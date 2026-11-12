@@ -53,7 +53,7 @@ export interface ProdutoModelo3D {
   produtoId: string; nome: string; tipo: TipoMockup; dimensoes: Dimensoes; mockup3d: Mockup3D; marca?: string; fornecedor?: string; custo?: number; categoria: string;
   montagem: Montagem; /** altura de omissão ao chão (m), só para peças de parede */ alturaOmissao: number; demo: boolean;
   /** Só as peças de uma família do catálogo (familias.ts): a família, a variante escolhida, o SKU e o preço dessa variante. */
-  fam?: { familiaId: string; medidaId: string; acabId: string; sku: string; preco: number };
+  fam?: { familiaId: string; medidaId: string; acabId: string; sku: string; preco: number; /** o produto do catálogo que esta variante é (família agrupada de produtos existentes) */ produtoId?: string };
 }
 
 interface Espec { rotulo: string; mont: Montagem; alt: number; dim: [number, number, number]; cor: string }

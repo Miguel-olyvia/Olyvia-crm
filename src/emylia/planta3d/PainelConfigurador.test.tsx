@@ -2,18 +2,19 @@
 import { useState } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { PainelConfigurador } from "./PainelConfigurador";
+import type { Produto } from "../v2/catalogoModelo";
+import { PainelConfigurador, type PainelConfiguradorProps } from "./PainelConfigurador";
 import { linhasDeVariantes, type FamiliaCfg } from "./configurador";
 
 afterEach(cleanup);
 
 let ultima: FamiliaCfg[] = [];
-function Casa({ inicial = [] }: { inicial?: FamiliaCfg[] }) {
+function Casa({ inicial = [], catalogo }: { inicial?: FamiliaCfg[]; catalogo?: PainelConfiguradorProps["catalogo"] }) {
   const [lista, setLista] = useState<FamiliaCfg[]>(inicial);
   ultima = lista;
-  return <PainelConfigurador familias={lista} onFamilias={setLista} />;
+  return <PainelConfigurador familias={lista} onFamilias={setLista} catalogo={catalogo} />;
 }
-const estado = () => screen.getByText(/^Passo \d de 3 · /).textContent;
+const estado = () => screen.getByText(/^Passo \d de \d · /).textContent;
 const seguinte = () => screen.getByRole("button", { name: "Seguinte" });
 const abrirExemplo = () => { render(<Casa />); fireEvent.click(screen.getByRole("button", { name: "Começar pelo exemplo" })); };
 const abrirLody = () => { render(<Casa />); fireEvent.click(screen.getByRole("button", { name: "Exemplo: Lody, FRASA (9 produtos)" })); };
@@ -249,5 +250,220 @@ describe("PainelConfigurador", () => {
     expect(screen.getByText(/identificador/i, { selector: "#motivo-seguinte" })).toBeInTheDocument();
     escrever("Nome da família", "Lava-loiça Keran 2");
     expect(seguinte()).toBeEnabled();
+  });
+});
+
+/* ------------------------------------------------------------------ juntar produtos do catálogo */
+const produto = (id: string, n: string, pvp: number | undefined, extra: Partial<Produto> = {}): Produto => ({ id, n, custo: 80, un: "un", marca: "FRASA", fornecedor: "Forn", data: "2026-10-01", no: null, sku: `SKU-${id}`, sub: "Cubas inox", ...(pvp !== undefined ? { pvp } : {}), ...extra });
+const LODY: Produto[] = [];
+for (const [i, tam] of [40, 50, 70].entries()) for (const [j, ac] of ["Cobre", "Gold", "Gunmetal"].entries()) LODY.push(produto(`l${tam}${ac.slice(0, 2)}`, `Lava-louças Lody ${tam} - ${ac}`, 139 + i * 20 + j));
+const VELARES: Produto[] = [34, 40, 45, 50, 70].map((t, i) => produto(`v${t}`, `Lava-louças VELAR 1 CUBA ${t}`, 149 + i));
+const OUTROS: Produto[] = [produto("s1", "Sanita compacta", 165, { sub: "Sanitas", marca: "Roca" }), produto("t1", "Misturadora de bidé X - Cromo", 99, { sub: "Torneiras", marca: "Rodi" })];
+const CATALOGO = { produtos: [...OUTROS, ...LODY, ...VELARES], arvore: [] };
+const abrirJuntar = (cat = CATALOGO) => {
+  render(<Casa catalogo={cat} />);
+  clicar("Nova família");
+  fireEvent.click(screen.getByRole("radio", { name: "Juntar produtos do catálogo" }));
+  ir(1);
+};
+const caixa = (nome: RegExp) => screen.getByRole("checkbox", { name: nome });
+const escolherLody = () => { for (const p of LODY) fireEvent.click(caixa(new RegExp(`${p.n}$|${p.n}[ ,]`))); };
+const valor = (rotulo: string) => (screen.getByLabelText(rotulo) as HTMLInputElement).value;
+
+describe("PainelConfigurador: juntar produtos do catálogo", () => {
+  it("o passo 1 pergunta «Como quer criar a família?»: «Do zero» (por omissão, 3 passos) ou «Juntar produtos do catálogo» (4 passos)", () => {
+    render(<Casa catalogo={CATALOGO} />);
+    clicar("Nova família");
+    const grupo = screen.getByRole("group", { name: "Como quer criar a família?" });
+    expect(within(grupo).getByRole("radio", { name: "Do zero" })).toBeChecked();
+    expect(estado()).toBe("Passo 1 de 3 · Família");
+    expect(screen.getByLabelText("Nome da família")).toBeInTheDocument();
+    fireEvent.click(within(grupo).getByRole("radio", { name: "Juntar produtos do catálogo" }));
+    expect(estado()).toBe("Passo 1 de 4 · Família");
+    expect(screen.queryByLabelText("Nome da família")).not.toBeInTheDocument();
+    fireEvent.click(within(grupo).getByRole("radio", { name: "Do zero" }));
+    expect(estado()).toBe("Passo 1 de 3 · Família");
+  });
+
+  it("uma família que já existe (exemplo ou a editar) não pergunta como criar", () => {
+    abrirExemplo();
+    expect(screen.queryByRole("group", { name: "Como quer criar a família?" })).not.toBeInTheDocument();
+  });
+
+  it("escolher produtos: um passo, foco no título, Seguinte desligado com o motivo escrito até haver um produto", () => {
+    abrirJuntar();
+    expect(estado()).toBe("Passo 2 de 4 · Escolher produtos");
+    expect(screen.getByRole("heading", { name: "Escolher produtos" })).toHaveFocus();
+    expect(seguinte()).toBeDisabled();
+    expect(screen.getByText("Para continuar: escolha pelo menos um produto do catálogo.")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Produtos escolhidos" })).toHaveTextContent("Nenhum produto escolhido");
+    fireEvent.click(caixa(/Sanita compacta/));
+    expect(seguinte()).toBeEnabled();
+    expect(screen.getByRole("status", { name: "Produtos escolhidos" })).toHaveTextContent("1 escolhido");
+  });
+
+  it("a pesquisa filtra por nome, marca, referência e categoria; o que já foi escolhido mantém-se; a lista tem altura limitada e rola", () => {
+    abrirJuntar();
+    const pesquisa = screen.getByLabelText("Procurar produtos do catálogo");
+    fireEvent.change(pesquisa, { target: { value: "lody" } });
+    const lista = screen.getByRole("list", { name: "Produtos do catálogo" });
+    expect(within(lista).getAllByRole("checkbox")).toHaveLength(9);
+    expect(lista).toHaveClass("overflow-y-auto");
+    expect(lista.className).toMatch(/max-h-/);
+    fireEvent.click(caixa(/Lody 40 - Cobre/));
+    fireEvent.change(pesquisa, { target: { value: "roca" } });
+    expect(within(lista).getAllByRole("checkbox")).toHaveLength(1);
+    expect(screen.getByRole("status", { name: "Produtos escolhidos" })).toHaveTextContent("1 escolhido");
+    fireEvent.change(pesquisa, { target: { value: "SKU-s1" } });
+    expect(within(lista).getAllByRole("checkbox")).toHaveLength(1);
+    fireEvent.change(pesquisa, { target: { value: "sanitas" } });
+    expect(within(lista).getAllByRole("checkbox")).toHaveLength(1);
+    fireEvent.change(pesquisa, { target: { value: "xyz inexistente" } });
+    expect(screen.getByText(/Nenhum produto do catálogo corresponde/)).toBeInTheDocument();
+  });
+
+  it("cada produto mostra o nome, a referência e o preço em texto (não só pela cor)", () => {
+    abrirJuntar();
+    const c = caixa(/Sanita compacta/);
+    expect(c.closest("label")).toHaveTextContent(/Sanita compacta.*SKU-s1.*165,00/);
+  });
+
+  it("os 9 produtos Lody: 3 medidas × 3 acabamentos, palpite pelo nome, SKU e preço só de leitura, e guardar na sessão", () => {
+    abrirJuntar();
+    escolherLody();
+    expect(screen.getByRole("status", { name: "Produtos escolhidos" })).toHaveTextContent("9 escolhidos");
+    ir(1);
+    expect(estado()).toBe("Passo 3 de 4 · Atribuir medidas e acabamentos");
+    expect(screen.getByRole("heading", { name: "Atribuir medidas e acabamentos" })).toHaveFocus();
+    // sugestões da família, editáveis
+    expect(valor("Nome da família")).toBe("Lava-louças Lody");
+    expect(valor("Marca")).toBe("FRASA");
+    expect((screen.getByLabelText("Categoria") as HTMLSelectElement).value).toBe("lavaloicas");
+    // o palpite por produto
+    expect(valor("Medida do produto 1")).toBe("40 cm"); expect(valor("Acabamento do produto 1")).toBe("Cobre");
+    expect(valor("Medida do produto 5")).toBe("50 cm"); expect(valor("Acabamento do produto 5")).toBe("Gold");
+    expect(valor("Largura do produto 1 (cm)")).toBe("44");
+    expect(screen.getByRole("status", { name: "Resumo da atribuição" })).toHaveTextContent("9 produtos = 3 medidas × 3 acabamentos");
+    // SKU e preço vêm do produto: texto, sem campo para escrever
+    const prod1 = screen.getByRole("group", { name: /^Produto 1:/ });
+    expect(within(prod1).getByText(/SKU-l40C.*139,00.*vem do produto do catálogo/)).toBeInTheDocument();
+    expect(within(prod1).queryByLabelText(/SKU|Preço/)).not.toBeInTheDocument();
+    ir(1);
+    expect(estado()).toBe("Passo 4 de 4 · Resumo e pré-visualização");
+    expect(screen.getByText("9 produtos = 9 referências")).toBeInTheDocument();
+    const linhas = within(tabela()).getAllByRole("row").slice(1).map((l) => celulasDaLinha(l));
+    expect(linhas).toHaveLength(9);
+    expect(linhas.map((c) => c[2]).sort()).toEqual(LODY.map((p) => p.sku!).sort());
+    expect(linhas.find((c) => c[2] === "SKU-l40Co")?.[3]).toMatch(/139,00/);
+    expect(within(screen.getByRole("list", { name: "Pré-visualização da família" })).getAllByRole("listitem")).toHaveLength(1);
+    clicar("Guardar na sessão");
+    expect(ultima).toHaveLength(1);
+    const f = ultima[0];
+    expect(Object.values(f.celulas).filter((c) => c.produtoId)).toHaveLength(9);
+    expect(linhasDeVariantes(f).map((l) => l.sku).sort()).toEqual(LODY.map((p) => p.sku!).sort());
+    expect(f.medidas).toHaveLength(3); expect(f.acabamentos).toHaveLength(3);
+    expect(screen.getByText("Lava-louças Lody")).toBeInTheDocument();
+  });
+
+  it("o palpite é editável: mudar a medida de um produto muda a família; uma medida/acabamento repetido é um erro que bloqueia o Seguinte", () => {
+    abrirJuntar();
+    fireEvent.click(caixa(/Lody 40 - Cobre/)); fireEvent.click(caixa(/Lody 40 - Gold/));
+    ir(1);
+    expect(screen.getByRole("status", { name: "Resumo da atribuição" })).toHaveTextContent("2 produtos = 1 medida × 2 acabamentos");
+    escrever("Medida do produto 2", "45 cm");
+    expect(screen.getByRole("status", { name: "Resumo da atribuição" })).toHaveTextContent("2 produtos = 2 medidas × 2 acabamentos");
+    escrever("Medida do produto 2", "40 cm"); escrever("Acabamento do produto 2", "Cobre");
+    expect(screen.getByRole("alert")).toHaveTextContent(/mesma medida \(40 cm\) e o mesmo acabamento \(Cobre\)/);
+    expect(seguinte()).toBeDisabled();
+    expect(screen.getByText(/Para continuar: .*mesma medida/, { selector: "#motivo-seguinte" })).toBeInTheDocument();
+    escrever("Acabamento do produto 2", "Gold");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(seguinte()).toBeEnabled();
+  });
+
+  it("produto sem preço de venda: erro visível por escrito, e o Seguinte e o Guardar ficam bloqueados", () => {
+    const semPreco = { produtos: [...CATALOGO.produtos, produto("x1", "Lava-louças Zeta 40 - Cobre", undefined, { custo: 0 })], arvore: [] };
+    abrirJuntar(semPreco);
+    fireEvent.click(caixa(/Zeta 40 - Cobre/));
+    ir(1);
+    expect(screen.getByRole("alert")).toHaveTextContent(/«Lava-louças Zeta 40 - Cobre» não tem preço de venda/);
+    expect(screen.getByText(/sem preço de venda/i, { selector: "fieldset p" })).toBeInTheDocument();
+    expect(seguinte()).toBeDisabled();
+  });
+
+  it("produto sem PVP mas com custo: o preço é o calculado pelo catálogo e diz-se por escrito", () => {
+    const semPvp = { produtos: [produto("c1", "Lava-louças Alfa 40 - Inox", undefined, { custo: 65 })], arvore: [] };
+    abrirJuntar(semPvp);
+    fireEvent.click(caixa(/Alfa 40/));
+    ir(1);
+    expect(screen.getByRole("group", { name: /^Produto 1:/ })).toHaveTextContent(/100,00.*sem PVP.*custo/);
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
+  it("tirar um produto da família na atribuição desmarca-o; sem produtos volta a pedir a escolha", () => {
+    abrirJuntar();
+    fireEvent.click(caixa(/Lody 40 - Cobre/));
+    ir(1);
+    clicar("Tirar o produto 1 da família");
+    expect(estado()).toBe("Passo 2 de 4 · Escolher produtos");
+    expect(screen.getByRole("status", { name: "Produtos escolhidos" })).toHaveTextContent("Nenhum produto escolhido");
+  });
+
+  it("Anterior volta atrás e as escolhas mantêm-se; Cancelar sai", () => {
+    abrirJuntar();
+    fireEvent.click(caixa(/Lody 40 - Cobre/));
+    ir(1);
+    clicar("Anterior");
+    expect(caixa(/Lody 40 - Cobre/)).toBeChecked();
+    clicar("Cancelar");
+    expect(screen.getByRole("button", { name: "Nova família" })).toBeInTheDocument();
+  });
+
+  it("«Exemplo: agrupar as lava-loiças Velar do catálogo» pré-seleciona as 5 Velar e abre a escolha", () => {
+    render(<Casa catalogo={CATALOGO} />);
+    clicar("Exemplo: agrupar as lava-loiças Velar do catálogo");
+    expect(estado()).toBe("Passo 2 de 4 · Escolher produtos");
+    expect(screen.getByRole("status", { name: "Produtos escolhidos" })).toHaveTextContent("5 escolhidos");
+    ir(1);
+    expect(valor("Nome da família")).toBe("Lava-louças VELAR");
+    expect(screen.getByRole("status", { name: "Resumo da atribuição" })).toHaveTextContent("5 produtos = 5 medidas × 1 acabamento");
+    expect(valor("Acabamento do produto 1")).toBe("Inox");
+  });
+
+  it("o botão do exemplo só aparece se o catálogo tiver lava-loiças Velar", () => {
+    render(<Casa catalogo={{ produtos: OUTROS, arvore: [] }} />);
+    expect(screen.queryByRole("button", { name: /agrupar as lava-loiças Velar/ })).not.toBeInTheDocument();
+  });
+
+  it("a Velar 70 propõe o 3D do fabricante (velar71) e o resumo conta-o", () => {
+    render(<Casa catalogo={CATALOGO} />);
+    clicar("Exemplo: agrupar as lava-loiças Velar do catálogo");
+    ir(2);
+    expect(screen.getByText("5 produtos = 5 referências")).toBeInTheDocument();
+    const linhas = within(tabela()).getAllByRole("row").slice(1).map((l) => celulasDaLinha(l));
+    expect(linhas.map((c) => c[4])).toEqual(["Sim", "Sim", "Sim", "Sim", "Sim"]);
+  });
+
+  it("editar uma família agrupada: o SKU e o preço das variantes aparecem só de leitura, com o aviso", () => {
+    render(<Casa catalogo={CATALOGO} />);
+    clicar("Exemplo: agrupar as lava-loiças Velar do catálogo");
+    ir(2); clicar("Guardar na sessão");
+    clicar("Editar Lava-louças VELAR");
+    expect(screen.queryByRole("group", { name: "Como quer criar a família?" })).not.toBeInTheDocument();
+    ir(1);
+    expect(screen.getByLabelText("SKU do acabamento 1 do produto 1")).toBeDisabled();
+    expect(screen.getByLabelText("Preço do acabamento 1 do produto 1 (€)")).toBeDisabled();
+    expect(screen.getAllByText(/vem do produto do catálogo/).length).toBeGreaterThan(0);
+  });
+
+  it("400 px: os campos da atribuição e a tabela não obrigam a scroll horizontal da página (grelhas que quebram, tabela em overflow-x-auto)", () => {
+    abrirJuntar();
+    fireEvent.click(caixa(/Lody 40 - Cobre/));
+    ir(1);
+    const g = screen.getByRole("group", { name: /^Produto 1:/ });
+    expect(g.className).toMatch(/min-w-0/);
+    expect(g.querySelector(".grid")).not.toBeNull();
+    ir(1);
+    expect(tabela().closest("div")).toHaveClass("overflow-x-auto");
   });
 });

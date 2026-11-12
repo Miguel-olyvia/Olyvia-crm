@@ -3,25 +3,25 @@
 // com SKU, preço e modelo 3D próprios), 3 Resumo e pré-visualização (tabela «N produtos = N referências», erros, cartão ao vivo e guardar).
 // Na vida real uma lava-loiça com 9 variantes são 9 produtos diferentes: por isso não há uma lista global de acabamentos nem uma matriz cor × medida; a matriz passa a ser
 // a consequência de cada produto ter os seus acabamentos. O modelo de dados (FamiliaCfg) não mudou. A lista é de quem usa o painel (a página guarda-a em familiasConfiguradas.ts); só em memória.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CartaoFamilia } from "./BarraProdutos";
-import { ESPEC, ROTULO_ESPACO } from "./catalogo3d";
+import { ESPEC, ROTULO_ESPACO, tipoMockupDe } from "./catalogo3d";
 import {
-  TIPOS_DA_CATEGORIA, acabamentosDoProduto, alterarAcabamento, alterarVariante, aplicarAcabamentoATodos, celulaKey, comNome, copiarAcabamentosParaOutros, criarFamiliaVazia, definirGlbDaVariante,
-  exemploKeran, exemploLodyFrasa, ficheirosCompativeis, juntarAcabamentoAoProduto, juntarAcabamentoExistente, juntarProduto, linhasDeVariantes, paraFamilia, prepararParaEdicao, problemas,
-  resumoDeProdutos, skuDaCelula, tirarAcabamentoDoProduto, tirarProduto, type FamiliaCfg, type MedidaCfg,
+  TIPOS_DA_CATEGORIA, acabamentosDoProduto, alterarAcabamento, alterarVariante, aplicarAcabamentoATodos, categoriaSugerida, celulaKey, comNome, copiarAcabamentosParaOutros, criarFamiliaVazia, definirGlbDaVariante,
+  exemploKeran, exemploLodyFrasa, familiaDeProdutos, ficheiroSugerido, ficheirosCompativeis, juntarAcabamentoAoProduto, juntarAcabamentoExistente, juntarProduto, linhasDeVariantes, palpiteDoProduto, paraFamilia,
+  prepararParaEdicao, problemas, refDoProduto, resumoDeProdutos, skuDaCelula, sugerirFamilia, tirarAcabamentoDoProduto, tirarProduto, type AtribuicaoProduto, type FamiliaCfg, type MedidaCfg,
 } from "./configurador";
+import { BTN, BTN_PRIMARIO, CAMPO, INP, eur } from "./estilosPainel";
 import { CATEGORIAS_FAMILIA, variantesDe, type CategoriaFam } from "./familias";
 import { chaveFicheiro } from "./modelosHtml/ficheiros";
 import type { TipoEspaco } from "./modelo";
+import { PassoAtribuir, PassoEscolher, type CatalogoLido } from "./PassosCatalogo";
+import { useCatalogo } from "../v2/catalogoStore";
 
-const INP = "h-11 min-w-0 w-full rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25 disabled:cursor-not-allowed disabled:opacity-60";
-const BTN = "inline-flex min-h-11 items-center justify-center rounded-full border border-input bg-background px-4 py-2 text-[15px] transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50";
-const BTN_PRIMARIO = "inline-flex min-h-11 items-center justify-center rounded-full border border-primary bg-primary px-4 py-2 text-[15px] font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:cursor-not-allowed disabled:opacity-50";
-const CAMPO = "grid min-w-0 gap-1 text-sm font-medium";
-const eur = (n: number) => n.toLocaleString("pt-PT", { style: "currency", currency: "EUR" });
-const TITULOS = ["Família", "Produtos e acabamentos", "Resumo e pré-visualização"] as const;
-const TOTAL_PASSOS = TITULOS.length;
+/** Os passos «do zero» (o assistente original) e os de «juntar produtos do catálogo» (a escolha e a atribuição entram a seguir à pergunta do passo 1). */
+const TITULOS_ZERO = ["Família", "Produtos e acabamentos", "Resumo e pré-visualização"] as const;
+const TITULOS_CATALOGO = ["Família", "Escolher produtos", "Atribuir medidas e acabamentos", "Resumo e pré-visualização"] as const;
+type Modo = "zero" | "catalogo";
 const SEM_GLB = "";
 const semAcao = () => undefined;
 
@@ -29,27 +29,90 @@ export interface PainelConfiguradorProps {
   /** As famílias configuradas nesta sessão (quem usa o painel guarda-as e regista-as). */
   familias: readonly FamiliaCfg[];
   onFamilias: (lista: FamiliaCfg[]) => void;
+  /** O catálogo de onde se juntam produtos (só leitura). Sem ele, o do protótipo (useCatalogo). */
+  catalogo?: CatalogoLido;
 }
 
-/** O passo do assistente onde se corrige um problema: o grupo 1 (família) é o passo 1; os grupos 2, 3 e 4 (acabamentos, medidas, SKUs) são o passo 2 (por produto). */
-const passoDoProblema = (grupo: 1 | 2 | 3 | 4): 1 | 2 => (grupo === 1 ? 1 : 2);
+/** O passo do assistente onde se corrige um problema. «Do zero»: o grupo 1 (família) é o passo 1; os grupos 2, 3 e 4 (acabamentos, medidas, SKUs) são o passo 2 (por produto).
+ * «Juntar produtos»: o nome, a marca e a categoria editam-se no passo 3 (junto da atribuição), por isso todos os problemas se corrigem lá. */
+const passoDoProblema = (modo: Modo, grupo: 1 | 2 | 3 | 4): number => (modo === "catalogo" ? 3 : grupo === 1 ? 1 : 2);
 const nomeProduto = (m: MedidaCfg): string => m.rotulo.trim() || m.ref.trim() || m.id;
+const atribuicaoInicial = (p: CatalogoLido["produtos"][number], arvore: CatalogoLido["arvore"]): AtribuicaoProduto => {
+  const tipo = tipoMockupDe(p, arvore), pal = palpiteDoProduto(p.n, { sub: p.sub, tipo }), glb = ficheiroSugerido(tipo, p.n, pal);
+  return { produtoId: p.id, medida: pal.medida, dim: pal.dim, acabamento: pal.acabamento, cor: pal.cor, codigo: pal.codigo, metalness: pal.metalness, roughness: pal.roughness, ...(glb ? { glb } : {}) };
+};
+const ehVelar = (nome: string): boolean => /\bvelar\b/i.test(nome) && /lava/i.test(nome);
 
-export function PainelConfigurador({ familias, onFamilias }: PainelConfiguradorProps) {
-  const [rascunho, setRascunho] = useState<FamiliaCfg | null>(null);
+export function PainelConfigurador({ familias, onFamilias, catalogo }: PainelConfiguradorProps) {
+  const [base, setBase] = useState<FamiliaCfg | null>(null);
   const [original, setOriginal] = useState<string | null>(null);
   const [passo, setPasso] = useState(1);
   const [escolha, setEscolha] = useState<{ med?: string; acab?: string }>({});
+  // «juntar produtos do catálogo»: o modo, se se pergunta como criar (só nas famílias novas), os produtos escolhidos (pela ordem) e a atribuição de cada um
+  const [modo, setModo] = useState<Modo>("zero");
+  const [pergunta, setPergunta] = useState(false);
+  const [escolhidos, setEscolhidos] = useState<string[]>([]);
+  const [atribuicoes, setAtribuicoes] = useState<Record<string, AtribuicaoProduto>>({});
+  const ultimaSugestao = useRef<{ nome: string; marca: string; categoria: CategoriaFam; tipo: FamiliaCfg["tipo"] } | null>(null);
   const tituloRef = useRef<HTMLHeadingElement>(null), primeiraVez = useRef(true);
-  const emLista = rascunho === null;
+  const lido = useCatalogo(), cat: CatalogoLido = catalogo ?? lido;
+  const porId = useMemo(() => new Map(cat.produtos.map((p) => [p.id, p] as const)), [cat.produtos]);
+  const produtosEscolhidos = useMemo(() => escolhidos.flatMap((id) => { const p = porId.get(id); return p ? [p] : []; }), [escolhidos, porId]);
+  const velares = useMemo(() => cat.produtos.filter((p) => ehVelar(p.n)), [cat.produtos]);
+  // em «juntar produtos» a família é DERIVADA dos produtos e das atribuições (`base` só guarda o nome, a marca, a categoria, o tipo e os espaços)
+  const derivado = useMemo(
+    () => (modo === "catalogo" && base ? familiaDeProdutos(base, produtosEscolhidos.map((p) => refDoProduto(p)), produtosEscolhidos.flatMap((p) => (atribuicoes[p.id] ? [atribuicoes[p.id]] : []))) : null),
+    [modo, base, produtosEscolhidos, atribuicoes],
+  );
+  const rascunho = derivado ? derivado.familia : base;
+  const emLista = base === null;
+  const titulos = modo === "catalogo" ? TITULOS_CATALOGO : TITULOS_ZERO, total = titulos.length;
   useEffect(() => {
     if (primeiraVez.current) { primeiraVez.current = false; return; }
     tituloRef.current?.focus();
   }, [passo, emLista]);
 
-  const abrir = (f: FamiliaCfg, idOriginal: string | null) => { setRascunho(prepararParaEdicao(f)); setOriginal(idOriginal); setPasso(1); setEscolha({}); };
+  const reiniciarCatalogo = (ids: readonly string[]) => {
+    ultimaSugestao.current = null;
+    setEscolhidos([...ids]);
+    setAtribuicoes(Object.fromEntries(ids.flatMap((id) => { const p = porId.get(id); return p ? [[id, atribuicaoInicial(p, cat.arvore)] as const] : []; })));
+  };
+  const abrir = (f: FamiliaCfg, idOriginal: string | null, nova = false) => {
+    setBase(prepararParaEdicao(f)); setOriginal(idOriginal); setPasso(1); setEscolha({});
+    setModo("zero"); setPergunta(nova); reiniciarCatalogo([]);
+  };
+  const abrirExemploVelar = () => {
+    abrir(criarFamiliaVazia(), null, true);
+    setModo("catalogo"); reiniciarCatalogo(velares.map((p) => p.id)); setPasso(2);
+  };
+  const fechar = () => { setBase(null); setOriginal(null); reiniciarCatalogo([]); setModo("zero"); setPergunta(false); };
   const guardarLista = (lista: FamiliaCfg[]) => onFamilias(lista);
-  const mudar = (f: FamiliaCfg) => setRascunho(f);
+  // em «juntar produtos» só o cabeçalho da família se edita à mão: as medidas, os acabamentos e as células saem sempre dos produtos
+  const mudar = (f: FamiliaCfg) => setBase(modo === "catalogo" && base ? { ...base, id: f.id, nome: f.nome, marca: f.marca, categoria: f.categoria, tipo: f.tipo, espacos: f.espacos } : f);
+  const alternar = (id: string) => {
+    const p = porId.get(id);
+    if (!p) return;
+    setEscolhidos((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]));
+    setAtribuicoes((a) => (a[id] ? a : { ...a, [id]: atribuicaoInicial(p, cat.arvore) }));
+  };
+  const atribuir = (id: string, patch: Partial<AtribuicaoProduto>) => setAtribuicoes((a) => (a[id] ? { ...a, [id]: { ...a[id], ...patch } } : a));
+  /** Ao sair da escolha propõe o nome, a marca e a categoria pelos produtos, sem pisar o que o utilizador já escreveu. */
+  const sugerir = () => {
+    const sug = sugerirFamilia(produtosEscolhidos.map((p) => refDoProduto(p)));
+    const contagem = new Map<string, number>();
+    for (const p of produtosEscolhidos) { const t = tipoMockupDe(p, cat.arvore); contagem.set(t, (contagem.get(t) ?? 0) + 1); }
+    const tipoComum = [...contagem.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] as FamiliaCfg["tipo"] | undefined;
+    const c = categoriaSugerida(tipoComum ?? "caixa"), ult = ultimaSugestao.current;
+    setBase((b) => {
+      if (!b) return b;
+      let n = b;
+      if (b.nome.trim() === "" || b.nome === ult?.nome) n = comNome(n, sug.nome);
+      if (b.marca.trim() === "" || b.marca === ult?.marca) n = { ...n, marca: sug.marca };
+      if (!ult || (b.categoria === ult.categoria && b.tipo === ult.tipo)) n = { ...n, categoria: c.categoria, tipo: c.tipo, espacos: [...(CATEGORIAS_FAMILIA.find((x) => x.id === c.categoria)?.espacos ?? ["outro"])] };
+      return n;
+    });
+    ultimaSugestao.current = { nome: sug.nome, marca: sug.marca, categoria: c.categoria, tipo: c.tipo };
+  };
 
   const aviso = (
     <p role="note" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -57,11 +120,11 @@ export function PainelConfigurador({ familias, onFamilias }: PainelConfiguradorP
     </p>
   );
 
-  if (!rascunho) {
+  if (!base || !rascunho) {
     return (
       <section aria-label="Configurador de famílias (protótipo)" className="flex w-full max-w-2xl flex-col gap-3 rounded-2xl border border-primary/30 bg-primary/[0.03] p-3">
         {aviso}
-        <p className="text-sm text-muted-foreground">Crie uma família de produtos: cada produto (uma medida com a sua referência) tem os seus acabamentos, e cada acabamento é uma variante com o seu preço e o seu SKU. Depois de guardada, aparece na barra de produtos, na categoria que escolheu.</p>
+        <p className="text-sm text-muted-foreground">Crie uma família de produtos: cada produto (uma medida com a sua referência) tem os seus acabamentos, e cada acabamento é uma variante com o seu preço e o seu SKU. Pode criá-la do zero ou juntando produtos que já existem no catálogo. Depois de guardada, aparece na barra de produtos, na categoria que escolheu.</p>
         {familias.length === 0
           ? <p role="status" className="text-[15px]">Ainda sem famílias configuradas.</p>
           : (
@@ -79,35 +142,50 @@ export function PainelConfigurador({ familias, onFamilias }: PainelConfiguradorP
             </ul>
           )}
         <div className="flex flex-wrap gap-2">
-          <button type="button" className={BTN_PRIMARIO} onClick={() => abrir(criarFamiliaVazia(), null)}>Nova família</button>
+          <button type="button" className={BTN_PRIMARIO} onClick={() => abrir(criarFamiliaVazia(), null, true)}>Nova família</button>
           <button type="button" className={BTN} onClick={() => abrir(exemploKeran(), null)}>Começar pelo exemplo</button>
           <button type="button" className={BTN} onClick={() => abrir(exemploLodyFrasa(), null)}>Exemplo: Lody, FRASA (9 produtos)</button>
+          {velares.length >= 2 && <button type="button" className={BTN} onClick={abrirExemploVelar}>Exemplo: agrupar as lava-loiças Velar do catálogo</button>}
         </div>
       </section>
     );
   }
 
   const outrosIds = familias.filter((x) => x.id !== original).map((x) => x.id);
-  const todos = problemas(rascunho, outrosIds);
-  const doPasso = todos.filter((x) => passoDoProblema(x.passo) === passo);
-  const motivo = passo < TOTAL_PASSOS && doPasso.length > 0 ? `Para continuar: ${doPasso[0].msg}` : "";
-  const seguinte = () => { if (!motivo) setPasso((p) => Math.min(TOTAL_PASSOS, p + 1)); };
+  const todos: { passo: number; msg: string }[] = [
+    ...problemas(rascunho, outrosIds).map((x) => ({ passo: passoDoProblema(modo, x.passo), msg: x.msg })),
+    ...(derivado?.conflitos ?? []).map((msg) => ({ passo: 3, msg })),
+  ];
+  const doPasso = todos.filter((x) => x.passo === passo);
+  const semProdutos = modo === "catalogo" && passo === 2 && produtosEscolhidos.length === 0;
+  const motivo = semProdutos ? "Para continuar: escolha pelo menos um produto do catálogo." : passo < total && doPasso.length > 0 ? `Para continuar: ${doPasso[0].msg}` : "";
+  const seguinte = () => {
+    if (motivo) return;
+    if (modo === "catalogo" && passo === 2) sugerir();
+    setPasso((p) => Math.min(total, p + 1));
+  };
   const anterior = () => setPasso((p) => Math.max(1, p - 1));
   const guardar = () => {
     if (todos.length > 0) return;
     const lista = original ? familias.map((x) => (x.id === original ? rascunho : x)) : [...familias, rascunho];
     guardarLista(lista);
-    setRascunho(null); setOriginal(null);
+    fechar();
   };
+  const tirarDaFamilia = (id: string) => {
+    const resto = escolhidos.filter((x) => x !== id);
+    setEscolhidos(resto);
+    if (resto.length === 0) setPasso(2);
+  };
+  const emCatalogo = modo === "catalogo";
 
   return (
     <section aria-label="Configurador de famílias (protótipo)" className="flex w-full max-w-2xl flex-col gap-3 rounded-2xl border border-primary/30 bg-primary/[0.03] p-3"
       onKeyDown={(e) => { if (e.key === "Escape") { e.stopPropagation(); if (passo > 1) anterior(); } }}>
       {aviso}
       <div>
-        <p role="status" className="text-sm font-medium text-muted-foreground">Passo {passo} de {TOTAL_PASSOS} · {TITULOS[passo - 1]}</p>
+        <p role="status" className="text-sm font-medium text-muted-foreground">Passo {passo} de {total} · {titulos[passo - 1]}</p>
         <ol aria-label="Passos do configurador" className="mt-1 flex gap-1.5">
-          {TITULOS.map((t, i) => {
+          {titulos.map((t, i) => {
             const n = i + 1, atual = n === passo;
             return (
               <li key={t} aria-current={atual ? "step" : undefined} aria-label={`Passo ${n}: ${t}${n < passo ? " (feito)" : atual ? " (atual)" : ""}`}
@@ -120,22 +198,49 @@ export function PainelConfigurador({ familias, onFamilias }: PainelConfiguradorP
       </div>
 
       <div className="space-y-3 rounded-xl border border-border bg-card p-3">
-        <h3 ref={tituloRef} tabIndex={-1} className="text-[15px] font-semibold outline-none">{TITULOS[passo - 1]}</h3>
-        {passo === 1 && <PassoFamilia f={rascunho} onMudar={mudar} />}
-        {passo === 2 && <PassoProdutos f={rascunho} onMudar={mudar} erros={doPasso.map((x) => x.msg)} />}
-        {passo === 3 && <PassoResumo f={rascunho} erros={todos.map((x) => x.msg)} escolha={escolha} onEscolha={setEscolha} />}
+        <h3 ref={tituloRef} tabIndex={-1} className="text-[15px] font-semibold outline-none">{titulos[passo - 1]}</h3>
+        {passo === 1 && pergunta && <ComoCriar modo={modo} onModo={setModo} />}
+        {passo === 1 && !emCatalogo && <PassoFamilia f={rascunho} onMudar={mudar} />}
+        {passo === 1 && emCatalogo && <p className="text-sm text-muted-foreground">No passo seguinte escolhe os produtos do catálogo. O nome, a marca e a categoria da família sugerem-se a partir deles e podem corrigir-se.</p>}
+        {passo === 2 && !emCatalogo && <PassoProdutos f={rascunho} onMudar={mudar} erros={doPasso.map((x) => x.msg)} />}
+        {passo === 2 && emCatalogo && <PassoEscolher catalogo={cat} escolhidos={escolhidos} onAlternar={alternar} onLimpar={() => setEscolhidos([])} />}
+        {passo === 3 && emCatalogo && (
+          <>
+            <PassoFamilia f={rascunho} onMudar={mudar} />
+            <Erros erros={doPasso.filter((x) => !(derivado?.conflitos ?? []).includes(x.msg)).map((x) => x.msg)} />
+            <PassoAtribuir familia={rascunho} produtos={produtosEscolhidos} atribuicoes={atribuicoes} conflitos={derivado?.conflitos ?? []} onAtribuir={atribuir} onTirar={tirarDaFamilia} />
+          </>
+        )}
+        {passo === total && <PassoResumo f={rascunho} erros={todos.map((x) => x.msg)} escolha={escolha} onEscolha={setEscolha} />}
       </div>
 
       <div role="group" aria-label="Navegação do configurador" className="flex flex-wrap items-center gap-2">
         {motivo && <p id="motivo-seguinte" className="w-full text-sm text-muted-foreground">{motivo}</p>}
-        {passo === TOTAL_PASSOS && todos.length > 0 && <p className="w-full text-sm text-muted-foreground">Para guardar: corrija primeiro os erros indicados.</p>}
+        {passo === total && todos.length > 0 && <p className="w-full text-sm text-muted-foreground">Para guardar: corrija primeiro os erros indicados.</p>}
         <button type="button" className={BTN} disabled={passo === 1} onClick={anterior}>Anterior</button>
-        {passo < TOTAL_PASSOS
+        {passo < total
           ? <button type="button" className={BTN_PRIMARIO} disabled={!!motivo} aria-describedby={motivo ? "motivo-seguinte" : undefined} onClick={seguinte}>Seguinte</button>
           : <button type="button" className={BTN_PRIMARIO} disabled={todos.length > 0} onClick={guardar}>Guardar na sessão</button>}
-        <button type="button" className={BTN} onClick={() => { setRascunho(null); setOriginal(null); }}>Cancelar</button>
+        <button type="button" className={BTN} onClick={fechar}>Cancelar</button>
       </div>
     </section>
+  );
+}
+
+/** A pergunta do passo 1 de uma família nova: «Como quer criar a família?». */
+function ComoCriar({ modo, onModo }: { modo: Modo; onModo: (m: Modo) => void }) {
+  const opcao = (m: Modo, rotulo: string, ajuda: string) => (
+    <label className={`flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border px-3 py-2 text-[15px] ${modo === m ? "border-primary bg-primary/10" : "border-input bg-background hover:bg-accent"}`}>
+      <input type="radio" name="como-criar" aria-label={rotulo} className="mt-1 h-5 w-5 shrink-0" checked={modo === m} onChange={() => onModo(m)} />
+      <span className="min-w-0"><span className="block font-medium">{rotulo}</span><span className="block text-sm text-muted-foreground">{ajuda}</span></span>
+    </label>
+  );
+  return (
+    <fieldset className="grid min-w-0 gap-2">
+      <legend className="mb-1 text-sm font-medium">Como quer criar a família?</legend>
+      {opcao("zero", "Do zero", "Escreve as medidas, os acabamentos, as referências e os preços.")}
+      {opcao("catalogo", "Juntar produtos do catálogo", "Escolhe produtos que já existem; cada um traz a sua referência e o seu preço.")}
+    </fieldset>
   );
 }
 
@@ -233,8 +338,9 @@ function PassoProdutos({ f, onMudar, erros }: PassoProps & { erros: readonly str
                       <label className={CAMPO}>Acabamento<input aria-label={`Nome do ${nome}`} className={INP} value={a.nome} onChange={(e) => onMudar(alterarAcabamento(f, a.id, { nome: e.target.value }))} /></label>
                       <label className={CAMPO}>Código<input aria-label={`Código do ${nome}`} className={INP} value={a.codigo} onChange={(e) => onMudar(alterarAcabamento(f, a.id, { codigo: e.target.value }))} /></label>
                       <label className={CAMPO}>Cor<input aria-label={`Cor do ${nome}`} type="color" className="h-11 w-16 rounded-lg border border-input bg-card p-1" value={a.cor} onChange={(e) => onMudar(alterarAcabamento(f, a.id, { cor: e.target.value }))} /></label>
-                      <label className={CAMPO}>SKU<input aria-label={`SKU do ${nome}`} className={INP} disabled={!c.ativo} placeholder={autoSku(m.id, a.id)} value={c.sku ?? autoSku(m.id, a.id)} onChange={(e) => mudaCelula({ sku: e.target.value })} /></label>
-                      <label className={CAMPO}>Preço (€)<input aria-label={`Preço do ${nome} (€)`} type="number" min="0" step="0.01" inputMode="decimal" className={INP} disabled={!c.ativo} placeholder={String(m.preco)} defaultValue={c.preco ?? ""} onChange={(e) => mudaCelula({ preco: e.target.value === "" ? undefined : numero(e.target.value) })} /></label>
+                      <label className={CAMPO}>SKU<input aria-label={`SKU do ${nome}`} className={INP} disabled={!c.ativo || !!c.produtoId} placeholder={autoSku(m.id, a.id)} value={c.sku ?? autoSku(m.id, a.id)} onChange={(e) => mudaCelula({ sku: e.target.value })} /></label>
+                      <label className={CAMPO}>Preço (€)<input aria-label={`Preço do ${nome} (€)`} type="number" min="0" step="0.01" inputMode="decimal" className={INP} disabled={!c.ativo || !!c.produtoId} placeholder={String(m.preco)} defaultValue={c.preco ?? ""} onChange={(e) => mudaCelula({ preco: e.target.value === "" ? undefined : numero(e.target.value) })} /></label>
+                      {c.produtoId && <p className="text-sm text-muted-foreground sm:col-span-2">O SKU e o preço: vem do produto do catálogo «{c.produtoNome || c.produtoId}»; mudam-se no catálogo, não aqui.</p>}
                       {ficheiros.length === 0
                         ? <p className="self-end text-sm text-muted-foreground">Modelo genérico: este tipo de produto não tem 3D do fabricante.</p>
                         : (
@@ -282,7 +388,7 @@ function PassoProdutos({ f, onMudar, erros }: PassoProps & { erros: readonly str
 }
 
 function PassoResumo({ f, erros, escolha, onEscolha }: { f: FamiliaCfg; erros: readonly string[]; escolha: { med?: string; acab?: string }; onEscolha: (e: { med?: string; acab?: string }) => void }) {
-  const linhas = linhasDeVariantes(f), resumo = resumoDeProdutos(f);
+  const linhas = linhasDeVariantes(f), resumo = resumoDeProdutos(f), doCatalogo = linhas.some((l) => !!l.produtoId);
   return (
     <div className="grid gap-3">
       <Erros erros={erros} />
@@ -292,12 +398,12 @@ function PassoResumo({ f, erros, escolha, onEscolha }: { f: FamiliaCfg; erros: r
         <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
           <caption className="px-2 py-1 text-left text-sm font-medium">Variantes geradas</caption>
           <thead>
-            <tr className="border-y border-border bg-muted/40"><th scope="col" className="px-2 py-1.5">Produto</th><th scope="col" className="px-2 py-1.5">Acabamento</th><th scope="col" className="px-2 py-1.5">SKU</th><th scope="col" className="px-2 py-1.5">Preço</th><th scope="col" className="px-2 py-1.5">3D do fabricante</th></tr>
+            <tr className="border-y border-border bg-muted/40"><th scope="col" className="px-2 py-1.5">Produto</th><th scope="col" className="px-2 py-1.5">Acabamento</th><th scope="col" className="px-2 py-1.5">SKU</th><th scope="col" className="px-2 py-1.5">Preço</th><th scope="col" className="px-2 py-1.5">3D do fabricante</th>{doCatalogo && <th scope="col" className="px-2 py-1.5">Origem</th>}</tr>
           </thead>
           <tbody>
             {linhas.map((l) => (
               <tr key={l.chave} className="border-b border-border last:border-0">
-                <td className="px-2 py-1.5">{l.produto}</td><td className="px-2 py-1.5">{l.acabamento}</td><td className="break-all px-2 py-1.5">{l.sku}</td><td className="whitespace-nowrap px-2 py-1.5">{eur(l.preco)}</td><td className="px-2 py-1.5">{l.tem3d ? "Sim" : "Não"}</td>
+                <td className="px-2 py-1.5">{l.produto}</td><td className="px-2 py-1.5">{l.acabamento}</td><td className="break-all px-2 py-1.5">{l.sku}</td><td className="whitespace-nowrap px-2 py-1.5">{eur(l.preco)}</td><td className="px-2 py-1.5">{l.tem3d ? "Sim" : "Não"}</td>{doCatalogo && <td className="px-2 py-1.5">{l.produtoId ? "Produto do catálogo" : "Criado aqui"}</td>}
               </tr>
             ))}
           </tbody>

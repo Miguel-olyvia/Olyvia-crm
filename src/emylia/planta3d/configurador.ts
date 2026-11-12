@@ -5,11 +5,13 @@ import { CATEGORIAS_FAMILIA, FAMILIAS, PREFIXO_CFG, type AcabFam, type Categoria
 import type { TipoMockup } from "./catalogo3d";
 import type { TipoEspaco } from "./modelo";
 import { FICHEIROS_3D, chaveFicheiro, type Ficheiro3D } from "./modelosHtml/ficheiros";
+import { precoUnitario } from "../produtosVisita";
 
 export interface AcabCfg { id: string; nome: string; cor: string; metalness: number; roughness: number; codigo: string }
 export interface MedidaCfg { id: string; rotulo: string; ref: string; /** largura, profundidade, altura (cm) */ dim: [number, number, number]; /** preço base (€) */ preco: number }
-/** Uma célula da matriz: o acabamento existe nesta medida? `preco`/`sku` próprios sobrepõem o da medida / o automático. */
-export interface CelulaCfg { ativo: boolean; sku?: string; preco?: number }
+/** Uma célula da matriz: o acabamento existe nesta medida? `preco`/`sku` próprios sobrepõem o da medida / o automático.
+ * Com `produtoId` a variante É um produto que já existe no catálogo: `sku` e `preco` são uma cópia do produto (só leitura, não se editam aqui) e `produtoNome` o nome dele. */
+export interface CelulaCfg { ativo: boolean; sku?: string; preco?: number; produtoId?: string; produtoNome?: string }
 export interface RegraSku { modo: "auto" | "manual"; sep: string }
 export interface FamiliaCfg {
   id: string; marca: string; nome: string; categoria: CategoriaFam; tipo: TipoMockup; espacos: TipoEspaco[];
@@ -50,16 +52,24 @@ const acabDe = (f: FamiliaCfg, id: string) => f.acabamentos.find((a) => a.id ===
 export function skuDaCelula(f: FamiliaCfg, medidaId: string, acabId: string): string {
   const m = medidaDe(f, medidaId), a = acabDe(f, acabId);
   if (!m || !a) return "";
+  const c = f.celulas[celulaKey(medidaId, acabId)];
+  if (c?.produtoId) return c.sku?.trim() ?? "";
   const auto = `${m.ref}${f.regraSku.sep}${a.codigo}`;
   return f.regraSku.modo === "manual" ? (f.celulas[celulaKey(medidaId, acabId)]?.sku?.trim() || auto) : auto;
 }
 const precoProprio = (c?: CelulaCfg): number | undefined => (typeof c?.preco === "number" && Number.isFinite(c.preco) && c.preco > 0 ? c.preco : undefined);
 /** O preço de uma célula: o dela, senão o da medida. */
-export const precoDaCelula = (f: FamiliaCfg, medidaId: string, acabId: string): number => precoProprio(f.celulas[celulaKey(medidaId, acabId)]) ?? medidaDe(f, medidaId)?.preco ?? 0;
+export function precoDaCelula(f: FamiliaCfg, medidaId: string, acabId: string): number {
+  const c = f.celulas[celulaKey(medidaId, acabId)];
+  if (c?.produtoId) return precoProprio(c) ?? 0;
+  return precoProprio(c) ?? medidaDe(f, medidaId)?.preco ?? 0;
+}
 
 const celulasAtivas = (f: FamiliaCfg): { m: MedidaCfg; a: AcabCfg }[] =>
   f.medidas.flatMap((m) => f.acabamentos.filter((a) => f.celulas[celulaKey(m.id, a.id)]?.ativo === true).map((a) => ({ m, a })));
 const nomeMedida = (m: MedidaCfg): string => m.rotulo.trim() || m.ref.trim() || m.id;
+/** A medida tem células que são produtos do catálogo? Então o preço vem deles e o «preço base» é só informativo. */
+const medidaDoCatalogo = (f: FamiliaCfg, medidaId: string): boolean => Object.entries(f.celulas).some(([k, c]) => k.startsWith(`${medidaId}|`) && !!c.produtoId);
 
 /* ------------------------------------------------------------------ validação */
 export function problemas(f: FamiliaCfg, outrosIds: readonly string[] = []): Problema[] {
@@ -75,7 +85,7 @@ export function problemas(f: FamiliaCfg, outrosIds: readonly string[] = []): Pro
   }
   if (f.medidas.length === 0) add(3, "Junte pelo menos um produto (uma medida com referência).");
   for (const m of f.medidas) {
-    if (!(m.preco > 0)) add(3, `O produto «${nomeMedida(m)}» não tem preço base.`);
+    if (!(m.preco > 0) && !medidaDoCatalogo(f, m.id)) add(3, `O produto «${nomeMedida(m)}» não tem preço base.`);
     if (!m.ref.trim()) add(3, `O produto «${nomeMedida(m)}» não tem referência.`);
     if (m.dim.some((x) => !(x > 0))) add(3, `O produto «${nomeMedida(m)}» tem dimensões por preencher.`);
   }
@@ -85,6 +95,15 @@ export function problemas(f: FamiliaCfg, outrosIds: readonly string[] = []): Pro
     const porSku = new Map<string, string[]>();
     for (const { m, a } of ativas) { const s = skuDaCelula(f, m.id, a.id); porSku.set(s, [...(porSku.get(s) ?? []), `${nomeMedida(m)} × ${a.nome}`]); }
     for (const [sku, onde] of porSku) if (onde.length > 1) add(4, `O SKU «${sku}» repete-se (${onde.join("; ")}).`);
+    const porProduto = new Map<string, { nome: string; onde: string[] }>();
+    for (const { m, a } of ativas) {
+      const c = f.celulas[celulaKey(m.id, a.id)];
+      if (!c?.produtoId) continue;
+      const nome = c.produtoNome || c.sku || c.produtoId, atual = porProduto.get(c.produtoId) ?? { nome, onde: [] };
+      porProduto.set(c.produtoId, { nome, onde: [...atual.onde, `${nomeMedida(m)} × ${a.nome}`] });
+      if (precoProprio(c) === undefined) add(3, `O produto do catálogo «${nome}» não tem preço de venda.`);
+    }
+    for (const [, x] of porProduto) if (x.onde.length > 1) add(4, `O mesmo produto do catálogo («${x.nome}») entra em mais de uma variante (${x.onde.join("; ")}).`);
     if (ativas.length > 0) for (const m of f.medidas) if (!ativas.some((x) => x.m.id === m.id)) add(4, `O produto «${nomeMedida(m)}» não tem nenhum acabamento ativo: junte um acabamento ou remova o produto.`);
   }
   return p;
@@ -98,16 +117,17 @@ export function paraFamilia(f: FamiliaCfg): Familia {
   const ativas = celulasAtivas(f);
   const medidas: MedidaFam[] = f.medidas.filter((m) => ativas.some((x) => x.m.id === m.id)).map((m) => {
     const dela = ativas.filter((x) => x.m.id === m.id).map((x) => x.a);
-    const precos: Record<string, number> = {}, skus: Record<string, string> = {};
+    const precos: Record<string, number> = {}, skus: Record<string, string> = {}, produtos: Record<string, string> = {};
     for (const a of dela) {
-      const proprio = precoProprio(f.celulas[celulaKey(m.id, a.id)]);
+      const c = f.celulas[celulaKey(m.id, a.id)], proprio = precoProprio(c);
       if (proprio !== undefined) precos[a.id] = proprio;
       skus[a.id] = skuDaCelula(f, m.id, a.id);
+      if (c?.produtoId) produtos[a.id] = c.produtoId;
     }
     const [w, d, h] = m.dim;
     const forma = f.tipo === "torneira_cozinha" ? { torneira: { estilo: "monocomando" as const, altura: h * 10, saida: d * 10, alcance: d * 10, base: w * 10 } }
       : f.tipo === "lava_loica" ? { cubas: [{ w: Math.max(w * 10 - 40, 100), d: Math.max(d * 10 - 40, 100), prof: h * 10, left: 20, top: 20 }] } : {};
-    return { id: m.id, rotulo: m.rotulo, ref: m.ref, preco: m.preco, dim: m.dim, spec: { ...forma, acabamentos: dela.map((a) => a.id), precos, skus } };
+    return { id: m.id, rotulo: m.rotulo, ref: m.ref, preco: m.preco, dim: m.dim, spec: { ...forma, acabamentos: dela.map((a) => a.id), precos, skus, ...(Object.keys(produtos).length ? { produtos } : {}) } };
   });
   const acabamentos: AcabFam[] = f.acabamentos.filter((a) => ativas.some((x) => x.a.id === a.id)).map((a) => ({ ...a, delta: 0 }));
   const glbCelulas: Record<string, string> = {};
@@ -224,8 +244,10 @@ export const aplicarAcabamentoATodos = (f: FamiliaCfg, acabId: string): FamiliaC
 /** Muda a variante-produto (célula): ativo, preço ou SKU próprios. Só se o acabamento já faz parte do produto. */
 export function alterarVariante(f: FamiliaCfg, medidaId: string, acabId: string, p: Partial<CelulaCfg>): FamiliaCfg {
   if (!existeCelula(f, medidaId, acabId)) return f;
-  const k = celulaKey(medidaId, acabId);
-  return { ...f, celulas: { ...f.celulas, [k]: { ...f.celulas[k], ...p } } };
+  const k = celulaKey(medidaId, acabId), atual = f.celulas[k];
+  // um produto do catálogo manda no seu SKU e no seu preço: aqui só se liga ou desliga
+  const permitido: Partial<CelulaCfg> = atual.produtoId ? (p.ativo === undefined ? {} : { ativo: p.ativo }) : p;
+  return { ...f, celulas: { ...f.celulas, [k]: { ...atual, ...permitido } } };
 }
 /** Escolhe (ou, com chave vazia, tira) o GLB do fabricante de uma variante. */
 export function definirGlbDaVariante(f: FamiliaCfg, medidaId: string, acabId: string, chave: string): FamiliaCfg {
@@ -238,10 +260,10 @@ export const alterarAcabamento = (f: FamiliaCfg, acabId: string, p: DadosAcab): 
   ({ ...f, acabamentos: f.acabamentos.map((a) => (a.id === acabId ? { ...a, ...p } : a)) });
 
 /** Uma linha do resumo: uma variante ativa, ou seja, um produto real com a sua referência. */
-export interface LinhaVariante { chave: string; medidaId: string; acabId: string; produto: string; ref: string; acabamento: string; sku: string; preco: number; tem3d: boolean }
+export interface LinhaVariante { chave: string; medidaId: string; acabId: string; produto: string; ref: string; acabamento: string; sku: string; preco: number; tem3d: boolean; /** o produto do catálogo de onde vêm o SKU e o preço */ produtoId?: string }
 export const linhasDeVariantes = (f: FamiliaCfg): LinhaVariante[] => celulasAtivas(f).map(({ m, a }) => {
   const chave = celulaKey(m.id, a.id);
-  return { chave, medidaId: m.id, acabId: a.id, produto: nomeMedida(m), ref: m.ref, acabamento: a.nome.trim() || a.id, sku: skuDaCelula(f, m.id, a.id), preco: precoDaCelula(f, m.id, a.id), tem3d: Boolean(f.glb?.[chave]) };
+  return { chave, medidaId: m.id, acabId: a.id, produto: nomeMedida(m), ref: m.ref, acabamento: a.nome.trim() || a.id, sku: skuDaCelula(f, m.id, a.id), preco: precoDaCelula(f, m.id, a.id), tem3d: Boolean(f.glb?.[chave]), ...(f.celulas[chave]?.produtoId ? { produtoId: f.celulas[chave].produtoId } : {}) };
 });
 /** «N produtos = N referências»: produtos = variantes ativas; referências = SKUs distintos (se divergem, há SKUs repetidos). */
 export function resumoDeProdutos(f: FamiliaCfg): { produtos: number; referencias: number; texto: string } {
@@ -252,7 +274,7 @@ export function resumoDeProdutos(f: FamiliaCfg): { produtos: number; referencias
  * Em modo automático os SKUs escritos eram ignorados, por isso descartam-se; nenhum SKU efetivo muda. Devolve uma cópia. */
 export function prepararParaEdicao(f: FamiliaCfg): FamiliaCfg {
   const c = structuredClone(f);
-  if (c.regraSku.modo === "auto") for (const k of Object.keys(c.celulas)) delete c.celulas[k].sku;
+  if (c.regraSku.modo === "auto") for (const k of Object.keys(c.celulas)) if (!c.celulas[k].produtoId) delete c.celulas[k].sku;
   return { ...c, regraSku: { ...c.regraSku, modo: "manual" } };
 }
 
@@ -293,4 +315,158 @@ export function exemploKeran(): FamiliaCfg {
     regraSku: { modo: "auto", sep: "-" },
     glb: { "m80|inox": chaveFicheiro("lava_loica", "keran80", "inox"), "m100|inox": chaveFicheiro("lava_loica", "keran100", "inox") },
   };
+}
+
+/* ------------------------------------------------------------------ JUNTAR PRODUTOS QUE JÁ EXISTEM NO CATÁLOGO
+ * Em vez de recriar cada variante, escolhem-se produtos reais do catálogo (só leitura): cada um é UMA variante (medida × acabamento) e traz o seu SKU e o seu preço de
+ * venda, que aqui não se editam. O palpite por análise do nome propõe a medida e o acabamento; o utilizador corrige. Funções puras, sem React.
+ * O catálogo de exemplo não traz o acabamento em colunas: está no nome («Lody 40 U-F - Cobre») ou no subtipo («Cubas inox»), por isso é preciso adivinhá-lo. */
+
+/** A margem-alvo (%) com que o protótipo calcula o preço de um produto sem PVP (o valor de omissão do motor, `cfg.alvo`). */
+export const ALVO_PROTO = 35;
+/** Um produto do catálogo como o configurador o vê: o preço de venda já resolvido (o PVP real, senão custo ÷ (1 − margem-alvo), como o catálogo). */
+export interface ProdutoRef { id: string; n: string; marca?: string; sku?: string; sub?: string; /** preço de venda por unidade (€, s/IVA); 0 = sem preço */ preco: number; /** o catálogo não tem PVP: o preço foi calculado pelo custo */ semPvp: boolean }
+/** O mínimo que se lê de um `Produto` do catálogo (v2/catalogoModelo.ts). */
+export interface ProdutoDoCatalogo { id: string; n: string; marca?: string; sku?: string; sub?: string; custo: number; pvp?: number }
+export function refDoProduto(p: ProdutoDoCatalogo, alvo: number = ALVO_PROTO): ProdutoRef {
+  const sku = p.sku?.trim() || p.id, preco = precoUnitario({ custo: p.custo, ...(p.pvp != null ? { pvp: p.pvp } : {}) }, alvo);
+  return { id: p.id, n: p.n, ...(p.marca ? { marca: p.marca } : {}), sku, ...(p.sub ? { sub: p.sub } : {}), preco: Number.isFinite(preco) && preco > 0 ? preco : 0, semPvp: !(p.pvp != null && p.pvp > 0) };
+}
+
+const plano = (s: string): string => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+interface AcabConhecido { id: string; codigo: string; cor: string; metalness: number; roughness: number; re: RegExp }
+/** Os acabamentos que o nome costuma trazer (o `id` é o do catálogo 3D, para propor o GLB do fabricante). */
+const ACABAMENTOS_CONHECIDOS: readonly AcabConhecido[] = [
+  { id: "cobre", codigo: "CO", cor: "#bc825b", metalness: 1, roughness: 0.3, re: /\b(cobre|copper)\b/g },
+  { id: "oro", codigo: "GO", cor: "#c9ad68", metalness: 1, roughness: 0.3, re: /\b(oro|gold|dourad[oa])\b/g },
+  { id: "gunmetal", codigo: "GM", cor: "#62605e", metalness: 1, roughness: 0.29, re: /\bgun ?metal\b/g },
+  { id: "inox", codigo: "IX", cor: "#c3c7ca", metalness: 1, roughness: 0.3, re: /\binox(idavel)?\b/g },
+  { id: "negro", codigo: "NE", cor: "#151617", metalness: 0.05, roughness: 0.5, re: /\b(negro|preto|preta|black|midnight)\b/g },
+  { id: "blanco", codigo: "BL", cor: "#f2f2ef", metalness: 0.02, roughness: 0.4, re: /\b(blanco|branco|branca|white)\b/g },
+  { id: "chrome", codigo: "CR", cor: "#d9dde0", metalness: 1, roughness: 0.12, re: /\b(cromad[oa]|cromo|chrome)\b/g },
+  { id: "nickel", codigo: "NI", cor: "#b9bcbd", metalness: 1, roughness: 0.2, re: /\bniquel\b/g },
+  { id: "brushed", codigo: "AC", cor: "#b7b9ba", metalness: 1, roughness: 0.27, re: /\b(acero|escovad[oa])\b/g },
+  { id: "titanio", codigo: "TI", cor: "#55524d", metalness: 1, roughness: 0.3, re: /\btitanio\b/g },
+  { id: "antracite", codigo: "AN", cor: "#4a4e53", metalness: 0, roughness: 0.5, re: /\bantracite\b/g },
+];
+/** O acabamento conhecido que aparece MAIS À DIREITA no texto (em «BLANCO INOX LEMIS», Blanco é a marca e Inox o acabamento) e o pedaço do texto original. */
+function acabamentoNoTexto(texto: string): { a: AcabConhecido; achado: string } | undefined {
+  const t = plano(texto);
+  let melhor: { a: AcabConhecido; achado: string; i: number } | undefined;
+  for (const a of ACABAMENTOS_CONHECIDOS) for (const m of t.matchAll(a.re)) if (!melhor || m.index > melhor.i) melhor = { a, achado: texto.slice(m.index, m.index + m[0].length), i: m.index };
+  return melhor;
+}
+const formatoNome = (s: string): string => (s === s.toUpperCase() || s === s.toLowerCase() ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s);
+const iniciais = (s: string): string => { const p = s.trim().split(/\s+/).filter(Boolean); return (p.length > 1 ? p.map((x) => x[0]).join("") : (p[0] ?? "").slice(0, 2)).toUpperCase(); };
+/** O pedaço depois do último « - » do nome, se parece um acabamento (sem números, até 3 palavras, sem «cuba»). */
+function fimDoNome(nome: string): string {
+  const partes = nome.split(/\s+[-–—]\s+/);
+  const fim = partes.length > 1 ? partes[partes.length - 1].trim() : "";
+  return fim && !/\d/.test(fim) && !/cuba/i.test(fim) && fim.split(/\s+/).length <= 3 ? fim : "";
+}
+
+export interface PalpiteProduto {
+  /** o rótulo da medida («40 cm», «60×45×80 cm» ou «Única») */
+  medida: string; /** largura, profundidade, altura (cm) */ dim: [number, number, number]; /** a largura em cm lida do nome */ numero?: number;
+  acabamento: string; cor: string; codigo: string; metalness: number; roughness: number; /** o id do acabamento no catálogo 3D, quando o nome o diz */ acabId?: string;
+}
+/** O palpite da medida e do acabamento de um produto a partir do nome (e do subtipo): sempre editável. */
+export function palpiteDoProduto(nome: string, o: { sub?: string; tipo?: TipoMockup } = {}): PalpiteProduto {
+  const texto = nome.replace(/\s+/g, " ").trim(), t = plano(texto), lava = o.tipo === "lava_loica";
+  // acabamento: o fim do nome («… - Cobre»), senão o que está mais à direita no nome, senão no subtipo
+  const fim = fimDoNome(texto);
+  const achado = fim ? acabamentoNoTexto(fim) : (acabamentoNoTexto(texto) ?? acabamentoNoTexto(o.sub ?? ""));
+  let acab: Pick<PalpiteProduto, "acabamento" | "cor" | "codigo" | "metalness" | "roughness" | "acabId"> = { acabamento: "Padrão", cor: "#b7b9ba", codigo: "STD", metalness: 0.5, roughness: 0.4 };
+  if (achado) acab = { acabamento: formatoNome(fim || achado.achado), cor: achado.a.cor, codigo: achado.a.codigo, metalness: achado.a.metalness, roughness: achado.a.roughness, acabId: achado.a.id };
+  else if (fim) acab = { acabamento: formatoNome(fim), cor: "#b7b9ba", codigo: iniciais(fim), metalness: 0.5, roughness: 0.4 };
+  // medida: «60x45x80», senão «86CM», senão o número a seguir a «CUBA», senão o primeiro número de 2-3 algarismos (20 a 300) que não conta cubas
+  const tres = /(\d{2,3})\s*[x×]\s*(\d{2,3})(?:\s*[x×]\s*(\d{1,3}))?/.exec(t);
+  if (tres) {
+    const w = Number(tres[1]), d = Number(tres[2]), h = tres[3] ? Number(tres[3]) : 20;
+    return { medida: `${w}×${d}${tres[3] ? `×${h}` : ""} cm`, dim: [w, d, h], numero: w, ...acab };
+  }
+  const n = /(\d{2,3})\s*cm\b/.exec(t)?.[1] ?? /cubas?\s+(\d{2,3})\b/.exec(t)?.[1]
+    ?? [...t.matchAll(/\b(\d{2,3})\b(?!\s*cubas?)/g)].map((m) => Number(m[1])).find((x) => x >= 20 && x <= 300)?.toString();
+  if (n === undefined) return { medida: "Única", dim: lava ? [50, 44, 20] : [60, 50, 20], ...acab };
+  const numero = Number(n);
+  return { medida: `${numero} cm`, dim: lava ? [numero + 4, 44, 20] : [numero, 50, 20], numero, ...acab };
+}
+
+/** O nome e a marca sugeridos para a família: o começo comum dos nomes (sem números nem «CUBA» no fim) e a marca mais frequente. */
+export function sugerirFamilia(refs: readonly ProdutoRef[]): { nome: string; marca: string } {
+  if (refs.length === 0) return { nome: "", marca: "" };
+  const marcas = new Map<string, number>();
+  for (const r of refs) if (r.marca?.trim()) marcas.set(r.marca.trim(), (marcas.get(r.marca.trim()) ?? 0) + 1);
+  const marca = [...marcas.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? "";
+  const palavras = (n: string) => n.replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+  const numerica = /^\d+([.,]\d+)?(cm)?$/i, solta = /^\d+([.,]\d+)?(cm)?$|^cubas?$|^[-–—]$/i;
+  const limpar = (p: string[]) => { const q = [...p]; while (q.length && solta.test(q[q.length - 1])) q.pop(); return q; };
+  const um = (n: string) => {
+    const fim = fimDoNome(n), base = fim ? n.slice(0, n.lastIndexOf(fim)).replace(/\s+[-–—]\s*$/, "") : n;
+    return palavras(base).filter((w) => !numerica.test(w)).join(" ");
+  };
+  if (refs.length === 1) return { nome: um(refs[0].n), marca };
+  const todas = refs.map((r) => palavras(r.n)), primeira = todas[0], comum: string[] = [];
+  for (let i = 0; i < primeira.length && todas.every((p) => p[i] !== undefined && plano(p[i]) === plano(primeira[i])); i++) comum.push(primeira[i]);
+  return { nome: limpar(comum).join(" ") || um(refs[0].n), marca };
+}
+
+/** A categoria (e o tipo, que a categoria aceita) sugerida pelo tipo de mockup do produto. */
+export function categoriaSugerida(tipo: TipoMockup): { categoria: CategoriaFam; tipo: TipoMockup } {
+  const direto: Partial<Record<TipoMockup, CategoriaFam>> = { lava_loica: "lavaloicas", torneira_cozinha: "torneiras", placa: "placas", tampo: "tampos", bancada: "tampos", sifao: "cozinha" };
+  const categoria = direto[tipo] ?? (TIPOS_DA_CATEGORIA.banho.includes(tipo) ? "banho" : "cozinha");
+  return { categoria, tipo: TIPOS_DA_CATEGORIA[categoria].includes(tipo) ? tipo : TIPOS_DA_CATEGORIA[categoria][0] };
+}
+
+/** A chave do GLB do fabricante que o nome do produto casa (modelo = palavra do nome; números a ±1 cm; sufixo «N»; acabamento do palpite), ou vazio. */
+export function ficheiroSugerido(tipo: TipoMockup, nome: string, palpite: Pick<PalpiteProduto, "acabId" | "numero">): string {
+  const familia = tipo === "torneira_cozinha" ? "torneira" : tipo === "lava_loica" ? "lava_loica" : null;
+  if (!familia || !palpite.acabId) return "";
+  const palavras = plano(nome).split(/[^a-z0-9]+/).filter(Boolean);
+  let melhor: { x: Ficheiro3D; custo: number } | undefined;
+  for (const x of FICHEIROS_3D) {
+    if (x.familia !== familia || x.acab !== palpite.acabId) continue;
+    const m = /^([a-z]+)(\d+)?([a-z]*)$/.exec(x.modelo);
+    if (!m || !palavras.includes(m[1])) continue;
+    if (!m[3] && palavras.includes("n")) continue;
+    if (m[3] && !palavras.includes(m[3])) continue;
+    let custo = 0;
+    if (m[2]) {
+      if (palpite.numero === undefined) continue;
+      custo = Math.abs(Number(m[2]) - palpite.numero);
+      if (custo > 1) continue;
+    }
+    if (!melhor || custo < melhor.custo) melhor = { x, custo };
+  }
+  return melhor ? chaveFicheiro(melhor.x.familia, melhor.x.modelo, melhor.x.acab) : "";
+}
+
+/** O que o utilizador atribui a cada produto escolhido: a medida e o acabamento (e, se quiser, o GLB do fabricante). */
+export interface AtribuicaoProduto { produtoId: string; medida: string; dim: [number, number, number]; acabamento: string; cor: string; codigo: string; metalness?: number; roughness?: number; glb?: string }
+
+/** Monta a família a partir dos produtos escolhidos e das atribuições (mantém o nome, a marca, a categoria, o tipo e os espaços de `base`).
+ * Produtos com a mesma medida (rótulo) juntam-se num mesmo «produto» da família, com as dimensões do primeiro; o mesmo acabamento (nome) é um só. Se dois produtos
+ * pedem a mesma medida × acabamento, o segundo fica de fora e há um conflito para corrigir. */
+export function familiaDeProdutos(base: FamiliaCfg, refs: readonly ProdutoRef[], atribuicoes: readonly AtribuicaoProduto[]): { familia: FamiliaCfg; conflitos: string[] } {
+  const porId = new Map(refs.map((r) => [r.id, r] as const)), compativeis = new Set(ficheirosCompativeis(base.tipo).map((x) => chaveFicheiro(x.familia, x.modelo, x.acab)));
+  const medidas: MedidaCfg[] = [], acabamentos: AcabCfg[] = [], celulas: Record<string, CelulaCfg> = {}, glb: Record<string, string> = {}, ocupado = new Map<string, string>(), conflitos: string[] = [];
+  for (const a of atribuicoes) {
+    const r = porId.get(a.produtoId);
+    if (!r) continue;
+    const rotulo = a.medida.trim() || "Única", nomeAcab = a.acabamento.trim() || "Padrão";
+    let m = medidas.find((x) => norm(x.rotulo) === norm(rotulo));
+    if (!m) { m = { id: `m${medidas.length + 1}`, rotulo, ref: r.sku?.trim() || r.id, dim: [...a.dim], preco: 0 }; medidas.push(m); }
+    let c = acabamentos.find((x) => norm(x.nome) === norm(nomeAcab));
+    if (!c) { c = { id: `a${acabamentos.length + 1}`, nome: nomeAcab, cor: a.cor, metalness: a.metalness ?? 0.5, roughness: a.roughness ?? 0.4, codigo: a.codigo.trim() || `A${acabamentos.length + 1}` }; acabamentos.push(c); }
+    const k = celulaKey(m.id, c.id);
+    if (ocupado.has(k)) { conflitos.push(`Os produtos «${ocupado.get(k)}» e «${r.n}» têm a mesma medida (${m.rotulo}) e o mesmo acabamento (${c.nome}): mude a medida ou o acabamento de um deles.`); continue; }
+    ocupado.set(k, r.n);
+    celulas[k] = { ativo: true, produtoId: r.id, produtoNome: r.n, sku: r.sku?.trim() || r.id, ...(r.preco > 0 ? { preco: r.preco } : {}) };
+    if (a.glb && compativeis.has(a.glb)) glb[k] = a.glb;
+  }
+  for (const m of medidas) {
+    const precos = Object.entries(celulas).filter(([k]) => k.startsWith(`${m.id}|`)).map(([, x]) => x.preco ?? 0).filter((x) => x > 0);
+    m.preco = precos.length ? Math.min(...precos) : 0;
+  }
+  return { familia: { ...base, acabamentos, medidas, celulas, glb, regraSku: { ...base.regraSku, modo: "manual" } }, conflitos };
 }

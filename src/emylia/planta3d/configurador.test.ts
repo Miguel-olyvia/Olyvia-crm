@@ -7,6 +7,11 @@ import {
   juntarAcabamentoAoProduto, juntarProduto, linhasDeVariantes, paraFamilia, prepararParaEdicao, resumoDeProdutos, skuDaCelula, tirarAcabamentoDoProduto, tirarProduto, validar, type FamiliaCfg,
 } from "./configurador";
 import { FICHEIROS_3D, chaveFicheiro } from "./modelosHtml/ficheiros";
+import {
+  ALVO_PROTO, TIPOS_DA_CATEGORIA, alterarVariante as alterarVarianteCat, categoriaSugerida, familiaDeProdutos, ficheiroSugerido, palpiteDoProduto, refDoProduto, sugerirFamilia,
+  type AtribuicaoProduto, type ProdutoRef,
+} from "./configurador";
+import { produtoIdsAgrupados } from "./familias";
 
 afterEach(() => registarFamilias([]));
 
@@ -354,5 +359,178 @@ describe("semente Lava-loiça Lody, FRASA: 9 produtos = 9 referências", () => {
   it("singular: 1 produto = 1 referência", () => {
     const f = juntarAcabamentoAoProduto(juntarProduto(vazia()), "m1", { nome: "Inox", codigo: "IX" });
     expect(resumoDeProdutos(f).texto).toBe("1 produto = 1 referência");
+  });
+});
+
+/* ------------------------------------------------------------------ juntar produtos que já existem no catálogo */
+describe("palpiteDoProduto: medida e acabamento a partir do nome", () => {
+  it("«Lody 40 U-F - Cobre»: medida 40 e acabamento Cobre (depois do hífen)", () => {
+    const p = palpiteDoProduto("Lody 40 U-F - Cobre");
+    expect(p).toMatchObject({ medida: "40 cm", acabamento: "Cobre", codigo: "CO", acabId: "cobre" });
+    expect(p.dim).toEqual([40, 50, 20]);
+  });
+  it("lava-loiça (tipo): a largura leva 4 cm de rebordo e a profundidade é 44", () => {
+    expect(palpiteDoProduto("Lody 40 U-F - Cobre", { tipo: "lava_loica" }).dim).toEqual([44, 44, 20]);
+  });
+  it("«Lava-louças VELAR 1 CUBA 50»: a medida vem depois de CUBA; sem acabamento no nome, o subtipo «Cubas inox» dá Inox", () => {
+    expect(palpiteDoProduto("Lava-louças VELAR 1 CUBA 50", { sub: "Cubas inox" })).toMatchObject({ medida: "50 cm", acabamento: "Inox", acabId: "inox" });
+  });
+  it("sem acabamento reconhecível, o acabamento é «Padrão»", () => {
+    expect(palpiteDoProduto("Lava-louças VELAR 1 CUBA 50")).toMatchObject({ medida: "50 cm", acabamento: "Padrão", codigo: "STD" });
+    expect(palpiteDoProduto("Lava-louças VELAR 1 CUBA 50").acabId).toBeUndefined();
+  });
+  it("«… 45 S-IF 523 030 86CM»: a medida explícita em cm ganha; o último acabamento do nome ganha (Blanco é marca, Inox é o acabamento)", () => {
+    expect(palpiteDoProduto("LAVA LOUÇA BLANCO INOX LEMIS 45 S-IF 523 030 86CM")).toMatchObject({ medida: "86 cm", acabamento: "Inox" });
+  });
+  it("«AMBAR 100 C/ESCORREDOR 1 CUBA» → 100; «1.5 CUBA 55» → 55; «DUO 60 - 2 CUBAS» → 60 e o fim «2 CUBAS» não é um acabamento", () => {
+    expect(palpiteDoProduto("Lava-louças AMBAR 100 C/ESCORREDOR 1 CUBA").medida).toBe("100 cm");
+    expect(palpiteDoProduto("Lava-louças AMBAR 1.5 CUBA 55").medida).toBe("55 cm");
+    const d = palpiteDoProduto("Lava-louças DUO 60 - 2 CUBAS");
+    expect(d.medida).toBe("60 cm");
+    expect(d.acabamento).toBe("Padrão");
+  });
+  it("dimensões escritas no nome: «Móvel 60x45x80» → 60, 45 e 80", () => {
+    const p = palpiteDoProduto("Móvel baixo 60x45x80 - Branco");
+    expect(p.dim).toEqual([60, 45, 80]);
+    expect(p).toMatchObject({ medida: "60×45×80 cm", acabamento: "Branco", acabId: "blanco" });
+  });
+  it("sem número no nome: medida «Única»", () => {
+    expect(palpiteDoProduto("Misturadoras Monocomando ROUND").medida).toBe("Única");
+  });
+  it("um fim «- Rosa velho» que não está no dicionário é o nome do acabamento, com código das iniciais", () => {
+    expect(palpiteDoProduto("Lava-louças X 40 - Rosa velho")).toMatchObject({ acabamento: "Rosa velho", codigo: "RV" });
+  });
+  it("texto vazio ou só espaços: não rebenta", () => {
+    expect(palpiteDoProduto("   ")).toMatchObject({ medida: "Única", acabamento: "Padrão" });
+  });
+});
+
+describe("sugerirFamilia, categoriaSugerida e ficheiroSugerido", () => {
+  const ref = (id: string, n: string, extra: Partial<ProdutoRef> = {}): ProdutoRef => ({ id, n, marca: "FRASA", sku: id.toUpperCase(), preco: 100, semPvp: false, ...extra });
+  it("o nome é o começo comum dos nomes, sem números nem «CUBA» no fim; a marca é a mais frequente", () => {
+    const s = sugerirFamilia([ref("a", "Lava-louças VELAR 1 CUBA 34"), ref("b", "Lava-louças VELAR 1 CUBA 40"), ref("c", "Lava-louças VELAR 1 CUBA 50", { marca: "Rodi" }), ref("d", "Lava-louças VELAR 1 CUBA 70")]);
+    expect(s).toEqual({ nome: "Lava-louças VELAR", marca: "FRASA" });
+  });
+  it("um só produto: o nome dele sem a medida; sem produtos: vazio", () => {
+    expect(sugerirFamilia([ref("a", "Lody 40 U-F - Cobre")]).nome).toBe("Lody U-F");
+    expect(sugerirFamilia([])).toEqual({ nome: "", marca: "" });
+  });
+  it("categoriaSugerida: cada tipo cai numa categoria que o aceita", () => {
+    expect(categoriaSugerida("lava_loica")).toEqual({ categoria: "lavaloicas", tipo: "lava_loica" });
+    expect(categoriaSugerida("torneira_cozinha")).toEqual({ categoria: "torneiras", tipo: "torneira_cozinha" });
+    expect(categoriaSugerida("resguardo")).toEqual({ categoria: "banho", tipo: "resguardo" });
+    for (const t of ["sanita", "caixa", "placa", "tampo", "bancada"] as const) { const c = categoriaSugerida(t); expect(TIPOS_DA_CATEGORIA[c.categoria]).toContain(c.tipo); }
+  });
+  it("ficheiroSugerido: Lody 40 Cobre (lava-loiça) e Smooth Cromo (torneira) casam com um GLB do fabricante", () => {
+    expect(ficheiroSugerido("lava_loica", "Lody 40 U-F - Cobre", palpiteDoProduto("Lody 40 U-F - Cobre"))).toBe(chaveFicheiro("lava_loica", "lody40", "cobre"));
+    const t = "Misturadoras Monocomando Extraível SMOOTH - Cromo";
+    expect(ficheiroSugerido("torneira_cozinha", t, palpiteDoProduto(t))).toBe(chaveFicheiro("torneira", "smooth", "chrome"));
+  });
+  it("ficheiroSugerido: Velar 70 apanha o velar71 (1 cm de diferença) e o sufixo N distingue ambar40n de ambar40", () => {
+    const v = "Lava-louças VELAR 1 CUBA 70";
+    expect(ficheiroSugerido("lava_loica", v, palpiteDoProduto(v, { sub: "Cubas inox" }))).toBe(chaveFicheiro("lava_loica", "velar71", "inox"));
+    const a = "Lava-louças AMBAR 1 CUBA 40 N - Negro", b = "Lava-louças AMBAR 1 CUBA 40 - Negro";
+    expect(ficheiroSugerido("lava_loica", a, palpiteDoProduto(a))).toBe(chaveFicheiro("lava_loica", "ambar40n", "negro"));
+    expect(ficheiroSugerido("lava_loica", b, palpiteDoProduto(b))).toBe(chaveFicheiro("lava_loica", "ambar40", "negro"));
+  });
+  it("ficheiroSugerido: sem acabamento conhecido, sem GLB de outro tipo, ou nome que não casa, devolve vazio", () => {
+    expect(ficheiroSugerido("lava_loica", "Lava-louças KERAN 80", palpiteDoProduto("Lava-louças KERAN 80"))).toBe("");
+    expect(ficheiroSugerido("movel", "Lody 40 - Cobre", palpiteDoProduto("Lody 40 - Cobre"))).toBe("");
+    expect(ficheiroSugerido("lava_loica", "Lava-louças Zeta 40 - Cobre", palpiteDoProduto("Lava-louças Zeta 40 - Cobre"))).toBe("");
+  });
+});
+
+describe("refDoProduto: o preço de venda é o do catálogo", () => {
+  const prod = { id: "p1", n: "X", marca: "M", sku: " S1 ", sub: "Cubas inox", custo: 65 };
+  it("com PVP usa o PVP; sem PVP, custo ÷ (1 − margem-alvo), como o catálogo (precoUnitario)", () => {
+    expect(refDoProduto({ ...prod, pvp: 149 })).toMatchObject({ preco: 149, semPvp: false, sku: "S1" });
+    const r = refDoProduto(prod);
+    expect(ALVO_PROTO).toBe(35);
+    expect(r).toMatchObject({ preco: 100, semPvp: true });
+  });
+  it("sem PVP e sem custo: preço 0 (é erro mais à frente); sem referência: o id serve de SKU", () => {
+    expect(refDoProduto({ id: "p9", n: "Y", custo: 0 })).toMatchObject({ preco: 0, semPvp: true, sku: "p9" });
+  });
+});
+
+describe("familiaDeProdutos: agrupar produtos reais numa família", () => {
+  const nova = (): FamiliaCfg => ({ ...criarFamiliaVazia(), id: "cfg:lody-do-catalogo", nome: "Lody do catálogo", marca: "FRASA", acabamentos: [], medidas: [], celulas: {} });
+  const ACABS = [["Cobre", "CO"], ["Gold", "GO"], ["Gunmetal", "GM"]] as const;
+  const refs9: ProdutoRef[] = [], atrib9: AtribuicaoProduto[] = [];
+  for (const [i, tam] of [40, 50, 70].entries()) for (const [j, [ac, cod]] of ACABS.entries()) {
+    const id = `p-${tam}-${cod}`;
+    refs9.push({ id, n: `Lava-louças Lody ${tam} - ${ac}`, marca: "FRASA", sku: `LLCCI-${tam}${cod}`, preco: 140 + i * 20 + j, semPvp: false });
+    atrib9.push({ produtoId: id, medida: `${tam} cm`, dim: [tam + 4, 44, 20], acabamento: ac, cor: "#bc825b", codigo: cod });
+  }
+  it("9 produtos → 3 medidas × 3 acabamentos, 9 células ativas, e a família valida sem erros", () => {
+    const { familia: f, conflitos } = familiaDeProdutos(nova(), refs9, atrib9);
+    expect(conflitos).toEqual([]);
+    expect(f.medidas.map((m) => m.rotulo)).toEqual(["40 cm", "50 cm", "70 cm"]);
+    expect(f.acabamentos.map((a) => a.nome)).toEqual(["Cobre", "Gold", "Gunmetal"]);
+    expect(Object.values(f.celulas).filter((c) => c.ativo && c.produtoId)).toHaveLength(9);
+    expect(validar(f)).toEqual([]);
+    expect(resumoDeProdutos(f).texto).toBe("9 produtos = 9 referências");
+  });
+  it("o SKU e o preço de cada variante vêm do produto (não da regra ref+código nem do preço da medida)", () => {
+    const { familia: f } = familiaDeProdutos(nova(), refs9, atrib9);
+    const linhas = linhasDeVariantes(f);
+    expect(linhas.map((l) => l.sku).sort()).toEqual(refs9.map((r) => r.sku).sort());
+    for (const r of refs9) expect(linhas.find((l) => l.sku === r.sku)?.preco).toBe(r.preco);
+    expect(skuDaCelula(f, "m1", "a1")).toBe("LLCCI-40CO");
+  });
+  it("paraFamilia e resolverVariante respeitam o produto: SKU, preço e produtoId; modeloDaFamilia leva-os para a peça", () => {
+    const fam = paraFamilia(familiaDeProdutos(nova(), refs9, atrib9).familia);
+    expect(variantesDe(fam)).toHaveLength(9);
+    const v = resolverVariante(fam, "m2", "a3");
+    expect(v).toMatchObject({ sku: "LLCCI-50GM", preco: 162, produtoId: "p-50-GM" });
+    const m = modeloDaFamilia(fam, "m2", "a3");
+    expect(m.fam).toMatchObject({ sku: "LLCCI-50GM", preco: 162, produtoId: "p-50-GM" });
+    expect(produtoIdsAgrupados().size).toBe(0);
+    registarFamilias([fam]);
+    expect([...produtoIdsAgrupados()].sort()).toEqual(refs9.map((r) => r.id).sort());
+  });
+  it("produtos com a mesma medida juntam-se no mesmo «produto» da família (e as dimensões são as do primeiro)", () => {
+    const { familia: f } = familiaDeProdutos(nova(), refs9.slice(0, 3), atrib9.slice(0, 3));
+    expect(f.medidas).toHaveLength(1);
+    expect(acabamentosDoProduto(f, "m1")).toHaveLength(3);
+    expect(f.medidas[0].dim).toEqual([44, 44, 20]);
+  });
+  it("duas atribuições na mesma medida × acabamento: a segunda fica de fora e há um conflito legível", () => {
+    const dup = { ...atrib9[0], produtoId: "p-40-CO2" };
+    const { familia: f, conflitos } = familiaDeProdutos(nova(), [...refs9.slice(0, 1), { ...refs9[0], id: "p-40-CO2", n: "Lava-louças Lody 40 - Cobre (bis)" }], [atrib9[0], dup]);
+    expect(Object.values(f.celulas)).toHaveLength(1);
+    expect(conflitos).toHaveLength(1);
+    expect(conflitos[0]).toMatch(/mesma medida .*40 cm.* e o mesmo acabamento .*Cobre/);
+  });
+  it("produto sem preço de venda: a família deixa de validar, com o nome do produto", () => {
+    const refs = refs9.map((r, i) => (i === 0 ? { ...r, preco: 0 } : r));
+    const { familia: f } = familiaDeProdutos(nova(), refs, atrib9);
+    expect(validar(f).some((m) => /Lava-louças Lody 40 - Cobre.*não tem preço de venda/.test(m))).toBe(true);
+  });
+  it("o mesmo produto em duas variantes é erro", () => {
+    const { familia } = familiaDeProdutos(nova(), refs9, atrib9);
+    const f = { ...familia, celulas: { ...familia.celulas, "m2|a1": { ...familia.celulas["m1|a1"] } } };
+    expect(validar(f).some((m) => /mesmo produto do catálogo/.test(m))).toBe(true);
+  });
+  it("sem produtos atribuídos, ou atribuição de um produto desconhecido: família vazia, sem rebentar", () => {
+    expect(familiaDeProdutos(nova(), [], []).familia.medidas).toEqual([]);
+    expect(familiaDeProdutos(nova(), refs9.slice(0, 1), [{ ...atrib9[0], produtoId: "nao-existe" }]).familia.celulas).toEqual({});
+  });
+  it("o GLB escolhido vai para a célula e sai se não serve o tipo da família", () => {
+    const g = chaveFicheiro("lava_loica", "lody40", "cobre");
+    const { familia: f } = familiaDeProdutos(nova(), refs9.slice(0, 1), [{ ...atrib9[0], glb: g }]);
+    expect(f.glb).toEqual({ "m1|a1": g });
+    const outro = familiaDeProdutos({ ...nova(), tipo: "movel", categoria: "cozinha" }, refs9.slice(0, 1), [{ ...atrib9[0], glb: g }]).familia;
+    expect(outro.glb).toEqual({});
+  });
+  it("SKU e preço de uma célula de produto são só de leitura: alterarVariante ignora-os mas aceita ativo", () => {
+    const { familia: f } = familiaDeProdutos(nova(), refs9, atrib9);
+    const g = alterarVarianteCat(f, "m1", "a1", { sku: "OUTRO", preco: 1, ativo: false });
+    expect(g.celulas["m1|a1"]).toMatchObject({ sku: "LLCCI-40CO", preco: 140, ativo: false, produtoId: "p-40-CO" });
+  });
+  it("prepararParaEdicao não apaga o SKU de um produto do catálogo", () => {
+    const { familia: f } = familiaDeProdutos(nova(), refs9, atrib9);
+    const g = prepararParaEdicao({ ...f, regraSku: { modo: "auto", sep: "-" } });
+    expect(skuDaCelula(g, "m1", "a1")).toBe("LLCCI-40CO");
   });
 });

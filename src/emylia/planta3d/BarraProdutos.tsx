@@ -7,7 +7,7 @@ import { PREDEFINIDOS } from "./composicaoCozinha";
 import { categoriaDoTipo, genericoServe } from "./categoriasGlb";
 import { GRUPOS_ESPACO, MOSTRAR_GENERICOS, ROTULO_ESPACO, SO_COM_MODELO_HTML, produtosDoGrupo, sem, temModeloGenerico, temModeloHtml, type ProdutoModelo3D } from "./catalogo3d";
 import { CONJUNTOS, type Conjunto } from "./conjuntos";
-import { CATEGORIAS_FAMILIA, acabamentosDaMedida, familiasDaCategoria, modeloDaFamilia, resolverVariante, temGlbDoFabricante, variantesDe, type Familia } from "./familias";
+import { CATEGORIAS_FAMILIA, acabamentosDaMedida, familiasDaCategoria, modeloDaFamilia, produtoIdsAgrupados, resolverVariante, temGlbDoFabricante, variantesDe, type Familia } from "./familias";
 import type { ParteLivre } from "./composicaoLivre";
 import { PainelComposicaoLivre } from "./PainelComposicaoLivre";
 import { temFicheiro } from "./modelosHtml/ficheiros";
@@ -96,13 +96,16 @@ function rotuloModelo(m: ProdutoModelo3D): { curto: string; titulo: string } | n
 /** As famílias que a lista mostra: com SO_COM_MODELO_HTML, só as que têm o modelo do HTML, mais as criadas no Configurador (origem «configurada»). */
 const familiasVisiveis = (c: Familia["categoria"]): Familia[] => familiasDaCategoria(c).filter((f) => !SO_COM_MODELO_HTML || !!f.htmlModelo || f.origem === "configurada");
 
-export function BarraProdutos({ produtos: todosProdutos, espaco, onEspaco, semSeletorEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto, onBancada, onComposicao, onComposicaoLivre, versaoFamilias }: BarraProdutosProps) {
+export function BarraProdutos({ produtos: todosOsProdutos, espaco, onEspaco, semSeletorEspaco, onPegar, onMover, onLargar, onCancelar, onJuntar, onConjunto, onBancada, onComposicao, onComposicaoLivre, versaoFamilias }: BarraProdutosProps) {
   const [q, setQ] = useState("");
   const [livreAberta, setLivreAberta] = useState(false);
   const [grupoEscolhido, setGrupo] = useState<string>("");
   const [quantos, setQuantos] = useState(PASSO_VISIVEIS);
   const [filtro, setFiltro] = useState<FiltroModelo>("todos");
   const [escolhas, setEscolhas] = useState<Record<string, { med?: string; acab?: string }>>({});
+  // os produtos que já pertencem a uma família agrupada (Configurador: «juntar produtos do catálogo») aparecem no cartão da família, não também soltos
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- versaoFamilias só serve para recalcular quando o registo do Configurador muda
+  const todosProdutos = useMemo(() => { const g = produtoIdsAgrupados(); return g.size ? todosOsProdutos.filter((m) => !g.has(m.produtoId)) : todosOsProdutos; }, [todosOsProdutos, versaoFamilias]);
   // protótipo: só os produtos com o modelo 3D do HTML (catalogo3d.ts, SO_COM_MODELO_HTML); separadores, contagens e pesquisa contam só esses
   // o catálogo 3D do HTML é de cozinha: os tampos Coverlam de cozinha não aparecem na casa de banho, no quarto nem na sala
   // e, com MOSTRAR_GENERICOS, depois deles os que têm o modelo genérico da categoria (selo «3D genérico»)

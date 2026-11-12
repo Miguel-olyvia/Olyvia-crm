@@ -17,6 +17,8 @@ export interface SpecMedida {
   acabamentos?: string[]; nota?: string;
   /** só das famílias do Configurador (configurador.ts): preço e SKU por acabamento NESTA medida; sem entrada valem o preço da medida + diferença e ref-código */
   precos?: Record<string, number>; skus?: Record<string, string>;
+  /** só das famílias do Configurador feitas de produtos que já existem no catálogo: acabamento → id do produto (o SKU e o preço acima vêm dele) */
+  produtos?: Record<string, string>;
 }
 export interface MedidaFam { id: string; rotulo: string; ref: string; preco: number; /** largura, profundidade, altura (cm) */ dim: [number, number, number]; spec?: SpecMedida }
 export type CategoriaFam = "torneiras" | "lavaloicas" | "placas" | "tampos" | "cozinha" | "banho";
@@ -183,10 +185,14 @@ export function registarFamilias(lista: readonly Familia[]): void {
 export const todasAsFamilias = (): Familia[] => (configuradas.length ? [...FAMILIAS, ...configuradas] : FAMILIAS);
 export const familiaPorId = (id: string): Familia | undefined => todasAsFamilias().find((f) => f.id === id);
 export const familiasDaCategoria = (c: CategoriaFam): Familia[] => todasAsFamilias().filter((f) => f.categoria === c);
+/** Os ids dos produtos do catálogo que já pertencem a uma família do Configurador (a barra de produtos não os repete soltos). */
+export const produtoIdsAgrupados = (): ReadonlySet<string> => new Set(configuradas.flatMap((f) => f.medidas.flatMap((m) => Object.values(m.spec?.produtos ?? {}))));
 
 /* ------------------------------------------------------------------ variantes: medida × acabamento, geradas dos dados */
 export interface VarianteResolvida {
   familia: Familia; medida: MedidaFam; acabamento: AcabFam; sku: string; preco: number; nome: string; material: MaterialMockup & { cor: string };
+  /** o produto do catálogo que esta variante É (famílias feitas de produtos existentes); o SKU e o preço são dele */
+  produtoId?: string;
 }
 /** Os acabamentos que servem uma medida (por omissão, todos os da família). */
 export function acabamentosDaMedida(f: Familia, medidaId?: string): AcabFam[] {
@@ -201,7 +207,8 @@ export function resolverVariante(f: Familia, medidaId?: string, acabId?: string)
   const acabamento = lista.find((a) => a.id === acabId) ?? lista[0];
   const nome = medida.rotulo ? `${f.nome.replace(/ \(demo\)$/, "")} ${medida.rotulo}${f.origem === "configurada" ? "" : " (demo)"}` : f.nome;
   const sku = medida.spec?.skus?.[acabamento.id] ?? `${medida.ref}-${acabamento.codigo}`, preco = medida.spec?.precos?.[acabamento.id] ?? medida.preco + acabamento.delta;
-  return { familia: f, medida, acabamento, sku, preco, nome, material: { cor: acabamento.cor, metalness: acabamento.metalness, roughness: acabamento.roughness } };
+  const produtoId = medida.spec?.produtos?.[acabamento.id];
+  return { familia: f, medida, acabamento, sku, preco, nome, material: { cor: acabamento.cor, metalness: acabamento.metalness, roughness: acabamento.roughness }, ...(produtoId ? { produtoId } : {}) };
 }
 /** Todas as variantes de uma família (geradas: nada de uma linha por cor). */
 export function variantesDe(f: Familia): VarianteResolvida[] {
@@ -253,6 +260,6 @@ export function modeloDaFamilia(f: Familia, medidaId?: string, acabId?: string):
   const alt = f.alt ?? (f.tipo === "lava_loica" ? alturaLavaLoicaCm(h, "baixo") / 100 : e.alt);
   return {
     produtoId: chaveModelo(f.id, v.medida.id, v.acabamento.id), nome: v.nome, tipo: f.tipo, dimensoes: { larguraCm: w, profundidadeCm: d, alturaCm: h, deNome: true }, mockup3d: mock, marca: f.marca, custo: v.preco,
-    categoria: e.rotulo, montagem: f.mont ?? e.mont, alturaOmissao: alt, demo: true, fam: { familiaId: f.id, medidaId: v.medida.id, acabId: v.acabamento.id, sku: v.sku, preco: v.preco },
+    categoria: e.rotulo, montagem: f.mont ?? e.mont, alturaOmissao: alt, demo: true, fam: { familiaId: f.id, medidaId: v.medida.id, acabId: v.acabamento.id, sku: v.sku, preco: v.preco, ...(v.produtoId ? { produtoId: v.produtoId } : {}) },
   };
 }
