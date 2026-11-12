@@ -1,7 +1,8 @@
 // 12/11 (Rúben: «se o cliente disser que quer tudo preto, o Estúdio no passo dos estilos já sugere tudo a preto e combinações boas para
 // preto»). Dois cartões do passo «Estilo»:
-//  · «Pelo que o cliente disse»: as frases sobre cores, da chamada e da visita (esta ao vivo: a gravação continua no Estúdio), e o estilo
-//    que sai delas. Enquanto o comercial não mexer nas cores à mão, aplica-se sozinho (com «Desfazer»); depois fica como sugestão.
+//  · «Pelo que se disse na conversa»: as frases sobre cores, da chamada e da visita (esta ao vivo: a gravação continua no Estúdio), e o
+//    estilo que sai delas. Cada coisa nova que se diz aplica-se sozinha, por cima do que lá está (com «Desfazer»); o que já se aplicou
+//    não volta a ser aplicado, por isso o que o comercial muda à mão depois fica.
 //  · «Combinações para o preto»: o que um designer proporia com a cor principal, com as cores dos produtos que o catálogo escolheria.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
@@ -10,7 +11,7 @@ import { cn } from "@/lib/utils";
 import { useGravacao } from "@/emylia/gravador";
 import { NOME_CATEGORIA, melhorPara, type Categoria, type Cor, type Estilo } from "./catalogoFake";
 import { aplicarEstilo, type Projeto } from "./necessidadesEstudio";
-import { amostras, combinacoesPara, ditosDaConversa, estiloDosDitos, juntarEstilo, mesmoEstilo, nomeCor, tempo, type EstiloOuvido } from "./estiloDaConversa";
+import { amostras, chavesDosDitos, combinacoesPara, ditosDaConversa, estiloDosDitos, juntarEstilo, mesmoEstilo, nomeCor, tempo, type EstiloOuvido } from "./estiloDaConversa";
 import { chip } from "./pecasEstudio";
 
 type SetP = React.Dispatch<React.SetStateAction<Projeto>>;
@@ -44,19 +45,22 @@ export function OuvidoDoCliente({ p, setP, ouvido, aOuvir }: { p: Projeto; setP:
   const aplicado = !!proposto && mesmoEstilo(proposto, p.estilo);
   const [anuncio, setAnuncio] = useState("");
   const antesDoAuto = useRef<Projeto | null>(null);
-  const chave = ouvido ? JSON.stringify([ouvido.estilo, ouvido.evitar]) : "";
+  // 12/11 (Rúben: «estou a dizer que quero uma sanita preta mas o Estúdio não se adapta»): cada coisa nova que se diz aplica-se logo,
+  // mesmo depois de o comercial ter mexido nas cores (antes, depois de um toque à mão, ficava só como sugestão)
+  const chaves = ouvido ? chavesDosDitos(ouvido.ditos) : [];
+  const vistos = new Set(p.ditosVistos ?? []);
+  const novos = ouvido ? ouvido.ditos.filter((_, i) => !vistos.has(chaves[i])) : [];
 
-  // enquanto o comercial não mexer nas cores, o que o cliente diz aplica-se sozinho
   useEffect(() => {
-    if (!ouvido || p.estiloManual || aplicado) return;
+    if (!novos.length) return;
+    const o = estiloDosDitos(novos)!;
     setP((x) => {
       antesDoAuto.current = x;
-      return comEstilo(x, juntarEstilo(x.estilo, ouvido), false);
+      return { ...comEstilo(x, juntarEstilo(x.estilo, o), false), ditosVistos: [...new Set([...(x.ditosVistos ?? []), ...chaves])] };
     });
-    const r = resumoEstilo(ouvido.estilo, ouvido.evitar);
-    setAnuncio(`Pelo que o cliente disse: ${r.join("; ")}. As peças a trocar, as paredes e o chão já seguem este estilo.`);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- corre quando muda o que se ouviu
-  }, [chave, p.estiloManual]);
+    setAnuncio(`Pelo que se disse: ${resumoEstilo(o.estilo, o.evitar).join("; ")}. As peças a trocar, as paredes e o chão já seguem.`);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- corre quando chega uma coisa nova dita
+  }, [chaves.join("|"), p.ditosVistos?.length]);
 
   if (!ouvido && !aOuvir) return null;
   // as últimas três frases (uma frase com duas cores aparece uma vez)
@@ -65,7 +69,7 @@ export function OuvidoDoCliente({ p, setP, ouvido, aOuvir }: { p: Projeto; setP:
     <section aria-labelledby="t-ouvido" className="space-y-4 rounded-2xl border border-primary/30 bg-primary/[0.04] p-5">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 id="t-ouvido" className="flex items-center gap-2 text-[17px] font-semibold tracking-tight">
-          <Ear className="h-5 w-5 text-primary" aria-hidden="true" />Pelo que o cliente disse
+          <Ear className="h-5 w-5 text-primary" aria-hidden="true" />Pelo que se disse na conversa
         </h3>
         {aOuvir && (
           <span className="inline-flex items-center gap-2 rounded-full bg-background px-3 py-1 text-sm text-muted-foreground">
@@ -95,16 +99,16 @@ export function OuvidoDoCliente({ p, setP, ouvido, aOuvir }: { p: Projeto; setP:
             {aplicado ? (
               <span className="inline-flex items-center gap-1.5 text-[15px] text-foreground"><Check className="h-4 w-4 text-success" aria-hidden="true" />Aplicado às cores e às peças a trocar.</span>
             ) : (
-              <button type="button" className={cn(chip(true), "min-h-11")} onClick={() => { setP((x) => comEstilo(x, juntarEstilo(x.estilo, ouvido), true)); setAnuncio("O estilo passou a ser o que o cliente disse."); }}>
-                <Check className="h-4 w-4" aria-hidden="true" />Usar o que o cliente disse
+              <button type="button" className={cn(chip(true), "min-h-11")} onClick={() => { setP((x) => comEstilo(x, juntarEstilo(x.estilo, ouvido), true)); setAnuncio("O estilo passou a ser o que se disse na conversa."); }}>
+                <Check className="h-4 w-4" aria-hidden="true" />Usar o que se disse
               </button>
             )}
-            {aplicado && antesDoAuto.current && !p.estiloManual && (
+            {antesDoAuto.current && (
               <button type="button" className={cn(chip(false), "min-h-11")} onClick={() => {
                 const antes = antesDoAuto.current!;
                 antesDoAuto.current = null;
-                setP({ ...antes, estiloManual: true });
-                setAnuncio("Voltou ao estilo de antes. O que o cliente disser a seguir fica só como sugestão.");
+                setP((x) => ({ ...antes, ditosVistos: x.ditosVistos }));
+                setAnuncio("Voltou ao estilo de antes.");
               }}><Undo2 className="h-4 w-4" aria-hidden="true" />Desfazer</button>
             )}
           </div>

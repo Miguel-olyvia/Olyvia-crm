@@ -40,6 +40,15 @@ describe("o estilo dito na conversa", () => {
     expect(o.estilo.cores).toEqual(["preto"]);
   });
 
+  it("na visita conta também o comercial (é quem segura o telemóvel) e a escolha ditada sem verbo", () => {
+    const o = ouvir([co("Quero uma sanita preta."), co("Torneiras pretas e o móvel em madeira.")])!;
+    expect(o.estilo.porCategoria.sanita).toEqual(["preto"]);
+    expect(o.estilo.porCategoria.torneira).toEqual(["preto"]);
+    expect(o.estilo.porCategoria.movel).toEqual(["madeira"]);
+    expect(ouvir([co("Temos sanitas pretas e brancas."), co("O móvel é branco.")])).toBeNull();
+    expect(ouvir([co("Põe a base de duche preta.")])!.estilo.porCategoria.base).toEqual(["preto"]);
+  });
+
   it("o cliente muda de ideias: ganha o que disse por último", () => {
     const o = ouvir([cl("Quero tudo branco."), cl("Afinal prefiro tudo preto.")])!;
     expect(o.estilo.cores).toEqual(["preto", "branco"]);

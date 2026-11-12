@@ -4,8 +4,8 @@
 // Só lógica, sem React. Lê-se frase a frase:
 //  · a cor dita, e a peça de que se fala perto dela («o móvel em madeira»; «tudo preto» é para tudo);
 //  · «não quero nada preto», «sem branco» → a evitar;
-//  · só o que o cliente quer: frases com vontade («quero», «gostava», «prefiro», «tudo»…). Uma pergunta do comercial («Quer tudo preto?»)
-//    só conta se o cliente a seguir disser que sim.
+//  · só o que se quer: frases com vontade («quero», «gostava», «prefiro», «tudo», «põe»…) ou ditadas («Sanita preta.»), diga-as quem
+//    disser (na visita o comercial repete a escolha em voz alta). Uma pergunta («Quer tudo preto?») só conta com um sim a seguir.
 // O que se disse por último ganha (o cliente muda de ideias a meio da conversa).
 import type { Fala } from "@/emylia/chamadaMotor";
 import { CORES, melhorPara, type Categoria, type Cor, type Estilo } from "./catalogoFake";
@@ -37,7 +37,8 @@ const corDe = (w: string): Cor | null => COR_PALAVRA.find(([rx]) => rx.test(w))?
 const PECA_PALAVRA: [RegExp, Categoria[]][] = [
   [/^(m[oó]veis|m[oó]vel|gavetas?|gaveteiros?)$/, ["movel"]],
   [/^arm[aá]rios?$/, ["movel", "armario"]],
-  [/^(sanitas?|retretes?|loi[cç]as?)$/, ["sanita", "bide"]],
+  [/^(sanitas?|retretes?)$/, ["sanita"]],
+  [/^loi[cç]as?$/, ["sanita", "bide", "banheira"]],
   [/^bid[eé]s?$/, ["bide"]],
   [/^(torneiras?|misturadoras?|monocomandos?)$/, ["torneira"]],
   [/^metais$/, ["torneira", "coluna_duche", "toalheiro"]],
@@ -67,18 +68,27 @@ const SIM = /^\s*(sim|isso|exato|exatamente|claro|pode ser|perfeito|é isso|gost
 
 const palavras = (t: string) => [...t.toLowerCase().matchAll(/[\p{L}\d-]+/gu)].map((m) => m[0]);
 
+/** Uma escolha ditada sem verbo («Sanita preta, torneiras pretas.»): frase curta com peça e cor, sem descrever o que há («está», «é»). */
+const DESCREVE = /^(est[aá]|est[aã]o|é|s[aã]o|era|eram|tem|t[eê]m|tinha|ficou|temos|tenho|h[aá]|existe|existem|vendemos|trabalhamos|costuma|costumam)$/;
+function ditado(frase: string): boolean {
+  const ws = palavras(frase);
+  return ws.length <= 8 && ws.some((w) => pecasDe(w)) && ws.some((w) => corDe(w)) && !ws.some((w) => DESCREVE.test(w));
+}
+
 /** As coisas ditas sobre cores numa conversa (por ordem). */
 export function ditosDaConversa(falas: readonly Fala[], origem: DitoEstilo["origem"]): DitoEstilo[] {
   const out: DitoEstilo[] = [];
   falas.forEach((f, i) => {
     const prox = falas[i + 1];
-    // o comercial só conta quando o cliente lhe diz que sim («Quer tudo preto?» «Sim, tudo.»)
-    const confirmado = f.falante === "comercial" ? !!prox && prox.falante !== "comercial" && SIM.test(prox.texto) : false;
-    if (f.falante === "comercial" && !confirmado) return;
+    // 12/11 (Rúben, na visita: «estou a dizer que quero uma sanita preta mas o Estúdio não se adapta»): conta quem quer que fale. Na
+    // visita, quem segura o telemóvel é o comercial (e o modelo marca-o «comercial»), e é muitas vezes ele que diz a escolha em voz alta
+    // («então fica a sanita preta»). Uma pergunta («Quer tudo preto?») só conta com um sim logo a seguir.
+    const sim = !!prox && SIM.test(prox.texto);
     for (const frase of f.texto.split(/(?<=[.!?;])\s+/)) {
       const pergunta = /\?\s*$/.test(frase);
-      if (pergunta && !confirmado) continue;
-      if (!confirmado && !VONTADE.test(frase.toLowerCase())) continue;
+      if (pergunta && !sim) continue;
+      const confirmado = pergunta && sim;
+      if (!confirmado && !VONTADE.test(frase.toLowerCase()) && !ditado(frase)) continue;
       // a peça e a negação procuram-se na oração (até à vírgula): «tudo preto, menos o móvel, que é em madeira»
       const oracoes = frase.split(/[,:]|\s+(?=(?:mas|menos|exceto|só)\s)/i).map(palavras);
       oracoes.forEach((ws, o) => {
@@ -93,7 +103,7 @@ export function ditosDaConversa(falas: readonly Fala[], origem: DitoEstilo["orig
           let cats: Categoria[] = [], dist = 7;
           ws.forEach((x, k) => { const c = pecasDe(x); if (c && Math.abs(k - j) < dist) { dist = Math.abs(k - j); cats = c; } });
           if (!cats.length && !tudo) for (let a = o - 1; a >= 0 && !cats.length; a--) for (const x of oracoes[a]) { const c = pecasDe(x); if (c) cats = c; }
-          const texto = confirmado ? `${f.texto.trim()} ${prox!.texto.trim()}` : frase.trim();
+          const texto = confirmado ? `${frase.trim()} ${prox!.texto.trim()}` : frase.trim();
           out.push({ cor, cats, evitar, tudo: tudo && !cats.length, frase: texto, inicio: f.inicio, origem });
         });
       });
@@ -101,6 +111,18 @@ export function ditosDaConversa(falas: readonly Fala[], origem: DitoEstilo["orig
   });
   // a mesma cor dita duas vezes na mesma frase conta uma vez
   return out.filter((d, i) => out.findIndex((x) => x.frase === d.frase && x.cor === d.cor && x.cats.join() === d.cats.join() && x.evitar === d.evitar) === i);
+}
+
+/** Uma chave por coisa dita (o mesmo conteúdo dito pela 2.ª vez tem outra chave): a pré-visualização e a frase revista da mesma fala dão a
+ *  mesma chave, por isso não se aplica duas vezes. */
+export function chavesDosDitos(ditos: readonly DitoEstilo[]): string[] {
+  const n = new Map<string, number>();
+  return ditos.map((d) => {
+    const k = `${d.cor}|${d.cats.join("+")}|${d.evitar ? 1 : 0}|${d.tudo ? 1 : 0}`;
+    const i = (n.get(k) ?? 0) + 1;
+    n.set(k, i);
+    return `${k}#${i}`;
+  });
 }
 
 /** O estilo que sai do que se disse: o que se disse por último ganha. */

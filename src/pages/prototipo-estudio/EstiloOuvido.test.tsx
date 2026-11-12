@@ -41,14 +41,24 @@ describe("o Estúdio ouve a conversa e muda o estilo", () => {
     expect(screen.getByText("Aplicado às cores e às peças a trocar.")).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Combinações para o preto" })).toBeInTheDocument();
 
-    // desfazer: volta ao de antes e o que se disser a seguir fica como sugestão
+    // desfazer: volta ao de antes; o que se disser a seguir aplica-se por cima (só o novo)
     fireEvent.click(screen.getByRole("button", { name: "Desfazer" }));
     expect(atual.estilo.cores).toEqual(["branco"]);
     chega(fala(80, "cliente", "E o móvel quero em madeira."));
-    expect(atual.estilo.porCategoria.movel).toBeUndefined();
-    fireEvent.click(screen.getByRole("button", { name: "Usar o que o cliente disse" }));
+    expect(atual.estilo.porCategoria.movel).toEqual(["madeira"]);
+    expect(atual.estilo.cores).toEqual(["branco"]);
+    fireEvent.click(screen.getByRole("button", { name: "Usar o que se disse" }));
     expect(atual.estilo.cores[0]).toBe("preto");
     expect(atual.estilo.porCategoria.movel).toEqual(["madeira"]);
+  });
+
+  it("depois de mexer à mão, o que se diz a seguir muda na mesma (o comercial a falar também conta)", () => {
+    render(<Ecra inicio={{ ...PROJETO_EXEMPLO, negocio: 7, estilo: { cores: ["branco"], porCategoria: {} }, estiloManual: true }} />);
+    chega(fala(30, "comercial", "Quero uma sanita preta."));
+    expect(atual.estilo.porCategoria.sanita).toEqual(["preto"]);
+    // a frase revista da mesma fala não volta a aplicar (o que se mudou à mão a seguir fica)
+    act(() => { vivo.g = { ...vivo.g, falas: [{ ...fala(30, "comercial", "Quero uma sanita preta."), revista: true }] }; vivo.ouvir.forEach((x) => x()); });
+    expect(atual.estilo.porCategoria.sanita).toEqual(["preto"]);
   });
 
   it("uma combinação aplica-se com um toque", () => {
@@ -62,7 +72,7 @@ describe("o Estúdio ouve a conversa e muda o estilo", () => {
   it("a gravação de outro negócio não conta", () => {
     vivo.g = { ...vivo.g, negocio: 99, falas: [fala(5, "cliente", "Quero tudo preto.")] };
     render(<Ecra inicio={{ ...PROJETO_EXEMPLO, negocio: 7, estilo: { cores: ["branco"], porCategoria: {} } }} />);
-    expect(screen.queryByText("Pelo que o cliente disse")).not.toBeInTheDocument();
+    expect(screen.queryByText("Pelo que se disse na conversa")).not.toBeInTheDocument();
     expect(atual.estilo.cores).toEqual(["branco"]);
   });
 });

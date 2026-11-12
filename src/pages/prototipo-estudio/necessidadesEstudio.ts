@@ -54,6 +54,8 @@ export interface Projeto {
   ditosAntes?: import("./estiloDaConversa").DitoEstilo[];
   /** 12/11: o comercial mexeu nas cores à mão; o que o cliente disser a seguir já não as muda sozinho (fica como sugestão). */
   estiloManual?: boolean;
+  /** 12/11: as coisas ditas na conversa que já se aplicaram ao estilo (chavesDosDitos); só as novas se aplicam. */
+  ditosVistos?: string[];
 }
 export interface PorColocar { id: string; tipo: TipoPeca; produto?: string; acompanha?: Partial<Record<Categoria, string>> }
 
