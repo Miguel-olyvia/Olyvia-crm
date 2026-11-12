@@ -182,7 +182,13 @@ describe("o alerta das adendas por disparar, em cima do Estúdio (sem sair dele)
     // disparar: vai ao cliente; o alerta mostra o percurso
     fireEvent.click(within(screen.getByRole("article", { name: `Adenda ${a.n}` })).getByRole("button", { name: "Enviar ao cliente" }));
     expect(a.estado).toBe("enviada");
-    expect(within(screen.getByRole("region", { name: "Adendas da obra" })).getByRole("listitem", { name: `Adenda ${a.n}: À espera do cliente` })).toBeTruthy();
+    const linha = within(screen.getByRole("region", { name: "Adendas da obra" })).getByRole("button", { name: `Adenda ${a.n}: À espera do cliente. Ver o documento` });
+    // tocar na linha abre o documento da adenda por cima; Fechar fecha
+    fireEvent.click(linha);
+    const doc = screen.getByRole("dialog", { name: `Documento da adenda ${a.n}` });
+    expect(within(doc).getAllByText(new RegExp(a.n.replace(/[/]/g, "\/"))).length).toBeGreaterThan(0);
+    fireEvent.click(within(doc).getAllByRole("button", { name: "Fechar" }).at(-1)!);
+    expect(screen.queryByRole("dialog", { name: `Documento da adenda ${a.n}` })).toBeNull();
     expect(p.tasks[mont].dur).toBe(p.tasks[mont].dur); // o plano não mexeu
   });
   it("descartar tira a adenda (nada foi ao cliente) e o imprevisto com custo fica por disparar", () => {

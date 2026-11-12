@@ -3,14 +3,16 @@
 // por disparar (o motivo, a tarefa, as linhas, o total com IVA, os dias, o estado e os botões) e as que já andam, com o percurso até ao
 // pagamento (o cliente aceita, assina, a fatura, paga). Tudo sem sair do Estúdio. O percurso está em quemPaga.ts (percursoAdenda).
 import { useEffect, useState } from "react";
-import { useParamUrl } from "../usarParamUrl";
+import { usePainelUrl, useParamUrl } from "../usarParamUrl";
+import { ContratoDoc, Partilhar, PropostaDoc } from "../DocsCliente";
+import { AcoesAdenda } from "../TrabalhosAMais";
 import { motion } from "framer-motion";
 import { Check, FileText, Pencil, Send, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, type Negocio } from "../motor";
 import type { Ctx } from "../pecas";
-import { adendaBloqueada, diasAdenda, totaisAdenda, totaisLinhas, type Adenda, type LinhaAdenda } from "../adendas";
+import { adendaBloqueada, diasAdenda, estadoAdenda, totaisAdenda, totaisLinhas, type Adenda, type LinhaAdenda } from "../adendas";
 import { podeNeg } from "../permissoes";
 import { useReduzir } from "../movimento";
 import { PASSOS_ADENDA, adendasAAndar, deOndeVem, percursoAdenda, type PercursoAdenda } from "./quemPaga";
@@ -38,7 +40,7 @@ export function AdendasDaObra({ ctx, d, todas }: { ctx: Ctx; d: Negocio; todas?:
   const reduzir = useReduzir();
   const planeia = podeNeg(S.role, "obra.planear");
   // 12/11: a adenda aberta («Ver ou mudar») no endereço (?adenda=AD …), como os outros painéis do Estúdio (só a do alerta, não a do separador Cliente)
-  const [abertaUrl, setAbertaUrl] = useParamUrl<string>("adenda", "", undefined, todas ? false : undefined);
+  const [abertaUrl, setAbertaUrl] = useParamUrl<string>("editar", "", undefined, todas ? false : undefined);
   const aberta = abertaUrl || null;
   const setAberta = (n: string | null) => setAbertaUrl(n ?? "", { substituir: !n });
   const L = todas
@@ -102,26 +104,87 @@ export function AdendasDaObra({ ctx, d, todas }: { ctx: Ctx; d: Negocio; todas?:
 
       {andar.length > 0 && (
         <ul className="space-y-1.5">
-          {andar.map(({ a, p }) => (
-            <li key={a.n} aria-label={`Adenda ${a.n}: ${p.t}`} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1.5 rounded-xl bg-card px-3 py-2 ring-1 ring-border">
-              <span className="min-w-0 flex-1 text-sm">
-                <span className="font-medium">{deOndeVem(ctx.S, a)}</span>
-                <span className="block text-muted-foreground">Adenda {a.n} · {eur(totaisAdenda(a).total)} € com IVA</span>
-              </span>
-              <span className="flex shrink-0 flex-col items-end gap-1">
-                <Percurso p={p} />
-                <span className={cn("text-xs font-medium", p.i === 5 ? "text-success" : p.i < 0 ? "text-muted-foreground" : "text-amber-800 dark:text-amber-300")}>
-                  {p.i === 5 && <Check className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />}{p.t}{p.quem && p.i < 5 && p.i >= 0 ? ` · ${p.quem}` : ""}
-                </span>
-              </span>
-              {planeia && p.acao === "contrato" && <Button type="button" size="sm" variant="outline" className="min-h-9 rounded-full" onClick={() => run(() => A.enviarContratoAdenda(d.id, a.n))}><Send className="mr-1.5 h-4 w-4" aria-hidden="true" />Enviar o contrato</Button>}
-            </li>
-          ))}
+          {andar.map(({ a, p }) => <LinhaACaminho key={a.n} ctx={ctx} d={d} a={a} p={p} planeia={planeia} noEndereco={!todas} />)}
         </ul>
       )}
 
       {editar && <EditarAdenda ctx={ctx} d={d} a={editar} fechar={() => setAberta(null)} />}
     </section>
+  );
+}
+
+/** 12/11 (Rúben: «deve ser clicável para ver o doc»): a adenda que já anda, numa linha que se toca: abre o documento por cima do Estúdio.
+ *  No alerta do topo, o documento aberto vai para o endereço (?adenda=AD …: o «voltar» fecha-o); no separador Cliente fica em memória
+ *  (as duas listas mostram a mesma adenda e só uma pode ter o endereço). */
+function LinhaACaminho({ ctx, d, a, p, planeia, noEndereco }: { ctx: Ctx; d: Negocio; a: Adenda; p: PercursoAdenda; planeia: boolean; noEndereco: boolean }) {
+  const { A, run } = ctx;
+  const [urlAberto, setUrlAberto] = usePainelUrl("adenda", a.n);
+  const [memAberto, setMemAberto] = useState(false);
+  const aberto = noEndereco ? urlAberto : memAberto;
+  const abrir = (v: boolean) => (noEndereco ? setUrlAberto(v) : setMemAberto(v));
+  return (
+    <li className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl bg-card ring-1 ring-border transition-colors hover:bg-muted/50 hover:ring-foreground/30">
+      <button type="button" onClick={() => abrir(true)} aria-label={`Adenda ${a.n}: ${p.t}. Ver o documento`}
+        className="flex min-h-14 min-w-0 flex-1 cursor-pointer flex-wrap items-center justify-between gap-x-3 gap-y-1.5 rounded-xl px-3 py-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        <span className="min-w-0 flex-1 text-sm">
+          <span className="font-medium">{deOndeVem(ctx.S, a)}</span>
+          <span className="block text-muted-foreground">Adenda {a.n} · {eur(totaisAdenda(a).total)} € com IVA <span className="inline-flex items-center gap-0.5 font-medium text-primary"><FileText className="h-3.5 w-3.5" aria-hidden="true" />Ver</span></span>
+        </span>
+        <span className="flex shrink-0 flex-col items-end gap-1">
+          <Percurso p={p} />
+          <span className={cn("text-xs font-medium", p.i === 5 ? "text-success" : p.i < 0 ? "text-muted-foreground" : "text-amber-800 dark:text-amber-300")}>
+            {p.i === 5 && <Check className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />}{p.t}{p.quem && p.i < 5 && p.i >= 0 ? ` · ${p.quem}` : ""}
+          </span>
+        </span>
+      </button>
+      {planeia && p.acao === "contrato" && <Button type="button" size="sm" variant="outline" className="mb-2 mr-3 min-h-9 rounded-full sm:mb-0" onClick={() => run(() => A.enviarContratoAdenda(d.id, a.n))}><Send className="mr-1.5 h-4 w-4" aria-hidden="true" />Enviar o contrato</Button>}
+      {aberto && <DocumentoAdenda ctx={ctx} d={d} a={a} p={p} fechar={() => abrir(false)} />}
+    </li>
+  );
+}
+
+/** O documento da adenda por cima do Estúdio (no telemóvel, em ecrã inteiro): a proposta e, se já houver, o contrato da adenda; por baixo,
+ *  as ações do estado em que está (as dos Trabalhos a mais). */
+function DocumentoAdenda({ ctx, d, a, p, fechar }: { ctx: Ctx; d: Negocio; a: Adenda; p: PercursoAdenda; fechar: () => void }) {
+  const temContrato = a.estado === "assinada" || (a.estado === "aceite" && a.contrato === "enviado");
+  const [qual, setQual] = useState<"proposta" | "contrato">(temContrato ? "contrato" : "proposta");
+  // Esc fecha só o documento (o Estúdio vê o defaultPrevented e fica aberto)
+  useEffect(() => {
+    const tecla = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); fechar(); } };
+    window.addEventListener("keydown", tecla, true);
+    return () => window.removeEventListener("keydown", tecla, true);
+  }, [fechar]);
+  const e = estadoAdenda(a);
+  return (
+    <div className="fixed inset-0 z-[60] flex justify-center bg-black/40 sm:items-center sm:p-6" onClick={fechar}>
+      <div role="dialog" aria-modal="true" aria-label={`Documento da adenda ${a.n}`} onClick={(ev) => ev.stopPropagation()}
+        className="flex h-full w-full max-w-4xl flex-col bg-card shadow-2xl sm:h-auto sm:max-h-[92vh] sm:rounded-2xl">
+        <div className="flex items-start justify-between gap-3 border-b border-border p-4">
+          <div className="min-w-0">
+            <p className="text-xs font-medium text-muted-foreground">Adenda {a.n} · {p.t}</p>
+            <h2 className="text-lg font-semibold">{deOndeVem(ctx.S, a)}</h2>
+          </div>
+          <Button type="button" variant="ghost" className="min-h-10 shrink-0" aria-label="Fechar" onClick={fechar}><X className="h-4 w-4" /></Button>
+        </div>
+        {temContrato && (
+          <div role="tablist" aria-label="O documento" className="flex gap-1 px-4 pt-3">
+            {(["proposta", "contrato"] as const).map((k) => (
+              <button key={k} type="button" role="tab" aria-selected={qual === k} onClick={() => setQual(k)}
+                className={cn("min-h-10 rounded-full px-4 text-sm font-medium", qual === k ? "bg-foreground text-background" : "hover:bg-muted")}>{k === "proposta" ? "A proposta" : "O contrato da adenda"}</button>
+            ))}
+          </div>
+        )}
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+          <Partilhar ctx={ctx} d={d} tipo="adenda" estado={e.t}>
+            {qual === "contrato" && temContrato ? <ContratoDoc S={ctx.S} d={d} a={a} /> : <PropostaDoc S={ctx.S} d={d} a={a} />}
+          </Partilhar>
+          <AcoesAdenda ctx={ctx} d={d} a={a} />
+        </div>
+        <div className="flex justify-end border-t border-border p-3">
+          <Button type="button" variant="outline" size="lg" onClick={fechar}>Fechar</Button>
+        </div>
+      </div>
+    </div>
   );
 }
 

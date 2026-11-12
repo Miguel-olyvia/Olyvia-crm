@@ -47,6 +47,20 @@ describe("o Estúdio da obra no endereço", () => {
     expect(q().get("aba")).toBe("equipa");
     expect(screen.getByRole("tab", { name: /Equipa/ }).getAttribute("aria-selected")).toBe("true");
   });
+  it("a adenda a caminho abre o documento no endereço (?adenda=); o «voltar» fecha-o", async () => {
+    const { d } = montar();
+    // uma adenda do imprevisto do exemplo, já enviada ao cliente
+    fireEvent.click(within(screen.getByRole("article", { name: /^Imprevisto / })).getByRole("button", { name: "Fazer a proposta ao cliente" }));
+    fireEvent.click(within(screen.getByRole("article", { name: /^Imprevisto / })).getByRole("button", { name: "Preparar a adenda" }));
+    const n = d.adendas!.at(-1)!.n;
+    fireEvent.click(within(screen.getByRole("article", { name: `Adenda ${n}` })).getByRole("button", { name: "Enviar ao cliente" }));
+    fireEvent.click(screen.getByRole("button", { name: `Adenda ${n}: À espera do cliente. Ver o documento` }));
+    expect(screen.getByRole("dialog", { name: `Documento da adenda ${n}` })).toBeTruthy();
+    expect(q().get("adenda")).toBe(n);
+    await act(async () => { window.history.back(); await new Promise((r) => setTimeout(r, 30)); });
+    expect(q().get("adenda")).toBeNull();
+    expect(screen.queryByRole("dialog", { name: `Documento da adenda ${n}` })).toBeNull();
+  });
   it("«Voltar ao negócio» tira o separador e o painel do endereço", () => {
     let mexeu: boolean | undefined;
     montar((m) => { mexeu = m; });

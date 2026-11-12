@@ -10,7 +10,7 @@
 //    registar; com custo, a adenda vai logo ao cliente); a atividade (os ajustes ao plano).
 // A lógica está em planoVivo.ts e alertasObra.ts; as mudanças vão pelas ações do motor (A.replanearObra, A.registarImprevisto…).
 import { Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { EnderecoAtivo, usePainelUrl, useParamUrl } from "../usarParamUrl";
+import { EnderecoAtivo, escreverParamUrl, usePainelUrl, useParamUrl } from "../usarParamUrl";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, ArrowLeft, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Flame, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Rocket, RotateCcw, Shuffle, Sparkles, TrendingUp, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -131,7 +131,14 @@ export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: 
   const [aba, setAbaUrl] = useParamUrl<AbaObra>("aba", "plano", ABAS_OBRA, noEndereco ? undefined : false);
   const setAba = (x: AbaObra) => { if (x === aba) return; mexeu.current = true; setAbaUrl(x); };
   // sair do Estúdio: o separador e o painel saem do endereço (não ficam na página do negócio)
-  const sair = () => { if (noEndereco) { setPainelUrl("", { substituir: true }); setAbaUrl("plano", { substituir: true }); } fechar(mexeu.current); };
+  const sair = () => {
+    if (noEndereco) {
+      setPainelUrl("", { substituir: true }); setAbaUrl("plano", { substituir: true });
+      // e o documento ou a adenda aberta (AdendasObra.tsx)
+      for (const n of ["adenda", "editar"]) escreverParamUrl(n, "", true, ativo === "pesquisa" ? "pesquisa" : "hash");
+    }
+    fechar(mexeu.current);
+  };
   const [vista, setVista] = useState<"gantt" | "tecnicos">("gantt");
   const [desfazer, setDesfazer] = useState<{ snap: Retrato; ti: number; n: number } | null>(null);
   useEffect(() => { if (!desfazer) return; const t = setTimeout(() => setDesfazer(null), 7000); return () => clearTimeout(t); }, [desfazer?.n]); // eslint-disable-line react-hooks/exhaustive-deps
