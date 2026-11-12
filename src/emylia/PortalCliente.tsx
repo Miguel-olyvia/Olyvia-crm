@@ -5,7 +5,7 @@
 // · Contrato gerado: aparece no mesmo link, por assinar, com o contrato à vista.
 // · Assinado: o mesmo link mostra o plano da obra (fases e datas, sem custos nem margens).
 // As ações são as do motor, por isso o negócio no protótipo passa de fase como hoje (e o outro separador vê-o pelo storage).
-import { useState, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, Armchair, Check, ChevronRight, ClipboardCheck, Clock, Copy, Eye, FileText, Grid3x3, Hammer, MessageSquareText, PenLine, Plug, Scale, X, XCircle, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NaFrente } from "./NaFrente";
@@ -22,7 +22,10 @@ import { AssinaturaContrato } from "./AssinaturaContrato";
 import { AutoRececaoDoc } from "./AutoRececao";
 import { RelatorioObra } from "./RelatorioObra";
 import { em3, ibanAVista, ibanCurto, ibanValido, metodoDe, metodosDe, referenciaMb, useDadosPagamento, vencimento } from "./pagamentoCliente";
-import { DiarioPortal, NovidadesPortal, TrabalhosDaFase } from "./PortalObra";
+import { TrabalhosDaFase } from "./PortalObra";
+import { HistoricoObraPortal, ProgressoObraPortal } from "./ObraNoPortal";
+import { diaDeHoje, tarefasDoCliente } from "./obraCliente";
+import { negocioParaCliente } from "./real/vistaCliente";
 import { Conversa } from "./ConversaObra";
 import type { FaturaReg } from "./v2/financeiro";
 import { nomeEmpresa } from "./acessosPortal";
@@ -263,8 +266,11 @@ function PagarFatura({ numero, montante, vence, refMb, alvo, titular, verFatura,
 
 /** `previa` (23/10): "Ver como o cliente", aberto pela equipa: tudo à vista, nada se grava (as ações não correm e diz-se porquê).
  *  `outrosPedidos` (23/10): o cliente com vários negócios volta à lista deles (PortalClienteConta.tsx). */
-export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: { ctx: Ctx; d: Negocio; fechar: () => void; previa?: boolean; outrosPedidos?: () => void; real?: PortalReal }) {
+export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real }: { ctx: Ctx; d: Negocio; fechar: () => void; previa?: boolean; outrosPedidos?: () => void; real?: PortalReal }) {
   const { S, A } = ctx;
+  // 12/11: na pré-visualização, o negócio como vai para o cliente (real/vistaCliente.ts): sem custos, notas e histórico internos
+  const dLimpo = useMemo(() => (previa ? negocioParaCliente(d0) : null), [previa, d0]);
+  const d = dLimpo ?? d0;
   const [bloqueou, setBloqueou] = useState(false);
   // na pré-visualização nenhuma ação do cliente chega ao motor (antes a equipa aceitava e assinava por ele, sem rasto de quem foi)
   const run: Ctx["run"] = previa ? () => setBloqueou(true) : ctx.run;
@@ -608,7 +614,8 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
           {p?.estado === "concluída" ? "Concluída. Obrigado pela confiança."
             : p?.estado === "em curso" ? (() => {
                 // o que a equipa está a fazer hoje e quando acaba, numa frase
-                const hoje = [...new Set(p.tasks.filter((t) => t.dia <= p.dia && p.dia < t.dia + t.dur && t.exec?.estado !== "validada").map((t) => t.nome.toLowerCase()))];
+                // 12/11: o dia pelo calendário (o p.dia da vista fica parado até alguém da equipa abrir o negócio)
+                const k = diaDeHoje(p), hoje = [...new Set(tarefasDoCliente(p).filter((t) => t.dia <= k && k < t.dia + t.dur && t.exec?.estado !== "validada").map((t) => t.nome.toLowerCase()))];
                 const fim = rotuloDia(p, Math.max(...p.tasks.map((t) => t.dia + t.dur)) - 1);
                 return `Em curso. ${hoje.length ? `Hoje a equipa está em ${hoje.join(" e ")}. ` : ""}A obra acaba a ${fim}. Em baixo vê as fotografias de cada trabalho.`;
               })()
@@ -622,6 +629,8 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
 
   /** A obra à vista: depois de assinar o contrato, e com a 1.ª parcela de uma adenda por pagar. */
   const naObra = P.estado === "obra" || P.estado === "pagar";
+  /** 12/11: o progresso e o histórico da obra: com o contrato assinado e o plano feito, até ao relatório final. */
+  const obraVisivel = !!p && (!!o?.vendaDireta || o?.contrato === "assinado") && P.estado !== "relatorio";
   // 2/11, portal real: aceitar a adenda pede o código por SMS (no lugar da confirmação da V1)
   if (real && ad && TA && P.estado === "rever" && confirmar === "aceitar") {
     agora = real.assinarComSms({ titulo: `Aceitar a adenda ${ad.n}`, texto: `De ${eur(TA.total)} € com IVA, mais ${diasAdenda(ad.linhas)} ${diasAdenda(ad.linhas) === 1 ? "dia útil" : "dias úteis"} de obra.`,
@@ -744,12 +753,15 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
 
           {agora && <section aria-label="Agora" className="rounded-2xl bg-white p-5 shadow-sm animate-in fade-in-0 slide-in-from-bottom-1 duration-300">{agora}</section>}
 
+          {/* 12/11: a obra a andar (o progresso e as datas) e tudo o que aconteceu, do mais recente para o mais antigo (ObraNoPortal.tsx) */}
+          {/* com o contrato assinado, sempre (também com uma adenda por responder e com o auto por assinar); depois, o relatório conta tudo */}
+          {obraVisivel && p && <ProgressoObraPortal d={d} />}
+          {obraVisivel && <HistoricoObraPortal d={d} />}
           {/* o plano da obra (depois de assinar; 21/10: também com a 1.ª parcela de uma adenda por pagar) */}
           {naObra && fasesObra.length > 0 && p && (
             <section aria-label="O plano da obra" className="rounded-2xl bg-white p-5 shadow-sm">
               <h2 className="text-lg font-semibold tracking-tight">O plano, fase a fase</h2>
-              {/* 21/10: o progresso, os avisos de ajustes e, em cada trabalho, as fotografias e as notas dos técnicos */}
-              <div className="mt-3"><NovidadesPortal d={d} p={p} /></div>
+              {/* 21/10: em cada trabalho, as fotografias e as notas dos técnicos (12/11: o progresso e os avisos passaram para cima) */}
               <ol className="mt-4">
                 {fasesObra.map(({ f, ts, i0, i1, estado }, k) => {
                   const Ic = ICONE_FASE[f] ?? Hammer, ultima = k === fasesObra.length - 1;
@@ -775,7 +787,6 @@ export function PortalCliente({ ctx, d, fechar, previa, outrosPedidos, real }: {
               {d.obra.ec && <MateriaisPortal d={d} />}
             </section>
           )}
-          {naObra && p && (p.estado === "em curso" || p.estado === "concluída") && <DiarioPortal p={p} />}
           {/* 21/10: a conversa com a equipa da obra (o gestor responde na página da obra) */}
           {real ? (
             <section aria-label="Fale com a equipa" className="space-y-2">

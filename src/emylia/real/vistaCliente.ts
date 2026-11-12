@@ -9,6 +9,10 @@
 //   os avisos aos técnicos, o plano antes dos ajustes, o diário de horas e de correções, e o estado da conta do portal.
 // · Fica: o que os documentos e o portal mostram (preços de venda, quantidades, prestações, faturas, plano e datas, fotografias e
 //   notas dos técnicos, o auto e o relatório). As horas previstas das tarefas ficam, porque o progresso da obra é pesado por elas.
+// · 12/11 (o histórico da obra no portal, obraCliente.ts): do histórico do negócio só vão as linhas que o cliente pode ler
+//   (HIST_CLIENTE, com o texto limpo); do diário de obra, só as fotografias (as ocorrências, as notas e os marcos são da equipa);
+//   dos ajustes ao plano, só os avisos dados ao cliente (sem quem paga, o custo nem o motivo interno); os imprevistos, os problemas,
+//   a segurança, as encomendas de ajuste, as pausas e a confirmação do fim pelo gestor não vão.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CustoCongelado, Estado, LinhaOrc, MatTarefa, Negocio, Servico, Tarefa } from "../motor";
 import type { Adenda, LinhaAdenda } from "../adendas";
@@ -18,6 +22,7 @@ import { nifEmpresa, nomeEmpresa, nomeFiscalEmpresa } from "../acessosPortal";
 import { RESPONSAVEL_OBRA } from "../obraOps";
 import { lerInventario } from "../inventario/loja";
 import { resumoEcNegocio, type PoResumoNeg, type ResumoEcNeg } from "../inventario/ponteNegocios";
+import { historicoParaCliente } from "../obraCliente";
 
 export const VERSAO_VISTA = 1;
 
@@ -72,7 +77,7 @@ function limparTarefa(t: Tarefa): Tarefa {
     ...(encomendado ? { encomendado: encomendado.map(limparMatTarefa) } : {}),
     ...(exec ? {
       exec: (() => {
-        const { motivo: _m, ch: _c, envios, ...x } = exec;
+        const { motivo: _m, ch: _c, pausa: _p, envios, ...x } = exec;
         return { ...x, horas: 0, ...(envios ? { envios: envios.filter((e) => e.k !== "correcao").map(limparEnvio) } : {}) };
       })(),
     } : {}),
@@ -83,10 +88,10 @@ function limparTarefa(t: Tarefa): Tarefa {
 const INTERNO = /margem|custo|lucro|€\s*\/\s*h|aprova(?:ç|c)[aã]o da dire|dire(?:ç|c)[aã]o aprovou|jur[ií]dico/i;
 
 /** O negócio como o cliente o pode receber. */
-export function negocioParaCliente(d0: Negocio): Negocio {
+export function negocioParaCliente(d0: Negocio, hoje = new Date()): Negocio {
   const d = structuredClone(d0);
   delete d.acesso; delete d.valida; delete d.sug;
-  d.hist = d.hist.filter((e) => !INTERNO.test(e.t));
+  d.hist = historicoParaCliente(d.hist, hoje).filter((e) => !INTERNO.test(e.t));
   if (d.orc) {
     const o = d.orc;
     o.linhas = o.linhas.map(limparLinhaOrc);
@@ -101,9 +106,12 @@ export function negocioParaCliente(d0: Negocio): Negocio {
   ob.real = null;
   ob.aprendido = false;
   if (ob.realFases) ob.realFases = { fases: [], diasPrev: ob.realFases.diasPrev, diasReal: ob.realFases.diasReal, custoPrev: 0, custoReal: 0, preco: 0 };
-  if (ob.diario) ob.diario = ob.diario.filter((e) => e.k !== "horas" && e.k !== "correcao");
+  if (ob.diario) ob.diario = ob.diario.filter((e) => e.k === "foto");
+  if (ob.alteracoes) ob.alteracoes = ob.alteracoes.filter((a) => a.cliente && a.avisoCliente)
+    .map((a) => ({ q: a.q, dia: a.dia, quem: "", t: "", motivo: "", fimAntes: a.fimAntes, fimDepois: a.fimDepois, cliente: true, avisoCliente: a.avisoCliente }));
+  delete ob.imprevistos; delete ob.problemas; delete ob.seg; delete ob.ecsAjuste;
   if (ob.plano) {
-    const { base: _b, avisos: _a, ...p } = ob.plano;
+    const { base: _b, avisos: _a, fimAceite: _f, ...p } = ob.plano;
     ob.plano = { ...p, tasks: p.tasks.map(limparTarefa) };
   }
   // a conversa real está na base (negocio_mensagens): a do protótipo não vai

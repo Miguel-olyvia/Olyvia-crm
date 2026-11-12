@@ -56,9 +56,11 @@ describe("vista do cliente: o que sai do CRM", () => {
     expect(t.exec!.envios!.map((e) => e.k)).toEqual(["registo"]);
     expect(t.exec!.envios![0].horas).toBeUndefined();
     expect(c.obra.plano!.avisos).toBeUndefined();
-    expect(c.obra.diario!.map((e) => e.k)).toEqual(["ocorrencia"]);
+    // 12/11: do diário só vão as fotografias (as ocorrências e as notas são da equipa)
+    expect(c.obra.diario!.map((e) => e.k)).toEqual([]);
     expect(c.hist.some((e) => /margem/i.test(e.t))).toBe(false);
-    expect(c.hist.some((e) => e.t === "Proposta enviada ao cliente")).toBe(true);
+    // 12/11: do histórico só vão as linhas da lista do cliente (obraCliente.ts: HIST_CLIENTE)
+    expect(c.hist.some((e) => e.t === "Proposta enviada ao cliente")).toBe(false);
     for (const s of Object.values(v.svc)) expect([s.eh, s.eq, s.cons]).toEqual([0, 0, 0]);
     const json = JSON.stringify(v);
     expect(json).not.toMatch(/Fornecedor X|levar o andaime|mal acabado|refazer o remate|aviso interno|"custoReal":999/);
