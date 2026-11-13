@@ -14,6 +14,7 @@ import {
 import { BTN, BTN_PRIMARIO, CAMPO, INP, eur } from "./estilosPainel";
 import { CATEGORIAS_FAMILIA, variantesDe, type CategoriaFam } from "./familias";
 import type { TipoEspaco } from "./modelo";
+import { filtrosIniciais, idsEmFamilias, type FiltrosCatalogo } from "./filtrosCatalogo";
 import { PassoAtribuir, PassoEscolher, type CatalogoLido } from "./PassosCatalogo";
 import { useCatalogo } from "../v2/catalogoStore";
 
@@ -45,11 +46,13 @@ export function PainelConfigurador({ familias, onFamilias, catalogo }: PainelCon
   const [escolha, setEscolha] = useState<{ med?: string; acab?: string }>({});
   const [escolhidos, setEscolhidos] = useState<string[]>([]);
   const [atribuicoes, setAtribuicoes] = useState<Record<string, AtribuicaoProduto>>({});
+  const [filtros, setFiltros] = useState<FiltrosCatalogo>(filtrosIniciais);
   const ultimaSugestao = useRef<{ nome: string; marca: string; categoria: CategoriaFam; tipo: FamiliaCfg["tipo"] } | null>(null);
   const tituloRef = useRef<HTMLHeadingElement>(null), primeiraVez = useRef(true);
   const lido = useCatalogo(), cat: CatalogoLido = catalogo ?? lido;
   const porId = useMemo(() => new Map(cat.produtos.map((p) => [p.id, p] as const)), [cat.produtos]);
   const produtosEscolhidos = useMemo(() => escolhidos.flatMap((id) => { const p = porId.get(id); return p ? [p] : []; }), [escolhidos, porId]);
+  const ocupados = useMemo(() => idsEmFamilias(familias, original), [familias, original]);
   const velares = useMemo(() => cat.produtos.filter((p) => ehVelar(p.n)), [cat.produtos]);
   const derivado = useMemo(
     () => (base ? familiaDeProdutos(base, produtosEscolhidos.map((p) => refDoProduto(p)), produtosEscolhidos.flatMap((p) => (atribuicoes[p.id] ? [atribuicoes[p.id]] : []))) : null),
@@ -65,7 +68,7 @@ export function PainelConfigurador({ familias, onFamilias, catalogo }: PainelCon
   const abrir = (f: FamiliaCfg, idOriginal: string | null, atribs: readonly AtribuicaoProduto[]) => {
     const validas = atribs.filter((a) => porId.has(a.produtoId));
     ultimaSugestao.current = null;
-    setBase(f); setOriginal(idOriginal); setPasso(PASSO_ESCOLHER); setEscolha({});
+    setBase(f); setOriginal(idOriginal); setPasso(PASSO_ESCOLHER); setEscolha({}); setFiltros(filtrosIniciais());
     setEscolhidos(validas.map((a) => a.produtoId)); setAtribuicoes(Object.fromEntries(validas.map((a) => [a.produtoId, a] as const)));
   };
   const abrirNova = () => abrir(criarFamiliaVazia(), null, []);
@@ -78,6 +81,12 @@ export function PainelConfigurador({ familias, onFamilias, catalogo }: PainelCon
     if (!p) return;
     setEscolhidos((l) => (l.includes(id) ? l.filter((x) => x !== id) : [...l, id]));
     setAtribuicoes((a) => (a[id] ? a : { ...a, [id]: atribuicaoInicial(p, cat.arvore) }));
+  };
+  /** «Selecionar os N resultados»: junta de uma vez os que ainda não estão escolhidos (a ordem da escolha mantém-se). */
+  const selecionar = (ids: readonly string[]) => {
+    const novos = ids.flatMap((id) => { const p = porId.get(id); return p ? [p] : []; });
+    setEscolhidos((l) => [...l, ...novos.map((p) => p.id).filter((id) => !l.includes(id))]);
+    setAtribuicoes((a) => ({ ...Object.fromEntries(novos.map((p) => [p.id, atribuicaoInicial(p, cat.arvore)] as const)), ...a }));
   };
   const atribuir = (id: string, patch: Partial<AtribuicaoProduto>) => setAtribuicoes((a) => (a[id] ? { ...a, [id]: { ...a[id], ...patch } } : a));
   const acrescentarAtributo = (nome: string) => setBase((b) => (b ? { ...b, atributos: [...(b.atributos ?? []), nome] } : b));
@@ -116,25 +125,42 @@ export function PainelConfigurador({ familias, onFamilias, catalogo }: PainelCon
         {aviso}
         <p className="text-sm text-muted-foreground">Uma família junta produtos que já existem no catálogo e são iguais, mudando só nos atributos (medida, cor, nº de cubas, material…). Escolha os produtos e diga o valor de cada atributo em cada um: o SKU e o preço de cada variante vêm do produto. Depois de guardada, a família aparece na barra de produtos, na categoria que escolheu.</p>
         {familias.length === 0
-          ? <p role="status" className="text-[15px]">Ainda sem famílias configuradas.</p>
+          ? (
+            <div className="grid gap-2 rounded-xl border border-dashed border-border bg-card p-4">
+              <p role="status" className="text-[15px] font-semibold">Ainda sem famílias configuradas.</p>
+              <p className="text-sm text-muted-foreground">Comece por juntar os produtos do catálogo que são iguais e só mudam nos atributos.</p>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className={BTN_PRIMARIO} onClick={abrirNova}>Nova família (juntar produtos do catálogo)</button>
+                {velares.length >= 2 && <button type="button" className={BTN} onClick={abrirExemploVelar}>Exemplo: agrupar as lava-loiças Velar do catálogo</button>}
+              </div>
+            </div>
+          )
           : (
-            <ul aria-label="Famílias configuradas" className="grid gap-2">
-              {familias.map((f) => {
-                const n = variantesDe(paraFamilia(f)).length;
-                return (
-                  <li key={f.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3">
-                    <div className="min-w-0 flex-1"><p className="break-words text-[15px] font-semibold">{f.nome}</p><p className="text-sm text-muted-foreground">{f.marca || "Sem marca"} · {CATEGORIAS_FAMILIA.find((c) => c.id === f.categoria)?.rotulo} · {n} {n === 1 ? "variante" : "variantes"}</p></div>
-                    <button type="button" className={BTN} aria-label={`Editar ${f.nome}`} onClick={() => abrir(f, f.id, atribuicoesDaFamilia(f))}>Editar</button>
-                    <button type="button" className={BTN} aria-label={`Remover ${f.nome}`} onClick={() => onFamilias(familias.filter((x) => x.id !== f.id))}>Remover</button>
-                  </li>
-                );
-              })}
-            </ul>
+            <>
+              <ul aria-label="Famílias configuradas" className="grid gap-2">
+                {familias.map((f) => {
+                  const n = variantesDe(paraFamilia(f)).length;
+                  return (
+                    <li key={f.id} className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="break-words text-base font-semibold">{f.nome}</p>
+                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium">{`${n} ${n === 1 ? "produto" : "produtos"}`}</span>
+                        </div>
+                        <p className="text-sm text-muted-foreground">{f.marca || "Sem marca"} · {CATEGORIAS_FAMILIA.find((c) => c.id === f.categoria)?.rotulo} · {n} {n === 1 ? "variante" : "variantes"}</p>
+                      </div>
+                      <button type="button" className={`${BTN} cursor-pointer`} aria-label={`Editar ${f.nome}`} onClick={() => abrir(f, f.id, atribuicoesDaFamilia(f))}>Editar</button>
+                      <button type="button" className={`${BTN} cursor-pointer`} aria-label={`Remover ${f.nome}`} onClick={() => onFamilias(familias.filter((x) => x.id !== f.id))}>Remover</button>
+                    </li>
+                  );
+                })}
+              </ul>
+              <div className="flex flex-wrap gap-2">
+                <button type="button" className={BTN_PRIMARIO} onClick={abrirNova}>Nova família (juntar produtos do catálogo)</button>
+                {velares.length >= 2 && <button type="button" className={BTN} onClick={abrirExemploVelar}>Exemplo: agrupar as lava-loiças Velar do catálogo</button>}
+              </div>
+            </>
           )}
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className={BTN_PRIMARIO} onClick={abrirNova}>Nova família (juntar produtos do catálogo)</button>
-          {velares.length >= 2 && <button type="button" className={BTN} onClick={abrirExemploVelar}>Exemplo: agrupar as lava-loiças Velar do catálogo</button>}
-        </div>
       </section>
     );
   }
@@ -187,7 +213,9 @@ export function PainelConfigurador({ familias, onFamilias, catalogo }: PainelCon
 
       <div className="space-y-3 rounded-xl border border-border bg-card p-3">
         <h3 ref={tituloRef} tabIndex={-1} className="text-[15px] font-semibold outline-none">{TITULOS[passo - 1]}</h3>
-        {passo === PASSO_ESCOLHER && <PassoEscolher catalogo={cat} escolhidos={escolhidos} onAlternar={alternar} onLimpar={() => setEscolhidos([])} />}
+        {passo === PASSO_ESCOLHER && (
+          <PassoEscolher catalogo={cat} escolhidos={escolhidos} ocupados={ocupados} filtros={filtros} onFiltros={setFiltros} onAlternar={alternar} onSelecionar={selecionar} onLimpar={() => setEscolhidos([])} />
+        )}
         {passo === PASSO_ATRIBUIR && (
           <>
             <Erros erros={doPasso.map((x) => x.msg).filter((m) => !(derivado?.conflitos ?? []).includes(m))} />
@@ -197,6 +225,7 @@ export function PainelConfigurador({ familias, onFamilias, catalogo }: PainelCon
         )}
         {passo === TOTAL && (
           <>
+            <Erros erros={todos.map((x) => x.msg)} />
             <PassoFamilia f={rascunho} onMudar={mudar} />
             <PassoResumo f={rascunho} erros={todos.map((x) => x.msg)} escolha={escolha} onEscolha={setEscolha} />
           </>
@@ -260,20 +289,19 @@ function PassoFamilia({ f, onMudar }: { f: FamiliaCfg; onMudar: (f: FamiliaCfg) 
 }
 
 function PassoResumo({ f, erros, escolha, onEscolha }: { f: FamiliaCfg; erros: readonly string[]; escolha: { med?: string; acab?: string }; onEscolha: (e: { med?: string; acab?: string }) => void }) {
-  const linhas = linhasDeVariantes(f), resumo = resumoDeProdutos(f), extras = f.atributos ?? [], cel = "px-2 py-1.5";
+  const linhas = linhasDeVariantes(f), resumo = resumoDeProdutos(f), extras = f.atributos ?? [], cel = "px-2 py-1.5", cabecalho = `sticky top-0 bg-muted ${cel}`;
   return (
     <div className="grid gap-3">
-      <Erros erros={erros} />
       <p className="text-[15px] font-semibold">{resumo.texto}</p>
       <p className="text-sm text-muted-foreground">Cada linha é um produto do catálogo, com os seus valores em cada atributo. O SKU e o preço vêm do produto e só se leem. Para mudar uma linha, volte ao passo anterior.</p>
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="max-h-80 overflow-x-auto overflow-y-auto rounded-lg border border-border">
         <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
           <caption className="px-2 py-1 text-left text-sm font-medium">Variantes geradas</caption>
           <thead>
-            <tr className="border-y border-border bg-muted/40">
-              <th scope="col" className={cel}>Produto</th><th scope="col" className={cel}>Medida</th><th scope="col" className={cel}>Cor</th>
-              {extras.map((x) => <th key={x} scope="col" className={cel}>{x}</th>)}
-              <th scope="col" className={cel}>SKU</th><th scope="col" className={cel}>Preço</th><th scope="col" className={cel}>3D do fabricante</th>
+            <tr className="border-y border-border">
+              <th scope="col" className={cabecalho}>Produto</th><th scope="col" className={cabecalho}>Medida</th><th scope="col" className={cabecalho}>Cor</th>
+              {extras.map((x) => <th key={x} scope="col" className={cabecalho}>{x}</th>)}
+              <th scope="col" className={cabecalho}>SKU</th><th scope="col" className={cabecalho}>Preço</th><th scope="col" className={cabecalho}>3D do fabricante</th>
             </tr>
           </thead>
           <tbody>

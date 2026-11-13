@@ -214,6 +214,13 @@ function acabamentoNoTexto(texto: string): { a: AcabConhecido; achado: string } 
   for (const a of ACABAMENTOS_CONHECIDOS) for (const m of t.matchAll(a.re)) if (!melhor || m.index > melhor.i) melhor = { a, achado: texto.slice(m.index, m.index + m[0].length), i: m.index };
   return melhor;
 }
+/** O cinzento neutro dos acabamentos que o protótipo não conhece. */
+export const COR_NEUTRA = "#b7b9ba";
+/** A cor (e o brilho) DERIVADOS do acabamento de um produto do catálogo: a cor não se escolhe, vem do nome do acabamento. `conhecido` = o nome é um acabamento que o protótipo conhece. */
+export function corDoAcabamento(nome: string): { cor: string; metalness: number; roughness: number; conhecido: boolean } {
+  const achado = nome.trim() ? acabamentoNoTexto(nome) : undefined;
+  return achado ? { cor: achado.a.cor, metalness: achado.a.metalness, roughness: achado.a.roughness, conhecido: true } : { cor: COR_NEUTRA, metalness: 0.5, roughness: 0.4, conhecido: false };
+}
 const formatoNome = (s: string): string => (s === s.toUpperCase() || s === s.toLowerCase() ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : s);
 const iniciais = (s: string): string => { const p = s.trim().split(/\s+/).filter(Boolean); return (p.length > 1 ? p.map((x) => x[0]).join("") : (p[0] ?? "").slice(0, 2)).toUpperCase(); };
 /** O pedaço depois do último « - » do nome, se parece um acabamento (sem números, até 3 palavras, sem «cuba»). */
@@ -299,7 +306,7 @@ export function ficheiroSugerido(tipo: TipoMockup, nome: string, palpite: Pick<P
   return melhor ? chaveFicheiro(melhor.x.familia, melhor.x.modelo, melhor.x.acab) : "";
 }
 
-/** O que o utilizador atribui a cada produto escolhido: a medida, o acabamento/cor, os atributos extra (`extras`: nome do atributo → valor) e, se quiser, o GLB do fabricante. */
+/** O que o utilizador atribui a cada produto escolhido: a medida, o acabamento (a `cor` é DERIVADA dele por `corDoAcabamento`, nunca escrita à mão), os atributos extra (`extras`: nome do atributo → valor) e, se quiser, o GLB do fabricante. */
 export interface AtribuicaoProduto { produtoId: string; medida: string; dim: [number, number, number]; acabamento: string; cor: string; codigo: string; metalness?: number; roughness?: number; glb?: string; extras?: Record<string, string> }
 
 /** Os nomes que um atributo extra não pode ter (já existem como atributos de cada produto). */
@@ -335,7 +342,7 @@ export function familiaDeProdutos(base: FamiliaCfg, refs: readonly ProdutoRef[],
     let m = medidas.find((x) => norm(x.rotulo) === norm(rotulo));
     if (!m) { m = { id: `m${medidas.length + 1}`, rotulo, ref: r.sku?.trim() || r.id, dim: [...a.dim], preco: 0 }; medidas.push(m); }
     let c = acabamentos.find((x) => norm(x.nome) === norm(nomeAcab));
-    if (!c) { c = { id: `a${acabamentos.length + 1}`, nome: nomeAcab, cor: a.cor, metalness: a.metalness ?? 0.5, roughness: a.roughness ?? 0.4, codigo: a.codigo.trim() || `A${acabamentos.length + 1}` }; acabamentos.push(c); }
+    if (!c) { const d = corDoAcabamento(nomeAcab); c = { id: `a${acabamentos.length + 1}`, nome: nomeAcab, cor: d.cor, metalness: d.conhecido ? d.metalness : a.metalness ?? d.metalness, roughness: d.conhecido ? d.roughness : a.roughness ?? d.roughness, codigo: a.codigo.trim() || `A${acabamentos.length + 1}` }; acabamentos.push(c); }
     const k = celulaKey(m.id, c.id);
     if (ocupado.has(k)) {
       const todos = [`Medida: ${medidaBase}`, ...nomesExtra.map((n) => `${n}: ${valores[n] ?? "—"}`), `Cor: ${c.nome}`].join("; ");

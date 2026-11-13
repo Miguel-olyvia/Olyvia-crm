@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { FAMILIAS, acabamentosDaMedida, familiaPorId, familiasDaCategoria, modeloDaFamilia, resolverVariante, temGlbDoFabricante, variantesDe } from "./familias";
 import { registarFamilias, todasAsFamilias } from "./familias";
 import {
-  ALVO_PROTO, TIPOS_DA_CATEGORIA, atribuicoesDaFamilia, categoriaSugerida, celulaKey, criarFamiliaVazia, erroNomeAtributo, familiaDeProdutos, ficheiroSugerido, ficheirosCompativeis,
+  ALVO_PROTO, COR_NEUTRA, TIPOS_DA_CATEGORIA, atribuicoesDaFamilia, categoriaSugerida, celulaKey, corDoAcabamento, criarFamiliaVazia, erroNomeAtributo, familiaDeProdutos, ficheiroSugerido, ficheirosCompativeis,
   linhasDeVariantes, palpiteDoProduto, paraFamilia, refDoProduto, resumoDeProdutos, rotuloDaMedida, skuDaCelula, sugerirFamilia, validar,
   type AtribuicaoProduto, type FamiliaCfg, type ProdutoRef,
 } from "./configurador";
@@ -428,5 +428,27 @@ describe("atributos extra: juntam-se ao rótulo da medida", () => {
     const refeita = familiaDeProdutos(nova(["Nº de cubas"]), refs, volta).familia;
     expect(refeita.medidas.map((m) => m.rotulo)).toEqual(f.medidas.map((m) => m.rotulo));
     expect(Object.keys(refeita.celulas)).toEqual(Object.keys(f.celulas));
+  });
+});
+
+describe("corDoAcabamento: a cor deriva do acabamento do produto (não se escolhe)", () => {
+  it("o nome do acabamento dá a cor: Cobre, Gold/Oro, Gunmetal, Cromo, Preto", () => {
+    expect(corDoAcabamento("Cobre")).toMatchObject({ cor: "#bc825b", conhecido: true });
+    expect(corDoAcabamento("Gold").cor).toBe(corDoAcabamento("Oro").cor);
+    expect(corDoAcabamento("PVD Gold").conhecido).toBe(true);
+    expect(corDoAcabamento("Gunmetal").cor).toBe("#62605e");
+    expect(corDoAcabamento("Cromo").cor).toBe("#d9dde0");
+    expect(corDoAcabamento("Preto").cor).toBe("#151617");
+    expect(corDoAcabamento("  COBRE  ").cor).toBe("#bc825b");
+  });
+  it("um acabamento desconhecido (ou vazio) dá o cinzento neutro e não é «conhecido»", () => {
+    for (const n of ["Pedra bege", "", "   "]) expect(corDoAcabamento(n)).toMatchObject({ cor: COR_NEUTRA, conhecido: false });
+  });
+  it("a cor da família sai do nome do acabamento: dois produtos com o mesmo acabamento têm a mesma cor, mesmo que a atribuição traga outra", () => {
+    const base: FamiliaCfg = { ...criarFamiliaVazia(), id: "cfg:x", nome: "X", acabamentos: [], medidas: [], celulas: {} };
+    const refs: ProdutoRef[] = [1, 2, 3].map((i) => ({ id: `p${i}`, n: `Produto ${i}`, sku: `S${i}`, preco: 100, semPvp: false }));
+    const atr = (id: string, medida: string, acabamento: string, cor: string): AtribuicaoProduto => ({ produtoId: id, medida, dim: [50, 44, 20], acabamento, cor, codigo: "XX" });
+    const { familia } = familiaDeProdutos(base, refs, [atr("p1", "40 cm", "Cobre", "#123456"), atr("p2", "50 cm", "cobre", "#abcdef"), atr("p3", "50 cm", "Pedra bege", "#ff0000")]);
+    expect(familia.acabamentos.map((a) => [a.nome, a.cor])).toEqual([["Cobre", "#bc825b"], ["Pedra bege", COR_NEUTRA]]);
   });
 });

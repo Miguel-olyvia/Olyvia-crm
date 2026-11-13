@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { Produto } from "../v2/catalogoModelo";
+import type { No, Produto } from "../v2/catalogoModelo";
 import { PainelConfigurador } from "./PainelConfigurador";
 import { linhasDeVariantes, type FamiliaCfg } from "./configurador";
 
@@ -385,5 +385,238 @@ describe("PainelConfigurador: 400 px", () => {
     escrever("Nº de cubas do produto 1", "1 cuba"); escrever("Nº de cubas do produto 2", "2 cubas"); escrever("Nº de cubas do produto 3", "2 cubas");
     ir(1);
     expect(tabela().closest("div")).toHaveClass("overflow-x-auto");
+  });
+});
+
+/* ------------------------------------------------------------------ passo «Escolher produtos»: filtros, seleção em massa e bandeja */
+const ARVORE: No[] = [{ id: "o1", n: "Canalização", pai: null }, { id: "n1", n: "Lava-loiças", pai: "o1" }, { id: "n2", n: "Torneiras", pai: "o1" }];
+const TOTAL_PRODUTOS = CATALOGO.produtos.length;
+const resultados = () => screen.getByRole("status", { name: "Resultados" });
+const listaProdutos = () => screen.getByRole("list", { name: "Produtos do catálogo" });
+const marcar = (nome: string | RegExp) => fireEvent.click(screen.getByRole("checkbox", { name: nome }));
+const pesquisar = (v: string) => fireEvent.change(screen.getByLabelText("Procurar produtos do catálogo"), { target: { value: v } });
+const escolhidosTexto = () => screen.getByRole("status", { name: "Produtos escolhidos" }).textContent;
+const comArvore = () => ({
+  produtos: [produto("k1", "Lava-loiça K1", 100, { no: "n1", marca: "Alfa" }), produto("k2", "Lava-loiça K2", 100, { no: "n1", marca: "Beta" }), produto("k3", "Torneira K3", 100, { no: "n2", marca: "Alfa" }), produto("k4", "Torneira K4 sem preço", undefined, { no: "n2", marca: "Beta", custo: 0 })],
+  arvore: ARVORE,
+});
+
+describe("PassoEscolher: filtros", () => {
+  it("«N de M produtos» começa com todos; marcar uma marca filtra a lista e actualiza a contagem; as contagens de marca vêm no rótulo", () => {
+    abrirNova();
+    expect(resultados()).toHaveTextContent(`${TOTAL_PRODUTOS} de ${TOTAL_PRODUTOS} produtos`);
+    expect(screen.getByRole("checkbox", { name: "Roca (1)" })).toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: `FRASA (${TOTAL_PRODUTOS - 2})` })).toBeInTheDocument();
+    marcar("Roca (1)");
+    expect(resultados()).toHaveTextContent(`1 de ${TOTAL_PRODUTOS} produtos`);
+    expect(within(listaProdutos()).getAllByRole("checkbox")).toHaveLength(1);
+    expect(screen.getByRole("checkbox", { name: "Roca (1)" })).toBeChecked();
+  });
+  it("as contagens das marcas acompanham a pesquisa (facetas): só ficam as marcas com resultados", () => {
+    abrirNova();
+    pesquisar("lody");
+    expect(screen.getByRole("checkbox", { name: "FRASA (9)" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "Roca (1)" })).not.toBeInTheDocument();
+    expect(resultados()).toHaveTextContent(`9 de ${TOTAL_PRODUTOS} produtos`);
+  });
+  it("cada filtro ativo é um chip removível com aria-label «Remover filtro Marca: X»; «Limpar filtros» tira todos", () => {
+    abrirNova();
+    marcar("Roca (1)");
+    const chips = screen.getByRole("list", { name: "Filtros ativos" });
+    expect(within(chips).getByText("Marca: Roca")).toBeInTheDocument();
+    clicar("Remover filtro Marca: Roca");
+    expect(resultados()).toHaveTextContent(`${TOTAL_PRODUTOS} de ${TOTAL_PRODUTOS} produtos`);
+    expect(screen.queryByRole("list", { name: "Filtros ativos" })).not.toBeInTheDocument();
+    marcar("Roca (1)"); pesquisar("sanita");
+    clicar("Limpar filtros");
+    expect(resultados()).toHaveTextContent(`${TOTAL_PRODUTOS} de ${TOTAL_PRODUTOS} produtos`);
+    expect(screen.getByLabelText("Procurar produtos do catálogo")).toHaveValue("");
+    expect(screen.queryByRole("button", { name: "Limpar filtros" })).not.toBeInTheDocument();
+  });
+  it("sem resultados: diz o que está ativo e oferece «Remover filtro X» e «Limpar filtros» (não um ecrã vazio)", () => {
+    abrirNova();
+    marcar("Roca (1)"); pesquisar("lody");
+    expect(screen.getByText(/Nenhum produto do catálogo corresponde a «lody» com os filtros ativos/)).toBeInTheDocument();
+    expect(screen.queryByRole("list", { name: "Produtos do catálogo" })).not.toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Remover filtro Marca: Roca" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Remover filtro Pesquisa: lody" })).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: "Limpar filtros" })).toHaveLength(1);
+    clicar("Remover filtro Marca: Roca");
+    expect(within(listaProdutos()).getAllByRole("checkbox")).toHaveLength(9);
+  });
+  it("«Limpar filtros» no estado vazio devolve a lista toda", () => {
+    abrirNova();
+    marcar("Roca (1)"); pesquisar("lody");
+    clicar("Limpar filtros");
+    expect(resultados()).toHaveTextContent(`${TOTAL_PRODUTOS} de ${TOTAL_PRODUTOS} produtos`);
+  });
+  it("categoria: o ramo do catálogo (ofício › sub) filtra, com contagem, e combina com a marca", () => {
+    abrirNova(comArvore());
+    expect(screen.getByRole("checkbox", { name: "Canalização › Lava-loiças (2)" })).toBeInTheDocument();
+    marcar("Canalização › Torneiras (2)");
+    expect(resultados()).toHaveTextContent("2 de 4 produtos");
+    marcar("Alfa (1)");
+    expect(resultados()).toHaveTextContent("1 de 4 produtos");
+    expect(screen.getByRole("checkbox", { name: "Canalização › Lava-loiças (1)" })).toBeInTheDocument();
+    expect(screen.getByRole("list", { name: "Filtros ativos" })).toHaveTextContent("Categoria: Canalização › Torneiras");
+  });
+  it("«Só com preço de venda» tira os produtos sem preço", () => {
+    abrirNova(comArvore());
+    marcar("Só com preço de venda");
+    expect(resultados()).toHaveTextContent("3 de 4 produtos");
+    expect(screen.queryByRole("checkbox", { name: /Torneira K4/ })).not.toBeInTheDocument();
+  });
+  it("«Ainda sem família» esconde os produtos já agrupados noutra família da sessão", () => {
+    abrirVelar();
+    ir(2); clicar("Guardar na sessão"); clicar(NOVA);
+    marcar("Ainda sem família");
+    expect(resultados()).toHaveTextContent(`${TOTAL_PRODUTOS - 5} de ${TOTAL_PRODUTOS} produtos`);
+    expect(screen.queryByRole("checkbox", { name: /VELAR 1 CUBA 34/ })).not.toBeInTheDocument();
+  });
+  it("«Só os escolhidos» mostra só a seleção", () => {
+    abrirNova();
+    fireEvent.click(caixa(/Sanita compacta/));
+    marcar("Só os escolhidos");
+    expect(resultados()).toHaveTextContent(`1 de ${TOTAL_PRODUTOS} produtos`);
+    expect(within(listaProdutos()).getAllByRole("checkbox")).toHaveLength(1);
+  });
+  it("em ecrã estreito os filtros ficam num bloco recolhível «Filtros (n)» com aria-expanded", () => {
+    abrirNova();
+    const botao = () => screen.getByRole("button", { name: /^Filtros \(\d+\)$/ });
+    expect(botao()).toHaveAttribute("aria-expanded", "false");
+    expect(botao()).toHaveTextContent("Filtros (0)");
+    fireEvent.click(botao());
+    expect(botao()).toHaveAttribute("aria-expanded", "true");
+    expect(document.getElementById(botao().getAttribute("aria-controls")!)).toContainElement(screen.getByRole("checkbox", { name: "Roca (1)" }));
+    marcar("Roca (1)");
+    expect(botao()).toHaveTextContent("Filtros (1)");
+    fireEvent.click(botao());
+    expect(botao()).toHaveAttribute("aria-expanded", "false");
+  });
+  it("a marca tem pesquisa própria só quando há mais de 12 valores", () => {
+    abrirNova();
+    expect(screen.queryByLabelText("Procurar marca")).not.toBeInTheDocument();
+    cleanup();
+    const muitas = { produtos: Array.from({ length: 14 }, (_, i) => produto(`m${i}`, `Produto ${i}`, 10, { marca: `Marca${String.fromCharCode(65 + i)}` })), arvore: [] };
+    abrirNova(muitas);
+    fireEvent.change(screen.getByLabelText("Procurar marca"), { target: { value: "marcab" } });
+    expect(screen.getByRole("checkbox", { name: "MarcaB (1)" })).toBeInTheDocument();
+    expect(screen.queryByRole("checkbox", { name: "MarcaC (1)" })).not.toBeInTheDocument();
+  });
+  it("«Ver parecidos» pesquisa pelo nome-base (sem medida nem cor) e junta a família", () => {
+    abrirNova();
+    marcar("FRASA (" + (TOTAL_PRODUTOS - 2) + ")");
+    clicar("Ver parecidos com Lava-louças Lody 40 - Cobre");
+    expect(screen.getByLabelText("Procurar produtos do catálogo")).toHaveValue("Lava-louças Lody");
+    expect(within(listaProdutos()).getAllByRole("checkbox")).toHaveLength(9);
+    expect(screen.queryByRole("button", { name: /^Remover filtro Marca/ })).not.toBeInTheDocument();
+  });
+});
+
+describe("PassoEscolher: seleção e bandeja", () => {
+  it("«Selecionar os N resultados» escolhe só os visíveis pelo filtro (N no rótulo) e «Limpar seleção» tira-os", () => {
+    abrirNova();
+    pesquisar("lody");
+    clicar("Selecionar os 9 resultados");
+    expect(escolhidosTexto()).toBe("9 escolhidos");
+    pesquisar("roca");
+    clicar("Selecionar o resultado");
+    expect(escolhidosTexto()).toBe("10 escolhidos");
+    clicar("Limpar seleção");
+    expect(escolhidosTexto()).toBe("Nenhum produto escolhido");
+    expect(screen.queryByRole("button", { name: "Limpar seleção" })).not.toBeInTheDocument();
+  });
+  it("nunca seleciona mais de 200 sem avisar: o rótulo diz «os primeiros 200 dos N» e há uma nota", () => {
+    const muitos = { produtos: Array.from({ length: 250 }, (_, i) => produto(`q${i}`, `Peça ${i}`, 10)), arvore: [] };
+    abrirNova(muitos);
+    expect(screen.getByText(/Só se selecionam 200 de cada vez/)).toBeInTheDocument();
+    clicar("Selecionar os primeiros 200 dos 250 resultados");
+    expect(escolhidosTexto()).toBe("200 escolhidos");
+  });
+  it("a bandeja «Escolhidos (n)» mantém a seleção ao mudar de filtro e cada nome tem o seu «Remover»", () => {
+    abrirNova();
+    fireEvent.click(caixa(/Sanita compacta/));
+    pesquisar("lody"); marcar("FRASA (9)");
+    const bandeja = screen.getByRole("region", { name: "Escolhidos (1)" });
+    expect(within(bandeja).getByText("Sanita compacta")).toBeInTheDocument();
+    clicar("Remover Sanita compacta dos escolhidos");
+    expect(escolhidosTexto()).toBe("Nenhum produto escolhido");
+    expect(screen.queryByRole("region", { name: /^Escolhidos/ })).not.toBeInTheDocument();
+  });
+  it("com o filtro a esconder o produto escolhido a seleção continua (o Seguinte fica ativo)", () => {
+    abrirNova();
+    fireEvent.click(caixa(/Sanita compacta/));
+    marcar("FRASA (" + (TOTAL_PRODUTOS - 2) + ")");
+    expect(escolhidosTexto()).toBe("1 escolhido");
+    expect(seguinte()).toBeEnabled();
+  });
+});
+
+/* ------------------------------------------------------------------ a cor deriva do acabamento do produto */
+describe("PassoAtribuir: a cor não se escolhe", () => {
+  it("não há seletor de cor; a amostra diz o nome do acabamento e que é definida pelo produto", () => {
+    abrirNova();
+    fireEvent.click(caixa(/Lody 40 - Cobre/));
+    ir(1);
+    expect(document.querySelector("input[type=color]")).toBeNull();
+    expect(screen.queryByLabelText(/^Cor do acabamento/)).not.toBeInTheDocument();
+    const amostra = screen.getByRole("img", { name: "Cor: Cobre, definida pelo produto" });
+    expect(amostra).toHaveStyle({ backgroundColor: "#bc825b" });
+    expect(amostra.parentElement).toHaveTextContent("Cobre");
+  });
+  it("editar o nome do acabamento recalcula a cor; um nome desconhecido dá cinzento neutro com a nota", () => {
+    abrirNova();
+    fireEvent.click(caixa(/Lody 40 - Cobre/));
+    ir(1);
+    escrever("Acabamento do produto 1", "Gold");
+    expect(screen.getByRole("img", { name: "Cor: Gold, definida pelo produto" })).toHaveStyle({ backgroundColor: "#c9ad68" });
+    escrever("Acabamento do produto 1", "Pedra bege");
+    const neutra = screen.getByRole("img", { name: "Cor: Pedra bege, não definida no produto" });
+    expect(neutra).toHaveStyle({ backgroundColor: "#b7b9ba" });
+    expect(neutra.parentElement).toHaveTextContent("cor não definida no produto");
+  });
+  it("dois produtos com o mesmo acabamento têm a mesma cor", () => {
+    abrirNova({ produtos: [produto("c1", "Lava-louças Lody 40 - Cobre", 100), produto("c2", "Lava-louças Lody 50 - Cobre", 110)], arvore: [] });
+    fireEvent.click(caixa(/Lody 40 - Cobre/)); fireEvent.click(caixa(/Lody 50 - Cobre/));
+    ir(1);
+    const amostras = screen.getAllByRole("img", { name: "Cor: Cobre, definida pelo produto" });
+    expect(amostras).toHaveLength(2);
+    expect(amostras[0].getAttribute("style")).toBe(amostras[1].getAttribute("style"));
+  });
+});
+
+/* ------------------------------------------------------------------ polimento: erros por linha, resumo e lista de famílias */
+describe("Configurador: polimento", () => {
+  it("o erro de uma linha tem ícone e texto («Erro:») e o resumo dos erros é um role=alert; o resumo da atribuição fica fixo ao rolar", () => {
+    abrirNova({ produtos: [...CATALOGO.produtos, produto("x1", "Lava-louças Zeta 40 - Cobre", undefined, { custo: 0 })], arvore: [] });
+    fireEvent.click(caixa(/Zeta 40 - Cobre/));
+    ir(1);
+    const linha = screen.getByRole("group", { name: /^Produto 1:/ });
+    expect(within(linha).getByText(/Erro: sem preço de venda no catálogo/i)).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/não tem preço de venda/);
+    expect(resumoAtribuicao().parentElement?.className).toMatch(/sticky/);
+  });
+  it("no resumo os erros ficam no topo, antes do formulário, e a tabela tem altura limitada com cabeçalho fixo", () => {
+    abrirNova();
+    fireEvent.click(caixa(/Lody 40 - Cobre/));
+    ir(2);
+    escrever("Nome da família", " ");
+    const alerta = screen.getByRole("alert");
+    expect(alerta.compareDocumentPosition(screen.getByLabelText("Nome da família")) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(tabela().closest("div")!.className).toMatch(/max-h-/);
+    expect(within(tabela()).getAllByRole("columnheader")[0].className).toMatch(/sticky/);
+    expect(screen.getAllByRole("button", { name: "Guardar na sessão" })).toHaveLength(1);
+  });
+  it("a lista de famílias mostra o título, «N produtos» e Editar/Remover com o nome da família; sem famílias o estado vazio traz o botão primário «Nova família»", () => {
+    render(<Casa />);
+    const vazio = screen.getByText("Ainda sem famílias configuradas.").closest("div")!;
+    expect(within(vazio).getByRole("button", { name: NOVA })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: NOVA })).toHaveLength(1);
+    clicar(EXEMPLO_VELAR); ir(2); clicar("Guardar na sessão");
+    const lista = screen.getByRole("list", { name: "Famílias configuradas" });
+    expect(within(lista).getByText("5 produtos")).toBeInTheDocument();
+    expect(within(lista).getByRole("button", { name: "Editar Lava-louças VELAR" })).toBeInTheDocument();
+    expect(within(lista).getByRole("button", { name: "Remover Lava-louças VELAR" })).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: NOVA })).toHaveLength(1);
   });
 });
