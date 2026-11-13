@@ -2,11 +2,11 @@
 // a opção nova e a linha curta da lista. A lista de atributos é global; o produto escolhe quais tem e UMA opção de cada (a Medida
 // escreve-se, sem lista). Reaproveita as peças de pecasForm.tsx. Só aparece quando a base devolveu atributos
 // (cat_ler_atributos); sem a função, K.atributos fica vazio e nada disto se vê.
-import { useId, useMemo, useRef, useState } from "react";
-import { Check, Loader2, Plus } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Check, ChevronDown, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { CAMPO, CHIP, NOTA, Campo, Chips, Num, Retirar } from "./pecasForm";
+import { CAMPO, NOTA, Campo, Chips, Num, Retirar } from "./pecasForm";
 import { mesmosAtributos, normalizarHex, resumoAtributos, textoMedida, textoValor } from "./atributosTexto";
 import { criarOpcaoAtributo, gravarAtributos, lerNumero, type FichaProdutoReal } from "./fichaProdutoDados";
 import { mudarCatalogo } from "./v2/catalogoStore";
@@ -51,8 +51,8 @@ function atributosDe(linhas: readonly Linha[], defs: readonly AtributoDef[]): At
 }
 
 /* ------------------------------------------------------------------ opção nova */
-function NovaOpcao({ def, org, aoCriar, fechar }: { def: AtributoDef; org: string; aoCriar: (o: OpcaoAtributo) => void; fechar: () => void }) {
-  const [nome, setNome] = useState(""), [hex, setHex] = useState("");
+function NovaOpcao({ def, org, nomeInicial = "", aoCriar, fechar }: { def: AtributoDef; org: string; nomeInicial?: string; aoCriar: (o: OpcaoAtributo) => void; fechar: () => void }) {
+  const [nome, setNome] = useState(nomeInicial), [hex, setHex] = useState("");
   const [erro, setErro] = useState<string | null>(null);
   const [aGravar, setAGravar] = useState(false);
   const msgHex = useId();
@@ -96,6 +96,89 @@ function NovaOpcao({ def, org, aoCriar, fechar }: { def: AtributoDef; org: strin
   );
 }
 
+/* ------------------------------------------------------------------ o valor: combobox com pesquisa */
+/** Escreve-se sem acentos nem maiúsculas. */
+const semAcentos = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+/** A opção escolhida: pode ser uma que a lista já não traz (desativada). */
+interface Escolhida { id: string; nome: string; hex: string | null; inativa: boolean }
+type Item = { k: "opcao"; o: OpcaoAtributo } | { k: "nova" };
+
+/** Dropdown com pesquisa em texto (combobox, padrão ARIA 1.2: input role=combobox, listbox de options, aria-activedescendant). Setas, Home, End,
+ *  Enter e Esc. Com `onNova`, o último item é «Nova opção…». A opção desativada que o produto já tem aparece escolhida, mas não é escolhível de novo. */
+function ComboOpcao({ rotulo, atributoId, opcoes, temHex, atual, onEscolher, onNova, registar }: {
+  rotulo: string; atributoId: string; opcoes: readonly OpcaoAtributo[]; temHex: boolean; atual: Escolhida | null; onEscolher: (o: OpcaoAtributo) => void;
+  onNova?: (nomeEscrito: string) => void; registar: (id: string, el: HTMLInputElement | null) => void;
+}) {
+  const lid = useId();
+  const entradaRef = useCallback((el: HTMLInputElement | null) => registar(atributoId, el), [registar, atributoId]);
+  const [q, setQ] = useState<string | null>(null); // o que se está a escrever; null = mostra a opção escolhida
+  const [aberto, setAberto] = useState(false);
+  const [ativo, setAtivo] = useState(0);
+  const filtradas = useMemo(() => {
+    const t = semAcentos((q ?? "").trim());
+    return t ? opcoes.filter((o) => semAcentos(`${o.nome || o.valor} ${o.valor} ${o.hex ?? ""}`).includes(t)) : [...opcoes];
+  }, [opcoes, q]);
+  const itens: Item[] = [...filtradas.map((o): Item => ({ k: "opcao", o })), ...(onNova ? [{ k: "nova" } as Item] : [])];
+  const fechar = () => { setAberto(false); setQ(null); };
+  const escolher = (i: Item) => { const nomeEscrito = (q ?? "").trim(); fechar(); if (i.k === "nova") onNova?.(nomeEscrito); else onEscolher(i.o); };
+  // ao abrir, o item ativo é a opção escolhida (e a lista rola até ela); o texto do campo fica selecionado para escrever por cima
+  const daEscolhida = opcoes.findIndex((o) => o.id === atual?.id);
+  const abrir = (el?: HTMLInputElement) => { if (!aberto) { setAberto(true); setAtivo(Math.max(0, daEscolhida)); } el?.select(); };
+  useEffect(() => {
+    if (aberto && daEscolhida >= 0) document.getElementById(`${lid}-${daEscolhida}`)?.scrollIntoView?.({ block: "nearest" });
+  }, [aberto]); // eslint-disable-line react-hooks/exhaustive-deps
+  const valor = q ?? (atual ? `${atual.nome}${atual.inativa ? " (desativada)" : ""}` : "");
+  const ativoId = aberto && itens[ativo] ? `${lid}-${ativo}` : undefined;
+  /** Move a opção ativa (gesto de teclado) e traz-a à vista. */
+  const vai = (i: number) => {
+    const n = Math.max(0, Math.min(itens.length - 1, i));
+    setAtivo(n);
+    document.getElementById(`${lid}-${n}`)?.scrollIntoView?.({ block: "nearest" });
+  };
+  const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+    // Home e End movem o cursor enquanto se escreve: só são da lista com ela aberta e sem texto de pesquisa (ou com Ctrl)
+    const daLista = aberto && (!q || e.ctrlKey);
+    if (e.key === "ArrowDown") { e.preventDefault(); if (aberto) vai(ativo + 1); else abrir(e.currentTarget); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); if (aberto) vai(ativo - 1); else abrir(e.currentTarget); }
+    else if (e.key === "Home" && daLista) { e.preventDefault(); vai(0); }
+    else if (e.key === "End" && daLista) { e.preventDefault(); vai(itens.length - 1); }
+    else if (e.key === "Enter" && aberto) { e.preventDefault(); if (itens[ativo]) escolher(itens[ativo]); }
+    else if (e.key === "Escape" && aberto) { e.preventDefault(); e.stopPropagation(); fechar(); }
+    else if (e.key === "Tab") fechar();
+  };
+  return (
+    <div className="relative">
+      {temHex && atual && q === null && <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"><Amostra hex={atual.hex} /></span>}
+      <input ref={entradaRef} type="text" role="combobox" aria-label={rotulo} aria-expanded={aberto} aria-controls={aberto ? lid : undefined} aria-autocomplete="list"
+        aria-activedescendant={ativoId} autoComplete="off" spellCheck={false} value={valor} placeholder="Escolher ou escrever para procurar"
+        onClick={(e) => { if (aberto) fechar(); else abrir(e.currentTarget); }} onFocus={(e) => e.currentTarget.select()} onChange={(e) => { setQ(e.target.value); setAberto(true); setAtivo(0); }} onBlur={fechar} onKeyDown={onKeyDown}
+        className={cn(CAMPO, "pr-10", temHex && atual && q === null && "pl-12")} />
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+      {/* a região de estado está sempre montada (só muda o texto), para os leitores de ecrã a anunciarem */}
+      <span role="status" className="sr-only">{!aberto ? "" : filtradas.length === 0 ? "Nenhuma opção encontrada" : filtradas.length === 1 ? "1 opção" : `${filtradas.length} opções`}</span>
+      {aberto && (
+        <ul id={lid} role="listbox" aria-label={rotulo} onMouseDown={(e) => e.preventDefault()}
+          className="absolute left-0 top-full z-20 mt-1 max-h-72 w-full overflow-auto rounded-xl border border-border bg-popover p-1 shadow-lg motion-safe:animate-in motion-safe:fade-in-0">
+          {itens.map((i, k) => (
+            <li key={i.k === "nova" ? "nova" : i.o.id} id={`${lid}-${k}`} role="option" aria-selected={k === ativo}
+              onClick={() => escolher(i)} onMouseEnter={() => setAtivo(k)}
+              className={cn("flex min-h-11 cursor-pointer items-center gap-2 rounded-lg px-3 text-[15px]", k === ativo && "bg-muted")}>
+              {i.k === "nova"
+                ? <><Plus className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />Nova opção…</>
+                : <>
+                  {temHex && <Amostra hex={i.o.hex} />}
+                  <span className="min-w-0 flex-1">{i.o.nome || i.o.valor}{temHex && <>{" "}<span className="text-sm text-muted-foreground tabular-nums">{i.o.hex ?? "sem hex"}</span></>}{atual?.id === i.o.id && <>{" "}<span className="sr-only">(escolhida)</span></>}</span>
+                  {atual?.id === i.o.id && <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />}
+                </>}
+            </li>
+          ))}
+          {!filtradas.length && <li role="presentation" className="px-3 py-2.5 text-[15px] text-muted-foreground">Nenhuma opção encontrada</li>}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 /* ------------------------------------------------------------------ o editor */
 /** Escolher os atributos de um produto. `inicial` é o que o produto já tem; `onChange` recebe, a cada escolha de quem usa o ecrã, só o que
  *  já vale (a medida só quando está completa). Com `real` (página real) e products.edit, cada atributo de lista deixa criar opções novas. */
@@ -103,12 +186,13 @@ export function AtributosEditor({ defs, inicial, onChange, real, vazio }: {
   defs: readonly AtributoDef[]; inicial: readonly AtributoProduto[]; onChange: (a: AtributoProduto[]) => void; real?: FichaProdutoReal; vazio?: string;
 }) {
   const [linhas, setLinhas] = useState<Linha[]>(() => inicial.map(dosValores));
-  const [aCriar, setACriar] = useState<string | null>(null);
-  const botoes = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [aCriar, setACriar] = useState<{ id: string; nome: string } | null>(null);
+  const entradas = useRef<Record<string, HTMLInputElement | null>>({});
+  const registar = useCallback((id: string, el: HTMLInputElement | null) => { entradas.current[id] = el; }, []);
   /** Muda as linhas e avisa quem usa, no mesmo gesto (não num efeito, que reemitiria quando a lista de atributos muda de identidade). */
   const aplicar = (f: (L: Linha[]) => Linha[]) => { const n = f(linhas); setLinhas(n); onChange(atributosDe(n, defs)); };
   const mudar = (id: string, p: Partial<Linha>) => aplicar((L) => L.map((x) => (x.id === id ? { ...x, ...p } : x)));
-  const fechar = (id: string) => { setACriar(null); botoes.current[id]?.focus(); };
+  const fechar = (id: string) => { setACriar(null); entradas.current[id]?.focus(); };
   const livres = defs.filter((d) => !linhas.some((L) => L.id === d.id));
 
   return (
@@ -117,13 +201,14 @@ export function AtributosEditor({ defs, inicial, onChange, real, vazio }: {
       {linhas.map((L) => {
         const d = defs.find((x) => x.id === L.id);
         if (!d) return null;
-        // a opção atual que a lista já não traz (desativada) fica escolhida e à vista
-        const fora = L.opcao && !d.opcoes.some((o) => o.id === L.opcao) ? { id: L.opcao, nome: L.texto, inativa: L.inativa } : null;
+        // a opção atual: a da lista, ou (desativada) uma que a lista já não traz, que fica escolhida e à vista
+        const na = L.opcao ? d.opcoes.find((o) => o.id === L.opcao) : undefined;
+        const atual: Escolhida | null = L.opcao ? { id: L.opcao, nome: na ? na.nome || na.valor : L.texto, hex: na?.hex ?? null, inativa: !na && L.inativa } : null;
         return (
           <div key={d.id} className="grid gap-2 rounded-xl bg-muted/50 p-3">
             <div className="flex items-center justify-between gap-2">
               <span className="text-[15px] font-medium">{d.nome}</span>
-              <Retirar rot={`Retirar o atributo ${d.nome}`} onClick={() => { aplicar((x) => x.filter((y) => y.id !== d.id)); if (aCriar === d.id) setACriar(null); }} />
+              <Retirar rot={`Retirar o atributo ${d.nome}`} onClick={() => { aplicar((x) => x.filter((y) => y.id !== d.id)); if (aCriar?.id === d.id) setACriar(null); }} />
             </div>
             {d.tipo === "medida" ? (
               <div className="grid gap-3">
@@ -138,36 +223,12 @@ export function AtributosEditor({ defs, inicial, onChange, real, vazio }: {
               </div>
             ) : (
               <>
-                <div role="radiogroup" aria-label={d.nome} className="flex flex-wrap gap-2">
-                  {d.opcoes.map((o) => {
-                    const on = L.opcao === o.id;
-                    return (
-                      <button key={o.id} type="button" role="radio" aria-checked={on} onClick={() => mudar(d.id, { opcao: o.id, texto: o.nome || o.valor, inativa: false })} className={CHIP(on)}>
-                        {on && <Check className="h-4 w-4 text-primary" aria-hidden="true" />}
-                        {d.temHex && <Amostra hex={o.hex} />}
-                        <span>{o.nome || o.valor}{d.temHex && <>{" "}<span className="text-sm text-muted-foreground tabular-nums">{o.hex ?? "sem hex"}</span></>}</span>
-                      </button>
-                    );
-                  })}
-                  {fora && (
-                    <button type="button" role="radio" aria-checked className={CHIP(true)} onClick={() => undefined}>
-                      <Check className="h-4 w-4 text-primary" aria-hidden="true" />
-                      {d.temHex && <Amostra hex={null} />}
-                      <span>{fora.nome}{fora.inativa ? " (desativada)" : ""}</span>
-                    </button>
-                  )}
-                </div>
+                <ComboOpcao rotulo={d.nome} atributoId={d.id} opcoes={d.opcoes} temHex={d.temHex} atual={atual} registar={registar}
+                  onEscolher={(o) => mudar(d.id, { opcao: o.id, texto: o.nome || o.valor, inativa: false })}
+                  onNova={real?.podeEditar ? (nome) => setACriar({ id: d.id, nome }) : undefined} />
                 {!L.opcao && <p className={NOTA}>Escolha uma opção para o atributo contar.</p>}
-                {real?.podeEditar && (
-                  <div>
-                    <button type="button" ref={(el) => { botoes.current[d.id] = el; }} aria-label={`Nova opção em ${d.nome}`} aria-expanded={aCriar === d.id} onClick={() => setACriar(d.id)}
-                      className="inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-dashed border-input px-3.5 text-[15px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25">
-                      <Plus className="h-4 w-4" aria-hidden="true" />Nova opção…
-                    </button>
-                  </div>
-                )}
-                {real?.podeEditar && aCriar === d.id && (
-                  <NovaOpcao def={d} org={real.org} fechar={() => fechar(d.id)}
+                {real?.podeEditar && aCriar?.id === d.id && (
+                  <NovaOpcao def={d} org={real.org} nomeInicial={aCriar.nome} fechar={() => fechar(d.id)}
                     aoCriar={(o) => { mudar(d.id, { opcao: o.id, texto: o.nome || o.valor, inativa: false }); fechar(d.id); }} />
                 )}
               </>
