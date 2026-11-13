@@ -50,7 +50,7 @@ export interface LinhaProduto {
   category_id?: string | null; subcategory_id?: string | null;
 }
 /** Uma categoria de produto (product_categories). */
-export interface LinhaCategoriaProduto { id: string; name: string; parent_id: string | null; sort_order: number | null }
+export interface LinhaCategoriaProduto { id: string; name: string; parent_id: string | null; sort_order: number | null; /** 20270117700000: false = desativada; em falta = ativa. */ ativa?: boolean }
 /** 13/11 (20270117100000): o que cat_ler_produtos_tabelas manda além dos campos de cada produto. */
 export interface LinhasTabelas {
   categoriasProduto: LinhaCategoriaProduto[];
@@ -124,7 +124,7 @@ const unDe = (p: LinhaProduto) => p.uom || p.unidade || "un";
  *  usa uma só árvore (classe dos serviços, ramo dos produtos e a regra «exige produto»). Uma categoria de produto com o mesmo nome
  *  (e o mesmo pai) que um ramo dos serviços fica nesse ramo; as outras entram na árvore como ramos só de produtos (soProduto).
  *  Devolve os nós a mais e a função categoria de produto → nó da árvore. */
-export function juntarArvoreProdutos(servicos: readonly No[], cats: readonly LinhaCategoriaProduto[]): { extra: No[]; noDe: (id: string | null | undefined) => string | null } {
+export function juntarArvoreProdutos(servicos: readonly No[], cats: readonly LinhaCategoriaProduto[]): { extra: No[]; noDe: (id: string | null | undefined) => string | null; inativos: Set<string> } {
   const raiz = new Map<string, string>(), sub = new Map<string, string>();
   for (const x of servicos) {
     if (x.pai == null) { if (!raiz.has(nomeIgual(x.n))) raiz.set(nomeIgual(x.n), x.id); }
@@ -132,7 +132,7 @@ export function juntarArvoreProdutos(servicos: readonly No[], cats: readonly Lin
   }
   const svc = new Set(servicos.map((x) => x.id));
   const porId = new Map(cats.map((c) => [c.id, c]));
-  const memo = new Map<string, string | null>(), extra: No[] = [];
+  const memo = new Map<string, string | null>(), extra: No[] = [], inativos = new Set<string>();
   const noDe = (id: string | null | undefined, ver = new Set<string>()): string | null => {
     if (!id) return null;
     if (memo.has(id)) return memo.get(id)!;
@@ -142,12 +142,13 @@ export function juntarArvoreProdutos(servicos: readonly No[], cats: readonly Lin
     const pai = c.parent_id ? noDe(c.parent_id, ver) : null;
     const igual = pai == null ? raiz.get(nomeIgual(c.name)) : svc.has(pai) ? sub.get(pai + "|" + nomeIgual(c.name)) : undefined;
     const no = igual ?? c.id;
-    if (!igual) extra.push({ id: c.id, n: c.name, pai, soProduto: true });
+    if (c.ativa === false) inativos.add(no);
+    if (!igual) extra.push({ id: c.id, n: c.name, pai, soProduto: true, ...(c.ativa === false ? { inativa: true as const } : {}) });
     memo.set(id, no);
     return no;
   };
   for (const c of [...cats].sort((a, b) => (n(a.sort_order) - n(b.sort_order)) || a.name.localeCompare(b.name))) noDe(c.id);
-  return { extra, noDe };
+  return { extra, noDe, inativos };
 }
 const dia = (v: string | null | undefined): string => (v ? String(v).slice(0, 10) : "");
 /** Do mais antigo para o mais recente (o último é o atual). */
@@ -212,7 +213,7 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
     (junta && (p.subcategory_id || p.category_id) ? junta.noDe(p.subcategory_id || p.category_id) : null) ?? p.catalogo_categoria_id;
   const K: Catalogo = {
     ...base,
-    arvore: [...arvoreSvc, ...(junta?.extra ?? [])].sort((a, b) => Number(a.pai != null) - Number(b.pai != null)),
+    arvore: [...arvoreSvc.map((x): No => (junta?.inativos.has(x.id) ? { ...x, inativa: true } : x)), ...(junta?.extra ?? [])].sort((a, b) => Number(a.pai != null) - Number(b.pai != null)),
     produtos: [], pacotes: [], classe: {}, exigeProduto: {}, qtdDe: {}, perguntaManter: {}, fasesServico: {}, entulhoServico: {}, icone: {},
     equivalentes: undefined, servicosCriados: [], consumiveisCriados: [],
     ...(defsAtributos ? { atributos: defsAtributos } : {}),
@@ -288,7 +289,8 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
   }
   const unicos = (xs: string[]) => [...new Set(xs.filter(Boolean))].sort((a, b) => a.localeCompare(b));
   K.unidades = unicos([...base.unidades, ...(T?.unidades ?? []), ...K.produtos.map((p) => p.un), ...itens.map((i) => i.un)]);
-  K.marcas = unicos([...(T?.marcas ?? []), ...K.produtos.map((p) => p.marca)]);
+  // com as tabelas, só as marcas ATIVAS (a leitura já traz as da organização e as dos produtos); a marca desativada de um produto fica no produto
+  K.marcas = T ? unicos(T.marcas) : unicos(K.produtos.map((p) => p.marca));
   K.fornecedores = unicos([...K.produtos.map((p) => p.fornecedor), ...Object.values(receitas).flatMap((r) => r.cons.map((c) => c.fornecedor))]);
 
   const C: Custos = {

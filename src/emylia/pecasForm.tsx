@@ -1,20 +1,30 @@
 // 13/11: as peças do formulário do Catálogo (campo, número, chips, retirar e as classes que partilham), tiradas de CriarNoCatalogo.tsx
 // para o editor de atributos (AtributosProduto.tsx) as usar sem uma importação circular. O comportamento é o mesmo.
-import { useId, type ReactNode } from "react";
+import { useEffect, useId, type ReactNode } from "react";
 import { Check, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const NOTA = "text-[15px] text-muted-foreground";
-export const CAMPO = "h-11 w-full rounded-lg border border-input bg-card px-3 text-[15px] outline-none transition-shadow focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
+export const CAMPO = "h-11 w-full rounded-lg border border-input bg-card px-3 text-[15px] outline-none transition-shadow focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 export const CHIP = (on: boolean) => cn("inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-3.5 text-[15px] transition-all", on ? "border-primary bg-primary/10 font-medium text-foreground" : "border-input bg-card text-muted-foreground hover:bg-muted hover:text-foreground");
 
 export function Campo({ rot, dica, children, className }: { rot: string; dica?: string; children: (id: string) => ReactNode; className?: string }) {
   const id = useId();
+  const idDica = `${id}-dica`;
+  // a dica fica ligada ao campo (aria-describedby) sem apagar o que o campo já declara; corre em cada render porque o campo pode reescrever o atributo
+  useEffect(() => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const toks = (el.getAttribute("aria-describedby") ?? "").split(/\s+/).filter(Boolean);
+    const tem = toks.includes(idDica);
+    if (dica && !tem) el.setAttribute("aria-describedby", [idDica, ...toks].join(" "));
+    else if (!dica && tem) { const r = toks.filter((t) => t !== idDica); if (r.length) el.setAttribute("aria-describedby", r.join(" ")); else el.removeAttribute("aria-describedby"); }
+  });
   return (
     <div className={cn("grid content-start gap-1.5", className)}>
       <label htmlFor={id} className="text-[15px] font-medium">{rot}</label>
       {children(id)}
-      {dica && <span className="text-sm text-muted-foreground">{dica}</span>}
+      {dica && <span id={idDica} className="text-sm text-muted-foreground">{dica}</span>}
     </div>
   );
 }

@@ -21,7 +21,7 @@ import { FichaServicoSimples } from "./FichaServicoSimples";
 import { tomarFichaPendente } from "./fichaNav";
 import { montarCatalogo, type Ref } from "./ligacoes";
 import { LigacoesCatalogo, abrirLigacoesEm } from "./LigacoesCatalogo";
-import { GestaoAtributos } from "./GestaoAtributos";
+import { GestaoCatalogo, type SeparadorGestao } from "./GestaoCatalogo";
 import {
   FILTROS_V1, agruparPorOficio, iconeDoServico, margemEmPalavras, passaFiltroV1, pesquisarProdutos, precoProduto,
   quebraEquip, tecnicosCatalogo, usosEquip, type ConsCatalogo, type FiltroV1,
@@ -394,10 +394,11 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   useEffect(() => { if (pendente) { const t = window.setTimeout(() => setServicoUrl(pendente, { substituir: true }), 0); return () => window.clearTimeout(t); } return undefined; }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // 27/10: o Criar no Catálogo abre no lugar da lista (?criar=servico|produto|…): o "voltar" do browser fecha-o
   const [criar, setCriar] = useParamUrl<TipoCriar | "">("criar", "", ["", ...TIPOS_CRIAR.map((t) => t.k)]);
-  // 13/11: a gestão dos atributos (?atributos=1) abre no lugar da lista, só na página real
-  const [atributosAberto, setAtributosAberto] = useParamUrl<"" | "1">("atributos", "", ["", "1"]);
+  // 13/11: a gestão do Catálogo (categorias, marcas e atributos) abre no lugar da lista, só na página real. O separador vai no endereço:
+  // ?atributos=categorias|marcas|1 (o «1» é o endereço antigo da gestão dos atributos e continua a abrir os Atributos).
+  const [atributosAberto, setAtributosAberto] = useParamUrl<"" | "1" | "categorias" | "marcas">("atributos", "", ["", "1", "categorias", "marcas"]);
   const voltarAtributos = useRef(false);
-  // ao sair da gestão, o foco regressa ao botão «Atributos» (como nas fichas)
+  // ao sair da gestão, o foco regressa ao botão «Gestão» (como nas fichas)
   useEffect(() => {
     if (atributosAberto || !voltarAtributos.current) return;
     voltarAtributos.current = false;
@@ -468,7 +469,8 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   if (atributosAberto && real) {
     return (
       <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
-        <GestaoAtributos real={real} voltar={() => setAtributosAberto("")} anunciar={anunciar} />
+        <GestaoCatalogo real={real} separador={atributosAberto === "1" ? "atributos" : atributosAberto} voltar={() => setAtributosAberto("")} anunciar={anunciar}
+          onSeparador={(s: SeparadorGestao) => setAtributosAberto(s === "atributos" ? "1" : s, { substituir: true })} />
         {regiao}
       </div>
     );
@@ -495,7 +497,7 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   if (produtoAberto) {
     return (
       <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
-        <FichaProduto key={produtoAberto} p={K.produtos.find((x) => x.id === produtoAberto)} min={S.cfg.min} alvo={S.cfg.alvo} real={real} atributos={K.atributos}
+        <FichaProduto key={produtoAberto} p={K.produtos.find((x) => x.id === produtoAberto)} min={S.cfg.min} alvo={S.cfg.alvo} real={real} atributos={K.atributos} arvore={K.arvore} marcas={K.marcas}
           voltar={() => { voltarProduto.current = produtoAberto; setProdutoAberto(""); }} anunciar={anunciar} nomeServico={nomeServico}
           onAbrirServico={(sid) => { setProdutoAberto("", { substituir: true }); setAberto(sid); }} />
         {regiao}
@@ -552,7 +554,7 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
           {real && (
-            <Button id="btn-atributos" variant="ghost" className="h-11 text-[15px] text-muted-foreground" onClick={() => { voltarAtributos.current = true; setAtributosAberto("1"); }}>Atributos</Button>
+            <Button id="btn-atributos" title="Atributos, categorias e marcas" variant="ghost" className="h-11 text-[15px] text-muted-foreground" onClick={() => { voltarAtributos.current = true; setAtributosAberto("categorias"); }}>Gestão</Button>
           )}
           {tipoDaSeccao && (
             <Button className="h-11 shrink-0 text-[15px] shadow-sm transition-transform hover:-translate-y-0.5" onClick={() => setCriar(tipoDaSeccao)}>

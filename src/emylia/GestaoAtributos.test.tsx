@@ -253,11 +253,29 @@ describe("GestaoAtributos: opções", () => {
 
   it("ordenar: «Descer» troca com a seguinte e manda TODAS as opções; extremos desligados", async () => {
     await abrir();
-    expect(screen.getByRole("button", { name: "Subir Preto" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Descer Cinza" })).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: "Descer Preto" }));
+    expect(screen.getByRole("button", { name: "Subir Preto, posição 1 de 3" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Descer Cinza, posição 3 de 3" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Descer Preto, posição 1 de 3" }));
     await waitFor(() => expect(chamadasDe("cat_reordenar_opcoes")).toHaveLength(1));
     expect(chamadasDe("cat_reordenar_opcoes")[0].a).toEqual({ p_org: ORG, p_atributo: A_COR, p_ids: [O_BRANCO, O_PRETO, O_CINZA] });
+  });
+
+  it("o anúncio da ordenação diz a posição nova", async () => {
+    const anunciar = vi.fn();
+    render(<GestaoAtributos real={REAL()} voltar={vi.fn()} anunciar={anunciar} />);
+    await screen.findByRole("region", { name: "Cor" });
+    fireEvent.click(screen.getByRole("button", { name: "Descer Preto, posição 1 de 3" }));
+    await waitFor(() => expect(anunciar).toHaveBeenCalledWith("«Preto» passou para a posição 2 de 3."));
+  });
+
+  it("Esc na confirmação volta atrás sem gravar", async () => {
+    await abrir();
+    fireEvent.click(within(sec("Cor")).getByRole("button", { name: "Renomear o atributo Cor" }));
+    fireEvent.change(screen.getByLabelText("Nome do atributo"), { target: { value: "Cor base" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar nome" }));
+    fireEvent.keyDown(confirmacao(), { key: "Escape" });
+    expect(screen.queryByRole("group", { name: /^Mudar / })).toBeNull();
+    expect(chamadasDe("cat_guardar_atributo")).toHaveLength(0);
   });
 
   it("erro de validação (CT002) mostra a mensagem em português e relê, para o ecrã não mentir", async () => {
@@ -291,23 +309,25 @@ describe("GestaoAtributos: opções", () => {
   });
 });
 
-describe("Catálogo: entrada «Atributos»", () => {
+describe("Catálogo: entrada «Gestão» (antes «Atributos»; agora com categorias e marcas, ver GestaoCatalogo.test.tsx)", () => {
   const pagina = (r?: FichaProdutoReal) => {
     const S = seed();
     const run = (fn: () => void) => fn();
     render(<CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={r} />);
   };
-  it("na página real há um acesso «Atributos» que abre o ecrã e volta ao Catálogo", async () => {
+  it("na página real há um acesso «Gestão» que abre o ecrã, com os Atributos num separador, e volta ao Catálogo", async () => {
     pagina(REAL());
-    fireEvent.click(screen.getByRole("button", { name: "Atributos" }));
-    expect(await screen.findByRole("heading", { level: 1, name: "Atributos" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Gestão" }));
+    expect(await screen.findByRole("heading", { level: 1, name: "Gestão do Catálogo" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Atributos" }));
+    expect(await screen.findByRole("region", { name: "Cor" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Voltar ao Catálogo" }));
     expect(screen.getByRole("heading", { level: 1, name: "Catálogo e custos" })).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByRole("button", { name: "Atributos" })).toHaveFocus());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Gestão" })).toHaveFocus());
   });
   it("sem a página real (protótipo) não há acesso", () => {
     pagina(undefined);
-    expect(screen.queryByRole("button", { name: "Atributos" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Gestão" })).toBeNull();
   });
 });
 

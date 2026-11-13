@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { eur, nfmt, pct, type Estado, type MedKey, type SvcId } from "./motor";
 import { numero } from "./pecas";
 import { CATALOGO_TODO, type LinhaCat } from "./catalogo";
-import { EX0, caminho, oficios, opcoesArvore, type Catalogo } from "./v2/catalogoModelo";
+import { EX0, caminho, oficios, type Catalogo } from "./v2/catalogoModelo";
 import { lerCatalogo, mudarCatalogo } from "./v2/catalogoStore";
 import { anoPerfil, aplicarTodos, horaPerfil, perfilDoServico, type Custos, type ModoPreco } from "./v2/custosModelo";
 import { lerCustos, mudarCustos } from "./v2/custosStore";
@@ -21,6 +21,8 @@ import {
 } from "./criarCatalogo";
 import { podeCriarTipo, usePermissoesCatalogo } from "./permissoesCatalogo";
 import { AtributosCriar } from "./AtributosProduto";
+import { CampoMarca, CamposRamo, RAMO_VAZIO } from "./ClassificacaoProduto";
+import { ramoParaCriar, type RamoEscolhido } from "./ramoProduto";
 import { CAMPO, CHIP, NOTA, Campo, Chips, Num, Retirar } from "./pecasForm";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 import type { AtributoProduto } from "./v2/catalogoModelo";
@@ -368,7 +370,14 @@ function FormServico({ S, C, K, onCriado }: { S: Estado; C: Custos; K: Catalogo;
 /* ------------------------------------------------------------------ produto */
 function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: FichaProdutoReal; onCriado: (id: string, nome: string) => void }) {
   const [nome, setNome] = useState(""), [marca, setMarca] = useState(""), [sku, setSku] = useState(""), [forn, setForn] = useState("");
-  const [un, setUn] = useState("un"), [custo, setCusto] = useState(""), [pvp, setPvp] = useState(""), [no, setNo] = useState(""), [desc, setDesc] = useState("");
+  const [un, setUn] = useState("un"), [custo, setCusto] = useState(""), [pvp, setPvp] = useState(""), [desc, setDesc] = useState("");
+  // 13/11: categoria e subcategoria em dropdowns com pesquisa; os nomes novos só entram na árvore quando o produto se cria
+  const [ramo, setRamoE] = useState<RamoEscolhido>(RAMO_VAZIO);
+  const [erroCriar, setErroCriar] = useState<string | null>(null);
+  const setRamo = (r: RamoEscolhido) => { setRamoE(r); setErroCriar(null); };
+  const ramoR = useMemo(() => ramoParaCriar(K.arvore, ramo), [K.arvore, ramo]);
+  const no = ramoR.ok ? ramoR.no ?? "" : "";
+  const arvoreCria = ramoR.ok ? ramoR.A : K.arvore;
   const [servico, setServico] = useState<SvcId | null>(null);
   const [img, setImg] = useState<IlustracaoKey | null>(null);
   const [verImg, setVerImg] = useState(false);
@@ -383,11 +392,14 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
   const o = { n: nome, custo: n(custo), un, marca, fornecedor: forn, no: no || null, sku, pvp: pvp.trim() ? n(pvp) : null, desc, servico, ...(img ? { img } : {}), ...(attrs.length ? { attrs } : {}) };
   const faltas = faltasProduto(K, o);
   const venda = precoVendaProduto(n0(custo), o.pvp, S.cfg.alvo), m = venda > 0 ? (venda - n0(custo)) / venda : 0;
-  const imgV = img ?? ilustracaoDoProduto({ n: nome }, no ? caminho(K.arvore, no) : null);
+  const imgV = img ?? ilustracaoDoProduto({ n: nome }, no ? caminho(arvoreCria, no) : null);
   const unidades = [...new Set(["un", "m²", "ml", "conj.", "cx", ...K.unidades])].slice(0, 10);
   const criar = () => {
-    const r = criarProdutoCompleto(lerCatalogo(), o);
-    if (!r.ok) return;
+    setErroCriar(null);
+    const K0 = lerCatalogo(), rr = ramoParaCriar(K0.arvore, ramo);
+    if (!rr.ok) { setErroCriar(rr.erro); return; } // nunca um clique morto: diz-se porquê
+    const r = criarProdutoCompleto({ ...K0, arvore: rr.A }, { ...o, no: rr.no });
+    if (!r.ok) { setErroCriar(r.erro); return; }
     mudarCatalogo(() => r.K);
     onCriado(r.id, nome.trim());
   };
@@ -397,15 +409,10 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
         <Secao i={1} titulo="O produto">
           <Campo rot="Nome do produto">{(id) => <input id={id} value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Sanita suspensa Rimless" className={CAMPO} autoFocus />}</Campo>
           <div className="grid gap-4 sm:grid-cols-2">
-            <Campo rot="Marca">{(id) => <><input id={id} list="criar-marcas" value={marca} onChange={(e) => setMarca(e.target.value)} className={CAMPO} /><datalist id="criar-marcas">{K.marcas.map((x) => <option key={x} value={x} />)}</datalist></>}</Campo>
+            <div className="grid content-start gap-4"><CampoMarca marcas={K.marcas} marca={marca} onChange={setMarca} /></div>
             <Campo rot="Referência" dica="A do fornecedor, se houver.">{(id) => <input id={id} value={sku} onChange={(e) => setSku(e.target.value)} className={CAMPO} />}</Campo>
           </div>
-          <Campo rot="Onde fica">{(id) => (
-            <select id={id} value={no} onChange={(e) => setNo(e.target.value)} className={CAMPO}>
-              <option value="">Sem classificação</option>
-              {opcoesArvore(K.arvore).map((x) => <option key={x.v} value={x.v}>{x.t}</option>)}
-            </select>
-          )}</Campo>
+          <CamposRamo arvore={K.arvore} ramo={ramo} onChange={setRamo} />
           <Campo rot="Descrição" dica="Uma linha, para o comercial e a proposta.">{(id) => <input id={id} value={desc} onChange={(e) => setDesc(e.target.value)} className={CAMPO} />}</Campo>
           <div className="grid gap-1.5">
             <span className="text-[15px] font-medium">Imagem</span>
@@ -449,13 +456,14 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
           <span key={imgV} className="motion-safe:animate-in motion-safe:zoom-in-90"><Ilustracao k={imgV} /></span>
           <span className="min-w-0">
             <span className={cn("block text-base font-semibold", !nome.trim() && "text-muted-foreground")}>{nome.trim() || "Produto novo"}</span>
-            <span className={cn(NOTA, "block")}>{[marca.trim(), sku.trim() ? `ref. ${sku.trim()}` : "", caminho(K.arvore, no || null)].filter(Boolean).join(" · ")}</span>
+            <span className={cn(NOTA, "block")}>{[marca.trim(), sku.trim() ? `ref. ${sku.trim()}` : "", caminho(arvoreCria, no || null)].filter(Boolean).join(" · ")}</span>
           </span>
         </div>
         {desc.trim() && <p className={cn(NOTA, "mt-2")}>{desc.trim()}</p>}
         <Grande v={eur(venda)} un={`€/${un}`} legenda={`${o.pvp != null && o.pvp > 0 ? "PVP" : `custo + ${S.cfg.alvo}%`} · custo ${eur(n0(custo))} € · margem ${pct(m)}`} />
         <BarraMargem m={m} min={S.cfg.min} alvo={S.cfg.alvo} />
         {nomeSvc && <p className="mt-4 flex items-center gap-2 text-[15px] font-medium text-primary"><Wrench className="h-4 w-4" aria-hidden="true" />Traz: {nomeSvc}</p>}
+        {erroCriar && <p className="mt-4 text-[15px] text-destructive" role="alert">{erroCriar}</p>}
         <Pronto itens={["Escreva o nome", "Escreva o custo"]} faltas={faltas} botao="Criar o produto" onCriar={criar} />
       </Previa>
     </div>

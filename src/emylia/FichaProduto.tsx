@@ -7,12 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { eur, pct, type SvcId } from "./motor";
-import type { AtributoDef, Produto } from "./v2/catalogoModelo";
+import type { AtributoDef, No, Produto } from "./v2/catalogoModelo";
 import { dataPT } from "./v2/custosModelo";
 import { margemEmPalavras } from "./fichaServico";
 import { BarraMargem } from "./CriarNoCatalogo";
 import { StockArmazens } from "./StockArmazens";
 import { AtributosFicha } from "./AtributosProduto";
+import { ClassificacaoFicha } from "./ClassificacaoProduto";
 import type { CrmCatalogItem, CrmCatalogList, FreeSupplierRow } from "@/components/supplier-portal-crm/types";
 import {
   definirPreferido, definirPvp, eUuid, lerNumero, lerFornecedoresOrg, lerFornecedoresProduto, ligarArtigo, margemProduto, moeda, procurarArtigos, unidadeDaLigacao,
@@ -40,9 +41,11 @@ type Props = {
   tipo?: "produto" | "consumivel";
   /** 13/11: a lista global de atributos (K.atributos). Em falta ou vazia (a função da base não existe): sem a secção «Atributos». */
   atributos?: AtributoDef[];
+  /** 13/11: a árvore e as marcas do Catálogo (K.arvore, K.marcas) para a secção «Classificação» (marca, categoria, subcategoria). Em falta: sem a secção. */
+  arvore?: No[]; marcas?: string[];
 };
 
-export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, real, tipo = "produto", atributos }: Props) {
+export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, real, tipo = "produto", atributos, arvore, marcas }: Props) {
   const cons = tipo === "consumivel";
   // 05/11: sem products.view_cost não se mostra o custo de compra (nem a margem, nem o preço dos fornecedores)
   const verCusto = real?.podeVerCusto !== false;
@@ -87,6 +90,13 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
           </Seccao>
         )
         : <Preco key={`${p.id}:${p.pvp ?? ""}`} p={p} min={min} alvo={alvo} real={real} anunciar={anunciar} verCusto={verCusto} />}
+
+      {/* 13/11: marca, categoria e subcategoria em dropdowns com pesquisa; grava direto (cat_guardar_produto_tabelas), pelo nome */}
+      {!cons && real && eUuid(p.id) && !!arvore && (
+        <Seccao id="fp-class" titulo="Classificação">
+          <ClassificacaoFicha p={p} arvore={arvore} marcas={marcas ?? []} real={real} anunciar={anunciar} />
+        </Seccao>
+      )}
 
       {/* 13/11: grava direto (cat_guardar_produto_atributos), como o PVP; a chave inclui os atributos para o bloco voltar ao que ficou na base */}
       {!cons && real && eUuid(p.id) && !!atributos?.length && (

@@ -24,6 +24,8 @@ export interface No {
   /** 13/11 (20270117100000): ramo que só existe na árvore dos produtos (product_categories), sem ofício igual nos serviços.
    *  Serve para classificar produtos e para a regra «exige produto»; não serve para classificar serviços. */
   soProduto?: true;
+  /** 13/11 (20270117700000): a categoria de produto está desativada (cat_ler_produtos_tabelas, «ativa»): os dropdowns de produto não a oferecem, exceto a que o produto já tem. Em falta = ativa. */
+  inativa?: true;
 }
 /** 13/11: a medida de um produto (atributo do tipo «medida»): 2D (largura × comprimento) ou 3D (com espessura), em cm ou mm. */
 export interface MedidaAtributo { tipo: "2D" | "3D"; largura: number; comprimento: number; espessura: number | null; unidade: "cm" | "mm" }

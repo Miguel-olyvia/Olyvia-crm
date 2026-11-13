@@ -123,6 +123,18 @@ export async function criarOpcaoAtributo(org: string, atributoId: string, valor:
   }
 }
 
+/** 13/11: a marca, a categoria e a subcategoria do produto, pelo NOME (cat_guardar_produto_tabelas cria a que faltar). A unidade segue como está
+ *  (a função grava-a também). Vazio/null limpa. Na base a função devolve o id do produto. */
+export async function gravarClassificacao(org: string, productId: string, o: { marca: string | null; unidade: string; categoria: string | null; subcategoria: string | null }): Promise<Res<string>> {
+  try {
+    const { data, error } = await rpcLivre("cat_guardar_produto_tabelas", { p_org: org, p_id: productId, p_marca: o.marca, p_unidade: o.unidade, p_categoria: o.categoria, p_subcategoria: o.subcategoria });
+    if (error || !data) return { ok: false, erro: erroAmigavel(error, "Não foi possível gravar a classificação.") };
+    return { ok: true, v: String(data) };
+  } catch (e) {
+    return { ok: false, erro: (e as Error).message || "Não foi possível gravar a classificação." };
+  }
+}
+
 /** "12,5" ou "12.5" → 12.5; vazio → null; o resto → NaN. */
 export function lerNumero(t: string): number | null {
   const s = t.trim().replace(/\s/g, "").replace(",", ".");

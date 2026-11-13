@@ -14,8 +14,8 @@ import {
   editarOpcao, guardarAtributo, lerAtributosGestao, reordenarOpcoes, type AtributoGestao, type OpcaoGestao, type ResG,
 } from "./atributosGestao";
 
-const BOTAO_ICONE = "grid h-11 w-11 shrink-0 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/25 disabled:pointer-events-none disabled:opacity-40";
-const BOTAO_TEXTO = "inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-input px-3.5 text-[15px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25 disabled:pointer-events-none disabled:opacity-50";
+const BOTAO_ICONE = "grid h-11 w-11 shrink-0 place-items-center rounded-lg text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-40";
+const BOTAO_TEXTO = "inline-flex min-h-11 items-center gap-1.5 rounded-lg border border-input px-3.5 text-[15px] text-muted-foreground outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50";
 const CARTAO = "rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)] sm:p-5";
 const ENTRA = "motion-safe:animate-in motion-safe:fade-in-0";
 const SEM_PERMISSAO = "Não tem permissão para ver os atributos.";
@@ -89,7 +89,7 @@ function Confirmar({ p, aGravar, erro, onConfirmar, onVoltar }: { p: Pendente; a
     : (n == null ? "Esta opção pode estar a ser usada por produtos: a mudança vai a todos." : `Esta opção é usada por ${produtos(n)}: a mudança altera ${n === 1 ? "esse produto" : `esses ${n} produtos`}.`);
   // grupo (não modal): o resto do ecrã continua à vista; o foco vai para aqui ao abrir
   return (
-    <div ref={ref} tabIndex={-1} role="group" aria-labelledby={tit} aria-describedby={desc}
+    <div ref={ref} tabIndex={-1} role="group" aria-labelledby={tit} aria-describedby={desc} onKeyDown={(e) => { if (e.key === "Escape" && !aGravar) { e.stopPropagation(); onVoltar(); } }}
       className={cn("grid gap-3 rounded-xl border border-primary/40 bg-primary/5 p-3 outline-none", ENTRA)}>
       <p id={tit} className="text-[15px] font-medium">{titulo}</p>
       <p id={desc} className={NOTA}>{texto}</p>
@@ -105,7 +105,8 @@ function Confirmar({ p, aGravar, erro, onConfirmar, onVoltar }: { p: Pendente; a
 }
 
 /* ------------------------------------------------------------------ o ecrã */
-export function GestaoAtributos({ real, voltar, anunciar }: { real: FichaProdutoReal; voltar: () => void; anunciar: (msg: string) => void }) {
+/** `embutido` (13/11): dentro do ecrã de gestão do Catálogo (GestaoCatalogo), que já tem o «Voltar ao Catálogo» e o título: aqui ficam só a nota e o conteúdo. */
+export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { real: FichaProdutoReal; voltar: () => void; anunciar: (msg: string) => void; embutido?: boolean }) {
   const { org, podeEditar } = real;
   const [lista, setLista] = useState<AtributoGestao[] | null>(null);
   const [erroLeitura, setErroLeitura] = useState<string | null>(null);
@@ -196,17 +197,21 @@ export function GestaoAtributos({ real, voltar, anunciar }: { real: FichaProduto
     const ids = a.opcoes.map((x) => x.id);
     [ids[i], ids[i + d]] = [ids[i + d], ids[i]];
     const id = a.opcoes[i].id;
-    void correr(() => reordenarOpcoes(org, a.id, ids), "Ordem guardada.", `atr:${a.id}`).then(() => setFoco(d === 1 ? `desc-${id}|sub-${id}` : `sub-${id}|desc-${id}`));
+    void correr(() => reordenarOpcoes(org, a.id, ids), `«${a.opcoes[i].nome}» passou para a posição ${i + d + 1} de ${a.opcoes.length}.`, `atr:${a.id}`).then(() => setFoco(d === 1 ? `desc-${id}|sub-${id}` : `sub-${id}|desc-${id}`));
   };
 
   return (
     <div className="grid gap-5">
       <div>
-        <button type="button" onClick={voltar} className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[15px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-primary/25">
-          <ArrowLeft className="h-4 w-4" aria-hidden="true" />Voltar ao Catálogo
-        </button>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">Atributos</h1>
-        <p className={cn(NOTA, "mt-1")}>Os atributos são os mesmos para toda a organização: cada produto escolhe quais tem e uma opção de cada.</p>
+        {!embutido && (
+          <>
+            <button type="button" onClick={voltar} className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-2 text-[15px] text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />Voltar ao Catálogo
+            </button>
+            <h1 className="mt-2 text-3xl font-semibold tracking-tight">Atributos</h1>
+          </>
+        )}
+        <p className={cn(NOTA, !embutido && "mt-1")}>Os atributos são os mesmos para toda a organização: cada produto escolhe quais tem e uma opção de cada.</p>
       </div>
 
       {lista && !podeEditar && <p role="note" className={cn(NOTA, "rounded-xl bg-muted/50 p-3")}>Só de leitura: para mudar os atributos precisa da permissão de editar produtos.</p>}
@@ -340,10 +345,10 @@ function Atributo({ a, podeEditar, aGravar, aberto, msg, pend, abrir, fechar, on
                       {o.usados != null && <span className="text-sm text-muted-foreground">{produtos(o.usados)}</span>}
                       {podeEditar && (
                         <span className="ml-auto flex flex-wrap items-center gap-1">
-                          <button id={`sub-${o.id}`} type="button" aria-label={`Subir ${o.nome}`} disabled={aGravar || i === 0} onClick={() => onMover(a, i, -1)} className={BOTAO_ICONE}>
+                          <button id={`sub-${o.id}`} type="button" aria-label={`Subir ${o.nome}, posição ${i + 1} de ${a.opcoes.length}`} disabled={aGravar || i === 0} onClick={() => onMover(a, i, -1)} className={BOTAO_ICONE}>
                             <ChevronUp className="h-5 w-5" aria-hidden="true" />
                           </button>
-                          <button id={`desc-${o.id}`} type="button" aria-label={`Descer ${o.nome}`} disabled={aGravar || i === a.opcoes.length - 1} onClick={() => onMover(a, i, 1)} className={BOTAO_ICONE}>
+                          <button id={`desc-${o.id}`} type="button" aria-label={`Descer ${o.nome}, posição ${i + 1} de ${a.opcoes.length}`} disabled={aGravar || i === a.opcoes.length - 1} onClick={() => onMover(a, i, 1)} className={BOTAO_ICONE}>
                             <ChevronDown className="h-5 w-5" aria-hidden="true" />
                           </button>
                           <button id={`ed-${o.id}`} type="button" aria-label={`Editar ${o.nome}`} aria-expanded={aberto?.t === "editarOpcao" && aberto.id === o.id} disabled={aGravar} onClick={() => abrir({ t: "editarOpcao", id: o.id })} className={BOTAO_ICONE}>

@@ -32,7 +32,7 @@ function atributoDe(a: Bruto): AtributoGestao {
 }
 
 /** Corre uma função da base e devolve o resultado; qualquer falha (erro da base ou da rede) volta como texto para mostrar. */
-async function chamar(fn: string, args: Record<string, unknown>, omissao: string): Promise<ResG<unknown>> {
+export async function chamar(fn: string, args: Record<string, unknown>, omissao: string): Promise<ResG<unknown>> {
   try {
     const { data, error } = await rpcLivre(fn, args);
     if (error || data == null) return { ok: false, erro: erroAmigavel(error, omissao), codigo: error?.code };

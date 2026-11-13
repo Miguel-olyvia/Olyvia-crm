@@ -74,6 +74,42 @@ describe("juntarArvoreProdutos: a árvore dos produtos junta-se à dos serviços
   });
 });
 
+describe("juntarArvoreProdutos: categorias desativadas (ativa: false)", () => {
+  it("uma categoria só de produtos desativada fica marcada; uma que cai num ramo dos serviços marca esse ramo; em falta = ativa", () => {
+    const { extra, inativos } = juntarArvoreProdutos(
+      [{ id: ID.of, n: "Canalização", pai: null }],
+      [{ id: ID.pcOf, name: "Canalização", parent_id: null, sort_order: 0, ativa: false },
+        { id: ID.pcSub, name: "Torneiras", parent_id: ID.pcOf, sort_order: 0, ativa: false },
+        { id: ID.pcSan, name: "Sanitários", parent_id: null, sort_order: 1, ativa: true },
+        { id: ID.pcLav, name: "Lavatórios", parent_id: ID.pcSan, sort_order: 0 }]);
+    expect([...inativos].sort()).toEqual([ID.of, ID.pcSub].sort());
+    expect(extra.find((x) => x.id === ID.pcSub)).toMatchObject({ soProduto: true, inativa: true });
+    expect(extra.find((x) => x.id === ID.pcSan)).not.toHaveProperty("inativa");
+    expect(extra.find((x) => x.id === ID.pcLav)).not.toHaveProperty("inativa");
+  });
+  it("no Catálogo montado os nós desativados levam inativa: true e os outros ficam como estavam", () => {
+    const R = { ...RESPOSTA_TABELAS, categoriasProduto: RESPOSTA_TABELAS.categoriasProduto.map((c) => (c.id === ID.pcLav || c.id === ID.pcOf ? { ...c, ativa: false } : { ...c, ativa: true })) };
+    const K = montar(juntarTabelas(linhasBase(), R)).K;
+    expect(K.arvore.find((x) => x.id === ID.pcLav)).toMatchObject({ inativa: true });
+    expect(K.arvore.find((x) => x.id === ID.of)).toMatchObject({ inativa: true });
+    expect(K.arvore.find((x) => x.id === ID.pcSan)).not.toHaveProperty("inativa");
+    expect(K.arvore.find((x) => x.id === ID.sub)).not.toHaveProperty("inativa");
+  });
+});
+
+describe("montarCatalogo: a lista de marcas vem só das ativas (REACT-H1)", () => {
+  it("a marca desativada de um produto não entra em K.marcas, mas o produto continua com ela", () => {
+    const R = { ...RESPOSTA_TABELAS, produtos: RESPOSTA_TABELAS.produtos.map((p) => (p.id === ID.prod ? { ...p, marca: "Velha" } : p)), marcas: ["Grohe", "Roca"] };
+    const K = montar(juntarTabelas(linhasBase(), R)).K;
+    expect(K.marcas).toEqual(["Grohe", "Roca"]);
+    expect(K.produtos.find((p) => p.id === ID.prod)!.marca).toBe("Velha");
+  });
+  it("sem as tabelas (função por criar) a lista continua a vir das marcas dos produtos", () => {
+    const K = montar(linhasBase()).K;
+    expect(K.marcas).toContain("GROHE");
+  });
+});
+
 describe("montarCatalogo com as tabelas (cat_ler_produtos_tabelas)", () => {
   it("marca, unidade e categoria vêm das tabelas, não do texto", () => {
     const K = montar().K;
