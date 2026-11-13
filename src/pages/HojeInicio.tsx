@@ -1,5 +1,5 @@
-// A primeira página (/home), 28/10: numa organização com o Negócio da Emylia ligado (negocio_workflow_config) e para quem vê Pessoas, é o
-// Hoje do protótipo V1 (o /negocios aberto no Hoje: o de cada papel, o do técnico, a agenda); nas outras, o Hoje do CRM de sempre.
+// A primeira página (/home), 28/10: para quem vê Pessoas (em todas as organizações desde 13/11, sem o interruptor negocio_workflow_config), é o
+// Hoje do protótipo V1 (o /negocios aberto no Hoje: o de cada papel, o do técnico, a agenda); para os outros, o Hoje do CRM de sempre.
 import { lazy, Suspense } from "react";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useNegociosAtivos } from "@/hooks/pessoas/useNegociosAtivos";

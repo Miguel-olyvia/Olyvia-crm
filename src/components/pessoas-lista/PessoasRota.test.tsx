@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useFontePessoas, type FontePessoas } from "@/hooks/pessoas/useFontePessoas";
 import type { NegociosAtivos } from "@/hooks/pessoas/useNegociosAtivos";
@@ -10,10 +10,8 @@ vi.mock("@/hooks/useTranslation", async () => (await import("./traducaoTeste")).
 vi.mock("@/hooks/usePodeDecidirProposta", () => ({ PERMISSAO_DECIDIR_PROPOSTA: "negocios.proposta.decidir", usePodeDecidirProposta: () => ({ pode: false, aLer: false }) }));
 
 const ativosMock = vi.hoisted(() => vi.fn());
-const repetirMock = vi.hoisted(() => vi.fn());
 vi.mock("@/hooks/pessoas/useNegociosAtivos", () => ({
   useNegociosAtivos: () => ativosMock(),
-  useRepetirNegociosAtivos: () => repetirMock,
 }));
 let empresa: { id: string } | null = { id: "org-nike" };
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: empresa, isLoading: false }) }));
@@ -46,7 +44,6 @@ const desenhar = (sobre: Partial<NegociosAtivos>) => {
 
 beforeEach(() => {
   ativosMock.mockReset();
-  repetirMock.mockReset();
   vistas.length = 0;
   empresa = { id: "org-nike" };
   utilizador = "u-rui";
@@ -96,37 +93,31 @@ describe("PessoasRota", () => {
     expect(screen.queryByText(/PAGINA/)).toBeNull();
   });
 
-  it("inativo: navega para a página inicial (nunca /leads) sem montar a página", () => {
+  it("sem organização ativa: vai para a página inicial (nunca /leads) sem montar a página", () => {
+    empresa = null;
     desenhar({ ativo: false });
     expect(screen.getByText("INICIO")).toBeInTheDocument();
     expect(screen.queryByText("LEADS")).toBeNull();
     expect(screen.queryByText(/PAGINA/)).toBeNull();
   });
 
-  it("erro sem nenhuma resposta: aviso com role alert, não redireciona e não monta", () => {
-    desenhar({ isError: true, erroSemResposta: true });
-    expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível confirmar se esta página está disponível.");
-    expect(screen.queryByText("LEADS")).toBeNull();
-    expect(screen.queryByText(/PAGINA/)).toBeNull();
+  it("já não há interruptor: com organização a página monta mesmo com ativo false", () => {
+    desenhar({ ativo: false, momentoGanho: "manual" });
+    expect(screen.getByText("PAGINA real:org-nike:manual")).toBeInTheDocument();
+    expect(screen.queryByText("INICIO")).toBeNull();
+  });
+
+  it("erro sem nenhuma resposta: a página monta na mesma, sem momento de ganho e sem bloquear", () => {
+    desenhar({ ativo: true, isError: true, erroSemResposta: true });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.getByText("PAGINA real:org-nike:null")).toBeInTheDocument();
+    expect(screen.queryByText("INICIO")).toBeNull();
   });
 
   it("erro de uma repetição COM dados antigos: a página mantém-se", () => {
     desenhar({ isError: true, erroSemResposta: false, ativo: true });
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByText(/PAGINA real/)).toBeInTheDocument();
-  });
-
-  it("o botão «Tentar de novo» repete a leitura do interruptor", () => {
-    desenhar({ isError: true, erroSemResposta: true });
-    fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
-    expect(repetirMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("enquanto repete, o botão fica desativado com aria-busy", () => {
-    desenhar({ isError: true, erroSemResposta: true, aRepetir: true });
-    const botao = screen.getByRole("button", { name: "Tentar de novo" });
-    expect(botao).toBeDisabled();
-    expect(botao).toHaveAttribute("aria-busy", "true");
   });
 
   it("o valor do contexto é estável entre renders (useMemo)", () => {

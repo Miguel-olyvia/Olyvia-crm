@@ -1,4 +1,4 @@
-// A primeira página (/home): o Hoje da V1 quando a organização tem o Negócio da Emylia ligado; senão, o Hoje do CRM.
+// A primeira página (/home): o Hoje da V1 para quem vê Pessoas com organização ativa (13/11: em todas, sem interruptor); senão, o Hoje do CRM.
 import { describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 
@@ -17,12 +17,12 @@ vi.mock("../NegociosEmylia", () => ({ default: ({ vistaInicial }: { vistaInicial
 import HojeInicio from "../HojeInicio";
 
 describe("/home", () => {
-  it("com o Negócio ligado: o Hoje da V1", async () => {
+  it("com organização ativa e pessoas.view: o Hoje da V1", async () => {
     estado.ativo = true; estado.pode = true;
     render(<HojeInicio />);
     expect(await screen.findByText("Emylia em hoje")).toBeTruthy();
   });
-  it("sem o Negócio ligado, ou sem ver Pessoas: o Hoje do CRM", async () => {
+  it("sem organização ativa, ou sem ver Pessoas: o Hoje do CRM", async () => {
     estado.ativo = false;
     const a = render(<HojeInicio />);
     expect(await screen.findByText("Hoje do CRM")).toBeTruthy();

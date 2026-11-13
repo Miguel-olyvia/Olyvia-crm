@@ -1,6 +1,6 @@
-// O item «Pessoas» do menu só aparece com a permissão pessoas.view E com o interruptor da organização ligado
-// (falha fechada: a carregar ou em erro também o esconde). Leads e Clientes não são afetados. A leitura do
-// interruptor só corre para quem já tem as permissões carregadas e pessoas.view.
+// O item «Pessoas» do menu só aparece com a permissão pessoas.view E com organização ativa (`ativo` do useNegociosAtivos).
+// 13/11: já não há interruptor por organização; a leitura da configuração do fecho (a carregar ou em erro) não esconde o
+// item. Essa leitura só corre para quem já tem as permissões carregadas e pessoas.view.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
@@ -65,37 +65,39 @@ beforeEach(() => {
 });
 
 describe("menu: o item «Pessoas»", () => {
-  it("visível com o interruptor ligado e a permissão", () => {
+  it("visível com organização ativa e a permissão", () => {
     preparar(TODAS, { ativo: true });
     expect(tem("Pessoas")).toBe(true);
   });
 
-  it("oculto quando a organização não tem o interruptor", () => {
+  it("oculto sem organização ativa (ativo false)", () => {
     preparar(TODAS, { ativo: false });
     expect(tem("Pessoas")).toBe(false);
   });
 
-  it("oculto enquanto o interruptor carrega (falha fechada)", () => {
+  it("oculto enquanto a organização carrega (ativo false)", () => {
     preparar(TODAS, { ativo: false, isLoading: true });
     expect(tem("Pessoas")).toBe(false);
   });
 
-  it("oculto mesmo com ativo true se ainda carrega", () => {
+  it("visível enquanto a configuração do fecho ainda carrega: já não espera por ela", () => {
     preparar(TODAS, { ativo: true, isLoading: true });
-    expect(tem("Pessoas")).toBe(false);
+    expect(tem("Pessoas")).toBe(true);
+    expect(tem("Negócios")).toBe(true);
   });
 
-  it("oculto quando a leitura do interruptor falhou", () => {
-    preparar(TODAS, { ativo: false, isError: true, erroSemResposta: true });
-    expect(tem("Pessoas")).toBe(false);
+  it("visível quando a leitura da configuração do fecho falhou", () => {
+    preparar(TODAS, { ativo: true, isError: true, erroSemResposta: true });
+    expect(tem("Pessoas")).toBe(true);
+    expect(tem("Negócios")).toBe(true);
   });
 
-  it("oculto sem a permissão pessoas.view, mesmo com o interruptor ligado", () => {
+  it("oculto sem a permissão pessoas.view, mesmo com organização ativa", () => {
     preparar(["leads.view", "clients.view"], { ativo: true });
     expect(tem("Pessoas")).toBe(false);
   });
 
-  it("oculto enquanto as permissões carregam, com o interruptor desligado", () => {
+  it("oculto enquanto as permissões carregam (hook desabilitado, ativo false)", () => {
     preparar(TODAS, { ativo: false }, true);
     expect(tem("Pessoas")).toBe(false);
   });
@@ -103,8 +105,7 @@ describe("menu: o item «Pessoas»", () => {
   it.each([
     [{ ativo: false }],
     [{ ativo: false, isLoading: true }],
-    [{ ativo: false, isError: true, erroSemResposta: true }],
-  ])("sem interruptor nem Pessoas nem Negócios, e Leads e Clientes já não existem (%j)", (negocios) => {
+  ])("sem organização ativa nem Pessoas nem Negócios, e Leads e Clientes já não existem (%j)", (negocios) => {
     preparar(TODAS, negocios);
     expect(tem("Pessoas")).toBe(false);
     expect(tem("Negócios")).toBe(false);
@@ -112,7 +113,7 @@ describe("menu: o item «Pessoas»", () => {
     expect(tem("Clientes")).toBe(false);
   });
 
-  it("com pessoas.view e o interruptor ligado aparecem Pessoas e Negócios (o da Emylia, 27/10), sem Leads nem Clientes", () => {
+  it("com pessoas.view e organização ativa aparecem Pessoas e Negócios (o da Emylia, 27/10), sem Leads nem Clientes", () => {
     preparar(TODAS, { ativo: true });
     expect(tem("Pessoas")).toBe(true);
     expect(tem("Negócios")).toBe(true);
@@ -120,7 +121,7 @@ describe("menu: o item «Pessoas»", () => {
     expect(tem("Clientes")).toBe(false);
   });
 
-  it("sem o interruptor a fila de submissões continua com a permissão dela", () => {
+  it("sem organização ativa a fila de submissões continua com a permissão dela", () => {
     preparar(["platform.pending_submissions.view"], { ativo: false });
     expect(tem("Pessoas")).toBe(false);
     expect(screen.queryAllByRole("button", { name: /submiss/i }).length).toBeGreaterThan(0);
@@ -134,7 +135,7 @@ describe("menu: o item «Pessoas»", () => {
     expect(tem("Clientes")).toBe(false);
   });
 
-  it("a leitura do interruptor só é pedida com as permissões carregadas e pessoas.view", () => {
+  it("a leitura da configuração só é pedida com as permissões carregadas e pessoas.view", () => {
     preparar(TODAS, { ativo: true });
     expect(ultimaOpcao()).toEqual({ habilitado: true });
     cleanup();
@@ -146,7 +147,7 @@ describe("menu: o item «Pessoas»", () => {
   });
 
   // 28/10 (noite, Rúben): o Pipeline sai do menu
-  it("só os itens /pessoas e /negocios dependem do interruptor", () => {
+  it("só os itens /pessoas e /negocios dependem de useNegociosAtivos", () => {
     const itens = menuSections.flatMap((s) => [...s.items, ...(s.subSections?.flatMap((x) => x.items) ?? [])]);
     expect(itens.filter((i) => i.requiresNegociosAtivos).map((i) => i.to)).toEqual(["/pessoas", "/negocios"]);
   });

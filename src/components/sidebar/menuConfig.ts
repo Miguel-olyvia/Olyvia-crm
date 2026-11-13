@@ -59,7 +59,7 @@ export interface MenuItem {
   permissions?: string[];
   /** When `permissions` is set, require ALL of them instead of the default ANY (OR) logic. */
   requireAll?: boolean;
-  /** Só aparece nas organizações com o interruptor dos negócios ligado (useNegociosAtivos); falha fechada. */
+  /** Só aparece com uma organização ativa e pessoas.view (useNegociosAtivos); já não há interruptor por organização. */
   requiresNegociosAtivos?: boolean;
   /**
    * Contador opcional (pílula no painel do menu), alimentado por

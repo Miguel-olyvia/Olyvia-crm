@@ -43,10 +43,10 @@ describe("useNegociosAtivos", () => {
     ctx = { activeCompany: { id: "org-1" }, isLoading: false };
   });
 
-  it("estado inicial síncrono: a carregar e inativo", () => {
+  it("estado inicial síncrono: a carregar e já ativo (há organização)", () => {
     resposta(new Promise(() => {}));
     const { result } = montar();
-    expect(result.current).toMatchObject({ isLoading: true, ativo: false, isError: false });
+    expect(result.current).toMatchObject({ isLoading: true, ativo: true, isError: false });
   });
 
   it("com linha de configuração: ativo e com o momento certo", async () => {
@@ -67,43 +67,43 @@ describe("useNegociosAtivos", () => {
     expect(eqMock).toHaveBeenCalledWith("organization_id", "org-1");
   });
 
-  it("sem linha: inativo, sem erro", async () => {
+  it("sem linha: ativo na mesma (já não há interruptor), sem momento de ganho e sem erro", async () => {
     resposta({ data: null, error: null });
     const { result } = montar();
     await waitFor(() => expect(result.current.isLoading).toBe(false));
     expect(result.current).toEqual({
-      ativo: false, momentoGanho: null, isLoading: false, isError: false, erroSemResposta: false, aRepetir: false,
+      ativo: true, momentoGanho: null, isLoading: false, isError: false, erroSemResposta: false, aRepetir: false,
     });
   });
 
-  it("42501 é um resultado válido: inativo, sem isError e sem Sentry", async () => {
+  it("42501 é um resultado válido: ativo, sem momento de ganho, sem isError e sem Sentry", async () => {
     resposta({ data: null, error: { code: "42501", message: "denied" } });
     const { result } = montar();
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current).toMatchObject({ ativo: false, isError: false });
+    expect(result.current).toMatchObject({ ativo: true, momentoGanho: null, isError: false });
     expect(captureMock).not.toHaveBeenCalled();
   });
 
-  it("erro devolvido pela base: isError, inativo, reportado e não fica em cache como válido", async () => {
+  it("erro devolvido pela base: isError, continua ativo, reportado e não fica em cache como válido", async () => {
     const bruto = { code: "57014", message: "timeout" };
     resposta({ data: null, error: bruto });
     const { result, client } = montar();
     await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current).toMatchObject({ ativo: false, momentoGanho: null, isLoading: false });
+    expect(result.current).toMatchObject({ ativo: true, momentoGanho: null, isLoading: false });
     expect(captureMock).toHaveBeenCalledWith(bruto, "pessoas-neg");
     expect(client.getQueryState(negociosAtivosQueryKey("org-1"))?.status).toBe("error");
     await client.refetchQueries({ queryKey: negociosAtivosQueryKey("org-1") });
     expect(fromMock).toHaveBeenCalledTimes(2);
   });
 
-  it("erro de rede lançado: isError, inativo e a segunda leitura volta a consultar", async () => {
+  it("erro de rede lançado: isError, continua ativo e a segunda leitura volta a consultar", async () => {
     const maybeSingle = vi.fn().mockRejectedValue(new Error("Failed to fetch"));
     eqMock.mockReturnValue({ maybeSingle });
     selectMock.mockReturnValue({ eq: eqMock });
     fromMock.mockReturnValue({ select: selectMock });
     const { result, client } = montar();
     await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current.ativo).toBe(false);
+    expect(result.current.ativo).toBe(true);
     await client.refetchQueries({ queryKey: negociosAtivosQueryKey("org-1") });
     expect(maybeSingle).toHaveBeenCalledTimes(2);
   });
@@ -131,7 +131,7 @@ describe("useNegociosAtivos", () => {
     resposta(new Promise<Resultado>((res) => { libertar = res; }));
     ctx = { activeCompany: { id: "org-2" }, isLoading: false };
     rerender();
-    expect(result.current).toMatchObject({ isLoading: true, ativo: false, momentoGanho: null });
+    expect(result.current).toMatchObject({ isLoading: true, ativo: true, momentoGanho: null });
     await waitFor(() => expect(eqMock).toHaveBeenCalledWith("organization_id", "org-2"));
 
     libertar({ data: { momento_ganho: "b" }, error: null });

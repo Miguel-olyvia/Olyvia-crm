@@ -1,6 +1,6 @@
 // A guarda com o hook REAL (useNegociosAtivos) e o Supabase simulado: transições de estado de ponta a ponta.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { useFontePessoas } from "@/hooks/pessoas/useFontePessoas";
@@ -60,20 +60,26 @@ describe("PessoasRota com o hook real", () => {
     expect(await screen.findByText("PAGINA org-1")).toBeInTheDocument();
   });
 
-  it("sem linha de configuração: vai para a página inicial", async () => {
+  it("sem linha de configuração: monta a página na mesma (já não há interruptor)", async () => {
     maybeSingleMock.mockResolvedValue({ data: null, error: null });
     montar();
-    expect(await screen.findByText("INICIO")).toBeInTheDocument();
+    expect(await screen.findByText("PAGINA org-1")).toBeInTheDocument();
+    expect(screen.queryByText("INICIO")).toBeNull();
   });
 
-  it("erro na primeira leitura: alerta; «Tentar de novo» repete e monta a página", async () => {
+  it("erro na primeira leitura: monta a página na mesma, sem alerta nem redirecionar", async () => {
     maybeSingleMock.mockResolvedValueOnce(falha);
     montar();
-    expect(await screen.findByRole("alert")).toBeInTheDocument();
-    maybeSingleMock.mockResolvedValueOnce(ativa());
-    fireEvent.click(screen.getByRole("button", { name: "Tentar de novo" }));
     expect(await screen.findByText("PAGINA org-1")).toBeInTheDocument();
-    expect(maybeSingleMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("INICIO")).toBeNull();
+  });
+
+  it("sem organização ativa: vai para a página inicial sem consultar a base", async () => {
+    ctx = { activeCompany: null, isLoading: false };
+    montar();
+    expect(await screen.findByText("INICIO")).toBeInTheDocument();
+    expect(maybeSingleMock).not.toHaveBeenCalled();
   });
 
   it("troca de organização: volta a carregar e usa a nova", async () => {

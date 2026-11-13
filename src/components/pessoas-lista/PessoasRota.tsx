@@ -6,25 +6,22 @@ import { usePodeApagarNegocios } from "@/hooks/pessoas/usePodeApagarNegocios";
 import { usePodeApagarPessoa } from "@/hooks/pessoas/usePodeApagarPessoa";
 import { usePermissoesDoFechoNoNegocio } from "@/hooks/pessoas/usePermissoesDoFechoNoNegocio";
 import { useUtilizadorPessoas } from "@/hooks/pessoas/useUtilizadorPessoas";
-import { Button } from "@/components/ui/button";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
-import { FOCO } from "@/components/negocio-metas/estilos";
 import { FontePessoasContext, type FontePessoas, type MomentoGanho } from "@/hooks/pessoas/useFontePessoas";
-import { useNegociosAtivos, useRepetirNegociosAtivos } from "@/hooks/pessoas/useNegociosAtivos";
+import { useNegociosAtivos } from "@/hooks/pessoas/useNegociosAtivos";
 
 const MOMENTOS: readonly MomentoGanho[] = ["manual", "proposta_aceite", "contrato_assinado"];
 
 /**
- * A guarda da rota /pessoas: só monta a página (em modo real) nas organizações com o interruptor ligado.
- * A carregar mostra o loader (num contentor status com texto); só bloqueia com erro (role alert, «Tentar de novo»)
- * quando nunca houve resposta válida, e nesse caso NÃO redireciona; com dados antigos a página mantém-se.
- * Sem interruptor (ou sem organização) vai para a página inicial: /leads e /clients redirecionam para /pessoas, por isso
- * redirecionar para lá (ou para /leads) faria um ciclo.
+ * A guarda da rota /pessoas: monta a página (em modo real) em todas as organizações; já não há interruptor por organização.
+ * A carregar mostra o loader (num contentor status com texto), para a página nascer já com o momento de ganho certo.
+ * Se a leitura da configuração do fecho falhar, a página monta na mesma com o momento de ganho a null (as ações que dependem
+ * dele ficam escondidas, a base continua a decidir). Só sem organização vai para a página inicial: /leads e /clients
+ * redirecionam para /pessoas, por isso redirecionar para lá (ou para /leads) faria um ciclo.
  */
 export function PessoasRota({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
   const negocios = useNegociosAtivos();
-  const repetir = useRepetirNegociosAtivos();
   const { activeCompany } = useCompany();
   const organizationId = activeCompany?.id ?? null;
   const momentoGanho = MOMENTOS.find((m) => m === negocios.momentoGanho) ?? null;
@@ -52,20 +49,7 @@ export function PessoasRota({ children }: { children: ReactNode }) {
       </div>
     );
   }
-  if (negocios.erroSemResposta) {
-    return (
-      <div role="alert" className="flex flex-wrap items-center gap-3 p-8">
-        <p className="text-sm text-muted-foreground">{t("pessoasPagina.real.routeError")}</p>
-        <Button
-          type="button" variant="outline" className={`min-h-11 ${FOCO}`} onClick={repetir}
-          disabled={negocios.aRepetir} aria-busy={negocios.aRepetir}
-        >
-          {t("pessoasPagina.real.retry")}
-        </Button>
-      </div>
-    );
-  }
-  if (!negocios.ativo || !fonte) return <Navigate to="/" replace />;
+  if (!fonte) return <Navigate to="/" replace />;
   // `key`: ao trocar de organização a página remonta e os filtros (formulário, «Só as minhas») voltam ao início, em vez de levarem
   // para a organização nova um id que é da anterior (a lista viria vazia).
   return <FontePessoasContext.Provider key={organizationId ?? ""} value={fonte}>{children}</FontePessoasContext.Provider>;

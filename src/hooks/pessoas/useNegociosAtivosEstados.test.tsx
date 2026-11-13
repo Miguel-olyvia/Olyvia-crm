@@ -34,7 +34,7 @@ describe("useNegociosAtivos: erroSemResposta, aRepetir e habilitado", () => {
     maybeSingleMock.mockResolvedValue({ data: null, error: { code: "57014", message: "t" } });
     const { result } = montar();
     await waitFor(() => expect(result.current.isError).toBe(true));
-    expect(result.current).toMatchObject({ erroSemResposta: true, ativo: false, aRepetir: false });
+    expect(result.current).toMatchObject({ erroSemResposta: true, ativo: true, momentoGanho: null, aRepetir: false });
   });
 
   it("sem linha (resposta válida): nem erro nem erroSemResposta", async () => {

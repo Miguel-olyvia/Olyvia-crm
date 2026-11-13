@@ -45,7 +45,8 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
   const { openSectionId, setOpenSectionId, closeSubmenu, isManuallyClosedRef } = useSidebarExpand();
   const { activeCompany } = useCompany();
   const { sectionCounts } = useSidebarAlertCounts(activeCompany?.id);
-  // O interruptor só se lê para quem já tem as permissões carregadas e pode ver Pessoas.
+  // Pessoas e Negócios estão em todas as organizações: `ativo` é só «há organização ativa» (a configuração do fecho
+  // só se lê para quem já tem as permissões carregadas e pode ver Pessoas).
   const negocios = useNegociosAtivos({ habilitado: !permissionsLoading && hasPermission("pessoas.view") });
   
   // Show skeleton while loading permissions (first load only)
@@ -57,8 +58,9 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
 
   const canViewItem = useCallback(
     (item: MenuItem): boolean => {
-      // Falha fechada: a carregar, em erro ou sem interruptor, o item não aparece (antes do atalho das permissões).
-      if (item.requiresNegociosAtivos && (negocios.isLoading || !negocios.ativo)) return false;
+      // Sem organização ativa (ou sem pessoas.view: o hook fica desabilitado) o item não aparece, antes do atalho das permissões.
+      // Já não espera pela leitura da configuração do fecho: uma leitura lenta ou falhada não esconde o menu.
+      if (item.requiresNegociosAtivos && !negocios.ativo) return false;
       if (permissionsLoading) return true;
       // Páginas ainda não prontas para toda a gente: nem aparecem a quem não
       // pode entrar, em vez de aparecerem e negarem o acesso ao clique.
@@ -76,7 +78,7 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
       }
       return true;
     },
-    [permissionsLoading, hasPermission, hasAnyPermission, anewRoleCode, negocios.ativo, negocios.isLoading]
+    [permissionsLoading, hasPermission, hasAnyPermission, anewRoleCode, negocios.ativo]
   );
 
   const canViewTopLevel = useCallback(
