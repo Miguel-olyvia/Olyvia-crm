@@ -17,6 +17,22 @@ import { initSentry, captureError } from "../_shared/sentry.ts";
 
 initSentry();
 
+// Estados em que o portal deixa o cliente assinar um contrato. É EXACTAMENTE a
+// lista que o ecrã do portal usa para mostrar o botão de assinar
+// (src/pages/ClientPortalContractDetail.tsx, `canSign`): o servidor não pode
+// ser mais permissivo do que o ecrã. Qualquer outro estado (anulado, rejeitado,
+// expirado, já assinado, activo) ou um contrato eliminado é recusado.
+const PORTAL_SIGNABLE_CONTRACT_STATUSES = ["pending_signature", "draft", "pending", "sent"];
+
+const contractNotSignable = (corsHeaders: Record<string, string>) =>
+  new Response(
+    JSON.stringify({
+      error: "contract_not_signable",
+      message: "Este contrato já não está disponível para assinatura.",
+    }),
+    { status: 409, headers: corsHeaders },
+  );
+
 // Guards against a slow/unresponsive downstream call keeping this Edge
 // Function alive past its execution limit — when that happens the platform
 // kills the invocation mid-flight with no response body/CORS headers at
@@ -826,21 +842,42 @@ serve(async (req) => {
           return new Response(JSON.stringify({ error: "contract_id and signature_image required" }), { status: 400, headers: corsHeaders });
         }
         if (!(await assertOwnership("contract_id", contract_id))) return forbidden();
-        // B1 — atomically claim OTP BEFORE any sign-side mutation
+
+        // Estado do contrato ANTES de consumir o OTP e de qualquer escrita: um
+        // contrato anulado (ou já assinado, expirado, rejeitado, eliminado) não
+        // se assina, e o cliente não gasta o código por causa disso.
         {
-          const otpClaim = await consumeVerifiedOtp("contract", contract_id, "contract_signature");
-          if (!otpClaim.ok) {
+          const { data: signable, error: signableError } = await withRetryResult(() => supabase
+            .from("client_contracts")
+            .select("status, deleted_at")
+            .eq("id", contract_id)
+            .maybeSingle());
+          if (signableError) {
+            console.error("[client-portal-action] sign_contract: falha a ler o estado do contrato");
             return new Response(
-              JSON.stringify({ error: "otp_required", message: "OTP inválido, expirado ou já utilizado. Peça um novo código." }),
-              { status: 403, headers: corsHeaders },
+              JSON.stringify({ error: "contract_check_unavailable", message: "Não foi possível validar o contrato. Tente novamente." }),
+              { status: 503, headers: corsHeaders },
             );
           }
+          if (!signable || signable.deleted_at || !PORTAL_SIGNABLE_CONTRACT_STATUSES.includes(signable.status)) {
+            console.warn("[client-portal-action] sign_contract recusado: contrato não assinável", { status: signable?.status ?? null, deleted: !!signable?.deleted_at });
+            return contractNotSignable(corsHeaders);
+          }
+        }
+
+        // B1 — atomically claim OTP BEFORE any sign-side mutation
+        const otpClaim = await consumeVerifiedOtp("contract", contract_id, "contract_signature");
+        if (!otpClaim.ok) {
+          return new Response(
+            JSON.stringify({ error: "otp_required", message: "OTP inválido, expirado ou já utilizado. Peça um novo código." }),
+            { status: 403, headers: corsHeaders },
+          );
         }
 
         const now = new Date().toISOString();
         const contractSignerName = await resolveSignerName("contract_id", contract_id);
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
-        await withRetryResult(() => supabase.from("client_contracts").update({
+        const { data: signedRows, error: signError } = await withRetryResult(() => supabase.from("client_contracts").update({
           status: "signed",
           signature_image,
           signature_date: now,
@@ -853,7 +890,35 @@ serve(async (req) => {
           // volta a congela-lo. A partir dai deixa de mudar por alguem o abrir.
           contract_body_frozen_html: null,
           contract_frozen_at: null,
-        }).eq("id", contract_id));
+        })
+          .eq("id", contract_id)
+          .in("status", PORTAL_SIGNABLE_CONTRACT_STATUSES)
+          .is("deleted_at", null)
+          .select("id"));
+
+        // Erro que não é o gatilho (23514): falha transitória da base. A
+        // assinatura não ficou registada, por isso o OTP volta a ficar utilizável
+        // e o cliente pode tentar de novo sem pedir outro código.
+        if (signError && signError.code !== "23514") {
+          console.error("[client-portal-action] sign_contract: falha a gravar a assinatura", { code: signError.code ?? null });
+          try {
+            const { error: otpRestoreError } = await supabase.from("sms_otp_codes").update({ consumed_at: null }).eq("id", otpClaim.otpId);
+            if (otpRestoreError) console.error("[client-portal-action] sign_contract: não foi possível repor o OTP", { code: otpRestoreError.code ?? null });
+          } catch (otpErr) {
+            console.error("[client-portal-action] sign_contract: não foi possível repor o OTP", otpErr);
+          }
+          return new Response(
+            JSON.stringify({ error: "sign_unavailable", message: "Não foi possível registar a assinatura. Tente novamente dentro de instantes." }),
+            { status: 503, headers: corsHeaders },
+          );
+        }
+
+        // Gatilho (o contrato foi anulado entretanto) ou 0 linhas: nada mais se
+        // dispara e o cliente não vê sucesso.
+        if (signError || !signedRows || signedRows.length === 0) {
+          console.warn("[client-portal-action] sign_contract recusado na gravação", { code: signError?.code ?? null, rows: signedRows?.length ?? 0 });
+          return contractNotSignable(corsHeaders);
+        }
 
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
         await withRetryResult(() => supabase.from("client_portal_users")

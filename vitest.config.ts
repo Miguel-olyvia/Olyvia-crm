@@ -18,6 +18,10 @@ export default defineConfig({
     ],
   },
   resolve: {
-    alias: { "@": path.resolve(__dirname, "./src") },
+    alias: [
+      { find: "@", replacement: path.resolve(__dirname, "./src") },
+      // As Edge Functions importam "npm:zod" (Deno); aqui resolve para o pacote.
+      { find: /^npm:zod$/, replacement: "zod" },
+    ],
   },
 });
