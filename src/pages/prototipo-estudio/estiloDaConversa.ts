@@ -64,6 +64,9 @@ const TUDO = /^(tudo|tod[oa]s?|tudinho|total|inteir[oa])$/;
 export const NEGA = /^(n[aã]o|nada|nunca|sem|detesto|odeio|evitar|evito|evitava|menos)$/;
 export const VONTADE = /\b(quer(o|ia|emos|[ií]amos)?|gosta(va|ria|mos)?|gosto|prefir(o|a|am)|prefer(e|em|ia|imos|[ií]amos|ência)|adoro|adoramos|apetece|sonho|tudo|tod[oa]s?|pode ser|a ideia|pensei|pens[aá]mos|imagino|escolh(o|i|emos)|vamos|fica(r|va)?|seja|p[oô]r|p[oõ]e|ponha|pomos|mete|meter|leva|levar|trocar|troca)\b/;
 const NAO_SEI = /^(sei|tenho|sabemos)$/;
+// 13/11: os conectores e artigos/possessivos que ligam as peças de uma lista («a sanita e a banheira», «sanita, bidé e banheira»).
+// Servem para a cor no fim da lista se distribuir por todas, parando na 1.ª palavra de conteúdo (um verbo, outra cor já tratada…).
+const LIGA = /^(e|ou|com|a|o|as|os|à|ao|aos|às|um|uma|uns|umas|minha|meu|minhas|meus|nossa|nosso|nossas|nossos|sua|seu|suas|seus|da|do|das|dos|de|em|no|na|nos|nas|and|the)$/;
 export const SIM = /^\s*(sim|isso|exato|exatamente|claro|pode ser|perfeito|é isso|gosto|adoro|era isso|tal e qual|sem dúvida)\b/i;
 
 export const palavras = (t: string) => [...t.toLowerCase().matchAll(/[\p{L}\d-]+/gu)].map((m) => m[0]);
@@ -99,9 +102,20 @@ export function ditosDaConversa(falas: readonly Fala[], origem: DitoEstilo["orig
           const antes = ws.slice(Math.max(0, j - 4), j);
           // «não quero nada branco», e também «branco não» / «branco nunca» (a negação logo a seguir à cor)
           const evitar = antes.some((x, k) => NEGA.test(x) && !NAO_SEI.test(antes[k + 1] ?? "")) || /^(n[aã]o|nunca|jamais)$/.test(ws[j + 1] ?? "");
-          // a peça mais perto da cor, na mesma oração (até 6 palavras); sem peça e sem «tudo», a última peça dita antes na frase
-          let cats: Categoria[] = [], dist = 7;
-          ws.forEach((x, k) => { const c = pecasDe(x); if (c && Math.abs(k - j) < dist) { dist = Math.abs(k - j); cats = c; } });
+          // 13/11 (Rúben, teste real: «a minha sanita e banheira branca» só pôs a banheira branca): a cor no fim de uma lista
+          // distribui-se por TODAS as peças da lista. Recolhem-se as peças à esquerda da cor enquanto entre elas só houver conectores
+          // ou artigos (LIGA); para-se na 1.ª palavra de conteúdo (ex.: «quero», «tirar», uma cor já tratada).
+          const lista = new Set<Categoria>();
+          for (let k = j - 1; k >= 0; k--) {
+            const c = pecasDe(ws[k]);
+            if (c) { for (const cc of c) lista.add(cc); continue; }
+            if (LIGA.test(ws[k])) continue;
+            break;
+          }
+          let cats: Categoria[] = [...lista];
+          // sem lista colada à cor: a peça mais perto, em qualquer direção, na mesma oração («o móvel quero em madeira», «branca, a sanita»)
+          if (!cats.length) { let dist = 7; ws.forEach((x, k) => { const c = pecasDe(x); if (c && Math.abs(k - j) < dist) { dist = Math.abs(k - j); cats = c; } }); }
+          // sem peça e sem «tudo»: a última peça dita antes, noutra oração
           if (!cats.length && !tudo) for (let a = o - 1; a >= 0 && !cats.length; a--) for (const x of oracoes[a]) { const c = pecasDe(x); if (c) cats = c; }
           const texto = confirmado ? `${frase.trim()} ${prox!.texto.trim()}` : frase.trim();
           out.push({ cor, cats, evitar, tudo: tudo && !cats.length, frase: texto, inicio: f.inicio, origem });

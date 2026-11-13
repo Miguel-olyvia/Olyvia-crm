@@ -40,6 +40,16 @@ describe("o estilo dito na conversa", () => {
     expect(o.estilo.cores).toEqual(["preto"]);
   });
 
+  it("13/11: a cor no fim de uma lista de peças aplica-se a todas (sem apanhar o que vem antes do verbo)", () => {
+    const o = ouvir([cl("Olhe, eu quero tirar o bidé e quero a minha sanita e banheira branca.")])!;
+    expect(o.estilo.porCategoria.sanita).toEqual(["branco"]);
+    expect(o.estilo.porCategoria.banheira).toEqual(["branco"]);
+    // «tirar o bidé» está antes do segundo «quero»: o bidé não fica branco (é uma remoção, tratada à parte)
+    expect(o.estilo.porCategoria.bide ?? []).toEqual([]);
+    // uma peça só continua a ligar-se à sua cor
+    expect(ouvir([cl("Quero o móvel em madeira.")])!.estilo.porCategoria.movel).toEqual(["madeira"]);
+  });
+
   it("na visita conta também o comercial (é quem segura o telemóvel) e a escolha ditada sem verbo", () => {
     const o = ouvir([co("Quero uma sanita preta."), co("Torneiras pretas e o móvel em madeira.")])!;
     expect(o.estilo.porCategoria.sanita).toEqual(["preto"]);
