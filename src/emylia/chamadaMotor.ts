@@ -35,7 +35,10 @@ export interface Insights {
   coaching: { correu_bem: string[]; a_melhorar: string[] };
   sentimento: { inicio: string; fim: string; notas?: string | null };
   /** 11/11: só na visita, o levantamento: o que ficou escolhido peça a peça, as medidas ditas e os valores falados. */
-  escolhas?: { peca: string; escolha: string; decidida: boolean; linha?: number | null }[];
+  escolhas?: { peca: string; acao?: "manter" | "trocar" | "remover" | "acrescentar"; cor?: "preto" | "branco" | "cinza" | "madeira" | "bege" | null;
+    material?: string | null; escolha: string; decidida: boolean; linha?: number | null }[];
+  /** 13/11: os trabalhos/extras pedidos ou recusados (nicho, pintura, tomadas…), decididos pela intenção. */
+  servicos?: { servico: string; quer: boolean; linha?: number | null }[];
   medidas?: { o_que: string; valor: string; linha?: number | null }[];
   valores?: ItemInsight[];
 }

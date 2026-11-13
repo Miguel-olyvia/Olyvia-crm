@@ -1,10 +1,11 @@
 // 5/11: o Estúdio abre a partir da Visita: a planta, as alturas e o estilo vêm do negócio.
 import { describe, expect, it } from "vitest";
 import { gravarPlanta, retangulo } from "@/emylia/planta";
-import { abrirEstudio, coresDoTexto, devolverAoNegocio, ditosDoNegocio, estiloDasRespostas, lerVolta, projetoDaVisita, CHAVE_ESTUDIO } from "./daVisita";
+import { abrirEstudio, coresDoTexto, devolverAoNegocio, ditosDoNegocio, estiloDasRespostas, lerVolta, pedidosDoNegocio, projetoDaVisita, CHAVE_ESTUDIO } from "./daVisita";
 import { estiloDosDitos } from "./estiloDaConversa";
 
-const insightsVisita = (escolhas: { peca: string; escolha: string; decidida?: boolean }[]) =>
+type EscolhaTeste = { peca: string; escolha: string; decidida?: boolean; acao?: "manter" | "trocar" | "remover" | "acrescentar"; cor?: "preto" | "branco" | "cinza" | "madeira" | "bege" | null; material?: string | null };
+const insightsVisita = (escolhas: EscolhaTeste[]) =>
   JSON.stringify({ insights: { resumo: "resumo", escolhas: escolhas.map((e) => ({ decidida: true, ...e })) }, tempos: [], em: "2026-11-13", metricas: {} });
 
 describe("o Estúdio a partir da Visita", () => {
@@ -23,6 +24,38 @@ describe("o Estúdio a partir da Visita", () => {
   it("13/11: sem análise do modelo, as cores saem das regras da transcrição", () => {
     const f = { transcricao_visita: "0:05 Cliente: Quero a sanita preta." };
     expect(estiloDosDitos(ditosDoNegocio(f))!.estilo.porCategoria.sanita).toEqual(["preto"]);
+  });
+
+  it("13/11: a cor estruturada do modelo manda, e uma peça a remover não leva cor", () => {
+    const f = { insights_visita: insightsVisita([
+      { peca: "sanita", acao: "trocar", cor: "preto", escolha: "sanita preta" },
+      { peca: "bidé", acao: "remover", escolha: "tirar o bidé" },
+    ]) };
+    const o = estiloDosDitos(ditosDoNegocio(f))!;
+    expect(o.estilo.porCategoria.sanita).toEqual(["preto"]);
+    expect(o.estilo.porCategoria.bide ?? []).toEqual([]);
+  });
+
+  it("13/11: as ações sobre as peças vêm do modelo (trocar, remover, acrescentar), seja qual for a frase", () => {
+    const f = { insights_visita: insightsVisita([
+      { peca: "bidé", acao: "remover", escolha: "o bidé sai" },
+      { peca: "base de duche", acao: "acrescentar", escolha: "quero uma base de duche" },
+      { peca: "sanita", acao: "manter", escolha: "a sanita fica" },
+    ]) };
+    const porTipo = Object.fromEntries(pedidosDoNegocio(f).pecas.map((x) => [x.tipo, x.acao]));
+    expect(porTipo.bide).toBe("tira");
+    expect(porTipo.base).toBe("junta");
+    expect("sanita" in porTipo).toBe(false);
+  });
+
+  it("13/11: os serviços vêm do modelo (nicho pedido, limpeza recusada), seja qual for a frase", () => {
+    const f = { insights_visita: JSON.stringify({ insights: { resumo: "r", escolhas: [], servicos: [
+      { servico: "um nicho no duche", quer: true },
+      { servico: "a limpeza final", quer: false },
+    ] }, tempos: [], em: "2026-11-13", metricas: {} }) };
+    const byId = Object.fromEntries(pedidosDoNegocio(f).servicos.map((s) => [s.id, s.quer]));
+    expect(byId["sv-nicho"]).toBe(true);
+    expect(byId["sv-limpeza"]).toBe(false);
   });
 
   it("13/11: com o modelo analisado, o «tudo branco» global das regras mantém-se (o modelo só dá por peça)", () => {

@@ -10,8 +10,9 @@ import { copiaPlanta } from "./exemploEstudio";
 import { alturaFinalCm, type Projeto } from "./necessidadesEstudio";
 import { prefixoDoEstudio, respostasDoNegocio, type GrupoVisita } from "./perguntasDaVisita";
 import { falasDoTexto, lerInsights } from "@/emylia/chamadaMotor";
+import { PECAS } from "@/emylia/planta";
 import { catsDeTexto, corDoTexto, ditosDaConversa, type DitoEstilo } from "./estiloDaConversa";
-import { pedidosDaConversa, type Pedidos } from "./pedidosDaConversa";
+import { pedidosDaConversa, servicoDeTexto, tipoPecaDeTexto, type AcaoPeca, type DitoPeca, type DitoServico, type Pedidos } from "./pedidosDaConversa";
 
 export const CHAVE_ESTUDIO = "olyvia.estudio.v1";
 /** 5/11: o que o Estúdio devolve ao negócio quando se carrega em «Voltar ao negócio» (a Visita lê-o e grava a planta). */
@@ -79,17 +80,37 @@ export function abrirEstudio(nome: string, f: Record<string, string>, negocio: n
   return guardarParaEstudio({ ...base, camposVisita: campos, prefixoPerguntas: prefixo, perguntas: { ...(base.perguntas ?? {}), ...respostasDoNegocio(f, prefixo, { camposVisita: campos }) }, ditosAntes: ditosDoNegocio(f), pedidosAntes: pedidosDoNegocio(f) });
 }
 
-/** 13/11 (Rúben, «o modelo é a verdade»): as escolhas de cor que o modelo extraiu da conversa (insights.escolhas), já separadas peça a
- *  peça — por isso sem o problema da coordenação das regras. Uma escolha com peça e cor reconhecidas dá um dito. */
+/** 13/11 (Rúben, «o modelo é a verdade»): as escolhas de cor que o modelo extraiu, já separadas peça a peça. A cor vem do campo
+ *  estruturado 'cor' (o modelo decide-a pela intenção, seja qual for a frase); se faltar, lê-se do texto da escolha. Uma peça a
+ *  remover não leva cor. */
 export function ditosDoModelo(f: Record<string, string | undefined>): DitoEstilo[] {
   const out: DitoEstilo[] = [];
   for (const [campo, origem] of [["insights_chamada", "chamada"], ["insights_visita", "visita"]] as const) {
     const g = lerInsights(f[campo]);
     for (const e of g?.insights.escolhas ?? []) {
-      const cor = corDoTexto(e.escolha), cats = catsDeTexto(e.peca);
+      if (e.acao === "remover") continue;
+      const cor = e.cor ?? corDoTexto(e.escolha), cats = catsDeTexto(e.peca);
       if (!cor || !cats.length) continue;
       const inicio = e.linha != null && g!.tempos[e.linha] != null ? g!.tempos[e.linha] : 0;
       out.push({ cor, cats, evitar: false, tudo: false, frase: `${e.peca}: ${e.escolha}`, inicio, origem });
+    }
+  }
+  return out;
+}
+
+/** 13/11 (Rúben, «trocar ou retirar algo de MUITAS formas»): as ações sobre as peças que o modelo extraiu (acao: trocar, remover,
+ *  acrescentar), decididas pela intenção e não pela frase exata. É a verdade sobre as peças; as regras só valem sem análise do modelo. */
+const ACAO_MODELO: Record<string, AcaoPeca> = { manter: "fica", trocar: "troca", remover: "tira", acrescentar: "junta" };
+export function pedidosPecasDoModelo(f: Record<string, string | undefined>): DitoPeca[] {
+  const out: DitoPeca[] = [];
+  for (const [campo, origem] of [["insights_chamada", "chamada"], ["insights_visita", "visita"]] as const) {
+    const g = lerInsights(f[campo]);
+    for (const e of g?.insights.escolhas ?? []) {
+      const acao = e.acao && e.acao !== "manter" ? ACAO_MODELO[e.acao] : null;
+      const tipo = tipoPecaDeTexto(e.peca);
+      if (!acao || !tipo || PECAS[tipo]?.abertura) continue;
+      const inicio = e.linha != null && g!.tempos[e.linha] != null ? g!.tempos[e.linha] : 0;
+      out.push({ tipo, acao, frase: `${e.peca}: ${e.escolha}`, inicio, origem });
     }
   }
   return out;
@@ -162,8 +183,29 @@ export function lerVolta(negocio: number): Volta | null {
   } catch { return null; }
 }
 
-/** 12/11: as decisões ditas sobre as peças e os serviços nas conversas já gravadas no negócio. */
+/** 13/11 (Rúben, «os serviços também, tem dificuldade na linguagem fluida»): os serviços pedidos ou recusados que o modelo extraiu
+ *  (insights.servicos), decididos pela intenção; o nome casa-se com o id do catálogo. É a verdade; sem análise, das regras. */
+export function servicosDoModelo(f: Record<string, string | undefined>): DitoServico[] {
+  const out: DitoServico[] = [];
+  for (const [campo, origem] of [["insights_chamada", "chamada"], ["insights_visita", "visita"]] as const) {
+    const g = lerInsights(f[campo]);
+    for (const s of g?.insights.servicos ?? []) {
+      const id = servicoDeTexto(s.servico);
+      if (!id) continue;
+      const inicio = s.linha != null && g!.tempos[s.linha] != null ? g!.tempos[s.linha] : 0;
+      out.push({ id, quer: s.quer !== false, frase: s.servico, inicio, origem });
+    }
+  }
+  return out;
+}
+
+/** 12/11→13/11: as decisões sobre as peças e os serviços. Quando o modelo já analisou, ele é a verdade (peças por acao, serviços por
+ *  intenção, robustos a qualquer frase); sem análise de um lado, esse lado vem das regras. */
 export function pedidosDoNegocio(f: Record<string, string | undefined>): Pedidos {
   const a = pedidosDaConversa(falasDoTexto(f.transcricao_chamada), "chamada"), b = pedidosDaConversa(falasDoTexto(f.transcricao_visita), "visita");
-  return { pecas: [...a.pecas, ...b.pecas], servicos: [...a.servicos, ...b.servicos] };
+  const mPecas = pedidosPecasDoModelo(f), mServicos = servicosDoModelo(f);
+  return {
+    pecas: mPecas.length ? mPecas : [...a.pecas, ...b.pecas],
+    servicos: mServicos.length ? mServicos : [...a.servicos, ...b.servicos],
+  };
 }

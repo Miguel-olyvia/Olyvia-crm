@@ -24,11 +24,11 @@ Regras: nunca inventes nem completes uma frase plausível; se uma parte não se 
 
 Divide a conversa em frases, pela ordem em que são ditas, e em cada uma dá:
 - inicio e fim, em segundos desde o início deste áudio;
-- falante: "comercial" (o profissional da empresa: mede, explica as opções, mostra amostras, fala de preços, prazos e da obra), "cliente" (o dono da casa: diz o que quer, o que gosta, as dúvidas, responde) ou "outro" (outra pessoa da casa). Usa o timbre e o papel na conversa, e mantém a mesma pessoa coerente ao longo do áudio;
+- falante: "comercial" (o profissional da empresa: mede, explica as opções, mostra amostras, fala de preços, prazos e da obra), "cliente" (o dono da casa: diz o que quer, o que gosta, as dúvidas, responde) ou "outro" (outra pessoa da casa: cônjuge, familiar). Podem estar várias pessoas a falar; distingue-as pelo timbre e pelo papel na conversa, e mantém cada pessoa coerente do princípio ao fim (o mesmo timbre é sempre a mesma pessoa). Na dúvida entre cliente e "outro", olha para quem decide e quem pergunta;
 - texto: exatamente o que foi dito. Medidas e números em algarismos ("80 por 60", "2,10 metros", "1 metro e 70", "8.900 euros", "dia 15"). Termos de obra comuns: base de duche, banheira, sanita suspensa, autoclismo, móvel, coluna, resguardo, torneira, misturadora, revestimento, pavimento, azulejo, tijoleira, teto falso, canalização, esgoto, impermeabilização;
 - confianca: de 0 a 1, de que o texto é mesmo o que se disse.
 
-Regras: nunca inventes nem completes uma frase plausível; se uma parte não se percebe, escreve "(impercetível)" nesse sítio e baixa a confiança. Ruído fica de fora; se não houver fala nenhuma, a lista vem vazia. Não resumas, não traduzas, não corrijas a gramática.`,
+Regras: nunca inventes nem completes uma frase plausível; se uma parte não se percebe, escreve "(impercetível)" nesse sítio e baixa a confiança. Quando duas pessoas falam ao mesmo tempo, NÃO juntes as vozes numa só linha nem inventes o que ficou tapado: dá uma frase por pessoa, cada uma com o seu falante e só com a parte que se percebe dela (o resto, "(impercetível)"). É melhor duas frases curtas e certas do que uma longa misturada. Ruído fica de fora; se não houver fala nenhuma, a lista vem vazia. Não resumas, não traduzas, não corrijas a gramática.`,
 };
 
 /** O fim do que já se transcreveu vai com o bloco, só para o assunto e para manter as mesmas pessoas. */
@@ -142,9 +142,24 @@ Regras:
 // peça a peça, as medidas ditas e os valores falados. Ficava espalhado por «preferências» e pelo resumo; agora vem à parte, com a linha.
 const LEVANTAMENTO = `
 - escolhas: o que ficou escolhido (ou ainda em dúvida) peça a peça: base de duche, sanita, móvel, lavatório, torneiras, resguardo,
-  revestimento, pavimento, teto, iluminação, etc. Em 'peca' o nome curto da peça; em 'escolha' o que foi escolhido com os pormenores
-  ditos (cor, acabamento, medida, marca, modelo); 'decidida' é false quando o cliente ficou de pensar ou hesitou entre opções (diz as
-  opções em 'escolha'). Se mudou de ideias, vale a última escolha. Uma linha por peça.
+  revestimento, pavimento, teto, iluminação, etc. Uma linha por peça. Em cada uma:
+  · 'peca': o nome curto da peça.
+  · 'acao': o que o cliente quer fazer com ela, pela INTENÇÃO, não pelas palavras exatas — as pessoas dizem o mesmo de muitas maneiras.
+    "trocar" (mudar a que há por outra: «troco a sanita», «quero uma sanita nova», «esta já não presta»), "remover" (tirar e não pôr
+    nada no lugar: «tira o bidé», «o bidé sai», «não quero bidé», «podemos deitar abaixo a banheira»), "acrescentar" (pôr uma que não
+    existe: «quero uma base de duche», «meter um nicho», «pôr uns apoios»), ou "manter" (fica como está: «a sanita fica», «nessa não
+    mexo»). Na dúvida entre trocar e manter, se ele escolhe cor/modelo para a peça é "trocar".
+  · 'cor': a cor principal pedida para a peça, UMA de: "preto", "branco", "cinza", "madeira", "bege". Null se não disse cor, ou se a cor
+    não é nenhuma dessas.
+  · 'material': o acabamento ou material dito (ex.: "mate", "mármore", "carvalho", "inox"), ou null.
+  · 'escolha': uma frase curta e natural com tudo o que foi dito (cor, acabamento, medida, marca, modelo), para a pessoa ler.
+  · 'decidida': false quando o cliente ficou de pensar ou hesitou entre opções (diz as opções em 'escolha'). Se mudou de ideias ao
+    longo da conversa, vale SEMPRE a última vontade.
+- servicos: os trabalhos e extras pedidos (ou recusados) para além das peças, pela INTENÇÃO e não pelas palavras exatas — dizem-se de
+  muitas maneiras. Exemplos: nicho no duche, impermeabilização, pintar o teto, tomada ou ponto de luz novo, aplique por cima do espelho,
+  estores, ventilação/extrator, instalação elétrica nova, reboco ou regularizar paredes, rodapé, limpeza final, montagem dos móveis,
+  recortes na pedra, conduta do exaustor, ligação da máquina. Em 'servico' o nome curto do trabalho; 'quer' é false quando o cliente
+  disse que NÃO quer ou dispensa («a limpeza não é precisa», «sem rodapé»). Um por linha; só o que foi mesmo falado.
 - medidas: todas as medidas ditas (paredes, pé-direito, base de duche, móvel, janela, porta, altura do azulejo), com 'o_que' e 'valor'
   tal como foram ditos («2,10 m», «80 por 60», «até ao teto»).
 - valores: os preços, totais, descontos, condições de pagamento e prazos de obra falados («2 semanas de obra», «sinal de 30%»).`;
@@ -200,13 +215,19 @@ export function esquemaInsights(tipo: Tipo) {
     ...ESQUEMA_INSIGHTS_BASE,
     properties: {
       ...ESQUEMA_INSIGHTS_BASE.properties,
-      escolhas: lista({ type: "OBJECT", properties: { peca: { type: "STRING" }, escolha: { type: "STRING" }, decidida: { type: "BOOLEAN" },
-        linha: { type: "INTEGER", nullable: true } }, required: ["peca", "escolha", "decidida"] }),
+      escolhas: lista({ type: "OBJECT", properties: { peca: { type: "STRING" },
+        acao: { type: "STRING", enum: ["manter", "trocar", "remover", "acrescentar"] },
+        cor: { type: "STRING", enum: ["preto", "branco", "cinza", "madeira", "bege"], nullable: true },
+        material: { type: "STRING", nullable: true },
+        escolha: { type: "STRING" }, decidida: { type: "BOOLEAN" },
+        linha: { type: "INTEGER", nullable: true } }, required: ["peca", "acao", "escolha", "decidida"] }),
+      servicos: lista({ type: "OBJECT", properties: { servico: { type: "STRING" }, quer: { type: "BOOLEAN" }, linha: { type: "INTEGER", nullable: true } },
+        required: ["servico", "quer"] }),
       medidas: lista({ type: "OBJECT", properties: { o_que: { type: "STRING" }, valor: { type: "STRING" }, linha: { type: "INTEGER", nullable: true } },
         required: ["o_que", "valor"] }),
       valores: lista(item),
     },
-    required: [...ESQUEMA_INSIGHTS_BASE.required, "escolhas", "medidas", "valores"],
+    required: [...ESQUEMA_INSIGHTS_BASE.required, "escolhas", "servicos", "medidas", "valores"],
   };
 }
 /** Compatível com quem já o usava (a chamada). */

@@ -22,6 +22,8 @@ const PECA: [RegExp, TipoPeca][] = [
   [/^(frigor[ií]ficos?|frigos?)$/, "frigorifico"], [/^exaustor(es)?$/, "exaustor"], [/^arm[aá]rios?$/, "armario"],
 ];
 const pecaDe = (w: string): TipoPeca | null => PECA.find(([rx]) => rx.test(w))?.[1] ?? null;
+/** 13/11: o tipo de peça mencionado num texto livre (o 'peca' que o modelo extraiu): a 1.ª que casar. */
+export function tipoPecaDeTexto(t: string): TipoPeca | null { for (const w of palavras(t)) { const x = pecaDe(w); if (x) return x; } return null; }
 
 const TIRA = /^(tirar|tira|tiramos|tirem|retirar|retira|remover|remove|arrancar|arranca|eliminar|elimina|sair|sai|dispenso|dispensar)$/;
 const TROCA = /^(trocar|troca|trocamos|substituir|substitui|mudar|muda|mudamos|renovar|renova)$/;
@@ -40,6 +42,10 @@ const SERVICO: [RegExp, string][] = [
   [/liga\w*\s+(d?a\s+)?m[aá]quina/, "sv-ligacao-maquina"],
 ];
 /** «não é preciso», «dispensa», «sem» antes do serviço: sai. */
+/** 13/11: o serviço do catálogo que uma frase (o 'servico' que o modelo extraiu) refere, ou null. O modelo já separou cada serviço; aqui
+ *  é só casar o nome com o id. */
+export function servicoDeTexto(t: string): string | null { const s = t.toLowerCase(); return SERVICO.find(([rx]) => rx.test(s))?.[1] ?? null; }
+
 const NAO_SERVICO = /\b(n[aã]o\s+(quero|queremos|[eé]\s+preciso|precisa|precisamos|vale\s+a\s+pena|fazemos|faz\s+falta)|dispens\w*|sem|escusa|escusamos|nada\s+de)\b/;
 const PEDE_SERVICO = /\b(quer\w*|gosta\w*|precis\w*|p[oô]r|p[oõ]e|pomos|meter|mete|fazer|faz|fazemos|pintar|pinta|instalar|instala|colocar|coloca|juntar|junta|acrescentar|leva|levar|tamb[eé]m|incluir|inclui|convém|conv[eé]m)\b/;
 
