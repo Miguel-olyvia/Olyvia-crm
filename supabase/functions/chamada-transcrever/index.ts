@@ -13,9 +13,6 @@ import { ESQUEMA_BLOCO, INSTRUCAO_BLOCO, comContexto, frasesDoBloco } from "../_
 // Uma chamada dá uma fala a cada poucos segundos: 240 por minuto por pessoa chega para várias chamadas.
 const RATE_LIMIT = { bucket: "chamada-transcrever", maxAttempts: 240, windowMinutes: 1 };
 const MODELO = Deno.env.get("CHAMADAS_GEMINI_MODELO") ?? "gemini-3.1-flash-lite";
-// 9/11 (Rúben, a visita real: «a transcrição tem muitos erros»): na visita as falas são mais longas e em sala, com termos de obra;
-// vai ao modelo maior (o mesmo dos campos), que erra muito menos
-const MODELO_VISITA = Deno.env.get("CHAMADAS_GEMINI_MODELO_VISITA") ?? "gemini-3.8-flash";
 const CONFIANCA_MIN = 0.5;
 // 20 s de WAV a 16 kHz são 640 KB; em base64 ~860 KB. Mais do que isso não é uma fala.
 const MAX_B64 = 1_200_000;
@@ -141,7 +138,9 @@ serve(async (req) => {
     }
     if (!visita && audio_b64.length > MAX_B64) return json({ error: "Fala longa demais" }, 400);
     if (audio_b64.length > MAX_B64_VISITA) return json({ error: "Fala longa demais" }, 400);
-    const modelo = visita ? MODELO_VISITA : MODELO;
+    // 13/11: o provisório ao vivo (modo "fala") vai sempre ao modelo rápido, também na visita: tem de ser imediato. A segunda
+    // passagem, em blocos de ~50 s (modo "bloco", acima), usa o modelo maior e corrige o que este deixar tosco.
+    const modelo = MODELO;
     const instrucao = (visita ? INSTRUCAO_VISITA : INSTRUCAO_BASE) +
       (visita && contexto ? `
 

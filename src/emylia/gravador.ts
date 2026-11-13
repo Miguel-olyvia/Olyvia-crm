@@ -46,8 +46,11 @@ export interface Gravacao {
 const CHAVE = "olyvia.gravacao.v1";
 const CHAVE_MIC = "olyvia.gravacao.microfone";
 const VAZIA: Gravacao = { negocio: null, nome: "", modo: "visita", voltar: "/negocios", estado: "parado", falas: [], inicioEm: null, pausas: 0, pendentes: 0, falhadas: 0, aRever: 0, aFalar: false, nivel: 0, microfone: "", msg: "" };
+// 13/11 (Rúben: «a transcrição tem um delay muito grande, tenho de parar de falar e leva ~20 s»): o provisório ao vivo tem de ser
+// imediato. Antes juntava falas até 15 s e só fechava o pedaço 2,5 s depois de parar de falar. Agora fecha depressa (0,6 s de pausa, ou
+// 3 s de fala seguida), para a linha aparecer 1 a 2 s depois. A passagem de blocos (~50 s, modelo maior) corrige por trás.
 /** Cada pedaço da visita junta falas até isto (s); nenhum passa de MAX_S. */
-const JUNTAR_S = 15, MAX_S = 20, SILENCIO_FECHA_MS = 2500;
+const JUNTAR_S = 3, MAX_S = 20, SILENCIO_FECHA_MS = 600;
 const ESPERAS = [3000, 8000, 20000];
 
 function lerGuardada(): Gravacao {
