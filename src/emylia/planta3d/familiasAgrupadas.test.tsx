@@ -3,7 +3,8 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { catalogo0 } from "../v2/catalogoModelo";
 import { BarraProdutos } from "./BarraProdutos";
-import { comNome, criarFamiliaVazia, familiaDeProdutos, palpiteDoProduto, paraFamilia, refDoProduto } from "./configurador";
+import { atributosDoProduto } from "./atributosProduto";
+import { comNome, criarFamiliaVazia, eixosPorOmissao, familiaPorEixos, palpiteDoProduto, paraFamilia, refDoProduto, type ItemEixos, type ProdutoDoCatalogo } from "./configurador";
 import { registarFamilias } from "./familias";
 import { comDemonstracao, produtosParaEspaco } from "./catalogo3d";
 
@@ -26,10 +27,13 @@ const verSoltos = () => { fireEvent.click(tabsLava()[1]); fireEvent.change(scree
 const nomesSoltos = () => within(screen.getByRole("list", { name: "Produtos do catálogo" })).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? "");
 const soltosDaVelar = () => nomesSoltos().filter((n) => /VELAR 1 CUBA/i.test(n));
 
+/** a família sai dos produtos do catálogo: os atributos vêm de atributosDoProduto e os eixos são os de omissão (nada se escreve) */
+function agrupar(nome: string, produtos: readonly ProdutoDoCatalogo[]) {
+  const itens: ItemEixos[] = produtos.map((p) => ({ ref: refDoProduto(p), atributos: atributosDoProduto(p), dim: palpiteDoProduto(p.n, { sub: p.sub, tipo: "lava_loica" }).dim }));
+  return familiaPorEixos({ ...comNome(criarFamiliaVazia(), nome), marca: "FRASA" }, itens, eixosPorOmissao(itens.map((i) => i.atributos)));
+}
 function registarVelar() {
-  const refs = VELAR.map((p) => refDoProduto(p));
-  const atrib = VELAR.map((p) => { const a = palpiteDoProduto(p.n, { sub: p.sub, tipo: "lava_loica" }); return { produtoId: p.id, medida: a.medida, dim: a.dim, acabamento: a.acabamento, cor: a.cor, codigo: a.codigo }; });
-  const { familia } = familiaDeProdutos({ ...comNome(criarFamiliaVazia(), "Lava-louças VELAR"), marca: "FRASA" }, refs, atrib);
+  const { familia } = agrupar("Lava-louças VELAR", VELAR);
   registarFamilias([paraFamilia(familia)]);
   return familia;
 }
@@ -78,20 +82,17 @@ describe("barra de produtos: família agrupada de produtos do catálogo", () => 
   });
 });
 
-describe("barra de produtos: atributos extra no cartão da família", () => {
-  const ref = (id: string, n: string, preco: number) => ({ id, n, marca: "FRASA", sku: id.toUpperCase(), preco, semPvp: false });
-  const atr = (produtoId: string, medida: string, acabamento: string, cubas: string) =>
-    ({ produtoId, medida, dim: [54, 44, 20] as [number, number, number], acabamento, cor: acabamento === "Inox" ? "#c3c7ca" : "#151617", codigo: acabamento.slice(0, 2).toUpperCase(), extras: { "Nº de cubas": cubas } });
+describe("barra de produtos: atributos escolhidos no cartão da família", () => {
+  const produto = (id: string, n: string, custo: number): ProdutoDoCatalogo => ({ id, n, marca: "FRASA", sku: id.toUpperCase(), sub: "Cubas inox", custo, pvp: custo });
   const registarComCubas = () => {
-    const refs = [ref("a", "Velar 50 1 cuba", 100), ref("b", "Velar 50 2 cubas", 120), ref("c", "Velar 50 2 cubas Negro", 130)];
-    const atrs = [atr("a", "50 cm", "Inox", "1 cuba"), atr("b", "50 cm", "Inox", "2 cubas"), atr("c", "50 cm", "Negro", "2 cubas")];
-    const { familia, conflitos } = familiaDeProdutos({ ...comNome(criarFamiliaVazia(), "Velar com cubas"), marca: "FRASA", atributos: ["Nº de cubas"] }, refs, atrs);
+    // os atributos (50 cm, 1 cuba / 2 cubas, Inox / Negro) vêm dos nomes dos produtos: o seletor de medida junta a Medida e o Nº de cubas, que variam
+    const { familia, conflitos } = agrupar("Velar com cubas", [produto("a", "Velar 50 1 cuba", 100), produto("b", "Velar 50 2 cubas", 120), produto("c", "Velar 50 2 cubas Negro", 130)]);
     expect(conflitos).toEqual([]);
     registarFamilias([paraFamilia(familia)]);
     return familia;
   };
 
-  it("o seletor de medida mostra «50 cm · 2 cubas» e só as combinações que existem (as bolinhas são a cor)", () => {
+  it("o seletor de medida mostra «50 cm · 1 cuba» e «50 cm · 2 cubas» e só as combinações que existem (as bolinhas são a cor)", () => {
     const { rerenderComVersao } = montar();
     rerenderComVersao(registarComCubas());
     verFamilias();
@@ -103,6 +104,6 @@ describe("barra de produtos: atributos extra no cartão da família", () => {
     fireEvent.change(select, { target: { value: (within(cartao).getAllByRole("option")[1] as HTMLOptionElement).value } });
     expect(within(cartao).getAllByRole("button", { name: /^Acabamento / }).map((b) => b.getAttribute("aria-label"))).toEqual(["Acabamento Inox", "Acabamento Negro"]);
     fireEvent.click(within(cartao).getByRole("button", { name: "Acabamento Negro" }));
-    expect(within(cartao).getByText(/SKU C\b/)).toBeInTheDocument();
+    expect(within(cartao).getByText(/SKU C/)).toBeInTheDocument();
   });
 });

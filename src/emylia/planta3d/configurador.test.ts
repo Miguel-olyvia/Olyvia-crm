@@ -3,7 +3,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import { FAMILIAS, acabamentosDaMedida, familiaPorId, familiasDaCategoria, modeloDaFamilia, resolverVariante, temGlbDoFabricante, variantesDe } from "./familias";
 import { registarFamilias, todasAsFamilias } from "./familias";
 import {
-  ALVO_PROTO, COR_NEUTRA, TIPOS_DA_CATEGORIA, atribuicoesDaFamilia, categoriaSugerida, celulaKey, corDoAcabamento, criarFamiliaVazia, erroNomeAtributo, familiaDeProdutos, ficheiroSugerido, ficheirosCompativeis,
+  ALVO_PROTO, COR_NEUTRA, TIPOS_DA_CATEGORIA, categoriaSugerida, celulaKey, corDoAcabamento, criarFamiliaVazia, familiaDeProdutos, ficheiroSugerido, ficheirosCompativeis,
+  eixosPorOmissao, eixosValidos, familiaPorEixos, idsDaFamilia, marcaDaFamilia, nomesDosAtributos, produtosSemValor, textoSemValor, type ItemEixos,
   linhasDeVariantes, palpiteDoProduto, paraFamilia, refDoProduto, resumoDeProdutos, rotuloDaMedida, skuDaCelula, sugerirFamilia, validar,
   type AtribuicaoProduto, type FamiliaCfg, type ProdutoRef,
 } from "./configurador";
@@ -412,22 +413,111 @@ describe("atributos extra: juntam-se ao rótulo da medida", () => {
     expect(r.familia.celulas["m1|a1"].valores).toBeUndefined();
   });
 
-  it("erroNomeAtributo: vazio, repetido (sem distinguir maiúsculas) e os que já existem são recusados", () => {
-    expect(erroNomeAtributo("Material", [])).toBe("");
-    expect(erroNomeAtributo("  ", [])).toMatch(/Escreva o nome/);
-    expect(erroNomeAtributo("material", ["Material"])).toMatch(/Já há um atributo/);
-    for (const n of ["Medida", "cor", "Acabamento", "Cor/Acabamento"]) expect(erroNomeAtributo(n, [])).toMatch(/já existe em cada produto/);
+});
+
+/* ------------------------------------------------------------------ eixos escolhidos: nada se escreve, só se escolhe entre os atributos que o produto já tem */
+describe("eixos: o que o utilizador escolhe entre os atributos dos produtos", () => {
+  const item = (id: string, n: string, atributos: Record<string, string>, preco = 100): ItemEixos => ({
+    ref: { id, n, marca: "FRASA", sku: id.toUpperCase(), preco, semPvp: false }, atributos, dim: [54, 44, 20],
+  });
+  const cubas = (c: string, m: string, cor = "Inox") => ({ Medida: m, Cor: cor, "Nº de cubas": c, Material: "Inox" });
+  const BETAS = [item("a", "Beta 1 CUBA 50", cubas("1 cuba", "50 cm")), item("b", "Beta 2 CUBAS 50", cubas("2 cubas", "50 cm")), item("c", "Beta 2 CUBAS 70", cubas("2 cubas", "70 cm"))];
+  const nova = (): FamiliaCfg => ({ ...criarFamiliaVazia(), id: "cfg:beta", nome: "Beta", marca: "FRASA" });
+
+  it("nomesDosAtributos: Medida e Cor primeiro, os outros pela ordem em que aparecem; sem repetir", () => {
+    expect(nomesDosAtributos([{ Material: "Inox", "Nº de cubas": "1 cuba" }, { Cor: "Cobre", Medida: "40 cm" }])).toEqual(["Medida", "Cor", "Material", "Nº de cubas"]);
+    expect(nomesDosAtributos([])).toEqual([]);
   });
 
-  it("atribuicoesDaFamilia é o inverso de familiaDeProdutos (para voltar a editar): refaz a mesma família", () => {
-    const { familia: f } = familiaDeProdutos(nova(["Nº de cubas"]), refs, atrs);
-    const volta = atribuicoesDaFamilia(f);
-    expect(volta.map((a) => [a.produtoId, a.medida, a.acabamento, a.extras?.["Nº de cubas"]])).toEqual([
-      ["a", "50 cm", "Inox", "1 cuba"], ["b", "50 cm", "Inox", "2 cubas"], ["c", "70 cm", "Inox", "2 cubas"], ["d", "70 cm", "Negro", "2 cubas"],
-    ]);
-    const refeita = familiaDeProdutos(nova(["Nº de cubas"]), refs, volta).familia;
-    expect(refeita.medidas.map((m) => m.rotulo)).toEqual(f.medidas.map((m) => m.rotulo));
-    expect(Object.keys(refeita.celulas)).toEqual(Object.keys(f.celulas));
+  it("eixosPorOmissao: a cor é «Cor»; a medida junta Medida e os atributos que variam (o que é igual em todos não entra)", () => {
+    expect(eixosPorOmissao(BETAS.map((x) => x.atributos))).toEqual({ cor: "Cor", medida: ["Medida", "Nº de cubas"] });
+    expect(eixosPorOmissao([{ Cor: "Cromo" }, { Cor: "Preto" }])).toEqual({ cor: "Cor", medida: [] });
+    expect(eixosPorOmissao([{ Acabamento: "Cobre", Medida: "40 cm" }])).toEqual({ cor: "Acabamento", medida: ["Medida"] });
+    expect(eixosPorOmissao([{}])).toEqual({ cor: null, medida: [] });
+  });
+
+  it("eixosValidos: sem escolha usa a omissão; atributos que já não existem saem; a cor não fica também na medida", () => {
+    const lista = BETAS.map((x) => x.atributos);
+    expect(eixosValidos(undefined, lista)).toEqual(eixosPorOmissao(lista));
+    expect(eixosValidos({ cor: "Brilho", medida: ["Medida", "Cor", "Brilho", "Material"] }, lista)).toEqual({ cor: null, medida: ["Medida", "Cor", "Material"] });
+    expect(eixosValidos({ cor: "Cor", medida: ["Cor", "Medida"] }, lista)).toEqual({ cor: "Cor", medida: ["Medida"] });
+  });
+
+  it("os eixos escolhidos geram o rótulo («50 cm · 1 cuba») e as variantes; o resto continua a vir do produto", () => {
+    const { familia: f, conflitos } = familiaPorEixos(nova(), BETAS, { cor: "Cor", medida: ["Medida", "Nº de cubas"] });
+    expect(conflitos).toEqual([]);
+    expect(f.medidas.map((m) => m.rotulo)).toEqual(["50 cm · 1 cuba", "50 cm · 2 cubas", "70 cm · 2 cubas"]);
+    expect(f.acabamentos.map((a) => a.nome)).toEqual(["Inox"]);
+    expect(f.eixos).toEqual({ cor: "Cor", medida: ["Medida", "Nº de cubas"] });
+    expect(linhasDeVariantes(f).map((l) => [l.sku, l.preco, l.valores["Nº de cubas"], l.valores.Medida])).toEqual([["A", 100, "1 cuba", "50 cm"], ["B", 100, "2 cubas", "50 cm"], ["C", 100, "2 cubas", "70 cm"]]);
+    expect(validar(f)).toEqual([]);
+    expect(variantesDe(paraFamilia(f))).toHaveLength(3);
+  });
+
+  it("a ordem escolhida conta («1 cuba · 50 cm») e escolher só um atributo dá só esse valor", () => {
+    expect(familiaPorEixos(nova(), BETAS.slice(0, 2), { cor: "Cor", medida: ["Nº de cubas", "Medida"] }).familia.medidas.map((m) => m.rotulo)).toEqual(["1 cuba · 50 cm", "2 cubas · 50 cm"]);
+    expect(familiaPorEixos(nova(), BETAS.slice(0, 2), { cor: "Cor", medida: ["Nº de cubas"] }).familia.medidas.map((m) => m.rotulo)).toEqual(["1 cuba", "2 cubas"]);
+  });
+
+  it("a cor das bolinhas é o atributo escolhido (qualquer um); sem atributo de cor há um só acabamento «Padrão»", () => {
+    const itens = [item("a", "X 1", { Medida: "40 cm", Material: "Inox" }), item("b", "X 2", { Medida: "50 cm", Material: "Latão" })];
+    const porMaterial = familiaPorEixos(nova(), itens, { cor: "Material", medida: ["Medida"] }).familia;
+    expect(porMaterial.acabamentos.map((a) => a.nome)).toEqual(["Inox", "Latão"]);
+    const semCor = familiaPorEixos(nova(), itens, { cor: null, medida: ["Medida"] }).familia;
+    expect(semCor.acabamentos.map((a) => a.nome)).toEqual(["Padrão"]);
+    expect(semCor.acabamentos[0].cor).toBe(COR_NEUTRA);
+  });
+
+  it("a cor das bolinhas deriva do nome do acabamento do produto (não se escreve)", () => {
+    const { familia } = familiaPorEixos(nova(), [item("a", "X 40", { Medida: "40 cm", Cor: "Cobre" })], { cor: "Cor", medida: ["Medida"] });
+    expect(familia.acabamentos[0]).toMatchObject({ nome: "Cobre", cor: "#bc825b" });
+  });
+
+  it("combinação repetida: o segundo fica de fora e o erro diz que se corrige no catálogo ou excluindo um produto", () => {
+    const duas = [item("a", "Beta 40", cubas("1 cuba", "50 cm")), item("b", "Beta 40 N", cubas("1 cuba", "50 cm"))];
+    const r = familiaPorEixos(nova(), duas, { cor: "Cor", medida: ["Medida", "Nº de cubas"] });
+    expect(r.conflitos).toHaveLength(1);
+    expect(r.conflitos[0]).toMatch(/«Beta 40» e «Beta 40 N» têm os mesmos valores em todos os atributos \(Medida: 50 cm; Nº de cubas: 1 cuba; Cor: Inox\)/);
+    expect(r.conflitos[0]).toMatch(/corrija no produto do catálogo ou exclua um dos produtos/);
+    expect(Object.keys(r.familia.celulas)).toHaveLength(1);
+    // sem o «Nº de cubas» nos eixos a mesma colisão aparece com os valores que contam
+    expect(familiaPorEixos(nova(), BETAS.slice(0, 2), { cor: "Cor", medida: ["Medida"] }).conflitos[0]).toMatch(/\(Medida: 50 cm; Cor: Inox\)/);
+  });
+
+  it("produtosSemValor: um produto sem valor num atributo escolhido como eixo bloqueia; um atributo fora dos eixos não", () => {
+    const itens = [...BETAS, item("d", "Beta sem cubas", { Medida: "80 cm", Cor: "Inox" })];
+    const eixos = { cor: "Cor", medida: ["Medida", "Nº de cubas"] };
+    const faltas = produtosSemValor(itens, eixos);
+    expect(faltas).toHaveLength(1);
+    expect(faltas[0]).toMatchObject({ produtoId: "d", atributo: "Nº de cubas" });
+    expect(faltas[0].msg).toBe(`«Beta sem cubas»: ${textoSemValor("Nº de cubas")}`);
+    expect(textoSemValor("Nº de cubas")).toBe("Este produto não tem Nº de cubas: corrija no produto do catálogo.");
+    expect(produtosSemValor(itens, { cor: "Cor", medida: ["Medida"] })).toEqual([]);
+    expect(produtosSemValor([item("e", "Sem nada", {})], { cor: "Cor", medida: ["Medida"] }).map((x) => x.atributo)).toEqual(["Medida", "Cor"]);
+    expect(produtosSemValor([item("e", "Sem nada", {})], { cor: null, medida: [] })).toEqual([]);
+  });
+
+  it("um valor só com espaços conta como em falta", () => {
+    expect(produtosSemValor([item("e", "X", { Medida: "  " })], { cor: null, medida: ["Medida"] })).toHaveLength(1);
+  });
+
+  it("idsDaFamilia devolve os produtos da família pela ordem das variantes, para a reabrir com os mesmos produtos", () => {
+    const { familia: f } = familiaPorEixos(nova(), BETAS, { cor: "Cor", medida: ["Medida", "Nº de cubas"] });
+    expect(idsDaFamilia(f)).toEqual(["a", "b", "c"]);
+    expect(idsDaFamilia(nova())).toEqual([]);
+  });
+
+  it("marcaDaFamilia: a marca comum; «Várias marcas» (com aviso) se diferem; vazio sem marcas", () => {
+    const r = (marca?: string) => ({ ...BETAS[0].ref, ...(marca === undefined ? { marca: undefined } : { marca }) });
+    expect(marcaDaFamilia([r("FRASA"), r("FRASA")])).toEqual({ marca: "FRASA", varias: false });
+    expect(marcaDaFamilia([r("FRASA"), r("Rodi")])).toEqual({ marca: "Várias marcas", varias: true });
+    expect(marcaDaFamilia([r(), r()])).toEqual({ marca: "", varias: false });
+    expect(marcaDaFamilia([])).toEqual({ marca: "", varias: false });
+  });
+
+  it("problemas: sem nome derivável pede os produtos, não um nome escrito", () => {
+    expect(validar({ ...nova(), nome: "" }).some((m) => /Escreva o nome/.test(m))).toBe(false);
+    expect(validar({ ...nova(), nome: "" }).some((m) => /nome da família/i.test(m))).toBe(true);
   });
 });
 

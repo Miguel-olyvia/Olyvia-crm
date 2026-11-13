@@ -1,5 +1,6 @@
 // Protótipo (visualizador 3D): o CONFIGURADOR DE FAMÍLIAS, só em memória (estado React; recarregar perde tudo; nada vai para a base nem para o armazenamento).
-// Uma família é SEMPRE um agrupamento de produtos que já existem no catálogo (só se diferenciam em atributos: medida, cor/acabamento e atributos extra livres).
+// Uma família é SEMPRE um agrupamento de produtos que já existem no catálogo (só se diferenciam em atributos). NADA se escreve à mão: os atributos de cada produto vêm de
+// `atributosDoProduto` (atributosProduto.ts) e o utilizador só ESCOLHE quais servem de seletor de cor (bolinhas) e de medida (`EixosCfg`) e que produtos entram.
 // Modelo: acabamentos × medidas + uma MATRIZ de células (uma por produto: SKU e preço vêm dele) + o GLB do fabricante por célula. `paraFamilia`
 // converte-a numa `Familia` do catálogo (familias.ts), para o resto do ecrã a tratar como as outras. Funções puras: sem React, sem three.
 import { CATEGORIAS_FAMILIA, FAMILIAS, PREFIXO_CFG, type AcabFam, type CategoriaFam, type Familia, type MedidaFam } from "./familias";
@@ -28,9 +29,13 @@ export interface FamiliaCfg {
   glb?: Record<string, string>;
   /** os nomes dos atributos extra da família («Nº de cubas», «Material»…), além da medida e da cor/acabamento; cada produto tem um valor para cada (`CelulaCfg.valores`). Sem eles, a família só tem medida e cor. */
   atributos?: string[];
+  /** os atributos (dos produtos) que servem de seletor de cor/acabamento e de medida. Com isto a família vem dos eixos (`familiaPorEixos`) e `atributos` já não se usa. */
+  eixos?: EixosCfg;
 }
-/** Um problema da família e o GRUPO onde se corrige: 1 Família; 2 acabamentos, 3 medidas e 4 combinações. No assistente (PainelConfigurador) o grupo 1 corrige-se no passo
- * «Resumo e pré-visualização» (nome, marca, tipo) e os grupos 2, 3 e 4 no passo «Atribuir atributos» (a atribuição de cada produto). */
+/** Os eixos escolhidos: `cor` = o atributo das bolinhas (um só, ou nenhum); `medida` = os atributos que compõem o seletor de medida, pela ordem escolhida. */
+export interface EixosCfg { cor: string | null; medida: string[] }
+/** Um problema da família e o GRUPO onde se corrige: 1 Família; 2 acabamentos, 3 medidas e 4 combinações. No assistente (PainelConfigurador) o grupo 1 (nome, marca, espaços) é
+ * DERIVADO dos produtos e mostra-se no resumo; os grupos 2, 3 e 4 mostram-se no passo «Atributos dos produtos». */
 export interface Problema { passo: 1 | 2 | 3 | 4; msg: string }
 
 export const celulaKey = (medidaId: string, acabId: string): string => `${medidaId}|${acabId}`;
@@ -81,9 +86,9 @@ const medidaDoCatalogo = (f: FamiliaCfg, medidaId: string): boolean => Object.en
 /* ------------------------------------------------------------------ validação */
 export function problemas(f: FamiliaCfg, outrosIds: readonly string[] = []): Problema[] {
   const p: Problema[] = [], add = (passo: Problema["passo"], msg: string) => p.push({ passo, msg });
-  if (!f.nome.trim()) add(1, "Escreva o nome da família.");
-  else if (!slug(f.nome)) add(1, "O nome precisa de letras ou números.");
-  if (f.id === PREFIXO_CFG || outrosIds.includes(f.id) || FAMILIAS.some((d) => d.id === f.id)) add(1, `Já existe uma família com o identificador «${f.id}»: mude o nome.`);
+  if (!f.nome.trim()) add(1, "Não foi possível derivar o nome da família a partir dos produtos escolhidos.");
+  else if (!slug(f.nome)) add(1, "O nome da família (derivado dos produtos) precisa de letras ou números.");
+  if (f.id === PREFIXO_CFG || outrosIds.includes(f.id) || FAMILIAS.some((d) => d.id === f.id)) add(1, `Já existe uma família com o identificador «${f.id}»: escolha outros produtos ou remova a família que já existe.`);
   if (f.espacos.length === 0) add(1, "Escolha pelo menos um espaço (onde a família aparece).");
   if (f.acabamentos.length === 0) add(2, "Junte pelo menos um acabamento.");
   for (const a of f.acabamentos) {
@@ -306,19 +311,8 @@ export function ficheiroSugerido(tipo: TipoMockup, nome: string, palpite: Pick<P
   return melhor ? chaveFicheiro(melhor.x.familia, melhor.x.modelo, melhor.x.acab) : "";
 }
 
-/** O que o utilizador atribui a cada produto escolhido: a medida, o acabamento (a `cor` é DERIVADA dele por `corDoAcabamento`, nunca escrita à mão), os atributos extra (`extras`: nome do atributo → valor) e, se quiser, o GLB do fabricante. */
+/** A atribuição de um produto à família (a UI já não a escreve: `familiaPorEixos` constrói-a dos atributos do produto): a medida, o acabamento (a `cor` é DERIVADA dele por `corDoAcabamento`), os valores dos atributos da medida (`extras`) e o GLB proposto. */
 export interface AtribuicaoProduto { produtoId: string; medida: string; dim: [number, number, number]; acabamento: string; cor: string; codigo: string; metalness?: number; roughness?: number; glb?: string; extras?: Record<string, string> }
-
-/** Os nomes que um atributo extra não pode ter (já existem como atributos de cada produto). */
-const ATRIBUTOS_RESERVADOS = ["medida", "cor", "acabamento", "cor/acabamento"];
-/** Porque é que `nome` não serve de novo atributo extra («» se serve): vazio, repetido (sem distinguir maiúsculas) ou um dos que já existem (medida, cor, acabamento). */
-export function erroNomeAtributo(nome: string, existentes: readonly string[]): string {
-  const n = norm(nome);
-  if (!n) return "Escreva o nome do atributo (por exemplo «Nº de cubas»).";
-  if (ATRIBUTOS_RESERVADOS.includes(n)) return `«${nome.trim()}» já existe em cada produto: use outro nome para o atributo extra.`;
-  if (existentes.some((x) => norm(x) === n)) return `Já há um atributo «${nome.trim()}».`;
-  return "";
-}
 
 /** O rótulo da medida no cartão: a medida + os valores dos atributos extra que o produto tem («50 cm · 2 cubas»). Uma medida «Única» só aparece se não houver extras. */
 export function rotuloDaMedida(medida: string, extras: readonly string[]): string {
@@ -331,22 +325,25 @@ export function rotuloDaMedida(medida: string, extras: readonly string[]): strin
  * Se dois produtos têm os mesmos valores em TODOS os atributos (medida, extras e cor/acabamento), o segundo fica de fora e há um conflito para corrigir. */
 export function familiaDeProdutos(base: FamiliaCfg, refs: readonly ProdutoRef[], atribuicoes: readonly AtribuicaoProduto[]): { familia: FamiliaCfg; conflitos: string[] } {
   const porId = new Map(refs.map((r) => [r.id, r] as const)), compativeis = new Set(ficheirosCompativeis(base.tipo).map((x) => chaveFicheiro(x.familia, x.modelo, x.acab)));
-  const nomesExtra = base.atributos ?? [];
+  const eixos = base.eixos, nomesExtra = eixos ? eixos.medida : base.atributos ?? [];
   const medidas: MedidaCfg[] = [], acabamentos: AcabCfg[] = [], celulas: Record<string, CelulaCfg> = {}, glb: Record<string, string> = {}, ocupado = new Map<string, string>(), conflitos: string[] = [];
   for (const a of atribuicoes) {
     const r = porId.get(a.produtoId);
     if (!r) continue;
     const valores: Record<string, string> = {};
     for (const n of nomesExtra) { const v = a.extras?.[n]?.trim(); if (v) valores[n] = v; }
-    const medidaBase = a.medida.trim() || "Única", rotulo = rotuloDaMedida(a.medida, nomesExtra.map((n) => valores[n] ?? "")), nomeAcab = a.acabamento.trim() || "Padrão";
+    const lista = nomesExtra.map((n) => valores[n] ?? ""), nomeAcab = a.acabamento.trim() || "Padrão";
+    // com eixos o rótulo é só os valores dos atributos escolhidos, pela ordem escolhida; sem eixos, a medida + os extras (famílias antigas)
+    const rotulo = eixos ? lista.filter(Boolean).join(" · ") || "Única" : rotuloDaMedida(a.medida, lista), medidaBase = eixos ? valores[NOME_MEDIDA] || rotulo : a.medida.trim() || "Única";
     let m = medidas.find((x) => norm(x.rotulo) === norm(rotulo));
     if (!m) { m = { id: `m${medidas.length + 1}`, rotulo, ref: r.sku?.trim() || r.id, dim: [...a.dim], preco: 0 }; medidas.push(m); }
     let c = acabamentos.find((x) => norm(x.nome) === norm(nomeAcab));
     if (!c) { const d = corDoAcabamento(nomeAcab); c = { id: `a${acabamentos.length + 1}`, nome: nomeAcab, cor: d.cor, metalness: d.conhecido ? d.metalness : a.metalness ?? d.metalness, roughness: d.conhecido ? d.roughness : a.roughness ?? d.roughness, codigo: a.codigo.trim() || `A${acabamentos.length + 1}` }; acabamentos.push(c); }
     const k = celulaKey(m.id, c.id);
     if (ocupado.has(k)) {
-      const todos = [`Medida: ${medidaBase}`, ...nomesExtra.map((n) => `${n}: ${valores[n] ?? "—"}`), `Cor: ${c.nome}`].join("; ");
-      conflitos.push(`Os produtos «${ocupado.get(k)}» e «${r.n}» têm os mesmos valores em todos os atributos (${todos}): mude pelo menos um valor num deles.`);
+      const todos = [...(eixos ? [] : [`Medida: ${medidaBase}`]), ...nomesExtra.map((n) => `${n}: ${valores[n] ?? "—"}`), `${eixos?.cor ?? "Cor"}: ${c.nome}`].join("; ");
+      const como = eixos ? "corrija no produto do catálogo ou exclua um dos produtos" : "mude pelo menos um valor num deles";
+      conflitos.push(`Os produtos «${ocupado.get(k)}» e «${r.n}» têm os mesmos valores em todos os atributos (${todos}): ${como}.`);
       continue;
     }
     ocupado.set(k, r.n);
@@ -360,14 +357,59 @@ export function familiaDeProdutos(base: FamiliaCfg, refs: readonly ProdutoRef[],
   return { familia: { ...base, acabamentos, medidas, celulas, glb, regraSku: { ...base.regraSku, modo: "manual" } }, conflitos };
 }
 
-/** O inverso de `familiaDeProdutos`: as atribuições (pela ordem dos produtos) de uma família guardada, para a voltar a editar. */
-export function atribuicoesDaFamilia(f: FamiliaCfg): AtribuicaoProduto[] {
-  return f.medidas.flatMap((m) => f.acabamentos.flatMap((a): AtribuicaoProduto[] => {
-    const k = celulaKey(m.id, a.id), c = f.celulas[k];
-    if (!c?.produtoId) return [];
-    return [{
-      produtoId: c.produtoId, medida: c.medida ?? m.rotulo, dim: [...m.dim], acabamento: a.nome, cor: a.cor, codigo: a.codigo, metalness: a.metalness, roughness: a.roughness,
-      ...(f.glb?.[k] ? { glb: f.glb[k] } : {}), ...(c.valores ? { extras: { ...c.valores } } : {}),
-    }];
-  }));
+/** Os produtos de uma família guardada, pela ordem das variantes (para a reabrir com os mesmos produtos; os eixos ficam em `FamiliaCfg.eixos`). */
+export function idsDaFamilia(f: FamiliaCfg): string[] {
+  return f.medidas.flatMap((m) => f.acabamentos.flatMap((a) => { const id = f.celulas[celulaKey(m.id, a.id)]?.produtoId; return id ? [id] : []; }));
+}
+
+/* ------------------------------------------------------------------ EIXOS: escolher entre os atributos que o produto já tem (nada se escreve) */
+/** O nome do atributo da medida (o que `atributosDoProduto` devolve). */
+export const NOME_MEDIDA = "Medida";
+const ORDEM_ATRIBUTOS: readonly string[] = [NOME_MEDIDA, "Cor"];
+const vazio = (v: string | undefined): boolean => !v || !v.trim();
+type AtributosLista = readonly Readonly<Record<string, string>>[];
+/** Os nomes dos atributos que os produtos têm (a união): Medida e Cor primeiro, os outros pela ordem em que aparecem. */
+export function nomesDosAtributos(lista: AtributosLista): string[] {
+  const vistos = new Set<string>();
+  for (const a of lista) for (const k of Object.keys(a)) vistos.add(k);
+  return [...ORDEM_ATRIBUTOS.filter((k) => vistos.has(k)), ...[...vistos].filter((k) => !ORDEM_ATRIBUTOS.includes(k))];
+}
+/** A cor das bolinhas e a medida por omissão: a cor é «Cor» (ou «Acabamento», ou o primeiro atributo cujo nome o diz); a medida junta a Medida e os restantes atributos QUE VARIAM entre os produtos. */
+export function eixosPorOmissao(lista: AtributosLista): EixosCfg {
+  const nomes = nomesDosAtributos(lista);
+  const cor = nomes.find((n) => norm(n) === "cor") ?? nomes.find((n) => norm(n) === "acabamento") ?? nomes.find((n) => /cor|acabamento/i.test(n)) ?? null;
+  const varia = (n: string) => new Set(lista.map((a) => a[n]?.trim() ?? "")).size > 1;
+  return { cor, medida: nomes.filter((n) => n !== cor && (n === NOME_MEDIDA || varia(n))) };
+}
+/** Os eixos que valem para estes produtos: sem escolha, a omissão; senão a escolha sem os atributos que já não existem e sem a cor repetida na medida. */
+export function eixosValidos(escolha: EixosCfg | null | undefined, lista: AtributosLista): EixosCfg {
+  if (!escolha) return eixosPorOmissao(lista);
+  const nomes = new Set(nomesDosAtributos(lista)), cor = escolha.cor && nomes.has(escolha.cor) ? escolha.cor : null;
+  return { cor, medida: [...new Set(escolha.medida)].filter((n) => nomes.has(n) && n !== cor) };
+}
+
+/** Um produto escolhido como o configurador o vê: o preço e o SKU (`ref`), os atributos (`atributosDoProduto`), as dimensões (palpite, só para o 3D) e o GLB proposto pelo nome. */
+export interface ItemEixos { ref: ProdutoRef; atributos: Readonly<Record<string, string>>; dim: [number, number, number]; glb?: string }
+/** O aviso de um produto sem valor num atributo escolhido (aparece na linha do produto). */
+export const textoSemValor = (atributo: string): string => `Este produto não tem ${atributo}: corrija no produto do catálogo.`;
+/** Os produtos sem valor nos atributos escolhidos como eixos (bloqueiam o Seguinte e o Guardar até se corrigir no catálogo ou se excluir o produto). */
+export function produtosSemValor(itens: readonly Pick<ItemEixos, "ref" | "atributos">[], eixos: EixosCfg): { produtoId: string; nome: string; atributo: string; msg: string }[] {
+  const usados = [...eixos.medida, ...(eixos.cor ? [eixos.cor] : [])];
+  return itens.flatMap((i) => usados.filter((n) => vazio(i.atributos[n])).map((atributo) => ({ produtoId: i.ref.id, nome: i.ref.n, atributo, msg: `«${i.ref.n}»: ${textoSemValor(atributo)}` })));
+}
+/** A família a partir dos produtos e dos eixos escolhidos: o rótulo da medida junta os valores dos atributos de `eixos.medida`; as bolinhas são o atributo de `eixos.cor`.
+ * Nada é escrito à mão: tudo vem dos `atributos` de cada produto. O resultado guarda os `eixos` para a família poder ser reaberta. */
+export function familiaPorEixos(base: FamiliaCfg, itens: readonly ItemEixos[], eixos: EixosCfg): { familia: FamiliaCfg; conflitos: string[] } {
+  const atribuicoes = itens.map((i): AtribuicaoProduto => {
+    const extras = Object.fromEntries(eixos.medida.flatMap((n) => (vazio(i.atributos[n]) ? [] : [[n, i.atributos[n].trim()] as const])));
+    const acabamento = eixos.cor ? i.atributos[eixos.cor]?.trim() ?? "" : "";
+    return { produtoId: i.ref.id, medida: extras[NOME_MEDIDA] ?? "", dim: i.dim, acabamento, cor: corDoAcabamento(acabamento).cor, codigo: "", extras, ...(i.glb ? { glb: i.glb } : {}) };
+  });
+  return familiaDeProdutos({ ...base, eixos: { cor: eixos.cor, medida: [...eixos.medida] } }, itens.map((i) => i.ref), atribuicoes);
+}
+
+/** A marca da família: a marca comum dos produtos, «Várias marcas» (`varias`: mostra-se um aviso) se diferem, ou vazio. */
+export function marcaDaFamilia(refs: readonly Pick<ProdutoRef, "marca">[]): { marca: string; varias: boolean } {
+  const marcas = [...new Set(refs.map((r) => r.marca?.trim() ?? "").filter(Boolean))];
+  return marcas.length > 1 ? { marca: "Várias marcas", varias: true } : { marca: marcas[0] ?? "", varias: false };
 }

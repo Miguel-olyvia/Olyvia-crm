@@ -1,20 +1,18 @@
-// Protótipo (visualizador 3D): os passos «Escolher produtos» e «Atribuir atributos» do Configurador de famílias, para criar uma família A PARTIR DE
+// Protótipo (visualizador 3D): os passos «Escolher produtos» e «Atributos dos produtos» do Configurador de famílias, para criar uma família A PARTIR DE
 // PRODUTOS QUE JÁ EXISTEM no catálogo (só leitura: nada se escreve no catalogoStore). O assistente (PainelConfigurador.tsx) guarda o estado; aqui só se desenha.
+// O segundo passo («Atributos dos produtos») é só de leitura: os atributos vêm de `atributosDoProduto`; o utilizador só escolhe eixos e exclui produtos.
 // A escolha tem filtros (marca, categoria, preço, família) por cima da lista: a lógica pura está em filtrosCatalogo.ts e o bloco de filtros em FiltrosEscolher.tsx.
 import { useDeferredValue, useId, useMemo, useState } from "react";
 import type { No, Produto } from "../v2/catalogoModelo";
-import { ALVO_PROTO, corDoAcabamento, erroNomeAtributo, ficheirosCompativeis, refDoProduto, type AtribuicaoProduto, type FamiliaCfg } from "./configurador";
+import { ALVO_PROTO, corDoAcabamento, refDoProduto, textoSemValor, type EixosCfg } from "./configurador";
 import { BTN, CAMPO, INP, eur } from "./estilosPainel";
 import { FiltrosEscolher } from "./FiltrosEscolher";
 import {
   MAX_SELECAO, aplicarFiltros, chipsDe, comParecidos, contarFiltrosAtivos, facetasDe, indexarCatalogo, semChip, type FiltrosCatalogo,
 } from "./filtrosCatalogo";
-import { chaveFicheiro } from "./modelosHtml/ficheiros";
 
 /** O máximo de produtos desenhados de cada vez (o catálogo de exemplo tem milhares): «Mostrar mais» acrescenta outros tantos. */
 export const MAX_LISTA = 100;
-const NOMES_DIM = ["Largura", "Profundidade", "Altura"] as const;
-const numero = (v: string): number => { const n = Number(v.replace(",", ".")); return Number.isFinite(n) ? n : 0; };
 const plural = (n: number, um: string, varios: string): string => `${n} ${n === 1 ? um : varios}`;
 
 export interface CatalogoLido { produtos: readonly Produto[]; arvore: readonly No[] }
@@ -136,112 +134,109 @@ export function PassoEscolher({ catalogo, escolhidos, ocupados, filtros, onFiltr
   );
 }
 
-export function PassoAtribuir({ familia, produtos, atribuicoes, conflitos, atributos, onAtribuir, onTirar, onAcrescentarAtributo, onTirarAtributo }: {
-  familia: FamiliaCfg; produtos: readonly Produto[]; atribuicoes: Readonly<Record<string, AtribuicaoProduto>>; conflitos: readonly string[]; atributos: readonly string[];
-  onAtribuir: (id: string, p: Partial<AtribuicaoProduto>) => void; onTirar: (id: string) => void; onAcrescentarAtributo: (nome: string) => void; onTirarAtributo: (nome: string) => void;
-}) {
-  const ficheiros = ficheirosCompativeis(familia.tipo), idLista = useId();
-  const [novo, setNovo] = useState(""), [erroNovo, setErroNovo] = useState("");
-  const acrescentar = () => {
-    const erro = erroNomeAtributo(novo, atributos);
-    setErroNovo(erro);
-    if (erro) return;
-    onAcrescentarAtributo(novo.trim()); setNovo("");
-  };
-  /** os valores que já foram usados num atributo (sugestões para os outros produtos) */
-  const usados = (nome: string): string[] => [...new Set(Object.values(atribuicoes).map((x) => x.extras?.[nome]?.trim() ?? "").filter(Boolean))];
+export interface PassoAtributosProps {
+  produtos: readonly Produto[];
+  /** os atributos de cada produto (vêm de `atributosDoProduto`; só se leem) e os nomes dos atributos que existem nestes produtos */
+  atributosPor: ReadonlyMap<string, Readonly<Record<string, string>>>; nomes: readonly string[];
+  eixos: EixosCfg; onEixos: (e: EixosCfg) => void; onExcluir: (id: string) => void;
+  /** o resumo («N produtos = M medidas × K acabamentos») e os avisos que bloqueiam (combinações repetidas, produtos sem valor) */
+  resumo: string; avisos: readonly string[];
+}
+
+/** O passo «Atributos dos produtos»: SÓ DE LEITURA. Mostra os atributos que cada produto já tem, o SKU e o preço; o utilizador apenas escolhe que atributo faz as bolinhas de
+ * cor/acabamento, que atributos compõem o seletor de medida e que produtos ficam na família. Nada se escreve: o que falta corrige-se no produto do catálogo. */
+export function PassoAtributos({ produtos, atributosPor, nomes, eixos, onEixos, onExcluir, resumo, avisos }: PassoAtributosProps) {
+  const grupo = useId(), noSeletor = new Set(eixos.medida), cel = "px-2 py-1.5", cab = `sticky top-0 bg-muted ${cel}`;
+  const escolherCor = (n: string | null) => onEixos({ cor: n, medida: eixos.medida.filter((x) => x !== n) });
+  const alternarMedida = (n: string) => onEixos({ cor: eixos.cor, medida: noSeletor.has(n) ? eixos.medida.filter((x) => x !== n) : [...eixos.medida, n] });
+  const exemplo = produtos.map((p) => eixos.medida.map((n) => atributosPor.get(p.id)?.[n]?.trim() ?? "").filter(Boolean).join(" · ")).find(Boolean) ?? "";
+  const caixa = "inline-flex min-h-11 cursor-pointer items-center gap-2 rounded-full border border-input bg-background px-4 text-[15px] hover:bg-accent";
   return (
     <div className="grid gap-3">
-      <p className="text-sm text-muted-foreground">Os produtos de uma família são iguais e só mudam nos atributos. Diga o valor de cada atributo em cada produto: a medida e a cor/acabamento (a sugestão vem do nome) e os atributos extra que acrescentar. Cada produto fica definido pela combinação dos seus valores, que não pode repetir-se. O SKU e o preço são os do catálogo e não se editam aqui.</p>
-      <fieldset className="grid min-w-0 gap-2 rounded-xl border border-border p-2">
-        <legend className="px-1 text-sm font-semibold">Atributos extra da família</legend>
-        {atributos.length === 0
-          ? <p className="text-sm text-muted-foreground">Sem atributos extra: cada produto só tem medida e cor/acabamento. Acrescente, por exemplo, «Nº de cubas», «Material» ou «Acabamento da aresta».</p>
-          : (
-            <ul aria-label="Atributos extra" className="flex flex-wrap gap-2">
-              {atributos.map((n) => (
-                <li key={n} className="inline-flex min-h-11 items-center gap-2 rounded-full border border-input bg-background pl-4 pr-1 text-[15px]">
-                  <span className="break-words">{n}</span>
-                  <button type="button" className={BTN} aria-label={`Remover o atributo ${n}`} onClick={() => onTirarAtributo(n)}>Remover</button>
-                </li>
-              ))}
-            </ul>
-          )}
-        <div className="flex flex-wrap items-end gap-2">
-          <label className={`${CAMPO} min-w-40 flex-1`}>Nome do novo atributo
-            <input className={INP} value={novo} onChange={(e) => { setNovo(e.target.value); setErroNovo(""); }} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); acrescentar(); } }} placeholder="Por exemplo, Nº de cubas" />
-          </label>
-          <button type="button" className={BTN} onClick={acrescentar}>Acrescentar atributo</button>
-        </div>
-        {erroNovo && <p role="alert" className="text-sm text-destructive">Erro: {erroNovo}</p>}
-      </fieldset>
-      <div className="sticky top-0 z-10 grid gap-2 bg-card py-1">
-        <p role="status" aria-label="Resumo da atribuição" className="text-[15px] font-semibold">{plural(produtos.length, "produto", "produtos")} = {plural(familia.medidas.length, "medida", "medidas")} × {plural(familia.acabamentos.length, "acabamento", "acabamentos")}</p>
-        {conflitos.length > 0 && (
-          <ul role="alert" className="grid gap-1 rounded-lg border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-            {conflitos.map((c) => <li key={c}>Erro: {c}</li>)}
-          </ul>
-        )}
-      </div>
-      {produtos.map((p, i) => {
-        const a = atribuicoes[p.id];
-        if (!a) return null;
-        const n = i + 1, r = refDoProduto(p), nome = `produto ${n}`;
-        return (
-          <fieldset key={p.id} className="grid min-w-0 gap-2 rounded-xl border border-border p-2">
-            <legend className="max-w-full break-words px-1 text-sm font-semibold">Produto {n}: {p.n}</legend>
-            <p className="break-words text-sm text-muted-foreground">SKU {r.sku} · {p.marca || "sem marca"} · {r.preco > 0 ? eur(r.preco) : "preço em falta"}{r.semPvp && r.preco > 0 ? ` (sem PVP: custo + margem de ${ALVO_PROTO} %)` : ""} · vem do produto do catálogo</p>
-            {r.preco <= 0 && <p className="text-sm font-medium text-destructive"><span aria-hidden="true">⚠ </span>Erro: sem preço de venda no catálogo (sem PVP nem custo): não pode entrar na família.</p>}
-            <div className="grid gap-2 sm:grid-cols-2">
-              <label className={CAMPO}>Medida (rótulo)<input aria-label={`Medida do ${nome}`} className={INP} value={a.medida} onChange={(e) => onAtribuir(p.id, { medida: e.target.value })} /></label>
-              <div className="grid grid-cols-3 gap-2">
-                {NOMES_DIM.map((d, j) => (
-                  <label key={d} className={CAMPO}>{d} (cm)
-                    <input aria-label={`${d} do ${nome} (cm)`} type="number" min="0" step="0.1" inputMode="decimal" className={INP} defaultValue={a.dim[j]}
-                      onChange={(e) => onAtribuir(p.id, { dim: a.dim.map((x, k) => (k === j ? numero(e.target.value) : x)) as [number, number, number] })} />
+      <p className="text-sm text-muted-foreground">Os atributos vêm dos produtos do catálogo e só se leem aqui: nada se escreve. Escolha qual deles faz as bolinhas de cor/acabamento e quais compõem o seletor de medida, e que produtos ficam na família. Para mudar um valor, corrija-o no produto do catálogo ou exclua o produto. O SKU e o preço são os do catálogo.</p>
+      {nomes.length === 0
+        ? <p className="text-sm text-muted-foreground">Estes produtos não têm atributos reconhecidos: corrija-os no produto do catálogo.</p>
+        : (
+          <div className="grid gap-2 sm:grid-cols-2">
+            <fieldset className="grid min-w-0 gap-2 rounded-xl border border-border p-2">
+              <legend className="px-1 text-sm font-semibold">Atributo das bolinhas de cor/acabamento</legend>
+              <div className="flex flex-wrap gap-2">
+                {nomes.map((n) => (
+                  <label key={n} className={`${caixa} ${eixos.cor === n ? "border-primary bg-primary/10" : ""}`}>
+                    <input type="radio" name={`${grupo}-cor`} className="h-5 w-5" checked={eixos.cor === n} onChange={() => escolherCor(n)} />{n}
+                  </label>
+                ))}
+                <label className={`${caixa} ${eixos.cor === null ? "border-primary bg-primary/10" : ""}`}>
+                  <input type="radio" name={`${grupo}-cor`} className="h-5 w-5" checked={eixos.cor === null} onChange={() => escolherCor(null)} />Nenhum (sem bolinhas)
+                </label>
+              </div>
+            </fieldset>
+            <fieldset className="grid min-w-0 gap-2 rounded-xl border border-border p-2">
+              <legend className="px-1 text-sm font-semibold">Atributos do seletor de medida</legend>
+              <div className="flex flex-wrap gap-2">
+                {nomes.filter((n) => n !== eixos.cor).map((n) => (
+                  <label key={n} className={`${caixa} ${noSeletor.has(n) ? "border-primary bg-primary/10" : ""}`}>
+                    <input type="checkbox" className="h-5 w-5" checked={noSeletor.has(n)} onChange={() => alternarMedida(n)} />{n}
                   </label>
                 ))}
               </div>
-              <label className={CAMPO}>Acabamento (cor)<input aria-label={`Acabamento do ${nome}`} className={INP} value={a.acabamento} onChange={(e) => { const d = corDoAcabamento(e.target.value); onAtribuir(p.id, { acabamento: e.target.value, cor: d.cor, metalness: d.metalness, roughness: d.roughness }); }} /></label>
-              <label className={CAMPO}>Código do acabamento<input aria-label={`Código do acabamento do ${nome}`} className={INP} value={a.codigo} onChange={(e) => onAtribuir(p.id, { codigo: e.target.value })} /></label>
-              <AmostraDeCor acabamento={a.acabamento} />
-              {atributos.map((x, k) => (
-                <label key={x} className={CAMPO}>{x}
-                  <input aria-label={`${x} do ${nome}`} className={INP} list={`${idLista}-${k}`} value={a.extras?.[x] ?? ""} onChange={(e) => onAtribuir(p.id, { extras: { ...a.extras, [x]: e.target.value } })} />
-                  <datalist id={`${idLista}-${k}`}>{usados(x).map((v) => <option key={v} value={v} />)}</datalist>
-                </label>
+              <p className="text-sm text-muted-foreground">{exemplo ? `O seletor mostra os valores juntos, por exemplo «${exemplo}».` : "Sem atributos escolhidos, o seletor de medida mostra «Única»."}</p>
+            </fieldset>
+          </div>
+        )}
+      <div className="sticky top-0 z-10 grid gap-2 bg-card py-1">
+        <p role="status" aria-label="Resumo da atribuição" className="text-[15px] font-semibold">{resumo}</p>
+        {avisos.length > 0 && (
+          <ul role="alert" className="grid gap-1 rounded-lg border border-destructive/50 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            {avisos.map((c) => <li key={c}>Erro: {c}</li>)}
+          </ul>
+        )}
+      </div>
+      <div className="max-h-96 overflow-x-auto overflow-y-auto rounded-lg border border-border">
+        <table className="w-full min-w-[32rem] border-collapse text-left text-sm">
+          <caption className="px-2 py-1 text-left text-sm font-medium">Atributos dos produtos</caption>
+          <thead>
+            <tr className="border-y border-border">
+              <th scope="col" className={cab}>Produto</th>
+              {nomes.map((n) => (
+                <th key={n} scope="col" className={cab}>{n}{eixos.cor === n ? <span className="block text-xs font-normal text-muted-foreground">bolinhas</span> : noSeletor.has(n) ? <span className="block text-xs font-normal text-muted-foreground">medida</span> : null}</th>
               ))}
-              {ficheiros.length === 0
-                ? <p className="self-end text-sm text-muted-foreground">Modelo genérico: este tipo de produto não tem 3D do fabricante.</p>
-                : (
-                  <label className={CAMPO}>Modelo 3D
-                    <select aria-label={`Modelo 3D do ${nome}`} className={INP} value={a.glb ?? ""} onChange={(e) => onAtribuir(p.id, { glb: e.target.value })}>
-                      <option value="">Modelo genérico</option>
-                      {ficheiros.map((x) => <option key={x.ficheiro} value={chaveFicheiro(x.familia, x.modelo, x.acab)}>{x.marca} · {x.modelo} · {x.acab}</option>)}
-                    </select>
-                  </label>
-                )}
-            </div>
-            {ficheiros.length > 0 && <p><span className="rounded bg-muted px-1.5 text-xs text-muted-foreground">{a.glb ? "3D do fabricante (proposto pelo nome, pode mudar)" : "Modelo genérico"}</span></p>}
-            <div><button type="button" className={BTN} aria-label={`Tirar o ${nome} da família`} onClick={() => onTirar(p.id)}>Tirar da família</button></div>
-          </fieldset>
-        );
-      })}
+              <th scope="col" className={cab}>SKU</th><th scope="col" className={cab}>Preço</th><th scope="col" className={cab}><span className="sr-only">Ação</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {produtos.map((p) => {
+              const r = refDoProduto(p), at = atributosPor.get(p.id) ?? {};
+              const usados = [...eixos.medida, ...(eixos.cor ? [eixos.cor] : [])], falta = usados.filter((n) => !at[n]?.trim());
+              return (
+                <tr key={p.id} className="border-b border-border align-top last:border-0">
+                  <th scope="row" className={`break-words text-left font-medium ${cel}`}>
+                    {p.n}
+                    {falta.map((n) => <span key={n} className="block text-sm font-normal text-destructive"><span aria-hidden="true">⚠ </span>{textoSemValor(n)}</span>)}
+                    {r.preco <= 0 && <span className="block text-sm font-normal text-destructive"><span aria-hidden="true">⚠ </span>Erro: sem preço de venda no catálogo (sem PVP nem custo): não pode entrar na família.</span>}
+                  </th>
+                  {nomes.map((n) => <td key={n} className={`break-words ${cel}`}>{at[n]?.trim() ? (eixos.cor === n ? <AmostraDeCor acabamento={at[n]} /> : at[n]) : <span className="text-muted-foreground">sem valor</span>}</td>)}
+                  <td className={`break-all ${cel}`}>{r.sku}</td>
+                  <td className={cel}>{r.preco > 0 ? eur(r.preco) : "em falta"}{r.semPvp && r.preco > 0 ? <span className="block text-xs text-muted-foreground">{`sem PVP: custo + margem de ${ALVO_PROTO} %`}</span> : null}</td>
+                  <td className={cel}><button type="button" className={`${BTN} cursor-pointer`} aria-label={`Excluir ${p.n} da família`} onClick={() => onExcluir(p.id)}>Excluir</button></td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
-/** A cor do acabamento NÃO se escolhe: deriva do nome (corDoAcabamento). Mostra-se só como amostra, sempre com o nome ao lado (não só cor). */
+/** A cor da bolinha NÃO se escolhe: deriva do nome do acabamento do produto (corDoAcabamento). Mostra-se só como amostra, sempre com o nome ao lado (não só cor). */
 function AmostraDeCor({ acabamento }: { acabamento: string }) {
-  const nome = acabamento.trim() || "Padrão", d = corDoAcabamento(nome);
+  const nome = acabamento.trim(), d = corDoAcabamento(nome);
   return (
-    <div className={CAMPO}>
-      <span>Cor (definida pelo produto)</span>
-      <p className="flex min-h-11 flex-wrap items-center gap-2 text-[15px] font-normal">
-        <span role="img" aria-label={d.conhecido ? `Cor: ${nome}, definida pelo produto` : `Cor: ${nome}, não definida no produto`} style={{ backgroundColor: d.cor }} className="h-6 w-6 shrink-0 rounded-full border border-border" />
-        <span className="break-words">{nome}</span>
-        {!d.conhecido && <span className="text-sm text-muted-foreground">cor não definida no produto</span>}
-      </p>
-    </div>
+    <span className="inline-flex min-h-8 flex-wrap items-center gap-2">
+      <span role="img" aria-label={d.conhecido ? `Cor: ${nome}, definida pelo produto` : `Cor: ${nome}, não definida no produto`} style={{ backgroundColor: d.cor }} className="h-6 w-6 shrink-0 rounded-full border border-border" />
+      <span className="break-words">{nome}</span>
+      {!d.conhecido && <span className="text-xs text-muted-foreground">cor não definida no produto</span>}
+    </span>
   );
 }
