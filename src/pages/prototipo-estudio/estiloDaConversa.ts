@@ -62,7 +62,9 @@ const pecasDe = (w: string): Categoria[] | null => PECA_PALAVRA.find(([rx]) => r
 
 const TUDO = /^(tudo|tod[oa]s?|tudinho|total|inteir[oa])$/;
 export const NEGA = /^(n[aã]o|nada|nunca|sem|detesto|odeio|evitar|evito|evitava|menos)$/;
-export const VONTADE = /\b(quer(o|ia|emos|[ií]amos)?|gosta(va|ria|mos)?|gosto|prefir(o|a|am)|prefer(e|em|ia|imos|[ií]amos|ência)|adoro|adoramos|apetece|sonho|tudo|tod[oa]s?|pode ser|a ideia|pensei|pens[aá]mos|imagino|escolh(o|i|emos)|vamos|fica(r|va)?|seja|p[oô]r|p[oõ]e|ponha|pomos|mete|meter|leva|levar|trocar|troca)\b/;
+// 13/11 («linguagem fluida»): além dos verbos de vontade, os marcadores de decisão/correção com que se escolhe sem dizer «quero»
+// («afinal cinza», «fico com o branco», «opto pelo preto», «vou de madeira», «decidimos o bege»).
+export const VONTADE = /\b(quer(o|ia|emos|[ií]amos)?|gosta(va|ria|mos)?|gosto|prefir(o|a|am)|prefer(e|em|ia|imos|[ií]amos|ência)|adoro|adoramos|apetece|sonho|tudo|tod[oa]s?|pode ser|a ideia|pensei|pens[aá]mos|imagino|escolh(o|i|emos)|vamos|fica(r|va)?|seja|p[oô]r|p[oõ]e|ponha|pomos|mete|meter|leva|levar|trocar|troca|afinal|opt(o|ei|ou|amos|ámos)|fico com|ficamos com|vou de|vamos de|fico por|decid(i|imos|iu))\b/;
 const NAO_SEI = /^(sei|tenho|sabemos)$/;
 // 13/11: os conectores e artigos/possessivos que ligam as peças de uma lista («a sanita e a banheira», «sanita, bidé e banheira»).
 // Servem para a cor no fim da lista se distribuir por todas, parando na 1.ª palavra de conteúdo (um verbo, outra cor já tratada…).

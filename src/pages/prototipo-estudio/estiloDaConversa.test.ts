@@ -40,6 +40,13 @@ describe("o estilo dito na conversa", () => {
     expect(o.estilo.cores).toEqual(["preto"]);
   });
 
+  it("13/11: apanha as escolhas ditas sem «quero» (afinal, fico com, opto, vou de)", () => {
+    expect(ouvir([cl("Afinal cinza.")])!.estilo.cores).toEqual(["cinza"]);
+    expect(ouvir([cl("Fico com o branco.")])!.estilo.cores).toEqual(["branco"]);
+    expect(ouvir([cl("Opto pelo preto.")])!.estilo.cores).toEqual(["preto"]);
+    expect(ouvir([cl("Vou de madeira no móvel.")])!.estilo.porCategoria.movel).toEqual(["madeira"]);
+  });
+
   it("13/11: a cor no fim de uma lista de peças aplica-se a todas (sem apanhar o que vem antes do verbo)", () => {
     const o = ouvir([cl("Olhe, eu quero tirar o bidé e quero a minha sanita e banheira branca.")])!;
     expect(o.estilo.porCategoria.sanita).toEqual(["branco"]);
