@@ -36,6 +36,21 @@ describe("o Estúdio ouve a conversa e muda o estilo", () => {
     expect(Object.keys(atual.escolhas).length).toBeGreaterThan(antes);
   });
 
+  it("13/11: «prefiro branco» (sem a palavra «tudo») também pinta a divisão toda", () => {
+    render(<Ecra inicio={{ ...PROJETO_EXEMPLO, negocio: 7, estilo: { cores: [], porCategoria: {} }, escolhas: {} }} />);
+    const antes = Object.keys(atual.escolhas).length;
+    chega(fala(30, "cliente", "Prefiro branco."));
+    expect(atual.estilo.cores[0]).toBe("branco");
+    expect(Object.keys(atual.escolhas).length).toBeGreaterThan(antes);
+  });
+
+  it("13/11: uma sequência de tirar/trocar/acrescentar e trocas de cor não rebenta", () => {
+    render(<Ecra inicio={{ ...PROJETO_EXEMPLO, negocio: 7, estilo: { cores: [], porCategoria: {} }, escolhas: {} }} />);
+    for (const [t, txt] of [[10, "Tira o bidé."], [20, "Troca a sanita."], [30, "Quero uma base de duche."], [40, "Prefiro branco."], [50, "Afinal prefiro preto."], [60, "Afinal prefiro cinza."]] as [number, string][]) chega(fala(t, "cliente", txt));
+    expect(atual).toBeTruthy();
+    expect(atual.estilo.cores[0]).toBe("cinza"); // o que se disse por último ganha
+  });
+
   it("quando o cliente diz «quero tudo preto», o estilo e as paredes passam a preto, com as combinações para o preto", () => {
     const inicio: Projeto = { ...PROJETO_EXEMPLO, negocio: 7, estilo: { cores: ["branco"], porCategoria: {} }, revestimento: undefined, pavimento: undefined };
     render(<Ecra inicio={inicio} />);

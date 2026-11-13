@@ -34,7 +34,7 @@ const ARTIGO = /^(o|a|os|as|um|uma|uns|umas|de|do|da|novo|nova|novos|novas|esse|
 /** Os serviços do catálogo pelas palavras com que se pedem. */
 const SERVICO: [RegExp, string][] = [
   [/impermeabiliza/, "sv-imperm"], [/\bnicho/, "sv-nicho"], [/pint\w*\s+(d?[oa]\s+)?teto|teto\s+pintado/, "sv-pintura-teto"],
-  [/estore/, "sv-estores"], [/\btomadas?\b/, "sv-tomada"], [/aplique|luz\s+(por\s+)?cima\s+do\s+espelho/, "sv-aplique"],
+  [/estore/, "sv-estores"], [/\btomadas?\b/, "sv-tomada"], [/aplique|\bleds?\b|fita\s+led|luz\s+(por\s+)?cima\s+do\s+espelho/, "sv-aplique"],
   [/ventila|ventaxia|extrator/, "sv-ventilador"], [/(instala\w*|parte|circuito)\s+el[eé]tric|eletricidade\s+nova/, "sv-eletrica"],
   [/reboc|regulariza\w*\s+(d?as\s+)?paredes/, "sv-reboco"], [/rodap/, "sv-rodape"], [/limpeza/, "sv-limpeza"],
   [/montagem\s+(d?os\s+)?m[oó]veis|montar\s+os\s+m[oó]veis/, "sv-montagem-cozinha"], [/recortes?/, "sv-recortes"],

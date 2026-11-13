@@ -123,7 +123,8 @@ export function ditosDoNegocio(f: Record<string, string | undefined>): DitoEstil
   const regras = [...ditosDaConversa(falasDoTexto(f.transcricao_chamada), "chamada"), ...ditosDaConversa(falasDoTexto(f.transcricao_visita), "visita")];
   const modelo = ditosDoModelo(f);
   if (!modelo.length) return regras;
-  return [...modelo, ...regras.filter((d) => d.evitar || d.tudo)];
+  // das regras ficam as cores de conjunto (sem peça: «tudo branco», «prefiro branco») e as evitações; o por-peça é do modelo
+  return [...modelo, ...regras.filter((d) => d.evitar || !d.cats.length)];
 }
 
 /** 6/11: o projeto do Estúdio gravado no negócio (f.estudio, JSON), ou null. */

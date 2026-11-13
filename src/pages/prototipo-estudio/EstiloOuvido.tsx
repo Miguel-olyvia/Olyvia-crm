@@ -94,8 +94,9 @@ export function OuvidoDoCliente({ p, setP, ouvido, pedidos = { pecas: [], servic
   useEffect(() => {
     if (!novos.length && !pecasNovas.length && !servicosNovos.length && !trocasNovas.length) return;
     const o = novos.length ? estiloDosDitos(novos) : null;
-    // 13/11 (Rúben: «disse que quero tudo branco e não fez nada»): um «tudo <cor>» novo repinta a divisão toda, não só o que se troca
-    const global = novos.some((d) => !d.evitar && d.tudo);
+    // 13/11 (Rúben: «tudo branco não fez nada» e «disse que preferia branco e não entendeu»): uma cor de CONJUNTO (sem peça: «tudo
+    // branco», «prefiro branco», «era mais para branco») é a cor da divisão — repinta tudo, não só o que se troca.
+    const global = novos.some((d) => !d.evitar && !d.cats.length);
     setP((x) => {
       antesDoAuto.current = x;
       let r = o ? comEstilo(x, juntarEstilo(x.estilo, o), false, global) : x;
@@ -152,7 +153,7 @@ export function OuvidoDoCliente({ p, setP, ouvido, pedidos = { pecas: [], servic
             {aplicado ? (
               <span className="inline-flex items-center gap-1.5 text-[15px] text-foreground"><Check className="h-4 w-4 text-success" aria-hidden="true" />Aplicado às cores, às peças e aos serviços.</span>
             ) : (
-              <button type="button" className={cn(chip(true), "min-h-11")} onClick={() => { setP((x) => comEstilo(x, juntarEstilo(x.estilo, ouvido!), true, ouvido!.ditos.some((d) => !d.evitar && d.tudo))); setAnuncio("O estilo passou a ser o que se disse na conversa."); }}>
+              <button type="button" className={cn(chip(true), "min-h-11")} onClick={() => { setP((x) => comEstilo(x, juntarEstilo(x.estilo, ouvido!), true, ouvido!.ditos.some((d) => !d.evitar && !d.cats.length))); setAnuncio("O estilo passou a ser o que se disse na conversa."); }}>
                 <Check className="h-4 w-4" aria-hidden="true" />Usar o que se disse
               </button>
             )}

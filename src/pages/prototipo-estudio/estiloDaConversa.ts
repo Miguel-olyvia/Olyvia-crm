@@ -161,8 +161,10 @@ export function estiloDosDitos(ditos: readonly DitoEstilo[]): EstiloOuvido | nul
     }
     evitar.delete(d.cor);
     if (d.cats.length) for (const c of d.cats) porCategoria[c] = [d.cor, ...(porCategoria[c] ?? []).filter((x) => x !== d.cor)];
-    // «tudo preto» passa à frente; uma cor dita sem peça junta-se às do cliente
-    else cores = d.tudo ? [d.cor, ...cores.filter((x) => x !== d.cor)] : cores.includes(d.cor) ? cores : [...cores, d.cor];
+    // 13/11 (Rúben: «trocar de cor várias vezes e ele bloqueia»): uma cor de conjunto (sem peça), dita ou «tudo», passa SEMPRE à frente —
+    // o que se disse por último é a cor principal. Antes só o «tudo» passava à frente e as cores soltas juntavam-se atrás, pelo que a
+    // primeira ficava a mandar e as trocas seguintes pareciam não pegar.
+    else cores = [d.cor, ...cores.filter((x) => x !== d.cor)];
   }
   for (const c of Object.keys(porCategoria) as Categoria[]) if (!porCategoria[c]!.length) delete porCategoria[c];
   return { estilo: { cores, porCategoria }, evitar: [...evitar], ditos: [...ditos] };
