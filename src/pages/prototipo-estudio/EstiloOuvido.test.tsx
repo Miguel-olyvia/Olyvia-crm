@@ -27,6 +27,15 @@ const fala = (inicio: number, falante: Fala["falante"], texto: string): Fala => 
 describe("o Estúdio ouve a conversa e muda o estilo", () => {
   beforeEach(() => { vivo.g = { negocio: 7, modo: "visita", estado: "a_ouvir", falas: [] }; });
 
+  it("13/11: «quero tudo branco» pinta a divisão toda, incluindo as peças que ficam", () => {
+    render(<Ecra inicio={{ ...PROJETO_EXEMPLO, negocio: 7, estilo: { cores: [], porCategoria: {} }, escolhas: {} }} />);
+    const antes = Object.keys(atual.escolhas).length;
+    chega(fala(30, "cliente", "Quero tudo branco."));
+    expect(atual.estilo.cores[0]).toBe("branco");
+    // repintou peças para além das que já se trocavam (o «tudo» aplica-se às que ficam)
+    expect(Object.keys(atual.escolhas).length).toBeGreaterThan(antes);
+  });
+
   it("quando o cliente diz «quero tudo preto», o estilo e as paredes passam a preto, com as combinações para o preto", () => {
     const inicio: Projeto = { ...PROJETO_EXEMPLO, negocio: 7, estilo: { cores: ["branco"], porCategoria: {} }, revestimento: undefined, pavimento: undefined };
     render(<Ecra inicio={inicio} />);

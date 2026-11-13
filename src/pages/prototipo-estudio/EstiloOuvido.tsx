@@ -19,9 +19,10 @@ import { chip } from "./pecasEstudio";
 
 type SetP = React.Dispatch<React.SetStateAction<Projeto>>;
 
-/** Mudar o estilo e escolher de novo o que combina (as peças trocadas e novas, as paredes e o chão). */
-export const comEstilo = (x: Projeto, estilo: Estilo, manual: boolean): Projeto =>
-  ({ ...aplicarEstilo({ ...x, estilo }, (cat) => melhorPara(cat, estilo)?.id), estiloManual: manual || x.estiloManual });
+/** Mudar o estilo e escolher de novo o que combina (as peças trocadas e novas, as paredes e o chão). Com `todas`, repinta também as
+ *  peças que ficam — é o que «tudo branco» quer dizer: toda a divisão naquela cor, não só o que se vai trocar. */
+export const comEstilo = (x: Projeto, estilo: Estilo, manual: boolean, todas = false): Projeto =>
+  ({ ...aplicarEstilo({ ...x, estilo }, (cat) => melhorPara(cat, estilo)?.id, todas), estiloManual: manual || x.estiloManual });
 
 const acompanhaRecomendado = (tipo: TipoPeca, p: Projeto): Partial<Record<Categoria, string>> =>
   Object.fromEntries((ACOMPANHA[tipo] ?? []).map((cat) => [cat, melhorPara(cat, p.estilo)?.id]).filter(([, id]) => !!id));
@@ -93,9 +94,11 @@ export function OuvidoDoCliente({ p, setP, ouvido, pedidos = { pecas: [], servic
   useEffect(() => {
     if (!novos.length && !pecasNovas.length && !servicosNovos.length && !trocasNovas.length) return;
     const o = novos.length ? estiloDosDitos(novos) : null;
+    // 13/11 (Rúben: «disse que quero tudo branco e não fez nada»): um «tudo <cor>» novo repinta a divisão toda, não só o que se troca
+    const global = novos.some((d) => !d.evitar && d.tudo);
     setP((x) => {
       antesDoAuto.current = x;
-      let r = o ? comEstilo(x, juntarEstilo(x.estilo, o), false) : x;
+      let r = o ? comEstilo(x, juntarEstilo(x.estilo, o), false, global) : x;
       // «quero uma banheira preta»: a banheira que há (em «Fica» ou já trocada) passa a «Trocar», com a preta escolhida
       for (const t of trocasNovas) if (r.antes.pecas.some((pc) => pc.tipo === t.tipo)) r = aplicarPeca(r, t.tipo, "troca");
       if (trocasNovas.length) r = aplicarEstilo(r, (cat) => melhorPara(cat, r.estilo)?.id);
@@ -149,7 +152,7 @@ export function OuvidoDoCliente({ p, setP, ouvido, pedidos = { pecas: [], servic
             {aplicado ? (
               <span className="inline-flex items-center gap-1.5 text-[15px] text-foreground"><Check className="h-4 w-4 text-success" aria-hidden="true" />Aplicado às cores, às peças e aos serviços.</span>
             ) : (
-              <button type="button" className={cn(chip(true), "min-h-11")} onClick={() => { setP((x) => comEstilo(x, juntarEstilo(x.estilo, ouvido!), true)); setAnuncio("O estilo passou a ser o que se disse na conversa."); }}>
+              <button type="button" className={cn(chip(true), "min-h-11")} onClick={() => { setP((x) => comEstilo(x, juntarEstilo(x.estilo, ouvido!), true, ouvido!.ditos.some((d) => !d.evitar && d.tudo))); setAnuncio("O estilo passou a ser o que se disse na conversa."); }}>
                 <Check className="h-4 w-4" aria-hidden="true" />Usar o que se disse
               </button>
             )}

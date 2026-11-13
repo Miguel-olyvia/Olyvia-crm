@@ -25,6 +25,13 @@ describe("o Estúdio a partir da Visita", () => {
     expect(estiloDosDitos(ditosDoNegocio(f))!.estilo.porCategoria.sanita).toEqual(["preto"]);
   });
 
+  it("13/11: com o modelo analisado, o «tudo branco» global das regras mantém-se (o modelo só dá por peça)", () => {
+    const f = { insights_visita: insightsVisita([{ peca: "sanita", escolha: "branca" }]), transcricao_visita: "0:05 Cliente: Quero tudo branco." };
+    const o = estiloDosDitos(ditosDoNegocio(f))!;
+    expect(o.estilo.cores).toContain("branco");          // o global, das regras
+    expect(o.estilo.porCategoria.sanita).toEqual(["branco"]); // o por-peça, do modelo
+  });
+
   it("as cores ditas num texto, pela ordem", () => {
     expect(coresDoTexto("Cinza 120 x 60 retificado")).toEqual(["cinza"]);
     expect(coresDoTexto("Axis Oak")).toEqual(["madeira"]);

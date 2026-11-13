@@ -95,13 +95,14 @@ export function ditosDoModelo(f: Record<string, string | undefined>): DitoEstilo
   return out;
 }
 
-/** 12/11→13/11: o que se disse sobre as cores no negócio. Quando o modelo já analisou a conversa, as escolhas de cor vêm dele (a verdade),
- *  e das regras ficam só as evitações («sem branco»), que o modelo não põe nas escolhas. Sem análise do modelo, usam-se as regras. */
+/** 12/11→13/11: o que se disse sobre as cores no negócio. Quando o modelo já analisou a conversa, as escolhas de cor por peça vêm dele (a
+ *  verdade). Das regras ficam o que o modelo não põe nas escolhas: as cores globais («tudo branco») e as evitações («sem branco»). Sem
+ *  análise do modelo, usam-se as regras como até aqui. */
 export function ditosDoNegocio(f: Record<string, string | undefined>): DitoEstilo[] {
   const regras = [...ditosDaConversa(falasDoTexto(f.transcricao_chamada), "chamada"), ...ditosDaConversa(falasDoTexto(f.transcricao_visita), "visita")];
   const modelo = ditosDoModelo(f);
   if (!modelo.length) return regras;
-  return [...modelo, ...regras.filter((d) => d.evitar)];
+  return [...modelo, ...regras.filter((d) => d.evitar || d.tudo)];
 }
 
 /** 6/11: o projeto do Estúdio gravado no negócio (f.estudio, JSON), ou null. */
