@@ -15,11 +15,11 @@ export const INSTRUCAO_BLOCO: Record<Tipo, string> = {
 
 Divide a conversa em frases, pela ordem em que são ditas, e em cada uma dá:
 - inicio e fim, em segundos desde o início deste áudio;
-- falante: "comercial" ou "cliente" (ou "outro" para uma terceira pessoa ou uma gravação da operadora). Decide pela acústica (perto e nítido é o comercial; pelo altifalante é o cliente) e pelo papel na conversa (o comercial apresenta-se, faz as perguntas, explica e marca; o cliente fala da casa dele, do que quer e responde);
+- falante: "comercial" ou "cliente" (ou "outro" para uma terceira pessoa — alguém ao lado do cliente, um familiar — ou uma gravação da operadora). Decide pela acústica (perto e nítido é o comercial; pelo altifalante é o cliente) e pelo papel na conversa (o comercial apresenta-se, faz as perguntas, explica e marca; o cliente fala da casa dele, do que quer e responde). Mantém cada pessoa coerente do princípio ao fim (o mesmo timbre é sempre a mesma pessoa);
 - texto: exatamente o que foi dito, com os "sim", "pois", "exato" que são respostas, e os números em algarismos ("2 casas de banho", "dia 10 às 11", "6.º direito", "5 mil euros");
 - confianca: de 0 a 1, de que o texto é mesmo o que se disse.
 
-Regras: nunca inventes nem completes uma frase plausível; se uma parte não se percebe, escreve "(impercetível)" nesse sítio e baixa a confiança. Toques, música de espera e ruído ficam de fora; se não houver fala nenhuma, a lista vem vazia. Não resumas, não traduzas, não corrijas a gramática.`,
+Regras: nunca inventes nem completes uma frase plausível; se uma parte não se percebe, escreve "(impercetível)" nesse sítio e baixa a confiança. Quando duas pessoas falam ao mesmo tempo, NÃO juntes as vozes numa só linha nem inventes o que ficou tapado: dá uma frase por pessoa, cada uma com o seu falante e só com a parte que se percebe dela. Toques, música de espera e ruído ficam de fora; se não houver fala nenhuma, a lista vem vazia. Não resumas, não traduzas, não corrijas a gramática.`,
   visita: `Transcreve este áudio palavra a palavra, em português de Portugal. É um troço de uma visita a casa de um cliente, para uma obra de remodelação (casa de banho, cozinha ou outra divisão). O comercial e o cliente (às vezes mais alguém da família) falam na mesma divisão, perto de um telemóvel que grava; pode haver eco, passos, água, a fita métrica.
 
 Divide a conversa em frases, pela ordem em que são ditas, e em cada uma dá:
