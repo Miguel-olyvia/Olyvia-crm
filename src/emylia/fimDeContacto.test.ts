@@ -78,7 +78,8 @@ describe("fim de contacto", () => {
     expect(faltaDaFase(codigosDaFase(neg(2)))).toBeNull();
     expect(faltaDaFase(codigosDaFase(neg(1, { [CHAVE_CONTACTO_CONCLUIDO]: "2026-11-11" })))).toBe("negocios.visita.gerir");
     reais(GESTOR);
-    expect(faltaDaFase(codigosDaFase(neg(3)))).toBeNull(); // obra.planear: as medidas e o plano antes do contrato
+    // 13/11 (20270117200000): o Negócio já não aceita obra.planear (as medidas e o plano passaram à Obra)
+    expect(faltaDaFase(codigosDaFase(neg(3)))).toBe("negocios.orcamento.editar");
     expect(faltaDaFase(codigosDaFase(neg(4)))).toBeNull(); // o Financeiro não pede permissão de fase
     expect(faltaDaFase(codigosDaFase(neg(5)))).toBeNull();
     expect(avisoDaFase("negocios.visita.gerir")).toContain("(negocios.visita.gerir)");
@@ -87,5 +88,17 @@ describe("fim de contacto", () => {
     expect(faltaDaFase(codigosDaFase(neg(1, { [CHAVE_CONTACTO_CONCLUIDO]: "2026-11-11" })))).toBe("negocios.visita.gerir");
     expect(avisoDaFase("negocios.visita.gerir")).toContain("já está com o comercial");
     expect(faltaDaFase(codigosDaFase(neg(3)))).toBe("negocios.orcamento.editar");
+  });
+
+  it("13/11 (20270117200000): o Financeiro (registar_fatura, validar_pagamento) trabalha na Obra; sem nenhuma da fase fica só de leitura", () => {
+    const neg = (fase: number) => ({ fase, f: {} });
+    reais(["pessoas.view", "pessoas.edit", "negocios.registar_fatura", "negocios.validar_pagamento"]);
+    expect(faltaDaFase(codigosDaFase(neg(4)))).toBeNull();
+    expect(faltaDaFase(codigosDaFase(neg(5)))).toBeNull();
+    expect(faltaDaFase(codigosDaFase(neg(3)))).toBe("negocios.orcamento.editar");
+    reais(["pessoas.view", "pessoas.edit", "negocios.validar_pagamento"]);
+    expect(faltaDaFase(codigosDaFase(neg(5)))).toBeNull();
+    reais(["pessoas.view", "pessoas.edit"]);
+    expect(faltaDaFase(codigosDaFase(neg(5)))).toBe("negocios.obra.planear");
   });
 });
