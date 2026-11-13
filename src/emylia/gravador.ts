@@ -46,11 +46,11 @@ export interface Gravacao {
 const CHAVE = "olyvia.gravacao.v1";
 const CHAVE_MIC = "olyvia.gravacao.microfone";
 const VAZIA: Gravacao = { negocio: null, nome: "", modo: "visita", voltar: "/negocios", estado: "parado", falas: [], inicioEm: null, pausas: 0, pendentes: 0, falhadas: 0, aRever: 0, aFalar: false, nivel: 0, microfone: "", msg: "" };
-// 13/11 (Rúben: «a transcrição tem um delay muito grande, tenho de parar de falar e leva ~20 s»): o provisório ao vivo tem de ser
-// imediato. Antes juntava falas até 15 s e só fechava o pedaço 2,5 s depois de parar de falar. Agora fecha depressa (0,6 s de pausa, ou
-// 3 s de fala seguida), para a linha aparecer 1 a 2 s depois. A passagem de blocos (~50 s, modelo maior) corrige por trás.
+// 13/11 (Rúben: «a transcrição tem um delay muito grande» → «tornar super reativa»): o provisório ao vivo tem de ser imediato. Antes
+// juntava falas até 15 s e só fechava o pedaço 2,5 s depois de parar de falar. Agora fecha a cada pausa curta (0,3 s, ou 2 s de fala
+// seguida), para cada frase aparecer ~1 s depois de a dizer. A passagem de blocos (~50 s, modelo maior) corrige por trás.
 /** Cada pedaço da visita junta falas até isto (s); nenhum passa de MAX_S. */
-const JUNTAR_S = 3, MAX_S = 20, SILENCIO_FECHA_MS = 600;
+const JUNTAR_S = 2, MAX_S = 20, SILENCIO_FECHA_MS = 300;
 const ESPERAS = [3000, 8000, 20000];
 
 function lerGuardada(): Gravacao {
@@ -333,8 +333,9 @@ async function ligarMicrofone() {
     baseAssetPath: VAD_ASSETS, onnxWASMBasePath: ONNX_BASE, model: "v5", audioContext: ctxAudio,
     getStream: async () => s, pauseStream: async () => undefined, resumeStream: async () => s,
     positiveSpeechThreshold: 0.5, negativeSpeechThreshold: 0.35,
-    // na visita, 0,9 s de silêncio fecha a fala (na chamada responde-se depressa: 0,4 s)
-    redemptionMs: visita ? 900 : 400, preSpeechPadMs: visita ? 400 : 300, minSpeechMs: visita ? 300 : 350,
+    // 13/11 («super reativa»): na visita 0,5 s de silêncio fecha a fala (antes 0,9 s), para cada frase aparecer logo; na chamada 0,4 s.
+    // O pad de 0,4 s antes da fala segura o arranque das palavras (a voz ao longe na sala), mesmo com o fecho mais rápido.
+    redemptionMs: visita ? 500 : 400, preSpeechPadMs: visita ? 400 : 300, minSpeechMs: visita ? 300 : 350,
     submitUserSpeechOnPause: true,
     onSpeechStart: () => { inicioFala = base + (performance.now() - t0) / 1000; if (fechaPedaco) { window.clearTimeout(fechaPedaco); fechaPedaco = null; } mudar({ aFalar: true }); },
     onSpeechEnd: (audio: Float32Array) => {
