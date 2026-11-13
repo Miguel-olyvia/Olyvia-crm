@@ -7,11 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { eur, pct, type SvcId } from "./motor";
-import type { Produto } from "./v2/catalogoModelo";
+import type { AtributoDef, Produto } from "./v2/catalogoModelo";
 import { dataPT } from "./v2/custosModelo";
 import { margemEmPalavras } from "./fichaServico";
 import { BarraMargem } from "./CriarNoCatalogo";
 import { StockArmazens } from "./StockArmazens";
+import { AtributosFicha } from "./AtributosProduto";
 import type { CrmCatalogItem, CrmCatalogList, FreeSupplierRow } from "@/components/supplier-portal-crm/types";
 import {
   definirPreferido, definirPvp, eUuid, lerNumero, lerFornecedoresOrg, lerFornecedoresProduto, ligarArtigo, margemProduto, moeda, procurarArtigos, unidadeDaLigacao,
@@ -37,9 +38,11 @@ type Props = {
   nomeServico: (sid: SvcId) => string; onAbrirServico: (sid: SvcId) => void; real?: FichaProdutoReal;
   /** 29/10: "consumivel" = a ficha do consumível (sem PVP nem margem: é custo dos serviços). */
   tipo?: "produto" | "consumivel";
+  /** 13/11: a lista global de atributos (K.atributos). Em falta ou vazia (a função da base não existe): sem a secção «Atributos». */
+  atributos?: AtributoDef[];
 };
 
-export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, real, tipo = "produto" }: Props) {
+export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, real, tipo = "produto", atributos }: Props) {
   const cons = tipo === "consumivel";
   // 05/11: sem products.view_cost não se mostra o custo de compra (nem a margem, nem o preço dos fornecedores)
   const verCusto = real?.podeVerCusto !== false;
@@ -84,6 +87,13 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
           </Seccao>
         )
         : <Preco key={`${p.id}:${p.pvp ?? ""}`} p={p} min={min} alvo={alvo} real={real} anunciar={anunciar} verCusto={verCusto} />}
+
+      {/* 13/11: grava direto (cat_guardar_produto_atributos), como o PVP; a chave inclui os atributos para o bloco voltar ao que ficou na base */}
+      {!cons && real && eUuid(p.id) && !!atributos?.length && (
+        <Seccao id="fp-atrib" titulo="Atributos">
+          <AtributosFicha key={`${p.id}:${JSON.stringify(p.attrs ?? [])}`} p={p} defs={atributos} real={real} anunciar={anunciar} />
+        </Seccao>
+      )}
 
       {real && eUuid(p.id)
         ? <Fornecedores key={p.id} p={p} real={real} anunciar={anunciar} verCusto={verCusto} />

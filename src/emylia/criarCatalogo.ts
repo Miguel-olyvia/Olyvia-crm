@@ -13,7 +13,7 @@
 import { CATALOGO_TODO, normal, type ItemCatalogo, type LinhaCat } from "./catalogo";
 import { r2, type Estado, type MedKey, type SvcId } from "./motor";
 import type { IconeServicoKey, IlustracaoKey } from "./ilustracoes";
-import { criarProduto, type Catalogo, type ConsumivelCriado } from "./v2/catalogoModelo";
+import { criarProduto, type AtributoProduto, type Catalogo, type ConsumivelCriado } from "./v2/catalogoModelo";
 import {
   HOJE, custoHoraPerfil, custoReceita, margemSobrePreco, mesesEntre, precoReceita,
   type CustoCalc, type Custos, type Equip, type ModoPreco, type ReceitaV2,
@@ -134,6 +134,8 @@ export function criarServico(K: Catalogo, C: Custos, o: NovoServico, hoje = HOJE
 export interface NovoProdutoCompleto {
   n: string; custo: number; un: string; marca?: string; fornecedor?: string; no?: string | null;
   sku?: string; pvp?: number | null; desc?: string; servico?: SvcId | null; img?: IlustracaoKey;
+  /** 13/11: os atributos escolhidos (Cor, Medida…); seguem com o produto novo. */
+  attrs?: AtributoProduto[];
 }
 /** O preço de venda do produto: o PVP, ou o custo com a margem-alvo. */
 export const precoVendaProduto = (custo: number, pvp: number | null | undefined, alvo: number) =>
@@ -158,6 +160,7 @@ export function criarProdutoCompleto(K: Catalogo, o: NovoProdutoCompleto, hoje =
     ...p,
     ...(o.sku?.trim() ? { sku: o.sku.trim() } : {}), ...(o.pvp != null && o.pvp > 0 ? { pvp: r2(o.pvp) } : {}),
     ...(o.desc?.trim() ? { desc: o.desc.trim() } : {}), ...(o.servico ? { servico: o.servico } : {}), ...(o.img ? { img: o.img } : {}),
+    ...(o.attrs?.length ? { attrs: o.attrs } : {}),
   });
   return { ok: true, id: r.id, K: { ...r.K, produtos } };
 }

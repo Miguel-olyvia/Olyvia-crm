@@ -25,6 +25,16 @@ export interface No {
    *  Serve para classificar produtos e para a regra «exige produto»; não serve para classificar serviços. */
   soProduto?: true;
 }
+/** 13/11: a medida de um produto (atributo do tipo «medida»): 2D (largura × comprimento) ou 3D (com espessura), em cm ou mm. */
+export interface MedidaAtributo { tipo: "2D" | "3D"; largura: number; comprimento: number; espessura: number | null; unidade: "cm" | "mm" }
+/** 13/11: o valor de um atributo num produto: uma opção da lista (opcaoId, com o texto em `valor`) ou uma medida. */
+/** `inativa`: a opção escolhida foi desativada depois (a lista já não a traz); o valor mantém-se até alguém o trocar. */
+export interface AtributoProduto { atributoId: string; opcaoId?: string; valor?: string; medida?: MedidaAtributo; inativa?: true }
+/** 13/11: uma opção de um atributo de lista (Cor: Preto #000000). `valor` é o texto que a base guarda (nalguns atributos em
+ *  MAIÚSCULAS: PIZARRA) e `nome` o que se mostra (Pizarra). `hex` só nos atributos com amostra de cor. */
+export interface OpcaoAtributo { id: string; valor: string; nome: string; hex: string | null; ordem: number }
+/** 13/11: um atributo da lista global (Medida, Cor, Tonalidade, Tipo de grelha, Textura, Brilho), com as suas opções. */
+export interface AtributoDef { id: string; codigo: string; nome: string; tipo: "lista" | "medida"; temHex: boolean; ordem: number; opcoes: OpcaoAtributo[] }
 export interface Produto {
   id: string; n: string;
   /** Custo de compra por unidade (€). */
@@ -52,6 +62,8 @@ export interface Produto {
   sub?: string;
   /** O entulho que gera quando é retirado (volume solto e peso, por unidade; 14/10). Sem ele, o do tipo (entulhoPadrao.ts). */
   entulho?: EntulhoProd;
+  /** 13/11: os atributos do produto (cat_ler_atributos): no máximo um valor por atributo. Sem eles, o produto não os tem. */
+  attrs?: AtributoProduto[];
 }
 /** Quantidade de uma linha de pacote: fixa, ou por medida (× fator, com arredondamento para cima). */
 export type Regra = { k: "fixo"; q: number } | { k: "por"; med: MedKey; f: number; arred: boolean };
@@ -107,6 +119,8 @@ export interface Catalogo {
   servicosCriados?: ItemCatalogo[];
   /** 27/10: os consumíveis criados no Catálogo, ainda sem receita que os use. */
   consumiveisCriados?: ConsumivelCriado[];
+  /** 13/11: a lista global de atributos dos produtos. Em falta ou vazia (a função da base não existe): o ecrã não os mostra. */
+  atributos?: AtributoDef[];
 }
 /** Um consumível criado à mão (27/10): o preço é por unidade, a data é a do preço. */
 export interface ConsumivelCriado { id: string; n: string; un: string; preco: number; fornecedor: string; data: string; opcional?: boolean }

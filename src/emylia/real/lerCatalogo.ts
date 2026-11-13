@@ -1,7 +1,7 @@
 // CRM: lê o Catálogo e custos da organização numa só chamada (cat_ler_catalogo, migration 20261231920000).
 // A função devolve as linhas de cada tabela; montar os objetos dos ecrãs é real/catalogoReal.ts.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { LinhaProduto, LinhasCatalogo, LinhasTabelas } from "./catalogoReal";
+import type { LinhaAtributo, LinhaProduto, LinhasAtributos, LinhasCatalogo, LinhasTabelas } from "./catalogoReal";
 
 const VAZIO: LinhasCatalogo = {
   parametros: null, margemLinha: [], categorias: [], perfis: [], equipamentos: [], estrutura: [], servicos: [], precosServico: [],
@@ -50,13 +50,33 @@ export function juntarTabelas(L: LinhasCatalogo, r: unknown): LinhasCatalogo {
   };
 }
 
+/** 13/11 (cat_ler_atributos): junta os atributos dos produtos. Sem resposta (função por criar na base, erro ou outro formato): as
+ *  linhas ficam como estão, sem `atributos`, e o ecrã não mostra a secção «Atributos». */
+export function juntarAtributos(L: LinhasCatalogo, r: unknown): LinhasCatalogo {
+  if (!r || typeof r !== "object" || !Array.isArray((r as Record<string, unknown>).atributos)) return L;
+  const o = r as Record<string, unknown>;
+  const atributos: LinhasAtributos = { defs: lista<LinhaAtributo>(o.atributos), produtos: lista<LinhasAtributos["produtos"][number]>(o.produtos) };
+  return { ...L, atributos };
+}
+
+/** A resposta de cat_ler_atributos; qualquer falha (função por criar, permissão, rede) é «sem atributos», nunca um erro. */
+async function lerAtributos(sb: SupabaseClient, org: string): Promise<unknown> {
+  try {
+    const a = (await sb.rpc("cat_ler_atributos" as never, { p_org: org } as never)) as { data?: unknown; error?: unknown } | undefined;
+    return a && !a.error ? a.data : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function lerCatalogo(sb: SupabaseClient, org: string): Promise<LinhasCatalogo> {
-  const [r, t] = await Promise.all([
+  const [r, t, a] = await Promise.all([
     sb.rpc("cat_ler_catalogo" as never, { p_org: org } as never),
     sb.rpc("cat_ler_produtos_tabelas" as never, { p_org: org } as never),
+    lerAtributos(sb, org),
   ]);
   if (r.error) throw new Error(mensagemErroCatalogo(r.error));
   // sem a função nova (SQL 20270117100000 por colar) ou com erro nela: lê-se pelo texto, como antes
   if (t.error) console.info("Catálogo: produtos pelo texto (cat_ler_produtos_tabelas:", t.error.message ?? t.error.code, ")");
-  return juntarTabelas(linhasDe(r.data), t.error ? null : t.data);
+  return juntarAtributos(juntarTabelas(linhasDe(r.data), t.error ? null : t.data), a);
 }

@@ -4,7 +4,8 @@
 // e rpc_catalog_link, com a unidade resolvida por fetchFreeSupplierRows). Quem decide é a base; isto só não oferece o que ela recusa.
 import type { CatalogLinkResult, CrmCatalogItem, CrmCatalogList, FreeSupplierRow, RpcError } from "@/components/supplier-portal-crm/types";
 import { precoProduto } from "./fichaServico";
-import type { Produto } from "./v2/catalogoModelo";
+import type { AtributoProduto, OpcaoAtributo, Produto } from "./v2/catalogoModelo";
+import { valoresParaGravar } from "./atributosTexto";
 
 // o cliente e as funções de Compras carregam-se só quando a ficha os usa (o CatalogoV1 também corre no protótipo e nos testes sem base)
 // (uma só promessa: dois imports ao mesmo tempo davam, nos testes, o módulo verdadeiro em vez do simulado)
@@ -60,7 +61,7 @@ export function moeda(v: number | null | undefined, currency: string | null | un
 }
 
 // as duas RPCs novas não estão nos tipos gerados
-const rpcLivre = async (fn: string, args: Record<string, unknown>) => {
+export const rpcLivre = async (fn: string, args: Record<string, unknown>) => {
   const sb = await cliente();
   const { data, error } = await sb.rpc(fn as never, args as never);
   return { data: data as unknown, error: (error ?? null) as RpcError | null };
@@ -95,6 +96,30 @@ export async function definirPvp(productId: string, pvp: number | null): Promise
     return { ok: true, v: data as { ok: boolean; pvp: number | null } };
   } catch (e) {
     return { ok: false, erro: (e as Error).message || "Não foi possível gravar o PVP." };
+  }
+}
+
+/** 13/11: os atributos do produto (Cor, Medida…). Grava DIRETO por cat_guardar_produto_atributos, que substitui o conjunto todo do
+ *  produto; não passa pelo autosave do Catálogo (que regravaria o custo). Função por criar na base: «Ainda não disponível…». */
+export async function gravarAtributos(org: string, productId: string, attrs: readonly AtributoProduto[]): Promise<Res<{ ok: boolean; n: number }>> {
+  try {
+    const { data, error } = await rpcLivre("cat_guardar_produto_atributos", { p_org: org, p_produto: productId, p_valores: valoresParaGravar(attrs) });
+    if (error || !data) return { ok: false, erro: erroAmigavel(error, "Não foi possível gravar os atributos.") };
+    return { ok: true, v: data as { ok: boolean; n: number } };
+  } catch (e) {
+    return { ok: false, erro: (e as Error).message || "Não foi possível gravar os atributos." };
+  }
+}
+
+/** 13/11: uma opção nova de um atributo (cat_guardar_opcao). Na Cor o hex (#RRGGBB) é obrigatório; nome repetido: a base diz «Esta opção já existe». */
+export async function criarOpcaoAtributo(org: string, atributoId: string, valor: string, hex: string | null): Promise<Res<OpcaoAtributo>> {
+  try {
+    const { data, error } = await rpcLivre("cat_guardar_opcao", { p_org: org, p_atributo: atributoId, p_valor: valor, p_hex: hex });
+    const o = (data as { opcao?: OpcaoAtributo } | null)?.opcao;
+    if (error || !o?.id) return { ok: false, erro: erroAmigavel(error, "Não foi possível criar a opção.") };
+    return { ok: true, v: { id: o.id, valor: o.valor, nome: o.nome || o.valor, hex: o.hex ?? null, ordem: o.ordem ?? 0 } };
+  } catch (e) {
+    return { ok: false, erro: (e as Error).message || "Não foi possível criar a opção." };
   }
 }
 

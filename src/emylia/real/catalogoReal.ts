@@ -5,7 +5,7 @@
 import type { MedKey, Servico, SvcId } from "../motor";
 import type { ItemCatalogo, LinhaCat } from "../catalogo";
 import type { Custos, LinhaEstrutura, ModoPreco, Parametros, PassoMO, ReceitaV2, UsoCons, UsoEquip } from "../v2/custosModelo";
-import type { Catalogo, No, Produto, Regra } from "../v2/catalogoModelo";
+import type { AtributoDef, AtributoProduto, Catalogo, MedidaAtributo, No, Produto, Regra } from "../v2/catalogoModelo";
 import type { EntulhoSvc } from "../entulho";
 import type { FichaTecnico } from "../equipa/tecnicos";
 
@@ -59,6 +59,14 @@ export interface LinhasTabelas {
   /** O ramo da árvore dos produtos de onde cada serviço obriga a escolher um produto (services.exige_categoria_produto_id). */
   exige: { service_id: string; categoria_produto_id: string }[];
 }
+/** 13/11 (cat_ler_atributos): a lista global de atributos com as opções, e os valores de cada produto (só os que têm). */
+export interface LinhaAtributo {
+  id: string; codigo: string; nome: string; tipo: "lista" | "medida"; tem_hex: boolean; ordem: number;
+  opcoes: { id: string; valor: string; nome?: string | null; hex: string | null; ordem: number }[];
+}
+/** `ativa`: false se a opção foi desativada (o id continua a vir; `opcoes` da lista só traz as ativas). */
+export interface LinhaValorAtributo { atributo: string; opcao: string | null; valor: string | null; medida: MedidaAtributo | null; ativa?: boolean }
+export interface LinhasAtributos { defs: LinhaAtributo[]; produtos: { id: string; valores: LinhaValorAtributo[] }[] }
 export interface LinhaPrecoProduto { product_id: string; price_type: string; price: number; valid_from: string | null }
 export interface LinhaFornecedorProduto { product_id: string; purchase_price: number | null; preco_data: string | null; ligacao: string; fornecedor: string | null }
 export interface LinhaTecnico { id: string; nome: string; custo_hora: number | null; perfis: string[] }
@@ -83,6 +91,8 @@ export interface LinhasCatalogo {
   ve_custo_tecnicos?: boolean;
   /** 13/11 (20270117100000): os produtos leem-se pelas tabelas de referência. Sem o campo: como antes, pelo texto. */
   tabelas?: LinhasTabelas;
+  /** 13/11 (cat_ler_atributos): os atributos dos produtos. Sem o campo (função por criar ou com erro): o ecrã não os mostra. */
+  atributos?: LinhasAtributos;
 }
 
 /* ------------------------------------------------------------------ o resultado */
@@ -165,6 +175,20 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
     return { custo: n(c?.price), data: dia(c?.valid_from), fornecedor: "" };
   };
   const produtoPorId = new Map(L.produtos.map((p) => [p.id, p]));
+  // 13/11: os atributos (cat_ler_atributos); sem eles, K.atributos fica por definir e os produtos sem attrs
+  const attrsDe = new Map<string, AtributoProduto[]>();
+  for (const x of L.atributos?.produtos ?? []) {
+    const vs = (x.valores ?? []).filter((v) => v?.atributo).map((v): AtributoProduto => ({
+      atributoId: v.atributo, ...(v.opcao ? { opcaoId: v.opcao } : {}), ...(v.valor != null ? { valor: v.valor } : {}), ...(v.medida ? { medida: v.medida } : {}), ...(v.opcao && v.ativa === false ? { inativa: true as const } : {}),
+    }));
+    if (vs.length) attrsDe.set(x.id, vs);
+  }
+  const defsAtributos: AtributoDef[] | undefined = L.atributos
+    ? [...L.atributos.defs].filter((d) => d?.id).sort((a, b) => n(a.ordem) - n(b.ordem)).map((d) => ({
+      id: d.id, codigo: d.codigo, nome: d.nome, tipo: d.tipo, temHex: !!d.tem_hex, ordem: n(d.ordem),
+      opcoes: [...(d.opcoes ?? [])].sort((a, b) => n(a.ordem) - n(b.ordem)).map((o) => ({ id: o.id, valor: o.valor, nome: o.nome || o.valor, hex: o.hex ?? null, ordem: n(o.ordem) })),
+    }))
+    : undefined;
 
   // serviços
   const cat = new Map(L.categorias.map((c) => [c.id, c]));
@@ -191,6 +215,7 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
     arvore: [...arvoreSvc, ...(junta?.extra ?? [])].sort((a, b) => Number(a.pai != null) - Number(b.pai != null)),
     produtos: [], pacotes: [], classe: {}, exigeProduto: {}, qtdDe: {}, perguntaManter: {}, fasesServico: {}, entulhoServico: {}, icone: {},
     equivalentes: undefined, servicosCriados: [], consumiveisCriados: [],
+    ...(defsAtributos ? { atributos: defsAtributos } : {}),
   };
 
   for (const s of L.servicos) {
@@ -254,6 +279,7 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
         ...(p.sku ? { sku: p.sku } : {}), ...(pvp && n(pvp.price) > 0 ? { pvp: n(pvp.price) } : {}), ...(p.short_description ? { desc: p.short_description } : {}),
         ...(p.entulho_m3 != null ? { entulho: { m3: n(p.entulho_m3), ...(p.entulho_kg != null ? { kg: n(p.entulho_kg) } : {}) } } : {}),
         ...(Array.isArray(p.image_urls) && p.image_urls.length ? { fotos: p.image_urls.filter((u) => typeof u === "string" && u) } : {}),
+        ...(attrsDe.has(p.id) ? { attrs: attrsDe.get(p.id) } : {}),
       };
       K.produtos.push(prod);
     } else if (!usados.has(p.id)) {

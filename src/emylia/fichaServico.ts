@@ -14,6 +14,7 @@ import {
 import type { IconeServicoKey } from "./ilustracoes";
 import { ARTIGOS_DEM0, PAR_DEM0, contaExemplo, vSoltoDe, type ArtigoDem, type ContaExemplo, type EntulhoSvc, type ParDem } from "./entulho";
 import { entulhoDoProduto, entulhoDoServico, tipoDoTexto } from "./entulhoPadrao";
+import { textoPesquisaAtributos } from "./atributosTexto";
 
 /* ------------------------------------------------------------------ medida */
 /** As unidades de um serviço, para escolher (não escrever). */
@@ -141,11 +142,11 @@ export function agruparPorOficio<T extends { oficio: string }>(L: T[], ordem: st
 /* ------------------------------------------------------------------ produtos */
 /** Os produtos que trazem este serviço quando se escolhem na visita. */
 export const produtosQueTrazem = (K: Pick<Catalogo, "produtos">, sid: SvcId): Produto[] => K.produtos.filter((p) => p.servico === sid);
-/** Procura em nome, marca, SKU e subcategoria (sem acentos). */
+/** Procura em nome, marca, SKU, subcategoria e atributos (sem acentos). */
 export function pesquisarProdutos(L: Produto[], q: string): Produto[] {
   const qq = normal(q.trim());
   if (!qq) return L;
-  return L.filter((p) => normal(`${p.n} ${p.marca} ${p.sku ?? ""} ${p.sub ?? ""} ${p.fornecedor}`).includes(qq));
+  return L.filter((p) => normal(`${p.n} ${p.marca} ${p.sku ?? ""} ${p.sub ?? ""} ${p.fornecedor} ${textoPesquisaAtributos(p)}`).includes(qq));
 }
 /** O preço de venda de um produto: o PVP real, ou o custo com a margem dada (sobre o preço). */
 export const precoProduto = (p: Produto, margem: number) => (p.pvp != null ? p.pvp : margem < 100 ? p.custo / (1 - margem / 100) : 0);

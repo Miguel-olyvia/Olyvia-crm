@@ -2,7 +2,7 @@
 // (Serviço, Produto, Equipamento, Consumível, Técnico), o formulário à esquerda e a pré-visualização à direita, que mostra já
 // o custo, o preço e a margem enquanto se escreve. As regras e as contas estão em criarCatalogo.ts.
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
-import { ArrowLeft, Check, Circle, Drill, Droplet, HardHat, Package, Plus, Search, Trash2, Wrench, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Check, Circle, Drill, Droplet, HardHat, Package, Plus, Search, Wrench, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, pct, type Estado, type MedKey, type SvcId } from "./motor";
@@ -20,11 +20,12 @@ import {
   type NovoServico, type TipoCriar,
 } from "./criarCatalogo";
 import { podeCriarTipo, usePermissoesCatalogo } from "./permissoesCatalogo";
+import { AtributosCriar } from "./AtributosProduto";
+import { CAMPO, CHIP, NOTA, Campo, Chips, Num, Retirar } from "./pecasForm";
+import type { FichaProdutoReal } from "./fichaProdutoDados";
+import type { AtributoProduto } from "./v2/catalogoModelo";
 
-const NOTA = "text-[15px] text-muted-foreground";
-const CAMPO = "h-11 w-full rounded-lg border border-input bg-card px-3 text-[15px] outline-none transition-shadow focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
 const CARTAO = "rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)] sm:p-5";
-const CHIP = (on: boolean) => cn("inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-3.5 text-[15px] transition-all", on ? "border-primary bg-primary/10 font-medium text-foreground" : "border-input bg-card text-muted-foreground hover:bg-muted hover:text-foreground");
 const ICONE_TIPO: Record<TipoCriar, LucideIcon> = { servico: Wrench, produto: Package, equipamento: Drill, consumivel: Droplet, tecnico: HardHat };
 const COR_TIPO: Record<TipoCriar, string> = {
   servico: "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-300", produto: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
@@ -38,36 +39,6 @@ const n = (s: string) => (s.trim() ? numero(s) : NaN);
 const n0 = (s: string) => { const x = n(s); return isNaN(x) ? 0 : x; };
 
 /* ------------------------------------------------------------------ peças do formulário */
-function Campo({ rot, dica, children, className }: { rot: string; dica?: string; children: (id: string) => ReactNode; className?: string }) {
-  const id = useId();
-  return (
-    <div className={cn("grid content-start gap-1.5", className)}>
-      <label htmlFor={id} className="text-[15px] font-medium">{rot}</label>
-      {children(id)}
-      {dica && <span className="text-sm text-muted-foreground">{dica}</span>}
-    </div>
-  );
-}
-function Num({ id, v, set, suf, rot, ph = "0" }: { id?: string; v: string; set: (s: string) => void; suf?: string; rot?: string; ph?: string }) {
-  return (
-    <span className="relative block">
-      <input id={id} aria-label={rot} type="text" inputMode="decimal" value={v} placeholder={ph} onChange={(e) => set(e.target.value.replace(/[^\d,.-]/g, ""))}
-        className={cn(CAMPO, "text-right tabular-nums", suf ? "pr-14" : "")} />
-      {suf && <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{suf}</span>}
-    </span>
-  );
-}
-function Chips<T extends string | null>({ rot, opcoes, v, set }: { rot: string; opcoes: readonly (readonly [T, string])[]; v: T; set: (v: T) => void }) {
-  return (
-    <div role="radiogroup" aria-label={rot} className="flex flex-wrap gap-2">
-      {opcoes.map(([k, t]) => (
-        <button key={String(k)} type="button" role="radio" aria-checked={v === k} onClick={() => set(k)} className={CHIP(v === k)}>
-          {v === k && <Check className="h-4 w-4 text-primary" aria-hidden="true" />}{t}
-        </button>
-      ))}
-    </div>
-  );
-}
 function Secao({ i, titulo, texto, children }: { i: number; titulo: string; texto?: string; children: ReactNode }) {
   return (
     <section aria-label={titulo} className={cn(CARTAO, "motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-bottom-2 motion-safe:fill-mode-both motion-safe:duration-300")} style={{ animationDelay: `${i * 60}ms` }}>
@@ -116,11 +87,6 @@ function Procurar({ rot, ph, opcoes, onEscolher }: { rot: string; ph: string; op
     </div>
   );
 }
-const Retirar = ({ rot, onClick }: { rot: string; onClick: () => void }) => (
-  <button type="button" aria-label={rot} onClick={onClick} className="grid h-11 w-11 shrink-0 place-items-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive">
-    <Trash2 className="h-4 w-4" aria-hidden="true" />
-  </button>
-);
 
 /* ------------------------------------------------------------------ pré-visualização */
 /** O que falta, como uma lista que se vai riscando; e o botão de criar. */
@@ -400,12 +366,13 @@ function FormServico({ S, C, K, onCriado }: { S: Estado; C: Custos; K: Catalogo;
 }
 
 /* ------------------------------------------------------------------ produto */
-function FormProduto({ S, K, onCriado }: { S: Estado; K: Catalogo; onCriado: (id: string, nome: string) => void }) {
+function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: FichaProdutoReal; onCriado: (id: string, nome: string) => void }) {
   const [nome, setNome] = useState(""), [marca, setMarca] = useState(""), [sku, setSku] = useState(""), [forn, setForn] = useState("");
   const [un, setUn] = useState("un"), [custo, setCusto] = useState(""), [pvp, setPvp] = useState(""), [no, setNo] = useState(""), [desc, setDesc] = useState("");
   const [servico, setServico] = useState<SvcId | null>(null);
   const [img, setImg] = useState<IlustracaoKey | null>(null);
   const [verImg, setVerImg] = useState(false);
+  const [attrs, setAttrs] = useState<AtributoProduto[]>([]);
   const servicos = useMemo(() => {
     const m = new Map<string, { v: string; t: string; sub: string }>();
     for (const [sid, s] of Object.entries(S.svc)) m.set(sid, { v: sid, t: s.n, sub: s.perfil });
@@ -413,7 +380,7 @@ function FormProduto({ S, K, onCriado }: { S: Estado; K: Catalogo; onCriado: (id
     return [...m.values()];
   }, [S.svc, K]); // eslint-disable-line react-hooks/exhaustive-deps
   const nomeSvc = servico ? servicos.find((x) => x.v === servico)?.t ?? servico : null;
-  const o = { n: nome, custo: n(custo), un, marca, fornecedor: forn, no: no || null, sku, pvp: pvp.trim() ? n(pvp) : null, desc, servico, ...(img ? { img } : {}) };
+  const o = { n: nome, custo: n(custo), un, marca, fornecedor: forn, no: no || null, sku, pvp: pvp.trim() ? n(pvp) : null, desc, servico, ...(img ? { img } : {}), ...(attrs.length ? { attrs } : {}) };
   const faltas = faltasProduto(K, o);
   const venda = precoVendaProduto(n0(custo), o.pvp, S.cfg.alvo), m = venda > 0 ? (venda - n0(custo)) / venda : 0;
   const imgV = img ?? ilustracaoDoProduto({ n: nome }, no ? caminho(K.arvore, no) : null);
@@ -456,6 +423,7 @@ function FormProduto({ S, K, onCriado }: { S: Estado; K: Catalogo; onCriado: (id
               </div>
             )}
           </div>
+          <AtributosCriar defs={K.atributos} onChange={setAttrs} real={real} />
         </Secao>
         <Secao i={2} titulo="Compra e venda">
           <div className="grid gap-1.5"><span className="text-[15px] font-medium">Unidade</span><Chips rot="Unidade do produto" opcoes={unidades.map((u) => [u, u] as const)} v={un} set={setUn} /></div>
@@ -604,9 +572,11 @@ function FormTecnico({ S, C, onCriado }: { S: Estado; C: Custos; onCriado: (id: 
 }
 
 /* ------------------------------------------------------------------ a página */
-export function CriarNoCatalogo({ S, C, K, run, tipo, setTipo, voltar, onCriado }: {
+export function CriarNoCatalogo({ S, C, K, run, tipo, setTipo, voltar, onCriado, real }: {
   S: Estado; C: Custos; K: Catalogo; run: (fn: () => void) => void; tipo: TipoCriar; setTipo: (t: TipoCriar) => void; voltar: () => void;
   onCriado: (t: TipoCriar, id: string, nome: string) => void;
+  /** 13/11: só na página real; deixa criar opções novas dos atributos (cat_guardar_opcao). */
+  real?: FichaProdutoReal;
 }) {
   const titulo = useRef<HTMLHeadingElement>(null);
   useEffect(() => { titulo.current?.focus(); }, []);
@@ -644,7 +614,7 @@ export function CriarNoCatalogo({ S, C, K, run, tipo, setTipo, voltar, onCriado 
       {!pode && <p role="note" className="mt-8 text-[15px] text-muted-foreground">Sem permissão para criar este tipo no Catálogo.</p>}
       {pode && <div key={tipo} className="mt-8 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
         {tipo === "servico" && <FormServico S={S} C={C} K={K} onCriado={feito("servico")} />}
-        {tipo === "produto" && <FormProduto S={S} K={K} onCriado={feito("produto")} />}
+        {tipo === "produto" && <FormProduto S={S} K={K} real={real} onCriado={feito("produto")} />}
         {tipo === "equipamento" && <FormEquip C={C} onCriado={feito("equipamento")} />}
         {tipo === "consumivel" && <FormConsumivel S={S} C={C} K={K} onCriado={feito("consumivel")} />}
         {tipo === "tecnico" && <FormTecnico S={S} C={C} onCriado={feito("tecnico")} />}

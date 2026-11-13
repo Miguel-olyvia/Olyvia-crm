@@ -21,6 +21,7 @@ import { FichaServicoSimples } from "./FichaServicoSimples";
 import { tomarFichaPendente } from "./fichaNav";
 import { montarCatalogo, type Ref } from "./ligacoes";
 import { LigacoesCatalogo, abrirLigacoesEm } from "./LigacoesCatalogo";
+import { GestaoAtributos } from "./GestaoAtributos";
 import {
   FILTROS_V1, agruparPorOficio, iconeDoServico, margemEmPalavras, passaFiltroV1, pesquisarProdutos, precoProduto,
   quebraEquip, tecnicosCatalogo, usosEquip, type ConsCatalogo, type FiltroV1,
@@ -28,6 +29,7 @@ import {
 import { useParamUrl } from "./usarParamUrl";
 import { CriarNoCatalogo } from "./CriarNoCatalogo";
 import { FichaProduto } from "./FichaProduto";
+import { ResumoAtributos } from "./AtributosProduto";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { BarraSelecao, CaixaLinha, useSelecao } from "./MarcarArmazens";
 import { TIPOS_CRIAR, consumiveisComCriados, type TipoCriar } from "./criarCatalogo";
@@ -227,6 +229,7 @@ function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo, real,
             <span className="min-w-0 flex-1">
               <button id={`prod-${p.id}`} type="button" onClick={(e) => { e.stopPropagation(); tocar(p.id); }} className="block text-left text-[15px] font-medium group-hover:underline">{p.n}{p.id === novo && <Novo />}</button>
               {(p.marca || p.sku) && <span className={cn(NOTA, "block")}>{[p.marca, p.sku ? `ref. ${p.sku}` : ""].filter(Boolean).join(" · ")}</span>}
+              <ResumoAtributos p={p} defs={K.atributos} />
               {p.servico && (
                 <button type="button" onClick={(e) => { e.stopPropagation(); onAbrir(p.servico!); }} className="mt-0.5 inline-flex min-h-11 items-center text-left text-[15px] font-medium text-primary underline-offset-4 hover:underline sm:min-h-0">
                   Traz: {nomeServico(p.servico)}
@@ -391,6 +394,15 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   useEffect(() => { if (pendente) { const t = window.setTimeout(() => setServicoUrl(pendente, { substituir: true }), 0); return () => window.clearTimeout(t); } return undefined; }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // 27/10: o Criar no Catálogo abre no lugar da lista (?criar=servico|produto|…): o "voltar" do browser fecha-o
   const [criar, setCriar] = useParamUrl<TipoCriar | "">("criar", "", ["", ...TIPOS_CRIAR.map((t) => t.k)]);
+  // 13/11: a gestão dos atributos (?atributos=1) abre no lugar da lista, só na página real
+  const [atributosAberto, setAtributosAberto] = useParamUrl<"" | "1">("atributos", "", ["", "1"]);
+  const voltarAtributos = useRef(false);
+  // ao sair da gestão, o foco regressa ao botão «Atributos» (como nas fichas)
+  useEffect(() => {
+    if (atributosAberto || !voltarAtributos.current) return;
+    voltarAtributos.current = false;
+    document.getElementById("btn-atributos")?.focus();
+  }, [atributosAberto]);
   const [realce, setRealce] = useState<{ t: TipoCriar; id: string } | null>(null);
   const [aviso, setAviso] = useState<{ msg: string; n: number } | null>(null);
   const voltarPara = useRef<SvcId | null>(null);
@@ -453,10 +465,19 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
     window.scrollTo?.({ top: 0, behavior: "smooth" });
   };
 
+  if (atributosAberto && real) {
+    return (
+      <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
+        <GestaoAtributos real={real} voltar={() => setAtributosAberto("")} anunciar={anunciar} />
+        {regiao}
+      </div>
+    );
+  }
+
   if (criar) {
     return (
       <div className="mx-auto w-full max-w-6xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
-        <CriarNoCatalogo S={S} C={C} K={K} run={run} tipo={criar} setTipo={(t) => setCriar(t, { substituir: true })} voltar={() => setCriar("")} onCriado={criado} />
+        <CriarNoCatalogo S={S} C={C} K={K} run={run} tipo={criar} setTipo={(t) => setCriar(t, { substituir: true })} voltar={() => setCriar("")} onCriado={criado} real={real} />
         {regiao}
       </div>
     );
@@ -474,7 +495,7 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   if (produtoAberto) {
     return (
       <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
-        <FichaProduto key={produtoAberto} p={K.produtos.find((x) => x.id === produtoAberto)} min={S.cfg.min} alvo={S.cfg.alvo} real={real}
+        <FichaProduto key={produtoAberto} p={K.produtos.find((x) => x.id === produtoAberto)} min={S.cfg.min} alvo={S.cfg.alvo} real={real} atributos={K.atributos}
           voltar={() => { voltarProduto.current = produtoAberto; setProdutoAberto(""); }} anunciar={anunciar} nomeServico={nomeServico}
           onAbrirServico={(sid) => { setProdutoAberto("", { substituir: true }); setAberto(sid); }} />
         {regiao}
@@ -529,11 +550,16 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
         <div className="min-w-0 flex-1">
           <h1 className="text-3xl font-semibold tracking-tight">Catálogo e custos</h1>
         </div>
-        {tipoDaSeccao && (
-          <Button className="h-11 shrink-0 text-[15px] shadow-sm transition-transform hover:-translate-y-0.5" onClick={() => setCriar(tipoDaSeccao)}>
-            <Plus className="mr-1 h-5 w-5" aria-hidden="true" />Criar
-          </Button>
-        )}
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          {real && (
+            <Button id="btn-atributos" variant="ghost" className="h-11 text-[15px] text-muted-foreground" onClick={() => { voltarAtributos.current = true; setAtributosAberto("1"); }}>Atributos</Button>
+          )}
+          {tipoDaSeccao && (
+            <Button className="h-11 shrink-0 text-[15px] shadow-sm transition-transform hover:-translate-y-0.5" onClick={() => setCriar(tipoDaSeccao)}>
+              <Plus className="mr-1 h-5 w-5" aria-hidden="true" />Criar
+            </Button>
+          )}
+        </div>
       </div>
       <div role="tablist" aria-label="Secções do Catálogo" className="mt-6 flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] sm:[mask-image:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)]">
         {SECCOES.map(([s, t]) => tab(s, t))}

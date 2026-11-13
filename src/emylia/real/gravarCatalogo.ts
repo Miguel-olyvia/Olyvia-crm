@@ -7,6 +7,7 @@ import { itemCatalogo, type ItemCatalogo } from "../catalogo";
 import type { Custos, ReceitaV2 } from "../v2/custosModelo";
 import type { Catalogo, No } from "../v2/catalogoModelo";
 import { MEDIDA_PARA_BASE, type CatalogoMontado, type LinhaProduto } from "./catalogoReal";
+import { mesmosAtributos, valoresParaGravar } from "../atributosTexto";
 
 /** O Catálogo num momento: o que os ecrãs mostram. */
 export interface FotoCatalogo {
@@ -115,6 +116,11 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
     if (tabelas)
       out.push({ rpc: "cat_guardar_produto_tabelas", nota: `Produto: ${p.n} (marca, unidade e categoria)`, args: {
         p_org: org, p_id: novo ? { tmp: "prod:" + p.id } : p.id, p_marca: p.marca, p_unidade: p.un, ...nomesRamo(p.no) } });
+    // 13/11: os atributos escolhidos ao criar seguem com o produto novo (cat_guardar_produto_atributos); sem atributos a lista não muda.
+    // Num produto que já existe os atributos gravam-se na ficha, direto (fichaProdutoDados.gravarAtributos), não por aqui.
+    if (p.attrs?.length && (novo || !mesmosAtributos(a?.attrs, p.attrs)))
+      out.push({ rpc: "cat_guardar_produto_atributos", nota: `Produto: ${p.n} (atributos)`, args: {
+        p_org: org, p_produto: novo ? { tmp: "prod:" + p.id } : p.id, p_valores: valoresParaGravar(p.attrs) } });
   }
   for (const c of depois.K.consumiveisCriados ?? []) {
     const a = consA.get(c.id);
