@@ -27,6 +27,9 @@ const porId = <T extends { id: string }>(L: readonly T[]) => new Map(L.map((x) =
 export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: FotoCatalogo, base: Pick<CatalogoMontado, "ids"> & { produtos: LinhaProduto[] }): Chamada[] {
   const out: Chamada[] = [];
   const ids = base.ids;
+  // 13/11 (20270117100000): a marca, a unidade e a categoria dos produtos e o ramo exigido pelos serviços gravam-se pelas tabelas de
+  // referência (cat_guardar_produto_tabelas, cat_guardar_servico_exige), pelo nome do ramo. Sem a função na base: como antes.
+  const tabelas = !!ids.tabelas;
 
   // 1. parâmetros, margens e margens por linha
   if (!igual(antes.C.par, depois.C.par) || !igual(antes.margens, depois.margens) || !igual(antes.C.minLinha, depois.C.minLinha)) {
@@ -70,15 +73,27 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
     out.push({ rpc: "cat_guardar_equipamento_horas", nota: `Equipamento retirado: ${a.n}`, args: {
       p_org: org, p_id: a.id, p_nome: a.n, p_compra: a.compra, p_vida_horas: a.vida, p_residual: a.residual, p_manutencao_ano: a.manutAno, p_uso_ano_horas: a.usoAno, p_apagar: true } });
 
-  // 5. árvore (os ofícios antes dos subs)
+  // 5. árvore (os ofícios antes dos subs). Os ramos só da árvore dos produtos (soProduto) não se gravam aqui: mudam-se nas
+  // Categorias de produtos.
   const noA = porId(antes.K.arvore), noD = porId(depois.K.arvore);
   const noRef = (id: string | null | undefined): string | Tmp | null => (!id ? null : noA.has(id) && UUID.test(id) ? id : { tmp: "no:" + id });
+  /** O ramo na árvore dos serviços (service_categories); um ramo só de produtos não tem: null. */
+  const noServico = (id: string | null | undefined) => (id && noD.get(id)?.soProduto ? null : noRef(id));
+  /** Os nomes do ramo (categoria de topo e sub), para gravar pela árvore dos produtos. */
+  const nomesRamo = (id: string | null | undefined): { p_categoria: string | null; p_subcategoria: string | null } => {
+    const x = id ? noD.get(id) : undefined;
+    if (!x) return { p_categoria: null, p_subcategoria: null };
+    let topo = x;
+    for (let i = 0; topo.pai && noD.has(topo.pai) && i < 10; i++) topo = noD.get(topo.pai)!;
+    return topo === x ? { p_categoria: x.n, p_subcategoria: null } : { p_categoria: topo.n, p_subcategoria: x.n };
+  };
   for (const n of [...depois.K.arvore].sort((x, y) => Number(x.pai != null) - Number(y.pai != null))) {
+    if (n.soProduto) continue;
     const a = noA.get(n.id);
     if (a && a.n === n.n && a.pai === n.pai) continue;
     out.push({ rpc: "cat_guardar_categoria", nota: `Ramo: ${n.n}`, guarda: a ? undefined : "no:" + n.id, args: { p_org: org, p_id: a ? n.id : null, p_nome: n.n, p_pai: noRef(n.pai) } });
   }
-  for (const a of antes.K.arvore) if (!noD.has(a.id) && UUID.test(a.id) && !(a.pai && !noD.has(a.pai)))
+  for (const a of antes.K.arvore) if (!a.soProduto && !noD.has(a.id) && UUID.test(a.id) && !(a.pai && !noD.has(a.pai)))
     out.push({ rpc: "cat_apagar_categoria", nota: `Ramo retirado: ${a.n}`, args: { p_org: org, p_id: a.id } });
 
   // 6. produtos e consumíveis soltos
@@ -92,11 +107,14 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
     const novo = !a || !prodBase.has(p.id);
     const id: string | Tmp | null = novo ? null : p.id;
     out.push({ rpc: "cat_guardar_produto", nota: `Produto: ${p.n}`, guarda: novo ? "prod:" + p.id : undefined, args: {
-      p_org: org, p_id: id, p_tipo: "produto", p_nome: p.n, p_sku: p.sku ?? null, p_unidade: p.un, p_categoria_id: noRef(p.no),
+      p_org: org, p_id: id, p_tipo: "produto", p_nome: p.n, p_sku: p.sku ?? null, p_unidade: p.un, p_categoria_id: tabelas ? noServico(p.no) : noRef(p.no),
       p_custo: p.custo, p_custo_data: p.data || null, p_pvp: p.pvp ?? null, p_servico_id: svcRef(p.servico), p_fator_servico: p.fatorServico ?? 1,
       p_entulho_m3: p.entulho?.m3 ?? null, p_entulho_kg: p.entulho?.kg ?? null, p_descricao: p.desc ?? null } });
     if (novo || a?.marca !== p.marca || a?.fornecedor !== p.fornecedor)
       out.push({ rpc: "cat_guardar_produto_texto", nota: `Produto: ${p.n} (marca e fornecedor)`, args: { p_org: org, p_id: novo ? { tmp: "prod:" + p.id } : p.id, p_marca: p.marca, p_fornecedor: p.fornecedor } });
+    if (tabelas)
+      out.push({ rpc: "cat_guardar_produto_tabelas", nota: `Produto: ${p.n} (marca, unidade e categoria)`, args: {
+        p_org: org, p_id: novo ? { tmp: "prod:" + p.id } : p.id, p_marca: p.marca, p_unidade: p.un, ...nomesRamo(p.no) } });
   }
   for (const c of depois.K.consumiveisCriados ?? []) {
     const a = consA.get(c.id);
@@ -107,6 +125,9 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
       p_custo: c.preco, p_custo_data: c.data || null, p_pvp: null, p_servico_id: null, p_fator_servico: 1 } });
     if (novo || a?.fornecedor !== c.fornecedor)
       out.push({ rpc: "cat_guardar_produto_texto", nota: `Consumível: ${c.n} (fornecedor)`, args: { p_org: org, p_id: novo ? { tmp: "prod:" + c.id } : c.id, p_marca: null, p_fornecedor: c.fornecedor } });
+    if (tabelas && (novo || a?.un !== c.un))
+      out.push({ rpc: "cat_guardar_produto_tabelas", nota: `Consumível: ${c.n} (unidade)`, args: {
+        p_org: org, p_id: novo ? { tmp: "prod:" + c.id } : c.id, p_marca: null, p_unidade: c.un, p_categoria: null, p_subcategoria: null } });
   }
 
   // 7. serviços: a receita (mão de obra, equipamentos, consumíveis, preço) e os pormenores (ícone, produto exigido, entulho…)
@@ -144,13 +165,16 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
             p_org: org, p_id: null, p_tipo: "consumivel", p_nome: c.n, p_sku: null, p_unidade: c.un, p_categoria_id: null,
             p_custo: c.preco, p_custo_data: c.data || null, p_pvp: null, p_servico_id: null, p_fator_servico: 1 } });
           if (c.fornecedor) out.push({ rpc: "cat_guardar_produto_texto", nota: `Consumível novo: ${c.n} (fornecedor)`, args: { p_org: org, p_id: { tmp: t }, p_marca: null, p_fornecedor: c.fornecedor } });
+          if (tabelas) out.push({ rpc: "cat_guardar_produto_tabelas", nota: `Consumível novo: ${c.n} (unidade)`, args: {
+            p_org: org, p_id: { tmp: t }, p_marca: null, p_unidade: c.un, p_categoria: null, p_subcategoria: null } });
           consProduto.set(chave, { tmp: t });
         }
         ref = consProduto.get(chave)!;
       }
       return { product_id: ref, quantidade: c.q, opcional: !!c.opcional };
     });
-    const no = mD.no ? noD.get(mD.no) : undefined;
+    // um serviço não fica num ramo só de produtos (não existe em service_categories)
+    const no = mD.no && !noD.get(mD.no)?.soProduto ? noD.get(mD.no) : undefined;
     const cat: No | undefined = no?.pai ? noD.get(no.pai) : no;
     const fases = (mD.fases ?? []) as number[];
     const precoMudou = rA?.precoTabela !== rD.precoTabela;
@@ -166,10 +190,13 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
     const regra = mD.qtd;
     out.push({ rpc: "cat_guardar_servico_detalhes", nota: `Serviço: ${nome} (pormenores)`, args: {
       p_org: org, p_id: novo ? { tmp: "svc:" + sid } : ids.servico.get(sid), p_chave: sid, p_unidade: mD.un ?? item?.un ?? null, p_icone: mD.icone ?? null,
-      p_exige_categoria_id: noRef(mD.exige), p_exige_medida: !regra ? null : regra.k === "fixo" ? "fixo" : MEDIDA_PARA_BASE[regra.med],
+      p_exige_categoria_id: tabelas ? noServico(mD.exige) : noRef(mD.exige), p_exige_medida: !regra ? null : regra.k === "fixo" ? "fixo" : MEDIDA_PARA_BASE[regra.med],
       p_exige_fator: !regra ? null : regra.k === "fixo" ? regra.q : regra.f, p_exige_arredondar: regra?.k === "por" ? regra.arred : false,
       p_pergunta_manter: mD.perg ?? null, p_entulho_modo: mD.ent?.modo ?? null, p_entulho_m3: mD.ent?.m3 ?? null, p_entulho_kg: mD.ent?.kg ?? null,
     } });
+    if (tabelas)
+      out.push({ rpc: "cat_guardar_servico_exige", nota: `Serviço: ${nome} (produto obrigatório)`, args: {
+        p_org: org, p_id: novo ? { tmp: "svc:" + sid } : ids.servico.get(sid), ...nomesRamo(mD.exige) } });
   }
   return out;
 }

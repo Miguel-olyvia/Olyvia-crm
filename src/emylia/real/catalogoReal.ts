@@ -44,6 +44,20 @@ export interface LinhaProduto {
   marca_livre: string | null; fornecedor_livre: string | null;
   /** 03/11 (20270104930000): as fotos do produto; base antiga não manda o campo. */
   image_urls?: string[] | null;
+  /** 13/11 (20270117100000, cat_ler_produtos_tabelas): a marca, a unidade e a categoria pelas tabelas de referência (brands, uom,
+   *  product_categories). Sem a função na base (SQL por colar) não vêm e fica o texto (marca_livre, unidade, catalogo_categoria_id). */
+  brand_id?: string | null; marca?: string | null; uom_id?: string | null; uom?: string | null;
+  category_id?: string | null; subcategory_id?: string | null;
+}
+/** Uma categoria de produto (product_categories). */
+export interface LinhaCategoriaProduto { id: string; name: string; parent_id: string | null; sort_order: number | null }
+/** 13/11 (20270117100000): o que cat_ler_produtos_tabelas manda além dos campos de cada produto. */
+export interface LinhasTabelas {
+  categoriasProduto: LinhaCategoriaProduto[];
+  marcas: string[];
+  unidades: string[];
+  /** O ramo da árvore dos produtos de onde cada serviço obriga a escolher um produto (services.exige_categoria_produto_id). */
+  exige: { service_id: string; categoria_produto_id: string }[];
 }
 export interface LinhaPrecoProduto { product_id: string; price_type: string; price: number; valid_from: string | null }
 export interface LinhaFornecedorProduto { product_id: string; purchase_price: number | null; preco_data: string | null; ligacao: string; fornecedor: string | null }
@@ -67,6 +81,8 @@ export interface LinhasCatalogo {
   tecnicos: LinhaTecnico[];
   /** 20261231998000: a base mandou o custo/hora de cada técnico (só com hr.pessoas.retribuicao.view). Sem o campo: true (base antiga). */
   ve_custo_tecnicos?: boolean;
+  /** 13/11 (20270117100000): os produtos leem-se pelas tabelas de referência. Sem o campo: como antes, pelo texto. */
+  tabelas?: LinhasTabelas;
 }
 
 /* ------------------------------------------------------------------ o resultado */
@@ -80,8 +96,8 @@ export interface CatalogoMontado {
   tecnicos: FichaTecnico[];
   /** Margem mínima e alvo da organização (S.cfg.min, S.cfg.alvo). */
   margens: { min: number; alvo: number };
-  /** Chave da Emylia → id na base (para gravar). */
-  ids: { servico: Map<string, string>; perfil: Map<string, string> };
+  /** Chave da Emylia → id na base (para gravar). `tabelas`: os produtos gravam-se pelas tabelas de referência (20270117100000). */
+  ids: { servico: Map<string, string>; perfil: Map<string, string>; tabelas?: boolean };
 }
 
 /** As medidas das Operações (base) ↔ as da Emylia (motor). */
@@ -90,6 +106,39 @@ export const MEDIDA_PARA_BASE: Record<MedKey, string> = { pav: "m2_pavimento", p
 const medidaDaBase = (m: string | null | undefined): MedKey | null => (m ? MEDIDA_DA_BASE[m] ?? null : null);
 
 const n = (v: unknown): number => (v === null || v === undefined ? 0 : Number(v));
+const nomeIgual = (s: string) => s.trim().replace(/\s+/g, " ").toLowerCase();
+/** A unidade do produto: a da tabela de unidades (uom) e, sem ela, o texto. */
+const unDe = (p: LinhaProduto) => p.uom || p.unidade || "un";
+
+/** 13/11 (20270117100000): a árvore dos produtos (product_categories) junta-se à dos serviços pelo nome, porque o motor da Emylia
+ *  usa uma só árvore (classe dos serviços, ramo dos produtos e a regra «exige produto»). Uma categoria de produto com o mesmo nome
+ *  (e o mesmo pai) que um ramo dos serviços fica nesse ramo; as outras entram na árvore como ramos só de produtos (soProduto).
+ *  Devolve os nós a mais e a função categoria de produto → nó da árvore. */
+export function juntarArvoreProdutos(servicos: readonly No[], cats: readonly LinhaCategoriaProduto[]): { extra: No[]; noDe: (id: string | null | undefined) => string | null } {
+  const raiz = new Map<string, string>(), sub = new Map<string, string>();
+  for (const x of servicos) {
+    if (x.pai == null) { if (!raiz.has(nomeIgual(x.n))) raiz.set(nomeIgual(x.n), x.id); }
+    else if (!sub.has(x.pai + "|" + nomeIgual(x.n))) sub.set(x.pai + "|" + nomeIgual(x.n), x.id);
+  }
+  const svc = new Set(servicos.map((x) => x.id));
+  const porId = new Map(cats.map((c) => [c.id, c]));
+  const memo = new Map<string, string | null>(), extra: No[] = [];
+  const noDe = (id: string | null | undefined, ver = new Set<string>()): string | null => {
+    if (!id) return null;
+    if (memo.has(id)) return memo.get(id)!;
+    const c = porId.get(id);
+    if (!c || ver.has(id)) return null;
+    ver.add(id);
+    const pai = c.parent_id ? noDe(c.parent_id, ver) : null;
+    const igual = pai == null ? raiz.get(nomeIgual(c.name)) : svc.has(pai) ? sub.get(pai + "|" + nomeIgual(c.name)) : undefined;
+    const no = igual ?? c.id;
+    if (!igual) extra.push({ id: c.id, n: c.name, pai, soProduto: true });
+    memo.set(id, no);
+    return no;
+  };
+  for (const c of [...cats].sort((a, b) => (n(a.sort_order) - n(b.sort_order)) || a.name.localeCompare(b.name))) noDe(c.id);
+  return { extra, noDe };
+}
 const dia = (v: string | null | undefined): string => (v ? String(v).slice(0, 10) : "");
 /** Do mais antigo para o mais recente (o último é o atual). */
 const porData = <T extends { valid_from: string | null }>(L: T[]) => [...L].sort((a, b) => String(a.valid_from ?? "").localeCompare(String(b.valid_from ?? "")));
@@ -128,11 +177,18 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
   const receitas: Record<SvcId, ReceitaV2> = {};
   const itens: ItemCatalogo[] = [];
   const svc: Record<SvcId, Servico> = {};
+  const arvoreSvc = [...L.categorias].sort((a, b) => (n(a.sort_order) - n(b.sort_order)) || a.name.localeCompare(b.name))
+    .sort((a, b) => Number(a.parent_id != null) - Number(b.parent_id != null))
+    .map((c): No => ({ id: c.id, n: c.name, pai: c.parent_id }));
+  // 13/11 (20270117100000): com as tabelas, os produtos e a regra «exige produto» vão pela árvore dos produtos, junta pelo nome
+  const T = L.tabelas;
+  const junta = T ? juntarArvoreProdutos(arvoreSvc, T.categoriasProduto) : null;
+  const exigeNovo = new Map((T?.exige ?? []).map((e) => [e.service_id, junta!.noDe(e.categoria_produto_id)]));
+  const noDoProduto = (p: LinhaProduto): string | null =>
+    (junta && (p.subcategory_id || p.category_id) ? junta.noDe(p.subcategory_id || p.category_id) : null) ?? p.catalogo_categoria_id;
   const K: Catalogo = {
     ...base,
-    arvore: [...L.categorias].sort((a, b) => (n(a.sort_order) - n(b.sort_order)) || a.name.localeCompare(b.name))
-      .sort((a, b) => Number(a.parent_id != null) - Number(b.parent_id != null))
-      .map((c): No => ({ id: c.id, n: c.name, pai: c.parent_id })),
+    arvore: [...arvoreSvc, ...(junta?.extra ?? [])].sort((a, b) => Number(a.pai != null) - Number(b.pai != null)),
     produtos: [], pacotes: [], classe: {}, exigeProduto: {}, qtdDe: {}, perguntaManter: {}, fasesServico: {}, entulhoServico: {}, icone: {},
     equivalentes: undefined, servicosCriados: [], consumiveisCriados: [],
   };
@@ -146,7 +202,7 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
       const p = produtoPorId.get(u.product_id);
       if (!p) return [];
       const c = custoDe(p.id);
-      return [{ id: p.id, n: p.name, q: n(u.quantity), un: p.unidade ?? "un", preco: c.custo, fornecedor: c.fornecedor || p.fornecedor_livre || "", data: c.data, ...(u.opcional ? { opcional: true } : {}) }];
+      return [{ id: p.id, n: p.name, q: n(u.quantity), un: unDe(p), preco: c.custo, fornecedor: c.fornecedor || p.fornecedor_livre || "", data: c.data, ...(u.opcional ? { opcional: true } : {}) }];
     });
     const hist = porData(precosSvc.get(s.id) ?? []).map((p) => ({ data: dia(p.valid_from), preco: n(p.price), nota: p.nota ?? "" }));
     const atual = porData(precosSvc.get(s.id) ?? []).pop();
@@ -164,8 +220,10 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
       linhas: (s.linhas ?? []) as LinhaCat[], ...(s.sku ? { sku: s.sku } : {}), ...(rec.precoTabela > 0 ? { pvp: rec.precoTabela } : {}) });
     const no = s.service_subcategory_id ?? s.service_category_id;
     if (no) K.classe[sid] = no;
-    if (s.exige_produto_categoria_id) {
-      K.exigeProduto![sid] = s.exige_produto_categoria_id;
+    // 13/11: o ramo exigido pela árvore dos produtos (exige_categoria_produto_id); sem ele, o antigo (árvore dos serviços)
+    const exige = exigeNovo.get(s.id) ?? s.exige_produto_categoria_id;
+    if (exige) {
+      K.exigeProduto![sid] = exige;
       const m = s.exige_produto_medida;
       const regra: Regra = !m || m === "fixo" ? { k: "fixo", q: n(s.exige_produto_fator) || 1 }
         : { k: "por", med: medidaDaBase(m) ?? "pav", f: n(s.exige_produto_fator) || 1, arred: !!s.exige_produto_arredondar };
@@ -190,8 +248,8 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
     // 29/10: PVP limpo (cat_definir_pvp com null) ou a 0 não conta: o preço volta a ser custo + alvo
     if (p.tipo_catalogo === "produto") {
       const prod: Produto = {
-        id: p.id, n: p.name, custo: c.custo, un: p.unidade ?? "un", marca: p.marca_livre ?? "", fornecedor: c.fornecedor || p.fornecedor_livre || "",
-        data: c.data, no: p.catalogo_categoria_id,
+        id: p.id, n: p.name, custo: c.custo, un: unDe(p), marca: p.marca || p.marca_livre || "", fornecedor: c.fornecedor || p.fornecedor_livre || "",
+        data: c.data, no: noDoProduto(p),
         ...(p.servico_id && svcChave.has(p.servico_id) ? { servico: svcChave.get(p.servico_id)!, fatorServico: n(p.fator_servico) || 1 } : {}),
         ...(p.sku ? { sku: p.sku } : {}), ...(pvp && n(pvp.price) > 0 ? { pvp: n(pvp.price) } : {}), ...(p.short_description ? { desc: p.short_description } : {}),
         ...(p.entulho_m3 != null ? { entulho: { m3: n(p.entulho_m3), ...(p.entulho_kg != null ? { kg: n(p.entulho_kg) } : {}) } } : {}),
@@ -199,12 +257,12 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
       };
       K.produtos.push(prod);
     } else if (!usados.has(p.id)) {
-      K.consumiveisCriados!.push({ id: p.id, n: p.name, un: p.unidade ?? "un", preco: c.custo, fornecedor: c.fornecedor || p.fornecedor_livre || "", data: c.data });
+      K.consumiveisCriados!.push({ id: p.id, n: p.name, un: unDe(p), preco: c.custo, fornecedor: c.fornecedor || p.fornecedor_livre || "", data: c.data });
     }
   }
   const unicos = (xs: string[]) => [...new Set(xs.filter(Boolean))].sort((a, b) => a.localeCompare(b));
-  K.unidades = unicos([...base.unidades, ...K.produtos.map((p) => p.un), ...itens.map((i) => i.un)]);
-  K.marcas = unicos(K.produtos.map((p) => p.marca));
+  K.unidades = unicos([...base.unidades, ...(T?.unidades ?? []), ...K.produtos.map((p) => p.un), ...itens.map((i) => i.un)]);
+  K.marcas = unicos([...(T?.marcas ?? []), ...K.produtos.map((p) => p.marca)]);
   K.fornecedores = unicos([...K.produtos.map((p) => p.fornecedor), ...Object.values(receitas).flatMap((r) => r.cons.map((c) => c.fornecedor))]);
 
   const C: Custos = {
@@ -239,5 +297,5 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
     return [{ id: t.id, pessoaRhId: t.id, n: t.nome, sk: nome, ...rotulo, ...(p ? { perfilId: p } : {}), perfis, ferias: [], custoHora: n(t.custo_hora), tel: "", desde: "", ...custo }];
   });
 
-  return { C, K, svc, itens, tecnicos, margens, ids: { servico: svcId, perfil: perfilId } };
+  return { C, K, svc, itens, tecnicos, margens, ids: { servico: svcId, perfil: perfilId, ...(T ? { tabelas: true } : {}) } };
 }

@@ -19,7 +19,12 @@ import { EXIGE_MUDELAR, ICONE_MUDELAR, OFICIOS_NOVOS_MUDELAR, PRODUTOS_MUDELAR, 
 
 /* ------------------------------------------------------------------ tipos */
 /** Um nó da árvore: ofício (pai null) ou sub (pai = id do ofício). Só dois níveis. */
-export interface No { id: string; n: string; pai: string | null }
+export interface No {
+  id: string; n: string; pai: string | null;
+  /** 13/11 (20270117100000): ramo que só existe na árvore dos produtos (product_categories), sem ofício igual nos serviços.
+   *  Serve para classificar produtos e para a regra «exige produto»; não serve para classificar serviços. */
+  soProduto?: true;
+}
 export interface Produto {
   id: string; n: string;
   /** Custo de compra por unidade (€). */

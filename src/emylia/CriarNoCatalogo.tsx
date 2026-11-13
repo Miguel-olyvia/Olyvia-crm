@@ -195,11 +195,12 @@ const Grande = ({ v, un, legenda }: { v: string; un: string; legenda?: string })
 interface PassoF { n: string; perfil: string; h: string; auto: boolean }
 interface ConsF { n: string; un: string; preco: number; fornecedor: string; data: string; q: string; opcional: boolean }
 function FormServico({ S, C, K, onCriado }: { S: Estado; C: Custos; K: Catalogo; onCriado: (id: string, nome: string) => void }) {
-  const ofs = useMemo(() => oficios(K.arvore), [K.arvore]);
+  // 13/11: os ramos só da árvore dos produtos (soProduto) não servem para classificar serviços
+  const ofs = useMemo(() => oficios(K.arvore).filter((x) => !x.soProduto), [K.arvore]);
   const [nome, setNome] = useState("");
   const [of, setOf] = useState(ofs[0]?.id ?? "");
   const [sub, setSub] = useState("");
-  const subs = K.arvore.filter((x) => x.pai === of);
+  const subs = K.arvore.filter((x) => x.pai === of && !x.soProduto);
   const no = sub || of;
   const oficio = oficioESub(K, no)?.oficio ?? "";
   const [un, setUn] = useState("un");
