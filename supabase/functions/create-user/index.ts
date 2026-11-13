@@ -35,10 +35,10 @@ import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import {
   motivoPapelNaoAtribuivel,
-  possoGerirUtilizador,
   souAdminSistema,
   temPermissaoNaOrg,
 } from "../_shared/adminConta.ts";
+import { executarRamoContaExistente, mensagemErroRpc } from "./contaExistente.ts";
 import {
   deriveKeyFromEnv,
   encryptNif,
@@ -192,6 +192,21 @@ function jsonError(
   });
 }
 
+// Erros dos passos da conta existente: `error` já é a mensagem em português (o ecrã mostra `error` primeiro) e `code`
+// é o identificador estável. Nunca leva texto do GoTrue; o original fica no log.
+function erroPasso(
+  corsHeaders: Record<string, string>,
+  code: string,
+  message: string,
+  status: number,
+  extra: Record<string, unknown> = {},
+) {
+  return new Response(JSON.stringify({ error: message, code, message, ...extra }), {
+    status,
+    headers: { ...corsHeaders, "Content-Type": "application/json" },
+  });
+}
+
 function normalizeText(value: any) {
   return String(value || "").trim();
 }
@@ -282,27 +297,6 @@ function prepareAdditionalPhones(additionalPhones: any, primaryPhone: string | n
     phones.push({ phone_number, country_code, phone_type: item?.phone_type || "mobile", is_primary: false });
   }
   return { phones, error: null };
-}
-
-async function findAuthUserByEmail(supabaseClient: any, email: string) {
-  const normalizedEmail = email.toLowerCase();
-  let page = 1;
-  const perPage = 1000;
-
-  while (true) {
-    const { data, error } = await supabaseClient.auth.admin.listUsers({ page, perPage });
-
-    if (error) {
-      throw error;
-    }
-
-    const users = data?.users || [];
-    const found = users.find((u: any) => u.email?.toLowerCase() === normalizedEmail);
-    if (found) return found;
-
-    if (users.length < perPage) return null;
-    page += 1;
-  }
 }
 
 serve(async (req: Request) => {
@@ -466,7 +460,7 @@ serve(async (req: Request) => {
     if (phoneResult.error) return jsonError(corsHeaders, "duplicate_phone", phoneResult.error);
     const preparedAdditionalPhones = phoneResult.phones;
 
-    console.log("Creating user:", email, "by admin:", caller.anewUserId);
+    console.log("Creating user by admin:", caller.anewUserId);
 
     // Set audit context for this transaction's writes. anew_users has no
     // organization_id column — org is resolved by fn_audit_anew_users() via a
@@ -511,59 +505,37 @@ serve(async (req: Request) => {
 
     if (createError) {
       // If user already exists in auth, find them and proceed
-      if (createError.message?.includes("already been registered") || createError.message?.includes("already exists")) {
-        console.log("Auth user already exists, looking up:", email);
-        const existingAuth = await findAuthUserByEmail(supabaseClient, email);
-
-        if (!existingAuth) {
-          return new Response(JSON.stringify({ error: "User already exists but could not be found" }), {
-            status: 400,
+      const emailJaExiste = (createError as { code?: string }).code === "email_exists" ||
+        createError.message?.includes("already been registered") ||
+        createError.message?.includes("already exists");
+      if (emailJaExiste) {
+        // A conta já existe (sem auth.admin.listUsers, que falhava com «Database error finding users»). Toda a decisão
+        // está em contaExistente.ts: com ficha só se associa (nunca a finalize), sem ficha cai no ramo normal.
+        const ramo = await executarRamoContaExistente(supabaseClient, {
+          email,
+          actorId: caller.anewUserId,
+          actorAuthId: requestingUser.id,
+          callerIsSystemAdmin,
+          memberships: normalizeMemberships(memberships, membership),
+        });
+        if (ramo.tipo === "resposta") {
+          return new Response(JSON.stringify(ramo.corpo), {
+            status: ramo.status,
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
         }
-
-        authUserId = existingAuth.id;
-        authUserResponse = existingAuth;
+        authUserId = ramo.authUserId;
         isExistingAuthUser = true;
-        console.log("Found existing auth user:", authUserId);
-
-        // 20270106310000: a conta já existe — o pedido ia reescrever a ficha
-        // dela e juntar-lhe associações. Fora o administrador de sistema, nunca
-        // a própria conta e, se a pessoa já tem associações ativas, só quem a
-        // pode gerir (users.edit na organização de cada uma, sem papéis com mais
-        // poder do que o seu).
-        if (!callerIsSystemAdmin) {
-          if (authUserId === requestingUser.id) {
-            return jsonError(corsHeaders, "cannot_assign_self", "Não pode atribuir papéis a si próprio.", 403);
-          }
-          const { data: existingAnew } = await supabaseClient
-            .from("anew_users")
-            .select("id")
-            .eq("auth_user_id", authUserId)
-            .maybeSingle();
-          if (existingAnew) {
-            const { count: activeMemberships } = await supabaseClient
-              .from("anew_memberships")
-              .select("id", { count: "exact", head: true })
-              .eq("user_id", existingAnew.id)
-              .eq("status", "active");
-            if ((activeMemberships ?? 0) > 0 &&
-                !(await possoGerirUtilizador(supabaseClient, requestingUser.id, existingAnew.id, "users.edit"))) {
-              return jsonError(
-                corsHeaders,
-                "existing_user_out_of_scope",
-                "Este email já pertence a um utilizador que não pode gerir.",
-                403,
-              );
-            }
-          }
-        }
+        authUserResponse = { id: authUserId, email };
       } else {
         console.error("Create user error:", createError);
-        return new Response(JSON.stringify({ error: createError.message }), {
-          status: 400,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        const fraca = (createError as { code?: string }).code === "weak_password";
+        return erroPasso(
+          corsHeaders,
+          fraca ? "weak_password" : "create_auth_user_failed",
+          fraca ? "Falhou ao criar a conta: a palavra-passe não cumpre os requisitos." : "Falhou ao criar a conta.",
+          400,
+        );
       }
     } else {
       authUserId = createdAuthData.user!.id;
@@ -617,10 +589,8 @@ serve(async (req: Request) => {
 
     if (finalizeError || !finalizedAnewUser) {
       console.error("Error finalizing anew_users profile:", finalizeError);
-      return new Response(JSON.stringify({ error: finalizeError?.message || "Failed to finalize user profile" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
+      const { mensagem, status } = mensagemErroRpc(finalizeError);
+      return erroPasso(corsHeaders, "finalize_profile_failed", mensagem, status);
     }
 
     const anewUser: { id: string } = { id: (finalizedAnewUser as any).id };
@@ -645,7 +615,7 @@ serve(async (req: Request) => {
   } catch (error: any) {
     console.error("Error in create-user function:", error);
     await captureError(error, { function: "create-user" });
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: "Falhou ao processar o pedido de criação.", code: "internal_error" }), {
       status: 500,
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

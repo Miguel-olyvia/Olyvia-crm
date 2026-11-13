@@ -1,3 +1,4 @@
+import { avisoContaExistente } from "@/lib/avisoContaExistente";
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -552,7 +553,7 @@ export function MemberFormPanel({
         return;
       }
 
-      toast.success(t("common.created"));
+      toast.success(avisoContaExistente(functionData) ?? t("common.created"));
       setSavingNewUser(false);
       setCreateUserSheetOpen(false);
       onSaved();

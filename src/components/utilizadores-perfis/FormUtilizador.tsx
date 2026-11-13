@@ -26,7 +26,7 @@ import { abasComErroUtilizador, primeiroErroUtilizador, validarUtilizador, type 
 export type FormUtilizadorAberto = Extract<NonNullable<FormAberto>, { tipo: "utilizador" }>;
 
 /** O resultado da gravação; ao criar traz o `anew_users.id` criado (para ligar à ficha do RH a seguir). */
-export type ResultadoGravarUtilizador = { ok: true; id?: string } | { ok: false; erro: string };
+export type ResultadoGravarUtilizador = { ok: true; id?: string; aviso?: string } | { ok: false; erro: string };
 
 interface FormUtilizadorProps {
   form: FormAberto;
@@ -128,7 +128,7 @@ function Interior(props: InteriorProps) {
     setAGravar(false);
     const nome = valores.nome.trim();
     aoConcluir({
-      aviso: t(criar ? "usersProfiles.form.user.created" : "usersProfiles.form.user.saved"),
+      aviso: (criar ? r.aviso : undefined) ?? t(criar ? "usersProfiles.form.user.created" : "usersProfiles.form.user.saved"),
       anuncio: t(criar ? "usersProfiles.form.user.announce.created" : "usersProfiles.form.user.announce.saved", { name: nome }),
       ...(alerta ? { alerta } : {}),
     });

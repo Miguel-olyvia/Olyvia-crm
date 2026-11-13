@@ -1,3 +1,4 @@
+import { avisoContaExistente } from "@/lib/avisoContaExistente";
 import { useState, useEffect } from "react";
 import {
   Dialog,
@@ -364,7 +365,7 @@ export function OrganizationMembersDialog({
         return;
       }
 
-      toast.success(t("users.created"));
+      toast.success(avisoContaExistente(data) ?? t("users.created"));
       setIsCreatingUser(false);
       resetForm();
       fetchMembers();

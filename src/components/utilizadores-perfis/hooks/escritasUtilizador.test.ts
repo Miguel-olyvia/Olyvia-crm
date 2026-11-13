@@ -44,6 +44,22 @@ describe("criarUtilizadorNaBase", () => {
     preparar({ invocar: () => ({ data: { error: "Sem permissão users.create" }, error: { message: "Edge Function returned a non-2xx status code" } }) });
     expect(await criarUtilizadorNaBase({ ...valores, palavraPasse: "segredo1" }, vinc)).toEqual({ ok: false, erro: "Sem permissão users.create" });
   });
+  it("conta que já existia: devolve o aviso do servidor para o ecrã mostrar (ficha não alterada)", async () => {
+    preparar({ invocar: () => ({ data: { existing_auth_user: true, ficha_alterada: false, associadas: ["org"], message: "A pessoa já existia: foi associada à organização sem alterar a ficha." } }) });
+    expect(await criarUtilizadorNaBase({ ...valores, palavraPasse: "segredo1" }, vinc)).toEqual({
+      ok: true, aviso: "A pessoa já existia: foi associada à organização sem alterar a ficha.",
+    });
+  });
+  it("conta nova: sem aviso", async () => {
+    preparar({ invocar: () => ({ data: { anew_user_id: "novo", existing_auth_user: false } }) });
+    expect(await criarUtilizadorNaBase({ ...valores, palavraPasse: "segredo1" }, vinc)).toEqual({ ok: true, id: "novo" });
+  });
+  it("falha de passo da conta existente chega em português, não o código", async () => {
+    preparar({ invocar: () => ({ data: { error: "Falhou ao associar à organização: Sem permissão. Já ficaram associadas: 1 de 2.", code: "existing_account_association_failed" }, error: { message: "Edge Function returned a non-2xx status code" } }) });
+    expect(await criarUtilizadorNaBase({ ...valores, palavraPasse: "segredo1" }, vinc)).toEqual({
+      ok: false, erro: "Falhou ao associar à organização: Sem permissão. Já ficaram associadas: 1 de 2.",
+    });
+  });
   it("uma resposta sem utilizador criado é falha", async () => {
     preparar({ invocar: () => ({ data: {} }) });
     expect((await criarUtilizadorNaBase({ ...valores, palavraPasse: "segredo1" }, vinc)).ok).toBe(false);

@@ -2,6 +2,7 @@
 // envia convite nem email), rpc_update_user pelo nif-write-proxy (editar e mudar a role de um vínculo), update-user-password,
 // e delete-user/restore-user + rpc_delete_user/rpc_restore_user (desativar é um soft delete reversível). Cada função devolve
 // `{ ok }` ou `{ ok: false, erro }`: nunca se engole um erro.
+import { avisoContaExistente } from "@/lib/avisoContaExistente";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { corpoCriarUtilizador, paramsAtualizarUtilizador, type ValoresGravar } from "../payloadsUtilizador";
 import { mensagemDeErro } from "../rolesReais";
@@ -18,7 +19,8 @@ const falha = (e: unknown): ResultadoMutacao => ({ ok: false, erro: mensagemDeEr
 const EMAIL_JA_REGISTADO = /already been registered|email_exists/i;
 
 /** A criação devolve também o `anew_users.id` criado (serve, por exemplo, a ligar a conta a uma ficha de RH a seguir). */
-export type ResultadoCriacao = { ok: true; id: string } | { ok: false; erro: string };
+/** `aviso`: quando a conta já existia, a mensagem do servidor («associada sem alterar a ficha») para o ecrã mostrar. */
+export type ResultadoCriacao = { ok: true; id?: string; aviso?: string } | { ok: false; erro: string };
 
 export async function criarUtilizadorNaBase(valores: ValoresGravar, vinculos: readonly Vinculo[]): Promise<ResultadoCriacao> {
   try {
@@ -28,6 +30,9 @@ export async function criarUtilizadorNaBase(valores: ValoresGravar, vinculos: re
       if (mensagem && EMAIL_JA_REGISTADO.test(mensagem)) return { ok: false, erro: ERRO_EMAIL_EXISTENTE };
       return { ok: false, erro: mensagem ?? "Não foi possível criar o utilizador." };
     }
+    // Conta que já existia: a Edge só associa e não devolve a pessoa (sem anew_user_id), só o aviso para o ecrã.
+    const aviso = avisoContaExistente(resposta.data);
+    if (aviso) return { ok: true, aviso };
     const criado = (resposta.data as { anew_user_id?: string } | null)?.anew_user_id;
     if (!criado) return { ok: false, erro: "A base não devolveu o utilizador criado." };
     return { ok: true, id: criado };

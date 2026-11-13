@@ -1,3 +1,4 @@
+import { avisoContaExistente } from "@/lib/avisoContaExistente";
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
@@ -1160,14 +1161,13 @@ export default function UsersNew() {
 
         if (createError) {
           const errorMessage = await extractFunctionErrorMessage(createInvoke, createError);
-          if (errorMessage && /already been registered|email_exists/i.test(errorMessage)) {
-            throw new Error("EMAIL_EXISTS");
-          }
           throw new Error(errorMessage || createError.message || t("common.error"));
         }
 
+        // Conta que já existia: a Edge só a associou (sem anew_user_id nem ficha alterada) e traz a mensagem para o ecrã.
+        const avisoExistente = avisoContaExistente(createResult);
         const finalUserId = createResult?.anew_user_id;
-        if (!finalUserId) throw new Error("Failed to resolve created user");
+        if (!finalUserId && !avisoExistente) throw new Error("Failed to resolve created user");
 
         // NOTE: the full anew_users field set (phone, description, position,
         // location, template_id, custom_attributes) is now written ONCE by
@@ -1176,7 +1176,7 @@ export default function UsersNew() {
         // entity_audit_log row. Do not add a follow-up .update() here — see
         // supabase/migrations/20260825010000_rpc_finalize_user_profile.sql.
 
-        toast.success(t("users.created"));
+        toast.success(avisoExistente ?? t("users.created"));
       }
 
       if (createMore && !selectedUser) {
@@ -1191,13 +1191,10 @@ export default function UsersNew() {
       console.error("[UserSave] Error saving user:", error);
       console.error("[UserSave] Error details:", JSON.stringify({ message: error?.message, code: error?.code, details: error?.details, hint: error?.hint }));
 
-      if (error.message === "EMAIL_EXISTS" || error.message?.includes("already been registered")) {
-        toast.error(t("users.errors.emailAlreadyRegistered"));
-      } else {
-        const msg = error.message || t("common.error");
-        const displayMsg = msg === "Edge Function returned a non-2xx status code" ? t("common.error") : msg;
-        toast.error(displayMsg);
-      }
+      // O «email já registado» deixou de existir aqui: a Edge associa a conta existente ou responde com o passo que falhou.
+      const msg = error.message || t("common.error");
+      const displayMsg = msg === "Edge Function returned a non-2xx status code" ? t("common.error") : msg;
+      toast.error(displayMsg);
     } finally {
       setSaving(false);
     }
