@@ -1,9 +1,30 @@
 // 5/11: o Estúdio abre a partir da Visita: a planta, as alturas e o estilo vêm do negócio.
 import { describe, expect, it } from "vitest";
 import { gravarPlanta, retangulo } from "@/emylia/planta";
-import { abrirEstudio, coresDoTexto, devolverAoNegocio, estiloDasRespostas, lerVolta, projetoDaVisita, CHAVE_ESTUDIO } from "./daVisita";
+import { abrirEstudio, coresDoTexto, devolverAoNegocio, ditosDoNegocio, estiloDasRespostas, lerVolta, projetoDaVisita, CHAVE_ESTUDIO } from "./daVisita";
+import { estiloDosDitos } from "./estiloDaConversa";
+
+const insightsVisita = (escolhas: { peca: string; escolha: string; decidida?: boolean }[]) =>
+  JSON.stringify({ insights: { resumo: "resumo", escolhas: escolhas.map((e) => ({ decidida: true, ...e })) }, tempos: [], em: "2026-11-13", metricas: {} });
 
 describe("o Estúdio a partir da Visita", () => {
+  it("13/11: o modelo é a verdade das cores (as escolhas peça a peça, sem a coordenação a falhar)", () => {
+    const f = { insights_visita: insightsVisita([
+      { peca: "sanita", escolha: "branca" },
+      { peca: "banheira", escolha: "branca" },
+      { peca: "móvel", escolha: "em madeira" },
+    ]) };
+    const o = estiloDosDitos(ditosDoNegocio(f))!;
+    expect(o.estilo.porCategoria.sanita).toEqual(["branco"]);
+    expect(o.estilo.porCategoria.banheira).toEqual(["branco"]);
+    expect(o.estilo.porCategoria.movel).toEqual(["madeira"]);
+  });
+
+  it("13/11: sem análise do modelo, as cores saem das regras da transcrição", () => {
+    const f = { transcricao_visita: "0:05 Cliente: Quero a sanita preta." };
+    expect(estiloDosDitos(ditosDoNegocio(f))!.estilo.porCategoria.sanita).toEqual(["preto"]);
+  });
+
   it("as cores ditas num texto, pela ordem", () => {
     expect(coresDoTexto("Cinza 120 x 60 retificado")).toEqual(["cinza"]);
     expect(coresDoTexto("Axis Oak")).toEqual(["madeira"]);

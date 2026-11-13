@@ -9,8 +9,8 @@ import type { Cor, Estilo } from "./catalogoFake";
 import { copiaPlanta } from "./exemploEstudio";
 import { alturaFinalCm, type Projeto } from "./necessidadesEstudio";
 import { prefixoDoEstudio, respostasDoNegocio, type GrupoVisita } from "./perguntasDaVisita";
-import { falasDoTexto } from "@/emylia/chamadaMotor";
-import { ditosDaConversa, type DitoEstilo } from "./estiloDaConversa";
+import { falasDoTexto, lerInsights } from "@/emylia/chamadaMotor";
+import { catsDeTexto, corDoTexto, ditosDaConversa, type DitoEstilo } from "./estiloDaConversa";
 import { pedidosDaConversa, type Pedidos } from "./pedidosDaConversa";
 
 export const CHAVE_ESTUDIO = "olyvia.estudio.v1";
@@ -79,9 +79,29 @@ export function abrirEstudio(nome: string, f: Record<string, string>, negocio: n
   return guardarParaEstudio({ ...base, camposVisita: campos, prefixoPerguntas: prefixo, perguntas: { ...(base.perguntas ?? {}), ...respostasDoNegocio(f, prefixo, { camposVisita: campos }) }, ditosAntes: ditosDoNegocio(f), pedidosAntes: pedidosDoNegocio(f) });
 }
 
-/** 12/11: as cores ditas nas conversas já gravadas no negócio (a transcrição da chamada e a da visita). */
+/** 13/11 (Rúben, «o modelo é a verdade»): as escolhas de cor que o modelo extraiu da conversa (insights.escolhas), já separadas peça a
+ *  peça — por isso sem o problema da coordenação das regras. Uma escolha com peça e cor reconhecidas dá um dito. */
+export function ditosDoModelo(f: Record<string, string | undefined>): DitoEstilo[] {
+  const out: DitoEstilo[] = [];
+  for (const [campo, origem] of [["insights_chamada", "chamada"], ["insights_visita", "visita"]] as const) {
+    const g = lerInsights(f[campo]);
+    for (const e of g?.insights.escolhas ?? []) {
+      const cor = corDoTexto(e.escolha), cats = catsDeTexto(e.peca);
+      if (!cor || !cats.length) continue;
+      const inicio = e.linha != null && g!.tempos[e.linha] != null ? g!.tempos[e.linha] : 0;
+      out.push({ cor, cats, evitar: false, tudo: false, frase: `${e.peca}: ${e.escolha}`, inicio, origem });
+    }
+  }
+  return out;
+}
+
+/** 12/11→13/11: o que se disse sobre as cores no negócio. Quando o modelo já analisou a conversa, as escolhas de cor vêm dele (a verdade),
+ *  e das regras ficam só as evitações («sem branco»), que o modelo não põe nas escolhas. Sem análise do modelo, usam-se as regras. */
 export function ditosDoNegocio(f: Record<string, string | undefined>): DitoEstilo[] {
-  return [...ditosDaConversa(falasDoTexto(f.transcricao_chamada), "chamada"), ...ditosDaConversa(falasDoTexto(f.transcricao_visita), "visita")];
+  const regras = [...ditosDaConversa(falasDoTexto(f.transcricao_chamada), "chamada"), ...ditosDaConversa(falasDoTexto(f.transcricao_visita), "visita")];
+  const modelo = ditosDoModelo(f);
+  if (!modelo.length) return regras;
+  return [...modelo, ...regras.filter((d) => d.evitar)];
 }
 
 /** 6/11: o projeto do Estúdio gravado no negócio (f.estudio, JSON), ou null. */

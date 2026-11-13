@@ -71,6 +71,13 @@ export const SIM = /^\s*(sim|isso|exato|exatamente|claro|pode ser|perfeito|é is
 
 export const palavras = (t: string) => [...t.toLowerCase().matchAll(/[\p{L}\d-]+/gu)].map((m) => m[0]);
 
+// 13/11 (Rúben, «a plataforma por voz, com o modelo como verdade»): o modelo já separa a conversa em escolhas peça a peça; destas lê-se
+// a peça e a cor sem o problema da coordenação (cada escolha é de uma só peça). Reaproveitam-se os mesmos dicionários das regras.
+/** As peças mencionadas num texto livre (o 'peca' que o modelo extraiu): a 1.ª que casar. */
+export function catsDeTexto(t: string): Categoria[] { for (const w of palavras(t)) { const c = pecasDe(w); if (c) return c; } return []; }
+/** A 1.ª cor mencionada num texto livre (o 'escolha' que o modelo extraiu). */
+export function corDoTexto(t: string): Cor | null { for (const w of palavras(t)) { const c = corDe(w); if (c) return c; } return null; }
+
 /** Uma escolha ditada sem verbo («Sanita preta, torneiras pretas.»): frase curta com peça e cor, sem descrever o que há («está», «é»). */
 const DESCREVE = /^(est[aá]|est[aã]o|é|s[aã]o|era|eram|tem|t[eê]m|tinha|ficou|temos|tenho|h[aá]|existe|existem|vendemos|trabalhamos|costuma|costumam)$/;
 function ditado(frase: string): boolean {
