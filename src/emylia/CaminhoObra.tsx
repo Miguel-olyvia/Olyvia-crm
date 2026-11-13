@@ -96,7 +96,7 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
   const viaturas = ligacoesObra(Fr, d.id).map((x) => Fr.viaturas.find((v) => v.id === x.vid)?.mat).filter(Boolean);
   if (!P.length) return null;
   const feitos = P.filter((x) => x.estado === "feito").length;
-  const falta = faltaParaArrancar(d, db);
+  const falta = faltaParaArrancar(d, db, S);
   const go1 = P.find((x) => x.trilho === "obra")!;
   // 6/11 (permissões): o passo é do papel atual E quem entrou tem as permissões que ele pede (permEmFaltaDoPasso); sem elas, o botão
   // fica desligado e diz qual falta (como o BotaoFase)

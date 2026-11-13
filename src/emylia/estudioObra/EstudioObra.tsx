@@ -184,7 +184,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: 
   const dias = diasDaObra(inicio, nDias);
   const PV = porValidar(p);
   const falta = vivo ? faltaParaEncerrar(d, S, db) : [];
-  const faltaArrancar = p.estado === "aprovado" ? faltaParaArrancar(d, db) : [];
+  const faltaArrancar = p.estado === "aprovado" ? faltaParaArrancar(d, db, S) : [];
   const ims = imprevistosDe(d), imsAbertos = ims.filter((i) => i.estado !== "fechado" && i.estado !== "aprovado");
   const val = (() => { try { return valorContrato(d, S); } catch { return null; } })();
   const custoPend = ims.filter((i) => i.estado === "aberto" || i.estado === "proposta").reduce((a, i) => a + (i.custo ?? 0), 0);

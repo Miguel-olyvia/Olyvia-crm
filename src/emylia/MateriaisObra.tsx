@@ -10,7 +10,7 @@ import type { Ctx } from "./pecas";
 import { useInventario } from "./inventario/loja";
 import { faltaMateriaisReal, prontaReal, prontidaoDe, usarProntidao } from "./inventario/prontidaoReal";
 import { estadoLinhaNegocio, faltaMateriais, linhaDoResumo, resumoEcNegocio, type LinhaResumoNeg, type ResumoEcNeg } from "./inventario/ponteNegocios";
-import { entregaTarde, textoMateriais } from "./preparacaoObra";
+import { EC_ADENDA_AUTOMATICA, ecNoServidor, entregaTarde, textoMateriais } from "./preparacaoObra";
 import { ecDaAdenda, linhasDaEc, linhasDaObra, porEncomendarDe, totaisDaEc } from "./encomendasAjuste";
 import { assinadas, primeiraPaga } from "./adendas";
 import { aprovadorPo } from "./real/encomendaReal";
@@ -61,7 +61,7 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
   if (!ec) return (
     <div className="max-w-3xl rounded-2xl border border-dashed border-input p-5">
       <h3 className="text-xl font-semibold tracking-tight">Materiais por encomendar</h3>
-      <p className="mt-1 text-[15px] text-muted-foreground">{textoMateriais(d, null)}</p>
+      <p className="mt-1 text-[15px] text-muted-foreground">{textoMateriais(d, null, S)}</p>
     </div>
   );
 
@@ -140,6 +140,9 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
           </ul>
           {!primeiraPaga(a)
             ? <p className="mt-2 text-sm text-muted-foreground">Encomendam-se quando o pagamento da 1.ª parcela da adenda for validado: vão numa encomenda de cliente própria, no Inventário.</p>
+            // 13/11: numa organização real é a base que a emite (ecNoServidor): sem o botão, que lá não faz nada
+            : ecNoServidor(S)
+            ? <p className="mt-2 text-sm text-muted-foreground">{EC_ADENDA_AUTOMATICA}</p>
             : <>
               <p className="mt-2 text-sm text-muted-foreground">O pagamento da adenda está validado mas a encomenda não chegou ao Inventário.</p>
               <Button className="mt-3 min-h-11" onClick={go(() => A.emitirEcsAdenda(d.id))}>Emitir a encomenda da adenda</Button>

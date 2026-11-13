@@ -74,7 +74,7 @@ function FormPagamento({ ctx, d, f, fs, tranches, fechar, avisar }: { ctx: Ctx; 
           // 9/11: a encomenda de cliente só sai com o plano da obra aprovado
           : d.obra.plano && d.obra.plano.estado === "por aprovar"
             ? `Pagamento validado · recibo ${d.fin.recibo.n}. A obra está a andar: falta aprovar o plano; a encomenda de cliente sai com ele.`
-            : `Pagamento validado · recibo ${d.fin.recibo.n}. ${semEncomendaCliente(d)}`;
+            : `Pagamento validado · recibo ${d.fin.recibo.n}. ${semEncomendaCliente(d, S)}`;
       } else {
         const rc = A.reciboTranche(d.id, f.numero);
         if (!rc) return;

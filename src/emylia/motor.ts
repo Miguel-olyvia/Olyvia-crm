@@ -30,7 +30,7 @@ import {
 import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
   textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
-import { agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, retificacaoAceite, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
+import { agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, FALTA_EC_AUTOMATICA, ecNoServidor, marcarEcNoServidor, retificacaoAceite, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
@@ -1522,7 +1522,9 @@ export function proximo(d: Negocio, S: Estado): Proximo {
       if (p.estado === "por aprovar") return { t: conflitos(p).length ? "Operações: resolver um conflito e aprovar o plano" : "Operações: aprovar o plano", sub: "Plano gerado do orçamento. As medidas confirmam-se ao mesmo tempo; com os dois, o contrato.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
       if (p.estado === "aprovado") {
         // 19/10: os materiais por garantir no Inventário (aprovar ou receber as encomendas a fornecedor) seguram o arranque
-        const F = faltaParaArrancar(d);
+        const F = faltaParaArrancar(d, undefined, S);
+        // 13/11: numa organização real a encomenda de cliente é emitida pela base: espera-se por ela (não é passo de ninguém)
+        if (ecNoServidor(S) && F.includes(FALTA_EC_AUTOMATICA)) return { t: "À espera da encomenda de cliente", sub: "É emitida automaticamente e aparece no negócio quando chegar ao Inventário. Para arrancar falta " + F.join(", ") + ".", who: "financeiro", wait: true };
         // 21/10: só a adenda por pagar (ou por encomendar) segura o arranque: é do Financeiro
         if (F.length && F.every((x) => /adenda/.test(x))) return { t: "À espera da adenda", sub: "Para arrancar falta " + F.join(", ") + ".", who: "financeiro", wait: true };
         if (F.length) return { t: "À espera dos materiais", sub: "Para arrancar falta " + F.join(", ") + ".", btn: "Abrir Inventário", act: "abrirInv", who: "armazem" };
@@ -1945,6 +1947,8 @@ const PECAS_UN = new Set(["un", "ud", "und", "pç", "pc", "pcs", "conj", "cj", "
 export const pecaInteira = (un: string | null | undefined, q: number): number => (un && PECAS_UN.has(normalUn(un).replace(/\.$/, "")) && q > 0 ? Math.ceil(q - 1e-9) : q);
 
 export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, real?: LigacaoReal) {
+  // 13/11: com a ligação real a encomenda de cliente (e a das adendas) é a da base (emitirEc não emite): os ecrãs escondem os botões de emitir
+  if (real) marcarEcNoServidor(S);
   // 22/10: os técnicos (TECS) passam a ser os da ficha deste Estado; um estado de antes fica com os seis de sempre
   garantirTecnicos(S);
   // 22/10: e os custos (um estado de antes fica com os de arranque)
@@ -2030,7 +2034,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     // senão, emite-se quando as Operações o aprovarem (aprovarPlano; numa organização real, a base ao gravar o plano aprovado)
     const ok = (planoAprovado(d) && d.orc?.contrato === "assinado") || d.orc?.vendaDireta ? emitirEc(d) : false; // 9/11: a venda direta não tem obra a aprovar (como na base)
     fase(d, 5);
-    const F = faltaParaArrancar(d);
+    const F = faltaParaArrancar(d, undefined, S);
     avisar({ msg: "Recibo " + rc.n + " " + como, sub: "Passou a Obra" + (F.length ? " · falta " + F.join(", ") : " · pronta a arrancar"), kind: "ok" });
     // 12/11 (Rúben: as medidas e o plano só depois do Financeiro): é agora que abrem, ao mesmo tempo; com os dois, o contrato
     if (!ok && !d.orc?.vendaDireta) avisar({ msg: "Segue a Obra", sub: retificacaoAceite(d) && planoAprovado(d) ? "Assina-se o contrato; depois sai a encomenda de cliente" : "Ao mesmo tempo, o supervisor confirma as medidas e as Operações aprovam o plano. Com os dois, o contrato; assinado, sai a encomenda de cliente", kind: "auto", atraso: 500 });
@@ -3905,7 +3909,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!exigePerm("obra.planear")) return;
       const d = deal(id);
       // 19/10: o pagamento, o plano e os materiais garantidos no Inventário (preparacaoObra.ts: faltaParaArrancar)
-      { const F = faltaParaArrancar(d); if (F.length) { avisar({ msg: "Ainda não dá para arrancar", sub: "Falta " + F.join(", "), kind: "bad" }); return; } }
+      { const F = faltaParaArrancar(d, undefined, S); if (F.length) { avisar({ msg: "Ainda não dá para arrancar", sub: "Falta " + F.join(", "), kind: "bad" }); return; } }
       if (!portao(d, [OBRA[0]])) return;
       // 23/10: com o relógio real, a obra começa hoje (o plano mantém a ordem e a duração das tarefas)
       if (relogioReal && d.obra.plano!.origem === "orcamento") arrancarHoje(d.obra.plano!);

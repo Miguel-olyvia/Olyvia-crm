@@ -104,7 +104,7 @@ function SecPlano({ ctx, d, reg, pode, mudar }: Props & { ctx: Ctx }) {
   const { S, A, go, run } = ctx;
   // 19/10: o arranque espera pelos materiais garantidos no Inventário (lidos ao vivo)
   const db = useInventario();
-  const p = d.obra.plano!, C = conflitos(p), F = faltaParaArrancar(d, db).filter((x) => !/plano/.test(x)), matsOk = !F.length;
+  const p = d.obra.plano!, C = conflitos(p), F = faltaParaArrancar(d, db, S).filter((x) => !/plano/.test(x)), matsOk = !F.length;
   const falta = faltaAprovar(p, reg);
   let frase = "", botao: React.ReactNode = null;
   if (p.estado === "por aprovar") {
@@ -542,7 +542,7 @@ function SecMateriais({ ctx, d }: { ctx: Ctx; d: Negocio }) {
     <Secao id="materiais" titulo="Materiais"
       extra={<Button variant="ghost" className={BOTAO} onClick={go(() => A.abrirInv(d.id))}>Abrir no Inventário<ArrowRight aria-hidden="true" /></Button>}>
       <ProximoRececaoNegocio d={d} A={A} go={go} />
-      <p className="text-[15px]">{textoMateriais(d, r)}</p>
+      <p className="text-[15px]">{textoMateriais(d, r, ctx.S)}</p>
       {linhas.length > 0 && (
         <ul className="mt-3 divide-y divide-border">
           {linhas.map((x) => (

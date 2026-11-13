@@ -16,6 +16,7 @@ import type { Ctx } from "./pecas";
 import { SeletorPesquisa } from "./pecasFicha";
 import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
 import { ecDaAdenda, porEncomendarDe } from "./encomendasAjuste";
+import { ecNoServidor } from "./preparacaoObra";
 import {
   MOTIVOS_ADENDA, adendaBloqueada, alertasAdenda, diasAdenda, estadoAdenda, faturaAValidar, nomeParcela, parcelaFaturavel, parcelasAdenda, previsaoLinha, primeiraPaga, proximaParcela,
   totaisAdenda, totaisLinhas, valorContrato, versaoAdenda, type Adenda, type LinhaAdenda,
@@ -170,7 +171,7 @@ export function TrabalhosAMais(ctx: Ctx & { d: Negocio }) {
                 {a.estado === "assinada" && (() => {
                   const ea = ecDaAdenda(d, a.n), pend = porEncomendarDe(d, a.n).length;
                   if (!ea && !pend) return null;
-                  return <p className="mt-1 text-[15px] text-muted-foreground">Materiais: {ea ? `encomenda ${ea.n} no Inventário` : primeiraPaga(a) ? (d.obra.ec?.ref ? "a encomenda não chegou ao Inventário: emita-a no passo Materiais" : "a encomenda emite-se logo a seguir à inicial") : "encomendam-se quando a 1.ª parcela da adenda for paga"}</p>;
+                  return <p className="mt-1 text-[15px] text-muted-foreground">Materiais: {ea ? `encomenda ${ea.n} no Inventário` : primeiraPaga(a) ? (d.obra.ec?.ref ? (ecNoServidor(S) ? "a encomenda é emitida automaticamente e aparece aqui quando chegar ao Inventário" : "a encomenda não chegou ao Inventário: emita-a no passo Materiais") : "a encomenda emite-se logo a seguir à inicial") : "encomendam-se quando a 1.ª parcela da adenda for paga"}</p>;
                 })()}
                 {a.estado === "recusada" && <p className="mt-2 text-[15px]">{a.recusa ? <>«{a.recusa}»</> : "Sem motivo."} <span className="text-sm text-muted-foreground">· {a.recusada}</span></p>}
                 <div className="mt-3"><AcoesAdenda ctx={ctx} d={d} a={a} editar={(x) => abrirCom(x, x.n)} /></div>

@@ -175,7 +175,7 @@ export function ListaObras(ctx: Ctx) {
               const tHoje = p.estado === "em curso" ? p.tasks.find((t) => t.dia <= p.dia && p.dia < t.dia + t.dur) : null;
               const fase = tHoje?.fase ?? p.tasks[0]?.fase;
               const pr = progresso(p);
-              const F = faltaParaArrancar(o, db);
+              const F = faltaParaArrancar(o, db, S);
               // 21/10 (revisto): a próxima ação em destaque quando é do Filipe; senão, à espera de quê (sem repetir o estado)
               const Fa = F.filter((f) => !/plano/.test(f));
               const [marco, acao]: [string, boolean] = p.estado === "por aprovar" ? (o.fin.pago ? ["Aprovar o plano", true] : ["À espera do pagamento do sinal", false])
@@ -262,7 +262,7 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const PE = p.estado === "em curso" ? pontosEncerrar(d, S, db) : [], podeEncerrar = PE.every((x) => x.ok);
   // a lista para encerrar só se abre na reta final (tudo feito, ou o último dia): antes disso é ruído
   const retaFinal = p.estado === "em curso" && (p.dia >= ultimo || p.tasks.every((t) => estadoDe(t) === "feita" || estadoDe(t) === "validada"));
-  const F = faltaParaArrancar(d, db).filter((f) => !/plano/.test(f));
+  const F = faltaParaArrancar(d, db, S).filter((f) => !/plano/.test(f));
   const tarde = entregaTarde(d, db);
   const muda = pode && (p.estado === "por aprovar" || p.estado === "aprovado");
   // 26/10: a tarefa aberta no plano vai para o endereço (?tarefa=3): o "voltar" do browser fecha-a
@@ -360,7 +360,7 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           </ul>
         )}
         {/* 23/10: a verificação do plano (verificacaoPlano.ts), antes de aprovar */}
-        {p.estado === "por aprovar" && <VerificacaoPlano L={verificarPlano(d, S, faltaParaArrancar(d, db))} irPara={irPara} comecar={pode ? (iso) => go(() => A.inicioPlano(d.id, iso))() : undefined} compras={go(() => A.abrirComprasObra(d.id))} />}
+        {p.estado === "por aprovar" && <VerificacaoPlano L={verificarPlano(d, S, faltaParaArrancar(d, db, S))} irPara={irPara} comecar={pode ? (iso) => go(() => A.inicioPlano(d.id, iso))() : undefined} compras={go(() => A.abrirComprasObra(d.id))} />}
         {C.map((c) => {
           const ti = p.tasks.indexOf(c.t);
           const alt = TECS.find((x) => x.sk === c.t.sk && x.id !== c.tec.id && diaDeFerias(x, p, c.t.dia, c.t.dur) == null);
@@ -1597,7 +1597,7 @@ const TOM_MAT: Record<EstadoMat, string> = {
 /** "Eliminada…" → "eliminada…": só a primeira letra (os números das encomendas ficam como são). */
 const minuscula = (t: string) => t.charAt(0).toLowerCase() + t.slice(1);
 function MateriaisObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
-  const { A, go } = ctx;
+  const { A, go, S } = ctx;
   const db = useInventario();
   // 09/11 (20270111870000): sem client_orders.view, com negocios.obra.materiais: as linhas vêm de obra_materiais_ler (sem dinheiro nem fornecedores)
   const lida = useMateriaisDaObra(ctx, d);
@@ -1610,7 +1610,7 @@ function MateriaisObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         {lida.k === "a ler" ? <span className="text-muted-foreground">A ler os materiais…</span>
           : lida.k === "erro" ? <span className="text-muted-foreground">Não foi possível ler os materiais.</span>
           : lida.k === "lidos" && lida.m.ecs.length ? `Encomenda de cliente ${lida.m.ecs.join(", ")}: ${lida.m.linhas.length ? minuscula(textoResumoEc(inv!)) : "sem materiais."}`
-          : !d.obra.ec ? semEncomendaCliente(d)
+          : !d.obra.ec ? semEncomendaCliente(d, S)
           : d.obra.ec.ref ? (inv ? `Encomenda de cliente ${inv.id} no Inventário: ${minuscula(textoResumoEc(inv))}` : `Encomenda de cliente ${d.obra.ec.n} emitida.`)
           : "Obra do exemplo: os materiais já estão na obra."}
       </p>

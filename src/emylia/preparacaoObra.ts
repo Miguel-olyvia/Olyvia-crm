@@ -576,9 +576,33 @@ export const SO_DEPOIS_DO_PAGAMENTO = "Depois de confirmado o pagamento.";
 /** A encomenda de cliente nasce do pagamento validado (no Inventário novo). */
 export const EC_NO_PAGAMENTO = "Emite-se com o pagamento validado, o plano aprovado e o contrato assinado.";
 
+/* 13/11: numa organização real a encomenda de cliente (e a de cada adenda) é emitida pela base: fn_neg_emitir_ec_se_pronta, com o pagamento
+ * da 1.ª prestação validado, o plano aprovado e o contrato assinado (a venda direta, no pagamento; a adenda, com o pagamento dela). As ações
+ * «Emitir a encomenda de cliente» (A.emitirEc) e «Emitir a encomenda da adenda» (A.emitirEcsAdenda) aí não fazem nada (o motor não emite com a
+ * ligação real), por isso não se mostram: fica o estado e uma frase a dizer que é automática. O Estado marca-se no motor (acoes, com a
+ * ligação real); no protótipo e no exemplo fica tudo como antes (o botão faz a emissão simulada). */
+const ESTADOS_EC_NO_SERVIDOR = new WeakSet<object>();
+/** Marca o Estado de uma organização real (a encomenda de cliente emite-se na base). Chamado por acoes() com a ligação real. */
+export const marcarEcNoServidor = (S: object): void => { ESTADOS_EC_NO_SERVIDOR.add(S); };
+/** A encomenda de cliente deste Estado é emitida automaticamente pela base (organização real)? */
+export const ecNoServidor = (S: object | null | undefined): boolean => !!S && ESTADOS_EC_NO_SERVIDOR.has(S);
+/** A frase da encomenda de cliente por emitir, numa organização real. */
+export const EC_AUTOMATICA = "A encomenda de cliente é emitida automaticamente quando o pagamento estiver validado, o plano aprovado e o contrato assinado.";
+/** Idem, na venda direta (sem plano nem contrato). */
+export const EC_AUTOMATICA_DIRETA = "A encomenda de cliente é emitida automaticamente quando o pagamento estiver validado.";
+/** Numa organização real, com tudo pronto e a encomenda ainda por ler: é a base que a emite; aparece quando chegar ao Inventário. */
+export const EC_AUTOMATICA_PRONTA = "O pagamento, o plano e o contrato estão prontos: a encomenda de cliente é emitida automaticamente e aparece aqui quando chegar ao Inventário.";
+/** Idem, para a encomenda de uma adenda com o pagamento validado. */
+export const EC_ADENDA_AUTOMATICA = "O pagamento da adenda está validado: a encomenda da adenda é emitida automaticamente e aparece aqui quando chegar ao Inventário.";
+/** O que falta para arrancar, numa organização real, enquanto a encomenda de cliente não chega (não é uma ação de ninguém). */
+export const FALTA_EC_AUTOMATICA = "a encomenda de cliente (emitida automaticamente)";
+const faltaEcAdenda = (n: string, S?: object | null): string => (ecNoServidor(S) ? `a encomenda da adenda ${n} (emitida automaticamente)` : `emitir a encomenda da adenda ${n}`);
+
 /** O que falta para arrancar a obra (vazio = pode arrancar): o pagamento, a encomenda de cliente, os materiais garantidos no Inventário
- *  (ponteNegocios.ts: faltaMateriais) e o plano aprovado. `db`: o Inventário já lido pelo ecrã (useInventario); sem ele, lê-se aqui. */
-export function faltaParaArrancar(d: Negocio, db?: Inventario | null): string[] {
+ *  (ponteNegocios.ts: faltaMateriais) e o plano aprovado. `db`: o Inventário já lido pelo ecrã (useInventario); sem ele, lê-se aqui.
+ *  `S` (13/11): numa organização real (ecNoServidor) a encomenda de cliente e a das adendas são automáticas: diz-se que se espera por elas,
+ *  em vez de «emitir» (uma ação que lá não existe). */
+export function faltaParaArrancar(d: Negocio, db?: Inventario | null, S?: Estado | null): string[] {
   const p = d.obra.plano, F: string[] = [];
   // 12/11 (Rúben: as medidas e o plano depois do Financeiro): primeiro o pagamento; depois, ao mesmo tempo, as medidas e o plano
   // (11/11: «em simultâneo»); com os dois, o contrato; assinado, a encomenda de cliente
@@ -587,7 +611,7 @@ export function faltaParaArrancar(d: Negocio, db?: Inventario | null): string[] 
     if (!retificacaoAceite(d)) F.push("retificar as medidas");
     else if (!planoAprovadoDe(d)) { /* «aprovar o plano» entra no fim, como antes */ }
     else if (!contratoAssinado(d)) F.push("assinar o contrato");
-    else F.push("emitir a encomenda de cliente");
+    else F.push(ecNoServidor(S) ? FALTA_EC_AUTOMATICA : "emitir a encomenda de cliente");
   }
   else if (usarProntidao(d.obra.ec)) F.push(...faltaMateriaisReal(prontidaoDe(d.obra.ec.contrato)));
   else if (d.obra.ec.ref) F.push(...faltaMateriais(resumoEcNegocio(db ?? lerInventario(), d.obra.ec.ref)));
@@ -598,7 +622,7 @@ export function faltaParaArrancar(d: Negocio, db?: Inventario | null): string[] 
   // 21/10 (decisão C): basta a 1.ª parcela da adenda paga (e a encomenda dela emitida); as outras parcelas não seguram o arranque
   if (!p || p.estado === "por aprovar" || p.estado === "aprovado") for (const a of assinadas(d)) {
     if (!primeiraPaga(a)) F.push(faturasAdenda(a).length ? `receber o pagamento da 1.ª parcela da adenda ${a.n}` : `faturar a 1.ª parcela da adenda ${a.n} e receber o pagamento`);
-    else if (d.obra.ec?.ref && !ecDaAdenda(d, a.n) && porEncomendarDe(d, a.n).length) F.push(`emitir a encomenda da adenda ${a.n}`);
+    else if (d.obra.ec?.ref && !ecDaAdenda(d, a.n) && porEncomendarDe(d, a.n).length) F.push(faltaEcAdenda(a.n, S));
   }
   if (!p || p.estado === "por aprovar") F.push("aprovar o plano");
   return F;
@@ -610,19 +634,22 @@ export const tarefasDaAdenda = (p: Plano, n: string): Tarefa[] => p.tasks.filter
 export const EC_ADENDA_NO_PAGAMENTO = "Emite-se quando o pagamento da 1.ª parcela da adenda for validado.";
 
 /** Porque é que a encomenda de cliente ainda não saiu: o que falta, pela ordem (12/11: o pagamento, as medidas e o plano, o contrato); com
- *  tudo pronto e sem encomenda, é porque não chegou ao Inventário (emite-se de novo). */
-export function semEncomendaCliente(d: Negocio): string {
+ *  tudo pronto e sem encomenda, é porque não chegou ao Inventário (emite-se de novo). 13/11: numa organização real (`S`, ecNoServidor) é a base
+ *  que a emite: diz-se que é automática, sem mandar emitir. */
+export function semEncomendaCliente(d: Negocio, S?: Estado | null): string {
   const direta = !!d.orc?.vendaDireta;
+  if (ecNoServidor(S) && !d.fin.pago) return direta ? EC_AUTOMATICA_DIRETA : EC_AUTOMATICA;
   if (!d.fin.pago) return direta ? "A encomenda de cliente emite-se quando o pagamento for validado." : "A encomenda de cliente sai depois do pagamento validado, das medidas aceites, do plano aprovado e do contrato assinado.";
   if (!direta && !retificacaoAceite(d)) return "A encomenda de cliente sai depois das medidas aceites, do plano aprovado e do contrato assinado.";
   if (!direta && !planoAprovadoDe(d)) return "A encomenda de cliente sai depois do plano aprovado e do contrato assinado.";
   if (!contratoAssinado(d)) return "A encomenda de cliente sai depois do contrato assinado.";
+  if (ecNoServidor(S)) return direta ? "O pagamento está validado: a encomenda de cliente é emitida automaticamente e aparece aqui quando chegar ao Inventário." : EC_AUTOMATICA_PRONTA;
   return "A encomenda de cliente não chegou ao Inventário: emita-a de novo no negócio.";
 }
 
 /** A frase dos materiais da obra: a encomenda de cliente e o estado dela no Inventário (as obras antigas do exemplo já os têm na obra). */
-export function textoMateriais(d: Negocio, r: ResumoEcNeg | null): string {
-  if (!d.obra.ec) return semEncomendaCliente(d);
+export function textoMateriais(d: Negocio, r: ResumoEcNeg | null, S?: Estado | null): string {
+  if (!d.obra.ec) return semEncomendaCliente(d, S);
   if (usarProntidao(d.obra.ec)) return textoProntidaoReal(d.obra.ec.n, prontidaoDe(d.obra.ec.contrato));
   if (!d.obra.ec.ref) return "Obra do exemplo: os materiais já estão na obra.";
   return r ? `Encomenda de cliente ${r.id}: ${textoResumoEc(r)}` : `Encomenda de cliente ${d.obra.ec.n} emitida.`;
@@ -639,8 +666,13 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
   const L: PassoPrep[] = [];
 
   // a encomenda de cliente: nasce do pagamento validado, no Inventário novo
+  // 13/11: numa organização real é a base que a emite (ecNoServidor): sem o botão «Emitir no Inventário» (lá não faz nada), à espera dela
+  const auto = ecNoServidor(S);
   if (!ec) {
-    L.push(d.fin.pago && planoAprovadoDe(d) && contratoAssinado(d)
+    const pronta = d.fin.pago && planoAprovadoDe(d) && contratoAssinado(d);
+    L.push(auto
+      ? { id: "ec", trilho: "ec", estado: "espera", who: null, t: "Encomenda de cliente", sub: pronta ? EC_AUTOMATICA_PRONTA : d.orc?.vendaDireta ? EC_AUTOMATICA_DIRETA : EC_AUTOMATICA }
+      : pronta
       ? { id: "ec", trilho: "ec", estado: "agora", who: "financeiro", t: "Emitir a encomenda de cliente", sub: "O pagamento, o plano e o contrato estão prontos mas a encomenda não chegou ao Inventário. Emita-a de novo.", act: "emitirEc", btn: "Emitir no Inventário" }
       : { id: "ec", trilho: "ec", estado: "espera", who: null, t: "Encomenda de cliente", sub: EC_NO_PAGAMENTO });
   } else {
@@ -664,6 +696,7 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
       : !pend ? { id, trilho: "ec", estado: "feito", who: null, t, sub: "Sem materiais a encomendar: só mão de obra." }
       : !primeiraPaga(a) ? { id, trilho: "ec", estado: "espera", who: null, t, sub: EC_ADENDA_NO_PAGAMENTO }
       : !ec?.ref ? { id, trilho: "ec", estado: "espera", who: null, t, sub: "O pagamento da adenda está validado: emite-se logo a seguir à encomenda de cliente inicial." }
+      : auto ? { id, trilho: "ec", estado: "espera", who: null, t, sub: EC_ADENDA_AUTOMATICA }
       : { id, trilho: "ec", estado: "agora", who: "financeiro", t: `Emitir a encomenda da adenda ${a.n}`, sub: "O pagamento da adenda está validado mas a encomenda não chegou ao Inventário. Emita-a de novo.", act: "emitirEcsAdenda", btn: "Emitir no Inventário" });
   }
 
@@ -731,7 +764,7 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
   for (const a of assinadas(d)) L.push(...passosPagamentoAdenda(d, a));
 
   // o arranque
-  const F = faltaParaArrancar(d);
+  const F = faltaParaArrancar(d, undefined, S);
   L.push(p.estado === "em curso" || p.estado === "concluída"
     ? { id: "go", trilho: "obra", estado: "feito", who: "operacoes", t: p.estado === "concluída" ? "Obra concluída" : "Obra em curso", sub: "" }
     : F.length
