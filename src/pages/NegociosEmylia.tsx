@@ -129,6 +129,9 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   // 12/11 («Simular função»): `simulados` são os códigos da função escolhida (null: as minhas, reais). Põe-nos no motor no lugar dos lidos
   // e `pode`, as rotas e o resto abaixo respondem só por eles; o que se lê e se grava na base segue as permissões reais.
   const simular = useSimularFuncao(org);
+  // 13/11 (Rúben, «testes reais com users reais na Mudelar»): os seletores «A ver como» e «Simular função» são andaime de teste
+  // (super-admin no ambiente de testes, como as Ferramentas de teste). Um user real não os vê — tem o seu papel e pronto.
+  const [andaimeTeste, setAndaimeTeste] = useState(false);
   const simulados = simular.simulacao?.codigos ?? null;
   const simularRef = useRef<HTMLSelectElement>(null);
   const simuladosRef = useRef(simulados);
@@ -662,6 +665,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
     };
     void podeModoTeste(supabase, org).then((pode) => {
       if (!vivo) return;
+      setAndaimeTeste(pode); // os seletores de teste do topo seguem o mesmo modo de teste das Ferramentas
       definirModoTeste(!pode ? null : {
         aceitarProposta: (d) => peloCliente(d, "sign_proposal"),
         assinarContrato: (d) => peloCliente(d, "sign_contract"),
@@ -899,16 +903,16 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
       {/* 9/11 (Rúben, telemóvel): o papel e o estado da gravação numa linha; as vistas numa fila que desliza na sua própria largura
           (antes alargavam a página toda para 563 px e o ecrã fugia para o lado ao arrastar) */}
       {!verTecnicos && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3 text-[15px] sm:justify-between sm:gap-3">
-        <label className="flex min-w-0 items-center gap-2">
+        {andaimeTeste && <label className="flex min-w-0 items-center gap-2">
           <span className="hidden text-muted-foreground sm:inline">A ver como</span>
           <select aria-label="A ver como" className="min-h-10 max-w-[60vw] rounded-lg border border-input bg-card px-3 sm:max-w-none" value={S.role}
             onChange={(e) => run(() => { S.role = escolhaRef.current = e.target.value as Papel; })}>
             {(meus ? papeisPermitidos(meus) : (Object.keys(PAPEIS) as Papel[])).map((p) => <option key={p} value={p}>{PAPEIS[p].n}</option>)}
           </select>
-        </label>
+        </label>}
         {/* 12/11: «Simular função» (só no ecrã): escolhe uma função da organização e o ecrã responde só com as permissões dela. Só depois de a
             página abrir (os papéis e os dados ao abrir são os reais). */}
-        {simular.funcoes && simular.funcoes.length > 0 && (
+        {andaimeTeste && simular.funcoes && simular.funcoes.length > 0 && (
           <label className="flex min-w-0 items-center gap-2">
             <span className="hidden text-muted-foreground sm:inline">Simular função</span>
             <select ref={simularRef} aria-label="Simular função" aria-busy={simular.aLer} className="min-h-10 max-w-[60vw] rounded-lg border border-input bg-card px-3 sm:max-w-none" value={simular.simulacao?.id ?? ""}

@@ -24,6 +24,9 @@ vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany
 // 04/11/2026: a página lê a permissão real de mandar ao portal (PermPortalNegocios); aqui tem-na toda (portal.manage)
 // 09/11: `perfil` null: todas; senão, só essas (o técnico só pelo papel não tem nenhuma no perfil)
 const perfil = vi.hoisted(() => ({ codigos: null as string[] | null }));
+// 13/11: o modo de teste do super-admin (mostra «A ver como»/«Simular função»). Ligado por omissão (a maioria dos testes é super-admin);
+// os testes de um utilizador sem privilégios desligam-no.
+const modoTeste = vi.hoisted(() => ({ on: true }));
 vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: (c: string) => !perfil.codigos || perfil.codigos.includes(c), loading: false }) }));
 vi.mock("@/hooks/pessoas/novaLead/gravarNovaLead", () => ({ gravarNovaLead: (...a: unknown[]) => gravarNovaLead(...a) }));
 vi.mock("@/hooks/pessoas/novaLead/comerciaisNovaLead", () => ({ resolverOrgRaiz: async () => ORG, lerComerciais: async () => ({ users: [], tree: [] }) }));
@@ -49,10 +52,11 @@ const NEGOCIO = {
 
 describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
   beforeEach(() => {
-    rpc.mockReset(); gravarNovaLead.mockReset(); perfil.codigos = null;
+    rpc.mockReset(); gravarNovaLead.mockReset(); perfil.codigos = null; modoTeste.on = true;
     rpc.mockImplementation(async (fn: string) => {
       // 30/10 (20270101340000): os papéis do RH; aqui, quem vê todos (pessoas.edit pelo perfil da Olyvia)
       if (fn === "neg_meus_papeis") return { data: { papeis: [], pessoa: null, todos: true }, error: null };
+      if (fn === "fn_modo_teste_para_mim") return { data: modoTeste.on, error: null };
       if (fn === "cat_ler_catalogo") return { data: CATALOGO, error: null };
       if (fn === "neg_ler_negocios") return { data: [NEGOCIO], error: null };
       // 20261231999000: as obras dos negócios lêem-se ao lado (aqui, nenhuma)
@@ -121,6 +125,7 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
   });
 
   it("sem papel no RH (e sem o perfil que vê todos): diz o que falta e não lê os negócios", async () => {
+    modoTeste.on = false; // utilizador normal, sem o andaime de teste
     const antes = rpc.getMockImplementation()!;
     rpc.mockImplementation(async (fn: string, ...r: unknown[]) => fn === "neg_meus_papeis"
       ? { data: { papeis: [], pessoa: { id: "p2", nome: "Helena Brandão" }, todos: false }, error: null }
@@ -233,6 +238,7 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
     });
 
     it("enquanto as permissões se leem, diz «A ler os negócios…» e não mostra os negócios", async () => {
+      modoTeste.on = false; // utilizador normal, sem o andaime de teste
       const antes = rpc.getMockImplementation()!;
       let soltar!: () => void;
       const espera = new Promise<void>((r) => { soltar = r; });

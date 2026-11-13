@@ -105,6 +105,7 @@ describe("Simular função (só no ecrã)", { timeout: 20000 }, () => {
     funcoesBase.codigos = { r1: ASSISTENTE, r2: COMERCIAL };
     rpc.mockImplementation(async (fn: string, a?: unknown) => {
       if (fn === "neg_meus_papeis") return { data: real.papeis, error: null };
+      if (fn === "fn_modo_teste_para_mim") return { data: true, error: null }; // super-admin no ambiente de teste: mostra «A ver como» e «Simular função»
       if (fn === "neg_historico_autores" || fn === "neg_rececoes_ler" || fn === "neg_respostas_ler" || fn === "neg_gestores_obra") return { data: [], error: null };
       if (fn === "cat_ler_catalogo") return { data: CATALOGO, error: null };
       if (fn === "neg_ler_negocios") return { data: real.negocios, error: null };
