@@ -1996,11 +1996,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     return false;
   };
   const obraDe = (d: Negocio) => d.servico || LINHAS[d.linha].n;
-  /** 24/10 (2.0): a fatura e o auto de receção também avisam o cliente por email ("Novo documento disponível"), só com a base
-   *  ligada e com um email válido (o portal já os mostra; sem email não se pede: não bloqueia o Financeiro nem a Obra). */
-  const avisarDocumento = (d: Negocio, doc: "fatura" | "auto", titulo: string) => {
-    if (modoReal() && emailDaFicha(d)) acessoCliente(d, doc, titulo + " · " + obraDe(d));
-  };
+  /** 24/10 (2.0): a fatura e o auto de receção já aparecem no portal do cliente (vêm do estado do negócio: o cliente vê-os e paga lá).
+   *  15/11 (Rúben, teste A-Z): o aviso por email usava create-client-portal-access, que só sabe a proposta e o contrato — para a fatura
+   *  e o auto dava sempre um "erro" enganador ("Não foi possível criar a conta do portal", com a conta já criada na proposta), mesmo
+   *  com o documento já no portal. Até a Edge Function os saber enviar (feat/fatura-auto), não se pede o aviso: nada se perde (o portal
+   *  já os mostra), só não há email a anunciá-los. */
+  const avisarDocumento = (_d: Negocio, _doc: "fatura" | "auto", _titulo: string) => {};
 
   // Não se passa de fase sem os campos obrigatórios. Se faltar algo, abre o
   // negócio, marca os campos e diz quantos faltam.

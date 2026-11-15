@@ -3,7 +3,7 @@ import { esquecerInventario } from "./inventario/loja";
 import { acoes, proximo, seed, type Estado } from "./motor";
 import { lerFaturaErp, resumoErp, type InfoErp } from "./erpEticadata";
 import { CHAVE_VERSAO } from "./versaoPrototipo";
-import { definirModoReal } from "./acessosPortal";
+import { definirCriadorContas, definirModoReal, type EnvioAcesso } from "./acessosPortal";
 
 // 26/10: a Edge Function erp-fatura (a ponte na rede da empresa), simulada
 const { invocar } = vi.hoisted(() => ({ invocar: vi.fn() }));
@@ -22,7 +22,18 @@ describe("a fatura do Eticadata no V1", () => {
   let S: Estado;
   const d = () => S.deals.find((x) => x.id === 1027)!;
   beforeEach(() => { localStorage.setItem(CHAVE_VERSAO, "0"); esquecerInventario(); S = seed(); S.role = "financeiro"; });
-  afterEach(() => vi.unstubAllGlobals());
+  afterEach(() => { vi.unstubAllGlobals(); definirModoReal(null); });
+
+  it("15/11: registar a fatura no modo real não pede acesso ao portal (o portal já a mostra; sem o erro enganador)", () => {
+    definirModoReal("org-1", "Olyvia Demo");
+    d().f.email = "ana@exemplo.pt";
+    const pedidos: EnvioAcesso[] = [];
+    const desligar = definirCriadorContas((e) => pedidos.push(e));
+    acoes(S, () => {}, (fn) => fn()).registarFaturaErp(1027, "FAT 15200126/12", info());
+    desligar();
+    expect(d().fin.fatura).toBeTruthy();
+    expect(pedidos).toHaveLength(0);
+  });
 
   it("o passo é registar a fatura do ERP, não emitir", () => {
     expect(proximo(d(), S)).toMatchObject({ t: "Registar a fatura do ERP", act: "registarFaturaErp", who: "financeiro" });
