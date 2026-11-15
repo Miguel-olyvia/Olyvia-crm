@@ -455,7 +455,11 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       const areaId = E(AREA).titulo, passoArea = passos.find((x) => x.id === areaId);
       const faltaArea = (aValidar(d, AREA.titulo) ? emFalta(GA, d.f).length : 0) + (aValidar(d, "fotos") && !(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim" ? 1 : 0);
       const faltaMed = aValidar(d, "medidas") ? nMed - medOk : 0;
-      const faltaNec = aValidar(d, "nec") ? (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length : 0;
+      // 15/11 (Rúben, teste A-Z): o campo «o cliente fornece produtos» (ESCOLHAS) entra no portão da visita, mas faltava na conta do bloco
+      // — com os serviços já escolhidos o acordeão «Necessidades» não acendia nem abria, e o «Fechar levantamento» só dava um aviso que
+      // parecia não fazer nada. Conta-se aqui também, como na lista de passos, para o bloco acender e abrir no campo em falta.
+      const faltaNec = (aValidar(d, "nec") ? (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length : 0)
+        + (aValidar(d, ESCOLHAS.titulo) && !E(ESCOLHAS).oculto ? emFalta([E(ESCOLHAS)], d.f).length : 0);
       passos = [
         ...passos.slice(0, ate).filter((x) => x.id !== "visitas" && x.id !== areaId),
         { id: "estudio", titulo: "Estúdio", icone: Sparkles,

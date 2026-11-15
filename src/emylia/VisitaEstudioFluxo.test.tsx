@@ -33,6 +33,18 @@ describe("a Visita de uma casa de banho segue o Estúdio (motor verdadeiro)", ()
     expect(passosDaFase(ctx, d, false).map((p) => p.id)).toContain("medidas");
   });
 
+  it("15/11: «o cliente fornece produtos» por responder acende o bloco das Necessidades (não fica preso no «Fechar levantamento»)", () => {
+    const { ctx, d } = montar();
+    // o «Fechar levantamento» correu e ficou marcado a validar, como o portão faz ao faltar o campo das Escolhas
+    d.valida = { fase: d.fase, grupos: [ESCOLHAS.titulo] };
+    d.f.materiais_cliente = "";
+    const comFalta = passosDaFase(ctx, d, true).find((p) => p.id === "estudio")!.falta ?? 0;
+    // respondido, o bloco já não acende por esse campo: a diferença é só o campo das Escolhas
+    d.f.materiais_cliente = "Não";
+    const semFalta = passosDaFase(ctx, d, true).find((p) => p.id === "estudio")!.falta ?? 0;
+    expect(comFalta).toBeGreaterThan(semFalta);
+  });
+
   it("abrir, decidir no Estúdio, voltar: fica tudo no negócio e nas necessidades", () => {
     const { ctx, d, gravacoes } = montar();
     // 1. abrir o Estúdio a partir da Visita
