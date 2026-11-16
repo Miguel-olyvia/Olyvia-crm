@@ -3,17 +3,21 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { contarPorRole, mensagemDeErro } from "../rolesReais";
+import { lerTodasAsPaginas } from "./lerPaginado";
 
 const LOTE_ROLES = 10;
-const LIMITE_LINHAS = 5000;
 
+type LinhaVinculo = { role_id: string; user_id: string };
+
+// Lê por páginas (o PostgREST corta nas 1000 linhas): uma contagem parcial deixaria eliminar uma role em uso. A ordem acaba
+// no `id` (único) para as páginas não repetirem nem saltarem vínculos. Um erro em qualquer página sobe: nunca há contagem parcial.
 export async function lerContagemPorRole(roleIds: string[]): Promise<Record<string, number>> {
-  const linhas: { role_id: string; user_id: string }[] = [];
+  const linhas: LinhaVinculo[] = [];
   for (let i = 0; i < roleIds.length; i += LOTE_ROLES) {
-    const { data, error } = await supabase
-      .from("anew_memberships").select("role_id, user_id").eq("status", "active").in("role_id", roleIds.slice(i, i + LOTE_ROLES)).limit(LIMITE_LINHAS);
-    if (error) throw error;
-    linhas.push(...((data ?? []) as { role_id: string; user_id: string }[]));
+    const lote = roleIds.slice(i, i + LOTE_ROLES);
+    linhas.push(...await lerTodasAsPaginas<LinhaVinculo>((de, ate) => supabase
+      .from("anew_memberships").select("role_id, user_id").eq("status", "active").in("role_id", lote)
+      .order("role_id").order("user_id").order("id").range(de, ate)));
   }
   return contarPorRole(linhas, roleIds);
 }

@@ -14,6 +14,7 @@ import {
 import { agruparPermissoesPorRole, mensagemDeErro, roleDaBase, type LinhaRole, type LinhaRolePermissao } from "../rolesReais";
 import type { ClientePortal, Organizacao, Role, Utilizador } from "../tipos";
 import { db } from "./clienteBase";
+import { lerTodasAsPaginas } from "./lerPaginado";
 
 export const CHAVE_UTILIZADORES = ["utilizadores-perfis", "utilizadores"] as const;
 const ORGANIZACAO_INEXISTENTE = "00000000-0000-0000-0000-000000000000";
@@ -59,12 +60,17 @@ async function lerOrganizacoes(p: ParametrosLeitura, ambito: Set<string>): Promi
   return linhas;
 }
 
-async function lerRolesDosVinculos(roleIds: string[]): Promise<Role[]> {
+/** As roles dos vínculos, com as permissões. Exportada para os testes. */
+export async function lerRolesDosVinculos(roleIds: string[]): Promise<Role[]> {
   if (roleIds.length === 0) return [];
   const linhas = await selectInBatchesOrThrow<LinhaRole>(roleIds, (lote) =>
     db.from("anew_roles").select("id, code, name, description, organization_id, is_system, can_sign_contracts, deleted_at").in("id", lote));
+  // Cada lote (até 200 roles) passa facilmente das 1000 linhas que o PostgREST serve: lê-se por páginas, com ordem
+  // determinística. Uma falha em qualquer página volta a ser `{ error }` para o lote falhar inteiro, como antes.
   const perms = await selectInBatchesOrThrow<LinhaRolePermissao>(roleIds, (lote) =>
-    db.from("anew_role_permissions").select("role_id, permission_code").in("role_id", lote).limit(5000));
+    lerTodasAsPaginas<LinhaRolePermissao>((de, ate) => db.from("anew_role_permissions").select("role_id, permission_code")
+      .in("role_id", lote).order("role_id").order("permission_code").range(de, ate))
+      .then((data) => ({ data, error: null }), (e: unknown) => ({ data: null, error: { message: mensagemDeErro(e) } })));
   const por = agruparPermissoesPorRole(perms);
   return linhas.map((l) => roleDaBase(l, por[l.id] ?? []));
 }
