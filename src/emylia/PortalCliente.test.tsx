@@ -48,18 +48,10 @@ describe("portal do cliente: o percurso guiado", () => {
     expect(screen.queryByRole("region", { name: "Próximo passo" })).toBeNull();
     expect(screen.queryByRole("button", { name: /Assinar/ })).toBeNull();
 
-    // 12/11 (Rúben: as medidas e o plano só depois do Financeiro): aceite, passa a Financeiro; pago, na Obra, as medidas e o plano;
-    // com os dois, o contrato; assinado, a encomenda de cliente
+    // 16/11 (o fluxo em vigor): aceite, o comercial gera o contrato (antes do pagamento); assinado, o Financeiro: a fatura e o pagamento;
+    // pago, na Obra, as medidas e o plano; com os dois, a encomenda de cliente
     expect(d.fase).toBe(4);
-    expect(proximo(d, S).t).toMatch(/fatura/i);
-    A.enviarContrato(d.id);
-    expect(d.orc!.contrato).toBeFalsy(); // ainda não: falta o pagamento
-    d.fin.fatura = { n: "FT 2026/1", q: "hoje" }; d.f.comprovativo = "TRF 1"; d.f.conta = "Banco A"; d.f.data_pag = "2026-11-09";
-    S.role = "financeiro"; A.validar(d.id);
-    expect(d.fase).toBe(5);
-    S.role = "operacoes"; A.retificarMedidas(d.id); A.resolverConflitos(d.id); A.aprovarPlano(d.id);
-    expect(d.obra.plano?.estado).toBe("aprovado");
-    expect(proximo(d, S).t).toMatch(/Gerar e enviar o contrato/);
+    expect(proximo(d, S)).toMatchObject({ act: "enviarContrato", who: "comercial" });
     S.role = "comercial";
     A.enviarContrato(d.id);
     expect(d.orc!.contrato).toBe("enviado");
@@ -79,8 +71,17 @@ describe("portal do cliente: o percurso guiado", () => {
     fireEvent.click(screen.getByRole("button", { name: /Assinar o contrato/ }));
     expect(d.orc!.contrato).toBe("assinado");
     expect(d.orc!.assinatura).toMatchObject({ tipo: "digital" });
-    expect(d.fase).toBe(5); // assinado, na Obra: sai a encomenda de cliente
-    expect(d.obra.ec).toBeTruthy();
+    // assinado, segue o Financeiro (ainda sem encomenda de cliente)
+    expect(d.fase).toBe(4);
+    expect(proximo(d, S).t).toMatch(/fatura/i);
+    expect(d.obra.ec).toBeFalsy();
+    d.fin.fatura = { n: "FT 2026/1", q: "hoje" }; d.f.comprovativo = "TRF 1"; d.f.conta = "Banco A"; d.f.data_pag = "2026-11-09";
+    S.role = "financeiro"; A.validar(d.id);
+    expect(d.fase).toBe(5);
+    S.role = "operacoes"; A.retificarMedidas(d.id); A.resolverConflitos(d.id); A.aprovarPlano(d.id);
+    expect(d.obra.plano?.estado).toBe("aprovado");
+    expect(d.obra.ec).toBeTruthy(); // pago, medidas e plano: sai a encomenda de cliente
+    r.rerender(<Portal S={S} d={d} A={A} />);
 
     // depois de assinado: o plano da obra, sem custos nem margens
     expect(screen.getByRole("heading", { name: "A sua obra" })).toBeTruthy();

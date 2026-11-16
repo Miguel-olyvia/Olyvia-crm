@@ -1350,10 +1350,18 @@ export interface Proximo {
 /** 12/11 (Rúben: «a validação das medidas das obras e a validação do plano da obra só vêm depois do Financeiro»). A ordem em vigor:
  *  proposta aceite → Financeiro (fatura e pagamento) → Obra: as medidas e o plano (ao mesmo tempo) → contrato assinado → encomenda de
  *  cliente → arranque. As medidas e o plano esperam pelo pagamento validado (os negócios antigos, com a encomenda já emitida, não). */
-export const medidasEPlanoAbertos = (d: Pick<Negocio, "fin" | "obra" | "orc">): boolean => d.fin.pago || !!d.obra.ec || !!d.orc?.vendaDireta;
+// 16/11 (o fluxo em vigor): proposta assinada → contrato assinado (ou só a proposta, na venda direta) → pagamento validado e fatura →
+// as medidas e o plano (ao mesmo tempo) → se a retificação muda o valor, a fatura dela no Financeiro (adenda do acerto, sem o cliente
+// assinar; se baixa, a nota de crédito) → encomenda de cliente e obra. A venda direta também espera pelo pagamento (como a base).
+export const medidasEPlanoAbertos = (d: Pick<Negocio, "fin" | "obra" | "orc">): boolean => d.fin.pago || !!d.obra.ec;
+/** 16/11: a adenda do acerto (a fatura da retificação) por pagar: a encomenda de cliente espera por ela (fn_neg_emitir_ec_se_pronta). */
+export const retificacaoPorPagar = (d: Pick<Negocio, "adendas">): boolean =>
+  (d.adendas ?? []).some((a) => a.motivo === MOTIVO_ACERTO && a.estado !== "anulada" && a.estado !== "recusada" && !primeiraPaga(a));
 /** 12/11: o contrato assinado, as medidas ou o plano mudaram o valor e ainda ninguém decidiu o acerto (a adenda ou seguir sem ela). */
+// 16/11: o contrato já vem assinado antes do pagamento (ou é venda direta, só a proposta); a retificação faz-se depois do pagamento e o
+// acerto volta ao Financeiro (adendaDoValor: a fatura da retificação; registarNotaCredito: quando baixa)
 export const acertoDoValorPendente = (d: Negocio): boolean =>
-  !d.anulado && !d.perdido && !d.orc?.vendaDireta && d.orc?.contrato === "assinado" && !d.f.acerto_valor
+  !d.anulado && !d.perdido && !!d.orc?.aceite && (d.orc.contrato === "assinado" || !!d.orc.vendaDireta) && d.fin.pago && !d.f.acerto_valor
   && d.obra.plano?.estado !== "concluída" && mudancasDeValor(d).length > 0;
 /** 12/11: a adenda do acerto, se o comercial a preparou (d.f.acerto_valor tem o número; «sem adenda» se seguiu sem ela). */
 export const adendaDoAcerto = (d: Negocio): Adenda | undefined => (d.f.acerto_valor ? d.adendas?.find((a) => a.n === d.f.acerto_valor) : undefined);
@@ -1362,7 +1370,7 @@ export const adendaDoAcerto = (d: Negocio): Adenda | undefined => (d.f.acerto_va
  *  orçamento (as horas e as tarefas). */
 export function mudancasDeValor(d: Negocio): string[] {
   const R: string[] = [];
-  if (!d.f.retif_aceite || d.orc?.vendaDireta) return R;
+  if (!d.f.retif_aceite) return R; // 16/11: a venda direta também (as medidas e o plano depois do pagamento)
   for (const [k, l] of camposMedida(LINHAS[d.linha])) {
     const r = d.f[`retif_${k}`];
     if (r == null || r === "") continue;
@@ -1428,6 +1436,12 @@ export function medidasRetificadas(d: Negocio): Partial<Record<CampoMedida, numb
 }
 /** O que os ajustes ao plano mudam no valor: as horas a mais ou a menos de cada tarefa (e as tarefas novas) ao preço por hora do serviço
  *  dela, com o desconto da proposta. Com tarefas tiradas não dá para saber quais (a referência só guarda as horas): `semValor`. */
+/** 16/11: quanto a retificação muda o valor (sem IVA): o que as medidas e o plano juntam (> 0: a fatura da retificação) ou tiram
+ *  (< 0: a nota de crédito). É o mesmo número que o AcertoDoValor mostra. */
+export function difDoAcerto(d: Negocio, S: Estado): number {
+  const mi = impactoDasMedidas(d, S, medidasRetificadas(d)), pi = impactoDoPlano(d, S);
+  return r2((mi?.medidas ?? 0) + (pi.semValor ? 0 : pi.valor));
+}
 export function impactoDoPlano(d: Negocio, S: Estado): { horas: number; valor: number; semValor: boolean } {
   const p = d.obra.plano;
   if (!p?.base) return { horas: 0, valor: 0, semValor: false };
@@ -1441,6 +1455,16 @@ export function impactoDoPlano(d: Negocio, S: Estado): { horas: number; valor: n
     if (s && s.h > 0) v += (dh * s.preco) / s.h;
   });
   return { horas: r2(h), valor: r2(v * (1 - (d.orc?.desconto || 0) / 100)), semValor: false };
+}
+/** 16/11: o passo do contrato principal, da proposta aceite até à assinatura (null: venda direta, por aceitar ou já assinado). O contrato
+ *  vem antes do pagamento (o fluxo em vigor); o cliente assina-o no mesmo link do portal. */
+export function passoDoContrato(o: Orcamento | null | undefined): Proximo | null {
+  if (!o?.aceite || o.vendaDireta || o.contrato === "assinado") return null;
+  if (o.contrato === "enviado") return { t: "À espera da assinatura do contrato", sub: "Contrato no portal do cliente. Assinado, segue a fatura e o pagamento.", who: "cliente", wait: true, sim: "assinar" };
+  // 15/10 (Ruben): o cliente aceita no portal e é o comercial que gera o contrato; aparece no mesmo link, por assinar
+  if (o.contratoPedido) return { t: "O cliente pediu alterações ao contrato", sub: `Cláusulas: ${o.contratoPedido.clausulas.map((x) => x.c.toLowerCase()).join(", ")}. O Jurídico revê e valida; depois o comercial envia a versão ${(o.contratoVersoes?.length ?? 0) + 1}.`, btn: "Rever o contrato", act: "abrirRevisao", who: "juridico" };
+  if (o.contratoRevisto) return { t: `Enviar o contrato (versão ${(o.contratoVersoes?.length ?? 0) + 1})`, sub: `Revisto e validado pelo Jurídico (${o.contratoRevisto.por}, ${o.contratoRevisto.q}). Volta ao portal do cliente, por assinar.`, btn: "Enviar o contrato", act: "enviarContrato", who: "comercial" };
+  return { t: "Proposta aceite. Gerar o contrato", sub: "O contrato aparece no mesmo link do cliente, por assinar. Assinado, segue a fatura e o pagamento; depois, as medidas e o plano da obra.", btn: "Gerar o contrato", act: "enviarContrato", who: "comercial" };
 }
 /** Ao ler da base: 12/11 (as medidas e o plano depois do Financeiro) a proposta aceite que ficou no Negócio (do fluxo de 10/11, à espera
  *  das medidas, do plano ou do contrato) passa ao Financeiro (a base faz o mesmo: fn_neg_fase_minima, 20270116000000). */
@@ -1483,21 +1507,14 @@ export function proximo(d: Negocio, S: Estado): Proximo {
         return { t: "O cliente pediu alterações", sub: `No portal, ${pc.q}: ${pediu || "sem detalhe"}. Faça a versão ${versaoAtual(o!) + 1}: a v${versaoAtual(o!)} fica guardada.`, btn: "Fazer a nova versão", act: "pedidoCliente", who: "comercial" };
       }
       if (!o!.aceite) return { t: "À espera do cliente", sub: "Proposta no portal desde " + o!.enviada + ".", who: "cliente", wait: true, sim: "aceitar" };
-      // 12/11 (Rúben: «a validação das medidas e do plano da obra só vêm depois do Financeiro»): aceite, o negócio passa a Financeiro
-      // (aceitar; ao ler da base, acertarFaseDasMedidas). As medidas, o plano e o contrato fazem-se na Obra, depois do pagamento.
-      if (!o!.vendaDireta && o!.contrato !== "enviado" && !o!.contratoPedido && !o!.contratoRevisto)
-        return { t: "Proposta aceite: segue a fatura", sub: "O Financeiro regista a fatura e valida o pagamento. Depois, na Obra, as medidas, o plano e o contrato.", who: "financeiro", wait: true };
-      if (!o!.vendaDireta && o!.contrato !== "assinado")
-        return o!.contrato === "enviado"
-          ? { t: "À espera da assinatura do contrato", sub: "Contrato no portal do cliente.", who: "cliente", wait: true, sim: "assinar" }
-          // 15/10 (Ruben): o cliente aceita no portal e é o comercial que gera o contrato; aparece no mesmo link, por assinar
-          : o!.contratoPedido
-          ? { t: "O cliente pediu alterações ao contrato", sub: `Cláusulas: ${o!.contratoPedido.clausulas.map((x) => x.c.toLowerCase()).join(", ")}. O Jurídico revê e valida; depois o comercial envia a versão ${(o!.contratoVersoes?.length ?? 0) + 1}.`, btn: "Rever o contrato", act: "abrirRevisao", who: "juridico" }
-          : o!.contratoRevisto
-          ? { t: `Enviar o contrato (versão ${(o!.contratoVersoes?.length ?? 0) + 1})`, sub: `Revisto e validado pelo Jurídico (${o!.contratoRevisto.por}, ${o!.contratoRevisto.q}). Volta ao portal do cliente, por assinar.`, btn: "Enviar o contrato", act: "enviarContrato", who: "comercial" }
-          : { t: "Plano aprovado. Gerar o contrato", sub: "Com as medidas certas e o plano aprovado. O contrato aparece no mesmo link do cliente, por assinar; assinado, sai a encomenda de cliente.", btn: "Gerar o contrato", act: "enviarContrato", who: "comercial" };
-      return { t: "—" };
-    case 4:
+      // 16/11 (o fluxo em vigor): aceite, o contrato gera-se e assina-se ANTES do pagamento (na venda direta fica só a proposta); depois o
+      // Financeiro (a fatura e o pagamento) e, na Obra, as medidas e o plano. Aceite, o negócio já está no Financeiro (acertarFaseDasMedidas):
+      // o passo do contrato vem primeiro também lá (passoDoContrato, no case 4).
+      return passoDoContrato(o!) ?? { t: "—" };
+    case 4: {
+      // 16/11: com contrato, primeiro o contrato assinado; só depois a fatura e o pagamento
+      const pc = passoDoContrato(d.orc);
+      if (pc) return pc;
       // 19/10: na V2 a Olyvia não emite faturas: o Financeiro regista a do programa certificado (sem botão no passo)
       if (!d.fin.fatura && lerVersao() !== "atual") return { t: "Registar a fatura", sub: "Emita-a no programa de faturação certificado e registe-a no Financeiro do negócio.", who: "financeiro" };
       // 22/10: no V1 também não: emite-se no Eticadata, regista-se aqui o número e a Olyvia lê no ERP se já foi paga (erpEticadata.ts)
@@ -1507,6 +1524,7 @@ export function proximo(d: Negocio, S: Estado): Proximo {
       if (d.fin.erp) return { t: "À espera do pagamento", sub: `${d.fin.fatura.n}: ${resumoErp(d.fin.erp)}. A Olyvia vê no Eticadata quando for paga; também pode validar à mão.`, btn: "Verificar no ERP", act: "verificarErp", who: "financeiro" };
       if (d.f.comprovativo) return { t: "Validar o pagamento", sub: `O cliente diz que pagou a ${d.fin.fatura.n}${d.f.data_pag ? " a " + d.f.data_pag.split("-").reverse().join("/") : ""} · ${d.f.comprovativo}. Confirmar que o valor entrou na conta; o recibo é emitido ao validar.`, btn: "Validar pagamento", act: "validar", who: "financeiro" };
       return { t: "À espera do pagamento", sub: `A ${d.fin.fatura.n} está no portal do cliente, com os dados para pagar. Sem ligação ao Eticadata, pode validar à mão quando o valor entrar.`, btn: "Validar à mão", act: "validar", who: "financeiro" };
+    }
     case 5: {
       const p = d.obra.plano;
       // F3: a encomenda emitida no servidor e o plano ainda por gerar (gera-se do orçamento, como no pagamento do protótipo)
@@ -2025,6 +2043,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
   };
   /** A encomenda de cliente, emitida no Inventário novo (16/10): reserva FIFO do stock e encomenda ao fornecedor do que faltar.
    *  Idempotente: se já existe, não faz nada. Devolve se a encomenda ficou emitida. */
+  /** 16/11: a encomenda de cliente que esperava pelo acerto do valor (a retificação paga, a nota de crédito ou seguir sem acerto): com o
+   *  pagamento validado, o plano aprovado e o contrato assinado (ou a venda direta), emite-se; numa organização real, a base. */
+  const ecSePronta = (d: Negocio, como: string) => {
+    if (d.obra.ec || !d.fin.pago || !planoAprovado(d) || !(d.orc?.contrato === "assinado" || d.orc?.vendaDireta) || acertoDoValorPendente(d) || retificacaoPorPagar(d)) return;
+    if (real) avisar({ msg: "A encomenda de cliente é emitida ao gravar", sub: "Vai para as Encomendas de cliente: stock reservado; o que falta vai ao fornecedor", kind: "auto", atraso: 500 });
+    else if (emitirEc(d)) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: como, kind: "auto", atraso: 500 });
+  };
   /** O pagamento confirmado (à mão ou no Eticadata): o recibo, a encomenda de cliente no Inventário e a passagem à Obra. */
   const pago = (d: Negocio, rc: { n: string; q: string }, como: string) => {
     const id = d.id;
@@ -2034,12 +2059,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     if (!d.obra.plano) prepararPlanoDe(d, S);
     // 9/11 (Rúben: «a encomenda a cliente só acontece depois do plano de obra estar aprovado»): com o plano já aprovado emite-se agora;
     // senão, emite-se quando as Operações o aprovarem (aprovarPlano; numa organização real, a base ao gravar o plano aprovado)
-    const ok = (planoAprovado(d) && d.orc?.contrato === "assinado") || d.orc?.vendaDireta ? emitirEc(d) : false; // 9/11: a venda direta não tem obra a aprovar (como na base)
+    // 16/11 (o fluxo em vigor): também a venda direta espera pelo plano aprovado, e as duas pela retificação paga (como a base)
+    const ok = planoAprovado(d) && (d.orc?.contrato === "assinado" || !!d.orc?.vendaDireta) && !retificacaoPorPagar(d) ? emitirEc(d) : false;
     fase(d, 5);
     const F = faltaParaArrancar(d, undefined, S);
     avisar({ msg: "Recibo " + rc.n + " " + como, sub: "Passou a Obra" + (F.length ? " · falta " + F.join(", ") : " · pronta a arrancar"), kind: "ok" });
-    // 12/11 (Rúben: as medidas e o plano só depois do Financeiro): é agora que abrem, ao mesmo tempo; com os dois, o contrato
-    if (!ok && !d.orc?.vendaDireta) avisar({ msg: "Segue a Obra", sub: retificacaoAceite(d) && planoAprovado(d) ? "Assina-se o contrato; depois sai a encomenda de cliente" : "Ao mesmo tempo, o supervisor confirma as medidas e as Operações aprovam o plano. Com os dois, o contrato; assinado, sai a encomenda de cliente", kind: "auto", atraso: 500 });
+    // 12/11 (Rúben: as medidas e o plano só depois do Financeiro): é agora que abrem, ao mesmo tempo. 16/11: o contrato já vem assinado
+    if (!ok && !real) avisar({ msg: "Segue a Obra", sub: "Ao mesmo tempo, o supervisor confirma as medidas e as Operações aprovam o plano. Se a retificação mudar o valor, volta ao Financeiro; depois, sai a encomenda de cliente", kind: "auto", atraso: 500 });
     else if (real) avisar({ msg: "A encomenda de cliente é emitida ao gravar", sub: "Com o pagamento validado e o plano aprovado, vai para as Encomendas de cliente: stock reservado; o que falta vai numa encomenda a fornecedor", kind: "auto", atraso: 500 });
     if (ok) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Stock reservado; o que falta vai numa encomenda a fornecedor, por aprovar no Inventário", kind: "auto", atraso: 500, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(id)) } });
   };
@@ -2431,8 +2457,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
      *  em rascunho. Os serviços que as medidas do local aumentam entram com a quantidade a mais e o preço da proposta (assinada, juntam-se ao
      *  plano com os materiais, como os outros trabalhos a mais); os produtos a mais e as horas a mais do plano entram como valor, sem tarefa
      *  (as horas já estão no plano aprovado). O que desce não se desconta sozinho: o comercial dá o desconto na adenda, se for o caso. */
+    // 16/11 (o fluxo em vigor): a retificação que muda o valor volta ao Financeiro, sem o cliente aceitar nem assinar: a adenda do acerto
+    // fica logo assinada pela empresa (como as do Estúdio da obra) e o Financeiro fatura-a e valida o pagamento; a encomenda de cliente
+    // espera por ele (retificacaoPorPagar; na base, fn_neg_emitir_ec_se_pronta). Assinada no CRM pede negocios.proposta.decidir (a base).
     adendaDoValor(id: number): string | null {
-      if (!exigePerm("orcamento.editar")) return null;
+      if (!exigePerm("orcamento.editar") || !exigePerm("proposta.decidir")) return null;
       const d = deal(id), o = d.orc;
       if (!o || !acertoDoValorPendente(d)) return null;
       const desc = 1 - (o.desconto || 0) / 100;
@@ -2461,8 +2490,31 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       }
       if (!n) return null;
       d.f.acerto_valor = n;
-      log(d, `Adenda ${n} do acerto (o valor mudou depois do contrato): ${mudancasDeValor(d).join("; ")}`);
+      log(d, `Adenda ${n} do acerto (a retificação mudou o valor): ${mudancasDeValor(d).join("; ")}`);
+      // 16/11: sem o cliente: verificada, assinada pela empresa e já do Financeiro (assinarAdenda junta ao plano o que tem tarefa)
+      if (a) {
+        const q = agora();
+        a.verif = true; a.enviada = q; a.aceite = q; a.estado = "aceite"; a.contrato = "enviado";
+        a.empresa = { nome: lerQuemAssina() || PAPEIS[S.role].nome, q };
+        congelarAdenda(S, a);
+        A.assinarAdenda(id, n);
+        log(d, `Retificação ${n} enviada ao Financeiro (sem assinatura do cliente): faturar e validar o pagamento antes da encomenda de cliente`);
+        avisar({ msg: `Retificação ${n} no Financeiro`, sub: "O Financeiro regista a fatura da retificação e valida o pagamento; depois, a encomenda de cliente", kind: "ok" });
+      }
       return n;
+    },
+    /** 16/11: a retificação baixou o valor (raro): o Financeiro emite a nota de crédito no Eticadata e regista-a aqui; não segura a obra. */
+    registarNotaCredito(id: number, numero: string): boolean {
+      if (!exigePerm("finance.invoice")) return false;
+      const d = deal(id), n = numero.trim();
+      if (!n) { avisar({ msg: "Escreva o número da nota de crédito", kind: "bad" }); return false; }
+      if (!acertoDoValorPendente(d)) return false;
+      d.f.acerto_valor = "nota de crédito";
+      d.f.nota_credito = n;
+      log(d, `Nota de crédito ${n} registada (a retificação baixou o valor): ${mudancasDeValor(d).join("; ")}`);
+      avisar({ msg: `Nota de crédito ${n} registada`, sub: "O negócio segue", kind: "ok" });
+      ecSePronta(d, "Emitida com a nota de crédito registada");
+      return true;
     },
     /** 12/11: o comercial decide que o acerto não se cobra (a diferença é pequena, ou desce): fica registado e o negócio segue. */
     semAdendaDoValor(id: number) {
@@ -2471,7 +2523,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!acertoDoValorPendente(d)) return;
       d.f.acerto_valor = "sem adenda";
       log(d, `Sem adenda do acerto (${PAPEIS[S.role].n}): ${mudancasDeValor(d).join("; ")}`, "w");
-      avisar({ msg: "Segue sem adenda", sub: "O valor fica o do contrato", kind: "ok" });
+      avisar({ msg: "Segue sem acerto", sub: "O valor fica o da proposta aceite", kind: "ok" });
+      ecSePronta(d, "Emitida sem acerto do valor");
     },
     /** 21/10: a versão nova faz-se num só sítio: mexer nos produtos da visita refaz o orçamento logo (sem voltar à visita);
      *  os preços, o desconto e as linhas à mão mantêm-se (preservarManuais). Só com a proposta por enviar. */
@@ -2758,16 +2811,15 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       fase(d, 4);
       if (!d.obra.plano) prepararObra(d);
       if (d.orc!.vendaDireta) { avisar({ msg: "Venda direta aceite", sub: "Cliente criado · passou a Financeiro", kind: "auto" }); return; }
-      avisar({ msg: "O cliente aceitou a proposta", sub: "Cliente criado · passou a Financeiro: a fatura e o pagamento. Depois, na Obra, as medidas e o plano; com os dois, o contrato.", kind: "auto" });
+      // 16/11: o contrato gera-se agora (antes do pagamento); assinado, o Financeiro trata da fatura e do pagamento
+      avisar({ msg: "O cliente aceitou a proposta", sub: "Cliente criado · o comercial gera o contrato; assinado, o Financeiro trata da fatura e do pagamento. Depois, na Obra, as medidas e o plano.", kind: "auto" });
     },
     recusar(id: number) { const d = deal(id); d.perdido = true; log(d, "O cliente recusou a proposta", "x"); avisar({ msg: "Negócio perdido", sub: d.nome, kind: "bad", act: { label: "Anular", fn: () => run(() => { anularPerda(d, "Recusa anulada pelo comercial"); }) } }); },
     enviarContrato(id: number) { if (!exigePerm("contrato.editar")) return; const d = deal(id);
-      // 12/11 (Rúben: as medidas e o plano depois do Financeiro): o contrato vem depois deles, na Obra; primeiro, o pagamento validado
-      if (d.orc?.aceite && !d.orc.vendaDireta && !medidasEPlanoAbertos(d)) { avisar({ msg: "Primeiro, o pagamento", sub: "O contrato gera-se na Obra, depois do pagamento validado, das medidas aceites e do plano aprovado", kind: "bad" }); return; }
-      // 9/11: o contrato vai com o plano aprovado e as medidas retificadas (11/11: feitos ao mesmo tempo; o contrato pede os dois). Se mudarem
-      // o valor, o acerto faz-se depois, numa adenda (12/11): o contrato é o da proposta aceite e paga
-      if ((d.fase >= 4 || d.orc?.aceite) && !planoAprovado(d)) { avisar({ msg: "Ainda não", sub: "O contrato envia-se com as medidas aceites e o plano aprovado pelas Operações", kind: "bad" }); return; }
-      if (d.orc?.aceite && !d.orc.vendaDireta && !retificacaoAceite(d)) { avisar({ msg: "Ainda não", sub: "Falta o supervisor aceitar as medidas; depois, o contrato", kind: "bad" }); return; }
+      // 16/11 (o fluxo em vigor): o contrato gera-se com a proposta aceite, ANTES do pagamento (antes de 16/11 esperava pelo pagamento, pelas
+      // medidas e pelo plano). A venda direta não tem contrato. Se a retificação mudar o valor, o acerto volta ao Financeiro (adendaDoValor).
+      if (!d.orc?.aceite) { avisar({ msg: "Ainda não", sub: "O contrato gera-se depois de o cliente aceitar a proposta", kind: "bad" }); return; }
+      if (d.orc.vendaDireta) { avisar({ msg: "Venda direta", sub: "A venda direta fica só com a proposta aceite: não tem contrato", kind: "bad" }); return; }
       if (d.orc?.contratoPedido) { avisar({ msg: "O contrato está com o Jurídico", sub: "Só se envia depois de validado", kind: "bad" }); return; } if (!portao(d, [PROPOSTA[1]])) return; if (!comEmail(d, "contrato")) return; d.orc!.contrato = "enviado"; log(d, "Contrato gerado e enviado para assinatura no portal"); avisar({ msg: "Contrato gerado", sub: "Já está no portal do cliente, por assinar", kind: "ok" }); acessoCliente(d, "contrato", "Contrato · " + obraDe(d)); },
     /** 23/10 (2.0): "Acesso ao portal" (o cabeçalho do negócio) e "Tentar de novo": o acesso do cliente outra vez, sem documento novo.
      *  A conta real volta a pedir-se (já existindo, só se liga ao negócio; a password não muda). */
@@ -2816,11 +2868,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const d = deal(id); d.orc!.contrato = "assinado"; log(d, "Contrato assinado pelo cliente"); criarCliente(S, d);
       // um contrato que ficou no Negócio (do fluxo de 10/11): assinado, passa a Financeiro (o plano fica como foi aprovado)
       if (d.fase < 4) { fase(d, 4); if (!d.obra.plano) prepararObra(d); avisar({ msg: "Contrato assinado", sub: "Cliente criado sozinho · passou a Financeiro", kind: "auto" }); return; }
-      // 9/11: com o pagamento e o plano aprovado, o contrato assinado emite a encomenda de cliente (numa organização real, a base)
-      avisar({ msg: "Contrato assinado", sub: "Segue a encomenda de cliente", kind: "auto" });
-      if (d.fin.pago && planoAprovado(d) && !d.obra.ec && !real && emitirEc(d)) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Emitida com o contrato assinado", kind: "auto", atraso: 500 });
-      // 12/11: as medidas ou o plano mudaram o valor: o acerto numa adenda (é o comercial)
-      if (acertoDoValorPendente(d)) avisar({ msg: "O valor mudou", sub: `${mudancasDeValor(d).join("; ")}. O comercial prepara a adenda do acerto.`, kind: "auto", atraso: 900 });
+      // 16/11: o contrato assina-se antes do pagamento: segue o Financeiro. (Um negócio antigo, já pago e com o plano aprovado, emite a
+      // encomenda de cliente se não houver retificação por pagar; numa organização real, a base.)
+      avisar({ msg: "Contrato assinado", sub: d.fin.pago ? "Segue a encomenda de cliente" : "Segue o Financeiro: a fatura e o pagamento", kind: "auto" });
+      if (d.fin.pago && planoAprovado(d) && !retificacaoPorPagar(d) && !d.obra.ec && !real && emitirEc(d)) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Emitida com o contrato assinado", kind: "auto", atraso: 500 });
+      if (acertoDoValorPendente(d)) avisar({ msg: "O valor mudou", sub: `${mudancasDeValor(d).join("; ")}. A retificação volta ao Financeiro.`, kind: "auto", atraso: 900 });
     },
     /** 9/11: o supervisor retifica as medidas no local e aceita-as (o primeiro passo da Obra); sem valores, ficam as da visita. */
     retificarMedidas(id: number, valores?: Record<string, number>, notas?: string) {
@@ -3138,6 +3190,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     registarFatura(id: number, numero: string, dataPt: string, nomeTranche: string): boolean {
       const d = deal(id);
       if (!exigePerm("finance.invoice")) return false;
+      // 16/11: com contrato, a primeira fatura depois de ele estar assinado
+      if (!d.fin.fatura && passoDoContrato(d.orc)) { avisar({ msg: "Primeiro, o contrato assinado", sub: "A fatura regista-se depois de o cliente assinar o contrato", kind: "bad" }); return false; }
       if (!d.fin.fatura) d.fin.fatura = { n: numero.trim(), q: dataPt.slice(0, 5) };
       log(d, `Fatura ${numero.trim()} registada · ${nomeTranche} · emitida no programa certificado`);
       return true;
@@ -3169,6 +3223,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // chamada só com o id (das listas do Hoje): abre o negócio, onde se escreve o número
       if (numero == null) { S.view = "negocio"; S.deal = id; S.confirmPerda = null; S.pulse = "sec-4"; return; }
       if (!exigePerm("finance.invoice")) return;
+      // 16/11 (o fluxo em vigor): com contrato, a fatura vem depois de ele estar assinado (a venda direta, logo com a proposta aceite)
+      if (!d.fin.fatura && passoDoContrato(d.orc)) { avisar({ msg: "Primeiro, o contrato assinado", sub: "A fatura regista-se depois de o cliente assinar o contrato", kind: "bad" }); return; }
       if (!portao(d, [FINANCEIRO[0], FINANCEIRO[1]])) return;
       const n = numero.trim(), hoje = new Date();
       d.fin.fatura = { n, q: info?.data ? info.data.slice(8, 10) + "/" + info.data.slice(5, 7) : String(hoje.getDate()).padStart(2, "0") + "/" + String(hoje.getMonth() + 1).padStart(2, "0") };
@@ -3892,17 +3948,21 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const d = deal(id);
       // 12/11 (Rúben: «a validação das medidas e do plano só vêm depois do Financeiro»)
       if (!medidasEPlanoAbertos(d)) { avisar({ msg: "Primeiro, o pagamento", sub: "O plano aprova-se depois de o Financeiro validar o pagamento", kind: "bad" }); return; }
+      // 16/11 (o fluxo em vigor): se as medidas ou o plano mudaram o valor, primeiro a retificação vai ao Financeiro (ou a nota de crédito,
+      // ou segue sem acerto); só depois se aprova o plano. Assim a base nunca emite a encomenda de cliente com o acerto por decidir.
+      if (acertoDoValorPendente(d)) { avisar({ msg: "Primeiro, a retificação", sub: `O valor mudou (${mudancasDeValor(d).join("; ")}). O comercial envia a retificação ao Financeiro, ou o Financeiro regista a nota de crédito; depois, aprova-se o plano`, kind: "bad" }); return; }
       if (conflitos(d.obra.plano!).length) { avisar({ msg: "Há um conflito por resolver", sub: "Troque o técnico ou adie a fase", kind: "bad" }); return; }
       d.obra.plano!.estado = "aprovado"; log(d, "Plano aprovado pelas Operações");
       // o início do plano passa para a preparação da obra (não se escreve duas vezes)
       const p = d.obra.plano!;
       if (p.origem === "orcamento" && !d.f.inicio) { const i = inicioDoPlano(p); if (i) d.f.inicio = isoDia(i); } avisar({ msg: "Plano aprovado", sub: "Os técnicos recebem as tarefas na app", kind: "ok" });
       // 9/11: o plano aprovado (com o pagamento validado e o contrato assinado) emite a encomenda de cliente; numa organização real, a base
-      // 11/11: as medidas fazem-se ao mesmo tempo; sem elas aceites, o contrato espera
-      // 12/11: se as medidas ou o plano mudarem o valor, o acerto faz-se numa adenda, depois do contrato assinado
-      if (!d.obra.ec && !d.orc?.contrato && !d.orc?.vendaDireta && !retificacaoAceite(d)) avisar({ msg: "Falta aceitar as medidas", sub: "O supervisor confirma as medidas no local; com elas aceites, segue o contrato. Se mudarem, o plano volta a por aprovar.", kind: "auto", atraso: 500 });
-      else if (!d.obra.ec && d.orc?.contrato !== "assinado" && !d.orc?.vendaDireta) avisar({ msg: "Segue o contrato", sub: mudancasDeValor(d).length ? "O comercial gera e envia o contrato da proposta aceite; assinado, sai a encomenda de cliente e o valor que mudou acerta-se numa adenda" : "Com o plano aprovado, o comercial gera e envia o contrato; assinado, sai a encomenda de cliente", kind: "auto", atraso: 500 });
-      else if (!d.obra.ec) {
+      // 16/11 (o fluxo em vigor): o contrato já vem assinado antes do pagamento (ou é venda direta); a retificação que muda o valor volta ao
+      // Financeiro e a encomenda espera pela fatura dela paga
+      if (!d.obra.ec && !retificacaoAceite(d)) avisar({ msg: "Falta aceitar as medidas", sub: "O supervisor confirma as medidas no local. Se mudarem, o plano volta a por aprovar.", kind: "auto", atraso: 500 });
+      else if (!d.obra.ec && retificacaoPorPagar(d)) avisar({ msg: "Falta a retificação paga", sub: "O Financeiro fatura a retificação e valida o pagamento; depois, sai a encomenda de cliente", kind: "auto", atraso: 500 });
+      else if (!d.obra.ec && d.orc?.contrato !== "assinado" && !d.orc?.vendaDireta) avisar({ msg: "Falta o contrato assinado", sub: "O cliente assina o contrato no portal; depois, sai a encomenda de cliente", kind: "auto", atraso: 500 });
+      else if (!d.obra.ec && d.fin.pago) {
         if (real) avisar({ msg: "A encomenda de cliente é emitida ao gravar", sub: "O plano aprovado manda-a para as Encomendas de cliente: stock reservado; o que falta vai ao fornecedor", kind: "auto", atraso: 500 });
         else if (emitirEc(d)) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Emitida com o plano aprovado", kind: "auto", atraso: 500, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(id)) } });
       }
@@ -4227,6 +4287,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 21/10 (decisão B): sem encomenda inicial, a da adenda emite-se logo a seguir a ela (emitirEc)
       if (ft.i === 0 && !d.obra.ec?.ref && porEncomendarDe(d, a.n).length) log(d, `A encomenda da adenda ${a.n} emite-se logo a seguir à encomenda de cliente inicial`);
       avisar({ msg: `Recibo ${ft.recibo.n} emitido`, sub: `Pagamento da ${nomeParcela(ft.i)} da adenda ${a.n} validado (${ft.n})`, kind: "ok" });
+      // 16/11: a retificação paga solta a encomenda de cliente que esperava por ela (com o pagamento, o plano aprovado e o contrato ou a
+      // venda direta); numa organização real, a base (neg_validar_pagamento → fn_neg_emitir_ec_se_pronta)
+      if (ft.i === 0 && a.motivo === MOTIVO_ACERTO) ecSePronta(d, "Emitida com a retificação paga");
       // 21/10 (decisão B/C): a 1.ª parcela paga emite a encomenda dos materiais da adenda no Inventário (EC-<id>-A<k>)
       if (ft.i === 0) encomendarAdendas(d);
     },
