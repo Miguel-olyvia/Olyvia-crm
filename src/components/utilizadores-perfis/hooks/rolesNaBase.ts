@@ -4,6 +4,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { dadosParaRpc, mensagemDeErro, mesmosCodigos } from "../rolesReais";
 import type { DadosRole } from "../tipos";
+import { lerTodasAsPaginas } from "./lerPaginado";
 
 type Rpc = (nome: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: unknown }>;
 // As RPCs aceitam NULL na descrição; os tipos gerados não. Chamam-se pelo nome, como em Roles.tsx.
@@ -27,10 +28,16 @@ async function lerRole(id: string): Promise<{ id: string; code: string; name: st
   return (data as { id: string; code: string; name: string; deleted_at: string | null } | null) ?? null;
 }
 
-async function lerPermissoes(id: string): Promise<string[]> {
-  const { data, error } = await supabase.from("anew_role_permissions").select("permission_code").eq("role_id", id).limit(5000);
-  if (error) throw new Error(mensagemDeErro(error));
-  return ((data ?? []) as { permission_code: string }[]).map((p) => p.permission_code);
+/** Exportada para os testes. Paginada: com mais de 1000 permissões o PostgREST cortava em silêncio e a confirmação falhava. */
+export async function lerPermissoes(id: string): Promise<string[]> {
+  try {
+    const linhas = await lerTodasAsPaginas<{ permission_code: string }>((de, ate) => supabase
+      .from("anew_role_permissions").select("permission_code").eq("role_id", id)
+      .order("role_id").order("permission_code").range(de, ate));
+    return linhas.map((p) => p.permission_code);
+  } catch (error) {
+    throw new Error(mensagemDeErro(error));
+  }
 }
 
 /** Confirma na base que a role ficou como se pediu (nome, código, permissões). */

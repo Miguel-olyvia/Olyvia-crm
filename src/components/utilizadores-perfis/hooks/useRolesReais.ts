@@ -10,10 +10,10 @@ import {
   agruparPermissoesPorRole, mensagemDeErro, roleDaBase, rolesVisiveis, type LinhaRole, type LinhaRolePermissao,
 } from "../rolesReais";
 import type { Role } from "../tipos";
+import { lerTodasAsPaginas } from "./lerPaginado";
 
 const MAX_NIVEIS_HIERARQUIA = 10;
 const LOTE_ROLES = 10;
-const LIMITE_LINHAS = 5000;
 
 /** O id da organização ativa e os das ascendentes (a holding também dá roles), do mais próximo para cima. */
 async function idsOrganizacaoEAscendentes(ativa: string): Promise<Set<string>> {
@@ -38,13 +38,15 @@ async function lerRoles(ativa: string, papel: string | null, eliminadas: boolean
   return rolesVisiveis((data ?? []) as unknown as LinhaRole[], papel, ids);
 }
 
-async function lerPermissoesDasRoles(roleIds: string[]): Promise<LinhaRolePermissao[]> {
+/** Exportada para os testes. Lotes de roles (o URL não cresce sem fim) e, dentro de cada lote, paginada: um lote passa
+ *  facilmente das 1000 linhas (só super_admin tem ~480) e o PostgREST cortava em silêncio — roles apareciam sem permissões. */
+export async function lerPermissoesDasRoles(roleIds: string[]): Promise<LinhaRolePermissao[]> {
   const todas: LinhaRolePermissao[] = [];
   for (let i = 0; i < roleIds.length; i += LOTE_ROLES) {
-    const { data, error } = await supabase
-      .from("anew_role_permissions").select("role_id, permission_code").in("role_id", roleIds.slice(i, i + LOTE_ROLES)).limit(LIMITE_LINHAS);
-    if (error) throw error;
-    todas.push(...((data ?? []) as LinhaRolePermissao[]));
+    const lote = roleIds.slice(i, i + LOTE_ROLES);
+    todas.push(...await lerTodasAsPaginas<LinhaRolePermissao>((de, ate) => supabase
+      .from("anew_role_permissions").select("role_id, permission_code").in("role_id", lote)
+      .order("role_id").order("permission_code").range(de, ate)));
   }
   return todas;
 }

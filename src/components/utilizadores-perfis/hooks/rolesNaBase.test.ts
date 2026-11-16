@@ -3,14 +3,14 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const rpc = vi.fn();
 const respostas: Record<string, { data: unknown; error: unknown }> = {};
 
-// Cada from(tabela).select().eq().maybeSingle()/limit() responde com o que o teste pôs em `respostas[tabela]`.
+// Cada from(tabela).select().eq().maybeSingle()/range() responde com o que o teste pôs em `respostas[tabela]`.
 vi.mock("@/integrations/supabase/client", () => {
   const cadeia = (tabela: string) => {
     const c: Record<string, unknown> = {};
     const devolve = () => Promise.resolve(respostas[tabela] ?? { data: null, error: null });
-    ["select", "eq"].forEach((m) => { c[m] = () => c; });
+    ["select", "eq", "order"].forEach((m) => { c[m] = () => c; });
     c.maybeSingle = devolve;
-    c.limit = devolve;
+    c.range = devolve;
     return c;
   };
   return { supabase: { rpc: (...a: unknown[]) => rpc(...a), from: (t: string) => cadeia(t) } };

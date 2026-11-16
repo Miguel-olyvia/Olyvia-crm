@@ -13,7 +13,7 @@ vi.mock("@/integrations/supabase/client", () => {
     pedidos.push(registo);
     const resposta = () => Promise.resolve(respostas[tabela] ?? { data: [], error: null });
     const b: Record<string, unknown> = {};
-    ["select", "eq", "order", "is", "not", "in", "limit"].forEach((m) => {
+    ["select", "eq", "order", "is", "not", "in", "limit", "range"].forEach((m) => {
       b[m] = (...args: unknown[]) => { registo.filtros.push([m, ...args]); return b; };
     });
     b.maybeSingle = resposta;
