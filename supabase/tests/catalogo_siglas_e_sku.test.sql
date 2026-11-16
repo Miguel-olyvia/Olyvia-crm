@@ -3,6 +3,7 @@
 -- ============================================================
 -- ORDEM: correr ANTES do db push da 118000000 (falha no passo 0, «função cat_gerar_sku_produto não existe»);
 -- depois do push termina com «OK: …» e a lista do que foi saltado. Qualquer falha rebenta com 'FALHOU: …'.
+-- Desde 20270118200000 (subcategoria obrigatória no SKU) espera também essa migration: antes dela falha em P3.
 --
 -- Tudo dentro de BEGIN … ROLLBACK. Escritas só na nike (b6ffce4f-f630-4933-833a-008649757a33): categorias e
 -- subcategorias de teste, 5 atributos de teste (nomes com um sufixo aleatório, para não colidirem com os que a nike
@@ -30,16 +31,17 @@
 --   4. Siglas: guardar (minúsculas normalizadas), CT004 com o id no DETAIL (topo, sub, opção), a mesma sigla noutro pai
 --      passa, CT002 (vazia, sinais, 7 letras, só algarismos na categoria, opção de grupo global), CT003, CT001
 --   5. Leituras: "sigla" (3 leituras), "sku_ordem" e "sku_entra"
---   6. Gerar: formato completo na ordem inicial; 3D mm decimal; sequência 0001 → 0002 e outro prefixo; atributo em falta
---      omitido; categoria sem sigla e sem categoria → não gera; manual sem/com p_forcar (sku_gerado false → true);
+--   6. Gerar: formato completo na ordem inicial; 3D mm decimal; sequência 0001 → 0002; atributo em falta omitido;
+--      sem subcategoria, categoria sem sigla e sem categoria → não gera (falta "subcategoria" sempre que não há sub;
+--      o provisório fica); manual sem/com p_forcar (sku_gerado false → true);
 --      provisório CAT- substituído; opção sem sigla → omitida com falta; colisão salta; app.audit_source reposto;
 --      CT003 (inexistente, apagado), CT002 (consumível), CT001 (sem permissão, BM24)
 --   7. Ordem: cat_guardar_sku_config (medida antes da cor, brilho desligado) → SKU na ordem nova; SKU já gerados não
 --      mudam; recusas (vazia, incompleta, repetida, sem "entra", global, inexistente, sem permissão)
---   8. Regenerar: SKU gerado volta a ser gerado ao gravar (mantém o NNNN com o mesmo prefixo; muda de prefixo → número
---      novo do outro prefixo)
+--   8. Regenerar: SKU gerado volta a ser gerado ao gravar (mantém o NNNN com o mesmo prefixo; sem sub → não regenera e
+--      o SKU anterior fica; outra categoria+sub → começa em 0001 desse par)
 --   9. Pré-visualizar: o NNNN seguinte sem o consumir; medida incompleta e 1e100000 omitidas com falta (resposta curta);
---      sem sigla / sem categoria → sku null; sub de outro pai → CT002; perfil reduzido → CT001
+--      sem sigla / sem categoria / sem subcategoria → sku null; sub de outro pai → CT002; perfil reduzido → CT001
 --  10. GRANTs (anon e PUBLIC sem EXECUTE; internas sem authenticated) e search_path com pg_temp (fn_cat_exigir_uma incluída)
 --
 -- O que NÃO cobre: corridas entre duas sessões (advisory locks); um produto REAL de outra organização → CT003 (só ids
@@ -267,6 +269,7 @@ BEGIN
   PERFORM set_config('teste.t3', v_t3::text, true);
   PERFORM set_config('teste.n_t1', 'Topo SKU T' || v_suf, true); PERFORM set_config('teste.n_s1', 'Sub SKU T' || v_suf, true);
   PERFORM set_config('teste.n_t2', 'Topo Sem Sub T' || v_suf, true); PERFORM set_config('teste.n_t3', 'Topo Sem Sigla T' || v_suf, true);
+  PERFORM set_config('teste.n_s3', 'Sub Tres T' || v_suf, true);
 END $t$;
 SELECT set_config('request.jwt.claims', current_setting('teste.claims_sem'), true);
 DO $t$
@@ -476,26 +479,30 @@ BEGIN
   IF r ->> 'sku' IS DISTINCT FROM v_pre || '-0002-VM-7P5X30X2MM' THEN RAISE EXCEPTION 'FALHOU: P2 → %', r; END IF;
   PERFORM set_config('teste.p2', v_p::text, true);
 
-  -- P3: sem subcategoria, outro prefixo → 0001
+  -- P3: sem subcategoria (20270118200000: obrigatória) → não gera, falta "subcategoria" e o SKU provisório fica
   v_p := public.cat_guardar_produto(v_org, NULL, 'produto', 'Teste SKU P3 2027', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
   PERFORM public.cat_guardar_produto_tabelas(v_org, v_p, NULL, NULL, current_setting('teste.n_t2'), NULL);
   PERFORM public.cat_guardar_produto_atributos(v_org, v_p, jsonb_build_array(jsonb_build_object('atributo', v_cor, 'opcao', v_azul)));
   r := public.cat_gerar_sku_produto(v_org, v_p);
-  IF r ->> 'sku' IS DISTINCT FROM v_sc || '-0001-AZ' THEN RAISE EXCEPTION 'FALHOU: P3 (sem sub) → %', r; END IF;
+  IF (r -> 'gerado') IS DISTINCT FROM 'false'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["subcategoria"]'::jsonb
+     OR r ->> 'motivo' IS DISTINCT FROM 'faltas' OR r ->> 'sku' !~ '^CAT-[0-9A-F]{10}$'
+     OR r ->> 'sku' IS DISTINCT FROM (SELECT p.sku FROM products p WHERE p.id = v_p) THEN
+    RAISE EXCEPTION 'FALHOU: P3 (sem sub: não devia gerar) → %', r;
+  END IF;
 
-  -- P4: categoria sem sigla → não gera e o SKU fica
+  -- P4: categoria sem sigla (e sem sub) → não gera e o SKU fica
   v_p := public.cat_guardar_produto(v_org, NULL, 'produto', 'Teste SKU P4 2027', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
   PERFORM public.cat_guardar_produto_tabelas(v_org, v_p, NULL, NULL, current_setting('teste.n_t3'), NULL);
   r := public.cat_gerar_sku_produto(v_org, v_p);
-  IF (r -> 'gerado') IS DISTINCT FROM 'false'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["sigla_categoria"]'::jsonb
+  IF (r -> 'gerado') IS DISTINCT FROM 'false'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["sigla_categoria", "subcategoria"]'::jsonb
      OR r ->> 'motivo' IS DISTINCT FROM 'faltas' OR r ->> 'sku' !~ '^CAT-[0-9A-F]{10}$' THEN
     RAISE EXCEPTION 'FALHOU: P4 (categoria sem sigla) → %', r;
   END IF;
 
-  -- P5: sem categoria → não gera
+  -- P5: sem categoria nem sub → não gera
   v_p := public.cat_guardar_produto(v_org, NULL, 'produto', 'Teste SKU P5 2027', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
   r := public.cat_gerar_sku_produto(v_org, v_p);
-  IF (r -> 'gerado') IS DISTINCT FROM 'false'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["categoria"]'::jsonb THEN
+  IF (r -> 'gerado') IS DISTINCT FROM 'false'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["categoria", "subcategoria"]'::jsonb THEN
     RAISE EXCEPTION 'FALHOU: P5 (sem categoria) → %', r;
   END IF;
 
@@ -528,7 +535,7 @@ BEGIN
     RAISE EXCEPTION 'FALHOU: sku_gerado não ficou true depois de gerar';
   END IF;
   IF EXISTS (SELECT 1 FROM products WHERE organization_id = current_setting('teste.org')::uuid
-             AND name IN ('Teste SKU P4 2027', 'Teste SKU P5 2027') AND sku_gerado) THEN
+             AND name IN ('Teste SKU P3 2027', 'Teste SKU P4 2027', 'Teste SKU P5 2027') AND sku_gerado) THEN
     RAISE EXCEPTION 'FALHOU: sku_gerado true num produto que não gerou';
   END IF;
 END $t$;
@@ -726,12 +733,18 @@ BEGIN
     END IF;
   END IF;
   r := public.cat_prever_sku(v_org, current_setting('teste.t3')::uuid, NULL, '[]'::jsonb);
-  IF r -> 'sku' IS DISTINCT FROM 'null'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["sigla_categoria"]'::jsonb THEN
+  IF r -> 'sku' IS DISTINCT FROM 'null'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["sigla_categoria", "subcategoria"]'::jsonb THEN
     RAISE EXCEPTION 'FALHOU: pré-visualização sem sigla → %', r;
   END IF;
   r := public.cat_prever_sku(v_org, NULL, NULL, NULL);
-  IF r -> 'sku' IS DISTINCT FROM 'null'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["categoria"]'::jsonb THEN
+  IF r -> 'sku' IS DISTINCT FROM 'null'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["categoria", "subcategoria"]'::jsonb THEN
     RAISE EXCEPTION 'FALHOU: pré-visualização sem categoria → %', r;
+  END IF;
+  -- categoria com sigla, sem subcategoria (20270118200000: obrigatória) → sku null e a falta
+  r := public.cat_prever_sku(v_org, current_setting('teste.t2')::uuid, NULL, jsonb_build_array(
+    jsonb_build_object('atributo', current_setting('teste.cor'), 'opcao', current_setting('teste.o_azul'))));
+  IF r -> 'sku' IS DISTINCT FROM 'null'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["subcategoria"]'::jsonb THEN
+    RAISE EXCEPTION 'FALHOU: pré-visualização sem subcategoria → %', r;
   END IF;
   BEGIN PERFORM public.cat_prever_sku(v_org, v_t1, current_setting('teste.s3')::uuid, '[]'::jsonb);
     RAISE EXCEPTION 'FALHOU: subcategoria de outro pai aceite';
@@ -768,10 +781,18 @@ BEGIN
   IF r ->> 'sku' IS DISTINCT FROM current_setting('teste.pre') || '-0002-7P5X30X2MM-AZ' OR (r -> 'gerado') IS DISTINCT FROM 'true'::jsonb THEN
     RAISE EXCEPTION 'FALHOU: regenerar com o mesmo prefixo → %', r;
   END IF;
-  -- P2 muda de categoria (sem sub): prefixo novo → o número seguinte desse prefixo (P3 tem 0001)
+  -- P2 muda de categoria sem sub: não regenera e o SKU gerado antes fica
   PERFORM public.cat_guardar_produto_tabelas(v_org, v_p, NULL, NULL, current_setting('teste.n_t2'), NULL);
   r := public.cat_gerar_sku_produto(v_org, v_p);
-  IF r ->> 'sku' IS DISTINCT FROM current_setting('teste.sc') || '-0002-7P5X30X2MM-AZ' THEN
+  IF (r -> 'gerado') IS DISTINCT FROM 'false'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["subcategoria"]'::jsonb
+     OR r ->> 'sku' IS DISTINCT FROM current_setting('teste.pre') || '-0002-7P5X30X2MM-AZ'
+     OR (SELECT p.sku FROM products p WHERE p.id = v_p) IS DISTINCT FROM current_setting('teste.pre') || '-0002-7P5X30X2MM-AZ' THEN
+    RAISE EXCEPTION 'FALHOU: regenerar sem subcategoria (devia ficar o SKU anterior) → %', r;
+  END IF;
+  -- com a sub (s3, sigla = a de s1, noutro pai): prefixo novo (categoria, subcategoria) → começa em 0001
+  PERFORM public.cat_guardar_produto_tabelas(v_org, v_p, NULL, NULL, current_setting('teste.n_t2'), current_setting('teste.n_s3'));
+  r := public.cat_gerar_sku_produto(v_org, v_p);
+  IF r ->> 'sku' IS DISTINCT FROM current_setting('teste.sc') || '-' || current_setting('teste.sb') || '-0001-7P5X30X2MM-AZ' THEN
     RAISE EXCEPTION 'FALHOU: regenerar com outro prefixo → %', r;
   END IF;
 END $t$;
@@ -817,7 +838,7 @@ BEGIN
   END IF;
 END $t$;
 
-SELECT 'OK: sugestão e medida (limites 100000 e 3 casas), preenchimento da nike, gatilhos (categorias, opções, sku_ordem seguinte), ordem inicial, siglas (normalizar, CT004 x3 com DETAIL, outro pai, CT002 x5, CT003 x2, CT001 x2), leituras (sigla, sku_ordem, sku_entra), gerar (formato, 3D mm, sequência e outro prefixo, atributo em falta, sem sigla, sem categoria, manual com/sem forçar e sku_gerado, provisório, opção sem sigla, colisão, audit_source reposto, recusas), ordem configurável (medida primeiro, brilho fora, SKU antigos intactos, 6 recusas + CT001), pré-visualização (sem consumir, medida incompleta, 1e100000, sem sigla, sem categoria, sub de outro pai, CT001), regenerar (mesmo prefixo mantém o número; outro prefixo dá o seguinte), acessos e search_path. Saltado: '
+SELECT 'OK: sugestão e medida (limites 100000 e 3 casas), preenchimento da nike, gatilhos (categorias, opções, sku_ordem seguinte), ordem inicial, siglas (normalizar, CT004 x3 com DETAIL, outro pai, CT002 x5, CT003 x2, CT001 x2), leituras (sigla, sku_ordem, sku_entra), gerar (formato, 3D mm, sequência, atributo em falta, sem subcategoria, sem sigla, sem categoria, manual com/sem forçar e sku_gerado, provisório, opção sem sigla, colisão, audit_source reposto, recusas), ordem configurável (medida primeiro, brilho fora, SKU antigos intactos, 6 recusas + CT001), pré-visualização (sem consumir, medida incompleta, 1e100000, sem sigla, sem categoria, sem subcategoria, sub de outro pai, CT001), regenerar (mesmo prefixo mantém o número; sem sub fica o anterior; outro par começa em 0001), acessos e search_path. Saltado: '
        || coalesce(nullif(current_setting('teste.saltados', true), ''), 'nada') AS resultado;
 
 ROLLBACK;

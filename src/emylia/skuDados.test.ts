@@ -77,7 +77,7 @@ describe("descreverFaltas e textoSemGerar", () => {
     expect(descreverFaltas(["sigla_categoria"], nomes)).toEqual(["Falta a sigla da categoria «Casa de banho»"]);
     expect(descreverFaltas(["sigla_subcategoria"], nomes)).toEqual(["Falta a sigla da subcategoria «Torneiras»"]);
     expect(descreverFaltas(["categoria"])).toEqual(["Falta escolher a categoria"]);
-    expect(descreverFaltas(["subcategoria"])).toEqual(["A subcategoria não pertence à categoria escolhida"]);
+    expect(descreverFaltas(["subcategoria"])).toEqual(["Falta escolher a subcategoria (é obrigatória para a referência), ou não pertence à categoria escolhida"]);
     expect(descreverFaltas(["sigla:cor", "medida:medida"], nomes)).toEqual(["Falta a sigla da opção escolhida em «Cor»", "Falta a medida de «Medida» completa"]);
     expect(descreverFaltas(["sigla:cor"])).toEqual(["Falta a sigla da opção escolhida em «cor»"]);
     expect(descreverFaltas(["numero"])).toEqual(["Já não há números livres (9999) para esta combinação"]);

@@ -64,7 +64,7 @@ export function descreverFaltas(faltas: readonly string[], n: NomesSku = {}): st
   return faltas.map((f) => {
     if (f === "categoria") return "Falta escolher a categoria";
     if (f === "sigla_categoria") return com("Falta a sigla da categoria", n.categoria);
-    if (f === "subcategoria") return "A subcategoria não pertence à categoria escolhida";
+    if (f === "subcategoria") return "Falta escolher a subcategoria (é obrigatória para a referência), ou não pertence à categoria escolhida";
     if (f === "sigla_subcategoria") return com("Falta a sigla da subcategoria", n.subcategoria);
     if (f === "numero") return "Já não há números livres (9999) para esta combinação";
     const [tipo, codigo] = [f.slice(0, f.indexOf(":")), f.slice(f.indexOf(":") + 1)];
