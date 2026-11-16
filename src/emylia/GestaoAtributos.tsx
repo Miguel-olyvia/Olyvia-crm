@@ -60,12 +60,12 @@ function OpcaoForm({ temHex, inicial, rotulo, criar, bloqueado, erro, idGuardar,
                 <input id={id} value={hex} onChange={(e) => setHex(e.target.value)} placeholder="#RRGGBB" maxLength={7} autoCapitalize="off" spellCheck={false}
                   aria-invalid={hexFormato} aria-describedby={hexFormato ? msgHex : undefined} className={cn(CAMPO, "tabular-nums")} />
               </span>
-              {hexFormato && <span id={msgHex} className="text-sm text-destructive">Use o formato #RRGGBB, por exemplo #1A2B3C.</span>}
+              {hexFormato && <span id={msgHex} className="text-sm text-red-700 dark:text-red-400">Use o formato #RRGGBB, por exemplo #1A2B3C.</span>}
             </>
           )}</Campo>
         )}
       </div>
-      {erro && <p className="text-[15px] text-destructive" role="alert">{erro}</p>}
+      {erro && <p className="text-[15px] text-red-700 dark:text-red-400" role="alert">{erro}</p>}
       {razao && <p id={dica} className="text-sm text-muted-foreground">{razao}</p>}
       <div className="flex flex-wrap gap-2">
         <Button id={idGuardar} className="min-h-11 text-[15px]" disabled={!pode} aria-describedby={razao ? dica : undefined} onClick={() => onEnviar(nome.trim(), hexOk)}>{rotulo}</Button>
@@ -93,7 +93,7 @@ function Confirmar({ p, aGravar, erro, onConfirmar, onVoltar }: { p: Pendente; a
       className={cn("grid gap-3 rounded-xl border border-primary/40 bg-primary/5 p-3 outline-none", ENTRA)}>
       <p id={tit} className="text-[15px] font-medium">{titulo}</p>
       <p id={desc} className={NOTA}>{texto}</p>
-      {erro && <p className="text-[15px] text-destructive" role="alert">{erro}</p>}
+      {erro && <p className="text-[15px] text-red-700 dark:text-red-400" role="alert">{erro}</p>}
       <div className="flex flex-wrap gap-2">
         <Button className="min-h-11 text-[15px]" disabled={aGravar} onClick={onConfirmar}>
           {aGravar && <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />}Confirmar
@@ -217,7 +217,7 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
       {lista && !podeEditar && <p role="note" className={cn(NOTA, "rounded-xl bg-muted/50 p-3")}>Só de leitura: para mudar os atributos precisa da permissão de editar produtos.</p>}
       {erroLeitura && (
         <div className="grid justify-items-start gap-2">
-          <p className={erroLeitura === AINDA_NAO || semPermissao ? NOTA : "text-[15px] text-destructive"} role={erroLeitura === AINDA_NAO || semPermissao ? "status" : "alert"}>{erroLeitura}</p>
+          <p className={erroLeitura === AINDA_NAO || semPermissao ? NOTA : "text-[15px] text-red-700 dark:text-red-400"} role={erroLeitura === AINDA_NAO || semPermissao ? "status" : "alert"}>{erroLeitura}</p>
           {erroLeitura !== AINDA_NAO && !semPermissao && <Button variant="outline" className="min-h-11 text-[15px]" onClick={() => void reler()}>Tentar de novo</Button>}
         </div>
       )}
@@ -272,7 +272,7 @@ function NovoAtributo({ aGravar, erro, onCriar, onCancelar }: { aGravar: boolean
           Tem cor (hexadecimal)
         </label>
       )}
-      {erro && <p className="text-[15px] text-destructive" role="alert">{erro}</p>}
+      {erro && <p className="text-[15px] text-red-700 dark:text-red-400" role="alert">{erro}</p>}
       <div className="flex flex-wrap gap-2">
         <Button className="min-h-11 text-[15px]" disabled={!nome.trim() || aGravar} onClick={() => onCriar(nome.trim(), tipo, temHex)}>
           {aGravar && <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />}Criar atributo
@@ -314,12 +314,12 @@ function Atributo({ a, podeEditar, aGravar, aberto, msg, pend, abrir, fechar, on
           </button>
         )}
       </div>
-      {erroAtributo && <p className="mt-2 text-[15px] text-destructive" role="alert">{erroAtributo}</p>}
+      {erroAtributo && <p className="mt-2 text-[15px] text-red-700 dark:text-red-400" role="alert">{erroAtributo}</p>}
 
       {aRenomear && (
         <div className={cn("mt-3 grid gap-3 rounded-xl border border-border bg-card p-3", ENTRA)}>
           <Campo rot="Nome do atributo">{(id) => <input id={id} value={nome} onChange={(e) => setNome(e.target.value)} className={CAMPO} autoFocus />}</Campo>
-          {!pendAtributo && msg(`ren:${a.id}`) && <p className="text-[15px] text-destructive" role="alert">{msg(`ren:${a.id}`)}</p>}
+          {!pendAtributo && msg(`ren:${a.id}`) && <p className="text-[15px] text-red-700 dark:text-red-400" role="alert">{msg(`ren:${a.id}`)}</p>}
           <div className="flex flex-wrap gap-2">
             <Button id={`gn-${a.id}`} className="min-h-11 text-[15px]" disabled={aGravar || !!pendAtributo || !nome.trim() || nome.trim() === a.nome} onClick={() => onRenomear(a, nome.trim())}>Guardar nome</Button>
             <Button variant="outline" className="min-h-11 text-[15px]" disabled={aGravar || !!pendAtributo} onClick={() => fechar(`ren-${a.id}`)}>Cancelar</Button>

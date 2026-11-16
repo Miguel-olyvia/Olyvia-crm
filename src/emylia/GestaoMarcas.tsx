@@ -119,7 +119,7 @@ function Marca({ m, podeEditar, aGravar, aberto, pend, msg, abrir, fechar, onPed
           </span>
         )}
       </div>
-      {msg(`est:${m.id}`) && <p className="mt-2 text-[15px] text-destructive" role="alert">{msg(`est:${m.id}`)}</p>}
+      {msg(`est:${m.id}`) && <p className="mt-2 text-[15px] text-red-700 dark:text-red-400" role="alert">{msg(`est:${m.id}`)}</p>}
       {aEditar && (
         <div className="mt-3 grid gap-3">
           <FormNome rotuloNome="Nome da marca" inicial={m.nome} siteInicial={m.website ?? ""} comSite botao="Guardar marca" aGravar={aGravar} bloqueado={!!p} erro={p ? null : msg(`ed:${m.id}`)} idGuardar={`gn-${m.id}`}

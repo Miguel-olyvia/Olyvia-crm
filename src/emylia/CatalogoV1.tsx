@@ -395,8 +395,8 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   // 27/10: o Criar no Catálogo abre no lugar da lista (?criar=servico|produto|…): o "voltar" do browser fecha-o
   const [criar, setCriar] = useParamUrl<TipoCriar | "">("criar", "", ["", ...TIPOS_CRIAR.map((t) => t.k)]);
   // 13/11: a gestão do Catálogo (categorias, marcas e atributos) abre no lugar da lista, só na página real. O separador vai no endereço:
-  // ?atributos=categorias|marcas|1 (o «1» é o endereço antigo da gestão dos atributos e continua a abrir os Atributos).
-  const [atributosAberto, setAtributosAberto] = useParamUrl<"" | "1" | "categorias" | "marcas">("atributos", "", ["", "1", "categorias", "marcas"]);
+  // ?atributos=categorias|subcategorias|marcas|1 (o «1» é o endereço antigo da gestão dos atributos e continua a abrir os Atributos).
+  const [atributosAberto, setAtributosAberto] = useParamUrl<"" | "1" | "categorias" | "subcategorias" | "marcas">("atributos", "", ["", "1", "categorias", "subcategorias", "marcas"]);
   const voltarAtributos = useRef(false);
   // ao sair da gestão, o foco regressa ao botão «Gestão» (como nas fichas)
   useEffect(() => {

@@ -31,13 +31,18 @@ interface Props {
   placeholder?: string;
   vazio?: string;
   desativado?: boolean;
+  /** Sem escolha, o campo mostra o texto de `semValor` como valor (um filtro «Todas as categorias»), e não vazio. */
+  semValorComoValor?: boolean;
+  obrigatorio?: boolean;
+  /** Classes a juntar às do campo (só os ecrãs de gestão pedem uma borda mais forte). */
+  classeCampo?: string;
   /** Para devolver o foco ao campo depois de fechar um formulário. */
   registar?: (el: HTMLInputElement | null) => void;
 }
 
 /** Dropdown com pesquisa em texto (combobox, padrão ARIA 1.2: input role=combobox, listbox de options, aria-activedescendant). Setas, Home, End,
  *  Enter, Esc e Tab. */
-export function ComboPesquisa({ rotulo, id, itens, atual, onEscolher, onNova, textoNova = "Nova opção…", semValor, placeholder = "Escolher ou escrever para procurar", vazio = "Nenhuma opção encontrada", desativado, registar }: Props) {
+export function ComboPesquisa({ rotulo, id, itens, atual, onEscolher, onNova, textoNova = "Nova opção…", semValor, placeholder = "Escolher ou escrever para procurar", vazio = "Nenhuma opção encontrada", desativado, semValorComoValor, obrigatorio, classeCampo, registar }: Props) {
   const lid = useId();
   const entradaRef = useCallback((el: HTMLInputElement | null) => registar?.(el), [registar]);
   const [q, setQ] = useState<string | null>(null); // o que se está a escrever; null = mostra a escolhida
@@ -59,7 +64,7 @@ export function ComboPesquisa({ rotulo, id, itens, atual, onEscolher, onNova, te
   useEffect(() => {
     if (aberto && daEscolhida >= 0) document.getElementById(`${lid}-${daEscolhida}`)?.scrollIntoView?.({ block: "nearest" });
   }, [aberto]); // eslint-disable-line react-hooks/exhaustive-deps
-  const valor = q ?? (atual ? `${atual.nome}${atual.inativo ? " (desativada)" : ""}` : "");
+  const valor = q ?? (atual ? `${atual.nome}${atual.inativo ? " (desativada)" : ""}` : semValorComoValor ? (semValor ?? "") : "");
   const ativoId = aberto && lista[ativo] ? `${lid}-${ativo}` : undefined;
   /** Move a opção ativa (gesto de teclado) e traz-a à vista. O rato só marca, nunca rola. */
   const vai = (i: number) => {
@@ -82,11 +87,11 @@ export function ComboPesquisa({ rotulo, id, itens, atual, onEscolher, onNova, te
   const estado = !aberto ? "" : `${contagem}${onNova ? `, e ${textoNova}` : ""}`;
   return (
     <div className="relative">
-      <input id={id} ref={entradaRef} type="text" role="combobox" aria-label={rotulo} aria-expanded={aberto} aria-controls={aberto && lista.length > 0 ? lid : undefined} aria-autocomplete="list"
+      <input id={id} ref={entradaRef} type="text" role="combobox" aria-label={rotulo} aria-expanded={aberto} aria-controls={aberto && lista.length > 0 ? lid : undefined} aria-autocomplete="list" aria-required={obrigatorio ? true : undefined}
         aria-activedescendant={ativoId} autoComplete="off" spellCheck={false} value={valor} placeholder={placeholder} disabled={desativado}
         onClick={(e) => { if (!aberto) abrir(e.currentTarget); else if (!q) fechar(); }} onFocus={(e) => e.currentTarget.select()}
         onChange={(e) => { setQ(e.target.value); setAberto(true); setAtivo(0); }} onBlur={fechar} onKeyDown={onKeyDown}
-        className={cn(CAMPO, "pr-10 disabled:cursor-not-allowed disabled:opacity-60")} />
+        className={cn(CAMPO, "pr-10 disabled:cursor-not-allowed disabled:opacity-60", classeCampo)} />
       <ChevronDown className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
       {/* a região de estado está sempre montada (só muda o texto), para os leitores de ecrã a anunciarem */}
       <span role="status" className="sr-only">{estado}</span>
