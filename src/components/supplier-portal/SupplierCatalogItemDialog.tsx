@@ -44,6 +44,13 @@ import {
   validateCatalogImageFile,
 } from "@/lib/supplierPortal/catalogImages";
 
+/** As categorias por empresa cliente, pela ordem em que vêm (a base já ordena por empresa). */
+export function gruposEmpresa(cs: readonly SpCategoria[]): [string, SpCategoria[]][] {
+  const m = new Map<string, SpCategoria[]>();
+  for (const c of cs) { const k = c.empresa ?? ""; m.set(k, [...(m.get(k) ?? []), c]); }
+  return [...m];
+}
+
 interface SupplierCatalogItemDialogProps {
   open: boolean;
   /** null = criar artigo novo. */
@@ -534,7 +541,14 @@ export function SupplierCatalogItemDialog({
                 <select id="sp-cat" className={SELECT} value={form.categoria_id}
                   onChange={(e) => setForm((f) => ({ ...f, categoria_id: e.target.value, subcategoria_id: "" }))}>
                   <option value="">Escolha a categoria</option>
-                  {categorias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                  {/* as categorias são de cada empresa cliente: com mais de uma empresa, agrupam-se pelo nome dela */}
+                  {gruposEmpresa(categorias).length > 1
+                    ? gruposEmpresa(categorias).map(([empresa, cs]) => (
+                        <optgroup key={empresa} label={empresa}>
+                          {cs.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                        </optgroup>
+                      ))
+                    : categorias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
                 </select>
               </Field>
               <Field id="sp-subcat" label={categoria?.subcategorias.length ? "Subcategoria *" : "Subcategoria"}>

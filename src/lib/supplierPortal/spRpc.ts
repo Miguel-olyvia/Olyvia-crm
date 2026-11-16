@@ -577,7 +577,8 @@ export async function spCatalogUpsertItem(item: SpCatalogRowInput & { id?: strin
 }
 
 /** 29/10 (migration 20270101310000): a lista única de categorias e subcategorias do portal, com o código que entra no SKU. */
-export interface SpCategoria { id: string; codigo: string; nome: string; subcategorias: { id: string; codigo: string; nome: string }[] }
+/** 16/11 (20270117950000): são as categorias da EMPRESA (product_categories) a que o fornecedor está ligado; o código é a sigla. */
+export interface SpCategoria { id: string; codigo: string; nome: string; empresa_id?: string; empresa?: string; subcategorias: { id: string; codigo: string; nome: string }[] }
 
 export async function spCatalogCategorias(): Promise<SpCategoria[]> {
   return unwrap<SpCategoria[]>(await supabase.rpc("sp_catalog_categorias" as never) as never) ?? [];
