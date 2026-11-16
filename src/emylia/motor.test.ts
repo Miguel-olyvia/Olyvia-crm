@@ -276,3 +276,17 @@ describe("a visita fica feita sozinha", () => {
     expect(d().valida?.grupos).toContain("visitas");
   });
 });
+
+// 16/11 (negócio 1001 da Mudelar): a empresa sem os serviços do pacote no Catálogo; com as medidas do Estúdio a página rebentava
+// em criarOrc (Cannot read properties of undefined (reading 'h')). Agora o serviço que não existe fica de fora do orçamento.
+describe("orçamento sem os serviços do pacote no Catálogo", () => {
+  it("não rebenta e só entram serviços que existem", async () => {
+    const { criarOrc, LINHAS } = await import("./motor");
+    const S = seed();
+    const d = S.deals.find((x) => x.linha === "wc")! as Negocio;
+    for (const [sid, k] of LINHAS.wc.map) { delete (S.svc as Record<string, unknown>)[sid]; d.visita.med[k] = 5; }
+    let o: ReturnType<typeof criarOrc> | null = null;
+    expect(() => { o = criarOrc(d, S); }).not.toThrow();
+    for (const l of o!.linhas) if (l.t === "svc") expect(S.svc[l.sid]).toBeTruthy();
+  });
+});
