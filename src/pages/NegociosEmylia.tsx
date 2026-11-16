@@ -912,7 +912,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
         </label>}
         {/* 12/11: «Simular função» (só no ecrã): escolhe uma função da organização e o ecrã responde só com as permissões dela. Só depois de a
             página abrir (os papéis e os dados ao abrir são os reais). */}
-        {andaimeTeste && simular.funcoes && simular.funcoes.length > 0 && (
+        {simular.funcoes && simular.funcoes.length > 0 && (
           <label className="flex min-w-0 items-center gap-2">
             <span className="hidden text-muted-foreground sm:inline">Simular função</span>
             <select ref={simularRef} aria-label="Simular função" aria-busy={simular.aLer} className="min-h-10 max-w-[60vw] rounded-lg border border-input bg-card px-3 sm:max-w-none" value={simular.simulacao?.id ?? ""}
