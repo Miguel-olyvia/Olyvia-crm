@@ -110,6 +110,58 @@ export function NavOficios({ grupos, sel, onSel, filtros }: { grupos: { oficio: 
   );
 }
 
+/** A coluna da esquerda dos Produtos (16/11): «Todas» e cada categoria de produto, no estilo dos ofícios. `sel` "" = todas. */
+export function NavCategorias({ grupos, sel, onSel, total }: { grupos: { id: string; nome: string; n: number }[]; sel: string; onSel: (id: string) => void; total: number }) {
+  const item = (id: string, t: string, n: number, rotulo: string, i: number) => {
+    const on = sel === id;
+    rotulo = `${rotulo}, ${n === 1 ? "1 produto" : `${n} produtos`}`; // o leitor de ecrã diz a contagem, como o olho vê
+    return (
+      <li key={id || "todas"} {...entrada(i)}>
+        <button type="button" aria-pressed={on} aria-label={rotulo} onClick={() => onSel(id)}
+          className={cn("group relative flex min-h-11 w-full items-center gap-2 rounded-lg px-3 text-left text-[15px] transition-colors", on ? "bg-primary/10 font-medium text-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground")}>
+          <span className={cn("absolute inset-y-2 left-0 w-0.5 rounded-full bg-primary transition-opacity", on ? "opacity-100" : "opacity-0")} aria-hidden="true" />
+          <span className="min-w-0 flex-1 truncate">{t}</span>
+          <span className="shrink-0 text-sm tabular-nums">{n}</span>
+        </button>
+      </li>
+    );
+  };
+  return (
+    <nav aria-label="Categorias de produto" className="hidden xl:block">
+      <div className="sticky top-6">
+        <p className="px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Categorias</p>
+        <ul className="mt-2 space-y-0.5">
+          {item("", "Todas", total, "Mostrar todas as categorias", 0)}
+          {grupos.map((g, i) => item(g.id, g.nome, g.n, `Mostrar só ${g.nome}`, i + 1))}
+        </ul>
+      </div>
+    </nav>
+  );
+}
+
+/** A coluna da direita dos Produtos (16/11): o resumo. `onSemCategoria` só se dá quando há produtos assim (a linha passa a botão). */
+export function PainelProdutos({ total, semReferencia, semCategoria, semMarca, onSemCategoria }: { total: number; semReferencia: number; semCategoria: number; semMarca: number; onSemCategoria?: () => void }) {
+  const linha = (t: string, n: number, acao?: () => void) => (
+    <li key={t} className="flex items-center gap-2 text-[15px]">
+      {acao
+        ? <button type="button" onClick={acao} className="min-h-11 min-w-0 flex-1 text-left font-medium underline-offset-4 hover:underline">{t}</button>
+        : <span className="min-w-0 flex-1">{t}</span>}
+      <span className={cn("shrink-0 font-semibold tabular-nums", n > 0 && t !== "Total de produtos" && "text-warning")}>{n}</span>
+    </li>
+  );
+  return (
+    <section aria-label="Resumo do Catálogo" className={cn(CARTAO, ENTRADA)}>
+      <h3 className="flex items-center gap-2 text-[17px] font-semibold tracking-tight"><Layers className="h-4 w-4 text-primary" aria-hidden="true" />Resumo do Catálogo</h3>
+      <ul className="mt-3 space-y-1">
+        {linha("Total de produtos", total)}
+        {linha("Sem referência gerada", semReferencia)}
+        {linha("Sem categoria de produto", semCategoria, semCategoria > 0 ? onSemCategoria : undefined)}
+        {linha("Sem marca", semMarca)}
+      </ul>
+    </section>
+  );
+}
+
 /* ------------------------------------------------------------------ coluna 3: o desempenho */
 const CARTAO = "rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)]";
 function Cartao({ id, children, acao }: { id: PainelId; i?: number; children: ReactNode; acao?: ReactNode }) {

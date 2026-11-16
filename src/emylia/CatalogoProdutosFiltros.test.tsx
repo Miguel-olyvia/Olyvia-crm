@@ -60,7 +60,8 @@ function paginaProdutos(K: Catalogo = montar()) {
 const combo = (nome: string) => screen.getByRole("combobox", { name: nome }) as HTMLInputElement;
 const opcoes = () => screen.queryAllByRole("option").map((o) => o.textContent);
 const escolher = (campo: string, opcao: string | RegExp) => { fireEvent.click(combo(campo)); fireEvent.click(screen.getByRole("option", { name: opcao })); };
-const linhas = () => within(screen.getByRole("tabpanel")).getAllByRole("listitem").map((li) => li.textContent ?? "");
+// só as linhas de produtos: a navegação por categorias e o resumo também são listas do separador
+const linhas = () => within(screen.getByRole("tabpanel")).getAllByRole("listitem").filter((li) => !li.closest("nav, section[aria-label='Resumo do Catálogo']")).map((li) => li.textContent ?? "");
 const contagem = () => screen.getByText(/^\d+ produtos?$/).textContent;
 
 describe("filtroProdutosCatalogo (sobre o modelo real)", () => {

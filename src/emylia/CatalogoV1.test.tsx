@@ -34,7 +34,8 @@ describe("CatalogoV1 · os seis separadores", () => {
     });
     pagina();
     fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
-    const lista = () => within(screen.getByRole("tabpanel")).getAllByRole("listitem");
+    // 16/11: a navegação por categorias e o resumo também são listas do separador; só contam as linhas de produtos
+    const lista = () => within(screen.getByRole("tabpanel")).getAllByRole("listitem").filter((li) => !li.closest("nav, section[aria-label='Resumo do Catálogo']"));
     expect(lista()).toHaveLength(40);
     fireEvent.click(screen.getByRole("button", { name: /^Mostrar mais \(/ }));
     expect(lista()).toHaveLength(80);

@@ -16,7 +16,7 @@ import { useCatalogo } from "./v2/catalogoStore";
 import { ICONE_ALERTA, NumeroCelula, TextoCelula } from "./v2/pecasCustos";
 import { FotoOuIlustracao, IconeServico } from "./ilustracoes";
 import { desempenhoServicos, desempenhoTecnicos } from "./desempenhoCatalogo";
-import { ENTRADA, NavOficios, ORDENS, PainelDesempenho, usePrefsCatalogo, type Ordem } from "./PainelCatalogo";
+import { ENTRADA, NavCategorias, NavOficios, ORDENS, PainelDesempenho, PainelProdutos, usePrefsCatalogo, type Ordem } from "./PainelCatalogo";
 import { FichaServicoSimples } from "./FichaServicoSimples";
 import { tomarFichaPendente } from "./fichaNav";
 import { montarCatalogo, type Ref } from "./ligacoes";
@@ -32,6 +32,7 @@ import { ComboPesquisa, type ItemCombo } from "./ComboPesquisa";
 import { Campo } from "./pecasForm";
 import { SEM_CATEGORIA_PRODUTO, SEM_FILTRO_PRODUTOS, haProdutosSemCategoria, normalizarMarca, categoriasDeProdutos, filtrarProdutosCatalogo, subcategoriasDeProdutos, type FiltroProdutos } from "./filtroProdutosCatalogo";
 import { FichaProduto } from "./FichaProduto";
+import { PROVISORIA } from "./ReferenciaFicha";
 import { ResumoAtributos } from "./AtributosProduto";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { BarraSelecao, CaixaLinha, useSelecao } from "./MarcarArmazens";
@@ -206,7 +207,7 @@ function oficioDe(K: Catalogo, no: string | null): string | null {
 }
 
 /* ------------------------------------------------------------------ produtos */
-function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo, real, anunciar }: { K: Catalogo; nomeServico: (sid: SvcId) => string; onAbrir: (sid: SvcId) => void; onAbrirProduto: (id: string) => void; margem: number; novo?: string; real?: FichaProdutoReal; anunciar: (msg: string) => void }) {
+function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo, real, anunciar, extra }: { K: Catalogo; nomeServico: (sid: SvcId) => string; onAbrir: (sid: SvcId) => void; onAbrirProduto: (id: string) => void; margem: number; novo?: string; real?: FichaProdutoReal; anunciar: (msg: string) => void; extra?: ReactNode }) {
   const sl = useSelecao();
   // 29/10: no modo Selecionar, tocar na linha (ou no nome) marca-a em vez de abrir a ficha
   const tocar = (id: string) => (sl.sel ? sl.alternar(id) : onAbrirProduto(id));
@@ -228,8 +229,20 @@ function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo, real,
   const L = useMemo(() => primeiro(pesquisarProdutos(filtrarProdutosCatalogo(K, K.produtos, fe), q), (p) => p.id === novo), [K, q, fe.cat, fe.sub, fe.marca, novo]); // eslint-disable-line react-hooks/exhaustive-deps
   const mudar = (p: Partial<FiltroProdutos>) => { setF((a) => ({ ...a, ...p })); setN(POR_PAGINA); };
   const atual = (itens: readonly ItemCombo[], id: string): ItemCombo | null => (id ? itens.find((x) => normalizarMarca(x.id) === normalizarMarca(id)) ?? null : null);
+  // 16/11: a coluna da esquerda (categorias, com o nº de produtos que a pesquisa e a marca deixam) e a do resumo (sobre o Catálogo todo)
+  const nav = useMemo(() => {
+    const base = pesquisarProdutos(K.produtos, q);
+    const conta = (cat: string) => filtrarProdutosCatalogo(K, base, { cat, sub: "", marca: fe.marca }).length;
+    return { total: conta(""), grupos: cats.map((c) => ({ id: c.id, nome: c.nome, n: conta(c.id) })) };
+  }, [K, q, cats, fe.marca]);
+  const resumo = useMemo(() => ({
+    semReferencia: K.produtos.filter((p) => !p.sku || PROVISORIA.test(p.sku)).length,
+    semCategoria: filtrarProdutosCatalogo(K, K.produtos, { cat: SEM_CATEGORIA_PRODUTO, sub: "", marca: "" }).length,
+    semMarca: K.produtos.filter((p) => !p.marca?.trim()).length,
+  }), [K]);
   return (
-    <>
+    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[13rem_minmax(0,1fr)_20rem]">
+      <div className="min-w-0 xl:col-start-2 xl:row-start-1">
       <div className="flex flex-wrap items-end gap-3">
         <Procurar v={q} onChange={(v) => { setQ(v); setN(POR_PAGINA); }} rotulo="Procurar produto" ph="Nome, marca, referência ou subcategoria" />
         <Campo rot="Categoria" className="w-full sm:w-56">{(id) => (
@@ -272,7 +285,17 @@ function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo, real,
         {!L.length && <Vazio>Nenhum produto com esse nome.</Vazio>}
       </ul>
       <MostrarMais faltam={L.length - n} onClick={() => setN(n + POR_PAGINA)} />
-    </>
+      {extra}
+      </div>
+      <div className="xl:col-start-1 xl:row-start-1">
+        <NavCategorias grupos={nav.grupos} total={nav.total} sel={fe.cat} onSel={(id) => mudar({ cat: id, sub: "" })} />
+      </div>
+      <div className="hidden lg:col-start-2 lg:row-start-1 lg:block xl:col-start-3">
+        <div className="lg:sticky lg:top-6">
+          <PainelProdutos total={K.produtos.length} {...resumo} onSemCategoria={semCat ? () => { setQ(""); mudar({ cat: SEM_CATEGORIA_PRODUTO, sub: "", marca: "" }); } : undefined} />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -561,13 +584,9 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   );
   const corpo: Record<Seccao, () => ReactNode> = {
     servicos: () => <Servicos S={S} itens={itens} K={K} onAbrir={abrir} min={S.cfg.min} alvo={S.cfg.alvo} />,
-    produtos: () => (
-      <>
-        <Produtos K={K} nomeServico={nomeServico} onAbrir={abrir} onAbrirProduto={(id) => setProdutoAberto(id)} margem={S.cfg.alvo} novo={realce?.t === "produto" ? realce.id : undefined} real={real} anunciar={anunciar} />
-        {/* 29/10: o produto de cada material do modelo (o que vai à encomenda de cliente); só na página real */}
-        {real && <MateriaisModelo K={K} real={real} anunciar={anunciar} />}
-      </>
-    ),
+    // 29/10: o produto de cada material do modelo (o que vai à encomenda de cliente); só na página real, no fim da coluna da lista
+    produtos: () => <Produtos K={K} nomeServico={nomeServico} onAbrir={abrir} onAbrirProduto={(id) => setProdutoAberto(id)} margem={S.cfg.alvo} novo={realce?.t === "produto" ? realce.id : undefined} real={real} anunciar={anunciar}
+      extra={real && <MateriaisModelo K={K} real={real} anunciar={anunciar} />} />,
     equipamentos: () => <Equipamentos S={S} C={C} mudar={mudar} novo={realce?.t === "equipamento" ? realce.id : undefined} />,
     consumiveis: () => <Consumiveis todos={consumiveis} C={C} nomeServico={nomeServico} novo={realce?.t === "consumivel" ? realce.id : undefined} onAbrirConsumivel={(id) => setConsAberto(id)} real={real} anunciar={anunciar} />,
     tecnicos: () => <Tecnicos S={S} C={C} mudar={mudar} novo={realce?.t === "tecnico" ? realce.id : undefined} />,
@@ -595,7 +614,7 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
         {SECCOES.map(([s, t]) => tab(s, t))}
       </div>
       {/* 27/10: o contentor tem sempre a mesma largura (o título e os separadores não saltam); só o corpo das secções estreitas encolhe */}
-      <div id={`painel-${seccao}`} role="tabpanel" aria-labelledby={`tab-${seccao}`} className={cn("pt-6", seccao === "ligacoes" ? "max-w-6xl" : seccao !== "servicos" && "max-w-3xl")}>
+      <div id={`painel-${seccao}`} role="tabpanel" aria-labelledby={`tab-${seccao}`} className={cn("pt-6", seccao === "ligacoes" ? "max-w-6xl" : seccao !== "servicos" && seccao !== "produtos" && "max-w-3xl")}>
         {corpo[seccao]()}
       </div>
       {regiao}

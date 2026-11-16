@@ -13,7 +13,7 @@ import type { FichaProdutoReal } from "./fichaProdutoDados";
 import type { AtributoDef, No, Produto } from "./v2/catalogoModelo";
 
 const NOTA = "text-[15px] text-muted-foreground";
-const PROVISORIA = /^CAT-[0-9A-F]{10}$/i;
+export const PROVISORIA = /^CAT-[0-9A-F]{10}$/i;
 
 /** A referência nova que a base daria agora (para a pergunta de substituir); sku null se não se conseguir saber (a pergunta faz-se na mesma). `nota`: porque não se previu. */
 async function novaReferencia(org: string, p: Produto, arvore: readonly No[]): Promise<{ sku: string | null; nota: string | null }> {
