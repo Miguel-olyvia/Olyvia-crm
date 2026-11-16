@@ -839,8 +839,9 @@ function linhaSvc(_d: Negocio, S: Estado, sid: SvcId, q: number, s: Servico): Li
 export function criarOrc(d: Negocio, S: Estado): Orcamento {
   const L = LINHAS[d.linha], m = d.visita.med, linhas: LinhaOrc[] = [];
   for (const [sid, k] of L.map) {
-    const s = S.svc[sid];
-    if (!(m[k] > 0) || d.visita.off.includes(sid)) continue;
+    // 16/11: um serviço do pacote que a empresa não tem no Catálogo (ou que o utilizador não pode ler) fica de fora; antes rebentava a página
+    const s = garantirServico(S, sid);
+    if (!s || !(m[k] > 0) || d.visita.off.includes(sid)) continue;
     linhas.push(linhaSvc(d, S, sid, m[k], s));
   }
   // os juntados do Catálogo, pela ordem em que foram juntados
