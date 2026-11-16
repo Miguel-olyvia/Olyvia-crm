@@ -43,13 +43,13 @@ describe("GestaoCatalogo: separadores", () => {
     return { onSeparador, voltar, rerender };
   };
 
-  it("um título, o «Voltar ao Catálogo» e quatro separadores pela ordem Categorias, Subcategorias, Marcas, Atributos, com o escolhido marcado", async () => {
+  it("um título, o «Voltar ao Catálogo» e cinco separadores pela ordem Categorias, Subcategorias, Marcas, Atributos, Referência (SKU), com o escolhido marcado", async () => {
     const { voltar } = montar("marcas");
     expect(screen.getByRole("heading", { level: 1, name: "Gestão do Catálogo" })).toBeInTheDocument();
     const t = screen.getAllByRole("tab");
-    expect(t.map((x) => x.textContent)).toEqual(["Categorias", "Subcategorias", "Marcas", "Atributos"]);
-    expect(t.map((x) => x.getAttribute("aria-selected"))).toEqual(["false", "false", "true", "false"]);
-    expect(t.map((x) => x.tabIndex)).toEqual([-1, -1, 0, -1]); // só o escolhido entra na ordem do Tab
+    expect(t.map((x) => x.textContent)).toEqual(["Categorias", "Subcategorias", "Marcas", "Atributos", "Referência (SKU)"]);
+    expect(t.map((x) => x.getAttribute("aria-selected"))).toEqual(["false", "false", "true", "false", "false"]);
+    expect(t.map((x) => x.tabIndex)).toEqual([-1, -1, 0, -1, -1]); // só o escolhido entra na ordem do Tab
     expect(screen.getByRole("tabpanel", { name: "Marcas" })).toBeInTheDocument();
     expect(await screen.findByText("Roca")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Voltar ao Catálogo" }));
@@ -72,9 +72,11 @@ describe("GestaoCatalogo: separadores", () => {
     fireEvent.keyDown(screen.getByRole("tab", { name: "Subcategorias" }), { key: "ArrowRight" });
     expect(onSeparador).toHaveBeenLastCalledWith("marcas");
     fireEvent.keyDown(cat, { key: "ArrowLeft" });
-    expect(onSeparador).toHaveBeenLastCalledWith("atributos"); // dá a volta
+    expect(onSeparador).toHaveBeenLastCalledWith("sku"); // dá a volta
     fireEvent.keyDown(cat, { key: "End" });
-    expect(onSeparador).toHaveBeenLastCalledWith("atributos");
+    expect(onSeparador).toHaveBeenLastCalledWith("sku");
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Atributos" }), { key: "ArrowRight" });
+    expect(onSeparador).toHaveBeenLastCalledWith("sku");
     fireEvent.keyDown(cat, { key: "Home" });
     expect(onSeparador).toHaveBeenLastCalledWith("categorias");
   });
@@ -93,6 +95,23 @@ describe("GestaoCatalogo: separadores", () => {
     expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
     expect(screen.getAllByRole("button", { name: "Voltar ao Catálogo" })).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Novo atributo" })).toBeInTheDocument();
+  });
+
+  it("o separador Referência (SKU) vem a seguir a Atributos e mostra a composição, com Categoria e Subcategoria fixas; o atalho leva aos outros separadores", async () => {
+    const { onSeparador } = montar("sku");
+    expect(screen.getByRole("tabpanel", { name: "Referência (SKU)" })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Referência (SKU)" })).toBeInTheDocument();
+    expect(await screen.findByText("Brilho")).toBeInTheDocument();
+    expect(screen.getAllByText("Fixo: a referência base")).toHaveLength(3);
+    expect(screen.queryByRole("region", { name: "Brilho" })).toBeNull(); // não é a gestão dos atributos
+    expect(base.chamadas.sort()).toEqual(["cat_ler_atributos_gestao", "cat_ler_categorias_gestao"]);
+    expect(onSeparador).not.toHaveBeenCalled();
+  });
+
+  it("o separador Atributos já não traz o bloco da referência", async () => {
+    montar("atributos");
+    await screen.findByRole("region", { name: "Brilho" });
+    expect(screen.queryByRole("region", { name: "Referência (SKU)" })).toBeNull();
   });
 
   it("os separadores têm alvos de 44 px e o painel é ligado ao separador", () => {
@@ -136,6 +155,18 @@ describe("Catálogo: entrada «Gestão»", () => {
     render(<EnderecoAtivo.Provider value={true}><CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={REAL()} /></EnderecoAtivo.Provider>);
     expect(await screen.findByRole("tab", { name: "Atributos", selected: true })).toBeInTheDocument();
     expect(await screen.findByRole("region", { name: "Brilho" })).toBeInTheDocument();
+  });
+
+  it("?atributos=sku abre o separador Referência (SKU) e o separador fica no endereço", async () => {
+    window.history.replaceState(null, "", "/#/?atributos=sku");
+    const S = seed(), run = (fn: () => void) => fn();
+    render(<EnderecoAtivo.Provider value={true}><CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={REAL()} /></EnderecoAtivo.Provider>);
+    expect(await screen.findByRole("tab", { name: "Referência (SKU)", selected: true })).toBeInTheDocument();
+    expect(await screen.findByRole("region", { name: "Referência (SKU)" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Marcas" }));
+    await waitFor(() => expect(window.location.hash).toContain("atributos=marcas"));
+    fireEvent.click(screen.getByRole("tab", { name: "Referência (SKU)" }));
+    await waitFor(() => expect(window.location.hash).toContain("atributos=sku"));
   });
 
   it("?atributos=subcategorias abre o separador Subcategorias e o separador fica no endereço", async () => {

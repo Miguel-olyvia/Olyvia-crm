@@ -10,9 +10,8 @@ import { CAMPO, NOTA, Campo, Chips } from "./pecasForm";
 import { Amostra } from "./AtributosProduto";
 import { semAcentos } from "./ComboPesquisa";
 import { normalizarHex } from "./atributosTexto";
-import { guardarSiglaOpcao, guardarSkuConfig, type ItemSku } from "./skuDados";
+import { guardarSiglaOpcao } from "./skuDados";
 import { FormSigla, SiglaTexto } from "./siglasGestao";
-import { OrdemSku } from "./OrdemSku";
 import { BOTAO_ICONE as ICONE_PROTEGIDO, Razao, protegido } from "./gestaoPecas";
 import { AINDA_NAO, criarOpcaoAtributo, type FichaProdutoReal } from "./fichaProdutoDados";
 import {
@@ -224,9 +223,6 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
   /** 16/11: a sigla de uma opção (SKU); só vale para os SKU futuros. */
   const gravarSigla = (o: OpcaoGestao, sigla: string) =>
     void correr(() => guardarSiglaOpcao(org, o.id, sigla), `Sigla de «${o.nome}» guardada: ${sigla}.`, `sig:${o.id}`).then((ok) => { if (ok) fechar(`sig-${o.id}`); });
-  /** 16/11: a ordem dos atributos no SKU e quais entram (todos, pela ordem). */
-  const gravarOrdemSku = (itens: ItemSku[]) =>
-    correr(() => guardarSkuConfig(org, itens), "Ordem da referência guardada.", "sku");
   const confirmar = () => {
     if (!pend) return;
     if (pend.t === "atributo") void gravarNomeAtributo(pend.atributo, pend.nome); else void gravarOpcao(pend.opcao, pend.nome, pend.hex);
@@ -302,7 +298,6 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
               abrir={abrir} fechar={fechar} onRenomear={pedirRenomear} onNovaOpcao={criarOpcaoNova} onPedirGravar={pedirGravarOpcao}
               onConfirmar={confirmar} onVoltarConfirmar={voltarDaConfirmacao} onAtivar={ativar} onMover={mover} onSigla={gravarSigla} />
           ))}
-          {lista.length > 0 && <OrdemSku atributos={lista} podeEditar={podeEditar} aGravar={aGravar} erro={msg("sku")} onGuardar={gravarOrdemSku} anunciar={anunciar} />}
         </>
       )}
     </div>

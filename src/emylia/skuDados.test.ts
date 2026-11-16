@@ -100,6 +100,7 @@ describe("exemploSku", () => {
     ];
     expect(exemploSku(attrs)).toBe("BC-TO-0001-AZ-60X30-XX");
     expect(exemploSku([])).toBe("BC-TO-0001");
+    expect(exemploSku(attrs, "FER-??-0007")).toBe("FER-??-0007-AZ-60X30-XX");
   });
 });
 

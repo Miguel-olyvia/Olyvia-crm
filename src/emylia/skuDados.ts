@@ -83,10 +83,11 @@ export function textoSemGerar(r: ResultadoGerar, n: NomesSku = {}): string {
   return f.length ? f.join("; ") : "não foi possível";
 }
 
-/** O exemplo ao vivo do formato, para quem ordena os atributos: a primeira sigla de cada atributo que entra (XX se não houver), a medida 60X30. */
-export function exemploSku(atributos: readonly { tipo: "lista" | "medida"; entra: boolean; siglas: readonly string[] }[]): string {
+/** O exemplo ao vivo do formato, para quem ordena os atributos: a primeira sigla de cada atributo que entra (XX se não houver), a medida 60X30.
+ *  `base` = SIGLA_CAT-SIGLA_SUB-NNNN (por omissão o exemplo BC-TO-0001). */
+export function exemploSku(atributos: readonly { tipo: "lista" | "medida"; entra: boolean; siglas: readonly string[] }[], base = "BC-TO-0001"): string {
   const partes = atributos.filter((a) => a.entra).map((a) => (a.tipo === "medida" ? "60X30" : a.siglas[0] ?? "XX"));
-  return ["BC-TO-0001", ...partes].join("-");
+  return [base, ...partes].join("-");
 }
 
 export const PREVER_AMBIGUO = "Não é possível prever: há categorias com o mesmo nome.";

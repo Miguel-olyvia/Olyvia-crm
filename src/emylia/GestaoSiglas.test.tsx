@@ -1,5 +1,5 @@
 // 16/11: as siglas e a ordem da referência (SKU) nos ecrãs de gestão do Catálogo: sigla de categorias, subcategorias e opções, e o bloco
-// «Referência (SKU)» do separador Atributos. A base é simulada; confere-se o contrato de 20270118000000 (nomes e argumentos).
+// «Referência (SKU)», que tem separador próprio. A base é simulada; confere-se o contrato de 20270118000000 (nomes e argumentos).
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -14,6 +14,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 import { GestaoCategorias } from "./GestaoCategorias";
 import { GestaoSubcategorias } from "./GestaoSubcategorias";
 import { GestaoAtributos } from "./GestaoAtributos";
+import { GestaoSku } from "./GestaoSku";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 
 const ORG = "b6ffce4f-f630-4933-833a-008649757a33";
@@ -178,19 +179,72 @@ describe("Atributos: sigla das opções", () => {
   });
 });
 
-describe("Atributos: bloco «Referência (SKU)»", () => {
-  const abrir = async (r = REAL(), anunciar = vi.fn()) => {
-    render(<GestaoAtributos real={r} voltar={vi.fn()} anunciar={anunciar} />);
-    await screen.findByRole("region", { name: "Cor" });
-    fireEvent.click(screen.getByRole("button", { name: /Referência \(SKU\)/ }));
-    return { anunciar, bloco: screen.getByRole("region", { name: "Referência (SKU)" }) };
+describe("Separador «Referência (SKU)»", () => {
+  const abrir = async (r = REAL(), anunciar = vi.fn(), irPara = vi.fn()) => {
+    render(<GestaoSku real={r} anunciar={anunciar} irPara={irPara} />);
+    const bloco = await screen.findByRole("region", { name: "Referência (SKU)" });
+    await within(bloco).findByText("Cor");
+    return { anunciar, irPara, bloco };
   };
-  const nomes = (bloco: HTMLElement) => within(bloco).getAllByRole("listitem").map((l) => (l.textContent ?? "").replace(/^\d+\.\s*/, "").split(/Entra|Subir|Descer/)[0].trim());
-  it("lista os atributos pela posição no SKU (Cor, Brilho, Medida), com o exemplo ao vivo só dos que entram, e a explicação", async () => {
+  // os blocos configuráveis são os que vêm depois dos três fixos (categoria, subcategoria, número)
+  const nomes = (bloco: HTMLElement) => within(bloco).getAllByRole("listitem").slice(3).map((l) => (l.textContent ?? "").replace(/^\d+\.\s*/, "").split(/Entra|Subir|Descer/)[0].trim());
+  const escolherCombo = (bloco: HTMLElement, rotulo: string, opcao: string) => {
+    fireEvent.click(within(bloco).getByRole("combobox", { name: rotulo }));
+    fireEvent.click(screen.getByRole("option", { name: opcao }));
+  };
+  const comPrever = (sku: string | null) => {
+    base.responder = (f) => (f === "cat_ler_categorias_gestao" ? { data: categorias(), error: null } : f === "cat_ler_atributos_gestao" ? { data: atributos(), error: null }
+      : f === "cat_prever_sku" ? { data: { sku, faltas: [] }, error: null } : { data: { ok: true }, error: null });
+  };
+  it("a composição começa por Categoria, Subcategoria e Número, fixos e presos: sem Subir/Descer nem interruptor, com «Fixo: a referência base»", async () => {
+    const { bloco } = await abrir();
+    const fixos = within(bloco).getAllByRole("listitem").slice(0, 3);
+    expect(fixos.map((l) => (l.textContent ?? "").replace(/^\d+\.\s*/, "").split(/Fixo/)[0].trim())).toEqual(["Categoria", "Subcategoria", "Número (4 dígitos)"]);
+    for (const l of fixos) {
+      expect(within(l).getByText("Fixo: a referência base")).toBeInTheDocument();
+      expect(within(l).queryByRole("button", { name: /Subir|Descer/ })).toBeNull();
+      expect(within(l).queryByRole("switch")).toBeNull();
+    }
+  });
+  it("lista os atributos configuráveis pela posição no SKU (Cor, Brilho, Medida), com o exemplo ao vivo só dos que entram, e a explicação", async () => {
     const { bloco } = await abrir();
     expect(nomes(bloco)).toEqual(["Cor", "Brilho", "Medida"]);
     expect(within(bloco).getByTestId("exemplo-sku")).toHaveTextContent("BC-TO-0001-AZ-60X30");
     expect(within(bloco).getByText(/simplesmente não entram/)).toBeInTheDocument();
+  });
+  it("escolher categoria e subcategoria usa as siglas reais, mostra «Sigla: …» e a próxima referência da base (cat_prever_sku)", async () => {
+    const { bloco } = await abrir();
+    expect(within(bloco).getByRole("combobox", { name: "Subcategoria" })).toBeDisabled();
+    expect(within(bloco).getByText(/Escolha primeiro a categoria/)).toBeInTheDocument();
+    comPrever("BC-TO-0003");
+    escolherCombo(bloco, "Categoria", "Casa de banho");
+    expect(within(bloco).getByText("Sigla: BC")).toBeInTheDocument();
+    escolherCombo(bloco, "Subcategoria", "Torneiras");
+    expect(within(bloco).getByText("Sigla: TO")).toBeInTheDocument();
+    await waitFor(() => expect(within(bloco).getByTestId("exemplo-sku")).toHaveTextContent("BC-TO-0003-AZ-60X30"));
+    expect(within(bloco).getByText(/A próxima referência desta base:/)).toHaveTextContent("A próxima referência desta base: BC-TO-0003");
+    expect(chamadasDe("cat_prever_sku").at(-1)?.a).toEqual({ p_org: ORG, p_categoria: C1, p_subcategoria: S1, p_atributos: [] });
+  });
+  it("uma subcategoria sem sigla avisa «Falta a sigla» (a vermelho) e o atalho leva ao separador Subcategorias", async () => {
+    const { bloco, irPara } = await abrir();
+    escolherCombo(bloco, "Categoria", "Casa de banho");
+    escolherCombo(bloco, "Subcategoria", "Louças");
+    const aviso = within(bloco).getByText("Falta a sigla");
+    expect(aviso.className).toMatch(/text-red-700 dark:text-red-400/);
+    const atalho = within(bloco).getByRole("button", { name: "Editar a sigla da subcategoria" });
+    expect(atalho.className).toContain("min-h-11");
+    fireEvent.click(atalho);
+    expect(irPara).toHaveBeenCalledWith("subcategorias");
+    fireEvent.click(within(bloco).getByRole("button", { name: "Editar a sigla da categoria" }));
+    expect(irPara).toHaveBeenLastCalledWith("categorias");
+  });
+  it("mudar a categoria limpa a subcategoria escolhida", async () => {
+    const { bloco } = await abrir();
+    escolherCombo(bloco, "Categoria", "Casa de banho");
+    escolherCombo(bloco, "Subcategoria", "Torneiras");
+    escolherCombo(bloco, "Categoria", "Ferramentas");
+    expect(within(bloco).getByRole("combobox", { name: "Subcategoria" })).toHaveValue("");
+    expect(within(bloco).getByText("Sigla: FER")).toBeInTheDocument();
   });
   it("Descer/Subir mudam a ordem no ecrã, anunciam a posição e o exemplo acompanha; Guardar manda TODOS os atributos pela ordem nova", async () => {
     const { bloco, anunciar } = await abrir();
@@ -256,8 +310,7 @@ describe("Atributos: bloco «Referência (SKU)»", () => {
   });
   it("sem products.edit só se vê: sem botões de mover, sem interruptores e sem Guardar", async () => {
     const { bloco } = await abrir(REAL({ podeEditar: false }));
-    // só o botão que abre e fecha o bloco
-    expect(within(bloco).getAllByRole("button").map((b) => b.id)).toEqual(["sku-abrir"]);
+    expect(within(bloco).queryAllByRole("button")).toHaveLength(0);
     expect(within(bloco).queryByRole("switch")).toBeNull();
     expect(within(bloco).getByText("Cor")).toBeInTheDocument();
   });
@@ -267,5 +320,10 @@ describe("Atributos: bloco «Referência (SKU)»", () => {
     base.responder = (f) => (f === "cat_guardar_sku_config" ? erro("PGRST202", "Could not find the function public.cat_guardar_sku_config") : { data: atributos(), error: null });
     fireEvent.click(within(bloco).getByRole("button", { name: "Guardar a ordem da referência" }));
     expect(await within(bloco).findByRole("alert")).toHaveTextContent("Ainda não disponível nesta base");
+  });
+  it("o separador Atributos já não tem o bloco da referência", async () => {
+    render(<GestaoAtributos real={REAL()} voltar={vi.fn()} anunciar={vi.fn()} />);
+    await screen.findByRole("region", { name: "Cor" });
+    expect(screen.queryByRole("region", { name: "Referência (SKU)" })).toBeNull();
   });
 });
