@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils";
 import { CAMPO, CHIP, NOTA, Campo } from "./pecasForm";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { lerCategoriasGestao, type CategoriaGestao, type SubcategoriaGestao } from "./categoriasMarcasGestao";
-import { Acoes, Renomear, useAcoesCategorias, type Ctx } from "./categoriasAcoes";
+import { Acoes, EditarSigla, Renomear, useAcoesCategorias, type Ctx } from "./categoriasAcoes";
+import { SiglaTexto } from "./siglasGestao";
 import { ComboPesquisa, semAcentos, type ItemCombo } from "./ComboPesquisa";
 import { BOTAO_TEXTO, CARTAO, EstadoLeitura, FormNome, Razao, Selo, produtos, protegido, useGestaoLista } from "./gestaoPecas";
 
@@ -147,6 +148,7 @@ function LinhaSub({ s, c, g }: { s: SubcategoriaGestao; c: CategoriaGestao; g: C
         <span className={cn("min-w-0 break-words text-[15px] font-medium", !s.ativo && "text-muted-foreground")}>{s.nome}</span>
         {!s.ativo && <Selo>desativada</Selo>}
         {s.global && <Selo>Partilhada</Selo>}
+        <SiglaTexto sigla={s.sigla} />
         <span className="text-sm text-muted-foreground">Categoria: {c.nome}{!c.ativo && " (desativada)"}</span>
         {s.usados != null && <span className="text-sm text-muted-foreground">{produtos(s.usados)}</span>}
         <Acoes item={s} pai={c} irmas={irmas} g={g} tipo="a subcategoria" />
@@ -154,6 +156,7 @@ function LinhaSub({ s, c, g }: { s: SubcategoriaGestao; c: CategoriaGestao; g: C
       {g.podeEditar && !s.global && bloqueada && <p className="mt-1 text-sm text-muted-foreground" aria-hidden="true">{g.razaoBloqueada}</p>}
       {g.msg(`est:${s.id}`) && <p className="mt-2 text-[15px] text-red-700 dark:text-red-400" role="alert">{g.msg(`est:${s.id}`)}</p>}
       <Renomear item={s} pai={c} g={g} />
+      <EditarSigla item={s} pai={c} g={g} />
     </li>
   );
 }

@@ -27,6 +27,8 @@ export interface No {
   /** 13/11 (20270117700000): a categoria de produto está desativada (cat_ler_produtos_tabelas, «ativa»): os dropdowns de produto não a oferecem, exceto a que o produto já tem. Em falta = ativa. */
   inativa?: true;
 }
+/** 16/11: uma categoria (pai null) ou subcategoria de produtos. `id` e `pai` são ids de nós de K.arvore; `ordem` é o sort_order da base. */
+export interface CategoriaProdutoK { id: string; n: string; pai: string | null; ordem: number; inativa?: true }
 /** 13/11: a medida de um produto (atributo do tipo «medida»): 2D (largura × comprimento) ou 3D (com espessura), em cm ou mm. */
 export interface MedidaAtributo { tipo: "2D" | "3D"; largura: number; comprimento: number; espessura: number | null; unidade: "cm" | "mm" }
 /** 13/11: o valor de um atributo num produto: uma opção da lista (opcaoId, com o texto em `valor`) ou uma medida. */
@@ -114,6 +116,10 @@ export interface Catalogo {
   fasesServico?: Record<SvcId, FaseObra[]>;
   unidades: string[];
   marcas: string[];
+  /** 16/11: as categorias e subcategorias de PRODUTOS (product_categories, cat_ler_produtos_tabelas), com o id do nó da árvore (K.arvore) onde cada uma
+   *  ficou depois de juntar à dos serviços pelo nome. Distingue-as dos ofícios dos serviços sem depender de nomes e existe mesmo sem produtos (os filtros
+   *  da lista de Produtos usam-na). Em falta (protótipo, base sem as tabelas): os filtros caem nos produtos que existem. */
+  categoriasProduto?: CategoriaProdutoK[];
   fornecedores: string[];
   /** O ícone de cada serviço (14/10). Sem ele, usa-se o do nome ou o do ofício (ilustracoes.tsx). */
   icone?: Record<SvcId, IconeServicoKey>;

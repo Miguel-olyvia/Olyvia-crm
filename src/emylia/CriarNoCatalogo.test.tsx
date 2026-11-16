@@ -59,6 +59,15 @@ describe("Criar no Catálogo", () => {
     expect(screen.getByText("Criado aqui")).toBeInTheDocument();
   });
 
+  it("produto: a referência é opcional e diz que, vazia, gera-se sozinha; sem página real não há pré-visualização da referência", () => {
+    pagina();
+    fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
+    fireEvent.click(screen.getByRole("button", { name: "Criar" }));
+    expect(screen.getByLabelText("Referência (opcional: se ficar vazia gera-se sozinha)")).toBeInTheDocument();
+    expect(screen.queryByText(/Referência gerada/)).toBeNull();
+    expect(screen.queryByText(/Escolha a categoria para ver a referência/)).toBeNull();
+  });
+
   it("equipamento: o €/h aparece já e, criado, fica no topo do separador com o selo «Novo»", () => {
     pagina();
     fireEvent.click(screen.getByRole("tab", { name: "Equipamentos" }));

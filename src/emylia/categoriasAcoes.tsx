@@ -2,16 +2,18 @@
 // Desativar/Reativar), o formulário de renomear com a confirmação e a lógica de gravar (criar, renomear, ativar, reordenar). Quem decide é a base
 // (cat_* de 20270117700000): aqui só se grava e relê-se depois de cada ação, também em falha (useGestaoLista.correr).
 import { useState } from "react";
-import { ChevronDown, ChevronUp, Pencil } from "lucide-react";
+import { ChevronDown, ChevronUp, Pencil, Tag } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   estadoCategoria, guardarCategoria, reordenarCategorias, type CategoriaGestao, type SubcategoriaGestao,
 } from "./categoriasMarcasGestao";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
+import { guardarSigla } from "./skuDados";
+import { FormSigla } from "./siglasGestao";
 import { BOTAO_ICONE, BOTAO_TEXTO, ConfirmarMudanca, FormNome, Razao, produtos, protegido, useGestaoLista } from "./gestaoPecas";
 
 export type Item = SubcategoriaGestao;
-export type Aberto = { t: "nova"; pai: string | null } | { t: "renomear"; id: string };
+export type Aberto = { t: "nova"; pai: string | null } | { t: "renomear"; id: string } | { t: "sigla"; id: string };
 /** O que espera confirmação: renomear algo que produtos usam (ou de uso desconhecido). */
 export interface Pendente { item: Item; pai: string | null; nome: string }
 type Gestao = ReturnType<typeof useGestaoLista<CategoriaGestao[]>>;
@@ -23,6 +25,8 @@ export interface Ctx {
   abrir: (a: Aberto) => void; fechar: (focar?: string) => void;
   onCriar: (pai: CategoriaGestao | null, nome: string) => void; onRenomear: (item: Item, pai: string | null, nome: string) => void;
   onConfirmar: () => void; onVoltarConfirmar: () => void;
+  /** 16/11: muda a sigla (SKU); só vale para os SKU futuros. */
+  onSigla: (item: Item, pai: CategoriaGestao | null, sigla: string) => void;
   onAtivar: (item: Item, pai: CategoriaGestao | null) => void; onMover: (pai: CategoriaGestao | null, irmas: Item[], i: number, d: -1 | 1) => void;
   /** Uma razão para não reordenar (por exemplo, a lista está filtrada); sem ela, a ordem depende só da posição. */
   semOrdem?: string | null;
@@ -50,6 +54,8 @@ export function useAcoesCategorias(real: FichaProdutoReal, g: Gestao, focoCriar:
     g.setErro(null); setPend({ item, pai, nome });
   };
   const confirmar = () => { if (pend) void gravarNome(pend.item, pend.pai, pend.nome); };
+  const gravarSigla = (item: Item, pai: CategoriaGestao | null, sigla: string) =>
+    void g.correr(() => guardarSigla(org, item.id, sigla), `Sigla de «${item.nome}» guardada: ${sigla}.`, `sig:${item.id}`).then((ok) => { if (ok) fechar(`sig-${item.id}`); });
   const voltarConfirmar = () => { if (!pend) return; g.setFoco(`gn-${pend.item.id}`); setPend(null); };
   const ativar = (item: Item, pai: CategoriaGestao | null) => {
     const ativo = !item.ativo, tipo = pai ? "Subcategoria" : "Categoria";
@@ -67,7 +73,7 @@ export function useAcoesCategorias(real: FichaProdutoReal, g: Gestao, focoCriar:
   };
   const ctx: Ctx = {
     podeEditar, aGravar: g.aGravar, aberto, pend, msg: g.msg, abrir, fechar, onCriar: criar, onRenomear: renomear, onConfirmar: confirmar,
-    onVoltarConfirmar: voltarConfirmar, onAtivar: ativar, onMover: mover,
+    onVoltarConfirmar: voltarConfirmar, onSigla: gravarSigla, onAtivar: ativar, onMover: mover,
   };
   return { ctx, aberto, abrir, fechar };
 }
@@ -78,6 +84,7 @@ export function Acoes({ item, pai, irmas, g, tipo }: { item: Item; pai: Categori
   const suf = pai ? ` em ${pai.nome}` : "";
   const k = irmas.findIndex((x) => x.id === item.id);
   const aRenomear = g.aberto?.t === "renomear" && g.aberto.id === item.id;
+  const aSigla = g.aberto?.t === "sigla" && g.aberto.id === item.id;
   const bloqueada = !item.ativo && !!pai && !pai.ativo; // uma subcategoria não se reativa com a categoria desativada
   // nada de disabled: o botão perderia o foco enquanto se grava; aria-disabled, razão ligada e clique sem efeito
   const grav = g.aGravar ? "A guardar…" : null;
@@ -98,6 +105,10 @@ export function Acoes({ item, pai, irmas, g, tipo }: { item: Item; pai: Categori
         <Pencil className="h-4 w-4" aria-hidden="true" />
       </button>
       <Razao id={`rz-ren-${item.id}`}>{grav}</Razao>
+      <button id={`sig-${item.id}`} type="button" aria-label={`Mudar a sigla de ${item.nome}${suf}`} aria-expanded={aSigla} className={BOTAO_ICONE} {...protegido(grav, `rz-sig-${item.id}`, () => g.abrir({ t: "sigla", id: item.id }))}>
+        <Tag className="h-4 w-4" aria-hidden="true" />
+      </button>
+      <Razao id={`rz-sig-${item.id}`}>{grav}</Razao>
       <button id={`act-${item.id}`} type="button" aria-label={`${item.ativo ? "Desativar" : "Reativar"} ${item.nome}${suf}`} className={cn(BOTAO_TEXTO, "border-transparent")} {...protegido(rAtivar, `rz-act-${item.id}`, () => g.onAtivar(item, pai))}>
         {item.ativo ? "Desativar" : "Reativar"}
       </button>
@@ -120,6 +131,17 @@ export function Renomear({ item, pai, g }: { item: Item; pai: CategoriaGestao | 
         <ConfirmarMudanca titulo={`Mudar o nome de «${item.nome}» para «${p.nome}»?`} aGravar={g.aGravar} erro={g.msg(`ren:${item.id}`)} onConfirmar={g.onConfirmar} onVoltar={g.onVoltarConfirmar}
           texto={n == null ? `Esta ${tipo} pode estar a ser usada por produtos: o novo nome aparece em todos.` : `Esta ${tipo} é usada por ${produtos(n)}: o novo nome aparece em ${n === 1 ? "esse produto" : `esses ${n} produtos`}.`} />
       )}
+    </div>
+  );
+}
+
+/** O formulário de editar a sigla, por baixo da linha (o mesmo sítio que o de renomear). */
+export function EditarSigla({ item, pai, g }: { item: Item; pai: CategoriaGestao | null; g: Ctx }) {
+  if (!g.podeEditar || g.aberto?.t !== "sigla" || g.aberto.id !== item.id) return null;
+  return (
+    <div className="mt-3">
+      <FormSigla rotulo={`Sigla da ${nomeTipo(pai?.id ?? null)}`} inicial={item.sigla} exigeLetra aGravar={g.aGravar} erro={g.msg(`sig:${item.id}`)} idGuardar={`gs-${item.id}`}
+        onEnviar={(s) => g.onSigla(item, pai, s)} onCancelar={() => g.fechar(`sig-${item.id}`)} />
     </div>
   );
 }

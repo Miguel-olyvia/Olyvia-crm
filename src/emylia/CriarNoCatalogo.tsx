@@ -21,6 +21,7 @@ import {
 } from "./criarCatalogo";
 import { podeCriarTipo, usePermissoesCatalogo } from "./permissoesCatalogo";
 import { AtributosCriar } from "./AtributosProduto";
+import { PreviaSku } from "./PreviaSku";
 import { CampoMarca, CamposRamo, RAMO_VAZIO } from "./ClassificacaoProduto";
 import { ramoParaCriar, type RamoEscolhido } from "./ramoProduto";
 import { CAMPO, CHIP, NOTA, Campo, Chips, Num, Retirar } from "./pecasForm";
@@ -378,6 +379,9 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
   const ramoR = useMemo(() => ramoParaCriar(K.arvore, ramo), [K.arvore, ramo]);
   const no = ramoR.ok ? ramoR.no ?? "" : "";
   const arvoreCria = ramoR.ok ? ramoR.A : K.arvore;
+  // os nomes escolhidos (ou a criar) para a pré-visualização da referência
+  const nomeCat = ramo.catNova?.trim() || K.arvore.find((x) => x.id === ramo.cat)?.n || null;
+  const nomeSub = ramo.subNova?.trim() || K.arvore.find((x) => x.id === ramo.sub)?.n || null;
   const [servico, setServico] = useState<SvcId | null>(null);
   const [img, setImg] = useState<IlustracaoKey | null>(null);
   const [verImg, setVerImg] = useState(false);
@@ -410,7 +414,7 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
           <Campo rot="Nome do produto">{(id) => <input id={id} value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Sanita suspensa Rimless" className={CAMPO} autoFocus />}</Campo>
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="grid content-start gap-4"><CampoMarca marcas={K.marcas} marca={marca} onChange={setMarca} /></div>
-            <Campo rot="Referência" dica="A do fornecedor, se houver.">{(id) => <input id={id} value={sku} onChange={(e) => setSku(e.target.value)} className={CAMPO} />}</Campo>
+            <Campo rot="Referência (opcional: se ficar vazia gera-se sozinha)" dica="A do fornecedor, se houver; senão gera-se a partir da categoria, da subcategoria e dos atributos.">{(id) => <input id={id} value={sku} onChange={(e) => setSku(e.target.value)} className={CAMPO} />}</Campo>
           </div>
           <CamposRamo arvore={K.arvore} ramo={ramo} onChange={setRamo} />
           <Campo rot="Descrição" dica="Uma linha, para o comercial e a proposta.">{(id) => <input id={id} value={desc} onChange={(e) => setDesc(e.target.value)} className={CAMPO} />}</Campo>
@@ -431,6 +435,8 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
             )}
           </div>
           <AtributosCriar defs={K.atributos} onChange={setAttrs} real={real} />
+          {/* 16/11: o SKU que se geraria (cat_prever_sku): só na página real, e só enquanto a referência está vazia */}
+          <PreviaSku real={real} categoria={nomeCat} subcategoria={nomeSub} categoriaNova={!!ramo.catNova || !!ramo.subNova} attrs={attrs} defs={K.atributos} manual={!!sku.trim()} />
         </Secao>
         <Secao i={2} titulo="Compra e venda">
           <div className="grid gap-1.5"><span className="text-[15px] font-medium">Unidade</span><Chips rot="Unidade do produto" opcoes={unidades.map((u) => [u, u] as const)} v={un} set={setUn} /></div>

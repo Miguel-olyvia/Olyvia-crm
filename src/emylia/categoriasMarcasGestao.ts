@@ -7,7 +7,8 @@ import { chamar, type ResG } from "./atributosGestao";
 export type { ResG };
 
 /** Uma subcategoria: como a categoria, sem filhos. `global`: partilhada por todas as organizações, só se lê. `usados`: produtos que a usam (null = não se sabe). */
-export interface SubcategoriaGestao { id: string; nome: string; ordem: number; ativo: boolean; global: boolean; usados: number | null }
+/** `sigla` (20270118000000): o código da categoria no SKU (BC, TO); null = ainda sem. */
+export interface SubcategoriaGestao { id: string; nome: string; ordem: number; ativo: boolean; global: boolean; usados: number | null; sigla: string | null }
 export interface CategoriaGestao extends SubcategoriaGestao { subcategorias: SubcategoriaGestao[] }
 export interface MarcaGestao { id: string; nome: string; website: string | null; ativo: boolean; global: boolean; usados: number | null }
 
@@ -16,7 +17,7 @@ const texto = (x: unknown): string => (typeof x === "string" ? x : "");
 const contagem = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) ? x : null);
 
 function subDe(c: Bruto): SubcategoriaGestao {
-  return { id: texto(c.id), nome: texto(c.nome), ordem: contagem(c.ordem) ?? 0, ativo: c.ativo !== false, global: c.global === true, usados: contagem(c.usados) };
+  return { id: texto(c.id), nome: texto(c.nome), ordem: contagem(c.ordem) ?? 0, ativo: c.ativo !== false, global: c.global === true, usados: contagem(c.usados), sigla: texto(c.sigla).trim() || null };
 }
 function categoriaDe(c: Bruto): CategoriaGestao {
   return { ...subDe(c), subcategorias: Array.isArray(c.subcategorias) ? (c.subcategorias as Bruto[]).map(subDe) : [] };

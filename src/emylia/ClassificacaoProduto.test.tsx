@@ -45,7 +45,7 @@ afterEach(() => { cleanup(); reporCustos(); reporCatalogo(); });
 const combo = (ctx: HTMLElement | Document, nome: string) => within(ctx as HTMLElement).getByRole("combobox", { name: nome }) as HTMLInputElement;
 const escolher = (ctx: HTMLElement | Document, campo: string, opcao: string | RegExp) => {
   fireEvent.click(combo(ctx, campo));
-  fireEvent.click(within(ctx as HTMLElement).getByRole("option", { name: opcao }));
+  fireEvent.click(screen.getByRole("option", { name: opcao }));
 };
 const opcoes = () => screen.queryAllByRole("option").map((x) => x.textContent);
 

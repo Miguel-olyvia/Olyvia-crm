@@ -3,13 +3,17 @@
 // (pecasForm, Amostra). Quem decide é a base (cat_* de 20270117600000): aqui só se mostra o que ela devolve e se relê depois de cada gravação.
 // A Medida é fixa (2D/3D + números, escreve-se em cada produto): só informação. Os atributos não se desativam.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp, Loader2, Pencil, Plus, Search } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp, Loader2, Pencil, Plus, Search, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CAMPO, NOTA, Campo, Chips } from "./pecasForm";
 import { Amostra } from "./AtributosProduto";
 import { semAcentos } from "./ComboPesquisa";
 import { normalizarHex } from "./atributosTexto";
+import { guardarSiglaOpcao, guardarSkuConfig, type ItemSku } from "./skuDados";
+import { FormSigla, SiglaTexto } from "./siglasGestao";
+import { OrdemSku } from "./OrdemSku";
+import { BOTAO_ICONE as ICONE_PROTEGIDO, Razao, protegido } from "./gestaoPecas";
 import { AINDA_NAO, criarOpcaoAtributo, type FichaProdutoReal } from "./fichaProdutoDados";
 import {
   editarOpcao, guardarAtributo, lerAtributosGestao, reordenarOpcoes, type AtributoGestao, type OpcaoGestao, type ResG,
@@ -30,7 +34,8 @@ type Aberto =
   | { t: "novoAtributo" }
   | { t: "renomear"; id: string }
   | { t: "novaOpcao"; id: string }
-  | { t: "editarOpcao"; id: string };
+  | { t: "editarOpcao"; id: string }
+  | { t: "siglaOpcao"; id: string };
 /** O que espera confirmação: mudar o nome/cor de uma opção, ou o nome de um atributo, quando há produtos (ou não se sabe) a usá-lo. */
 type Pendente = { t: "opcao"; nome: string | null; hex: string | null; opcao: OpcaoGestao } | { t: "atributo"; atributo: AtributoGestao; nome: string };
 /** O erro fica no sítio onde a ação foi feita: "novo", "ren:<atributo>", "nova:<atributo>", "ed:<opção>" ou "atr:<atributo>" (ativar, ordenar). */
@@ -128,7 +133,7 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
   /** Fechar um painel fecha também o formulário de opção (nova ou editar) e a confirmação de opção desse atributo, sem repor foco. */
   const soltar = (a: AtributoGestao) => {
     const ids = new Set(a.opcoes.map((o) => o.id));
-    setAberto((x) => (x && ((x.t === "novaOpcao" && x.id === a.id) || (x.t === "editarOpcao" && ids.has(x.id))) ? null : x));
+    setAberto((x) => (x && ((x.t === "novaOpcao" && x.id === a.id) || ((x.t === "editarOpcao" || x.t === "siglaOpcao") && ids.has(x.id))) ? null : x));
     setPend((p) => (p && p.t === "opcao" && ids.has(p.opcao.id) ? null : p));
   };
   const alternar = (a: AtributoGestao) => {
@@ -216,6 +221,12 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
     if (o.usados === 0) { void gravarOpcao(o, nomeNovo, hexNovo); return; }
     setErro(null); setPend({ t: "opcao", nome: nomeNovo, hex: hexNovo, opcao: o });
   };
+  /** 16/11: a sigla de uma opção (SKU); só vale para os SKU futuros. */
+  const gravarSigla = (o: OpcaoGestao, sigla: string) =>
+    void correr(() => guardarSiglaOpcao(org, o.id, sigla), `Sigla de «${o.nome}» guardada: ${sigla}.`, `sig:${o.id}`).then((ok) => { if (ok) fechar(`sig-${o.id}`); });
+  /** 16/11: a ordem dos atributos no SKU e quais entram (todos, pela ordem). */
+  const gravarOrdemSku = (itens: ItemSku[]) =>
+    correr(() => guardarSkuConfig(org, itens), "Ordem da referência guardada.", "sku");
   const confirmar = () => {
     if (!pend) return;
     if (pend.t === "atributo") void gravarNomeAtributo(pend.atributo, pend.nome); else void gravarOpcao(pend.opcao, pend.nome, pend.hex);
@@ -289,8 +300,9 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
           {lista.map((a) => (
             <Atributo key={a.id} a={a} podeEditar={podeEditar} aberta={abertos.has(a.id)} onAlternar={() => alternar(a)} aGravar={aGravar} aberto={aberto} msg={msg} pend={pend}
               abrir={abrir} fechar={fechar} onRenomear={pedirRenomear} onNovaOpcao={criarOpcaoNova} onPedirGravar={pedirGravarOpcao}
-              onConfirmar={confirmar} onVoltarConfirmar={voltarDaConfirmacao} onAtivar={ativar} onMover={mover} />
+              onConfirmar={confirmar} onVoltarConfirmar={voltarDaConfirmacao} onAtivar={ativar} onMover={mover} onSigla={gravarSigla} />
           ))}
+          {lista.length > 0 && <OrdemSku atributos={lista} podeEditar={podeEditar} aGravar={aGravar} erro={msg("sku")} onGuardar={gravarOrdemSku} anunciar={anunciar} />}
         </>
       )}
     </div>
@@ -332,8 +344,9 @@ interface AtributoProps {
   onRenomear: (a: AtributoGestao, nome: string) => void; onNovaOpcao: (a: AtributoGestao, nome: string, hex: string | null) => void;
   onPedirGravar: (o: OpcaoGestao, nome: string, hex: string | null) => void; onConfirmar: () => void; onVoltarConfirmar: () => void;
   onAtivar: (a: AtributoGestao, o: OpcaoGestao, ativo: boolean) => void; onMover: (a: AtributoGestao, i: number, d: -1 | 1) => void;
+  onSigla: (o: OpcaoGestao, sigla: string) => void;
 }
-function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pend, abrir, fechar, onRenomear, onNovaOpcao, onPedirGravar, onConfirmar, onVoltarConfirmar, onAtivar, onMover }: AtributoProps) {
+function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pend, abrir, fechar, onRenomear, onNovaOpcao, onPedirGravar, onConfirmar, onVoltarConfirmar, onAtivar, onMover, onSigla }: AtributoProps) {
   const nomeId = useId(), painel = useId(), razaoId = useId();
   const [nome, setNome] = useState(a.nome);
   const [q, setQ] = useState("");
@@ -343,7 +356,7 @@ function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pen
   const erroAtributo = msg(`atr:${a.id}`);
   const pesquisa = q.trim() !== "";
   // cada opção leva o índice REAL (a ordem é a de todas as opções, também com a lista filtrada)
-  const idComForm = aberto?.t === "editarOpcao" ? aberto.id : pend?.t === "opcao" ? pend.opcao.id : null;
+  const idComForm = aberto?.t === "editarOpcao" || aberto?.t === "siglaOpcao" ? aberto.id : pend?.t === "opcao" ? pend.opcao.id : null;
   const { vistas, coincidem } = useMemo(() => {
     const t = semAcentos(q.trim());
     const com = a.opcoes.map((o, i) => ({ o, i }));
@@ -426,6 +439,7 @@ function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pen
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                             {a.temHex && <Amostra hex={o.hex} />}
                             <span className={cn("min-w-0 break-words text-[15px] font-medium", !o.ativo && "text-foreground/75")}>{o.nome}{!o.ativo && " (desativada)"}</span>
+                            <SiglaTexto sigla={o.sigla} />
                             {a.temHex && <span className="text-sm text-foreground/75 tabular-nums">{o.hex ?? "sem hex"}</span>}
                             {o.usados != null && <span className="text-sm text-foreground/75">{produtos(o.usados)}</span>}
                             {podeEditar && (
@@ -438,6 +452,11 @@ function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pen
                                   aria-disabled={semMover || undefined} aria-describedby={semMover ? razaoId : undefined} onClick={() => { if (!semMover) onMover(a, i, 1); }} className={cn(BOTAO_ICONE, ARIA_DESLIGADO)}>
                                   <ChevronDown className="h-5 w-5" aria-hidden="true" />
                                 </button>
+                                <button id={`sig-${o.id}`} type="button" aria-label={`Mudar a sigla de ${o.nome}`} aria-expanded={aberto?.t === "siglaOpcao" && aberto.id === o.id} className={ICONE_PROTEGIDO}
+                                  {...protegido(aGravar ? "A guardar…" : null, `rz-sig-${o.id}`, () => abrir({ t: "siglaOpcao", id: o.id }))}>
+                                  <Tag className="h-4 w-4" aria-hidden="true" />
+                                </button>
+                                <Razao id={`rz-sig-${o.id}`}>{aGravar ? "A guardar…" : null}</Razao>
                                 <button id={`ed-${o.id}`} type="button" aria-label={`Editar ${o.nome}`} aria-expanded={aberto?.t === "editarOpcao" && aberto.id === o.id} disabled={aGravar} onClick={() => abrir({ t: "editarOpcao", id: o.id })} className={BOTAO_ICONE}>
                                   <Pencil className="h-4 w-4" aria-hidden="true" />
                                 </button>
@@ -447,6 +466,10 @@ function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pen
                               </span>
                             )}
                           </div>
+                          {podeEditar && aberto?.t === "siglaOpcao" && aberto.id === o.id && (
+                            <FormSigla rotulo="Sigla da opção" inicial={o.sigla} exigeLetra={false} aGravar={aGravar} erro={msg(`sig:${o.id}`)} idGuardar={`gs-${o.id}`}
+                              onEnviar={(s) => onSigla(o, s)} onCancelar={() => fechar(`sig-${o.id}`)} />
+                          )}
                           {podeEditar && aberto?.t === "editarOpcao" && aberto.id === o.id && (
                             <>
                               <OpcaoForm temHex={a.temHex} inicial={{ nome: o.nome, hex: o.hex }} rotulo="Guardar opção" criar={false} bloqueado={aGravar || !!pendOpcao}

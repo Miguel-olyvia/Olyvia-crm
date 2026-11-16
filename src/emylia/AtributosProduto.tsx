@@ -7,6 +7,7 @@ import { Check, ChevronDown, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CAMPO, NOTA, Campo, Chips, Num, Retirar } from "./pecasForm";
+import { ListaFlutuante } from "./listaFlutuante";
 import { mesmosAtributos, normalizarHex, resumoAtributos, textoMedida, textoValor } from "./atributosTexto";
 import { criarOpcaoAtributo, gravarAtributos, lerNumero, type FichaProdutoReal } from "./fichaProdutoDados";
 import { mudarCatalogo } from "./v2/catalogoStore";
@@ -110,6 +111,7 @@ function ComboOpcao({ rotulo, atributoId, opcoes, temHex, atual, onEscolher, onN
   onNova?: (nomeEscrito: string) => void; registar: (id: string, el: HTMLInputElement | null) => void;
 }) {
   const lid = useId();
+  const caixa = useRef<HTMLDivElement>(null); // a lista flutuante (portal) acompanha este wrapper
   const entradaRef = useCallback((el: HTMLInputElement | null) => registar(atributoId, el), [registar, atributoId]);
   const [q, setQ] = useState<string | null>(null); // o que se está a escrever; null = mostra a opção escolhida
   const [aberto, setAberto] = useState(false);
@@ -147,7 +149,7 @@ function ComboOpcao({ rotulo, atributoId, opcoes, temHex, atual, onEscolher, onN
     else if (e.key === "Tab") fechar();
   };
   return (
-    <div className="relative">
+    <div ref={caixa} className="relative">
       {temHex && atual && q === null && <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"><Amostra hex={atual.hex} /></span>}
       <input ref={entradaRef} type="text" role="combobox" aria-label={rotulo} aria-expanded={aberto} aria-controls={aberto ? lid : undefined} aria-autocomplete="list"
         aria-activedescendant={ativoId} autoComplete="off" spellCheck={false} value={valor} placeholder="Escolher ou escrever para procurar"
@@ -157,8 +159,8 @@ function ComboOpcao({ rotulo, atributoId, opcoes, temHex, atual, onEscolher, onN
       {/* a região de estado está sempre montada (só muda o texto), para os leitores de ecrã a anunciarem */}
       <span role="status" className="sr-only">{!aberto ? "" : filtradas.length === 0 ? "Nenhuma opção encontrada" : filtradas.length === 1 ? "1 opção" : `${filtradas.length} opções`}</span>
       {aberto && (
-        <ul id={lid} role="listbox" aria-label={rotulo} onMouseDown={(e) => e.preventDefault()}
-          className="absolute left-0 top-full z-20 mt-1 max-h-72 w-full overflow-auto rounded-xl border border-border bg-popover p-1 shadow-lg motion-safe:animate-in motion-safe:fade-in-0">
+        <ListaFlutuante ancora={caixa} aoSairDaVista={fechar}>
+        <ul id={lid} role="listbox" aria-label={rotulo}>
           {itens.map((i, k) => (
             <li key={i.k === "nova" ? "nova" : i.o.id} id={`${lid}-${k}`} role="option" aria-selected={k === ativo}
               onClick={() => escolher(i)} onMouseEnter={() => setAtivo(k)}
@@ -174,6 +176,7 @@ function ComboOpcao({ rotulo, atributoId, opcoes, temHex, atual, onEscolher, onN
           ))}
           {!filtradas.length && <li role="presentation" className="px-3 py-2.5 text-[15px] text-muted-foreground">Nenhuma opção encontrada</li>}
         </ul>
+        </ListaFlutuante>
       )}
     </div>
   );

@@ -5,7 +5,7 @@
 import type { MedKey, Servico, SvcId } from "../motor";
 import type { ItemCatalogo, LinhaCat } from "../catalogo";
 import type { Custos, LinhaEstrutura, ModoPreco, Parametros, PassoMO, ReceitaV2, UsoCons, UsoEquip } from "../v2/custosModelo";
-import type { AtributoDef, AtributoProduto, Catalogo, MedidaAtributo, No, Produto, Regra } from "../v2/catalogoModelo";
+import type { AtributoDef, AtributoProduto, Catalogo, CategoriaProdutoK, MedidaAtributo, No, Produto, Regra } from "../v2/catalogoModelo";
 import type { EntulhoSvc } from "../entulho";
 import type { FichaTecnico } from "../equipa/tecnicos";
 
@@ -217,6 +217,11 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
     produtos: [], pacotes: [], classe: {}, exigeProduto: {}, qtdDe: {}, perguntaManter: {}, fasesServico: {}, entulhoServico: {}, icone: {},
     equivalentes: undefined, servicosCriados: [], consumiveisCriados: [],
     ...(defsAtributos ? { atributos: defsAtributos } : {}),
+    // 16/11: a árvore dos produtos tal como a base a tem (com os nós da árvore do Catálogo), para os filtros da lista de Produtos
+    ...(junta && T ? { categoriasProduto: T.categoriasProduto.flatMap((c): CategoriaProdutoK[] => {
+      const id = junta.noDe(c.id);
+      return id ? [{ id, n: c.name, pai: c.parent_id ? junta.noDe(c.parent_id) : null, ordem: n(c.sort_order), ...(c.ativa === false ? { inativa: true as const } : {}) }] : [];
+    }) } : {}),
   };
 
   for (const s of L.servicos) {

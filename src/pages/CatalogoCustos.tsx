@@ -19,7 +19,7 @@ import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
 import { ProvedorPermissoesCatalogo, permissoesCatalogo } from "@/emylia/permissoesCatalogo";
 
-type Gravacao = { k: "parado" } | { k: "a-gravar"; n: number } | { k: "gravado"; n: number } | { k: "erro"; t: string };
+type Gravacao = { k: "parado" } | { k: "a-gravar"; n: number } | { k: "gravado"; n: number; avisos: string[] } | { k: "erro"; t: string };
 
 const rpc: Rpc = async (fn, args) => {
   const { data, error } = await supabase.rpc(fn as never, args as never);
@@ -72,7 +72,7 @@ export default function CatalogoCustos() {
       const r = await executarCatalogo(chamadas, rpc);
       try { await carregar(b.org); } catch { /* fica o que está; o erro da gravação diz o resto */ }
       aGravar.current = false;
-      setGravacao(r.erro ? { k: "erro", t: r.erro } : { k: "gravado", n: r.feitas });
+      setGravacao(r.erro ? { k: "erro", t: r.erro } : { k: "gravado", n: r.feitas, avisos: r.avisos });
     }, 900);
     return () => window.clearTimeout(t);
   }, [C, K, mexido, pronto, S, carregar]);
@@ -96,6 +96,8 @@ export default function CatalogoCustos() {
       <div className="flex min-h-10 items-center justify-end gap-2 px-4 pt-2 text-[15px]" role="status" aria-live="polite">
         {gravacao.k === "a-gravar" && <span className="text-muted-foreground">A gravar {gravacao.n === 1 ? "1 mudança" : `${gravacao.n} mudanças`}…</span>}
         {gravacao.k === "gravado" && <span className="text-muted-foreground">Gravado</span>}
+        {/* 16/11: o produto ficou criado mas a referência (SKU) ficou por gerar: diz-se porquê, sem anular nada */}
+        {gravacao.k === "gravado" && gravacao.avisos.map((a, i) => <span key={`${i}:${a}`} className="text-amber-800 dark:text-amber-300">{a}</span>)}
         {gravacao.k === "erro" && <span className="text-destructive">Não gravou: {gravacao.t}</span>}
       </div>
       {erroLer ? <p className="p-6 text-destructive">{erroLer}</p>

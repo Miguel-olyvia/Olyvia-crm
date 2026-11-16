@@ -1,11 +1,12 @@
 // 13/11: o dropdown com pesquisa em texto do Catálogo (marca, categoria, subcategoria). Nunca uma lista solta: um campo onde se escreve para
 // procurar e se escolhe com o toque ou o teclado. Mesmo desenho e comportamento do combobox das opções dos atributos (AtributosProduto.tsx),
 // mas genérico: itens {id, nome}, «Nova …» opcional no fim, opção desativada atual mostrada mas não escolhível.
-import { useCallback, useEffect, useId, useMemo, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Check, ChevronDown, Loader2, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CAMPO, Campo } from "./pecasForm";
+import { ListaFlutuante } from "./listaFlutuante";
 
 /** Um item do dropdown. `inativo`: desativado na base; mostra-se só se for o escolhido, e não se pode escolher de novo. */
 export interface ItemCombo { id: string; nome: string; inativo?: boolean }
@@ -44,6 +45,7 @@ interface Props {
  *  Enter, Esc e Tab. */
 export function ComboPesquisa({ rotulo, id, itens, atual, onEscolher, onNova, textoNova = "Nova opção…", semValor, placeholder = "Escolher ou escrever para procurar", vazio = "Nenhuma opção encontrada", desativado, semValorComoValor, obrigatorio, classeCampo, registar }: Props) {
   const lid = useId();
+  const caixa = useRef<HTMLDivElement>(null); // a lista flutuante (portal) acompanha este wrapper
   const entradaRef = useCallback((el: HTMLInputElement | null) => registar?.(el), [registar]);
   const [q, setQ] = useState<string | null>(null); // o que se está a escrever; null = mostra a escolhida
   const [aberto, setAberto] = useState(false);
@@ -86,7 +88,7 @@ export function ComboPesquisa({ rotulo, id, itens, atual, onEscolher, onNova, te
   const contagem = filtradas.length === 0 ? vazio : filtradas.length === 1 ? "1 opção" : `${filtradas.length} opções`;
   const estado = !aberto ? "" : `${contagem}${onNova ? `, e ${textoNova}` : ""}`;
   return (
-    <div className="relative">
+    <div ref={caixa} className="relative">
       <input id={id} ref={entradaRef} type="text" role="combobox" aria-label={rotulo} aria-expanded={aberto} aria-controls={aberto && lista.length > 0 ? lid : undefined} aria-autocomplete="list" aria-required={obrigatorio ? true : undefined}
         aria-activedescendant={ativoId} autoComplete="off" spellCheck={false} value={valor} placeholder={placeholder} disabled={desativado}
         onClick={(e) => { if (!aberto) abrir(e.currentTarget); else if (!q) fechar(); }} onFocus={(e) => e.currentTarget.select()}
@@ -96,8 +98,7 @@ export function ComboPesquisa({ rotulo, id, itens, atual, onEscolher, onNova, te
       {/* a região de estado está sempre montada (só muda o texto), para os leitores de ecrã a anunciarem */}
       <span role="status" className="sr-only">{estado}</span>
       {aberto && (
-        <div onMouseDown={(e) => e.preventDefault()}
-          className="absolute left-0 top-full z-20 mt-1 max-h-72 w-full overflow-auto rounded-xl border border-border bg-popover p-1 shadow-lg motion-safe:animate-in motion-safe:fade-in-0">
+        <ListaFlutuante ancora={caixa} aoSairDaVista={fechar}>
           {!filtradas.length && <p className="px-3 py-2.5 text-[15px] text-muted-foreground">{vazio}</p>}
           {lista.length > 0 && (
         <ul id={lid} role="listbox" aria-label={rotulo}>
@@ -117,7 +118,7 @@ export function ComboPesquisa({ rotulo, id, itens, atual, onEscolher, onNova, te
           ))}
         </ul>
           )}
-        </div>
+        </ListaFlutuante>
       )}
     </div>
   );

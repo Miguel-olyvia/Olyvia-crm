@@ -1,5 +1,5 @@
 // 13/11: o dropdown com pesquisa em texto do Catálogo (marca, categoria, subcategoria): padrão ARIA 1.2, como o das opções dos atributos.
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComboPesquisa, type ItemCombo } from "./ComboPesquisa";
@@ -218,5 +218,137 @@ describe("ComboPesquisa", () => {
     fireEvent.click(cb);
     fireEvent.click(screen.getByRole("option", { name: "Roca" }));
     expect(cb).toHaveValue("Roca");
+  });
+});
+
+// 16/11: a lista aberta tem de SOBREPOR o cartão seguinte: vai num portal para o <body>, com position: fixed junto ao campo
+describe("ComboPesquisa · a lista flutua por cima de tudo", () => {
+  const retangulo = (r: { left: number; top: number; width: number; height: number }) => () =>
+    ({ ...r, right: r.left + r.width, bottom: r.top + r.height, x: r.left, y: r.top, toJSON: () => ({}) }) as DOMRect;
+  const comRetangulo = (cb: HTMLElement, r: { left: number; top: number; width: number; height: number }) => {
+    const caixa = cb.parentElement as HTMLElement; // o wrapper que a lista acompanha
+    caixa.getBoundingClientRect = retangulo(r);
+    return caixa;
+  };
+
+  it("o listbox está no <body>, fora do wrapper do campo, e é fixo com z-index acima dos cartões e dos diálogos", () => {
+    const { cb } = montar();
+    comRetangulo(cb, { left: 40, top: 100, width: 300, height: 44 });
+    fireEvent.click(cb);
+    const lista = screen.getByRole("listbox", { name: "Marca" });
+    const flutuante = lista.closest("[data-lista-flutuante]") as HTMLElement;
+    expect(flutuante.parentElement).toBe(document.body);
+    expect(cb.parentElement!.contains(lista)).toBe(false);
+    expect(flutuante.style.position).toBe("fixed");
+    expect(Number(flutuante.style.zIndex)).toBeGreaterThan(610); // diálogos: 600/610
+    expect(Number(flutuante.style.zIndex)).toBeLessThan(700); // popovers e selects: 700
+  });
+
+  it("tem a largura do campo e fica logo por baixo dele quando há espaço", () => {
+    const { cb } = montar();
+    comRetangulo(cb, { left: 40, top: 100, width: 300, height: 44 });
+    fireEvent.click(cb);
+    const f = screen.getByRole("listbox").closest("[data-lista-flutuante]") as HTMLElement;
+    expect(f.style.width).toBe("300px");
+    expect(f.style.left).toBe("40px");
+    expect(f.style.top).toBe("148px"); // 100 + 44 + folga de 4
+    expect(f.style.bottom).toBe("");
+    expect(f).not.toHaveAttribute("data-para-cima");
+  });
+
+  it("sem espaço por baixo, abre para cima (colada ao topo do campo)", () => {
+    const { cb } = montar();
+    const alturaJanela = window.innerHeight;
+    comRetangulo(cb, { left: 10, top: alturaJanela - 60, width: 200, height: 44 });
+    fireEvent.click(cb);
+    const f = screen.getByRole("listbox").closest("[data-lista-flutuante]") as HTMLElement;
+    expect(f).toHaveAttribute("data-para-cima");
+    expect(f.style.top).toBe("");
+    expect(f.style.bottom).toBe("64px"); // 60 + folga de 4
+  });
+
+  it("acompanha o campo quando um contentor com scroll rola e quando a janela muda de tamanho", async () => {
+    const { cb } = montar();
+    const caixa = comRetangulo(cb, { left: 40, top: 100, width: 300, height: 44 });
+    fireEvent.click(cb);
+    const f = () => screen.getByRole("listbox").closest("[data-lista-flutuante]") as HTMLElement;
+    expect(f().style.top).toBe("148px");
+    caixa.getBoundingClientRect = retangulo({ left: 40, top: 20, width: 300, height: 44 });
+    fireEvent.scroll(document.body); // o scroll de um contentor não borbulha: apanha-se em capture, na janela
+    await waitFor(() => expect(f().style.top).toBe("68px")); // o recálculo vai num requestAnimationFrame
+    caixa.getBoundingClientRect = retangulo({ left: 70, top: 20, width: 260, height: 44 });
+    fireEvent(window, new Event("resize"));
+    await waitFor(() => expect(f().style.left).toBe("70px"));
+    expect(f().style.width).toBe("260px");
+    expect(screen.getByRole("listbox")).toBeInTheDocument(); // rolar (com o campo à vista) não fecha
+  });
+
+  it("L1: muitos eventos de scroll seguidos medem uma só vez por frame", async () => {
+    const { cb } = montar();
+    const caixa = comRetangulo(cb, { left: 40, top: 100, width: 300, height: 44 });
+    fireEvent.click(cb);
+    const medir = vi.fn(retangulo({ left: 40, top: 100, width: 300, height: 44 }));
+    caixa.getBoundingClientRect = medir;
+    for (let i = 0; i < 20; i++) fireEvent.scroll(document.body);
+    expect(medir).not.toHaveBeenCalled();
+    await waitFor(() => expect(medir).toHaveBeenCalledTimes(1));
+  });
+
+  it("M3: se o campo sai da vista (rolou para fora da janela), a lista fecha", async () => {
+    const { cb } = montar();
+    const caixa = comRetangulo(cb, { left: 40, top: 100, width: 300, height: 44 });
+    fireEvent.click(cb);
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    caixa.getBoundingClientRect = retangulo({ left: 40, top: -200, width: 300, height: 44 }); // fim do campo acima da janela
+    fireEvent.scroll(document.body);
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+    expect(cb).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("M3: também fecha quando o campo sai da área visível de um contentor com scroll", async () => {
+    render(<div data-testid="contentor" style={{ overflowY: "auto" }}><ComboPesquisa rotulo="Cor" itens={ITENS} atual={null} onEscolher={vi.fn()} /></div>);
+    const cb = screen.getByRole("combobox", { name: "Cor" });
+    const contentor = screen.getByTestId("contentor");
+    contentor.getBoundingClientRect = retangulo({ left: 0, top: 100, width: 400, height: 200 }); // visível: 100..300
+    comRetangulo(cb, { left: 10, top: 150, width: 300, height: 44 });
+    fireEvent.click(cb);
+    expect(screen.getByRole("listbox")).toBeInTheDocument();
+    cb.parentElement!.getBoundingClientRect = retangulo({ left: 10, top: 320, width: 300, height: 44 }); // abaixo do fundo do contentor
+    fireEvent.scroll(contentor);
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+  });
+
+  it("M2: com window.visualViewport (teclado virtual), o espaço conta-se pela área visível", () => {
+    const vv = { height: 300, offsetTop: 0, addEventListener: vi.fn(), removeEventListener: vi.fn() };
+    Object.defineProperty(window, "visualViewport", { value: vv, configurable: true });
+    try {
+      const { cb } = montar();
+      comRetangulo(cb, { left: 10, top: 200, width: 280, height: 44 }); // por baixo só há 300 − 244 − 12 = 44 px de área visível
+      fireEvent.click(cb);
+      const f = screen.getByRole("listbox").closest("[data-lista-flutuante]") as HTMLElement;
+      expect(f).toHaveAttribute("data-para-cima"); // com innerHeight (768) abriria para baixo
+      expect(vv.addEventListener).toHaveBeenCalledWith("resize", expect.any(Function));
+      expect(vv.addEventListener).toHaveBeenCalledWith("scroll", expect.any(Function));
+      fireEvent.keyDown(cb, { key: "Escape" });
+      expect(vv.removeEventListener).toHaveBeenCalledWith("resize", expect.any(Function));
+    } finally {
+      Object.defineProperty(window, "visualViewport", { value: undefined, configurable: true });
+    }
+  });
+
+  it("fechar tira a lista do <body> e deixa de ouvir o scroll", () => {
+    const { cb } = montar();
+    fireEvent.click(cb);
+    fireEvent.keyDown(cb, { key: "Escape" });
+    expect(document.querySelector("[data-lista-flutuante]")).toBeNull();
+    expect(() => fireEvent.scroll(document.body)).not.toThrow();
+  });
+
+  it("escolher com um clique na lista (no <body>) continua a funcionar e o rato não tira o foco ao campo", () => {
+    const { cb, onEscolher } = montar();
+    fireEvent.click(cb);
+    expect(fireEvent.mouseDown(screen.getByRole("listbox"))).toBe(false); // preventDefault: o input não perde o foco
+    fireEvent.click(screen.getByRole("option", { name: "Roca" }));
+    expect(onEscolher).toHaveBeenCalledWith(ITENS[1]);
   });
 });

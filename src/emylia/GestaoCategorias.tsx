@@ -8,7 +8,8 @@ import { cn } from "@/lib/utils";
 import { NOTA } from "./pecasForm";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { lerCategoriasGestao, type CategoriaGestao, type SubcategoriaGestao } from "./categoriasMarcasGestao";
-import { Acoes, Renomear, useAcoesCategorias, type Ctx } from "./categoriasAcoes";
+import { Acoes, EditarSigla, Renomear, useAcoesCategorias, type Ctx } from "./categoriasAcoes";
+import { SiglaTexto } from "./siglasGestao";
 import { BOTAO_TEXTO, CARTAO, EstadoLeitura, FormNome, Razao, Selo, produtos, protegido, useGestaoLista } from "./gestaoPecas";
 
 type Item = SubcategoriaGestao;
@@ -57,11 +58,13 @@ function Categoria({ c, irmas, g }: { c: CategoriaGestao; irmas: Item[]; g: Ctx 
         <h2 id={tit} className="min-w-0 break-words text-lg font-semibold">{c.nome}</h2>
         {c.global && <Selo>Partilhada</Selo>}
         {!c.ativo && <Selo>desativada</Selo>}
+        <SiglaTexto sigla={c.sigla} />
         {c.usados != null && <span className={NOTA}>{`Usada em ${produtos(c.usados)}`}</span>}
         <Acoes item={c} pai={null} irmas={irmas} g={g} tipo="a categoria" />
       </div>
       {g.msg(`est:${c.id}`) && <p className="mt-2 text-[15px] text-red-700 dark:text-red-400" role="alert">{g.msg(`est:${c.id}`)}</p>}
       <Renomear item={c} pai={null} g={g} />
+      <EditarSigla item={c} pai={null} g={g} />
       {edita && !c.ativo && c.subcategorias.length > 0 && <p className={cn(NOTA, "mt-2")}>Ao reativar, as subcategorias reativam-se uma a uma.</p>}
 
       {c.subcategorias.length > 0 ? (
@@ -73,12 +76,14 @@ function Categoria({ c, irmas, g }: { c: CategoriaGestao; irmas: Item[]; g: Ctx 
                 <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                   <span className={cn("min-w-0 break-words text-[15px] font-medium", !s.ativo && "text-muted-foreground")}>{s.nome}{!s.ativo && " (desativada)"}</span>
                   {s.global && <Selo>Partilhada</Selo>}
+                  <SiglaTexto sigla={s.sigla} />
                   {s.usados != null && <span className="text-sm text-muted-foreground">{produtos(s.usados)}</span>}
                   <Acoes item={s} pai={c} irmas={subsEditaveis} g={g} tipo="a subcategoria" />
                 </div>
                 {g.podeEditar && !s.global && bloqueada && <p className="mt-1 text-sm text-muted-foreground" aria-hidden="true">Reative primeiro a categoria.</p>}
                 {g.msg(`est:${s.id}`) && <p className="mt-2 text-[15px] text-red-700 dark:text-red-400" role="alert">{g.msg(`est:${s.id}`)}</p>}
                 <Renomear item={s} pai={c} g={g} />
+                <EditarSigla item={s} pai={c} g={g} />
               </li>
             );
           })}

@@ -11,9 +11,9 @@ import { eur, nfmt, pct, type SvcId } from "./motor";
 import type { Ctx } from "./pecas";
 import { aplicarTodos, dataPT, listaCatalogoCompleta, origemHora, pesquisar, type Custos, type ItemLista } from "./v2/custosModelo";
 import { lerCustos, mudarCustos, useCustos } from "./v2/custosStore";
-import { caminho, dentroDe, noDoServico, oficios, type Catalogo } from "./v2/catalogoModelo";
+import { caminho, noDoServico, oficios, type Catalogo } from "./v2/catalogoModelo";
 import { useCatalogo } from "./v2/catalogoStore";
-import { ICONE_ALERTA, NumeroCelula, TextoCelula, Escolha } from "./v2/pecasCustos";
+import { ICONE_ALERTA, NumeroCelula, TextoCelula } from "./v2/pecasCustos";
 import { FotoOuIlustracao, IconeServico } from "./ilustracoes";
 import { desempenhoServicos, desempenhoTecnicos } from "./desempenhoCatalogo";
 import { ENTRADA, NavOficios, ORDENS, PainelDesempenho, usePrefsCatalogo, type Ordem } from "./PainelCatalogo";
@@ -28,6 +28,9 @@ import {
 } from "./fichaServico";
 import { useParamUrl } from "./usarParamUrl";
 import { CriarNoCatalogo } from "./CriarNoCatalogo";
+import { ComboPesquisa, type ItemCombo } from "./ComboPesquisa";
+import { Campo } from "./pecasForm";
+import { SEM_CATEGORIA_PRODUTO, SEM_FILTRO_PRODUTOS, haProdutosSemCategoria, normalizarMarca, categoriasDeProdutos, filtrarProdutosCatalogo, subcategoriasDeProdutos, type FiltroProdutos } from "./filtroProdutosCatalogo";
 import { FichaProduto } from "./FichaProduto";
 import { ResumoAtributos } from "./AtributosProduto";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
@@ -208,14 +211,39 @@ function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo, real,
   // 29/10: no modo Selecionar, tocar na linha (ou no nome) marca-a em vez de abrir a ficha
   const tocar = (id: string) => (sl.sel ? sl.alternar(id) : onAbrirProduto(id));
   const [q, setQ] = useState("");
-  const [of, setOf] = useState("");
+  // 16/11: três filtros só de produtos (categoria, subcategoria, marca) em vez do «Ofício» dos serviços; ver filtroProdutosCatalogo.ts
+  const [f, setF] = useState<FiltroProdutos>(SEM_FILTRO_PRODUTOS);
   const [n, setN] = useState(POR_PAGINA);
-  const L = useMemo(() => primeiro(pesquisarProdutos(of ? K.produtos.filter((p) => dentroDe(K.arvore, p.no, of)) : K.produtos, q), (p) => p.id === novo), [K, q, of, novo]);
+  const semCat = useMemo(() => haProdutosSemCategoria(K), [K.produtos, K.categoriasProduto]); // eslint-disable-line react-hooks/exhaustive-deps
+  const nomeRamo = (x: { n: string; inativa?: true }) => (x.inativa ? `${x.n} (desativada)` : x.n);
+  // «Sem categoria de produto» fecha a lista, e só se oferece se há produtos assim (os que só têm o ofício dos serviços não se alcançam de outra maneira)
+  const cats = useMemo(() => [...categoriasDeProdutos(K).map((x): ItemCombo => ({ id: x.id, nome: nomeRamo(x) })), ...(semCat ? [{ id: SEM_CATEGORIA_PRODUTO, nome: "Sem categoria de produto" }] : [])], [K.arvore, K.produtos, K.categoriasProduto, semCat]); // eslint-disable-line react-hooks/exhaustive-deps
+  const marcas = useMemo(() => { const vistas = new Set<string>(); return K.marcas.map((m) => m.trim()).filter((m) => { const k = normalizarMarca(m); if (!k || vistas.has(k)) return false; vistas.add(k); return true; }).map((m): ItemCombo => ({ id: m, nome: m })); }, [K.marcas]);
+  // o filtro escolhido que deixou de existir na lista (releitura do Catálogo) repõe-se, em vez de mostrar o id
+  const catOk = !f.cat || cats.some((x) => x.id === f.cat);
+  const cat = catOk ? f.cat : "";
+  const subs = useMemo(() => subcategoriasDeProdutos(K, cat).map((x): ItemCombo => ({ id: x.id, nome: nomeRamo(x) })), [K.arvore, K.produtos, K.categoriasProduto, cat]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fe: FiltroProdutos = { cat, sub: cat && subs.some((x) => x.id === f.sub) ? f.sub : "", marca: marcas.some((x) => normalizarMarca(x.nome) === normalizarMarca(f.marca)) ? f.marca : "" };
+  useEffect(() => { if (fe.cat !== f.cat || fe.sub !== f.sub || fe.marca !== f.marca) setF(fe); }, [fe.cat, fe.sub, fe.marca]); // eslint-disable-line react-hooks/exhaustive-deps
+  const L = useMemo(() => primeiro(pesquisarProdutos(filtrarProdutosCatalogo(K, K.produtos, fe), q), (p) => p.id === novo), [K, q, fe.cat, fe.sub, fe.marca, novo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const mudar = (p: Partial<FiltroProdutos>) => { setF((a) => ({ ...a, ...p })); setN(POR_PAGINA); };
+  const atual = (itens: readonly ItemCombo[], id: string): ItemCombo | null => (id ? itens.find((x) => normalizarMarca(x.id) === normalizarMarca(id)) ?? null : null);
   return (
     <>
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-wrap items-end gap-3">
         <Procurar v={q} onChange={(v) => { setQ(v); setN(POR_PAGINA); }} rotulo="Procurar produto" ph="Nome, marca, referência ou subcategoria" />
-        <Escolha rotulo="Ofício" w="w-full sm:w-64" v={of} opcoes={[{ v: "", t: "Todos os ofícios" }, ...oficios(K.arvore).map((o) => ({ v: o.id, t: o.n }))]} onSet={(v) => { setOf(v); setN(POR_PAGINA); }} />
+        <Campo rot="Categoria" className="w-full sm:w-56">{(id) => (
+          <ComboPesquisa id={id} rotulo="Categoria" itens={cats} atual={atual(cats, fe.cat)} semValor="Todas as categorias" semValorComoValor placeholder="Todas as categorias" vazio="Nenhuma categoria encontrada"
+            onEscolher={(i) => mudar({ cat: i.id, sub: "" })} />
+        )}</Campo>
+        <Campo rot="Subcategoria" dica={!fe.cat ? "Escolha primeiro a categoria." : fe.cat === SEM_CATEGORIA_PRODUTO ? "«Sem categoria de produto» não tem subcategorias." : undefined} className="w-full sm:w-56">{(id) => (
+          <ComboPesquisa id={id} rotulo="Subcategoria" itens={subs} atual={atual(subs, fe.sub)} desativado={!fe.cat || fe.cat === SEM_CATEGORIA_PRODUTO} semValor="Todas as subcategorias" semValorComoValor placeholder="Todas as subcategorias" vazio="Nenhuma subcategoria encontrada"
+            onEscolher={(i) => mudar({ sub: i.id })} />
+        )}</Campo>
+        <Campo rot="Marca" className="w-full sm:w-56">{(id) => (
+          <ComboPesquisa id={id} rotulo="Marca" itens={marcas} atual={atual(marcas, fe.marca)} semValor="Todas as marcas" semValorComoValor placeholder="Todas as marcas" vazio="Nenhuma marca encontrada"
+            onEscolher={(i) => mudar({ marca: i.id })} />
+        )}</Campo>
         {!sl.sel && <BarraSelecao s={sl} filtrados={L} real={real} anunciar={anunciar} tipo="produtos" />}
       </div>
       {sl.sel && <BarraSelecao s={sl} filtrados={L} real={real} anunciar={anunciar} tipo="produtos" />}

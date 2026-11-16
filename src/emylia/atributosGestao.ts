@@ -7,10 +7,13 @@ import { erroAmigavel, rpcLivre } from "./fichaProdutoDados";
 /** Como Res, mas a falha pode trazer o código da base (CT001 = sem permissão). */
 export type ResG<T> = { ok: true; v: T } | { ok: false; erro: string; codigo?: string };
 
-export interface OpcaoGestao { id: string; valor: string; nome: string; hex: string | null; ordem: number; ativo: boolean; usados: number | null }
+/** `sigla` (20270118000000): o código da opção no SKU (AZ, PZ); null = ainda sem. */
+export interface OpcaoGestao { id: string; valor: string; nome: string; hex: string | null; ordem: number; ativo: boolean; usados: number | null; sigla: string | null }
 export interface AtributoGestao {
   id: string; codigo: string; nome: string; tipo: "lista" | "medida"; temHex: boolean; ordem: number; ativo: boolean;
   usados: number | null; opcoes: OpcaoGestao[];
+  /** 20270118000000: a posição no SKU (1…n; null = ainda sem) e se o atributo entra no SKU. */
+  skuOrdem: number | null; skuEntra: boolean;
 }
 
 type Bruto = Record<string, unknown>;
@@ -20,7 +23,7 @@ const contagem = (x: unknown): number | null => (typeof x === "number" && Number
 function opcaoDe(o: Bruto): OpcaoGestao {
   return {
     id: texto(o.id), valor: texto(o.valor), nome: texto(o.nome) || texto(o.valor), hex: texto(o.hex) || null,
-    ordem: contagem(o.ordem) ?? 0, ativo: o.ativo !== false, usados: contagem(o.usados),
+    ordem: contagem(o.ordem) ?? 0, ativo: o.ativo !== false, usados: contagem(o.usados), sigla: texto(o.sigla).trim() || null,
   };
 }
 function atributoDe(a: Bruto): AtributoGestao {
@@ -28,6 +31,7 @@ function atributoDe(a: Bruto): AtributoGestao {
     id: texto(a.id), codigo: texto(a.codigo), nome: texto(a.nome), tipo: a.tipo === "medida" ? "medida" : "lista", temHex: a.tem_hex === true,
     ordem: contagem(a.ordem) ?? 0, ativo: a.ativo !== false, usados: contagem(a.usados),
     opcoes: Array.isArray(a.opcoes) ? (a.opcoes as Bruto[]).map(opcaoDe) : [],
+    skuOrdem: contagem(a.sku_ordem), skuEntra: a.sku_entra !== false,
   };
 }
 

@@ -97,13 +97,13 @@ describe("gravar um produto novo com atributos", () => {
     depois.K.produtos.push(p as never);
     return diferencasCatalogo(ORG, antes, depois, { ids, produtos });
   };
-  it("sem atributos a lista de chamadas é a de sempre (sem o 4.º RPC)", () => {
-    expect(dif(novo()).map((c) => c.rpc)).toEqual(["cat_guardar_produto", "cat_guardar_produto_texto"]);
-    expect(dif(novo([])).map((c) => c.rpc)).toEqual(["cat_guardar_produto", "cat_guardar_produto_texto"]);
+  it("sem atributos a lista de chamadas é a de sempre (sem cat_guardar_produto_atributos); só se acrescenta gerar a referência (16/11)", () => {
+    expect(dif(novo()).map((c) => c.rpc)).toEqual(["cat_guardar_produto", "cat_guardar_produto_texto", "cat_gerar_sku_produto"]);
+    expect(dif(novo([])).map((c) => c.rpc)).toEqual(["cat_guardar_produto", "cat_guardar_produto_texto", "cat_gerar_sku_produto"]);
   });
   it("com atributos acrescenta o cat_guardar_produto_atributos, no fim, com o produto por resolver e os valores no formato da base", () => {
     const ch = dif(novo(ATTRS));
-    expect(ch.map((c) => c.rpc)).toEqual(["cat_guardar_produto", "cat_guardar_produto_texto", "cat_guardar_produto_atributos"]);
+    expect(ch.map((c) => c.rpc)).toEqual(["cat_guardar_produto", "cat_guardar_produto_texto", "cat_guardar_produto_atributos", "cat_gerar_sku_produto"]);
     expect(ch[2].args).toEqual({ p_org: ORG, p_produto: { tmp: "prod:novo" }, p_valores: [
       { atributo: A_COR, opcao: O_PRETO }, { atributo: A_MED, medida: { tipo: "2D", largura: 60, comprimento: 60, espessura: null, unidade: "cm" } },
     ] });
@@ -111,7 +111,7 @@ describe("gravar um produto novo com atributos", () => {
   it("executarCatalogo troca o tmp pelo id que a base deu ao produto", async () => {
     const ch = dif(novo(ATTRS)), feitas: { rpc: string; args: Record<string, unknown> }[] = [];
     const r = await executarCatalogo(ch, async (rpc, args) => { feitas.push({ rpc, args }); return { data: rpc === "cat_guardar_produto" ? "cccccccc-cccc-4ccc-accc-cccccccccccc" : { ok: true }, error: null }; });
-    expect(r).toEqual({ feitas: 3, erro: null });
+    expect(r).toEqual({ feitas: 4, erro: null, avisos: [] });
     expect(feitas[2].args.p_produto).toBe("cccccccc-cccc-4ccc-accc-cccccccccccc");
   });
   it("um produto que já existe não regrava atributos quando só muda a marca", () => {

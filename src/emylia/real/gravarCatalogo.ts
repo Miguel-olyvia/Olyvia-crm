@@ -8,6 +8,8 @@ import type { Custos, ReceitaV2 } from "../v2/custosModelo";
 import type { Catalogo, No } from "../v2/catalogoModelo";
 import { MEDIDA_PARA_BASE, type CatalogoMontado, type LinhaProduto } from "./catalogoReal";
 import { mesmosAtributos, valoresParaGravar } from "../atributosTexto";
+import { erroAmigavel } from "../fichaProdutoDados";
+import { textoSemGerar } from "../skuDados";
 
 /** O Catálogo num momento: o que os ecrãs mostram. */
 export interface FotoCatalogo {
@@ -18,8 +20,10 @@ export interface FotoCatalogo {
 }
 /** Um valor que só se sabe depois de uma chamada anterior (o id que a base deu). */
 export interface Tmp { tmp: string }
-export interface Chamada { rpc: string; args: Record<string, unknown>; guarda?: string; nota: string }
+/** `tolerante`: se falhar, a gravação continua e diz-se em `avisos` (o que já se gravou fica; é o caso de gerar a referência, o último passo). */
+export interface Chamada { rpc: string; args: Record<string, unknown>; guarda?: string; nota: string; tolerante?: boolean; produto?: string }
 
+const avisoSku = (nome: string | undefined, motivo: string) => `Produto${nome ? ` «${nome}»` : ""} criado; referência por gerar: ${motivo}`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const igual = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const porId = <T extends { id: string }>(L: readonly T[]) => new Map(L.map((x) => [x.id, x]));
@@ -121,6 +125,10 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
     if (p.attrs?.length && (novo || !mesmosAtributos(a?.attrs, p.attrs)))
       out.push({ rpc: "cat_guardar_produto_atributos", nota: `Produto: ${p.n} (atributos)`, args: {
         p_org: org, p_produto: novo ? { tmp: "prod:" + p.id } : p.id, p_valores: valoresParaGravar(p.attrs) } });
+    // 16/11 (20270118000000): um produto novo SEM referência escrita ganha uma gerada (categoria + subcategoria + número + atributos), como ÚLTIMO
+    // passo (precisa da classificação e dos atributos já gravados). Tolerante: o produto fica criado mesmo que a referência fique por gerar.
+    if (novo && !p.sku?.trim())
+      out.push({ rpc: "cat_gerar_sku_produto", nota: `Produto: ${p.n} (referência)`, tolerante: true, produto: p.n, args: { p_org: org, p_produto: { tmp: "prod:" + p.id }, p_forcar: false } });
   }
   for (const c of depois.K.consumiveisCriados ?? []) {
     const a = consA.get(c.id);
@@ -223,20 +231,32 @@ function resolver(v: unknown, tmps: Map<string, string>): unknown {
 
 export type Rpc = (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message?: string; code?: string } | null }>;
 
-/** Corre as chamadas por ordem. Pára na primeira que falhar e diz qual foi. */
-export async function executarCatalogo(chamadas: readonly Chamada[], rpc: Rpc): Promise<{ feitas: number; erro: string | null }> {
+/** Corre as chamadas por ordem. Pára na primeira que falhar e diz qual foi, salvo as tolerantes: essas falham para `avisos` e o resto corre. */
+export async function executarCatalogo(chamadas: readonly Chamada[], rpc: Rpc): Promise<{ feitas: number; erro: string | null; avisos: string[] }> {
   const tmps = new Map<string, string>();
+  const avisos: string[] = [];
   let feitas = 0;
   for (const c of chamadas) {
     let args: Record<string, unknown>;
     try { args = resolver(c.args, tmps) as Record<string, unknown>; }
-    catch (e) { return { feitas, erro: `${c.nota}: ${(e as Error).message}` }; }
-    const { data, error } = await rpc(c.rpc, args);
-    if (error) return { feitas, erro: `${c.nota}: ${error.message ?? "erro da base"}` };
+    catch (e) { return { feitas, erro: `${c.nota}: ${(e as Error).message}`, avisos }; }
+    let r: Awaited<ReturnType<Rpc>>;
+    try { r = await rpc(c.rpc, args); }
+    catch (e) { r = { data: null, error: { message: (e as Error).message || "erro de rede" } }; }
+    const { data, error } = r;
+    if (error) {
+      if (c.tolerante) { avisos.push(avisoSku(c.produto, erroAmigavel(error, "erro da base"))); continue; }
+      return { feitas, erro: `${c.nota}: ${error.message ?? "erro da base"}`, avisos };
+    }
     if (c.guarda && typeof data === "string") tmps.set(c.guarda, data);
+    // a base responde sem erro mas pode não ter gerado (faltam siglas, ou a referência atual é manual): o produto fica, o aviso diz porquê
+    if (c.rpc === "cat_gerar_sku_produto" && data && typeof data === "object" && (data as { gerado?: unknown }).gerado === false) {
+      const v = data as { sku?: string | null; faltas?: unknown; motivo?: string | null };
+      avisos.push(avisoSku(c.produto, textoSemGerar({ sku: v.sku ?? null, gerado: false, faltas: Array.isArray(v.faltas) ? v.faltas.filter((f): f is string => typeof f === "string") : [], motivo: v.motivo ?? null })));
+    }
     feitas++;
   }
-  return { feitas, erro: null };
+  return { feitas, erro: null, avisos };
 }
 
 /** O antes de uma comparação (uma cópia: as stores mudam os objetos no sítio). */

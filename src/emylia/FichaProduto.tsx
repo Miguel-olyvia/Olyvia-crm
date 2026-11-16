@@ -14,6 +14,7 @@ import { BarraMargem } from "./CriarNoCatalogo";
 import { StockArmazens } from "./StockArmazens";
 import { AtributosFicha } from "./AtributosProduto";
 import { ClassificacaoFicha } from "./ClassificacaoProduto";
+import { ReferenciaFicha } from "./ReferenciaFicha";
 import type { CrmCatalogItem, CrmCatalogList, FreeSupplierRow } from "@/components/supplier-portal-crm/types";
 import {
   definirPreferido, definirPvp, eUuid, lerNumero, lerFornecedoresOrg, lerFornecedoresProduto, ligarArtigo, margemProduto, moeda, procurarArtigos, unidadeDaLigacao,
@@ -50,6 +51,9 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
   // 05/11: sem products.view_cost não se mostra o custo de compra (nem a margem, nem o preço dos fornecedores)
   const verCusto = real?.podeVerCusto !== false;
   const titulo = useRef<HTMLHeadingElement>(null);
+  // 16/11: depois de mudar a classificação ou os atributos, oferece recalcular a referência (nunca o faz sozinho)
+  const [sugerirRef, setSugerirRef] = useState(false);
+  const anunciarMudanca = (msg: string) => { anunciar(msg); setSugerirRef(true); };
   useEffect(() => { titulo.current?.focus(); }, []);
   const topo = (
     <button type="button" onClick={voltar} className="inline-flex min-h-11 items-center gap-2 rounded-lg pr-3 text-[15px] font-medium text-muted-foreground hover:text-foreground">
@@ -71,6 +75,9 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
       <header className="mt-3">
         <p className={NOTA}>{[cons ? "Consumível" : "", p.marca, p.sku ? `ref. ${p.sku}` : "", `unidade: ${p.un}`].filter(Boolean).join(" · ")}</p>
         <h1 id="ficha-t" ref={titulo} tabIndex={-1} className="text-3xl font-semibold tracking-tight outline-none">{p.n}</h1>
+        {!cons && real && real.podeEditar && eUuid(p.id) && (
+          <ReferenciaFicha key={p.id} p={p} arvore={arvore} atributos={atributos} real={real} anunciar={anunciar} sugerir={sugerirRef} aoGerar={() => setSugerirRef(false)} />
+        )}
         {p.servico && (
           <button type="button" onClick={() => onAbrirServico(p.servico!)} className={LINK}>Traz: {nomeServico(p.servico)}</button>
         )}
@@ -94,14 +101,14 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
       {/* 13/11: marca, categoria e subcategoria em dropdowns com pesquisa; grava direto (cat_guardar_produto_tabelas), pelo nome */}
       {!cons && real && eUuid(p.id) && !!arvore && (
         <Seccao id="fp-class" titulo="Classificação">
-          <ClassificacaoFicha p={p} arvore={arvore} marcas={marcas ?? []} real={real} anunciar={anunciar} />
+          <ClassificacaoFicha p={p} arvore={arvore} marcas={marcas ?? []} real={real} anunciar={anunciarMudanca} />
         </Seccao>
       )}
 
       {/* 13/11: grava direto (cat_guardar_produto_atributos), como o PVP; a chave inclui os atributos para o bloco voltar ao que ficou na base */}
       {!cons && real && eUuid(p.id) && !!atributos?.length && (
         <Seccao id="fp-atrib" titulo="Atributos">
-          <AtributosFicha key={`${p.id}:${JSON.stringify(p.attrs ?? [])}`} p={p} defs={atributos} real={real} anunciar={anunciar} />
+          <AtributosFicha key={`${p.id}:${JSON.stringify(p.attrs ?? [])}`} p={p} defs={atributos} real={real} anunciar={anunciarMudanca} />
         </Seccao>
       )}
 

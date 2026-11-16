@@ -53,7 +53,7 @@ const ficha = (o: { p?: Produto; r?: FichaProdutoReal; atributos?: AtributoDef[]
 const combo = (ctx: HTMLElement, atributo: string) => within(ctx).getByRole("combobox", { name: atributo });
 const escolher = (ctx: HTMLElement, atributo: string, opcao: string | RegExp) => {
   fireEvent.click(combo(ctx, atributo));
-  fireEvent.click(within(ctx).getByRole("option", { name: opcao }));
+  fireEvent.click(screen.getByRole("option", { name: opcao }));
 };
 const gravadas = () => base.chamadas.filter((c) => c.f === "cat_guardar_produto_atributos");
 
@@ -80,8 +80,8 @@ describe("ficha do produto: Atributos", () => {
     expect(screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)[i + 1]).toBe("Fornecedores ligados");
     expect(combo(sec, "Cor")).toHaveValue("Preto");
     fireEvent.click(combo(sec, "Cor"));
-    expect(within(sec).getByRole("option", { name: /^Preto\s+#000000(\s+\(escolhida\))?$/ })).toBeInTheDocument();
-    expect(within(sec).getByRole("option", { name: /^Branco\s+sem hex$/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /^Preto\s+#000000(\s+\(escolhida\))?$/ })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: /^Branco\s+sem hex$/ })).toBeInTheDocument();
     // a medida e o brilho ainda não estão no produto: só se juntam à escolha
     expect(within(sec).queryByRole("combobox", { name: "Brilho" })).toBeNull();
     expect(within(sec).getByRole("button", { name: "Guardar atributos" })).toBeDisabled();
@@ -245,7 +245,7 @@ describe("criar produto: Atributos", () => {
       const grupo = screen.getByRole("group", { name: "Atributos do produto" });
       fireEvent.change(within(grupo).getByLabelText("Juntar atributo"), { target: { value: A_COR } });
       fireEvent.click(combo(grupo, "Cor"));
-      fireEvent.click(within(grupo).getByRole("option", { name: "Nova opção…" }));
+      fireEvent.click(screen.getByRole("option", { name: "Nova opção…" }));
       return grupo;
     };
     it("na Cor o hex é obrigatório: com amostra em direto e o botão só liga com #RRGGBB válido", async () => {
@@ -266,7 +266,7 @@ describe("criar produto: Atributos", () => {
       // a opção nova aparece, já escolhida, com o nome e o hex escritos; e fica no Catálogo em memória
       await waitFor(() => expect(combo(grupo, "Cor")).toHaveValue("Verde"));
       fireEvent.click(combo(grupo, "Cor"));
-      expect(within(grupo).getByRole("option", { name: /^Verde\s+#00FF00(\s+\(escolhida\))?$/ })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: /^Verde\s+#00FF00(\s+\(escolhida\))?$/ })).toBeInTheDocument();
       expect(lerCatalogo().atributos!.find((a) => a.id === A_COR)!.opcoes.map((o) => o.valor)).toContain("Verde");
     });
     it("nome duplicado: a mensagem da base aparece em alerta e a opção não entra", async () => {
@@ -285,7 +285,7 @@ describe("criar produto: Atributos", () => {
       const grupo = screen.getByRole("group", { name: "Atributos do produto" });
       fireEvent.change(within(grupo).getByLabelText("Juntar atributo"), { target: { value: A_BRI } });
       fireEvent.click(combo(grupo, "Brilho"));
-      fireEvent.click(within(grupo).getByRole("option", { name: "Nova opção…" }));
+      fireEvent.click(screen.getByRole("option", { name: "Nova opção…" }));
       expect(within(grupo).queryByLabelText("Cor em hexadecimal (#RRGGBB)")).toBeNull();
       fireEvent.change(within(grupo).getByLabelText("Nome da opção"), { target: { value: "Acetinado" } });
       expect(within(grupo).getByRole("button", { name: "Criar opção" })).toBeEnabled();
@@ -297,7 +297,7 @@ describe("criar produto: Atributos", () => {
       const grupo = screen.getByRole("group", { name: "Atributos do produto" });
       fireEvent.change(within(grupo).getByLabelText("Juntar atributo"), { target: { value: A_COR } });
       fireEvent.click(combo(grupo, "Cor"));
-      expect(within(grupo).queryByRole("option", { name: /Nova opção/ })).toBeNull();
+      expect(screen.queryByRole("option", { name: /Nova opção/ })).toBeNull();
     });
   });
 });
@@ -330,7 +330,7 @@ describe("revisão: opção desativada, radiogroup, foco e avisos", () => {
     expect(combo(sec, "Cor")).toHaveValue("Pizarra (desativada)");
     // não é escolhível de novo: não está na lista
     fireEvent.click(combo(sec, "Cor"));
-    expect(within(sec).queryByRole("option", { name: /Pizarra/ })).toBeNull();
+    expect(screen.queryByRole("option", { name: /Pizarra/ })).toBeNull();
     expect(screen.getByRole("button", { name: "Guardar atributos" })).toBeDisabled();
   });
   it("HIGH1: ao guardar outra mudança, o valor desativado segue na lista; nunca se descarta em silêncio", async () => {
@@ -357,8 +357,27 @@ describe("revisão: opção desativada, radiogroup, foco e avisos", () => {
     const sec = screen.getByRole("region", { name: "Atributos" });
     expect(within(sec).queryByRole("radiogroup", { name: "Cor" })).toBeNull();
     fireEvent.click(combo(sec, "Cor"));
-    const itens = within(within(sec).getByRole("listbox", { name: "Cor" })).getAllByRole("option");
+    const itens = within(screen.getByRole("listbox", { name: "Cor" })).getAllByRole("option");
     expect(itens[itens.length - 1]).toHaveTextContent("Nova opção…");
+  });
+
+  it("16/11: a lista de opções flutua por cima do cartão seguinte: está no <body>, fixa, com z-index alto, e escolher continua a funcionar", () => {
+    ficha();
+    const sec = screen.getByRole("region", { name: "Atributos" });
+    const campo = combo(sec, "Cor");
+    campo.parentElement!.getBoundingClientRect = () => ({ left: 30, top: 200, width: 280, height: 44, right: 310, bottom: 244, x: 30, y: 200, toJSON: () => ({}) }) as DOMRect;
+    fireEvent.click(campo);
+    const lista = screen.getByRole("listbox", { name: "Cor" });
+    const f = lista.closest("[data-lista-flutuante]") as HTMLElement;
+    expect(f.parentElement).toBe(document.body);
+    expect(sec.contains(lista)).toBe(false);
+    expect(f.style.position).toBe("fixed");
+    expect(f.style.width).toBe("280px");
+    expect(Number(f.style.zIndex)).toBeGreaterThan(610);
+    expect(campo).toHaveAttribute("aria-controls", lista.id);
+    fireEvent.click(screen.getByRole("option", { name: /^Branco/ }));
+    expect(campo).toHaveValue("Branco");
+    expect(document.querySelector("[data-lista-flutuante]")).toBeNull();
   });
 
   it("(a) o onChange só sai das ações de quem escolhe, não quando a lista de atributos muda de identidade", () => {
@@ -378,7 +397,7 @@ describe("revisão: opção desativada, radiogroup, foco e avisos", () => {
     ficha();
     const sec = screen.getByRole("region", { name: "Atributos" });
     fireEvent.click(combo(sec, "Cor"));
-    fireEvent.click(within(sec).getByRole("option", { name: "Nova opção…" }));
+    fireEvent.click(screen.getByRole("option", { name: "Nova opção…" }));
     expect(within(sec).getByLabelText("Nome da opção")).toHaveFocus();
     fireEvent.click(within(sec).getByRole("button", { name: "Cancelar" }));
     expect(combo(sec, "Cor")).toHaveFocus();
@@ -388,7 +407,7 @@ describe("revisão: opção desativada, radiogroup, foco e avisos", () => {
     ficha();
     const sec = screen.getByRole("region", { name: "Atributos" });
     fireEvent.click(combo(sec, "Cor"));
-    fireEvent.click(within(sec).getByRole("option", { name: "Nova opção…" }));
+    fireEvent.click(screen.getByRole("option", { name: "Nova opção…" }));
     const hex = within(sec).getByLabelText("Cor em hexadecimal (#RRGGBB)");
     expect(hex).not.toHaveAttribute("aria-invalid", "true");
     fireEvent.change(hex, { target: { value: "#12" } });

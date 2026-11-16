@@ -117,7 +117,7 @@ describe("diferencasCatalogo: o que mudou, em chamadas às funções cat_*", () 
     expect(ch[0]).toMatchObject({ rpc: "cat_guardar_produto", guarda: "cons:canal:c9" });
     const feitas: Chamada[] = [];
     const r = await executarCatalogo(ch, async (rpc, args) => { feitas.push({ rpc, args, nota: "" }); return { data: rpc === "cat_guardar_produto" ? "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa" : ID.svc, error: null }; });
-    expect(r).toEqual({ feitas: ch.length, erro: null });
+    expect(r).toEqual({ feitas: ch.length, erro: null, avisos: [] });
     const svc = feitas.find((c) => c.rpc === "cat_guardar_servico")!;
     expect((svc.args.p_cons as { product_id: string }[]).map((c) => c.product_id)).toEqual([ID.cons, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"]);
   });
