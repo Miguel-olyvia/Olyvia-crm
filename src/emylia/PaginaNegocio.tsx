@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   FASES, LINHAS, PAPEIS, nomeLinha, visitaFeita, visitas,
-  acertoDoValorPendente, adendaDoAcerto, alertas, bloqueado, camposMedida, mudancasDeValor, impactoDasMedidas, impactoDoPlano, medidasRetificadas, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
+  acertoDoValorPendente, adendaDoAcerto, retificacaoPorPagar, alertas, bloqueado, camposMedida, mudancasDeValor, impactoDasMedidas, impactoDoPlano, medidasRetificadas, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
   SEM_ORCAMENTO, semOrcamento,
 } from "./motor";
@@ -312,6 +312,30 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
   // 11/11: na fase Negócio ou mais à frente sem orçamento (as versões apagadas na base), só o aviso: nenhum passo de orçamento
   if (fase === d.fase && semOrcamento(d)) return [{ id: "sem-orcamento", titulo: "Sem orçamento", icone: FileText, feito: false, semAvancar: true, resumo: [],
     corpo: <p role="alert" className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{SEM_ORCAMENTO}</p> }];
+  // 16/11 (o fluxo em vigor): proposta assinada → contrato gerado e assinado (a venda direta fica só com a proposta) → o Financeiro (a fatura
+  // e o pagamento) → na Obra, as medidas e o plano. O passo do contrato vem logo a seguir à proposta aceite, no Financeiro (fase 4), e
+  // fica à vista na Obra. Já não espera pelo pagamento, pelas medidas nem pelo plano.
+  const passoContratoPrincipal = (): Passo | null => {
+    if (!o?.aceite || o.vendaDireta) return null;
+    if (!simples) return g(PROPOSTA[1], FileSignature, !!o.contrato);
+    const estado = o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : "pronto a gerar";
+    return { ...g(PROPOSTA[1], FileSignature, !!o.contrato), conta: undefined, feito: o.contrato === "assinado", semAvancar: true, resumo: [estado],
+      corpo: (
+        <div className="space-y-10">
+          <Campos grupo={E(PROPOSTA[1])} {...fx} ro={!!o.contrato} />
+          {/* 11/11: gerar (ou esperar pela assinatura) aqui mesmo, antes do texto do contrato */}
+          {o.contrato !== "assinado" && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/30 bg-primary/[0.04] p-4">
+              <p className="text-[15px]">{o.contrato === "enviado" ? "O contrato está no portal do cliente, por assinar. Assinado, segue a fatura e o pagamento." : "O contrato vai ao portal do cliente, por assinar. Assinado, segue a fatura e o pagamento."}</p>
+              <BotaoFase ctx={ctx} d={d} tamanho="default" />
+            </div>
+          )}
+          <Partilhar ctx={ctx} d={d} tipo="contrato" estado={estado}>
+            <ContratoDoc S={S} d={d} />
+          </Partilhar>
+        </div>
+      ) };
+  };
   let passos: Passo[] = [];
   if (fase === 0) {
     passos = [
@@ -507,16 +531,17 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           )}
         </div>
       ) }, !!o.enviada) : g(PROPOSTA[0], FileSignature, !!o.enviada),
-      // 12/11 (Rúben: «a validação das medidas e do plano da obra só vêm depois do Financeiro»): aceite, o negócio passa a Financeiro;
-      // as medidas, o plano e o contrato são passos da Obra
+      // 12/11: aceite, o negócio passa a Financeiro. 16/11: o contrato é o primeiro passo de lá (passoContratoPrincipal)
     ];
   } else if (fase === 4 && simples) {
     // 10/11 (Rúben: «não queremos muitos passos, queremos certezas»): o Financeiro em dois passos. 1) A fatura: o valor a faturar agora,
     // os dados de faturação e da fatura, e o registo do número, tudo no mesmo sítio (o botão diz o que falta, se faltar). 2) O pagamento.
     const TI = totais(d, S), agora = d.orc ? tranches(d, TI.total, S)[0] : null, ft = d.fin.fatura;
     const gF = [FINANCEIRO[0], FINANCEIRO[1]].map(E).filter((x) => !x.oculto);
-    const faltamF = emFalta(gF, d.f).length;
+    const faltamF = emFalta(gF, d.f).length, pContrato = passoContratoPrincipal();
     passos = [
+      // 16/11: com contrato, primeiro o contrato assinado; depois a fatura e o pagamento
+      ...(pContrato ? [pContrato] : []),
       { id: "fatura", titulo: "Fatura", icone: Euro, feito: !!ft, semAvancar: true,
         resumo: [ft ? ft.n : faltamF ? `falta${faltamF === 1 ? " 1 dado" : `m ${faltamF} dados`}` : "por registar"],
         corpo: (
@@ -540,7 +565,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
         corpo: <PagamentoDoCliente {...ctx} d={d} /> },
     ];
   } else if (fase === 4) {
+    const pContrato = passoContratoPrincipal();
     passos = [
+      ...(pContrato ? [pContrato] : []), // 16/11: o contrato antes da fatura
       { id: "docs", titulo: "Fatura e recibo", icone: Euro, feito: !!d.fin.recibo, resumo: [d.fin.fatura?.n || "fatura por emitir"], corpo: simples ? <DocumentosSimples {...ctx} d={d} /> : <div className="pg estreito"><Documentos ctx={ctx} d={d} /></div> },
       // 3/11 (Rúben): o Pagamento não se preenche à mão: espera que o cliente diga no portal que pagou e o Financeiro só valida
       // (PagamentoDoCliente.tsx). Os outros grupos (dados de faturação, fatura) continuam como a empresa os definiu.
@@ -552,42 +579,23 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     ];
   } else if (fase === 5) {
     // 12/11 (Rúben: «a validação das medidas das obras e a validação do plano da obra só vêm depois do Financeiro»): na Obra, depois do
-    // pagamento, o supervisor retifica as medidas e as Operações aprovam o plano (ao mesmo tempo); com os dois, o contrato; assinado, a
-    // encomenda de cliente. Se as medidas ou o plano mudarem o valor, o acerto numa adenda (AcertoDoValor, no passo Contrato).
+    // pagamento, o supervisor retifica as medidas e as Operações aprovam o plano (ao mesmo tempo). 16/11: o contrato já vem assinado (ou é
+    // venda direta, que também retifica as medidas); se a retificação mudar o valor, volta ao Financeiro (AcertoDoValor, no passo da obra).
     const semObraAMedir = !!d.orc?.vendaDireta;
     const passoRetif: Passo = { id: "retificacao", titulo: simples ? "Medidas" : "Retificação de medidas", icone: Ruler, feito: retificacaoAceite(d), semAvancar: true,
       resumo: [d.f.retif_aceite ? `aceites a ${d.f.retif_aceite.split("-").reverse().join("/")}` : "por fazer"],
       corpo: <RetificacaoMedidas ctx={ctx} d={d} /> };
-    const prontoContrato = planoAprovadoDe(d) && retificacaoAceite(d);
-    const passoContrato: Passo | null = o && !semObraAMedir ? (simples ? { ...g(PROPOSTA[1], FileSignature, !!o.contrato), conta: undefined, feito: o.contrato === "assinado" && !acertoDoValorPendente(d), semAvancar: true,
-      resumo: [o.contrato === "assinado" ? (acertoDoValorPendente(d) ? "assinado · o valor mudou" : "assinado") : o.contrato === "enviado" ? "à espera da assinatura" : !prontoContrato ? "depois das medidas e do plano" : "pronto a gerar"],
-      corpo: (
-        <div className="space-y-10">
-          {!o.contrato && !prontoContrato && <p className="rounded-xl bg-muted/60 px-4 py-3 text-[15px] text-muted-foreground">O contrato gera-se depois de as medidas serem aceites e de as Operações aprovarem o plano.</p>}
-          {/* 12/11: com o contrato assinado e o valor mudado nas medidas ou no plano, o acerto (a adenda) vem primeiro */}
-          {o.contrato === "assinado" && (acertoDoValorPendente(d) || adendaDoAcerto(d)) && <AcertoDoValor ctx={ctx} d={d} />}
-          <Campos grupo={E(PROPOSTA[1])} {...fx} ro={!!o.contrato} />
-          {/* 11/11: gerar (ou esperar pela assinatura) aqui mesmo, antes do texto do contrato */}
-          {prontoContrato && o.contrato !== "assinado" && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-primary/30 bg-primary/[0.04] p-4">
-              <p className="text-[15px]">{o.contrato === "enviado" ? "O contrato está no portal do cliente, por assinar. Assinado, sai a encomenda de cliente." : "Tudo pronto: o contrato vai ao portal do cliente, por assinar."}</p>
-              <BotaoFase ctx={ctx} d={d} tamanho="default" />
-            </div>
-          )}
-          <Partilhar ctx={ctx} d={d} tipo="contrato" estado={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : !prontoContrato ? "depois das medidas e do plano" : "pronto a gerar"}>
-            <ContratoDoc S={S} d={d} />
-          </Partilhar>
-        </div>
-      ) } : g(PROPOSTA[1], FileSignature, !!o.contrato)) : null;
+    const passoContrato = passoContratoPrincipal();
+    const verAcerto = acertoDoValorPendente(d) || (!!adendaDoAcerto(d) && retificacaoPorPagar(d));
     passos = [
-      ...(semObraAMedir ? [] : [passoRetif]),
+      passoRetif,
       // 21/10 (Ruben): no aspeto simples, o plano e os materiais são dois passos (antes, um só "Plano e materiais" parecia só o plano)
       // 12/11: com o plano aprovado e o contrato por assinar, o passo conta como feito (a página segue para o Contrato); assinado, é a obra
       { id: "obra", titulo: simples ? "Plano da obra" : "Plano, materiais e resultado", icone: simples ? CalendarClock : Hammer,
-        feito: d.obra.plano?.estado === "concluída" || (!semObraAMedir && planoAprovadoDe(d) && o?.contrato !== "assinado"), resumo: [d.obra.plano?.estado || ""],
+        feito: d.obra.plano?.estado === "concluída" || (!semObraAMedir && planoAprovadoDe(d) && !!o?.aceite && o.contrato !== "assinado"), resumo: [d.obra.plano?.estado || ""],
         // 9/11 (Rúben): o Estúdio do plano, por cima do negócio (o calendário por técnico, os alertas e aprovar)
         // 12/11: o contrato assinado com o valor mudado: o acerto (a adenda) à vista também aqui, onde a página abre
-        corpo: simples ? <div className="space-y-6">{acertoDoValorPendente(d) && <AcertoDoValor ctx={ctx} d={d} />}{d.obra.plano && d.obra.plano.estado !== "por aprovar" ? <AbrirEstudioObra ctx={ctx} d={d} /> : <AbrirEstudioPlano ctx={ctx} d={d} />}<ObraSimples {...ctx} d={d} /></div> : <div className="pg estreito"><ObraResumo {...ctx} d={d} /></div> },
+        corpo: simples ? <div className="space-y-6">{verAcerto && <AcertoDoValor ctx={ctx} d={d} />}{d.obra.plano && d.obra.plano.estado !== "por aprovar" ? <AbrirEstudioObra ctx={ctx} d={d} /> : <AbrirEstudioPlano ctx={ctx} d={d} />}<ObraSimples {...ctx} d={d} /></div> : <div className="pg estreito"><ObraResumo {...ctx} d={d} /></div> },
       ...(passoContrato ? [passoContrato] : []),
       ...(simples ? [(() => {
         const r = d.obra.ec?.ref ? resumoEcNegocio(lerInventario(), d.obra.ec.ref) : null, c = contaMateriais(d, r);

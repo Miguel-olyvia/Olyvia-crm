@@ -1,5 +1,5 @@
 -- ============================================================
--- Teste: 20270117830000 medidas_plano_contrato_depois_do_pagamento (base RH)
+-- Teste: 20270117830000 medidas_plano_contrato_depois_do_pagamento + 20270117960000 contrato_antes_do_pagamento (base RH)
 -- ============================================================
 -- SÓ para a base RH (project-ref uetjghdkwbywbftedtth). NUNCA na de produção (tzbfgwpckrfbqcolqxtm).
 -- Tudo dentro de BEGIN … ROLLBACK; cada gravação corre num sub-bloco que acaba SEMPRE em RAISE (desfaz-se o que gravou, mesmo
@@ -19,12 +19,14 @@
 --   (b)  1052 «Teste A-Z 15/11»: 1.ª prestação paga (Obra, 5), sem encomenda; contrato v1 em rascunho; plano por aprovar.
 --   (c)  1049 com a versão aceite passada a venda direta (só nesta transação).
 -- Cobre:
---   0. a conta tem as três permissões; fn_neg_medidas_e_plano_abertos (a)=não (b)=sim (c)=sim; authenticated/anon sem EXECUTE nela
---   1. (a) gravar sem mudar passa; mudar as medidas retificadas, o estado do contrato ou as cláusulas dá NE013; pôr venda_direta no
---      JSON ao mesmo tempo não abre a porta; plano por aprovar passa; aprovado / em curso dá NE013
+--   0. a conta tem as três permissões; fn_neg_medidas_e_plano_abertos (a)=não (b)=sim (c)=não (16/11: a venda direta também espera
+--      pelo pagamento); authenticated/anon sem EXECUTE nela
+--   1. (a) gravar sem mudar passa; mudar as medidas retificadas dá NE013; o estado do contrato e as cláusulas PASSAM (16/11: o contrato
+--      vem antes do pagamento); pôr venda_direta no JSON ao mesmo tempo não abre a porta; plano por aprovar passa; aprovado / em curso dá NE013
 --   2. (a') gravar sem mudar passa (retif_ e contrato já na base); mudar as notas da retificação dá NE013
 --   3. (a'') a obra nova com o plano por aprovar passa; já aprovado dá NE013
---   4. (b) e (c): mudar as medidas, o contrato e aprovar o plano passam
+--   4. (b): mudar as medidas, o contrato e aprovar o plano passam
+--   5. (c) venda direta sem pagamento (16/11): as medidas e o plano dão NE013; o contrato passa (como em (a))
 -- ============================================================
 
 BEGIN;
@@ -163,8 +165,8 @@ BEGIN
   (11, '1 (a) negócio gravado sem mudar', 'n', 'passa', n_a, j_a),
   (12, '1 (a) medidas retificadas (retif_notas)', 'n', 'NE013 medidas', n_a,
        jsonb_set(j_a, '{respostas}', coalesce((SELECT jsonb_agg(x) FROM jsonb_array_elements(j_a->'respostas') x WHERE x->>'campo_chave' <> 'retif_notas'), '[]') || jsonb_build_array(v_retif))),
-  (13, '1 (a) contrato enviado', 'n', 'NE013 contrato', n_a, jsonb_set(j_a, '{contratos,0,estado}', '"enviado"')),
-  (14, '1 (a) contrato com cláusula', 'n', 'NE013 contrato', n_a, jsonb_set(j_a, '{contratos,0,clausulas}', v_cl)),
+  (13, '1 (a) contrato enviado', 'n', 'passa', n_a, jsonb_set(j_a, '{contratos,0,estado}', '"enviado"')),
+  (14, '1 (a) contrato com cláusula', 'n', 'passa', n_a, jsonb_set(j_a, '{contratos,0,clausulas}', v_cl)),
   (15, '1 (a) medidas + venda_direta no JSON', 'n', 'NE013 medidas', n_a,
        jsonb_set(jsonb_set(j_a, '{respostas}', (j_a->'respostas') || jsonb_build_array(v_retif)), '{orcamentos}',
                  (SELECT jsonb_agg(CASE WHEN x->>'estado' = 'aceite' THEN jsonb_set(x, '{venda_direta}', 'true') ELSE x END) FROM jsonb_array_elements(j_a->'orcamentos') x))),
@@ -193,8 +195,8 @@ BEGIN
   UPDATE quotes SET venda_direta = true
   WHERE negocio_id = n_leg AND fluxo_emylia AND adenda_id IS NULL AND deleted_at IS NULL AND estado = 'aceite';
   INSERT INTO _med_rel (caso, esperado, obtido, resultado, detalhe)
-  VALUES ('0 abertos (c) 1049 venda direta aceite', 'sim', CASE WHEN public.fn_neg_medidas_e_plano_abertos(n_leg) THEN 'sim' ELSE 'não' END,
-          CASE WHEN public.fn_neg_medidas_e_plano_abertos(n_leg) THEN 'OK' ELSE 'FALHA' END, '—');
+  VALUES ('0 abertos (c) 1049 venda direta aceite, sem pagamento', 'não', CASE WHEN public.fn_neg_medidas_e_plano_abertos(n_leg) THEN 'sim' ELSE 'não' END,
+          CASE WHEN public.fn_neg_medidas_e_plano_abertos(n_leg) THEN 'FALHA' ELSE 'OK' END, '—');
   BEGIN
     PERFORM set_config('request.jwt.claims', v_claims, true);
     PERFORM set_config('request.jwt.claim.sub', c_auth::text, true);
@@ -206,10 +208,10 @@ BEGIN
   END;
   DELETE FROM _med_casos;
   INSERT INTO _med_casos VALUES
-  (51, '5 (c) venda direta: mudar as notas da retificação', 'n', 'passa', n_leg,
+  (51, '5 (c) venda direta sem pagamento: mudar as notas da retificação', 'n', 'NE013 medidas', n_leg,
        jsonb_set(j_c, '{respostas}', coalesce((SELECT jsonb_agg(x) FROM jsonb_array_elements(j_c->'respostas') x WHERE x->>'campo_chave' <> 'retif_notas'), '[]') || jsonb_build_array(v_retif))),
   (52, '5 (c) venda direta: contrato com cláusula', 'n', 'passa', n_leg, jsonb_set(j_c, '{contratos,0,clausulas}', v_cl)),
-  (53, '5 (c) venda direta: plano aprovado', 'o', 'passa', n_leg, jsonb_set(o_c, '{emylia,plano,estado}', '"aprovado"'));
+  (53, '5 (c) venda direta sem pagamento: plano aprovado', 'o', 'NE013 plano', n_leg, jsonb_set(o_c, '{emylia,plano,estado}', '"aprovado"'));
   PERFORM pg_temp.med_correr();
 END $t$;
 

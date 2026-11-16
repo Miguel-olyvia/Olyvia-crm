@@ -9,7 +9,7 @@
 // O cartão do negócio só lê o estado da encomenda no Inventário (reservada, encomendada ao fornecedor, saída).
 import { resumoErp } from "./erpEticadata";
 import { itemCatalogo, normal } from "./catalogo";
-import { DIAS, LINHAS, PAPEIS, TECS, calcMats, acertoDoValorPendente, conflitos, diaDeFerias, eur, medidasEPlanoAbertos, mudancasDeValor, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
+import { DIAS, LINHAS, PAPEIS, TECS, calcMats, acertoDoValorPendente, conflitos, difDoAcerto, retificacaoPorPagar, diaDeFerias, eur, medidasEPlanoAbertos, mudancasDeValor, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
 import { custosDe, perfilIdDe, receitaDe } from "./v2/custosModelo";
 import { HORAS_DIA } from "./ganttOrcamento";
 import { PERFIL_DO_SK, tecnicosDoPerfil } from "./equipa/tecnicos";
@@ -611,12 +611,13 @@ export function faltaParaArrancar(d: Negocio, db?: Inventario | null, S?: Estado
     if (!retificacaoAceite(d)) F.push("retificar as medidas");
     else if (!planoAprovadoDe(d)) { /* «aprovar o plano» entra no fim, como antes */ }
     else if (!contratoAssinado(d)) F.push("assinar o contrato");
-    else F.push(ecNoServidor(S) ? FALTA_EC_AUTOMATICA : "emitir a encomenda de cliente");
+    // 16/11: a retificação por faturar ou por pagar segura a encomenda (o acerto e as adendas entram a seguir)
+    else if (!acertoDoValorPendente(d) && !retificacaoPorPagar(d)) F.push(ecNoServidor(S) ? FALTA_EC_AUTOMATICA : "emitir a encomenda de cliente");
   }
   else if (usarProntidao(d.obra.ec)) F.push(...faltaMateriaisReal(prontidaoDe(d.obra.ec.contrato)));
   else if (d.obra.ec.ref) F.push(...faltaMateriais(resumoEcNegocio(db ?? lerInventario(), d.obra.ec.ref)));
   // 12/11: o valor que as medidas ou o plano mudaram acerta-se antes de arrancar (a adenda, ou seguir sem ela)
-  if (acertoDoValorPendente(d)) F.push("decidir o acerto do valor (a adenda)");
+  if (acertoDoValorPendente(d)) F.push("enviar a retificação ao Financeiro (ou a nota de crédito)");
   // 21/10 (decisão B): as adendas assinadas antes do arranque também: o pagamento de cada uma e a encomenda dos materiais dela (como as
   // outras de ajuste, as encomendas a fornecedor dela não seguram o arranque: as tarefas esperam no plano). Com a obra a andar, não bloqueiam nada.
   // 21/10 (decisão C): basta a 1.ª parcela da adenda paga (e a encomenda dela emitida); as outras parcelas não seguram o arranque
@@ -712,7 +713,8 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
   // 9/11: o supervisor retifica as medidas no local (11/11: ao mesmo tempo que as Operações aprovam o plano). 12/11 (Rúben: «só vêm
   // depois do Financeiro»): os dois esperam pelo pagamento validado
   const abertos = medidasEPlanoAbertos(d);
-  if (!d.orc?.vendaDireta) L.push(retificacaoAceite(d)
+  // 16/11: a venda direta também retifica as medidas (depois do pagamento, como o caminho com contrato)
+  L.push(retificacaoAceite(d)
     ? { id: "ret", trilho: "plano", estado: "feito", who: "operacoes", t: "Medidas retificadas e aceites", sub: d.f.retif_aceite ? `A ${d.f.retif_aceite.split("-").reverse().join("/")}${d.f.retif_por ? `, por ${d.f.retif_por}` : ""}.` : "" }
     : !abertos
     ? { id: "ret", trilho: "plano", estado: "espera", who: "operacoes", t: "Retificar as medidas", sub: SO_DEPOIS_DO_PAGAMENTO }
@@ -722,28 +724,28 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
     : p.estado === "por aprovar"
     ? { id: "pl-ok", trilho: "plano", estado: "agora", who: "operacoes", t: nc ? "Resolver o conflito e aprovar o plano" : "Aprovar o plano", sub: nc ? `${nc} ${nc === 1 ? "técnico de férias" : "técnicos de férias"} numa tarefa.` : "Os técnicos recebem as tarefas na app.", act: "aprovarPlano", btn: "Aprovar o plano" }
     : { id: "pl-ok", trilho: "plano", estado: "feito", who: "operacoes", t: "Plano aprovado", sub: "Técnicos avisados." });
-  // 9/11: o contrato assina-se com o plano aprovado (as medidas e as datas certas), antes da encomenda (12/11: e depois do pagamento)
+  // 16/11 (o fluxo em vigor): o contrato gera-se com a proposta aceite e assina-se ANTES do pagamento (a venda direta não tem)
   if (!d.orc?.vendaDireta) {
     const c = d.orc?.contrato;
     L.push(c === "assinado"
       ? { id: "ct", trilho: "plano", estado: "feito", who: "comercial", t: "Contrato assinado", sub: "" }
       : c === "enviado"
       ? { id: "ct", trilho: "plano", estado: "espera", who: null, t: "À espera da assinatura do contrato", sub: "No portal do cliente." }
-      : !abertos
-      ? { id: "ct", trilho: "plano", estado: "espera", who: "comercial", t: "Contrato", sub: "Depois do pagamento, das medidas aceites e do plano aprovado." }
-      : !planoAprovadoDe(d) || !retificacaoAceite(d)
-      ? { id: "ct", trilho: "plano", estado: "espera", who: "comercial", t: "Contrato", sub: !retificacaoAceite(d) && !planoAprovadoDe(d) ? "Com as medidas aceites e o plano aprovado." : !retificacaoAceite(d) ? "Falta o supervisor aceitar as medidas." : "Falta as Operações aprovarem o plano." }
       // 15/10: o cliente pediu alterações ao contrato no portal: o Jurídico revê; validado, o comercial envia a versão seguinte
       : d.orc?.contratoPedido
       ? { id: "ct", trilho: "plano", estado: "agora", who: "juridico", t: "O cliente pediu alterações ao contrato", sub: `Cláusulas: ${d.orc.contratoPedido.clausulas.map((x) => x.c.toLowerCase()).join(", ")}. O Jurídico revê e valida; depois o comercial envia a versão ${(d.orc.contratoVersoes?.length ?? 0) + 1}.`, act: "abrirRevisao", btn: "Rever o contrato" }
       : d.orc?.contratoRevisto
       ? { id: "ct", trilho: "plano", estado: "agora", who: "comercial", t: `Enviar o contrato (versão ${(d.orc.contratoVersoes?.length ?? 0) + 1})`, sub: `Revisto e validado pelo Jurídico (${d.orc.contratoRevisto.por}, ${d.orc.contratoRevisto.q}). Volta ao portal do cliente, por assinar.`, act: "enviarContrato", btn: "Enviar o contrato" }
-      : { id: "ct", trilho: "plano", estado: "agora", who: "comercial", t: "Gerar e enviar o contrato", sub: "Com as medidas e o plano: vai ao portal do cliente, por assinar.", act: "enviarContrato", btn: "Gerar o contrato" });
-    // 12/11 (Rúben: se as medidas ou o plano mudarem o valor, uma adenda): com o contrato assinado, o comercial prepara a adenda do acerto
-    const ac = d.f.acerto_valor;
-    if (ac) L.push({ id: "ac", trilho: "plano", estado: "feito", who: "comercial", t: ac === "sem adenda" ? "Acerto do valor: sem adenda" : `Acerto do valor: adenda ${ac}`, sub: "" });
-    else if (acertoDoValorPendente(d)) L.push({ id: "ac", trilho: "plano", estado: "agora", who: "comercial", t: "O valor mudou: preparar a adenda", sub: `${mudancasDeValor(d).join("; ")}.`, act: "adendaDoValor", btn: "Preparar a adenda" });
+      : { id: "ct", trilho: "plano", estado: "agora", who: "comercial", t: "Gerar e enviar o contrato", sub: "Com a proposta aceite: vai ao portal do cliente, por assinar. Assinado, segue o pagamento.", act: "enviarContrato", btn: "Gerar o contrato" });
   }
+  // 16/11: a retificação que muda o valor volta ao Financeiro: se sobe, o comercial manda-a (a adenda do acerto, sem o cliente assinar) e
+  // o Financeiro fatura-a e valida o pagamento; se baixa, o Financeiro regista a nota de crédito. A encomenda de cliente espera pela paga.
+  const ac = d.f.acerto_valor;
+  if (ac) L.push({ id: "ac", trilho: "plano", estado: "feito", who: ac === "nota de crédito" ? "financeiro" : "comercial",
+    t: ac === "sem adenda" ? "Acerto do valor: sem acerto" : ac === "nota de crédito" ? `Nota de crédito ${d.f.nota_credito ?? ""}`.trim() : `Retificação ${ac} no Financeiro`, sub: "" });
+  else if (acertoDoValorPendente(d)) L.push(difDoAcerto(d, S) > 0.004
+    ? { id: "ac", trilho: "plano", estado: "agora", who: "comercial", t: "O valor mudou: enviar a retificação ao Financeiro", sub: `${mudancasDeValor(d).join("; ")}.`, act: "adendaDoValor", btn: "Enviar ao Financeiro" }
+    : { id: "ac", trilho: "plano", estado: "agora", who: "financeiro", t: "O valor baixou: registar a nota de crédito", sub: `${mudancasDeValor(d).join("; ")}. Emita-a no Eticadata e registe o número no negócio.` });
 
   // o pagamento
   L.push(d.fin.fatura

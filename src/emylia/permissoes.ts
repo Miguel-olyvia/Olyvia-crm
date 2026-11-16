@@ -98,7 +98,7 @@ export const podeNeg = (p: Papel, x: PermNeg): boolean => {
  *  uma delas, o botão fica desligado e diz qual falta, em vez de o clique ser recusado depois. */
 const PERM_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
   contactar: ["contacto.registar"], marcarVisita: ["visita.gerir"], fecharVisita: ["visita.preencher", "orcamento.editar"],
-  pedidoCliente: ["orcamento.editar"], adendaDoValor: ["orcamento.editar"], semAdendaDoValor: ["orcamento.editar"], enviar: ["proposta.enviar"], enviarAdenda: ["proposta.enviar"],
+  pedidoCliente: ["orcamento.editar"], adendaDoValor: ["orcamento.editar", "proposta.decidir"], registarNotaCredito: ["finance.invoice"], semAdendaDoValor: ["orcamento.editar"], enviar: ["proposta.enviar"], enviarAdenda: ["proposta.enviar"],
   enviarContrato: ["contrato.editar"], enviarContratoAdenda: ["contrato.editar"], abrirRevisao: ["contrato.editar"], abrirRevisaoAdenda: ["contrato.editar"],
   aprovarAdenda: ["margin.approve"], validar: ["finance.validate_payment"], registarFaturaErp: ["finance.invoice"],
   // 13/11 (20270117200000): faturar as adendas e validar os pagamentos delas são do Financeiro (neg_registar_fatura, neg_validar_pagamento)
