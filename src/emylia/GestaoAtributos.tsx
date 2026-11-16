@@ -2,12 +2,13 @@
 // criar, renomear, mudar a cor, ativar/desativar e ordenar opções. Só com products.edit (sem ela, leitura). Usa as peças do Catálogo
 // (pecasForm, Amostra). Quem decide é a base (cat_* de 20270117600000): aqui só se mostra o que ela devolve e se relê depois de cada gravação.
 // A Medida é fixa (2D/3D + números, escreve-se em cada produto): só informação. Os atributos não se desativam.
-import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronUp, Loader2, Pencil, Plus } from "lucide-react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp, Loader2, Pencil, Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CAMPO, NOTA, Campo, Chips } from "./pecasForm";
 import { Amostra } from "./AtributosProduto";
+import { semAcentos } from "./ComboPesquisa";
 import { normalizarHex } from "./atributosTexto";
 import { AINDA_NAO, criarOpcaoAtributo, type FichaProdutoReal } from "./fichaProdutoDados";
 import {
@@ -21,6 +22,9 @@ const ENTRA = "motion-safe:animate-in motion-safe:fade-in-0";
 const SEM_PERMISSAO = "Não tem permissão para ver os atributos.";
 
 const produtos = (n: number) => `${n} produto${n === 1 ? "" : "s"}`;
+const opcoesDe = (n: number) => `${n} ${n === 1 ? "opção" : "opções"}`;
+/** Subir/Descer sem `disabled` quando a razão é a pesquisa: fica no Tab e a razão lê-se (aria-describedby). */
+const ARIA_DESLIGADO = "aria-disabled:cursor-not-allowed aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground";
 
 type Aberto =
   | { t: "novoAtributo" }
@@ -117,41 +121,65 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
   const [erro, setErro] = useState<Erro | null>(null);
   const [pend, setPend] = useState<Pendente | null>(null);
   const [foco, setFoco] = useState<string | null>(null);
-  const temLista = useRef(false), ocupado = useRef(false), orgAtual = useRef(org);
+  /** Os painéis abertos (ids dos atributos): tudo fechado por omissão; sobrevive a gravar e reler. */
+  const [abertos, setAbertos] = useState<ReadonlySet<string>>(new Set());
+  const temLista = useRef(false), ocupado = useRef(false), orgAtual = useRef(org), listaAtual = useRef<AtributoGestao[] | null>(null);
   orgAtual.current = org;
+  /** Fechar um painel fecha também o formulário de opção (nova ou editar) e a confirmação de opção desse atributo, sem repor foco. */
+  const soltar = (a: AtributoGestao) => {
+    const ids = new Set(a.opcoes.map((o) => o.id));
+    setAberto((x) => (x && ((x.t === "novaOpcao" && x.id === a.id) || (x.t === "editarOpcao" && ids.has(x.id))) ? null : x));
+    setPend((p) => (p && p.t === "opcao" && ids.has(p.opcao.id) ? null : p));
+  };
+  const alternar = (a: AtributoGestao) => {
+    if (abertos.has(a.id)) soltar(a);
+    setAbertos((s) => { const n = new Set(s); if (n.has(a.id)) n.delete(a.id); else n.add(a.id); return n; });
+  };
+  const fecharTodos = (l: AtributoGestao[]) => { l.forEach(soltar); setAbertos(new Set()); };
   const msg = (onde: string) => (erro?.onde === onde ? erro.msg : null);
 
-  const reler = useCallback(async () => {
+  /** Devolve a lista lida, ou null se a leitura falhou ou a organização mudou entretanto (quem chama não deve agir sobre ela). */
+  const reler = useCallback(async (): Promise<AtributoGestao[] | null> => {
     const deste = org;
     const r = await lerAtributosGestao(org);
-    if (orgAtual.current !== deste) return; // a organização mudou entretanto: esta resposta já não vale
-    if (r.ok) { temLista.current = true; setLista(r.v); setErroLeitura(null); setSemPermissao(false); setDesatualizado(false); return; }
-    if (temLista.current) { setDesatualizado(true); return; }
-    if (r.codigo === "CT001") { setSemPermissao(true); setErroLeitura(SEM_PERMISSAO); return; }
+    if (orgAtual.current !== deste) return null; // a organização mudou entretanto: esta resposta já não vale
+    if (r.ok) { temLista.current = true; listaAtual.current = r.v; setLista(r.v); setErroLeitura(null); setSemPermissao(false); setDesatualizado(false); return r.v; }
+    if (temLista.current) { setDesatualizado(true); return null; }
+    if (r.codigo === "CT001") { setSemPermissao(true); setErroLeitura(SEM_PERMISSAO); return null; }
     setErroLeitura(r.erro);
+    return null;
   }, [org]);
   // ao mudar de organização, nada da anterior fica no ecrã
   useEffect(() => {
-    temLista.current = false; ocupado.current = false;
-    setLista(null); setErroLeitura(null); setSemPermissao(false); setDesatualizado(false); setAGravar(false); setAberto(null); setErro(null); setPend(null);
+    temLista.current = false; ocupado.current = false; listaAtual.current = null;
+    setLista(null); setErroLeitura(null); setSemPermissao(false); setDesatualizado(false); setAGravar(false); setAberto(null); setErro(null); setPend(null); setAbertos(new Set());
     void reler();
   }, [reler]);
   // depois de fechar um formulário, gravar ou mexer na ordem, o foco volta a um botão que exista (o primeiro da lista que esteja ativo)
   useEffect(() => {
     if (!foco) return;
-    const el = foco.split("|").map((i) => document.getElementById(i) as HTMLButtonElement | null).find((x) => x && !x.disabled);
+    // se o alvo já não existe (painel fechado, opção desmontada), o foco vai para o botão do painel do atributo a que o pedido pertence
+    const doAtributo = (i: string) => {
+      const [p, resto] = [i.slice(0, i.indexOf("-")), i.slice(i.indexOf("-") + 1)];
+      if (["nova", "gc", "gn", "ren", "tog"].includes(p)) return resto;
+      return (listaAtual.current ?? []).find((a) => a.opcoes.some((o) => o.id === resto))?.id;
+    };
+    const ids = foco.split("|");
+    const atr = ids.map(doAtributo).find(Boolean);
+    const el = [...ids, ...(atr ? [`tog-${atr}`] : [])].map((i) => document.getElementById(i) as HTMLButtonElement | null).find((x) => x && !x.disabled);
     el?.focus();
     setFoco(null);
   }, [foco, lista, aberto, pend]);
 
   /** Grava, relê SEMPRE (também se falhou: o ecrã não pode ficar a mentir) e avisa o Catálogo, também se falhou (tolerante). Devolve true se gravou. */
-  const correr = async (op: () => Promise<ResG<unknown>>, aviso: string, onde: string): Promise<boolean> => {
+  const correr = async (op: () => Promise<ResG<unknown>>, aviso: string, onde: string, aoLer?: (lida: AtributoGestao[] | null) => void): Promise<boolean> => {
     if (ocupado.current) return false;
     ocupado.current = true;
     setAGravar(true); setErro(null);
     try {
       const r = await op();
-      await reler();
+      const lida = await reler();
+      if (r.ok) aoLer?.(lida);
       try { await real.recarregar(); } catch { /* o Catálogo relê na próxima vez */ }
       if (!r.ok) { setErro({ onde, msg: r.erro }); return false; }
       anunciar(aviso);
@@ -161,8 +189,14 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
   const abrir = (a: Aberto) => { setAberto(a); setErro(null); setPend(null); };
   const fechar = (focar?: string) => { setAberto(null); setErro(null); setPend(null); if (focar) setFoco(focar); };
 
-  const criarAtributo = (nome: string, tipo: "lista" | "medida", temHex: boolean) =>
-    void correr(() => guardarAtributo(org, { atributo: null, nome, tipo, temHex: tipo === "lista" && temHex }), `Atributo «${nome}» criado.`, "novo").then((ok) => { if (ok) fechar("novo-atributo"); });
+  const criarAtributo = (nome: string, tipo: "lista" | "medida", temHex: boolean) => {
+    // os ids de ANTES de gravar; o que a releitura trouxe a mais E tem este nome foi criado por esta ação (não por outro utilizador), e abre-se
+    const antes = new Set((listaAtual.current ?? []).map((x) => x.id)), nomeNovo = semAcentos(nome.trim());
+    void correr(() => guardarAtributo(org, { atributo: null, nome, tipo, temHex: tipo === "lista" && temHex }), `Atributo «${nome}» criado.`, "novo", (lida) => {
+      const novos = (lida ?? []).filter((x) => !antes.has(x.id) && semAcentos(x.nome.trim()) === nomeNovo).map((x) => x.id);
+      if (novos.length) setAbertos((s) => new Set([...s, ...novos]));
+    }).then((ok) => { if (ok) fechar("novo-atributo"); });
+  };
   const gravarNomeAtributo = (a: AtributoGestao, nome: string) =>
     correr(() => guardarAtributo(org, { atributo: a.id, nome, tipo: null, temHex: null }), `Atributo «${nome}» guardado.`, `ren:${a.id}`).then((ok) => { if (ok) fechar(`ren-${a.id}`); });
   /** Renomear um atributo usado por produtos (ou de uso desconhecido) pede confirmação; sem produtos, grava logo. */
@@ -200,6 +234,7 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
     void correr(() => reordenarOpcoes(org, a.id, ids), `«${a.opcoes[i].nome}» passou para a posição ${i + d + 1} de ${a.opcoes.length}.`, `atr:${a.id}`).then(() => setFoco(d === 1 ? `desc-${id}|sub-${id}` : `sub-${id}|desc-${id}`));
   };
 
+  const todosAbertos = !!lista && lista.length > 0 && lista.every((x) => abertos.has(x.id));
   return (
     <div className="grid gap-5">
       <div>
@@ -244,8 +279,15 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
             </div>
           )}
           {!lista.length && <p className={NOTA}>Ainda não há atributos.</p>}
+          {lista.length > 1 && (
+            <div>
+              <button id="abrir-todos" type="button" onClick={() => (todosAbertos ? fecharTodos(lista) : setAbertos(new Set(lista.map((x) => x.id))))} className={BOTAO_TEXTO}>
+                {todosAbertos ? "Fechar todos" : "Abrir todos"}
+              </button>
+            </div>
+          )}
           {lista.map((a) => (
-            <Atributo key={a.id} a={a} podeEditar={podeEditar} aGravar={aGravar} aberto={aberto} msg={msg} pend={pend}
+            <Atributo key={a.id} a={a} podeEditar={podeEditar} aberta={abertos.has(a.id)} onAlternar={() => alternar(a)} aGravar={aGravar} aberto={aberto} msg={msg} pend={pend}
               abrir={abrir} fechar={fechar} onRenomear={pedirRenomear} onNovaOpcao={criarOpcaoNova} onPedirGravar={pedirGravarOpcao}
               onConfirmar={confirmar} onVoltarConfirmar={voltarDaConfirmacao} onAtivar={ativar} onMover={mover} />
           ))}
@@ -285,29 +327,59 @@ function NovoAtributo({ aGravar, erro, onCriar, onCancelar }: { aGravar: boolean
 
 /* ------------------------------------------------------------------ um atributo e as suas opções */
 interface AtributoProps {
-  a: AtributoGestao; podeEditar: boolean; aGravar: boolean; aberto: Aberto | null; msg: (onde: string) => string | null; pend: Pendente | null;
+  a: AtributoGestao; podeEditar: boolean; aberta: boolean; onAlternar: () => void; aGravar: boolean; aberto: Aberto | null; msg: (onde: string) => string | null; pend: Pendente | null;
   abrir: (a: Aberto) => void; fechar: (focar?: string) => void;
   onRenomear: (a: AtributoGestao, nome: string) => void; onNovaOpcao: (a: AtributoGestao, nome: string, hex: string | null) => void;
   onPedirGravar: (o: OpcaoGestao, nome: string, hex: string | null) => void; onConfirmar: () => void; onVoltarConfirmar: () => void;
   onAtivar: (a: AtributoGestao, o: OpcaoGestao, ativo: boolean) => void; onMover: (a: AtributoGestao, i: number, d: -1 | 1) => void;
 }
-function Atributo({ a, podeEditar, aGravar, aberto, msg, pend, abrir, fechar, onRenomear, onNovaOpcao, onPedirGravar, onConfirmar, onVoltarConfirmar, onAtivar, onMover }: AtributoProps) {
-  const tit = useId();
+function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pend, abrir, fechar, onRenomear, onNovaOpcao, onPedirGravar, onConfirmar, onVoltarConfirmar, onAtivar, onMover }: AtributoProps) {
+  const nomeId = useId(), painel = useId(), razaoId = useId();
   const [nome, setNome] = useState(a.nome);
+  const [q, setQ] = useState("");
   const aRenomear = aberto?.t === "renomear" && aberto.id === a.id;
   const aCriar = aberto?.t === "novaOpcao" && aberto.id === a.id;
   const pendAtributo = pend?.t === "atributo" && pend.atributo.id === a.id ? pend : null;
   const erroAtributo = msg(`atr:${a.id}`);
+  const pesquisa = q.trim() !== "";
+  // cada opção leva o índice REAL (a ordem é a de todas as opções, também com a lista filtrada)
+  const idComForm = aberto?.t === "editarOpcao" ? aberto.id : pend?.t === "opcao" ? pend.opcao.id : null;
+  const { vistas, coincidem } = useMemo(() => {
+    const t = semAcentos(q.trim());
+    const com = a.opcoes.map((o, i) => ({ o, i }));
+    if (!t) return { vistas: com, coincidem: com.length };
+    const certas = com.filter(({ o }) => semAcentos(o.nome).includes(t) || (a.temHex && (o.hex ?? "").toLowerCase().includes(t)));
+    // a opção com formulário ou confirmação abertos não desaparece com a pesquisa (perderia o que se escreveu)
+    return { vistas: com.filter((x) => certas.includes(x) || x.o.id === idComForm), coincidem: certas.length };
+  }, [a.opcoes, a.temHex, q, idComForm]);
+  // o anúncio da contagem espera que se pare de escrever; a lista filtra logo
+  const textoEstado = !pesquisa ? "" : coincidem === 0 ? "Nenhuma opção encontrada" : `${coincidem} de ${a.opcoes.length} ${a.opcoes.length === 1 ? "opção" : "opções"}`;
+  const [anuncio, setAnuncio] = useState("");
+  useEffect(() => {
+    if (!textoEstado) { setAnuncio(""); return; }
+    const t = setTimeout(() => setAnuncio(textoEstado), 300);
+    return () => clearTimeout(t);
+  }, [textoEstado]);
+  const resumo = a.tipo === "medida" ? null : opcoesDe(a.opcoes.length);
   return (
-    <section aria-labelledby={tit} className={CARTAO}>
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 id={tit} className="text-lg font-semibold">{a.nome}</h2>
-            <span className="rounded-md bg-muted px-2 py-0.5 text-sm text-muted-foreground">{a.tipo === "medida" ? "Medida" : a.temHex ? "Lista com cor" : "Lista"}</span>
-          </div>
-          {a.usados != null && <p className={NOTA}>{`Usado em ${produtos(a.usados)}`}</p>}
-        </div>
+    <section aria-labelledby={nomeId} className={CARTAO}>
+      <div className="flex items-start gap-1">
+        <h2 className="min-w-0 flex-1 text-lg font-semibold">
+          <button id={`tog-${a.id}`} type="button" aria-expanded={aberta} aria-controls={painel} onClick={onAlternar}
+            className="flex min-h-11 w-full items-center gap-2 rounded-lg px-1 text-left outline-none transition-colors hover:bg-muted/60 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+            <ChevronRight className={cn("h-5 w-5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", aberta && "rotate-90")} aria-hidden="true" />
+            <span className="grid min-w-0 gap-0.5">
+              <span className="flex flex-wrap items-center gap-2">
+                <span id={nomeId} className="break-words">{a.nome}</span>
+                <span className="rounded-md bg-muted px-2 py-0.5 text-sm font-normal text-foreground/75">{a.tipo === "medida" ? "Medida" : a.temHex ? "Lista com cor" : "Lista"}</span>
+              </span>
+              <span className="flex flex-wrap gap-x-3 text-[15px] font-normal text-foreground/75">
+                {a.usados != null && <span>{`Usado em ${produtos(a.usados)}`}</span>}
+                {resumo && <span>{resumo}</span>}
+              </span>
+            </span>
+          </button>
+        </h2>
         {podeEditar && (
           <button id={`ren-${a.id}`} type="button" aria-label={`Renomear o atributo ${a.nome}`} aria-expanded={aRenomear} onClick={() => { setNome(a.nome); abrir({ t: "renomear", id: a.id }); }} className={BOTAO_ICONE}>
             <Pencil className="h-4 w-4" aria-hidden="true" />
@@ -328,64 +400,82 @@ function Atributo({ a, podeEditar, aGravar, aberto, msg, pend, abrir, fechar, on
         </div>
       )}
 
-      {a.tipo === "medida" ? (
-        <p className={cn(NOTA, "mt-3")}>Medida fixa: 2D ou 3D, com largura, comprimento (e espessura em 3D) em cm ou mm. Escreve-se em cada produto; não tem lista de opções nem cor.</p>
-      ) : (
-        <>
-          {a.opcoes.length > 0 ? (
-            <ul className="mt-3 grid gap-2">
-              {a.opcoes.map((o, i) => {
-                const pendOpcao = pend?.t === "opcao" && pend.opcao.id === o.id ? pend : null;
-                return (
-                  <li key={o.id} className="grid gap-2 rounded-xl bg-muted/50 p-2 pl-3">
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                      {a.temHex && <Amostra hex={o.hex} />}
-                      <span className={cn("min-w-0 break-words text-[15px] font-medium", !o.ativo && "text-muted-foreground")}>{o.nome}{!o.ativo && " (desativada)"}</span>
-                      {a.temHex && <span className="text-sm text-muted-foreground tabular-nums">{o.hex ?? "sem hex"}</span>}
-                      {o.usados != null && <span className="text-sm text-muted-foreground">{produtos(o.usados)}</span>}
-                      {podeEditar && (
-                        <span className="ml-auto flex flex-wrap items-center gap-1">
-                          <button id={`sub-${o.id}`} type="button" aria-label={`Subir ${o.nome}, posição ${i + 1} de ${a.opcoes.length}`} disabled={aGravar || i === 0} onClick={() => onMover(a, i, -1)} className={BOTAO_ICONE}>
-                            <ChevronUp className="h-5 w-5" aria-hidden="true" />
-                          </button>
-                          <button id={`desc-${o.id}`} type="button" aria-label={`Descer ${o.nome}, posição ${i + 1} de ${a.opcoes.length}`} disabled={aGravar || i === a.opcoes.length - 1} onClick={() => onMover(a, i, 1)} className={BOTAO_ICONE}>
-                            <ChevronDown className="h-5 w-5" aria-hidden="true" />
-                          </button>
-                          <button id={`ed-${o.id}`} type="button" aria-label={`Editar ${o.nome}`} aria-expanded={aberto?.t === "editarOpcao" && aberto.id === o.id} disabled={aGravar} onClick={() => abrir({ t: "editarOpcao", id: o.id })} className={BOTAO_ICONE}>
-                            <Pencil className="h-4 w-4" aria-hidden="true" />
-                          </button>
-                          <button id={`act-${o.id}`} type="button" aria-label={`${o.ativo ? "Desativar" : "Reativar"} ${o.nome}`} disabled={aGravar} onClick={() => onAtivar(a, o, !o.ativo)} className={cn(BOTAO_TEXTO, "border-transparent")}>
-                            {o.ativo ? "Desativar" : "Reativar"}
-                          </button>
-                        </span>
-                      )}
-                    </div>
-                    {podeEditar && aberto?.t === "editarOpcao" && aberto.id === o.id && (
-                      <>
-                        <OpcaoForm temHex={a.temHex} inicial={{ nome: o.nome, hex: o.hex }} rotulo="Guardar opção" criar={false} bloqueado={aGravar || !!pendOpcao}
-                          erro={pendOpcao ? null : msg(`ed:${o.id}`)} idGuardar={`gu-${o.id}`}
-                          onEnviar={(n, h) => onPedirGravar(o, n, h)} onCancelar={() => fechar(`ed-${o.id}`)} />
-                        {pendOpcao && <Confirmar p={pendOpcao} aGravar={aGravar} erro={msg(`ed:${o.id}`)} onConfirmar={onConfirmar} onVoltar={onVoltarConfirmar} />}
-                      </>
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          ) : <p className={cn(NOTA, "mt-3")}>Ainda não tem opções.</p>}
-          {podeEditar && (
-            <div className="mt-3 grid gap-3">
-              <div>
-                <button id={`nova-${a.id}`} type="button" aria-label={`Nova opção em ${a.nome}`} aria-expanded={aCriar} onClick={() => abrir({ t: "novaOpcao", id: a.id })} className={cn(BOTAO_TEXTO, "border-dashed")}>
-                  <Plus className="h-4 w-4" aria-hidden="true" />Nova opção…
-                </button>
+      <div id={painel}>
+        {aberta && (a.tipo === "medida" ? (
+          <p className={cn(NOTA, "mt-3")}>Medida fixa: 2D ou 3D, com largura, comprimento (e espessura em 3D) em cm ou mm. Escreve-se em cada produto; não tem lista de opções nem cor.</p>
+        ) : (
+          <>
+            {a.opcoes.length > 0 ? (
+              <div className="mt-3 grid gap-3">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                  <input type="search" aria-label={`Pesquisar opção em ${a.nome}`} placeholder="Pesquisar opção" value={q} onChange={(e) => setQ(e.target.value)} className={cn(CAMPO, "pl-9")} />
+                </div>
+                {/* sempre montada: quem pesquisa ouve quantas opções ficam */}
+                <p role="status" className={NOTA}>{anuncio}</p>
+                {pesquisa && podeEditar && vistas.length > 0 && <p id={razaoId} className={NOTA}>Limpe a pesquisa para reordenar.</p>}
+                {vistas.length > 0 && <div role="region" aria-label={`Opções de ${a.nome}`} tabIndex={0}
+                  className="max-h-72 overflow-y-auto overscroll-contain rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+                  <ul className="grid gap-2">
+                    {vistas.map(({ o, i }) => {
+                      const pendOpcao = pend?.t === "opcao" && pend.opcao.id === o.id ? pend : null;
+                      const total = a.opcoes.length;
+                      const semMover = pesquisa; // a razão é a pesquisa; os extremos continuam a usar `disabled`
+                      return (
+                        <li key={o.id} className="grid gap-2 rounded-xl bg-muted/50 p-2 pl-3">
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                            {a.temHex && <Amostra hex={o.hex} />}
+                            <span className={cn("min-w-0 break-words text-[15px] font-medium", !o.ativo && "text-foreground/75")}>{o.nome}{!o.ativo && " (desativada)"}</span>
+                            {a.temHex && <span className="text-sm text-foreground/75 tabular-nums">{o.hex ?? "sem hex"}</span>}
+                            {o.usados != null && <span className="text-sm text-foreground/75">{produtos(o.usados)}</span>}
+                            {podeEditar && (
+                              <span className="ml-auto flex flex-wrap items-center gap-1">
+                                <button id={`sub-${o.id}`} type="button" aria-label={`Subir ${o.nome}, posição ${i + 1} de ${total}`} disabled={!semMover && (aGravar || i === 0)}
+                                  aria-disabled={semMover || undefined} aria-describedby={semMover ? razaoId : undefined} onClick={() => { if (!semMover) onMover(a, i, -1); }} className={cn(BOTAO_ICONE, ARIA_DESLIGADO)}>
+                                  <ChevronUp className="h-5 w-5" aria-hidden="true" />
+                                </button>
+                                <button id={`desc-${o.id}`} type="button" aria-label={`Descer ${o.nome}, posição ${i + 1} de ${total}`} disabled={!semMover && (aGravar || i === total - 1)}
+                                  aria-disabled={semMover || undefined} aria-describedby={semMover ? razaoId : undefined} onClick={() => { if (!semMover) onMover(a, i, 1); }} className={cn(BOTAO_ICONE, ARIA_DESLIGADO)}>
+                                  <ChevronDown className="h-5 w-5" aria-hidden="true" />
+                                </button>
+                                <button id={`ed-${o.id}`} type="button" aria-label={`Editar ${o.nome}`} aria-expanded={aberto?.t === "editarOpcao" && aberto.id === o.id} disabled={aGravar} onClick={() => abrir({ t: "editarOpcao", id: o.id })} className={BOTAO_ICONE}>
+                                  <Pencil className="h-4 w-4" aria-hidden="true" />
+                                </button>
+                                <button id={`act-${o.id}`} type="button" aria-label={`${o.ativo ? "Desativar" : "Reativar"} ${o.nome}`} disabled={aGravar} onClick={() => onAtivar(a, o, !o.ativo)} className={cn(BOTAO_TEXTO, "border-transparent")}>
+                                  {o.ativo ? "Desativar" : "Reativar"}
+                                </button>
+                              </span>
+                            )}
+                          </div>
+                          {podeEditar && aberto?.t === "editarOpcao" && aberto.id === o.id && (
+                            <>
+                              <OpcaoForm temHex={a.temHex} inicial={{ nome: o.nome, hex: o.hex }} rotulo="Guardar opção" criar={false} bloqueado={aGravar || !!pendOpcao}
+                                erro={pendOpcao ? null : msg(`ed:${o.id}`)} idGuardar={`gu-${o.id}`}
+                                onEnviar={(n, h) => onPedirGravar(o, n, h)} onCancelar={() => fechar(`ed-${o.id}`)} />
+                              {pendOpcao && <Confirmar p={pendOpcao} aGravar={aGravar} erro={msg(`ed:${o.id}`)} onConfirmar={onConfirmar} onVoltar={onVoltarConfirmar} />}
+                            </>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>}
               </div>
-              {aCriar && <OpcaoForm temHex={a.temHex} inicial={{ nome: "", hex: null }} rotulo="Criar opção" criar bloqueado={aGravar} erro={msg(`nova:${a.id}`)} idGuardar={`gc-${a.id}`}
-                onEnviar={(n, h) => onNovaOpcao(a, n, h)} onCancelar={() => fechar(`nova-${a.id}`)} />}
-            </div>
-          )}
-        </>
-      )}
+            ) : <p className={cn(NOTA, "mt-3")}>Ainda não tem opções.</p>}
+            {podeEditar && (
+              <div className="mt-3 grid gap-3">
+                <div>
+                  <button id={`nova-${a.id}`} type="button" aria-label={`Nova opção em ${a.nome}`} aria-expanded={aCriar} onClick={() => abrir({ t: "novaOpcao", id: a.id })} className={cn(BOTAO_TEXTO, "border-dashed")}>
+                    <Plus className="h-4 w-4" aria-hidden="true" />Nova opção…
+                  </button>
+                </div>
+                {aCriar && <OpcaoForm temHex={a.temHex} inicial={{ nome: "", hex: null }} rotulo="Criar opção" criar bloqueado={aGravar} erro={msg(`nova:${a.id}`)} idGuardar={`gc-${a.id}`}
+                  onEnviar={(n, h) => onNovaOpcao(a, n, h)} onCancelar={() => fechar(`nova-${a.id}`)} />}
+              </div>
+            )}
+          </>
+        ))}
+      </div>
     </section>
   );
 }

@@ -59,9 +59,13 @@ beforeEach(() => {
 });
 afterEach(() => { cleanup(); reporCustos(); reporCatalogo(); window.history.replaceState(null, "", "/"); });
 
-const abrir = async (r: FichaProdutoReal = REAL()) => {
+/** Os painéis começam fechados: por omissão estes testes abrem todos, e `{ fechados: true }` deixa-os como nascem. */
+const cabecalho = (n: string) => within(sec(n)).getAllByRole("button").find((b) => b.hasAttribute("aria-controls"))!;
+const abrirTodos = () => { for (const b of screen.getAllByRole("button")) if (b.hasAttribute("aria-controls") && b.getAttribute("aria-expanded") === "false") fireEvent.click(b); };
+const abrir = async (r: FichaProdutoReal = REAL(), o: { fechados?: boolean } = {}) => {
   render(<GestaoAtributos real={r} voltar={vi.fn()} anunciar={vi.fn()} />);
   await screen.findByRole("region", { name: "Cor" });
+  if (!o.fechados) abrirTodos();
 };
 const sec = (n: string) => screen.getByRole("region", { name: n });
 const li = (raiz: HTMLElement, nome: string) => within(raiz).getAllByRole("listitem").find((x) => (x.textContent ?? "").startsWith(nome))!;
@@ -113,6 +117,7 @@ describe("GestaoAtributos: ler", () => {
     base.responder = () => ({ data: { atributos: [{ ...lido().atributos[2], usados: null, opcoes: [{ ...lido().atributos[2].opcoes[0], usados: null }] }] }, error: null });
     render(<GestaoAtributos real={REAL()} voltar={vi.fn()} anunciar={vi.fn()} />);
     await screen.findByRole("region", { name: "Brilho" });
+    abrirTodos();
     expect(screen.queryByText(/produtos?$/)).toBeNull();
   });
 });
@@ -264,6 +269,7 @@ describe("GestaoAtributos: opções", () => {
     const anunciar = vi.fn();
     render(<GestaoAtributos real={REAL()} voltar={vi.fn()} anunciar={anunciar} />);
     await screen.findByRole("region", { name: "Cor" });
+    abrirTodos();
     fireEvent.click(screen.getByRole("button", { name: "Descer Preto, posição 1 de 3" }));
     await waitFor(() => expect(anunciar).toHaveBeenCalledWith("«Preto» passou para a posição 2 de 3."));
   });
@@ -408,5 +414,255 @@ describe("GestaoAtributos: revisão", () => {
     rerender(<GestaoAtributos real={REAL({ org: OUTRA })} voltar={vi.fn()} anunciar={vi.fn()} />);
     await waitFor(() => expect(chamadasDe("cat_ler_atributos_gestao").at(-1)!.a).toEqual({ p_org: OUTRA }));
     await waitFor(() => expect(screen.queryByRole("region", { name: "Cor" })).toBeNull());
+  });
+});
+
+describe("GestaoAtributos: painéis recolhíveis e pesquisa", () => {
+  it("começa tudo fechado: o cabeçalho diz nome, tipo, uso e nº de opções, e as opções não estão no ecrã", async () => {
+    await abrir(REAL(), { fechados: true });
+    const b = cabecalho("Cor");
+    expect(b).toHaveAttribute("aria-expanded", "false");
+    expect(b).toHaveTextContent("Cor");
+    expect(b).toHaveTextContent("Lista com cor");
+    expect(b).toHaveTextContent("Usado em 3 produtos");
+    expect(b).toHaveTextContent("3 opções");
+    expect(cabecalho("Brilho")).toHaveTextContent("1 opção");
+    expect(screen.queryByText("Preto")).toBeNull();
+    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+    // editar o atributo continua à mão sem abrir
+    expect(within(sec("Cor")).getByRole("button", { name: "Renomear o atributo Cor" })).toBeInTheDocument();
+  });
+
+  it("abrir liga o botão ao painel (aria-controls), o foco fica no botão, e a lista tem altura fixa com scroll teclável", async () => {
+    await abrir(REAL(), { fechados: true });
+    const b = cabecalho("Cor");
+    b.focus();
+    fireEvent.click(b);
+    expect(b).toHaveAttribute("aria-expanded", "true");
+    expect(b).toHaveFocus();
+    const lista = screen.getByRole("region", { name: "Opções de Cor" });
+    expect(b.getAttribute("aria-controls")).toBeTruthy();
+    expect(document.getElementById(b.getAttribute("aria-controls")!)).toContainElement(lista);
+    expect(lista.className).toContain("max-h-72");
+    expect(lista.className).toContain("overflow-y-auto");
+    expect(lista).toHaveAttribute("tabindex", "0");
+    expect(li(lista, "Preto")).toBeInTheDocument();
+    fireEvent.click(b);
+    expect(b).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "Opções de Cor" })).toBeNull();
+  });
+
+  it("pesquisa por escrita: sem acentos nem maiúsculas, também pelo hex, com a contagem num estado", async () => {
+    await abrir(REAL(), { fechados: true });
+    fireEvent.click(cabecalho("Cor"));
+    const campo = screen.getByRole("searchbox", { name: "Pesquisar opção em Cor" });
+    const lista = screen.getByRole("region", { name: "Opções de Cor" });
+    fireEvent.change(campo, { target: { value: "PRÉ" } });
+    expect(within(lista).getAllByRole("listitem")).toHaveLength(1);
+    expect(li(lista, "Preto")).toBeInTheDocument();
+    await waitFor(() => expect(within(sec("Cor")).getByRole("status")).toHaveTextContent("1 de 3 opções"));
+    fireEvent.change(campo, { target: { value: "#888" } });
+    expect(li(lista, "Cinza")).toBeInTheDocument();
+    expect(within(lista).getAllByRole("listitem")).toHaveLength(1);
+    fireEvent.change(campo, { target: { value: "zzz" } });
+    expect(screen.queryAllByRole("listitem")).toHaveLength(0);
+    await waitFor(() => expect(within(sec("Cor")).getByRole("status")).toHaveTextContent("Nenhuma opção encontrada"));
+    fireEvent.change(campo, { target: { value: "" } });
+    expect(within(screen.getByRole("region", { name: "Opções de Cor" })).getAllByRole("listitem")).toHaveLength(3);
+    await waitFor(() => expect(within(sec("Cor")).getByRole("status")).toBeEmptyDOMElement());
+  });
+
+  it("com pesquisa ativa Subir/Descer ficam aria-disabled com a razão escrita e não gravam; sem pesquisa voltam", async () => {
+    await abrir(REAL(), { fechados: true });
+    fireEvent.click(cabecalho("Cor"));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Pesquisar opção em Cor" }), { target: { value: "branco" } });
+    const desc = screen.getByRole("button", { name: "Descer Branco, posição 2 de 3" });
+    expect(desc).toHaveAttribute("aria-disabled", "true");
+    expect(desc).not.toBeDisabled();
+    expect(desc.getAttribute("aria-describedby")).toBeTruthy();
+    expect(document.getElementById(desc.getAttribute("aria-describedby")!)).toHaveTextContent("Limpe a pesquisa para reordenar.");
+    fireEvent.click(desc);
+    expect(chamadasDe("cat_reordenar_opcoes")).toHaveLength(0);
+    fireEvent.change(screen.getByRole("searchbox", { name: "Pesquisar opção em Cor" }), { target: { value: "" } });
+    expect(screen.getByRole("button", { name: "Descer Branco, posição 2 de 3" })).not.toHaveAttribute("aria-disabled", "true");
+    expect(screen.queryByText("Limpe a pesquisa para reordenar.")).toBeNull();
+  });
+
+  it("a Medida é um painel simples: fechado não mostra a descrição, aberto mostra-a, sem pesquisa", async () => {
+    await abrir(REAL(), { fechados: true });
+    expect(screen.queryByText(/2D ou 3D/)).toBeNull();
+    fireEvent.click(cabecalho("Medida"));
+    expect(within(sec("Medida")).getByText(/2D ou 3D/)).toBeInTheDocument();
+    expect(within(sec("Medida")).queryByRole("searchbox")).toBeNull();
+  });
+
+  it("o painel continua aberto depois de gravar e reler", async () => {
+    await abrir(REAL(), { fechados: true });
+    fireEvent.click(cabecalho("Cor"));
+    fireEvent.click(screen.getByRole("button", { name: "Desativar Preto" }));
+    await waitFor(() => expect(chamadasDe("cat_ler_atributos_gestao")).toHaveLength(2));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Desativar Preto" })).toHaveFocus());
+    expect(cabecalho("Cor")).toHaveAttribute("aria-expanded", "true");
+    expect(cabecalho("Brilho")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("um atributo recém-criado abre-se sozinho", async () => {
+    let criado = false;
+    base.responder = (f) => {
+      if (f === "cat_guardar_atributo") { criado = true; return { data: { ok: true }, error: null }; }
+      if (f !== "cat_ler_atributos_gestao") return { data: { ok: true }, error: null };
+      const l = lido();
+      if (criado) l.atributos.push({ id: "aaaaaaaa-0000-4000-a000-000000000009", codigo: "acab", nome: "Acabamento", tipo: "lista", tem_hex: false, ordem: 4, ativo: true, usados: 0, opcoes: [] });
+      return { data: l, error: null };
+    };
+    await abrir(REAL(), { fechados: true });
+    fireEvent.click(screen.getByRole("button", { name: "Novo atributo" }));
+    fireEvent.change(screen.getByLabelText("Nome do atributo"), { target: { value: "Acabamento" } });
+    fireEvent.click(screen.getByRole("button", { name: "Criar atributo" }));
+    await screen.findByRole("region", { name: "Acabamento" });
+    expect(cabecalho("Acabamento")).toHaveAttribute("aria-expanded", "true");
+    expect(cabecalho("Cor")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  /** A base simulada acumula os atributos criados (por esta ação) e os «criados por outro utilizador» (aparecem na releitura seguinte). */
+  const baseComCriados = (outros: string[] = []) => {
+    const criados: string[] = [];
+    const novo = (nome: string, n: number) => ({ id: `aaaaaaaa-0000-4000-a000-0000000001${String(n).padStart(2, "0")}`, codigo: nome.toLowerCase(), nome, tipo: "lista", tem_hex: false, ordem: 10 + n, ativo: true, usados: 0, opcoes: [] });
+    base.responder = (f, a) => {
+      if (f === "cat_guardar_atributo") { criados.push(a.p_nome as string); return { data: { ok: true }, error: null }; }
+      if (f !== "cat_ler_atributos_gestao") return { data: { ok: true }, error: null };
+      const l = lido();
+      const nomes = criados.length ? [...criados, ...outros] : [];
+      nomes.forEach((nm, i) => l.atributos.push(novo(nm, i) as never));
+      return { data: l, error: null };
+    };
+  };
+  const criarAtr = async (nome: string) => {
+    fireEvent.click(screen.getByRole("button", { name: "Novo atributo" }));
+    fireEvent.change(screen.getByLabelText("Nome do atributo"), { target: { value: nome } });
+    fireEvent.click(screen.getByRole("button", { name: "Criar atributo" }));
+    await screen.findByRole("region", { name: nome });
+  };
+  const atrasada = () => REAL({ recarregar: vi.fn(() => new Promise<undefined>((ok) => setTimeout(() => ok(undefined), 80))) });
+
+  it("H1: com o recarregar do Catálogo a demorar, abre só o criado por esta ação (não o que outro utilizador criou)", async () => {
+    baseComCriados(["Outro utilizador"]);
+    await abrir(atrasada(), { fechados: true });
+    await criarAtr("Acabamento");
+    await waitFor(() => expect(cabecalho("Acabamento")).toHaveAttribute("aria-expanded", "true"));
+    expect(cabecalho("Outro utilizador")).toHaveAttribute("aria-expanded", "false");
+    expect(cabecalho("Cor")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("H1: dois atributos criados seguidos abrem-se os dois", async () => {
+    baseComCriados();
+    await abrir(atrasada(), { fechados: true });
+    await criarAtr("Acabamento");
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Criar atributo" })).toBeNull());
+    await waitFor(() => expect(cabecalho("Acabamento")).toHaveAttribute("aria-expanded", "true"));
+    await criarAtr("Veio");
+    await waitFor(() => expect(cabecalho("Veio")).toHaveAttribute("aria-expanded", "true"));
+    expect(cabecalho("Acabamento")).toHaveAttribute("aria-expanded", "true");
+  });
+
+  it("H1: se a releitura falha depois de criar, não rebenta e não abre nada às cegas", async () => {
+    let criou = false;
+    base.responder = (f) => {
+      if (f === "cat_guardar_atributo") { criou = true; return { data: { ok: true }, error: null }; }
+      if (f !== "cat_ler_atributos_gestao") return { data: { ok: true }, error: null };
+      return criou ? { data: null, error: { message: "Failed to fetch" } } : { data: lido(), error: null };
+    };
+    await abrir(REAL(), { fechados: true });
+    fireEvent.click(screen.getByRole("button", { name: "Novo atributo" }));
+    fireEvent.change(screen.getByLabelText("Nome do atributo"), { target: { value: "Acabamento" } });
+    fireEvent.click(screen.getByRole("button", { name: "Criar atributo" }));
+    expect(await screen.findByText(/pode estar desatualizada/)).toBeInTheDocument();
+    expect(cabecalho("Cor")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("H1: se a organização mudar antes de a releitura chegar, o atributo da outra não abre nada na nova", async () => {
+    baseComCriados();
+    const r = atrasada();
+    const { rerender } = render(<GestaoAtributos real={r} voltar={vi.fn()} anunciar={vi.fn()} />);
+    await screen.findByRole("region", { name: "Cor" });
+    fireEvent.click(screen.getByRole("button", { name: "Novo atributo" }));
+    fireEvent.change(screen.getByLabelText("Nome do atributo"), { target: { value: "Acabamento" } });
+    fireEvent.click(screen.getByRole("button", { name: "Criar atributo" }));
+    await waitFor(() => expect(chamadasDe("cat_guardar_atributo")).toHaveLength(1));
+    rerender(<GestaoAtributos real={REAL({ org: "11111111-1111-4111-8111-111111111111" })} voltar={vi.fn()} anunciar={vi.fn()} />);
+    await new Promise((ok) => setTimeout(ok, 200));
+    await screen.findByRole("region", { name: "Acabamento" });
+    expect(cabecalho("Acabamento")).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("H2: fechar o painel (botão ou «Fechar todos») fecha o formulário e a confirmação das suas opções; ao reabrir não reaparecem nem roubam o foco", async () => {
+    await abrir(REAL(), { fechados: true });
+    const b = cabecalho("Cor");
+    fireEvent.click(b);
+    fireEvent.click(screen.getByRole("button", { name: "Editar Preto" }));
+    fireEvent.change(screen.getByLabelText("Nome da opção"), { target: { value: "Negro" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar opção" }));
+    expect(confirmacao()).toBeInTheDocument();
+    b.focus();
+    fireEvent.click(b);
+    fireEvent.click(b);
+    expect(screen.queryByLabelText("Nome da opção")).toBeNull();
+    expect(screen.queryByRole("group", { name: /^Mudar / })).toBeNull();
+    expect(screen.getByRole("button", { name: "Editar Preto" })).toHaveAttribute("aria-expanded", "false");
+    expect(b).toHaveFocus();
+    // nova opção, e agora fechando com «Fechar todos»
+    fireEvent.click(screen.getByRole("button", { name: "Nova opção em Cor" }));
+    expect(screen.getByLabelText("Nome da opção")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Abrir todos" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fechar todos" }));
+    fireEvent.click(screen.getByRole("button", { name: "Abrir todos" }));
+    expect(screen.queryByLabelText("Nome da opção")).toBeNull();
+    expect(screen.getByRole("button", { name: "Nova opção em Cor" })).toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("H3: se o painel se fechar enquanto grava, o foco vai para o botão do painel em vez de se perder", async () => {
+    await abrir(atrasada(), { fechados: true });
+    const b = cabecalho("Cor");
+    fireEvent.click(b);
+    fireEvent.click(screen.getByRole("button", { name: "Desativar Preto" }));
+    fireEvent.click(b);
+    await waitFor(() => expect(chamadasDe("cat_editar_opcao")).toHaveLength(1));
+    await waitFor(() => expect(b).toHaveFocus());
+  });
+
+  it("M1: a pesquisa não desmonta a opção que tem o formulário aberto", async () => {
+    await abrir(REAL(), { fechados: true });
+    fireEvent.click(cabecalho("Cor"));
+    fireEvent.click(screen.getByRole("button", { name: "Editar Preto" }));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Pesquisar opção em Cor" }), { target: { value: "cinza" } });
+    expect(screen.getByLabelText("Nome da opção")).toBeInTheDocument();
+    expect(li(screen.getByRole("region", { name: "Opções de Cor" }), "Cinza")).toBeInTheDocument();
+    await waitFor(() => expect(within(sec("Cor")).getByRole("status")).toHaveTextContent("1 de 3 opções"));
+  });
+
+  it("M2: sem resultados não há região com scroll focável", async () => {
+    await abrir(REAL(), { fechados: true });
+    fireEvent.click(cabecalho("Cor"));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Pesquisar opção em Cor" }), { target: { value: "zzz" } });
+    expect(screen.queryByRole("region", { name: "Opções de Cor" })).toBeNull();
+  });
+
+  it("M4: o anúncio da contagem espera (~300 ms) mas a lista filtra logo", async () => {
+    await abrir(REAL(), { fechados: true });
+    fireEvent.click(cabecalho("Cor"));
+    fireEvent.change(screen.getByRole("searchbox", { name: "Pesquisar opção em Cor" }), { target: { value: "pre" } });
+    expect(screen.getAllByRole("listitem").filter((x) => (x.textContent ?? "").includes("Cinza"))).toHaveLength(0);
+    expect(within(sec("Cor")).getByRole("status")).toBeEmptyDOMElement();
+    await waitFor(() => expect(within(sec("Cor")).getByRole("status")).toHaveTextContent("1 de 3 opções"));
+  });
+
+  it("«Abrir todos» e «Fechar todos»", async () => {
+    await abrir(REAL(), { fechados: true });
+    screen.getByRole("button", { name: "Abrir todos" }).focus();
+    fireEvent.click(screen.getByRole("button", { name: "Abrir todos" }));
+    for (const n of ["Medida", "Cor", "Brilho"]) expect(cabecalho(n)).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Fechar todos" }));
+    for (const n of ["Medida", "Cor", "Brilho"]) expect(cabecalho(n)).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByRole("button", { name: "Abrir todos" })).toHaveFocus();
   });
 });
