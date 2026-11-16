@@ -24,9 +24,24 @@ export const codigosSimulados = (codigosDaFuncao: readonly string[]): ReadonlySe
 
 /** As funções da organização (sem as eliminadas). Uma falha sobe como erro: nunca uma lista vazia no lugar dela. */
 export async function lerFuncoes(org: string): Promise<Funcao[]> {
-  const { data, error } = await supabase.from("anew_roles").select("id, code, name").eq("organization_id", org).is("deleted_at", null).order("name");
+  // 16/11: como o ecrã de Roles: as da organização, as das organizações-mãe (anew_hierarchy) e as globais, sem as de sistema
+  const ids: string[] = [org];
+  for (let i = 0, atual = org; i < 10; i += 1) {
+    const { data: h, error: eh } = await supabase.from("anew_hierarchy").select("parent_org_id").eq("child_org_id", atual).maybeSingle();
+    if (eh) throw new Error(mensagemDeErro(eh));
+    const pai = (h as { parent_org_id: string | null } | null)?.parent_org_id;
+    if (!pai || ids.includes(pai)) break;
+    ids.push(pai);
+    atual = pai;
+  }
+  const { data, error } = await supabase.from("anew_roles").select("id, code, name, organization_id")
+    .or(`organization_id.in.(${ids.join(",")}),organization_id.is.null`).is("deleted_at", null).order("name");
   if (error) throw new Error(mensagemDeErro(error));
-  return ((data ?? []) as Funcao[]).map((f) => ({ id: f.id, code: f.code, name: f.name }));
+  const vistos = new Set<string>();
+  return ((data ?? []) as (Funcao & { organization_id: string | null })[])
+    .filter((f) => f.code !== "system_admin" && f.code !== "super_admin")
+    .filter((f) => (f.organization_id !== null ? true : !vistos.has(f.code) && (vistos.add(f.code), true)))
+    .map((f) => ({ id: f.id, code: f.code, name: f.name }));
 }
 
 /** Os códigos de permissão de uma função. Uma falha sobe como erro. */
