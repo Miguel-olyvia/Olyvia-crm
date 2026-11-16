@@ -41,14 +41,14 @@ vi.mock("@/integrations/supabase/client", () => {
     b.then = (ok: (v: unknown) => unknown, ko?: (e: unknown) => unknown) => Promise.resolve(responder()).then(ok, ko);
     return b;
   };
-  return { supabase: { from, rpc: (...a: unknown[]) => rpc(...a) } };
+  return { supabase: { from, rpc: (...a: unknown[]) => rpc(...a), auth: { getUser: async () => ({ data: { user: null } }) } } };
 });
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: null, isLoading: false }) }));
 vi.mock("@/hooks/usePermissionScope", () => ({ usePermissionScope: () => ({ anewRoleCode: null }) }));
 
 import { lerPermissoesDasRoles } from "./useRolesReais";
 import { guardarRoleNaBase, lerPermissoes } from "./rolesNaBase";
-import { lerRolesDosVinculos } from "./useUtilizadoresReais";
+import { lerAmbitos, lerRolesDosVinculos, lerTelefones, lerUtilizadoresDaBase, lerVinculos } from "./useUtilizadoresReais";
 import { lerContagemPorRole } from "./useContagemUtilizadoresPorRole";
 
 const codigos = (n: number) => Array.from({ length: n }, (_, i) => `modulo.acao_${String(i).padStart(4, "0")}`);
@@ -182,5 +182,116 @@ describe("lerContagemPorRole (decide se uma role se pode eliminar)", () => {
     preparar();
     falharEmDe = 1000;
     await expect(lerContagemPorRole(["role-a"])).rejects.toMatchObject({ message: "falha a meio da leitura" });
+  });
+});
+
+describe("lerVinculos, lerTelefones e lerAmbitos (lista de utilizadores, lotes de 200 ids)", () => {
+  const n5 = (i: number) => String(i).padStart(5, "0");
+  // Cada caso: 3 ids num só lote de 200, com 700 + 500 + 300 = 1500 linhas, mais do que o corte de 1000. Mais 40 linhas de um
+  // id fora do pedido, para provar que o filtro se mantém. As linhas vão baralhadas: a ordem tem de vir do pedido.
+  const tamanhos = [700, 500, 300];
+  const baralhar = <T,>(xs: T[]) => xs.map((x, i) => ({ x, k: (i * 7919) % xs.length })).sort((a, z) => a.k - z.k).map((p) => p.x);
+  const gerar = (ids: string[], fazer: (dono: string, i: number) => Linha) =>
+    baralhar([...ids, "fora"].flatMap((dono, d) => Array.from({ length: d < ids.length ? tamanhos[d] : 40 }, (_, i) => fazer(dono, d * 10000 + i))));
+
+  const casos = [
+    {
+      nome: "lerVinculos", tabela: "anew_memberships", dono: "user_id", ordem: ["user_id", "id"], ler: lerVinculos,
+      fazer: (dono: string, i: number) => ({
+        id: `m${n5(i)}`, user_id: dono, organization_id: "org", relationship_type: "BELONGS_TO", role_id: "r1", status: "active", join_method: null,
+      }),
+      chave: (l: Linha) => String(l.id),
+    },
+    {
+      nome: "lerTelefones", tabela: "anew_entity_phones", dono: "entity_id", ordem: ["entity_id", "id"], ler: lerTelefones,
+      fazer: (dono: string, i: number) => ({ id: `p${n5(i)}`, entity_id: dono, phone_number: `9${n5(i)}`, country_code: "+351", is_primary: false }),
+      chave: (l: Linha) => String(l.phone_number),
+    },
+    {
+      nome: "lerAmbitos", tabela: "anew_membership_permission_scopes", dono: "membership_id", ordem: ["membership_id", "id"], ler: lerAmbitos,
+      fazer: (dono: string, i: number) => ({ id: `s${n5(i)}`, membership_id: dono, permission_code: `modulo.acao_${n5(i)}`, scope_level: "ORG" }),
+      chave: (l: Linha) => `${String(l.membership_id)}|${String(l.permission_code)}`,
+    },
+  ] as const;
+
+  describe.each(casos)("$nome ($tabela)", (c) => {
+    const ids = ["a", "b", "c"];
+    const preparar = () => { tabelas[c.tabela] = gerar(ids, c.fazer); };
+
+    it("devolve as 1500 linhas, sem repetidas, só dos ids pedidos, apesar do corte nas 1000", async () => {
+      preparar();
+      const linhas = (await c.ler(ids)) as unknown as Linha[];
+      expect(linhas).toHaveLength(1500);
+      expect(new Set(linhas.map(c.chave)).size).toBe(1500);
+      ids.forEach((id, i) => expect(linhas.filter((l) => l[c.dono] === id)).toHaveLength(tamanhos[i]));
+      expect(linhas.some((l) => l[c.dono] === "fora")).toBe(false);
+    });
+
+    it("pede páginas de 1000 com ordem determinística até ao id, sem `.limit()`", async () => {
+      preparar();
+      await c.ler(ids);
+      const daTabela = pedidos.filter((p) => p.tabela === c.tabela);
+      expect(daTabela).toHaveLength(pedidos.length);
+      expect(daTabela.map((p) => p.range)).toEqual([[0, 999], [1000, 1999]]);
+      daTabela.forEach((p) => {
+        expect(p.ordem).toEqual(c.ordem);
+        expect(p.limite).toBeNull();
+      });
+    });
+
+    it("uma falha na 2.ª página sobe como Error com a mensagem da base: nunca uma lista parcial", async () => {
+      preparar();
+      falharEmDe = 1000;
+      await expect(c.ler(ids)).rejects.toThrow("falha a meio da leitura");
+      await expect(c.ler(ids)).rejects.toBeInstanceOf(Error);
+    });
+
+    it("sem ids não pede nada", async () => {
+      await expect(c.ler([])).resolves.toEqual([]);
+      expect(pedidos).toHaveLength(0);
+    });
+  });
+
+  it("na leitura completa, um utilizador com mais de 1000 vínculos vem com todos, o telefone principal não se perde e uma falha numa página a meio faz falhar tudo", async () => {
+    tabelas.anew_users = [{ id: "u1", email: "ana@x.pt", name: "Ana", phone: null, auth_user_id: "a1", status: "active", entity_id: "e1", position: null, created_by: null }];
+    tabelas.anew_organizations = [{ id: "org", name: "Org", type: "company" }];
+    tabelas.anew_roles = [{ id: "r1", code: "comercial", name: "Comercial" }];
+    tabelas.anew_memberships = Array.from({ length: 1200 }, (_, i) => ({
+      id: `m${n5(i)}`, user_id: "u1", organization_id: "org", relationship_type: "BELONGS_TO", role_id: "r1", status: "active", join_method: null,
+    }));
+    // O único telefone principal é o último na ordem (entity_id, id): com o corte nas 1000 perdia-se.
+    tabelas.anew_entity_phones = Array.from({ length: 1100 }, (_, i) => ({
+      id: `p${n5(i)}`, entity_id: "e1", phone_number: `9${n5(i)}`, country_code: "+351", is_primary: i === 1099,
+    }));
+    const parametros = { orgAtivaId: "org", tipoSistema: false, escopoOrganizacoes: "ORG" as const, anewUserId: null, idsEmpresasDoUtilizador: ["org"] };
+    const r = await lerUtilizadoresDaBase(parametros);
+    expect(r.todos).toHaveLength(1);
+    expect(r.todos[0].vinculos).toHaveLength(1200);
+    expect(new Set(r.todos[0].vinculos.map((v) => v.membershipId)).size).toBe(1200);
+    expect(r.todos[0].telefone).toBe("+351 901099");
+
+    pedidos.length = 0;
+    falharEmDe = 1000;
+    await expect(lerUtilizadoresDaBase(parametros)).rejects.toThrow("falha a meio da leitura");
+  });
+});
+
+describe("lerUtilizadoresDaBase (anew_users sem lotes)", () => {
+  it("lê mais de 1000 utilizadores por páginas, por nome e depois id, sem repetir homónimos", async () => {
+    // 1500 utilizadores, só 3 nomes: sem o desempate por id as páginas podiam repetir ou saltar linhas.
+    tabelas.anew_users = Array.from({ length: 1500 }, (_, i) => ({
+      id: `u${String(i).padStart(5, "0")}`, email: `u${i}@x.pt`, name: ["Ana", "Rui", "Zé"][i % 3], phone: null, auth_user_id: null,
+      status: "active", entity_id: null, position: null, created_by: null,
+    }));
+    // Administrador de sistema sem organização ativa: vê todos, mesmo sem vínculos.
+    const r = await lerUtilizadoresDaBase({ orgAtivaId: "", tipoSistema: true, escopoOrganizacoes: "ORG", anewUserId: null, idsEmpresasDoUtilizador: [] });
+    expect(r.todos).toHaveLength(1500);
+    expect(new Set(r.todos.map((u) => u.id)).size).toBe(1500);
+    expect(r.todos.map((u) => u.nome)).toEqual([...r.todos.map((u) => u.nome)].sort((a, z) => a.localeCompare(z)));
+    const dosUtilizadores = pedidos.filter((p) => p.tabela === "anew_users");
+    expect(dosUtilizadores.map((p) => p.range)).toEqual([[0, 999], [1000, 1999]]);
+    dosUtilizadores.forEach((p) => expect(p.ordem).toEqual(["name", "id"]));
+    pedidos.filter((p) => p.tabela === "anew_hierarchy").forEach((p) => expect(p.ordem).toEqual(["id"]));
+    pedidos.filter((p) => p.tabela === "anew_organizations" && p.range).forEach((p) => expect(p.ordem).toEqual(["name", "id"]));
   });
 });

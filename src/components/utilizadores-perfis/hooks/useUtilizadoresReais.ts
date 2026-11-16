@@ -38,21 +38,34 @@ export interface ResultadoLeitura {
 
 interface LinhaOrganizacao { id: string; name: string; type: string; created_by?: string | null }
 
-/** `.select()` falhado levanta o erro da base. */
-async function ler<T>(consulta: PromiseLike<{ data: T[] | null; error: { message: string } | null }>): Promise<T[]> {
-  const { data, error } = await consulta;
-  if (error) throw new Error(error.message);
-  return data ?? [];
+type PedirPagina = Parameters<typeof lerTodasAsPaginas>[0];
+
+// O PostgREST (max_rows = 1000) corta qualquer resposta nas 1000 linhas em silêncio. As leituras que podem passar disso vão por
+// páginas (`lerTodasAsPaginas`), sempre com uma ordem determinística que acaba numa coluna única (`id`), senão as páginas podiam
+// repetir ou saltar linhas. Uma falha em qualquer página faz falhar a leitura inteira: nunca se devolve uma lista parcial.
+
+/** Leitura sem lotes, por páginas: uma falha sobe como `Error` com a mensagem da base. */
+function lerPaginas<T>(pedirPagina: PedirPagina): Promise<T[]> {
+  return lerTodasAsPaginas<T>(pedirPagina).catch((e: unknown) => { throw new Error(mensagemDeErro(e)); });
+}
+
+/** Um lote de `selectInBatchesOrThrow` lido por páginas (cada lote de 200 ids pode passar das 1000 linhas). Uma falha em
+ *  qualquer página volta a ser `{ error }`, para o lote (e a leitura) falhar inteiro, como antes. */
+function loteEmPaginas<T>(pedirPagina: PedirPagina): Promise<{ data: T[] | null; error: { message: string } | null }> {
+  return lerTodasAsPaginas<T>(pedirPagina)
+    .then((data) => ({ data, error: null }), (e: unknown) => ({ data: null, error: { message: mensagemDeErro(e) } }));
 }
 
 async function lerOrganizacoes(p: ParametrosLeitura, ambito: Set<string>): Promise<LinhaOrganizacao[]> {
-  let consulta = db.from("anew_organizations").select("id, name, type, created_by").order("name");
-  if (p.escopoOrganizacoes === "NONE") {
-    consulta = p.idsEmpresasDoUtilizador.length > 0 ? consulta.in("id", p.idsEmpresasDoUtilizador) : consulta.eq("id", ORGANIZACAO_INEXISTENTE);
-  } else if (ambito.size > 0) {
-    consulta = consulta.in("id", [...ambito]);
-  }
-  const linhas = await ler<LinhaOrganizacao>(consulta);
+  const linhas = await lerPaginas<LinhaOrganizacao>((de, ate) => {
+    let consulta = db.from("anew_organizations").select("id, name, type, created_by").order("name").order("id");
+    if (p.escopoOrganizacoes === "NONE") {
+      consulta = p.idsEmpresasDoUtilizador.length > 0 ? consulta.in("id", p.idsEmpresasDoUtilizador) : consulta.eq("id", ORGANIZACAO_INEXISTENTE);
+    } else if (ambito.size > 0) {
+      consulta = consulta.in("id", [...ambito]);
+    }
+    return consulta.range(de, ate);
+  });
   if (p.escopoOrganizacoes === "OWNED" && p.anewUserId) {
     const minhas = new Set(p.idsEmpresasDoUtilizador);
     return linhas.filter((o) => o.created_by === p.anewUserId || minhas.has(o.id));
@@ -68,23 +81,53 @@ export async function lerRolesDosVinculos(roleIds: string[]): Promise<Role[]> {
   // Cada lote (até 200 roles) passa facilmente das 1000 linhas que o PostgREST serve: lê-se por páginas, com ordem
   // determinística. Uma falha em qualquer página volta a ser `{ error }` para o lote falhar inteiro, como antes.
   const perms = await selectInBatchesOrThrow<LinhaRolePermissao>(roleIds, (lote) =>
-    lerTodasAsPaginas<LinhaRolePermissao>((de, ate) => db.from("anew_role_permissions").select("role_id, permission_code")
-      .in("role_id", lote).order("role_id").order("permission_code").range(de, ate))
-      .then((data) => ({ data, error: null }), (e: unknown) => ({ data: null, error: { message: mensagemDeErro(e) } })));
+    loteEmPaginas<LinhaRolePermissao>((de, ate) => db.from("anew_role_permissions").select("role_id, permission_code")
+      .in("role_id", lote).order("role_id").order("permission_code").range(de, ate)));
   const por = agruparPermissoesPorRole(perms);
   return linhas.map((l) => roleDaBase(l, por[l.id] ?? []));
+}
+
+// Os três lotes seguintes (até 200 ids cada) podem passar das 1000 linhas: lidos por páginas, ordenados até ao `id`.
+
+/** Os vínculos dos utilizadores. Exportada para os testes. */
+export function lerVinculos(userIds: string[]): Promise<LinhaMembership[]> {
+  if (userIds.length === 0) return Promise.resolve([]);
+  return selectInBatchesOrThrow<LinhaMembership>(userIds, (lote) =>
+    loteEmPaginas<LinhaMembership>((de, ate) => db.from("anew_memberships")
+      .select("id, user_id, organization_id, relationship_type, role_id, status, join_method")
+      .in("user_id", lote).order("user_id").order("id").range(de, ate)));
+}
+
+/** Os telefones das entidades dos utilizadores. Exportada para os testes. */
+export function lerTelefones(entityIds: string[]): Promise<LinhaTelefone[]> {
+  if (entityIds.length === 0) return Promise.resolve([]);
+  return selectInBatchesOrThrow<LinhaTelefone>(entityIds, (lote) =>
+    loteEmPaginas<LinhaTelefone>((de, ate) => db.from("anew_entity_phones")
+      .select("entity_id, phone_number, country_code, is_primary")
+      .in("entity_id", lote).order("entity_id").order("id").range(de, ate)));
+}
+
+/** Os âmbitos por vínculo. Exportada para os testes. */
+export function lerAmbitos(membershipIds: string[]): Promise<LinhaAmbito[]> {
+  if (membershipIds.length === 0) return Promise.resolve([]);
+  return selectInBatchesOrThrow<LinhaAmbito>(membershipIds, (lote) =>
+    loteEmPaginas<LinhaAmbito>((de, ate) => db.from("anew_membership_permission_scopes")
+      .select("membership_id, permission_code, scope_level")
+      .in("membership_id", lote).order("membership_id").order("id").range(de, ate)));
 }
 
 /** A leitura completa. Exportada para os testes. */
 export async function lerUtilizadoresDaBase(p: ParametrosLeitura): Promise<ResultadoLeitura> {
   const { data: { user: autenticado } } = await db.auth.getUser();
-  const hierarquia = await ler<LinhaHierarquia>(db.from("anew_hierarchy").select("parent_org_id, child_org_id"));
+  const hierarquia = await lerPaginas<LinhaHierarquia>((de, ate) =>
+    db.from("anew_hierarchy").select("parent_org_id, child_org_id").order("id").range(de, ate));
   const ambito = idsOrganizacoesVisiveis(hierarquia, p.orgAtivaId);
   const organizacoesLidas = await lerOrganizacoes(p, ambito);
-  const users = await ler<LinhaUtilizadorBase>(db.from("anew_users").select("*").order("name"));
+  // Por nome (a ordem da lista) e depois por `id`, para as páginas não repetirem nem saltarem homónimos.
+  const users = await lerPaginas<LinhaUtilizadorBase>((de, ate) =>
+    db.from("anew_users").select("*").order("name").order("id").range(de, ate));
 
-  const memberships = users.length === 0 ? [] : await selectInBatchesOrThrow<LinhaMembership>(users.map((u) => u.id), (lote) =>
-    db.from("anew_memberships").select("id, user_id, organization_id, relationship_type, role_id, status, join_method").in("user_id", lote));
+  const memberships = await lerVinculos(users.map((u) => u.id));
   const roleIds = [...new Set(memberships.map((m) => m.role_id).filter(Boolean))];
   const roles = roleIds.length === 0 ? [] : await selectInBatchesOrThrow<LinhaRoleBase>(roleIds, (lote) =>
     db.from("anew_roles").select("id, code, name").in("id", lote));
@@ -92,11 +135,8 @@ export async function lerUtilizadoresDaBase(p: ParametrosLeitura): Promise<Resul
   const orgsDosVinculos = idsOrgsDosVinculos.length === 0 ? [] : await selectInBatchesOrThrow<LinhaOrganizacao>(idsOrgsDosVinculos, (lote) =>
     db.from("anew_organizations").select("id, name, type").in("id", lote));
   const entidades = users.map((u) => u.entity_id).filter((x): x is string => !!x);
-  const phones = entidades.length === 0 ? [] : await selectInBatchesOrThrow<LinhaTelefone>(entidades, (lote) =>
-    db.from("anew_entity_phones").select("entity_id, phone_number, country_code, is_primary").in("entity_id", lote));
-  const idsMemberships = memberships.map((m) => m.id);
-  const scopes = idsMemberships.length === 0 ? [] : await selectInBatchesOrThrow<LinhaAmbito>(idsMemberships, (lote) =>
-    db.from("anew_membership_permission_scopes").select("membership_id, permission_code, scope_level").in("membership_id", lote));
+  const phones = await lerTelefones(entidades);
+  const scopes = await lerAmbitos(memberships.map((m) => m.id));
 
   const todos = montarUtilizadores({
     users, memberships, roles, phones, scopes, authUserId: autenticado?.id, tipoSistema: p.tipoSistema,
