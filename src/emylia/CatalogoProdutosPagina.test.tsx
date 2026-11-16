@@ -81,15 +81,23 @@ async function pagina(r: FichaProdutoReal | null = real(), K: Catalogo = montar(
 const painel = () => within(screen.getByRole("tabpanel"));
 const combo = (nome: string) => screen.getByRole("combobox", { name: nome }) as HTMLInputElement;
 const escolher = (campo: string, opcao: string | RegExp) => { fireEvent.click(combo(campo)); fireEvent.click(screen.getByRole("option", { name: opcao })); };
-const ultima = () => paginas().at(-1)!.a;
+/** O pedido «principal» do último filtro: com o pré-carregamento o último pedido é uma página seguinte, por isso devolve-se o da página mais baixa do último grupo de filtros. */
+const mesmoFiltro = (x: Record<string, unknown>, y: Record<string, unknown>) => Object.keys(x).every((k) => k === "p_pagina" || x[k] === y[k]);
+const ultima = () => {
+  const fim = paginas().at(-1)!.a;
+  const grupo = paginas().filter((c) => mesmoFiltro(c.a, fim));
+  return grupo.reduce((m, c) => ((c.a.p_pagina as number) <= (m.a.p_pagina as number) ? c : m)).a;
+};
+const pedidas = (extra: Record<string, unknown> = {}) => paginas().filter((c) => mesmoFiltro(c.a, { ...paginas()[0].a, ...extra })).map((c) => c.a.p_pagina as number);
 
 beforeEach(() => { base.chamadas = []; base.responder = padrao; });
 afterEach(() => { cleanup(); reporCustos(); reporCatalogo(); });
 
 describe("Produtos por páginas · a leitura", () => {
-  it("ao abrir pede a página 1 de 50, sem filtros, com a organização; e as contagens", async () => {
+  it("ao abrir pede a página 1 de 50, sem filtros, com a organização (e pré-carrega a 2 e a 3); e as contagens", async () => {
     await pagina();
-    expect(paginas()).toHaveLength(1);
+    await waitFor(() => expect(paginas()).toHaveLength(3));
+    expect(paginas().map((c) => c.a.p_pagina)).toEqual([1, 2, 3]);
     expect(paginas()[0].a).toEqual({ p_org: ORG, p_q: null, p_categoria: null, p_subcategoria: null, p_modelo: null, p_marca: null, p_sem_categoria: false, p_limite: 50, p_pagina: 1 });
     expect(doTipo("cat_ler_produtos_contagens").length).toBeGreaterThan(0);
     expect(doTipo("cat_ler_produtos_contagens")[0].a).toEqual({ p_org: ORG, p_q: null, p_marca: null });
@@ -122,7 +130,7 @@ describe("Produtos por páginas · Anterior e Seguinte", () => {
     expect(ant).toHaveAccessibleDescription(/primeira página/i);
     fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
     await screen.findByText(/Página 2 de 3/);
-    expect(ultima()).toMatchObject({ p_pagina: 2, p_limite: 50 });
+    expect(paginas().some((c) => c.a.p_pagina === 2 && c.a.p_limite === 50)).toBe(true);
     expect(painel().getByRole("button", { name: "Produto da página 2" })).toBeInTheDocument();
     expect(screen.getByText(/Página 2 de 3/)).toHaveFocus();
     expect(screen.getByRole("button", { name: "Anterior" })).toBeEnabled();
@@ -138,7 +146,7 @@ describe("Produtos por páginas · Anterior e Seguinte", () => {
     expect(seg).toHaveAccessibleDescription(/última página/i);
     fireEvent.click(screen.getByRole("button", { name: "Anterior" }));
     await screen.findByText(/Página 2 de 3/);
-    expect(ultima()).toMatchObject({ p_pagina: 2 });
+    expect(painel().getByRole("button", { name: "Produto da página 2" })).toBeInTheDocument();
   });
   it("os botões estão numa navegação com nome", async () => {
     await pagina();
@@ -219,7 +227,8 @@ describe("Produtos por páginas · a pesquisa tem debounce", () => {
     for (const t of ["g", "gr", "gro"]) fireEvent.change(caixa, { target: { value: t } });
     await new Promise((r) => setTimeout(r, 120));
     expect(paginas()).toHaveLength(antes); // ainda a esperar
-    await waitFor(() => expect(paginas()).toHaveLength(antes + 1), { timeout: 2000 });
+    await waitFor(() => expect(paginas().length).toBeGreaterThan(antes), { timeout: 2000 });
+    await waitFor(() => expect(pedidas({ p_q: "gro" })).toEqual([1, 2, 3])); // uma só pesquisa: a página 1 e o pré-carregamento de 2 e 3
     expect(ultima()).toMatchObject({ p_q: "gro", p_pagina: 1 });
   });
   it("a pesquisa volta à página 1 e leva-a também às contagens", async () => {
@@ -259,6 +268,90 @@ describe("Produtos por páginas · navegação por categorias e resumo vêm das 
     const nav = screen.getByRole("navigation", { name: "Categorias de produto", hidden: true });
     fireEvent.click(await within(nav).findByRole("button", { name: "Mostrar só Sanitários, 1 produto", hidden: true }));
     await waitFor(() => expect(ultima()).toMatchObject({ p_categoria: ID.pcSan, p_pagina: 1 }));
+  });
+});
+
+describe("Produtos por páginas · pré-carregamento e cache", () => {
+  /** 6 páginas, para haver o que pré-carregar para lá da 3. */
+  const seis = (f: string, a: Record<string, unknown>): unknown => {
+    if (f !== "cat_ler_produtos_pagina") return padrao(f, a);
+    const p = a.p_pagina as number;
+    return { data: { total: 300, pagina: p, limite: 50, paginas: 6, produtos: [linha(`88888888-8888-4888-a888-8888888888${p}1`, `Produto da página ${p}`)] }, error: null };
+  };
+  const pedidasSemFiltro = () => paginas().filter((c) => c.a.p_marca === null).map((c) => c.a.p_pagina as number);
+  const assentar = () => act(async () => { await new Promise((r) => setTimeout(r, 30)); });
+  const abrir6 = async () => { base.responder = seis; porCatalogo(montar()); const S = seed(); const run = (fn: () => void) => fn();
+    render(<CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={real()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Produtos" })); await screen.findByText(/Página 1 de 6/); };
+
+  it("ao abrir a página 1 pede 1, 2 e 3", async () => {
+    await abrir6();
+    await waitFor(() => expect(pedidasSemFiltro().sort()).toEqual([1, 2, 3]));
+  });
+  it("ir à 2 mostra-a logo (sem «A ler…»), não a pede de novo e pré-carrega a 4", async () => {
+    await abrir6();
+    await waitFor(() => expect(pedidasSemFiltro()).toHaveLength(3));
+    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    expect(screen.queryByText(/A ler/)).not.toBeInTheDocument();
+    await screen.findByText(/Página 2 de 6/);
+    await waitFor(() => expect(pedidasSemFiltro().sort()).toEqual([1, 2, 3, 4]));
+    expect(painel().getByRole("button", { name: "Produto da página 2" })).toBeInTheDocument();
+  });
+  it("voltar à 1 usa a cache: nenhum pedido novo", async () => {
+    await abrir6();
+    await waitFor(() => expect(pedidasSemFiltro()).toHaveLength(3));
+    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    await waitFor(() => expect(pedidasSemFiltro()).toHaveLength(4));
+    const n = paginas().length;
+    fireEvent.click(screen.getByRole("button", { name: "Anterior" }));
+    await screen.findByText(/Página 1 de 6/);
+    await assentar();
+    expect(paginas()).toHaveLength(n);
+  });
+  it("mudar o filtro limpa a cache e recomeça (1, 2 e 3 do novo filtro; e voltar a «sem filtro» lê de novo)", async () => {
+    await abrir6();
+    await waitFor(() => expect(pedidasSemFiltro()).toHaveLength(3));
+    escolher("Marca", "Roca");
+    await waitFor(() => expect(paginas().filter((c) => c.a.p_marca === "Roca").map((c) => c.a.p_pagina).sort()).toEqual([1, 2, 3]));
+    escolher("Marca", "Todas as marcas");
+    await waitFor(() => expect(pedidasSemFiltro().filter((p) => p === 1)).toHaveLength(2));
+  });
+  it("uma falha a pré-carregar não mostra erro, e a página lê-se normalmente quando se pede", async () => {
+    let falhas = 0;
+    base.responder = (f, a) => { if (f === "cat_ler_produtos_pagina" && a.p_pagina === 2 && falhas++ === 0) return { data: null, error: { message: "rede em baixo" } }; return seis(f, a); };
+    porCatalogo(montar()); const S = seed(); const run = (fn: () => void) => fn();
+    render(<CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={real()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
+    await screen.findByText(/Página 1 de 6/);
+    await waitFor(() => expect(falhas).toBe(1));
+    await assentar();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText(/rede em baixo/)).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    await screen.findByText(/Página 2 de 6/);
+    expect(painel().getByRole("button", { name: "Produto da página 2" })).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+  it("a última página não pré-carrega para lá de `paginas`", async () => {
+    await pagina(); // 3 páginas
+    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    await screen.findByText(/Página 2 de 3/);
+    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    await screen.findByText(/Página 3 de 3/);
+    await assentar();
+    expect(Math.max(...paginas().map((c) => c.a.p_pagina as number))).toBe(3);
+  });
+  it("depois de gravar no Catálogo (o Catálogo é relido) a cache invalida-se e a página volta a ler-se", async () => {
+    const K = montar();
+    base.responder = seis; porCatalogo(K); const S = seed(); const run = (fn: () => void) => fn();
+    const el = (k: Catalogo) => <CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={real()} />;
+    const { rerender } = render(el(K));
+    fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
+    await screen.findByText(/Página 1 de 6/);
+    await waitFor(() => expect(pedidasSemFiltro()).toHaveLength(3));
+    act(() => { porCatalogo(montar()); });
+    rerender(el(K));
+    await waitFor(() => expect(pedidasSemFiltro().filter((p) => p === 1).length).toBeGreaterThanOrEqual(2));
   });
 });
 

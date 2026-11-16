@@ -22,6 +22,7 @@ import {
   SEM_CATEGORIA_PRODUTO, SEM_FILTRO_PRODUTOS, categoriasDeProdutos, filtrarProdutosCatalogo, haProdutosSemCategoria, modelosDeProdutos, normalizarMarca, subcategoriasDeProdutos,
   type FiltroProdutos,
 } from "./filtroProdutosCatalogo";
+import { CachePaginas } from "./real/cachePaginasProdutos";
 import {
   lerProdutosContagens, lerProdutosPagina, type ContagensProdutos, type FiltroServidor, type LinhaPaginaProduto, type PaginaProdutos,
 } from "./real/produtosPaginados";
@@ -32,13 +33,17 @@ const ID_RAZAO_ANT = "prod-pag-razao-ant", ID_RAZAO_SEG = "prod-pag-razao-seg";
 /* ------------------------------------------------------------------ leituras */
 interface Leitura<T> { dados: T | null; erro: string | null; aLer: boolean; tentar: () => void }
 /** Uma leitura ao servidor que se repete quando `deps` mudam. Mantém os dados anteriores enquanto lê (a lista não pisca); `ativa` false não lê. */
-function useLeitura<T>(ler: () => Promise<Res<T>>, deps: readonly unknown[], ativa = true): Leitura<T> {
+function useLeitura<T>(ler: () => Promise<Res<T>>, deps: readonly unknown[], ativa = true, lerSinc?: () => T | undefined): Leitura<T> {
   const [e, setE] = useState<{ dados: T | null; erro: string | null; aLer: boolean }>({ dados: null, erro: null, aLer: ativa });
   const [n, setN] = useState(0);
   const lerRef = useRef(ler);
   lerRef.current = ler;
+  const sincRef = useRef(lerSinc);
+  sincRef.current = lerSinc;
   useEffect(() => {
     if (!ativa) return undefined;
+    const emCache = sincRef.current?.(); // uma página já em cache mostra-se logo, sem «A ler…»
+    if (emCache !== undefined) { setE({ dados: emCache, erro: null, aLer: false }); return undefined; }
     let vivo = true;
     setE((x) => ({ ...x, erro: null, aLer: true }));
     lerRef.current().then(
@@ -120,8 +125,15 @@ export function ProdutosPagina({ K, real, nomeServico, onAbrir, onAbrirProduto, 
   // a lista: o que o servidor devolve para a pesquisa e os filtros
   const semCategoria = fe.cat === SEM_CATEGORIA_PRODUTO;
   const filtro: FiltroServidor = { q: qDeb, categoria: cat && !semCategoria ? baseDe(cat) : "", subcategoria: sub ? baseDe(sub) : "", modelo, marca: fe.marca, semCategoria };
-  const pag = useLeitura<PaginaProdutos>(() => lerProdutosPagina(real.org, filtro, pagina), [real.org, qDeb, filtro.categoria, filtro.subcategoria, modelo, fe.marca, semCategoria, pagina, K]);
+  // cache das páginas (org + filtros + pesquisa + limite + página): mudar filtros, pesquisa, organização ou o Catálogo (K é relido depois de gravar) recomeça-a
+  const cacheRef = useRef<CachePaginas | null>(null);
+  if (!cacheRef.current) cacheRef.current = new CachePaginas(lerProdutosPagina);
+  const cache = cacheRef.current;
+  cache.contexto(real.org, filtro, K);
+  const pag = useLeitura<PaginaProdutos>(() => cache.obter(real.org, filtro, pagina), [real.org, qDeb, filtro.categoria, filtro.subcategoria, modelo, fe.marca, semCategoria, pagina, K], true, () => cache.ver(real.org, filtro, pagina));
   const dados = pag.dados;
+  // mostrada a página N, pré-carrega N+1 e N+2 em segundo plano (nunca para lá da última; uma falha é silenciosa)
+  useEffect(() => { if (dados && dados.pagina === pagina) cache.precarregar(real.org, filtro, pagina, dados.paginas); }, [dados, pagina]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (dados && dados.paginas > 0 && pagina > dados.paginas) setPagina(dados.paginas); }, [dados, pagina]);
   useEffect(() => { if (dados) onLinhas?.(dados.produtos); }, [dados]); // eslint-disable-line react-hooks/exhaustive-deps
   // depois de mudar de página o foco vai ao topo da lista, que anuncia «Página X de Y» (aria-live)
