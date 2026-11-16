@@ -33,9 +33,10 @@ describe("Catálogo e custos (ligado à base)", () => {
     render(<MemoryRouter><CatalogoCustos /></MemoryRouter>);
     expect(await screen.findByText("Ponto de água de teste", {}, { timeout: 5000 })).toBeInTheDocument();
     expect(rpc).toHaveBeenCalledWith("cat_ler_catalogo", { p_org: "11111111-1111-4111-a111-111111111111" });
-    // abrir não grava nada (nada mudou): só as leituras do Catálogo e das linhas do modelo (29/10)
+    // abrir não grava nada (nada mudou): só as leituras do Catálogo e das linhas do modelo (29/10). 16/11: os atributos lêem-se só nas definições
+    // (cat_ler_atributos traria os valores de todos os produtos) e a lista de Produtos só se lê quando o separador abre (por páginas).
     await new Promise((r) => setTimeout(r, 1200));
-    expect(rpc.mock.calls.map((c) => c[0]).sort()).toEqual(["cat_ler_catalogo", "neg_ler_linhas_modelo"]);
+    expect(rpc.mock.calls.map((c) => c[0]).sort()).toEqual(["cat_ler_atributos_definicoes", "cat_ler_catalogo", "cat_ler_modelos_gestao", "cat_ler_produtos_tabelas", "neg_ler_linhas_modelo"]);
   });
   it("sem permissão, diz porquê", async () => {
     rpc.mockResolvedValue({ data: null, error: { code: "CT001", message: "Sem permissão (services.view)." } });

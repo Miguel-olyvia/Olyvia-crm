@@ -59,9 +59,10 @@ export function subcategoriasDeProdutos(K: Modelo, cat: string): RamoFiltro[] {
 
 /** Os modelos de uma subcategoria (o nó da árvore), por número e nome: «0001 · SORTY». Um desativado só se algum produto ainda o tem (`inativa`).
  *  Sem subcategoria ou sem os modelos na base: vazio. */
-export function modelosDeProdutos(K: Pick<Catalogo, "modelos" | "produtos">, sub: string): RamoFiltro[] {
+export function modelosDeProdutos(K: Pick<Catalogo, "modelos" | "produtos">, sub: string, usadosNaBase?: ReadonlySet<string>): RamoFiltro[] {
   if (!sub || !K.modelos) return [];
-  const usados = new Set(K.produtos.flatMap((p) => (p.modeloId ? [p.modeloId] : [])));
+  // 16/11: no Catálogo por páginas os produtos do K já não trazem o modelo; os modelos em uso vêm das contagens (usadosNaBase)
+  const usados = new Set([...K.produtos.flatMap((p) => (p.modeloId ? [p.modeloId] : [])), ...(usadosNaBase ?? [])]);
   return K.modelos.filter((m) => m.sub === sub && (m.ativo || usados.has(m.id)))
     .sort((a, b) => a.numero - b.numero || a.n.localeCompare(b.n, "pt"))
     .map((m): RamoFiltro => ({ id: m.id, n: rotuloModelo({ numero: m.numero, nome: m.n }), ...(m.ativo ? {} : { inativa: true as const }) }));

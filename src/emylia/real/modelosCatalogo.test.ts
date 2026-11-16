@@ -66,16 +66,13 @@ describe("lerCatalogo: os modelos são tolerantes", () => {
     },
   }) as never;
 
-  it("lê os modelos e as ligações dos produtos (só os produtos com modelo, da organização)", async () => {
-    const L = await lerCatalogo(sb(() => ({ data: MODELOS, error: null }), () => ({ data: [{ id: P1, model_id: M1 }], error: null })), ORG);
-    expect(montar(L).K.produtos[0]).toMatchObject({ modeloId: M1, modelo: "SORTY" });
-  });
-  it("lê mais de uma página de ligações", async () => {
-    const pagina = Array.from({ length: 1000 }, (_, i) => ({ id: `x${i}`, model_id: M1 }));
-    const pedidos: number[] = [];
-    const L = await lerCatalogo(sb(() => ({ data: MODELOS, error: null }), (de) => { pedidos.push(de); return { data: de === 0 ? pagina : [{ id: P1, model_id: M1 }], error: null }; }), ORG);
-    expect(pedidos).toEqual([0, 1000]);
-    expect(L.modelos?.produtos).toHaveLength(1001);
+  it("lê os modelos mas já não lê products.model_id: o modelo de cada produto vem da lista e da ficha (16/11)", async () => {
+    let leuTabela = false;
+    const L = await lerCatalogo(sb(() => ({ data: MODELOS, error: null }), () => { leuTabela = true; return { data: [{ id: P1, model_id: M1 }], error: null }; }), ORG);
+    expect(leuTabela).toBe(false);
+    expect(L.modelos?.lista).toHaveLength(2);
+    expect(L.modelos?.produtos).toBeNull();
+    expect(montar(L).K.produtos[0].modeloId).toBeUndefined();
   });
   it("função por criar, erro, exceção ou sem modelos: o Catálogo lê-se na mesma, sem modelos", async () => {
     const falhas = [
@@ -90,19 +87,6 @@ describe("lerCatalogo: os modelos são tolerantes", () => {
       expect(L.produtos).toHaveLength(1);
       expect(L.modelos).toBeUndefined();
     }
-  });
-  it("a leitura dos produtos a falhar não deita abaixo o Catálogo nem os modelos", async () => {
-    for (const f of [() => ({ data: null, error: { message: "x" } }), () => { throw new Error("rede"); }]) {
-      const L = await lerCatalogo(sb(() => ({ data: MODELOS, error: null }), f), ORG);
-      expect(L.modelos?.lista).toHaveLength(2);
-      expect(L.modelos?.produtos).toBeNull();
-    }
-  });
-  it("uma lista de modelos vazia não consulta os produtos", async () => {
-    let consultou = false;
-    const L = await lerCatalogo(sb(() => ({ data: { modelos: [] }, error: null }), () => { consultou = true; return { data: [], error: null }; }), ORG);
-    expect(consultou).toBe(false);
-    expect(L.modelos?.lista).toEqual([]);
   });
 });
 

@@ -4,7 +4,12 @@
 // Escala para centenas de serviços e milhares de produtos: as contas ficam em useMemo e as listas
 // mostram aos poucos ("Mostrar mais").
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Clock, Plus, Search, Sparkles, TriangleAlert, UserX } from "lucide-react";
+import { Clock, Plus, TriangleAlert, UserX } from "lucide-react";
+import { LISTA, NOTA, VALORES, REALCE, Novo, Procurar, Vazio } from "./pecasListaCatalogo";
+import { ProdutosPagina } from "./ProdutosPagina";
+import { FichaProdutoAberto } from "./FichaProdutoAberto";
+import { FichaProduto } from "./FichaProduto";
+import type { LinhaPaginaProduto } from "./real/produtosPaginados";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, pct, type SvcId } from "./motor";
@@ -32,7 +37,6 @@ import { ComboPesquisa, type ItemCombo } from "./ComboPesquisa";
 import { Campo } from "./pecasForm";
 import { SEM_CATEGORIA_PRODUTO, SEM_FILTRO_PRODUTOS, haProdutosSemCategoria, modelosDeProdutos, normalizarMarca, categoriasDeProdutos, filtrarProdutosCatalogo, subcategoriasDeProdutos, type FiltroProdutos } from "./filtroProdutosCatalogo";
 import { rotuloModelo } from "./modelosDados";
-import { FichaProduto } from "./FichaProduto";
 import { PROVISORIA } from "./ReferenciaFicha";
 import { ResumoAtributos } from "./AtributosProduto";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
@@ -44,27 +48,12 @@ import { podeCriarTipo, usePermissoesCatalogo } from "./permissoesCatalogo";
 
 type Seccao = "servicos" | "produtos" | "equipamentos" | "consumiveis" | "tecnicos" | "ligacoes";
 const SECCOES: [Seccao, string][] = [["servicos", "Serviços"], ["produtos", "Produtos"], ["equipamentos", "Equipamentos"], ["consumiveis", "Consumíveis"], ["tecnicos", "Técnicos"], ["ligacoes", "Ligações"]];
-const LISTA = "divide-y divide-border rounded-2xl border border-border bg-card px-4 shadow-[var(--shadow-sm)] sm:px-5";
-const NOTA = "text-[15px] text-muted-foreground";
-// Os valores à direita da linha (preço, custo, margem). No telemóvel passam para uma linha própria por baixo do nome, lado a lado,
-// para o nome não ficar espremido numa coluna estreita; a partir de sm voltam a ser a coluna da direita.
-const VALORES = "flex basis-full flex-wrap items-baseline gap-x-3 sm:block sm:basis-auto sm:shrink-0 sm:text-right";
 const POR_GRUPO = 8, POR_PAGINA = 40;
 const CHIP = (on: boolean) => cn("inline-flex min-h-11 items-center rounded-lg border px-4 text-[15px] transition-colors", on ? "border-primary bg-primary/10 font-medium" : "border-input bg-card hover:bg-muted");
 
 // a página lembra-se do separador enquanto a sessão dura (ex.: ao voltar de um orçamento)
 let ultimaSeccao: Seccao = "servicos";
 
-function Procurar({ v, onChange, rotulo, ph }: { v: string; onChange: (s: string) => void; rotulo: string; ph: string }) {
-  return (
-    <label className="relative block w-full max-w-xl">
-      <span className="sr-only">{rotulo}</span>
-      <Search className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-      <input type="search" value={v} onChange={(e) => onChange(e.target.value)} placeholder={ph}
-        className="h-11 w-full rounded-lg border border-input bg-card pl-10 pr-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25" />
-    </label>
-  );
-}
 function MostrarMais({ faltam, onClick }: { faltam: number; onClick: () => void }) {
   if (faltam <= 0) return null;
   return (
@@ -80,10 +69,6 @@ const ComoSeCalcula = ({ children }: { children: ReactNode }) => (
     <p className={cn(NOTA, "mt-1")}>{children}</p>
   </details>
 );
-const Vazio = ({ children }: { children: ReactNode }) => <li className={cn(NOTA, "py-4")}>{children}</li>;
-// 27/10: o que se acabou de criar (CriarNoCatalogo) vai para o topo da lista, realçado, com o selo «Novo»
-const REALCE = cn("-mx-4 rounded-xl bg-primary/5 px-4 ring-1 ring-primary/30 sm:-mx-5 sm:px-5", ENTRADA);
-const Novo = () => <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-primary px-2 py-0.5 align-middle text-xs font-semibold text-primary-foreground"><Sparkles className="h-3 w-3" aria-hidden="true" />Novo</span>;
 /** A lista com o elemento realçado à cabeça. */
 const primeiro = <T,>(L: readonly T[], e: (x: T) => boolean): T[] => { const i = L.findIndex(e); return i <= 0 ? [...L] : [L[i], ...L.slice(0, i), ...L.slice(i + 1)]; };
 
@@ -452,6 +437,9 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   // 29/10: e a do consumível (?consumivel=…), a mesma ficha na variante consumível
   const [consAberto, setConsAberto] = useParamUrl<string>("consumivel", "");
   const voltarProduto = useRef<string | null>(null);
+  // 16/11: as linhas que a lista de Produtos por páginas trouxe (a ficha aberta delas tira daqui o modelo do produto)
+  const linhasVistas = useRef(new Map<string, LinhaPaginaProduto>());
+  const verLinhas = useCallback((L: readonly LinhaPaginaProduto[]) => { for (const l of L) linhasVistas.current.set(l.id, l); }, []);
   // vindo do orçamento ("Abrir a ficha do serviço"): a ficha abre na entrada do Catálogo (depois de a moldura a juntar ao histórico)
   useEffect(() => { if (pendente) { const t = window.setTimeout(() => setServicoUrl(pendente, { substituir: true }), 0); return () => window.clearTimeout(t); } return undefined; }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // 27/10: o Criar no Catálogo abre no lugar da lista (?criar=servico|produto|…): o "voltar" do browser fecha-o
@@ -559,7 +547,7 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   if (produtoAberto) {
     return (
       <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
-        <FichaProduto key={produtoAberto} p={K.produtos.find((x) => x.id === produtoAberto)} min={S.cfg.min} alvo={S.cfg.alvo} real={real} atributos={K.atributos} arvore={K.arvore} marcas={K.marcas} modelos={K.modelos}
+        <FichaProdutoAberto id={produtoAberto} K={K} vistas={linhasVistas.current} min={S.cfg.min} alvo={S.cfg.alvo} real={real}
           voltar={() => { voltarProduto.current = produtoAberto; setProdutoAberto(""); }} anunciar={anunciar} nomeServico={nomeServico}
           onAbrirServico={(sid) => { setProdutoAberto("", { substituir: true }); setAberto(sid); }} />
         {regiao}
@@ -596,8 +584,11 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   const corpo: Record<Seccao, () => ReactNode> = {
     servicos: () => <Servicos S={S} itens={itens} K={K} onAbrir={abrir} min={S.cfg.min} alvo={S.cfg.alvo} />,
     // 29/10: o produto de cada material do modelo (o que vai à encomenda de cliente); só na página real, no fim da coluna da lista
-    produtos: () => <Produtos K={K} nomeServico={nomeServico} onAbrir={abrir} onAbrirProduto={(id) => setProdutoAberto(id)} margem={S.cfg.alvo} novo={realce?.t === "produto" ? realce.id : undefined} real={real} anunciar={anunciar}
-      extra={real && <MateriaisModelo K={K} real={real} anunciar={anunciar} />} />,
+    // 16/11: na página real a lista vem do servidor por páginas (ProdutosPagina); sem «real» (protótipo) fica em memória
+    produtos: () => (real
+      ? <ProdutosPagina K={K} real={real} nomeServico={nomeServico} onAbrir={abrir} onAbrirProduto={(id) => setProdutoAberto(id)} margem={S.cfg.alvo} novo={realce?.t === "produto" ? realce.id : undefined} anunciar={anunciar}
+        onLinhas={verLinhas} extra={<MateriaisModelo K={K} real={real} anunciar={anunciar} />} />
+      : <Produtos K={K} nomeServico={nomeServico} onAbrir={abrir} onAbrirProduto={(id) => setProdutoAberto(id)} margem={S.cfg.alvo} novo={realce?.t === "produto" ? realce.id : undefined} real={real} anunciar={anunciar} />),
     equipamentos: () => <Equipamentos S={S} C={C} mudar={mudar} novo={realce?.t === "equipamento" ? realce.id : undefined} />,
     consumiveis: () => <Consumiveis todos={consumiveis} C={C} nomeServico={nomeServico} novo={realce?.t === "consumivel" ? realce.id : undefined} onAbrirConsumivel={(id) => setConsAberto(id)} real={real} anunciar={anunciar} />,
     tecnicos: () => <Tecnicos S={S} C={C} mudar={mudar} novo={realce?.t === "tecnico" ? realce.id : undefined} />,

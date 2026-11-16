@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { eur, pct, type SvcId } from "./motor";
-import type { AtributoDef, ModeloK, No, Produto } from "./v2/catalogoModelo";
+import type { AtributoDef, AtributoProduto, ModeloK, No, Produto } from "./v2/catalogoModelo";
+import { lerAtributosProduto } from "./real/produtosPaginados";
 import { numeroSku } from "./modelosDados";
 import { dataPT } from "./v2/custosModelo";
 import { margemEmPalavras } from "./fichaServico";
@@ -58,12 +59,32 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
   const [sugerirRef, setSugerirRef] = useState(false);
   const anunciarMudanca = (msg: string) => { anunciar(msg); setSugerirRef(true); };
   useEffect(() => { titulo.current?.focus(); }, []);
+  // 16/11: os atributos do produto lêem-se ao abrir a ficha (cat_ler_atributos_produto): o arranque do Catálogo já não traz os valores de todos os produtos
+  const lerAttrs = !cons && !!real && !!p && eUuid(p.id) && !!atributos?.length;
+  const [lidos, setLidos] = useState<{ id: string; attrs: AtributoProduto[] } | null>(null);
+  const [erroAttrs, setErroAttrs] = useState<string | null>(null);
+  const [versaoAttrs, setVersaoAttrs] = useState(0);
+  const idP = p?.id, org = real?.org;
+  useEffect(() => {
+    if (!lerAttrs || !org || !idP) return undefined;
+    let vivo = true;
+    setErroAttrs(null);
+    lerAtributosProduto(org, idP).then(
+      (r) => { if (vivo) { if (r.ok) setLidos({ id: idP, attrs: r.v }); else setErroAttrs(r.erro); } },
+      (e: unknown) => { if (vivo) setErroAttrs(e instanceof Error && e.message ? e.message : "Não foi possível ler os atributos."); },
+    );
+    return () => { vivo = false; };
+  }, [lerAttrs, org, idP, versaoAttrs]);
   const topo = (
     <button type="button" onClick={voltar} className="inline-flex min-h-11 items-center gap-2 rounded-lg pr-3 text-[15px] font-medium text-muted-foreground hover:text-foreground">
       <ArrowLeft className="h-5 w-5" aria-hidden="true" />Voltar ao Catálogo
     </button>
   );
-  if (!p) {
+  // o produto com os atributos lidos agora; sem leitura (ainda, ou falhou) ficam os que já traz (o protótipo, os testes), e sem eles não se sabe: não se mostra o editor
+  const lido = lidos && lidos.id === p?.id ? lidos.attrs : undefined;
+  const pe = p && lido ? { ...p, attrs: lido } : p;
+  const aLerAttrs = lerAttrs && !!p && pe?.attrs === undefined;
+  if (!p || !pe) {
     return (
       <article aria-labelledby="ficha-t">
         {topo}
@@ -79,7 +100,7 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
         <p className={NOTA}>{[cons ? "Consumível" : "", p.marca, p.modelo ? `modelo ${numeroSku(p.modeloNumero ?? 0)} · ${p.modelo}` : "", p.sku ? `ref. ${p.sku}` : "", `unidade: ${p.un}`].filter(Boolean).join(" · ")}</p>
         <h1 id="ficha-t" ref={titulo} tabIndex={-1} className="text-3xl font-semibold tracking-tight outline-none">{p.n}</h1>
         {!cons && real && real.podeEditar && eUuid(p.id) && (
-          <ReferenciaFicha key={p.id} p={p} arvore={arvore} atributos={atributos} real={real} anunciar={anunciar} sugerir={sugerirRef} aoGerar={() => setSugerirRef(false)} />
+          <ReferenciaFicha key={p.id} p={pe} arvore={arvore} atributos={atributos} real={real} anunciar={anunciar} sugerir={sugerirRef} aoGerar={() => setSugerirRef(false)} />
         )}
         {p.servico && (
           <button type="button" onClick={() => onAbrirServico(p.servico!)} className={LINK}>Traz: {nomeServico(p.servico)}</button>
@@ -111,7 +132,11 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
       {/* 13/11: grava direto (cat_guardar_produto_atributos), como o PVP; a chave inclui os atributos para o bloco voltar ao que ficou na base */}
       {!cons && real && eUuid(p.id) && !!atributos?.length && (
         <Seccao id="fp-atrib" titulo="Atributos">
-          <AtributosFicha key={`${p.id}:${JSON.stringify(p.attrs ?? [])}`} p={p} defs={atributos} real={real} anunciar={anunciarMudanca} />
+          {aLerAttrs
+            ? (erroAttrs
+              ? <p role="alert" className="mt-3 text-[15px] text-destructive">Não foi possível ler os atributos: {erroAttrs} <Button variant="outline" className="ml-2 min-h-11 text-[15px]" onClick={() => setVersaoAttrs((n) => n + 1)}>Tentar de novo</Button></p>
+              : <p role="status" className={cn(NOTA, "mt-3")}>A ler os atributos…</p>)
+            : <AtributosFicha key={`${p.id}:${JSON.stringify(pe.attrs ?? [])}`} p={pe} defs={atributos} real={real} anunciar={(msg) => { anunciarMudanca(msg); setVersaoAttrs((n) => n + 1); }} />}
         </Seccao>
       )}
 

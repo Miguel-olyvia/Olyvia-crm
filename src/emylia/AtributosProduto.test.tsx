@@ -185,11 +185,33 @@ describe("ficha do produto: Atributos", () => {
     expect(within(sec).queryByRole("combobox")).toBeNull();
   });
 
-  it("produto sem atributos, com a lista definida: mostra a secção para juntar", () => {
+  // 16/11: o arranque do Catálogo já não traz os valores dos atributos (K.produtos sem attrs): a ficha lê-os do produto (cat_ler_atributos_produto)
+  it("produto sem atributos, com a lista definida: lê os do produto (nenhum) e mostra a secção para juntar", async () => {
+    base.respostas.cat_ler_atributos_produto = { data: { valores: [] }, error: null };
     ficha({ p: { ...PROD, attrs: undefined } });
     const sec = screen.getByRole("region", { name: "Atributos" });
-    expect(within(sec).getByText("Este produto ainda não tem atributos.")).toBeInTheDocument();
+    expect(within(sec).getByText("A ler os atributos…")).toBeInTheDocument();
+    expect(await within(sec).findByText("Este produto ainda não tem atributos.")).toBeInTheDocument();
     expect(within(sec).getByLabelText("Juntar atributo")).toBeInTheDocument();
+    expect(base.chamadas.find((c) => c.f === "cat_ler_atributos_produto")?.a).toEqual({ p_org: "org-1", p_produto: PID });
+  });
+  it("os atributos lidos do produto são os que a ficha mostra e edita", async () => {
+    base.respostas.cat_ler_atributos_produto = { data: { valores: [{ atributo: A_COR, opcao: O_BRANCO, valor: "Branco", medida: null }] }, error: null };
+    ficha({ p: { ...PROD, attrs: undefined } });
+    const sec = screen.getByRole("region", { name: "Atributos" });
+    expect(await within(sec).findByRole("combobox", { name: "Cor" })).toHaveValue("Branco");
+  });
+  it("depois de guardar, volta a ler os atributos do produto (e não só o Catálogo)", async () => {
+    base.respostas.cat_ler_atributos_produto = { data: { valores: [] }, error: null };
+    base.respostas.cat_guardar_produto_atributos = { data: { ok: true, n: 1 }, error: null };
+    ficha({ p: { ...PROD, attrs: undefined } });
+    const sec = screen.getByRole("region", { name: "Atributos" });
+    await within(sec).findByText("Este produto ainda não tem atributos.");
+    fireEvent.change(within(sec).getByLabelText("Juntar atributo"), { target: { value: A_COR } });
+    escolher(sec, "Cor", /^Preto/);
+    fireEvent.click(within(sec).getByRole("button", { name: "Guardar atributos" }));
+    await waitFor(() => expect(gravadas()).toHaveLength(1));
+    await waitFor(() => expect(base.chamadas.filter((c) => c.f === "cat_ler_atributos_produto")).toHaveLength(2));
   });
 });
 

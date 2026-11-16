@@ -73,42 +73,31 @@ export function juntarModelos(L: LinhasCatalogo, r: unknown, ligacoes: { id: str
   return { ...L, modelos: { lista: modelos, produtos: ligacoes } };
 }
 
-const PAGINA = 1000;
-type Cadeia = { select: (c: string) => Cadeia; eq: (c: string, v: unknown) => Cadeia; not: (c: string, op: string, v: unknown) => Cadeia; range: (de: number, ate: number) => Promise<{ data?: unknown; error?: unknown } | undefined> };
-/** O modelo de cada produto vivo da organização, lido da própria tabela products (RLS: quem vê a organização). Páginas de 1000; null se falhar. */
-async function lerLigacoesModelo(sb: SupabaseClient, org: string): Promise<{ id: string; model_id: string }[] | null> {
+/** A resposta de cat_ler_modelos_gestao; qualquer falha é «sem modelos», nunca um erro. 16/11: já não se lê products.model_id (14 328 linhas em páginas com OFFSET davam
+ *  timeout): o modelo de cada produto vem da página da lista (cat_ler_produtos_pagina) e da ficha. */
+async function lerModelos(sb: SupabaseClient, org: string): Promise<unknown> {
   try {
-    const out: { id: string; model_id: string }[] = [];
-    for (let de = 0; de < 100 * PAGINA; de += PAGINA) {
-      const p = await (sb as unknown as { from: (t: string) => Cadeia }).from("products").select("id, model_id").eq("organization_id", org).eq("is_deleted", false).not("model_id", "is", null).range(de, de + PAGINA - 1);
-      if (!p || p.error || !Array.isArray(p.data)) return null;
-      out.push(...(p.data as { id: string; model_id: string }[]));
-      if (p.data.length < PAGINA) break;
-    }
-    return out;
+    const m = (await sb.rpc("cat_ler_modelos_gestao" as never, { p_org: org } as never)) as { data?: unknown; error?: unknown } | undefined;
+    return m && !m.error ? m.data : null;
   } catch {
     return null;
   }
 }
 
-/** A resposta de cat_ler_modelos_gestao (e, se há modelos, as ligações dos produtos); qualquer falha é «sem modelos», nunca um erro. */
-async function lerModelos(sb: SupabaseClient, org: string): Promise<{ r: unknown; ligacoes: { id: string; model_id: string }[] | null }> {
-  try {
-    const m = (await sb.rpc("cat_ler_modelos_gestao" as never, { p_org: org } as never)) as { data?: unknown; error?: unknown } | undefined;
-    if (!m || m.error) return { r: null, ligacoes: null };
-    const lista = (m.data as { modelos?: unknown } | null)?.modelos;
-    // sem modelos nenhum produto tem modelo (FK): poupa-se a leitura da tabela
-    return { r: m.data, ligacoes: Array.isArray(lista) && lista.length ? await lerLigacoesModelo(sb, org) : [] };
-  } catch {
-    return { r: null, ligacoes: null };
-  }
-}
+type Resposta = { data?: unknown; error?: { code?: string; message?: string } | null } | undefined;
+/** A função não existe na base (PGRST202, 42883): é o único erro que justifica voltar à função antiga. */
+const funcaoEmFalta = (e: { code?: string; message?: string } | null | undefined) =>
+  !!e && (e.code === "PGRST202" || e.code === "42883" || /could not find the function|function .* does not exist/i.test(e.message ?? ""));
 
-/** A resposta de cat_ler_atributos; qualquer falha (função por criar, permissão, rede) é «sem atributos», nunca um erro. */
+/** 16/11: só as definições dos atributos (cat_ler_atributos_definicoes). A função antiga (cat_ler_atributos) trazia os valores de TODOS os produtos (8 MB na Mudelar) e só se
+ *  usa se a nova ainda não existe na base; qualquer outra falha (tempo, rede, permissão) é «sem atributos», nunca um erro nem a leitura pesada. */
 async function lerAtributos(sb: SupabaseClient, org: string): Promise<unknown> {
   try {
-    const a = (await sb.rpc("cat_ler_atributos" as never, { p_org: org } as never)) as { data?: unknown; error?: unknown } | undefined;
-    return a && !a.error ? a.data : null;
+    const a = (await sb.rpc("cat_ler_atributos_definicoes" as never, { p_org: org } as never)) as Resposta;
+    if (a && !a.error) return a.data;
+    if (!funcaoEmFalta(a?.error)) return null;
+    const v = (await sb.rpc("cat_ler_atributos" as never, { p_org: org } as never)) as Resposta;
+    return v && !v.error ? v.data : null;
   } catch {
     return null;
   }
@@ -124,5 +113,5 @@ export async function lerCatalogo(sb: SupabaseClient, org: string): Promise<Linh
   if (r.error) throw new Error(mensagemErroCatalogo(r.error));
   // sem a função nova (SQL 20270117100000 por colar) ou com erro nela: lê-se pelo texto, como antes
   if (t.error) console.info("Catálogo: produtos pelo texto (cat_ler_produtos_tabelas:", t.error.message ?? t.error.code, ")");
-  return juntarModelos(juntarAtributos(juntarTabelas(linhasDe(r.data), t.error ? null : t.data), a), m.r, m.ligacoes);
+  return juntarModelos(juntarAtributos(juntarTabelas(linhasDe(r.data), t.error ? null : t.data), a), m, null);
 }

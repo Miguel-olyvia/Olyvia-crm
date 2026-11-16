@@ -29,7 +29,8 @@ export interface No {
   inativa?: true;
 }
 /** 16/11: uma categoria (pai null) ou subcategoria de produtos. `id` e `pai` são ids de nós de K.arvore; `ordem` é o sort_order da base. */
-export interface CategoriaProdutoK { id: string; n: string; pai: string | null; ordem: number; inativa?: true }
+/** `origem`: o id em product_categories (o nó pode ser o do ofício dos serviços com o mesmo nome); é o que a base recebe nos filtros por páginas. */
+export interface CategoriaProdutoK { id: string; n: string; pai: string | null; ordem: number; inativa?: true; origem?: string }
 /** 16/11 (20270118300000): um modelo de produto. `sub`: o nó da árvore da subcategoria onde está (o mesmo id que Produto.no e CategoriaProdutoK). */
 export interface ModeloK { id: string; n: string; numero: number; sub: string; ativo: boolean }
 /** 13/11: a medida de um produto (atributo do tipo «medida»): 2D (largura × comprimento) ou 3D (com espessura), em cm ou mm. */

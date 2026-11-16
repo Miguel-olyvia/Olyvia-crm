@@ -119,13 +119,19 @@ describe("Stock e armazéns · marcar em lote no Catálogo", () => {
       { ...PROD, id: uuid(1), n: "Torneira lavatório" }, { ...PROD, id: uuid(2), n: "Torneira cozinha" }, { ...PROD, id: uuid(3), n: "Sifão" },
     ];
   });
-  it("Selecionar → todos os filtrados (respeita a pesquisa) → Marcar armazém manda esses ids; os recusados aparecem com o motivo", async () => {
+  // 16/11: na página real a lista vem do servidor por páginas (cat_ler_produtos_pagina): o que se seleciona é o que a página trouxe
+  const pagina1 = (...nomes: [number, string][]) => {
+    base.respostas.cat_ler_produtos_pagina = { data: { total: nomes.length, pagina: 1, limite: 50, paginas: 1, produtos: nomes.map(([n, nome]) => ({ id: uuid(n), nome, sku: null, marca: null, modelo_id: null, modelo: null, modelo_numero: null, unidade: "un", custo: 60, pvp: 100, atributos_resumo: null })) }, error: null };
+  };
+  it("Selecionar → todos os filtrados (a página que a pesquisa trouxe) → Marcar armazém manda esses ids; os recusados aparecem com o motivo", async () => {
     juntar();
+    pagina1([1, "Torneira lavatório"], [2, "Torneira cozinha"]);
     base.respostas.cat_definir_armazem_produtos = { data: { ok: true, alterados: 1, gere_stock_ligados: 1, gere_stock_desligados: 0, recusados: [{ product_id: uuid(2), nome: "Torneira cozinha", motivo: "Produto apagado." }] }, error: null };
     const r = real();
     pagina(r);
     fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
     fireEvent.change(screen.getByRole("searchbox", { name: "Procurar produto" }), { target: { value: "torneira" } });
+    await screen.findByRole("button", { name: "Torneira cozinha" });
     fireEvent.click(screen.getByRole("button", { name: "Selecionar" }));
     fireEvent.click(screen.getByRole("button", { name: "Selecionar todos os filtrados (2)" }));
     expect(screen.getByRole("checkbox", { name: "Selecionar Torneira lavatório" })).toBeChecked();
@@ -144,12 +150,14 @@ describe("Stock e armazéns · marcar em lote no Catálogo", () => {
     expect(recusados).toHaveTextContent("Torneira cozinha — Produto apagado.");
     expect(barra).not.toHaveTextContent(/gere stock/i);
   });
-  it("sem inventory.edit não há «Selecionar»; tocar na linha abre a ficha", () => {
+  it("sem inventory.edit não há «Selecionar»; tocar na linha abre a ficha", async () => {
     juntar();
+    pagina1([3, "Sifão"]);
     pagina(real({ podeStock: false }));
     fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
+    const sifao = await screen.findByRole("button", { name: "Sifão" });
     expect(screen.queryByRole("button", { name: "Selecionar" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Sifão" }));
+    fireEvent.click(sifao);
     expect(screen.getByRole("heading", { level: 1, name: "Sifão" })).toBeInTheDocument();
   });
   it("os consumíveis também: a linha abre a ficha do consumível e há «Selecionar»", () => {

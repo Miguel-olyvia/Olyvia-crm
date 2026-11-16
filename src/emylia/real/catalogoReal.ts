@@ -159,6 +159,13 @@ const dia = (v: string | null | undefined): string => (v ? String(v).slice(0, 10
 /** Do mais antigo para o mais recente (o último é o atual). */
 const porData = <T extends { valid_from: string | null }>(L: T[]) => [...L].sort((a, b) => String(a.valid_from ?? "").localeCompare(String(b.valid_from ?? "")));
 
+/** 16/11: os valores de atributos de um produto (cat_ler_atributos e cat_ler_atributos_produto) como Produto.attrs; um valor sem atributo fica de fora. */
+export function atributosDeValores(valores: readonly LinhaValorAtributo[] | null | undefined): AtributoProduto[] {
+  return (valores ?? []).filter((v) => v?.atributo).map((v): AtributoProduto => ({
+    atributoId: v.atributo, ...(v.opcao ? { opcaoId: v.opcao } : {}), ...(v.valor != null ? { valor: v.valor } : {}), ...(v.medida ? { medida: v.medida } : {}), ...(v.opcao && v.ativa === false ? { inativa: true as const } : {}),
+  }));
+}
+
 /** Monta o Catálogo e os custos da organização. `base` é o Catálogo de partida (catalogo0()): ficam dele os parâmetros da demolição. */
 export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Record<SvcId, Servico>): CatalogoMontado {
   // perfis: a chave da Emylia (ou o id)
@@ -184,9 +191,7 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
   // 13/11: os atributos (cat_ler_atributos); sem eles, K.atributos fica por definir e os produtos sem attrs
   const attrsDe = new Map<string, AtributoProduto[]>();
   for (const x of L.atributos?.produtos ?? []) {
-    const vs = (x.valores ?? []).filter((v) => v?.atributo).map((v): AtributoProduto => ({
-      atributoId: v.atributo, ...(v.opcao ? { opcaoId: v.opcao } : {}), ...(v.valor != null ? { valor: v.valor } : {}), ...(v.medida ? { medida: v.medida } : {}), ...(v.opcao && v.ativa === false ? { inativa: true as const } : {}),
-    }));
+    const vs = atributosDeValores(x.valores);
     if (vs.length) attrsDe.set(x.id, vs);
   }
   // 16/11: o modelo de cada produto (só o que a lista dos modelos traz: um modelo apagado deixa o produto sem modelo)
@@ -231,7 +236,7 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
     // 16/11: a árvore dos produtos tal como a base a tem (com os nós da árvore do Catálogo), para os filtros da lista de Produtos
     ...(junta && T ? { categoriasProduto: T.categoriasProduto.flatMap((c): CategoriaProdutoK[] => {
       const id = junta.noDe(c.id);
-      return id ? [{ id, n: c.name, pai: c.parent_id ? junta.noDe(c.parent_id) : null, ordem: n(c.sort_order), ...(c.ativa === false ? { inativa: true as const } : {}) }] : [];
+      return id ? [{ id, origem: c.id, n: c.name, pai: c.parent_id ? junta.noDe(c.parent_id) : null, ordem: n(c.sort_order), ...(c.ativa === false ? { inativa: true as const } : {}) }] : [];
     }) } : {}),
   };
 

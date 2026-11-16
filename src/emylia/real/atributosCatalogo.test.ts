@@ -63,10 +63,13 @@ describe("juntarAtributos", () => {
 describe("lerCatalogo: a 3.ª chamada é tolerante", () => {
   const catalogo = { data: { produtos: [prod(P1, "Mosaico")] }, error: null };
   const sb = (atributos: () => unknown) => ({
-    rpc: async (fn: string) => (fn === "cat_ler_atributos" ? atributos() : fn === "cat_ler_catalogo" ? catalogo : { data: null, error: { message: "sem função" } }),
+    rpc: async (fn: string) => (fn === "cat_ler_atributos_definicoes" || fn === "cat_ler_atributos" ? atributos() : fn === "cat_ler_catalogo" ? catalogo : { data: null, error: { message: "sem função" } }),
   }) as never;
-  it("lê os atributos quando a função responde", async () => {
-    const L = await lerCatalogo(sb(() => ({ data: RESPOSTA, error: null })), ORG);
+  it("lê os atributos pela função antiga quando a nova (definições) ainda não existe na base", async () => {
+    const chamadas: string[] = [];
+    const antigo = { rpc: async (fn: string) => { chamadas.push(fn); return fn === "cat_ler_atributos" ? { data: RESPOSTA, error: null } : fn === "cat_ler_catalogo" ? catalogo : { data: null, error: { code: "PGRST202", message: "Could not find the function public." + fn } }; } } as never;
+    const L = await lerCatalogo(antigo, ORG);
+    expect(chamadas).toContain("cat_ler_atributos_definicoes");
     expect(L.atributos?.defs).toHaveLength(2);
     expect(montar(L).K.produtos[0].attrs).toHaveLength(2);
   });

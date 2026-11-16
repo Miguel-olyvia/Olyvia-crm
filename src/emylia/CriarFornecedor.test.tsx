@@ -59,7 +59,9 @@ const preencherConsumivel = () => {
   fireEvent.change(screen.getByLabelText("Preço"), { target: { value: "4" } });
 };
 /** As funções cat_* chamadas: só a leitura dos fornecedores, nenhuma escrita. */
-const escritas = () => base.chamadas.map((c) => c.f).filter((f) => f.startsWith("cat_"));
+// 16/11: as leituras da lista de Produtos por páginas (cat_ler_produtos_pagina/contagens) não são escritas
+const LISTA_POR_PAGINAS = ["cat_ler_produtos_pagina", "cat_ler_produtos_contagens"];
+const escritas = () => base.chamadas.map((c) => c.f).filter((f) => f.startsWith("cat_") && !LISTA_POR_PAGINAS.includes(f));
 const novoFornecedor = async () => { await pronto(); fireEvent.click(campo()); fireEvent.click(screen.getByRole("option", { name: "Novo fornecedor…" })); return screen.getByRole("group", { name: "Novo fornecedor" }); };
 
 describe("produto: campo Fornecedor real", () => {
