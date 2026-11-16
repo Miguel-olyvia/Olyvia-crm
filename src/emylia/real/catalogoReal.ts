@@ -5,7 +5,7 @@
 import type { MedKey, Servico, SvcId } from "../motor";
 import type { ItemCatalogo, LinhaCat } from "../catalogo";
 import type { Custos, LinhaEstrutura, ModoPreco, Parametros, PassoMO, ReceitaV2, UsoCons, UsoEquip } from "../v2/custosModelo";
-import type { AtributoDef, AtributoProduto, Catalogo, CategoriaProdutoK, MedidaAtributo, No, Produto, Regra } from "../v2/catalogoModelo";
+import type { AtributoDef, AtributoProduto, Catalogo, CategoriaProdutoK, MedidaAtributo, ModeloK, No, Produto, Regra } from "../v2/catalogoModelo";
 import type { EntulhoSvc } from "../entulho";
 import type { FichaTecnico } from "../equipa/tecnicos";
 
@@ -67,6 +67,9 @@ export interface LinhaAtributo {
 /** `ativa`: false se a opção foi desativada (o id continua a vir; `opcoes` da lista só traz as ativas). */
 export interface LinhaValorAtributo { atributo: string; opcao: string | null; valor: string | null; medida: MedidaAtributo | null; ativa?: boolean }
 export interface LinhasAtributos { defs: LinhaAtributo[]; produtos: { id: string; valores: LinhaValorAtributo[] }[] }
+/** 16/11 (cat_ler_modelos_gestao): um modelo; `subcategoria` é o id em product_categories. `produtos`: o modelo de cada produto (products.model_id); null = não se leu. */
+export interface LinhaModelo { id: string; nome: string; numero: number; ativo: boolean; subcategoria: string }
+export interface LinhasModelos { lista: LinhaModelo[]; produtos: { id: string; model_id: string }[] | null }
 export interface LinhaPrecoProduto { product_id: string; price_type: string; price: number; valid_from: string | null }
 export interface LinhaFornecedorProduto { product_id: string; purchase_price: number | null; preco_data: string | null; ligacao: string; fornecedor: string | null }
 export interface LinhaTecnico { id: string; nome: string; custo_hora: number | null; perfis: string[] }
@@ -93,6 +96,8 @@ export interface LinhasCatalogo {
   tabelas?: LinhasTabelas;
   /** 13/11 (cat_ler_atributos): os atributos dos produtos. Sem o campo (função por criar ou com erro): o ecrã não os mostra. */
   atributos?: LinhasAtributos;
+  /** 16/11 (cat_ler_modelos_gestao + products.model_id): os modelos. Sem o campo (função por criar ou com erro): o ecrã não os oferece. */
+  modelos?: LinhasModelos;
 }
 
 /* ------------------------------------------------------------------ o resultado */
@@ -184,6 +189,10 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
     }));
     if (vs.length) attrsDe.set(x.id, vs);
   }
+  // 16/11: o modelo de cada produto (só o que a lista dos modelos traz: um modelo apagado deixa o produto sem modelo)
+  const modeloPorId = new Map((L.modelos?.lista ?? []).map((m) => [m.id, m]));
+  const modeloDe = new Map<string, LinhaModelo>();
+  for (const x of L.modelos?.produtos ?? []) { const m = modeloPorId.get(x.model_id); if (m) modeloDe.set(x.id, m); }
   const defsAtributos: AtributoDef[] | undefined = L.atributos
     ? [...L.atributos.defs].filter((d) => d?.id).sort((a, b) => n(a.ordem) - n(b.ordem)).map((d) => ({
       id: d.id, codigo: d.codigo, nome: d.nome, tipo: d.tipo, temHex: !!d.tem_hex, ordem: n(d.ordem),
@@ -217,6 +226,8 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
     produtos: [], pacotes: [], classe: {}, exigeProduto: {}, qtdDe: {}, perguntaManter: {}, fasesServico: {}, entulhoServico: {}, icone: {},
     equivalentes: undefined, servicosCriados: [], consumiveisCriados: [],
     ...(defsAtributos ? { atributos: defsAtributos } : {}),
+    // 16/11: os modelos, com a subcategoria como nó da árvore (o mesmo id que Produto.no)
+    ...(L.modelos ? { modelos: L.modelos.lista.map((m): ModeloK => ({ id: m.id, n: m.nome, numero: m.numero, sub: junta ? junta.noDe(m.subcategoria) ?? m.subcategoria : m.subcategoria, ativo: m.ativo })) } : {}),
     // 16/11: a árvore dos produtos tal como a base a tem (com os nós da árvore do Catálogo), para os filtros da lista de Produtos
     ...(junta && T ? { categoriasProduto: T.categoriasProduto.flatMap((c): CategoriaProdutoK[] => {
       const id = junta.noDe(c.id);
@@ -286,6 +297,7 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
         ...(p.entulho_m3 != null ? { entulho: { m3: n(p.entulho_m3), ...(p.entulho_kg != null ? { kg: n(p.entulho_kg) } : {}) } } : {}),
         ...(Array.isArray(p.image_urls) && p.image_urls.length ? { fotos: p.image_urls.filter((u) => typeof u === "string" && u) } : {}),
         ...(attrsDe.has(p.id) ? { attrs: attrsDe.get(p.id) } : {}),
+        ...(modeloDe.has(p.id) ? { modeloId: modeloDe.get(p.id)!.id, modelo: modeloDe.get(p.id)!.nome, modeloNumero: modeloDe.get(p.id)!.numero } : {}),
       };
       K.produtos.push(prod);
     } else if (!usados.has(p.id)) {

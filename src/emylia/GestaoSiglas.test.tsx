@@ -22,6 +22,13 @@ const C1 = "c0000000-0000-4000-a000-000000000001", C2 = "c0000000-0000-4000-a000
 const S1 = "50000000-0000-4000-a000-000000000001", S2 = "50000000-0000-4000-a000-000000000002";
 const A_MED = "aaaaaaaa-0000-4000-a000-000000000002", A_COR = "aaaaaaaa-0000-4000-a000-000000000001", A_BRI = "aaaaaaaa-0000-4000-a000-000000000003";
 const O_AZUL = "bbbbbbbb-0000-4000-a000-000000000001", O_VERM = "bbbbbbbb-0000-4000-a000-000000000002";
+const M1 = "e0000000-0000-4000-a000-000000000001", M2 = "e0000000-0000-4000-a000-000000000002";
+/** Os modelos (20270118300000): na subcategoria «Torneiras» (S1) o SORTY 0001 e o STONE PLUS 0003 (desativado: não se escolhe); noutra subcategoria, o ZEUS. */
+const modelos = () => ({ modelos: [
+  { id: M1, nome: "SORTY", numero: 1, ativo: true, usados: 2, subcategoria: { id: S1, nome: "Torneiras", sigla: "TO", ativo: true }, categoria: { id: C1, nome: "Casa de banho", sigla: "BC" } },
+  { id: M2, nome: "STONE PLUS", numero: 3, ativo: true, usados: 0, subcategoria: { id: S1, nome: "Torneiras", sigla: "TO", ativo: true }, categoria: { id: C1, nome: "Casa de banho", sigla: "BC" } },
+  { id: "e0000000-0000-4000-a000-000000000009", nome: "ZEUS", numero: 7, ativo: true, usados: 0, subcategoria: { id: S2, nome: "Louças", sigla: null, ativo: true }, categoria: { id: C1, nome: "Casa de banho", sigla: "BC" } },
+] });
 
 const categorias = () => ({
   categorias: [
@@ -52,7 +59,8 @@ const razao = (b: HTMLElement) => (b.getAttribute("aria-describedby") ?? "").spl
 
 beforeEach(() => {
   base.chamadas = [];
-  base.responder = (f) => (f === "cat_ler_categorias_gestao" ? { data: categorias(), error: null } : f === "cat_ler_atributos_gestao" ? { data: atributos(), error: null } : { data: { ok: true }, error: null });
+  base.responder = (f) => (f === "cat_ler_categorias_gestao" ? { data: categorias(), error: null } : f === "cat_ler_atributos_gestao" ? { data: atributos(), error: null }
+    : f === "cat_ler_modelos_gestao" ? { data: { modelos: [] }, error: null } : { data: { ok: true }, error: null });
 });
 afterEach(cleanup);
 
@@ -192,14 +200,14 @@ describe("Separador «Referência (SKU)»", () => {
     fireEvent.click(within(bloco).getByRole("combobox", { name: rotulo }));
     fireEvent.click(screen.getByRole("option", { name: opcao }));
   };
-  const comPrever = (sku: string | null) => {
+  const comModelos = () => {
     base.responder = (f) => (f === "cat_ler_categorias_gestao" ? { data: categorias(), error: null } : f === "cat_ler_atributos_gestao" ? { data: atributos(), error: null }
-      : f === "cat_prever_sku" ? { data: { sku, faltas: [] }, error: null } : { data: { ok: true }, error: null });
+      : f === "cat_ler_modelos_gestao" ? { data: modelos(), error: null } : { data: { ok: true }, error: null });
   };
-  it("a composição começa por Categoria, Subcategoria e Número, fixos e presos: sem Subir/Descer nem interruptor, com «Fixo: a referência base»", async () => {
+  it("a composição começa por Categoria, Subcategoria e Modelo, fixos e presos: sem Subir/Descer nem interruptor, com «Fixo: a referência base»", async () => {
     const { bloco } = await abrir();
     const fixos = within(bloco).getAllByRole("listitem").slice(0, 3);
-    expect(fixos.map((l) => (l.textContent ?? "").replace(/^\d+\.\s*/, "").split(/Fixo/)[0].trim())).toEqual(["Categoria", "Subcategoria", "Número (4 dígitos)"]);
+    expect(fixos.map((l) => (l.textContent ?? "").replace(/^\d+\.\s*/, "").split(/Fixo/)[0].trim())).toEqual(["Categoria", "Subcategoria", "Modelo (4 dígitos)"]);
     for (const l of fixos) {
       expect(within(l).getByText("Fixo: a referência base")).toBeInTheDocument();
       expect(within(l).queryByRole("button", { name: /Subir|Descer/ })).toBeNull();
@@ -211,19 +219,46 @@ describe("Separador «Referência (SKU)»", () => {
     expect(nomes(bloco)).toEqual(["Cor", "Brilho", "Medida"]);
     expect(within(bloco).getByTestId("exemplo-sku")).toHaveTextContent("BC-TO-0001-AZ-60X30");
     expect(within(bloco).getByText(/simplesmente não entram/)).toBeInTheDocument();
+    // o número de 4 dígitos é o do modelo (já não um contador por categoria e subcategoria)
+    expect(within(bloco).getByText(/O número vem do modelo do produto/)).toBeInTheDocument();
+    expect(within(bloco).queryByText(/Conta-se por categoria/)).toBeNull();
   });
-  it("escolher categoria e subcategoria usa as siglas reais, mostra «Sigla: …» e a próxima referência da base (cat_prever_sku)", async () => {
+  it("escolher categoria, subcategoria e MODELO usa as siglas reais e o número do modelo: «Sigla: …», «Modelo escolhido: SORTY → 0001» e o exemplo", async () => {
+    comModelos();
     const { bloco } = await abrir();
     expect(within(bloco).getByRole("combobox", { name: "Subcategoria" })).toBeDisabled();
     expect(within(bloco).getByText(/Escolha primeiro a categoria/)).toBeInTheDocument();
-    comPrever("BC-TO-0003");
+    expect(within(bloco).getByRole("combobox", { name: "Modelo" })).toBeDisabled();
+    expect(within(bloco).getByText(/Escolha primeiro a subcategoria/)).toBeInTheDocument();
     escolherCombo(bloco, "Categoria", "Casa de banho");
     expect(within(bloco).getByText("Sigla: BC")).toBeInTheDocument();
     escolherCombo(bloco, "Subcategoria", "Torneiras");
     expect(within(bloco).getByText("Sigla: TO")).toBeInTheDocument();
-    await waitFor(() => expect(within(bloco).getByTestId("exemplo-sku")).toHaveTextContent("BC-TO-0003-AZ-60X30"));
-    expect(within(bloco).getByText(/A próxima referência desta base:/)).toHaveTextContent("A próxima referência desta base: BC-TO-0003");
-    expect(chamadasDe("cat_prever_sku").at(-1)?.a).toEqual({ p_org: ORG, p_categoria: C1, p_subcategoria: S1, p_atributos: [] });
+    // só os modelos da subcategoria escolhida, com o número
+    fireEvent.click(within(bloco).getByRole("combobox", { name: "Modelo" }));
+    expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Nenhum", "0001 · SORTY", "0003 · STONE PLUS"]);
+    fireEvent.click(screen.getByRole("option", { name: "0003 · STONE PLUS" }));
+    expect(within(bloco).getByTestId("exemplo-sku")).toHaveTextContent("BC-TO-0003-AZ-60X30");
+    expect(within(bloco).getByText(/Modelo escolhido:/)).toHaveTextContent("Modelo escolhido: STONE PLUS → 0003");
+    // é só leitura e sem chamar a base: o número é o do modelo
+    expect(base.chamadas.filter((c) => c.f.startsWith("cat_prever") || c.f.startsWith("cat_guardar")).length).toBe(0);
+  });
+  it("mudar a subcategoria limpa o modelo; sem a lista de modelos na base o campo fica desativado com «Ainda não disponível nesta base»", async () => {
+    comModelos();
+    const { bloco } = await abrir();
+    escolherCombo(bloco, "Categoria", "Casa de banho");
+    escolherCombo(bloco, "Subcategoria", "Torneiras");
+    escolherCombo(bloco, "Modelo", "0001 · SORTY");
+    escolherCombo(bloco, "Subcategoria", "Louças");
+    expect(within(bloco).getByRole("combobox", { name: "Modelo" })).toHaveValue("");
+    cleanup();
+    base.responder = (f) => (f === "cat_ler_categorias_gestao" ? { data: categorias(), error: null } : f === "cat_ler_atributos_gestao" ? { data: atributos(), error: null }
+      : f === "cat_ler_modelos_gestao" ? erro("PGRST202", "Could not find the function") : { data: { ok: true }, error: null });
+    const r = await abrir();
+    escolherCombo(r.bloco, "Categoria", "Casa de banho");
+    escolherCombo(r.bloco, "Subcategoria", "Torneiras");
+    await waitFor(() => expect(within(r.bloco).getByRole("combobox", { name: "Modelo" })).toBeDisabled());
+    expect(within(r.bloco).getByText("Ainda não disponível nesta base")).toBeInTheDocument();
   });
   it("uma subcategoria sem sigla avisa «Falta a sigla» (a vermelho) e o atalho leva ao separador Subcategorias", async () => {
     const { bloco, irPara } = await abrir();

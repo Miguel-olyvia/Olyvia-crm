@@ -8,8 +8,8 @@ import { reporCustos } from "./v2/custosStore";
 import { mudarCatalogo, porCatalogo } from "./v2/catalogoStore";
 import { catalogo0, type Catalogo } from "./v2/catalogoModelo";
 import { montarCatalogo, type LinhasCatalogo } from "./real/catalogoReal";
-import { juntarTabelas, linhasDe } from "./real/lerCatalogo";
-import { SEM_CATEGORIA_PRODUTO, categoriasDeProdutos, filtrarProdutosCatalogo, haProdutosSemCategoria, subcategoriasDeProdutos } from "./filtroProdutosCatalogo";
+import { juntarModelos, juntarTabelas, linhasDe } from "./real/lerCatalogo";
+import { SEM_CATEGORIA_PRODUTO, categoriasDeProdutos, filtrarProdutosCatalogo, haProdutosSemCategoria, modelosDeProdutos, subcategoriasDeProdutos } from "./filtroProdutosCatalogo";
 
 const ID = {
   of: "66666666-6666-4666-a666-666666666666", sub: "77777777-7777-4777-a777-777777777777", eletr: "66666666-6666-4666-a666-666666666667",
@@ -258,5 +258,81 @@ describe("M4: o filtro escolhido que deixa de existir repõe-se", () => {
     expect(combo("Categoria")).toHaveValue("Canalização");
     expect(combo("Subcategoria")).toHaveValue("Todas as subcategorias");
     expect(combo("Marca")).toHaveValue("Todas as marcas");
+  });
+});
+
+// 16/11 (20270118300000): o filtro «Modelo» (depende da subcategoria) e o modelo na linha do produto. O Modelo só se oferece quando a base trouxe os modelos (K.modelos).
+describe("filtro por Modelo", () => {
+  const M = { sorty: "eeeeeeee-0000-4000-a000-000000000001", zeus: "eeeeeeee-0000-4000-a000-000000000002", misto: "eeeeeeee-0000-4000-a000-000000000003", velho: "eeeeeeee-0000-4000-a000-000000000004" };
+  const sub = (id: string) => ({ id, nome: "x", sigla: null, ativo: true });
+  const MODELOS = { modelos: [
+    { id: M.zeus, nome: "ZEUS", numero: 7, ativo: true, usados: 0, subcategoria: sub(ID.pcSub), categoria: null },
+    { id: M.sorty, nome: "SORTY", numero: 1, ativo: true, usados: 2, subcategoria: sub(ID.pcSub), categoria: null },
+    { id: M.velho, nome: "VELHO", numero: 3, ativo: false, usados: 0, subcategoria: sub(ID.pcSub), categoria: null },
+    { id: M.misto, nome: "MISTO", numero: 1, ativo: true, usados: 1, subcategoria: sub(ID.pcSub2), categoria: null },
+  ] };
+  const LIGACOES = [{ id: ID.torneira, model_id: M.sorty }, { id: ID.misturadora, model_id: M.misto }];
+  const comModelos = (): Catalogo => montarCatalogo(juntarModelos(juntarTabelas(linhasBase(), RESPOSTA), MODELOS, LIGACOES), catalogo0(), {}).K;
+  // os ids da árvore do Catálogo: «Louças e torneiras» é o mesmo nó nos serviços e nos produtos (junta-se pelo nome), por isso o id é o dos serviços
+  const no = (K: Catalogo, nome: string) => K.arvore.find((x) => x.n === nome)!.id;
+
+  it("modelosDeProdutos: só os da subcategoria, por número; um desativado só se algum produto o tem; sem subcategoria ou sem modelos, nada", () => {
+    const K = comModelos();
+    expect(K.modelos?.find((m) => m.id === M.sorty)?.sub).toBe(no(K, "Louças e torneiras"));
+    expect(modelosDeProdutos(K, no(K, "Louças e torneiras")).map((x) => x.n)).toEqual(["0001 · SORTY", "0007 · ZEUS"]);
+    expect(modelosDeProdutos(K, no(K, "Misturadoras")).map((x) => x.n)).toEqual(["0001 · MISTO"]);
+    expect(modelosDeProdutos(K, "")).toEqual([]);
+    expect(modelosDeProdutos(montar(), no(K, "Louças e torneiras"))).toEqual([]);
+    K.produtos.find((p) => p.id === ID.lavatorio)!.modeloId = M.velho;
+    expect(modelosDeProdutos(K, no(K, "Louças e torneiras")).find((x) => x.id === M.velho)).toMatchObject({ n: "0003 · VELHO", inativa: true });
+  });
+  it("filtrarProdutosCatalogo filtra pelo modelo e combina-o com a subcategoria e a marca; sem modelo no filtro, não muda nada", () => {
+    const K = comModelos();
+    expect(filtrarProdutosCatalogo(K, K.produtos, { cat: "", sub: "", marca: "", modelo: M.sorty }).map((p) => p.n)).toEqual(["Torneira cozinha"]);
+    const cat = no(K, "Canalização"), sub = no(K, "Louças e torneiras");
+    expect(filtrarProdutosCatalogo(K, K.produtos, { cat, sub, marca: "Grohe", modelo: M.sorty }).map((p) => p.n)).toEqual(["Torneira cozinha"]);
+    expect(filtrarProdutosCatalogo(K, K.produtos, { cat, sub, marca: "Roca", modelo: M.sorty })).toEqual([]);
+    expect(filtrarProdutosCatalogo(K, K.produtos, { cat: "", sub: "", marca: "" })).toHaveLength(4);
+  });
+  it("o filtro Modelo está desativado, com a razão dita, até haver subcategoria; depois lista os modelos dela (com o número) e filtra", () => {
+    paginaProdutos(comModelos());
+    expect(combo("Modelo")).toBeDisabled();
+    expect(screen.getByText("Escolha primeiro a subcategoria.")).toBeInTheDocument();
+    escolher("Categoria", "Canalização");
+    expect(combo("Modelo")).toBeDisabled();
+    escolher("Subcategoria", "Louças e torneiras");
+    expect(combo("Modelo")).toBeEnabled();
+    fireEvent.click(combo("Modelo"));
+    expect(opcoes()).toEqual(["Todos os modelos", "0001 · SORTY", "0007 · ZEUS"]);
+    fireEvent.click(screen.getByRole("option", { name: "0001 · SORTY" }));
+    expect(contagem()).toBe("1 produto");
+    expect(linhas().join("|")).toContain("Torneira cozinha");
+    expect(linhas().join("|")).not.toContain("Misturadora banho");
+  });
+  it("mudar a subcategoria ou a categoria limpa o modelo", () => {
+    paginaProdutos(comModelos());
+    escolher("Categoria", "Canalização");
+    escolher("Subcategoria", "Louças e torneiras");
+    escolher("Modelo", "0001 · SORTY");
+    expect(combo("Modelo")).toHaveValue("0001 · SORTY");
+    escolher("Subcategoria", "Misturadoras");
+    expect(combo("Modelo")).toHaveValue("Todos os modelos");
+    expect(contagem()).toBe("1 produto");
+    escolher("Modelo", "0001 · MISTO");
+    escolher("Categoria", "Sanitários");
+    expect(combo("Modelo")).toHaveValue("Todos os modelos");
+    expect(combo("Modelo")).toBeDisabled();
+  });
+  it("o modelo aparece na linha do produto (número e nome); um produto sem modelo não o mostra", () => {
+    paginaProdutos(comModelos());
+    const torneira = linhas().find((l) => l.includes("Torneira cozinha"))!;
+    expect(torneira).toContain("0001 · SORTY");
+    const lavatorio = linhas().find((l) => l.includes("Lavatório suspenso"))!;
+    expect(lavatorio).not.toContain("·  ");
+    expect(lavatorio).not.toMatch(/\d{4} · /);
+  });
+  it("sem os modelos na base (função por criar) o filtro «Modelo» não se oferece", () => {
+    paginaProdutos();
+    expect(screen.queryByRole("combobox", { name: "Modelo" })).toBeNull();
   });
 });

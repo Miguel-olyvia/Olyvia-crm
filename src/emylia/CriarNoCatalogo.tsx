@@ -22,7 +22,10 @@ import {
 import { podeCriarTipo, usePermissoesCatalogo } from "./permissoesCatalogo";
 import { AtributosCriar } from "./AtributosProduto";
 import { PreviaSku } from "./PreviaSku";
+import { CampoFornecedor, fornecedorParaModelo } from "./CampoFornecedor";
+import { FORNECEDOR_VAZIO, type FornecedorEscolhido } from "./fornecedoresCatalogo";
 import { CampoMarca, CamposRamo, RAMO_VAZIO } from "./ClassificacaoProduto";
+import { CampoModelo, MODELO_VAZIO, type ModeloEscolhido } from "./CampoModelo";
 import { ramoParaCriar, type RamoEscolhido } from "./ramoProduto";
 import { CAMPO, CHIP, NOTA, Campo, Chips, Num, Retirar } from "./pecasForm";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
@@ -370,12 +373,17 @@ function FormServico({ S, C, K, onCriado }: { S: Estado; C: Custos; K: Catalogo;
 
 /* ------------------------------------------------------------------ produto */
 function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: FichaProdutoReal; onCriado: (id: string, nome: string) => void }) {
-  const [nome, setNome] = useState(""), [marca, setMarca] = useState(""), [sku, setSku] = useState(""), [forn, setForn] = useState("");
+  const [nome, setNome] = useState(""), [marca, setMarca] = useState(""), [sku, setSku] = useState(""), [forn, setForn] = useState<FornecedorEscolhido>(FORNECEDOR_VAZIO);
   const [un, setUn] = useState("un"), [custo, setCusto] = useState(""), [pvp, setPvp] = useState(""), [desc, setDesc] = useState("");
   // 13/11: categoria e subcategoria em dropdowns com pesquisa; os nomes novos só entram na árvore quando o produto se cria
   const [ramo, setRamoE] = useState<RamoEscolhido>(RAMO_VAZIO);
   const [erroCriar, setErroCriar] = useState<string | null>(null);
-  const setRamo = (r: RamoEscolhido) => { setRamoE(r); setErroCriar(null); };
+  // 16/11: o modelo é da subcategoria (define o NNNN da referência): mudar de categoria ou de subcategoria tira o modelo escolhido
+  const [modelo, setModelo] = useState<ModeloEscolhido>(MODELO_VAZIO);
+  const setRamo = (r: RamoEscolhido) => {
+    if (r.cat !== ramo.cat || r.sub !== ramo.sub || r.catNova !== ramo.catNova || r.subNova !== ramo.subNova) setModelo(MODELO_VAZIO);
+    setRamoE(r); setErroCriar(null);
+  };
   const ramoR = useMemo(() => ramoParaCriar(K.arvore, ramo), [K.arvore, ramo]);
   const no = ramoR.ok ? ramoR.no ?? "" : "";
   const arvoreCria = ramoR.ok ? ramoR.A : K.arvore;
@@ -393,7 +401,9 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
     return [...m.values()];
   }, [S.svc, K]); // eslint-disable-line react-hooks/exhaustive-deps
   const nomeSvc = servico ? servicos.find((x) => x.v === servico)?.t ?? servico : null;
-  const o = { n: nome, custo: n(custo), un, marca, fornecedor: forn, no: no || null, sku, pvp: pvp.trim() ? n(pvp) : null, desc, servico, ...(img ? { img } : {}), ...(attrs.length ? { attrs } : {}) };
+  const nomeModelo = modelo.novo ?? K.modelos?.find((m) => m.id === modelo.id)?.n ?? "";
+  const o = { n: nome, custo: n(custo), un, marca, ...fornecedorParaModelo(forn), no: no || null, sku, pvp: pvp.trim() ? n(pvp) : null, desc, servico, ...(img ? { img } : {}), ...(attrs.length ? { attrs } : {}),
+    ...(modelo.id ? { modeloId: modelo.id } : {}), ...(modelo.novo ? { modeloNovo: modelo.novo } : {}) };
   const faltas = faltasProduto(K, o);
   const venda = precoVendaProduto(n0(custo), o.pvp, S.cfg.alvo), m = venda > 0 ? (venda - n0(custo)) / venda : 0;
   const imgV = img ?? ilustracaoDoProduto({ n: nome }, no ? caminho(arvoreCria, no) : null);
@@ -417,6 +427,8 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
             <Campo rot="Referência (opcional: se ficar vazia gera-se sozinha)" dica="A do fornecedor, se houver; senão gera-se a partir da categoria, da subcategoria e dos atributos.">{(id) => <input id={id} value={sku} onChange={(e) => setSku(e.target.value)} className={CAMPO} />}</Campo>
           </div>
           <CamposRamo arvore={K.arvore} ramo={ramo} onChange={setRamo} />
+          {/* 16/11: o modelo, a seguir à subcategoria: só na página real (sem ela não há modelos) */}
+          {real && <CampoModelo modelos={K.modelos} sub={ramo.sub} subNova={!!ramo.subNova} valor={modelo} onChange={setModelo} podeCriar={real.podeEditar} />}
           <Campo rot="Descrição" dica="Uma linha, para o comercial e a proposta.">{(id) => <input id={id} value={desc} onChange={(e) => setDesc(e.target.value)} className={CAMPO} />}</Campo>
           <div className="grid gap-1.5">
             <span className="text-[15px] font-medium">Imagem</span>
@@ -436,7 +448,7 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
           </div>
           <AtributosCriar defs={K.atributos} onChange={setAttrs} real={real} />
           {/* 16/11: o SKU que se geraria (cat_prever_sku): só na página real, e só enquanto a referência está vazia */}
-          <PreviaSku real={real} categoria={nomeCat} subcategoria={nomeSub} categoriaNova={!!ramo.catNova || !!ramo.subNova} attrs={attrs} defs={K.atributos} manual={!!sku.trim()} />
+          <PreviaSku real={real} categoria={nomeCat} subcategoria={nomeSub} categoriaNova={!!ramo.catNova || !!ramo.subNova} attrs={attrs} defs={K.atributos} manual={!!sku.trim()} modeloId={modelo.id || null} modeloNovo={!!modelo.novo} />
         </Secao>
         <Secao i={2} titulo="Compra e venda">
           <div className="grid gap-1.5"><span className="text-[15px] font-medium">Unidade</span><Chips rot="Unidade do produto" opcoes={unidades.map((u) => [u, u] as const)} v={un} set={setUn} /></div>
@@ -444,7 +456,7 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
             <Campo rot="Custo de compra">{(id) => <Num id={id} v={custo} set={setCusto} suf={`€/${un}`} />}</Campo>
             <Campo rot="PVP (opcional)" dica={`Sem PVP, vende-se ao custo com a margem-alvo de ${S.cfg.alvo}%.`}>{(id) => <Num id={id} v={pvp} set={setPvp} suf={`€/${un}`} ph="" />}</Campo>
           </div>
-          <Campo rot="Fornecedor">{(id) => <><input id={id} list="criar-forn" value={forn} onChange={(e) => setForn(e.target.value)} className={CAMPO} /><datalist id="criar-forn">{K.fornecedores.map((x) => <option key={x} value={x} />)}</datalist></>}</Campo>
+          <CampoFornecedor real={real} valor={forn} onChange={setForn} sugestoes={K.fornecedores} idLista="criar-forn" />
         </Secao>
         <Secao i={3} titulo="O serviço que traz" texto="Escolhido na visita, o produto junta este serviço ao orçamento (ex.: a sanita traz a instalação). Sem serviço, só se vende.">
           {servico ? (
@@ -462,7 +474,7 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
           <span key={imgV} className="motion-safe:animate-in motion-safe:zoom-in-90"><Ilustracao k={imgV} /></span>
           <span className="min-w-0">
             <span className={cn("block text-base font-semibold", !nome.trim() && "text-muted-foreground")}>{nome.trim() || "Produto novo"}</span>
-            <span className={cn(NOTA, "block")}>{[marca.trim(), sku.trim() ? `ref. ${sku.trim()}` : "", caminho(arvoreCria, no || null)].filter(Boolean).join(" · ")}</span>
+            <span className={cn(NOTA, "block")}>{[marca.trim(), nomeModelo, sku.trim() ? `ref. ${sku.trim()}` : "", caminho(arvoreCria, no || null)].filter(Boolean).join(" · ")}</span>
           </span>
         </div>
         {desc.trim() && <p className={cn(NOTA, "mt-2")}>{desc.trim()}</p>}
@@ -514,10 +526,10 @@ function FormEquip({ C, onCriado }: { C: Custos; onCriado: (id: string, nome: st
 }
 
 /* ------------------------------------------------------------------ consumível */
-function FormConsumivel({ S, C, K, onCriado }: { S: Estado; C: Custos; K: Catalogo; onCriado: (id: string, nome: string) => void }) {
-  const [nome, setNome] = useState(""), [un, setUn] = useState("un"), [preco, setPreco] = useState(""), [forn, setForn] = useState(""), [opcional, setOpcional] = useState(false);
+function FormConsumivel({ S, C, K, real, onCriado }: { S: Estado; C: Custos; K: Catalogo; real?: FichaProdutoReal; onCriado: (id: string, nome: string) => void }) {
+  const [nome, setNome] = useState(""), [un, setUn] = useState("un"), [preco, setPreco] = useState(""), [forn, setForn] = useState<FornecedorEscolhido>(FORNECEDOR_VAZIO), [opcional, setOpcional] = useState(false);
   const existentes = useMemo(() => consumiveisComCriados(S, C, K), [S, C, K]);
-  const o = { n: nome, un, preco: n(preco), fornecedor: forn, opcional };
+  const o = { n: nome, un, preco: n(preco), ...fornecedorParaModelo(forn), opcional };
   const faltas = faltasConsumivel(existentes, o);
   const criar = () => { const r = criarConsumivel(lerCatalogo(), existentes, o); if (!r.ok) return; mudarCatalogo(() => r.K); onCriado(r.id, nome.trim()); };
   return (
@@ -528,7 +540,7 @@ function FormConsumivel({ S, C, K, onCriado }: { S: Estado; C: Custos; K: Catalo
           <div className="grid gap-1.5"><span className="text-[15px] font-medium">Unidade</span><Chips rot="Unidade do consumível" opcoes={UN_CONS.map((u) => [u, u] as const)} v={un} set={setUn} /></div>
           <div className="grid gap-4 sm:grid-cols-2">
             <Campo rot="Preço">{(id) => <Num id={id} v={preco} set={setPreco} suf={`€/${un}`} />}</Campo>
-            <Campo rot="Fornecedor">{(id) => <><input id={id} list="criar-forn-c" value={forn} onChange={(e) => setForn(e.target.value)} className={CAMPO} /><datalist id="criar-forn-c">{K.fornecedores.map((x) => <option key={x} value={x} />)}</datalist></>}</Campo>
+            <CampoFornecedor real={real} valor={forn} onChange={setForn} sugestoes={K.fornecedores} idLista="criar-forn-c" />
           </div>
           <button type="button" role="switch" aria-checked={opcional} onClick={() => setOpcional((v) => !v)} className="flex w-full items-center justify-between gap-4 text-left">
             <span><span className="block text-[15px] font-medium">Opcional por omissão</span><span className="block text-sm text-muted-foreground">Ao juntá-lo a um serviço, não entra no custo até alguém o ligar.</span></span>
@@ -540,7 +552,7 @@ function FormConsumivel({ S, C, K, onCriado }: { S: Estado; C: Custos; K: Catalo
         <div className="flex items-center gap-3">
           <span className={cn("grid h-12 w-12 place-items-center rounded-xl", COR_TIPO.consumivel)}><Droplet className="h-5 w-5" aria-hidden="true" /></span>
           <span className="min-w-0"><span className={cn("block text-base font-semibold", !nome.trim() && "text-muted-foreground")}>{nome.trim() || "Consumível novo"}</span>
-            <span className={cn(NOTA, "block")}>{forn.trim() || "Fornecedor por escolher"}{opcional ? " · opcional" : ""}</span></span>
+            <span className={cn(NOTA, "block")}>{forn.nome.trim() || "Fornecedor por escolher"}{opcional ? " · opcional" : ""}</span></span>
         </div>
         <Grande v={eur(n0(preco))} un={`€/${un}`} legenda="preço de hoje: fica desatualizado ao fim de uns meses" />
         <p className={cn(NOTA, "mt-4 rounded-xl bg-muted/60 p-3")}>Depois junta-se aos serviços na receita (aqui no Criar ou na ficha do serviço).</p>
@@ -630,7 +642,7 @@ export function CriarNoCatalogo({ S, C, K, run, tipo, setTipo, voltar, onCriado,
         {tipo === "servico" && <FormServico S={S} C={C} K={K} onCriado={feito("servico")} />}
         {tipo === "produto" && <FormProduto S={S} K={K} real={real} onCriado={feito("produto")} />}
         {tipo === "equipamento" && <FormEquip C={C} onCriado={feito("equipamento")} />}
-        {tipo === "consumivel" && <FormConsumivel S={S} C={C} K={K} onCriado={feito("consumivel")} />}
+        {tipo === "consumivel" && <FormConsumivel S={S} C={C} K={K} real={real} onCriado={feito("consumivel")} />}
         {tipo === "tecnico" && <FormTecnico S={S} C={C} onCriado={feito("tecnico")} />}
       </div>}
     </div>

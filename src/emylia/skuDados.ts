@@ -1,6 +1,7 @@
 // 16/11: a referência (SKU) do Catálogo: as siglas das categorias e das opções, a ordem dos atributos no SKU, a pré-visualização e a geração.
 // Chama as funções cat_* de 20270118000000_catalogo_siglas_e_sku.sql (cat_guardar_sigla_categoria, cat_guardar_sigla_opcao, cat_guardar_sku_config,
-// cat_gerar_sku_produto, cat_prever_sku). Formato: SIGLA_CAT-SIGLA_SUB-NNNN-<atributos pela ordem>-<medida>, ex.: BC-TO-0001-AZ-PZ-60X30.
+// cat_gerar_sku_produto) e de 20270118300000_catalogo_modelos_e_sku_por_modelo.sql (cat_prever_sku_modelo). Formato:
+// SIGLA_CAT-SIGLA_SUB-NNNN-<atributos pela ordem>-<medida>, ex.: BC-TO-0001-AZ-PZ-60X30. NNNN é o número do MODELO do produto (não um contador).
 // Quem decide é a base; aqui só se chama e se traduz o que ela devolve (códigos de falta em frases). Erros CT001–CT004 vêm em português.
 import { chamar, type ResG } from "./atributosGestao";
 import type { CategoriaGestao, SubcategoriaGestao } from "./categoriasMarcasGestao";
@@ -35,8 +36,9 @@ export function guardarSkuConfig(org: string, itens: readonly ItemSku[]): Promis
   return chamar("cat_guardar_sku_config", { p_org: org, p_itens: [...itens] }, "Não foi possível guardar a ordem da referência.");
 }
 
-export interface ResultadoGerar { sku: string | null; gerado: boolean; faltas: string[]; motivo: string | null }
-export interface ResultadoPrever { sku: string | null; faltas: string[] }
+/** `outroProduto`/`outroApagado`: só no motivo «duplicado» (a combinação modelo + atributos já é de outro produto). */
+export interface ResultadoGerar { sku: string | null; gerado: boolean; faltas: string[]; motivo: string | null; outroProduto?: string; outroApagado?: boolean }
+export interface ResultadoPrever { sku: string | null; faltas: string[]; outroProduto?: string }
 type Bruto = Record<string, unknown>;
 const faltasDe = (x: unknown): string[] => (Array.isArray(x) ? x.filter((f): f is string => typeof f === "string") : []);
 const sku = (x: unknown): string | null => (typeof x === "string" && x.trim() ? x : null);
@@ -45,28 +47,33 @@ export async function gerarSkuProduto(org: string, produto: string, forcar = fal
   const r = await chamar("cat_gerar_sku_produto", { p_org: org, p_produto: produto, p_forcar: forcar }, "Não foi possível gerar a referência.");
   if (!r.ok) return r;
   const v = r.v as Bruto;
-  return { ok: true, v: { sku: sku(v.sku), gerado: v.gerado === true, faltas: faltasDe(v.faltas), motivo: typeof v.motivo === "string" ? v.motivo : null } };
+  return { ok: true, v: {
+    sku: sku(v.sku), gerado: v.gerado === true, faltas: faltasDe(v.faltas), motivo: typeof v.motivo === "string" ? v.motivo : null,
+    ...(typeof v.outro_produto === "string" ? { outroProduto: v.outro_produto, outroApagado: v.outro_apagado === true } : {}),
+  } };
 }
-/** Só leitura: o número mostrado é o próximo e só se confirma ao guardar. `atributos` no formato de cat_guardar_produto_atributos. */
-export async function preverSku(org: string, categoria: string | null, subcategoria: string | null, atributos: readonly unknown[]): Promise<ResG<ResultadoPrever>> {
-  const r = await chamar("cat_prever_sku", { p_org: org, p_categoria: categoria, p_subcategoria: subcategoria, p_atributos: [...atributos] }, "Não foi possível prever a referência.");
+/** Só leitura: a referência que o produto teria com este modelo (o NNNN é o número dele). `atributos` no formato de cat_guardar_produto_atributos;
+ *  `produto` = o produto em edição (o seu próprio SKU não conta como duplicado). Sem modelo: sku null e a falta «modelo». */
+export async function preverSkuModelo(org: string, categoria: string | null, subcategoria: string | null, modelo: string | null, atributos: readonly unknown[], produto: string | null = null): Promise<ResG<ResultadoPrever>> {
+  const r = await chamar("cat_prever_sku_modelo", { p_org: org, p_categoria: categoria, p_subcategoria: subcategoria, p_modelo: modelo, p_atributos: [...atributos], p_produto: produto }, "Não foi possível prever a referência.");
   if (!r.ok) return r;
   const v = r.v as Bruto;
-  return { ok: true, v: { sku: sku(v.sku), faltas: faltasDe(v.faltas) } };
+  return { ok: true, v: { sku: sku(v.sku), faltas: faltasDe(v.faltas), ...(typeof v.outro_produto === "string" ? { outroProduto: v.outro_produto } : {}) } };
 }
 
 /** Os nomes que tornam as faltas legíveis (opcionais: sem eles a frase fica sem o nome). */
 export interface NomesSku { categoria?: string | null; subcategoria?: string | null; atributos?: Record<string, string> }
 const com = (frase: string, nome?: string | null) => (nome ? `${frase} «${nome}»` : frase);
 
-/** Os códigos de falta da base (categoria, sigla_categoria, subcategoria, sigla_subcategoria, numero, sigla:<atributo>, medida:<atributo>) em frases. */
+/** Os códigos de falta da base (categoria, sigla_categoria, subcategoria, sigla_subcategoria, modelo, sigla:<atributo>, medida:<atributo>, duplicado) em frases. */
 export function descreverFaltas(faltas: readonly string[], n: NomesSku = {}): string[] {
   return faltas.map((f) => {
     if (f === "categoria") return "Falta escolher a categoria";
     if (f === "sigla_categoria") return com("Falta a sigla da categoria", n.categoria);
     if (f === "subcategoria") return "Falta escolher a subcategoria (é obrigatória para a referência), ou não pertence à categoria escolhida";
     if (f === "sigla_subcategoria") return com("Falta a sigla da subcategoria", n.subcategoria);
-    if (f === "numero") return "Já não há números livres (9999) para esta combinação";
+    if (f === "modelo") return "Escolha o modelo (define o número de 4 dígitos)";
+    if (f === "duplicado") return "Já existe um produto com este modelo e estes atributos";
     const [tipo, codigo] = [f.slice(0, f.indexOf(":")), f.slice(f.indexOf(":") + 1)];
     if (f.includes(":") && (tipo === "sigla" || tipo === "medida")) {
       const nome = n.atributos?.[codigo] ?? codigo;

@@ -1,4 +1,5 @@
-// 16/11: os filtros da lista de PRODUTOS do Catálogo (Categoria, Subcategoria, Marca). Só de produtos: o «Ofício» dos serviços já não entra.
+// 16/11: os filtros da lista de PRODUTOS do Catálogo (Categoria, Subcategoria, Modelo, Marca). Só de produtos: o «Ofício» dos serviços já não entra.
+// O Modelo (20270118300000) depende da subcategoria e só se oferece quando a base trouxe os modelos (K.modelos).
 // O modelo guarda o produto num só nó da árvore (Produto.no; ramoProduto.ts: categoria → subcategoria). As categorias e subcategorias oferecidas vêm
 // da árvore dos produtos da organização (K.categoriasProduto, de product_categories), TODAS as ativas, mesmo sem produtos (a Mudelar tem 0 produtos),
 // por sort_order e nome. Uma desativada só aparece se algum produto ainda a tem («X (desativada)»). Sem K.categoriasProduto (protótipo sem «real», base
@@ -8,8 +9,9 @@
 // é o mesmo nó (a árvore junta-as pelo nome), por isso conta como essa categoria.
 import { oficios, type Catalogo, type CategoriaProdutoK, type Produto } from "./v2/catalogoModelo";
 import { ramoDe } from "./ramoProduto";
+import { rotuloModelo } from "./modelosDados";
 
-export interface FiltroProdutos { cat: string; sub: string; marca: string }
+export interface FiltroProdutos { cat: string; sub: string; marca: string; /** O id do modelo («» ou em falta = todos). */ modelo?: string }
 export const SEM_FILTRO_PRODUTOS: FiltroProdutos = { cat: "", sub: "", marca: "" };
 /** O valor do filtro Categoria para «Sem categoria de produto» (nunca é um id de nó). */
 export const SEM_CATEGORIA_PRODUTO = "__sem_categoria_produto__";
@@ -55,6 +57,16 @@ export function subcategoriasDeProdutos(K: Modelo, cat: string): RamoFiltro[] {
   return K.arvore.filter((x) => x.pai === cat && subs.has(x.id)).map((x) => ({ id: x.id, n: x.n }));
 }
 
+/** Os modelos de uma subcategoria (o nó da árvore), por número e nome: «0001 · SORTY». Um desativado só se algum produto ainda o tem (`inativa`).
+ *  Sem subcategoria ou sem os modelos na base: vazio. */
+export function modelosDeProdutos(K: Pick<Catalogo, "modelos" | "produtos">, sub: string): RamoFiltro[] {
+  if (!sub || !K.modelos) return [];
+  const usados = new Set(K.produtos.flatMap((p) => (p.modeloId ? [p.modeloId] : [])));
+  return K.modelos.filter((m) => m.sub === sub && (m.ativo || usados.has(m.id)))
+    .sort((a, b) => a.numero - b.numero || a.n.localeCompare(b.n, "pt"))
+    .map((m): RamoFiltro => ({ id: m.id, n: rotuloModelo({ numero: m.numero, nome: m.n }), ...(m.ativo ? {} : { inativa: true as const }) }));
+}
+
 /** O produto não está em nenhuma categoria de produto (sem nó, ou com um nó que não é da árvore dos produtos). */
 const semCategoria = (ids: ReadonlySet<string> | null, p: Produto) => !p.no || (ids != null && !ids.has(p.no));
 const idsDeCategorias = (K: Pick<Catalogo, "categoriasProduto">) => (K.categoriasProduto ? new Set(K.categoriasProduto.map((c) => c.id)) : null);
@@ -67,14 +79,15 @@ export function haProdutosSemCategoria(K: Pick<Catalogo, "produtos" | "categoria
 /** A marca compara-se sem espaços de fora nem maiúsculas. */
 export const normalizarMarca = (m: string) => m.trim().toLowerCase();
 
-/** Os produtos que passam os três filtros; um filtro vazio não filtra. Escolher a categoria inclui as subcategorias dela. */
+/** Os produtos que passam os filtros; um filtro vazio não filtra. Escolher a categoria inclui as subcategorias dela. */
 export function filtrarProdutosCatalogo(K: Pick<Catalogo, "arvore" | "categoriasProduto">, produtos: readonly Produto[], f: FiltroProdutos): Produto[] {
-  if (!f.cat && !f.sub && !f.marca) return [...produtos];
+  if (!f.cat && !f.sub && !f.marca && !f.modelo) return [...produtos];
   const marca = normalizarMarca(f.marca);
   const ids = f.cat === SEM_CATEGORIA_PRODUTO ? idsDeCategorias(K) : null;
   const porId = new Map(K.arvore.map((x) => [x.id, x]));
   return produtos.filter((p) => {
     if (marca && normalizarMarca(p.marca) !== marca) return false;
+    if (f.modelo && p.modeloId !== f.modelo) return false;
     if (f.cat === SEM_CATEGORIA_PRODUTO) return semCategoria(ids, p);
     if (!f.cat && !f.sub) return true;
     const x = p.no ? porId.get(p.no) : undefined;

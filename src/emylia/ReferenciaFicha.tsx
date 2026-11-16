@@ -7,7 +7,8 @@ import { cn } from "@/lib/utils";
 import { valoresParaGravar } from "./atributosTexto";
 import { lerCategoriasGestao } from "./categoriasMarcasGestao";
 import { BOTAO_TEXTO, ConfirmarMudanca, Razao, protegido } from "./gestaoPecas";
-import { PREVER_AMBIGUO, descreverFaltas, gerarSkuProduto, preverSku, resolverCategoria, textoSemGerar, type NomesSku, type ResultadoGerar } from "./skuDados";
+import { PREVER_AMBIGUO, descreverFaltas, gerarSkuProduto, preverSkuModelo, resolverCategoria, textoSemGerar, type NomesSku, type ResultadoGerar } from "./skuDados";
+import { ReferenciaDuplicada } from "./ReferenciaDuplicada";
 import { nomesDoRamo } from "./ramoProduto";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 import type { AtributoDef, No, Produto } from "./v2/catalogoModelo";
@@ -24,7 +25,8 @@ async function novaReferencia(org: string, p: Produto, arvore: readonly No[]): P
   const ids = resolverCategoria(l.v, categoria, subcategoria);
   if (ids.k === "ambiguo") return { sku: null, nota: PREVER_AMBIGUO };
   if (ids.k === "nao-existe") return { sku: null, nota: null };
-  const r = await preverSku(org, ids.categoria, ids.subcategoria, valoresParaGravar(p.attrs ?? []));
+  // o NNNN é o número do modelo do produto; o próprio produto não conta como duplicado de si
+  const r = await preverSkuModelo(org, ids.categoria, ids.subcategoria, p.modeloId ?? null, valoresParaGravar(p.attrs ?? []), p.id);
   return { sku: r.ok ? r.v.sku : null, nota: null };
 }
 
@@ -36,6 +38,7 @@ export function ReferenciaFicha({ p, arvore, atributos, real, anunciar, sugerir,
   const [aGravar, setAGravar] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [faltas, setFaltas] = useState<string[]>([]);
+  const [duplicado, setDuplicado] = useState<{ outro: string | null; apagado: boolean } | null>(null);
   const [confirmar, setConfirmar] = useState<{ novo: string | null; faltas: string[]; nota: string | null } | null>(null);
   const [focar, setFocar] = useState(false);
   const ocupado = useRef(false), botao = useRef<HTMLButtonElement>(null);
@@ -49,7 +52,7 @@ export function ReferenciaFicha({ p, arvore, atributos, real, anunciar, sugerir,
   const gerar = async (forcar: boolean) => {
     if (ocupado.current) return; // guarda de reentrada (um segundo toque antes de o estado mudar)
     ocupado.current = true;
-    setAGravar(true); setErro(null); setFaltas([]);
+    setAGravar(true); setErro(null); setFaltas([]); setDuplicado(null);
     try {
       const r = await gerarSkuProduto(real.org, p.id, forcar);
       // forçar a partir da confirmação: o erro fica na própria confirmação (aberta, para voltar atrás); senão, junto ao botão
@@ -67,8 +70,12 @@ export function ReferenciaFicha({ p, arvore, atributos, real, anunciar, sugerir,
         setConfirmar({ novo: n.sku, nota: n.nota, faltas: descreverFaltas(v.faltas, nomes()) });
         return;
       }
-      setConfirmar(null); setFaltas(descreverFaltas(v.faltas, nomes()));
-      if (!v.faltas.length) setFaltas([`Não se gerou: ${textoSemGerar(v, nomes())}.`]);
+      setConfirmar(null);
+      // «duplicado» leva a ligação para o outro produto, por isso não entra como texto simples
+      const f = v.faltas.filter((x) => x !== "duplicado");
+      setFaltas(descreverFaltas(f, nomes()));
+      if (v.motivo === "duplicado" || v.faltas.includes("duplicado")) setDuplicado({ outro: v.outroProduto ?? null, apagado: v.outroApagado === true });
+      else if (!v.faltas.length) setFaltas([`Não se gerou: ${textoSemGerar(v, nomes())}.`]);
       setFocar(true);
     } finally { ocupado.current = false; setAGravar(false); }
   };
@@ -83,7 +90,12 @@ export function ReferenciaFicha({ p, arvore, atributos, real, anunciar, sugerir,
       {sugerir && <p className={NOTA}>A classificação ou os atributos mudaram. A referência não muda sozinha: recalcule-a se quiser.</p>}
       {erro && !confirmar && <p className="text-[15px] text-red-700 dark:text-red-400" role="alert">{erro}</p>}
       <div role="status" aria-label="Resultado da referência" className={NOTA}>
-        {faltas.length > 0 && <ul className="list-disc pl-5">{faltas.map((f) => <li key={f}>{f}</li>)}</ul>}
+        {(faltas.length > 0 || duplicado) && (
+          <ul className="list-disc pl-5">
+            {faltas.map((f) => <li key={f}>{f}</li>)}
+            {duplicado && <li><ReferenciaDuplicada outro={duplicado.outro} apagado={duplicado.apagado} /></li>}
+          </ul>
+        )}
       </div>
       {confirmar && (
         <ConfirmarMudanca titulo={`A referência atual foi escrita à mão: substituir por ${confirmar.novo ?? "uma referência gerada"}?`} aGravar={aGravar} erro={erro}

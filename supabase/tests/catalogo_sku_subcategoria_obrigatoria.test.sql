@@ -13,13 +13,16 @@
 -- Correr a partir do worktree rh-pessoas (supabase/.temp/project-ref = uetjghdkwbywbftedtth):
 --   supabase db query --linked -f supabase/tests/catalogo_sku_subcategoria_obrigatoria.test.sql
 --
+-- Desde 20270118300000 o NNNN é o número do MODELO, e os modelos numeram-se por subcategoria: os produtos que geram
+-- SKU ligam-se a modelos de teste criados com o número automático; sem modelo as faltas levam também "modelo".
+--
 -- O que PROVA:
 --   0. fn_cat_sku_partes sem categoria nem subcategoria → faltam as duas e não há prefixo (a versão antiga falha aqui)
---   1. Produto só com categoria: cat_gerar_sku_produto não gera (gerado=false, faltas ["subcategoria"], motivo
---      "faltas"), o SKU provisório fica e sku_gerado continua false; cat_prever_sku → sku null, faltas ["subcategoria"]
---   2. Com categoria + subcategoria gera CAT-SUB-NNNN, e o NNNN é por par: S1 e S2 da mesma categoria começam ambas
---      em 0001; um segundo produto em S1 dá 0002; a pré-visualização em S2 mostra 0002; o produto do passo 1, ao
---      receber S2, gera 0002 de S2
+--   1. Produto só com categoria: cat_gerar_sku_produto não gera (gerado=false, faltas ["subcategoria", "modelo"],
+--      motivo "faltas"), o SKU provisório fica e sku_gerado continua false; cat_prever_sku → sku null, as mesmas faltas
+--   2. Com categoria + subcategoria (e modelo) gera CAT-SUB-NNNN, e o NNNN é por par: os primeiros modelos de S1 e de
+--      S2 da mesma categoria são ambos 0001; o segundo de S1 é 0002; a pré-visualização em S2 com o segundo modelo de
+--      S2 mostra 0002; o produto do passo 1, ao receber S2 e esse modelo, gera 0002 de S2
 -- ============================================================
 
 BEGIN;
@@ -34,6 +37,9 @@ BEGIN
   r := public.fn_cat_sku_partes(gen_random_uuid(), NULL, NULL, '[]'::jsonb);
   IF r -> 'faltas' IS DISTINCT FROM '["categoria", "subcategoria"]'::jsonb OR r -> 'prefixo' IS DISTINCT FROM 'null'::jsonb THEN
     RAISE EXCEPTION 'FALHOU: sem subcategoria não falta "subcategoria" (versão antiga; aplicar 20270118200000) → %', r;
+  END IF;
+  IF to_regprocedure('public.cat_guardar_modelo(uuid,uuid,uuid,text,integer)') IS NULL THEN
+    RAISE EXCEPTION 'FALHOU: não há modelos (cat_guardar_modelo): aplicar 20270118300000.';
   END IF;
 END $t$;
 
@@ -83,6 +89,7 @@ DECLARE
   v_sa text := current_setting('teste.sa'); v_s1 text := current_setting('teste.s1'); v_s2 text := current_setting('teste.s2');
   n_t text := 'Topo SubObrig T' || v_suf; n_s1 text := 'Sub Um T' || v_suf; n_s2 text := 'Sub Dois T' || v_suf;
   v_t uuid; v_c1 uuid; v_c2 uuid; v_pc uuid; v_pa uuid; v_pb uuid; v_pd uuid; v_prov text; r jsonb;
+  v_a1 uuid; v_a2 uuid; v_b1 uuid; v_b2 uuid;
 BEGIN
   v_t := (public.cat_guardar_categoria_produto(v_org, NULL, NULL, n_t) -> 'categoria' ->> 'id')::uuid;
   v_c1 := (public.cat_guardar_categoria_produto(v_org, NULL, v_t, n_s1) -> 'categoria' ->> 'id')::uuid;
@@ -90,13 +97,18 @@ BEGIN
   PERFORM public.cat_guardar_sigla_categoria(v_org, v_t, v_sa);
   PERFORM public.cat_guardar_sigla_categoria(v_org, v_c1, v_s1);
   PERFORM public.cat_guardar_sigla_categoria(v_org, v_c2, v_s2);
+  -- 20270118300000: modelos com o número automático, por subcategoria (S1: 1 e 2; S2: 1 e 2)
+  v_a1 := (public.cat_guardar_modelo(v_org, NULL, v_c1, 'Mod A1 T' || v_suf) #>> '{modelo,id}')::uuid;
+  v_a2 := (public.cat_guardar_modelo(v_org, NULL, v_c1, 'Mod A2 T' || v_suf) #>> '{modelo,id}')::uuid;
+  v_b1 := (public.cat_guardar_modelo(v_org, NULL, v_c2, 'Mod B1 T' || v_suf) #>> '{modelo,id}')::uuid;
+  v_b2 := (public.cat_guardar_modelo(v_org, NULL, v_c2, 'Mod B2 T' || v_suf) #>> '{modelo,id}')::uuid;
 
   -- ─── 1. Só categoria: não gera, o provisório fica ───
   v_pc := public.cat_guardar_produto(v_org, NULL, 'produto', 'Teste SubObrig C ' || v_suf, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
   PERFORM public.cat_guardar_produto_tabelas(v_org, v_pc, NULL, NULL, n_t, NULL);
   v_prov := (SELECT p.sku FROM products p WHERE p.id = v_pc);
   r := public.cat_gerar_sku_produto(v_org, v_pc);
-  IF (r -> 'gerado') IS DISTINCT FROM 'false'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["subcategoria"]'::jsonb
+  IF (r -> 'gerado') IS DISTINCT FROM 'false'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["subcategoria", "modelo"]'::jsonb
      OR r ->> 'motivo' IS DISTINCT FROM 'faltas' OR r ->> 'sku' IS DISTINCT FROM v_prov THEN
     RAISE EXCEPTION 'FALHOU: sem subcategoria gerou (ou a resposta não é a esperada) → %', r;
   END IF;
@@ -105,13 +117,14 @@ BEGIN
     RAISE EXCEPTION 'FALHOU: sem subcategoria o SKU do produto mudou (% → %)', v_prov, (SELECT p.sku FROM products p WHERE p.id = v_pc);
   END IF;
   r := public.cat_prever_sku(v_org, v_t, NULL, '[]'::jsonb);
-  IF r -> 'sku' IS DISTINCT FROM 'null'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["subcategoria"]'::jsonb THEN
+  IF r -> 'sku' IS DISTINCT FROM 'null'::jsonb OR r -> 'faltas' IS DISTINCT FROM '["subcategoria", "modelo"]'::jsonb THEN
     RAISE EXCEPTION 'FALHOU: pré-visualização sem subcategoria → %', r;
   END IF;
 
   -- ─── 2. Categoria + subcategoria: o número é por par ───
   v_pa := public.cat_guardar_produto(v_org, NULL, 'produto', 'Teste SubObrig A ' || v_suf, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
   PERFORM public.cat_guardar_produto_tabelas(v_org, v_pa, NULL, NULL, n_t, n_s1);
+  PERFORM public.cat_guardar_produto_modelo(v_org, v_pa, v_a1);
   r := public.cat_gerar_sku_produto(v_org, v_pa);
   IF r ->> 'sku' IS DISTINCT FROM v_sa || '-' || v_s1 || '-0001' OR (r -> 'gerado') IS DISTINCT FROM 'true'::jsonb THEN
     RAISE EXCEPTION 'FALHOU: categoria + S1 → % (esperado %)', r, v_sa || '-' || v_s1 || '-0001';
@@ -119,6 +132,7 @@ BEGIN
 
   v_pb := public.cat_guardar_produto(v_org, NULL, 'produto', 'Teste SubObrig B ' || v_suf, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
   PERFORM public.cat_guardar_produto_tabelas(v_org, v_pb, NULL, NULL, n_t, n_s2);
+  PERFORM public.cat_guardar_produto_modelo(v_org, v_pb, v_b1);
   r := public.cat_gerar_sku_produto(v_org, v_pb);
   IF r ->> 'sku' IS DISTINCT FROM v_sa || '-' || v_s2 || '-0001' OR (r -> 'gerado') IS DISTINCT FROM 'true'::jsonb THEN
     RAISE EXCEPTION 'FALHOU: S2 da mesma categoria não começou em 0001 → % (esperado %)', r, v_sa || '-' || v_s2 || '-0001';
@@ -126,18 +140,20 @@ BEGIN
 
   v_pd := public.cat_guardar_produto(v_org, NULL, 'produto', 'Teste SubObrig D ' || v_suf, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
   PERFORM public.cat_guardar_produto_tabelas(v_org, v_pd, NULL, NULL, n_t, n_s1);
+  PERFORM public.cat_guardar_produto_modelo(v_org, v_pd, v_a2);
   r := public.cat_gerar_sku_produto(v_org, v_pd);
   IF r ->> 'sku' IS DISTINCT FROM v_sa || '-' || v_s1 || '-0002' THEN
     RAISE EXCEPTION 'FALHOU: segundo produto em S1 → % (esperado %)', r, v_sa || '-' || v_s1 || '-0002';
   END IF;
 
-  r := public.cat_prever_sku(v_org, v_t, v_c2, '[]'::jsonb);
+  r := public.cat_prever_sku_modelo(v_org, v_t, v_c2, v_b2, '[]'::jsonb);
   IF r ->> 'sku' IS DISTINCT FROM v_sa || '-' || v_s2 || '-0002' OR r -> 'faltas' IS DISTINCT FROM '[]'::jsonb THEN
     RAISE EXCEPTION 'FALHOU: pré-visualização em S2 → % (esperado %)', r, v_sa || '-' || v_s2 || '-0002';
   END IF;
 
   -- o produto do passo 1 recebe S2: passa a gerar, com o seguinte de S2
   PERFORM public.cat_guardar_produto_tabelas(v_org, v_pc, NULL, NULL, n_t, n_s2);
+  PERFORM public.cat_guardar_produto_modelo(v_org, v_pc, v_b2);
   r := public.cat_gerar_sku_produto(v_org, v_pc);
   IF r ->> 'sku' IS DISTINCT FROM v_sa || '-' || v_s2 || '-0002' OR (r -> 'gerado') IS DISTINCT FROM 'true'::jsonb
      OR (SELECT p.sku_gerado FROM products p WHERE p.id = v_pc) IS NOT TRUE THEN
@@ -146,6 +162,6 @@ BEGIN
 END $t$;
 RESET ROLE;
 
-SELECT 'OK: sem subcategoria não gera (falta "subcategoria", provisório e sku_gerado intactos) nem se prevê; com categoria + subcategoria gera, e o número é por par (S1 0001 e 0002, S2 0001, prever S2 0002, o produto sem sub ao receber S2 → 0002).' AS resultado;
+SELECT 'OK: sem subcategoria não gera (faltas "subcategoria" e "modelo", provisório e sku_gerado intactos) nem se prevê; com categoria + subcategoria + modelo gera, e o número é por par (modelos de S1 0001 e 0002, de S2 0001, prever S2 com o 2.º modelo 0002, o produto sem sub ao receber S2 e esse modelo → 0002).' AS resultado;
 
 ROLLBACK;

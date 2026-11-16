@@ -30,7 +30,8 @@ import { useParamUrl } from "./usarParamUrl";
 import { CriarNoCatalogo } from "./CriarNoCatalogo";
 import { ComboPesquisa, type ItemCombo } from "./ComboPesquisa";
 import { Campo } from "./pecasForm";
-import { SEM_CATEGORIA_PRODUTO, SEM_FILTRO_PRODUTOS, haProdutosSemCategoria, normalizarMarca, categoriasDeProdutos, filtrarProdutosCatalogo, subcategoriasDeProdutos, type FiltroProdutos } from "./filtroProdutosCatalogo";
+import { SEM_CATEGORIA_PRODUTO, SEM_FILTRO_PRODUTOS, haProdutosSemCategoria, modelosDeProdutos, normalizarMarca, categoriasDeProdutos, filtrarProdutosCatalogo, subcategoriasDeProdutos, type FiltroProdutos } from "./filtroProdutosCatalogo";
+import { rotuloModelo } from "./modelosDados";
 import { FichaProduto } from "./FichaProduto";
 import { PROVISORIA } from "./ReferenciaFicha";
 import { ResumoAtributos } from "./AtributosProduto";
@@ -224,9 +225,13 @@ function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo, real,
   const catOk = !f.cat || cats.some((x) => x.id === f.cat);
   const cat = catOk ? f.cat : "";
   const subs = useMemo(() => subcategoriasDeProdutos(K, cat).map((x): ItemCombo => ({ id: x.id, nome: nomeRamo(x) })), [K.arvore, K.produtos, K.categoriasProduto, cat]); // eslint-disable-line react-hooks/exhaustive-deps
-  const fe: FiltroProdutos = { cat, sub: cat && subs.some((x) => x.id === f.sub) ? f.sub : "", marca: marcas.some((x) => normalizarMarca(x.nome) === normalizarMarca(f.marca)) ? f.marca : "" };
-  useEffect(() => { if (fe.cat !== f.cat || fe.sub !== f.sub || fe.marca !== f.marca) setF(fe); }, [fe.cat, fe.sub, fe.marca]); // eslint-disable-line react-hooks/exhaustive-deps
-  const L = useMemo(() => primeiro(pesquisarProdutos(filtrarProdutosCatalogo(K, K.produtos, fe), q), (p) => p.id === novo), [K, q, fe.cat, fe.sub, fe.marca, novo]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 16/11: o modelo depende da subcategoria; só se oferece quando a base trouxe os modelos (K.modelos)
+  const sub = cat && subs.some((x) => x.id === f.sub) ? f.sub : "";
+  const modelosFiltro = useMemo(() => modelosDeProdutos(K, sub).map((x): ItemCombo => ({ id: x.id, nome: x.inativa ? `${x.n} (desativado)` : x.n })), [K.modelos, K.produtos, sub]); // eslint-disable-line react-hooks/exhaustive-deps
+  const modelo = modelosFiltro.some((x) => x.id === f.modelo) ? f.modelo ?? "" : "";
+  const fe: FiltroProdutos = { cat, sub, marca: marcas.some((x) => normalizarMarca(x.nome) === normalizarMarca(f.marca)) ? f.marca : "", modelo };
+  useEffect(() => { if (fe.cat !== f.cat || fe.sub !== f.sub || fe.marca !== f.marca || modelo !== (f.modelo ?? "")) setF(fe); }, [fe.cat, fe.sub, fe.marca, modelo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const L = useMemo(() => primeiro(pesquisarProdutos(filtrarProdutosCatalogo(K, K.produtos, fe), q), (p) => p.id === novo), [K, q, fe.cat, fe.sub, fe.marca, modelo, novo]); // eslint-disable-line react-hooks/exhaustive-deps
   const mudar = (p: Partial<FiltroProdutos>) => { setF((a) => ({ ...a, ...p })); setN(POR_PAGINA); };
   const atual = (itens: readonly ItemCombo[], id: string): ItemCombo | null => (id ? itens.find((x) => normalizarMarca(x.id) === normalizarMarca(id)) ?? null : null);
   // 16/11: a coluna da esquerda (categorias, com o nº de produtos que a pesquisa e a marca deixam) e a do resumo (sobre o Catálogo todo)
@@ -247,12 +252,18 @@ function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo, real,
         <Procurar v={q} onChange={(v) => { setQ(v); setN(POR_PAGINA); }} rotulo="Procurar produto" ph="Nome, marca, referência ou subcategoria" />
         <Campo rot="Categoria" className="w-full sm:w-56">{(id) => (
           <ComboPesquisa id={id} rotulo="Categoria" itens={cats} atual={atual(cats, fe.cat)} semValor="Todas as categorias" semValorComoValor placeholder="Todas as categorias" vazio="Nenhuma categoria encontrada"
-            onEscolher={(i) => mudar({ cat: i.id, sub: "" })} />
+            onEscolher={(i) => mudar({ cat: i.id, sub: "", modelo: "" })} />
         )}</Campo>
         <Campo rot="Subcategoria" dica={!fe.cat ? "Escolha primeiro a categoria." : fe.cat === SEM_CATEGORIA_PRODUTO ? "«Sem categoria de produto» não tem subcategorias." : undefined} className="w-full sm:w-56">{(id) => (
           <ComboPesquisa id={id} rotulo="Subcategoria" itens={subs} atual={atual(subs, fe.sub)} desativado={!fe.cat || fe.cat === SEM_CATEGORIA_PRODUTO} semValor="Todas as subcategorias" semValorComoValor placeholder="Todas as subcategorias" vazio="Nenhuma subcategoria encontrada"
-            onEscolher={(i) => mudar({ sub: i.id })} />
+            onEscolher={(i) => mudar({ sub: i.id, modelo: "" })} />
         )}</Campo>
+        {K.modelos && (
+          <Campo rot="Modelo" dica={!sub ? "Escolha primeiro a subcategoria." : undefined} className="w-full sm:w-56">{(id) => (
+            <ComboPesquisa id={id} rotulo="Modelo" itens={modelosFiltro} atual={atual(modelosFiltro, modelo)} desativado={!sub} semValor="Todos os modelos" semValorComoValor placeholder="Todos os modelos" vazio="Esta subcategoria não tem modelos"
+              onEscolher={(i) => mudar({ modelo: i.id })} />
+          )}</Campo>
+        )}
         <Campo rot="Marca" className="w-full sm:w-56">{(id) => (
           <ComboPesquisa id={id} rotulo="Marca" itens={marcas} atual={atual(marcas, fe.marca)} semValor="Todas as marcas" semValorComoValor placeholder="Todas as marcas" vazio="Nenhuma marca encontrada"
             onEscolher={(i) => mudar({ marca: i.id })} />
@@ -269,7 +280,7 @@ function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo, real,
             <FotoOuIlustracao fotos={p.fotos} nome={p.n} k={p.img ?? "generico"} />
             <span className="min-w-0 flex-1">
               <button id={`prod-${p.id}`} type="button" onClick={(e) => { e.stopPropagation(); tocar(p.id); }} className="block text-left text-[15px] font-medium group-hover:underline">{p.n}{p.id === novo && <Novo />}</button>
-              {(p.marca || p.sku) && <span className={cn(NOTA, "block")}>{[p.marca, p.sku ? `ref. ${p.sku}` : ""].filter(Boolean).join(" · ")}</span>}
+              {(p.marca || p.sku || p.modelo) && <span className={cn(NOTA, "block")}>{[p.marca, p.modelo ? rotuloModelo({ numero: p.modeloNumero ?? 0, nome: p.modelo }) : "", p.sku ? `ref. ${p.sku}` : ""].filter(Boolean).join(" · ")}</span>}
               <ResumoAtributos p={p} defs={K.atributos} />
               {p.servico && (
                 <button type="button" onClick={(e) => { e.stopPropagation(); onAbrir(p.servico!); }} className="mt-0.5 inline-flex min-h-11 items-center text-left text-[15px] font-medium text-primary underline-offset-4 hover:underline sm:min-h-0">
@@ -446,8 +457,8 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   // 27/10: o Criar no Catálogo abre no lugar da lista (?criar=servico|produto|…): o "voltar" do browser fecha-o
   const [criar, setCriar] = useParamUrl<TipoCriar | "">("criar", "", ["", ...TIPOS_CRIAR.map((t) => t.k)]);
   // 13/11: a gestão do Catálogo (categorias, marcas e atributos) abre no lugar da lista, só na página real. O separador vai no endereço:
-  // ?atributos=categorias|subcategorias|marcas|sku|1 (o «1» é o endereço antigo da gestão dos atributos e continua a abrir os Atributos).
-  const [atributosAberto, setAtributosAberto] = useParamUrl<"" | "1" | "categorias" | "subcategorias" | "marcas" | "sku">("atributos", "", ["", "1", "categorias", "subcategorias", "marcas", "sku"]);
+  // ?atributos=categorias|subcategorias|modelos|marcas|sku|1 (o «1» é o endereço antigo da gestão dos atributos e continua a abrir os Atributos).
+  const [atributosAberto, setAtributosAberto] = useParamUrl<"" | "1" | "categorias" | "subcategorias" | "modelos" | "marcas" | "sku">("atributos", "", ["", "1", "categorias", "subcategorias", "modelos", "marcas", "sku"]);
   const voltarAtributos = useRef(false);
   // ao sair da gestão, o foco regressa ao botão «Gestão» (como nas fichas)
   useEffect(() => {
@@ -548,7 +559,7 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   if (produtoAberto) {
     return (
       <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
-        <FichaProduto key={produtoAberto} p={K.produtos.find((x) => x.id === produtoAberto)} min={S.cfg.min} alvo={S.cfg.alvo} real={real} atributos={K.atributos} arvore={K.arvore} marcas={K.marcas}
+        <FichaProduto key={produtoAberto} p={K.produtos.find((x) => x.id === produtoAberto)} min={S.cfg.min} alvo={S.cfg.alvo} real={real} atributos={K.atributos} arvore={K.arvore} marcas={K.marcas} modelos={K.modelos}
           voltar={() => { voltarProduto.current = produtoAberto; setProdutoAberto(""); }} anunciar={anunciar} nomeServico={nomeServico}
           onAbrirServico={(sid) => { setProdutoAberto("", { substituir: true }); setAberto(sid); }} />
         {regiao}

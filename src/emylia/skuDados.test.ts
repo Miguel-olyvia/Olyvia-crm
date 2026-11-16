@@ -10,7 +10,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 import {
-  descreverFaltas, exemploSku, gerarSkuProduto, guardarSigla, guardarSiglaOpcao, guardarSkuConfig, normalizarSigla, preverSku, resolverCategoria, textoSemGerar, validarSigla,
+  descreverFaltas, exemploSku, gerarSkuProduto, guardarSigla, guardarSiglaOpcao, guardarSkuConfig, normalizarSigla, preverSkuModelo, resolverCategoria, textoSemGerar, validarSigla,
 } from "./skuDados";
 import type { CategoriaGestao } from "./categoriasMarcasGestao";
 
@@ -37,19 +37,29 @@ describe("normalizarSigla e validarSigla", () => {
 });
 
 describe("as chamadas", () => {
-  it("guardarSigla, guardarSiglaOpcao, guardarSkuConfig, gerarSkuProduto e preverSku usam os nomes e argumentos da base", async () => {
+  it("guardarSigla, guardarSiglaOpcao, guardarSkuConfig, gerarSkuProduto e preverSkuModelo usam os nomes e argumentos da base", async () => {
     await guardarSigla(ORG, ID, "BC");
     await guardarSiglaOpcao(ORG, ID, "AZ");
     await guardarSkuConfig(ORG, [{ atributo: ID, entra: true }]);
     await gerarSkuProduto(ORG, ID, true);
-    await preverSku(ORG, ID, null, [{ atributo: ID, opcao: ID }]);
+    await preverSkuModelo(ORG, ID, ID, ID, [{ atributo: ID, opcao: ID }]);
     expect(base.chamadas).toEqual([
       { f: "cat_guardar_sigla_categoria", a: { p_org: ORG, p_id: ID, p_sigla: "BC" } },
       { f: "cat_guardar_sigla_opcao", a: { p_org: ORG, p_opcao: ID, p_sigla: "AZ" } },
       { f: "cat_guardar_sku_config", a: { p_org: ORG, p_itens: [{ atributo: ID, entra: true }] } },
       { f: "cat_gerar_sku_produto", a: { p_org: ORG, p_produto: ID, p_forcar: true } },
-      { f: "cat_prever_sku", a: { p_org: ORG, p_categoria: ID, p_subcategoria: null, p_atributos: [{ atributo: ID, opcao: ID }] } },
+      { f: "cat_prever_sku_modelo", a: { p_org: ORG, p_categoria: ID, p_subcategoria: ID, p_modelo: ID, p_atributos: [{ atributo: ID, opcao: ID }], p_produto: null } },
     ]);
+  });
+  it("preverSkuModelo: sem modelo manda null, com o produto em edição manda-o, e lê o outro produto de um duplicado", async () => {
+    await preverSkuModelo(ORG, ID, ID, null, [], "p1");
+    expect(base.chamadas[0].a).toMatchObject({ p_modelo: null, p_produto: "p1" });
+    base.responder = () => ({ data: { sku: "BC-TO-0001-AZ", faltas: ["duplicado"], outro_produto: "p2" }, error: null });
+    expect(await preverSkuModelo(ORG, ID, ID, ID, [])).toEqual({ ok: true, v: { sku: "BC-TO-0001-AZ", faltas: ["duplicado"], outroProduto: "p2" } });
+  });
+  it("gerarSkuProduto lê o outro produto quando a combinação já existe (duplicado)", async () => {
+    base.responder = () => ({ data: { sku: null, gerado: false, faltas: ["duplicado"], motivo: "duplicado", outro_produto: "p2", outro_apagado: true }, error: null });
+    expect(await gerarSkuProduto(ORG, ID)).toEqual({ ok: true, v: { sku: null, gerado: false, faltas: ["duplicado"], motivo: "duplicado", outroProduto: "p2", outroApagado: true } });
   });
   it("sigla repetida (CT004) diz «Já existe outra com esta sigla»", async () => {
     base.responder = () => ({ data: null, error: { code: "CT004", message: "Já existe uma categoria com esta sigla.", details: ID } });
@@ -60,12 +70,12 @@ describe("as chamadas", () => {
     base.responder = () => ({ data: null, error: { code: "PGRST202", message: "Could not find the function" } });
     expect(await gerarSkuProduto(ORG, ID)).toMatchObject({ ok: false, erro: "Ainda não disponível nesta base" });
     base.responder = () => ({ data: null, error: { code: "CT001", message: "Sem permissão." } });
-    expect(await preverSku(ORG, ID, null, [])).toMatchObject({ ok: false, erro: "Sem permissão.", codigo: "CT001" });
+    expect(await preverSkuModelo(ORG, ID, null, null, [])).toMatchObject({ ok: false, erro: "Sem permissão.", codigo: "CT001" });
   });
   it("lê as respostas de gerar e de prever (campos em falta viram valores seguros)", async () => {
     base.responder = (f) => ({ data: f === "cat_gerar_sku_produto" ? { sku: "BC-TO-0001", gerado: true, faltas: [], motivo: null } : { sku: null, faltas: ["sigla_categoria"] }, error: null });
     expect(await gerarSkuProduto(ORG, ID)).toEqual({ ok: true, v: { sku: "BC-TO-0001", gerado: true, faltas: [], motivo: null } });
-    expect(await preverSku(ORG, ID, null, [])).toEqual({ ok: true, v: { sku: null, faltas: ["sigla_categoria"] } });
+    expect(await preverSkuModelo(ORG, ID, null, null, [])).toEqual({ ok: true, v: { sku: null, faltas: ["sigla_categoria"] } });
     base.responder = () => ({ data: { lixo: 1 }, error: null });
     expect(await gerarSkuProduto(ORG, ID)).toEqual({ ok: true, v: { sku: null, gerado: false, faltas: [], motivo: null } });
   });
@@ -80,13 +90,16 @@ describe("descreverFaltas e textoSemGerar", () => {
     expect(descreverFaltas(["subcategoria"])).toEqual(["Falta escolher a subcategoria (é obrigatória para a referência), ou não pertence à categoria escolhida"]);
     expect(descreverFaltas(["sigla:cor", "medida:medida"], nomes)).toEqual(["Falta a sigla da opção escolhida em «Cor»", "Falta a medida de «Medida» completa"]);
     expect(descreverFaltas(["sigla:cor"])).toEqual(["Falta a sigla da opção escolhida em «cor»"]);
-    expect(descreverFaltas(["numero"])).toEqual(["Já não há números livres (9999) para esta combinação"]);
+    expect(descreverFaltas(["modelo"])).toEqual(["Escolha o modelo (define o número de 4 dígitos)"]);
+    expect(descreverFaltas(["duplicado"])).toEqual(["Já existe um produto com este modelo e estes atributos"]);
     expect(descreverFaltas(["xpto"])).toEqual(["Falta xpto"]);
   });
   it("textoSemGerar explica porque não se gerou", () => {
     expect(textoSemGerar({ sku: null, gerado: false, faltas: ["sigla_categoria"], motivo: "faltas" })).toBe("Falta a sigla da categoria");
     expect(textoSemGerar({ sku: "X", gerado: false, faltas: [], motivo: "sku_manual" })).toBe("a referência atual foi escrita à mão");
     expect(textoSemGerar({ sku: "X", gerado: false, faltas: [], motivo: null })).toBe("não foi possível");
+    expect(textoSemGerar({ sku: null, gerado: false, faltas: ["modelo"], motivo: "faltas" })).toBe("Escolha o modelo (define o número de 4 dígitos)");
+    expect(textoSemGerar({ sku: null, gerado: false, faltas: ["duplicado"], motivo: "duplicado", outroProduto: "p2" })).toBe("Já existe um produto com este modelo e estes atributos");
   });
 });
 

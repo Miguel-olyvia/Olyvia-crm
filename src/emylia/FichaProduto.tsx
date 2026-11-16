@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { eur, pct, type SvcId } from "./motor";
-import type { AtributoDef, No, Produto } from "./v2/catalogoModelo";
+import type { AtributoDef, ModeloK, No, Produto } from "./v2/catalogoModelo";
+import { numeroSku } from "./modelosDados";
 import { dataPT } from "./v2/custosModelo";
 import { margemEmPalavras } from "./fichaServico";
 import { BarraMargem } from "./CriarNoCatalogo";
@@ -44,9 +45,11 @@ type Props = {
   atributos?: AtributoDef[];
   /** 13/11: a árvore e as marcas do Catálogo (K.arvore, K.marcas) para a secção «Classificação» (marca, categoria, subcategoria). Em falta: sem a secção. */
   arvore?: No[]; marcas?: string[];
+  /** 16/11: os modelos do Catálogo (K.modelos) para o campo «Modelo» da secção «Classificação». Em falta: o campo diz «Ainda não disponível nesta base». */
+  modelos?: ModeloK[];
 };
 
-export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, real, tipo = "produto", atributos, arvore, marcas }: Props) {
+export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, real, tipo = "produto", atributos, arvore, marcas, modelos }: Props) {
   const cons = tipo === "consumivel";
   // 05/11: sem products.view_cost não se mostra o custo de compra (nem a margem, nem o preço dos fornecedores)
   const verCusto = real?.podeVerCusto !== false;
@@ -73,7 +76,7 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
     <article aria-labelledby="ficha-t">
       {topo}
       <header className="mt-3">
-        <p className={NOTA}>{[cons ? "Consumível" : "", p.marca, p.sku ? `ref. ${p.sku}` : "", `unidade: ${p.un}`].filter(Boolean).join(" · ")}</p>
+        <p className={NOTA}>{[cons ? "Consumível" : "", p.marca, p.modelo ? `modelo ${numeroSku(p.modeloNumero ?? 0)} · ${p.modelo}` : "", p.sku ? `ref. ${p.sku}` : "", `unidade: ${p.un}`].filter(Boolean).join(" · ")}</p>
         <h1 id="ficha-t" ref={titulo} tabIndex={-1} className="text-3xl font-semibold tracking-tight outline-none">{p.n}</h1>
         {!cons && real && real.podeEditar && eUuid(p.id) && (
           <ReferenciaFicha key={p.id} p={p} arvore={arvore} atributos={atributos} real={real} anunciar={anunciar} sugerir={sugerirRef} aoGerar={() => setSugerirRef(false)} />
@@ -101,7 +104,7 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
       {/* 13/11: marca, categoria e subcategoria em dropdowns com pesquisa; grava direto (cat_guardar_produto_tabelas), pelo nome */}
       {!cons && real && eUuid(p.id) && !!arvore && (
         <Seccao id="fp-class" titulo="Classificação">
-          <ClassificacaoFicha p={p} arvore={arvore} marcas={marcas ?? []} real={real} anunciar={anunciarMudanca} />
+          <ClassificacaoFicha p={p} arvore={arvore} marcas={marcas ?? []} modelos={modelos} real={real} anunciar={anunciarMudanca} />
         </Seccao>
       )}
 

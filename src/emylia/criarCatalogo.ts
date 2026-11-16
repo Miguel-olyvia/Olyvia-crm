@@ -13,6 +13,7 @@
 import { CATALOGO_TODO, normal, type ItemCatalogo, type LinhaCat } from "./catalogo";
 import { r2, type Estado, type MedKey, type SvcId } from "./motor";
 import type { IconeServicoKey, IlustracaoKey } from "./ilustracoes";
+import type { FornecedorPendente } from "./fornecedoresCatalogo";
 import { criarProduto, type AtributoProduto, type Catalogo, type ConsumivelCriado } from "./v2/catalogoModelo";
 import {
   HOJE, custoHoraPerfil, custoReceita, margemSobrePreco, mesesEntre, precoReceita,
@@ -133,9 +134,13 @@ export function criarServico(K: Catalogo, C: Custos, o: NovoServico, hoje = HOJE
 /* ------------------------------------------------------------------ produto */
 export interface NovoProdutoCompleto {
   n: string; custo: number; un: string; marca?: string; fornecedor?: string; no?: string | null;
+  /** 16/11: o fornecedor real escolhido, ou um novo por criar ao gravar (só na página real). */
+  fornecedorId?: string; fornecedorNovo?: FornecedorPendente;
   sku?: string; pvp?: number | null; desc?: string; servico?: SvcId | null; img?: IlustracaoKey;
   /** 13/11: os atributos escolhidos (Cor, Medida…); seguem com o produto novo. */
   attrs?: AtributoProduto[];
+  /** 16/11 (20270118300000): o modelo (define o NNNN da referência): um que já existe (`modeloId`) ou um novo por criar ao gravar (`modeloNovo`, só o nome). */
+  modeloId?: string; modeloNovo?: string;
 }
 /** O preço de venda do produto: o PVP, ou o custo com a margem-alvo. */
 export const precoVendaProduto = (custo: number, pvp: number | null | undefined, alvo: number) =>
@@ -154,13 +159,14 @@ export function faltasProduto(K: Catalogo, o: NovoProdutoCompleto): string[] {
 export function criarProdutoCompleto(K: Catalogo, o: NovoProdutoCompleto, hoje = HOJE): ResCriar<{ K: Catalogo }> {
   const f = faltasProduto(K, o);
   if (f.length) return { ok: false, erro: f[0] };
-  const r = criarProduto(K, { n: o.n, custo: o.custo, un: o.un, marca: o.marca, fornecedor: o.fornecedor, no: o.no ?? null }, hoje);
+  const r = criarProduto(K, { n: o.n, custo: o.custo, un: o.un, marca: o.marca, fornecedor: o.fornecedor, fornecedorId: o.fornecedorId, fornecedorNovo: o.fornecedorNovo, no: o.no ?? null }, hoje);
   if (!r.ok) return r;
   const produtos = r.K.produtos.map((p) => p.id !== r.id ? p : {
     ...p,
     ...(o.sku?.trim() ? { sku: o.sku.trim() } : {}), ...(o.pvp != null && o.pvp > 0 ? { pvp: r2(o.pvp) } : {}),
     ...(o.desc?.trim() ? { desc: o.desc.trim() } : {}), ...(o.servico ? { servico: o.servico } : {}), ...(o.img ? { img: o.img } : {}),
     ...(o.attrs?.length ? { attrs: o.attrs } : {}),
+    ...(o.modeloId ? { modeloId: o.modeloId } : o.modeloNovo?.trim() ? { modeloNovo: o.modeloNovo.trim() } : {}),
   });
   return { ok: true, id: r.id, K: { ...r.K, produtos } };
 }
@@ -210,7 +216,8 @@ export function criarConsumivel(K: Catalogo, existentes: readonly { n: string }[
   if (f.length) return { ok: false, erro: f[0] };
   const n = o.n.trim(), L = K.consumiveisCriados ?? [];
   const id = idLivre("k-", n, L.map((c) => c.id));
-  const c: ConsumivelCriado = { id, n, un: o.un.trim(), preco: r2(o.preco), fornecedor: o.fornecedor.trim() || "Por escolher", data: hoje, ...(o.opcional ? { opcional: true } : {}) };
+  const c: ConsumivelCriado = { id, n, un: o.un.trim(), preco: r2(o.preco), fornecedor: o.fornecedor.trim() || "Por escolher", data: hoje, ...(o.opcional ? { opcional: true } : {}),
+    ...(o.fornecedorId ? { fornecedorId: o.fornecedorId } : o.fornecedorNovo?.nome.trim() ? { fornecedorNovo: o.fornecedorNovo } : {}) };
   return { ok: true, id, K: { ...K, consumiveisCriados: [...L, c] } };
 }
 

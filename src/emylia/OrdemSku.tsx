@@ -1,5 +1,6 @@
 // 16/11: o separador «Referência (SKU)» da Gestão do Catálogo: a composição da referência, em blocos por ordem. SKU = SIGLA_CAT-SIGLA_SUB-NNNN-
-// <atributos por esta ordem>-<medida>. A Categoria, a Subcategoria e o Número vêm sempre primeiro e estão PRESOS (fixos: sem mover nem desligar);
+// <atributos por esta ordem>-<medida>, com NNNN = o número do MODELO do produto (SORTY 0001, STONE PLUS 0002…). A Categoria, a Subcategoria e o Modelo
+// vêm sempre primeiro e estão PRESOS (fixos: sem mover nem desligar);
 // depois vêm os atributos configuráveis, cuja ORDEM e quais entram se escolhem aqui (a Medida é um atributo como os outros). Os atributos que um
 // produto não tem não entram. Mexe-se no ecrã (Subir/Descer, interruptor) e só se grava em «Guardar» (cat_guardar_sku_config, com TODOS os
 // atributos pela ordem). Só com products.edit (sem ela, só se vê). Não reescreve nenhum SKU já gerado.
@@ -10,14 +11,14 @@ import { cn } from "@/lib/utils";
 import { NOTA } from "./pecasForm";
 import type { AtributoGestao } from "./atributosGestao";
 import { exemploSku, type ItemSku } from "./skuDados";
+import { numeroSku } from "./modelosDados";
 import { ANEL, BOTAO_ICONE, BOTAO_TEXTO, CARTAO, ENTRA, Razao, protegido } from "./gestaoPecas";
 
-/** A base da referência (o que está preso): a categoria e a subcategoria escolhidas para o exemplo e a próxima referência dessa base. */
+/** A base da referência (o que está preso): a categoria, a subcategoria e o modelo escolhidos para o exemplo (o número do modelo é o NNNN). */
 export interface BaseSku {
   categoria: { nome: string; sigla: string | null } | null;
   subcategoria: { nome: string; sigla: string | null } | null;
-  /** Só leitura (cat_prever_sku): a próxima referência desta base, ou null se não se sabe. */
-  proximo: string | null;
+  modelo: { nome: string; numero: number } | null;
   /** O atalho para editar a sigla. */
   irPara: (separador: "categorias" | "subcategorias") => void;
 }
@@ -28,8 +29,6 @@ function ordemDaBase(L: readonly AtributoGestao[]): ItemSku[] {
     .map((a) => ({ atributo: a.id, entra: a.skuEntra }));
 }
 const igual = (a: readonly ItemSku[], b: readonly ItemSku[]) => a.length === b.length && a.every((x, i) => x.atributo === b[i].atributo && x.entra === b[i].entra);
-/** O número de 4 dígitos de uma referência (BC-TO-0003-…), ou null. */
-const numeroDe = (sku: string | null): string | null => sku?.match(/-(\d{4})(?:-|$)/)?.[1] ?? null;
 
 const FIXO = "Fixo: a referência base";
 const LINHA_FIXA = "flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl border border-dashed border-foreground/30 bg-muted/30 p-2 pl-3";
@@ -76,9 +75,9 @@ export function OrdemSku({ atributos, podeEditar, aGravar, erro, onGuardar, anun
   }, [local, servidor]);
   const mudou = !igual(itens, servidor);
   const porId = useMemo(() => new Map(atributos.map((a) => [a.id, a])), [atributos]);
-  const { categoria, subcategoria, proximo, irPara } = base;
-  // sem escolha, o exemplo de sempre (BC-TO-0001); com escolha, as siglas reais («??» onde falta) e o próximo número dessa base
-  const parteBase = `${categoria ? categoria.sigla ?? "??" : "BC"}-${subcategoria ? subcategoria.sigla ?? "??" : categoria ? "XX" : "TO"}-${numeroDe(proximo) ?? "0001"}`;
+  const { categoria, subcategoria, modelo, irPara } = base;
+  // sem escolha, o exemplo de sempre (BC-TO-0001); com escolha, as siglas reais («??» onde falta) e o número do modelo
+  const parteBase = `${categoria ? categoria.sigla ?? "??" : "BC"}-${subcategoria ? subcategoria.sigla ?? "??" : categoria ? "XX" : "TO"}-${modelo ? numeroSku(modelo.numero) : "0001"}`;
   const exemplo = exemploSku(itens.map((i) => {
     const a = porId.get(i.atributo)!;
     return { tipo: a.tipo, entra: i.entra, siglas: a.opcoes.map((o) => o.sigla).filter((s): s is string => !!s) };
@@ -113,14 +112,16 @@ export function OrdemSku({ atributos, podeEditar, aGravar, erro, onGuardar, anun
   return (
     <section aria-labelledby={tit} className={cn(CARTAO, "grid gap-3", ENTRA)}>
       <h2 id={tit} className="text-lg font-semibold">Referência (SKU)</h2>
-      <p className={NOTA}>A referência de um produto junta a sigla da categoria e da subcategoria (sempre as duas, presas), um número de 4 dígitos e depois as siglas dos atributos pela ordem de baixo (a medida escreve-se com x: 60X30). Os atributos que um produto não tem simplesmente não entram na referência. A ordem só vale para as referências novas.</p>
+      <p className={NOTA}>A referência de um produto junta a sigla da categoria e da subcategoria (sempre as duas, presas), o número de 4 dígitos do modelo (cada modelo tem o seu: SORTY 0001, STONE PLUS 0002…; a marca não conta) e depois as siglas dos atributos pela ordem de baixo (a medida escreve-se com x: 60X30). Os atributos que um produto não tem simplesmente não entram na referência. A ordem só vale para as referências novas.</p>
       {escolha}
       <p data-testid="exemplo-sku" className="text-[15px]">Exemplo: <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm tabular-nums">{exemplo}</code></p>
       <ol className="grid gap-2" aria-label="Composição da referência">
         <BlocoFixo n={1} nome="Categoria"><Sigla de={categoria} rotulo="categoria" irPara={() => irPara("categorias")} /></BlocoFixo>
         <BlocoFixo n={2} nome="Subcategoria"><Sigla de={subcategoria} rotulo="subcategoria" irPara={() => irPara("subcategorias")} /></BlocoFixo>
-        <BlocoFixo n={3} nome="Número (4 dígitos)">
-          {proximo ? <span className={NOTA}>A próxima referência desta base: <span className="font-mono tabular-nums">{proximo}</span></span> : <span className={NOTA}>Conta-se por categoria e subcategoria.</span>}
+        <BlocoFixo n={3} nome="Modelo (4 dígitos)">
+          {modelo
+            ? <span className={NOTA}>Modelo escolhido: {modelo.nome} → <span className="font-mono tabular-nums">{numeroSku(modelo.numero)}</span></span>
+            : <span className={NOTA}>O número vem do modelo do produto (SORTY 0001, STONE PLUS 0002…).</span>}
         </BlocoFixo>
         {itens.map((it, i) => {
           const a = porId.get(it.atributo)!;

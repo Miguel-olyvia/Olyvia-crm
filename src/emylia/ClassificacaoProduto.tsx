@@ -10,7 +10,9 @@ import { NOTA, Campo } from "./pecasForm";
 import { ComboPesquisa, NovoNome, semAcentos, type ItemCombo } from "./ComboPesquisa";
 import { categoriasDe, nomesDoRamo, ramoDe, subcategoriasDe, type RamoEscolhido } from "./ramoProduto";
 import { gravarClassificacao, type FichaProdutoReal } from "./fichaProdutoDados";
-import type { No } from "./v2/catalogoModelo";
+import { CampoModelo, MODELO_VAZIO, type ModeloEscolhido } from "./CampoModelo";
+import { ligarModeloAoProduto, numeroSku } from "./modelosDados";
+import type { ModeloK, No } from "./v2/catalogoModelo";
 
 const NOVA = "__nova__";
 const DICA_NOVA = "É nova: cria-se quando o produto for gravado.";
@@ -18,7 +20,7 @@ const DESATIVADA = "Já existe e está desativada: reative-a na Gestão.";
 const juntar = (t: string) => t.trim().replace(/\s+/g, " ");
 
 /** Devolve o foco a um campo depois de o seu formulário «Nova …» fechar. */
-function useFoco(): { registar: (el: HTMLInputElement | null) => void; devolver: () => void } {
+export function useFoco(): { registar: (el: HTMLInputElement | null) => void; devolver: () => void } {
   const el = useRef<HTMLInputElement | null>(null);
   const [n, setN] = useState(0);
   useEffect(() => { if (n) el.current?.focus(); }, [n]);
@@ -106,20 +108,24 @@ export function CamposRamo({ arvore, ramo, onChange }: { arvore: readonly No[]; 
 }
 
 /* ------------------------------------------------------------------ a ficha */
-/** Na ficha (secção «Classificação»): grava direto por cat_guardar_produto_tabelas e relê o Catálogo. Sem products.edit só se lê. */
-export function ClassificacaoFicha({ p, arvore, marcas, real, anunciar }: {
-  p: { id: string; n: string; un: string; marca: string; no: string | null }; arvore: readonly No[]; marcas: readonly string[]; real: FichaProdutoReal; anunciar: (msg: string) => void;
+/** Na ficha (secção «Classificação»): grava direto por cat_guardar_produto_tabelas e relê o Catálogo. Sem products.edit só se lê.
+ *  16/11: também o modelo (cat_guardar_produto_modelo, depois da classificação: o modelo tem de ser da subcategoria já gravada); a referência não muda sozinha. */
+export function ClassificacaoFicha({ p, arvore, marcas, modelos, real, anunciar }: {
+  p: { id: string; n: string; un: string; marca: string; no: string | null; modeloId?: string; modelo?: string; modeloNumero?: number }; arvore: readonly No[]; marcas: readonly string[];
+  /** Os modelos da organização (K.modelos); sem eles o campo diz «Ainda não disponível nesta base». */
+  modelos?: readonly ModeloK[]; real: FichaProdutoReal; anunciar: (msg: string) => void;
 }) {
   const atuais = useMemo(() => nomesDoRamo(arvore, p.no), [arvore, p.no]);
   const [marca, setMarca] = useState(p.marca);
   const [ramo, setRamo] = useState<RamoEscolhido>(() => ramoInicial(arvore, p.no));
+  const [modelo, setModelo] = useState<ModeloEscolhido>({ id: p.modeloId ?? "", novo: null });
   const [aGravar, setAGravar] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [aviso, setAviso] = useState("");
   const estado = useRef<HTMLParagraphElement>(null), ocupado = useRef(false);
   const rz = useId();
   // o Catálogo relê depois de gravar e o produto muda: o que se vê acompanha-o (sem remontar, para o estado e o foco ficarem)
-  useEffect(() => { setMarca(p.marca); setRamo(ramoInicial(arvore, p.no)); }, [p.id, p.marca, p.no]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { setMarca(p.marca); setRamo(ramoInicial(arvore, p.no)); setModelo({ id: p.modeloId ?? "", novo: null }); }, [p.id, p.marca, p.no, p.modeloId]); // eslint-disable-line react-hooks/exhaustive-deps
   // depois de guardar, o foco vai para o estado (o botão não desaparece, mas o resultado ouve-se logo)
   useEffect(() => { if (aviso) estado.current?.focus(); }, [aviso]);
   if (!real.podeEditar) {
@@ -129,32 +135,45 @@ export function ClassificacaoFicha({ p, arvore, marcas, real, anunciar }: {
         {linha("Marca", p.marca.trim() || null, "sem marca")}
         {linha("Categoria", atuais.categoria, "sem categoria")}
         {linha("Subcategoria", atuais.subcategoria, "sem subcategoria")}
+        {linha("Modelo", p.modelo ? `${numeroSku(p.modeloNumero ?? 0)} · ${p.modelo}` : null, "sem modelo")}
       </ul>
     );
   }
   const nomeDe = (id: string) => arvore.find((x) => x.id === id)?.n ?? null;
   const categoria = ramo.catNova ?? nomeDe(ramo.cat);
   const subcategoria = categoria ? ramo.subNova ?? nomeDe(ramo.sub) : null;
-  const mudou = juntar(marca) !== juntar(p.marca) || categoria !== atuais.categoria || subcategoria !== atuais.subcategoria;
+  const classMudou = juntar(marca) !== juntar(p.marca) || categoria !== atuais.categoria || subcategoria !== atuais.subcategoria;
+  const modeloMudou = !!modelo.novo || modelo.id !== (p.modeloId ?? "");
+  const mudou = classMudou || modeloMudou;
+  // o modelo é da subcategoria: mudar de categoria ou de subcategoria tira o escolhido (e, ao guardar, desliga o que o produto tinha)
+  const mudarRamo = (r: RamoEscolhido) => {
+    if (r.cat !== ramo.cat || r.sub !== ramo.sub || r.catNova !== ramo.catNova || r.subNova !== ramo.subNova) setModelo(MODELO_VAZIO);
+    setRamo(r); setErro(null);
+  };
   const gravar = async () => {
     if (ocupado.current) return; // guarda de reentrada (um segundo toque antes de o estado mudar)
     ocupado.current = true;
     setAGravar(true); setErro(null); setAviso("");
     try {
-      const r = await gravarClassificacao(real.org, p.id, { marca: juntar(marca) || null, unidade: p.un, categoria, subcategoria });
+      const r = classMudou ? await gravarClassificacao(real.org, p.id, { marca: juntar(marca) || null, unidade: p.un, categoria, subcategoria }) : null;
+      // o modelo só depois da classificação (tem de ser da subcategoria já gravada); se a classificação falhou, nada mais se grava
+      const m = (r && !r.ok) || !modeloMudou ? null : await ligarModeloAoProduto(real.org, p.id, modelo, { categoria, subcategoria });
       // relê SEMPRE, também em falha: o ecrã não pode ficar a mentir
       try { await real.recarregar(); } catch { /* fica o que está */ }
-      if (!r.ok) { setErro(r.erro); return; }
-      anunciar(`Classificação de ${p.n} guardada.`);
-      setAviso("Classificação guardada.");
+      if (r && !r.ok) { setErro(r.erro); return; }
+      if (m && !m.ok) { setErro(r ? `A classificação ficou guardada, mas o modelo não: ${m.erro}` : m.erro); return; }
+      const ambos = classMudou && modeloMudou;
+      anunciar(ambos ? `Classificação e modelo de ${p.n} guardados.` : modeloMudou ? `Modelo de ${p.n} guardado.` : `Classificação de ${p.n} guardada.`);
+      setAviso(ambos ? "Classificação e modelo guardados." : modeloMudou ? "Modelo guardado." : "Classificação guardada.");
     } finally { ocupado.current = false; setAGravar(false); }
   };
   // nada de disabled: o botão perderia o foco a gravar; aria-disabled, razão ligada e clique sem efeito
-  const razao = aGravar ? "A guardar a classificação…" : !mudou ? "Mude a marca, a categoria ou a subcategoria para guardar." : null;
+  const razao = aGravar ? "A guardar a classificação…" : !mudou ? (modelos ? "Mude a marca, a categoria, a subcategoria ou o modelo para guardar." : "Mude a marca, a categoria ou a subcategoria para guardar.") : null;
   return (
     <div className="mt-4 grid gap-4">
       <CampoMarca marcas={marcas} marca={marca} original={p.marca} onChange={(m) => { setMarca(m); setErro(null); }} />
-      <CamposRamo arvore={arvore} ramo={ramo} onChange={(r) => { setRamo(r); setErro(null); }} />
+      <CamposRamo arvore={arvore} ramo={ramo} onChange={mudarRamo} />
+      <CampoModelo modelos={modelos} sub={ramo.sub} subNova={!!ramo.subNova} valor={modelo} onChange={(m) => { setModelo(m); setErro(null); }} podeCriar original={p.modeloId} />
       <div>
         <Button className="min-h-11 text-[15px] aria-disabled:cursor-not-allowed aria-disabled:opacity-50" aria-disabled={razao ? true : undefined} aria-describedby={razao ? rz : undefined} onClick={razao ? undefined : () => void gravar()}>
           {aGravar && <Loader2 className="mr-1 h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />}Guardar classificação

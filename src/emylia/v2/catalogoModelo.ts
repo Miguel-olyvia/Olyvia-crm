@@ -15,6 +15,7 @@ import {
   type Custos, type ReceitaV2, type UsoCons,
 } from "./custosModelo";
 import type { IconeServicoKey, IlustracaoKey } from "../ilustracoes";
+import type { FornecedorPendente } from "../fornecedoresCatalogo";
 import { EXIGE_MUDELAR, ICONE_MUDELAR, OFICIOS_NOVOS_MUDELAR, PRODUTOS_MUDELAR, SUBS_NOVOS_MUDELAR, servicoMudelar } from "../dados/catalogoMudelar";
 
 /* ------------------------------------------------------------------ tipos */
@@ -29,6 +30,8 @@ export interface No {
 }
 /** 16/11: uma categoria (pai null) ou subcategoria de produtos. `id` e `pai` são ids de nós de K.arvore; `ordem` é o sort_order da base. */
 export interface CategoriaProdutoK { id: string; n: string; pai: string | null; ordem: number; inativa?: true }
+/** 16/11 (20270118300000): um modelo de produto. `sub`: o nó da árvore da subcategoria onde está (o mesmo id que Produto.no e CategoriaProdutoK). */
+export interface ModeloK { id: string; n: string; numero: number; sub: string; ativo: boolean }
 /** 13/11: a medida de um produto (atributo do tipo «medida»): 2D (largura × comprimento) ou 3D (com espessura), em cm ou mm. */
 export interface MedidaAtributo { tipo: "2D" | "3D"; largura: number; comprimento: number; espessura: number | null; unidade: "cm" | "mm" }
 /** 13/11: o valor de um atributo num produto: uma opção da lista (opcaoId, com o texto em `valor`) ou uma medida. */
@@ -44,6 +47,8 @@ export interface Produto {
   /** Custo de compra por unidade (€). */
   custo: number;
   un: string; marca: string; fornecedor: string;
+  /** 16/11: só num produto NOVO criado na página real: o fornecedor real escolhido (suppliers.id) ou um novo por criar ao gravar. `fornecedor` leva o nome. */
+  fornecedorId?: string; fornecedorNovo?: FornecedorPendente;
   /** Data do preço (ISO): alimenta o "Preço desatualizado". */
   data: string;
   /** Onde fica na árvore (null = sem classificação). */
@@ -68,6 +73,10 @@ export interface Produto {
   entulho?: EntulhoProd;
   /** 13/11: os atributos do produto (cat_ler_atributos): no máximo um valor por atributo. Sem eles, o produto não os tem. */
   attrs?: AtributoProduto[];
+  /** 16/11 (20270118300000): o modelo do produto (product_models: Categoria › Subcategoria › Modelo); o número dele é o NNNN do SKU. Sem ele, o produto não tem modelo. */
+  modeloId?: string; modelo?: string; modeloNumero?: number;
+  /** Só num produto NOVO criado na página real: o modelo novo, por criar ao gravar (cat_guardar_modelo), na subcategoria do produto. `modelo` leva o nome. */
+  modeloNovo?: string;
 }
 /** Quantidade de uma linha de pacote: fixa, ou por medida (× fator, com arredondamento para cima). */
 export type Regra = { k: "fixo"; q: number } | { k: "por"; med: MedKey; f: number; arred: boolean };
@@ -120,6 +129,8 @@ export interface Catalogo {
    *  ficou depois de juntar à dos serviços pelo nome. Distingue-as dos ofícios dos serviços sem depender de nomes e existe mesmo sem produtos (os filtros
    *  da lista de Produtos usam-na). Em falta (protótipo, base sem as tabelas): os filtros caem nos produtos que existem. */
   categoriasProduto?: CategoriaProdutoK[];
+  /** 16/11: os modelos (cat_ler_modelos_gestao). Sem eles (função por criar, sem permissão): sem o campo e o ecrã não oferece modelos. */
+  modelos?: ModeloK[];
   fornecedores: string[];
   /** O ícone de cada serviço (14/10). Sem ele, usa-se o do nome ou o do ofício (ilustracoes.tsx). */
   icone?: Record<SvcId, IconeServicoKey>;
@@ -131,7 +142,7 @@ export interface Catalogo {
   atributos?: AtributoDef[];
 }
 /** Um consumível criado à mão (27/10): o preço é por unidade, a data é a do preço. */
-export interface ConsumivelCriado { id: string; n: string; un: string; preco: number; fornecedor: string; data: string; opcional?: boolean }
+export interface ConsumivelCriado { id: string; n: string; un: string; preco: number; fornecedor: string; data: string; opcional?: boolean; fornecedorId?: string; fornecedorNovo?: FornecedorPendente }
 
 /* ------------------------------------------------------------------ medidas */
 export const MEDIDAS: { k: MedKey; n: string; curto: string }[] = [
@@ -261,7 +272,7 @@ export function garantirValor(lista: string[], v: string): { lista: string[]; v:
 }
 
 /* ------------------------------------------------------------------ produtos */
-export interface NovoProduto { n: string; custo: number; un: string; marca?: string; fornecedor?: string; no?: string | null }
+export interface NovoProduto { n: string; custo: number; un: string; marca?: string; fornecedor?: string; fornecedorId?: string; fornecedorNovo?: FornecedorPendente; no?: string | null }
 export type ResProduto = { ok: true; K: Catalogo; id: string } | { ok: false; erro: string };
 /** Cria um material: nome único, custo ≥ 0 e unidade; marca, unidade e fornecedor novos entram nas listas. Data do preço = hoje. */
 export function criarProduto(K: Catalogo, o: NovoProduto, hoje = HOJE): ResProduto {
@@ -272,7 +283,8 @@ export function criarProduto(K: Catalogo, o: NovoProduto, hoje = HOJE): ResProdu
   if (!o.un.trim()) return { ok: false, erro: "Escolha a unidade." };
   const u = garantirValor(K.unidades, o.un), m = garantirValor(K.marcas, o.marca ?? ""), f = garantirValor(K.fornecedores, o.fornecedor ?? "");
   const id = novoId("m", K.produtos.map((p) => p.id));
-  const p: Produto = { id, n, custo: r2(o.custo), un: u.v, marca: m.v, fornecedor: f.v, data: hoje, no: o.no ?? null };
+  const p: Produto = { id, n, custo: r2(o.custo), un: u.v, marca: m.v, fornecedor: f.v, data: hoje, no: o.no ?? null,
+    ...(o.fornecedorId ? { fornecedorId: o.fornecedorId } : o.fornecedorNovo?.nome.trim() ? { fornecedorNovo: o.fornecedorNovo } : {}) };
   return { ok: true, id, K: { ...K, produtos: [...K.produtos, p], unidades: u.lista, marcas: m.lista, fornecedores: f.lista } };
 }
 /** Muda o custo de um material: a data do preço passa a hoje. */

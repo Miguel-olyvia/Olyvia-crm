@@ -9,7 +9,9 @@ import type { Catalogo, No } from "../v2/catalogoModelo";
 import { MEDIDA_PARA_BASE, type CatalogoMontado, type LinhaProduto } from "./catalogoReal";
 import { mesmosAtributos, valoresParaGravar } from "../atributosTexto";
 import { erroAmigavel } from "../fichaProdutoDados";
-import { textoSemGerar } from "../skuDados";
+import { resolverCategoria, textoSemGerar } from "../skuDados";
+import type { CategoriaGestao } from "../categoriasMarcasGestao";
+import { RPC_LIGAR_FORNECEDOR, argsLigarFornecedor, type FornecedorPendente } from "../fornecedoresCatalogo";
 
 /** O Catálogo num momento: o que os ecrãs mostram. */
 export interface FotoCatalogo {
@@ -21,9 +23,43 @@ export interface FotoCatalogo {
 /** Um valor que só se sabe depois de uma chamada anterior (o id que a base deu). */
 export interface Tmp { tmp: string }
 /** `tolerante`: se falhar, a gravação continua e diz-se em `avisos` (o que já se gravou fica; é o caso de gerar a referência, o último passo). */
-export interface Chamada { rpc: string; args: Record<string, unknown>; guarda?: string; nota: string; tolerante?: boolean; produto?: string }
+export interface Chamada { rpc: string; args: Record<string, unknown>; guarda?: string; nota: string; tolerante?: boolean; produto?: string;
+  /** Quando a resposta não é o id (texto), tira-se dela o que `guarda` guarda: o id do modelo criado, a subcategoria achada. null = não deu. */
+  extrai?: (data: unknown) => string | null;
+  /** O início do aviso de um passo tolerante («Produto «X» criado; fornecedor por ligar»); sem ele, o da referência. O motivo segue-se depois de «: ». */
+  aviso?: string }
 
 const avisoSku = (nome: string | undefined, motivo: string) => `Produto${nome ? ` «${nome}»` : ""} criado; referência por gerar: ${motivo}`;
+/** 16/11: o fornecedor real de um produto ou consumível NOVO (cat_ligar_fornecedor_produto), depois de o texto e antes dos atributos. Tolerante:
+ *  o produto fica criado e o texto do fornecedor já foi gravado por cat_guardar_produto_texto (compatibilidade). */
+const ligarFornecedor = (org: string, rotulo: "Produto" | "Consumível", nome: string, ref: Tmp, x: { fornecedorId?: string; fornecedorNovo?: FornecedorPendente }): Chamada[] => {
+  const args = argsLigarFornecedor(org, ref, x);
+  return args ? [{ rpc: RPC_LIGAR_FORNECEDOR, nota: `${rotulo}: ${nome} (fornecedor)`, tolerante: true, aviso: `${rotulo} «${nome}» criado; fornecedor por ligar`, args }] : [];
+};
+/** 16/11: o modelo de um produto NOVO (depois da classificação, antes de gerar a referência, que precisa dele). Um modelo novo cria-se na subcategoria do
+ *  produto: o id dela só se sabe depois de gravada (pode ter sido criada agora), por isso lê-se pelos nomes (como a pré-visualização). Tolerante: o produto
+ *  fica criado e diz-se que o modelo ficou por ligar. */
+const ligarModelo = (org: string, nome: string, ref: Tmp, x: { modeloId?: string; modeloNovo?: string }, ramo: { p_categoria: string | null; p_subcategoria: string | null }): Chamada[] => {
+  const aviso = `Produto «${nome}» criado; modelo por ligar`;
+  const novo = x.modeloNovo?.trim();
+  if (!x.modeloId && !novo) return [];
+  const ligar = (modelo: string | Tmp): Chamada => ({ rpc: "cat_guardar_produto_modelo", nota: `Produto: ${nome} (modelo)`, tolerante: true, aviso, args: { p_org: org, p_produto: ref, p_modelo: modelo } });
+  if (!novo) return [ligar(x.modeloId!)];
+  const t = ref.tmp;
+  return [
+    { rpc: "cat_ler_categorias_gestao", nota: `Produto: ${nome} (subcategoria do modelo)`, tolerante: true, aviso, guarda: "sub:" + t, args: { p_org: org }, extrai: (d) => subDe(d, ramo) },
+    { rpc: "cat_guardar_modelo", nota: `Produto: ${nome} (modelo novo)`, tolerante: true, aviso, guarda: "modelo:" + t, args: { p_org: org, p_id: null, p_subcategoria: { tmp: "sub:" + t }, p_nome: novo, p_numero: null },
+      extrai: (d) => { const id = (d as { modelo?: { id?: unknown } } | null)?.modelo?.id; return typeof id === "string" ? id : null; } },
+    ligar({ tmp: "modelo:" + t }),
+  ];
+};
+/** O id da subcategoria (em product_categories) a partir dos nomes da categoria e da subcategoria do produto; null se não existe ou é ambíguo. */
+function subDe(d: unknown, ramo: { p_categoria: string | null; p_subcategoria: string | null }): string | null {
+  const lista = (d as { categorias?: unknown } | null)?.categorias;
+  if (!ramo.p_categoria || !ramo.p_subcategoria || !Array.isArray(lista)) return null;
+  const r = resolverCategoria(lista as CategoriaGestao[], ramo.p_categoria, ramo.p_subcategoria);
+  return r.k === "ok" ? r.subcategoria : null;
+}
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const igual = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const porId = <T extends { id: string }>(L: readonly T[]) => new Map(L.map((x) => [x.id, x]));
@@ -117,6 +153,7 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
       p_entulho_m3: p.entulho?.m3 ?? null, p_entulho_kg: p.entulho?.kg ?? null, p_descricao: p.desc ?? null } });
     if (novo || a?.marca !== p.marca || a?.fornecedor !== p.fornecedor)
       out.push({ rpc: "cat_guardar_produto_texto", nota: `Produto: ${p.n} (marca e fornecedor)`, args: { p_org: org, p_id: novo ? { tmp: "prod:" + p.id } : p.id, p_marca: p.marca, p_fornecedor: p.fornecedor } });
+    if (novo) out.push(...ligarFornecedor(org, "Produto", p.n, { tmp: "prod:" + p.id }, p));
     if (tabelas)
       out.push({ rpc: "cat_guardar_produto_tabelas", nota: `Produto: ${p.n} (marca, unidade e categoria)`, args: {
         p_org: org, p_id: novo ? { tmp: "prod:" + p.id } : p.id, p_marca: p.marca, p_unidade: p.un, ...nomesRamo(p.no) } });
@@ -125,6 +162,8 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
     if (p.attrs?.length && (novo || !mesmosAtributos(a?.attrs, p.attrs)))
       out.push({ rpc: "cat_guardar_produto_atributos", nota: `Produto: ${p.n} (atributos)`, args: {
         p_org: org, p_produto: novo ? { tmp: "prod:" + p.id } : p.id, p_valores: valoresParaGravar(p.attrs) } });
+    // 16/11 (20270118300000): o modelo do produto novo (o NNNN da referência é o número dele), antes de gerar a referência
+    if (novo) out.push(...ligarModelo(org, p.n, { tmp: "prod:" + p.id }, p, nomesRamo(p.no)));
     // 16/11 (20270118000000): um produto novo SEM referência escrita ganha uma gerada (categoria + subcategoria + número + atributos), como ÚLTIMO
     // passo (precisa da classificação e dos atributos já gravados). Tolerante: o produto fica criado mesmo que a referência fique por gerar.
     if (novo && !p.sku?.trim())
@@ -139,6 +178,7 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
       p_custo: c.preco, p_custo_data: c.data || null, p_pvp: null, p_servico_id: null, p_fator_servico: 1 } });
     if (novo || a?.fornecedor !== c.fornecedor)
       out.push({ rpc: "cat_guardar_produto_texto", nota: `Consumível: ${c.n} (fornecedor)`, args: { p_org: org, p_id: novo ? { tmp: "prod:" + c.id } : c.id, p_marca: null, p_fornecedor: c.fornecedor } });
+    if (novo) out.push(...ligarFornecedor(org, "Consumível", c.n, { tmp: "prod:" + c.id }, c));
     if (tabelas && (novo || a?.un !== c.un))
       out.push({ rpc: "cat_guardar_produto_tabelas", nota: `Consumível: ${c.n} (unidade)`, args: {
         p_org: org, p_id: novo ? { tmp: "prod:" + c.id } : c.id, p_marca: null, p_unidade: c.un, p_categoria: null, p_subcategoria: null } });
@@ -239,16 +279,20 @@ export async function executarCatalogo(chamadas: readonly Chamada[], rpc: Rpc): 
   for (const c of chamadas) {
     let args: Record<string, unknown>;
     try { args = resolver(c.args, tmps) as Record<string, unknown>; }
-    catch (e) { return { feitas, erro: `${c.nota}: ${(e as Error).message}`, avisos }; }
+    catch (e) {
+      // um passo tolerante cujo id não se obteve (o que o criava falhou, já avisado) fica por fazer; os outros correm
+      if (c.tolerante) { if (c.aviso) avisos.push(`${c.aviso}: não se chegou a identificar o que faltava`); continue; }
+      return { feitas, erro: `${c.nota}: ${(e as Error).message}`, avisos };
+    }
     let r: Awaited<ReturnType<Rpc>>;
     try { r = await rpc(c.rpc, args); }
     catch (e) { r = { data: null, error: { message: (e as Error).message || "erro de rede" } }; }
     const { data, error } = r;
     if (error) {
-      if (c.tolerante) { avisos.push(avisoSku(c.produto, erroAmigavel(error, "erro da base"))); continue; }
+      if (c.tolerante) { avisos.push(c.aviso ? `${c.aviso}: ${erroAmigavel(error, "erro da base")}` : avisoSku(c.produto, erroAmigavel(error, "erro da base"))); continue; }
       return { feitas, erro: `${c.nota}: ${error.message ?? "erro da base"}`, avisos };
     }
-    if (c.guarda && typeof data === "string") tmps.set(c.guarda, data);
+    if (c.guarda) { const v = c.extrai ? c.extrai(data) : data; if (typeof v === "string") tmps.set(c.guarda, v); }
     // a base responde sem erro mas pode não ter gerado (faltam siglas, ou a referência atual é manual): o produto fica, o aviso diz porquê
     if (c.rpc === "cat_gerar_sku_produto" && data && typeof data === "object" && (data as { gerado?: unknown }).gerado === false) {
       const v = data as { sku?: string | null; faltas?: unknown; motivo?: string | null };

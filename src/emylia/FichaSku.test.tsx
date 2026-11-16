@@ -31,6 +31,7 @@ import type { FichaProdutoReal } from "./fichaProdutoDados";
 const ORG = "b6ffce4f-f630-4933-833a-008649757a33";
 const PID = "11111111-2222-4333-8444-555555555555";
 const PC1 = "c0000000-0000-4000-a000-000000000001", PS1 = "50000000-0000-4000-a000-000000000001";
+const M1 = "e0000000-0000-4000-a000-000000000001", OUTRO = "d0000000-0000-4000-a000-000000000002";
 const A_COR = "aaaaaaaa-0000-4000-a000-000000000001", O_AZUL = "bbbbbbbb-0000-4000-a000-000000000001";
 const ARVORE: No[] = [{ id: "c1", n: "Casa de banho", pai: null }, { id: "s2", n: "Torneiras", pai: "c1" }, { id: "c2", n: "Cozinha", pai: null }];
 const DEFS: AtributoDef[] = [{ id: A_COR, codigo: "cor", nome: "Cor", tipo: "lista", temHex: false, ordem: 1, opcoes: [{ id: O_AZUL, valor: "AZUL", nome: "Azul", hex: null, ordem: 1 }] }];
@@ -54,7 +55,7 @@ beforeEach(() => {
   base.responder = (f) => (f === "cat_produto_stock" ? ok({ gere_stock: true, pode_editar: true, armazens: [] })
     : f === "cat_gerar_sku_produto" ? ok(GERADO)
     : f === "cat_ler_categorias_gestao" ? ok({ categorias: [{ id: PC1, nome: "Casa de banho", ordem: 1, ativo: true, global: false, usados: 0, sigla: "BC", subcategorias: [{ id: PS1, nome: "Torneiras", ordem: 1, ativo: true, global: false, usados: 0, sigla: "TO" }] }] })
-    : f === "cat_prever_sku" ? ok({ sku: "BC-TO-0003-AZ", faltas: [] }) : ok({ ok: true }));
+    : f === "cat_prever_sku_modelo" ? ok({ sku: "BC-TO-0003-AZ", faltas: [] }) : ok({ ok: true }));
 });
 afterEach(() => { cleanup(); reporCustos(); reporCatalogo(); });
 
@@ -109,13 +110,38 @@ describe("Ficha: botão de gerar/recalcular a referência", () => {
     expect(screen.getByRole("status", { name: "Resultado da referência" })).toHaveTextContent("Falta a sigla da opção escolhida em «Cor»");
     expect(anunciar).not.toHaveBeenCalledWith(expect.stringContaining("Referência gerada"));
   });
+  it("sem modelo a base não gera: diz «Escolha o modelo (define o número de 4 dígitos)» e não anuncia como gerada", async () => {
+    base.responder = (f) => (f === "cat_gerar_sku_produto" ? ok({ sku: null, gerado: false, faltas: ["modelo"], motivo: "faltas" }) : ok({ ok: true }));
+    const { anunciar } = ficha();
+    fireEvent.click(botao());
+    await waitFor(() => expect(screen.getByRole("status", { name: "Resultado da referência" })).toHaveTextContent("Escolha o modelo (define o número de 4 dígitos)"));
+    expect(anunciar).not.toHaveBeenCalledWith(expect.stringContaining("Referência gerada"));
+  });
+  it("a combinação já existe (duplicado): diz «Já existe um produto com este modelo e estes atributos» com a ligação para abrir o outro", async () => {
+    base.responder = (f) => (f === "cat_gerar_sku_produto" ? ok({ sku: "BC-TO-0001-AZ", gerado: false, faltas: ["duplicado"], motivo: "duplicado", outro_produto: OUTRO, outro_apagado: false }) : ok({ ok: true }));
+    const { anunciar } = ficha({ ...PROD, modeloId: M1, modelo: "SORTY", modeloNumero: 1 });
+    fireEvent.click(botao());
+    const r = await screen.findByRole("status", { name: "Resultado da referência" });
+    await waitFor(() => expect(r).toHaveTextContent("Já existe um produto com este modelo e estes atributos"));
+    expect(within(r).getByRole("link", { name: /Abrir esse produto/ })).toHaveAttribute("href", expect.stringContaining(`produto=${OUTRO}`));
+    expect(anunciar).not.toHaveBeenCalledWith(expect.stringContaining("Referência gerada"));
+  });
+  it("duplicado com o outro já apagado: diz-o, sem ligação para uma ficha que já não existe", async () => {
+    base.responder = (f) => (f === "cat_gerar_sku_produto" ? ok({ sku: "BC-TO-0001-AZ", gerado: false, faltas: ["duplicado"], motivo: "duplicado", outro_produto: OUTRO, outro_apagado: true }) : ok({ ok: true }));
+    ficha({ ...PROD, modeloId: M1 });
+    fireEvent.click(botao());
+    const r = await screen.findByRole("status", { name: "Resultado da referência" });
+    await waitFor(() => expect(r).toHaveTextContent("(apagado)"));
+    expect(within(r).queryByRole("link")).toBeNull();
+  });
   it("referência escrita à mão: pede confirmação no ecrã com a nova, e só depois de confirmar chama com p_forcar=true", async () => {
-    base.responder = (f) => (f === "cat_gerar_sku_produto" ? ok({ sku: "GR-77", gerado: false, faltas: [], motivo: "sku_manual" }) : f === "cat_ler_categorias_gestao" ? ok({ categorias: [{ id: PC1, nome: "Casa de banho", ordem: 1, ativo: true, global: false, usados: 0, sigla: "BC", subcategorias: [{ id: PS1, nome: "Torneiras", ordem: 1, ativo: true, global: false, usados: 0, sigla: "TO" }] }] }) : f === "cat_prever_sku" ? ok({ sku: "BC-TO-0003-AZ", faltas: [] }) : ok({ ok: true }));
-    const { anunciar, r } = ficha({ ...PROD, sku: "GR-77" });
+    base.responder = (f) => (f === "cat_gerar_sku_produto" ? ok({ sku: "GR-77", gerado: false, faltas: [], motivo: "sku_manual" }) : f === "cat_ler_categorias_gestao" ? ok({ categorias: [{ id: PC1, nome: "Casa de banho", ordem: 1, ativo: true, global: false, usados: 0, sigla: "BC", subcategorias: [{ id: PS1, nome: "Torneiras", ordem: 1, ativo: true, global: false, usados: 0, sigla: "TO" }] }] }) : f === "cat_prever_sku_modelo" ? ok({ sku: "BC-TO-0003-AZ", faltas: [] }) : ok({ ok: true }));
+    const { anunciar, r } = ficha({ ...PROD, sku: "GR-77", modeloId: M1, modelo: "SORTY", modeloNumero: 3 });
     fireEvent.click(botao());
     const grupo = await screen.findByRole("group", { name: "A referência atual foi escrita à mão: substituir por BC-TO-0003-AZ?" });
     expect(grupo).toHaveFocus();
-    expect(chamadasDe("cat_prever_sku")[0].a).toEqual({ p_org: ORG, p_categoria: PC1, p_subcategoria: PS1, p_atributos: [{ atributo: A_COR, opcao: O_AZUL }] });
+    // a nova referência prevê-se com o modelo do produto (o NNNN é o número dele) e o próprio produto, que não conta como duplicado de si
+    expect(chamadasDe("cat_prever_sku_modelo")[0].a).toEqual({ p_org: ORG, p_categoria: PC1, p_subcategoria: PS1, p_modelo: M1, p_atributos: [{ atributo: A_COR, opcao: O_AZUL }], p_produto: PID });
     expect(chamadasDe("cat_gerar_sku_produto").map((c) => c.a.p_forcar)).toEqual([false]);
     base.responder = (f) => (f === "cat_gerar_sku_produto" ? ok({ sku: "BC-TO-0003-AZ", gerado: true, faltas: [], motivo: null }) : ok({ ok: true }));
     fireEvent.click(within(grupo).getByRole("button", { name: "Confirmar" }));
@@ -161,7 +187,7 @@ describe("Ficha: casos de borda da confirmação", () => {
     fireEvent.click(botao());
     const grupo = await screen.findByRole("group", { name: "A referência atual foi escrita à mão: substituir por uma referência gerada?" });
     expect(grupo).toHaveTextContent("Não é possível prever: há categorias com o mesmo nome.");
-    expect(chamadasDe("cat_prever_sku")).toHaveLength(0);
+    expect(chamadasDe("cat_prever_sku_modelo")).toHaveLength(0);
   });
   it("se forçar falha, o erro aparece num só sítio (na confirmação, que continua aberta)", async () => {
     base.responder = (f) => (f === "cat_gerar_sku_produto" ? ok(MANUAL) : f === "cat_ler_categorias_gestao" ? erro("CT001", "Sem permissão.") : ok({ ok: true }));
