@@ -70,6 +70,26 @@ describe("SKU do artigo do fornecedor", () => {
     expect(screen.getByText("ISO-····-CIN")).toBeInTheDocument();
   });
 
+  it("as categorias são das empresas: com uma só empresa lista sem grupos, com várias agrupa pelo nome da empresa", async () => {
+    categorias.mockResolvedValue([
+      { id: "m-rp", codigo: "MR", nome: "Mobiliário de Roupeiros", empresa: "Mudelar", subcategorias: [] },
+      { id: "n-cr", codigo: "CR", nome: "Carpintaria", empresa: "nike", subcategorias: [] },
+    ]);
+    abrir();
+    const sel = await screen.findByLabelText("Categoria *");
+    const grupos = sel.querySelectorAll("optgroup");
+    expect([...grupos].map((g) => g.label)).toEqual(["Mudelar", "nike"]);
+    expect(grupos[0].textContent).toContain("Mobiliário de Roupeiros");
+  });
+
+  it("uma só empresa: sem grupos", async () => {
+    categorias.mockResolvedValue(LISTA.map((c) => ({ ...c, empresa: "Mudelar" })));
+    abrir();
+    const sel = await screen.findByLabelText("Categoria *");
+    expect(sel.querySelectorAll("optgroup")).toHaveLength(0);
+    expect(sel.textContent).toContain("Revestimentos");
+  });
+
   it("sem a lista na base (migration por aplicar), grava como antes, sem classificação", async () => {
     categorias.mockRejectedValue(new Error("função desconhecida"));
     upsert.mockResolvedValue({ created: true, item: ITEM });
