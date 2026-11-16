@@ -73,6 +73,9 @@ export const CONTACTO: Grupo[] = [
     nota: "A 1.ª morada do cliente é a fiscal. A da obra pode ser outra, e é dela que sai a distância ao armazém.",
     campos: [
       { k: "morada", l: "Rua e número", t: "texto" },
+      // 16/11 (Rúben, teste live): o código postal faltava no formulário à mão, mas a verificação de viagem (quem consegue chegar à
+      //  visita) precisa dele; sem ele dizia «falta a morada completa». Opcional, para não travar quem não o sabe de cor.
+      { k: "cp", l: "Código postal", t: "texto", ph: "0000-000", opcional: true },
       { k: "imovel", l: "Moradia ou andar", t: "escolha", op: ["Andar", "Moradia"] },
       { k: "fracao", l: "Andar e fração", t: "texto", ph: "6.º Dto.", se: { k: "imovel", v: ["Andar"] } },
     ],
@@ -102,11 +105,14 @@ export const EXTERIOR: Grupo = {
     // 5/11 (Rúben): há onde pôr o contentor (à porta, no passeio, num logradouro ou garagem)?
     { k: "espaco_contentor", bloco: "Acesso e estacionamento", l: "Espaço para colocar o contentor de entulho", t: "sim_nao", ajuda: "À porta, no passeio, num logradouro ou numa garagem.", opcional: true },
     { k: "dist_entulho", bloco: "Acesso e estacionamento", l: "Distância ao contentor", t: "escolha", op: ["Até 10 m", "10 a 30 m", "Mais de 30 m"], papel: "orcamento", opcional: true },
-    { k: "tem_elevador", bloco: "O prédio", l: "Tem elevador", t: "sim_nao", papel: "plano" },
+    // 16/11 (Rúben, teste live): numa moradia, perguntar elevador, andares do prédio, andar da fração e frações por andar não faz
+    //  sentido e eram 4 campos obrigatórios a mais. Só aparecem quando é «Andar» (ou enquanto não se escolheu: v inclui ""), como a
+    //  tipologia já faz com «Casa». O orçamento lida bem com a ausência (sem elevador nem custo de escada numa moradia ao nível da rua).
+    { k: "tem_elevador", bloco: "O prédio", l: "Tem elevador", t: "sim_nao", papel: "plano", se: { k: "imovel", v: ["Andar", ""] } },
     { k: "n_elevadores", bloco: "O prédio", l: "Nº de elevadores", t: "contador", min: 1, max: 6, se: { k: "tem_elevador", v: ["Sim"] } },
-    { k: "n_andares", bloco: "O prédio", l: "Andares do prédio", t: "contador", min: 1, max: 40 },
-    { k: "andar", bloco: "O prédio", l: "Andar da fração", t: "contador", min: 0, max: 40, zero: "R/C", papel: "plano" },
-    { k: "n_fracoes_por_andar", bloco: "O prédio", l: "Frações por andar", t: "contador", min: 1, max: 20 },
+    { k: "n_andares", bloco: "O prédio", l: "Andares do prédio", t: "contador", min: 1, max: 40, se: { k: "imovel", v: ["Andar", ""] } },
+    { k: "andar", bloco: "O prédio", l: "Andar da fração", t: "contador", min: 0, max: 40, zero: "R/C", papel: "plano", se: { k: "imovel", v: ["Andar", ""] } },
+    { k: "n_fracoes_por_andar", bloco: "O prédio", l: "Frações por andar", t: "contador", min: 1, max: 20, se: { k: "imovel", v: ["Andar", ""] } },
   ],
 };
 
