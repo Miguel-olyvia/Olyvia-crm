@@ -13,6 +13,7 @@ import { seed, type Estado } from "@/emylia/motor";
 import { lerCustos, useCustos } from "@/emylia/v2/custosStore";
 import { lerCatalogo as lerCatalogoStore, useCatalogo } from "@/emylia/v2/catalogoStore";
 import { CatalogoV1 } from "@/emylia/CatalogoV1";
+import type { RotaCatalogo } from "@/emylia/catalogoRotas";
 import type { Ctx } from "@/emylia/pecas";
 import { carregarCatalogo, type CatalogoCarregado } from "@/emylia/real/carregarCatalogo";
 import { diferencasCatalogo, executarCatalogo, fotografar, type Rpc } from "@/emylia/real/gravarCatalogo";
@@ -30,7 +31,8 @@ const rpc: Rpc = async (fn, args) => {
 
 type Base = CatalogoCarregado;
 
-export default function CatalogoCustos() {
+/** rota (17/11): vem das páginas /catalogo/… (CatalogoRota); sem ela, a página abre como antes. */
+export default function CatalogoCustos({ rota }: { rota?: RotaCatalogo } = {}) {
   usePaginaInteira();
   const { activeCompany, isLoading } = useCompany();
   const org = activeCompany?.id ?? null;
@@ -63,10 +65,13 @@ export default function CatalogoCustos() {
   const run = useCallback((fn: () => void) => { fn(); setMexido((m) => m + 1); setTique((t) => t + 1); }, []);
   const go = useCallback((fn: () => void) => () => run(fn), [run]);
 
+  // 17/11: a gravação pendente (o que mudou há menos de 900 ms) também corre ao sair da página, senão ir para uma página de Gestão perdia-a
+  const gravarPendente = useRef<(() => Promise<void>) | null>(null);
   useEffect(() => {
     const b = base.current;
-    if (!pronto || !b || aGravar.current) return undefined;
-    const t = window.setTimeout(async () => {
+    if (!pronto || !b || aGravar.current) { gravarPendente.current = null; return undefined; }
+    const gravar = async () => {
+      if (aGravar.current) return;
       const depois = fotografar({ C: lerCustos(), K: lerCatalogoStore(), svc: S.svc, margens: { min: S.cfg.min, alvo: S.cfg.alvo } });
       const chamadas = diferencasCatalogo(b.org, b.foto, depois, { ids: b.M.ids, produtos: b.produtos });
       if (!chamadas.length) return;
@@ -82,9 +87,12 @@ export default function CatalogoCustos() {
       // 17/11: eliminar um ofício que a base recusa (em uso em cargos, pessoas, obras…): o motivo também num aviso; o ofício já voltou (recarregou)
       const recusa = r.erro ? chamadas.find((c) => c.rpc === "cat_retirar_perfil" && r.erro!.startsWith(`${c.nota}: `)) : undefined;
       if (recusa && r.erro) toast({ variant: "destructive", title: "O ofício não foi eliminado", description: r.erro.slice(recusa.nota.length + 2) });
-    }, 900);
+    };
+    gravarPendente.current = gravar;
+    const t = window.setTimeout(() => { gravarPendente.current = null; void gravar(); }, 900);
     return () => window.clearTimeout(t);
   }, [C, K, mexido, pronto, S, carregar, queryClient]);
+  useEffect(() => () => { const g = gravarPendente.current; gravarPendente.current = null; if (g) void g(); }, []);
 
   const ctx = { S, A: {} as Ctx["A"], run, go, q: "" } as Ctx;
   // 29/10: a ficha do produto lê os fornecedores ligados e liga a artigos do portal; mexer exige products.edit (o can_link de Compras); a estrela também products.manage_prices
@@ -111,7 +119,7 @@ export default function CatalogoCustos() {
       </div>
       {erroLer ? <p className="p-6 text-destructive">{erroLer}</p>
         : !pronto ? <p className="p-6 text-muted-foreground">A ler o Catálogo…</p>
-        : <ProvedorPermissoesCatalogo valor={perms}><CatalogoV1 {...ctx} real={real} /></ProvedorPermissoesCatalogo>}
+        : <ProvedorPermissoesCatalogo valor={perms}><CatalogoV1 {...ctx} real={real} rota={rota} /></ProvedorPermissoesCatalogo>}
     </div>
   );
 }

@@ -18,14 +18,32 @@ const CATALOGO_ANTIGO = [
   ["/product-configurator-lab", "ProductConfiguratorLab"],
 ] as const;
 
-describe("catálogo antigo: redireciona para /catalogo-custos", () => {
+describe("catálogo antigo: redireciona para /catalogo-custos (que encaminha para /catalogo/…)", () => {
   it.each(CATALOGO_ANTIGO)("%s leva ao Catálogo e custos e a página já não é carregada", (rota, pagina) => {
     expect(linhaDe(rota)).toContain('<Navigate to="/catalogo-custos" replace />');
     expect(appSource).not.toMatch(new RegExp(`import\\("\\./pages/${pagina}"\\)`));
   });
 
-  it("o Catálogo e custos continua com services.view", () => {
-    expect(linhaDe("/catalogo-custos")).toContain('<ProtectedRoute permission="services.view"><CatalogoCustos />');
+  it("o Catálogo e custos continua com services.view: o endereço antigo só encaminha e as rotas novas têm a guarda", () => {
+    expect(linhaDe("/catalogo-custos")).toContain("<RedirectCatalogo />");
+    expect(linhaDe("/catalogo-custos")).not.toContain("<CatalogoCustos");
+    const ROTAS = [
+      ["/catalogo/produtos", "<CatalogoRota seccao=\"produtos\" />"], ["/catalogo/produtos/:id", "<CatalogoRota seccao=\"produtos\" />"],
+      ["/catalogo/servicos", "<CatalogoRota seccao=\"servicos\" />"], ["/catalogo/servicos/:sid", "<CatalogoRota seccao=\"servicos\" />"],
+      ["/catalogo/servicos/equipamentos", "<CatalogoRota seccao=\"equipamentos\" />"], ["/catalogo/servicos/consumiveis", "<CatalogoRota seccao=\"consumiveis\" />"],
+      ["/catalogo/servicos/tecnicos", "<CatalogoRota seccao=\"tecnicos\" />"], ["/catalogo/ligacoes", "<CatalogoRota seccao=\"ligacoes\" />"],
+      ["/catalogo/produtos/categorias", "<CatalogoGestao separador=\"categorias\" />"], ["/catalogo/produtos/subcategorias", "<CatalogoGestao separador=\"subcategorias\" />"],
+      ["/catalogo/produtos/modelos", "<CatalogoGestao separador=\"modelos\" />"], ["/catalogo/produtos/marcas", "<CatalogoGestao separador=\"marcas\" />"],
+      ["/catalogo/produtos/atributos", "<CatalogoGestao separador=\"atributos\" />"], ["/catalogo/produtos/referencia", "<CatalogoGestao separador=\"sku\" />"],
+    ] as const;
+    for (const [rota, elemento] of ROTAS) expect(linhaDe(rota), rota).toContain(`<ProtectedRoute permission="services.view">${elemento}</ProtectedRoute>`);
+  });
+
+  it("cada item do menu do Catálogo tem a mesma permissão da sua rota", () => {
+    const secao = menuSections.find((s) => s.id === "catalogo")!;
+    for (const i of [...secao.items, ...secao.subSections!.flatMap((x) => x.items)]) {
+      expect(linhaDe(i.to), i.to).toContain(`<ProtectedRoute permission="${i.permission}">`);
+    }
   });
 
   it("Organizações já não abre nos caminhos do catálogo nem pede products.view/services.view", () => {
@@ -38,13 +56,15 @@ describe("catálogo antigo: redireciona para /catalogo-custos", () => {
 
   it("o editor de modelos de orçamento abre o Catálogo e custos, não /products ou /services", () => {
     expect(quoteEditor).not.toMatch(/\/products\?edit=|\/services\?edit=/);
-    expect(quoteEditor).toContain('window.open("/catalogo-custos", "_blank")');
+    expect(quoteEditor).not.toContain('window.open("/catalogo-custos", "_blank")');
+    expect(quoteEditor).toContain('window.open("/catalogo/produtos", "_blank")');
+    expect(quoteEditor).toContain('window.open("/catalogo/servicos", "_blank")');
   });
 
   it("os atalhos do Hoje não levam às páginas antigas do catálogo; fica um atalho para o Catálogo e custos", () => {
     const destinos = QUICK_GROUPS.flatMap((g) => g.items.map((i) => i.to));
     CATALOGO_ANTIGO.forEach(([rota]) => expect(destinos, rota).not.toContain(rota));
-    expect(atalho("catalogo")).toMatchObject({ to: "/catalogo-custos", permission: "services.view" });
+    expect(atalho("catalogo")).toMatchObject({ to: "/catalogo/servicos", permission: "services.view" });
   });
 });
 

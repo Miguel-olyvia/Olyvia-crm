@@ -16,7 +16,7 @@ export const DESTINOS: Destino[] = [
   { url: "/pessoas", nome: "Pessoas", palavras: ["pessoas", "clientes", "contactos", "contatos", "os leads", "lista de clientes"] },
   { url: "/client-orders", nome: "Inventário", palavras: ["inventario", "stock", "armazem", "encomendas de cliente"] },
   { url: "/equipas-obra", nome: "Equipas de obra", palavras: ["equipas de obra", "equipa de obra", "as equipas", "equipas"] },
-  { url: "/catalogo-custos", nome: "Catálogo e custos", palavras: ["catalogo e custos", "catalogo", "custos", "produtos e servicos", "precos"] },
+  { url: "/catalogo/servicos", nome: "Catálogo e custos", palavras: ["catalogo e custos", "catalogo", "custos", "produtos e servicos", "precos"] },
   { url: "/prototipo/estudio", nome: "Estúdio", palavras: ["estudio", "a planta", "o projeto 3d"] },
 ];
 

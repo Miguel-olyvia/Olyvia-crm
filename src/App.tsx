@@ -19,6 +19,7 @@ import { ClientRouteGuard, CrmRouteGuard, SupplierRouteGuard } from "@/component
 import { LayoutRoute } from "@/components/Layout";
 import { RotaNegocios } from "@/components/RotaNegocios";
 import { RedirectRh } from "@/components/RedirectRh";
+import { RedirectCatalogo } from "@/components/RedirectCatalogo";
 
 // Critical routes loaded eagerly
 import Index from "./pages/Index";
@@ -62,7 +63,8 @@ const Receiving = lazy(() => import("./pages/Receiving"));
 const ClientOrders = lazy(() => import("./pages/ClientOrders"));
 const StockCounts = lazy(() => import("./pages/StockCounts"));
 const Suppliers = lazy(() => import("./pages/Suppliers"));
-const CatalogoCustos = lazy(() => import("./pages/CatalogoCustos"));
+const CatalogoRota = lazy(() => import("./pages/CatalogoRota"));
+const CatalogoGestao = lazy(() => import("./pages/CatalogoGestao"));
 const NegociosEmylia = lazy(() => import("./pages/NegociosEmylia"));
 
 const TeamHub = lazy(() => import("./pages/TeamHub"));
@@ -385,7 +387,23 @@ const App = () => (
                       <Route path="/stock-counts" element={<ProtectedRoute permission="inventory.view"><StockCounts /></ProtectedRoute>} />
                       <Route path="/suppliers" element={<ProtectedRoute permission="suppliers.view"><Suppliers /></ProtectedRoute>} />
                       <Route path="/services" element={<Navigate to="/catalogo-custos" replace />} />
-                      <Route path="/catalogo-custos" element={<ProtectedRoute permission="services.view"><CatalogoCustos /></ProtectedRoute>} />
+                      {/* 17/11: o Catálogo tem páginas (menu lateral). /catalogo-custos só encaminha (?sec=, ?servico=, ?produto=, ?consumivel=, ?criar=, ?atributos=). */}
+                      <Route path="/catalogo-custos" element={<RedirectCatalogo />} />
+                      <Route path="/catalogo" element={<Navigate to="/catalogo/servicos" replace />} />
+                      <Route path="/catalogo/produtos" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="produtos" /></ProtectedRoute>} />
+                      <Route path="/catalogo/produtos/categorias" element={<ProtectedRoute permission="services.view"><CatalogoGestao separador="categorias" /></ProtectedRoute>} />
+                      <Route path="/catalogo/produtos/subcategorias" element={<ProtectedRoute permission="services.view"><CatalogoGestao separador="subcategorias" /></ProtectedRoute>} />
+                      <Route path="/catalogo/produtos/modelos" element={<ProtectedRoute permission="services.view"><CatalogoGestao separador="modelos" /></ProtectedRoute>} />
+                      <Route path="/catalogo/produtos/marcas" element={<ProtectedRoute permission="services.view"><CatalogoGestao separador="marcas" /></ProtectedRoute>} />
+                      <Route path="/catalogo/produtos/atributos" element={<ProtectedRoute permission="services.view"><CatalogoGestao separador="atributos" /></ProtectedRoute>} />
+                      <Route path="/catalogo/produtos/referencia" element={<ProtectedRoute permission="services.view"><CatalogoGestao separador="sku" /></ProtectedRoute>} />
+                      <Route path="/catalogo/produtos/:id" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="produtos" /></ProtectedRoute>} />
+                      <Route path="/catalogo/servicos" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="servicos" /></ProtectedRoute>} />
+                      <Route path="/catalogo/servicos/equipamentos" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="equipamentos" /></ProtectedRoute>} />
+                      <Route path="/catalogo/servicos/consumiveis" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="consumiveis" /></ProtectedRoute>} />
+                      <Route path="/catalogo/servicos/tecnicos" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="tecnicos" /></ProtectedRoute>} />
+                      <Route path="/catalogo/servicos/:sid" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="servicos" /></ProtectedRoute>} />
+                      <Route path="/catalogo/ligacoes" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="ligacoes" /></ProtectedRoute>} />
                       <Route path="/service-categories" element={<Navigate to="/catalogo-custos" replace />} />
                       <Route path="/service-subcategories" element={<Navigate to="/catalogo-custos" replace />} />
                       <Route path="/service-catalog-items" element={<Navigate to="/catalogo-custos" replace />} />

@@ -6,7 +6,7 @@ import { seed, type Estado } from "../motor";
 import { aplicarTodos } from "../v2/custosModelo";
 import { catalogo0 } from "../v2/catalogoModelo";
 import { ligarCustos } from "../v2/custosStore";
-import { porCatalogo } from "../v2/catalogoStore";
+import { marcarCatalogoAtualizado, porCatalogo } from "../v2/catalogoStore";
 import { substituirCatalogoTodo } from "../catalogo";
 import { usarTecnicos } from "../equipa/tecnicos";
 import { montarCatalogo, type CatalogoMontado, type LinhaProduto } from "./catalogoReal";
@@ -36,6 +36,7 @@ export function aplicarCatalogo(org: string, M: CatalogoMontado, produtos: Linha
   S.custos = M.C;
   ligarCustos(S);
   porCatalogo(M.K);
+  marcarCatalogoAtualizado();
   aplicarTodos(S, M.C);
   return { org, M, produtos, foto: fotografar({ C: M.C, K: M.K, svc: S.svc, margens: M.margens }) };
 }

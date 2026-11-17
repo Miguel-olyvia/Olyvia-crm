@@ -88,17 +88,17 @@ const VISTAS = new Set(["negocios", "negocio", "hoje", "operacoes"]);
 const SEPARADORES: [Vista, string][] = [["hoje", "Hoje"], ["negocios", "Negócios"], ["operacoes", "Operações"]];
 /** As vistas da Emylia que abrem uma página da Olyvia: as Pessoas do CRM, as encomendas de cliente do Inventário e o Catálogo e custos. */
 const PAGINA_REAL: Partial<Record<Vista, string>> = {
-  pessoas: "/pessoas", leads: "/pessoas", clientes: "/pessoas", inventario: "/client-orders", catalogo: "/catalogo-custos",
+  pessoas: "/pessoas", leads: "/pessoas", clientes: "/pessoas", inventario: "/client-orders", catalogo: "/catalogo/servicos",
 };
 /** As mesmas ligações, ao lado dos separadores (como o menu do protótipo). 09/11: com a permissão de cada página; sem ela, não aparece. */
 const LIGACOES: [string, string, string][] = [["Pessoas", "/pessoas", "pessoas.view"], ["Inventário", "/client-orders", "client_orders.view"], ["Equipas de obra", "/equipas-obra", "pessoas.view"],
-  ["Catálogo e custos", "/catalogo-custos", "services.view"]];
+  ["Catálogo e custos", "/catalogo/servicos", "services.view"]];
 
 /** 10/11: a permissão que a rota de cada página real pede (ProtectedRoute em App.tsx) e o nome com que se avisa. As rotas só olham para o
  *  perfil da Olyvia: sem ela, a ligação levava a «Acesso negado». */
 const PERM_PAGINA: readonly [string, string, string][] = [["/client-orders", "client_orders.view", "as encomendas de cliente"],
   ["/receiving", "receiving.view", "a Receção"], ["/purchase-orders", "purchase_orders.view", "as encomendas a fornecedor"],
-  ["/catalogo-custos", "services.view", "o Catálogo e custos"], ["/pessoas", "pessoas.view", "as Pessoas"]];
+  ["/catalogo", "services.view", "o Catálogo e custos"], ["/pessoas", "pessoas.view", "as Pessoas"]];
 const permDaPagina = (url: string): readonly [string, string, string] | null =>
   PERM_PAGINA.find(([rota]) => url === rota || url.startsWith(rota + "?") || url.startsWith(rota + "/")) ?? null;
 

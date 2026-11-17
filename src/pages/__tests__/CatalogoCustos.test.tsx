@@ -1,7 +1,8 @@
 // A página Catálogo e custos: lê o Catálogo da organização ativa (cat_ler_catalogo) e mostra o Catálogo da Emylia.
-import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 const rpc = vi.fn();
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: (...a: unknown[]) => rpc(...a) } }));
@@ -10,6 +11,7 @@ vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany
 vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: () => false }) }));
 
 import CatalogoCustos from "../CatalogoCustos";
+import { mudarCustos, reporCustos } from "@/emylia/v2/custosStore";
 
 const SVC = "55555555-5555-4555-a555-555555555555", OF = "66666666-6666-4666-a666-666666666666", PERFIL = "22222222-2222-4222-a222-222222222222";
 const CATALOGO = {
@@ -28,9 +30,10 @@ const CATALOGO = {
 
 describe("Catálogo e custos (ligado à base)", () => {
   beforeEach(() => { rpc.mockReset(); });
+  afterEach(() => { reporCustos(); });
   it("lê o Catálogo da organização ativa e mostra o serviço", async () => {
     rpc.mockResolvedValue({ data: CATALOGO, error: null });
-    render(<MemoryRouter><CatalogoCustos /></MemoryRouter>);
+    render(<QueryClientProvider client={new QueryClient()}><MemoryRouter><CatalogoCustos /></MemoryRouter></QueryClientProvider>);
     expect(await screen.findByText("Ponto de água de teste", {}, { timeout: 5000 })).toBeInTheDocument();
     expect(rpc).toHaveBeenCalledWith("cat_ler_catalogo", { p_org: "11111111-1111-4111-a111-111111111111" });
     // abrir não grava nada (nada mudou): só as leituras do Catálogo e das linhas do modelo (29/10). 16/11: os atributos lêem-se só nas definições
@@ -38,9 +41,17 @@ describe("Catálogo e custos (ligado à base)", () => {
     await new Promise((r) => setTimeout(r, 1200));
     expect(rpc.mock.calls.map((c) => c[0]).sort()).toEqual(["cat_ler_atributos_definicoes", "cat_ler_catalogo", "cat_ler_modelos_gestao", "cat_ler_produtos_tabelas", "neg_ler_linhas_modelo"]);
   });
+  it("sair da página com uma alteração por gravar (menos de 900 ms) grava-a ao desmontar", async () => {
+    rpc.mockResolvedValue({ data: CATALOGO, error: null });
+    const { unmount } = render(<QueryClientProvider client={new QueryClient()}><MemoryRouter><CatalogoCustos /></MemoryRouter></QueryClientProvider>);
+    expect(await screen.findByText("Ponto de água de teste", {}, { timeout: 5000 })).toBeInTheDocument();
+    act(() => { mudarCustos((c) => { c.par.tsu = 30; }); });
+    unmount();
+    await waitFor(() => expect(rpc.mock.calls.map((c) => c[0])).toContain("cat_guardar_parametros"), { timeout: 700 });
+  });
   it("sem permissão, diz porquê", async () => {
     rpc.mockResolvedValue({ data: null, error: { code: "CT001", message: "Sem permissão (services.view)." } });
-    render(<MemoryRouter><CatalogoCustos /></MemoryRouter>);
+    render(<QueryClientProvider client={new QueryClient()}><MemoryRouter><CatalogoCustos /></MemoryRouter></QueryClientProvider>);
     expect(await screen.findByText("Não tem permissão para ver o Catálogo e custos desta organização.")).toBeInTheDocument();
   });
 });

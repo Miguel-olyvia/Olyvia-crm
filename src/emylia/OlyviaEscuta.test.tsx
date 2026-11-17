@@ -87,7 +87,7 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     render(arvore("/negocios?vista=hoje"));
     expect(ativos).toHaveLength(1);
     falar(ultimo(), res("olyvia vai ao catálogo", true));
-    expect(loc()).toBe("/catalogo-custos");
+    expect(loc()).toBe("/catalogo/servicos");
     act(() => { vi.advanceTimersByTime(2000); });
     expect(ativos).toHaveLength(1);
     expect(ativos[0].parado).toBe(false);
@@ -159,7 +159,7 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     falar(rec, res("olyvia", true));
     expect(screen.getByRole("button", { name: "Olyvia — a ouvir-te" })).toBeInTheDocument();
     falar(rec, res("olyvia", true), res("vai ao catálogo", true));
-    expect(loc()).toBe("/catalogo-custos");
+    expect(loc()).toBe("/catalogo/servicos");
     falar(rec, res("olyvia", true), res("vai ao catálogo", true), res("abre os negócios", true));
     expect(loc()).toBe("/negocios");
   });

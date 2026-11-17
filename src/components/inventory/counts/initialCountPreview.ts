@@ -10,7 +10,7 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Cliente = { from: (t: string) => any };
 
-export const CATALOGO_CUSTOS_PATH = "/catalogo-custos";
+export const CATALOGO_CUSTOS_PATH = "/catalogo/produtos";
 
 /** Nº de linhas que a contagem inicial vai criar no armazém (produtos marcados que passam os filtros). */
 export async function countInitialLines(

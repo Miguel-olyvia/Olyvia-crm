@@ -36,6 +36,6 @@ describe("countInitialLines", () => {
     await expect(countInitialLines(c, "org-1", "wh-1", null)).rejects.toEqual({ message: "boom" });
   });
   it("o atalho leva ao Catálogo e custos", () => {
-    expect(CATALOGO_CUSTOS_PATH).toBe("/catalogo-custos");
+    expect(CATALOGO_CUSTOS_PATH).toBe("/catalogo/produtos");
   });
 });
