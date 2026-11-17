@@ -8,7 +8,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Ear, Mic, MicOff, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { DESTINOS, EV_ABRIR, EV_FASE, EV_PASSO, EV_PESQUISA, EV_RESPOSTA, extrairAposGatilho, interpretarComando, juntarLetras, limparFrase, normal, pareceComando, pedeParaParar, temGatilho, VERBO_PREENCHER } from "./comandoOlyvia";
+import { DESTINOS, EV_ABRIR, EV_FASE, EV_PASSO, EV_PESQUISA, EV_RESPOSTA, extrairAposGatilho, interpretarComando, juntarLetras, limparFrase, normal, pedeParaParar, temGatilho, VERBO_PREENCHER } from "./comandoOlyvia";
 import { andarNaPagina, escreverNaPesquisa, executarPlano, lerCampos, preencherPelaFrase, type Acao } from "./preencherOlyvia";
 import { supabase } from "@/integrations/supabase/client";
 
@@ -32,8 +32,12 @@ import { useGravacao } from "./gravador";
 const PASSOS_JA = new Set(["fim", "proximo", "anterior", "inicio"]);
 /** Quanto silêncio (ms) chega para agir sem esperar que o browser dê a frase por acabada (o browser leva ~1 s). */
 export const PAUSA_PARA_AGIR = 400;
-/** Quanto tempo (ms) fica acordada depois de «Olyvia» ou da última ordem: entretanto, as ordens não precisam do nome. */
-export const ACORDADA_MS = 30_000;
+/** 17/11: numa frase natural (sem ordem conhecida), quanto silêncio chega para a tratar sem esperar pelo fim de frase do browser. */
+export const PAUSA_FRASE = 1100;
+/** Quanto tempo (ms) fica acordada depois de «Olyvia» ou da última fala: entretanto, as ordens não precisam do nome. */
+export const ACORDADA_MS = 60_000;
+/** 17/11: uma frase com mais palavras do que isto é linguagem natural — vai primeiro à IA (as regras só apanham frases feitas). */
+const PALAVRAS_FRASE_NATURAL = 8;
 
 // Web Speech API (SpeechRecognition): o mínimo que usamos, para não depender de tipos globais que o TS não traz.
 interface ResultadoVoz { results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal?: boolean }> }
@@ -119,6 +123,41 @@ export function OlyviaComando() {
     const noNegocio = naPaginaNegocios && !!new URLSearchParams(locRef.current.search).get("negocio");
     const limpa = limparFrase(juntarLetras(normal(frase)).replace(/^(?:ok |o |a )?o ?l[iy]via\s*/, ""));
 
+    // 17/11: pergunta à IA (olyvia-comando) com o que está no ecrã e faz o que ela disser. Devolve false se não houver IA ou ações
+    // (com `dizerVazio`, mostra a resposta dela mesmo sem ações, ex.: «Bom dia!»).
+    const viaIa = async (): Promise<boolean> => {
+      setAviso({ msg: `«${frase.trim()}» — a pensar…`, ok: true });
+      const lista = { passo: "", listar: true, lista: [] as string[] };
+      if (noNegocio) avisa(EV_PASSO, lista);
+      const campos = lerCampos();
+      const r = await perguntarIa(frase.trim(), locRef.current.pathname + locRef.current.search, campos, lista.lista);
+      if (!r) return false;
+      const doEcra = r.acoes.filter((a) => ["opcao", "contador", "texto"].includes(a.tipo)) as unknown as Acao[];
+      if (doEcra.length) await executarPlano(campos, doEcra);
+      for (const a of r.acoes) {
+        const t = a.texto ?? "";
+        if (a.tipo === "navegar") { const d = DESTINOS.find((x) => x.nome === t); if (d) navigate(d.url); }
+        else if (a.tipo === "scroll") andarNaPagina(t as "baixo" | "cima" | "topo" | "fundo");
+        else if (a.tipo === "passo" && noNegocio) avisa(EV_PASSO, { passo: t, tentar: true, ok: false });
+        else if (a.tipo === "limpar") { if (naPaginaNegocios) avisa(EV_PESQUISA, ""); escreverNaPesquisa(""); }
+        else if (a.tipo === "pesquisar") { if (!naPaginaNegocios) navigate("/negocios"); setTimeout(() => avisa(EV_PESQUISA, t), naPaginaNegocios ? 0 : 80); }
+        else if (a.tipo === "abrir_negocio") { if (!naPaginaNegocios) navigate("/negocios"); setTimeout(() => avisa(EV_ABRIR, { nome: t, fase: null }), naPaginaNegocios ? 0 : 120); }
+      }
+      setAviso({ msg: r.resposta || (r.acoes.length ? "Feito." : `Ouvi «${frase.trim()}» — não percebi.`), ok: r.acoes.length > 0 });
+      return true;
+    };
+
+    // 17/11 (Rúben: «se a plataforma não entender linguagem natural por voz, isto é inútil»): uma frase natural (comprida) vai
+    // primeiro à IA, que a percebe toda («não vai haver contentor, o prédio tem 4 andares e estamos no primeiro»); as regras por
+    // palavras-chave só apanham frases feitas e enganam-se nas compridas («obra… hoje» saltava para o Hoje). Sem IA, seguem as regras.
+    if (limpa.split(" ").length > PALAVRAS_FRASE_NATURAL) {
+      if (await viaIa()) return;
+      // sem IA: de uma frase comprida só se aproveita o que responde às perguntas do ecrã (navegar por uma palavra solta enganava-se)
+      const feito = await preencherPelaFrase(limpa);
+      setAviso(feito.length ? { msg: `Feito — ${feito.join(" · ")}.`, ok: true } : { msg: `Ouvi «${frase.trim()}» — não percebi.`, ok: false });
+      return;
+    }
+
     // 17/11 (gravação do Rúben): andar na página e limpar a pesquisa, em qualquer página
     if (c.acao === "scroll") {
       andarNaPagina(c.para);
@@ -170,27 +209,9 @@ export function OlyviaComando() {
         if (c.acao === "ir-fase") avisa(EV_FASE, { fase: c.fase }); else avisa(EV_PASSO, { passo: c.passo });
         fechar(1500);
         break;
-      default: {
+      default:
         // 17/11: as regras não perceberam — pergunta à IA com o que está no ecrã (olyvia-comando); sem ela, diz o que ouviu
-        setAviso({ msg: `«${frase.trim()}» — a pensar…`, ok: true });
-        const lista = { passo: "", listar: true, lista: [] as string[] };
-        if (noNegocio) avisa(EV_PASSO, lista);
-        const campos = lerCampos();
-        const r = await perguntarIa(frase.trim(), locRef.current.pathname + locRef.current.search, campos, lista.lista);
-        if (!r) { setAviso({ msg: `Ouvi «${frase.trim()}» — não percebi. Tenta «vai aos negócios», «desce» ou «acesso fácil».`, ok: false }); break; }
-        const doEcra = r.acoes.filter((a): a is Acao => ["opcao", "contador", "texto"].includes(a.tipo)) as Acao[];
-        if (doEcra.length) await executarPlano(campos, doEcra);
-        for (const a of r.acoes) {
-          const t = a.texto ?? "";
-          if (a.tipo === "navegar") { const d = DESTINOS.find((x) => x.nome === t); if (d) navigate(d.url); }
-          else if (a.tipo === "scroll") andarNaPagina(t as "baixo" | "cima" | "topo" | "fundo");
-          else if (a.tipo === "passo" && noNegocio) avisa(EV_PASSO, { passo: t, tentar: true, ok: false });
-          else if (a.tipo === "limpar") { if (naPaginaNegocios) avisa(EV_PESQUISA, ""); escreverNaPesquisa(""); }
-          else if (a.tipo === "pesquisar") { if (!naPaginaNegocios) navigate("/negocios"); setTimeout(() => avisa(EV_PESQUISA, t), naPaginaNegocios ? 0 : 80); }
-          else if (a.tipo === "abrir_negocio") { if (!naPaginaNegocios) navigate("/negocios"); setTimeout(() => avisa(EV_ABRIR, { nome: t, fase: null }), naPaginaNegocios ? 0 : 120); }
-        }
-        setAviso({ msg: r.resposta || (r.acoes.length ? "Feito." : `Ouvi «${frase.trim()}» — não percebi.`), ok: r.acoes.length > 0 });
-      }
+        if (!(await viaIa())) setAviso({ msg: `Ouvi «${frase.trim()}» — não percebi. Tenta «vai aos negócios», «desce» ou «acesso fácil».`, ok: false });
     }
   }, [navigate]);
 
@@ -283,7 +304,9 @@ export function OlyviaComando() {
         if (!txt) return;
         const final = !!lista[lista.length - 1]?.isFinal, ate = lista.length;
         const comGatilho = temGatilho(txt);
-        if (comGatilho) acordar();
+        // 17/11 (gravação do Rúben: falava em frases naturais e ela adormecia a meio): acordada, qualquer fala renova o tempo — não só as
+        // ordens que resultam
+        if (comGatilho || estaAcordada()) acordar();
         if (pedeParaParar(txt)) { if (final) { usados = ate; adormecer("Até já — diz «Olyvia» quando precisares."); } return; }
         let cmd = extrairAposGatilho(txt);
         if (!cmd) {
@@ -292,20 +315,23 @@ export function OlyviaComando() {
           if (!estaAcordada()) return; // a dormir: sem «Olyvia», não é com ela
           cmd = normal(txt);
         }
-        // acordada e sem «Olyvia»: uma frase comprida é conversa à volta, não uma ordem
-        if (!comGatilho && !pareceComando(cmd)) { if (final) usados = ate; return; }
+        // 17/11 (gravação do Rúben: «estou a falar em linguagem natural e não regista nada»): as frases naturais são compridas — antes,
+        // mais de 9 palavras era «conversa à volta» e deitava-se fora sem dizer nada. Agora, acordada, tudo conta (a IA percebe-as);
+        // só um monólogo enorme fica de fora
+        if (!comGatilho && normal(cmd).split(" ").length > 60) { if (final) usados = ate; return; }
         const c = interpretarComando(cmd);
-        const agir = () => {
+        const agir = (porPausa = false) => {
           espera = null;
-          // meia frase sem ordem conhecida ainda pode crescer: só quando acaba vai à página (preencher, um passo pelo nome) ou diz que não percebeu
-          if (c.acao === "nada" && !final) return;
+          // meia frase sem ordem conhecida ainda pode crescer: espera pelo fim da frase do browser ou por uma pausa (PAUSA_FRASE)
+          if (c.acao === "nada" && !final && !porPausa) return;
           usados = ate;
           acordar(); // cada ordem renova o tempo acordada
           void executarRef.current(cmd!);
         };
         if (final || c.acao === "scroll" || (c.acao === "ir-passo" && PASSOS_JA.has(c.passo))) { agir(); return; }
         setAviso({ msg: `«${txt}…»`, ok: true });
-        if (c.acao !== "nada") espera = setTimeout(agir, PAUSA_PARA_AGIR);
+        // a fala natural não espera pelo «fim de frase» do browser (às vezes não chega quando se fala seguido): uma pausa curta chega
+        espera = setTimeout(() => agir(true), c.acao === "nada" ? PAUSA_FRASE : PAUSA_PARA_AGIR);
       };
       r.onerror = (ev) => {
         // sem um gesto recente o browser recusa o micro: não se desliga a escolha — espera-se pelo próximo clique ou tecla

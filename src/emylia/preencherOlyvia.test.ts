@@ -41,6 +41,10 @@ describe("o plano: que resposta dar a cada pergunta", () => {
     expect(plano("o prédio tem quatro andares")).toEqual(["Andares do prédio=4"]);
     expect(plano("andar da fração rés do chão")).toEqual(["Andar da fração=0"]);
   });
+  it("17/11 (gravação): «estamos no primeiro andar e tem duas frações» — ordinais e o número antes do rótulo", () => {
+    const campos = [...EXTERIOR, { rotulo: "Frações por andar", tipo: "contador" as const, valor: "—" }];
+    expect(plano("estamos no primeiro andar e tem duas frações", campos)).toEqual(["Andar da fração=1", "Frações por andar=2"]);
+  });
   it("distâncias em metros («até 10 metros») e respostas sem a pergunta, se só uma pergunta as tem («fácil»)", () => {
     expect(plano("distância ao contentor até 10 metros")).toEqual(["Distância ao contentor=Até 10 m"]);
     expect(plano("fácil")).toEqual(["Acesso=Fácil"]);

@@ -5,11 +5,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { EV_ABRIR, EV_PASSO } from "./comandoOlyvia";
 
-const g = vi.hoisted(() => ({ estado: "parado" as string }));
+const g = vi.hoisted(() => ({ estado: "parado" as string, invoke: null as null | ((nome: string, o: { body: { frase: string } }) => Promise<unknown>) }));
 vi.mock("./gravador", () => ({ useGravacao: () => ({ estado: g.estado }) }));
-vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
+// a IA (olyvia-comando): por omissão não há (como antes de a função estar publicada)
+vi.mock("@/integrations/supabase/client", () => ({ supabase: { functions: { invoke: (n: string, o: { body: { frase: string } }) => (g.invoke ? g.invoke(n, o) : Promise.resolve({ data: null, error: new Error("sem função") })) } } }));
 
-import { ACORDADA_MS, OlyviaComando, PAUSA_PARA_AGIR } from "./OlyviaComando";
+import { ACORDADA_MS, OlyviaComando, PAUSA_FRASE, PAUSA_PARA_AGIR } from "./OlyviaComando";
 
 type Res = { transcript: string }[] & { isFinal: boolean };
 class Falso {
@@ -41,7 +42,7 @@ class Canal {
 }
 
 beforeEach(() => {
-  localStorage.clear(); ativos = []; g.estado = "parado"; Canal.todos = [];
+  localStorage.clear(); ativos = []; g.estado = "parado"; g.invoke = null; Canal.todos = [];
   vi.stubGlobal("BroadcastChannel", Canal);
   (window as unknown as { webkitSpeechRecognition: unknown }).webkitSpeechRecognition = Falso;
 });
@@ -172,13 +173,39 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     expect(loc()).toBe("/negocios?vista=hoje");
   });
 
-  it("acordada, uma frase comprida é conversa à volta e não uma ordem", () => {
+  it("acordada e sem IA, uma frase comprida não salta de página por uma palavra solta («catálogo»)", async () => {
     vi.useFakeTimers();
     render(arvore("/negocios?vista=hoje"));
     const rec = ultimo();
     falar(rec, res("olyvia", true));
     falar(rec, res("olyvia", true), res("ontem fui ao catálogo da loja e depois passei pela obra do senhor joão para ver", true));
+    await act(async () => { await vi.runOnlyPendingTimersAsync(); });
     expect(loc()).toBe("/negocios?vista=hoje");
+  });
+
+  it("17/11 (Rúben: «falo em linguagem natural e não regista nada»): a frase natural comprida vai à IA, e faz o que ela diz", async () => {
+    vi.useFakeTimers();
+    const pedidos: string[] = [];
+    g.invoke = async (_n, o) => { pedidos.push(o.body.frase); return { data: { acoes: [{ tipo: "navegar", texto: "Catálogo e custos" }], resposta: "A abrir o catálogo." }, error: null }; };
+    render(arvore("/negocios?vista=hoje"));
+    const rec = ultimo();
+    falar(rec, res("olyvia", true));
+    // sem «fim de frase» do browser: uma pausa curta chega
+    falar(rec, res("olyvia", true), res("preciso de ver quanto custam os materiais todos que temos no catálogo"));
+    await act(async () => { await vi.advanceTimersByTimeAsync(PAUSA_FRASE + 50); });
+    expect(pedidos).toEqual(["preciso de ver quanto custam os materiais todos que temos no catalogo"]);
+    expect(loc()).toBe("/catalogo-custos");
+  });
+
+  it("acordada, qualquer fala renova o tempo (não adormece a meio de uma conversa)", () => {
+    vi.useFakeTimers();
+    render(arvore("/negocios?vista=hoje"));
+    const rec = ultimo();
+    falar(rec, res("olyvia", true));
+    act(() => { vi.advanceTimersByTime(ACORDADA_MS - 1000); });
+    falar(rec, res("olyvia", true), res("hum deixa-me ver"));
+    act(() => { vi.advanceTimersByTime(ACORDADA_MS - 1000); });
+    expect(screen.getByRole("button", { name: "Olyvia — a ouvir-te" })).toBeInTheDocument();
   });
 
   it("adormece sozinha passado ACORDADA_MS sem ordens, e com «obrigado»", () => {
