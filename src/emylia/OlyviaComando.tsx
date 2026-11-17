@@ -351,14 +351,19 @@ export function OlyviaComando() {
         if (ativoRef.current && !parado && !precisaGesto) setTimeout(arrancar, cancelamentos ? 600 * cancelamentos : 100);
       };
       recRef.current = r;
-      try { r.start(); } catch { recRef.current = null; }
+      // 17/11 (Rúben: «às vezes deixa de ouvir, não sei porquê»): se o browser recusa arrancar (ainda a fechar a sessão anterior), antes
+      // ficava assim para sempre; agora tenta de novo daqui a pouco
+      try { r.start(); } catch { recRef.current = null; setTimeout(arrancar, 800); }
     };
     arrancar();
+    // e uma vigia: ligada, sem reconhecimento ativo e sem estar à espera de um toque → volta a ouvir (o Chrome às vezes termina sem «end»)
+    const vigia = setInterval(() => { if (ativoRef.current && !parado && !precisaGesto && !recRef.current) arrancar(); }, 4000);
     const noGesto = () => { precisaGesto = false; avisouGesto = false; cancelamentos = 0; if (ativoRef.current && !recRef.current) arrancar(); };
     window.addEventListener("pointerdown", noGesto);
     window.addEventListener("keydown", noGesto);
     return () => {
       parado = true;
+      clearInterval(vigia);
       if (espera) clearTimeout(espera);
       if (sono) clearTimeout(sono);
       setAcordada(false);
