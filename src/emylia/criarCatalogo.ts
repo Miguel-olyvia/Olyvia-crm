@@ -141,6 +141,8 @@ export interface NovoProdutoCompleto {
   attrs?: AtributoProduto[];
   /** 16/11 (20270118300000): o modelo (define o NNNN da referência): um que já existe (`modeloId`) ou um novo por criar ao gravar (`modeloNovo`, só o nome). */
   modeloId?: string; modeloNovo?: string;
+  /** 17/11 (20270120900000): o estado do produto novo (Rascunho, Ativo, Descontinuado). Sem ele a base cria-o Ativo. */
+  estado?: "draft" | "active" | "discontinued";
 }
 /** O preço de venda do produto: o PVP, ou o custo com a margem-alvo. */
 export const precoVendaProduto = (custo: number, pvp: number | null | undefined, alvo: number) =>
@@ -165,7 +167,7 @@ export function criarProdutoCompleto(K: Catalogo, o: NovoProdutoCompleto, hoje =
     ...p,
     ...(o.sku?.trim() ? { sku: o.sku.trim() } : {}), ...(o.pvp != null && o.pvp > 0 ? { pvp: r2(o.pvp) } : {}),
     ...(o.desc?.trim() ? { desc: o.desc.trim() } : {}), ...(o.servico ? { servico: o.servico } : {}), ...(o.img ? { img: o.img } : {}),
-    ...(o.attrs?.length ? { attrs: o.attrs } : {}),
+    ...(o.attrs?.length ? { attrs: o.attrs } : {}), ...(o.estado ? { estado: o.estado } : {}),
     ...(o.modeloId ? { modeloId: o.modeloId } : o.modeloNovo?.trim() ? { modeloNovo: o.modeloNovo.trim() } : {}),
   });
   return { ok: true, id: r.id, K: { ...r.K, produtos } };

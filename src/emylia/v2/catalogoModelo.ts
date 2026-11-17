@@ -85,6 +85,8 @@ export interface Produto {
   modeloId?: string; modelo?: string; modeloNumero?: number;
   /** Só num produto NOVO criado na página real: o modelo novo, por criar ao gravar (cat_guardar_modelo), na subcategoria do produto. `modelo` leva o nome. */
   modeloNovo?: string;
+  /** 17/11 (20270120900000): o estado (products.status). Só o trazem a ficha lida por cat_ler_produto e o produto NOVO do formulário de criar; sem ele não se sabe (o Catálogo antigo não o lê). */
+  estado?: "draft" | "active" | "discontinued";
 }
 /** Quantidade de uma linha de pacote: fixa, ou por medida (× fator, com arredondamento para cima). */
 export type Regra = { k: "fixo"; q: number } | { k: "por"; med: MedKey; f: number; arred: boolean };

@@ -117,6 +117,30 @@ export async function definirGrossistaDistribuidor(productId: string, grossista:
   }
 }
 
+/** 17/11 (20270120900000): o estado de um produto, como a base o guarda (products.status). */
+export type EstadoProduto = "draft" | "active" | "discontinued";
+export const ESTADOS_PRODUTO: readonly { v: EstadoProduto; rotulo: string }[] = [
+  { v: "draft", rotulo: "Rascunho" }, { v: "active", rotulo: "Ativo" }, { v: "discontinued", rotulo: "Descontinuado" },
+];
+export const rotuloEstadoProduto = (e: string | null | undefined): string => ESTADOS_PRODUTO.find((x) => x.v === e)?.rotulo ?? "";
+
+/** 17/11 (20270120900000): muda o estado do produto (cat_definir_estado_produto). Mesma permissão de cat_guardar_produto. A base recusa com CT001 (sem permissão),
+ *  CT002 (estado inválido) e CT003 (produto inexistente): a mensagem mostra-se tal como vem. */
+export async function definirEstadoProduto(org: string, productId: string, estado: EstadoProduto): Promise<Res<{ ok: boolean; estado: EstadoProduto; alterado: boolean }>> {
+  const FRASE = "Não foi possível mudar o estado do produto.";
+  try {
+    const { data, error } = await rpcLivre("cat_definir_estado_produto", { p_org: org, p_produto: productId, p_status: estado });
+    if (error) {
+      if (/^CT00\d$/.test(error.code ?? "") && error.message) return { ok: false, erro: error.message };
+      return { ok: false, erro: erroAmigavel(error, FRASE) === AINDA_NAO ? AINDA_NAO : FRASE };
+    }
+    if (!data) return { ok: false, erro: FRASE };
+    return { ok: true, v: data as { ok: boolean; estado: EstadoProduto; alterado: boolean } };
+  } catch {
+    return { ok: false, erro: FRASE };
+  }
+}
+
 /** 19/01: um preço do grossista/distribuidor escrito à mão: vazio → null (sem preço); número ≥ 0 com no máximo 2 casas e < 100 000 000 → o número;
  *  o resto → NaN (a base recusa o mesmo com CT002). */
 export function lerPrecoTabela(t: string): number | null {
