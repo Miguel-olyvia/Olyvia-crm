@@ -107,3 +107,21 @@ describe("useProdutosDoEstudio", () => {
     expect(pesquisa).not.toHaveBeenCalled();
   });
 });
+
+describe("17/11: o produto exato escolhido no Estúdio", () => {
+  it("lê-se pelo id (não pela pesquisa) e é esse que entra, mesmo fora dos primeiros resultados", async () => {
+    const EXATO = "0b1c2d3e-0000-4000-8000-000000000009";
+    ficha.mockImplementation(async (_o: string, id: string) => ({ ok: true, v: { id, n: "SANITA FLY SUSPENSO", custo: 80, un: "un", marca: "", fornecedor: "", data: "", no: null } as Produto }));
+    const r = await trazerProdutosDoEstudio(ORG, [{ ...L("prod-s", "sanita", "produto", ["branco"]), produtoId: EXATO, n: "SANITA FLY SUSPENSO" }], {});
+    expect(r.erros).toEqual([]);
+    expect(pesquisa).not.toHaveBeenCalled();
+    expect(ficha).toHaveBeenCalledWith(ORG, EXATO);
+    expect(lerCatalogo().produtos.map((p) => p.id)).toEqual([EXATO]);
+  });
+  it("se não se consegue ler, diz qual (não entra outro no lugar)", async () => {
+    ficha.mockResolvedValue({ ok: false, erro: "inexistente" });
+    const r = await trazerProdutosDoEstudio(ORG, [{ ...L("prod-s", "sanita"), produtoId: "0b1c2d3e-0000-4000-8000-0000000000aa", n: "Sanita X" }], {});
+    expect(r.erros).toEqual(["Sanita X: não foi possível ler o produto escolhido"]);
+    expect(lerCatalogo().produtos).toEqual([]);
+  });
+});
