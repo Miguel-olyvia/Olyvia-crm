@@ -111,7 +111,7 @@ export function CartaoProduto({ prod, estilo, escolhido, onEscolher, recomendado
           {prod.destaque && <span className="block text-xs text-muted-foreground">{prod.destaque}</span>}
           <span className="mt-1 flex flex-wrap items-center gap-2 text-sm">
             <b>{eur(prod.preco)}{prod.un === "m²" ? "/m²" : ""}</b>
-            <span className="text-muted-foreground">+ {eur(prod.inst)}{prod.un === "m²" ? "/m²" : ""} de mão de obra</span>
+            <span className="text-muted-foreground" title={prod.instServico}>+ {eur(prod.inst)}{prod.un === "m²" ? "/m²" : ""} {prod.instServico ? `· ${prod.instServico}` : "de mão de obra"}</span>
             {c === 2 && <span className="rounded-full bg-success/15 px-2 text-xs font-medium text-success">combina</span>}
             {c === 1 && <span className="rounded-full bg-muted px-2 text-xs">também combina</span>}
             {recomendado && <span className="rounded-full bg-primary px-2 text-xs font-medium text-primary-foreground">recomendado</span>}

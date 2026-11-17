@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 
-import { coresDoTexto, medidasDoTexto, produtoDaLinha } from "./catalogoRealDoEstudio";
+import { comMaoDeObraDoServico, coresDoTexto, medidasDoTexto, produtoDaLinha } from "./catalogoRealDoEstudio";
 import { melhorPara, produto, produtosDe, usarProdutosReais, type Estilo } from "./catalogoFake";
 import type { LinhaPaginaProduto } from "@/emylia/real/produtosPaginados";
 
@@ -44,6 +44,16 @@ describe("a linha do servidor como produto do Estúdio", () => {
   });
   it("revestimentos por m²", () => {
     expect(produtoDaLinha(linha("Revestimento PORCELÂNICO STATUÁRIO 60x120", { unidade: "m2" }), "pavimento")!.un).toBe("m²");
+  });
+});
+
+describe("17/11 (Rúben: «a mão de obra a vir do serviço ligado»)", () => {
+  it("o preço do serviço × o fator, com o nome do serviço; sem serviço (ou sem preço), fica como estava", () => {
+    const a = produtoDaLinha(linha("Móvel AXIS 60x81x45 Branco"), "movel")!, b = produtoDaLinha(linha("Toalheiro SMOOTH 45cm"), "toalheiro")!;
+    const r = comMaoDeObraDoServico([a, b], new Map([[a.id, { sid: "s1", fator: 2 }], [b.id, { sid: "s2", fator: 1 }]]),
+      new Map([["s1", { n: "Instalação de Mobiliário WC", preco: 85.5 }]]));
+    expect(r[0]).toMatchObject({ inst: 171, instServico: "Instalação de Mobiliário WC" });
+    expect(r[1]).toEqual(b);
   });
 });
 

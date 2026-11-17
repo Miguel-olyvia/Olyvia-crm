@@ -103,6 +103,46 @@ async function idsDasSubcategorias(org: string): Promise<Map<string, string>> {
   return new Map(data.map((c) => [semAcento(c.name), c.id]));
 }
 
+// ------------------------------------------------------------------ 17/11 (Rúben: «a mão de obra a vir do serviço ligado»)
+
+export interface LigacaoServico { sid: string; fator: number }
+export interface ServicoComPreco { n: string; preco: number }
+/** A mão de obra de cada produto pelo serviço que o instala (products.servico_id): o preço de venda do serviço × o fator. Sem
+ *  serviço ligado (ou sem preço), o produto fica como estava. */
+export function comMaoDeObraDoServico(lista: readonly Produto[], ligacoes: ReadonlyMap<string, LigacaoServico>, servicos: ReadonlyMap<string, ServicoComPreco>): Produto[] {
+  return lista.map((p) => {
+    const l = ligacoes.get(p.id), s = l && servicos.get(l.sid);
+    return s ? { ...p, inst: Math.round(s.preco * l!.fator * 100) / 100, instServico: s.n } : p;
+  });
+}
+
+type Sb = { from: (t: string) => { select: (c: string) => { in: (k: string, v: string[]) => Promise<{ data: unknown[] | null; error: unknown }> } } };
+const aos150 = <T,>(xs: T[]) => Array.from({ length: Math.ceil(xs.length / 150) }, (_, i) => xs.slice(i * 150, i * 150 + 150));
+
+/** Lê o serviço ligado a cada produto e o preço de venda desse serviço (as mesmas leituras que as encomendas e o seletor do catálogo). */
+async function maoDeObraDosServicos(lista: readonly Produto[]): Promise<Produto[]> {
+  const sb = supabase as unknown as Sb;
+  const ligacoes = new Map<string, LigacaoServico>();
+  for (const ids of aos150(lista.map((p) => p.id))) {
+    const { data, error } = await sb.from("products").select("id, servico_id, fator_servico").in("id", ids);
+    if (error || !data) return [...lista];
+    for (const r of data as { id: string; servico_id: string | null; fator_servico: number | null }[]) {
+      if (r.servico_id) ligacoes.set(r.id, { sid: r.servico_id, fator: Number(r.fator_servico) > 0 ? Number(r.fator_servico) : 1 });
+    }
+  }
+  const servicos = new Map<string, ServicoComPreco>();
+  for (const ids of aos150([...new Set([...ligacoes.values()].map((l) => l.sid))])) {
+    const { data, error } = await sb.from("services").select("id, name, service_prices(price, price_type)").in("id", ids);
+    if (error || !data) return [...lista];
+    for (const s of data as { id: string; name: string; service_prices: { price: number; price_type: string | null }[] | null }[]) {
+      const precos = s.service_prices ?? [];
+      const pr = precos.find((x) => x.price_type === "retail") ?? precos[0];
+      if (pr && Number(pr.price) > 0) servicos.set(s.id, { n: s.name, preco: Number(pr.price) });
+    }
+  }
+  return comMaoDeObraDoServico(lista, ligacoes, servicos);
+}
+
 /** Os produtos verdadeiros do Estúdio, de todas as categorias. */
 export async function carregarProdutosDoEstudio(org: string): Promise<Produto[]> {
   const ids = await idsDasSubcategorias(org);
@@ -129,7 +169,9 @@ export async function carregarProdutosDoEstudio(org: string): Promise<Produto[]>
       if (x) vistos.set(l.id, x);
     }
   }
-  return [...vistos.values()];
+  const lista = [...vistos.values()];
+  // a mão de obra pelo serviço ligado; se a leitura falhar, ficam os valores de referência
+  try { return await maoDeObraDosServicos(lista); } catch { return lista; }
 }
 
 /** No Estúdio: com sessão, carrega os produtos verdadeiros da organização (uma vez por organização) e redesenha quando chegam. */
