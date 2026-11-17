@@ -23,6 +23,9 @@ const real = vi.hoisted(() => ({
   perfil: null as string[] | null,
   papeis: { papeis: [] as string[], pessoa: null as { id: string; nome: string } | null, todos: true },
   negocios: [] as unknown[],
+  admin: true, // administrador de sistema (get_user_context.is_system_admin)
+  modoTeste: true, // fn_modo_teste_para_mim: só a organização de teste
+  filtrosRoles: null as Record<string, unknown> | null,
 }));
 const hoje = vi.hoisted(() => ({ simples: null as Record<string, unknown> | null, tecnico: null as Record<string, unknown> | null }));
 const perda = vi.hoisted(() => ({ atual: null as null | { perder: (d: unknown, fase: string, motivo: string) => void } }));
@@ -35,6 +38,7 @@ vi.mock("@/integrations/supabase/client", () => ({
         const q: Record<string, unknown> = {};
         for (const m of ["select", "order", "limit", "is"]) q[m] = () => q;
         q.eq = (c: string, v: unknown) => { filtros[c] = v; return q; };
+        q.or = (v: string) => { filtros.or = v; if (t === "anew_roles") real.filtrosRoles = filtros; return q; };
         q.then = (ok: (v: unknown) => unknown, ko: (e: unknown) => unknown) => Promise.resolve(t === "anew_roles" ? funcoesBase.roles
           : funcoesBase.espera ? funcoesBase.espera.then(() => ({ data: (funcoesBase.codigos[filtros.role_id as string] ?? []).map((permission_code) => ({ permission_code })), error: null }))
           : { data: (funcoesBase.codigos[filtros.role_id as string] ?? []).map((permission_code) => ({ permission_code })), error: null }).then(ok, ko);
@@ -47,7 +51,7 @@ vi.mock("@/integrations/supabase/client", () => ({
   },
 }));
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: { id: empresa.id }, isLoading: false }) }));
-vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: (c: string) => !real.perfil || real.perfil.includes(c), loading: false }) }));
+vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ isSystemAdmin: real.admin, hasPermission: (c: string) => !real.perfil || real.perfil.includes(c), loading: false }) }));
 vi.mock("@/emylia/HojeSimples", async (orig) => {
   const m = await orig<typeof import("@/emylia/HojeSimples")>();
   return { ...(m as object), HojeSimples: (p: Record<string, unknown>) => { hoje.simples = p; return <m.HojeSimples {...(p as unknown as import("react").ComponentProps<typeof m.HojeSimples>)} />; } };
@@ -99,15 +103,15 @@ const papeisDoAVerComo = () => [...(screen.getByLabelText("A ver como") as HTMLS
 
 describe("Simular função (só no ecrã)", { timeout: 20000 }, () => {
   beforeEach(() => {
-    rpc.mockReset(); empresa.id = ORG; real.perfil = null; real.papeis = { papeis: [], pessoa: null, todos: true }; real.negocios = [NEGOCIO];
+    rpc.mockReset(); empresa.id = ORG; real.admin = true; real.modoTeste = true; real.filtrosRoles = null; real.perfil = null; real.papeis = { papeis: [], pessoa: null, todos: true }; real.negocios = [NEGOCIO];
     funcoesBase.espera = null; hoje.simples = null; hoje.tecnico = null; perda.atual = null;
     funcoesBase.roles = { data: [{ id: "r1", code: "assistente", name: "Assistente comercial" }, { id: "r2", code: "comercial", name: "Comercial" }], error: null };
     funcoesBase.codigos = { r1: ASSISTENTE, r2: COMERCIAL };
     rpc.mockImplementation(async (fn: string, a?: unknown) => {
       if (fn === "neg_meus_papeis") return { data: real.papeis, error: null };
-      if (fn === "fn_modo_teste_para_mim") return { data: true, error: null }; // super-admin no ambiente de teste: mostra «A ver como» e «Simular função»
+      if (fn === "fn_modo_teste_para_mim") return { data: real.modoTeste, error: null }; // super-admin no ambiente de teste: mostra «A ver como» e «Simular função»
       if (fn === "neg_historico_autores" || fn === "neg_rececoes_ler" || fn === "neg_respostas_ler" || fn === "neg_gestores_obra") return { data: [], error: null };
-      if (fn === "cat_ler_catalogo") return { data: CATALOGO, error: null };
+      if (fn === "cat_ler_catalogo_servicos" || fn === "cat_ler_catalogo") return { data: CATALOGO, error: null };
       if (fn === "neg_ler_negocios") return { data: real.negocios, error: null };
       if (fn === "obra_ler_negocios") return { data: [], error: null };
       if (fn === "neg_sugestoes_formulario") return { data: null, error: { code: "PGRST202" } };

@@ -28,6 +28,7 @@ import { HojeTecnico, SemTecnicoLigado } from "@/emylia/HojeTecnico";
 import { OperacoesSimples } from "@/emylia/OperacoesSimples";
 import type { Ctx } from "@/emylia/pecas";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
+import { limparCatalogoLido } from "@/emylia/real/catalogoLeve";
 import { carregarCamposConfig, lerCamposConfig } from "@/emylia/real/camposConfig";
 import { definirEfeitosCampos, definirGravarEfeitos } from "@/emylia/efeitosLevantamento";
 import { aplicarAgenda, aplicarCompromissos, carregarAgendaReal, carregarVisitasCrm, equipaReal, tecnicoDaConta } from "@/emylia/real/agendaReal";
@@ -117,6 +118,8 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   const verCustos = usePodeVerCustos();
   definirVerCustos(verCustos.aLer ? null : verCustos.pode);
   useEffect(() => () => definirVerCustos(undefined), []);
+  // 17/11: ao sair, o Catálogo deixa de se dizer parcial (o protótipo e as outras organizações não herdam o estado)
+  useEffect(() => () => limparCatalogoLido(), []);
   // 11/11 (teste da Obra, achado): o relógio real (motor: diaReal) nunca se ligava na app: o «hoje» das obras em curso ficava no dia em que
   // arrancaram (o Hoje do técnico, os atrasos e o Estúdio da obra erravam) e arrancar não punha o início em hoje. Com a base, liga-se.
   definirRelogioReal(!!org);
@@ -583,7 +586,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
       if (!vivo) return;
       const so = !mp.todos && soExecucaoRef.current;
       // 11/11 (F1): um erro do Catálogo (ex.: CT001) não bloqueia o ecrã: avisa e os negócios abrem só para consulta
-      const cat = await carregarCatalogo(supabase, org, S, { semLinhasModelo: so, tolerante: true });
+      const cat = await carregarCatalogo(supabase, org, S, { semLinhasModelo: so, tolerante: true, leve: true });
       catalogoFalhou.current = !!cat.erro;
       if (cat.erro) avisar({ msg: "O Catálogo não carregou", sub: `${cat.erro} Os negócios abrem só para consulta.`, kind: "bad" });
       // 9/11: as equipas de obra da empresa (o plano escolhe a equipa toda ou nenhum membro); um erro aqui não para nada

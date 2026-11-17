@@ -17,6 +17,8 @@ import { type Catalogo, type Produto } from "./v2/catalogoModelo";
 import { CONSUMIVEIS } from "./equipamentosCliente";
 import { ServicosCatalogo, orcLinhas } from "./ServicosCatalogo";
 import { ContadorQtd } from "./ContadorQtd";
+import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
+import { produtoParaTocar, useProdutosDoRamo } from "./real/pesquisaProdutos";
 import { SelecaoGuiada } from "./SelecaoGuiada";
 import { FotoOuIlustracao, ilustracaoDe } from "./ilustracoes";
 import {
@@ -103,15 +105,22 @@ function Escolhido({ p, ctx, K, ro, clienteFornece }: { p: ProdVisita; ctx: P; K
 }
 
 /** A escolha de produtos de uma lista: pesquisa e marca só quando a lista é grande; em fila (telemóvel) ou grelha; às páginas. */
-function Escolher({ produtos, K, alvo, ja, onTocar, rotulo, focoRef }: {
+function Escolher({ produtos, K, alvo, ja, onTocar, rotulo, focoRef, servidor }: {
   produtos: Produto[]; K: Catalogo; alvo: number; ja: (id: string) => boolean; onTocar: (p: Produto) => void; rotulo: string; focoRef?: React.Ref<HTMLParagraphElement>;
+  /** 17/11: Catálogo leve: os produtos do ramo (`no`) procuram-se no servidor (com o texto escrito) em vez de se filtrar `produtos`. */
+  servidor?: { org: string; no: string | null };
 }) {
   const [q, setQ] = useState("");
   const [marca, setMarca] = useState<string | null>(null);
   const [n, setN] = useState(PAGINA);
-  const grande = produtos.length > PAGINA;
-  const marcas = useMemo(() => (grande ? marcasDe(produtos) : []), [produtos, grande]);
-  const lista = useMemo(() => filtrarProdutos(produtos, K.arvore, { q, marca }), [produtos, K.arvore, q, marca]);
+  const srv = useProdutosDoRamo(servidor?.org ?? null, K.arvore, servidor?.no ?? null, q, !!servidor);
+  const grande = servidor ? true : produtos.length > PAGINA;
+  const marcas = useMemo(() => (grande && !servidor ? marcasDe(produtos) : []), [produtos, grande, servidor]);
+  const filtrada = useMemo(() => filtrarProdutos(produtos, K.arvore, { q, marca }), [produtos, K.arvore, q, marca]);
+  const lista = servidor ? srv.produtos : filtrada;
+  const temMais = servidor ? srv.maisPaginas : lista.length > n;
+  const maisN = servidor ? Math.min(PAGINA, Math.max(srv.total - lista.length, 1)) : Math.min(PAGINA, lista.length - n);
+  const verMais = () => (servidor ? srv.maisUma() : setN((x) => x + PAGINA));
   const uid = useId();
   return (
     <div className="mt-4">
@@ -136,24 +145,25 @@ function Escolher({ produtos, K, alvo, ja, onTocar, rotulo, focoRef }: {
           )}
         </div>
       )}
-      {grande && <p className="sr-only" aria-live="polite">{lista.length} produtos</p>}
+      {grande && <p className="sr-only" aria-live="polite">{servidor ? srv.total : lista.length} produtos</p>}
       <ul aria-labelledby={`${uid}-r`}
         className="mt-3 flex snap-x gap-3 overflow-x-auto pb-2 [scrollbar-width:thin] sm:grid sm:grid-cols-3 sm:overflow-visible sm:pb-0 lg:grid-cols-4">
-        {lista.slice(0, n).map((p) => (
+        {(servidor ? lista : lista.slice(0, n)).map((p) => (
           <li key={p.id} className="w-40 shrink-0 snap-start sm:w-auto">
             <CartaoProduto p={p} K={K} alvo={alvo} ja={ja(p.id)} onTocar={() => onTocar(p)} compacto />
           </li>
         ))}
-        {lista.length > n && (
+        {temMais && (
           <li className="w-40 shrink-0 snap-start sm:w-auto">
-            <button type="button" onClick={() => setN((x) => x + PAGINA)}
+            <button type="button" onClick={verMais}
               className="grid h-full min-h-44 w-full place-items-center rounded-xl border border-dashed border-input px-3 text-center text-[15px] font-medium text-primary hover:border-primary">
-              Ver mais {Math.min(PAGINA, lista.length - n)}
+              Ver mais {maisN}
             </button>
           </li>
         )}
       </ul>
-      {!lista.length && <p className="mt-2 text-[15px] text-muted-foreground">Nada com esse nome.</p>}
+      {!lista.length && <p className="mt-2 text-[15px] text-muted-foreground" role={servidor && srv.erro ? "alert" : undefined}>
+        {servidor && srv.erro ? `Não foi possível procurar: ${srv.erro}` : servidor && srv.aCarregar ? "A procurar…" : "Nada com esse nome."}</p>}
     </div>
   );
 }
@@ -192,6 +202,17 @@ function BlocoObrigacao({ o, ctx, K, escolhidos, clienteFornece }: { o: Obrigaca
     const juntar = !prodPorId.has(p.id);
     run(() => { tocarProdutoGuiado(A, K, d, o, p); });
     if (juntar) { setAberto(false); setFoco(p.id); }
+  };
+  // 17/11: Catálogo leve: o produto escolhido da pesquisa lê-se inteiro (traz o serviço que instala) e entra no Catálogo antes de o motor o usar
+  const orgPesquisa = catalogoParcial() ? orgDoCatalogoLido() : null;
+  const [erroTocar, setErroTocar] = useState<string | null>(null);
+  const lendo = useRef(false);
+  const [aLer, setALer] = useState(false);
+  const tocarServidor = (p: Produto) => {
+    if (!orgPesquisa) return tocar(p);
+    if (lendo.current) return; // um toque durante a leitura não a repete
+    lendo.current = true; setALer(true); setErroTocar(null);
+    void produtoParaTocar(orgPesquisa, p, prodPorId.has(p.id)).then((x) => { if (x.ok) tocar(x.v); else setErroTocar(x.erro); }).finally(() => { lendo.current = false; setALer(false); });
   };
 
   const estado = o.estado === "mantem" ? "Mantém o que tem: não entra produto."
@@ -238,9 +259,13 @@ function BlocoObrigacao({ o, ctx, K, escolhidos, clienteFornece }: { o: Obrigaca
       )}
 
       {mostraEscolha && (
-        <Escolher produtos={produtos} K={K} alvo={S.cfg.alvo} ja={(id) => prodPorId.has(id)} onTocar={tocar} focoRef={focoEscolher}
+        <Escolher produtos={produtos} K={K} alvo={S.cfg.alvo} ja={(id) => prodPorId.has(id)} onTocar={tocarServidor} focoRef={focoEscolher}
+          servidor={orgPesquisa ? { org: orgPesquisa, no: o.no } : undefined}
           rotulo={obj ? `Escolha ${obj.comArtigo}` : `Escolha o produto de ${(o.caminho.split(" › ").pop() ?? "").toLowerCase()}`} />
       )}
+
+      {erroTocar && <p role="alert" className="mt-2 text-[15px] text-destructive">Não foi possível juntar o produto: {erroTocar}</p>}
+      {aLer && <p role="status" className="mt-2 text-[15px] text-muted-foreground">A ler o produto…</p>}
 
       {!ro && (passo === "escolhido" || (passo === "escolher" && clienteFornece && !escolhidos.length)) && (
         <div className="mt-3 flex flex-wrap gap-x-5">
@@ -275,8 +300,21 @@ function OutrosProdutos({ ctx, K }: { ctx: P; K: Catalogo }) {
   const uid = useId();
   const base = useMemo(() => K.produtos.filter((p) => !CONSUMIVEIS.has(p.n)), [K.produtos]);
   const cats = useMemo(() => categorias(base, K.arvore), [base, K.arvore]);
-  const lista = useMemo(() => filtrarProdutos(base, K.arvore, { q, cat }), [base, K.arvore, q, cat]);
-  const tocar = (p: Produto) => run(() => (prodPorId.has(p.id) ? A.tirarProduto(d.id, p.id) : A.produto(d.id, p, qtdSugerida(K, p, servicosVisita(d), v.med))));
+  // 17/11: Catálogo leve: a pesquisa é no servidor (sem as categorias de cima, que saíam da lista toda)
+  const orgPesquisa = catalogoParcial() ? orgDoCatalogoLido() : null;
+  const srv = useProdutosDoRamo(orgPesquisa, K.arvore, null, q, !!orgPesquisa && aberto);
+  const [erroTocar, setErroTocar] = useState<string | null>(null);
+  const lendo = useRef(false);
+  const [aLer, setALer] = useState(false);
+  const filtrada = useMemo(() => filtrarProdutos(base, K.arvore, { q, cat }), [base, K.arvore, q, cat]);
+  const lista = orgPesquisa ? srv.produtos.filter((p) => !CONSUMIVEIS.has(p.n)) : filtrada;
+  const tocarLido = (p: Produto) => run(() => (prodPorId.has(p.id) ? A.tirarProduto(d.id, p.id) : A.produto(d.id, p, qtdSugerida(K, p, servicosVisita(d), v.med))));
+  const tocar = (p: Produto) => {
+    if (!orgPesquisa) return tocarLido(p);
+    if (lendo.current) return; // um toque durante a leitura não a repete
+    lendo.current = true; setALer(true); setErroTocar(null);
+    void produtoParaTocar(orgPesquisa, p, prodPorId.has(p.id)).then((x) => { if (x.ok) tocarLido(x.v); else setErroTocar(x.erro); }).finally(() => { lendo.current = false; setALer(false); });
+  };
   const chip = (on: boolean) => cn("inline-flex min-h-11 shrink-0 items-center rounded-full border px-4 text-[15px] transition-colors",
     on ? "border-primary bg-primary/[0.08] font-medium text-foreground ring-1 ring-primary" : "border-input bg-card text-foreground hover:border-foreground/40");
 
@@ -302,20 +340,24 @@ function OutrosProdutos({ ctx, K }: { ctx: P; K: Catalogo }) {
         <input type="search" value={q} onChange={(e) => { setQ(e.target.value); setN(PAGINA); }} placeholder="Procurar: espelho, toalheiro, bancada…" autoFocus
           className="h-12 w-full rounded-xl border border-input bg-background pl-10 pr-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25" />
       </label>
-      <div role="group" aria-label="Categoria" className="mt-3 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
+      {!orgPesquisa && <div role="group" aria-label="Categoria" className="mt-3 flex gap-2 overflow-x-auto pb-1 [scrollbar-width:thin]">
         <button type="button" aria-pressed={!cat} onClick={() => { setCat(null); setN(PAGINA); }} className={chip(!cat)}>Todas</button>
         {cats.map((c) => (
           <button key={c.n} type="button" aria-pressed={cat === c.n} onClick={() => { setCat(cat === c.n ? null : c.n); setN(PAGINA); }} className={chip(cat === c.n)}>{c.n}</button>
         ))}
-      </div>
-      <p className="mt-3 text-sm text-muted-foreground" aria-live="polite">{lista.length ? `${lista.length} produto${lista.length === 1 ? "" : "s"}` : "Nada no Catálogo com esse nome."}</p>
+      </div>}
+      {erroTocar && <p role="alert" className="mt-2 text-[15px] text-destructive">Não foi possível juntar o produto: {erroTocar}</p>}
+      {aLer && <p role="status" className="mt-2 text-[15px] text-muted-foreground">A ler o produto…</p>}
+      <p className="mt-3 text-sm text-muted-foreground" aria-live="polite" role={orgPesquisa && srv.erro ? "alert" : undefined}>
+        {orgPesquisa && srv.erro ? `Não foi possível procurar: ${srv.erro}` : orgPesquisa && srv.aCarregar && !lista.length ? "A procurar…"
+          : lista.length ? `${orgPesquisa ? srv.total : lista.length} produto${(orgPesquisa ? srv.total : lista.length) === 1 ? "" : "s"}` : "Nada no Catálogo com esse nome."}</p>
       <ul className="mt-2 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4" aria-label="Produtos do Catálogo">
-        {lista.slice(0, n).map((p) => <li key={p.id}><CartaoProduto p={p} K={K} alvo={ctx.S.cfg.alvo} ja={prodPorId.has(p.id)} onTocar={() => tocar(p)} /></li>)}
+        {(orgPesquisa ? lista : lista.slice(0, n)).map((p) => <li key={p.id}><CartaoProduto p={p} K={K} alvo={ctx.S.cfg.alvo} ja={prodPorId.has(p.id)} onTocar={() => tocar(p)} /></li>)}
       </ul>
-      {lista.length > n && (
-        <button type="button" onClick={() => setN((x) => x + PAGINA)}
+      {(orgPesquisa ? srv.maisPaginas : lista.length > n) && (
+        <button type="button" onClick={() => (orgPesquisa ? srv.maisUma() : setN((x) => x + PAGINA))}
           className="mt-3 inline-flex min-h-11 items-center rounded-xl border border-input px-4 text-[15px] font-medium text-foreground hover:border-foreground/40">
-          Mostrar mais {Math.min(PAGINA, lista.length - n)}
+          Mostrar mais {orgPesquisa ? Math.min(PAGINA, Math.max(srv.total - lista.length, 1)) : Math.min(PAGINA, lista.length - n)}
         </button>
       )}
     </section>

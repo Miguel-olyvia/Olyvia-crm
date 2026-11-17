@@ -38,22 +38,26 @@ export function Segmentos<T extends string>({ rotulo, v, opcoes, onSet, nome, oc
 /* ------------------------------------------------------------------ seletor com pesquisa */
 export interface OpcaoSeletor { v: string; t: string; sub?: string; valor?: string; icone?: ReactNode; procura?: string }
 
-export function SeletorPesquisa({ rotulo, opcoes, onEscolher, gatilho, atual, max = 8, placeholder = "Procurar…", vazio = "Nenhum resultado.", className }: {
+export function SeletorPesquisa({ rotulo, opcoes, onEscolher, gatilho, atual, max = 8, placeholder = "Procurar…", vazio = "Nenhum resultado.", className, aoMudar, totalServidor, aProcurar }: {
   rotulo: string; opcoes: OpcaoSeletor[]; onEscolher: (v: string) => void;
   /** O conteúdo do botão que abre o painel. */
   gatilho: ReactNode; atual?: string; max?: number; placeholder?: string; vazio?: string; className?: string;
+  /** 17/11: pesquisa NO SERVIDOR. Com `aoMudar` as `opcoes` já vêm filtradas (não se filtra aqui) e diz-se o texto escrito e se o painel está aberto; `totalServidor` é o total que o
+   *  servidor achou e `aProcurar` que a procura está a correr. Sem `aoMudar` o seletor filtra a lista que recebe, como sempre. */
+  aoMudar?: (q: string, aberto: boolean) => void; totalServidor?: number; aProcurar?: boolean;
 }) {
   const [aberto, setAberto] = useState(false);
   const [q, setQ] = useState("");
   const [ativo, setAtivo] = useState(0);
   const id = useId(), lista = useRef<HTMLUListElement>(null);
   const filtradas = useMemo(() => {
+    if (aoMudar) return opcoes;
     const qq = normal(q.trim());
     const L = qq ? opcoes.filter((o) => normal(`${o.t} ${o.sub ?? ""} ${o.procura ?? ""}`).includes(qq)) : opcoes;
     return L.slice(0, max);
-  }, [opcoes, q, max]);
-  const total = q.trim() ? opcoes.filter((o) => normal(`${o.t} ${o.sub ?? ""} ${o.procura ?? ""}`).includes(normal(q.trim()))).length : opcoes.length;
-  const escolher = (v: string) => { onEscolher(v); setAberto(false); setQ(""); };
+  }, [opcoes, q, max, aoMudar]);
+  const total = aoMudar ? totalServidor ?? opcoes.length : q.trim() ? opcoes.filter((o) => normal(`${o.t} ${o.sub ?? ""} ${o.procura ?? ""}`).includes(normal(q.trim()))).length : opcoes.length;
+  const escolher = (v: string) => { onEscolher(v); setAberto(false); setQ(""); aoMudar?.("", false); };
   const mover = (d: number) => {
     const n = filtradas.length;
     if (!n) return;
@@ -62,7 +66,7 @@ export function SeletorPesquisa({ rotulo, opcoes, onEscolher, gatilho, atual, ma
     lista.current?.querySelector<HTMLElement>(`[data-i="${i}"]`)?.scrollIntoView?.({ block: "nearest" });
   };
   return (
-    <Popover open={aberto} onOpenChange={(o) => { setAberto(o); if (!o) setQ(""); setAtivo(0); }}>
+    <Popover open={aberto} onOpenChange={(o) => { setAberto(o); if (!o) setQ(""); setAtivo(0); aoMudar?.("", o); }}>
       <PopoverTrigger asChild>
         <button type="button" aria-haspopup="dialog" aria-label={rotulo}
           className={cn("inline-flex min-h-11 items-center gap-2 rounded-lg text-left text-[15px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30", className)}>
@@ -74,7 +78,7 @@ export function SeletorPesquisa({ rotulo, opcoes, onEscolher, gatilho, atual, ma
           <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
           <input autoFocus type="search" role="combobox" aria-expanded="true" aria-controls={id} aria-label={`Procurar: ${rotulo}`}
             aria-activedescendant={filtradas[ativo] ? `${id}-${ativo}` : undefined}
-            value={q} placeholder={placeholder} onChange={(e) => { setQ(e.target.value); setAtivo(0); }}
+            value={q} placeholder={placeholder} onChange={(e) => { setQ(e.target.value); setAtivo(0); aoMudar?.(e.target.value, true); }}
             onKeyDown={(e) => {
               if (e.key === "ArrowDown") { e.preventDefault(); mover(1); }
               else if (e.key === "ArrowUp") { e.preventDefault(); mover(-1); }
@@ -95,7 +99,7 @@ export function SeletorPesquisa({ rotulo, opcoes, onEscolher, gatilho, atual, ma
               {o.valor && <span className="shrink-0 text-[15px] tabular-nums">{o.valor}</span>}
             </li>
           ))}
-          {!filtradas.length && <li className="px-3 py-3 text-[15px] text-muted-foreground">{vazio}</li>}
+          {!filtradas.length && <li className="px-3 py-3 text-[15px] text-muted-foreground">{aProcurar ? "A procurar…" : vazio}</li>}
         </ul>
         {total > filtradas.length && <p className="border-t border-border px-3 py-2 text-[14px] text-muted-foreground">Mais {total - filtradas.length}: escreva para encontrar.</p>}
       </PopoverContent>

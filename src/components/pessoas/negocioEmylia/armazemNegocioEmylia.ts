@@ -256,7 +256,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     if (catalogo || !ids) {
       // 11/11 (F1): um erro do Catálogo (ex.: CT001) não bloqueia a ficha: avisa, e os negócios ficam só para consulta (sem o Catálogo,
       // gravar perdia os serviços)
-      const cat = await carregarCatalogo(sb, org, S, { tolerante: true });
+      const cat = await carregarCatalogo(sb, org, S, { tolerante: true, leve: true });
       catalogoFalhou = !!cat.erro;
       if (cat.erro) avisar({ msg: "O Catálogo não carregou", sub: `${cat.erro} O negócio fica só para consulta.`, kind: "bad" });
       ids = idsServico(cat.M.ids.servico);
