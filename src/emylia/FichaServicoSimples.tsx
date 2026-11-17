@@ -5,7 +5,7 @@
 // Revisto a 14/10 (pedido do Ruben): sem <select> nativos (segmentos para poucas opções, seletor com pesquisa
 // para muitas, pecasFicha.tsx); equipamentos e consumíveis numa linha limpa cada um, com a conta numa só linha
 // e o total do bloco; e a secção "Entulho" (se gera, de onde vem e a conta, entulho.ts e entulhoPadrao.ts).
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Clock, Info, Package, Plus, TriangleAlert, UserX, Waypoints, Wrench } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -25,13 +25,14 @@ import { SoLeitura, usePermissoesCatalogo } from "./permissoesCatalogo";
 import { FotoOuIlustracao, ICONES_SERVICO, IconeServico } from "./ilustracoes";
 import {
   ORIGENS_MEDIDA, REGRAS_QTD, UNIDADES_SERVICO, avisoMedida, chaveRegra, custoComOpcionais, entulhoFicha, exemploMedida, iconeDoServico, margemEmPalavras, medidaDe,
-  partesCusto, perguntasPossiveis, precoProduto, produtosQueTrazem, quebraEquip,
+  ligadosDoServico, partesCusto, perguntasPossiveis, precoProduto, produtosQueTrazem, quebraEquip,
 } from "./fichaServico";
 import { ARTIGOS_DEM0, vSoltoDe, type ModoEntulho } from "./entulho";
 import { entulhoDoProduto, m3PadraoDoNome, tipoDoTexto } from "./entulhoPadrao";
 import { GatilhoCampo, NomeInline, NumeroInline, Segmentos, SeletorPesquisa } from "./pecasFicha";
 import { SeletorProdutoServidor } from "./SeletorProdutoServidor";
 import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
+import { escolherProdutoDoServidor, produtoDeLinha, usePesquisaProdutos } from "./real/pesquisaProdutos";
 import { normal } from "./catalogo";
 import { FASES_OBRA, fasesDoServico, fasesPadrao, type FaseObra } from "./fasesObra";
 
@@ -157,9 +158,26 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
   };
   const nid = (pref: string, L: { id: string }[]) => pref + (Math.max(0, ...L.map((x) => Number(x.id.replace(/\D/g, "")) || 0)) + 1);
   const velhos = new Set(consumiveisDesatualizados(rec, C.par.mesesDesatualizado).map((x) => x.id));
-  const ligados = produtosQueTrazem(K, sid);
   // 17/11: com o Catálogo leve K.produtos não é a lista toda: os produtos procuram-se no servidor (SeletorProdutoServidor). Sem ele (protótipo, Catálogo inteiro), a lista de sempre.
   const orgPesquisa = catalogoParcial() ? orgDoCatalogoLido() : null;
+  // 22/01: no modo leve os produtos que trazem o serviço vêm de cat_pesquisar_produtos (por serviço), juntos aos do Catálogo em memória (que mandam: ligar e desligar ainda por gravar).
+  const doServidor = usePesquisaProdutos(orgPesquisa, { q: "", servico: sid }, { ativo: !!orgPesquisa });
+  const lidos = useMemo(() => doServidor.linhas.map(produtoDeLinha), [doServidor.linhas]);
+  const ligadosK = produtosQueTrazem(K, sid); // o que o entulho por produto sabe (precisa do m³ e do kg, que a lista não traz)
+  const ligados = orgPesquisa ? ligadosDoServico(K, sid, lidos) : ligadosK;
+  // o total do servidor ainda não sabe do que se ligou ou desligou agora (por gravar): corrige-se com a diferença entre a lista lida e a de agora
+  const saidos = lidos.filter((l) => !ligados.some((x) => x.id === l.id)).length;
+  const entrados = ligados.filter((x) => !lidos.some((l) => l.id === x.id)).length;
+  const totalLigados = Math.max(ligados.length, orgPesquisa ? doServidor.total - saidos + entrados : 0);
+  // desligar um produto que só o servidor conhece: lê-o inteiro (entra no Catálogo em memória, já registado para o autosave) e tira-lhe o serviço
+  const desligar = async (p: Produto) => {
+    if (orgPesquisa && !K.produtos.some((z) => z.id === p.id)) {
+      const r = await escolherProdutoDoServidor(orgPesquisa, p.id);
+      if (!r.ok) { anunciar(`Não foi possível desligar ${p.n}: ${r.erro}`); return; }
+    }
+    mudarCatalogo((k) => { const y = k.produtos.find((z) => z.id === p.id); if (y) { delete y.servico; delete y.fatorServico; } });
+    anunciar(`${p.n} já não traz este serviço`);
+  };
   const partes = partesCusto(c, S.cfg.estrutura);
   const regraAtual = K.qtdDe?.[sid];
   const regras: { t: string; r: Regra }[] = regraAtual && !REGRAS_QTD.some((x) => chaveRegra(x.r) === chaveRegra(regraAtual)) ? [...REGRAS_QTD, { t: textoRegra(regraAtual), r: regraAtual }] : REGRAS_QTD;
@@ -441,12 +459,13 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
                   <span className={cn(NOTA, "block text-[14px]")}>{[p.marca, p.sku].filter(Boolean).join(" · ")}{p.marca || p.sku ? " · " : ""}1 {p.un} traz {nfmt(p.fatorServico ?? 1)} {un}</span>
                 </span>
                 <span className="shrink-0 text-[15px] tabular-nums">{eur(precoProduto(p, S.cfg.alvo))} €</span>
-                <Retirar rotulo={`Desligar ${p.n}`} onClick={() => { mudarCatalogo((k) => { const y = k.produtos.find((z) => z.id === p.id); if (y) { delete y.servico; delete y.fatorServico; } }); anunciar(`${p.n} já não traz este serviço`); }} />
+                <Retirar rotulo={`Desligar ${p.n}`} onClick={() => { void desligar(p); }} />
               </li>
             ))}
-            {ligados.length > 12 && <li className={cn(NOTA, "py-2")}>E mais {ligados.length - 12} (ver em Ligações).</li>}
+            {doServidor.aviso && <li className={cn(NOTA, "py-2")}>{doServidor.aviso}</li>}
+            {totalLigados > 12 && <li className={cn(NOTA, "py-2")}>E mais {totalLigados - 12} (ver em Ligações).</li>}
           </ul>
-        ) : <p className={cn(NOTA, "mt-3")}>{orgPesquisa ? "Nenhum dos produtos já lidos traz este serviço; os outros procuram-se em «Ligar um produto»." : "Nenhum produto traz este serviço."}</p>}
+        ) : <p className={cn(NOTA, "mt-3")}>{orgPesquisa ? (doServidor.aCarregar ? "A ler os produtos que trazem este serviço…" : doServidor.erro ? `Não foi possível ler os produtos que trazem este serviço: ${doServidor.erro}` : "Nenhum produto traz este serviço.") : "Nenhum produto traz este serviço."}</p>}
         {orgPesquisa ? (
           <SeletorProdutoServidor org={orgPesquisa} rotulo="Ligar um produto" gatilho={<Juntar t="Ligar um produto" />} noCatalogo aoErro={(m) => anunciar(`Não foi possível ligar o produto: ${m}`)}
             aoEscolher={(p) => { mudarCatalogo((k) => { const y = k.produtos.find((z) => z.id === p.id); if (y) { y.servico = sid; y.fatorServico = 1; } }); anunciar(`${p.n} passa a trazer este serviço`); }} />
@@ -494,9 +513,9 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
         {ent.e.modo === "produto" && (
           <div className="mt-4">
             <p className={ROT}>O que sai, por produto</p>
-            {ligados.length ? (
+            {ligadosK.length ? (
               <ul className="mt-1 divide-y divide-border" aria-label="Entulho dos produtos ligados">
-                {[...ligados].sort((a, b) => Number(entulhoDoProduto(b).m3 > 0) - Number(entulhoDoProduto(a).m3 > 0)).slice(0, 6).map((p: Produto) => {
+                {[...ligadosK].sort((a, b) => Number(entulhoDoProduto(b).m3 > 0) - Number(entulhoDoProduto(a).m3 > 0)).slice(0, 6).map((p: Produto) => {
                   const en = entulhoDoProduto(p);
                   const por = (m3: number, kg: number | undefined) => { mudarCatalogo((k) => { const y = k.produtos.find((z) => z.id === p.id); if (y) y.entulho = { m3, ...(kg ? { kg } : {}) }; }); anunciar(`${p.n}: ${m3t(m3)} m³${kg ? ` e ${nfmt(kg)} kg` : ""}`); };
                   return (
@@ -510,7 +529,7 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
                     </li>
                   );
                 })}
-                {ligados.length > 6 && <li className={cn(NOTA, "py-2 text-[14px]")}>E mais {ligados.length - 6}: cada um com o seu valor ou o do tipo.</li>}
+                {ligadosK.length > 6 && <li className={cn(NOTA, "py-2 text-[14px]")}>E mais {ligadosK.length - 6}: cada um com o seu valor ou o do tipo.</li>}
               </ul>
             ) : <p className={cn(NOTA, "mt-1")}>Sem produtos ligados: vale o tipo do serviço{ent.produto ? ` (${ent.produto.tipo}, ${m3t(ent.produto.m3)} m³${ent.produto.kg ? ` e ${ent.produto.kg} kg` : ""})` : ""}.</p>}
           </div>

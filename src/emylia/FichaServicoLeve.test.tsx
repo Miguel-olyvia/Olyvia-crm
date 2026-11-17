@@ -18,10 +18,15 @@ const pagina = vi.fn(), ficha = vi.fn();
 vi.mock("./real/produtosPaginados", async (orig) => ({ ...(await orig<typeof import("./real/produtosPaginados")>()), lerProdutosPagina: (...a: unknown[]) => pagina(...a) }));
 vi.mock("./real/produtosLeves", () => ({ lerProdutoFicha: (...a: unknown[]) => ficha(...a) }));
 
+// os produtos que o servidor diz que trazem o serviço aberto (cat_pesquisar_produtos por serviço); a pesquisa geral não os traz
+let doServidor: string[] = [];
+const paginaDe = (produtos: unknown[]) => ({ ok: true, v: { total: produtos.length, pagina: 1, limite: 50, paginas: 1, produtos } });
 beforeEach(() => {
-  pagina.mockReset(); ficha.mockReset();
-  pagina.mockResolvedValue({ ok: true, v: { total: 1, pagina: 1, limite: 50, paginas: 1, produtos: [linha("p-base", "Base de duche 120")] } });
-  ficha.mockResolvedValue({ ok: true, v: BASE });
+  pagina.mockReset(); ficha.mockReset(); doServidor = [];
+  pagina.mockImplementation(async (_org: string, f: { servico?: string }) => f.servico
+    ? paginaDe(doServidor.map((id) => ({ ...linha(id, `Ligado ${id}`), servico_id: f.servico, fator_servico: 2 })))
+    : paginaDe([linha("p-base", "Base de duche 120")]));
+  ficha.mockImplementation(async (_org: string, id: string) => ({ ok: true, v: id === "p-base" ? BASE : { ...BASE, id, n: `Ligado ${id}`, sku: `S-${id}` } }));
   definirCatalogoLido(ORG, true);
 });
 afterEach(() => { cleanup(); reporCustos(); reporCatalogo(); definirCatalogoLido(ORG, false); });
@@ -61,6 +66,38 @@ describe("a ficha do serviço com o Catálogo leve", () => {
     expect(novo).toMatchObject({ n: "Base de duche 120", preco: 123.4, q: 1, un: "un", fornecedor: "Roca PT" });
     // um consumível de receita não entra em K.produtos (só se lê)
     expect(lerCatalogo().produtos.some((p) => p.id === "p-base")).toBe(false);
+  });
+  it("«Produtos ligados» mostra os que o servidor diz que trazem o serviço, mesmo fora do Catálogo em memória", async () => {
+    doServidor = ["p-lig"];
+    abrirServico();
+    expect(await screen.findByText("Ligado p-lig")).toBeTruthy();
+    expect(lerCatalogo().produtos.some((p) => p.id === "p-lig")).toBe(false);
+    expect(pagina).toHaveBeenCalledWith(ORG, expect.objectContaining({ servico: expect.any(String) }), 1);
+  });
+  it("desligar um produto que só o servidor conhece: lê-o, tira-lhe o serviço e a linha desaparece", async () => {
+    doServidor = ["p-lig"];
+    abrirServico();
+    await screen.findByText("Ligado p-lig");
+    fireEvent.click(screen.getByRole("button", { name: "Desligar Ligado p-lig" }));
+    await waitFor(() => expect(screen.queryByText("Ligado p-lig")).toBeNull());
+    expect(ficha).toHaveBeenCalledWith(ORG, "p-lig");
+    const p = lerCatalogo().produtos.find((x) => x.id === "p-lig");
+    expect(p).toBeDefined();
+    expect(p?.servico).toBeUndefined();
+  });
+  it("um produto acabado de ligar continua na lista, ainda que o servidor (não gravado) não o traga (M1)", async () => {
+    abrirServico();
+    fireEvent.click(screen.getByRole("button", { name: "Ligar um produto" }));
+    fireEvent.click(await screen.findByRole("option", { name: /Base de duche 120/ }));
+    await waitFor(() => expect(lerCatalogo().produtos.find((p) => p.id === "p-base")?.servico).toBeTruthy());
+    expect(await screen.findByRole("button", { name: "Desligar Base de duche 120" })).toBeTruthy();
+  });
+  it("LOW: depois de desligar, «E mais N» desce (o total do servidor ainda não está gravado)", async () => {
+    doServidor = Array.from({ length: 13 }, (_, i) => `p-${i}`);
+    abrirServico();
+    expect(await screen.findByText(/E mais 1 \(ver em Ligações\)/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Desligar Ligado p-0" }));
+    await waitFor(() => expect(screen.queryByText(/E mais/)).toBeNull());
   });
   it("sem o Catálogo leve (leitura inteira, protótipo), nenhum dos dois seletores chama a base", async () => {
     definirCatalogoLido(ORG, false);

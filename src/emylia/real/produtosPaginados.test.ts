@@ -10,7 +10,7 @@ vi.mock("@/integrations/supabase/client", () => ({
   supabase: { rpc: vi.fn(async (f: string, a: Record<string, unknown>) => { base.chamadas.push({ f, a }); return base.responder(f, a); }) },
 }));
 
-import { argsPagina, lerAtributosProduto, lerModeloDoProduto, lerProdutosContagens, lerProdutosPagina, paginaDe, contagensDe, SEM_FILTRO_SERVIDOR, POR_PAGINA_SERVIDOR } from "./produtosPaginados";
+import { argsPagina, argsPesquisa, lerAtributosProduto, lerModeloDoProduto, lerProdutosContagens, lerProdutosPagina, paginaDe, contagensDe, SEM_FILTRO_SERVIDOR, POR_PAGINA_SERVIDOR } from "./produtosPaginados";
 
 const ORG = "11111111-1111-4111-a111-111111111111";
 const P1 = "88888888-8888-4888-a888-888888888881";
@@ -130,5 +130,43 @@ describe("lerModeloDoProduto (ficha aberta pelo endereço, sem passar pela lista
     base.responder = () => ({ data: { total: 0, pagina: 1, limite: 50, paginas: 0, produtos: [] }, error: null });
     const r = await lerModeloDoProduto(ORG, P1, "Base 1");
     expect(r.ok && r.v).toBeUndefined();
+  });
+});
+
+describe("pesquisa por serviço (cat_pesquisar_produtos, 20270122000000)", () => {
+  it("argsPesquisa: p_pagina e p_limite, o serviço, e sem modelo, marca nem sem_categoria", () => {
+    const a = argsPesquisa(ORG, { ...SEM_FILTRO_SERVIDOR, q: " cola ", servico: "s-1", categoria: "c", subcategoria: "sc" }, 3);
+    expect(a).toEqual({ p_org: ORG, p_q: "cola", p_servico: "s-1", p_categoria: "c", p_subcategoria: "sc", p_pagina: 3, p_limite: POR_PAGINA_SERVIDOR });
+    expect(argsPesquisa(ORG, SEM_FILTRO_SERVIDOR, 1)).toMatchObject({ p_q: null, p_servico: null, p_categoria: null, p_subcategoria: null });
+  });
+  it("com serviço chama cat_pesquisar_produtos e devolve servico_id e fator_servico da linha", async () => {
+    base.responder = () => ({ data: { total: 1, pagina: 1, limite: 50, paginas: 1, produtos: [linha(P1, { servico_id: "s-1", fator_servico: 2 })] }, error: null });
+    const r = await lerProdutosPagina(ORG, { ...SEM_FILTRO_SERVIDOR, servico: "s-1" }, 1);
+    expect(base.chamadas.map((c) => c.f)).toEqual(["cat_pesquisar_produtos"]);
+    expect(base.chamadas[0].a).toMatchObject({ p_servico: "s-1", p_pagina: 1, p_limite: 50 });
+    expect(r.ok && r.v.produtos[0]).toMatchObject({ servico_id: "s-1", fator_servico: 2 });
+  });
+  it("sem serviço continua a chamar cat_ler_produtos_pagina", async () => {
+    base.responder = () => ({ data: { total: 0, pagina: 1, limite: 50, paginas: 1, produtos: [] }, error: null });
+    await lerProdutosPagina(ORG, SEM_FILTRO_SERVIDOR, 1);
+    expect(base.chamadas.map((c) => c.f)).toEqual(["cat_ler_produtos_pagina"]);
+  });
+});
+
+describe("M12: cat_pesquisar_produtos em falta na base", () => {
+  it("cai para cat_ler_produtos_pagina, sem o filtro de serviço, e avisa", async () => {
+    base.responder = (f) => (f === "cat_pesquisar_produtos"
+      ? { data: null, error: { code: "PGRST202", message: "Could not find the function public.cat_pesquisar_produtos(p_org) in the schema cache" } }
+      : { data: { total: 1, pagina: 1, limite: 50, paginas: 1, produtos: [linha(P1)] }, error: null });
+    const r = await lerProdutosPagina(ORG, { ...SEM_FILTRO_SERVIDOR, servico: "s-1" }, 1);
+    expect(base.chamadas.map((c) => c.f)).toEqual(["cat_pesquisar_produtos", "cat_ler_produtos_pagina"]);
+    expect(base.chamadas[1].a).not.toHaveProperty("p_servico");
+    expect(r.ok && r.v.aviso).toMatch(/serviço/);
+  });
+  it("outro erro (tempo) não cai na outra função", async () => {
+    base.responder = () => ({ data: null, error: { code: "57014", message: "statement timeout" } });
+    const r = await lerProdutosPagina(ORG, { ...SEM_FILTRO_SERVIDOR, servico: "s-1" }, 1);
+    expect(base.chamadas.map((c) => c.f)).toEqual(["cat_pesquisar_produtos"]);
+    expect(r.ok).toBe(false);
   });
 });

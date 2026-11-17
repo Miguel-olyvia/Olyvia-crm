@@ -15,6 +15,9 @@ import { MapaDatasObra, inicioPorOmissao } from "@/emylia/MapaDatasObra";
 import { materiaisDaReceita, passosDaReceita, planoDaVisita, planoDoEstudio } from "@/emylia/planoDaVisita";
 import { simularNoNegocio } from "@/emylia/estudioNoNegocio";
 import { podeVerCustos } from "@/emylia/permissoes";
+import { catalogoParcial, orgDoCatalogoLido } from "@/emylia/real/catalogoLeve";
+import { useProdutosDoEstudio } from "@/emylia/real/produtosDoEstudio";
+import { linhasParaLevar } from "./levarParaNegocio";
 import { useCatalogoDoEstudio } from "./catalogoDoEstudio";
 import { juntarExtra, mudarEquipa, mudarExtra, mudarInicio, projetoNoCatalogo, reporServico, servicosParaPlano, trocarServico, type ServicoDoProjeto } from "./servicosDoCatalogo";
 import type { Projeto } from "./necessidadesEstudio";
@@ -45,7 +48,10 @@ export function PlanoDoEstudio({ p, setP, fechar, semCatalogo }: {
 
 function ComCatalogo({ p, setP, fechar, S, erro }: { p: Projeto; setP: React.Dispatch<React.SetStateAction<Projeto>>; fechar: (f: boolean) => void; S: Estado; erro: string | null }) {
   const K = useCatalogo();
-  const produtos = useMemo(() => K.produtos ?? [], [K.produtos]);
+  // 22/01: com o Catálogo leve K.produtos não tem o par de cada peça: junta-se-lhe o que o servidor dá para cada tipo (só para o plano e o orçamento mostrarem; nada entra no Catálogo)
+  const base = useMemo(() => K.produtos ?? [], [K.produtos]);
+  const linhas = useMemo(() => linhasParaLevar(p), [p]);
+  const produtos = useProdutosDoEstudio(catalogoParcial() ? orgDoCatalogoLido() : null, linhas, base);
   const inicio = inicioPorOmissao(p.catalogo?.inicio);
   const L = useMemo(() => projetoNoCatalogo(p, S, produtos), [p, S, produtos]);
   const negocio = p.negocio !== undefined ? S.deals.find((x) => x.id === p.negocio) : undefined;
@@ -125,6 +131,7 @@ function Servicos({ p, setP, S, L }: { p: Projeto; setP: React.Dispatch<React.Se
       {L.produtos.length > 0 && (
         <div className="space-y-2">
           <h4 className="text-sm font-semibold">Os produtos</h4>
+          {catalogoParcial() && <p className="text-sm text-muted-foreground">O produto de cada peça é a melhor correspondência entre os primeiros resultados da pesquisa no Catálogo.</p>}
           <ul className="space-y-1.5">
             {L.produtos.map((x) => (
               <li key={x.chave} className="flex items-center justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2 text-[15px]">

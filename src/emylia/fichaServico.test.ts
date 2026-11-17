@@ -3,7 +3,7 @@ import { seed } from "./motor";
 import { custoReceita, custos0, equipHora, receitaDe, type Equip } from "./v2/custosModelo";
 import {
   avisoMedida, consumiveisCatalogo, custoComOpcionais, exemploMedida, iconeDoServico, medidaDe, partesCusto, pesquisarProdutos,
-  precoProduto, quantidadeDaMedida, quebraEquip,
+  ligadosDoServico, precoProduto, quantidadeDaMedida, quebraEquip,
 } from "./fichaServico";
 import type { Produto } from "./v2/catalogoModelo";
 
@@ -115,5 +115,27 @@ describe("fichaServico · ícone, produtos e consumíveis", () => {
     const cola = consumiveisCatalogo(S, C).find((x) => x.n === "Cimento-cola C2TE")!;
     expect(cola.servicos).toEqual(expect.arrayContaining(["revest", "pav"]));
     expect(cola.opcionalEm).toBe(1);
+  });
+});
+
+describe("fichaServico · ligadosDoServico (Catálogo leve: os da lista do servidor juntos aos do Catálogo em memória)", () => {
+  const P = (id: string, extra: Partial<Produto> = {}): Produto => ({ id, n: `P ${id}`, custo: 1, un: "un", marca: "", fornecedor: "", data: "2026-11-01", no: null, ...extra });
+  it("sem lista do servidor: o mesmo que produtosQueTrazem", () => {
+    const K = { produtos: [P("a", { servico: "s" }), P("b")] };
+    expect(ligadosDoServico(K, "s", []).map((p) => p.id)).toEqual(["a"]);
+  });
+  it("traz os do servidor que não estão no Catálogo em memória", () => {
+    const K = { produtos: [] as Produto[] };
+    expect(ligadosDoServico(K, "s", [P("x", { servico: "s" }), P("y", { servico: "s" })]).map((p) => p.id)).toEqual(["x", "y"]);
+  });
+  it("um produto desligado em memória não volta pela lista do servidor (que ainda não foi gravada)", () => {
+    const K = { produtos: [P("x")] };
+    expect(ligadosDoServico(K, "s", [P("x", { servico: "s" })])).toEqual([]);
+  });
+  it("um produto ligado agora (só em memória) aparece, sem repetir o que o servidor já trazia", () => {
+    const K = { produtos: [P("novo", { servico: "s" }), P("x", { servico: "s", fatorServico: 3 })] };
+    const L = ligadosDoServico(K, "s", [P("x", { servico: "s" })]);
+    expect(L.map((p) => p.id)).toEqual(["x", "novo"]);
+    expect(L[0].fatorServico).toBe(3); // o de memória manda
   });
 });

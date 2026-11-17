@@ -17,6 +17,8 @@ import { FASES_OBRA } from "./fasesObra";
 import { rotuloDia, tecnicosDoOficio } from "./preparacaoObra";
 import { IconeServico, iconeDoServico } from "./ilustracoes";
 import { AvatarTec } from "./AcompanhamentoObra";
+import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
+import { usePesquisaProdutos } from "./real/pesquisaProdutos";
 import { consumiveisConhecidos, criarTarefa, diaMinimo, materiaisDaTarefa, materiaisDoServico, oficioDe, podeTirar, tempoDoServico, ultimoAviso } from "./tarefasValidador";
 import { ecDaAdenda, porEncomendar } from "./encomendasAjuste";
 import { primeiraPaga } from "./adendas";
@@ -120,7 +122,14 @@ export function EditorMateriais({ mats, mudar }: { mats: MatTarefa[]; mudar: (m:
   const [q, setQ] = useState("");
   const todos = useMemo(consumiveisConhecidos, []);
   const sem = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-  const opcoes = todos.filter((c) => !mats.some((m) => m.n === c.n) && (!q.trim() || sem(c.n).includes(sem(q.trim())))).slice(0, 12);
+  // 22/01: com o Catálogo leve `todos` só tem os produtos dos consumos; a partir de 2 letras procura-se também o resto do Catálogo no servidor (com o id, para a encomenda, e o custo)
+  const org = catalogoParcial() ? orgDoCatalogoLido() : null;
+  const srv = usePesquisaProdutos(org, { q }, { ativo: !!org && juntar && q.trim().length >= 2 });
+  const doServidor: MatTarefa[] = org && q.trim().length >= 2
+    ? srv.linhas.map((l) => ({ n: l.nome, q: 1, un: l.unidade ?? "un", produto: l.id, ...(l.custo ? { preco: l.custo } : {}), ...(l.fornecedor ? { forn: l.fornecedor } : {}) })) : [];
+  const jaLidos = new Set(todos.map((c) => c.n));
+  // o filtro pelo nome vale também para os do servidor: a pesquisa tem 0,3 s de atraso e o que ainda lá está é de um texto anterior
+  const opcoes = [...todos, ...doServidor.filter((c) => !jaLidos.has(c.n))].filter((c) => !mats.some((m) => m.n === c.n) && (!q.trim() || sem(c.n).includes(sem(q.trim())))).slice(0, 12);
   const passo = (m: MatTarefa) => (m.q >= 10 ? 1 : m.q >= 1 ? 1 : 0.5);
   return (
     <div>
@@ -161,7 +170,9 @@ export function EditorMateriais({ mats, mudar }: { mats: MatTarefa[]; mudar: (m:
                 <Plus className="h-3.5 w-3.5" aria-hidden="true" />{c.n}
               </button>
             ))}
-            {!opcoes.length && <span className="text-sm text-muted-foreground">Nada com esse nome.</span>}
+            {org && q.trim().length >= 2 && srv.aCarregar && <span role="status" className="text-sm text-muted-foreground">A procurar…</span>}
+            {org && q.trim().length >= 2 && srv.erro && <span role="alert" className="text-sm text-destructive">Não foi possível procurar: {srv.erro}</span>}
+            {!opcoes.length && !srv.aCarregar && !srv.erro && <span className="text-sm text-muted-foreground">Nada com esse nome.</span>}
           </div>
           <button type="button" onClick={() => setJuntar(false)} className="mt-2 min-h-9 text-sm text-muted-foreground hover:text-foreground">Fechar</button>
         </div>

@@ -54,3 +54,34 @@ describe("lerCatalogo com a opção leve", () => {
     }
   });
 });
+
+describe("lerCatalogo leve: as tabelas dos produtos (cat_ler_produtos_tabelas_servicos)", () => {
+  const TAB = { categoriasProduto: [], marcas: [], unidades: [], exige: [], produtos: [] };
+  const base = { ...comum, cat_ler_catalogo_servicos: () => ({ data: LEVE, error: null }), cat_ler_catalogo: () => ({ data: INTEIRO, error: null }) };
+  it("leve: chama a versão dos serviços e não a completa", async () => {
+    const c = cliente({ ...base, cat_ler_produtos_tabelas_servicos: () => ({ data: TAB, error: null }), cat_ler_produtos_tabelas: () => ({ data: TAB, error: null }) });
+    const L = await lerCatalogo(c.sb, ORG, { leve: true });
+    expect(c.rpcs).toContain("cat_ler_produtos_tabelas_servicos");
+    expect(c.rpcs).not.toContain("cat_ler_produtos_tabelas");
+    expect(L.tabelas).toBeDefined();
+  });
+  it("sem a opção leve: a de sempre", async () => {
+    const c = cliente({ ...base, cat_ler_produtos_tabelas_servicos: () => ({ data: TAB, error: null }), cat_ler_produtos_tabelas: () => ({ data: TAB, error: null }) });
+    await lerCatalogo(c.sb, ORG);
+    expect(c.rpcs).toContain("cat_ler_produtos_tabelas");
+    expect(c.rpcs).not.toContain("cat_ler_produtos_tabelas_servicos");
+  });
+  it("a nova por criar na base (a função nomeada em falta): volta à antiga", async () => {
+    const erro = { code: "PGRST202", message: "Could not find the function public.cat_ler_produtos_tabelas_servicos(p_org) in the schema cache" };
+    const c = cliente({ ...base, cat_ler_produtos_tabelas_servicos: () => ({ data: null, error: erro }), cat_ler_produtos_tabelas: () => ({ data: TAB, error: null }) });
+    const L = await lerCatalogo(c.sb, ORG, { leve: true });
+    expect(c.rpcs.filter((f) => f.startsWith("cat_ler_produtos_tabelas"))).toEqual(["cat_ler_produtos_tabelas_servicos", "cat_ler_produtos_tabelas"]);
+    expect(L.tabelas).toBeDefined();
+  });
+  it("outro erro (tempo): não cai na versão pesada e fica sem tabelas", async () => {
+    const c = cliente({ ...base, cat_ler_produtos_tabelas_servicos: () => ({ data: null, error: { code: "57014", message: "statement timeout" } }), cat_ler_produtos_tabelas: () => ({ data: TAB, error: null }) });
+    const L = await lerCatalogo(c.sb, ORG, { leve: true });
+    expect(c.rpcs).not.toContain("cat_ler_produtos_tabelas");
+    expect(L.tabelas).toBeUndefined();
+  });
+});

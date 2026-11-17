@@ -6,7 +6,7 @@
 //   "Escolher no Catálogo" (o produto escolhido cobre a parte e ela desce sozinha) e "Tirar" / "Repor".
 // · "Juntar um produto" abre o Catálogo inteiro, com pesquisa e categorias.
 // Cada mudança refaz o orçamento (A.refazerOrcamento); o preço mudado à mão da estimativa deixa de valer, porque ela mudou.
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowRightLeft, Check, Link2, Plus, RotateCcw, Search, Sparkles, Trash2 } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -22,6 +22,8 @@ import { categoriaDe, categorias, filtrarProdutos, ilustracaoDoCatalogo } from "
 import { nosAbaixo, partesDoModelo, precoProduto, precoUnitario, qtdSugerida, type ParteEstimativa, type ProdVisita } from "./produtosVisita";
 import { MOLA, useReduzir } from "./movimento";
 import { servicosVisita } from "./motor";
+import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
+import { escolherProdutoDoServidor, filtroDoRamo, produtoDeLinha, usePesquisaProdutos } from "./real/pesquisaProdutos";
 
 const PAGINA = 12;
 const maiuscula = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
@@ -40,6 +42,7 @@ function raizDaTroca(K: Catalogo, p: ProdVisita, partes: ParteEstimativa[]): str
   if (daParte?.raiz) return daParte.raiz;
   const no = K.arvore.find((x) => x.id === p.no);
   if (!no) return null;
+  if (catalogoParcial()) return no.id; // 22/01: K.produtos não é a lista toda (não se pode contar os irmãos): a pesquisa no servidor procura no ramo do produto
   const n = (id: string) => { const nos = nosAbaixo(K.arvore, id); return K.produtos.filter((x) => x.no && nos.has(x.no)).length; };
   return n(no.id) < 4 && no.pai ? no.pai : no.id;
 }
@@ -249,18 +252,39 @@ function JanelaCatalogo({ K, alvo, janela, fechar, escolher, jaTem }: {
   const [cat, setCat] = useState<string | null>(null);
   const [n, setN] = useState(PAGINA);
   const atual = janela?.k === "trocar" ? janela.p : null;
+  // 22/01: com o Catálogo leve as alternativas vêm da pesquisa no servidor (o ramo inteiro e o texto, como no modo completo: sem filtrar pelo serviço do produto original); o escolhido lê-se inteiro ao tocar
+  const org = catalogoParcial() ? orgDoCatalogoLido() : null;
+  const raizPesquisa = !janela || janela.k === "juntar" ? null : janela.k === "parte" ? janela.parte.raiz ?? null : janela.raiz;
+  const srv = usePesquisaProdutos(org, { q, ...filtroDoRamo(K.arvore, raizPesquisa) }, { ativo: !!org && !!janela });
+  const [aLer, setALer] = useState(false);
+  const [erroLer, setErroLer] = useState<string | null>(null);
+  // M10: cada pedido leva um número; abrir, trocar ou fechar a janela invalida o que estava a ler (a leitura que chega depois não faz a troca)
+  const pedido = useRef(0);
+  useEffect(() => { pedido.current++; setALer(false); setErroLer(null); }, [janela]);
+  const tocar = async (p: Produto) => {
+    if (!org) { escolher(p); return; }
+    if (aLer) return;
+    const meu = ++pedido.current;
+    setALer(true); setErroLer(null);
+    try {
+      const r = await escolherProdutoDoServidor(org, p.id);
+      if (meu !== pedido.current) return; // a janela fechou (ou mudou) entretanto
+      if (r.ok) escolher(r.v); else setErroLer(r.erro);
+    } finally { if (meu === pedido.current) setALer(false); }
+  };
 
   // o universo: na troca, o ramo da parte do modelo ou do produto (raizDaTroca);
   // numa parte do modelo, o ramo da parte; ao juntar, o Catálogo todo
   const base = useMemo(() => {
+    if (org) return srv.linhas.filter((l) => !CONSUMIVEIS.has(l.nome)).map(produtoDeLinha);
     const todos = K.produtos.filter((p) => !CONSUMIVEIS.has(p.n));
     if (!janela || janela.k === "juntar") return todos;
     const raiz = janela.k === "parte" ? janela.parte.raiz : janela.raiz;
     if (!raiz) return todos;
     const nos = nosAbaixo(K.arvore, raiz);
     return todos.filter((p) => p.no && nos.has(p.no));
-  }, [K, janela]);
-  const cats = useMemo(() => categorias(base, K.arvore), [base, K.arvore]);
+  }, [K, janela, org, srv.linhas]);
+  const cats = useMemo(() => (org ? [] : categorias(base, K.arvore)), [org, base, K.arvore]);
 
   // ao abrir: na troca, começa na categoria do produto atual
   useEffect(() => {
@@ -270,11 +294,11 @@ function JanelaCatalogo({ K, alvo, janela, fechar, escolher, jaTem }: {
   }, [janela]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const lista = useMemo(() => {
-    const L = filtrarProdutos(base, K.arvore, { q, cat });
+    const L = org ? base : filtrarProdutos(base, K.arvore, { q, cat }); // o servidor já filtrou pelo texto
     // na troca, os de preço mais perto do atual primeiro; nos outros, do mais barato ao mais caro
     const pa = atual ? precoUnitario(atual) : 0;
     return [...L].sort((a, b) => (atual ? Math.abs(precoUnitario(a, alvo) - pa) - Math.abs(precoUnitario(b, alvo) - pa) : precoUnitario(a, alvo) - precoUnitario(b, alvo)));
-  }, [base, K.arvore, q, cat, atual, alvo]);
+  }, [base, K.arvore, q, cat, atual, alvo, org]);
 
   const titulo = !janela ? "" : janela.k === "trocar" ? `Trocar ${janela.p.n}` : janela.k === "parte" ? maiuscula(janela.parte.d) : "Juntar um produto";
   const sub = !janela ? "" : janela.k === "trocar" ? "Toque no produto que fica no lugar dele: a quantidade mantém-se."
@@ -318,6 +342,9 @@ function JanelaCatalogo({ K, alvo, janela, fechar, escolher, jaTem }: {
 
         <div className="min-h-0 flex-1 overflow-y-auto bg-muted/30 p-5">
           <p className="sr-only" aria-live="polite">{lista.length} produtos</p>
+          {org && srv.erro && <p role="alert" className="pb-3 text-[15px] text-destructive">Não foi possível procurar: {srv.erro}</p>}
+          {erroLer && <p role="alert" className="pb-3 text-[15px] text-destructive">Não foi possível ler o produto: {erroLer}</p>}
+          {aLer && <p role="status" className="pb-3 text-[15px] text-muted-foreground">A ler o produto…</p>}
           {lista.length ? (
             <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {lista.slice(0, n).map((p) => {
@@ -325,7 +352,7 @@ function JanelaCatalogo({ K, alvo, janela, fechar, escolher, jaTem }: {
                 const dif = atual ? (precoUnitario(p, alvo) - precoUnitario(atual)) * atual.q : 0;
                 return (
                   <li key={p.id}>
-                    <button type="button" disabled={eAtual || ja} onClick={() => escolher(p)}
+                    <button type="button" disabled={eAtual || ja || aLer} onClick={() => { void tocar(p); }}
                       className={cn("group relative flex h-full w-full flex-col rounded-2xl border bg-card p-2.5 text-left transition-all duration-150",
                         eAtual || ja ? "cursor-default border-primary/50 ring-1 ring-primary/40" : "border-border hover:-translate-y-0.5 hover:border-primary hover:shadow-[0_10px_24px_-14px_hsl(var(--primary)/0.6)]")}>
                       <span className="grid h-24 place-items-center rounded-xl bg-muted/70 transition-colors group-hover:bg-primary/[0.08]">
@@ -350,12 +377,12 @@ function JanelaCatalogo({ K, alvo, janela, fechar, escolher, jaTem }: {
               })}
             </ul>
           ) : (
-            <p className="py-10 text-center text-[15px] text-muted-foreground">Nada no Catálogo{q.trim() ? ` com «${q.trim()}»` : ""}.</p>
+            <p className="py-10 text-center text-[15px] text-muted-foreground">{org && srv.aCarregar ? "A procurar…" : `Nada no Catálogo${q.trim() ? ` com «${q.trim()}»` : ""}.`}</p>
           )}
-          {lista.length > n && (
-            <button type="button" onClick={() => setN((x) => x + PAGINA)}
+          {(lista.length > n || (org && srv.maisPaginas)) && (
+            <button type="button" onClick={() => { setN((x) => x + PAGINA); if (org && srv.maisPaginas && n + PAGINA >= lista.length) srv.maisUma(); }}
               className="mx-auto mt-4 flex min-h-11 items-center rounded-xl border border-input bg-card px-4 text-[15px] font-medium hover:border-foreground/40">
-              Mostrar mais {Math.min(PAGINA, lista.length - n)}
+              Mostrar mais{lista.length - n > 0 ? ` ${Math.min(PAGINA, lista.length - n)}` : ""}
             </button>
           )}
         </div>

@@ -1,7 +1,7 @@
 // 17/11: a pesquisa de produtos no servidor (usePesquisaProdutos): debounce, páginas de 50, pesquisas atrasadas descartadas, erros.
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { usePesquisaProdutos } from "./pesquisaProdutos";
+import { produtoDeLinha, usePesquisaProdutos } from "./pesquisaProdutos";
 import { aoRegistarProduto, registarProdutoLido } from "./catalogoLeve";
 import { lerCatalogo, reporCatalogo } from "../v2/catalogoStore";
 
@@ -87,5 +87,47 @@ describe("registarProdutoLido", () => {
     aoRegistarProduto(f)();
     registarProdutoLido(p);
     expect(f).not.toHaveBeenCalled();
+  });
+});
+
+describe("usePesquisaProdutos por serviço", () => {
+  it("o filtro `servico` vai à leitura; mudar de serviço volta à página 1", async () => {
+    pagina.mockResolvedValue({ ok: true, v: { total: 1, pagina: 1, limite: 50, paginas: 1, produtos: [linha("a")] } });
+    const { result, rerender } = renderHook(({ s }) => usePesquisaProdutos(ORG, { q: "", servico: s }), { initialProps: { s: "s-1" } });
+    await waitFor(() => expect(result.current.linhas).toHaveLength(1));
+    expect(pagina).toHaveBeenLastCalledWith(ORG, expect.objectContaining({ servico: "s-1" }), 1);
+    rerender({ s: "s-2" });
+    await waitFor(() => expect(pagina).toHaveBeenLastCalledWith(ORG, expect.objectContaining({ servico: "s-2" }), 1));
+  });
+});
+
+describe("produtoDeLinha com o serviço", () => {
+  it("leva o serviço e o fator da linha de cat_pesquisar_produtos; sem eles, nada", () => {
+    expect(produtoDeLinha({ ...linha("a"), servico_id: "s-1", fator_servico: 2.5 })).toMatchObject({ servico: "s-1", fatorServico: 2.5 });
+    const sem = produtoDeLinha(linha("b"));
+    expect(sem.servico).toBeUndefined();
+    expect(sem.fatorServico).toBeUndefined();
+  });
+});
+
+describe("M9: o filtro mudou, as linhas antigas saem", () => {
+  it("enquanto a pesquisa nova não chega, não há linhas (não se toca na lista antiga) e aCarregar está ligado", async () => {
+    pagina.mockResolvedValueOnce({ ok: true, v: { total: 1, pagina: 1, limite: 50, paginas: 1, produtos: [linha("velho")] } });
+    let soltar!: (v: unknown) => void;
+    pagina.mockImplementationOnce(() => new Promise((r) => { soltar = r; }));
+    const { result, rerender } = renderHook(({ q }) => usePesquisaProdutos(ORG, { q }, { atrasoMs: 0 }), { initialProps: { q: "" } });
+    await waitFor(() => expect(result.current.linhas.map((l) => l.id)).toEqual(["velho"]));
+    rerender({ q: "x" });
+    expect(result.current.linhas).toEqual([]);
+    expect(result.current.aCarregar).toBe(true);
+    await waitFor(() => expect(pagina).toHaveBeenCalledTimes(2));
+    soltar({ ok: true, v: { total: 1, pagina: 1, limite: 50, paginas: 1, produtos: [linha("novo")] } });
+    await waitFor(() => expect(result.current.linhas.map((l) => l.id)).toEqual(["novo"]));
+    expect(result.current.aCarregar).toBe(false);
+  });
+  it("expõe o aviso da página (M12)", async () => {
+    pagina.mockResolvedValue({ ok: true, v: { total: 0, pagina: 1, limite: 50, paginas: 1, produtos: [], aviso: "sem filtro de serviço" } });
+    const { result } = renderHook(() => usePesquisaProdutos(ORG, { q: "", servico: "s" }));
+    await waitFor(() => expect(result.current.aviso).toBe("sem filtro de serviço"));
   });
 });

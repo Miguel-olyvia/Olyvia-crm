@@ -2,7 +2,7 @@
 // um produto (os consumíveis e as ligações de um serviço, a visita, o orçamento) pesquisa-o em cat_ler_produtos_pagina (páginas de 50, com debounce) e, ao escolher,
 // lê-o inteiro com cat_ler_produto: o Produto chega ao estado do negócio ou do serviço com o mesmo formato de sempre.
 //
-// O que cat_ler_produtos_pagina NÃO filtra: por serviço (products.servico_id). Sem esse filtro («produtos que trazem este serviço») pesquisa-se por texto e categoria.
+// Por serviço (products.servico_id, «produtos que trazem este serviço»): `servico` no filtro passa a leitura para cat_pesquisar_produtos (20270122000000).
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { No, Produto } from "../v2/catalogoModelo";
 import type { Res } from "../fichaProdutoDados";
@@ -13,18 +13,21 @@ import { categoriaCruDoNo, noDoProdutoLido, registarProdutoLido } from "./catalo
 export const ATRASO_PESQUISA_MS = 300;
 
 /** O que a pesquisa filtra: o texto (nome, marca, referência) e, se quiser, os ids de categoria e subcategoria de product_categories. */
-export interface FiltroPesquisaProdutos { q: string; categoria?: string; subcategoria?: string }
+export interface FiltroPesquisaProdutos { q: string; categoria?: string; subcategoria?: string; /** products.servico_id: só os produtos que trazem este serviço. */ servico?: string }
 
 export interface PesquisaProdutos {
   linhas: LinhaPaginaProduto[]; total: number; aCarregar: boolean; erro: string | null; maisPaginas: boolean; maisUma: () => void;
+  /** O que dizer a quem vê a lista (por exemplo, a pesquisa por serviço não existe na base e a lista não está filtrada). */
+  aviso: string | null;
 }
 
 /** A pesquisa com debounce e páginas de 50. `ativo` false (o painel fechado) não chama a base. */
 export function usePesquisaProdutos(org: string | null, f: FiltroPesquisaProdutos, op: { ativo?: boolean; atrasoMs?: number } = {}): PesquisaProdutos {
   const { ativo = true, atrasoMs = ATRASO_PESQUISA_MS } = op;
-  const categoria = f.categoria ?? "", subcategoria = f.subcategoria ?? "";
+  const categoria = f.categoria ?? "", subcategoria = f.subcategoria ?? "", servico = f.servico ?? "";
   const [qAtraso, setQAtraso] = useState(f.q);
-  const [estado, setEstado] = useState<{ linhas: LinhaPaginaProduto[]; total: number; pagina: number; paginas: number }>({ linhas: [], total: 0, pagina: 0, paginas: 0 });
+  const VAZIO = { chave: "", linhas: [] as LinhaPaginaProduto[], total: 0, pagina: 0, paginas: 0, aviso: null as string | null };
+  const [estado, setEstado] = useState(VAZIO);
   const [aCarregar, setACarregar] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const pedido = useRef(0);
@@ -39,21 +42,26 @@ export function usePesquisaProdutos(org: string | null, f: FiltroPesquisaProduto
     if (!org) return;
     const eu = ++pedido.current;
     setACarregar(true); setErro(null);
-    const r = await lerProdutosPagina(org, { ...SEM_FILTRO_SERVIDOR, q: qAtraso, categoria, subcategoria }, pagina);
+    const chave = `${org}|${qAtraso}|${categoria}|${subcategoria}|${servico}`;
+    const r = await lerProdutosPagina(org, { ...SEM_FILTRO_SERVIDOR, q: qAtraso, categoria, subcategoria, ...(servico ? { servico } : {}) }, pagina);
     if (eu !== pedido.current) return; // uma pesquisa mais nova já saiu
     setACarregar(false);
-    if (!r.ok) { setErro(r.erro); if (!juntar) setEstado({ linhas: [], total: 0, pagina: 0, paginas: 0 }); return; }
-    setEstado((e) => ({ linhas: juntar ? [...e.linhas, ...r.v.produtos.filter((x) => !e.linhas.some((y) => y.id === x.id))] : r.v.produtos, total: r.v.total, pagina: r.v.pagina, paginas: r.v.paginas }));
-  }, [org, qAtraso, categoria, subcategoria]);
+    if (!r.ok) { setErro(r.erro); if (!juntar) setEstado(VAZIO); return; }
+    setEstado((e) => ({ chave, linhas: juntar ? [...e.linhas, ...r.v.produtos.filter((x) => !e.linhas.some((y) => y.id === x.id))] : r.v.produtos, total: r.v.total, pagina: r.v.pagina, paginas: r.v.paginas, aviso: r.v.aviso ?? null }));
+  }, [org, qAtraso, categoria, subcategoria, servico]);
 
   useEffect(() => {
     if (!ativo || !org) return;
     void ler(1, false);
   }, [ativo, org, ler]);
 
-  const maisPaginas = estado.pagina > 0 && estado.pagina < estado.paginas;
+  // M9: as linhas são de uma pesquisa; se o filtro (mesmo o texto ainda por «assentar») já é outro, a lista antiga não se mostra nem se toca
+  const atual = !!org && estado.chave === `${org}|${f.q}|${categoria}|${subcategoria}|${servico}`;
+  const maisPaginas = atual && estado.pagina > 0 && estado.pagina < estado.paginas;
   const maisUma = useCallback(() => { if (!aCarregar && maisPaginas) void ler(estado.pagina + 1, true); }, [aCarregar, maisPaginas, ler, estado.pagina]);
-  return { linhas: estado.linhas, total: estado.total, aCarregar, erro, maisPaginas, maisUma };
+  return atual
+    ? { linhas: estado.linhas, total: estado.total, aCarregar, erro, maisPaginas, maisUma, aviso: estado.aviso }
+    : { linhas: [], total: 0, aCarregar: aCarregar || (!!org && ativo && !erro), erro, maisPaginas: false, maisUma, aviso: null };
 }
 
 /** O produto escolhido da pesquisa, lido inteiro (cat_ler_produto) e já no Catálogo em memória (e registado para o autosave). */
@@ -85,6 +93,7 @@ export function produtoDeLinha(l: LinhaPaginaProduto): Produto {
     ...(l.sku ? { sku: l.sku } : {}), ...(pvp ? { pvp } : {}),
     ...(l.grossista != null ? { grossista: l.grossista } : {}), ...(l.distribuidor != null ? { distribuidor: l.distribuidor } : {}),
     ...(l.imagem ? { fotos: [l.imagem] } : {}),
+    ...(l.servico_id ? { servico: l.servico_id, fatorServico: l.fator_servico ?? 1 } : {}),
   };
 }
 

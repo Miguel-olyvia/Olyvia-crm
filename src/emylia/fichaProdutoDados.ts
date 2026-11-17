@@ -35,7 +35,7 @@ export interface FornecedorLigado {
 }
 export interface ResPreferido { ok: boolean; custo_aplicado: boolean; motivo: string | null }
 
-export type Res<T> = { ok: true; v: T } | { ok: false; erro: string };
+export type Res<T> = { ok: true; v: T } | { ok: false; erro: string; /** o código da base (CT001…), quando há */ codigo?: string };
 
 export const AINDA_NAO = "Ainda não disponível nesta base";
 
