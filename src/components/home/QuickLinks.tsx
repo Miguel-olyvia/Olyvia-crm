@@ -115,7 +115,7 @@ export const QUICK_GROUPS: QuickGroup[] = [
     icon: Wrench,
     color: "bg-orange-500/10 text-orange-700 dark:text-orange-400",
     items: [
-      { id: "catalogo", to: "/catalogo-custos", icon: Package, labelKey: "sidebar.catalogoCustos", permission: "services.view" },
+      { id: "catalogo", to: "/catalogo/servicos", icon: Package, labelKey: "sidebar.catalogoCustos", permission: "services.view" },
     ],
   },
   {

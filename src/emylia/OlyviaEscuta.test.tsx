@@ -132,7 +132,7 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     render(arvore("/negocios?vista=hoje"));
     expect(ativos).toHaveLength(1);
     falar(ultimo(), res("olyvia vai ao catálogo", true));
-    expect(loc()).toBe("/catalogo-custos");
+    expect(loc()).toBe("/catalogo/servicos");
     act(() => { vi.advanceTimersByTime(2000); });
     expect(ativos).toHaveLength(1);
     expect(ativos[0].parado).toBe(false);
@@ -204,7 +204,7 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     falar(rec, res("olyvia", true));
     expect(screen.getByRole("button", { name: "Olyvia — a ouvir-te" })).toBeInTheDocument();
     falar(rec, res("olyvia", true), res("vai ao catálogo", true));
-    expect(loc()).toBe("/catalogo-custos");
+    expect(loc()).toBe("/catalogo/servicos");
     falar(rec, res("olyvia", true), res("vai ao catálogo", true), res("abre os negócios", true));
     expect(loc()).toBe("/negocios");
   });
@@ -238,7 +238,7 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     falar(rec, res("olyvia", true), res("preciso de ver quanto custam os materiais todos que temos no catálogo"));
     await act(async () => { await vi.advanceTimersByTimeAsync(PAUSA_FRASE + 50); });
     expect(pedidos).toEqual(["preciso de ver quanto custam os materiais todos que temos no catalogo"]);
-    expect(loc()).toBe("/catalogo-custos");
+    expect(loc()).toBe("/catalogo/servicos");
   });
 
   it("acordada, qualquer fala renova o tempo (não adormece a meio de uma conversa)", () => {
@@ -289,7 +289,7 @@ describe("17/11: a escuta contínua da Olyvia", () => {
       expect(loc()).toBe("/negocios?vista=hoje");
       g.falas = [...g.falas, fala(5, "Olívia, vai ao catálogo.")];
       r.rerender(arvore("/negocios?vista=hoje"));
-      expect(loc()).toBe("/catalogo-custos");
+      expect(loc()).toBe("/catalogo/servicos");
     });
     it("só «Olyvia»: a fala seguinte é a ordem; as falas revistas não contam outra vez", () => {
       g.estado = "a_ouvir";
@@ -297,12 +297,12 @@ describe("17/11: a escuta contínua da Olyvia", () => {
       g.falas = [fala(1, "Olyvia.")];
       r.rerender(arvore("/negocios?vista=hoje"));
       g.falas = [...g.falas, fala(3, "Vai ao catálogo.")];
-      r.rerender(arvore("/catalogo-custos"));
-      expect(loc()).toBe("/catalogo-custos");
+      r.rerender(arvore("/catalogo/servicos"));
+      expect(loc()).toBe("/catalogo/servicos");
       // a 2.ª passagem repete o texto revisto: não volta a mandar
       g.falas = [fala(1, "Olyvia.", true), fala(3, "Olyvia, vai aos negócios.", true)];
-      r.rerender(arvore("/catalogo-custos"));
-      expect(loc()).toBe("/catalogo-custos");
+      r.rerender(arvore("/catalogo/servicos"));
+      expect(loc()).toBe("/catalogo/servicos");
     });
     it("as falas que já estavam ao abrir não são ordens novas", () => {
       g.estado = "a_ouvir";

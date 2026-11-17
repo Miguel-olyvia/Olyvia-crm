@@ -22,7 +22,7 @@ describe("a Olyvia por comando (botão flutuante)", () => {
   it("escrever «vai ao catálogo» navega para o Catálogo e custos", () => {
     montar();
     escrever("vai ao catálogo");
-    expect(loc()).toBe("/catalogo-custos");
+    expect(loc()).toBe("/catalogo/servicos");
   });
 
   it("«mostra o dia de hoje» leva ao Hoje", () => {

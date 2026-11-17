@@ -48,6 +48,7 @@ import { TIPOS_CRIAR, consumiveisComCriados, type TipoCriar } from "./criarCatal
 import { ehCriado } from "./catalogo";
 import { MateriaisModelo } from "./MateriaisModelo";
 import { podeCriarTipo, usePermissoesCatalogo } from "./permissoesCatalogo";
+import { CAMINHO_SECCAO, caminhoProduto, caminhoServico, type RotaCatalogo } from "./catalogoRotas";
 
 type Seccao = "servicos" | "produtos" | "equipamentos" | "consumiveis" | "tecnicos" | "ligacoes";
 const SECCOES: [Seccao, string][] = [["servicos", "Serviços"], ["produtos", "Produtos"], ["equipamentos", "Equipamentos"], ["consumiveis", "Consumíveis"], ["tecnicos", "Técnicos"], ["ligacoes", "Ligações"]];
@@ -452,19 +453,33 @@ function Tecnicos({ S, C, mudar, novo }: { S: Ctx["S"]; C: Custos; mudar: (fn: (
 const SECCAO_DO_TIPO: Record<TipoCriar, Seccao> = { servico: "servicos", produto: "produtos", equipamento: "equipamentos", consumivel: "consumiveis", tecnico: "tecnicos" };
 const NOME_TIPO: Record<TipoCriar, string> = { servico: "Serviço", produto: "Produto", equipamento: "Equipamento", consumivel: "Consumível", tecnico: "Técnico" };
 /** real (29/10): só na página real (CatalogoCustos), para a ficha do produto ler e ligar fornecedores. */
-export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) {
+/** rota (17/11): debaixo de /catalogo/… a secção e a ficha vêm da rota e o menu lateral faz de separadores (a barra e o «Gestão» escondem-se). */
+export function CatalogoV1({ S, run, real, rota }: Ctx & { real?: FichaProdutoReal; rota?: RotaCatalogo }) {
   const C = useCustos();
   const K = useCatalogo();
   const perms = usePermissoesCatalogo();
   // 26/10: a secção e a ficha aberta vão para o endereço (?sec=…, ?servico=…): o "voltar" do browser fecha a ficha e volta à secção
-  const [seccao, setSeccaoE] = useParamUrl<Seccao>("sec", ultimaSeccao, SECCOES.map(([k]) => k));
-  const setSeccao = (s: Seccao) => { ultimaSeccao = s; setSeccaoE(s); };
+  const [seccaoEstado, setSeccaoE] = useParamUrl<Seccao>("sec", ultimaSeccao, SECCOES.map(([k]) => k));
+  const seccao = rota ? rota.seccao : seccaoEstado;
+  const setSeccao = (s: Seccao) => {
+    // já na lista dessa secção (sem ficha): não há para onde ir, e navegar juntava ao histórico uma entrada repetida (o «voltar» ficava preso)
+    if (rota) { if (!(s === rota.seccao && !rota.produto && !rota.servico)) rota.ir(CAMINHO_SECCAO[s]); return; }
+    ultimaSeccao = s; setSeccaoE(s);
+  };
   const [pendente] = useState<SvcId | null>(() => tomarFichaPendente());
-  const [servicoUrl, setServicoUrl] = useParamUrl<string>("servico", "");
+  const [servicoEstado, setServicoEstado] = useParamUrl<string>("servico", "");
+  const servicoUrl = rota ? rota.servico ?? "" : servicoEstado;
+  const setServicoUrl = useCallback((v: string, op?: { substituir?: boolean }) => {
+    if (rota) rota.ir(v ? caminhoServico(v) : CAMINHO_SECCAO.servicos, op); else setServicoEstado(v, op);
+  }, [rota, setServicoEstado]);
   const aberto: SvcId | null = (servicoUrl || null) as SvcId | null;
   const setAberto = useCallback((sid: SvcId | null) => setServicoUrl(sid ?? ""), [setServicoUrl]);
   // 29/10: a ficha do produto também vai para o endereço (?produto=…)
-  const [produtoAberto, setProdutoAberto] = useParamUrl<string>("produto", "");
+  const [produtoEstado, setProdutoEstado] = useParamUrl<string>("produto", "");
+  const produtoAberto = rota ? rota.produto ?? "" : produtoEstado;
+  const setProdutoAberto = useCallback((v: string, op?: { substituir?: boolean }) => {
+    if (rota) rota.ir(v ? caminhoProduto(v) : CAMINHO_SECCAO.produtos, op); else setProdutoEstado(v, op);
+  }, [rota, setProdutoEstado]);
   // 29/10: e a do consumível (?consumivel=…), a mesma ficha na variante consumível
   const [consAberto, setConsAberto] = useParamUrl<string>("consumivel", "");
   const voltarProduto = useRef<string | null>(null);
@@ -479,6 +494,16 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   // ?atributos=categorias|subcategorias|modelos|marcas|sku|1 (o «1» é o endereço antigo da gestão dos atributos e continua a abrir os Atributos).
   const [atributosAberto, setAtributosAberto] = useParamUrl<"" | "1" | "categorias" | "subcategorias" | "modelos" | "marcas" | "sku">("atributos", "", ["", "1", "categorias", "subcategorias", "modelos", "marcas", "sku"]);
   const voltarAtributos = useRef(false);
+  // 17/11: debaixo da rota, navegar pelo menu para outra rota irmã fecha o Criar e a ficha de consumível (?criar=, ?consumivel=), que são estado
+  // desta página e sobreviveriam à mudança (a página não desmonta entre rotas, por causa do autosave)
+  const chaveRota = rota ? `${rota.seccao}|${rota.produto ?? ""}|${rota.servico ?? ""}` : null;
+  const chaveAnterior = useRef(chaveRota);
+  useEffect(() => {
+    if (chaveAnterior.current === chaveRota) return;
+    chaveAnterior.current = chaveRota;
+    setCriar("", { substituir: true });
+    setConsAberto("", { substituir: true });
+  }, [chaveRota]); // eslint-disable-line react-hooks/exhaustive-deps
   // ao sair da gestão, o foco regressa ao botão «Gestão» (como nas fichas)
   useEffect(() => {
     if (atributosAberto || !voltarAtributos.current) return;
@@ -489,7 +514,7 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   const [aviso, setAviso] = useState<{ msg: string; n: number } | null>(null);
   const voltarPara = useRef<SvcId | null>(null);
   const anunciar = useCallback((msg: string) => setAviso((a) => ({ msg, n: (a?.n ?? 0) + 1 })), []);
-  const abrir = useCallback((sid: SvcId) => { setAberto(sid); }, []);
+  const abrir = useCallback((sid: SvcId) => { setAberto(sid); }, [setAberto]);
 
   /** Muda os custos e leva-os aos serviços em uso (o orçamento usa o mesmo custo). */
   const mudar = (fn: (c: Custos) => void, msg: string) => {
@@ -526,7 +551,11 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const catLig = useMemo(() => montarCatalogo(S, C, K), [chave, C, K]);
   /** Abre o separador Ligações centrado num elemento (a partir da ficha). */
-  const verLigacoes = useCallback((r: Ref) => { abrirLigacoesEm(r); setSeccao("ligacoes"); setAberto(null); }, []);
+  const verLigacoes = useCallback((r: Ref) => {
+    abrirLigacoesEm(r);
+    if (rota) { rota.ir(CAMINHO_SECCAO.ligacoes); return; }
+    setSeccao("ligacoes"); setAberto(null);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const nomeServico = useCallback((sid: SvcId) => nomes.get(sid) ?? sid, [nomes]);
 
   const regiao = (
@@ -633,7 +662,7 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
           <h1 className="text-3xl font-semibold tracking-tight">Catálogo e custos</h1>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          {real && (
+          {real && !rota && (
             <Button id="btn-atributos" title="Atributos, categorias e marcas" variant="ghost" className="h-11 text-[15px] text-muted-foreground" onClick={() => { voltarAtributos.current = true; setAtributosAberto("categorias"); }}>Gestão</Button>
           )}
           {tipoDaSeccao && (
@@ -643,9 +672,11 @@ export function CatalogoV1({ S, run, real }: Ctx & { real?: FichaProdutoReal }) 
           )}
         </div>
       </div>
-      <div role="tablist" aria-label="Secções do Catálogo" className="mt-6 flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] sm:[mask-image:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)]">
-        {SECCOES.map(([s, t]) => tab(s, t))}
-      </div>
+      {!rota && (
+        <div role="tablist" aria-label="Secções do Catálogo" className="mt-6 flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] sm:[mask-image:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)]">
+          {SECCOES.map(([s, t]) => tab(s, t))}
+        </div>
+      )}
       {/* 27/10: o contentor tem sempre a mesma largura (o título e os separadores não saltam); só o corpo das secções estreitas encolhe */}
       <div id={`painel-${seccao}`} role="tabpanel" aria-labelledby={`tab-${seccao}`} className={cn("pt-6", seccao === "ligacoes" ? "max-w-6xl" : seccao !== "servicos" && seccao !== "produtos" && "max-w-3xl")}>
         {corpo[seccao]()}

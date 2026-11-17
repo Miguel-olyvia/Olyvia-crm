@@ -48,6 +48,14 @@ import {
   History as HistoryIcon,
   Eye,
   HardHat,
+  Link2,
+  FolderTree,
+  Layers,
+  Boxes,
+  Tag,
+  SlidersHorizontal,
+  Hammer,
+  PaintBucket,
 } from "lucide-react";
 import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
 
@@ -180,15 +188,6 @@ export const topLevelItems: TopLevelItem[] = [
     permissions: ["negocios.obra.executar", "negocios.obra.planear"],
   },
   {
-    // Emylia (decisão de 27/10): o Catálogo e custos substitui os Produtos e os Serviços. 28/10: sai de Organizações para o topo, como no
-    // protótipo. 03/11: as páginas antigas (/products, /services, categorias, marcas, pacotes…) redirecionam para aqui.
-    id: "catalogo",
-    to: "/catalogo-custos",
-    icon: Package,
-    labelKey: "sidebar.catalogoCustos",
-    permissions: ["services.view"],
-  },
-  {
     // 12/11 (Rúben: «o super admin precisa de, no menu inicial, conseguir ver a screen de todos os técnicos sem fazer login na conta
     // deles»): o ecrã de cada técnico, tal como ele o vê, escolhido numa lista. Só o super admin (a rota também: adminOnly).
     id: "tecnicos",
@@ -205,7 +204,7 @@ export const menuSections: MenuSection[] = [
     id: "organizations",
     icon: Building,
     labelKey: "sidebar.organizations",
-    // 03/11: as páginas antigas do catálogo (/products, /services, marcas, categorias...) redirecionam para /catalogo-custos (item de topo).
+    // 03/11: as páginas antigas do catálogo (/products, /services, marcas, categorias...) redirecionam para o Catálogo (17/11: secção própria, abaixo).
     paths: ["/organizations", "/org-templates", "/org-chart", "/org-help", "/flow-builder"],
     permissions: ["organizations.view", "flow_builder.view"],
     items: [
@@ -213,6 +212,55 @@ export const menuSections: MenuSection[] = [
       { to: "/org-chart", icon: Network, labelKey: "sidebar.orgChart", permission: "organizations.view" },
       { to: "/flow-builder", icon: Zap, labelKey: "sidebar.flowBuilder", permission: "flow_builder.view" },
       { to: "/org-help", icon: HelpCircle, labelKey: "sidebar.help", permission: "organizations.view" },
+    ],
+  },
+  {
+    // Emylia (decisão de 27/10): o Catálogo e custos substitui os Produtos e os Serviços. 28/10: sai de Organizações para o topo.
+    // 03/11: as páginas antigas (/products, /services, categorias, marcas, pacotes…) redirecionam para aqui. 17/11: passa a secção com menu
+    // lateral, como as Organizações: Produtos (lista + gestão), Serviços (lista, equipamentos, consumíveis, técnicos) e Ligações.
+    // Cada rota pede services.view, a mesma de antes; /catalogo-custos só encaminha (RedirectCatalogo).
+    id: "catalogo",
+    icon: Package,
+    labelKey: "sidebar.catalogoCustos",
+    paths: ["/catalogo"],
+    permissions: ["services.view"],
+    items: [],
+    subSections: [
+      {
+        key: "catalogo-produtos",
+        labelKey: "sidebar.catalogoProdutos",
+        defaultExpanded: true,
+        items: [
+          // `exact`: a Lista não fica realçada nas páginas de gestão (/catalogo/produtos/categorias…), que têm a sua entrada.
+          { to: "/catalogo/produtos", icon: Package, labelKey: "sidebar.catalogoLista", permission: "services.view", exact: true },
+          { to: "/catalogo/produtos/categorias", icon: FolderTree, labelKey: "sidebar.catalogoCategorias", permission: "services.view" },
+          { to: "/catalogo/produtos/subcategorias", icon: Layers, labelKey: "sidebar.catalogoSubcategorias", permission: "services.view" },
+          { to: "/catalogo/produtos/modelos", icon: Boxes, labelKey: "sidebar.catalogoModelos", permission: "services.view" },
+          { to: "/catalogo/produtos/marcas", icon: Tag, labelKey: "sidebar.catalogoMarcas", permission: "services.view" },
+          { to: "/catalogo/produtos/atributos", icon: SlidersHorizontal, labelKey: "sidebar.catalogoAtributos", permission: "services.view" },
+          { to: "/catalogo/produtos/referencia", icon: ScanBarcode, labelKey: "sidebar.catalogoReferencia", permission: "services.view" },
+        ],
+      },
+      {
+        key: "catalogo-servicos",
+        labelKey: "sidebar.catalogoServicos",
+        defaultExpanded: true,
+        items: [
+          { to: "/catalogo/servicos", icon: Wrench, labelKey: "sidebar.catalogoLista", permission: "services.view", exact: true },
+          { to: "/catalogo/servicos/equipamentos", icon: Hammer, labelKey: "sidebar.catalogoEquipamentos", permission: "services.view" },
+          { to: "/catalogo/servicos/consumiveis", icon: PaintBucket, labelKey: "sidebar.catalogoConsumiveis", permission: "services.view" },
+          { to: "/catalogo/servicos/tecnicos", icon: HardHat, labelKey: "sidebar.catalogoTecnicos", permission: "services.view" },
+        ],
+      },
+      {
+        // 17/11: Ligações no fim do menu (os itens soltos de uma secção aparecem sempre antes das sub-secções).
+        key: "catalogo-ligacoes",
+        labelKey: "sidebar.catalogoLigacoes",
+        defaultExpanded: true,
+        items: [
+          { to: "/catalogo/ligacoes", icon: Link2, labelKey: "sidebar.catalogoLigacoes", permission: "services.view" },
+        ],
+      },
     ],
   },
   {

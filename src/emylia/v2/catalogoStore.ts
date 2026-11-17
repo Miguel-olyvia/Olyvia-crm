@@ -32,8 +32,19 @@ export function porCatalogo(k: Catalogo): void {
 }
 export function reporCatalogo(): void {
   estado = catalogo0();
+  desatualizado = false;
   avisar();
 }
+
+/**
+ * 17/11: a gestão do Catálogo (/catalogo/produtos/categorias, …) muda dados que este Catálogo partilhado também guarda (categorias, marcas,
+ * modelos). Reler tudo a cada gravação é a leitura pesada (cat_ler_catalogo): em vez disso marca-se aqui, e quem lê o Catálogo de novo
+ * (carregarCatalogo, que todos os ecrãs fazem ao abrir) limpa a marca.
+ */
+let desatualizado = false;
+export const marcarCatalogoDesatualizado = (): void => { desatualizado = true; };
+export const marcarCatalogoAtualizado = (): void => { desatualizado = false; };
+export const catalogoDesatualizado = (): boolean => desatualizado;
 
 /** 26/10: a parte "catalogo" da sincronização: o que mudou em relação ao Catálogo de base. */
 export function lerParteCatalogo(): ParteCatalogo {
