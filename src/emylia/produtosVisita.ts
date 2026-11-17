@@ -101,9 +101,30 @@ export function servicosTrazidos(prod: ProdVisita[]): Record<SvcId, Trazido> {
   return r;
 }
 
-/** Os serviços do pacote em uso (medida > 0 e não tirados). */
-export const ativosDoPacote = (map: [SvcId, MedKey][], med: Medidas, off: SvcId[]): SvcId[] =>
-  map.filter(([sid, k]) => med[k] > 0 && !off.includes(sid)).map(([sid]) => sid);
+/**
+ * 17/11 (A-Z na Mudelar: a mão de obra contava duas vezes): os serviços do pacote cuja instalação os produtos escolhidos já trazem por OUTRO
+ * serviço do mesmo ramo do Catálogo (K.classe: ofício › sub). Ex.: o revestimento escolhido traz «Instalação de Revestimento m2»
+ * (Revestimentos › Parede), e o «Revestimento de parede» do pacote sai; a sanita traz «Instalação de Sanita Suspensa» (Canalização ›
+ * Louças e torneiras), e a «Montagem de louças» sai. Um produto que traz o próprio serviço do pacote não muda nada.
+ */
+export function pacoteSubstituido(pacote: readonly SvcId[], prod: ProdVisita[], classe = catalogoLigado()?.classe): Set<SvcId> {
+  const out = new Set<SvcId>();
+  if (!classe) return out;
+  const trazidos = Object.keys(servicosTrazidos(prod));
+  for (const x of pacote) {
+    const c = classe[x];
+    if (c && trazidos.some((y) => y !== x && classe[y] === c)) out.add(x);
+  }
+  return out;
+}
+
+/** Os serviços do pacote em uso (medida > 0 e não tirados). 17/11: com os produtos, sem os que eles substituem (pacoteSubstituido). */
+export const ativosDoPacote = (map: [SvcId, MedKey][], med: Medidas, off: SvcId[], prod?: ProdVisita[]): SvcId[] => {
+  const ativos = map.filter(([sid, k]) => med[k] > 0 && !off.includes(sid)).map(([sid]) => sid);
+  if (!prod?.length) return ativos;
+  const fora = pacoteSubstituido(ativos, prod);
+  return fora.size ? ativos.filter((s) => !fora.has(s)) : ativos;
+};
 
 /**
  * Os serviços trazidos por produtos que entram no orçamento como linha própria: os que não estão já
@@ -256,7 +277,9 @@ export interface ParteEstimativa {
 }
 
 /** As partes da estimativa do modelo (sem partes ou sem Catálogo ligado: lista vazia). */
-export function partesDoModelo(mat: MatModelo, prod: ProdVisita[], manter?: Record<SvcId, "sim" | "nao">, fora: string[] = [], arvore = catalogoLigado()?.arvore): ParteEstimativa[] {
+/** 17/11 (A-Z na Mudelar: «estimativa dos materiais do modelo» ao lado de todas as peças escolhidas): `inteiras` (a visita veio do Estúdio, onde cada peça
+ *  se escolhe uma a uma) cobre por inteiro a parte que tem produtos escolhidos; sem ela, a parte desce só pelo custo deles (o resto fica estimado). */
+export function partesDoModelo(mat: MatModelo, prod: ProdVisita[], manter?: Record<SvcId, "sim" | "nao">, fora: string[] = [], arvore = catalogoLigado()?.arvore, inteiras = false): ParteEstimativa[] {
   if (!mat.partes || !arvore) return [];
   const ativos = prod.filter((p) => p.q > 0);
   // os nós de um ramo: o próprio e os de baixo
@@ -270,7 +293,7 @@ export function partesDoModelo(mat: MatModelo, prod: ProdVisita[], manter?: Reco
     const d = pt.d ?? `parte ${k + 1}`, est = r2(mat.custo * pt.peso), R = pt.ramo ? ramo(pt.ramo) : null;
     const por = R ? ativos.filter((p) => p.no && R.nos.has(p.no)) : [];
     const mantida = !!pt.manter?.some((sid) => manter?.[sid] === "sim"), tirada = fora.includes(d);
-    const custo = mantida || tirada ? 0 : r2(Math.max(0, est - por.reduce((a, p) => a + p.custo * p.q, 0)));
+    const custo = mantida || tirada || (inteiras && por.length > 0) ? 0 : r2(Math.max(0, est - por.reduce((a, p) => a + p.custo * p.q, 0)));
     return { d, est, custo, preco: r2(mat.preco * (custo / mat.custo)), raiz: R?.raiz ?? null, nos: R?.nos ?? null, por, mantida, fora: tirada };
   });
 }
@@ -285,9 +308,9 @@ export function partesDoModelo(mat: MatModelo, prod: ProdVisita[], manter?: Reco
  * Sem partes (ou sem Catálogo ligado para saber os ramos), cai na regra antiga: desce pelo custo de todos os produtos.
  */
 export function materiaisDoModelo(
-  mat: MatModelo, prod: ProdVisita[], manter?: Record<SvcId, "sim" | "nao">, arvore = catalogoLigado()?.arvore, fora: string[] = [],
+  mat: MatModelo, prod: ProdVisita[], manter?: Record<SvcId, "sim" | "nao">, arvore = catalogoLigado()?.arvore, fora: string[] = [], inteiras = false,
 ): { custo: number; preco: number } | null {
-  const partes = partesDoModelo(mat, prod, manter, fora, arvore);
+  const partes = partesDoModelo(mat, prod, manter, fora, arvore, inteiras);
   let custo = partes.length ? partes.reduce((a, p) => a + p.custo, 0) : mat.custo - prod.filter((p) => p.q > 0).reduce((a, p) => a + p.custo * p.q, 0);
   custo = r2(custo);
   if (!(custo > 0.004)) return null;

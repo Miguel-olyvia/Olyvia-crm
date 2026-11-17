@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import type { No } from "./v2/catalogoModelo";
 import { nosDeProdutoDoRamo, ramoDaCategoriaProduto } from "./ramoDosProdutos";
-import { emFaltaProdutos, nosDoRamo, partesDoModelo, type ProdVisita } from "./produtosVisita";
+import { ativosDoPacote, emFaltaProdutos, nosDoRamo, pacoteSubstituido, partesDoModelo, type ProdVisita } from "./produtosVisita";
 import { filtroDoRamo } from "./real/pesquisaProdutos";
 
 const ARVORE: No[] = [
@@ -51,3 +51,25 @@ describe("o ramo do motor das categorias de produto", () => {
     expect(filtroDoRamo(ARVORE, "san")).toEqual({ subcategoria: "san" });
   });
 });
+
+describe("17/11: a visita do Estúdio sem mão de obra a dobrar", () => {
+  const classe = { revest: "parede", c4: "parede", pav: "pavimento", c6: "pavimento", loucas: "loucas", sSusp: "loucas", canal: "aguas" };
+  const P = (id: string, svc: string, q = 1): ProdVisita => ({ id, n: id, un: "un", custo: 10, q, no: null, svc, fator: 1 });
+  it("o serviço do pacote sai quando um produto traz OUTRO serviço do mesmo ramo; o próprio serviço não conta", () => {
+    const prod = [P("rev", "c4", 22), P("san", "sSusp"), P("x", "pav")];
+    expect([...pacoteSubstituido(["revest", "pav", "loucas", "canal"], prod, classe)].sort()).toEqual(["loucas", "revest"]);
+  });
+  it("ativosDoPacote só tira com os produtos dados (o motor só os dá numa visita do Estúdio)", () => {
+    const map: [string, "par" | "pav"][] = [["revest", "par"], ["pav", "pav"]];
+    const med = { par: 20, pav: 4 } as never;
+    expect(ativosDoPacote(map as never, med, [])).toEqual(["revest", "pav"]);
+  });
+  it("com «inteiras» (visita do Estúdio), a parte com produtos escolhidos fica toda coberta", () => {
+    const prod: ProdVisita[] = [{ id: "p1", n: "SANITA", un: "un", custo: 105, q: 1, no: "san" }];
+    const mat = { custo: 1000, preco: 1500, partes: [{ d: "louças", peso: 0.5, ramo: ["Canalização", "Louças e torneiras"] as [string, string] }, { d: "parede", peso: 0.5, ramo: ["Revestimentos", "Parede"] as [string, string] }] };
+    const [loucas, parede] = partesDoModelo(mat, prod, undefined, [], ARVORE, true);
+    expect(loucas.custo).toBe(0);
+    expect(parede.custo).toBe(500);
+  });
+});
+

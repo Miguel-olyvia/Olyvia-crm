@@ -70,7 +70,7 @@ export function ProdutosDaVersao({ ctx, d, ant }: { ctx: Ctx; d: Negocio; ant: V
   const retirados = saidos.filter((s) => ![...trocadoDe.values()].includes(s));
 
   // as partes da estimativa do modelo, com o preço na escala da linha que está no orçamento (o preço pode ter sido mudado)
-  const partes = partesDoModelo(L.mat, prods, v.manter, v.semParte, K.arvore);
+  const partes = partesDoModelo(L.mat, prods, v.manter, v.semParte, K.arvore, !!d.f.estudio);
   const linhaMat = o.linhas.find((l) => l.t === "mat" && l.d === L.mat.d);
   const somaPartes = partes.reduce((a, p) => a + p.preco, 0);
   const escala = linhaMat && linhaMat.t === "mat" && somaPartes > 0 ? linhaMat.preco / somaPartes : 1;

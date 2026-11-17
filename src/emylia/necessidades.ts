@@ -259,13 +259,13 @@ export function tocarProdutoGuiado(A: AcoesNec, K: Catalogo, d: Negocio, o: Pick
  * (escolher a sanita traz a instalação da sanita; perguntar outra vez "O cliente mantém a sanita?" seria repetir).
  */
 export function obrigacoesAMostrar(obr: Obrigacao[], d: Negocio): Obrigacao[] {
-  const v = d.visita, ativos = ativosDoPacote(LINHAS[d.linha].map, v.med, v.off), tr = servicosTrazidos(v.prod ?? []);
+  const v = d.visita, ativos = ativosDoPacote(LINHAS[d.linha].map, v.med, v.off, d.f.estudio ? v.prod ?? [] : undefined), tr = servicosTrazidos(v.prod ?? []);
   return obr.filter((o) => !(o.estado === "produto" && tr[o.sid] && !ativos.includes(o.sid) && !((v.extra[o.sid] || 0) > 0)));
 }
 
 /* ------------------------------------------------------------------ o resumo */
 /** A quantidade de um serviço na visita: a da medida (do pacote), a posta à mão, ou a que o produto traz. */
-export function qtdNaVisita(d: Negocio, sid: SvcId, ativos = ativosDoPacote(LINHAS[d.linha].map, d.visita.med, d.visita.off), tr = servicosTrazidos(d.visita.prod ?? [])): number {
+export function qtdNaVisita(d: Negocio, sid: SvcId, ativos = ativosDoPacote(LINHAS[d.linha].map, d.visita.med, d.visita.off, d.f.estudio ? d.visita.prod ?? [] : undefined), tr = servicosTrazidos(d.visita.prod ?? [])): number {
   const v = d.visita, k = LINHAS[d.linha].map.find(([x]) => x === sid)?.[1];
   return ativos.includes(sid) && k ? v.med[k] || 0 : (v.extra[sid] || 0) > 0 ? v.extra[sid]! : tr[sid]?.q ?? 0;
 }
@@ -273,7 +273,7 @@ export interface ResumoNec { servicos: number; produtos: number; total: number }
 /** Quantos serviços e produtos, e o valor estimado (serviços a preço de tabela e produtos ao preço de venda; o que o cliente fornece a zero). */
 export function resumoNecessidades(S: Estado, d: Negocio, sids: SvcId[]): ResumoNec {
   const L = LINHAS[d.linha], v = d.visita, prod = v.prod ?? [];
-  const ativos = ativosDoPacote(L.map, v.med, v.off), tr = servicosTrazidos(prod);
+  const ativos = ativosDoPacote(L.map, v.med, v.off, d.f.estudio ? prod : undefined), tr = servicosTrazidos(prod);
   let total = 0, servicos = 0;
   for (const sid of sids) {
     const s = servicoLeitura(S, sid);
