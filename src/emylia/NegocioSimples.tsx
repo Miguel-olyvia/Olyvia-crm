@@ -478,10 +478,16 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos, soLeitura }: { ctx: Ctx; 
   passosRef.current = passos;
   useEffect(() => {
     const aoPasso = (e: Event) => {
-      const alvo = (e as CustomEvent<{ passo: string }>).detail?.passo;
+      // 17/11: «tentar» — a Olyvia pergunta se o nome é um passo (antes de abrir um negócio com esse nome); responde em `ok`, sem erro
+      const det = (e as CustomEvent<{ passo: string; tentar?: boolean; ok?: boolean; listar?: boolean; lista?: string[] }>).detail;
+      // 17/11 (testarh): procura pelo nome que se vê na lista («Exterior do edifício») e, se não der, pelo nome interno
+      const vistos = passosRef.current.map((p) => ({ id: p.id, titulo: curto(p) }));
+      if (det?.listar) { det.lista = vistos.map((p) => p.titulo); return; }
+      const alvo = det?.passo;
       if (!alvo) return;
-      const ps = passosRef.current, i = indicePasso(ps, alvo, ativoRef.current);
-      if (i == null) { responderOlyvia(`Não há o passo «${alvo}» nesta fase.`, false); return; }
+      const ps = vistos, i = indicePasso(vistos, alvo, ativoRef.current) ?? indicePasso(passosRef.current, alvo, ativoRef.current);
+      if (i == null) { if (!det.tentar) responderOlyvia(`Não há o passo «${alvo}» nesta fase.`, false); return; }
+      det.ok = true;
       setAtivo(i);
       responderOlyvia(i >= ps.length ? "Fim." : `Passo: ${ps[i].titulo}.`);
     };

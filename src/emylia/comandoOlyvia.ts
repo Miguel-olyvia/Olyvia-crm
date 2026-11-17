@@ -30,6 +30,11 @@ export type Comando =
   | { acao: "ir-fase"; fase: number }
   /** passo: «fim», «proximo», «anterior», «inicio», ou o nome do passo («proposta», «morada da obra»). */
   | { acao: "ir-passo"; passo: string }
+  /** 17/11: andar na página — «desce», «vai lá para baixo», «sobe», «vai ao topo», «vai ao fundo da página». */
+  | { acao: "scroll"; para: "baixo" | "cima" | "topo" | "fundo" }
+  /** 17/11: «limpa a pesquisa», «tira o filtro». */
+  | { acao: "limpar-pesquisa" }
+  /** 17/11: o que sobra pode ser preencher campos («acesso fácil, estacionamento pago») ou um passo pelo nome — a página decide. */
   | { acao: "nada" };
 
 /** Os eventos entre o botão (OlyviaComando.tsx) e as páginas que sabem fazer (NegociosEmylia.tsx, NegocioSimples.tsx). */
@@ -90,7 +95,8 @@ const VERBO_BUSCA = /\b(?:procura[r]?|pesquisa[r]?|encontra[r]?|busca[r]?|locali
 const VERBO_ABRIR = /^(?:abre|abrir|abra|mostra|mostrar|mostre|ve|ver|entra|entrar)\s+(?:me\s+)?(?:(?:no|na|em)\s+)?(.*)$/;
 const COISA_COM_NOME = /\b(?:o |a |os |as )?(?:negocio|cliente|ficha|pessoa)\s+(?:d[oa]s?\s+|do\s+|da\s+|de\s+)?(.+)$/;
 // artigos, preposições e os substantivos «negócio/cliente/ficha/pessoa» no início do termo (ex.: «a cliente Ana» → «Ana»)
-const LIXO_INICIO = /^(?:o |a |os |as |um |uma |pel[oa]\s+|d[oa]s?\s+|do\s+|da\s+|de\s+|negocio\s+|cliente\s+|ficha\s+|pessoa\s+)+/;
+// 17/11 (gravação do Rúben: «procura por Ruben Carvalho» procurava «por ruben carvalho»): também «por», «pelo», «pela»
+const LIXO_INICIO = /^(?:o |a |os |as |um |uma |por\s+|pel[oa]\s+|d[oa]s?\s+|do\s+|da\s+|de\s+|negocio\s+|cliente\s+|ficha\s+|pessoa\s+)+/;
 const limparNome = (t: string): string => t.replace(LIXO_INICIO, "").trim();
 const eNome = (nome: string): boolean => nome.length >= 2 && !melhorDestino(nome);
 
@@ -126,14 +132,44 @@ export function extrairAposGatilho(texto: string): string | null {
 /** Pedir à Olyvia para parar de ouvir (volta a precisar de «Olyvia»): «obrigado», «chega», «para», «dorme», «adeus». */
 export const pedeParaParar = (texto: string): boolean =>
   /^(?:(?:muito )?obrigad[oa]|chega|ja chega|para|parar|para de ouvir|dorme|adeus|tchau|ate ja|silencio|stop)$/.test(normal(texto).replace(new RegExp("^" + GATILHO.source + "\\s*"), "").trim());
-/** Um comando é curto; uma frase comprida, com a Olyvia acordada, é conversa à volta (não se trata como ordem). */
-export const pareceComando = (texto: string): boolean => { const n = normal(texto); return !!n && n.split(" ").length <= 9; };
+/** 17/11: as ordens de preencher («põe acesso fácil, estacionamento pago, contentor na via pública») são compridas e valem. */
+export const VERBO_PREENCHER = /^(?:poe|por|pois|poem|mete|meter|marca|marcar|preenche|preencher|escolhe|escolher|coloca|colocar|seleciona|selecionar|define|definir|muda|mudar|altera|alterar|responde|responder)\b(?:\s+(?:me|la|lo|ai|ali|la))?\s*/;
+/** Um comando é curto; uma frase comprida, com a Olyvia acordada, é conversa à volta (não se trata como ordem) — salvo se manda preencher. */
+export const pareceComando = (texto: string): boolean => {
+  const n = limparFrase(normal(texto));
+  return !!n && (n.split(" ").length <= 9 || (VERBO_PREENCHER.test(n) && n.split(" ").length <= 30));
+};
+
+// 17/11 (gravação do Rúben: «ok abre o Ruben Carvalho novamente», «não, limpa o campo de pesquisa»): palavras de conversa à volta da ordem
+// «não» só cai antes de uma ordem («não, limpa a pesquisa»); «não tem elevador» é uma resposta e fica
+const ENCHIMENTO_INICIO = /^(?:(?:ok|okay|pronto|entao|agora|olha|ora|bem|sim|e|ja|bora|vamos la|por favor|se faz favor|faz favor|nao(?= (?:abre|abrir|vai|limpa|procura|pesquisa|mostra|desce|sobe|volta|passa|entra)\b))\s+)+/;
+const ENCHIMENTO_FIM = /(?:\s+(?:novamente|outra vez|de novo|por favor|se faz favor|faz favor|agora|ja|ai|obrigad[oa]))+$/;
+/** Tira o enchimento do início e do fim da frase (já normalizada); se ficar vazia, devolve-a como estava. */
+export const limparFrase = (s: string): string => s.replace(ENCHIMENTO_INICIO, "").replace(ENCHIMENTO_FIM, "").trim() || s;
+
+// 17/11 (gravação: «faz-te lá para baixo» não fazia nada): andar na página
+const SCROLL_FUNDO = /\b(?:fundo(?: da pagina)?|fim da pagina|final da pagina|ate (?:ao )?(?:fundo|fim da pagina)|la (?:para|pra) baixo de tudo)\b/;
+const SCROLL_TOPO = /\b(?:topo(?: da pagina)?|cimo da pagina|inicio da pagina|la (?:para|pra) cima de tudo)\b/;
+const SCROLL_BAIXO = /\b(?:desce|descer|desca|desces|desliza|scroll|rola|rolar|(?:para|pra) baixo|mais abaixo|mais para baixo|abaixo)\b/;
+const SCROLL_CIMA = /\b(?:sobe|subir|suba|(?:para|pra) cima|mais acima|mais para cima|acima)\b/;
+function scrollPedido(s: string): "baixo" | "cima" | "topo" | "fundo" | null {
+  if (SCROLL_FUNDO.test(s)) return "fundo";
+  if (SCROLL_TOPO.test(s)) return "topo";
+  if (SCROLL_BAIXO.test(s)) return "baixo";
+  if (SCROLL_CIMA.test(s)) return "cima";
+  return null;
+}
+const LIMPAR = /\b(?:limpa|limpar|apaga|apagar|tira|tirar|esvazia|remove|retira)\b.*\b(?:pesquisa|procura|busca|filtro|filtros)\b|^(?:sem pesquisa|mostra (?:todos|tudo)|ver (?:todos|tudo))$/;
 
 /** A frase dita ou escrita vira um comando. Tira a palavra de ativação «Olyvia» do início, se vier. */
 export function interpretarComando(texto: string): Comando {
   const t = juntarLetras(normal(texto));
   if (!t) return { acao: "nada" };
-  const semGatilho = t.replace(new RegExp("^(?:ok |o |a )?" + GATILHO.source + "\\s*"), "").trim() || t;
+  const semGatilho = limparFrase(t.replace(new RegExp("^(?:ok |o |a )?" + GATILHO.source + "\\s*"), "").trim() || t);
+  if (LIMPAR.test(semGatilho)) return { acao: "limpar-pesquisa" };
+  // a página antes dos passos: «vai lá para baixo» não é o passo «lá para baixo»; mas «vai para o fim» continua a ser o passo Fim
+  const sc = scrollPedido(semGatilho);
+  if (sc) return { acao: "scroll", para: sc };
   const { fase, resto: s } = extrairFase(semGatilho);
 
   // 1) um passo sozinho: «fim», «próximo passo», «anterior»
@@ -221,6 +257,18 @@ export function indicePasso(passos: readonly { id: string; titulo: string }[], a
   if (a === "proximo") return Math.min(passos.length, ativo + 1);
   if (a === "anterior") return Math.max(0, ativo - 1);
   if (a === "inicio") return 0;
-  const i = passos.findIndex((p) => { const t = normal(p.titulo), id = normal(p.id); return t === a || id === a || t.includes(a) || (t.length > 3 && a.includes(t)); });
-  return i === -1 ? null : i;
+  if (!a) return null;
+  const i = passos.findIndex((p) => { const t = normal(p.titulo), id = normal(p.id); return t === a || id === a || (a.length >= 4 && t.includes(a)) || (t.length > 3 && temExpressao(a, t)); });
+  if (i !== -1) return i;
+  // 17/11: um nome de passo mal ouvido («exterior do edificio» → «exterior de edifício») ainda serve, palavra a palavra (≥ 0,8)
+  const toks = a.split(" ").filter((x) => x.length > 2);
+  if (!toks.length) return null;
+  let melhor = -1, pontos = 0;
+  passos.forEach((p, j) => {
+    const ns = normal(p.titulo).split(" ").filter((x) => x.length > 2);
+    if (!ns.length) return;
+    const media = ns.reduce((s, y) => s + Math.max(...toks.map((x) => parecido(x, y))), 0) / ns.length;
+    if (media >= 0.8 && media > pontos) { melhor = j; pontos = media; }
+  });
+  return melhor === -1 ? null : melhor;
 }

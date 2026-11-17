@@ -19,8 +19,10 @@ const POR_COLUNA = 10;
 const FILTROS: [string, string][] = [["meus", "Os meus"], ["todos", "Todos"], ["atraso", "Com atraso"], ["wc", "Casa de banho"], ["coz", "Cozinha"]];
 
 export function NegociosSimples({ S, A, go, run, q, setQ, podeCriarNegocio }: Ctx) {
-  const f = S.filtro, ql = q.toLowerCase();
-  let ds = aberto(S).filter((d) => !ql || (d.nome + " " + d.tel + " " + d.servico + " " + d.local).toLowerCase().includes(ql));
+  // 17/11: sem acentos dos dois lados («ruben carvalho» encontra «Rúben Carvalho», como se diz à Olyvia ou se escreve à pressa)
+  const semAcento = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+  const f = S.filtro, ql = semAcento(q.trim());
+  let ds = aberto(S).filter((d) => !ql || semAcento(d.nome + " " + d.tel + " " + d.servico + " " + d.local).includes(ql));
   if (f === "meus") ds = ds.filter((d) => d.dono === "comercial");
   if (f === "wc" || f === "coz") ds = ds.filter((d) => d.linha === f);
   if (f === "atraso") ds = ds.filter((d) => d.atraso);
