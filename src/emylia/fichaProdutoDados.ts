@@ -99,6 +99,33 @@ export async function definirPvp(productId: string, pvp: number | null): Promise
   }
 }
 
+/** 19/01 (20270119700000): os preços grossista e distribuidor do produto, os DOIS como estado final (null apaga esse tipo). A base recusa com
+ *  CT001 (sem permissão), CT002 (negativo, mais de 2 casas ou >= 100 000 000) e CT003 (produto inexistente); a mensagem mostra-se tal como vem. */
+export async function definirGrossistaDistribuidor(productId: string, grossista: number | null, distribuidor: number | null): Promise<Res<{ ok: boolean; grossista: number | null; distribuidor: number | null }>> {
+  const FRASE = "Não foi possível gravar o grossista e o distribuidor.";
+  try {
+    const { data, error } = await rpcLivre("cat_definir_grossista_distribuidor", { p_product_id: productId, p_grossista: grossista, p_distribuidor: distribuidor });
+    if (error) {
+      if (/^CT00\d$/.test(error.code ?? "") && error.message) return { ok: false, erro: error.message }; // a recusa da base, tal como vem
+      return { ok: false, erro: erroAmigavel(error, FRASE) === AINDA_NAO ? AINDA_NAO : FRASE };
+    }
+    if (!data) return { ok: false, erro: FRASE };
+    return { ok: true, v: data as { ok: boolean; grossista: number | null; distribuidor: number | null } };
+  } catch {
+    // exceção (rede, cliente): o texto técnico não ajuda quem usa o ecrã
+    return { ok: false, erro: FRASE };
+  }
+}
+
+/** 19/01: um preço do grossista/distribuidor escrito à mão: vazio → null (sem preço); número ≥ 0 com no máximo 2 casas e < 100 000 000 → o número;
+ *  o resto → NaN (a base recusa o mesmo com CT002). */
+export function lerPrecoTabela(t: string): number | null {
+  const v = lerNumero(t);
+  if (v == null) return null;
+  const s = t.trim().replace(/\s/g, "").replace(",", ".");
+  return Number.isNaN(v) || !/^\d+(\.\d{1,2})?$/.test(s) || v >= 100_000_000 ? NaN : v;
+}
+
 /** 13/11: os atributos do produto (Cor, Medida…). Grava DIRETO por cat_guardar_produto_atributos, que substitui o conjunto todo do
  *  produto; não passa pelo autosave do Catálogo (que regravaria o custo). Função por criar na base: «Ainda não disponível…». */
 export async function gravarAtributos(org: string, productId: string, attrs: readonly AtributoProduto[]): Promise<Res<{ ok: boolean; n: number }>> {

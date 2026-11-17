@@ -68,6 +68,14 @@ describe("paginaDe e contagensDe", () => {
     expect(paginaDe(null)).toBeNull();
     expect(paginaDe({ produtos: "x" })).toBeNull();
   });
+  it("paginaDe mapeia grossista e distribuidor: número tal como vem, null quando é null ou falta (base antiga)", () => {
+    const r = paginaDe({ produtos: [
+      linha(P1, { grossista: 12.5, distribuidor: 0 }),
+      linha("22222222-2222-4222-a222-222222222222", { grossista: null, distribuidor: null }),
+      linha("33333333-3333-4333-a333-333333333333"),
+    ] });
+    expect(r?.produtos.map((x) => [x.grossista, x.distribuidor])).toEqual([[12.5, 0], [null, null], [null, null]]);
+  });
   it("contagensDe põe listas vazias e zeros onde falta", () => {
     expect(contagensDe({ total: 9, por_categoria: [{ id: "c", n: 4 }, { n: 1 }], sem_marca: 2 })).toEqual({
       total: 9, porCategoria: { c: 4 }, porSubcategoria: {}, porModelo: {}, semReferencia: 0, semCategoria: 0, semMarca: 2,

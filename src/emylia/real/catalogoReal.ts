@@ -292,13 +292,17 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
   const usados = new Set(L.usosCons.map((u) => u.product_id));
   for (const p of L.produtos) {
     const c = custoDe(p.id), pvp = ultimo(p.id, "retail");
+    // 19/01: grossista e distribuidor, como o PVP (o último preço de cada tipo); aqui o 0 é um preço válido, só o null/em falta é «sem preço»
+    const gros = ultimo(p.id, "wholesale"), dist = ultimo(p.id, "distributor");
     // 29/10: PVP limpo (cat_definir_pvp com null) ou a 0 não conta: o preço volta a ser custo + alvo
     if (p.tipo_catalogo === "produto") {
       const prod: Produto = {
         id: p.id, n: p.name, custo: c.custo, un: unDe(p), marca: p.marca || p.marca_livre || "", fornecedor: c.fornecedor || p.fornecedor_livre || "",
         data: c.data, no: noDoProduto(p),
         ...(p.servico_id && svcChave.has(p.servico_id) ? { servico: svcChave.get(p.servico_id)!, fatorServico: n(p.fator_servico) || 1 } : {}),
-        ...(p.sku ? { sku: p.sku } : {}), ...(pvp && n(pvp.price) > 0 ? { pvp: n(pvp.price) } : {}), ...(p.short_description ? { desc: p.short_description } : {}),
+        ...(p.sku ? { sku: p.sku } : {}), ...(pvp && n(pvp.price) > 0 ? { pvp: n(pvp.price) } : {}),
+        ...(L.precosProduto.length ? { precosLidos: true as const } : {}),
+        ...(gros && gros.price != null ? { grossista: n(gros.price) } : {}), ...(dist && dist.price != null ? { distribuidor: n(dist.price) } : {}), ...(p.short_description ? { desc: p.short_description } : {}),
         ...(p.entulho_m3 != null ? { entulho: { m3: n(p.entulho_m3), ...(p.entulho_kg != null ? { kg: n(p.entulho_kg) } : {}) } } : {}),
         ...(Array.isArray(p.image_urls) && p.image_urls.length ? { fotos: p.image_urls.filter((u) => typeof u === "string" && u) } : {}),
         ...(attrsDe.has(p.id) ? { attrs: attrsDe.get(p.id) } : {}),

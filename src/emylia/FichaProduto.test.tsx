@@ -140,7 +140,7 @@ describe("FichaProduto · o PVP (o custo vem do fornecedor)", () => {
     expect(screen.queryByText(/Abaixo da margem mínima/)).toBeNull();
     fireEvent.change(campo(), { target: { value: "50" } });
     expect(screen.getByText(/Abaixo do custo/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Guardar PVP" }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar preços" }));
     await waitFor(() => expect(r.recarregar).toHaveBeenCalled());
     expect(base.chamadas.find((c) => c.f === "cat_definir_pvp")?.a).toEqual({ p_product_id: PID, p_pvp: 50 });
     expect(anunciar).toHaveBeenCalledWith(expect.stringContaining("50,00 €"));
@@ -153,7 +153,7 @@ describe("FichaProduto · o PVP (o custo vem do fornecedor)", () => {
     expect(screen.getByText(/Sem PVP: custo \+ 35% de margem/)).toBeInTheDocument();
     fireEvent.change(campo(), { target: { value: "0" } });
     expect(screen.getByRole("alert")).toHaveTextContent("maior que 0");
-    expect(screen.getByRole("button", { name: "Guardar PVP" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Guardar preços" })).toBeDisabled();
   });
   it("Limpar PVP chama cat_definir_pvp com null", async () => {
     base.respostas.cat_definir_pvp = { data: { ok: true, pvp: null }, error: null };
@@ -169,15 +169,186 @@ describe("FichaProduto · o PVP (o custo vem do fornecedor)", () => {
     cleanup();
     ficha(PROD, real(true, false));
     expect(screen.queryByRole("textbox", { name: "PVP" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Guardar PVP" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Guardar preços" })).toBeNull();
     expect(screen.getByTestId("margem-produto")).toHaveTextContent("40,0%");
   });
   it("sem a função na base diz «Ainda não disponível nesta base»", async () => {
     base.respostas.cat_definir_pvp = { data: null, error: { code: "PGRST202", message: "Could not find the function public.cat_definir_pvp" } };
     ficha();
     fireEvent.change(campo(), { target: { value: "90" } });
-    fireEvent.click(screen.getByRole("button", { name: "Guardar PVP" }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar preços" }));
     expect(await screen.findByText("Ainda não disponível nesta base")).toBeInTheDocument();
+  });
+});
+
+describe("FichaProduto · grossista e distribuidor (ao lado do custo e do PVP)", () => {
+  beforeEach(() => { base.respostas.cat_produto_fornecedores = { data: [], error: null }; });
+  const gros = () => screen.getByRole("textbox", { name: "Grossista" });
+  const dist = () => screen.getByRole("textbox", { name: "Distribuidor" });
+  const guardar = () => screen.getByRole("button", { name: "Guardar preços" });
+  const chamadasGD = () => base.chamadas.filter((c) => c.f === "cat_definir_grossista_distribuidor");
+  // precosLidos: a leitura do Catálogo trouxe os preços (sem services.view vem vazia e os campos não se mostram)
+  const COM: Produto = { ...PROD, grossista: 45.5, distribuidor: 50, precosLidos: true };
+
+  it("mostra os dois preços atuais (ou «—») e os campos para os editar", () => {
+    ficha(COM);
+    expect(gros()).toHaveValue("45,5");
+    expect(dist()).toHaveValue("50");
+    expect(screen.getByTestId("grossista-produto")).toHaveTextContent("45,50 €");
+    cleanup();
+    ficha({ ...PROD, precosLidos: true });
+    expect(gros()).toHaveValue("");
+    expect(screen.getByTestId("grossista-produto")).toHaveTextContent("—");
+    expect(screen.getByTestId("distribuidor-produto")).toHaveTextContent("—");
+  });
+  it("sem ver o custo (products.view_cost) não aparecem; sem permissão de editar só se leem", () => {
+    ficha(COM, { ...real(), podeVerCusto: false });
+    expect(screen.queryByTestId("grossista-produto")).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Grossista" })).toBeNull();
+    cleanup();
+    ficha(COM, real(true, false));
+    expect(screen.getByTestId("grossista-produto")).toHaveTextContent("45,50 €");
+    expect(screen.queryByRole("textbox", { name: "Grossista" })).toBeNull();
+  });
+  it("Guardar chama a função com os dois valores finais e só com o que mudou; relê e anuncia", async () => {
+    base.respostas.cat_definir_grossista_distribuidor = { data: { ok: true, grossista: 40, distribuidor: 50 }, error: null };
+    const r = real();
+    const anunciar = ficha(COM, r);
+    expect(guardar()).toBeDisabled();
+    fireEvent.change(gros(), { target: { value: "40" } });
+    fireEvent.click(guardar());
+    await waitFor(() => expect(r.recarregar).toHaveBeenCalled());
+    expect(chamadasGD()).toHaveLength(1);
+    expect(chamadasGD()[0].a).toEqual({ p_product_id: PID, p_grossista: 40, p_distribuidor: 50 });
+    expect(base.chamadas.some((c) => c.f === "cat_definir_pvp")).toBe(false);
+    expect(anunciar).toHaveBeenCalledWith(expect.stringContaining("Torneira Teste"));
+  });
+  it("campo vazio manda null (apaga esse preço); aceita vírgula e 0", async () => {
+    base.respostas.cat_definir_grossista_distribuidor = { data: { ok: true, grossista: 0, distribuidor: null }, error: null };
+    const r = real();
+    ficha(COM, r);
+    fireEvent.change(dist(), { target: { value: "" } });
+    fireEvent.change(gros(), { target: { value: "0" } });
+    fireEvent.click(guardar());
+    await waitFor(() => expect(r.recarregar).toHaveBeenCalled());
+    expect(chamadasGD()[0].a).toEqual({ p_product_id: PID, p_grossista: 0, p_distribuidor: null });
+  });
+  it("com o PVP também alterado grava os dois no mesmo Guardar (PVP e depois grossista/distribuidor)", async () => {
+    base.respostas.cat_definir_pvp = { data: { ok: true, pvp: 90 }, error: null };
+    base.respostas.cat_definir_grossista_distribuidor = { data: { ok: true, grossista: 45.5, distribuidor: 60.25 }, error: null };
+    const r = real();
+    ficha(COM, r);
+    fireEvent.change(screen.getByRole("textbox", { name: "PVP" }), { target: { value: "90" } });
+    fireEvent.change(dist(), { target: { value: "60,25" } });
+    fireEvent.click(guardar());
+    await waitFor(() => expect(r.recarregar).toHaveBeenCalledTimes(1));
+    expect(base.chamadas.filter((c) => c.f.startsWith("cat_definir_p") || c.f === "cat_definir_grossista_distribuidor").map((c) => c.f)).toEqual(["cat_definir_pvp", "cat_definir_grossista_distribuidor"]);
+    expect(chamadasGD()[0].a).toEqual({ p_product_id: PID, p_grossista: 45.5, p_distribuidor: 60.25 });
+  });
+  it("só o PVP mudou: não chama a função do grossista/distribuidor", async () => {
+    base.respostas.cat_definir_pvp = { data: { ok: true, pvp: 90 }, error: null };
+    const r = real();
+    ficha(COM, r);
+    fireEvent.change(screen.getByRole("textbox", { name: "PVP" }), { target: { value: "90" } });
+    fireEvent.click(guardar());
+    await waitFor(() => expect(r.recarregar).toHaveBeenCalled());
+    expect(chamadasGD()).toHaveLength(0);
+  });
+  it.each([["-1"], ["abc"], ["1,234"], ["100000000"]])("valor inválido «%s»: avisa e não deixa guardar", (v) => {
+    ficha(COM);
+    fireEvent.change(gros(), { target: { value: v } });
+    expect(gros()).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByRole("alert")).toHaveTextContent("Grossista");
+    expect(guardar()).toBeDisabled();
+    expect(chamadasGD()).toHaveLength(0);
+  });
+  it("99999999,99 ainda é válido", () => {
+    ficha(COM);
+    fireEvent.change(gros(), { target: { value: "99999999,99" } });
+    expect(gros()).toHaveAttribute("aria-invalid", "false");
+    expect(guardar()).toBeEnabled();
+  });
+  // --- revisão independente ---
+  it("H1: PVP grava, grossista falha e a ficha é relida com o PVP novo: o erro fica visível e o que se escreveu mantém-se", async () => {
+    base.respostas.cat_definir_pvp = { data: { ok: true, pvp: 90 }, error: null };
+    base.respostas.cat_definir_grossista_distribuidor = { data: null, error: { code: "CT002", message: "Grossista inválido: máximo 2 casas" } };
+    let rerender: (ui: Parameters<typeof render>[0]) => void = () => {};
+    const props = (p: Produto, r: FichaProdutoReal) => <FichaProduto p={p} min={28} alvo={35} voltar={vi.fn()} anunciar={vi.fn()} nomeServico={(s) => s} onAbrirServico={vi.fn()} real={r} />;
+    const r: FichaProdutoReal = { ...real(), recarregar: vi.fn(async () => { rerender(props({ ...COM, pvp: 90 }, r)); }) };
+    const u = render(props(COM, r));
+    rerender = u.rerender;
+    fireEvent.change(screen.getByRole("textbox", { name: "PVP" }), { target: { value: "90" } });
+    fireEvent.change(gros(), { target: { value: "40" } });
+    fireEvent.click(guardar());
+    expect(await screen.findByText("Grossista inválido: máximo 2 casas")).toBeInTheDocument();
+    expect(r.recarregar).toHaveBeenCalled();
+    expect(screen.getByRole("textbox", { name: "PVP" })).toHaveValue("90");
+    expect(gros()).toHaveValue("40");
+    expect(dist()).toHaveValue("50");
+  });
+  it("H2: sem preços lidos (sem services.view) não se mostram nem se editam; o Guardar nunca chama a RPC do grossista", async () => {
+    base.respostas.cat_definir_pvp = { data: { ok: true, pvp: 90 }, error: null };
+    const r = real();
+    ficha({ ...PROD, grossista: 45.5 }, r);
+    expect(screen.queryByRole("textbox", { name: "Grossista" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Distribuidor" })).toBeNull();
+    expect(screen.queryByTestId("grossista-produto")).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: "PVP" }), { target: { value: "90" } });
+    fireEvent.click(guardar());
+    await waitFor(() => expect(r.recarregar).toHaveBeenCalled());
+    expect(chamadasGD()).toHaveLength(0);
+  });
+  it("M2: com o PVP inválido o Guardar fica desativado, mesmo que o grossista tenha mudado", () => {
+    ficha(COM);
+    fireEvent.change(gros(), { target: { value: "40" } });
+    expect(guardar()).toBeEnabled();
+    fireEvent.change(screen.getByRole("textbox", { name: "PVP" }), { target: { value: "0" } });
+    expect(guardar()).toBeDisabled();
+  });
+  it("L1: um erro que não é CT00x (rede, exceção) diz uma frase amigável, não o texto técnico", async () => {
+    base.respostas.cat_definir_grossista_distribuidor = { data: null, error: { code: "XX000", message: "internal error: relation x does not exist" } };
+    ficha(COM);
+    fireEvent.change(gros(), { target: { value: "40" } });
+    fireEvent.click(guardar());
+    expect(await screen.findByText("Não foi possível gravar o grossista e o distribuidor.")).toBeInTheDocument();
+    expect(screen.queryByText(/relation x/)).toBeNull();
+  });
+  it("L1: a exceção da chamada também passa por uma frase amigável", async () => {
+    base.respostas = { ...base.respostas, get cat_definir_grossista_distribuidor(): never { throw new Error("TypeError: Failed to fetch"); } } as never;
+    ficha(COM);
+    fireEvent.change(gros(), { target: { value: "40" } });
+    fireEvent.click(guardar());
+    expect(await screen.findByText("Não foi possível gravar o grossista e o distribuidor.")).toBeInTheDocument();
+    expect(screen.queryByText(/Failed to fetch/)).toBeNull();
+  });
+  it("L1: o anúncio só fala do que mudou", async () => {
+    base.respostas.cat_definir_grossista_distribuidor = { data: { ok: true, grossista: 40, distribuidor: 50 }, error: null };
+    const anunciar = ficha(COM, real());
+    fireEvent.change(gros(), { target: { value: "40" } });
+    fireEvent.click(guardar());
+    await waitFor(() => expect(anunciar).toHaveBeenCalled());
+    const msg = String(anunciar.mock.calls.at(-1)?.[0]);
+    expect(msg).toContain("Grossista");
+    expect(msg).not.toMatch(/distribuidor/i);
+    expect(msg).not.toContain("PVP");
+  });
+  it("L2: cada campo inválido liga-se ao seu erro por aria-describedby, e o erro diz o campo", () => {
+    ficha(COM);
+    expect(gros()).not.toHaveAttribute("aria-describedby");
+    fireEvent.change(dist(), { target: { value: "x" } });
+    const id = dist().getAttribute("aria-describedby");
+    expect(id).toBeTruthy();
+    expect(document.getElementById(id!)).toHaveTextContent(/^Distribuidor:/);
+    expect(gros()).not.toHaveAttribute("aria-describedby");
+  });
+  it("a recusa da base (CT002) aparece tal como vem e não relê", async () => {
+    base.respostas.cat_definir_grossista_distribuidor = { data: null, error: { code: "CT002", message: "Preço inválido: tem de ser >= 0 com 2 casas" } };
+    const r = real();
+    ficha(COM, r);
+    fireEvent.change(gros(), { target: { value: "40" } });
+    fireEvent.click(guardar());
+    expect(await screen.findByText("Preço inválido: tem de ser >= 0 com 2 casas")).toBeInTheDocument();
+    expect(r.recarregar).not.toHaveBeenCalled();
   });
 });
 

@@ -14,7 +14,9 @@ export interface LinhaPaginaProduto {
   id: string; nome: string; sku: string | null; sku_gerado: boolean | null; marca: string | null;
   categoria_id: string | null; categoria: string | null; subcategoria_id: string | null; subcategoria: string | null;
   modelo_id: string | null; modelo: string | null; modelo_numero: number | null;
-  unidade: string | null; custo: number | null; pvp: number | null; fornecedor: string | null; ativo: boolean | null; imagem: string | null; atributos_resumo: string | null;
+  unidade: string | null; custo: number | null; pvp: number | null;
+  /** 19/01 (20270119700000): os preços grossista e distribuidor; null = sem preço (ou quem lê não vê custo e PVP). */
+  grossista: number | null; distribuidor: number | null; fornecedor: string | null; ativo: boolean | null; imagem: string | null; atributos_resumo: string | null;
 }
 export interface PaginaProdutos { total: number; pagina: number; limite: number; paginas: number; produtos: LinhaPaginaProduto[] }
 /** As contagens por id (de product_categories e de product_models) e as do resumo. */
@@ -29,6 +31,8 @@ export const SEM_FILTRO_SERVIDOR: FiltroServidor = { q: "", categoria: "", subca
 export interface ModeloDoProduto { modeloId: string; modelo: string; modeloNumero: number }
 
 const num = (v: unknown, omissao = 0) => (typeof v === "number" && Number.isFinite(v) ? v : Number.isFinite(Number(v)) && v != null && v !== "" ? Number(v) : omissao);
+/** Um preço da base: número finito tal como vem; qualquer outra coisa (null, falta numa base antiga) = null. */
+const precoOuNulo = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const nulo = (s: string) => { const t = s.trim(); return t ? t : null; };
 const mensagem = (e: unknown, omissao: string) => (e instanceof Error && e.message ? e.message : omissao);
 
@@ -44,7 +48,9 @@ export function argsPagina(org: string, f: FiltroServidor, pagina: number, limit
 export function paginaDe(r: unknown): PaginaProdutos | null {
   if (!r || typeof r !== "object" || !Array.isArray((r as Record<string, unknown>).produtos)) return null;
   const o = r as Record<string, unknown>;
-  const produtos = (o.produtos as unknown[]).filter((x): x is LinhaPaginaProduto => !!x && typeof x === "object" && typeof (x as { id?: unknown }).id === "string");
+  const produtos = (o.produtos as unknown[])
+    .filter((x): x is LinhaPaginaProduto => !!x && typeof x === "object" && typeof (x as { id?: unknown }).id === "string")
+    .map((x) => ({ ...x, grossista: precoOuNulo(x.grossista), distribuidor: precoOuNulo(x.distribuidor) }));
   return { total: num(o.total, produtos.length), pagina: num(o.pagina, 1), limite: num(o.limite, POR_PAGINA_SERVIDOR), paginas: num(o.paginas, 1), produtos };
 }
 

@@ -186,7 +186,7 @@ export function ProdutosPagina({ K, real, nomeServico, onAbrir, onAbrirProduto, 
         {pag.erro && <ErroLeitura texto="Não foi possível ler os produtos" erro={pag.erro} tentar={pag.tentar} />}
         {erroContagens.erro && <ErroLeitura texto="Não foi possível ler as contagens" erro={erroContagens.erro} tentar={erroContagens.tentar} />}
         <ul className={cn(LISTA, "mt-2", pag.aLer && dados && "opacity-60")} aria-busy={pag.aLer}>
-          {linhas.map((l) => <LinhaProduto key={l.id} l={l} K={porId.get(l.id)} margem={margem} novo={novo} tocar={tocar} sl={sl} onAbrir={onAbrir} nomeServico={nomeServico} />)}
+          {linhas.map((l) => <LinhaProduto key={l.id} l={l} verCusto={real.podeVerCusto !== false} K={porId.get(l.id)} margem={margem} novo={novo} tocar={tocar} sl={sl} onAbrir={onAbrir} nomeServico={nomeServico} />)}
           {dados && !linhas.length && <Vazio>Nenhum produto com esse nome ou filtro.</Vazio>}
         </ul>
         {dados && dados.paginas > 0 && <NavegacaoPaginas pagina={dados.pagina} paginas={Math.max(dados.paginas, 1)} aLer={pag.aLer} irPara={irPara} />}
@@ -210,8 +210,8 @@ function useContagens(org: string, q: string, marca: string, K: Catalogo, ativa:
 }
 
 /* ------------------------------------------------------------------ a linha e a navegação */
-function LinhaProduto({ l, K, margem, novo, tocar, sl, onAbrir, nomeServico }: {
-  l: LinhaPaginaProduto; K: Produto | undefined; margem: number; novo?: string; tocar: (id: string) => void; sl: ReturnType<typeof useSelecao>;
+function LinhaProduto({ l, K, margem, novo, tocar, sl, onAbrir, nomeServico, verCusto }: {
+  l: LinhaPaginaProduto; verCusto: boolean; K: Produto | undefined; margem: number; novo?: string; tocar: (id: string) => void; sl: ReturnType<typeof useSelecao>;
   onAbrir: (sid: SvcId) => void; nomeServico: (sid: SvcId) => string;
 }) {
   const p = produtoDaLinha(l);
@@ -231,10 +231,26 @@ function LinhaProduto({ l, K, margem, novo, tocar, sl, onAbrir, nomeServico }: {
           </button>
         )}
       </span>
+      {/* 19/01: as colunas Grossista e Distribuidor (— quando não há preço; quem não vê custo e PVP recebe sempre null) */}
+      {verCusto && (
+        <span className="flex gap-4 pl-[4.75rem] sm:pl-0">
+          <ColunaPreco rotulo="Grossista" v={l.grossista} />
+          <ColunaPreco rotulo="Distribuidor" v={l.distribuidor} />
+        </span>
+      )}
       <span className={cn(VALORES, "pl-[4.75rem] sm:pl-0")}>
         <span className="block text-[15px] font-medium tabular-nums">{semPreco ? "—" : <>{eur(precoProduto(p, margem))} €/{p.un}</>}</span>
       </span>
     </li>
+  );
+}
+
+function ColunaPreco({ rotulo, v }: { rotulo: string; v: number | null }) {
+  return (
+    <span className="block min-w-[5.5rem] text-right">
+      <span className={cn(NOTA, "block")}>{rotulo}</span>
+      <span className="block text-[15px] font-medium tabular-nums">{v == null ? "—" : `${eur(v)} €`}</span>
+    </span>
   );
 }
 
