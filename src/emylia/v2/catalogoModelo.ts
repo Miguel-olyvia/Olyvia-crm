@@ -34,7 +34,9 @@ export interface CategoriaProdutoK { id: string; n: string; pai: string | null; 
 /** 16/11 (20270118300000): um modelo de produto. `sub`: o nó da árvore da subcategoria onde está (o mesmo id que Produto.no e CategoriaProdutoK). */
 export interface ModeloK { id: string; n: string; numero: number; sub: string; ativo: boolean }
 /** 13/11: a medida de um produto (atributo do tipo «medida»): 2D (largura × comprimento) ou 3D (com espessura), em cm ou mm. */
-export interface MedidaAtributo { tipo: "2D" | "3D"; largura: number; comprimento: number; espessura: number | null; unidade: "cm" | "mm" }
+export interface MedidaAtributo { tipo: "2D" | "3D"; largura: DimensaoMedida; comprimento: DimensaoMedida; espessura: DimensaoMedida | null; unidade: "cm" | "mm" }
+/** Uma dimensão da medida: um número ou um intervalo {de, ate} (de < ate; cada valor > 0, até 100000, no máximo 3 casas decimais). */
+export type DimensaoMedida = number | { de: number; ate: number };
 /** 13/11: o valor de um atributo num produto: uma opção da lista (opcaoId, com o texto em `valor`) ou uma medida. */
 /** `inativa`: a opção escolhida foi desativada depois (a lista já não a traz); o valor mantém-se até alguém o trocar. */
 export interface AtributoProduto { atributoId: string; opcaoId?: string; valor?: string; medida?: MedidaAtributo; inativa?: true }

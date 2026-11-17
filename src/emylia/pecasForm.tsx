@@ -28,10 +28,10 @@ export function Campo({ rot, dica, children, className }: { rot: string; dica?: 
     </div>
   );
 }
-export function Num({ id, v, set, suf, rot, ph = "0" }: { id?: string; v: string; set: (s: string) => void; suf?: string; rot?: string; ph?: string }) {
+export function Num({ id, v, set, suf, rot, ph = "0", invalido, descr }: { id?: string; v: string; set: (s: string) => void; suf?: string; rot?: string; ph?: string; invalido?: boolean; descr?: string }) {
   return (
     <span className="relative block">
-      <input id={id} aria-label={rot} type="text" inputMode="decimal" value={v} placeholder={ph} onChange={(e) => set(e.target.value.replace(/[^\d,.-]/g, ""))}
+      <input id={id} aria-label={rot} {...(invalido === undefined ? {} : { "aria-invalid": invalido })} aria-describedby={descr} type="text" inputMode="decimal" value={v} placeholder={ph} onChange={(e) => set(e.target.value.replace(/[^\d,.-]/g, ""))}
         className={cn(CAMPO, "text-right tabular-nums", suf ? "pr-14" : "")} />
       {suf && <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{suf}</span>}
     </span>
