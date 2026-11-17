@@ -579,7 +579,9 @@ function EstadoObra({ d, titulo, irPara }: { d: Negocio; titulo: string | null; 
       ...(corr.length ? [{ I: AlertTriangle, t: <><b className="font-semibold">{corr.length}</b> {corr.length === 1 ? "correção" : "correções"} em curso · {corr.map((t) => nomeTec(t.tec).split(" ")[0]).join(", ")}</>, tom: "mau" as const, ir: "hoje" as Seccao }] : []),
     ];
   } else if (p.estado === "concluída") {
-    cab = <p className="text-xl font-semibold tracking-tight">Obra concluída{p.tasks.length ? ` a ${rotuloDia(p, fim - 1)}` : ""}</p>;
+    // 17/11 (A-Z na Mudelar: «concluída a seg, 7 dez» numa obra acabada a 17/11): o dia em que se encerrou (o histórico); sem ele, o do plano
+    const fimReal = d.hist.find((h) => /^Obra concluída/.test(h.t))?.q?.split(" ")[0];
+    cab = <p className="text-xl font-semibold tracking-tight">Obra concluída{fimReal ? ` a ${fimReal}` : p.tasks.length ? ` a ${rotuloDia(p, fim - 1)}` : ""}</p>;
     L = [
       { I: CheckCircle2, t: <><b className="font-semibold">{p.tasks.length}</b> {p.tasks.length === 1 ? "tarefa feita" : "tarefas feitas"}</>, tom: "ok" },
       { I: ClipboardCheck, t: d.obra.auto?.estado === "assinado" ? "Auto de receção assinado pelo cliente" : d.obra.auto ? "Auto de receção por assinar" : "Sem auto de receção", tom: d.obra.auto?.estado === "assinado" ? "ok" : "aviso" },

@@ -123,3 +123,18 @@ describe("17/11: as tarefas da obra em curso, como os técnicos", () => {
     expect(d.obra.plano!.tasks.some((t) => t.exec?.estado === "validada")).toBe(false);
   });
 });
+
+describe("17/11: o auto de receção como o cliente", () => {
+  it("com o auto por assinar, o avançar assina-o como o cliente (simularAuto)", () => {
+    const { S, A, ctx } = montar();
+    const d = S.deals.find((x) => x.id === 1027)!;
+    d.fase = 5; S.role = "operacoes";
+    d.obra.auto = { n: "AR 2026/1027", q: "17/11", estado: "por assinar" } as never;
+    d.obra.plano!.estado = "concluída";
+    const P = passoDeTeste(d, S, A);
+    if (P.tipo !== "acao") throw new Error("esperava uma ação: " + P.tipo + " " + P.t);
+    expect(P.act).toBe("simularAuto");
+    ctx.run(() => A.simularAuto(d.id));
+    expect(d.obra.auto!.estado).toBe("assinado");
+  });
+});

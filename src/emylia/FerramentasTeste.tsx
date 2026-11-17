@@ -16,6 +16,7 @@
 //  3. «Avançar para o passo seguinte»: o próximo passo do negócio (motor.proximo), feito pela MESMA ação do botão do passo (fazer), que
 //     grava pelo caminho de sempre. Os passos do cliente usam 1 e 2. Os que precisam de alguém a escrever (a fatura do ERP, as medidas,
 //     o plano…) não se forçam: o painel diz qual é e leva lá. Nunca escreve a fase à força.
+//     17/11: o auto de receção por assinar também (motor.simularAuto).
 //  4. 17/11 (Rúben, teste A-Z na Mudelar: «sim, cria»): com a obra em curso, «Fazer a tarefa seguinte como o técnico» e «Fazer todas as tarefas
 //     como os técnicos». O ecrã do técnico só mostra as tarefas do dia; aqui faz-se a tarefa pelas MESMAS ações do ecrã dele (começar, os
 //     passos, as horas previstas, uma fotografia de exemplo, «Correu como previsto.», enviar e terminar). A validação continua do responsável
@@ -52,6 +53,8 @@ export type PassoTeste =
 export function passoDeTeste(d: Negocio, S: Estado, A?: Ctx["A"]): PassoTeste {
   const p = proximo(d, S);
   if (p.sim === "aceitar" || p.sim === "assinar") return { tipo: "cliente", acao: p.sim, t: p.t, sub: p.sub };
+  // 17/11 (A-Z na Mudelar): o auto de receção por assinar no portal: o cliente assina-o (motor.simularAuto, a assinatura simulada do protótipo)
+  if (p.sim === "auto") return { tipo: "acao", act: "simularAuto", t: p.t, sub: p.sub, btn: "Assinar o auto de receção como o cliente" };
   if (p.act && SO_NO_ECRA.has(p.act)) {
     const navega = !!A && typeof (A as unknown as Record<string, unknown>)[p.act] === "function" && p.act !== "registarFaturaErp";
     return { tipo: "ecra", act: p.act, arg: p.arg, t: p.t, sub: p.sub, btn: p.btn, navega };
