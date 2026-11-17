@@ -3,7 +3,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
-import { EV_ABRIR, EV_PASSO } from "./comandoOlyvia";
+import { EV_ABRIR, EV_PASSO, EV_PESQUISA } from "./comandoOlyvia";
 
 const g = vi.hoisted(() => ({ estado: "parado" as string, falas: [] as { inicio: number; fim: number; texto: string; falante: string; confianca_falante: number; revista?: boolean }[], invoke: null as null | ((nome: string, o: { body: { frase: string } }) => Promise<unknown>) }));
 vi.mock("./gravador", () => ({ useGravacao: () => ({ estado: g.estado, falas: g.falas }) }));
@@ -74,6 +74,50 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     falar(rec, res("olyvia abre o ruben branco", true));
     act(() => { vi.runOnlyPendingTimers(); });
     expect(pedidos).toEqual([{ nome: "ruben branco", fase: null }]);
+  });
+
+  it("17/11 (Rúben: disse «agora abre o Carlos Mendes», apanhou «Carlos», parou, depois «Mendes», e não fez nada): nada se perde", () => {
+    vi.useFakeTimers();
+    render(arvore("/negocios"));
+    const pedidos = ouvir(EV_ABRIR);
+    const rec = ultimo();
+    falar(rec, res("olyvia"));
+    // uma pausa curta depois de «Carlos» já não chega para agir com meio nome
+    falar(rec, res("olyvia agora abre o carlos"));
+    act(() => { vi.advanceTimersByTime(PAUSA_PARA_AGIR + 100); });
+    expect(pedidos).toEqual([]);
+    falar(rec, res("olyvia agora abre o carlos mendes", true));
+    act(() => { vi.runOnlyPendingTimers(); });
+    expect(pedidos).toEqual([{ nome: "carlos mendes", fase: null }]);
+  });
+
+  it("e se agiu a meio (pausa grande), o resto do nome completa a ordem, no mesmo resultado ou noutro", () => {
+    vi.useFakeTimers();
+    render(arvore("/negocios"));
+    const pedidos = ouvir(EV_ABRIR);
+    const rec = ultimo();
+    falar(rec, res("olyvia", true));
+    falar(rec, res("olyvia", true), res("agora abre o carlos"));
+    act(() => { vi.advanceTimersByTime(PAUSA_FRASE + 50); });
+    expect(pedidos).toEqual([{ nome: "carlos", fase: null }]);
+    // o mesmo resultado cresce («… mendes») e o browser fecha-o: só «mendes» é novo, e completa a ordem de antes
+    falar(rec, res("olyvia", true), res("agora abre o carlos mendes", true));
+    act(() => { vi.runOnlyPendingTimers(); });
+    expect(pedidos).toEqual([{ nome: "carlos", fase: null }, { nome: "carlos mendes", fase: null }]);
+  });
+
+  it("noutro resultado: «procura o Nuno» … «Pereira»", () => {
+    vi.useFakeTimers();
+    render(arvore("/negocios"));
+    const buscas = ouvir(EV_PESQUISA);
+    const rec = ultimo();
+    falar(rec, res("olyvia", true));
+    falar(rec, res("olyvia", true), res("procura o nuno", true));
+    act(() => { vi.advanceTimersByTime(50); });
+    expect(buscas).toEqual(["nuno"]);
+    falar(rec, res("olyvia", true), res("procura o nuno", true), res("pereira", true));
+    act(() => { vi.advanceTimersByTime(50); });
+    expect(buscas).toEqual(["nuno", "nuno pereira"]);
   });
 
   it("os passos curtos agem logo («vai para o fim»)", () => {

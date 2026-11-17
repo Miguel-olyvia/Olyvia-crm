@@ -329,6 +329,8 @@ export function OlyviaComando() {
     // reinícios e, à terceira, pára e avisa em vez de ficar a ligar e desligar o micro
     let cancelamentos = 0;
     let espera: ReturnType<typeof setTimeout> | null = null;
+    /** A última ordem feita (para completar uma dita aos bocados: «abre o Carlos» … «Mendes»). */
+    let ultima: { frase: string; acao: string; em: number } | null = null;
     // 17/11 (Rúben: «é chato estar sempre a dizer Olyvia, a primeira vez chega»): «Olyvia» acorda-a; acordada, as frases curtas são
     // ordens sem o nome. Cada ordem renova o tempo; ACORDADA_MS sem ordens, ou «obrigado / chega», e volta a precisar de «Olyvia».
     let acordadaAte = 0;
@@ -347,15 +349,20 @@ export function OlyviaComando() {
       if (parado || recRef.current) return;
       const r = new C();
       r.lang = "pt-PT"; r.continuous = true; r.interimResults = true;
-      let usados = 0, inicio = Date.now();
+      // 17/11 (Rúben: «disse "agora abre o Carlos Mendes" e ele apanhou "Carlos", parou, depois "Mendes", e não fez nada; devia estar
+      // sempre a ouvir tudo sem cortar»): quando age a meio de uma frase (numa pausa), o que se disse a seguir NÃO se perde — guarda-se
+      // quantas palavras do resultado ainda em curso já foram usadas (`prefixo`) e o resto continua a contar
+      let usados = 0, prefixo = 0, inicio = Date.now();
       r.onstart = () => { inicio = Date.now(); setAEscutar(true); };
       r.onresult = (e) => {
         cancelamentos = 0;
         if (espera) { clearTimeout(espera); espera = null; }
         const lista = Array.from(e.results);
-        const txt = lista.slice(usados).map((x) => x[0]?.transcript ?? "").join(" ").trim();
-        if (!txt) return;
+        const partes = lista.slice(usados).map((x) => x[0]?.transcript ?? "");
+        if (prefixo && partes.length) partes[0] = partes[0].trim().split(/\s+/).slice(prefixo).join(" ");
+        const txt = partes.join(" ").replace(/\s+/g, " ").trim();
         const final = !!lista[lista.length - 1]?.isFinal, ate = lista.length;
+        if (!txt) { if (final) { usados = ate; prefixo = 0; } return; }
         const comGatilho = temGatilho(txt);
         // 17/11 (gravação do Rúben: falava em frases naturais e ela adormecia a meio): acordada, qualquer fala renova o tempo — não só as
         // ordens que resultam
@@ -377,14 +384,25 @@ export function OlyviaComando() {
           espera = null;
           // meia frase sem ordem conhecida ainda pode crescer: espera pelo fim da frase do browser ou por uma pausa (PAUSA_FRASE)
           if (c.acao === "nada" && !final && !porPausa) return;
-          usados = ate;
+          // o resultado ainda em curso fica: só as palavras já usadas saem (o que vier a seguir nele continua a contar)
+          if (final) { usados = ate; prefixo = 0; }
+          else { usados = ate - 1; prefixo = (lista[ate - 1]?.[0]?.transcript ?? "").trim().split(/\s+/).filter(Boolean).length; }
           acordar(); // cada ordem renova o tempo acordada
-          void executarRef.current(cmd!);
+          // o resto de uma ordem dita aos bocados («abre o Carlos» … «Mendes»): junta-se à ordem de antes e faz-se outra vez, completa
+          let frase = cmd!;
+          if (ultima && Date.now() - ultima.em < 6000 && c.acao === "nada" && (ultima.acao === "abrir-negocio" || ultima.acao === "pesquisar")) {
+            const junto = `${ultima.frase} ${frase}`;
+            if (interpretarComando(junto).acao === ultima.acao) frase = junto;
+          }
+          ultima = { frase, acao: interpretarComando(frase).acao, em: Date.now() };
+          void executarRef.current(frase);
         };
         if (final || c.acao === "scroll" || (c.acao === "ir-passo" && PASSOS_JA.has(c.passo))) { agir(); return; }
         setAviso({ msg: `«${txt}…»`, ok: true });
-        // a fala natural não espera pelo «fim de frase» do browser (às vezes não chega quando se fala seguido): uma pausa curta chega
-        espera = setTimeout(() => agir(true), c.acao === "nada" ? PAUSA_FRASE : PAUSA_PARA_AGIR);
+        // a fala natural não espera pelo «fim de frase» do browser (às vezes não chega quando se fala seguido): uma pausa chega. Um nome
+        // («abre o Carlos… Mendes») espera mais, como uma frase, para não agir com meio nome
+        const comNome = c.acao === "nada" || c.acao === "abrir-negocio" || c.acao === "pesquisar";
+        espera = setTimeout(() => agir(true), comNome ? PAUSA_FRASE : PAUSA_PARA_AGIR);
       };
       r.onerror = (ev) => {
         // sem um gesto recente o browser recusa o micro: não se desliga a escolha — espera-se pelo próximo clique ou tecla
