@@ -23,6 +23,7 @@ import { cn } from "@/lib/utils";
 import { FASES, LINHAS, PAPEIS, eur0, pct, proximo, sugerirDaLead, tot, versaoAtual, type Negocio } from "./motor";
 import { CONTACTO, FINANCEIRO, LEAD, OBRA, PROPOSTA, EXTERIOR, INTERIOR, AREA, ESCOLHAS, DECISAO, PECAS_WC, divisoesEscolhidas, efetivo, gruposArea, nomeGrupo, type Grupo } from "./campos";
 import { Campos, type Passo } from "./CamposFase";
+import { EV_PASSO, indicePasso, responderOlyvia } from "./comandoOlyvia";
 import { BotaoFase, passosDaFase, temBotaoFase } from "./PaginaNegocio";
 import { OrcamentoSimples } from "./OrcamentoSimples";
 import { DocumentosSimples } from "./FasesSimples";
@@ -472,6 +473,21 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos, soLeitura }: { ctx: Ctx; 
     const n = typeof x === "function" ? x(ativoRef.current) : x;
     setPassoUrl(n >= idsRef.current.length ? "fim" : idsRef.current[Math.max(0, n)] ?? "");
   }, [setPassoUrl]);
+  // 17/11 (protótipo): a Olyvia por comando — «vai para o fim», «próximo passo», «passo anterior», «vai para a proposta» (comandoOlyvia.ts)
+  const passosRef = useRef(passos);
+  passosRef.current = passos;
+  useEffect(() => {
+    const aoPasso = (e: Event) => {
+      const alvo = (e as CustomEvent<{ passo: string }>).detail?.passo;
+      if (!alvo) return;
+      const ps = passosRef.current, i = indicePasso(ps, alvo, ativoRef.current);
+      if (i == null) { responderOlyvia(`Não há o passo «${alvo}» nesta fase.`, false); return; }
+      setAtivo(i);
+      responderOlyvia(i >= ps.length ? "Fim." : `Passo: ${ps[i].titulo}.`);
+    };
+    window.addEventListener(EV_PASSO, aoPasso);
+    return () => window.removeEventListener(EV_PASSO, aoPasso);
+  }, [setAtivo]);
   // 27/10 (Rúben): enviada a proposta, a página não fica no orçamento (nem em nenhum passo de antes): vai para o fim, "à espera do cliente"
   const enviadaAntes = useRef(!!d.orc?.enviada);
   useEffect(() => {

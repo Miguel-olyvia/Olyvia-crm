@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { EnderecoAtivo } from "@/lib/paramUrl";
 import { ecraDoEndereco, ecraDoEstado, ecraValido, irParaEcra, mesmoEcra, pesquisaDoEcra } from "@/emylia/enderecoNegocios";
+import { EV_ABRIR, EV_FASE, EV_PESQUISA, FASES_NOMES, negocioPorNome, responderOlyvia } from "@/emylia/comandoOlyvia";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
@@ -253,16 +254,64 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   const relerPedido = useRef(false);
   const [q, setQ] = useState("");
 
-  // 17/11 (protótipo): a Olyvia por comando («procura o Nuno») manda o termo para a pesquisa do quadro (OlyviaComando.tsx dispara o evento,
-  // depois de abrir os Negócios). Só a pesquisa; não abre o negócio sozinha.
+  // 17/11 (protótipo): a Olyvia por comando (OlyviaComando.tsx / comandoOlyvia.ts). Aqui cumpre-se o que é dos Negócios:
+  //  · «procura o Nuno» → o termo na pesquisa do quadro;
+  //  · «abre o Ruben Branco (na fase de negócio)» → abre o negócio com o nome mais parecido, na fase pedida (?fase= só se já passou);
+  //  · «vai para a fase de visita» → muda a fase que se lê no negócio aberto.
+  // Responde ao botão (responderOlyvia) com o que fez. Só navega: não muda nada no negócio.
+  const pedidoOlyvia = useRef<{ nome: string; fase: number | null } | null>(null);
+  const abrirPeloNome = useCallback((p: { nome: string; fase: number | null }) => {
+    const d = negocioPorNome(S.deals.filter((x) => !x.perdido), p.nome) ?? negocioPorNome(S.deals, p.nome);
+    if (!d) {
+      S.view = "negocios"; S.deal = null; setQ(p.nome); redesenhar();
+      responderOlyvia(`Não encontrei «${p.nome}» — pus na pesquisa.`, false);
+      return;
+    }
+    const sp = new URLSearchParams();
+    sp.set("negocio", String(d.id));
+    let msg = `A abrir ${d.nome}`;
+    if (p.fase != null) {
+      if (p.fase < d.fase) { sp.set("fase", String(p.fase)); msg += ` · fase ${FASES_NOMES[p.fase]}`; }
+      else if (p.fase > d.fase) msg += ` — ainda está em ${FASES_NOMES[d.fase]}`;
+      else msg += ` · ${FASES_NOMES[p.fase]}`;
+    }
+    navigate({ pathname: "/negocios", search: "?" + sp.toString() });
+    responderOlyvia(msg + ".");
+  }, [S, navigate, redesenhar]);
   useEffect(() => {
     const aoPesquisar = (e: Event) => {
       const termo = (e as CustomEvent<string>).detail;
-      if (typeof termo === "string" && termo) { setQ(termo); redesenhar(); }
+      if (typeof termo === "string" && termo) { S.view = "negocios"; S.deal = null; setQ(termo); redesenhar(); }
     };
-    window.addEventListener("olyvia-pesquisa", aoPesquisar);
-    return () => window.removeEventListener("olyvia-pesquisa", aoPesquisar);
-  }, [redesenhar]);
+    const aoAbrir = (e: Event) => {
+      const p = (e as CustomEvent<{ nome: string; fase: number | null }>).detail;
+      if (!p?.nome) return;
+      // os negócios ainda a ler: fica pendente e abre-se quando chegarem
+      if (!pronto) { pedidoOlyvia.current = p; return; }
+      abrirPeloNome(p);
+    };
+    const aoFase = (e: Event) => {
+      const f = (e as CustomEvent<{ fase: number }>).detail?.fase;
+      const d = S.deal != null ? S.deals.find((x) => x.id === S.deal) : undefined;
+      if (f == null || !d) { responderOlyvia("Abre primeiro um negócio.", false); return; }
+      const sp = new URLSearchParams(window.location.search);
+      sp.delete("passo");
+      if (f < d.fase) { sp.set("fase", String(f)); responderOlyvia(`${d.nome} · fase ${FASES_NOMES[f]}.`); }
+      else { sp.delete("fase"); responderOlyvia(f > d.fase ? `${d.nome} ainda está em ${FASES_NOMES[d.fase]}.` : `${d.nome} · ${FASES_NOMES[f]} (a fase atual).`, f <= d.fase); }
+      navigate({ search: "?" + sp.toString() });
+    };
+    window.addEventListener(EV_PESQUISA, aoPesquisar);
+    window.addEventListener(EV_ABRIR, aoAbrir);
+    window.addEventListener(EV_FASE, aoFase);
+    return () => {
+      window.removeEventListener(EV_PESQUISA, aoPesquisar);
+      window.removeEventListener(EV_ABRIR, aoAbrir);
+      window.removeEventListener(EV_FASE, aoFase);
+    };
+  }, [S, pronto, abrirPeloNome, navigate, redesenhar]);
+  useEffect(() => {
+    if (pronto && pedidoOlyvia.current) { const p = pedidoOlyvia.current; pedidoOlyvia.current = null; abrirPeloNome(p); }
+  }, [pronto, abrirPeloNome]);
 
   const avisar = useCallback((a: Aviso) => {
     const mostra = () => {
