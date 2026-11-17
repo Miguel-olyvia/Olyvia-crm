@@ -36,6 +36,7 @@ import { acertarPosicoes, mudarODepois, seguirOAntes } from "./posicoesDepois";
 const Visualizador3D = lazy(() => import("@/emylia/planta3d/Visualizador3D"));
 import { CHAVE_ESTUDIO as CHAVE, devolverAoNegocio } from "./daVisita";
 import { pedeDesfazer, vozNoEstudio } from "./estudioPorVoz";
+import { useProdutosReaisNoEstudio } from "./catalogoRealDoEstudio";
 import { EV_ESTUDIO } from "@/emylia/comandoOlyvia";
 // 9/11 (Rúben: «o Estúdio é o passo final da visita»): o último passo fecha a visita (os serviços do Catálogo, o plano e o orçamento)
 const PASSOS = ["Antes", "Estilo", "Depois", "3D", "Proposta", "Fechar"] as const;
@@ -53,6 +54,8 @@ function lerGuardado(): Projeto {
 }
 
 export default function EstudioProjeto() {
+  // 17/11: com sessão, os produtos verdadeiros da organização (o catálogo da Mudelar); sem ela, o catálogo de teste
+  const reais = useProdutosReaisNoEstudio();
   const [p, setP] = useState<Projeto>(lerGuardado);
   const [passo, setPasso] = useState<Passo>("Antes");
   const [aberta, setAberta] = useState<string | null>(null);
@@ -141,7 +144,9 @@ export default function EstudioProjeto() {
       <header className="sticky top-0 z-30 border-b border-border bg-background/90 backdrop-blur">
         <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-8">
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">Estúdio · protótipo</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
+              Estúdio · {reais.n ? `catálogo da empresa (${reais.n.toLocaleString("pt-PT")} produtos)` : reais.aLer ? "a ler o catálogo…" : "catálogo de teste"}
+            </p>
             <h1 className="truncate text-xl font-semibold tracking-tight">{p.nome ?? "Casa de banho do Bruno"}</h1>
           </div>
           <div className="flex flex-wrap gap-2">
