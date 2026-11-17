@@ -1,6 +1,7 @@
 import { lazy, Suspense } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
+import { OlyviaComando } from "@/emylia/OlyviaComando";
 import { IndicadorGravacao } from "@/emylia/IndicadorGravacao";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
@@ -461,6 +462,8 @@ const App = () => (
                   <Route path="*" element={<NotFound />} />
                 </Routes>
               </Suspense>
+              {/* 17/11 (protótipo): a Olyvia por comando de voz — botão flutuante que navega pela app (OlyviaComando.tsx) */}
+              <OlyviaComando />
               </FornecedorFonteDenunciasReal>
               </PermissionsProvider>
             </CompanyProvider>

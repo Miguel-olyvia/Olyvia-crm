@@ -253,6 +253,17 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   const relerPedido = useRef(false);
   const [q, setQ] = useState("");
 
+  // 17/11 (protótipo): a Olyvia por comando («procura o Nuno») manda o termo para a pesquisa do quadro (OlyviaComando.tsx dispara o evento,
+  // depois de abrir os Negócios). Só a pesquisa; não abre o negócio sozinha.
+  useEffect(() => {
+    const aoPesquisar = (e: Event) => {
+      const termo = (e as CustomEvent<string>).detail;
+      if (typeof termo === "string" && termo) { setQ(termo); redesenhar(); }
+    };
+    window.addEventListener("olyvia-pesquisa", aoPesquisar);
+    return () => window.removeEventListener("olyvia-pesquisa", aoPesquisar);
+  }, [redesenhar]);
+
   const avisar = useCallback((a: Aviso) => {
     const mostra = () => {
       const id = ++tid.current;
