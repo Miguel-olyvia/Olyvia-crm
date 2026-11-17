@@ -238,13 +238,15 @@ export interface ItemSeg { k: string; t: string; sub: string; ok: boolean }
 export function seguranca(d: Negocio): ItemSeg[] {
   const tratado = d.obra.seg ?? {};
   const via = !!(d.orc?.demolicao as { r?: { licenca?: boolean } } | undefined)?.r?.licenca || /via p[úu]blica/i.test(Object.values(d.f).join(" "));
-  const cam = d.f.localidade || d.local.split(",").pop()?.trim() || "da zona";
+  // 17/11 (A-Z: «Pedido à Câmara de da zona»): o concelho é a localidade da obra; sem ela, a câmara municipal sem nome
+  const cam = (d.f.localidade || "").trim();
+  const camara = cam ? `Câmara de ${cam}` : "Câmara Municipal";
   const L: ItemSeg[] = [
     { k: "seguro", t: "Seguro de responsabilidade civil", sub: "Fidelidade · apólice RC-2026-0412 · válido até 31/12/2026", ok: true },
     { k: "pss", t: "Plano de segurança e saúde", sub: tratado.pss ? `Feito · ${tratado.pss}` : "Riscos da obra, EPI e regras de estaleiro. Fica na carrinha.", ok: !!tratado.pss || d.obra.plano?.estado === "em curso" || d.obra.plano?.estado === "concluída" },
     { k: "condominio", t: "Aviso ao condomínio", sub: tratado.condominio ? `Afixado · ${tratado.condominio}` : "Horário das obras e contacto do responsável, na entrada do prédio.", ok: !!tratado.condominio },
   ];
-  if (via) L.push({ k: "via", t: "Licença de ocupação da via pública", sub: tratado.via ? `Aprovada pela Câmara de ${cam} · ${tratado.via}` : `Para o contentor de entulho. Pedido à Câmara de ${cam}.`, ok: !!tratado.via });
+  if (via) L.push({ k: "via", t: "Licença de ocupação da via pública", sub: tratado.via ? `Aprovada pela ${camara} · ${tratado.via}` : `Para o contentor de entulho. Pedido à ${camara}.`, ok: !!tratado.via });
   return L;
 }
 
