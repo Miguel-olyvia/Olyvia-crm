@@ -6,9 +6,15 @@
 //  sem ele, fica a caixa de texto. Esconde-se nas páginas públicas (login, formulários).
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { Ear, Mic, Sparkles, X } from "lucide-react";
+import { Ear, Mic, MicOff, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { EV_ABRIR, EV_FASE, EV_PASSO, EV_PESQUISA, EV_RESPOSTA, extrairAposGatilho, interpretarComando, normal } from "./comandoOlyvia";
+import { useGravacao } from "./gravador";
+
+/** Os passos curtos e sem dúvida: agem logo, sem esperar que se pare de falar. */
+const PASSOS_JA = new Set(["fim", "proximo", "anterior", "inicio"]);
+/** Quanto silêncio (ms) chega para agir sem esperar que o browser dê a frase por acabada (o browser leva ~1 s). */
+export const PAUSA_PARA_AGIR = 400;
 
 // Web Speech API (SpeechRecognition): o mínimo que usamos, para não depender de tipos globais que o TS não traz.
 interface ResultadoVoz { results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal?: boolean }> }
@@ -49,8 +55,12 @@ export function OlyviaComando() {
   const [aEscutar, setAEscutar] = useState(false);
   const recRef = useRef<Reconhecedor | null>(null);
   const ativoRef = useRef(false);
-  const ultimoExec = useRef(0);
   const temVoz = useRef<boolean>(!!classeVoz());
+  // 17/11 (Rúben): a escuta pausa sozinha enquanto se grava a visita ou a chamada (o gravador precisa do micro, e a conversa com o
+  // cliente não é para dar ordens à Olyvia); volta quando a gravação pára. Nas páginas públicas também não ouve.
+  const gravacao = useGravacao();
+  const aGravar = gravacao.estado === "a_ligar" || gravacao.estado === "a_ouvir";
+  const ligado = escutaSempre && !aGravar && !paginaPublica(pathname);
 
   const executar = useCallback((frase: string) => {
     const c = interpretarComando(frase);
@@ -96,10 +106,15 @@ export function OlyviaComando() {
     return () => clearTimeout(t);
   }, [aviso]);
 
+  // o «executar» num ref: a escuta contínua não depende dele (o navigate muda a cada página, e isso reiniciava e desligava a escuta)
+  const executarRef = useRef(executar);
+  executarRef.current = executar;
+
   // Carregar para falar (um comando de cada vez), quando a «Escuta sempre» está desligada.
   const ouvirUmaVez = useCallback(() => {
     const C = classeVoz();
     if (!C) { setAviso({ msg: "O browser não ouve aqui — escreve o comando.", ok: false }); return; }
+    if (aGravar) { setAviso({ msg: "A gravação está a usar o micro — escreve o comando.", ok: false }); return; }
     if (aOuvir) { recRef.current?.stop(); return; }
     const r = new C();
     r.lang = "pt-PT"; r.continuous = false; r.interimResults = false;
@@ -109,59 +124,86 @@ export function OlyviaComando() {
     r.onend = () => setAOuvir(false);
     recRef.current = r; setAviso(null);
     try { r.start(); } catch { setAOuvir(false); }
-  }, [aOuvir, executar]);
+  }, [aOuvir, aGravar, executar]);
 
-  // Modo «sempre à escuta»: ouve em contínuo e só age depois de «Olyvia». Reinicia-se sozinho (o browser pára-o de vez em quando).
+  useEffect(() => { try { localStorage.setItem(CHAVE_ESCUTA, escutaSempre ? "1" : "0"); } catch { /* ignore */ } }, [escutaSempre]);
+
+  // diz quando pausa por causa de uma gravação e quando volta (só com a escuta ligada)
+  const gravavaAntes = useRef(aGravar);
   useEffect(() => {
-    ativoRef.current = escutaSempre;
-    try { localStorage.setItem(CHAVE_ESCUTA, escutaSempre ? "1" : "0"); } catch { /* ignore */ }
-    if (!escutaSempre) {
+    if (gravavaAntes.current === aGravar) return;
+    gravavaAntes.current = aGravar;
+    if (escutaSempre) setAviso(aGravar ? { msg: "Em pausa enquanto se grava.", ok: true } : { msg: "Voltei a ouvir — diz «Olyvia…».", ok: true });
+  }, [aGravar, escutaSempre]);
+
+  // Modo «sempre à escuta»: ouve em contínuo e só age depois de «Olyvia». Só depende de estar ligada — mudar de página não a reinicia.
+  // 17/11 (Rúben: «leva tempo a reagir»): não espera que o browser dê a frase por acabada (~1 s); age quando se pára de falar um instante
+  // (PAUSA_PARA_AGIR), e logo nos passos curtos («fim», «próximo»). Também já não pára e volta a arrancar depois de cada comando (perdia o
+  // que se dizia nesse intervalo): os resultados já usados ficam para trás (`usados`).
+  useEffect(() => {
+    ativoRef.current = ligado;
+    if (!ligado) {
       const r = recRef.current; recRef.current = null; setAEscutar(false);
       if (r) { r.onend = null; try { r.stop(); } catch { /* ignore */ } }
       return;
     }
     const C = classeVoz();
     if (!C) return;
-    let parado = false;
+    let parado = false, precisaGesto = false, avisouGesto = false;
+    let espera: ReturnType<typeof setTimeout> | null = null;
     const arrancar = () => {
       if (parado || recRef.current) return;
       const r = new C();
       r.lang = "pt-PT"; r.continuous = true; r.interimResults = true;
+      let usados = 0;
       r.onstart = () => setAEscutar(true);
       r.onresult = (e) => {
+        if (espera) { clearTimeout(espera); espera = null; }
         const lista = Array.from(e.results);
-        const txt = lista.map((x) => x[0]?.transcript ?? "").join(" ");
+        const txt = lista.slice(usados).map((x) => x[0]?.transcript ?? "").join(" ");
         const cmd = extrairAposGatilho(txt);
         if (!cmd) {
           // disse só «Olyvia»: fica à espera do resto
           if (/\bol[yi]via\b/.test(normal(txt))) setAviso({ msg: "Sim? Diz o que queres.", ok: true });
           return;
         }
-        // enquanto se fala, mostra o que vai ouvindo; só age quando a frase acaba (senão «abre o Ruben…» abria o 1.º Ruben antes do «Branco»)
-        if (!lista[lista.length - 1]?.isFinal) { setAviso({ msg: `Olyvia: «${cmd}…»`, ok: true }); return; }
-        if (Date.now() - ultimoExec.current < 1500) return;
-        ultimoExec.current = Date.now();
-        if (interpretarComando(cmd).acao === "nada") setAviso({ msg: `Ouvi «${cmd}» — não percebi.`, ok: false });
-        else executar(cmd);
-        try { r.stop(); } catch { /* ignore */ } // limpa o que já ouviu; o onend reinicia
+        const final = !!lista[lista.length - 1]?.isFinal, ate = lista.length;
+        const c = interpretarComando(cmd);
+        const agir = () => {
+          espera = null;
+          // meia frase sem sentido ainda pode crescer: só se dá por não percebida quando acaba
+          if (c.acao === "nada") { if (final) { usados = ate; setAviso({ msg: `Ouvi «${cmd}» — não percebi.`, ok: false }); } return; }
+          usados = ate;
+          executarRef.current(cmd);
+        };
+        if (final || (c.acao === "ir-passo" && PASSOS_JA.has(c.passo))) { agir(); return; }
+        setAviso({ msg: `Olyvia: «${cmd}…»`, ok: true });
+        if (c.acao !== "nada") espera = setTimeout(agir, PAUSA_PARA_AGIR);
       };
       r.onerror = (ev) => {
-        if (ev?.error === "not-allowed" || ev?.error === "service-not-allowed") { setEscutaSempre(false); setAviso({ msg: "Preciso de permissão do microfone para ouvir.", ok: false }); }
+        // sem um gesto recente o browser recusa o micro: não se desliga a escolha — espera-se pelo próximo clique ou tecla
+        if (ev?.error === "not-allowed" || ev?.error === "service-not-allowed") {
+          precisaGesto = true;
+          if (!avisouGesto) { avisouGesto = true; setAviso({ msg: "Toca em qualquer sítio para eu voltar a ouvir.", ok: false }); }
+        }
       };
-      r.onend = () => { recRef.current = null; setAEscutar(false); if (ativoRef.current && !parado) setTimeout(arrancar, 250); };
+      r.onend = () => { recRef.current = null; setAEscutar(false); if (ativoRef.current && !parado && !precisaGesto) setTimeout(arrancar, 100); };
       recRef.current = r;
       try { r.start(); } catch { recRef.current = null; }
     };
     arrancar();
-    // o browser recusa começar a ouvir sem um gesto do utilizador; arranca também no primeiro clique/toque.
-    const noGesto = () => { if (ativoRef.current && !recRef.current) arrancar(); };
+    const noGesto = () => { precisaGesto = false; avisouGesto = false; if (ativoRef.current && !recRef.current) arrancar(); };
     window.addEventListener("pointerdown", noGesto);
+    window.addEventListener("keydown", noGesto);
     return () => {
-      parado = true; window.removeEventListener("pointerdown", noGesto);
+      parado = true;
+      if (espera) clearTimeout(espera);
+      window.removeEventListener("pointerdown", noGesto);
+      window.removeEventListener("keydown", noGesto);
       const r = recRef.current; recRef.current = null;
       if (r) { r.onend = null; try { r.stop(); } catch { /* ignore */ } }
     };
-  }, [escutaSempre, executar]);
+  }, [ligado]);
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => { if (e.key === "Escape") setAberto(false); };
@@ -197,7 +239,7 @@ export function OlyviaComando() {
           )}
           {temVoz.current && (
             <label className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2">
-              <span className="flex items-center gap-2 text-sm"><Ear className="h-4 w-4 text-primary" aria-hidden="true" />Escuta sempre — diz «Olyvia…»</span>
+              <span className="flex items-center gap-2 text-sm"><Ear className="h-4 w-4 text-primary" aria-hidden="true" />{escutaSempre && aGravar ? "Escuta em pausa enquanto se grava" : "Escuta sempre — diz «Olyvia…»"}</span>
               <button type="button" role="switch" aria-checked={escutaSempre} aria-label="Escuta sempre" onClick={() => setEscutaSempre((v) => !v)}
                 className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", escutaSempre ? "bg-primary" : "bg-muted")}>
                 <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-background shadow transition-all", escutaSempre ? "left-[22px]" : "left-0.5")} />
@@ -208,12 +250,12 @@ export function OlyviaComando() {
       ) : aviso ? (
         <div role="status" className={cn("max-w-[min(80vw,18rem)] rounded-xl border px-3 py-2 text-sm shadow-[var(--shadow-md,0_6px_18px_rgba(0,0,0,0.14))]", aviso.ok ? "border-primary/40 bg-card text-primary" : "border-border bg-card text-muted-foreground")}>{aviso.msg}</div>
       ) : null}
-      <button type="button" aria-expanded={aberto} aria-label={aEscutar ? "Olyvia — à escuta" : "Olyvia — comando por voz"}
+      <button type="button" aria-expanded={aberto} aria-label={escutaSempre && aGravar ? "Olyvia — em pausa (a gravar)" : aEscutar ? "Olyvia — à escuta" : "Olyvia — comando por voz"}
         onClick={() => { setAberto((v) => !v); setAviso(null); }}
         className={cn("group relative inline-flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-primary-foreground shadow-[var(--shadow-lg,0_10px_30px_rgba(0,0,0,0.25))] transition-transform hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
           aEscutar && "ring-2 ring-primary/40")}>
         {aEscutar && <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 h-3 w-3 animate-pulse rounded-full border-2 border-card bg-destructive" />}
-        {aEscutar ? <Ear className="h-5 w-5" aria-hidden="true" /> : <Mic className="h-5 w-5" aria-hidden="true" />}
+        {escutaSempre && aGravar ? <MicOff className="h-5 w-5" aria-hidden="true" /> : aEscutar ? <Ear className="h-5 w-5" aria-hidden="true" /> : <Mic className="h-5 w-5" aria-hidden="true" />}
         <span className="text-[15px] font-semibold">Olyvia</span>
       </button>
     </div>

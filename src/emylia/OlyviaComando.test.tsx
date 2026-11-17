@@ -5,6 +5,8 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { EVENTO_PESQUISA, OlyviaComando } from "./OlyviaComando";
 import { EV_ABRIR, EV_PASSO, responderOlyvia } from "./comandoOlyvia";
 
+// o botão lê o estado do gravador (pausa a escuta enquanto se grava), que puxa o cliente da base
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 afterEach(cleanup);
 
 function Local() { const l = useLocation(); return <div data-testid="loc">{l.pathname}{l.search}</div>; }
