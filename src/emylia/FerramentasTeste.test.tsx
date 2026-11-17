@@ -92,3 +92,34 @@ describe("ferramentas de teste: os botões", () => {
     expect(espiao).toHaveBeenCalledWith(lead.id);
   });
 });
+
+describe("17/11: as tarefas da obra em curso, como os técnicos", () => {
+  const obra = () => {
+    const m = montar();
+    const d = m.S.deals.find((x) => x.id === 1027)!;
+    d.fase = 5; d.obra.plano!.estado = "em curso"; m.S.role = "operacoes"; // quem pode executar a obra (como o super admin no testarh)
+    for (const t of d.obra.plano!.tasks) { delete t.exec; delete t.bloqueio; }
+    return { ...m, d };
+  };
+  it("a tarefa seguinte fica feita, por validar, com as horas previstas, os passos e uma fotografia", async () => {
+    const { ctx, d } = obra();
+    const { fazerTarefaComoTecnico, tarefaSeguinte } = await import("./FerramentasTeste");
+    const ti = tarefaSeguinte(d);
+    expect(ti).toBe(0);
+    fazerTarefaComoTecnico(ctx.A, d, ti);
+    const e = d.obra.plano!.tasks[0].exec!;
+    expect(e.estado).toBe("feita");
+    expect(e.fotos.length).toBe(1);
+    expect(e.horas).toBeGreaterThan(0);
+    expect(tarefaSeguinte(d)).toBe(1);
+  });
+  it("«todas» faz as tarefas por fazer; a validação fica para o responsável", () => {
+    const { ctx, d } = obra();
+    ligar();
+    render(<FerramentasTeste ctx={ctx} d={d} ambiente={() => true} />);
+    const n = d.obra.plano!.tasks.length;
+    fireEvent.click(screen.getByRole("button", { name: `Fazer todas as tarefas como os técnicos (${n})` }));
+    expect(d.obra.plano!.tasks.every((t) => t.exec?.estado === "feita")).toBe(true);
+    expect(d.obra.plano!.tasks.some((t) => t.exec?.estado === "validada")).toBe(false);
+  });
+});

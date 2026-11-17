@@ -16,10 +16,17 @@
 //  3. «Avançar para o passo seguinte»: o próximo passo do negócio (motor.proximo), feito pela MESMA ação do botão do passo (fazer), que
 //     grava pelo caminho de sempre. Os passos do cliente usam 1 e 2. Os que precisam de alguém a escrever (a fatura do ERP, as medidas,
 //     o plano…) não se forçam: o painel diz qual é e leva lá. Nunca escreve a fase à força.
+//  4. 17/11 (Rúben, teste A-Z na Mudelar: «sim, cria»): com a obra em curso, «Fazer a tarefa seguinte como o técnico» e «Fazer todas as tarefas
+//     como os técnicos». O ecrã do técnico só mostra as tarefas do dia; aqui faz-se a tarefa pelas MESMAS ações do ecrã dele (começar, os
+//     passos, as horas previstas, uma fotografia de exemplo, «Correu como previsto.», enviar e terminar). A validação continua do responsável
+//     (nas Operações), e o fim da obra também.
 import { useState } from "react";
 import { FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { proximo, type Estado, type Negocio } from "./motor";
+import { fotoExemplo } from "./obraOps";
+import { COR_FASE } from "./planoObra";
+import { instrucoesDe } from "./trabalhoObra";
 import { fazer, type Ctx } from "./pecas";
 import { modoReal } from "./acessosPortal";
 import { useModoTeste } from "./real/modoTeste";
@@ -53,6 +60,27 @@ export function passoDeTeste(d: Negocio, S: Estado, A?: Ctx["A"]): PassoTeste {
   return { tipo: "espera", t: p.t, sub: p.sub };
 }
 
+/** A tarefa seguinte da obra em curso por fazer (pela ordem do plano), sem as paradas por um imprevisto; -1 sem nenhuma. */
+export function tarefaSeguinte(d: Negocio): number {
+  const p = d.obra.plano;
+  if (!p || p.estado !== "em curso") return -1;
+  return p.tasks.findIndex((t) => !t.bloqueio && t.exec?.estado !== "feita" && t.exec?.estado !== "validada");
+}
+/** As tarefas por fazer da obra em curso. */
+export const tarefasPorFazer = (d: Negocio): number =>
+  d.obra.plano?.estado === "em curso" ? d.obra.plano.tasks.filter((t) => !t.bloqueio && t.exec?.estado !== "feita" && t.exec?.estado !== "validada").length : 0;
+
+/** Faz a tarefa `ti` como o técnico dela: as mesmas ações do Hoje do técnico (dentro de um ctx.run). */
+export function fazerTarefaComoTecnico(A: Ctx["A"], d: Negocio, ti: number): void {
+  const t = d.obra.plano?.tasks[ti];
+  if (!t) return;
+  A.comecarTarefa(d.id, ti);
+  const ja = new Set(t.exec?.passos ?? []);
+  instrucoesDe(t).passos.forEach((_, k) => { if (!ja.has(k)) A.marcarPasso(d.id, ti, k); });
+  const horas = t.h > 0 ? t.h : 1;
+  A.enviarRegisto(d.id, ti, { horas, fotos: [fotoExemplo(t.nome, t.fase ? COR_FASE[t.fase] : undefined, 0)], nota: "Correu como previsto. (teste)", feita: true });
+}
+
 // FERRAMENTAS-TESTE (temporário, remover antes da main)
 export function FerramentasTeste({ ctx, d, ambiente = ambienteAqui }: { ctx: Ctx; d: Negocio; /** para os testes */ ambiente?: () => boolean }) {
   const teste = useModoTeste();
@@ -73,6 +101,17 @@ export function FerramentasTeste({ ctx, d, ambiente = ambienteAqui }: { ctx: Ctx
     if (P.tipo === "cliente") { cliente(P.acao); return; }
     if (P.tipo === "acao" || (P.tipo === "ecra" && P.navega)) ctx.go(() => fazer(ctx.A, P.act, d.id, P.arg))();
   };
+  // 17/11: as tarefas da obra em curso, como os técnicos (a validação fica para o responsável)
+  const porFazer = tarefasPorFazer(d);
+  const tarefas = (todas: boolean) => ctx.run(() => {
+    // o negócio do estado (as ações mudam-no aqui dentro); a mesma tarefa duas vezes seguidas quer dizer que não passou: pára
+    const atual = () => ctx.S.deals.find((x) => x.id === d.id) ?? d;
+    let antes = -1;
+    for (let i = 0, ti = tarefaSeguinte(atual()); ti >= 0 && ti !== antes && i < 200; i++, antes = ti, ti = tarefaSeguinte(atual())) {
+      fazerTarefaComoTecnico(ctx.A, atual(), ti);
+      if (!todas) break;
+    }
+  });
   const botaoAvancar = P.tipo === "cliente" ? (P.acao === "aceitar" ? "Aceitar a proposta como o cliente" : "Assinar o contrato como o cliente")
     : P.tipo === "acao" ? `Avançar: ${P.btn}`
     : P.tipo === "ecra" && P.navega ? `Ir para o passo: ${P.btn ?? P.t}`
@@ -100,6 +139,16 @@ export function FerramentasTeste({ ctx, d, ambiente = ambienteAqui }: { ctx: Ctx
           title={porQueAssinar ?? undefined} onClick={() => cliente("assinar")}>
           {aFazer === "assinar" ? "A assinar…" : "Assinar o contrato como o cliente"}
         </Button>
+        {porFazer > 0 && (
+          <>
+            <Button type="button" variant="outline" className="border-amber-600 bg-white text-amber-900 hover:bg-amber-50" disabled={!!aFazer} onClick={() => tarefas(false)}>
+              Fazer a tarefa seguinte como o técnico
+            </Button>
+            <Button type="button" variant="outline" className="border-amber-600 bg-white text-amber-900 hover:bg-amber-50" disabled={!!aFazer} onClick={() => tarefas(true)}>
+              Fazer todas as tarefas como os técnicos ({porFazer})
+            </Button>
+          </>
+        )}
         {botaoAvancar && (
           <Button type="button" className="bg-amber-600 text-white hover:bg-amber-700" disabled={!!aFazer} onClick={avancar}>
             {botaoAvancar}
