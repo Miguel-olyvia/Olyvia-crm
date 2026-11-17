@@ -2,7 +2,6 @@
 // de sempre; só o contentor mudou (painel lateral em vez de página).
 import { Card, CardContent } from "@/components/ui/card";
 import { PessoaOficiosObraCard } from "@/components/rh-exemplo/hooks/PessoaOficiosObraCardReal";
-import { PessoaPapeisNegocioCard } from "@/components/rh-exemplo/hooks/PessoaPapeisNegocioCardReal";
 import { PessoaAgendaObraCard } from "@/components/rh-exemplo/hooks/PessoaAgendaObraCardReal";
 import { CartaoAdmissaoDaFicha } from "@/components/rh-exemplo/hooks/CartaoAdmissaoDaFicha";
 import type { ResumoConvite } from "@/components/rh-exemplo/hooks/useConviteAdmissaoResumo";
@@ -72,11 +71,6 @@ export function AbaLaborais({ ficha, pessoa, ctx, aoMudarCargo, aoAbrirContratos
         A chave com o cargo relê o cartão quando o cargo muda (os ofícios herdados e se é técnica vêm do cargo, 20261231998000). */}
     <PessoaOficiosObraCard
       key={`${pessoa.id}:${pessoa.cargo_id ?? ""}`}
-      pessoaId={pessoa.id} organizationId={pessoa.organization_id} podeEditar={w.podeEditarLaborais}
-    />
-    {/* 30/10 (20270101340000): os papéis da pessoa no Negócio (Financeiro, Compras e armazém, Gestor de obra…). */}
-    <PessoaPapeisNegocioCard
-      key={`papeis:${pessoa.id}:${pessoa.cargo_id ?? ""}`}
       pessoaId={pessoa.id} organizationId={pessoa.organization_id} podeEditar={w.podeEditarLaborais}
     />
     {/* 28/10 (20261231999000): as tarefas de obra da pessoa, do plano da obra de cada negócio. */}

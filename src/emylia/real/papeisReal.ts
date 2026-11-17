@@ -1,7 +1,8 @@
-// CRM (30/10/2026): os papéis do Negócio vêm do RH (migration 20270101340000). Na V1 o papel escolhia-se à mão ("A ver como"); aqui cada
-// pessoa do RH tem os seus (cartão "Papéis no Negócio" na ficha) e o Técnico é quem tem cargo técnico de obra. A base aceita as ações pelo
-// papel (neg_papeis_permissoes): o Financeiro regista a fatura e valida o pagamento, Compras e armazém aprova a encomenda a fornecedor, o
-// Gestor de obra e o Técnico gravam a obra. Quem tem o perfil da Olyvia com pessoas.edit (ou é admin do sistema) continua a ver todos.
+// CRM: as vistas do Negócio («A ver como»). 17/11/2026: o «Papel no Negócio» do RH saiu: as vistas vêm SÓ das permissões do perfil
+// (papeisDasPermissoes): o Financeiro (validar o pagamento / registar a fatura), Compras e armazém (aprovar a encomenda a fornecedor), o
+// Gestor de obra (planear a obra), o Comercial e a Direção (aprovar a margem). O Técnico fica como estava: vem da base (neg_meus_papeis:
+// o cargo técnico de obra do RH, ou o perfil «Ser técnico de obra» com a conta ligada ao RH). O Jurídico não tem permissão própria e
+// deixa de aparecer. Quem tem o perfil da Olyvia com pessoas.edit (ou é admin do sistema) continua a poder escolher todas.
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { PAPEIS, type Papel } from "../motor";
 import { CODIGO_APROVAR_PO, CODIGO_BASE, PERMS_DIRECAO_EXTRA, PERMS_FASES, PERMS_PAPEL } from "../permissoes";
@@ -9,6 +10,7 @@ import { RESPONSAVEL_OBRA, definirViaturaObra } from "../obraOps";
 import { definirResponsaveisObra } from "../campos";
 
 export interface MeusPapeis {
+  /** As vistas da pessoa (lido da base: só o Técnico; depois de comPapeisDasPermissoes: mais as das permissões). */
   papeis: Papel[];
   /** A pessoa do RH ligada à conta (pessoas_contas). */
   pessoa: { id: string; nome: string } | null;
@@ -16,31 +18,20 @@ export interface MeusPapeis {
   todos: boolean;
 }
 
-/** Os papéis que se escolhem no RH (o Técnico vem do cargo técnico de obra ou, 09/11, do perfil «Ser técnico de obra»: negocios.obra.tecnico). */
-export const PAPEIS_RH: readonly Papel[] = ["comercial", "direcao", "financeiro", "armazem", "operacoes", "juridico"];
+/** 17/11: as vistas do Negócio na Olyvia, pela ordem do circuito: as de PAPEIS sem o Jurídico (sem permissão própria). */
+export const VISTAS_NEGOCIO: readonly Papel[] = (Object.keys(PAPEIS) as Papel[]).filter((p) => p !== "juridico");
 /** O nome de cada papel, sem a pessoa do exemplo ("Sandra · Financeiro" → "Financeiro"). */
 export const ROTULO_PAPEL: Record<Papel, string> = {
   comercial: "Comercial", direcao: "Direção", financeiro: "Financeiro", armazem: "Compras e armazém", operacoes: "Gestor de obra",
   juridico: "Jurídico", tecnico: "Técnico de obra",
 };
-/** O que cada papel faz no Negócio (o texto do cartão do RH). */
-export const FAZ_O_PAPEL: Record<Papel, string> = {
-  comercial: "Contacto, visita, orçamento, proposta e contrato.",
-  direcao: "Aprova as exceções à margem e vê tudo.",
-  financeiro: "Regista a fatura do Eticadata e valida o pagamento.",
-  armazem: "Aprova as encomendas a fornecedor e recebe os materiais.",
-  operacoes: "Aprova o plano da obra, atribui os técnicos e valida as tarefas.",
-  juridico: "Revê as cláusulas do contrato que o cliente pede para mudar.",
-  // 09/11: vem do cargo técnico de obra (RH) ou do perfil «Ser técnico de obra» (negocios.obra.tecnico), não se escolhe aqui.
-  tecnico: "Faz as tarefas da obra que lhe são atribuídas.",
-};
-
 const ehPapel = (x: unknown): x is Papel => typeof x === "string" && x in PAPEIS;
 
-/** O que a base devolve (neg_meus_papeis), limpo. */
+/** O que a base devolve (neg_meus_papeis), limpo. 17/11: dos papéis só fica o Técnico (como estava: o cargo técnico de obra ou o perfil
+ *  «Ser técnico de obra»); os outros vêm das permissões do perfil (comPapeisDasPermissoes), mesmo que a base ainda os devolva. */
 export function papeisDoLido(data: unknown): MeusPapeis {
   const o = (data && typeof data === "object" ? data : {}) as { papeis?: unknown; pessoa?: { id?: unknown; nome?: unknown } | null; todos?: unknown };
-  const papeis = Array.isArray(o.papeis) ? [...new Set(o.papeis.filter(ehPapel))] : [];
+  const papeis: Papel[] = Array.isArray(o.papeis) && o.papeis.filter(ehPapel).includes("tecnico") ? ["tecnico"] : [];
   const pessoa = o.pessoa && typeof o.pessoa.id === "string" ? { id: o.pessoa.id, nome: String(o.pessoa.nome ?? "").trim() } : null;
   return { papeis, pessoa, todos: o.todos === true };
 }
@@ -55,12 +46,13 @@ export async function lerMeusPapeis(sb: SupabaseClient, org: string): Promise<Me
   return papeisDoLido(data);
 }
 
-/** Os papéis do "A ver como": todos, ou só os da pessoa (pela ordem do circuito). */
+/** Os papéis do "A ver como": todas as vistas, ou só as da pessoa (pela ordem do circuito). Nunca o Jurídico. */
 export const papeisPermitidos = (m: MeusPapeis): Papel[] =>
-  m.todos ? (Object.keys(PAPEIS) as Papel[]) : (Object.keys(PAPEIS) as Papel[]).filter((p) => m.papeis.includes(p));
+  m.todos ? [...VISTAS_NEGOCIO] : VISTAS_NEGOCIO.filter((p) => m.papeis.includes(p));
 
-/** 9/11 (Lote 1, A): os papéis que as permissões do perfil dão a quem não tem nenhum Papel no Negócio no RH (nem pessoas.edit): cada
- *  papel pelo trabalho que faz no Negócio. Os códigos são os lidos por fn_cat_pode (CODIGOS_NEGOCIOS). */
+/** 9/11 (Lote 1, A): as vistas que as permissões do perfil dão: cada papel pelo trabalho que faz no Negócio. 17/11: é a ÚNICA fonte
+ *  destes cinco (o Papel no Negócio do RH saiu); o Técnico não está aqui (vem da base, como antes). Os códigos são os lidos por
+ *  fn_cat_pode (CODIGOS_NEGOCIOS). */
 const PAPEL_PELAS_PERMISSOES: readonly [Papel, readonly string[]][] = [
   ["comercial", [CODIGO_BASE["contacto.registar"], CODIGO_BASE["visita.gerir"], CODIGO_BASE["visita.preencher"], CODIGO_BASE["orcamento.editar"], CODIGO_BASE["proposta.enviar"]]],
   ["direcao", [CODIGO_BASE["margin.approve"]]],
@@ -71,14 +63,14 @@ const PAPEL_PELAS_PERMISSOES: readonly [Papel, readonly string[]][] = [
 /** Os papéis (pela ordem do circuito, a de PAPEIS) a que basta uma das permissões de PAPEL_PELAS_PERMISSOES. */
 export function papeisDasPermissoes(codigos: ReadonlySet<string>): Papel[] {
   const dados = new Set(PAPEL_PELAS_PERMISSOES.filter(([, cs]) => cs.some((c) => codigos.has(c))).map(([p]) => p));
-  return (Object.keys(PAPEIS) as Papel[]).filter((p) => dados.has(p));
+  return VISTAS_NEGOCIO.filter((p) => dados.has(p));
 }
-/** Quem não tem papel nenhum (nem vê todos) passa a ter os que as permissões dão; quem já tem papel (ou vê todos) fica como está.
- *  `codigos` null (a leitura falhou): fica como está. */
+/** 17/11: as vistas da pessoa são as que as permissões dão, mais o Técnico se a base o deu (como antes). `codigos` null (a leitura
+ *  falhou): só o Técnico. Com `todos`, o «A ver como» continua com todas (papeisPermitidos). */
 export function comPapeisDasPermissoes(m: MeusPapeis, codigos: ReadonlySet<string> | null): MeusPapeis {
-  if (m.todos || m.papeis.length > 0 || !codigos) return m;
-  const papeis = papeisDasPermissoes(codigos);
-  return papeis.length ? { ...m, papeis } : m;
+  const dados = new Set<Papel>(codigos ? papeisDasPermissoes(codigos) : []);
+  if (m.papeis.includes("tecnico")) dados.add("tecnico");
+  return { ...m, papeis: VISTAS_NEGOCIO.filter((p) => dados.has(p)) };
 }
 
 /** O papel com que a página abre: o que já estava, se é permitido; senão o primeiro da pessoa (o Técnico só se não tiver outro). */
@@ -91,25 +83,24 @@ export function papelInicial(m: MeusPapeis, atual: Papel): Papel | null {
 /** 11/11: a ordem com que se escolhe o papel de abertura quando as permissões do perfil dão vários: o mais específico primeiro (o
  *  Financeiro, Compras e armazém e o Gestor de obra fazem um trabalho só deles; depois o Comercial, e a Direção só quando é o único papel
  *  que as permissões dão: o perfil Comercial tem negocios.margem.aprovar, que dá a Direção, e tem de abrir no Comercial). O Técnico
- *  (e o Jurídico, que as permissões não dão) só se não houver nenhum destes. */
+ *  só se não houver nenhum destes. */
 export const PREFERENCIA_PAPEL_INICIAL: readonly Papel[] = ["financeiro", "armazem", "operacoes", "comercial", "direcao"];
 export function papelMaisEspecifico(L: readonly Papel[]): Papel | null {
   return PREFERENCIA_PAPEL_INICIAL.find((p) => L.includes(p)) ?? L.find((p) => p !== "tecnico") ?? L[0] ?? null;
 }
 
-/** 11/11: o papel com que a página ABRE e os papéis da pessoa. `rh` é o que neg_meus_papeis devolveu (antes das permissões); `codigos`
- *  as permissões negocios.* do perfil (null: não se leram ou a leitura falhou); `escolhido` o papel que a pessoa escolheu à mão no «A ver
- *  como» enquanto está na página (null: ainda nenhum).
+/** 11/11: o papel com que a página ABRE e os papéis da pessoa. `rh` é o que neg_meus_papeis devolveu (a pessoa, `todos` e o Técnico);
+ *  `codigos` as permissões negocios.* do perfil (null: não se leram ou a leitura falhou); `escolhido` o papel que a pessoa escolheu à mão
+ *  no «A ver como» enquanto está na página (null: ainda nenhum).
  *  - escolhido e permitido: fica esse;
- *  - com Papel no Negócio na ficha RH: como antes (papelInicial);
- *  - sem papel no RH (com ou sem `todos`): o papel mais específico que as permissões dão (antes, quem via todos abria no Comercial);
- *  - sem nada disso: como antes (papelInicial: com `todos`, o que já estava; sem, nenhum).
- *  Não muda o que se pode escolher: quem vê todos continua a poder escolher qualquer papel. */
+ *  - o papel mais específico que as permissões dão (17/11: sempre, já não há Papel no Negócio no RH);
+ *  - sem nenhum: papelInicial (o Técnico; com `todos`, o que já estava; sem nada, nenhum).
+ *  Não muda o que se pode escolher: quem vê todos continua a poder escolher qualquer vista (menos o Jurídico). */
 export function papelDeAbertura(rh: MeusPapeis, codigos: ReadonlySet<string> | null, atual: Papel, escolhido: Papel | null = null): { meus: MeusPapeis; papel: Papel | null } {
   const meus = comPapeisDasPermissoes(rh, codigos);
   const P = papeisPermitidos(meus);
   if (escolhido && P.includes(escolhido)) return { meus, papel: escolhido };
-  if (rh.papeis.length === 0 && codigos) {
+  if (codigos) {
     const p = papelMaisEspecifico(papeisDasPermissoes(codigos).filter((x) => P.includes(x)));
     if (p) return { meus, papel: p };
   }
@@ -128,7 +119,7 @@ export function aplicarNomesPapeis(m: MeusPapeis): void {
 
 const ORIGINAIS: Record<Papel, (typeof PAPEIS)[Papel]> = Object.fromEntries((Object.keys(PAPEIS) as Papel[]).map((p) => [p, { ...PAPEIS[p] }])) as Record<Papel, (typeof PAPEIS)[Papel]>;
 /** 30/10: os papéis que quem entrou pode escolher no "A ver como" (null: todos, como na V1). Os ecrãs que oferecem "mudar para o
- *  Financeiro" só o oferecem a quem o pode ser. */
+ *  Financeiro" só o oferecem a quem o pode ser. 17/11: na Olyvia nunca é null (quem vê todos tem VISTAS_NEGOCIO, sem o Jurídico). */
 let escolhiveis: Papel[] | null = null;
 export const definirPapeisEscolhiveis = (L: Papel[] | null): void => { escolhiveis = L; };
 export const podeVerComo = (p: Papel): boolean => !escolhiveis || escolhiveis.includes(p);

@@ -12,7 +12,8 @@ const aCarregar = <div className="p-6 text-muted-foreground">A carregar…</div>
 export default function HojeInicio() {
   const { hasPermission, loading } = usePermissions();
   const negocios = useNegociosAtivos({ habilitado: !loading && hasPermission("pessoas.view") });
-  // 30/10 (20270101340000): quem tem um papel no Negócio pelo RH (o técnico, o Financeiro…) também abre no Hoje, sem pessoas.view
+  // 30/10 (20270101340000): o técnico de obra pela base (o cargo do RH) também abre no Hoje, sem pessoas.view (17/11: os outros papéis
+  // do RH saíram; esses abrem pelas permissões do perfil)
   // 09/11: o perfil «Ser técnico de obra» (negocios.obra.tecnico) abre sempre no Hoje do técnico (sem a conta ligada ao RH, o aviso).
   // O código vai literal: a guarda do editor (garantiaPermissoes.test.ts) procura-o nas chamadas a hasPermission.
   const tecnicoPorPerfil = hasPermission("negocios.obra.tecnico");

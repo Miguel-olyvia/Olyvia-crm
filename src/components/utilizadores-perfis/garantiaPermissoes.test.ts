@@ -384,7 +384,7 @@ function coerente(menu: Entrada, rota: Guarda): boolean {
  * componente (se mudar, o teste falha e isto revê-se).
  */
 const GUARDAS_PROPRIAS: Readonly<Record<string, { ficheiro: string; contem: string; guarda: Guarda }>> = {
-  // RotaNegocios: pessoas.view, ou (sem ela) um Papel no Negócio pelo RH — o Papel não é uma permissão do editor.
+  // RotaNegocios: pessoas.view ou as da obra, ou (sem elas) técnico de obra pelo cargo do RH — o cargo não é uma permissão do editor.
   "/negocios": { ficheiro: "components/RotaNegocios.tsx", contem: 'permissions={["pessoas.view", ...PERMS_OBRA]}', guarda: { permissoes: ["pessoas.view", "negocios.obra.executar", "negocios.obra.planear", "negocios.obra.tecnico"], todas: false } },
 };
 

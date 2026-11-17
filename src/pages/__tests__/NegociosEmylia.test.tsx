@@ -112,10 +112,12 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
   });
 
   // 30/10 (20270101340000): os papéis vêm do RH. A Inês, só Financeiro, vê-se a si própria e não escolhe os outros papéis
-  it("quem só tem o papel Financeiro no RH: o A ver como só tem esse, com o nome da pessoa", async () => {
+  it("17/11: as vistas vêm só das permissões do perfil: o Financeiro pela permissão, sem o Comercial/Jurídico que o RH ainda devolva", async () => {
     const antes = rpc.getMockImplementation()!;
+    const financeiro = new Set(["negocios.validar_pagamento", "negocios.registar_fatura", "pessoas.view"]);
     rpc.mockImplementation(async (fn: string, ...r: unknown[]) => fn === "neg_meus_papeis"
-      ? { data: { papeis: ["financeiro"], pessoa: { id: "p1", nome: "Inês Lourenço" }, todos: false }, error: null }
+      ? { data: { papeis: ["comercial", "juridico"], pessoa: { id: "p1", nome: "Inês Lourenço" }, todos: false }, error: null }
+      : fn === "fn_cat_pode" ? { data: financeiro.has((r[0] as { p_perm: string }).p_perm), error: null }
       : antes(fn, ...r));
     render(comQuery(<MemoryRouter><NegociosEmylia /></MemoryRouter>));
     await waitFor(() => expect(screen.queryAllByText("Marta Lima").length).toBeGreaterThan(0), { timeout: 8000 });
@@ -124,14 +126,23 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
     expect(sel.value).toBe("financeiro");
   });
 
-  it("sem papel no RH (e sem o perfil que vê todos): diz o que falta e não lê os negócios", async () => {
+  it("17/11: quem vê todos não tem o Jurídico no «A ver como»", async () => {
+    render(comQuery(<MemoryRouter><NegociosEmylia /></MemoryRouter>));
+    await waitFor(() => expect(screen.queryAllByText("Marta Lima").length).toBeGreaterThan(0), { timeout: 8000 });
+    const sel = screen.getByLabelText("A ver como") as HTMLSelectElement;
+    expect([...sel.options].map((o) => o.value)).toEqual(["comercial", "direcao", "financeiro", "armazem", "operacoes", "tecnico"]);
+  });
+
+  it("sem permissões do Negócio no perfil (e sem o perfil que vê todos): diz o que falta e não lê os negócios", async () => {
     modoTeste.on = false; // utilizador normal, sem o andaime de teste
     const antes = rpc.getMockImplementation()!;
+    // 17/11: um papel que a base ainda devolva do RH (o Comercial) já não chega: sem permissões, nenhuma vista
     rpc.mockImplementation(async (fn: string, ...r: unknown[]) => fn === "neg_meus_papeis"
-      ? { data: { papeis: [], pessoa: { id: "p2", nome: "Helena Brandão" }, todos: false }, error: null }
+      ? { data: { papeis: ["comercial"], pessoa: { id: "p2", nome: "Helena Brandão" }, todos: false }, error: null }
+      : fn === "fn_cat_pode" ? { data: false, error: null }
       : antes(fn, ...r));
     render(comQuery(<MemoryRouter><NegociosEmylia /></MemoryRouter>));
-    await waitFor(() => expect(screen.getByText(/Não tem nenhum papel no Negócio/)).toBeTruthy(), { timeout: 8000 });
+    await waitFor(() => expect(screen.getByText("Não tem nenhum papel no Negócio. Peça um perfil com permissões do Negócio.")).toBeTruthy(), { timeout: 8000 });
     expect(rpc.mock.calls.some(([fn]) => fn === "neg_ler_negocios")).toBe(false);
   });
 

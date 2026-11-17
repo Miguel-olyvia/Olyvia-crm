@@ -1,5 +1,6 @@
-// 30/10/2026 (20270101340000): o /negocios abre a quem tem pessoas.view pelo perfil da Olyvia OU um papel no Negócio pelo RH (o Financeiro,
-// Compras e armazém, o Gestor de obra, o Técnico…). Sem nenhum dos dois, fica o "Sem acesso" de sempre (ProtectedRoute).
+// 30/10/2026 (20270101340000): o /negocios abre a quem tem pessoas.view pelo perfil da Olyvia OU (17/11) é técnico de obra pela base
+// (neg_meus_papeis: o cargo técnico de obra do RH, como antes). O Papel no Negócio do RH (Financeiro, Compras e armazém, Gestor de obra…)
+// saiu: esses entram pelas permissões do perfil. Sem nenhum, fica o "Sem acesso" de sempre (ProtectedRoute).
 import type { ReactNode } from "react";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { usePermissions } from "@/hooks/usePermissions";
