@@ -66,6 +66,29 @@ describe("17/11 (Rúben: «se clico em sanita, não posso pesquisar por sanitas�
     expect(bateComPesquisa(p, "suspensa")).toBe(false);
     expect(bateComPesquisa(p, "")).toBe(true);
   });
+  it("sinónimos e plurais: «douradas» encontra ORO, «pretos» encontra Negro, «cromada» encontra Cromo", () => {
+    const oro = produtoDaLinha(linha("Coluna de Duche NILO ORO"), "coluna_duche")!;
+    const negro = produtoDaLinha(linha("Resguardo Kenna Angular 95x75 Negro"), "resguardo")!;
+    const cromo = produtoDaLinha(linha("Torneira de Lavatório CASSIO Cromo"), "torneira")!;
+    expect(bateComPesquisa(oro, "douradas")).toBe(true);
+    expect(bateComPesquisa(negro, "pretos")).toBe(true);
+    expect(bateComPesquisa(cromo, "cromada")).toBe(true);
+    expect(bateComPesquisa(cromo, "douradas")).toBe(false);
+  });
+});
+
+describe("17/11 (Rúben: «a torneira tem que estar sempre associada a um móvel»)", () => {
+  it("escolher o móvel escolhe a torneira; sem nenhuma a combinar com o estilo, a primeira", async () => {
+    const { escolherProduto } = await import("./necessidadesEstudio");
+    const { PROJETO_EXEMPLO } = await import("./exemploEstudio");
+    const movel = PROJETO_EXEMPLO.depois.pecas.find((x) => x.tipo === "movel")!;
+    const torneiraOro = produtoDaLinha(linha("Torneira de Lavatório SIRIO ORO"), "torneira")!;
+    const movelReal = produtoDaLinha(linha("Móvel AXIS 60x81x45 Branco"), "movel")!;
+    usarProdutosReais([torneiraOro, movelReal]);
+    const x = { ...PROJETO_EXEMPLO, estilo: { cores: ["preto" as const], porCategoria: {} }, acompanha: {} };
+    const r = escolherProduto(x, movel.id, movelReal.id);
+    expect(r.acompanha[movel.id]?.torneira).toBe(torneiraOro.id);
+  });
 });
 
 describe("o Estúdio passa a escolher dos produtos verdadeiros", () => {

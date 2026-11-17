@@ -24,21 +24,8 @@ export const CATEGORIAS_REAIS: Partial<Record<Categoria, string[]>> = {
 /** Uma palavra para procurar cada cor (a pesquisa do servidor também apanha os atributos). */
 const PROCURA_COR: Record<Cor, string> = { branco: "branco", preto: "preto", cinza: "cinza", madeira: "madeira", bege: "bege" };
 
-import { semAcento } from "./pesquisaEstudio";
-export { semAcento };
-
-const COR_PALAVRAS: [Cor, RegExp][] = [
-  ["branco", /\b(branc|blanc|bianc|white)/],
-  ["preto", /\b(pret|negr|black|nero)/],
-  ["cinza", /\b(cinz|gris|grey|gray|antracit|grafit|cimento|cement|concret|crom|inox|aco\b|acero|niquel|titani|gun ?metal)/],
-  ["madeira", /\b(madeir|carvalh|nogueir|nogal|roble|oak|wood|freixo|fresno|cerejeir|walnut|teca|wengue|olmo)/],
-  ["bege", /\b(bege|beige|beje|creme|crema|marfil|arena|areia|sand|taupe|cappuc|capuc|linho|ouro|oro\b|dourad|cobre|rosa gold)/],
-];
-/** As cores de um produto pelo nome e pelos atributos («SANITA GLAMIC BTW CINZA MATE» → cinza). */
-export function coresDoTexto(texto: string): Cor[] {
-  const t = semAcento(texto);
-  return COR_PALAVRAS.filter(([, rx]) => rx.test(t)).map(([c]) => c);
-}
+import { coresDoTexto, semAcento } from "./pesquisaEstudio";
+export { coresDoTexto, semAcento };
 /** Um tom mais fiel do que a cor do estilo, para o desenho e o 3D (dourado, cobre, cromado). */
 function hexDoTexto(texto: string, cores: Cor[]): string {
   const t = semAcento(texto);

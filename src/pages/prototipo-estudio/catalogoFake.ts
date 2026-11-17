@@ -23,6 +23,9 @@ export const NOME_CATEGORIA: Record<Categoria, string> = {
 };
 /** O que acompanha cada peça (escolhe-se no mesmo painel). */
 export const ACOMPANHA: Partial<Record<TipoPeca, Categoria[]>> = { base: ["coluna_duche", "resguardo"], banheira: ["coluna_duche"], movel: ["torneira"], lava: ["torneira"] };
+/** 17/11 (Rúben: «a torneira tem que estar sempre associada a um móvel, não pode estar fora de um móvel»): o que acompanha sempre a peça
+ *  (escolhe-se sozinho com ela e, se faltar, a proposta diz que falta). */
+export const ACOMPANHA_SEMPRE: Partial<Record<TipoPeca, Categoria[]>> = { movel: ["torneira"], lava: ["torneira"] };
 
 export interface Produto {
   id: string;
