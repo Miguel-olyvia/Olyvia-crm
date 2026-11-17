@@ -167,9 +167,6 @@ function TemplateDaProposta({ c, children }: { c: ContextoDosTemplates; children
 }
 
 /* ------------------------------------------------------------------------------------------------ passo Contrato */
-/** «2026-10-30» passa a «30/10/2026»; qualquer outro texto fica como está. */
-const dataDmy = (iso: string): string => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso.split("-").reverse().join("/") : iso);
-
 /** 17/11: «30/10/2026» (a data da proposta vem assim de useDadosDaProposta) passa a «2026-10-30»: {{proposta_data}} formata-se com
  *  new Date(), que não lê dd/mm/aaaa (dava «NaN de undefined de NaN» no contrato). Outro texto fica como está. */
 export const dataIso = (dmy: string): string => {
@@ -187,7 +184,8 @@ function dadosDaMinuta(d: Negocio, c: ContextoDosTemplates, nome: string, valore
     empresa_nome: nome, cliente_nome: d.f.nome_fiscal || d.nome, cliente_nif: d.f.nif_fat || d.f.nif || "", cliente_morada: d.f.morada || d.local || "",
     cliente_email: d.f.email || "", cliente_telefone: d.tel.includes("@") ? "" : d.tel, ...(T ? { contrato_valor: T.total, proposta_valor: T.total } : {}),
     ...(proposta ? { proposta_numero: proposta.numero, ...(proposta.data ? { proposta_data: dataIso(proposta.data) } : {}) } : {}),
-    ...(inicio ? { contrato_data_inicio: dataDmy(inicio) } : {}),
+    // 17/11: em ISO, como a da proposta ({{contrato_data_inicio}} formata-se com new Date(): «30/10/2026» dava «NaN de undefined de NaN»)
+    ...(inicio ? { contrato_data_inicio: dataIso(inicio) } : {}),
   };
   return { ...base, ...valores } as ContractVariableData;
 }

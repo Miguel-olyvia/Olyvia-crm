@@ -2057,7 +2057,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     for (const a of acertosPorJuntar(d)) {
       const novas = juntarAoPlano(p, a), comTarefa = linhasComTarefa(a);
       novas.forEach((t, i) => { const x = comTarefa[i]; t.adenda = a.n; if (x) { t.mats = x.mats ? x.mats.map((m) => ({ ...m })) : materiaisDoServico(x.sid, x.q); t.encomendado = []; } });
-      if (novas.length) log(d, `Plano: ${novas.length} ${novas.length === 1 ? "tarefa" : "tarefas"} da adenda ${a.n} juntas pelas Operações`);
+      if (novas.length) log(d, `Plano: ${novas.length} ${novas.length === 1 ? "tarefa da adenda " + a.n + " junta" : "tarefas da adenda " + a.n + " juntas"} pelas Operações`);
       total += novas.length;
     }
     return total;
@@ -3112,7 +3112,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const d = deal(id), a = d.adendas?.find((x) => x.n === n), p = d.obra.plano;
       if (!a || a.estado !== "aceite" || a.contrato !== "enviado") return;
       a.estado = "assinada"; a.assinada = agora(); a.contrato = null;
-      log(d, "Adenda " + n + " assinada pelo cliente");
+      // 17/11: a do acerto (a retificação) assina-a a empresa, sem o cliente (adendaDoValor)
+      log(d, "Adenda " + n + (a.motivo === MOTIVO_ACERTO && a.empresa ? " assinada pela empresa (" + a.empresa.nome + ")" : " assinada pelo cliente"));
       // 3/11: a de um problema do cliente com a obra já concluída reabre-a para a assistência
       { const pr = problemaDaAdenda(d, a); if (pr) reabrirParaAssistencia(d, pr); }
       // 12/11 (quem paga): a de um ajuste pedido pelo cliente faz o ajuste que ficou à espera (prolongar, atrasar, a tarefa nova)

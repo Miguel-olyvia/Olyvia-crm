@@ -76,7 +76,7 @@ describe("a retificação assinada pelo comercial: as tarefas entram com as Oper
     expect(ts.every((t) => Array.isArray(t.encomendado))).toBe(true);
     expect(d.obra.plano!.estado).toBe("aprovado");
     expect(acertosPorJuntar(d)).toEqual([]);
-    expect(d.hist.some((h) => new RegExp(`adenda ${n} juntas pelas Operações`).test(h.t))).toBe(true);
+    expect(d.hist.some((h) => new RegExp(`adenda ${n} juntas? pelas Operações`).test(h.t))).toBe(true);
     // aprovar outra vez (ex.: depois de mexer) não as duplica
     d.obra.plano!.estado = "por aprovar";
     aprovar(S, d, A);
