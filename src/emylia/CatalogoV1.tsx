@@ -4,13 +4,16 @@
 // Escala para centenas de serviços e milhares de produtos: as contas ficam em useMemo e as listas
 // mostram aos poucos ("Mostrar mais").
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { Clock, Plus, TriangleAlert, UserX } from "lucide-react";
+import { Clock, Plus, Trash2, TriangleAlert, UserX } from "lucide-react";
 import { LISTA, NOTA, VALORES, REALCE, Novo, Procurar, Vazio } from "./pecasListaCatalogo";
 import { ProdutosPagina } from "./ProdutosPagina";
 import { FichaProdutoAberto } from "./FichaProdutoAberto";
 import { FichaProduto } from "./FichaProduto";
 import type { LinhaPaginaProduto } from "./real/produtosPaginados";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, pct, type SvcId } from "./motor";
 import type { Ctx } from "./pecas";
@@ -387,6 +390,9 @@ function Tecnicos({ S, C, mudar, novo }: { S: Ctx["S"]; C: Custos; mudar: (fn: (
   // 03/11: o salário do perfil grava com cat_guardar_perfil (services.edit).
   const pode = usePermissoesCatalogo().servicos;
   const L = primeiro(tecnicosCatalogo(S, C), (t) => t.p.id === novo), direcao = S.role === "direcao" && pode;
+  // 17/11: eliminar um ofício (services.edit). Tirá-lo de C.perfis faz a página real chamar cat_retirar_perfil; a base recusa
+  // se estiver em uso noutro lado (cargos, pessoas, obras…) e o ofício volta ao recarregar, com o motivo na linha de estado.
+  const [aEliminar, setAEliminar] = useState<Custos["perfis"][number] | null>(null);
   return (
     <>
       <ul className={LISTA}>
@@ -394,7 +400,7 @@ function Tecnicos({ S, C, mudar, novo }: { S: Ctx["S"]; C: Custos; mudar: (fn: (
           <li key={p.id} className={cn("flex min-h-16 flex-wrap items-center gap-3 py-3", p.id === novo && REALCE)}>
             <span className="min-w-0 flex-1">
               <span className="block text-[15px] font-medium">{p.n}{p.id === novo && <Novo />}</span>
-              <span className={cn(NOTA, "block")}>{servicos ? `${servicos} ${servicos === 1 ? "serviço" : "serviços"} em uso` : "sem serviços em uso"}</span>
+              <span id={`uso-${p.id}`} className={cn(NOTA, "block")}>{servicos ? `${servicos} ${servicos === 1 ? "serviço" : "serviços"} em uso` : "sem serviços em uso"}{pode && servicos > 0 && ": não se pode eliminar"}</span>
               <span className={cn(NOTA, "block")}>{origemHora(hora)}</span>
               {hora.fonte === "rh" && hora.tecnicos.length > 1 && (
                 <details className="text-[15px]">
@@ -409,9 +415,34 @@ function Tecnicos({ S, C, mudar, novo }: { S: Ctx["S"]; C: Custos; mudar: (fn: (
                 <NumeroCelula rotulo={`Salário de ${p.n}`} v={p.salario ?? 0} onSet={(v) => mudar((c) => { c.perfis.find((x) => x.id === p.id)!.salario = v > 0 ? v : null; }, `Salário de ${p.n}: ${eur(v)} €`)} /><span className={NOTA}>€</span></label>
             )}
             <span className="w-28 shrink-0 text-right text-[15px] font-medium tabular-nums">{eh == null ? "—" : `${eur(eh)} €/h`}</span>
+            {pode && (
+              <Button type="button" variant="outline" className="min-h-11 gap-2 text-[15px] text-destructive hover:text-destructive"
+                aria-label={`Eliminar ${p.n}`} disabled={servicos > 0} aria-describedby={servicos > 0 ? `uso-${p.id}` : undefined}
+                title={servicos > 0 ? `Em uso em ${servicos} ${servicos === 1 ? "serviço" : "serviços"}: não se pode eliminar` : undefined}
+                onClick={() => setAEliminar(p)}>
+                <Trash2 className="h-4 w-4" aria-hidden="true" />Eliminar
+              </Button>
+            )}
           </li>
         ))}
       </ul>
+      <AlertDialog open={aEliminar != null} onOpenChange={(o) => { if (!o) setAEliminar(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Eliminar o ofício «{aEliminar?.n}»?</AlertDialogTitle>
+            <AlertDialogDescription>Esta ação não se desfaz.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel className="min-h-11">Cancelar</AlertDialogCancel>
+            <AlertDialogAction className={cn(buttonVariants({ variant: "destructive" }), "min-h-11")}
+              onClick={() => {
+                const p = aEliminar;
+                setAEliminar(null);
+                if (p) mudar((c) => { c.perfis = c.perfis.filter((x) => x.id !== p.id); }, `${p.n} eliminado`);
+              }}>Eliminar</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <ComoSeCalcula>O custo/hora de cada ofício é a média do custo/hora dos técnicos dele no RH (Recursos Humanos (exemplo) › Pessoas › ficha › Detalhes laborais › Ofícios de obra). Sem técnicos, usa o salário do perfil: salário × {nfmt(C.par.meses)} meses + TSU de {nfmt(C.par.tsu)}% + seguros (pelo menos 5 % do salário), a dividir por {nfmt(C.par.horasAno)} h produtivas por ano.</ComoSeCalcula>
     </>
   );

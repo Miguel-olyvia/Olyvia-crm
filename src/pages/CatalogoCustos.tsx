@@ -7,6 +7,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
+import { toast } from "@/hooks/use-toast";
 import type { FichaProdutoReal } from "@/emylia/fichaProdutoDados";
 import { seed, type Estado } from "@/emylia/motor";
 import { lerCustos, useCustos } from "@/emylia/v2/custosStore";
@@ -78,6 +79,9 @@ export default function CatalogoCustos() {
       try { await carregar(b.org); } catch { /* fica o que está; o erro da gravação diz o resto */ }
       aGravar.current = false;
       setGravacao(r.erro ? { k: "erro", t: r.erro } : { k: "gravado", n: r.feitas, avisos: r.avisos });
+      // 17/11: eliminar um ofício que a base recusa (em uso em cargos, pessoas, obras…): o motivo também num aviso; o ofício já voltou (recarregou)
+      const recusa = r.erro ? chamadas.find((c) => c.rpc === "cat_retirar_perfil" && r.erro!.startsWith(`${c.nota}: `)) : undefined;
+      if (recusa && r.erro) toast({ variant: "destructive", title: "O ofício não foi eliminado", description: r.erro.slice(recusa.nota.length + 2) });
     }, 900);
     return () => window.clearTimeout(t);
   }, [C, K, mexido, pronto, S, carregar, queryClient]);
