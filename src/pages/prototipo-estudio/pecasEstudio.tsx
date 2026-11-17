@@ -1,13 +1,14 @@
 // 5/11: as peças do ecrã do Estúdio que mais do que um passo usa (os cartões, as cores, os produtos do catálogo, o orçamento).
 import { useEffect, useRef, useState } from "react";
 import { animate, motion, useReducedMotion } from "framer-motion";
-import { ArrowRight, Check, CircleDot, Trash2, X } from "lucide-react";
+import { ArrowRight, Check, CircleDot, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PECAS, areaChaoM2, areaParedesM2, type PecaPlanta } from "@/emylia/planta";
 import { ACOMPANHA, CORES, NOME_CATEGORIA, combina, coresPara, produto, produtosDe, type Categoria, type Cor, type Estilo, type Produto } from "./catalogoFake";
 import { IVA, alturaFinalCm, escolherProduto, estadoDaPeca, totais, type Projeto } from "./necessidadesEstudio";
 import { Ilustracao } from "./Ilustracao";
+import { bateComPesquisa, procurarNoCatalogo } from "./pesquisaEstudio";
 
 export const eur = (n: number) => n.toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 export const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
@@ -127,14 +128,37 @@ export function CartaoProduto({ prod, estilo, escolhido, onEscolher, recomendado
 export function ListaProdutos({ cat, estilo, escolhido, onEscolher, limite, acao }: { cat: Categoria; estilo: Estilo; escolhido?: string; onEscolher: (id: string) => void; limite?: number; acao?: string }) {
   const [todos, setTodos] = useState(false);
   const [mais, setMais] = useState(false);
-  const completa = produtosDe(cat, estilo, todos);
+  // 17/11 (Rúben: «se clico em sanita, não posso pesquisar por sanitas»): procurar pelo nome, o modelo ou os atributos. Com texto, a
+  // lista mostra todas as cores (quem procura quer ver tudo) e, um instante depois de parar de escrever, procura também no catálogo
+  // inteiro da empresa (o que não estava carregado junta-se à lista)
+  const [q, setQ] = useState("");
+  const [aProcurar, setAProcurar] = useState(false);
+  useEffect(() => {
+    if (q.trim().length < 2) { setAProcurar(false); return; }
+    let vivo = true;
+    const t = setTimeout(() => {
+      setAProcurar(true);
+      procurarNoCatalogo(cat, q).catch(() => 0).finally(() => { if (vivo) setAProcurar(false); });
+    }, 350);
+    return () => { vivo = false; clearTimeout(t); };
+  }, [q, cat]);
+  const procura = q.trim();
+  const completa = procura ? produtosDe(cat, estilo, true).filter((p) => bateComPesquisa(p, procura)) : produtosDe(cat, estilo, todos);
   const lista = limite && !mais ? completa.slice(0, limite) : completa;
   const recomendado = produtosDe(cat, estilo)[0]?.id;
-  const fora = produtosDe(cat, estilo, true).length - produtosDe(cat, estilo).length;
+  const fora = procura ? 0 : produtosDe(cat, estilo, true).length - produtosDe(cat, estilo).length;
   return (
     <div className="space-y-2">
-      <p className="text-sm text-muted-foreground">Filtrado por {coresPara(estilo, cat).map((c) => CORES[c].n.toLowerCase()).join(" e ") || "todas as cores"}.</p>
-      {lista.length === 0 && <p className="text-sm">Nenhum produto combina com o estilo.</p>}
+      <label className="relative block">
+        <span className="sr-only">Procurar {NOME_CATEGORIA[cat].toLowerCase()}</span>
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+        <input type="search" value={q} onChange={(e) => { setQ(e.target.value); setMais(false); }} placeholder={`Procurar ${NOME_CATEGORIA[cat].toLowerCase()}: nome, modelo, cor, medida…`}
+          className={cn(INP, "pl-9")} />
+      </label>
+      {procura
+        ? <p className="text-sm text-muted-foreground" aria-live="polite">{aProcurar ? "A procurar no catálogo…" : `${completa.length} ${completa.length === 1 ? "resultado" : "resultados"} para «${procura}», em todas as cores.`}</p>
+        : <p className="text-sm text-muted-foreground">Filtrado por {coresPara(estilo, cat).map((c) => CORES[c].n.toLowerCase()).join(" e ") || "todas as cores"}.</p>}
+      {lista.length === 0 && !aProcurar && <p className="text-sm">{procura ? "Nenhum produto com esse nome." : "Nenhum produto combina com o estilo."}</p>}
       <ul className="space-y-2">{lista.map((prod) => <CartaoProduto key={prod.id} prod={prod} estilo={estilo} escolhido={escolhido === prod.id} recomendado={prod.id === recomendado} acao={acao} onEscolher={() => onEscolher(prod.id)} />)}</ul>
       {limite && completa.length > limite && <button type="button" className="min-h-11 text-sm text-primary underline-offset-4 hover:underline" onClick={() => setMais((x) => !x)}>{mais ? "Ver menos" : `Ver mais ${completa.length - limite}`}</button>}
       {fora > 0 && <button type="button" className="min-h-11 text-sm text-primary underline-offset-4 hover:underline" onClick={() => setTodos((x) => !x)}>{todos ? "Só os que combinam" : `Ver também os outros ${fora}`}</button>}
