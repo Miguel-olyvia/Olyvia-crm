@@ -115,6 +115,15 @@ describe("17/11: as frases da gravação do Rúben", () => {
     expect(ac("vai até ao fundo da página")).toBe("scroll:fundo");
     expect(ac("vai para o fim")).toBe("passo:fim"); // o fim do negócio continua a ser o passo
   });
+  it("gravar: «começa a gravar», «grava a visita», «termina a gravação», «para de gravar»", () => {
+    const g = (f: string) => { const c = interpretarComando(f); return c.acao === "gravar" ? (c.ligar ? "liga" : "para") : c.acao; };
+    expect(g("começa a gravar")).toBe("liga");
+    expect(g("Olyvia, grava a visita")).toBe("liga");
+    expect(g("inicia a chamada")).toBe("liga");
+    expect(g("termina a gravação")).toBe("para");
+    expect(g("para de gravar")).toBe("para");
+    expect(g("acaba a chamada")).toBe("para");
+  });
   it("«ok abre o Ruben Carvalho novamente»: o «ok» e o «novamente» ficam de fora", () => {
     expect(cmd("ok abre o Ruben Carvalho novamente")).toBe(">ruben carvalho");
     expect(cmd("pronto, vai aos negócios outra vez")).toBe("Negócios");

@@ -21,6 +21,8 @@ const PALAVRAS_VAZIAS = new Set(["o", "a", "os", "as", "do", "da", "dos", "das",
 const NUMEROS: Record<string, number> = {
   zero: 0, um: 1, uma: 1, dois: 2, duas: 2, tres: 3, quatro: 4, cinco: 5, seis: 6, sete: 7, oito: 8, nove: 9, dez: 10, onze: 11, doze: 12,
   treze: 13, catorze: 14, quatorze: 14, quinze: 15, dezasseis: 16, dezassete: 17, dezoito: 18, dezanove: 19, vinte: 20, rc: 0,
+  // 17/11 (gravação: «no primeiro andar»): os andares dizem-se por ordinais
+  primeiro: 1, segundo: 2, terceiro: 3, quarto: 4, quinto: 5, sexto: 6, setimo: 7, oitavo: 8, nono: 9, decimo: 10,
 };
 
 /** O rótulo sem «(opcional)» nem «Sugerido», normalizado. */
@@ -85,7 +87,7 @@ export function planoPreencher(frase: string, campos: readonly CampoEcra[]): Aca
   ordem.forEach(([i, pos], j) => {
     const fimSeg = j + 1 < ordem.length ? ordem[j + 1][1].ini : s.length;
     const seg = s.slice(pos.fim, fimSeg).trim();
-    const antes = s.slice(Math.max(0, pos.ini - 8), pos.ini);
+    const antes = s.slice(Math.max(0, pos.ini - 20), pos.ini);
     const a = resposta(campos[i], seg, /^(?:tem|ha|com)\b/.test(pos.k) ? `${antes} tem` : antes, pos.k);
     if (a) { acoes.push({ campo: i, ...a }); respondidos.add(i); pedacosUsados.push([pos.fim, fimSeg]); }
   });
@@ -142,7 +144,8 @@ function resposta(c: CampoEcra, seg: string, antes: string, chave = ""): Respost
     return null;
   }
   if (c.tipo === "contador") {
-    const n = numeroDito(seg) ?? numeroDito(antes);
+    // «primeiro andar», «quatro andares»: o número logo antes do rótulo ganha ao que vem depois (que já pode ser de outra pergunta)
+    const n = numeroDito(antes.trim().split(" ").pop() ?? "") ?? numeroDito(seg.split(" ").slice(0, 3).join(" "));
     return n == null ? null : { tipo: "contador", n };
   }
   const texto = seg.replace(/^(?:(?:e|é|:|de|do|da|que|o|a|igual a|fica)\s+)+/, "").trim();

@@ -734,8 +734,9 @@ serve(async (req: Request) => {
           .eq("document_id", docId)
           .maybeSingle();
 
+        let publishError: unknown = null;
         if (existingDoc) {
-          await supabase
+          const { error } = await supabase
             .from("client_portal_documents")
             .update({
               is_visible: true,
@@ -746,8 +747,9 @@ serve(async (req: Request) => {
               updated_at: new Date().toISOString(),
             })
             .eq("id", existingDoc.id);
+          publishError = error;
         } else {
-          await supabase.from("client_portal_documents").insert({
+          const { error } = await supabase.from("client_portal_documents").insert({
             portal_user_id: portalUserId,
             organization_id,
             entity_id: entityId,
@@ -756,6 +758,35 @@ serve(async (req: Request) => {
             is_visible: true,
             published_by: callerAnew?.id || null,
           });
+          publishError = error;
+        }
+
+        if (publishError) {
+          // fail-soft como antes, mas visível nos logs e sem dar o contrato como enviado
+          console.error("Error publishing document to portal:", publishError);
+          return;
+        }
+
+        // 17/11 (vindo da main, 9305d20d): contrato publicado no portal ⇒ draft → pending_signature. Sem isto o contrato ficava em
+        // «Rascunho» e o cliente não o conseguia assinar (fluxo de 16/11: contrato antes do pagamento). Só sai de 'draft' (a guarda
+        // está no próprio UPDATE); pending_signature não está nos aliases de assinatura, por isso não mexe em stock nem em encomendas.
+        // Nunca fatal: o documento já está publicado.
+        if (docType === "contract") {
+          try {
+            const { error: statusError } = await supabase
+              .from("client_contracts")
+              .update({
+                status: "pending_signature",
+                status_changed_at: new Date().toISOString(),
+                status_changed_by: callerAnew?.id || null,
+              })
+              .eq("id", docId)
+              .eq("organization_id", organization_id)
+              .eq("status", "draft");
+            if (statusError) console.error("Error moving contract to pending_signature:", statusError);
+          } catch (statusErr) {
+            console.error("Error moving contract to pending_signature:", statusErr);
+          }
         }
       } catch (e) {
         console.error("Error publishing document to portal:", e);

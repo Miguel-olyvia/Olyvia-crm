@@ -438,8 +438,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     );
     const resumoMedidas = CM.filter(([k]) => medida(v.med, k) > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(medida(v.med, k))}`);
     const comWC = d.linha === "wc" || divisoesEscolhidas(d.f).includes("Casa de banho");
-    // 6/11: a cozinha também segue o Estúdio
-    const comEstudio = comWC || d.linha === "coz" || divisoesEscolhidas(d.f).includes("Cozinha");
+    // 6/11: a cozinha também segue o Estúdio. 17/11 (Rúben, num negócio de «Remodelação geral» com os passos antigos: «já não devia
+    // existir nada disto… passou tudo para o Estúdio, só era exterior, interior e Estúdio»): todas as visitas seguem o Estúdio
+    const comEstudio = true;
     const passoNec: Passo = { id: "nec", titulo: "Necessidades do cliente", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed && !faltaProdutosVisita(d, S).length && (!simples || E(ESCOLHAS).oculto || !emFalta([E(ESCOLHAS)], d.f).length),
       resumo: [...orcLinhas(d, S).map((sid) => S.svc[sid]?.n ?? sid), ...(v.prod ?? []).map((p) => p.n)], corpo: <NecessidadesCliente {...ctx} d={d} simples={simples} /> };
     passos = [
@@ -981,6 +982,10 @@ function AcertoDoValor({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const mi = impactoDasMedidas(d, ctx.S, medidasRetificadas(d)), pi = impactoDoPlano(d, ctx.S);
   // só o que as medidas e o plano mudam (os «acertos» do orçamento refeito não entram: a adenda não os leva)
   const dif = a ? totalAdenda(a.linhas, a.desconto) : (mi?.medidas ?? 0) + (pi.semValor ? 0 : pi.valor);
+  // 17/11 (fluxo de 16/11): se a retificação baixa o valor, não há adenda: o Financeiro emite a nota de crédito no programa certificado e
+  // regista-a aqui (A.registarNotaCredito, finance.invoice); o comercial pode ainda seguir sem acerto
+  const baixa = !a && dif < -0.004;
+  if (baixa) return <NotaDeCredito ctx={ctx} d={d} R={R} dif={dif} podeComercial={pode} />;
   return (
     <section aria-labelledby="acerto-t" className="space-y-3 rounded-2xl border border-amber-300/70 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -998,6 +1003,34 @@ function AcertoDoValor({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </div>
         {!pode && <p className="text-sm text-muted-foreground">Quem prepara a adenda é o comercial. <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={() => ctx.run(() => ctx.A.role("comercial"))}>Mudar para {PAPEIS.comercial.n}</button></p>}
       </>}
+    </section>
+  );
+}
+
+/** 17/11 (teste do fluxo de 16/11): a retificação baixou o valor. O Financeiro emite a nota de crédito no programa certificado e regista o
+ *  número aqui (finance.invoice); com ela registada, o plano aprova-se e a encomenda de cliente segue. */
+export function NotaDeCredito({ ctx, d, R, dif, podeComercial }: { ctx: Ctx; d: Negocio; R: string[]; dif: number; podeComercial: boolean }) {
+  const [numero, setNumero] = useState("");
+  const podeFin = podeNeg(ctx.S.role, "finance.invoice");
+  const id = `nota-credito-${d.id}`;
+  return (
+    <section aria-labelledby="nota-credito-t" className="space-y-3 rounded-2xl border border-amber-300/70 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 id="nota-credito-t" className="text-[17px] font-semibold tracking-tight">O valor baixou: nota de crédito</h3>
+        <p className="text-lg font-semibold tabular-nums">−{eur(Math.abs(dif))} € <span className="text-sm font-normal text-muted-foreground">s/ IVA</span></p>
+      </div>
+      <ul className="list-disc space-y-0.5 pl-5 text-[15px]">{R.map((x) => <li key={x}>{x}</li>)}</ul>
+      <p className="text-[15px] text-muted-foreground">O Financeiro emite a nota de crédito no programa de faturação certificado e regista o número aqui. Depois, aprova-se o plano e segue a encomenda de cliente.</p>
+      <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); ctx.run(() => { if (ctx.A.registarNotaCredito(d.id, numero)) setNumero(""); }); }}>
+        <label htmlFor={id} className="space-y-1 text-[15px] font-medium">
+          <span className="block">Número da nota de crédito</span>
+          <input id={id} value={numero} onChange={(e) => setNumero(e.target.value)} disabled={!podeFin} placeholder="NC 2026/…"
+            className="min-h-11 w-56 rounded-lg border border-input bg-background px-3 text-[15px] disabled:opacity-50" />
+        </label>
+        <Button type="submit" className="min-h-11" disabled={!podeFin || !numero.trim()}>Registar nota de crédito</Button>
+        {podeComercial && <Button type="button" variant="ghost" className="min-h-11" onClick={() => ctx.run(() => ctx.A.semAdendaDoValor(d.id))}>Seguir sem acerto</Button>}
+      </form>
+      {!podeFin && <p className="text-sm text-muted-foreground">Quem regista a nota de crédito é o Financeiro.</p>}
     </section>
   );
 }

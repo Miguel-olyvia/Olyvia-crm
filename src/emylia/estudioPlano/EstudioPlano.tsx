@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { TECS, impactoDasMedidas, medidasEPlanoAbertos, impactoDoPlano, medidasRetificadas, nfmt, tot, type Negocio, type Tarefa } from "../motor";
+import { TECS, acertoDoValorPendente, impactoDasMedidas, medidasEPlanoAbertos, impactoDoPlano, medidasRetificadas, nfmt, tot, type Negocio, type Tarefa } from "../motor";
 import type { Ctx } from "../pecas";
 import { NaFrente } from "../NaFrente";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
@@ -107,8 +107,10 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
   // 12/11 (Rúben: «a validação das medidas e do plano da obra só vêm depois do Financeiro»): o plano ajusta-se antes, mas aprova-se depois
   // do pagamento validado. 11/11 (Rúben: «em simultâneo»): não espera pelas medidas; se elas mudarem, o plano volta a por aprovar
   const planeia = podeNeg(S.role, "obra.planear"), pago = medidasEPlanoAbertos(d);
-  const podeAprovar = p.estado === "por aprovar" && planeia && pago && !alertas.some((a) => a.m === "de férias");
-  const porque = p.estado !== "por aprovar" ? "" : !pago ? "O plano aprova-se depois de o Financeiro validar o pagamento." : !planeia ? "Quem aprova o plano são as Operações." : alertas.some((a) => a.m === "de férias") ? "Há um técnico de férias numa tarefa." : "";
+  // 17/11 (teste do fluxo de 16/11): com o valor mudado e o acerto por decidir, aprovar era recusado sem nada no ecrã; agora diz-se porquê
+  const acertoPorDecidir = acertoDoValorPendente(d);
+  const podeAprovar = p.estado === "por aprovar" && planeia && pago && !acertoPorDecidir && !alertas.some((a) => a.m === "de férias");
+  const porque = p.estado !== "por aprovar" ? "" : !pago ? "O plano aprova-se depois de o Financeiro validar o pagamento." : !planeia ? "Quem aprova o plano são as Operações." : acertoPorDecidir ? "O valor mudou: primeiro a retificação vai ao Financeiro (a adenda do acerto, ou a nota de crédito se baixou); depois, aprova-se o plano." : alertas.some((a) => a.m === "de férias") ? "Há um técnico de férias numa tarefa." : "";
   const fimData = dias[Math.max(0, fim - 1)];
   const fazer = (fn: () => void) => run(fn);
   const retrato = (): Retrato => p.tasks.map((t) => ({ dia: t.dia, dur: t.dur, h: t.h, tec: t.tec }));

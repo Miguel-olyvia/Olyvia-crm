@@ -20,7 +20,6 @@ import { extractPromptTokens, substituteVariables, type ContractVariableData } f
 import { sanitizeRichHtml } from "@/utils/sanitize";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { cn } from "@/lib/utils";
-import { planoAprovadoDe, retificacaoAceite } from "@/emylia/preparacaoObra";
 import { ContratoNoPasso } from "./ContratoNoPasso";
 import { EnviarParaPortal } from "./EnviarParaPortal";
 import { SeletorDeTemplate } from "./SeletorDeTemplate";
@@ -168,8 +167,12 @@ function TemplateDaProposta({ c, children }: { c: ContextoDosTemplates; children
 }
 
 /* ------------------------------------------------------------------------------------------------ passo Contrato */
-/** «2026-10-30» passa a «30/10/2026»; qualquer outro texto fica como está. */
-const dataDmy = (iso: string): string => (/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso.split("-").reverse().join("/") : iso);
+/** 17/11: «30/10/2026» (a data da proposta vem assim de useDadosDaProposta) passa a «2026-10-30»: {{proposta_data}} formata-se com
+ *  new Date(), que não lê dd/mm/aaaa (dava «NaN de undefined de NaN» no contrato). Outro texto fica como está. */
+export const dataIso = (dmy: string): string => {
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(dmy.trim());
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : dmy;
+};
 
 type DadosDaProposta = { numero: string; data: string } | null | undefined;
 
@@ -180,8 +183,9 @@ function dadosDaMinuta(d: Negocio, c: ContextoDosTemplates, nome: string, valore
   const base: ContractVariableData = {
     empresa_nome: nome, cliente_nome: d.f.nome_fiscal || d.nome, cliente_nif: d.f.nif_fat || d.f.nif || "", cliente_morada: d.f.morada || d.local || "",
     cliente_email: d.f.email || "", cliente_telefone: d.tel.includes("@") ? "" : d.tel, ...(T ? { contrato_valor: T.total, proposta_valor: T.total } : {}),
-    ...(proposta ? { proposta_numero: proposta.numero, ...(proposta.data ? { proposta_data: proposta.data } : {}) } : {}),
-    ...(inicio ? { contrato_data_inicio: dataDmy(inicio) } : {}),
+    ...(proposta ? { proposta_numero: proposta.numero, ...(proposta.data ? { proposta_data: dataIso(proposta.data) } : {}) } : {}),
+    // 17/11: em ISO, como a da proposta ({{contrato_data_inicio}} formata-se com new Date(): «30/10/2026» dava «NaN de undefined de NaN»)
+    ...(inicio ? { contrato_data_inicio: dataIso(inicio) } : {}),
   };
   return { ...base, ...valores } as ContractVariableData;
 }
@@ -312,7 +316,9 @@ function MinutaDoNegocio({ c, children, bloqueado, soEscolher = false }: { c: Co
       {!soEscolher && <CondicoesDoContrato c={c} nomeMinuta={minuta?.name ?? ""} />}
       {/* 12/11 (Rúben: «falta ver aqui o contrato»): o contrato montado, antes do envio ao portal */}
       {!soEscolher && <div key={org.chave}><ContratoNoPasso S={c.ctx.S} d={c.d} minutaHtml={minutaHtml} nomeMinuta={minuta?.name ?? null} falta={falta} /></div>}
-      {!soEscolher && <EnviarParaPortal negocioId={c.negocioId} tipo="contract" podeEditar={c.podeEditar} />}
+      {/* 17/11: enviado ao portal, o contrato do negócio fica «enviado» (à espera da assinatura; a base: pending_signature) */}
+      {!soEscolher && <EnviarParaPortal negocioId={c.negocioId} tipo="contract" podeEditar={c.podeEditar}
+        aoEnviar={() => c.ctx.run(() => { c.ctx.A.contratoNoPortal(c.d.id); })} />}
     </div>
   );
 }
@@ -345,8 +351,7 @@ export function oQueFaltaNoContrato({ c, minuta, valores, nMinutas, aLer }: {
   }
   const { g } = grupoDasCondicoes(c, minuta?.name ?? "");
   for (const x of emFalta([g], c.d.f)) falta.push(`Responder: ${x.l}.`);
-  if (!retificacaoAceite(c.d)) falta.push("As medidas aceites.");
-  if (!planoAprovadoDe(c.d)) falta.push("O plano da obra aprovado pelas Operações.");
+  // 17/11 (fluxo de 16/11): o contrato vem logo a seguir à proposta aceite, ANTES do pagamento; as medidas e o plano são depois, na Obra
   return falta;
 }
 

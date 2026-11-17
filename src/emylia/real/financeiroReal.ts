@@ -74,10 +74,14 @@ function aplicarResposta(d: Negocio, o: OpFinanceira, r: Record<string, unknown>
   }
   const rc = typeof r.recibo === "string" ? r.recibo : null;
   if (!rc) return;
-  // 30/10 (visto no browser): o ecrã numera o recibo antes de a base responder (RC 2026/301) e escreve-o no histórico; fica o da base
-  const antes = [d.fin.recibo?.n, ...(d.fin.tranches ?? []).map((x) => x.recibo)].filter((x): x is string => !!x && x !== rc);
-  for (const h of d.hist ?? []) for (const v of antes) if (h.t.includes(v)) h.t = h.t.split(v).join(rc);
+  // 30/10 (visto no browser): o ecrã numera o recibo antes de a base responder (RC 2026/301) e escreve-o no histórico; fica o da base.
+  // 17/11: só quando o pagamento é do contrato (a fatura do negócio ou uma tranche): o de uma adenda trocava o recibo do contrato no histórico
   const t = d.fin.tranches?.find((x) => x.numero.trim() === o.fatura);
+  if (t || d.fin.fatura?.n.trim() === o.fatura) {
+    const primeira = !t || (d.fin.tranches ?? []).find((x) => x.pagamento) === t || !(d.fin.tranches ?? []).some((x) => x.pagamento);
+    const antes = [t?.recibo, primeira ? d.fin.recibo?.n : undefined].filter((x): x is string => !!x && x !== rc);
+    for (const h of d.hist ?? []) for (const v of antes) if (h.t.includes(v)) h.t = h.t.split(v).join(rc);
+  }
   if (t) {
     // 29/10: a tranche paga pelo cartão Pagamento fica com o pagamento; a 1.ª paga é a do negócio, que fica com o recibo da base
     t.pagamento ??= { data: o.data ?? "", conta: o.conta ?? "", ref: o.referencia ?? "" };
@@ -86,7 +90,13 @@ function aplicarResposta(d: Negocio, o: OpFinanceira, r: Record<string, unknown>
     return;
   }
   if (d.fin.fatura?.n.trim() === o.fatura) { d.fin.recibo = { n: rc, q: d.fin.recibo?.q ?? "hoje" }; return; }
-  for (const a of d.adendas ?? []) for (const f of faturasAdenda(a)) if (f.n.trim() === o.fatura && f.recibo) f.recibo = { ...f.recibo, n: rc };
+  for (const a of d.adendas ?? []) for (const f of faturasAdenda(a)) {
+    if (f.n.trim() !== o.fatura || !f.recibo) continue;
+    // 17/11 (teste do fluxo de 16/11, negócio 1002): também na adenda o histórico ficava com o número do ecrã («RC 2026/301») e não o da base
+    const velho = f.recibo.n;
+    if (velho && velho !== rc) for (const h of d.hist ?? []) if (h.t.includes(velho)) h.t = h.t.split(velho).join(rc);
+    f.recibo = { ...f.recibo, n: rc };
+  }
 }
 
 /** Grava pelas funções do servidor e devolve os avisos. Um erro para (a fatura seguinte pode depender desta) e lança-se. */

@@ -10,12 +10,14 @@ interface EnviarParaPortalProps {
   tipo: DocumentoParaPortal;
   /** `pessoas.edit` neste negócio. */
   podeEditar: boolean;
+  /** 17/11: chamado depois de o portal ter o documento (o contrato do negócio passa a «enviado» no motor). */
+  aoEnviar?: () => void;
 }
 
 const NOME: Record<DocumentoParaPortal, string> = { proposal: "proposta", contract: "contrato" };
 
-export function EnviarParaPortal({ negocioId, tipo, podeEditar }: EnviarParaPortalProps) {
-  const p = useEnviarParaPortalNegocio(negocioId, tipo);
+export function EnviarParaPortal({ negocioId, tipo, podeEditar, aoEnviar }: EnviarParaPortalProps) {
+  const p = useEnviarParaPortalNegocio(negocioId, tipo, aoEnviar);
   const nome = NOME[tipo];
   const pode = podeEditar && p.podePermissao;
   return (

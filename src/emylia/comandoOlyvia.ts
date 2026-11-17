@@ -34,6 +34,8 @@ export type Comando =
   | { acao: "scroll"; para: "baixo" | "cima" | "topo" | "fundo" }
   /** 17/11: «limpa a pesquisa», «tira o filtro». */
   | { acao: "limpar-pesquisa" }
+  /** 17/11 (Rúben: «isto vai substituir a gravação da chamada»): «começa a gravar», «grava a visita», «termina a gravação». */
+  | { acao: "gravar"; ligar: boolean }
   /** 17/11: o que sobra pode ser preencher campos («acesso fácil, estacionamento pago») ou um passo pelo nome — a página decide. */
   | { acao: "nada" };
 
@@ -43,6 +45,8 @@ export const EV_ABRIR = "olyvia-abrir-negocio";
 export const EV_FASE = "olyvia-fase";
 export const EV_PASSO = "olyvia-passo";
 export const EV_RESPOSTA = "olyvia-resposta";
+/** 17/11: a frase vai ao Estúdio (estudioPorVoz.ts); o detalhe { frase, ok, msg } volta preenchido se o Estúdio fez alguma coisa. */
+export const EV_ESTUDIO = "olyvia-estudio";
 /** A página que fez (ou não conseguiu) responde ao botão, que mostra a frase. */
 export const responderOlyvia = (msg: string, ok = true): void => { window.dispatchEvent(new CustomEvent(EV_RESPOSTA, { detail: { msg, ok } })); };
 
@@ -161,12 +165,18 @@ function scrollPedido(s: string): "baixo" | "cima" | "topo" | "fundo" | null {
 }
 const LIMPAR = /\b(?:limpa|limpar|apaga|apagar|tira|tirar|esvazia|remove|retira)\b.*\b(?:pesquisa|procura|busca|filtro|filtros)\b|^(?:sem pesquisa|mostra (?:todos|tudo)|ver (?:todos|tudo))$/;
 
+// 17/11: a Olyvia liga e desliga a gravação da chamada / da visita (carrega nos botões do painel, ChamadaDireto.tsx)
+const PARAR_GRAVAR = /\b(?:para|parar|pára|termina|terminar|acaba|acabar|fecha|fechar|desliga|desligar)\b(?:\s+\S+){0,3}\s+(?:gravar|gravacao|chamada)\b|\b(?:para|parar|termina|acaba) (?:de )?gravar\b/;
+const LIGAR_GRAVAR = /^(?:(?:comeca|começa|inicia|iniciar|liga|ligar|vamos|podes)\s+(?:a\s+)?)?(?:gravar|grava)\b|\b(?:comeca|inicia|liga) (?:a )?(?:gravacao|chamada)\b|\b(?:ouve|regista|anota|grava) (?:a |esta )?(?:conversa|visita|chamada)\b/;
+
 /** A frase dita ou escrita vira um comando. Tira a palavra de ativação «Olyvia» do início, se vier. */
 export function interpretarComando(texto: string): Comando {
   const t = juntarLetras(normal(texto));
   if (!t) return { acao: "nada" };
   const semGatilho = limparFrase(t.replace(new RegExp("^(?:ok |o |a )?" + GATILHO.source + "\\s*"), "").trim() || t);
   if (LIMPAR.test(semGatilho)) return { acao: "limpar-pesquisa" };
+  if (PARAR_GRAVAR.test(semGatilho)) return { acao: "gravar", ligar: false };
+  if (LIGAR_GRAVAR.test(semGatilho)) return { acao: "gravar", ligar: true };
   // a página antes dos passos: «vai lá para baixo» não é o passo «lá para baixo»; mas «vai para o fim» continua a ser o passo Fim
   const sc = scrollPedido(semGatilho);
   if (sc) return { acao: "scroll", para: sc };

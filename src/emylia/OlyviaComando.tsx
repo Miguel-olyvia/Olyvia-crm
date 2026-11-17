@@ -8,9 +8,18 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Ear, Mic, MicOff, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { DESTINOS, EV_ABRIR, EV_FASE, EV_PASSO, EV_PESQUISA, EV_RESPOSTA, extrairAposGatilho, interpretarComando, juntarLetras, limparFrase, normal, pareceComando, pedeParaParar, temGatilho, VERBO_PREENCHER } from "./comandoOlyvia";
+import { DESTINOS, EV_ABRIR, EV_ESTUDIO, EV_FASE, EV_PASSO, EV_PESQUISA, EV_RESPOSTA, extrairAposGatilho, interpretarComando, juntarLetras, limparFrase, normal, pedeParaParar, temGatilho, VERBO_PREENCHER } from "./comandoOlyvia";
 import { andarNaPagina, escreverNaPesquisa, executarPlano, lerCampos, preencherPelaFrase, type Acao } from "./preencherOlyvia";
 import { supabase } from "@/integrations/supabase/client";
+
+/** O primeiro botão à vista (fora da própria Olyvia) cujo texto bate certo. */
+function botaoVisivel(rx: RegExp): HTMLButtonElement | null {
+  for (const b of Array.from(document.querySelectorAll<HTMLButtonElement>("button"))) {
+    if (b.disabled || b.closest("[data-olyvia]")) continue;
+    if (rx.test((b.textContent ?? "").replace(/\s+/g, " ").trim())) return b;
+  }
+  return null;
+}
 
 type AcaoIa = { tipo: string; campo?: number | null; opcao?: number | null; n?: number | null; texto?: string | null };
 /** 17/11: a frase que as regras não perceberam vai à IA (função olyvia-comando) com as perguntas do ecrã. Null se não houver resposta. */
@@ -32,8 +41,12 @@ import { useGravacao } from "./gravador";
 const PASSOS_JA = new Set(["fim", "proximo", "anterior", "inicio"]);
 /** Quanto silêncio (ms) chega para agir sem esperar que o browser dê a frase por acabada (o browser leva ~1 s). */
 export const PAUSA_PARA_AGIR = 400;
-/** Quanto tempo (ms) fica acordada depois de «Olyvia» ou da última ordem: entretanto, as ordens não precisam do nome. */
-export const ACORDADA_MS = 30_000;
+/** 17/11: numa frase natural (sem ordem conhecida), quanto silêncio chega para a tratar sem esperar pelo fim de frase do browser. */
+export const PAUSA_FRASE = 1100;
+/** Quanto tempo (ms) fica acordada depois de «Olyvia» ou da última fala: entretanto, as ordens não precisam do nome. */
+export const ACORDADA_MS = 60_000;
+/** 17/11: uma frase com mais palavras do que isto é linguagem natural — vai primeiro à IA (as regras só apanham frases feitas). */
+const PALAVRAS_FRASE_NATURAL = 8;
 
 // Web Speech API (SpeechRecognition): o mínimo que usamos, para não depender de tipos globais que o TS não traz.
 interface ResultadoVoz { results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal?: boolean }> }
@@ -119,10 +132,61 @@ export function OlyviaComando() {
     const noNegocio = naPaginaNegocios && !!new URLSearchParams(locRef.current.search).get("negocio");
     const limpa = limparFrase(juntarLetras(normal(frase)).replace(/^(?:ok |o |a )?o ?l[iy]via\s*/, ""));
 
+    // 17/11: pergunta à IA (olyvia-comando) com o que está no ecrã e faz o que ela disser. Devolve false se não houver IA ou ações
+    // (com `dizerVazio`, mostra a resposta dela mesmo sem ações, ex.: «Bom dia!»).
+    const viaIa = async (): Promise<boolean> => {
+      setAviso({ msg: `«${frase.trim()}» — a pensar…`, ok: true });
+      const lista = { passo: "", listar: true, lista: [] as string[] };
+      if (noNegocio) avisa(EV_PASSO, lista);
+      const campos = lerCampos();
+      const r = await perguntarIa(frase.trim(), locRef.current.pathname + locRef.current.search, campos, lista.lista);
+      if (!r) return false;
+      const doEcra = r.acoes.filter((a) => ["opcao", "contador", "texto"].includes(a.tipo)) as unknown as Acao[];
+      if (doEcra.length) await executarPlano(campos, doEcra);
+      for (const a of r.acoes) {
+        const t = a.texto ?? "";
+        if (a.tipo === "navegar") { const d = DESTINOS.find((x) => x.nome === t); if (d) navigate(d.url); }
+        else if (a.tipo === "scroll") andarNaPagina(t as "baixo" | "cima" | "topo" | "fundo");
+        else if (a.tipo === "passo" && noNegocio) avisa(EV_PASSO, { passo: t, tentar: true, ok: false });
+        else if (a.tipo === "limpar") { if (naPaginaNegocios) avisa(EV_PESQUISA, ""); escreverNaPesquisa(""); }
+        else if (a.tipo === "pesquisar") { if (!naPaginaNegocios) navigate("/negocios"); setTimeout(() => avisa(EV_PESQUISA, t), naPaginaNegocios ? 0 : 80); }
+        else if (a.tipo === "abrir_negocio") { if (!naPaginaNegocios) navigate("/negocios"); setTimeout(() => avisa(EV_ABRIR, { nome: t, fase: null }), naPaginaNegocios ? 0 : 120); }
+      }
+      setAviso({ msg: r.resposta || (r.acoes.length ? "Feito." : `Ouvi «${frase.trim()}» — não percebi.`), ok: r.acoes.length > 0 });
+      return true;
+    };
+
+    // 17/11 (Rúben: «no Estúdio falta ele trabalhar também»): no Estúdio, a frase vai primeiro ao projeto (passos, alturas, peças,
+    // cores — estudioPorVoz.ts); o que ele não souber fazer segue o caminho de sempre (gravar, navegar, IA)
+    if (locRef.current.pathname.startsWith("/prototipo/estudio") && c.acao !== "gravar" && c.acao !== "navegar") {
+      const det = { frase: frase.replace(/^\s*(?:ok\s+|ó\s+)?o\s?l[iíy]via[\s,.:!]*/i, ""), ok: false, msg: "" };
+      avisa(EV_ESTUDIO, det);
+      if (det.ok) { setAviso({ msg: det.msg, ok: true }); return; }
+    }
+
+    // 17/11 (Rúben: «se a plataforma não entender linguagem natural por voz, isto é inútil»): uma frase natural (comprida) vai
+    // primeiro à IA, que a percebe toda («não vai haver contentor, o prédio tem 4 andares e estamos no primeiro»); as regras por
+    // palavras-chave só apanham frases feitas e enganam-se nas compridas («obra… hoje» saltava para o Hoje). Sem IA, seguem as regras.
+    if (limpa.split(" ").length > PALAVRAS_FRASE_NATURAL) {
+      if (await viaIa()) return;
+      // sem IA: de uma frase comprida só se aproveita o que responde às perguntas do ecrã (navegar por uma palavra solta enganava-se)
+      const feito = await preencherPelaFrase(limpa);
+      setAviso(feito.length ? { msg: `Feito — ${feito.join(" · ")}.`, ok: true } : { msg: `Ouvi «${frase.trim()}» — não percebi.`, ok: false });
+      return;
+    }
+
     // 17/11 (gravação do Rúben): andar na página e limpar a pesquisa, em qualquer página
     if (c.acao === "scroll") {
       andarNaPagina(c.para);
       setAviso({ msg: c.para === "baixo" ? "A descer." : c.para === "cima" ? "A subir." : c.para === "topo" ? "Topo da página." : "Fundo da página.", ok: true });
+      return;
+    }
+    if (c.acao === "gravar") {
+      // 17/11 (Rúben: «isto vai substituir a gravação da chamada»): carrega nos botões do painel da chamada / da visita, para o fim da
+      // gravação (preencher os campos, a análise) seguir igual
+      const botao = botaoVisivel(c.ligar ? /^(?:Começar a gravar|Iniciar chamada|Continuar a gravar)$/ : /^Terminar e preencher$/);
+      if (botao) { botao.click(); setAviso({ msg: c.ligar ? "A gravar a conversa. Para uma ordem, diz «Olyvia, …»." : "Gravação terminada — a preencher os campos.", ok: true }); }
+      else setAviso({ msg: c.ligar ? "Para gravar, abre um negócio no Contacto ou na Visita." : "Não há nenhuma gravação a decorrer.", ok: false });
       return;
     }
     if (c.acao === "limpar-pesquisa") {
@@ -170,27 +234,9 @@ export function OlyviaComando() {
         if (c.acao === "ir-fase") avisa(EV_FASE, { fase: c.fase }); else avisa(EV_PASSO, { passo: c.passo });
         fechar(1500);
         break;
-      default: {
+      default:
         // 17/11: as regras não perceberam — pergunta à IA com o que está no ecrã (olyvia-comando); sem ela, diz o que ouviu
-        setAviso({ msg: `«${frase.trim()}» — a pensar…`, ok: true });
-        const lista = { passo: "", listar: true, lista: [] as string[] };
-        if (noNegocio) avisa(EV_PASSO, lista);
-        const campos = lerCampos();
-        const r = await perguntarIa(frase.trim(), locRef.current.pathname + locRef.current.search, campos, lista.lista);
-        if (!r) { setAviso({ msg: `Ouvi «${frase.trim()}» — não percebi. Tenta «vai aos negócios», «desce» ou «acesso fácil».`, ok: false }); break; }
-        const doEcra = r.acoes.filter((a): a is Acao => ["opcao", "contador", "texto"].includes(a.tipo)) as Acao[];
-        if (doEcra.length) await executarPlano(campos, doEcra);
-        for (const a of r.acoes) {
-          const t = a.texto ?? "";
-          if (a.tipo === "navegar") { const d = DESTINOS.find((x) => x.nome === t); if (d) navigate(d.url); }
-          else if (a.tipo === "scroll") andarNaPagina(t as "baixo" | "cima" | "topo" | "fundo");
-          else if (a.tipo === "passo" && noNegocio) avisa(EV_PASSO, { passo: t, tentar: true, ok: false });
-          else if (a.tipo === "limpar") { if (naPaginaNegocios) avisa(EV_PESQUISA, ""); escreverNaPesquisa(""); }
-          else if (a.tipo === "pesquisar") { if (!naPaginaNegocios) navigate("/negocios"); setTimeout(() => avisa(EV_PESQUISA, t), naPaginaNegocios ? 0 : 80); }
-          else if (a.tipo === "abrir_negocio") { if (!naPaginaNegocios) navigate("/negocios"); setTimeout(() => avisa(EV_ABRIR, { nome: t, fase: null }), naPaginaNegocios ? 0 : 120); }
-        }
-        setAviso({ msg: r.resposta || (r.acoes.length ? "Feito." : `Ouvi «${frase.trim()}» — não percebi.`), ok: r.acoes.length > 0 });
-      }
+        if (!(await viaIa())) setAviso({ msg: `Ouvi «${frase.trim()}» — não percebi. Tenta «vai aos negócios», «desce» ou «acesso fácil».`, ok: false });
     }
   }, [navigate]);
 
@@ -234,8 +280,36 @@ export function OlyviaComando() {
   useEffect(() => {
     if (gravavaAntes.current === aGravar) return;
     gravavaAntes.current = aGravar;
-    if (escutaSempre) setAviso(aGravar ? { msg: "Em pausa enquanto se grava.", ok: true } : { msg: "Voltei a ouvir — diz «Olyvia…».", ok: true });
+    if (escutaSempre) setAviso(aGravar ? { msg: "A ouvir a conversa. Para uma ordem, diz «Olyvia, …».", ok: true } : { msg: "Voltei a ouvir — diz «Olyvia…».", ok: true });
   }, [aGravar, escutaSempre]);
+
+  // 17/11 (Rúben: «isto vai substituir a gravação da chamada; ele também vai estar a ouvir o cliente e a tomar anotações»): enquanto
+  // se grava, o micro é do gravador (um só micro: no telemóvel não dá para dois) e a Olyvia ouve pelas falas que ele transcreve. A
+  // conversa toda vai para as notas e os campos (como antes); as ordens começam por «Olyvia, …» (decidido com o Rúben, para o que o
+  // cliente diz nunca ser tomado como ordem). Só «Olyvia»: a fala seguinte, nos 10 s, é a ordem. As falas revistas (a 2.ª passagem)
+  // não contam outra vez.
+  const ultimaFala = useRef<number | null>(null);
+  const esperaOrdem = useRef(0);
+  useEffect(() => {
+    const fs = gravacao.falas ?? [];
+    // ao abrir (ou numa gravação que continua), as falas que já lá estavam não são ordens novas
+    if (ultimaFala.current === null) { ultimaFala.current = fs.reduce((m, f) => Math.max(m, f.inicio), -1); return; }
+    if (!fs.length) { ultimaFala.current = -1; return; }
+    if (!escutaSempre) return;
+    for (const f of fs) {
+      if (f.revista || f.inicio <= ultimaFala.current) continue;
+      ultimaFala.current = f.inicio;
+      const t = f.texto ?? "";
+      if (temGatilho(t)) {
+        const cmd = extrairAposGatilho(t);
+        if (cmd && !pedeParaParar(cmd)) { esperaOrdem.current = 0; void executarRef.current(cmd); }
+        else { esperaOrdem.current = Date.now() + 10_000; setAviso({ msg: "Sim? Diz a ordem.", ok: true }); }
+      } else if (esperaOrdem.current > Date.now()) {
+        esperaOrdem.current = 0;
+        void executarRef.current(t);
+      }
+    }
+  }, [gravacao.falas, escutaSempre]);
 
   // Modo «sempre à escuta»: ouve em contínuo e só age depois de «Olyvia». Só depende de estar ligada — mudar de página não a reinicia.
   // 17/11 (Rúben: «leva tempo a reagir»): não espera que o browser dê a frase por acabada (~1 s); age quando se pára de falar um instante
@@ -255,6 +329,8 @@ export function OlyviaComando() {
     // reinícios e, à terceira, pára e avisa em vez de ficar a ligar e desligar o micro
     let cancelamentos = 0;
     let espera: ReturnType<typeof setTimeout> | null = null;
+    /** A última ordem feita (para completar uma dita aos bocados: «abre o Carlos» … «Mendes»). */
+    let ultima: { frase: string; acao: string; em: number } | null = null;
     // 17/11 (Rúben: «é chato estar sempre a dizer Olyvia, a primeira vez chega»): «Olyvia» acorda-a; acordada, as frases curtas são
     // ordens sem o nome. Cada ordem renova o tempo; ACORDADA_MS sem ordens, ou «obrigado / chega», e volta a precisar de «Olyvia».
     let acordadaAte = 0;
@@ -273,17 +349,24 @@ export function OlyviaComando() {
       if (parado || recRef.current) return;
       const r = new C();
       r.lang = "pt-PT"; r.continuous = true; r.interimResults = true;
-      let usados = 0, inicio = Date.now();
+      // 17/11 (Rúben: «disse "agora abre o Carlos Mendes" e ele apanhou "Carlos", parou, depois "Mendes", e não fez nada; devia estar
+      // sempre a ouvir tudo sem cortar»): quando age a meio de uma frase (numa pausa), o que se disse a seguir NÃO se perde — guarda-se
+      // quantas palavras do resultado ainda em curso já foram usadas (`prefixo`) e o resto continua a contar
+      let usados = 0, prefixo = 0, inicio = Date.now();
       r.onstart = () => { inicio = Date.now(); setAEscutar(true); };
       r.onresult = (e) => {
         cancelamentos = 0;
         if (espera) { clearTimeout(espera); espera = null; }
         const lista = Array.from(e.results);
-        const txt = lista.slice(usados).map((x) => x[0]?.transcript ?? "").join(" ").trim();
-        if (!txt) return;
+        const partes = lista.slice(usados).map((x) => x[0]?.transcript ?? "");
+        if (prefixo && partes.length) partes[0] = partes[0].trim().split(/\s+/).slice(prefixo).join(" ");
+        const txt = partes.join(" ").replace(/\s+/g, " ").trim();
         const final = !!lista[lista.length - 1]?.isFinal, ate = lista.length;
+        if (!txt) { if (final) { usados = ate; prefixo = 0; } return; }
         const comGatilho = temGatilho(txt);
-        if (comGatilho) acordar();
+        // 17/11 (gravação do Rúben: falava em frases naturais e ela adormecia a meio): acordada, qualquer fala renova o tempo — não só as
+        // ordens que resultam
+        if (comGatilho || estaAcordada()) acordar();
         if (pedeParaParar(txt)) { if (final) { usados = ate; adormecer("Até já — diz «Olyvia» quando precisares."); } return; }
         let cmd = extrairAposGatilho(txt);
         if (!cmd) {
@@ -292,20 +375,34 @@ export function OlyviaComando() {
           if (!estaAcordada()) return; // a dormir: sem «Olyvia», não é com ela
           cmd = normal(txt);
         }
-        // acordada e sem «Olyvia»: uma frase comprida é conversa à volta, não uma ordem
-        if (!comGatilho && !pareceComando(cmd)) { if (final) usados = ate; return; }
+        // 17/11 (gravação do Rúben: «estou a falar em linguagem natural e não regista nada»): as frases naturais são compridas — antes,
+        // mais de 9 palavras era «conversa à volta» e deitava-se fora sem dizer nada. Agora, acordada, tudo conta (a IA percebe-as);
+        // só um monólogo enorme fica de fora
+        if (!comGatilho && normal(cmd).split(" ").length > 60) { if (final) usados = ate; return; }
         const c = interpretarComando(cmd);
-        const agir = () => {
+        const agir = (porPausa = false) => {
           espera = null;
-          // meia frase sem ordem conhecida ainda pode crescer: só quando acaba vai à página (preencher, um passo pelo nome) ou diz que não percebeu
-          if (c.acao === "nada" && !final) return;
-          usados = ate;
+          // meia frase sem ordem conhecida ainda pode crescer: espera pelo fim da frase do browser ou por uma pausa (PAUSA_FRASE)
+          if (c.acao === "nada" && !final && !porPausa) return;
+          // o resultado ainda em curso fica: só as palavras já usadas saem (o que vier a seguir nele continua a contar)
+          if (final) { usados = ate; prefixo = 0; }
+          else { usados = ate - 1; prefixo = (lista[ate - 1]?.[0]?.transcript ?? "").trim().split(/\s+/).filter(Boolean).length; }
           acordar(); // cada ordem renova o tempo acordada
-          void executarRef.current(cmd!);
+          // o resto de uma ordem dita aos bocados («abre o Carlos» … «Mendes»): junta-se à ordem de antes e faz-se outra vez, completa
+          let frase = cmd!;
+          if (ultima && Date.now() - ultima.em < 6000 && c.acao === "nada" && (ultima.acao === "abrir-negocio" || ultima.acao === "pesquisar")) {
+            const junto = `${ultima.frase} ${frase}`;
+            if (interpretarComando(junto).acao === ultima.acao) frase = junto;
+          }
+          ultima = { frase, acao: interpretarComando(frase).acao, em: Date.now() };
+          void executarRef.current(frase);
         };
         if (final || c.acao === "scroll" || (c.acao === "ir-passo" && PASSOS_JA.has(c.passo))) { agir(); return; }
         setAviso({ msg: `«${txt}…»`, ok: true });
-        if (c.acao !== "nada") espera = setTimeout(agir, PAUSA_PARA_AGIR);
+        // a fala natural não espera pelo «fim de frase» do browser (às vezes não chega quando se fala seguido): uma pausa chega. Um nome
+        // («abre o Carlos… Mendes») espera mais, como uma frase, para não agir com meio nome
+        const comNome = c.acao === "nada" || c.acao === "abrir-negocio" || c.acao === "pesquisar";
+        espera = setTimeout(() => agir(true), comNome ? PAUSA_FRASE : PAUSA_PARA_AGIR);
       };
       r.onerror = (ev) => {
         // sem um gesto recente o browser recusa o micro: não se desliga a escolha — espera-se pelo próximo clique ou tecla
@@ -325,14 +422,19 @@ export function OlyviaComando() {
         if (ativoRef.current && !parado && !precisaGesto) setTimeout(arrancar, cancelamentos ? 600 * cancelamentos : 100);
       };
       recRef.current = r;
-      try { r.start(); } catch { recRef.current = null; }
+      // 17/11 (Rúben: «às vezes deixa de ouvir, não sei porquê»): se o browser recusa arrancar (ainda a fechar a sessão anterior), antes
+      // ficava assim para sempre; agora tenta de novo daqui a pouco
+      try { r.start(); } catch { recRef.current = null; setTimeout(arrancar, 800); }
     };
     arrancar();
+    // e uma vigia: ligada, sem reconhecimento ativo e sem estar à espera de um toque → volta a ouvir (o Chrome às vezes termina sem «end»)
+    const vigia = setInterval(() => { if (ativoRef.current && !parado && !precisaGesto && !recRef.current) arrancar(); }, 4000);
     const noGesto = () => { precisaGesto = false; avisouGesto = false; cancelamentos = 0; if (ativoRef.current && !recRef.current) arrancar(); };
     window.addEventListener("pointerdown", noGesto);
     window.addEventListener("keydown", noGesto);
     return () => {
       parado = true;
+      clearInterval(vigia);
       if (espera) clearTimeout(espera);
       if (sono) clearTimeout(sono);
       setAcordada(false);
@@ -351,8 +453,10 @@ export function OlyviaComando() {
 
   if (paginaPublica(pathname)) return null;
 
-  const emPausa = escutaSempre && (aGravar || outroOuve);
-  const rotulo = escutaSempre && aGravar ? "Olyvia — em pausa (a gravar)" : escutaSempre && outroOuve ? "Olyvia — a ouvir noutro separador"
+  // 17/11: a gravar, a Olyvia não está em pausa — ouve a conversa pelo gravador (as ordens com «Olyvia, …»)
+  const naConversa = escutaSempre && aGravar;
+  const emPausa = escutaSempre && !aGravar && outroOuve;
+  const rotulo = naConversa ? "Olyvia — a ouvir a conversa (diz «Olyvia, …»)" : emPausa ? "Olyvia — a ouvir noutro separador"
     : acordada ? "Olyvia — a ouvir-te" : aEscutar ? "Olyvia — à escuta (diz «Olyvia»)" : "Olyvia — comando por voz";
 
   // 17/11 (Rúben: «mete o ícone de uma ovelha ao lado do ícone do chat»): um botão redondo do mesmo tamanho do chat, mesmo à esquerda
@@ -382,7 +486,7 @@ export function OlyviaComando() {
           )}
           {temVoz.current && (
             <label className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2">
-              <span className="flex items-center gap-2 text-sm"><Ear className="h-4 w-4 text-primary" aria-hidden="true" />{escutaSempre && aGravar ? "Escuta em pausa enquanto se grava" : escutaSempre && outroOuve ? "A ouvir noutro separador — toca aqui para usar neste" : "Escuta sempre — diz «Olyvia» uma vez e depois fala à vontade"}</span>
+              <span className="flex items-center gap-2 text-sm"><Ear className="h-4 w-4 text-primary" aria-hidden="true" />{naConversa ? "A ouvir a conversa e a tomar notas — para uma ordem, diz «Olyvia, …»" : emPausa ? "A ouvir noutro separador — toca aqui para usar neste" : "Escuta sempre — diz «Olyvia» uma vez e depois fala à vontade"}</span>
               <button type="button" role="switch" aria-checked={escutaSempre} aria-label="Escuta sempre" onClick={() => setEscutaSempre((v) => !v)}
                 className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", escutaSempre ? "bg-primary" : "bg-muted")}>
                 <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-background shadow transition-all", escutaSempre ? "left-[22px]" : "left-0.5")} />
@@ -399,7 +503,9 @@ export function OlyviaComando() {
           acordada && "ring-4 ring-emerald-400/70", emPausa && "opacity-75")}>
         <IconeOvelha className="h-8 w-8 sm:h-9 sm:w-9" />
         {/* o estado num sinal no canto: a ouvir-te (verde), à escuta à espera de «Olyvia» (vermelho), em pausa (micro cortado) */}
-        {emPausa ? (
+        {naConversa ? (
+          <span aria-hidden="true" className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full border-2 border-card bg-destructive text-destructive-foreground animate-pulse"><Mic className="h-3 w-3" /></span>
+        ) : emPausa ? (
           <span aria-hidden="true" className="absolute -right-1 -top-1 grid h-5 w-5 place-items-center rounded-full border-2 border-card bg-muted text-muted-foreground"><MicOff className="h-3 w-3" /></span>
         ) : acordada ? (
           <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 h-3.5 w-3.5 animate-pulse rounded-full border-2 border-card bg-emerald-500" />
