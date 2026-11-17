@@ -31,13 +31,24 @@ const arvore = (inicio: string) => <MemoryRouter initialEntries={[inicio]}><Olyv
 const loc = () => screen.getByTestId("loc").textContent;
 const ouvir = (nome: string) => { const vistos: unknown[] = []; window.addEventListener(nome, (e) => vistos.push((e as CustomEvent).detail)); return vistos; };
 
+/** Os outros separadores: um BroadcastChannel falso que entrega as mensagens aos outros canais com o mesmo nome. */
+class Canal {
+  static todos: Canal[] = [];
+  onmessage: ((e: { data: unknown }) => void) | null = null;
+  constructor(public nome: string) { Canal.todos.push(this); }
+  postMessage(data: unknown) { for (const c of Canal.todos) if (c !== this && c.nome === this.nome) c.onmessage?.({ data }); }
+  close() { Canal.todos = Canal.todos.filter((c) => c !== this); }
+}
+
 beforeEach(() => {
-  localStorage.clear(); ativos = []; g.estado = "parado";
+  localStorage.clear(); ativos = []; g.estado = "parado"; Canal.todos = [];
+  vi.stubGlobal("BroadcastChannel", Canal);
   (window as unknown as { webkitSpeechRecognition: unknown }).webkitSpeechRecognition = Falso;
 });
 afterEach(() => {
-  cleanup(); vi.useRealTimers();
+  cleanup(); vi.useRealTimers(); vi.unstubAllGlobals();
   delete (window as unknown as { webkitSpeechRecognition?: unknown }).webkitSpeechRecognition;
+  delete (document as unknown as { visibilityState?: string }).visibilityState;
 });
 
 describe("17/11: a escuta contínua da Olyvia", () => {
@@ -96,6 +107,49 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     r.rerender(arvore("/negocios"));
     expect(ativos).toHaveLength(2);
     expect(ultimo().parado).toBe(false);
+  });
+
+  it("só ouve um separador: quando outro pede o micro, este cede; volta quando se toca neste (e avisa o outro)", () => {
+    render(arvore("/negocios"));
+    expect(ativos).toHaveLength(1);
+    const outro = new Canal("olyvia-escuta");
+    const recebidos: unknown[] = [];
+    outro.onmessage = (e) => recebidos.push(e.data);
+    act(() => outro.postMessage({ tipo: "quero", id: "outro-separador" }));
+    expect(ativos[0].parado).toBe(true);
+    expect(screen.getByRole("button", { name: "Olyvia — a ouvir noutro separador" })).toBeInTheDocument();
+    act(() => { fireEvent.pointerDown(window); });
+    expect(ativos).toHaveLength(2);
+    expect(ultimo().parado).toBe(false);
+    expect(recebidos).toContainEqual(expect.objectContaining({ tipo: "quero" }));
+  });
+
+  it("um separador escondido não ouve; volta quando se vê outra vez", () => {
+    render(arvore("/negocios"));
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(ativos[0].parado).toBe(true);
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "visible" });
+    act(() => { document.dispatchEvent(new Event("visibilitychange")); });
+    expect(ativos).toHaveLength(2);
+  });
+
+  it("travão: cancelada logo ao arrancar três vezes seguidas, pára e avisa (não fica a ligar e desligar); volta ao toque", () => {
+    vi.useFakeTimers();
+    render(arvore("/negocios"));
+    const cancelar = () => { const rec = ultimo(); act(() => { rec.onerror!({ error: "aborted" }); rec.onend!(); }); };
+    cancelar();
+    act(() => { vi.advanceTimersByTime(600); });
+    expect(ativos).toHaveLength(2);
+    cancelar();
+    act(() => { vi.advanceTimersByTime(1200); });
+    expect(ativos).toHaveLength(3);
+    cancelar();
+    expect(screen.getByRole("status").textContent).toMatch(/ocupado noutro separador/);
+    act(() => { vi.advanceTimersByTime(5000); });
+    expect(ativos).toHaveLength(3);
+    act(() => { fireEvent.pointerDown(window); });
+    expect(ativos).toHaveLength(4);
   });
 
   it("quando o browser pede um clique (not-allowed), não desliga a escolha: volta a ouvir no próximo toque", () => {

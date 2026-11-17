@@ -60,7 +60,37 @@ export function OlyviaComando() {
   // cliente não é para dar ordens à Olyvia); volta quando a gravação pára. Nas páginas públicas também não ouve.
   const gravacao = useGravacao();
   const aGravar = gravacao.estado === "a_ligar" || gravacao.estado === "a_ouvir";
-  const ligado = escutaSempre && !aGravar && !paginaPublica(pathname);
+  // 17/11 (Rúben: «o microfone desativa e ativa nonstop»): o Chrome só deixa UM reconhecimento de voz ativo no browser inteiro — com dois
+  // separadores da app abertos, cada um cancelava o do outro ao arrancar («aborted») e os dois reiniciavam sem parar. Agora só ouve o
+  // separador que se está a usar (o último com clique, tecla ou foco: avisa os outros por um BroadcastChannel e eles cedem), e um
+  // separador escondido não ouve.
+  const meuId = useRef(Math.random().toString(36).slice(2));
+  const canalRef = useRef<BroadcastChannel | null>(null);
+  const [visivel, setVisivel] = useState(() => typeof document === "undefined" || document.visibilityState !== "hidden");
+  const [outroOuve, setOutroOuve] = useState(false);
+  const reclamar = useCallback(() => {
+    setOutroOuve(false);
+    canalRef.current?.postMessage({ tipo: "quero", id: meuId.current });
+  }, []);
+  useEffect(() => {
+    const canal = typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("olyvia-escuta") : null;
+    canalRef.current = canal;
+    if (canal) canal.onmessage = (e: MessageEvent<{ tipo?: string; id?: string }>) => { if (e.data?.tipo === "quero" && e.data.id !== meuId.current) setOutroOuve(true); };
+    const aoVer = () => { const v = document.visibilityState !== "hidden"; setVisivel(v); if (v && document.hasFocus()) reclamar(); };
+    window.addEventListener("focus", reclamar);
+    window.addEventListener("pointerdown", reclamar);
+    window.addEventListener("keydown", reclamar);
+    document.addEventListener("visibilitychange", aoVer);
+    if (document.visibilityState !== "hidden" && document.hasFocus()) reclamar();
+    return () => {
+      canal?.close(); canalRef.current = null;
+      window.removeEventListener("focus", reclamar);
+      window.removeEventListener("pointerdown", reclamar);
+      window.removeEventListener("keydown", reclamar);
+      document.removeEventListener("visibilitychange", aoVer);
+    };
+  }, [reclamar]);
+  const ligado = escutaSempre && !aGravar && !paginaPublica(pathname) && visivel && !outroOuve;
 
   const executar = useCallback((frase: string) => {
     const c = interpretarComando(frase);
@@ -150,14 +180,18 @@ export function OlyviaComando() {
     const C = classeVoz();
     if (!C) return;
     let parado = false, precisaGesto = false, avisouGesto = false;
+    // travão: cancelada logo ao arrancar várias vezes seguidas (outro programa ou separador antigo a usar o reconhecimento) → espaça os
+    // reinícios e, à terceira, pára e avisa em vez de ficar a ligar e desligar o micro
+    let cancelamentos = 0;
     let espera: ReturnType<typeof setTimeout> | null = null;
     const arrancar = () => {
       if (parado || recRef.current) return;
       const r = new C();
       r.lang = "pt-PT"; r.continuous = true; r.interimResults = true;
-      let usados = 0;
-      r.onstart = () => setAEscutar(true);
+      let usados = 0, inicio = Date.now();
+      r.onstart = () => { inicio = Date.now(); setAEscutar(true); };
       r.onresult = (e) => {
+        cancelamentos = 0;
         if (espera) { clearTimeout(espera); espera = null; }
         const lista = Array.from(e.results);
         const txt = lista.slice(usados).map((x) => x[0]?.transcript ?? "").join(" ");
@@ -185,14 +219,23 @@ export function OlyviaComando() {
         if (ev?.error === "not-allowed" || ev?.error === "service-not-allowed") {
           precisaGesto = true;
           if (!avisouGesto) { avisouGesto = true; setAviso({ msg: "Toca em qualquer sítio para eu voltar a ouvir.", ok: false }); }
-        }
+        } else if (ev?.error === "aborted" && Date.now() - inicio < 2000) cancelamentos++;
       };
-      r.onend = () => { recRef.current = null; setAEscutar(false); if (ativoRef.current && !parado && !precisaGesto) setTimeout(arrancar, 100); };
+      r.onend = () => {
+        recRef.current = null; setAEscutar(false);
+        if (Date.now() - inicio >= 2000) cancelamentos = 0;
+        if (cancelamentos >= 3) {
+          precisaGesto = true;
+          setAviso({ msg: "O micro está ocupado noutro separador ou programa. Toca aqui para eu ouvir neste.", ok: false });
+          return;
+        }
+        if (ativoRef.current && !parado && !precisaGesto) setTimeout(arrancar, cancelamentos ? 600 * cancelamentos : 100);
+      };
       recRef.current = r;
       try { r.start(); } catch { recRef.current = null; }
     };
     arrancar();
-    const noGesto = () => { precisaGesto = false; avisouGesto = false; if (ativoRef.current && !recRef.current) arrancar(); };
+    const noGesto = () => { precisaGesto = false; avisouGesto = false; cancelamentos = 0; if (ativoRef.current && !recRef.current) arrancar(); };
     window.addEventListener("pointerdown", noGesto);
     window.addEventListener("keydown", noGesto);
     return () => {
@@ -239,7 +282,7 @@ export function OlyviaComando() {
           )}
           {temVoz.current && (
             <label className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2">
-              <span className="flex items-center gap-2 text-sm"><Ear className="h-4 w-4 text-primary" aria-hidden="true" />{escutaSempre && aGravar ? "Escuta em pausa enquanto se grava" : "Escuta sempre — diz «Olyvia…»"}</span>
+              <span className="flex items-center gap-2 text-sm"><Ear className="h-4 w-4 text-primary" aria-hidden="true" />{escutaSempre && aGravar ? "Escuta em pausa enquanto se grava" : escutaSempre && outroOuve ? "A ouvir noutro separador — toca aqui para usar neste" : "Escuta sempre — diz «Olyvia…»"}</span>
               <button type="button" role="switch" aria-checked={escutaSempre} aria-label="Escuta sempre" onClick={() => setEscutaSempre((v) => !v)}
                 className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", escutaSempre ? "bg-primary" : "bg-muted")}>
                 <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-background shadow transition-all", escutaSempre ? "left-[22px]" : "left-0.5")} />
@@ -250,12 +293,12 @@ export function OlyviaComando() {
       ) : aviso ? (
         <div role="status" className={cn("max-w-[min(80vw,18rem)] rounded-xl border px-3 py-2 text-sm shadow-[var(--shadow-md,0_6px_18px_rgba(0,0,0,0.14))]", aviso.ok ? "border-primary/40 bg-card text-primary" : "border-border bg-card text-muted-foreground")}>{aviso.msg}</div>
       ) : null}
-      <button type="button" aria-expanded={aberto} aria-label={escutaSempre && aGravar ? "Olyvia — em pausa (a gravar)" : aEscutar ? "Olyvia — à escuta" : "Olyvia — comando por voz"}
+      <button type="button" aria-expanded={aberto} aria-label={escutaSempre && aGravar ? "Olyvia — em pausa (a gravar)" : escutaSempre && outroOuve ? "Olyvia — a ouvir noutro separador" : aEscutar ? "Olyvia — à escuta" : "Olyvia — comando por voz"}
         onClick={() => { setAberto((v) => !v); setAviso(null); }}
         className={cn("group relative inline-flex items-center gap-2 rounded-full bg-primary px-4 py-3 text-primary-foreground shadow-[var(--shadow-lg,0_10px_30px_rgba(0,0,0,0.25))] transition-transform hover:scale-[1.03] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/50",
           aEscutar && "ring-2 ring-primary/40")}>
         {aEscutar && <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 h-3 w-3 animate-pulse rounded-full border-2 border-card bg-destructive" />}
-        {escutaSempre && aGravar ? <MicOff className="h-5 w-5" aria-hidden="true" /> : aEscutar ? <Ear className="h-5 w-5" aria-hidden="true" /> : <Mic className="h-5 w-5" aria-hidden="true" />}
+        {escutaSempre && (aGravar || outroOuve) ? <MicOff className="h-5 w-5" aria-hidden="true" /> : aEscutar ? <Ear className="h-5 w-5" aria-hidden="true" /> : <Mic className="h-5 w-5" aria-hidden="true" />}
         <span className="text-[15px] font-semibold">Olyvia</span>
       </button>
     </div>
