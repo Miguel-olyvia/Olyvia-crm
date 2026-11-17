@@ -8,8 +8,8 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CAMPO, NOTA, Campo, Chips, Num, Retirar } from "./pecasForm";
 import { ListaFlutuante } from "./listaFlutuante";
-import { mesmosAtributos, normalizarHex, resumoAtributos, textoMedida, textoValor } from "./atributosTexto";
-import { criarOpcaoAtributo, gravarAtributos, lerNumero, type FichaProdutoReal } from "./fichaProdutoDados";
+import { dimensaoParaTexto, dimensaoVazia, errosDimensao, lerDimensao, mesmosAtributos, normalizarHex, resumoAtributos, textoMedida, textoValor, type DimensaoTexto } from "./atributosTexto";
+import { criarOpcaoAtributo, gravarAtributos, type FichaProdutoReal } from "./fichaProdutoDados";
 import { mudarCatalogo } from "./v2/catalogoStore";
 import type { AtributoDef, AtributoProduto, MedidaAtributo, OpcaoAtributo, Produto } from "./v2/catalogoModelo";
 
@@ -24,20 +24,55 @@ export function Amostra({ hex, testId }: { hex: string | null; testId?: string }
 /* ------------------------------------------------------------------ o que está escolhido, ainda por validar */
 type Unidade = "cm" | "mm";
 /** `texto`: o nome da opção escolhida; `inativa`: a opção foi desativada (já não vem na lista, mas o valor mantém-se). */
-interface Linha { id: string; opcao: string | null; texto: string; inativa: boolean; tipo: "2D" | "3D"; l: string; c: string; e: string; un: Unidade }
-const texto = (x: number | null | undefined) => (x == null ? "" : String(x).replace(".", ","));
+interface Linha { id: string; opcao: string | null; texto: string; inativa: boolean; tipo: "2D" | "3D"; l: DimensaoTexto; c: DimensaoTexto; e: DimensaoTexto; un: Unidade }
 const dosValores = (a: AtributoProduto): Linha => ({
-  id: a.atributoId, opcao: a.opcaoId ?? null, texto: a.valor ?? "", inativa: !!a.inativa, tipo: a.medida?.tipo ?? "2D", l: texto(a.medida?.largura),
-  c: texto(a.medida?.comprimento), e: texto(a.medida?.espessura), un: a.medida?.unidade ?? "cm",
+  id: a.atributoId, opcao: a.opcaoId ?? null, texto: a.valor ?? "", inativa: !!a.inativa, tipo: a.medida?.tipo ?? "2D", l: dimensaoParaTexto(a.medida?.largura),
+  c: dimensaoParaTexto(a.medida?.comprimento), e: dimensaoParaTexto(a.medida?.espessura), un: a.medida?.unidade ?? "cm",
 });
-const linhaNova = (id: string): Linha => ({ id, opcao: null, texto: "", inativa: false, tipo: "2D", l: "", c: "", e: "", un: "cm" });
+const linhaNova = (id: string): Linha => ({ id, opcao: null, texto: "", inativa: false, tipo: "2D", l: dimensaoVazia(), c: dimensaoVazia(), e: dimensaoVazia(), un: "cm" });
 
-/** A medida escrita, se estiver completa (largura e comprimento > 0; em 3D também a espessura). */
+/** A medida escrita, se estiver completa (cada dimensão um número > 0 ou um intervalo de < até; em 3D também a espessura). */
 function medidaDe(L: Linha): MedidaAtributo | null {
-  const l = lerNumero(L.l), c = lerNumero(L.c), e = lerNumero(L.e);
-  if (!(l && l > 0) || !(c && c > 0)) return null;
-  if (L.tipo === "3D") return e && e > 0 ? { tipo: "3D", largura: l, comprimento: c, espessura: e, unidade: L.un } : null;
+  const l = lerDimensao(L.l).v, c = lerDimensao(L.c).v, e = lerDimensao(L.e).v;
+  if (l == null || c == null) return null;
+  if (L.tipo === "3D") return e != null ? { tipo: "3D", largura: l, comprimento: c, espessura: e, unidade: L.un } : null;
   return { tipo: "2D", largura: l, comprimento: c, espessura: null, unidade: L.un };
+}
+
+/** Uma dimensão da medida: um campo, ou (com «Intervalo») dois, «de» e «até». O erro vem escrito junto ao campo e ligado a ele. */
+function Dimensao({ rot, d, un, set }: { rot: string; d: DimensaoTexto; un: Unidade; set: (p: DimensaoTexto, emitir?: boolean) => void }) {
+  const uid = useId(), idCampo = `${uid}-campo`, idRot = `${uid}-rot`, idErroA = `${uid}-erro-a`, idErroB = `${uid}-erro-b`;
+  const erros = errosDimensao(d);
+  const campo = (e: string | null, idErro: string) => ({ suf: un, ph: "", invalido: !!e, descr: e ? idErro : undefined });
+  const msg = (e: string | null, idErro: string) => e && <span id={idErro} role="alert" className="text-sm text-destructive">{e}</span>;
+  // marcar/desmarcar só muda o ecrã: o «até» fica em memória (`b`) e a medida anterior só é substituída quando a nova já vale
+  const alternar = (iv: boolean) => { const n = { ...d, iv }; set(n, lerDimensao(n).v != null); };
+  return (
+    <div className="grid content-start gap-1.5">
+      <div className="flex items-center justify-between gap-2">
+        {d.iv ? <span id={idRot} className="text-[15px] font-medium">{rot}</span> : <label htmlFor={idCampo} className="text-[15px] font-medium">{rot}</label>}
+        <label className="flex min-h-11 cursor-pointer items-center gap-1.5 text-sm text-muted-foreground">
+          <input type="checkbox" aria-label={`${rot}: intervalo`} checked={d.iv} onChange={(e) => alternar(e.target.checked)} className="h-4 w-4 accent-primary" />
+          Intervalo
+        </label>
+      </div>
+      {d.iv ? (
+        <div role="group" aria-labelledby={idRot} className="grid grid-cols-2 items-start gap-2">
+          <div className="grid gap-1.5">
+            <Num rot={`${rot} (de)`} v={d.a} set={(v) => set({ ...d, a: v })} {...campo(erros.a, idErroA)} />
+            {msg(erros.a, idErroA)}
+          </div>
+          <div className="grid gap-1.5">
+            <Num rot={`${rot} (até)`} v={d.b} set={(v) => set({ ...d, b: v })} {...campo(erros.b, idErroB)} />
+            {msg(erros.b, idErroB)}
+          </div>
+        </div>
+      ) : <>
+        <Num id={idCampo} v={d.a} set={(v) => set({ ...d, a: v })} {...campo(erros.a, idErroA)} />
+        {msg(erros.a, idErroA)}
+      </>}
+    </div>
+  );
 }
 /** Os atributos que já valem: uma opção (também a desativada: nunca se descarta um valor que o produto já tem) ou uma medida completa. */
 function atributosDe(linhas: readonly Linha[], defs: readonly AtributoDef[]): AtributoProduto[] {
@@ -193,8 +228,8 @@ export function AtributosEditor({ defs, inicial, onChange, real, vazio }: {
   const entradas = useRef<Record<string, HTMLInputElement | null>>({});
   const registar = useCallback((id: string, el: HTMLInputElement | null) => { entradas.current[id] = el; }, []);
   /** Muda as linhas e avisa quem usa, no mesmo gesto (não num efeito, que reemitiria quando a lista de atributos muda de identidade). */
-  const aplicar = (f: (L: Linha[]) => Linha[]) => { const n = f(linhas); setLinhas(n); onChange(atributosDe(n, defs)); };
-  const mudar = (id: string, p: Partial<Linha>) => aplicar((L) => L.map((x) => (x.id === id ? { ...x, ...p } : x)));
+  const aplicar = (f: (L: Linha[]) => Linha[], emitir = true) => { const n = f(linhas); setLinhas(n); if (emitir) onChange(atributosDe(n, defs)); };
+  const mudar = (id: string, p: Partial<Linha>, emitir = true) => aplicar((L) => L.map((x) => (x.id === id ? { ...x, ...p } : x)), emitir);
   const fechar = (id: string) => { setACriar(null); entradas.current[id]?.focus(); };
   const livres = defs.filter((d) => !linhas.some((L) => L.id === d.id));
 
@@ -217,9 +252,9 @@ export function AtributosEditor({ defs, inicial, onChange, real, vazio }: {
               <div className="grid gap-3">
                 <Chips<"2D" | "3D"> rot="Tipo de medida" opcoes={[["2D", "2D"], ["3D", "3D"]] as const} v={L.tipo} set={(v) => mudar(d.id, { tipo: v })} />
                 <div className="grid gap-3 sm:grid-cols-3">
-                  <Campo rot="Largura">{(id) => <Num id={id} v={L.l} set={(v) => mudar(d.id, { l: v })} suf={L.un} ph="" />}</Campo>
-                  <Campo rot="Comprimento">{(id) => <Num id={id} v={L.c} set={(v) => mudar(d.id, { c: v })} suf={L.un} ph="" />}</Campo>
-                  {L.tipo === "3D" && <Campo rot="Espessura">{(id) => <Num id={id} v={L.e} set={(v) => mudar(d.id, { e: v })} suf={L.un} ph="" />}</Campo>}
+                  <Dimensao rot="Largura" d={L.l} un={L.un} set={(v, emitir) => mudar(d.id, { l: v }, emitir)} />
+                  <Dimensao rot="Comprimento" d={L.c} un={L.un} set={(v, emitir) => mudar(d.id, { c: v }, emitir)} />
+                  {L.tipo === "3D" && <Dimensao rot="Espessura" d={L.e} un={L.un} set={(v, emitir) => mudar(d.id, { e: v }, emitir)} />}
                 </div>
                 <Chips<Unidade> rot="Unidade da medida" opcoes={[["cm", "cm"], ["mm", "mm"]] as const} v={L.un} set={(v) => mudar(d.id, { un: v })} />
                 {!medidaDe(L) && <p className={NOTA}>Preencha a largura e o comprimento{L.tipo === "3D" ? " e a espessura" : ""} para a medida contar.</p>}

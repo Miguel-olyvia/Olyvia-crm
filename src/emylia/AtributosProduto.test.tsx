@@ -158,6 +158,171 @@ describe("ficha do produto: Atributos", () => {
     expect(within(within(sec).getByRole("radiogroup", { name: "Tipo de medida" })).getByRole("radio", { name: "2D" })).toHaveAttribute("aria-checked", "true");
   });
 
+  describe("a medida com intervalo", () => {
+    const juntarMedida = () => {
+      ficha();
+      const sec = screen.getByRole("region", { name: "Atributos" });
+      fireEvent.change(within(sec).getByLabelText("Juntar atributo"), { target: { value: A_MED } });
+      return sec;
+    };
+    const escrever = (sec: HTMLElement, rot: string, v: string) => fireEvent.change(within(sec).getByLabelText(rot), { target: { value: v } });
+    const MED_IV: AtributoProduto = { atributoId: A_MED, valor: "91–100 × 90 cm", medida: { tipo: "2D", largura: { de: 91, ate: 100 }, comprimento: 90, espessura: null, unidade: "cm" } };
+    const MED_NUM: AtributoProduto = { atributoId: A_MED, valor: "60×60 cm", medida: { tipo: "2D", largura: 60, comprimento: 60, espessura: null, unidade: "cm" } };
+
+    it("cada dimensão tem o seu «Intervalo», desligado por omissão (um campo, como antes)", () => {
+      const sec = juntarMedida();
+      for (const d of ["Largura", "Comprimento"]) expect(within(sec).getByRole("checkbox", { name: `${d}: intervalo` })).not.toBeChecked();
+      expect(within(sec).queryByRole("checkbox", { name: "Espessura: intervalo" })).toBeNull();
+      expect(within(sec).getByLabelText("Largura")).toBeInTheDocument();
+      expect(within(sec).queryByLabelText("Largura (de)")).toBeNull();
+    });
+
+    it("ligado: dois campos «de» e «até»; grava {de, ate} na largura e o número no comprimento", async () => {
+      base.respostas.cat_guardar_produto_atributos = { data: { ok: true, n: 2 }, error: null };
+      const sec = juntarMedida();
+      fireEvent.click(within(sec).getByRole("checkbox", { name: "Largura: intervalo" }));
+      expect(within(sec).queryByRole("textbox", { name: "Largura" })).toBeNull(); // o grupo «Largura» agrupa os dois campos
+      escrever(sec, "Largura (de)", "91"); escrever(sec, "Largura (até)", "100"); escrever(sec, "Comprimento", "90");
+      fireEvent.click(within(sec).getByRole("button", { name: "Guardar atributos" }));
+      await waitFor(() => expect(gravadas()).toHaveLength(1));
+      expect(gravadas()[0].a.p_valores).toEqual([
+        { atributo: A_COR, opcao: O_PRETO }, { atributo: A_MED, medida: { tipo: "2D", largura: { de: 91, ate: 100 }, comprimento: 90, espessura: null, unidade: "cm" } },
+      ]);
+    });
+
+    it("3D com as três dimensões em intervalo", async () => {
+      base.respostas.cat_guardar_produto_atributos = { data: { ok: true, n: 2 }, error: null };
+      const sec = juntarMedida();
+      fireEvent.click(within(within(sec).getByRole("radiogroup", { name: "Tipo de medida" })).getByRole("radio", { name: "3D" }));
+      for (const d of ["Largura", "Comprimento", "Espessura"]) fireEvent.click(within(sec).getByRole("checkbox", { name: `${d}: intervalo` }));
+      escrever(sec, "Largura (de)", "10"); escrever(sec, "Largura (até)", "12,5");
+      escrever(sec, "Comprimento (de)", "20"); escrever(sec, "Comprimento (até)", "25");
+      escrever(sec, "Espessura (de)", "0,8"); escrever(sec, "Espessura (até)", "1");
+      fireEvent.click(within(sec).getByRole("button", { name: "Guardar atributos" }));
+      await waitFor(() => expect(gravadas()).toHaveLength(1));
+      expect(gravadas()[0].a.p_valores[1]).toEqual({ atributo: A_MED, medida: { tipo: "3D", largura: { de: 10, ate: 12.5 }, comprimento: { de: 20, ate: 25 }, espessura: { de: 0.8, ate: 1 }, unidade: "cm" } });
+    });
+
+    it("«de» igual ou maior que «até»: a mensagem (role=alert) fica junto do «até», só ele é inválido, e não grava", () => {
+      const sec = juntarMedida();
+      fireEvent.click(within(sec).getByRole("checkbox", { name: "Largura: intervalo" }));
+      escrever(sec, "Largura (de)", "100"); escrever(sec, "Largura (até)", "91"); escrever(sec, "Comprimento", "90");
+      const de = within(sec).getByLabelText("Largura (de)"), ate = within(sec).getByLabelText("Largura (até)");
+      expect(de).toHaveAttribute("aria-invalid", "false");
+      expect(de).not.toHaveAttribute("aria-describedby");
+      expect(ate).toHaveAttribute("aria-invalid", "true");
+      const msg = document.getElementById(ate.getAttribute("aria-describedby") ?? "");
+      expect(msg).toHaveTextContent("O «de» tem de ser menor que o «até».");
+      expect(msg).toHaveAttribute("role", "alert");
+      expect(within(sec).getByLabelText("Comprimento")).toHaveAttribute("aria-invalid", "false");
+      expect(within(sec).getByRole("button", { name: "Guardar atributos" })).toBeDisabled();
+      escrever(sec, "Largura (de)", "80");
+      expect(ate).toHaveAttribute("aria-invalid", "false");
+      expect(within(sec).getByRole("button", { name: "Guardar atributos" })).toBeEnabled();
+    });
+
+    it("o erro do «de» só marca o «de»; o do «até» só o «até»", () => {
+      const sec = juntarMedida();
+      fireEvent.click(within(sec).getByRole("checkbox", { name: "Largura: intervalo" }));
+      escrever(sec, "Largura (de)", "0"); escrever(sec, "Largura (até)", "5");
+      expect(within(sec).getByLabelText("Largura (de)")).toHaveAttribute("aria-invalid", "true");
+      expect(within(sec).getByLabelText("Largura (até)")).toHaveAttribute("aria-invalid", "false");
+      escrever(sec, "Largura (de)", "1"); escrever(sec, "Largura (até)", "100001");
+      expect(within(sec).getByLabelText("Largura (de)")).toHaveAttribute("aria-invalid", "false");
+      expect(within(sec).getByLabelText("Largura (até)")).toHaveAttribute("aria-invalid", "true");
+    });
+
+    it("a escrever «12,», «12.» ou «-» não há erro nem aria-invalid", () => {
+      const sec = juntarMedida();
+      for (const x of ["12,", "12.", "-"]) {
+        escrever(sec, "Largura", x);
+        expect(within(sec).getByLabelText("Largura")).toHaveAttribute("aria-invalid", "false");
+        expect(within(sec).queryByRole("alert")).toBeNull();
+      }
+    });
+
+    it("marcar «Intervalo» numa dimensão com valor não apaga a medida: sem «até» não há nada a guardar", () => {
+      ficha({ p: { ...PROD, attrs: [MED_NUM] } });
+      const sec = screen.getByRole("region", { name: "Atributos" });
+      fireEvent.click(within(sec).getByRole("checkbox", { name: "Largura: intervalo" }));
+      expect(within(sec).getByRole("button", { name: "Guardar atributos" })).toBeDisabled();
+      escrever(sec, "Largura (até)", "100");
+      expect(within(sec).getByRole("button", { name: "Guardar atributos" })).toBeEnabled();
+    });
+
+    it("marcar «Intervalo» e preencher o «até»: guardar leva {de, ate}", async () => {
+      base.respostas.cat_guardar_produto_atributos = { data: { ok: true, n: 1 }, error: null };
+      ficha({ p: { ...PROD, attrs: [MED_NUM] } });
+      const sec = screen.getByRole("region", { name: "Atributos" });
+      fireEvent.click(within(sec).getByRole("checkbox", { name: "Largura: intervalo" }));
+      escrever(sec, "Largura (até)", "100");
+      fireEvent.click(within(sec).getByRole("button", { name: "Guardar atributos" }));
+      await waitFor(() => expect(gravadas()).toHaveLength(1));
+      expect(gravadas()[0].a.p_valores).toEqual([{ atributo: A_MED, medida: { tipo: "2D", largura: { de: 60, ate: 100 }, comprimento: 60, espessura: null, unidade: "cm" } }]);
+    });
+
+    it("desmarcar guarda o «até» em memória: ao marcar outra vez volta a aparecer", () => {
+      ficha({ p: { ...PROD, attrs: [MED_IV] } });
+      const sec = screen.getByRole("region", { name: "Atributos" });
+      const caixa = within(sec).getByRole("checkbox", { name: "Largura: intervalo" });
+      fireEvent.click(caixa);
+      expect(within(sec).getByLabelText("Largura")).toHaveValue("91");
+      fireEvent.click(caixa);
+      expect(within(sec).getByLabelText("Largura (de)")).toHaveValue("91");
+      expect(within(sec).getByLabelText("Largura (até)")).toHaveValue("100");
+    });
+
+    it("um número que não é maior que 0: erro junto ao campo, também em modo número", () => {
+      const sec = juntarMedida();
+      escrever(sec, "Largura", "0");
+      const l = within(sec).getByLabelText("Largura");
+      expect(l).toHaveAttribute("aria-invalid", "true");
+      expect(document.getElementById(l.getAttribute("aria-describedby") ?? "")).toHaveTextContent("Escreva um número maior que 0.");
+      expect(within(sec).getByLabelText("Comprimento")).not.toHaveAttribute("aria-describedby");
+    });
+
+    it("uma medida antiga (números) abre sem intervalo e grava igual", async () => {
+      base.respostas.cat_guardar_produto_atributos = { data: { ok: true, n: 2 }, error: null };
+      ficha({ p: { ...PROD, attrs: [{ atributoId: A_COR, opcaoId: O_PRETO, valor: "Preto" }, MED_NUM] } });
+      const sec = screen.getByRole("region", { name: "Atributos" });
+      expect(within(sec).getByLabelText("Largura")).toHaveValue("60");
+      expect(within(sec).getByRole("checkbox", { name: "Largura: intervalo" })).not.toBeChecked();
+      escolher(sec, "Cor", /^Branco/);
+      fireEvent.click(within(sec).getByRole("button", { name: "Guardar atributos" }));
+      await waitFor(() => expect(gravadas()).toHaveLength(1));
+      expect(gravadas()[0].a.p_valores).toEqual([{ atributo: A_COR, opcao: O_BRANCO }, { atributo: A_MED, medida: MED_NUM.medida }]);
+    });
+
+    it("uma medida com intervalo abre com o interruptor ligado e os dois valores; sem mexer, não há nada a guardar", () => {
+      ficha({ p: { ...PROD, attrs: [MED_IV] } });
+      const sec = screen.getByRole("region", { name: "Atributos" });
+      expect(within(sec).getByRole("checkbox", { name: "Largura: intervalo" })).toBeChecked();
+      expect(within(sec).getByLabelText("Largura (de)")).toHaveValue("91");
+      expect(within(sec).getByLabelText("Largura (até)")).toHaveValue("100");
+      expect(within(sec).getByLabelText("Comprimento")).toHaveValue("90");
+      expect(within(sec).getByRole("button", { name: "Guardar atributos" })).toBeDisabled();
+    });
+
+    it("desligar o intervalo volta a um campo (fica o «de»); a lista mostra «91–100 × 90 cm» só em leitura", () => {
+      ficha({ p: { ...PROD, attrs: [MED_IV] } });
+      const sec = screen.getByRole("region", { name: "Atributos" });
+      fireEvent.click(within(sec).getByRole("checkbox", { name: "Largura: intervalo" }));
+      expect(within(sec).getByLabelText("Largura")).toHaveValue("91");
+      cleanup();
+      ficha({ p: { ...PROD, attrs: [MED_IV] }, r: real(false) });
+      expect(screen.getByText(/Medida: 91–100 × 90 cm/)).toBeInTheDocument();
+    });
+
+    it("a recusa CT002 da base aparece tal como vem", async () => {
+      base.respostas.cat_guardar_produto_atributos = { data: null, error: { code: "CT002", message: "A largura tem de ir de um valor menor até um maior." } };
+      ficha({ p: { ...PROD, attrs: [MED_IV] } });
+      const sec = screen.getByRole("region", { name: "Atributos" });
+      fireEvent.click(within(within(sec).getByRole("radiogroup", { name: "Unidade da medida" })).getByRole("radio", { name: "mm" }));
+      fireEvent.click(within(sec).getByRole("button", { name: "Guardar atributos" }));
+      expect(await screen.findByRole("alert")).toHaveTextContent("A largura tem de ir de um valor menor até um maior.");
+    });
+  });
+
   it("função da base por aplicar: diz «Ainda não disponível» em alerta e não relê", async () => {
     base.respostas.cat_guardar_produto_atributos = { data: null, error: { code: "PGRST202", message: "Could not find the function public.cat_guardar_produto_atributos" } };
     const { r } = ficha();
