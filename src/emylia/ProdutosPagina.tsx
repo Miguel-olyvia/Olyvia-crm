@@ -28,7 +28,6 @@ import {
 } from "./real/produtosPaginados";
 
 const ESPERA_PESQUISA = 300;
-const ID_RAZAO_ANT = "prod-pag-razao-ant", ID_RAZAO_SEG = "prod-pag-razao-seg";
 
 /* ------------------------------------------------------------------ leituras */
 interface Leitura<T> { dados: T | null; erro: string | null; aLer: boolean; tentar: () => void }
@@ -183,6 +182,7 @@ export function ProdutosPagina({ K, real, nomeServico, onAbrir, onAbrirProduto, 
         </div>
         {sl.sel && <BarraSelecao s={sl} filtrados={linhas} real={real} anunciar={anunciar} tipo="produtos" />}
         <p ref={topo} tabIndex={-1} className={cn(NOTA, "mt-4 outline-none")} aria-live="polite">{estado}</p>
+        {dados && dados.paginas > 1 && <NavegacaoPaginas onde="topo" pagina={dados.pagina} paginas={dados.paginas} aLer={pag.aLer} irPara={irPara} />}
         {pag.erro && <ErroLeitura texto="Não foi possível ler os produtos" erro={pag.erro} tentar={pag.tentar} />}
         {erroContagens.erro && <ErroLeitura texto="Não foi possível ler as contagens" erro={erroContagens.erro} tentar={erroContagens.tentar} />}
         <ul className={cn(LISTA, "mt-2", pag.aLer && dados && "opacity-60")} aria-busy={pag.aLer}>
@@ -256,8 +256,10 @@ function ColunaPreco({ rotulo, v }: { rotulo: string; v: number | null }) {
   );
 }
 
-function NavegacaoPaginas({ pagina, paginas, aLer, irPara }: { pagina: number; paginas: number; aLer: boolean; irPara: (p: number) => void }) {
+function NavegacaoPaginas({ pagina, paginas, aLer, irPara, onde = "fim" }: { pagina: number; paginas: number; aLer: boolean; irPara: (p: number) => void; onde?: "topo" | "fim" }) {
   const primeira = pagina <= 1, ultima = pagina >= paginas;
+  // 17/11: a navegação aparece no topo e no fim da lista; cada uma com os seus ids (as razões não se repetem)
+  const ID_RAZAO_ANT = `prod-pag-razao-ant-${onde}`, ID_RAZAO_SEG = `prod-pag-razao-seg-${onde}`;
   const botao = (rotulo: string, desativado: boolean, razao: string, idRazao: string, alvo: number) => (
     <>
       <Button variant="outline" className="min-h-11 text-[15px]" disabled={desativado} aria-describedby={desativado ? idRazao : undefined} title={desativado ? razao : undefined} onClick={() => irPara(alvo)}>{rotulo}</Button>
@@ -265,7 +267,7 @@ function NavegacaoPaginas({ pagina, paginas, aLer, irPara }: { pagina: number; p
     </>
   );
   return (
-    <nav aria-label="Páginas de produtos" aria-busy={aLer} className={cn("mt-4 flex flex-wrap items-center gap-3", ENTRADA)}>
+    <nav aria-label={onde === "topo" ? "Páginas de produtos (topo)" : "Páginas de produtos"} aria-busy={aLer} className={cn(onde === "topo" ? "mt-2" : "mt-4", "flex flex-wrap items-center gap-3", ENTRADA)}>
       {botao("Anterior", primeira, "Já está na primeira página.", ID_RAZAO_ANT, pagina - 1)}
       {botao("Seguinte", ultima, "Já está na última página.", ID_RAZAO_SEG, pagina + 1)}
     </nav>

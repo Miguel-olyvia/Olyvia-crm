@@ -151,31 +151,43 @@ describe("Produtos por páginas · a leitura", () => {
   });
 });
 
+/** 17/11: há navegação no topo e no fim da lista; os testes usam a do fim. */
+const botaoFim = (nome: string) => within(screen.getByRole("navigation", { name: "Páginas de produtos" })).getByRole("button", { name: nome });
+
 describe("Produtos por páginas · Anterior e Seguinte", () => {
   it("na primeira página «Anterior» está desativado com a razão; «Seguinte» pede a página 2 e leva o foco ao topo da lista", async () => {
     await pagina();
-    const ant = screen.getByRole("button", { name: "Anterior" });
+    const ant = botaoFim("Anterior");
     expect(ant).toBeDisabled();
     expect(ant).toHaveAccessibleDescription(/primeira página/i);
-    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    fireEvent.click(botaoFim("Seguinte"));
     await screen.findByText(/Página 2 de 3/);
     expect(paginas().some((c) => c.a.p_pagina === 2 && c.a.p_limite === 50)).toBe(true);
     expect(painel().getByRole("button", { name: "Produto da página 2" })).toBeInTheDocument();
     expect(screen.getByText(/Página 2 de 3/)).toHaveFocus();
-    expect(screen.getByRole("button", { name: "Anterior" })).toBeEnabled();
+    expect(botaoFim("Anterior")).toBeEnabled();
   });
   it("na última página «Seguinte» está desativado com a razão; «Anterior» volta atrás", async () => {
     await pagina();
-    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    fireEvent.click(botaoFim("Seguinte"));
     await screen.findByText(/Página 2 de 3/);
-    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    fireEvent.click(botaoFim("Seguinte"));
     await screen.findByText(/Página 3 de 3/);
-    const seg = screen.getByRole("button", { name: "Seguinte" });
+    const seg = botaoFim("Seguinte");
     expect(seg).toBeDisabled();
     expect(seg).toHaveAccessibleDescription(/última página/i);
-    fireEvent.click(screen.getByRole("button", { name: "Anterior" }));
+    fireEvent.click(botaoFim("Anterior"));
     await screen.findByText(/Página 2 de 3/);
     expect(painel().getByRole("button", { name: "Produto da página 2" })).toBeInTheDocument();
+  });
+  it("17/11: com mais de uma página, Anterior e Seguinte também aparecem no topo da lista e funcionam", async () => {
+    await pagina();
+    const topo = screen.getByRole("navigation", { name: "Páginas de produtos (topo)" });
+    expect(within(topo).getByRole("button", { name: "Anterior" })).toBeDisabled();
+    fireEvent.click(within(topo).getByRole("button", { name: "Seguinte" }));
+    await screen.findByText(/Página 2 de 3/);
+    expect(paginas().some((c) => c.a.p_pagina === 2)).toBe(true);
+    expect(within(screen.getByRole("navigation", { name: "Páginas de produtos (topo)" })).getByRole("button", { name: "Anterior" })).toBeEnabled();
   });
   it("os botões estão numa navegação com nome", async () => {
     await pagina();
@@ -190,8 +202,8 @@ describe("Produtos por páginas · Anterior e Seguinte", () => {
     render(<CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={real()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
     await screen.findByText("Página 1 de 1 · 1 produto");
-    expect(screen.getByRole("button", { name: "Anterior" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Seguinte" })).toBeDisabled();
+    expect(botaoFim("Anterior")).toBeDisabled();
+    expect(botaoFim("Seguinte")).toBeDisabled();
   });
   it("sem produtos: diz que não há nenhum e não oferece páginas", async () => {
     base.responder = (f, a) => (f === "cat_ler_produtos_pagina" ? { data: { total: 0, pagina: 1, limite: 50, paginas: 0, produtos: [] }, error: null } : padrao(f, a));
@@ -207,7 +219,7 @@ describe("Produtos por páginas · Anterior e Seguinte", () => {
 describe("Produtos por páginas · os filtros mandam os argumentos certos e voltam à página 1", () => {
   it("categoria: o id em product_categories (não o do nó do ofício) e página 1, mesmo a partir da página 2", async () => {
     await pagina();
-    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    fireEvent.click(botaoFim("Seguinte"));
     await screen.findByText(/Página 2 de 3/);
     escolher("Categoria", "Canalização");
     await waitFor(() => expect(ultima()).toMatchObject({ p_categoria: ID.pcOf, p_pagina: 1, p_subcategoria: null }));
@@ -262,7 +274,7 @@ describe("Produtos por páginas · a pesquisa tem debounce", () => {
   });
   it("a pesquisa volta à página 1 e leva-a também às contagens", async () => {
     await pagina();
-    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    fireEvent.click(botaoFim("Seguinte"));
     await screen.findByText(/Página 2 de 3/);
     fireEvent.change(painel().getByRole("searchbox", { name: "Procurar produto" }), { target: { value: "roca" } });
     await waitFor(() => expect(ultima()).toMatchObject({ p_q: "roca", p_pagina: 1 }), { timeout: 2000 });
@@ -320,7 +332,7 @@ describe("Produtos por páginas · pré-carregamento e cache", () => {
   it("ir à 2 mostra-a logo (sem «A ler…»), não a pede de novo e pré-carrega a 4", async () => {
     await abrir6();
     await waitFor(() => expect(pedidasSemFiltro()).toHaveLength(3));
-    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    fireEvent.click(botaoFim("Seguinte"));
     expect(screen.queryByText(/A ler/)).not.toBeInTheDocument();
     await screen.findByText(/Página 2 de 6/);
     await waitFor(() => expect(pedidasSemFiltro().sort()).toEqual([1, 2, 3, 4]));
@@ -329,10 +341,10 @@ describe("Produtos por páginas · pré-carregamento e cache", () => {
   it("voltar à 1 usa a cache: nenhum pedido novo", async () => {
     await abrir6();
     await waitFor(() => expect(pedidasSemFiltro()).toHaveLength(3));
-    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    fireEvent.click(botaoFim("Seguinte"));
     await waitFor(() => expect(pedidasSemFiltro()).toHaveLength(4));
     const n = paginas().length;
-    fireEvent.click(screen.getByRole("button", { name: "Anterior" }));
+    fireEvent.click(botaoFim("Anterior"));
     await screen.findByText(/Página 1 de 6/);
     await assentar();
     expect(paginas()).toHaveLength(n);
@@ -356,16 +368,16 @@ describe("Produtos por páginas · pré-carregamento e cache", () => {
     await assentar();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByText(/rede em baixo/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    fireEvent.click(botaoFim("Seguinte"));
     await screen.findByText(/Página 2 de 6/);
     expect(painel().getByRole("button", { name: "Produto da página 2" })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
   it("a última página não pré-carrega para lá de `paginas`", async () => {
     await pagina(); // 3 páginas
-    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    fireEvent.click(botaoFim("Seguinte"));
     await screen.findByText(/Página 2 de 3/);
-    fireEvent.click(screen.getByRole("button", { name: "Seguinte" }));
+    fireEvent.click(botaoFim("Seguinte"));
     await screen.findByText(/Página 3 de 3/);
     await assentar();
     expect(Math.max(...paginas().map((c) => c.a.p_pagina as number))).toBe(3);
