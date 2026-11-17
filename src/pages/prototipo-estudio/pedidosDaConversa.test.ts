@@ -19,6 +19,16 @@ describe("as peças decididas em voz alta", () => {
     expect(pecas("Tirar a banheira e pôr uma base de duche.")).toEqual(["banheira:tira", "base:junta"]);
   });
 
+  it("17/11: «trocar A por B» de tipos diferentes = tirar A e pôr B (a banheira sai, a base junta-se)", () => {
+    expect(pecas("Trocar a banheira por uma base de duche.")).toEqual(["banheira:tira", "base:junta"]);
+    expect(pecas("Quero trocar a banheira por uma base de duche.")).toEqual(["banheira:tira", "base:junta"]);
+    expect(pecas("Substituir a banheira por um móvel.")).toEqual(["banheira:tira", "movel:junta"]);
+    expect(pecas("Mudamos a banheira para uma base.")).toEqual(["banheira:tira", "base:junta"]);
+    // trocar pela MESMA peça (um modelo novo) continua a ser «troca», não «tira»
+    expect(pecas("Trocar a sanita por uma suspensa.")).toEqual(["sanita:troca"]);
+    expect(pecas("Trocar a banheira.")).toEqual(["banheira:troca"]);
+  });
+
   it("a negação vira a decisão; a cor não é «fica»; o que não é decisão não conta", () => {
     expect(pecas("Não quero tirar o bidé.")).toEqual(["bide:fica"]);
     expect(pecas("Fica a sanita preta.")).toEqual([]);

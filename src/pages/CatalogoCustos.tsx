@@ -3,6 +3,7 @@
 // nos ecrãs grava-se sozinho, entidade a entidade, pelas funções cat_* (real/gravarCatalogo.ts), e a página volta a ler da base.
 // Substitui os Produtos e os Serviços antigos no menu (as páginas antigas ficam até à limpeza).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -39,6 +40,7 @@ export default function CatalogoCustos() {
   const [gravacao, setGravacao] = useState<Gravacao>({ k: "parado" });
   const base = useRef<Base | null>(null);
   const aGravar = useRef(false);
+  const queryClient = useQueryClient();
 
   const carregar = useCallback(async (o: string) => {
     base.current = await carregarCatalogo(supabase, o, S);
@@ -70,12 +72,15 @@ export default function CatalogoCustos() {
       aGravar.current = true;
       setGravacao({ k: "a-gravar", n: chamadas.length });
       const r = await executarCatalogo(chamadas, rpc);
+      // 17/11: um perfil (ofício) criado, mudado ou retirado: os ofícios em cache dos Cargos do RH (useOficiosObra) leem-se de novo
+      if (chamadas.some((c) => c.rpc === "cat_guardar_perfil" || c.rpc === "cat_retirar_perfil"))
+        void queryClient.invalidateQueries({ queryKey: ["rh-oficios-obra"] });
       try { await carregar(b.org); } catch { /* fica o que está; o erro da gravação diz o resto */ }
       aGravar.current = false;
       setGravacao(r.erro ? { k: "erro", t: r.erro } : { k: "gravado", n: r.feitas, avisos: r.avisos });
     }, 900);
     return () => window.clearTimeout(t);
-  }, [C, K, mexido, pronto, S, carregar]);
+  }, [C, K, mexido, pronto, S, carregar, queryClient]);
 
   const ctx = { S, A: {} as Ctx["A"], run, go, q: "" } as Ctx;
   // 29/10: a ficha do produto lê os fornecedores ligados e liga a artigos do portal; mexer exige products.edit (o can_link de Compras); a estrela também products.manage_prices

@@ -69,8 +69,10 @@ export function pedidosDaConversa(falas: readonly Fala[], origem: Dito["origem"]
   return { pecas, servicos };
 }
 
+const POR = /^(por|para|pela|pelo)$/;
 function pecasDaOracao(oracao: string, base: Dito, out: DitoPeca[]) {
   const ws = palavras(oracao);
+  const locais: { tipo: TipoPeca; acao: AcaoPeca; j: number }[] = [];
   ws.forEach((w, j) => {
     const tipo = pecaDe(w);
     if (!tipo) return;
@@ -92,8 +94,23 @@ function pecasDaOracao(oracao: string, base: Dito, out: DitoPeca[]) {
     else if (/^sem$/.test(antes)) acao = "tira";
     if (!acao) return;
     if (PECAS[tipo]?.abertura) return;
-    out.push({ ...base, tipo, acao });
+    locais.push({ tipo, acao, j });
   });
+  // 17/11 (Rúben, teste no Estúdio): «trocar a banheira por uma base de duche» = tirar a banheira e pôr a base. Quando se troca uma peça
+  //  POR/PARA outra de tipo diferente, a primeira sai e a segunda junta-se — antes ficavam as duas (a banheira em «trocar» e a base como
+  //  peça nova). A peça-alvo lê-se logo a seguir ao «por/para» (o «para» sozinho não a marcava). Trocar pela mesma peça não muda.
+  for (const a of locais) {
+    if (a.acao !== "troca") continue;
+    const pi = ws.findIndex((w, i) => i > a.j && POR.test(w));
+    if (pi === -1) continue;
+    let alvo: TipoPeca | null = null, bj = -1;
+    for (let i = pi + 1; i < ws.length && i <= pi + 4; i++) { const tp = pecaDe(ws[i]); if (tp) { alvo = tp; bj = i; break; } if (!ARTIGO.test(ws[i])) break; }
+    if (!alvo || alvo === a.tipo) continue;
+    a.acao = "tira";
+    const existente = locais.find((x) => x.j === bj);
+    if (existente) existente.acao = "junta"; else locais.push({ tipo: alvo, acao: "junta", j: bj });
+  }
+  for (const l of locais.sort((x, y) => x.j - y.j)) out.push({ ...base, tipo: l.tipo, acao: l.acao });
 }
 
 function servicosDaOracao(oracao: string, base: Dito, out: DitoServico[]) {

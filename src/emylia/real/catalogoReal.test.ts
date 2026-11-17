@@ -141,6 +141,54 @@ describe("diferencasCatalogo: o que mudou, em chamadas às funções cat_*", () 
   });
 });
 
+describe("diferencasCatalogo: retirar um perfil (técnico/ofício) apaga-o na base (17/11, cat_retirar_perfil)", () => {
+  const PINTOR = "99999999-0000-4000-8000-000000000003";
+  const montar2 = () => {
+    const L = linhas();
+    L.perfis = [...L.perfis, { id: PINTOR, chave: "pintor", nome: "Pintor", salario_referencia: 1000, ativo: true }];
+    return montarCatalogo(L, catalogo0(), { canal: { n: "Canalização", un: "pt", h: 2, eh: 0, eq: 0, cons: 0, preco: 106.05, perfil: "Canalizador", perfilId: "canalizador" } });
+  };
+  const chamadas = (mexer: (d: FotoCatalogo) => void) => {
+    const M = montar2(), antes = foto(M), depois = foto(M);
+    mexer(depois);
+    return diferencasCatalogo(ORG, antes, depois, { ids: M.ids, produtos: linhas().produtos });
+  };
+
+  it("um perfil da base retirado gera cat_retirar_perfil com o id da base", () => {
+    const ch = chamadas((d) => { d.C.perfis = d.C.perfis.filter((p) => p.id !== "pintor"); });
+    expect(ch).toEqual([{ rpc: "cat_retirar_perfil", nota: "Retirar Pintor", args: { p_org: ORG, p_id: PINTOR } }]);
+  });
+  it("o perfil retira-se depois de gravado o serviço que deixou de o usar", () => {
+    const ch = chamadas((d) => {
+      d.C.receitas.canal.mo = d.C.receitas.canal.mo.map((p) => ({ ...p, perfil: "pintor" }));
+      d.C.perfis = d.C.perfis.filter((p) => p.id !== "canalizador");
+    });
+    expect(ch.map((c) => c.rpc)).toEqual(["cat_guardar_servico", "cat_guardar_servico_detalhes", "cat_retirar_perfil"]);
+    expect((ch[0].args.p_mo as { perfil_id: string }[])[0].perfil_id).toBe(PINTOR);
+    expect(ch[2].args).toEqual({ p_org: ORG, p_id: ID.perfil });
+  });
+  it("um perfil novo, renomeado ou sem mudanças não gera cat_retirar_perfil", () => {
+    expect(chamadas(() => {}).length).toBe(0);
+    const novo = chamadas((d) => { d.C.perfis.push({ id: "pf9", n: "Eletricista", salario: null }); });
+    expect(novo.map((c) => c.rpc)).toEqual(["cat_guardar_perfil"]);
+    expect(novo[0]).toMatchObject({ guarda: "perfil:pf9", args: { p_id: null, p_nome: "Eletricista" } });
+    const renomeado = chamadas((d) => { d.C.perfis.find((p) => p.id === "pintor")!.n = "Pintor de interiores"; });
+    expect(renomeado.map((c) => c.rpc)).toEqual(["cat_guardar_perfil"]);
+    expect(renomeado[0].args).toMatchObject({ p_id: PINTOR, p_nome: "Pintor de interiores" });
+  });
+  it("um perfil criado e retirado antes de gravar não chega à base", () => {
+    const M = montar2(), antes = foto(M);
+    antes.C.perfis.push({ id: "pf9", n: "Eletricista", salario: null }); // ainda sem id na base (ids.perfil não o tem)
+    const depois = foto(M);
+    expect(diferencasCatalogo(ORG, antes, depois, { ids: M.ids, produtos: linhas().produtos })).toEqual([]);
+  });
+  it("se a base recusar (em uso), a gravação pára e o motivo chega ao ecrã", async () => {
+    const ch = chamadas((d) => { d.C.perfis = d.C.perfis.filter((p) => p.id !== "pintor"); });
+    const r = await executarCatalogo(ch, async () => ({ data: null, error: { message: "«Pintor» está em uso em 2 cargos e 1 pessoa: não se pode retirar.", code: "CT005" } }));
+    expect(r).toEqual({ feitas: 0, erro: "Retirar Pintor: «Pintor» está em uso em 2 cargos e 1 pessoa: não se pode retirar.", avisos: [] });
+  });
+});
+
 describe("montarCatalogo: técnicos do RH e o €/h da base (28/10, cargos técnicos)", () => {
   const PERFIL2 = "99999999-0000-4000-8000-000000000002";
   const comRh = (veCusto = true) => {
