@@ -262,6 +262,33 @@ export async function preencherPelaFrase(frase: string): Promise<string[]> {
   return plano.length ? executarPlano(campos, plano) : [];
 }
 
+// ------------------------------------------------------------------ 17/11 (Rúben: «tudo por voz»): carregar num botão pelo nome
+
+/** O que nunca se carrega por voz (não se desfaz, ou sai da conta): fica para a mão de quem está a usar. */
+const NAO_POR_VOZ = /\b(?:enviar|envia|eliminar|apagar (?:o|a|este|esta) |apagar neg|excluir|assinar|aceitar|pagar|perdido|cancelar|terminar sess|sair|logout|remover acesso|revogar|descartar|repor password)/i;
+const VERBO_CARREGAR = /^(?:(?:carrega|carregar|clica|clicar|toca|tocar|prime|primir|seleciona|selecionar|escolhe|escolher|abre|abrir|faz|fazer)\s+(?:em|no|na|nos|nas|o|a|os|as)?\s*)?(?:(?:o |no )?botao\s+(?:de |do |da )?)?/;
+/** O botão à vista com o nome dito («escolher o estilo», «carrega em aplicar o estilo», «desfazer», «todos»). */
+export function botaoPeloNome(frase: string, raiz: ParentNode = document): HTMLButtonElement | null {
+  // a frase inteira («escolher o estilo» é o nome do botão) ou sem o verbo («carrega em aplicar o estilo»)
+  const inteira = normal(frase), semVerbo = inteira.replace(VERBO_CARREGAR, "").trim();
+  for (const alvo of inteira === semVerbo ? [inteira] : [inteira, semVerbo]) { const b = botaoCom(alvo, raiz); if (b) return b; }
+  return null;
+}
+function botaoCom(alvo: string, raiz: ParentNode): HTMLButtonElement | null {
+  if (alvo.length < 3) return null;
+  let melhor: HTMLButtonElement | null = null;
+  for (const b of Array.from(raiz.querySelectorAll<HTMLButtonElement>("button, [role='button'], a[href]"))) {
+    if ((b as HTMLButtonElement).disabled || b.getAttribute("aria-disabled") === "true" || !aVista(b)) continue;
+    // as respostas das perguntas («Sim», «Fácil») são do preencher, que sabe de que pergunta são
+    if (b.hasAttribute("aria-pressed") && b.closest("[role='group'][aria-labelledby]")) continue;
+    const t = textoDe(b) || b.getAttribute("aria-label") || "";
+    if (!t || t.length > 60 || NAO_POR_VOZ.test(t)) continue;
+    const n = normal(t).replace(/\s*\d+\s*$/, ""); // «Proposta 3 por escolher» conta pelo nome
+    if (n === alvo || (alvo.split(" ").length >= 2 && n.startsWith(alvo + " "))) { melhor = b as HTMLButtonElement; if (n === alvo) break; }
+  }
+  return melhor;
+}
+
 // ------------------------------------------------------------------ andar na página e limpar a pesquisa
 
 /** O que faz scroll na página: a área principal (a maior caixa com scroll) ou a própria página. */

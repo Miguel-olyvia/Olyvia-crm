@@ -35,7 +35,7 @@ import { totalDaCozinha } from "./cozinha/modelo";
 import { acertarPosicoes, mudarODepois, seguirOAntes } from "./posicoesDepois";
 const Visualizador3D = lazy(() => import("@/emylia/planta3d/Visualizador3D"));
 import { CHAVE_ESTUDIO as CHAVE, devolverAoNegocio } from "./daVisita";
-import { vozNoEstudio } from "./estudioPorVoz";
+import { pedeDesfazer, vozNoEstudio } from "./estudioPorVoz";
 import { EV_ESTUDIO } from "@/emylia/comandoOlyvia";
 // 9/11 (Rúben: «o Estúdio é o passo final da visita»): o último passo fecha a visita (os serviços do Catálogo, o plano e o orçamento)
 const PASSOS = ["Antes", "Estilo", "Depois", "3D", "Proposta", "Fechar"] as const;
@@ -111,12 +111,20 @@ export default function EstudioProjeto() {
   // 17/11 (Rúben: «no Estúdio falta ele trabalhar também»): a Olyvia manda a frase para aqui (EV_ESTUDIO); o Estúdio faz o que sabe
   // (passos, alturas, divisão, peças, serviços, cores — estudioPorVoz.ts) e responde no próprio pedido
   const voz = useRef<(det: { frase: string; ok: boolean; msg: string }) => void>(() => {});
+  // o que a voz mudou, para «desfaz» voltar atrás (o «Desfazer» da planta não sabe das mudanças feitas por fora)
+  const antesDaVoz = useRef<Projeto[]>([]);
   voz.current = (det) => {
+    if (pedeDesfazer(det.frase)) {
+      const anterior = antesDaVoz.current.pop();
+      if (!anterior) return; // nada feito por voz: segue para o «Desfazer» da página (um botão com esse nome)
+      setP(anterior); det.ok = true; det.msg = "Desfeito.";
+      return;
+    }
     const r = vozNoEstudio(det.frase, pRef.current, PASSOS.indexOf(passo));
     if (!r) return;
     det.ok = true;
     det.msg = r.partes.join(" · ") + ".";
-    if (r.p) setP(r.p);
+    if (r.p) { antesDaVoz.current = [...antesDaVoz.current.slice(-19), pRef.current]; setP(r.p); }
     if (r.passo !== undefined) ir(PASSOS[r.passo]);
     if (r.mostrar) setMostrar(true);
     if (r.voltar) voltar(false);
