@@ -44,6 +44,8 @@ export interface Produto {
   z0?: number;
   z1?: number;
   destaque?: string;
+  /** 17/11: o serviço do catálogo que instala este produto (o nome); `inst` é então o preço dele × o fator. */
+  instServico?: string;
 }
 
 const P = (id: string, cat: Categoria, n: string, colecao: string, cores: Cor[], preco: number, inst: number, extra: Partial<Produto> = {}): Produto =>

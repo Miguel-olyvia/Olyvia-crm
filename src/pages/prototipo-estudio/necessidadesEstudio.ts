@@ -146,7 +146,8 @@ export function necessidades(p: Projeto): Linha[] {
     if (estado === "troca") linha({ id: `ret-${x.id}`, grupo: "Trabalhos", n: `Retirar ${nome(x.tipo)} ${fem(x.tipo) ? "antiga" : "antigo"}`, q: 1, un: "un", unit: TABELA.retirar[x.tipo], porque: fem(x.tipo) ? "Sai para entrar a nova." : "Sai para entrar o novo." });
     if (prod) linha({ id: `prod-${x.id}`, grupo: "Peças", n: prod.n, q: 1, un: "un", unit: prod.preco, porque });
     else linha({ id: `prod-${x.id}`, grupo: "Peças", n: `${PECAS[x.tipo].n}: por escolher`, q: 1, un: "un", unit: 0, porque: "Toque na peça para a escolher no catálogo.", porEscolher: true });
-    linha({ id: `inst-${x.id}`, grupo: "Trabalhos", n: `Instalação: ${nome(x.tipo)}`, q: 1, un: "un", unit: prod?.inst ?? TABELA.instalar[x.tipo], porque });
+    // 17/11: com o catálogo verdadeiro, a instalação é o serviço ligado ao produto (o nome dele)
+    linha({ id: `inst-${x.id}`, grupo: "Trabalhos", n: prod?.instServico ?? `Instalação: ${nome(x.tipo)}`, q: 1, un: "un", unit: prod?.inst ?? TABELA.instalar[x.tipo], porque });
     for (const cat of ACOMPANHA[x.tipo] ?? []) {
       const a = produto(p.acompanha[x.id]?.[cat]);
       if (a) linha({ id: `acomp-${x.id}-${cat}`, grupo: "Peças", n: a.n, q: 1, un: "un", unit: a.preco + a.inst, porque: `${SINGULAR[cat] ?? NOME_CATEGORIA[cat]} ${fem(x.tipo) ? "da" : "do"} ${nome(x.tipo)}, com instalação.` });
@@ -158,7 +159,7 @@ export function necessidades(p: Projeto): Linha[] {
     const prod = produto(x.produto), porque = "Escolhido no estilo; falta pô-lo na planta.";
     if (prod) linha({ id: `prod-${x.id}`, grupo: "Peças", n: prod.n, q: 1, un: "un", unit: prod.preco, porque });
     else linha({ id: `prod-${x.id}`, grupo: "Peças", n: `${PECAS[x.tipo].n}: por escolher`, q: 1, un: "un", unit: 0, porque, porEscolher: true });
-    linha({ id: `inst-${x.id}`, grupo: "Trabalhos", n: `Instalação: ${nome(x.tipo)}`, q: 1, un: "un", unit: prod?.inst ?? TABELA.instalar[x.tipo], porque });
+    linha({ id: `inst-${x.id}`, grupo: "Trabalhos", n: prod?.instServico ?? `Instalação: ${nome(x.tipo)}`, q: 1, un: "un", unit: prod?.inst ?? TABELA.instalar[x.tipo], porque });
     for (const cat of ACOMPANHA[x.tipo] ?? []) {
       const a = produto(x.acompanha?.[cat]);
       if (a) linha({ id: `acomp-${x.id}-${cat}`, grupo: "Peças", n: a.n, q: 1, un: "un", unit: a.preco + a.inst, porque: `${SINGULAR[cat] ?? NOME_CATEGORIA[cat]} ${fem(x.tipo) ? "da" : "do"} ${nome(x.tipo)}, com instalação.` });
