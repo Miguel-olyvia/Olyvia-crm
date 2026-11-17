@@ -1,3 +1,5 @@
+import { useEffect, useLayoutEffect, useRef } from "react";
+import { SmsVariableButtons } from "@/components/forms/SmsVariableButtons";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -142,6 +144,55 @@ export function FormEmailsTab<T extends EmailsTabFields>({
 }: FormEmailsTabProps<T>) {
   const { t } = useTranslation();
   const set = (patch: Partial<EmailsTabFields>) => onChange({ ...branding, ...patch });
+
+  // Última posição do cursor na caixa do SMS (guardada ao perder o foco, p. ex. ao clicar num botão).
+  const smsRef = useRef<HTMLTextAreaElement>(null);
+  const smsCaret = useRef<{ start: number; end: number } | null>(null);
+  const pendingCaret = useRef<number | null>(null);
+  const rememberSmsCaret = () => {
+    const el = smsRef.current;
+    if (el) smsCaret.current = { start: el.selectionStart, end: el.selectionEnd };
+  };
+  const insertSmsVariable = (key: string) => {
+    const el = smsRef.current;
+    const text = branding.confirmation_sms_message;
+    const live = el && document.activeElement === el ? { start: el.selectionStart, end: el.selectionEnd } : null;
+    const range = live ?? smsCaret.current ?? { start: text.length, end: text.length };
+    const start = Math.min(range.start, text.length);
+    const end = Math.min(Math.max(range.end, start), text.length);
+    const token = `{{${key}}}`;
+    const nextText = text.slice(0, start) + token + text.slice(end);
+    const caret = start + token.length;
+    if (nextText === text) {
+      // O valor não muda, logo não há re-render a esperar: aplica já.
+      pendingCaret.current = null;
+      applyCaret(caret);
+      return;
+    }
+    pendingCaret.current = caret;
+    set({ confirmation_sms_message: nextText });
+  };
+  const applyCaret = (pos: number) => {
+    const el = smsRef.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(pos, pos);
+    smsCaret.current = { start: pos, end: pos };
+  };
+  // Ao desligar o SMS a caixa desmonta: o cursor guardado deixa de valer.
+  useEffect(() => {
+    if (!branding.confirmation_sms_enabled) {
+      smsCaret.current = null;
+      pendingCaret.current = null;
+    }
+  }, [branding.confirmation_sms_enabled]);
+  // Depois de a mensagem mudar, devolve o foco à caixa com o cursor a seguir ao que entrou.
+  useLayoutEffect(() => {
+    const pos = pendingCaret.current;
+    if (pos == null) return;
+    pendingCaret.current = null;
+    applyCaret(pos);
+  }, [branding.confirmation_sms_message]);
   // Interruptor do comercial que se mostra: o dele, senão o do cliente (regra do servidor).
   const technicianReminderOn = branding.reminder_technician_enabled ?? branding.reminder_enabled;
   const followsClientOverridden =
@@ -186,14 +237,17 @@ export function FormEmailsTab<T extends EmailsTabFields>({
                 <Label htmlFor="confirmation-sms-message" className="text-xs">Mensagem do SMS</Label>
                 <Textarea
                   id="confirmation-sms-message"
+                  ref={smsRef}
                   value={branding.confirmation_sms_message}
                   onChange={(e) => set({ confirmation_sms_message: e.target.value })}
+                  onBlur={rememberSmsCaret}
                   placeholder='Deixe vazio para usar a mensagem base: "{{company_name}}: a sua visita ficou marcada para {{meeting_date}}. Aguarde o nosso contacto telefónico para confirmação da visita."'
                   rows={3}
                 />
-                <p className="text-[10px] text-muted-foreground">
-                  Aceita as mesmas variáveis do email: {"{{lead_name}}"}, {"{{meeting_date}}"}, {"{{company_name}}"}, {"{{cancel_url}}"}.
-                </p>
+                <SmsVariableButtons
+                  includeLink={branding.confirmation_sms_include_link}
+                  onInsert={insertSmsVariable}
+                />
               </div>
               <SwitchHeader
                 small

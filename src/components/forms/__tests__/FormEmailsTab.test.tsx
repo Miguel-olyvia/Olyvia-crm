@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { FormEmailsTab, type EmailsTabFields } from "../FormEmailsTab";
@@ -227,5 +228,131 @@ describe("FormEmailsTab: aviso ao cliente ao reagendar e ao cancelar tem interru
   it("ja nao diz que o cliente recebe sempre", () => {
     const { client } = renderTab();
     expect(within(client).queryByText(/recebe sempre/)).not.toBeInTheDocument();
+  });
+});
+
+function StatefulTab({ initial }: { initial: EmailsTabFields }) {
+  const [branding, setBranding] = useState(initial);
+  return (
+    <FormEmailsTab
+      branding={branding}
+      onChange={setBranding}
+      emailTemplateOptions={[]}
+      smtpOptions={[]}
+    />
+  );
+}
+
+const SMS_BUTTONS: Array<[string, string]> = [
+  ["Nome do cliente", "lead_name"],
+  ["Data e hora da visita", "meeting_date"],
+  ["Técnico", "technician_name"],
+  ["Morada da visita", "location"],
+  ["Empresa", "company_name"],
+  ["Telefone do cliente", "lead_phone"],
+  ["Email do cliente", "lead_email"],
+];
+
+const LINK_BTN = "Inserir variável Link gerir/cancelar {{cancel_url}}";
+
+describe("FormEmailsTab: variáveis do SMS como botões", () => {
+  const smsBox = () => screen.getByLabelText("Mensagem do SMS") as HTMLTextAreaElement;
+
+  it("mostra as 7 variáveis (sem o link, que está desligado) e nenhum alias", () => {
+    render(<StatefulTab initial={allOn} />);
+    expect(screen.getByText("Inserir variável:")).toBeInTheDocument();
+    for (const [label, key] of SMS_BUTTONS) {
+      const btn = screen.getByRole("button", { name: `Inserir variável ${label} {{${key}}}` });
+      expect(btn).toHaveAttribute("type", "button");
+      expect(btn).toHaveTextContent(`{{${key}}}`);
+    }
+    for (const alias of ["client_name", "client_email", "meeting_datetime"]) {
+      expect(screen.queryByText(new RegExp(`\\{\\{${alias}\\}\\}`))).not.toBeInTheDocument();
+    }
+  });
+
+  it("clicar insere na posição do cursor e devolve o foco com o cursor depois do inserido", () => {
+    render(<StatefulTab initial={{ ...allOn, confirmation_sms_message: "Olá , bem-vindo" }} />);
+    const box = smsBox();
+    box.focus();
+    box.setSelectionRange(4, 4);
+    box.blur(); // clicar no botão tira o foco da caixa
+    fireEvent.click(screen.getByRole("button", { name: "Inserir variável Nome do cliente {{lead_name}}" }));
+    expect(box.value).toBe("Olá {{lead_name}}, bem-vindo");
+    expect(box).toHaveFocus();
+    expect(box.selectionStart).toBe(4 + "{{lead_name}}".length);
+    expect(box.selectionEnd).toBe(box.selectionStart);
+  });
+
+  it("sem foco (nunca clicou na caixa) insere no fim", () => {
+    render(<StatefulTab initial={{ ...allOn, confirmation_sms_message: "Visita em " }} />);
+    fireEvent.click(screen.getByRole("button", { name: "Inserir variável Data e hora da visita {{meeting_date}}" }));
+    const box = smsBox();
+    expect(box.value).toBe("Visita em {{meeting_date}}");
+    expect(box).toHaveFocus();
+    expect(box.selectionStart).toBe(box.value.length);
+  });
+
+  it("cancel_url só fica disponível com o link ligado", () => {
+    const { unmount } = render(<StatefulTab initial={allOn} />);
+    const off = screen.getByRole("button", { name: LINK_BTN });
+    expect(off).toHaveAttribute("aria-disabled", "true");
+    expect(off).not.toBeDisabled();
+    off.focus();
+    expect(off).toHaveFocus();
+    fireEvent.click(off);
+    expect(smsBox().value).toBe("");
+    unmount();
+
+    render(<StatefulTab initial={{ ...allOn, confirmation_sms_include_link: true }} />);
+    const on = screen.getByRole("button", { name: LINK_BTN });
+    expect(on).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(on);
+    expect(smsBox().value).toBe("{{cancel_url}}");
+  });
+
+  it("os botões ficam num grupo nomeado pelo rótulo «Inserir variável:»", () => {
+    render(<StatefulTab initial={allOn} />);
+    const group = screen.getByRole("group", { name: "Inserir variável:" });
+    expect(within(group).getAllByRole("button")).toHaveLength(8);
+  });
+
+  it("com texto selecionado, a variável substitui a seleção", () => {
+    render(<StatefulTab initial={{ ...allOn, confirmation_sms_message: "Olá NOME, bem-vindo" }} />);
+    const box = smsBox();
+    box.focus();
+    box.setSelectionRange(4, 8);
+    box.blur();
+    fireEvent.click(screen.getByRole("button", { name: "Inserir variável Nome do cliente {{lead_name}}" }));
+    expect(box.value).toBe("Olá {{lead_name}}, bem-vindo");
+    expect(box.selectionStart).toBe(4 + "{{lead_name}}".length);
+  });
+
+  it("inserir a mesma variável que estava selecionada (texto igual) não deixa a posição presa", () => {
+    render(<StatefulTab initial={{ ...allOn, confirmation_sms_message: "{{lead_name}}" }} />);
+    const box = smsBox();
+    box.focus();
+    box.setSelectionRange(0, 13);
+    box.blur();
+    fireEvent.click(screen.getByRole("button", { name: "Inserir variável Nome do cliente {{lead_name}}" }));
+    expect(box.value).toBe("{{lead_name}}");
+    expect(box).toHaveFocus();
+    expect(box.selectionStart).toBe(13);
+    // Uma edição seguinte não pode ser puxada para a posição antiga.
+    fireEvent.change(box, { target: { value: "{{lead_name}} mais texto" } });
+    expect(box.selectionStart).toBe("{{lead_name}} mais texto".length);
+  });
+
+  it("desligar e voltar a ligar o SMS esquece o cursor antigo e insere no fim", () => {
+    render(<StatefulTab initial={{ ...allOn, confirmation_sms_message: "abc" }} />);
+    const box = smsBox();
+    box.focus();
+    box.setSelectionRange(1, 1);
+    box.blur();
+    const toggle = screen.getByRole("switch", { name: "Também por SMS" });
+    fireEvent.click(toggle);
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "Inserir variável Empresa {{company_name}}" }));
+    expect(smsBox().value).toBe("abc{{company_name}}");
   });
 });
