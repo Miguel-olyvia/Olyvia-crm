@@ -11,6 +11,8 @@ import type { Ctx } from "./pecas";
 import { PREFIXO_CLIENTE, PREFIXO_PROD, precoProduto, servicosTrazidos } from "./produtosVisita";
 import { FotoOuIlustracao, ilustracaoDe } from "./ilustracoes";
 import { useCatalogo } from "./v2/catalogoStore";
+import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
+import { useFotosDosProdutos } from "./real/fotosDosProdutos";
 
 export { PREFIXO_CLIENTE, PREFIXO_PROD };
 
@@ -19,6 +21,8 @@ export function ProdutosOrcamento({ S, A, run, d, simples }: Pick<Ctx, "S" | "A"
   const traz = Object.entries(servicosTrazidos(prod));
   const t = simples ? "text-[15px]" : "text-sm";
   const K = useCatalogo();
+  // 22/01: com o Catálogo leve, os produtos escolhidos que não estão em K (ao reabrir o negócio) têm a foto lida do servidor (cat_ler_produto, uma vez por produto)
+  const fotosLidas = useFotosDosProdutos(catalogoParcial() ? orgDoCatalogoLido() : null, prod.filter((p) => !K.produtos.some((x) => x.id === p.id)).map((p) => p.id));
   // 15/10, a página simples: uma lista limpa (a ilustração, o nome e a quantidade, o preço à direita); a instalação que o
   // produto traz vai por baixo do próprio produto, e não numa frase à parte
   if (simples) {
@@ -34,7 +38,7 @@ export function ProdutosOrcamento({ S, A, run, d, simples }: Pick<Ctx, "S" | "A"
               const inst = p.svc && p.q > 0 ? S.svc[p.svc] : null;
               return (
                 <li key={p.id} className="flex items-center gap-3 py-3">
-                  <FotoOuIlustracao fotos={K.produtos.find((x) => x.id === p.id)?.fotos} nome={p.n} k={ilustracaoDe(p.n)} className="h-10 w-10 shrink-0" decorativa />
+                  <FotoOuIlustracao fotos={K.produtos.find((x) => x.id === p.id)?.fotos ?? fotosLidas[p.id]} nome={p.n} k={ilustracaoDe(p.n)} className="h-10 w-10 shrink-0" decorativa />
                   <span className="min-w-0 flex-1">
                     <span className="block text-[15px] font-medium leading-snug">{p.n}</span>
                     <span className="block text-sm text-muted-foreground">

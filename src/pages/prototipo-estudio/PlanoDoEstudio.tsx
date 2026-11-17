@@ -7,7 +7,6 @@
 //  · «Fechar a visita»: volta ao negócio, leva tudo e fecha a visita (o orçamento e o plano ficam gerados).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { garantirProdutos } from "@/emylia/real/garantirProdutos";
-import { linhasParaLevar } from "./levarParaNegocio";
 import { Check, ChevronDown, Hammer, Lock, Plus, Repeat, Search, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -17,6 +16,9 @@ import { MapaDatasObra, inicioPorOmissao } from "@/emylia/MapaDatasObra";
 import { materiaisDaReceita, passosDaReceita, planoDaVisita, planoDoEstudio } from "@/emylia/planoDaVisita";
 import { simularNoNegocio } from "@/emylia/estudioNoNegocio";
 import { podeVerCustos } from "@/emylia/permissoes";
+import { catalogoParcial, orgDoCatalogoLido } from "@/emylia/real/catalogoLeve";
+import { useProdutosDoEstudio } from "@/emylia/real/produtosDoEstudio";
+import { linhasParaLevar } from "./levarParaNegocio";
 import { useCatalogoDoEstudio } from "./catalogoDoEstudio";
 import { juntarExtra, mudarEquipa, mudarExtra, mudarInicio, projetoNoCatalogo, reporServico, servicosParaPlano, trocarServico, type ServicoDoProjeto } from "./servicosDoCatalogo";
 import type { Projeto } from "./necessidadesEstudio";
@@ -47,10 +49,13 @@ export function PlanoDoEstudio({ p, setP, fechar, semCatalogo }: {
 
 function ComCatalogo({ p, setP, fechar, S, erro }: { p: Projeto; setP: React.Dispatch<React.SetStateAction<Projeto>>; fechar: (f: boolean) => void; S: Estado; erro: string | null }) {
   const K = useCatalogo();
-  const produtos = useMemo(() => K.produtos ?? [], [K.produtos]);
-  // 17/11: os produtos escolhidos (ids do Catálogo verdadeiro) que o Catálogo leve não traz leem-se do servidor; ao chegarem, o Catálogo muda e o plano volta a ligar
-  const ids = useMemo(() => linhasParaLevar(p).map((l) => l.produtoId).filter(Boolean).sort().join(","), [p]);
+  // 22/01: com o Catálogo leve K.produtos não tem o par de cada peça: junta-se-lhe o que o servidor dá para cada tipo (só para o plano e o orçamento mostrarem; nada entra no Catálogo)
+  const base = useMemo(() => K.produtos ?? [], [K.produtos]);
+  const linhas = useMemo(() => linhasParaLevar(p), [p]);
+  // 17/11: e o produto EXATO que se escolheu em cada peça (ids do Catálogo verdadeiro) lê-se do servidor e entra no Catálogo: o plano liga-o tal e qual
+  const ids = useMemo(() => linhas.map((l) => l.produtoId).filter(Boolean).sort().join(","), [linhas]);
   useEffect(() => { if (ids) void garantirProdutos(ids.split(",")).catch(() => []); }, [ids]);
+  const produtos = useProdutosDoEstudio(catalogoParcial() ? orgDoCatalogoLido() : null, linhas, base);
   const inicio = inicioPorOmissao(p.catalogo?.inicio);
   const L = useMemo(() => projetoNoCatalogo(p, S, produtos), [p, S, produtos]);
   const negocio = p.negocio !== undefined ? S.deals.find((x) => x.id === p.negocio) : undefined;
@@ -130,6 +135,7 @@ function Servicos({ p, setP, S, L }: { p: Projeto; setP: React.Dispatch<React.Se
       {L.produtos.length > 0 && (
         <div className="space-y-2">
           <h4 className="text-sm font-semibold">Os produtos</h4>
+          {catalogoParcial() && <p className="text-sm text-muted-foreground">O produto de cada peça é a melhor correspondência entre os primeiros resultados da pesquisa no Catálogo.</p>}
           <ul className="space-y-1.5">
             {L.produtos.map((x) => (
               <li key={x.chave} className="flex items-center justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2 text-[15px]">

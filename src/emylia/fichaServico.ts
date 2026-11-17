@@ -142,6 +142,14 @@ export function agruparPorOficio<T extends { oficio: string }>(L: T[], ordem: st
 /* ------------------------------------------------------------------ produtos */
 /** Os produtos que trazem este serviço quando se escolhem na visita. */
 export const produtosQueTrazem = (K: Pick<Catalogo, "produtos">, sid: SvcId): Produto[] => K.produtos.filter((p) => p.servico === sid);
+/** 22/01, Catálogo leve: os produtos que trazem o serviço = os da lista do servidor (cat_pesquisar_produtos por serviço) juntos aos do Catálogo em memória. O de memória manda
+ *  (desligar ou ligar ainda não gravado, o fator editado): um produto do servidor que em memória já não traz o serviço sai; um ligado só em memória entra, no fim. */
+export function ligadosDoServico(K: Pick<Catalogo, "produtos">, sid: SvcId, doServidor: readonly Produto[]): Produto[] {
+  const memoria = new Map(K.produtos.map((p) => [p.id, p]));
+  const dados = doServidor.flatMap((s) => { const m = memoria.get(s.id) ?? s; return m.servico === sid ? [m] : []; });
+  const vistos = new Set(dados.map((p) => p.id));
+  return [...dados, ...produtosQueTrazem(K, sid).filter((p) => !vistos.has(p.id))];
+}
 /** Procura em nome, marca, SKU, subcategoria e atributos (sem acentos). */
 export function pesquisarProdutos(L: Produto[], q: string): Produto[] {
   const qq = normal(q.trim());

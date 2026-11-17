@@ -39,7 +39,7 @@ vi.mock("./produtosLeves", async (orig) => {
 
 const sb = { rpc: async (fn: string) => {
   if (fn === "cat_ler_catalogo_servicos") return { data: CATALOGO_LEVE, error: null };
-  if (fn === "cat_ler_produtos_tabelas") return { data: TABELAS, error: null };
+  if (fn === "cat_ler_produtos_tabelas" || fn === "cat_ler_produtos_tabelas_servicos") return { data: TABELAS, error: null };
   return { data: null, error: { message: "sem função" } };
 } } as never;
 

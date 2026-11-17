@@ -24,11 +24,14 @@ import { levarEstudio } from "./estudioNoNegocio";
 import { camposDasEscolhas, escolhasDoNegocio } from "./preparacaoObra";
 import { MapaDatasObra, inicioPorOmissao } from "./MapaDatasObra";
 import { lerCatalogo } from "./v2/catalogoStore";
+import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
+import { escolherProdutoDoServidor } from "./real/pesquisaProdutos";
+import { trazerProdutosDoEstudio, useProdutosDoEstudio } from "./real/produtosDoEstudio";
+import { linhasParaLevar } from "@/pages/prototipo-estudio/levarParaNegocio";
+import type { Produto } from "./v2/catalogoModelo";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
 import { useCatalogo } from "./v2/catalogoStore";
 import { ligarAoCatalogo, type LinhaLevada } from "./ligarEstudio";
-import { garantirProdutos, produtosEmFalta } from "./real/garantirProdutos";
-import { linhasParaLevar } from "@/pages/prototipo-estudio/levarParaNegocio";
 import { porMedida, type Negocio } from "./motor";
 import { areaChaoM2, gravarPlanta } from "./planta";
 import type { Ctx } from "./pecas";
@@ -125,19 +128,34 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const ultimo = useRef(salvo?.gravadoEm ?? 0);
   const ref = useRef({ ctx, d });
   ref.current = { ctx, d };
-  /** Leva o projeto ao negócio. null: já entrou; uma promessa: entra quando os produtos chegarem do servidor. */
-  const trazer = (p: Projeto): Promise<void> | null => {
-    const aplicar = () => {
-      const r = aplicarDoEstudio(ref.current.ctx, ref.current.d, p);
-      if (r.linhas.length) setPendentes(r.linhas);
-      setFeito(r.avisos.join(" ") || "Do Estúdio não veio nada de novo.");
-    };
-    // 17/11: com o Catálogo leve, os produtos escolhidos no Estúdio leem-se do servidor antes de entrar (senão ficavam «sem par»).
-    // Sem nenhum em falta, entra já (como antes).
-    const ids = linhasParaLevar(p).map((l) => l.produtoId);
-    if (!produtosEmFalta(ids).length) { aplicar(); return null; }
-    setFeito("A ler do Catálogo os produtos escolhidos no Estúdio…");
-    return garantirProdutos(ids).catch(() => []).then(aplicar);
+  const aplicar = (p: Projeto, erros: string[] = [], aproximado = false) => {
+    const r = aplicarDoEstudio(ref.current.ctx, ref.current.d, p);
+    if (r.linhas.length) setPendentes(r.linhas);
+    const avisos = [...r.avisos];
+    if (erros.length) avisos.push(`Não foi possível ler do Catálogo: ${erros.join("; ")}.`);
+    // M5: com o Catálogo leve o par de cada peça é a melhor correspondência entre os primeiros resultados da pesquisa
+    if (aproximado && !erros.length) avisos.push("Os produtos são a melhor correspondência entre os primeiros resultados da pesquisa: confirme-os nas Necessidades.");
+    setFeito(avisos.join(" ") || "Do Estúdio não veio nada de novo.");
+  };
+  // M3/M4: enquanto se lê, o botão fica desativado; uma resposta de outro negócio, ou depois de a página sair, ignora-se
+  const [aLer, setALer] = useState(false);
+  const vivo = useRef(true);
+  useEffect(() => { vivo.current = true; return () => { vivo.current = false; }; }, []);
+  /** Com o Catálogo leve K.produtos não tem o par de cada peça: lê-se do servidor ANTES de levar o projeto. Devolve uma promessa de «correu tudo bem» (false: houve erros, ou a resposta
+   *  já não valia); sem o Catálogo leve devolve undefined e tudo é como sempre, síncrono. */
+  const trazer = (p: Projeto): Promise<boolean> | undefined => {
+    const org = catalogoParcial() ? orgDoCatalogoLido() : null;
+    if (!org) { aplicar(p); return undefined; }
+    const negocio = ref.current.d.id;
+    setALer(true);
+    return trazerProdutosDoEstudio(org, linhasParaLevar(p), ref.current.ctx.S?.svc ?? {})
+      .then((r) => r.erros, (e: unknown) => [e instanceof Error ? e.message : "falhou a leitura"])
+      .then((erros): boolean => {
+        if (!vivo.current || ref.current.d.id !== negocio) return false; // o negócio mudou ou a página saiu
+        try { aplicar(p, erros, true); } catch (e) { setFeito(`Não foi possível levar o Estúdio ao negócio: ${e instanceof Error ? e.message : "falhou a gravar"}.`); return false; }
+        return erros.length === 0;
+      })
+      .finally(() => { if (vivo.current) setALer(false); });
   };
 
   useEffect(() => {
@@ -165,10 +183,14 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         return;
       }
       // 9/11: «Fechar a visita» no Estúdio: com tudo levado, a visita fecha (o orçamento nasce com o plano e as datas). Se faltar alguma
-      // resposta obrigatória, o motor diz qual e a visita fica aberta. 17/11: depois de os produtos chegarem do servidor.
+      // resposta obrigatória, o motor diz qual e a visita fica aberta. (22/01: com o Catálogo leve, só depois de os produtos serem lidos.)
       const fechar = () => { if (v.fechar) { const { ctx: c, d: n } = ref.current; c.run(() => c.A.fecharVisita(n.id)); } };
-      const aChegar = trazer(p);
-      if (aChegar) void aChegar.then(fechar); else fechar();
+      const lendo = trazer(p);
+      if (!lendo) fechar();
+      else void lendo.then((bem) => {
+        if (bem) fechar();
+        else if (v.fechar && vivo.current) setFeito((f) => `${f} A visita ficou aberta: corrija o que falhou e feche-a de novo.`.trim());
+      });
     };
     aoVoltar();
     const aoMudar = (e: StorageEvent) => {
@@ -233,7 +255,7 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             </dl>
             <div className="mt-auto flex flex-wrap gap-2">
               <Button type="button" className="min-h-11 flex-1 sm:flex-none" onClick={abrir}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Continuar no Estúdio</Button>
-              <Button type="button" variant="outline" className="min-h-11 flex-1 sm:flex-none" onClick={() => { const p = projetoDoEstudioPara(d.id) ?? salvo; if (p) void trazer(p); }}>Trazer do Estúdio</Button>
+              <Button type="button" variant="outline" className="min-h-11 flex-1 sm:flex-none" disabled={aLer} onClick={() => { void trazer(projetoDoEstudioPara(d.id) ?? salvo); }}>Trazer do Estúdio</Button>
             </div>
           </div>
         </section>
@@ -251,6 +273,7 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </section>
       )}
       {pendentes.length > 0 && <DoEstudio ctx={ctx} d={d} linhas={pendentes} feito={(texto) => { setPendentes([]); setFeito(texto); }} />}
+      {aLer && <p role="status" className="text-sm text-muted-foreground">A ler os produtos do Estúdio…</p>}
       <p role="status" className="min-h-5 text-sm text-success">{feito}</p>
     </div>
   );
@@ -263,21 +286,28 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
  */
 export function DoEstudio({ ctx, d, linhas, feito }: { ctx: Ctx; d: Negocio; linhas: LinhaLevada[]; feito: (texto: string) => void }) {
   const K = useCatalogo();
-  // 17/11: os produtos do Estúdio que o Catálogo leve não tem leem-se do servidor (o Catálogo muda e isto volta a ligar)
-  useEffect(() => { void garantirProdutos(linhas.map((l) => l.produtoId)).catch(() => []); }, [linhas]);
-  const ligacoes = useMemo(() => ligarAoCatalogo(linhas, ctx.S?.svc ?? {}, K.produtos ?? []), [linhas, ctx.S?.svc, K.produtos]);
+  // 22/01: com o Catálogo leve o par de cada peça vem do servidor (candidatos), e lê-se inteiro ao juntar
+  const org = catalogoParcial() ? orgDoCatalogoLido() : null;
+  const produtos = useProdutosDoEstudio(org, linhas, K.produtos ?? []);
+  const ligacoes = useMemo(() => ligarAoCatalogo(linhas, ctx.S?.svc ?? {}, produtos), [linhas, ctx.S?.svc, produtos]);
   const juntaveis = ligacoes.filter((g) => g.alvo && !g.vemComProduto);
   const [fora, setFora] = useState<Set<number>>(new Set());
   const semPar = ligacoes.filter((g) => !g.alvo);
   const comProduto = ligacoes.filter((g) => g.vemComProduto);
   const entram = juntaveis.filter((g) => !fora.has(ligacoes.indexOf(g)));
-  const juntar = () => {
+  const juntar = async () => {
     let s = 0, pr = 0;
+    // os produtos que só o servidor conhece lêem-se inteiros (e entram no Catálogo em memória) antes de ir às necessidades
+    const lidos = new Map<string, Produto>((K.produtos ?? []).map((x) => [x.id, x]));
+    if (org) {
+      const ids = [...new Set(entram.flatMap((g) => (g.alvo?.tipo === "produto" && !lidos.has(g.alvo.id) ? [g.alvo.id] : [])))];
+      for (const r of await Promise.all(ids.map((id) => escolherProdutoDoServidor(org, id)))) if (r.ok) lidos.set(r.v.id, r.v);
+    }
     ctx.run(() => {
       for (const g of entram) {
         if (!g.alvo) continue;
         if (g.alvo.tipo === "servico") { ctx.A.extra(d.id, g.alvo.id, g.q); s++; }
-        else { const prod = (K.produtos ?? []).find((x) => x.id === g.alvo!.id); if (prod) { ctx.A.produto(d.id, prod, g.q); pr++; } }
+        else { const prod = lidos.get(g.alvo.id); if (prod) { ctx.A.produto(d.id, prod, g.q); pr++; } }
       }
     });
     feito(`Nas necessidades: ${s} ${s === 1 ? "serviço" : "serviços"} e ${pr} ${pr === 1 ? "produto" : "produtos"} do Estúdio. Confira-os mais abaixo, em «Necessidades do cliente».`);
@@ -291,6 +321,7 @@ export function DoEstudio({ ctx, d, linhas, feito }: { ctx: Ctx; d: Negocio; lin
         </div>
         <Button type="button" variant="ghost" className="min-h-11" aria-label="Agora não" onClick={() => feito("")}><X className="h-4 w-4" aria-hidden="true" /></Button>
       </div>
+      {org && <p className="text-sm text-muted-foreground">Com o Catálogo grande, o produto de cada peça é a melhor correspondência entre os primeiros resultados da pesquisa: confirme-o.</p>}
       <ul className="space-y-2">
         {juntaveis.map((g) => {
           const i = ligacoes.indexOf(g), dentro = !fora.has(i);
@@ -314,7 +345,7 @@ export function DoEstudio({ ctx, d, linhas, feito }: { ctx: Ctx; d: Negocio; lin
       </ul>
       {comProduto.length > 0 && <p className="text-sm text-muted-foreground">A instalação já vem com o produto: {comProduto.flatMap((g) => g.linhas.map((l) => l.n)).join("; ")}.</p>}
       {semPar.length > 0 && <p className="text-sm text-warning-foreground">Sem par no Catálogo (junte à mão nas Necessidades): {semPar.flatMap((g) => g.linhas.map((l) => l.n)).join("; ")}.</p>}
-      <Button type="button" className="min-h-11" disabled={entram.length === 0} onClick={juntar}>
+      <Button type="button" className="min-h-11" disabled={entram.length === 0} onClick={() => { void juntar(); }}>
         <Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Juntar às necessidades ({entram.length})
       </Button>
     </section>

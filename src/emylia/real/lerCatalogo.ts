@@ -117,15 +117,25 @@ async function lerLinhas(sb: SupabaseClient, org: string, leve: boolean): Promis
   return (await sb.rpc("cat_ler_catalogo" as never, { p_org: org } as never)) as Resposta;
 }
 
+/** 17/11 (20270122000000): as tabelas dos produtos. A versão leve (cat_ler_produtos_tabelas_servicos) traz em `produtos` só os dos consumos (48 KB na Mudelar, em vez de 9,8 MB);
+ *  só se a função nomeada não existe na base volta a cat_ler_produtos_tabelas. Qualquer outro erro sobe tal como veio (o chamador deixa o Catálogo sem tabelas). */
+async function lerTabelas(sb: SupabaseClient, org: string, leve: boolean): Promise<Resposta> {
+  if (leve) {
+    const r = (await sb.rpc("cat_ler_produtos_tabelas_servicos" as never, { p_org: org } as never)) as Resposta;
+    if (!funcaoNomeadaEmFalta(r?.error, "cat_ler_produtos_tabelas_servicos")) return r;
+  }
+  return (await sb.rpc("cat_ler_produtos_tabelas" as never, { p_org: org } as never)) as Resposta;
+}
+
 export async function lerCatalogo(sb: SupabaseClient, org: string, opcoes: { leve?: boolean } = {}): Promise<LinhasCatalogo> {
   const [r, t, a, m] = await Promise.all([
     lerLinhas(sb, org, !!opcoes.leve),
-    sb.rpc("cat_ler_produtos_tabelas" as never, { p_org: org } as never),
+    lerTabelas(sb, org, !!opcoes.leve),
     lerAtributos(sb, org),
     lerModelos(sb, org),
   ]);
   if (r?.error) throw new Error(mensagemErroCatalogo(r.error));
   // sem a função nova (SQL 20270117100000 por colar) ou com erro nela: lê-se pelo texto, como antes
-  if (t.error) console.info("Catálogo: produtos pelo texto (cat_ler_produtos_tabelas:", t.error.message ?? t.error.code, ")");
-  return juntarModelos(juntarAtributos(juntarTabelas(linhasDe(r?.data), t.error ? null : t.data), a), m, null);
+  if (t?.error) console.info("Catálogo: produtos pelo texto (tabelas dos produtos:", t.error.message ?? t.error.code, ")");
+  return juntarModelos(juntarAtributos(juntarTabelas(linhasDe(r?.data), !t || t.error ? null : t.data), a), m, null);
 }

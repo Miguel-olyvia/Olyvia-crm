@@ -20,6 +20,7 @@ import { type Catalogo, type Produto } from "./v2/catalogoModelo";
 import { CONSUMIVEIS } from "./equipamentosCliente";
 import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
 import { produtoParaTocar, useProdutosDoRamo } from "./real/pesquisaProdutos";
+import { produtosDoRamoPorPartes } from "./real/ramoPorPartes";
 import { orcLinhas } from "./ServicosCatalogo";
 import { FotoOuIlustracao, IconeServico, Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
 import { nosDoRamo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, type Obrigacao } from "./produtosVisita";
@@ -630,11 +631,23 @@ function PassoPergunta({ ctx, K, o, tiles, resolvido }: { ctx: P; K: Catalogo; o
     const res = { f: "tirou" as "juntou" | "tirou" };
     run(() => { res.f = tocarProdutoGuiado(A, K, d, o, p); });
     if (res.f !== "juntou") return res.f;
-    const noRamo = (d.visita.prod ?? []).filter((x) => x.no && ramo.has(x.no)).map((x) => K.produtos.find((y) => y.id === x.id) ?? x);
-    if (trocaResolvida(o, noRamo, produtos)) resolvido();
+    const noRamoAgora = () => (d.visita.prod ?? []).filter((x) => x.no && ramo.has(x.no)).map((x) => K.produtos.find((y) => y.id === x.id) ?? x);
+    // 22/01: com o Catálogo leve `produtos` (os do ramo em K) não é o ramo todo: «o ramo não tem bidés» seria falso e a troca resolvia-se sem eles. As partes da pergunta
+    // procuram-se no ramo, no servidor; se a pesquisa falhar não se sabe, e a troca não avança sozinha.
+    const org = catalogoParcial() ? orgDoCatalogoLido() : null;
+    if (!org) { if (trocaResolvida(o, noRamoAgora(), produtos)) resolvido(); }
+    else {
+      setAvisoRamo(null);
+      void produtosDoRamoPorPartes(org, K.arvore, o.no, o.pergunta).then((doServidor) => {
+        if (!doServidor) { setAvisoRamo("Não foi possível verificar o ramo; escolha à mão e avance."); return; }
+        // M11: relê a visita agora (o que se escolheu ou tirou durante a pesquisa conta)
+        if (trocaResolvida(o, noRamoAgora(), [...produtos, ...doServidor])) resolvido();
+      });
+    }
     return res.f;
   };
   const mantem = resp === "sim", trocaOn = troca && resp !== "sim";
+  const [avisoRamo, setAvisoRamo] = useState<string | null>(null);
 
   return (
     <div className="space-y-4">
@@ -656,6 +669,7 @@ function PassoPergunta({ ctx, K, o, tiles, resolvido }: { ctx: P; K: Catalogo; o
         <div ref={listaRef} className="scroll-mt-24">
           <ListaProdutos ctx={ctx} K={K} produtos={produtos} onTocar={tocar} rotulo={obj ? `Produtos: ${obj.comArtigo}` : "Produtos"}
             servidor={catalogoParcial() && orgDoCatalogoLido() ? { org: orgDoCatalogoLido()!, no: o.no } : undefined} />
+          {avisoRamo && <p role="status" className="mt-2 text-sm text-warning-foreground">{avisoRamo}</p>}
         </div>
       )}
     </div>

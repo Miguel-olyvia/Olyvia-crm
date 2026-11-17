@@ -4,6 +4,7 @@
 //   cat_ler_produtos_contagens(p_org, p_q, p_marca)
 //   cat_ler_atributos_produto(p_org, p_produto)      cat_ler_atributos_definicoes(p_org)
 import { erroAmigavel, rpcLivre, type Res } from "../fichaProdutoDados";
+import { funcaoNomeadaEmFalta } from "./lerCatalogo";
 import type { AtributoProduto } from "../v2/catalogoModelo";
 import { atributosDeValores, type LinhaValorAtributo } from "./catalogoReal";
 
@@ -19,15 +20,21 @@ export interface LinhaPaginaProduto {
   grossista: number | null; distribuidor: number | null; fornecedor: string | null; ativo: boolean | null; imagem: string | null; atributos_resumo: string | null;
   /** 17/11 (20270120900000): 'draft' | 'active' | 'discontinued'. Em falta numa base antiga. */
   estado?: string | null;
+  /** 22/01 (cat_pesquisar_produtos, 20270122000000): o serviço que o produto traz e quantas unidades do serviço traz uma unidade dele. Só vêm da pesquisa por serviço. */
+  servico_id?: string | null; fator_servico?: number | null;
 }
-export interface PaginaProdutos { total: number; pagina: number; limite: number; paginas: number; produtos: LinhaPaginaProduto[] }
+export interface PaginaProdutos { total: number; pagina: number; limite: number; paginas: number; produtos: LinhaPaginaProduto[]; /** o que quem mostra a lista deve dizer (a pesquisa por serviço não existe na base: a lista não está filtrada) */ aviso?: string }
 /** As contagens por id (de product_categories e de product_models) e as do resumo. */
 export interface ContagensProdutos {
   total: number; porCategoria: Record<string, number>; porSubcategoria: Record<string, number>; porModelo: Record<string, number>;
   semReferencia: number; semCategoria: number; semMarca: number;
 }
 /** O que o ecrã filtra (os ids de categoria e subcategoria são os de product_categories). */
-export interface FiltroServidor { q: string; categoria: string; subcategoria: string; modelo: string; marca: string; semCategoria: boolean }
+export interface FiltroServidor {
+  q: string; categoria: string; subcategoria: string; modelo: string; marca: string; semCategoria: boolean;
+  /** products.servico_id: só os produtos que trazem este serviço (passa a leitura para cat_pesquisar_produtos). */
+  servico?: string;
+}
 export const SEM_FILTRO_SERVIDOR: FiltroServidor = { q: "", categoria: "", subcategoria: "", modelo: "", marca: "", semCategoria: false };
 /** O modelo de um produto, como Produto.modeloId/modelo/modeloNumero. */
 export interface ModeloDoProduto { modeloId: string; modelo: string; modeloNumero: number }
@@ -44,6 +51,11 @@ export function argsPagina(org: string, f: FiltroServidor, pagina: number, limit
     p_org: org, p_q: nulo(f.q), p_categoria: f.semCategoria ? null : nulo(f.categoria), p_subcategoria: f.semCategoria ? null : nulo(f.subcategoria),
     p_modelo: nulo(f.modelo), p_marca: nulo(f.marca), p_sem_categoria: f.semCategoria, p_limite: limite, p_pagina: pagina,
   };
+}
+
+/** Os argumentos de cat_pesquisar_produtos (20270122000000). ATENÇÃO: p_pagina vem antes de p_limite. Sem modelo, marca nem «sem categoria». */
+export function argsPesquisa(org: string, f: FiltroServidor, pagina: number, limite = POR_PAGINA_SERVIDOR): Record<string, unknown> {
+  return { p_org: org, p_q: nulo(f.q), p_servico: nulo(f.servico ?? ""), p_categoria: nulo(f.categoria), p_subcategoria: nulo(f.subcategoria), p_pagina: pagina, p_limite: limite };
 }
 
 /** A resposta de cat_ler_produtos_pagina; null se não for uma página (sem a lista dos produtos). */
@@ -72,16 +84,34 @@ export function contagensDe(r: unknown): ContagensProdutos | null {
   };
 }
 
-export async function lerProdutosPagina(org: string, f: FiltroServidor, pagina: number): Promise<Res<PaginaProdutos>> {
+type ResPagina = { ok: true; v: PaginaProdutos } | { ok: false; erro: string; codigo?: string; mensagemBase?: string };
+async function lerPaginaDe(fn: "cat_pesquisar_produtos" | "cat_ler_produtos_pagina", args: Record<string, unknown>): Promise<ResPagina> {
   try {
-    const { data, error } = await rpcLivre("cat_ler_produtos_pagina", argsPagina(org, f, pagina));
-    if (error) return { ok: false, erro: erroAmigavel(error, "Não foi possível ler os produtos.") };
+    const { data, error } = await rpcLivre(fn, args);
+    if (error) return { ok: false, erro: erroAmigavel(error, "Não foi possível ler os produtos."), ...(error.code ? { codigo: error.code } : {}), mensagemBase: error.message ?? "" };
     const p = paginaDe(data);
     return p ? { ok: true, v: p } : { ok: false, erro: "A base respondeu num formato que não se percebe (produtos)." };
   } catch (e) {
     return { ok: false, erro: mensagem(e, "Não foi possível ler os produtos.") };
   }
 }
+
+/** 22/01: a pesquisa de cat_pesquisar_produtos (a mesma página que cat_ler_produtos_pagina, e em cada linha o serviço que o produto traz e o fator). Sem modelo, marca nem «sem categoria». */
+export async function lerPesquisaProdutos(org: string, f: FiltroServidor, pagina: number): Promise<Res<PaginaProdutos>> {
+  const r = await lerPaginaDe("cat_pesquisar_produtos", argsPesquisa(org, f, pagina));
+  // M12: sem a função na base (só ESSA função em falta) lê-se a lista de sempre, SEM o filtro de serviço, e avisa-se
+  if (r.ok) return r;
+  if (!funcaoNomeadaEmFalta({ code: r.codigo, message: r.mensagemBase }, "cat_pesquisar_produtos")) return { ok: false, erro: r.erro };
+  const l = await lerPaginaDe("cat_ler_produtos_pagina", argsPagina(org, { ...f, servico: undefined }, pagina));
+  return l.ok ? { ok: true, v: { ...l.v, aviso: f.servico ? "A pesquisa por serviço ainda não existe nesta base: a lista não está filtrada pelo serviço." : "A pesquisa de produtos ainda não existe nesta base: a lista é a de sempre." } } : { ok: false, erro: l.erro };
+}
+
+/** A página da lista; com `servico` no filtro é a pesquisa por serviço (cat_pesquisar_produtos). */
+export const lerProdutosPagina = async (org: string, f: FiltroServidor, pagina: number): Promise<Res<PaginaProdutos>> => {
+  if (f.servico) return lerPesquisaProdutos(org, f, pagina);
+  const r = await lerPaginaDe("cat_ler_produtos_pagina", argsPagina(org, f, pagina));
+  return r.ok ? r : { ok: false, erro: r.erro };
+};
 
 export async function lerProdutosContagens(org: string, q: string, marca: string): Promise<Res<ContagensProdutos>> {
   try {

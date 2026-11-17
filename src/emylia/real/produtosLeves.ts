@@ -72,7 +72,7 @@ export function produtoDeLeitura(r: unknown): Produto | null {
 export async function lerProdutoFicha(org: string, id: string): Promise<Res<Produto>> {
   try {
     const { data, error } = await rpcLivre("cat_ler_produto", { p_org: org, p_produto: id });
-    if (error) return { ok: false, erro: /^CT00\d$/.test(error.code ?? "") && error.message ? error.message : erroAmigavel(error, "Não foi possível ler o produto.") };
+    if (error) return { ok: false, erro: /^CT00\d$/.test(error.code ?? "") && error.message ? error.message : erroAmigavel(error, "Não foi possível ler o produto."), ...(error.code ? { codigo: error.code } : {}) };
     const p = produtoDeLeitura(data);
     return p ? { ok: true, v: p } : { ok: false, erro: "A base respondeu num formato que não se percebe (produto)." };
   } catch (e) {
