@@ -171,8 +171,9 @@ export function OlyviaComando() {
 
   if (paginaPublica(pathname)) return null;
 
+  // 17/11: em baixo à direita, por cima da bolha do chat (à esquerda a barra lateral tapava metade do botão e cortava o painel)
   return (
-    <div className="fixed bottom-5 left-5 z-[60] flex flex-col items-start gap-3 print:hidden">
+    <div className="fixed bottom-20 right-5 z-[60] flex flex-col items-end gap-3 print:hidden">
       {aberto ? (
         <section aria-label="Comando da Olyvia" className="w-[min(92vw,22rem)] space-y-3 rounded-2xl border border-primary/30 bg-card p-4 shadow-[var(--shadow-lg,0_10px_30px_rgba(0,0,0,0.18))]">
           <div className="flex items-center justify-between gap-2">
