@@ -81,6 +81,13 @@ describe("AbaLaborais (rh-exemplo): ofícios de obra", () => {
     await waitFor(() => expect(screen.queryByText("Ofícios de obra")).toBeNull());
   });
 
+  it("17/11: já não há o cartão «Papéis no Negócio» nem se leem os papéis da pessoa (as vistas vêm do perfil)", async () => {
+    montar({ podeVerLaborais: true, podeEditarLaborais: true });
+    expect(await screen.findByText("Ofícios de obra")).toBeInTheDocument();
+    expect(screen.queryByText(/Papéis no Negócio/)).toBeNull();
+    expect(hrRpc).not.toHaveBeenCalledWith("rh_ler_papeis_pessoa", expect.anything());
+  });
+
   it("sem podeVerLaborais, mostra «sem acesso» e não há cartão", () => {
     montar({ podeVerLaborais: false, podeEditarLaborais: false });
     expect(screen.queryByText("Ofícios de obra")).toBeNull();

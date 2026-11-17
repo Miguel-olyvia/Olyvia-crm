@@ -44,7 +44,7 @@
 // Desfaz a decisão de 04/11 que mantinha as três de Operações por causa do Frota (Ligações).
 //
 // 05/11/2026 (ronda 2, aprovado): operations.view também sai do editor (sem ação própria: o item «Operação» do menu abre o /negocios,
-// guardado por pessoas.view/Papel no Negócio). A guarda do menu fica (ESCONDIDAS_COM_GUARDA); o grupo Operação desaparece do editor.
+// guardado por pessoas.view/técnico de obra). A guarda do menu fica (ESCONDIDAS_COM_GUARDA); o grupo Operação desaparece do editor.
 //
 // 06/11/2026 (aprovado, auditoria de uso real): saem do editor api_keys.copy/create/delete/toggle (só /technical-settings, sem ligação
 // viva), leads.config (só a guarda de /lead-contact-results, sem ligação viva) e quote_templates.duplicate (o servidor aceita create).
@@ -383,7 +383,7 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
   // operations.orders.view/view_all e operations.costs.view: sem ação na app viva, 05/11 (as policies/RPCs de ops_* e as do Frota
   // continuam a verificá-las; só saem do editor).
   // operations.view: sem ação própria na app viva, 05/11 (ronda 2). O item «Operação» do menu abre /negocios?vista=operacoes, que é
-  // guardado por pessoas.view ou pelo Papel no Negócio (RotaNegocios) e lê as obras por obra_ler_negocios (pessoas.view); as ligações
+  // guardado por pessoas.view ou pelas permissões da obra / técnico de obra (RotaNegocios) e lê as obras por obra_ler_negocios (pessoas.view); as ligações
   // do Frota levam a /operacao (operacao-app desativada). No servidor só ops_pode a pede, com um perfil de operações (0 na base).
   // Esconde-se só: a guarda do menu e as ligações do Frota não mudam (ESCONDIDAS_COM_GUARDA) e os papéis mantêm-na ao gravar.
   operations: [

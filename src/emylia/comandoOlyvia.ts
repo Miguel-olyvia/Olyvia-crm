@@ -1,0 +1,193 @@
+// 17/11 (Rúben, ideia WOW): a Olyvia por comando — um botão flutuante que ouve (ou lê) uma frase e faz o que se pede:
+//  · navegar: «Olyvia, vai aos negócios», «vai ao catálogo», «mostra o inventário», «hoje»;
+//  · abrir um negócio pelo nome, numa fase: «abre o Ruben Branco», «abre o Ruben Branco na fase de negócio»;
+//  · andar dentro do negócio: «vai para o fim», «próximo passo», «passo anterior», «vai para a proposta», «vai para a fase de visita»;
+//  · procurar: «procura o Nuno Pereira» (põe o nome na pesquisa dos Negócios).
+// Protótipo: só navegação e pesquisa — nada que mude dados (uma ação irreversível por voz pede sempre confirmação, fica para depois).
+// A compreensão é determinística (palavras-chave), sem modelo nem custo: fiável e instantânea. Só lógica, sem React, para testar à parte.
+
+export interface Destino { url: string; nome: string; palavras: string[] }
+
+/** Os sítios para onde a Olyvia salta. A palavra mais específica ganha (ex.: «catálogo e custos» ganha a «custos»). */
+export const DESTINOS: Destino[] = [
+  { url: "/negocios", nome: "Negócios", palavras: ["negocios", "negocio", "pipeline", "funil", "o quadro", "quadro dos negocios"] },
+  { url: "/negocios?vista=hoje", nome: "Hoje", palavras: ["hoje", "o meu dia", "meu dia", "tarefas de hoje"] },
+  { url: "/negocios?vista=operacoes", nome: "Operações", palavras: ["operacoes", "obras em curso", "gestao de obra", "as obras"] },
+  { url: "/pessoas", nome: "Pessoas", palavras: ["pessoas", "clientes", "contactos", "contatos", "os leads", "lista de clientes"] },
+  { url: "/client-orders", nome: "Inventário", palavras: ["inventario", "stock", "armazem", "encomendas de cliente"] },
+  { url: "/equipas-obra", nome: "Equipas de obra", palavras: ["equipas de obra", "equipa de obra", "as equipas", "equipas"] },
+  { url: "/catalogo-custos", nome: "Catálogo e custos", palavras: ["catalogo e custos", "catalogo", "custos", "produtos e servicos", "precos"] },
+  { url: "/prototipo/estudio", nome: "Estúdio", palavras: ["estudio", "a planta", "o projeto 3d"] },
+];
+
+/** As fases do negócio, pela ordem do motor (motor.ts FASES): 0 Por contactar … 5 Obra. */
+export const FASES_NOMES = ["Por contactar", "Contacto", "Visita", "Negócio", "Financeiro", "Obra"] as const;
+
+export type Comando =
+  | { acao: "navegar"; url: string; nome: string }
+  | { acao: "pesquisar"; termo: string }
+  | { acao: "abrir-negocio"; nome: string; fase: number | null }
+  | { acao: "ir-fase"; fase: number }
+  /** passo: «fim», «proximo», «anterior», «inicio», ou o nome do passo («proposta», «morada da obra»). */
+  | { acao: "ir-passo"; passo: string }
+  | { acao: "nada" };
+
+/** Os eventos entre o botão (OlyviaComando.tsx) e as páginas que sabem fazer (NegociosEmylia.tsx, NegocioSimples.tsx). */
+export const EV_PESQUISA = "olyvia-pesquisa";
+export const EV_ABRIR = "olyvia-abrir-negocio";
+export const EV_FASE = "olyvia-fase";
+export const EV_PASSO = "olyvia-passo";
+export const EV_RESPOSTA = "olyvia-resposta";
+/** A página que fez (ou não conseguiu) responde ao botão, que mostra a frase. */
+export const responderOlyvia = (msg: string, ok = true): void => { window.dispatchEvent(new CustomEvent(EV_RESPOSTA, { detail: { msg, ok } })); };
+
+/** Minúsculas, sem acentos nem pontuação, espaços colapsados. */
+export const normal = (s: string): string =>
+  s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim();
+
+/** `p` (já normalizado) aparece em `s` como palavra/expressão inteira. */
+const temExpressao = (s: string, p: string): boolean => ` ${s} `.includes(` ${p} `);
+
+/** O destino cuja palavra-chave aparece na frase; empate, ganha a mais longa (mais específica). */
+export function melhorDestino(s: string): Destino | null {
+  let melhor: Destino | null = null, tamanho = 0;
+  for (const d of DESTINOS) for (const p of d.palavras) {
+    const pn = normal(p);
+    if (temExpressao(s, pn) && pn.length > tamanho) { melhor = d; tamanho = pn.length; }
+  }
+  return melhor;
+}
+
+// ------------------------------------------------------------------ a fase dita («na fase de negócio», «no financeiro»)
+const NOME_FASE = "(por contactar|contacto|contato|visita|levantamento|negocio|proposta|orcamento|financeiro|fatura|faturacao|pagamento|obra)";
+const FASE_COM_PALAVRA = new RegExp(`\\s*\\b(?:(?:na|no|em|para a|pra a|pra|a|ir a|ir para a)\\s+)?fase\\s+(?:(?:de|do|da|dos|das)\\s+)?${NOME_FASE}\\b`);
+const FASE_NO_FIM = new RegExp(`\\s+(?:na|no)\\s+${NOME_FASE}$`);
+const indiceFase = (n: string): number =>
+  /^por contactar$/.test(n) ? 0 : /^conta(c)?to$/.test(n) ? 1 : /^(visita|levantamento)$/.test(n) ? 2
+    : /^(negocio|proposta|orcamento)$/.test(n) ? 3 : /^(financeiro|fatura|faturacao|pagamento)$/.test(n) ? 4 : 5;
+
+/** Tira a fase da frase e devolve-a (índice) com o resto. */
+export function extrairFase(s: string): { fase: number | null; resto: string } {
+  const m = s.match(FASE_COM_PALAVRA) ?? s.match(FASE_NO_FIM);
+  if (!m) return { fase: null, resto: s };
+  return { fase: indiceFase(m[1]), resto: (s.slice(0, m.index) + s.slice((m.index ?? 0) + m[0].length)).replace(/\s+/g, " ").trim() };
+}
+
+// ------------------------------------------------------------------ o passo («vai para o fim», «próximo passo», «vai para a proposta»)
+const VERBO_MOVER = /^(vai|vamos|ir|passa|passar|salta|saltar|anda|avanca|avancar|volta|voltar|segue|seguir)\b\s*(.*)$/;
+const PREP_INICIO = /^(?:(?:para|pra|pro|ao|aos|a|as|o|os|no|na|nos|nas|em|ate)\s+)+/;
+/** Os passos especiais (sem nome): fim, próximo, anterior, início. */
+function passoEspecial(alvo: string): string | null {
+  if (/^(?:o )?(?:fim|final|ultimo passo|ultimo|fim do negocio)$/.test(alvo)) return "fim";
+  if (/^(?:o )?(?:proximo|seguinte)(?: passo)?$|^passo seguinte$/.test(alvo)) return "proximo";
+  if (/^(?:o )?(?:anterior|passo anterior|atras|tras)$/.test(alvo)) return "anterior";
+  if (/^(?:o )?(?:inicio|primeiro passo|primeiro|comeco)$/.test(alvo)) return "inicio";
+  return null;
+}
+
+// ------------------------------------------------------------------ a pesquisa e o nome do negócio
+const VERBO_BUSCA = /\b(?:procura[r]?|pesquisa[r]?|encontra[r]?|busca[r]?|localiza[r]?)\b\s+(.+)$/;
+const VERBO_ABRIR = /^(?:abre|abrir|abra|mostra|mostrar|mostre|ve|ver|entra|entrar)\s+(?:me\s+)?(?:(?:no|na|em)\s+)?(.*)$/;
+const COISA_COM_NOME = /\b(?:o |a |os |as )?(?:negocio|cliente|ficha|pessoa)\s+(?:d[oa]s?\s+|do\s+|da\s+|de\s+)?(.+)$/;
+// artigos, preposições e os substantivos «negócio/cliente/ficha/pessoa» no início do termo (ex.: «a cliente Ana» → «Ana»)
+const LIXO_INICIO = /^(?:o |a |os |as |um |uma |pel[oa]\s+|d[oa]s?\s+|do\s+|da\s+|de\s+|negocio\s+|cliente\s+|ficha\s+|pessoa\s+)+/;
+const limparNome = (t: string): string => t.replace(LIXO_INICIO, "").trim();
+const eNome = (nome: string): boolean => nome.length >= 2 && !melhorDestino(nome);
+
+/** O termo a procurar, se a frase for uma pesquisa («procura o Nuno»). Senão, null. */
+export function extrairBusca(s: string): string | null {
+  const m = s.match(VERBO_BUSCA);
+  if (!m) return null;
+  const termo = limparNome(m[1]);
+  return eNome(termo) ? termo : null;
+}
+
+/** Em modo «sempre à escuta»: o que vem a seguir à palavra de ativação «Olyvia» (a última vez que aparece na frase corrida).
+ *  Sem «Olyvia», devolve null (não se faz nada). Apanha «Olyvia», «Olívia», «Olivia» (o reconhecimento escreve-a de várias formas). */
+export function extrairAposGatilho(texto: string): string | null {
+  const t = normal(texto);
+  const re = /\bol[yi]via\b/g;
+  let m: RegExpExecArray | null, fim = -1;
+  while ((m = re.exec(t)) !== null) fim = m.index + m[0].length;
+  if (fim === -1) return null;
+  const depois = t.slice(fim).replace(/^[\s,:.]+/, "").trim();
+  return depois || null;
+}
+
+/** A frase dita ou escrita vira um comando. Tira a palavra de ativação «Olyvia» do início, se vier. */
+export function interpretarComando(texto: string): Comando {
+  const t = normal(texto);
+  if (!t) return { acao: "nada" };
+  const semGatilho = t.replace(/^(?:ok |o |a )?ol[yi]via\s*/, "").trim() || t;
+  const { fase, resto: s } = extrairFase(semGatilho);
+
+  // 1) um passo sozinho: «fim», «próximo passo», «anterior»
+  const so = passoEspecial(s);
+  if (so) return { acao: "ir-passo", passo: so };
+
+  // 2) mexer-se: «vai para o fim», «vai para a proposta», «vai para a fase de visita», «vai aos negócios»
+  const mov = s.match(VERBO_MOVER);
+  if (mov) {
+    const alvo = mov[2].replace(PREP_INICIO, "").trim();
+    if (!alvo && fase != null) return { acao: "ir-fase", fase };
+    if (!alvo) return /^(avanca|avancar|segue|seguir)$/.test(mov[1]) ? { acao: "ir-passo", passo: "proximo" }
+      : /^(volta|voltar)$/.test(mov[1]) ? { acao: "ir-passo", passo: "anterior" } : { acao: "nada" };
+    const esp = passoEspecial(alvo);
+    if (esp) return { acao: "ir-passo", passo: esp };
+    const dest = melhorDestino(alvo) ?? melhorDestino(mov[2]);
+    if (dest) return { acao: "navegar", url: dest.url, nome: dest.nome };
+    const passo = alvo.replace(/^passo\s+/, "").trim();
+    if (passo) return { acao: "ir-passo", passo };
+  }
+
+  // 3) procurar: «procura o Nuno Pereira»
+  const busca = extrairBusca(s);
+  if (busca) return { acao: "pesquisar", termo: busca };
+
+  // 4) abrir um negócio pelo nome: «abre o Ruben Branco (na fase de negócio)», «mostra o negócio da Maria»
+  const ab = s.match(VERBO_ABRIR);
+  if (ab) {
+    const nome = limparNome(ab[1]);
+    if (eNome(nome) && !melhorDestino(ab[1])) return { acao: "abrir-negocio", nome, fase };
+  }
+  const coisa = s.match(COISA_COM_NOME);
+  if (coisa) {
+    const nome = limparNome(coisa[1]);
+    if (eNome(nome)) return { acao: "abrir-negocio", nome, fase };
+  }
+
+  // 5) navegar para uma página
+  const dest = melhorDestino(s);
+  if (dest) return { acao: "navegar", url: dest.url, nome: dest.nome };
+
+  // 6) só a fase: «fase de financeiro»
+  if (fase != null) return { acao: "ir-fase", fase };
+  return { acao: "nada" };
+}
+
+// ------------------------------------------------------------------ o que as páginas usam para cumprir o comando
+
+/** O negócio cujo nome mais se parece com o dito: igual > começa por > tem todas as palavras. Null se nenhum serve. */
+export function negocioPorNome<T extends { nome: string }>(deals: readonly T[], nome: string): T | null {
+  const alvo = normal(nome);
+  if (!alvo) return null;
+  const toks = alvo.split(" ");
+  let melhor: T | null = null, pontos = 0;
+  for (const d of deals) {
+    const n = normal(d.nome);
+    const p = n === alvo ? 4 : n.startsWith(alvo) ? 3 : toks.every((x) => temExpressao(n, x)) ? 2 : toks.every((x) => n.includes(x)) ? 1 : 0;
+    if (p > pontos) { melhor = d; pontos = p; }
+  }
+  return melhor;
+}
+
+/** O índice do passo pedido (passos.length = «Fim»), a partir do passo aberto. Null se não há passo com esse nome. */
+export function indicePasso(passos: readonly { id: string; titulo: string }[], alvo: string, ativo: number): number | null {
+  const a = normal(alvo);
+  if (a === "fim") return passos.length;
+  if (a === "proximo") return Math.min(passos.length, ativo + 1);
+  if (a === "anterior") return Math.max(0, ativo - 1);
+  if (a === "inicio") return 0;
+  const i = passos.findIndex((p) => { const t = normal(p.titulo), id = normal(p.id); return t === a || id === a || t.includes(a) || (t.length > 3 && a.includes(t)); });
+  return i === -1 ? null : i;
+}

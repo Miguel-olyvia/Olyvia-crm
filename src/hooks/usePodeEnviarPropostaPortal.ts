@@ -1,7 +1,7 @@
 // Quem pode enviar uma PROPOSTA ao portal do cliente (enviar, republicar, reenviar credenciais) — a mesma regra do servidor
 // (create-client-portal-access e republish_proposal_snapshot, 04/11/2026): portal.manage OU negocios.proposta.enviar na organização ativa.
-// negocios.proposta.enviar lê-se por fn_cat_pode(org, código), a MESMA função com que o servidor decide (perfil na organização, Papel no
-// Negócio de neg_papeis_permissoes, admin do sistema); portal.manage pelo perfil (hasPermission). Antes a proposta pedia client_contracts.edit
+// negocios.proposta.enviar lê-se por fn_cat_pode(org, código), a MESMA função com que o servidor decide (perfil na organização e admin
+// do sistema; 17/11: o Papel no Negócio do RH saiu); portal.manage pelo perfil (hasPermission). Antes a proposta pedia client_contracts.edit
 // (uma permissão de contratos) no servidor e nada no ecrã. Enquanto se lê, `pode` é false e `aLer` é true; uma leitura que falha vale «não».
 // Sem react-query de propósito: a página de Propostas não tem QueryClient nos testes e não precisa de cache para uma pergunta só.
 import { useEffect, useState } from "react";

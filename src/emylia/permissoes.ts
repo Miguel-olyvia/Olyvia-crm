@@ -3,8 +3,8 @@
 // que chamam a ação do passo sem olhar para o papel (fazer(A, act), em LeadsSimples, PessoaFicha e PessoasV1).
 // 22/10: "equipa.edit": a ficha dos técnicos de obra (custo/hora, ofício, férias), no bloco "Obra" da ficha da pessoa (RH › Pessoas): a Direção e as Operações.
 // 23/10 (2.0, segurança): com uma conta real, quem decide são as permissões do utilizador na base, postas aqui (definirPermissoesReais).
-// 5/11: leem-se por fn_cat_pode(org, código), a MESMA função com que o servidor decide (o perfil, os Papéis no Negócio de TODOS os papéis
-// da pessoa e o admin do sistema), em usePermissoesReaisNegocio (real/usePermissoesReais.ts), com `simular: false`, na ficha da pessoa
+// 5/11: leem-se por fn_cat_pode(org, código), a MESMA função com que o servidor decide (o perfil e o admin do sistema; 17/11: o Papel
+// no Negócio do RH saiu), em usePermissoesReaisNegocio (real/usePermissoesReais.ts), com `simular: false`, na ficha da pessoa
 // (permissoesPosContrato.ts) e em /negocios (NegociosEmylia.tsx). Aí o "A ver como" só escolhe a vista e de quem é cada passo
 // (p.who === S.role): o que se pode fazer é o que a base diz, seja qual for o papel escolhido. O quadro por papel (PERMS_PAPEL) só serve
 // sem conta (o protótipo local e os testes); o ramo `simular: true` (o papel simulado, sem passar do que a base dá) já ninguém o põe.

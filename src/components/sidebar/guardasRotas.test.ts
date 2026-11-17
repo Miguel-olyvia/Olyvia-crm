@@ -151,7 +151,7 @@ describe("rotas antes sem guarda", () => {
       .forEach((r) => expect(linhaDe(r), r).not.toContain("ProtectedRoute"));
   });
 
-  it("/negocios continua com RotaNegocios (pessoas.view ou um papel no Negócio pelo RH), como o menu", () => {
+  it("/negocios continua com RotaNegocios (pessoas.view, as da obra ou técnico de obra pelo cargo), como o menu", () => {
     expect(linhaDe("/negocios")).toContain("<RotaNegocios>");
     expect(itemMenu("/negocios")?.permission).toBe("pessoas.view");
   });
