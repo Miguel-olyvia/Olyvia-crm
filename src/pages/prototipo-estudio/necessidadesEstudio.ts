@@ -9,7 +9,7 @@ import { PASSO, PECAS, areaChaoM2, areaParedesM2, encaixar, juntarPeca, type Pec
 import { sitioDeQuemSai } from "./posicoesDepois";
 import { linhasDaCozinha, type Cozinha } from "./cozinha/modelo";
 import { TIPOS_COZINHA } from "@/emylia/planta";
-import { ACOMPANHA, ACOMPANHA_SEMPRE, NOME_CATEGORIA, SERVICOS, melhorPara, produto, produtosDe, servico, type Categoria, type Estilo, type Servico } from "./catalogoFake";
+import { ACOMPANHA, ACOMPANHA_SEMPRE, NOME_CATEGORIA, ficouDeTeste, SERVICOS, melhorPara, produto, produtosDe, servico, type Categoria, type Estilo, type Servico } from "./catalogoFake";
 
 export interface Alturas { /** Pé-direito atual, em cm. */ peDireito: number; /** Altura do teto falso, em cm; null sem teto falso. */ tetoFalso: number | null }
 
@@ -338,9 +338,16 @@ export function escolherProduto(p: Projeto, pecaId: string, produtoId: string): 
   const tipo = p.depois.pecas.find((x) => x.id === pecaId)?.tipo;
   const ja = p.acompanha[pecaId] ?? {};
   const juntar: Partial<Record<Categoria, string>> = {};
+  const melhor = (cat: Categoria) => melhorPara(cat, p.estilo)?.id ?? produtosDe(cat, p.estilo, true)[0]?.id;
   for (const cat of (tipo && ACOMPANHA_SEMPRE[tipo]) || []) {
     if (ja[cat]) continue;
-    const id = melhorPara(cat, p.estilo)?.id ?? produtosDe(cat, p.estilo, true)[0]?.id;
+    const id = melhor(cat);
+    if (id) juntar[cat] = id;
+  }
+  // 17/11 (A-Z na Mudelar): o que acompanha e ainda é do catálogo de teste passa ao verdadeiro da mesma categoria (senão ia «por semelhança» para o negócio)
+  for (const cat of (tipo && ACOMPANHA[tipo]) || []) {
+    if (!ficouDeTeste(ja[cat])) continue;
+    const id = melhor(cat);
     if (id) juntar[cat] = id;
   }
   const acompanha = Object.keys(juntar).length ? { ...p.acompanha, [pecaId]: { ...ja, ...juntar } } : p.acompanha;
