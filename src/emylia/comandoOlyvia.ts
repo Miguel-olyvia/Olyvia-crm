@@ -102,11 +102,19 @@ export function extrairBusca(s: string): string | null {
   return eNome(termo) ? termo : null;
 }
 
+/** 17/11: letras soltas ditas uma a uma juntam-se («teste c p» → «teste cp»): o reconhecimento escreve assim as siglas. */
+export const juntarLetras = (s: string): string => s.replace(/\b[a-z0-9]\b(?: [a-z0-9]\b)+/g, (m) => m.replace(/ /g, ""));
+
+/** A palavra de ativação, como o reconhecimento a escreve: «Olyvia», «Olívia», «Olivia», «ó Lívia». */
+const GATILHO = /\bo ?l[iy]via\b/g;
+/** A frase tem a palavra de ativação «Olyvia»? */
+export const temGatilho = (texto: string): boolean => new RegExp(GATILHO.source).test(normal(texto));
+
 /** Em modo «sempre à escuta»: o que vem a seguir à palavra de ativação «Olyvia» (a última vez que aparece na frase corrida).
  *  Sem «Olyvia», devolve null (não se faz nada). Apanha «Olyvia», «Olívia», «Olivia» (o reconhecimento escreve-a de várias formas). */
 export function extrairAposGatilho(texto: string): string | null {
   const t = normal(texto);
-  const re = /\bol[yi]via\b/g;
+  const re = new RegExp(GATILHO.source, "g");
   let m: RegExpExecArray | null, fim = -1;
   while ((m = re.exec(t)) !== null) fim = m.index + m[0].length;
   if (fim === -1) return null;
@@ -114,11 +122,18 @@ export function extrairAposGatilho(texto: string): string | null {
   return depois || null;
 }
 
+// 17/11 (Rúben: «é chato estar sempre a dizer Olyvia, a primeira vez chega»): depois de «Olyvia», a conversa segue sem o nome.
+/** Pedir à Olyvia para parar de ouvir (volta a precisar de «Olyvia»): «obrigado», «chega», «para», «dorme», «adeus». */
+export const pedeParaParar = (texto: string): boolean =>
+  /^(?:(?:muito )?obrigad[oa]|chega|ja chega|para|parar|para de ouvir|dorme|adeus|tchau|ate ja|silencio|stop)$/.test(normal(texto).replace(new RegExp("^" + GATILHO.source + "\\s*"), "").trim());
+/** Um comando é curto; uma frase comprida, com a Olyvia acordada, é conversa à volta (não se trata como ordem). */
+export const pareceComando = (texto: string): boolean => { const n = normal(texto); return !!n && n.split(" ").length <= 9; };
+
 /** A frase dita ou escrita vira um comando. Tira a palavra de ativação «Olyvia» do início, se vier. */
 export function interpretarComando(texto: string): Comando {
-  const t = normal(texto);
+  const t = juntarLetras(normal(texto));
   if (!t) return { acao: "nada" };
-  const semGatilho = t.replace(/^(?:ok |o |a )?ol[yi]via\s*/, "").trim() || t;
+  const semGatilho = t.replace(new RegExp("^(?:ok |o |a )?" + GATILHO.source + "\\s*"), "").trim() || t;
   const { fase, resto: s } = extrairFase(semGatilho);
 
   // 1) um passo sozinho: «fim», «próximo passo», «anterior»
@@ -169,17 +184,35 @@ export function interpretarComando(texto: string): Comando {
 
 /** O negócio cujo nome mais se parece com o dito: igual > começa por > tem todas as palavras. Null se nenhum serve. */
 export function negocioPorNome<T extends { nome: string }>(deals: readonly T[], nome: string): T | null {
-  const alvo = normal(nome);
+  const alvo = juntarLetras(normal(nome));
   if (!alvo) return null;
   const toks = alvo.split(" ");
   let melhor: T | null = null, pontos = 0;
   for (const d of deals) {
-    const n = normal(d.nome);
-    const p = n === alvo ? 4 : n.startsWith(alvo) ? 3 : toks.every((x) => temExpressao(n, x)) ? 2 : toks.every((x) => n.includes(x)) ? 1 : 0;
+    const n = juntarLetras(normal(d.nome));
+    let p = n === alvo ? 4 : n.startsWith(alvo) ? 3 : toks.every((x) => temExpressao(n, x)) ? 2 : toks.every((x) => n.includes(x)) ? 1 : 0;
+    // 17/11 (Rúben: «disse "abre o teste cp" e nem isso regista»): um nome mal ouvido («teste sp», «nuno pereiro») ainda serve, se cada
+    // palavra dita for parecida com uma do nome (média ≥ 0,7); fica abaixo das correspondências certas
+    if (!p) {
+      const ns = n.split(" ");
+      const media = toks.reduce((s, x) => s + Math.max(...ns.map((y) => parecido(x, y))), 0) / toks.length;
+      if (media >= 0.7) p = media;
+    }
     if (p > pontos) { melhor = d; pontos = p; }
   }
   return melhor;
 }
+
+/** Distância de edição (Levenshtein) e a parecença 0–1 entre duas palavras. */
+function distancia(a: string, b: string): number {
+  const v = Array.from({ length: b.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= a.length; i++) {
+    let ant = v[0]; v[0] = i;
+    for (let j = 1; j <= b.length; j++) { const t = v[j]; v[j] = Math.min(v[j] + 1, v[j - 1] + 1, ant + (a[i - 1] === b[j - 1] ? 0 : 1)); ant = t; }
+  }
+  return v[b.length];
+}
+export const parecido = (a: string, b: string): number => { const m = Math.max(a.length, b.length); return m ? 1 - distancia(a, b) / m : 1; };
 
 /** O índice do passo pedido (passos.length = «Fim»), a partir do passo aberto. Null se não há passo com esse nome. */
 export function indicePasso(passos: readonly { id: string; titulo: string }[], alvo: string, ativo: number): number | null {

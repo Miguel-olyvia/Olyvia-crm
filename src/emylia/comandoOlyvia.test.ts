@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extrairAposGatilho, indicePasso, interpretarComando, negocioPorNome } from "./comandoOlyvia";
+import { extrairAposGatilho, indicePasso, interpretarComando, juntarLetras, negocioPorNome, pedeParaParar, pareceComando, temGatilho } from "./comandoOlyvia";
 
 /** O comando em texto curto, para os testes: «Negócios», «?termo», «>nome@fase», «fase:3», «passo:fim», «—». */
 const cmd = (frase: string): string => {
@@ -81,6 +81,15 @@ describe("a palavra de ativação «Olyvia» (modo sempre à escuta)", () => {
     expect(extrairAposGatilho("ó Olívia vai ao catálogo")).toBe("vai ao catalogo");
     expect(extrairAposGatilho("estava eu a falar e disse olivia mostra o inventário")).toBe("mostra o inventario");
   });
+  it("modo conversa: reconhece o nome, o «obrigado / chega» e as frases curtas", () => {
+    expect(temGatilho("Olívia")).toBe(true);
+    expect(temGatilho("abre os negócios")).toBe(false);
+    expect(pedeParaParar("obrigado")).toBe(true);
+    expect(pedeParaParar("Olyvia, chega")).toBe(true);
+    expect(pedeParaParar("obrigado por abrires o negócio")).toBe(false);
+    expect(pareceComando("abre o teste cp")).toBe(true);
+    expect(pareceComando("ontem fui ao catálogo da loja e depois passei pela obra do senhor joão")).toBe(false);
+  });
   it("sem «Olyvia», não devolve nada (não dispara); a última menção conta", () => {
     expect(extrairAposGatilho("abre os negócios")).toBeNull();
     expect(extrairAposGatilho("olyvia espera, olyvia abre as pessoas")).toBe("abre as pessoas");
@@ -102,6 +111,18 @@ describe("cumprir o comando: achar o negócio e o passo", () => {
     expect(negocioPorNome(deals, "nuno")?.id).toBe(3);
     expect(negocioPorNome(deals, "teste sistema 2910")?.id).toBe(4);
     expect(negocioPorNome(deals, "maria")).toBeNull();
+  });
+  it("17/11 («abre o teste cp» não registava): letras soletradas juntam-se e o nome mal ouvido ainda acerta", () => {
+    expect(juntarLetras("teste c p")).toBe("teste cp");
+    expect(juntarLetras("abre o teste c p")).toBe("abre o teste cp");
+    expect(cmd("abre o teste c p")).toBe(">teste cp");
+    expect(cmd("abre o teste cp")).toBe(">teste cp");
+    const lista = [...deals, { id: 5, nome: "Teste CP 16/11" }];
+    expect(negocioPorNome(lista, "teste c p")?.id).toBe(5);
+    expect(negocioPorNome(lista, "teste cp")?.id).toBe(5);
+    expect(negocioPorNome(lista, "nuno pereyra")?.id).toBe(3); // mal ouvido
+    expect(negocioPorNome(lista, "ruben brancos")?.id).toBe(1);
+    expect(negocioPorNome(lista, "maria")).toBeNull();
   });
   it("o passo pelo nome, ou fim / próximo / anterior a partir do aberto", () => {
     const passos = [{ id: "orc", titulo: "Orçamento" }, { id: "Proposta", titulo: "Proposta" }];
