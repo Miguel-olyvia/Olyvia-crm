@@ -79,6 +79,22 @@ describe("montarCatalogo: as tabelas nos objetos dos ecrãs da Emylia", () => {
     L.precosProduto.push({ product_id: ID.prod, price_type: "retail", price: null as unknown as number, valid_from: "2026-10-29T11:00:00" });
     expect(montarCatalogo(L, catalogo0(), {}).K.produtos[0].pvp).toBeUndefined();
   });
+  it("19/01: grossista e distribuidor vêm dos preços wholesale e distributor (o mais recente manda; null limpa; sem linha, sem preço)", () => {
+    expect(montar().K.produtos[0]).not.toHaveProperty("grossista");
+    const L = linhas();
+    L.precosProduto.push({ product_id: ID.prod, price_type: "wholesale", price: 55, valid_from: "2026-10-01T10:00:00" });
+    L.precosProduto.push({ product_id: ID.prod, price_type: "wholesale", price: 52.5, valid_from: "2026-10-02T10:00:00" });
+    L.precosProduto.push({ product_id: ID.prod, price_type: "distributor", price: 0, valid_from: "2026-10-01T10:00:00" });
+    expect(montarCatalogo(L, catalogo0(), {}).K.produtos[0]).toMatchObject({ grossista: 52.5, distribuidor: 0 });
+    L.precosProduto.push({ product_id: ID.prod, price_type: "wholesale", price: null as unknown as number, valid_from: "2026-10-03T10:00:00" });
+    expect(montarCatalogo(L, catalogo0(), {}).K.produtos[0].grossista).toBeUndefined();
+  });
+  it("H2: precosLidos só quando a leitura trouxe preços (sem services.view, precosProduto vem vazio e os produtos não o levam)", () => {
+    expect(montar().K.produtos[0].precosLidos).toBe(true);
+    const L = linhas();
+    L.precosProduto = [];
+    expect(montarCatalogo(L, catalogo0(), {}).K.produtos[0].precosLidos).toBeUndefined();
+  });
   it("03/11: image_urls do produto passam a fotos; sem o campo (base antiga) ou vazio, sem fotos", () => {
     expect(montar().K.produtos[0].fotos).toBeUndefined();
     const L = linhas();

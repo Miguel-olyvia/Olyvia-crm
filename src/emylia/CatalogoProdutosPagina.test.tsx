@@ -111,6 +111,35 @@ describe("Produtos por páginas · a leitura", () => {
     const sem = painel().getByRole("button", { name: "Lavatório suspenso" }).closest("li")!;
     expect(sem.textContent).toMatch(/107,69\s*€\/un/); // 70 ÷ (1 − 0,35)
   });
+  it("a linha tem as colunas «Grossista» e «Distribuidor»: o valor em euros, ou «—» quando não há", async () => {
+    base.responder = (f, a) => {
+      const r = padrao(f, a) as { data: { produtos?: Record<string, unknown>[] } };
+      if (f === "cat_ler_produtos_pagina" && a.p_pagina === 1) r.data.produtos = [
+        linha(ID.torneira, "Torneira cozinha", { grossista: 45.5, distribuidor: 50 }),
+        linha(ID.lavatorio, "Lavatório suspenso", { grossista: null, distribuidor: null }),
+      ];
+      return r;
+    };
+    await pagina();
+    const cheia = painel().getByRole("button", { name: "Torneira cozinha" }).closest("li")!;
+    expect(cheia.textContent).toMatch(/Grossista\s*45,50\s*€/);
+    expect(cheia.textContent).toMatch(/Distribuidor\s*50,00\s*€/);
+    const vazia = painel().getByRole("button", { name: "Lavatório suspenso" }).closest("li")!;
+    expect(vazia.textContent).toMatch(/Grossista\s*—/);
+    expect(vazia.textContent).toMatch(/Distribuidor\s*—/);
+  });
+  it("M1: sem products.view_cost as colunas Grossista e Distribuidor não se mostram", async () => {
+    base.responder = (f, a) => {
+      const r = padrao(f, a) as { data: { produtos?: Record<string, unknown>[] } };
+      if (f === "cat_ler_produtos_pagina" && a.p_pagina === 1) r.data.produtos = [linha(ID.torneira, "Torneira cozinha", { grossista: 45.5, distribuidor: 50 })];
+      return r;
+    };
+    await pagina(real({ podeVerCusto: false }));
+    const l = painel().getByRole("button", { name: "Torneira cozinha" }).closest("li")!;
+    expect(l.textContent).not.toContain("Grossista");
+    expect(l.textContent).not.toContain("Distribuidor");
+    expect(l.textContent).not.toContain("45,50");
+  });
   it("mostra «Página X de Y · N produtos» numa região que se anuncia", async () => {
     await pagina();
     const t = screen.getByText("Página 1 de 3 · 120 produtos");

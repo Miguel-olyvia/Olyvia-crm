@@ -1,7 +1,7 @@
 // A ficha do produto (29/10): como a do serviço, uma página no lugar da lista (?produto=…), com "Voltar ao Catálogo".
 // Preço (custo, PVP e margem sobre a venda), os fornecedores ligados (o preferido com estrela) e "Ligar a artigo do fornecedor",
 // que procura no catálogo do fornecedor no portal e liga como em Compras (fichaProduto.ts). Sem página real (o protótipo) só mostra o preço.
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Link2, Loader2, Star } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -19,7 +19,7 @@ import { ClassificacaoFicha } from "./ClassificacaoProduto";
 import { ReferenciaFicha } from "./ReferenciaFicha";
 import type { CrmCatalogItem, CrmCatalogList, FreeSupplierRow } from "@/components/supplier-portal-crm/types";
 import {
-  definirPreferido, definirPvp, eUuid, lerNumero, lerFornecedoresOrg, lerFornecedoresProduto, ligarArtigo, margemProduto, moeda, procurarArtigos, unidadeDaLigacao,
+  definirGrossistaDistribuidor, definirPreferido, definirPvp, eUuid, lerNumero, lerPrecoTabela, lerFornecedoresOrg, lerFornecedoresProduto, ligarArtigo, margemProduto, moeda, procurarArtigos, unidadeDaLigacao,
   type FichaProdutoReal, type FornecedorLigado,
 } from "./fichaProdutoDados";
 
@@ -120,7 +120,7 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
               : <p className={cn(NOTA, "mt-3")} data-testid="sem-custo">Sem permissão para ver o custo de compra (products.view_cost).</p>}
           </Seccao>
         )
-        : <Preco key={`${p.id}:${p.pvp ?? ""}`} p={p} min={min} alvo={alvo} real={real} anunciar={anunciar} verCusto={verCusto} />}
+        : <Preco key={p.id} p={p} min={min} alvo={alvo} real={real} anunciar={anunciar} verCusto={verCusto} />}
 
       {/* 13/11: marca, categoria e subcategoria em dropdowns com pesquisa; grava direto (cat_guardar_produto_tabelas), pelo nome */}
       {!cons && real && eUuid(p.id) && !!arvore && (
@@ -173,6 +173,9 @@ function FotosProduto({ fotos, nome }: { fotos?: string[]; nome: string }) {
 // Gravar vai direto a cat_definir_pvp (não pelo autosave do Catálogo, que também grava custo).
 const texto = (v: number | undefined) => (v == null ? "" : String(v).replace(".", ","));
 
+const precoOuTraco = (v: number | null | undefined) => (v == null ? "—" : `${eur(v)} €`);
+const MSG_PRECO_TABELA = (nome: string) => `${nome}: tem de ser um número igual ou maior que 0, com no máximo 2 casas e abaixo de 100 000 000.`;
+
 function Preco({ p, min, alvo, real, anunciar, verCusto = true }: { p: Produto; min: number; alvo: number; real?: FichaProdutoReal; anunciar: (msg: string) => void; verCusto?: boolean }) {
   const pode = !!real && real.podeEditar && real.podeMudarPrecos && eUuid(p.id);
   const [t, setT] = useState(texto(p.pvp));
@@ -188,21 +191,64 @@ function Preco({ p, min, alvo, real, anunciar, verCusto = true }: { p: Produto; 
   const mudou = !invalido && (lido ?? null) !== (p.pvp ?? null);
   const avisos = verCusto && !semPvp && !invalido ? [venda < p.custo ? "Abaixo do custo: vende-se com prejuízo." : baixa ? `Abaixo da margem mínima (${min}%).` : ""].filter(Boolean) : [];
 
+  // 19/01: grossista e distribuidor, ao lado do custo e do PVP. Vazio = sem preço (null); a base recusa o que não for ≥ 0, com 2 casas, < 100 000 000.
+  // H2: só com os preços lidos (sem services.view a leitura vem vazia): um «sem preço» que é só falta de permissão nunca se mostra nem se grava por cima
+  const verTabela = verCusto && !!p.precosLidos;
+  const [tG, setTG] = useState(texto(p.grossista)), [tD, setTD] = useState(texto(p.distribuidor));
+  const idErroG = useId(), idErroD = useId();
+  // sem remontar (a key é só o id): depois de gravar e reler, o campo acompanha o que ficou na base; o que se escreveu e o erro mantêm-se
+  useEffect(() => { setT(texto(p.pvp)); }, [p.pvp]);
+  useEffect(() => { setTG(texto(p.grossista)); }, [p.grossista]);
+  useEffect(() => { setTD(texto(p.distribuidor)); }, [p.distribuidor]);
+  const lidoG = lerPrecoTabela(tG), lidoD = lerPrecoTabela(tD);
+  const invalidoG = verTabela && lidoG != null && Number.isNaN(lidoG), invalidoD = verTabela && lidoD != null && Number.isNaN(lidoD);
+  const pvpMudou = mudou && lido != null;
+  const gMudou = (lidoG ?? null) !== (p.grossista ?? null), dMudou = (lidoD ?? null) !== (p.distribuidor ?? null);
+  const tabelaMudou = verTabela && !invalidoG && !invalidoD && (gMudou || dMudou);
+
+  const recarregar = async () => { try { await real?.recarregar(); } catch { /* fica o que está */ } };
   const gravar = async (v: number | null) => {
     if (!real) return;
     setAGravar(true); setErro(null);
     const r = await definirPvp(p.id, v);
     if (!r.ok || !r.v.ok) { setAGravar(false); setErro(r.ok ? "Não foi possível gravar o PVP." : r.erro); return; }
     anunciar(v == null ? `PVP de ${p.n} limpo: o preço volta a custo + ${alvo}%.` : `PVP de ${p.n}: ${eur(v)} €/${p.un}.`);
-    try { await real.recarregar(); } catch { /* fica o que está */ }
+    await recarregar();
+    setAGravar(false);
+  };
+  // «Guardar preços»: o PVP e o grossista/distribuidor no mesmo momento, cada um só se mudou (o PVP primeiro; se falhar, pára e diz porquê)
+  const guardar = async () => {
+    if (!real) return;
+    setAGravar(true); setErro(null);
+    const frases: string[] = [];
+    if (pvpMudou) {
+      const r = await definirPvp(p.id, lido as number);
+      if (!r.ok || !r.v.ok) { setAGravar(false); setErro(r.ok ? "Não foi possível gravar o PVP." : r.erro); return; }
+      frases.push(`PVP de ${p.n}: ${eur(lido as number)} €/${p.un}.`);
+    }
+    if (tabelaMudou) {
+      // os dois valores finais (estado final); só o que mudou se anuncia
+      const r = await definirGrossistaDistribuidor(p.id, lidoG ?? null, lidoD ?? null);
+      if (!r.ok || !r.v.ok) {
+        // o PVP já ficou gravado: anuncia-o e relê (o erro e o que se escreveu mantêm-se, o Preco não remonta)
+        if (frases.length) { anunciar(frases.join(" ")); await recarregar(); }
+        setAGravar(false); setErro(r.ok ? "Não foi possível gravar o grossista e o distribuidor." : r.erro); return;
+      }
+      if (gMudou) frases.push(`Grossista de ${p.n}: ${precoOuTraco(lidoG ?? null)}.`);
+      if (dMudou) frases.push(`Distribuidor de ${p.n}: ${precoOuTraco(lidoD ?? null)}.`);
+    }
+    anunciar(frases.join(" "));
+    await recarregar();
     setAGravar(false);
   };
 
   return (
     <Seccao id="fp-preco" titulo="Preço">
-      <dl className={cn("mt-4 grid gap-3", verCusto ? "grid-cols-3" : "grid-cols-1")}>
+      <dl className={cn("mt-4 grid gap-3", verCusto ? "grid-cols-2 sm:grid-cols-5" : "grid-cols-1")}>
         {verCusto && <div><dt className={NOTA}>Custo por {p.un}</dt><dd className="text-2xl font-semibold tabular-nums">{eur(p.custo)} €</dd>{p.data && <dd className={NOTA}>de {dataPT(p.data)}</dd>}</div>}
         <div><dt className={NOTA}>{semPvp ? "Preço" : "PVP"} por {p.un}</dt><dd className="text-2xl font-semibold tabular-nums" data-testid="venda-produto">{eur(venda)} €</dd></div>
+        {verTabela && <div><dt className={NOTA}>Grossista por {p.un}</dt><dd className="text-2xl font-semibold tabular-nums" data-testid="grossista-produto">{precoOuTraco(p.grossista)}</dd></div>}
+        {verTabela && <div><dt className={NOTA}>Distribuidor por {p.un}</dt><dd className="text-2xl font-semibold tabular-nums" data-testid="distribuidor-produto">{precoOuTraco(p.distribuidor)}</dd></div>}
         {verCusto && (
         <div>
           <dt className={NOTA}>Margem</dt>
@@ -223,13 +269,27 @@ function Preco({ p, min, alvo, real, anunciar, verCusto = true }: { p: Produto; 
             <input type="text" inputMode="decimal" value={t} onChange={(e) => { setT(e.target.value); setErro(null); }} placeholder="vazio = custo + alvo"
               aria-label="PVP" aria-invalid={invalido} disabled={aGravar} className={cn(ENTRADA_TXT, "w-44 tabular-nums")} />
           </label>
-          <Button className="min-h-11 text-[15px]" disabled={aGravar || !mudou || lido == null} onClick={() => void gravar(lido as number)}>
-            {aGravar && <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />}Guardar PVP
+          {verTabela && (
+            <>
+              <label className="grid gap-1"><span className="text-[15px] font-medium">Grossista (€/{p.un}, sem IVA)</span>
+                <input type="text" inputMode="decimal" value={tG} onChange={(e) => { setTG(e.target.value); setErro(null); }} placeholder="vazio = sem preço"
+                  aria-label="Grossista" aria-invalid={invalidoG} aria-describedby={invalidoG ? idErroG : undefined} disabled={aGravar} className={cn(ENTRADA_TXT, "w-44 tabular-nums")} />
+              </label>
+              <label className="grid gap-1"><span className="text-[15px] font-medium">Distribuidor (€/{p.un}, sem IVA)</span>
+                <input type="text" inputMode="decimal" value={tD} onChange={(e) => { setTD(e.target.value); setErro(null); }} placeholder="vazio = sem preço"
+                  aria-label="Distribuidor" aria-invalid={invalidoD} aria-describedby={invalidoD ? idErroD : undefined} disabled={aGravar} className={cn(ENTRADA_TXT, "w-44 tabular-nums")} />
+              </label>
+            </>
+          )}
+          <Button className="min-h-11 text-[15px]" disabled={aGravar || invalido || invalidoG || invalidoD || !(pvpMudou || tabelaMudou)} onClick={() => void guardar()}>
+            {aGravar && <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />}Guardar preços
           </Button>
           <Button variant="outline" className="min-h-11 text-[15px]" disabled={aGravar || p.pvp == null} onClick={() => { setT(""); void gravar(null); }}>Limpar PVP</Button>
         </div>
       )}
       {pode && invalido && <p className="mt-2 text-[15px] text-destructive" role="alert">O PVP tem de ser um número maior que 0.</p>}
+      {pode && invalidoG && <p id={idErroG} className="mt-2 text-[15px] text-destructive" role="alert">{MSG_PRECO_TABELA("Grossista")}</p>}
+      {pode && invalidoD && <p id={idErroD} className="mt-2 text-[15px] text-destructive" role="alert">{MSG_PRECO_TABELA("Distribuidor")}</p>}
       {pode && avisos.map((a) => <p key={a} className="mt-2 text-[15px] text-warning" role="status">{a}</p>)}
       {erro && <p className="mt-2 text-[15px] text-destructive" role="alert">{erro}</p>}
     </Seccao>

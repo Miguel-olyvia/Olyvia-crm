@@ -64,6 +64,11 @@ export interface Produto {
   sku?: string;
   /** Preço de venda real (€ s/IVA, por unidade). Sem ele, o preço é o custo ÷ (1 − margem). */
   pvp?: number;
+  /** 19/01: os preços grossista e distribuidor (€ s/IVA, por unidade; price_type wholesale e distributor). Sem eles, não há preço desse tipo. */
+  grossista?: number; distribuidor?: number;
+  /** 19/01: a leitura do Catálogo trouxe preços (sem services.view a base devolve precosProduto vazio). Sem isto, grossista/distribuidor não se mostram nem se editam:
+   *  um «sem preço» que é só falta de permissão não pode ser gravado por cima do valor que o utilizador nunca viu. */
+  precosLidos?: true;
   /** A ilustração (ilustracoes.tsx). Sem ela, escolhe-se pelo nome. */
   img?: IlustracaoKey;
   /** 03/11: as fotos do produto (products.image_urls, URLs públicos; a 1.ª é a principal). Sem elas, a ilustração. */
