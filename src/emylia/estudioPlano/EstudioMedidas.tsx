@@ -158,7 +158,7 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
                 className="flex flex-col items-center gap-3 rounded-3xl bg-card px-10 py-8 shadow-2xl">
                 <span className="relative grid h-16 w-16 place-items-center rounded-full bg-success/15 text-success"><Brilho ativo /><VistoDesenho on grande className="h-9 w-9" /></span>
                 <p className="text-lg font-semibold">Medidas aceites</p>
-                <p className="text-sm text-muted-foreground">{d.obra.plano && ["aprovado", "em curso"].includes(d.obra.plano.estado) ? "Com o plano aprovado, segue o contrato." : "Com o plano aprovado pelas Operações, segue o contrato."}</p>
+                <p className="text-sm text-muted-foreground">{d.obra.plano && ["aprovado", "em curso"].includes(d.obra.plano.estado) ? "Com o plano aprovado, segue a encomenda de cliente." : "Com o plano aprovado pelas Operações, segue a encomenda de cliente."}</p>
               </motion.div>
             </motion.div>
           )}
