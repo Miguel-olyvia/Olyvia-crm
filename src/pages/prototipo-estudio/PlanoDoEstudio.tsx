@@ -7,6 +7,7 @@
 //  · «Fechar a visita»: volta ao negócio, leva tudo e fecha a visita (o orçamento e o plano ficam gerados).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { garantirProdutos } from "@/emylia/real/garantirProdutos";
+import { precoProduto } from "@/emylia/fichaServico";
 import { Check, ChevronDown, Hammer, Lock, Plus, Repeat, Search, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -65,7 +66,9 @@ function ComCatalogo({ p, setP, fechar, S, erro }: { p: Projeto; setP: React.Dis
     return negocio ? planoDaVisita(simularNoNegocio(negocio, pi, S, produtos).d, S, ini) : planoDoEstudio(servicosParaPlano(L), S, ini, p.negocio, p.catalogo);
   }, [p, S, produtos, negocio, L]);
   const P = useMemo(() => calcular(inicio), [calcular, inicio]);
-  const total = P.orc && negocio ? tot({ ...negocio, orc: P.orc }, S).pf : L.servicos.reduce((a, s) => a + s.q * s.preco, 0);
+  // 17/11 (A-Z na Mudelar: o fecho dizia 1.803 € e a Proposta 5.399 €): sem o negócio carregado neste separador, o total soma também os produtos (o PVP, senão o custo com a margem-alvo)
+  const total = P.orc && negocio ? tot({ ...negocio, orc: P.orc }, S).pf
+    : L.servicos.reduce((a, s) => a + s.q * s.preco, 0) + L.produtos.reduce((a, x) => { const pr = produtos.find((y) => y.id === x.id); return a + (pr ? precoProduto(pr, S.cfg.alvo) * x.q : 0); }, 0);
 
   return (
     <>
