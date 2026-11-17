@@ -9,7 +9,7 @@ const g = vi.hoisted(() => ({ estado: "parado" as string }));
 vi.mock("./gravador", () => ({ useGravacao: () => ({ estado: g.estado }) }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 
-import { OlyviaComando, PAUSA_PARA_AGIR } from "./OlyviaComando";
+import { ACORDADA_MS, OlyviaComando, PAUSA_PARA_AGIR } from "./OlyviaComando";
 
 type Res = { transcript: string }[] & { isFinal: boolean };
 class Falso {
@@ -150,6 +150,62 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     expect(ativos).toHaveLength(3);
     act(() => { fireEvent.pointerDown(window); });
     expect(ativos).toHaveLength(4);
+  });
+
+  it("modo conversa: «Olyvia» uma vez e depois as ordens vão sem o nome", () => {
+    vi.useFakeTimers();
+    render(arvore("/negocios?vista=hoje"));
+    const rec = ultimo();
+    falar(rec, res("olyvia", true));
+    expect(screen.getByRole("button", { name: "Olyvia — a ouvir-te" })).toBeInTheDocument();
+    falar(rec, res("olyvia", true), res("vai ao catálogo", true));
+    expect(loc()).toBe("/catalogo-custos");
+    falar(rec, res("olyvia", true), res("vai ao catálogo", true), res("abre os negócios", true));
+    expect(loc()).toBe("/negocios");
+  });
+
+  it("a dormir, sem «Olyvia», ignora o que se diz", () => {
+    vi.useFakeTimers();
+    render(arvore("/negocios?vista=hoje"));
+    falar(ultimo(), res("vai ao catálogo", true));
+    act(() => { vi.advanceTimersByTime(PAUSA_PARA_AGIR * 2); });
+    expect(loc()).toBe("/negocios?vista=hoje");
+  });
+
+  it("acordada, uma frase comprida é conversa à volta e não uma ordem", () => {
+    vi.useFakeTimers();
+    render(arvore("/negocios?vista=hoje"));
+    const rec = ultimo();
+    falar(rec, res("olyvia", true));
+    falar(rec, res("olyvia", true), res("ontem fui ao catálogo da loja e depois passei pela obra do senhor joão para ver", true));
+    expect(loc()).toBe("/negocios?vista=hoje");
+  });
+
+  it("adormece sozinha passado ACORDADA_MS sem ordens, e com «obrigado»", () => {
+    vi.useFakeTimers();
+    render(arvore("/negocios?vista=hoje"));
+    const rec = ultimo();
+    falar(rec, res("olyvia", true));
+    act(() => { vi.advanceTimersByTime(ACORDADA_MS + 10); });
+    expect(screen.getByRole("button", { name: "Olyvia — à escuta (diz «Olyvia»)" })).toBeInTheDocument();
+    falar(rec, res("olyvia", true), res("vai ao catálogo", true));
+    expect(loc()).toBe("/negocios?vista=hoje");
+    falar(rec, res("olyvia", true), res("vai ao catálogo", true), res("olyvia", true));
+    falar(rec, res("olyvia", true), res("vai ao catálogo", true), res("olyvia", true), res("obrigado", true));
+    expect(screen.getByRole("button", { name: "Olyvia — à escuta (diz «Olyvia»)" })).toBeInTheDocument();
+    falar(rec, res("olyvia", true), res("vai ao catálogo", true), res("olyvia", true), res("obrigado", true), res("vai ao catálogo", true));
+    expect(loc()).toBe("/negocios?vista=hoje");
+  });
+
+  it("acordada, «abre o teste c p» (letras soletradas) pede o negócio pelo nome", () => {
+    vi.useFakeTimers();
+    render(arvore("/negocios"));
+    const pedidos = ouvir(EV_ABRIR);
+    const rec = ultimo();
+    falar(rec, res("olyvia", true));
+    falar(rec, res("olyvia", true), res("abre o teste c p", true));
+    act(() => { vi.runOnlyPendingTimers(); });
+    expect(pedidos).toEqual([{ nome: "teste cp", fase: null }]);
   });
 
   it("quando o browser pede um clique (not-allowed), não desliga a escolha: volta a ouvir no próximo toque", () => {
