@@ -86,7 +86,13 @@ function aplicarResposta(d: Negocio, o: OpFinanceira, r: Record<string, unknown>
     return;
   }
   if (d.fin.fatura?.n.trim() === o.fatura) { d.fin.recibo = { n: rc, q: d.fin.recibo?.q ?? "hoje" }; return; }
-  for (const a of d.adendas ?? []) for (const f of faturasAdenda(a)) if (f.n.trim() === o.fatura && f.recibo) f.recibo = { ...f.recibo, n: rc };
+  for (const a of d.adendas ?? []) for (const f of faturasAdenda(a)) {
+    if (f.n.trim() !== o.fatura || !f.recibo) continue;
+    // 17/11 (teste do fluxo de 16/11, negócio 1002): também na adenda o histórico ficava com o número do ecrã («RC 2026/301») e não o da base
+    const velho = f.recibo.n;
+    if (velho && velho !== rc) for (const h of d.hist ?? []) if (h.t.includes(velho)) h.t = h.t.split(velho).join(rc);
+    f.recibo = { ...f.recibo, n: rc };
+  }
 }
 
 /** Grava pelas funções do servidor e devolve os avisos. Um erro para (a fatura seguinte pode depender desta) e lança-se. */

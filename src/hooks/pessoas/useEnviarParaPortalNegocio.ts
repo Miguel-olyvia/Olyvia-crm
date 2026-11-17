@@ -3,7 +3,7 @@
 // Sem essa linha (a proposta/contrato da Emylia ainda só existe no estado do negócio) não há nada para enviar e diz-se; nunca se envia com um id inventado.
 // «Enviada» só aparece quando o portal já tem o documento visível (client_portal_documents), isto é, depois do sucesso; o erro da função aparece
 // no aviso do próprio useClientPortalAccess (destrutivo, visível).
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
@@ -20,8 +20,11 @@ interface Linhas { data: unknown; error: { message: string } | null }
 interface Q { select: (c: string) => Q; eq: (c: string, v: unknown) => Q; order: (c: string, o: { ascending: boolean }) => Q; limit: (n: number) => Q; then: PromiseLike<Linhas>["then"] }
 const de = (t: string): Q => (supabase as unknown as { from: (n: string) => Q }).from(t);
 
-export function useEnviarParaPortalNegocio(negocioId: string | null, tipo: DocumentoParaPortal) {
+export function useEnviarParaPortalNegocio(negocioId: string | null, tipo: DocumentoParaPortal, aoEnviar?: () => void) {
   const qc = useQueryClient();
+  // 17/11: quem chama sabe do sucesso (o contrato do negócio passa a «enviado» no motor: senão a gravação seguinte do negócio voltava-o a rascunho)
+  const aoEnviarRef = useRef(aoEnviar);
+  aoEnviarRef.current = aoEnviar;
   const { hasPermission, isSystemAdmin } = usePermissions();
   const tabela = tipo === "proposal" ? "proposals" : "client_contracts";
   const chave = ["pessoas-portal-documento", negocioId, tipo];
@@ -45,7 +48,7 @@ export function useEnviarParaPortalNegocio(negocioId: string | null, tipo: Docum
       return { doc, noPortal: ((b.data ?? []) as unknown[]).length > 0 };
     },
   });
-  const { generatePortalAccess, loading } = useClientPortalAccess({ onSuccess: () => { void qc.invalidateQueries({ queryKey: chave }); } });
+  const { generatePortalAccess, loading } = useClientPortalAccess({ onSuccess: () => { void qc.invalidateQueries({ queryKey: chave }); aoEnviarRef.current?.(); } });
   // as mesmas permissões das páginas e do servidor (create-client-portal-access): o contrato pede «enviar para assinatura»; a proposta
   // (04/11/2026) pede negocios.proposta.enviar ou portal.manage (usePodeEnviarPropostaPortal). A de editar a ficha junta-a quem chama.
   const proposta = usePodeEnviarPropostaPortal(tipo === "proposal");

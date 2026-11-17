@@ -1357,6 +1357,11 @@ export const medidasEPlanoAbertos = (d: Pick<Negocio, "fin" | "obra" | "orc">): 
 /** 16/11: a adenda do acerto (a fatura da retificação) por pagar: a encomenda de cliente espera por ela (fn_neg_emitir_ec_se_pronta). */
 export const retificacaoPorPagar = (d: Pick<Negocio, "adendas">): boolean =>
   (d.adendas ?? []).some((a) => a.motivo === MOTIVO_ACERTO && a.estado !== "anulada" && a.estado !== "recusada" && !primeiraPaga(a));
+/** 17/11: as retificações (adendas do acerto) assinadas cujas tarefas ainda não estão no plano (assinadas por quem não planeia): entram
+ *  quando as Operações aprovarem o plano (aprovarPlano). */
+export const acertosPorJuntar = (d: Pick<Negocio, "adendas" | "obra">): Adenda[] =>
+  (d.adendas ?? []).filter((a) => a.motivo === MOTIVO_ACERTO && a.estado === "assinada" && linhasComTarefa(a).length > 0
+    && !(d.obra.plano?.tasks ?? []).some((t) => t.adenda === a.n));
 /** 12/11: o contrato assinado, as medidas ou o plano mudaram o valor e ainda ninguém decidiu o acerto (a adenda ou seguir sem ela). */
 // 16/11: o contrato já vem assinado antes do pagamento (ou é venda direta, só a proposta); a retificação faz-se depois do pagamento e o
 // acerto volta ao Financeiro (adendaDoValor: a fatura da retificação; registarNotaCredito: quando baixa)
@@ -1538,7 +1543,7 @@ export function proximo(d: Negocio, S: Estado): Proximo {
         const a = passosAgora(d, S)[0];
         if (a) return { t: a.t, sub: a.sub, btn: a.btn, act: a.act, arg: a.arg, who: a.who! };
       }
-      if (p.estado === "por aprovar") return { t: conflitos(p).length ? "Operações: resolver um conflito e aprovar o plano" : "Operações: aprovar o plano", sub: "Plano gerado do orçamento. As medidas confirmam-se ao mesmo tempo; com os dois, o contrato.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
+      if (p.estado === "por aprovar") return { t: conflitos(p).length ? "Operações: resolver um conflito e aprovar o plano" : "Operações: aprovar o plano", sub: "Plano gerado do orçamento. As medidas confirmam-se ao mesmo tempo; com os dois, a encomenda de cliente.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
       if (p.estado === "aprovado") {
         // 19/10: os materiais por garantir no Inventário (aprovar ou receber as encomendas a fornecedor) seguram o arranque
         const F = faltaParaArrancar(d, undefined, S);
@@ -2043,6 +2048,20 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
   };
   /** A encomenda de cliente, emitida no Inventário novo (16/10): reserva FIFO do stock e encomenda ao fornecedor do que faltar.
    *  Idempotente: se já existe, não faz nada. Devolve se a encomenda ficou emitida. */
+  /** 17/11: as tarefas das retificações (adendas do acerto) assinadas por quem não planeia, que ficaram por juntar ao plano (assinarAdenda):
+   *  entram agora, com quem aprova o plano (negocios.obra.planear). Devolve quantas tarefas entraram. */
+  const juntarAcertosPendentes = (d: Negocio): number => {
+    const p = d.obra.plano;
+    if (!p || p.estado === "concluída") return 0;
+    let total = 0;
+    for (const a of acertosPorJuntar(d)) {
+      const novas = juntarAoPlano(p, a), comTarefa = linhasComTarefa(a);
+      novas.forEach((t, i) => { const x = comTarefa[i]; t.adenda = a.n; if (x) { t.mats = x.mats ? x.mats.map((m) => ({ ...m })) : materiaisDoServico(x.sid, x.q); t.encomendado = []; } });
+      if (novas.length) log(d, `Plano: ${novas.length} ${novas.length === 1 ? "tarefa" : "tarefas"} da adenda ${a.n} juntas pelas Operações`);
+      total += novas.length;
+    }
+    return total;
+  };
   /** 16/11: a encomenda de cliente que esperava pelo acerto do valor (a retificação paga, a nota de crédito ou seguir sem acerto): com o
    *  pagamento validado, o plano aprovado e o contrato assinado (ou a venda direta), emite-se; numa organização real, a base. */
   const ecSePronta = (d: Negocio, como: string) => {
@@ -2821,6 +2840,18 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!d.orc?.aceite) { avisar({ msg: "Ainda não", sub: "O contrato gera-se depois de o cliente aceitar a proposta", kind: "bad" }); return; }
       if (d.orc.vendaDireta) { avisar({ msg: "Venda direta", sub: "A venda direta fica só com a proposta aceite: não tem contrato", kind: "bad" }); return; }
       if (d.orc?.contratoPedido) { avisar({ msg: "O contrato está com o Jurídico", sub: "Só se envia depois de validado", kind: "bad" }); return; } if (!portao(d, [PROPOSTA[1]])) return; if (!comEmail(d, "contrato")) return; d.orc!.contrato = "enviado"; log(d, "Contrato gerado e enviado para assinatura no portal"); avisar({ msg: "Contrato gerado", sub: "Já está no portal do cliente, por assinar", kind: "ok" }); acessoCliente(d, "contrato", "Contrato · " + obraDe(d)); },
+    /** 17/11 (teste do fluxo de 16/11, negócio 1002 da Mudelar): com a minuta escolhida, o contrato vai ao portal pelo «Enviar para o portal do
+     *  cliente» do passo (EnviarParaPortal), que já publica o documento; aqui só se marca o contrato do negócio como enviado (sem novo envio).
+     *  Sem isto o negócio ficava com o contrato por gerar e a gravação seguinte (neg_guardar_negocio) voltava-o a rascunho. Idempotente. */
+    contratoNoPortal(id: number): boolean {
+      if (!exigePerm("contrato.editar")) return false;
+      const d = deal(id), o = d.orc;
+      if (!o?.aceite || o.vendaDireta || o.contrato === "enviado" || o.contrato === "assinado") return false;
+      o.contrato = "enviado";
+      log(d, "Contrato enviado para assinatura no portal");
+      avisar({ msg: "Contrato no portal", sub: "À espera da assinatura do cliente; assinado, segue a fatura e o pagamento", kind: "ok" });
+      return true;
+    },
     /** 23/10 (2.0): "Acesso ao portal" (o cabeçalho do negócio) e "Tentar de novo": o acesso do cliente outra vez, sem documento novo.
      *  A conta real volta a pedir-se (já existindo, só se liga ao negócio; a password não muda). */
     acessoPortal(id: number) {
@@ -2898,7 +2929,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 10/11: aceite no portal do cliente, o plano não nasceu (é da equipa): nasce agora, por aprovar
       if (!d.obra.plano && d.orc?.aceite && !noPortalReal) { prepararPlanoDe(d, S); log(d, "Plano da obra gerado do orçamento · " + d.obra.plano!.tasks.length + " tarefas · por aprovar (Operações)"); }
       if (voltou) avisar({ msg: "Medidas aceites · o plano volta a por aprovar", sub: `As medidas mudaram (${mudaram.join("; ")}). As Operações revêem o plano e aprovam de novo.`, kind: "ok" });
-      else avisar({ msg: "Medidas aceites", sub: planoAprovado(d) ? "Com o plano aprovado, segue o contrato" : "Falta as Operações aprovarem o plano; depois, o contrato", kind: "ok" });
+      else avisar({ msg: "Medidas aceites", sub: planoAprovado(d) ? "Com o plano aprovado, segue a encomenda de cliente" : "Falta as Operações aprovarem o plano; depois, a encomenda de cliente", kind: "ok" });
     },
     abrirRetificacao(id: number) { S.view = "negocio"; S.deal = id; S.op = null; },
     /** Volta a emitir a encomenda de cliente no Inventário (se não chegou lá ao validar o pagamento). */
@@ -3086,6 +3117,16 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       { const pr = problemaDaAdenda(d, a); if (pr) reabrirParaAssistencia(d, pr); }
       // 12/11 (quem paga): a de um ajuste pedido pelo cliente faz o ajuste que ficou à espera (prolongar, atrasar, a tarefa nova)
       if (p && p.estado !== "concluída" && a.ajuste) { entrarAjusteDaAdenda(d, a); return; }
+      // 17/11 (teste do fluxo de 16/11, negócio 1002): a retificação que muda o valor fica assinada pela empresa (adendaDoValor), muitas
+      // vezes pelo comercial. Mexer no plano é das Operações (negocios.obra.planear; obra_guardar_negocio recusava e as tarefas perdiam-se,
+      // com o histórico a dizer que tinham entrado): sem essa permissão, as tarefas ficam por juntar e entram quando as Operações aprovam
+      // o plano (juntarAcertosPendentes, em aprovarPlano). O plano por aprovar continua por aprovar.
+      if (p && p.estado !== "concluída" && a.motivo === MOTIVO_ACERTO && !podeNeg(S.role, "obra.planear")) {
+        const nT = linhasComTarefa(a).length;
+        if (nT) log(d, `Plano: ${nT} ${nT === 1 ? "tarefa" : "tarefas"} da adenda ${n} por juntar: ${nT === 1 ? "entra" : "entram"} quando as Operações aprovarem o plano`, "w");
+        avisar({ msg: "Adenda assinada", sub: nT ? "As tarefas entram no plano quando as Operações o aprovarem" : "Sem tarefas novas no plano", kind: "ok" });
+        return;
+      }
       if (p && p.estado !== "concluída") {
         const antes = new Map(p.tasks.map((t) => [t, t.dia] as const));
         const novas = juntarAoPlano(p, a);
@@ -3951,6 +3992,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 16/11 (o fluxo em vigor): se as medidas ou o plano mudaram o valor, primeiro a retificação vai ao Financeiro (ou a nota de crédito,
       // ou segue sem acerto); só depois se aprova o plano. Assim a base nunca emite a encomenda de cliente com o acerto por decidir.
       if (acertoDoValorPendente(d)) { avisar({ msg: "Primeiro, a retificação", sub: `O valor mudou (${mudancasDeValor(d).join("; ")}). O comercial envia a retificação ao Financeiro, ou o Financeiro regista a nota de crédito; depois, aprova-se o plano`, kind: "bad" }); return; }
+      // 17/11: as tarefas da retificação assinada por quem não planeia (o comercial) entram agora, com quem aprova o plano
+      juntarAcertosPendentes(d);
       if (conflitos(d.obra.plano!).length) { avisar({ msg: "Há um conflito por resolver", sub: "Troque o técnico ou adie a fase", kind: "bad" }); return; }
       d.obra.plano!.estado = "aprovado"; log(d, "Plano aprovado pelas Operações");
       // o início do plano passa para a preparação da obra (não se escreve duas vezes)
