@@ -8,6 +8,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { seed, type Estado } from "@/emylia/motor";
 import { definirEstadoVivo, useEstadoVivo } from "@/emylia/estadoVivo";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
+import { idsServico, lerNegocios, negocioParaOEcra } from "@/emylia/real/negocioBase";
 import { aplicarAgenda, carregarAgendaReal } from "@/emylia/real/agendaReal";
 import { carregarEquipasObra } from "@/emylia/equipa/equipasObra";
 
@@ -29,7 +30,13 @@ export function useCatalogoDoEstudio(): CatalogoDoEstudio {
       try {
         if (!S) {
           const novo = seed(); novo.deals = []; novo.clientes = []; novo.deal = null;
-          await carregarCatalogo(supabase, org, novo, { leve: true });
+          const cat = await carregarCatalogo(supabase, org, novo, { leve: true });
+          // 17/11 (A-Z na Mudelar: o Estúdio dizia «equipa livre» e o negócio via o Lucas noutra obra; o total do fecho não batia com o do
+          // negócio): os negócios da organização (as obras dos outros e o próprio), como na página dos Negócios. Sem eles, fica como antes.
+          try {
+            const lidos = await lerNegocios(supabase, org, idsServico(cat.M.ids.servico), undefined, { semSugestoes: true });
+            novo.deals = lidos.map(negocioParaOEcra);
+          } catch { /* sem negócios: o Estúdio continua com o Catálogo */ }
           if (!ativo) return;
           definirEstadoVivo(novo, org);
         }
