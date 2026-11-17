@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { extrairAposGatilho, indicePasso, interpretarComando, juntarLetras, negocioPorNome, pedeParaParar, pareceComando, temGatilho } from "./comandoOlyvia";
+import { extrairAposGatilho, indicePasso, interpretarComando, juntarLetras, limparFrase, negocioPorNome, pedeParaParar, pareceComando, temGatilho } from "./comandoOlyvia";
 
 /** O comando em texto curto, para os testes: «Negócios», «?termo», «>nome@fase», «fase:3», «passo:fim», «—». */
 const cmd = (frase: string): string => {
@@ -93,6 +93,43 @@ describe("a palavra de ativação «Olyvia» (modo sempre à escuta)", () => {
   it("sem «Olyvia», não devolve nada (não dispara); a última menção conta", () => {
     expect(extrairAposGatilho("abre os negócios")).toBeNull();
     expect(extrairAposGatilho("olyvia espera, olyvia abre as pessoas")).toBe("abre as pessoas");
+  });
+});
+
+describe("17/11: as frases da gravação do Rúben", () => {
+  const ac = (frase: string) => { const c = interpretarComando(frase); return c.acao === "scroll" ? `scroll:${c.para}` : c.acao === "limpar-pesquisa" ? "limpar" : cmd(frase); };
+  it("«procura por Ruben Carvalho» procura «ruben carvalho» (sem o «por»)", () => {
+    expect(cmd("procura por Ruben Carvalho")).toBe("?ruben carvalho");
+    expect(cmd("pesquisa pelo Nuno")).toBe("?nuno");
+  });
+  it("«não, limpa o campo de pesquisa» limpa a pesquisa", () => {
+    expect(ac("não, limpa o campo de pesquisa")).toBe("limpar");
+    expect(ac("apaga a pesquisa")).toBe("limpar");
+    expect(ac("tira o filtro")).toBe("limpar");
+  });
+  it("andar na página: «faz-te lá para baixo», «desce», «sobe», «vai ao topo», «fundo da página»", () => {
+    expect(ac("faz-te lá para baixo")).toBe("scroll:baixo");
+    expect(ac("desce")).toBe("scroll:baixo");
+    expect(ac("mais para cima")).toBe("scroll:cima");
+    expect(ac("vai ao topo")).toBe("scroll:topo");
+    expect(ac("vai até ao fundo da página")).toBe("scroll:fundo");
+    expect(ac("vai para o fim")).toBe("passo:fim"); // o fim do negócio continua a ser o passo
+  });
+  it("«ok abre o Ruben Carvalho novamente»: o «ok» e o «novamente» ficam de fora", () => {
+    expect(cmd("ok abre o Ruben Carvalho novamente")).toBe(">ruben carvalho");
+    expect(cmd("pronto, vai aos negócios outra vez")).toBe("Negócios");
+    expect(limparFrase("nao tem elevador")).toBe("nao tem elevador"); // «não» de resposta fica
+  });
+  it("ordens de preencher compridas contam como ordem; conversa comprida não", () => {
+    expect(pareceComando("põe acesso fácil estacionamento pago contentor de entulho na via pública e sem elevador")).toBe(true);
+    expect(pareceComando("ontem fui ao catálogo da loja e depois passei pela obra do senhor joão")).toBe(false);
+  });
+  it("um passo mal ouvido ainda se encontra («exterior de edifício»)", () => {
+    const passos = [{ id: "v", titulo: "Visitas" }, { id: "Local + exterior", titulo: "Exterior do edifício" }, { id: "n", titulo: "Necessidades do cliente" }];
+    expect(indicePasso(passos, "exterior do edificio", 0)).toBe(1);
+    expect(indicePasso(passos, "exterior de edificio", 0)).toBe(1);
+    expect(indicePasso(passos, "necessidades", 0)).toBe(2);
+    expect(indicePasso(passos, "ruben carvalho", 0)).toBeNull();
   });
 });
 

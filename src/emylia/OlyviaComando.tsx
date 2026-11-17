@@ -8,7 +8,24 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Ear, Mic, MicOff, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { EV_ABRIR, EV_FASE, EV_PASSO, EV_PESQUISA, EV_RESPOSTA, extrairAposGatilho, interpretarComando, normal, pareceComando, pedeParaParar, temGatilho } from "./comandoOlyvia";
+import { DESTINOS, EV_ABRIR, EV_FASE, EV_PASSO, EV_PESQUISA, EV_RESPOSTA, extrairAposGatilho, interpretarComando, juntarLetras, limparFrase, normal, pareceComando, pedeParaParar, temGatilho, VERBO_PREENCHER } from "./comandoOlyvia";
+import { andarNaPagina, escreverNaPesquisa, executarPlano, lerCampos, preencherPelaFrase, type Acao } from "./preencherOlyvia";
+import { supabase } from "@/integrations/supabase/client";
+
+type AcaoIa = { tipo: string; campo?: number | null; opcao?: number | null; n?: number | null; texto?: string | null };
+/** 17/11: a frase que as regras não perceberam vai à IA (função olyvia-comando) com as perguntas do ecrã. Null se não houver resposta. */
+async function perguntarIa(frase: string, pagina: string, campos: ReturnType<typeof lerCampos>, passos: string[]): Promise<{ acoes: AcaoIa[]; resposta: string } | null> {
+  try {
+    const { data, error } = await supabase.functions.invoke("olyvia-comando", {
+      body: {
+        frase, pagina, passos, destinos: DESTINOS.map((d) => d.nome),
+        campos: campos.slice(0, 120).map((c) => ({ rotulo: c.rotulo.slice(0, 200), tipo: c.tipo, ...(c.opcoes ? { opcoes: c.opcoes.map((o) => o.texto.slice(0, 120)) } : {}), ...(c.valor ? { valor: c.valor.slice(0, 300) } : {}) })),
+      },
+    });
+    if (error || !data || !Array.isArray(data.acoes)) return null;
+    return { acoes: data.acoes as AcaoIa[], resposta: String(data.resposta ?? "") };
+  } catch { return null; }
+}
 import { useGravacao } from "./gravador";
 
 /** Os passos curtos e sem dúvida: agem logo, sem esperar que se pare de falar. */
@@ -95,10 +112,42 @@ export function OlyviaComando() {
   }, [reclamar]);
   const ligado = escutaSempre && !aGravar && !paginaPublica(pathname) && visivel && !outroOuve;
 
-  const executar = useCallback((frase: string) => {
+  const executar = useCallback(async (frase: string) => {
     const c = interpretarComando(frase);
     const fechar = (ms: number) => setTimeout(() => { setAberto(false); setTexto(""); }, ms);
     const naPaginaNegocios = locRef.current.pathname === "/negocios";
+    const noNegocio = naPaginaNegocios && !!new URLSearchParams(locRef.current.search).get("negocio");
+    const limpa = limparFrase(juntarLetras(normal(frase)).replace(/^(?:ok |o |a )?o ?l[iy]via\s*/, ""));
+
+    // 17/11 (gravação do Rúben): andar na página e limpar a pesquisa, em qualquer página
+    if (c.acao === "scroll") {
+      andarNaPagina(c.para);
+      setAviso({ msg: c.para === "baixo" ? "A descer." : c.para === "cima" ? "A subir." : c.para === "topo" ? "Topo da página." : "Fundo da página.", ok: true });
+      return;
+    }
+    if (c.acao === "limpar-pesquisa") {
+      if (naPaginaNegocios) avisa(EV_PESQUISA, "");
+      const ok = escreverNaPesquisa("") || naPaginaNegocios;
+      setAviso(ok ? { msg: "Pesquisa limpa.", ok: true } : { msg: "Não há pesquisa nesta página.", ok: false });
+      return;
+    }
+    // preencher o que está no ecrã («acesso fácil, estacionamento pago»): quando a frase não é outra ordem, ou começa por «põe/marca…»
+    if (c.acao === "nada" || (VERBO_PREENCHER.test(limpa) && c.acao !== "navegar")) {
+      const feito = await preencherPelaFrase(limpa);
+      if (feito.length) { setAviso({ msg: `Feito — ${feito.join(" · ")}.`, ok: true }); return; }
+    }
+    // dentro de um negócio, um nome que é um passo («exterior do edifício», «abre as necessidades») vai para esse passo
+    if (noNegocio && (c.acao === "nada" || c.acao === "abrir-negocio" || c.acao === "pesquisar")) {
+      const alvo = c.acao === "abrir-negocio" ? c.nome : c.acao === "pesquisar" ? c.termo : limpa.replace(/^(?:vai|vamos|abre|mostra|passa)\s+(?:(?:para|pra|ao|a|o|as|os|no|na)\s+)*/, "");
+      const pedido = { passo: alvo, tentar: true, ok: false };
+      avisa(EV_PASSO, pedido);
+      if (pedido.ok) return;
+    }
+    // procurar noutra página com pesquisa própria (Pessoas, Catálogo…): escreve ali, sem saltar para os Negócios
+    if (c.acao === "pesquisar" && !naPaginaNegocios && !/\bnegocio/.test(limpa) && escreverNaPesquisa(c.termo)) {
+      setAviso({ msg: `A procurar «${c.termo}».`, ok: true });
+      return;
+    }
     switch (c.acao) {
       case "navegar":
         setAviso({ msg: `A abrir ${c.nome}…`, ok: true });
@@ -121,8 +170,27 @@ export function OlyviaComando() {
         if (c.acao === "ir-fase") avisa(EV_FASE, { fase: c.fase }); else avisa(EV_PASSO, { passo: c.passo });
         fechar(1500);
         break;
-      default:
-        setAviso({ msg: "Não percebi. Tenta «vai aos negócios».", ok: false });
+      default: {
+        // 17/11: as regras não perceberam — pergunta à IA com o que está no ecrã (olyvia-comando); sem ela, diz o que ouviu
+        setAviso({ msg: `«${frase.trim()}» — a pensar…`, ok: true });
+        const lista = { passo: "", listar: true, lista: [] as string[] };
+        if (noNegocio) avisa(EV_PASSO, lista);
+        const campos = lerCampos();
+        const r = await perguntarIa(frase.trim(), locRef.current.pathname + locRef.current.search, campos, lista.lista);
+        if (!r) { setAviso({ msg: `Ouvi «${frase.trim()}» — não percebi. Tenta «vai aos negócios», «desce» ou «acesso fácil».`, ok: false }); break; }
+        const doEcra = r.acoes.filter((a): a is Acao => ["opcao", "contador", "texto"].includes(a.tipo)) as Acao[];
+        if (doEcra.length) await executarPlano(campos, doEcra);
+        for (const a of r.acoes) {
+          const t = a.texto ?? "";
+          if (a.tipo === "navegar") { const d = DESTINOS.find((x) => x.nome === t); if (d) navigate(d.url); }
+          else if (a.tipo === "scroll") andarNaPagina(t as "baixo" | "cima" | "topo" | "fundo");
+          else if (a.tipo === "passo" && noNegocio) avisa(EV_PASSO, { passo: t, tentar: true, ok: false });
+          else if (a.tipo === "limpar") { if (naPaginaNegocios) avisa(EV_PESQUISA, ""); escreverNaPesquisa(""); }
+          else if (a.tipo === "pesquisar") { if (!naPaginaNegocios) navigate("/negocios"); setTimeout(() => avisa(EV_PESQUISA, t), naPaginaNegocios ? 0 : 80); }
+          else if (a.tipo === "abrir_negocio") { if (!naPaginaNegocios) navigate("/negocios"); setTimeout(() => avisa(EV_ABRIR, { nome: t, fase: null }), naPaginaNegocios ? 0 : 120); }
+        }
+        setAviso({ msg: r.resposta || (r.acoes.length ? "Feito." : `Ouvi «${frase.trim()}» — não percebi.`), ok: r.acoes.length > 0 });
+      }
     }
   }, [navigate]);
 
@@ -229,13 +297,13 @@ export function OlyviaComando() {
         const c = interpretarComando(cmd);
         const agir = () => {
           espera = null;
-          // meia frase sem sentido ainda pode crescer: só se dá por não percebida quando acaba (e mostra o que ouviu)
-          if (c.acao === "nada") { if (final) { usados = ate; setAviso({ msg: `Ouvi «${txt}» — não percebi.`, ok: false }); } return; }
+          // meia frase sem ordem conhecida ainda pode crescer: só quando acaba vai à página (preencher, um passo pelo nome) ou diz que não percebeu
+          if (c.acao === "nada" && !final) return;
           usados = ate;
           acordar(); // cada ordem renova o tempo acordada
-          executarRef.current(cmd!);
+          void executarRef.current(cmd!);
         };
-        if (final || (c.acao === "ir-passo" && PASSOS_JA.has(c.passo))) { agir(); return; }
+        if (final || c.acao === "scroll" || (c.acao === "ir-passo" && PASSOS_JA.has(c.passo))) { agir(); return; }
         setAviso({ msg: `«${txt}…»`, ok: true });
         if (c.acao !== "nada") espera = setTimeout(agir, PAUSA_PARA_AGIR);
       };
@@ -290,7 +358,7 @@ export function OlyviaComando() {
   // 17/11 (Rúben: «mete o ícone de uma ovelha ao lado do ícone do chat»): um botão redondo do mesmo tamanho do chat, mesmo à esquerda
   // dele (InternalChatWidget: bottom-4 right-4, 48 px; sm: bottom-6 right-6, 56 px). O painel e os avisos abrem por cima.
   return (
-    <div className="fixed bottom-4 right-[4.75rem] z-[500] flex flex-col items-end gap-3 print:hidden sm:bottom-6 sm:right-[5.75rem]">
+    <div data-olyvia="" className="fixed bottom-4 right-[4.75rem] z-[500] flex flex-col items-end gap-3 print:hidden sm:bottom-6 sm:right-[5.75rem]">
       {aberto ? (
         <section aria-label="Comando da Olyvia" className="w-[min(calc(100vw-6rem),22rem)] space-y-3 rounded-2xl border border-primary/30 bg-card p-4 shadow-[var(--shadow-lg,0_10px_30px_rgba(0,0,0,0.18))]">
           <div className="flex items-center justify-between gap-2">

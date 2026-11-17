@@ -278,7 +278,10 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   useEffect(() => {
     const aoPesquisar = (e: Event) => {
       const termo = (e as CustomEvent<string>).detail;
-      if (typeof termo === "string" && termo) { S.view = "negocios"; S.deal = null; setQ(termo); redesenhar(); }
+      // 17/11: "" limpa a pesquisa («limpa a pesquisa»); com termo, procura em todos (o filtro «Os meus» escondia o procurado)
+      if (typeof termo !== "string") return;
+      if (!termo) { setQ(""); return; }
+      S.view = "negocios"; S.deal = null; S.filtro = "todos"; setQ(termo); redesenhar();
     };
     const aoAbrir = (e: Event) => {
       const p = (e as CustomEvent<{ nome: string; fase: number | null }>).detail;
