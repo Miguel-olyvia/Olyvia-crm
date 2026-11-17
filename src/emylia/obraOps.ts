@@ -242,7 +242,8 @@ export function seguranca(d: Negocio): ItemSeg[] {
   const cam = (d.f.localidade || "").trim();
   const camara = cam ? `Câmara de ${cam}` : "Câmara Municipal";
   const L: ItemSeg[] = [
-    { k: "seguro", t: "Seguro de responsabilidade civil", sub: "Fidelidade · apólice RC-2026-0412 · válido até 31/12/2026", ok: true },
+    // 17/11 (Rúben, «resolve tudo»): antes uma apólice inventada (sempre «certa»); agora confirma-se em cada obra, como os outros
+    { k: "seguro", t: "Seguro de responsabilidade civil", sub: tratado.seguro ? `Confirmado · ${tratado.seguro}` : "Confirme que a apólice de responsabilidade civil da empresa cobre esta obra.", ok: !!tratado.seguro },
     { k: "pss", t: "Plano de segurança e saúde", sub: tratado.pss ? `Feito · ${tratado.pss}` : "Riscos da obra, EPI e regras de estaleiro. Fica na carrinha.", ok: !!tratado.pss || d.obra.plano?.estado === "em curso" || d.obra.plano?.estado === "concluída" },
     { k: "condominio", t: "Aviso ao condomínio", sub: tratado.condominio ? `Afixado · ${tratado.condominio}` : "Horário das obras e contacto do responsável, na entrada do prédio.", ok: !!tratado.condominio },
   ];
@@ -267,3 +268,8 @@ export function nomeCurtoTarefa(n: string): string {
   const x = n.replace(/^MO Modelo Remodela[çc][ãa]o Completa\s*-\s*/i, "Remodelação · ").replace(/^M[ãa]o de Obra\s*-?\s*/i, "").trim();
   return x.charAt(0).toUpperCase() + x.slice(1);
 }
+
+/** 17/11: o nome de cada ponto de segurança, para o histórico («Obra: segurança · aviso ao condomínio tratado»). */
+export const NOME_SEGURANCA: Record<string, string> = {
+  seguro: "seguro de responsabilidade civil", pss: "plano de segurança e saúde", condominio: "aviso ao condomínio", via: "licença de ocupação da via pública",
+};

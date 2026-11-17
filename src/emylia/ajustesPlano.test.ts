@@ -152,7 +152,10 @@ describe("a obra: técnico → fotografia → supervisor", () => {
     expect(E[0].origem).toBe("Frota");
     expect(E.some((e) => e.n === "Martelo demolidor")).toBe(true);
     expect(materiaisPorFase(d).length).toBeGreaterThan(0);
-    expect(seguranca(d).find((x) => x.k === "seguro")!.ok).toBe(true);
+    // 17/11: o seguro já não é uma apólice inventada sempre «certa»: confirma-se em cada obra
+    expect(seguranca(d).find((x) => x.k === "seguro")!.ok).toBe(false);
+    d.obra.seg = { ...(d.obra.seg ?? {}), seguro: "17/11" };
+    expect(seguranca(d).find((x) => x.k === "seguro")).toMatchObject({ ok: true, sub: "Confirmado · 17/11" });
   });
 });
 

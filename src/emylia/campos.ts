@@ -253,7 +253,7 @@ export const OBRA: Grupo[] = [
     titulo: "Fecho",
     campos: [
       { k: "vistoria", l: "Vistoria final", t: "data" },
-      { k: "auto_rececao", l: "Auto de receção assinado", t: "sim_nao" },
+      // 17/11 (A-Z na Mudelar): sem «Auto de receção assinado» à mão: o auto gera-se ao encerrar e o cliente assina-o no portal (d.obra.auto)
       { k: "satisfacao", l: "Satisfação do cliente", t: "escolha", op: ["1", "2", "3", "4", "5"] },
       { k: "notas_fecho", l: "Remates e notas", t: "texto_longo" },
     ],

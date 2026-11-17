@@ -6,7 +6,7 @@ import type { DadosLead } from "./real/dadosDaLead";
 import type { FaturaReg } from "./v2/financeiro";
 import { erroZonasLinha, limparZonas, porZona, type GrupoZona, type ZonaLinha } from "./zonasOrcamento";
 import { diferencas, fimDe, guardarBase, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
-import { faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
+import { NOME_SEGURANCA, faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
 import { replanear, simularAtraso } from "./estudioObra/planoVivo";
 import { lerQuemAssina } from "./estudioObra/quemAssina";
 import { MOTIVO_QUEM_PAGA, aplicarNoPlano, custoDaHora, guardarAjuste, impactoAjuste, type AjusteAdenda, type AjusteObra, type ImpactoAjuste } from "./estudioObra/quemPaga";
@@ -3890,7 +3890,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 9/11 (Lote 1, K): mexer na obra que não é a execução das tarefas pede negocios.obra.planear (obra_guardar_negocio)
       if (!exigePerm("obra.planear")) return;
       const d = deal(id); (d.obra.seg ??= {})[k] = agora();
-      log(d, "Obra: segurança · " + k + " tratado");
+      log(d, "Obra: segurança · " + (NOME_SEGURANCA[k] ?? k) + " tratado");
     },
     /* -------------------------------------------- 21/10: o validador junta, muda de fase e tira tarefas (tarefasValidador.ts) */
     novaTarefaPlano(id: number, n: NovaTarefa): number | null {

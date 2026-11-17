@@ -490,8 +490,8 @@ export function FechoDaObra({ ctx, d, irPara }: { ctx: Ctx; d: Negocio; irPara: 
           <p className="text-sm font-semibold">A vistoria final</p>
           <label className="grid gap-1 text-sm">Data da vistoria
             <input type="date" value={f.vistoria ?? ""} onChange={(e) => run(() => A.campo(d.id, "vistoria", e.target.value))} className="h-11 rounded-xl border border-input bg-background px-3 text-[15px]" /></label>
-          <div className="space-y-1"><p className="text-sm">Auto de receção assinado</p>
-            <div className="flex gap-2">{["Sim", "Não"].map((x) => <button key={x} type="button" aria-pressed={f.auto_rececao === x} onClick={() => run(() => A.campo(d.id, "auto_rececao", x))} className={chip(f.auto_rececao === x)}>{x}</button>)}</div></div>
+          {/* 17/11: o auto de receção não se marca à mão: gera-se ao encerrar e o cliente assina-o no portal */}
+          <p className="text-sm text-muted-foreground">Auto de receção: {d.obra.auto ? `${d.obra.auto.n} · ${d.obra.auto.estado === "assinado" ? `assinado pelo cliente a ${d.obra.auto.assinado ?? d.obra.auto.q}` : "no portal do cliente, por assinar"}` : "gera-se ao encerrar a obra e vai ao portal do cliente para assinar."}</p>
           <div className="space-y-1"><p className="text-sm">Satisfação do cliente</p>
             <div className="flex gap-2">{["1", "2", "3", "4", "5"].map((x) => <button key={x} type="button" aria-pressed={f.satisfacao === x} onClick={() => run(() => A.campo(d.id, "satisfacao", x))} className={cn(chip(f.satisfacao === x), "w-11 justify-center px-0")}>{x}</button>)}</div></div>
           <NotasFecho valor={f.notas_fecho ?? ""} gravar={(v) => run(() => A.campo(d.id, "notas_fecho", v))} />
