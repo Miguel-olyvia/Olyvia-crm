@@ -28,7 +28,7 @@ import { CampoMarca, CamposRamo, RAMO_VAZIO } from "./ClassificacaoProduto";
 import { CampoModelo, MODELO_VAZIO, type ModeloEscolhido } from "./CampoModelo";
 import { ramoParaCriar, type RamoEscolhido } from "./ramoProduto";
 import { CAMPO, CHIP, NOTA, Campo, Chips, Num, Retirar } from "./pecasForm";
-import type { FichaProdutoReal } from "./fichaProdutoDados";
+import { ESTADOS_PRODUTO, type EstadoProduto, type FichaProdutoReal } from "./fichaProdutoDados";
 import type { AtributoProduto } from "./v2/catalogoModelo";
 
 const CARTAO = "rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)] sm:p-5";
@@ -96,7 +96,7 @@ function Procurar({ rot, ph, opcoes, onEscolher }: { rot: string; ph: string; op
 
 /* ------------------------------------------------------------------ pré-visualização */
 /** O que falta, como uma lista que se vai riscando; e o botão de criar. */
-function Pronto({ itens, faltas, botao, onCriar }: { itens: string[]; faltas: string[]; botao: string; onCriar: () => void }) {
+function Pronto({ itens, faltas, botao, onCriar, ocupado }: { itens: string[]; faltas: string[]; botao: string; onCriar: () => void; ocupado?: string }) {
   const ok = !faltas.length;
   return (
     <div className="mt-5 border-t border-border pt-4">
@@ -116,7 +116,7 @@ function Pronto({ itens, faltas, botao, onCriar }: { itens: string[]; faltas: st
           ))}
         </ul>
       )}
-      <Button className="mt-4 h-12 w-full text-base" disabled={!ok} onClick={onCriar}><Plus className="mr-1 h-5 w-5" aria-hidden="true" />{botao}</Button>
+      <Button className="mt-4 h-12 w-full text-base" disabled={!ok || !!ocupado} onClick={onCriar}><Plus className="mr-1 h-5 w-5" aria-hidden="true" />{ocupado ?? botao}</Button>
       {ok && <p className={cn(NOTA, "mt-2 text-center")}>Tudo pronto.</p>}
     </div>
   );
@@ -372,7 +372,13 @@ function FormServico({ S, C, K, onCriado }: { S: Estado; C: Custos; K: Catalogo;
 }
 
 /* ------------------------------------------------------------------ produto */
-function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: FichaProdutoReal; onCriado: (id: string, nome: string) => void }) {
+/** `duplicado` (17/11): numa página que não tem todos os produtos em memória, pergunta à base se o nome ou a referência já existem (devolve a frase de recusa, ou null).
+ *  `semServico`: a página não tem os serviços; sem a secção «O serviço que traz». */
+export interface OpcoesCriarProduto { duplicado?: (o: { n: string; sku: string }) => Promise<string | null>; semServico?: boolean;
+  /** O texto do botão enquanto quem chama grava ou relê (desativa-o). */
+  ocupado?: string }
+function FormProduto({ S, K, real, onCriado, duplicado, semServico, ocupado }: { S: Estado; K: Catalogo; real?: FichaProdutoReal; onCriado: (id: string, nome: string) => void } & OpcoesCriarProduto) {
+  const [estado, setEstado] = useState<EstadoProduto>("active"), [aVerificar, setAVerificar] = useState(false);
   const [nome, setNome] = useState(""), [marca, setMarca] = useState(""), [sku, setSku] = useState(""), [forn, setForn] = useState<FornecedorEscolhido>(FORNECEDOR_VAZIO);
   const [un, setUn] = useState("un"), [custo, setCusto] = useState(""), [pvp, setPvp] = useState(""), [desc, setDesc] = useState("");
   // 13/11: categoria e subcategoria em dropdowns com pesquisa; os nomes novos só entram na árvore quando o produto se cria
@@ -402,18 +408,26 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
   }, [S.svc, K]); // eslint-disable-line react-hooks/exhaustive-deps
   const nomeSvc = servico ? servicos.find((x) => x.v === servico)?.t ?? servico : null;
   const nomeModelo = modelo.novo ?? K.modelos?.find((m) => m.id === modelo.id)?.n ?? "";
-  const o = { n: nome, custo: n(custo), un, marca, ...fornecedorParaModelo(forn), no: no || null, sku, pvp: pvp.trim() ? n(pvp) : null, desc, servico, ...(img ? { img } : {}), ...(attrs.length ? { attrs } : {}),
+  const o = { n: nome, custo: n(custo), un, marca, ...fornecedorParaModelo(forn), no: no || null, sku, pvp: pvp.trim() ? n(pvp) : null, desc, servico, ...(img ? { img } : {}), ...(attrs.length ? { attrs } : {}), ...(real ? { estado } : {}),
     ...(modelo.id ? { modeloId: modelo.id } : {}), ...(modelo.novo ? { modeloNovo: modelo.novo } : {}) };
   const faltas = faltasProduto(K, o);
   const venda = precoVendaProduto(n0(custo), o.pvp, S.cfg.alvo), m = venda > 0 ? (venda - n0(custo)) / venda : 0;
   const imgV = img ?? ilustracaoDoProduto({ n: nome }, no ? caminho(arvoreCria, no) : null);
   const unidades = [...new Set(["un", "m²", "ml", "conj.", "cx", ...K.unidades])].slice(0, 10);
-  const criar = () => {
+  const criar = async () => {
+    if (aVerificar) return;
     setErroCriar(null);
     const K0 = lerCatalogo(), rr = ramoParaCriar(K0.arvore, ramo);
     if (!rr.ok) { setErroCriar(rr.erro); return; } // nunca um clique morto: diz-se porquê
     const r = criarProdutoCompleto({ ...K0, arvore: rr.A }, { ...o, no: rr.no });
     if (!r.ok) { setErroCriar(r.erro); return; }
+    if (duplicado) {
+      setAVerificar(true);
+      let recusa: string | null;
+      try { recusa = await duplicado({ n: nome.trim(), sku: sku.trim() }); } catch (e) { recusa = e instanceof Error && e.message ? e.message : "Não foi possível confirmar se o produto já existe."; }
+      setAVerificar(false);
+      if (recusa) { setErroCriar(recusa); return; }
+    }
     mudarCatalogo(() => r.K);
     onCriado(r.id, nome.trim());
   };
@@ -430,6 +444,8 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
           {/* 16/11: o modelo, a seguir à subcategoria: só na página real (sem ela não há modelos) */}
           {real && <CampoModelo modelos={K.modelos} sub={ramo.sub} subNova={!!ramo.subNova} valor={modelo} onChange={setModelo} podeCriar={real.podeEditar} />}
           <Campo rot="Descrição" dica="Uma linha, para o comercial e a proposta.">{(id) => <input id={id} value={desc} onChange={(e) => setDesc(e.target.value)} className={CAMPO} />}</Campo>
+          {/* 17/11 (20270120900000): o estado do produto novo; Ativo por omissão. Só na página real (grava-se com cat_definir_estado_produto) */}
+          {real && <div className="grid gap-1.5"><span className="text-[15px] font-medium">Estado</span><Chips<EstadoProduto> rot="Estado do produto" opcoes={ESTADOS_PRODUTO.map((x) => [x.v, x.rotulo] as const)} v={estado} set={setEstado} /></div>}
           <div className="grid gap-1.5">
             <span className="text-[15px] font-medium">Imagem</span>
             <button type="button" aria-expanded={verImg} onClick={() => setVerImg((v) => !v)} className="inline-flex min-h-11 items-center justify-self-start text-[15px] font-medium text-primary underline-offset-4 hover:underline">
@@ -458,7 +474,7 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
           </div>
           <CampoFornecedor real={real} valor={forn} onChange={setForn} sugestoes={K.fornecedores} idLista="criar-forn" />
         </Secao>
-        <Secao i={3} titulo="O serviço que traz" texto="Escolhido na visita, o produto junta este serviço ao orçamento (ex.: a sanita traz a instalação). Sem serviço, só se vende.">
+        {!semServico && <Secao i={3} titulo="O serviço que traz" texto="Escolhido na visita, o produto junta este serviço ao orçamento (ex.: a sanita traz a instalação). Sem serviço, só se vende.">
           {servico ? (
             <div className="flex items-center gap-3 rounded-xl bg-muted/50 p-3">
               <Wrench className="h-4 w-4 text-primary" aria-hidden="true" /><span className="min-w-0 flex-1 text-[15px] font-medium">{nomeSvc}</span>
@@ -467,7 +483,7 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
           ) : (
             <Procurar rot="Serviço que traz" ph="Procurar serviço" opcoes={servicos} onEscolher={(v) => setServico(v)} />
           )}
-        </Secao>
+        </Secao>}
       </div>
       <Previa>
         <div className="flex items-center gap-3">
@@ -482,7 +498,7 @@ function FormProduto({ S, K, real, onCriado }: { S: Estado; K: Catalogo; real?: 
         <BarraMargem m={m} min={S.cfg.min} alvo={S.cfg.alvo} />
         {nomeSvc && <p className="mt-4 flex items-center gap-2 text-[15px] font-medium text-primary"><Wrench className="h-4 w-4" aria-hidden="true" />Traz: {nomeSvc}</p>}
         {erroCriar && <p className="mt-4 text-[15px] text-destructive" role="alert">{erroCriar}</p>}
-        <Pronto itens={["Escreva o nome", "Escreva o custo"]} faltas={faltas} botao="Criar o produto" onCriar={criar} />
+        <Pronto itens={["Escreva o nome", "Escreva o custo"]} faltas={faltas} botao="Criar o produto" onCriar={criar} ocupado={aVerificar ? "A verificar…" : ocupado} />
       </Previa>
     </div>
   );
@@ -598,7 +614,9 @@ function FormTecnico({ S, C, onCriado }: { S: Estado; C: Custos; onCriado: (id: 
 }
 
 /* ------------------------------------------------------------------ a página */
-export function CriarNoCatalogo({ S, C, K, run, tipo, setTipo, voltar, onCriado, real }: {
+export function CriarNoCatalogo({ S, C, K, run, tipo, setTipo, voltar, onCriado, real, produto }: {
+  /** 17/11: só para «produto» (a página de Produtos, que não tem todos os produtos em memória). */
+  produto?: OpcoesCriarProduto;
   S: Estado; C: Custos; K: Catalogo; run: (fn: () => void) => void; tipo: TipoCriar; setTipo: (t: TipoCriar) => void; voltar: () => void;
   onCriado: (t: TipoCriar, id: string, nome: string) => void;
   /** 13/11: só na página real; deixa criar opções novas dos atributos (cat_guardar_opcao). */
@@ -640,7 +658,7 @@ export function CriarNoCatalogo({ S, C, K, run, tipo, setTipo, voltar, onCriado,
       {!pode && <p role="note" className="mt-8 text-[15px] text-muted-foreground">Sem permissão para criar este tipo no Catálogo.</p>}
       {pode && <div key={tipo} className="mt-8 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
         {tipo === "servico" && <FormServico S={S} C={C} K={K} onCriado={feito("servico")} />}
-        {tipo === "produto" && <FormProduto S={S} K={K} real={real} onCriado={feito("produto")} />}
+        {tipo === "produto" && <FormProduto S={S} K={K} real={real} onCriado={feito("produto")} {...produto} />}
         {tipo === "equipamento" && <FormEquip C={C} onCriado={feito("equipamento")} />}
         {tipo === "consumivel" && <FormConsumivel S={S} C={C} K={K} real={real} onCriado={feito("consumivel")} />}
         {tipo === "tecnico" && <FormTecnico S={S} C={C} onCriado={feito("tecnico")} />}

@@ -28,7 +28,7 @@ describe("catálogo antigo: redireciona para /catalogo-custos (que encaminha par
     expect(linhaDe("/catalogo-custos")).toContain("<RedirectCatalogo />");
     expect(linhaDe("/catalogo-custos")).not.toContain("<CatalogoCustos");
     const ROTAS = [
-      ["/catalogo/produtos", "<CatalogoRota seccao=\"produtos\" />"], ["/catalogo/produtos/:id", "<CatalogoRota seccao=\"produtos\" />"],
+      ["/catalogo/produtos", "<CatalogoProdutos />"], ["/catalogo/produtos/:id", "<CatalogoProdutos />"],
       ["/catalogo/servicos", "<CatalogoRota seccao=\"servicos\" />"], ["/catalogo/servicos/:sid", "<CatalogoRota seccao=\"servicos\" />"],
       ["/catalogo/servicos/equipamentos", "<CatalogoRota seccao=\"equipamentos\" />"], ["/catalogo/servicos/consumiveis", "<CatalogoRota seccao=\"consumiveis\" />"],
       ["/catalogo/servicos/tecnicos", "<CatalogoRota seccao=\"tecnicos\" />"], ["/catalogo/servicos/ligacoes", "<CatalogoRota seccao=\"ligacoes\" />"],

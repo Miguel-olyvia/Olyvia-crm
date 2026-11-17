@@ -17,6 +17,8 @@ export interface LinhaPaginaProduto {
   unidade: string | null; custo: number | null; pvp: number | null;
   /** 19/01 (20270119700000): os preços grossista e distribuidor; null = sem preço (ou quem lê não vê custo e PVP). */
   grossista: number | null; distribuidor: number | null; fornecedor: string | null; ativo: boolean | null; imagem: string | null; atributos_resumo: string | null;
+  /** 17/11 (20270120900000): 'draft' | 'active' | 'discontinued'. Em falta numa base antiga. */
+  estado?: string | null;
 }
 export interface PaginaProdutos { total: number; pagina: number; limite: number; paginas: number; produtos: LinhaPaginaProduto[] }
 /** As contagens por id (de product_categories e de product_models) e as do resumo. */

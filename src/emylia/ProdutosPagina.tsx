@@ -17,7 +17,7 @@ import { BarraSelecao, CaixaLinha, useSelecao } from "./MarcarArmazens";
 import { precoProduto } from "./fichaServico";
 import { rotuloModelo } from "./modelosDados";
 import { PROVISORIA } from "./ReferenciaFicha";
-import type { FichaProdutoReal, Res } from "./fichaProdutoDados";
+import { rotuloEstadoProduto, type FichaProdutoReal, type Res } from "./fichaProdutoDados";
 import {
   SEM_CATEGORIA_PRODUTO, SEM_FILTRO_PRODUTOS, categoriasDeProdutos, filtrarProdutosCatalogo, haProdutosSemCategoria, modelosDeProdutos, normalizarMarca, subcategoriasDeProdutos,
   type FiltroProdutos,
@@ -223,6 +223,8 @@ function LinhaProduto({ l, K, margem, novo, tocar, sl, onAbrir, nomeServico, ver
       <FotoOuIlustracao fotos={p.fotos} nome={l.nome} k={K?.img ?? "generico"} />
       <span className="min-w-0 flex-1">
         <button id={`prod-${l.id}`} type="button" onClick={(e) => { e.stopPropagation(); tocar(l.id); }} className="block text-left text-[15px] font-medium group-hover:underline">{l.nome}{l.id === novo && <Novo />}</button>
+        {/* 17/11: só o que não está ativo leva etiqueta (Rascunho, Descontinuado) */}
+        {l.estado && l.estado !== "active" && rotuloEstadoProduto(l.estado) && <span className="mt-0.5 inline-block rounded-md border border-border bg-muted px-2 py-0.5 text-[13px] font-medium text-muted-foreground">{rotuloEstadoProduto(l.estado)}</span>}
         {detalhe && <span className={cn(NOTA, "block")}>{detalhe}</span>}
         {l.atributos_resumo && <span className={cn(NOTA, "block")}>{l.atributos_resumo}</span>}
         {K?.servico && (

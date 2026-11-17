@@ -17,6 +17,7 @@ import { StockArmazens } from "./StockArmazens";
 import { AtributosFicha } from "./AtributosProduto";
 import { ClassificacaoFicha } from "./ClassificacaoProduto";
 import { ReferenciaFicha } from "./ReferenciaFicha";
+import { EstadoFicha } from "./EstadoProduto";
 import type { CrmCatalogItem, CrmCatalogList, FreeSupplierRow } from "@/components/supplier-portal-crm/types";
 import {
   definirGrossistaDistribuidor, definirPreferido, definirPvp, eUuid, lerNumero, lerPrecoTabela, lerFornecedoresOrg, lerFornecedoresProduto, ligarArtigo, margemProduto, moeda, procurarArtigos, unidadeDaLigacao,
@@ -106,6 +107,8 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
           <button type="button" onClick={() => onAbrirServico(p.servico!)} className={LINK}>Traz: {nomeServico(p.servico)}</button>
         )}
         <FotosProduto fotos={p.fotos} nome={p.n} />
+        {/* 17/11: o Estado (Rascunho, Ativo, Descontinuado) só aparece quando a ficha o leu (cat_ler_produto) */}
+        {!cons && real && eUuid(p.id) && p.estado && <EstadoFicha produto={p.id} nome={p.n} estado={p.estado} real={real} anunciar={anunciar} />}
       </header>
 
       {/* 29/10: a chave inclui o PVP: depois de gravar e reler, o campo volta ao que ficou na base */}

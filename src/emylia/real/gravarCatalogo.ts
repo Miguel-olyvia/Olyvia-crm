@@ -164,6 +164,10 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
         p_org: org, p_produto: novo ? { tmp: "prod:" + p.id } : p.id, p_valores: valoresParaGravar(p.attrs) } });
     // 16/11 (20270118300000): o modelo do produto novo (o NNNN da referência é o número dele), antes de gerar a referência
     if (novo) out.push(...ligarModelo(org, p.n, { tmp: "prod:" + p.id }, p, nomesRamo(p.no)));
+    // 17/11 (20270120900000): o estado do produto novo, depois de criado (cat_guardar_produto cria-o Ativo, por isso só quando não é «active»). Tolerante: o produto fica criado.
+    if (novo && p.estado && p.estado !== "active")
+      out.push({ rpc: "cat_definir_estado_produto", nota: `Produto: ${p.n} (estado)`, tolerante: true, aviso: `Produto «${p.n}» criado; estado por definir`,
+        args: { p_org: org, p_produto: { tmp: "prod:" + p.id }, p_status: p.estado } });
     // 16/11 (20270118000000): um produto novo SEM referência escrita ganha uma gerada (categoria + subcategoria + número + atributos), como ÚLTIMO
     // passo (precisa da classificação e dos atributos já gravados). Tolerante: o produto fica criado mesmo que a referência fique por gerar.
     if (novo && !p.sku?.trim())
