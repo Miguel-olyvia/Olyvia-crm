@@ -9,7 +9,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { Ear, Mic, MicOff, Sparkles, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DESTINOS, EV_ABRIR, EV_ESTUDIO, EV_FASE, EV_PASSO, EV_PESQUISA, EV_RESPOSTA, extrairAposGatilho, interpretarComando, juntarLetras, limparFrase, normal, pedeParaParar, temGatilho, VERBO_PREENCHER } from "./comandoOlyvia";
-import { andarNaPagina, escreverNaPesquisa, executarPlano, lerCampos, preencherPelaFrase, type Acao } from "./preencherOlyvia";
+import { andarNaPagina, botaoPeloNome, escreverNaPesquisa, executarPlano, lerCampos, preencherPelaFrase, type Acao } from "./preencherOlyvia";
 import { supabase } from "@/integrations/supabase/client";
 
 /** O primeiro botão à vista (fora da própria Olyvia) cujo texto bate certo. */
@@ -125,6 +125,7 @@ export function OlyviaComando() {
   }, [reclamar]);
   const ligado = escutaSempre && !aGravar && !paginaPublica(pathname) && visivel && !outroOuve;
 
+  const ultimoScroll = useRef<"baixo" | "cima" | null>(null);
   const executar = useCallback(async (frase: string) => {
     const c = interpretarComando(frase);
     const fechar = (ms: number) => setTimeout(() => { setAberto(false); setTexto(""); }, ms);
@@ -164,6 +165,13 @@ export function OlyviaComando() {
       if (det.ok) { setAviso({ msg: det.msg, ok: true }); return; }
     }
 
+    // 17/11 (Rúben: «tudo por voz»): o nome de um botão à vista carrega nele («escolher o estilo», «aplicar o estilo», «desfazer»,
+    // «todos», «gravar a visita»); o que não se desfaz (enviar, apagar, assinar…) nunca se carrega por voz
+    if (c.acao === "nada" || c.acao === "abrir-negocio" || c.acao === "ir-passo") {
+      const b = botaoPeloNome(limpa);
+      if (b) { b.click(); setAviso({ msg: `«${(b.textContent ?? "").replace(/\s+/g, " ").trim() || b.getAttribute("aria-label")}»`, ok: true }); return; }
+    }
+
     // 17/11 (Rúben: «se a plataforma não entender linguagem natural por voz, isto é inútil»): uma frase natural (comprida) vai
     // primeiro à IA, que a percebe toda («não vai haver contentor, o prédio tem 4 andares e estamos no primeiro»); as regras por
     // palavras-chave só apanham frases feitas e enganam-se nas compridas («obra… hoje» saltava para o Hoje). Sem IA, seguem as regras.
@@ -175,8 +183,17 @@ export function OlyviaComando() {
       return;
     }
 
+    // 17/11 (Rúben): «volta para trás» = a página anterior; «mais» repete o último scroll
+    if (c.acao === "voltar") { navigate(-1); setAviso({ msg: "Página anterior.", ok: true }); return; }
+    if (c.acao === "mais") {
+      if (!ultimoScroll.current) { setAviso({ msg: "Mais o quê? Diz, por exemplo, «desce».", ok: false }); return; }
+      andarNaPagina(ultimoScroll.current);
+      setAviso({ msg: ultimoScroll.current === "baixo" ? "A descer mais." : "A subir mais.", ok: true });
+      return;
+    }
     // 17/11 (gravação do Rúben): andar na página e limpar a pesquisa, em qualquer página
     if (c.acao === "scroll") {
+      ultimoScroll.current = c.para === "cima" || c.para === "topo" ? "cima" : "baixo";
       andarNaPagina(c.para);
       setAviso({ msg: c.para === "baixo" ? "A descer." : c.para === "cima" ? "A subir." : c.para === "topo" ? "Topo da página." : "Fundo da página.", ok: true });
       return;
@@ -397,7 +414,7 @@ export function OlyviaComando() {
           ultima = { frase, acao: interpretarComando(frase).acao, em: Date.now() };
           void executarRef.current(frase);
         };
-        if (final || c.acao === "scroll" || (c.acao === "ir-passo" && PASSOS_JA.has(c.passo))) { agir(); return; }
+        if (final || c.acao === "scroll" || c.acao === "mais" || c.acao === "voltar" || (c.acao === "ir-passo" && PASSOS_JA.has(c.passo))) { agir(); return; }
         setAviso({ msg: `«${txt}…»`, ok: true });
         // a fala natural não espera pelo «fim de frase» do browser (às vezes não chega quando se fala seguido): uma pausa chega. Um nome
         // («abre o Carlos… Mendes») espera mais, como uma frase, para não agir com meio nome

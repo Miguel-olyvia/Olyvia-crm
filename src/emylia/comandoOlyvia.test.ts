@@ -64,7 +64,13 @@ describe("andar dentro do negócio aberto", () => {
     expect(cmd("próximo passo")).toBe("passo:proximo");
     expect(cmd("avança")).toBe("passo:proximo");
     expect(cmd("volta ao passo anterior")).toBe("passo:anterior");
-    expect(cmd("volta atrás")).toBe("passo:anterior");
+    // 17/11 (Rúben): «volta para trás» é a página anterior; o passo de antes diz-se «passo anterior»
+    expect(interpretarComando("volta atrás").acao).toBe("voltar");
+    expect(interpretarComando("volta para trás").acao).toBe("voltar");
+    expect(interpretarComando("página anterior").acao).toBe("voltar");
+    expect(interpretarComando("mais").acao).toBe("mais");
+    expect(interpretarComando("outra vez").acao).toBe("mais");
+    expect(interpretarComando("mais para baixo").acao).toBe("scroll");
     expect(cmd("vai para a proposta")).toBe("passo:proposta");
     expect(cmd("vai para o passo morada da obra")).toBe("passo:morada da obra");
   });

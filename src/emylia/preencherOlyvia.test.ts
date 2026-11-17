@@ -1,6 +1,6 @@
 // 17/11 (gravação do Rúben: «não preenche campos ou ajusta, nada»): a Olyvia preenche as perguntas que estão no ecrã pela frase dita.
 import { afterEach, describe, expect, it } from "vitest";
-import { chavesDoRotulo, lerCampos, numeroDito, planoPreencher, preencherPelaFrase, type CampoEcra } from "./preencherOlyvia";
+import { botaoPeloNome, chavesDoRotulo, lerCampos, numeroDito, planoPreencher, preencherPelaFrase, type CampoEcra } from "./preencherOlyvia";
 
 const op = (rotulo: string, ...ops: string[]): CampoEcra => ({ rotulo, tipo: "opcoes", opcoes: ops.map((texto) => ({ texto, ligado: false })) });
 // o passo «Exterior do edifício» da Visita, como se vê no ecrã (gravação de 17/11)
@@ -85,6 +85,22 @@ function montarEcra() {
   return cliques;
 }
 afterEach(() => { document.body.innerHTML = ""; });
+
+describe("17/11 (Rúben: «tudo por voz»): carregar num botão pelo nome", () => {
+  it("encontra o botão dito; nunca os que não se desfazem; nunca as respostas das perguntas", () => {
+    document.body.innerHTML = `
+      <button>Escolher o estilo</button><button>Aplicar o estilo</button><button>Enviar a proposta</button><button>Desfazer</button>
+      <span id="r9">Tem elevador</span><div role="group" aria-labelledby="r9"><button aria-pressed="false">Sim</button></div>
+      <button aria-pressed="false">Todos</button>`;
+    expect(botaoPeloNome("escolher o estilo")?.textContent).toBe("Escolher o estilo");
+    expect(botaoPeloNome("carrega em aplicar o estilo")?.textContent).toBe("Aplicar o estilo");
+    expect(botaoPeloNome("desfazer")?.textContent).toBe("Desfazer");
+    expect(botaoPeloNome("todos")?.textContent).toBe("Todos");
+    expect(botaoPeloNome("enviar a proposta")).toBeNull();
+    expect(botaoPeloNome("sim")).toBeNull();
+    expect(botaoPeloNome("abre o carlos mendes")).toBeNull();
+  });
+});
 
 describe("no ecrã", () => {
   it("lê as perguntas à vista (não as da própria Olyvia)", () => {

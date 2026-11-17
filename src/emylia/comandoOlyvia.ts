@@ -36,6 +36,10 @@ export type Comando =
   | { acao: "limpar-pesquisa" }
   /** 17/11 (Rúben: «isto vai substituir a gravação da chamada»): «começa a gravar», «grava a visita», «termina a gravação». */
   | { acao: "gravar"; ligar: boolean }
+  /** 17/11 (Rúben): «volta para trás» = a página anterior (como o «recuar» do browser). */
+  | { acao: "voltar" }
+  /** 17/11 (Rúben: «se eu disser "mais" ele deve fazer mais scroll»): repetir a última ordem de andar na página. */
+  | { acao: "mais" }
   /** 17/11: o que sobra pode ser preencher campos («acesso fácil, estacionamento pago») ou um passo pelo nome — a página decide. */
   | { acao: "nada" };
 
@@ -89,7 +93,7 @@ const PREP_INICIO = /^(?:(?:para|pra|pro|ao|aos|a|as|o|os|no|na|nos|nas|em|ate)\
 function passoEspecial(alvo: string): string | null {
   if (/^(?:o )?(?:fim|final|ultimo passo|ultimo|fim do negocio)$/.test(alvo)) return "fim";
   if (/^(?:o )?(?:proximo|seguinte)(?: passo)?$|^passo seguinte$/.test(alvo)) return "proximo";
-  if (/^(?:o )?(?:anterior|passo anterior|atras|tras)$/.test(alvo)) return "anterior";
+  if (/^(?:o )?(?:anterior|passo anterior)$/.test(alvo)) return "anterior";
   if (/^(?:o )?(?:inicio|primeiro passo|primeiro|comeco)$/.test(alvo)) return "inicio";
   return null;
 }
@@ -174,6 +178,8 @@ export function interpretarComando(texto: string): Comando {
   const t = juntarLetras(normal(texto));
   if (!t) return { acao: "nada" };
   const semGatilho = limparFrase(t.replace(new RegExp("^(?:ok |o |a )?" + GATILHO.source + "\\s*"), "").trim() || t);
+  if (/^(?:volta|voltar|vai|anda|regressa)\s+(?:para|pra|a)?\s*(?:tras|atras)$|^(?:pagina anterior|volta a pagina anterior|vai a pagina anterior|recua|recuar|para tras)$/.test(semGatilho)) return { acao: "voltar" };
+  if (/^(?:mais|mais um bocado|mais um pouco|ainda mais|outra vez|de novo|novamente|continua|continuar)$/.test(semGatilho) || /^(?:mais|outra vez|de novo|novamente|continua)$/.test(t.replace(new RegExp("^(?:ok |o |a )?" + GATILHO.source + "\\s*"), "").trim())) return { acao: "mais" };
   if (LIMPAR.test(semGatilho)) return { acao: "limpar-pesquisa" };
   if (PARAR_GRAVAR.test(semGatilho)) return { acao: "gravar", ligar: false };
   if (LIGAR_GRAVAR.test(semGatilho)) return { acao: "gravar", ligar: true };
