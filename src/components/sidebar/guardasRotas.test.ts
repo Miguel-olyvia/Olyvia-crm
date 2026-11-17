@@ -31,7 +31,7 @@ describe("catálogo antigo: redireciona para /catalogo-custos (que encaminha par
       ["/catalogo/produtos", "<CatalogoRota seccao=\"produtos\" />"], ["/catalogo/produtos/:id", "<CatalogoRota seccao=\"produtos\" />"],
       ["/catalogo/servicos", "<CatalogoRota seccao=\"servicos\" />"], ["/catalogo/servicos/:sid", "<CatalogoRota seccao=\"servicos\" />"],
       ["/catalogo/servicos/equipamentos", "<CatalogoRota seccao=\"equipamentos\" />"], ["/catalogo/servicos/consumiveis", "<CatalogoRota seccao=\"consumiveis\" />"],
-      ["/catalogo/servicos/tecnicos", "<CatalogoRota seccao=\"tecnicos\" />"], ["/catalogo/ligacoes", "<CatalogoRota seccao=\"ligacoes\" />"],
+      ["/catalogo/servicos/tecnicos", "<CatalogoRota seccao=\"tecnicos\" />"], ["/catalogo/servicos/ligacoes", "<CatalogoRota seccao=\"ligacoes\" />"],
       ["/catalogo/produtos/categorias", "<CatalogoGestao separador=\"categorias\" />"], ["/catalogo/produtos/subcategorias", "<CatalogoGestao separador=\"subcategorias\" />"],
       ["/catalogo/produtos/modelos", "<CatalogoGestao separador=\"modelos\" />"], ["/catalogo/produtos/marcas", "<CatalogoGestao separador=\"marcas\" />"],
       ["/catalogo/produtos/atributos", "<CatalogoGestao separador=\"atributos\" />"], ["/catalogo/produtos/referencia", "<CatalogoGestao separador=\"sku\" />"],
@@ -41,9 +41,14 @@ describe("catálogo antigo: redireciona para /catalogo-custos (que encaminha par
 
   it("cada item do menu do Catálogo tem a mesma permissão da sua rota", () => {
     const secao = menuSections.find((s) => s.id === "catalogo")!;
-    for (const i of [...secao.items, ...secao.subSections!.flatMap((x) => x.items)]) {
+    expect(secao.items).toHaveLength(2);
+    for (const i of [...secao.items, ...(secao.subSections ?? []).flatMap((x) => x.items)]) {
       expect(linhaDe(i.to), i.to).toContain(`<ProtectedRoute permission="${i.permission}">`);
     }
+  });
+
+  it("o endereço /catalogo/ligacoes (da primeira versão) encaminha para /catalogo/servicos/ligacoes", () => {
+    expect(linhaDe("/catalogo/ligacoes")).toContain('<Navigate to="/catalogo/servicos/ligacoes" replace />');
   });
 
   it("Organizações já não abre nos caminhos do catálogo nem pede products.view/services.view", () => {

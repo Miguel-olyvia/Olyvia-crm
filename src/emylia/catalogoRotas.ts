@@ -19,8 +19,15 @@ export const CAMINHO_SECCAO: Record<SeccaoCatalogo, string> = {
   equipamentos: "/catalogo/servicos/equipamentos",
   consumiveis: "/catalogo/servicos/consumiveis",
   tecnicos: "/catalogo/servicos/tecnicos",
-  ligacoes: "/catalogo/ligacoes",
+  ligacoes: "/catalogo/servicos/ligacoes",
 };
+
+/** As duas páginas do menu lateral. Dentro de cada uma a navegação faz-se por separadores (SeparadoresCatalogo), e cada separador é uma rota. */
+export type GrupoCatalogo = "produtos" | "servicos";
+export interface SeparadorCatalogo { chave: string; rotulo: string; to: string }
+export const grupoDaSeccao = (s: SeccaoCatalogo): GrupoCatalogo => (s === "produtos" ? "produtos" : "servicos");
+/** A lista (e as fichas, que abrem dentro dela) é o separador «lista»; as outras secções têm o separador com o seu nome. */
+export const separadorDaSeccao = (s: SeccaoCatalogo): string => (s === "produtos" || s === "servicos" ? "lista" : s);
 
 export const CAMINHO_GESTAO: Record<SeparadorGestao, string> = {
   categorias: "/catalogo/produtos/categorias",
@@ -29,6 +36,28 @@ export const CAMINHO_GESTAO: Record<SeparadorGestao, string> = {
   marcas: "/catalogo/produtos/marcas",
   atributos: "/catalogo/produtos/atributos",
   sku: "/catalogo/produtos/referencia",
+};
+
+/** O id do separador (para o `aria-labelledby` do painel). */
+export const idSeparadorCatalogo = (chave: string): string => `tab-cat-${chave}`;
+
+export const SEPARADORES_CATALOGO: Record<GrupoCatalogo, readonly SeparadorCatalogo[]> = {
+  produtos: [
+    { chave: "lista", rotulo: "Lista", to: CAMINHO_SECCAO.produtos },
+    { chave: "categorias", rotulo: "Categorias", to: CAMINHO_GESTAO.categorias },
+    { chave: "subcategorias", rotulo: "Subcategorias", to: CAMINHO_GESTAO.subcategorias },
+    { chave: "modelos", rotulo: "Modelos", to: CAMINHO_GESTAO.modelos },
+    { chave: "marcas", rotulo: "Marcas", to: CAMINHO_GESTAO.marcas },
+    { chave: "atributos", rotulo: "Atributos", to: CAMINHO_GESTAO.atributos },
+    { chave: "sku", rotulo: "Referência (SKU)", to: CAMINHO_GESTAO.sku },
+  ],
+  servicos: [
+    { chave: "lista", rotulo: "Lista", to: CAMINHO_SECCAO.servicos },
+    { chave: "equipamentos", rotulo: "Equipamentos", to: CAMINHO_SECCAO.equipamentos },
+    { chave: "consumiveis", rotulo: "Consumíveis", to: CAMINHO_SECCAO.consumiveis },
+    { chave: "tecnicos", rotulo: "Técnicos", to: CAMINHO_SECCAO.tecnicos },
+    { chave: "ligacoes", rotulo: "Ligações", to: CAMINHO_SECCAO.ligacoes },
+  ],
 };
 
 /** Para onde leva um link ao Catálogo sem mais indicações (o separador que a página antiga abria por omissão). */

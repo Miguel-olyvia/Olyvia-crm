@@ -22,7 +22,7 @@ function abrir(url: string) {
 describe("RedirectCatalogo", () => {
   it.each([
     ["/catalogo-custos", "/catalogo/servicos"],
-    ["/catalogo-custos?sec=ligacoes", "/catalogo/ligacoes"],
+    ["/catalogo-custos?sec=ligacoes", "/catalogo/servicos/ligacoes"],
     ["/catalogo-custos?sec=tecnicos", "/catalogo/servicos/tecnicos"],
     ["/catalogo-custos?servico=s1", "/catalogo/servicos/s1"],
     ["/catalogo-custos?produto=p1", "/catalogo/produtos/p1"],

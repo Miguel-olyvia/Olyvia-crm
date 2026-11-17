@@ -1,6 +1,6 @@
 // 17/11: o Catálogo passa a ter páginas (menu lateral). O endereço antigo (/catalogo-custos?sec=…&servico=…) traduz-se para as rotas novas.
 import { describe, expect, it } from "vitest";
-import { CAMINHO_GESTAO, CAMINHO_SECCAO, caminhoProduto, caminhoServico, destinoCatalogoAntigo } from "./catalogoRotas";
+import { CAMINHO_GESTAO, CAMINHO_SECCAO, caminhoProduto, caminhoServico, destinoCatalogoAntigo, grupoDaSeccao, separadorDaSeccao } from "./catalogoRotas";
 
 describe("destinoCatalogoAntigo: cada parâmetro do endereço antigo vai para a rota certa", () => {
   it("sem parâmetros abre os Serviços (o separador de sempre)", () => {
@@ -8,7 +8,7 @@ describe("destinoCatalogoAntigo: cada parâmetro do endereço antigo vai para a 
   });
   it.each([
     ["servicos", "/catalogo/servicos"], ["produtos", "/catalogo/produtos"], ["equipamentos", "/catalogo/servicos/equipamentos"],
-    ["consumiveis", "/catalogo/servicos/consumiveis"], ["tecnicos", "/catalogo/servicos/tecnicos"], ["ligacoes", "/catalogo/ligacoes"],
+    ["consumiveis", "/catalogo/servicos/consumiveis"], ["tecnicos", "/catalogo/servicos/tecnicos"], ["ligacoes", "/catalogo/servicos/ligacoes"],
   ])("?sec=%s -> %s", (sec, rota) => {
     expect(destinoCatalogoAntigo(`?sec=${sec}`)).toBe(rota);
   });
@@ -57,7 +57,12 @@ describe("destinoCatalogoAntigo: cada parâmetro do endereço antigo vai para a 
 
 describe("os caminhos das rotas", () => {
   it("cada secção e cada página de gestão têm o seu caminho", () => {
-    expect(CAMINHO_SECCAO.ligacoes).toBe("/catalogo/ligacoes");
+    expect(CAMINHO_SECCAO.ligacoes).toBe("/catalogo/servicos/ligacoes");
+    expect(grupoDaSeccao("ligacoes")).toBe("servicos");
+    expect(grupoDaSeccao("produtos")).toBe("produtos");
+    expect(separadorDaSeccao("produtos")).toBe("lista");
+    expect(separadorDaSeccao("servicos")).toBe("lista");
+    expect(separadorDaSeccao("tecnicos")).toBe("tecnicos");
     expect(CAMINHO_GESTAO.sku).toBe("/catalogo/produtos/referencia");
     expect(CAMINHO_GESTAO.atributos).toBe("/catalogo/produtos/atributos");
     expect(caminhoProduto("a b")).toBe("/catalogo/produtos/a%20b");

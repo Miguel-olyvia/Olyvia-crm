@@ -48,14 +48,6 @@ import {
   History as HistoryIcon,
   Eye,
   HardHat,
-  Link2,
-  FolderTree,
-  Layers,
-  Boxes,
-  Tag,
-  SlidersHorizontal,
-  Hammer,
-  PaintBucket,
 } from "lucide-react";
 import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
 
@@ -216,51 +208,17 @@ export const menuSections: MenuSection[] = [
   },
   {
     // Emylia (decisão de 27/10): o Catálogo e custos substitui os Produtos e os Serviços. 28/10: sai de Organizações para o topo.
-    // 03/11: as páginas antigas (/products, /services, categorias, marcas, pacotes…) redirecionam para aqui. 17/11: passa a secção com menu
-    // lateral, como as Organizações: Produtos (lista + gestão), Serviços (lista, equipamentos, consumíveis, técnicos) e Ligações.
-    // Cada rota pede services.view, a mesma de antes; /catalogo-custos só encaminha (RedirectCatalogo).
+    // 03/11: as páginas antigas (/products, /services, categorias, marcas, pacotes…) redirecionam para aqui. 17/11 (correção do utilizador):
+    // secção com DOIS itens, Produtos e Serviços, ativos em todas as subrotas deles (sem `exact`); dentro de cada página a navegação é por
+    // separadores (SeparadoresCatalogo), e cada separador é uma rota. Cada rota pede services.view; /catalogo-custos só encaminha (RedirectCatalogo).
     id: "catalogo",
     icon: Package,
     labelKey: "sidebar.catalogoCustos",
     paths: ["/catalogo"],
     permissions: ["services.view"],
-    items: [],
-    subSections: [
-      {
-        key: "catalogo-produtos",
-        labelKey: "sidebar.catalogoProdutos",
-        defaultExpanded: true,
-        items: [
-          // `exact`: a Lista não fica realçada nas páginas de gestão (/catalogo/produtos/categorias…), que têm a sua entrada.
-          { to: "/catalogo/produtos", icon: Package, labelKey: "sidebar.catalogoLista", permission: "services.view", exact: true },
-          { to: "/catalogo/produtos/categorias", icon: FolderTree, labelKey: "sidebar.catalogoCategorias", permission: "services.view" },
-          { to: "/catalogo/produtos/subcategorias", icon: Layers, labelKey: "sidebar.catalogoSubcategorias", permission: "services.view" },
-          { to: "/catalogo/produtos/modelos", icon: Boxes, labelKey: "sidebar.catalogoModelos", permission: "services.view" },
-          { to: "/catalogo/produtos/marcas", icon: Tag, labelKey: "sidebar.catalogoMarcas", permission: "services.view" },
-          { to: "/catalogo/produtos/atributos", icon: SlidersHorizontal, labelKey: "sidebar.catalogoAtributos", permission: "services.view" },
-          { to: "/catalogo/produtos/referencia", icon: ScanBarcode, labelKey: "sidebar.catalogoReferencia", permission: "services.view" },
-        ],
-      },
-      {
-        key: "catalogo-servicos",
-        labelKey: "sidebar.catalogoServicos",
-        defaultExpanded: true,
-        items: [
-          { to: "/catalogo/servicos", icon: Wrench, labelKey: "sidebar.catalogoLista", permission: "services.view", exact: true },
-          { to: "/catalogo/servicos/equipamentos", icon: Hammer, labelKey: "sidebar.catalogoEquipamentos", permission: "services.view" },
-          { to: "/catalogo/servicos/consumiveis", icon: PaintBucket, labelKey: "sidebar.catalogoConsumiveis", permission: "services.view" },
-          { to: "/catalogo/servicos/tecnicos", icon: HardHat, labelKey: "sidebar.catalogoTecnicos", permission: "services.view" },
-        ],
-      },
-      {
-        // 17/11: Ligações no fim do menu (os itens soltos de uma secção aparecem sempre antes das sub-secções).
-        key: "catalogo-ligacoes",
-        labelKey: "sidebar.catalogoLigacoes",
-        defaultExpanded: true,
-        items: [
-          { to: "/catalogo/ligacoes", icon: Link2, labelKey: "sidebar.catalogoLigacoes", permission: "services.view" },
-        ],
-      },
+    items: [
+      { to: "/catalogo/produtos", icon: Package, labelKey: "sidebar.catalogoProdutos", permission: "services.view" },
+      { to: "/catalogo/servicos", icon: Wrench, labelKey: "sidebar.catalogoServicos", permission: "services.view" },
     ],
   },
   {

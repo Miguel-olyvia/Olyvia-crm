@@ -48,7 +48,8 @@ import { TIPOS_CRIAR, consumiveisComCriados, type TipoCriar } from "./criarCatal
 import { ehCriado } from "./catalogo";
 import { MateriaisModelo } from "./MateriaisModelo";
 import { podeCriarTipo, usePermissoesCatalogo } from "./permissoesCatalogo";
-import { CAMINHO_SECCAO, caminhoProduto, caminhoServico, type RotaCatalogo } from "./catalogoRotas";
+import { CAMINHO_SECCAO, caminhoProduto, caminhoServico, grupoDaSeccao, idSeparadorCatalogo, separadorDaSeccao, type RotaCatalogo } from "./catalogoRotas";
+import { SeparadoresCatalogo } from "./SeparadoresCatalogo";
 
 type Seccao = "servicos" | "produtos" | "equipamentos" | "consumiveis" | "tecnicos" | "ligacoes";
 const SECCOES: [Seccao, string][] = [["servicos", "Serviços"], ["produtos", "Produtos"], ["equipamentos", "Equipamentos"], ["consumiveis", "Consumíveis"], ["tecnicos", "Técnicos"], ["ligacoes", "Ligações"]];
@@ -453,7 +454,7 @@ function Tecnicos({ S, C, mudar, novo }: { S: Ctx["S"]; C: Custos; mudar: (fn: (
 const SECCAO_DO_TIPO: Record<TipoCriar, Seccao> = { servico: "servicos", produto: "produtos", equipamento: "equipamentos", consumivel: "consumiveis", tecnico: "tecnicos" };
 const NOME_TIPO: Record<TipoCriar, string> = { servico: "Serviço", produto: "Produto", equipamento: "Equipamento", consumivel: "Consumível", tecnico: "Técnico" };
 /** real (29/10): só na página real (CatalogoCustos), para a ficha do produto ler e ligar fornecedores. */
-/** rota (17/11): debaixo de /catalogo/… a secção e a ficha vêm da rota e o menu lateral faz de separadores (a barra e o «Gestão» escondem-se). */
+/** rota (17/11): debaixo de /catalogo/… a secção e a ficha vêm da rota e cada separador é uma rota (SeparadoresCatalogo, visíveis também nas fichas); o «Gestão» esconde-se. */
 export function CatalogoV1({ S, run, real, rota }: Ctx & { real?: FichaProdutoReal; rota?: RotaCatalogo }) {
   const C = useCustos();
   const K = useCatalogo();
@@ -595,10 +596,20 @@ export function CatalogoV1({ S, run, real, rota }: Ctx & { real?: FichaProdutoRe
     );
   }
 
+  // 17/11: debaixo da rota, os separadores do grupo (Produtos ou Serviços) ficam no topo, também com uma ficha aberta (a ficha é o painel da Lista)
+  const idPainel = `painel-${seccao}`;
+  const barraRota = rota && (
+    <div className="mb-6"><SeparadoresCatalogo grupo={grupoDaSeccao(rota.seccao)} ativo={separadorDaSeccao(rota.seccao)} ir={(c) => rota.ir(c)} painelId={idPainel} /></div>
+  );
+  const painelFicha = (filhos: ReactNode): ReactNode => (rota
+    ? <div id={idPainel} role="tabpanel" aria-labelledby={idSeparadorCatalogo(separadorDaSeccao(rota.seccao))}>{filhos}</div>
+    : filhos);
+
   if (aberto) {
     return (
       <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
-        <FichaServicoSimples key={aberto} S={S} C={C} run={run} sid={aberto} voltar={() => { voltarPara.current = aberto; setAberto(null); }} anunciar={anunciar} verLigacoes={verLigacoes} />
+        {barraRota}
+        {painelFicha(<FichaServicoSimples key={aberto} S={S} C={C} run={run} sid={aberto} voltar={() => { voltarPara.current = aberto; setAberto(null); }} anunciar={anunciar} verLigacoes={verLigacoes} />)}
         {regiao}
       </div>
     );
@@ -607,9 +618,10 @@ export function CatalogoV1({ S, run, real, rota }: Ctx & { real?: FichaProdutoRe
   if (produtoAberto) {
     return (
       <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
-        <FichaProdutoAberto id={produtoAberto} K={K} vistas={linhasVistas.current} min={S.cfg.min} alvo={S.cfg.alvo} real={real}
+        {barraRota}
+        {painelFicha(<FichaProdutoAberto id={produtoAberto} K={K} vistas={linhasVistas.current} min={S.cfg.min} alvo={S.cfg.alvo} real={real}
           voltar={() => { voltarProduto.current = produtoAberto; setProdutoAberto(""); }} anunciar={anunciar} nomeServico={nomeServico}
-          onAbrirServico={(sid) => { setProdutoAberto("", { substituir: true }); setAberto(sid); }} />
+          onAbrirServico={(sid) => { setProdutoAberto("", { substituir: true }); setAberto(sid); }} />)}
         {regiao}
       </div>
     );
@@ -619,9 +631,10 @@ export function CatalogoV1({ S, run, real, rota }: Ctx & { real?: FichaProdutoRe
     const x = consumiveis.find((c) => c.id === consAberto);
     return (
       <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
-        <FichaProduto key={consAberto} tipo="consumivel" min={S.cfg.min} alvo={S.cfg.alvo} real={real} anunciar={anunciar} nomeServico={nomeServico} onAbrirServico={(sid) => { setConsAberto("", { substituir: true }); setAberto(sid); }}
+        {barraRota}
+        {painelFicha(<FichaProduto key={consAberto} tipo="consumivel" min={S.cfg.min} alvo={S.cfg.alvo} real={real} anunciar={anunciar} nomeServico={nomeServico} onAbrirServico={(sid) => { setConsAberto("", { substituir: true }); setAberto(sid); }}
           p={x && x.id ? { id: x.id, n: x.n, custo: x.preco, un: x.un, marca: "", fornecedor: x.fornecedor, data: x.data, no: null } : undefined}
-          voltar={() => { voltarProduto.current = consAberto; setConsAberto(""); }} />
+          voltar={() => { voltarProduto.current = consAberto; setConsAberto(""); }} />)}
         {regiao}
       </div>
     );
@@ -672,13 +685,13 @@ export function CatalogoV1({ S, run, real, rota }: Ctx & { real?: FichaProdutoRe
           )}
         </div>
       </div>
-      {!rota && (
+      {rota ? <div className="mt-6"><SeparadoresCatalogo grupo={grupoDaSeccao(rota.seccao)} ativo={separadorDaSeccao(rota.seccao)} ir={(c) => rota.ir(c)} painelId={idPainel} /></div> : (
         <div role="tablist" aria-label="Secções do Catálogo" className="mt-6 flex gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] sm:[mask-image:none] [&::-webkit-scrollbar]:hidden [mask-image:linear-gradient(to_right,#000_calc(100%-2rem),transparent)]">
           {SECCOES.map(([s, t]) => tab(s, t))}
         </div>
       )}
       {/* 27/10: o contentor tem sempre a mesma largura (o título e os separadores não saltam); só o corpo das secções estreitas encolhe */}
-      <div id={`painel-${seccao}`} role="tabpanel" aria-labelledby={`tab-${seccao}`} className={cn("pt-6", seccao === "ligacoes" ? "max-w-6xl" : seccao !== "servicos" && seccao !== "produtos" && "max-w-3xl")}>
+      <div id={idPainel} role="tabpanel" aria-labelledby={rota ? idSeparadorCatalogo(separadorDaSeccao(seccao)) : `tab-${seccao}`} className={cn("pt-6", seccao === "ligacoes" ? "max-w-6xl" : seccao !== "servicos" && seccao !== "produtos" && "max-w-3xl")}>
         {corpo[seccao]()}
       </div>
       {regiao}
