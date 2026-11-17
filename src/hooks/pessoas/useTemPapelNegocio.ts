@@ -1,5 +1,7 @@
-// 30/10/2026 (20270101340000): quem tem um papel no Negócio pelo RH (ou é técnico de obra) entra no /negocios e no Hoje do /home, mesmo
-// sem a permissão pessoas.view do perfil da Olyvia. A base aceita as ações pelo papel (neg_papeis_permissoes).
+// 30/10/2026 (20270101340000): quem é técnico de obra pela base (neg_meus_papeis: o cargo técnico de obra do RH ou o perfil «Ser técnico
+// de obra» com a conta ligada) entra no /negocios e no Hoje do /home, mesmo sem a permissão pessoas.view do perfil da Olyvia. 17/11: o
+// Papel no Negócio do RH (Comercial, Direção, Financeiro, Compras e armazém, Gestor de obra, Jurídico) saiu: papeisDoLido só guarda o
+// Técnico, e os outros entram pelas permissões do perfil.
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";

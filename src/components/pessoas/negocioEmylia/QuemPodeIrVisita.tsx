@@ -1,7 +1,7 @@
 // 4/11 (Rúben): em «Marcar a visita», primeiro a data da visita (obrigatória; sem atalhos de dia nem duração: a duração vem de «Preparar a
 // visita»). Escolhida a data, aparecem os comerciais que podem ir, cada um com as horas livres que tem nesse dia. Sem nenhum comercial
-// livre, sugerem-se os técnicos livres nesse dia e os próximos dias com comerciais livres. Depois, a hora. Os papéis vêm do RH
-// (neg_papeis_dos_recursos, 20270106410000); sem essa função na base, «Quem vai» mostra toda a gente, como antes.
+// livre, sugerem-se os técnicos livres nesse dia e os próximos dias com comerciais livres. Depois, a hora. Os papéis vêm da base
+// (neg_papeis_dos_recursos, 20270106410000; 17/11: o Papel no Negócio do RH saiu); sem essa função na base, «Quem vai» mostra toda a gente, como antes.
 import { useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { CalendarClock, Check, Sparkles } from "lucide-react";
@@ -28,7 +28,7 @@ const semFuncao = (e: { code?: string } | null) => e?.code === "PGRST202" || e?.
 /** Quantos dias a seguir à data se procuram comerciais livres, quando nesse dia não há nenhum. */
 const DIAS_A_PROCURAR = 7;
 
-/** Os papéis de cada recurso da agenda (do RH). null: não se sabem (a função por colar, ou um erro): mostra-se toda a gente. */
+/** Os papéis de cada recurso da agenda (da base). null: não se sabem (a função por colar, ou um erro): mostra-se toda a gente. */
 export function usePapeisDosRecursos(): Map<string, string[]> | null {
   const fonte = useFontePessoas();
   const org = fonte.modo === "real" ? fonte.organizationId : null;
@@ -46,7 +46,7 @@ export function usePapeisDosRecursos(): Map<string, string[]> | null {
   return q.data ?? null;
 }
 
-/** 5/11: os papéis do RH ainda não chegaram (a marcação sozinha espera por eles). */
+/** 5/11: os papéis ainda não chegaram (a marcação sozinha espera por eles). */
 function usePapeisALer(): boolean {
   const fonte = useFontePessoas();
   const org = fonte.modo === "real" ? fonte.organizationId : null;
@@ -154,7 +154,7 @@ export function QuemPodeIrVisita({ a, recursos, duracaoMin, horario, feriados, h
     if (!escolherSozinho || !dia || sozinhoEm.current === dia + "|" + a.hora || a.escolhidos.length > 0 || a.somenteLeitura) return;
     if (papeisALer || !tudoLido) return;
     sozinhoEm.current = dia + "|" + a.hora;
-    if (!g.conhecido) { aoEscolherSozinho?.({ quem: null, motivo: "Não se sabe quem é comercial (os papéis do RH não chegaram): escolha quem vai." }); return; }
+    if (!g.conhecido) { aoEscolherSozinho?.({ quem: null, motivo: "Não se sabe quem é comercial (os papéis não chegaram): escolha quem vai." }); return; }
     // sem hora certa: o comercial mais perto com uma hora livre na parte do dia combinada, e a primeira dessas horas
     if (!a.hora) {
       // as horas livres são do dia todo (00:00 incluído): só as de trabalho, manhã 08:00 a 13:00, tarde 13:00 a 20:00 (5/11: a 1.ª saiu às 00:00)

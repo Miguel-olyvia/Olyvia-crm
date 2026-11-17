@@ -1,6 +1,6 @@
 // Quem pode ver os custos e as margens do orçamento de um negócio em /negocios: a mesma pergunta das RPCs que os devolvem
 // (fn_neg_ler_orcamento, neg_ler_negocios, fn_neg_ler_adendas), fn_cat_pode(org, 'quotes.view_costs'), que junta o perfil na
-// organização, o Papel no Negócio (neg_papeis_permissoes) e o admin do sistema. Sem ela a base devolve os custos a null e o ecrã
+// organização e o admin do sistema (17/11: o Papel no Negócio do RH saiu). Sem ela a base devolve os custos a null e o ecrã
 // mostraria margem 100 % e «Custo 0 €». Padrão de usePodeDecidirProposta: enquanto se lê, `pode` é false e `aLer` é true; uma leitura
 // que falha vale «não». A ficha (NegocioEmyliaDoGuia) lê o mesmo código em permissoesPosContrato.ts.
 import { useEffect, useState } from "react";

@@ -68,7 +68,7 @@ import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real
 import { aoMudarProntidao } from "@/emylia/inventario/prontidaoReal";
 import { definirOrgErp } from "@/emylia/erpEticadata";
 import { usePaginaInteira } from "@/hooks/usePaginaInteira";
-import { aplicarNomesPapeis, aplicarPermissoesReais, definirPapeisEscolhiveis, aplicarGestoresObra, lerGestoresObra, lerMeusPapeis, papeisPermitidos, papelDeAbertura, reporNomesPapeis, type MeusPapeis } from "@/emylia/real/papeisReal";
+import { aplicarNomesPapeis, aplicarPermissoesReais, definirPapeisEscolhiveis, aplicarGestoresObra, lerGestoresObra, lerMeusPapeis, papeisPermitidos, papelDeAbertura, reporNomesPapeis, VISTAS_NEGOCIO, type MeusPapeis } from "@/emylia/real/papeisReal";
 import { atribuirPorAtribuir } from "@/emylia/preparacaoObra";
 import { aprovarPoReal, definirAprovadorPo } from "@/emylia/real/encomendaReal";
 import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste";
@@ -95,15 +95,12 @@ const LIGACOES: [string, string, string][] = [["Pessoas", "/pessoas", "pessoas.v
   ["Catálogo e custos", "/catalogo-custos", "services.view"]];
 
 /** 10/11: a permissão que a rota de cada página real pede (ProtectedRoute em App.tsx) e o nome com que se avisa. As rotas só olham para o
- *  perfil da Olyvia (não para o Papel no Negócio): sem ela, a ligação levava a «Acesso negado». */
+ *  perfil da Olyvia: sem ela, a ligação levava a «Acesso negado». */
 const PERM_PAGINA: readonly [string, string, string][] = [["/client-orders", "client_orders.view", "as encomendas de cliente"],
   ["/receiving", "receiving.view", "a Receção"], ["/purchase-orders", "purchase_orders.view", "as encomendas a fornecedor"],
   ["/catalogo-custos", "services.view", "o Catálogo e custos"], ["/pessoas", "pessoas.view", "as Pessoas"]];
 const permDaPagina = (url: string): readonly [string, string, string] | null =>
   PERM_PAGINA.find(([rota]) => url === rota || url.startsWith(rota + "?") || url.startsWith(rota + "/")) ?? null;
-
-/** 09/11: os papéis do Negócio que veem a encomenda de cliente do negócio (neg_papeis_permissoes com client_orders.view). */
-const PAPEIS_VEEM_ENCOMENDAS: readonly Papel[] = ["comercial", "direcao", "financeiro", "armazem", "operacoes"];
 
 /** `vistaInicial`: a vista ao abrir sem ?vista= (a primeira página, /home, abre no Hoje). */
 
@@ -124,8 +121,8 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   // arrancaram (o Hoje do técnico, os atrasos e o Estúdio da obra erravam) e arrancar não punha o início em hoje. Com a base, liga-se.
   definirRelogioReal(!!org);
   useEffect(() => () => definirRelogioReal(false), []);
-  // 5/11: as permissões das ações (podeNeg) vêm de fn_cat_pode, a MESMA pergunta do servidor (o perfil, os Papéis no Negócio de todos os
-  // papéis da pessoa e o admin do sistema), postas no motor com `simular: false`, como na ficha da pessoa. O «A ver como» continua a
+  // 5/11: as permissões das ações (podeNeg) vêm de fn_cat_pode, a MESMA pergunta do servidor (o perfil e o admin do sistema; 17/11: o
+  // Papel no Negócio do RH já não conta), postas no motor com `simular: false`, como na ficha da pessoa. O «A ver como» continua a
   // escolher a vista e de quem é cada passo, mas já não muda o que se pode fazer. Com as reais postas, definirVerCustos é ignorado.
   // 12/11 («Simular função»): `simulados` são os códigos da função escolhida (null: as minhas, reais). Põe-nos no motor no lugar dos lidos
   // e `pode`, as rotas e o resto abaixo respondem só por eles; o que se lê e se grava na base segue as permissões reais.
@@ -146,7 +143,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   const verEncomendasPerfil = useRef(true);
   // LEITURA (carregarEncomendas): sempre a conta real, nunca a função simulada
   verEncomendasPerfil.current = permsPerfilALer || hasPermission("client_orders.view");
-  // 09/11: o que quem entrou pode ver: fn_cat_pode (o perfil, os Papéis no Negócio e o admin, como a base decide; lido em
+  // 09/11: o que quem entrou pode ver: fn_cat_pode (o perfil e o admin, como a base decide; lido em
   // usePermissoesReaisNegocio) OU o perfil da Olyvia (usePermissions). Enquanto se lê, só o perfil.
   const codigosReais = perms.leitura.k === "lidas" ? perms.leitura.codigos : null;
   const codigosLidos = simulados ?? codigosReais;
@@ -155,7 +152,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   const pode = (c: string): boolean => (simulados ? simulados.has(c) : podeReal(c));
   // 11/11: ao sair da página, o «Mudar» do impacto ao lado dos campos deixa de aparecer
   useEffect(() => () => definirGravarEfeitos(null), []);
-  // 10/11: as páginas reais (rotas da Olyvia) só contam o perfil; o Papel no Negócio não abre a rota. As ligações só aparecem com ela.
+  // 10/11: as páginas reais (rotas da Olyvia) só contam o perfil. As ligações só aparecem com ela.
   const podeRota = (c: string): boolean => (simulados ? simulados.has(c) : !permsPerfilALer && hasPermission(c));
   // ao abrir uma, só se recusa com o perfil já lido (a ler, abre; a rota decide na mesma). Num ref para o `run` e as ligações ao
   // Inventário (guardadas em useCallback/useMemo).
@@ -425,10 +422,11 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   // 28/10: a encomenda de cliente e as encomendas a fornecedor de cada negócio, da base (as emitidas no servidor)
   const carregarEncomendas = useCallback(async (lidos: readonly NegocioLido[]) => {
     if (!org) return;
-    // 09/11: quem não vê encomendas de cliente (sem client_orders.view no perfil nem um papel do negócio que as veja, ex.: o técnico)
-    // não as pede: a base recusava-as e o aviso «A encomenda de cliente não carregou» aparecia sempre. Fica sem nenhuma.
+    // 09/11: quem não vê encomendas de cliente (sem client_orders.view no perfil, ex.: o técnico) não as pede: a base recusava-as e o
+    // aviso «A encomenda de cliente não carregou» aparecia sempre. Fica sem nenhuma. 17/11: só pelo perfil (ou quem vê todos); o Papel
+    // no Negócio do RH já não as dá.
     const m = meusRef.current;
-    const veEncomendas = verEncomendasPerfil.current || !m || m.todos || m.papeis.some((p) => PAPEIS_VEEM_ENCOMENDAS.includes(p));
+    const veEncomendas = verEncomendasPerfil.current || !m || m.todos;
     if (!veEncomendas) { definirEncomendasReais(new Map()); redesenhar(); return; }
     const pares = lidos.flatMap((n) => {
       const d = S.deals.find((x) => x.id === n.linhas.negocio.numero);
@@ -508,17 +506,18 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   }, [org, permsLidas]);
   useEffect(() => aoMudarProntidao(redesenhar), [redesenhar]);
 
-  // 12/11 («Simular função»): os papéis lidos ao abrir (os do RH e, sem eles, as permissões reais), guardados para recalcular o papel de
+  // 12/11 («Simular função»): o que se leu ao abrir (a pessoa, `todos` e o Técnico; e as permissões reais), guardado para recalcular o papel de
   // abertura e os papéis escolhíveis quando muda a simulação, SEM recarregar o catálogo e os campos. null enquanto não se leram.
   const papeisBase = useRef<{ rh: MeusPapeis; codigos: ReadonlySet<string> | null } | null>(null);
-  /** Aplica os papéis (nomes, escolhíveis, `meus`) e devolve o papel de abertura. Simulando, o RH fica neutro (sem papéis, sem «todos») para
-   *  que os códigos da função decidam (comPapeisDasPermissoes não os ignora), e o Técnico vem de negocios.obra.tecnico. */
+  /** Aplica os papéis (nomes, escolhíveis, `meus`) e devolve o papel de abertura. 17/11: as vistas vêm só das permissões (papelDeAbertura,
+   *  a mesma conta a simular e com as reais). Simulando, o RH fica neutro (sem o Técnico da base, sem «todos») para que só os códigos da
+   *  função decidam, e o Técnico vem de negocios.obra.tecnico (como antes). */
   const aplicarPapeis = useCallback((base: { rh: MeusPapeis; codigos: ReadonlySet<string> | null }, sim: ReadonlySet<string> | null): { mp: MeusPapeis; papel: Papel | null } => {
     const rh: MeusPapeis = sim ? { papeis: [], pessoa: base.rh.pessoa, todos: false } : base.rh;
     const r = papelDeAbertura(rh, sim ?? base.codigos, S.role, escolhaRef.current);
     let mp = r.meus, papel = r.papel;
     if (sim && sim.has("negocios.obra.tecnico") && !mp.papeis.includes("tecnico")) { mp = { ...mp, papeis: [...mp.papeis, "tecnico"] }; papel = papel ?? "tecnico"; }
-    aplicarNomesPapeis(mp); aplicarPermissoesReais(); definirPapeisEscolhiveis(mp.todos ? null : papeisPermitidos(mp));
+    aplicarNomesPapeis(mp); aplicarPermissoesReais(); definirPapeisEscolhiveis(papeisPermitidos(mp));
     // meusRef (o que decide as LEITURAS, carregarEncomendas) fica sempre com os papéis reais, nunca os simulados
     if (!sim) meusRef.current = mp;
     setMeus(mp);
@@ -556,20 +555,18 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
     setPronto(false); setErroLer(null);
     papeisBase.current = null; gravarEfeitosRef.current = null;
     (async () => {
-      // 30/10: os papéis do RH primeiro: sem nenhum (e sem o perfil da Olyvia que vê todos), não há nada a fazer aqui
+      // 30/10: a pessoa do RH ligada à conta, `todos` (pessoas.edit, admin) e o Técnico (neg_meus_papeis; 17/11: os outros papéis saíram)
       const rh = await lerMeusPapeis(supabase, org);
       if (!vivo) return;
-      // 9/11 (Lote 1, A): sem Papel no Negócio no RH (nem pessoas.edit), os papéis vêm das permissões negocios.* do perfil (fn_cat_pode):
-      // entra e vê os passos para que tem permissão, em vez de «Não tem nenhum papel»
-      // 11/11: sem papel no RH, também quem vê todos (pessoas.edit, admin) abre no papel que as permissões dão (o Financeiro abria no
-      // Comercial); só muda o papel de abertura, o «A ver como» continua com todos. Uma escolha à mão nesta página mantém-se.
-      const codigos = rh.papeis.length === 0 ? await lerPermissoesReais(org) : null;
+      // 17/11: as vistas vêm SÓ das permissões negocios.* do perfil (fn_cat_pode); o Papel no Negócio do RH saiu. Quem vê todos
+      // (pessoas.edit, admin) abre no papel que as permissões dão; o «A ver como» continua com todos. Uma escolha à mão mantém-se.
+      const codigos = await lerPermissoesReais(org);
       if (!vivo) return;
       // 12/11: guarda o que se leu (para a simulação recalcular os papéis). O que se lê e grava aqui decide-se pelos papéis REAIS (mp);
       // se já se simula (a lista de funções chegou durante a abertura), a simulação aplica-se por cima, só no ecrã.
       papeisBase.current = { rh, codigos };
       const { mp, papel } = aplicarPapeis(papeisBase.current, null);
-      if (!papel) { setErroLer("Não tem nenhum papel no Negócio. Peça ao RH para lho dar na sua ficha (Papéis no Negócio), um cargo técnico de obra ou o perfil de técnico de obra."); return; }
+      if (!papel) { setErroLer("Não tem nenhum papel no Negócio. Peça um perfil com permissões do Negócio."); return; }
       S.role = papel;
       if (simuladosRef.current) {
         antesDeSimular.current = { escolha: escolhaRef.current, role: S.role };
@@ -931,7 +928,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   } else if (tecConta && S.tec !== tecConta) S.tec = tecConta;
   // 09/11: quem só pode ser o técnico (sem ver todos) fica sempre fixo no seu, mesmo sem técnico ligado (null: o aviso), e nunca vê o de outro
   const fixarTecnico = !verTecnicos && (!!tecConta || (!!meus && !meus.todos && S.role === "tecnico"));
-  // 09/11: cada separador só aparece a quem tem a permissão dele (perfil OU papel OU admin): o Hoje sempre; os Negócios (e a ficha) com
+  // 09/11: cada separador só aparece a quem tem a permissão dele (perfil OU admin): o Hoje sempre; os Negócios (e a ficha) com
   // pessoas.view; as Operações com negocios.obra.executar ou negocios.obra.planear. As outras vistas (que abrem páginas reais) não se tocam.
   const vistaPermitida = (v: Vista): boolean =>
     v === "negocios" || v === "negocio" ? pode("pessoas.view")
@@ -967,7 +964,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
           <span className="hidden text-muted-foreground sm:inline">A ver como</span>
           <select aria-label="A ver como" className="min-h-10 max-w-[60vw] rounded-lg border border-input bg-card px-3 sm:max-w-none" value={S.role}
             onChange={(e) => run(() => { S.role = escolhaRef.current = e.target.value as Papel; })}>
-            {(meus ? papeisPermitidos(meus) : (Object.keys(PAPEIS) as Papel[])).map((p) => <option key={p} value={p}>{PAPEIS[p].n}</option>)}
+            {(meus ? papeisPermitidos(meus) : VISTAS_NEGOCIO).map((p) => <option key={p} value={p}>{PAPEIS[p].n}</option>)}
           </select>
         </label>}
         {/* 12/11: «Simular função» (só no ecrã): escolhe uma função da organização e o ecrã responde só com as permissões dela. Só depois de a

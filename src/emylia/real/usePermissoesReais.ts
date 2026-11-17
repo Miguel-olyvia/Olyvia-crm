@@ -11,8 +11,8 @@ import { supabase } from "@/integrations/supabase/client";
 /**
  * As permissões de quem entrou, lidas por `fn_cat_pode(org, código)`: a MESMA função com que o servidor decide nas funções do Negócio
  * (neg_guardar_negocio, obra_guardar_negocio, neg_perder_negocio, …; 20270101340000 e 20270105200000) e que dá EXECUTE a authenticated.
- * Junta o perfil da Olyvia (has_anew_permission_in_org), o Papel no Negócio do RH (fn_neg_papel_permite, de TODOS os papéis da pessoa) e
- * o admin do sistema. Antes lia-se `fn_neg_tem_permissao_org`, que ignora o Papel no Negócio e o admin do sistema e escondia ações que o
+ * Junta o perfil da Olyvia (has_anew_permission_in_org) e o admin do sistema (17/11: o Papel no Negócio do RH, fn_neg_papel_permite,
+ * saiu). Antes lia-se `fn_neg_tem_permissao_org`, que ignora o Papel no Negócio e o admin do sistema e escondia ações que o
  * servidor deixa fazer (3/11). O `tem_permissao(org, perm)` que o código da Emylia pergunta não existe nesta base. `null`: a leitura falhou.
  */
 export async function lerPermissoesReais(org: string): Promise<ReadonlySet<string> | null> {

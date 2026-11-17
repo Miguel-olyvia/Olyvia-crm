@@ -1,44 +1,53 @@
-// 30/10 (20270101340000): os papéis do Negócio vêm do RH. O "A ver como" só mostra os da pessoa (ou todos, a quem vê todos), a página abre
+// 30/10 (20270101340000): os papéis do Negócio. 17/11: o Papel no Negócio do RH saiu: as vistas vêm só das permissões do perfil (e o
+// Técnico da base, como antes); o Jurídico não aparece. O "A ver como" só mostra os da pessoa (ou todos, a quem vê todos), a página abre
 // no primeiro papel da pessoa, e o nome de quem faz o papel é o da pessoa do RH. E o plano da obra: um técnico do RH com vários ofícios
 // conta em todos (antes só no primeiro, e o Diogo, canalizador e montador, ficava fora das tarefas de um deles), e as tarefas por atribuir
 // de um plano por aprovar ficam com o técnico que o RH já tem.
 import { afterEach, describe, expect, it } from "vitest";
 import { PAPEIS, type Plano } from "../motor";
+import type { MeusPapeis } from "./papeisReal";
 import { podeNeg } from "../permissoes";
 import { RESPONSAVEL_OBRA, equipaDaObra, equipamentosDaObra } from "../obraOps";
 import { RESPONSAVEIS_OBRA } from "../campos";
 import { TECNICOS, tecnicosIniciais, usarTecnicos, type FichaTecnico } from "../equipa/tecnicos";
 import { atribuirPorAtribuir, tecnicosDoOficio } from "../preparacaoObra";
 import { CODIGO_BASE } from "../permissoes";
-import { aplicarGestoresObra, aplicarNomesPapeis, aplicarPermissoesReais, definirResponsavelObra, papeisDoLido, papeisPermitidos, papelDeAbertura, papelInicial, papelMaisEspecifico, reporNomesPapeis } from "./papeisReal";
+import { aplicarGestoresObra, aplicarNomesPapeis, aplicarPermissoesReais, comPapeisDasPermissoes, definirResponsavelObra, papeisDasPermissoes, papeisDoLido, papeisPermitidos, papelDeAbertura, papelInicial, papelMaisEspecifico, reporNomesPapeis, VISTAS_NEGOCIO } from "./papeisReal";
 
 afterEach(() => { reporNomesPapeis(); usarTecnicos(tecnicosIniciais()); });
 
 describe("os papéis de quem entrou", () => {
-  it("limpa o que a base devolve: papéis desconhecidos saem, sem pessoa fica null", () => {
+  it("limpa o que a base devolve: 17/11 só fica o Técnico (os papéis do RH já não contam), sem pessoa fica null", () => {
     expect(papeisDoLido({ papeis: ["financeiro", "x", "tecnico", "financeiro"], pessoa: null, todos: false }))
-      .toEqual({ papeis: ["financeiro", "tecnico"], pessoa: null, todos: false });
+      .toEqual({ papeis: ["tecnico"], pessoa: null, todos: false });
+    expect(papeisDoLido({ papeis: ["comercial", "direcao", "financeiro", "armazem", "operacoes", "juridico"], pessoa: null, todos: false }))
+      .toEqual({ papeis: [], pessoa: null, todos: false });
     expect(papeisDoLido(null)).toEqual({ papeis: [], pessoa: null, todos: false });
   });
 
-  it("o A ver como: só os papéis da pessoa, pela ordem do circuito; quem vê todos tem os sete", () => {
-    const m = papeisDoLido({ papeis: ["operacoes", "financeiro"], pessoa: { id: "p", nome: "Inês Lourenço" }, todos: false });
+  it("o A ver como: só os papéis da pessoa, pela ordem do circuito; quem vê todos tem os seis (sem o Jurídico)", () => {
+    const m: MeusPapeis = { papeis: ["operacoes", "financeiro"], pessoa: { id: "p", nome: "Inês Lourenço" }, todos: false };
     expect(papeisPermitidos(m)).toEqual(["financeiro", "operacoes"]);
-    expect(papeisPermitidos({ ...m, todos: true })).toHaveLength(Object.keys(PAPEIS).length);
+    expect(papeisPermitidos({ ...m, todos: true })).toEqual(["comercial", "direcao", "financeiro", "armazem", "operacoes", "tecnico"]);
+    expect(papeisPermitidos({ ...m, todos: true })).not.toContain("juridico");
+    expect(papeisPermitidos({ ...m, papeis: ["juridico", "comercial"] })).toEqual(["comercial"]);
+    expect(VISTAS_NEGOCIO).toHaveLength(Object.keys(PAPEIS).length - 1);
   });
 
   it("abre no papel que já tinha se é dela; senão no primeiro que não é o técnico; sem papéis, em nenhum", () => {
-    const fin = papeisDoLido({ papeis: ["financeiro"], todos: false });
+    const fin: MeusPapeis = { papeis: ["financeiro"], pessoa: null, todos: false };
     expect(papelInicial(fin, "comercial")).toBe("financeiro");
     expect(papelInicial(fin, "financeiro")).toBe("financeiro");
-    expect(papelInicial(papeisDoLido({ papeis: ["tecnico", "operacoes"], todos: false }), "comercial")).toBe("operacoes");
+    expect(papelInicial({ ...fin, papeis: ["tecnico", "operacoes"] }, "comercial")).toBe("operacoes");
     expect(papelInicial(papeisDoLido({ papeis: ["tecnico"], todos: false }), "comercial")).toBe("tecnico");
     expect(papelInicial(papeisDoLido({ papeis: [], todos: false }), "comercial")).toBeNull();
     expect(papelInicial(papeisDoLido({ papeis: [], todos: true }), "comercial")).toBe("comercial");
+    // quem vê todos e estava no Jurídico (o protótipo) não abre nele
+    expect(papelInicial(papeisDoLido({ papeis: [], todos: true }), "juridico")).toBe("comercial");
   });
 
   it("o nome do papel é o da pessoa nos papéis dela, e só o papel nos outros (sem a Sandra do exemplo); ao sair volta", () => {
-    aplicarNomesPapeis(papeisDoLido({ papeis: ["financeiro"], pessoa: { id: "p", nome: "Inês Lourenço" }, todos: true }));
+    aplicarNomesPapeis({ papeis: ["financeiro"], pessoa: { id: "p", nome: "Inês Lourenço" }, todos: true });
     expect(PAPEIS.financeiro.n).toBe("Inês · Financeiro");
     expect(PAPEIS.armazem.n).toBe("Compras e armazém");
     expect(PAPEIS.operacoes.n).toBe("Gestor de obra");
@@ -56,7 +65,7 @@ describe("o papel com que a página abre", () => {
   it("financeiro sem papel no RH e com todos (pessoas.edit) → Financeiro; o A ver como continua com todos", () => {
     const r = papelDeAbertura(semRH(true), cods("finance.validate_payment", "finance.invoice"), "comercial");
     expect(r.papel).toBe("financeiro");
-    expect(papeisPermitidos(r.meus)).toHaveLength(Object.keys(PAPEIS).length);
+    expect(papeisPermitidos(r.meus)).toEqual([...VISTAS_NEGOCIO]);
     // e sem todos, também
     expect(papelDeAbertura(semRH(false), cods("finance.validate_payment"), "comercial").papel).toBe("financeiro");
   });
@@ -71,10 +80,30 @@ describe("o papel com que a página abre", () => {
     expect(papelDeAbertura(semRH(true), cods("visita.gerir"), "financeiro").papel).toBe("comercial");
   });
 
-  it("com papel RH «Comercial» → Comercial, as permissões não contam", () => {
+  it("17/11: um papel RH «Comercial» que a base ainda devolva não conta: só as permissões", () => {
     const rh = papeisDoLido({ papeis: ["comercial"], todos: false });
-    expect(papelDeAbertura(rh, cods("finance.validate_payment"), "comercial").papel).toBe("comercial");
-    expect(papelDeAbertura({ ...rh, todos: true }, null, "comercial").papel).toBe("comercial");
+    const r = papelDeAbertura(rh, cods("finance.validate_payment"), "comercial");
+    expect(r.papel).toBe("financeiro");
+    expect(papeisPermitidos(r.meus)).toEqual(["financeiro"]);
+    // sem permissões nenhumas, o papel do RH sozinho não abre a página
+    expect(papelDeAbertura(rh, new Set(), "comercial").papel).toBeNull();
+    expect(papelDeAbertura(rh, null, "comercial").papel).toBeNull();
+  });
+
+  it("o Técnico da base fica como estava, e junta-se às vistas das permissões", () => {
+    const rh = papeisDoLido({ papeis: ["tecnico"], pessoa: { id: "p", nome: "Diogo" }, todos: false });
+    expect(papelDeAbertura(rh, new Set(), "comercial")).toMatchObject({ papel: "tecnico", meus: { papeis: ["tecnico"] } });
+    expect(papelDeAbertura(rh, null, "comercial").papel).toBe("tecnico");
+    const r = papelDeAbertura(rh, cods("obra.planear"), "comercial");
+    expect(r.papel).toBe("operacoes");
+    expect(papeisPermitidos(r.meus)).toEqual(["operacoes", "tecnico"]);
+  });
+
+  it("o Jurídico nunca aparece pelas permissões (não tem permissão própria), mesmo com contrato.editar", () => {
+    const todas = new Set(Object.values(CODIGO_BASE));
+    expect(papeisDasPermissoes(todas)).not.toContain("juridico");
+    expect(papeisDasPermissoes(cods("contrato.editar"))).toEqual([]);
+    expect(comPapeisDasPermissoes({ papeis: ["juridico"], pessoa: null, todos: false }, todas).papeis).not.toContain("juridico");
   });
 
   it("sem nada → como hoje: sem todos, nenhum papel; com todos, o que já estava", () => {

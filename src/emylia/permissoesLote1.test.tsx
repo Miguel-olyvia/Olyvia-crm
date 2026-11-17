@@ -452,11 +452,13 @@ describe("A · os papéis que as permissões dão a quem não tem Papel no Negó
     expect(m.papeis).toEqual(["financeiro"]);
     expect(papelInicial(m, "comercial")).toBe("financeiro");
   });
-  it("quem já tem papel, ou vê todos, fica igual; sem nada (ou a leitura falhou) continua sem papel", () => {
+  it("17/11: as vistas são sempre as das permissões (um papel RH já não conta); sem nada (ou a leitura falhou) continua sem papel", () => {
     const comPapel: MeusPapeis = { papeis: ["armazem"], pessoa: null, todos: false };
-    expect(comPapeisDasPermissoes(comPapel, new Set(["negocios.obra.planear"]))).toBe(comPapel);
+    expect(comPapeisDasPermissoes(comPapel, new Set(["negocios.obra.planear"])).papeis).toEqual(["operacoes"]);
     const todos: MeusPapeis = { papeis: [], pessoa: null, todos: true };
-    expect(comPapeisDasPermissoes(todos, new Set(["negocios.obra.planear"]))).toBe(todos);
+    expect(comPapeisDasPermissoes(todos, new Set(["negocios.obra.planear"]))).toEqual({ ...todos, papeis: ["operacoes"] });
+    // o Técnico da base fica
+    expect(comPapeisDasPermissoes({ ...comPapel, papeis: ["tecnico"] }, new Set(["negocios.obra.planear"])).papeis).toEqual(["operacoes", "tecnico"]);
     expect(papelInicial(comPapeisDasPermissoes(sem, new Set()), "comercial")).toBeNull();
     expect(papelInicial(comPapeisDasPermissoes(sem, null), "comercial")).toBeNull();
   });
