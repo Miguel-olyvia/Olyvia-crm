@@ -134,7 +134,31 @@ export const CATALOGO: Produto[] = [
   P("pav-pedra-cr", "pavimento", "Pedra Creme 60 x 60", "Pedra", ["bege"], 36, 28),
 ];
 
-export const produto = (id: string | undefined): Produto | undefined => (id ? CATALOGO.find((x) => x.id === id) : undefined);
+// 17/11 (Rúben: «ligar o catálogo de produtos à lista do Estúdio da visita»): com sessão, o Estúdio usa os produtos verdadeiros
+// da organização (catalogoRealDoEstudio.ts, já no formato de Produto). Numa categoria com produtos verdadeiros, só esses; sem eles
+// (sem sessão, ou uma categoria que o catálogo ainda não tem), fica o catálogo de teste. Os projetos antigos (ids de teste) abrem.
+let REAIS: Produto[] = [];
+let REAIS_ID = new Map<string, Produto>();
+let REAIS_CAT = new Map<Categoria, Produto[]>();
+let versaoReais = 0;
+const ouvintesReais = new Set<() => void>();
+/** Passa a usar estes produtos verdadeiros (vazio = só o catálogo de teste). */
+export function usarProdutosReais(lista: readonly Produto[]): void {
+  REAIS = [...lista];
+  REAIS_ID = new Map(REAIS.map((p) => [p.id, p]));
+  REAIS_CAT = new Map();
+  for (const p of REAIS) REAIS_CAT.set(p.cat, [...(REAIS_CAT.get(p.cat) ?? []), p]);
+  versaoReais++;
+  ouvintesReais.forEach((f) => f());
+}
+export const produtosReais = (): readonly Produto[] => REAIS;
+/** Para o React redesenhar quando os produtos verdadeiros chegam (useSyncExternalStore). */
+export const ouvirProdutosReais = (f: () => void) => { ouvintesReais.add(f); return () => { ouvintesReais.delete(f); }; };
+export const versaoProdutosReais = () => versaoReais;
+/** Os produtos de onde se escolhe numa categoria: os verdadeiros, se houver; senão, os de teste. */
+const daCategoria = (cat: Categoria): Produto[] => REAIS_CAT.get(cat) ?? CATALOGO.filter((p) => p.cat === cat);
+
+export const produto = (id: string | undefined): Produto | undefined => (id ? REAIS_ID.get(id) ?? CATALOGO.find((x) => x.id === id) : undefined);
 
 /** O estilo do cliente: as cores de sempre, e as exceções por categoria («o resto cinza, o móvel em madeira»). */
 export interface Estilo { cores: Cor[]; porCategoria: Partial<Record<Categoria, Cor[]>> }
@@ -151,7 +175,7 @@ export function combina(p: Produto, e: Estilo): number {
 
 /** Os produtos de uma categoria, os que combinam primeiro (e, entre iguais, o mais barato). */
 export function produtosDe(cat: Categoria, e: Estilo, todos = false): Produto[] {
-  return CATALOGO.filter((p) => p.cat === cat && (todos || combina(p, e) > 0)).sort((a, b) => combina(b, e) - combina(a, e) || a.preco - b.preco);
+  return daCategoria(cat).filter((p) => todos || combina(p, e) > 0).sort((a, b) => combina(b, e) - combina(a, e) || a.preco - b.preco);
 }
 
 /** O que melhor combina, ou nada (sem nenhum que combine, não se escolhe sozinho). */

@@ -1,0 +1,153 @@
+// 17/11 (Rúben: «depois ligar esse catálogo de produtos à lista de produtos que está disponível no Estúdio da visita»). Com sessão,
+// o Estúdio deixa o catálogo de teste e mostra os produtos verdadeiros da organização (os da Mudelar, importados pelo Miguel), no
+// mesmo formato (Produto de catalogoFake.ts), para o resto do Estúdio (a planta, o estilo, o 3D, a proposta) não mudar:
+//  · cada tipo de peça lê as suas subcategorias (CATEGORIAS_REAIS), por páginas do servidor (cat_ler_produtos_pagina): uma geral e
+//    uma por cada cor do estilo (branco, preto, cinza, madeira, bege), para haver por onde escolher em qualquer estilo;
+//  · a cor sai do nome e dos atributos («BRANCO MATE», «Negro», «Antracite», «Carvalho»…), as medidas do nome («70x120»,
+//    «100x81x45»), o preço é o PVP; a altura no 3D e a instalação de referência vêm da peça de teste da mesma categoria (a instalação
+//    verdadeira é o serviço ligado ao produto, que entra pelo plano e pelo orçamento: servicosDoCatalogo.ts).
+// Sem sessão, ou se a leitura falhar, fica o catálogo de teste.
+import { useEffect, useState, useSyncExternalStore } from "react";
+import { useCompanyOpcional } from "@/contexts/CompanyContext";
+import { supabase } from "@/integrations/supabase/client";
+import { lerProdutosPagina, SEM_FILTRO_SERVIDOR, type LinhaPaginaProduto } from "@/emylia/real/produtosPaginados";
+import { CATALOGO, CORES, ouvirProdutosReais, produtosReais, usarProdutosReais, versaoProdutosReais, type Categoria, type Cor, type Produto } from "./catalogoFake";
+
+/** As subcategorias da Mudelar de cada tipo de peça do Estúdio (pelo nome, sem acentos nem maiúsculas). */
+export const CATEGORIAS_REAIS: Partial<Record<Categoria, string[]>> = {
+  base: ["Bases Duche"], banheira: ["Banheiras"], sanita: ["Sanitas"], bide: ["Bidés"], movel: ["Móveis de lavatório"],
+  coluna: ["Colunas"], espelho: ["Espelhos"], toalheiro: ["Toalheiros"], coluna_duche: ["Colunas Duche"], resguardo: ["Resguardos de Duche"],
+  torneira: ["Torneira Lavatório", "Torneira Pé Alto"], revestimento: ["Cerâmico", "Cerâmico Laminado"], pavimento: ["Porcelânico", "SPC"],
+  lava: ["Cubas compósito", "Cubas inox"], placa: ["Placas"], forno: ["Fornos"], frigorifico: ["Frigoríficos"], maquina: ["Máquinas lavar loiça"],
+  exaustor: ["Exaustores"], armario: ["Armários de Coluna"],
+};
+/** Uma palavra para procurar cada cor (a pesquisa do servidor também apanha os atributos). */
+const PROCURA_COR: Record<Cor, string> = { branco: "branco", preto: "preto", cinza: "cinza", madeira: "madeira", bege: "bege" };
+
+export const semAcento = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim();
+
+const COR_PALAVRAS: [Cor, RegExp][] = [
+  ["branco", /\b(branc|blanc|bianc|white)/],
+  ["preto", /\b(pret|negr|black|nero)/],
+  ["cinza", /\b(cinz|gris|grey|gray|antracit|grafit|cimento|cement|concret|crom|inox|aco\b|acero|niquel|titani|gun ?metal)/],
+  ["madeira", /\b(madeir|carvalh|nogueir|nogal|roble|oak|wood|freixo|fresno|cerejeir|walnut|teca|wengue|olmo)/],
+  ["bege", /\b(bege|beige|beje|creme|crema|marfil|arena|areia|sand|taupe|cappuc|capuc|linho|ouro|oro\b|dourad|cobre|rosa gold)/],
+];
+/** As cores de um produto pelo nome e pelos atributos («SANITA GLAMIC BTW CINZA MATE» → cinza). */
+export function coresDoTexto(texto: string): Cor[] {
+  const t = semAcento(texto);
+  return COR_PALAVRAS.filter(([, rx]) => rx.test(t)).map(([c]) => c);
+}
+/** Um tom mais fiel do que a cor do estilo, para o desenho e o 3D (dourado, cobre, cromado). */
+function hexDoTexto(texto: string, cores: Cor[]): string {
+  const t = semAcento(texto);
+  if (/\b(ouro|oro|dourad)/.test(t)) return "#c9a24a";
+  if (/\bcobre\b/.test(t)) return "#b87333";
+  if (/\brosa gold\b/.test(t)) return "#d8a39d";
+  if (/\b(crom|inox|niquel)/.test(t) && !cores.includes("preto") && !cores.includes("branco")) return "#c0c4c8";
+  return cores.length ? CORES[cores[0]].hex : "#d9d9d6";
+}
+
+/** As medidas ditas no nome («70x120», «100X81X45», «60 x 60 cm», «1200x2600x5,6» em mm). Em cm. */
+export function medidasDoTexto(texto: string): number[] | null {
+  const m = texto.match(/(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)(?:\s*[xX×]\s*(\d+(?:[.,]\d+)?))?/);
+  if (!m) return null;
+  let v = [m[1], m[2], m[3]].filter(Boolean).map((x) => Number(x!.replace(",", ".")));
+  if (v.some((x) => !Number.isFinite(x) || x <= 0)) return null;
+  if (Math.max(...v) > 400) v = v.map((x) => x / 10); // em milímetros
+  return v.map((x) => Math.round(x));
+}
+/** A largura e o fundo na planta, pelo tipo de peça e pelas medidas do nome. */
+function tamanhoNaPlanta(cat: Categoria, md: number[] | null): { w?: number; h?: number } {
+  if (!md || md.length < 2) return {};
+  const [a, b, c] = md;
+  if (cat === "base" || cat === "banheira" || cat === "resguardo") return { w: Math.max(a, b), h: Math.min(a, b) };
+  if ((cat === "movel" || cat === "coluna" || cat === "armario") && c) return { w: a, h: c };
+  if (cat === "movel" || cat === "espelho" || cat === "toalheiro") return { w: a };
+  return {};
+}
+
+/** Uma linha do servidor como Produto do Estúdio. Null se não serve (sem preço de venda, inativo). */
+export function produtoDaLinha(l: LinhaPaginaProduto, cat: Categoria): Produto | null {
+  const pvp = l.pvp ?? 0;
+  if (!(pvp > 0) || l.ativo === false || (l as { estado?: string }).estado === "draft") return null;
+  const texto = `${l.nome} ${l.atributos_resumo ?? ""}`;
+  const cores = coresDoTexto(texto);
+  const molde = CATALOGO.find((p) => p.cat === cat);
+  const un = /m2|m²/i.test(l.unidade ?? "") || cat === "revestimento" || cat === "pavimento" ? "m²" : "un";
+  return {
+    id: l.id, cat, n: l.nome.replace(/\s+/g, " ").trim(), colecao: l.modelo ?? l.marca ?? "",
+    cores, hex: hexDoTexto(texto, cores), preco: Math.round(pvp * 100) / 100, un,
+    inst: molde?.inst ?? 0,
+    ...tamanhoNaPlanta(cat, medidasDoTexto(l.nome)),
+    ...(molde?.z0 !== undefined ? { z0: molde.z0, z1: molde.z1 } : {}),
+    ...(l.atributos_resumo ? { destaque: l.atributos_resumo.slice(0, 120) } : {}),
+  };
+}
+
+/** Faz `n` tarefas de cada vez. */
+async function aos<T>(tarefas: (() => Promise<T>)[], n: number): Promise<T[]> {
+  const out: T[] = new Array(tarefas.length);
+  let i = 0;
+  await Promise.all(Array.from({ length: Math.min(n, tarefas.length) }, async () => {
+    while (i < tarefas.length) { const k = i++; out[k] = await tarefas[k](); }
+  }));
+  return out;
+}
+
+/** Os ids das subcategorias pelo nome (product_categories da organização). */
+async function idsDasSubcategorias(org: string): Promise<Map<string, string>> {
+  const { data, error } = await (supabase as unknown as { from: (t: string) => { select: (c: string) => { eq: (k: string, v: string) => Promise<{ data: { id: string; name: string }[] | null; error: unknown }> } } })
+    .from("product_categories").select("id,name").eq("organization_id", org);
+  if (error || !data) return new Map();
+  return new Map(data.map((c) => [semAcento(c.name), c.id]));
+}
+
+/** Os produtos verdadeiros do Estúdio, de todas as categorias. */
+export async function carregarProdutosDoEstudio(org: string): Promise<Produto[]> {
+  const ids = await idsDasSubcategorias(org);
+  const pedidos: { cat: Categoria; sub: string; q: string }[] = [];
+  for (const [cat, subs] of Object.entries(CATEGORIAS_REAIS) as [Categoria, string[]][]) {
+    for (const nome of subs) {
+      const sub = ids.get(semAcento(nome));
+      if (!sub) continue;
+      pedidos.push({ cat, sub, q: "" });
+      for (const c of Object.values(PROCURA_COR)) pedidos.push({ cat, sub, q: c });
+    }
+  }
+  const respostas = await aos(pedidos.map((p) => async () => {
+    const r = await lerProdutosPagina(org, { ...SEM_FILTRO_SERVIDOR, subcategoria: p.sub, q: p.q }, 1);
+    return { p, linhas: r.ok ? r.v.produtos : [] };
+  }), 8);
+  const vistos = new Map<string, Produto>();
+  for (const { p, linhas } of respostas) {
+    for (const l of linhas) {
+      if (vistos.has(l.id)) continue;
+      // as colunas de duche: só as colunas (os braços, os pratos e os chuveiros de encastre vão com elas)
+      if (p.cat === "coluna_duche" && !/^\s*coluna/i.test(l.nome)) continue;
+      const x = produtoDaLinha(l, p.cat);
+      if (x) vistos.set(l.id, x);
+    }
+  }
+  return [...vistos.values()];
+}
+
+/** No Estúdio: com sessão, carrega os produtos verdadeiros da organização (uma vez por organização) e redesenha quando chegam. */
+export function useProdutosReaisNoEstudio(): { n: number; aLer: boolean } {
+  const org = useCompanyOpcional()?.activeCompany?.id ?? null;
+  const [aLer, setALer] = useState(false);
+  useSyncExternalStore(ouvirProdutosReais, versaoProdutosReais);
+  useEffect(() => {
+    if (!org || jaLido === org) return;
+    let vivo = true;
+    setALer(true);
+    carregarProdutosDoEstudio(org)
+      .then((lista) => { if (!vivo) return; if (lista.length) { jaLido = org; usarProdutosReais(lista); } })
+      .catch(() => { /* fica o catálogo de teste */ })
+      .finally(() => { if (vivo) setALer(false); });
+    return () => { vivo = false; };
+  }, [org]);
+  return { n: produtosReais().length, aLer };
+}
+/** A organização cujos produtos já estão carregados (o Estúdio abre e fecha várias vezes na mesma visita). */
+let jaLido: string | null = null;

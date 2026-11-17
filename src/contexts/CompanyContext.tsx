@@ -395,3 +395,8 @@ export function useCompany() {
   }
   return context;
 }
+
+/** 17/11: como useCompany, mas sem CompanyProvider devolve null em vez de rebentar (o Estúdio também abre sozinho, sem sessão). */
+export function useCompanyOpcional(): CompanyContextType | null {
+  return useContext(CompanyContext) ?? null;
+}

@@ -12,6 +12,9 @@
 -- Ficam sem serviço (de propósito): os componentes das colunas de duche (braços, pratos, chuveiros de encastre: vão com a coluna),
 -- as placas de acionamento (vão com a sanita), os termoacumuladores (não há serviço) e os armários sem medida.
 -- Só mexe nos produtos ainda sem serviço: pode correr-se outra vez.
+-- 17/11 (tarde): também as torneiras e misturadoras (lavatório, pé alto e sifões → torneira de lavatório; bidé; banheira; encastre;
+-- misturadoras → torneira de cozinha) e os revestimentos (cerâmico e laminado → parede; porcelânico → pavimento; SPC; rodapés)
+-- que o Miguel importou no mesmo dia. Corrido outra vez, liga só esses (os outros já têm serviço).
 
 with org as (select '3242e925-da26-459a-8258-be04d904e355'::uuid id),
 regras(sub, padrao, chave, ordem) as (values
@@ -50,7 +53,22 @@ regras(sub, padrao, chave, ordem) as (values
   ('Exaustores', null, 'c30', 9), ('Fornos', null, 'c30', 9), ('Frigoríficos', null, 'c30', 9), ('Garrafeira', null, 'c30', 9),
   ('Máquinas lavar & secar roupa', null, 'c30', 9), ('Máquinas lavar loiça', null, 'c30', 9), ('Máquinas lavar roupa', null, 'c30', 9),
   ('Máquinas secar roupa', null, 'c30', 9), ('Micro-ondas', null, 'c30', 9),
-  ('Ventax', null, 'c29', 9)
+  ('Ventax', null, 'c29', 9),
+  -- 17/11 (as importações do Miguel do mesmo dia): Torneiras & Misturadoras
+  ('Torneira Lavatório', null, 'c18', 9), ('Torneira Pé Alto', null, 'c18', 9), ('Sifões Lavatório', null, 'c18', 9),
+  ('Torneira Bidé', null, 'c27', 9),
+  ('Torneira Banheira', 'ch[aã]o', 's-moitcb', 1), ('Torneira Banheira', null, 's-moitbf', 9),
+  ('Torneira Encastre', null, 's-moitle', 9),
+  -- não há serviço de torneira de duche: a mais parecida é a de banheira fixa (misturadora de parede, a mesma montagem)
+  ('Torneira Duche', null, 's-moitbf', 9),
+  ('Misturadoras Monocomando', null, 'c39', 9), ('Misturadoras Monocomando Abatível', null, 'c39', 9),
+  ('Misturadoras Monocomando Extraível', null, 'c39', 9), ('Misturadoras Monocomando Flexível', null, 'c39', 9),
+  ('Misturadoras Monocomando Giratória', null, 'c39', 9),
+  -- Revestimentos (por m²): parede, pavimento, SPC; os rodapés por ml
+  ('Cerâmico', 'rodap', 'c40', 0), ('Cerâmico', '\mpav\M', 'c6', 1), ('Cerâmico', null, 'c4', 9),
+  ('Cerâmico Laminado', 'rodap', 'c40', 0), ('Cerâmico Laminado', null, 'c4', 9),
+  ('Porcelânico', 'rodap', 'c40', 0), ('Porcelânico', '\mrev\M', 'c4', 1), ('Porcelânico', null, 'c6', 9),
+  ('SPC', 'rodap', 'c40', 0), ('SPC', null, 's-moipspc', 9)
 ),
 pelo_nome_subs(sub) as (values ('Armários Inferiores'), ('Armários superiores'), ('Armários de Coluna'), ('Acessórios de Cozinha'),
   ('Cozinha Completa - Projetos'), ('Puxadores'), ('Mobiliário de Roupeiros')),
@@ -72,7 +90,9 @@ nome as (
 ),
 regra as (
   select distinct on (pr.id) pr.id, s.id sid from prod pr
-  join regras r on r.sub = pr.sub and (r.padrao is null or pr.name ~* r.padrao)
+  -- a subcategoria comparada sem acentos nem maiúsculas («Flexivel» = «Flexível»)
+  join regras r on translate(lower(r.sub), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc') = translate(lower(pr.sub), 'áàâãäéèêëíìîïóòôõöúùûüç', 'aaaaaeeeeiiiiooooouuuuc')
+    and (r.padrao is null or pr.name ~* r.padrao)
   join svc s on s.chave = r.chave
   order by pr.id, r.ordem
 ),
