@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 
-import { comMaoDeObraDoServico, coresDoTexto, medidasDoTexto, produtoDaLinha } from "./catalogoRealDoEstudio";
+import { bateComPesquisa, comMaoDeObraDoServico, coresDoTexto, medidasDoTexto, produtoDaLinha } from "./catalogoRealDoEstudio";
 import { melhorPara, produto, produtosDe, usarProdutosReais, type Estilo } from "./catalogoFake";
 import type { LinhaPaginaProduto } from "@/emylia/real/produtosPaginados";
 
@@ -54,6 +54,17 @@ describe("17/11 (Rúben: «a mão de obra a vir do serviço ligado»)", () => {
       new Map([["s1", { n: "Instalação de Mobiliário WC", preco: 85.5 }]]));
     expect(r[0]).toMatchObject({ inst: 171, instServico: "Instalação de Mobiliário WC" });
     expect(r[1]).toEqual(b);
+  });
+});
+
+describe("17/11 (Rúben: «se clico em sanita, não posso pesquisar por sanitas»): a pesquisa", () => {
+  it("todos os termos, pelo nome, o modelo ou os atributos, sem acentos nem maiúsculas", () => {
+    const p = produtoDaLinha(linha("SANITA GLAMIC BTW CINZA MATE", { atributos_resumo: "Cor: Cinza · Tonalidade: Mate" }), "sanita")!;
+    expect(bateComPesquisa(p, "glamic")).toBe(true);
+    expect(bateComPesquisa(p, "sanita cinza")).toBe(true);
+    expect(bateComPesquisa(p, "Glámic  mate")).toBe(true);
+    expect(bateComPesquisa(p, "suspensa")).toBe(false);
+    expect(bateComPesquisa(p, "")).toBe(true);
   });
 });
 
