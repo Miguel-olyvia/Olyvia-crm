@@ -273,3 +273,11 @@ export function nomeCurtoTarefa(n: string): string {
 export const NOME_SEGURANCA: Record<string, string> = {
   seguro: "seguro de responsabilidade civil", pss: "plano de segurança e saúde", condominio: "aviso ao condomínio", via: "licença de ocupação da via pública",
 };
+
+/** 17/11: a obra em curso sem nada para hoje e com as tarefas por fazer mais à frente (arrancou antes do plano): pode adiantar-se (motor.adiantarPlano). */
+export function adiantavel(p: { dia: number; tasks: { dia: number; exec?: { estado: EstadoExec } }[] }): boolean {
+  const est = (t: { exec?: { estado: EstadoExec } }) => t.exec?.estado ?? "por fazer";
+  const pf = p.tasks.filter((t) => est(t) === "por fazer");
+  if (!pf.length || p.tasks.some((t) => est(t) === "em curso")) return false;
+  return Math.min(...pf.map((t) => t.dia)) > p.dia;
+}

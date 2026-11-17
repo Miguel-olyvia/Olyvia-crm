@@ -4025,6 +4025,20 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (relogioReal && d.obra.plano!.origem === "orcamento") arrancarHoje(d.obra.plano!);
       d.obra.plano!.estado = "em curso"; log(d, "Obra arrancou"); avisar({ msg: "Obra em curso", sub: "Os técnicos registam as horas na app", kind: "ok" });
     },
+    /** 17/11 (A-Z na Mudelar: a obra arrancou antes do plano e as tarefas ficaram nas datas antigas): as tarefas por fazer passam a começar
+     *  hoje, pela mesma ordem e duração (as já começadas ficam). As Operações veem os conflitos com outras obras como sempre. */
+    adiantarPlano(id: number) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado !== "em curso") return;
+      const porFazer = p.tasks.filter((t) => !t.exec);
+      if (!porFazer.length) return;
+      const k = Math.min(...porFazer.map((t) => t.dia)) - p.dia;
+      if (!(k > 0)) return;
+      for (const t of porFazer) t.dia -= k;
+      log(d, `Plano adiantado: as tarefas por fazer começam hoje (${k} ${k === 1 ? "dia útil" : "dias úteis"} mais cedo)`);
+      avisar({ msg: "Plano adiantado", sub: "As tarefas por fazer começam hoje, pela mesma ordem", kind: "ok" });
+    },
     fimObra(id: number) {
       // 9/11 (Lote 1, F): como o servidor (obra_guardar_negocio), encerrar muda o estado da obra: pede também negocios.obra.planear
       if (!exigePerm("obra.fechar") || !exigePerm("obra.planear")) return;

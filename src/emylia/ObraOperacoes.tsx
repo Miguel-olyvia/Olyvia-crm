@@ -19,7 +19,7 @@ import { entregaTarde, faltaParaArrancar, inicioDoPlano, rotuloDia, semEncomenda
 import { diasDasHoras, diferencas, fimDe, inicioMinimo, mexida } from "./ajustesPlano";
 import { HORAS_DIA } from "./ganttOrcamento";
 import {
-  RESPONSAVEL_OBRA, ROTULO_EXEC, custoHoraDe, equipaDaObra, equipamentosDaObra, estadoDe, fotoExemplo,
+  RESPONSAVEL_OBRA, ROTULO_EXEC, adiantavel, custoHoraDe, equipaDaObra, equipamentosDaObra, estadoDe, fotoExemplo,
   iniciais, materiaisPorFase, nomeCurtoTarefa, servicosDaObra, porValidar, progresso, quandoEquip, seguranca, tarefasDoDia, type EntradaDiario, type EstadoExec, type EstadoMat,
 } from "./obraOps";
 import { custoObra } from "./custoObra";
@@ -706,6 +706,11 @@ function Agora({ ctx, d, irPara, verDia }: { ctx: Ctx; d: Negocio; irPara: (s: S
           texto={`${nomeCurtoTarefa(t.nome)}${ks.length > 1 ? ` · ${ks.map((k) => rotuloDia(p, k)).join(", ")}` : ""}`} acao="Ver o dia" fazer={() => verDia(ks[0])} />
       ))}
       {corr.map((t) => <LinhaAgora key={"c" + p.tasks.indexOf(t)} I={FileWarning} tom="mau" titulo={`${nomeCurtoTarefa(t.nome)}: correção pedida`} texto={`À espera de ${primeiro(t.tec)}${t.exec?.motivo ? ` · ${t.exec.motivo}` : ""}`} />)}
+      {/* 17/11 (A-Z na Mudelar): arrancou antes do plano e hoje ninguém tem trabalho: trazer as tarefas para hoje */}
+      {p.estado === "em curso" && adiantavel(p) && (ctx.S.role === "operacoes" || pelaPermissao(ctx.S.role, ["obra.planear"])) && (
+        <LinhaAgora I={CalendarClock} tom="aviso" titulo={`As tarefas só começam a ${rotuloDia(p, Math.min(...p.tasks.filter((t) => estadoDe(t) === "por fazer").map((t) => t.dia)))}`}
+          texto="A obra já arrancou e hoje não há trabalho marcado." acao="Adiantar para hoje" fazer={() => ctx.run(() => ctx.A.adiantarPlano(d.id))} />
+      )}
       {nada && <p className="flex items-center gap-2 text-[15px]"><CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" />Nada à espera de si.</p>}
       {/* 6/11 (permissões): o papel E a permissão (negocios.obra.executar ou negocios.obra.imprevistos, como no motor) */}
       {/* 9/11 (Lote 1, C): o papel, ou (conta real) quem planeia a obra (negocios.obra.planear), como no motor */}
