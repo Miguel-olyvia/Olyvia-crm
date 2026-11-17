@@ -34,8 +34,8 @@ import type { Ctx } from "./pecas";
 const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
 const dataCurta = (d: Date) => d.toLocaleDateString("pt-PT", { weekday: "short", day: "numeric", month: "long" });
 
-/** A visita que segue o Estúdio: a de uma casa de banho (o que o Estúdio sabe fazer hoje). */
-export const visitaComEstudio = (d: Negocio, divisoes: string[]) => d.linha === "wc" || d.linha === "coz" || divisoes.includes("Casa de banho") || divisoes.includes("Cozinha");
+/** A visita que segue o Estúdio. 17/11 (Rúben): todas — «só era exterior, interior e Estúdio», qualquer que seja o tipo de obra. */
+export const visitaComEstudio = (_d: Negocio, _divisoes: string[]) => true;
 /** 6/11: a divisão do Estúdio pelo negócio (a cozinha, quando é só cozinha). */
 export const divisaoDoEstudio = (d: Negocio): "Casa de banho" | "Cozinha" =>
   d.linha === "coz" || (/cozinha/i.test(d.f.diag_tipo_area ?? "") && !/casa de banho/i.test(d.f.diag_tipo_area ?? "") && d.linha !== "wc") ? "Cozinha" : "Casa de banho";

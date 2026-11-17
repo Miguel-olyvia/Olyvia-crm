@@ -438,8 +438,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     );
     const resumoMedidas = CM.filter(([k]) => medida(v.med, k) > 0).map(([k, l]) => `${l.replace(/ \(.*\)/, "")} ${nfmt(medida(v.med, k))}`);
     const comWC = d.linha === "wc" || divisoesEscolhidas(d.f).includes("Casa de banho");
-    // 6/11: a cozinha também segue o Estúdio
-    const comEstudio = comWC || d.linha === "coz" || divisoesEscolhidas(d.f).includes("Cozinha");
+    // 6/11: a cozinha também segue o Estúdio. 17/11 (Rúben, num negócio de «Remodelação geral» com os passos antigos: «já não devia
+    // existir nada disto… passou tudo para o Estúdio, só era exterior, interior e Estúdio»): todas as visitas seguem o Estúdio
+    const comEstudio = true;
     const passoNec: Passo = { id: "nec", titulo: "Necessidades do cliente", icone: ClipboardList, feito: orcLinhas(d, S).length > 0 && medOk === nMed && !faltaProdutosVisita(d, S).length && (!simples || E(ESCOLHAS).oculto || !emFalta([E(ESCOLHAS)], d.f).length),
       resumo: [...orcLinhas(d, S).map((sid) => S.svc[sid]?.n ?? sid), ...(v.prod ?? []).map((p) => p.n)], corpo: <NecessidadesCliente {...ctx} d={d} simples={simples} /> };
     passos = [

@@ -33,6 +33,15 @@ describe("a Visita de uma casa de banho segue o Estúdio (motor verdadeiro)", ()
     expect(passosDaFase(ctx, d, false).map((p) => p.id)).toContain("medidas");
   });
 
+  it("17/11 (Rúben: «só era exterior, interior e Estúdio»): uma «Remodelação geral» sem divisão escolhida também segue o Estúdio", () => {
+    const { S, ctx } = montar();
+    const d = S.deals.find((x) => x.fase === 2)! as Negocio;
+    d.linha = "geral";
+    for (const k of Object.keys(d.f)) if (/^diag_|divis/.test(k)) delete d.f[k];
+    const ids = passosDaFase(ctx, d, true).map((p) => p.id);
+    expect(ids).toEqual([EXTERIOR.titulo, INTERIOR.titulo, "estudio"]);
+  });
+
   it("15/11: «o cliente fornece produtos» por responder acende o bloco das Necessidades (não fica preso no «Fechar levantamento»)", () => {
     const { ctx, d } = montar();
     // o «Fechar levantamento» correu e ficou marcado a validar, como o portão faz ao faltar o campo das Escolhas
