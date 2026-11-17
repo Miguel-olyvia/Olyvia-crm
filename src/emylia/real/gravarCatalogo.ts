@@ -252,6 +252,16 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
       out.push({ rpc: "cat_guardar_servico_exige", nota: `Serviço: ${nome} (produto obrigatório)`, args: {
         p_org: org, p_id: novo ? { tmp: "svc:" + sid } : ids.servico.get(sid), ...nomesRamo(mD.exige) } });
   }
+
+  // 8. perfis retirados (17/11, 20270118800000): apagam-se na base, no fim, depois de gravados os serviços que deixaram de os usar.
+  // Só os que a base conhece (id real); um perfil criado e retirado antes de gravar não chega aqui. Se estiver em uso (serviços,
+  // cargos, pessoas, obras…) a base recusa e diz onde: a gravação pára com esse motivo e o perfil volta ao recarregar.
+  const perfilD = new Set(depois.C.perfis.map((p) => p.id));
+  for (const a of antes.C.perfis) {
+    const id = ids.perfil.get(a.id);
+    if (perfilD.has(a.id) || !id) continue;
+    out.push({ rpc: "cat_retirar_perfil", nota: `Retirar ${a.n}`, args: { p_org: org, p_id: id } });
+  }
   return out;
 }
 
