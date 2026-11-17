@@ -8,7 +8,7 @@ import { PECAS, areaChaoM2, areaParedesM2, type PecaPlanta } from "@/emylia/plan
 import { ACOMPANHA, CORES, NOME_CATEGORIA, combina, coresPara, produto, produtosDe, type Categoria, type Cor, type Estilo, type Produto } from "./catalogoFake";
 import { IVA, alturaFinalCm, escolherProduto, estadoDaPeca, totais, type Projeto } from "./necessidadesEstudio";
 import { Ilustracao } from "./Ilustracao";
-import { bateComPesquisa, procurarNoCatalogo } from "./pesquisaEstudio";
+import { EV_PROCURAR, bateComPesquisa, procurarNoCatalogo } from "./pesquisaEstudio";
 
 export const eur = (n: number) => n.toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 export const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
@@ -133,6 +133,12 @@ export function ListaProdutos({ cat, estilo, escolhido, onEscolher, limite, acao
   // inteiro da empresa (o que não estava carregado junta-se à lista)
   const [q, setQ] = useState("");
   const [aProcurar, setAProcurar] = useState(false);
+  // a Olyvia por voz («procura sanitas glamic») escreve aqui
+  useEffect(() => {
+    const h = (e: Event) => { const d = (e as CustomEvent<{ cat: Categoria; q: string }>).detail; if (d?.cat === cat) { setQ(d.q); setMais(false); } };
+    window.addEventListener(EV_PROCURAR, h);
+    return () => window.removeEventListener(EV_PROCURAR, h);
+  }, [cat]);
   useEffect(() => {
     if (q.trim().length < 2) { setAProcurar(false); return; }
     let vivo = true;

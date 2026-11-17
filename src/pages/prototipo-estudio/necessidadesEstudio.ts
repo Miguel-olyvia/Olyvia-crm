@@ -9,7 +9,7 @@ import { PASSO, PECAS, areaChaoM2, areaParedesM2, encaixar, juntarPeca, type Pec
 import { sitioDeQuemSai } from "./posicoesDepois";
 import { linhasDaCozinha, type Cozinha } from "./cozinha/modelo";
 import { TIPOS_COZINHA } from "@/emylia/planta";
-import { ACOMPANHA, NOME_CATEGORIA, SERVICOS, produto, servico, type Categoria, type Estilo, type Servico } from "./catalogoFake";
+import { ACOMPANHA, ACOMPANHA_SEMPRE, NOME_CATEGORIA, SERVICOS, melhorPara, produto, produtosDe, servico, type Categoria, type Estilo, type Servico } from "./catalogoFake";
 
 export interface Alturas { /** Pé-direito atual, em cm. */ peDireito: number; /** Altura do teto falso, em cm; null sem teto falso. */ tetoFalso: number | null }
 
@@ -151,6 +151,8 @@ export function necessidades(p: Projeto): Linha[] {
     for (const cat of ACOMPANHA[x.tipo] ?? []) {
       const a = produto(p.acompanha[x.id]?.[cat]);
       if (a) linha({ id: `acomp-${x.id}-${cat}`, grupo: "Peças", n: a.n, q: 1, un: "un", unit: a.preco + a.inst, porque: `${SINGULAR[cat] ?? NOME_CATEGORIA[cat]} ${fem(x.tipo) ? "da" : "do"} ${nome(x.tipo)}, com instalação.` });
+      // 17/11: a torneira do móvel nunca falta sem se dar por isso
+      else if (prod && ACOMPANHA_SEMPRE[x.tipo]?.includes(cat)) linha({ id: `acomp-${x.id}-${cat}`, grupo: "Peças", n: `${SINGULAR[cat] ?? NOME_CATEGORIA[cat]}: por escolher`, q: 1, un: "un", unit: 0, porque: `${fem(x.tipo) ? "A" : "O"} ${nome(x.tipo)} leva sempre ${(SINGULAR[cat] ?? NOME_CATEGORIA[cat]).toLowerCase()}.`, porEscolher: true });
     }
     if (ELETRICO.includes(x.tipo)) linha({ id: `ele-${x.id}`, grupo: "Trabalhos", n: `Ponto elétrico: ${nome(x.tipo)}`, q: 1, un: "un", unit: TABELA.pontoEletrico, porque: "Precisa de corrente." });
     if (estado === "nova" && AGUA.includes(x.tipo)) linha({ id: `agua-${x.id}`, grupo: "Trabalhos", n: `Ponto de água e esgoto: ${nome(x.tipo)}`, q: 1, un: "un", unit: TABELA.pontoAgua, porque: "Peça de água num sítio novo." });
@@ -163,6 +165,7 @@ export function necessidades(p: Projeto): Linha[] {
     for (const cat of ACOMPANHA[x.tipo] ?? []) {
       const a = produto(x.acompanha?.[cat]);
       if (a) linha({ id: `acomp-${x.id}-${cat}`, grupo: "Peças", n: a.n, q: 1, un: "un", unit: a.preco + a.inst, porque: `${SINGULAR[cat] ?? NOME_CATEGORIA[cat]} ${fem(x.tipo) ? "da" : "do"} ${nome(x.tipo)}, com instalação.` });
+      else if (prod && ACOMPANHA_SEMPRE[x.tipo]?.includes(cat)) linha({ id: `acomp-${x.id}-${cat}`, grupo: "Peças", n: `${SINGULAR[cat] ?? NOME_CATEGORIA[cat]}: por escolher`, q: 1, un: "un", unit: 0, porque: `${fem(x.tipo) ? "A" : "O"} ${nome(x.tipo)} leva sempre ${(SINGULAR[cat] ?? NOME_CATEGORIA[cat]).toLowerCase()}.`, porEscolher: true });
     }
     if (ELETRICO.includes(x.tipo)) linha({ id: `ele-${x.id}`, grupo: "Trabalhos", n: `Ponto elétrico: ${nome(x.tipo)}`, q: 1, un: "un", unit: TABELA.pontoEletrico, porque: "Precisa de corrente." });
     if (AGUA.includes(x.tipo)) linha({ id: `agua-${x.id}`, grupo: "Trabalhos", n: `Ponto de água e esgoto: ${nome(x.tipo)}`, q: 1, un: "un", unit: TABELA.pontoAgua, porque: "Peça de água num sítio novo." });
@@ -330,7 +333,18 @@ export const mudarQtdServico = (p: Projeto, id: string, q: number): Projeto => (
 export function escolherProduto(p: Projeto, pecaId: string, produtoId: string): Projeto {
   const prod = produto(produtoId);
   const pecas = p.depois.pecas.map((x) => (x.id === pecaId && prod?.w && prod.h ? encaixar(x, prod.w, prod.h, p.depois) : x));
-  return { ...p, escolhas: { ...p.escolhas, [pecaId]: produtoId }, depois: { ...p.depois, pecas } };
+  // 17/11 (Rúben: «a torneira tem que estar sempre associada a um móvel»): o que acompanha sempre a peça escolhe-se com ela, se ainda
+  // não houver — a que melhor combina com o estilo ou, sem nenhuma a combinar, a primeira do catálogo
+  const tipo = p.depois.pecas.find((x) => x.id === pecaId)?.tipo;
+  const ja = p.acompanha[pecaId] ?? {};
+  const juntar: Partial<Record<Categoria, string>> = {};
+  for (const cat of (tipo && ACOMPANHA_SEMPRE[tipo]) || []) {
+    if (ja[cat]) continue;
+    const id = melhorPara(cat, p.estilo)?.id ?? produtosDe(cat, p.estilo, true)[0]?.id;
+    if (id) juntar[cat] = id;
+  }
+  const acompanha = Object.keys(juntar).length ? { ...p.acompanha, [pecaId]: { ...ja, ...juntar } } : p.acompanha;
+  return { ...p, escolhas: { ...p.escolhas, [pecaId]: produtoId }, acompanha, depois: { ...p.depois, pecas } };
 }
 /** Depois de muitas escolhas de uma vez (aplicar o estilo): cada peça com produto fica com o tamanho dele, no mesmo sítio. */
 export const encaixarEscolhas = (p: Projeto): Projeto =>

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 
-import { pecasDitas, pedeDesfazer, plantaPorVoz, vozNoEstudio } from "./estudioPorVoz";
+import { pecasDitas, pedeDesfazer, plantaPorVoz, procuraNoEstudio, vozNoEstudio } from "./estudioPorVoz";
 import { PROJETO_EXEMPLO } from "./exemploEstudio";
 import { retangulo, type Planta } from "@/emylia/planta";
 
@@ -44,6 +44,17 @@ describe("a planta por voz (passo Antes)", () => {
     expect(pedeDesfazer("desfaz")).toBe(true);
     expect(pedeDesfazer("não era isso")).toBe(true);
     expect(pedeDesfazer("desfaz a banheira")).toBe(false);
+  });
+});
+
+describe("17/11 (Rúben: «pesquisar por voz»)", () => {
+  it("o tipo de peça e o que procurar", () => {
+    expect(procuraNoEstudio("procura sanitas glamic")).toEqual({ cat: "sanita", q: "glamic" });
+    expect(procuraNoEstudio("mostra torneiras douradas")).toEqual({ cat: "torneira", q: "douradas" });
+    expect(procuraNoEstudio("quero ver resguardos pretos de 120")).toEqual({ cat: "resguardo", q: "pretos 120" });
+    expect(procuraNoEstudio("pesquisa azulejos brancos")).toEqual({ cat: "revestimento", q: "brancos" });
+    expect(procuraNoEstudio("procura um móvel de 80")).toEqual({ cat: "movel", q: "80" });
+    expect(procuraNoEstudio("vai para o estilo")).toBeNull();
   });
 });
 

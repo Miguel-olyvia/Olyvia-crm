@@ -10,7 +10,7 @@
 import type { Fala } from "@/emylia/chamadaMotor";
 import { PECAS, PLANTA_VAZIA, faltaFechar, juntarPeca, mudarComprimento, mudarComprimentoFechada, retangulo, type Planta, type TipoPeca } from "@/emylia/planta";
 import { aplicarEstilo, colocar, juntarServico, tirarServico, type Projeto } from "./necessidadesEstudio";
-import { melhorPara } from "./catalogoFake";
+import { NOME_CATEGORIA, melhorPara, type Categoria } from "./catalogoFake";
 import { mudarODepois, seguirOAntes } from "./posicoesDepois";
 import { tipoPecaDeTexto } from "./pedidosDaConversa";
 import { recusarSugestao } from "./sugestoesServicos";
@@ -36,7 +36,26 @@ const NOMES_PASSO: [RegExp, number][] = [
 ];
 const VERBO_IR = /^(?:(?:vai|vamos|ir|passa|passar|salta|abre|abrir|mostra|mostrar|ve|ver|entra|volta|voltar)\s+)?(?:(?:para|pra|pro|ao|a|o|as|os|no|na|ate)\s+)*(?:(?:o )?passo\s+(?:do |da |de )?)?/;
 
-export type RespostaEstudio = { passo?: number; voltar?: boolean; mostrar?: boolean; p?: Projeto; partes: string[] };
+export type RespostaEstudio = { passo?: number; voltar?: boolean; mostrar?: boolean; p?: Projeto; partes: string[]; procurar?: { cat: Categoria; q: string } };
+
+// ------------------------------------------------------------------ 17/11 (Rúben: «permitir pesquisar por voz utilizando a nossa nova AI»)
+const PROCURA = /^(?:procura|procurar|pesquisa|pesquisar|busca|buscar|encontra|encontrar|mostra|mostra me|mostrar|quero ver|ver|ve|tens|tem|ha|existe|existem)\s+(.+)$/;
+const CATEGORIA_DITA: [RegExp, Categoria][] = [
+  [/\btorneir/, "torneira"], [/\bmisturador/, "torneira"], [/\bresguard/, "resguardo"], [/\b(coluna de duche|colunas de duche|chuveir)/, "coluna_duche"],
+  [/\b(revestiment|azulej|parede)/, "revestimento"], [/\b(paviment|chao|piso|soalho)/, "pavimento"],
+];
+/** As palavras que dizem o tipo (saem do texto a procurar: «sanitas», «torneiras de», «para o móvel»). */
+const PALAVRA_DE_TIPO = /^(?:sanitas?|bides?|banheiras?|bases?|duche|moveis|movel|lavatorios?|espelhos?|toalheiros?|torneiras?|misturador(?:a|es|as)?|resguardos?|colunas?|chuveiros?|revestimentos?|azulejos?|paredes?|pavimentos?|chao|piso|soalho|lava|loica|loicas|placas?|fornos?|frigorificos?|maquinas?|exaustor(?:es)?|armarios?|de|do|da|dos|das|o|a|os|as|um|uma|uns|umas|para|com|e|que|me|tipo|modelo|modelos|produtos?)$/;
+/** «procura sanitas glamic», «mostra torneiras douradas», «quero ver resguardos pretos» → o tipo e o que procurar. */
+export function procuraNoEstudio(frase: string): { cat: Categoria; q: string } | null {
+  const n = nome(frase).replace(/^(?:ok|pronto|entao|agora|olyvia|olivia)\s+/g, "");
+  const m = n.match(PROCURA);
+  if (!m) return null;
+  const resto = m[1];
+  const cat = CATEGORIA_DITA.find(([rx]) => rx.test(resto))?.[1] ?? pecasDitas(resto)[0];
+  if (!cat) return null;
+  return { cat, q: resto.split(" ").filter((w) => !PALAVRA_DE_TIPO.test(w)).join(" ") };
+}
 
 /** O passo pedido (índice), ou voltar ao negócio / mostrar ao cliente. */
 export function passoNoEstudio(frase: string, atual: number): Omit<RespostaEstudio, "p" | "partes"> | null {
@@ -190,6 +209,8 @@ export function plantaPorVoz(frase: string, pl: Planta, comParedes: boolean): { 
 export function vozNoEstudio(frase: string, p: Projeto, atual: number): RespostaEstudio | null {
   const ir = passoNoEstudio(frase, atual);
   if (ir) return { ...ir, partes: [ir.voltar ? "A voltar ao negócio" : ir.mostrar ? "A mostrar ao cliente" : `Passo: ${PASSOS_ESTUDIO[ir.passo!]}`] };
+  const procura = procuraNoEstudio(frase);
+  if (procura) return { procurar: procura, partes: [procura.q ? `A procurar «${procura.q}» em ${NOME_CATEGORIA[procura.cat].toLowerCase()}` : NOME_CATEGORIA[procura.cat]] };
   // a planta: no «Antes», as paredes e as peças de hoje; no «Depois», mexer nas peças (as paredes são as do antes)
   if (atual === 0) {
     const r = plantaPorVoz(frase, p.antes, true);

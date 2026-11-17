@@ -10,7 +10,7 @@ import { Check, Ear, Palette, Undo2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useGravacao } from "@/emylia/gravador";
 import { PECAS, type TipoPeca } from "@/emylia/planta";
-import { ACOMPANHA, NOME_CATEGORIA, melhorPara, type Categoria, type Cor, type Estilo } from "./catalogoFake";
+import { ACOMPANHA, ACOMPANHA_SEMPRE, NOME_CATEGORIA, melhorPara, produtosDe, type Categoria, type Cor, type Estilo } from "./catalogoFake";
 import { aplicarEstilo, decidir, juntarPorColocar, juntarServico, tirarServico, type Decisao, type Projeto } from "./necessidadesEstudio";
 import { recusarSugestao } from "./sugestoesServicos";
 import { amostras, chavesDosDitos, combinacoesPara, ditosDaConversa, estiloDosDitos, juntarEstilo, mesmoEstilo, nomeCor, tempo, type DitoEstilo, type EstiloOuvido } from "./estiloDaConversa";
@@ -24,8 +24,10 @@ type SetP = React.Dispatch<React.SetStateAction<Projeto>>;
 export const comEstilo = (x: Projeto, estilo: Estilo, manual: boolean, todas = false): Projeto =>
   ({ ...aplicarEstilo({ ...x, estilo }, (cat) => melhorPara(cat, estilo)?.id, todas), estiloManual: manual || x.estiloManual });
 
+// 17/11 (Rúben: «a torneira tem que estar sempre associada a um móvel»): o que acompanha sempre entra mesmo sem nenhum a combinar com o estilo
 const acompanhaRecomendado = (tipo: TipoPeca, p: Projeto): Partial<Record<Categoria, string>> =>
-  Object.fromEntries((ACOMPANHA[tipo] ?? []).map((cat) => [cat, melhorPara(cat, p.estilo)?.id]).filter(([, id]) => !!id));
+  Object.fromEntries((ACOMPANHA[tipo] ?? []).map((cat) => [cat, melhorPara(cat, p.estilo)?.id
+    ?? (ACOMPANHA_SEMPRE[tipo]?.includes(cat) ? produtosDe(cat, p.estilo, true)[0]?.id : undefined)]).filter(([, id]) => !!id));
 
 /** Uma decisão dita sobre uma peça: a que há hoje fica, troca-se ou sai; uma que não há junta-se por colocar (com o recomendado). */
 export function aplicarPeca(x: Projeto, tipo: TipoPeca, acao: DitoPeca["acao"]): Projeto {

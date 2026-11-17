@@ -37,6 +37,8 @@ const Visualizador3D = lazy(() => import("@/emylia/planta3d/Visualizador3D"));
 import { CHAVE_ESTUDIO as CHAVE, devolverAoNegocio } from "./daVisita";
 import { pedeDesfazer, vozNoEstudio } from "./estudioPorVoz";
 import { useProdutosReaisNoEstudio } from "./catalogoRealDoEstudio";
+import { EV_PROCURAR } from "./pesquisaEstudio";
+import { ACOMPANHA } from "./catalogoFake";
 import { EV_ESTUDIO } from "@/emylia/comandoOlyvia";
 // 9/11 (Rúben: «o Estúdio é o passo final da visita»): o último passo fecha a visita (os serviços do Catálogo, o plano e o orçamento)
 const PASSOS = ["Antes", "Estilo", "Depois", "3D", "Proposta", "Fechar"] as const;
@@ -131,6 +133,20 @@ export default function EstudioProjeto() {
     if (r.passo !== undefined) ir(PASSOS[r.passo]);
     if (r.mostrar) setMostrar(true);
     if (r.voltar) voltar(false);
+    // 17/11 (Rúben: «pesquisar por voz»): abre, no passo Depois, a peça desse tipo (a torneira vive no móvel; o resguardo e a coluna de
+    // duche na base; o revestimento e o pavimento nos materiais) e escreve o que se disse na pesquisa da lista
+    if (r.procurar) {
+      const { cat, q } = r.procurar;
+      const pecas = pRef.current.depois.pecas;
+      const peca = pecas.find((x) => x.tipo === cat) ?? pecas.find((x) => (ACOMPANHA[x.tipo] ?? []).includes(cat));
+      if (cat !== "revestimento" && cat !== "pavimento" && !peca) {
+        det.msg = `Não há ${NOME_CATEGORIA[cat].toLowerCase()} na planta: junta primeiro a peça (ex.: «põe uma sanita»).`;
+        return;
+      }
+      if (passo !== "Depois") setPasso("Depois");
+      setAberta(cat === "revestimento" || cat === "pavimento" ? null : peca!.id);
+      setTimeout(() => window.dispatchEvent(new CustomEvent(EV_PROCURAR, { detail: { cat, q } })), 150);
+    }
   };
   useEffect(() => {
     const h = (e: Event) => voz.current((e as CustomEvent<{ frase: string; ok: boolean; msg: string }>).detail);
