@@ -480,10 +480,12 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos, soLeitura }: { ctx: Ctx; 
     const aoPasso = (e: Event) => {
       // 17/11: «tentar» — a Olyvia pergunta se o nome é um passo (antes de abrir um negócio com esse nome); responde em `ok`, sem erro
       const det = (e as CustomEvent<{ passo: string; tentar?: boolean; ok?: boolean; listar?: boolean; lista?: string[] }>).detail;
-      if (det?.listar) { det.lista = passosRef.current.map((p) => p.titulo); return; }
+      // 17/11 (testarh): procura pelo nome que se vê na lista («Exterior do edifício») e, se não der, pelo nome interno
+      const vistos = passosRef.current.map((p) => ({ id: p.id, titulo: curto(p) }));
+      if (det?.listar) { det.lista = vistos.map((p) => p.titulo); return; }
       const alvo = det?.passo;
       if (!alvo) return;
-      const ps = passosRef.current, i = indicePasso(ps, alvo, ativoRef.current);
+      const ps = vistos, i = indicePasso(vistos, alvo, ativoRef.current) ?? indicePasso(passosRef.current, alvo, ativoRef.current);
       if (i == null) { if (!det.tentar) responderOlyvia(`Não há o passo «${alvo}» nesta fase.`, false); return; }
       det.ok = true;
       setAtivo(i);
