@@ -59,6 +59,8 @@ regras(sub, padrao, chave, ordem) as (values
   ('Torneira Bidé', null, 'c27', 9),
   ('Torneira Banheira', 'ch[aã]o', 's-moitcb', 1), ('Torneira Banheira', null, 's-moitbf', 9),
   ('Torneira Encastre', null, 's-moitle', 9),
+  -- não há serviço de torneira de duche: a mais parecida é a de banheira fixa (misturadora de parede, a mesma montagem)
+  ('Torneira Duche', null, 's-moitbf', 9),
   ('Misturadoras Monocomando', null, 'c39', 9), ('Misturadoras Monocomando Abatível', null, 'c39', 9),
   ('Misturadoras Monocomando Extraível', null, 'c39', 9), ('Misturadoras Monocomando Flexível', null, 'c39', 9),
   ('Misturadoras Monocomando Giratória', null, 'c39', 9),
