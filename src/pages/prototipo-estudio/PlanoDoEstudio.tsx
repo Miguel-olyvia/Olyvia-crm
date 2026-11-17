@@ -135,7 +135,7 @@ function Servicos({ p, setP, S, L }: { p: Projeto; setP: React.Dispatch<React.Se
       {L.produtos.length > 0 && (
         <div className="space-y-2">
           <h4 className="text-sm font-semibold">Os produtos</h4>
-          {catalogoParcial() && <p className="text-sm text-muted-foreground">O produto de cada peça é a melhor correspondência entre os primeiros resultados da pesquisa no Catálogo.</p>}
+          {catalogoParcial() && linhas.some((l) => l.tipo === "produto" && !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(l.produtoId ?? "")) && <p className="text-sm text-muted-foreground">O produto das peças sem produto do Catálogo escolhido é a melhor correspondência entre os primeiros resultados da pesquisa no Catálogo.</p>}
           <ul className="space-y-1.5">
             {L.produtos.map((x) => (
               <li key={x.chave} className="flex items-center justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2 text-[15px]">

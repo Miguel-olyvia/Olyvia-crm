@@ -4,6 +4,7 @@ import { TECS, seed, type Negocio } from "./motor";
 import { planoDaVisita, planoDoEstudio } from "./planoDaVisita";
 import { retangulo } from "./planta";
 import { lerCatalogo } from "./v2/catalogoStore";
+import { CATALOGO_TODO } from "./catalogo";
 import { simularNoNegocio } from "./estudioNoNegocio";
 import { juntarExtra, mudarExtra, projetoNoCatalogo, reporServico, trocarServico } from "@/pages/prototipo-estudio/servicosDoCatalogo";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
@@ -60,6 +61,17 @@ describe("o plano da obra na visita", () => {
 });
 
 describe("o Estúdio ligado ao Catálogo", () => {
+  it("17/11 (A-Z na Mudelar, Catálogo leve): a instalação que o produto traz entra mesmo sem estar ainda em uso (S.svc)", () => {
+    const { S } = visita();
+    const sid = CATALOGO_TODO.find((i) => !S.svc[i.id] && /instala/i.test(i.n))!.id;
+    const UUID = "0b1c2d3e-0000-4000-8000-000000000077";
+    const K = [{ id: UUID, n: "SANITA GLAMIC SUSPENSO BRANCO BRILHO", custo: 90, un: "un", marca: "", fornecedor: "", data: "", no: null, servico: sid, fatorServico: 1 }];
+    const p = projeto({ escolhas: { b: "bas-ard-p", s: UUID } });
+    const L = projetoNoCatalogo(p, S, K as never);
+    expect(L.produtos.map((x) => x.id)).toContain(UUID);
+    expect(L.servicos.find((x) => x.sid === sid)).toMatchObject({ origem: "produto", q: 1 });
+    expect(L.semPar.join(" ")).not.toMatch(/sanita/i);
+  });
   it("os trabalhos têm o serviço do Catálogo; trocar, tirar, repor e juntar outro", () => {
     const { S } = visita();
     const K = lerCatalogo().produtos ?? [];
