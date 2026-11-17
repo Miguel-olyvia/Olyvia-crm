@@ -5,7 +5,9 @@
 //  · o plano da obra (o mesmo que a visita gera ao fechar e que a obra vai ter): o dia de início, a equipa do RH e o mapa de datas;
 //  · o orçamento que vai nascer (sem IVA);
 //  · «Fechar a visita»: volta ao negócio, leva tudo e fecha a visita (o orçamento e o plano ficam gerados).
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { garantirProdutos } from "@/emylia/real/garantirProdutos";
+import { linhasParaLevar } from "./levarParaNegocio";
 import { Check, ChevronDown, Hammer, Lock, Plus, Repeat, Search, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -46,6 +48,9 @@ export function PlanoDoEstudio({ p, setP, fechar, semCatalogo }: {
 function ComCatalogo({ p, setP, fechar, S, erro }: { p: Projeto; setP: React.Dispatch<React.SetStateAction<Projeto>>; fechar: (f: boolean) => void; S: Estado; erro: string | null }) {
   const K = useCatalogo();
   const produtos = useMemo(() => K.produtos ?? [], [K.produtos]);
+  // 17/11: os produtos escolhidos (ids do Catálogo verdadeiro) que o Catálogo leve não traz leem-se do servidor; ao chegarem, o Catálogo muda e o plano volta a ligar
+  const ids = useMemo(() => linhasParaLevar(p).map((l) => l.produtoId).filter(Boolean).sort().join(","), [p]);
+  useEffect(() => { if (ids) void garantirProdutos(ids.split(",")).catch(() => []); }, [ids]);
   const inicio = inicioPorOmissao(p.catalogo?.inicio);
   const L = useMemo(() => projetoNoCatalogo(p, S, produtos), [p, S, produtos]);
   const negocio = p.negocio !== undefined ? S.deals.find((x) => x.id === p.negocio) : undefined;

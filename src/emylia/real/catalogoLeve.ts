@@ -27,6 +27,20 @@ export const noDoProdutoLido = (idCru: string | null | undefined): string | null
 /** O inverso, para pesquisar no servidor: o nó do Catálogo como id de product_categories. */
 export const categoriaCruDoNo = (no: string): string => nos?.cru.get(no) ?? no;
 
+/** 17/11: os serviços do Catálogo lido, id da base → chave do motor. Um produto lido do servidor (cat_ler_produto) traz o servico_id da base; no negócio
+ *  o serviço vai pela chave (negocioBase.paraBase recusa um id: «Serviços que não estão no Catálogo desta organização»). */
+let chaveDeServico: Map<string, string> | null = null;
+/** Chamado por carregarCatalogo com M.ids.servico (chave → id). */
+export function definirServicosLidos(chaveParaId: ReadonlyMap<string, string>): void {
+  chaveDeServico = new Map([...chaveParaId].map(([k, id]) => [id, k]));
+}
+/** A chave do motor de um serviço lido pelo id (sem Catálogo lido, ou já uma chave: fica como está; um id que o Catálogo não tem: undefined). */
+export function chaveDoServicoLido(s: string | undefined): string | undefined {
+  if (!s || !chaveDeServico) return s;
+  if (chaveDeServico.has(s)) return chaveDeServico.get(s);
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) ? undefined : s;
+}
+
 /** Chamado por carregarCatalogo, antes de aplicar o Catálogo lido. */
 export function definirCatalogoLido(org: string, leve: boolean): void {
   orgDoCatalogo = org;
@@ -37,6 +51,7 @@ export function limparCatalogoLido(): void {
   parcial = false;
   orgDoCatalogo = null;
   nos = null;
+  chaveDeServico = null;
 }
 /** O Catálogo em memória veio da leitura leve: K.produtos NÃO é a lista toda. */
 export const catalogoParcial = (): boolean => parcial;

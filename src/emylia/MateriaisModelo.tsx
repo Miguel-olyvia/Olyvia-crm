@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Catalogo } from "./v2/catalogoModelo";
-import { nosAbaixo } from "./produtosVisita";
+import { nosDoRamo } from "./produtosVisita";
 import { Escolha } from "./v2/pecasCustos";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { aplicarLinhasModelo, linhasModeloDe, textoRegra, type LinhaModeloBase } from "./real/linhasModelo";
@@ -53,7 +53,7 @@ export function MateriaisModelo({ K, real, anunciar }: { K: Catalogo; real: Fich
     const of = p?.ramo_oficio ? K.arvore.find((x) => x.pai == null && x.n === p.ramo_oficio) : undefined;
     const no = of && p?.ramo_sub ? K.arvore.find((x) => x.pai === of.id && x.n === p.ramo_sub) ?? of : of;
     const ordenados = [...K.produtos].sort((a, b) => a.n.localeCompare(b.n, "pt"));
-    const nos = no ? nosAbaixo(K.arvore, no.id) : null;
+    const nos = no ? nosDoRamo(K.arvore, no.id) : null;
     const doRamo = nos ? ordenados.filter((x) => x.no && nos.has(x.no)) : [];
     const resto = nos ? ordenados.filter((x) => !(x.no && nos.has(x.no))) : ordenados;
     return [{ v: "", t: "Sem produto (não vai à encomenda)" }, ...doRamo.map((x) => ({ v: x.id, t: x.n })), ...resto.map((x) => ({ v: x.id, t: x.n }))];

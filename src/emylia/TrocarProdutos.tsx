@@ -19,7 +19,7 @@ import { CONSUMIVEIS } from "./equipamentosCliente";
 import { ContadorQtd } from "./ContadorQtd";
 import { FotoOuIlustracao, Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
 import { categoriaDe, categorias, filtrarProdutos, ilustracaoDoCatalogo } from "./necessidades";
-import { nosAbaixo, partesDoModelo, precoProduto, precoUnitario, qtdSugerida, type ParteEstimativa, type ProdVisita } from "./produtosVisita";
+import { nosAbaixo, nosDoRamo, partesDoModelo, precoProduto, precoUnitario, qtdSugerida, type ParteEstimativa, type ProdVisita } from "./produtosVisita";
 import { MOLA, useReduzir } from "./movimento";
 import { servicosVisita } from "./motor";
 
@@ -257,7 +257,7 @@ function JanelaCatalogo({ K, alvo, janela, fechar, escolher, jaTem }: {
     if (!janela || janela.k === "juntar") return todos;
     const raiz = janela.k === "parte" ? janela.parte.raiz : janela.raiz;
     if (!raiz) return todos;
-    const nos = nosAbaixo(K.arvore, raiz);
+    const nos = nosDoRamo(K.arvore, raiz);
     return todos.filter((p) => p.no && nos.has(p.no));
   }, [K, janela]);
   const cats = useMemo(() => categorias(base, K.arvore), [base, K.arvore]);

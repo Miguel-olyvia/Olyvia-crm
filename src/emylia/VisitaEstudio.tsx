@@ -27,6 +27,8 @@ import { lerCatalogo } from "./v2/catalogoStore";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
 import { useCatalogo } from "./v2/catalogoStore";
 import { ligarAoCatalogo, type LinhaLevada } from "./ligarEstudio";
+import { garantirProdutos, produtosEmFalta } from "./real/garantirProdutos";
+import { linhasParaLevar } from "@/pages/prototipo-estudio/levarParaNegocio";
 import { porMedida, type Negocio } from "./motor";
 import { areaChaoM2, gravarPlanta } from "./planta";
 import type { Ctx } from "./pecas";
@@ -123,10 +125,19 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const ultimo = useRef(salvo?.gravadoEm ?? 0);
   const ref = useRef({ ctx, d });
   ref.current = { ctx, d };
-  const trazer = (p: Projeto) => {
-    const r = aplicarDoEstudio(ref.current.ctx, ref.current.d, p);
-    if (r.linhas.length) setPendentes(r.linhas);
-    setFeito(r.avisos.join(" ") || "Do Estúdio não veio nada de novo.");
+  /** Leva o projeto ao negócio. null: já entrou; uma promessa: entra quando os produtos chegarem do servidor. */
+  const trazer = (p: Projeto): Promise<void> | null => {
+    const aplicar = () => {
+      const r = aplicarDoEstudio(ref.current.ctx, ref.current.d, p);
+      if (r.linhas.length) setPendentes(r.linhas);
+      setFeito(r.avisos.join(" ") || "Do Estúdio não veio nada de novo.");
+    };
+    // 17/11: com o Catálogo leve, os produtos escolhidos no Estúdio leem-se do servidor antes de entrar (senão ficavam «sem par»).
+    // Sem nenhum em falta, entra já (como antes).
+    const ids = linhasParaLevar(p).map((l) => l.produtoId);
+    if (!produtosEmFalta(ids).length) { aplicar(); return null; }
+    setFeito("A ler do Catálogo os produtos escolhidos no Estúdio…");
+    return garantirProdutos(ids).catch(() => []).then(aplicar);
   };
 
   useEffect(() => {
@@ -153,10 +164,11 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         if (v.antes.paredes.length) { const { ctx: c, d: n } = ref.current; c.run(() => c.A.campo(n.id, "planta", gravarPlanta(v.antes))); setFeito("A planta ficou no negócio."); }
         return;
       }
-      trazer(p);
       // 9/11: «Fechar a visita» no Estúdio: com tudo levado, a visita fecha (o orçamento nasce com o plano e as datas). Se faltar alguma
-      // resposta obrigatória, o motor diz qual e a visita fica aberta.
-      if (v.fechar) { const { ctx: c, d: n } = ref.current; c.run(() => c.A.fecharVisita(n.id)); }
+      // resposta obrigatória, o motor diz qual e a visita fica aberta. 17/11: depois de os produtos chegarem do servidor.
+      const fechar = () => { if (v.fechar) { const { ctx: c, d: n } = ref.current; c.run(() => c.A.fecharVisita(n.id)); } };
+      const aChegar = trazer(p);
+      if (aChegar) void aChegar.then(fechar); else fechar();
     };
     aoVoltar();
     const aoMudar = (e: StorageEvent) => {
@@ -221,7 +233,7 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             </dl>
             <div className="mt-auto flex flex-wrap gap-2">
               <Button type="button" className="min-h-11 flex-1 sm:flex-none" onClick={abrir}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Continuar no Estúdio</Button>
-              <Button type="button" variant="outline" className="min-h-11 flex-1 sm:flex-none" onClick={() => trazer(projetoDoEstudioPara(d.id) ?? salvo)}>Trazer do Estúdio</Button>
+              <Button type="button" variant="outline" className="min-h-11 flex-1 sm:flex-none" onClick={() => { const p = projetoDoEstudioPara(d.id) ?? salvo; if (p) void trazer(p); }}>Trazer do Estúdio</Button>
             </div>
           </div>
         </section>
@@ -251,6 +263,8 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
  */
 export function DoEstudio({ ctx, d, linhas, feito }: { ctx: Ctx; d: Negocio; linhas: LinhaLevada[]; feito: (texto: string) => void }) {
   const K = useCatalogo();
+  // 17/11: os produtos do Estúdio que o Catálogo leve não tem leem-se do servidor (o Catálogo muda e isto volta a ligar)
+  useEffect(() => { void garantirProdutos(linhas.map((l) => l.produtoId)).catch(() => []); }, [linhas]);
   const ligacoes = useMemo(() => ligarAoCatalogo(linhas, ctx.S?.svc ?? {}, K.produtos ?? []), [linhas, ctx.S?.svc, K.produtos]);
   const juntaveis = ligacoes.filter((g) => g.alvo && !g.vemComProduto);
   const [fora, setFora] = useState<Set<number>>(new Set());

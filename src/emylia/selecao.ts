@@ -6,7 +6,7 @@
 import { normal } from "./catalogo";
 import { nfmt, servicosVisita, type MedKey, type Negocio, type Servico, type SvcId, type acoes } from "./motor";
 import type { Catalogo, No, Produto } from "./v2/catalogoModelo";
-import { nosAbaixo, precoProduto, qtdSugerida, textoClienteCompra, type Obrigacao } from "./produtosVisita";
+import { nosDoRamo, precoProduto, qtdSugerida, textoClienteCompra, type Obrigacao } from "./produtosVisita";
 import { categoriaDe, ilustracaoDoCatalogo, medidaDaSugestao, nomeCurto, objetoDaPergunta, palavrasDe, procurarServicos, qtdNaVisita, sugestaoQtd, tituloObrigacao, type TileServico } from "./necessidades";
 import type { IlustracaoKey } from "./ilustracoes";
 
@@ -186,7 +186,7 @@ export function qtdServicoAoEscolher(c: { id: SvcId; n: string; un: string; qm: 
 export function quantidadeDaRegra(K: Catalogo, p: { no: string | null }, sids: SvcId[]): boolean {
   return sids.some((sid) => {
     const no = K.exigeProduto?.[sid], r = K.qtdDe?.[sid];
-    return !!no && !!r && !!p.no && nosAbaixo(K.arvore, no).has(p.no);
+    return !!no && !!r && !!p.no && nosDoRamo(K.arvore, no).has(p.no);
   });
 }
 
@@ -217,7 +217,7 @@ export function tocarProduto(A: Pick<A, "produto" | "tirarProduto">, K: Catalogo
 export function responderTroca(A: Pick<A, "manter" | "tirarProduto">, K: Catalogo, d: Negocio, o: Pick<Obrigacao, "sid" | "no">, r: "sim" | "nao") {
   A.manter(d.id, o.sid, r);
   if (r === "sim") {
-    const ramo = nosAbaixo(K.arvore, o.no);
+    const ramo = nosDoRamo(K.arvore, o.no);
     for (const p of [...(d.visita.prod ?? [])]) if (p.no && ramo.has(p.no)) A.tirarProduto(d.id, p.id);
   }
 }
@@ -274,7 +274,7 @@ export function blocosFornece(d: Negocio, obr: Obrigacao[], sids: SvcId[], o: {
   const base = itensFornece(d, obr, o.nomeSvc), usados = new Set<string>();
   const prod = new Map((d.visita.prod ?? []).map((p) => [p.id, p]));
   const blocos = sids.map((sid): BlocoFornece => {
-    const no = o.exige[sid], ramo = no ? nosAbaixo(o.arvore, no) : null;
+    const no = o.exige[sid], ramo = no ? nosDoRamo(o.arvore, no) : null;
     const ps = base.filter((it) => it.tipo === "produto" && !usados.has(it.k) && (prod.get(it.id)?.svc === sid || (!!ramo && !!it.no && ramo.has(it.no))));
     ps.forEach((it) => usados.add(it.k));
     // 15/10: o cliente só fornece produtos (os consumíveis e os equipamentos das receitas são sempre da empresa)

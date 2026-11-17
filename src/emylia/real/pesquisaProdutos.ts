@@ -8,7 +8,8 @@ import type { No, Produto } from "../v2/catalogoModelo";
 import type { Res } from "../fichaProdutoDados";
 import { SEM_FILTRO_SERVIDOR, lerProdutosPagina, type LinhaPaginaProduto } from "./produtosPaginados";
 import { lerProdutoFicha } from "./produtosLeves";
-import { categoriaCruDoNo, noDoProdutoLido, registarProdutoLido } from "./catalogoLeve";
+import { categoriaCruDoNo, chaveDoServicoLido, noDoProdutoLido, registarProdutoLido } from "./catalogoLeve";
+import { nosDeProdutoDoRamo } from "../ramoDosProdutos";
 
 export const ATRASO_PESQUISA_MS = 300;
 
@@ -61,7 +62,11 @@ export async function escolherProdutoDoServidor(org: string, id: string): Promis
   const r = await lerProdutoFicha(org, id);
   if (!r.ok) return r;
   // o `no` vem como id de product_categories; o Catálogo usa o nó fundido com a árvore dos serviços (e o autosave grava a categoria por ele)
-  return { ok: true, v: registarProdutoLido({ ...r.v, no: noDoProdutoLido(r.v.no) }) };
+  // 17/11: o serviço que o produto traz pela chave do motor (a base dá o id; um serviço que o Catálogo não tem sai, em vez de partir a gravação do negócio)
+  const servico = chaveDoServicoLido(r.v.servico);
+  const { servico: _id, fatorServico, ...resto } = r.v;
+  const p: Produto = { ...resto, no: noDoProdutoLido(r.v.no), ...(servico ? { servico, fatorServico: fatorServico ?? 1 } : {}) };
+  return { ok: true, v: registarProdutoLido(p) };
 }
 
 /** O produto lido, SEM o meter no Catálogo (para quem só precisa dos valores, como o consumível de uma receita). */
@@ -71,6 +76,16 @@ export const lerProdutoEscolhido = (org: string, id: string): Promise<Res<Produt
 export function filtroDoRamo(arvore: readonly No[], no: string | null): Pick<FiltroPesquisaProdutos, "categoria" | "subcategoria"> {
   const x = no ? arvore.find((y) => y.id === no) : undefined;
   if (!x) return {};
+  // 17/11 (A-Z na Mudelar: «Não há produtos com estes filtros»): um ramo só dos SERVIÇOS («Canalização › Louças e torneiras») não existe em product_categories.
+  // Pesquisa-se pelas categorias de produto que lhe pertencem (ramoDosProdutos.ts): uma só → essa; várias com o mesmo pai → o pai; senão sem filtro de ramo.
+  if (!x.soProduto && categoriaCruDoNo(x.id) === x.id) {
+    const pai = x.pai ? arvore.find((y) => y.id === x.pai) : undefined;
+    const deProduto = nosDeProdutoDoRamo(arvore, pai ? pai.n : x.n, pai ? x.n : undefined).map((id) => arvore.find((y) => y.id === id)!);
+    if (deProduto.length === 1) return deProduto[0].pai ? { subcategoria: categoriaCruDoNo(deProduto[0].id) } : { categoria: categoriaCruDoNo(deProduto[0].id) };
+    const pais = new Set(deProduto.map((y) => y.pai));
+    if (deProduto.length > 1 && pais.size === 1) { const p = [...pais][0]; return p ? { categoria: categoriaCruDoNo(p) } : {}; }
+    return {};
+  }
   // o servidor só conhece os ids de product_categories: o nó fundido com um ramo dos serviços converte-se no id cru
   return x.pai ? { subcategoria: categoriaCruDoNo(x.id) } : { categoria: categoriaCruDoNo(x.id) };
 }

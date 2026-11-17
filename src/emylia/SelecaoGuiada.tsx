@@ -22,7 +22,7 @@ import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
 import { produtoParaTocar, useProdutosDoRamo } from "./real/pesquisaProdutos";
 import { orcLinhas } from "./ServicosCatalogo";
 import { FotoOuIlustracao, IconeServico, Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
-import { nosAbaixo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, type Obrigacao } from "./produtosVisita";
+import { nosDoRamo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, type Obrigacao } from "./produtosVisita";
 import {
   filtrarProdutos, ilustracaoDoCatalogo, medidaDaSugestao, nomeCurto, objetoDaPergunta, obrigacoesAMostrar, ordenarParaObjeto, resumoNecessidades,
   servicoLeitura, tilesServicos, tocarProdutoGuiado, type TileServico,
@@ -611,7 +611,7 @@ function PassoPergunta({ ctx, K, o, tiles, resolvido }: { ctx: P; K: Catalogo; o
     () => ordenarMobilidade(ordenarParaTroca(ordenarParaObjeto(produtosDoRamo(K, o.no, CONSUMIVEIS), obj?.comArtigo ?? null), obj?.comArtigo, K.arvore), mob),
     [K, o.no, obj?.comArtigo, mob],
   );
-  const ramo = useMemo(() => nosAbaixo(K.arvore, o.no), [K.arvore, o.no]);
+  const ramo = useMemo(() => nosDoRamo(K.arvore, o.no), [K.arvore, o.no]);
   const troca = !o.pergunta || resp === "nao" || (resp !== "sim" && (v.prod ?? []).some((p) => p.no && ramo.has(p.no)));
   const listaRef = useRef<HTMLDivElement>(null);
   // a resposta mais provável, destacada mas não escolhida (só enquanto não há resposta)
@@ -685,7 +685,7 @@ function PassoOutros({ ctx, K, obr }: { ctx: P; K: Catalogo; obr: Obrigacao[] })
   const { S, A, run, d } = ctx;
   const mob = d.f.mobilidade_reduzida === "Sim";
   const produtos = useMemo(() => {
-    const ramos = obr.map((o) => nosAbaixo(K.arvore, o.no));
+    const ramos = obr.map((o) => nosDoRamo(K.arvore, o.no));
     const fora = K.produtos.filter((p) => !CONSUMIVEIS.has(p.n) && !ramos.some((r) => p.no && r.has(p.no)));
     // os do ofício dos serviços escolhidos primeiro (ordem estável)
     const ofDe = (no: string | null) => { let x = no ? K.arvore.find((y) => y.id === no) : undefined; while (x?.pai) x = K.arvore.find((y) => y.id === x!.pai); return x?.id; };
@@ -803,7 +803,7 @@ function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
   // as instalações que vêm com um produto escolhido: no resumo vão no produto ("com instalação"), não numa linha à parte
   const instalados = new Set(prod.filter((p) => p.q > 0).map((p) => K.produtos.find((x) => x.id === p.id)?.servico).filter((s): s is SvcId => !!s));
   const txtProd = (ids: string[]) => ids.map((id) => { const p = nomeP(id)!; return `${encurtar(p.n).nome}${p.q !== 1 ? ` × ${nfmt(p.q)}` : ""}${p.cliente ? " (fornecido pelo cliente)" : ""}`; }).join(", ");
-  const ramos = obr.map((o) => nosAbaixo(K.arvore, o.no));
+  const ramos = obr.map((o) => nosDoRamo(K.arvore, o.no));
   const linha = (p: PassoSel): { t: string; falta?: boolean } => {
     switch (p.tipo) {
       case "escolhas": {
@@ -820,7 +820,7 @@ function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
         const o = p.o!;
         if (o.estado === "mantem") return { t: "Mantém" };
         if (o.estado === "cliente") return { t: "O cliente compra" };
-        const ids = prod.filter((x) => x.no && nosAbaixo(K.arvore, o.no).has(x.no)).map((x) => x.id);
+        const ids = prod.filter((x) => x.no && nosDoRamo(K.arvore, o.no).has(x.no)).map((x) => x.id);
         if (ids.length) return { t: txtProd(ids) };
         return { t: o.estado === "pergunta" ? "Falta dizer se mantém ou troca" : "Falta escolher o produto", falta: true };
       }
