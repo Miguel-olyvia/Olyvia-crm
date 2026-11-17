@@ -4,7 +4,11 @@
 // Catálogo verdadeiro pelo nome (e pela cor, nos produtos). O comercial revê antes de juntar. Só regras; o ecrã está em PlantaDivisao.
 
 /** Uma linha do Estúdio, como chega ao negócio. `par`: a peça da planta (junta o produto com a sua instalação). */
-export interface LinhaLevada { id: string; n: string; q: number; un: string; tipo: "produto" | "servico"; chave: string; cores?: string[]; par?: string }
+export interface LinhaLevada {
+  id: string; n: string; q: number; un: string; tipo: "produto" | "servico"; chave: string; cores?: string[]; par?: string;
+  /** 17/11: o produto escolhido no Estúdio (com o catálogo verdadeiro, já é o id do Catálogo): esse é o que entra, sem procurar outro. */
+  produtoId?: string;
+}
 export interface ServicoReal { n: string; un?: string }
 export interface ProdutoReal { id: string; n: string; servico?: string }
 export type Alvo = { tipo: "servico"; id: string; n: string } | { tipo: "produto"; id: string; n: string };
@@ -116,7 +120,12 @@ export function ligarAoCatalogo(linhas: readonly LinhaLevada[], servicos: Readon
   for (const l of ordem) {
     let alvo: Alvo | null = null, vemComProduto = false, unDiferente: string | undefined;
     if (l.tipo === "produto") {
-      const p = produtoPara(l.chave, l.cores, produtos);
+      // 17/11 (teste A-Z na Mudelar: a sanita Fly passava a Elegant, a torneira de lavatório a torneira de banheira, ao fechar a visita):
+      // o produto escolhido no Estúdio entra tal e qual (pelo id, ou pelo mesmo nome). Só um produto do catálogo de teste (sem par no
+      // Catálogo) procura o parecido pela categoria e pela cor
+      const exato = l.produtoId ? produtos.find((x) => x.id === l.produtoId) ?? produtos.find((x) => limpo(x.n).trim() === limpo(l.n).trim()) : undefined;
+      const doCatalogo = !!l.produtoId && /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(l.produtoId);
+      const p = exato ?? (doCatalogo ? null : produtoPara(l.chave, l.cores, produtos));
       if (p) { alvo = { tipo: "produto", id: p.id, n: p.n }; if (l.par && !["coluna_duche", "resguardo", "torneira"].includes(l.chave)) produtoDaPeca.set(l.par, p); }
     } else {
       const doProduto = l.par && l.chave.startsWith("instalar:") ? produtoDaPeca.get(l.par) : undefined;

@@ -27,14 +27,15 @@ export function linhasParaLevar(p: Projeto): LinhaLevada[] {
     let m: RegExpMatchArray | null;
     if ((m = l.id.match(/^prod-(.+)$/))) {
       const prod = produtoDaPeca(m[1]), tipo = tipoDaPeca(m[1]);
-      if (tipo) out.push({ ...base, tipo: "produto", chave: prod?.cat ?? tipo, cores: prod?.cores, par: m[1] });
+      // 17/11: com o id do produto escolhido (o do Catálogo verdadeiro): é esse que entra no negócio
+      if (tipo) out.push({ ...base, tipo: "produto", chave: prod?.cat ?? tipo, cores: prod?.cores, par: m[1], ...(prod ? { produtoId: prod.id } : {}) });
     } else if ((m = l.id.match(/^acomp-(.+)-(coluna_duche|resguardo|torneira)$/))) {
       const pecaId = m[1], cat = m[2];
       const id = p.acompanha[pecaId]?.[cat as "coluna_duche"] ?? (p.porColocar ?? []).find((x) => x.id === pecaId)?.acompanha?.[cat as "coluna_duche"];
-      out.push({ ...base, tipo: "produto", chave: cat, cores: produto(id)?.cores, par: pecaId });
+      if (id) out.push({ ...base, tipo: "produto", chave: cat, cores: produto(id)?.cores, par: pecaId, produtoId: id });
     } else if (l.id === "rev" || l.id === "pav") {
       const prod = produto(l.id === "rev" ? p.revestimento : p.pavimento);
-      out.push({ ...base, tipo: "produto", chave: l.id === "rev" ? "revestimento" : "pavimento", cores: prod?.cores });
+      out.push({ ...base, tipo: "produto", chave: l.id === "rev" ? "revestimento" : "pavimento", cores: prod?.cores, ...(prod ? { produtoId: prod.id } : {}) });
     } else if ((m = l.id.match(/^inst-(.+)$/))) {
       const tipo = tipoDaPeca(m[1]);
       if (tipo) out.push({ ...base, tipo: "servico", chave: `instalar:${tipo}`, par: m[1] });

@@ -20,6 +20,20 @@ describe("ligar o Estúdio ao Catálogo", () => {
     expect(produtoPara("toalheiro", [], PRODUTOS)).toBeNull();
   });
 
+  it("17/11 (teste A-Z: os produtos escolhidos eram trocados ao fechar a visita): o produto escolhido no Estúdio entra tal e qual", () => {
+    const UUID = "0b1c2d3e-0000-4000-8000-000000000001";
+    const lista = [...PRODUTOS, { id: UUID, n: "SANITA FLY SUSPENSO BRANCO MATE", servico: "loucas" }];
+    // pelo id, mesmo havendo outra sanita que «combina» melhor pela cor
+    const [a] = ligarAoCatalogo([L("prod-s", "produto", "sanita", 1, { cores: ["cinza"], produtoId: UUID, n: "SANITA FLY SUSPENSO BRANCO MATE" })], SERVICOS, lista);
+    expect(a.alvo).toMatchObject({ tipo: "produto", id: UUID });
+    // um produto do Catálogo que o negócio não tem: fica sem par (à vista), em vez de entrar outro qualquer
+    const [b] = ligarAoCatalogo([L("prod-x", "produto", "sanita", 1, { produtoId: "0b1c2d3e-0000-4000-8000-0000000000ff", n: "Outra sanita" })], SERVICOS, lista);
+    expect(b.alvo).toBeNull();
+    // um produto do catálogo de teste (sem par): procura o parecido, como antes
+    const [c] = ligarAoCatalogo([L("prod-t", "produto", "sanita", 1, { cores: ["cinza"], produtoId: "san-nexo-c" })], SERVICOS, lista);
+    expect(c.alvo?.id).toBe("p2");
+  });
+
   it("o serviço: pelo nome, sem acentos", () => {
     expect(servicoPara("demolicao", SERVICOS)?.id).toBe("demol");
     expect(servicoPara("teto", SERVICOS)?.id).toBe("teto");
