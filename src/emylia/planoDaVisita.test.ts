@@ -72,12 +72,17 @@ describe("o Estúdio ligado ao Catálogo", () => {
     expect(L.servicos.find((x) => x.sid === sid)).toMatchObject({ origem: "produto", q: 1 });
     expect(L.semPar.join(" ")).not.toMatch(/sanita/i);
   });
+  it("17/11: um pacote de mão de obra de um modelo inteiro («MO Modelo…») não é o par de retirar uma peça", () => {
+    const { S } = visita();
+    const L = projetoNoCatalogo(projeto(), S, lerCatalogo().produtos ?? []);
+    expect(L.servicos.some((x) => /^\s*mo\s+modelo/i.test(x.n))).toBe(false);
+  });
   it("os trabalhos têm o serviço do Catálogo; trocar, tirar, repor e juntar outro", () => {
     const { S } = visita();
     const K = lerCatalogo().produtos ?? [];
     let p = projeto();
     const L = projetoNoCatalogo(p, S, K);
-    const rev = L.servicos.find((s) => s.sid === "revest")!;
+    const rev = L.servicos.find((s) => s.sid === "demol")!;
     expect(rev.q).toBeGreaterThan(0);
     expect(L.produtos.length).toBeGreaterThan(0);
     // trocar o revestimento por outro serviço do Catálogo
@@ -87,7 +92,7 @@ describe("o Estúdio ligado ao Catálogo", () => {
     p = trocarServico(p, rev.chave, null);
     expect(projetoNoCatalogo(p, S, K).tirados.map((x) => x.chave)).toContain(rev.chave);
     p = reporServico(p, rev.chave);
-    expect(projetoNoCatalogo(p, S, K).servicos.find((s) => s.chave === rev.chave)?.sid).toBe("revest");
+    expect(projetoNoCatalogo(p, S, K).servicos.find((s) => s.chave === rev.chave)?.sid).toBe("demol");
     // juntar um serviço à mão, mudar a quantidade e tirá-lo
     p = juntarExtra(p, "eletr", 2);
     expect(projetoNoCatalogo(p, S, K).servicos.find((s) => s.chave === "extra:eletr")).toMatchObject({ q: 2, origem: "extra" });
@@ -99,9 +104,9 @@ describe("o Estúdio ligado ao Catálogo", () => {
     const { S, d } = visita();
     const K = lerCatalogo().produtos ?? [];
     const { d: d1 } = simularNoNegocio(d, projeto(), S, K);
-    expect(d1.visita.extra.revest).toBeGreaterThan(0);
-    const chave = projetoNoCatalogo(projeto(), S, K).servicos.find((s) => s.sid === "revest")!.chave;
+    expect(d1.visita.extra.demol).toBeGreaterThan(0);
+    const chave = projetoNoCatalogo(projeto(), S, K).servicos.find((s) => s.sid === "demol")!.chave;
     const { d: d2 } = simularNoNegocio(d1, trocarServico(projeto(), chave, null), S, K);
-    expect(d2.visita.extra.revest).toBeUndefined();
+    expect(d2.visita.extra.demol).toBeUndefined();
   });
 });

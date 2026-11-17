@@ -52,7 +52,8 @@ type ProdutoCat = ProdutoReal & { servico?: SvcId; fatorServico?: number; un?: s
 const temEstado = (S: Pick<Estado, "svc">): S is Estado => !!(S as Partial<Estado>).cfg;
 function servicosDe(S: Pick<Estado, "svc">): Record<string, ServicoReal> {
   const out: Record<string, ServicoReal> = { ...S.svc };
-  if (temEstado(S)) for (const i of CATALOGO_TODO) if (!out[i.id]) out[i.id] = { n: i.n, un: i.un };
+  // os pacotes de mão de obra de um modelo inteiro («MO Modelo 1 - Casa de Banho: Remoção de Banheira…») não são o par de uma linha só
+  if (temEstado(S)) for (const i of CATALOGO_TODO) if (!out[i.id] && !/^\s*mo\s+modelo\b/i.test(i.n)) out[i.id] = { n: i.n, un: i.un };
   return out;
 }
 const svcDe = (S: Pick<Estado, "svc">, sid: SvcId | undefined): Servico | undefined =>

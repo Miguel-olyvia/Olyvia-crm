@@ -34,6 +34,17 @@ describe("ligar o Estúdio ao Catálogo", () => {
     expect(c.alvo?.id).toBe("p2");
   });
 
+  it("17/11 (A-Z na Mudelar): o assentamento do revestimento e do pavimento vem com o produto que o traz (não conta duas vezes)", () => {
+    const lista = [...PRODUTOS, { id: "rv", n: "Revestimento CERÂMICO ATREZO", servico: "c-inst-rev" }, { id: "pv", n: "Pavimento BRERA" }];
+    const r = ligarAoCatalogo([
+      L("rev", "produto", "revestimento", 22, { produtoId: "rv", n: "Revestimento CERÂMICO ATREZO" }), L("rev-inst", "servico", "revestimento", 20),
+      L("pav", "produto", "pavimento", 4.36, { produtoId: "pv", n: "Pavimento BRERA" }), L("pav-inst", "servico", "pavimento", 3.96),
+    ], SERVICOS, lista);
+    expect(r.find((x) => x.linhas.some((l) => l.id === "rev-inst"))?.vemComProduto).toBe(true);
+    // o pavimento sem serviço ligado fica com o assentamento da planta
+    expect(r.find((x) => x.linhas.some((l) => l.id === "pav-inst"))?.vemComProduto).toBeUndefined();
+  });
+
   it("o serviço: pelo nome, sem acentos", () => {
     expect(servicoPara("demolicao", SERVICOS)?.id).toBe("demol");
     expect(servicoPara("teto", SERVICOS)?.id).toBe("teto");

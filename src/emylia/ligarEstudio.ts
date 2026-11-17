@@ -126,9 +126,15 @@ export function ligarAoCatalogo(linhas: readonly LinhaLevada[], servicos: Readon
       const exato = l.produtoId ? produtos.find((x) => x.id === l.produtoId) ?? produtos.find((x) => limpo(x.n).trim() === limpo(l.n).trim()) : undefined;
       const doCatalogo = !!l.produtoId && /^[0-9a-f]{8}-[0-9a-f]{4}-/.test(l.produtoId);
       const p = exato ?? (doCatalogo ? null : produtoPara(l.chave, l.cores, produtos));
-      if (p) { alvo = { tipo: "produto", id: p.id, n: p.n }; if (l.par && !["coluna_duche", "resguardo", "torneira"].includes(l.chave)) produtoDaPeca.set(l.par, p); }
+      if (p) {
+        alvo = { tipo: "produto", id: p.id, n: p.n };
+        if (l.par && !["coluna_duche", "resguardo", "torneira"].includes(l.chave)) produtoDaPeca.set(l.par, p);
+        // 17/11 (A-Z na Mudelar: a mão de obra do revestimento e do pavimento contava duas vezes): o assentamento vem com o produto, se ele o traz
+        if (l.chave === "revestimento" || l.chave === "pavimento") produtoDaPeca.set(`@${l.chave}`, p);
+      }
     } else {
-      const doProduto = l.par && l.chave.startsWith("instalar:") ? produtoDaPeca.get(l.par) : undefined;
+      const doProduto = l.par && l.chave.startsWith("instalar:") ? produtoDaPeca.get(l.par)
+        : l.chave === "revestimento" || l.chave === "pavimento" ? produtoDaPeca.get(`@${l.chave}`) : undefined;
       if (doProduto?.servico) vemComProduto = true;
       const s = servicoPara(l.chave, servicos);
       if (s) { alvo = { tipo: "servico", id: s.id, n: s.n }; if (s.un && unidade(s.un) !== unidade(l.un)) unDiferente = s.un; }
