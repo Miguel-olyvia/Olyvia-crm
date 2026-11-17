@@ -30,6 +30,8 @@ import {
 import { ARTIGOS_DEM0, vSoltoDe, type ModoEntulho } from "./entulho";
 import { entulhoDoProduto, m3PadraoDoNome, tipoDoTexto } from "./entulhoPadrao";
 import { GatilhoCampo, NomeInline, NumeroInline, Segmentos, SeletorPesquisa } from "./pecasFicha";
+import { SeletorProdutoServidor } from "./SeletorProdutoServidor";
+import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
 import { normal } from "./catalogo";
 import { FASES_OBRA, fasesDoServico, fasesPadrao, type FaseObra } from "./fasesObra";
 
@@ -156,6 +158,8 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
   const nid = (pref: string, L: { id: string }[]) => pref + (Math.max(0, ...L.map((x) => Number(x.id.replace(/\D/g, "")) || 0)) + 1);
   const velhos = new Set(consumiveisDesatualizados(rec, C.par.mesesDesatualizado).map((x) => x.id));
   const ligados = produtosQueTrazem(K, sid);
+  // 17/11: com o Catálogo leve K.produtos não é a lista toda: os produtos procuram-se no servidor (SeletorProdutoServidor). Sem ele (protótipo, Catálogo inteiro), a lista de sempre.
+  const orgPesquisa = catalogoParcial() ? orgDoCatalogoLido() : null;
   const partes = partesCusto(c, S.cfg.estrutura);
   const regraAtual = K.qtdDe?.[sid];
   const regras: { t: string; r: Regra }[] = regraAtual && !REGRAS_QTD.some((x) => chaveRegra(x.r) === chaveRegra(regraAtual)) ? [...REGRAS_QTD, { t: textoRegra(regraAtual), r: regraAtual }] : REGRAS_QTD;
@@ -404,9 +408,15 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
         ) : <p className={cn(NOTA, "mt-3")}>Sem consumíveis na receita.</p>}
         <div className="mt-1 flex flex-wrap items-center justify-between gap-2 border-t border-border pt-2">
           <span className="flex flex-wrap items-center gap-x-4">
-            <SeletorPesquisa rotulo="Juntar consumível" gatilho={<Juntar t="Juntar consumível" />} placeholder="Nome, marca ou referência"
-              opcoes={K.produtos.filter((p) => !rec.cons.some((x) => x.n === p.n)).map((p) => ({ v: p.id, t: p.n, sub: [p.marca, p.sku].filter(Boolean).join(" · ") || p.fornecedor, procura: `${p.sku ?? ""} ${p.sub ?? ""}`, valor: `${eur(p.custo)} €/${p.un}`, icone: <FotoOuIlustracao fotos={p.fotos} nome={p.n} k={p.img ?? "generico"} className="h-9 w-9" /> }))}
-              onEscolher={(id) => { const p = K.produtos.find((y) => y.id === id); if (!p) return; const nId = nid("c", rec.cons); setNova(nId); editar((r) => { r.cons.push(consumivelDe(p, nId, 1)); }, `${p.n} juntado`); }} />
+            {orgPesquisa ? (
+              <SeletorProdutoServidor org={orgPesquisa} rotulo="Juntar consumível" gatilho={<Juntar t="Juntar consumível" />} excluir={(l) => rec.cons.some((x) => x.n === l.nome)}
+                valorDe={(l) => `${eur(l.custo ?? 0)} €/${l.unidade ?? "un"}`} aoErro={(m) => anunciar(`Não foi possível juntar o produto: ${m}`)}
+                aoEscolher={(p) => { const nId = nid("c", rec.cons); setNova(nId); editar((r) => { r.cons.push(consumivelDe(p, nId, 1)); }, `${p.n} juntado`); }} />
+            ) : (
+              <SeletorPesquisa rotulo="Juntar consumível" gatilho={<Juntar t="Juntar consumível" />} placeholder="Nome, marca ou referência"
+                opcoes={K.produtos.filter((p) => !rec.cons.some((x) => x.n === p.n)).map((p) => ({ v: p.id, t: p.n, sub: [p.marca, p.sku].filter(Boolean).join(" · ") || p.fornecedor, procura: `${p.sku ?? ""} ${p.sub ?? ""}`, valor: `${eur(p.custo)} €/${p.un}`, icone: <FotoOuIlustracao fotos={p.fotos} nome={p.n} k={p.img ?? "generico"} className="h-9 w-9" /> }))}
+                onEscolher={(id) => { const p = K.produtos.find((y) => y.id === id); if (!p) return; const nId = nid("c", rec.cons); setNova(nId); editar((r) => { r.cons.push(consumivelDe(p, nId, 1)); }, `${p.n} juntado`); }} />
+            )}
             <button type="button" className="inline-flex min-h-11 items-center px-1 text-[15px] text-muted-foreground hover:text-foreground"
               onClick={() => { const nId = nid("c", rec.cons); setNova(nId); editar((r) => { r.cons.push({ id: nId, n: "Novo consumível", q: 1, un: "un", preco: 1, fornecedor: "Por escolher", data: HOJE }); }, "Consumível juntado"); }}>
               ou escrever à mão
@@ -436,10 +446,15 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
             ))}
             {ligados.length > 12 && <li className={cn(NOTA, "py-2")}>E mais {ligados.length - 12} (ver em Ligações).</li>}
           </ul>
-        ) : <p className={cn(NOTA, "mt-3")}>Nenhum produto traz este serviço.</p>}
-        <SeletorPesquisa rotulo="Ligar um produto" gatilho={<Juntar t="Ligar um produto" />} placeholder="Nome, marca ou referência"
-          opcoes={K.produtos.filter((p) => p.servico !== sid).map((p) => ({ v: p.id, t: p.n, sub: [p.marca, p.sku].filter(Boolean).join(" · ") || p.fornecedor, procura: `${p.sku ?? ""} ${p.sub ?? ""}`, valor: `${eur(precoProduto(p, S.cfg.alvo))} €`, icone: <FotoOuIlustracao fotos={p.fotos} nome={p.n} k={p.img ?? "generico"} className="h-9 w-9" /> }))}
-          onEscolher={(id) => { const p = K.produtos.find((y) => y.id === id); if (!p) return; mudarCatalogo((k) => { const y = k.produtos.find((z) => z.id === id); if (y) { y.servico = sid; y.fatorServico = 1; } }); anunciar(`${p.n} passa a trazer este serviço`); }} />
+        ) : <p className={cn(NOTA, "mt-3")}>{orgPesquisa ? "Nenhum dos produtos já lidos traz este serviço; os outros procuram-se em «Ligar um produto»." : "Nenhum produto traz este serviço."}</p>}
+        {orgPesquisa ? (
+          <SeletorProdutoServidor org={orgPesquisa} rotulo="Ligar um produto" gatilho={<Juntar t="Ligar um produto" />} noCatalogo aoErro={(m) => anunciar(`Não foi possível ligar o produto: ${m}`)}
+            aoEscolher={(p) => { mudarCatalogo((k) => { const y = k.produtos.find((z) => z.id === p.id); if (y) { y.servico = sid; y.fatorServico = 1; } }); anunciar(`${p.n} passa a trazer este serviço`); }} />
+        ) : (
+          <SeletorPesquisa rotulo="Ligar um produto" gatilho={<Juntar t="Ligar um produto" />} placeholder="Nome, marca ou referência"
+            opcoes={K.produtos.filter((p) => p.servico !== sid).map((p) => ({ v: p.id, t: p.n, sub: [p.marca, p.sku].filter(Boolean).join(" · ") || p.fornecedor, procura: `${p.sku ?? ""} ${p.sub ?? ""}`, valor: `${eur(precoProduto(p, S.cfg.alvo))} €`, icone: <FotoOuIlustracao fotos={p.fotos} nome={p.n} k={p.img ?? "generico"} className="h-9 w-9" /> }))}
+            onEscolher={(id) => { const p = K.produtos.find((y) => y.id === id); if (!p) return; mudarCatalogo((k) => { const y = k.produtos.find((z) => z.id === id); if (y) { y.servico = sid; y.fatorServico = 1; } }); anunciar(`${p.n} passa a trazer este serviço`); }} />
+        )}
 
         <h3 className="mt-6 text-base font-semibold">Na visita</h3>
         <div className="mt-2 grid max-w-md gap-1">

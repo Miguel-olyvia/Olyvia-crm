@@ -53,6 +53,14 @@ describe("armazemNegocioEmylia", () => {
     expect(m.lerNegocios.mock.calls[0][1]).toBe(ORG);
   });
 
+  // 17/11: cat_ler_catalogo trazia os 29 785 produtos da Mudelar (statement timeout): o armazém pede a leitura LEVE (cat_ler_catalogo_servicos)
+  it("lê o catálogo na versão leve (e tolerante)", async () => {
+    obterArmazem(sb, "org-leve");
+    await esperar();
+    const c = m.carregarCatalogo.mock.calls.at(-1)!;
+    expect(c[3]).toMatchObject({ leve: true, tolerante: true });
+  });
+
   it("o estado é de uma organização real: sem stock nem técnicos de exemplo", () => {
     const a = obterArmazem(sb, ORG);
     expect(a.S.semExemplos).toBe(true);

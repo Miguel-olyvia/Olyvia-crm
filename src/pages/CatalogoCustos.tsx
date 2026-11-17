@@ -13,9 +13,10 @@ import { seed, type Estado } from "@/emylia/motor";
 import { lerCustos, useCustos } from "@/emylia/v2/custosStore";
 import { lerCatalogo as lerCatalogoStore, useCatalogo } from "@/emylia/v2/catalogoStore";
 import { CatalogoV1 } from "@/emylia/CatalogoV1";
-import type { RotaCatalogo } from "@/emylia/catalogoRotas";
+import { usaLeituraLeve, type RotaCatalogo } from "@/emylia/catalogoRotas";
 import type { Ctx } from "@/emylia/pecas";
-import { carregarCatalogo, type CatalogoCarregado } from "@/emylia/real/carregarCatalogo";
+import { LeituraAtrasada, carregarCatalogo, type CatalogoCarregado } from "@/emylia/real/carregarCatalogo";
+import { aoRegistarProduto, limparCatalogoLido, linhaDeProduto } from "@/emylia/real/catalogoLeve";
 import { diferencasCatalogo, executarCatalogo, fotografar, type Rpc } from "@/emylia/real/gravarCatalogo";
 import { usePaginaInteira } from "@/hooks/usePaginaInteira";
 import "@/emylia/prototipo.css";
@@ -45,10 +46,23 @@ export default function CatalogoCustos({ rota }: { rota?: RotaCatalogo } = {}) {
   const aGravar = useRef(false);
   const queryClient = useQueryClient();
 
+  // 17/11: nas páginas de Serviços lê-se o Catálogo LEVE (cat_ler_catalogo_servicos: só os produtos dos consumos, 145 na Mudelar em vez de 29 785; a leitura inteira
+  // dava statement timeout). Os produtos e as Ligações precisam da lista toda: ficam com a leitura inteira. Sem rota (endereço antigo): inteira.
+  const leve = usaLeituraLeve(rota?.seccao);
+  // 17/11: um contador de pedidos: uma leitura que acaba depois de outra mais nova (ex.: a leve de Serviços depois da inteira de Ligações) não se aplica por cima
+  const pedido = useRef(0);
   const carregar = useCallback(async (o: string) => {
-    base.current = await carregarCatalogo(supabase, o, S);
+    const eu = ++pedido.current;
+    try {
+      base.current = await carregarCatalogo(supabase, o, S, { leve, descartar: () => eu !== pedido.current });
+    } catch (e) {
+      if (e instanceof LeituraAtrasada) return;
+      throw e;
+    }
     setTique((t) => t + 1);
-  }, [S]);
+  }, [S, leve]);
+  // ao sair, a página esquece o estado parcial e a organização (o protótipo e as outras organizações não os herdam)
+  useEffect(() => () => { pedido.current++; limparCatalogoLido(); }, []);
 
   useEffect(() => {
     if (!org) return;
@@ -57,6 +71,15 @@ export default function CatalogoCustos({ rota }: { rota?: RotaCatalogo } = {}) {
     carregar(org).then(() => { if (vivo) setPronto(true); }).catch((e: Error) => { if (vivo) setErroLer(e.message); });
     return () => { vivo = false; };
   }, [org, carregar]);
+
+  // 17/11: um produto escolhido de uma pesquisa no servidor entra no Catálogo em memória (catalogoLeve.registarProdutoLido). Para o autosave não o gravar como NOVO (duplicado),
+  // entra primeiro no «antes» e na base: assim a ligação ao serviço grava-se pelo id dele.
+  useEffect(() => aoRegistarProduto((p) => {
+    const b = base.current;
+    if (!b || b.produtos.some((x) => x.id === p.id)) return;
+    b.foto.K.produtos.push(p);
+    b.produtos.push(linhaDeProduto(p));
+  }), []);
 
   // o que os ecrãs mudam: as stores (useCustos/useCatalogo) e S.svc (pelo run)
   const C = useCustos();

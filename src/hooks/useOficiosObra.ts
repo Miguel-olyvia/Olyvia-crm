@@ -10,6 +10,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { hrFrom, hrRpc } from "@/lib/hr/hrDb";
+import { funcaoNomeadaEmFalta } from "@/emylia/real/lerCatalogo";
 import { useCompany } from "@/contexts/CompanyContext";
 
 export interface OficioObra {
@@ -29,7 +30,10 @@ export function useOficiosObra(ativo = true) {
       if (!orgId) return { oficios: [], semAcesso: false };
       const { data: linhas, error } = await hrFrom("ops_skill").select("id, nome, ativo").eq("organization_id", orgId);
       if (!error && linhas?.length) return { oficios: (linhas as OficioObra[]).sort(porNome), semAcesso: false };
-      const { data: cat, error: erroCat } = await hrRpc("cat_ler_catalogo", { p_org: orgId });
+      // 17/11: só se leem os perfis; cat_ler_catalogo_servicos traz o mesmo `perfis` sem os 29 785 produtos. Sem a função na base, a antiga.
+      let lido = await hrRpc("cat_ler_catalogo_servicos", { p_org: orgId });
+      if (funcaoNomeadaEmFalta(lido.error, "cat_ler_catalogo_servicos")) lido = await hrRpc("cat_ler_catalogo", { p_org: orgId });
+      const { data: cat, error: erroCat } = lido;
       if (erroCat) return { oficios: [], semAcesso: true };
       const perfis = ((cat as { perfis?: OficioObra[] } | null)?.perfis ?? []).map((p) => ({ id: p.id, nome: p.nome, ativo: p.ativo }));
       return { oficios: perfis.sort(porNome), semAcesso: false };

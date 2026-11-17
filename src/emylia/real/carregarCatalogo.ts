@@ -13,6 +13,7 @@ import { montarCatalogo, type CatalogoMontado, type LinhaProduto } from "./catal
 import { lerCatalogo, linhasDe } from "./lerCatalogo";
 import { fotografar, type FotoCatalogo } from "./gravarCatalogo";
 import { carregarLinhasModelo } from "./linhasModelo";
+import { definirArvoreProdutos, definirCatalogoLido } from "./catalogoLeve";
 
 export interface CatalogoCarregado {
   org: string; M: CatalogoMontado; produtos: LinhaProduto[]; foto: FotoCatalogo;
@@ -42,14 +43,26 @@ export function aplicarCatalogo(org: string, M: CatalogoMontado, produtos: Linha
 }
 
 /** Lê da base e aplica. 29/10: também as linhas de negócio (linhasModelo.ts); se falharem, ficam as do código. */
+/** 17/11: a leitura chegou depois de outra mais nova (`descartar`): não se aplicou ao Catálogo. Quem chamou ignora-a. */
+export class LeituraAtrasada extends Error {
+  constructor() { super("Leitura do Catálogo atrasada: descartada."); this.name = "LeituraAtrasada"; }
+}
+
 export async function carregarCatalogo(sb: SupabaseClient, org: string, S: Estado,
-  opcoes: { semLinhasModelo?: boolean; tolerante?: boolean } = {}): Promise<CatalogoCarregado> {
+  opcoes: { semLinhasModelo?: boolean; tolerante?: boolean; leve?: boolean; descartar?: () => boolean } = {}): Promise<CatalogoCarregado> {
   // 11/11 (F1): nos Negócios (`tolerante`), um erro a ler o Catálogo não para o ecrã: monta-se vazio e devolve-se o erro (quem chama
   // avisa e não grava os negócios, que sem o Catálogo perdiam os serviços). Na página do Catálogo o erro continua a subir.
   let erro: string | undefined;
-  const ler = opcoes.tolerante ? lerCatalogo(sb, org).catch((e: Error) => { erro = e.message || "Não foi possível ler o Catálogo."; return linhasDe(null); }) : lerCatalogo(sb, org);
+  // 17/11: `leve` lê cat_ler_catalogo_servicos (só os produtos dos consumos dos serviços): Negócios, Serviços e Estúdio. Os produtos escolhem-se por pesquisa no servidor.
+  const ler = opcoes.tolerante ? lerCatalogo(sb, org, { leve: opcoes.leve }).catch((e: Error) => { erro = e.message || "Não foi possível ler o Catálogo."; return linhasDe(null); }) : lerCatalogo(sb, org, { leve: opcoes.leve });
   // 09/11 (20270111100000): quem só lê as obras não pode ler as linhas de negócio (neg_ler_linhas_modelo): ficam as do código
   const [L] = await Promise.all([ler, opcoes.semLinhasModelo ? Promise.resolve([]) : carregarLinhasModelo(sb, org).catch(() => [])]);
-  const c = aplicarCatalogo(org, montarCatalogo(L, catalogo0(), seed().svc), L.produtos, S);
+  // 17/11: uma leitura atrasada (já há outra mais nova) não se aplica por cima: uma leve não pode ficar sobre uma inteira
+  if (opcoes.descartar?.()) throw new LeituraAtrasada();
+  const M = montarCatalogo(L, catalogo0(), seed().svc);
+  // 17/11: os ecrãs sabem assim que K.produtos é parcial (leve) e de que organização pesquisar os outros; e como se converte a árvore dos produtos
+  definirCatalogoLido(org, !!opcoes.leve && !erro);
+  definirArvoreProdutos(M.K.arvore, L.tabelas?.categoriasProduto);
+  const c = aplicarCatalogo(org, M, L.produtos, S);
   return erro ? { ...c, erro } : c;
 }

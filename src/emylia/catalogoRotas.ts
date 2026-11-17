@@ -13,6 +13,9 @@ export interface RotaCatalogo {
   ir: (caminho: string, op?: { substituir?: boolean }) => void;
 }
 
+/** 17/11: só as secções de Serviços que não escolhem produtos da lista toda leem o Catálogo LEVE (cat_ler_catalogo_servicos). Os Produtos e as Ligações precisam da lista toda; sem rota, inteira. */
+export const usaLeituraLeve = (seccao: SeccaoCatalogo | undefined): boolean => !!seccao && seccao !== "produtos" && seccao !== "ligacoes";
+
 export const CAMINHO_SECCAO: Record<SeccaoCatalogo, string> = {
   servicos: "/catalogo/servicos",
   produtos: "/catalogo/produtos",

@@ -57,7 +57,8 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
       // 30/10 (20270101340000): os papéis do RH; aqui, quem vê todos (pessoas.edit pelo perfil da Olyvia)
       if (fn === "neg_meus_papeis") return { data: { papeis: [], pessoa: null, todos: true }, error: null };
       if (fn === "fn_modo_teste_para_mim") return { data: modoTeste.on, error: null };
-      if (fn === "cat_ler_catalogo") return { data: CATALOGO, error: null };
+      // 17/11: os Negócios leem o Catálogo LEVE (cat_ler_catalogo_servicos); a leitura inteira só serve de reserva
+      if (fn === "cat_ler_catalogo_servicos" || fn === "cat_ler_catalogo") return { data: CATALOGO, error: null };
       if (fn === "neg_ler_negocios") return { data: [NEGOCIO], error: null };
       // 20261231999000: as obras dos negócios lêem-se ao lado (aqui, nenhuma)
       if (fn === "obra_ler_negocios") return { data: [], error: null };
@@ -71,6 +72,14 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
       return { data: null, error: { message: "inesperado: " + fn } };
     });
     gravarNovaLead.mockResolvedValue({ entityId: "44444444-4444-4444-a444-444444444444", leadId: null, negocioId: "55555555-5555-4555-a555-555555555555" });
+  });
+
+  // 17/11: cat_ler_catalogo trazia os 29 785 produtos da Mudelar (32 MB, statement timeout). Os Negócios leem a versão leve e não a inteira.
+  it("lê o Catálogo LEVE (cat_ler_catalogo_servicos) e não o inteiro (cat_ler_catalogo)", async () => {
+    render(comQuery(<MemoryRouter><NegociosEmylia /></MemoryRouter>));
+    await waitFor(() => expect(screen.queryAllByText("Marta Lima").length).toBeGreaterThan(0), { timeout: 8000 });
+    expect(rpc).toHaveBeenCalledWith("cat_ler_catalogo_servicos", { p_org: ORG });
+    expect(rpc.mock.calls.filter(([fn]) => fn === "cat_ler_catalogo")).toHaveLength(0);
   });
 
   it("lê os negócios da organização ativa e abrir um negócio não grava nada", async () => {

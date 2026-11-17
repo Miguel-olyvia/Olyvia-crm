@@ -18,6 +18,8 @@ import { useCatalogo } from "./v2/catalogoStore";
 import { useCustos } from "./v2/custosStore";
 import { type Catalogo, type Produto } from "./v2/catalogoModelo";
 import { CONSUMIVEIS } from "./equipamentosCliente";
+import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
+import { produtoParaTocar, useProdutosDoRamo } from "./real/pesquisaProdutos";
 import { orcLinhas } from "./ServicosCatalogo";
 import { FotoOuIlustracao, IconeServico, Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
 import { nosAbaixo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, type Obrigacao } from "./produtosVisita";
@@ -489,10 +491,12 @@ function VerMais({ n, onMais }: { n: number; onMais: () => void }) {
 }
 
 /* ================================================================== uma lista de produtos (pesquisa, filtros, os primeiros) */
-function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe }: {
+function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe, servidor }: {
   ctx: P; K: Catalogo; produtos: Produto[]; onTocar: (p: Produto) => "juntou" | "tirou" | void; rotulo: string;
   /** Agrupar pelas fases da obra (Mais produtos). */
   faseDe?: (p: Produto) => FaseObra;
+  /** 17/11: Catálogo leve: os produtos (do ramo `no`, ou todos) procuram-se no servidor com o texto escrito, em vez de se filtrar `produtos`; sem os filtros de tipo e de fase. */
+  servidor?: { org: string; no: string | null };
 }) {
   const { A, run, d } = ctx;
   const reduzir = useReduzir();
@@ -500,16 +504,34 @@ function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe }: {
   const [cat, setCat] = useState<string | null>(null);
   const [fase, setFase] = useState<FaseObra | null>(null);
   const [n, setN] = useState(PRIMEIROS_PROD);
-  const cats = useMemo(() => categoriasDaLista(produtos, K.arvore), [produtos, K.arvore]);
-  const lista = useMemo(() => {
+  const srv = useProdutosDoRamo(servidor?.org ?? null, K.arvore, servidor?.no ?? null, q, !!servidor);
+  const [erroTocar, setErroTocar] = useState<string | null>(null);
+  const lendo = useRef(false);
+  const [aLer, setALer] = useState(false);
+  const cats = useMemo(() => (servidor ? [] : categoriasDaLista(produtos, K.arvore)), [produtos, K.arvore, servidor]);
+  const filtrada = useMemo(() => {
     const f = filtrarProdutos(produtos, K.arvore, { q });
     const t = cat ? f.filter((p) => categoriaFiltro(p, K.arvore) === cat) : f;
     return faseDe ? filtrarPorFase(t, fase, (p) => [faseDe(p)]) : t;
   }, [produtos, K.arvore, q, cat, fase]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lista = servidor ? srv.produtos.filter((p) => !CONSUMIVEIS.has(p.n)) : filtrada;
+  const haMais = servidor ? srv.maisPaginas : lista.length > n;
+  const grande = servidor ? true : produtos.length > PRIMEIROS_PROD;
+  // juntar lê o produto inteiro (traz o serviço que instala) e mete-o no Catálogo antes de o motor o usar; tirar só precisa do id
+  const tocarCartao = (p: Produto): "juntou" | "tirou" | void => {
+    if (!servidor) return onTocar(p);
+    if (lendo.current) return undefined; // um toque durante a leitura não a repete
+    lendo.current = true; setALer(true); setErroTocar(null);
+    void produtoParaTocar(servidor.org, p, (d.visita.prod ?? []).some((x) => x.id === p.id)).then((x) => {
+      if (!x.ok) { setErroTocar(x.erro); return; }
+      if (onTocar(x.v) === "juntou") vibrar(10, reduzir);
+    }).finally(() => { lendo.current = false; setALer(false); });
+    return undefined;
+  };
   const limpar = () => { setQ(""); setCat(null); setFase(null); setN(PRIMEIROS_PROD); };
   const escolhido = new Map((d.visita.prod ?? []).map((p) => [p.id, p]));
   const sids = servicosVisita(d);
-  const visiveis = lista.slice(0, n);
+  const visiveis = servidor ? lista : lista.slice(0, n);
   const animar = visiveis.length <= ANIMAR_ATE;
   const grupos = faseDe ? porFase(visiveis, faseDe) : [{ fase: 0, nome: "", itens: visiveis }];
   let idx = 0;
@@ -521,7 +543,7 @@ function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe }: {
     return (
       <CartaoProduto key={p.id} nome={nome} nomeCompleto={p.n} detalhe={[detalhe, p.marca].filter(Boolean).join(" · ")} preco={precoUnitario(p, ctx.S.cfg.alvo)} un={p.un}
         img={ilustracaoDoCatalogo(K.arvore, p)} fotos={p.fotos} on={!!ja} trazInstalacao={!!p.servico} animar={animar} entrada={cascata(j, reduzir)}
-        onTocar={() => { if (onTocar(p) === "juntou") vibrar(10, reduzir); }}>
+        onTocar={() => { if (tocarCartao(p) === "juntou") vibrar(10, reduzir); }}>
         {ja && (
           <QtdMudar id={`pq-${p.id}-${d.id}`} valor={ja.q} un={p.un} nome={nome} texto={textoQtd({ q: ja.q, un: p.un, daMedida })}
             onMudar={(x) => run(() => A.produtoQtd(d.id, p.id, x))} />
@@ -539,18 +561,23 @@ function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe }: {
   };
   return (
     <div className="space-y-3">
-      {faseDe ? (
+      {faseDe && !servidor ? (
         <Filtros q={q} setQ={(x) => { setQ(x); setN(PRIMEIROS_PROD); }} fase={fase} setFase={(f) => { setFase(f); setN(PRIMEIROS_PROD); }}
           tipo={cat} setTipo={(x) => { setCat(x); setN(PRIMEIROS_PROD); }} tipos={cats} n={lista.length} nomes={["produto", "produtos", "Nenhum produto"]}
-          pesquisa={produtos.length > PRIMEIROS_PROD ? { rotulo: `Procurar em ${rotulo.toLowerCase()}`, ph: "Procurar: nome, marca, referência…" } : undefined} />
+          pesquisa={grande ? { rotulo: `Procurar em ${rotulo.toLowerCase()}`, ph: "Procurar: nome, marca, referência…" } : undefined} />
       ) : (
         <>
-          {produtos.length > PRIMEIROS_PROD && <Pesquisa valor={q} onMudar={(x) => { setQ(x); setN(PRIMEIROS_PROD); }} rotulo={`Procurar em ${rotulo.toLowerCase()}`} ph="Procurar: nome, marca, referência…" />}
-          <FiltrosFila quebra opcoes={cats} ativo={cat} onMudar={(x) => { setCat(x); setN(PRIMEIROS_PROD); }} rotulo="Filtrar por tipo" />
+          {grande && <Pesquisa valor={q} onMudar={(x) => { setQ(x); setN(PRIMEIROS_PROD); }} rotulo={`Procurar em ${rotulo.toLowerCase()}`} ph="Procurar: nome, marca, referência…" />}
+          {!servidor && <FiltrosFila quebra opcoes={cats} ativo={cat} onMudar={(x) => { setCat(x); setN(PRIMEIROS_PROD); }} rotulo="Filtrar por tipo" />}
           {q.trim() && lista.length > 0 && <p className="text-sm text-muted-foreground" aria-live="polite">{plural(lista.length, "produto", "produtos")}</p>}
         </>
       )}
-      {!lista.length ? (
+      {erroTocar && <p role="alert" className="text-[15px] text-destructive">Não foi possível juntar o produto: {erroTocar}</p>}
+      {aLer && <p role="status" className="text-[15px] text-muted-foreground">A ler o produto…</p>}
+      {servidor && srv.erro && <p role="alert" className="text-[15px] text-destructive">Não foi possível procurar: {srv.erro}</p>}
+      {servidor && srv.aCarregar && !lista.length ? (
+        <p className="text-[15px] text-muted-foreground" aria-live="polite">A procurar…</p>
+      ) : !lista.length ? (
         <Vazio texto={q.trim() ? `Nada com "${q.trim()}". Procure pela marca ou pela referência, ou tire o filtro.` : "Não há produtos com estes filtros."}
           acao={q.trim() || cat || fase ? "Limpar a pesquisa e os filtros" : undefined} onAcao={limpar} img="generico" />
       ) : faseDe ? (
@@ -569,7 +596,7 @@ function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe }: {
           <ul className={GRELHA_PROD} aria-label={rotulo}>{visiveis.map(cartao)}</ul>
         </LayoutGroup>
       )}
-      {lista.length > n && <VerMais n={Math.min(MAIS, lista.length - n)} onMais={() => setN((x) => x + MAIS)} />}
+      {haMais && <VerMais n={servidor ? Math.min(MAIS, Math.max(srv.total - lista.length, 1)) : Math.min(MAIS, lista.length - n)} onMais={() => (servidor ? srv.maisUma() : setN((x) => x + MAIS))} />}
     </div>
   );
 }
@@ -627,7 +654,8 @@ function PassoPergunta({ ctx, K, o, tiles, resolvido }: { ctx: P; K: Catalogo; o
       )}
       {troca && (
         <div ref={listaRef} className="scroll-mt-24">
-          <ListaProdutos ctx={ctx} K={K} produtos={produtos} onTocar={tocar} rotulo={obj ? `Produtos: ${obj.comArtigo}` : "Produtos"} />
+          <ListaProdutos ctx={ctx} K={K} produtos={produtos} onTocar={tocar} rotulo={obj ? `Produtos: ${obj.comArtigo}` : "Produtos"}
+            servidor={catalogoParcial() && orgDoCatalogoLido() ? { org: orgDoCatalogoLido()!, no: o.no } : undefined} />
         </div>
       )}
     </div>
@@ -677,7 +705,7 @@ function PassoOutros({ ctx, K, obr }: { ctx: P; K: Catalogo; obr: Obrigacao[] })
     }
     return f;
   };
-  return <ListaProdutos ctx={ctx} K={K} produtos={produtos} rotulo="Mais produtos" faseDe={faseDe} onTocar={(p) => { let r: "juntou" | "tirou" = "tirou"; run(() => { r = tocarProduto(A, K, d, p); }); return r; }} />;
+  return <ListaProdutos ctx={ctx} K={K} produtos={produtos} rotulo="Mais produtos" faseDe={faseDe} servidor={catalogoParcial() && orgDoCatalogoLido() ? { org: orgDoCatalogoLido()!, no: null } : undefined} onTocar={(p) => { let r: "juntou" | "tirou" = "tirou"; run(() => { r = tocarProduto(A, K, d, p); }); return r; }} />;
 }
 
 /* ================================================================== O que o cliente fornece, por serviço */

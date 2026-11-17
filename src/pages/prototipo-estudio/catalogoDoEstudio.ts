@@ -29,7 +29,7 @@ export function useCatalogoDoEstudio(): CatalogoDoEstudio {
       try {
         if (!S) {
           const novo = seed(); novo.deals = []; novo.clientes = []; novo.deal = null;
-          await carregarCatalogo(supabase, org, novo);
+          await carregarCatalogo(supabase, org, novo, { leve: true });
           if (!ativo) return;
           definirEstadoVivo(novo, org);
         }

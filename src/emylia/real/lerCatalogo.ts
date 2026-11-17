@@ -89,6 +89,9 @@ type Resposta = { data?: unknown; error?: { code?: string; message?: string } | 
 const funcaoEmFalta = (e: { code?: string; message?: string } | null | undefined) =>
   !!e && (e.code === "PGRST202" || e.code === "42883" || /could not find the function|function .* does not exist/i.test(e.message ?? ""));
 
+/** A função `nome` (e não outra) não existe na base: o erro de «função em falta» tem de a nomear. Um erro de DENTRO da função (outra função em falta) não conta. */
+export const funcaoNomeadaEmFalta = (e: { code?: string; message?: string } | null | undefined, nome: string): boolean => funcaoEmFalta(e) && (e?.message ?? "").includes(nome);
+
 /** 16/11: só as definições dos atributos (cat_ler_atributos_definicoes). A função antiga (cat_ler_atributos) trazia os valores de TODOS os produtos (8 MB na Mudelar) e só se
  *  usa se a nova ainda não existe na base; qualquer outra falha (tempo, rede, permissão) é «sem atributos», nunca um erro nem a leitura pesada. */
 async function lerAtributos(sb: SupabaseClient, org: string): Promise<unknown> {
@@ -103,15 +106,26 @@ async function lerAtributos(sb: SupabaseClient, org: string): Promise<unknown> {
   }
 }
 
-export async function lerCatalogo(sb: SupabaseClient, org: string): Promise<LinhasCatalogo> {
+/** 17/11 (20270121000000): a leitura LEVE do Catálogo. cat_ler_catalogo_servicos devolve o mesmo JSON, mas `produtos`, `precosProduto` e `fornecedores` só trazem os
+ *  produtos dos consumos dos serviços (145 na Mudelar, em vez de 29 785: 32 MB, 4 a 15 s). Sem a função na base (PGRST202, 42883) lê-se cat_ler_catalogo, como antes;
+ *  qualquer outro erro (permissão, tempo) sobe tal como veio, sem voltar à leitura pesada. */
+async function lerLinhas(sb: SupabaseClient, org: string, leve: boolean): Promise<Resposta> {
+  if (leve) {
+    const r = (await sb.rpc("cat_ler_catalogo_servicos" as never, { p_org: org } as never)) as Resposta;
+    if (!funcaoNomeadaEmFalta(r?.error, "cat_ler_catalogo_servicos")) return r;
+  }
+  return (await sb.rpc("cat_ler_catalogo" as never, { p_org: org } as never)) as Resposta;
+}
+
+export async function lerCatalogo(sb: SupabaseClient, org: string, opcoes: { leve?: boolean } = {}): Promise<LinhasCatalogo> {
   const [r, t, a, m] = await Promise.all([
-    sb.rpc("cat_ler_catalogo" as never, { p_org: org } as never),
+    lerLinhas(sb, org, !!opcoes.leve),
     sb.rpc("cat_ler_produtos_tabelas" as never, { p_org: org } as never),
     lerAtributos(sb, org),
     lerModelos(sb, org),
   ]);
-  if (r.error) throw new Error(mensagemErroCatalogo(r.error));
+  if (r?.error) throw new Error(mensagemErroCatalogo(r.error));
   // sem a função nova (SQL 20270117100000 por colar) ou com erro nela: lê-se pelo texto, como antes
   if (t.error) console.info("Catálogo: produtos pelo texto (cat_ler_produtos_tabelas:", t.error.message ?? t.error.code, ")");
-  return juntarModelos(juntarAtributos(juntarTabelas(linhasDe(r.data), t.error ? null : t.data), a), m, null);
+  return juntarModelos(juntarAtributos(juntarTabelas(linhasDe(r?.data), t.error ? null : t.data), a), m, null);
 }
