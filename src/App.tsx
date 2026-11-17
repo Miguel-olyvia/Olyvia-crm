@@ -403,7 +403,9 @@ const App = () => (
                       <Route path="/catalogo/servicos/consumiveis" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="consumiveis" /></ProtectedRoute>} />
                       <Route path="/catalogo/servicos/tecnicos" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="tecnicos" /></ProtectedRoute>} />
                       <Route path="/catalogo/servicos/:sid" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="servicos" /></ProtectedRoute>} />
-                      <Route path="/catalogo/ligacoes" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="ligacoes" /></ProtectedRoute>} />
+                      <Route path="/catalogo/servicos/ligacoes" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="ligacoes" /></ProtectedRoute>} />
+                      {/* o endereço da primeira versão (as Ligações eram uma página própria) */}
+                      <Route path="/catalogo/ligacoes" element={<Navigate to="/catalogo/servicos/ligacoes" replace />} />
                       <Route path="/service-categories" element={<Navigate to="/catalogo-custos" replace />} />
                       <Route path="/service-subcategories" element={<Navigate to="/catalogo-custos" replace />} />
                       <Route path="/service-catalog-items" element={<Navigate to="/catalogo-custos" replace />} />

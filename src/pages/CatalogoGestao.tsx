@@ -1,8 +1,7 @@
 // 17/11: as páginas de gestão dos produtos do Catálogo (/catalogo/produtos/categorias, …/subcategorias, …/modelos, …/marcas, …/atributos, …/referencia).
-// Cada uma monta o componente que já existia (os mesmos de GestaoCatalogo) e esse lê só o que precisa: não passa por cat_ler_catalogo.
+// 17/11 (correção do utilizador): com os separadores de Produtos no topo (cada separador é uma rota). Cada uma monta o componente que já existia (os mesmos de GestaoCatalogo) e esse lê só o que precisa: não passa por cat_ler_catalogo.
 import { useCallback, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { cn } from "@/lib/utils";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePaginaInteira } from "@/hooks/usePaginaInteira";
@@ -15,14 +14,12 @@ import { GestaoModelos } from "@/emylia/GestaoModelos";
 import { GestaoSku } from "@/emylia/GestaoSku";
 import { GestaoSubcategorias } from "@/emylia/GestaoSubcategorias";
 import type { SeparadorGestao } from "@/emylia/GestaoCatalogo";
-import { CAMINHO_GESTAO, CAMINHO_SECCAO } from "@/emylia/catalogoRotas";
+import { CAMINHO_GESTAO, CAMINHO_SECCAO, idSeparadorCatalogo } from "@/emylia/catalogoRotas";
 import { NOTA } from "@/emylia/pecasForm";
+import { SeparadoresCatalogo } from "@/emylia/SeparadoresCatalogo";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
 
-const TITULO: Record<SeparadorGestao, string> = {
-  categorias: "Categorias", subcategorias: "Subcategorias", modelos: "Modelos", marcas: "Marcas", atributos: "Atributos", sku: "Referência (SKU)",
-};
 const NOTA_GESTAO = "Gestão do Catálogo. Vale para toda a organização.";
 
 export default function CatalogoGestao({ separador }: { separador: SeparadorGestao }) {
@@ -46,12 +43,11 @@ export default function CatalogoGestao({ separador }: { separador: SeparadorGest
   if (!real) return <div className="p-6">Escolha uma organização para ver o Catálogo e custos.</div>;
   return (
     <div className="pn calma pg-root min-h-full bg-background">
-      <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
-        <div className="grid gap-5">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight">{TITULO[separador]}</h1>
-            <p className={cn(NOTA, "mt-1")}>{NOTA_GESTAO}</p>
-          </div>
+      <div className="mx-auto w-full max-w-[90rem] px-4 pb-24 pt-8 sm:px-8 sm:pt-12">
+        <h1 className="text-3xl font-semibold tracking-tight">Catálogo e custos</h1>
+        <div className="mt-6"><SeparadoresCatalogo grupo="produtos" ativo={separador} ir={(c) => navigate(c)} painelId={`painel-${separador}`} /></div>
+        <div id={`painel-${separador}`} role="tabpanel" aria-labelledby={idSeparadorCatalogo(separador)} className="grid max-w-3xl gap-5 pt-6">
+          <p className={NOTA}>{NOTA_GESTAO}</p>
           {separador === "categorias" && <GestaoCategorias real={real} anunciar={anunciar} />}
           {separador === "subcategorias" && <GestaoSubcategorias real={real} anunciar={anunciar} />}
           {separador === "modelos" && <GestaoModelos real={real} anunciar={anunciar} />}

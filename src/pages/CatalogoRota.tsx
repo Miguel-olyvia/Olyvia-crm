@@ -1,4 +1,4 @@
-// 17/11: as rotas /catalogo/produtos, /catalogo/servicos/*, /catalogo/ligacoes e as fichas (/catalogo/produtos/:id, /catalogo/servicos/:sid) montam
+// 17/11: as rotas /catalogo/produtos, /catalogo/servicos/* (Ligações incluída: /catalogo/servicos/ligacoes) e as fichas (/catalogo/produtos/:id, /catalogo/servicos/:sid) montam
 // POR AGORA a página atual (CatalogoCustos) com a secção e a ficha que a rota diz. A troca das leituras pesadas fica para as fases seguintes.
 // O que não vem da rota (?criar=…, ?consumivel=…) lê-se da pesquisa do endereço: sem o EnderecoAtivo a página guardava-o só em memória, e as
 // ligações que o RedirectCatalogo traduz (/catalogo-custos?criar=produto) perdiam-no.
