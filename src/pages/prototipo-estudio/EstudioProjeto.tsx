@@ -35,6 +35,8 @@ import { totalDaCozinha } from "./cozinha/modelo";
 import { acertarPosicoes, mudarODepois, seguirOAntes } from "./posicoesDepois";
 const Visualizador3D = lazy(() => import("@/emylia/planta3d/Visualizador3D"));
 import { CHAVE_ESTUDIO as CHAVE, devolverAoNegocio } from "./daVisita";
+import { vozNoEstudio } from "./estudioPorVoz";
+import { EV_ESTUDIO } from "@/emylia/comandoOlyvia";
 // 9/11 (Rúben: «o Estúdio é o passo final da visita»): o último passo fecha a visita (os serviços do Catálogo, o plano e o orçamento)
 const PASSOS = ["Antes", "Estilo", "Depois", "3D", "Proposta", "Fechar"] as const;
 type Passo = (typeof PASSOS)[number];
@@ -105,6 +107,25 @@ export default function EstudioProjeto() {
   };
   const ir = (q: Passo) => { setPasso(q); setAberta(null); window.scrollTo?.({ top: 0, behavior: "smooth" }); };
   const reduzir = useReducedMotion();
+
+  // 17/11 (Rúben: «no Estúdio falta ele trabalhar também»): a Olyvia manda a frase para aqui (EV_ESTUDIO); o Estúdio faz o que sabe
+  // (passos, alturas, divisão, peças, serviços, cores — estudioPorVoz.ts) e responde no próprio pedido
+  const voz = useRef<(det: { frase: string; ok: boolean; msg: string }) => void>(() => {});
+  voz.current = (det) => {
+    const r = vozNoEstudio(det.frase, pRef.current, PASSOS.indexOf(passo));
+    if (!r) return;
+    det.ok = true;
+    det.msg = r.partes.join(" · ") + ".";
+    if (r.p) setP(r.p);
+    if (r.passo !== undefined) ir(PASSOS[r.passo]);
+    if (r.mostrar) setMostrar(true);
+    if (r.voltar) voltar(false);
+  };
+  useEffect(() => {
+    const h = (e: Event) => voz.current((e as CustomEvent<{ frase: string; ok: boolean; msg: string }>).detail);
+    window.addEventListener(EV_ESTUDIO, h);
+    return () => window.removeEventListener(EV_ESTUDIO, h);
+  }, []);
 
   return (
     <main className="min-h-screen bg-gradient-to-b from-background to-muted/40">

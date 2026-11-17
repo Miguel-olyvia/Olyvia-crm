@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { EV_ABRIR, EV_PASSO } from "./comandoOlyvia";
 
-const g = vi.hoisted(() => ({ estado: "parado" as string, invoke: null as null | ((nome: string, o: { body: { frase: string } }) => Promise<unknown>) }));
-vi.mock("./gravador", () => ({ useGravacao: () => ({ estado: g.estado }) }));
+const g = vi.hoisted(() => ({ estado: "parado" as string, falas: [] as { inicio: number; fim: number; texto: string; falante: string; confianca_falante: number; revista?: boolean }[], invoke: null as null | ((nome: string, o: { body: { frase: string } }) => Promise<unknown>) }));
+vi.mock("./gravador", () => ({ useGravacao: () => ({ estado: g.estado, falas: g.falas }) }));
 // a IA (olyvia-comando): por omissão não há (como antes de a função estar publicada)
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { functions: { invoke: (n: string, o: { body: { frase: string } }) => (g.invoke ? g.invoke(n, o) : Promise.resolve({ data: null, error: new Error("sem função") })) } } }));
 
@@ -42,7 +42,7 @@ class Canal {
 }
 
 beforeEach(() => {
-  localStorage.clear(); ativos = []; g.estado = "parado"; g.invoke = null; Canal.todos = [];
+  localStorage.clear(); ativos = []; g.estado = "parado"; g.falas = []; g.invoke = null; Canal.todos = [];
   vi.stubGlobal("BroadcastChannel", Canal);
   (window as unknown as { webkitSpeechRecognition: unknown }).webkitSpeechRecognition = Falso;
 });
@@ -101,7 +101,7 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     g.estado = "a_ouvir";
     r.rerender(arvore("/negocios"));
     expect(ativos[0].parado).toBe(true);
-    expect(screen.getByRole("button", { name: "Olyvia — em pausa (a gravar)" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Olyvia — a ouvir a conversa (diz «Olyvia, …»)" })).toBeInTheDocument();
     act(() => { vi.advanceTimersByTime(1000); });
     expect(ativos).toHaveLength(1);
     g.estado = "interrompida";
@@ -233,6 +233,49 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     falar(rec, res("olyvia", true), res("abre o teste c p", true));
     act(() => { vi.runOnlyPendingTimers(); });
     expect(pedidos).toEqual([{ nome: "teste cp", fase: null }]);
+  });
+
+  describe("17/11 (Rúben: «isto vai substituir a gravação da chamada»): a gravar, ouve pelas falas do gravador", () => {
+    const fala = (inicio: number, texto: string, revista = false) => ({ inicio, fim: inicio + 2, texto, falante: "comercial", confianca_falante: 1, revista });
+    it("a conversa não são ordens; «Olyvia, …» é", () => {
+      g.estado = "a_ouvir";
+      const r = render(arvore("/negocios?vista=hoje"));
+      g.falas = [fala(1, "Bom dia, então vamos ver o catálogo de azulejos")];
+      r.rerender(arvore("/negocios?vista=hoje"));
+      expect(loc()).toBe("/negocios?vista=hoje");
+      g.falas = [...g.falas, fala(5, "Olívia, vai ao catálogo.")];
+      r.rerender(arvore("/negocios?vista=hoje"));
+      expect(loc()).toBe("/catalogo-custos");
+    });
+    it("só «Olyvia»: a fala seguinte é a ordem; as falas revistas não contam outra vez", () => {
+      g.estado = "a_ouvir";
+      const r = render(arvore("/negocios?vista=hoje"));
+      g.falas = [fala(1, "Olyvia.")];
+      r.rerender(arvore("/negocios?vista=hoje"));
+      g.falas = [...g.falas, fala(3, "Vai ao catálogo.")];
+      r.rerender(arvore("/catalogo-custos"));
+      expect(loc()).toBe("/catalogo-custos");
+      // a 2.ª passagem repete o texto revisto: não volta a mandar
+      g.falas = [fala(1, "Olyvia.", true), fala(3, "Olyvia, vai aos negócios.", true)];
+      r.rerender(arvore("/catalogo-custos"));
+      expect(loc()).toBe("/catalogo-custos");
+    });
+    it("as falas que já estavam ao abrir não são ordens novas", () => {
+      g.estado = "a_ouvir";
+      g.falas = [fala(1, "Olyvia, vai ao catálogo.")];
+      render(arvore("/negocios?vista=hoje"));
+      expect(loc()).toBe("/negocios?vista=hoje");
+    });
+    it("«Olyvia, começa a gravar» carrega no botão do painel", async () => {
+      vi.useFakeTimers();
+      const carregou = vi.fn();
+      const b = document.createElement("button"); b.textContent = "Começar a gravar"; b.onclick = carregou; document.body.appendChild(b);
+      render(arvore("/negocios?negocio=1"));
+      falar(ultimo(), res("olyvia começa a gravar", true));
+      await act(async () => { await vi.runOnlyPendingTimersAsync(); });
+      expect(carregou).toHaveBeenCalledTimes(1);
+      b.remove();
+    });
   });
 
   it("quando o browser pede um clique (not-allowed), não desliga a escolha: volta a ouvir no próximo toque", () => {
