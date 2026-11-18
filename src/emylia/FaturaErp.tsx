@@ -15,7 +15,7 @@ const INTERVALO_MS = 60_000;
 const dmy = (iso: string) => (iso ? iso.split("-").reverse().join("/") : "—");
 
 /** O passo «Registar a fatura do ERP»: o número da fatura emitida no Eticadata; confirma-a no ERP antes de a registar. */
-export function RegistarFaturaErp({ ctx, d, tamanho = "lg", aEsquerda = false }: { ctx: Ctx; d: Negocio; tamanho?: "lg" | "default"; aEsquerda?: boolean }) {
+export function RegistarFaturaErp({ ctx, d, tamanho = "lg", aEsquerda = false, semDados = false }: { ctx: Ctx; d: Negocio; tamanho?: "lg" | "default"; aEsquerda?: boolean; /** 18/11: o passo Fatura sem os campos (não os exige) */ semDados?: boolean }) {
   const { A, go, S } = ctx;
   const [numero, setNumero] = useState("");
   const [aLer, setALer] = useState(false);
@@ -25,7 +25,7 @@ export function RegistarFaturaErp({ ctx, d, tamanho = "lg", aEsquerda = false }:
   const pode = podeNeg(S.role, "finance.invoice");
   // 10/11 (teste do 1026): sem os dados de faturação e da fatura, o motor não regista; diz-se aqui o que falta, antes de escrever o número
   // (antes, o aviso passava em segundos e a fatura ficava por registar sem se perceber porquê)
-  const faltam = [FINANCEIRO[0], FINANCEIRO[1]].map((g) => efetivo(S.campos, g)).filter((g) => !g.oculto)
+  const faltam = semDados ? [] : [FINANCEIRO[0], FINANCEIRO[1]].map((g) => efetivo(S.campos, g)).filter((g) => !g.oculto)
     .flatMap((g) => emFalta([g], d.f).map((c) => ({ c: c.l, g: g.nome || g.titulo })));
   const registar = async (e: FormEvent) => {
     e.preventDefault();
@@ -35,7 +35,7 @@ export function RegistarFaturaErp({ ctx, d, tamanho = "lg", aEsquerda = false }:
     setALer(true); setErro(null);
     const r = await lerFaturaErp(n);
     setALer(false);
-    if ("info" in r) { go(() => A.registarFaturaErp(d.id, n, r.info))(); return; }
+    if ("info" in r) { go(() => A.registarFaturaErp(d.id, n, r.info, semDados))(); return; }
     setErro({ msg: r.msg, semLigacao: r.motivo === "sem_ligacao" });
   };
   if (!pode) return (
@@ -66,7 +66,7 @@ export function RegistarFaturaErp({ ctx, d, tamanho = "lg", aEsquerda = false }:
       {erro && (
         <p id={`fat-erp-erro-${d.id}`} role="alert" className="text-sm text-destructive">
           {erro.msg}
-          {erro.semLigacao && <> <button type="button" className="font-medium underline underline-offset-4" onClick={go(() => A.registarFaturaErp(d.id, numero.trim().replace(/\s+/g, " "), null))}>Registar sem confirmar</button></>}
+          {erro.semLigacao && <> <button type="button" className="font-medium underline underline-offset-4" onClick={go(() => A.registarFaturaErp(d.id, numero.trim().replace(/\s+/g, " "), null, semDados))}>Registar sem confirmar</button></>}
         </p>
       )}
     </form>

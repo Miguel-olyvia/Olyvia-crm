@@ -69,7 +69,7 @@ export function PagamentoDoCliente({ S, A, run, d }: Ctx & { d: Negocio }) {
           )}
           <div className="flex flex-wrap gap-3">
             <Button size="lg" variant={avisou ? "default" : "outline"} disabled={!podeValidar} aria-describedby={podeValidar ? undefined : idSemPerm}
-              onClick={() => run(() => A.validar(d.id))}>{avisou ? "Validar pagamento" : "Validar à mão"}</Button>
+              onClick={() => run(() => A.validar(d.id))}>Ok, já foi paga</Button>
             <Button size="lg" variant="ghost" onClick={() => run(() => A.verificarErp(d.id))}><RefreshCw className="mr-2 h-4 w-4" aria-hidden />Verificar no Eticadata</Button>
           </div>
           {!podeValidar && <p id={idSemPerm} className="text-sm text-muted-foreground">{SEM_PERM["finance.validate_payment"].sub}</p>}

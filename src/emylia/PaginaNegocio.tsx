@@ -538,32 +538,30 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     // 10/11 (Rúben: «não queremos muitos passos, queremos certezas»): o Financeiro em dois passos. 1) A fatura: o valor a faturar agora,
     // os dados de faturação e da fatura, e o registo do número, tudo no mesmo sítio (o botão diz o que falta, se faltar). 2) O pagamento.
     const TI = totais(d, S), agora = d.orc ? tranches(d, TI.total, S)[0] : null, ft = d.fin.fatura;
-    const gF = [FINANCEIRO[0], FINANCEIRO[1]].map(E).filter((x) => !x.oculto);
-    const faltamF = emFalta(gF, d.f).length, pContrato = passoContratoPrincipal();
+    const pContrato = passoContratoPrincipal();
     passos = [
       // 16/11: com contrato, primeiro o contrato assinado; depois a fatura e o pagamento
       ...(pContrato ? [pContrato] : []),
-      { id: "fatura", titulo: "Fatura", icone: Euro, feito: !!ft, semAvancar: true,
-        resumo: [ft ? ft.n : faltamF ? `falta${faltamF === 1 ? " 1 dado" : `m ${faltamF} dados`}` : "por registar"],
+      // 18/11 (Rúben: «o step da fatura só devia ter a fatura, a referência e "ok, já foi paga"; todos os campos são desnecessários»): um
+      // passo só, sem os campos dos dados de faturação e da fatura: o número da fatura, a referência do pagamento e o «Ok, já foi paga»
+      { id: "fatura", titulo: "Fatura", icone: Euro, feito: d.fin.pago, semAvancar: true,
+        resumo: [d.fin.pago ? `${ft?.n ?? "fatura"} · paga` : ft ? `${ft.n} · por pagar` : "por registar"],
         corpo: (
-          <div className="space-y-10">
+          <div className="space-y-6">
             {agora && !ft && (
               <p className="rounded-2xl bg-primary/[0.06] px-4 py-3 text-[15px]">
                 A faturar agora: <span className="font-semibold">{agora.l}</span> ({Math.round(agora.p * 100)}%) · <span className="font-semibold tabular-nums">{eur(agora.v)} €</span> com IVA
               </p>
             )}
-            {gF.map((gr) => <Campos key={gr.titulo} grupo={gr} {...fx} ro={!!ft} />)}
             <section aria-label="Registar a fatura" className="space-y-2 rounded-2xl border border-border bg-card p-4">
               <h3 className="text-[17px] font-semibold tracking-tight">{ft ? `Fatura ${ft.n} registada` : "Registar a fatura"}</h3>
               {ft ? <EstadoFaturaErp ctx={ctx} d={d} />
                 : <><p className="text-[15px] text-muted-foreground">Emita-a no Eticadata e escreva aqui o número: vai para o portal do cliente, com os dados para pagar.</p>
-                  <RegistarFaturaErp ctx={ctx} d={d} aEsquerda /></>}
+                  <RegistarFaturaErp ctx={ctx} d={d} aEsquerda semDados /></>}
             </section>
+            {ft && <PagamentoDoCliente {...ctx} d={d} />}
           </div>
         ) },
-      { id: FINANCEIRO[2].titulo, titulo: E(FINANCEIRO[2]).nome || FINANCEIRO[2].titulo, icone: Euro, feito: d.fin.pago,
-        resumo: [d.fin.pago ? "validado" : !ft ? "depois da fatura" : d.f.comprovativo ? "o cliente diz que pagou" : "à espera do cliente"],
-        corpo: <PagamentoDoCliente {...ctx} d={d} /> },
     ];
   } else if (fase === 4) {
     const pContrato = passoContratoPrincipal();
@@ -593,7 +591,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       // 21/10 (Ruben): no aspeto simples, o plano e os materiais são dois passos (antes, um só "Plano e materiais" parecia só o plano)
       // 12/11: com o plano aprovado e o contrato por assinar, o passo conta como feito (a página segue para o Contrato); assinado, é a obra
       { id: "obra", titulo: simples ? "Plano da obra" : "Plano, materiais e resultado", icone: simples ? CalendarClock : Hammer,
-        feito: d.obra.plano?.estado === "concluída" || (!semObraAMedir && planoAprovadoDe(d) && !!o?.aceite && o.contrato !== "assinado"), resumo: [d.obra.plano?.estado || ""],
+        // 18/11 (Rúben: «o plano da obra não ficou fechado, devia ter ficado»): aprovado é feito, com o contrato assinado ou não
+        feito: d.obra.plano?.estado === "concluída" || (!semObraAMedir && planoAprovadoDe(d) && !!o?.aceite), resumo: [d.obra.plano?.estado || ""],
         // 9/11 (Rúben): o Estúdio do plano, por cima do negócio (o calendário por técnico, os alertas e aprovar)
         // 12/11: o contrato assinado com o valor mudado: o acerto (a adenda) à vista também aqui, onde a página abre
         corpo: simples ? <div className="space-y-6">{verAcerto && <AcertoDoValor ctx={ctx} d={d} />}{d.obra.plano && d.obra.plano.estado !== "por aprovar" ? <AbrirEstudioObra ctx={ctx} d={d} /> : <AbrirEstudioPlano ctx={ctx} d={d} />}<ObraSimples {...ctx} d={d} /></div> : <div className="pg estreito"><ObraResumo {...ctx} d={d} /></div> },
@@ -613,7 +612,6 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
   for (const ps of passos) {
     const gr = TODOS.find((x) => x.titulo === ps.id);
     if (gr && aValidar(d, gr.titulo)) ps.falta = emFalta(gr === AREA ? gruposArea(S.campos, d.f).map(E) : [E(gr)], d.f).length;
-    if (ps.id === "fatura" && (aValidar(d, FINANCEIRO[0].titulo) || aValidar(d, FINANCEIRO[1].titulo))) ps.falta = emFalta([FINANCEIRO[0], FINANCEIRO[1]].map(E), d.f).length || undefined;
     if (ps.id === "visitas") ps.falta = visitas(d).reduce((a, n) => a + (aValidar(d, `Visita ${n}`) ? emFalta([grupoVisita(n)], d.f).length : 0), 0) + (aValidar(d, "visitas") && !visitaFeita(d) ? 1 : 0) || undefined;
     if (ps.id === "medidas" && aValidar(d, "medidas")) ps.falta = camposMedida(L).filter(([k]) => medidaEmFalta(v.med, k)).length;
     if (ps.id === "nec" && aValidar(d, "nec")) ps.falta = (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length || undefined;

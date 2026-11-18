@@ -1359,8 +1359,9 @@ export interface Proximo {
 // assinar; se baixa, a nota de crédito) → encomenda de cliente e obra. A venda direta também espera pelo pagamento (como a base).
 export const medidasEPlanoAbertos = (d: Pick<Negocio, "fin" | "obra" | "orc">): boolean => d.fin.pago || !!d.obra.ec;
 /** 16/11: a adenda do acerto (a fatura da retificação) por pagar: a encomenda de cliente espera por ela (fn_neg_emitir_ec_se_pronta). */
+// 18/11: e assinada pelo cliente (antes contava só o pagamento: a de 1009 ficou paga sem o cliente a ver)
 export const retificacaoPorPagar = (d: Pick<Negocio, "adendas">): boolean =>
-  (d.adendas ?? []).some((a) => a.motivo === MOTIVO_ACERTO && a.estado !== "anulada" && a.estado !== "recusada" && !primeiraPaga(a));
+  (d.adendas ?? []).some((a) => a.motivo === MOTIVO_ACERTO && a.estado !== "anulada" && a.estado !== "recusada" && (a.estado !== "assinada" || !primeiraPaga(a)));
 /** 17/11: as retificações (adendas do acerto) assinadas cujas tarefas ainda não estão no plano (assinadas por quem não planeia): entram
  *  quando as Operações aprovarem o plano (aprovarPlano). */
 export const acertosPorJuntar = (d: Pick<Negocio, "adendas" | "obra">): Adenda[] =>
@@ -2514,15 +2515,15 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!n) return null;
       d.f.acerto_valor = n;
       log(d, `Adenda ${n} do acerto (a retificação mudou o valor): ${mudancasDeValor(d).join("; ")}`);
-      // 16/11: sem o cliente: verificada, assinada pela empresa e já do Financeiro (assinarAdenda junta ao plano o que tem tarefa)
+      // 18/11 (Rúben: «a adenda não foi enviada ao cliente… não pode acontecer»): a retificação que muda o valor vai ao portal do cliente,
+      // já assinada pela empresa. O cliente aceita e assina; só depois o Financeiro fatura e valida, e só depois a encomenda de cliente.
       if (a) {
-        const q = agora();
-        a.verif = true; a.enviada = q; a.aceite = q; a.estado = "aceite"; a.contrato = "enviado";
-        a.empresa = { nome: lerQuemAssina() || PAPEIS[S.role].nome, q };
-        congelarAdenda(S, a);
-        A.assinarAdenda(id, n);
-        log(d, `Retificação ${n} enviada ao Financeiro (sem assinatura do cliente): faturar e validar o pagamento antes da encomenda de cliente`);
-        avisar({ msg: `Retificação ${n} no Financeiro`, sub: "O Financeiro regista a fatura da retificação e valida o pagamento; depois, a encomenda de cliente", kind: "ok" });
+        a.empresa = { nome: lerQuemAssina() || PAPEIS[S.role].nome, q: agora() };
+        if (!A.verificarEnviarAdenda(id, n)) {
+          avisar({ msg: `Adenda ${n} preparada, por enviar`, sub: "Abra-a, corrija o que a Olyvia aponta e envie-a ao cliente", kind: "bad" });
+          return n;
+        }
+        log(d, `Retificação ${n} enviada ao cliente: aceita e assina no portal; depois o Financeiro fatura e valida o pagamento, e só então a encomenda de cliente`);
       }
       return n;
     },
@@ -3117,7 +3118,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!a || a.estado !== "aceite" || a.contrato !== "enviado") return;
       a.estado = "assinada"; a.assinada = agora(); a.contrato = null;
       // 17/11: a do acerto (a retificação) assina-a a empresa, sem o cliente (adendaDoValor)
-      log(d, "Adenda " + n + (a.motivo === MOTIVO_ACERTO && a.empresa ? " assinada pela empresa (" + a.empresa.nome + ")" : " assinada pelo cliente"));
+      log(d, "Adenda " + n + (a.motivo === MOTIVO_ACERTO && a.empresa && !a.assinatura ? " assinada pela empresa (" + a.empresa.nome + ")" : " assinada pelo cliente"));
       // 3/11: a de um problema do cliente com a obra já concluída reabre-a para a assistência
       { const pr = problemaDaAdenda(d, a); if (pr) reabrirParaAssistencia(d, pr); }
       // 12/11 (quem paga): a de um ajuste pedido pelo cliente faz o ajuste que ficou à espera (prolongar, atrasar, a tarefa nova)
@@ -3264,14 +3265,15 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       pago(d, rc, "emitido");
     },
     /** 22/10: regista a fatura emitida no Eticadata (o número, como lá aparece) com a leitura do ERP; se já estiver paga, segue logo para a Obra. */
-    registarFaturaErp(id: number, numero?: string, info?: InfoErp | null) {
+    registarFaturaErp(id: number, numero?: string, info?: InfoErp | null, semDados = false) {
       const d = deal(id);
       // chamada só com o id (das listas do Hoje): abre o negócio, onde se escreve o número
       if (numero == null) { S.view = "negocio"; S.deal = id; S.confirmPerda = null; S.pulse = "sec-4"; return; }
       if (!exigePerm("finance.invoice")) return;
       // 16/11 (o fluxo em vigor): com contrato, a fatura vem depois de ele estar assinado (a venda direta, logo com a proposta aceite)
       if (!d.fin.fatura && passoDoContrato(d.orc)) { avisar({ msg: "Primeiro, o contrato assinado", sub: "A fatura regista-se depois de o cliente assinar o contrato", kind: "bad" }); return; }
-      if (!portao(d, [FINANCEIRO[0], FINANCEIRO[1]])) return;
+      // 18/11 (Rúben): o passo Fatura do Negócio já não pede os dados de faturação nem os da fatura (semDados)
+      if (!semDados && !portao(d, [FINANCEIRO[0], FINANCEIRO[1]])) return;
       const n = numero.trim(), hoje = new Date();
       d.fin.fatura = { n, q: info?.data ? info.data.slice(8, 10) + "/" + info.data.slice(5, 7) : String(hoje.getDate()).padStart(2, "0") + "/" + String(hoje.getMonth() + 1).padStart(2, "0") };
       d.fin.erp = info ?? null;

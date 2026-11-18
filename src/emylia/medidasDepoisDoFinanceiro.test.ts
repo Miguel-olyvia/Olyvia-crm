@@ -121,13 +121,14 @@ describe("a retificação muda o valor: volta ao Financeiro (16/11)", () => {
     aprovar(S, d, A);
     expect(d.obra.plano?.estado).toBe("por aprovar");
   });
-  it("«Enviar ao Financeiro»: a adenda do acerto fica assinada pela empresa, sem o cliente, com o serviço a mais ao preço da proposta", () => {
+  it("18/11 (Rúben: «a adenda não foi enviada ao cliente… não pode acontecer»): a adenda do acerto vai ao portal do cliente, já assinada pela empresa, com o serviço a mais ao preço da proposta", () => {
     const { S, d, A } = comMedidaMaior();
     S.role = "comercial";
     const v0 = d.orc!.versoes?.length ?? 0;
     expect(A.adendaDoValor(d.id)).toBeTruthy();
     const a = adendaDoAcerto(d)!;
-    expect(a.estado).toBe("assinada");
+    expect(a.estado).toBe("enviada");
+    expect(a.enviada).toBeTruthy();
     expect(a.motivo).toBe(MOTIVO_ACERTO);
     expect(a.empresa?.nome).toBeTruthy();
     const svc = a.linhas.find((x) => !x.livre)!;
@@ -136,14 +137,24 @@ describe("a retificação muda o valor: volta ao Financeiro (16/11)", () => {
     expect(d.orc!.versoes?.length ?? 0).toBe(v0);
     expect(acertoDoValorPendente(d)).toBe(false);
     expect(retificacaoPorPagar(d)).toBe(true);
-    expect(passosPreparacao(d, S).find((x) => x.id === "ac")).toMatchObject({ estado: "feito" });
+    // sem o cliente assinar, o Financeiro não fatura
+    S.role = "financeiro";
+    expect(A.registarFaturaAdenda(d.id, a.n, "FT 2026/RET0")).toBe(false);
   });
-  it("a encomenda de cliente espera pela fatura da retificação paga; validada, sai", () => {
+  it("a encomenda de cliente espera pela adenda assinada pelo cliente e pela fatura dela paga; só então sai", () => {
     const { S, d, A } = comMedidaMaior();
     S.role = "comercial";
     const n = A.adendaDoValor(d.id)!;
     aprovar(S, d, A);
     expect(d.obra.plano?.estado).toBe("aprovado");
+    expect(d.obra.ec).toBeFalsy();
+    // o cliente aceita e assina no portal
+    A.aceitarAdenda(d.id, n);
+    S.role = "comercial";
+    A.enviarContratoAdenda(d.id, n);
+    expect(adendaDoAcerto(d)!.contrato).toBe("enviado");
+    A.simularAdenda(d.id, n);
+    expect(adendaDoAcerto(d)!.estado).toBe("assinada");
     expect(d.obra.ec).toBeFalsy();
     S.role = "financeiro";
     expect(A.registarFaturaAdenda(d.id, n, "FT 2026/RET1")).toBe(true);
