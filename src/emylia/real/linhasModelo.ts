@@ -72,11 +72,16 @@ export function aplicarLinhasModelo(L: LinhaModeloBase[]): void {
   for (const l of L) LINHAS[l.chave] = linhaDoMotor(l);
 }
 
-/** Lê da base e aplica. Sem a função (migration por aplicar) ou sem permissão, ficam as linhas do código. */
-export async function carregarLinhasModelo(sb: SupabaseClient, org: string): Promise<LinhaModeloBase[]> {
+/** 18/11: só lê (não aplica): quem lê pode ter sido ultrapassado por uma leitura mais nova e só aplica depois de o saber (carregarCatalogo). */
+export async function lerLinhasModelo(sb: SupabaseClient, org: string): Promise<LinhaModeloBase[]> {
   const { data, error } = await sb.rpc("neg_ler_linhas_modelo" as never, { p_org: org } as never);
   if (error) return [];
-  const L = linhasModeloDe(data);
+  return linhasModeloDe(data);
+}
+
+/** Lê da base e aplica. Sem a função (migration por aplicar) ou sem permissão, ficam as linhas do código. */
+export async function carregarLinhasModelo(sb: SupabaseClient, org: string): Promise<LinhaModeloBase[]> {
+  const L = await lerLinhasModelo(sb, org);
   aplicarLinhasModelo(L);
   return L;
 }

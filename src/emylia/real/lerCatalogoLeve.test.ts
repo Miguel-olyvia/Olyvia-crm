@@ -85,3 +85,28 @@ describe("lerCatalogo leve: as tabelas dos produtos (cat_ler_produtos_tabelas_se
     expect(L.tabelas).toBeUndefined();
   });
 });
+
+describe("lerCatalogo com soServicos: não lê o que é dos Produtos", () => {
+  const TAB = { categoriasProduto: [], marcas: [], unidades: [], exige: [], produtos: [{ id: "p-leve", brand_id: "b1", marca: "Marca X", category_id: "c1" }] };
+  const base = { ...comum, cat_ler_catalogo_servicos: () => ({ data: LEVE, error: null }), cat_ler_produtos_tabelas_servicos: () => ({ data: TAB, error: null }),
+    cat_ler_atributos_definicoes: () => ({ data: { atributos: [], produtos: [] }, error: null }), cat_ler_modelos_gestao: () => ({ data: { modelos: [] }, error: null }) };
+  it("não chama os atributos nem os modelos, mas mantém as tabelas dos serviços (a marca e a categoria dos consumos)", async () => {
+    const c = cliente(base);
+    const L = await lerCatalogo(c.sb, ORG, { leve: true, soServicos: true });
+    expect(c.rpcs).not.toContain("cat_ler_atributos_definicoes");
+    expect(c.rpcs).not.toContain("cat_ler_atributos");
+    expect(c.rpcs).not.toContain("cat_ler_modelos_gestao");
+    expect(c.rpcs).toContain("cat_ler_produtos_tabelas_servicos");
+    expect(L.atributos).toBeUndefined();
+    expect(L.modelos).toBeUndefined();
+    expect(L.produtos[0].marca).toBe("Marca X");
+  });
+  it("sem a opção (Negócios, Estúdio, Produtos), continua a ler os atributos e os modelos", async () => {
+    const c = cliente(base);
+    const L = await lerCatalogo(c.sb, ORG, { leve: true });
+    expect(c.rpcs).toContain("cat_ler_atributos_definicoes");
+    expect(c.rpcs).toContain("cat_ler_modelos_gestao");
+    expect(L.atributos).toBeDefined();
+    expect(L.modelos).toBeDefined();
+  });
+});

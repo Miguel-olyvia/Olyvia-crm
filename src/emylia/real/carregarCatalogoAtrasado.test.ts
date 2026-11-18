@@ -1,6 +1,6 @@
 // 17/11 (revisão M4): uma leitura LEVE que acaba depois de uma INTEIRA mais nova não se pode aplicar por cima dela (carregarCatalogo aplica o Catálogo às stores).
 import { afterEach, describe, expect, it } from "vitest";
-import { seed } from "../motor";
+import { LINHAS, seed } from "../motor";
 import { reporCustos } from "../v2/custosStore";
 import { lerCatalogo, reporCatalogo } from "../v2/catalogoStore";
 import { LeituraAtrasada, carregarCatalogo } from "./carregarCatalogo";
@@ -35,5 +35,23 @@ describe("carregarCatalogo: leituras atrasadas", () => {
   it("sem `descartar`, ou com ele falso, aplica-se como sempre", async () => {
     await carregarCatalogo(cliente({ cat_ler_catalogo: async () => ({ data: INTEIRO, error: null }) }), ORG, seed(), { descartar: () => false });
     expect(lerCatalogo().produtos).toHaveLength(2);
+  });
+});
+
+describe("carregarCatalogo: as linhas de negócio só se aplicam se a leitura não foi descartada", () => {
+  const OUTRA = [{ chave: "wc", nome: "Linhas de OUTRA organização", modelo: "x" }];
+  const sbLinhas = () => cliente({
+    cat_ler_catalogo: async () => ({ data: INTEIRO, error: null }),
+    neg_ler_linhas_modelo: async () => ({ data: OUTRA, error: null }),
+  });
+  const original = LINHAS.wc;
+  afterEach(() => { LINHAS.wc = original; });
+  it("uma leitura descartada (outra mais nova) deixa o LINHAS global como estava", async () => {
+    await expect(carregarCatalogo(sbLinhas(), ORG, seed(), { descartar: () => true })).rejects.toBeInstanceOf(LeituraAtrasada);
+    expect(LINHAS.wc).toBe(original);
+  });
+  it("uma leitura válida aplica-as", async () => {
+    await carregarCatalogo(sbLinhas(), ORG, seed(), { descartar: () => false });
+    expect(LINHAS.wc.n).toBe("Linhas de OUTRA organização");
   });
 });

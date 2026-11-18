@@ -70,3 +70,18 @@ describe("autosave do Catálogo com a leitura leve (K.produtos parcial)", () => 
     expect(g[0].guarda).toBeUndefined();
   });
 });
+
+describe("autosave com a leitura soServicos (sem atributos nem modelos)", () => {
+  it("o «antes» e o «depois» vêm da mesma leitura sem atributos nem modelos: nada mudou, nenhuma chamada", async () => {
+    const sb = { rpc: async (fn: string) => fn === "cat_ler_catalogo_servicos"
+      ? { data: { servicos: [], produtos: [linhaProduto(ID.cons, "Fita de teflon")] }, error: null }
+      : { data: null, error: { message: "sem função" } } } as never;
+    const { lerCatalogo } = await import("./lerCatalogo");
+    const L = await lerCatalogo(sb, ORG, { leve: true, soServicos: true });
+    expect(L.atributos).toBeUndefined();
+    expect(L.modelos).toBeUndefined();
+    const M = montarCatalogo(L, catalogo0(), {});
+    const f = () => fotografar({ C: M.C, K: M.K, svc: M.svc, margens: M.margens });
+    expect(diferencasCatalogo(ORG, f(), f(), { ids: M.ids, produtos: L.produtos })).toEqual([]);
+  });
+});

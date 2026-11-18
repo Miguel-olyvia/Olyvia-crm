@@ -48,7 +48,7 @@ import { TIPOS_CRIAR, consumiveisComCriados, type TipoCriar } from "./criarCatal
 import { ehCriado } from "./catalogo";
 import { MateriaisModelo } from "./MateriaisModelo";
 import { podeCriarTipo, usePermissoesCatalogo } from "./permissoesCatalogo";
-import { CAMINHO_SECCAO, caminhoProduto, caminhoServico, grupoDaSeccao, idSeparadorCatalogo, separadorDaSeccao, type RotaCatalogo } from "./catalogoRotas";
+import { CAMINHO_SECCAO, caminhoProduto, caminhoServico, grupoDaSeccao, idSeparadorCatalogo, separadorDaSeccao, usaLeituraLeve, type RotaCatalogo } from "./catalogoRotas";
 import { SeparadoresCatalogo } from "./SeparadoresCatalogo";
 
 type Seccao = "servicos" | "produtos" | "equipamentos" | "consumiveis" | "tecnicos" | "ligacoes";
@@ -491,6 +491,12 @@ export function CatalogoV1({ S, run, real, rota }: Ctx & { real?: FichaProdutoRe
   useEffect(() => { if (pendente) { const t = window.setTimeout(() => setServicoUrl(pendente, { substituir: true }), 0); return () => window.clearTimeout(t); } return undefined; }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // 27/10: o Criar no Catálogo abre no lugar da lista (?criar=servico|produto|…): o "voltar" do browser fecha-o
   const [criar, setCriar] = useParamUrl<TipoCriar | "">("criar", "", ["", ...TIPOS_CRIAR.map((t) => t.k)]);
+  // 18/11: as páginas de Serviços leem o Catálogo sem modelos nem atributos (soServicos): um produto criado aqui nasceria sem eles e com a referência (SKU) errada.
+  // Criar um PRODUTO leva à página de Produtos, que lê tudo; o resto cria-se na própria página.
+  const produtoNosProdutos = !!rota && usaLeituraLeve(rota.seccao);
+  const criarProdutoAqui = produtoNosProdutos && criar === "produto";
+  useEffect(() => { if (criarProdutoAqui) rota?.ir(`${CAMINHO_SECCAO.produtos}?criar=produto`, { substituir: true }); }, [criarProdutoAqui]); // eslint-disable-line react-hooks/exhaustive-deps
+  const escolherTipoCriar = (t: TipoCriar) => { if (t === "produto" && produtoNosProdutos) rota?.ir(`${CAMINHO_SECCAO.produtos}?criar=produto`); else setCriar(t, { substituir: true }); };
   // 13/11: a gestão do Catálogo (categorias, marcas e atributos) abre no lugar da lista, só na página real. O separador vai no endereço:
   // ?atributos=categorias|subcategorias|modelos|marcas|sku|1 (o «1» é o endereço antigo da gestão dos atributos e continua a abrir os Atributos).
   const [atributosAberto, setAtributosAberto] = useParamUrl<"" | "1" | "categorias" | "subcategorias" | "modelos" | "marcas" | "sku">("atributos", "", ["", "1", "categorias", "subcategorias", "modelos", "marcas", "sku"]);
@@ -587,10 +593,11 @@ export function CatalogoV1({ S, run, real, rota }: Ctx & { real?: FichaProdutoRe
     );
   }
 
+  if (criarProdutoAqui) return null;
   if (criar) {
     return (
       <div className="mx-auto w-full max-w-6xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
-        <CriarNoCatalogo S={S} C={C} K={K} run={run} tipo={criar} setTipo={(t) => setCriar(t, { substituir: true })} voltar={() => setCriar("")} onCriado={criado} real={real} />
+        <CriarNoCatalogo S={S} C={C} K={K} run={run} tipo={criar} setTipo={escolherTipoCriar} voltar={() => setCriar("")} onCriado={criado} real={real} />
         {regiao}
       </div>
     );

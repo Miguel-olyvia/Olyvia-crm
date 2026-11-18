@@ -18,6 +18,7 @@ import type { Ctx } from "@/emylia/pecas";
 import { LeituraAtrasada, carregarCatalogo, type CatalogoCarregado } from "@/emylia/real/carregarCatalogo";
 import { aoRegistarProduto, limparCatalogoLido, linhaDeProduto } from "@/emylia/real/catalogoLeve";
 import { diferencasCatalogo, executarCatalogo, fotografar, type Rpc } from "@/emylia/real/gravarCatalogo";
+import { AVISO_LENTO_MS, ERRO_DEMOROU, ErroLeituraCatalogo, LIMITE_LEITURA_MS, LeituraCatalogo } from "@/emylia/LeituraCatalogo";
 import { usePaginaInteira } from "@/hooks/usePaginaInteira";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
@@ -49,28 +50,41 @@ export default function CatalogoCustos({ rota }: { rota?: RotaCatalogo } = {}) {
   // 17/11: nas páginas de Serviços lê-se o Catálogo LEVE (cat_ler_catalogo_servicos: só os produtos dos consumos, 145 na Mudelar em vez de 29 785; a leitura inteira
   // dava statement timeout). Os produtos e as Ligações precisam da lista toda: ficam com a leitura inteira. Sem rota (endereço antigo): inteira.
   const leve = usaLeituraLeve(rota?.seccao);
+  // 18/11: Serviços só lê o que é de Serviços: sem atributos nem modelos (são dos Produtos). Mesmas secções que a leitura leve.
+  const soServicos = leve;
   // 17/11: um contador de pedidos: uma leitura que acaba depois de outra mais nova (ex.: a leve de Serviços depois da inteira de Ligações) não se aplica por cima
   const pedido = useRef(0);
   const carregar = useCallback(async (o: string) => {
     const eu = ++pedido.current;
     try {
-      base.current = await carregarCatalogo(supabase, o, S, { leve, descartar: () => eu !== pedido.current });
+      base.current = await carregarCatalogo(supabase, o, S, { leve, soServicos, descartar: () => eu !== pedido.current });
     } catch (e) {
       if (e instanceof LeituraAtrasada) return;
       throw e;
     }
     setTique((t) => t + 1);
-  }, [S, leve]);
+  }, [S, leve, soServicos]);
   // ao sair, a página esquece o estado parcial e a organização (o protótipo e as outras organizações não os herdam)
   useEffect(() => () => { pedido.current++; limparCatalogoLido(); }, []);
 
+  // 18/11: aos 10 s a leitura avisa que demora; aos 30 s é um erro. Uma resposta que chegue depois não se aplica (o pedido avança e a leitura fica «descartada»).
+  const [lento, setLento] = useState(false);
+  const [tentativa, setTentativa] = useState(0);
+  const tentarDeNovo = useCallback(() => setTentativa((t) => t + 1), []);
   useEffect(() => {
     if (!org) return;
     let vivo = true;
-    setPronto(false); setErroLer(null);
-    carregar(org).then(() => { if (vivo) setPronto(true); }).catch((e: Error) => { if (vivo) setErroLer(e.message); });
-    return () => { vivo = false; };
-  }, [org, carregar]);
+    setPronto(false); setErroLer(null); setLento(false);
+    const aviso = window.setTimeout(() => { if (vivo) setLento(true); }, AVISO_LENTO_MS);
+    const limite = window.setTimeout(() => {
+      if (!vivo) return;
+      vivo = false; pedido.current++;
+      setLento(false); setErroLer(ERRO_DEMOROU);
+    }, LIMITE_LEITURA_MS);
+    const acabou = () => { window.clearTimeout(aviso); window.clearTimeout(limite); };
+    carregar(org).then(() => { if (vivo) { acabou(); setPronto(true); } }).catch((e: Error) => { if (vivo) { acabou(); setErroLer(e.message); } });
+    return () => { vivo = false; acabou(); };
+  }, [org, carregar, tentativa]);
 
   // 17/11: um produto escolhido de uma pesquisa no servidor entra no Catálogo em memória (catalogoLeve.registarProdutoLido). Para o autosave não o gravar como NOVO (duplicado),
   // entra primeiro no «antes» e na base: assim a ligação ao serviço grava-se pelo id dele.
@@ -140,8 +154,8 @@ export default function CatalogoCustos({ rota }: { rota?: RotaCatalogo } = {}) {
         {gravacao.k === "gravado" && gravacao.avisos.map((a, i) => <span key={`${i}:${a}`} className="text-amber-800 dark:text-amber-300">{a}</span>)}
         {gravacao.k === "erro" && <span className="text-destructive">Não gravou: {gravacao.t}</span>}
       </div>
-      {erroLer ? <p className="p-6 text-destructive">{erroLer}</p>
-        : !pronto ? <p className="p-6 text-muted-foreground">A ler o Catálogo…</p>
+      {erroLer ? <ErroLeituraCatalogo erro={erroLer} onRepetir={tentarDeNovo} />
+        : !pronto ? <LeituraCatalogo lento={lento} onRepetir={tentarDeNovo} foco={tentativa} />
         : <ProvedorPermissoesCatalogo valor={perms}><CatalogoV1 {...ctx} real={real} rota={rota} /></ProvedorPermissoesCatalogo>}
     </div>
   );

@@ -97,7 +97,8 @@ export function destinoCatalogoAntigo(search: string): string {
 
   const sec = p.get("sec");
   const criar = p.get("criar");
-  if (E_TIPO(criar)) return com(E_SECCAO(sec) ? CAMINHO_SECCAO[sec] : CAMINHO_SECCAO[SECCAO_DO_TIPO[criar]], { criar });
+  // 18/11: criar um PRODUTO faz-se sempre na página de Produtos (a leitura de Serviços não traz os modelos nem os atributos), seja qual for ?sec=
+  if (E_TIPO(criar)) return com(criar === "produto" ? CAMINHO_SECCAO.produtos : E_SECCAO(sec) ? CAMINHO_SECCAO[sec] : CAMINHO_SECCAO[SECCAO_DO_TIPO[criar]], { criar });
 
   const servico = p.get("servico");
   if (servico) return com(caminhoServico(servico));
