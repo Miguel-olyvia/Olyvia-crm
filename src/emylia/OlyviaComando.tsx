@@ -98,12 +98,17 @@ function irParaSecao(nome: string): boolean {
 /** O passo noutra fase: abre cada fase do negócio, da mais adiantada para trás, até a encontrar (um passo, ou a secção do resumo de uma
  *  fase feita). A fase onde está, ou null. */
 async function procurarPassoNasFases(passo: string): Promise<number | null> {
+  const botaoFase = (f: number) => document.querySelector<HTMLElement>(`button[aria-label="Ver a fase ${FASES_NOMES[f]} (feita)"]`);
   for (let f = FASES_NOMES.length - 1; f >= 0; f--) {
-    avisa(EV_FASE, { fase: f });
+    // 18/11 (testarh): no ecrã do negócio em Obra, só o botão da barra das fases mostra o resumo de uma fase feita (o endereço não chega)
+    const b = botaoFase(f);
+    if (b) { if (b.getAttribute("aria-pressed") !== "true") carregar(b); } else avisa(EV_FASE, { fase: f });
     await assentar(1500, 200);
     if (tentarPasso(passo) || irParaSecao(passo)) return f;
   }
-  avisa(EV_FASE, { fase: FASES_NOMES.length - 1 }); // não há: volta à fase em que o negócio está
+  // não há: volta à fase em que o negócio está
+  document.querySelectorAll<HTMLElement>('button[aria-label^="Ver a fase "][aria-pressed="true"]').forEach((b) => carregar(b));
+  avisa(EV_FASE, { fase: FASES_NOMES.length - 1 });
   return null;
 }
 

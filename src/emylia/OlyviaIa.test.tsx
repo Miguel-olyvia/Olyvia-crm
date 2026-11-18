@@ -241,6 +241,24 @@ describe("a IA com o ecrã inteiro", () => {
     }
   });
 
+  it("no negócio em Obra, a fase feita abre-se pelo botão da barra das fases", async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = `<button aria-label="Ver a fase Negócio (feita)" aria-pressed="false">Negócio</button><main><h2>Antes de arrancar</h2></main>`;
+    const b = document.querySelector("button")!;
+    b.addEventListener("click", () => { b.setAttribute("aria-pressed", "true"); document.querySelector("main")!.innerHTML = "<h3>Orçamento</h3><h3>Proposta</h3>"; });
+    const vistos: string[] = [];
+    const orig = HTMLElement.prototype.scrollIntoView, rects = HTMLElement.prototype.getClientRects;
+    HTMLElement.prototype.scrollIntoView = function () { vistos.push(this.textContent ?? ""); };
+    HTMLElement.prototype.getClientRects = function () { return [{}] as unknown as DOMRectList; };
+    try {
+      render(<MemoryRouter initialEntries={["/negocios?negocio=7"]}><OlyviaComando /></MemoryRouter>);
+      await pedir("vai para a proposta");
+      await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+      expect(b.getAttribute("aria-pressed")).toBe("true");
+      expect(vistos).toContain("Proposta");
+    } finally { HTMLElement.prototype.scrollIntoView = orig; HTMLElement.prototype.getClientRects = rects; }
+  });
+
   it("lembra-se da conversa («e o outro?»)", async () => {
     vi.useFakeTimers();
     const conversas: unknown[][] = [];
