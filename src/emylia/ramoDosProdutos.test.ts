@@ -43,8 +43,8 @@ describe("o ramo do motor das categorias de produto", () => {
     expect(emFaltaProdutos(K, ["loucas"], { prod: [] } as never)).toHaveLength(1);
   });
   it("a pesquisa no servidor de um ramo dos serviços vai pelas categorias de produto dele (nunca pelo id do ramo, que dava lista vazia)", () => {
-    // várias categorias com pais diferentes: sem filtro de ramo (pesquisa pelo texto)
-    expect(filtroDoRamo(ARVORE, "lt")).toEqual({});
+    // várias categorias com pais diferentes: uma pesquisa por cada subcategoria (antes, sem filtro: abria com banheiras)
+    expect(filtroDoRamo(ARVORE, "lt")).toEqual({ subcategorias: ["san", "lav", "kit", "bd"] });
     // uma só: essa
     expect(filtroDoRamo(ARVORE, "par")).toEqual({ subcategoria: "cer" });
     // um nó só de produtos: como antes
