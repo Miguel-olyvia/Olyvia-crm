@@ -83,6 +83,12 @@ describe("paginaDe e contagensDe", () => {
     expect(contagensDe(null)).toBeNull();
     expect(contagensDe({ total: "x" })).toBeNull();
   });
+  it("contagensDe lê sem_preco como semPreco; sem a chave (função antiga) fica undefined, e 0 continua a ser 0", () => {
+    expect(contagensDe({ total: 9, sem_preco: 4 })?.semPreco).toBe(4);
+    expect(contagensDe({ total: 9, sem_preco: 0 })?.semPreco).toBe(0);
+    expect(contagensDe({ total: 9, sem_marca: 2 })?.semPreco).toBeUndefined();
+    expect(contagensDe({ total: 9, sem_preco: null })?.semPreco).toBeUndefined();
+  });
 });
 
 describe("lerProdutosContagens", () => {
