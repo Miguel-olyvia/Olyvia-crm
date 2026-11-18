@@ -49,10 +49,14 @@ describe("atributosDoItem: texto dos atributos estruturados", () => {
     expect(r.hex.Cor).toEqual(["#FFFFFF", "#000000"]);
   });
 
-  it("cor dupla por dois valores do mesmo atributo: nomes juntos com «/» e hex em lista", () => {
+  it("atributo repetido (a base só permite um valor por atributo): usa a primeira linha e avisa com o nome do atributo, sem juntar textos nem hex", () => {
     const r = atributosDoItem({ attrs: [opc(A_COR, "o-branco"), opc(A_COR, "o-preto")] }, DEFS);
-    expect(r.atributos.Cor).toBe("Branco/Preto");
-    expect(r.hex.Cor).toEqual(["#F5F5F0", "#000000"]);
+    expect(r.atributos.Cor).toBe("Branco");
+    expect(r.hex.Cor).toEqual(["#F5F5F0"]);
+    expect(r.avisos).toEqual(["«Cor»: o produto tem mais de um valor neste atributo (Branco; Preto): só se usa o primeiro."]);
+    const m = atributosDoItem({ attrs: [med(d2(60, 60)), med(d2(30, 30))] }, DEFS);
+    expect(m.atributos.Medida).toBe("60×60 cm");
+    expect(m.avisos[0]).toMatch(/^«Medida»: o produto tem mais de um valor/);
   });
 
   it("opção sem hex: a cor existe pelo nome e não há hex; hex inválido ignora-se e deixa um aviso", () => {
@@ -89,6 +93,26 @@ describe("atributosDoItem: texto dos atributos estruturados", () => {
     expect(atributosDoItem({ attrs: [med(d2(60, 60))] }, DEFS).intervalos).toEqual([]);
   });
 
+  it("fronteiras: opcaoId inexistente sem valor, atributo sem valor e medida null saltam-se", () => {
+    const vazio = { atributos: {}, hex: {}, intervalos: [], avisos: [] };
+    expect(atributosDoItem({ attrs: [{ atributoId: A_COR, opcaoId: "nao-existe" }] }, DEFS)).toEqual(vazio);
+    expect(atributosDoItem({ attrs: [{ atributoId: A_COR }] }, DEFS)).toEqual(vazio);
+    expect(atributosDoItem({ attrs: [{ atributoId: A_MED, medida: null as unknown as MedidaAtributo }] }, DEFS)).toEqual(vazio);
+  });
+
+  it("intervalo na espessura de uma medida 3D e 1D em mm", () => {
+    const r3 = atributosDoItem({ attrs: [med({ tipo: "3D", largura: 60, comprimento: 60, espessura: { de: 8, ate: 10 }, unidade: "mm" })] }, DEFS);
+    expect(r3).toMatchObject({ atributos: { Medida: "60 × 60 × 8–10 mm" }, intervalos: ["Medida"] });
+    expect(atributosDoItem({ attrs: [med({ tipo: "1D", dimensao: "espessura", valor: 9, unidade: "mm" })] }, DEFS))
+      .toMatchObject({ atributos: { Medida: "Espessura 9 mm" }, intervalos: [] });
+  });
+
+  it("o atributo cujo código é «medida» chama-se sempre «Medida», seja qual for o nome na definição", () => {
+    const defs: AtributoDef[] = [{ ...DEFS[0], nome: "Dimensão" }];
+    expect(atributosDoItem({ attrs: [med(d2(60, 60))] }, defs).atributos).toEqual({ Medida: "60×60 cm" });
+    expect(atributosDoItem({ attrs: [med(d2({ de: 1, ate: 2 }, 60))] }, defs).intervalos).toEqual(["Medida"]);
+  });
+
   it("não muta os argumentos", () => {
     const attrs = [opc(A_COR, "o-bp")], antes = JSON.stringify([attrs, DEFS]);
     atributosDoItem({ attrs }, DEFS);
@@ -116,6 +140,16 @@ describe("lerMedidaTexto / tipoDaMedida: os formatos reais", () => {
     expect(tipoDaMedida("Grande")).toBe("texto");
     expect(tipoDaMedida("")).toBe("texto");
   });
+  it("números que não cabem num número finito não são medida (nunca NaN nem Infinity)", () => {
+    const enorme = "9".repeat(400);
+    expect(lerMedidaTexto(`${enorme}×60 cm`)).toBeUndefined();
+    expect(lerMedidaTexto(`Largura ${enorme} cm`)).toBeUndefined();
+    expect(Number.isNaN(compararMedidas(`${enorme}×60 cm`, `${enorme}×70 cm`))).toBe(false);
+  });
+  it("3D com intervalo na espessura e 1D em mm", () => {
+    expect(lerMedidaTexto("60×60×8–10 mm")).toMatchObject({ tipo: "3D", intervalo: true, unidade: "mm", dims: [{ de: 60, ate: 60 }, { de: 60, ate: 60 }, { de: 8, ate: 10 }] });
+    expect(lerMedidaTexto("Espessura 9 mm")).toMatchObject({ tipo: "1D", unidade: "mm", intervalo: false });
+  });
   it("medidaEmCm converte mm para cm e devolve o limite inferior dos intervalos", () => {
     expect(medidaEmCm("600×300 mm")).toMatchObject({ largura: 60, comprimento: 30, area: 1800 });
     expect(medidaEmCm("91–100 × 90 cm")).toMatchObject({ largura: 91, comprimento: 90 });
@@ -140,6 +174,12 @@ describe("compararMedidas: ordem estável com os formatos reais", () => {
     expect(ordenar(["Largura 100 cm", "Largura 70 cm", "Largura 9 cm"])).toEqual(["Largura 9 cm", "Largura 70 cm", "Largura 100 cm"]);
     expect(ordenar(["Espessura 1 cm", "Comprimento 1 cm", "Altura 1 cm", "Largura 1 cm"])).toEqual(["Largura 1 cm", "Altura 1 cm", "Comprimento 1 cm", "Espessura 1 cm"]);
   });
+  it("1D em mm compara em cm: Largura 800 mm entre Largura 70 cm e Largura 90 cm", () => {
+    expect(ordenar(["Largura 90 cm", "Largura 800 mm", "Largura 70 cm"])).toEqual(["Largura 70 cm", "Largura 800 mm", "Largura 90 cm"]);
+  });
+  it("3D com intervalo na espessura ordena depois do 3D de espessura fixa igual ao limite inferior", () => {
+    expect(ordenar(["60×60×8–10 cm", "60×60×8 cm", "60×60×7 cm"])).toEqual(["60×60×7 cm", "60×60×8 cm", "60×60×8–10 cm"]);
+  });
   it("intervalos ordenam-se pelo limite inferior e depois pelo superior", () => {
     expect(ordenar(["100×90 cm", "91–100 × 90 cm", "60×90 cm", "91–95 × 90 cm"])).toEqual(["60×90 cm", "91–95 × 90 cm", "91–100 × 90 cm", "100×90 cm"]);
   });
@@ -156,6 +196,12 @@ describe("compararMedidas: ordem estável com os formatos reais", () => {
     for (let i = 0; i < 10; i++) {
       const baralhada = [...base].sort((a, b) => ((a.length * (i + 3)) % 7) - ((b.length * (i + 3)) % 7) || a.localeCompare(b, "en"));
       expect(ordenar(baralhada)).toEqual(esperado);
+    }
+  });
+  it("é transitiva em todos os triplos da amostra (a < b e b < c implica a < c)", () => {
+    const amostra = ["60×60 cm", "600×600 mm", "Largura 70 cm", "Altura 70 cm", "Grande", "91–100 × 90 cm", "", "60×60×1 cm", "2 cubas", "10 cubas", "Largura 800 mm", "30×60 cm"];
+    for (const a of amostra) for (const b of amostra) for (const c of amostra) {
+      if (compararMedidas(a, b) <= 0 && compararMedidas(b, c) <= 0) expect(compararMedidas(a, c)).toBeLessThanOrEqual(0);
     }
   });
   it("é antissimétrica e reflexiva para todos os formatos", () => {

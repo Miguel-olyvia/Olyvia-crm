@@ -33,7 +33,7 @@ describe("menuConfig: a secção Catálogo", () => {
 
 describe("item ativo no Catálogo", () => {
   it("Produtos fica ativo na lista, nas páginas de gestão e na ficha; Serviços não", () => {
-    for (const p of ["/catalogo/produtos", "/catalogo/produtos/categorias", "/catalogo/produtos/referencia", "/catalogo/produtos/abc-123"]) {
+    for (const p of ["/catalogo/produtos", "/catalogo/produtos/categorias", "/catalogo/produtos/referencia", "/catalogo/produtos/familias", "/catalogo/produtos/abc-123"]) {
       expect(itemAtivo(produtos, p), p).toBe(true);
       expect(itemAtivo(servicos, p), p).toBe(false);
     }

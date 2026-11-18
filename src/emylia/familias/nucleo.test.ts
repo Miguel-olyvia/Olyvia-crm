@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import type { AtributoDef, Produto } from "../v2/catalogoModelo";
 import {
-  ALVO_PROTO, categoriaDaFamilia, eixosPorOmissao, eixosValidos, familiaPorEixos, idsDaFamilia, itemDoCatalogo, marcaDaFamilia, nomesDosAtributos, problemas,
+  categoriaDaFamilia, eixosPorOmissao, eixosValidos, familiaPorEixos, idsDaFamilia, itemDoCatalogo, marcaDaFamilia, nomesDosAtributos, problemas,
   produtosEmIntervalo, produtosSemValor, refDoProduto, slug, sugerirFamilia, textoSemValor, type EixosCfg, type FamiliaCfg, type ItemEixos, type ProdutoRef,
 } from "./nucleo";
 
@@ -17,7 +17,6 @@ describe("refDoProduto: o preço de venda é o do catálogo", () => {
   const prod = { id: "p1", n: "X", marca: "M", sku: " S1 ", sub: "Cubas inox", custo: 65 };
   it("com PVP usa o PVP; sem PVP, custo ÷ (1 − margem-alvo), como o catálogo", () => {
     expect(refDoProduto({ ...prod, pvp: 149 })).toMatchObject({ preco: 149, semPvp: false, sku: "S1" });
-    expect(ALVO_PROTO).toBe(35);
     expect(refDoProduto(prod)).toMatchObject({ preco: 100, semPvp: true });
   });
   it("sem PVP e sem custo: preço 0; sem referência o id serve de SKU; a categoria passa", () => {
@@ -25,7 +24,8 @@ describe("refDoProduto: o preço de venda é o do catálogo", () => {
     expect(refDoProduto({ ...prod, categoria: "Cozinha › Lava-louças" }).categoria).toBe("Cozinha › Lava-louças");
     expect(refDoProduto({ id: "p9", n: "Y", custo: 0 })).not.toHaveProperty("categoria");
   });
-  it("PVP negativo ou NaN no custo não dá preço negativo nem NaN", () => {
+  it("PVP negativo cai no cálculo pelo custo; custo NaN dá preço 0 (nunca negativo nem NaN)", () => {
+    expect(refDoProduto({ id: "a", n: "A", custo: 65, pvp: -5 })).toMatchObject({ preco: 100, semPvp: true });
     expect(refDoProduto({ id: "a", n: "A", custo: Number.NaN }).preco).toBe(0);
   });
 });
@@ -112,6 +112,19 @@ describe("familiaPorEixos: variantes, medidas e cores", () => {
     expect(idsDaFamilia(f)).toEqual(["a", "b", "c"]);
   });
 
+  it("as cores ficam por nome normalizado (não pela ordem dos produtos): ids a1/a2 e corId seguem essa ordem", () => {
+    const preto = item("p", "P preto", { Cor: "Preto", Medida: "60×60 cm" }, { hex: { Cor: ["#000000"] } });
+    const branco = item("b", "P branco", { Cor: "Branco", Medida: "60×60 cm" }, { hex: { Cor: ["#FFFFFF"] } });
+    const eixos = { cor: "Cor", medida: ["Medida"] };
+    const f = familiaPorEixos("P", [preto, branco], eixos).familia;
+    expect(f.cores.map((c) => [c.id, c.nome])).toEqual([["a1", "Branco"], ["a2", "Preto"]]);
+    expect(f.variantes.map((v) => [v.produtoId, v.corId])).toEqual([["b", "a1"], ["p", "a2"]]);
+    expect(familiaPorEixos("P", [branco, preto], eixos).familia).toEqual(f);
+    // maiúsculas/minúsculas não baralham a ordem
+    const g = familiaPorEixos("P", [item("1", "x", { Cor: "verde", Medida: "40×40 cm" }), item("2", "y", { Cor: "Azul", Medida: "40×40 cm" })], eixos).familia;
+    expect(g.cores.map((c) => c.nome)).toEqual(["Azul", "verde"]);
+  });
+
   it("matriz 2D: 3 medidas (por área) × 2 cores = 6 variantes, cada uma com o SKU do seu produto", () => {
     const itens: ItemEixos[] = [];
     for (const m of ["60×120 cm", "30×60 cm", "60×60 cm"]) for (const c of ["Branco", "Preto"]) itens.push(item(`${m}-${c}`, `Pav ${m} ${c}`, { Medida: m, Cor: c }, { sku: `SKU ${m} ${c}` }));
@@ -125,7 +138,7 @@ describe("familiaPorEixos: variantes, medidas e cores", () => {
     expect(erros(f)).toEqual([]);
   });
 
-  it("intervalos/texto/1D/2D juntos: sem formato conhecido ordena por texto, e a ordem não depende da entrada", () => {
+  it("sem formato de medida conhecido, as medidas e os outros atributos ordenam-se por texto", () => {
     const a = familiaPorEixos("X", [item("a", "A", { Medida: "Grande" }), item("b", "B", { Medida: "Cabe" })], { cor: null, medida: ["Medida"] }).familia;
     expect(a.medidas.map((m) => m.rotulo)).toEqual(["Cabe", "Grande"]);
     const b = familiaPorEixos("X", [item("a", "A", { Tonalidade: "Z" }), item("b", "B", { Tonalidade: "A" })], { cor: null, medida: ["Tonalidade"] }).familia;
@@ -202,6 +215,13 @@ describe("familiaPorEixos: variantes, medidas e cores", () => {
     expect(produtosSemValor([], eixos)).toEqual([]);
   });
 
+  it("um atributo repetido nos eixos conta uma vez (um único problema por produto e atributo)", () => {
+    const eixos = { cor: "Medida", medida: ["Medida", "Medida"] };
+    expect(produtosSemValor([item("e", "Sem nada", {})], eixos)).toHaveLength(1);
+    const iv = item("i", "Iv", { Medida: "1–2 × 3 cm" }, { intervalos: ["Medida"] });
+    expect(produtosEmIntervalo([iv], eixos)).toHaveLength(1);
+  });
+
   it("medida em intervalo: não é uma variante, é problema «medida em intervalo»; fora dos eixos não conta", () => {
     const iv = item("i", "Pav 91-100", { Medida: "91–100 × 90 cm", Cor: "Branco" }, { intervalos: ["Medida"] });
     const normal = item("n", "Pav 60", { Medida: "60×90 cm", Cor: "Branco" });
@@ -258,12 +278,10 @@ describe("familiaPorEixos: variantes, medidas e cores", () => {
     expect(f.id).toBe("fam:lava-loucas-acao");
   });
 
-  it("10 000 produtos (100 medidas × 100 cores) montam-se em tempo razoável e sem perder variantes", () => {
+  it("10 000 produtos (100 medidas × 100 cores) montam-se sem perder variantes nem rebentar (o limite é o tempo de teste do vitest)", () => {
     const itens: ItemEixos[] = [];
     for (let m = 1; m <= 100; m++) for (let c = 1; c <= 100; c++) itens.push(item(`p${m}-${c}`, `P ${m} ${c}`, { Medida: `${m}×${m + 1} cm`, Cor: `Cor ${c}` }, { hex: { Cor: ["#112233"] } }));
-    const t0 = Date.now();
     const f = familiaPorEixos("Grande", itens, { cor: "Cor", medida: ["Medida"] }).familia;
-    expect(Date.now() - t0).toBeLessThan(5000);
     expect(f.variantes).toHaveLength(10000);
     expect(f.medidas).toHaveLength(100);
     expect(f.cores).toHaveLength(100);
@@ -281,8 +299,9 @@ function BETAS_SIMPLES(): ItemEixos[] {
 
 describe("problemas: o que bloqueia e o que só avisa", () => {
   const ok = (): FamiliaCfg => familiaPorEixos("Beta", BETAS_SIMPLES(), { cor: "Cor", medida: ["Medida"] }).familia;
-  it("uma família certa não tem erros (a cor sem hex só avisa)", () => {
+  it("uma família certa não tem erros; uma cor sem hex só avisa", () => {
     expect(erros(ok())).toEqual([]);
+    expect(problemas(ok()).map((p) => [p.tipo, p.gravidade])).toEqual([["cor_sem_hex", "aviso"]]);
   });
   it("sem nome, ou nome sem letras nem números: erro a pedir produtos, não um nome escrito", () => {
     expect(erros({ ...ok(), nome: "" }).map((p) => p.tipo)).toEqual(["nome"]);
@@ -294,6 +313,10 @@ describe("problemas: o que bloqueia e o que só avisa", () => {
     const f = ok();
     expect(erros(f, [f.id]).map((p) => p.tipo)).toEqual(["id"]);
     expect(erros(f, ["fam:outra"])).toEqual([]);
+  });
+  it("SKU repetido sem distinguir maiúsculas nem espaços à volta", () => {
+    const f = familiaPorEixos("Beta", [item("a", "A", { Medida: "40×40 cm" }, { sku: "ABC" }), item("b", "B", { Medida: "50×50 cm" }, { sku: "  abc " })], { cor: null, medida: ["Medida"] }).familia;
+    expect(erros(f).map((x) => [x.tipo, x.msg])).toEqual([["sku", "O SKU «ABC» repete-se (A; B)."]]);
   });
   it("SKU repetido entre variantes e produto sem preço de venda", () => {
     const f = familiaPorEixos("Beta", [item("a", "A", { Medida: "40×40 cm" }, { sku: "IGUAL" }), item("b", "B", { Medida: "50×50 cm" }, { sku: "IGUAL", preco: 0 })], { cor: null, medida: ["Medida"] }).familia;

@@ -41,6 +41,9 @@ export const CAMINHO_GESTAO: Record<SeparadorGestao, string> = {
   sku: "/catalogo/produtos/referencia",
 };
 
+/** O configurador de famílias: não é uma página de gestão (não entra em SeparadorGestao nem em CAMINHO_GESTAO), por isso o caminho vai à parte. */
+export const CAMINHO_FAMILIAS = "/catalogo/produtos/familias";
+
 /** O id do separador (para o `aria-labelledby` do painel). */
 export const idSeparadorCatalogo = (chave: string): string => `tab-cat-${chave}`;
 
@@ -53,6 +56,7 @@ export const SEPARADORES_CATALOGO: Record<GrupoCatalogo, readonly SeparadorCatal
     { chave: "marcas", rotulo: "Marcas", to: CAMINHO_GESTAO.marcas },
     { chave: "atributos", rotulo: "Atributos", to: CAMINHO_GESTAO.atributos },
     { chave: "sku", rotulo: "Referência (SKU)", to: CAMINHO_GESTAO.sku },
+    { chave: "familias", rotulo: "Famílias", to: CAMINHO_FAMILIAS },
   ],
   servicos: [
     { chave: "lista", rotulo: "Lista", to: CAMINHO_SECCAO.servicos },

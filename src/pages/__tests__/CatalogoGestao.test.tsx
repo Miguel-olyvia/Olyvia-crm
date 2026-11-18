@@ -47,7 +47,7 @@ describe("CatalogoGestao: cada página abre o componente certo", () => {
     expect(screen.getByTestId("gestao")).toHaveTextContent(new RegExp(`^${texto}`));
     expect(screen.getAllByTestId("gestao")).toHaveLength(1);
     // a navegação é pelos separadores de Produtos (o do separador aberto selecionado), não pelo menu lateral
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Lista", "Categorias", "Subcategorias", "Modelos", "Marcas", "Atributos", "Referência (SKU)"]);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Lista", "Categorias", "Subcategorias", "Modelos", "Marcas", "Atributos", "Referência (SKU)", "Famílias"]);
     expect(screen.getByRole("tab", { name: titulo })).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("heading", { level: 1, name: "Catálogo e custos" })).toBeInTheDocument();
   });
@@ -55,6 +55,7 @@ describe("CatalogoGestao: cada página abre o componente certo", () => {
   it.each([
     ["Lista", "/catalogo/produtos"], ["Categorias", "/catalogo/produtos/categorias"], ["Modelos", "/catalogo/produtos/modelos"],
     ["Marcas", "/catalogo/produtos/marcas"], ["Atributos", "/catalogo/produtos/atributos"], ["Referência (SKU)", "/catalogo/produtos/referencia"],
+    ["Famílias", "/catalogo/produtos/familias"],
   ])("o separador «%s» navega para %s", (rotulo, rota) => {
     montar("subcategorias");
     fireEvent.click(screen.getByRole("tab", { name: rotulo }));

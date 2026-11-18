@@ -7,9 +7,9 @@
 //   avisos     o que se ignorou (hex inválido)
 //
 // DECISÕES (13/11 em diante; documentadas aqui porque o núcleo e os testes dependem delas):
-//  1. LISTA DE HEX. Hoje a base guarda um valor por atributo e um hex por opção, por isso a cor normal dá um hex. A cor dupla aceita-se de duas formas: uma opção cujo
-//     `hex` traz vários separados por vírgula/espaço («#FFFFFF, #000000»), ou várias linhas do mesmo atributo (nomes juntos com «/», hex em lista, pela ordem).
-//     Um hex que não seja #RRGGBB ignora-se e fica um aviso; o atributo continua a existir pelo nome (a cor fica «sem hex», sem bloquear).
+//  1. HEX. A base tem UNIQUE (product_id, attribute_id): um valor e um hex (da opção) por atributo e produto, e a cor normal dá um hex. A cor dupla é opcional e só se aceita
+//     numa opção cujo `hex` traz vários separados por vírgula/espaço («#FFFFFF, #000000»). Um hex que não seja #RRGGBB ignora-se e fica um aviso; o atributo continua a
+//     existir pelo nome (a cor fica «sem hex», sem bloquear). Um atributo REPETIDO no mesmo produto (não devia existir) usa a primeira linha e fica um aviso com os valores.
 //  2. MEDIDA 1D vs 2D/3D. Ambas são valores únicos legítimos do atributo «Medida», mas não se medem pela mesma régua: «Largura 70 cm» não é «60×60 cm». A ordem é
 //     2D/3D (por área, depois largura, comprimento, espessura) → 1D (largura < altura < comprimento < espessura; depois pelo valor) → o resto por texto (números por valor).
 //     Misturar 1D e 2D/3D na mesma família NÃO bloqueia (o núcleo emite um AVISO `medida_mista`): é provável engano no catálogo, mas é uma escolha do utilizador.
@@ -20,6 +20,11 @@
 //     resultado não depende da ordem de entrada. Unidades: cm e mm (mm → cm dividindo por 10).
 import type { AtributoDef, AtributoProduto, DimensaoMedida, DimensaoUnica, MedidaAtributo, Produto } from "../v2/catalogoModelo";
 import { normalizarHex, textoValor } from "../atributosTexto";
+
+/** O nome do atributo da medida; o atributo cujo código é «medida» chama-se sempre assim no núcleo, seja qual for o nome na definição. */
+export const NOME_MEDIDA = "Medida";
+const CODIGO_MEDIDA = "medida";
+const nomeDoAtributo = (def: AtributoDef): string => ((def.codigo ?? "").trim().toLowerCase() === CODIGO_MEDIDA ? NOME_MEDIDA : def.nome);
 
 /** O que o núcleo lê de um produto: ver o cabeçalho. */
 export interface AtributosDoItem {
@@ -53,18 +58,16 @@ export function atributosDoItem(produto: Pick<Produto, "attrs">, defs: readonly 
   for (const [id, linhas] of grupos) {
     const def = porId.get(id);
     if (!def) continue;
-    const textos = linhas.map((a) => textoValor(def, a).trim()).filter(Boolean);
-    if (textos.length === 0) continue;
-    r.atributos[def.nome] = textos.join("/");
-    if (linhas.some((a) => a.medida && temIntervalo(a.medida))) r.intervalos.push(def.nome);
+    const comTexto = linhas.map((a) => ({ a, t: textoValor(def, a).trim() })).filter((x) => x.t), nome = nomeDoAtributo(def);
+    if (comTexto.length === 0) continue;
+    const { a: usada, t } = comTexto[0];
+    r.atributos[nome] = t;
+    if (comTexto.length > 1) r.avisos.push(`«${nome}»: o produto tem mais de um valor neste atributo (${comTexto.map((x) => x.t).join("; ")}): só se usa o primeiro.`);
+    if (usada.medida && temIntervalo(usada.medida)) r.intervalos.push(nome);
     if (!def.temHex) continue;
-    const hex: string[] = [];
-    for (const a of linhas) {
-      const o = a.opcaoId ? def.opcoes.find((x) => x.id === a.opcaoId) : undefined, { validos, maus } = hexDaOpcao(o?.hex);
-      hex.push(...validos);
-      for (const m of maus) r.avisos.push(`«${def.nome}»: hex inválido «${m}» ignorado.`);
-    }
-    if (hex.length) r.hex[def.nome] = hex;
+    const o = usada.opcaoId ? def.opcoes.find((x) => x.id === usada.opcaoId) : undefined, { validos, maus } = hexDaOpcao(o?.hex);
+    for (const m of maus) r.avisos.push(`«${nome}»: hex inválido «${m}» ignorado.`);
+    if (validos.length) r.hex[nome] = validos;
   }
   return r;
 }
@@ -84,15 +87,17 @@ const RE_ND = new RegExp(String.raw`^(${DIM}(?:\s*[×x]\s*${DIM}){1,2})\s*(cm|mm
 const ORDEM_1D: Readonly<Record<DimensaoUnica, number>> = { largura: 0, altura: 1, comprimento: 2, espessura: 3 };
 const n = (s: string): number => Number(s.replace(",", "."));
 const lerDim = (s: string): Intervalo => { const p = s.split(/[–-]/).map((x) => n(x.trim())); return { de: p[0], ate: p[p.length - 1] }; };
+const finitas = (dims: readonly Intervalo[]): boolean => dims.every((d) => Number.isFinite(d.de) && Number.isFinite(d.ate));
 
 /** Lê o texto de uma medida do catálogo («Largura 70 cm», «60×60 cm», «12,5×25×0,8 mm», «91–100 × 90 cm»); o que não for uma medida → undefined. */
 export function lerMedidaTexto(texto: string): MedidaLida | undefined {
   const t = (texto ?? "").trim();
   const a = RE_1D.exec(t);
-  if (a) { const dims = [lerDim(a[2])]; return { tipo: "1D", dimensao: a[1].toLowerCase() as DimensaoUnica, dims, unidade: a[3].toLowerCase() as "cm" | "mm", intervalo: dims[0].de !== dims[0].ate }; }
+  if (a) { const dims = [lerDim(a[2])]; if (!finitas(dims)) return undefined; return { tipo: "1D", dimensao: a[1].toLowerCase() as DimensaoUnica, dims, unidade: a[3].toLowerCase() as "cm" | "mm", intervalo: dims[0].de !== dims[0].ate }; }
   const b = RE_ND.exec(t);
   if (!b) return undefined;
   const dims = b[1].split(/\s*[×x]\s*/i).map(lerDim);
+  if (!finitas(dims)) return undefined;
   return { tipo: dims.length === 3 ? "3D" : "2D", dims, unidade: b[2].toLowerCase() as "cm" | "mm", intervalo: dims.some((d) => d.de !== d.ate) };
 }
 /** «1D», «2D», «3D» ou «texto» (o que não se lê como medida). */

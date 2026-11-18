@@ -31,7 +31,7 @@ describe("CatalogoV1 com a rota a mandar", () => {
   });
   it("na página Produtos, os separadores são os de Produtos, com a Lista selecionada", () => {
     pagina({ seccao: "produtos" });
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Lista", "Categorias", "Subcategorias", "Modelos", "Marcas", "Atributos", "Referência (SKU)"]);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Lista", "Categorias", "Subcategorias", "Modelos", "Marcas", "Atributos", "Referência (SKU)", "Famílias"]);
     expect(screen.getByRole("tab", { name: "Lista" })).toHaveAttribute("aria-selected", "true");
   });
   it("clicar num separador navega para a rota dele", () => {
@@ -63,7 +63,7 @@ describe("CatalogoV1 com a rota a mandar", () => {
   });
   it("a ficha de um produto também abre com os separadores dos Produtos visíveis", () => {
     pagina({ seccao: "produtos", produto: "p-1" });
-    expect(screen.getAllByRole("tab")).toHaveLength(7);
+    expect(screen.getAllByRole("tab")).toHaveLength(8);
     expect(screen.getByRole("tab", { name: "Lista" })).toHaveAttribute("aria-selected", "true");
   });
   it("abrir um serviço da lista navega para a rota da ficha", () => {

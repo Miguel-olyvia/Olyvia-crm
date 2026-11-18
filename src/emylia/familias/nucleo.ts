@@ -4,7 +4,8 @@
 // Cada produto que entra é UMA variante (SKU e preço dele, só leitura). Um produto que não pode ser variante fica em `excluidos` e é um problema.
 import type { AtributoDef, Produto } from "../v2/catalogoModelo";
 import { precoUnitario } from "../produtosVisita";
-import { atributosDoItem, compararMedidas, tipoDaMedida } from "./atributosFamilia";
+import { NOME_MEDIDA, atributosDoItem, compararMedidas, tipoDaMedida } from "./atributosFamilia";
+export { NOME_MEDIDA };
 
 /* ------------------------------------------------------------------ tipos */
 /** Os eixos escolhidos: `cor` = o atributo das bolinhas (um só, ou nenhum); `medida` = os atributos que compõem o seletor de medida, pela ordem escolhida. */
@@ -47,8 +48,6 @@ export interface Problema { tipo: TipoProblema; gravidade: "erro" | "aviso"; msg
 
 /* ------------------------------------------------------------------ pequenas ajudas */
 export const PREFIXO_FAMILIA = "fam:";
-/** O nome do atributo da medida (como o catálogo o chama). */
-export const NOME_MEDIDA = "Medida";
 const NOME_COR_OMISSAO = "Padrão";
 const SEP = "\u0001";
 const norm = (s: string): string => s.trim().toLowerCase();
@@ -103,7 +102,7 @@ export function eixosValidos(escolha: EixosCfg | null | undefined, lista: Atribu
 /* ------------------------------------------------------------------ produtos que não podem ser variante */
 /** O aviso de um produto sem valor num atributo escolhido. */
 export const textoSemValor = (atributo: string): string => `Este produto não tem ${atributo}: corrija no produto do catálogo.`;
-const usadosPor = (eixos: EixosCfg): string[] => [...eixos.medida, ...(eixos.cor ? [eixos.cor] : [])];
+const usadosPor = (eixos: EixosCfg): string[] => [...new Set([...eixos.medida, ...(eixos.cor ? [eixos.cor] : [])])];
 /** Os produtos sem valor nos atributos escolhidos como eixos (bloqueiam até se corrigir no catálogo ou se excluir o produto). */
 export function produtosSemValor(itens: readonly Pick<ItemEixos, "ref" | "atributos">[], eixos: EixosCfg): { produtoId: string; nome: string; atributo: string; msg: string }[] {
   const usados = usadosPor(eixos);
@@ -180,6 +179,7 @@ function separar(itens: readonly ItemEixos[], eixos: EixosCfg): Separados {
   return { validos, excluidos };
 }
 
+const compararTexto = (a: string, b: string): number => a.localeCompare(b, "pt", { numeric: true }) || (a < b ? -1 : a > b ? 1 : 0);
 const cmpValores = (a: readonly string[], b: readonly string[]): number => {
   for (let i = 0; i < a.length; i++) { const c = compararMedidas(a[i], b[i]); if (c !== 0) return c; }
   return 0;
@@ -192,7 +192,7 @@ const misturaDeMedidas = (validos: readonly Valido[], eixos: EixosCfg): boolean 
 };
 
 /** A família a partir dos produtos e dos eixos escolhidos. As medidas ordenam-se pelos valores (`compararMedidas`, por ordem dos eixos), por isso o resultado não depende da
- * ordem dos produtos; as cores ficam pela ordem em que aparecem. `conflitos`: as combinações repetidas (mensagens legíveis); todos os problemas saem de `problemas(familia)`. */
+ * ordem dos produtos; as cores ficam por nome normalizado (ids a1, a2… nessa ordem). `conflitos`: as combinações repetidas (mensagens legíveis); todos os problemas saem de `problemas(familia)`. */
 export function familiaPorEixos(nome: string, itens: readonly ItemEixos[], eixos: EixosCfg): { familia: FamiliaCfg; conflitos: string[] } {
   const eixosCopia: EixosCfg = { cor: eixos.cor, medida: [...eixos.medida] };
   const { validos, excluidos } = separar(itens, eixosCopia);
@@ -201,7 +201,7 @@ export function familiaPorEixos(nome: string, itens: readonly ItemEixos[], eixos
   for (const v of validos) {
     const mChave = v.valores.map(norm).join(SEP), cChave = norm(v.cor);
     let cor = coresPorChave.get(cChave);
-    if (!cor) { cor = { id: `a${coresPorChave.size + 1}`, nome: v.cor, hex: v.hex, semHex: eixosCopia.cor !== null && v.hex.length === 0, hexAlternativos: [] }; coresPorChave.set(cChave, cor); }
+    if (!cor) { cor = { id: "", nome: v.cor, hex: v.hex, semHex: eixosCopia.cor !== null && v.hex.length === 0, hexAlternativos: [] }; coresPorChave.set(cChave, cor); }
     else if (v.hex.length) {
       if (cor.hex.length === 0) { cor.hex = v.hex; cor.semHex = false; }
       else if (cor.hex.join() !== v.hex.join() && !cor.hexAlternativos.some((h) => h.join() === v.hex.join())) cor.hexAlternativos.push(v.hex);
@@ -220,7 +220,8 @@ export function familiaPorEixos(nome: string, itens: readonly ItemEixos[], eixos
   }
   const ordenadas = [...medidasPorChave.entries()].sort((a, b) => cmpValores(a[1], b[1]));
   const medidas: MedidaCfg[] = ordenadas.map(([, valores], i) => ({ id: `m${i + 1}`, rotulo: valores.join(" · ") || "Única", valores: Object.fromEntries(eixosCopia.medida.map((x, k) => [x, valores[k]])) }));
-  const idMedida = new Map(ordenadas.map(([chave], i) => [chave, i] as const)), idCor = new Map([...coresPorChave.keys()].map((c, i) => [c, i] as const));
+  const coresOrdenadas = [...coresPorChave.entries()].sort((a, b) => compararTexto(a[0], b[0])).map(([chave, c], i) => ({ chave, cor: { ...c, id: `a${i + 1}` } }));
+  const idMedida = new Map(ordenadas.map(([chave], i) => [chave, i] as const)), idCor = new Map(coresOrdenadas.map(({ chave }, i) => [chave, i] as const));
   const variantes = aceites
     .map(({ v, mChave, cChave }) => ({ mi: idMedida.get(mChave) ?? 0, ci: idCor.get(cChave) ?? 0, v }))
     .sort((a, b) => a.mi - b.mi || a.ci - b.ci)
@@ -229,7 +230,7 @@ export function familiaPorEixos(nome: string, itens: readonly ItemEixos[], eixos
   return {
     familia: {
       id: `${PREFIXO_FAMILIA}${slug(nomeLimpo)}`, nome: nomeLimpo, marca: marca.marca, marcasVarias: marca.varias, categoria: categoria.categoria,
-      eixos: eixosCopia, cores: [...coresPorChave.values()], medidas, variantes, excluidos, misturaMedidas: misturaDeMedidas(validos, eixosCopia),
+      eixos: eixosCopia, cores: coresOrdenadas.map((x) => x.cor), medidas, variantes, excluidos, misturaMedidas: misturaDeMedidas(validos, eixosCopia),
     },
     conflitos,
   };
@@ -243,12 +244,13 @@ const erro = (tipo: TipoProblema, msg: string, produtoId?: string): Problema => 
 const aviso = (tipo: TipoProblema, msg: string): Problema => ({ tipo, gravidade: "aviso", msg });
 
 function problemasDeVariantes(f: FamiliaCfg): Problema[] {
-  const p: Problema[] = [], porSku = new Map<string, string[]>();
+  const p: Problema[] = [], porSku = new Map<string, { sku: string; onde: string[] }>();
   for (const v of f.variantes) {
-    porSku.set(v.sku, [...(porSku.get(v.sku) ?? []), v.produtoNome]);
+    const chave = v.sku.trim().toLowerCase(), atual = porSku.get(chave) ?? { sku: v.sku.trim(), onde: [] };
+    porSku.set(chave, { sku: atual.sku, onde: [...atual.onde, v.produtoNome] });
     if (!(v.preco > 0)) p.push(erro("preco", `O produto «${v.produtoNome}» não tem preço de venda.`, v.produtoId));
   }
-  for (const [sku, onde] of porSku) if (onde.length > 1) p.push(erro("sku", `O SKU «${sku}» repete-se (${onde.join("; ")}).`));
+  for (const { sku, onde } of porSku.values()) if (onde.length > 1) p.push(erro("sku", `O SKU «${sku}» repete-se (${onde.join("; ")}).`));
   return p;
 }
 function avisosDaFamilia(f: FamiliaCfg): Problema[] {

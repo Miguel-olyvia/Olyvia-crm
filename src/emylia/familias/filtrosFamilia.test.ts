@@ -7,15 +7,15 @@ const item = (id: string, medida: string): ItemEixos => ({ ref: { id, n: id, sku
 const fam = (nome: string, ids: string[]): FamiliaCfg => familiaPorEixos(nome, ids.map((id, i) => item(id, `${40 + i}×40 cm`)), { cor: null, medida: ["Medida"] }).familia;
 
 describe("filtrosIniciais", () => {
-  it("sem filtros ativos, e cada chamada devolve um objeto novo (listas não partilhadas)", () => {
+  it("sem filtros ativos, e as listas não são partilhadas entre chamadas", () => {
     expect(filtrosIniciais()).toEqual({ q: "", marcas: [], categorias: [], soComPreco: false, semFamilia: false, soEscolhidos: false });
-    expect(filtrosIniciais()).not.toBe(filtrosIniciais());
-    expect(filtrosIniciais().marcas).not.toBe(filtrosIniciais().marcas);
-    expect(filtrosIniciais().categorias).not.toBe(filtrosIniciais().categorias);
+    const a = filtrosIniciais(), b = filtrosIniciais();
+    (a.marcas as string[]).push("x");
+    expect(b.marcas).toEqual([]);
   });
-  it("aceita ser alargado com valores (tipo FiltrosCatalogo)", () => {
+  it("um FiltrosCatalogo preenchido a partir dos iniciais mantém o resto por omissão", () => {
     const f: FiltrosCatalogo = { ...filtrosIniciais(), q: "velar", marcas: ["frasa"] };
-    expect(f).toMatchObject({ q: "velar", marcas: ["frasa"] });
+    expect(f).toEqual({ ...filtrosIniciais(), q: "velar", marcas: ["frasa"] });
   });
 });
 

@@ -12,9 +12,9 @@ const montar = (grupo: "produtos" | "servicos", ativo: string) => {
 const rotulos = () => screen.getAllByRole("tab").map((t) => t.textContent);
 
 describe("SeparadoresCatalogo", () => {
-  it("Produtos: Lista, Categorias, Subcategorias, Modelos, Marcas, Atributos, Referência (SKU)", () => {
+  it("Produtos: Lista, Categorias, Subcategorias, Modelos, Marcas, Atributos, Referência (SKU), Famílias", () => {
     montar("produtos", "lista");
-    expect(rotulos()).toEqual(["Lista", "Categorias", "Subcategorias", "Modelos", "Marcas", "Atributos", "Referência (SKU)"]);
+    expect(rotulos()).toEqual(["Lista", "Categorias", "Subcategorias", "Modelos", "Marcas", "Atributos", "Referência (SKU)", "Famílias"]);
   });
   it("Serviços: Lista, Equipamentos, Consumíveis, Técnicos, Ligações", () => {
     montar("servicos", "lista");
@@ -29,7 +29,7 @@ describe("SeparadoresCatalogo", () => {
   it.each([
     ["produtos", "Lista", "/catalogo/produtos"], ["produtos", "Categorias", "/catalogo/produtos/categorias"], ["produtos", "Subcategorias", "/catalogo/produtos/subcategorias"],
     ["produtos", "Modelos", "/catalogo/produtos/modelos"], ["produtos", "Marcas", "/catalogo/produtos/marcas"], ["produtos", "Atributos", "/catalogo/produtos/atributos"],
-    ["produtos", "Referência (SKU)", "/catalogo/produtos/referencia"],
+    ["produtos", "Referência (SKU)", "/catalogo/produtos/referencia"], ["produtos", "Famílias", "/catalogo/produtos/familias"],
     ["servicos", "Lista", "/catalogo/servicos"], ["servicos", "Equipamentos", "/catalogo/servicos/equipamentos"], ["servicos", "Consumíveis", "/catalogo/servicos/consumiveis"],
     ["servicos", "Técnicos", "/catalogo/servicos/tecnicos"], ["servicos", "Ligações", "/catalogo/servicos/ligacoes"],
   ] as const)("%s: clicar em «%s» navega para %s", (grupo, rotulo, rota) => {

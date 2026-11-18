@@ -87,7 +87,7 @@ describe("Produtos do Catálogo: a lista não lê o Catálogo inteiro", () => {
     expect(fns).not.toContain("cat_ler_produtos_tabelas");
     expect(doTipo("cat_ler_referencias_produtos")[0].a).toEqual({ p_org: ORG });
     expect(screen.getByText("Torneira cozinha")).toBeInTheDocument();
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Lista", "Categorias", "Subcategorias", "Modelos", "Marcas", "Atributos", "Referência (SKU)"]);
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Lista", "Categorias", "Subcategorias", "Modelos", "Marcas", "Atributos", "Referência (SKU)", "Famílias"]);
   });
 
   it("mostra o estado de um produto que não está ativo, e só desse", async () => {
