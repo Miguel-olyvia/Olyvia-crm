@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -33,6 +33,12 @@ import {
   type LayoutDensity,
 } from "@/lib/forms/layoutConfig";
 import { formBrandingConfigSchema } from "@/lib/validations";
+import {
+  activeEmailLocales,
+  emailLocaleTemplatesEqual,
+  normalizeEmailLocaleTemplates,
+  type EmailLocaleTemplates,
+} from "@/lib/formEmailLocales";
 
 const TRANSLATABLE_BRANDING_KEYS = [
   "form_title",
@@ -122,6 +128,8 @@ interface BrandingData {
   email_smtp_id: string | null;
   scheduling_invite_enabled: boolean;
   scheduling_invite_delays_hours: string;
+  /** Modelo de email por idioma: {finalidade: {idioma: id}} (ver lib/formEmailLocales). */
+  email_locale_templates: EmailLocaleTemplates;
 }
 
 const defaultBranding: BrandingData = {
@@ -191,6 +199,7 @@ const defaultBranding: BrandingData = {
   email_smtp_id: null,
   scheduling_invite_enabled: true,
   scheduling_invite_delays_hours: "24",
+  email_locale_templates: {},
 };
 
 const fontOptions = [
@@ -277,16 +286,24 @@ function ColorInput({ label, description, value, onChange }: { label: string; de
 
 export function FormBrandingConfig({ open, onOpenChange, formId, formName }: FormBrandingConfigProps) {
   const { activeCompany } = useCompany();
+  const { t } = useTranslation();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [branding, setBranding] = useState<BrandingData>(defaultBranding);
   const [existingId, setExistingId] = useState<string | null>(null);
+  // Mapa de modelos por idioma tal como veio da base: só se grava se o utilizador o mexer,
+  // para guardar outro separador não reescrever o que não se tocou.
+  const loadedLocaleTemplates = useRef<EmailLocaleTemplates>({});
   const [i18nConfig, setI18nConfig] = useState<FormI18nConfig>({
     default_locale: DEFAULT_FORM_LOCALE,
     enabled_locales: [],
     content: {},
   });
   const [activeLocale, setActiveLocale] = useState<string>(DEFAULT_FORM_LOCALE);
+  // O separador Emails só se mostra depois de os idiomas responderem (ou falharem): assim não
+  // muda de forma (um seletor -> um por idioma) depois de aparecer.
+  const [i18nLoading, setI18nLoading] = useState(true);
+  const i18nRequest = useRef(0);
   const [emailTemplateOptions, setEmailTemplateOptions] = useState<EmailTemplateOption[]>([]);
   const [smtpOptions, setSmtpOptions] = useState<SmtpOption[]>([]);
 
@@ -299,10 +316,26 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
   }, [open, formId, activeCompany?.id]);
 
   const loadI18nConfig = async () => {
-    const { data } = await supabase.from("forms").select("settings").eq("id", formId).maybeSingle();
-    const cfg = readI18nConfig(data?.settings);
-    setI18nConfig(cfg);
-    setActiveLocale(cfg.default_locale || DEFAULT_FORM_LOCALE);
+    const request = ++i18nRequest.current;
+    setI18nLoading(true);
+    try {
+      const { data, error } = await supabase.from("forms").select("settings").eq("id", formId).maybeSingle();
+      if (error) throw error;
+      if (request !== i18nRequest.current) return;
+      const cfg = readI18nConfig(data?.settings);
+      setI18nConfig(cfg);
+      setActiveLocale(cfg.default_locale || DEFAULT_FORM_LOCALE);
+    } catch (e) {
+      if (request !== i18nRequest.current) return;
+      console.error("Failed to load form languages", e);
+      // Sem os idiomas o separador Emails mostra o seletor único. Não se grava nada em
+      // forms.settings.i18n, e o mapa de modelos por idioma fica como veio da base.
+      setI18nConfig({ default_locale: DEFAULT_FORM_LOCALE, enabled_locales: [], content: {} });
+      setActiveLocale(DEFAULT_FORM_LOCALE);
+      toast.error("Erro ao carregar os idiomas do formulário");
+    } finally {
+      if (request === i18nRequest.current) setI18nLoading(false);
+    }
   };
 
   const loadEmailOptions = async () => {
@@ -329,6 +362,8 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
     const def = i18nConfig.default_locale || DEFAULT_FORM_LOCALE;
     return [def, ...(i18nConfig.enabled_locales || []).filter((l) => l !== def)];
   }, [i18nConfig]);
+
+  const emailLocales = useMemo(() => activeEmailLocales(i18nConfig), [i18nConfig]);
 
   const isDefaultLocale = activeLocale === (i18nConfig.default_locale || DEFAULT_FORM_LOCALE);
 
@@ -368,6 +403,8 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
       if (error) throw error;
 
       if (data) {
+        const localeTemplates = normalizeEmailLocaleTemplates((data as any).email_locale_templates);
+        loadedLocaleTemplates.current = localeTemplates;
         setExistingId(data.id);
         setBranding({
           logo_url: data.logo_url || "",
@@ -438,8 +475,10 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
           scheduling_invite_delays_hours: Array.isArray((data as any).scheduling_invite_delays_hours)
             ? (data as any).scheduling_invite_delays_hours.join(", ")
             : "24",
+          email_locale_templates: localeTemplates,
         });
       } else {
+        loadedLocaleTemplates.current = {};
         setExistingId(null);
         setBranding(defaultBranding);
       }
@@ -470,11 +509,14 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
 
     setSaving(true);
     try {
-      const { scheduling_invite_delays_hours, ...rest } = branding;
+      const { scheduling_invite_delays_hours, email_locale_templates, ...rest } = branding;
       const updatePayload: any = {
         ...rest,
         scheduling_invite_delays_hours: parsedDelays.length > 0 ? parsedDelays : [24],
       };
+      if (!emailLocaleTemplatesEqual(email_locale_templates, loadedLocaleTemplates.current)) {
+        updatePayload.email_locale_templates = email_locale_templates;
+      }
 
       if (existingId) {
         const { error } = await supabase
@@ -1007,12 +1049,20 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
               </TabsContent>
 
               <TabsContent value="emails" className="space-y-6 mt-0">
-                <FormEmailsTab<BrandingData>
-                  branding={branding}
-                  onChange={setBranding}
-                  emailTemplateOptions={emailTemplateOptions}
-                  smtpOptions={smtpOptions}
-                />
+                {i18nLoading ? (
+                  <div role="status" className="flex items-center gap-2 py-6 text-sm text-muted-foreground">
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    {t("emailAudience.localesLoading")}
+                  </div>
+                ) : (
+                  <FormEmailsTab<BrandingData>
+                    branding={branding}
+                    onChange={setBranding}
+                    emailTemplateOptions={emailTemplateOptions}
+                    smtpOptions={smtpOptions}
+                    activeLocales={emailLocales}
+                  />
+                )}
               </TabsContent>
             </ScrollArea>
               </Tabs>
