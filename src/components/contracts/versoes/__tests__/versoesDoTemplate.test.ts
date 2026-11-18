@@ -147,7 +147,7 @@ describe("camposDoIdioma numa versão", () => {
 });
 
 describe("escreverCorpo numa versão", () => {
-  it("escreve só na versão, deixa o corpo base e atualiza o base_hash", () => {
+  it("escreve só na versão e deixa o corpo base e o base_hash como estavam", () => {
     const m = comEn();
     const r = escreverCorpo(m, "en", "<h2>SERVICES AGREEMENT</h2>");
     expect(r.body_html).toBe(CORPO_PT);
@@ -155,6 +155,20 @@ describe("escreverCorpo numa versão", () => {
     expect(en.body_html).toBe("<h2>SERVICES AGREEMENT</h2>");
     expect(en.base_hash).toBe(calcularBaseHash(CORPO_PT));
     expect(en.footer_text).toBe("Documento gerado pelo Olyvia");
+  });
+
+  it("editar a versão NÃO apaga o aviso «o português mudou»: só marcarRevisto renova o base_hash", () => {
+    const criada = comEn();
+    const mudado: EstadoMinuta = { ...criada, body_html: `${CORPO_PT}<p>nova cláusula</p>` };
+    expect(calcularCompletude(mudado, "en").desatualizado).toBe(true);
+
+    const editado: EstadoMinuta = { ...mudado, ...escreverCorpo(mudado, "en", "<h2>SERVICES AGREEMENT</h2><p>a new clause</p>") };
+    expect((editado.doc_settings as any).versions.en.base_hash).toBe(calcularBaseHash(CORPO_PT));
+    expect(calcularCompletude(editado, "en").desatualizado).toBe(true);
+
+    const revisto = marcarRevisto(editado, "en");
+    expect((revisto.doc_settings as any).versions.en.base_hash).toBe(calcularBaseHash(mudado.body_html));
+    expect(calcularCompletude(revisto, "en").desatualizado).toBe(false);
   });
 
   it("preserva chaves desconhecidas dentro da versão", () => {

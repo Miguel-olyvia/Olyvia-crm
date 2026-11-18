@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import {
   fraseAssinaturaUnica,
   inserirAntesDoBlocoDeAssinatura,
+  isDecorativeLine,
+  localizarAssinaturas,
   removerBlocoDeAssinatura,
   temBlocoDeAssinatura,
 } from "../assinaturas";
@@ -22,7 +24,7 @@ const SEM_BLOCO = `<h2>CONTRATO</h2><p>O CLIENTE obriga-se a pagar o preço acor
 describe("temBlocoDeAssinatura", () => {
   it("deteta o bloco em duas colunas em português e em inglês", () => {
     expect(temBlocoDeAssinatura(`<p>x</p>${BLOCO_PT}`)).toBe(true);
-    expect(temBlocoDeAssinatura(`<p>x</p>${BLOCO_EN}`)).toBe(true);
+    expect(temBlocoDeAssinatura(`<p>x</p>${BLOCO_EN}`, "en")).toBe(true);
     expect(temBlocoDeAssinatura(BLOCO_EN, "en")).toBe(true);
     expect(temBlocoDeAssinatura(BLOCO_PT, "pt")).toBe(true);
   });
@@ -43,9 +45,15 @@ describe("temBlocoDeAssinatura", () => {
     expect(temBlocoDeAssinatura("<p>nada</p>")).toBe(false);
   });
 
-  it("o idioma da versão vem primeiro, mas as frases dos outros idiomas servem de último recurso", () => {
-    expect(temBlocoDeAssinatura(BLOCO_EN, "pt")).toBe(true);
+  it("com idioma explícito procura-se só nele e no base; os outros só se forem pedidos na lista", () => {
+    expect(temBlocoDeAssinatura(BLOCO_EN, "pt")).toBe(false);
     expect(temBlocoDeAssinatura(BLOCO_PT, "en")).toBe(true);
+    expect(temBlocoDeAssinatura(BLOCO_EN, "pt", ["pt", "en"])).toBe(true);
+  });
+
+  it("sem idioma (chamadas antigas) é só o português de hoje", () => {
+    expect(temBlocoDeAssinatura(BLOCO_EN)).toBe(false);
+    expect(temBlocoDeAssinatura(`<p>x</p>${BLOCO_PT}`)).toBe(true);
   });
 });
 
@@ -169,5 +177,144 @@ describe("paridade com a deteção de injectSignaturesIntoBlock (contractDocumen
     expect(pt.segundaParte.flags).toBe("i");
     expect(pt.primeiraParte.source).toBe("A PRIMEIRA CONTRATANTE");
     expect(pt.primeiraParte.flags).toBe("i");
+  });
+});
+
+// ── H1: uma cláusula curta em inglês não é um bloco de assinatura ────────────────────────────────
+const CLAUSULA_EN = `<p>The Company shall provide the Services to the Client.</p>`;
+const CORPO_EN = `<h2>SERVICES AGREEMENT</h2>${CLAUSULA_EN}<p>Clause 2. Payment is due in 30 days.</p><p>Clause 3. Governing law.</p><p>Clause 4. Notices.</p><p>Clause 5. Term.</p>`;
+const PLANO_EN_FIM = `<p>Clause 1.</p><p>London, 13 March 2026</p><p>_______________________</p><p>THE FIRST PARTY&nbsp;&nbsp;&nbsp;THE SECOND PARTY</p>`;
+
+describe("H1 — o bloco plano em inglês só vale no fim do corpo e com linha de assinatura", () => {
+  it("a cláusula curta com as duas partes, no meio do corpo, não é tocada por deteção, remoção nem inserção", () => {
+    expect(temBlocoDeAssinatura(CORPO_EN, "en")).toBe(false);
+    const r = removerBlocoDeAssinatura(CORPO_EN, "en");
+    expect(r.removido).toBe(false);
+    expect(r.html).toBe(CORPO_EN);
+    const i = inserirAntesDoBlocoDeAssinatura(CORPO_EN, "<p>FRASE</p>", "en");
+    expect(i.inserido).toBe(false);
+    expect(i.html).toBe(CORPO_EN);
+  });
+
+  it("a mesma cláusula no fim do corpo, sem linha de assinatura, também não conta", () => {
+    expect(temBlocoDeAssinatura(`<p>Clause 1.</p>${CLAUSULA_EN}`, "en")).toBe(false);
+  });
+
+  it("uma etiqueta com as duas partes e uma linha, mas no meio do corpo, não conta", () => {
+    const meio = `<p>_____________</p><p>THE FIRST PARTY   THE SECOND PARTY</p>${"<p>Clause.</p>".repeat(5)}`;
+    expect(temBlocoDeAssinatura(meio, "en")).toBe(false);
+  });
+
+  it("o bloco real no fim, com linha, continua a ser detetado (colunas e plano)", () => {
+    expect(temBlocoDeAssinatura(`<p>Clause</p>${BLOCO_EN}`, "en")).toBe(true);
+    expect(temBlocoDeAssinatura(PLANO_EN_FIM, "en")).toBe(true);
+    expect(inserirAntesDoBlocoDeAssinatura(PLANO_EN_FIM, "<p>FRASE</p>", "en").inserido).toBe(true);
+  });
+
+  it("o plano em inglês, só com a heurística, nunca é REMOVIDO (só marcas ou colunas)", () => {
+    const r = removerBlocoDeAssinatura(PLANO_EN_FIM, "en");
+    expect(r.removido).toBe(false);
+    expect(r.html).toBe(PLANO_EN_FIM);
+  });
+
+  it("as colunas em inglês e as marcas continuam a poder ser removidas", () => {
+    expect(removerBlocoDeAssinatura(`<p>Clause</p>${BLOCO_EN}`, "en").removido).toBe(true);
+    expect(removerBlocoDeAssinatura(`<p>Fim.</p>${MARCADO}`, "en").removido).toBe(true);
+  });
+
+  it("o português fica como hoje: o plano antigo é aceite mesmo no meio e sem linha", () => {
+    const meio = `<p>A PRIMEIRA CONTRATANTE   O SEGUNDO CONTRATANTE</p>${"<p>x</p>".repeat(6)}`;
+    expect(temBlocoDeAssinatura(meio, "pt")).toBe(true);
+    expect(removerBlocoDeAssinatura(meio, "pt").removido).toBe(true);
+  });
+});
+
+// ── H2: o português não procura nos outros idiomas ───────────────────────────────────────────────
+describe("H2 — um texto em inglês solto num contrato em português não é tocado", () => {
+  const PT_COM_INGLES = `<p>Lisboa</p><p>The Client signs here</p><p>THE COMPANY and THE CLIENT agree.</p>`;
+  it("nem por omissão nem com idioma pt", () => {
+    expect(temBlocoDeAssinatura(PT_COM_INGLES)).toBe(false);
+    expect(temBlocoDeAssinatura(PT_COM_INGLES, "pt")).toBe(false);
+    expect(removerBlocoDeAssinatura(PT_COM_INGLES, "pt").html).toBe(PT_COM_INGLES);
+  });
+});
+
+// ── M1: só as linhas puramente decorativas ────────────────────────────────────────────────────────
+describe("M1 — isDecorativeLine", () => {
+  const el = (html: string) => {
+    const t = document.createElement("template");
+    t.innerHTML = html;
+    return t.content.firstElementChild;
+  };
+  it("aceita sublinhados, traços, espaços e <br>", () => {
+    expect(isDecorativeLine(el("<p>_______</p>"))).toBe(true);
+    expect(isDecorativeLine(el("<p>&nbsp;<br></p>"))).toBe(true);
+    expect(isDecorativeLine(el("<div> — – - </div>"))).toBe(true);
+    expect(isDecorativeLine(el("<p></p>"))).toBe(true);
+  });
+  it("nunca com imagem, svg, tabela ou canvas, nem com texto", () => {
+    expect(isDecorativeLine(el(`<p><img src="rubrica.png"></p>`))).toBe(false);
+    expect(isDecorativeLine(el("<div><table><tr><td></td></tr></table></div>"))).toBe(false);
+    expect(isDecorativeLine(el(`<div><svg width="1"></svg></div>`))).toBe(false);
+    expect(isDecorativeLine(el("<p><canvas></canvas></p>"))).toBe(false);
+    expect(isDecorativeLine(el("<p>texto</p>"))).toBe(false);
+    expect(isDecorativeLine(null)).toBe(false);
+  });
+  it("a rúbrica antes do bloco não é apagada pela remoção", () => {
+    const r = removerBlocoDeAssinatura(`<p>Lisboa</p><p><img src="rubrica.png"></p>${FLAT}`);
+    expect(r.removido).toBe(true);
+    expect(r.html).toContain("rubrica.png");
+    expect(r.html).not.toContain("____");
+  });
+});
+
+// ── M3: uma só localização, com as marcas tratadas por igual ─────────────────────────────────────
+const LINHA = `<div style="border-bottom:1px solid #000;height:40px;"></div>`;
+describe("M3 — localizarAssinaturas unifica as marcas", () => {
+  const raiz = (html: string) => {
+    const t = document.createElement("template");
+    t.innerHTML = html;
+    return t.content;
+  };
+
+  it("só o contentor marcado: as duas colunas diretas são a empresa e o cliente", () => {
+    const html = `<div class="olv-assinaturas"><div>${LINHA}<p>Pela empresa</p></div><div>${LINHA}<p>Pelo cliente</p></div></div>`;
+    const loc = localizarAssinaturas(raiz(html));
+    expect(loc?.tipo).toBe("colunas");
+    if (loc?.tipo === "colunas") {
+      expect(loc.empresa?.textContent).toContain("Pela empresa");
+      expect(loc.cliente?.textContent).toContain("Pelo cliente");
+      expect(loc.elementos).toHaveLength(1);
+    }
+  });
+
+  it("só a coluna do cliente marcada: a irmã com linha é a da empresa", () => {
+    const html = `<div style="display:flex"><div>${LINHA}<p>Pela empresa</p></div><div class="olv-assinatura-cliente">${LINHA}<p>Pelo cliente</p></div></div>`;
+    const loc = localizarAssinaturas(raiz(html));
+    expect(loc?.tipo === "colunas" && loc.empresa?.textContent).toContain("Pela empresa");
+  });
+
+  it("as duas colunas marcadas ao nível do topo: remove-se cada uma, sem falhar", () => {
+    const html = `<p>Fim do texto.</p><div class="olv-assinatura-empresa">${LINHA}<p>Pela empresa</p></div><div class="olv-assinatura-cliente">${LINHA}<p>Pelo cliente</p></div>`;
+    const r = removerBlocoDeAssinatura(html);
+    expect(r.removido).toBe(true);
+    expect(r.html).toContain("Fim do texto.");
+    expect(r.html).not.toContain("Pela empresa");
+    expect(r.html).not.toContain("Pelo cliente");
+  });
+
+  it("as colunas marcadas dentro de um contentor com outro texto: só as colunas saem", () => {
+    const html = `<div><p>Cláusula longa que não pode desaparecer.</p><div class="olv-assinatura-empresa">${LINHA}<p>E</p></div><div class="olv-assinatura-cliente">${LINHA}<p>C</p></div></div>`;
+    const r = removerBlocoDeAssinatura(html);
+    expect(r.removido).toBe(true);
+    expect(r.html).toContain("Cláusula longa");
+    expect(r.html).not.toContain(">E<");
+    expect(r.html).not.toContain(">C<");
+  });
+
+  it("sem marcas, as frases do idioma achadas em colunas", () => {
+    const loc = localizarAssinaturas(raiz(BLOCO_EN), { idioma: "en" });
+    expect(loc?.tipo).toBe("colunas");
+    expect(localizarAssinaturas(raiz(BLOCO_EN))).toBeNull();
   });
 });

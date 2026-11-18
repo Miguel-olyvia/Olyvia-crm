@@ -22,13 +22,25 @@ const h = vi.hoisted(() => {
     updates: [] as Array<Record<string, unknown>>,
     updateEqs: [] as Array<[string, unknown]>,
     inserts: [] as Array<Record<string, unknown>>,
+    updateNeqs: [] as Array<[string, unknown]>,
+    // Com `store`, os updates comportam-se como na base: filtram as linhas e, como o gatilho BEFORE UPDATE,
+    // mudam o updated_at de CADA linha atualizada (incluindo as do reset em massa do «default»).
+    store: null as Array<Record<string, unknown>> | null,
+    contador: 0,
   };
 
   function construir(tabela: string) {
     let op: "select" | "update" | "insert" | "delete" = "select";
+    const filtros: Array<["eq" | "neq", string, unknown]> = [];
+    const casa = (l: Record<string, unknown>) => filtros.every(([k, col, v]) => (k === "eq" ? l[col] === v : l[col] !== v));
     const resultado = () => {
       if (tabela === "client_contract_templates") {
         if (op === "select") return { data: estado.templates, error: null };
+        if (op === "update" && estado.store) {
+          const alvo = estado.store.filter(casa);
+          alvo.forEach((l) => { estado.contador += 1; l.updated_at = `gatilho-${estado.contador}`; });
+          return { data: alvo.map((l) => ({ id: l.id })), error: null };
+        }
         if (op === "update") return { data: estado.linhasAtualizadas, error: null };
         if (op === "insert") return { data: [{ id: "novo" }], error: null };
       }
@@ -52,12 +64,24 @@ const h = vi.hoisted(() => {
       },
       delete: () => { op = "delete"; return c; },
       eq: (col: string, val: unknown) => {
+        filtros.push(["eq", col, val]);
         if (op === "update" && tabela === "client_contract_templates") estado.updateEqs.push([col, val]);
+        return c;
+      },
+      neq: (col: string, val: unknown) => {
+        filtros.push(["neq", col, val]);
+        if (op === "update" && tabela === "client_contract_templates") estado.updateNeqs.push([col, val]);
         return c;
       },
       order: () => c,
       not: () => c,
-      maybeSingle: () => Promise.resolve({ data: estado.existente, error: null }),
+      maybeSingle: () => {
+        if (estado.store) {
+          const l = estado.store.find(casa);
+          return Promise.resolve({ data: l ? { id: l.id, updated_at: l.updated_at } : null, error: null });
+        }
+        return Promise.resolve({ data: estado.existente, error: null });
+      },
       then: (res: (v: unknown) => unknown, rej: (e: unknown) => unknown) => Promise.resolve(resultado()).then(res, rej),
     });
     return c;
@@ -148,6 +172,9 @@ beforeEach(() => {
   h.estado.selects.length = 0;
   h.estado.updates.length = 0;
   h.estado.updateEqs.length = 0;
+  h.estado.updateNeqs.length = 0;
+  h.estado.store = null;
+  h.estado.contador = 0;
   h.estado.inserts.length = 0;
   h.toast.success.mockClear();
   h.toast.error.mockClear();
@@ -222,15 +249,19 @@ describe("ContractTemplates: versões por idioma", () => {
     montar();
     await abrirEdicao();
     await adicionarEn();
-    const abas = await screen.findAllByRole("tab", { name: /^(PT|EN)/ });
+    const abas = await screen.findAllByRole("tab", { name: /\(base\)|por traduzir/ });
     expect(abas.map((a) => a.textContent?.replace(/\s+/g, " ").trim())).toEqual(["PT (base)", "EN · 1 por traduzir"]);
     expect(abas[1]).toHaveAttribute("aria-selected", "true");
     expect((screen.getByLabelText("corpo-do-editor") as HTMLTextAreaElement).value).toBe(CORPO_PT);
     expect(screen.getByRole("region", { name: "O que falta traduzir" })).toBeInTheDocument();
-    const painel = document.getElementById("olv-painel-idioma-minuta");
-    expect(painel).toHaveAttribute("role", "tabpanel");
-    expect(painel).toHaveAttribute("aria-labelledby", abas[1].id);
-    expect(abas[1]).toHaveAttribute("aria-controls", "olv-painel-idioma-minuta");
+    // ARIA válido: o grupo do conteúdo é IRMÃO da barra (não a contém) e está nomeado pela aba ativa.
+    const grupo = screen.getByRole("group", { name: "English, 1 por traduzir" });
+    expect(grupo).toHaveAttribute("aria-labelledby", abas[1].id);
+    const lista = screen.getByRole("tablist", { name: "Idiomas da minuta" });
+    expect(grupo.contains(lista)).toBe(false);
+    expect(lista.closest('[role="tabpanel"]')).toBeNull();
+    expect(grupo.closest('[role="tabpanel"]')).toBeNull();
+    expect(grupo.querySelector('[role="tabpanel"]')).not.toBeNull(); // os do Radix (Editor, Layout…) ficam lá dentro
   });
 
   it("traduzir o corpo e guardar escreve só em doc_settings.versions.en; o corpo base e o resto ficam", async () => {
@@ -257,7 +288,7 @@ describe("ContractTemplates: versões por idioma", () => {
     await waitFor(() => expect(screen.getByTestId("preview-corpo").textContent).toContain("SERVICES AGREEMENT"));
     expect(screen.getByTestId("preview").textContent).toContain("Page 1 of 1");
 
-    fireEvent.click(screen.getByRole("tab", { name: "PT (base)" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Português (base)" }));
     expect((screen.getByLabelText("corpo-do-editor") as HTMLTextAreaElement).value).toBe(CORPO_PT);
     await waitFor(() => expect(screen.getByTestId("preview").textContent).toContain("Página 1 de 1"));
   });
@@ -316,6 +347,87 @@ describe("ContractTemplates: guarda de concorrência", () => {
     fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
     await waitFor(() => expect(h.toast.error).toHaveBeenCalled());
     expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+});
+
+describe("ContractTemplates: guardar a minuta «default» (o gatilho muda updated_at em cada update)", () => {
+  function prepararDefault() {
+    h.estado.templates = [minuta({ is_default: true }), minuta({ id: "t2", name: "Outra", is_default: false })];
+    h.estado.store = [
+      { id: "t1", organization_id: "org-teste", updated_at: T1_UPDATED },
+      { id: "t2", organization_id: "org-teste", updated_at: "2026-11-10T09:00:00+00:00" },
+    ];
+  }
+
+  it("guardar a default funciona: o reset em massa deixa de fora a própria minuta", async () => {
+    prepararDefault();
+    montar();
+    await abrirEdicao();
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+
+    await waitFor(() => expect(h.toast.success).toHaveBeenCalled());
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(h.toast.error).not.toHaveBeenCalled();
+    // O reset em massa (is_default:false) exclui a própria minuta e depois grava-se com a guarda de updated_at.
+    expect(h.estado.updates[0]).toEqual({ is_default: false });
+    expect(h.estado.updateNeqs).toContainEqual(["id", "t1"]);
+    expect(h.estado.updates).toHaveLength(2);
+    expect(h.estado.updates[1]).toMatchObject({ is_default: true, name: "Minuta A" });
+  });
+
+  it("um conflito verdadeiro (outra sessão mudou o updated_at) continua a ser detetado, antes de mexer nas outras minutas", async () => {
+    prepararDefault();
+    montar();
+    await abrirEdicao();
+    h.estado.store![0].updated_at = "2026-11-18T11:30:00+00:00"; // outra pessoa guardou entretanto
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+
+    const aviso = await screen.findByRole("alertdialog");
+    expect(within(aviso).getByText("Esta minuta foi alterada por outra pessoa")).toBeInTheDocument();
+    expect(h.toast.success).not.toHaveBeenCalled();
+    expect(h.estado.updates).toHaveLength(0); // nem o reset do «default» das outras minutas correu
+    expect(h.estado.store![1].updated_at).toBe("2026-11-10T09:00:00+00:00");
+  });
+
+  it("«Guardar por cima» também funciona na default", async () => {
+    prepararDefault();
+    montar();
+    await abrirEdicao();
+    h.estado.store![0].updated_at = "2026-11-18T11:30:00+00:00";
+    fireEvent.click(screen.getByRole("button", { name: "Guardar" }));
+    const aviso = await screen.findByRole("alertdialog");
+
+    fireEvent.click(within(aviso).getByRole("button", { name: "Guardar por cima" }));
+    await waitFor(() => expect(h.toast.success).toHaveBeenCalled());
+    expect(h.estado.updates).toHaveLength(2);
+  });
+});
+
+describe("ContractTemplates: o foco não se perde ao mexer nos idiomas", () => {
+  it("1.º «Adicionar idioma»: o foco vai para o título do painel; ao confirmar, para a aba nova; ao remover, para a aba que fica", async () => {
+    montar();
+    await abrirEdicao();
+
+    fireEvent.click(screen.getByRole("button", { name: "Adicionar idioma" }));
+    await waitFor(() => expect(screen.getByText("Adicionar uma versão de idioma")).toHaveFocus());
+
+    fireEvent.click(screen.getByRole("button", { name: "Adicionar versão" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "English, 1 por traduzir" })).toHaveFocus());
+
+    fireEvent.click(screen.getByRole("button", { name: "Remover esta versão" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Remover" }));
+    // Era a única versão: a barra desaparece e o foco volta ao botão «Adicionar idioma» do cabeçalho.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Adicionar idioma" })).toHaveFocus());
+  });
+
+  it("ao remover uma de duas versões, o foco vai para a aba ativa que fica", async () => {
+    h.estado.templates = [minuta({ doc_settings: { versions: { en: { body_html: CORPO_PT }, es: { body_html: CORPO_PT } } } })];
+    montar();
+    await abrirEdicao();
+    fireEvent.click(await screen.findByRole("tab", { name: /^English/ }));
+    fireEvent.click(screen.getByRole("button", { name: "Remover esta versão" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Remover" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: "Português (base)" })).toHaveFocus());
   });
 });
 

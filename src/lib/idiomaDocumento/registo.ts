@@ -52,6 +52,11 @@ export function obterIdioma(codigo: unknown): IdiomaDef | undefined {
   return IDIOMAS.find((i) => i.codigo === c);
 }
 
+/** O idioma tem expressões que identificam o bloco de assinatura (o inglês e o português têm; es e fr ainda não)? */
+export function temFrasesDeAssinatura(codigo: unknown): boolean {
+  return obterIdioma(codigo)?.assinatura !== undefined;
+}
+
 export function idiomaRegistado(codigo: unknown): codigo is string {
   return obterIdioma(codigo) !== undefined;
 }

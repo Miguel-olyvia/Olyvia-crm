@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, within } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 vi.mock("@/contexts/LanguageContext", () => ({ useLanguage: () => ({ language: "pt" }) }));
 
@@ -124,3 +125,78 @@ describe("BarraDeIdiomas", () => {
     });
   });
 });
+
+describe("BarraDeIdiomas — acessibilidade e foco", () => {
+  it("cada aba tem nome acessível com o texto visível e o idioma por extenso", () => {
+    montar();
+    expect(screen.getByRole("tab", { name: "PT (base), Português" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "EN · 3 por traduzir, English" })).toBeInTheDocument();
+  });
+
+  it("o nome da aba inclui o aviso de que o português mudou", () => {
+    montar({ resumo: [{ ...EN_INCOMPLETO, desatualizado: true }] });
+    expect(screen.getByRole("tab", { name: "EN · 3 por traduzir, English · O português mudou" })).toBeInTheDocument();
+  });
+
+  it("o botão de adicionar idioma anuncia o diálogo que abre e liga-se a ele", () => {
+    montar();
+    const botao = screen.getByRole("button", { name: /Adicionar idioma/ });
+    expect(botao).toHaveAttribute("aria-haspopup", "dialog");
+    expect(botao).toHaveAttribute("aria-expanded", "false");
+    expect(botao).toHaveAttribute("aria-controls", "dialogo-adicionar-idioma");
+    fireEvent.click(botao);
+    expect(botao).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("dialog")).toHaveAttribute("id", "dialogo-adicionar-idioma");
+  });
+
+  it("quando se pede foco, vai para a aba ativa", async () => {
+    const props = { resumo: [EN_INCOMPLETO], idiomaAtivo: "en", livres: ["es"], idPainel: "p", onEscolher: vi.fn(), onAdicionar: vi.fn() };
+    const { rerender } = render(<BarraDeIdiomas {...props} pedidoFoco={0} />);
+    expect(screen.getByRole("tab", { name: /^EN/ })).not.toHaveFocus();
+    rerender(<BarraDeIdiomas {...props} pedidoFoco={1} />);
+    await waitFor(() => expect(screen.getByRole("tab", { name: /^EN/ })).toHaveFocus());
+  });
+
+  it("sem abas (última versão removida), o foco vai para «Adicionar idioma»", async () => {
+    const props = { resumo: [], idiomaAtivo: "pt", livres: ["en"], idPainel: "p", onEscolher: vi.fn(), onAdicionar: vi.fn() };
+    const { rerender } = render(<BarraDeIdiomas {...props} pedidoFoco={0} />);
+    rerender(<BarraDeIdiomas {...props} pedidoFoco={1} />);
+    await waitFor(() => expect(screen.getByRole("button", { name: /Adicionar idioma/ })).toHaveFocus());
+  });
+
+  it("depois de confirmar o diálogo, o foco não volta ao botão: fica na aba nova", async () => {
+    const onAdicionar = vi.fn();
+    function Estado() {
+      const [versoes, setVersoes] = useState<string[]>([]);
+      const [pedido, setPedido] = useState(0);
+      return (
+        <BarraDeIdiomas
+          resumo={versoes.map((codigo) => ({ codigo, faltam: 1, completo: false, desatualizado: false }))}
+          idiomaAtivo={versoes[0] ?? "pt"}
+          livres={["en"]}
+          idPainel="p"
+          pedidoFoco={pedido}
+          onEscolher={vi.fn()}
+          onAdicionar={(c, copiar) => { onAdicionar(c, copiar); setVersoes([c]); setPedido((n) => n + 1); }}
+        />
+      );
+    }
+    render(<Estado />);
+    fireEvent.click(screen.getByRole("button", { name: /Adicionar idioma/ }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Adicionar" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: /^EN/ })).toHaveFocus());
+    // e continua lá depois de o Radix acabar de fechar o diálogo
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByRole("tab", { name: /^EN/ })).toHaveFocus();
+  });
+
+  it("cancelar o diálogo devolve o foco ao botão de adicionar", async () => {
+    montar();
+    const botao = screen.getByRole("button", { name: /Adicionar idioma/ });
+    botao.focus();
+    fireEvent.click(botao);
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(botao).toHaveFocus());
+  });
+});
+

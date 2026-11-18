@@ -1,7 +1,8 @@
 // Paginação do PDF do contrato: fatia o canvas do html2pdf em páginas e junta as versões de idioma, uma a seguir
 // à outra (a 2.ª versão e as seguintes começam sempre numa página nova).
 
-import type { ContractFooterGroup } from "./contractPdfFooter";
+import { IDIOMA_BASE } from "@/lib/idiomaDocumento";
+import { computeFooterLayout, drawContractPdfFootersByVersion, type ContractFooterGroup } from "./contractPdfFooter";
 
 /**
  * Fatia o canvas do html2pdf em páginas, cortando sempre numa faixa sem tinta.
@@ -126,16 +127,23 @@ function findInkFreeCut(
 
 /**
  * O html de impressão pronto para o PDF: sem scripts; sem o rodapé do corpo (é desenhado por página com o jsPDF,
- * no idioma de cada uma); e sem a quebra de página das `.page` seguintes à primeira — o PDF abre a página nova
- * na paginação, e um `break-before` na própria raiz que o html2pdf clona arriscava uma página em branco antes
- * de cada versão.
+ * no idioma de cada uma); sem wrappers olv-versao (desembrulham-se: só chegam aqui por html antigo); e sem a quebra
+ * de página das `.page` seguintes à primeira — o PDF abre a página nova na paginação, e um `break-before` na própria
+ * raiz que o html2pdf clona arriscava uma página em branco antes de cada versão. Só se mexe nas `.page` de topo
+ * (filhas do body) e no rodapé delas: uma classe `page` ou `footer` no corpo do utilizador fica como está.
  */
 export function prepararHtmlParaPdf(html: string): string {
   const parsed = new DOMParser().parseFromString(html, "text/html");
   parsed.querySelectorAll("script").forEach((script) => script.remove());
-  parsed.querySelectorAll(".footer").forEach((node) => node.remove());
-  parsed.querySelectorAll(".page").forEach((pagina) => pagina.removeAttribute("style"));
+  parsed.querySelectorAll("body > .page > .footer").forEach((node) => node.remove());
+  parsed.querySelectorAll("body > .page").forEach((pagina) => pagina.removeAttribute("style"));
+  parsed.querySelectorAll(".olv-versao").forEach((embrulho) => embrulho.replaceWith(...Array.from(embrulho.childNodes)));
   return `<!doctype html>${parsed.documentElement.outerHTML}`;
+}
+
+/** As páginas do documento de impressão: as `.page` de topo (uma por versão), não as que o utilizador escreveu no corpo. */
+export function paginasDoDocumento(documento: Document): HTMLElement[] {
+  return Array.from(documento.querySelectorAll<HTMLElement>("body > .page"));
 }
 
 /** Uma `.page` do documento de impressão (uma por versão de idioma) pronta a ir para o PDF. */
@@ -171,4 +179,80 @@ export async function paginarVersoesNoPdf(opcoes: {
     });
   }
   return grupos;
+}
+
+/** O que o PDF precisa de saber de cada versão. */
+export interface VersaoParaPdf {
+  codigo: string;
+  settings: Record<string, any>;
+}
+
+/**
+ * Monta o PDF de um documento com uma ou várias versões de idioma: uma `.page` por versão, paginada à vez, com o
+ * rodapé e a numeração de cada página no idioma da sua versão. A margem inferior é o máximo entre os rodapés de
+ * todas as páginas (o conteúdo nunca lhes encavalita). As margens e o formato vêm das definições base.
+ * `jsPDF` e `html2pdf` vêm de fora (importados de forma preguiçosa por quem chama; falsos nos testes).
+ */
+export async function gerarPdfDasVersoes(opcoes: {
+  pageElements: readonly HTMLElement[];
+  versoes: readonly VersaoParaPdf[];
+  settings: Record<string, any>;
+  safeFileName: string;
+  jsPDF: new (opcoes: any) => any;
+  html2pdf: () => any;
+}): Promise<any> {
+  const { pageElements, versoes, settings: s, safeFileName } = opcoes;
+  const marginTop = Number(s.margin_top ?? 20) || 20;
+  const marginRight = Number(s.margin_right ?? 20) || 20;
+  const marginBottomBase = Number(s.margin_bottom ?? 20) || 20;
+  const marginLeft = Number(s.margin_left ?? 20) || 20;
+
+  const jsPdfOptions = {
+    unit: "mm" as const,
+    format: s.page_size === "LETTER" ? "letter" : "a4",
+    orientation: (s.page_orientation === "landscape" ? "landscape" : "portrait") as "landscape" | "portrait",
+  };
+  const pdf = new opcoes.jsPDF(jsPdfOptions);
+
+  // Uma versão por página, pela mesma ordem; páginas sem versão usam o idioma e as definições base.
+  const paginas = pageElements.map((elemento, indice) => ({
+    codigo: versoes[indice]?.codigo ?? IDIOMA_BASE,
+    elemento,
+    settings: versoes[indice]?.settings ?? s,
+  }));
+  const layouts = paginas.map((pagina) => computeFooterLayout(pagina.settings, pdf));
+  const marginBottom = Math.max(marginBottomBase, ...layouts.map((layout) => layout.reservedMm));
+
+  const criarWorker = (pageElement: HTMLElement) =>
+    opcoes
+      .html2pdf()
+      .set({
+        margin: [marginTop, marginRight, marginBottom, marginLeft],
+        filename: `${safeFileName}.pdf`,
+        image: { type: "jpeg", quality: 0.98 },
+        html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+        jsPDF: jsPdfOptions,
+        pagebreak: {
+          mode: ["css", "legacy"],
+          avoid: [
+            ".content p",
+            ".content li",
+            ".content h1", ".content h2", ".content h3",
+            ".content h4", ".content h5", ".content h6",
+            ".content tr",
+            ".content img",
+            ".content blockquote",
+            ".content div",
+            ".content font",
+            "[data-pdf-section='header']",
+          ],
+        },
+      })
+      .from(pageElement);
+
+  // Cada versão é paginada à vez; a 2.ª e as seguintes começam numa página nova.
+  const grupos = await paginarVersoesNoPdf({ pdf, offsets: { marginTop, marginLeft }, paginas, criarWorker });
+  // Rodapé por página, no idioma de cada uma; total e numeração contínuos do documento inteiro.
+  drawContractPdfFootersByVersion(pdf, grupos.map((grupo, indice) => ({ ...grupo, layout: layouts[indice] })));
+  return pdf;
 }

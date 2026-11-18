@@ -31,7 +31,7 @@ describe("ListaDeVerificacaoDaVersao", () => {
     const regiao = screen.getByRole("region", { name: "O que falta traduzir" });
     const itens = within(regiao).getAllByRole("listitem").map((li) => li.textContent?.replace(/\s+/g, " ").trim());
     expect(itens).toEqual([
-      "Corpo da minuta Igual ao Português",
+      "Corpo da minuta Igual ao português",
       "Título do cabeçalho Em falta",
       "Rodapé Traduzido",
       "Título da tabela de artigos Traduzido",
@@ -41,17 +41,17 @@ describe("ListaDeVerificacaoDaVersao", () => {
 
   it("o texto em português começa escondido e abre e fecha num painel recolhível", () => {
     montar(LINHAS);
-    const botao = screen.getByRole("button", { name: "Mostrar o texto em Português" });
+    const botao = screen.getByRole("button", { name: "Mostrar o texto em português" });
     expect(botao).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByText("CONTRATO")).toBeNull();
 
     fireEvent.click(botao);
-    expect(screen.getByRole("button", { name: "Esconder o texto em Português" })).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByRole("button", { name: "Esconder o texto em português" })).toHaveAttribute("aria-expanded", "true");
     const original = screen.getByText("CONTRATO");
     expect(original).toHaveAttribute("lang", "pt");
     expect(screen.getByText("Entre as partes é celebrado este contrato.", { selector: "[lang]" })).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Esconder o texto em Português" }));
+    fireEvent.click(screen.getByRole("button", { name: "Esconder o texto em português" }));
     expect(screen.queryByText("CONTRATO")).toBeNull();
   });
 
@@ -68,7 +68,7 @@ describe("ListaDeVerificacaoDaVersao", () => {
   it("em inglês os textos mudam de língua", () => {
     montar(LINHAS, "en");
     expect(screen.getByRole("region", { name: "What is left to translate" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Show the Português text" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show the Portuguese text" })).toBeInTheDocument();
     expect(screen.getAllByText("Missing").length).toBeGreaterThan(0);
   });
 

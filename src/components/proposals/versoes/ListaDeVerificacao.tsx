@@ -6,9 +6,9 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { obterIdioma } from "@/lib/idiomaDocumento";
 import { textoSimples } from "@/lib/idiomaDocumento/texto";
 import { useTranslation } from "@/hooks/useTranslation";
+import { nomeNaFrase } from "./nomeNaFrase";
 import type { CampoDeVerificacao, EstadoDoCampo } from "./modeloVersoes";
 
 interface ListaDeVerificacaoProps {
@@ -36,7 +36,7 @@ const CHAVE_ESTADO: Record<EstadoDoCampo, string> = {
 export function ListaDeVerificacao({ codigo, campos, seccoes, desatualizado, onMarcarAtualizada, onRemover }: ListaDeVerificacaoProps) {
   const { t } = useTranslation();
   const [confirmarRemocao, setConfirmarRemocao] = useState(false);
-  const idioma = obterIdioma(codigo)?.nomeNativo ?? codigo;
+  const idioma = nomeNaFrase(t, codigo);
   const porTraduzir = campos.filter((c) => c.estado !== "traduzido").length;
 
   const nomeDoCampo = (c: CampoDeVerificacao): string => {

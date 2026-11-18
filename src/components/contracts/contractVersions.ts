@@ -26,7 +26,11 @@ export interface CorpoDividido {
 export function dividirCorpoDoContrato(html: string, contrato: unknown): CorpoDividido {
   const divididos = dividirEmVersoes(html);
   const dividiu = divididos.length > 1 || divididos[0].html !== html;
-  if (dividiu) return { segmentos: divididos, comMarcas: true };
+  if (dividiu) {
+    // Uma versão em branco (corpo base vazio com a versão inglesa cheia) não é uma página: só cabeçalho.
+    const comTexto = divididos.filter((s) => s.html.trim() !== "");
+    return { segmentos: comTexto.length > 0 ? comTexto : divididos, comMarcas: true };
+  }
   const idiomas = idiomasDoDocumento(contrato as Parameters<typeof idiomasDoDocumento>[0]);
   return { segmentos: [{ codigo: idiomas.length === 1 ? idiomas[0] : IDIOMA_BASE, html }], comMarcas: false };
 }

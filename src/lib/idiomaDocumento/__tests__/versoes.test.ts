@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   aplicarVersaoContrato,
   aplicarVersaoProposta,
+  sobreposicaoDaVersaoContrato,
   idiomasDisponiveisContrato,
   idiomasDisponiveisProposta,
 } from "../versoes";
@@ -114,11 +115,21 @@ describe("aplicarVersaoContrato", () => {
     expect(ds.contract_block_commercial_label).toBeNull();
   });
 
-  it("subtítulo (um site, p.ex.) ausente na versão fica o do base; null na versão limpa-o", () => {
-    expect((aplicarVersaoContrato(minuta(), "en").doc_settings as any).contract_block_subtitle).toBe("www.mudelar.pt");
+  it("subtítulo ausente na versão NÃO vaza o português: cai em null como os outros rótulos", () => {
+    expect((aplicarVersaoContrato(minuta(), "en").doc_settings as any).contract_block_subtitle).toBeNull();
     const t = minuta();
-    (t.doc_settings.versions.en.header as any).contract_block_subtitle = null;
-    expect((aplicarVersaoContrato(t, "en").doc_settings as any).contract_block_subtitle).toBeNull();
+    (t.doc_settings.versions.en.header as any).contract_block_subtitle = "www.mudelar.com";
+    expect((aplicarVersaoContrato(t, "en").doc_settings as any).contract_block_subtitle).toBe("www.mudelar.com");
+  });
+
+  it("sobreposicaoDaVersaoContrato devolve só o que a versão sobrepõe (e null se não houver versão)", () => {
+    const sobre = sobreposicaoDaVersaoContrato(minuta(), "en") as Record<string, unknown>;
+    expect(sobre.footer_text).toBe("English footer");
+    expect(sobre.contract_block_subtitle).toBeNull();
+    expect(sobre.contract_block_title).toBe("SERVICES AGREEMENT");
+    expect("primary_color" in sobre).toBe(false);
+    expect(sobreposicaoDaVersaoContrato(minuta(), "pt")).toBeNull();
+    expect(sobreposicaoDaVersaoContrato(minuta(), "fr")).toBeNull();
   });
 
   it("rodapé em falta na versão cai no texto base; título da tabela em falta cai no dicionário", () => {

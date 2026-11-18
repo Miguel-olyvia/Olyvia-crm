@@ -1,20 +1,20 @@
 // Deteção e remoção do BLOCO DE ASSINATURA de um corpo de contrato, para o juntar numa só assinatura quando
-// o documento sai em vários idiomas.
+// o documento sai em vários idiomas. É a ÚNICA localização do bloco: contractDocument.ts (carimbo e signatário)
+// usa `localizarAssinaturas` daqui; não há cópia noutro sítio (há um teste de paridade com injectSignaturesIntoBlock).
 //
-// Escolha (passo 1): a lógica de contractDocument.ts (isDecorativeLine, hasLineMarker, a procura das duas
-// colunas e o bloco plano com SECOND_PARTY_RE/FIRST_PARTY_RE) NÃO está exportada e esse ficheiro traz o
-// cliente Supabase — este módulo é neutro e não o pode importar. Por isso aqui vão CÓPIAS PURAS dessa
-// lógica, com os mesmos critérios e as mesmas expressões (as do português estão no registo), provadas
-// por um teste de paridade contra injectSignaturesIntoBlock. contractDocument.ts não foi alterado.
-//
-// A deteção deixa de depender só de frases em português, por esta ordem:
-//   1) marcas por classe: olv-assinaturas (contentor) ou olv-assinatura-empresa / olv-assinatura-cliente;
-//   2) expressões por idioma, vindas do registo (o idioma da versão primeiro, os outros como último recurso);
-//   3) a heurística de sempre (colunas com linha; bloco plano curto) — é a mesma de 2, aplicada ao português.
+// A deteção, por esta ordem:
+//   1) marcas por classe: olv-assinaturas (contentor) ou olv-assinatura-empresa / olv-assinatura-cliente (colunas);
+//   2) as frases do idioma pedido e do idioma base (o português é exatamente o de sempre): duas colunas, cada uma
+//      com a sua linha, uma delas a mencionar o cliente; ou o bloco plano antigo. Os OUTROS idiomas só se procuram
+//      quando são pedidos expressamente (lista `idiomas`), nunca por omissão;
+//   3) nada.
+// Em idiomas que não o base o bloco PLANO (uma etiqueta curta com as duas partes) só vale no fim do corpo e com uma
+// linha de assinatura, e nunca se REMOVE sem marcas nem colunas: «The Company shall provide the Services to the
+// Client.» é uma cláusula, não uma assinatura. O português fica como hoje (mesma heurística de sempre).
 // Precisa de DOM (como injectSignaturesIntoBlock): sem `document` não deteta nada e devolve o html intacto.
 
 import { tDoc } from "./dicionario";
-import { IDIOMAS, ordenarPorRegisto, type FrasesDeAssinatura } from "./registo";
+import { IDIOMA_BASE, normalizarCodigo, obterIdioma, ordenarPorRegisto, type FrasesDeAssinatura } from "./registo";
 
 export const CLASSE_ASSINATURAS = "olv-assinaturas";
 export const CLASSE_ASSINATURA_EMPRESA = "olv-assinatura-empresa";
@@ -22,6 +22,10 @@ export const CLASSE_ASSINATURA_CLIENTE = "olv-assinatura-cliente";
 export const CLASSE_ASSINATURA_UNICA = "olv-assinatura-unica";
 
 const MAX_LINHAS_DECORATIVAS = 2;
+/** Quantos blocos de nível superior, contados do fim, ainda são «o fim do corpo». */
+const BLOCOS_FINAIS = 3;
+/** Conteúdo que nunca é uma linha decorativa: uma rúbrica, um carimbo ou um quadro. */
+const CONTEUDO_NAO_DECORATIVO = "img, svg, table, canvas, picture, video, iframe, object, embed, input";
 
 function abrir(html: string | null | undefined): HTMLTemplateElement | null {
   if (!html || typeof document === "undefined") return null;
@@ -34,86 +38,209 @@ function classes(el: Element): string {
   return el.getAttribute("class") ?? "";
 }
 
-// ── cópias de contractDocument.ts ───────────────────────────────────────────────────────────────
+// ── critérios de uma linha para assinar ─────────────────────────────────────────────────────────
 
-/** Parágrafo/div só com underscores, traços e espaços (as linhas de assinatura soltas de uma minuta). */
-function isDecorativeLine(el: Element | null): boolean {
+/**
+ * Parágrafo/div só com underscores, traços e espaços (as linhas de assinatura soltas de uma minuta).
+ * Nunca com imagem, svg, tabela ou canvas lá dentro: uma rúbrica ou um carimbo não é uma linha decorativa.
+ */
+export function isDecorativeLine(el: Element | null): boolean {
   if (!el) return false;
   if (!/^(P|DIV)$/.test(el.tagName)) return false;
+  if (el.querySelector(CONTEUDO_NAO_DECORATIVO)) return false;
   const raw = (el.textContent || "").replace(/\u00A0/g, " ");
   return raw.replace(/[\s_·\-–—]/g, "").length === 0;
 }
 
 /** Uma linha para assinar: borda inferior, <hr> ou um parágrafo só de underscores. */
-function isLineElement(el: Element): boolean {
+export function isLineElement(el: Element): boolean {
   if (/border-bottom/i.test(el.getAttribute?.("style") || "")) return true;
   if (el.tagName === "HR") return true;
   const text = el.textContent || "";
   return text.replace(/[\s_·\-–—]/g, "").length === 0 && text.replace(/\s/g, "").length > 0;
 }
 
-function hasLineMarker(el: Element): boolean {
+/** Uma coluna de assinatura real tem uma linha: ela própria, um filho ou um descendente. */
+export function hasLineMarker(el: Element): boolean {
   if (isLineElement(el)) return true;
   if (Array.from(el.children).some(isLineElement)) return true;
   return !!el.querySelector('[style*="border-bottom" i], hr');
 }
 
-/** O contentor cujos filhos diretos são duas colunas de assinatura (uma delas menciona o cliente). */
-function findColumns(raiz: ParentNode, frases: FrasesDeAssinatura): Element | null {
-  const candidatos = Array.from(raiz.querySelectorAll("div, p, td, span, tr"));
-  return (
-    candidatos.find((el) => {
-      const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-      if (!frases.segundaParte.test(text) || text.length >= 400) return false;
-      const kids = Array.from(el.children);
-      if (kids.length < 2) return false;
-      const cliente = kids.find((k) => frases.segundaParte.test(k.textContent || ""));
-      const empresa = kids.find((k) => k !== cliente);
-      if (!cliente || !empresa) return false;
-      return hasLineMarker(cliente) && hasLineMarker(empresa);
-    }) ?? null
-  );
-}
+// ── o bloco plano em idiomas que não o base ─────────────────────────────────────────────────────
 
-/** O bloco plano antigo: uma só etiqueta curta com as duas partes. */
-function findFlat(raiz: ParentNode, frases: FrasesDeAssinatura): Element | null {
-  const candidatos = Array.from(raiz.querySelectorAll("div, p, td, span, tr"));
-  return (
-    candidatos.find((el) => {
-      const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-      return frases.primeiraParte.test(text) && frases.segundaParte.test(text) && text.length < 220;
-    }) ?? null
-  );
-}
-
-// ── deteção ─────────────────────────────────────────────────────────────────────────────────────
-
-function findMarked(raiz: ParentNode): Element | null {
-  const contentor = raiz.querySelector(`.${CLASSE_ASSINATURAS}`);
-  if (contentor) return contentor;
-  const cliente = raiz.querySelector(`.${CLASSE_ASSINATURA_CLIENTE}`);
-  const empresa = raiz.querySelector(`.${CLASSE_ASSINATURA_EMPRESA}`);
-  if (cliente && empresa) {
-    let ancestral = cliente.parentElement;
-    while (ancestral && !ancestral.contains(empresa)) ancestral = ancestral.parentElement;
-    return ancestral ?? cliente;
+/** Os blocos de nível superior do corpo, com os wrappers olv-versao desembrulhados. */
+function blocosDeNivelTopo(raiz: ParentNode): Element[] {
+  const out: Element[] = [];
+  for (const el of Array.from(raiz.children)) {
+    if (/(^|\s)olv-versao(\s|$)/.test(classes(el))) out.push(...blocosDeNivelTopo(el));
+    else out.push(el);
   }
-  return cliente ?? empresa;
+  return out;
 }
 
-function frasesPorOrdem(codigo?: string): FrasesDeAssinatura[] {
-  const comFrases = IDIOMAS.filter((i) => i.assinatura);
-  const primeiro = comFrases.filter((i) => i.codigo === codigo);
-  const resto = comFrases.filter((i) => i.codigo !== codigo);
-  return [...primeiro, ...resto].map((i) => i.assinatura as FrasesDeAssinatura);
+function estaNoFimDoCorpo(raiz: ParentNode, el: Element): boolean {
+  const blocos = blocosDeNivelTopo(raiz);
+  const indice = blocos.findIndex((b) => b === el || b.contains(el));
+  return indice >= 0 && indice >= blocos.length - BLOCOS_FINAIS;
 }
 
-function localizar(raiz: ParentNode, codigo?: string): Element | null {
-  const marcado = findMarked(raiz);
-  if (marcado) return marcado;
-  for (const frases of frasesPorOrdem(codigo)) {
-    const alvo = findColumns(raiz, frases) ?? findFlat(raiz, frases);
-    if (alvo) return alvo;
+/** Tem uma linha para assinar: borda, <hr>, sublinhados no próprio texto ou uma linha logo antes. */
+function temLinhaDeAssinatura(el: Element): boolean {
+  if (hasLineMarker(el)) return true;
+  if (/_{3,}/.test(el.textContent || "")) return true;
+  const anterior = el.previousElementSibling;
+  return !!anterior && isLineElement(anterior);
+}
+
+/** O bloco plano é crível? No fim do corpo e com linha de assinatura. */
+export function blocoPlanoPlausivel(raiz: ParentNode, el: Element): boolean {
+  return estaNoFimDoCorpo(raiz, el) && temLinhaDeAssinatura(el);
+}
+
+// ── idiomas de deteção ──────────────────────────────────────────────────────────────────────────
+
+export interface FrasesDoIdioma {
+  codigo: string;
+  frases: FrasesDeAssinatura;
+}
+
+/**
+ * Os idiomas em que se procuram as frases de assinatura: o pedido (se tiver frases), o base e, só se vierem
+ * expressamente em `extras`, os outros. Sem idioma (chamadas antigas) é só o português de hoje.
+ */
+export function idiomasDeDeteccao(idioma?: string | null, extras: readonly string[] = []): FrasesDoIdioma[] {
+  const pedidos = [normalizarCodigo(idioma) ?? IDIOMA_BASE, IDIOMA_BASE, ...extras.map((c) => normalizarCodigo(c))];
+  const vistos: string[] = [];
+  for (const c of pedidos) if (c && !vistos.includes(c)) vistos.push(c);
+  const out: FrasesDoIdioma[] = [];
+  for (const codigo of vistos) {
+    const frases = obterIdioma(codigo)?.assinatura;
+    if (frases) out.push({ codigo, frases });
+  }
+  return out;
+}
+
+// ── localização ─────────────────────────────────────────────────────────────────────────────────
+
+export interface OpcoesDeLocalizacao {
+  /** O idioma da versão onde se procura (omissão: o base). */
+  idioma?: string | null;
+  /** Outros idiomas em que também se procura, pedidos expressamente (o documento com vários idiomas). */
+  idiomas?: readonly string[];
+  /** «remover»: em idiomas que não o base, o bloco plano (só frases) não conta — só marcas e colunas. */
+  modo?: "detetar" | "remover";
+  /** Só as marcas por classe. */
+  soMarcas?: boolean;
+}
+
+export type LocalizacaoDaAssinatura =
+  /** Duas colunas (marcadas por classe ou achadas pelas frases). Uma das partes pode faltar. */
+  | { tipo: "colunas"; marcada: boolean; empresa: Element | null; cliente: Element | null; elementos: Element[]; idioma?: string }
+  /** O bloco plano: uma só etiqueta com as duas partes. */
+  | { tipo: "plano"; alvo: Element; elementos: Element[]; idioma: string };
+
+function candidatos(raiz: ParentNode): Element[] {
+  return Array.from(raiz.querySelectorAll("div, p, td, span, tr"));
+}
+
+function posicao(a: Element, b: Element): number {
+  return a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1;
+}
+
+function semEspacos(texto: string | null): string {
+  return (texto ?? "").replace(/\s+/g, "");
+}
+
+/** O que sai quando se tira o bloco marcado: o ancestral comum, se ele só contém as colunas; senão cada coluna. */
+function elementosDasColunas(empresa: Element | null, cliente: Element | null): Element[] {
+  const colunas = [empresa, cliente].filter((c): c is Element => c !== null).sort(posicao);
+  if (colunas.length < 2) return colunas;
+  let ancestral = colunas[1].parentElement;
+  while (ancestral && !ancestral.contains(colunas[0])) ancestral = ancestral.parentElement;
+  if (ancestral && semEspacos(ancestral.textContent) === semEspacos(colunas[0].textContent) + semEspacos(colunas[1].textContent)) {
+    return [ancestral];
+  }
+  return colunas;
+}
+
+/** A coluna irmã (com linha) de uma coluna marcada. */
+function irma(coluna: Element): Element | null {
+  const pai = coluna.parentElement;
+  return Array.from(pai?.children ?? []).find((k) => k !== coluna && hasLineMarker(k)) ?? null;
+}
+
+function localizarMarcado(raiz: ParentNode): LocalizacaoDaAssinatura | null {
+  const contentor = raiz.querySelector(`.${CLASSE_ASSINATURAS}`);
+  const ambito: ParentNode = contentor ?? raiz;
+  let empresa = ambito.querySelector(`.${CLASSE_ASSINATURA_EMPRESA}`);
+  let cliente = ambito.querySelector(`.${CLASSE_ASSINATURA_CLIENTE}`);
+  if (!contentor && !empresa && !cliente) return null;
+
+  if (contentor && !empresa && !cliente) {
+    // Só o contentor: as duas colunas diretas (a da empresa à esquerda, a do cliente à direita).
+    let filhos = Array.from(contentor.children);
+    if (filhos.length === 1) filhos = Array.from(filhos[0].children);
+    if (filhos.length >= 2) {
+      empresa = filhos[0];
+      cliente = filhos[filhos.length - 1];
+    }
+  }
+  if (cliente && !empresa) empresa = irma(cliente);
+  if (empresa && !cliente) cliente = irma(empresa);
+
+  return {
+    tipo: "colunas",
+    marcada: true,
+    empresa,
+    cliente,
+    elementos: contentor ? [contentor] : elementosDasColunas(empresa, cliente),
+  };
+}
+
+/**
+ * O contentor cujos PRÓPRIOS filhos diretos já se dividem em duas colunas de assinatura genuínas (cada uma com
+ * a sua linha) — uma menciona o cliente/segunda parte, a outra não. Ignora wrappers de 1 filho e containers
+ * maiores que incluem texto solto (datas, quebras de linha) ao lado do verdadeiro bloco de colunas.
+ */
+function procurarColunas(raiz: ParentNode, frases: FrasesDeAssinatura): { contentor: Element; empresa: Element; cliente: Element } | null {
+  for (const el of candidatos(raiz)) {
+    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+    if (!frases.segundaParte.test(text) || text.length >= 400) continue;
+    const kids = Array.from(el.children);
+    if (kids.length < 2) continue;
+    const cliente = kids.find((k) => frases.segundaParte.test(k.textContent || ""));
+    const empresa = kids.find((k) => k !== cliente);
+    if (!cliente || !empresa) continue;
+    if (hasLineMarker(cliente) && hasLineMarker(empresa)) return { contentor: el, empresa, cliente };
+  }
+  return null;
+}
+
+/** O bloco plano antigo: uma só etiqueta curta (<220) com as duas partes (e, se `aceita`, que passe o crivo). */
+function procurarPlano(raiz: ParentNode, frases: FrasesDeAssinatura, aceita?: (el: Element) => boolean): Element | null {
+  return (
+    candidatos(raiz).find((el) => {
+      const text = (el.textContent || "").replace(/\s+/g, " ").trim();
+      if (!(frases.primeiraParte.test(text) && frases.segundaParte.test(text) && text.length < 220)) return false;
+      return aceita ? aceita(el) : true;
+    }) ?? null
+  );
+}
+
+export function localizarAssinaturas(raiz: ParentNode, opcoes: OpcoesDeLocalizacao = {}): LocalizacaoDaAssinatura | null {
+  const marcado = localizarMarcado(raiz);
+  if (marcado || opcoes.soMarcas) return marcado;
+
+  for (const { codigo, frases } of idiomasDeDeteccao(opcoes.idioma, opcoes.idiomas)) {
+    const base = codigo === IDIOMA_BASE;
+    const colunas = procurarColunas(raiz, frases);
+    if (colunas) {
+      return { tipo: "colunas", marcada: false, empresa: colunas.empresa, cliente: colunas.cliente, elementos: [colunas.contentor], idioma: codigo };
+    }
+    if (!base && opcoes.modo === "remover") continue;
+    const alvo = procurarPlano(raiz, frases, base ? undefined : (el) => blocoPlanoPlausivel(raiz, el));
+    if (alvo) return { tipo: "plano", alvo, elementos: [alvo], idioma: codigo };
   }
   return null;
 }
@@ -134,37 +261,45 @@ function subir(elemento: Element): Element {
 }
 
 interface Bloco {
-  /** O bloco (já sem o embrulho que só o continha). */
-  principal: Element;
-  /** As linhas decorativas imediatamente antes dele (do mais próximo para o mais longe). */
+  /** O bloco (já sem o embrulho que só o continha); mais de um quando as colunas estão soltas no topo. */
+  principais: Element[];
+  /** As linhas decorativas imediatamente antes do primeiro (do mais próximo para o mais longe). */
   linhas: Element[];
 }
 
-function encontrarBloco(raiz: ParentNode, codigo?: string): Bloco | null {
-  const alvo = localizar(raiz, codigo);
-  if (!alvo) return null;
-  const principal = subir(alvo);
+function encontrarBloco(raiz: ParentNode, opcoes: OpcoesDeLocalizacao): Bloco | null {
+  const loc = localizarAssinaturas(raiz, opcoes);
+  if (!loc || loc.elementos.length === 0) return null;
+  const principais = Array.from(new Set(loc.elementos.map(subir)));
   const linhas: Element[] = [];
-  let anterior = principal.previousElementSibling;
+  let anterior = principais[0].previousElementSibling;
   while (linhas.length < MAX_LINHAS_DECORATIVAS && isDecorativeLine(anterior)) {
     linhas.push(anterior as Element);
     anterior = (anterior as Element).previousElementSibling;
   }
-  return { principal, linhas };
+  return { principais, linhas };
 }
 
-export function temBlocoDeAssinatura(html: string | null | undefined, codigo?: string): boolean {
+/** O bloco existe? (`idioma` = o da versão; `idiomas` = outros idiomas pedidos expressamente.) */
+export function temBlocoDeAssinatura(html: string | null | undefined, codigo?: string, idiomas?: readonly string[]): boolean {
   const modelo = abrir(html);
-  return !!modelo && localizar(modelo.content, codigo) !== null;
+  return !!modelo && localizarAssinaturas(modelo.content, { idioma: codigo, idiomas }) !== null;
 }
 
-/** Tira o bloco de assinatura (e as linhas decorativas que o antecedem). Sem bloco, devolve o html tal e qual. */
-export function removerBlocoDeAssinatura(html: string, codigo?: string): { html: string; removido: boolean } {
+/**
+ * Tira o bloco de assinatura (e as linhas decorativas que o antecedem). Sem bloco, devolve o html tal e qual.
+ * Em idiomas que não o base só se remove com marcas por classe ou colunas: nunca só pela heurística plana.
+ */
+export function removerBlocoDeAssinatura(
+  html: string,
+  codigo?: string,
+  idiomas?: readonly string[],
+): { html: string; removido: boolean } {
   const modelo = abrir(html);
-  const bloco = modelo ? encontrarBloco(modelo.content, codigo) : null;
+  const bloco = modelo ? encontrarBloco(modelo.content, { idioma: codigo, idiomas, modo: "remover" }) : null;
   if (!modelo || !bloco) return { html, removido: false };
   bloco.linhas.forEach((l) => l.remove());
-  bloco.principal.remove();
+  bloco.principais.forEach((p) => p.remove());
   return { html: modelo.innerHTML, removido: true };
 }
 
@@ -173,11 +308,12 @@ export function inserirAntesDoBlocoDeAssinatura(
   html: string,
   fragmento: string,
   codigo?: string,
+  idiomas?: readonly string[],
 ): { html: string; inserido: boolean } {
   const modelo = abrir(html);
-  const bloco = modelo ? encontrarBloco(modelo.content, codigo) : null;
+  const bloco = modelo ? encontrarBloco(modelo.content, { idioma: codigo, idiomas }) : null;
   if (!modelo || !bloco) return { html, inserido: false };
-  const inicio = bloco.linhas.length > 0 ? bloco.linhas[bloco.linhas.length - 1] : bloco.principal;
+  const inicio = bloco.linhas.length > 0 ? bloco.linhas[bloco.linhas.length - 1] : bloco.principais[0];
   const novo = document.createElement("template");
   novo.innerHTML = fragmento;
   inicio.parentNode?.insertBefore(novo.content, inicio);

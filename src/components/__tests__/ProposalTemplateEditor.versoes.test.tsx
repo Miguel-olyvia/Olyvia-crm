@@ -300,12 +300,56 @@ describe("ProposalTemplateEditor — editar uma versão", () => {
   it("remover a única versão e guardar: a chave `versions` sai do design_settings", async () => {
     await abrir(linha({ ...DESIGN_COMPLETO, versions: { en: { footer_text: "x" } } }));
     fireEvent.click(screen.getAllByRole("tab")[1]);
-    fireEvent.click(screen.getByRole("button", { name: "Remover a versão English" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remover a versão inglês" }));
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remover" }));
     await guardar();
     const design = gravacoes()[0].payload!.design_settings as Record<string, unknown>;
     expect("versions" in design).toBe(false);
     expect(JSON.stringify(design)).toBe(JSON.stringify(DESIGN_COMPLETO));
+  });
+});
+
+// ---- Foco e acessibilidade dos controlos de idioma ------------------------------------------------------
+describe("ProposalTemplateEditor — foco e acessibilidade", () => {
+  it("depois de adicionar um idioma, o foco fica na aba nova", async () => {
+    await abrir();
+    await adicionarIngles(true);
+    await waitFor(() => expect(screen.getByRole("tab", { name: /^EN/ })).toHaveFocus());
+  });
+
+  it("depois de remover a única versão, o foco vai para «Adicionar idioma» (a barra desapareceu)", async () => {
+    await abrir(linha({ ...DESIGN_COMPLETO, versions: { en: { footer_text: "x" } } }));
+    fireEvent.click(screen.getAllByRole("tab")[1]);
+    fireEvent.click(screen.getByRole("button", { name: "Remover a versão inglês" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remover" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /Adicionar idioma/ })).toHaveFocus());
+  });
+
+  it("depois de remover uma de duas versões, o foco vai para a aba ativa (português)", async () => {
+    await abrir(linha({ ...DESIGN_COMPLETO, versions: { en: { footer_text: "x" }, es: { footer_text: "y" } } }));
+    fireEvent.click(screen.getAllByRole("tab")[1]);
+    fireEvent.click(screen.getByRole("button", { name: "Remover a versão inglês" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remover" }));
+    await waitFor(() => expect(screen.getByRole("tab", { name: /^PT/ })).toHaveFocus());
+  });
+
+  it("«Reset» e «Usar layout Orçamento» só se desativam fora do base, e dizem porquê", async () => {
+    await abrir(linha({ ...DESIGN_COMPLETO, versions: { en: { footer_text: "x" } } }));
+    const reset = screen.getByRole("button", { name: /Reset/ });
+    const layout = screen.getByRole("button", { name: /Usar layout Orçamento/ });
+    expect(reset).toBeEnabled();
+    expect(layout).toBeEnabled();
+    expect(reset).not.toHaveAttribute("aria-describedby");
+
+    fireEvent.click(screen.getAllByRole("tab")[1]);
+    expect(reset).toBeDisabled();
+    expect(layout).toBeDisabled();
+    expect(reset).toHaveAccessibleDescription("Só disponível no idioma base (português).");
+    expect(layout).toHaveAccessibleDescription("Só disponível no idioma base (português).");
+
+    fireEvent.click(screen.getAllByRole("tab")[0]);
+    expect(reset).toBeEnabled();
+    expect(reset).not.toHaveAttribute("aria-describedby");
   });
 });
 

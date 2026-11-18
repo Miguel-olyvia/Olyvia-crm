@@ -66,9 +66,13 @@ describe("injectSignaturesIntoBlock — blocos em inglês", () => {
     expect(out).not.toContain(">Assinado<");
   });
 
-  it("o bloco em inglês também é encontrado sem dizer o idioma (último recurso), com as palavras do português", () => {
-    const out = injectSignaturesIntoBlock(BLOCO_EN, EMPRESA, CLIENTE);
-    expect(out).toContain("Assinado via SMS OTP");
+  it("sem dizer o idioma (chamadas antigas) procura-se só em português: o bloco em inglês fica como está", () => {
+    expect(injectSignaturesIntoBlock(BLOCO_EN, EMPRESA, CLIENTE)).toBe(BLOCO_EN);
+  });
+
+  it("só se procura em inglês quando o idioma ou a lista de idiomas o pede", () => {
+    expect(injectSignaturesIntoBlock(BLOCO_EN, EMPRESA, CLIENTE, "pt")).toBe(BLOCO_EN);
+    const out = injectSignaturesIntoBlock(BLOCO_EN, EMPRESA, CLIENTE, "pt", ["pt", "en"]);
     expect(out.indexOf("Ricardo Belchior")).toBeLessThan(out.indexOf("(THE COMPANY)"));
   });
 
@@ -124,10 +128,14 @@ describe("hasSignatoryHook — marcas e idiomas", () => {
     expect(hasSignatoryHook(`<div class="outra olv-assinaturas"></div>`)).toBe(true);
   });
 
-  it("reconhece o cliente em inglês", () => {
-    expect(hasSignatoryHook("<p>THE CLIENT</p>")).toBe(true);
+  it("reconhece o cliente em inglês só quando o idioma o pede; o português de hoje não muda", () => {
+    expect(hasSignatoryHook("<p>THE CLIENT</p>")).toBe(false);
+    expect(hasSignatoryHook("<p>the client signs</p>")).toBe(false);
+    expect(hasSignatoryHook("<p>THE CLIENT</p>", "pt")).toBe(false);
     expect(hasSignatoryHook("<p>THE CLIENT</p>", "en")).toBe(true);
+    expect(hasSignatoryHook("<p>THE CLIENT</p>", "pt", ["pt", "en"])).toBe(true);
     expect(hasSignatoryHook("<p>O CLIENTE</p>", "en")).toBe(true);
+    expect(hasSignatoryHook("<p>O CLIENTE</p>")).toBe(true);
   });
 
   it("não confunde com uma classe parecida nem com texto sem a frase", () => {
@@ -148,10 +156,8 @@ describe("injectSignatoryIntoSignatureBlock — idioma e marcas", () => {
     expect(out).not.toContain("____");
   });
 
-  it("sem dizer o idioma, o bloco plano em inglês também é achado", () => {
-    const out = injectSignatoryIntoSignatureBlock(PLANO_EN, "Ricardo Belchior", "Manager");
-    expect(out).toContain("Ricardo Belchior");
-    expect(out).toContain("THE SECOND PARTY");
+  it("sem dizer o idioma, o bloco plano em inglês não é tocado (só o português de hoje)", () => {
+    expect(injectSignatoryIntoSignatureBlock(PLANO_EN, "Ricardo Belchior", "Manager")).toBe(PLANO_EN);
   });
 
   it("numa coluna da empresa marcada, o nome entra por baixo da linha, sem mexer no resto", () => {
@@ -168,5 +174,59 @@ describe("injectSignatoryIntoSignatureBlock — idioma e marcas", () => {
 
   it("sem nome, devolve o html tal e qual", () => {
     expect(injectSignatoryIntoSignatureBlock(BLOCO_MARCADO, " ", "x")).toBe(BLOCO_MARCADO);
+  });
+});
+
+// ── H1/H2/M3 na injeção ──────────────────────────────────────────────────────────────────────────
+const CLAUSULA_EN = `<p>The Company shall provide the Services to the Client.</p>`;
+const CORPO_EN = `<h2>SERVICES AGREEMENT</h2>${CLAUSULA_EN}${"<p>Clause.</p>".repeat(5)}`;
+
+describe("cláusulas em inglês não são blocos de assinatura (H1) nem os do português (H2)", () => {
+  it("em inglês, a cláusula curta no meio do corpo não é sobrescrita pela injeção", () => {
+    expect(injectSignaturesIntoBlock(CORPO_EN, EMPRESA, CLIENTE, "en")).toBe(CORPO_EN);
+    expect(injectSignaturesIntoBlock(CORPO_EN, EMPRESA, CLIENTE, "en", ["pt", "en"])).toBe(CORPO_EN);
+    expect(injectSignatoryIntoSignatureBlock(CORPO_EN, "Ricardo", "Gerente", "en")).toBe(CORPO_EN);
+  });
+
+  it("o bloco real em inglês (colunas e plano no fim) continua a ser carimbado", () => {
+    expect(injectSignaturesIntoBlock(`<p>Clause</p>${BLOCO_EN}`, EMPRESA, CLIENTE, "en")).toContain("Signed via SMS OTP");
+    expect(injectSignaturesIntoBlock(PLANO_EN, EMPRESA, CLIENTE, "en")).toContain("Signed via SMS OTP");
+  });
+
+  it("um contrato em português com texto inglês solto não é tocado, com ou sem idioma", () => {
+    const pt = `<p>Lisboa</p><p>The Client signs here</p><p>THE COMPANY and THE CLIENT agree.</p>`;
+    expect(injectSignaturesIntoBlock(pt, EMPRESA, CLIENTE)).toBe(pt);
+    expect(injectSignaturesIntoBlock(pt, EMPRESA, CLIENTE, "pt")).toBe(pt);
+    const rotulos = `<p>THE FIRST PARTY and THE SECOND PARTY</p>`;
+    expect(injectSignatoryIntoSignatureBlock(rotulos, "Ricardo", "Gerente")).toBe(rotulos);
+    expect(hasSignatoryHook(pt)).toBe(false);
+  });
+});
+
+describe("marcas por classe tratadas por igual (M3)", () => {
+  const CONTENTOR = `<div class="olv-assinaturas"><div>${LINHA}<p>Pela empresa</p></div><div>${LINHA}<p>Pelo cliente</p></div></div>`;
+
+  it("só o contentor marcado: as duas colunas levam carimbo", () => {
+    const out = injectSignaturesIntoBlock(CONTENTOR, EMPRESA, CLIENTE);
+    expect(out.indexOf("Ricardo Belchior")).toBeLessThan(out.indexOf("Pela empresa"));
+    expect(out.indexOf("Assinado via SMS OTP")).toBeLessThan(out.indexOf("Pelo cliente"));
+    expect(out.indexOf("Assinado via SMS OTP")).toBeGreaterThan(out.indexOf("Pela empresa"));
+  });
+
+  it("só a coluna do cliente marcada: a irmã é a da empresa e também leva carimbo", () => {
+    const so = `<div style="display:flex"><div>${LINHA}<p>Pela empresa</p></div><div class="olv-assinatura-cliente">${LINHA}<p>Pelo cliente</p></div></div>`;
+    const out = injectSignaturesIntoBlock(so, EMPRESA, CLIENTE);
+    expect(out).toContain("Brush Script");
+    expect(out).toContain("Assinado via SMS OTP");
+  });
+});
+
+describe("a rúbrica antes do bloco não é apagada pelo signatário (M1)", () => {
+  it("injectSignatoryIntoSignatureBlock só apaga linhas puramente decorativas", () => {
+    const html = `<p>Lisboa</p><p><img src="rubrica.png"></p><p>_______</p><p>A PRIMEIRA CONTRATANTE   O SEGUNDO CONTRATANTE</p>`;
+    const out = injectSignatoryIntoSignatureBlock(html, "Ricardo", "Gerente");
+    expect(out).toContain("rubrica.png");
+    expect(out).not.toContain("_______");
+    expect(out).toContain("Ricardo");
   });
 });

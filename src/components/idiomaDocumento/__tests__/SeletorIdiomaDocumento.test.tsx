@@ -154,13 +154,24 @@ describe("SeletorIdiomaDocumento", () => {
       expect(onChange).toHaveBeenLastCalledWith(["en", "es"]);
     });
 
-    it("nunca deixa desmarcar o último idioma: a caixa fica desativada e onChange não corre", () => {
+    it("nunca deixa desmarcar o último idioma: a caixa fica com aria-disabled (continua focável), explica porquê e onChange não corre", () => {
       const onChange = vi.fn();
       montar(<SeletorIdiomaDocumento disponiveis={TRES} valor={["en"]} onChange={onChange} />);
       const unica = screen.getByRole("checkbox", { name: "English" });
-      expect(unica).toBeDisabled();
+      expect(unica).not.toBeDisabled();
+      expect(unica).toHaveAttribute("aria-disabled", "true");
+      expect(unica).toHaveAccessibleDescription("Tem de ficar pelo menos um idioma.");
+      unica.focus();
+      expect(unica).toHaveFocus();
       fireEvent.click(unica);
       expect(onChange).not.toHaveBeenCalled();
+      expect(screen.getByRole("checkbox", { name: "Português" })).not.toHaveAttribute("aria-disabled");
+    });
+
+    it("com mais do que um idioma marcado não há texto de ajuda nem aria-disabled", () => {
+      montar(<SeletorIdiomaDocumento disponiveis={TRES} valor={["pt", "en"]} onChange={() => {}} />);
+      expect(screen.queryByText("Tem de ficar pelo menos um idioma.")).toBeNull();
+      for (const c of screen.getAllByRole("checkbox")) expect(c).not.toHaveAttribute("aria-disabled");
     });
 
     it("um valor vazio ou desconhecido mostra o primeiro idioma marcado", () => {

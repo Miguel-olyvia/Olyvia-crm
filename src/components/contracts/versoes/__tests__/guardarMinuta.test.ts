@@ -29,17 +29,21 @@ describe("COLUNAS_DA_MINUTA", () => {
 });
 
 describe("payloadDeCriar", () => {
-  it("grava o idioma do texto base (omissão pt) e o doc_settings tal como está", () => {
+  it("o insert de uma minuta em português é o de sempre: sem a chave language (a base põe 'pt')", () => {
     const p = payloadDeCriar(FORM, "org-1", "user-1");
     expect(p).toEqual({
       name: "Minuta", body_html: "<p>texto</p>", is_active: true, is_default: false,
       organization_id: "org-1", created_by: "user-1",
       signatory_user_id: null, signatory_role_id: null,
-      doc_settings: FORM.doc_settings, language: "pt",
+      doc_settings: FORM.doc_settings,
     });
-    expect(payloadDeCriar({ ...FORM, language: undefined }, "o", "u").language).toBe("pt");
-    expect(payloadDeCriar({ ...FORM, language: null }, "o", "u").language).toBe("pt");
-    expect(payloadDeCriar({ ...FORM, language: "en" }, "o", "u").language).toBe("en");
+    expect(p).not.toHaveProperty("language");
+    expect(payloadDeCriar({ ...FORM, language: undefined }, "o", "u")).not.toHaveProperty("language");
+    expect(payloadDeCriar({ ...FORM, language: null }, "o", "u")).not.toHaveProperty("language");
+  });
+
+  it("só escreve language quando o idioma base não é o português", () => {
+    expect(payloadDeCriar({ ...FORM, language: "en" }, "o", "u")).toHaveProperty("language", "en");
   });
 
   it("não acrescenta a chave versions a um template sem versões", () => {

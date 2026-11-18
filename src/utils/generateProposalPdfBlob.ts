@@ -4,7 +4,7 @@ import { generateQuotePdfBlob } from '@/utils/generateQuotePdfBlob';
 import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate, resolveProposalBrandingTemplate, mergeProposalBranding } from '@/utils/quotePdfTemplate';
 import { aggregateQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
 import { captureFlowError } from '@/lib/observability/captureFlowError';
-import { IDIOMA_BASE, aplicarVersaoProposta } from '@/lib/idiomaDocumento';
+import { IDIOMA_BASE, aplicarVersaoProposta, nomeDoIdioma } from '@/lib/idiomaDocumento';
 import { resolverIdiomasDaProposta } from '@/utils/idiomasDaProposta';
 
 /**
@@ -162,16 +162,28 @@ async function generateFromQuotePdfs(
 
   const merged = await PDFDocument.create();
   const lastQuoteId = resolvedQuotes[resolvedQuotes.length - 1]?.id;
+
+  // O modelo do orçamento lê-se UMA vez por modelo, e não por orçamento e por idioma. Guarda-se a promessa (e não o
+  // valor): se a leitura falhar, falha dentro do try do orçamento que a pede, como antes, e não a geração inteira.
+  const modelosDosOrcamentos = new Map<string, Promise<any | null>>();
+  for (const quote of resolvedQuotes) {
+    if (quote.template_id && !modelosDosOrcamentos.has(quote.template_id)) {
+      const leitura = fetchQuotePdfTemplateById(quote.template_id);
+      leitura.catch(() => undefined); // já tratada: o erro aparece quando o orçamento a esperar
+      modelosDosOrcamentos.set(quote.template_id, leitura);
+    }
+  }
   // Continua-se a tentar os orcamentos seguintes -- um partido nao deve levar
   // os outros atras. O motivo de cada falha vai para a consola e para o
   // Sentry; ao utilizador nao se mostra o erro cru, mostra-se o que ele pode
   // fazer.
-  let houveFalha = false;
   // Uma falha a CARREGAR o gerador (e nao a executa-lo) quer dizer que a
   // pagina esta aberta desde antes de uma publicacao e pede um pedaco de
   // codigo que ja nao existe. Nada tem a ver com esta proposta, e recarregar
   // resolve -- por isso e a unica classe que merece mensagem propria.
   let versaoDesactualizada = false;
+  // Idiomas em que pelo menos um orçamento falhou (só serve quando se pedem vários idiomas).
+  const idiomasComFalha: string[] = [];
 
   // Uma passagem por idioma (o português primeiro, se for pedido), cada uma com todos os orçamentos: o documento
   // junto é «toda a versão em português» seguida de «toda a versão em inglês». Com um só idioma é a passagem de sempre.
@@ -181,7 +193,7 @@ async function generateFromQuotePdfs(
         // Structural template: the quote's own (compatible layout for the
         // items table/bundles), falling back to the org default quote template.
         const structuralTemplate = (quote.template_id
-          ? await fetchQuotePdfTemplateById(quote.template_id)
+          ? await modelosDosOrcamentos.get(quote.template_id)
           : null) ?? orgDefaultTemplate;
         // Branding on top: the proposal's own selected template (title, colors,
         // footer/terms/thank-you), when one is configured. Os dois modelos já
@@ -217,7 +229,7 @@ async function generateFromQuotePdfs(
       } catch (e) {
         console.error(`[generateProposalPdfBlob] Failed quote ${quote.id} (${idioma}):`, e);
         captureFlowError(e, 'proposal-document-export');
-        houveFalha = true;
+        if (!idiomasComFalha.includes(idioma)) idiomasComFalha.push(idioma);
         const motivo = e instanceof Error ? e.message : String(e);
         if (/dynamically imported module|Importing a module script failed|error loading dynamically/i.test(motivo)) {
           versaoDesactualizada = true;
@@ -236,6 +248,18 @@ async function generateFromQuotePdfs(
       );
     }
     throw new Error('Não foi possível produzir o documento desta proposta.');
+  }
+
+  // Com vários idiomas, um PDF a que falta uma versão (ou orçamentos de uma versão) não sai em silêncio: quem o
+  // descarrega julgaria que está completo. Com um só idioma mantém-se o que sempre se fez (sai o que se produziu).
+  if (idiomas.length > 1 && idiomasComFalha.length > 0) {
+    if (versaoDesactualizada) {
+      throw new Error('Há uma versão nova da aplicação. Recarregue a página (Ctrl+F5) e tente novamente.');
+    }
+    throw new Error(
+      `Não foi possível produzir a versão em ${idiomasComFalha.map((c) => nomeDoIdioma(c)).join(' e em ')} deste documento. ` +
+        'O PDF não foi gerado para não sair incompleto; tente novamente.',
+    );
   }
 
   const bytes = await merged.save();

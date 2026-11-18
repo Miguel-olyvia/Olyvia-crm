@@ -3,7 +3,7 @@ import { Check, ChevronDown, Equal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
-import { obterIdioma } from "@/lib/idiomaDocumento/registo";
+import { useNomeParaFrase } from "./nomeParaFrase";
 import type { EstadoDeVerificacao, LinhaDeVerificacao } from "./versoesDoTemplate";
 
 interface Props {
@@ -24,12 +24,13 @@ const ESTILO: Record<EstadoDeVerificacao, { classe: string; Icone: typeof Check 
  */
 export function ListaDeVerificacaoDaVersao({ linhas, base }: Props) {
   const { t } = useTranslation();
+  const nomeParaFrase = useNomeParaFrase();
   const titulo = useId();
   const lista = useId();
   const [aberto, setAberto] = useState(false);
 
   if (linhas.length === 0) return null;
-  const nomeBase = obterIdioma(base)?.nomeNativo ?? base;
+  const nomeBase = nomeParaFrase(base);
   const tudoFeito = linhas.every((l) => l.estado === "traduzido");
 
   return (

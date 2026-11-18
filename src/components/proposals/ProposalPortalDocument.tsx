@@ -130,7 +130,7 @@ const SECAO_SEM_NOME = "\u0000sem-nome";
 
 /** Uma versão de idioma do documento: as palavras do ecrã, o template já resolvido e as suas secções. */
 interface VersaoDoDocumento {
-  codigo: string;
+  codigo: PortalIdioma;
   lingua: PortalIdioma;
   t: PortalTraducao["t"];
   template: any | null;
@@ -197,11 +197,13 @@ export function ProposalPortalDocument({
   onSelectedQuotesChange,
 }: ProposalPortalDocumentProps) {
   const isPreview = mode === "preview";
-  // Os idiomas vêm das props (nunca do armazém do portal): `idiomasDoDocumento` manda quando traz algum código
-  // registado; senão vale `idioma`, e um valor estranho cai em português.
+  // Os idiomas vêm das props (nunca do armazém do portal): `idiomasDoDocumento` manda quando traz algum idioma com
+  // palavras de ecrã (o portal só tem dicionário em pt e en); senão vale `idioma`, e um valor estranho cai em
+  // português. Um idioma sem dicionário de ecrã (es, fr) não se oferece: mostrá-lo misturaria o texto dessa versão com
+  // palavras de outra língua.
   const chaveIdiomas = (idiomasDoDocumento ?? []).join("+");
-  const codigos = useMemo<string[]>(() => {
-    const pedidos = chaveIdiomas.split("+").map((c) => normalizarCodigo(c)).filter((c): c is string => c !== null);
+  const codigos = useMemo<PortalIdioma[]>(() => {
+    const pedidos = chaveIdiomas.split("+").map((c) => normalizarCodigo(c)).filter((c): c is PortalIdioma => ehPortalIdioma(c));
     const unicos = Array.from(new Set(pedidos));
     return unicos.length > 0 ? unicos : [ehPortalIdioma(idioma) ? idioma : "pt"];
   }, [chaveIdiomas, idioma]);
@@ -209,7 +211,7 @@ export function ProposalPortalDocument({
   const versoes = useMemo<VersaoDoDocumento[]>(
     () =>
       codigos.map((codigo) => {
-        const { idioma: lingua, t } = traduzirEm(codigo as PortalIdioma);
+        const { idioma: lingua, t } = traduzirEm(codigo);
         const templateDaVersao = aplicarVersaoProposta(template, codigo);
         return { codigo, lingua, t, template: templateDaVersao, documentSections: seccoesDoDocumento(templateDaVersao, t) };
       }),

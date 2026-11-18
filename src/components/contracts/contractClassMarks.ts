@@ -1,7 +1,7 @@
 // Marcas por classe no html de um contrato (olv-versao, olv-assinaturas…). Só classes: o sanitizador do html
 // corta os atributos data-*. Compara-se por TOKEN inteiro: «olv-assinaturas-extra» não é «olv-assinaturas».
 
-const RE_CLASSE = /\bclass\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
+const RE_CLASSE = /(?<![\w-])class\s*=\s*(?:"([^"]*)"|'([^']*)')/gi;
 
 /** O html (texto) tem algum elemento cuja classe contém um destes tokens? */
 export function htmlTemClasse(html: string | null | undefined, ...tokens: string[]): boolean {

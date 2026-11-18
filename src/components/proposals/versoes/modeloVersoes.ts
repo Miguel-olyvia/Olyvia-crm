@@ -62,6 +62,9 @@ export interface ResumoDeIdioma {
   desatualizado: boolean;
 }
 
+/** Id do diálogo «Adicionar idioma» (o botão que o abre liga-se a ele por aria-controls). */
+export const ID_DIALOGO_ADICIONAR_IDIOMA = "dialogo-adicionar-idioma";
+
 /** Id do separador de um idioma na barra (o painel liga-se a ele por aria-labelledby). */
 export function idDaAba(codigo: string): string {
   return `aba-idioma-${codigo}`;

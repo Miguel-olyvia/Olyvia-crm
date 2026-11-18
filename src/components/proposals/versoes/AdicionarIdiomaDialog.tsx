@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
@@ -6,6 +6,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { obterIdioma } from "@/lib/idiomaDocumento";
 import { useTranslation } from "@/hooks/useTranslation";
+import { ID_DIALOGO_ADICIONAR_IDIOMA } from "./modeloVersoes";
 
 interface AdicionarIdiomaDialogProps {
   open: boolean;
@@ -13,25 +14,39 @@ interface AdicionarIdiomaDialogProps {
   /** Os idiomas do registo que o template ainda não tem. */
   livres: string[];
   onConfirmar: (codigo: string, copiarPortugues: boolean) => void;
+  /** Fechou sem adicionar (cancelar, Esc, X): devolver o foco a quem abriu o diálogo. */
+  onCancelado?: () => void;
 }
 
 const LINHA = "flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-md px-2 text-sm hover:bg-muted";
 
-export function AdicionarIdiomaDialog({ open, onOpenChange, livres, onConfirmar }: AdicionarIdiomaDialogProps) {
+export function AdicionarIdiomaDialog({ open, onOpenChange, livres, onConfirmar, onCancelado }: AdicionarIdiomaDialogProps) {
   const { t } = useTranslation();
   const [escolha, setEscolha] = useState<string | null>(null);
   const [copiar, setCopiar] = useState(true);
   const codigo = escolha !== null && livres.includes(escolha) ? escolha : livres[0];
 
+  // Ao confirmar, quem chama põe o foco na aba nova; o Radix não deve devolvê-lo ao botão que abriu o diálogo.
+  const confirmado = useRef(false);
+
   const confirmar = () => {
     if (!codigo) return;
+    confirmado.current = true;
     onConfirmar(codigo, copiar);
     onOpenChange(false);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent
+        id={ID_DIALOGO_ADICIONAR_IDIOMA}
+        onCloseAutoFocus={(evento) => {
+          // Sem DialogTrigger o Radix não sabe para onde devolver o foco: decidimos nós.
+          evento.preventDefault();
+          if (confirmado.current) confirmado.current = false;
+          else onCancelado?.();
+        }}
+      >
         <DialogHeader>
           <DialogTitle>{t("proposalTemplateEditor.versions.dialog.title")}</DialogTitle>
           <DialogDescription>{t("proposalTemplateEditor.versions.dialog.description")}</DialogDescription>

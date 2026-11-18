@@ -96,12 +96,14 @@ export function camposDoIdioma(m: EstadoMinuta, codigo: string): { body_html: st
   return { body_html: typeof v.body_html === "string" ? v.body_html : "", settings };
 }
 
-/** Escreve o corpo no idioma `codigo`. Numa versão, regista também o texto base de que ela parte (base_hash). */
+/**
+ * Escreve o corpo no idioma `codigo`. Editar a versão NÃO mexe no base_hash: o aviso «o português mudou» só
+ * desaparece com `marcarRevisto` (ou ao criar a versão), nunca a cada tecla.
+ */
 export function escreverCorpo(m: EstadoMinuta, codigo: string, html: string): CamposDaMinuta {
   const c = normalizarCodigo(codigo);
   if (!c || c === idiomaBaseDoTemplate(m)) return { body_html: html, doc_settings: m.doc_settings };
-  const hash = calcularBaseHashDoTemplate(m);
-  return { body_html: m.body_html, doc_settings: atualizarVersao(m, c, (v) => ({ ...v, body_html: html, base_hash: hash })) };
+  return { body_html: m.body_html, doc_settings: atualizarVersao(m, c, (v) => ({ ...v, body_html: html })) };
 }
 
 function aplicarTextoNaVersao(v: Obj, next: Obj, mudou: readonly string[]): Obj {

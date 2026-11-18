@@ -100,7 +100,9 @@ function Caixas({ disponiveis, escolha, rotulo, className, onChange }: {
   className?: string;
   onChange: (escolha: string[]) => void;
 }) {
+  const { t } = useTranslation();
   const base = useId();
+  const idAjuda = `${base}-ajuda`;
   const alternar = (codigo: string, marcado: boolean) => {
     const proxima = marcado ? [...escolha, codigo] : escolha.filter((c) => c !== codigo);
     if (proxima.length === 0) return;
@@ -108,18 +110,27 @@ function Caixas({ disponiveis, escolha, rotulo, className, onChange }: {
   };
 
   return (
-    <div role="group" aria-label={rotulo} className={cn("flex flex-wrap gap-2", className)}>
+    <div role="group" aria-label={rotulo} className={cn("flex flex-wrap items-center gap-2", className)}>
       {disponiveis.map((codigo) => {
         const marcado = escolha.includes(codigo);
         const id = `${base}-${codigo}`;
         const ultimo = marcado && escolha.length === 1;
         return (
           <label key={codigo} htmlFor={id} className={cn(ALVO, "flex cursor-pointer items-center gap-2 rounded-md border bg-background px-3 text-sm", ultimo && "cursor-not-allowed opacity-70")}>
-            <Checkbox id={id} aria-label={nomeNativo(codigo)} checked={marcado} disabled={ultimo} onCheckedChange={(v) => alternar(codigo, v === true)} />
+            {/* aria-disabled (e não disabled): a caixa continua focável e a ajuda explica porque não desmarca. */}
+            <Checkbox
+              id={id}
+              aria-label={nomeNativo(codigo)}
+              checked={marcado}
+              aria-disabled={ultimo ? true : undefined}
+              aria-describedby={ultimo ? idAjuda : undefined}
+              onCheckedChange={(v) => alternar(codigo, v === true)}
+            />
             <span>{nomeNativo(codigo)}</span>
           </label>
         );
       })}
+      {escolha.length === 1 && <p id={idAjuda} className="w-full text-xs text-muted-foreground">{t("contractTemplates.versoes.seletor.ultimo")}</p>}
     </div>
   );
 }

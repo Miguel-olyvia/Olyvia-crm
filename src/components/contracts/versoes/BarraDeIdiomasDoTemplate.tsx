@@ -1,4 +1,4 @@
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { AlertTriangle, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -11,7 +11,8 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { obterIdioma } from "@/lib/idiomaDocumento/registo";
 import type { ResumoDaVersao } from "./useVersoesDoTemplate";
-import { ID_PAINEL_IDIOMA, idDaAbaDeIdioma } from "./idsDeIdioma";
+import { ID_PAINEL_ADICIONAR, idDaAbaDeIdioma } from "./idsDeIdioma";
+import { useNomeParaFrase } from "./nomeParaFrase";
 
 export interface BarraDeIdiomasProps {
   base: string;
@@ -40,15 +41,20 @@ function PainelAdicionar({ base, faltam, onAdicionar, onCancelar }: {
   onCancelar: () => void;
 }) {
   const { t } = useTranslation();
+  const nomeParaFrase = useNomeParaFrase();
   const titulo = useId();
   const idCopiar = useId();
+  const tituloRef = useRef<HTMLParagraphElement>(null);
   const [escolha, setEscolha] = useState(faltam[0] ?? "");
   const [copiar, setCopiar] = useState(true);
-  const nomeBase = nomeNativo(base);
+  const nomeBase = nomeParaFrase(base);
+
+  // Ao abrir, o foco vai para o título do painel (o botão que o abriu pode ter desaparecido do ecrã).
+  useEffect(() => { tituloRef.current?.focus(); }, []);
 
   return (
-    <div role="group" aria-labelledby={titulo} className="space-y-3 rounded-lg border bg-muted/30 p-3">
-      <p id={titulo} className="text-sm font-medium">{t("contractTemplates.versoes.adicionar.titulo")}</p>
+    <div id={ID_PAINEL_ADICIONAR} role="group" aria-labelledby={titulo} className="space-y-3 rounded-lg border bg-muted/30 p-3">
+      <p id={titulo} ref={tituloRef} tabIndex={-1} className="text-sm font-medium outline-none">{t("contractTemplates.versoes.adicionar.titulo")}</p>
       {faltam.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t("contractTemplates.versoes.adicionar.semIdiomas")}</p>
       ) : (
@@ -91,6 +97,17 @@ function Separadores({ codigos, props }: { codigos: string[]; props: BarraDeIdio
   const { t } = useTranslation();
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
 
+  /** «English, 3 por traduzir, texto base mudou»: o idioma por extenso e o que há a dizer dele. */
+  const nomeDaAba = (codigo: string) => {
+    if (codigo === props.base) return `${nomeNativo(codigo)} ${t("contractTemplates.versoes.barra.base")}`;
+    const r = props.completudes[codigo];
+    return [
+      nomeNativo(codigo),
+      r && !r.completo ? t("contractTemplates.versoes.barra.porTraduzir", { n: r.porTraduzir }) : null,
+      r?.desatualizado ? t("contractTemplates.versoes.barra.desatualizado") : null,
+    ].filter(Boolean).join(", ");
+  };
+
   const ir = (i: number) => {
     refs.current[i]?.focus();
     props.onSelecionar(codigos[i]);
@@ -122,7 +139,7 @@ function Separadores({ codigos, props }: { codigos: string[]; props: BarraDeIdio
             role="tab"
             id={idDaAbaDeIdioma(codigo)}
             aria-selected={selecionada}
-            aria-controls={ID_PAINEL_IDIOMA}
+            aria-label={nomeDaAba(codigo)}
             tabIndex={selecionada ? 0 : -1}
             title={nomeNativo(codigo)}
             onClick={() => props.onSelecionar(codigo)}
@@ -137,12 +154,7 @@ function Separadores({ codigos, props }: { codigos: string[]; props: BarraDeIdio
             {!ehBase && resumo && !resumo.completo && (
               <span className="text-xs font-normal text-amber-700 dark:text-amber-400">{` · ${t("contractTemplates.versoes.barra.porTraduzir", { n: resumo.porTraduzir })}`}</span>
             )}
-            {!ehBase && resumo?.desatualizado && (
-              <>
-                <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />
-                <span className="sr-only">{t("contractTemplates.versoes.barra.desatualizado")}</span>
-              </>
-            )}
+            {!ehBase && resumo?.desatualizado && <AlertTriangle className="h-3.5 w-3.5 text-amber-600 dark:text-amber-400" aria-hidden="true" />}
           </button>
         );
       })}
@@ -151,10 +163,10 @@ function Separadores({ codigos, props }: { codigos: string[]; props: BarraDeIdio
 }
 
 /** O botão «Adicionar idioma». Numa minuta sem versões é o único sinal desta função (a barra ainda não aparece). */
-export function BotaoAdicionarIdioma({ expandido, onClick }: { expandido: boolean; onClick: () => void }) {
+export function BotaoAdicionarIdioma({ expandido, onClick, id }: { expandido: boolean; onClick: () => void; id?: string }) {
   const { t } = useTranslation();
   return (
-    <Button type="button" variant="outline" className={ALVO} aria-expanded={expandido} onClick={onClick}>
+    <Button id={id} type="button" variant="outline" className={ALVO} aria-expanded={expandido} aria-controls={expandido ? ID_PAINEL_ADICIONAR : undefined} onClick={onClick}>
       <Plus className="h-4 w-4" aria-hidden="true" />
       {t("contractTemplates.versoes.barra.adicionar")}
     </Button>
@@ -163,12 +175,22 @@ export function BotaoAdicionarIdioma({ expandido, onClick }: { expandido: boolea
 
 export function BarraDeIdiomasDoTemplate(props: BarraDeIdiomasProps) {
   const { t } = useTranslation();
+  const nomeParaFrase = useNomeParaFrase();
   const [confirmarRemocao, setConfirmarRemocao] = useState(false);
   const { base, ativo, versoes, adicionando, somenteLeitura } = props;
+  // Depois de adicionar ou remover, o foco vai para a aba ativa que ficar (o botão ou o painel que o tinham desaparecem).
+  // Guarda-se o idioma ativo de antes: o foco só passa quando o pai muda mesmo o idioma ativo.
+  const focoDepoisDeAtivoMudarDe = useRef<string | null>(null);
+  useEffect(() => {
+    if (focoDepoisDeAtivoMudarDe.current !== null && focoDepoisDeAtivoMudarDe.current !== ativo) {
+      focoDepoisDeAtivoMudarDe.current = null;
+      document.getElementById(idDaAbaDeIdioma(ativo))?.focus();
+    }
+  });
   const codigos = [base, ...versoes];
   const mostrarSeparadores = versoes.length > 0 || adicionando;
   const resumoAtivo = props.completudes[ativo];
-  const nomeAtivo = nomeNativo(ativo);
+  const nomeAtivo = nomeParaFrase(ativo);
 
   if (!mostrarSeparadores && somenteLeitura) return null;
 
@@ -186,13 +208,21 @@ export function BarraDeIdiomasDoTemplate(props: BarraDeIdiomasProps) {
       </div>
 
       {adicionando && !somenteLeitura && (
-        <PainelAdicionar base={base} faltam={props.faltamAdicionar} onAdicionar={props.onAdicionar} onCancelar={props.onFecharAdicionar} />
+        <PainelAdicionar
+          base={base}
+          faltam={props.faltamAdicionar}
+          onAdicionar={(codigo, copiar) => {
+            focoDepoisDeAtivoMudarDe.current = ativo;
+            props.onAdicionar(codigo, copiar);
+          }}
+          onCancelar={props.onFecharAdicionar}
+        />
       )}
 
       {ativo !== base && resumoAtivo?.desatualizado && (
         <div role="status" className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-50/60 p-3 text-sm text-amber-900 dark:bg-amber-950/20 dark:text-amber-200">
           <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
-          <span className="flex-1">{t("contractTemplates.versoes.desatualizado.aviso", { base: nomeNativo(base) })}</span>
+          <span className="flex-1">{t("contractTemplates.versoes.desatualizado.aviso", { base: nomeParaFrase(base) })}</span>
           {!somenteLeitura && (
             <Button type="button" variant="outline" size="sm" className={ALVO} onClick={() => props.onMarcarRevisto(ativo)}>
               {t("contractTemplates.versoes.desatualizado.revisto")}
@@ -202,14 +232,19 @@ export function BarraDeIdiomasDoTemplate(props: BarraDeIdiomasProps) {
       )}
 
       <AlertDialog open={confirmarRemocao} onOpenChange={setConfirmarRemocao}>
-        <AlertDialogContent>
+        <AlertDialogContent onCloseAutoFocus={(e) => e.preventDefault()}>
           <AlertDialogHeader>
             <AlertDialogTitle>{t("contractTemplates.versoes.remover.titulo", { nome: nomeAtivo })}</AlertDialogTitle>
-            <AlertDialogDescription>{t("contractTemplates.versoes.remover.descricao", { base: nomeNativo(base) })}</AlertDialogDescription>
+            <AlertDialogDescription>{t("contractTemplates.versoes.remover.descricao", { base: nomeParaFrase(base) })}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t("contractTemplates.versoes.remover.cancelar")}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => props.onRemover(ativo)} className="bg-destructive text-destructive-foreground">
+            <AlertDialogAction
+              onClick={() => {
+                focoDepoisDeAtivoMudarDe.current = ativo;
+                props.onRemover(ativo);
+              }}
+              className="bg-destructive text-destructive-foreground">
               {t("contractTemplates.versoes.remover.confirmar")}
             </AlertDialogAction>
           </AlertDialogFooter>

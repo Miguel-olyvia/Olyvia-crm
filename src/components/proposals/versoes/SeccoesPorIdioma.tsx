@@ -1,8 +1,8 @@
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { obterIdioma } from "@/lib/idiomaDocumento";
 import { useTranslation } from "@/hooks/useTranslation";
+import { nomeNaFrase } from "./nomeNaFrase";
 import type { CampoDeSeccao } from "./modeloVersoes";
 
 export interface SeccaoParaTraduzir {
@@ -55,7 +55,7 @@ function camposDe(seccao: SeccaoParaTraduzir, t: (chave: string) => string): Cam
 
 export function SeccoesPorIdioma({ codigo, seccoes, valorDaSeccao, onEscrever }: SeccoesPorIdiomaProps) {
   const { t } = useTranslation();
-  const idioma = obterIdioma(codigo)?.nomeNativo ?? codigo;
+  const idioma = nomeNaFrase(t, codigo);
 
   return (
     <div className="space-y-3">

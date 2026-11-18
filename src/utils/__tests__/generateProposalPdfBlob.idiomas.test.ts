@@ -205,15 +205,69 @@ describe("pt + en", () => {
     expect(chamadas().map((x) => x.documentContext.idioma ?? "pt")).toEqual(["pt", "en"]);
   });
 
-  it("uma versão que falha não leva as outras atrás", async () => {
-    let n = 0;
-    gerarOrcamento.mockImplementation(async () => {
-      n += 1;
-      if (n === 2) throw new Error("falhou");
+  it("um só idioma: um orçamento que falha não leva os outros atrás (como sempre)", async () => {
+    gerarOrcamento.mockImplementation(async (id: string) => {
+      if (id === "q2") throw new Error("falhou");
       return { blob: await paginaVazia(), fileName: "x.pdf" };
     });
-    const { blob } = await generateProposalPdfBlob("p1", prefetch(modeloProposta(), 1), { idiomas: ["pt", "en"] });
+    const { blob } = await generateProposalPdfBlob("p1", prefetch(modeloProposta(), 2), { idiomas: ["pt"] });
     expect(await paginas(blob)).toBe(1);
+  });
+
+  it("pt + en: se a passagem inglesa falha por completo, não sai um PDF só em português: erro claro", async () => {
+    gerarOrcamento.mockImplementation(async (_id: string, opts: any) => {
+      if (opts.documentContext.idioma === "en") throw new Error("falhou");
+      return { blob: await paginaVazia(), fileName: "x.pdf" };
+    });
+    await expect(generateProposalPdfBlob("p1", prefetch(modeloProposta(), 2), { idiomas: ["pt", "en"] })).rejects.toThrow(
+      /versão em English/,
+    );
+  });
+
+  it("pt + en: a passagem portuguesa a falhar também não passa em silêncio", async () => {
+    gerarOrcamento.mockImplementation(async (_id: string, opts: any) => {
+      if (!opts.documentContext.idioma) throw new Error("falhou");
+      return { blob: await paginaVazia(), fileName: "x.pdf" };
+    });
+    await expect(generateProposalPdfBlob("p1", prefetch(modeloProposta(), 1), { idiomas: ["pt", "en"] })).rejects.toThrow(
+      /versão em Português/,
+    );
+  });
+
+  it("pt + en: um orçamento que falha só numa das passagens também dá erro (a versão ficaria incompleta)", async () => {
+    gerarOrcamento.mockImplementation(async (id: string, opts: any) => {
+      if (id === "q2" && opts.documentContext.idioma === "en") throw new Error("falhou");
+      return { blob: await paginaVazia(), fileName: "x.pdf" };
+    });
+    await expect(generateProposalPdfBlob("p1", prefetch(modeloProposta(), 2), { idiomas: ["pt", "en"] })).rejects.toThrow(
+      /versão em English/,
+    );
+  });
+
+  it("pt + en: se a falha foi carregar o gerador (página desatualizada), a mensagem é a de recarregar", async () => {
+    gerarOrcamento.mockImplementation(async (_id: string, opts: any) => {
+      if (opts.documentContext.idioma === "en") throw new Error("Failed to fetch dynamically imported module: x");
+      return { blob: await paginaVazia(), fileName: "x.pdf" };
+    });
+    await expect(generateProposalPdfBlob("p1", prefetch(modeloProposta(), 1), { idiomas: ["pt", "en"] })).rejects.toThrow(
+      "Há uma versão nova da aplicação.",
+    );
+  });
+
+  it("o modelo do orçamento é lido uma só vez por modelo, e não por orçamento e por idioma", async () => {
+    fetchPorId.mockResolvedValue(normalizeQuotePdfTemplate(modeloEstrutural() as never));
+    const p = prefetch(modeloProposta(), 3);
+    p.quotes[0].quote.template_id = "estr";
+    p.quotes[1].quote.template_id = "estr";
+    p.quotes[2].quote.template_id = "outro";
+    await generateProposalPdfBlob("p1", p, { idiomas: ["pt", "en"] });
+    expect(gerarOrcamento).toHaveBeenCalledTimes(6);
+    expect(fetchPorId.mock.calls.map((c) => c[0]).sort()).toEqual(["estr", "outro"]);
+  });
+
+  it("sem modelos próprios nos orçamentos não se consulta nada", async () => {
+    await generateProposalPdfBlob("p1", prefetch(modeloProposta(), 2), { idiomas: ["pt", "en"] });
+    expect(fetchPorId).not.toHaveBeenCalled();
   });
 
   it("se nada foi produzido, o erro de sempre", async () => {

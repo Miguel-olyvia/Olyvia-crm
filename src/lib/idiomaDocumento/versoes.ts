@@ -81,21 +81,33 @@ export function idiomasDisponiveisProposta(template: TemplatePropostaLike | null
   return ordenarPorRegisto([base, ...Object.keys(lerVersoes(template.design_settings, base))]);
 }
 
+/**
+ * O que a versão `codigo` sobrepõe às definições (doc_settings) da base: os rótulos e o subtítulo do cabeçalho
+ * (o que a versão não traz fica a null e cai no dicionário, nunca no português), o título da tabela de artigos e,
+ * se a versão tiver, o rodapé. null se não houver versão para aplicar. Quem espalha extra_settings por cima das
+ * colunas deve aplicar isto DEPOIS, para que o português do extra_settings não anule a versão.
+ */
+export function sobreposicaoDaVersaoContrato(template: TemplateContratoLike, codigo: string): Record<string, unknown> | null {
+  const c = normalizarCodigo(codigo);
+  if (!template || !c || c === idiomaBaseDoTemplate(template)) return null;
+  const v = versaoDoContrato(template, c);
+  if (!v) return null;
+
+  const cabecalho = ehObjeto(v.header) ? v.header : {};
+  const sobre: Record<string, unknown> = {};
+  for (const chave of [...ROTULOS_CABECALHO, SUBTITULO_CABECALHO]) sobre[chave] = naoVazio(cabecalho[chave]) ? cabecalho[chave] : null;
+  if (naoVazio(v.footer_text)) sobre.footer_text = v.footer_text;
+  sobre.quote_items_title = naoVazio(v.quote_items_title) ? v.quote_items_title : null;
+  return sobre;
+}
+
 /** O template com a versão `codigo` aplicada; a MESMA referência se não houver nada a aplicar. */
 export function aplicarVersaoContrato<T extends TemplateContratoLike>(template: T, codigo: string): T {
+  const sobre = sobreposicaoDaVersaoContrato(template, codigo);
   const c = normalizarCodigo(codigo);
-  if (!template || !c || c === idiomaBaseDoTemplate(template)) return template;
-  const v = versaoDoContrato(template, c);
-  if (!v) return template;
-
-  const base = template.doc_settings ?? {};
-  const cabecalho = ehObjeto(v.header) ? v.header : {};
-  const novo: Record<string, unknown> = { ...base };
-  for (const chave of ROTULOS_CABECALHO) novo[chave] = naoVazio(cabecalho[chave]) ? cabecalho[chave] : null;
-  if (SUBTITULO_CABECALHO in cabecalho) novo[SUBTITULO_CABECALHO] = naoVazio(cabecalho[SUBTITULO_CABECALHO]) ? cabecalho[SUBTITULO_CABECALHO] : null;
-  if (naoVazio(v.footer_text)) novo.footer_text = v.footer_text;
-  novo.quote_items_title = naoVazio(v.quote_items_title) ? v.quote_items_title : null;
-  return { ...template, body_html: v.body_html as string, doc_settings: novo };
+  const v = sobre && c ? versaoDoContrato(template, c) : undefined;
+  if (!sobre || !v) return template;
+  return { ...template, body_html: v.body_html as string, doc_settings: { ...(template.doc_settings ?? {}), ...sobre } };
 }
 
 function sobreporSeccao(seccao: unknown, porId: Record<string, unknown>): unknown {

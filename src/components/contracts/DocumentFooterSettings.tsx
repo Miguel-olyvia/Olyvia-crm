@@ -5,7 +5,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { FileText } from "lucide-react";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { useTranslation } from "@/hooks/useTranslation";
-import { obterIdioma } from "@/lib/idiomaDocumento/registo";
+import { useNomeParaFrase } from "./versoes/nomeParaFrase";
 import { CamposComuns, type VersaoEmEdicao } from "./versoes/CamposComuns";
 
 interface Props {
@@ -17,6 +17,7 @@ interface Props {
 
 export function DocumentFooterSettings({ settings, onChange, versao }: Props) {
   const { t } = useTranslation();
+  const nomeParaFrase = useNomeParaFrase();
   const textoBase = versao?.textoBase?.trim();
   return (
     <div className="space-y-4">
@@ -48,7 +49,7 @@ export function DocumentFooterSettings({ settings, onChange, versao }: Props) {
             />
             {versao && textoBase && !settings.footer_text && (
               <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                {t("contractTemplates.versoes.rodape.semTexto", { base: obterIdioma(versao.base)?.nomeNativo ?? versao.base })}
+                {t("contractTemplates.versoes.rodape.semTexto", { base: nomeParaFrase(versao.base) })}
               </p>
             )}
           </div>

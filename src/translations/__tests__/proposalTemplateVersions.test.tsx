@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
+import { IDIOMAS } from "@/lib/idiomaDocumento";
 import { proposalTemplateVersionsTranslations } from "../proposalTemplateVersions";
 
 let idioma = "pt";
@@ -55,4 +56,20 @@ describe("traduções das versões por idioma do editor de propostas", () => {
     const { result } = renderHook(() => useTranslation());
     expect(result.current.t("proposalTemplateEditor.versions.addLanguage")).toBe("Add language");
   });
+
+  it("há um nome de idioma para frases (minúscula inicial em pt) para cada idioma do registo", () => {
+    for (const { codigo } of IDIOMAS) {
+      const chave = `proposalTemplateEditor.versions.lang.${codigo}`;
+      expect(proposalTemplateVersionsTranslations.pt[chave], `pt:${chave}`).toMatch(/^[a-zç]/);
+      expect(proposalTemplateVersionsTranslations.en[chave], `en:${chave}`).toMatch(/^[A-Z]/);
+    }
+    expect(proposalTemplateVersionsTranslations.pt["proposalTemplateEditor.versions.lang.pt"]).toBe("português");
+    expect(proposalTemplateVersionsTranslations.pt["proposalTemplateEditor.versions.lang.en"]).toBe("inglês");
+  });
+
+  it("a razão de «Reset» desativado existe em en e pt", () => {
+    expect(proposalTemplateVersionsTranslations.pt["proposalTemplateEditor.versions.resetDisabledReason"]).toBe("Só disponível no idioma base (português).");
+    expect(proposalTemplateVersionsTranslations.en["proposalTemplateEditor.versions.resetDisabledReason"]).toBe("Only available in the base language (Portuguese).");
+  });
 });
+

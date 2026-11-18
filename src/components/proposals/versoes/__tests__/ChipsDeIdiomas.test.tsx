@@ -29,7 +29,7 @@ describe("ChipsDeIdiomas", () => {
     expect(screen.getByText("PT · EN")).toBeInTheDocument();
     const incompleto = screen.getByText("EN incompleto");
     expect(incompleto).toBeInTheDocument();
-    expect(incompleto).toHaveAttribute("title", "2 por traduzir em English");
+    expect(incompleto).toHaveAttribute("title", "2 por traduzir em inglês");
   });
 
   it("versão completa: só a lista de idiomas, sem «incompleto»", () => {
@@ -44,6 +44,6 @@ describe("ChipsDeIdiomas", () => {
 
   it("o chip dos idiomas tem nome acessível com os idiomas por extenso", () => {
     render(<ChipsDeIdiomas template={{ ...LINHA, design_settings: { versions: { en: { footer_text: "F", accept_button_text: "A" } } } }} />);
-    expect(screen.getByLabelText("Idiomas: Português, English")).toBeInTheDocument();
+    expect(screen.getByLabelText("Idiomas: português, inglês")).toBeInTheDocument();
   });
 });

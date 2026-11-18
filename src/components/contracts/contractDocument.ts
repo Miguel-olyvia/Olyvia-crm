@@ -5,10 +5,10 @@ import { substituteVariables, type ContractVariableData } from "@/utils/contract
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { renderContractHeaderHtml } from "./contractHeader";
 import { tDoc } from "@/lib/idiomaDocumento/dicionario";
-import { aplicarVersaoContrato } from "@/lib/idiomaDocumento/versoes";
+import { sobreposicaoDaVersaoContrato } from "@/lib/idiomaDocumento/versoes";
+import { IDIOMA_BASE } from "@/lib/idiomaDocumento/registo";
 import { dividirCorpoDoContrato, juntarSegmentos, type ContractVersion } from "./contractVersions";
-import { computeFooterLayout, drawContractPdfFootersByVersion } from "./contractPdfFooter";
-import { paginarVersoesNoPdf, prepararHtmlParaPdf } from "./contractPdfPaginate";
+import { gerarPdfDasVersoes, paginasDoDocumento, prepararHtmlParaPdf } from "./contractPdfPaginate";
 import {
   buildItemsTableModel,
   type ItemsTableLine,
@@ -1141,11 +1141,13 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
   const settings: DocumentSettings = montarSettings(tplFlat);
 
   // As definições de cada versão de idioma: o cabeçalho e o rodapé da versão sobrepõem-se aos da base
-  // (aplicarVersaoContrato); sem nada a aplicar, são exatamente as da base (a mesma referência).
+  // (sobreposicaoDaVersaoContrato); sem nada a aplicar, são exatamente as da base (a mesma referência).
   const tplFlatDaVersao = (codigo: string): Record<string, any> => {
     if (!templateData) return tplFlat;
-    const aplicado = aplicarVersaoContrato(templateData, codigo);
-    return aplicado === templateData ? tplFlat : flattenSettingsRow(aplicado.doc_settings || {});
+    // A sobreposição da versão vai POR CIMA do que o flatten espalhou (extra_settings incluído): o rodapé e o
+    // cabeçalho em português do extra_settings não podem anular os da versão.
+    const sobre = sobreposicaoDaVersaoContrato(templateData, codigo);
+    return sobre ? { ...tplFlat, ...sobre } : tplFlat;
   };
   const settingsDaVersao = (codigo: string): DocumentSettings => {
     const doTemplate = tplFlatDaVersao(codigo);
@@ -1322,7 +1324,8 @@ export async function downloadContractDocumentPdf(
       }),
     );
 
-    const pageElements = Array.from(iframeDocument.querySelectorAll(".page")) as HTMLElement[];
+    // As `.page` de topo, uma por versão de idioma (não as que o utilizador escreveu no corpo).
+    const pageElements = paginasDoDocumento(iframeDocument);
     if (pageElements.length === 0) throw new Error("Não foi possível encontrar o conteúdo do contrato");
 
     // O html2canvas fecha o canvas alguns pixéis acima do fim real do conteúdo
@@ -1341,69 +1344,17 @@ export async function downloadContractDocumentPdf(
       .replace(/[^a-zA-Z0-9-_]+/g, "_")
       .replace(/^_+|_+$/g, "") || "contrato";
 
-    const s = resolved.settings;
-    const marginTop = Number(s.margin_top ?? 20) || 20;
-    const marginRight = Number(s.margin_right ?? 20) || 20;
-    const marginBottomBase = Number(s.margin_bottom ?? 20) || 20;
-    const marginLeft = Number(s.margin_left ?? 20) || 20;
-
-    // Uma `.page` por versão de idioma, pela mesma ordem de `versoes` (um documento montado sem versões é uma só).
-    const versoes = versoesParaImprimir(resolved);
-
-    // O rodapé (texto + "Página X de Y") deixou de ser conteúdo do documento e
-    // passou a ser desenhado com jsPDF em TODAS as páginas — ver
-    // `drawContractPdfFootersByVersion`. Reservamos-lhe espaço alargando a margem
-    // inferior usada na paginação (o máximo entre os rodapés de todos os idiomas),
-    // para o conteúdo nunca lhe encavalitar.
-    const jsPdfOptions = {
-      unit: "mm" as const,
-      format: s.page_size === "LETTER" ? "letter" : "a4",
-      orientation: (s.page_orientation === "landscape" ? "landscape" : "portrait") as "landscape" | "portrait",
-    };
+    // Uma `.page` por versão, pela mesma ordem de `versoes`. O rodapé (texto + "Página X de Y") é desenhado
+    // com jsPDF em TODAS as páginas, no idioma de cada uma (gerarPdfDasVersoes).
     const { jsPDF } = await import("jspdf");
-    const pdf = new jsPDF(jsPdfOptions);
-    const footerLayouts = versoes.map((versao) => computeFooterLayout(versao.settings, pdf));
-    const marginBottom = Math.max(marginBottomBase, ...footerLayouts.map((layout) => layout.reservedMm));
-
-    const criarWorker = (pageElement: HTMLElement) =>
-      html2pdf()
-        .set({
-          margin: [marginTop, marginRight, marginBottom, marginLeft],
-          filename: `${safeFileName}.pdf`,
-          image: { type: "jpeg", quality: 0.98 },
-          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-          jsPDF: jsPdfOptions,
-          pagebreak: {
-            mode: ["css", "legacy"],
-            avoid: [
-              ".content p",
-              ".content li",
-              ".content h1", ".content h2", ".content h3",
-              ".content h4", ".content h5", ".content h6",
-              ".content tr",
-              ".content img",
-              ".content blockquote",
-              ".content div",
-              ".content font",
-              "[data-pdf-section='header']",
-            ],
-          },
-        })
-        .from(pageElement);
-
-    // Cada versão é paginada à vez; a 2.ª e as seguintes começam numa página nova.
-    const grupos = await paginarVersoesNoPdf({
-      pdf,
-      offsets: { marginTop, marginLeft },
-      paginas: pageElements.map((elemento, indice) => ({
-        codigo: versoes[indice]?.codigo ?? "pt",
-        elemento,
-        settings: versoes[indice]?.settings ?? s,
-      })),
-      criarWorker,
+    const pdf = await gerarPdfDasVersoes({
+      pageElements,
+      versoes: versoesParaImprimir(resolved),
+      settings: resolved.settings,
+      safeFileName,
+      jsPDF: jsPDF as never,
+      html2pdf,
     });
-    // Rodapé por página, no idioma de cada uma; total e numeração contínuos do documento inteiro.
-    drawContractPdfFootersByVersion(pdf, grupos.map((grupo, indice) => ({ ...grupo, layout: footerLayouts[indice] })));
     pdf.save(`${safeFileName}.pdf`);
   } finally {
     iframe?.remove();
@@ -1420,7 +1371,7 @@ export { drawContractPdfFooters } from "./contractPdfFooter";
 /** As versões a imprimir: as do resolver, ou (documento montado à mão, sem `versoes`) uma só com o bodyHtml. */
 function versoesParaImprimir(document: ResolvedContractDocument): ContractVersion<DocumentSettings>[] {
   if (document.versoes?.length) return document.versoes;
-  return [{ codigo: "pt", bodyHtml: document.bodyHtml, settings: document.settings }];
+  return [{ codigo: IDIOMA_BASE, bodyHtml: document.bodyHtml, settings: document.settings }];
 }
 
 const ESTILO_PAGINA_SEGUINTE = "break-before:page;page-break-before:always";

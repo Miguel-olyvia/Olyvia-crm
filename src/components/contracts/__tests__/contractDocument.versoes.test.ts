@@ -254,3 +254,44 @@ describe("buildContractPrintHtml — uma página por versão", () => {
     expect(html).toContain("Corpo antigo");
   });
 });
+
+describe("as definições da versão mandam sobre extra_settings do modelo (M6)", () => {
+  const COM_EXTRA = {
+    language: "pt",
+    body_html: CORPO_PT,
+    doc_settings: {
+      ...DOC_SETTINGS_BASE,
+      extra_settings: { footer_text: "Extra PT", contract_block_title: "EXTRA PT", contract_block_subtitle: "www.pt", contract_block_number_label: "N.º PT" },
+    },
+  };
+
+  it("o rodapé, o título, o subtítulo e os rótulos do inglês não são anulados pelo extra_settings português", async () => {
+    const r = await resolver(contrato({ template_snapshot: COM_EXTRA }));
+    const [pt, en] = r.versoes;
+    expect(en.settings.footer_text).toBe("English footer");
+    expect((en.settings as any).contract_block_title).toBeNull();
+    expect((en.settings as any).contract_block_subtitle).toBeNull();
+    expect((en.settings as any).contract_block_number_label).toBe("CONTRACT No.");
+    // o português fica como hoje: o extra_settings por cima das colunas
+    expect(pt.settings.footer_text).toBe("Extra PT");
+    expect((pt.settings as any).contract_block_title).toBe("EXTRA PT");
+    expect((pt.settings as any).contract_block_subtitle).toBe("www.pt");
+  });
+
+  it("a versão sem rodapé próprio herda o do base, também quando o base o tem no extra_settings", async () => {
+    const t = JSON.parse(JSON.stringify(COM_EXTRA));
+    delete t.doc_settings.versions.en.footer_text;
+    const r = await resolver(contrato({ template_snapshot: t }));
+    expect(r.versoes[1].settings.footer_text).toBe("Extra PT");
+  });
+});
+
+describe("versão vazia (corpo base em branco)", () => {
+  it("uma versão em branco não gera uma página só com cabeçalho", async () => {
+    const corpo = `<div class="olv-versao olv-versao-pt"></div>\n<div class="olv-versao olv-versao-en" style="break-before:page;page-break-before:always">${CORPO_EN}</div>`;
+    const r = await resolver(contrato({ contract_body_html: corpo }));
+    expect(r.versoes.map((v) => v.codigo)).toEqual(["en"]);
+    const html = buildContractPrintHtml(r as never, "T");
+    expect(new DOMParser().parseFromString(html, "text/html").querySelectorAll("body > .page")).toHaveLength(1);
+  });
+});

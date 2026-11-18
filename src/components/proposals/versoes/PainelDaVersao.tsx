@@ -1,7 +1,7 @@
 import { Info } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { obterIdioma } from "@/lib/idiomaDocumento";
 import { useTranslation } from "@/hooks/useTranslation";
+import { nomeNaFrase } from "./nomeNaFrase";
 import { ConteudoPorIdioma, type BaseDoConteudo } from "./ConteudoPorIdioma";
 import { ListaDeVerificacao } from "./ListaDeVerificacao";
 import { SeccoesPorIdioma, type SeccaoParaTraduzir } from "./SeccoesPorIdioma";
@@ -20,7 +20,7 @@ interface PainelDaVersaoProps {
 export function PainelDaVersao({ versoes, config }: PainelDaVersaoProps) {
   const { t } = useTranslation();
   const codigo = versoes.idiomaAtivo;
-  const idioma = obterIdioma(codigo)?.nomeNativo ?? codigo;
+  const idioma = nomeNaFrase(t, codigo);
 
   return (
     <div className="space-y-4">

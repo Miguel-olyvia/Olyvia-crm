@@ -219,3 +219,101 @@ describe("comporCorpoDoContrato — assinatura única", () => {
     expect(out).toContain(FRASE_PT);
   });
 });
+
+describe("dividirEmVersoes — html desequilibrado e marcas à mão (M8)", () => {
+  const V = (c: string, corpo: string) => `<div class="olv-versao olv-versao-${c}">${corpo}</div>`;
+
+  it("um div sem fecho dentro de uma versão não faz perder as seguintes", () => {
+    const html = `${V("pt", "<div><p>um</p>")}
+${V("en", "<p>two</p>")}`;
+    const r = dividirEmVersoes(html);
+    expect(r.map((x) => x.codigo)).toEqual(["pt", "en"]);
+    expect(r[0].html).toContain("um");
+    expect(r[1].html).toBe("<p>two</p>");
+  });
+
+  it("um </div> a mais dentro de uma versão: as duas versões continuam lá, sem perder texto", () => {
+    const html = `${V("pt", "<p>um</p></div><p>sobra</p>")}${V("en", "<p>two</p>")}`;
+    const r = dividirEmVersoes(html);
+    expect(r.map((x) => x.codigo)).toEqual(["pt", "en"]);
+    expect(r[0].html).toContain("um");
+    expect(r[0].html).toContain("sobra");
+    expect(r[1].html).toBe("<p>two</p>");
+  });
+
+  it("wrapper escrito à mão: maiúsculas, aspas simples, outros atributos", () => {
+    const html = `<DIV id="a" CLASS='olv-versao olv-versao-EN' title="x"><p>hello</p></DIV><div style="x" class="olv-versao olv-versao-pt"><p>olá</p></div>`;
+    expect(dividirEmVersoes(html)).toEqual([
+      { codigo: "en", html: "<p>hello</p>" },
+      { codigo: "pt", html: "<p>olá</p>" },
+    ]);
+  });
+
+  it("data-class não é uma classe", () => {
+    const html = `<div data-class="olv-versao olv-versao-en"><p>a</p></div>`;
+    expect(dividirEmVersoes(html)).toEqual([{ codigo: "pt", html }]);
+  });
+
+  it("uma só versão com marca: é essa, sem o wrapper", () => {
+    expect(dividirEmVersoes(V("en", "<p>only</p>"))).toEqual([{ codigo: "en", html: "<p>only</p>" }]);
+  });
+
+  it("uma versão vazia continua a ser uma versão", () => {
+    expect(dividirEmVersoes(`${V("pt", "")}${V("en", "<p>x</p>")}`)).toEqual([
+      { codigo: "pt", html: "" },
+      { codigo: "en", html: "<p>x</p>" },
+    ]);
+  });
+
+  it("três idiomas, um deles com div sem fecho", () => {
+    const html = `${V("pt", "<p>a</p>")}${V("en", "<div><div><p>b</p>")}${V("es", "<p>c</p>")}`;
+    expect(dividirEmVersoes(html).map((x) => x.codigo)).toEqual(["pt", "en", "es"]);
+    expect(dividirEmVersoes(html)[2].html).toBe("<p>c</p>");
+  });
+
+  it("html sem fecho do próprio wrapper (fim do texto): a versão fecha no fim", () => {
+    const r = dividirEmVersoes(`<div class="olv-versao olv-versao-pt"><p>a</p>`);
+    expect(r).toEqual([{ codigo: "pt", html: "<p>a</p>" }]);
+  });
+
+  it("uma versão com div sem fecho sai equilibrada (pode voltar a embrulhar-se)", () => {
+    const r = dividirEmVersoes(`${V("pt", "<div><p>um</p>")}${V("en", "<p>two</p>")}`);
+    const abertos = (r[0].html.match(/<div/gi) ?? []).length;
+    const fechados = (r[0].html.match(/<\/div>/gi) ?? []).length;
+    expect(abertos).toBe(fechados);
+  });
+});
+
+describe("comporCorpoDoContrato — H1, M-baixos", () => {
+  const FRASE_PT = "Esta assinatura vale para as versões em português e em inglês.";
+  const CLAUSULA_EN = "<p>The Company shall provide the Services to the Client.</p>";
+
+  it("uma cláusula curta em inglês no meio do corpo não é apagada pela composição", () => {
+    const en = `<h2>AGREEMENT</h2>${CLAUSULA_EN}${"<p>Clause.</p>".repeat(5)}`;
+    const t = minuta({ pt: `${PT_SEM_ASSINATURA}${BLOCO_PT}`, en });
+    const [pt, ing] = dividirEmVersoes(comporCorpoDoContrato(t, "pt+en"));
+    expect(ing.html).toContain("The Company shall provide");
+    // a última versão não tem bloco identificável: a assinatura portuguesa fica onde estava, com a sua frase
+    expect(pt.html).toContain("O CLIENTE");
+  });
+
+  it("o plano em inglês no fim, só com a heurística, não é apagado pela composição (a assinatura não fica a meio)", () => {
+    const plano = `<p>Clause 1.</p><p>_______________________</p><p>THE FIRST PARTY  THE SECOND PARTY</p>`;
+    const t = minuta({ pt: `${PT_SEM_ASSINATURA}${BLOCO_PT}`, en: plano });
+    const out = comporCorpoDoContrato(t, "pt+en");
+    expect(out).toContain("THE SECOND PARTY");
+  });
+
+  it("quando a última versão (es) não tem expressões de assinatura, não se remove nada", () => {
+    const t = minuta({ pt: `${PT_SEM_ASSINATURA}${BLOCO_PT}`, en: `${EN_SEM_ASSINATURA}${BLOCO_EN}`, es: "<h2>CONTRATO ES</h2><p>Hola</p>" });
+    const out = comporCorpoDoContrato(t, "pt+en+es");
+    expect(out).toContain("O CLIENTE");
+    expect(out).toContain("THE CLIENT");
+    expect(out).not.toContain(FRASE_PT);
+  });
+
+  it("corpo base vazio com versão inglesa cheia: só a versão inglesa, sem uma primeira página vazia", () => {
+    const t = minuta({ pt: "", en: EN_SEM_ASSINATURA });
+    expect(comporCorpoDoContrato(t, "pt+en")).toBe(`<div class="olv-versao olv-versao-en">${EN_SEM_ASSINATURA}</div>`);
+  });
+});

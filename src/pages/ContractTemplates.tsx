@@ -46,10 +46,10 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { DocumentPreview } from "@/components/document-editor/DocumentPreview";
 import { contractTemplateFormSchema } from "@/lib/validations";
 import { tDoc } from "@/lib/idiomaDocumento/dicionario";
-import { obterIdioma } from "@/lib/idiomaDocumento/registo";
 import { useVersoesDoTemplate } from "@/components/contracts/versoes/useVersoesDoTemplate";
 import { BarraDeIdiomasDoTemplate, BotaoAdicionarIdioma } from "@/components/contracts/versoes/BarraDeIdiomasDoTemplate";
-import { ID_PAINEL_IDIOMA, idDaAbaDeIdioma } from "@/components/contracts/versoes/idsDeIdioma";
+import { ID_BOTAO_ADICIONAR_IDIOMA, idDaAbaDeIdioma } from "@/components/contracts/versoes/idsDeIdioma";
+import { useNomeParaFrase } from "@/components/contracts/versoes/nomeParaFrase";
 import { ListaDeVerificacaoDaVersao } from "@/components/contracts/versoes/ListaDeVerificacaoDaVersao";
 import { ChipsDeIdiomasDoCartao } from "@/components/contracts/versoes/ChipsDeIdiomasDoCartao";
 import { corpoTemLocalDeAssinatura, htmlNovaClausula } from "@/components/contracts/versoes/blocosDeInsercao";
@@ -92,6 +92,19 @@ const ContractTemplates = () => {
   const [formData, setFormData] = useState({ name: "", body_html: "", is_active: true, is_default: false, signatory_user_id: null as string | null, signatory_role_id: null as string | null, doc_settings: null as TemplateDocSettings | null, language: "pt" as string | null });
   // Versões por idioma da minuta: sem versões o idioma ativo é o base e nada muda.
   const versoes = useVersoesDoTemplate(formData, setFormData);
+  const nomeParaFrase = useNomeParaFrase();
+  // Ao remover a ÚLTIMA versão a barra desaparece: o foco volta ao botão «Adicionar idioma» do cabeçalho.
+  const focarAdicionarAoSairDaBarra = useRef(false);
+  useEffect(() => {
+    if (focarAdicionarAoSairDaBarra.current && !versoes.mostrarBarra) {
+      focarAdicionarAoSairDaBarra.current = false;
+      document.getElementById(ID_BOTAO_ADICIONAR_IDIOMA)?.focus();
+    }
+  }, [versoes.mostrarBarra]);
+  const removerVersao = (codigo: string) => {
+    focarAdicionarAoSairDaBarra.current = versoes.versoes.length === 1;
+    versoes.remover(codigo);
+  };
   // O «Guardar» não atualizou porque outra pessoa alterou a minuta entretanto: guarda o updated_at de agora.
   const [conflitoAtualizadoEm, setConflitoAtualizadoEm] = useState<string | null>(null);
   const [previewIdioma, setPreviewIdioma] = useState("pt");
@@ -363,7 +376,8 @@ const ContractTemplates = () => {
       if (data.is_default) {
         // Antes de tirar o «default» às outras minutas, ver se esta não foi alterada por outra pessoa.
         await verificarSemConflito(supabase as any, { id: data.id, carregadoEm: data.carregadoEm });
-        await (supabase as any).from("client_contract_templates").update({ is_default: false }).eq("organization_id", activeCompany?.id);
+        // Sem esta minuta: o gatilho BEFORE UPDATE mudaria o updated_at dela e a guarda do «Guardar» falharia sempre.
+        await (supabase as any).from("client_contract_templates").update({ is_default: false }).eq("organization_id", activeCompany?.id).neq("id", data.id);
       }
       await atualizarMinutaComGuarda(supabase as any, {
         id: data.id,
@@ -606,7 +620,7 @@ const ContractTemplates = () => {
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleEdit(template)} title="Editar"><Pencil className="h-4 w-4 text-orange-500" /></Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => duplicateMutation.mutate(template)} disabled={duplicateMutation.isPending} title="Duplicar"><Copy className="h-4 w-4" /></Button>
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handlePreview(template)} title="Preview"><Eye className="h-4 w-4" /></Button>
-                        <TemplateExportButtons templateName={template.name} bodyHtml={template.body_html} variant="icon" docSettingsOverride={{ ...(docSettings || {}), ...(template.doc_settings || {}) }} sampleData={previewSampleData} />
+                        <TemplateExportButtons templateName={template.name} bodyHtml={template.body_html} variant="icon" docSettingsOverride={{ ...(docSettings || {}), ...(template.doc_settings || {}) }} sampleData={previewSampleData} idioma={template.language ?? undefined} />
                         <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => { setDeleteId(template.id); setIsDeleteOpen(true); }} title="Eliminar"><Trash2 className="h-4 w-4 text-destructive" /></Button>
                       </div>
                     )}
@@ -699,15 +713,12 @@ const ContractTemplates = () => {
                       <Label htmlFor="is_default" className="text-sm flex items-center gap-1"><Star className="h-3.5 w-3.5" /> Default</Label>
                     </div>
                     {/* Sem versões, a barra de idiomas ainda não aparece: este botão é a única entrada. */}
-                    {canManage && !versoes.mostrarBarra && <BotaoAdicionarIdioma expandido={false} onClick={versoes.abrirAdicionar} />}
+                    {canManage && !versoes.mostrarBarra && <BotaoAdicionarIdioma id={ID_BOTAO_ADICIONAR_IDIOMA} expandido={false} onClick={versoes.abrirAdicionar} />}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.9fr)] gap-4 flex-1 min-h-0">
-                <div
-                  className="flex flex-col gap-2 min-h-0"
-                  {...(versoes.mostrarBarra ? { id: ID_PAINEL_IDIOMA, role: "tabpanel", "aria-labelledby": idDaAbaDeIdioma(versoes.ativo) } : {})}
-                >
+                <div className="flex flex-col gap-2 min-h-0">
                 {versoes.mostrarBarra && (
                   <BarraDeIdiomasDoTemplate
                     base={versoes.base}
@@ -721,10 +732,12 @@ const ContractTemplates = () => {
                     onAbrirAdicionar={versoes.abrirAdicionar}
                     onFecharAdicionar={versoes.fecharAdicionar}
                     onAdicionar={versoes.adicionar}
-                    onRemover={versoes.remover}
+                    onRemover={removerVersao}
                     onMarcarRevisto={versoes.marcarRevisto}
                   />
                 )}
+                {/* O conteúdo do idioma ativo (irmão da barra, não filho dela); sem barra não leva atributos. */}
+                <div className="flex-1 flex flex-col min-h-0" {...(versoes.mostrarBarra ? { role: "group", "aria-labelledby": idDaAbaDeIdioma(versoes.ativo) } : {})}>
                 <Tabs value={editorTab} onValueChange={setEditorTab} className="flex-1 flex flex-col min-h-0">
                   <TabsList className="mb-2">
                     <TabsTrigger value="editor" className="gap-1.5">
@@ -747,7 +760,7 @@ const ContractTemplates = () => {
                   <TabsContent value="editor" className="flex-1 min-h-0 overflow-y-auto space-y-3">
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <Label>{versoes.ehBase ? "Editor da Minuta *" : `${t("contractTemplates.versoes.corpo.rotulo", { nome: obterIdioma(versoes.ativo)?.nomeNativo ?? versoes.ativo })} *`}</Label>
+                        <Label>{versoes.ehBase ? "Editor da Minuta *" : `${t("contractTemplates.versoes.corpo.rotulo", { nome: nomeParaFrase(versoes.ativo) })} *`}</Label>
                         <span className="text-xs text-muted-foreground">{clauseCount} cláusulas · ~{wordCount} palavras</span>
                       </div>
                       {(() => {
@@ -866,7 +879,7 @@ const ContractTemplates = () => {
                   </TabsContent>
 
                   <TabsContent value="signatures" className="flex-1 min-h-0 overflow-y-auto space-y-4">
-                    {formData.signatory_user_id && !(hasSignatoryHook(versoes.corpo) || (versoes.ativo !== "pt" && corpoTemLocalDeAssinatura(versoes.corpo))) && (
+                    {formData.signatory_user_id && !(hasSignatoryHook(versoes.corpo) || corpoTemLocalDeAssinatura(versoes.corpo)) && (
                       <div className="border rounded-lg p-3 bg-amber-50 border-amber-200 text-sm flex items-start gap-3">
                         <div className="flex-1 text-amber-900">
                           O corpo da minuta não tem nenhum local para mostrar o signatário (sem
@@ -919,6 +932,7 @@ const ContractTemplates = () => {
                   </TabsContent>
                 </Tabs>
                 </div>
+                </div>
 
                 <aside className="hidden lg:flex flex-col min-h-0 border rounded-lg bg-muted/10 overflow-hidden">
                   <header className="flex items-center justify-between px-3 py-2 border-b bg-background/60">
@@ -942,7 +956,7 @@ const ContractTemplates = () => {
                 <DialogFooter className="mt-4 pt-4 border-t">
                   <Button type="button" variant="outline" onClick={handleCloseEditor}>Cancelar</Button>
                   {versoes.preview.body_html && (
-                    <TemplateExportButtons templateName={formData.name || "minuta"} bodyHtml={versoes.preview.body_html} variant="button" docSettingsOverride={mergedSettings} sampleData={previewSampleData} />
+                    <TemplateExportButtons templateName={formData.name || "minuta"} bodyHtml={versoes.preview.body_html} variant="button" docSettingsOverride={mergedSettings} sampleData={previewSampleData} idioma={versoes.ativo} />
                   )}
                   <Button
                     type="button" variant="outline" disabled={!versoes.preview.body_html}

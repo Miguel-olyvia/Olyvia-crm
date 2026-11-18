@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { BarraDeIdiomasDoTemplate, type BarraDeIdiomasProps } from "../BarraDeIdiomasDoTemplate";
-import { ID_PAINEL_IDIOMA, idDaAbaDeIdioma } from "../idsDeIdioma";
+import { ID_PAINEL_ADICIONAR, idDaAbaDeIdioma } from "../idsDeIdioma";
 
 function propsBase(extra: Partial<BarraDeIdiomasProps> = {}): BarraDeIdiomasProps {
   return {
@@ -56,7 +56,19 @@ describe("separadores de idioma", () => {
     expect(abas[0]).toHaveAttribute("tabindex", "0");
     expect(abas[1]).toHaveAttribute("tabindex", "-1");
     expect(abas[0]).toHaveAttribute("id", idDaAbaDeIdioma("pt"));
-    expect(abas[0]).toHaveAttribute("aria-controls", ID_PAINEL_IDIOMA);
+    // O painel de cada idioma é o ecrã inteiro do editor: as abas não apontam para um tabpanel que não existe.
+    expect(abas[0]).not.toHaveAttribute("aria-controls");
+  });
+
+  it("cada aba tem nome acessível com o idioma por extenso e o que falta", () => {
+    montar(propsBase({ versoes: ["en", "es"], completudes: {
+      en: { porTraduzir: 3, completo: false, desatualizado: false },
+      es: { porTraduzir: 0, completo: true, desatualizado: true },
+    } }));
+    const abas = screen.getAllByRole("tab");
+    expect(abas[0]).toHaveAccessibleName("Português (base)");
+    expect(abas[1]).toHaveAccessibleName("English, 3 por traduzir");
+    expect(abas[2]).toHaveAccessibleName("Español, texto base mudou");
   });
 
   it("uma versão completa mostra só o código", () => {
@@ -98,9 +110,9 @@ describe("separadores de idioma", () => {
     }
   });
 
-  it("uma versão desatualizada avisa também na aba (texto para leitores de ecrã)", () => {
+  it("uma versão desatualizada avisa também na aba (no nome acessível)", () => {
     montar(propsBase({ completudes: { en: { porTraduzir: 0, completo: true, desatualizado: true } } }));
-    expect(screen.getAllByRole("tab")[1].textContent).toContain("texto base mudou");
+    expect(screen.getAllByRole("tab")[1]).toHaveAccessibleName("English, texto base mudou");
   });
 });
 
@@ -112,7 +124,7 @@ describe("adicionar idioma", () => {
     const radios = within(painel).getAllByRole("radio");
     expect(radios.map((r) => r.getAttribute("aria-label"))).toEqual(["Español", "Français"]);
     expect(radios[0]).toHaveAttribute("aria-checked", "true");
-    const copiar = within(painel).getByRole("checkbox", { name: "Começar com uma cópia do texto em Português" });
+    const copiar = within(painel).getByRole("checkbox", { name: "Começar com uma cópia do texto em português" });
     expect(copiar).toHaveAttribute("aria-checked", "true");
 
     fireEvent.click(within(painel).getByRole("button", { name: "Adicionar versão" }));
@@ -150,7 +162,56 @@ describe("adicionar idioma", () => {
     const { rerender } = montar(propsBase());
     expect(screen.getByRole("button", { name: "Adicionar idioma" })).toHaveAttribute("aria-expanded", "false");
     rerender(<LanguageProvider><BarraDeIdiomasDoTemplate {...propsBase({ adicionando: true })} /></LanguageProvider>);
-    expect(screen.getByRole("button", { name: "Adicionar idioma" })).toHaveAttribute("aria-expanded", "true");
+    const botao = screen.getByRole("button", { name: "Adicionar idioma" });
+    expect(botao).toHaveAttribute("aria-expanded", "true");
+    expect(botao).toHaveAttribute("aria-controls", ID_PAINEL_ADICIONAR);
+    expect(document.getElementById(ID_PAINEL_ADICIONAR)).toBe(screen.getByRole("group", { name: "Adicionar uma versão de idioma" }));
+  });
+
+  it("fechado, o botão não aponta para um painel que não existe", () => {
+    montar(propsBase());
+    expect(screen.getByRole("button", { name: "Adicionar idioma" })).not.toHaveAttribute("aria-controls");
+  });
+});
+
+describe("foco", () => {
+  function remontar(r: ReturnType<typeof montar>, p: BarraDeIdiomasProps) {
+    r.rerender(<LanguageProvider><BarraDeIdiomasDoTemplate {...p} /></LanguageProvider>);
+  }
+
+  it("ao abrir o painel de adicionar, o foco vai para o título do painel", () => {
+    montar(propsBase({ adicionando: true }));
+    expect(screen.getByText("Adicionar uma versão de idioma")).toHaveFocus();
+  });
+
+  it("ao adicionar a versão, o foco vai para a aba do idioma novo", () => {
+    const antes = propsBase({ adicionando: true });
+    const r = montar(antes);
+    fireEvent.click(screen.getByRole("button", { name: "Adicionar versão" }));
+    expect(antes.onAdicionar).toHaveBeenCalledWith("es", true);
+    remontar(r, propsBase({
+      ativo: "es", versoes: ["en", "es"], adicionando: false,
+      completudes: { en: { porTraduzir: 3, completo: false, desatualizado: false }, es: { porTraduzir: 3, completo: false, desatualizado: false } },
+    }));
+    expect(screen.getByRole("tab", { name: "Español, 3 por traduzir" })).toHaveFocus();
+  });
+
+  it("ao remover a versão, o foco vai para a aba ativa que fica", () => {
+    const antes = propsBase({ ativo: "en" });
+    const r = montar(antes);
+    fireEvent.click(screen.getByRole("button", { name: "Remover esta versão" }));
+    fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remover" }));
+    expect(antes.onRemover).toHaveBeenCalledWith("en");
+    remontar(r, propsBase({ ativo: "pt", versoes: ["es"], completudes: { es: { porTraduzir: 1, completo: false, desatualizado: false } } }));
+    expect(screen.getByRole("tab", { name: "Português (base)" })).toHaveFocus();
+  });
+
+  it("sem ação de adicionar ou remover, a barra não rouba o foco", () => {
+    const r = montar(propsBase());
+    const botao = screen.getByRole("button", { name: "Adicionar idioma" });
+    botao.focus();
+    remontar(r, propsBase({ ativo: "en" }));
+    expect(botao).toHaveFocus();
   });
 });
 
@@ -160,7 +221,7 @@ describe("remover versão", () => {
     montar(p);
     fireEvent.click(screen.getByRole("button", { name: "Remover esta versão" }));
     const dialogo = screen.getByRole("alertdialog");
-    expect(within(dialogo).getByText("Remover a versão English?")).toBeInTheDocument();
+    expect(within(dialogo).getByText("Remover a versão inglês?")).toBeInTheDocument();
     expect(p.onRemover).not.toHaveBeenCalled();
     fireEvent.click(within(dialogo).getByRole("button", { name: "Remover" }));
     expect(p.onRemover).toHaveBeenCalledWith("en");
@@ -185,7 +246,7 @@ describe("o português mudou desde esta versão", () => {
     const p = propsBase({ ativo: "en", completudes: { en: { porTraduzir: 0, completo: true, desatualizado: true } } });
     montar(p);
     const aviso = screen.getByRole("status");
-    expect(aviso.textContent).toContain("O texto em Português mudou desde que esta versão foi escrita");
+    expect(aviso.textContent).toContain("O texto em português mudou desde que esta versão foi escrita");
     fireEvent.click(within(aviso).getByRole("button", { name: "Marcar como revisto" }));
     expect(p.onMarcarRevisto).toHaveBeenCalledWith("en");
   });

@@ -177,10 +177,30 @@ describe("pt + en", () => {
     expect(versao(container, "en")).toBeTruthy();
   });
 
-  it("um código sem dicionário no portal (es) tem título nativo e palavras em português", () => {
-    const { container } = renderDoc(singleQuote, { idiomasDoDocumento: ["pt", "es"] });
-    expect(within(versao(container, "es")!).getByRole("heading", { name: "Español" })).toBeTruthy();
-    expect(within(versao(container, "es")!).getAllByRole("columnheader").map((th) => th.textContent)).toContain("QTD");
+  it("um idioma sem dicionário de ecrã (es, fr) não se oferece: nunca texto de uma língua com palavras de outra", () => {
+    const comEs = {
+      ...configuradoComEn,
+      template: { ...modeloComEn, design_settings: { versions: { ...modeloComEn.design_settings.versions, es: { terms_conditions: "<p>Pago a 30 días</p>" } } } },
+    };
+    const soPt = renderDoc(comEs, { idiomasDoDocumento: ["pt"] }).container.innerHTML;
+    cleanup();
+    const ptEs = renderDoc(comEs, { idiomasDoDocumento: ["pt", "es"] });
+    expect(ptEs.container.innerHTML).toBe(soPt);
+    expect(texto(ptEs.container)).not.toContain("Pago a 30 días");
+    expect(ptEs.container.querySelector("[lang]")).toBeNull();
+    cleanup();
+    const tres = renderDoc(comEs, { idiomasDoDocumento: ["pt", "es", "en", "fr"] });
+    expect(Array.from(tres.container.querySelectorAll("[lang]")).map((e) => e.getAttribute("lang"))).toEqual(["pt", "en"]);
+  });
+
+  it("só idiomas sem dicionário de ecrã: vale o idioma de sempre (a prop idioma)", () => {
+    const en = renderDoc(singleQuote, { idioma: "en" }).container.innerHTML;
+    cleanup();
+    expect(renderDoc(singleQuote, { idioma: "en", idiomasDoDocumento: ["es"] }).container.innerHTML).toBe(en);
+    cleanup();
+    const pt = renderDoc(singleQuote).container.innerHTML;
+    cleanup();
+    expect(renderDoc(singleQuote, { idiomasDoDocumento: ["fr", "es"] }).container.innerHTML).toBe(pt);
   });
 
   it("códigos repetidos ou inválidos são ignorados", () => {

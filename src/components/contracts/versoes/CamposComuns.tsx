@@ -1,7 +1,6 @@
 import type { ReactNode } from "react";
-import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
-import { obterIdioma } from "@/lib/idiomaDocumento/registo";
+import { ID_NOTA_COMUM } from "./idsDeIdioma";
 
 /** Numa versão de idioma, o que identifica o idioma base (para a nota «comum a todos os idiomas»). */
 export interface VersaoEmEdicao {
@@ -14,7 +13,7 @@ export interface VersaoEmEdicao {
 }
 
 interface Props {
-  /** Em verdadeiro (versão de idioma): os campos ficam desativados com a nota. Em falso: não muda nada no DOM. */
+  /** Em verdadeiro (versão de idioma): os campos ficam desativados. Em falso: não muda nada no DOM. */
   versao?: VersaoEmEdicao;
   children: ReactNode;
   className?: string;
@@ -23,16 +22,17 @@ interface Props {
 /**
  * Cores, margens, logótipo e restantes opções são comuns a todos os idiomas: só se alteram no idioma base.
  * Fora de uma versão devolve os filhos tal e qual (sem elemento a mais); numa versão embrulha-os num
- * `fieldset` desativado (desativa todos os botões, interruptores e campos lá dentro) com a nota.
+ * `fieldset` desativado (desativa todos os botões, interruptores e campos lá dentro). A nota que explica
+ * porquê é UMA só, fora da zona esbatida (está no painel de layout); cada zona aponta para ela.
  */
 export function CamposComuns({ versao, children, className }: Props) {
-  const { t } = useTranslation();
   if (!versao) return <>{children}</>;
   return (
-    <fieldset disabled className={cn("pointer-events-none m-0 min-w-0 space-y-4 border-0 p-0 opacity-60", className)}>
-      <p className="text-[11px] italic text-muted-foreground">
-        {t("contractTemplates.versoes.comum.nota", { base: obterIdioma(versao.base)?.nomeNativo ?? versao.base })}
-      </p>
+    <fieldset
+      disabled
+      aria-describedby={ID_NOTA_COMUM}
+      className={cn("pointer-events-none m-0 min-w-0 space-y-4 border-0 p-0 opacity-60", className)}
+    >
       {children}
     </fieldset>
   );

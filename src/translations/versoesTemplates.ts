@@ -6,6 +6,7 @@
 export const versoesTemplatesTranslations: Record<string, Record<string, string>> = {
   en: {
     'contractTemplates.versoes.seletor.rotulo': 'Document language',
+    'contractTemplates.versoes.seletor.ultimo': 'At least one language must stay selected.',
 
     'contractTemplates.versoes.barra.rotulo': 'Template languages',
     'contractTemplates.versoes.barra.base': '(base)',
@@ -28,6 +29,7 @@ export const versoesTemplatesTranslations: Record<string, Record<string, string>
     'contractTemplates.versoes.remover.cancelar': 'Cancel',
 
     'contractTemplates.versoes.comum.nota': 'Common to all languages — change it in the {base} version.',
+    'contractTemplates.versoes.tabela.nota': 'The items table of this version has the settings it had when the version was created.',
     'contractTemplates.versoes.rodape.semTexto': 'No text in this language: the {base} text is used.',
     'contractTemplates.versoes.corpo.rotulo': 'Template text in {nome}',
 
@@ -57,6 +59,7 @@ export const versoesTemplatesTranslations: Record<string, Record<string, string>
   },
   pt: {
     'contractTemplates.versoes.seletor.rotulo': 'Idioma do documento',
+    'contractTemplates.versoes.seletor.ultimo': 'Tem de ficar pelo menos um idioma.',
 
     'contractTemplates.versoes.barra.rotulo': 'Idiomas da minuta',
     'contractTemplates.versoes.barra.base': '(base)',
@@ -79,6 +82,7 @@ export const versoesTemplatesTranslations: Record<string, Record<string, string>
     'contractTemplates.versoes.remover.cancelar': 'Cancelar',
 
     'contractTemplates.versoes.comum.nota': 'Comum a todos os idiomas — altere na versão em {base}.',
+    'contractTemplates.versoes.tabela.nota': 'A tabela de artigos desta versão tem a configuração do momento em que foi criada.',
     'contractTemplates.versoes.rodape.semTexto': 'Sem texto neste idioma: usa-se o texto em {base}.',
     'contractTemplates.versoes.corpo.rotulo': 'Texto da minuta em {nome}',
 

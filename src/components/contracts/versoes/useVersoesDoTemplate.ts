@@ -39,7 +39,12 @@ export function useVersoesDoTemplate<T extends FormularioComVersoes>(formData: T
   const [escolhido, setEscolhido] = useState<string | null>(null);
   const [adicionando, setAdicionando] = useState(false);
 
-  const estado = formData as unknown as EstadoMinuta;
+  // Só estes três campos do formulário contam: mudar o nome, o signatário… não recalcula nada daqui.
+  const { language, body_html, doc_settings } = formData;
+  const estado = useMemo<EstadoMinuta>(
+    () => ({ language, body_html, doc_settings: doc_settings as EstadoMinuta["doc_settings"] }),
+    [language, body_html, doc_settings],
+  );
   const base = idiomaBaseDoTemplate(estado);
   const versoes = useMemo(() => codigosDasVersoes(estado), [estado]);
   const ativo = escolhido && versoes.includes(escolhido) ? escolhido : base;
@@ -60,12 +65,12 @@ export function useVersoesDoTemplate<T extends FormularioComVersoes>(formData: T
   const campos = useMemo(() => camposDoIdioma(estado, ativo), [estado, ativo]);
 
   const preview = useMemo(() => {
-    if (ehBase) return { body_html: formData.body_html, doc_settings: formData.doc_settings as T["doc_settings"] };
+    if (ehBase) return { body_html, doc_settings: doc_settings as T["doc_settings"] };
     const resolvida = aplicarVersaoContrato(estado, ativo);
     if (resolvida !== estado) return { body_html: resolvida.body_html, doc_settings: resolvida.doc_settings as T["doc_settings"] };
     // Versão ainda sem texto: mostra-se vazia (e não o português), com o layout que se está a editar.
     return { body_html: campos.body_html, doc_settings: campos.settings as T["doc_settings"] };
-  }, [ehBase, estado, ativo, campos, formData.body_html, formData.doc_settings]);
+  }, [ehBase, estado, ativo, campos, body_html, doc_settings]);
 
   const completudes = useMemo(() => {
     const out: Record<string, ResumoDaVersao> = {};

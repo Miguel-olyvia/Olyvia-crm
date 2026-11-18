@@ -77,12 +77,12 @@ describe("ListaDeVerificacao", () => {
 
   it("remover a versão pede confirmação", () => {
     const props = montar();
-    fireEvent.click(screen.getByRole("button", { name: "Remover a versão English" }));
-    const dialogo = screen.getByRole("alertdialog", { name: "Remover a versão English?" });
+    fireEvent.click(screen.getByRole("button", { name: "Remover a versão inglês" }));
+    const dialogo = screen.getByRole("alertdialog", { name: "Remover a versão inglês?" });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Manter" }));
     expect(props.onRemover).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole("button", { name: "Remover a versão English" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remover a versão inglês" }));
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remover" }));
     expect(props.onRemover).toHaveBeenCalledWith("en");
   });

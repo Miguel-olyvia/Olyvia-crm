@@ -58,6 +58,8 @@ export const TABLE_UNDERSCORE_BLOCK = `<table style="width:100%;"><tr>
 /** O bloco plano antigo: uma só etiqueta com as duas partes, precedida de linhas de underscores. */
 export const FLAT_BLOCK = `<p>Lisboa, 13 de Março de 2026</p><p>_______________________</p><p>_______________________</p><p>A PRIMEIRA CONTRATANTE&nbsp;&nbsp;&nbsp;&nbsp;O SEGUNDO CONTRATANTE</p>`;
 
+export const TEXTO_INGLES_SOLTO = `<p>Lisboa</p><p>The Client signs here</p><p>The Company shall provide the Services to the Client.</p>`;
+
 export const SEM_BLOCO = `<h2>CONTRATO</h2><p>O CLIENTE obriga-se a pagar o preço acordado no prazo estabelecido na proposta, sem prejuízo do disposto na cláusula anterior e demais legislação aplicável ao presente contrato.</p>`;
 
 const EMPRESA_ASSINOU = { signed: true, name: "Ricardo Belchior", showOtpBadge: false } as const;
@@ -281,6 +283,12 @@ export const CENARIOS: Record<string, Cenario> = {
   "signatario.bloco-real": (i) => assinarSignatario(REAL_BLOCK, "Ricardo Belchior", "Gerente", i),
 
   "ganchos.todos": (i) => JSON.stringify(HTML_DOS_GANCHOS.map((h) => gancho(h, i))),
+
+  // Texto em inglês solto num contrato em português: o português de hoje não o vê (esperado = o original).
+  "assinaturas.pt-com-texto-ingles": (i) => assinar(TEXTO_INGLES_SOLTO, EMPRESA_ASSINOU, CLIENTE_ASSINOU, i),
+  "assinaturas.pt-bloco-com-texto-ingles": (i) => assinar(`<p>THE COMPANY and THE CLIENT agree.</p>${REAL_BLOCK}`, EMPRESA_ASSINOU, CLIENTE_ASSINOU, i),
+  "signatario.pt-texto-ingles": (i) => assinarSignatario("<p>THE FIRST PARTY and THE SECOND PARTY</p>", "Ricardo Belchior", "Gerente", i),
+  "ganchos.texto-ingles": (i) => JSON.stringify(["<p>The Client signs here</p>", "<p>the client</p>", "<p>THE SECOND PARTY</p>"].map((h) => gancho(h, i))),
 
   ...Object.fromEntries(
     NOMES_RESOLVIDO.map((nome) => [`resolver.${nome}`, async () => textoDoResolvido(await resolvido(nome))]),

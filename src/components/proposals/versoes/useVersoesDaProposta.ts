@@ -33,6 +33,8 @@ function objetoDe(valor: unknown): Record<string, unknown> {
 export function useVersoesDaProposta<C extends ConfigComTextos>(config: C) {
   const [versoes, setVersoes] = useState<Versoes>({});
   const [escolhido, setEscolhido] = useState<string>(IDIOMA_BASE);
+  // Sobe quando adicionar/remover desmontam o controlo que tinha o foco; a barra de idiomas põe-no na aba ativa.
+  const [pedidoFoco, setPedidoFoco] = useState(0);
 
   // Se a versão aberta deixar de existir (remover, recarregar), cai para o português.
   const idiomaAtivo = escolhido !== IDIOMA_BASE && typeof versoes[escolhido] === "object" && versoes[escolhido] !== null ? escolhido : IDIOMA_BASE;
@@ -57,11 +59,15 @@ export function useVersoesDaProposta<C extends ConfigComTextos>(config: C) {
       if (!c) return;
       setVersoes((prev) => adicionarVersao(prev, c, config, { copiarPortugues }));
       setEscolhido(c);
+      setPedidoFoco((n) => n + 1);
     },
     [config],
   );
 
-  const remover = useCallback((codigo: string) => setVersoes((prev) => removerVersao(prev, codigo)), []);
+  const remover = useCallback((codigo: string) => {
+    setVersoes((prev) => removerVersao(prev, codigo));
+    setPedidoFoco((n) => n + 1);
+  }, []);
 
   const escreverTexto = useCallback(
     (campo: string, valor: string) => {
@@ -103,6 +109,7 @@ export function useVersoesDaProposta<C extends ConfigComTextos>(config: C) {
     campos,
     configVisivel,
     livres,
+    pedidoFoco,
     carregar,
     escolher,
     adicionar,

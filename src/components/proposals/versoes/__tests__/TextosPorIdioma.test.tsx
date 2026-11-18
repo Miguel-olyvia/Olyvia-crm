@@ -158,13 +158,13 @@ describe("ConteudoPorIdioma", () => {
 
   it("o corpo do email (HTML) vazio de texto grava-se como vazio", () => {
     const onEscrever = montar();
-    fireEvent.change(screen.getByLabelText("Corpo do email (English)"), { target: { value: "<p></p>" } });
+    fireEvent.change(screen.getByLabelText("Corpo do email (inglês)"), { target: { value: "<p></p>" } });
     expect(onEscrever).toHaveBeenCalledWith("email_body", "");
   });
 
   it("o corpo do email com texto passa tal e qual", () => {
     const onEscrever = montar();
-    fireEvent.change(screen.getByLabelText("Corpo do email (English)"), { target: { value: "<p>Hello</p>" } });
+    fireEvent.change(screen.getByLabelText("Corpo do email (inglês)"), { target: { value: "<p>Hello</p>" } });
     expect(onEscrever).toHaveBeenCalledWith("email_body", "<p>Hello</p>");
   });
 

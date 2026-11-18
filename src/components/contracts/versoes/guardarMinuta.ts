@@ -35,7 +35,8 @@ export function payloadDeCriar(data: FormularioDaMinuta, organizationId: string 
     signatory_user_id: data.signatory_user_id,
     signatory_role_id: data.signatory_role_id,
     doc_settings: data.doc_settings,
-    language: data.language || IDIOMA_BASE,
+    // Em português (ou sem idioma) o insert é o de sempre: a base põe 'pt' por omissão.
+    ...(data.language && data.language !== IDIOMA_BASE ? { language: data.language } : {}),
   };
 }
 

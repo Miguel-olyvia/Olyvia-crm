@@ -19,6 +19,9 @@ import { ManualTablesSection } from "./ManualTablesSection";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { tDoc } from "@/lib/idiomaDocumento/dicionario";
 import { CamposComuns, type VersaoEmEdicao } from "./versoes/CamposComuns";
+import { ID_NOTA_COMUM } from "./versoes/idsDeIdioma";
+import { useNomeParaFrase } from "./versoes/nomeParaFrase";
+import { useTranslation } from "@/hooks/useTranslation";
 
 export type TemplateDocSettings = Partial<DocumentSettings> & {
   show_quote_items?: boolean;
@@ -61,6 +64,8 @@ const COLUMN_LABELS: Record<QuoteItemsColumnKey, string> = {
 };
 
 export function TemplateDocSettingsPanel({ orgName, value, onChange, bodyHtml, onBodyHtmlChange, versao }: Props) {
+  const { t } = useTranslation();
+  const nomeParaFrase = useNomeParaFrase();
   const merged = {
     logo_url: null,
     primary_color: "#7C3AED",
@@ -122,6 +127,11 @@ export function TemplateDocSettingsPanel({ orgName, value, onChange, bodyHtml, o
   return (
     <ScrollArea className="h-full">
       <div className="space-y-5 p-4">
+        {versao && (
+          <p id={ID_NOTA_COMUM} className="text-xs italic text-muted-foreground">
+            {t("contractTemplates.versoes.comum.nota", { base: nomeParaFrase(versao.base) })}
+          </p>
+        )}
         <CamposComuns versao={versao}>
           <StylePresetsSelector onSelect={handleChange} currentSettings={merged} />
         </CamposComuns>
@@ -148,6 +158,7 @@ export function TemplateDocSettingsPanel({ orgName, value, onChange, bodyHtml, o
             />
           </div>
           </CamposComuns>
+          {versao && <p className="text-[11px] text-muted-foreground">{t("contractTemplates.versoes.tabela.nota")}</p>}
           {value.show_quote_items && (
             <div className="space-y-4 pl-2 border-l-2 border-muted">
               <div className="space-y-1">

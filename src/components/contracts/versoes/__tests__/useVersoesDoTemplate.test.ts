@@ -196,6 +196,24 @@ describe("com uma versão ativa", () => {
   });
 });
 
+describe("memos só dependem do que importa", () => {
+  it("mudar um campo que não é corpo, doc_settings nem language não recalcula o que o hook devolve", () => {
+    const r = renderHook(() => {
+      const [formData, setFormData] = useState<Form>(inicial());
+      return { setFormData, v: useVersoesDoTemplate(formData, setFormData) };
+    });
+    act(() => r.result.current.v.adicionar("en", true));
+    const antes = r.result.current.v;
+    act(() => r.result.current.setFormData((fd) => ({ ...fd, name: "Outro nome" })));
+    const depois = r.result.current.v;
+    expect(depois.completudes).toBe(antes.completudes);
+    expect(depois.linhas).toBe(antes.linhas);
+    expect(depois.preview).toBe(antes.preview);
+    expect(depois.versoes).toBe(antes.versoes);
+    expect(depois.faltamAdicionar).toBe(antes.faltamAdicionar);
+  });
+});
+
 describe("texto base noutro idioma", () => {
   it("com language=en o base é o inglês e o português passa a ser uma versão possível", () => {
     const { result } = montar(inicial({ language: "en" }));

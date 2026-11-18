@@ -93,4 +93,24 @@ describe("useVersoesDaProposta", () => {
     act(() => result.current.marcarAtualizada());
     expect(result.current.resumoAtivo?.desatualizado).toBe(false);
   });
+
+  it("pede foco para a barra depois de adicionar e depois de remover uma versão", () => {
+    const { result } = renderHook(() => useVersoesDaProposta(config()));
+    expect(result.current.pedidoFoco).toBe(0);
+    act(() => result.current.adicionar("en", false));
+    expect(result.current.pedidoFoco).toBe(1);
+    act(() => result.current.remover("en"));
+    expect(result.current.pedidoFoco).toBe(2);
+  });
+
+  it("escolher, escrever e carregar não pedem foco", () => {
+    const { result } = renderHook(() => useVersoesDaProposta(config()));
+    act(() => result.current.adicionar("en", false));
+    act(() => result.current.escolher("pt"));
+    act(() => result.current.escolher("en"));
+    act(() => result.current.escreverTexto("footer_text", "x"));
+    act(() => result.current.carregar({}));
+    expect(result.current.pedidoFoco).toBe(1);
+  });
 });
+

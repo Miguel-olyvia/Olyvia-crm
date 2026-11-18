@@ -1,11 +1,11 @@
-import { useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { AlertTriangle, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { IDIOMA_BASE, obterIdioma } from "@/lib/idiomaDocumento";
 import { useTranslation } from "@/hooks/useTranslation";
 import { AdicionarIdiomaDialog } from "./AdicionarIdiomaDialog";
-import { idDaAba, type ResumoDeIdioma } from "./modeloVersoes";
+import { ID_DIALOGO_ADICIONAR_IDIOMA, idDaAba, type ResumoDeIdioma } from "./modeloVersoes";
 
 interface BarraDeIdiomasProps {
   /** Um item por idioma não base. Vazio: só aparece o botão de adicionar. */
@@ -17,14 +17,31 @@ interface BarraDeIdiomasProps {
   idPainel: string;
   onEscolher: (codigo: string) => void;
   onAdicionar: (codigo: string, copiarPortugues: boolean) => void;
+  /**
+   * Sobe quando adicionar ou remover uma versão desmonta o controlo que tinha o foco: a barra põe-no na
+   * aba ativa (ou no botão de adicionar, se já não houver abas).
+   */
+  pedidoFoco?: number;
 }
 
 const ABA = "inline-flex min-h-11 items-center gap-1.5 rounded-md border px-3 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background";
 
-export function BarraDeIdiomas({ resumo, idiomaAtivo, livres, idPainel, onEscolher, onAdicionar }: BarraDeIdiomasProps) {
+export function BarraDeIdiomas({ resumo, idiomaAtivo, livres, idPainel, onEscolher, onAdicionar, pedidoFoco = 0 }: BarraDeIdiomasProps) {
   const { t } = useTranslation();
   const [dialogoAberto, setDialogoAberto] = useState(false);
   const abas = useRef<Record<string, HTMLButtonElement | null>>({});
+  const botaoAdicionar = useRef<HTMLButtonElement>(null);
+  const ativoRef = useRef(idiomaAtivo);
+  ativoRef.current = idiomaAtivo;
+  const pedidoAnterior = useRef(pedidoFoco);
+
+  // setTimeout 0: corre depois de o Radix devolver o foco ao fechar os diálogos, que também usa um timeout.
+  useEffect(() => {
+    if (pedidoAnterior.current === pedidoFoco) return;
+    pedidoAnterior.current = pedidoFoco;
+    const timer = setTimeout(() => (abas.current[ativoRef.current] ?? botaoAdicionar.current)?.focus(), 0);
+    return () => clearTimeout(timer);
+  }, [pedidoFoco]);
   const codigos = [IDIOMA_BASE, ...resumo.map((r) => r.codigo)];
 
   const mover = (de: string, evento: KeyboardEvent<HTMLButtonElement>) => {
@@ -43,6 +60,11 @@ export function BarraDeIdiomas({ resumo, idiomaAtivo, livres, idPainel, onEscolh
 
   const aba = (codigo: string, texto: string, item?: ResumoDeIdioma) => {
     const ativa = codigo === idiomaAtivo;
+    // O nome acessível contém o texto visível e acrescenta o idioma por extenso (e o aviso, que é só visual).
+    const nomeAcessivel = [
+      `${texto}, ${obterIdioma(codigo)?.nomeNativo ?? codigo}`,
+      item?.desatualizado ? t("proposalTemplateEditor.versions.outdatedFlag") : null,
+    ].filter(Boolean).join(" · ");
     return (
       <button
         key={codigo}
@@ -53,6 +75,7 @@ export function BarraDeIdiomas({ resumo, idiomaAtivo, livres, idPainel, onEscolh
         aria-selected={ativa}
         aria-controls={idPainel}
         tabIndex={ativa ? 0 : -1}
+        aria-label={nomeAcessivel}
         title={obterIdioma(codigo)?.nomeNativo}
         onClick={() => onEscolher(codigo)}
         onKeyDown={(e) => mover(codigo, e)}
@@ -62,12 +85,7 @@ export function BarraDeIdiomas({ resumo, idiomaAtivo, livres, idPainel, onEscolh
         )}
       >
         {texto}
-        {item?.desatualizado && (
-          <>
-            <AlertTriangle className="h-3.5 w-3.5 text-amber-700 dark:text-amber-300" aria-hidden="true" />
-            <span className="sr-only"> · {t("proposalTemplateEditor.versions.outdatedFlag")}</span>
-          </>
-        )}
+        {item?.desatualizado && <AlertTriangle className="h-3.5 w-3.5 text-amber-700 dark:text-amber-300" aria-hidden="true" />}
       </button>
     );
   };
@@ -88,11 +106,21 @@ export function BarraDeIdiomas({ resumo, idiomaAtivo, livres, idPainel, onEscolh
       )}
       {livres.length > 0 && (
         <>
-          <Button type="button" variant="ghost" size="sm" className="min-h-11 min-w-11" onClick={() => setDialogoAberto(true)}>
+          <Button
+            ref={botaoAdicionar}
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="min-h-11 min-w-11"
+            aria-haspopup="dialog"
+            aria-expanded={dialogoAberto}
+            aria-controls={ID_DIALOGO_ADICIONAR_IDIOMA}
+            onClick={() => setDialogoAberto(true)}
+          >
             <Plus className="mr-1 h-4 w-4" aria-hidden="true" />
             {t("proposalTemplateEditor.versions.addLanguage")}
           </Button>
-          <AdicionarIdiomaDialog open={dialogoAberto} onOpenChange={setDialogoAberto} livres={livres} onConfirmar={onAdicionar} />
+          <AdicionarIdiomaDialog open={dialogoAberto} onOpenChange={setDialogoAberto} livres={livres} onConfirmar={onAdicionar} onCancelado={() => botaoAdicionar.current?.focus()} />
         </>
       )}
     </div>

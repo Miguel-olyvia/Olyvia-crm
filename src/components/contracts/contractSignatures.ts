@@ -1,20 +1,21 @@
 // Assinaturas do corpo de um contrato: o signatário escolhido na minuta, o gancho que o mostra e o ESTADO REAL
 // de assinatura (empresa + cliente) injetado no bloco. Ciente do idioma: a deteção do bloco (marcas por classe,
-// frases de cada idioma, heurística de sempre) está em contractSignatureBlock.ts e o carimbo escreve as palavras
+// frases do idioma e do base, heurística de sempre) é uma só, em src/lib/idiomaDocumento/assinaturas.ts
+// (localizarAssinaturas), e o carimbo escreve as palavras
 // no idioma da versão (ou nos dois, quando o documento sai em vários e a assinatura é uma só). A data do
 // carimbo mantém o formato de sempre, no idioma (primeiro) do carimbo; o português é exatamente o de antes.
 
-import { IDIOMA_BASE, localeDoIdioma, ordenarPorRegisto, tDoc } from "@/lib/idiomaDocumento";
 import {
-  CLASSE_EMPRESA,
-  frasesPorOrdem,
-  isLineElement,
+  IDIOMA_BASE,
+  idiomasDeDeteccao,
   isDecorativeLine,
+  isLineElement,
+  localeDoIdioma,
   localizarAssinaturas,
-  localizarBlocoGenerico,
-  rotulosDasPartes,
-  temMarcaDeAssinatura,
-} from "./contractSignatureBlock";
+  ordenarPorRegisto,
+  tDoc,
+} from "@/lib/idiomaDocumento";
+import { localizarBlocoGenerico, rotulosDasPartes, temMarcaDeAssinatura } from "./contractSignatureBlock";
 
 const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
@@ -73,7 +74,8 @@ export function injectSignatoryIntoSignatureBlock(
   template.innerHTML = html;
 
   // Coluna da empresa marcada: o nome e o cargo entram por baixo da linha, sem refazer o bloco.
-  const empresaMarcada = template.content.querySelector(`.${CLASSE_EMPRESA}`);
+  const marcada = localizarAssinaturas(template.content, { soMarcas: true });
+  const empresaMarcada = marcada?.tipo === "colunas" ? marcada.empresa : null;
   if (empresaMarcada) {
     if ((empresaMarcada.textContent || "").includes(name)) return html;
     const nome = `<div><strong>${esc(name)}</strong>${cargo ? `<br/><span style="color:#6b7280;font-size:0.92em;">${esc(cargo)}</span>` : ""}</div>`;
@@ -120,14 +122,15 @@ export const SIGNATORY_BLOCK_MARKER_HTML =
 /**
  * Devolve true se o `body_html` já contém um gancho que mostra o signatário:
  * marcador determinístico, chip {{signatario_nome}}, as marcas por classe do bloco de assinatura, ou a
- * frase do cliente reconhecida pela heurística (a do `idioma` primeiro, depois as dos outros idiomas).
+ * frase do cliente reconhecida pela heurística: só a do `idioma` e a do base (sem idioma, só a portuguesa de
+ * hoje); outros idiomas só se vierem em `idiomas`.
  */
-export function hasSignatoryHook(html: string | null | undefined, idioma?: string): boolean {
+export function hasSignatoryHook(html: string | null | undefined, idioma?: string, idiomas?: readonly string[]): boolean {
   if (!html) return false;
   if (/data-signatory-block\s*=\s*"primary"/i.test(html)) return true;
   if (/\{\{\s*signatario_nome\s*\}\}/i.test(html)) return true;
   if (temMarcaDeAssinatura(html)) return true;
-  return frasesPorOrdem(idioma).some(({ frases }) => frases.segundaParte.test(html));
+  return idiomasDeDeteccao(idioma, idiomas).some(({ frases }) => frases.segundaParte.test(html));
 }
 
 export interface PartySignatureInfo {
@@ -229,7 +232,7 @@ export function injectSignaturesIntoBlock(
 
   const template = document.createElement("template");
   template.innerHTML = html;
-  const alvo = localizarAssinaturas(template.content, idioma);
+  const alvo = localizarAssinaturas(template.content, { idioma, idiomas: idiomasDoCarimboPedidos });
   if (!alvo) return html;
 
   // Colunas marcadas por classe, ou as duas colunas achadas pelas frases: o carimbo vai colado à linha de cada uma.

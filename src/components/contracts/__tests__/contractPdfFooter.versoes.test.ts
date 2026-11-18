@@ -214,7 +214,14 @@ describe("prepararHtmlParaPdf", () => {
     expect(saida.startsWith("<!doctype html>")).toBe(true);
   });
 
-  it("não deixa wrappers olv-versao no documento do PDF", () => {
-    expect(prepararHtmlParaPdf(HTML)).not.toContain("olv-versao");
+  it("não deixa wrappers olv-versao no documento do PDF (o fixture TEM wrappers)", () => {
+    const comWrappers = HTML.replace(
+      '<div class="content"><p>Versão en</p></div>',
+      '<div class="content"><div class="olv-versao olv-versao-en"><p>Versão en</p></div></div>',
+    );
+    expect(comWrappers).toContain("olv-versao-en");
+    const saida = prepararHtmlParaPdf(comWrappers);
+    expect(saida).not.toContain("olv-versao");
+    expect(saida).toContain("Versão en");
   });
 });

@@ -2,9 +2,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RichTextEditor } from "@/components/RichTextEditor";
-import { obterIdioma } from "@/lib/idiomaDocumento";
 import { textoSimples } from "@/lib/idiomaDocumento/texto";
 import { useTranslation } from "@/hooks/useTranslation";
+import { nomeNaFrase } from "./nomeNaFrase";
 
 /** O português do template (o que o editor tem em `config`), só o que este separador lê. */
 export interface BaseDoConteudo {
@@ -50,7 +50,7 @@ function CampoDeTexto({ campo, tipo, linhas, codigo, base, valor, onEscrever }: 
   onEscrever: (campo: string, valor: string) => void;
 }) {
   const { t } = useTranslation();
-  const idioma = obterIdioma(codigo)?.nomeNativo ?? codigo;
+  const idioma = nomeNaFrase(t, codigo);
   const rotulo = t(`proposalTemplateEditor.versions.field.${campo}`);
   const id = `versao-${campo}`;
   const ajuda = `${id}-pt`;
@@ -65,7 +65,9 @@ function CampoDeTexto({ campo, tipo, linhas, codigo, base, valor, onEscrever }: 
       </p>
       {tipo === "html" ? (
         <div role="group" aria-labelledby={`${id}-rotulo`} aria-describedby={ajuda}>
+          {/* key por idioma: remonta ao trocar, para a flag interna do editor não engolir o texto do idioma novo */}
           <RichTextEditor
+            key={codigo}
             value={valor}
             onChange={(v) => onEscrever(campo, htmlVazio(v) ? "" : v)}
             placeholder={`${rotulo} (${idioma})`}

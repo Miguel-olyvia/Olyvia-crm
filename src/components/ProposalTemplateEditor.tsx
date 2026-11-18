@@ -1134,6 +1134,7 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
               idPainel={idPainelIdioma}
               onEscolher={versoesDoc.escolher}
               onAdicionar={versoesDoc.adicionar}
+              pedidoFoco={versoesDoc.pedidoFoco}
             />
           </div>
           <div className="flex items-center gap-2">
@@ -1172,11 +1173,14 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
                 </Button>
               ))}
             </div>
-            <Button variant="outline" size="sm" onClick={resetToDefaults} disabled={!versoesDoc.ehBase}>
+            {!versoesDoc.ehBase && (
+              <span id="razao-reset-idioma" className="sr-only">{t("proposalTemplateEditor.versions.resetDisabledReason")}</span>
+            )}
+            <Button variant="outline" size="sm" onClick={resetToDefaults} disabled={!versoesDoc.ehBase} aria-describedby={versoesDoc.ehBase ? undefined : "razao-reset-idioma"}>
               <RotateCcw className="h-4 w-4 mr-1" />
               Reset
             </Button>
-            <Button variant="outline" size="sm" onClick={applyQuotePdfTemplate} disabled={!versoesDoc.ehBase}>
+            <Button variant="outline" size="sm" onClick={applyQuotePdfTemplate} disabled={!versoesDoc.ehBase} aria-describedby={versoesDoc.ehBase ? undefined : "razao-reset-idioma"}>
               Usar layout Orçamento
             </Button>
             <Button onClick={handleSave} disabled={saving || loadFailed} title={loadFailed ? "Carregamento do template falhou — gravação bloqueada" : undefined}>
