@@ -100,7 +100,10 @@ Regras:
    Se o ecrã diz «Sem permissão», está vazio ou não tem o que se pede, pára ("continuar": false) e diz isso em 'resposta'.
 11. «Abre o negócio X» é "abrir_negocio" (com 'fase' se a disser), mesmo que se veja um cartão da obra com o mesmo nome: a obra e o
    negócio são páginas diferentes, e os passos (Proposta, Contrato, …) só existem dentro do negócio. "passo" só com passos na lista.
-   Em 'resposta' nunca digas que fizeste o que ainda não está feito: num passo intermédio deixa-a vazia.`;
+   Em 'resposta' nunca digas que fizeste o que ainda não está feito: num passo intermédio deixa-a vazia.
+12. Os passos da lista são só os da FASE aberta do negócio. Um passo de outra fase (por exemplo, a Proposta é da fase Negócio)
+   pede primeiro a fase: carrega no botão dessa fase (a barra das fases no topo do negócio) com
+   "continuar": true, e no ecrã seguinte vai ao passo.`;
 
 const ESQUEMA = {
   type: "OBJECT",
@@ -159,6 +162,15 @@ export function ecraParaTexto(p: Pedido): string {
 }
 
 /** Só passa o que existe no ecrã: um número fora da lista ou uma página inventada não chega ao browser. */
+/** Escreveu numa caixa que tem, na mesma zona, um botão ainda inativo (o «Enviar» da conversa). */
+export function esperaBotao(acoes: AcaoIa[], p: Pedido): boolean {
+  return acoes.some((a) => {
+    if (a.tipo !== "escrever" || a.elemento == null) return false;
+    const zona = p.elementos[a.elemento]?.zona;
+    return !!zona && p.elementos.some((e) => e.tipo === "botao" && e.zona === zona && (e.estado ?? "").includes("inativo"));
+  });
+}
+
 export function acoesValidas(acoes: AcaoIa[], p: Pedido): AcaoIa[] {
   const { campos, elementos, destinos } = p;
   return (acoes ?? []).filter((a) => {
@@ -207,8 +219,12 @@ serve(async (req) => {
       const r = await gerarJson<{ acoes: AcaoIa[]; resposta: string; continuar?: boolean }>({ modelo: MODELO, partes: [{ text: ecraParaTexto(p) }], esquema: ESQUEMA, instrucaoSistema: INSTRUCAO });
       const acoes = acoesValidas(r.acoes, p);
       // se nada do que a IA quis fazer é possível, não se diz que se fez
-      const resposta = (r.acoes ?? []).length > 0 && acoes.length === 0 ? "Isso não consigo fazer a partir deste ecrã." : r.resposta ?? "";
-      return json({ acoes, resposta, continuar: !!r.continuar && acoes.length > 0, motor: `gemini:${MODELO}` });
+      let resposta = (r.acoes ?? []).length > 0 && acoes.length === 0 ? "Isso não consigo fazer a partir deste ecrã." : r.resposta ?? "";
+      let continuar = !!r.continuar && acoes.length > 0;
+      // 18/11 (testarh): escreveu a mensagem e disse «Enviei» sem carregar. Se ao lado da caixa há um botão que só acende depois de
+      // escrever, segue-se sempre para o ecrã seguinte (aí a IA carrega, ou pára se só se pediu para escrever), e não se diz que se fez.
+      if (!continuar && esperaBotao(acoes, p)) { continuar = true; resposta = ""; }
+      return json({ acoes, resposta, continuar, motor: `gemini:${MODELO}` });
     } catch (e) {
       if (e instanceof ErroGemini && (e.status === 429 || e.status >= 500)) return json({ error: "Gemini indisponível", retry: true }, 503);
       throw e;

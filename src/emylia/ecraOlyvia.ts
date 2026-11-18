@@ -78,11 +78,13 @@ function tipoDe(el: HTMLElement): TipoElemento | null {
 
 function estadoDe(el: HTMLElement): string | undefined {
   const marcado = el instanceof HTMLInputElement && (el.type === "checkbox" || el.type === "radio") ? el.checked
-    : el.getAttribute("aria-checked") === "true" || el.getAttribute("aria-pressed") === "true" ? true
-      : el.getAttribute("aria-checked") === "false" || el.getAttribute("aria-pressed") === "false" ? false : null;
+    : el.getAttribute("aria-checked") === "true" ? true : el.getAttribute("aria-checked") === "false" ? false : null;
   const e: string[] = [];
   if (marcado === true) e.push("ligado"); else if (marcado === false) e.push("desligado");
-  if (el.getAttribute("aria-selected") === "true" || el.getAttribute("data-state") === "active") e.push("escolhido");
+  // 18/11: um botão de escolher (aria-pressed: as fases do negócio, os chips) não é um interruptor: «desligado» fazia a IA julgá-lo morto
+  const premido = el.getAttribute("aria-pressed");
+  if (el.getAttribute("aria-selected") === "true" || el.getAttribute("data-state") === "active" || premido === "true") e.push("escolhido");
+  else if (premido === "false") e.push("não escolhido");
   if (el.getAttribute("aria-expanded") === "true") e.push("aberto");
   if (el.getAttribute("aria-current") && el.getAttribute("aria-current") !== "false") e.push("atual");
   // 18/11: o «Enviar» da conversa só acende depois de escrever; a IA tem de saber que existe

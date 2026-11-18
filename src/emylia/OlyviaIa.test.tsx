@@ -77,6 +77,10 @@ describe("o ecrã para a IA", () => {
     expect(e.texto).toMatch(/Carlos Mendes/);
     expect(e.texto).not.toMatch(/Olyvia/);
   });
+  it("as fases do negócio (aria-pressed) vão como escolhido / não escolhido, não como desligadas", () => {
+    document.body.innerHTML = `<nav><button aria-pressed="false">Negócio</button><button aria-pressed="true">Obra</button></nav><button role="switch" aria-checked="false">Som</button>`;
+    expect(lerEcra().elementos.map((x) => `${x.texto}:${x.estado}`)).toEqual(["Negócio:não escolhido", "Obra:escolhido", "Som:desligado"]);
+  });
   it("o que não se desfaz", () => {
     for (const n of ["Enviar proposta", "Apagar", "Assinar contrato", "Registar fatura", "Marcar como perdido"]) expect(eIrreversivel(n)).toBe(true);
     for (const n of ["Abrir", "Proposta", "Guardar rascunho", "Próximo passo", "Ver mais"]) expect(eIrreversivel(n)).toBe(false);
