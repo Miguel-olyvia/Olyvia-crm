@@ -4,6 +4,7 @@ import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
 import { substituteVariables, type ContractVariableData } from "@/utils/contractVariables";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { renderContractHeaderHtml } from "./contractHeader";
+import { tDoc } from "@/lib/idiomaDocumento/dicionario";
 import {
   buildItemsTableModel,
   type ItemsTableLine,
@@ -856,7 +857,8 @@ function buildQuoteItemsHtml(
     showBundles?: boolean;
     showManual?: boolean;
     showBundleComponents?: boolean;
-  }
+  },
+  idioma: string = "pt",
 ): string {
   const {
     title, showQuantity, showUnit, showPrice, showTotal, primaryColor, columnOrder, colors,
@@ -899,10 +901,14 @@ function buildQuoteItemsHtml(
     primaryColor,
     columnOrder,
     colors,
-  });
+  }, idioma);
 }
 
-function renderItemsTableModelHtml(
+/**
+ * `idioma` (omissão "pt", código aberto) muda só as palavras (cabeçalhos, «Orçamento», «Subtotal», «Total»,
+ * «Ref.»). O formato do dinheiro (`fmt`) é o mesmo em qualquer idioma.
+ */
+export function renderItemsTableModelHtml(
   model: ItemsTableModel,
   opts: {
     title: string;
@@ -914,17 +920,18 @@ function renderItemsTableModelHtml(
     columnOrder?: QuoteItemsColumnKey[];
     colors: RenderColorOpts;
   },
+  idioma: string = "pt",
 ): string {
   const { title, showQuantity, showUnit, showPrice, showTotal, primaryColor, columnOrder, colors } = opts;
   const { headerBg, headerColor, borderColor, zebra, zebraColor } = colors;
   const fmt = (n: number) => `€${(Math.round(n * 100) / 100).toFixed(2).replace(".", ",")}`;
 
   const colByKey: Record<QuoteItemsColumnKey, { key: string; label: string; show: boolean; align: "left" | "center" | "right" }> = {
-    description: { key: "description", label: "Descrição",  show: true,         align: "left" },
-    quantity:    { key: "quantity",    label: "Qtd",        show: showQuantity, align: "center" },
-    unit:        { key: "unit",        label: "Un.",        show: showUnit,     align: "center" },
-    price:       { key: "unit_price",  label: "Preço Unit.",show: showPrice,    align: "right" },
-    total:       { key: "line_total",  label: "Total",      show: showTotal,    align: "right" },
+    description: { key: "description", label: tDoc(idioma, "doc.tabela.descricao"),  show: true,         align: "left" },
+    quantity:    { key: "quantity",    label: tDoc(idioma, "doc.tabela.qtd"),        show: showQuantity, align: "center" },
+    unit:        { key: "unit",        label: tDoc(idioma, "doc.tabela.un"),         show: showUnit,     align: "center" },
+    price:       { key: "unit_price",  label: tDoc(idioma, "doc.tabela.precoUnit"),  show: showPrice,    align: "right" },
+    total:       { key: "line_total",  label: tDoc(idioma, "doc.tabela.total"),      show: showTotal,    align: "right" },
   };
   const order = normalizeOrder(columnOrder);
   const baseCols = order.map(k => colByKey[k]);
@@ -975,12 +982,12 @@ function renderItemsTableModelHtml(
     const blocks = model.groups.map(group => {
       const body = group.lines.map((l, i) => renderLineRow(l, i)).join("");
       return `<div style="margin:12px 0;">
-      <h4 style="margin:0 0 6px;font-size:14px;color:${primaryColor};">Orçamento ${escapeHtml(group.quoteNumber)}</h4>
+      <h4 style="margin:0 0 6px;font-size:14px;color:${primaryColor};">${tDoc(idioma, "doc.tabela.orcamento")} ${escapeHtml(group.quoteNumber)}</h4>
       <table style="width:100%;border-collapse:collapse;">
         <thead><tr>${head}</tr></thead>
         <tbody>${body}</tbody>
         <tfoot><tr>
-          <td colspan="${baseCols.filter(c => c.show).length - 1}" style="border:1px solid ${borderColor};padding:8px;text-align:right;color:#111827;font-weight:600;">Subtotal</td>
+          <td colspan="${baseCols.filter(c => c.show).length - 1}" style="border:1px solid ${borderColor};padding:8px;text-align:right;color:#111827;font-weight:600;">${tDoc(idioma, "doc.tabela.subtotal")}</td>
           <td style="border:1px solid ${borderColor};padding:8px;text-align:right;color:#111827;font-weight:600;">${fmt(group.subtotal)}</td>
         </tr></tfoot>
       </table>
@@ -989,12 +996,12 @@ function renderItemsTableModelHtml(
     return `<div style="margin:16px 0;">
     ${titleHtml}
     ${blocks}
-    <div style="margin-top:8px;text-align:right;font-weight:700;color:${primaryColor};">Total: ${fmt(model.grand_total)}</div>
+    <div style="margin-top:8px;text-align:right;font-weight:700;color:${primaryColor};">${tDoc(idioma, "doc.tabela.total")}: ${fmt(model.grand_total)}</div>
   </div>`;
   }
 
   const showRef = model.show_quote_ref;
-  const refHead = showRef ? `<th style="border:1px solid ${borderColor};padding:8px;text-align:left;color:${headerColor};background:${headerBg};">Ref.</th>` : "";
+  const refHead = showRef ? `<th style="border:1px solid ${borderColor};padding:8px;text-align:left;color:${headerColor};background:${headerBg};">${tDoc(idioma, "doc.tabela.ref")}</th>` : "";
   const body = model.lines.map((l, i) => renderLineRow(l, i, showRef ? [{ key: "quote_ref", align: "left", value: escapeHtml(String(l.quote_ref ?? "")) }] : [])).join("");
   return `<div style="margin:16px 0;">
     ${titleHtml}
@@ -1002,7 +1009,7 @@ function renderItemsTableModelHtml(
       <thead><tr>${refHead}${head}</tr></thead>
       <tbody>${body}</tbody>
       <tfoot><tr>
-        <td colspan="${baseCols.filter(c => c.show).length + (showRef ? 1 : 0) - 1}" style="border:1px solid ${borderColor};padding:8px;text-align:right;color:#111827;font-weight:700;">Total</td>
+        <td colspan="${baseCols.filter(c => c.show).length + (showRef ? 1 : 0) - 1}" style="border:1px solid ${borderColor};padding:8px;text-align:right;color:#111827;font-weight:700;">${tDoc(idioma, "doc.tabela.total")}</td>
         <td style="border:1px solid ${borderColor};padding:8px;text-align:right;color:#111827;font-weight:700;">${fmt(model.grand_total)}</td>
       </tr></tfoot>
     </table>
@@ -1031,6 +1038,9 @@ function resolveTableColors(templateDocSettings: any, primaryColor: string): Ren
  *
  * Behavior for the legacy-token-only path is byte-identical to the previous
  * applyQuoteItemsToken implementation.
+ *
+ * `idioma` (omissão "pt", código aberto) muda só as palavras (título e cabeçalhos das tabelas); um título
+ * escolhido no modelo ou no chip manda sempre. O formato do dinheiro não depende do idioma.
  */
 export function applyDataTableTokens(
   baseHtml: string,
@@ -1038,6 +1048,7 @@ export function applyDataTableTokens(
   templateDocSettings: any,
   primaryColor: string,
   autoAppendIfMissing: boolean = true,
+  idioma: string = "pt",
 ): string {
   let html = (baseHtml || "").replace(/\{\{tabela_artigos\}\}/gi, "{{orcamento_itens}}");
   const items = variableData.orcamento_itens || [];
@@ -1059,7 +1070,7 @@ export function applyDataTableTokens(
       }
     }
     return buildQuoteItemsHtml(items, {
-      title: cfg.title || templateDocSettings?.quote_items_title || "Artigos do Orçamento",
+      title: cfg.title || templateDocSettings?.quote_items_title || tDoc(idioma, "doc.tabela.tituloArtigos"),
       showQuantity: cfg.showQuantity !== false,
       showUnit: cfg.showUnit !== false,
       showPrice: cfg.showPrice !== false,
@@ -1072,7 +1083,7 @@ export function applyDataTableTokens(
       showBundles: cfg.showBundles !== false,
       showManual: cfg.showManual !== false,
       showBundleComponents: cfg.showBundleComponents === true,
-    });
+    }, idioma);
   });
 
   // 2) Legacy {{orcamento_itens}} path (preserved exactly as before).
@@ -1086,7 +1097,7 @@ export function applyDataTableTokens(
     }
     const descriptionOnly = templateDocSettings?.quote_items_description_only === true;
     const itemsHtml = buildQuoteItemsHtml(items, {
-      title: templateDocSettings?.quote_items_title || "Artigos do Orçamento",
+      title: templateDocSettings?.quote_items_title || tDoc(idioma, "doc.tabela.tituloArtigos"),
       showQuantity: descriptionOnly ? false : (templateDocSettings?.quote_items_show_quantity !== false),
       showUnit: descriptionOnly ? false : (templateDocSettings?.quote_items_show_unit !== false),
       showPrice: descriptionOnly ? false : (templateDocSettings?.quote_items_show_price !== false),
@@ -1094,7 +1105,7 @@ export function applyDataTableTokens(
       primaryColor: primaryColor || "#7C3AED",
       columnOrder: templateDocSettings?.quote_items_column_order || undefined,
       colors: resolveTableColors(templateDocSettings, primaryColor),
-    });
+    }, idioma);
     html = html.replace(/\{\{orcamento_itens\}\}/gi, itemsHtml);
   } else {
     html = html.replace(/\{\{orcamento_itens\}\}/gi, "");
@@ -1111,14 +1122,14 @@ export function applyDataTableTokens(
       try { cfg = JSON.parse(decodeURIComponent(escape(atob(cfgMatch[1])))); } catch { cfg = {}; }
     }
     return buildSignatoriesHtml(signatarios, {
-      title: cfg.title || "Signatários",
+      title: cfg.title || tDoc(idioma, "doc.signatarios.titulo"),
       showName: cfg.showName !== false,
       showEmail: cfg.showEmail !== false,
       showRole: cfg.showRole !== false,
       showOrder: cfg.showOrder === true,
       primaryColor: primaryColor || "#7C3AED",
       tableHeaderColor: templateDocSettings?.table_header_color || null,
-    });
+    }, idioma);
   });
   // Cleanup any stray legacy token if chip absent
   html = html.replace(/\{\{tabela_signatarios\}\}/gi, "");
@@ -1128,15 +1139,16 @@ export function applyDataTableTokens(
 
 function buildSignatoriesHtml(
   parties: NonNullable<ContractVariableData["signatarios"]>,
-  opts: { title: string; showName: boolean; showEmail: boolean; showRole: boolean; showOrder: boolean; primaryColor: string; tableHeaderColor?: string | null }
+  opts: { title: string; showName: boolean; showEmail: boolean; showRole: boolean; showOrder: boolean; primaryColor: string; tableHeaderColor?: string | null },
+  idioma: string = "pt",
 ): string {
   const { title, showName, showEmail, showRole, showOrder, primaryColor, tableHeaderColor } = opts;
   const headerBg = tableHeaderColor || primaryColor || "#7C3AED";
   const cols = [
-    { key: "ordem", label: "#",      show: showOrder, align: "center" as const },
-    { key: "nome",  label: "Nome",   show: showName,  align: "left"   as const },
-    { key: "papel", label: "Papel",  show: showRole,  align: "left"   as const },
-    { key: "email", label: "Email",  show: showEmail, align: "left"   as const },
+    { key: "ordem", label: tDoc(idioma, "doc.signatarios.ordem"), show: showOrder, align: "center" as const },
+    { key: "nome",  label: tDoc(idioma, "doc.signatarios.nome"),  show: showName,  align: "left"   as const },
+    { key: "papel", label: tDoc(idioma, "doc.signatarios.papel"), show: showRole,  align: "left"   as const },
+    { key: "email", label: tDoc(idioma, "doc.signatarios.email"), show: showEmail, align: "left"   as const },
   ];
   const head = cols.filter(c => c.show).map(c => `<th style="border:1px solid #d1d5db;padding:8px;text-align:${c.align};color:#ffffff;background:${headerBg};">${c.label}</th>`).join("");
   const body = parties.map((p) => {
@@ -1215,8 +1227,9 @@ export function applyQuoteItemsToken(
   templateDocSettings: any,
   primaryColor: string,
   autoAppendIfMissing: boolean = true,
+  idioma: string = "pt",
 ): string {
-  return applyDataTableTokens(baseHtml, variableData, templateDocSettings, primaryColor, autoAppendIfMissing);
+  return applyDataTableTokens(baseHtml, variableData, templateDocSettings, primaryColor, autoAppendIfMissing, idioma);
 }
 
 /**

@@ -8,6 +8,10 @@
 import { getVariableDefinition, resolveAlias } from "./documentVariables/registry";
 import type { RenderContext } from "./documentVariables/context";
 import { EMPTY_CLIENT, EMPTY_COMPANY, EMPTY_COMMERCIAL } from "./documentVariables/context";
+import { dataPorExtenso, duracaoEntre } from "@/lib/idiomaDocumento/datas";
+import { tDoc } from "@/lib/idiomaDocumento/dicionario";
+import { numberToEnglishWords } from "@/lib/idiomaDocumento/numeroPorExtenso";
+import { normalizarCodigo } from "@/lib/idiomaDocumento/registo";
 
 
 // Complete set of token keys that are auto-resolved — never prompt the user for these.
@@ -127,23 +131,18 @@ function numberToPortugueseWords(num: number): string {
   return result;
 }
 
-function calculateDuration(startDate: string, endDate: string): string {
-  if (!startDate || !endDate) return "—";
-  const start = new Date(startDate);
-  const end = new Date(endDate);
-  const months = (end.getFullYear() - start.getFullYear()) * 12 + (end.getMonth() - start.getMonth());
-  if (months <= 0) {
-    const days = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
-    return `${days} dias`;
-  }
-  return `${months} meses`;
+// Só as palavras dependem do idioma (omissão "pt", código aberto): o dinheiro e os números não mudam.
+// A lógica de datas e durações vive em src/lib/idiomaDocumento (módulo neutro, partilhado com o resto).
+function calculateDuration(startDate: string, endDate: string, idioma: string = "pt"): string {
+  return duracaoEntre(startDate, endDate, idioma);
 }
 
-function formatDate(dateStr: string | null): string {
-  if (!dateStr) return "—";
-  const d = new Date(dateStr);
-  const months = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"];
-  return `${d.getDate()} de ${months[d.getMonth()]} de ${d.getFullYear()}`;
+function formatDate(dateStr: string | null, idioma: string = "pt"): string {
+  return dataPorExtenso(dateStr, idioma);
+}
+
+function valorPorExtenso(num: number, idioma: string): string {
+  return normalizarCodigo(idioma) === "en" ? numberToEnglishWords(num) : numberToPortugueseWords(num);
 }
 
 export interface ContractVariableData {
@@ -203,13 +202,21 @@ export interface ContractVariableData {
 }
 
 
-export function substituteVariables(html: string, data: ContractVariableData, highlightMode: boolean = false): string {
+/**
+ * `idioma` (omissão "pt", código aberto) muda só as PALAVRAS: meses e «de» das datas, a duração, o valor por
+ * extenso, os cabeçalhos da tabela de itens e os rótulos de «em falta». O formato do dinheiro e dos números
+ * é o mesmo em qualquer idioma.
+ */
+export function substituteVariables(html: string, data: ContractVariableData, highlightMode: boolean = false, idioma: string = "pt"): string {
   // Alias legado: {{tabela_artigos}} deve produzir a mesma tabela que {{orcamento_itens}}.
   let result = html.split("{{tabela_artigos}}").join("{{orcamento_itens}}");
 
+  // Rótulo de um campo em falta, no idioma do documento (chave `doc.rotulo.<chave>`).
+  const rot = (chave: string) => tDoc(idioma, `doc.rotulo.${chave}`);
+
   const missingPlaceholder = (label: string) =>
     highlightMode
-      ? `<span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:3px;font-weight:500;">[${label} em falta]</span>`
+      ? `<span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:3px;font-weight:500;">[${tDoc(idioma, "doc.emFalta", { rotulo: label })}]</span>`
       : "____________";
 
   const filledWrap = (value: string) =>
@@ -253,42 +260,42 @@ export function substituteVariables(html: string, data: ContractVariableData, hi
   };
 
   const replacements: Record<string, string> = {
-    "{{empresa_nome}}": resolveValue(fromRegistry("empresa_nome"), "Nome da empresa"),
-    "{{empresa_nif}}": resolveValue(fromRegistry("empresa_nif"), "NIF da empresa"),
-    "{{empresa_morada}}": resolveValue(fromRegistry("empresa_morada"), "Morada da empresa"),
-    "{{cliente_nome}}": resolveValue(fromRegistry("cliente_nome"), "Nome do cliente"),
-    "{{cliente_nif}}": resolveValue(fromRegistry("cliente_nif"), "NIF do cliente"),
-    "{{cliente_morada}}": resolveValue(fromRegistry("cliente_morada"), "Morada do cliente"),
-    "{{cliente_email}}": resolveValue(fromRegistry("cliente_email"), "Email do cliente"),
-    "{{cliente_telefone}}": resolveValue(fromRegistry("cliente_telefone"), "Telefone do cliente"),
-    "{{comercial_nome}}": resolveValue(fromRegistry("comercial_nome"), "Nome do comercial"),
-    "{{comercial_email}}": resolveValue(data.comercial_email, "Email do comercial"),
-    "{{comercial_telefone}}": resolveValue(data.comercial_telefone, "Telefone do comercial"),
-    "{{contrato_numero}}": resolveValue(data.contrato_numero, "Nº do contrato"),
+    "{{empresa_nome}}": resolveValue(fromRegistry("empresa_nome"), rot("empresaNome")),
+    "{{empresa_nif}}": resolveValue(fromRegistry("empresa_nif"), rot("empresaNif")),
+    "{{empresa_morada}}": resolveValue(fromRegistry("empresa_morada"), rot("empresaMorada")),
+    "{{cliente_nome}}": resolveValue(fromRegistry("cliente_nome"), rot("clienteNome")),
+    "{{cliente_nif}}": resolveValue(fromRegistry("cliente_nif"), rot("clienteNif")),
+    "{{cliente_morada}}": resolveValue(fromRegistry("cliente_morada"), rot("clienteMorada")),
+    "{{cliente_email}}": resolveValue(fromRegistry("cliente_email"), rot("clienteEmail")),
+    "{{cliente_telefone}}": resolveValue(fromRegistry("cliente_telefone"), rot("clienteTelefone")),
+    "{{comercial_nome}}": resolveValue(fromRegistry("comercial_nome"), rot("comercialNome")),
+    "{{comercial_email}}": resolveValue(data.comercial_email, rot("comercialEmail")),
+    "{{comercial_telefone}}": resolveValue(data.comercial_telefone, rot("comercialTelefone")),
+    "{{contrato_numero}}": resolveValue(data.contrato_numero, rot("contratoNumero")),
     "{{contrato_valor}}": data.contrato_valor != null
       ? filledWrap((() => { const f = Math.abs(data.contrato_valor!).toFixed(2); const [i, d] = f.split('.'); return '€' + i.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + d; })())
-      : missingPlaceholder("Valor do contrato"),
+      : missingPlaceholder(rot("contratoValor")),
     "{{contrato_valor_extenso}}": data.contrato_valor != null
-      ? filledWrap(numberToPortugueseWords(data.contrato_valor))
-      : missingPlaceholder("Valor por extenso"),
+      ? filledWrap(valorPorExtenso(data.contrato_valor, idioma))
+      : missingPlaceholder(rot("contratoValorExtenso")),
     "{{contrato_data_inicio}}": data.contrato_data_inicio
-      ? filledWrap(formatDate(data.contrato_data_inicio))
-      : missingPlaceholder("Data de início"),
+      ? filledWrap(formatDate(data.contrato_data_inicio, idioma))
+      : missingPlaceholder(rot("contratoDataInicio")),
     "{{contrato_data_fim}}": data.contrato_data_fim
-      ? filledWrap(formatDate(data.contrato_data_fim))
-      : missingPlaceholder("Data de fim"),
+      ? filledWrap(formatDate(data.contrato_data_fim, idioma))
+      : missingPlaceholder(rot("contratoDataFim")),
     "{{contrato_duracao}}": data.contrato_data_inicio && data.contrato_data_fim
-      ? filledWrap(calculateDuration(data.contrato_data_inicio, data.contrato_data_fim))
-      : missingPlaceholder("Duração"),
-    "{{proposta_numero}}": resolveValue(data.proposta_numero, "Nº da proposta"),
+      ? filledWrap(calculateDuration(data.contrato_data_inicio, data.contrato_data_fim, idioma))
+      : missingPlaceholder(rot("contratoDuracao")),
+    "{{proposta_numero}}": resolveValue(data.proposta_numero, rot("propostaNumero")),
     "{{proposta_valor}}": data.proposta_valor != null
       ? filledWrap((() => { const f = Math.abs(data.proposta_valor!).toFixed(2); const [i, d] = f.split('.'); return '€' + i.replace(/\B(?=(\d{3})+(?!\d))/g, '.') + ',' + d; })())
-      : missingPlaceholder("Valor da proposta"),
+      : missingPlaceholder(rot("propostaValor")),
     "{{proposta_data}}": data.proposta_data
-      ? filledWrap(formatDate(data.proposta_data))
-      : missingPlaceholder("Data da proposta"),
-    "{{data_atual}}": filledWrap(formatDate(data.data_documento || new Date().toISOString())),
-    "{{cliente_localidade}}": resolveValue((data as any).cliente_localidade, "Localidade"),
+      ? filledWrap(formatDate(data.proposta_data, idioma))
+      : missingPlaceholder(rot("propostaData")),
+    "{{data_atual}}": filledWrap(formatDate(data.data_documento || new Date().toISOString(), idioma)),
+    "{{cliente_localidade}}": resolveValue((data as any).cliente_localidade, rot("clienteLocalidade")),
   };
 
 
@@ -296,10 +303,10 @@ export function substituteVariables(html: string, data: ContractVariableData, hi
   if (data.orcamento_itens && data.orcamento_itens.length > 0) {
     const tableHtml = `<table style="width:100%;border-collapse:collapse;margin:10px 0;color:#111827;">
       <thead><tr style="background:#f3f4f6;">
-        <th style="border:1px solid #d1d5db;padding:8px;text-align:left;color:#111827;">Descrição</th>
-        <th style="border:1px solid #d1d5db;padding:8px;text-align:center;color:#111827;">Qtd</th>
-        <th style="border:1px solid #d1d5db;padding:8px;text-align:center;color:#111827;">Un.</th>
-        <th style="border:1px solid #d1d5db;padding:8px;text-align:right;color:#111827;">Valor</th>
+        <th style="border:1px solid #d1d5db;padding:8px;text-align:left;color:#111827;">${tDoc(idioma, "doc.tabela.descricao")}</th>
+        <th style="border:1px solid #d1d5db;padding:8px;text-align:center;color:#111827;">${tDoc(idioma, "doc.tabela.qtd")}</th>
+        <th style="border:1px solid #d1d5db;padding:8px;text-align:center;color:#111827;">${tDoc(idioma, "doc.tabela.un")}</th>
+        <th style="border:1px solid #d1d5db;padding:8px;text-align:right;color:#111827;">${tDoc(idioma, "doc.tabela.valor")}</th>
       </tr></thead>
       <tbody>${data.orcamento_itens.map(item => `<tr>
         <td style="border:1px solid #d1d5db;padding:8px;color:#111827;">${item.descricao}</td>
@@ -310,7 +317,7 @@ export function substituteVariables(html: string, data: ContractVariableData, hi
     </table>`;
     replacements["{{orcamento_itens}}"] = highlightMode ? filledWrap(tableHtml) : tableHtml;
   } else {
-    replacements["{{orcamento_itens}}"] = missingPlaceholder("Itens do orçamento");
+    replacements["{{orcamento_itens}}"] = missingPlaceholder(rot("itensOrcamento"));
   }
 
   for (const [key, value] of Object.entries(replacements)) {
