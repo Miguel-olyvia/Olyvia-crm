@@ -214,6 +214,33 @@ describe("a IA com o ecrã inteiro", () => {
     } finally { window.removeEventListener(EV_FASE, aoFase); window.removeEventListener(EV_PASSO, aoPasso); }
   });
 
+  it("numa fase já feita, o «passo» é a secção do resumo (a Proposta da fase Negócio)", async () => {
+    vi.useFakeTimers();
+    const fases: number[] = [];
+    const aoFase = (e: Event) => {
+      const f = (e as CustomEvent<{ fase: number }>).detail.fase; fases.push(f);
+      document.querySelector("main")?.remove();
+      const m = document.createElement("main"); m.innerHTML = f === 3 ? "<h3>Orçamento</h3><h3>Proposta</h3>" : "<h2>Antes de arrancar</h2>"; document.body.appendChild(m);
+    };
+    const aoPasso = (e: Event) => { const d = (e as CustomEvent<{ listar?: boolean; lista?: string[] }>).detail; if (d.listar) d.lista = ["Medidas", "Contrato"]; };
+    window.addEventListener(EV_FASE, aoFase); window.addEventListener(EV_PASSO, aoPasso);
+    const vistos: string[] = [];
+    const orig = HTMLElement.prototype.scrollIntoView;
+    HTMLElement.prototype.scrollIntoView = function () { vistos.push(this.textContent ?? ""); };
+    const rects = HTMLElement.prototype.getClientRects;
+    HTMLElement.prototype.getClientRects = function () { return [{}] as unknown as DOMRectList; };
+    try {
+      render(<MemoryRouter initialEntries={["/negocios?negocio=7"]}><OlyviaComando /></MemoryRouter>);
+      await pedir("vai para a proposta");
+      await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+      expect(fases).toEqual([5, 4, 3]);
+      expect(vistos).toContain("Proposta");
+    } finally {
+      window.removeEventListener(EV_FASE, aoFase); window.removeEventListener(EV_PASSO, aoPasso);
+      HTMLElement.prototype.scrollIntoView = orig; HTMLElement.prototype.getClientRects = rects;
+    }
+  });
+
   it("lembra-se da conversa («e o outro?»)", async () => {
     vi.useFakeTimers();
     const conversas: unknown[][] = [];

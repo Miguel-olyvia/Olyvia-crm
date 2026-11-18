@@ -86,12 +86,22 @@ function tentarPasso(passo: string): boolean {
   avisa(EV_PASSO, d);
   return d.ok;
 }
-/** O passo noutra fase: abre cada fase do negócio, da mais adiantada para trás, até a encontrar. A fase onde está, ou null. */
+/** Uma fase já feita não tem passos: mostra o resumo em secções («Orçamento», «Proposta», «Contrato»). Desliza até à secção com esse nome. */
+function irParaSecao(nome: string): boolean {
+  const alvo = normal(nome);
+  const h = Array.from(document.querySelectorAll<HTMLElement>("h2, h3, h4"))
+    .find((x) => !x.closest("[data-olyvia]") && x.getClientRects().length > 0 && normal(x.textContent ?? "") === alvo);
+  if (!h) return false;
+  h.scrollIntoView?.({ behavior: "smooth", block: "start" });
+  return true;
+}
+/** O passo noutra fase: abre cada fase do negócio, da mais adiantada para trás, até a encontrar (um passo, ou a secção do resumo de uma
+ *  fase feita). A fase onde está, ou null. */
 async function procurarPassoNasFases(passo: string): Promise<number | null> {
   for (let f = FASES_NOMES.length - 1; f >= 0; f--) {
     avisa(EV_FASE, { fase: f });
     await assentar(1500, 200);
-    if (tentarPasso(passo)) return f;
+    if (tentarPasso(passo) || irParaSecao(passo)) return f;
   }
   avisa(EV_FASE, { fase: FASES_NOMES.length - 1 }); // não há: volta à fase em que o negócio está
   return null;
