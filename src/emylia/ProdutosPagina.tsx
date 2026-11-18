@@ -17,6 +17,7 @@ import { BarraSelecao, CaixaLinha, useSelecao } from "./MarcarArmazens";
 import { precoProduto } from "./fichaServico";
 import { rotuloModelo } from "./modelosDados";
 import { PROVISORIA } from "./ReferenciaFicha";
+import { SkuLinha } from "./SkuProduto";
 import { rotuloEstadoProduto, type FichaProdutoReal, type Res } from "./fichaProdutoDados";
 import {
   SEM_CATEGORIA_PRODUTO, SEM_FILTRO_PRODUTOS, categoriasDeProdutos, filtrarProdutosCatalogo, haProdutosSemCategoria, modelosDeProdutos, normalizarMarca, subcategoriasDeProdutos,
@@ -24,7 +25,7 @@ import {
 } from "./filtroProdutosCatalogo";
 import { CachePaginas } from "./real/cachePaginasProdutos";
 import {
-  lerProdutosContagens, lerProdutosPagina, type ContagensProdutos, type FiltroServidor, type LinhaPaginaProduto, type PaginaProdutos,
+  lerMarcasDoFiltro, lerProdutosContagens, lerProdutosPagina, textoEstadoPagina, type ContagensProdutos, type FiltroServidor, type LinhaPaginaProduto, type MarcasDoFiltro, type PaginaProdutos,
 } from "./real/produtosPaginados";
 
 const ESPERA_PESQUISA = 300;
@@ -109,27 +110,52 @@ export function ProdutosPagina({ K, real, nomeServico, onAbrir, onAbrirProduto, 
   const semCat = ctgG ? ctgG.semCategoria > 0 : haProdutosSemCategoria(K);
   const nomeRamo = (x: { n: string; inativa?: true }) => (x.inativa ? `${x.n} (desativada)` : x.n);
   const cats = useMemo(() => [...categoriasDeProdutos(K).map((x): ItemCombo => ({ id: x.id, nome: nomeRamo(x) })), ...(semCat ? [{ id: SEM_CATEGORIA_PRODUTO, nome: "Sem categoria de produto" }] : [])], [K.arvore, K.produtos, K.categoriasProduto, semCat]); // eslint-disable-line react-hooks/exhaustive-deps
-  const marcas = useMemo(() => { const vistas = new Set<string>(); return K.marcas.map((m) => m.trim()).filter((m) => { const k = normalizarMarca(m); if (!k || vistas.has(k)) return false; vistas.add(k); return true; }).map((m): ItemCombo => ({ id: m, nome: m })); }, [K.marcas]);
   const cat = !f.cat || cats.some((x) => x.id === f.cat) ? f.cat : "";
   const subs = useMemo(() => subcategoriasDeProdutos(K, cat).map((x): ItemCombo => ({ id: x.id, nome: nomeRamo(x) })), [K.arvore, K.produtos, K.categoriasProduto, cat]); // eslint-disable-line react-hooks/exhaustive-deps
   const sub = cat && subs.some((x) => x.id === f.sub) ? f.sub : "";
   const usados = useMemo(() => new Set(Object.keys(ctgG?.porModelo ?? {})), [ctgG]);
   const modelosFiltro = useMemo(() => modelosDeProdutos(K, sub, usados).map((x): ItemCombo => ({ id: x.id, nome: x.inativa ? `${x.n} (desativado)` : x.n })), [K.modelos, sub, usados]); // eslint-disable-line react-hooks/exhaustive-deps
   const modelo = modelosFiltro.some((x) => x.id === f.modelo) ? f.modelo ?? "" : "";
-  const fe: FiltroProdutos = { cat, sub, marca: marcas.some((x) => normalizarMarca(x.nome) === normalizarMarca(f.marca)) ? f.marca : "", modelo };
-  useEffect(() => { if (fe.cat !== f.cat || fe.sub !== f.sub || fe.marca !== f.marca || modelo !== (f.modelo ?? "")) setF(fe); }, [fe.cat, fe.sub, fe.marca, modelo]); // eslint-disable-line react-hooks/exhaustive-deps
+  const semCategoria = cat === SEM_CATEGORIA_PRODUTO;
+  // o que já se escolheu (sem a marca): serve a lista de produtos e a lista de marcas
+  const filtroBase: FiltroServidor = { q: qDeb, categoria: cat && !semCategoria ? baseDe(cat) : "", subcategoria: sub ? baseDe(sub) : "", modelo, marca: "", semCategoria };
+  // 22/01: o filtro Marca só mostra as marcas que existem no que já se escolheu, com o nº de produtos (cat_ler_marcas_do_filtro). A pesquisa entra já com o debounce (qDeb).
+  // Sem a função na base (dados null) ou com a leitura a falhar, fica a lista do arranque (K.marcas), sem erro visível; enquanto lê, mantém a anterior.
+  // `chaveMarcas` diz de que conjunto são as marcas lidas: enquanto a leitura do conjunto atual não acaba, a marca escolhida pode já não valer
+  const chaveMarcas = JSON.stringify([real.org, qDeb, filtroBase.categoria, filtroBase.subcategoria, modelo, semCategoria]);
+  const chaveAtual = useRef(chaveMarcas), chaveLida = useRef("");
+  chaveAtual.current = chaveMarcas;
+  const marcasLidas = useLeitura<MarcasDoFiltro | null>(
+    () => lerMarcasDoFiltro(real.org, filtroBase).then((r) => { if (chaveAtual.current === chaveMarcas) chaveLida.current = chaveMarcas; return r; }),
+    [real.org, qDeb, filtroBase.categoria, filtroBase.subcategoria, modelo, semCategoria, K],
+  );
+  const daBase = !marcasLidas.erro ? marcasLidas.dados : null;
+  const marcas = useMemo(() => {
+    const vistas = new Set<string>();
+    const brutas = daBase ? daBase.marcas.map((m) => ({ nome: m.nome.trim(), n: m.n })) : K.marcas.map((m) => ({ nome: m.trim(), n: -1 }));
+    return brutas.filter((m) => { const k = normalizarMarca(m.nome); if (!k || vistas.has(k)) return false; vistas.add(k); return true; })
+      .map((m): ItemCombo => ({ id: m.nome, nome: m.n >= 0 ? `${m.nome} · ${m.n}` : m.nome }));
+  }, [K.marcas, daBase]);
+  // a marca escolhida só se repõe quando a leitura acaba e ela já não está no conjunto (a meio da leitura mantém-se)
+  const marcaValida = !f.marca || marcasLidas.aLer || marcas.some((x) => normalizarMarca(x.id) === normalizarMarca(f.marca));
+  const fe: FiltroProdutos = { cat, sub, marca: marcaValida ? f.marca : "", modelo };
+  useEffect(() => {
+    if (fe.cat !== f.cat || fe.sub !== f.sub || fe.marca !== f.marca || modelo !== (f.modelo ?? "")) { setF(fe); if (fe.marca !== f.marca) setPagina(1); }
+  }, [fe.cat, fe.sub, fe.marca, modelo]); // eslint-disable-line react-hooks/exhaustive-deps
   const mudar = (p: Partial<FiltroProdutos>) => { setF((a) => ({ ...a, ...p })); setPagina(1); };
   const atual = (itens: readonly ItemCombo[], id: string): ItemCombo | null => (id ? itens.find((x) => normalizarMarca(x.id) === normalizarMarca(id)) ?? null : null);
 
   // a lista: o que o servidor devolve para a pesquisa e os filtros
-  const semCategoria = fe.cat === SEM_CATEGORIA_PRODUTO;
-  const filtro: FiltroServidor = { q: qDeb, categoria: cat && !semCategoria ? baseDe(cat) : "", subcategoria: sub ? baseDe(sub) : "", modelo, marca: fe.marca, semCategoria };
+  const filtro: FiltroServidor = { ...filtroBase, marca: fe.marca };
   // cache das páginas (org + filtros + pesquisa + limite + página): mudar filtros, pesquisa, organização ou o Catálogo (K é relido depois de gravar) recomeça-a
   const cacheRef = useRef<CachePaginas | null>(null);
   if (!cacheRef.current) cacheRef.current = new CachePaginas(lerProdutosPagina);
   const cache = cacheRef.current;
   cache.contexto(real.org, filtro, K);
-  const pag = useLeitura<PaginaProdutos>(() => cache.obter(real.org, filtro, pagina), [real.org, qDeb, filtro.categoria, filtro.subcategoria, modelo, fe.marca, semCategoria, pagina, K], true, () => cache.ver(real.org, filtro, pagina));
+  // com marca escolhida, mudar o conjunto (categoria, pesquisa…) espera pelas marcas desse conjunto antes de pedir a lista: pedir já com a marca antiga e depois outra vez sem ela
+  // fazia piscar «0 produtos». Entretanto a lista anterior fica, com a opacidade de «a ler».
+  const aEsperarMarcas = !!fe.marca && chaveLida.current !== chaveMarcas;
+  const pag = useLeitura<PaginaProdutos>(() => cache.obter(real.org, filtro, pagina), [real.org, qDeb, filtro.categoria, filtro.subcategoria, modelo, fe.marca, semCategoria, pagina, K], !aEsperarMarcas, () => cache.ver(real.org, filtro, pagina));
   const dados = pag.dados;
   // mostrada a página N, pré-carrega N+1 e N+2 em segundo plano (nunca para lá da última; uma falha é silenciosa)
   useEffect(() => { if (dados && dados.pagina === pagina) cache.precarregar(real.org, filtro, pagina, dados.paginas); }, [dados, pagina]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -153,8 +179,7 @@ export function ProdutosPagina({ K, real, nomeServico, onAbrir, onAbrirProduto, 
   }), [K, ctgG]);
 
   const linhas = dados?.produtos ?? [];
-  const total = dados?.total ?? 0;
-  const estado = !dados ? (pag.aLer ? "A ler os produtos…" : "") : total === 0 ? "0 produtos" : `Página ${dados.pagina} de ${Math.max(dados.paginas, 1)} · ${total === 1 ? "1 produto" : `${total} produtos`}`;
+  const estado = !dados ? (pag.aLer ? "A ler os produtos…" : "") : textoEstadoPagina(dados);
   const erroContagens = (qDeb.trim() || f.marca.trim() ? contagensF : contagensG);
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[13rem_minmax(0,1fr)_20rem]">
@@ -181,7 +206,7 @@ export function ProdutosPagina({ K, real, nomeServico, onAbrir, onAbrirProduto, 
             )}</Campo>
           )}
           <Campo rot="Marca" reservarDica>{(id) => (
-            <ComboPesquisa id={id} rotulo="Marca" itens={marcas} atual={atual(marcas, fe.marca)} semValor="Todas as marcas" semValorComoValor placeholder="Todas as marcas" vazio="Nenhuma marca encontrada"
+            <ComboPesquisa id={id} rotulo="Marca" itens={marcas} atual={atual(marcas, fe.marca) ?? (fe.marca ? { id: fe.marca, nome: fe.marca } : null)} semValor="Todas as marcas" semValorComoValor placeholder="Todas as marcas" vazio="Nenhuma marca encontrada"
               onEscolher={(i) => mudar({ marca: i.id })} />
           )}</Campo>
           </div>
@@ -197,7 +222,7 @@ export function ProdutosPagina({ K, real, nomeServico, onAbrir, onAbrirProduto, 
         {linhas.length > 0 && <CabecalhoColunas verCusto={real.podeVerCusto !== false} />}
         {pag.erro && <ErroLeitura texto="Não foi possível ler os produtos" erro={pag.erro} tentar={pag.tentar} />}
         {erroContagens.erro && <ErroLeitura texto="Não foi possível ler as contagens" erro={erroContagens.erro} tentar={erroContagens.tentar} />}
-        <ul className={cn(LISTA, "mt-1", pag.aLer && dados && "opacity-60")} aria-busy={pag.aLer}>
+        <ul className={cn(LISTA, "mt-1", (pag.aLer || aEsperarMarcas) && dados && "opacity-60")} aria-busy={pag.aLer || aEsperarMarcas}>
           {linhas.map((l) => <LinhaProduto key={l.id} l={l} verCusto={real.podeVerCusto !== false} K={porId.get(l.id)} margem={margem} novo={novo} tocar={tocar} sl={sl} onAbrir={onAbrir} nomeServico={nomeServico} />)}
           {dados && !linhas.length && <Vazio>Nenhum produto com esse nome ou filtro.</Vazio>}
         </ul>
@@ -231,7 +256,7 @@ function LinhaProduto({ l, K, margem, novo, tocar, sl, onAbrir, nomeServico, ver
   const temPvp = l.pvp != null && l.pvp > 0;
   const semPreco = !temPvp && l.custo == null;
   const sugerido = !temPvp && l.custo != null;
-  const detalhe = [l.marca, l.modelo ? rotuloModelo({ numero: l.modelo_numero ?? 0, nome: l.modelo }) : "", l.sku ? `ref. ${l.sku}` : ""].filter(Boolean).join(" · ");
+  const detalhe = [l.marca, l.modelo ? rotuloModelo({ numero: l.modelo_numero ?? 0, nome: l.modelo }) : ""].filter(Boolean).join(" · ");
   return (
     <li onClick={() => tocar(l.id)} className={cn("group flex min-h-[4.5rem] cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 py-3 sm:flex-nowrap sm:gap-4", l.id === novo && REALCE)}>
       <CaixaLinha id={l.id} nome={l.nome} s={sl} />
@@ -240,6 +265,8 @@ function LinhaProduto({ l, K, margem, novo, tocar, sl, onAbrir, nomeServico, ver
         <button id={`prod-${l.id}`} type="button" onClick={(e) => { e.stopPropagation(); tocar(l.id); }} className="flex min-h-11 items-center text-left text-[15px] font-medium group-hover:underline">{l.nome}{l.id === novo && <Novo />}</button>
         {/* 17/11: só o que não está ativo leva etiqueta (Rascunho, Descontinuado) */}
         {l.estado && l.estado !== "active" && rotuloEstadoProduto(l.estado) && <span className="mt-0.5 inline-block rounded-md border border-border bg-muted px-2 py-0.5 text-[13px] font-medium text-muted-foreground">{rotuloEstadoProduto(l.estado)}</span>}
+        {/* 18/11: o SKU tem linha própria, logo por baixo do nome (a linha cinzenta fica só com marca e modelo) */}
+        <SkuLinha sku={l.sku} />
         {detalhe && <span className={cn(NOTA, "block")}>{detalhe}</span>}
         {l.atributos_resumo && <span className={cn(NOTA, "block")}>{l.atributos_resumo}</span>}
         {/* abaixo de xl o grossista e o distribuidor vão numa linha pequena por baixo do nome (sem forçar largura); a partir de xl são colunas, com cabeçalho */}

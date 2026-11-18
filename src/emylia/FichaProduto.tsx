@@ -17,6 +17,7 @@ import { StockArmazens } from "./StockArmazens";
 import { AtributosFicha } from "./AtributosProduto";
 import { ClassificacaoFicha } from "./ClassificacaoProduto";
 import { ReferenciaFicha } from "./ReferenciaFicha";
+import { SkuFicha } from "./SkuProduto";
 import { EstadoFicha } from "./EstadoProduto";
 import type { CrmCatalogItem, CrmCatalogList, FreeSupplierRow } from "@/components/supplier-portal-crm/types";
 import {
@@ -98,8 +99,10 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
     <article aria-labelledby="ficha-t">
       {topo}
       <header className="mt-3">
-        <p className={NOTA}>{[cons ? "Consumível" : "", p.marca, p.modelo ? `modelo ${numeroSku(p.modeloNumero ?? 0)} · ${p.modelo}` : "", p.sku ? `ref. ${p.sku}` : "", `unidade: ${p.un}`].filter(Boolean).join(" · ")}</p>
+        <p className={NOTA}>{[cons ? "Consumível" : "", p.marca, p.modelo ? `modelo ${numeroSku(p.modeloNumero ?? 0)} · ${p.modelo}` : "", `unidade: ${p.un}`].filter(Boolean).join(" · ")}</p>
         <h1 id="ficha-t" ref={titulo} tabIndex={-1} className="text-3xl font-semibold tracking-tight outline-none">{p.n}</h1>
+        {/* 18/11: o SKU em destaque, com «Copiar» (a linha cinzenta de cima fica só com consumível, marca, modelo e unidade) */}
+        <SkuFicha key={p.id} sku={p.sku} />
         {!cons && real && real.podeEditar && eUuid(p.id) && (
           <ReferenciaFicha key={p.id} p={pe} arvore={arvore} atributos={atributos} real={real} anunciar={anunciar} sugerir={sugerirRef} aoGerar={() => setSugerirRef(false)} />
         )}

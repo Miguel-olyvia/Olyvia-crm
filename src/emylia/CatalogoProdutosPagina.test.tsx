@@ -80,7 +80,7 @@ async function pagina(r: FichaProdutoReal | null = real(), K: Catalogo = montar(
   if (r) await screen.findAllByText(/Página 1 de 3/);
 }
 const painel = () => within(screen.getByRole("tabpanel"));
-const combo = (nome: string) => screen.getByRole("combobox", { name: nome }) as HTMLInputElement;
+const combo = (nome: string) => screen.getByRole("combobox", { name: new RegExp(`^${nome}( |$)`) }) as HTMLInputElement;
 const escolher = (campo: string, opcao: string | RegExp) => { fireEvent.click(combo(campo)); fireEvent.click(screen.getByRole("option", { name: opcao })); };
 /** O pedido «principal» do último filtro: com o pré-carregamento o último pedido é uma página seguinte, por isso devolve-se o da página mais baixa do último grupo de filtros. */
 const mesmoFiltro = (x: Record<string, unknown>, y: Record<string, unknown>) => Object.keys(x).every((k) => k === "p_pagina" || x[k] === y[k]);
@@ -106,7 +106,8 @@ describe("Produtos por páginas · a leitura", () => {
   it("a linha mostra nome, marca, modelo, referência, atributos e preço (o PVP, ou custo + margem alvo sem PVP)", async () => {
     await pagina();
     const l = painel().getByRole("button", { name: "Torneira cozinha" }).closest("li")!;
-    expect(l.textContent).toContain("Grohe · 0001 · SORTY · ref. CB-0001-1");
+    expect(l.textContent).toContain("Grohe · 0001 · SORTY");
+    expect(l.textContent).toContain("CB-0001-1");
     expect(l.textContent).toContain("Cor: Preto");
     expect(l.textContent).toMatch(/100,00\s*€\/un/);
     const sem = painel().getByRole("button", { name: "Lavatório suspenso" }).closest("li")!;
@@ -144,11 +145,11 @@ describe("Produtos por páginas · a leitura", () => {
   it("«Página X de Y · N produtos» anuncia-se numa região role=status à parte (escondida), e o parágrafo focável não leva aria-live", async () => {
     await pagina();
     const estado = screen.getByTestId("produtos-estado");
-    expect(estado).toHaveTextContent("Página 1 de 3 · 120 produtos");
+    expect(estado).toHaveTextContent("Página 1 de 3 · produtos 1–50 de 120");
     expect(estado).not.toHaveAttribute("aria-live");
     expect(estado.className).not.toMatch(/(^|\s)outline-none/);
     expect(estado.className).toContain("focus-visible:ring-2");
-    const regioes = screen.getAllByRole("status").filter((r) => r.textContent === "Página 1 de 3 · 120 produtos");
+    const regioes = screen.getAllByRole("status").filter((r) => r.textContent === "Página 1 de 3 · produtos 1–50 de 120");
     expect(regioes).toHaveLength(1);
     expect(regioes[0].className).toContain("sr-only");
     expect(regioes[0]).not.toBe(estado);
@@ -209,7 +210,7 @@ describe("Produtos por páginas · Anterior e Seguinte", () => {
     const S = seed(); const run = (fn: () => void) => fn();
     render(<CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={real()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
-    await screen.findAllByText("Página 1 de 1 · 1 produto");
+    await screen.findAllByText("Página 1 de 1 · produtos 1 de 1");
     expect(screen.queryByRole("navigation", { name: /Paginação de produtos/ })).not.toBeInTheDocument();
   });
   it("sem produtos: diz que não há nenhum e não oferece páginas", async () => {
@@ -699,6 +700,188 @@ describe("Produtos por páginas · seleção e ficha", () => {
     falhar = false;
     fireEvent.click(within(aviso.closest("[role='alert']") as HTMLElement).getByRole("button", { name: "Tentar de novo" }));
     expect(await screen.findByText("Cor: Preto")).toBeInTheDocument();
+  });
+});
+
+// 22/01 (cat_ler_marcas_do_filtro): o filtro «Marca» mostra só as marcas que existem no que já se escolheu, com o nº de produtos
+describe("Produtos por páginas · o filtro Marca só mostra as marcas do que já se escolheu", () => {
+  const TODAS = { marcas: [{ id: null, marca: "Bellacasa", n: 196 }, { id: null, marca: "Grohe", n: 1 }, { id: null, marca: "Roca", n: 1 }], sem_marca: 1, total: 198 };
+  const marcasPor = (f: string, a: Record<string, unknown>): unknown => {
+    if (f !== "cat_ler_marcas_do_filtro") return padrao(f, a);
+    if (a.p_subcategoria === ID.pcSub) return { data: { marcas: [{ id: null, marca: "Grohe", n: 1 }], sem_marca: 0, total: 1 }, error: null };
+    if (a.p_categoria === ID.pcOf) return { data: { marcas: [{ id: null, marca: "Bellacasa", n: 5 }, { id: null, marca: "Grohe", n: 1 }], sem_marca: 0, total: 6 }, error: null };
+    if (a.p_categoria === ID.pcSan) return { data: { marcas: [{ id: null, marca: "Roca", n: 1 }], sem_marca: 0, total: 1 }, error: null };
+    return { data: TODAS, error: null };
+  };
+  // o botão de cada filtro pela posição na grelha (Categoria, Subcategoria, [Modelo], Marca): não depende do nome acessível do botão
+  const botaoDe = (n: "Categoria" | "Subcategoria" | "Marca") => { const bs = Array.from(screen.getByTestId("produtos-filtros").querySelectorAll<HTMLElement>("button[aria-haspopup]")); return n === "Marca" ? bs[bs.length - 1] : bs[n === "Categoria" ? 0 : 1]; };
+  const esc = (n: "Categoria" | "Subcategoria" | "Marca", opcao: string) => { fireEvent.click(botaoDe(n)); fireEvent.click(screen.getByRole("option", { name: opcao })); };
+  const marcasPedidas = () => doTipo("cat_ler_marcas_do_filtro");
+  const opcoesAbertas = () => screen.queryAllByRole("option").map((x) => x.textContent);
+  /** abre a Marca, espera pelas opções e fecha (a leitura dentro do waitFor não pode abrir nem fechar nada: o DOM mudaria e o waitFor repetia-se sem parar) */
+  const comMarcaAberta = async (esperado: string[]) => { fireEvent.click(botaoDe("Marca")); await waitFor(() => expect(opcoesAbertas()).toEqual(esperado)); fireEvent.click(botaoDe("Marca")); };
+  const comMarcaTem = async (opcao: string) => { fireEvent.click(botaoDe("Marca")); await waitFor(() => expect(opcoesAbertas()).toContain(opcao)); fireEvent.click(botaoDe("Marca")); };
+  const espera = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
+
+  beforeEach(() => { base.responder = marcasPor; });
+
+  it("mostra cada marca com o nº de produtos, pela ordem da base, e pede com os filtros da lista (sem marca)", async () => {
+    await pagina();
+    await comMarcaAberta(["Todas as marcas", "Bellacasa · 196", "Grohe · 1", "Roca · 1"]);
+    expect(marcasPedidas()[0].a).toEqual({ p_org: ORG, p_q: null, p_categoria: null, p_subcategoria: null, p_modelo: null, p_sem_categoria: false });
+  });
+  it("a lista muda quando se escolhe a categoria e depois a subcategoria", async () => {
+    await pagina();
+    await comMarcaTem("Bellacasa · 196");
+    esc("Categoria", "Canalização");
+    await comMarcaAberta(["Todas as marcas", "Bellacasa · 5", "Grohe · 1"]);
+    expect(marcasPedidas().at(-1)!.a).toMatchObject({ p_categoria: ID.pcOf });
+    esc("Subcategoria", "Louças e torneiras");
+    await comMarcaAberta(["Todas as marcas", "Grohe · 1"]);
+    expect(marcasPedidas().at(-1)!.a).toMatchObject({ p_categoria: ID.pcOf, p_subcategoria: ID.pcSub });
+  });
+  it("escolher uma marca filtra a lista e não faz nova leitura das marcas", async () => {
+    await pagina();
+    await comMarcaTem("Roca · 1");
+    const antes = marcasPedidas().length;
+    esc("Marca", "Roca · 1");
+    await waitFor(() => expect(ultima()).toMatchObject({ p_marca: "Roca", p_pagina: 1 }));
+    await espera(50);
+    expect(marcasPedidas()).toHaveLength(antes);
+    expect(botaoDe("Marca").textContent).toContain("Roca");
+  });
+  it("se a marca escolhida deixa de existir no novo conjunto volta a «Todas as marcas» e a lista à página 1", async () => {
+    await pagina();
+    await comMarcaTem("Roca · 1");
+    esc("Marca", "Roca · 1");
+    await waitFor(() => expect(ultima()).toMatchObject({ p_marca: "Roca" }));
+    fireEvent.click(botaoFim("Seguinte"));
+    await screen.findAllByText(/Página 2 de 3/);
+    esc("Categoria", "Canalização"); // aqui a Roca não existe
+    await waitFor(() => expect(botaoDe("Marca").textContent).toBe("Todas as marcas"));
+    await waitFor(() => expect(ultima()).toMatchObject({ p_marca: null, p_categoria: ID.pcOf, p_pagina: 1 }));
+    await screen.findAllByText(/Página 1 de 3/);
+  });
+  it("sem piscar: enquanto lê, mantém a lista anterior e a marca escolhida (não a repõe antes de a leitura acabar)", async () => {
+    await pagina();
+    await comMarcaTem("Roca · 1");
+    esc("Marca", "Roca · 1");
+    await waitFor(() => expect(ultima()).toMatchObject({ p_marca: "Roca" }));
+    let soltar: (v: unknown) => void = () => {};
+    const presa = new Promise((r) => { soltar = r; });
+    base.responder = (f, a) => (f === "cat_ler_marcas_do_filtro" ? presa : marcasPor(f, a));
+    esc("Categoria", "Canalização");
+    await espera(50);
+    expect(botaoDe("Marca").textContent).toContain("Roca"); // a leitura nova ainda decorre
+    await comMarcaAberta(["Todas as marcas", "Bellacasa · 196", "Grohe · 1", "Roca · 1"]); // a anterior, sem piscar
+    expect(ultima()).toMatchObject({ p_marca: "Roca" });
+    await act(async () => { soltar(marcasPor("cat_ler_marcas_do_filtro", { p_categoria: ID.pcOf })); await presa; });
+    await waitFor(() => expect(botaoDe("Marca").textContent).toBe("Todas as marcas"));
+  });
+  it("com marca escolhida, mudar a categoria não pede a lista com a marca antiga e a categoria nova; mantém a anterior («a ler») e pede só quando as marcas chegam", async () => {
+    await pagina();
+    await comMarcaTem("Roca · 1");
+    esc("Marca", "Roca · 1");
+    await waitFor(() => expect(ultima()).toMatchObject({ p_marca: "Roca" }));
+    let soltar: (v: unknown) => void = () => {};
+    const presa = new Promise((r) => { soltar = r; });
+    base.responder = (f, a) => (f === "cat_ler_marcas_do_filtro" ? presa : marcasPor(f, a));
+    const antes = paginas().length;
+    esc("Categoria", "Canalização");
+    await espera(100);
+    expect(paginas().slice(antes).filter((c) => c.a.p_categoria === ID.pcOf)).toEqual([]); // nenhum pedido novo enquanto as marcas não chegam
+    expect(document.querySelector("ul[aria-busy='true']")).not.toBeNull(); // a lista anterior fica, a ler
+    await act(async () => { soltar(marcasPor("cat_ler_marcas_do_filtro", { p_categoria: ID.pcOf })); await presa; });
+    await waitFor(() => expect(ultima()).toMatchObject({ p_categoria: ID.pcOf, p_marca: null, p_pagina: 1 }));
+    expect(paginas().filter((c) => c.a.p_categoria === ID.pcOf && c.a.p_marca === "Roca")).toEqual([]); // nunca a combinação antiga
+  });
+  it("sem a função na base usa as marcas do arranque (sem número) e não mostra erro", async () => {
+    base.responder = (f, a) => (f === "cat_ler_marcas_do_filtro" ? { data: null, error: { code: "PGRST202", message: "Could not find the function public.cat_ler_marcas_do_filtro(p_org) in the schema cache" } } : padrao(f, a));
+    await pagina();
+    await waitFor(() => expect(marcasPedidas().length).toBeGreaterThan(0));
+    await espera(50);
+    await comMarcaAberta(["Todas as marcas", "Grohe", "Roca"]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+  it("se a leitura falha (tempo) usa as marcas do arranque, sem erro visível", async () => {
+    base.responder = (f, a) => (f === "cat_ler_marcas_do_filtro" ? { data: null, error: { code: "57014", message: "statement timeout" } } : padrao(f, a));
+    await pagina();
+    await waitFor(() => expect(marcasPedidas().length).toBeGreaterThan(0));
+    await espera(50);
+    await comMarcaAberta(["Todas as marcas", "Grohe", "Roca"]);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+  it("escrever depressa na pesquisa não lê as marcas a cada tecla: uma só leitura, com o texto todo, passados ~300 ms", async () => {
+    await pagina();
+    await waitFor(() => expect(marcasPedidas().length).toBeGreaterThan(0));
+    const antes = marcasPedidas().length;
+    const caixa = painel().getByRole("searchbox", { name: "Procurar produto" });
+    for (const t of ["g", "gr", "gro"]) fireEvent.change(caixa, { target: { value: t } });
+    await espera(120);
+    expect(marcasPedidas()).toHaveLength(antes);
+    await waitFor(() => expect(marcasPedidas()).toHaveLength(antes + 1), { timeout: 2000 });
+    expect(marcasPedidas().at(-1)!.a).toMatchObject({ p_q: "gro" });
+  });
+});
+
+// 18/11: o contador diz quais os produtos que se estão a ver («produtos 51–100 de 120»), calculado com o limite e o total da própria página
+describe("Produtos por páginas · o contador diz que produtos se vêem", () => {
+  it("a página seguinte mostra o intervalo seguinte, e a última acaba no total", async () => {
+    await pagina();
+    fireEvent.click(botaoFim("Seguinte"));
+    await screen.findAllByText("Página 2 de 3 · produtos 51–100 de 120");
+    fireEvent.click(botaoFim("Seguinte"));
+    await screen.findAllByText("Página 3 de 3 · produtos 101–120 de 120");
+  });
+});
+
+// 18/11: o SKU numa linha própria, logo por baixo do nome; a linha cinzenta fica só com marca e modelo
+describe("Produtos por páginas · o SKU na linha", () => {
+  it("o SKU tem linha própria, logo a seguir ao nome, com a etiqueta «SKU»; a linha cinzenta já não leva «ref.»", async () => {
+    await pagina();
+    const l = painel().getByRole("button", { name: "Torneira cozinha" }).closest("li")!;
+    const valor = within(l).getByText("CB-0001-1");
+    expect(within(l).getByText("SKU")).toBeInTheDocument();
+    const nome = within(l).getByRole("button", { name: "Torneira cozinha" });
+    expect(nome.compareDocumentPosition(valor) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(l.textContent).not.toContain("ref.");
+    const cinzenta = within(l).getByText("Grohe · 0001 · SORTY");
+    expect(cinzenta.textContent).toBe("Grohe · 0001 · SORTY");
+    expect(cinzenta).not.toContainElement(valor);
+  });
+  it("clicar no SKU seleciona-o e não abre a ficha; clicar no resto da linha continua a abrir", async () => {
+    await pagina();
+    const l = painel().getByRole("button", { name: "Torneira cozinha" }).closest("li")!;
+    fireEvent.click(within(l).getByText("CB-0001-1"));
+    expect(window.getSelection()?.toString()).toBe("CB-0001-1");
+    expect(screen.queryByRole("heading", { level: 1, name: "Torneira cozinha" })).toBeNull();
+    fireEvent.click(within(l).getByText("Grohe · 0001 · SORTY"));
+    expect(await screen.findByRole("heading", { level: 1, name: "Torneira cozinha" })).toBeInTheDocument();
+  });
+  it("no modo «Selecionar» clicar no SKU não marca nem desmarca a linha; clicar no resto da linha marca-a", async () => {
+    await pagina();
+    fireEvent.click(painel().getByRole("button", { name: "Selecionar" }));
+    const l = (await screen.findByRole("checkbox", { name: "Selecionar Torneira cozinha" })).closest("li")!;
+    fireEvent.click(within(l).getByText("CB-0001-1"));
+    expect(screen.queryByText("1 selecionado")).toBeNull();
+    fireEvent.click(within(l).getByText("Grohe · 0001 · SORTY"));
+    expect(screen.getByText("1 selecionado")).toBeInTheDocument();
+  });
+  it("sem SKU ou com a referência provisória diz «SKU por gerar»", async () => {
+    base.responder = (f, a) => {
+      const r = padrao(f, a) as { data: { produtos?: Record<string, unknown>[] } };
+      if (f === "cat_ler_produtos_pagina" && a.p_pagina === 1) r.data.produtos = [
+        linha(ID.torneira, "Torneira cozinha", { sku: "CAT-0123456789" }),
+        linha(ID.lavatorio, "Lavatório suspenso", { sku: null }),
+      ];
+      return r;
+    };
+    await pagina();
+    for (const nome of ["Torneira cozinha", "Lavatório suspenso"]) {
+      const l = painel().getByRole("button", { name: nome }).closest("li")!;
+      expect(within(l).getByText("SKU por gerar")).toBeInTheDocument();
+      expect(l.textContent).not.toContain("CAT-0123456789");
+    }
   });
 });
 
