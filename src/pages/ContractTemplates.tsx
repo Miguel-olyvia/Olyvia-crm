@@ -31,7 +31,7 @@ import { applyQuoteItemsToken, applyFormulaChips, injectSignatoryIntoSignatureBl
 import { useOrgHeaderData, applyOrgHeaderOverrides } from "@/components/contracts/useOrgHeaderData";
 import { upsertQuoteItemsChipInHtml, readQuoteItemsChipConfig } from "@/components/contracts/TableInsertPopover";
 import { DEFAULT_QUOTE_ITEMS_CONFIG, type QuoteItemsChipConfig } from "@/components/contracts/DataTableConfigForm";
-import { BASE_TEMPLATES, VARIABLE_CATEGORIES, CLAUSE_ORDINALS, type BaseTemplate } from "@/utils/contractBaseTemplates";
+import { BASE_TEMPLATES, VARIABLE_CATEGORIES, type BaseTemplate } from "@/utils/contractBaseTemplates";
 import { DocumentSettingsPanel } from "@/components/contracts/DocumentSettingsPanel";
 import { TemplateDocSettingsPanel, type TemplateDocSettings } from "@/components/contracts/TemplateDocSettingsPanel";
 import { EnhancedToolbarButtons } from "@/components/contracts/EnhancedToolbarButtons";
@@ -45,6 +45,18 @@ import { SignatoryOtpDialog } from "@/components/contracts/SignatoryOtpDialog";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { DocumentPreview } from "@/components/document-editor/DocumentPreview";
 import { contractTemplateFormSchema } from "@/lib/validations";
+import { tDoc } from "@/lib/idiomaDocumento/dicionario";
+import { obterIdioma } from "@/lib/idiomaDocumento/registo";
+import { useVersoesDoTemplate } from "@/components/contracts/versoes/useVersoesDoTemplate";
+import { BarraDeIdiomasDoTemplate, BotaoAdicionarIdioma } from "@/components/contracts/versoes/BarraDeIdiomasDoTemplate";
+import { ID_PAINEL_IDIOMA, idDaAbaDeIdioma } from "@/components/contracts/versoes/idsDeIdioma";
+import { ListaDeVerificacaoDaVersao } from "@/components/contracts/versoes/ListaDeVerificacaoDaVersao";
+import { ChipsDeIdiomasDoCartao } from "@/components/contracts/versoes/ChipsDeIdiomasDoCartao";
+import { corpoTemLocalDeAssinatura, htmlNovaClausula } from "@/components/contracts/versoes/blocosDeInsercao";
+import {
+  COLUNAS_DA_MINUTA, ConflitoDeEdicaoError, atualizarMinutaComGuarda, verificarSemConflito,
+  payloadDeAtualizar, payloadDeCriar, payloadDeDuplicar,
+} from "@/components/contracts/versoes/guardarMinuta";
 
 interface ContractTemplate {
   id: string;
@@ -60,6 +72,8 @@ interface ContractTemplate {
   signatory_user_id: string | null;
   signatory_role_id: string | null;
   doc_settings: TemplateDocSettings | null;
+  /** Idioma do texto base da minuta (coluna `language`, omissão 'pt'). */
+  language?: string | null;
 }
 
 const ContractTemplates = () => {
@@ -75,7 +89,12 @@ const ContractTemplates = () => {
   const [previewHtml, setPreviewHtml] = useState("");
   const [previewSettings, setPreviewSettings] = useState<any>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
-  const [formData, setFormData] = useState({ name: "", body_html: "", is_active: true, is_default: false, signatory_user_id: null as string | null, signatory_role_id: null as string | null, doc_settings: null as TemplateDocSettings | null });
+  const [formData, setFormData] = useState({ name: "", body_html: "", is_active: true, is_default: false, signatory_user_id: null as string | null, signatory_role_id: null as string | null, doc_settings: null as TemplateDocSettings | null, language: "pt" as string | null });
+  // Versões por idioma da minuta: sem versões o idioma ativo é o base e nada muda.
+  const versoes = useVersoesDoTemplate(formData, setFormData);
+  // O «Guardar» não atualizou porque outra pessoa alterou a minuta entretanto: guarda o updated_at de agora.
+  const [conflitoAtualizadoEm, setConflitoAtualizadoEm] = useState<string | null>(null);
+  const [previewIdioma, setPreviewIdioma] = useState("pt");
   const [showBaseTemplates, setShowBaseTemplates] = useState(false);
   const [editorTab, setEditorTab] = useState<string>("editor");
   const [otpDialogOpen, setOtpDialogOpen] = useState(false);
@@ -116,9 +135,9 @@ const ContractTemplates = () => {
   const mergedSettings = useMemo<any>(() => ({
     ...(docSettings || {}),
     ...(liveDocSettings || {}),
-    ...(formData.doc_settings || {}),
+    ...(versoes.preview.doc_settings || {}),
     show_quote_items: true,
-  }), [docSettings, liveDocSettings, formData.doc_settings]);
+  }), [docSettings, liveDocSettings, versoes.preview.doc_settings]);
   const primaryColor: string = mergedSettings.primary_color || "#7C3AED";
   // Fetch active org empresa data so the template preview reflects real organization info
   const { data: orgHeader } = useOrgHeaderData();
@@ -185,26 +204,28 @@ const ContractTemplates = () => {
     );
   }, [selectedSignatoryData]);
 
+  // As palavras da pré-visualização (rótulos de tabela, campos em falta, datas) seguem o idioma do texto mostrado.
+  const idiomaDaPreview = versoes.ativo;
   const editorPreprocess = useCallback(
     (html: string, sampleData: Record<string, any>) => {
-      const withItems = applyQuoteItemsToken(html, sampleData as any, mergedSettings, primaryColor, false);
-      const substituted = substituteVariables(withItems, sampleData);
+      const withItems = applyQuoteItemsToken(html, sampleData as any, mergedSettings, primaryColor, false, idiomaDaPreview);
+      const substituted = substituteVariables(withItems, sampleData, false, idiomaDaPreview);
       const withFormulas = applyFormulaChips(substituted, sampleData as any);
       return injectSignatoryFallback(withFormulas);
     },
-    [mergedSettings, primaryColor, injectSignatoryFallback],
+    [mergedSettings, primaryColor, injectSignatoryFallback, idiomaDaPreview],
   );
   const buildPreviewHtml = useCallback(
-    (html: string, sampleData: Record<string, any>, settings: any) => {
+    (html: string, sampleData: Record<string, any>, settings: any, idioma: string = "pt") => {
       const color = settings?.primary_color || "#7C3AED";
-      const withItems = applyQuoteItemsToken(html, sampleData as any, settings, color, false);
-      const substituted = substituteVariables(withItems, sampleData);
+      const withItems = applyQuoteItemsToken(html, sampleData as any, settings, color, false, idioma);
+      const substituted = substituteVariables(withItems, sampleData, false, idioma);
       const withFormulas = applyFormulaChips(substituted, sampleData as any);
       return injectSignatoryFallback(withFormulas);
     },
     [injectSignatoryFallback],
   );
-  const deferredBody = useDeferredValue(formData.body_html);
+  const deferredBody = useDeferredValue(versoes.preview.body_html);
 
   // ─── Sync between lateral "Lista de Artigos" settings and the block in body_html ───
   // The settings panel writes into formData.doc_settings; this effect propagates
@@ -284,7 +305,7 @@ const ContractTemplates = () => {
       if (!activeCompany?.id) return [];
       const { data, error } = await (supabase as any)
         .from("client_contract_templates")
-        .select("id, name, description, body_html, is_active, is_default, organization_id, created_at, created_by, updated_at, signatory_user_id, signatory_role_id, doc_settings")
+        .select(COLUNAS_DA_MINUTA)
         .eq("organization_id", activeCompany.id)
         .order("is_default", { ascending: false })
         .order("created_at", { ascending: false });
@@ -320,12 +341,9 @@ const ContractTemplates = () => {
       if (data.is_default) {
         await (supabase as any).from("client_contract_templates").update({ is_default: false }).eq("organization_id", activeCompany?.id);
       }
-      const { data: inserted, error } = await (supabase as any).from("client_contract_templates").insert({
-        name: data.name, body_html: data.body_html, is_active: data.is_active, is_default: data.is_default,
-        organization_id: activeCompany?.id, created_by: businessUserId,
-        signatory_user_id: data.signatory_user_id, signatory_role_id: data.signatory_role_id,
-        doc_settings: data.doc_settings,
-      }).select("id");
+      const { data: inserted, error } = await (supabase as any).from("client_contract_templates")
+        .insert(payloadDeCriar(data, activeCompany?.id, businessUserId))
+        .select("id");
       if (error) throw error;
       if (!inserted || inserted.length === 0) throw new Error("Sem permissão para criar minuta");
     },
@@ -341,17 +359,17 @@ const ContractTemplates = () => {
   });
 
   const updateMutation = useMutation({
-    mutationFn: async (data: typeof formData & { id: string }) => {
+    mutationFn: async (data: typeof formData & { id: string; carregadoEm?: string | null; linguaCarregada?: string | null }) => {
       if (data.is_default) {
+        // Antes de tirar o «default» às outras minutas, ver se esta não foi alterada por outra pessoa.
+        await verificarSemConflito(supabase as any, { id: data.id, carregadoEm: data.carregadoEm });
         await (supabase as any).from("client_contract_templates").update({ is_default: false }).eq("organization_id", activeCompany?.id);
       }
-      const { data: updated, error } = await (supabase as any)
-        .from("client_contract_templates")
-        .update({ name: data.name, body_html: data.body_html, is_active: data.is_active, is_default: data.is_default, signatory_user_id: data.signatory_user_id, signatory_role_id: data.signatory_role_id, doc_settings: data.doc_settings })
-        .eq("id", data.id)
-        .select("id");
-      if (error) throw error;
-      if (!updated || updated.length === 0) throw new Error("Sem permissão para guardar esta minuta");
+      await atualizarMinutaComGuarda(supabase as any, {
+        id: data.id,
+        carregadoEm: data.carregadoEm,
+        payload: payloadDeAtualizar(data, data.linguaCarregada),
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["contract-templates"] });
@@ -359,6 +377,11 @@ const ContractTemplates = () => {
       handleCloseEditor();
     },
     onError: async (error: any) => {
+      // O texto do editor fica como está; só se pergunta se se guarda por cima.
+      if (error instanceof ConflitoDeEdicaoError) {
+        setConflitoAtualizadoEm(error.atualizadoEm);
+        return;
+      }
       const description = await getFriendlyErrorMessage(error);
       toast.error(t('contractTemplates.toast.updateError'), { description });
     },
@@ -388,12 +411,9 @@ const ContractTemplates = () => {
       if (!user.user) throw new Error("Não autenticado");
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error("Business user not resolved");
-      const { data: inserted, error } = await (supabase as any).from("client_contract_templates").insert({
-        name: `${template.name} (cópia)`, body_html: template.body_html, is_active: false, is_default: false,
-        organization_id: activeCompany?.id, created_by: businessUserId,
-        signatory_user_id: template.signatory_user_id, signatory_role_id: template.signatory_role_id,
-        doc_settings: template.doc_settings,
-      }).select("id");
+      const { data: inserted, error } = await (supabase as any).from("client_contract_templates")
+        .insert(payloadDeDuplicar(template, activeCompany?.id, businessUserId))
+        .select("id");
       if (error) throw error;
       if (!inserted || inserted.length === 0) throw new Error("Sem permissão para duplicar minuta");
     },
@@ -410,7 +430,9 @@ const ContractTemplates = () => {
   const handleCloseEditor = () => {
     setIsEditorOpen(false);
     setEditingTemplate(null);
-    setFormData({ name: "", body_html: "", is_active: true, is_default: false, signatory_user_id: null, signatory_role_id: null, doc_settings: null });
+    setFormData({ name: "", body_html: "", is_active: true, is_default: false, signatory_user_id: null, signatory_role_id: null, doc_settings: null, language: "pt" });
+    versoes.reiniciar();
+    setConflitoAtualizadoEm(null);
     setShowBaseTemplates(false);
     setEditorTab("editor");
 
@@ -419,14 +441,18 @@ const ContractTemplates = () => {
 
   const handleEdit = (template: ContractTemplate) => {
     setEditingTemplate(template);
-    setFormData({ name: template.name, body_html: template.body_html, is_active: template.is_active ?? true, is_default: template.is_default ?? false, signatory_user_id: template.signatory_user_id, signatory_role_id: template.signatory_role_id, doc_settings: template.doc_settings ?? null });
+    setFormData({ name: template.name, body_html: template.body_html, is_active: template.is_active ?? true, is_default: template.is_default ?? false, signatory_user_id: template.signatory_user_id, signatory_role_id: template.signatory_role_id, doc_settings: template.doc_settings ?? null, language: template.language ?? "pt" });
+    versoes.reiniciar();
+    setConflitoAtualizadoEm(null);
     setIsEditorOpen(true);
   };
 
   const handlePreview = (template: ContractTemplate) => {
-    const tDoc: any = { ...(docSettings || {}), ...(template.doc_settings || {}), show_quote_items: true };
-    setPreviewHtml(buildPreviewHtml(template.body_html, previewSampleData, tDoc));
-    setPreviewSettings(tDoc);
+    const idioma = template.language || "pt";
+    const settingsDoTemplate: any = { ...(docSettings || {}), ...(template.doc_settings || {}), show_quote_items: true };
+    setPreviewHtml(buildPreviewHtml(template.body_html, previewSampleData, settingsDoTemplate, idioma));
+    setPreviewSettings(settingsDoTemplate);
+    setPreviewIdioma(idioma);
     setIsPreviewOpen(true);
   };
 
@@ -448,12 +474,8 @@ const ContractTemplates = () => {
 
   const handleInsertClause = () => {
     if (!editorRef.current) return;
-    const currentHtml = formData.body_html || "";
-    const clauseMatches = currentHtml.match(/<strong>([A-ZÁÉÍÓÚÂÊÔÃÕÇ\s]+) —/g);
-    const nextIndex = clauseMatches ? clauseMatches.length : 0;
-    const ordinal = CLAUSE_ORDINALS[nextIndex] || `CLÁUSULA ${nextIndex + 1}`;
-    const clauseHtml = `<br/><p><strong>${ordinal} — Título da Cláusula</strong></p><p><em>(clique aqui para editar esta cláusula...)</em></p><br/>`;
-    document.execCommand("insertHTML", false, clauseHtml);
+    // A cláusula nova segue o idioma do corpo que se está a editar (ordinais, título e instrução).
+    document.execCommand("insertHTML", false, htmlNovaClausula(versoes.ativo, versoes.corpo || ""));
   };
 
   const handleExecCommand = useCallback((cmd: string, value?: string) => {
@@ -490,7 +512,7 @@ const ContractTemplates = () => {
     }
 
     if (editingTemplate) {
-      updateMutation.mutate({ ...formData, id: editingTemplate.id });
+      updateMutation.mutate({ ...formData, id: editingTemplate.id, carregadoEm: editingTemplate.updated_at, linguaCarregada: editingTemplate.language });
     } else {
       createMutation.mutate(formData);
     }
@@ -513,8 +535,12 @@ const ContractTemplates = () => {
     return <><div className="flex items-center justify-center h-64"><Loader2 className="h-8 w-8 animate-spin text-primary" /></div></>;
   }
 
-  const wordCount = formData.body_html ? formData.body_html.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length : 0;
-  const clauseCount = countClauses(formData.body_html);
+  const wordCount = versoes.corpo ? versoes.corpo.replace(/<[^>]*>/g, " ").split(/\s+/).filter(Boolean).length : 0;
+  const clauseCount = countClauses(versoes.corpo);
+  // Numa versão de idioma, o painel de layout mostra só os textos dessa versão; o resto é comum (desativado).
+  const versaoEmEdicao = versoes.ehBase
+    ? undefined
+    : { codigo: versoes.ativo, base: versoes.base, textoBase: (formData.doc_settings?.footer_text as string | null | undefined) ?? null };
 
   return (
     <>
@@ -568,6 +594,7 @@ const ContractTemplates = () => {
                           <h3 className="font-semibold">{template.name}</h3>
                           {template.is_default && <Badge className="bg-primary/20 text-primary text-[10px]">Default</Badge>}
                           {!template.is_active && <Badge variant="secondary" className="text-[10px]">Inactiva</Badge>}
+                          <ChipsDeIdiomasDoCartao template={template} />
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5">
                           {countClauses(template.body_html)} cláusulas · Usado {usage} {usage === 1 ? "vez" : "vezes"} · Última edição: {new Date(template.updated_at).toLocaleDateString("pt-PT")}
@@ -671,10 +698,33 @@ const ContractTemplates = () => {
                       <Switch id="is_default" checked={formData.is_default} onCheckedChange={c => setFormData({ ...formData, is_default: c })} />
                       <Label htmlFor="is_default" className="text-sm flex items-center gap-1"><Star className="h-3.5 w-3.5" /> Default</Label>
                     </div>
+                    {/* Sem versões, a barra de idiomas ainda não aparece: este botão é a única entrada. */}
+                    {canManage && !versoes.mostrarBarra && <BotaoAdicionarIdioma expandido={false} onClick={versoes.abrirAdicionar} />}
                   </div>
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_minmax(420px,0.9fr)] gap-4 flex-1 min-h-0">
+                <div
+                  className="flex flex-col gap-2 min-h-0"
+                  {...(versoes.mostrarBarra ? { id: ID_PAINEL_IDIOMA, role: "tabpanel", "aria-labelledby": idDaAbaDeIdioma(versoes.ativo) } : {})}
+                >
+                {versoes.mostrarBarra && (
+                  <BarraDeIdiomasDoTemplate
+                    base={versoes.base}
+                    ativo={versoes.ativo}
+                    versoes={versoes.versoes}
+                    completudes={versoes.completudes}
+                    faltamAdicionar={versoes.faltamAdicionar}
+                    adicionando={versoes.adicionando}
+                    somenteLeitura={!canManage}
+                    onSelecionar={versoes.definirAtivo}
+                    onAbrirAdicionar={versoes.abrirAdicionar}
+                    onFecharAdicionar={versoes.fecharAdicionar}
+                    onAdicionar={versoes.adicionar}
+                    onRemover={versoes.remover}
+                    onMarcarRevisto={versoes.marcarRevisto}
+                  />
+                )}
                 <Tabs value={editorTab} onValueChange={setEditorTab} className="flex-1 flex flex-col min-h-0">
                   <TabsList className="mb-2">
                     <TabsTrigger value="editor" className="gap-1.5">
@@ -697,7 +747,7 @@ const ContractTemplates = () => {
                   <TabsContent value="editor" className="flex-1 min-h-0 overflow-y-auto space-y-3">
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <Label>Editor da Minuta *</Label>
+                        <Label>{versoes.ehBase ? "Editor da Minuta *" : `${t("contractTemplates.versoes.corpo.rotulo", { nome: obterIdioma(versoes.ativo)?.nomeNativo ?? versoes.ativo })} *`}</Label>
                         <span className="text-xs text-muted-foreground">{clauseCount} cláusulas · ~{wordCount} palavras</span>
                       </div>
                       {(() => {
@@ -705,7 +755,7 @@ const ContractTemplates = () => {
                         const found = new Set<string>();
                         const re = /\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g;
                         let m: RegExpExecArray | null;
-                        while ((m = re.exec(formData.body_html || "")) !== null) {
+                        while ((m = re.exec(versoes.corpo || "")) !== null) {
                           if (!knownKeys.has(m[1])) found.add(m[1]);
                         }
                         if (found.size === 0) return null;
@@ -722,9 +772,10 @@ const ContractTemplates = () => {
                         );
                       })()}
                       <RichTextEditor
+                        key={versoes.ativo}
                         ref={editorRef}
-                        value={formData.body_html}
-                        onChange={v => setFormData({ ...formData, body_html: v })}
+                        value={versoes.corpo}
+                        onChange={versoes.setCorpo}
                         placeholder="... continuar a escrever cláusulas ..."
                         variables={editorVariables}
                         minHeight="400px"
@@ -739,10 +790,13 @@ const ContractTemplates = () => {
                             >
                               + Cláusula
                             </Button>
-                            <EnhancedToolbarButtons onExecCommand={handleExecCommand} />
+                            <EnhancedToolbarButtons onExecCommand={handleExecCommand} idioma={versoes.ativo} />
                           </>
                         }
                       />
+                      {!versoes.ehBase && (
+                        <ListaDeVerificacaoDaVersao linhas={versoes.linhas} base={versoes.base} />
+                      )}
                     </div>
                   </TabsContent>
 
@@ -751,13 +805,11 @@ const ContractTemplates = () => {
                     <div className="border rounded-lg bg-muted/10">
                       <TemplateDocSettingsPanel
                         orgName={activeCompany?.name}
-                        value={formData.doc_settings || {}}
-                        onChange={(next) => {
-                          const isEmpty = !next || Object.keys(next).length === 0;
-                          setFormData({ ...formData, doc_settings: isEmpty ? null : next });
-                        }}
-                        bodyHtml={formData.body_html}
-                        onBodyHtmlChange={(html) => setFormData((fd) => ({ ...fd, body_html: html }))}
+                        value={versoes.settings || {}}
+                        onChange={versoes.setSettings}
+                        bodyHtml={versoes.corpo}
+                        onBodyHtmlChange={versoes.setCorpo}
+                        versao={versaoEmEdicao}
                       />
                     </div>
                   </TabsContent>
@@ -814,7 +866,7 @@ const ContractTemplates = () => {
                   </TabsContent>
 
                   <TabsContent value="signatures" className="flex-1 min-h-0 overflow-y-auto space-y-4">
-                    {formData.signatory_user_id && !hasSignatoryHook(formData.body_html) && (
+                    {formData.signatory_user_id && !(hasSignatoryHook(versoes.corpo) || (versoes.ativo !== "pt" && corpoTemLocalDeAssinatura(versoes.corpo))) && (
                       <div className="border rounded-lg p-3 bg-amber-50 border-amber-200 text-sm flex items-start gap-3">
                         <div className="flex-1 text-amber-900">
                           O corpo da minuta não tem nenhum local para mostrar o signatário (sem
@@ -826,8 +878,7 @@ const ContractTemplates = () => {
                           size="sm"
                           variant="outline"
                           onClick={() => {
-                            const nextBody = `${formData.body_html || ""}${SIGNATORY_BLOCK_MARKER_HTML}`;
-                            setFormData({ ...formData, body_html: nextBody });
+                            versoes.setCorpo(`${versoes.corpo || ""}${SIGNATORY_BLOCK_MARKER_HTML}`);
                             toast.success(t('contractTemplates.toast.signatureBlockAdded'));
                           }}
                         >
@@ -867,6 +918,7 @@ const ContractTemplates = () => {
                     />
                   </TabsContent>
                 </Tabs>
+                </div>
 
                 <aside className="hidden lg:flex flex-col min-h-0 border rounded-lg bg-muted/10 overflow-hidden">
                   <header className="flex items-center justify-between px-3 py-2 border-b bg-background/60">
@@ -880,8 +932,8 @@ const ContractTemplates = () => {
                       bodyHtml={deferredBody}
                       sampleData={previewSampleData as any}
                       preprocessHtml={editorPreprocess}
-                      headerSlot={<ContractPreviewHeader settings={mergedSettings} />}
-                      footerSlot={<ContractPreviewFooter settings={mergedSettings} />}
+                      headerSlot={<ContractPreviewHeader settings={mergedSettings} idioma={idiomaDaPreview} />}
+                      footerSlot={<ContractPreviewFooter settings={mergedSettings} idioma={idiomaDaPreview} />}
                     />
                   </div>
                 </aside>
@@ -889,14 +941,15 @@ const ContractTemplates = () => {
 
                 <DialogFooter className="mt-4 pt-4 border-t">
                   <Button type="button" variant="outline" onClick={handleCloseEditor}>Cancelar</Button>
-                  {formData.body_html && (
-                    <TemplateExportButtons templateName={formData.name || "minuta"} bodyHtml={formData.body_html} variant="button" docSettingsOverride={mergedSettings} sampleData={previewSampleData} />
+                  {versoes.preview.body_html && (
+                    <TemplateExportButtons templateName={formData.name || "minuta"} bodyHtml={versoes.preview.body_html} variant="button" docSettingsOverride={mergedSettings} sampleData={previewSampleData} />
                   )}
                   <Button
-                    type="button" variant="outline" disabled={!formData.body_html}
+                    type="button" variant="outline" disabled={!versoes.preview.body_html}
                     onClick={() => {
-                      setPreviewHtml(buildPreviewHtml(formData.body_html, previewSampleData, mergedSettings));
+                      setPreviewHtml(buildPreviewHtml(versoes.preview.body_html, previewSampleData, mergedSettings, versoes.ativo));
                       setPreviewSettings(mergedSettings);
+                      setPreviewIdioma(versoes.ativo);
                       setIsPreviewOpen(true);
                     }}
                   >
@@ -939,8 +992,8 @@ const ContractTemplates = () => {
                     settings={ds}
                     bodyHtml={previewHtml}
                     sampleData={previewSampleData as any}
-                    headerSlot={<ContractPreviewHeader settings={ds} sampleData={previewSampleData} />}
-                    footerSlot={<ContractPreviewFooter settings={ds} />}
+                    headerSlot={<ContractPreviewHeader settings={ds} sampleData={previewSampleData} idioma={previewIdioma} />}
+                    footerSlot={<ContractPreviewFooter settings={ds} idioma={previewIdioma} />}
                   />
                 );
               })()}
@@ -969,26 +1022,49 @@ const ContractTemplates = () => {
         <VariableDetectionAssistant
           open={isVariableAssistantOpen}
           onOpenChange={setIsVariableAssistantOpen}
-          html={formData.body_html}
-          onApply={(newHtml) => setFormData({ ...formData, body_html: newHtml })}
+          html={versoes.corpo}
+          onApply={versoes.setCorpo}
         />
+
+        {/* Outra pessoa guardou a minuta depois de a abrirmos: o texto do editor fica; pergunta-se se se guarda por cima. */}
+        <AlertDialog open={conflitoAtualizadoEm !== null} onOpenChange={(open) => !open && setConflitoAtualizadoEm(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>{t("contractTemplates.versoes.guardar.conflitoTitulo")}</AlertDialogTitle>
+              <AlertDialogDescription>{t("contractTemplates.versoes.guardar.conflitoDescricao")}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>{t("contractTemplates.versoes.guardar.cancelar")}</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => {
+                  if (editingTemplate && conflitoAtualizadoEm) {
+                    updateMutation.mutate({ ...formData, id: editingTemplate.id, carregadoEm: conflitoAtualizadoEm, linguaCarregada: editingTemplate.language });
+                  }
+                  setConflitoAtualizadoEm(null);
+                }}
+              >
+                {t("contractTemplates.versoes.guardar.substituir")}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </>
   );
 };
 
-function ContractPreviewHeader({ settings, sampleData }: { settings: any; sampleData?: any }) {
-  const html = renderContractHeaderHtml(settings || {}, (sampleData || SAMPLE_VARIABLE_DATA) as any);
+function ContractPreviewHeader({ settings, sampleData, idioma = "pt" }: { settings: any; sampleData?: any; idioma?: string }) {
+  const html = renderContractHeaderHtml(settings || {}, (sampleData || SAMPLE_VARIABLE_DATA) as any, idioma);
   return <div dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }} />;
 }
 
-function ContractPreviewFooter({ settings }: { settings: any }) {
+function ContractPreviewFooter({ settings, idioma = "pt" }: { settings: any; idioma?: string }) {
   const ds = settings || {};
   if (ds.show_footer === false) return null;
   return (
     <div className="mt-12 pt-4 border-t text-center text-xs text-muted-foreground">
       {ds.footer_text && <p>{ds.footer_text}</p>}
-      {ds.show_page_numbers !== false && <p className="mt-1">Página 1 de 1</p>}
+      {ds.show_page_numbers !== false && <p className="mt-1">{tDoc(idioma, "doc.pagina", { x: 1, y: 1 })}</p>}
     </div>
   );
 }

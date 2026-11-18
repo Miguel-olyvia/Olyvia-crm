@@ -74,6 +74,11 @@ import { pt } from "date-fns/locale";
 import { GalleryPickerDialog } from "@/components/GalleryPickerDialog";
 import { RichTextEditor } from "@/components/RichTextEditor";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { BarraDeIdiomas } from "@/components/proposals/versoes/BarraDeIdiomas";
+import { PainelDaVersao } from "@/components/proposals/versoes/PainelDaVersao";
+import { useVersoesDaProposta } from "@/components/proposals/versoes/useVersoesDaProposta";
+import { comVersoesNoDesign, idDaAba, separarVersoes } from "@/components/proposals/versoes/modeloVersoes";
 
 // Mock data for preview
 const mockProposal = {
@@ -727,7 +732,15 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
   // a config default em branco (bug: loadTemplate engolia erros).
   const [loadFailed, setLoadFailed] = useState(false);
 
-  const isDirty = isLoaded && initialConfigRef.current !== null && initialConfigRef.current !== JSON.stringify({ config, itemsTableSettings });
+  // Versões por idioma (design_settings.versions): estado próprio, como items_table, e não dentro do config.
+  const versoesDoc = useVersoesDaProposta(config);
+  const { versoes } = versoesDoc;
+  // updated_at do template quando foi carregado: guarda de concorrência na gravação.
+  const carregadoEmRef = useRef<string | null>(null);
+  const [conflitoDeGravacao, setConflitoDeGravacao] = useState(false);
+  const idPainelIdioma = "painel-idioma-proposta";
+
+  const isDirty = isLoaded && initialConfigRef.current !== null && initialConfigRef.current !== JSON.stringify({ config, itemsTableSettings, versoes });
 
   const requestClose = useCallback(() => {
     if (isDirty) setCloseConfirmOpen(true);
@@ -801,11 +814,11 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
 
   useEffect(() => {
     if (needsBaseline) {
-      initialConfigRef.current = JSON.stringify({ config, itemsTableSettings });
+      initialConfigRef.current = JSON.stringify({ config, itemsTableSettings, versoes });
       setIsLoaded(true);
       setNeedsBaseline(false);
     }
-  }, [needsBaseline, config, itemsTableSettings]);
+  }, [needsBaseline, config, itemsTableSettings, versoes]);
 
   const loadCompanies = async () => {
     const { data, error } = await supabase.from("anew_organizations").select("id, name").order("name");
@@ -834,7 +847,14 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
         (data as any).design_settings && typeof (data as any).design_settings === "object" && !Array.isArray((data as any).design_settings)
           ? { ...((data as any).design_settings as Record<string, unknown>) }
           : null;
-      const designSettings = parseDesignSettings((data as any).design_settings);
+      // `versions` fica de fora do config (que recebe o resto do design_settings por spread) e vai para o
+      // estado das versões; originalDesignSettingsRef continua com tudo, para a gravação preservar o que
+      // não se mexeu.
+      const { restante: designSemVersoes, versoes: versoesCarregadas } = separarVersoes((data as any).design_settings);
+      const designSettings = parseDesignSettings(designSemVersoes);
+      versoesDoc.carregar(versoesCarregadas);
+      carregadoEmRef.current = typeof (data as any).updated_at === "string" ? (data as any).updated_at : null;
+      setConflitoDeGravacao(false);
       // Carrega items_table existente (gerido pelos adapters) ou aplica defaults.
       const rawItemsTable = (originalDesignSettingsRef.current as any)?.items_table;
       setItemsTableSettings({
@@ -1010,21 +1030,42 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
         verification_email_subject: config.verification_email_subject || null,
         verification_email_body: config.verification_email_body || null,
         sections: JSON.parse(JSON.stringify(config.sections)),
-        design_settings: {
-          ...getDesignSettings(config, originalDesignSettingsRef.current),
-          items_table: itemsTableSettings,
-        },
+        // `versions` só existe se houver versões; sem elas o design_settings sai exatamente como sempre saiu.
+        design_settings: comVersoesNoDesign(
+          {
+            ...getDesignSettings(config, originalDesignSettingsRef.current),
+            items_table: itemsTableSettings,
+          },
+          versoes,
+          originalDesignSettingsRef.current,
+        ),
       };
 
       let savedId: string | null = null;
       if (templateId) {
         const tbl = supabase.from("proposal_templates") as any;
-        const { data: updated, error } = await tbl
-          .update(templateData)
-          .eq("id", templateId)
-          .select("id");
+        // Guarda de concorrência: só atualiza se o template ainda estiver como o carregámos.
+        const carregadoEm = carregadoEmRef.current;
+        let pedido = tbl.update(templateData).eq("id", templateId);
+        if (carregadoEm) pedido = pedido.eq("updated_at", carregadoEm);
+        const { data: updated, error } = await pedido.select("id");
         if (error) throw error;
-        if (!updated || updated.length === 0) throw new Error("Sem permissão para guardar este template");
+        if (!updated || updated.length === 0) {
+          // Nenhuma linha: ou outra pessoa guardou entretanto, ou não há permissão. O texto do editor fica.
+          const { data: atual } = await tbl.select("updated_at").eq("id", templateId).maybeSingle();
+          const atualizadoEm: unknown = atual?.updated_at;
+          if (carregadoEm && typeof atualizadoEm === "string" && atualizadoEm !== carregadoEm) {
+            carregadoEmRef.current = atualizadoEm;
+            setConflitoDeGravacao(true);
+            toast({
+              title: t("proposalTemplateEditor.versions.conflict.title"),
+              description: t("proposalTemplateEditor.versions.conflict.description"),
+              variant: "destructive",
+            });
+            return;
+          }
+          throw new Error("Sem permissão para guardar este template");
+        }
         savedId = updated[0].id;
       } else {
         const tbl = supabase.from("proposal_templates") as any;
@@ -1055,7 +1096,7 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
         }
       }
 
-      initialConfigRef.current = JSON.stringify({ config, itemsTableSettings });
+      initialConfigRef.current = JSON.stringify({ config, itemsTableSettings, versoes });
       toast({ title: templateId ? "Template atualizado" : "Template criado" });
       onClose();
     } catch (error: any) {
@@ -1086,6 +1127,14 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
                 className="text-lg font-semibold border-none shadow-none h-auto p-0 focus-visible:ring-0"
               />
             </div>
+            <BarraDeIdiomas
+              resumo={versoesDoc.resumo}
+              idiomaAtivo={versoesDoc.idiomaAtivo}
+              livres={versoesDoc.livres}
+              idPainel={idPainelIdioma}
+              onEscolher={versoesDoc.escolher}
+              onAdicionar={versoesDoc.adicionar}
+            />
           </div>
           <div className="flex items-center gap-2">
             {!lockTemplateType && (
@@ -1123,11 +1172,11 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
                 </Button>
               ))}
             </div>
-            <Button variant="outline" size="sm" onClick={resetToDefaults}>
+            <Button variant="outline" size="sm" onClick={resetToDefaults} disabled={!versoesDoc.ehBase}>
               <RotateCcw className="h-4 w-4 mr-1" />
               Reset
             </Button>
-            <Button variant="outline" size="sm" onClick={applyQuotePdfTemplate}>
+            <Button variant="outline" size="sm" onClick={applyQuotePdfTemplate} disabled={!versoesDoc.ehBase}>
               Usar layout Orçamento
             </Button>
             <Button onClick={handleSave} disabled={saving || loadFailed} title={loadFailed ? "Carregamento do template falhou — gravação bloqueada" : undefined}>
@@ -1140,9 +1189,23 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
         {/* Main Content */}
         <div className="flex-1 flex overflow-hidden">
           {/* Left Panel - Settings */}
-          <div className="w-80 flex-shrink-0 border-r bg-muted/30 overflow-hidden flex flex-col">
+          <div
+            id={idPainelIdioma}
+            role={versoesDoc.mostrarBarra ? "tabpanel" : undefined}
+            aria-labelledby={versoesDoc.mostrarBarra ? idDaAba(versoesDoc.idiomaAtivo) : undefined}
+            className="w-80 flex-shrink-0 border-r bg-muted/30 overflow-hidden flex flex-col"
+          >
             <ScrollArea className="flex-1">
               <div className="p-4 space-y-4">
+                {conflitoDeGravacao && (
+                  <Alert variant="destructive">
+                    <AlertTitle>{t("proposalTemplateEditor.versions.conflict.title")}</AlertTitle>
+                    <AlertDescription>{t("proposalTemplateEditor.versions.conflict.description")}</AlertDescription>
+                  </Alert>
+                )}
+                {!versoesDoc.ehBase && <PainelDaVersao versoes={versoesDoc} config={config} />}
+                {/* Os separadores do português ficam montados (escondidos) para não perder o estado ao trocar de idioma. */}
+                <div hidden={!versoesDoc.ehBase}>
                 <Tabs defaultValue="sections" className="w-full">
                   <TabsList className="grid w-full grid-cols-4">
                     <TabsTrigger value="sections" className="text-xs px-2">
@@ -1643,6 +1706,7 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
                     </div>
                   </TabsContent>
                 </Tabs>
+                </div>
               </div>
             </ScrollArea>
           </div>
@@ -1650,14 +1714,15 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
           {/* Right Panel - Preview */}
           <div className="flex-1 overflow-auto bg-muted/50 p-4">
             <div className="flex justify-center">
-              <div 
-                style={{ 
-                  width: previewWidth, 
+              <div
+                lang={versoesDoc.ehBase ? undefined : versoesDoc.idiomaAtivo}
+                style={{
+                  width: previewWidth,
                   maxWidth: '100%',
                   transition: 'width 0.3s ease'
                 }}
               >
-                <ProposalPreview config={config} />
+                <ProposalPreview config={versoesDoc.configVisivel} />
               </div>
             </div>
           </div>

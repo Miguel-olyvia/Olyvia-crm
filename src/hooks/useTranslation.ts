@@ -5,6 +5,8 @@ import { bundleTranslations } from "@/translations/bundles";
 import { priceContextsTranslations } from "@/translations/priceContexts";
 import { directSalesTranslations } from "@/translations/directSales";
 import { todayTranslations } from "@/translations/today";
+import { versoesTemplatesTranslations } from "@/translations/versoesTemplates";
+import { proposalTemplateVersionsTranslations } from "@/translations/proposalTemplateVersions";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -23,6 +25,14 @@ Object.keys(directSalesTranslations).forEach((lang) => {
 // Ecrã "Hoje" (/home) — módulo próprio, mesmo padrão.
 Object.keys(todayTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...todayTranslations[lang as keyof typeof todayTranslations] };
+});
+// Minutas com versões por idioma (editor de minutas e escolha do idioma ao gerar) — módulo próprio.
+Object.keys(versoesTemplatesTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...versoesTemplatesTranslations[lang] };
+});
+// Editor de templates de proposta com versões por idioma — módulo próprio, mesmo padrão.
+Object.keys(proposalTemplateVersionsTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...proposalTemplateVersionsTranslations[lang] };
 });
 
 export const useTranslation = () => {

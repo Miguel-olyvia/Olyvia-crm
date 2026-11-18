@@ -24,6 +24,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useCooldown, OTP_COOLDOWN_SECONDS } from "@/hooks/useCooldown";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { resolverIdiomasDaProposta } from "@/utils/idiomasDaProposta";
 import { MOTIVOS_REJEICAO_PROPOSTA } from "@/components/portal/motivosRejeicao";
 import {
   mensagemDeChave,
@@ -416,6 +417,13 @@ const ClientPortalProposalDetail = () => {
   const canActOnProposal = !["accepted", "rejected", "expired"].includes(proposal.status);
   const statusLabelKey = proposal.status === "draft" && canActOnProposal ? "pc.propostaDet.estado.aguardaDecisao" : STATUS_LABEL_KEYS[proposal.status];
   const statusLabel = statusLabelKey ? t(statusLabelKey) : proposal.status;
+  // O idioma do documento é o do botão do portal quando o template tem essa versão (senão português). Decide-se ao
+  // desenhar, e não ao carregar, porque o cliente pode trocar o idioma sem recarregar a proposta. O PDF usa os mesmos.
+  const idiomasDoDocumento = resolverIdiomasDaProposta({
+    linha: proposal,
+    template: portalData.template,
+    idiomaDoPortal: idioma,
+  });
 
   return (
     <ClientPortalLayout>
@@ -434,6 +442,7 @@ const ClientPortalProposalDetail = () => {
           company={portalData.company}
           mode="portal"
           idioma={idioma}
+          idiomasDoDocumento={idiomasDoDocumento}
           statusLabel={statusLabel}
           canActOnProposal={canActOnProposal}
           actionLoading={actionLoading}
@@ -483,7 +492,7 @@ const ClientPortalProposalDetail = () => {
                 });
                 return;
               }
-              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, payload);
+              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, payload, { idiomas: idiomasDoDocumento });
               downloadBlob(blob, fileName);
             } catch (e: unknown) {
               toast({

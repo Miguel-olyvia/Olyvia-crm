@@ -5,6 +5,10 @@ import { substituteVariables, type ContractVariableData } from "@/utils/contract
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { renderContractHeaderHtml } from "./contractHeader";
 import { tDoc } from "@/lib/idiomaDocumento/dicionario";
+import { aplicarVersaoContrato } from "@/lib/idiomaDocumento/versoes";
+import { dividirCorpoDoContrato, juntarSegmentos, type ContractVersion } from "./contractVersions";
+import { computeFooterLayout, drawContractPdfFootersByVersion } from "./contractPdfFooter";
+import { paginarVersoesNoPdf, prepararHtmlParaPdf } from "./contractPdfPaginate";
 import {
   buildItemsTableModel,
   type ItemsTableLine,
@@ -85,273 +89,16 @@ export function stripVariableChips(html: string): string {
   return container.innerHTML;
 }
 
-/**
- * Substitui o bloco final estático de assinatura
- *   "A PRIMEIRA CONTRATANTE … O SEGUNDO CONTRATANTE"
- * pelo nome/cargo do signatário escolhido na minuta. Conservador: só toca
- * em elementos curtos (<220 chars) que contenham ambas as etiquetas — assim
- * cláusulas que mencionem "A PRIMEIRA CONTRATANTE" no texto ficam intactas.
- * Se já não houver bloco a substituir (foi reescrito manualmente ou já usa
- * {{signatario_*}}), devolve o HTML original.
- */
-export function injectSignatoryIntoSignatureBlock(
-  html: string,
-  signatoryName?: string | null,
-  signatoryRole?: string | null,
-): string {
-  if (!html) return html;
-  const name = (signatoryName || "").trim();
-  if (!name) return html;
-  const cargo = (signatoryRole || "").trim();
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-  // Remove um parágrafo de underscores/traços imediatamente antes do bloco
-  // de assinatura (a injeção desenha as suas próprias linhas).
-  const stripPrecedingUnderscoreLineSSR = (src: string): string =>
-    src.replace(
-      /<p\b[^>]*>(?:[\s\u00A0_·\-–—]|&nbsp;|<br\s*\/?>)*<\/p>\s*(?=<(?:p|div)\b[^>]*>[\s\S]*?A PRIMEIRA CONTRATANTE[\s\S]*?O SEGUNDO CONTRATANTE)/gi,
-      "",
-    );
-
-  // Fallback SSR — usa regex sobre <p>… A PRIMEIRA CONTRATANTE … O SEGUNDO CONTRATANTE …</p>
-  if (typeof document === "undefined") {
-    const cleaned = stripPrecedingUnderscoreLineSSR(html);
-    return cleaned.replace(
-      /<(p|div)\b([^>]*)>([\s\S]*?A PRIMEIRA CONTRATANTE[\s\S]*?O SEGUNDO CONTRATANTE[\s\S]*?)<\/\1>/gi,
-      (match, tag: string, attrs: string, inner: string) => {
-        if (inner.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim().length > 220) return match;
-        return `<${tag}${attrs}>
-          <span style="display:inline-block;width:48%;vertical-align:top;text-align:left;">
-            <span style="display:block;border-top:1px solid #111;width:92%;height:1px;margin:0 0 6px 0;"></span>
-            <strong>${esc(name)}</strong>${cargo ? `<br/><span style="color:#6b7280;font-size:0.92em;">${esc(cargo)}</span>` : ""}<br/>
-            <span>A PRIMEIRA CONTRATANTE</span>
-          </span>
-          <span style="display:inline-block;width:48%;vertical-align:top;text-align:left;">
-            <span style="display:block;border-top:1px solid #111;width:92%;height:1px;margin:0 0 6px 0;"></span>
-            <span>O SEGUNDO CONTRATANTE</span>
-          </span>
-        </${tag}>`;
-      },
-    );
-  }
-
-  const template = document.createElement("template");
-  template.innerHTML = html;
-  const candidates = Array.from(template.content.querySelectorAll("p, div, td"));
-  const target = candidates.find((el) => {
-    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-    return (
-      text.includes("A PRIMEIRA CONTRATANTE") &&
-      text.includes("O SEGUNDO CONTRATANTE") &&
-      text.length < 220
-    );
-  });
-  if (!target) return html;
-
-  // Remover até 2 elementos anteriores que contenham apenas underscores/
-  // traços/espaços/<br> (linhas de assinatura duplicadas do template).
-  const isDecorativeLine = (el: Element | null): boolean => {
-    if (!el) return false;
-    if (!/^(P|DIV)$/.test(el.tagName)) return false;
-    const raw = (el.textContent || "").replace(/\u00A0/g, " ");
-    const stripped = raw.replace(/[\s_·\-–—]/g, "");
-    return stripped.length === 0;
-  };
-  for (let i = 0; i < 2; i += 1) {
-    const prev = target.previousElementSibling;
-    if (isDecorativeLine(prev)) prev!.remove();
-    else break;
-  }
-
-  target.innerHTML = `
-      <span style="display:inline-block;width:48%;vertical-align:top;text-align:left;">
-        <span style="display:block;border-top:1px solid #111;width:92%;height:1px;margin:0 0 6px 0;"></span>
-        <strong>${esc(name)}</strong>${cargo ? `<br/><span style="color:#6b7280;font-size:0.92em;">${esc(cargo)}</span>` : ""}<br/>
-        <span>A PRIMEIRA CONTRATANTE</span>
-      </span>
-      <span style="display:inline-block;width:48%;vertical-align:top;text-align:left;">
-        <span style="display:block;border-top:1px solid #111;width:92%;height:1px;margin:0 0 6px 0;"></span>
-        <span>O SEGUNDO CONTRATANTE</span>
-      </span>`;
-  return template.innerHTML;
-}
-
-/**
- * HTML do marcador determinístico de bloco de assinatura. Quando este marcador
- * está presente no `body_html` do template/contrato, serve de âncora visível
- * para o utilizador saber onde o signatário vai ser mostrado.
- */
-export const SIGNATORY_BLOCK_MARKER_HTML =
-  '<div data-signatory-block="primary" style="margin-top:32px"></div>';
-
-/**
- * Devolve true se o `body_html` já contém um gancho que mostra o signatário:
- * marcador determinístico, chip {{signatario_nome}}, ou a frase reconhecida
- * pela heurística legacy usada por `injectSignatoryIntoSignatureBlock`.
- */
-export function hasSignatoryHook(html: string | null | undefined): boolean {
-  if (!html) return false;
-  if (/data-signatory-block\s*=\s*"primary"/i.test(html)) return true;
-  if (/\{\{\s*signatario_nome\s*\}\}/i.test(html)) return true;
-  if (/O SEGUNDO CONTRATANTE/i.test(html) || /\bO CLIENTE\b/i.test(html)) return true;
-  return false;
-}
-
-export interface PartySignatureInfo {
-  signed: boolean;
-  name?: string | null;
-  signedAt?: string | null;
-  ip?: string | null;
-  /** true = client (shows "Assinado via SMS OTP" + name/date/IP); false = company (plain signature, no badge) */
-  showOtpBadge?: boolean;
-}
-
-const SECOND_PARTY_RE = /O SEGUNDO CONTRATANTE|\bO CLIENTE\b/i;
-const FIRST_PARTY_RE = /A PRIMEIRA CONTRATANTE/i;
-
-// Reserved height (px) above each signature line once at least one party has
-// signed — the client stamp (badge + name + date + IP, 4 lines) is naturally
-// taller than the company's (just a cursive name, 1 line); without a shared
-// minimum height the two lines end up at different vertical positions.
-const STAMP_MIN_HEIGHT = 60;
-
-function buildSignatureStampHtml(esc: (s: string) => string, info: PartySignatureInfo): string {
-  const base = `min-height:${STAMP_MIN_HEIGHT}px;display:flex;flex-direction:column;justify-content:flex-end;`;
-  if (!info.signed) {
-    // Not signed yet — invisible spacer only, so the line doesn't jump when
-    // the OTHER party's (possibly taller) stamp appears.
-    return `<div style="${base}"></div>`;
-  }
-  if (info.showOtpBadge) {
-    const dateStr = info.signedAt
-      ? new Date(info.signedAt).toLocaleString("pt-PT", { day: "2-digit", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" })
-      : "";
-    return `<div style="${base}margin-bottom:6px;">
-      <div style="color:#059669;font-size:11px;font-weight:600;">&#10003; Assinado via SMS OTP</div>
-      ${info.name ? `<div style="font-size:12px;font-weight:600;color:#374151;">${esc(info.name)}</div>` : ""}
-      ${dateStr ? `<div style="font-size:11px;color:#6b7280;">${esc(dateStr)}</div>` : ""}
-      ${info.ip ? `<div style="font-size:10px;color:#9ca3af;">IP: ${esc(info.ip)}</div>` : ""}
-    </div>`;
-  }
-  return `<div style="${base}margin-bottom:2px;">
-    <div style="font-family:'Brush Script MT','Segoe Script','Lucida Handwriting',cursive;font-size:22px;color:#1a1a1a;">${esc(info.name || "Assinado")}</div>
-  </div>`;
-}
-
-/**
- * Injeta o ESTADO REAL de assinatura (empresa + cliente) diretamente no bloco
- * de assinatura existente no corpo do contrato — sem substituir o texto
- * original das etiquetas ("A [Empresa]" / "O Cliente" ou o genérico legacy
- * "A PRIMEIRA CONTRATANTE" / "O SEGUNDO CONTRATANTE"). Nada aparece do lado
- * de uma parte enquanto ela não tiver assinado (`signed: false` → sem
- * conteúdo injetado, o espaço fica como já estava na minuta).
- *
- * Ao contrário de `injectSignatoryIntoSignatureBlock` (que só sabe mostrar um
- * nome estático definido na minuta, sem estado real), esta função é chamada
- * em cada render/PDF a partir dos campos reais do contrato
- * (company_signature_date/company_signed_by_name, signature_date/
- * signed_by_name/signature_ip), por isso reflete sempre o estado atual.
- */
-export function injectSignaturesIntoBlock(
-  html: string,
-  company: PartySignatureInfo,
-  client: PartySignatureInfo,
-): string {
-  if (!html) return html;
-  if (typeof document === "undefined") return html; // SSR: no-op (não exercitado neste código)
-  // Nada assinado ainda — não mexer no HTML original (buildSignatureStampHtml
-  // já não devolve vazio quando signed=false, para poder reservar espaço).
-  if (!company.signed && !client.signed) return html;
-
-  const esc = (s: string) =>
-    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
-  const companyStamp = buildSignatureStampHtml(esc, company);
-  const clientStamp = buildSignatureStampHtml(esc, client);
-
-  const template = document.createElement("template");
-  template.innerHTML = html;
-  const candidates = Array.from(template.content.querySelectorAll("div, p, td, span, tr"));
-
-  // Uma "coluna" de assinatura real tem sempre uma linha para assinar por
-  // cima da etiqueta — via borda (border-bottom), <hr>, ou um parágrafo feito
-  // só de underscores/traços (ex.: "_______________________"). Sem isto, um
-  // <div> "container" maior (ex.: o parágrafo "Pontinha, {{data}}" que
-  // antecede o bloco de assinatura, cujo ÚLTIMO filho é o wrapper com as
-  // colunas lá dentro) também "parece" ter duas partes (uma menciona o
-  // cliente, outra não) e era escolhido por engano.
-  const isLineElement = (el: Element): boolean => {
-    if (/border-bottom/i.test((el as HTMLElement).getAttribute?.("style") || "")) return true;
-    if (el.tagName === "HR") return true;
-    const text = el.textContent || "";
-    const stripped = text.replace(/[\s_·\-–—]/g, "");
-    return stripped.length === 0 && text.replace(/\s/g, "").length > 0;
-  };
-  const hasLineMarker = (el: Element): boolean => {
-    if (isLineElement(el)) return true;
-    if (Array.from(el.children).some(isLineElement)) return true;
-    if (el.querySelector('[style*="border-bottom" i], hr')) return true;
-    return false;
-  };
-
-  // 1) Preferido: o contentor cujos PRÓPRIOS filhos diretos já se dividem em
-  //    duas colunas de assinatura genuínas (cada uma com a sua linha) — uma
-  //    menciona o cliente/segunda parte, a outra não. Isto ignora tanto
-  //    wrappers de 1 filho como containers maiores que incluem texto solto
-  //    (datas, quebras de linha) ao lado do verdadeiro bloco de colunas.
-  const columnsTarget = candidates.find((el) => {
-    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-    if (!SECOND_PARTY_RE.test(text) || text.length >= 400) return false;
-    const kids = Array.from(el.children) as HTMLElement[];
-    if (kids.length < 2) return false;
-    const clientCol = kids.find((k) => SECOND_PARTY_RE.test(k.textContent || ""));
-    const companyCol = kids.find((k) => k !== clientCol);
-    if (!clientCol || !companyCol) return false;
-    return hasLineMarker(clientCol) && hasLineMarker(companyCol);
-  });
-
-  if (columnsTarget) {
-    const kids = Array.from(columnsTarget.children) as HTMLElement[];
-    const clientCol = kids.find((k) => SECOND_PARTY_RE.test(k.textContent || ""))!;
-    const companyCol = kids.find((k) => k !== clientCol)!;
-    // Inserir mesmo antes da linha (não no início da coluna) — a assinatura
-    // fica colada por cima da linha, como um "assina aqui" normal, mesmo que
-    // a coluna tenha outro conteúdo antes da linha.
-    const insertNearLine = (col: HTMLElement, stamp: string) => {
-      if (!stamp) return;
-      const lineEl = Array.from(col.children).find(isLineElement);
-      if (lineEl) lineEl.insertAdjacentHTML("beforebegin", stamp);
-      else col.insertAdjacentHTML("afterbegin", stamp);
-    };
-    insertNearLine(companyCol, companyStamp);
-    insertNearLine(clientCol, clientStamp);
-    return template.innerHTML;
-  }
-
-  // 2) Fallback legacy: bloco plano com o texto genérico exato numa única
-  //    etiqueta, sem sub-elementos por parte — reconstrói como antes.
-  const flatTarget = candidates.find((el) => {
-    const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-    return FIRST_PARTY_RE.test(text) && SECOND_PARTY_RE.test(text) && text.length < 220;
-  });
-  if (flatTarget) {
-    flatTarget.innerHTML = `
-      <span style="display:inline-block;width:48%;vertical-align:top;text-align:left;">
-        ${companyStamp}
-        <span style="display:block;border-top:1px solid #111;width:92%;height:1px;margin:0 0 6px 0;"></span>
-        <span>A PRIMEIRA CONTRATANTE</span>
-      </span>
-      <span style="display:inline-block;width:48%;vertical-align:top;text-align:left;">
-        ${clientStamp}
-        <span style="display:block;border-top:1px solid #111;width:92%;height:1px;margin:0 0 6px 0;"></span>
-        <span>O SEGUNDO CONTRATANTE</span>
-      </span>`;
-    return template.innerHTML;
-  }
-
-  return html;
-}
+// As assinaturas do corpo (signatário da minuta, gancho, estado real de assinatura) vivem em
+// contractSignatures.ts, cientes do idioma; continuam a sair deste módulo para quem já as importava.
+export {
+  SIGNATORY_BLOCK_MARKER_HTML,
+  hasSignatoryHook,
+  injectSignatoryIntoSignatureBlock,
+  injectSignaturesIntoBlock,
+  type PartySignatureInfo,
+} from "./contractSignatures";
+import { injectSignaturesIntoBlock } from "./contractSignatures";
 
 /**
  * A linha da minuta congelada no contrato (`template_snapshot`), ou null se o
@@ -397,7 +144,10 @@ export async function resolveSignatoryFromTemplateRow(
 }
 
 interface ResolvedContractDocument {
+  /** O corpo inteiro (todas as versões, com os wrappers olv-versao se as houver): para quem ainda não usa `versoes`. */
   bodyHtml: string;
+  /** Uma entrada por versão de idioma (uma só, portuguesa, se o corpo não tiver marcas): corpo sem wrapper e definições dessa língua. */
+  versoes: ContractVersion<DocumentSettings>[];
   variableData: ContractVariableData;
   organization: any;
   settings: DocumentSettings;
@@ -1289,6 +1039,57 @@ export const UNFREEZE_CONTRACT_COLUMNS = {
   contract_frozen_at: null,
 } as const;
 
+interface SegmentoDoContrato {
+  contract: any;
+  variableData: ContractVariableData;
+  /** O idioma deste segmento (o do wrapper olv-versao; português num corpo sem marcas). */
+  idioma: string;
+  /** Os idiomas de todo o corpo, pela ordem das versões: com mais de um, o carimbo da assinatura sai em todos. */
+  idiomasDoCorpo: readonly string[];
+  /** As definições desta versão (título da tabela, cores…). */
+  templateSettings: Record<string, any>;
+  primaryColor: string;
+  anexarTabela: boolean;
+}
+
+/**
+ * O corpo de UMA versão de idioma, de texto de minuta a documento: tabelas, variáveis (palavras no idioma da
+ * versão; dinheiro e números não mudam), fórmulas, chips do editor e o estado real das assinaturas.
+ */
+function resolverSegmentoDoContrato(html: string, ctx: SegmentoDoContrato): string {
+  const { contract, variableData, idioma } = ctx;
+  // Pre-substitution: alias and quote items (must run BEFORE substituteVariables
+  // so the fixed handler in contractVariables.ts cannot inject the default table).
+  let out = applyQuoteItemsToken(html, variableData, ctx.templateSettings, ctx.primaryColor, ctx.anexarTabela, idioma);
+
+  out = substituteVariables(out, variableData, false, idioma);
+  // Safety net (should be a no-op).
+  out = out.replace(/\{\{(orcamento_itens|tabela_artigos)\}\}/gi, "");
+  // Resolver fórmulas inseridas em células de tabelas manuais (Corte 2C).
+  out = applyFormulaChips(out, variableData);
+  // Remove os "chips" visuais do editor (fundo roxo) — render final sem destaques.
+  out = stripVariableChips(out);
+  // Bloco final de assinatura — injeta o estado REAL de assinatura de cada
+  // parte (nada aparece do lado de quem ainda não assinou).
+  return injectSignaturesIntoBlock(
+    out,
+    {
+      signed: !!contract.company_signature_date,
+      name: contract.company_signed_by_name,
+      showOtpBadge: false,
+    },
+    {
+      signed: !!contract.signature_date,
+      name: contract.signed_by_name,
+      signedAt: contract.signature_date,
+      ip: contract.signature_ip,
+      showOtpBadge: true,
+    },
+    idioma,
+    ctx.idiomasDoCorpo.length > 1 ? ctx.idiomasDoCorpo : undefined,
+  );
+}
+
 export async function resolveContractDocument(contract: any, orgId: string, activeCompanyName?: string): Promise<ResolvedContractDocument | null> {
   if (!contract || !orgId) return null;
 
@@ -1331,11 +1132,24 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
 
   const orgRow = flattenSettingsRow(settingsRes.data || {});
   const tplFlat = flattenSettingsRow(templateData?.doc_settings || {});
-  const settings: DocumentSettings = {
+  const montarSettings = (doTemplate: Record<string, any>): DocumentSettings => ({
     ...DEFAULT_DOCUMENT_SETTINGS,
     organization_id: orgId,
     ...orgRow,
-    ...tplFlat,
+    ...doTemplate,
+  });
+  const settings: DocumentSettings = montarSettings(tplFlat);
+
+  // As definições de cada versão de idioma: o cabeçalho e o rodapé da versão sobrepõem-se aos da base
+  // (aplicarVersaoContrato); sem nada a aplicar, são exatamente as da base (a mesma referência).
+  const tplFlatDaVersao = (codigo: string): Record<string, any> => {
+    if (!templateData) return tplFlat;
+    const aplicado = aplicarVersaoContrato(templateData, codigo);
+    return aplicado === templateData ? tplFlat : flattenSettingsRow(aplicado.doc_settings || {});
+  };
+  const settingsDaVersao = (codigo: string): DocumentSettings => {
+    const doTemplate = tplFlatDaVersao(codigo);
+    return doTemplate === tplFlat ? settings : montarSettings(doTemplate);
   };
 
   const organization = organizationRes.data;
@@ -1362,45 +1176,37 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
   const congelado = hasFrozenBody(contract);
 
   const usingContractBody = !!contract.contract_body_html;
-  let baseHtml = congelado
+  const baseHtml = congelado
     ? (contract.contract_body_frozen_html as string)
     : (contract.contract_body_html || templateData?.body_html || "");
   if (!baseHtml) return null;
 
+  // O idioma de cada parte do corpo vem das marcas olv-versao (um corpo sem marcas é um só segmento, o de hoje).
+  const { segmentos, comMarcas } = dividirCorpoDoContrato(baseHtml, contract);
+  const idiomasDoCorpo = segmentos.map((segmento) => segmento.codigo);
+
   let bodyHtml: string;
+  let segmentosFinais = segmentos;
   if (congelado) {
+    // A cópia congelada divide-se pelas marcas e não se recalcula nada.
     bodyHtml = baseHtml;
   } else {
-  // Pre-substitution: alias and quote items (must run BEFORE substituteVariables
-  // so the fixed handler in contractVariables.ts cannot inject the default table).
-  // Quando o body vem do contrato (já renderizado na geração), NÃO voltamos a
-  // anexar a tabela de produtos no fim — evita duplicado no PDF.
-  baseHtml = applyQuoteItemsToken(baseHtml, variableData, tplFlat, settings.primary_color || "#7C3AED", !usingContractBody);
-
-  bodyHtml = substituteVariables(baseHtml, variableData);
-  // Safety net (should be a no-op).
-  bodyHtml = bodyHtml.replace(/\{\{(orcamento_itens|tabela_artigos)\}\}/gi, "");
-  // Resolver fórmulas inseridas em células de tabelas manuais (Corte 2C).
-  bodyHtml = applyFormulaChips(bodyHtml, variableData);
-  // Remove os "chips" visuais do editor (fundo roxo) — render final sem destaques.
-  bodyHtml = stripVariableChips(bodyHtml);
-  // Bloco final de assinatura — injeta o estado REAL de assinatura de cada
-  // parte (nada aparece do lado de quem ainda não assinou).
-  bodyHtml = injectSignaturesIntoBlock(
-    bodyHtml,
-    {
-      signed: !!contract.company_signature_date,
-      name: contract.company_signed_by_name,
-      showOtpBadge: false,
-    },
-    {
-      signed: !!contract.signature_date,
-      name: contract.signed_by_name,
-      signedAt: contract.signature_date,
-      ip: contract.signature_ip,
-      showOtpBadge: true,
-    },
-  );
+    // A substituição de variáveis, as tabelas e o carimbo correm POR SEGMENTO, com o idioma do wrapper.
+    segmentosFinais = segmentos.map((segmento, indice) => ({
+      codigo: segmento.codigo,
+      html: resolverSegmentoDoContrato(segmento.html, {
+        contract,
+        variableData,
+        idioma: segmento.codigo,
+        idiomasDoCorpo,
+        templateSettings: tplFlatDaVersao(segmento.codigo),
+        primaryColor: settings.primary_color || "#7C3AED",
+        // Quando o body vem do contrato (já renderizado na geração), NÃO voltamos a anexar a tabela de
+        // produtos no fim — evita duplicado no PDF. Havendo várias versões, só a última a recebe.
+        anexarTabela: !usingContractBody && indice === segmentos.length - 1,
+      }),
+    }));
+    bodyHtml = juntarSegmentos(segmentosFinais, comMarcas);
 
     // Assinado pelo cliente e ainda sem copia congelada: congela-se AGORA, na
     // primeira vez que for lido. E assim que os contratos ja assinados passam a
@@ -1440,6 +1246,11 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
 
   return {
     bodyHtml,
+    versoes: segmentosFinais.map((segmento) => ({
+      codigo: segmento.codigo,
+      bodyHtml: segmento.html,
+      settings: settingsDaVersao(segmento.codigo),
+    })),
     variableData,
     organization,
     settings,
@@ -1470,14 +1281,9 @@ export async function downloadContractDocumentPdf(
   try {
     const html2pdfModule = await import("html2pdf.js");
     const html2pdf = (html2pdfModule.default || html2pdfModule) as any;
-    const html = buildContractPrintHtml(resolved, title);
-
-    const parser = new DOMParser();
-    const parsed = parser.parseFromString(html, "text/html");
-    parsed.querySelectorAll("script").forEach((script) => script.remove());
-    // O rodapé é desenhado por página com o jsPDF (drawContractPdfFooters);
-    // mantê-lo no corpo do documento voltaria a imprimi-lo só no fim.
-    parsed.querySelectorAll(".footer").forEach((node) => node.remove());
+    // Sem scripts, sem o rodapé do corpo (é desenhado por página com o jsPDF, drawContractPdfFootersByVersion)
+    // e sem a quebra de página das `.page` seguintes (o PDF abre a página nova na paginação).
+    const preparedHtml = prepararHtmlParaPdf(buildContractPrintHtml(resolved, title));
 
     iframe = window.document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
@@ -1493,8 +1299,6 @@ export async function downloadContractDocumentPdf(
     iframe.style.opacity = "0";
     iframe.style.pointerEvents = "none";
     window.document.body.appendChild(iframe);
-
-    const preparedHtml = `<!doctype html>${parsed.documentElement.outerHTML}`;
 
     await new Promise<void>((resolve, reject) => {
       iframe!.onload = () => resolve();
@@ -1518,17 +1322,19 @@ export async function downloadContractDocumentPdf(
       }),
     );
 
-    const pageElement = iframeDocument.querySelector(".page") as HTMLElement | null;
-    if (!pageElement) throw new Error("Não foi possível encontrar o conteúdo do contrato");
+    const pageElements = Array.from(iframeDocument.querySelectorAll(".page")) as HTMLElement[];
+    if (pageElements.length === 0) throw new Error("Não foi possível encontrar o conteúdo do contrato");
 
     // O html2canvas fecha o canvas alguns pixéis acima do fim real do conteúdo
     // e corta a última linha do documento ao meio (visível já antes desta
     // alteração, onde a vítima era o rodapé em vez do texto). Um espaçador
     // final garante que a linha sacrificada é sempre espaço em branco.
-    const bottomSpacer = iframeDocument.createElement("div");
-    bottomSpacer.setAttribute("aria-hidden", "true");
-    bottomSpacer.style.height = `${CANVAS_BOTTOM_SPACER_PX}px`;
-    pageElement.appendChild(bottomSpacer);
+    for (const pageElement of pageElements) {
+      const bottomSpacer = iframeDocument.createElement("div");
+      bottomSpacer.setAttribute("aria-hidden", "true");
+      bottomSpacer.style.height = `${CANVAS_BOTTOM_SPACER_PX}px`;
+      pageElement.appendChild(bottomSpacer);
+    }
 
     const safeFileName = `${fileNameBase}`
       .trim()
@@ -1541,10 +1347,14 @@ export async function downloadContractDocumentPdf(
     const marginBottomBase = Number(s.margin_bottom ?? 20) || 20;
     const marginLeft = Number(s.margin_left ?? 20) || 20;
 
+    // Uma `.page` por versão de idioma, pela mesma ordem de `versoes` (um documento montado sem versões é uma só).
+    const versoes = versoesParaImprimir(resolved);
+
     // O rodapé (texto + "Página X de Y") deixou de ser conteúdo do documento e
     // passou a ser desenhado com jsPDF em TODAS as páginas — ver
-    // `drawContractPdfFooters`. Reservamos-lhe espaço alargando a margem
-    // inferior usada na paginação, para o conteúdo nunca lhe encavalitar.
+    // `drawContractPdfFootersByVersion`. Reservamos-lhe espaço alargando a margem
+    // inferior usada na paginação (o máximo entre os rodapés de todos os idiomas),
+    // para o conteúdo nunca lhe encavalitar.
     const jsPdfOptions = {
       unit: "mm" as const,
       format: s.page_size === "LETTER" ? "letter" : "a4",
@@ -1552,36 +1362,48 @@ export async function downloadContractDocumentPdf(
     };
     const { jsPDF } = await import("jspdf");
     const pdf = new jsPDF(jsPdfOptions);
-    const footerLayout = computeFooterLayout(s, pdf);
-    const marginBottom = Math.max(marginBottomBase, footerLayout.reservedMm);
+    const footerLayouts = versoes.map((versao) => computeFooterLayout(versao.settings, pdf));
+    const marginBottom = Math.max(marginBottomBase, ...footerLayouts.map((layout) => layout.reservedMm));
 
-    const pdfWorker = html2pdf()
-      .set({
-        margin: [marginTop, marginRight, marginBottom, marginLeft],
-        filename: `${safeFileName}.pdf`,
-        image: { type: "jpeg", quality: 0.98 },
-        html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
-        jsPDF: jsPdfOptions,
-        pagebreak: {
-          mode: ["css", "legacy"],
-          avoid: [
-            ".content p",
-            ".content li",
-            ".content h1", ".content h2", ".content h3",
-            ".content h4", ".content h5", ".content h6",
-            ".content tr",
-            ".content img",
-            ".content blockquote",
-            ".content div",
-            ".content font",
-            "[data-pdf-section='header']",
-          ],
-        },
-      })
-      .from(pageElement);
+    const criarWorker = (pageElement: HTMLElement) =>
+      html2pdf()
+        .set({
+          margin: [marginTop, marginRight, marginBottom, marginLeft],
+          filename: `${safeFileName}.pdf`,
+          image: { type: "jpeg", quality: 0.98 },
+          html2canvas: { scale: 2, useCORS: true, backgroundColor: "#ffffff" },
+          jsPDF: jsPdfOptions,
+          pagebreak: {
+            mode: ["css", "legacy"],
+            avoid: [
+              ".content p",
+              ".content li",
+              ".content h1", ".content h2", ".content h3",
+              ".content h4", ".content h5", ".content h6",
+              ".content tr",
+              ".content img",
+              ".content blockquote",
+              ".content div",
+              ".content font",
+              "[data-pdf-section='header']",
+            ],
+          },
+        })
+        .from(pageElement);
 
-    await paginateWorkerCanvasToPdf(pdfWorker, pdf, { marginTop, marginLeft });
-    drawContractPdfFooters(pdf, s, footerLayout);
+    // Cada versão é paginada à vez; a 2.ª e as seguintes começam numa página nova.
+    const grupos = await paginarVersoesNoPdf({
+      pdf,
+      offsets: { marginTop, marginLeft },
+      paginas: pageElements.map((elemento, indice) => ({
+        codigo: versoes[indice]?.codigo ?? "pt",
+        elemento,
+        settings: versoes[indice]?.settings ?? s,
+      })),
+      criarWorker,
+    });
+    // Rodapé por página, no idioma de cada uma; total e numeração contínuos do documento inteiro.
+    drawContractPdfFootersByVersion(pdf, grupos.map((grupo, indice) => ({ ...grupo, layout: footerLayouts[indice] })));
     pdf.save(`${safeFileName}.pdf`);
   } finally {
     iframe?.remove();
@@ -1591,233 +1413,40 @@ export async function downloadContractDocumentPdf(
 /** Espaçador (px CSS) no fim do documento, para o html2canvas não cortar a última linha. */
 const CANVAS_BOTTOM_SPACER_PX = 24;
 
-/** Corpo de letra (pt) do rodapé desenhado pelo jsPDF. */
-const FOOTER_FONT_PT = 9;
-const PT_TO_MM = 25.4 / 72;
-/** Espaço em branco (mm) entre o rodapé e o limite físico da folha. */
-const FOOTER_BOTTOM_PADDING_MM = 4;
-/** Espaço em branco (mm) entre o texto do rodapé e a numeração. */
-const FOOTER_PAGE_NUM_GAP_MM = 2.5;
-/** Espaço em branco (mm) entre o divisor e a primeira linha do rodapé. */
-const FOOTER_DIVIDER_GAP_MM = 2;
-/** Folga (mm) entre o fim do conteúdo e o divisor do rodapé. */
-const FOOTER_CONTENT_CLEARANCE_MM = 4;
+// O rodapé do PDF (layout e desenho por página/idioma) e a paginação do canvas vivem em contractPdfFooter.ts
+// e contractPdfPaginate.ts; o desenho do rodapé continua a sair daqui para quem já o importava.
+export { drawContractPdfFooters } from "./contractPdfFooter";
 
-interface ContractFooterLayout {
-  showFooterText: boolean;
-  showPageNumbers: boolean;
-  /** Texto do rodapé já partido nas linhas que cabem na largura útil. */
-  textLines: string[];
-  lineHeightMm: number;
-  /** Margem inferior mínima que a paginação tem de respeitar. */
-  reservedMm: number;
+/** As versões a imprimir: as do resolver, ou (documento montado à mão, sem `versoes`) uma só com o bodyHtml. */
+function versoesParaImprimir(document: ResolvedContractDocument): ContractVersion<DocumentSettings>[] {
+  if (document.versoes?.length) return document.versoes;
+  return [{ codigo: "pt", bodyHtml: document.bodyHtml, settings: document.settings }];
 }
 
-/**
- * Calcula, a partir das definições do documento, quanto espaço o rodapé ocupa.
- * Feito ANTES da paginação: o conteúdo tem de parar acima desta zona.
- *
- * `pdf` é usado só para medir a quebra de linha do texto do rodapé com a mesma
- * fonte com que ele vai ser desenhado.
- */
-function computeFooterLayout(settings: Record<string, any>, pdf: any): ContractFooterLayout {
-  const showFooter = settings.show_footer !== false;
-  const footerText = String(settings.footer_text || "");
-  const showFooterText = showFooter && footerText.length > 0;
-  const showPageNumbers = showFooter && settings.show_page_numbers !== false;
-  const lineHeightMm = FOOTER_FONT_PT * PT_TO_MM * 1.25;
+const ESTILO_PAGINA_SEGUINTE = "break-before:page;page-break-before:always";
 
-  const pageWidthMm = pdf.internal.pageSize.getWidth();
-  const marginLeft = Number(settings.margin_left ?? 20) || 20;
-  const marginRight = Number(settings.margin_right ?? 20) || 20;
-  const contentWidthMm = Math.max(20, pageWidthMm - marginLeft - marginRight);
-
-  pdf.setFontSize(FOOTER_FONT_PT);
-  const textLines: string[] = showFooterText ? pdf.splitTextToSize(footerText, contentWidthMm) : [];
-
-  const reservedMm =
-    FOOTER_BOTTOM_PADDING_MM +
-    (showPageNumbers ? lineHeightMm + FOOTER_PAGE_NUM_GAP_MM : 0) +
-    (showFooterText ? textLines.length * lineHeightMm + FOOTER_DIVIDER_GAP_MM : 0) +
-    FOOTER_CONTENT_CLEARANCE_MM;
-
-  return { showFooterText, showPageNumbers, textLines, lineHeightMm, reservedMm };
+/** Uma `.page` (cabeçalho no idioma da versão, corpo, rodapé da versão). As seguintes à primeira abrem página nova. */
+function renderPaginaDaVersao(
+  document: ResolvedContractDocument,
+  versao: ContractVersion<DocumentSettings>,
+  indice: number,
+): string {
+  const sanitizedBody = DOMPurify.sanitize(versao.bodyHtml);
+  const footerText = versao.settings.footer_text || "";
+  const estilo = indice > 0 ? ` style="${ESTILO_PAGINA_SEGUINTE}"` : "";
+  return `<div class="page"${estilo}>
+      ${renderContractHeaderHtml(versao.settings as any, document.variableData as any, versao.codigo)}
+      <div class="content">${sanitizedBody}</div>
+      ${versao.settings.show_footer !== false && footerText ? `<div class="footer"><p>${escapeHtml(footerText)}</p></div>` : ""}
+    </div>`;
 }
 
-/**
- * Escreve o rodapé (texto + "Página X de Y") em TODAS as páginas do PDF.
- *
- * Substitui o rodapé que era injetado como conteúdo do documento e que, por
- * isso, (a) só aparecia no fim da última página e (b) dizia sempre
- * "Página 1 de 1" — uma constante literal, independente do nº real de páginas.
- * Mesmo padrão já usado no export de minutas (TemplateExportButtons).
- */
-export function drawContractPdfFooters(
-  pdf: any,
-  settings: Record<string, any>,
-  layout: ContractFooterLayout = computeFooterLayout(settings, pdf),
-): void {
-  if (!layout.showFooterText && !layout.showPageNumbers) return;
-
-  const pageWidthMm = pdf.internal.pageSize.getWidth();
-  const pageHeightMm = pdf.internal.pageSize.getHeight();
-  const marginLeft = Number(settings.margin_left ?? 20) || 20;
-  const marginRight = Number(settings.margin_right ?? 20) || 20;
-  const contentWidthMm = Math.max(20, pageWidthMm - marginLeft - marginRight);
-
-  const total = pdf.getNumberOfPages();
-  const textLines = layout.textLines;
-  const textBlockHeightMm = textLines.length * layout.lineHeightMm;
-
-  const pageNumBaselineY = pageHeightMm - FOOTER_BOTTOM_PADDING_MM;
-  const textFirstBaselineY =
-    (layout.showPageNumbers ? pageNumBaselineY - FOOTER_PAGE_NUM_GAP_MM : pageNumBaselineY) -
-    textBlockHeightMm +
-    layout.lineHeightMm * 0.85;
-  const dividerY = textFirstBaselineY - layout.lineHeightMm * 0.85 - FOOTER_DIVIDER_GAP_MM;
-
-  for (let i = 1; i <= total; i++) {
-    pdf.setPage(i);
-    pdf.setFontSize(FOOTER_FONT_PT);
-    pdf.setTextColor(107, 114, 128);
-
-    if (layout.showFooterText) {
-      pdf.setDrawColor(229, 231, 235);
-      pdf.setLineWidth(0.2);
-      pdf.line(marginLeft, dividerY, pageWidthMm - marginRight, dividerY);
-      textLines.forEach((line, idx) => {
-        pdf.text(line, pageWidthMm / 2, textFirstBaselineY + idx * layout.lineHeightMm, { align: "center" });
-      });
-    }
-    if (layout.showPageNumbers) {
-      pdf.text(`Página ${i} de ${total}`, pageWidthMm / 2, pageNumBaselineY, { align: "center" });
-    }
-  }
-}
-
-/**
- * Fatia o canvas do html2pdf em páginas, cortando sempre numa faixa sem tinta.
- *
- * Porquê não usar o `toPdf()` do html2pdf: a paginação dele acontece em dois
- * sítios que não concordam entre si. O plugin `pagebreak` insere os "pads" com
- * base no layout do DOM vivo, mas o `toPdf()` corta o canvas produzido pelo
- * html2canvas — e o html2canvas re-faz o layout num clone, com diferenças de
- * alguns pixéis. Onde um bloco acaba encostado ao limite da página, esse desvio
- * chega para a última linha ficar partida ao meio: metade no fundo de uma
- * página, metade no topo da seguinte (medido: 317 pixéis com tinta exatamente
- * na linha de corte do CC-2026-0011).
- *
- * Aqui o corte é decidido sobre os pixéis que vão mesmo para o PDF: procura-se,
- * a partir da altura nominal e para cima, a primeira linha de pixéis sem tinta.
- * Isto é indiferente à causa do desvio e cobre também texto solto e blocos que
- * o `pagebreak.avoid` não protege.
- */
-async function paginateWorkerCanvasToPdf(
-  worker: any,
-  pdf: any,
-  offsets: { marginTop: number; marginLeft: number },
-): Promise<void> {
-  await worker.toContainer();
-  await worker.toCanvas();
-
-  const canvas: HTMLCanvasElement = worker.prop.canvas;
-  const pageSize = worker.prop.pageSize;
-
-  const context = canvas.getContext("2d", { willReadFrequently: true });
-  const pxPageHeight = Math.max(1, Math.floor(canvas.width * pageSize.inner.ratio));
-  const mmPerPx = pageSize.inner.width / canvas.width;
-
-  const pageCanvas = document.createElement("canvas");
-  pageCanvas.width = canvas.width;
-  const pageContext = pageCanvas.getContext("2d");
-
-  let top = 0;
-  let isFirstPage = true;
-  while (top < canvas.height) {
-    const nominalCut = Math.min(top + pxPageHeight, canvas.height);
-    const cut =
-      nominalCut >= canvas.height
-        ? canvas.height
-        : findInkFreeCut(context, canvas.width, top, nominalCut, pxPageHeight);
-    const sliceHeight = cut - top;
-    if (sliceHeight <= 0) break;
-
-    pageCanvas.height = sliceHeight;
-    if (pageContext) {
-      pageContext.fillStyle = "#ffffff";
-      pageContext.fillRect(0, 0, canvas.width, sliceHeight);
-      pageContext.drawImage(canvas, 0, top, canvas.width, sliceHeight, 0, 0, canvas.width, sliceHeight);
-    }
-
-    if (!isFirstPage) pdf.addPage();
-    pdf.addImage(
-      pageCanvas.toDataURL("image/jpeg", 0.98),
-      "JPEG",
-      offsets.marginLeft,
-      offsets.marginTop,
-      pageSize.inner.width,
-      sliceHeight * mmPerPx,
-    );
-
-    isFirstPage = false;
-    top = cut;
-  }
-}
-
-/** Fração máxima de uma página que se aceita perder para fugir de uma linha de texto. */
-const INK_SCAN_FRACTION = 0.14;
-/** Um pixel conta como "tinta" abaixo deste valor em qualquer canal. */
-const INK_THRESHOLD = 235;
-
-/**
- * Devolve a maior altura <= `nominalCut` cuja linha de pixéis não tem tinta.
- * Se não houver nenhuma dentro da janela de procura, devolve `nominalCut`
- * (cortar no sítio nominal é melhor do que produzir uma página vazia).
- */
-function findInkFreeCut(
-  context: CanvasRenderingContext2D | null,
-  width: number,
-  top: number,
-  nominalCut: number,
-  pxPageHeight: number,
-): number {
-  if (!context) return nominalCut;
-  const maxScan = Math.min(Math.round(pxPageHeight * INK_SCAN_FRACTION), nominalCut - top - 1);
-  if (maxScan <= 0) return nominalCut;
-
-  let band: ImageData;
-  try {
-    band = context.getImageData(0, nominalCut - maxScan, width, maxScan);
-  } catch {
-    // Canvas contaminado por imagem cross-origin: sem leitura de pixéis,
-    // mantém-se o corte nominal.
-    return nominalCut;
-  }
-
-  for (let row = maxScan - 1; row >= 0; row--) {
-    let hasInk = false;
-    for (let x = 0; x < width; x++) {
-      const offset = (row * width + x) * 4;
-      if (
-        band.data[offset] < INK_THRESHOLD ||
-        band.data[offset + 1] < INK_THRESHOLD ||
-        band.data[offset + 2] < INK_THRESHOLD
-      ) {
-        hasInk = true;
-        break;
-      }
-    }
-    if (!hasInk) return nominalCut - maxScan + row;
-  }
-  return nominalCut;
-}
 
 export function buildContractPrintHtml(document: ResolvedContractDocument, title: string) {
-  const sanitizedBody = DOMPurify.sanitize(document.bodyHtml);
+  const versoes = versoesParaImprimir(document);
   const headerAlignment = document.settings.header_layout || "left";
   const logoUrl = document.settings.logo_url || document.organization?.logo_url || "";
   const primaryColor = document.settings.primary_color || "#7C3AED";
-  const footerText = document.settings.footer_text || "";
 
   const marginTop = Number(document.settings.margin_top ?? 20) || 20;
   const marginRight = Number(document.settings.margin_right ?? 20) || 20;
@@ -1964,11 +1593,7 @@ export function buildContractPrintHtml(document: ResolvedContractDocument, title
     </style>
   </head>
   <body>
-    <div class="page">
-      ${renderContractHeaderHtml(document.settings as any, document.variableData as any)}
-      <div class="content">${sanitizedBody}</div>
-      ${document.settings.show_footer !== false && footerText ? `<div class="footer"><p>${escapeHtml(footerText)}</p></div>` : ""}
-    </div>
+    ${versoes.map((versao, indice) => renderPaginaDaVersao(document, versao, indice)).join("\n    ")}
     <script>
       window.addEventListener('load', () => {
         setTimeout(() => {

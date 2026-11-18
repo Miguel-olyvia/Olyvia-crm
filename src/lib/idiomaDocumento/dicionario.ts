@@ -3,13 +3,16 @@
 
 import { DICIONARIO_EN } from "./dicionario.en";
 import { DICIONARIO_PT } from "./dicionario.pt";
+import { DICIONARIO_PROPOSTA_EN } from "./dicionario.proposta.en";
+import { DICIONARIO_PROPOSTA_PT } from "./dicionario.proposta.pt";
 import { IDIOMA_BASE, normalizarCodigo } from "./registo";
 
 export type ParametrosDoc = Record<string, string | number | null | undefined>;
 
+// As chaves doc.proposta.* (rótulos do PDF da proposta) vivem em ficheiros próprios e juntam-se às gerais aqui.
 const DICIONARIOS: Record<string, Record<string, string>> = {
-  pt: DICIONARIO_PT,
-  en: DICIONARIO_EN,
+  pt: { ...DICIONARIO_PT, ...DICIONARIO_PROPOSTA_PT },
+  en: { ...DICIONARIO_EN, ...DICIONARIO_PROPOSTA_EN },
 };
 
 function interpolar(texto: string, params?: ParametrosDoc): string {

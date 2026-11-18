@@ -4,19 +4,27 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { FileText } from "lucide-react";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
+import { useTranslation } from "@/hooks/useTranslation";
+import { obterIdioma } from "@/lib/idiomaDocumento/registo";
+import { CamposComuns, type VersaoEmEdicao } from "./versoes/CamposComuns";
 
 interface Props {
   settings: DocumentSettings;
   onChange: (s: Partial<DocumentSettings>) => void;
+  /** Presente quando se edita uma versão de idioma: só o texto do rodapé é editável. */
+  versao?: VersaoEmEdicao;
 }
 
-export function DocumentFooterSettings({ settings, onChange }: Props) {
+export function DocumentFooterSettings({ settings, onChange, versao }: Props) {
+  const { t } = useTranslation();
+  const textoBase = versao?.textoBase?.trim();
   return (
     <div className="space-y-4">
       <h4 className="text-sm font-semibold flex items-center gap-2">
         <FileText className="h-4 w-4" /> Rodapé do Documento
       </h4>
 
+      <CamposComuns versao={versao}>
       <label className="flex items-center gap-2 text-xs cursor-pointer">
         <Switch
           checked={settings.show_footer}
@@ -25,6 +33,7 @@ export function DocumentFooterSettings({ settings, onChange }: Props) {
         />
         Mostrar rodapé
       </label>
+      </CamposComuns>
 
       {settings.show_footer && (
         <>
@@ -33,12 +42,18 @@ export function DocumentFooterSettings({ settings, onChange }: Props) {
             <Textarea
               value={settings.footer_text || ""}
               onChange={(e) => onChange({ footer_text: e.target.value || null })}
-              placeholder="Ex: Documento gerado automaticamente pelo sistema Olyvia"
+              placeholder={versao ? textoBase || undefined : "Ex: Documento gerado automaticamente pelo sistema Olyvia"}
               className="text-sm min-h-[60px]"
               rows={2}
             />
+            {versao && textoBase && !settings.footer_text && (
+              <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                {t("contractTemplates.versoes.rodape.semTexto", { base: obterIdioma(versao.base)?.nomeNativo ?? versao.base })}
+              </p>
+            )}
           </div>
 
+          <CamposComuns versao={versao}>
           <label className="flex items-center gap-2 text-xs cursor-pointer">
             <Switch
               checked={settings.show_page_numbers}
@@ -64,6 +79,7 @@ export function DocumentFooterSettings({ settings, onChange }: Props) {
               ))}
             </div>
           </div>
+          </CamposComuns>
         </>
       )}
     </div>

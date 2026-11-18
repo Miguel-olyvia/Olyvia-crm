@@ -11,7 +11,9 @@ import { ProposalPortalOtpSection } from "@/components/proposals/ProposalPortalO
 import { formatarData, formatarDataHora } from "@/portal-i18n/formato";
 import { traduzir } from "@/portal-i18n/traduzir";
 import { traduzirEm } from "@/portal-i18n/traduzirEm";
-import type { PortalIdioma } from "@/portal-i18n/tipos";
+import { ehPortalIdioma, type PortalIdioma } from "@/portal-i18n/tipos";
+import type { PortalTraducao } from "@/portal-i18n/usePortalT";
+import { aplicarVersaoProposta, normalizarCodigo, obterIdioma } from "@/lib/idiomaDocumento";
 import { computeQuoteTotals, computeLineVatAmount, aggregateQuoteTotals } from "@/utils/quotes/computeQuoteTotals";
 import { getLineDisplayUnitPrice } from "@/utils/quotes/quoteLinePricing";
 
@@ -45,6 +47,14 @@ interface ProposalPortalDocumentProps {
    * sempre; o portal do cliente passa o idioma escolhido. Conteúdo escrito pela organização não é traduzido.
    */
   idioma?: PortalIdioma;
+  /**
+   * Idiomas do documento, por ordem (omissão ['pt']; quando vem, manda sobre `idioma`). O template passa por
+   * aplicarVersaoProposta em cada um e o miolo (secções do template) corre uma vez por versão, cada uma com o seu
+   * título; com um só idioma não há título de versão. Os controlos interativos (caixas de seleção, OTP,
+   * aceitar/rejeitar, total selecionado) ficam só na primeira versão; as seguintes saem em modo de leitura.
+   * Quem decide os idiomas é quem chama (ver resolverIdiomasDaProposta): este componente mostra o que lhe pedem.
+   */
+  idiomasDoDocumento?: string[];
   statusLabel?: string;
   canActOnProposal?: boolean;
   actionLoading?: boolean;
@@ -118,6 +128,34 @@ const normalizarTitulo = (texto: string): string =>
 /** Nome da secção quando as linhas não têm `section_name`: sentinela independente do idioma (traduz-se só ao mostrar). */
 const SECAO_SEM_NOME = "\u0000sem-nome";
 
+/** Uma versão de idioma do documento: as palavras do ecrã, o template já resolvido e as suas secções. */
+interface VersaoDoDocumento {
+  codigo: string;
+  lingua: PortalIdioma;
+  t: PortalTraducao["t"];
+  template: any | null;
+  documentSections: DocumentSection[];
+}
+
+/** As secções visíveis do template, ou as de omissão (com os rótulos no idioma de `t`) se não houver nenhuma. */
+function seccoesDoDocumento(template: any | null, t: PortalTraducao["t"]): DocumentSection[] {
+  const configured = Array.isArray(template?.sections)
+    ? template.sections.filter((section: any) => DOCUMENT_SECTION_TYPES.has(section?.type))
+    : [];
+
+  if (configured.length > 0) {
+    return configured.filter((section: DocumentSection) => section.visible !== false);
+  }
+
+  return [
+    { id: "fallback_header", type: "header", label: t("pc.docProposta.secao.cabecalho"), visible: true, settings: { customTitle: t("pc.docProposta.secao.tituloProposta"), showLogo: true, showDate: true } },
+    { id: "fallback_company", type: "company_info", label: t("pc.docProposta.secao.empresa"), visible: template?.show_company_info !== false, settings: { sectionLabel: t("pc.docProposta.secao.empresa") } },
+    { id: "fallback_quote_items", type: "quote_items", label: t("pc.docProposta.secao.detalhes"), visible: template?.show_quote_details !== false, settings: { sectionLabel: t("pc.docProposta.secao.detalhes") } },
+    { id: "fallback_terms", type: "terms", label: t("pc.docProposta.secao.condicoes"), visible: template?.show_terms !== false, settings: { sectionLabel: t("pc.docProposta.secao.condicoes") } },
+    { id: "fallback_footer", type: "footer", label: t("pc.docProposta.secao.rodape"), visible: true, settings: {} },
+  ].filter((section) => section.visible !== false);
+}
+
 const hasUsefulText = (value: unknown) => {
   if (typeof value !== "string") return false;
   return DOMPurify.sanitize(value, { ALLOWED_TAGS: [] }).trim().length > 0;
@@ -137,6 +175,7 @@ export function ProposalPortalDocument({
   company,
   mode = "preview",
   idioma = "pt",
+  idiomasDoDocumento,
   statusLabel,
   canActOnProposal = false,
   actionLoading = false,
@@ -158,13 +197,28 @@ export function ProposalPortalDocument({
   onSelectedQuotesChange,
 }: ProposalPortalDocumentProps) {
   const isPreview = mode === "preview";
-  // O idioma vem da prop (nunca do armazém do portal); um valor estranho cai em português.
-  const { idioma: lingua, t } = useMemo(() => traduzirEm(idioma), [idioma]);
+  // Os idiomas vêm das props (nunca do armazém do portal): `idiomasDoDocumento` manda quando traz algum código
+  // registado; senão vale `idioma`, e um valor estranho cai em português.
+  const chaveIdiomas = (idiomasDoDocumento ?? []).join("+");
+  const codigos = useMemo<string[]>(() => {
+    const pedidos = chaveIdiomas.split("+").map((c) => normalizarCodigo(c)).filter((c): c is string => c !== null);
+    const unicos = Array.from(new Set(pedidos));
+    return unicos.length > 0 ? unicos : [ehPortalIdioma(idioma) ? idioma : "pt"];
+  }, [chaveIdiomas, idioma]);
+  // Uma versão por idioma: o template resolvido (a MESMA referência se não houver versão) e as palavras do ecrã.
+  const versoes = useMemo<VersaoDoDocumento[]>(
+    () =>
+      codigos.map((codigo) => {
+        const { idioma: lingua, t } = traduzirEm(codigo as PortalIdioma);
+        const templateDaVersao = aplicarVersaoProposta(template, codigo);
+        return { codigo, lingua, t, template: templateDaVersao, documentSections: seccoesDoDocumento(templateDaVersao, t) };
+      }),
+    [codigos, template],
+  );
+  // O que fica fora das versões (cartões, faixas, OTP, ações) fala o idioma da primeira.
+  const { lingua, t } = versoes[0];
   // O dinheiro não segue o idioma: formatCurrency de sempre (€1.234,56) em português e em inglês.
   const money = (value: number): string => formatCurrency(value);
-  // O nome da secção sem nome é uma sentinela (não entra no texto traduzido): mudar de idioma não muda as chaves
-  // da seleção. Só se traduz ao mostrar.
-  const nomeSecaoVisivel = (nome: string): string => (nome === SECAO_SEM_NOME ? t("pc.docProposta.itens") : nome);
   const primaryColor = template?.primary_color || "#7C3AED";
   const designSettings = parseDesignSettings(template?.design_settings);
   const theme = {
@@ -183,24 +237,6 @@ export function ProposalPortalDocument({
   const fontFamily = theme.fontFamily;
   const logoUrl = template?.logo_url || company?.logo_url || null;
   const hasMultipleQuotes = quotes.length > 1;
-
-  const documentSections = useMemo<DocumentSection[]>(() => {
-    const configured = Array.isArray(template?.sections)
-      ? template.sections.filter((section: any) => DOCUMENT_SECTION_TYPES.has(section?.type))
-      : [];
-
-    if (configured.length > 0) {
-      return configured.filter((section: DocumentSection) => section.visible !== false);
-    }
-
-    return [
-      { id: "fallback_header", type: "header", label: t("pc.docProposta.secao.cabecalho"), visible: true, settings: { customTitle: t("pc.docProposta.secao.tituloProposta"), showLogo: true, showDate: true } },
-      { id: "fallback_company", type: "company_info", label: t("pc.docProposta.secao.empresa"), visible: template?.show_company_info !== false, settings: { sectionLabel: t("pc.docProposta.secao.empresa") } },
-      { id: "fallback_quote_items", type: "quote_items", label: t("pc.docProposta.secao.detalhes"), visible: template?.show_quote_details !== false, settings: { sectionLabel: t("pc.docProposta.secao.detalhes") } },
-      { id: "fallback_terms", type: "terms", label: t("pc.docProposta.secao.condicoes"), visible: template?.show_terms !== false, settings: { sectionLabel: t("pc.docProposta.secao.condicoes") } },
-      { id: "fallback_footer", type: "footer", label: t("pc.docProposta.secao.rodape"), visible: true, settings: {} },
-    ].filter((section) => section.visible !== false);
-  }, [template, t]);
 
   // Build section map for all quotes
   const allSections = useMemo(() => {
@@ -299,176 +335,332 @@ export function ProposalPortalDocument({
     ? formatarData(new Date(proposal.valid_until), lingua, "longo")
     : null;
 
-  const renderQuoteItems = () => (
-    template?.show_quote_details !== false && quotes.length > 0 && (
-            <div className="space-y-4">
-              {quotes.map((quote) => {
-                const lines = quoteLines[quote.id] || [];
-                const sections: Record<string, any[]> = {};
+  // O miolo de UMA versão de idioma: as secções do template resolvido, com as palavras desse idioma. Só a primeira
+  // versão é interativa; as seguintes saem em modo de leitura (sem caixas de seleção, realce de seleção nem PDF).
+  // Dentro desta função `template`, `lingua` e `t` são os DA VERSÃO (escondem os de fora de propósito).
+  const renderMiolo = (versao: VersaoDoDocumento, primeira: boolean) => {
+    const { template, lingua, t, documentSections } = versao;
+    const agir = canActOnProposal && primeira;
+    const comSelecao = primeira;
+    const baixarPdf = primeira ? onDownloadPdf : undefined;
+    // O nome da secção sem nome é uma sentinela (não entra no texto traduzido): mudar de idioma não muda as chaves
+    // da seleção. Só se traduz ao mostrar.
+    const nomeSecaoVisivel = (nome: string): string => (nome === SECAO_SEM_NOME ? t("pc.docProposta.itens") : nome);
+
+    const renderQuoteItems = () => (
+      template?.show_quote_details !== false && quotes.length > 0 && (
+              <div className="space-y-4">
+                {quotes.map((quote) => {
+                  const lines = quoteLines[quote.id] || [];
+                  const sections: Record<string, any[]> = {};
     
-                lines.forEach((line) => {
-                  const sectionName = line.section_name || SECAO_SEM_NOME;
-                  if (!sections[sectionName]) {
-                    sections[sectionName] = [];
-                  }
-                  sections[sectionName].push(line);
-                });
+                  lines.forEach((line) => {
+                    const sectionName = line.section_name || SECAO_SEM_NOME;
+                    if (!sections[sectionName]) {
+                      sections[sectionName] = [];
+                    }
+                    sections[sectionName].push(line);
+                  });
     
-                const showQuoteActions =
-                  canActOnProposal && quote.estado !== "aceite" && quote.estado !== "rejeitado";
+                  const showQuoteActions =
+                    agir && quote.estado !== "aceite" && quote.estado !== "rejeitado";
     
-                const sectionEntries = Object.entries(sections);
-                const hasMultipleSections = sectionEntries.length > 1;
+                  const sectionEntries = Object.entries(sections);
+                  const hasMultipleSections = sectionEntries.length > 1;
     
-                const isQuoteSelected = selectedQuoteIds.has(quote.id);
-                const isQuoteDecided = quote.estado === "aceite" || quote.estado === "rejeitado";
+                  const isQuoteSelected = selectedQuoteIds.has(quote.id);
+                  const isQuoteDecided = quote.estado === "aceite" || quote.estado === "rejeitado";
     
-                // If multiple sections, render each as a separate card
-                if (hasMultipleSections) {
-                  return (
-                    <div key={quote.id} className={`space-y-4 rounded-xl transition-all ${hasMultipleQuotes && !isQuoteDecided ? (isQuoteSelected ? 'ring-2 ring-primary/40 p-2' : 'opacity-60 p-2') : ''}`}>
-                      {hasMultipleQuotes && canActOnProposal && !isQuoteDecided && (
-                        <div className="flex items-center gap-2 px-2 pt-1">
-                          <Checkbox
-                            checked={isQuoteSelected}
-                            onCheckedChange={() => toggleQuoteSelection(quote.id)}
-                            className="h-5 w-5"
-                            disabled={isPreview}
-                          />
-                          <span className="text-sm font-medium">
-                            {isQuoteSelected ? t("pc.docProposta.orcamento.selecionado") : t("pc.docProposta.orcamento.selecionar")}
-                          </span>
-                        </div>
-                      )}
-                      {sectionEntries.map(([sectionName, items], sectionIdx) => {
-                        const sectionSubtotal = items.reduce((sum, item) => sum + (item.total_sem_iva || 0), 0);
-                        const sectionKey = `${quote.id}::${sectionName}`;
-                        const isSectionSelected = selectedSectionKeys.has(sectionKey);
+                  // If multiple sections, render each as a separate card
+                  if (hasMultipleSections) {
+                    return (
+                      <div key={quote.id} className={`space-y-4 rounded-xl transition-all ${hasMultipleQuotes && comSelecao && !isQuoteDecided ? (isQuoteSelected ? 'ring-2 ring-primary/40 p-2' : 'opacity-60 p-2') : ''}`}>
+                        {hasMultipleQuotes && agir && !isQuoteDecided && (
+                          <div className="flex items-center gap-2 px-2 pt-1">
+                            <Checkbox
+                              checked={isQuoteSelected}
+                              onCheckedChange={() => toggleQuoteSelection(quote.id)}
+                              className="h-5 w-5"
+                              disabled={isPreview}
+                            />
+                            <span className="text-sm font-medium">
+                              {isQuoteSelected ? t("pc.docProposta.orcamento.selecionado") : t("pc.docProposta.orcamento.selecionar")}
+                            </span>
+                          </div>
+                        )}
+                        {sectionEntries.map(([sectionName, items], sectionIdx) => {
+                          const sectionSubtotal = items.reduce((sum, item) => sum + (item.total_sem_iva || 0), 0);
+                          const sectionKey = `${quote.id}::${sectionName}`;
+                          const isSectionSelected = selectedSectionKeys.has(sectionKey);
     
-                        return (
-                          <Card 
-                            key={`${quote.id}-${sectionName}`}
-                            className={`transition-all ${hasMultipleSectionsInSingleQuote && canActOnProposal && !isQuoteDecided ? (isSectionSelected ? 'ring-2 ring-primary/40' : 'opacity-60') : ''}`}
-                          >
-                            <CardHeader className="pb-3 flex flex-row items-center justify-between">
-                              <CardTitle className="text-base flex items-center gap-2">
-                                {hasMultipleSectionsInSingleQuote && canActOnProposal && !isQuoteDecided && (
+                          return (
+                            <Card 
+                              key={`${quote.id}-${sectionName}`}
+                              className={`transition-all ${hasMultipleSectionsInSingleQuote && agir && !isQuoteDecided ? (isSectionSelected ? 'ring-2 ring-primary/40' : 'opacity-60') : ''}`}
+                            >
+                              <CardHeader className="pb-3 flex flex-row items-center justify-between">
+                                <CardTitle className="text-base flex items-center gap-2">
+                                  {hasMultipleSectionsInSingleQuote && agir && !isQuoteDecided && (
+                                    <Checkbox
+                                      checked={isSectionSelected}
+                                      onCheckedChange={() => toggleSectionSelection(sectionKey)}
+                                      className="h-5 w-5"
+                                      disabled={isPreview}
+                                    />
+                                  )}
+                                  📋 {nomeSecaoVisivel(sectionName)}
+                                  <Badge variant="outline" className="text-xs font-normal">
+                                    {quote.quote_number || quote.title || ""}
+                                  </Badge>
+                                </CardTitle>
+                                <div className="flex items-center gap-2">
+                                  {hasMultipleSectionsInSingleQuote && agir && !isQuoteDecided && (
+                                    <span className="text-xs text-muted-foreground">
+                                      {isSectionSelected ? t("pc.docProposta.secaoSelecionada") : t("pc.docProposta.secaoNaoSelecionada")}
+                                    </span>
+                                  )}
+                                  {sectionIdx === 0 && baixarPdf && (
+                                    <Button variant="outline" size="sm" className="gap-1.5" onClick={baixarPdf}>
+                                      <Download className="h-3.5 w-3.5" /> {t("pc.docProposta.baixarPdf")}
+                                    </Button>
+                                  )}
+                                </div>
+                              </CardHeader>
+                              <CardContent className="space-y-4">
+                                <div className="overflow-x-auto">
+                                  <table className="w-full text-sm">
+                                    <thead>
+                                      <tr className="border-b-2 border-border">
+                                        <th className="py-2 pr-4 text-left font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.item")}</th>
+                                        <th className="px-2 py-2 text-center font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.qtd")}</th>
+                                        <th className="px-2 py-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.precoUnit")}</th>
+                                        <th className="py-2 pl-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.total")}</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {items.map((item: any) => (
+                                        <tr key={item.id} className="border-b border-border/50">
+                                          <td className="py-3 pr-4">
+                                            <p className="font-medium">{item.descricao_snapshot}</p>
+                                            {item.item_description && (
+                                              <p className="mt-0.5 text-xs text-muted-foreground">{item.item_description}</p>
+                                            )}
+                                          </td>
+                                          <td className="px-2 py-3 text-center">{item.qt || 1}</td>
+                                          <td className="px-2 py-3 text-right">
+                                            {item.qt ? money(getLineDisplayUnitPrice(item)) : "—"}
+                                          </td>
+                                          <td className="py-3 pl-2 text-right font-medium">{money(item.total_sem_iva || 0)}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+    
+                                <div className="space-y-1 border-t pt-3 text-sm">
+                                  {(() => {
+                                    const globalDiscount = Number((quote as any).desconto_global_percent) || 0;
+                                    const discountAmount = sectionSubtotal * globalDiscount / 100;
+                                    // IVA por taxa com a conta do PDF (bundles repartidos por
+                                    // componente); o desconto global reduz a base de cada linha.
+                                    const sectionTotals = computeQuoteTotals(items, [], globalDiscount);
+                                    const adjustedTotal = sectionTotals.total;
+                                    return (
+                                      <>
+                                        <div className="flex justify-between">
+                                          <span className="text-muted-foreground">{t("pc.docProposta.totais.subtotal")}</span>
+                                          <span>{money(sectionSubtotal)}</span>
+                                        </div>
+                                        {globalDiscount > 0 && (
+                                          <div className="flex justify-between text-orange-600 dark:text-orange-400">
+                                            <span>{t("pc.docProposta.totais.descontoGlobal", { percentagem: globalDiscount })}</span>
+                                            <span>-{money(discountAmount)}</span>
+                                          </div>
+                                        )}
+                                        {sectionTotals.vatBreakdown.map((b) => (
+                                          <div key={b.rate} className="flex justify-between">
+                                            <span className="text-muted-foreground">{t("pc.docProposta.totais.iva", { taxa: b.rate })}</span>
+                                            <span>{money(b.vat)}</span>
+                                          </div>
+                                        ))}
+                                        <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
+                                          <span>{t("pc.docProposta.tabela.total")}</span>
+                                          <span style={{ color: primaryColor }}>{money(adjustedTotal)}</span>
+                                        </div>
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+                              </CardContent>
+                            </Card>
+                          );
+                        })}
+    
+                        {/* Overall quote totals and actions */}
+                        <Card>
+                          <CardContent className="pt-6 space-y-4">
+                            {(() => {
+                              // Each section card above only shows its OWN
+                              // subtotal/discount/IVA — the service fee is never
+                              // tied to a single section (it belongs to the whole
+                              // quote), so without this it never appeared
+                              // anywhere: the client saw the sections not add up
+                              // to "Total do Orçamento" with no explanation why.
+                              const namedFees = quoteFees[quote.id] || [];
+                              const globalDiscount = Number((quote as any).desconto_global_percent) || 0;
+                              const totals = computeQuoteTotals(lines, namedFees, globalDiscount);
+                              if (namedFees.length === 0) return null;
+                              return (
+                                <div className="space-y-1 border-b pb-3 text-sm">
+                                  <div className="flex justify-between">
+                                    <span className="text-muted-foreground">{t("pc.docProposta.totais.subtotalTodasSecoes")}</span>
+                                    <span>{money(totals.subtotalBruto)}</span>
+                                  </div>
+                                  {namedFees.map((fee: any) => (
+                                    <div key={fee.id} className="flex justify-between">
+                                      <span className="text-muted-foreground">{fee.service_fee_types?.name || t("pc.docProposta.taxaServico")}</span>
+                                      <span>{money(Number(fee.calculated_value) || 0)}</span>
+                                    </div>
+                                  ))}
+                                  {globalDiscount > 0 && (
+                                    <div className="flex justify-between text-orange-600 dark:text-orange-400">
+                                      <span>{t("pc.docProposta.totais.descontoGlobal", { percentagem: globalDiscount })}</span>
+                                      <span>-{money(totals.discountValue)}</span>
+                                    </div>
+                                  )}
+                                  {totals.vatBreakdown.map((b) => (
+                                    <div key={b.rate} className="flex justify-between">
+                                      <span className="text-muted-foreground">{t("pc.docProposta.totais.iva", { taxa: b.rate })}</span>
+                                      <span>{money(b.vat)}</span>
+                                    </div>
+                                  ))}
+                                  {totals.roundedFeeVatBreakdown.map((f, i) => (
+                                    <div key={`fee-${i}`} className="flex justify-between">
+                                      <span className="text-muted-foreground">{t("pc.docProposta.totais.ivaTaxaTraco", { taxa: f.rate, nome: f.name })}</span>
+                                      <span>{money(f.vat)}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              );
+                            })()}
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-3">
+                                {hasMultipleQuotes && agir && !isQuoteDecided && (
                                   <Checkbox
-                                    checked={isSectionSelected}
-                                    onCheckedChange={() => toggleSectionSelection(sectionKey)}
+                                    checked={isQuoteSelected}
+                                    onCheckedChange={() => toggleQuoteSelection(quote.id)}
                                     className="h-5 w-5"
                                     disabled={isPreview}
                                   />
                                 )}
-                                📋 {nomeSecaoVisivel(sectionName)}
-                                <Badge variant="outline" className="text-xs font-normal">
-                                  {quote.quote_number || quote.title || ""}
-                                </Badge>
-                              </CardTitle>
-                              <div className="flex items-center gap-2">
-                                {hasMultipleSectionsInSingleQuote && canActOnProposal && !isQuoteDecided && (
-                                  <span className="text-xs text-muted-foreground">
-                                    {isSectionSelected ? t("pc.docProposta.secaoSelecionada") : t("pc.docProposta.secaoNaoSelecionada")}
-                                  </span>
-                                )}
-                                {sectionIdx === 0 && onDownloadPdf && (
-                                  <Button variant="outline" size="sm" className="gap-1.5" onClick={onDownloadPdf}>
-                                    <Download className="h-3.5 w-3.5" /> {t("pc.docProposta.baixarPdf")}
-                                  </Button>
-                                )}
+                                <span className="text-base font-bold" style={{ color: primaryColor }}>
+                                  {t("pc.docProposta.totais.totalOrcamento", { numero: quote.quote_number || "" })}
+                                </span>
                               </div>
-                            </CardHeader>
-                            <CardContent className="space-y-4">
-                              <div className="overflow-x-auto">
-                                <table className="w-full text-sm">
-                                  <thead>
-                                    <tr className="border-b-2 border-border">
-                                      <th className="py-2 pr-4 text-left font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.item")}</th>
-                                      <th className="px-2 py-2 text-center font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.qtd")}</th>
-                                      <th className="px-2 py-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.precoUnit")}</th>
-                                      <th className="py-2 pl-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.total")}</th>
+                              <span className="text-base font-bold" style={{ color: primaryColor }}>
+                                {money(quote.total || 0)}
+                              </span>
+                            </div>
+
+                            {hasMultipleQuotes && agir && !isQuoteDecided && (
+                              <p className="text-xs text-muted-foreground">
+                                {isQuoteSelected ? t("pc.docProposta.orcamento.selecionadoParaAceitar") : t("pc.docProposta.orcamento.desmarcarParaExcluir")}
+                              </p>
+                            )}
+    
+                            {/* Botões por orçamento removidos: aceitação só via OTP/SMS no fundo da proposta */}
+    
+                            {quote.estado === "aceite" && (
+                              <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">{t("pc.docProposta.orcamento.aceite")}</Badge>
+                            )}
+                            {quote.estado === "rejeitado" && (
+                              <Badge variant="destructive">{t("pc.docProposta.orcamento.rejeitado")}</Badge>
+                            )}
+                          </CardContent>
+                        </Card>
+                      </div>
+                    );
+                  }
+    
+                  // Single section: render as before in one card
+                  return (
+                    <Card key={quote.id} className={`transition-all ${hasMultipleQuotes && comSelecao && !isQuoteDecided ? (isQuoteSelected ? 'ring-2 ring-primary/40' : 'opacity-60') : ''}`}>
+                      <CardHeader className="pb-3 flex flex-row items-center justify-between">
+                        <CardTitle className="text-base flex items-center gap-2">
+                          {hasMultipleQuotes && agir && !isQuoteDecided && (
+                            <Checkbox
+                              checked={isQuoteSelected}
+                              onCheckedChange={() => toggleQuoteSelection(quote.id)}
+                              className="h-5 w-5"
+                              disabled={isPreview}
+                            />
+                          )}
+                          📋 {t("pc.docProposta.orcamento.titulo", { numero: quote.quote_number || quote.title || "" })}
+                        </CardTitle>
+                        {baixarPdf && (
+                          <Button variant="outline" size="sm" className="gap-1.5" onClick={baixarPdf}>
+                            <Download className="h-3.5 w-3.5" /> {t("pc.docProposta.baixarPdf")}
+                          </Button>
+                        )}
+                      </CardHeader>
+                      <CardContent className="space-y-4">
+                        {sectionEntries.map(([sectionName, items]) => (
+                          <div key={sectionName}>
+                            <div className="overflow-x-auto">
+                              <table className="w-full text-sm">
+                                <thead>
+                                  <tr className="border-b-2 border-border">
+                                    <th className="py-2 pr-4 text-left font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.item")}</th>
+                                    <th className="px-2 py-2 text-center font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.qtd")}</th>
+                                    <th className="px-2 py-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.precoUnit")}</th>
+                                    <th className="py-2 pl-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.total")}</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {items.map((item: any) => (
+                                    <tr key={item.id} className="border-b border-border/50">
+                                      <td className="py-3 pr-4">
+                                        <p className="font-medium">{item.descricao_snapshot}</p>
+                                        {item.item_description && (
+                                          <p className="mt-0.5 text-xs text-muted-foreground">{item.item_description}</p>
+                                        )}
+                                      </td>
+                                      <td className="px-2 py-3 text-center">{item.qt || 1}</td>
+                                      <td className="px-2 py-3 text-right">
+                                        {item.qt ? money(getLineDisplayUnitPrice(item)) : "—"}
+                                      </td>
+                                      <td className="py-3 pl-2 text-right font-medium">{money(item.total_sem_iva || 0)}</td>
                                     </tr>
-                                  </thead>
-                                  <tbody>
-                                    {items.map((item: any) => (
-                                      <tr key={item.id} className="border-b border-border/50">
-                                        <td className="py-3 pr-4">
-                                          <p className="font-medium">{item.descricao_snapshot}</p>
-                                          {item.item_description && (
-                                            <p className="mt-0.5 text-xs text-muted-foreground">{item.item_description}</p>
-                                          )}
-                                        </td>
-                                        <td className="px-2 py-3 text-center">{item.qt || 1}</td>
-                                        <td className="px-2 py-3 text-right">
-                                          {item.qt ? money(getLineDisplayUnitPrice(item)) : "—"}
-                                        </td>
-                                        <td className="py-3 pl-2 text-right font-medium">{money(item.total_sem_iva || 0)}</td>
-                                      </tr>
-                                    ))}
-                                  </tbody>
-                                </table>
-                              </div>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          </div>
+                        ))}
     
-                              <div className="space-y-1 border-t pt-3 text-sm">
-                                {(() => {
-                                  const globalDiscount = Number((quote as any).desconto_global_percent) || 0;
-                                  const discountAmount = sectionSubtotal * globalDiscount / 100;
-                                  // IVA por taxa com a conta do PDF (bundles repartidos por
-                                  // componente); o desconto global reduz a base de cada linha.
-                                  const sectionTotals = computeQuoteTotals(items, [], globalDiscount);
-                                  const adjustedTotal = sectionTotals.total;
-                                  return (
-                                    <>
-                                      <div className="flex justify-between">
-                                        <span className="text-muted-foreground">{t("pc.docProposta.totais.subtotal")}</span>
-                                        <span>{money(sectionSubtotal)}</span>
-                                      </div>
-                                      {globalDiscount > 0 && (
-                                        <div className="flex justify-between text-orange-600 dark:text-orange-400">
-                                          <span>{t("pc.docProposta.totais.descontoGlobal", { percentagem: globalDiscount })}</span>
-                                          <span>-{money(discountAmount)}</span>
-                                        </div>
-                                      )}
-                                      {sectionTotals.vatBreakdown.map((b) => (
-                                        <div key={b.rate} className="flex justify-between">
-                                          <span className="text-muted-foreground">{t("pc.docProposta.totais.iva", { taxa: b.rate })}</span>
-                                          <span>{money(b.vat)}</span>
-                                        </div>
-                                      ))}
-                                      <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
-                                        <span>{t("pc.docProposta.tabela.total")}</span>
-                                        <span style={{ color: primaryColor }}>{money(adjustedTotal)}</span>
-                                      </div>
-                                    </>
-                                  );
-                                })()}
-                              </div>
-                            </CardContent>
-                          </Card>
-                        );
-                      })}
-    
-                      {/* Overall quote totals and actions */}
-                      <Card>
-                        <CardContent className="pt-6 space-y-4">
+                        <div className="space-y-1 border-t pt-3 text-sm">
                           {(() => {
-                            // Each section card above only shows its OWN
-                            // subtotal/discount/IVA — the service fee is never
-                            // tied to a single section (it belongs to the whole
-                            // quote), so without this it never appeared
-                            // anywhere: the client saw the sections not add up
-                            // to "Total do Orçamento" with no explanation why.
+                            // Reuses the exact same pure function the PDF is built from
+                            // (src/utils/quotes/computeQuoteTotals.ts), instead of a
+                            // parallel re-implementation. That old version (a) applied
+                            // the global discount to subtotal+fees instead of just the
+                            // subtotal, and (b) fell back to Number(quote.iva_rate || 23)
+                            // — quote.iva_rate is a stale header default, not the real
+                            // per-line VAT config, and `|| 23` also silently overrides a
+                            // legitimate 0% (auto-liquidação) with 23%. Both bugs made
+                            // this preview disagree with the PDF whenever a quote had a
+                            // discount and/or a 0%-VAT fee.
                             const namedFees = quoteFees[quote.id] || [];
                             const globalDiscount = Number((quote as any).desconto_global_percent) || 0;
                             const totals = computeQuoteTotals(lines, namedFees, globalDiscount);
-                            if (namedFees.length === 0) return null;
+                            const total = Number(quote.total) || totals.total;
                             return (
-                              <div className="space-y-1 border-b pb-3 text-sm">
+                              <>
                                 <div className="flex justify-between">
-                                  <span className="text-muted-foreground">{t("pc.docProposta.totais.subtotalTodasSecoes")}</span>
+                                  <span className="text-muted-foreground">{t("pc.docProposta.totais.subtotal")}</span>
                                   <span>{money(totals.subtotalBruto)}</span>
                                 </div>
-                                {namedFees.map((fee: any) => (
+                                {namedFees.length > 0 && namedFees.map((fee: any) => (
                                   <div key={fee.id} className="flex justify-between">
                                     <span className="text-muted-foreground">{fee.service_fee_types?.name || t("pc.docProposta.taxaServico")}</span>
                                     <span>{money(Number(fee.calculated_value) || 0)}</span>
@@ -492,455 +684,314 @@ export function ProposalPortalDocument({
                                     <span>{money(f.vat)}</span>
                                   </div>
                                 ))}
-                              </div>
+                                <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
+                                  <span>{t("pc.docProposta.tabela.total")}</span>
+                                  <span style={{ color: primaryColor }}>{money(total)}</span>
+                                </div>
+                              </>
                             );
                           })()}
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              {hasMultipleQuotes && canActOnProposal && !isQuoteDecided && (
-                                <Checkbox
-                                  checked={isQuoteSelected}
-                                  onCheckedChange={() => toggleQuoteSelection(quote.id)}
-                                  className="h-5 w-5"
-                                  disabled={isPreview}
-                                />
-                              )}
-                              <span className="text-base font-bold" style={{ color: primaryColor }}>
-                                {t("pc.docProposta.totais.totalOrcamento", { numero: quote.quote_number || "" })}
-                              </span>
-                            </div>
-                            <span className="text-base font-bold" style={{ color: primaryColor }}>
-                              {money(quote.total || 0)}
-                            </span>
-                          </div>
-
-                          {hasMultipleQuotes && canActOnProposal && !isQuoteDecided && (
-                            <p className="text-xs text-muted-foreground">
-                              {isQuoteSelected ? t("pc.docProposta.orcamento.selecionadoParaAceitar") : t("pc.docProposta.orcamento.desmarcarParaExcluir")}
-                            </p>
-                          )}
+                        </div>
     
-                          {/* Botões por orçamento removidos: aceitação só via OTP/SMS no fundo da proposta */}
-    
-                          {quote.estado === "aceite" && (
-                            <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">{t("pc.docProposta.orcamento.aceite")}</Badge>
-                          )}
-                          {quote.estado === "rejeitado" && (
-                            <Badge variant="destructive">{t("pc.docProposta.orcamento.rejeitado")}</Badge>
-                          )}
-                        </CardContent>
-                      </Card>
-                    </div>
-                  );
-                }
-    
-                // Single section: render as before in one card
-                return (
-                  <Card key={quote.id} className={`transition-all ${hasMultipleQuotes && !isQuoteDecided ? (isQuoteSelected ? 'ring-2 ring-primary/40' : 'opacity-60') : ''}`}>
-                    <CardHeader className="pb-3 flex flex-row items-center justify-between">
-                      <CardTitle className="text-base flex items-center gap-2">
-                        {hasMultipleQuotes && canActOnProposal && !isQuoteDecided && (
-                          <Checkbox
-                            checked={isQuoteSelected}
-                            onCheckedChange={() => toggleQuoteSelection(quote.id)}
-                            className="h-5 w-5"
-                            disabled={isPreview}
-                          />
+                        {hasMultipleQuotes && agir && !isQuoteDecided && (
+                          <p className="text-xs text-muted-foreground">
+                            {isQuoteSelected ? t("pc.docProposta.orcamento.selecionadoParaAceitar") : t("pc.docProposta.orcamento.desmarcarParaExcluir")}
+                          </p>
                         )}
-                        📋 {t("pc.docProposta.orcamento.titulo", { numero: quote.quote_number || quote.title || "" })}
-                      </CardTitle>
-                      {onDownloadPdf && (
-                        <Button variant="outline" size="sm" className="gap-1.5" onClick={onDownloadPdf}>
-                          <Download className="h-3.5 w-3.5" /> {t("pc.docProposta.baixarPdf")}
-                        </Button>
-                      )}
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                      {sectionEntries.map(([sectionName, items]) => (
-                        <div key={sectionName}>
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-sm">
-                              <thead>
-                                <tr className="border-b-2 border-border">
-                                  <th className="py-2 pr-4 text-left font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.item")}</th>
-                                  <th className="px-2 py-2 text-center font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.qtd")}</th>
-                                  <th className="px-2 py-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.precoUnit")}</th>
-                                  <th className="py-2 pl-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.total")}</th>
-                                </tr>
-                              </thead>
-                              <tbody>
-                                {items.map((item: any) => (
-                                  <tr key={item.id} className="border-b border-border/50">
-                                    <td className="py-3 pr-4">
-                                      <p className="font-medium">{item.descricao_snapshot}</p>
-                                      {item.item_description && (
-                                        <p className="mt-0.5 text-xs text-muted-foreground">{item.item_description}</p>
-                                      )}
-                                    </td>
-                                    <td className="px-2 py-3 text-center">{item.qt || 1}</td>
-                                    <td className="px-2 py-3 text-right">
-                                      {item.qt ? money(getLineDisplayUnitPrice(item)) : "—"}
-                                    </td>
-                                    <td className="py-3 pl-2 text-right font-medium">{money(item.total_sem_iva || 0)}</td>
-                                  </tr>
-                                ))}
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      ))}
     
-                      <div className="space-y-1 border-t pt-3 text-sm">
-                        {(() => {
-                          // Reuses the exact same pure function the PDF is built from
-                          // (src/utils/quotes/computeQuoteTotals.ts), instead of a
-                          // parallel re-implementation. That old version (a) applied
-                          // the global discount to subtotal+fees instead of just the
-                          // subtotal, and (b) fell back to Number(quote.iva_rate || 23)
-                          // — quote.iva_rate is a stale header default, not the real
-                          // per-line VAT config, and `|| 23` also silently overrides a
-                          // legitimate 0% (auto-liquidação) with 23%. Both bugs made
-                          // this preview disagree with the PDF whenever a quote had a
-                          // discount and/or a 0%-VAT fee.
-                          const namedFees = quoteFees[quote.id] || [];
-                          const globalDiscount = Number((quote as any).desconto_global_percent) || 0;
-                          const totals = computeQuoteTotals(lines, namedFees, globalDiscount);
-                          const total = Number(quote.total) || totals.total;
-                          return (
-                            <>
-                              <div className="flex justify-between">
-                                <span className="text-muted-foreground">{t("pc.docProposta.totais.subtotal")}</span>
-                                <span>{money(totals.subtotalBruto)}</span>
-                              </div>
-                              {namedFees.length > 0 && namedFees.map((fee: any) => (
-                                <div key={fee.id} className="flex justify-between">
-                                  <span className="text-muted-foreground">{fee.service_fee_types?.name || t("pc.docProposta.taxaServico")}</span>
-                                  <span>{money(Number(fee.calculated_value) || 0)}</span>
-                                </div>
-                              ))}
-                              {globalDiscount > 0 && (
-                                <div className="flex justify-between text-orange-600 dark:text-orange-400">
-                                  <span>{t("pc.docProposta.totais.descontoGlobal", { percentagem: globalDiscount })}</span>
-                                  <span>-{money(totals.discountValue)}</span>
-                                </div>
-                              )}
-                              {totals.vatBreakdown.map((b) => (
-                                <div key={b.rate} className="flex justify-between">
-                                  <span className="text-muted-foreground">{t("pc.docProposta.totais.iva", { taxa: b.rate })}</span>
-                                  <span>{money(b.vat)}</span>
-                                </div>
-                              ))}
-                              {totals.roundedFeeVatBreakdown.map((f, i) => (
-                                <div key={`fee-${i}`} className="flex justify-between">
-                                  <span className="text-muted-foreground">{t("pc.docProposta.totais.ivaTaxaTraco", { taxa: f.rate, nome: f.name })}</span>
-                                  <span>{money(f.vat)}</span>
-                                </div>
-                              ))}
-                              <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
-                                <span>{t("pc.docProposta.tabela.total")}</span>
-                                <span style={{ color: primaryColor }}>{money(total)}</span>
-                              </div>
-                            </>
-                          );
-                        })()}
-                      </div>
+                        {/* Botões por orçamento removidos: aceitação só via OTP/SMS no fundo da proposta */}
     
-                      {hasMultipleQuotes && canActOnProposal && !isQuoteDecided && (
-                        <p className="text-xs text-muted-foreground">
-                          {isQuoteSelected ? t("pc.docProposta.orcamento.selecionadoParaAceitar") : t("pc.docProposta.orcamento.desmarcarParaExcluir")}
-                        </p>
-                      )}
-    
-                      {/* Botões por orçamento removidos: aceitação só via OTP/SMS no fundo da proposta */}
-    
-                      {quote.estado === "aceite" && (
-                        <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">{t("pc.docProposta.orcamento.aceite")}</Badge>
-                      )}
-                      {quote.estado === "rejeitado" && (
-                        <Badge variant="destructive">{t("pc.docProposta.orcamento.rejeitado")}</Badge>
-                      )}
-                    </CardContent>
-                  </Card>
-                );
-              })}
+                        {quote.estado === "aceite" && (
+                          <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">{t("pc.docProposta.orcamento.aceite")}</Badge>
+                        )}
+                        {quote.estado === "rejeitado" && (
+                          <Badge variant="destructive">{t("pc.docProposta.orcamento.rejeitado")}</Badge>
+                        )}
+                      </CardContent>
+                    </Card>
+                  );
+                })}
 
-              {(() => {
-                // Totais da proposta com o IVA discriminado por taxa, como no PDF.
-                // Mesma regra do cartão do topo: havendo orçamentos aceites só esses
-                // contam; antes de qualquer decisão, todos os não rejeitados.
-                const hasAcceptedQuote = quotes.some((q: any) => q?.estado === "aceite");
-                const valueQuotes = quotes.filter((q: any) =>
-                  (hasAcceptedQuote ? q?.estado === "aceite" : q?.estado !== "rejeitado")
-                  && (quoteLines[q.id] || []).length > 0
-                );
-                if (valueQuotes.length === 0) return null;
-                const totals = aggregateQuoteTotals(valueQuotes.map((q: any) => ({
-                  lines: quoteLines[q.id] || [],
-                  fees: quoteFees[q.id] || [],
-                  descontoPercent: Number(q.desconto_global_percent) || 0,
-                })));
-                return (
-                  <Card>
-                    <CardContent className="pt-6">
-                      <div className="ml-auto max-w-sm space-y-1 text-sm">
-                        <div className="flex justify-between font-medium">
-                          <span>{t("pc.docProposta.totais.subtotalSemIva")}</span>
-                          <span>{money(totals.subtotalWithFees)}</span>
-                        </div>
-                        {totals.vatBreakdown.map((b) => (
-                          <div key={b.rate} className="flex justify-between">
-                            <span className="text-muted-foreground">{t("pc.docProposta.totais.ivaTaxa", { taxa: b.rate })}</span>
-                            <span>{money(b.vat)}</span>
+                {(() => {
+                  // Totais da proposta com o IVA discriminado por taxa, como no PDF.
+                  // Mesma regra do cartão do topo: havendo orçamentos aceites só esses
+                  // contam; antes de qualquer decisão, todos os não rejeitados.
+                  const hasAcceptedQuote = quotes.some((q: any) => q?.estado === "aceite");
+                  const valueQuotes = quotes.filter((q: any) =>
+                    (hasAcceptedQuote ? q?.estado === "aceite" : q?.estado !== "rejeitado")
+                    && (quoteLines[q.id] || []).length > 0
+                  );
+                  if (valueQuotes.length === 0) return null;
+                  const totals = aggregateQuoteTotals(valueQuotes.map((q: any) => ({
+                    lines: quoteLines[q.id] || [],
+                    fees: quoteFees[q.id] || [],
+                    descontoPercent: Number(q.desconto_global_percent) || 0,
+                  })));
+                  return (
+                    <Card>
+                      <CardContent className="pt-6">
+                        <div className="ml-auto max-w-sm space-y-1 text-sm">
+                          <div className="flex justify-between font-medium">
+                            <span>{t("pc.docProposta.totais.subtotalSemIva")}</span>
+                            <span>{money(totals.subtotalWithFees)}</span>
                           </div>
-                        ))}
-                        {totals.feeVatBreakdown.map((f, i) => (
-                          <div key={`fee-${i}`} className="flex justify-between">
-                            <span className="text-muted-foreground">{t("pc.docProposta.totais.ivaTaxaParenteses", { taxa: f.rate, nome: f.name })}</span>
-                            <span>{money(f.vat)}</span>
+                          {totals.vatBreakdown.map((b) => (
+                            <div key={b.rate} className="flex justify-between">
+                              <span className="text-muted-foreground">{t("pc.docProposta.totais.ivaTaxa", { taxa: b.rate })}</span>
+                              <span>{money(b.vat)}</span>
+                            </div>
+                          ))}
+                          {totals.feeVatBreakdown.map((f, i) => (
+                            <div key={`fee-${i}`} className="flex justify-between">
+                              <span className="text-muted-foreground">{t("pc.docProposta.totais.ivaTaxaParenteses", { taxa: f.rate, nome: f.name })}</span>
+                              <span>{money(f.vat)}</span>
+                            </div>
+                          ))}
+                          <div className="flex justify-between">
+                            <span className="text-muted-foreground">{t("pc.docProposta.totais.ivaTotal")}</span>
+                            <span>{money(totals.totalIva)}</span>
                           </div>
-                        ))}
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">{t("pc.docProposta.totais.ivaTotal")}</span>
-                          <span>{money(totals.totalIva)}</span>
+                          <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
+                            <span>{t("pc.docProposta.totais.totalGeral")}</span>
+                            <span style={{ color: primaryColor }}>{money(totals.total)}</span>
+                          </div>
                         </div>
-                        <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
-                          <span>{t("pc.docProposta.totais.totalGeral")}</span>
-                          <span style={{ color: primaryColor }}>{money(totals.total)}</span>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })()}
-            </div>
-          )
-  );
-
-  // `fallbackKey` é a chave do rótulo por omissão. O que a organização definiu (sectionLabel, ou um label
-  // renomeado) fica como vem; só o rótulo de fábrica ou em falta segue o idioma. Em português, a regra de sempre.
-  // Em inglês, um texto igual a um de fábrica em português (sem caixa nem acentos) traduz-se; outro fica como vem.
-  const traduzSeDeFabrica = (valor: string, tipo: string, extras: string[] = []): string => {
-    if (lingua === "pt") return valor;
-    const alvo = normalizarTitulo(valor);
-    const chave = [...(ROTULOS_DE_FABRICA[tipo] ?? []), ...extras].find(
-      (k) => normalizarTitulo(traduzir("pt", PREFIXO_SECAO + k)) === alvo,
+                      </CardContent>
+                    </Card>
+                  );
+                })()}
+              </div>
+            )
     );
-    return chave ? t(PREFIXO_SECAO + chave) : valor;
-  };
 
-  const sectionLabel = (section: DocumentSection, fallbackKey: string): string => {
-    const custom = section.settings?.sectionLabel;
-    if (custom) return traduzSeDeFabrica(custom, section.type);
-    const label = section.label;
-    if (lingua === "pt") return label || t(fallbackKey);
-    if (!label) return t(fallbackKey);
-    return traduzSeDeFabrica(label, section.type);
-  };
+    // `fallbackKey` é a chave do rótulo por omissão. O que a organização definiu (sectionLabel, ou um label
+    // renomeado) fica como vem; só o rótulo de fábrica ou em falta segue o idioma. Em português, a regra de sempre.
+    // Em inglês, um texto igual a um de fábrica em português (sem caixa nem acentos) traduz-se; outro fica como vem.
+    const traduzSeDeFabrica = (valor: string, tipo: string, extras: string[] = []): string => {
+      if (lingua === "pt") return valor;
+      const alvo = normalizarTitulo(valor);
+      const chave = [...(ROTULOS_DE_FABRICA[tipo] ?? []), ...extras].find(
+        (k) => normalizarTitulo(traduzir("pt", PREFIXO_SECAO + k)) === alvo,
+      );
+      return chave ? t(PREFIXO_SECAO + chave) : valor;
+    };
 
-  const sectionTitle = (section: DocumentSection, fallbackKey: string) => {
-    const label = sectionLabel(section, fallbackKey);
-    if (!label || section.settings?.showTitle === false) return null;
-    return (
-      <div
-        className="mb-3 px-3 py-2 text-sm font-semibold"
-        style={{
-          backgroundColor: theme.surfaceColor,
-          color: theme.textColor,
-          borderRadius: Math.max(theme.borderRadius - 2, 0),
-        }}
-      >
-        {label}
-      </div>
-    );
-  };
+    const sectionLabel = (section: DocumentSection, fallbackKey: string): string => {
+      const custom = section.settings?.sectionLabel;
+      if (custom) return traduzSeDeFabrica(custom, section.type);
+      const label = section.label;
+      if (lingua === "pt") return label || t(fallbackKey);
+      if (!label) return t(fallbackKey);
+      return traduzSeDeFabrica(label, section.type);
+    };
 
-  const renderContentBlock = (section: DocumentSection, fallbackKey: string, html: string) => {
-    if (!hasUsefulText(html)) return null;
-    return (
-      <section
-        key={section.id || section.type}
-        style={{ color: theme.textColor }}
-      >
-        {sectionTitle(section, fallbackKey)}
+    const sectionTitle = (section: DocumentSection, fallbackKey: string) => {
+      const label = sectionLabel(section, fallbackKey);
+      if (!label || section.settings?.showTitle === false) return null;
+      return (
         <div
-          className="prose prose-sm max-w-none"
+          className="mb-3 px-3 py-2 text-sm font-semibold"
           style={{
-            color: theme.secondaryTextColor,
-            backgroundColor: theme.contentBlockBg,
-            border: `1px solid ${theme.borderColor}`,
-            borderRadius: theme.borderRadius,
-            padding: theme.paddingCard,
+            backgroundColor: theme.surfaceColor,
+            color: theme.textColor,
+            borderRadius: Math.max(theme.borderRadius - 2, 0),
           }}
-          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}
-        />
-      </section>
-    );
-  };
-
-  const renderHeaderSection = (section: DocumentSection) => {
-    const customTitle = section.settings?.customTitle;
-    const title = customTitle
-      ? traduzSeDeFabrica(customTitle, section.type, ["tituloProposta"])
-      : sectionLabel(section, "pc.docProposta.secao.tituloProposta");
-    const showLogo = section.settings?.showLogo !== false;
-    const showDate = section.settings?.showDate !== false;
-    const hasHeaderText = hasUsefulText(template?.header_text);
-    if (!title && !showLogo && !showDate && !hasHeaderText) return null;
-
-    return (
-      <section
-        key={section.id || "header"}
-        style={{
-          backgroundColor: theme.headerBgColor,
-          color: theme.headerTextColor,
-          border: `1px solid ${theme.borderColor}`,
-          borderRadius: theme.borderRadius,
-          padding: theme.paddingCard,
-        }}
-      >
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-1">
-            {title && <h2 className="text-xl font-bold">{title}</h2>}
-            {showDate && (
-              <p className="text-sm" style={{ color: theme.secondaryTextColor }}>
-                {formatarData(new Date(proposal.created_at), lingua, "numerico")}
-              </p>
-            )}
-          </div>
-          {showLogo && logoUrl && <img src={logoUrl} alt={company?.name || ""} className="h-14 w-auto object-contain" />}
+        >
+          {label}
         </div>
-        {hasHeaderText && (
+      );
+    };
+
+    const renderContentBlock = (section: DocumentSection, fallbackKey: string, html: string) => {
+      if (!hasUsefulText(html)) return null;
+      return (
+        <section
+          key={section.id || section.type}
+          style={{ color: theme.textColor }}
+        >
+          {sectionTitle(section, fallbackKey)}
           <div
-            className="prose prose-sm mt-4 max-w-none"
-            style={{ color: theme.secondaryTextColor }}
-            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(template.header_text) }}
+            className="prose prose-sm max-w-none"
+            style={{
+              color: theme.secondaryTextColor,
+              backgroundColor: theme.contentBlockBg,
+              border: `1px solid ${theme.borderColor}`,
+              borderRadius: theme.borderRadius,
+              padding: theme.paddingCard,
+            }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(html) }}
           />
-        )}
-      </section>
-    );
-  };
+        </section>
+      );
+    };
 
-  const renderCompanySection = (section: DocumentSection) => {
-    if (!company?.name && !logoUrl) return null;
-    return (
-      <section key={section.id || "company_info"} style={{ color: theme.textColor }}>
-        {sectionTitle(section, "pc.docProposta.secao.empresa")}
-        <div
-          className="flex items-center gap-4"
-          style={{
-            backgroundColor: theme.contentBlockBg,
-            border: `1px solid ${theme.borderColor}`,
-            borderLeft: `4px solid ${primaryColor}`,
-            borderRadius: theme.borderRadius,
-            padding: theme.paddingCard,
-          }}
-        >
-          {logoUrl && <img src={logoUrl} alt="" className="h-12 w-auto object-contain" />}
-          {company?.name && <h2 className="text-lg font-bold" style={{ color: primaryColor }}>{company.name}</h2>}
-        </div>
-      </section>
-    );
-  };
+    const renderHeaderSection = (section: DocumentSection) => {
+      const customTitle = section.settings?.customTitle;
+      const title = customTitle
+        ? traduzSeDeFabrica(customTitle, section.type, ["tituloProposta"])
+        : sectionLabel(section, "pc.docProposta.secao.tituloProposta");
+      const showLogo = section.settings?.showLogo !== false;
+      const showDate = section.settings?.showDate !== false;
+      const hasHeaderText = hasUsefulText(template?.header_text);
+      if (!title && !showLogo && !showDate && !hasHeaderText) return null;
 
-  const renderClientSection = (section: DocumentSection) => {
-    const client = proposal.client || proposal.clients || proposal.anew_clients || null;
-    const name = client?.name || client?.display_name || client?.company_name || [client?.first_name, client?.last_name].filter(Boolean).join(" ");
-    if (!name && !client?.email && !client?.phone) return null;
-    return (
-      <section key={section.id || "client_info"} style={{ color: theme.textColor }}>
-        {sectionTitle(section, "pc.docProposta.secao.cliente")}
-        <div
-          className="space-y-1 text-sm"
+      return (
+        <section
+          key={section.id || "header"}
           style={{
-            backgroundColor: theme.contentBlockBg,
+            backgroundColor: theme.headerBgColor,
+            color: theme.headerTextColor,
             border: `1px solid ${theme.borderColor}`,
             borderRadius: theme.borderRadius,
             padding: theme.paddingCard,
           }}
         >
-          {name && <p className="font-semibold">{name}</p>}
-          {client?.email && <p style={{ color: theme.secondaryTextColor }}>{client.email}</p>}
-          {client?.phone && <p style={{ color: theme.secondaryTextColor }}>{client.phone}</p>}
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="space-y-1">
+              {title && <h2 className="text-xl font-bold">{title}</h2>}
+              {showDate && (
+                <p className="text-sm" style={{ color: theme.secondaryTextColor }}>
+                  {formatarData(new Date(proposal.created_at), lingua, "numerico")}
+                </p>
+              )}
+            </div>
+            {showLogo && logoUrl && <img src={logoUrl} alt={company?.name || ""} className="h-14 w-auto object-contain" />}
+          </div>
+          {hasHeaderText && (
+            <div
+              className="prose prose-sm mt-4 max-w-none"
+              style={{ color: theme.secondaryTextColor }}
+              dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(template.header_text) }}
+            />
+          )}
+        </section>
+      );
+    };
+
+    const renderCompanySection = (section: DocumentSection) => {
+      if (!company?.name && !logoUrl) return null;
+      return (
+        <section key={section.id || "company_info"} style={{ color: theme.textColor }}>
+          {sectionTitle(section, "pc.docProposta.secao.empresa")}
+          <div
+            className="flex items-center gap-4"
+            style={{
+              backgroundColor: theme.contentBlockBg,
+              border: `1px solid ${theme.borderColor}`,
+              borderLeft: `4px solid ${primaryColor}`,
+              borderRadius: theme.borderRadius,
+              padding: theme.paddingCard,
+            }}
+          >
+            {logoUrl && <img src={logoUrl} alt="" className="h-12 w-auto object-contain" />}
+            {company?.name && <h2 className="text-lg font-bold" style={{ color: primaryColor }}>{company.name}</h2>}
+          </div>
+        </section>
+      );
+    };
+
+    const renderClientSection = (section: DocumentSection) => {
+      const client = proposal.client || proposal.clients || proposal.anew_clients || null;
+      const name = client?.name || client?.display_name || client?.company_name || [client?.first_name, client?.last_name].filter(Boolean).join(" ");
+      if (!name && !client?.email && !client?.phone) return null;
+      return (
+        <section key={section.id || "client_info"} style={{ color: theme.textColor }}>
+          {sectionTitle(section, "pc.docProposta.secao.cliente")}
+          <div
+            className="space-y-1 text-sm"
+            style={{
+              backgroundColor: theme.contentBlockBg,
+              border: `1px solid ${theme.borderColor}`,
+              borderRadius: theme.borderRadius,
+              padding: theme.paddingCard,
+            }}
+          >
+            {name && <p className="font-semibold">{name}</p>}
+            {client?.email && <p style={{ color: theme.secondaryTextColor }}>{client.email}</p>}
+            {client?.phone && <p style={{ color: theme.secondaryTextColor }}>{client.phone}</p>}
+          </div>
+        </section>
+      );
+    };
+
+    const renderValiditySection = (section: DocumentSection) => {
+      if (!proposal.valid_until) return null;
+      return renderContentBlock(
+        section,
+        "pc.docProposta.secao.validade",
+        t("pc.docProposta.validadeTexto", { data: formatarData(new Date(proposal.valid_until), lingua, "numerico") })
+      );
+    };
+
+    const getNotesContent = (section: DocumentSection) => {
+      const quoteNotes = quotes
+        .map((quote) => quote.client_notes)
+        .filter(hasUsefulText)
+        .join("\n\n");
+
+      return section.settings?.content || proposal.notes || quoteNotes || "";
+    };
+
+    const renderFooterSection = (section: DocumentSection) => {
+      const footerContent = section.settings?.content || template?.footer_text || "";
+      if (!hasUsefulText(footerContent)) return null;
+
+      return (
+        <section key={section.id || "footer"} style={{ color: theme.textColor }}>
+          {section.settings?.showTitle === true && section.settings?.sectionLabel
+            ? sectionTitle(section, "pc.docProposta.secao.rodape")
+            : null}
+          <div
+            className="prose prose-sm max-w-none"
+            style={{
+              color: theme.secondaryTextColor,
+              backgroundColor: theme.contentBlockBg,
+              border: `1px solid ${theme.borderColor}`,
+              borderRadius: theme.borderRadius,
+              padding: theme.paddingCard,
+            }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(footerContent) }}
+          />
+        </section>
+      );
+    };
+
+    const renderDocumentSection = (section: DocumentSection) => {
+      switch (section.type) {
+        case "header":
+          return renderHeaderSection(section);
+        case "company_info":
+          return renderCompanySection(section);
+        case "client_info":
+          return renderClientSection(section);
+        case "description":
+          return renderContentBlock(section, "pc.docProposta.secao.descricao", section.settings?.content || proposal.description || "");
+        case "notes":
+          return renderContentBlock(section, "pc.docProposta.secao.notas", getNotesContent(section));
+        case "validity":
+          return renderValiditySection(section);
+        case "quote_items":
+          return renderQuoteItems();
+        case "terms":
+          return renderContentBlock(section, "pc.docProposta.secao.condicoes", template?.terms_conditions || "");
+        case "footer":
+          return renderFooterSection(section);
+        default:
+          return null;
+      }
+    };
+
+    const renderDocumentSections = () => {
+      const rendered = documentSections.map(renderDocumentSection).filter(Boolean);
+      if (rendered.length === 0) return null;
+      return (
+        <div className="document-template-sections" style={{ display: "flex", flexDirection: "column", gap: theme.gapSections }}>
+          {rendered}
         </div>
-      </section>
-    );
-  };
+      );
+    };
 
-  const renderValiditySection = (section: DocumentSection) => {
-    if (!proposal.valid_until) return null;
-    return renderContentBlock(
-      section,
-      "pc.docProposta.secao.validade",
-      t("pc.docProposta.validadeTexto", { data: formatarData(new Date(proposal.valid_until), lingua, "numerico") })
-    );
-  };
-
-  const getNotesContent = (section: DocumentSection) => {
-    const quoteNotes = quotes
-      .map((quote) => quote.client_notes)
-      .filter(hasUsefulText)
-      .join("\n\n");
-
-    return section.settings?.content || proposal.notes || quoteNotes || "";
-  };
-
-  const renderFooterSection = (section: DocumentSection) => {
-    const footerContent = section.settings?.content || template?.footer_text || "";
-    if (!hasUsefulText(footerContent)) return null;
-
-    return (
-      <section key={section.id || "footer"} style={{ color: theme.textColor }}>
-        {section.settings?.showTitle === true && section.settings?.sectionLabel
-          ? sectionTitle(section, "pc.docProposta.secao.rodape")
-          : null}
-        <div
-          className="prose prose-sm max-w-none"
-          style={{
-            color: theme.secondaryTextColor,
-            backgroundColor: theme.contentBlockBg,
-            border: `1px solid ${theme.borderColor}`,
-            borderRadius: theme.borderRadius,
-            padding: theme.paddingCard,
-          }}
-          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(footerContent) }}
-        />
-      </section>
-    );
-  };
-
-  const renderDocumentSection = (section: DocumentSection) => {
-    switch (section.type) {
-      case "header":
-        return renderHeaderSection(section);
-      case "company_info":
-        return renderCompanySection(section);
-      case "client_info":
-        return renderClientSection(section);
-      case "description":
-        return renderContentBlock(section, "pc.docProposta.secao.descricao", section.settings?.content || proposal.description || "");
-      case "notes":
-        return renderContentBlock(section, "pc.docProposta.secao.notas", getNotesContent(section));
-      case "validity":
-        return renderValiditySection(section);
-      case "quote_items":
-        return renderQuoteItems();
-      case "terms":
-        return renderContentBlock(section, "pc.docProposta.secao.condicoes", template?.terms_conditions || "");
-      case "footer":
-        return renderFooterSection(section);
-      default:
-        return null;
-    }
-  };
-
-  const renderDocumentSections = () => {
-    const rendered = documentSections.map(renderDocumentSection).filter(Boolean);
-    if (rendered.length === 0) return null;
-    return (
-      <div className="document-template-sections" style={{ display: "flex", flexDirection: "column", gap: theme.gapSections }}>
-        {rendered}
-      </div>
-    );
+    return renderDocumentSections();
   };
 
   return (
@@ -1063,7 +1114,20 @@ export function ProposalPortalDocument({
         </CardContent>
       </Card>
 
-      {renderDocumentSections()}
+      {versoes.length > 1
+        ? versoes.map((versao, indice) => {
+            const miolo = renderMiolo(versao, indice === 0);
+            if (!miolo) return null;
+            return (
+              <section key={versao.codigo} lang={versao.codigo} className="space-y-5">
+                <h2 className="text-lg font-semibold" style={{ color: primaryColor }}>
+                  {obterIdioma(versao.codigo)?.nomeNativo ?? versao.codigo}
+                </h2>
+                {miolo}
+              </section>
+            );
+          })
+        : renderMiolo(versoes[0], true)}
 
       {/* OTP SMS Verification Section */}
       {canActOnProposal && (

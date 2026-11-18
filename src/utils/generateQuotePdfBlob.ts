@@ -26,7 +26,7 @@ export async function generateQuotePdfBlob(
   quoteId: string,
   options: {
     templateOverride?: any | null;
-    documentContext?: { kind: 'quote' } | { kind: 'proposal'; number?: string | null; title?: string | null };
+    documentContext?: { kind: 'quote' } | { kind: 'proposal'; number?: string | null; title?: string | null; idioma?: string };
     /** Multi-quote proposal PDFs: hide this quote's own totals block. */
     hideTotals?: boolean;
     /** Multi-quote proposal PDFs: render the aggregated totals block instead. */
