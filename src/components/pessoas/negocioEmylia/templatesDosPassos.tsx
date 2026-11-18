@@ -176,14 +176,18 @@ export const dataIso = (dmy: string): string => {
 
 type DadosDaProposta = { numero: string; data: string } | null | undefined;
 
-function dadosDaMinuta(d: Negocio, c: ContextoDosTemplates, nome: string, valores: Record<string, string>, proposta?: DadosDaProposta): ContractVariableData {
+export function dadosDaMinuta(d: Negocio, c: ContextoDosTemplates, nome: string, valores: Record<string, string>, proposta?: DadosDaProposta): ContractVariableData {
   const T = d.orc ? totaisIva(d, c.ctx.S) : null;
-  // O início da obra é a data do contrato; o número e a data da proposta são os da base (os que o cliente vê no portal), não os do desenho da Emylia.
+  // O início da obra é a data do contrato. 17/11: o número da proposta é o que o cliente recebeu (PR 2026/<negócio>); a data vem da base.
   const inicio = d.f.inicio_prev || d.orc?.inicioObra || "";
   const base: ContractVariableData = {
     empresa_nome: nome, cliente_nome: d.f.nome_fiscal || d.nome, cliente_nif: d.f.nif_fat || d.f.nif || "", cliente_morada: d.f.morada || d.local || "",
     cliente_email: d.f.email || "", cliente_telefone: d.tel.includes("@") ? "" : d.tel, ...(T ? { contrato_valor: T.total, proposta_valor: T.total } : {}),
-    ...(proposta ? { proposta_numero: proposta.numero, ...(proposta.data ? { proposta_data: dataIso(proposta.data) } : {}) } : {}),
+    // 17/11 (A-Z na Mudelar: o contrato citava «P-2026-0032, válida 15 dias» e o cliente recebeu a «PR 2026/1005», 30 dias): o número é o da
+    // proposta que o cliente recebeu e aceitou (o mesmo do documento e do portal); a data vem da base; a validade, da proposta enviada
+    proposta_numero: `PR 2026/${d.id}${d.orc?.versoes?.length ? ` · v${d.orc.versoes.length + 1}` : ""}`,
+    ...(proposta?.data ? { proposta_data: dataIso(proposta.data) } : {}),
+    ...(d.f.validade ? { proposta_validade: d.f.validade } : {}),
     // 17/11: em ISO, como a da proposta ({{contrato_data_inicio}} formata-se com new Date(): «30/10/2026» dava «NaN de undefined de NaN»)
     ...(inicio ? { contrato_data_inicio: dataIso(inicio) } : {}),
   };

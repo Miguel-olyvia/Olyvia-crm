@@ -5,7 +5,9 @@
 //  · o plano da obra (o mesmo que a visita gera ao fechar e que a obra vai ter): o dia de início, a equipa do RH e o mapa de datas;
 //  · o orçamento que vai nascer (sem IVA);
 //  · «Fechar a visita»: volta ao negócio, leva tudo e fecha a visita (o orçamento e o plano ficam gerados).
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { garantirProdutos } from "@/emylia/real/garantirProdutos";
+import { precoProduto } from "@/emylia/fichaServico";
 import { Check, ChevronDown, Hammer, Lock, Plus, Repeat, Search, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -51,6 +53,9 @@ function ComCatalogo({ p, setP, fechar, S, erro }: { p: Projeto; setP: React.Dis
   // 22/01: com o Catálogo leve K.produtos não tem o par de cada peça: junta-se-lhe o que o servidor dá para cada tipo (só para o plano e o orçamento mostrarem; nada entra no Catálogo)
   const base = useMemo(() => K.produtos ?? [], [K.produtos]);
   const linhas = useMemo(() => linhasParaLevar(p), [p]);
+  // 17/11: e o produto EXATO que se escolheu em cada peça (ids do Catálogo verdadeiro) lê-se do servidor e entra no Catálogo: o plano liga-o tal e qual
+  const ids = useMemo(() => linhas.map((l) => l.produtoId).filter(Boolean).sort().join(","), [linhas]);
+  useEffect(() => { if (ids) void garantirProdutos(ids.split(",")).catch(() => []); }, [ids]);
   const produtos = useProdutosDoEstudio(catalogoParcial() ? orgDoCatalogoLido() : null, linhas, base);
   const inicio = inicioPorOmissao(p.catalogo?.inicio);
   const L = useMemo(() => projetoNoCatalogo(p, S, produtos), [p, S, produtos]);
@@ -61,7 +66,9 @@ function ComCatalogo({ p, setP, fechar, S, erro }: { p: Projeto; setP: React.Dis
     return negocio ? planoDaVisita(simularNoNegocio(negocio, pi, S, produtos).d, S, ini) : planoDoEstudio(servicosParaPlano(L), S, ini, p.negocio, p.catalogo);
   }, [p, S, produtos, negocio, L]);
   const P = useMemo(() => calcular(inicio), [calcular, inicio]);
-  const total = P.orc && negocio ? tot({ ...negocio, orc: P.orc }, S).pf : L.servicos.reduce((a, s) => a + s.q * s.preco, 0);
+  // 17/11 (A-Z na Mudelar: o fecho dizia 1.803 € e a Proposta 5.399 €): sem o negócio carregado neste separador, o total soma também os produtos (o PVP, senão o custo com a margem-alvo)
+  const total = P.orc && negocio ? tot({ ...negocio, orc: P.orc }, S).pf
+    : L.servicos.reduce((a, s) => a + s.q * s.preco, 0) + L.produtos.reduce((a, x) => { const pr = produtos.find((y) => y.id === x.id); return a + (pr ? precoProduto(pr, S.cfg.alvo) * x.q : 0); }, 0);
 
   return (
     <>
@@ -131,7 +138,7 @@ function Servicos({ p, setP, S, L }: { p: Projeto; setP: React.Dispatch<React.Se
       {L.produtos.length > 0 && (
         <div className="space-y-2">
           <h4 className="text-sm font-semibold">Os produtos</h4>
-          {catalogoParcial() && <p className="text-sm text-muted-foreground">O produto de cada peça é a melhor correspondência entre os primeiros resultados da pesquisa no Catálogo.</p>}
+          {catalogoParcial() && linhasParaLevar(p).some((l) => l.tipo === "produto" && !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(l.produtoId ?? "")) && <p className="text-sm text-muted-foreground">O produto das peças sem produto do Catálogo escolhido é a melhor correspondência entre os primeiros resultados da pesquisa no Catálogo.</p>}
           <ul className="space-y-1.5">
             {L.produtos.map((x) => (
               <li key={x.chave} className="flex items-center justify-between gap-3 rounded-xl bg-muted/50 px-3 py-2 text-[15px]">

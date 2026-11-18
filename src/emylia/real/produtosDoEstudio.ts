@@ -11,6 +11,7 @@ import { ligarAoCatalogo, type LinhaLevada, type ServicoReal } from "../ligarEst
 import { SEM_FILTRO_SERVIDOR, lerPesquisaProdutos } from "./produtosPaginados";
 import { escolherProdutoDoServidor, produtoDeLinha } from "./pesquisaProdutos";
 import { limparAoMudarDeSessao } from "./sessaoCaches";
+import { garantirProdutos } from "./garantirProdutos";
 
 /** A palavra que se pesquisa no servidor por cada tipo de peça (as chaves de ligarEstudio.produtoPara; sem acentos, a pesquisa do servidor ignora-os). */
 export const PALAVRA_DO_TIPO: Readonly<Record<string, string>> = {
@@ -82,6 +83,9 @@ export function useProdutosDoEstudio(org: string | null, linhas: readonly LinhaL
     void candidatosDosPedidos(org, tipos.split("|")).then((r) => { if (vivo) setExtras({ chave: `${org}|${tipos}`, lista: r.produtos }); });
     return () => { vivo = false; };
   }, [org, tipos]);
+  // 17/11: o produto exato de cada peça (id do Catálogo verdadeiro) entra no Catálogo em memória (e chega pela `base`)
+  const exatos = useMemo(() => linhas.map((l) => l.produtoId ?? "").filter((x) => ID_DO_CATALOGO.test(x)).sort().join(","), [linhas]);
+  useEffect(() => { if (org && exatos) void garantirProdutos(exatos.split(","), org).catch(() => []); }, [org, exatos]);
   return useMemo(() => {
     if (!org || !tipos || extras.chave !== `${org}|${tipos}` || !extras.lista.length) return base;
     const tem = new Set(base.map((p) => p.id));
@@ -89,13 +93,21 @@ export function useProdutosDoEstudio(org: string | null, linhas: readonly LinhaL
   }, [org, tipos, extras, base]);
 }
 
+const ID_DO_CATALOGO = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /** Antes de levar o projeto do Estúdio ao negócio: lê inteiro o par que cada peça vai ter e mete-o no Catálogo em memória (o que já lá está não se lê outra vez). `erros`: o que não se leu. */
 export async function trazerProdutosDoEstudio(org: string, linhas: readonly LinhaLevada[], servicos: Readonly<Record<string, ServicoReal>>): Promise<{ erros: string[] }> {
-  const { produtos: candidatos, erros: errosPesquisa } = await candidatosComErros(org, linhas);
+  // 17/11 (A-Z na Mudelar: os produtos escolhidos eram trocados ao fechar a visita): o produto EXATO de cada peça (LinhaLevada.produtoId, um id do Catálogo
+  // verdadeiro) lê-se primeiro; ligarAoCatalogo usa-o tal e qual. Os candidatos da pesquisa ficam para as peças sem id (o catálogo de teste).
+  const [{ produtos: candidatos, erros: errosPesquisa }, naoLidos] = await Promise.all([
+    candidatosComErros(org, linhas.filter((l) => !ID_DO_CATALOGO.test(l.produtoId ?? ""))),
+    garantirProdutos(linhas.map((l) => l.produtoId), org),
+  ]);
+  const errosExatos = naoLidos.map((id) => `${linhas.find((l) => l.produtoId === id)?.n ?? id}: não foi possível ler o produto escolhido`);
   const emMemoria = lerCatalogo().produtos ?? [];
   const tem = new Set(emMemoria.map((p) => p.id));
   const pares = ligarAoCatalogo(linhas, servicos, [...emMemoria, ...candidatos.filter((p) => !tem.has(p.id))]);
   const ids = [...new Set(pares.flatMap((g) => (g.alvo?.tipo === "produto" && !tem.has(g.alvo.id) ? [g.alvo.id] : [])))];
   const lidos = await Promise.all(ids.map((id) => escolherProdutoDoServidor(org, id)));
-  return { erros: [...errosPesquisa, ...lidos.flatMap((r, i) => (r.ok ? [] : [`${candidatos.find((p) => p.id === ids[i])?.n ?? ids[i]}: ${r.erro}`]))] };
+  return { erros: [...errosExatos, ...errosPesquisa, ...lidos.flatMap((r, i) => (r.ok ? [] : [`${candidatos.find((p) => p.id === ids[i])?.n ?? ids[i]}: ${r.erro}`]))] };
 }

@@ -4,8 +4,9 @@
 // serviço do Catálogo (o preço, a receita: o ofício, as horas, os materiais e consumíveis), cada peça com o produto (e a instalação que
 // o produto traz). O comercial troca o serviço, tira-o ou junta outro do Catálogo; isso fica no projeto (Projeto.catalogo) e é o que
 // entra no negócio ao fechar a visita. Só regras; os ecrãs estão em PlanoDoEstudio.tsx.
-import { ligarAoCatalogo, type LinhaLevada, type ProdutoReal } from "@/emylia/ligarEstudio";
-import type { Estado, SvcId } from "@/emylia/motor";
+import { ligarAoCatalogo, type LinhaLevada, type ProdutoReal, type ServicoReal } from "@/emylia/ligarEstudio";
+import { servicoDoCatalogo, type Estado, type Servico, type SvcId } from "@/emylia/motor";
+import { CATALOGO_TODO } from "@/emylia/catalogo";
 import type { ServicoEscolhido } from "@/emylia/planoDaVisita";
 import { linhasParaLevar } from "./levarParaNegocio";
 import type { Projeto } from "./necessidadesEstudio";
@@ -46,11 +47,23 @@ export interface ProjetoNoCatalogo {
 
 type ProdutoCat = ProdutoReal & { servico?: SvcId; fatorServico?: number; un?: string };
 
+// 17/11 (A-Z na Mudelar: «Instalação de Base de Duche» sem par e o orçamento do fecho sem as instalações): com o Catálogo leve, S.svc só tem os
+// serviços já em uso. Os outros do Catálogo da organização (CATALOGO_TODO) também servem de par, e entram com a receita de agora (servicoDoCatalogo).
+const temEstado = (S: Pick<Estado, "svc">): S is Estado => !!(S as Partial<Estado>).cfg;
+function servicosDe(S: Pick<Estado, "svc">): Record<string, ServicoReal> {
+  const out: Record<string, ServicoReal> = { ...S.svc };
+  // os pacotes de mão de obra de um modelo inteiro («MO Modelo 1 - Casa de Banho: Remoção de Banheira…») não são o par de uma linha só
+  if (temEstado(S)) for (const i of CATALOGO_TODO) if (!out[i.id] && !/^\s*mo\s+modelo\b/i.test(i.n)) out[i.id] = { n: i.n, un: i.un };
+  return out;
+}
+const svcDe = (S: Pick<Estado, "svc">, sid: SvcId | undefined): Servico | undefined =>
+  !sid ? undefined : S.svc[sid] ?? (temEstado(S) ? servicoDoCatalogo(sid, S) ?? undefined : undefined);
+
 /** O projeto ligado ao Catálogo verdadeiro (S.svc e os produtos da organização), com as escolhas do comercial. */
 export function projetoNoCatalogo(p: Projeto, S: Pick<Estado, "svc">, produtos: readonly ProdutoCat[]): ProjetoNoCatalogo {
   const E = p.catalogo ?? {};
   const linhas: LinhaLevada[] = linhasParaLevar(p);
-  const lig = ligarAoCatalogo(linhas, S.svc, produtos);
+  const lig = ligarAoCatalogo(linhas, servicosDe(S), produtos);
   const servicos: ServicoDoProjeto[] = [], prods: ProdutoDoProjeto[] = [], semPar: string[] = [], tirados: ProjetoNoCatalogo["tirados"] = [];
   const juntarServico = (x: ServicoDoProjeto) => {
     const ja = servicos.find((y) => y.sid === x.sid && y.origem !== "extra");
@@ -65,20 +78,20 @@ export function projetoNoCatalogo(p: Projeto, S: Pick<Estado, "svc">, produtos: 
       const pr = produtos.find((x) => x.id === g.alvo!.id);
       prods.push({ chave, id: g.alvo.id, n: g.alvo.n, q: g.q, de });
       // a instalação que o produto traz entra como serviço (é o que o orçamento faz: trazidosParaOrc)
-      const sid = pr?.servico;
-      if (sid && S.svc[sid]) juntarServico({ chave: `prod:${g.alvo.id}`, sid, n: S.svc[sid].n, q: g.q * (pr?.fatorServico ?? 1), un: S.svc[sid].un, preco: S.svc[sid].preco, de: [g.alvo.n], origem: "produto" });
+      const sid = pr?.servico, sp = svcDe(S, sid);
+      if (sid && sp) juntarServico({ chave: `prod:${g.alvo.id}`, sid, n: sp.n, q: g.q * (pr?.fatorServico ?? 1), un: sp.un, preco: sp.preco, de: [g.alvo.n], origem: "produto" });
       continue;
     }
     if (g.vemComProduto) continue;
     const troca = E.trocas?.[chave];
-    if (troca === null) { tirados.push({ chave, n: S.svc[g.alvo.id]?.n ?? g.alvo.n }); continue; }
-    const sid = troca && S.svc[troca] ? troca : g.alvo.id;
-    const s = S.svc[sid];
+    if (troca === null) { tirados.push({ chave, n: svcDe(S, g.alvo.id)?.n ?? g.alvo.n }); continue; }
+    const sid = troca && svcDe(S, troca) ? troca : g.alvo.id;
+    const s = svcDe(S, sid);
     if (!s) { semPar.push(...de); continue; }
     juntarServico({ chave, sid, n: s.n, q: g.q, un: s.un, preco: s.preco, de, origem: "planta", ...(g.unDiferente && sid === g.alvo.id ? { unDiferente: g.unDiferente } : {}), ...(troca ? { trocado: true } : {}) });
   }
   for (const x of E.extras ?? []) {
-    const s = S.svc[x.sid];
+    const s = svcDe(S, x.sid);
     if (s && x.q > 0) servicos.push({ chave: `extra:${x.sid}`, sid: x.sid, n: s.n, q: x.q, un: s.un, preco: s.preco, de: ["Juntado no Estúdio"], origem: "extra" });
   }
   return { servicos, produtos: prods, semPar, tirados };

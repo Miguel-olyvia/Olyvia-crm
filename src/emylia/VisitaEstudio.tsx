@@ -134,7 +134,7 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
     const avisos = [...r.avisos];
     if (erros.length) avisos.push(`Não foi possível ler do Catálogo: ${erros.join("; ")}.`);
     // M5: com o Catálogo leve o par de cada peça é a melhor correspondência entre os primeiros resultados da pesquisa
-    if (aproximado && !erros.length) avisos.push("Os produtos são a melhor correspondência entre os primeiros resultados da pesquisa: confirme-os nas Necessidades.");
+    if (aproximado && !erros.length && linhasParaLevar(p).some((l) => l.tipo === "produto" && !/^[0-9a-f]{8}-[0-9a-f]{4}-/i.test(l.produtoId ?? ""))) avisos.push("Os produtos são a melhor correspondência entre os primeiros resultados da pesquisa: confirme-os nas Necessidades.");
     setFeito(avisos.join(" ") || "Do Estúdio não veio nada de novo.");
   };
   // M3/M4: enquanto se lê, o botão fica desativado; uma resposta de outro negócio, ou depois de a página sair, ignora-se

@@ -92,3 +92,49 @@ describe("ferramentas de teste: os botões", () => {
     expect(espiao).toHaveBeenCalledWith(lead.id);
   });
 });
+
+describe("17/11: as tarefas da obra em curso, como os técnicos", () => {
+  const obra = () => {
+    const m = montar();
+    const d = m.S.deals.find((x) => x.id === 1027)!;
+    d.fase = 5; d.obra.plano!.estado = "em curso"; m.S.role = "operacoes"; // quem pode executar a obra (como o super admin no testarh)
+    for (const t of d.obra.plano!.tasks) { delete t.exec; delete t.bloqueio; }
+    return { ...m, d };
+  };
+  it("a tarefa seguinte fica feita, por validar, com as horas previstas, os passos e uma fotografia", async () => {
+    const { ctx, d } = obra();
+    const { fazerTarefaComoTecnico, tarefaSeguinte } = await import("./FerramentasTeste");
+    const ti = tarefaSeguinte(d);
+    expect(ti).toBe(0);
+    fazerTarefaComoTecnico(ctx.A, d, ti);
+    const e = d.obra.plano!.tasks[0].exec!;
+    expect(e.estado).toBe("feita");
+    expect(e.fotos.length).toBe(1);
+    expect(e.horas).toBeGreaterThan(0);
+    expect(tarefaSeguinte(d)).toBe(1);
+  });
+  it("«todas» faz as tarefas por fazer; a validação fica para o responsável", () => {
+    const { ctx, d } = obra();
+    ligar();
+    render(<FerramentasTeste ctx={ctx} d={d} ambiente={() => true} />);
+    const n = d.obra.plano!.tasks.length;
+    fireEvent.click(screen.getByRole("button", { name: `Fazer todas as tarefas como os técnicos (${n})` }));
+    expect(d.obra.plano!.tasks.every((t) => t.exec?.estado === "feita")).toBe(true);
+    expect(d.obra.plano!.tasks.some((t) => t.exec?.estado === "validada")).toBe(false);
+  });
+});
+
+describe("17/11: o auto de receção como o cliente", () => {
+  it("com o auto por assinar, o avançar assina-o como o cliente (simularAuto)", () => {
+    const { S, A, ctx } = montar();
+    const d = S.deals.find((x) => x.id === 1027)!;
+    d.fase = 5; S.role = "operacoes";
+    d.obra.auto = { n: "AR 2026/1027", q: "17/11", estado: "por assinar" } as never;
+    d.obra.plano!.estado = "concluída";
+    const P = passoDeTeste(d, S, A);
+    if (P.tipo !== "acao") throw new Error("esperava uma ação: " + P.tipo + " " + P.t);
+    expect(P.act).toBe("simularAuto");
+    ctx.run(() => A.simularAuto(d.id));
+    expect(d.obra.auto!.estado).toBe("assinado");
+  });
+});

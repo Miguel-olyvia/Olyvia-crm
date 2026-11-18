@@ -238,13 +238,16 @@ export interface ItemSeg { k: string; t: string; sub: string; ok: boolean }
 export function seguranca(d: Negocio): ItemSeg[] {
   const tratado = d.obra.seg ?? {};
   const via = !!(d.orc?.demolicao as { r?: { licenca?: boolean } } | undefined)?.r?.licenca || /via p[úu]blica/i.test(Object.values(d.f).join(" "));
-  const cam = d.f.localidade || d.local.split(",").pop()?.trim() || "da zona";
+  // 17/11 (A-Z: «Pedido à Câmara de da zona»): o concelho é a localidade da obra; sem ela, a câmara municipal sem nome
+  const cam = (d.f.localidade || "").trim();
+  const camara = cam ? `Câmara de ${cam}` : "Câmara Municipal";
   const L: ItemSeg[] = [
-    { k: "seguro", t: "Seguro de responsabilidade civil", sub: "Fidelidade · apólice RC-2026-0412 · válido até 31/12/2026", ok: true },
+    // 17/11 (Rúben, «resolve tudo»): antes uma apólice inventada (sempre «certa»); agora confirma-se em cada obra, como os outros
+    { k: "seguro", t: "Seguro de responsabilidade civil", sub: tratado.seguro ? `Confirmado · ${tratado.seguro}` : "Confirme que a apólice de responsabilidade civil da empresa cobre esta obra.", ok: !!tratado.seguro },
     { k: "pss", t: "Plano de segurança e saúde", sub: tratado.pss ? `Feito · ${tratado.pss}` : "Riscos da obra, EPI e regras de estaleiro. Fica na carrinha.", ok: !!tratado.pss || d.obra.plano?.estado === "em curso" || d.obra.plano?.estado === "concluída" },
     { k: "condominio", t: "Aviso ao condomínio", sub: tratado.condominio ? `Afixado · ${tratado.condominio}` : "Horário das obras e contacto do responsável, na entrada do prédio.", ok: !!tratado.condominio },
   ];
-  if (via) L.push({ k: "via", t: "Licença de ocupação da via pública", sub: tratado.via ? `Aprovada pela Câmara de ${cam} · ${tratado.via}` : `Para o contentor de entulho. Pedido à Câmara de ${cam}.`, ok: !!tratado.via });
+  if (via) L.push({ k: "via", t: "Licença de ocupação da via pública", sub: tratado.via ? `Aprovada pela ${camara} · ${tratado.via}` : `Para o contentor de entulho. Pedido à ${camara}.`, ok: !!tratado.via });
   return L;
 }
 
@@ -264,4 +267,17 @@ export function nomeCurtoTarefa(n: string): string {
   if (parte) return `${parte[1]} · ${parte[2].charAt(0).toUpperCase()}${parte[2].slice(1)}`;
   const x = n.replace(/^MO Modelo Remodela[çc][ãa]o Completa\s*-\s*/i, "Remodelação · ").replace(/^M[ãa]o de Obra\s*-?\s*/i, "").trim();
   return x.charAt(0).toUpperCase() + x.slice(1);
+}
+
+/** 17/11: o nome de cada ponto de segurança, para o histórico («Obra: segurança · aviso ao condomínio tratado»). */
+export const NOME_SEGURANCA: Record<string, string> = {
+  seguro: "seguro de responsabilidade civil", pss: "plano de segurança e saúde", condominio: "aviso ao condomínio", via: "licença de ocupação da via pública",
+};
+
+/** 17/11: a obra em curso sem nada para hoje e com as tarefas por fazer mais à frente (arrancou antes do plano): pode adiantar-se (motor.adiantarPlano). */
+export function adiantavel(p: { dia: number; tasks: { dia: number; exec?: { estado: EstadoExec } }[] }): boolean {
+  const est = (t: { exec?: { estado: EstadoExec } }) => t.exec?.estado ?? "por fazer";
+  const pf = p.tasks.filter((t) => est(t) === "por fazer");
+  if (!pf.length || p.tasks.some((t) => est(t) === "em curso")) return false;
+  return Math.min(...pf.map((t) => t.dia)) > p.dia;
 }

@@ -13,7 +13,7 @@ import { montarCatalogo, type CatalogoMontado, type LinhaProduto } from "./catal
 import { lerCatalogo, linhasDe } from "./lerCatalogo";
 import { fotografar, type FotoCatalogo } from "./gravarCatalogo";
 import { aplicarLinhasModelo, lerLinhasModelo } from "./linhasModelo";
-import { definirArvoreProdutos, definirCatalogoLido } from "./catalogoLeve";
+import { definirArvoreProdutos, definirCatalogoLido, definirServicosLidos } from "./catalogoLeve";
 
 export interface CatalogoCarregado {
   org: string; M: CatalogoMontado; produtos: LinhaProduto[]; foto: FotoCatalogo;
@@ -67,6 +67,7 @@ export async function carregarCatalogo(sb: SupabaseClient, org: string, S: Estad
   // 17/11: os ecrãs sabem assim que K.produtos é parcial (leve) e de que organização pesquisar os outros; e como se converte a árvore dos produtos
   definirCatalogoLido(org, !!opcoes.leve && !erro);
   definirArvoreProdutos(M.K.arvore, L.tabelas?.categoriasProduto);
+  definirServicosLidos(M.ids.servico);
   const c = aplicarCatalogo(org, M, L.produtos, S);
   return erro ? { ...c, erro } : c;
 }

@@ -293,7 +293,7 @@ export function materiaisDoOrcamento(d: Negocio): { n: string; un: string; q: nu
   if (!o || !L) return [];
   if (o.aceite) return (o.matsModelo ?? []).map((m) => ({ ...m, produto: null }));
   if (!o.linhas.some((l) => l.t === "mat" && !l.prod && !l.livre && l.d === L.mat.d)) return [];
-  const partes = partesDoModelo(L.mat, d.visita.prod ?? [], d.visita.manter, d.visita.semParte);
+  const partes = partesDoModelo(L.mat, d.visita.prod ?? [], d.visita.manter, d.visita.semParte, undefined, !!d.f.estudio);
   const sai = new Set(partes.filter((p) => p.mantida || p.fora || p.por.length > 0).map((p) => p.d));
   return L.mats.flatMap(([n, un, f, , b]) => {
     const q = f(d.visita.med);

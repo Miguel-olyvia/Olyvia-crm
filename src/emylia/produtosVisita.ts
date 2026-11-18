@@ -8,6 +8,7 @@
 // Só tipos de motor.ts e do Catálogo: assim o motor pode usar este ficheiro sem ciclos de importação.
 import type { Catalogo, No, Produto, Regra } from "./v2/catalogoModelo";
 import type { LinhaOrc, MedKey, Medidas, SvcId } from "./motor";
+import { nosDeProdutoDoRamo } from "./ramoDosProdutos";
 
 export const PREFIXO_PROD = "Produto · ";
 export const PREFIXO_CLIENTE = "Fornecido pelo cliente · ";
@@ -59,6 +60,17 @@ export function nosAbaixo(A: No[], no: string): Set<string> {
   }
   return r;
 }
+/** 17/11: os nós de um ramo dos SERVIÇOS e, com eles, as categorias de produto (só de produtos) que lhe pertencem (ramoDosProdutos.ts):
+ *  «Canalização › Louças e torneiras» inclui «Sanitas», «Bases Duche»… da Mudelar. Um nó só de produtos fica como nosAbaixo. */
+export function nosDoRamo(A: No[], no: string): Set<string> {
+  const r = nosAbaixo(A, no);
+  const x = A.find((y) => y.id === no);
+  if (!x || x.soProduto) return r;
+  const pai = x.pai ? A.find((y) => y.id === x.pai) : null;
+  const [oficio, sub] = pai ? [pai.n, x.n] : [x.n, undefined];
+  for (const p of nosDeProdutoDoRamo(A, oficio, sub)) for (const y of nosAbaixo(A, p)) r.add(y);
+  return r;
+}
 /** "Canalização › Louças e torneiras". */
 export function caminhoNo(A: No[], id: string | null | undefined): string {
   const n = id ? A.find((x) => x.id === id) : undefined;
@@ -89,9 +101,30 @@ export function servicosTrazidos(prod: ProdVisita[]): Record<SvcId, Trazido> {
   return r;
 }
 
-/** Os serviços do pacote em uso (medida > 0 e não tirados). */
-export const ativosDoPacote = (map: [SvcId, MedKey][], med: Medidas, off: SvcId[]): SvcId[] =>
-  map.filter(([sid, k]) => med[k] > 0 && !off.includes(sid)).map(([sid]) => sid);
+/**
+ * 17/11 (A-Z na Mudelar: a mão de obra contava duas vezes): os serviços do pacote cuja instalação os produtos escolhidos já trazem por OUTRO
+ * serviço do mesmo ramo do Catálogo (K.classe: ofício › sub). Ex.: o revestimento escolhido traz «Instalação de Revestimento m2»
+ * (Revestimentos › Parede), e o «Revestimento de parede» do pacote sai; a sanita traz «Instalação de Sanita Suspensa» (Canalização ›
+ * Louças e torneiras), e a «Montagem de louças» sai. Um produto que traz o próprio serviço do pacote não muda nada.
+ */
+export function pacoteSubstituido(pacote: readonly SvcId[], prod: ProdVisita[], classe = catalogoLigado()?.classe): Set<SvcId> {
+  const out = new Set<SvcId>();
+  if (!classe) return out;
+  const trazidos = Object.keys(servicosTrazidos(prod));
+  for (const x of pacote) {
+    const c = classe[x];
+    if (c && trazidos.some((y) => y !== x && classe[y] === c)) out.add(x);
+  }
+  return out;
+}
+
+/** Os serviços do pacote em uso (medida > 0 e não tirados). 17/11: com os produtos, sem os que eles substituem (pacoteSubstituido). */
+export const ativosDoPacote = (map: [SvcId, MedKey][], med: Medidas, off: SvcId[], prod?: ProdVisita[]): SvcId[] => {
+  const ativos = map.filter(([sid, k]) => med[k] > 0 && !off.includes(sid)).map(([sid]) => sid);
+  if (!prod?.length) return ativos;
+  const fora = pacoteSubstituido(ativos, prod);
+  return fora.size ? ativos.filter((s) => !fora.has(s)) : ativos;
+};
 
 /**
  * Os serviços trazidos por produtos que entram no orçamento como linha própria: os que não estão já
@@ -136,7 +169,7 @@ export function obrigacoes(K: Catalogo, sids: SvcId[], v: NecVisita, clienteForn
     const no = ex[sid];
     if (!no || !K.arvore.some((x) => x.id === no)) return [];
     // 26/10: com os ramos equivalentes (parede e pavimento), um produto de qualquer deles cumpre
-    const ramo = new Set([no, ...(K.equivalentes ?? []).filter((g) => g.includes(no)).flat()].flatMap((n) => [...nosAbaixo(K.arvore, n)]));
+    const ramo = new Set([no, ...(K.equivalentes ?? []).filter((g) => g.includes(no)).flat()].flatMap((n) => [...nosDoRamo(K.arvore, n)]));
     const por = prod.filter((p) => p.no && ramo.has(p.no) && p.q > 0).map((p) => p.n);
     const pergunta = K.perguntaManter?.[sid]?.trim() || null, resp = v.manter?.[sid];
     const estado: EstadoObrigacao =
@@ -164,7 +197,7 @@ export function linhasClienteCompra(v: NecVisita, sids: SvcId[], clienteFornece:
 
 /** Os produtos que se podem escolher num ramo (sem os consumíveis das receitas, que não são escolha do cliente). */
 export function produtosDoRamo(K: Catalogo, no: string, consumiveis: Set<string>): Produto[] {
-  const ramo = nosAbaixo(K.arvore, no);
+  const ramo = nosDoRamo(K.arvore, no);
   return K.produtos.filter((p) => p.no && ramo.has(p.no) && !consumiveis.has(p.n));
 }
 
@@ -172,7 +205,7 @@ export function produtosDoRamo(K: Catalogo, no: string, consumiveis: Set<string>
 export function qtdSugerida(K: Catalogo, p: Produto, sids: SvcId[], med: Medidas): number {
   for (const sid of sids) {
     const no = K.exigeProduto?.[sid], r = K.qtdDe?.[sid];
-    if (!no || !r || !p.no || !nosAbaixo(K.arvore, no).has(p.no)) continue;
+    if (!no || !r || !p.no || !nosDoRamo(K.arvore, no).has(p.no)) continue;
     const q = qtdRegra(r, med);
     if (q > 0) return q;
   }
@@ -244,20 +277,23 @@ export interface ParteEstimativa {
 }
 
 /** As partes da estimativa do modelo (sem partes ou sem Catálogo ligado: lista vazia). */
-export function partesDoModelo(mat: MatModelo, prod: ProdVisita[], manter?: Record<SvcId, "sim" | "nao">, fora: string[] = [], arvore = catalogoLigado()?.arvore): ParteEstimativa[] {
+/** 17/11 (A-Z na Mudelar: «estimativa dos materiais do modelo» ao lado de todas as peças escolhidas): `inteiras` (a visita veio do Estúdio, onde cada peça
+ *  se escolhe uma a uma) cobre por inteiro a parte que tem produtos escolhidos; sem ela, a parte desce só pelo custo deles (o resto fica estimado). */
+export function partesDoModelo(mat: MatModelo, prod: ProdVisita[], manter?: Record<SvcId, "sim" | "nao">, fora: string[] = [], arvore = catalogoLigado()?.arvore, inteiras = false): ParteEstimativa[] {
   if (!mat.partes || !arvore) return [];
   const ativos = prod.filter((p) => p.q > 0);
   // os nós de um ramo: o próprio e os de baixo
   const ramo = ([o, sub]: [string, string?]) => {
     const of = arvore.find((x) => x.pai == null && x.n === o);
     const raiz = of && (sub ? arvore.find((x) => x.pai === of.id && x.n === sub) : of);
-    return raiz ? { raiz: raiz.id, nos: nosAbaixo(arvore, raiz.id) } : null;
+    // 17/11: com as categorias de produto que pertencem a este ramo («Sanitas» e «Bases Duche» são «Louças e torneiras»)
+    return raiz ? { raiz: raiz.id, nos: nosDoRamo(arvore, raiz.id) } : null;
   };
   return mat.partes.map((pt, k) => {
     const d = pt.d ?? `parte ${k + 1}`, est = r2(mat.custo * pt.peso), R = pt.ramo ? ramo(pt.ramo) : null;
     const por = R ? ativos.filter((p) => p.no && R.nos.has(p.no)) : [];
     const mantida = !!pt.manter?.some((sid) => manter?.[sid] === "sim"), tirada = fora.includes(d);
-    const custo = mantida || tirada ? 0 : r2(Math.max(0, est - por.reduce((a, p) => a + p.custo * p.q, 0)));
+    const custo = mantida || tirada || (inteiras && por.length > 0) ? 0 : r2(Math.max(0, est - por.reduce((a, p) => a + p.custo * p.q, 0)));
     return { d, est, custo, preco: r2(mat.preco * (custo / mat.custo)), raiz: R?.raiz ?? null, nos: R?.nos ?? null, por, mantida, fora: tirada };
   });
 }
@@ -272,9 +308,9 @@ export function partesDoModelo(mat: MatModelo, prod: ProdVisita[], manter?: Reco
  * Sem partes (ou sem Catálogo ligado para saber os ramos), cai na regra antiga: desce pelo custo de todos os produtos.
  */
 export function materiaisDoModelo(
-  mat: MatModelo, prod: ProdVisita[], manter?: Record<SvcId, "sim" | "nao">, arvore = catalogoLigado()?.arvore, fora: string[] = [],
+  mat: MatModelo, prod: ProdVisita[], manter?: Record<SvcId, "sim" | "nao">, arvore = catalogoLigado()?.arvore, fora: string[] = [], inteiras = false,
 ): { custo: number; preco: number } | null {
-  const partes = partesDoModelo(mat, prod, manter, fora, arvore);
+  const partes = partesDoModelo(mat, prod, manter, fora, arvore, inteiras);
   let custo = partes.length ? partes.reduce((a, p) => a + p.custo, 0) : mat.custo - prod.filter((p) => p.q > 0).reduce((a, p) => a + p.custo * p.q, 0);
   custo = r2(custo);
   if (!(custo > 0.004)) return null;

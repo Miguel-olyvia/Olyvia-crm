@@ -6,7 +6,7 @@ import type { DadosLead } from "./real/dadosDaLead";
 import type { FaturaReg } from "./v2/financeiro";
 import { erroZonasLinha, limparZonas, porZona, type GrupoZona, type ZonaLinha } from "./zonasOrcamento";
 import { diferencas, fimDe, guardarBase, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
-import { faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
+import { NOME_SEGURANCA, faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
 import { replanear, simularAtraso } from "./estudioObra/planoVivo";
 import { lerQuemAssina } from "./estudioObra/quemAssina";
 import { MOTIVO_QUEM_PAGA, aplicarNoPlano, custoDaHora, guardarAjuste, impactoAjuste, type AjusteAdenda, type AjusteObra, type ImpactoAjuste } from "./estudioObra/quemPaga";
@@ -838,10 +838,14 @@ function linhaSvc(_d: Negocio, S: Estado, sid: SvcId, q: number, s: Servico): Li
 }
 export function criarOrc(d: Negocio, S: Estado): Orcamento {
   const L = LINHAS[d.linha], m = d.visita.med, linhas: LinhaOrc[] = [];
+  // 17/11: numa visita feita no Estúdio (cada peça escolhida com a sua instalação), os serviços do pacote que os produtos escolhidos substituem pelo
+  // seu (do mesmo ramo) não entram (ativosDoPacote). Fora do Estúdio fica como sempre.
+  const comEstudio = !!d.f.estudio;
+  const pacote = new Set(ativosDoPacote(L.map, m, d.visita.off, comEstudio ? d.visita.prod ?? [] : undefined));
   for (const [sid, k] of L.map) {
     // 16/11: um serviço do pacote que a empresa não tem no Catálogo (ou que o utilizador não pode ler) fica de fora; antes rebentava a página
     const s = garantirServico(S, sid);
-    if (!s || !(m[k] > 0) || d.visita.off.includes(sid)) continue;
+    if (!s || !(m[k] > 0) || d.visita.off.includes(sid) || !pacote.has(sid)) continue;
     linhas.push(linhaSvc(d, S, sid, m[k], s));
   }
   // os juntados do Catálogo, pela ordem em que foram juntados
@@ -855,12 +859,12 @@ export function criarOrc(d: Negocio, S: Estado): Orcamento {
   }
   // os serviços trazidos pelos produtos escolhidos (os que não vêm do pacote nem foram postos à mão)
   const prod = d.visita.prod ?? [];
-  for (const [sid, t] of trazidosParaOrc(prod, ativosDoPacote(L.map, m, d.visita.off), d.visita.extra)) {
+  for (const [sid, t] of trazidosParaOrc(prod, ativosDoPacote(L.map, m, d.visita.off, comEstudio ? prod : undefined), d.visita.extra)) {
     const sv = garantirServico(S, sid);
     if (sv && t.q > 0) linhas.push(linhaSvc(d, S, sid, t.q, sv));
   }
   // os materiais do modelo descem pelo que os produtos escolhidos já cobrem (sem produtos, ficam iguais)
-  const mm = materiaisDoModelo(L.mat, prod, d.visita.manter, undefined, d.visita.semParte);
+  const mm = materiaisDoModelo(L.mat, prod, d.visita.manter, undefined, d.visita.semParte, !!d.f.estudio);
   if (mm) linhas.push({ t: "mat", d: L.mat.d, custo: mm.custo, preco: mm.preco });
   linhas.push(...linhasDosProdutos(prod), ...linhasClienteCompra(d.visita, servicosVisita(d), d.f.materiais_cliente === "Sim"));
   const o: Orcamento = { modelo: L.modelo, linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} };
@@ -965,7 +969,7 @@ const GAS_NO_ORCAMENTO: Record<string, SvcId[]> = { Anular: ["c7"], Instalar: ["
 /** Todos os serviços da visita: do pacote (pelas medidas), postos à mão e trazidos pelos produtos escolhidos. */
 export function servicosVisita(d: Negocio): SvcId[] {
   const v = d.visita;
-  return servicosDaVisita(ativosDoPacote(LINHAS[d.linha].map, v.med, v.off), v.extra, v.prod ?? []);
+  return servicosDaVisita(ativosDoPacote(LINHAS[d.linha].map, v.med, v.off, d.f.estudio ? v.prod ?? [] : undefined), v.extra, v.prod ?? []);
 }
 /** O que falta nas necessidades por causa dos produtos (com o Catálogo ligado): perguntas por responder e produtos por escolher. */
 export function faltaProdutosVisita(d: Negocio, S: Estado): { sid: SvcId; t: string }[] {
@@ -1015,7 +1019,7 @@ export function sincronizarEfeitos(d: Negocio, _S: Estado) {
     .filter((e) => !(e.k === "diag_gas" && (GAS_NO_ORCAMENTO[d.f.diag_gas] ?? []).some((sid) => o.linhas.some((l) => l.t === "svc" && l.sid === sid && l.q > 0))))
     .filter((e) => !(modelo && NO_MODELO_DE_OBRA.has(e.k)));
   const fator = ef.find((e) => e.t === "material")?.fator ?? 1;
-  const mm = materiaisDoModelo(L.mat, d.visita.prod ?? [], d.visita.manter, undefined, d.visita.semParte);
+  const mm = materiaisDoModelo(L.mat, d.visita.prod ?? [], d.visita.manter, undefined, d.visita.semParte, !!d.f.estudio);
   if (tinhaMat && fator > 0 && mm) o.linhas.push({ t: "mat", d: L.mat.d, custo: r2(mm.custo * fator), preco: r2(mm.preco * fator) });
   let bc = 0, bp = 0;
   for (const l of o.linhas) if (l.t === "svc") { bc += l.cu * l.q; bp += l.pu * l.q; }
@@ -3885,8 +3889,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     tratarSeguranca(id: number, k: string) {
       // 9/11 (Lote 1, K): mexer na obra que não é a execução das tarefas pede negocios.obra.planear (obra_guardar_negocio)
       if (!exigePerm("obra.planear")) return;
-      const d = deal(id); (d.obra.seg ??= {})[k] = agora();
-      log(d, "Obra: segurança · " + k + " tratado");
+      // 18/11: a data (dd/mm hh:mm), não «hoje hh:mm», que no dia seguinte continuava a dizer «hoje»
+      const t = new Date(), p2 = (n: number) => String(n).padStart(2, "0");
+      const d = deal(id); (d.obra.seg ??= {})[k] = `${p2(t.getDate())}/${p2(t.getMonth() + 1)} ${p2(t.getHours())}:${p2(t.getMinutes())}`;
+      log(d, "Obra: segurança · " + (NOME_SEGURANCA[k] ?? k) + " tratado");
     },
     /* -------------------------------------------- 21/10: o validador junta, muda de fase e tira tarefas (tarefasValidador.ts) */
     novaTarefaPlano(id: number, n: NovaTarefa): number | null {
@@ -4020,6 +4026,20 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 23/10: com o relógio real, a obra começa hoje (o plano mantém a ordem e a duração das tarefas)
       if (relogioReal && d.obra.plano!.origem === "orcamento") arrancarHoje(d.obra.plano!);
       d.obra.plano!.estado = "em curso"; log(d, "Obra arrancou"); avisar({ msg: "Obra em curso", sub: "Os técnicos registam as horas na app", kind: "ok" });
+    },
+    /** 17/11 (A-Z na Mudelar: a obra arrancou antes do plano e as tarefas ficaram nas datas antigas): as tarefas por fazer passam a começar
+     *  hoje, pela mesma ordem e duração (as já começadas ficam). As Operações veem os conflitos com outras obras como sempre. */
+    adiantarPlano(id: number) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado !== "em curso") return;
+      const porFazer = p.tasks.filter((t) => !t.exec);
+      if (!porFazer.length) return;
+      const k = Math.min(...porFazer.map((t) => t.dia)) - p.dia;
+      if (!(k > 0)) return;
+      for (const t of porFazer) t.dia -= k;
+      log(d, `Plano adiantado: as tarefas por fazer começam hoje (${k} ${k === 1 ? "dia útil" : "dias úteis"} mais cedo)`);
+      avisar({ msg: "Plano adiantado", sub: "As tarefas por fazer começam hoje, pela mesma ordem", kind: "ok" });
     },
     fimObra(id: number) {
       // 9/11 (Lote 1, F): como o servidor (obra_guardar_negocio), encerrar muda o estado da obra: pede também negocios.obra.planear

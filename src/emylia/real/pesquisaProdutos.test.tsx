@@ -131,3 +131,15 @@ describe("M9: o filtro mudou, as linhas antigas saem", () => {
     await waitFor(() => expect(result.current.aviso).toBe("sem filtro de serviço"));
   });
 });
+
+describe("17/11: várias subcategorias (um ramo do motor com várias categorias de produto)", () => {
+  it("uma pesquisa por subcategoria, juntas por nome e sem repetidos", async () => {
+    pagina.mockImplementation(async (_o: string, f: { subcategoria: string }) => ({ ok: true, v: { total: 1, pagina: 1, limite: 50, paginas: 1,
+      produtos: f.subcategoria === "san" ? [{ ...linha("s1"), nome: "Sanita Roca" }, { ...linha("x"), nome: "Comum" }] : [{ ...linha("b1"), nome: "Base de duche" }, { ...linha("x"), nome: "Comum" }] } }));
+    const { result } = renderHook(() => usePesquisaProdutos(ORG, { q: "", subcategorias: ["san", "bd"] }));
+    await waitFor(() => expect(result.current.linhas).toHaveLength(3));
+    expect(pagina).toHaveBeenCalledWith(ORG, expect.objectContaining({ subcategoria: "san" }), 1);
+    expect(pagina).toHaveBeenCalledWith(ORG, expect.objectContaining({ subcategoria: "bd" }), 1);
+    expect(result.current.linhas.map((x) => x.nome)).toEqual(["Base de duche", "Comum", "Sanita Roca"]);
+  });
+});

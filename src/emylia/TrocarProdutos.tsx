@@ -19,7 +19,7 @@ import { CONSUMIVEIS } from "./equipamentosCliente";
 import { ContadorQtd } from "./ContadorQtd";
 import { FotoOuIlustracao, Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
 import { categoriaDe, categorias, filtrarProdutos, ilustracaoDoCatalogo } from "./necessidades";
-import { nosAbaixo, partesDoModelo, precoProduto, precoUnitario, qtdSugerida, type ParteEstimativa, type ProdVisita } from "./produtosVisita";
+import { nosAbaixo, nosDoRamo, partesDoModelo, precoProduto, precoUnitario, qtdSugerida, type ParteEstimativa, type ProdVisita } from "./produtosVisita";
 import { MOLA, useReduzir } from "./movimento";
 import { servicosVisita } from "./motor";
 import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
@@ -70,7 +70,7 @@ export function ProdutosDaVersao({ ctx, d, ant }: { ctx: Ctx; d: Negocio; ant: V
   const retirados = saidos.filter((s) => ![...trocadoDe.values()].includes(s));
 
   // as partes da estimativa do modelo, com o preço na escala da linha que está no orçamento (o preço pode ter sido mudado)
-  const partes = partesDoModelo(L.mat, prods, v.manter, v.semParte, K.arvore);
+  const partes = partesDoModelo(L.mat, prods, v.manter, v.semParte, K.arvore, !!d.f.estudio);
   const linhaMat = o.linhas.find((l) => l.t === "mat" && l.d === L.mat.d);
   const somaPartes = partes.reduce((a, p) => a + p.preco, 0);
   const escala = linhaMat && linhaMat.t === "mat" && somaPartes > 0 ? linhaMat.preco / somaPartes : 1;
@@ -281,7 +281,7 @@ function JanelaCatalogo({ K, alvo, janela, fechar, escolher, jaTem }: {
     if (!janela || janela.k === "juntar") return todos;
     const raiz = janela.k === "parte" ? janela.parte.raiz : janela.raiz;
     if (!raiz) return todos;
-    const nos = nosAbaixo(K.arvore, raiz);
+    const nos = nosDoRamo(K.arvore, raiz);
     return todos.filter((p) => p.no && nos.has(p.no));
   }, [K, janela, org, srv.linhas]);
   const cats = useMemo(() => (org ? [] : categorias(base, K.arvore)), [org, base, K.arvore]);

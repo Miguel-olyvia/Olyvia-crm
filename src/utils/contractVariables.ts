@@ -17,7 +17,7 @@ export const RESERVED_CONTRACT_KEYS: ReadonlySet<string> = new Set([
   "cliente_nome", "cliente_nif", "cliente_morada", "cliente_email", "cliente_telefone", "cliente_localidade",
   "contrato_numero", "contrato_valor", "contrato_valor_extenso",
   "contrato_data_inicio", "contrato_data_fim", "contrato_duracao",
-  "proposta_numero", "proposta_valor", "proposta_data",
+  "proposta_numero", "proposta_valor", "proposta_data", "proposta_validade",
   "orcamento_itens", "tabela_artigos", "tabela_signatarios",
   "comercial_nome", "comercial_email", "comercial_telefone",
   "signatario_nome", "signatario_cargo",
@@ -53,6 +53,7 @@ export const CONTRACT_VARIABLES = [
   { key: "{{proposta_numero}}", label: "Nº da Proposta", description: "Número da proposta associada" },
   { key: "{{proposta_valor}}", label: "Valor da Proposta", description: "Valor da proposta original" },
   { key: "{{proposta_data}}", label: "Data da Proposta", description: "Data de emissão da proposta" },
+  { key: "{{proposta_validade}}", label: "Validade da Proposta", description: "Validade da proposta enviada (ex: 30 dias)" },
   { key: "{{orcamento_itens}}", label: "Itens do Orçamento", description: "Tabela com itens do orçamento (respeita configuração do layout da minuta)" },
   { key: "{{tabela_artigos}}", label: "Tabela de Artigos (alias)", description: "Alias de {{orcamento_itens}} — mesma tabela" },
   { key: "{{comercial_nome}}", label: "Nome do Comercial", description: "Nome do comercial responsável" },
@@ -185,6 +186,8 @@ export interface ContractVariableData {
   proposta_numero?: string;
   proposta_valor?: number;
   proposta_data?: string;
+  /** 17/11: a validade da proposta enviada (ex.: «30 dias»), para a minuta não a ter escrita à mão */
+  proposta_validade?: string;
   orcamento_itens?: {
     descricao: string;
     qtd: number;
@@ -287,6 +290,7 @@ export function substituteVariables(html: string, data: ContractVariableData, hi
     "{{proposta_data}}": data.proposta_data
       ? filledWrap(formatDate(data.proposta_data))
       : missingPlaceholder("Data da proposta"),
+    "{{proposta_validade}}": resolveValue(data.proposta_validade, "Validade da proposta"),
     "{{data_atual}}": filledWrap(formatDate(data.data_documento || new Date().toISOString())),
     "{{cliente_localidade}}": resolveValue((data as any).cliente_localidade, "Localidade"),
   };
@@ -362,6 +366,7 @@ export const SAMPLE_VARIABLE_DATA: ContractVariableData = {
   comercial_telefone: "917 000 000",
   proposta_valor: 380.50,
   proposta_data: "2026-02-20",
+  proposta_validade: "30 dias",
   signatario_nome: "Ricardo Pereira",
   signatario_cargo: "Administrador",
 };

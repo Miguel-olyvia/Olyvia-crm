@@ -164,6 +164,11 @@ export const versaoProdutosReais = () => versaoReais;
 const daCategoria = (cat: Categoria): Produto[] => REAIS_CAT.get(cat) ?? CATALOGO.filter((p) => p.cat === cat);
 
 export const produto = (id: string | undefined): Produto | undefined => (id ? REAIS_ID.get(id) ?? CATALOGO.find((x) => x.id === id) : undefined);
+/** 17/11: um produto do catálogo de teste numa categoria que já tem produtos verdadeiros (um projeto feito antes de o catálogo verdadeiro chegar). */
+export const ficouDeTeste = (id: string | undefined): boolean => {
+  const p = id && !REAIS_ID.has(id) ? CATALOGO.find((x) => x.id === id) : undefined;
+  return !!p && !!REAIS_CAT.get(p.cat)?.length;
+};
 
 /** O estilo do cliente: as cores de sempre, e as exceções por categoria («o resto cinza, o móvel em madeira»). */
 export interface Estilo { cores: Cor[]; porCategoria: Partial<Record<Categoria, Cor[]>> }

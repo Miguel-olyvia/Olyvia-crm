@@ -22,7 +22,7 @@ import { produtoParaTocar, useProdutosDoRamo } from "./real/pesquisaProdutos";
 import { SelecaoGuiada } from "./SelecaoGuiada";
 import { FotoOuIlustracao, ilustracaoDe } from "./ilustracoes";
 import {
-  nosAbaixo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, textoClienteCompra, type Obrigacao, type ProdVisita,
+  nosDoRamo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, textoClienteCompra, type Obrigacao, type ProdVisita,
 } from "./produtosVisita";
 import {
   categorias, faltaEmPalavras, filtrarProdutos, ilustracaoDoCatalogo, marcasDe, obrigacoesAMostrar, mostraCartoes, nomeCurto, objetoDaPergunta, ordenarParaObjeto, passoGuiado,
@@ -372,7 +372,7 @@ export function ProdutosVisita(ctx: P) {
   const clienteFornece = d.f.materiais_cliente === "Sim";
   const obr = obrigacoesAMostrar(obrigacoes(K, servicosVisita(d), v, clienteFornece), d);
   // cada produto escolhido mostra-se no primeiro serviço cujo ramo o contém; os outros ficam em "Outros produtos escolhidos"
-  const ramos = obr.map((o) => nosAbaixo(K.arvore, o.no));
+  const ramos = obr.map((o) => nosDoRamo(K.arvore, o.no));
   const dono = (p: ProdVisita) => (p.no ? ramos.findIndex((r) => r.has(p.no!)) : -1);
   const outros = prod.filter((p) => dono(p) < 0);
 

@@ -3,7 +3,8 @@
 // obras nos mesmos dias (os planos do orçamento, com datas reais).
 import { conflitos, type Estado, type Negocio, type Plano, TECS } from "./motor";
 import { diasDaObra, isoDia, proximoUtil } from "./planoObra";
-import { inicioDoPlano, rotuloDia } from "./preparacaoObra";
+import { HORAS_DIA } from "./ganttOrcamento";
+import { cargaDosTecnicos, horasPorDia, inicioDoPlano, rotuloDia } from "./preparacaoObra";
 
 export interface PontoPlano { id: string; ok: boolean; t: string; ir?: "plano" | "equipa" | "mat" | "compras";
   /** Técnicos noutra obra: o 1.º dia útil depois dessas obras acabarem ("aaaa-mm-dd"), para começar sem choques. */ depois?: string }
@@ -20,25 +21,26 @@ function diasReais(p: Plano): string[][] | null {
 /** O último dia real de um plano do orçamento ("aaaa-mm-dd"). */
 function ultimoDia(p: Plano): string | null { const A = diasReais(p); return A ? A.flat().sort().pop() ?? null : null; }
 
-/** O mesmo técnico noutra obra (por aprovar, aprovada ou em curso) num dos mesmos dias. */
+/** O mesmo técnico noutra obra num dos mesmos dias. 17/11 (A-Z na Mudelar: o negócio dizia «toda a equipa livre» e as Operações acusavam o
+ *  Lucas noutra obra): a MESMA regra da agenda do negócio e do Estúdio (preparacaoObra.cargaDosTecnicos): só as obras que reservam a agenda
+ *  (planoOcupa), só as tarefas por fazer, em horas por dia: há conflito quando as horas da outra obra mais as desta passam o dia de trabalho. */
 export function sobreposicoes(d: Negocio, S: Estado): { tec: string; n: string; tarefa: string; outra: string; dia: string; fimOutra: string | null }[] {
   const p = d.obra.plano, A = p && diasReais(p);
   if (!p || !A) return [];
+  const carga = cargaDosTecnicos(S, d.id);
   const out: { tec: string; n: string; tarefa: string; outra: string; dia: string; fimOutra: string | null }[] = [];
-  for (const o of S.deals) {
-    const q = o.obra.plano;
-    if (o.id === d.id || !q || q.estado === "concluída" || o.perdido || o.anulado) continue;
-    const B = diasReais(q);
-    if (!B) continue;
-    p.tasks.forEach((t, i) => {
-      if (!t.tec || out.some((x) => x.tec === t.tec && x.outra === o.nome)) return;
-      q.tasks.forEach((u, j) => {
-        if (u.tec !== t.tec || out.some((x) => x.tec === t.tec && x.outra === o.nome)) return;
-        const dia = A[i].find((x) => B[j].includes(x));
-        if (dia) out.push({ tec: t.tec, n: TECS.find((x) => x.id === t.tec)?.n ?? t.tec, tarefa: t.nome, outra: o.nome, dia, fimOutra: ultimoDia(q) });
-      });
-    });
-  }
+  p.tasks.forEach((t, i) => {
+    if (!t.tec || t.exec?.estado === "feita" || t.exec?.estado === "validada") return;
+    const h = horasPorDia(t);
+    for (const dia of A[i]) {
+      const c = carga.get(t.tec)?.get(dia);
+      if (!c || c.h + h <= HORAS_DIA + 0.01) continue;
+      const outra = [...c.itens].sort((a, b) => b.h - a.h)[0];
+      if (!outra || out.some((x) => x.tec === t.tec && x.outra === outra.nome)) continue;
+      const q = outra.negocio?.obra.plano;
+      out.push({ tec: t.tec, n: TECS.find((x) => x.id === t.tec)?.n ?? t.tec, tarefa: t.nome, outra: outra.nome, dia, fimOutra: q ? ultimoDia(q) : null });
+    }
+  });
   return out;
 }
 

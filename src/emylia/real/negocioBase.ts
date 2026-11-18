@@ -36,6 +36,12 @@ export function negocioDoLido(n: NegocioLido): Negocio {
   // e a última leitura do Eticadata da fatura (não se grava na base)
   const erp = erpLembrado(d.fin.fatura?.n);
   if (erp) d.fin.erp = erp;
+  // 17/11 (A-Z na Mudelar): a aceitação no portal grava-a o servidor, sem linha no histórico; junta-se aqui (fica gravada na próxima
+  // gravação), logo a seguir ao envio da proposta
+  if (d.orc?.aceite && !d.hist.some((h) => /aceit/i.test(h.t) && /proposta/i.test(h.t))) {
+    const i = d.hist.findIndex((h) => /Proposta enviada/i.test(h.t));
+    d.hist.splice(i < 0 ? 0 : i, 0, { t: "O cliente aceitou a proposta no portal", q: String(d.orc.aceite), k: "a" });
+  }
   return d;
 }
 

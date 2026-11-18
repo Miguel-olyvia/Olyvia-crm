@@ -13,7 +13,7 @@ import { caminho, type Catalogo, type No, type Produto } from "./v2/catalogoMode
 import { equipHora, horaPerfil, receitaDe, type Custos } from "./v2/custosModelo";
 import { iconeDoOficio, ilustracaoDe, ilustracaoDoProduto, type IconeServicoKey, type IlustracaoKey } from "./ilustracoes";
 import { iconeDoServico, todosSids } from "./fichaServico";
-import { nosAbaixo } from "./produtosVisita";
+import { nosDoRamo } from "./produtosVisita";
 
 /* ------------------------------------------------------------------ o catálogo do mapa */
 export type TipoNo = "svc" | "prod" | "equip" | "cons" | "tec";
@@ -101,7 +101,7 @@ function indice(K: CatalogoLig): Indice {
   I = {
     svc: new Map(K.servicos.map((s) => [s.id, s])), prod: new Map(K.produtos.map((p) => [p.id, p])),
     equip: new Map(K.equip.map((e) => [e.id, e])), tec: new Map(K.tecnicos.map((t) => [t.id, t])), cons: new Map(K.consumiveis.map((c) => [c.k, c])),
-    ramo: (no) => { let r = ramos.get(no); if (!r) { r = nosAbaixo(K.arvore, no); ramos.set(no, r); } return r; },
+    ramo: (no) => { let r = ramos.get(no); if (!r) { r = nosDoRamo(K.arvore, no); ramos.set(no, r); } return r; },
   };
   INDICES.set(K, I);
   return I;

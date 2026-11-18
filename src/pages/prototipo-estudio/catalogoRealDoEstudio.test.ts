@@ -89,6 +89,18 @@ describe("17/11 (Rúben: «a torneira tem que estar sempre associada a um móvel
     const r = escolherProduto(x, movel.id, movelReal.id);
     expect(r.acompanha[movel.id]?.torneira).toBe(torneiraOro.id);
   });
+  it("A-Z na Mudelar: a torneira que ficou do catálogo de teste passa à verdadeira; uma verdadeira fica", async () => {
+    const { escolherProduto } = await import("./necessidadesEstudio");
+    const { PROJETO_EXEMPLO } = await import("./exemploEstudio");
+    const movel = PROJETO_EXEMPLO.depois.pecas.find((x) => x.tipo === "movel")!;
+    const torneira = produtoDaLinha(linha("Torneira de Lavatório CASSIO Cromo"), "torneira")!, outra = produtoDaLinha(linha("Torneira de Lavatório SIRIO ORO"), "torneira")!;
+    const movelReal = produtoDaLinha(linha("Móvel AXIS 60x81x45 Branco"), "movel")!;
+    usarProdutosReais([torneira, outra, movelReal]);
+    const x = { ...PROJETO_EXEMPLO, acompanha: { [movel.id]: { torneira: "tor-mono-c" } } };
+    expect(escolherProduto(x, movel.id, movelReal.id).acompanha[movel.id]?.torneira).not.toBe("tor-mono-c");
+    const y = { ...PROJETO_EXEMPLO, acompanha: { [movel.id]: { torneira: outra.id } } };
+    expect(escolherProduto(y, movel.id, movelReal.id).acompanha[movel.id]?.torneira).toBe(outra.id);
+  });
 });
 
 describe("o Estúdio passa a escolher dos produtos verdadeiros", () => {

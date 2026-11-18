@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { seed, type Negocio, type Plano } from "./motor";
 import { sobreposicoes, verificarPlano } from "./verificacaoPlano";
 
-const plano = (inicio: string, tasks: { tec: string | null; dia: number; dur: number }[], estado: Plano["estado"] = "por aprovar"): Plano =>
+const plano = (inicio: string, tasks: { tec: string | null; dia: number; dur: number; h?: number }[], estado: Plano["estado"] = "por aprovar"): Plano =>
   ({ estado, origem: "orcamento", inicio, dia: 0, tasks: tasks.map((t, i) => ({ nome: `T${i + 1}`, svcs: [], sk: "x", h: 4, ...t })) } as unknown as Plano);
 const obra = (S: ReturnType<typeof seed>, id: number, nome: string, p: Plano): Negocio => {
   const d = { ...structuredClone(S.deals[0]), id, nome, perdido: false, anulado: undefined } as Negocio;
@@ -15,8 +15,9 @@ describe("rever o plano", () => {
   it("o mesmo técnico noutra obra nos mesmos dias, e o dia útil para começar depois", () => {
     const S = seed();
     const tec = S.deals.flatMap((d) => d.obra.plano?.tasks ?? []).find((t) => t.tec)?.tec ?? "hugo";
-    const a = obra(S, 9001, "Obra A", plano("2026-10-26", [{ tec, dia: 0, dur: 2 }]));
-    const b = obra(S, 9002, "Obra B", plano("2026-10-27", [{ tec, dia: 0, dur: 3 }], "aprovado"));
+    // 17/11: em horas, como a agenda do negócio: dias cheios dos dois lados (8 h por dia)
+    const a = obra(S, 9001, "Obra A", plano("2026-10-26", [{ tec, dia: 0, dur: 2, h: 16 }]));
+    const b = obra(S, 9002, "Obra B", plano("2026-10-27", [{ tec, dia: 0, dur: 3, h: 24 }], "aprovado"));
     S.deals = [a, b];
     const sob = sobreposicoes(a, S);
     expect(sob).toHaveLength(1);
@@ -24,6 +25,15 @@ describe("rever o plano", () => {
     const p = verificarPlano(a, S, []).find((x) => x.id === "outras")!;
     expect(p.ok).toBe(false);
     expect(p.depois).toBe("2026-10-30"); // sexta, o dia útil a seguir ao fim da obra B
+  });
+  it("17/11: a mesma regra do negócio: tarefas curtas que cabem no dia não são conflito; um rascunho por pagar não reserva", () => {
+    const S = seed();
+    const a = obra(S, 9001, "Obra A", plano("2026-10-26", [{ tec: "x1", dia: 0, dur: 1, h: 2 }]));
+    const b = obra(S, 9002, "Obra B", plano("2026-10-26", [{ tec: "x1", dia: 0, dur: 1, h: 3 }], "aprovado"));
+    const c = obra(S, 9003, "Obra C", plano("2026-10-26", [{ tec: "x1", dia: 0, dur: 1, h: 8 }], "por aprovar"));
+    c.fin = { ...c.fin, pago: false };
+    S.deals = [a, b, c];
+    expect(sobreposicoes(a, S)).toEqual([]);
   });
   it("obras concluídas ou noutros dias não contam", () => {
     const S = seed();

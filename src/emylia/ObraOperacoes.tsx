@@ -19,7 +19,7 @@ import { entregaTarde, faltaParaArrancar, inicioDoPlano, rotuloDia, semEncomenda
 import { diasDasHoras, diferencas, fimDe, inicioMinimo, mexida } from "./ajustesPlano";
 import { HORAS_DIA } from "./ganttOrcamento";
 import {
-  RESPONSAVEL_OBRA, ROTULO_EXEC, custoHoraDe, equipaDaObra, equipamentosDaObra, estadoDe, fotoExemplo,
+  RESPONSAVEL_OBRA, ROTULO_EXEC, adiantavel, custoHoraDe, equipaDaObra, equipamentosDaObra, estadoDe, fotoExemplo,
   iniciais, materiaisPorFase, nomeCurtoTarefa, servicosDaObra, porValidar, progresso, quandoEquip, seguranca, tarefasDoDia, type EntradaDiario, type EstadoExec, type EstadoMat,
 } from "./obraOps";
 import { custoObra } from "./custoObra";
@@ -579,7 +579,9 @@ function EstadoObra({ d, titulo, irPara }: { d: Negocio; titulo: string | null; 
       ...(corr.length ? [{ I: AlertTriangle, t: <><b className="font-semibold">{corr.length}</b> {corr.length === 1 ? "correção" : "correções"} em curso · {corr.map((t) => nomeTec(t.tec).split(" ")[0]).join(", ")}</>, tom: "mau" as const, ir: "hoje" as Seccao }] : []),
     ];
   } else if (p.estado === "concluída") {
-    cab = <p className="text-xl font-semibold tracking-tight">Obra concluída{p.tasks.length ? ` a ${rotuloDia(p, fim - 1)}` : ""}</p>;
+    // 17/11 (A-Z na Mudelar: «concluída a seg, 7 dez» numa obra acabada a 17/11): o dia em que se encerrou (o histórico); sem ele, o do plano
+    const fimReal = d.hist.find((h) => /^Obra concluída/.test(h.t))?.q?.split(" ")[0];
+    cab = <p className="text-xl font-semibold tracking-tight">Obra concluída{fimReal ? ` a ${fimReal}` : p.tasks.length ? ` a ${rotuloDia(p, fim - 1)}` : ""}</p>;
     L = [
       { I: CheckCircle2, t: <><b className="font-semibold">{p.tasks.length}</b> {p.tasks.length === 1 ? "tarefa feita" : "tarefas feitas"}</>, tom: "ok" },
       { I: ClipboardCheck, t: d.obra.auto?.estado === "assinado" ? "Auto de receção assinado pelo cliente" : d.obra.auto ? "Auto de receção por assinar" : "Sem auto de receção", tom: d.obra.auto?.estado === "assinado" ? "ok" : "aviso" },
@@ -704,6 +706,11 @@ function Agora({ ctx, d, irPara, verDia }: { ctx: Ctx; d: Negocio; irPara: (s: S
           texto={`${nomeCurtoTarefa(t.nome)}${ks.length > 1 ? ` · ${ks.map((k) => rotuloDia(p, k)).join(", ")}` : ""}`} acao="Ver o dia" fazer={() => verDia(ks[0])} />
       ))}
       {corr.map((t) => <LinhaAgora key={"c" + p.tasks.indexOf(t)} I={FileWarning} tom="mau" titulo={`${nomeCurtoTarefa(t.nome)}: correção pedida`} texto={`À espera de ${primeiro(t.tec)}${t.exec?.motivo ? ` · ${t.exec.motivo}` : ""}`} />)}
+      {/* 17/11 (A-Z na Mudelar): arrancou antes do plano e hoje ninguém tem trabalho: trazer as tarefas para hoje */}
+      {p.estado === "em curso" && adiantavel(p) && (ctx.S.role === "operacoes" || pelaPermissao(ctx.S.role, ["obra.planear"])) && (
+        <LinhaAgora I={CalendarClock} tom="aviso" titulo={`As tarefas só começam a ${rotuloDia(p, Math.min(...p.tasks.filter((t) => estadoDe(t) === "por fazer").map((t) => t.dia)))}`}
+          texto="A obra já arrancou e hoje não há trabalho marcado." acao="Adiantar para hoje" fazer={() => ctx.run(() => ctx.A.adiantarPlano(d.id))} />
+      )}
       {nada && <p className="flex items-center gap-2 text-[15px]"><CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" />Nada à espera de si.</p>}
       {/* 6/11 (permissões): o papel E a permissão (negocios.obra.executar ou negocios.obra.imprevistos, como no motor) */}
       {/* 9/11 (Lote 1, C): o papel, ou (conta real) quem planeia a obra (negocios.obra.planear), como no motor */}
