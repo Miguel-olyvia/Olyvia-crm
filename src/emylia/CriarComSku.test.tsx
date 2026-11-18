@@ -35,7 +35,7 @@ const M1 = "e0000000-0000-4000-a000-000000000001", M2 = "e0000000-0000-4000-a000
 // a árvore do Catálogo usa ids próprios (aqui «c1», «s2»): a pré-visualização resolve a categoria pelo NOME
 const ARVORE: No[] = [{ id: "c1", n: "Casa de banho", pai: null }, { id: "s2", n: "Torneiras", pai: "c1" }];
 const real: FichaProdutoReal = { org: ORG, podeEditar: true, podeMudarPrecos: true, recarregar: vi.fn(async () => {}) };
-const combo = (ctx: HTMLElement, nome: string) => within(ctx).getByRole("combobox", { name: nome }) as HTMLInputElement;
+const combo = (ctx: HTMLElement, nome: string) => within(ctx).getByRole("combobox", { name: new RegExp(`^${nome}( |$)`) }) as HTMLInputElement;
 const escolher = (ctx: HTMLElement, campo: string, opcao: string) => { fireEvent.click(combo(ctx, campo)); fireEvent.click(screen.getByRole("option", { name: opcao })); };
 
 beforeEach(() => {
@@ -69,7 +69,7 @@ describe("criar produto: referência gerada", () => {
   });
   it("o campo «Modelo» vem a seguir à Subcategoria, desativado e com a razão até haver subcategoria; depois só mostra os modelos dela", () => {
     const sec = abrir(true);
-    const ordem = within(sec).getAllByRole("combobox").map((c) => c.getAttribute("aria-label"));
+    const ordem = within(sec).getAllByRole("combobox").map((c) => document.querySelector(`label[for="${c.id}"]`)?.textContent ?? c.getAttribute("aria-label")); // o nome vem do rótulo visível quando o há
     expect(ordem.indexOf("Modelo")).toBe(ordem.indexOf("Subcategoria") + 1);
     expect(combo(sec, "Modelo")).toBeDisabled();
     expect(within(sec).getByText("Escolha primeiro a subcategoria (o modelo é da subcategoria).")).toBeInTheDocument();

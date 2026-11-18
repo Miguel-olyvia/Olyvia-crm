@@ -21,8 +21,9 @@
 --   3. Texto da lista paginada: o atributos_resumo de cat_ler_produtos_pagina traz «91–100×90 cm».
 --   4. Duplicados: o mesmo intervalo noutro produto do mesmo modelo → «duplicado» (gerar e pré-visualizar); outro
 --      intervalo → outro SKU.
---   5. Recusas CT002: de > ate, de = ate, falta o «ate», falta o «de», chave a mais, início <= 0, fim com 4 casas;
---      a medida gravada antes fica.
+--   5. Recusas CT002: de > ate, de = ate, falta o «ate», falta o «de», chave a mais, início negativo, fim com 4 casas;
+--      a medida gravada antes fica. O início 0 aceita-se (20270122300000: «até 100» = {"de":0,"ate":100}).
+-- Desde 20270122300000 (início 0 aceite, mensagem «igual ou maior que zero») este teste só passa com ela aplicada.
 --   6. Números como antes: value_json e value_text iguais aos de 20270117600000 («70 × 70 cm», «12,5 × 25 × 0,8 mm»),
 --      SKU 70X70; a pré-visualização com um intervalo inválido não dá erro (falta medida:<código>).
 --
@@ -173,7 +174,8 @@ BEGIN
       jsonb_build_object('l', '{"de":91}'::jsonb,           'm', 'No intervalo da largura falta o fim («ate»).'),
       jsonb_build_object('l', '{"ate":100}'::jsonb,         'm', 'No intervalo da largura falta o início («de»).'),
       jsonb_build_object('l', '{"de":91,"ate":100,"a":1}'::jsonb, 'm', 'O intervalo da largura só leva «de» e «ate».'),
-      jsonb_build_object('l', '{"de":0,"ate":100}'::jsonb,  'm', 'O início da largura tem de ser um número maior que zero.'),
+      -- 20270122300000: o início pode ser 0 (aceite mais abaixo); recusa-se só o negativo
+      jsonb_build_object('l', '{"de":-1,"ate":100}'::jsonb, 'm', 'O início da largura tem de ser um número igual ou maior que zero.'),
       jsonb_build_object('l', '{"de":91,"ate":100.0001}'::jsonb, 'm', 'O fim da largura tem no máximo 3 casas decimais.'))) x LOOP
     BEGIN
       PERFORM public.cat_guardar_produto_atributos(v_org, v_p1, jsonb_build_array(jsonb_build_object('atributo', v_med,
@@ -188,6 +190,15 @@ BEGIN
   IF v_n <> 7 THEN RAISE EXCEPTION 'FALHOU: % recusas (esperadas 7)', v_n; END IF;
   SELECT e INTO v_e FROM jsonb_array_elements(public.cat_ler_atributos_produto(v_org, v_p1) -> 'valores') e;
   IF v_e -> 'medida' IS DISTINCT FROM v_esperado THEN RAISE EXCEPTION 'FALHOU: a medida mudou depois das recusas → %', v_e; END IF;
+
+  -- 20270122300000: o início 0 aceita-se («até 100»): {"de":0,"ate":100}, «0–100 × 90 cm» (em P2)
+  r := public.cat_guardar_produto_atributos(v_org, v_p2, jsonb_build_array(jsonb_build_object('atributo', v_med,
+         'medida', '{"tipo":"2D","largura":{"de":0,"ate":100},"comprimento":90,"unidade":"cm"}'::jsonb)));
+  SELECT e INTO v_e FROM jsonb_array_elements(public.cat_ler_atributos_produto(v_org, v_p2) -> 'valores') e;
+  IF r IS DISTINCT FROM '{"ok":true,"n":1}'::jsonb OR v_e #> '{medida,largura}' IS DISTINCT FROM '{"de":0,"ate":100}'::jsonb
+     OR v_e ->> 'valor' IS DISTINCT FROM '0–100 × 90 cm' THEN
+    RAISE EXCEPTION 'FALHOU: intervalo com início 0 → % / %', r, v_e;
+  END IF;
 
   PERFORM set_config('teste.p1', v_p1::text, true);
 END $t$;

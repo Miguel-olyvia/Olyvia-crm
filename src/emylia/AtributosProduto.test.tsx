@@ -224,7 +224,7 @@ describe("ficha do produto: Atributos", () => {
     it("o erro do «de» só marca o «de»; o do «até» só o «até»", () => {
       const sec = juntarMedida();
       fireEvent.click(within(sec).getByRole("checkbox", { name: "Largura: intervalo" }));
-      escrever(sec, "Largura (de)", "0"); escrever(sec, "Largura (até)", "5");
+      escrever(sec, "Largura (de)", "-5"); escrever(sec, "Largura (até)", "5");
       expect(within(sec).getByLabelText("Largura (de)")).toHaveAttribute("aria-invalid", "true");
       expect(within(sec).getByLabelText("Largura (até)")).toHaveAttribute("aria-invalid", "false");
       escrever(sec, "Largura (de)", "1"); escrever(sec, "Largura (até)", "100001");
@@ -320,6 +320,208 @@ describe("ficha do produto: Atributos", () => {
       fireEvent.click(within(within(sec).getByRole("radiogroup", { name: "Unidade da medida" })).getByRole("radio", { name: "mm" }));
       fireEvent.click(within(sec).getByRole("button", { name: "Guardar atributos" }));
       expect(await screen.findByRole("alert")).toHaveTextContent("A largura tem de ir de um valor menor até um maior.");
+    });
+  });
+
+  describe("a medida 1D", () => {
+    const juntar = () => {
+      ficha();
+      const sec = screen.getByRole("region", { name: "Atributos" });
+      fireEvent.change(within(sec).getByLabelText("Juntar atributo"), { target: { value: A_MED } });
+      return sec;
+    };
+    const tipo = (sec: HTMLElement, t: string) => fireEvent.click(within(within(sec).getByRole("radiogroup", { name: "Tipo de medida" })).getByRole("radio", { name: t }));
+    const dim = (sec: HTMLElement, t: string) => fireEvent.click(within(within(sec).getByRole("radiogroup", { name: "Dimensão da medida" })).getByRole("radio", { name: t }));
+    const escrever = (sec: HTMLElement, rot: string, v: string) => fireEvent.change(within(sec).getByLabelText(rot), { target: { value: v } });
+    const guardar = (sec: HTMLElement) => within(sec).getByRole("button", { name: "Guardar atributos" });
+
+    it("o seletor tem 1D, 2D e 3D, por esta ordem, e 2D é a omissão", () => {
+      const sec = juntar();
+      const g = within(sec).getByRole("radiogroup", { name: "Tipo de medida" });
+      expect(within(g).getAllByRole("radio").map((r) => r.textContent)).toEqual(["1D", "2D", "3D"]);
+      expect(within(g).getByRole("radio", { name: "2D" })).toHaveAttribute("aria-checked", "true");
+    });
+
+    it("em 1D mostra a dimensão (4 escolhas), um só valor e a unidade; sem largura, comprimento nem espessura", () => {
+      const sec = juntar();
+      tipo(sec, "1D");
+      const g = within(sec).getByRole("radiogroup", { name: "Dimensão da medida" });
+      expect(within(g).getAllByRole("radio").map((r) => r.textContent)).toEqual(["Largura", "Altura", "Comprimento", "Espessura"]);
+      expect(within(sec).getByLabelText("Valor")).toBeInTheDocument();
+      expect(within(sec).getByRole("checkbox", { name: "Valor: intervalo" })).not.toBeChecked();
+      expect(within(sec).getByRole("radiogroup", { name: "Unidade da medida" })).toBeInTheDocument();
+      for (const x of ["Largura", "Comprimento", "Espessura"]) expect(within(sec).queryByLabelText(x)).toBeNull();
+    });
+
+    it("só grava com a dimensão e o valor; envia só tipo, dimensao, valor e unidade", async () => {
+      base.respostas.cat_guardar_produto_atributos = { data: { ok: true, n: 2 }, error: null };
+      const sec = juntar();
+      tipo(sec, "1D");
+      expect(guardar(sec)).toBeDisabled();
+      expect(within(sec).getByText(/Escolha a dimensão e preencha o valor/)).toBeInTheDocument();
+      dim(sec, "Altura");
+      escrever(sec, "Valor da altura", "70");
+      expect(guardar(sec)).toBeEnabled();
+      fireEvent.click(guardar(sec));
+      await waitFor(() => expect(gravadas()).toHaveLength(1));
+      expect(gravadas()[0].a.p_valores).toEqual([{ atributo: A_COR, opcao: O_PRETO }, { atributo: A_MED, medida: { tipo: "1D", dimensao: "altura", valor: 70, unidade: "cm" } }]);
+      expect(Object.keys((gravadas()[0].a.p_valores as { medida?: object }[])[1].medida ?? {}).sort()).toEqual(["dimensao", "tipo", "unidade", "valor"]);
+    });
+
+    it("intervalo e unidade mm: «Espessura 5,5–6 mm»", async () => {
+      base.respostas.cat_guardar_produto_atributos = { data: { ok: true, n: 2 }, error: null };
+      const sec = juntar();
+      tipo(sec, "1D"); dim(sec, "Espessura");
+      fireEvent.click(within(sec).getByRole("checkbox", { name: "Valor da espessura: intervalo" }));
+      escrever(sec, "Valor da espessura (de)", "5,5"); escrever(sec, "Valor da espessura (até)", "6");
+      fireEvent.click(within(within(sec).getByRole("radiogroup", { name: "Unidade da medida" })).getByRole("radio", { name: "mm" }));
+      fireEvent.click(guardar(sec));
+      await waitFor(() => expect(gravadas()).toHaveLength(1));
+      expect(gravadas()[0].a.p_valores[1]).toEqual({ atributo: A_MED, medida: { tipo: "1D", dimensao: "espessura", valor: { de: 5.5, ate: 6 }, unidade: "mm" } });
+    });
+
+    it("1D: intervalo a começar em 0 vale (0–40) e grava {de: 0, ate: 40}", async () => {
+      base.respostas.cat_guardar_produto_atributos = { data: { ok: true, n: 2 }, error: null };
+      const sec = juntar();
+      tipo(sec, "1D"); dim(sec, "Largura");
+      fireEvent.click(within(sec).getByRole("checkbox", { name: "Valor da largura: intervalo" }));
+      escrever(sec, "Valor da largura (de)", "0"); escrever(sec, "Valor da largura (até)", "40");
+      expect(within(sec).getByLabelText("Valor da largura (de)")).toHaveAttribute("aria-invalid", "false");
+      fireEvent.click(guardar(sec));
+      await waitFor(() => expect(gravadas()).toHaveLength(1));
+      expect(gravadas()[0].a.p_valores[1]).toEqual({ atributo: A_MED, medida: { tipo: "1D", dimensao: "largura", valor: { de: 0, ate: 40 }, unidade: "cm" } });
+    });
+
+    it("2D: a largura de 0 até 40 deixa guardar e grava {de: 0, ate: 40}", async () => {
+      base.respostas.cat_guardar_produto_atributos = { data: { ok: true, n: 2 }, error: null };
+      const sec = juntar();
+      fireEvent.click(within(sec).getByRole("checkbox", { name: "Largura: intervalo" }));
+      escrever(sec, "Largura (de)", "0"); escrever(sec, "Largura (até)", "40"); escrever(sec, "Comprimento", "90");
+      expect(within(sec).getByLabelText("Largura (de)")).toHaveAttribute("aria-invalid", "false");
+      expect(guardar(sec)).toBeEnabled();
+      fireEvent.click(guardar(sec));
+      await waitFor(() => expect(gravadas()).toHaveLength(1));
+      expect(gravadas()[0].a.p_valores[1]).toEqual({ atributo: A_MED, medida: { tipo: "2D", largura: { de: 0, ate: 40 }, comprimento: 90, espessura: null, unidade: "cm" } });
+    });
+
+    it("3D: a espessura de 0 até 2 deixa guardar e grava {de: 0, ate: 2}", async () => {
+      base.respostas.cat_guardar_produto_atributos = { data: { ok: true, n: 2 }, error: null };
+      const sec = juntar();
+      tipo(sec, "3D");
+      escrever(sec, "Largura", "60"); escrever(sec, "Comprimento", "30");
+      fireEvent.click(within(sec).getByRole("checkbox", { name: "Espessura: intervalo" }));
+      escrever(sec, "Espessura (de)", "0"); escrever(sec, "Espessura (até)", "2");
+      expect(guardar(sec)).toBeEnabled();
+      fireEvent.click(guardar(sec));
+      await waitFor(() => expect(gravadas()).toHaveLength(1));
+      expect(gravadas()[0].a.p_valores[1]).toEqual({ atributo: A_MED, medida: { tipo: "3D", largura: 60, comprimento: 30, espessura: { de: 0, ate: 2 }, unidade: "cm" } });
+    });
+
+    it("o «até» a 0 e o número simples a 0 continuam recusados (2D e 1D)", () => {
+      const sec = juntar();
+      fireEvent.click(within(sec).getByRole("checkbox", { name: "Largura: intervalo" }));
+      escrever(sec, "Largura (de)", "0"); escrever(sec, "Largura (até)", "0"); escrever(sec, "Comprimento", "0");
+      expect(within(sec).getByLabelText("Largura (até)")).toHaveAttribute("aria-invalid", "true");
+      expect(within(sec).getByLabelText("Comprimento")).toHaveAttribute("aria-invalid", "true");
+      expect(guardar(sec)).toBeDisabled();
+      tipo(sec, "1D"); dim(sec, "Altura"); escrever(sec, "Valor da altura", "0");
+      expect(within(sec).getByLabelText("Valor da altura")).toHaveAttribute("aria-invalid", "true");
+    });
+
+    it("o campo do valor chama-se pela dimensão escolhida (e «Valor» enquanto não há dimensão); o intervalo idem", () => {
+      const sec = juntar();
+      tipo(sec, "1D");
+      expect(within(sec).getByLabelText("Valor")).toBeInTheDocument();
+      for (const [d, rot] of [["Largura", "Valor da largura"], ["Altura", "Valor da altura"], ["Comprimento", "Valor do comprimento"], ["Espessura", "Valor da espessura"]]) {
+        dim(sec, d);
+        expect(within(sec).getByLabelText(rot)).toBeInTheDocument();
+        expect(within(sec).getByRole("checkbox", { name: `${rot}: intervalo` })).toBeInTheDocument();
+      }
+    });
+
+    it("os grupos «Tipo de medida» e «Dimensão da medida» têm legenda visível", () => {
+      const sec = juntar();
+      expect(within(sec).getByText("Tipo de medida")).toBeVisible();
+      tipo(sec, "1D");
+      expect(within(sec).getByText("Dimensão da medida")).toBeVisible();
+    });
+
+    it("passar de uma medida gravada a 1D incompleta avisa que guardar assim remove a medida gravada; completa, o aviso sai", () => {
+      ficha({ p: { ...PROD, attrs: [{ atributoId: A_MED, valor: "60×60 cm", medida: { tipo: "2D", largura: 60, comprimento: 60, espessura: null, unidade: "cm" } }] } });
+      const sec = screen.getByRole("region", { name: "Atributos" });
+      expect(within(sec).queryByText("Guardar assim remove a medida gravada.")).toBeNull();
+      tipo(sec, "1D");
+      expect(within(sec).getByText("Guardar assim remove a medida gravada.")).toHaveAttribute("role", "status");
+      dim(sec, "Largura"); escrever(sec, "Valor da largura", "60");
+      expect(within(sec).queryByText("Guardar assim remove a medida gravada.")).toBeNull();
+    });
+
+    it("sem medida gravada antes, 1D incompleta não leva esse aviso", () => {
+      const sec = juntar();
+      tipo(sec, "1D");
+      expect(within(sec).queryByText("Guardar assim remove a medida gravada.")).toBeNull();
+    });
+
+    it("erros do valor: zero em modo número, e «de» ≥ «até», ligados ao campo e sem gravar", () => {
+      const sec = juntar();
+      tipo(sec, "1D"); dim(sec, "Altura");
+      escrever(sec, "Valor da altura", "0");
+      const v = within(sec).getByLabelText("Valor da altura");
+      expect(v).toHaveAttribute("aria-invalid", "true");
+      expect(document.getElementById(v.getAttribute("aria-describedby") ?? "")).toHaveTextContent("Escreva um número maior que 0.");
+      expect(guardar(sec)).toBeDisabled();
+      fireEvent.click(within(sec).getByRole("checkbox", { name: "Valor da altura: intervalo" }));
+      escrever(sec, "Valor da altura (de)", "50"); escrever(sec, "Valor da altura (até)", "40");
+      expect(within(sec).getByLabelText("Valor da altura (até)")).toHaveAttribute("aria-invalid", "true");
+      expect(guardar(sec)).toBeDisabled();
+    });
+
+    it("2D → 1D → 2D: em 1D não vão largura/comprimento; ao voltar a 2D os valores escritos continuam lá", async () => {
+      base.respostas.cat_guardar_produto_atributos = { data: { ok: true, n: 2 }, error: null };
+      const sec = juntar();
+      escrever(sec, "Largura", "60"); escrever(sec, "Comprimento", "40");
+      tipo(sec, "1D"); dim(sec, "Comprimento"); escrever(sec, "Valor do comprimento", "12");
+      fireEvent.click(guardar(sec));
+      await waitFor(() => expect(gravadas()).toHaveLength(1));
+      expect(gravadas()[0].a.p_valores[1]).toEqual({ atributo: A_MED, medida: { tipo: "1D", dimensao: "comprimento", valor: 12, unidade: "cm" } });
+      tipo(sec, "2D");
+      expect(within(sec).getByLabelText("Largura")).toHaveValue("60");
+      expect(within(sec).getByLabelText("Comprimento")).toHaveValue("40");
+      expect(within(sec).queryByLabelText(/^Valor/)).toBeNull();
+    });
+
+    it("3D → 1D: a espessura não vai", async () => {
+      base.respostas.cat_guardar_produto_atributos = { data: { ok: true, n: 2 }, error: null };
+      const sec = juntar();
+      tipo(sec, "3D");
+      escrever(sec, "Largura", "60"); escrever(sec, "Comprimento", "40"); escrever(sec, "Espessura", "2");
+      tipo(sec, "1D"); dim(sec, "Largura"); escrever(sec, "Valor da largura", "60");
+      fireEvent.click(guardar(sec));
+      await waitFor(() => expect(gravadas()).toHaveLength(1));
+      expect(gravadas()[0].a.p_valores[1]).toEqual({ atributo: A_MED, medida: { tipo: "1D", dimensao: "largura", valor: 60, unidade: "cm" } });
+    });
+
+    it("uma medida 1D já gravada abre com 1D, a dimensão e o valor; sem mexer não há nada a guardar; a lista mostra o texto", () => {
+      const M1D: AtributoProduto = { atributoId: A_MED, valor: "Largura 100–105 cm", medida: { tipo: "1D", dimensao: "largura", valor: { de: 100, ate: 105 }, unidade: "cm" } };
+      ficha({ p: { ...PROD, attrs: [M1D] } });
+      const sec = screen.getByRole("region", { name: "Atributos" });
+      expect(within(within(sec).getByRole("radiogroup", { name: "Tipo de medida" })).getByRole("radio", { name: "1D" })).toHaveAttribute("aria-checked", "true");
+      expect(within(within(sec).getByRole("radiogroup", { name: "Dimensão da medida" })).getByRole("radio", { name: "Largura" })).toHaveAttribute("aria-checked", "true");
+      expect(within(sec).getByRole("checkbox", { name: "Valor da largura: intervalo" })).toBeChecked();
+      expect(within(sec).getByLabelText("Valor da largura (de)")).toHaveValue("100");
+      expect(within(sec).getByLabelText("Valor da largura (até)")).toHaveValue("105");
+      expect(guardar(sec)).toBeDisabled();
+      cleanup();
+      ficha({ p: { ...PROD, attrs: [M1D] }, r: real(false) });
+      expect(screen.getByText(/Medida: Largura 100–105 cm/)).toBeInTheDocument();
+    });
+
+    it("a recusa CT002 da base aparece tal como vem", async () => {
+      base.respostas.cat_guardar_produto_atributos = { data: null, error: { code: "CT002", message: "A medida 1D precisa de uma dimensão válida." } };
+      const sec = juntar();
+      tipo(sec, "1D"); dim(sec, "Altura"); escrever(sec, "Valor da altura", "70");
+      fireEvent.click(guardar(sec));
+      expect(await screen.findByRole("alert")).toHaveTextContent("A medida 1D precisa de uma dimensão válida.");
     });
   });
 

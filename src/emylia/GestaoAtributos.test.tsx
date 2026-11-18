@@ -92,7 +92,7 @@ describe("GestaoAtributos: ler", () => {
   it("a Medida só informa: sem lista de opções, sem hex, sem botões de opção", async () => {
     await abrir();
     const med = sec("Medida");
-    expect(within(med).getByText(/2D ou 3D/)).toBeInTheDocument();
+    expect(within(med).getByText(/1D, 2D ou 3D/)).toBeInTheDocument();
     expect(within(med).queryByRole("list")).toBeNull();
     expect(within(med).queryByRole("button", { name: /Nova opção/ })).toBeNull();
   });

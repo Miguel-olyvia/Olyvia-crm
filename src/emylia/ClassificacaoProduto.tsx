@@ -20,11 +20,11 @@ const DESATIVADA = "Já existe e está desativada: reative-a na Gestão.";
 const juntar = (t: string) => t.trim().replace(/\s+/g, " ");
 
 /** Devolve o foco a um campo depois de o seu formulário «Nova …» fechar. */
-export function useFoco(): { registar: (el: HTMLInputElement | null) => void; devolver: () => void } {
-  const el = useRef<HTMLInputElement | null>(null);
+export function useFoco(): { registar: (el: HTMLButtonElement | null) => void; devolver: () => void } {
+  const el = useRef<HTMLButtonElement | null>(null);
   const [n, setN] = useState(0);
   useEffect(() => { if (n) el.current?.focus(); }, [n]);
-  return { registar: useCallback((x: HTMLInputElement | null) => { el.current = x; }, []), devolver: useCallback(() => setN((v) => v + 1), []) };
+  return { registar: useCallback((x: HTMLButtonElement | null) => { el.current = x; }, []), devolver: useCallback(() => setN((v) => v + 1), []) };
 }
 
 /* ------------------------------------------------------------------ marca */

@@ -10,7 +10,7 @@ vi.mock("@/integrations/supabase/client", () => ({
   supabase: { rpc: vi.fn(async (f: string, a: Record<string, unknown>) => { base.chamadas.push({ f, a }); return base.responder(f, a); }) },
 }));
 
-import { argsPagina, argsPesquisa, lerAtributosProduto, lerModeloDoProduto, lerProdutosContagens, lerProdutosPagina, paginaDe, contagensDe, SEM_FILTRO_SERVIDOR, POR_PAGINA_SERVIDOR } from "./produtosPaginados";
+import { argsPagina, argsPesquisa, lerAtributosProduto, lerMarcasDoFiltro, lerModeloDoProduto, lerProdutosContagens, lerProdutosPagina, paginaDe, contagensDe, SEM_FILTRO_SERVIDOR, POR_PAGINA_SERVIDOR, textoEstadoPagina } from "./produtosPaginados";
 
 const ORG = "11111111-1111-4111-a111-111111111111";
 const P1 = "88888888-8888-4888-a888-888888888881";
@@ -175,4 +175,54 @@ describe("M12: cat_pesquisar_produtos em falta na base", () => {
     expect(base.chamadas.map((c) => c.f)).toEqual(["cat_pesquisar_produtos"]);
     expect(r.ok).toBe(false);
   });
+});
+
+describe("lerMarcasDoFiltro (cat_ler_marcas_do_filtro)", () => {
+  const RESP = { marcas: [{ id: "m1", marca: "Bellacasa", n: 196 }, { id: null, marca: "Roca", n: 3 }], sem_marca: 5, total: 204 };
+  it("leva os mesmos argumentos da lista (sem marca, sem página) e devolve as marcas com o nº de produtos", async () => {
+    base.responder = () => ({ data: RESP, error: null });
+    const r = await lerMarcasDoFiltro(ORG, { q: "  x ", categoria: "c", subcategoria: "s", modelo: "m", marca: "Roca", semCategoria: false });
+    expect(base.chamadas).toEqual([{ f: "cat_ler_marcas_do_filtro", a: { p_org: ORG, p_q: "x", p_categoria: "c", p_subcategoria: "s", p_modelo: "m", p_sem_categoria: false } }]);
+    expect(r).toEqual({ ok: true, v: { marcas: [{ id: "m1", nome: "Bellacasa", n: 196 }, { id: null, nome: "Roca", n: 3 }], semMarca: 5, total: 204 } });
+  });
+  it("«sem categoria» não leva categoria nem subcategoria", async () => {
+    base.responder = () => ({ data: RESP, error: null });
+    await lerMarcasDoFiltro(ORG, { ...SEM_FILTRO_SERVIDOR, categoria: "c", subcategoria: "s", semCategoria: true });
+    expect(base.chamadas[0].a).toMatchObject({ p_sem_categoria: true, p_categoria: null, p_subcategoria: null });
+  });
+  it("função em falta na base: devolve v null (a lista fica com as marcas do arranque)", async () => {
+    base.responder = () => ({ data: null, error: { code: "PGRST202", message: "Could not find the function public.cat_ler_marcas_do_filtro(p_org) in the schema cache" } });
+    expect(await lerMarcasDoFiltro(ORG, SEM_FILTRO_SERVIDOR)).toEqual({ ok: true, v: null });
+  });
+  it("outro erro (tempo) é erro, não «função em falta»", async () => {
+    base.responder = () => ({ data: null, error: { code: "57014", message: "statement timeout" } });
+    expect((await lerMarcasDoFiltro(ORG, SEM_FILTRO_SERVIDOR)).ok).toBe(false);
+  });
+  it("resposta sem a lista de marcas é erro; marcas sem nome ou com n inválido ignoram-se/zero", async () => {
+    base.responder = () => ({ data: { total: 1 }, error: null });
+    expect((await lerMarcasDoFiltro(ORG, SEM_FILTRO_SERVIDOR)).ok).toBe(false);
+    base.responder = () => ({ data: { marcas: [{ id: null, marca: "  ", n: 2 }, { id: null, marca: "Roca", n: "x" }, null] }, error: null });
+    expect(await lerMarcasDoFiltro(ORG, SEM_FILTRO_SERVIDOR)).toEqual({ ok: true, v: { marcas: [{ id: null, nome: "Roca", n: 0 }], semMarca: 0, total: 0 } });
+  });
+  it("uma excepção de rede é erro", async () => {
+    base.responder = () => { throw new Error("rede em baixo"); };
+    expect(await lerMarcasDoFiltro(ORG, SEM_FILTRO_SERVIDOR)).toMatchObject({ ok: false, erro: "rede em baixo" });
+  });
+});
+
+describe("textoEstadoPagina (o contador por cima da lista)", () => {
+  const t = (pagina: number, paginas: number, total: number, limite = 50) => textoEstadoPagina({ pagina, paginas, total, limite });
+  it("primeira página: produtos 1–50", () => expect(t(1, 340, 16983)).toBe("Página 1 de 340 · produtos 1–50 de 16983"));
+  it("página intermédia", () => expect(t(2, 3, 120)).toBe("Página 2 de 3 · produtos 51–100 de 120"));
+  it("última página com um total que não é múltiplo de 50 acaba no total", () => expect(t(340, 340, 16983)).toBe("Página 340 de 340 · produtos 16951–16983 de 16983"));
+  it("última página de um total múltiplo de 50", () => expect(t(3, 3, 120)).toBe("Página 3 de 3 · produtos 101–120 de 120"));
+  it("uma só página com vários produtos", () => expect(t(1, 1, 37)).toBe("Página 1 de 1 · produtos 1–37 de 37"));
+  it("um só produto: «produtos 1 de 1»", () => expect(t(1, 1, 1)).toBe("Página 1 de 1 · produtos 1 de 1"));
+  it("nunca mostra «Página 5 de 2» nem «Página 0»: a página fica entre 1 e o nº de páginas", () => {
+    expect(t(5, 2, 100)).toBe("Página 2 de 2 · produtos 51–100 de 100");
+    expect(t(0, 2, 100)).toBe("Página 1 de 2 · produtos 1–50 de 100");
+    expect(t(-3, 1, 10)).toBe("Página 1 de 1 · produtos 1–10 de 10");
+  });
+  it("vazio continua a frase de hoje", () => expect(t(1, 0, 0)).toBe("0 produtos"));
+  it("sem separador de milhares e com o limite da página", () => expect(t(2, 2, 1234, 1000)).toBe("Página 2 de 2 · produtos 1001–1234 de 1234"));
 });

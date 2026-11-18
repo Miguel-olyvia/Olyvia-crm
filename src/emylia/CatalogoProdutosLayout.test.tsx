@@ -49,7 +49,7 @@ function pagina() {
 }
 const separador = (nome: string) => fireEvent.click(screen.getByRole("tab", { name: nome }));
 const grelha = () => screen.getByRole("tabpanel").querySelector<HTMLElement>(":scope > div")!;
-const combo = (nome: string) => screen.getByRole("combobox", { name: nome }) as HTMLInputElement;
+const combo = (nome: string) => screen.getByRole("combobox", { name: new RegExp(`^${nome}( |$)`) }) as HTMLButtonElement;
 const contagem = () => screen.getByText(/^\d+ produtos?$/).textContent;
 const nav = () => screen.getByRole("navigation", { name: "Categorias de produto" });
 const painel = () => screen.getByRole("region", { name: "Resumo do Catálogo" });
@@ -93,7 +93,7 @@ describe("Produtos: navegação por categorias", () => {
     pagina();
     separador("Produtos");
     fireEvent.click(within(nav()).getByRole("button", { name: "Mostrar só Canalização, 2 produtos" }));
-    expect(combo("Categoria")).toHaveValue("Canalização");
+    expect(combo("Categoria").textContent).toBe("Canalização");
     expect(contagem()).toBe("2 produtos");
     expect(within(nav()).getByRole("button", { name: "Mostrar só Canalização, 2 produtos" })).toHaveAttribute("aria-pressed", "true");
     fireEvent.click(combo("Categoria"));
@@ -101,7 +101,7 @@ describe("Produtos: navegação por categorias", () => {
     expect(within(nav()).getByRole("button", { name: "Mostrar só Sanitários, 1 produto" })).toHaveAttribute("aria-pressed", "true");
     expect(within(nav()).getByRole("button", { name: "Mostrar só Canalização, 2 produtos" })).toHaveAttribute("aria-pressed", "false");
     fireEvent.click(within(nav()).getByRole("button", { name: "Mostrar todas as categorias, 4 produtos" }));
-    expect(combo("Categoria")).toHaveValue("Todas as categorias");
+    expect(combo("Categoria").textContent).toBe("Todas as categorias");
     expect(contagem()).toBe("4 produtos");
   });
 });
@@ -121,7 +121,7 @@ describe("Produtos: painel de resumo", () => {
     separador("Produtos");
     expect(within(painel()).queryByRole("button", { name: /Sem marca|Sem referência|Total/ })).toBeNull();
     fireEvent.click(within(painel()).getByRole("button", { name: /Sem categoria de produto/ }));
-    expect(combo("Categoria")).toHaveValue("Sem categoria de produto");
+    expect(combo("Categoria").textContent).toBe("Sem categoria de produto");
     expect(contagem()).toBe("1 produto");
   });
   it("o clique limpa também a pesquisa e a marca: a lista fica com os N que o painel mostra", () => {
@@ -133,8 +133,8 @@ describe("Produtos: painel de resumo", () => {
     expect(contagem()).toBe("1 produto");
     fireEvent.click(within(painel()).getByRole("button", { name: /Sem categoria de produto/ }));
     expect(screen.getByRole("searchbox", { name: "Procurar produto" })).toHaveValue("");
-    expect(combo("Marca")).toHaveValue("Todas as marcas");
-    expect(combo("Categoria")).toHaveValue("Sem categoria de produto");
+    expect(combo("Marca").textContent).toBe("Todas as marcas");
+    expect(combo("Categoria").textContent).toBe("Sem categoria de produto");
     expect(contagem()).toBe("1 produto");
     expect(within(screen.getByRole("tabpanel")).getByText("Produto solto")).toBeInTheDocument();
   });

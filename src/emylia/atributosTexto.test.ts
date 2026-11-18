@@ -1,7 +1,7 @@
 // 13/11: os atributos do produto (Medida, Cor, Tonalidade…): as contas e os textos puros (atributosProduto.ts).
 import { describe, expect, it } from "vitest";
-import type { AtributoDef, AtributoProduto } from "./v2/catalogoModelo";
-import { dimensaoParaTexto, errosDimensao, hexValido, lerDimensao, mesmosAtributos, normalizarHex, resumoAtributos, textoMedida, textoPesquisaAtributos, valoresParaGravar } from "./atributosTexto";
+import type { AtributoDef, AtributoProduto, DimensaoUnica, MedidaAtributo } from "./v2/catalogoModelo";
+import { dimensaoParaTexto, errosDimensao, hexValido, lerDimensao, mesmosAtributos, normalizarHex, resumoAtributos, rotuloValor1D, textoMedida, textoPesquisaAtributos, valoresParaGravar } from "./atributosTexto";
 import { pesquisarProdutos } from "./fichaServico";
 
 const A_COR = "aaaaaaaa-0000-4000-a000-000000000001", A_MED = "aaaaaaaa-0000-4000-a000-000000000002", A_BRI = "aaaaaaaa-0000-4000-a000-000000000003";
@@ -62,7 +62,9 @@ describe("lerDimensao (a validação igual à da base)", () => {
     expect(lerDimensao(iv("", "90"))).toEqual({ v: null, erro: null });
   });
   it("intervalo: cada lado é validado como um número", () => {
-    expect(lerDimensao(iv("0", "5")).erro).toBe("Escreva um número maior que 0.");
+    expect(lerDimensao(iv("-5", "10")).erro).toBe("Escreva um número igual ou maior que 0.");
+    expect(lerDimensao(iv("abc", "10")).erro).toBe("Escreva um número igual ou maior que 0.");
+    expect(lerDimensao(iv("5", "0")).erro).toBe("Escreva um número maior que 0.");
     expect(lerDimensao(iv("5", "100001")).erro).toBe("O máximo é 100000.");
   });
 });
@@ -81,9 +83,69 @@ describe("a escrita a meio não é erro", () => {
   });
 });
 
+describe("intervalo a começar em 0 (a base aceita de = 0; o «até» continua > 0)", () => {
+  it("«0–40» vale; «0–0» e «0» sozinho em modo número não", () => {
+    expect(lerDimensao({ iv: true, a: "0", b: "40" })).toEqual({ v: { de: 0, ate: 40 }, erro: null });
+    expect(errosDimensao({ iv: true, a: "0", b: "40" })).toEqual({ a: null, b: null });
+    expect(lerDimensao({ iv: true, a: "0", b: "0" })).toEqual({ v: null, erro: "Escreva um número maior que 0." });
+    expect(lerDimensao({ iv: false, a: "0", b: "" }).erro).toBe("Escreva um número maior que 0.");
+  });
+  it("«0.0» e «0,0» no «de» valem como 0; «0–0» fica recusado no «até»", () => {
+    expect(lerDimensao({ iv: true, a: "0.0", b: "5" })).toEqual({ v: { de: 0, ate: 5 }, erro: null });
+    expect(lerDimensao({ iv: true, a: "0,0", b: "5" })).toEqual({ v: { de: 0, ate: 5 }, erro: null });
+    expect(errosDimensao({ iv: true, a: "0", b: "0" })).toEqual({ a: null, b: "Escreva um número maior que 0." });
+  });
+  it("o texto mostra o início 0", () => {
+    expect(textoMedida({ ...MED, largura: { de: 0, ate: 40 } })).toBe("0–40 × 60 cm");
+  });
+});
+
+describe("medida 1D", () => {
+  const M1: MedidaAtributo = { tipo: "1D", dimensao: "largura", valor: 70, unidade: "cm" };
+  it("o texto: «Largura 70 cm», intervalo com «–», vírgula portuguesa, início 0", () => {
+    expect(textoMedida(M1)).toBe("Largura 70 cm");
+    expect(textoMedida({ ...M1, valor: { de: 100, ate: 105 } })).toBe("Largura 100–105 cm");
+    expect(textoMedida({ tipo: "1D", dimensao: "altura", valor: 70, unidade: "cm" })).toBe("Altura 70 cm");
+    expect(textoMedida({ tipo: "1D", dimensao: "espessura", valor: 5.5, unidade: "mm" })).toBe("Espessura 5,5 mm");
+    expect(textoMedida({ tipo: "1D", dimensao: "comprimento", valor: 2, unidade: "cm" })).toBe("Comprimento 2 cm");
+    expect(textoMedida({ ...M1, valor: { de: 0, ate: 40 } })).toBe("Largura 0–40 cm");
+  });
+  it("uma dimensão desconhecida (dado antigo ou futuro) mostra-se tal como vem, nunca «undefined»", () => {
+    const m = { tipo: "1D", dimensao: "profundidade", valor: 70, unidade: "cm" } as unknown as MedidaAtributo;
+    expect(textoMedida(m)).toBe("profundidade 70 cm");
+  });
+  it("o nome do campo do valor segue a dimensão (da largura, do comprimento…); sem dimensão, «Valor»", () => {
+    expect([null, "largura", "altura", "comprimento", "espessura"].map((d) => rotuloValor1D(d as DimensaoUnica | null)))
+      .toEqual(["Valor", "Valor da largura", "Valor da altura", "Valor do comprimento", "Valor da espessura"]);
+  });
+  it("a linha curta e a pesquisa usam o mesmo texto", () => {
+    expect(resumoAtributos([{ atributoId: A_MED, medida: M1 }], DEFS)).toBe("Medida: Largura 70 cm");
+    expect(textoPesquisaAtributos({ attrs: [{ atributoId: A_MED, medida: M1 }] })).toBe("Largura 70 cm");
+  });
+  it("grava só tipo, dimensao, valor e unidade (as chaves a null que a base devolva não vão)", () => {
+    const lida = { ...M1, largura: null, comprimento: null, espessura: null } as unknown as MedidaAtributo;
+    const [v] = valoresParaGravar([{ atributoId: A_MED, medida: lida }]);
+    expect(v).toEqual({ atributo: A_MED, medida: { tipo: "1D", dimensao: "largura", valor: 70, unidade: "cm" } });
+    expect(Object.keys((v as { medida: object }).medida).sort()).toEqual(["dimensao", "tipo", "unidade", "valor"]);
+  });
+  it("mesmosAtributos não conta as chaves largura/comprimento/espessura a null que a leitura traga num 1D", () => {
+    const comNulls = { ...M1, largura: null, comprimento: null, espessura: null } as unknown as MedidaAtributo;
+    expect(mesmosAtributos([{ atributoId: A_MED, medida: M1 }], [{ atributoId: A_MED, medida: comNulls }])).toBe(true);
+    expect(mesmosAtributos([{ atributoId: A_MED, medida: comNulls }], [{ atributoId: A_MED, medida: { ...M1, valor: 71 } }])).toBe(false);
+  });
+  it("mesmosAtributos distingue a dimensão, o valor e a unidade", () => {
+    const a: AtributoProduto[] = [{ atributoId: A_MED, medida: M1 }];
+    expect(mesmosAtributos(a, [{ atributoId: A_MED, medida: { ...M1, valor: 70 } }])).toBe(true);
+    expect(mesmosAtributos(a, [{ atributoId: A_MED, medida: { ...M1, dimensao: "altura" } }])).toBe(false);
+    expect(mesmosAtributos(a, [{ atributoId: A_MED, medida: { ...M1, valor: { de: 70, ate: 80 } } }])).toBe(false);
+    expect(mesmosAtributos(a, [{ atributoId: A_MED, medida: { ...M1, unidade: "mm" } }])).toBe(false);
+    expect(mesmosAtributos(a, [{ atributoId: A_MED, medida: { tipo: "2D", largura: 70, comprimento: 70, espessura: null, unidade: "cm" } }])).toBe(false);
+  });
+});
+
 describe("errosDimensao (o erro de cada campo)", () => {
   it("o erro do «de» só marca o «de»; o do «até» só o «até»", () => {
-    expect(errosDimensao({ iv: true, a: "0", b: "5" })).toEqual({ a: "Escreva um número maior que 0.", b: null });
+    expect(errosDimensao({ iv: true, a: "-5", b: "5" })).toEqual({ a: "Escreva um número igual ou maior que 0.", b: null });
     expect(errosDimensao({ iv: true, a: "5", b: "100001" })).toEqual({ a: null, b: "O máximo é 100000." });
   });
   it("«de» igual ou maior que «até»: o erro fica no «até»", () => {

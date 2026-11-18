@@ -24,7 +24,7 @@ export async function copiarTexto(texto: string): Promise<boolean> {
 }
 
 /** Seleciona o texto de um elemento (o recurso quando a cópia é recusada). */
-function selecionar(el: HTMLElement | null): void {
+export function selecionar(el: HTMLElement | null): void {
   if (!el) return;
   const s = window.getSelection(), r = document.createRange();
   r.selectNodeContents(el);

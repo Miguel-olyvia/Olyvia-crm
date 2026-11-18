@@ -57,7 +57,7 @@ function paginaProdutos(K: Catalogo = montar()) {
   fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
   return K;
 }
-const combo = (nome: string) => screen.getByRole("combobox", { name: nome }) as HTMLInputElement;
+const combo = (nome: string) => screen.getByRole("combobox", { name: new RegExp(`^${nome}( |$)`) }) as HTMLButtonElement;
 const opcoes = () => screen.queryAllByRole("option").map((o) => o.textContent);
 const escolher = (campo: string, opcao: string | RegExp) => { fireEvent.click(combo(campo)); fireEvent.click(screen.getByRole("option", { name: opcao })); };
 // só as linhas de produtos: a navegação por categorias e o resumo também são listas do separador
@@ -113,10 +113,10 @@ describe("filtroProdutosCatalogo (sobre o modelo real)", () => {
 describe("CatalogoV1 · Produtos: Categoria, Subcategoria e Marca", () => {
   it("há três filtros de produtos e já não há o «Ofício»", () => {
     paginaProdutos();
-    expect(combo("Categoria")).toHaveValue("Todas as categorias");
-    expect(combo("Subcategoria")).toHaveValue("Todas as subcategorias");
-    expect(combo("Marca")).toHaveValue("Todas as marcas");
-    expect(screen.queryByRole("combobox", { name: "Ofício" })).toBeNull();
+    expect(combo("Categoria").textContent).toBe("Todas as categorias");
+    expect(combo("Subcategoria").textContent).toBe("Todas as subcategorias");
+    expect(combo("Marca").textContent).toBe("Todas as marcas");
+    expect(screen.queryByRole("combobox", { name: /^Ofício( |$)/ })).toBeNull();
     expect(screen.queryByRole("combobox", { name: /ofício/i })).toBeNull();
   });
   it("a categoria lista só categorias de produtos, com «Todas as categorias» primeiro, e filtra", () => {
@@ -145,13 +145,13 @@ describe("CatalogoV1 · Produtos: Categoria, Subcategoria e Marca", () => {
     paginaProdutos();
     escolher("Categoria", "Canalização");
     escolher("Subcategoria", "Misturadoras");
-    expect(combo("Subcategoria")).toHaveValue("Misturadoras");
+    expect(combo("Subcategoria").textContent).toBe("Misturadoras");
     escolher("Categoria", "Sanitários");
-    expect(combo("Subcategoria")).toHaveValue("Todas as subcategorias");
+    expect(combo("Subcategoria").textContent).toBe("Todas as subcategorias");
     expect(contagem()).toBe("1 produto");
     escolher("Subcategoria", "Lavatórios");
     escolher("Categoria", "Todas as categorias");
-    expect(combo("Subcategoria")).toHaveValue("Todas as subcategorias");
+    expect(combo("Subcategoria").textContent).toBe("Todas as subcategorias");
     expect(combo("Subcategoria")).toBeDisabled();
     expect(contagem()).toBe("4 produtos");
   });
@@ -168,10 +168,14 @@ describe("CatalogoV1 · Produtos: Categoria, Subcategoria e Marca", () => {
     expect(contagem()).toBe("1 produto");
     expect(linhas()[0]).toContain("Lavatório suspenso");
   });
-  it("escrever no dropdown procura (sem acentos) e a lista aberta está no <body>, por cima da página", () => {
-    paginaProdutos();
-    fireEvent.change(combo("Categoria"), { target: { value: "sanit" } });
+  it("escrever na pesquisa do painel procura (sem acentos), o botão não muda, e a lista aberta está no <body>, por cima da página", () => {
+    // mais de 7 categorias: o painel tem campo de pesquisa
+    const extra = Array.from({ length: 6 }, (_, i) => ({ id: `99999999-0000-4000-8000-00000000000${i}`, name: `Extra ${i + 1}`, parent_id: null, sort_order: 10 + i }));
+    paginaProdutos(montarCatalogo(juntarTabelas(linhasBase(), { ...RESPOSTA, categoriasProduto: [...RESPOSTA.categoriasProduto, ...extra] }), catalogo0(), {}).K);
+    fireEvent.click(combo("Categoria"));
+    fireEvent.change(screen.getByRole("combobox", { name: /^Pesquisar Categoria( |$)/ }), { target: { value: "sanit" } });
     expect(opcoes()).toEqual(["Sanitários"]);
+    expect(combo("Categoria").textContent).toBe("Todas as categorias");
     expect(screen.getByRole("listbox", { name: "Categoria" }).closest("[data-lista-flutuante]")!.parentElement).toBe(document.body);
   });
 });
@@ -245,8 +249,8 @@ describe("M4: o filtro escolhido que deixa de existir repõe-se", () => {
     escolher("Categoria", "Sanitários");
     expect(contagem()).toBe("1 produto");
     act(() => { mudarCatalogo((k) => { k.categoriasProduto = K.categoriasProduto!.filter((c) => c.id !== ID.pcSan && c.pai !== ID.pcSan); k.produtos = k.produtos.filter((p) => p.id !== ID.lavatorio); }); });
-    expect(combo("Categoria")).toHaveValue("Todas as categorias");
-    expect(combo("Categoria").value).not.toMatch(/[0-9a-f]{8}-/);
+    expect(combo("Categoria").textContent).toBe("Todas as categorias");
+    expect(combo("Categoria").textContent).not.toMatch(/[0-9a-f]{8}-/);
     expect(contagem()).toBe("3 produtos");
   });
   it("o mesmo para a subcategoria e para a marca", () => {
@@ -255,9 +259,9 @@ describe("M4: o filtro escolhido que deixa de existir repõe-se", () => {
     escolher("Subcategoria", "Esquentadores");
     escolher("Marca", "Sanindusa");
     act(() => { mudarCatalogo((k) => { k.categoriasProduto = K.categoriasProduto!.filter((c) => c.id !== ID.pcEsq); k.marcas = k.marcas.filter((m) => m !== "Sanindusa"); }); });
-    expect(combo("Categoria")).toHaveValue("Canalização");
-    expect(combo("Subcategoria")).toHaveValue("Todas as subcategorias");
-    expect(combo("Marca")).toHaveValue("Todas as marcas");
+    expect(combo("Categoria").textContent).toBe("Canalização");
+    expect(combo("Subcategoria").textContent).toBe("Todas as subcategorias");
+    expect(combo("Marca").textContent).toBe("Todas as marcas");
   });
 });
 
@@ -314,13 +318,13 @@ describe("filtro por Modelo", () => {
     escolher("Categoria", "Canalização");
     escolher("Subcategoria", "Louças e torneiras");
     escolher("Modelo", "0001 · SORTY");
-    expect(combo("Modelo")).toHaveValue("0001 · SORTY");
+    expect(combo("Modelo").textContent).toBe("0001 · SORTY");
     escolher("Subcategoria", "Misturadoras");
-    expect(combo("Modelo")).toHaveValue("Todos os modelos");
+    expect(combo("Modelo").textContent).toBe("Todos os modelos");
     expect(contagem()).toBe("1 produto");
     escolher("Modelo", "0001 · MISTO");
     escolher("Categoria", "Sanitários");
-    expect(combo("Modelo")).toHaveValue("Todos os modelos");
+    expect(combo("Modelo").textContent).toBe("Todos os modelos");
     expect(combo("Modelo")).toBeDisabled();
   });
   it("o modelo aparece na linha do produto (número e nome); um produto sem modelo não o mostra", () => {
@@ -333,6 +337,6 @@ describe("filtro por Modelo", () => {
   });
   it("sem os modelos na base (função por criar) o filtro «Modelo» não se oferece", () => {
     paginaProdutos();
-    expect(screen.queryByRole("combobox", { name: "Modelo" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: /^Modelo( |$)/ })).toBeNull();
   });
 });

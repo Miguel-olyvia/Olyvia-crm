@@ -76,7 +76,7 @@ describe("Subcategorias: ler e filtrar", () => {
 
   it("o filtro por categoria tem «Todas as categorias» como primeiro item e limita a lista", async () => {
     await abrir();
-    const combo = screen.getByRole("combobox", { name: "Filtrar por categoria" });
+    const combo = screen.getByRole("combobox", { name: /^Filtrar por categoria( |$)/ });
     fireEvent.click(combo);
     const opcoes = screen.getAllByRole("option");
     expect(opcoes[0]).toHaveTextContent("Todas as categorias");
@@ -102,7 +102,7 @@ describe("Subcategorias: criar", () => {
   it("escolhe-se a categoria (só ativas e da organização) e o nome; grava com p_pai e relê", async () => {
     const anunciar = await abrir();
     fireEvent.click(screen.getByRole("button", { name: "Nova subcategoria" }));
-    const cat = screen.getByRole("combobox", { name: "Categoria" });
+    const cat = screen.getByRole("combobox", { name: /^Categoria( |$)/ });
     fireEvent.click(cat);
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Casa de banho", "Cozinha"]); // sem Antiguidades (desativada) nem Ferramentas (partilhada)
     const criar = screen.getByRole("button", { name: "Criar subcategoria" });
@@ -130,7 +130,7 @@ describe("Subcategorias: criar", () => {
     base.responder = (f) => (f === "cat_ler_categorias_gestao" ? { data: lido(), error: null } : erro("CT002", "Já existe uma subcategoria com esse nome."));
     await abrir();
     fireEvent.click(screen.getByRole("button", { name: "Nova subcategoria" }));
-    fireEvent.click(screen.getByRole("combobox", { name: "Categoria" }));
+    fireEvent.click(screen.getByRole("combobox", { name: /^Categoria( |$)/ }));
     fireEvent.click(screen.getAllByRole("option")[0]);
     fireEvent.change(screen.getByRole("textbox", { name: "Nome da subcategoria" }), { target: { value: "Louças" } });
     fireEvent.click(screen.getByRole("button", { name: "Criar subcategoria" }));
@@ -205,7 +205,7 @@ describe("Subcategorias: renomear, estado, ordem", () => {
   it("mudar de categoria não existe: nenhuma ação de mover para outra categoria", async () => {
     await abrir();
     fireEvent.click(within(linha("Louças")).getByRole("button", { name: /Renomear/ }));
-    expect(screen.queryByRole("combobox", { name: "Categoria" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: /^Categoria( |$)/ })).toBeNull();
   });
 
   it("uma falha de estado mostra o erro na linha (role=alert) e relê na mesma", async () => {
@@ -287,19 +287,19 @@ describe("Subcategorias: revisão (foco, contraste, estrutura)", () => {
 
   it("o filtro de categoria mostra «Todas as categorias» como valor", async () => {
     await abrir();
-    expect(screen.getByRole("combobox", { name: "Filtrar por categoria" })).toHaveValue("Todas as categorias");
+    expect(screen.getByRole("combobox", { name: /^Filtrar por categoria( |$)/ }).textContent).toBe("Todas as categorias");
   });
 
   it("os controlos de gestão têm borda com contraste (border-foreground/40)", async () => {
     await abrir();
     expect(screen.getByRole("searchbox", { name: "Procurar subcategoria" }).className).toContain("border-foreground/40");
-    expect(screen.getByRole("combobox", { name: "Filtrar por categoria" }).className).toContain("border-foreground/40");
+    expect(screen.getByRole("combobox", { name: /^Filtrar por categoria( |$)/ }).className).toContain("border-foreground/40");
   });
 
   it("criar: o foco vai para o campo da categoria, que é obrigatório", async () => {
     await abrir();
     fireEvent.click(screen.getByRole("button", { name: "Nova subcategoria" }));
-    const cat = screen.getByRole("combobox", { name: "Categoria" });
+    const cat = screen.getByRole("combobox", { name: /^Categoria( |$)/ });
     expect(cat).toHaveFocus();
     expect(cat).toHaveAttribute("aria-required", "true");
     expect(screen.getByRole("textbox", { name: "Nome da subcategoria" })).toHaveAttribute("aria-required", "true");
@@ -310,7 +310,7 @@ describe("Subcategorias: revisão (foco, contraste, estrutura)", () => {
     fireEvent.change(screen.getByRole("searchbox", { name: "Procurar subcategoria" }), { target: { value: "louca" } });
     fireEvent.click(screen.getByRole("radio", { name: "Ativas" }));
     fireEvent.click(screen.getByRole("button", { name: "Nova subcategoria" }));
-    fireEvent.click(screen.getByRole("combobox", { name: "Categoria" }));
+    fireEvent.click(screen.getByRole("combobox", { name: /^Categoria( |$)/ }));
     fireEvent.click(screen.getAllByRole("option")[1]);
     fireEvent.change(screen.getByRole("textbox", { name: "Nome da subcategoria" }), { target: { value: "Fogões" } });
     fireEvent.click(screen.getByRole("button", { name: "Criar subcategoria" }));

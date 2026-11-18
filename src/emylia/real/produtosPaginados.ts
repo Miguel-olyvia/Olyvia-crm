@@ -3,6 +3,7 @@
 //   cat_ler_produtos_pagina(p_org, p_q, p_categoria, p_subcategoria, p_modelo, p_marca, p_sem_categoria, p_limite, p_pagina)
 //   cat_ler_produtos_contagens(p_org, p_q, p_marca)
 //   cat_ler_atributos_produto(p_org, p_produto)      cat_ler_atributos_definicoes(p_org)
+//   cat_ler_marcas_do_filtro(p_org, p_q, p_categoria, p_subcategoria, p_modelo, p_sem_categoria)  (22/01, 20270122200000)
 import { erroAmigavel, rpcLivre, type Res } from "../fichaProdutoDados";
 import { funcaoNomeadaEmFalta } from "./lerCatalogo";
 import type { AtributoProduto } from "../v2/catalogoModelo";
@@ -125,6 +126,54 @@ export async function lerProdutosContagens(org: string, q: string, marca: string
   } catch (e) {
     return { ok: false, erro: mensagem(e, "Não foi possível ler as contagens.") };
   }
+}
+
+/** 22/01 (20270122200000): as marcas que existem no que o filtro já escolheu (sem a própria marca), com o nº de produtos de cada uma. `id` é o da marca na base (ou null); `nome` é o texto de p_marca. */
+export interface MarcaDoFiltro { id: string | null; nome: string; n: number }
+export interface MarcasDoFiltro { marcas: MarcaDoFiltro[]; semMarca: number; total: number }
+
+/** A resposta de cat_ler_marcas_do_filtro; null se não trouxer a lista de marcas. As marcas sem nome ignoram-se. */
+export function marcasDoFiltroDe(r: unknown): MarcasDoFiltro | null {
+  if (!r || typeof r !== "object" || !Array.isArray((r as Record<string, unknown>).marcas)) return null;
+  const o = r as Record<string, unknown>;
+  const marcas = (o.marcas as unknown[]).flatMap((x): MarcaDoFiltro[] => {
+    if (!x || typeof x !== "object") return [];
+    const m = x as { id?: unknown; marca?: unknown; n?: unknown };
+    const nome = typeof m.marca === "string" ? m.marca.trim() : "";
+    return nome ? [{ id: typeof m.id === "string" ? m.id : null, nome, n: num(m.n) }] : [];
+  });
+  return { marcas, semMarca: num(o.sem_marca), total: num(o.total) };
+}
+
+/** Os argumentos de cat_ler_marcas_do_filtro: os da lista, sem a marca e sem página. */
+export function argsMarcasDoFiltro(org: string, f: FiltroServidor): Record<string, unknown> {
+  const { p_org, p_q, p_categoria, p_subcategoria, p_modelo, p_sem_categoria } = argsPagina(org, f, 1);
+  return { p_org, p_q, p_categoria, p_subcategoria, p_modelo, p_sem_categoria };
+}
+
+/** `v: null` = a função ainda não existe na base (o ecrã fica com as marcas do arranque); qualquer outro erro é erro. */
+export async function lerMarcasDoFiltro(org: string, f: FiltroServidor): Promise<Res<MarcasDoFiltro | null>> {
+  try {
+    const { data, error } = await rpcLivre("cat_ler_marcas_do_filtro", argsMarcasDoFiltro(org, f));
+    if (error) {
+      if (funcaoNomeadaEmFalta({ code: error.code, message: error.message }, "cat_ler_marcas_do_filtro")) return { ok: true, v: null };
+      return { ok: false, erro: erroAmigavel(error, "Não foi possível ler as marcas.") };
+    }
+    const m = marcasDoFiltroDe(data);
+    return m ? { ok: true, v: m } : { ok: false, erro: "A base respondeu num formato que não se percebe (marcas)." };
+  } catch (e) {
+    return { ok: false, erro: mensagem(e, "Não foi possível ler as marcas.") };
+  }
+}
+
+/** 18/11: o contador por cima da lista. «Página X de Y · produtos 51–100 de 120»; um só produto «produtos 1 de 1»; vazio «0 produtos». O intervalo sai do limite e do total da própria página (sem pedir nada à base); números sem separador de milhares. */
+export function textoEstadoPagina(d: Pick<PaginaProdutos, "pagina" | "paginas" | "total" | "limite">): string {
+  if (d.total <= 0) return "0 produtos";
+  const limite = d.limite > 0 ? d.limite : POR_PAGINA_SERVIDOR;
+  const paginas = Math.max(d.paginas, 1), pagina = Math.min(Math.max(d.pagina, 1), paginas); // nunca «Página 0» nem «Página 5 de 2»
+  const inicio = Math.min((pagina - 1) * limite + 1, d.total), fim = Math.min(pagina * limite, d.total);
+  const quais = d.total === 1 ? "produtos 1 de 1" : `produtos ${inicio}–${fim} de ${d.total}`;
+  return `Página ${pagina} de ${paginas} · ${quais}`;
 }
 
 /** Os atributos de um produto (a ficha). */

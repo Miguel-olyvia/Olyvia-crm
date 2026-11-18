@@ -42,7 +42,17 @@ const real = (podeEditar = true): FichaProdutoReal => ({ org: "org-1", podeEdita
 beforeEach(() => { base.chamadas = []; base.respostas = { cat_produto_stock: { data: { gere_stock: true, pode_editar: true, armazens: [] }, error: null } }; });
 afterEach(() => { cleanup(); reporCustos(); reporCatalogo(); });
 
-const combo = (ctx: HTMLElement | Document, nome: string) => within(ctx as HTMLElement).getByRole("combobox", { name: nome }) as HTMLInputElement;
+const combo = (ctx: HTMLElement | Document, nome: string) => within(ctx as HTMLElement).getByRole("combobox", { name: new RegExp(`^${nome}( |$)`) }) as HTMLButtonElement;
+/** O que o botão mostra sem escolha (o placeholder por omissão). */
+const VAZIO = "Escolher…";
+const MUITAS = ["Grohe", "Roca", "Hansgrohe", "Geberit", "Ideal Standard", "Jacob Delafon", "Villeroy", "Laufen"]; // mais de 7: o painel tem pesquisa
+const pesquisa = (campo: string) => screen.getByRole("combobox", { name: `Pesquisar ${campo}` });
+/** «Nova …» escolhida e o nome escrito no formulário que abre (as listas curtas não têm pesquisa para o levar). */
+const novaComNome = (ctx: HTMLElement, campo: string, opcao: string, rotuloNome: string, nome: string) => {
+  fireEvent.click(combo(ctx, campo));
+  fireEvent.click(screen.getByRole("option", { name: opcao }));
+  fireEvent.change(screen.getByLabelText(rotuloNome), { target: { value: nome } });
+};
 const escolher = (ctx: HTMLElement | Document, campo: string, opcao: string | RegExp) => {
   fireEvent.click(combo(ctx, campo));
   fireEvent.click(screen.getByRole("option", { name: opcao }));
@@ -50,8 +60,8 @@ const escolher = (ctx: HTMLElement | Document, campo: string, opcao: string | Re
 const opcoes = () => screen.queryAllByRole("option").map((x) => x.textContent);
 
 describe("criar produto: marca, categoria e subcategoria", () => {
-  const pagina = () => {
-    mudarCatalogo((k) => { k.arvore = structuredClone(ARVORE); k.marcas = [...MARCAS]; });
+  const pagina = (marcas: string[] = MARCAS) => {
+    mudarCatalogo((k) => { k.arvore = structuredClone(ARVORE); k.marcas = [...marcas]; });
     const S = seed(), run = (fn: () => void) => fn();
     render(<CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={undefined} />);
     fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
@@ -66,32 +76,42 @@ describe("criar produto: marca, categoria e subcategoria", () => {
     return lerCatalogo().produtos.find((p) => p.n === nome)!;
   };
 
-  it("são três dropdowns com pesquisa; já não há datalist nem o select «Onde fica»", () => {
+  it("são três dropdowns (botão + painel com pesquisa); já não há datalist nem o select «Onde fica»", () => {
     const sec = pagina();
-    for (const n of ["Marca", "Categoria", "Subcategoria"]) expect(combo(sec, n)).toHaveAttribute("aria-autocomplete", "list");
+    for (const n of ["Marca", "Categoria", "Subcategoria"]) expect(combo(sec, n)).toHaveAttribute("aria-haspopup", "listbox");
     expect(sec.querySelector("datalist")).toBeNull();
     expect(sec.querySelector("select")).toBeNull();
     expect(within(sec).queryByLabelText("Onde fica")).toBeNull();
   });
 
   it("marca: pesquisa em texto e escolhe; o produto leva a marca", () => {
-    const sec = pagina();
-    fireEvent.change(combo(sec, "Marca"), { target: { value: "ROC" } });
+    const sec = pagina(MUITAS);
+    fireEvent.click(combo(sec, "Marca"));
+    fireEvent.change(pesquisa("Marca"), { target: { value: "ROC" } });
     expect(opcoes()).toEqual(["Roca", "Nova marca…"]);
     fireEvent.click(screen.getByRole("option", { name: "Roca" }));
     expect(criar("Torneira A").marca).toBe("Roca");
   });
 
   it("«Nova marca…» leva o que se escreveu, pede confirmação do nome e a marca nova segue com o produto, por nome", () => {
-    const sec = pagina();
-    fireEvent.change(combo(sec, "Marca"), { target: { value: "Duravit" } });
+    const sec = pagina(MUITAS);
+    fireEvent.click(combo(sec, "Marca"));
+    fireEvent.change(pesquisa("Marca"), { target: { value: "Duravit" } });
     fireEvent.click(screen.getByRole("option", { name: "Nova marca…" }));
     const grupo = screen.getByRole("group", { name: "Nova marca" });
     expect(within(grupo).getByLabelText("Nome da nova marca")).toHaveValue("Duravit");
     fireEvent.click(within(grupo).getByRole("button", { name: "Criar" }));
     expect(screen.queryByRole("group", { name: "Nova marca" })).toBeNull();
-    expect(combo(sec, "Marca")).toHaveValue("Duravit");
+    expect(combo(sec, "Marca")).toHaveTextContent("Duravit");
     expect(criar("Sanita A").marca).toBe("Duravit");
+  });
+
+  it("numa lista curta (sem pesquisa) «Nova marca…» abre o formulário com o nome vazio, a escrever lá", () => {
+    const sec = pagina();
+    fireEvent.click(combo(sec, "Marca"));
+    expect(screen.queryByRole("combobox", { name: /^Pesquisar Marca( |$)/ })).toBeNull();
+    fireEvent.click(screen.getByRole("option", { name: "Nova marca…" }));
+    expect(screen.getByLabelText("Nome da nova marca")).toHaveValue("");
   });
 
   it("a subcategoria está desativada até haver categoria, e só mostra as da categoria escolhida", () => {
@@ -111,7 +131,7 @@ describe("criar produto: marca, categoria e subcategoria", () => {
     escolher(sec, "Categoria", "Casa de banho");
     escolher(sec, "Subcategoria", "Louças");
     escolher(sec, "Categoria", "Cozinha");
-    expect(combo(sec, "Subcategoria")).toHaveValue("");
+    expect(combo(sec, "Subcategoria")).toHaveTextContent(VAZIO);
     expect(criar("Faca").no).toBe("c2");
     cleanup(); reporCatalogo();
     const sec2 = pagina();
@@ -124,23 +144,22 @@ describe("criar produto: marca, categoria e subcategoria", () => {
     escolher(sec, "Categoria", "Casa de banho");
     escolher(sec, "Subcategoria", "Louças");
     escolher(sec, "Categoria", "Sem categoria");
-    expect(combo(sec, "Categoria")).toHaveValue("");
+    expect(combo(sec, "Categoria")).toHaveTextContent(VAZIO);
     expect(combo(sec, "Subcategoria")).toBeDisabled();
   });
 
   it("«Nova categoria…» e «Nova subcategoria…»: nascem só de produto, a subcategoria dentro da categoria, e só quando o produto se cria", () => {
     const sec = pagina();
-    fireEvent.change(combo(sec, "Categoria"), { target: { value: "Jardim" } });
-    fireEvent.click(screen.getByRole("option", { name: "Nova categoria…" }));
+    novaComNome(sec, "Categoria", "Nova categoria…", "Nome da nova categoria", "Jardim");
     fireEvent.click(within(screen.getByRole("group", { name: "Nova categoria" })).getByRole("button", { name: "Criar" }));
-    expect(combo(sec, "Categoria")).toHaveValue("Jardim");
+    expect(combo(sec, "Categoria")).toHaveTextContent("Jardim");
     expect(combo(sec, "Subcategoria")).toBeEnabled();
     fireEvent.click(combo(sec, "Subcategoria"));
     expect(opcoes()).toEqual(["Sem subcategoria", "Nova subcategoria…"]);
     fireEvent.click(screen.getByRole("option", { name: "Nova subcategoria…" }));
     fireEvent.change(screen.getByLabelText("Nome da nova subcategoria"), { target: { value: "Rega" } });
     fireEvent.click(within(screen.getByRole("group", { name: "Nova subcategoria" })).getByRole("button", { name: "Criar" }));
-    expect(combo(sec, "Subcategoria")).toHaveValue("Rega");
+    expect(combo(sec, "Subcategoria")).toHaveTextContent("Rega");
     // ainda nada na árvore: só quando o produto se cria
     expect(lerCatalogo().arvore.some((x) => x.n === "Jardim")).toBe(false);
     const p = criar("Mangueira");
@@ -152,18 +171,17 @@ describe("criar produto: marca, categoria e subcategoria", () => {
 
   it("cancelar a «Nova …» fecha o formulário, devolve o foco ao campo e não muda nada", () => {
     const sec = pagina();
-    fireEvent.change(combo(sec, "Marca"), { target: { value: "Duravit" } });
+    fireEvent.click(combo(sec, "Marca"));
     fireEvent.click(screen.getByRole("option", { name: "Nova marca…" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
     expect(screen.queryByRole("group", { name: "Nova marca" })).toBeNull();
-    expect(combo(sec, "Marca")).toHaveValue("");
+    expect(combo(sec, "Marca")).toHaveTextContent(VAZIO);
     expect(document.activeElement).toBe(combo(sec, "Marca"));
   });
 
   it("uma categoria nova com o nome de uma que existe (sem acentos nem maiúsculas) usa a que existe", () => {
     const sec = pagina();
-    fireEvent.change(combo(sec, "Categoria"), { target: { value: "COZINHA" } });
-    fireEvent.click(screen.getByRole("option", { name: "Nova categoria…" }));
+    novaComNome(sec, "Categoria", "Nova categoria…", "Nome da nova categoria", "COZINHA");
     fireEvent.click(within(screen.getByRole("group", { name: "Nova categoria" })).getByRole("button", { name: "Criar" }));
     criar("Panela");
     expect(lerCatalogo().arvore.filter((x) => x.n.toLowerCase() === "cozinha")).toHaveLength(1);
@@ -183,28 +201,28 @@ describe("categorias desativadas: não se oferecem, exceto a que o produto já t
   it("a categoria e a subcategoria desativadas saem da lista", () => {
     const sec = ficha("s2");
     fireEvent.click(combo(sec, "Categoria"));
-    expect(opcoes()).toEqual(["Sem categoria", "Casa de banho (escolhida)", "Jardim", "Nova categoria…"]);
-    fireEvent.keyDown(combo(sec, "Categoria"), { key: "Escape" });
+    expect(opcoes()).toEqual(["Sem categoria", "Casa de banho", "Jardim", "Nova categoria…"]);
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
     fireEvent.click(combo(sec, "Subcategoria"));
-    expect(opcoes()).toEqual(["Sem subcategoria", "Torneiras (escolhida)", "Nova subcategoria…"]);
+    expect(opcoes()).toEqual(["Sem subcategoria", "Torneiras", "Nova subcategoria…"]);
   });
   it("a que o produto já tem aparece «X (desativada)» e não volta a ser escolhível; a Nova subcategoria não se oferece", () => {
     const sec = ficha("s3");
-    expect(combo(sec, "Categoria")).toHaveValue("Cozinha (desativada)");
-    expect(combo(sec, "Subcategoria")).toHaveValue("Bancadas");
+    expect(combo(sec, "Categoria")).toHaveTextContent("Cozinha (desativada)");
+    expect(combo(sec, "Subcategoria")).toHaveTextContent("Bancadas");
     fireEvent.click(combo(sec, "Categoria"));
     expect(opcoes()).not.toContain("Cozinha");
-    fireEvent.keyDown(combo(sec, "Categoria"), { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("listbox"), { key: "Escape" });
     fireEvent.click(combo(sec, "Subcategoria"));
     expect(opcoes()).toEqual(["Sem subcategoria"]); // as subs de uma categoria desativada não se escolhem de novo
   });
   it("a subcategoria desativada que o produto tem mostra «(desativada)»", () => {
     const sec = ficha("s1");
-    expect(combo(sec, "Subcategoria")).toHaveValue("Louças (desativada)");
+    expect(combo(sec, "Subcategoria")).toHaveTextContent("Louças (desativada)");
   });
   it("uma marca que a leitura já não traz (desativada) e é a do produto: «(desativada)», sem «é nova»", () => {
     const sec = ficha("s2", "Antiga");
-    expect(combo(sec, "Marca")).toHaveValue("Antiga (desativada)");
+    expect(combo(sec, "Marca")).toHaveTextContent("Antiga (desativada)");
     expect(within(sec).queryByText(/É nova/)).toBeNull();
   });
   it("na criação também não se oferecem", () => {
@@ -229,13 +247,12 @@ describe("«Nova …» com o nome de uma desativada (REACT-M1)", () => {
   };
   it("categoria: avisa no momento, não fecha nem escolhe em silêncio", () => {
     const sec = ficha();
-    fireEvent.change(combo(sec, "Categoria"), { target: { value: "cozinha" } });
-    fireEvent.click(screen.getByRole("option", { name: "Nova categoria…" }));
+    novaComNome(sec, "Categoria", "Nova categoria…", "Nome da nova categoria", "cozinha");
     fireEvent.click(within(screen.getByRole("group", { name: "Nova categoria" })).getByRole("button", { name: "Criar" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Já existe e está desativada: reative-a na Gestão.");
     expect(screen.getByRole("group", { name: "Nova categoria" })).toBeInTheDocument();
     expect(screen.getByLabelText("Nome da nova categoria")).toHaveAttribute("aria-invalid", "true");
-    expect(combo(sec, "Categoria")).toHaveValue("Casa de banho");
+    expect(combo(sec, "Categoria")).toHaveTextContent("Casa de banho");
   });
   it("subcategoria: o mesmo", () => {
     const sec = ficha();
@@ -244,7 +261,7 @@ describe("«Nova …» com o nome de uma desativada (REACT-M1)", () => {
     fireEvent.change(screen.getByLabelText("Nome da nova subcategoria"), { target: { value: "Loucas" } });
     fireEvent.click(within(screen.getByRole("group", { name: "Nova subcategoria" })).getByRole("button", { name: "Criar" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Já existe e está desativada: reative-a na Gestão.");
-    expect(combo(sec, "Subcategoria")).toHaveValue("");
+    expect(combo(sec, "Subcategoria")).toHaveTextContent(VAZIO);
   });
   it("cancelar limpa o aviso e o botão «Criar» sem nome diz porquê", () => {
     ficha();
@@ -301,9 +318,9 @@ describe("ficha do produto: classificação", () => {
 
   it("mostra a marca, a categoria e a subcategoria atuais, em dropdowns, depois do Preço", () => {
     const { sec } = ficha();
-    expect(combo(sec, "Marca")).toHaveValue("Grohe");
-    expect(combo(sec, "Categoria")).toHaveValue("Casa de banho");
-    expect(combo(sec, "Subcategoria")).toHaveValue("Torneiras");
+    expect(combo(sec, "Marca")).toHaveTextContent("Grohe");
+    expect(combo(sec, "Categoria")).toHaveTextContent("Casa de banho");
+    expect(combo(sec, "Subcategoria")).toHaveTextContent("Torneiras");
     const t = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent);
     expect(t.indexOf("Classificação")).toBe(t.indexOf("Preço") + 1);
   });
@@ -342,8 +359,7 @@ describe("ficha do produto: classificação", () => {
   it("marca, categoria e subcategoria novas gravam-se pelo nome", async () => {
     base.respostas.cat_guardar_produto_tabelas = { data: PID, error: null };
     const { sec } = ficha();
-    fireEvent.change(combo(sec, "Marca"), { target: { value: "Duravit" } });
-    fireEvent.click(screen.getByRole("option", { name: "Nova marca…" }));
+    novaComNome(sec, "Marca", "Nova marca…", "Nome da nova marca", "Duravit");
     fireEvent.click(within(screen.getByRole("group", { name: "Nova marca" })).getByRole("button", { name: "Criar" }));
     escolher(sec, "Categoria", "Cozinha");
     fireEvent.click(combo(sec, "Subcategoria"));
@@ -384,7 +400,7 @@ describe("ficha do produto: classificação", () => {
   it("um produto sem classificação mostra os campos vazios e, só leitura, «sem …»", () => {
     const p = { ...PROD, marca: "", no: null };
     const { sec } = ficha({ p });
-    expect(combo(sec, "Marca")).toHaveValue("");
+    expect(combo(sec, "Marca")).toHaveTextContent(VAZIO);
     expect(combo(sec, "Subcategoria")).toBeDisabled();
     cleanup();
     const { sec: s2 } = ficha({ p, r: real(false) });

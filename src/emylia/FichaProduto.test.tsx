@@ -75,6 +75,33 @@ describe("FichaProduto · abrir pela linha", () => {
   });
 });
 
+describe("FichaProduto · o SKU em destaque", () => {
+  it("o SKU aparece junto do cabeçalho com «Copiar»; a linha cinzenta tem marca e unidade mas já não «ref.»", () => {
+    ficha(PROD, undefined);
+    const cab = screen.getByRole("heading", { level: 1, name: "Torneira Teste" }).closest("header")!;
+    expect(within(cab).getByText("GR-1").className).toMatch(/\bfont-mono\b/);
+    expect(within(cab).getByRole("button", { name: "Copiar SKU" })).toBeInTheDocument();
+    expect(cab.textContent).not.toContain("ref.");
+    expect(within(cab).getByText("Grohe · unidade: un")).toBeInTheDocument();
+  });
+  it("o aviso «SKU copiado» não passa para outro produto", async () => {
+    Object.defineProperty(navigator, "clipboard", { value: { writeText: vi.fn(async () => {}) }, configurable: true });
+    const el = (p: Produto) => <FichaProduto p={p} min={28} alvo={35} voltar={vi.fn()} anunciar={vi.fn()} nomeServico={(s) => s} onAbrirServico={vi.fn()} real={undefined} />;
+    const { rerender } = render(el(PROD));
+    fireEvent.click(screen.getByRole("button", { name: "Copiar SKU" }));
+    await waitFor(() => expect(screen.getByRole("status")).toHaveTextContent("SKU copiado"));
+    rerender(el({ ...PROD, id: "22222222-3333-4444-8555-666666666666", n: "Outro produto", sku: "GR-2" }));
+    expect(screen.getByText("GR-2")).toBeInTheDocument();
+    expect(screen.queryByText("SKU copiado")).toBeNull();
+    Reflect.deleteProperty(navigator, "clipboard");
+  });
+  it("sem SKU diz «SKU por gerar» e não oferece copiar", () => {
+    ficha({ ...PROD, sku: undefined }, undefined);
+    expect(screen.getByText("SKU por gerar")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Copiar SKU" })).toBeNull();
+  });
+});
+
 describe("FichaProduto · preço e fornecedores", () => {
   it("mostra a margem (PVP − custo) ÷ PVP; sem PVP, custo + alvo", async () => {
     base.respostas.cat_produto_fornecedores = { data: [], error: null };

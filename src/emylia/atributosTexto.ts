@@ -1,7 +1,7 @@
 // 13/11: os atributos do produto (Medida, Cor, Tonalidade…): as contas e os textos puros, sem ecrã nem base.
 // Ficam aqui o hex, o texto da medida, a linha curta da lista («Cor: Preto · Medida: 60×60 cm»), o texto da pesquisa e o formato
 // que cat_guardar_produto_atributos recebe.
-import type { AtributoDef, AtributoProduto, DimensaoMedida, MedidaAtributo, Produto } from "./v2/catalogoModelo";
+import type { AtributoDef, AtributoProduto, DimensaoMedida, DimensaoUnica, MedidaAtributo, Produto } from "./v2/catalogoModelo";
 
 const HEX = /^#[0-9a-f]{6}$/i;
 export const hexValido = (s: string): boolean => HEX.test(s);
@@ -13,8 +13,15 @@ export function normalizarHex(s: string): string | null {
 
 const num = (x: number) => String(x).replace(".", ",");
 const textoDim = (d: DimensaoMedida): string => (typeof d === "number" ? num(d) : `${num(d.de)}–${num(d.ate)}`);
+/** As dimensões da medida 1D, pela ordem em que se escolhem no ecrã. */
+export const DIMENSOES_1D: readonly (readonly [DimensaoUnica, string])[] = [["largura", "Largura"], ["altura", "Altura"], ["comprimento", "Comprimento"], ["espessura", "Espessura"]];
+const NOME_DIMENSAO: Record<DimensaoUnica, string> = { largura: "Largura", altura: "Altura", comprimento: "Comprimento", espessura: "Espessura" };
+const ROTULO_VALOR: Record<DimensaoUnica, string> = { largura: "Valor da largura", altura: "Valor da altura", comprimento: "Valor do comprimento", espessura: "Valor da espessura" };
+/** O nome do campo do valor em 1D, pela dimensão escolhida; «Valor» enquanto não houver dimensão. */
+export const rotuloValor1D = (d: DimensaoUnica | null): string => (d ? ROTULO_VALOR[d] ?? "Valor" : "Valor");
 /** «60×60 cm», «12,5×25×0,8 mm»; com algum intervalo, «91–100 × 90 cm» (espaços à volta do ×, para o traço do intervalo não se confundir). */
 export const textoMedida = (m: MedidaAtributo): string => {
+  if (m.tipo === "1D") return `${NOME_DIMENSAO[m.dimensao] ?? m.dimensao} ${textoDim(m.valor)} ${m.unidade}`; // «Largura 70 cm», «Largura 100–105 cm»
   const partes = [m.largura, m.comprimento, ...(m.tipo === "3D" && m.espessura != null ? [m.espessura] : [])];
   return `${partes.map(textoDim).join(partes.some((p) => typeof p !== "number") ? " × " : "×")} ${m.unidade}`;
 };
@@ -29,13 +36,16 @@ export const dimensaoParaTexto = (d: DimensaoMedida | null | undefined): Dimensa
 
 const MAXIMO = 100000, CASAS = 3;
 const ERRO_NUMERO = "Escreva um número maior que 0.";
+/** O «de» de um intervalo pode ser 0 (a base aceita 0 <= de < até). */
+const ERRO_NUMERO_DE = "Escreva um número igual ou maior que 0.";
 /** Um valor escrito: vazio → {v:null, erro:null} (incompleto); inválido → erro. As regras da base: > 0, até 100000, no máximo 3 casas. */
-function lerValor(t: string): { v: number | null; erro: string | null } {
+function lerValor(t: string, zeroOk = false): { v: number | null; erro: string | null } {
   const s = t.trim().replace(/\s/g, "").replace(",", ".");
   if (!s || s === "-" || s === "." || /^\d+\.$/.test(s)) return { v: null, erro: null }; // vazio ou a meio da escrita («12,», «-»): incompleto, sem erro
-  if (!/^\d+(\.\d+)?$/.test(s)) return { v: null, erro: ERRO_NUMERO };
+  const erroBase = zeroOk ? ERRO_NUMERO_DE : ERRO_NUMERO;
+  if (!/^\d+(\.\d+)?$/.test(s)) return { v: null, erro: erroBase };
   const n = Number(s);
-  if (!(n > 0)) return { v: null, erro: ERRO_NUMERO };
+  if (!zeroOk && !(n > 0)) return { v: null, erro: erroBase };
   if (n > MAXIMO) return { v: null, erro: `O máximo é ${MAXIMO}.` };
   if ((s.split(".")[1] ?? "").length > CASAS) return { v: null, erro: `No máximo ${CASAS} casas decimais.` };
   return { v: n, erro: null };
@@ -45,14 +55,14 @@ export function lerDimensao(d: DimensaoTexto): { v: DimensaoMedida | null; erro:
   const { a: ea, b: eb } = errosDimensao(d);
   const erro = ea ?? eb;
   if (erro) return { v: null, erro };
-  const a = lerValor(d.a);
+  const a = lerValor(d.a, d.iv);
   if (!d.iv) return a;
   const b = lerValor(d.b);
   return a.v == null || b.v == null ? { v: null, erro: null } : { v: { de: a.v, ate: b.v }, erro: null };
 }
 /** O erro de cada campo: o do «de» só marca o «de», o do «até» só o «até»; «de» ≥ «até» fica no «até». Em modo número só há `a`. */
 export function errosDimensao(d: DimensaoTexto): { a: string | null; b: string | null } {
-  const a = lerValor(d.a);
+  const a = lerValor(d.a, d.iv);
   if (!d.iv) return { a: a.erro, b: null };
   const b = lerValor(d.b);
   const ordem = a.erro == null && b.erro == null && a.v != null && b.v != null && !(a.v < b.v) ? "O «de» tem de ser menor que o «até»." : null;
@@ -81,9 +91,12 @@ export function resumoAtributos(attrs: readonly AtributoProduto[] | undefined, d
 export const textoPesquisaAtributos = (p: Pick<Produto, "attrs">): string =>
   (p.attrs ?? []).map((a) => (a.medida ? textoMedida(a.medida) : a.valor ?? "")).filter(Boolean).join(" ");
 
+/** O 1D leva só tipo, dimensao, valor e unidade: as chaves largura/comprimento/espessura (a null) que a leitura possa trazer não se reenviam. */
+const medidaParaGravar = (m: MedidaAtributo): MedidaAtributo => (m.tipo === "1D" ? { tipo: "1D", dimensao: m.dimensao, valor: m.valor, unidade: m.unidade } : m);
+
 /** O que cat_guardar_produto_atributos recebe: {atributo, opcao} ou {atributo, medida}. Um atributo sem valor não vai. */
 export function valoresParaGravar(attrs: readonly AtributoProduto[]): ({ atributo: string; opcao: string } | { atributo: string; medida: MedidaAtributo })[] {
-  return attrs.flatMap((a) => (a.medida ? [{ atributo: a.atributoId, medida: a.medida }] : a.opcaoId ? [{ atributo: a.atributoId, opcao: a.opcaoId }] : []));
+  return attrs.flatMap((a) => (a.medida ? [{ atributo: a.atributoId, medida: medidaParaGravar(a.medida) }] : a.opcaoId ? [{ atributo: a.atributoId, opcao: a.opcaoId }] : []));
 }
 
 /** Número ou [de, ate]: a ordem das chaves do objeto (a base devolve-as por outra ordem) não conta. */
@@ -93,7 +106,11 @@ const chaveDim = (d: DimensaoMedida | null | undefined) => (d == null ? null : t
 export function mesmosAtributos(a: readonly AtributoProduto[] | undefined, b: readonly AtributoProduto[] | undefined): boolean {
   const chave = (L: readonly AtributoProduto[] | undefined) =>
     JSON.stringify(valoresParaGravar(L ?? [])
-      .map((v) => ("medida" in v ? [v.atributo, v.medida.tipo, chaveDim(v.medida.largura), chaveDim(v.medida.comprimento), chaveDim(v.medida.espessura), v.medida.unidade] : [v.atributo, v.opcao]))
+      .map((v) => {
+        if (!("medida" in v)) return [v.atributo, v.opcao];
+        const m = v.medida;
+        return m.tipo === "1D" ? [v.atributo, "1D", m.dimensao, chaveDim(m.valor), m.unidade] : [v.atributo, m.tipo, chaveDim(m.largura), chaveDim(m.comprimento), chaveDim(m.espessura), m.unidade];
+      })
       .sort((x, y) => String(x[0]).localeCompare(String(y[0]))));
   return chave(a) === chave(b);
 }

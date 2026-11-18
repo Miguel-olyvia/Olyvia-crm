@@ -79,7 +79,7 @@ afterEach(cleanup);
 describe("Produtos do Catálogo: a lista não lê o Catálogo inteiro", () => {
   it("usa as referências e a página; nunca cat_ler_catalogo nem cat_ler_produtos_tabelas", async () => {
     montar("/catalogo/produtos");
-    await screen.findByText(/Página 1 de 1/);
+    await screen.findAllByText(/Página 1 de 1/); // o texto está no parágrafo e na região de estado (leitores de ecrã)
     const fns = base.chamadas.map((c) => c.f);
     expect(fns).toContain("cat_ler_referencias_produtos");
     expect(fns).toContain("cat_ler_produtos_pagina");
@@ -285,7 +285,7 @@ describe("Produtos do Catálogo: revisão (duplicados, desmontar, reler, atribut
     fireEvent.click(screen.getByRole("button", { name: "Criar o produto" }));
     expect(await within(avisos()).findByText(/Não gravou/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Voltar ao Catálogo/ }));
-    await screen.findByText(/Página 1 de 1/);
+    await screen.findAllByText(/Página 1 de 1/); // o texto está no parágrafo e na região de estado (leitores de ecrã)
     expect(screen.queryByText(/Não gravou/)).not.toBeInTheDocument();
   });
 
@@ -340,14 +340,14 @@ describe("Produtos do Catálogo: revisão (duplicados, desmontar, reler, atribut
 describe("Produtos do Catálogo: o botão Criar da lista", () => {
   it("aparece com products.edit e abre o formulário", async () => {
     montar("/catalogo/produtos");
-    await screen.findByText(/Página 1 de 1/);
+    await screen.findAllByText(/Página 1 de 1/); // o texto está no parágrafo e na região de estado (leitores de ecrã)
     fireEvent.click(screen.getByRole("button", { name: "Criar" }));
     expect(await screen.findByLabelText("Nome do produto")).toBeInTheDocument();
   });
   it("não aparece sem products.edit", async () => {
     perms.tem = (p) => p !== "products.edit";
     montar("/catalogo/produtos");
-    await screen.findByText(/Página 1 de 1/);
+    await screen.findAllByText(/Página 1 de 1/); // o texto está no parágrafo e na região de estado (leitores de ecrã)
     expect(screen.queryByRole("button", { name: "Criar" })).not.toBeInTheDocument();
   });
 });
@@ -374,7 +374,7 @@ describe("Produtos do Catálogo: as margens vêm de cat_ler_parametros_catalogo"
     parametros = PARAMETROS;
     base.responder = semPvp;
     montar("/catalogo/produtos");
-    await screen.findByText(/Página 1 de 1/);
+    await screen.findAllByText(/Página 1 de 1/); // o texto está no parágrafo e na região de estado (leitores de ecrã)
     expect(await screen.findByText(/120,00/)).toBeInTheDocument();
   });
 

@@ -53,7 +53,7 @@ const abrir = async (r: FichaProdutoReal = REAL(), anunciar = vi.fn()) => {
 const linha = (texto: string) => screen.getAllByRole("listitem").find((x) => (x.textContent ?? "").startsWith(texto))!;
 const razao = (b: HTMLElement) => (b.getAttribute("aria-describedby") ?? "").split(" ").map((i) => document.getElementById(i)?.textContent ?? "").join(" ").trim();
 const escolher = (combo: string, opcao: string) => {
-  fireEvent.click(screen.getByRole("combobox", { name: combo }));
+  fireEvent.click(screen.getByRole("combobox", { name: new RegExp(`^${combo}( |$)`) }));
   fireEvent.click(screen.getAllByRole("option").find((o) => o.textContent?.startsWith(opcao))!);
 };
 
@@ -86,12 +86,12 @@ describe("Modelos: ler, agrupar e filtrar", () => {
 
   it("o filtro por subcategoria está desativado, com a razão, até haver categoria; depois limita a lista", async () => {
     await abrir();
-    expect(screen.getByRole("combobox", { name: "Filtrar por subcategoria" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: /^Filtrar por subcategoria( |$)/ })).toBeDisabled();
     expect(screen.getByText("Escolha primeiro a categoria.")).toBeInTheDocument();
     escolher("Filtrar por categoria", "Casa de banho");
     expect(screen.getAllByRole("listitem")).toHaveLength(3);
     expect(screen.queryByText("0001 · NOVO")).toBeNull();
-    expect(screen.getByRole("combobox", { name: "Filtrar por subcategoria" })).toBeEnabled();
+    expect(screen.getByRole("combobox", { name: /^Filtrar por subcategoria( |$)/ })).toBeEnabled();
     escolher("Filtrar por subcategoria", "Bases de Duche");
     expect(screen.getAllByRole("listitem")).toHaveLength(3);
   });
@@ -135,7 +135,7 @@ describe("Modelos: criar", () => {
     const anunciar = await abrir();
     await waitFor(() => expect(screen.getByRole("button", { name: "Novo modelo" })).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(screen.getByRole("button", { name: "Novo modelo" }));
-    fireEvent.click(screen.getByRole("combobox", { name: "Subcategoria" }));
+    fireEvent.click(screen.getByRole("combobox", { name: /^Subcategoria( |$)/ }));
     const opcoes = screen.getAllByRole("option").map((o) => o.textContent);
     expect(opcoes).toEqual(["Casa de banho › Bases de Duche", "Casa de banho › Torneiras"]);
     fireEvent.click(screen.getAllByRole("option")[0]);
@@ -156,7 +156,7 @@ describe("Modelos: criar", () => {
     await abrir();
     await waitFor(() => expect(screen.getByRole("button", { name: "Novo modelo" })).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(screen.getByRole("button", { name: "Novo modelo" }));
-    fireEvent.click(screen.getByRole("combobox", { name: "Subcategoria" }));
+    fireEvent.click(screen.getByRole("combobox", { name: /^Subcategoria( |$)/ }));
     fireEvent.click(screen.getAllByRole("option")[1]);
     fireEvent.change(screen.getByRole("textbox", { name: /Nome do modelo/ }), { target: { value: "Rio" } });
     fireEvent.change(screen.getByRole("textbox", { name: /Número/ }), { target: { value: "0" } });
@@ -176,7 +176,7 @@ describe("Modelos: criar", () => {
     await abrir();
     await waitFor(() => expect(screen.getByRole("button", { name: "Novo modelo" })).not.toHaveAttribute("aria-disabled"));
     fireEvent.click(screen.getByRole("button", { name: "Novo modelo" }));
-    fireEvent.click(screen.getByRole("combobox", { name: "Subcategoria" }));
+    fireEvent.click(screen.getByRole("combobox", { name: /^Subcategoria( |$)/ }));
     fireEvent.click(screen.getAllByRole("option")[0]);
     fireEvent.change(screen.getByRole("textbox", { name: /Nome do modelo/ }), { target: { value: "Rio" } });
     const antes = chamadasDe("cat_ler_modelos_gestao").length;
