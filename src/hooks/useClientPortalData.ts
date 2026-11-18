@@ -14,12 +14,14 @@ interface PortalSummary {
   pendingActions: Array<{
     id: string;
     type: "proposal" | "contract" | "quote";
-    title: string;
+    /** Só o dado: `null` quando não há título/número. Quem apresenta traduz a falta («Proposta sem título»). */
+    title: string | null;
     status: string;
     date: string;
   }>;
   commercial: {
-    name: string;
+    /** Só o dado: `null` quando a base não tem nome. Quem apresenta traduz a falta («Comercial»). */
+    name: string | null;
     phone: string | null;
     email: string | null;
   } | null;
@@ -134,7 +136,7 @@ export function useClientPortalData() {
           pendingActions.push({
             id: p.id,
             type: "proposal",
-            title: p.title || "Proposta sem título",
+            title: p.title || null,
             status: p.status,
             date: p.created_at,
           });
@@ -144,7 +146,7 @@ export function useClientPortalData() {
           pendingActions.push({
             id: c.id,
             type: "contract",
-            title: c.contract_number || "Contrato sem título",
+            title: c.contract_number || null,
             status: c.status,
             date: c.created_at,
           });
@@ -165,7 +167,7 @@ export function useClientPortalData() {
         if (cancelled) return;
         if (commercialInfo) {
           commercial = {
-            name: commercialInfo.name || "Comercial",
+            name: commercialInfo.name || null,
             phone: commercialInfo.phone || null,
             email: commercialInfo.email || null,
           };

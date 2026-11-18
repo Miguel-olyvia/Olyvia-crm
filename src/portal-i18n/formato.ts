@@ -1,5 +1,7 @@
-// Formatação por idioma do portal. Não mexe no formatCurrency de src/lib/utils.ts (o CRM usa-o).
-// Locales: pt -> pt / pt-PT; en -> enGB / en-GB (dd/mm/aaaa, 24 horas, «5 March 2025»).
+// Datas por idioma do portal. SÓ as palavras seguem o idioma (meses, dias da semana, «de», «às» / «at»): o
+// dd/mm/aaaa numérico e as horas HH:mm são iguais nos dois idiomas. Dinheiro e números NÃO passam por aqui:
+// ficam como sempre (formatCurrency de src/lib/utils.ts no cliente; pt-PT no fornecedor).
+// Locales date-fns: pt -> pt; en -> enGB («5 March 2025»).
 import { format } from "date-fns";
 import { enGB, pt, type Locale } from "date-fns/locale";
 import type { PortalIdioma } from "./tipos";
@@ -11,10 +13,6 @@ const SEM_VALOR = "—";
 
 export function localeDateFns(idioma: PortalIdioma): Locale {
   return idioma === "en" ? enGB : pt;
-}
-
-export function localeIntl(idioma: PortalIdioma): string {
-  return idioma === "en" ? "en-GB" : "pt-PT";
 }
 
 const PADROES: Record<EstiloDeData, Record<PortalIdioma, string>> = {
@@ -78,30 +76,4 @@ export function formatarDataIso(valor: string | null | undefined, idioma: Portal
   if (m) return `${m[3]}/${m[2]}/${m[1]}`;
   const d = paraData(valor);
   return d ? formatarData(d, idioma, "numerico") : valor;
-}
-
-/** Em falta conta como 0 (igual a formatSpMoney); um número não finito não se mostra como valor. */
-function numeroOuNull(valor: number | null | undefined): number | null {
-  const n = Number(valor ?? 0);
-  return Number.isFinite(n) ? n : null;
-}
-
-export function formatarNumero(
-  valor: number | null | undefined,
-  idioma: PortalIdioma,
-  opcoes?: Intl.NumberFormatOptions,
-): string {
-  const n = numeroOuNull(valor);
-  return n === null ? SEM_VALOR : n.toLocaleString(localeIntl(idioma), opcoes);
-}
-
-export function formatarMoeda(valor: number | null | undefined, idioma: PortalIdioma, moeda = "EUR"): string {
-  const n = numeroOuNull(valor);
-  if (n === null) return SEM_VALOR;
-  const codigo = moeda || "EUR";
-  try {
-    return n.toLocaleString(localeIntl(idioma), { style: "currency", currency: codigo });
-  } catch {
-    return `${n.toFixed(2)} ${codigo}`;
-  }
 }

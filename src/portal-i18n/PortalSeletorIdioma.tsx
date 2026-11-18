@@ -1,11 +1,14 @@
 // Alternador PT | EN do portal: um grupo com dois botões aria-pressed. Os nomes («Português», «English») são fixos
 // e escritos na língua de cada um, para quem não percebe o idioma atual os conseguir sempre encontrar.
+// Na variante compacta o texto visível é «PT»/«EN»: o nome acessível começa por ele («PT, Português»), para o
+// nome conter o texto visível (WCAG 2.5.3). Na normal o nome é o próprio texto, sem aria-label redundante.
+import { useId } from "react";
 import { cn } from "@/lib/utils";
 import { usePortalIdioma } from "./usePortalIdioma";
 import type { PortalIdioma } from "./tipos";
 
 interface PortalSeletorIdiomaProps {
-  /** Mostra só PT | EN (para cabeçalhos estreitos); o nome acessível continua a ser o nome por extenso. */
+  /** Mostra só PT | EN (para cabeçalhos estreitos); o nome acessível junta a sigla ao nome por extenso. */
   compacto?: boolean;
   className?: string;
 }
@@ -21,13 +24,17 @@ const BASE_DO_BOTAO =
 
 export function PortalSeletorIdioma({ compacto = false, className }: PortalSeletorIdiomaProps) {
   const { idioma, setIdioma } = usePortalIdioma();
+  const idDoNome = useId();
 
   return (
     <div
       role="group"
-      aria-label="Idioma / Language"
+      aria-labelledby={idDoNome}
       className={cn("inline-flex items-center gap-0.5 rounded-lg border border-border bg-muted p-0.5", className)}
     >
+      <span id={idDoNome} className="sr-only">
+        <span lang="pt">Idioma</span> / <span lang="en">Language</span>
+      </span>
       {OPCOES.map((opcao) => {
         const ativo = idioma === opcao.idioma;
         return (
@@ -35,7 +42,7 @@ export function PortalSeletorIdioma({ compacto = false, className }: PortalSelet
             key={opcao.idioma}
             type="button"
             lang={opcao.idioma}
-            aria-label={opcao.nome}
+            aria-label={compacto ? `${opcao.sigla}, ${opcao.nome}` : undefined}
             aria-pressed={ativo}
             onClick={() => setIdioma(opcao.idioma)}
             className={cn(

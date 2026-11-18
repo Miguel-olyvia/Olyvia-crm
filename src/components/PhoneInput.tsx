@@ -8,8 +8,25 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { COUNTRY_CODES, CountryCode } from "@/constants/countryCodes";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
+
+/**
+ * Textos dados por quem usa o componente fora do CRM (o portal, no idioma dele). Sem isto, o PhoneInput usa o
+ * t() do CRM, como sempre.
+ */
+export interface PhoneInputLabels {
+  /** Placeholder e nome acessível da caixa de pesquisa de países. */
+  pesquisar: string;
+  /** «Número completo» (a nota por baixo do campo). */
+  numeroCompleto: string;
+  /** Nome acessível do seletor do indicativo. */
+  indicativo: string;
+  /** Nome acessível do campo do telefone quando não há `label` visível. */
+  telefone: string;
+  /** Nome de um país (chave em inglês de COUNTRY_CODES) no idioma de quem usa; sem isto, o t() do CRM. */
+  nomesDosPaises?: (nome: string) => string;
+}
 
 interface PhoneInputProps {
   label?: string;
@@ -20,6 +37,7 @@ interface PhoneInputProps {
   required?: boolean;
   disabled?: boolean;
   placeholder?: string;
+  labels?: PhoneInputLabels;
 }
 
 export function PhoneInput({
@@ -31,13 +49,18 @@ export function PhoneInput({
   required = false,
   disabled = false,
   placeholder = "912 345 678",
+  labels,
 }: PhoneInputProps) {
   const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState("");
+  const phoneId = useId();
+  const countryName = (name: string): string => labels?.nomesDosPaises?.(name) ?? t(`countries.${name}`);
+  const searchText = labels?.pesquisar ?? t('common.searchCountry');
+  const fullNumberText = labels?.numeroCompleto ?? t('common.fullNumber');
 
   const filteredCountries = COUNTRY_CODES.filter(
     (country) =>
-      t(`countries.${country.name}`).toLowerCase().includes(searchTerm.toLowerCase()) ||
+      countryName(country.name).toLowerCase().includes(searchTerm.toLowerCase()) ||
       country.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       country.dialCode.includes(searchTerm) ||
       country.code.toLowerCase().includes(searchTerm.toLowerCase())
@@ -52,7 +75,7 @@ export function PhoneInput({
   return (
     <div className="space-y-2">
       {label && (
-        <Label>
+        <Label htmlFor={phoneId}>
           {label}
           {required && <span className="text-destructive ml-1">*</span>}
         </Label>
@@ -63,7 +86,7 @@ export function PhoneInput({
           onValueChange={onCountryCodeChange}
           disabled={disabled}
         >
-          <SelectTrigger className="w-[140px]">
+          <SelectTrigger className="w-[140px]" aria-label={labels?.indicativo}>
             <SelectValue>
               {COUNTRY_CODES.find(c => c.dialCode === countryCodeValue)?.flag}{" "}
               {countryCodeValue}
@@ -72,7 +95,8 @@ export function PhoneInput({
           <SelectContent>
             <div className="px-2 pb-2">
               <Input
-                placeholder={t('common.searchCountry')}
+                placeholder={searchText}
+                aria-label={labels ? searchText : undefined}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="h-8"
@@ -82,7 +106,7 @@ export function PhoneInput({
               <SelectItem key={country.code} value={country.dialCode}>
                 <span className="flex items-center gap-2">
                   <span>{country.flag}</span>
-                  <span>{t(`countries.${country.name}`)}</span>
+                  <span>{countryName(country.name)}</span>
                   <span className="text-muted-foreground">{country.dialCode}</span>
                 </span>
               </SelectItem>
@@ -91,7 +115,9 @@ export function PhoneInput({
         </Select>
         
         <Input
+          id={phoneId}
           type="tel"
+          aria-label={!label ? labels?.telefone : undefined}
           value={phoneValue}
           onChange={handlePhoneInput}
           placeholder={placeholder}
@@ -101,7 +127,7 @@ export function PhoneInput({
         />
       </div>
       <p className="text-xs text-muted-foreground">
-        {t('common.fullNumber')}: {countryCodeValue} {phoneValue}
+        {fullNumberText}: {countryCodeValue} {phoneValue}
       </p>
     </div>
   );

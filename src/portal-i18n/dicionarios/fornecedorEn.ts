@@ -1,7 +1,15 @@
 // Supplier portal texts, in English (`sp.*` keys, one part per page: `sp.encomendas.*`, `sp.catalogo.*`...).
 // Keep this file under 400 lines: put each new page/area in its own `fornecedorEn.<theme>.ts` exporting a
 // `Record<string, string>` and spread it here. Every key must also exist in `fornecedorPt.ts` (and vice versa).
+import { fornecedorEnLayout } from "./fornecedorEn.layout";
+import { fornecedorEnInicio } from "./fornecedorEn.inicio";
+import { fornecedorEnEncomendas } from "./fornecedorEn.encomendas";
+import { fornecedorEnEncomendaDet } from "./fornecedorEn.encomendaDet";
+import { fornecedorEnErro } from "./fornecedorEn.erro"; import { fornecedorEnCatalogoEPerfil } from "./fornecedorEn.catalogoEPerfil";
+
 export const fornecedorEn: Record<string, string> = {
+  ...fornecedorEnLayout, ...fornecedorEnInicio, ...fornecedorEnEncomendas, ...fornecedorEnEncomendaDet, ...fornecedorEnErro, ...fornecedorEnCatalogoEPerfil,
+
   // Layout
   "sp.layout.titulo": "Supplier Portal",
   "sp.layout.menu.inicio": "Home",

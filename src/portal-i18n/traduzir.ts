@@ -1,7 +1,6 @@
 // A tradução propriamente dita, sem React: idioma -> pt -> a própria chave; {x} e {{x}} como o t() do CRM;
 // plurais por duas chaves explícitas (traduzirN). Em desenvolvimento avisa (uma vez) das chaves em falta.
 import { dicionarios } from "./dicionarios";
-import { formatarNumero } from "./formato";
 import type { ParamsDeTraducao, PortalIdioma } from "./tipos";
 
 const avisados = new Set<string>();
@@ -59,7 +58,7 @@ export function traduzir(idioma: PortalIdioma, chave: string, params?: ParamsDeT
 
 /**
  * Plural: `chaveUm` só para n = 1 (0 e todos os outros usam `chaveVarios`). O texto recebe {n}, já formatado
- * pelo idioma («1,500» / «1500»), e os restantes parâmetros; um `n` nos parâmetros tem prioridade.
+ * em pt-PT nos dois idiomas (o formato dos números não segue o idioma), e os restantes parâmetros; um `n` nos parâmetros tem prioridade.
  */
 export function traduzirN(
   idioma: PortalIdioma,
@@ -68,6 +67,6 @@ export function traduzirN(
   n: number,
   params?: ParamsDeTraducao,
 ): string {
-  const nTexto = Number.isFinite(n) ? formatarNumero(n, idioma) : String(n);
+  const nTexto = Number.isFinite(n) ? n.toLocaleString("pt-PT") : String(n);
   return traduzir(idioma, n === 1 ? chaveUm : chaveVarios, { n: nTexto, ...params });
 }

@@ -10,6 +10,9 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, Json } from "@/integrations/supabase/types";
+import { lerIdioma } from "@/portal-i18n/armazemIdioma";
+import { traduzir } from "@/portal-i18n/traduzir";
+import type { PortalIdioma } from "@/portal-i18n/tipos";
 
 type SpFunctions = Database["public"]["Functions"];
 
@@ -287,14 +290,17 @@ export class SupplierPortalRpcError extends Error {
   readonly code: string | null;
   readonly hint: string | null;
   readonly details: string | null;
-  /** Mensagens próprias da chamada, por hint (sobrepõem-se às genéricas de spErrorMessage). */
+  /**
+   * Mensagens próprias da chamada, por hint (sobrepõem-se às genéricas de spErrorMessage). Os valores são CHAVES
+   * do dicionário do portal (`sp.erro.*`), traduzidas ao mostrar, no idioma de então.
+   */
   readonly hintMessages: Partial<Record<SpErrorHint, string>>;
 
   constructor(
     raw: { message?: string; code?: string; hint?: string; details?: string } | null | undefined,
     hintMessages: Partial<Record<SpErrorHint, string>> = {},
   ) {
-    super(raw?.message || "Erro desconhecido");
+    super(raw?.message || traduzir(lerIdioma(), "sp.erro.desconhecido"));
     this.name = "SupplierPortalRpcError";
     this.code = raw?.code ?? null;
     this.hint = raw?.hint ?? null;
@@ -312,49 +318,53 @@ export function isNoSupplierAccess(err: unknown): boolean {
 }
 
 /**
- * Mensagem para o utilizador. O ecrã decide pelo `hint` (estável); a
- * `message` do servidor vem em português e serve para validação/conflitos.
+ * Mensagem para o utilizador, no idioma do portal (por omissão o que está ativo agora). O ecrã decide pelo `hint`
+ * (estável); a `message` do servidor (RAISE EXCEPTION, em português) serve para validação/conflitos e FICA COMO
+ * VEM nesta fase. Por traduzir: not_found, too_many_rows, conflict, validation e order_closed quando o servidor
+ * manda `message` (só a mensagem de reserva, sem texto do servidor, está traduzida), e qualquer `message` crua
+ * que caia no fim (hint desconhecido ou ausente).
  */
-export function spErrorMessage(err: unknown): string {
+export function spErrorMessage(err: unknown, idioma: PortalIdioma = lerIdioma()): string {
+  const t = (chave: string): string => traduzir(idioma, chave);
   const hint = getSpHint(err);
   const raw = err instanceof Error ? err.message : "";
   const code = err instanceof SupplierPortalRpcError ? err.code : null;
 
   const own = err instanceof SupplierPortalRpcError && hint ? err.hintMessages[hint as SpErrorHint] : undefined;
-  if (own) return own;
+  if (own) return t(own);
 
   switch (hint) {
     case "no_supplier_access":
-      return "Sem acesso ativo ao portal do fornecedor. Contacte a empresa que o convidou.";
+      return t("sp.erro.semAcesso");
     case "not_owner":
-      return "Só o utilizador principal da conta pode alterar o catálogo.";
+      return t("sp.erro.soPrincipalCatalogo");
     case "not_found":
-      return raw || "O artigo não existe ou já não está disponível.";
+      return raw || t("sp.erro.naoEncontrado");
     case "too_many_rows":
-      return raw || "Demasiadas linhas: o máximo é 5000 por importação.";
+      return raw || t("sp.erro.demasiadasLinhas");
     case "conflict":
-      return raw || "Já existe um artigo com esta referência.";
+      return raw || t("sp.erro.jaExiste");
     case "validation":
-      return raw || "Dados inválidos.";
+      return raw || t("sp.erro.dadosInvalidos");
     case "stale_revision":
-      return "A empresa atualizou esta encomenda entretanto. Reveja os dados atualizados e confirme de novo.";
+      return t("sp.erro.encomendaAtualizada");
     case "order_closed":
-      return raw || "Esta encomenda já foi recebida ou cancelada: já não pode ser confirmada.";
+      return raw || t("sp.erro.encomendaFechada");
     default:
       break;
   }
 
   const lower = raw.toLowerCase();
   if (lower.includes("failed to fetch") || lower.includes("network") || lower.includes("load failed")) {
-    return "Sem ligação ao servidor. Verifique a ligação à internet e tente novamente.";
+    return t("sp.erro.semLigacao");
   }
   if (code === "57014" || lower.includes("statement timeout")) {
-    return "A operação demorou demasiado tempo. Tente novamente ou use um ficheiro mais pequeno.";
+    return t("sp.erro.demorou");
   }
   if (code === "42501") {
-    return "Sem permissão para esta operação.";
+    return t("sp.erro.semPermissao");
   }
-  return raw || "Ocorreu um erro inesperado. Tente novamente.";
+  return raw || t("sp.erro.inesperado");
 }
 
 // ─── Chamadas ───────────────────────────────────────────────────────────────
@@ -526,7 +536,7 @@ export function isSpFunctionMissing(err: unknown): boolean {
 
 /** not_owner nestas RPCs não é sobre o catálogo: mensagem própria. */
 const SUPPLIER_DATA_HINT_MESSAGES: Partial<Record<SpErrorHint, string>> = {
-  not_owner: "Só o responsável principal da conta pode fazer esta alteração.",
+  not_owner: "sp.erro.soPrincipalDados",
 };
 
 export async function spGetMySupplierData(): Promise<SpMySupplierData> {

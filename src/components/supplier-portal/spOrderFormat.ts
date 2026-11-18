@@ -1,23 +1,26 @@
-// Portal do Fornecedor (F3.2) — rótulos e formatação das encomendas.
+// Portal do Fornecedor (F3.2) — formatação das encomendas e mapa código → chave dos estados.
+// Só as PALAVRAS seguem o idioma do portal (meses, «às»...). Dinheiro, quantidades, dd/mm/aaaa e horas ficam
+// como sempre, nos dois idiomas. Os códigos de estado da base não mudam, só se mapeiam para chaves `sp.estado.*`.
+import { format } from "date-fns";
+import { formatarData, formatarDataIso, localeDateFns, type PortalIdioma } from "@/portal-i18n";
 import type { SpOrderStatus, SpPublicationStatus } from "@/lib/supplierPortal/spRpc";
 
+const SEM_VALOR = "—";
+
 /** "YYYY-MM-DD" → "dd/mm/aaaa" sem passar por Date (evita desvios de fuso). */
-export function formatSpDate(value: string | null | undefined): string {
-  if (!value) return "—";
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(value);
-  if (m) return `${m[3]}/${m[2]}/${m[1]}`;
-  const d = new Date(value);
-  return Number.isNaN(d.getTime()) ? value : d.toLocaleDateString("pt-PT");
+export function formatSpDate(value: string | null | undefined, idioma: PortalIdioma): string {
+  return formatarDataIso(value, idioma);
 }
 
-/** timestamptz → "dd/mm/aaaa hh:mm" (hora local). */
-export function formatSpDateTime(value: string | null | undefined): string {
-  if (!value) return "—";
+/** timestamptz → "dd/mm/aaaa, hh:mm" (hora local, 24 horas). Um texto que não é data volta como veio. */
+export function formatSpDateTime(value: string | null | undefined, idioma: PortalIdioma): string {
+  if (!value) return SEM_VALOR;
   const d = new Date(value);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  return format(d, "dd/MM/yyyy, HH:mm", { locale: localeDateFns(idioma) });
 }
 
+/** Dinheiro: o formato não segue o idioma do portal (sempre pt-PT, como sempre foi): só as palavras o seguem. */
 export function formatSpMoney(value: number | null | undefined, currency = "EUR"): string {
   const n = Number(value ?? 0);
   try {
@@ -27,8 +30,14 @@ export function formatSpMoney(value: number | null | undefined, currency = "EUR"
   }
 }
 
+/** Quantidades: até 4 casas, sempre em pt-PT (vírgula decimal), nos dois idiomas. */
 export function formatSpQty(value: number | null | undefined): string {
   return Number(value ?? 0).toLocaleString("pt-PT", { maximumFractionDigits: 4 });
+}
+
+/** Data de um dia (sem hora) a partir de um timestamptz, na hora local: «Desde …». */
+export function formatSpLocalDay(value: string | null | undefined, idioma: PortalIdioma): string {
+  return formatarData(value, idioma, "numerico");
 }
 
 type Tone = "new" | "viewed" | "confirmed" | "partial" | "received" | "cancelled";
@@ -42,17 +51,17 @@ export const SP_TONE_CLASS: Record<Tone, string> = {
   cancelled: "bg-red-100 text-red-900 border-red-200 dark:bg-red-500/15 dark:text-red-200 dark:border-red-500/30",
 };
 
-/** Estado da resposta do fornecedor: Nova / Vista / Confirmada. */
-export function spPublicationBadge(status: SpPublicationStatus): { label: string; tone: Tone } {
-  if (status === "confirmed") return { label: "Confirmada", tone: "confirmed" };
-  if (status === "viewed") return { label: "Vista", tone: "viewed" };
-  return { label: "Nova", tone: "new" };
+/** Estado da resposta do fornecedor: Nova / Vista / Confirmada (chave do dicionário, não texto). */
+export function spPublicationBadge(status: SpPublicationStatus): { labelKey: string; tone: Tone } {
+  if (status === "confirmed") return { labelKey: "sp.estado.confirmada", tone: "confirmed" };
+  if (status === "viewed") return { labelKey: "sp.estado.vista", tone: "viewed" };
+  return { labelKey: "sp.estado.nova", tone: "new" };
 }
 
 /** Estado da encomenda na empresa, só quando já avançou (null para "encomendada"). */
-export function spOrderStatusBadge(status: SpOrderStatus): { label: string; tone: Tone } | null {
-  if (status === "cancelled") return { label: "Cancelada", tone: "cancelled" };
-  if (status === "received") return { label: "Recebida", tone: "received" };
-  if (status === "partially_received") return { label: "Parcialmente recebida", tone: "partial" };
+export function spOrderStatusBadge(status: SpOrderStatus): { labelKey: string; tone: Tone } | null {
+  if (status === "cancelled") return { labelKey: "sp.estado.cancelada", tone: "cancelled" };
+  if (status === "received") return { labelKey: "sp.estado.recebida", tone: "received" };
+  if (status === "partially_received") return { labelKey: "sp.estado.parcialmenteRecebida", tone: "partial" };
   return null;
 }

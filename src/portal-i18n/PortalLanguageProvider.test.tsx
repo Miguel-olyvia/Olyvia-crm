@@ -154,8 +154,9 @@ describe("usePortalFormato", () => {
     expect(result.current.idioma).toBe("en");
     expect(result.current.formatarData(data, "longo")).toBe("5 March 2025");
     expect(result.current.formatarDataHora(data, "longo")).toBe("5 March 2025 at 14:30");
-    expect(result.current.formatarMoeda(1234.5)).toBe("€1,234.50");
-    expect(result.current.formatarNumero(1234.5678, { maximumFractionDigits: 2 })).toBe("1,234.57");
+    expect(result.current.formatarData(data, "numerico")).toBe("05/03/2025");
+    expect("formatarMoeda" in result.current).toBe(false);
+    expect("formatarNumero" in result.current).toBe(false);
   });
 });
 

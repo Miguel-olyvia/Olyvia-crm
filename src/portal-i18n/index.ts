@@ -5,14 +5,20 @@ export { usePortalIdioma, type PortalIdiomaEstado } from "./usePortalIdioma";
 export { usePortalT, type PortalTraducao } from "./usePortalT";
 export { usePortalFormato, type PortalFormato } from "./usePortalFormato";
 export { traduzir, traduzirN } from "./traduzir";
+export { traduzirEm } from "./traduzirEm";
+export {
+  marcarMensagem,
+  mensagemDeChave,
+  mensagemDeTexto,
+  resolverMensagem,
+  resolverMensagemMarcada,
+  type MensagemDoPortal,
+} from "./mensagem";
 export {
   formatarData,
   formatarDataHora,
   formatarDataIso,
-  formatarMoeda,
-  formatarNumero,
   localeDateFns,
-  localeIntl,
   padraoDeFormato,
   type EstiloDeData,
 } from "./formato";

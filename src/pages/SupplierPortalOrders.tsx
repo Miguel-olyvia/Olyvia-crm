@@ -14,17 +14,19 @@ import { isNoSupplierAccess, spErrorMessage, spListOrders, type SpOrderFilter } 
 import { SP_ORDERS_QUERY_KEY } from "@/components/supplier-portal/useSpOrdersToConfirm";
 import { SpOrderBadges } from "@/components/supplier-portal/SpOrderBadges";
 import { formatSpDate, formatSpMoney } from "@/components/supplier-portal/spOrderFormat";
+import { usePortalT } from "@/portal-i18n";
 
 const PAGE_SIZE = 25;
 const ALL_COMPANIES = "__all__";
 
-const FILTERS: { value: SpOrderFilter; label: string }[] = [
-  { value: "to_confirm", label: "Por confirmar" },
-  { value: "confirmed", label: "Confirmadas" },
-  { value: "open", label: "Em curso" },
-  { value: "received", label: "Recebidas" },
-  { value: "cancelled", label: "Canceladas" },
-  { value: "all", label: "Todas" },
+// O código do filtro (to_confirm, confirmed...) é o da base e do URL; a etiqueta é `sp.encomendas.filtro.<código>`.
+const FILTERS: { value: SpOrderFilter; labelKey: string }[] = [
+  { value: "to_confirm", labelKey: "sp.encomendas.filtro.to_confirm" },
+  { value: "confirmed", labelKey: "sp.encomendas.filtro.confirmed" },
+  { value: "open", labelKey: "sp.encomendas.filtro.open" },
+  { value: "received", labelKey: "sp.encomendas.filtro.received" },
+  { value: "cancelled", labelKey: "sp.encomendas.filtro.cancelled" },
+  { value: "all", labelKey: "sp.encomendas.filtro.all" },
 ];
 
 function parseFilter(value: string | null): SpOrderFilter {
@@ -34,6 +36,7 @@ function parseFilter(value: string | null): SpOrderFilter {
 /** Portal do Fornecedor — lista de encomendas (sp_list_orders). */
 export default function SupplierPortalOrders() {
   const { account, companies, refresh } = useSupplierPortal();
+  const { t, idioma } = usePortalT();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
 
@@ -98,11 +101,8 @@ export default function SupplierPortalOrders() {
     <div className="space-y-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Encomendas</h1>
-          <p className="text-sm text-muted-foreground">
-            Encomendas que as empresas lhe enviaram pelo portal. Abra uma encomenda para ver o detalhe, descarregar o PDF e
-            confirmar.
-          </p>
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">{t("sp.encomendas.titulo")}</h1>
+          <p className="text-sm text-muted-foreground">{t("sp.encomendas.subtitulo")}</p>
         </div>
         <Button
           variant="outline"
@@ -111,12 +111,12 @@ export default function SupplierPortalOrders() {
           disabled={query.isFetching}
         >
           <RefreshCw className={cn("h-4 w-4", query.isFetching && "animate-spin")} aria-hidden="true" />
-          Atualizar
+          {t("sp.encomendas.atualizar")}
         </Button>
       </div>
 
       {/* Separadores de estado com contagem (counts não dependem do estado escolhido). */}
-      <div role="tablist" aria-label="Estado das encomendas" className="flex gap-1 overflow-x-auto border-b">
+      <div role="tablist" aria-label={t("sp.encomendas.estadoDasEncomendas")} className="flex gap-1 overflow-x-auto border-b">
         {FILTERS.map((f) => {
           const selected = f.value === filter;
           const count = data?.counts?.[f.value];
@@ -135,7 +135,7 @@ export default function SupplierPortalOrders() {
                   : "border-transparent text-muted-foreground hover:text-foreground hover:border-border",
               )}
             >
-              {f.label}
+              {t(f.labelKey)}
               {count !== undefined && (
                 <span
                   className={cn(
@@ -153,13 +153,13 @@ export default function SupplierPortalOrders() {
 
       <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
         <div className="space-y-1">
-          <Label htmlFor="sp-orders-search">Pesquisar</Label>
+          <Label htmlFor="sp-orders-search">{t("sp.encomendas.pesquisar")}</Label>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" aria-hidden="true" />
             <Input
               id="sp-orders-search"
               type="search"
-              placeholder="Número da encomenda ou empresa"
+              placeholder={t("sp.encomendas.pesquisarPlaceholder")}
               value={searchInput}
               onChange={(e) => {
                 setSearchInput(e.target.value);
@@ -171,16 +171,16 @@ export default function SupplierPortalOrders() {
         </div>
         {showCompany && (
           <div className="space-y-1 sm:w-64">
-            <Label htmlFor="sp-orders-company">Empresa</Label>
+            <Label htmlFor="sp-orders-company">{t("sp.encomendas.empresa")}</Label>
             <Select
               value={orgId ?? ALL_COMPANIES}
               onValueChange={(v) => updateParam("empresa", v === ALL_COMPANIES ? null : v)}
             >
               <SelectTrigger id="sp-orders-company" className="h-11">
-                <SelectValue placeholder="Todas as empresas" />
+                <SelectValue placeholder={t("sp.encomendas.todasEmpresas")} />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={ALL_COMPANIES}>Todas as empresas</SelectItem>
+                <SelectItem value={ALL_COMPANIES}>{t("sp.encomendas.todasEmpresas")}</SelectItem>
                 {companies.map((c) => (
                   <SelectItem key={c.organization_id} value={c.organization_id}>
                     {c.name}
@@ -195,9 +195,9 @@ export default function SupplierPortalOrders() {
       {query.error && !isNoSupplierAccess(query.error) && (
         <Alert variant="destructive">
           <AlertDescription className="flex flex-wrap items-center gap-2">
-            {spErrorMessage(query.error)}
+            {spErrorMessage(query.error, idioma)}
             <Button size="sm" variant="outline" onClick={() => void query.refetch()}>
-              Tentar de novo
+              {t("sp.erro.tentarDeNovo")}
             </Button>
           </AlertDescription>
         </Alert>
@@ -205,17 +205,21 @@ export default function SupplierPortalOrders() {
 
       {query.isLoading ? (
         <p className="py-10 text-center text-sm text-muted-foreground" role="status">
-          A carregar encomendas…
+          {t("sp.encomendas.aCarregar")}
         </p>
       ) : items.length === 0 && !query.error ? (
         <div className="rounded-lg border bg-background py-12 px-4 text-center space-y-2">
           <ClipboardList className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden="true" />
           <p className="text-sm font-medium text-foreground">
-            {search || orgId ? "Nenhuma encomenda com estes filtros." : filter === "to_confirm" ? "Não tem encomendas por confirmar." : "Sem encomendas."}
+            {search || orgId
+              ? t("sp.encomendas.vazio.comFiltros")
+              : filter === "to_confirm"
+                ? t("sp.encomendas.vazio.porConfirmar")
+                : t("sp.encomendas.vazio.sem")}
           </p>
           {filter !== "all" && (
             <Button variant="link" onClick={() => updateParam("estado", "all")}>
-              Ver todas as encomendas
+              {t("sp.encomendas.vazio.verTodas")}
             </Button>
           )}
         </div>
@@ -238,12 +242,14 @@ export default function SupplierPortalOrders() {
                   </div>
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <span>
-                      {formatSpDate(o.order_date)} · {o.lines} linha(s)
+                      {formatSpDate(o.order_date, idioma)} · {t("sp.encomendas.linhasN", { n: o.lines })}
                     </span>
                     <span className="font-medium text-foreground">{formatSpMoney(o.total, o.currency)}</span>
                   </div>
                   {o.promised_date && (
-                    <p className="text-xs text-muted-foreground">Entrega prevista: {formatSpDate(o.promised_date)}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {t("sp.encomendas.entregaPrevistaDia", { data: formatSpDate(o.promised_date, idioma) })}
+                    </p>
                   )}
                 </Link>
               </li>
@@ -255,14 +261,14 @@ export default function SupplierPortalOrders() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Encomenda</TableHead>
-                  {showCompany && <TableHead>Empresa</TableHead>}
-                  <TableHead>Data</TableHead>
-                  <TableHead>Entrega pedida</TableHead>
-                  <TableHead>Entrega prevista</TableHead>
-                  <TableHead className="text-right">Linhas</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  <TableHead>Estado</TableHead>
+                  <TableHead>{t("sp.encomendas.coluna.encomenda")}</TableHead>
+                  {showCompany && <TableHead>{t("sp.encomendas.coluna.empresa")}</TableHead>}
+                  <TableHead>{t("sp.encomendas.coluna.data")}</TableHead>
+                  <TableHead>{t("sp.encomendas.coluna.entregaPedida")}</TableHead>
+                  <TableHead>{t("sp.encomendas.coluna.entregaPrevista")}</TableHead>
+                  <TableHead className="text-right">{t("sp.encomendas.coluna.linhas")}</TableHead>
+                  <TableHead className="text-right">{t("sp.encomendas.coluna.total")}</TableHead>
+                  <TableHead>{t("sp.encomendas.coluna.estado")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -282,9 +288,9 @@ export default function SupplierPortalOrders() {
                       </Link>
                     </TableCell>
                     {showCompany && <TableCell className="max-w-[18ch] truncate" title={o.organization.name}>{o.organization.name}</TableCell>}
-                    <TableCell>{formatSpDate(o.order_date)}</TableCell>
-                    <TableCell>{formatSpDate(o.expected_delivery)}</TableCell>
-                    <TableCell>{formatSpDate(o.promised_date)}</TableCell>
+                    <TableCell>{formatSpDate(o.order_date, idioma)}</TableCell>
+                    <TableCell>{formatSpDate(o.expected_delivery, idioma)}</TableCell>
+                    <TableCell>{formatSpDate(o.promised_date, idioma)}</TableCell>
                     <TableCell className="text-right tabular-nums">{o.lines}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatSpMoney(o.total, o.currency)}</TableCell>
                     <TableCell>
@@ -298,7 +304,7 @@ export default function SupplierPortalOrders() {
 
           <div className="flex items-center justify-between gap-2 text-sm text-muted-foreground">
             <span aria-live="polite">
-              {from}–{to} de {total}
+              {t("sp.encomendas.paginacao", { de: from, ate: to, total })}
             </span>
             <div className="flex gap-2">
               <Button
@@ -306,7 +312,7 @@ export default function SupplierPortalOrders() {
                 className="h-11 w-11 p-0"
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
                 disabled={page === 0 || query.isFetching}
-                aria-label="Página anterior"
+                aria-label={t("sp.encomendas.paginaAnterior")}
               >
                 <ChevronLeft className="h-4 w-4" aria-hidden="true" />
               </Button>
@@ -315,7 +321,7 @@ export default function SupplierPortalOrders() {
                 className="h-11 w-11 p-0"
                 onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
                 disabled={page >= pageCount - 1 || query.isFetching}
-                aria-label="Página seguinte"
+                aria-label={t("sp.encomendas.paginaSeguinte")}
               >
                 <ChevronRight className="h-4 w-4" aria-hidden="true" />
               </Button>

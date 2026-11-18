@@ -11,16 +11,18 @@ import { PORTAL_ORGS_QUERY_KEY, usePortalCompany, type PortalOrg } from "@/conte
 import { useToast } from "@/hooks/use-toast";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePortalEntityName } from "@/hooks/usePortalEntityName";
+import { PortalLanguageProvider, PortalSeletorIdioma, usePortalT } from "@/portal-i18n";
 
 interface ClientPortalLayoutProps {
   children: ReactNode;
 }
 
+// `labelKey` é a chave do dicionário do portal (pc.layout.menu.*), traduzida na apresentação.
 const NAV_ITEMS = [
-  { label: "Início", icon: Home, path: "/client-portal", matchPaths: ["/client-portal"], badgeKey: null },
-  { label: "Propostas", icon: FileText, path: "/client-portal/proposals", matchPaths: ["/client-portal/proposals"], badgeKey: "proposals" as const },
-  { label: "Contratos", icon: ScrollText, path: "/client-portal/contracts", matchPaths: ["/client-portal/contracts"], badgeKey: "contracts" as const },
-  { label: "Documentos", icon: FolderOpen, path: "/client-portal/documents", matchPaths: ["/client-portal/documents"], badgeKey: null },
+  { labelKey: "pc.layout.menu.inicio", icon: Home, path: "/client-portal", matchPaths: ["/client-portal"], badgeKey: null },
+  { labelKey: "pc.layout.menu.propostas", icon: FileText, path: "/client-portal/proposals", matchPaths: ["/client-portal/proposals"], badgeKey: "proposals" as const },
+  { labelKey: "pc.layout.menu.contratos", icon: ScrollText, path: "/client-portal/contracts", matchPaths: ["/client-portal/contracts"], badgeKey: "contracts" as const },
+  { labelKey: "pc.layout.menu.documentos", icon: FolderOpen, path: "/client-portal/documents", matchPaths: ["/client-portal/documents"], badgeKey: null },
 ];
 
 // Quem já mudou a palavra-passe nesta aba, POR UTILIZADOR.
@@ -60,6 +62,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   // empresas do grupo. Ver src/contexts/PortalCompanyContext.tsx.
   const { activeOrg, portalOrgs, hasMultiple, isLoading: orgsLoading } = usePortalCompany();
   const queryClient = useQueryClient();
+  const { t } = usePortalT();
   // Só contas client_supplier (cliente que é também fornecedor) veem o botão.
   const supplierSwitch = useClientSupplierSwitch();
   const [userName, setUserName] = useState("");
@@ -180,7 +183,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
   const handlePasswordChanged = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      toast({ title: "Sessão expirada", description: "Volte a iniciar sessão.", variant: "destructive" });
+      toast({ title: t("pc.layout.sessaoExpirada.titulo"), description: t("pc.layout.sessaoExpirada.descricao"), variant: "destructive" });
       return;
     }
     const { error } = await supabase
@@ -189,8 +192,8 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
       .eq("auth_user_id", user.id);
     if (error) {
       toast({
-        title: "Erro",
-        description: "Não foi possível confirmar a alteração da palavra-passe. Tente novamente.",
+        title: t("pc.layout.erro.titulo"),
+        description: t("pc.layout.erro.confirmarPassword"),
         variant: "destructive",
       });
       return; // keep modal open
@@ -215,7 +218,10 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
 
   const initials = getInitials(displayName);
 
+  // O PortalLanguageProvider vive aqui porque todas as páginas do portal de cliente (lista e detalhe)
+  // se embrulham neste layout: é ele que mantém o <html lang> igual ao idioma do portal.
   return (
+    <PortalLanguageProvider>
     <div className="min-h-screen flex flex-col" style={{ backgroundColor: "#F8F7FC" }}>
       {/* Top Bar */}
       <header className="border-b bg-white px-4 md:px-6 py-3 flex items-center justify-between shrink-0 shadow-sm">
@@ -240,7 +246,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
           {!hasMultiple && !orgsLoading && activeOrg && (
             <div className="hidden sm:block min-w-0">
               <p className="text-sm font-semibold text-foreground leading-tight truncate">{orgName}</p>
-              <p className="text-[11px] font-medium" style={{ color: "#7C3AED" }}>Portal do Cliente</p>
+              <p className="text-[11px] font-medium" style={{ color: "#7C3AED" }}>{t("pc.layout.titulo")}</p>
             </div>
           )}
         </div>
@@ -255,21 +261,22 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
             </div>
             <div className="hidden sm:block text-right">
               <p className="text-sm font-medium text-foreground leading-tight">{displayName}</p>
-              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">Cliente</p>
+              <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">{t("pc.layout.papel")}</p>
             </div>
           </div>
           <div className="w-px h-6 bg-border mx-1 hidden sm:block" />
+          <PortalSeletorIdioma compacto />
           {supplierSwitch.available && (
             <Button
               variant="outline"
               size="sm"
               onClick={() => navigate(supplierSwitch.switchTo("supplier"))}
               className="gap-1.5 min-h-[24px] min-w-[24px]"
-              aria-label="Mudar para Portal do Fornecedor"
-              title="Mudar para Portal do Fornecedor"
+              aria-label={t("pc.layout.mudarParaFornecedor")}
+              title={t("pc.layout.mudarParaFornecedor")}
             >
               <ArrowLeftRight className="h-3.5 w-3.5" aria-hidden="true" />
-              <span className="hidden md:inline text-xs">Mudar para Portal do Fornecedor</span>
+              <span className="hidden md:inline text-xs">{t("pc.layout.mudarParaFornecedor")}</span>
             </Button>
           )}
           <Button
@@ -277,9 +284,10 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
             size="sm"
             onClick={handleLogout}
             className="gap-1.5 text-muted-foreground hover:text-destructive hover:border-destructive/30 transition-colors"
+            aria-label={t("pt.sair")}
           >
-            <LogOut className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline text-xs">Sair</span>
+            <LogOut className="h-3.5 w-3.5" aria-hidden="true" />
+            <span className="hidden sm:inline text-xs">{t("pt.sair")}</span>
           </Button>
         </div>
       </header>
@@ -303,7 +311,7 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
                 )}
               >
                 <item.icon className="h-4 w-4" />
-                {item.label}
+                {t(item.labelKey)}
                 {badgeCount > 0 && (
                   <span
                     className="ml-1 inline-flex items-center justify-center h-5 min-w-[20px] px-1.5 rounded-full text-[10px] font-bold text-white"
@@ -328,12 +336,13 @@ export function ClientPortalLayout({ children }: ClientPortalLayoutProps) {
         <p className="text-xs text-muted-foreground">
           {orgName && <span className="font-medium">{orgName}</span>}
           {orgName && " · "}
-          Portal do Cliente
+          {t("pc.layout.titulo")}
         </p>
       </footer>
 
       {/* First Login Modal */}
       <FirstLoginModal open={showFirstLogin} onPasswordChanged={handlePasswordChanged} />
     </div>
+    </PortalLanguageProvider>
   );
 }

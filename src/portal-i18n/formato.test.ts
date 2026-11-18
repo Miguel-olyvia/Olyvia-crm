@@ -1,23 +1,12 @@
-// Formatação por idioma do portal: datas (date-fns com locale pt / enGB), moeda e números. Não mexe no
-// formatCurrency do CRM e cobre o dd/mm/aaaa fixo do portal do fornecedor sem deriva de fuso.
+// Formatação por idioma do portal: só datas (date-fns com locale pt / enGB): as palavras seguem o idioma e o
+// dd/mm/aaaa e as horas não. Cobre o dd/mm/aaaa fixo do portal do fornecedor sem deriva de fuso.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { formatCurrency } from "@/lib/utils";
-import {
-  formatarData,
-  formatarDataHora,
-  formatarDataIso,
-  formatarMoeda,
-  formatarNumero,
-  localeDateFns,
-  localeIntl,
-  padraoDeFormato,
-} from "./formato";
+import { formatarData, formatarDataHora, formatarDataIso, localeDateFns, padraoDeFormato } from "./formato";
 
 // O tsconfig da app não inclui os tipos do Node; só se precisa de process.env.TZ.
 declare const process: { env: Record<string, string | undefined> };
 
 const QUARTA = new Date(2025, 2, 5, 14, 30); // quarta-feira, 5 de março de 2025, 14:30 (hora local)
-const espacos = (s: string): string => s.replace(/\s/g, " ");
 
 describe("locales", () => {
   it("date-fns: pt e enGB", () => {
@@ -25,10 +14,6 @@ describe("locales", () => {
     expect(localeDateFns("en").code).toBe("en-GB");
   });
 
-  it("Intl: pt-PT e en-GB", () => {
-    expect(localeIntl("pt")).toBe("pt-PT");
-    expect(localeIntl("en")).toBe("en-GB");
-  });
 });
 
 describe("padraoDeFormato", () => {
@@ -124,6 +109,8 @@ describe("formatarDataHora", () => {
     expect(formatarDataHora(QUARTA, "pt", "curto")).toBe("5 mar 2025, 14:30");
     expect(formatarDataHora(QUARTA, "en", "curto")).toBe("5 Mar 2025, 14:30");
     expect(formatarDataHora(QUARTA, "pt", "numerico")).toBe("05/03/2025 14:30");
+    // O numérico não muda com o idioma: dd/mm/aaaa e HH:mm como sempre.
+    expect(formatarDataHora(QUARTA, "en", "numerico")).toBe("05/03/2025 14:30");
   });
 
   it("o estilo por omissão é o curto, e a hora é de 24 horas com zeros à esquerda", () => {
@@ -190,57 +177,11 @@ describe("sem deriva de fuso", () => {
   });
 });
 
-describe("formatarMoeda", () => {
-  it("euros por omissão, à maneira de cada idioma", () => {
-    expect(espacos(formatarMoeda(10000.5, "pt"))).toBe("10 000,50 €");
-    expect(formatarMoeda(10000.5, "en")).toBe("€10,000.50");
-  });
-
-  it("outra moeda", () => {
-    expect(formatarMoeda(10, "en", "USD")).toMatch(/\$10\.00/);
-    expect(espacos(formatarMoeda(10, "pt", "USD"))).toMatch(/^10,00 US\$$/);
-  });
-
-  it("valores negativos e zero", () => {
-    expect(formatarMoeda(-5, "en")).toBe("-€5.00");
-    expect(formatarMoeda(0, "en")).toBe("€0.00");
-  });
-
-  it("em falta conta como 0, como o formatSpMoney do fornecedor", () => {
-    expect(formatarMoeda(null, "en")).toBe("€0.00");
-    expect(formatarMoeda(undefined, "pt")).toBe(formatarMoeda(0, "pt"));
-  });
-
-  it("um número não finito dá «—»", () => {
-    expect(formatarMoeda(Number.NaN, "pt")).toBe("—");
-    expect(formatarMoeda(Number.POSITIVE_INFINITY, "en")).toBe("—");
-  });
-
-  it("uma moeda inválida ou vazia não lança", () => {
-    expect(formatarMoeda(3.5, "en", "XX")).toBe("3.50 XX");
-    expect(formatarMoeda(3.5, "pt", "")).toBe(formatarMoeda(3.5, "pt", "EUR"));
-  });
-
-  it("não mexe no formatCurrency do CRM", () => {
-    formatarMoeda(1234.5, "en");
-    expect(formatCurrency(1234.5)).toBe("€1.234,50");
-  });
-});
-
-describe("formatarNumero", () => {
-  it("separadores de cada idioma", () => {
-    expect(espacos(formatarNumero(1234567.891, "pt", { maximumFractionDigits: 2 }))).toBe("1 234 567,89");
-    expect(formatarNumero(1234567.891, "en", { maximumFractionDigits: 2 })).toBe("1,234,567.89");
-  });
-
-  it("quantidades com até 4 decimais", () => {
-    expect(formatarNumero(0.12345, "pt", { maximumFractionDigits: 4 })).toBe("0,1235");
-    expect(formatarNumero(2.5, "en", { maximumFractionDigits: 4 })).toBe("2.5");
-  });
-
-  it("em falta conta como 0 e não finito dá «—»", () => {
-    expect(formatarNumero(null, "en")).toBe("0");
-    expect(formatarNumero(undefined, "pt")).toBe("0");
-    expect(formatarNumero(Number.NaN, "pt")).toBe("—");
+describe("dinheiro e números não fazem parte do idioma do portal", () => {
+  it("o módulo não exporta formatadores de moeda nem de números (só palavras e datas seguem o idioma)", async () => {
+    const modulo = (await import("./formato")) as Record<string, unknown>;
+    expect(modulo.formatarMoeda).toBeUndefined();
+    expect(modulo.formatarNumero).toBeUndefined();
+    expect(modulo.localeIntl).toBeUndefined();
   });
 });

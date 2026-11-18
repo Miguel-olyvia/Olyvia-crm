@@ -5,25 +5,16 @@ import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
 import { usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContext";
 import { PortalOrgsErrorState } from "@/components/portal/PortalOrgsErrorState";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileText, ArrowRight } from "lucide-react";
 import { formatCurrency } from "@/lib/utils";
-import { format } from "date-fns";
-import { pt } from "date-fns/locale";
-
-const STATUS_MAP: Record<string, { label: string; variant: "default" | "secondary" | "destructive" | "outline" }> = {
-  sent: { label: "A aguardar", variant: "secondary" },
-  pending: { label: "A aguardar", variant: "secondary" },
-  draft: { label: "Rascunho", variant: "outline" },
-  accepted: { label: "Aceite", variant: "default" },
-  rejected: { label: "Rejeitada", variant: "destructive" },
-  expired: { label: "Expirada", variant: "destructive" },
-};
+import { usePortalFormato, usePortalT } from "@/portal-i18n";
 
 const ClientPortalProposals = () => {
   const navigate = useNavigate();
+  const { t } = usePortalT();
+  const { formatarData } = usePortalFormato();
   const [proposals, setProposals] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   // Empresa ativa do portal — ver src/contexts/PortalCompanyContext.tsx.
@@ -82,13 +73,10 @@ const ClientPortalProposals = () => {
     return () => { cancelled = true; };
   }, [activeOrg, orgsLoading]);
 
-  // M2: formatCurrency now imported from @/lib/utils
-
-
   return (
     <ClientPortalLayout>
       <div className="space-y-4">
-        <h2 className="text-xl font-bold text-foreground">As Minhas Propostas</h2>
+        <h2 className="text-xl font-bold text-foreground">{t("pc.propostas.titulo")}</h2>
 
         {loading ? (
           <div className="space-y-3">
@@ -101,10 +89,10 @@ const ClientPortalProposals = () => {
           <Card>
             <CardContent className="py-8 text-center">
               <FileText className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-              <p className="text-muted-foreground">Não tem propostas disponíveis.</p>
+              <p className="text-muted-foreground">{t("pc.propostas.vazio")}</p>
               {hasMultiple && (
                 <p className="text-xs text-muted-foreground mt-1.5">
-                  Se esperava ver outras, troque de empresa no seletor no topo da página.
+                  {t("pc.propostas.vazioTroqueEmpresa")}
                 </p>
               )}
             </CardContent>
@@ -131,11 +119,11 @@ const ClientPortalProposals = () => {
                             <span>•</span>
                             <span>{formatCurrency(p.value)}</span>
                             <span>•</span>
-                            <span>{format(new Date(p.created_at), "d MMM yyyy", { locale: pt })}</span>
+                            <span>{formatarData(p.created_at, "curto")}</span>
                             {p.valid_until && (
                               <>
                                 <span>•</span>
-                                <span>Válida até {format(new Date(p.valid_until), "d MMM yyyy", { locale: pt })}</span>
+                                <span>{t("pc.propostas.validaAte", { data: formatarData(p.valid_until, "curto") })}</span>
                               </>
                             )}
                           </div>
@@ -147,7 +135,7 @@ const ClientPortalProposals = () => {
                           size="sm"
                           onClick={() => navigate(`/client-portal/proposals/${p.id}`)}
                         >
-                          Ver <ArrowRight className="h-3 w-3 ml-1" />
+                          {t("pc.propostas.ver")} <ArrowRight className="h-3 w-3 ml-1" />
                         </Button>
                       </div>
                     </div>

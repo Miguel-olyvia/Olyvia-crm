@@ -22,7 +22,9 @@ describe("PortalSeletorIdioma", () => {
     const grupo = screen.getByRole("group");
     expect(grupo).toHaveAccessibleName(/idioma/i);
     const botoes = within(grupo).getAllByRole("button");
-    expect(botoes.map((b) => b.getAttribute("aria-label"))).toEqual(["Português", "English"]);
+    expect(botoes.map((b) => b.textContent)).toEqual(["Português", "English"]);
+    // No modo normal o nome vem do texto visível: sem aria-label redundante.
+    for (const b of botoes) expect(b).not.toHaveAttribute("aria-label");
     for (const b of botoes) {
       expect(b.tagName).toBe("BUTTON");
       expect(b).toHaveAttribute("type", "button");
@@ -77,8 +79,9 @@ describe("PortalSeletorIdioma", () => {
         <PortalSeletorIdioma />
       </>,
     );
-    fireEvent.click(screen.getAllByRole("button", { name: "English" })[0]);
-    for (const b of screen.getAllByRole("button", { name: "English" })) expect(b).toHaveAttribute("aria-pressed", "true");
+    fireEvent.click(screen.getByRole("button", { name: "EN, English" }));
+    expect(screen.getByRole("button", { name: "EN, English" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "English" })).toHaveAttribute("aria-pressed", "true");
   });
 
   it("na variante normal mostra os nomes por extenso", () => {
@@ -87,10 +90,23 @@ describe("PortalSeletorIdioma", () => {
     expect(screen.getByRole("button", { name: "English" })).toHaveTextContent("English");
   });
 
-  it("na variante compacta mostra PT e EN, com os mesmos nomes acessíveis", () => {
+  it("na variante compacta mostra PT e EN e o nome acessível contém o texto visível (WCAG 2.5.3)", () => {
     render(<PortalSeletorIdioma compacto />);
-    expect(screen.getByRole("button", { name: "Português" })).toHaveTextContent(/^PT$/);
-    expect(screen.getByRole("button", { name: "English" })).toHaveTextContent(/^EN$/);
+    const pt = screen.getByRole("button", { name: "PT, Português" });
+    const en = screen.getByRole("button", { name: "EN, English" });
+    expect(pt).toHaveTextContent(/^PT$/);
+    expect(en).toHaveTextContent(/^EN$/);
+    expect(pt).toHaveAttribute("lang", "pt");
+    expect(en).toHaveAttribute("lang", "en");
+    for (const b of [pt, en]) expect((b.getAttribute("aria-label") ?? "").startsWith(b.textContent ?? "?")).toBe(true);
+  });
+
+  it("o nome do grupo é «Idioma / Language», cada palavra na sua língua", () => {
+    const { container } = render(<PortalSeletorIdioma />);
+    expect(screen.getByRole("group")).toHaveAccessibleName("Idioma / Language");
+    expect(screen.getByRole("group")).not.toHaveAttribute("aria-label");
+    expect(container.querySelector('[lang="pt"]:not(button)')).toHaveTextContent("Idioma");
+    expect(container.querySelector('[lang="en"]:not(button)')).toHaveTextContent("Language");
   });
 
   it.each([false, true])("os botões têm alvo de pelo menos 44 px (compacto=%s)", (compacto) => {

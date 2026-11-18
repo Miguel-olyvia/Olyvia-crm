@@ -1,19 +1,17 @@
 import { useEffect, useState, useMemo } from "react";
-import { format } from "date-fns";
 import DOMPurify from "dompurify";
-import { pt } from "date-fns/locale";
-import { FileText, Mail, MessageCircle, Phone, Download, CheckSquare, Smartphone, ShieldCheck, Loader2, Square, CheckSquare2 } from "lucide-react";
+import { FileText, Mail, MessageCircle, Phone, Download, CheckSquare, Square, CheckSquare2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  InputOTP, InputOTPGroup, InputOTPSlot,
-} from "@/components/ui/input-otp";
 import type { ProposalPortalCommercial } from "@/components/proposals/proposalPortalData";
 import { formatCurrency } from "@/lib/utils";
-import { cooldownLabel } from "@/hooks/useCooldown";
-import { OtpCooldownNotice } from "@/components/ui/otp-cooldown-notice";
+import { ProposalPortalOtpSection } from "@/components/proposals/ProposalPortalOtpSection";
+import { formatarData, formatarDataHora } from "@/portal-i18n/formato";
+import { traduzir } from "@/portal-i18n/traduzir";
+import { traduzirEm } from "@/portal-i18n/traduzirEm";
+import type { PortalIdioma } from "@/portal-i18n/tipos";
 import { computeQuoteTotals, computeLineVatAmount, aggregateQuoteTotals } from "@/utils/quotes/computeQuoteTotals";
 import { getLineDisplayUnitPrice } from "@/utils/quotes/quoteLinePricing";
 
@@ -42,6 +40,11 @@ interface ProposalPortalDocumentProps {
   commercial: ProposalPortalCommercial | null;
   company: any | null;
   mode?: "preview" | "portal";
+  /**
+   * Idioma dos textos do documento. Por omissão português: o CRM (pré-visualização) não passa a prop e fica como
+   * sempre; o portal do cliente passa o idioma escolhido. Conteúdo escrito pela organização não é traduzido.
+   */
+  idioma?: PortalIdioma;
   statusLabel?: string;
   canActOnProposal?: boolean;
   actionLoading?: boolean;
@@ -87,6 +90,34 @@ const DOCUMENT_SECTION_TYPES = new Set([
   "quote_items",
 ]);
 
+/**
+ * Rótulos que o editor de templates grava por omissão em `section.label`, por tipo de secção (chave sem prefixo).
+ * Em inglês, um `label` igual ao de fábrica em português é tratado como omissão e traduz-se; um renomeado fica.
+ */
+const ROTULOS_DE_FABRICA: Record<string, string[]> = {
+  header: ["cabecalho"],
+  company_info: ["empresa", "infoEmpresa"],
+  client_info: ["cliente"],
+  description: ["descricao"],
+  notes: ["notas"],
+  validity: ["validade", "validadeAte"],
+  terms: ["condicoes"],
+  footer: ["rodape"],
+  quote_items: ["detalhes"],
+};
+const PREFIXO_SECAO = "pc.docProposta.secao.";
+
+/**
+ * O editor de templates também grava por omissão os TÍTULOS em português (settings.sectionLabel «CLIENTE»,
+ * «CONDIÇÕES GERAIS», «Válida até»; settings.customTitle «PROPOSTA»). Compara-se sem caixa nem acentos para
+ * reconhecer esses valores de fábrica; o que a organização escreveu de facto é diferente e fica como vem.
+ */
+const normalizarTitulo = (texto: string): string =>
+  texto.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+
+/** Nome da secção quando as linhas não têm `section_name`: sentinela independente do idioma (traduz-se só ao mostrar). */
+const SECAO_SEM_NOME = "\u0000sem-nome";
+
 const hasUsefulText = (value: unknown) => {
   if (typeof value !== "string") return false;
   return DOMPurify.sanitize(value, { ALLOWED_TAGS: [] }).trim().length > 0;
@@ -105,7 +136,8 @@ export function ProposalPortalDocument({
   commercial,
   company,
   mode = "preview",
-  statusLabel = "A aguardar decisão",
+  idioma = "pt",
+  statusLabel,
   canActOnProposal = false,
   actionLoading = false,
   otpStep = "idle",
@@ -126,6 +158,13 @@ export function ProposalPortalDocument({
   onSelectedQuotesChange,
 }: ProposalPortalDocumentProps) {
   const isPreview = mode === "preview";
+  // O idioma vem da prop (nunca do armazém do portal); um valor estranho cai em português.
+  const { idioma: lingua, t } = useMemo(() => traduzirEm(idioma), [idioma]);
+  // O dinheiro não segue o idioma: formatCurrency de sempre (€1.234,56) em português e em inglês.
+  const money = (value: number): string => formatCurrency(value);
+  // O nome da secção sem nome é uma sentinela (não entra no texto traduzido): mudar de idioma não muda as chaves
+  // da seleção. Só se traduz ao mostrar.
+  const nomeSecaoVisivel = (nome: string): string => (nome === SECAO_SEM_NOME ? t("pc.docProposta.itens") : nome);
   const primaryColor = template?.primary_color || "#7C3AED";
   const designSettings = parseDesignSettings(template?.design_settings);
   const theme = {
@@ -155,13 +194,13 @@ export function ProposalPortalDocument({
     }
 
     return [
-      { id: "fallback_header", type: "header", label: "Cabeçalho", visible: true, settings: { customTitle: "PROPOSTA", showLogo: true, showDate: true } },
-      { id: "fallback_company", type: "company_info", label: "Empresa", visible: template?.show_company_info !== false, settings: { sectionLabel: "Empresa" } },
-      { id: "fallback_quote_items", type: "quote_items", label: "Detalhes do Orçamento", visible: template?.show_quote_details !== false, settings: { sectionLabel: "Detalhes do Orçamento" } },
-      { id: "fallback_terms", type: "terms", label: "Condições Gerais", visible: template?.show_terms !== false, settings: { sectionLabel: "Condições Gerais" } },
-      { id: "fallback_footer", type: "footer", label: "Rodapé", visible: true, settings: {} },
+      { id: "fallback_header", type: "header", label: t("pc.docProposta.secao.cabecalho"), visible: true, settings: { customTitle: t("pc.docProposta.secao.tituloProposta"), showLogo: true, showDate: true } },
+      { id: "fallback_company", type: "company_info", label: t("pc.docProposta.secao.empresa"), visible: template?.show_company_info !== false, settings: { sectionLabel: t("pc.docProposta.secao.empresa") } },
+      { id: "fallback_quote_items", type: "quote_items", label: t("pc.docProposta.secao.detalhes"), visible: template?.show_quote_details !== false, settings: { sectionLabel: t("pc.docProposta.secao.detalhes") } },
+      { id: "fallback_terms", type: "terms", label: t("pc.docProposta.secao.condicoes"), visible: template?.show_terms !== false, settings: { sectionLabel: t("pc.docProposta.secao.condicoes") } },
+      { id: "fallback_footer", type: "footer", label: t("pc.docProposta.secao.rodape"), visible: true, settings: {} },
     ].filter((section) => section.visible !== false);
-  }, [template]);
+  }, [template, t]);
 
   // Build section map for all quotes
   const allSections = useMemo(() => {
@@ -170,7 +209,7 @@ export function ProposalPortalDocument({
       const lines = quoteLines[quote.id] || [];
       const sections: Record<string, any[]> = {};
       lines.forEach(line => {
-        const sectionName = line.section_name || "Itens";
+        const sectionName = line.section_name || SECAO_SEM_NOME;
         if (!sections[sectionName]) sections[sectionName] = [];
         sections[sectionName].push(line);
       });
@@ -257,7 +296,7 @@ export function ProposalPortalDocument({
   const isAccepted = proposal.status === "accepted";
   const isRejected = proposal.status === "rejected";
   const validUntilFormatted = proposal.valid_until
-    ? format(new Date(proposal.valid_until), "d 'de' MMMM 'de' yyyy", { locale: pt })
+    ? formatarData(new Date(proposal.valid_until), lingua, "longo")
     : null;
 
   const renderQuoteItems = () => (
@@ -268,7 +307,7 @@ export function ProposalPortalDocument({
                 const sections: Record<string, any[]> = {};
     
                 lines.forEach((line) => {
-                  const sectionName = line.section_name || "Itens";
+                  const sectionName = line.section_name || SECAO_SEM_NOME;
                   if (!sections[sectionName]) {
                     sections[sectionName] = [];
                   }
@@ -297,7 +336,7 @@ export function ProposalPortalDocument({
                             disabled={isPreview}
                           />
                           <span className="text-sm font-medium">
-                            {isQuoteSelected ? "✓ Orçamento selecionado" : "Selecionar este orçamento"}
+                            {isQuoteSelected ? t("pc.docProposta.orcamento.selecionado") : t("pc.docProposta.orcamento.selecionar")}
                           </span>
                         </div>
                       )}
@@ -321,7 +360,7 @@ export function ProposalPortalDocument({
                                     disabled={isPreview}
                                   />
                                 )}
-                                📋 {sectionName}
+                                📋 {nomeSecaoVisivel(sectionName)}
                                 <Badge variant="outline" className="text-xs font-normal">
                                   {quote.quote_number || quote.title || ""}
                                 </Badge>
@@ -329,12 +368,12 @@ export function ProposalPortalDocument({
                               <div className="flex items-center gap-2">
                                 {hasMultipleSectionsInSingleQuote && canActOnProposal && !isQuoteDecided && (
                                   <span className="text-xs text-muted-foreground">
-                                    {isSectionSelected ? "✓ Selecionado" : "Não selecionado"}
+                                    {isSectionSelected ? t("pc.docProposta.secaoSelecionada") : t("pc.docProposta.secaoNaoSelecionada")}
                                   </span>
                                 )}
                                 {sectionIdx === 0 && onDownloadPdf && (
                                   <Button variant="outline" size="sm" className="gap-1.5" onClick={onDownloadPdf}>
-                                    <Download className="h-3.5 w-3.5" /> Download PDF
+                                    <Download className="h-3.5 w-3.5" /> {t("pc.docProposta.baixarPdf")}
                                   </Button>
                                 )}
                               </div>
@@ -344,10 +383,10 @@ export function ProposalPortalDocument({
                                 <table className="w-full text-sm">
                                   <thead>
                                     <tr className="border-b-2 border-border">
-                                      <th className="py-2 pr-4 text-left font-medium text-muted-foreground uppercase text-xs tracking-wide">Item</th>
-                                      <th className="px-2 py-2 text-center font-medium text-muted-foreground uppercase text-xs tracking-wide">QTD</th>
-                                      <th className="px-2 py-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">Preço Unit.</th>
-                                      <th className="py-2 pl-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">Total</th>
+                                      <th className="py-2 pr-4 text-left font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.item")}</th>
+                                      <th className="px-2 py-2 text-center font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.qtd")}</th>
+                                      <th className="px-2 py-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.precoUnit")}</th>
+                                      <th className="py-2 pl-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.total")}</th>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -361,9 +400,9 @@ export function ProposalPortalDocument({
                                         </td>
                                         <td className="px-2 py-3 text-center">{item.qt || 1}</td>
                                         <td className="px-2 py-3 text-right">
-                                          {item.qt ? formatCurrency(getLineDisplayUnitPrice(item)) : "—"}
+                                          {item.qt ? money(getLineDisplayUnitPrice(item)) : "—"}
                                         </td>
-                                        <td className="py-3 pl-2 text-right font-medium">{formatCurrency(item.total_sem_iva || 0)}</td>
+                                        <td className="py-3 pl-2 text-right font-medium">{money(item.total_sem_iva || 0)}</td>
                                       </tr>
                                     ))}
                                   </tbody>
@@ -381,24 +420,24 @@ export function ProposalPortalDocument({
                                   return (
                                     <>
                                       <div className="flex justify-between">
-                                        <span className="text-muted-foreground">Subtotal</span>
-                                        <span>{formatCurrency(sectionSubtotal)}</span>
+                                        <span className="text-muted-foreground">{t("pc.docProposta.totais.subtotal")}</span>
+                                        <span>{money(sectionSubtotal)}</span>
                                       </div>
                                       {globalDiscount > 0 && (
                                         <div className="flex justify-between text-orange-600 dark:text-orange-400">
-                                          <span>Desconto global ({globalDiscount}%)</span>
-                                          <span>-{formatCurrency(discountAmount)}</span>
+                                          <span>{t("pc.docProposta.totais.descontoGlobal", { percentagem: globalDiscount })}</span>
+                                          <span>-{money(discountAmount)}</span>
                                         </div>
                                       )}
                                       {sectionTotals.vatBreakdown.map((b) => (
                                         <div key={b.rate} className="flex justify-between">
-                                          <span className="text-muted-foreground">IVA ({b.rate}%)</span>
-                                          <span>{formatCurrency(b.vat)}</span>
+                                          <span className="text-muted-foreground">{t("pc.docProposta.totais.iva", { taxa: b.rate })}</span>
+                                          <span>{money(b.vat)}</span>
                                         </div>
                                       ))}
                                       <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
-                                        <span>Total</span>
-                                        <span style={{ color: primaryColor }}>{formatCurrency(adjustedTotal)}</span>
+                                        <span>{t("pc.docProposta.tabela.total")}</span>
+                                        <span style={{ color: primaryColor }}>{money(adjustedTotal)}</span>
                                       </div>
                                     </>
                                   );
@@ -426,31 +465,31 @@ export function ProposalPortalDocument({
                             return (
                               <div className="space-y-1 border-b pb-3 text-sm">
                                 <div className="flex justify-between">
-                                  <span className="text-muted-foreground">Subtotal (todas as secções)</span>
-                                  <span>{formatCurrency(totals.subtotalBruto)}</span>
+                                  <span className="text-muted-foreground">{t("pc.docProposta.totais.subtotalTodasSecoes")}</span>
+                                  <span>{money(totals.subtotalBruto)}</span>
                                 </div>
                                 {namedFees.map((fee: any) => (
                                   <div key={fee.id} className="flex justify-between">
-                                    <span className="text-muted-foreground">{fee.service_fee_types?.name || 'Taxa de Serviço'}</span>
-                                    <span>{formatCurrency(Number(fee.calculated_value) || 0)}</span>
+                                    <span className="text-muted-foreground">{fee.service_fee_types?.name || t("pc.docProposta.taxaServico")}</span>
+                                    <span>{money(Number(fee.calculated_value) || 0)}</span>
                                   </div>
                                 ))}
                                 {globalDiscount > 0 && (
                                   <div className="flex justify-between text-orange-600 dark:text-orange-400">
-                                    <span>Desconto global ({globalDiscount}%)</span>
-                                    <span>-{formatCurrency(totals.discountValue)}</span>
+                                    <span>{t("pc.docProposta.totais.descontoGlobal", { percentagem: globalDiscount })}</span>
+                                    <span>-{money(totals.discountValue)}</span>
                                   </div>
                                 )}
                                 {totals.vatBreakdown.map((b) => (
                                   <div key={b.rate} className="flex justify-between">
-                                    <span className="text-muted-foreground">IVA ({b.rate}%)</span>
-                                    <span>{formatCurrency(b.vat)}</span>
+                                    <span className="text-muted-foreground">{t("pc.docProposta.totais.iva", { taxa: b.rate })}</span>
+                                    <span>{money(b.vat)}</span>
                                   </div>
                                 ))}
                                 {totals.roundedFeeVatBreakdown.map((f, i) => (
                                   <div key={`fee-${i}`} className="flex justify-between">
-                                    <span className="text-muted-foreground">IVA ({f.rate}%) — {f.name}</span>
-                                    <span>{formatCurrency(f.vat)}</span>
+                                    <span className="text-muted-foreground">{t("pc.docProposta.totais.ivaTaxaTraco", { taxa: f.rate, nome: f.name })}</span>
+                                    <span>{money(f.vat)}</span>
                                   </div>
                                 ))}
                               </div>
@@ -467,27 +506,27 @@ export function ProposalPortalDocument({
                                 />
                               )}
                               <span className="text-base font-bold" style={{ color: primaryColor }}>
-                                Total do Orçamento {quote.quote_number || ""}
+                                {t("pc.docProposta.totais.totalOrcamento", { numero: quote.quote_number || "" })}
                               </span>
                             </div>
                             <span className="text-base font-bold" style={{ color: primaryColor }}>
-                              {formatCurrency(quote.total || 0)}
+                              {money(quote.total || 0)}
                             </span>
                           </div>
 
                           {hasMultipleQuotes && canActOnProposal && !isQuoteDecided && (
                             <p className="text-xs text-muted-foreground">
-                              {isQuoteSelected ? "✓ Selecionado para aceitação" : "Desmarque para excluir este orçamento"}
+                              {isQuoteSelected ? t("pc.docProposta.orcamento.selecionadoParaAceitar") : t("pc.docProposta.orcamento.desmarcarParaExcluir")}
                             </p>
                           )}
     
                           {/* Botões por orçamento removidos: aceitação só via OTP/SMS no fundo da proposta */}
     
                           {quote.estado === "aceite" && (
-                            <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">✅ Orçamento aceite</Badge>
+                            <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">{t("pc.docProposta.orcamento.aceite")}</Badge>
                           )}
                           {quote.estado === "rejeitado" && (
-                            <Badge variant="destructive">❌ Orçamento rejeitado</Badge>
+                            <Badge variant="destructive">{t("pc.docProposta.orcamento.rejeitado")}</Badge>
                           )}
                         </CardContent>
                       </Card>
@@ -508,11 +547,11 @@ export function ProposalPortalDocument({
                             disabled={isPreview}
                           />
                         )}
-                        📋 Orçamento {quote.quote_number || quote.title || ""}
+                        📋 {t("pc.docProposta.orcamento.titulo", { numero: quote.quote_number || quote.title || "" })}
                       </CardTitle>
                       {onDownloadPdf && (
                         <Button variant="outline" size="sm" className="gap-1.5" onClick={onDownloadPdf}>
-                          <Download className="h-3.5 w-3.5" /> Download PDF
+                          <Download className="h-3.5 w-3.5" /> {t("pc.docProposta.baixarPdf")}
                         </Button>
                       )}
                     </CardHeader>
@@ -523,10 +562,10 @@ export function ProposalPortalDocument({
                             <table className="w-full text-sm">
                               <thead>
                                 <tr className="border-b-2 border-border">
-                                  <th className="py-2 pr-4 text-left font-medium text-muted-foreground uppercase text-xs tracking-wide">Item</th>
-                                  <th className="px-2 py-2 text-center font-medium text-muted-foreground uppercase text-xs tracking-wide">QTD</th>
-                                  <th className="px-2 py-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">Preço Unit.</th>
-                                  <th className="py-2 pl-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">Total</th>
+                                  <th className="py-2 pr-4 text-left font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.item")}</th>
+                                  <th className="px-2 py-2 text-center font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.qtd")}</th>
+                                  <th className="px-2 py-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.precoUnit")}</th>
+                                  <th className="py-2 pl-2 text-right font-medium text-muted-foreground uppercase text-xs tracking-wide">{t("pc.docProposta.tabela.total")}</th>
                                 </tr>
                               </thead>
                               <tbody>
@@ -540,9 +579,9 @@ export function ProposalPortalDocument({
                                     </td>
                                     <td className="px-2 py-3 text-center">{item.qt || 1}</td>
                                     <td className="px-2 py-3 text-right">
-                                      {item.qt ? formatCurrency(getLineDisplayUnitPrice(item)) : "—"}
+                                      {item.qt ? money(getLineDisplayUnitPrice(item)) : "—"}
                                     </td>
-                                    <td className="py-3 pl-2 text-right font-medium">{formatCurrency(item.total_sem_iva || 0)}</td>
+                                    <td className="py-3 pl-2 text-right font-medium">{money(item.total_sem_iva || 0)}</td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -570,36 +609,36 @@ export function ProposalPortalDocument({
                           return (
                             <>
                               <div className="flex justify-between">
-                                <span className="text-muted-foreground">Subtotal</span>
-                                <span>{formatCurrency(totals.subtotalBruto)}</span>
+                                <span className="text-muted-foreground">{t("pc.docProposta.totais.subtotal")}</span>
+                                <span>{money(totals.subtotalBruto)}</span>
                               </div>
                               {namedFees.length > 0 && namedFees.map((fee: any) => (
                                 <div key={fee.id} className="flex justify-between">
-                                  <span className="text-muted-foreground">{fee.service_fee_types?.name || 'Taxa de Serviço'}</span>
-                                  <span>{formatCurrency(Number(fee.calculated_value) || 0)}</span>
+                                  <span className="text-muted-foreground">{fee.service_fee_types?.name || t("pc.docProposta.taxaServico")}</span>
+                                  <span>{money(Number(fee.calculated_value) || 0)}</span>
                                 </div>
                               ))}
                               {globalDiscount > 0 && (
                                 <div className="flex justify-between text-orange-600 dark:text-orange-400">
-                                  <span>Desconto global ({globalDiscount}%)</span>
-                                  <span>-{formatCurrency(totals.discountValue)}</span>
+                                  <span>{t("pc.docProposta.totais.descontoGlobal", { percentagem: globalDiscount })}</span>
+                                  <span>-{money(totals.discountValue)}</span>
                                 </div>
                               )}
                               {totals.vatBreakdown.map((b) => (
                                 <div key={b.rate} className="flex justify-between">
-                                  <span className="text-muted-foreground">IVA ({b.rate}%)</span>
-                                  <span>{formatCurrency(b.vat)}</span>
+                                  <span className="text-muted-foreground">{t("pc.docProposta.totais.iva", { taxa: b.rate })}</span>
+                                  <span>{money(b.vat)}</span>
                                 </div>
                               ))}
                               {totals.roundedFeeVatBreakdown.map((f, i) => (
                                 <div key={`fee-${i}`} className="flex justify-between">
-                                  <span className="text-muted-foreground">IVA ({f.rate}%) — {f.name}</span>
-                                  <span>{formatCurrency(f.vat)}</span>
+                                  <span className="text-muted-foreground">{t("pc.docProposta.totais.ivaTaxaTraco", { taxa: f.rate, nome: f.name })}</span>
+                                  <span>{money(f.vat)}</span>
                                 </div>
                               ))}
                               <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
-                                <span>Total</span>
-                                <span style={{ color: primaryColor }}>{formatCurrency(total)}</span>
+                                <span>{t("pc.docProposta.tabela.total")}</span>
+                                <span style={{ color: primaryColor }}>{money(total)}</span>
                               </div>
                             </>
                           );
@@ -608,17 +647,17 @@ export function ProposalPortalDocument({
     
                       {hasMultipleQuotes && canActOnProposal && !isQuoteDecided && (
                         <p className="text-xs text-muted-foreground">
-                          {isQuoteSelected ? "✓ Selecionado para aceitação" : "Desmarque para excluir este orçamento"}
+                          {isQuoteSelected ? t("pc.docProposta.orcamento.selecionadoParaAceitar") : t("pc.docProposta.orcamento.desmarcarParaExcluir")}
                         </p>
                       )}
     
                       {/* Botões por orçamento removidos: aceitação só via OTP/SMS no fundo da proposta */}
     
                       {quote.estado === "aceite" && (
-                        <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">✅ Orçamento aceite</Badge>
+                        <Badge className="bg-emerald-100 text-emerald-700 border-emerald-200">{t("pc.docProposta.orcamento.aceite")}</Badge>
                       )}
                       {quote.estado === "rejeitado" && (
-                        <Badge variant="destructive">❌ Orçamento rejeitado</Badge>
+                        <Badge variant="destructive">{t("pc.docProposta.orcamento.rejeitado")}</Badge>
                       )}
                     </CardContent>
                   </Card>
@@ -645,28 +684,28 @@ export function ProposalPortalDocument({
                     <CardContent className="pt-6">
                       <div className="ml-auto max-w-sm space-y-1 text-sm">
                         <div className="flex justify-between font-medium">
-                          <span>Subtotal (sem IVA)</span>
-                          <span>{formatCurrency(totals.subtotalWithFees)}</span>
+                          <span>{t("pc.docProposta.totais.subtotalSemIva")}</span>
+                          <span>{money(totals.subtotalWithFees)}</span>
                         </div>
                         {totals.vatBreakdown.map((b) => (
                           <div key={b.rate} className="flex justify-between">
-                            <span className="text-muted-foreground">IVA {b.rate}%</span>
-                            <span>{formatCurrency(b.vat)}</span>
+                            <span className="text-muted-foreground">{t("pc.docProposta.totais.ivaTaxa", { taxa: b.rate })}</span>
+                            <span>{money(b.vat)}</span>
                           </div>
                         ))}
                         {totals.feeVatBreakdown.map((f, i) => (
                           <div key={`fee-${i}`} className="flex justify-between">
-                            <span className="text-muted-foreground">IVA {f.rate}% ({f.name})</span>
-                            <span>{formatCurrency(f.vat)}</span>
+                            <span className="text-muted-foreground">{t("pc.docProposta.totais.ivaTaxaParenteses", { taxa: f.rate, nome: f.name })}</span>
+                            <span>{money(f.vat)}</span>
                           </div>
                         ))}
                         <div className="flex justify-between">
-                          <span className="text-muted-foreground">IVA Total</span>
-                          <span>{formatCurrency(totals.totalIva)}</span>
+                          <span className="text-muted-foreground">{t("pc.docProposta.totais.ivaTotal")}</span>
+                          <span>{money(totals.totalIva)}</span>
                         </div>
                         <div className="flex justify-between border-t pt-1 text-base font-bold" style={{ borderTop: `2px solid ${primaryColor}` }}>
-                          <span>Total Geral (c/ IVA)</span>
-                          <span style={{ color: primaryColor }}>{formatCurrency(totals.total)}</span>
+                          <span>{t("pc.docProposta.totais.totalGeral")}</span>
+                          <span style={{ color: primaryColor }}>{money(totals.total)}</span>
                         </div>
                       </div>
                     </CardContent>
@@ -677,11 +716,29 @@ export function ProposalPortalDocument({
           )
   );
 
-  const sectionLabel = (section: DocumentSection, fallback: string) =>
-    section.settings?.sectionLabel || section.label || fallback;
+  // `fallbackKey` é a chave do rótulo por omissão. O que a organização definiu (sectionLabel, ou um label
+  // renomeado) fica como vem; só o rótulo de fábrica ou em falta segue o idioma. Em português, a regra de sempre.
+  // Em inglês, um texto igual a um de fábrica em português (sem caixa nem acentos) traduz-se; outro fica como vem.
+  const traduzSeDeFabrica = (valor: string, tipo: string, extras: string[] = []): string => {
+    if (lingua === "pt") return valor;
+    const alvo = normalizarTitulo(valor);
+    const chave = [...(ROTULOS_DE_FABRICA[tipo] ?? []), ...extras].find(
+      (k) => normalizarTitulo(traduzir("pt", PREFIXO_SECAO + k)) === alvo,
+    );
+    return chave ? t(PREFIXO_SECAO + chave) : valor;
+  };
 
-  const sectionTitle = (section: DocumentSection, fallback: string) => {
-    const label = sectionLabel(section, fallback);
+  const sectionLabel = (section: DocumentSection, fallbackKey: string): string => {
+    const custom = section.settings?.sectionLabel;
+    if (custom) return traduzSeDeFabrica(custom, section.type);
+    const label = section.label;
+    if (lingua === "pt") return label || t(fallbackKey);
+    if (!label) return t(fallbackKey);
+    return traduzSeDeFabrica(label, section.type);
+  };
+
+  const sectionTitle = (section: DocumentSection, fallbackKey: string) => {
+    const label = sectionLabel(section, fallbackKey);
     if (!label || section.settings?.showTitle === false) return null;
     return (
       <div
@@ -697,14 +754,14 @@ export function ProposalPortalDocument({
     );
   };
 
-  const renderContentBlock = (section: DocumentSection, fallbackLabel: string, html: string) => {
+  const renderContentBlock = (section: DocumentSection, fallbackKey: string, html: string) => {
     if (!hasUsefulText(html)) return null;
     return (
       <section
         key={section.id || section.type}
         style={{ color: theme.textColor }}
       >
-        {sectionTitle(section, fallbackLabel)}
+        {sectionTitle(section, fallbackKey)}
         <div
           className="prose prose-sm max-w-none"
           style={{
@@ -721,7 +778,10 @@ export function ProposalPortalDocument({
   };
 
   const renderHeaderSection = (section: DocumentSection) => {
-    const title = section.settings?.customTitle || sectionLabel(section, "PROPOSTA");
+    const customTitle = section.settings?.customTitle;
+    const title = customTitle
+      ? traduzSeDeFabrica(customTitle, section.type, ["tituloProposta"])
+      : sectionLabel(section, "pc.docProposta.secao.tituloProposta");
     const showLogo = section.settings?.showLogo !== false;
     const showDate = section.settings?.showDate !== false;
     const hasHeaderText = hasUsefulText(template?.header_text);
@@ -743,11 +803,11 @@ export function ProposalPortalDocument({
             {title && <h2 className="text-xl font-bold">{title}</h2>}
             {showDate && (
               <p className="text-sm" style={{ color: theme.secondaryTextColor }}>
-                {format(new Date(proposal.created_at), "dd/MM/yyyy", { locale: pt })}
+                {formatarData(new Date(proposal.created_at), lingua, "numerico")}
               </p>
             )}
           </div>
-          {showLogo && logoUrl && <img src={logoUrl} alt="Logo" className="h-14 w-auto object-contain" />}
+          {showLogo && logoUrl && <img src={logoUrl} alt={company?.name || ""} className="h-14 w-auto object-contain" />}
         </div>
         {hasHeaderText && (
           <div
@@ -764,7 +824,7 @@ export function ProposalPortalDocument({
     if (!company?.name && !logoUrl) return null;
     return (
       <section key={section.id || "company_info"} style={{ color: theme.textColor }}>
-        {sectionTitle(section, "Empresa")}
+        {sectionTitle(section, "pc.docProposta.secao.empresa")}
         <div
           className="flex items-center gap-4"
           style={{
@@ -775,7 +835,7 @@ export function ProposalPortalDocument({
             padding: theme.paddingCard,
           }}
         >
-          {logoUrl && <img src={logoUrl} alt="Logo" className="h-12 w-auto object-contain" />}
+          {logoUrl && <img src={logoUrl} alt="" className="h-12 w-auto object-contain" />}
           {company?.name && <h2 className="text-lg font-bold" style={{ color: primaryColor }}>{company.name}</h2>}
         </div>
       </section>
@@ -788,7 +848,7 @@ export function ProposalPortalDocument({
     if (!name && !client?.email && !client?.phone) return null;
     return (
       <section key={section.id || "client_info"} style={{ color: theme.textColor }}>
-        {sectionTitle(section, "Cliente")}
+        {sectionTitle(section, "pc.docProposta.secao.cliente")}
         <div
           className="space-y-1 text-sm"
           style={{
@@ -810,8 +870,8 @@ export function ProposalPortalDocument({
     if (!proposal.valid_until) return null;
     return renderContentBlock(
       section,
-      "Validade",
-      `Proposta válida até <strong>${format(new Date(proposal.valid_until), "dd/MM/yyyy", { locale: pt })}</strong>.`
+      "pc.docProposta.secao.validade",
+      t("pc.docProposta.validadeTexto", { data: formatarData(new Date(proposal.valid_until), lingua, "numerico") })
     );
   };
 
@@ -831,7 +891,7 @@ export function ProposalPortalDocument({
     return (
       <section key={section.id || "footer"} style={{ color: theme.textColor }}>
         {section.settings?.showTitle === true && section.settings?.sectionLabel
-          ? sectionTitle(section, "Rodapé")
+          ? sectionTitle(section, "pc.docProposta.secao.rodape")
           : null}
         <div
           className="prose prose-sm max-w-none"
@@ -857,15 +917,15 @@ export function ProposalPortalDocument({
       case "client_info":
         return renderClientSection(section);
       case "description":
-        return renderContentBlock(section, "Descrição do trabalho", section.settings?.content || proposal.description || "");
+        return renderContentBlock(section, "pc.docProposta.secao.descricao", section.settings?.content || proposal.description || "");
       case "notes":
-        return renderContentBlock(section, "Notas", getNotesContent(section));
+        return renderContentBlock(section, "pc.docProposta.secao.notas", getNotesContent(section));
       case "validity":
         return renderValiditySection(section);
       case "quote_items":
         return renderQuoteItems();
       case "terms":
-        return renderContentBlock(section, "Condições Gerais", template?.terms_conditions || "");
+        return renderContentBlock(section, "pc.docProposta.secao.condicoes", template?.terms_conditions || "");
       case "footer":
         return renderFooterSection(section);
       default:
@@ -889,16 +949,16 @@ export function ProposalPortalDocument({
       {!isPreview && canActOnProposal && otpStep !== "verified" && (
         <div className="rounded-xl border bg-gradient-to-r from-primary/5 to-primary/10 p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4">
           <div className="flex-1">
-            <h3 className="text-lg font-bold text-foreground">Proposta aguarda a sua decisão</h3>
+            <h3 className="text-lg font-bold text-foreground">{t("pc.docProposta.decisao.titulo")}</h3>
             <p className="text-sm text-muted-foreground mt-1">
-              Reveja os orçamentos abaixo, aceite ou peça alterações.
-              {validUntilFormatted && <> Proposta válida até <strong>{validUntilFormatted}</strong>.</>}
+              {t("pc.docProposta.decisao.texto")}
+              {validUntilFormatted && <>{" "}{t("pc.docProposta.decisao.validaAte")} <strong>{validUntilFormatted}</strong>.</>}
             </p>
           </div>
           <div className="flex gap-2 shrink-0">
             {onDownloadPdf && (
               <Button variant="outline" className="gap-2" onClick={onDownloadPdf}>
-                <Download className="h-4 w-4" /> Download PDF
+                <Download className="h-4 w-4" /> {t("pc.docProposta.baixarPdf")}
               </Button>
             )}
           </div>
@@ -908,25 +968,25 @@ export function ProposalPortalDocument({
       {/* Accepted Banner */}
       {isAccepted && (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-950 dark:border-emerald-800 p-5">
-          <h3 className="text-lg font-bold text-emerald-700 dark:text-emerald-300">✅ Proposta aceite</h3>
+          <h3 className="text-lg font-bold text-emerald-700 dark:text-emerald-300">{t("pc.docProposta.aceite.titulo")}</h3>
           {proposal.accepted_at && (
             <p className="text-sm text-emerald-600 dark:text-emerald-400 mt-1">
-              Aceite em {format(new Date(proposal.accepted_at), "d 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt })}
+              {t("pc.docProposta.aceite.em", { data: formatarDataHora(new Date(proposal.accepted_at), lingua, "longo") })}
             </p>
           )}
           {proposal.acceptance_ip && (
             <p className="text-xs text-emerald-500 dark:text-emerald-500 mt-1">
-              IP: {proposal.acceptance_ip} • Verificação por SMS OTP
+              {t("pc.docProposta.aceite.ip", { ip: proposal.acceptance_ip })}
             </p>
           )}
         </div>
       )}
       {isRejected && (
         <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-5">
-          <h3 className="text-lg font-bold text-destructive">❌ Proposta rejeitada</h3>
+          <h3 className="text-lg font-bold text-destructive">{t("pc.docProposta.rejeitada.titulo")}</h3>
           {proposal.rejected_at && (
             <p className="text-sm text-destructive/80 mt-1">
-              Rejeitada em {format(new Date(proposal.rejected_at), "d 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt })}
+              {t("pc.docProposta.rejeitada.em", { data: formatarDataHora(new Date(proposal.rejected_at), lingua, "longo") })}
             </p>
           )}
         </div>
@@ -937,14 +997,14 @@ export function ProposalPortalDocument({
         <CardHeader className="flex flex-row items-start justify-between gap-2">
           <div>
             <CardTitle className="flex items-center gap-2">
-              Proposta — {proposal.title}
+              {t("pc.docProposta.cartao.titulo", { titulo: String(proposal.title ?? "") })}
             </CardTitle>
             <p className="text-sm text-muted-foreground mt-1">
-              {proposal.proposal_number} · Criada a {format(new Date(proposal.created_at), "dd/MM/yyyy", { locale: pt })}
+              {t("pc.docProposta.cartao.criada", { numero: String(proposal.proposal_number ?? ""), data: formatarData(new Date(proposal.created_at), lingua, "numerico") })}
             </p>
           </div>
           <Badge variant="outline" className="shrink-0" style={{ borderColor: `${primaryColor}50`, color: primaryColor }}>
-            📋 {statusLabel}
+            📋 {statusLabel ?? t("pc.docProposta.estadoOmissao")}
           </Badge>
         </CardHeader>
         <CardContent>
@@ -978,22 +1038,22 @@ export function ProposalPortalDocument({
             return (
           <div className="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
             <div className="bg-muted/50 rounded-lg p-3">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">Valor Total</p>
-              <p className="text-lg font-bold" style={{ color: primaryColor }}>{formatCurrency(displayTotal)}</p>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">{t("pc.docProposta.cartao.valorTotal")}</p>
+              <p className="text-lg font-bold" style={{ color: primaryColor }}>{money(displayTotal)}</p>
             </div>
             <div className="bg-muted/50 rounded-lg p-3">
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">Subtotal (s/ IVA)</p>
-              <p className="text-lg font-bold">{formatCurrency(displaySubtotal)}</p>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">{t("pc.docProposta.cartao.subtotalSemIva")}</p>
+              <p className="text-lg font-bold">{money(displaySubtotal)}</p>
             </div>
             {proposal.valid_until && template?.show_validity !== false && (
               <div className="bg-muted/50 rounded-lg p-3">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">Válida até</p>
-                <p className="text-lg font-bold">{format(new Date(proposal.valid_until), "dd/MM/yyyy", { locale: pt })}</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">{t("pc.docProposta.cartao.validaAte")}</p>
+                <p className="text-lg font-bold">{formatarData(new Date(proposal.valid_until), lingua, "numerico")}</p>
               </div>
             )}
             {commercial && (
               <div className="bg-muted/50 rounded-lg p-3">
-                <p className="text-xs text-muted-foreground uppercase tracking-wide">Comercial</p>
+                <p className="text-xs text-muted-foreground uppercase tracking-wide">{t("pc.docProposta.cartao.comercial")}</p>
                 <p className="text-lg font-bold">{commercial.name}</p>
               </div>
             )}
@@ -1007,108 +1067,20 @@ export function ProposalPortalDocument({
 
       {/* OTP SMS Verification Section */}
       {canActOnProposal && (
-        <Card className="border-2 border-dashed border-primary/30">
-          <CardHeader>
-            <CardTitle className="text-base flex items-center gap-2">
-              <Smartphone className="h-5 w-5" />
-              Verificação por SMS
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">
-              Para aceitar esta proposta, enviaremos um código de verificação por SMS para o seu telemóvel.
-            </p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {isPreview ? (
-              <div className="text-center space-y-3 pointer-events-none opacity-50">
-                <Button size="lg" className="gap-2" disabled>
-                  <Smartphone className="h-5 w-5" />
-                  Enviar código SMS
-                </Button>
-              </div>
-            ) : (
-              <>
-                {otpStep === "idle" && (
-                  <div className="text-center space-y-3">
-                    <Button
-                      size="lg"
-                      className="gap-2"
-                      onClick={onSendOtp}
-                      disabled={actionLoading}
-                    >
-                      <Smartphone className="h-5 w-5" />
-                      Enviar código SMS
-                    </Button>
-                    {otpError && (
-                      <p className="text-sm text-destructive">{otpError}</p>
-                    )}
-                  </div>
-                )}
-
-                {otpStep === "sending" && (
-                  <div className="text-center space-y-3 py-4">
-                    <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
-                    <p className="text-sm text-muted-foreground">A enviar código SMS...</p>
-                  </div>
-                )}
-
-                {otpStep === "input" && (
-                  <div className="text-center space-y-4">
-                    <div className="space-y-1">
-                      <p className="text-sm text-muted-foreground">
-                        Código enviado para <span className="font-mono font-bold text-foreground">{maskedPhone}</span>
-                      </p>
-                      <p className="text-xs text-muted-foreground">Válido por 5 minutos</p>
-                    </div>
-                    <div className="flex justify-center">
-                      <InputOTP autoFocus maxLength={6} value={otpCode} onChange={(val) => onOtpCodeChange?.(val)}>
-                        <InputOTPGroup>
-                          <InputOTPSlot index={0} />
-                          <InputOTPSlot index={1} />
-                          <InputOTPSlot index={2} />
-                          <InputOTPSlot index={3} />
-                          <InputOTPSlot index={4} />
-                          <InputOTPSlot index={5} />
-                        </InputOTPGroup>
-                      </InputOTP>
-                    </div>
-                    {otpError && (
-                      <p className="text-sm text-destructive">{otpError}</p>
-                    )}
-                    <OtpCooldownNotice activo={otpCooldown > 0} />
-                    <div className="flex gap-3 justify-center">
-                      <Button variant="outline" size="sm" onClick={onResendOtp ?? onSendOtp} disabled={actionLoading || otpCooldown > 0}>
-                        {cooldownLabel("Reenviar código", otpCooldown)}
-                      </Button>
-                      <Button
-                        size="sm"
-                        className="gap-2"
-                        onClick={onVerifyOtp}
-                        disabled={otpCode.length !== 6 || actionLoading}
-                      >
-                        <ShieldCheck className="h-4 w-4" />
-                        Verificar
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {otpStep === "verifying" && (
-                  <div className="text-center space-y-3 py-4">
-                    <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
-                    <p className="text-sm text-muted-foreground">A verificar código e assinar proposta...</p>
-                  </div>
-                )}
-
-                {otpStep === "verified" && (
-                  <div className="text-center space-y-3 py-4">
-                    <ShieldCheck className="h-10 w-10 mx-auto text-emerald-600" />
-                    <p className="text-sm font-medium text-emerald-600">Código verificado! Proposta aceite com sucesso.</p>
-                  </div>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
+        <ProposalPortalOtpSection
+          t={t}
+          isPreview={isPreview}
+          otpStep={otpStep}
+          otpCode={otpCode}
+          maskedPhone={maskedPhone}
+          otpError={otpError}
+          otpCooldown={otpCooldown}
+          actionLoading={actionLoading}
+          onSendOtp={onSendOtp}
+          onResendOtp={onResendOtp}
+          onVerifyOtp={onVerifyOtp}
+          onOtpCodeChange={onOtpCodeChange}
+        />
       )}
 
       {/* Action Buttons - Bottom */}
@@ -1116,21 +1088,21 @@ export function ProposalPortalDocument({
         <Card className="bg-muted/30">
           <CardContent className="pt-6">
             <div className="text-center mb-4">
-              <h3 className="text-xl font-bold">Pronto para avançar?</h3>
+              <h3 className="text-xl font-bold">{t("pc.docProposta.acao.pronto")}</h3>
               {needsSelection ? (
                 <div className="mt-2 space-y-1">
                   <p className="text-sm text-muted-foreground">
-                    Selecione os orçamentos que pretende aceitar e confirme via SMS.
+                    {t("pc.docProposta.acao.selecioneOrcamentos")}
                   </p>
                   <p className="text-sm font-semibold" style={{ color: primaryColor }}>
                     {hasMultipleQuotes 
-                      ? `${selectedQuoteIds.size} de ${quotes.length} orçamentos selecionados`
-                      : `${selectedSectionKeys.size} de ${allSections.length} secções selecionadas`
-                    } — Total: {formatCurrency(selectedTotal)}
+                      ? t("pc.docProposta.acao.orcamentosSelecionados", { n: selectedQuoteIds.size, total: quotes.length })
+                      : t("pc.docProposta.acao.secoesSelecionadas", { n: selectedSectionKeys.size, total: allSections.length })
+                    } — {t("pc.docProposta.tabela.total")}: {money(selectedTotal)}
                   </p>
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground mt-1">Aceite a proposta via SMS ou solicite alterações.</p>
+                <p className="text-sm text-muted-foreground mt-1">{t("pc.docProposta.acao.aceiteOuAltere")}</p>
               )}
             </div>
             <div className={`flex flex-col sm:flex-row gap-3 justify-center ${isPreview ? "pointer-events-none opacity-50" : ""}`}>
@@ -1141,7 +1113,7 @@ export function ProposalPortalDocument({
                 disabled={actionLoading}
                 onClick={onAskQuestion}
               >
-                💬 Tenho dúvidas
+                {t("pc.docProposta.acao.duvidas")}
               </Button>
               <Button
                 variant="destructive"
@@ -1150,7 +1122,7 @@ export function ProposalPortalDocument({
                 disabled={actionLoading}
                 onClick={onRejectProposal}
               >
-                ✕ Rejeitar
+                {t("pc.docProposta.acao.rejeitar")}
               </Button>
               <Button
                 size="lg"
@@ -1160,12 +1132,12 @@ export function ProposalPortalDocument({
                 onClick={onSendOtp}
               >
                 <CheckSquare className="h-5 w-5 text-white" />
-                <span className="text-white">Aceitar e Assinar</span>
+                <span className="text-white">{t("pc.docProposta.acao.aceitarAssinar")}</span>
               </Button>
             </div>
             {needsSelection && !hasSelectedQuotes && !isPreview && (
               <p className="text-center text-sm text-destructive mt-3">
-                Selecione pelo menos um {hasMultipleSectionsInSingleQuote ? "secção" : "orçamento"} para poder aceitar a proposta.
+                {t("pc.docProposta.acao.selecionePeloMenos", { tipo: t(hasMultipleSectionsInSingleQuote ? "pc.docProposta.acao.tipoSecao" : "pc.docProposta.acao.tipoOrcamento") })}
               </p>
             )}
           </CardContent>
@@ -1174,10 +1146,10 @@ export function ProposalPortalDocument({
 
       {/* Footer: Company + Commercial info */}
       <div className="text-center text-sm text-muted-foreground space-y-1 pt-4">
-        {company && <p>Proposta enviada por <strong>{company.name}</strong></p>}
+        {company && <p>{t("pc.docProposta.rodape.enviadaPor")} <strong>{company.name}</strong></p>}
         {commercial && (
           <>
-            <p>Dúvidas? Contacte {commercial.name}
+            <p>{t("pc.docProposta.rodape.duvidas", { nome: String(commercial.name ?? "") })}
               {commercial.phone && <>{" "}<a href={`tel:${commercial.phone}`} className="font-medium hover:text-foreground">{commercial.phone}</a></>}
               {commercial.email && <>{" "}<a href={`mailto:${commercial.email}`} className="font-medium hover:text-foreground">{commercial.email}</a></>}
             </p>
@@ -1187,7 +1159,7 @@ export function ProposalPortalDocument({
 
       {isPreview && (
         <p className="pt-2 text-center text-xs italic text-muted-foreground">
-          Os botões de ação estão desativados neste preview.
+          {t("pc.docProposta.preview.aviso")}
         </p>
       )}
     </div>

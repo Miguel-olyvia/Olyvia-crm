@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { usePortalCompany } from "@/contexts/PortalCompanyContext";
 import { cn } from "@/lib/utils";
+import { usePortalT } from "@/portal-i18n";
 
 /**
  * Estado de erro do âmbito do portal (falha a carregar as empresas do cliente).
@@ -14,15 +15,16 @@ import { cn } from "@/lib/utils";
  */
 export function PortalOrgsErrorState() {
   const { refetchPortalOrgs, isFetching } = usePortalCompany();
+  const { t } = usePortalT();
 
   return (
     <Card>
       <CardContent className="py-8 text-center space-y-3">
         <AlertCircle className="h-8 w-8 text-muted-foreground mx-auto" />
         <div className="space-y-1">
-          <p className="text-sm font-medium text-foreground">Não foi possível carregar os seus dados.</p>
+          <p className="text-sm font-medium text-foreground">{t("pc.empresas.erro.titulo")}</p>
           <p className="text-xs text-muted-foreground">
-            Verifique a ligação à internet e tente novamente.
+            {t("pc.empresas.erro.dica")}
           </p>
         </div>
         {/* Durante a nova tentativa o estado da query continua `error` (e com
@@ -37,7 +39,7 @@ export function PortalOrgsErrorState() {
           aria-busy={isFetching}
         >
           <RefreshCw className={cn("h-3.5 w-3.5", isFetching && "animate-spin")} />
-          {isFetching ? "A tentar..." : "Tentar novamente"}
+          {isFetching ? t("pc.empresas.erro.aTentar") : t("pc.empresas.erro.tentar")}
         </Button>
       </CardContent>
     </Card>

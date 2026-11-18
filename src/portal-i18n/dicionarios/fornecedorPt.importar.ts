@@ -1,0 +1,115 @@
+// Portal do fornecedor, português: importação do catálogo (diálogo) e ficheiro modelo/exportação Excel.
+// Chaves `sp.importar.*`. As colunas do ficheiro têm uma chave por campo: `sp.importar.coluna.<campo>.cabecalho|descricao`
+// (o `<campo>` é o nome do campo da API, como `supplier_ref`). As mensagens por linha que vêm do servidor não se traduzem aqui.
+export const fornecedorPtImportar: Record<string, string> = {
+  // Diálogo: passos
+  "sp.importar.titulo": "Importar catálogo",
+  "sp.importar.descricao.file": "Escolha um ficheiro Excel (.xlsx, .xls) ou CSV com os seus artigos.",
+  "sp.importar.descricao.map": "Indique o que contém cada coluna do ficheiro.",
+  "sp.importar.descricao.preview": "Confira o que vai mudar antes de gravar. Nada foi gravado ainda.",
+  "sp.importar.descricao.done": "Importação concluída.",
+
+  // Passo 1: ficheiro
+  "sp.importar.ficheiro.aLer": "A ler o ficheiro…",
+  "sp.importar.ficheiro.escolher": "Toque para escolher o ficheiro",
+  "sp.importar.ficheiro.formatos": ".xlsx, .xls ou .csv · até {max} linhas · máx. 10 MB",
+  "sp.importar.ficheiro.semFicheiro": "Não tem um ficheiro preparado?",
+  "sp.importar.ficheiro.modelo": "Descarregar modelo",
+  "sp.importar.ficheiro.naoLeu": "Não foi possível ler o ficheiro.",
+
+  // Passo 2: mapeamento
+  "sp.importar.mapa.linhas.um": "{n} linha(s) de artigos",
+  "sp.importar.mapa.linhas.varios": "{n} linha(s) de artigos",
+  "sp.importar.mapa.semTitulo": "Coluna {n} (sem título)",
+  "sp.importar.mapa.exemplo": "ex.: {valor}",
+  "sp.importar.mapa.ignorar": "Ignorar esta coluna",
+  "sp.importar.mapa.obrigatoria": "{coluna} (obrigatória)",
+  "sp.importar.mapa.semReferencia": "Escolha a coluna da referência ({coluna}) — é obrigatória.",
+  "sp.importar.mapa.semNome": "Sem coluna de Nome: só será possível atualizar artigos que já existem.",
+  "sp.importar.mapa.nota": "Uma coluna presente com a célula vazia apaga esse valor no artigo (exceto Nome e Ativo). Para não mexer num campo, escolha «Ignorar esta coluna». Artigos que não estejam no ficheiro não são alterados nem desativados.",
+  "sp.importar.mapa.semLinhas": "Nenhuma linha com valores nas colunas escolhidas.",
+  "sp.importar.mapa.maximo": "Máximo {max} linhas por importação.",
+
+  // Passo 3: pré-visualização e fim
+  "sp.importar.previa.erroSaltado": "As linhas com erro são saltadas. Pode corrigi-las no ficheiro e voltar a importar mais tarde.",
+  "sp.importar.fim.nada": "Nenhum artigo foi alterado.",
+  "sp.importar.fim.gravado": "Gravado: {novos} novo(s) e {alterados} alterado(s).",
+  "sp.importar.fim.erros.um": "{n} linha(s) com erro foram saltadas.",
+  "sp.importar.fim.erros.varios": "{n} linha(s) com erro foram saltadas.",
+
+  // Botões
+  "sp.importar.botao.outroFicheiro": "Outro ficheiro",
+  "sp.importar.botao.previsualizar": "Pré-visualizar",
+  "sp.importar.botao.aVerificar": "A verificar…",
+  "sp.importar.botao.voltar": "Voltar",
+  "sp.importar.botao.aGravar": "A gravar…",
+  "sp.importar.botao.nadaGravar": "Nada para gravar",
+  "sp.importar.botao.gravar.um": "Gravar {n} linha(s) válida(s)",
+  "sp.importar.botao.gravar.varios": "Gravar {n} linha(s) válida(s)",
+  "sp.importar.botao.fechar": "Fechar",
+  "sp.importar.botao.cancelar": "Cancelar",
+
+  // Contagens, separadores e linhas
+  "sp.importar.resumo.novos": "Novos",
+  "sp.importar.resumo.alterados": "Alterados",
+  "sp.importar.resumo.iguais": "Iguais",
+  "sp.importar.resumo.comErro": "Com erro",
+  "sp.importar.separador.novos": "Novos ({n})",
+  "sp.importar.separador.alterados": "Alterados ({n})",
+  "sp.importar.separador.erros": "Erros ({n})",
+  "sp.importar.lista.nenhuma": "Nenhuma linha.",
+  "sp.importar.lista.linha": "Linha {n}",
+  "sp.importar.lista.semReferencia": "(sem referência)",
+  "sp.importar.lista.aMostrar": "A mostrar {max} de {total} linhas.",
+  "sp.importar.valor.vazio": "(vazio)",
+  "sp.importar.valor.sim": "sim",
+  "sp.importar.valor.nao": "não",
+
+  // Erros ao ler o ficheiro (lançados por readSupplierCatalogFile)
+  "sp.importar.erro.formato": "Formato não suportado. Use um ficheiro Excel (.xlsx, .xls) ou CSV (.csv).",
+  "sp.importar.erro.vazio": "O ficheiro está vazio.",
+  "sp.importar.erro.grande": "O ficheiro é demasiado grande (máximo 10 MB).",
+  "sp.importar.erro.invalido": "Não foi possível ler o ficheiro. Confirme que é um Excel válido.",
+  "sp.importar.erro.semDados": "O ficheiro não tem dados na primeira folha.",
+  "sp.importar.erro.demasiadasLinhas": "O ficheiro tem mais de {max} linhas de artigos. Divida-o em ficheiros mais pequenos.",
+  "sp.importar.erro.soCabecalhos": "O ficheiro só tem cabeçalhos: não há linhas de artigos.",
+
+  // Ficheiro Excel: folhas, instruções e nomes
+  "sp.importar.modelo.folhaCatalogo": "Catálogo",
+  "sp.importar.modelo.folhaInstrucoes": "Instruções",
+  "sp.importar.modelo.cabecalhoColuna": "Coluna",
+  "sp.importar.modelo.cabecalhoComoPreencher": "Como preencher",
+  "sp.importar.modelo.notas": "Notas",
+  "sp.importar.modelo.nota1": "Uma linha por artigo. Uma coluna que não exista no ficheiro não altera nada.",
+  "sp.importar.modelo.nota2": "Uma coluna presente com a célula vazia apaga esse valor (exceto Nome e Ativo).",
+  "sp.importar.modelo.nota3": "Máximo {max} linhas por ficheiro. Artigos que faltem no ficheiro não são desativados.",
+  "sp.importar.modelo.ficheiroModelo": "modelo_catalogo_fornecedor.xlsx",
+  "sp.importar.modelo.prefixoCatalogo": "catalogo",
+  "sp.importar.modelo.fornecedor": "fornecedor",
+
+  // Colunas do ficheiro (cabeçalho e como preencher)
+  "sp.importar.coluna.supplier_ref.cabecalho": "Ref.",
+  "sp.importar.coluna.supplier_ref.descricao": "Obrigatória. A sua referência do artigo (máx. 100 caracteres). Identifica o artigo: a mesma referência atualiza o artigo existente.",
+  "sp.importar.coluna.barcode.cabecalho": "Código de barras",
+  "sp.importar.coluna.barcode.descricao": "EAN/GTIN com 8 a 14 dígitos.",
+  "sp.importar.coluna.name.cabecalho": "Nome",
+  "sp.importar.coluna.name.descricao": "Obrigatório para artigos novos (máx. 300 caracteres). Vazio = mantém o nome gravado.",
+  "sp.importar.coluna.description.cabecalho": "Descrição",
+  "sp.importar.coluna.description.descricao": "Texto livre (máx. 2000 caracteres).",
+  "sp.importar.coluna.brand.cabecalho": "Marca",
+  "sp.importar.coluna.brand.descricao": "Máx. 100 caracteres.",
+  "sp.importar.coluna.unit_label.cabecalho": "Unidade",
+  "sp.importar.coluna.unit_label.descricao": "Unidade de venda (ex.: un, cx, m, kg). Máx. 30 caracteres.",
+  "sp.importar.coluna.units_per_pack.cabecalho": "Unidades por embalagem",
+  "sp.importar.coluna.units_per_pack.descricao": "Número maior que zero.",
+  "sp.importar.coluna.base_price.cabecalho": "Preço",
+  "sp.importar.coluna.base_price.descricao": "Preço base sem IVA. Aceita 12,5 ou 12.5 ou 1.234,56.",
+  "sp.importar.coluna.currency.cabecalho": "Moeda",
+  "sp.importar.coluna.currency.descricao": "Código de 3 letras (ex.: EUR). Vazio = EUR.",
+  "sp.importar.coluna.moq.cabecalho": "Mínimo",
+  "sp.importar.coluna.moq.descricao": "Quantidade mínima de encomenda (maior que zero).",
+  "sp.importar.coluna.lead_time_days.cabecalho": "Prazo (dias)",
+  "sp.importar.coluna.lead_time_days.descricao": "Prazo de entrega em dias inteiros (0 a 3650).",
+  "sp.importar.coluna.is_active.cabecalho": "Ativo",
+  "sp.importar.coluna.is_active.descricao": "sim/não. Vazio = mantém o estado gravado.",
+};

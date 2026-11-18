@@ -1,0 +1,115 @@
+// Supplier portal, English: catalogue import (dialog) and the Excel template/export file.
+// Keys `sp.importar.*`. One key pair per file column: `sp.importar.coluna.<field>.cabecalho|descricao`
+// (`<field>` is the API field name, such as `supplier_ref`). Per-row messages that come from the server are not translated here.
+export const fornecedorEnImportar: Record<string, string> = {
+  // Dialog: steps
+  "sp.importar.titulo": "Import catalogue",
+  "sp.importar.descricao.file": "Choose an Excel (.xlsx, .xls) or CSV file with your items.",
+  "sp.importar.descricao.map": "Tell us what each column of the file contains.",
+  "sp.importar.descricao.preview": "Check what will change before saving. Nothing has been saved yet.",
+  "sp.importar.descricao.done": "Import complete.",
+
+  // Step 1: file
+  "sp.importar.ficheiro.aLer": "Reading the file…",
+  "sp.importar.ficheiro.escolher": "Tap to choose a file",
+  "sp.importar.ficheiro.formatos": ".xlsx, .xls or .csv · up to {max} rows · max. 10 MB",
+  "sp.importar.ficheiro.semFicheiro": "Don't have a file ready?",
+  "sp.importar.ficheiro.modelo": "Download template",
+  "sp.importar.ficheiro.naoLeu": "The file could not be read.",
+
+  // Step 2: column mapping
+  "sp.importar.mapa.linhas.um": "{n} item row",
+  "sp.importar.mapa.linhas.varios": "{n} item rows",
+  "sp.importar.mapa.semTitulo": "Column {n} (no title)",
+  "sp.importar.mapa.exemplo": "e.g. {valor}",
+  "sp.importar.mapa.ignorar": "Ignore this column",
+  "sp.importar.mapa.obrigatoria": "{coluna} (required)",
+  "sp.importar.mapa.semReferencia": "Choose the reference column ({coluna}) — it is required.",
+  "sp.importar.mapa.semNome": "There is no Name column: you will only be able to update items that already exist.",
+  "sp.importar.mapa.nota": "A column that is present with an empty cell clears that value on the item (except Name and Active). To leave a field untouched, choose “Ignore this column”. Items that are not in the file are not changed or deactivated.",
+  "sp.importar.mapa.semLinhas": "No rows have values in the chosen columns.",
+  "sp.importar.mapa.maximo": "Maximum {max} rows per import.",
+
+  // Step 3: preview and finish
+  "sp.importar.previa.erroSaltado": "Rows with errors are skipped. You can fix them in the file and import again later.",
+  "sp.importar.fim.nada": "No items were changed.",
+  "sp.importar.fim.gravado": "Saved: {novos} new and {alterados} changed.",
+  "sp.importar.fim.erros.um": "{n} row with errors was skipped.",
+  "sp.importar.fim.erros.varios": "{n} rows with errors were skipped.",
+
+  // Buttons
+  "sp.importar.botao.outroFicheiro": "Choose another file",
+  "sp.importar.botao.previsualizar": "Preview",
+  "sp.importar.botao.aVerificar": "Checking…",
+  "sp.importar.botao.voltar": "Back",
+  "sp.importar.botao.aGravar": "Saving…",
+  "sp.importar.botao.nadaGravar": "Nothing to save",
+  "sp.importar.botao.gravar.um": "Save {n} valid row",
+  "sp.importar.botao.gravar.varios": "Save {n} valid rows",
+  "sp.importar.botao.fechar": "Close",
+  "sp.importar.botao.cancelar": "Cancel",
+
+  // Counts, tabs and rows
+  "sp.importar.resumo.novos": "New",
+  "sp.importar.resumo.alterados": "Changed",
+  "sp.importar.resumo.iguais": "Unchanged",
+  "sp.importar.resumo.comErro": "With errors",
+  "sp.importar.separador.novos": "New ({n})",
+  "sp.importar.separador.alterados": "Changed ({n})",
+  "sp.importar.separador.erros": "Errors ({n})",
+  "sp.importar.lista.nenhuma": "No rows.",
+  "sp.importar.lista.linha": "Row {n}",
+  "sp.importar.lista.semReferencia": "(no reference)",
+  "sp.importar.lista.aMostrar": "Showing {max} of {total} rows.",
+  "sp.importar.valor.vazio": "(empty)",
+  "sp.importar.valor.sim": "yes",
+  "sp.importar.valor.nao": "no",
+
+  // Errors while reading the file (thrown by readSupplierCatalogFile)
+  "sp.importar.erro.formato": "Unsupported format. Use an Excel (.xlsx, .xls) or CSV (.csv) file.",
+  "sp.importar.erro.vazio": "The file is empty.",
+  "sp.importar.erro.grande": "The file is too large (maximum 10 MB).",
+  "sp.importar.erro.invalido": "The file could not be read. Make sure it is a valid Excel file.",
+  "sp.importar.erro.semDados": "The file has no data on the first sheet.",
+  "sp.importar.erro.demasiadasLinhas": "The file has more than {max} item rows. Split it into smaller files.",
+  "sp.importar.erro.soCabecalhos": "The file only has headers: there are no item rows.",
+
+  // Excel file: sheets, instructions and file names
+  "sp.importar.modelo.folhaCatalogo": "Catalogue",
+  "sp.importar.modelo.folhaInstrucoes": "Instructions",
+  "sp.importar.modelo.cabecalhoColuna": "Column",
+  "sp.importar.modelo.cabecalhoComoPreencher": "How to fill in",
+  "sp.importar.modelo.notas": "Notes",
+  "sp.importar.modelo.nota1": "One row per item. A column that is not in the file changes nothing.",
+  "sp.importar.modelo.nota2": "A column that is present with an empty cell clears that value (except Name and Active).",
+  "sp.importar.modelo.nota3": "Maximum {max} rows per file. Items that are missing from the file are not deactivated.",
+  "sp.importar.modelo.ficheiroModelo": "supplier_catalogue_template.xlsx",
+  "sp.importar.modelo.prefixoCatalogo": "catalogue",
+  "sp.importar.modelo.fornecedor": "supplier",
+
+  // File columns (header and how to fill in)
+  "sp.importar.coluna.supplier_ref.cabecalho": "Supplier ref.",
+  "sp.importar.coluna.supplier_ref.descricao": "Required. Your own reference for the item (max. 100 characters). It identifies the item: the same reference updates the existing item.",
+  "sp.importar.coluna.barcode.cabecalho": "Barcode",
+  "sp.importar.coluna.barcode.descricao": "EAN/GTIN with 8 to 14 digits.",
+  "sp.importar.coluna.name.cabecalho": "Name",
+  "sp.importar.coluna.name.descricao": "Required for new items (max. 300 characters). Empty = keeps the saved name.",
+  "sp.importar.coluna.description.cabecalho": "Description",
+  "sp.importar.coluna.description.descricao": "Free text (max. 2000 characters).",
+  "sp.importar.coluna.brand.cabecalho": "Brand",
+  "sp.importar.coluna.brand.descricao": "Max. 100 characters.",
+  "sp.importar.coluna.unit_label.cabecalho": "Unit",
+  "sp.importar.coluna.unit_label.descricao": "Selling unit (e.g. pc, box, m, kg). Max. 30 characters.",
+  "sp.importar.coluna.units_per_pack.cabecalho": "Units per pack",
+  "sp.importar.coluna.units_per_pack.descricao": "A number greater than zero.",
+  "sp.importar.coluna.base_price.cabecalho": "Price",
+  "sp.importar.coluna.base_price.descricao": "Base price excluding VAT. Accepts 12.5, 12,5, 1,234.56 or 1.234,56.",
+  "sp.importar.coluna.currency.cabecalho": "Currency",
+  "sp.importar.coluna.currency.descricao": "3-letter code (e.g. EUR). Empty = EUR.",
+  "sp.importar.coluna.moq.cabecalho": "Min. order qty",
+  "sp.importar.coluna.moq.descricao": "Minimum order quantity (greater than zero).",
+  "sp.importar.coluna.lead_time_days.cabecalho": "Lead time (days)",
+  "sp.importar.coluna.lead_time_days.descricao": "Delivery lead time in whole days (0 to 3650).",
+  "sp.importar.coluna.is_active.cabecalho": "Active",
+  "sp.importar.coluna.is_active.descricao": "yes/no. Empty = keeps the saved status.",
+};

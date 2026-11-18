@@ -21,17 +21,21 @@ import {
 import { downloadSupplierCatalogTemplate, exportSupplierPortalCatalogXlsx } from "@/utils/supplierPortalCatalogTemplate";
 import { SupplierCatalogItemDialog } from "@/components/supplier-portal/SupplierCatalogItemDialog";
 import { SupplierCatalogImportDialog } from "@/components/supplier-portal/SupplierCatalogImportDialog";
+import { usePortalT } from "@/portal-i18n";
 
 const PAGE_SIZE = 50;
 const QUERY_KEY = "supplier-portal-catalog";
+const NO_VALUE = "—";
 
-function formatNumber(n: number | null, opts?: Intl.NumberFormatOptions): string {
-  if (n === null || n === undefined) return "—";
+/** Número do artigo (quantidades, unidades por embalagem) com até 4 casas. Formato pt-PT nos dois idiomas. */
+function formatNumber(n: number | null | undefined, opts?: Intl.NumberFormatOptions): string {
+  if (n === null || n === undefined) return NO_VALUE;
   return Number(n).toLocaleString("pt-PT", { maximumFractionDigits: 4, ...opts });
 }
 
+/** Preço na moeda do artigo (2 a 4 casas, pt-PT nos dois idiomas); moeda que o Intl não conhece cai para «valor CÓDIGO». */
 function formatPrice(item: SpCatalogItem): string {
-  if (item.base_price === null || item.base_price === undefined) return "—";
+  if (item.base_price === null || item.base_price === undefined) return NO_VALUE;
   try {
     return Number(item.base_price).toLocaleString("pt-PT", {
       style: "currency",
@@ -49,6 +53,8 @@ export default function SupplierPortalCatalog() {
   const { account, canManageCatalog, refresh } = useSupplierPortal();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { t, tn, idioma } = usePortalT();
+  const num = (n: number) => n.toLocaleString("pt-PT");
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
@@ -63,11 +69,11 @@ export default function SupplierPortalCatalog() {
 
   // Pesquisa com atraso para não chamar a RPC a cada tecla.
   useEffect(() => {
-    const t = window.setTimeout(() => {
+    const timer = window.setTimeout(() => {
       setSearch(searchInput.trim());
       setPage(0);
     }, 300);
-    return () => window.clearTimeout(t);
+    return () => window.clearTimeout(timer);
   }, [searchInput]);
 
   useEffect(() => {
@@ -117,13 +123,15 @@ export default function SupplierPortalCatalog() {
     try {
       const res = await spCatalogSetActive(ids, active);
       toast({
-        title: active ? "Artigos ativados" : "Artigos desativados",
-        description: `${res.updated} artigo(s) ${active ? "ativado(s)" : "desativado(s)"}.`,
+        title: t(active ? "sp.catalogo.aviso.ativados" : "sp.catalogo.aviso.desativados"),
+        description: active
+          ? tn("sp.catalogo.aviso.ativadosN.um", "sp.catalogo.aviso.ativadosN.varios", res.updated)
+          : tn("sp.catalogo.aviso.desativadosN.um", "sp.catalogo.aviso.desativadosN.varios", res.updated),
       });
       setSelected(new Set());
       await invalidate();
     } catch (err) {
-      handleError(err, active ? "Não foi possível ativar" : "Não foi possível desativar");
+      handleError(err, t(active ? "sp.catalogo.aviso.erroAtivar" : "sp.catalogo.aviso.erroDesativar"));
     } finally {
       setBusyIds((s) => {
         const next = new Set(s);
@@ -143,12 +151,12 @@ export default function SupplierPortalCatalog() {
         if (res.items.length < 500 || all.length >= res.total) break;
       }
       if (all.length === 0) {
-        toast({ title: "Catálogo vazio", description: "Ainda não tem artigos para exportar." });
+        toast({ title: t("sp.catalogo.aviso.vazio"), description: t("sp.catalogo.aviso.vazioDescricao") });
         return;
       }
-      exportSupplierPortalCatalogXlsx(all, account?.display_name ?? "fornecedor");
+      exportSupplierPortalCatalogXlsx(all, account?.display_name ?? "", idioma);
     } catch (err) {
-      handleError(err, "Não foi possível exportar");
+      handleError(err, t("sp.catalogo.aviso.erroExportar"));
     } finally {
       setExporting(false);
     }
@@ -178,33 +186,36 @@ export default function SupplierPortalCatalog() {
   const anySelectedActive = selectedItems.some((i) => i.is_active);
   const anySelectedInactive = selectedItems.some((i) => !i.is_active);
 
+  const statusLabel = (active: boolean) => t(active ? "sp.catalogo.estado.ativo" : "sp.catalogo.estado.inativo");
+  const countLabel = includeInactive
+    ? tn("sp.catalogo.contagem.todos.um", "sp.catalogo.contagem.todos.varios", total)
+    : tn("sp.catalogo.contagem.ativos.um", "sp.catalogo.contagem.ativos.varios", total);
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Catálogo</h1>
-          <p className="text-sm text-muted-foreground">
-            {query.isLoading ? "A carregar…" : `${total.toLocaleString("pt-PT")} artigo(s)${includeInactive ? "" : " ativos"}`}
-          </p>
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">{t("sp.catalogo.titulo")}</h1>
+          <p className="text-sm text-muted-foreground">{query.isLoading ? t("sp.catalogo.aCarregar") : countLabel}</p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex sm:flex-wrap">
-          <Button variant="outline" className="h-11 gap-2" onClick={downloadSupplierCatalogTemplate}>
+          <Button variant="outline" className="h-11 gap-2" onClick={() => downloadSupplierCatalogTemplate(idioma)}>
             <FileDown className="h-4 w-4" aria-hidden="true" />
-            Descarregar modelo
+            {t("sp.catalogo.botao.modelo")}
           </Button>
           <Button variant="outline" className="h-11 gap-2" onClick={() => void handleExport()} disabled={exporting}>
             <Download className="h-4 w-4" aria-hidden="true" />
-            {exporting ? "A exportar…" : "Exportar"}
+            {exporting ? t("sp.catalogo.botao.aExportar") : t("sp.catalogo.botao.exportar")}
           </Button>
           {canEdit && (
             <>
               <Button variant="outline" className="h-11 gap-2" onClick={() => setImportOpen(true)}>
                 <Upload className="h-4 w-4" aria-hidden="true" />
-                Importar
+                {t("sp.catalogo.botao.importar")}
               </Button>
               <Button className="h-11 gap-2" onClick={openNew}>
                 <Plus className="h-4 w-4" aria-hidden="true" />
-                Novo artigo
+                {t("sp.catalogo.botao.novoArtigo")}
               </Button>
             </>
           )}
@@ -214,9 +225,7 @@ export default function SupplierPortalCatalog() {
       {!canEdit && (
         <Alert>
           <Info className="h-4 w-4" />
-          <AlertDescription>
-            Está em modo de consulta. Só o utilizador principal da conta pode criar, alterar, importar ou desativar artigos.
-          </AlertDescription>
+          <AlertDescription>{t("sp.catalogo.consulta")}</AlertDescription>
         </Alert>
       )}
 
@@ -227,8 +236,8 @@ export default function SupplierPortalCatalog() {
             type="search"
             value={searchInput}
             onChange={(e) => setSearchInput(e.target.value)}
-            placeholder="Pesquisar por referência, nome, código de barras ou marca"
-            aria-label="Pesquisar artigos"
+            placeholder={t("sp.catalogo.pesquisa.placeholder")}
+            aria-label={t("sp.catalogo.pesquisa.aria")}
             className="h-11 pl-9"
             maxLength={100}
           />
@@ -242,25 +251,27 @@ export default function SupplierPortalCatalog() {
               setPage(0);
             }}
           />
-          <Label htmlFor="sp-include-inactive" className="cursor-pointer">Mostrar inativos</Label>
+          <Label htmlFor="sp-include-inactive" className="cursor-pointer">{t("sp.catalogo.mostrarInativos")}</Label>
         </div>
       </div>
 
       {canEdit && selectedIds.length > 0 && (
-        <div className="flex flex-wrap items-center gap-2 rounded-md border bg-background p-2" role="region" aria-label="Ações em lote">
-          <span className="text-sm px-2">{selectedIds.length} selecionado(s)</span>
+        <div className="flex flex-wrap items-center gap-2 rounded-md border bg-background p-2" role="region" aria-label={t("sp.catalogo.lote.aria")}>
+          <span className="text-sm px-2">
+            {tn("sp.catalogo.lote.selecionados.um", "sp.catalogo.lote.selecionados.varios", selectedIds.length)}
+          </span>
           {anySelectedInactive && (
             <Button variant="outline" className="h-11" disabled={busyIds.size > 0} onClick={() => void setActive(selectedIds, true)}>
-              Ativar
+              {t("sp.catalogo.acao.ativar")}
             </Button>
           )}
           {anySelectedActive && (
             <Button variant="outline" className="h-11" disabled={busyIds.size > 0} onClick={() => void setActive(selectedIds, false)}>
-              Desativar
+              {t("sp.catalogo.acao.desativar")}
             </Button>
           )}
           <Button variant="ghost" className="h-11" onClick={() => setSelected(new Set())}>
-            Limpar seleção
+            {t("sp.catalogo.acao.limparSelecao")}
           </Button>
         </div>
       )}
@@ -270,7 +281,7 @@ export default function SupplierPortalCatalog() {
           <AlertDescription className="flex flex-wrap items-center gap-2">
             {spErrorMessage(query.error)}
             <Button variant="outline" size="sm" className="h-11" onClick={() => void query.refetch()}>
-              Tentar de novo
+              {t("sp.catalogo.botao.tentarNovamente")}
             </Button>
           </AlertDescription>
         </Alert>
@@ -279,17 +290,17 @@ export default function SupplierPortalCatalog() {
       {!query.isLoading && !query.error && items.length === 0 && (
         <div className="rounded-lg border bg-background p-8 text-center space-y-3">
           <p className="text-sm text-muted-foreground">
-            {search ? "Nenhum artigo corresponde à pesquisa." : "Ainda não tem artigos no catálogo."}
+            {search ? t("sp.catalogo.vazio.pesquisa") : t("sp.catalogo.vazio.semArtigos")}
           </p>
           {!search && canEdit && (
             <div className="flex flex-col sm:flex-row gap-2 justify-center">
               <Button className="h-11 gap-2" onClick={() => setImportOpen(true)}>
                 <Upload className="h-4 w-4" aria-hidden="true" />
-                Importar Excel/CSV
+                {t("sp.catalogo.botao.importarExcel")}
               </Button>
               <Button variant="outline" className="h-11 gap-2" onClick={openNew}>
                 <Plus className="h-4 w-4" aria-hidden="true" />
-                Novo artigo
+                {t("sp.catalogo.botao.novoArtigo")}
               </Button>
             </div>
           )}
@@ -308,19 +319,19 @@ export default function SupplierPortalCatalog() {
                       <Checkbox
                         checked={allOnPageSelected}
                         onCheckedChange={(v) => toggleAll(v === true)}
-                        aria-label="Selecionar todos os artigos desta página"
+                        aria-label={t("sp.catalogo.acao.selecionarTodos")}
                       />
                     </TableHead>
                   )}
-                  <TableHead>Ref.</TableHead>
-                  <TableHead>Nome</TableHead>
-                  <TableHead>Cód. barras</TableHead>
-                  <TableHead>Unidade</TableHead>
-                  <TableHead className="text-right">Preço</TableHead>
-                  <TableHead className="text-right">Mínimo</TableHead>
-                  <TableHead className="text-right">Prazo</TableHead>
-                  <TableHead>Estado</TableHead>
-                  {canEdit && <TableHead className="w-28 text-right">Ações</TableHead>}
+                  <TableHead>{t("sp.catalogo.coluna.ref")}</TableHead>
+                  <TableHead>{t("sp.catalogo.coluna.nome")}</TableHead>
+                  <TableHead>{t("sp.catalogo.coluna.codBarras")}</TableHead>
+                  <TableHead>{t("sp.catalogo.coluna.unidade")}</TableHead>
+                  <TableHead className="text-right">{t("sp.catalogo.coluna.preco")}</TableHead>
+                  <TableHead className="text-right">{t("sp.catalogo.coluna.minimo")}</TableHead>
+                  <TableHead className="text-right">{t("sp.catalogo.coluna.prazo")}</TableHead>
+                  <TableHead>{t("sp.catalogo.coluna.estado")}</TableHead>
+                  {canEdit && <TableHead className="w-28 text-right">{t("sp.catalogo.coluna.acoes")}</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -331,7 +342,7 @@ export default function SupplierPortalCatalog() {
                         <Checkbox
                           checked={selected.has(item.id)}
                           onCheckedChange={(v) => toggleOne(item.id, v === true)}
-                          aria-label={`Selecionar ${item.supplier_ref}`}
+                          aria-label={t("sp.catalogo.acao.selecionarRef", { ref: item.supplier_ref })}
                         />
                       </TableCell>
                     )}
@@ -340,22 +351,33 @@ export default function SupplierPortalCatalog() {
                       <p className="truncate" title={item.name}>{item.name}</p>
                       {item.brand && <p className="text-xs text-muted-foreground truncate">{item.brand}</p>}
                     </TableCell>
-                    <TableCell className="font-mono text-xs">{item.barcode ?? "—"}</TableCell>
+                    <TableCell className="font-mono text-xs">{item.barcode ?? NO_VALUE}</TableCell>
                     <TableCell className="whitespace-nowrap">
-                      {item.unit_label ?? "—"}
-                      {item.units_per_pack ? <span className="text-xs text-muted-foreground"> · {formatNumber(item.units_per_pack)}/emb.</span> : null}
+                      {item.unit_label ?? NO_VALUE}
+                      {item.units_per_pack ? (
+                        <span className="text-xs text-muted-foreground">
+                          {" · "}
+                          {t("sp.catalogo.porEmbalagem", { n: formatNumber(item.units_per_pack) })}
+                        </span>
+                      ) : null}
                     </TableCell>
                     <TableCell className="text-right whitespace-nowrap">{formatPrice(item)}</TableCell>
                     <TableCell className="text-right">{formatNumber(item.moq)}</TableCell>
                     <TableCell className="text-right whitespace-nowrap">
-                      {item.lead_time_days === null ? "—" : `${item.lead_time_days} d`}
+                      {item.lead_time_days === null ? NO_VALUE : t("sp.catalogo.prazoCurto", { n: num(item.lead_time_days) })}
                     </TableCell>
                     <TableCell>
-                      <Badge variant={item.is_active ? "secondary" : "outline"}>{item.is_active ? "Ativo" : "Inativo"}</Badge>
+                      <Badge variant={item.is_active ? "secondary" : "outline"}>{statusLabel(item.is_active)}</Badge>
                     </TableCell>
                     {canEdit && (
                       <TableCell className="text-right whitespace-nowrap">
-                        <Button variant="ghost" size="icon" className="h-11 w-11" onClick={() => openEdit(item)} aria-label={`Editar ${item.supplier_ref}`}>
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-11 w-11"
+                          onClick={() => openEdit(item)}
+                          aria-label={t("sp.catalogo.acao.editarRef", { ref: item.supplier_ref })}
+                        >
                           <Pencil className="h-4 w-4" />
                         </Button>
                         <Button
@@ -364,8 +386,8 @@ export default function SupplierPortalCatalog() {
                           className="h-11 w-11"
                           disabled={busyIds.has(item.id)}
                           onClick={() => void setActive([item.id], !item.is_active)}
-                          aria-label={item.is_active ? `Desativar ${item.supplier_ref}` : `Ativar ${item.supplier_ref}`}
-                          title={item.is_active ? "Desativar" : "Ativar"}
+                          aria-label={t(item.is_active ? "sp.catalogo.acao.desativarRef" : "sp.catalogo.acao.ativarRef", { ref: item.supplier_ref })}
+                          title={t(item.is_active ? "sp.catalogo.acao.desativar" : "sp.catalogo.acao.ativar")}
                         >
                           <Power className={item.is_active ? "h-4 w-4 text-destructive" : "h-4 w-4 text-emerald-600"} />
                         </Button>
@@ -387,7 +409,7 @@ export default function SupplierPortalCatalog() {
                       <Checkbox
                         checked={selected.has(item.id)}
                         onCheckedChange={(v) => toggleOne(item.id, v === true)}
-                        aria-label={`Selecionar ${item.supplier_ref}`}
+                        aria-label={t("sp.catalogo.acao.selecionarRef", { ref: item.supplier_ref })}
                       />
                     </div>
                   )}
@@ -396,23 +418,27 @@ export default function SupplierPortalCatalog() {
                     <p className="font-medium break-words">{item.name}</p>
                     {item.brand && <p className="text-xs text-muted-foreground">{item.brand}</p>}
                   </div>
-                  <Badge variant={item.is_active ? "secondary" : "outline"}>{item.is_active ? "Ativo" : "Inativo"}</Badge>
+                  <Badge variant={item.is_active ? "secondary" : "outline"}>{statusLabel(item.is_active)}</Badge>
                 </div>
                 <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
-                  <dt className="text-muted-foreground">Preço</dt>
+                  <dt className="text-muted-foreground">{t("sp.catalogo.coluna.preco")}</dt>
                   <dd className="text-right">{formatPrice(item)}</dd>
-                  <dt className="text-muted-foreground">Unidade</dt>
+                  <dt className="text-muted-foreground">{t("sp.catalogo.coluna.unidade")}</dt>
                   <dd className="text-right">
-                    {item.unit_label ?? "—"}
-                    {item.units_per_pack ? ` · ${formatNumber(item.units_per_pack)}/emb.` : ""}
+                    {item.unit_label ?? NO_VALUE}
+                    {item.units_per_pack ? ` · ${t("sp.catalogo.porEmbalagem", { n: formatNumber(item.units_per_pack) })}` : ""}
                   </dd>
-                  <dt className="text-muted-foreground">Mínimo</dt>
+                  <dt className="text-muted-foreground">{t("sp.catalogo.coluna.minimo")}</dt>
                   <dd className="text-right">{formatNumber(item.moq)}</dd>
-                  <dt className="text-muted-foreground">Prazo</dt>
-                  <dd className="text-right">{item.lead_time_days === null ? "—" : `${item.lead_time_days} dias`}</dd>
+                  <dt className="text-muted-foreground">{t("sp.catalogo.coluna.prazo")}</dt>
+                  <dd className="text-right">
+                    {item.lead_time_days === null
+                      ? NO_VALUE
+                      : tn("sp.catalogo.prazoLongo.um", "sp.catalogo.prazoLongo.varios", item.lead_time_days)}
+                  </dd>
                   {item.barcode && (
                     <>
-                      <dt className="text-muted-foreground">Cód. barras</dt>
+                      <dt className="text-muted-foreground">{t("sp.catalogo.coluna.codBarras")}</dt>
                       <dd className="text-right font-mono break-all">{item.barcode}</dd>
                     </>
                   )}
@@ -421,7 +447,7 @@ export default function SupplierPortalCatalog() {
                   <div className="grid grid-cols-2 gap-2">
                     <Button variant="outline" className="h-11 gap-2" onClick={() => openEdit(item)}>
                       <Pencil className="h-4 w-4" aria-hidden="true" />
-                      Editar
+                      {t("sp.catalogo.acao.editar")}
                     </Button>
                     <Button
                       variant="outline"
@@ -430,7 +456,7 @@ export default function SupplierPortalCatalog() {
                       onClick={() => void setActive([item.id], !item.is_active)}
                     >
                       <Power className="h-4 w-4" aria-hidden="true" />
-                      {item.is_active ? "Desativar" : "Ativar"}
+                      {t(item.is_active ? "sp.catalogo.acao.desativar" : "sp.catalogo.acao.ativar")}
                     </Button>
                   </div>
                 )}
@@ -438,9 +464,9 @@ export default function SupplierPortalCatalog() {
             ))}
           </ul>
 
-          <nav className="flex items-center justify-between gap-2" aria-label="Paginação">
+          <nav className="flex items-center justify-between gap-2" aria-label={t("sp.catalogo.paginacao.aria")}>
             <p className="text-sm text-muted-foreground">
-              {from.toLocaleString("pt-PT")}–{to.toLocaleString("pt-PT")} de {total.toLocaleString("pt-PT")}
+              {t("sp.catalogo.paginacao.intervalo", { de: num(from), ate: num(to), total: num(total) })}
             </p>
             <div className="flex items-center gap-2">
               <Button
@@ -448,7 +474,7 @@ export default function SupplierPortalCatalog() {
                 className="h-11 w-11 p-0"
                 disabled={page === 0 || query.isFetching}
                 onClick={() => setPage((p) => Math.max(0, p - 1))}
-                aria-label="Página anterior"
+                aria-label={t("sp.catalogo.paginacao.anterior")}
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
@@ -460,7 +486,7 @@ export default function SupplierPortalCatalog() {
                 className="h-11 w-11 p-0"
                 disabled={page + 1 >= pageCount || query.isFetching}
                 onClick={() => setPage((p) => p + 1)}
-                aria-label="Página seguinte"
+                aria-label={t("sp.catalogo.paginacao.seguinte")}
               >
                 <ChevronRight className="h-4 w-4" />
               </Button>
@@ -482,7 +508,7 @@ export default function SupplierPortalCatalog() {
             onSaved={(saved, created) => {
               setItemDialogOpen(false);
               toast({
-                title: created ? "Artigo criado" : "Artigo guardado",
+                title: t(created ? "sp.catalogo.aviso.criado" : "sp.catalogo.aviso.guardado"),
                 description: `${saved.supplier_ref} · ${saved.name}`,
               });
               void invalidate();

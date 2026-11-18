@@ -1,10 +1,11 @@
-import { useState, type FormEvent } from "react";
+import { useMemo, useState, type FormEvent } from "react";
 import { Info, Loader2, Lock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { PhoneInput } from "@/components/PhoneInput";
+import { PhoneInput, type PhoneInputLabels } from "@/components/PhoneInput";
+import { translations } from "@/translations/index";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
@@ -16,12 +17,20 @@ import {
 } from "@/lib/supplierPortal/spRpc";
 import {
   joinCompanyNames,
+  supplierDataMessages,
   toFormValues,
   validateSupplierData,
   type SupplierDataErrors,
   type SupplierDataField,
   type SupplierDataFormValues,
 } from "@/lib/supplierPortal/supplierDataForm";
+import { marcarMensagem, resolverMensagemMarcada, usePortalT } from "@/portal-i18n";
+
+/** Nome de um país (chave em inglês) no idioma do portal; sem tradução fica o nome em inglês. */
+function nomeDoPais(nome: string, idioma: string): string {
+  const doIdioma = (translations as unknown as Record<string, Record<string, string> | undefined>)[idioma];
+  return doIdioma?.[`countries.${nome}`] ?? nome;
+}
 
 interface SupplierDataFormProps {
   /** Resultado de sp_get_my_supplier_data. */
@@ -39,9 +48,27 @@ interface SupplierDataFormProps {
  * Formulário dos dados da empresa no Portal do Fornecedor, partilhado pelo
  * passo obrigatório "Confirme os seus dados" e pela página "Os meus dados".
  * Com can_edit=false (utilizador de consulta) fica só de leitura.
+ *
+ * O PhoneInput é do CRM: o portal passa-lhe os textos (rótulo, indicativo, pesquisa, nota e nomes dos países)
+ * no idioma do portal; sem eles ele usaria o idioma do CRM.
  */
 export function SupplierDataForm({ initial, submitLabel, idPrefix, onSaved, onNoAccess, className }: SupplierDataFormProps) {
   const { toast } = useToast();
+  const { t, idioma } = usePortalT();
+  // Os erros por campo ficam em estado como mensagens com a CHAVE (marcadas) e traduzem-se ao mostrar:
+  // mudar de idioma com o erro visível muda também o erro.
+  const messages = useMemo(() => supplierDataMessages(marcarMensagem), []);
+  // O PhoneInput é do CRM: o portal dá-lhe os textos no idioma do portal (incluindo os nomes dos países).
+  const phoneLabels = useMemo<PhoneInputLabels>(
+    () => ({
+      pesquisar: t("sp.dados.form.pesquisarPais"),
+      numeroCompleto: t("sp.dados.form.numeroCompleto"),
+      indicativo: t("sp.dados.form.indicativo"),
+      telefone: t("sp.dados.form.telefoneCampo"),
+      nomesDosPaises: (nome: string) => nomeDoPais(nome, idioma),
+    }),
+    [t, idioma],
+  );
   const [values, setValues] = useState<SupplierDataFormValues>(() => toFormValues(initial.data));
   // Base de comparação do payload (só vai o que mudou). Passa a ser o que se
   // gravou, para que um segundo "Guardar" sem remontar não reenvie o mesmo.
@@ -60,12 +87,16 @@ export function SupplierDataForm({ initial, submitLabel, idPrefix, onSaved, onNo
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (readOnly || saving) return;
-    const result = validateSupplierData(values, baseline);
+    const result = validateSupplierData(values, baseline, messages);
     // "in" e não !result.ok: sem strictNullChecks o TS não estreita pelo literal.
     if ("errors" in result) {
       setErrors(result.errors);
       const first: string | undefined = Object.values(result.errors).find((m): m is string => !!m);
-      toast({ title: "Verifique os dados", description: first || "Há campos inválidos.", variant: "destructive" });
+      toast({
+        title: t("sp.dados.aviso.verifique"),
+        description: first ? resolverMensagemMarcada(first, idioma) : t("sp.dados.aviso.camposInvalidos"),
+        variant: "destructive",
+      });
       return;
     }
     setErrors({});
@@ -77,7 +108,7 @@ export function SupplierDataForm({ initial, submitLabel, idPrefix, onSaved, onNo
       onSaved(saved, result.values);
     } catch (err) {
       if (getSpHint(err) === "no_supplier_access") onNoAccess?.();
-      toast({ title: "Não foi possível guardar", description: spErrorMessage(err), variant: "destructive" });
+      toast({ title: t("sp.dados.aviso.naoGuardou"), description: spErrorMessage(err), variant: "destructive" });
     } finally {
       setSaving(false);
     }
@@ -113,7 +144,7 @@ export function SupplierDataForm({ initial, submitLabel, idPrefix, onSaved, onNo
         />
         {error && (
           <p id={id(`${field}-error`)} className="text-sm text-destructive">
-            {error}
+            {resolverMensagemMarcada(error, idioma)}
           </p>
         )}
       </div>
@@ -125,58 +156,75 @@ export function SupplierDataForm({ initial, submitLabel, idPrefix, onSaved, onNo
       {readOnly && (
         <Alert>
           <Lock className="h-4 w-4" aria-hidden="true" />
-          <AlertDescription>Só o utilizador principal da conta pode alterar estes dados.</AlertDescription>
+          <AlertDescription>{t("sp.dados.form.soLeitura")}</AlertDescription>
         </Alert>
       )}
       {!readOnly && manyCompanies && (
         <Alert>
           <Info className="h-4 w-4" aria-hidden="true" />
-          <AlertDescription>
-            Estes dados ficam atualizados em todas as empresas com que trabalha: {companiesLabel}
-          </AlertDescription>
+          <AlertDescription>{t("sp.dados.form.varias", { empresas: companiesLabel })}</AlertDescription>
         </Alert>
       )}
 
       <fieldset className="grid grid-cols-1 sm:grid-cols-2 gap-4" disabled={readOnly || saving}>
-        <legend className="sr-only">Empresa e contacto</legend>
-        {textField("name", "Nome da empresa", { required: true, autoComplete: "organization", maxLength: 200, className: "sm:col-span-2" })}
+        <legend className="sr-only">{t("sp.dados.form.empresaContacto")}</legend>
+        {textField("name", t("sp.dados.form.nome"), { required: true, autoComplete: "organization", maxLength: 200, className: "sm:col-span-2" })}
 
         <div className="space-y-1.5 sm:col-span-2">
-          <Label htmlFor={id("tax_id")}>NIF</Label>
+          <Label htmlFor={id("tax_id")}>{t("sp.dados.form.nif")}</Label>
           <Input id={id("tax_id")} value={initial.data.tax_id ?? ""} readOnly disabled className="h-11 font-mono" />
-          <p className="text-xs text-muted-foreground">Para alterar o NIF contacte a empresa.</p>
+          <p className="text-xs text-muted-foreground">{t("sp.dados.form.nifNota")}</p>
         </div>
 
-        {textField("contact_person", "Pessoa de contacto", { autoComplete: "name", maxLength: 200 })}
-        {textField("email", "Email", { type: "email", autoComplete: "email", placeholder: "geral@empresa.pt", maxLength: 255 })}
+        {textField("contact_person", t("sp.dados.form.pessoaContacto"), { autoComplete: "name", maxLength: 200 })}
+        {textField("email", t("sp.dados.form.email"), {
+          type: "email",
+          autoComplete: "email",
+          placeholder: t("sp.dados.form.emailExemplo"),
+          maxLength: 255,
+        })}
 
         <div className="sm:col-span-2 space-y-1.5">
           <PhoneInput
-            label="Telefone"
+            label={t("sp.dados.form.telefone")}
+            labels={phoneLabels}
             phoneValue={values.phone}
             countryCodeValue={values.phone_country_code}
             onPhoneChange={set("phone")}
             onCountryCodeChange={set("phone_country_code")}
             disabled={readOnly || saving}
           />
-          {errors.phone && <p className="text-sm text-destructive">{errors.phone}</p>}
+          {errors.phone && <p className="text-sm text-destructive">{resolverMensagemMarcada(errors.phone, idioma)}</p>}
         </div>
       </fieldset>
 
       <fieldset className="grid grid-cols-1 sm:grid-cols-2 gap-4" disabled={readOnly || saving}>
-        <legend className="text-sm font-medium text-foreground mb-2">Morada</legend>
-        {textField("address", "Morada", { autoComplete: "street-address", maxLength: 255, className: "sm:col-span-2" })}
-        {textField("postal_code", "Código postal", { autoComplete: "postal-code", placeholder: "0000-000", maxLength: 20 })}
-        {textField("city", "Cidade", { autoComplete: "address-level2", maxLength: 100 })}
-        {textField("country", "País", { autoComplete: "country-name", placeholder: "Portugal", maxLength: 100 })}
-        {textField("website", "Website", { type: "url", autoComplete: "url", placeholder: "www.empresa.pt", maxLength: 255 })}
+        <legend className="text-sm font-medium text-foreground mb-2">{t("sp.dados.form.moradaGrupo")}</legend>
+        {textField("address", t("sp.dados.form.morada"), { autoComplete: "street-address", maxLength: 255, className: "sm:col-span-2" })}
+        {textField("postal_code", t("sp.dados.form.codigoPostal"), {
+          autoComplete: "postal-code",
+          placeholder: t("sp.dados.form.codigoPostalExemplo"),
+          maxLength: 20,
+        })}
+        {textField("city", t("sp.dados.form.cidade"), { autoComplete: "address-level2", maxLength: 100 })}
+        {textField("country", t("sp.dados.form.pais"), {
+          autoComplete: "country-name",
+          placeholder: t("sp.dados.form.paisExemplo"),
+          maxLength: 100,
+        })}
+        {textField("website", t("sp.dados.form.website"), {
+          type: "url",
+          autoComplete: "url",
+          placeholder: t("sp.dados.form.websiteExemplo"),
+          maxLength: 255,
+        })}
       </fieldset>
 
       {!readOnly && (
         <div className="flex justify-end">
           <Button type="submit" className="h-11 w-full sm:w-auto gap-2" disabled={saving}>
             {saving && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-            {saving ? "A guardar…" : submitLabel}
+            {saving ? t("sp.dados.form.aGuardar") : submitLabel}
           </Button>
         </div>
       )}

@@ -1,6 +1,10 @@
 // Portal do Fornecedor (F3.1) — modelo XLSX, exportação e leitura de ficheiros
 // do catálogo (XLSX/XLS/CSV) para sp_catalog_import.
 //
+// Idioma: o modelo e a exportação saem no idioma do portal (cabeçalhos, instruções, nomes das folhas, sim/não ou
+// yes/no). A LEITURA reconhece cabeçalhos em português E em inglês, seja qual for o idioma do portal: exportar numa
+// língua e importar de volta mapeia todas as colunas. O servidor aceita sim/não e yes/no.
+//
 // Segurança:
 //  • Exportação/modelo: buildStandardWorkbook já prefixa com ' as células de
 //    texto começadas por = + - @ (neutraliza fórmulas ao abrir no Excel).
@@ -11,86 +15,101 @@
 import * as XLSX from "xlsx";
 import { buildStandardWorkbook, type StandardExportColumn } from "@/lib/exports/xlsxExport";
 import type { SpCatalogField, SpCatalogItem, SpCatalogRowInput } from "@/lib/supplierPortal/spRpc";
+import { ehPortalIdioma, IDIOMA_OMISSAO, type ParamsDeTraducao, type PortalIdioma } from "@/portal-i18n/tipos";
+import { traduzir } from "@/portal-i18n/traduzir";
 
 export const SUPPLIER_CATALOG_MAX_ROWS = 5000;
 export const SUPPLIER_CATALOG_MAX_FILE_BYTES = 10 * 1024 * 1024;
 
 export interface SupplierCatalogColumnDef {
   field: SpCatalogField;
-  header: string;
-  description: string;
   type: "text" | "number";
   width: number;
-  /** Cabeçalhos aceites (normalizados: sem acentos, minúsculas, só [a-z0-9]). */
+  /** Cabeçalhos aceites, em português e em inglês (normalizados: sem acentos, minúsculas, só [a-z0-9]). */
   aliases: string[];
 }
 
+/** Os cabeçalhos e as descrições de cada coluna vivem no dicionário (`sp.importar.coluna.<campo>.*`). */
 export const SUPPLIER_CATALOG_COLUMNS: SupplierCatalogColumnDef[] = [
   {
-    field: "supplier_ref", header: "Ref.", type: "text", width: 16,
-    description: "Obrigatória. A sua referência do artigo (máx. 100 caracteres). Identifica o artigo: a mesma referência atualiza o artigo existente.",
-    aliases: ["ref", "referencia", "reffornecedor", "referenciafornecedor", "referenciadofornecedor", "codigo", "codigoartigo", "codigodoartigo", "codigofornecedor", "suppliersku", "supplierref", "sku"],
+    field: "supplier_ref", type: "text", width: 16,
+    aliases: ["ref", "referencia", "reffornecedor", "referenciafornecedor", "referenciadofornecedor", "codigo", "codigoartigo", "codigodoartigo", "codigofornecedor", "suppliersku", "supplierref", "sku", "itemref", "reference"],
   },
   {
-    field: "barcode", header: "Código de barras", type: "text", width: 18,
-    description: "EAN/GTIN com 8 a 14 dígitos.",
+    field: "barcode", type: "text", width: 18,
     aliases: ["codigodebarras", "codigobarras", "codbarras", "barcode", "ean", "ean13", "gtin"],
   },
   {
-    field: "name", header: "Nome", type: "text", width: 36,
-    description: "Obrigatório para artigos novos (máx. 300 caracteres). Vazio = mantém o nome gravado.",
-    aliases: ["nome", "designacao", "artigo", "produto", "name", "nomedoartigo"],
+    field: "name", type: "text", width: 36,
+    aliases: ["nome", "designacao", "artigo", "produto", "name", "nomedoartigo", "itemname", "productname"],
   },
   {
-    field: "description", header: "Descrição", type: "text", width: 40,
-    description: "Texto livre (máx. 2000 caracteres).",
+    field: "description", type: "text", width: 40,
     aliases: ["descricao", "descricaolonga", "description", "detalhe"],
   },
   {
-    field: "brand", header: "Marca", type: "text", width: 16,
-    description: "Máx. 100 caracteres.",
-    aliases: ["marca", "brand", "fabricante"],
+    field: "brand", type: "text", width: 16,
+    aliases: ["marca", "brand", "fabricante", "manufacturer"],
   },
   {
-    field: "unit_label", header: "Unidade", type: "text", width: 10,
-    description: "Unidade de venda (ex.: un, cx, m, kg). Máx. 30 caracteres.",
-    aliases: ["unidade", "un", "unid", "unit", "uom", "unidadedevenda", "unidademedida"],
+    field: "unit_label", type: "text", width: 10,
+    aliases: ["unidade", "un", "unid", "unit", "uom", "unidadedevenda", "unidademedida", "unitofmeasure", "sellingunit"],
   },
   {
-    field: "units_per_pack", header: "Unidades por embalagem", type: "number", width: 14,
-    description: "Número maior que zero.",
-    aliases: ["unidadesporembalagem", "unidembalagem", "qtdembalagem", "qtdporembalagem", "quantidadeporembalagem", "embalagem", "unitsperpack"],
+    field: "units_per_pack", type: "number", width: 14,
+    aliases: ["unidadesporembalagem", "unidembalagem", "qtdembalagem", "qtdporembalagem", "quantidadeporembalagem", "embalagem", "unitsperpack", "unitsperpackage", "packsize", "qtyperpack"],
   },
   {
-    field: "base_price", header: "Preço", type: "number", width: 12,
-    description: "Preço base sem IVA. Aceita 12,5 ou 12.5 ou 1.234,56.",
-    aliases: ["preco", "precobase", "precounitario", "precosemiva", "precoliquido", "price", "baseprice"],
+    field: "base_price", type: "number", width: 12,
+    aliases: ["preco", "precobase", "precounitario", "precosemiva", "precoliquido", "price", "baseprice", "unitprice", "netprice"],
   },
   {
-    field: "currency", header: "Moeda", type: "text", width: 8,
-    description: "Código de 3 letras (ex.: EUR). Vazio = EUR.",
+    field: "currency", type: "text", width: 8,
     aliases: ["moeda", "currency", "divisa"],
   },
   {
-    field: "moq", header: "Mínimo", type: "number", width: 10,
-    description: "Quantidade mínima de encomenda (maior que zero).",
-    aliases: ["minimo", "quantidademinima", "qtdminima", "encomendaminima", "moq"],
+    field: "moq", type: "number", width: 10,
+    aliases: ["minimo", "quantidademinima", "qtdminima", "encomendaminima", "moq", "minorderqty", "minimumorderqty", "minimumorderquantity", "minimumquantity", "minimumqty", "minqty"],
   },
   {
-    field: "lead_time_days", header: "Prazo (dias)", type: "number", width: 12,
-    description: "Prazo de entrega em dias inteiros (0 a 3650).",
-    aliases: ["prazodias", "prazo", "prazoentrega", "prazodeentrega", "prazodeentregadias", "diasdeentrega", "leadtime", "leadtimedays"],
+    field: "lead_time_days", type: "number", width: 12,
+    aliases: ["prazodias", "prazo", "prazoentrega", "prazodeentrega", "prazodeentregadias", "diasdeentrega", "leadtime", "leadtimedays", "deliverytime", "deliverydays"],
   },
   {
-    field: "is_active", header: "Ativo", type: "text", width: 8,
-    description: "sim/não. Vazio = mantém o estado gravado.",
-    aliases: ["ativo", "activo", "active", "estado"],
+    field: "is_active", type: "text", width: 8,
+    aliases: ["ativo", "activo", "active", "estado", "status"],
   },
 ];
 
-export const SUPPLIER_CATALOG_FIELD_LABELS: Record<SpCatalogField, string> = Object.fromEntries(
-  SUPPLIER_CATALOG_COLUMNS.map((c) => [c.field, c.header]),
-) as Record<SpCatalogField, string>;
+function normalizarIdioma(idioma: unknown): PortalIdioma {
+  return ehPortalIdioma(idioma) ? idioma : IDIOMA_OMISSAO;
+}
+
+/** O cabeçalho de um campo no idioma pedido («Ref.», «Código de barras»... / «Supplier ref.», «Barcode»...). */
+export function supplierCatalogHeader(field: SpCatalogField, idioma: PortalIdioma): string {
+  return traduzir(idioma, `sp.importar.coluna.${field}.cabecalho`);
+}
+
+/** Como se preenche a coluna deste campo, no idioma pedido. */
+export function supplierCatalogDescription(field: SpCatalogField, idioma: PortalIdioma): string {
+  return traduzir(idioma, `sp.importar.coluna.${field}.descricao`);
+}
+
+/** Etiqueta de cada campo (a que se mostra nas alterações da importação), no idioma pedido. */
+export function supplierCatalogFieldLabels(idioma: PortalIdioma): Record<SpCatalogField, string> {
+  return Object.fromEntries(
+    SUPPLIER_CATALOG_COLUMNS.map((c) => [c.field, supplierCatalogHeader(c.field, idioma)]),
+  ) as Record<SpCatalogField, string>;
+}
+
+/** Nomes de ficheiro por idioma: o modelo, o prefixo da exportação e o nome por omissão do fornecedor. */
+export function supplierCatalogFileNames(idioma: PortalIdioma): { template: string; catalogoPrefixo: string; fornecedor: string } {
+  return {
+    template: traduzir(idioma, "sp.importar.modelo.ficheiroModelo"),
+    catalogoPrefixo: traduzir(idioma, "sp.importar.modelo.prefixoCatalogo"),
+    fornecedor: traduzir(idioma, "sp.importar.modelo.fornecedor"),
+  };
+}
 
 /**
  * Campos em que uma célula vazia NÃO é enviada (mantém o valor gravado).
@@ -119,30 +138,50 @@ function writeWorkbook(wb: XLSX.WorkBook, filename: string): void {
   XLSX.writeFile(wb, filename, { bookType: "xlsx", compression: true });
 }
 
-const exportColumns = (): StandardExportColumn[] =>
-  SUPPLIER_CATALOG_COLUMNS.map((c) => ({ key: c.field, header: c.header, type: c.type, width: c.width }));
+const exportColumns = (idioma: PortalIdioma): StandardExportColumn[] =>
+  SUPPLIER_CATALOG_COLUMNS.map((c) => ({
+    key: c.field,
+    header: supplierCatalogHeader(c.field, idioma),
+    type: c.type,
+    width: c.width,
+  }));
 
-/** "Descarregar modelo": folha Catálogo só com cabeçalhos + folha Instruções. */
-export function downloadSupplierCatalogTemplate(): void {
-  const wb = buildStandardWorkbook({ sheetName: "Catálogo", columns: exportColumns(), rows: [] });
+/** O modelo: folha do catálogo só com cabeçalhos + folha de instruções, no idioma pedido. */
+export function buildSupplierCatalogTemplateWorkbook(idioma: PortalIdioma = IDIOMA_OMISSAO): XLSX.WorkBook {
+  const lang = normalizarIdioma(idioma);
+  const t = (chave: string, params?: ParamsDeTraducao) => traduzir(lang, chave, params);
+  const wb = buildStandardWorkbook({
+    sheetName: t("sp.importar.modelo.folhaCatalogo"),
+    columns: exportColumns(lang),
+    rows: [],
+  });
   const instructions = XLSX.utils.aoa_to_sheet([
-    ["Coluna", "Como preencher"],
-    ...SUPPLIER_CATALOG_COLUMNS.map((c) => [c.header, c.description]),
+    [t("sp.importar.modelo.cabecalhoColuna"), t("sp.importar.modelo.cabecalhoComoPreencher")],
+    ...SUPPLIER_CATALOG_COLUMNS.map((c) => [supplierCatalogHeader(c.field, lang), supplierCatalogDescription(c.field, lang)]),
     [],
-    ["Notas", "Uma linha por artigo. Uma coluna que não exista no ficheiro não altera nada."],
-    ["", "Uma coluna presente com a célula vazia apaga esse valor (exceto Nome e Ativo)."],
-    ["", `Máximo ${SUPPLIER_CATALOG_MAX_ROWS} linhas por ficheiro. Artigos que faltem no ficheiro não são desativados.`],
+    [t("sp.importar.modelo.notas"), t("sp.importar.modelo.nota1")],
+    ["", t("sp.importar.modelo.nota2")],
+    ["", t("sp.importar.modelo.nota3", { max: SUPPLIER_CATALOG_MAX_ROWS })],
   ]);
   instructions["!cols"] = [{ wch: 24 }, { wch: 110 }];
-  XLSX.utils.book_append_sheet(wb, instructions, "Instruções");
-  writeWorkbook(wb, "modelo_catalogo_fornecedor.xlsx");
+  XLSX.utils.book_append_sheet(wb, instructions, t("sp.importar.modelo.folhaInstrucoes"));
+  return wb;
 }
 
-/** Exporta o catálogo atual no formato do modelo (reimportável). */
-export function exportSupplierPortalCatalogXlsx(items: SpCatalogItem[], accountName: string): void {
-  const wb = buildStandardWorkbook({
-    sheetName: "Catálogo",
-    columns: exportColumns(),
+/** "Descarregar modelo": o ficheiro do modelo no idioma do portal (português se não se disser). */
+export function downloadSupplierCatalogTemplate(idioma: PortalIdioma = IDIOMA_OMISSAO): void {
+  const lang = normalizarIdioma(idioma);
+  writeWorkbook(buildSupplierCatalogTemplateWorkbook(lang), supplierCatalogFileNames(lang).template);
+}
+
+/** A exportação do catálogo atual, no formato do modelo (reimportável), no idioma pedido. */
+export function buildSupplierCatalogExportWorkbook(items: SpCatalogItem[], idioma: PortalIdioma = IDIOMA_OMISSAO): XLSX.WorkBook {
+  const lang = normalizarIdioma(idioma);
+  const yes = traduzir(lang, "sp.importar.valor.sim");
+  const no = traduzir(lang, "sp.importar.valor.nao");
+  return buildStandardWorkbook({
+    sheetName: traduzir(lang, "sp.importar.modelo.folhaCatalogo"),
+    columns: exportColumns(lang),
     rows: items.map((i) => ({
       supplier_ref: i.supplier_ref,
       barcode: i.barcode,
@@ -155,11 +194,20 @@ export function exportSupplierPortalCatalogXlsx(items: SpCatalogItem[], accountN
       currency: i.currency,
       moq: i.moq,
       lead_time_days: i.lead_time_days,
-      is_active: i.is_active ? "sim" : "não",
+      is_active: i.is_active ? yes : no,
     })),
   });
-  const slug = slugify(accountName) || "fornecedor";
-  writeWorkbook(wb, `catalogo_${slug}_${new Date().toISOString().slice(0, 10)}.xlsx`);
+}
+
+/** Exporta o catálogo atual no formato do modelo (reimportável). */
+export function exportSupplierPortalCatalogXlsx(items: SpCatalogItem[], accountName: string, idioma: PortalIdioma = IDIOMA_OMISSAO): void {
+  const lang = normalizarIdioma(idioma);
+  const nomes = supplierCatalogFileNames(lang);
+  const slug = slugify(accountName) || nomes.fornecedor;
+  writeWorkbook(
+    buildSupplierCatalogExportWorkbook(items, lang),
+    `${nomes.catalogoPrefixo}_${slug}_${new Date().toISOString().slice(0, 10)}.xlsx`,
+  );
 }
 
 // ─── Leitura ────────────────────────────────────────────────────────────────
@@ -262,15 +310,50 @@ function parseCsv(text: string): string[][] {
   return out;
 }
 
-export async function readSupplierCatalogFile(file: File): Promise<ParsedSupplierCatalogFile> {
+/**
+ * Mapeamento automático pelos cabeçalhos (português ou inglês, em qualquer mistura); cada campo só uma vez.
+ * Um cabeçalho que não se reconhece fica a null (ignorar).
+ */
+export function autoMapHeaders(headers: string[]): (SpCatalogField | null)[] {
+  const used = new Set<SpCatalogField>();
+  return headers.map((h) => {
+    const norm = normalizeHeader(h);
+    if (!norm) return null;
+    const col = SUPPLIER_CATALOG_COLUMNS.find((c) => !used.has(c.field) && c.aliases.includes(norm));
+    if (!col) return null;
+    used.add(col.field);
+    return col.field;
+  });
+}
+
+/**
+ * Erro ao ler o ficheiro. `message` já vem no idioma pedido (para quem só mostra o texto), e `chave`/`params`
+ * deixam quem o guarda em estado traduzi-lo ao mostrar, no idioma de então.
+ */
+export class SupplierCatalogFileError extends Error {
+  readonly chave: string;
+  readonly params?: ParamsDeTraducao;
+  constructor(chave: string, params: ParamsDeTraducao | undefined, message: string) {
+    super(message);
+    this.name = "SupplierCatalogFileError";
+    this.chave = chave;
+    this.params = params;
+  }
+}
+
+/** Lê o ficheiro escolhido; as mensagens de erro saem no idioma do portal (português se não se disser). */
+export async function readSupplierCatalogFile(file: File, idioma: PortalIdioma = IDIOMA_OMISSAO): Promise<ParsedSupplierCatalogFile> {
+  const lang = normalizarIdioma(idioma);
+  const t = (chave: string, params?: ParamsDeTraducao) => traduzir(lang, chave, params);
+  const erro = (chave: string, params?: ParamsDeTraducao) => new SupplierCatalogFileError(chave, params, t(chave, params));
   const lower = file.name.toLowerCase();
   const isCsv = lower.endsWith(".csv");
   if (!isCsv && !lower.endsWith(".xlsx") && !lower.endsWith(".xls")) {
-    throw new Error("Formato não suportado. Use um ficheiro Excel (.xlsx, .xls) ou CSV (.csv).");
+    throw erro("sp.importar.erro.formato");
   }
-  if (file.size === 0) throw new Error("O ficheiro está vazio.");
+  if (file.size === 0) throw erro("sp.importar.erro.vazio");
   if (file.size > SUPPLIER_CATALOG_MAX_FILE_BYTES) {
-    throw new Error("O ficheiro é demasiado grande (máximo 10 MB).");
+    throw erro("sp.importar.erro.grande");
   }
 
   const buffer = await file.arrayBuffer();
@@ -286,10 +369,10 @@ export async function readSupplierCatalogFile(file: File): Promise<ParsedSupplie
     try {
       workbook = XLSX.read(buffer, { type: "array", cellFormula: false, cellHTML: false, cellDates: false });
     } catch {
-      throw new Error("Não foi possível ler o ficheiro. Confirme que é um Excel válido.");
+      throw erro("sp.importar.erro.invalido");
     }
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
-    if (!sheet || !sheet["!ref"]) throw new Error("O ficheiro não tem dados na primeira folha.");
+    if (!sheet || !sheet["!ref"]) throw erro("sp.importar.erro.semDados");
     firstRowNumber = XLSX.utils.decode_range(sheet["!ref"]).s.r + 1;
     matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: true, blankrows: true }) as unknown[][];
     formattedMatrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "", raw: false, blankrows: true }) as unknown[][];
@@ -308,7 +391,7 @@ export async function readSupplierCatalogFile(file: File): Promise<ParsedSupplie
 
   const isEmptyRow = (r: unknown[] | undefined) => !Array.isArray(r) || r.every((c) => cellToText(c) === "");
   const headerIdx = matrix.findIndex((r) => !isEmptyRow(r));
-  if (headerIdx === -1) throw new Error("O ficheiro está vazio.");
+  if (headerIdx === -1) throw erro("sp.importar.erro.vazio");
 
   const headers = (matrix[headerIdx] as unknown[]).map((c) => cellToText(c));
   const width = headers.length;
@@ -324,25 +407,12 @@ export async function readSupplierCatalogFile(file: File): Promise<ParsedSupplie
       : cells;
     rows.push({ rowNumber: firstRowNumber + i, cells, codeCells });
     if (rows.length > SUPPLIER_CATALOG_MAX_ROWS) {
-      throw new Error(
-        `O ficheiro tem mais de ${SUPPLIER_CATALOG_MAX_ROWS} linhas de artigos. Divida-o em ficheiros mais pequenos.`,
-      );
+      throw erro("sp.importar.erro.demasiadasLinhas", { max: SUPPLIER_CATALOG_MAX_ROWS });
     }
   }
-  if (rows.length === 0) throw new Error("O ficheiro só tem cabeçalhos: não há linhas de artigos.");
+  if (rows.length === 0) throw erro("sp.importar.erro.soCabecalhos");
 
-  // Mapeamento automático pelos cabeçalhos; cada campo só uma vez.
-  const used = new Set<SpCatalogField>();
-  const autoMapping = headers.map((h) => {
-    const norm = normalizeHeader(h);
-    if (!norm) return null;
-    const col = SUPPLIER_CATALOG_COLUMNS.find((c) => !used.has(c.field) && c.aliases.includes(norm));
-    if (!col) return null;
-    used.add(col.field);
-    return col.field;
-  });
-
-  return { fileName: file.name, headers, rows, autoMapping };
+  return { fileName: file.name, headers, rows, autoMapping: autoMapHeaders(headers) };
 }
 
 /**

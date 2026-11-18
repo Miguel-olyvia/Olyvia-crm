@@ -112,8 +112,9 @@ describe("traduzirN: plurais", () => {
     expect(traduzirN("en", "pc.artigos.um", "pc.artigos.varios", 5)).toBe("5 items");
   });
 
-  it("formata {n} pelo idioma", () => {
-    expect(traduzirN("en", "pc.artigos.um", "pc.artigos.varios", 1500)).toBe("1,500 items");
+  it("formata {n} sempre em pt-PT: o formato dos números não segue o idioma", () => {
+    expect(traduzirN("en", "pc.artigos.um", "pc.artigos.varios", 1500)).toBe("1500 items");
+    expect(traduzirN("en", "pc.artigos.um", "pc.artigos.varios", 15000)).toBe(`${(15000).toLocaleString("pt-PT")} items`);
     expect(traduzirN("pt", "pc.artigos.um", "pc.artigos.varios", 15000)).toBe(`${(15000).toLocaleString("pt-PT")} artigos`);
   });
 

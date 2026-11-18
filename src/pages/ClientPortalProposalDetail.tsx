@@ -24,29 +24,32 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useCooldown, OTP_COOLDOWN_SECONDS } from "@/hooks/useCooldown";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { MOTIVOS_REJEICAO_PROPOSTA } from "@/components/portal/motivosRejeicao";
+import {
+  mensagemDeChave,
+  mensagemDeTexto,
+  resolverMensagem,
+  usePortalFormato,
+  usePortalT,
+  type MensagemDoPortal,
+} from "@/portal-i18n";
 
-const STATUS_LABELS: Record<string, string> = {
-  sent: "A aguardar decisão",
-  pending: "A aguardar decisão",
-  draft: "Rascunho",
-  accepted: "Proposta aceite",
-  rejected: "Proposta rejeitada",
-  expired: "Proposta expirada",
+// Estado da proposta -> chave da etiqueta. Um estado desconhecido mostra-se como vem.
+const STATUS_LABEL_KEYS: Record<string, string> = {
+  sent: "pc.propostaDet.estado.aguardaDecisao",
+  pending: "pc.propostaDet.estado.aguardaDecisao",
+  draft: "pc.propostaDet.estado.rascunho",
+  accepted: "pc.propostaDet.estado.aceite",
+  rejected: "pc.propostaDet.estado.rejeitada",
+  expired: "pc.propostaDet.estado.expirada",
 };
-
-const REJECTION_REASONS = [
-  "Preço alto",
-  "Encontrei alternativa",
-  "Já não preciso",
-  "Prazo não serve",
-  "Vou adiar",
-  "Outro",
-];
 
 const ClientPortalProposalDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { t, idioma } = usePortalT();
+  const { formatarData } = usePortalFormato();
   const otpCooldown = useCooldown(OTP_COOLDOWN_SECONDS);
   const otpSendingRef = useRef(false);
 
@@ -65,7 +68,9 @@ const ClientPortalProposalDetail = () => {
   const [otpStep, setOtpStep] = useState<"idle" | "sending" | "input" | "verifying" | "verified">("idle");
   const [otpCode, setOtpCode] = useState("");
   const [maskedPhone, setMaskedPhone] = useState("");
-  const [otpError, setOtpError] = useState("");
+  // Guarda a CHAVE (ou o texto do servidor) e traduz ao mostrar: mudar de idioma muda o erro visível.
+  const [otpErro, setOtpError] = useState<MensagemDoPortal | null>(null);
+  const otpError = resolverMensagem(otpErro, idioma);
 
   const hasLoadedOnceRef = useRef(false);
 
@@ -113,7 +118,7 @@ const ClientPortalProposalDetail = () => {
     const { data, error } = await supabase.storage.from("documents").download(att.file_url);
     if (error || !data) {
       captureFlowError(error, "client-portal-proposal");
-      toast({ title: "Erro ao descarregar", description: error?.message, variant: "destructive" });
+      toast({ title: t("pc.propostaDet.anexos.erroDescarregar"), description: error?.message, variant: "destructive" });
       return;
     }
     // M3: full download pattern (Firefox/Safari safe)
@@ -150,11 +155,11 @@ const ClientPortalProposalDetail = () => {
         body: { action: "accept_quote", quote_id: quoteId },
       });
       if (error) throw error;
-      toast({ title: "Orçamento aceite", description: "O orçamento foi aceite com sucesso." });
+      toast({ title: t("pc.propostaDet.orcamento.aceiteTitulo"), description: t("pc.propostaDet.orcamento.aceiteTexto") });
       await reloadPortalData();
     } catch (error: any) {
       captureFlowError(error, "client-portal-proposal");
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      toast({ title: t("pc.propostaDet.erro"), description: error.message, variant: "destructive" });
     } finally {
       setActionLoading(false);
     }
@@ -166,11 +171,11 @@ const ClientPortalProposalDetail = () => {
       await supabase.functions.invoke("client-portal-action", {
         body: { action: "reject_quote", quote_id: quoteId },
       });
-      toast({ title: "Orçamento rejeitado" });
+      toast({ title: t("pc.propostaDet.orcamento.rejeitadoTitulo") });
       await reloadPortalData();
     } catch (error: any) {
       captureFlowError(error, "client-portal-proposal");
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      toast({ title: t("pc.propostaDet.erro"), description: error.message, variant: "destructive" });
     } finally {
       setActionLoading(false);
     }
@@ -186,8 +191,8 @@ const ClientPortalProposalDetail = () => {
     const hasSelectedQuote = selectedQuoteIds.length > 0;
     if (quotes.length > 0 && !hasAcceptedQuote && !hasSelectedQuote) {
       toast({
-        title: "Aceite pelo menos 1 orçamento",
-        description: "Antes de assinar a proposta, aceite pelo menos um orçamento.",
+        title: t("pc.propostaDet.orcamento.aceitePeloMenosUmTitulo"),
+        description: t("pc.propostaDet.orcamento.aceitePeloMenosUmTexto"),
         variant: "destructive",
       });
       return;
@@ -199,7 +204,7 @@ const ClientPortalProposalDetail = () => {
     otpSendingRef.current = true;
     // No Reenviar o passo não muda: o campo do código e o que já foi escrito mantêm-se.
     if (!isResend) setOtpStep("sending");
-    setOtpError("");
+    setOtpError(null);
     try {
       const { data, error } = await supabase.functions.invoke("sms-otp", {
         body: { action: "send_otp", reference_id: id, reference_type: "proposal", purpose: "proposal_signature" },
@@ -208,7 +213,7 @@ const ClientPortalProposalDetail = () => {
       if (error) throw new Error(error.message);
       if (data?.error) {
         if (data.error === "no_phone") {
-          setOtpError("Não foi encontrado um número de telefone associado à sua conta. Contacte o comercial.");
+          setOtpError(mensagemDeChave("pc.propostaDet.sms.semTelefone"));
           if (!isResend) setOtpStep("idle");
           return;
         }
@@ -218,12 +223,12 @@ const ClientPortalProposalDetail = () => {
       setMaskedPhone(data.masked_phone || "");
       setOtpStep("input");
       if (!isResend) otpCooldown.iniciar();
-      toast({ title: "Código SMS enviado", description: `Enviámos um código para ${data.masked_phone}` });
+      toast({ title: t("pc.propostaDet.sms.enviadoTitulo"), description: t("pc.propostaDet.sms.enviadoTexto", { telefone: data.masked_phone }) });
     } catch (err: any) {
-      setOtpError(err.message);
+      setOtpError(mensagemDeTexto(err.message));
       if (!isResend) setOtpStep("idle");
       captureFlowError(err, "client-portal-proposal");
-      toast({ title: "Erro ao enviar SMS", description: err.message, variant: "destructive" });
+      toast({ title: t("pc.propostaDet.sms.erroEnviar"), description: err.message, variant: "destructive" });
     } finally {
       otpSendingRef.current = false;
     }
@@ -236,7 +241,7 @@ const ClientPortalProposalDetail = () => {
     if (!id) return; // H4
     if (otpCode.length !== 6) return;
     setOtpStep("verifying");
-    setOtpError("");
+    setOtpError(null);
     try {
       const { data, error } = await supabase.functions.invoke("sms-otp", {
         body: { action: "verify_otp", reference_id: id, reference_type: "proposal", code: otpCode, purpose: "proposal_signature" },
@@ -244,15 +249,15 @@ const ClientPortalProposalDetail = () => {
 
       // On non-2xx, supabase-js sets error and data is null; parse the response body for a friendly message
       if (error) {
-        let friendly = "Código inválido. Tente novamente.";
+        let friendly: MensagemDoPortal = mensagemDeChave("pc.propostaDet.sms.codigoInvalidoTentar");
         try {
           const ctx: any = (error as any).context;
           if (ctx && typeof ctx.json === "function") {
             const body = await ctx.json();
-            if (body?.message) friendly = body.message;
+            if (body?.message) friendly = mensagemDeTexto(body.message);
           } else if (ctx?.body) {
             const body = typeof ctx.body === "string" ? JSON.parse(ctx.body) : ctx.body;
-            if (body?.message) friendly = body.message;
+            if (body?.message) friendly = mensagemDeTexto(body.message);
           }
         } catch {}
         setOtpError(friendly);
@@ -261,7 +266,7 @@ const ClientPortalProposalDetail = () => {
         return;
       }
       if (data?.error) {
-        setOtpError(data.message || "Código inválido");
+        setOtpError(data.message ? mensagemDeTexto(data.message) : mensagemDeChave("pc.propostaDet.sms.codigoInvalido"));
         setOtpStep("input");
         setOtpCode("");
         return;
@@ -276,7 +281,7 @@ const ClientPortalProposalDetail = () => {
       // (sign_proposal rejected, or a network/CORS failure) — that message
       // wrongly told the client the code they entered was wrong. Now shows the
       // real reason propagated from signProposalAfterOtp()/client-portal-action.
-      setOtpError(err.message || "Ocorreu um erro ao assinar a proposta. Tente novamente.");
+      setOtpError(err.message ? mensagemDeTexto(err.message) : mensagemDeChave("pc.propostaDet.assinatura.erroGenerico"));
       setOtpStep("input");
       setOtpCode("");
     }
@@ -323,16 +328,16 @@ const ClientPortalProposalDetail = () => {
       if (data?.error) throw new Error(data.message || data.error);
 
       toast({
-        title: "Proposta assinada com sucesso! 🎉",
+        title: t("pc.propostaDet.assinatura.sucessoTitulo"),
         description: portalData?.commercial?.name
-          ? `Obrigado! O comercial ${portalData.commercial.name} irá contactá-lo brevemente.`
-          : "Obrigado! Entraremos em contacto brevemente.",
+          ? t("pc.propostaDet.assinatura.sucessoComercial", { nome: portalData.commercial.name })
+          : t("pc.propostaDet.assinatura.sucessoGenerico"),
       });
 
       await reloadPortalData();
     } catch (error: any) {
       captureFlowError(error, "client-portal-proposal");
-      toast({ title: "Erro ao assinar", description: error.message, variant: "destructive" });
+      toast({ title: t("pc.propostaDet.assinatura.erroTitulo"), description: error.message, variant: "destructive" });
       throw error; // M9 — let verify catch reset the OTP step
     } finally {
       setActionLoading(false);
@@ -346,14 +351,14 @@ const ClientPortalProposalDetail = () => {
       await supabase.functions.invoke("client-portal-action", {
         body: { action: "reject_proposal", proposal_id: id, reason_code: rejectReason, reason_text: rejectNotes },
       });
-      toast({ title: "Proposta rejeitada", description: "Lamentamos. Obrigado pelo seu feedback." });
+      toast({ title: t("pc.propostaDet.rejeitar.feitaTitulo"), description: t("pc.propostaDet.rejeitar.feitaTexto") });
       setShowReject(false);
       setRejectReason("");
       setRejectNotes("");
       await reloadPortalData();
     } catch (error: any) {
       captureFlowError(error, "client-portal-proposal");
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      toast({ title: t("pc.propostaDet.erro"), description: error.message, variant: "destructive" });
     } finally {
       setActionLoading(false);
     }
@@ -371,12 +376,12 @@ const ClientPortalProposalDetail = () => {
           message: questionText.trim(),
         },
       });
-      toast({ title: "Dúvida enviada!", description: "O comercial será notificado e entrará em contacto." });
+      toast({ title: t("pc.propostaDet.duvida.enviadaTitulo"), description: t("pc.propostaDet.duvida.enviadaTexto") });
       setShowQuestion(false);
       setQuestionText("");
     } catch (error: any) {
       captureFlowError(error, "client-portal-proposal");
-      toast({ title: "Erro", description: error.message, variant: "destructive" });
+      toast({ title: t("pc.propostaDet.erro"), description: error.message, variant: "destructive" });
     } finally {
       setActionLoading(false);
     }
@@ -398,9 +403,9 @@ const ClientPortalProposalDetail = () => {
     return (
       <ClientPortalLayout>
         <div className="py-12 text-center">
-          <p className="text-muted-foreground">Proposta não encontrada.</p>
+          <p className="text-muted-foreground">{t("pc.propostaDet.naoEncontrada")}</p>
           <Button variant="ghost" onClick={() => navigate("/client-portal/proposals")} className="mt-4">
-            <ArrowLeft className="mr-2 h-4 w-4" /> Voltar
+            <ArrowLeft className="mr-2 h-4 w-4" /> {t("pc.propostaDet.voltar")}
           </Button>
         </div>
       </ClientPortalLayout>
@@ -409,13 +414,14 @@ const ClientPortalProposalDetail = () => {
 
   const proposal = portalData.proposal;
   const canActOnProposal = !["accepted", "rejected", "expired"].includes(proposal.status);
-  const statusLabel = proposal.status === "draft" && canActOnProposal ? "A aguardar decisão" : STATUS_LABELS[proposal.status] || proposal.status;
+  const statusLabelKey = proposal.status === "draft" && canActOnProposal ? "pc.propostaDet.estado.aguardaDecisao" : STATUS_LABEL_KEYS[proposal.status];
+  const statusLabel = statusLabelKey ? t(statusLabelKey) : proposal.status;
 
   return (
     <ClientPortalLayout>
       <div className="mx-auto w-full max-w-4xl space-y-5 py-4">
         <Button variant="ghost" size="sm" onClick={() => navigate("/client-portal/proposals")} className="w-fit gap-1">
-          <ArrowLeft className="h-4 w-4" /> Voltar
+          <ArrowLeft className="h-4 w-4" /> {t("pc.propostaDet.voltar")}
         </Button>
 
         <ProposalPortalDocument
@@ -427,6 +433,7 @@ const ClientPortalProposalDetail = () => {
           commercial={portalData.commercial}
           company={portalData.company}
           mode="portal"
+          idioma={idioma}
           statusLabel={statusLabel}
           canActOnProposal={canActOnProposal}
           actionLoading={actionLoading}
@@ -466,12 +473,12 @@ const ClientPortalProposalDetail = () => {
               // See utils/edgeFunctionResponse.ts.
               const payload = parseEdgeFunctionPayload<ProposalPdfPrefetch>(data);
               if (!payload) {
-                throw new Error("A resposta do servidor veio num formato inesperado. Contacta o suporte.");
+                throw new Error(t("pc.propostaDet.pdf.formatoInesperado"));
               }
               if (!payload.quotes?.length) {
                 toast({
-                  title: "Sem conteúdo para gerar o PDF",
-                  description: "Esta proposta não tem orçamentos associados.",
+                  title: t("pc.propostaDet.pdf.semConteudoTitulo"),
+                  description: t("pc.propostaDet.pdf.semConteudoTexto"),
                   variant: "destructive",
                 });
                 return;
@@ -480,7 +487,7 @@ const ClientPortalProposalDetail = () => {
               downloadBlob(blob, fileName);
             } catch (e: unknown) {
               toast({
-                title: "Erro ao gerar PDF",
+                title: t("pc.propostaDet.pdf.erroTitulo"),
                 description: await describeEdgeFunctionError(e),
                 variant: "destructive",
               });
@@ -493,7 +500,7 @@ const ClientPortalProposalDetail = () => {
             <CardContent className="p-5 space-y-3">
               <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
                 <Paperclip className="h-4 w-4" />
-                Documentos anexos ({attachments.length})
+                {t("pc.propostaDet.anexos.titulo", { n: attachments.length })}
               </h3>
               <div className="space-y-2">
                 {attachments.map((att) => (
@@ -502,11 +509,11 @@ const ClientPortalProposalDetail = () => {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{att.file_name}</p>
                       <p className="text-[11px] text-muted-foreground">
-                        {(att.file_type || "").toString().toUpperCase()} · {formatBytes(att.file_size)} · {new Date(att.created_at).toLocaleDateString("pt-PT")}
+                        {(att.file_type || "").toString().toUpperCase()} · {formatBytes(att.file_size)} · {formatarData(att.created_at, "numerico")}
                       </p>
                     </div>
                     <Button variant="outline" size="sm" onClick={() => handleDownloadAttachment(att)} className="gap-1.5">
-                      <Download className="h-3.5 w-3.5" /> Descarregar
+                      <Download className="h-3.5 w-3.5" /> {t("pc.propostaDet.anexos.descarregar")}
                     </Button>
                   </div>
                 ))}
@@ -517,41 +524,41 @@ const ClientPortalProposalDetail = () => {
 
         {/* Reject Dialog */}
         <Dialog open={showReject} onOpenChange={setShowReject}>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-md" closeLabel={t("pt.fechar")}>
             <DialogHeader>
-              <DialogTitle>Rejeitar Proposta</DialogTitle>
+              <DialogTitle>{t("pc.propostaDet.rejeitar.titulo")}</DialogTitle>
               <DialogDescription>
-                Indique o motivo da rejeição para nos ajudar a melhorar.
+                {t("pc.propostaDet.rejeitar.descricao")}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium">Motivo</label>
+                <label className="text-sm font-medium">{t("pc.propostaDet.rejeitar.motivo")}</label>
                 <Select value={rejectReason} onValueChange={setRejectReason}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Selecione um motivo" />
+                    <SelectValue placeholder={t("pc.propostaDet.rejeitar.motivoPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
-                    {REJECTION_REASONS.map((reason) => (
-                      <SelectItem key={reason} value={reason}>{reason}</SelectItem>
+                    {MOTIVOS_REJEICAO_PROPOSTA.map((motivo) => (
+                      <SelectItem key={motivo.valor} value={motivo.valor}>{t(motivo.chave)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium">Comentário (opcional)</label>
+                <label className="text-sm font-medium">{t("pc.propostaDet.rejeitar.comentario")}</label>
                 <Textarea
                   value={rejectNotes}
                   onChange={(e) => setRejectNotes(e.target.value)}
-                  placeholder="Adicione um comentário..."
+                  placeholder={t("pc.propostaDet.rejeitar.comentarioPlaceholder")}
                   rows={3}
                 />
               </div>
             </div>
             <DialogFooter>
-              <Button variant="ghost" onClick={() => setShowReject(false)}>Cancelar</Button>
+              <Button variant="ghost" onClick={() => setShowReject(false)}>{t("pc.propostaDet.rejeitar.cancelar")}</Button>
               <Button variant="destructive" onClick={handleRejectProposal} disabled={actionLoading}>
-                Confirmar Rejeição
+                {t("pc.propostaDet.rejeitar.confirmar")}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -559,25 +566,25 @@ const ClientPortalProposalDetail = () => {
 
         {/* Ask Question Dialog */}
         <Dialog open={showQuestion} onOpenChange={setShowQuestion}>
-          <DialogContent className="sm:max-w-md">
+          <DialogContent className="sm:max-w-md" closeLabel={t("pt.fechar")}>
             <DialogHeader>
-              <DialogTitle>💬 Tenho dúvidas</DialogTitle>
+              <DialogTitle>{t("pc.propostaDet.duvida.titulo")}</DialogTitle>
               <DialogDescription>
-                Envie a sua dúvida ao comercial responsável. Será notificado e entrará em contacto consigo.
+                {t("pc.propostaDet.duvida.descricao")}
               </DialogDescription>
             </DialogHeader>
             <div className="space-y-2">
               <Textarea
                 value={questionText}
                 onChange={(e) => setQuestionText(e.target.value)}
-                placeholder="Escreva a sua dúvida ou pedido de esclarecimento..."
+                placeholder={t("pc.propostaDet.duvida.placeholder")}
                 rows={4}
               />
             </div>
             <DialogFooter>
-              <Button variant="ghost" onClick={() => setShowQuestion(false)}>Cancelar</Button>
+              <Button variant="ghost" onClick={() => setShowQuestion(false)}>{t("pc.propostaDet.duvida.cancelar")}</Button>
               <Button onClick={handleAskQuestion} disabled={actionLoading || !questionText.trim()}>
-                Enviar Dúvida
+                {t("pc.propostaDet.duvida.enviar")}
               </Button>
             </DialogFooter>
           </DialogContent>

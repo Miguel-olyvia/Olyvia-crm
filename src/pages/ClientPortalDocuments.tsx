@@ -9,18 +9,38 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FolderOpen, FileDown, Download } from "lucide-react";
-import { format } from "date-fns";
-import { pt } from "date-fns/locale";
+import { usePortalFormato, usePortalT } from "@/portal-i18n";
+
+type Traduzir = ReturnType<typeof usePortalT>["t"];
 
 interface PortalDocument {
   id: string;
-  name: string;
+  name: string; // nome do ficheiro (dado); vazio no PDF da proposta, cujo nome se monta na apresentação
   url: string;
   bucket?: string | null; // if set, url is a storage path inside this bucket
   type: string;
-  source: string;
-  sourceLabel: string;
+  source: "contract" | "proposal" | "quote";
+  // Só no PDF gerado da proposta: o texto «Proposta {número}» NÃO se guarda montado (ficaria preso ao idioma
+  // em que a lista foi carregada); guardam-se os dados e monta-se ao mostrar, com t().
+  proposalPdf?: { ref: string; numero: string };
   date: string;
+}
+
+// Origem do anexo (chave do dicionário por tipo de entidade).
+const ORIGEM_KEYS: Record<PortalDocument["source"], string> = {
+  contract: "pc.documentos.origem.contrato",
+  proposal: "pc.documentos.origem.proposta",
+  quote: "pc.documentos.origem.orcamento",
+};
+
+function nomeDoDocumento(doc: PortalDocument, t: Traduzir): string {
+  return doc.proposalPdf ? t("pc.documentos.propostaRef", { ref: doc.proposalPdf.ref }) : doc.name;
+}
+
+function origemDoDocumento(doc: PortalDocument, t: Traduzir): string {
+  if (!doc.proposalPdf) return t(ORIGEM_KEYS[doc.source]);
+  const { numero } = doc.proposalPdf;
+  return numero ? t("pc.documentos.propostaRef", { ref: numero }) : t(ORIGEM_KEYS.proposal);
 }
 
 // M6: resolve the storage bucket for a document. The `documents` table has no
@@ -34,6 +54,8 @@ function resolveDocBucket(fileUrl: string): string | null {
 
 const ClientPortalDocuments = () => {
   const { toast } = useToast();
+  const { t } = usePortalT();
+  const { formatarData } = usePortalFormato();
   const [documents, setDocuments] = useState<PortalDocument[]>([]);
   const [loading, setLoading] = useState(true);
   // Empresa ativa do portal — ver src/contexts/PortalCompanyContext.tsx.
@@ -94,11 +116,11 @@ const ClientPortalDocuments = () => {
           if (p.document_url) {
             allDocs.push({
               id: `prop-${p.id}`,
-              name: `Proposta ${p.proposal_number || p.title}`,
+              name: "",
               url: p.document_url,
               type: "PDF",
               source: "proposal",
-              sourceLabel: `Proposta ${p.proposal_number || ""}`,
+              proposalPdf: { ref: p.proposal_number || p.title, numero: p.proposal_number || "" },
               date: p.created_at,
             });
           }
@@ -106,7 +128,7 @@ const ClientPortalDocuments = () => {
       }
 
       // Anexos unificados via documents (RLS trata do resto)
-      const docFilters: Array<{ type: string; ids: string[] }> = [];
+      const docFilters: Array<{ type: PortalDocument["source"]; ids: string[] }> = [];
       if (contractIds.length > 0) docFilters.push({ type: "contract", ids: contractIds });
       if (proposalIds.length > 0) docFilters.push({ type: "proposal", ids: proposalIds });
       const allQuoteIds = Array.from(indirectQuoteIds);
@@ -126,7 +148,6 @@ const ClientPortalDocuments = () => {
         if (cancelled) return;
 
         (docs || []).forEach((d: any) => {
-          const label = f.type === "contract" ? "Contrato" : f.type === "proposal" ? "Proposta" : "Orçamento";
           allDocs.push({
             id: d.id,
             name: d.file_name,
@@ -134,7 +155,6 @@ const ClientPortalDocuments = () => {
             bucket: resolveDocBucket(d.file_url), // M6
             type: (d.file_type || d.document_type || "").toString().toUpperCase(),
             source: f.type,
-            sourceLabel: label,
             date: d.created_at,
           });
         });
@@ -171,7 +191,7 @@ const ClientPortalDocuments = () => {
   return (
     <ClientPortalLayout>
       <div className="space-y-4">
-        <h2 className="text-xl font-bold text-foreground">Documentos</h2>
+        <h2 className="text-xl font-bold text-foreground">{t("pc.documentos.titulo")}</h2>
 
         {loading ? (
           <div className="space-y-3">
@@ -185,11 +205,11 @@ const ClientPortalDocuments = () => {
             <CardContent className="py-8 text-center">
               <FolderOpen className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
               <p className="text-muted-foreground">
-                Ainda não tem documentos disponíveis.
+                {t("pc.documentos.vazio")}
               </p>
               {hasMultiple && (
                 <p className="text-xs text-muted-foreground mt-1.5">
-                  Se esperava ver outros, troque de empresa no seletor no topo da página.
+                  {t("pc.documentos.vazioTroqueEmpresa")}
                 </p>
               )}
             </CardContent>
@@ -197,6 +217,7 @@ const ClientPortalDocuments = () => {
         ) : (
           <div className="space-y-2">
             {documents.map(doc => {
+              const nome = nomeDoDocumento(doc, t);
               const handleDownload = async (e: React.MouseEvent) => {
                 e.preventDefault();
                 try {
@@ -207,7 +228,7 @@ const ClientPortalDocuments = () => {
                     const blobUrl = URL.createObjectURL(data);
                     const a = document.createElement("a");
                     a.href = blobUrl;
-                    a.download = doc.name || "documento";
+                    a.download = nome || t("pc.documentos.nomeOmissao");
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
@@ -221,14 +242,14 @@ const ClientPortalDocuments = () => {
                   const blobUrl = URL.createObjectURL(blob);
                   const a = document.createElement("a");
                   a.href = blobUrl;
-                  a.download = doc.name || "documento";
+                  a.download = nome || t("pc.documentos.nomeOmissao");
                   document.body.appendChild(a);
                   a.click();
                   document.body.removeChild(a);
                   setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
                 } catch (err) {
                   console.error("download failed", err);
-                  toast({ title: "Erro ao descarregar", description: "Não foi possível descarregar o documento.", variant: "destructive" });
+                  toast({ title: t("pc.documentos.erroDescarregar.titulo"), description: t("pc.documentos.erroDescarregar.descricao"), variant: "destructive" });
                 }
               };
               return (
@@ -241,9 +262,9 @@ const ClientPortalDocuments = () => {
                     >
                       <FileDown className="h-5 w-5 text-primary shrink-0" />
                       <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium truncate">{doc.name}</p>
+                        <p className="text-sm font-medium truncate">{nome}</p>
                         <p className="text-xs text-muted-foreground">
-                          {doc.sourceLabel} • {doc.type} • {format(new Date(doc.date), "d MMM yyyy", { locale: pt })}
+                          {origemDoDocumento(doc, t)} • {doc.type} • {formatarData(doc.date, "curto")}
                         </p>
                       </div>
                       <Button variant="ghost" size="sm" asChild>

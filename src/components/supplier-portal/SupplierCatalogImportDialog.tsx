@@ -18,13 +18,22 @@ import {
 } from "@/lib/supplierPortal/spRpc";
 import {
   SUPPLIER_CATALOG_COLUMNS,
-  SUPPLIER_CATALOG_FIELD_LABELS,
   SUPPLIER_CATALOG_MAX_ROWS,
+  SupplierCatalogFileError,
   buildSupplierCatalogImportRows,
   downloadSupplierCatalogTemplate,
   readSupplierCatalogFile,
+  supplierCatalogFieldLabels,
+  supplierCatalogHeader,
   type ParsedSupplierCatalogFile,
 } from "@/utils/supplierPortalCatalogTemplate";
+import {
+  mensagemDeChave,
+  mensagemDeTexto,
+  resolverMensagem,
+  usePortalT,
+  type MensagemDoPortal,
+} from "@/portal-i18n";
 
 type Step = "file" | "map" | "preview" | "done";
 
@@ -39,17 +48,11 @@ interface SupplierCatalogImportDialogProps {
 const MAX_VISIBLE_ROWS = 300;
 
 const IGNORE = "__ignore__";
-const FIELD_OPTIONS = [
-  { value: IGNORE, label: "Ignorar esta coluna" },
-  ...SUPPLIER_CATALOG_COLUMNS.map((c) => ({
-    value: c.field,
-    label: c.field === "supplier_ref" ? `${c.header} (obrigatória)` : c.header,
-  })),
-];
 
-function formatValue(v: unknown): string {
-  if (v === null || v === undefined || v === "") return "(vazio)";
-  if (typeof v === "boolean") return v ? "sim" : "não";
+/** Um valor de uma alteração (antes/depois) para mostrar: vazio e sim/não seguem o idioma; os números ficam em pt-PT. */
+function formatValue(v: unknown, t: (chave: string) => string): string {
+  if (v === null || v === undefined || v === "") return t("sp.importar.valor.vazio");
+  if (typeof v === "boolean") return v ? t("sp.importar.valor.sim") : t("sp.importar.valor.nao");
   if (typeof v === "number") return v.toLocaleString("pt-PT", { maximumFractionDigits: 4 });
   return String(v);
 }
@@ -57,8 +60,10 @@ function formatValue(v: unknown): string {
 /**
  * Importar catálogo (XLSX/XLS/CSV) → mapear colunas → pré-visualizar
  * (sp_catalog_import dry_run=true) → gravar (dry_run=false). Só o owner.
+ * As mensagens por linha (`errors[]`) vêm do servidor, em português, e mostram-se como chegam.
  */
 export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, onNoAccess }: SupplierCatalogImportDialogProps) {
+  const { t, tn, idioma } = usePortalT();
   const [step, setStep] = useState<Step>("file");
   const [parsed, setParsed] = useState<ParsedSupplierCatalogFile | null>(null);
   const [mapping, setMapping] = useState<(SpCatalogField | null)[]>([]);
@@ -66,8 +71,26 @@ export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, on
   const [result, setResult] = useState<SpCatalogImportResult | null>(null);
   const [rows, setRows] = useState<SpCatalogRowInput[]>([]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Guarda a mensagem como chave (ou texto do servidor) e traduz ao mostrar: mudar de idioma muda o erro visível.
+  const [erro, setError] = useState<MensagemDoPortal | null>(null);
+  const error = resolverMensagem(erro, idioma);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const maxRows = SUPPLIER_CATALOG_MAX_ROWS;
+  const refHeader = supplierCatalogHeader("supplier_ref", idioma);
+  const fieldOptions = useMemo(
+    () => [
+      { value: IGNORE, label: t("sp.importar.mapa.ignorar") },
+      ...SUPPLIER_CATALOG_COLUMNS.map((c) => {
+        const header = supplierCatalogHeader(c.field, idioma);
+        return {
+          value: c.field,
+          label: c.field === "supplier_ref" ? t("sp.importar.mapa.obrigatoria", { coluna: header }) : header,
+        };
+      }),
+    ],
+    [t, idioma],
+  );
 
   const reset = () => {
     setStep("file");
@@ -93,7 +116,7 @@ export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, on
       onNoAccess();
       return;
     }
-    setError(spErrorMessage(err));
+    setError({ de: (lingua) => spErrorMessage(err, lingua) });
   };
 
   const handleFile = async (file: File | undefined) => {
@@ -101,12 +124,18 @@ export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, on
     setError(null);
     setBusy(true);
     try {
-      const p = await readSupplierCatalogFile(file);
+      const p = await readSupplierCatalogFile(file, idioma);
       setParsed(p);
       setMapping(p.autoMapping);
       setStep("map");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Não foi possível ler o ficheiro.");
+      setError(
+        err instanceof SupplierCatalogFileError
+          ? mensagemDeChave(err.chave, err.params)
+          : err instanceof Error
+            ? mensagemDeTexto(err.message)
+            : mensagemDeChave("sp.importar.ficheiro.naoLeu"),
+      );
       if (fileInputRef.current) fileInputRef.current.value = "";
     } finally {
       setBusy(false);
@@ -126,11 +155,11 @@ export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, on
     setError(null);
     const built = buildSupplierCatalogImportRows(parsed, mapping);
     if (built.length === 0) {
-      setError("Nenhuma linha com valores nas colunas escolhidas.");
+      setError(mensagemDeChave("sp.importar.mapa.semLinhas"));
       return;
     }
     if (built.length > SUPPLIER_CATALOG_MAX_ROWS) {
-      setError(`Máximo ${SUPPLIER_CATALOG_MAX_ROWS} linhas por importação.`);
+      setError(mensagemDeChave("sp.importar.mapa.maximo", { max: maxRows }));
       return;
     }
     setBusy(true);
@@ -166,15 +195,10 @@ export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, on
 
   return (
     <Dialog open={open} onOpenChange={close}>
-      <DialogContent className="sm:max-w-3xl max-h-[92vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-3xl max-h-[92vh] overflow-y-auto" closeLabel={t("pt.fechar")}>
         <DialogHeader>
-          <DialogTitle>Importar catálogo</DialogTitle>
-          <DialogDescription>
-            {step === "file" && "Escolha um ficheiro Excel (.xlsx, .xls) ou CSV com os seus artigos."}
-            {step === "map" && "Indique o que contém cada coluna do ficheiro."}
-            {step === "preview" && "Confira o que vai mudar antes de gravar. Nada foi gravado ainda."}
-            {step === "done" && "Importação concluída."}
-          </DialogDescription>
+          <DialogTitle>{t("sp.importar.titulo")}</DialogTitle>
+          <DialogDescription>{t(`sp.importar.descricao.${step}`)}</DialogDescription>
         </DialogHeader>
 
         {step === "file" && (
@@ -184,10 +208,8 @@ export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, on
               className="flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 sm:p-8 text-center cursor-pointer hover:bg-muted/50 focus-within:ring-2 focus-within:ring-ring"
             >
               <FileSpreadsheet className="h-8 w-8 text-muted-foreground" aria-hidden="true" />
-              <span className="text-sm font-medium">{busy ? "A ler o ficheiro…" : "Toque para escolher o ficheiro"}</span>
-              <span className="text-xs text-muted-foreground">
-                .xlsx, .xls ou .csv · até {SUPPLIER_CATALOG_MAX_ROWS} linhas · máx. 10 MB
-              </span>
+              <span className="text-sm font-medium">{busy ? t("sp.importar.ficheiro.aLer") : t("sp.importar.ficheiro.escolher")}</span>
+              <span className="text-xs text-muted-foreground">{t("sp.importar.ficheiro.formatos", { max: maxRows })}</span>
               <input
                 ref={fileInputRef}
                 id="sp-import-file"
@@ -199,10 +221,10 @@ export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, on
               />
             </label>
             <div className="flex flex-col sm:flex-row sm:items-center gap-2 text-sm text-muted-foreground">
-              <span>Não tem um ficheiro preparado?</span>
-              <Button type="button" variant="outline" className="h-11 gap-2" onClick={downloadSupplierCatalogTemplate}>
+              <span>{t("sp.importar.ficheiro.semFicheiro")}</span>
+              <Button type="button" variant="outline" className="h-11 gap-2" onClick={() => downloadSupplierCatalogTemplate(idioma)}>
                 <Download className="h-4 w-4" aria-hidden="true" />
-                Descarregar modelo
+                {t("sp.importar.ficheiro.modelo")}
               </Button>
             </div>
           </div>
@@ -211,7 +233,8 @@ export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, on
         {step === "map" && parsed && (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
-              <span className="font-medium text-foreground">{parsed.fileName}</span> · {parsed.rows.length} linha(s) de artigos
+              <span className="font-medium text-foreground">{parsed.fileName}</span> ·{" "}
+              {tn("sp.importar.mapa.linhas.um", "sp.importar.mapa.linhas.varios", parsed.rows.length)}
             </p>
             <div className="space-y-3">
               {parsed.headers.map((h, i) => {
@@ -220,18 +243,18 @@ export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, on
                   <div key={i} className="grid gap-1.5 sm:grid-cols-[1fr_16rem] sm:items-center rounded-md border p-3">
                     <div className="min-w-0">
                       <Label htmlFor={`sp-map-${i}`} className="font-medium">
-                        {h || `Coluna ${i + 1} (sem título)`}
+                        {h || t("sp.importar.mapa.semTitulo", { n: i + 1 })}
                       </Label>
                       {sample && (
                         <p className="text-xs text-muted-foreground truncate" title={sample}>
-                          ex.: {sample}
+                          {t("sp.importar.mapa.exemplo", { valor: sample })}
                         </p>
                       )}
                     </div>
                     <NativeSelect
                       id={`sp-map-${i}`}
                       className="h-11"
-                      options={FIELD_OPTIONS}
+                      options={fieldOptions}
                       value={mapping[i] ?? IGNORE}
                       onValueChange={(v) => setColumnField(i, v)}
                     />
@@ -241,19 +264,16 @@ export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, on
             </div>
             {!hasRef && (
               <Alert variant="destructive">
-                <AlertDescription>Escolha a coluna da referência (Ref.) — é obrigatória.</AlertDescription>
+                <AlertDescription>{t("sp.importar.mapa.semReferencia", { coluna: refHeader })}</AlertDescription>
               </Alert>
             )}
             {hasRef && !mappedFields.has("name") && (
               <Alert>
                 <AlertTriangle className="h-4 w-4" />
-                <AlertDescription>Sem coluna de Nome: só será possível atualizar artigos que já existem.</AlertDescription>
+                <AlertDescription>{t("sp.importar.mapa.semNome")}</AlertDescription>
               </Alert>
             )}
-            <p className="text-xs text-muted-foreground">
-              Uma coluna presente com a célula vazia apaga esse valor no artigo (exceto Nome e Ativo). Para não mexer
-              num campo, escolha «Ignorar esta coluna». Artigos que não estejam no ficheiro não são alterados nem desativados.
-            </p>
+            <p className="text-xs text-muted-foreground">{t("sp.importar.mapa.nota")}</p>
           </div>
         )}
 
@@ -262,9 +282,7 @@ export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, on
             <SummaryCounts r={preview} />
             <ResultTabs r={preview} />
             {preview.errors > 0 && (
-              <p className="text-xs text-muted-foreground">
-                As linhas com erro são saltadas. Pode corrigi-las no ficheiro e voltar a importar mais tarde.
-              </p>
+              <p className="text-xs text-muted-foreground">{t("sp.importar.previa.erroSaltado")}</p>
             )}
           </div>
         )}
@@ -274,10 +292,14 @@ export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, on
             <Alert>
               <CheckCircle2 className="h-4 w-4" />
               <AlertDescription>
-                {result.new + result.changed === 0
-                  ? "Nenhum artigo foi alterado."
-                  : `Gravado: ${result.new} novo(s) e ${result.changed} alterado(s).`}
-                {result.errors > 0 && ` ${result.errors} linha(s) com erro foram saltadas.`}
+                {[
+                  result.new + result.changed === 0
+                    ? t("sp.importar.fim.nada")
+                    : t("sp.importar.fim.gravado", { novos: result.new, alterados: result.changed }),
+                  result.errors > 0 ? tn("sp.importar.fim.erros.um", "sp.importar.fim.erros.varios", result.errors) : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
               </AlertDescription>
             </Alert>
             <SummaryCounts r={result} />
@@ -295,27 +317,31 @@ export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, on
           {step === "map" && (
             <>
               <Button type="button" variant="outline" className="h-11" onClick={reset} disabled={busy}>
-                Outro ficheiro
+                {t("sp.importar.botao.outroFicheiro")}
               </Button>
               <Button type="button" className="h-11 gap-2" onClick={() => void runPreview()} disabled={busy || !hasRef}>
-                {busy ? "A verificar…" : "Pré-visualizar"}
+                {busy ? t("sp.importar.botao.aVerificar") : t("sp.importar.botao.previsualizar")}
               </Button>
             </>
           )}
           {step === "preview" && (
             <>
               <Button type="button" variant="outline" className="h-11" onClick={() => setStep("map")} disabled={busy}>
-                Voltar
+                {t("sp.importar.botao.voltar")}
               </Button>
               <Button type="button" className="h-11 gap-2" onClick={() => void runImport()} disabled={busy || validCount === 0}>
                 <Upload className="h-4 w-4" aria-hidden="true" />
-                {busy ? "A gravar…" : validCount === 0 ? "Nada para gravar" : `Gravar ${validCount} linha(s) válida(s)`}
+                {busy
+                  ? t("sp.importar.botao.aGravar")
+                  : validCount === 0
+                    ? t("sp.importar.botao.nadaGravar")
+                    : tn("sp.importar.botao.gravar.um", "sp.importar.botao.gravar.varios", validCount)}
               </Button>
             </>
           )}
           {(step === "file" || step === "done") && (
             <Button type="button" variant={step === "done" ? "default" : "outline"} className="h-11" onClick={() => close(false)} disabled={busy}>
-              {step === "done" ? "Fechar" : "Cancelar"}
+              {step === "done" ? t("sp.importar.botao.fechar") : t("sp.importar.botao.cancelar")}
             </Button>
           )}
         </DialogFooter>
@@ -325,11 +351,12 @@ export function SupplierCatalogImportDialog({ open, onOpenChange, onImported, on
 }
 
 function SummaryCounts({ r }: { r: SpCatalogImportResult }) {
+  const { t } = usePortalT();
   const items = [
-    { label: "Novos", value: r.new, className: "text-emerald-700 dark:text-emerald-400" },
-    { label: "Alterados", value: r.changed, className: "text-blue-700 dark:text-blue-400" },
-    { label: "Iguais", value: r.unchanged, className: "text-muted-foreground" },
-    { label: "Com erro", value: r.errors, className: r.errors > 0 ? "text-destructive" : "text-muted-foreground" },
+    { label: t("sp.importar.resumo.novos"), value: r.new, className: "text-emerald-700 dark:text-emerald-400" },
+    { label: t("sp.importar.resumo.alterados"), value: r.changed, className: "text-blue-700 dark:text-blue-400" },
+    { label: t("sp.importar.resumo.iguais"), value: r.unchanged, className: "text-muted-foreground" },
+    { label: t("sp.importar.resumo.comErro"), value: r.errors, className: r.errors > 0 ? "text-destructive" : "text-muted-foreground" },
   ];
   return (
     <dl className="grid grid-cols-2 sm:grid-cols-4 gap-2">
@@ -344,6 +371,7 @@ function SummaryCounts({ r }: { r: SpCatalogImportResult }) {
 }
 
 function ResultTabs({ r }: { r: SpCatalogImportResult }) {
+  const { t } = usePortalT();
   const groups = {
     new: r.rows.filter((x) => x.status === "new"),
     changed: r.rows.filter((x) => x.status === "changed"),
@@ -353,9 +381,9 @@ function ResultTabs({ r }: { r: SpCatalogImportResult }) {
   return (
     <Tabs defaultValue={initial}>
       <TabsList className="w-full grid grid-cols-3 h-11">
-        <TabsTrigger value="new" className="h-9">Novos ({groups.new.length})</TabsTrigger>
-        <TabsTrigger value="changed" className="h-9">Alterados ({groups.changed.length})</TabsTrigger>
-        <TabsTrigger value="error" className="h-9">Erros ({groups.error.length})</TabsTrigger>
+        <TabsTrigger value="new" className="h-9">{t("sp.importar.separador.novos", { n: groups.new.length })}</TabsTrigger>
+        <TabsTrigger value="changed" className="h-9">{t("sp.importar.separador.alterados", { n: groups.changed.length })}</TabsTrigger>
+        <TabsTrigger value="error" className="h-9">{t("sp.importar.separador.erros", { n: groups.error.length })}</TabsTrigger>
       </TabsList>
       <TabsContent value="new"><RowList rows={groups.new} /></TabsContent>
       <TabsContent value="changed"><RowList rows={groups.changed} /></TabsContent>
@@ -365,7 +393,9 @@ function ResultTabs({ r }: { r: SpCatalogImportResult }) {
 }
 
 function RowList({ rows }: { rows: SpImportRowResult[] }) {
-  if (rows.length === 0) return <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma linha.</p>;
+  const { t, idioma } = usePortalT();
+  const fieldLabels = useMemo(() => supplierCatalogFieldLabels(idioma), [idioma]);
+  if (rows.length === 0) return <p className="text-sm text-muted-foreground py-4 text-center">{t("sp.importar.lista.nenhuma")}</p>;
   const visible = rows.slice(0, MAX_VISIBLE_ROWS);
   return (
     <div className="space-y-2">
@@ -373,8 +403,8 @@ function RowList({ rows }: { rows: SpImportRowResult[] }) {
         {visible.map((r, idx) => (
           <li key={`${r.row ?? "x"}-${idx}`} className="p-3 text-sm space-y-1">
             <div className="flex flex-wrap items-center gap-2">
-              {r.row !== null && <Badge variant="outline">Linha {r.row}</Badge>}
-              <span className="font-medium break-all">{r.supplier_ref || "(sem referência)"}</span>
+              {r.row !== null && <Badge variant="outline">{t("sp.importar.lista.linha", { n: r.row })}</Badge>}
+              <span className="font-medium break-all">{r.supplier_ref || t("sp.importar.lista.semReferencia")}</span>
               {r.name && <span className="text-muted-foreground break-words">· {r.name}</span>}
             </div>
             {r.errors && r.errors.length > 0 && (
@@ -387,9 +417,9 @@ function RowList({ rows }: { rows: SpImportRowResult[] }) {
                 {Object.entries(r.changes).map(([field, ch]) => (
                   <li key={field} className="break-words">
                     <span className="font-medium text-foreground">
-                      {SUPPLIER_CATALOG_FIELD_LABELS[field as SpCatalogField] ?? field}
+                      {fieldLabels[field as SpCatalogField] ?? field}
                     </span>
-                    : {formatValue(ch.old)} → {formatValue(ch.new)}
+                    : {formatValue(ch.old, t)} → {formatValue(ch.new, t)}
                   </li>
                 ))}
               </ul>
@@ -399,7 +429,7 @@ function RowList({ rows }: { rows: SpImportRowResult[] }) {
       </ul>
       {rows.length > MAX_VISIBLE_ROWS && (
         <p className="text-xs text-muted-foreground">
-          A mostrar {MAX_VISIBLE_ROWS} de {rows.length.toLocaleString("pt-PT")} linhas.
+          {t("sp.importar.lista.aMostrar", { max: MAX_VISIBLE_ROWS, total: rows.length.toLocaleString("pt-PT") })}
         </p>
       )}
     </div>

@@ -4,14 +4,19 @@
 import { describe, expect, it } from "vitest";
 import { dicionarios } from "./dicionarios";
 
-// Os ficheiros lidos como texto (sem node:fs): ClientPortal*.tsx, components/portal/*, SupplierPortal*.tsx e
-// components/supplier-portal/*, sem testes. Se um padrão não apanha nada, o objeto vem vazio e o teste passa.
+// Os ficheiros lidos como texto (sem node:fs): ClientPortal*.tsx, components/portal/*, SupplierPortal*.tsx,
+// components/supplier-portal/*, os estados de contrato, lib/supplierPortal/*, ProposalPortal*.tsx e o modelo de
+// catálogo do fornecedor, sem testes. Se um padrão não apanha nada, o objeto vem vazio e o teste passa.
 const ficheiros = import.meta.glob(
   [
     "/src/pages/ClientPortal*.{ts,tsx}",
     "/src/components/portal/**/*.{ts,tsx}",
     "/src/pages/SupplierPortal*.{ts,tsx}",
     "/src/components/supplier-portal/**/*.{ts,tsx}",
+    "/src/constants/contractStatus.ts",
+    "/src/lib/supplierPortal/*.ts",
+    "/src/components/proposals/ProposalPortal*.tsx",
+    "/src/utils/supplierPortalCatalogTemplate.ts",
     "!/src/**/*.test.*",
     "!/src/**/*.spec.*",
     "!/src/**/__tests__/**",
@@ -42,6 +47,38 @@ describe("extrairChaves (o próprio detetor)", () => {
       const e = "espt.x"; const f = "pc.com espaço";
     `;
     expect(extrairChaves(codigo)).toEqual([]);
+  });
+});
+
+describe("o varrimento cobre os ficheiros fora das pastas dos portais", () => {
+  const caminhos = Object.keys(ficheiros);
+
+  it("estados de contrato, lib/supplierPortal, ProposalPortal*.tsx e o modelo de catálogo", () => {
+    expect(caminhos).toEqual(
+      expect.arrayContaining([
+        "/src/constants/contractStatus.ts",
+        "/src/lib/supplierPortal/spRpc.ts",
+        "/src/lib/supplierPortal/supplierDataForm.ts",
+        "/src/components/proposals/ProposalPortalDocument.tsx",
+        "/src/components/proposals/ProposalPortalOtpSection.tsx",
+        "/src/utils/supplierPortalCatalogTemplate.ts",
+      ]),
+    );
+  });
+
+  it("R5: o detalhe do contrato usa o prefixo pc.contratoDet.* para assinado/anulado em (não pc.contratos.*)", () => {
+    const chaves = extrairChaves(ficheiros["/src/pages/ClientPortalContractDetail.tsx"] ?? "");
+    expect(chaves.filter((k) => k.startsWith("pc.contratos."))).toEqual([]);
+    expect(chaves).toEqual(expect.arrayContaining(["pc.contratoDet.assinadoEm", "pc.contratoDet.anuladoEm"]));
+    for (const k of ["pc.contratos.assinadoEm", "pc.contratos.anuladoEm"]) {
+      expect(k in dicionarios.pt).toBe(false);
+      expect(k in dicionarios.en).toBe(false);
+    }
+  });
+
+  it("e apanha chaves lá dentro (os estados de contrato têm chaves pc.estado.contrato.*)", () => {
+    const chaves = extrairChaves(ficheiros["/src/constants/contractStatus.ts"] ?? "");
+    expect(chaves).toContain("pc.estado.contrato.aguardaDecisao");
   });
 });
 

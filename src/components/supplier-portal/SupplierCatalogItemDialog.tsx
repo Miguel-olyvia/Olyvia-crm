@@ -13,6 +13,7 @@ import {
   type SpCatalogItem,
   type SpCatalogRowInput,
 } from "@/lib/supplierPortal/spRpc";
+import { mensagemDeChave, resolverMensagem, usePortalT, type MensagemDoPortal } from "@/portal-i18n";
 
 interface SupplierCatalogItemDialogProps {
   open: boolean;
@@ -38,6 +39,10 @@ interface FormState {
   is_active: boolean;
 }
 
+/**
+ * Um número para o campo de texto: vírgula decimal, como sempre, nos dois idiomas (o formato dos números não
+ * segue o idioma do portal). O servidor aceita ponto e vírgula; o que se envia é o que está no campo.
+ */
 const numToText = (n: number | null | undefined): string =>
   n === null || n === undefined ? "" : String(n).replace(".", ",");
 
@@ -65,9 +70,12 @@ const TEXT_FIELDS = [
 
 /** Criar/editar um artigo (sp_catalog_upsert_item). Só para o owner. */
 export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, onNoAccess }: SupplierCatalogItemDialogProps) {
+  const { t, idioma } = usePortalT();
   const [form, setForm] = useState<FormState>(() => toForm(item));
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Guarda a mensagem como chave (ou função do idioma) e traduz ao mostrar: mudar de idioma muda o erro visível.
+  const [erro, setError] = useState<MensagemDoPortal | null>(null);
+  const error = resolverMensagem(erro, idioma);
   const isEdit = !!item;
 
   useEffect(() => {
@@ -83,7 +91,7 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
     e.preventDefault();
     setError(null);
     if (!form.supplier_ref.trim() || !form.name.trim()) {
-      setError("A referência e o nome são obrigatórios.");
+      setError(mensagemDeChave("sp.catalogo.artigo.obrigatorios"));
       return;
     }
 
@@ -107,7 +115,7 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
         onNoAccess();
         return;
       }
-      setError(spErrorMessage(err));
+      setError({ de: (lingua) => spErrorMessage(err, lingua) });
     } finally {
       setSaving(false);
     }
@@ -115,64 +123,64 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
 
   return (
     <Dialog open={open} onOpenChange={(o) => !saving && onOpenChange(o)}>
-      <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto" closeLabel={t("pt.fechar")}>
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Editar artigo" : "Novo artigo"}</DialogTitle>
+          <DialogTitle>{isEdit ? t("sp.catalogo.artigo.tituloEditar") : t("sp.catalogo.artigo.tituloNovo")}</DialogTitle>
           <DialogDescription>
-            {isEdit ? "Altere os dados do artigo. Campos vazios ficam sem valor." : "Preencha pelo menos a referência e o nome."}
+            {isEdit ? t("sp.catalogo.artigo.descricaoEditar") : t("sp.catalogo.artigo.descricaoNovo")}
           </DialogDescription>
         </DialogHeader>
 
         <form id="sp-item-form" onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
-          <Field id="sp-ref" label="Referência *">
+          <Field id="sp-ref" label={t("sp.catalogo.artigo.referencia")}>
             <Input id="sp-ref" className="h-11" maxLength={100} value={form.supplier_ref}
               onChange={(e) => set("supplier_ref", e.target.value)} required autoComplete="off" />
           </Field>
-          <Field id="sp-barcode" label="Código de barras" hint="8 a 14 dígitos">
+          <Field id="sp-barcode" label={t("sp.catalogo.artigo.codigoBarras")} hint={t("sp.catalogo.artigo.codigoBarrasDica")}>
             <Input id="sp-barcode" className="h-11" inputMode="numeric" maxLength={20} value={form.barcode}
               onChange={(e) => set("barcode", e.target.value)} autoComplete="off" />
           </Field>
-          <Field id="sp-name" label="Nome *" className="sm:col-span-2">
+          <Field id="sp-name" label={t("sp.catalogo.artigo.nome")} className="sm:col-span-2">
             <Input id="sp-name" className="h-11" maxLength={300} value={form.name}
               onChange={(e) => set("name", e.target.value)} required />
           </Field>
-          <Field id="sp-desc" label="Descrição" className="sm:col-span-2">
+          <Field id="sp-desc" label={t("sp.catalogo.artigo.descricao")} className="sm:col-span-2">
             <Textarea id="sp-desc" rows={3} maxLength={2000} value={form.description}
               onChange={(e) => set("description", e.target.value)} />
           </Field>
-          <Field id="sp-brand" label="Marca">
+          <Field id="sp-brand" label={t("sp.catalogo.artigo.marca")}>
             <Input id="sp-brand" className="h-11" maxLength={100} value={form.brand}
               onChange={(e) => set("brand", e.target.value)} />
           </Field>
-          <Field id="sp-unit" label="Unidade" hint="ex.: un, cx, m, kg">
+          <Field id="sp-unit" label={t("sp.catalogo.artigo.unidade")} hint={t("sp.catalogo.artigo.unidadeDica")}>
             <Input id="sp-unit" className="h-11" maxLength={30} value={form.unit_label}
               onChange={(e) => set("unit_label", e.target.value)} />
           </Field>
-          <Field id="sp-upp" label="Unidades por embalagem">
+          <Field id="sp-upp" label={t("sp.catalogo.artigo.unidadesEmbalagem")}>
             <Input id="sp-upp" className="h-11" inputMode="decimal" value={form.units_per_pack}
               onChange={(e) => set("units_per_pack", e.target.value)} />
           </Field>
           <div className="grid grid-cols-[1fr_6rem] gap-3">
-            <Field id="sp-price" label="Preço (sem IVA)">
+            <Field id="sp-price" label={t("sp.catalogo.artigo.preco")}>
               <Input id="sp-price" className="h-11" inputMode="decimal" value={form.base_price}
                 onChange={(e) => set("base_price", e.target.value)} />
             </Field>
-            <Field id="sp-currency" label="Moeda">
+            <Field id="sp-currency" label={t("sp.catalogo.artigo.moeda")}>
               <Input id="sp-currency" className="h-11 uppercase" maxLength={3} value={form.currency}
                 onChange={(e) => set("currency", e.target.value.toUpperCase())} />
             </Field>
           </div>
-          <Field id="sp-moq" label="Quantidade mínima">
+          <Field id="sp-moq" label={t("sp.catalogo.artigo.minimo")}>
             <Input id="sp-moq" className="h-11" inputMode="decimal" value={form.moq}
               onChange={(e) => set("moq", e.target.value)} />
           </Field>
-          <Field id="sp-lead" label="Prazo de entrega (dias)">
+          <Field id="sp-lead" label={t("sp.catalogo.artigo.prazo")}>
             <Input id="sp-lead" className="h-11" inputMode="numeric" value={form.lead_time_days}
               onChange={(e) => set("lead_time_days", e.target.value)} />
           </Field>
           {isEdit && (
             <div className="sm:col-span-2 flex items-center justify-between rounded-md border p-3 min-h-11">
-              <Label htmlFor="sp-active" className="cursor-pointer">Artigo ativo</Label>
+              <Label htmlFor="sp-active" className="cursor-pointer">{t("sp.catalogo.artigo.ativo")}</Label>
               <Switch id="sp-active" checked={form.is_active} onCheckedChange={(v) => set("is_active", v)} />
             </div>
           )}
@@ -186,10 +194,14 @@ export function SupplierCatalogItemDialog({ open, item, onOpenChange, onSaved, o
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button type="button" variant="outline" className="h-11" onClick={() => onOpenChange(false)} disabled={saving}>
-            Cancelar
+            {t("sp.catalogo.artigo.cancelar")}
           </Button>
           <Button type="submit" form="sp-item-form" className="h-11" disabled={saving}>
-            {saving ? "A guardar..." : isEdit ? "Guardar alterações" : "Criar artigo"}
+            {saving
+              ? t("sp.catalogo.artigo.aGuardar")
+              : isEdit
+                ? t("sp.catalogo.artigo.guardar")
+                : t("sp.catalogo.artigo.criar")}
           </Button>
         </DialogFooter>
       </DialogContent>

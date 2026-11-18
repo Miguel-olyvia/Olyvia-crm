@@ -14,11 +14,12 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { spConfirmOrder, type SpConfirmOrderResult, type SpOrderDetail } from "@/lib/supplierPortal/spRpc";
 import { formatSpDate } from "@/components/supplier-portal/spOrderFormat";
+import { usePortalT } from "@/portal-i18n";
 
 const COMMENT_MAX = 1000;
 const MAX_DAYS_AHEAD = 730;
 
-/** Hoje em Lisboa (a RPC valida a data na hora de Lisboa), "YYYY-MM-DD". */
+/** Hoje em Lisboa (a RPC valida a data na hora de Lisboa), "YYYY-MM-DD". O en-CA é técnico: não segue o idioma. */
 function todayLisbon(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/Lisbon",
@@ -51,6 +52,7 @@ interface Props {
  * a empresa reenviou entretanto, a RPC responde stale_revision (tratado em onError).
  */
 export function SpConfirmOrderDialog({ open, onOpenChange, order, revision, onConfirmed, onError }: Props) {
+  const { t, idioma } = usePortalT();
   const [date, setDate] = useState("");
   const [comment, setComment] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -72,9 +74,9 @@ export function SpConfirmOrderDialog({ open, onOpenChange, order, revision, onCo
 
   const validateDate = (value: string): string | null => {
     if (!value) return null;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return "Data inválida.";
-    if (value < minDate) return `A data não pode ser anterior a ${formatSpDate(minDate)}.`;
-    if (value > maxDate) return `A data não pode ser posterior a ${formatSpDate(maxDate)}.`;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return t("sp.encomendaDet.dialogo.dataInvalida");
+    if (value < minDate) return t("sp.encomendaDet.dialogo.dataAnterior", { data: formatSpDate(minDate, idioma) });
+    if (value > maxDate) return t("sp.encomendaDet.dialogo.dataPosterior", { data: formatSpDate(maxDate, idioma) });
     return null;
   };
 
@@ -101,13 +103,10 @@ export function SpConfirmOrderDialog({ open, onOpenChange, order, revision, onCo
 
   return (
     <Dialog open={open} onOpenChange={(v) => !submitting && onOpenChange(v)}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" closeLabel={t("pt.fechar")}>
         <DialogHeader>
-          <DialogTitle>Confirmar encomenda {order.order_number}</DialogTitle>
-          <DialogDescription>
-            A empresa {order.company.name} é avisada da confirmação. Depois de confirmar, a data e o comentário já não podem
-            ser alterados aqui.
-          </DialogDescription>
+          <DialogTitle>{t("sp.encomendaDet.dialogo.titulo", { numero: order.order_number })}</DialogTitle>
+          <DialogDescription>{t("sp.encomendaDet.dialogo.descricao", { empresa: order.company.name })}</DialogDescription>
         </DialogHeader>
 
         <form
@@ -119,7 +118,7 @@ export function SpConfirmOrderDialog({ open, onOpenChange, order, revision, onCo
           }}
         >
           <div className="space-y-1.5">
-            <Label htmlFor="sp-confirm-date">Data de entrega prevista (opcional)</Label>
+            <Label htmlFor="sp-confirm-date">{t("sp.encomendaDet.dialogo.data")}</Label>
             <Input
               id="sp-confirm-date"
               type="date"
@@ -141,21 +140,21 @@ export function SpConfirmOrderDialog({ open, onOpenChange, order, revision, onCo
             ) : (
               <p id="sp-confirm-date-help" className="text-xs text-muted-foreground">
                 {order.expected_delivery
-                  ? `A empresa pediu entrega até ${formatSpDate(order.expected_delivery)}.`
-                  : "A empresa não indicou data de entrega."}
+                  ? t("sp.encomendaDet.dialogo.ajudaPediu", { data: formatSpDate(order.expected_delivery, idioma) })
+                  : t("sp.encomendaDet.dialogo.ajudaSem")}
               </p>
             )}
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="sp-confirm-comment">Comentário (opcional)</Label>
+            <Label htmlFor="sp-confirm-comment">{t("sp.encomendaDet.dialogo.comentario")}</Label>
             <Textarea
               id="sp-confirm-comment"
               rows={4}
               maxLength={COMMENT_MAX}
               value={comment}
               onChange={(e) => setComment(e.target.value.slice(0, COMMENT_MAX))}
-              placeholder="Ex.: entrega em duas vezes, artigo X com prazo maior…"
+              placeholder={t("sp.encomendaDet.dialogo.comentarioExemplo")}
               aria-describedby="sp-confirm-comment-count"
             />
             <p id="sp-confirm-comment-count" className="text-xs text-muted-foreground text-right" aria-live="polite">
@@ -166,11 +165,11 @@ export function SpConfirmOrderDialog({ open, onOpenChange, order, revision, onCo
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="outline" className="h-11" onClick={() => onOpenChange(false)} disabled={submitting}>
-            Cancelar
+            {t("sp.encomendaDet.dialogo.cancelar")}
           </Button>
           <Button type="submit" form="sp-confirm-order-form" className="h-11 gap-2" disabled={submitting}>
             {submitting && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-            Confirmar encomenda
+            {t("sp.encomendaDet.confirmar")}
           </Button>
         </DialogFooter>
       </DialogContent>

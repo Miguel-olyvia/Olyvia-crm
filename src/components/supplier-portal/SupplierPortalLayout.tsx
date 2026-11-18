@@ -10,19 +10,21 @@ import { SupplierPortalProvider, useSupplierPortal } from "@/contexts/SupplierPo
 import { SupplierFirstLoginModal } from "@/components/supplier-portal/SupplierFirstLoginModal";
 import { SupplierConfirmDataModal } from "@/components/supplier-portal/SupplierConfirmDataModal";
 import { useSpOrdersToConfirm } from "@/components/supplier-portal/useSpOrdersToConfirm";
+import { PortalLanguageProvider, PortalSeletorIdioma, usePortalT } from "@/portal-i18n";
 
 const NAV_ITEMS = [
-  { label: "Início", icon: Home, path: "/supplier-portal", end: true, badge: false },
-  { label: "Encomendas", icon: ClipboardList, path: "/supplier-portal/orders", end: false, badge: true },
-  { label: "Catálogo", icon: Package, path: "/supplier-portal/catalog", end: false, badge: false },
-  { label: "Os meus dados", icon: IdCard, path: "/supplier-portal/profile", end: false, badge: false },
+  { labelKey: "sp.layout.menu.inicio", icon: Home, path: "/supplier-portal", end: true, badge: false },
+  { labelKey: "sp.layout.menu.encomendas", icon: ClipboardList, path: "/supplier-portal/orders", end: false, badge: true },
+  { labelKey: "sp.layout.menu.catalogo", icon: Package, path: "/supplier-portal/catalog", end: false, badge: false },
+  { labelKey: "sp.layout.menu.meusDados", icon: IdCard, path: "/supplier-portal/profile", end: false, badge: false },
 ];
 
 function FullScreenLoader() {
+  const { t } = usePortalT();
   return (
     <div className="min-h-screen flex items-center justify-center bg-background" role="status" aria-live="polite">
       <OlyviaLoader size={40} />
-      <span className="sr-only">A carregar…</span>
+      <span className="sr-only">{t("sp.layout.aCarregar")}</span>
     </div>
   );
 }
@@ -42,6 +44,7 @@ function useLogout() {
  */
 function SwitchToClientPortalButton({ className, compact }: { className?: string; compact?: boolean }) {
   const navigate = useNavigate();
+  const { t } = usePortalT();
   const { available, switchTo } = useClientSupplierSwitch();
   if (!available) return null;
   return (
@@ -49,32 +52,32 @@ function SwitchToClientPortalButton({ className, compact }: { className?: string
       variant="outline"
       onClick={() => navigate(switchTo("portal"))}
       className={cn("h-11 min-w-11 gap-1.5", className)}
-      aria-label="Mudar para Portal do Cliente"
-      title="Mudar para Portal do Cliente"
+      aria-label={t("sp.layout.mudarParaCliente")}
+      title={t("sp.layout.mudarParaCliente")}
     >
       <ArrowLeftRight className="h-4 w-4" aria-hidden="true" />
-      <span className={cn("text-sm", compact && "hidden md:inline")}>Mudar para Portal do Cliente</span>
+      <span className={cn("text-sm", compact && "hidden md:inline")}>{t("sp.layout.mudarParaCliente")}</span>
     </Button>
   );
 }
 
 function NoActiveAccessScreen({ email }: { email: string | null }) {
   const logout = useLogout();
+  const { t } = usePortalT();
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <div className="w-full max-w-sm text-center space-y-4">
         <div className="mx-auto h-12 w-12 rounded-full bg-muted flex items-center justify-center">
           <Building2 className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
         </div>
-        <h1 className="text-lg font-semibold text-foreground">Sem acesso ativo</h1>
-        <p className="text-sm text-muted-foreground">
-          A sua conta não tem nenhum acesso ativo ao portal. Contacte a empresa que o convidou.
-        </p>
-        {email && <p className="text-xs text-muted-foreground break-all">Sessão iniciada como {email}</p>}
+        <h1 className="text-lg font-semibold text-foreground">{t("sp.layout.semAcesso.titulo")}</h1>
+        <p className="text-sm text-muted-foreground">{t("sp.layout.semAcesso.texto")}</p>
+        {email && <p className="text-xs text-muted-foreground break-all">{t("sp.layout.semAcesso.sessao", { email })}</p>}
+        <PortalSeletorIdioma compacto />
         <SwitchToClientPortalButton className="w-full" />
         <Button className="w-full h-11 gap-2" variant="outline" onClick={() => void logout()}>
           <LogOut className="h-4 w-4" aria-hidden="true" />
-          Sair
+          {t("sp.layout.sair")}
         </Button>
       </div>
     </div>
@@ -84,24 +87,24 @@ function NoActiveAccessScreen({ email }: { email: string | null }) {
 /** sp_whoami falhou (rede/JWT): não se sabe se há acesso — nunca "Sem acesso ativo". */
 function LoadErrorScreen({ onRetry }: { onRetry: () => void }) {
   const logout = useLogout();
+  const { t } = usePortalT();
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <div className="w-full max-w-sm text-center space-y-4" role="alert">
         <div className="mx-auto h-12 w-12 rounded-full bg-muted flex items-center justify-center">
           <AlertTriangle className="h-6 w-6 text-muted-foreground" aria-hidden="true" />
         </div>
-        <h1 className="text-lg font-semibold text-foreground">Não foi possível carregar o portal</h1>
-        <p className="text-sm text-muted-foreground">
-          Verifique a ligação à internet e tente de novo.
-        </p>
+        <h1 className="text-lg font-semibold text-foreground">{t("sp.layout.erroCarregar.titulo")}</h1>
+        <p className="text-sm text-muted-foreground">{t("sp.layout.erroCarregar.texto")}</p>
+        <PortalSeletorIdioma compacto />
         <Button className="w-full h-11 gap-2" onClick={onRetry}>
           <RefreshCw className="h-4 w-4" aria-hidden="true" />
-          Tentar de novo
+          {t("sp.erro.tentarDeNovo")}
         </Button>
         <SwitchToClientPortalButton className="w-full" />
         <Button className="w-full h-11 gap-2" variant="outline" onClick={() => void logout()}>
           <LogOut className="h-4 w-4" aria-hidden="true" />
-          Sair
+          {t("sp.layout.sair")}
         </Button>
       </div>
     </div>
@@ -112,6 +115,7 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
   const { loading, loadError, active, account, user, companies, firstLogin, profileConfirmed, markPasswordChanged, refresh } =
     useSupplierPortal();
   const logout = useLogout();
+  const { t } = usePortalT();
   const { count: toConfirm } = useSpOrdersToConfirm();
 
   if (loading) return <FullScreenLoader />;
@@ -128,10 +132,10 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
           <p className="text-sm sm:text-base font-semibold text-foreground leading-tight truncate" title={account.display_name}>
             {account.display_name}
           </p>
-          <p className="text-[11px] font-medium text-primary leading-tight">Portal do Fornecedor</p>
+          <p className="text-[11px] font-medium text-primary leading-tight">{t("sp.layout.titulo")}</p>
           {companiesLabel && (
             <p className="hidden md:block text-[11px] text-muted-foreground truncate max-w-[40ch]" title={companiesLabel}>
-              Clientes: {companiesLabel}
+              {t("sp.layout.clientes", { lista: companiesLabel })}
             </p>
           )}
         </div>
@@ -142,23 +146,24 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
               {userLabel}
             </p>
             <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
-              {user?.role === "owner" ? "Utilizador principal" : "Consulta"}
+              {user?.role === "owner" ? t("sp.layout.papel.owner") : t("sp.layout.papel.member")}
             </p>
           </div>
+          <PortalSeletorIdioma compacto />
           <SwitchToClientPortalButton compact />
           <Button
             variant="outline"
             onClick={() => void logout()}
             className="h-11 min-w-11 gap-1.5 text-muted-foreground hover:text-destructive hover:border-destructive/30"
-            aria-label="Sair"
+            aria-label={t("sp.layout.sair")}
           >
             <LogOut className="h-4 w-4" aria-hidden="true" />
-            <span className="hidden sm:inline text-sm">Sair</span>
+            <span className="hidden sm:inline text-sm">{t("sp.layout.sair")}</span>
           </Button>
         </div>
       </header>
 
-      <nav className="border-b bg-background px-2 md:px-6" aria-label="Portal do Fornecedor">
+      <nav className="border-b bg-background px-2 md:px-6" aria-label={t("sp.layout.titulo")}>
         <div className="flex gap-0.5 overflow-x-auto">
           {NAV_ITEMS.map((item) => (
             <NavLink
@@ -175,11 +180,11 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
               }
             >
               <item.icon className="h-4 w-4" aria-hidden="true" />
-              {item.label}
+              {t(item.labelKey)}
               {item.badge && !!toConfirm && toConfirm > 0 && (
                 <span
                   className="ml-0.5 inline-flex min-w-5 h-5 items-center justify-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground"
-                  aria-label={`${toConfirm} por confirmar`}
+                  aria-label={t("sp.layout.porConfirmar", { n: toConfirm })}
                 >
                   {toConfirm > 99 ? "99+" : toConfirm}
                 </span>
@@ -193,7 +198,7 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
 
       <footer className="border-t bg-background px-4 md:px-6 py-3 text-center">
         <p className="text-xs text-muted-foreground">
-          <span className="font-medium">{account.display_name}</span> · Portal do Fornecedor
+          <span className="font-medium">{account.display_name}</span> · {t("sp.layout.titulo")}
         </p>
       </footer>
 
@@ -204,26 +209,32 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
   );
 }
 
-const PageLoader = () => (
-  <div className="py-16 flex items-center justify-center" role="status" aria-live="polite">
-    <OlyviaLoader size={32} />
-    <span className="sr-only">A carregar…</span>
-  </div>
-);
+function PageLoader() {
+  const { t } = usePortalT();
+  return (
+    <div className="py-16 flex items-center justify-center" role="status" aria-live="polite">
+      <OlyviaLoader size={32} />
+      <span className="sr-only">{t("sp.layout.aCarregar")}</span>
+    </div>
+  );
+}
 
 /**
  * Montado uma só vez para todas as rotas /supplier-portal/* (lazy em App.tsx):
- * contexto (sp_whoami/sp_my_companies) + layout + páginas via Outlet.
+ * idioma (<html lang>) + contexto (sp_whoami/sp_my_companies) + layout + páginas via Outlet.
+ * O PortalLanguageProvider fica por fora de tudo, por isso cobre as cinco páginas e os ecrãs de erro.
  * O Suspense interno evita desmontar o layout ao carregar cada página.
  */
 export default function SupplierPortalShell() {
   return (
-    <SupplierPortalProvider>
-      <SupplierPortalLayout>
-        <Suspense fallback={<PageLoader />}>
-          <Outlet />
-        </Suspense>
-      </SupplierPortalLayout>
-    </SupplierPortalProvider>
+    <PortalLanguageProvider>
+      <SupplierPortalProvider>
+        <SupplierPortalLayout>
+          <Suspense fallback={<PageLoader />}>
+            <Outlet />
+          </Suspense>
+        </SupplierPortalLayout>
+      </SupplierPortalProvider>
+    </PortalLanguageProvider>
   );
 }

@@ -11,13 +11,14 @@ import { formatCurrency } from "@/lib/utils";
 import { resolvePortalContractIdsForUsers } from "@/lib/portal/contractAccess";
 import { usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContext";
 import { PortalOrgsErrorState } from "@/components/portal/PortalOrgsErrorState";
-import { format } from "date-fns";
-import { pt } from "date-fns/locale";
+import { usePortalFormato, usePortalT } from "@/portal-i18n";
 
-import { CONTRACT_STATUS_LABELS as STATUS_LABELS, CONTRACT_STATUS_VARIANTS as STATUS_VARIANTS } from "@/constants/contractStatus";
+import { CONTRACT_STATUS_VARIANTS as STATUS_VARIANTS, contractStatusLabel } from "@/constants/contractStatus";
 
 const ClientPortalContracts = () => {
   const navigate = useNavigate();
+  const { t } = usePortalT();
+  const { formatarData } = usePortalFormato();
   const [contracts, setContracts] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   // Empresa ativa do portal — ver src/contexts/PortalCompanyContext.tsx.
@@ -75,7 +76,7 @@ const ClientPortalContracts = () => {
   return (
     <ClientPortalLayout>
       <div className="space-y-4">
-        <h2 className="text-xl font-bold text-foreground">Os Meus Contratos</h2>
+        <h2 className="text-xl font-bold text-foreground">{t("pc.contratos.titulo")}</h2>
 
         {loading ? (
           <div className="space-y-3">
@@ -88,10 +89,10 @@ const ClientPortalContracts = () => {
           <Card>
             <CardContent className="py-8 text-center">
               <ScrollText className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-              <p className="text-muted-foreground">Não tem contratos disponíveis.</p>
+              <p className="text-muted-foreground">{t("pc.contratos.vazio")}</p>
               {hasMultiple && (
                 <p className="text-xs text-muted-foreground mt-1.5">
-                  Se esperava ver outros, troque de empresa no seletor no topo da página.
+                  {t("pc.contratos.vazioTroqueEmpresa")}
                 </p>
               )}
             </CardContent>
@@ -107,10 +108,10 @@ const ClientPortalContracts = () => {
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
                           <p className="font-medium text-sm">
-                            {contract.contract_number || "Contrato"}
+                            {contract.contract_number || t("pc.contratos.semNumero")}
                           </p>
                           <Badge variant={STATUS_VARIANTS[contract.status] || "outline"} className="text-[10px]">
-                            {STATUS_LABELS[contract.status] || contract.status}
+                            {contractStatusLabel(contract.status, t)}
                           </Badge>
                         </div>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
@@ -122,9 +123,9 @@ const ClientPortalContracts = () => {
                           )}
                           {contract.start_date && (
                             <>
-                              <span>{format(new Date(contract.start_date), "d MMM yyyy", { locale: pt })}</span>
+                              <span>{formatarData(contract.start_date, "curto")}</span>
                               {contract.end_date && (
-                                <span> — {format(new Date(contract.end_date), "d MMM yyyy", { locale: pt })}</span>
+                                <span> — {formatarData(contract.end_date, "curto")}</span>
                               )}
                             </>
                           )}
@@ -137,7 +138,7 @@ const ClientPortalContracts = () => {
                         size="sm"
                         onClick={() => navigate(`/client-portal/contracts/${contract.id}`)}
                       >
-                        Ver <ArrowRight className="h-3 w-3 ml-1" />
+                        {t("pc.contratos.ver")} <ArrowRight className="h-3 w-3 ml-1" />
                       </Button>
                     </div>
                   </div>
