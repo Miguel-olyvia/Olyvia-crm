@@ -91,7 +91,10 @@ Regras:
    porta sem pagar» é «Não pago»; «três pisos» é o contador dos andares.
 8. Se a frase não é para ti (a pessoa está a falar com outra pessoa, ou é conversa solta), devolve as ações vazias e a 'resposta' vazia.
 9. 'resposta' é DITA EM VOZ ALTA: curta e natural (uma frase, no máximo duas), sem listas, sem símbolos, sem números de elementos.
-   Com ações, diz o que fizeste («Abri a proposta do Carlos Mendes.»). Num passo intermédio (continuar), 'resposta' pode ficar vazia.`;
+   Com ações, diz o que fizeste («Abri a proposta do Carlos Mendes.»). Num passo intermédio (continuar), 'resposta' pode ficar vazia.
+10. Ir a uma página já cumpre os pedidos de «ver», «mostrar», «abrir» essa página: «quero ver as obras a decorrer» é navegar a Operações
+   com "continuar": false. Nunca andes de página em página à procura de alguma coisa, e nunca voltes a fazer o que já está em «já fiz».
+   Se o ecrã diz «Sem permissão», está vazio ou não tem o que se pede, pára ("continuar": false) e diz isso em 'resposta'.`;
 
 const ESQUEMA = {
   type: "OBJECT",

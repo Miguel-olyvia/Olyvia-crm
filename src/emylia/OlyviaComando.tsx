@@ -238,7 +238,7 @@ export function OlyviaComando() {
    * 18/11 (Rúben: «quero controlar tudo por voz»): a IA vê o ecrã inteiro e faz; num pedido de vários passos, faz o que dá, olha para o
    * ecrã novo e segue (até MAX_RONDAS). Um clique que não se desfaz pára e pergunta «Confirmas?». False se a IA não respondeu à primeira.
    */
-  const correrIa = async (frase: string, porVoz: boolean, feito: string[] = [], ronda0 = 0): Promise<boolean> => {
+  const correrIa = async (frase: string, porVoz: boolean, feito: string[] = [], ronda0 = 0, vistos = new Set<string>()): Promise<boolean> => {
     for (let ronda = ronda0; ronda < MAX_RONDAS; ronda++) {
       setAviso({ msg: ronda === 0 ? `«${frase}» — a pensar…` : `${feito[feito.length - 1] ?? "…"} — a seguir…`, ok: true });
       const loc = locRef.current;
@@ -248,6 +248,10 @@ export function OlyviaComando() {
       const campos = lerCampos().slice(0, 120);
       const cobertos = new Set<Element>(campos.flatMap((c) => [...(c.botoes ?? []), c.menos, c.mais, c.entrada].filter((x): x is NonNullable<typeof x> => !!x)));
       const ecra = lerEcra(cobertos);
+      if (ronda > 0 && /sem permiss[aã]o/i.test(ecra.texto)) {
+        terminar(frase, "Cheguei, mas não tens permissão para ver esta página.", false, porVoz);
+        return true;
+      }
       const r = await perguntarIa({
         frase: frase.slice(0, 1500), pagina: (loc.pathname + loc.search).slice(0, 300), passos: lista.lista.slice(0, 40), destinos: DESTINOS.map((d) => d.nome),
         campos: campos.map((c) => ({ rotulo: c.rotulo.slice(0, 200), tipo: c.tipo, ...(c.opcoes ? { opcoes: c.opcoes.map((o) => o.texto.slice(0, 120)) } : {}), ...(c.valor ? { valor: c.valor.slice(0, 300) } : {}) })),
@@ -258,6 +262,14 @@ export function OlyviaComando() {
         terminar(frase, `Fiz parte (${feito.slice(-2).join(", ")}), mas o resto não consegui.`, false, porVoz);
         return true;
       }
+      // 18/11 (testarh): a IA não anda às voltas. Repetir o que já fez neste pedido (a mesma página, as mesmas ações) é parar.
+      const assinatura = JSON.stringify(r.acoes.map((a) => a.tipo === "clicar" || a.tipo === "escrever" || a.tipo === "escolher" ? { ...a, elemento: ecra.elementos[a.elemento ?? -1]?.texto } : a));
+      const repete = r.acoes.length > 0 && (vistos.has(assinatura) || r.acoes.every((a) => a.tipo === "navegar" && feito.includes(`fui a ${a.texto}`)));
+      vistos.add(assinatura);
+      if (repete) {
+        terminar(frase, r.resposta && !r.continuar ? r.resposta : "Não encontro isso aqui. Diz-me onde está, ou de outra maneira.", false, porVoz);
+        return true;
+      }
       // o que não se desfaz: faz-se o que vem antes, e pergunta-se
       const k = r.acoes.findIndex((a) => a.tipo === "clicar" && a.elemento != null && eIrreversivel(ecra.elementos[a.elemento]?.texto ?? ""));
       feito.push(...(await fazerAcoes(k === -1 ? r.acoes : r.acoes.slice(0, k), campos, ecra)));
@@ -266,7 +278,7 @@ export function OlyviaComando() {
         const resto = [r.acoes[k], ...r.acoes.slice(k + 1).filter((a) => !(a.tipo === "clicar" && a.elemento != null && eIrreversivel(ecra.elementos[a.elemento]?.texto ?? "")))];
         pedirConfirmacao(`Vou carregar em «${nome}». Confirmas?`, porVoz, async () => {
           feito.push(...(await fazerAcoes(resto, campos, ecra)));
-          if (r.continuar || resto.length < r.acoes.length - k) { await assentar(); await correrIa(frase, porVoz, feito, ronda + 1); }
+          if (r.continuar || resto.length < r.acoes.length - k) { await assentar(); await correrIa(frase, porVoz, feito, ronda + 1, vistos); }
           else terminar(frase, r.resposta || `Carreguei em «${nome}».`, true, porVoz);
         });
         return true;

@@ -158,6 +158,30 @@ describe("a IA com o ecrã inteiro", () => {
     expect(screen.getByRole("status").textContent).toBe("Está bem, não faço.");
   });
 
+  it("não anda às voltas: repetir o mesmo passo pára (18/11, testarh)", async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    const abrir = document.createElement("button"); abrir.textContent = "Mais filtros"; document.body.appendChild(abrir);
+    g.invoke = async (_n, o) => { n++; return { data: { acoes: [{ tipo: "clicar", elemento: o.body.elementos!.findIndex((e) => e.texto === "Mais filtros") }], resposta: "", continuar: true }, error: null }; };
+    render(<MemoryRouter initialEntries={["/pessoas"]}><OlyviaComando /></MemoryRouter>);
+    await pedir("quero ver as obras que estão a decorrer agora");
+    expect(n).toBe(2);
+    expect(screen.getByRole("status").textContent).toMatch(/Não encontro isso aqui/);
+  });
+
+  it("sem permissão na página nova: diz e pára", async () => {
+    vi.useFakeTimers();
+    let n = 0;
+    const b = document.createElement("button"); b.textContent = "Operações";
+    b.onclick = () => { const p = document.createElement("main"); p.textContent = "Sem permissão (negocios.view)"; document.body.appendChild(p); };
+    document.body.appendChild(b);
+    g.invoke = async (_n, o) => { n++; return { data: { acoes: [{ tipo: "clicar", elemento: o.body.elementos!.findIndex((e) => e.texto === "Operações") }], resposta: "", continuar: true }, error: null }; };
+    render(<MemoryRouter initialEntries={["/pessoas"]}><OlyviaComando /></MemoryRouter>);
+    await pedir("preciso de ver as obras que estão a decorrer agora");
+    expect(n).toBe(1);
+    expect(screen.getByRole("status").textContent).toBe("Cheguei, mas não tens permissão para ver esta página.");
+  });
+
   it("lembra-se da conversa («e o outro?»)", async () => {
     vi.useFakeTimers();
     const conversas: unknown[][] = [];
