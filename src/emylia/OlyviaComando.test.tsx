@@ -75,7 +75,7 @@ describe("a Olyvia por comando (botão flutuante)", () => {
     window.addEventListener(EV_PASSO, h);
     escrever("vai para o fim");
     window.removeEventListener(EV_PASSO, h);
-    expect(passos).toEqual([{ passo: "fim" }]);
+    expect(passos).toMatchObject([{ passo: "fim" }]);
   });
 
   it("mostra a resposta da página que cumpriu («A abrir Ruben Branco · Negócio.»)", () => {

@@ -169,7 +169,7 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     render(arvore("/negocios?negocio=1021"));
     const passos = ouvir(EV_PASSO);
     falar(ultimo(), res("olyvia vai para o fim"));
-    expect(passos).toEqual([{ passo: "fim" }]);
+    expect(passos).toMatchObject([{ passo: "fim" }]);
   });
 
   it("mantém-se ligada depois de mudar de página (a mesma escuta continua, sem reiniciar)", () => {

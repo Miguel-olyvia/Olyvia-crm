@@ -102,8 +102,7 @@ Regras:
    negócio são páginas diferentes, e os passos (Proposta, Contrato, …) só existem dentro do negócio. "passo" só com passos na lista.
    Em 'resposta' nunca digas que fizeste o que ainda não está feito: num passo intermédio deixa-a vazia.
 12. Os passos da lista são só os da FASE aberta do negócio. Um passo de outra fase (por exemplo, a Proposta é da fase Negócio)
-   pede primeiro a fase: carrega no botão dessa fase (a barra das fases no topo do negócio) com
-   "continuar": true, e no ecrã seguinte vai ao passo.`;
+   pode pedir-se na mesma com "passo" (a app muda de fase sozinha).`;
 
 const ESQUEMA = {
   type: "OBJECT",
@@ -184,8 +183,9 @@ export function acoesValidas(acoes: AcaoIa[], p: Pedido): AcaoIa[] {
     if (a.tipo === "navegar") return !!a.texto && destinos.includes(a.texto);
     if (a.tipo === "scroll") return ["baixo", "cima", "topo", "fundo"].includes(a.texto ?? "");
     if (a.tipo === "limpar" || a.tipo === "voltar") return true;
-    // os passos só existem com um negócio aberto (18/11: na página da obra pedia «Proposta» e não acontecia nada)
-    if (a.tipo === "passo") return (p.passos ?? []).length > 0 && !!a.texto && ((p.passos ?? []).includes(a.texto) || ["fim", "proximo", "anterior"].includes(a.texto));
+    // os passos só existem com um negócio aberto (18/11: na página da obra pedia «Proposta» e não acontecia nada); um passo de outra
+    // fase vale (a app procura a fase que o tem)
+    if (a.tipo === "passo") return (p.passos ?? []).length > 0 && !!a.texto;
     return !!a.texto;
   });
 }

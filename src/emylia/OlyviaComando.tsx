@@ -12,7 +12,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Ear, Mic, MicOff, Sparkles, Volume2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { DESTINOS, EV_ABRIR, EV_ESTUDIO, EV_FASE, EV_PASSO, EV_PESQUISA, EV_RESPOSTA, eConfirmacao, eRecusa, esperaAteAgir, extrairAposGatilho, extrairFase, interpretarComando, juntarLetras, limparFrase, normal, pedeParaParar, temGatilho, VERBO_PREENCHER } from "./comandoOlyvia";
+import { DESTINOS, FASES_NOMES, EV_ABRIR, EV_ESTUDIO, EV_FASE, EV_PASSO, EV_PESQUISA, EV_RESPOSTA, eConfirmacao, eRecusa, esperaAteAgir, extrairAposGatilho, extrairFase, interpretarComando, juntarLetras, limparFrase, normal, pedeParaParar, temGatilho, VERBO_PREENCHER } from "./comandoOlyvia";
 import { acompanharFala, andarNaPagina, botaoPeloNome, escreverNaPesquisa, executarPlano, lerCampos, preencherPelaFrase, type Acao } from "./preencherOlyvia";
 import { assentar, carregar, eIrreversivel, escolherEm, escreverEm, lerEcra, type Ecra } from "./ecraOlyvia";
 import { supabase } from "@/integrations/supabase/client";
@@ -78,6 +78,24 @@ export const EVENTO_PESQUISA = EV_PESQUISA;
 const CHAVE_ESCUTA = "olyvia-escuta";
 const EXEMPLOS = ["vai aos negócios", "abre o negócio do Carlos e vai à proposta", "quanto custa esta proposta?", "desce", "o que falta fazer aqui?"];
 const avisa = (nome: string, detail: unknown) => window.dispatchEvent(new CustomEvent(nome, { detail }));
+
+const NAO_ENCONTREI = "não encontrei o passo";
+/** Vai ao passo na fase que está aberta; true se existe (o NegocioSimples responde em `ok`, de forma síncrona). */
+function tentarPasso(passo: string): boolean {
+  const d = { passo, tentar: true, ok: false };
+  avisa(EV_PASSO, d);
+  return d.ok;
+}
+/** O passo noutra fase: abre cada fase do negócio, da mais adiantada para trás, até a encontrar. A fase onde está, ou null. */
+async function procurarPassoNasFases(passo: string): Promise<number | null> {
+  for (let f = FASES_NOMES.length - 1; f >= 0; f--) {
+    avisa(EV_FASE, { fase: f });
+    await assentar(1500, 200);
+    if (tentarPasso(passo)) return f;
+  }
+  avisa(EV_FASE, { fase: FASES_NOMES.length - 1 }); // não há: volta à fase em que o negócio está
+  return null;
+}
 
 export function OlyviaComando() {
   const navigate = useNavigate();
@@ -210,7 +228,16 @@ export function OlyviaComando() {
         if (d) { navigate(d.url); feito.push(`fui a ${d.nome}`); }
       } else if (a.tipo === "scroll") { andarNaPagina(t as "baixo" | "cima" | "topo" | "fundo"); feito.push(`andei na página (${t})`); }
       else if (a.tipo === "voltar") { navigate(-1); feito.push("voltei à página anterior"); }
-      else if (a.tipo === "passo") { if (noNeg) { avisa(EV_PASSO, { passo: t, tentar: true, ok: false }); feito.push(`fui ao passo ${t}`); } }
+      else if (a.tipo === "passo") {
+        if (noNeg) {
+          // 18/11 (testarh): «vai à proposta» com o negócio em Obra — a Proposta é de outra fase; procura-se a fase que a tem
+          if (tentarPasso(t)) feito.push(`fui ao passo ${t}`);
+          else {
+            const f = await procurarPassoNasFases(t);
+            feito.push(f != null ? `fui à fase ${FASES_NOMES[f]} e ao passo ${t}` : `${NAO_ENCONTREI} «${t}» neste negócio`);
+          }
+        }
+      }
       else if (a.tipo === "limpar") { if (naNeg) avisa(EV_PESQUISA, ""); escreverNaPesquisa(""); feito.push("limpei a pesquisa"); }
       else if (a.tipo === "pesquisar") {
         if (!naNeg && escreverNaPesquisa(t)) feito.push(`procurei «${t}»`);
@@ -283,6 +310,8 @@ export function OlyviaComando() {
         });
         return true;
       }
+      const falhou = feito.find((x) => x.startsWith(NAO_ENCONTREI));
+      if (falhou) { terminar(frase, `Não encontrei esse passo${falhou.slice(NAO_ENCONTREI.length)}.`, false, porVoz); return true; }
       if (!r.continuar) {
         terminar(frase, r.resposta || (feito.length ? "Feito." : ""), feito.length > 0 || !!r.resposta, porVoz);
         return true;
@@ -407,8 +436,15 @@ export function OlyviaComando() {
       case "ir-fase":
       case "ir-passo":
         if (!new URLSearchParams(locRef.current.search).get("negocio")) { setAviso({ msg: "Abre primeiro um negócio — ex.: «abre o Ruben Branco».", ok: false }); break; }
-        if (c.acao === "ir-fase") avisa(EV_FASE, { fase: c.fase }); else avisa(EV_PASSO, { passo: c.passo });
-        fechar(1500);
+        if (c.acao === "ir-fase") { avisa(EV_FASE, { fase: c.fase }); fechar(1500); break; }
+        if (tentarPasso(c.passo)) { fechar(1500); break; }
+        {
+          // 18/11 (testarh): «vai à proposta» com o negócio em Obra — a Proposta é de outra fase
+          setAviso({ msg: `À procura de «${c.passo}» nas outras fases…`, ok: true });
+          const f = await procurarPassoNasFases(c.passo);
+          setAviso(f != null ? { msg: `${FASES_NOMES[f]} · ${c.passo}.`, ok: true } : { msg: `Não há o passo «${c.passo}» neste negócio.`, ok: false });
+          fechar(1800);
+        }
         break;
       default:
         // 17/11: as regras não perceberam — pergunta à IA com o que está no ecrã (olyvia-comando); sem ela, diz o que ouviu

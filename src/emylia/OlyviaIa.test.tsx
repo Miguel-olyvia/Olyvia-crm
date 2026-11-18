@@ -4,7 +4,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryRouter } from "react-router-dom";
-import { acabaAMeio, eConfirmacao, eRecusa, esperaAteAgir, interpretarComando, PAUSA_A_MEIO, PAUSA_CURTA, PAUSA_FRASE, PAUSA_ORDEM } from "./comandoOlyvia";
+import { EV_FASE, EV_PASSO, acabaAMeio, eConfirmacao, eRecusa, esperaAteAgir, interpretarComando, PAUSA_A_MEIO, PAUSA_CURTA, PAUSA_FRASE, PAUSA_ORDEM } from "./comandoOlyvia";
 import { eIrreversivel, lerEcra } from "./ecraOlyvia";
 import { campoMencionado, lerCampos } from "./preencherOlyvia";
 
@@ -188,6 +188,30 @@ describe("a IA com o ecrã inteiro", () => {
     await pedir("preciso de ver as obras que estão a decorrer agora");
     expect(n).toBe(1);
     expect(screen.getByRole("status").textContent).toBe("Cheguei, mas não tens permissão para ver esta página.");
+  });
+
+  it("um passo de outra fase: a app muda de fase sozinha (18/11, «vai à proposta» com o negócio em Obra), pelas regras e pela IA", async () => {
+    vi.useFakeTimers();
+    const PASSOS: Record<number, string[]> = { 3: ["Proposta"], 5: ["Medidas", "Contrato"] };
+    let fase = 5; let foi = ""; const fases: number[] = [];
+    const aoFase = (e: Event) => { const f = (e as CustomEvent<{ fase: number }>).detail.fase; fases.push(f); fase = f; document.body.dataset.f = String(f); };
+    const aoPasso = (e: Event) => { const d = (e as CustomEvent<{ passo: string; ok?: boolean; listar?: boolean; lista?: string[] }>).detail; if (d.listar) { d.lista = PASSOS[fase] ?? []; return; } if ((PASSOS[fase] ?? []).some((x) => x.toLowerCase() === d.passo.toLowerCase())) { d.ok = true; foi = `${fase}:${d.passo}`; } };
+    window.addEventListener(EV_FASE, aoFase); window.addEventListener(EV_PASSO, aoPasso);
+    try {
+      g.invoke = async () => ({ data: { acoes: [{ tipo: "passo", texto: "Proposta" }], resposta: "Abri a proposta.", continuar: false }, error: null });
+      render(<MemoryRouter initialEntries={["/negocios?negocio=7"]}><OlyviaComando /></MemoryRouter>);
+      // pelas regras
+      await pedir("vai para a proposta");
+      await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+      expect(foi.toLowerCase()).toBe("3:proposta");
+      expect(fases).toEqual([5, 4, 3]);
+      // pela IA (frase natural)
+      fase = 5; foi = ""; fases.length = 0;
+      await pedir("agora quero ver a proposta que fizemos ao cliente");
+      await act(async () => { await vi.advanceTimersByTimeAsync(2500); });
+      expect(foi).toBe("3:Proposta");
+      expect(fases).toEqual([5, 4, 3]);
+    } finally { window.removeEventListener(EV_FASE, aoFase); window.removeEventListener(EV_PASSO, aoPasso); }
   });
 
   it("lembra-se da conversa («e o outro?»)", async () => {
