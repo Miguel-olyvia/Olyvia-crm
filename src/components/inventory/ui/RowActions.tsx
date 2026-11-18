@@ -13,7 +13,7 @@
 //   />
 // primary: { label, onClick, icon?, variant?: "default" | "primary" | "destructive",
 //            disabled?, disabledReason?, permission?, requireAllPermissions?, hidden? }
-//   Desativado = aria-disabled + tooltip com o motivo (focável, ao contrário de disabled).
+//   Desativado = aria-disabled + motivo no hover (tooltip) e ao toque/clique (popover) — DisabledReason.
 // items: RowActionItem | "separator"
 //   RowActionItem: { label, onSelect, icon?, destructive?, disabled?, disabledReason?,
 //                    permission?, requireAllPermissions?, hideWithoutPermission?, hidden? }
@@ -35,7 +35,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { DisabledReason } from "./DisabledReason";
 
 type PermissionReq = string | readonly string[];
 
@@ -132,12 +132,8 @@ function PrimaryButton({ action }: { action: RowPrimaryAction }) {
     </button>
   );
   if (!blocked || !reason) return button;
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>{button}</TooltipTrigger>
-      <TooltipContent className="max-w-xs">{reason}</TooltipContent>
-    </Tooltip>
-  );
+  // 18/11: o motivo também por toque (Popover) além do hover — DisabledReason (o aria-describedby passa a ser o dele).
+  return <DisabledReason reason={reason}>{button}</DisabledReason>;
 }
 
 /** Remove separadores nas pontas e repetidos. */
@@ -179,7 +175,7 @@ export function RowActions({ primary, items, menuLabel = "Mais ações", modal =
             <button
               type="button"
               aria-label={menuLabel}
-              className="inline-flex min-h-[30px] min-w-[30px] items-center justify-center rounded-lg border border-transparent bg-transparent p-1 text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 data-[state=open]:bg-muted"
+              className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-transparent md:min-h-[30px] md:min-w-[30px] bg-transparent p-1 text-foreground transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 data-[state=open]:bg-muted"
             >
               <MoreHorizontal className="h-[18px] w-[18px]" aria-hidden="true" />
             </button>

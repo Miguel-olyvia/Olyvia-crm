@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { FilterPill, InventoryEmptyState, InventoryStatusBadge, clientOrdersLink, type InventoryTone } from "@/components/inventory/ui";
+import { BlockedButton, FilterPill, InventoryEmptyState, InventoryStatusBadge, clientOrdersLink, type InventoryTone } from "@/components/inventory/ui";
 import { cn } from "@/lib/utils";
 import { noteLabel } from "./deliveryNotes";
 import {
@@ -173,19 +173,19 @@ export function PorReceberList({
   }
 
   const dar = (po: ReceivablePo, wide = false) => (
-    <Button
+    // 18/11: sem permissão, o motivo abre-se ao toque (BlockedButton) e no hover.
+    <BlockedButton
       type="button"
       size="sm"
-      className={cn("whitespace-nowrap", wide && "h-11 w-full", !canReceive && "cursor-not-allowed opacity-50")}
-      aria-disabled={!canReceive || undefined}
-      title={canReceive ? undefined : receiveReason}
+      className={cn("whitespace-nowrap", wide && "h-11 w-full")}
+      blockedReason={canReceive ? null : (receiveReason ?? "Sem permissão")}
       aria-label={`Dar entrada ${po.orderNumber}`}
       onClick={() => {
         if (canReceive) onOpenPo(po.id);
       }}
     >
       Dar entrada →
-    </Button>
+    </BlockedButton>
   );
 
   const linhaDesktop = (po: ReceivablePo) => (

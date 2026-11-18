@@ -883,7 +883,8 @@ export default function StockMovementDialog({
                         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-60" />
                       </Button>
                     </PopoverTrigger>
-                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[24rem] p-0" align="start">
+                    {/* 18/11: em mobile nunca mais largo do que o ecrã (min-w 24rem saía fora a 360px). */}
+                    <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[min(24rem,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] p-0" align="start">
                       <Command shouldFilter={false}>
                         <CommandInput
                           placeholder="Pesquisar por EC, contrato, VD ou cliente…"
@@ -894,12 +895,12 @@ export default function StockMovementDialog({
                           <CommandGroup>
                             <CommandItem value="__none__" onSelect={() => selectClientOrder(null)}>
                               <Check className={cn("mr-2 h-4 w-4 shrink-0", !clientOrderId ? "opacity-100" : "opacity-0")} />
-                              Sem EC — saída sem ligação a uma encomenda
+                              <span className="min-w-0 flex-1 break-words">Sem EC — saída sem ligação a uma encomenda</span>
                             </CommandItem>
                             {clientOrderResults.map((o) => (
                               <CommandItem key={o.contract_id} value={o.contract_id} onSelect={() => selectClientOrder(o)}>
                                 <Check className={cn("mr-2 h-4 w-4 shrink-0", clientOrderId === o.contract_id ? "opacity-100" : "opacity-0")} />
-                                <span className="truncate">{formatClientOrderLabel(o)}</span>
+                                <span className="min-w-0 flex-1 break-words">{formatClientOrderLabel(o)}</span>
                               </CommandItem>
                             ))}
                           </CommandGroup>

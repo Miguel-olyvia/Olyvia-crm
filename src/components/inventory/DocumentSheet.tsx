@@ -64,9 +64,13 @@ export const DocumentSheetContent = forwardRef<HTMLDivElement, DocumentSheetCont
   ref,
 ) {
   const hasFooter = !!footer && (footer.left != null || footer.right != null);
+  // 18/11: em mobile (< md) o cabeçalho (resumo, cronologia, abas) e o corpo rolam juntos numa só área — antes o
+  // cabeçalho fixo comia o ecrã todo, o corpo ficava com altura 0 e o rodapé saía do ecrã. Em desktop o invólucro é
+  // `display: contents` (md:contents): cabeçalho fixo, corpo com scroll próprio e rodapé fixo, como antes.
   const inner = (
     <>
-      <div className="border-b bg-card px-3.5 pt-3 sm:px-5 sm:pt-4">
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain md:contents">
+      <div className="shrink-0 border-b bg-card px-3.5 pt-3 sm:px-5 sm:pt-4">
         <div className="flex items-start justify-between gap-2.5">
           <div className="min-w-0">
             {crumbs ? (
@@ -83,7 +87,7 @@ export const DocumentSheetContent = forwardRef<HTMLDivElement, DocumentSheetCont
               type="button"
               onClick={onClose}
               aria-label={closeLabel}
-              className="inline-flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="inline-flex h-10 w-10 items-center justify-center rounded-md text-muted-foreground md:h-9 md:w-9 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               <X className="h-4 w-4" aria-hidden="true" />
             </button>
@@ -91,11 +95,13 @@ export const DocumentSheetContent = forwardRef<HTMLDivElement, DocumentSheetCont
         </div>
         {header ? <div>{header}</div> : <div className="h-3" />}
       </div>
-      <div className={cn("min-h-0 flex-1 overflow-y-auto px-3.5 py-3 sm:px-5 sm:py-4", bodyClassName)}>
+      <div className={cn("px-3.5 py-3 sm:px-5 sm:py-4 md:min-h-0 md:flex-1 md:overflow-y-auto", bodyClassName)}>
         <div className="space-y-4">{children}</div>
       </div>
+      </div>
       {hasFooter && (
-        <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-card px-3.5 py-2.5 sm:px-5 sm:py-3">
+        // Fora da área que rola: fica sempre à vista no fundo (e acima da barra do iPhone — safe-area).
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t bg-card px-3.5 py-2.5 pb-[max(0.625rem,env(safe-area-inset-bottom))] sm:px-5 sm:py-3 sm:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
           {footer?.left != null && <div className="mr-auto flex flex-wrap items-center gap-2">{footer.left}</div>}
           {footer?.right}
         </div>

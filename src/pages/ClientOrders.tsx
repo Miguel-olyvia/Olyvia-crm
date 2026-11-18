@@ -16,7 +16,6 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
@@ -34,6 +33,8 @@ import {
   InventoryPageHeader,
   InventoryStatusBadge,
   RowActions,
+  BlockedButton,
+  DisabledReasonInfo,
   usePermissionGate,
   parseClientOrdersOrigin,
   parseClientOrdersParams,
@@ -3086,18 +3087,18 @@ const ClientOrders = () => {
             PDF
           </Button>
         </div>
-        <span title={requestReason ?? undefined} className="inline-flex">
-          <Button
-            variant="outline"
-            onClick={() => setRequestMissingConfirmOpen(true)}
-            disabled={!!requestReason || requestingMissing || confirmingAll}
-          >
-            {requestingMissing
-              ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-              : <ShoppingCart className="mr-2 h-4 w-4" aria-hidden="true" />}
-            Pedir em falta ao fornecedor{missingCount > 0 && !requestReason ? ` (${missingCount})` : ''}
-          </Button>
-        </span>
+        {/* 18/11: motivo também ao toque (BlockedButton abre-o num popover; no desktop continua o hover). */}
+        <BlockedButton
+          variant="outline"
+          blockedReason={requestReason}
+          onClick={() => setRequestMissingConfirmOpen(true)}
+          disabled={requestingMissing || confirmingAll}
+        >
+          {requestingMissing
+            ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+            : <ShoppingCart className="mr-2 h-4 w-4" aria-hidden="true" />}
+          Pedir em falta ao fornecedor{missingCount > 0 && !requestReason ? ` (${missingCount})` : ''}
+        </BlockedButton>
         {canConfirmStockExit && pending.length > 0 && !singleEach && (
           <Select
             value={confirmAllWarehouseId || EC_SUGGESTED_WAREHOUSE}
@@ -3117,14 +3118,12 @@ const ClientOrders = () => {
             </SelectContent>
           </Select>
         )}
-        <span title={confirmReason ?? undefined} className="inline-flex">
-          <Button onClick={handleConfirmAllStockExits} disabled={!!confirmReason || busy}>
-            {confirmingAll
-              ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
-              : <Truck className="mr-2 h-4 w-4" aria-hidden="true" />}
-            Confirmar saída ({pending.length})
-          </Button>
-        </span>
+        <BlockedButton blockedReason={confirmReason} onClick={handleConfirmAllStockExits} disabled={busy}>
+          {confirmingAll
+            ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
+            : <Truck className="mr-2 h-4 w-4" aria-hidden="true" />}
+          Confirmar saída ({pending.length})
+        </BlockedButton>
       </>
     );
   };
@@ -3150,16 +3149,9 @@ const ClientOrders = () => {
         : null;
     if (reason) {
       return (
-        <Tooltip key="exit">
-          <TooltipTrigger asChild>
-            <span className="inline-flex" tabIndex={0} aria-label={`Confirmar saída: ${reason}`}>
-              <Button size="sm" className="h-7 px-2 text-xs" disabled tabIndex={-1}>
-                Confirmar saída
-              </Button>
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>{reason}</TooltipContent>
-        </Tooltip>
+        <BlockedButton key="exit" size="sm" className="h-7 px-2 text-xs" blockedReason={reason} aria-label={`Confirmar saída: ${reason}`}>
+          Confirmar saída
+        </BlockedButton>
       );
     }
     const isActive = checklistActiveLineIds.has(key);
@@ -3239,17 +3231,10 @@ const ClientOrders = () => {
   const renderBlockedLineAction = (key: string, label: string, reason: string | undefined, icon?: ReactElement) => {
     const why = reason ?? 'Sem permissão';
     return (
-      <Tooltip key={key}>
-        <TooltipTrigger asChild>
-          <span className="inline-flex" tabIndex={0} aria-label={`${label}: ${why}`}>
-            <Button variant="outline" size="sm" className="h-7 gap-1 px-2 text-xs" disabled tabIndex={-1}>
-              {icon}
-              {label}
-            </Button>
-          </span>
-        </TooltipTrigger>
-        <TooltipContent className="max-w-xs">{why}</TooltipContent>
-      </Tooltip>
+      <BlockedButton key={key} variant="outline" size="sm" className="h-7 gap-1 px-2 text-xs" blockedReason={why} aria-label={`${label}: ${why}`}>
+        {icon}
+        {label}
+      </BlockedButton>
     );
   };
 
@@ -3406,6 +3391,7 @@ const ClientOrders = () => {
               className="inline-flex items-center gap-2 text-[13px]"
               title={canSeeDeleted ? undefined : 'Sem permissão: requer ver contratos (client_contracts.view)'}
             >
+              {/* 18/11: a caixa fica disabled (não recebe toques) — o motivo abre-se no «i» ao lado. */}
               <Checkbox
                 id="client-orders-show-deleted"
                 checked={showDeleted && canSeeDeleted}
@@ -3415,6 +3401,9 @@ const ClientOrders = () => {
               <Label htmlFor="client-orders-show-deleted" className="cursor-pointer font-normal">
                 Ver eliminadas
               </Label>
+              {canSeeDeleted ? null : (
+                <DisabledReasonInfo label="Ver eliminadas" reason="Sem permissão: requer ver contratos (client_contracts.view)" />
+              )}
             </div>
             {(searchTerm || statusFilter !== "all" || dateFrom || dateTo || urlReady || urlOrigin !== "all") && (
               <Button

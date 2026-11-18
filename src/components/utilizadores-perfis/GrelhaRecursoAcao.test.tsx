@@ -210,4 +210,13 @@ describe("18/11: a dica diz «Precisa também de» (EXIGE_TAMBEM), bloqueada ou 
     abrir("Inventário");
     expect(screen.getAllByText(TEXTO).length).toBeGreaterThan(0);
   });
+
+  it("o texto também está visível (não só no tooltip/sr-only) — legível por toque em mobile", () => {
+    render(<Editor visiveis={CAT_PO} inicial={["purchase_orders.view"]} />);
+    abrir("Inventário");
+    const visiveis = screen.getAllByText(TEXTO).filter((el) => !el.closest(".sr-only") && !el.closest("[role=tooltip]"));
+    expect(visiveis.length).toBeGreaterThan(0);
+    // Visível mas aria-hidden: o leitor de ecrã já o ouve pela descrição do controlo (sem repetir).
+    expect(visiveis[0].closest("[aria-hidden=true]")).not.toBeNull();
+  });
 });

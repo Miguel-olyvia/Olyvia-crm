@@ -39,7 +39,9 @@ export function ClientOrderDetailSheet({
         side="right"
         className="flex w-[min(1000px,100vw)] max-w-none flex-col gap-0 p-0 sm:max-w-none [&>button.absolute]:hidden"
       >
-        <div className="border-b bg-card px-5 pt-4 max-sm:px-3.5 max-sm:pt-3">
+        {/* 18/11: em mobile (< md) cabeçalho e corpo rolam juntos; em desktop o invólucro é display: contents (como antes). */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain md:contents">
+        <div className="shrink-0 border-b bg-card px-5 pt-4 max-sm:px-3.5 max-sm:pt-3">
           <div className="flex items-start justify-between gap-2.5">
             <div className="min-w-0">
               <SheetDescription className="mb-0.5 text-[12.5px] text-muted-foreground">{crumbs}</SheetDescription>
@@ -52,7 +54,7 @@ export function ClientOrderDetailSheet({
                 type="button"
                 onClick={() => onOpenChange(false)}
                 aria-label="Fechar"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="inline-flex h-10 w-10 items-center justify-center rounded-lg text-muted-foreground md:h-8 md:w-8 hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <X className="h-4 w-4" aria-hidden="true" />
               </button>
@@ -60,11 +62,12 @@ export function ClientOrderDetailSheet({
           </div>
           {info}
         </div>
-        <div className="min-h-0 flex-1 overflow-auto px-5 py-4 max-sm:px-3.5 max-sm:py-3">
+        <div className="px-5 py-4 max-sm:px-3.5 max-sm:py-3 md:min-h-0 md:flex-1 md:overflow-auto">
           <div className="flex flex-col gap-3">{children}</div>
         </div>
+        </div>
         {footer ? (
-          <div className="flex flex-wrap items-center justify-end gap-2 border-t bg-card px-5 py-3 max-sm:px-3.5">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 border-t bg-card px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] max-sm:px-3.5">
             {footer}
           </div>
         ) : null}

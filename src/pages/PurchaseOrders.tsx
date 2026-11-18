@@ -69,6 +69,8 @@ import { usePoPortalShipments } from "@/components/purchase-orders/usePoPortalSh
 import { activeShipment } from "@/components/purchase-orders/poPortalShipments";
 // UI nova do Inventário (Compras › Encomendas): cabeçalho, KPIs, pílulas e ações por linha.
 import {
+  BlockedButton,
+  DisabledReason,
   DocumentLink,
   InventoryPageHeader,
   InventoryStatusBadge,
@@ -576,8 +578,20 @@ const PurchaseOrders = () => {
   // linhas só com products.view_cost, a mesma permissão do valor por receber (PoKpis) e do histórico (rpc_po_historico).
   // Sem ela o valor continua no formulário (não se perde ao gravar), só não se mostra.
   const podeVerPrecosPo = hasPermission(PO_VALUE_PERMISSION);
+  // 18/11: o «—» abre o motivo também ao toque (DisabledReason), não só no hover.
   const precoPo = (texto: ReactNode): ReactNode =>
-    podeVerPrecosPo ? texto : <span className="text-muted-foreground" title={`Sem permissão: requer ${PO_VALUE_PERMISSION}.`}>—</span>;
+    podeVerPrecosPo ? texto : (
+      <DisabledReason reason={`Sem permissão: requer ${PO_VALUE_PERMISSION}.`}>
+        <button
+          type="button"
+          aria-label="Preço escondido"
+          onClick={(e) => e.stopPropagation()}
+          className="inline-flex min-h-6 min-w-6 items-center justify-center rounded text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          —
+        </button>
+      </DisabledReason>
+    );
 
   const [formData, setFormData] = useState<PurchaseOrderFormData>({
     supplier_id: "",
@@ -3561,32 +3575,28 @@ const PurchaseOrders = () => {
                       {/* Recebida: só de leitura — passar para stock e reverter por
                           linha (mesmas permissões que antes no aviso do diálogo). */}
                       {isOrderReceivedLock && releasableLines.length > 0 && (
-                        <Button
+                        <BlockedButton
                           type="button"
                           variant="outline"
-                          aria-disabled={!releaseToStockGate.allowed || undefined}
-                          title={releaseToStockGate.reason}
-                          className={releaseToStockGate.allowed ? undefined : "cursor-not-allowed opacity-50"}
+                          blockedReason={releaseToStockGate.allowed ? null : releaseToStockGate.reason}
                           onClick={() => { if (releaseToStockGate.allowed) void handleReleaseFromOrderDialog(); }}
                         >
                           <PackageCheck className="w-4 h-4 mr-2" />
                           Passar para stock
                           {releaseToStockGate.reason ? <span className="sr-only">{`: ${releaseToStockGate.reason}`}</span> : null}
-                        </Button>
+                        </BlockedButton>
                       )}
                       {isOrderReceivedLock && editingOrderMeta?.hasReceivedLines && (
-                        <Button
+                        <BlockedButton
                           type="button"
                           variant="outline"
-                          aria-disabled={!revertReceiptGate.allowed || undefined}
-                          title={revertReceiptGate.reason}
-                          className={revertReceiptGate.allowed ? undefined : "cursor-not-allowed opacity-50"}
+                          blockedReason={revertReceiptGate.allowed ? null : revertReceiptGate.reason}
                           onClick={() => { if (revertReceiptGate.allowed) handleRevertFromOrderDialog(); }}
                         >
                           <Undo2 className="w-4 h-4 mr-2" />
                           {t('purchaseOrders.revert.action')}
                           {revertReceiptGate.reason ? <span className="sr-only">{`: ${revertReceiptGate.reason}`}</span> : null}
-                        </Button>
+                        </BlockedButton>
                       )}
                       {isOrderReadOnly ? (
                         // Fecho completo (repõe o formulário) — o Cancelar abaixo só

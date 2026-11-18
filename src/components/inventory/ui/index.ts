@@ -27,6 +27,7 @@ export {
   type RowPrimaryAction,
 } from "./RowActions";
 export { DocumentLink } from "./DocumentLink";
+export { DisabledReason, DisabledReasonInfo, BlockedButton, type BlockedButtonProps } from "./DisabledReason";
 export * from "./inventoryLinks";
 
 // Métricas, estados, vazios, fila

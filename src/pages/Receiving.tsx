@@ -43,6 +43,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import {
+  BlockedButton,
   InventoryPageHeader,
   parseReceivingParams,
   purchaseOrdersLink,
@@ -4314,19 +4315,18 @@ export default function Receiving() {
           Encomendas por receber
         </Button>
       )}
-      <Button
+      {/* 18/11: bloqueado mostra o motivo também ao toque (BlockedButton). */}
+      <BlockedButton
         type="button"
         variant="outline"
-        aria-disabled={!newNoteGate.allowed}
-        title={newNoteGate.allowed ? undefined : newNoteGate.reason}
-        className={cn(!newNoteGate.allowed && "cursor-not-allowed opacity-50")}
+        blockedReason={newNoteGate.allowed ? null : (newNoteGate.reason ?? "Sem permissão")}
         onClick={() => {
           if (newNoteGate.allowed) openNewNote();
         }}
       >
         <Plus className="mr-2 h-4 w-4" aria-hidden />
         Nova guia
-      </Button>
+      </BlockedButton>
       {listOn ? null : poListGate.allowed ? (
         <Button asChild variant="outline">
           <Link to={purchaseOrdersLink({ status: "ordered" })}>
@@ -4335,10 +4335,10 @@ export default function Receiving() {
           </Link>
         </Button>
       ) : (
-        <Button type="button" variant="outline" aria-disabled title={poListGate.reason} className="cursor-not-allowed opacity-50">
+        <BlockedButton type="button" variant="outline" blockedReason={poListGate.reason ?? "Sem permissão"}>
           <ShoppingCart className="mr-2 h-4 w-4" aria-hidden />
           Receber numa encomenda
-        </Button>
+        </BlockedButton>
       )}
     </>
   );

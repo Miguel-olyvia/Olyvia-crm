@@ -100,9 +100,11 @@ describe("PorReceberList", () => {
     render(<Harness canReceive={false} onOpenPo={onOpenPo} />);
     const b = screen.getAllByRole("button", { name: "Dar entrada PO-0001" })[0];
     expect(b).toHaveAttribute("aria-disabled", "true");
-    expect(b).toHaveAttribute("title", expect.stringContaining("receiving.receive"));
+    // 18/11: o motivo deixou de estar em title= — vai na descrição acessível e abre-se ao toque/clique (DisabledReason).
+    expect(b).toHaveAccessibleDescription(expect.stringContaining("receiving.receive"));
     fireEvent.click(b);
     expect(onOpenPo).not.toHaveBeenCalled();
+    expect(screen.getByRole("note")).toHaveTextContent("receiving.receive");
     expect(screen.getAllByText("Modo consulta").length).toBeGreaterThan(0);
   });
 

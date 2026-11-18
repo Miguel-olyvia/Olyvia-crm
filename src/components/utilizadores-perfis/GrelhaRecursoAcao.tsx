@@ -96,18 +96,19 @@ function ControloPermissao({ permissao: p, rotulo, acao, concedida, edicao, tipo
     <button
       type="button" aria-pressed={concedida} aria-label={rotulo} {...comum}
       className={cn(
-        "inline-flex min-h-8 items-center gap-1 whitespace-nowrap rounded-full border px-2.5 text-xs font-medium transition-colors motion-reduce:transition-none",
+        // 18/11: o nome quebra de linha (em mobile cortava-se a meio, ilegível); max-w-full para não sair da célula.
+        "inline-flex min-h-8 max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-left text-xs font-medium leading-tight transition-colors motion-reduce:transition-none",
         concedida ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card text-foreground hover:border-foreground/40",
         (bloqueada || edicao.desativada) && "cursor-not-allowed opacity-50",
         FOCO,
       )}
     >
       {concedida && <Check className="h-3 w-3 shrink-0" aria-hidden="true" />}
-      {acao}
+      <span className="min-w-0 break-words">{acao}</span>
       {p.perigosa && <ShieldAlert className={cn("h-3.5 w-3.5 shrink-0", !concedida && "text-destructive")} aria-hidden="true" />}
     </button>
   );
-  return (
+  const dica = (
     <>
       <Tooltip>
         <TooltipTrigger asChild>{gatilho}</TooltipTrigger>
@@ -115,6 +116,15 @@ function ControloPermissao({ permissao: p, rotulo, acao, concedida, edicao, tipo
       </Tooltip>
       <span id={idDica} className="sr-only"><Dica permissao={p} motivo={motivo} exige={exige} /></span>
     </>
+  );
+  // 18/11: «Precisa também de: …» também visível (o tooltip não se vê ao toque). Nos chips fica por baixo do chip; nas
+  // células (caixas estreitas) vai por baixo do nome do recurso (linhaTabela). aria-hidden: o leitor já o tem no aria-describedby.
+  if (!exige || tipo !== "chip") return dica;
+  return (
+    <span className="inline-flex max-w-full flex-col items-start gap-0.5">
+      {dica}
+      <small aria-hidden="true" className="px-1 text-[11px] leading-tight text-muted-foreground">{exige}</small>
+    </span>
   );
 }
 
@@ -137,11 +147,11 @@ function Leitura({ permissao: p, rotulo, acao, concedida, tipo }: ControloProps)
   return (
     <span
       title={titulo}
-      className={cn("inline-flex min-h-8 items-center gap-1 whitespace-nowrap rounded-full border px-2.5 text-xs font-medium",
+      className={cn("inline-flex min-h-8 max-w-full items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium leading-tight",
         concedida ? "border-primary bg-primary/10 text-foreground" : "border-dashed border-input text-muted-foreground")}
     >
       <Icone className="h-3 w-3 shrink-0" aria-hidden="true" />
-      <span aria-hidden="true">{acao}</span>
+      <span aria-hidden="true" className="min-w-0 break-words">{acao}</span>
       {p.perigosa && <ShieldAlert className="h-3.5 w-3.5 shrink-0 text-destructive" aria-hidden="true" />}
       <span className="sr-only">{`${rotulo}: ${estado}${perigosa}`}</span>
     </span>
@@ -209,9 +219,22 @@ export function GrelhaRecursoAcao({ grupo, concedida, edicao }: GrelhaRecursoAca
 
   const linhaTabela = (l: LinhaGrelha) => {
     const semCrud = Object.keys(l.fixas).length === 0;
+    // 18/11: o «Precisa também de» das caixas (Ver/Criar/…) fica visível por baixo do nome do recurso: «Criar: Precisa também de: …».
+    const exigeFixas = edicao?.exigeTambem
+      ? COLUNAS_FIXAS.flatMap((c) => {
+          const p = l.fixas[c];
+          const e = p ? edicao.exigeTambem?.(p.codigo) : null;
+          return e ? [`${rotuloColuna(c)}: ${e}`] : [];
+        })
+      : [];
     return (
       <tr key={l.chave} className="border-t border-border/60">
-        <th scope="row" className={cn(FIXA, "bg-background px-3 py-1 text-left font-medium text-foreground")}>{l.rotulo}</th>
+        <th scope="row" className={cn(FIXA, "bg-background px-3 py-1 text-left font-medium text-foreground")}>
+          {l.rotulo}
+          {exigeFixas.map((x) => (
+            <small key={x} aria-hidden="true" className="block text-[11px] font-normal leading-tight text-muted-foreground">{x}</small>
+          ))}
+        </th>
         {COLUNAS_FIXAS.map((c) => {
           const p = l.fixas[c];
           return (
@@ -236,7 +259,11 @@ export function GrelhaRecursoAcao({ grupo, concedida, edicao }: GrelhaRecursoAca
       <th scope="row" className={cn(FIXA, "bg-background px-3 py-1.5 text-left align-top font-medium text-foreground")}>
         <span className="flex min-h-8 items-center">{l.rotulo}</span>
       </th>
-      <td colSpan={5} className="px-3 py-1.5">{chips(l)}</td>
+      <td colSpan={5} className="px-3 py-1.5">
+        {/* 18/11: em mobile os chips ficam presos logo a seguir à coluna fixa e quebram dentro da largura visível da região
+            (100cqw da região − coluna fixa − margens), em vez de saírem do ecrã cortados. Em desktop fica como estava. */}
+        <div className="sticky left-40 max-w-[calc(100cqw-10rem-1.5rem)] md:static md:max-w-none">{chips(l)}</div>
+      </td>
       {tudoLinha(l.rotulo, l.permissoes)}
     </tr>
   );
@@ -244,7 +271,7 @@ export function GrelhaRecursoAcao({ grupo, concedida, edicao }: GrelhaRecursoAca
   return (
     <TooltipProvider delayDuration={300}>
       {/* A região rola na horizontal só por dentro; é focável para se poder rolar com o teclado. */}
-      <div role="region" aria-label={grupo.rotulo} tabIndex={0} className={cn("relative overflow-x-auto rounded-md border border-border", FOCO)}>
+      <div role="region" aria-label={grupo.rotulo} tabIndex={0} className={cn("relative overflow-x-auto rounded-md border border-border [container-type:inline-size]", FOCO)}>
         <table className="w-full min-w-[40rem] table-fixed border-collapse text-sm">
           <caption className="sr-only">{grupo.rotulo}</caption>
           <colgroup>

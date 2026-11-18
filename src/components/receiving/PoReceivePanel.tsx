@@ -27,7 +27,7 @@ import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/ui/native-select";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { InventoryStatusBadge, clientOrdersLink } from "@/components/inventory/ui";
+import { BlockedButton, InventoryStatusBadge, clientOrdersLink } from "@/components/inventory/ui";
 import { cn } from "@/lib/utils";
 import { DeliveryNoteDialog } from "./DeliveryNoteDialog";
 import {
@@ -834,10 +834,11 @@ function PanelBody({
         <Button type="button" variant="outline" onClick={onClose}>
           Cancelar
         </Button>
-        <Button
+        {/* 18/11: sem permissão, o motivo abre-se também ao toque (BlockedButton); os outros bloqueios ficam como estavam. */}
+        <BlockedButton
           type="button"
+          blockedReason={!canReceive ? (receiveReason ?? "Sem permissão") : null}
           aria-disabled={blocked || undefined}
-          title={!canReceive ? receiveReason : undefined}
           className={cn(blocked && "cursor-not-allowed opacity-50")}
           onClick={() => {
             if (!blocked) confirmar();
@@ -845,7 +846,7 @@ function PanelBody({
         >
           <Check className="mr-2 h-4 w-4" aria-hidden="true" />
           {running ? "A receber…" : conferir ? `Confirmar entrada · ${fmtUn(totalUn)} un` : `Receber tudo · ${fmtUn(totalUn)} un`}
-        </Button>
+        </BlockedButton>
       </>
     );
   }

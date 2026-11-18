@@ -56,6 +56,8 @@ import {
   InventoryStatusBadge,
   InventoryEmptyState,
   RowActions,
+  BlockedButton,
+  DisabledReasonInfo,
   usePermissionGate,
   stocksLink,
   stockMovementsLink,
@@ -1022,6 +1024,10 @@ const Warehouses = () => {
                         <Label htmlFor={switchId} className="text-sm font-normal">
                           {t("warehouses.form.active")}
                         </Label>
+                        {/* 18/11: o Switch disabled não recebe toques — o motivo abre-se no «i». */}
+                        {editGate.allowed || !editGate.reason ? null : (
+                          <DisabledReasonInfo label={t("warehouses.form.active")} reason={editGate.reason} />
+                        )}
                       </div>
                     )}
                     {deleted ? null : (
@@ -1039,6 +1045,9 @@ const Warehouses = () => {
                         <Label htmlFor={servesSwitchId} className="text-sm font-normal">
                           Serve clientes
                         </Label>
+                        {editGate.allowed || !editGate.reason ? null : (
+                          <DisabledReasonInfo label="Serve clientes" reason={editGate.reason} />
+                        )}
                       </div>
                     )}
                     {defaultWarehouseId === warehouse.id ? (
@@ -1095,20 +1104,19 @@ const Warehouses = () => {
                     <Button asChild variant="outline" size="sm">
                       <Link to={stockMovementsLink({ warehouse: warehouse.id })}>Movimentos</Link>
                     </Button>
-                    <span title={movementBlockedReason}>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={deleted || !movementGate.allowed}
-                        onClick={() => {
-                          setMovementWarehouseId(warehouse.id);
-                          setMovementDialogOpen(true);
-                        }}
-                      >
-                        <ArrowLeftRight className="w-4 h-4 mr-1.5" />
-                        Registar movimento
-                      </Button>
-                    </span>
+                    <BlockedButton
+                      variant="outline"
+                      size="sm"
+                      blockedReason={deleted || !movementGate.allowed ? (movementBlockedReason ?? "Sem permissão") : null}
+                      onClick={() => {
+                        if (deleted || !movementGate.allowed) return;
+                        setMovementWarehouseId(warehouse.id);
+                        setMovementDialogOpen(true);
+                      }}
+                    >
+                      <ArrowLeftRight className="w-4 h-4 mr-1.5" />
+                      Registar movimento
+                    </BlockedButton>
                   </div>
                 </article>
               );

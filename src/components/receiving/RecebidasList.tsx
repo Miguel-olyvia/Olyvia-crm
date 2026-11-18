@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { InventoryEmptyState, InventoryStatusBadge, clientOrdersLink, purchaseOrdersLink } from "@/components/inventory/ui";
+import { BlockedButton, InventoryEmptyState, InventoryStatusBadge, clientOrdersLink, purchaseOrdersLink } from "@/components/inventory/ui";
 import { fmtUn } from "./porReceber";
 import { RECEIPTS_LIMIT, filtrarRecebidas, type ReceiptItem } from "./useReceivablePos";
 import { noteLabel } from "./deliveryNotes";
@@ -146,9 +146,9 @@ export function RecebidasList({ items, loading, error, noPermission, canOpenPo, 
                             </Link>
                           </Button>
                         ) : (
-                          <Button type="button" variant="outline" size="sm" aria-disabled title={openPoReason} className="cursor-not-allowed opacity-50">
+                          <BlockedButton type="button" variant="outline" size="sm" blockedReason={openPoReason ?? "Sem permissão"}>
                             Reverter
-                          </Button>
+                          </BlockedButton>
                         )
                       ) : null}
                     </TableCell>
