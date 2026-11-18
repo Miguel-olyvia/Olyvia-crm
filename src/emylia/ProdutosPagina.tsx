@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { eur } from "./motor";
 import type { SvcId } from "./motor";
 import type { Catalogo, Produto } from "./v2/catalogoModelo";
-import { ENTRADA, NavCategorias, PainelProdutos } from "./PainelCatalogo";
+import { ENTRADA, NavCategorias, ResumoProdutosFaixa } from "./PainelCatalogo";
 import { LISTA, NOTA, VALORES, REALCE, Novo, Procurar, Vazio } from "./pecasListaCatalogo";
 import { ComboPesquisa, type ItemCombo } from "./ComboPesquisa";
 import { Campo } from "./pecasForm";
@@ -182,8 +182,12 @@ export function ProdutosPagina({ K, real, nomeServico, onAbrir, onAbrirProduto, 
   const estado = !dados ? (pag.aLer ? "A ler os produtos…" : "") : textoEstadoPagina(dados);
   const erroContagens = (qDeb.trim() || f.marca.trim() ? contagensF : contagensG);
   return (
-    <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[13rem_minmax(0,1fr)_20rem]">
+    <div className="grid gap-8 xl:grid-cols-[13rem_minmax(0,1fr)]">
       <div className="min-w-0 xl:col-start-2 xl:row-start-1">
+        {/* 18/11: o resumo é uma faixa por cima da lista (já não uma coluna à direita): a lista fica com a largura toda que sobra */}
+        <div className="mb-6">
+          <ResumoProdutosFaixa {...resumo} onSemCategoria={semCat ? () => { setQ(""); setQDeb(""); mudar({ cat: SEM_CATEGORIA_PRODUTO, sub: "", marca: "", modelo: "" }); } : undefined} />
+        </div>
         {/* 18/11: a pesquisa é o controlo principal (linha própria, a toda a largura, com «Selecionar» ao lado); os filtros são secundários, numa só grelha com um só gap e a linha da ajuda reservada */}
         <div className="grid gap-4">
           <div data-testid="produtos-pesquisa" className="flex flex-wrap items-center gap-4">
@@ -232,11 +236,6 @@ export function ProdutosPagina({ K, real, nomeServico, onAbrir, onAbrirProduto, 
       <div className="xl:col-start-1 xl:row-start-1">
         <NavCategorias grupos={nav.grupos} total={nav.total} sel={fe.cat} onSel={(id) => mudar({ cat: id, sub: "", modelo: "" })} />
       </div>
-      <div className="hidden lg:col-start-2 lg:row-start-1 lg:block xl:col-start-3">
-        <div className="lg:sticky lg:top-6">
-          <PainelProdutos {...resumo} onSemCategoria={semCat ? () => { setQ(""); setQDeb(""); mudar({ cat: SEM_CATEGORIA_PRODUTO, sub: "", marca: "", modelo: "" }); } : undefined} />
-        </div>
-      </div>
     </div>
   );
 }
@@ -258,10 +257,11 @@ function LinhaProduto({ l, K, margem, novo, tocar, sl, onAbrir, nomeServico, ver
   const sugerido = !temPvp && l.custo != null;
   const detalhe = [l.marca, l.modelo ? rotuloModelo({ numero: l.modelo_numero ?? 0, nome: l.modelo }) : ""].filter(Boolean).join(" · ");
   return (
-    <li onClick={() => tocar(l.id)} className={cn("group flex min-h-[4.5rem] cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 py-3 sm:flex-nowrap sm:gap-4", l.id === novo && REALCE)}>
+    <li onClick={() => tocar(l.id)} className={cn("group flex min-h-[4.5rem] cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 py-3 sm:gap-4", l.id === novo && REALCE)}>
       <CaixaLinha id={l.id} nome={l.nome} s={sl} />
       <FotoOuIlustracao fotos={p.fotos} nome={l.nome} k={K?.img ?? "generico"} />
-      <span className="min-w-0 flex-1">
+      {/* 18/11: o nome tem pelo menos 16rem (a partir de sm); se a linha não chega para isso e os preços, são os preços que passam para baixo, não o nome que se espreme */}
+      <span className="min-w-0 flex-1 sm:flex-[1_1_16rem]">
         <button id={`prod-${l.id}`} type="button" onClick={(e) => { e.stopPropagation(); tocar(l.id); }} className="flex min-h-11 items-center text-left text-[15px] font-medium group-hover:underline">{l.nome}{l.id === novo && <Novo />}</button>
         {/* 17/11: só o que não está ativo leva etiqueta (Rascunho, Descontinuado) */}
         {l.estado && l.estado !== "active" && rotuloEstadoProduto(l.estado) && <span className="mt-0.5 inline-block rounded-md border border-border bg-muted px-2 py-0.5 text-[13px] font-medium text-muted-foreground">{rotuloEstadoProduto(l.estado)}</span>}
@@ -277,14 +277,15 @@ function LinhaProduto({ l, K, margem, novo, tocar, sl, onAbrir, nomeServico, ver
           </button>
         )}
       </span>
-      {/* 19/01: as colunas Grossista e Distribuidor (— quando não há preço; quem não vê custo e PVP recebe sempre null) */}
-      {verCusto && (
-        <>
-          <ColunaPreco rotulo="Grossista" v={l.grossista} />
-          <ColunaPreco rotulo="Distribuidor" v={l.distribuidor} />
-        </>
-      )}
-      <span className={cn(VALORES, "pl-[4.75rem] sm:pl-0")}>
+      {/* 19/01: as colunas Grossista e Distribuidor (— quando não há preço; quem não vê custo e PVP recebe sempre null). 18/11: as três colunas de preço são um só grupo, à direita,
+          que não encolhe: se faltar espaço passa inteiro para a linha de baixo, nunca fica cortado. */}
+      <span className={cn(VALORES, "pl-[4.75rem] sm:ml-auto sm:flex sm:items-baseline sm:gap-4 sm:pl-0")}>
+        {verCusto && (
+          <>
+            <ColunaPreco rotulo="Grossista" v={l.grossista} />
+            <ColunaPreco rotulo="Distribuidor" v={l.distribuidor} />
+          </>
+        )}
         <span className="block whitespace-nowrap text-right sm:min-w-28">
           <span className={cn(NOTA, "block sm:sr-only")}>Preço</span>
           <span className="block text-[15px] font-medium tabular-nums">{semPreco ? <SemPreco /> : <>{eur(precoProduto(p, margem))} €/{p.un}</>}</span>

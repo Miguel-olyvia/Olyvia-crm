@@ -885,6 +885,76 @@ describe("Produtos por páginas · o SKU na linha", () => {
   });
 });
 
+// 18/11: o «Resumo do Catálogo» deixa de ser uma coluna de 20rem (deixava um buraco por baixo e espremia a lista) e passa a uma faixa por cima da lista;
+// a lista fica com a largura toda que sobra, o nome tem largura mínima razoável e os preços nunca ficam cortados.
+describe("Produtos por páginas · o resumo é uma faixa por cima da lista", () => {
+  const resumo = () => screen.getByRole("region", { name: "Resumo do Catálogo", hidden: true });
+  const lista = () => screen.getByTestId("produtos-estado").parentElement!.querySelector("ul[aria-busy]")!;
+  it("a faixa está na coluna da lista, antes da pesquisa e da lista, e a grelha da página só tem categorias + lista (sem a coluna de 20rem)", async () => {
+    await pagina();
+    const r = resumo();
+    const coluna = screen.getByRole("searchbox", { name: "Procurar produto" }).closest<HTMLElement>("div.min-w-0")!;
+    expect(coluna).toContainElement(r);
+    expect(r.compareDocumentPosition(screen.getByRole("searchbox", { name: "Procurar produto" })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(r.compareDocumentPosition(lista()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const grelha = coluna.parentElement!;
+    expect(grelha.className).toContain("xl:grid-cols-[13rem_minmax(0,1fr)]");
+    expect(grelha.className).not.toContain("20rem");
+    expect(grelha.className).not.toMatch(/lg:grid-cols/);
+    expect(grelha.children).toHaveLength(2); // a coluna da lista e a das categorias
+  });
+  it("não fica escondida em ecrãs estreitos e quebra em colunas sozinha (2-3 colunas, sem scroll horizontal)", async () => {
+    await pagina();
+    const r = resumo();
+    for (let a: HTMLElement | null = r; a && a !== document.body; a = a.parentElement) expect(a.className, a.tagName).not.toMatch(/(^|\s)hidden(\s|$)/);
+    const ul = r.querySelector("ul")!;
+    expect(ul.className).toMatch(/\bgrid\b/);
+    expect(ul.className).toContain("grid-cols-[repeat(auto-fit,minmax(");
+    expect(ul.className).not.toMatch(/overflow-x|whitespace-nowrap/);
+  });
+  it("tem os mesmos contadores: Total, Sem referência, Sem categoria, Sem marca e, quando a base os dá, Sem preço de venda", async () => {
+    base.responder = (f, a) => (f === "cat_ler_produtos_contagens" ? { data: { ...CONTAGENS, sem_preco: 7 }, error: null } : padrao(f, a));
+    await pagina();
+    const r = resumo();
+    await waitFor(() => expect(within(r).getAllByRole("listitem", { hidden: true }).map((li) => li.textContent)).toEqual([
+      "Total de produtos3", "Sem referência gerada2", "Sem categoria de produto1", "Sem marca1", "Sem preço de venda7",
+    ]));
+  });
+  it("os alvos tocáveis da faixa têm 44 px (o botão «Sem categoria de produto»)", async () => {
+    await pagina();
+    const b = await within(resumo()).findByRole("button", { name: "Sem categoria de produto", hidden: true });
+    expect(b.className).toContain("min-h-11");
+  });
+});
+
+describe("Produtos por páginas · a linha da lista dá largura ao nome e não corta os preços", () => {
+  const respostaCom = (produtos: Record<string, unknown>[]) => { base.responder = (f, a) => {
+    const r = padrao(f, a) as { data: { produtos?: Record<string, unknown>[] } };
+    if (f === "cat_ler_produtos_pagina" && a.p_pagina === 1) r.data.produtos = produtos;
+    return r;
+  }; };
+  it("o nome tem uma largura mínima de 16rem (a partir de sm) e a linha quebra em vez de o espremer", async () => {
+    respostaCom([linha(ID.torneira, "Torneira monocomando de lavatório com bica alta", { grossista: 45.5, distribuidor: 50, pvp: 100 })]);
+    await pagina();
+    const l = painel().getByRole("button", { name: /^Torneira monocomando/ }).closest("li")!;
+    const colunaNome = painel().getByRole("button", { name: /^Torneira monocomando/ }).parentElement!;
+    expect(colunaNome.className).toContain("sm:flex-[1_1_16rem]");
+    expect(l.className).toMatch(/\bflex-wrap\b/);
+    expect(l.className).not.toMatch(/flex-nowrap/);
+  });
+  it("Grossista, Distribuidor e Preço são um só grupo, à direita, que não encolhe nem corta (quebra para baixo do nome se faltar espaço)", async () => {
+    respostaCom([linha(ID.torneira, "Torneira cozinha", { grossista: 45.5, distribuidor: 50, pvp: 100 })]);
+    await pagina();
+    const l = painel().getByRole("button", { name: "Torneira cozinha" }).closest("li")!;
+    const grupo = within(l).getByText("Preço").parentElement!.parentElement!;
+    for (const t of ["Grossista", "Distribuidor"]) expect(grupo).toContainElement(within(l).getByText(t));
+    expect(grupo.className).toContain("sm:shrink-0");
+    expect(grupo.className).toContain("sm:ml-auto");
+    expect(grupo.className).not.toMatch(/truncate|overflow-hidden|text-ellipsis/);
+    for (const t of ["Grossista", "Distribuidor"]) expect(within(l).getByText(t).parentElement!.className).toContain("xl:w-24"); // largura fixa, alinhada à direita
+  });
+});
+
 describe("Produtos · o protótipo (sem real) fica em memória", () => {
   it("não chama nenhuma função por páginas e mostra os produtos do Catálogo", async () => {
     await pagina(null);

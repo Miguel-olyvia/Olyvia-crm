@@ -164,6 +164,32 @@ export function PainelProdutos({ total, semReferencia, semCategoria, semMarca, s
   );
 }
 
+/** 18/11: o mesmo resumo em UMA faixa por cima da lista (em vez de uma coluna de 20rem que deixava um buraco por baixo e espremia a lista). Cada contador é um bloco (nome em cima,
+ *  número por baixo); os com valor > 0 levam o aviso (token só para texto, contraste 4,5:1). A grelha reparte-se sozinha (auto-fit) em 2-3 colunas nos ecrãs estreitos, sem scroll horizontal.
+ *  Mesmos textos, região e `onSemCategoria` que PainelProdutos (que fica para o protótipo). */
+export function ResumoProdutosFaixa({ total, semReferencia, semCategoria, semMarca, semPreco, onSemCategoria }: { total: number; semReferencia: number; semCategoria: number; semMarca: number; semPreco?: number | null | undefined; onSemCategoria?: () => void }) {
+  const bloco = (t: string, n: number, acao?: () => void) => (
+    <li key={t} className="flex min-w-0 flex-col justify-between gap-1 rounded-xl bg-muted/50 px-3 py-2">
+      {acao
+        ? <button type="button" onClick={acao} className="min-h-11 text-left text-[15px] font-medium leading-snug underline-offset-4 hover:underline">{t}</button>
+        : <span className="text-[15px] leading-snug text-muted-foreground">{t}</span>}
+      <span className={cn("text-xl font-semibold tabular-nums tracking-tight", n > 0 && t !== "Total de produtos" && "text-warning-text")}>{n}</span>
+    </li>
+  );
+  return (
+    <section aria-label="Resumo do Catálogo" className={ENTRADA}>
+      <ul className="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-2">
+        {bloco("Total de produtos", total)}
+        {bloco("Sem referência gerada", semReferencia)}
+        {bloco("Sem categoria de produto", semCategoria, semCategoria > 0 ? onSemCategoria : undefined)}
+        {bloco("Sem marca", semMarca)}
+        {/* só quando a base devolve sem_preco (a função antiga não o traz; vem null quando quem vê não vê preços): a linha esconde-se em vez de mostrar um 0 que não foi medido */}
+        {semPreco != null && bloco("Sem preço de venda", semPreco)}
+      </ul>
+    </section>
+  );
+}
+
 /* ------------------------------------------------------------------ coluna 3: o desempenho */
 const CARTAO = "rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)]";
 function Cartao({ id, children, acao }: { id: PainelId; i?: number; children: ReactNode; acao?: ReactNode }) {
