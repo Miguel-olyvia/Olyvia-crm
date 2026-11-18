@@ -165,7 +165,9 @@ function semelhanca(a: string, b: string): number {
 
 // ------------------------------------------------------------------ o ecrã: ler as perguntas e carregar nos botões
 
-interface CampoDom extends CampoEcra { botoes?: HTMLButtonElement[]; menos?: HTMLButtonElement; mais?: HTMLButtonElement; saida?: HTMLElement; entrada?: HTMLInputElement | HTMLTextAreaElement }
+interface CampoDom extends CampoEcra { botoes?: HTMLButtonElement[]; menos?: HTMLButtonElement; mais?: HTMLButtonElement; saida?: HTMLElement; entrada?: HTMLInputElement | HTMLTextAreaElement;
+  /** 18/11: a pergunta inteira no ecrã (o grupo ou a caixa), para deslizar até ela e realçá-la enquanto se fala dela. */
+  no?: HTMLElement }
 
 const JSDOM = typeof navigator !== "undefined" && /jsdom/i.test(navigator.userAgent);
 /** Está no ecrã (não escondido) e não é da própria Olyvia nem da pesquisa geral do topo. */
@@ -185,13 +187,13 @@ export function lerCampos(raiz: ParentNode = document): CampoDom[] {
     if (!rotulo) continue;
     const menos = g.querySelector<HTMLButtonElement>("button[aria-label='Menos']"), mais = g.querySelector<HTMLButtonElement>("button[aria-label='Mais']");
     if (menos && mais) {
-      r.push({ rotulo, tipo: "contador", menos, mais, saida: g.querySelector<HTMLElement>("output") ?? undefined, valor: textoDe(g.querySelector("output")) });
+      r.push({ rotulo, tipo: "contador", no: g, menos, mais, saida: g.querySelector<HTMLElement>("output") ?? undefined, valor: textoDe(g.querySelector("output")) });
       continue;
     }
     const botoes = Array.from(g.querySelectorAll<HTMLButtonElement>("button[aria-pressed]")).filter((b) => !b.disabled);
     if (!botoes.length) continue;
     botoes.forEach((b) => vistos.add(b));
-    r.push({ rotulo, tipo: "opcoes", botoes, opcoes: botoes.map((b) => ({ texto: textoDe(b).replace(/\(marque para avançar\)/, "").trim(), ligado: b.getAttribute("aria-pressed") === "true" })) });
+    r.push({ rotulo, tipo: "opcoes", no: g, botoes, opcoes: botoes.map((b) => ({ texto: textoDe(b).replace(/\(marque para avançar\)/, "").trim(), ligado: b.getAttribute("aria-pressed") === "true" })) });
   }
   // as caixas de escrever com rótulo (<label for>), fora da pesquisa e da própria Olyvia
   for (const e of Array.from(raiz.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>("input:not([type]),input[type='text'],input[type='number'],textarea"))) {
@@ -199,7 +201,7 @@ export function lerCampos(raiz: ParentNode = document): CampoDom[] {
     const lab = document.querySelector(`label[for="${CSS.escape(e.id)}"]`);
     const rotulo = lab ? textoDe(lab.querySelector("[id$='-rot']") ?? lab).replace(/\s*\(opcional\)\s*$/i, "") : e.getAttribute("aria-label") ?? "";
     if (!rotulo || rotulo.length > 80) continue;
-    r.push({ rotulo, tipo: "texto", entrada: e, valor: e.value });
+    r.push({ rotulo, tipo: "texto", no: (e.closest("label,[role='group']") as HTMLElement | null) ?? e, entrada: e, valor: e.value });
   }
   return r;
 }
@@ -214,7 +216,7 @@ const valorContador = (c: CampoDom): number | null => {
 };
 
 /** Escreve numa caixa controlada pelo React (o «value» nativo + input + blur, que é quando a ficha grava). */
-function escrever(e: HTMLInputElement | HTMLTextAreaElement, texto: string) {
+export function escrever(e: HTMLInputElement | HTMLTextAreaElement, texto: string) {
   const proto = e instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
   e.focus();
   Object.getOwnPropertyDescriptor(proto, "value")?.set?.call(e, texto);
@@ -228,6 +230,9 @@ export async function executarPlano(campos: CampoDom[], plano: readonly Acao[]):
   const feito: string[] = [];
   for (const a of plano) {
     const c = campos[a.campo];
+    if (!c) continue;
+    // 18/11 (Rúben: «enquanto vai falando os campos do formulário, faz scroll sozinha para acompanhar»): vê-se cada pergunta a mudar
+    if (c.no && plano.length) { mostrarCampo(c.no); await esperar(JSDOM ? 0 : 220); }
     if (a.tipo === "opcao" && c.botoes) {
       const b = c.botoes[a.opcao], o = c.opcoes![a.opcao];
       if (!o.ligado) b.click();
@@ -252,6 +257,54 @@ export async function executarPlano(campos: CampoDom[], plano: readonly Acao[]):
     }
   }
   return feito;
+}
+
+// ------------------------------------------------------------------ 18/11: acompanhar a fala (deslizar até à pergunta de que se fala)
+
+let realcado: { el: HTMLElement; outline: string; offset: string; t: ReturnType<typeof setTimeout> } | null = null;
+/** Desliza até à pergunta (ao centro do ecrã) e realça-a um instante. Não faz nada se já está realçada. */
+export function mostrarCampo(el: HTMLElement, ms = 1400): void {
+  if (realcado?.el === el) { clearTimeout(realcado.t); realcado.t = setTimeout(tirarRealce, ms); return; }
+  tirarRealce();
+  el.scrollIntoView?.({ block: "center", behavior: "smooth" });
+  realcado = { el, outline: el.style.outline, offset: el.style.outlineOffset, t: setTimeout(tirarRealce, ms) };
+  el.style.outline = "3px solid hsl(var(--primary) / 0.55)";
+  el.style.outlineOffset = "6px";
+}
+function tirarRealce() {
+  if (!realcado) return;
+  clearTimeout(realcado.t);
+  realcado.el.style.outline = realcado.outline;
+  realcado.el.style.outlineOffset = realcado.offset;
+  realcado = null;
+}
+
+/** A pergunta de que se está a falar: a que tem o rótulo dito mais tarde na frase (ou, sem rótulo, a única com a resposta dita). Null se nenhuma. */
+export function campoMencionado(frase: string, campos: readonly CampoEcra[]): number | null {
+  const s = unidades(juntarLetras(normal(frase)));
+  if (!s) return null;
+  let melhor: number | null = null, pos = -1;
+  campos.forEach((c, i) => {
+    for (const k of chavesDoRotulo(c.rotulo)) {
+      if (k.length < 4) continue;
+      const ps = posicoes(s, k);
+      const p = ps.length ? ps[ps.length - 1] : -1;
+      if (p > pos) { pos = p; melhor = i; }
+    }
+  });
+  if (melhor != null) return melhor;
+  // sem rótulo: a última resposta dita que é de uma pergunta só («fácil», «na via pública»)
+  const plano = planoPreencher(frase, campos);
+  return plano.length ? plano[plano.length - 1].campo : null;
+}
+
+/** Acompanha a fala: desliza até à pergunta de que se está a falar (sem a responder). Devolve o índice, ou null. */
+export function acompanharFala(frase: string): number | null {
+  const campos = lerCampos();
+  const i = campoMencionado(frase, campos);
+  const no = i != null ? campos[i]?.no : undefined;
+  if (no) mostrarCampo(no);
+  return i;
 }
 
 /** Tenta preencher o ecrã com a frase. Devolve o que fez (vazio se a frase não responde a nenhuma pergunta à vista). */

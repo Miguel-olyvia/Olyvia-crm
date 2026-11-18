@@ -10,7 +10,7 @@ vi.mock("./gravador", () => ({ useGravacao: () => ({ estado: g.estado, falas: g.
 // a IA (olyvia-comando): por omissão não há (como antes de a função estar publicada)
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { functions: { invoke: (n: string, o: { body: { frase: string } }) => (g.invoke ? g.invoke(n, o) : Promise.resolve({ data: null, error: new Error("sem função") })) } } }));
 
-import { ACORDADA_MS, OlyviaComando, PAUSA_FRASE, PAUSA_PARA_AGIR } from "./OlyviaComando";
+import { ACORDADA_MS, OlyviaComando, PAUSA_A_MEIO, PAUSA_FRASE, PAUSA_ORDEM } from "./OlyviaComando";
 
 type Res = { transcript: string }[] & { isFinal: boolean };
 class Falso {
@@ -53,13 +53,58 @@ afterEach(() => {
 });
 
 describe("17/11: a escuta contínua da Olyvia", () => {
-  it("reage quando se pára de falar um instante, sem esperar que o browser dê a frase por acabada", () => {
+  it("18/11: age quando se pára de falar, sem esperar que o browser dê a frase por acabada — mas não numa pausa curta", () => {
     vi.useFakeTimers();
     render(arvore("/negocios?vista=hoje"));
     falar(ultimo(), res("olyvia vai aos negócios"));
+    act(() => { vi.advanceTimersByTime(PAUSA_FRASE - 200); });
     expect(loc()).toBe("/negocios?vista=hoje");
-    act(() => { vi.advanceTimersByTime(PAUSA_PARA_AGIR); });
+    act(() => { vi.advanceTimersByTime(250); });
     expect(loc()).toBe("/negocios");
+  });
+
+  it("18/11 (Rúben: «se a pessoa fizer uma pequena pausa, ele não quebra»): a frase a meio («… do») espera muito mais, e junta o resto", async () => {
+    vi.useFakeTimers();
+    const pedidos: string[] = [];
+    g.invoke = async (_n, o) => { pedidos.push(o.body.frase); return { data: { acoes: [], resposta: "Está bem.", continuar: false }, error: null }; };
+    render(arvore("/negocios?vista=hoje"));
+    const rec = ultimo();
+    falar(rec, res("olyvia", true));
+    // o browser fecha a frase no «do» (pausa para pensar)…
+    falar(rec, res("olyvia", true), res("quero que me mostres o negócio do", true));
+    await act(async () => { await vi.advanceTimersByTimeAsync(PAUSA_FRASE + 500); });
+    expect(pedidos).toEqual([]);
+    // …e a pessoa continua noutro resultado: é uma frase só
+    falar(rec, res("olyvia", true), res("quero que me mostres o negócio do", true), res("carlos mendes que fica em oeiras", true));
+    await act(async () => { await vi.advanceTimersByTimeAsync(PAUSA_FRASE + 50); });
+    expect(pedidos).toEqual(["quero que me mostres o negocio do carlos mendes que fica em oeiras"]);
+  });
+
+  it("18/11: se o browser fecha a sessão de reconhecimento a meio da espera, o que se disse não se perde", async () => {
+    vi.useFakeTimers();
+    const pedidos: string[] = [];
+    g.invoke = async (_n, o) => { pedidos.push(o.body.frase); return { data: { acoes: [], resposta: "", continuar: false }, error: null }; };
+    render(arvore("/negocios?vista=hoje"));
+    const rec = ultimo();
+    falar(rec, res("olyvia", true));
+    falar(rec, res("olyvia", true), res("preciso de ver as obras que estão em curso agora"));
+    await act(async () => { rec.onend!(); await vi.advanceTimersByTimeAsync(10); });
+    expect(pedidos).toEqual(["preciso de ver as obras que estao em curso agora"]);
+    // e a sessão nova não o repete
+    await act(async () => { await vi.advanceTimersByTimeAsync(PAUSA_A_MEIO); });
+    expect(pedidos).toHaveLength(1);
+  });
+
+  it("18/11: a frase a meio acaba por ir sozinha passado PAUSA_A_MEIO (não fica à espera para sempre)", async () => {
+    vi.useFakeTimers();
+    const pedidos: string[] = [];
+    g.invoke = async (_n, o) => { pedidos.push(o.body.frase); return { data: { acoes: [], resposta: "", continuar: false }, error: null }; };
+    render(arvore("/negocios?vista=hoje"));
+    const rec = ultimo();
+    falar(rec, res("olyvia", true));
+    falar(rec, res("olyvia", true), res("preciso de ver as obras que estão em curso e", true));
+    await act(async () => { await vi.advanceTimersByTimeAsync(PAUSA_A_MEIO + 50); });
+    expect(pedidos).toEqual(["preciso de ver as obras que estao em curso e"]);
   });
 
   it("espera pelo fim do nome («abre o Ruben…» → «Branco») e não repete o comando quando o browser fecha a frase", () => {
@@ -68,9 +113,9 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     const pedidos = ouvir(EV_ABRIR);
     const rec = ultimo();
     falar(rec, res("olyvia abre o ruben"));
-    act(() => { vi.advanceTimersByTime(PAUSA_PARA_AGIR - 100); });
+    act(() => { vi.advanceTimersByTime(PAUSA_ORDEM); });
     falar(rec, res("olyvia abre o ruben branco"));
-    act(() => { vi.advanceTimersByTime(PAUSA_PARA_AGIR); vi.runOnlyPendingTimers(); });
+    act(() => { vi.advanceTimersByTime(PAUSA_FRASE + 50); });
     falar(rec, res("olyvia abre o ruben branco", true));
     act(() => { vi.runOnlyPendingTimers(); });
     expect(pedidos).toEqual([{ nome: "ruben branco", fase: null }]);
@@ -84,7 +129,7 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     falar(rec, res("olyvia"));
     // uma pausa curta depois de «Carlos» já não chega para agir com meio nome
     falar(rec, res("olyvia agora abre o carlos"));
-    act(() => { vi.advanceTimersByTime(PAUSA_PARA_AGIR + 100); });
+    act(() => { vi.advanceTimersByTime(PAUSA_ORDEM + 100); });
     expect(pedidos).toEqual([]);
     falar(rec, res("olyvia agora abre o carlos mendes", true));
     act(() => { vi.runOnlyPendingTimers(); });
@@ -113,10 +158,10 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     const rec = ultimo();
     falar(rec, res("olyvia", true));
     falar(rec, res("olyvia", true), res("procura o nuno", true));
-    act(() => { vi.advanceTimersByTime(50); });
+    act(() => { vi.advanceTimersByTime(PAUSA_ORDEM + 50); });
     expect(buscas).toEqual(["nuno"]);
     falar(rec, res("olyvia", true), res("procura o nuno", true), res("pereira", true));
-    act(() => { vi.advanceTimersByTime(50); });
+    act(() => { vi.advanceTimersByTime(PAUSA_FRASE + 50); });
     expect(buscas).toEqual(["nuno", "nuno pereira"]);
   });
 
@@ -132,6 +177,7 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     render(arvore("/negocios?vista=hoje"));
     expect(ativos).toHaveLength(1);
     falar(ultimo(), res("olyvia vai ao catálogo", true));
+    act(() => { vi.advanceTimersByTime(PAUSA_ORDEM + 50); });
     expect(loc()).toBe("/catalogo/servicos");
     act(() => { vi.advanceTimersByTime(2000); });
     expect(ativos).toHaveLength(1);
@@ -204,8 +250,10 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     falar(rec, res("olyvia", true));
     expect(screen.getByRole("button", { name: "Olyvia — a ouvir-te" })).toBeInTheDocument();
     falar(rec, res("olyvia", true), res("vai ao catálogo", true));
+    act(() => { vi.advanceTimersByTime(PAUSA_ORDEM + 50); });
     expect(loc()).toBe("/catalogo/servicos");
     falar(rec, res("olyvia", true), res("vai ao catálogo", true), res("abre os negócios", true));
+    act(() => { vi.advanceTimersByTime(PAUSA_ORDEM + 50); });
     expect(loc()).toBe("/negocios");
   });
 
@@ -213,7 +261,7 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     vi.useFakeTimers();
     render(arvore("/negocios?vista=hoje"));
     falar(ultimo(), res("vai ao catálogo", true));
-    act(() => { vi.advanceTimersByTime(PAUSA_PARA_AGIR * 2); });
+    act(() => { vi.advanceTimersByTime(PAUSA_FRASE * 2); });
     expect(loc()).toBe("/negocios?vista=hoje");
   });
 

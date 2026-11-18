@@ -232,6 +232,45 @@ export function interpretarComando(texto: string): Comando {
   return { acao: "nada" };
 }
 
+// ------------------------------------------------------------------ 18/11: quando agir (não cortar a meio de uma frase)
+// Rúben: «que não corte; se a pessoa fizer uma pequena pausa, ele não quebra». O browser dá a frase por acabada ao fim de ~0,7 s de
+// silêncio, e antes agia-se logo aí: quem parava para pensar («abre o negócio do… Carlos») ficava cortado. Agora espera-se pelo fim do
+// PENSAMENTO, pelo silêncio desde a última palavra ouvida: curto nas ordens feitas («desce»), mais longo numa frase natural, e bem mais
+// longo quando a frase acaba a meio («… e», «… do», «… para», «hum»).
+
+/** «desce», «sobe», «mais», «volta para trás»: quase instantâneo. */
+export const PAUSA_CURTA = 450;
+/** Uma ordem conhecida e curta que o browser já deu por acabada («vai ao catálogo», «procura o Nuno»). */
+export const PAUSA_ORDEM = 800;
+/** Uma frase natural: o silêncio que diz que a pessoa acabou de falar. */
+export const PAUSA_FRASE = 1600;
+/** A frase acaba a meio (num «e», «do», «para», num «hum»): a pessoa ainda está a pensar. */
+export const PAUSA_A_MEIO = 3200;
+
+const ACABA_A_MEIO = /\b(?:e|ou|mas|que|de|do|da|dos|das|no|na|nos|nas|ao|aos|a|o|os|as|um|uma|uns|umas|para|pra|pro|com|sem|em|por|pelo|pela|se|depois|tambem|entao|tipo|hum|hmm|humm|eh|ah|er|portanto|porque|quando|onde|como|qual|quais|meu|minha|seu|sua|esse|essa|este|esta|isto|aquele|aquela|tipo assim|ou seja|quer dizer|sobre|ate|entre|mais|muito|bem)$/;
+/** A frase dita acaba a meio (uma palavra que pede continuação)? */
+export const acabaAMeio = (texto: string): boolean => ACABA_A_MEIO.test(normal(texto));
+
+/** Quanto silêncio (ms) esperar, desde a última palavra ouvida, antes de agir. */
+export function esperaAteAgir(cmd: string, c: Comando, final: boolean): number {
+  if (acabaAMeio(cmd)) return PAUSA_A_MEIO;
+  if (c.acao === "scroll" || c.acao === "mais" || c.acao === "voltar") return PAUSA_CURTA;
+  if (c.acao !== "nada" && final && normal(cmd).split(" ").length <= 6) return PAUSA_ORDEM;
+  return PAUSA_FRASE;
+}
+
+/** 18/11: a resposta a «Confirmas?» (ações que não se desfazem pedem sempre confirmação). */
+export const eConfirmacao = (texto: string): boolean => {
+  const s = limparFrase(normal(texto).replace(new RegExp("^(?:ok |o |a )?" + GATILHO.source + "\\s*"), ""));
+  // a frase INTEIRA tem de ser um «sim» («sim, pode», «confirmo»): «vai aos negócios» é outra ordem, não confirma nada
+  const SIM = "(?:sim|confirmo|confirma|confirmado|pode|podes|pode ser|avanca|avancar|faz|faz isso|faz la|isso|isso mesmo|claro|claro que sim|ok|okay|esta bem|ta bem|vai em frente|com certeza|exato|exatamente|certo|siga|bora|carrega|carrega ai|envia|manda)";
+  return new RegExp(`^${SIM}(?: ${SIM})*$`).test(s);
+};
+export const eRecusa = (texto: string): boolean => {
+  const s = normal(texto).replace(new RegExp("^(?:ok |o |a )?" + GATILHO.source + "\\s*"), "");
+  return /^(?:nao|cancela|cancelar|espera|deixa|deixa estar|esquece|nem pensar|para|alto|negativo)\b/.test(s);
+};
+
 // ------------------------------------------------------------------ o que as páginas usam para cumprir o comando
 
 /** O negócio cujo nome mais se parece com o dito: igual > começa por > tem todas as palavras. Null se nenhum serve. */

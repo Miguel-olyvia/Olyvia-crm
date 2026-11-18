@@ -49,13 +49,14 @@ describe("a Olyvia por comando (botão flutuante)", () => {
     expect(ouvinte).toHaveBeenCalledWith("nuno pereira");
   });
 
-  it("«abre o Ruben Branco na fase de negócio» vai aos Negócios e pede para abrir esse negócio na fase 3", () => {
+  it("«abre o Ruben Branco na fase de negócio» vai aos Negócios e pede para abrir esse negócio na fase 3 (18/11: sem IA, pelas regras)", async () => {
     montar("/pessoas");
     const pedidos: unknown[] = [];
     const h = (e: Event) => pedidos.push((e as CustomEvent).detail);
     window.addEventListener(EV_ABRIR, h);
     vi.useFakeTimers();
     escrever("abre o Ruben Branco na fase de negócio");
+    await act(async () => { await Promise.resolve(); });
     expect(loc()).toBe("/negocios");
     vi.runAllTimers();
     vi.useRealTimers();
