@@ -1,7 +1,12 @@
 // Protótipo (visualizador 3D): os revestimentos por superfície (pavimento e parede), escolhidos numa lista. Só dados: a textura procedural
 // (azulejo com juntas, madeira, tinta) desenha-se no visualizador, num canvas, sem ficheiros externos.
 export type TipoRevestimento = "azulejo" | "madeira" | "tinta";
-export interface Revestimento { id: string; nome: string; tipo: TipoRevestimento; cor: string; junta?: string; /** Lado de uma peça de azulejo, ou largura de uma tábua (m). */ modulo: number }
+export interface Revestimento {
+  id: string; nome: string; tipo: TipoRevestimento; cor: string; junta?: string;
+  /** Lado de uma peça de azulejo, ou largura de uma tábua (m). */ modulo: number;
+  /** 18/11: a outra medida de uma peça retangular (m), na vertical da superfície (a altura na parede, o fundo no chão). Sem ela, quadrada. */
+  moduloAlto?: number;
+}
 export type Superficie = "pavimento" | "parede";
 
 export const PAVIMENTOS: Revestimento[] = [
@@ -24,3 +29,14 @@ export const REVESTIMENTOS: Record<Superficie, Revestimento[]> = { pavimento: PA
 
 /** O revestimento pelo id; um id desconhecido (um gravado antes de a lista mudar) dá o primeiro da lista. */
 export const revestimentoDe = (superficie: Superficie, id: string): Revestimento => REVESTIMENTOS[superficie].find((r) => r.id === id) ?? REVESTIMENTOS[superficie][0];
+
+/** O que se desenha numa superfície: o material do produto escolhido, se há (Estúdio), senão o da lista pelo id. */
+export const revestimentoDaSuperficie = (rev: { pavimento: string; parede: string; materiais?: Partial<Record<Superficie, Revestimento>> }, superficie: Superficie): Revestimento =>
+  rev.materiais?.[superficie] ?? revestimentoDe(superficie, rev[superficie]);
+
+/** Quantas vezes a textura se repete numa superfície de `w`×`h` m: uma repetição é uma peça (azulejo) ou quatro tábuas (madeira). */
+export function repeticoes(r: Revestimento, w: number, h: number): [number, number] {
+  const lx = r.tipo === "madeira" ? r.modulo * 4 : r.modulo;
+  const ly = r.tipo === "madeira" ? r.modulo * 4 : (r.moduloAlto ?? r.modulo);
+  return [Math.max(0.1, w / lx), Math.max(0.1, h / ly)];
+}

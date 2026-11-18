@@ -28,7 +28,70 @@ describe("o Estúdio no 3D do Miguel", () => {
   });
   it("o revestimento e o pavimento: o mais parecido da lista do 3D", () => {
     expect(revestimentosDe({ pavimento: "pav-madeira" })).toMatchObject({ pavimento: "madeira_carvalho" });
-    expect(revestimentosDe({ pavimento: "pav-tela-a", revestimento: "rev-tela-c" })).toEqual({ pavimento: "ceramico_escuro", parede: "tinta_cinza" });
+    expect(revestimentosDe({ pavimento: "pav-tela-a", revestimento: "rev-tela-c" })).toMatchObject({ pavimento: "ceramico_escuro", parede: "tinta_cinza" });
+    expect(revestimentosDe({}).materiais).toBeUndefined();
+  });
+});
+
+// 18/11 (Rúben: «os pavimentos estão sem render 3D porque é revestimentos»): o chão do 3D com modelos saía sempre o «Cerâmico claro» da
+// lista do visualizador, fosse qual fosse o pavimento escolhido (e as paredes, o «Azulejo branco»). Agora levam o material do produto.
+import { usarProdutosReais, type Produto } from "./catalogoFake";
+import { materialDoProduto } from "./estudioNo3D";
+import { repeticoes, revestimentoDaSuperficie } from "@/emylia/planta3d/revestimentos";
+
+/** Como chegam da Mudelar (produtoDaLinha): o Porcelânico e o SPC estão na categoria «Revestimentos», mas no Estúdio são o pavimento. */
+const REAL = (id: string, cat: "pavimento" | "revestimento", n: string, cores: Produto["cores"], hex: string): Produto =>
+  ({ id, cat, n, colecao: "", cores, hex, preco: 18.75, un: "m²", inst: 35.72 });
+const GRIS = REAL("real-pav-gris", "pavimento", "Revestimento PORCELÂNICO BRERA GRIS 45x45", ["cinza"], "#8a8d91");
+const SPC = REAL("real-pav-spc", "pavimento", "Pavimento SPC ROBLE NATURAL 1220x180x5", ["madeira"], "#b08a5e");
+const ARENA = REAL("real-rev-arena", "revestimento", "Revestimento CERÂMICO ATREZO PALCO ARENA 30x60", ["bege"], "#d8c3a0");
+
+describe("o pavimento e o revestimento escolhidos no 3D (18/11)", () => {
+  it("um pavimento da Mudelar (Porcelânico, na categoria Revestimentos) vai para o chão com a cor e a peça dele", () => {
+    usarProdutosReais([GRIS, SPC, ARENA]);
+    const r = espacoDoEstudio({ ...PROJETO_EXEMPLO, pavimento: GRIS.id, revestimento: ARENA.id }, "depois");
+    if ("erro" in r || !r.ok) throw new Error("a planta do exemplo devia abrir em 3D");
+    const chao = revestimentoDaSuperficie(r.espaco.revestimentos, "pavimento");
+    expect(chao).toMatchObject({ id: "estudio:real-pav-gris", cor: GRIS.hex, tipo: "azulejo", modulo: 0.45 });
+    expect(chao.moduloAlto).toBeUndefined();
+    // e o revestimento continua nas paredes, com a cor dele e a peça de 60 x 30 deitada
+    expect(revestimentoDaSuperficie(r.espaco.revestimentos, "parede")).toMatchObject({ cor: ARENA.hex, tipo: "azulejo", modulo: 0.6, moduloAlto: 0.3 });
+    usarProdutosReais([]);
+  });
+  it("o antes não leva os produtos escolhidos (fica o chão e as paredes da lista)", () => {
+    usarProdutosReais([GRIS]);
+    const r = espacoDoEstudio({ ...PROJETO_EXEMPLO, pavimento: GRIS.id }, "antes");
+    if ("erro" in r || !r.ok) throw new Error("o antes devia abrir em 3D");
+    expect(revestimentoDaSuperficie(r.espaco.revestimentos, "pavimento").id).not.toMatch(/^estudio:/);
+    usarProdutosReais([]);
+  });
+  it("madeira em tábuas da largura do nome; contínuo sem juntas; sem medida, a peça de sempre", () => {
+    expect(materialDoProduto(SPC, "pavimento")).toMatchObject({ tipo: "madeira", modulo: 0.18, cor: SPC.hex });
+    expect(materialDoProduto({ id: "x", n: "Cerâmico efeito madeira 120 x 20", hex: "#a0784f", cores: ["madeira"] }, "pavimento")).toMatchObject({ tipo: "madeira", modulo: 0.2 });
+    expect(materialDoProduto({ id: "m", n: "Microcimento Cinza", hex: "#9a9a98", cores: ["cinza"] }, "pavimento")).toMatchObject({ tipo: "tinta", cor: "#9a9a98" });
+    expect(materialDoProduto({ id: "s", n: "Porcelânico Blanco", hex: "#f4f4f2", cores: ["branco"] }, "pavimento")).toMatchObject({ tipo: "azulejo", modulo: 0.6 });
+    expect(materialDoProduto({ id: "s", n: "Azulejo Blanco", hex: "#f4f4f2", cores: ["branco"] }, "parede")).toMatchObject({ tipo: "azulejo", modulo: 0.3 });
+    // a junta é a cor do produto, mais escura
+    expect(materialDoProduto(GRIS, "pavimento").junta).toBe("#686a6d");
+  });
+  it("o pavimento escolhido muda o chão: cada um tem o seu material", () => {
+    usarProdutosReais([GRIS, SPC]);
+    const a = revestimentosDe({ pavimento: GRIS.id }).materiais?.pavimento, b = revestimentosDe({ pavimento: SPC.id }).materiais?.pavimento;
+    expect(a?.cor).not.toBe(b?.cor);
+    expect([a?.tipo, b?.tipo]).toEqual(["azulejo", "madeira"]);
+    usarProdutosReais([]);
+  });
+});
+
+describe("as repetições da textura (18/11)", () => {
+  it("peça retangular: uma repetição por peça em cada direção; madeira: quatro tábuas", () => {
+    expect(repeticoes({ id: "a", nome: "", tipo: "azulejo", cor: "#fff", modulo: 0.6, moduloAlto: 0.3 }, 2.4, 1.2)).toEqual([4, 4]);
+    expect(repeticoes({ id: "b", nome: "", tipo: "azulejo", cor: "#fff", modulo: 0.5 }, 1, 1)).toEqual([2, 2]);
+    expect(repeticoes({ id: "c", nome: "", tipo: "madeira", cor: "#fff", modulo: 0.25 }, 2, 1)).toEqual([2, 1]);
+  });
+  it("sem material de produto, a lista pelo id (como antes)", () => {
+    expect(revestimentoDaSuperficie({ pavimento: "madeira_escura", parede: "tinta_verde" }, "pavimento").id).toBe("madeira_escura");
+    expect(revestimentoDaSuperficie({ pavimento: "?", parede: "tinta_verde" }, "parede").id).toBe("tinta_verde");
   });
 });
 

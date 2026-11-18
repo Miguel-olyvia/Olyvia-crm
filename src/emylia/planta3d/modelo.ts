@@ -3,6 +3,8 @@
 // só paredes retas E/S/W/N) converte-se para este modelo em `deLegado` (ligacao.ts); a normalização do desenho à mão (grelha, ângulos, fecho,
 // auto-intersecções) vive aqui para servir também um desenho livre.
 
+import type { Revestimento, Superficie } from "./revestimentos";
+
 export interface Ponto { x: number; y: number }
 /** Opções de uma peça que vêm do catálogo de origem: montagem do lava-loiça, rotação e extracção da bica, tampas dos ralos, escorredor reverso, articulação. */
 export interface OpcoesPeca {
@@ -25,7 +27,9 @@ export interface PecaProduto {
   recortes?: { x: number; z: number; w: number; d: number }[];
   opc?: OpcoesPeca;
 }
-export interface Revestimentos { pavimento: string; parede: string }
+/** O revestimento de cada superfície, pelo id da lista (revestimentos.ts). 18/11: `materiais` leva o material de um produto escolhido
+ *  (a cor e a medida da peça do pavimento ou do revestimento do Estúdio); quando há, é esse que se desenha, não o da lista. */
+export interface Revestimentos { pavimento: string; parede: string; materiais?: Partial<Record<Superficie, Revestimento>> }
 export interface Espaco {
   tipo: TipoEspaco; nome: string; peDireito: number; unidade: "m";
   paredes: Parede[]; aberturas: Abertura[]; pecas: PecaProduto[]; revestimentos: Revestimentos;

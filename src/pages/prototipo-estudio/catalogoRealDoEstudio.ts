@@ -24,8 +24,8 @@ export const CATEGORIAS_REAIS: Partial<Record<Categoria, string[]>> = {
 /** Uma palavra para procurar cada cor (a pesquisa do servidor também apanha os atributos). */
 const PROCURA_COR: Record<Cor, string> = { branco: "branco", preto: "preto", cinza: "cinza", madeira: "madeira", bege: "bege" };
 
-import { coresDoTexto, semAcento } from "./pesquisaEstudio";
-export { coresDoTexto, semAcento };
+import { coresDoTexto, medidasDoTexto, semAcento } from "./pesquisaEstudio";
+export { coresDoTexto, medidasDoTexto, semAcento };
 /** Um tom mais fiel do que a cor do estilo, para o desenho e o 3D (dourado, cobre, cromado). */
 function hexDoTexto(texto: string, cores: Cor[]): string {
   const t = semAcento(texto);
@@ -36,15 +36,6 @@ function hexDoTexto(texto: string, cores: Cor[]): string {
   return cores.length ? CORES[cores[0]].hex : "#d9d9d6";
 }
 
-/** As medidas ditas no nome («70x120», «100X81X45», «60 x 60 cm», «1200x2600x5,6» em mm). Em cm. */
-export function medidasDoTexto(texto: string): number[] | null {
-  const m = texto.match(/(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)(?:\s*[xX×]\s*(\d+(?:[.,]\d+)?))?/);
-  if (!m) return null;
-  let v = [m[1], m[2], m[3]].filter(Boolean).map((x) => Number(x!.replace(",", ".")));
-  if (v.some((x) => !Number.isFinite(x) || x <= 0)) return null;
-  if (Math.max(...v) > 400) v = v.map((x) => x / 10); // em milímetros
-  return v.map((x) => Math.round(x));
-}
 /** A largura e o fundo na planta, pelo tipo de peça e pelas medidas do nome. */
 function tamanhoNaPlanta(cat: Categoria, md: number[] | null): { w?: number; h?: number } {
   if (!md || md.length < 2) return {};

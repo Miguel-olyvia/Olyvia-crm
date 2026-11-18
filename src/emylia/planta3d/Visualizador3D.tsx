@@ -18,7 +18,7 @@ import { USAR_GLB_GENERICOS, categoriaDoTipo, categoriaPorId, opcoesComOmissao, 
 import { USAR_GLB, criarMaterialEspelho, lerGlb, montarGenerico, montarModelo, reterGlb, soltarGlb, urlDoModeloHtml, type FamiliaGlb, type ModeloMontado } from "./modelosHtml/glb";
 import { BANCADA_OMISSAO, CHAPA_OMISSAO, TOPO_BANCADA_MM, ficheiroDaChapa, mudarChapa, selecaoChapa, type ConfigBancada } from "./bancada";
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
-import { revestimentoDe, type Revestimento } from "./revestimentos";
+import { repeticoes, revestimentoDaSuperficie, type Revestimento } from "./revestimentos";
 
 export type Vista3D = "cima" | "3d" | "pessoa";
 export interface Visualizador3DProps {
@@ -46,12 +46,11 @@ const MATERIAL_ESPELHO = criarMaterialEspelho();
 
 /* ------------------------------------------------------------------ texturas procedurais (canvas, sem ficheiros) */
 const cacheTexturas = new Map<string, THREE.CanvasTexture>();
-/** O lado, em metros, que uma repetição da textura cobre. */
-const ladoTextura = (r: Revestimento): number => (r.tipo === "madeira" ? r.modulo * 4 : r.modulo);
-
 function texturaBase(r: Revestimento): THREE.CanvasTexture | null {
   if (r.tipo === "tinta") return null;
-  const guardada = cacheTexturas.get(r.id);
+  // pela cor também: o material de um produto (Estúdio) tem o id do produto e a cor pode mudar entre leituras do catálogo
+  const chave = `${r.id}|${r.cor}|${r.junta ?? ""}`;
+  const guardada = cacheTexturas.get(chave);
   if (guardada) return guardada;
   const c = document.createElement("canvas");
   c.width = c.height = 256;
@@ -84,12 +83,14 @@ function texturaBase(r: Revestimento): THREE.CanvasTexture | null {
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.colorSpace = THREE.SRGBColorSpace;
   t.anisotropy = 4;
-  cacheTexturas.set(r.id, t);
+  cacheTexturas.set(chave, t);
   return t;
 }
 
 /** Um material do revestimento para uma superfície de `w`×`h` metros (a textura repete-se por metro, não esticada). */
 function useRevestimento(r: Revestimento, w: number, h: number): THREE.MeshLambertMaterial {
+  // pelo conteúdo, não pelo objeto: o material de um produto do Estúdio é um objeto novo em cada leitura do espaço
+  const chave = `${r.id}|${r.tipo}|${r.cor}|${r.junta ?? ""}|${r.modulo}|${r.moduloAlto ?? ""}`;
   const mat = useMemo(() => {
     const base = texturaBase(r);
     // o revestimento é mate e não recebe o ambiente de estúdio (com ele o branco satura e a divisão fica lisa): só as luzes e as sombras; as peças é que brilham
@@ -97,12 +98,13 @@ function useRevestimento(r: Revestimento, w: number, h: number): THREE.MeshLambe
     if (base) {
       const t = base.clone();
       t.needsUpdate = true;
-      const l = ladoTextura(r);
-      t.repeat.set(Math.max(0.1, w / l), Math.max(0.1, h / l));
+      const [rx, ry] = repeticoes(r, w, h);
+      t.repeat.set(rx, ry);
       m.map = t;
     }
     return m;
-  }, [r, w, h]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `chave` resume `r`
+  }, [chave, w, h]);
   useEffect(() => () => { mat.map?.dispose(); mat.dispose(); }, [mat]);
   return mat;
 }
@@ -859,7 +861,7 @@ function Peca({ p: original, m, etiquetas, selecionada, onSel, mover, arrasto, s
 /* ------------------------------------------------------------------ paredes, aberturas, chão e tecto */
 function ParedeCena({ parede, indice, espaco }: { parede: Parede; indice: number; espaco: Espaco }) {
   const c = comprimento(parede), esp = parede.espessura;
-  const rev = revestimentoDe("parede", espaco.revestimentos.parede);
+  const rev = revestimentoDaSuperficie(espaco.revestimentos, "parede");
   const mat = useRevestimento(rev, c, espaco.peDireito);
   const trocos = useMemo(() => trocosDeParede(parede, espaco.aberturas, espaco.peDireito), [parede, espaco.aberturas, espaco.peDireito]);
   const n = normalInterior(espaco.paredes, indice);
@@ -911,7 +913,7 @@ function Superficies({ espaco, teto }: { espaco: Espaco; teto: boolean }) {
   const contorno = useMemo(() => espaco.paredes.map((p) => p.a), [espaco.paredes]);
   const geo = useMemo(() => new THREE.ShapeGeometry(new THREE.Shape(contorno.map((q) => new THREE.Vector2(q.x, -q.y)))), [contorno]);
   useEffect(() => () => geo.dispose(), [geo]);
-  const rev = revestimentoDe("pavimento", espaco.revestimentos.pavimento);
+  const rev = revestimentoDaSuperficie(espaco.revestimentos, "pavimento");
   const mat = useRevestimento(rev, 1, 1);
   return (
     <>

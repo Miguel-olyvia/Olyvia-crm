@@ -7,16 +7,50 @@ import { centroPeca, normalInteriorCm, paredeMaisPertoCm, poligonoDe } from "@/e
 import { deLegado, modeloGenerico, type ResLegado } from "@/emylia/planta3d/ligacao";
 import { ESPEC, type ProdutoModelo3D } from "@/emylia/planta3d/catalogo3d";
 import type { Revestimentos } from "@/emylia/planta3d/modelo";
+import type { Revestimento, Superficie } from "@/emylia/planta3d/revestimentos";
+import { medidasDoTexto, semAcento } from "./pesquisaEstudio";
 import { produto, type Produto } from "./catalogoFake";
 import { alturaFinalCm, type Projeto } from "./necessidadesEstudio";
 
-/** O pavimento e a parede do visualizador mais parecidos com os produtos escolhidos. */
+/** O pavimento e a parede do visualizador: o id da lista dele mais parecido (para quem só lê o id) e, com produto escolhido, o material
+ *  desse produto (18/11, Rúben: «os pavimentos estão sem render 3D»: o chão saía sempre o «Cerâmico claro» da lista, com a cor e a
+ *  medida de outro; agora o chão e as paredes têm a cor e a peça do produto, seja ele do catálogo de teste ou do da empresa). */
 export function revestimentosDe(p: Pick<Projeto, "revestimento" | "pavimento">): Revestimentos {
   const pav = produto(p.pavimento), rev = produto(p.revestimento);
   const corPav = pav?.cores[0], corRev = rev?.cores[0];
   const pavimento = !pav ? "ceramico_claro" : corPav === "madeira" ? "madeira_carvalho" : corPav === "preto" || /antracite/i.test(pav.n) ? "ceramico_escuro" : "ceramico_claro";
   const parede = !rev ? "tinta_branca" : corRev === "madeira" ? "madeira_parede" : corRev === "cinza" || corRev === "preto" ? "tinta_cinza" : "azulejo_branco";
-  return { pavimento, parede };
+  const materiais: NonNullable<Revestimentos["materiais"]> = {};
+  if (pav) materiais.pavimento = materialDoProduto(pav, "pavimento");
+  if (rev) materiais.parede = materialDoProduto(rev, "parede");
+  return { pavimento, parede, ...(pav || rev ? { materiais } : {}) };
+}
+
+/** Palavras de um produto com aspeto de madeira (soalho, vinílico, cerâmico efeito madeira). */
+const MADEIRA = /\b(madeir|soalho|parquet|parque\b|tabua|tablon|carvalh|roble|oak|wood|nogal|nogueir|freixo|fresno|pinho|olmo|teca|wengue|walnut)/;
+/** Palavras de um acabamento contínuo, sem juntas. */
+const CONTINUO = /\b(microciment|microcement|resina|epoxi|betonilha)/;
+
+/** Uma cor `hex` escurecida (`f` de 0 a 1), para as juntas. */
+function escurecer(hex: string, f: number): string {
+  const m = /^#?([0-9a-f]{6})$/i.exec(hex.trim());
+  if (!m) return "#b8b4ab";
+  const n = parseInt(m[1], 16);
+  const c = [n >> 16, (n >> 8) & 255, n & 255].map((v) => Math.round(v * (1 - f)).toString(16).padStart(2, "0"));
+  return `#${c.join("")}`;
+}
+
+/** O material 3D de um pavimento ou de um revestimento do Estúdio: a cor dele, e madeira (tábuas), peças (azulejo com a medida do nome,
+ *  «45x45», «30x60», «120 x 20») ou contínuo (microcimento). A maior medida fica na horizontal; sem medida, a peça de sempre da lista. */
+export function materialDoProduto(prod: Pick<Produto, "id" | "n" | "hex" | "cores"> & { destaque?: string }, superficie: Superficie): Revestimento {
+  const texto = semAcento(`${prod.n} ${prod.destaque ?? ""}`);
+  const md = medidasDoTexto(prod.n)?.slice(0, 2).map((x) => x / 100).filter((x) => x >= 0.05 && x <= 3.2);
+  const [maior, menor] = md && md.length === 2 ? [Math.max(...md), Math.min(...md)] : [null, null];
+  const base = { id: `estudio:${prod.id}`, nome: prod.n, cor: prod.hex };
+  if (CONTINUO.test(texto)) return { ...base, tipo: "tinta", modulo: 1 };
+  if (prod.cores[0] === "madeira" || MADEIRA.test(texto)) return { ...base, tipo: "madeira", modulo: menor ?? (superficie === "pavimento" ? 0.18 : 0.12) };
+  const lado = superficie === "pavimento" ? 0.6 : 0.3;
+  return { ...base, tipo: "azulejo", junta: escurecer(prod.hex, 0.25), modulo: maior ?? lado, ...(maior && menor && maior !== menor ? { moduloAlto: menor } : {}) };
 }
 
 /** O modelo de uma peça com produto: o genérico do tipo, com a medida, o nome e a cor do produto. */

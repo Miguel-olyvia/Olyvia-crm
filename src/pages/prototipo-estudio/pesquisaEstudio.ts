@@ -14,6 +14,15 @@ export const COR_PALAVRAS: [Cor, RegExp][] = [
   ["madeira", /\b(madeir|carvalh|nogueir|nogal|roble|oak|wood|freixo|fresno|cerejeir|walnut|teca|wengue|olmo)/],
   ["bege", /\b(bege|beige|beje|creme|crema|marfil|arena|areia|sand|taupe|cappuc|capuc|linho|ouro|oro\b|dourad|cobre|rosa gold)/],
 ];
+/** As medidas ditas no nome («70x120», «100X81X45», «60 x 60 cm», «1200x2600x5,6» em mm). Em cm. */
+export function medidasDoTexto(texto: string): number[] | null {
+  const m = texto.match(/(\d+(?:[.,]\d+)?)\s*[xX×]\s*(\d+(?:[.,]\d+)?)(?:\s*[xX×]\s*(\d+(?:[.,]\d+)?))?/);
+  if (!m) return null;
+  let v = [m[1], m[2], m[3]].filter(Boolean).map((x) => Number(x!.replace(",", ".")));
+  if (v.some((x) => !Number.isFinite(x) || x <= 0)) return null;
+  if (Math.max(...v) > 400) v = v.map((x) => x / 10); // em milímetros
+  return v.map((x) => Math.round(x));
+}
 /** As cores de um produto pelo nome e pelos atributos («SANITA GLAMIC BTW CINZA MATE» → cinza). */
 export function coresDoTexto(texto: string): Cor[] {
   const t = semAcento(texto);
