@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { usePermissions } from "@/hooks/usePermissions";
 import { toast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { permissionReason } from "./inventarioUi";
+import { missingPermissionsReason, permissionReason } from "./inventarioUi";
 import {
   ContextoFrota, PERM, PERMS_REQUISITO, useFrotaCtx, type AbaFicha, type AvisoFrota, type CtxFrota, type DadosDlg, type LigacaoAviso, type PedidoConfirmacao,
   type Requisito, type TipoDlg,
@@ -104,7 +104,8 @@ export function FrotaShell({ children }: { children: ReactNode }) {
     if (aCarregar) return { ok: false, porque: A_CARREGAR };
     const { lista, todas } = PERMS_REQUISITO[r];
     const ok = todas ? lista.every((p) => hasPermission(p)) : lista.some((p) => hasPermission(p));
-    return ok ? { ok, porque: "" } : { ok, porque: todas ? `Sem permissão: requer ${lista.join(" e ")}. Peça acesso a um administrador.` : permissionReason(lista) };
+    // 18/11: com «todas», o aviso diz só as que faltam (missingPermissionsReason).
+    return ok ? { ok, porque: "" } : { ok, porque: missingPermissionsReason(lista, todas, hasPermission) ?? permissionReason(lista) };
   }, [aCarregar, hasPermission]);
   const soConsulta = !aCarregar && ![PERM.gerir, PERM.custos, PERM.self].some((p) => hasPermission(p));
 

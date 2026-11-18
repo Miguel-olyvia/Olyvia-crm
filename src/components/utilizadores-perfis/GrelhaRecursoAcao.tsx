@@ -26,6 +26,8 @@ export interface EdicaoMatriz {
   bloqueada: (codigo: string) => boolean;
   /** Porque está bloqueada, com o nome da permissão que falta («Precisa primeiro de «Ficha: Ver»»). */
   motivoBloqueio: (codigo: string) => string;
+  /** 18/11: «Precisa também de: «A» e «B»» — as que `codigo` exige além da dependência (EXIGE_TAMBEM); null se nenhuma. */
+  exigeTambem?: (codigo: string) => string | null;
   aoAlternar: (p: Permissao) => void;
   /** "Tudo" / "Limpar" do grupo. */
   aoModulo: (lista: Permissao[], marcar: boolean) => void;
@@ -39,7 +41,7 @@ const G = "usersProfiles.form.matrix.grid.";
 const FIXA = "sticky left-0 z-10";
 
 /** O texto da dica e da descrição acessível: nome, código, descrição, perigosa e porque está bloqueada. */
-function Dica({ permissao: p, motivo }: { permissao: Permissao; motivo: string | null }) {
+function Dica({ permissao: p, motivo, exige = null }: { permissao: Permissao; motivo: string | null; exige?: string | null }) {
   const { t } = useTranslation();
   return (
     <span className="block max-w-xs space-y-0.5 text-left">
@@ -47,6 +49,7 @@ function Dica({ permissao: p, motivo }: { permissao: Permissao; motivo: string |
       <span className="block font-mono text-xs text-muted-foreground">{p.codigo}</span>
       {p.descricao && <span className="block text-xs">{p.descricao}</span>}
       {p.perigosa && <span className="block text-xs font-medium text-destructive">{t("usersProfiles.dangerous")}</span>}
+      {exige && <span className="block text-xs">{exige}</span>}
       {motivo && <span className="block text-xs">{motivo}</span>}
     </span>
   );
@@ -67,6 +70,7 @@ function ControloPermissao({ permissao: p, rotulo, acao, concedida, edicao, tipo
   const bloqueada = !edicao.desativada && edicao.bloqueada(p.codigo) && !concedida;
   const idDica = `${id}-dica`;
   const motivo = bloqueada ? edicao.motivoBloqueio(p.codigo) : null;
+  const exige = edicao.exigeTambem?.(p.codigo) ?? null;
   // Bloqueada: continua focável (aria-disabled) para se ler a razão; o clique só avisa (MatrizEditavel), não muda nada.
   const comum = {
     "aria-describedby": idDica,
@@ -107,9 +111,9 @@ function ControloPermissao({ permissao: p, rotulo, acao, concedida, edicao, tipo
     <>
       <Tooltip>
         <TooltipTrigger asChild>{gatilho}</TooltipTrigger>
-        <TooltipContent><Dica permissao={p} motivo={motivo} /></TooltipContent>
+        <TooltipContent><Dica permissao={p} motivo={motivo} exige={exige} /></TooltipContent>
       </Tooltip>
-      <span id={idDica} className="sr-only"><Dica permissao={p} motivo={motivo} /></span>
+      <span id={idDica} className="sr-only"><Dica permissao={p} motivo={motivo} exige={exige} /></span>
     </>
   );
 }

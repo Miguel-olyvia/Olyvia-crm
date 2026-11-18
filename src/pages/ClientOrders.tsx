@@ -34,6 +34,7 @@ import {
   InventoryPageHeader,
   InventoryStatusBadge,
   RowActions,
+  usePermissionGate,
   parseClientOrdersOrigin,
   parseClientOrdersParams,
   type ClientOrderOriginFilter,
@@ -673,7 +674,11 @@ const ClientOrders = () => {
   const { hasPermission } = usePermissions();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const canConfirmStockExit = hasPermission('inventory.edit') && hasPermission('client_orders.confirm_stock_exit');
+  // Confirmar / repartir / reverter saída (rpc_confirm_client_order_stock_exit[_split] e
+  // rpc_revert_client_order_stock_exit exigem as três). 18/11: o aviso diz só as que faltam.
+  const permissionGate = usePermissionGate();
+  const confirmExitGate = permissionGate(['inventory.edit', 'client_orders.confirm_stock_exit', 'client_orders.view'], true);
+  const canConfirmStockExit = confirmExitGate.allowed;
   // Editar encomendas de cliente: linhas das manuais
   // (rpc_update_manual_client_order), morada de entrega e notas
   // (rpc_update_client_order_header) e acrescentar morada de entrega ao
@@ -684,7 +689,8 @@ const ClientOrders = () => {
   const canCreateOrder = hasPermission('client_orders.create');
   // Pedir em falta ao fornecedor (rpc_request_missing_from_supplier exige
   // purchase_orders.create + client_orders.view).
-  const canRequestMissing = hasPermission('purchase_orders.create') && hasPermission('client_orders.view');
+  const requestMissingGate = permissionGate(['purchase_orders.create', 'client_orders.view'], true);
+  const canRequestMissing = requestMissingGate.allowed;
   // Eliminar encomenda (rpc_delete_client_order exige client_orders.delete).
   const canDeleteOrder = hasPermission('client_orders.delete');
 
@@ -3056,12 +3062,12 @@ const ClientOrders = () => {
     const { pending, warehouses, singleEach } = getConfirmAllInfo();
     const busy = confirmingAll || confirmingLineId !== null;
     const confirmReason = !canConfirmStockExit
-      ? t('clientOrders.dialog.noPermissionToConfirm')
+      ? (confirmExitGate.reason ?? t('clientOrders.dialog.noPermissionToConfirm'))
       : pending.length === 0
         ? 'Nada pronto a sair: as linhas esperam stock ou a encomenda ao fornecedor'
         : null;
     const requestReason = !canRequestMissing
-      ? 'Sem permissão: requer encomendas a fornecedor (criar)'
+      ? (requestMissingGate.reason ?? 'Sem permissão para pedir ao fornecedor')
       : !doc.can_request_missing
         ? 'Nada em falta que se possa pedir'
         : null;
@@ -3136,7 +3142,7 @@ const ClientOrders = () => {
       return <Loader2 key="exit" className="h-4 w-4 animate-spin text-muted-foreground" aria-label="A confirmar a saída" />;
     }
     const reason = !canConfirmStockExit
-      ? t('clientOrders.dialog.noPermissionToConfirm')
+      ? (confirmExitGate.reason ?? t('clientOrders.dialog.noPermissionToConfirm'))
       : !group || options.length === 0 || !(group.quantity > 0) || group.totalCapacity < group.quantity
         ? (group && group.quantity > 0
           ? t('clientOrders.dialog.noWarehouseEnoughStock', { qty: formatDiagnosticNumber(group.quantity) })
@@ -3228,13 +3234,34 @@ const ClientOrders = () => {
     );
   };
 
+  // 18/11: ação de linha sem permissão — desativada, com o motivo (as permissões que faltam) na dica e
+  // no nome acessível, como o "Confirmar saída" de renderStockExitAction.
+  const renderBlockedLineAction = (key: string, label: string, reason: string | undefined, icon?: ReactElement) => {
+    const why = reason ?? 'Sem permissão';
+    return (
+      <Tooltip key={key}>
+        <TooltipTrigger asChild>
+          <span className="inline-flex" tabIndex={0} aria-label={`${label}: ${why}`}>
+            <Button variant="outline" size="sm" className="h-7 gap-1 px-2 text-xs" disabled tabIndex={-1}>
+              {icon}
+              {label}
+            </Button>
+          </span>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs">{why}</TooltipContent>
+      </Tooltip>
+    );
+  };
+
   // Ações por linha: confirmar saída, reverter saída (só saídas manuais) e
   // pedir em falta (abre a mesma confirmação do rodapé — a RPC é por encomenda).
   // Abrir a PO é a ligação na coluna "De onde vem".
   const renderLineActions = (line: ClientOrderDocumentLine) => {
     const nodes: ReactElement[] = [];
     if (isStockExitConfirmable(line)) nodes.push(renderStockExitAction(line));
-    if (isStockExitRevertible(line) && canConfirmStockExit) {
+    if (isStockExitRevertible(line) && !canConfirmStockExit) {
+      nodes.push(renderBlockedLineAction('revert', 'Reverter saída', confirmExitGate.reason, <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />));
+    } else if (isStockExitRevertible(line)) {
       nodes.push(
         <Button
           key="revert"
@@ -3252,7 +3279,9 @@ const ClientOrders = () => {
     const missingHere = line.item_type !== 'service'
       && (line.line_status === 'sem_fornecedor' || asQty(line.qty_missing) > 0)
       && line.has_preferred_supplier !== false;
-    if (missingHere && detailData?.can_request_missing && canRequestMissing) {
+    if (missingHere && detailData?.can_request_missing && !canRequestMissing) {
+      nodes.push(renderBlockedLineAction('missing', 'Pedir em falta', requestMissingGate.reason));
+    } else if (missingHere && detailData?.can_request_missing) {
       nodes.push(
         <Button
           key="missing"

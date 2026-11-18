@@ -20,6 +20,8 @@ export {
   RowActions,
   usePermissionGate,
   permissionReason,
+  missingPermissionsReason,
+  permissionLabel,
   type RowActionItem,
   type RowActionEntry,
   type RowPrimaryAction,

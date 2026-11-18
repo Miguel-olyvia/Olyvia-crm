@@ -18,14 +18,15 @@
 //   RowActionItem: { label, onSelect, icon?, destructive?, disabled?, disabledReason?,
 //                    permission?, requireAllPermissions?, hideWithoutPermission?, hidden? }
 //   Item desativado mostra o motivo por baixo (<small> do .menu do mockup).
-//   Sem permissão → desativado com "Sem permissão: requer X…" (ou escondido com
-//   hideWithoutPermission). Separadores nas pontas/repetidos são removidos.
+//   Sem permissão → desativado com "Sem permissão: requer X ou Y…" / com requireAllPermissions
+//   "Sem permissão: falta X e Y…" (só as em falta) — ou escondido com hideWithoutPermission. Separadores nas pontas/repetidos são removidos.
 // modal: DropdownMenu modal (por omissão true). DENTRO DE UM DIALOG/SHEET usar
 //   modal={false}, senão o focus trap do diálogo fecha o menu.
 // Os cliques não chegam à linha (stopPropagation), por isso funciona em tr clicáveis.
 import { useId, type ReactNode } from "react";
 import { MoreHorizontal, type LucideIcon } from "lucide-react";
 import { usePermissions } from "@/hooks/usePermissions";
+import { missingPermissionsReason, permissionReason } from "./permissionReason";
 import { cn } from "@/lib/utils";
 import {
   DropdownMenu,
@@ -78,9 +79,8 @@ interface RowActionsProps {
   className?: string;
 }
 
-/** O porquê de faltar permissão (PERMWHY do mockup). */
-export const permissionReason = (perms: readonly string[]): string =>
-  `Sem permissão: requer ${perms.join(" ou ")}. Peça acesso a um administrador.`;
+// O porquê de faltar permissão vive em permissionReason.ts (18/11: com requireAll diz só as que faltam, ligadas com «e»).
+export { permissionReason, missingPermissionsReason, permissionLabel } from "./permissionReason";
 
 /** Avalia uma exigência de permissão com as permissões reais; devolve o motivo se falhar. */
 export function usePermissionGate() {
@@ -90,7 +90,9 @@ export function usePermissionGate() {
     if (loading) return { allowed: false, reason: "A carregar permissões…" };
     const list = typeof req === "string" ? [req] : [...req];
     const ok = requireAll ? list.every((p) => hasPermission(p)) : hasAnyPermission(list);
-    return ok ? { allowed: true } : { allowed: false, reason: permissionReason(list) };
+    return ok
+      ? { allowed: true }
+      : { allowed: false, reason: missingPermissionsReason(list, requireAll, hasPermission) ?? permissionReason(list) };
   };
 }
 

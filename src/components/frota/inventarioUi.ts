@@ -5,5 +5,5 @@ export { KpiTile, KpiGrid } from "@/components/inventory/ui/KpiTile";
 export { WorkQueueCard } from "@/components/inventory/ui/WorkQueueCard";
 export { InventoryStatusBadge } from "@/components/inventory/ui/InventoryStatusBadge";
 export { InventoryEmptyState } from "@/components/inventory/ui/InventoryEmptyState";
-export { usePermissionGate, permissionReason } from "@/components/inventory/ui/RowActions";
+export { usePermissionGate, permissionReason, missingPermissionsReason } from "@/components/inventory/ui/RowActions";
 export type { InventoryTone } from "@/components/inventory/ui/tones";
