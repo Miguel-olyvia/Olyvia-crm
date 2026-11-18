@@ -2,6 +2,7 @@
 // resumo (cat_ler_produtos_contagens) e, na ficha, os atributos do produto (cat_ler_atributos_produto). Sem «real» (protótipo) fica em memória (CatalogoProdutosFiltros.test.tsx).
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { readFileSync } from "node:fs";
 
 const base = vi.hoisted(() => ({
   chamadas: [] as { f: string; a: Record<string, unknown> }[],
@@ -76,7 +77,7 @@ async function pagina(r: FichaProdutoReal | null = real(), K: Catalogo = montar(
   const run = (fn: () => void) => fn();
   render(<CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={r ?? undefined} />);
   fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
-  if (r) await screen.findByText(/Página 1 de 3/);
+  if (r) await screen.findAllByText(/Página 1 de 3/);
 }
 const painel = () => within(screen.getByRole("tabpanel"));
 const combo = (nome: string) => screen.getByRole("combobox", { name: nome }) as HTMLInputElement;
@@ -140,10 +141,17 @@ describe("Produtos por páginas · a leitura", () => {
     expect(l.textContent).not.toContain("Distribuidor");
     expect(l.textContent).not.toContain("45,50");
   });
-  it("mostra «Página X de Y · N produtos» numa região que se anuncia", async () => {
+  it("«Página X de Y · N produtos» anuncia-se numa região role=status à parte (escondida), e o parágrafo focável não leva aria-live", async () => {
     await pagina();
-    const t = screen.getByText("Página 1 de 3 · 120 produtos");
-    expect(t).toHaveAttribute("aria-live", "polite");
+    const estado = screen.getByTestId("produtos-estado");
+    expect(estado).toHaveTextContent("Página 1 de 3 · 120 produtos");
+    expect(estado).not.toHaveAttribute("aria-live");
+    expect(estado.className).not.toMatch(/(^|\s)outline-none/);
+    expect(estado.className).toContain("focus-visible:ring-2");
+    const regioes = screen.getAllByRole("status").filter((r) => r.textContent === "Página 1 de 3 · 120 produtos");
+    expect(regioes).toHaveLength(1);
+    expect(regioes[0].className).toContain("sr-only");
+    expect(regioes[0]).not.toBe(estado);
   });
   it("não lê os produtos do arranque para a lista: o que se vê é o que a página trouxe (e não os do K)", async () => {
     await pagina();
@@ -152,7 +160,7 @@ describe("Produtos por páginas · a leitura", () => {
 });
 
 /** 17/11: há navegação no topo e no fim da lista; os testes usam a do fim. */
-const botaoFim = (nome: string) => within(screen.getByRole("navigation", { name: "Páginas de produtos" })).getByRole("button", { name: nome });
+const botaoFim = (nome: string) => within(screen.getByRole("navigation", { name: "Paginação de produtos, fim da lista" })).getByRole("button", { name: nome });
 
 describe("Produtos por páginas · Anterior e Seguinte", () => {
   it("na primeira página «Anterior» está desativado com a razão; «Seguinte» pede a página 2 e leva o foco ao topo da lista", async () => {
@@ -161,49 +169,48 @@ describe("Produtos por páginas · Anterior e Seguinte", () => {
     expect(ant).toBeDisabled();
     expect(ant).toHaveAccessibleDescription(/primeira página/i);
     fireEvent.click(botaoFim("Seguinte"));
-    await screen.findByText(/Página 2 de 3/);
+    await screen.findAllByText(/Página 2 de 3/);
     expect(paginas().some((c) => c.a.p_pagina === 2 && c.a.p_limite === 50)).toBe(true);
     expect(painel().getByRole("button", { name: "Produto da página 2" })).toBeInTheDocument();
-    expect(screen.getByText(/Página 2 de 3/)).toHaveFocus();
+    expect(screen.getByTestId("produtos-estado")).toHaveFocus();
     expect(botaoFim("Anterior")).toBeEnabled();
   });
   it("na última página «Seguinte» está desativado com a razão; «Anterior» volta atrás", async () => {
     await pagina();
     fireEvent.click(botaoFim("Seguinte"));
-    await screen.findByText(/Página 2 de 3/);
+    await screen.findAllByText(/Página 2 de 3/);
     fireEvent.click(botaoFim("Seguinte"));
-    await screen.findByText(/Página 3 de 3/);
+    await screen.findAllByText(/Página 3 de 3/);
     const seg = botaoFim("Seguinte");
     expect(seg).toBeDisabled();
     expect(seg).toHaveAccessibleDescription(/última página/i);
     fireEvent.click(botaoFim("Anterior"));
-    await screen.findByText(/Página 2 de 3/);
+    await screen.findAllByText(/Página 2 de 3/);
     expect(painel().getByRole("button", { name: "Produto da página 2" })).toBeInTheDocument();
   });
   it("17/11: com mais de uma página, Anterior e Seguinte também aparecem no topo da lista e funcionam", async () => {
     await pagina();
-    const topo = screen.getByRole("navigation", { name: "Páginas de produtos (topo)" });
+    const topo = screen.getByRole("navigation", { name: "Paginação de produtos, início da lista" });
     expect(within(topo).getByRole("button", { name: "Anterior" })).toBeDisabled();
     fireEvent.click(within(topo).getByRole("button", { name: "Seguinte" }));
-    await screen.findByText(/Página 2 de 3/);
+    await screen.findAllByText(/Página 2 de 3/);
     expect(paginas().some((c) => c.a.p_pagina === 2)).toBe(true);
-    expect(within(screen.getByRole("navigation", { name: "Páginas de produtos (topo)" })).getByRole("button", { name: "Anterior" })).toBeEnabled();
+    expect(within(screen.getByRole("navigation", { name: "Paginação de produtos, início da lista" })).getByRole("button", { name: "Anterior" })).toBeEnabled();
   });
   it("os botões estão numa navegação com nome", async () => {
     await pagina();
-    const nav = screen.getByRole("navigation", { name: "Páginas de produtos" });
+    const nav = screen.getByRole("navigation", { name: "Paginação de produtos, fim da lista" });
     expect(within(nav).getByRole("button", { name: "Anterior" })).toBeInTheDocument();
     expect(within(nav).getByRole("button", { name: "Seguinte" })).toBeInTheDocument();
   });
-  it("uma lista que cabe numa página não tem botões ativos e diz «Página 1 de 1»", async () => {
+  it("uma lista que cabe numa página diz «Página 1 de 1» e não oferece navegação nenhuma (nem no topo nem no fim)", async () => {
     base.responder = (f, a) => (f === "cat_ler_produtos_pagina" ? { data: { total: 1, pagina: 1, limite: 50, paginas: 1, produtos: [linha(ID.torneira, "Torneira cozinha")] }, error: null } : padrao(f, a));
     porCatalogo(montar());
     const S = seed(); const run = (fn: () => void) => fn();
     render(<CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={real()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
-    await screen.findByText("Página 1 de 1 · 1 produto");
-    expect(botaoFim("Anterior")).toBeDisabled();
-    expect(botaoFim("Seguinte")).toBeDisabled();
+    await screen.findAllByText("Página 1 de 1 · 1 produto");
+    expect(screen.queryByRole("navigation", { name: /Paginação de produtos/ })).not.toBeInTheDocument();
   });
   it("sem produtos: diz que não há nenhum e não oferece páginas", async () => {
     base.responder = (f, a) => (f === "cat_ler_produtos_pagina" ? { data: { total: 0, pagina: 1, limite: 50, paginas: 0, produtos: [] }, error: null } : padrao(f, a));
@@ -211,7 +218,7 @@ describe("Produtos por páginas · Anterior e Seguinte", () => {
     const S = seed(); const run = (fn: () => void) => fn();
     render(<CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={real()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
-    await screen.findByText("0 produtos");
+    await screen.findAllByText("0 produtos");
     expect(screen.getByText("Nenhum produto com esse nome ou filtro.")).toBeInTheDocument();
   });
 });
@@ -220,7 +227,7 @@ describe("Produtos por páginas · os filtros mandam os argumentos certos e volt
   it("categoria: o id em product_categories (não o do nó do ofício) e página 1, mesmo a partir da página 2", async () => {
     await pagina();
     fireEvent.click(botaoFim("Seguinte"));
-    await screen.findByText(/Página 2 de 3/);
+    await screen.findAllByText(/Página 2 de 3/);
     escolher("Categoria", "Canalização");
     await waitFor(() => expect(ultima()).toMatchObject({ p_categoria: ID.pcOf, p_pagina: 1, p_subcategoria: null }));
   });
@@ -275,7 +282,7 @@ describe("Produtos por páginas · a pesquisa tem debounce", () => {
   it("a pesquisa volta à página 1 e leva-a também às contagens", async () => {
     await pagina();
     fireEvent.click(botaoFim("Seguinte"));
-    await screen.findByText(/Página 2 de 3/);
+    await screen.findAllByText(/Página 2 de 3/);
     fireEvent.change(painel().getByRole("searchbox", { name: "Procurar produto" }), { target: { value: "roca" } });
     await waitFor(() => expect(ultima()).toMatchObject({ p_q: "roca", p_pagina: 1 }), { timeout: 2000 });
     await waitFor(() => expect(doTipo("cat_ler_produtos_contagens").at(-1)!.a).toMatchObject({ p_q: "roca" }));
@@ -297,6 +304,59 @@ describe("Produtos por páginas · navegação por categorias e resumo vêm das 
     expect(within(r).getByText("Total de produtos").closest("li")!.textContent).toContain("3");
     expect(within(r).getByText("Sem marca").closest("li")!.textContent).toContain("1");
   });
+  it("o resumo mostra «Sem preço» com o número que a base devolve (e a 0 quando é 0)", async () => {
+    base.responder = (f, a) => (f === "cat_ler_produtos_contagens" ? { data: { ...CONTAGENS, sem_preco: 7 }, error: null } : padrao(f, a));
+    await pagina();
+    const r = screen.getByRole("region", { name: "Resumo do Catálogo", hidden: true });
+    await waitFor(() => expect(within(r).getByText("Sem preço de venda").closest("li")!.textContent).toContain("7"));
+    cleanup();
+    base.responder = (f, a) => (f === "cat_ler_produtos_contagens" ? { data: { ...CONTAGENS, sem_preco: 0 }, error: null } : padrao(f, a));
+    await pagina();
+    const r0 = screen.getByRole("region", { name: "Resumo do Catálogo", hidden: true });
+    await waitFor(() => expect(within(r0).getByText("Sem preço de venda").closest("li")!.textContent).toBe("Sem preço de venda0"));
+  });
+  it("se a base ainda não devolve sem_preco (função antiga) a linha «Sem preço» não aparece", async () => {
+    await pagina();
+    const r = screen.getByRole("region", { name: "Resumo do Catálogo", hidden: true });
+    await waitFor(() => expect(within(r).getByText("Sem referência gerada").closest("li")!.textContent).toContain("2"));
+    expect(within(r).queryByText("Sem preço de venda")).toBeNull();
+  });
+  it("os números a laranja usam um token só para texto, com contraste de 4,5:1 nos dois temas (calculado)", async () => {
+    base.responder = (f, a) => (f === "cat_ler_produtos_contagens" ? { data: { ...CONTAGENS, sem_preco: 7 }, error: null } : padrao(f, a));
+    await pagina();
+    const r = screen.getByRole("region", { name: "Resumo do Catálogo", hidden: true });
+    const n = (await within(r).findByText("Sem preço de venda")).closest("li")!.lastElementChild!;
+    expect(n.className).toContain("text-warning-text");
+    expect(n.className).not.toMatch(/(^|\s)text-warning(\s|$)/);
+    expect(within(r).getByText("Total de produtos").closest("li")!.lastElementChild!.className).not.toContain("text-warning");
+    const css = readFileSync("src/index.css", "utf8");
+    const bloco = (ini: string, fim: string) => css.slice(css.indexOf(ini), css.indexOf(fim, css.indexOf(ini) + 1) === -1 ? undefined : css.indexOf(fim, css.indexOf(ini) + 1));
+    const claro = bloco(":root {", ".dark {"), escuro = css.slice(css.indexOf(".dark {"));
+    const hsl = (b: string, v: string) => { const m = new RegExp(`--${v}:\\s*([\\d.]+)\\s+([\\d.]+)%\\s+([\\d.]+)%`).exec(b); expect(m, v).not.toBeNull(); return [Number(m![1]), Number(m![2]), Number(m![3])] as const; };
+    const lum = ([h, s, l]: readonly [number, number, number]) => {
+      const S = s / 100, L = l / 100, k = (x: number) => (x + h / 30) % 12, a = S * Math.min(L, 1 - L);
+      const f = (x: number) => L - a * Math.max(-1, Math.min(k(x) - 3, Math.min(9 - k(x), 1)));
+      const lin = (c: number) => (c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4);
+      return 0.2126 * lin(f(0)) + 0.7152 * lin(f(8)) + 0.0722 * lin(f(4));
+    };
+    const contraste = (a: readonly [number, number, number], b: readonly [number, number, number]) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); };
+    expect(contraste(hsl(claro, "warning-text"), hsl(claro, "card"))).toBeGreaterThanOrEqual(4.5);
+    expect(contraste(hsl(escuro, "warning-text"), hsl(escuro, "card"))).toBeGreaterThanOrEqual(4.5);
+  });
+  it("com sem_preco a null (quem não vê preços) a linha esconde-se, como quando a chave não existe", async () => {
+    base.responder = (f, a) => (f === "cat_ler_produtos_contagens" ? { data: { ...CONTAGENS, sem_preco: null }, error: null } : padrao(f, a));
+    await pagina();
+    const r = screen.getByRole("region", { name: "Resumo do Catálogo", hidden: true });
+    await waitFor(() => expect(within(r).getByText("Sem referência gerada").closest("li")!.textContent).toContain("2"));
+    expect(within(r).queryByText("Sem preço de venda")).toBeNull();
+  });
+  it("a linha «Sem preço de venda» é só informação (não é um botão)", async () => {
+    base.responder = (f, a) => (f === "cat_ler_produtos_contagens" ? { data: { ...CONTAGENS, sem_preco: 7 }, error: null } : padrao(f, a));
+    await pagina();
+    const r = screen.getByRole("region", { name: "Resumo do Catálogo", hidden: true });
+    await within(r).findByText("Sem preço de venda");
+    expect(within(r).queryByRole("button", { name: /Sem preço de venda/, hidden: true })).toBeNull();
+  });
   it("a linha «Sem categoria de produto» do resumo filtra por ela, no servidor", async () => {
     await pagina();
     const r = screen.getByRole("region", { name: "Resumo do Catálogo", hidden: true });
@@ -312,6 +372,166 @@ describe("Produtos por páginas · navegação por categorias e resumo vêm das 
   });
 });
 
+describe("Produtos por páginas · a disposição dos filtros e das colunas", () => {
+  const caixa = () => painel().getByRole("searchbox", { name: "Procurar produto" });
+  const grelhaFiltros = () => combo("Categoria").closest<HTMLElement>("[data-testid='produtos-filtros']")!;
+  const campoDe = (nome: string) => document.querySelector<HTMLLabelElement>(`label[for="${combo(nome).id}"]`)!.parentElement!;
+  const dicaDe = (nome: string) => campoDe(nome).querySelector<HTMLElement>("[id$='-dica']");
+
+  it("a pesquisa fica numa linha própria; Categoria, Subcategoria, Modelo e Marca numa só grelha 1/2/4 colunas alinhada ao topo", async () => {
+    await pagina();
+    const g = grelhaFiltros();
+    expect(g).not.toBeNull();
+    for (const c of ["grid-cols-1", "sm:grid-cols-2", "xl:grid-cols-4", "items-start"]) expect(g.className).toContain(c);
+    for (const n of ["Categoria", "Subcategoria", "Modelo", "Marca"]) expect(g).toContainElement(combo(n));
+    expect(g).not.toContainElement(caixa());
+    expect(g.className).not.toMatch(/\bw-\d|\bsm:w-/);
+    for (const n of ["Categoria", "Subcategoria", "Modelo", "Marca"]) expect(campoDe(n).className).not.toMatch(/\bw-(?!full)|sm:w-/);
+  });
+  it("cada filtro tem o rótulo ligado ao controlo", async () => {
+    await pagina();
+    for (const n of ["Categoria", "Subcategoria", "Modelo", "Marca"]) {
+      const rot = document.querySelector<HTMLLabelElement>(`label[for="${combo(n).id}"]`);
+      expect(rot).toHaveTextContent(n);
+    }
+  });
+  it("a linha da ajuda está sempre reservada (altura mínima), com ou sem texto, para os controlos não saltarem", async () => {
+    await pagina();
+    for (const n of ["Categoria", "Subcategoria", "Modelo", "Marca"]) expect(dicaDe(n), n).not.toBeNull();
+    expect(dicaDe("Categoria")!.className).toContain("min-h-5");
+    expect(dicaDe("Categoria")!).toBeEmptyDOMElement();
+    expect(dicaDe("Subcategoria")).toHaveTextContent("Escolha primeiro a categoria.");
+    const antes = dicaDe("Subcategoria");
+    escolher("Categoria", "Canalização");
+    expect(dicaDe("Subcategoria")).toBe(antes);
+    expect(dicaDe("Subcategoria")!).toBeEmptyDOMElement();
+    expect(dicaDe("Subcategoria")!.className).toContain("min-h-5");
+  });
+  it("a reserva da ajuda vale para todos os estados e as frases cabem numa linha (sm e lg); a reserva de duas linhas é só do xl", async () => {
+    await pagina();
+    const noInicio = dicaDe("Subcategoria")!;
+    const frases: string[] = [noInicio.textContent!, dicaDe("Modelo")!.textContent!];
+    escolher("Categoria", "Sem categoria de produto");
+    expect(dicaDe("Subcategoria")).toBe(noInicio);
+    expect(noInicio).toHaveTextContent("Sem subcategorias.");
+    frases.push(noInicio.textContent!);
+    escolher("Categoria", "Canalização");
+    expect(dicaDe("Subcategoria")).toBe(noInicio);
+    expect(noInicio).toBeEmptyDOMElement();
+    for (const f of frases) expect(f.length, f).toBeLessThanOrEqual(32);
+    for (const n of ["Categoria", "Subcategoria", "Modelo", "Marca"]) {
+      const c = dicaDe(n)!.className;
+      expect(c).toContain("min-h-5");
+      expect(c).toContain("xl:min-h-10");
+      expect(c).not.toMatch(/(^|\s)(sm|lg):min-h-10/);
+    }
+  });
+  it("a pesquisa usa o mesmo foco que os outros campos (ring-ring com offset), e não ring-primary/25", async () => {
+    await pagina();
+    expect(caixa().className).toContain("focus-visible:ring-ring");
+    expect(caixa().className).toContain("focus-visible:ring-offset-2");
+    expect(caixa().className).not.toContain("ring-primary/25");
+  });
+  it("«Selecionar» está na linha da pesquisa, fora da grelha dos filtros, com 44 px de altura", async () => {
+    await pagina();
+    const b = painel().getByRole("button", { name: "Selecionar" });
+    expect(grelhaFiltros()).not.toContainElement(b);
+    expect(b.className).toContain("min-h-11");
+    expect(b.closest("[data-testid='produtos-pesquisa']")).toContainElement(caixa());
+  });
+  const respostaCom = (produtos: Record<string, unknown>[]) => { base.responder = (f, a) => {
+    const r = padrao(f, a) as { data: { produtos?: Record<string, unknown>[] } };
+    if (f === "cat_ler_produtos_pagina" && a.p_pagina === 1) r.data.produtos = produtos;
+    return r;
+  }; };
+  it("Grossista e Distribuidor: abaixo de xl uma linha pequena por baixo do nome; a partir de xl colunas de largura fixa, à direita, com cabeçalho", async () => {
+    respostaCom([linha(ID.torneira, "Torneira cozinha", { grossista: 45.5, distribuidor: 50, pvp: 100 })]);
+    await pagina();
+    const l = painel().getByRole("button", { name: "Torneira cozinha" }).closest("li")!;
+    const pequena = within(l).getByText(/^Grossista 45,50 € · Distribuidor 50,00 €$/);
+    expect(pequena.className).toContain("xl:hidden");
+    expect(pequena.className).toContain("text-sm");
+    const coluna = (t: string) => within(l).getByText(t).parentElement!;
+    for (const t of ["Grossista", "Distribuidor"]) {
+      const c = coluna(t).className;
+      expect(c).toContain("hidden"); expect(c).toContain("xl:block"); expect(c).toContain("xl:w-24"); expect(c).toContain("text-right");
+      expect(c).not.toMatch(/(^|\s)min-w-/);
+    }
+    const cab = screen.getByTestId("produtos-cabecalho-colunas");
+    expect(cab).toHaveAttribute("aria-hidden", "true");
+    expect(cab.className).toContain("xl:flex");
+    expect(cab.className).not.toContain("sm:flex");
+    expect(cab.textContent).toBe("GrossistaDistribuidorPreço");
+  });
+  it("a coluna Preço tem min-w-28 (a partir de sm) e whitespace-nowrap, sem largura fixa e sem min-w abaixo de sm", async () => {
+    respostaCom([linha(ID.torneira, "Torneira cozinha", { pvp: 100 })]);
+    await pagina();
+    const preco = within(painel().getByRole("button", { name: "Torneira cozinha" }).closest("li")!).getByText("Preço").parentElement!;
+    expect(preco.className).toContain("sm:min-w-28");
+    expect(preco.className).toContain("whitespace-nowrap");
+    expect(preco.className).toContain("text-right");
+    expect(preco.className).not.toMatch(/(^|\s)(sm:)?w-28/);
+    expect(preco.className).not.toMatch(/(^|\s)min-w-/);
+  });
+  it("sem PVP mas com custo o preço é o sugerido e diz-se; com PVP não; sem nada o «—» fica escondido do leitor e só ele ouve «sem preço»", async () => {
+    respostaCom([
+      linha(ID.torneira, "Torneira cozinha", { pvp: 100 }),
+      linha(ID.lavatorio, "Lavatório suspenso", { pvp: null, custo: 70 }),
+      linha("88888888-8888-4888-a888-888888888899", "Produto sem nada", { pvp: null, custo: null, grossista: null, distribuidor: null }),
+    ]);
+    await pagina();
+    const li = (n: string) => painel().getByRole("button", { name: n }).closest("li")!;
+    expect(within(li("Torneira cozinha")).queryByText("sugerido")).toBeNull();
+    expect(within(li("Lavatório suspenso")).getByText("sugerido").className).toContain("text-sm");
+    const nada = li("Produto sem nada");
+    expect(within(nada).queryByText("sugerido")).toBeNull();
+    const traco = within(nada).getAllByText("—").filter((e) => e.getAttribute("aria-hidden") === "true");
+    expect(traco.length).toBeGreaterThanOrEqual(1);
+    expect(within(nada).getAllByText("sem preço").every((e) => e.className.includes("sr-only"))).toBe(true);
+    expect(nada.textContent).toMatch(/—sem preço/);
+  });
+  it("o cabeçalho das colunas só aparece quando há linhas", async () => {
+    respostaCom([]);
+    await pagina();
+    expect(screen.queryByTestId("produtos-cabecalho-colunas")).toBeNull();
+  });
+  it("sem products.view_cost o cabeçalho só tem o Preço", async () => {
+    await pagina(real({ podeVerCusto: false }));
+    expect(screen.getByTestId("produtos-cabecalho-colunas").textContent).toBe("Preço");
+  });
+  it("as navegações têm nomes que dizem onde estão, não ficam ocupadas (sem aria-busy) e os botões desativados não levam title", async () => {
+    await pagina();
+    const topo = screen.getByRole("navigation", { name: "Paginação de produtos, início da lista" });
+    const fim = screen.getByRole("navigation", { name: "Paginação de produtos, fim da lista" });
+    for (const n of [topo, fim]) expect(n).not.toHaveAttribute("aria-busy");
+    expect(within(topo).getByRole("button", { name: "Anterior" })).not.toHaveAttribute("title");
+    expect(within(fim).getByRole("button", { name: "Anterior" })).toHaveAccessibleDescription(/primeira página/i);
+  });
+  it("a caixa de «Selecionar» tem um alvo de 44 px (label à volta) e um clique marca uma só vez; o nome do produto também tem 44 px", async () => {
+    await pagina();
+    expect(painel().getByRole("button", { name: "Torneira cozinha" }).className).toContain("min-h-11");
+    fireEvent.click(painel().getByRole("button", { name: "Selecionar" }));
+    const caixaLinha = await screen.findByRole("checkbox", { name: "Selecionar Torneira cozinha" });
+    const rot = caixaLinha.closest("label")!;
+    expect(rot.className).toContain("min-h-11");
+    expect(rot.className).toContain("min-w-11");
+    fireEvent.click(rot);
+    expect(caixaLinha).toBeChecked();
+  });
+  it("a navegação do topo tem o espaço reservado mesmo com uma só página (sem saltos ao carregar)", async () => {
+    base.responder = (f, a) => (f === "cat_ler_produtos_pagina" ? { data: { total: 2, pagina: 1, limite: 50, paginas: 1, produtos: [linha(ID.torneira, "Torneira cozinha")] }, error: null } : padrao(f, a));
+    porCatalogo(montar());
+    const S = seed();
+    const run = (fn: () => void) => fn();
+    render(<CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={real()} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
+    await screen.findAllByText(/Página 1 de 1/);
+    const r = screen.getByTestId("produtos-navegacao-topo");
+    expect(r.className).toContain("min-h-11");
+    expect(within(r).queryByRole("navigation")).toBeNull();
+  });
+});
+
 describe("Produtos por páginas · pré-carregamento e cache", () => {
   /** 6 páginas, para haver o que pré-carregar para lá da 3. */
   const seis = (f: string, a: Record<string, unknown>): unknown => {
@@ -323,7 +543,7 @@ describe("Produtos por páginas · pré-carregamento e cache", () => {
   const assentar = () => act(async () => { await new Promise((r) => setTimeout(r, 30)); });
   const abrir6 = async () => { base.responder = seis; porCatalogo(montar()); const S = seed(); const run = (fn: () => void) => fn();
     render(<CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={real()} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Produtos" })); await screen.findByText(/Página 1 de 6/); };
+    fireEvent.click(screen.getByRole("tab", { name: "Produtos" })); await screen.findAllByText(/Página 1 de 6/); };
 
   it("ao abrir a página 1 pede 1, 2 e 3", async () => {
     await abrir6();
@@ -334,7 +554,7 @@ describe("Produtos por páginas · pré-carregamento e cache", () => {
     await waitFor(() => expect(pedidasSemFiltro()).toHaveLength(3));
     fireEvent.click(botaoFim("Seguinte"));
     expect(screen.queryByText(/A ler/)).not.toBeInTheDocument();
-    await screen.findByText(/Página 2 de 6/);
+    await screen.findAllByText(/Página 2 de 6/);
     await waitFor(() => expect(pedidasSemFiltro().sort()).toEqual([1, 2, 3, 4]));
     expect(painel().getByRole("button", { name: "Produto da página 2" })).toBeInTheDocument();
   });
@@ -345,7 +565,7 @@ describe("Produtos por páginas · pré-carregamento e cache", () => {
     await waitFor(() => expect(pedidasSemFiltro()).toHaveLength(4));
     const n = paginas().length;
     fireEvent.click(botaoFim("Anterior"));
-    await screen.findByText(/Página 1 de 6/);
+    await screen.findAllByText(/Página 1 de 6/);
     await assentar();
     expect(paginas()).toHaveLength(n);
   });
@@ -363,22 +583,22 @@ describe("Produtos por páginas · pré-carregamento e cache", () => {
     porCatalogo(montar()); const S = seed(); const run = (fn: () => void) => fn();
     render(<CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={real()} />);
     fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
-    await screen.findByText(/Página 1 de 6/);
+    await screen.findAllByText(/Página 1 de 6/);
     await waitFor(() => expect(falhas).toBe(1));
     await assentar();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
     expect(screen.queryByText(/rede em baixo/)).not.toBeInTheDocument();
     fireEvent.click(botaoFim("Seguinte"));
-    await screen.findByText(/Página 2 de 6/);
+    await screen.findAllByText(/Página 2 de 6/);
     expect(painel().getByRole("button", { name: "Produto da página 2" })).toBeInTheDocument();
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
   it("a última página não pré-carrega para lá de `paginas`", async () => {
     await pagina(); // 3 páginas
     fireEvent.click(botaoFim("Seguinte"));
-    await screen.findByText(/Página 2 de 3/);
+    await screen.findAllByText(/Página 2 de 3/);
     fireEvent.click(botaoFim("Seguinte"));
-    await screen.findByText(/Página 3 de 3/);
+    await screen.findAllByText(/Página 3 de 3/);
     await assentar();
     expect(Math.max(...paginas().map((c) => c.a.p_pagina as number))).toBe(3);
   });
@@ -388,7 +608,7 @@ describe("Produtos por páginas · pré-carregamento e cache", () => {
     const el = (k: Catalogo) => <CatalogoV1 S={S} A={acoes(S, vi.fn(), run)} run={run} go={(fn) => () => run(fn)} q="" setQ={vi.fn()} repor={vi.fn()} real={real()} />;
     const { rerender } = render(el(K));
     fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
-    await screen.findByText(/Página 1 de 6/);
+    await screen.findAllByText(/Página 1 de 6/);
     await waitFor(() => expect(pedidasSemFiltro()).toHaveLength(3));
     act(() => { porCatalogo(montar()); });
     rerender(el(K));
@@ -409,7 +629,7 @@ describe("Produtos por páginas · erros", () => {
     expect(screen.queryByText(/A ler/)).not.toBeInTheDocument();
     falhar = false;
     fireEvent.click(within(alerta).getByRole("button", { name: "Tentar de novo" }));
-    await screen.findByText(/Página 1 de 3/);
+    await screen.findAllByText(/Página 1 de 3/);
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
   });
   it("se as contagens falham a lista funciona e há «Tentar de novo» para elas", async () => {
@@ -489,7 +709,7 @@ describe("Produtos · o protótipo (sem real) fica em memória", () => {
     expect(base.chamadas.map((c) => c.f)).toEqual([]);
     expect(painel().getByRole("button", { name: "Torneira cozinha" })).toBeInTheDocument();
     expect(painel().getByRole("button", { name: "Produto solto" })).toBeInTheDocument();
-    expect(screen.queryByRole("navigation", { name: "Páginas de produtos" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("navigation", { name: "Paginação de produtos, fim da lista" })).not.toBeInTheDocument();
     expect(screen.getByText("3 produtos")).toBeInTheDocument();
   });
 });

@@ -43,6 +43,8 @@ All colors MUST be HSL.
     
     --warning: 38 92% 55%;
     --warning-foreground: 0 0% 100%;
+    /* 18/11: laranja só para TEXTO sobre o cartão claro (6:1; o --warning dá 2:1 e só serve de fundo ou ícone) */
+    --warning-text: 32 95% 30%;
     
     --info: 199 89% 52%;
     --info-foreground: 0 0% 100%;
@@ -98,6 +100,7 @@ All colors MUST be HSL.
     
     --warning: 38 92% 55%;
     --warning-foreground: 0 0% 100%;
+    --warning-text: 38 92% 55%; /* no escuro o laranja de fundo já passa (9:1 sobre o cartão) */
     
     --info: 199 89% 52%;
     --info-foreground: 0 0% 100%;

@@ -69,3 +69,12 @@ describe("os caminhos das rotas", () => {
     expect(caminhoServico("s1")).toBe("/catalogo/servicos/s1");
   });
 });
+
+describe("destinoCatalogoAntigo: criar um PRODUTO leva sempre à página de Produtos", () => {
+  it.each(["servicos", "equipamentos", "consumiveis", "tecnicos", "ligacoes", "produtos"])("?sec=%s&criar=produto -> /catalogo/produtos?criar=produto", (sec) => {
+    expect(destinoCatalogoAntigo(`?sec=${sec}&criar=produto`)).toBe("/catalogo/produtos?criar=produto");
+  });
+  it("os outros tipos continuam na secção pedida", () => {
+    expect(destinoCatalogoAntigo("?sec=equipamentos&criar=servico")).toBe("/catalogo/servicos/equipamentos?criar=servico");
+  });
+});

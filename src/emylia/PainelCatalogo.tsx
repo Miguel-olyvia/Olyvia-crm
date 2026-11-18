@@ -140,13 +140,13 @@ export function NavCategorias({ grupos, sel, onSel, total }: { grupos: { id: str
 }
 
 /** A coluna da direita dos Produtos (16/11): o resumo. `onSemCategoria` só se dá quando há produtos assim (a linha passa a botão). */
-export function PainelProdutos({ total, semReferencia, semCategoria, semMarca, onSemCategoria }: { total: number; semReferencia: number; semCategoria: number; semMarca: number; onSemCategoria?: () => void }) {
+export function PainelProdutos({ total, semReferencia, semCategoria, semMarca, semPreco, onSemCategoria }: { total: number; semReferencia: number; semCategoria: number; semMarca: number; semPreco?: number | null | undefined; onSemCategoria?: () => void }) {
   const linha = (t: string, n: number, acao?: () => void) => (
     <li key={t} className="flex items-center gap-2 text-[15px]">
       {acao
         ? <button type="button" onClick={acao} className="min-h-11 min-w-0 flex-1 text-left font-medium underline-offset-4 hover:underline">{t}</button>
         : <span className="min-w-0 flex-1">{t}</span>}
-      <span className={cn("shrink-0 font-semibold tabular-nums", n > 0 && t !== "Total de produtos" && "text-warning")}>{n}</span>
+      <span className={cn("shrink-0 font-semibold tabular-nums", n > 0 && t !== "Total de produtos" && "text-warning-text")}>{n}</span>
     </li>
   );
   return (
@@ -157,6 +157,8 @@ export function PainelProdutos({ total, semReferencia, semCategoria, semMarca, o
         {linha("Sem referência gerada", semReferencia)}
         {linha("Sem categoria de produto", semCategoria, semCategoria > 0 ? onSemCategoria : undefined)}
         {linha("Sem marca", semMarca)}
+        {/* 18/11: só quando a base devolve sem_preco (a função antiga não o traz, e vem null quando quem vê não vê preços: a linha esconde-se em vez de mostrar um 0 que não foi medido). «de venda»: a base conta o PVP inexistente, nulo ou ≤ 0. */}
+        {semPreco != null && linha("Sem preço de venda", semPreco)}
       </ul>
     </section>
   );

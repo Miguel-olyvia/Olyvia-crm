@@ -8,7 +8,8 @@ export const NOTA = "text-[15px] text-muted-foreground";
 export const CAMPO = "h-11 w-full rounded-lg border border-input bg-card px-3 text-[15px] outline-none transition-shadow focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background";
 export const CHIP = (on: boolean) => cn("inline-flex min-h-11 items-center gap-1.5 rounded-lg border px-3.5 text-[15px] transition-all", on ? "border-primary bg-primary/10 font-medium text-foreground" : "border-input bg-card text-muted-foreground hover:bg-muted hover:text-foreground");
 
-export function Campo({ rot, dica, children, className }: { rot: string; dica?: string; children: (id: string) => ReactNode; className?: string }) {
+/** `reservarDica`: a linha da ajuda existe sempre (altura mínima fixa), com ou sem texto, para os controlos de uma grelha não saltarem quando a ajuda aparece ou desaparece. */
+export function Campo({ rot, dica, children, className, reservarDica }: { rot: string; dica?: string; children: (id: string) => ReactNode; className?: string; reservarDica?: boolean }) {
   const id = useId();
   const idDica = `${id}-dica`;
   // a dica fica ligada ao campo (aria-describedby) sem apagar o que o campo já declara; corre em cada render porque o campo pode reescrever o atributo
@@ -24,7 +25,7 @@ export function Campo({ rot, dica, children, className }: { rot: string; dica?: 
     <div className={cn("grid content-start gap-1.5", className)}>
       <label htmlFor={id} className="text-[15px] font-medium">{rot}</label>
       {children(id)}
-      {dica && <span id={idDica} className="text-sm text-muted-foreground">{dica}</span>}
+      {(dica || reservarDica) && <span id={idDica} className={cn("text-sm text-muted-foreground", reservarDica && "min-h-5 xl:min-h-10")}>{dica}</span>}
     </div>
   );
 }

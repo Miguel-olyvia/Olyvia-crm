@@ -127,12 +127,14 @@ async function lerTabelas(sb: SupabaseClient, org: string, leve: boolean): Promi
   return (await sb.rpc("cat_ler_produtos_tabelas" as never, { p_org: org } as never)) as Resposta;
 }
 
-export async function lerCatalogo(sb: SupabaseClient, org: string, opcoes: { leve?: boolean } = {}): Promise<LinhasCatalogo> {
+/** 18/11: `soServicos` (páginas de Serviços): não lê os atributos nem os modelos, que são dos Produtos (juntarAtributos e juntarModelos toleram a falta).
+ *  Mantém as tabelas dos produtos (versão leve, 48 KB): dão a marca e a categoria dos produtos dos consumos, e sem elas o autosave podia reclassificá-los. */
+export async function lerCatalogo(sb: SupabaseClient, org: string, opcoes: { leve?: boolean; soServicos?: boolean } = {}): Promise<LinhasCatalogo> {
   const [r, t, a, m] = await Promise.all([
     lerLinhas(sb, org, !!opcoes.leve),
     lerTabelas(sb, org, !!opcoes.leve),
-    lerAtributos(sb, org),
-    lerModelos(sb, org),
+    opcoes.soServicos ? Promise.resolve(null) : lerAtributos(sb, org),
+    opcoes.soServicos ? Promise.resolve(null) : lerModelos(sb, org),
   ]);
   if (r?.error) throw new Error(mensagemErroCatalogo(r.error));
   // sem a função nova (SQL 20270117100000 por colar) ou com erro nela: lê-se pelo texto, como antes

@@ -28,6 +28,8 @@ export interface PaginaProdutos { total: number; pagina: number; limite: number;
 export interface ContagensProdutos {
   total: number; porCategoria: Record<string, number>; porSubcategoria: Record<string, number>; porModelo: Record<string, number>;
   semReferencia: number; semCategoria: number; semMarca: number;
+  /** 18/11: produtos sem preço nenhum. `undefined` quando a base ainda tem a função antiga (sem a chave `sem_preco`): o resumo esconde a linha. */
+  semPreco: number | undefined;
 }
 /** O que o ecrã filtra (os ids de categoria e subcategoria são os de product_categories). */
 export interface FiltroServidor {
@@ -81,6 +83,7 @@ export function contagensDe(r: unknown): ContagensProdutos | null {
   return {
     total: o.total, porCategoria: contar(o.por_categoria), porSubcategoria: contar(o.por_subcategoria), porModelo: contar(o.por_modelo),
     semReferencia: num(o.sem_referencia), semCategoria: num(o.sem_categoria), semMarca: num(o.sem_marca),
+    semPreco: o.sem_preco == null || o.sem_preco === "" ? undefined : num(o.sem_preco),
   };
 }
 

@@ -21,9 +21,12 @@ export type Selecao = ReturnType<typeof useSelecao>;
 /** A caixa da linha (só no modo Selecionar). Não deixa o clique chegar à linha. */
 export function CaixaLinha({ id, nome, s }: { id: string; nome: string; s: Selecao }) {
   if (!s.sel) return null;
+  // 18/11: alvo de 44 x 44 px (label à volta da caixa); as margens negativas guardam o aspeto e o espaçamento de sempre. O clique no label não chega à linha (senão marcava duas vezes).
   return (
-    <input type="checkbox" className="h-5 w-5 shrink-0 accent-[hsl(var(--primary))]" checked={s.sel.has(id)} disabled={!eUuid(id)}
-      onClick={(e) => e.stopPropagation()} onChange={() => s.alternar(id)} aria-label={`Selecionar ${nome}`} />
+    <label className="-m-3 flex h-11 min-h-11 w-11 min-w-11 shrink-0 cursor-pointer items-center justify-center" onClick={(e) => e.stopPropagation()}>
+      <input type="checkbox" className="h-5 w-5 shrink-0 cursor-pointer accent-[hsl(var(--primary))]" checked={s.sel.has(id)} disabled={!eUuid(id)}
+        onClick={(e) => e.stopPropagation()} onChange={() => s.alternar(id)} aria-label={`Selecionar ${nome}`} />
+    </label>
   );
 }
 

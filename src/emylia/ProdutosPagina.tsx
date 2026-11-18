@@ -149,6 +149,7 @@ export function ProdutosPagina({ K, real, nomeServico, onAbrir, onAbrirProduto, 
     semReferencia: ctgG ? ctgG.semReferencia : K.produtos.filter((p) => !p.sku || PROVISORIA.test(p.sku)).length,
     semCategoria: ctgG ? ctgG.semCategoria : filtrarProdutosCatalogo(K, K.produtos, { cat: SEM_CATEGORIA_PRODUTO, sub: "", marca: "" }).length,
     semMarca: ctgG ? ctgG.semMarca : K.produtos.filter((p) => !p.marca?.trim()).length,
+    semPreco: ctgG?.semPreco, // undefined sem contagens do servidor ou com a função antiga: a linha esconde-se
   }), [K, ctgG]);
 
   const linhas = dados?.produtos ?? [];
@@ -158,38 +159,49 @@ export function ProdutosPagina({ K, real, nomeServico, onAbrir, onAbrirProduto, 
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[13rem_minmax(0,1fr)_20rem]">
       <div className="min-w-0 xl:col-start-2 xl:row-start-1">
-        <div className="flex flex-wrap items-end gap-3">
-          <Procurar v={q} onChange={setQ} rotulo="Procurar produto" ph="Nome, marca, referência ou subcategoria" />
-          <Campo rot="Categoria" className="w-full sm:w-56">{(id) => (
+        {/* 18/11: a pesquisa é o controlo principal (linha própria, a toda a largura, com «Selecionar» ao lado); os filtros são secundários, numa só grelha com um só gap e a linha da ajuda reservada */}
+        <div className="grid gap-4">
+          <div data-testid="produtos-pesquisa" className="flex flex-wrap items-center gap-4">
+            <Procurar v={q} onChange={setQ} rotulo="Procurar produto" ph="Nome, marca, referência ou subcategoria" className="w-auto min-w-[14rem] max-w-none flex-1" />
+            {!sl.sel && <BarraSelecao s={sl} filtrados={linhas} real={real} anunciar={anunciar} tipo="produtos" />}
+          </div>
+          <div data-testid="produtos-filtros" className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          <Campo rot="Categoria" reservarDica>{(id) => (
             <ComboPesquisa id={id} rotulo="Categoria" itens={cats} atual={atual(cats, fe.cat)} semValor="Todas as categorias" semValorComoValor placeholder="Todas as categorias" vazio="Nenhuma categoria encontrada"
               onEscolher={(i) => mudar({ cat: i.id, sub: "", modelo: "" })} />
           )}</Campo>
-          <Campo rot="Subcategoria" dica={!fe.cat ? "Escolha primeiro a categoria." : fe.cat === SEM_CATEGORIA_PRODUTO ? "«Sem categoria de produto» não tem subcategorias." : undefined} className="w-full sm:w-56">{(id) => (
+          <Campo rot="Subcategoria" dica={!fe.cat ? "Escolha primeiro a categoria." : fe.cat === SEM_CATEGORIA_PRODUTO ? "Sem subcategorias." : undefined} reservarDica>{(id) => (
             <ComboPesquisa id={id} rotulo="Subcategoria" itens={subs} atual={atual(subs, fe.sub)} desativado={!fe.cat || fe.cat === SEM_CATEGORIA_PRODUTO} semValor="Todas as subcategorias" semValorComoValor placeholder="Todas as subcategorias" vazio="Nenhuma subcategoria encontrada"
               onEscolher={(i) => mudar({ sub: i.id, modelo: "" })} />
           )}</Campo>
           {K.modelos && (
-            <Campo rot="Modelo" dica={!sub ? "Escolha primeiro a subcategoria." : undefined} className="w-full sm:w-56">{(id) => (
+            <Campo rot="Modelo" dica={!sub ? "Escolha primeiro a subcategoria." : undefined} reservarDica>{(id) => (
               <ComboPesquisa id={id} rotulo="Modelo" itens={modelosFiltro} atual={atual(modelosFiltro, modelo)} desativado={!sub} semValor="Todos os modelos" semValorComoValor placeholder="Todos os modelos" vazio="Esta subcategoria não tem modelos"
                 onEscolher={(i) => mudar({ modelo: i.id })} />
             )}</Campo>
           )}
-          <Campo rot="Marca" className="w-full sm:w-56">{(id) => (
+          <Campo rot="Marca" reservarDica>{(id) => (
             <ComboPesquisa id={id} rotulo="Marca" itens={marcas} atual={atual(marcas, fe.marca)} semValor="Todas as marcas" semValorComoValor placeholder="Todas as marcas" vazio="Nenhuma marca encontrada"
               onEscolher={(i) => mudar({ marca: i.id })} />
           )}</Campo>
-          {!sl.sel && <BarraSelecao s={sl} filtrados={linhas} real={real} anunciar={anunciar} tipo="produtos" />}
+          </div>
         </div>
         {sl.sel && <BarraSelecao s={sl} filtrados={linhas} real={real} anunciar={anunciar} tipo="produtos" />}
-        <p ref={topo} tabIndex={-1} className={cn(NOTA, "mt-4 outline-none")} aria-live="polite">{estado}</p>
-        {dados && dados.paginas > 1 && <NavegacaoPaginas onde="topo" pagina={dados.pagina} paginas={dados.paginas} aLer={pag.aLer} irPara={irPara} />}
+        {/* o parágrafo recebe o foco depois de mudar de página (sem aria-live: o anúncio faz-se na região de estado, escondida) */}
+        <p ref={topo} data-testid="produtos-estado" tabIndex={-1} className={cn(NOTA, "mt-4 min-h-6 rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background")}>{estado}</p>
+        <p role="status" className="sr-only">{estado}</p>
+        {/* o espaço da navegação do topo existe sempre (a lista não salta quando a primeira página chega) */}
+        <div data-testid="produtos-navegacao-topo" className="mt-2 min-h-11">
+          {dados && dados.paginas > 1 && <NavegacaoPaginas onde="topo" pagina={dados.pagina} paginas={dados.paginas} irPara={irPara} />}
+        </div>
+        {linhas.length > 0 && <CabecalhoColunas verCusto={real.podeVerCusto !== false} />}
         {pag.erro && <ErroLeitura texto="Não foi possível ler os produtos" erro={pag.erro} tentar={pag.tentar} />}
         {erroContagens.erro && <ErroLeitura texto="Não foi possível ler as contagens" erro={erroContagens.erro} tentar={erroContagens.tentar} />}
-        <ul className={cn(LISTA, "mt-2", pag.aLer && dados && "opacity-60")} aria-busy={pag.aLer}>
+        <ul className={cn(LISTA, "mt-1", pag.aLer && dados && "opacity-60")} aria-busy={pag.aLer}>
           {linhas.map((l) => <LinhaProduto key={l.id} l={l} verCusto={real.podeVerCusto !== false} K={porId.get(l.id)} margem={margem} novo={novo} tocar={tocar} sl={sl} onAbrir={onAbrir} nomeServico={nomeServico} />)}
           {dados && !linhas.length && <Vazio>Nenhum produto com esse nome ou filtro.</Vazio>}
         </ul>
-        {dados && dados.paginas > 0 && <NavegacaoPaginas pagina={dados.pagina} paginas={Math.max(dados.paginas, 1)} aLer={pag.aLer} irPara={irPara} />}
+        {dados && dados.paginas > 1 && <NavegacaoPaginas pagina={dados.pagina} paginas={dados.paginas} irPara={irPara} />}
         {extra}
       </div>
       <div className="xl:col-start-1 xl:row-start-1">
@@ -215,59 +227,84 @@ function LinhaProduto({ l, K, margem, novo, tocar, sl, onAbrir, nomeServico, ver
   onAbrir: (sid: SvcId) => void; nomeServico: (sid: SvcId) => string;
 }) {
   const p = produtoDaLinha(l);
-  const semPreco = l.pvp == null && l.custo == null;
+  // 18/11: como a base conta «sem preço de venda» (PVP inexistente, nulo ou ≤ 0): sem PVP mas com custo o preço mostrado é o sugerido (custo e margem alvo)
+  const temPvp = l.pvp != null && l.pvp > 0;
+  const semPreco = !temPvp && l.custo == null;
+  const sugerido = !temPvp && l.custo != null;
   const detalhe = [l.marca, l.modelo ? rotuloModelo({ numero: l.modelo_numero ?? 0, nome: l.modelo }) : "", l.sku ? `ref. ${l.sku}` : ""].filter(Boolean).join(" · ");
   return (
     <li onClick={() => tocar(l.id)} className={cn("group flex min-h-[4.5rem] cursor-pointer flex-wrap items-center gap-x-3 gap-y-1 py-3 sm:flex-nowrap sm:gap-4", l.id === novo && REALCE)}>
       <CaixaLinha id={l.id} nome={l.nome} s={sl} />
       <FotoOuIlustracao fotos={p.fotos} nome={l.nome} k={K?.img ?? "generico"} />
       <span className="min-w-0 flex-1">
-        <button id={`prod-${l.id}`} type="button" onClick={(e) => { e.stopPropagation(); tocar(l.id); }} className="block text-left text-[15px] font-medium group-hover:underline">{l.nome}{l.id === novo && <Novo />}</button>
+        <button id={`prod-${l.id}`} type="button" onClick={(e) => { e.stopPropagation(); tocar(l.id); }} className="flex min-h-11 items-center text-left text-[15px] font-medium group-hover:underline">{l.nome}{l.id === novo && <Novo />}</button>
         {/* 17/11: só o que não está ativo leva etiqueta (Rascunho, Descontinuado) */}
         {l.estado && l.estado !== "active" && rotuloEstadoProduto(l.estado) && <span className="mt-0.5 inline-block rounded-md border border-border bg-muted px-2 py-0.5 text-[13px] font-medium text-muted-foreground">{rotuloEstadoProduto(l.estado)}</span>}
         {detalhe && <span className={cn(NOTA, "block")}>{detalhe}</span>}
         {l.atributos_resumo && <span className={cn(NOTA, "block")}>{l.atributos_resumo}</span>}
+        {/* abaixo de xl o grossista e o distribuidor vão numa linha pequena por baixo do nome (sem forçar largura); a partir de xl são colunas, com cabeçalho */}
+        {verCusto && <span className="block text-sm text-muted-foreground xl:hidden">Grossista {valorOuSem(l.grossista)} · Distribuidor {valorOuSem(l.distribuidor)}</span>}
         {K?.servico && (
-          <button type="button" onClick={(e) => { e.stopPropagation(); onAbrir(K.servico!); }} className="mt-0.5 inline-flex min-h-11 items-center text-left text-[15px] font-medium text-primary underline-offset-4 hover:underline sm:min-h-0">
+          <button type="button" onClick={(e) => { e.stopPropagation(); onAbrir(K.servico!); }} className="mt-0.5 inline-flex min-h-11 items-center text-left text-[15px] font-medium text-primary underline-offset-4 hover:underline">
             Traz: {nomeServico(K.servico)}
           </button>
         )}
       </span>
       {/* 19/01: as colunas Grossista e Distribuidor (— quando não há preço; quem não vê custo e PVP recebe sempre null) */}
       {verCusto && (
-        <span className="flex gap-4 pl-[4.75rem] sm:pl-0">
+        <>
           <ColunaPreco rotulo="Grossista" v={l.grossista} />
           <ColunaPreco rotulo="Distribuidor" v={l.distribuidor} />
-        </span>
+        </>
       )}
       <span className={cn(VALORES, "pl-[4.75rem] sm:pl-0")}>
-        <span className="block text-[15px] font-medium tabular-nums">{semPreco ? "—" : <>{eur(precoProduto(p, margem))} €/{p.un}</>}</span>
+        <span className="block whitespace-nowrap text-right sm:min-w-28">
+          <span className={cn(NOTA, "block sm:sr-only")}>Preço</span>
+          <span className="block text-[15px] font-medium tabular-nums">{semPreco ? <SemPreco /> : <>{eur(precoProduto(p, margem))} €/{p.un}</>}</span>
+          {sugerido && <span className="block text-sm text-muted-foreground">sugerido</span>}
+        </span>
       </span>
     </li>
   );
 }
 
+/** O «—» de um preço que falta: escondido do leitor de ecrã, que ouve «sem preço». */
+const SemPreco = () => <><span aria-hidden="true">—</span><span className="sr-only">sem preço</span></>;
+const valorOuSem = (v: number | null) => (v == null ? <SemPreco /> : `${eur(v)} €`);
+
+/** 18/11: o cabeçalho das colunas de preço (só a partir de xl, onde Grossista e Distribuidor são colunas; abaixo disso vão numa linha pequena por baixo do nome). Mesmas larguras e gaps que a linha. */
+function CabecalhoColunas({ verCusto }: { verCusto: boolean }) {
+  const col = "text-right text-sm font-medium text-muted-foreground";
+  return (
+    <div data-testid="produtos-cabecalho-colunas" aria-hidden="true" className="mt-2 hidden justify-end gap-4 px-5 xl:flex">
+      {verCusto && <span className={cn(col, "w-24")}>Grossista</span>}
+      {verCusto && <span className={cn(col, "w-24")}>Distribuidor</span>}
+      <span className={cn(col, "w-28")}>Preço</span>
+    </div>
+  );
+}
+
 function ColunaPreco({ rotulo, v }: { rotulo: string; v: number | null }) {
   return (
-    <span className="block min-w-[5.5rem] text-right">
-      <span className={cn(NOTA, "block")}>{rotulo}</span>
-      <span className="block text-[15px] font-medium tabular-nums">{v == null ? "—" : `${eur(v)} €`}</span>
+    <span className="hidden text-right xl:block xl:w-24">
+      <span className="sr-only">{rotulo}</span>
+      <span className="block text-[15px] font-medium tabular-nums">{v == null ? <SemPreco /> : `${eur(v)} €`}</span>
     </span>
   );
 }
 
-function NavegacaoPaginas({ pagina, paginas, aLer, irPara, onde = "fim" }: { pagina: number; paginas: number; aLer: boolean; irPara: (p: number) => void; onde?: "topo" | "fim" }) {
+function NavegacaoPaginas({ pagina, paginas, irPara, onde = "fim" }: { pagina: number; paginas: number; irPara: (p: number) => void; onde?: "topo" | "fim" }) {
   const primeira = pagina <= 1, ultima = pagina >= paginas;
   // 17/11: a navegação aparece no topo e no fim da lista; cada uma com os seus ids (as razões não se repetem)
   const ID_RAZAO_ANT = `prod-pag-razao-ant-${onde}`, ID_RAZAO_SEG = `prod-pag-razao-seg-${onde}`;
   const botao = (rotulo: string, desativado: boolean, razao: string, idRazao: string, alvo: number) => (
     <>
-      <Button variant="outline" className="min-h-11 text-[15px]" disabled={desativado} aria-describedby={desativado ? idRazao : undefined} title={desativado ? razao : undefined} onClick={() => irPara(alvo)}>{rotulo}</Button>
+      <Button variant="outline" className="min-h-11 text-[15px]" disabled={desativado} aria-describedby={desativado ? idRazao : undefined} onClick={() => irPara(alvo)}>{rotulo}</Button>
       {desativado && <span id={idRazao} className="sr-only">{razao}</span>}
     </>
   );
   return (
-    <nav aria-label={onde === "topo" ? "Páginas de produtos (topo)" : "Páginas de produtos"} aria-busy={aLer} className={cn(onde === "topo" ? "mt-2" : "mt-4", "flex flex-wrap items-center gap-3", ENTRADA)}>
+    <nav aria-label={onde === "topo" ? "Paginação de produtos, início da lista" : "Paginação de produtos, fim da lista"} className={cn(onde === "topo" ? "" : "mt-4", "flex flex-wrap items-center gap-3", ENTRADA)}>
       {botao("Anterior", primeira, "Já está na primeira página.", ID_RAZAO_ANT, pagina - 1)}
       {botao("Seguinte", ultima, "Já está na última página.", ID_RAZAO_SEG, pagina + 1)}
     </nav>
