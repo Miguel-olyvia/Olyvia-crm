@@ -70,7 +70,8 @@ export function SupplierItemsTab({ supplierId, organizationId, onOpenPortalTab, 
     refresh();
   };
 
-  const rows = items.data ?? [];
+  // Páginas de 50 (ordem tipo, id); sem total — contar todas as linhas passava os 8 s do statement_timeout.
+  const rows = items.rows;
 
   return (
     <div className="space-y-6">
@@ -89,7 +90,7 @@ export function SupplierItemsTab({ supplierId, organizationId, onOpenPortalTab, 
           <div className="flex justify-center py-6">
             <OlyviaLoader size={24} />
           </div>
-        ) : items.isError ? (
+        ) : items.isError && rows.length === 0 ? (
           <p className="text-sm text-destructive">
             {(items.error as { message?: string } | null)?.message || "Não foi possível carregar os artigos."}
           </p>
@@ -99,75 +100,103 @@ export function SupplierItemsTab({ supplierId, organizationId, onOpenPortalTab, 
             description="Nenhum produto ou serviço associado a este fornecedor. Ligue artigos do catálogo do portal abaixo."
           />
         ) : (
-          <div className="overflow-x-auto rounded-lg border">
-            <Table className="min-w-[760px]">
-              <caption className="sr-only">Produtos e serviços associados a este fornecedor</caption>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-8">
-                    <span className="sr-only">Preferido</span>
-                    <span aria-hidden="true">★</span>
-                  </TableHead>
-                  <TableHead>Ref. fornecedor</TableHead>
-                  <TableHead>Artigo</TableHead>
-                  <TableHead>SKU</TableHead>
-                  <TableHead>Tipo</TableHead>
-                  <TableHead className="text-right">Preço</TableHead>
-                  <TableHead className="text-right">Prazo</TableHead>
-                  <TableHead>Ativo</TableHead>
-                  <TableHead className="text-right">
-                    <span className="sr-only">Ações</span>
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {rows.map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell>
-                      {row.is_preferred ? (
-                        <span title="Preferido">
-                          <Star className="h-4 w-4 fill-amber-400 text-amber-400" aria-hidden="true" />
-                          <span className="sr-only">Preferido</span>
-                        </span>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="font-mono text-[13px]">
-                      {canViewPricing ? row.supplier_sku || "—" : <span className="italic text-muted-foreground">Sem permissão</span>}
-                    </TableCell>
-                    <TableCell className="font-medium">{itemLabel(row)}</TableCell>
-                    <TableCell className="font-mono text-[13px]">{itemSku(row)}</TableCell>
-                    <TableCell>{row.item_type === "product" ? "Produto" : "Serviço"}</TableCell>
-                    <TableCell className="whitespace-nowrap text-right tabular-nums">
-                      {canViewPricing ? (
-                        row.purchase_price != null ? `${row.purchase_price} ${row.currency}` : "—"
-                      ) : (
-                        <span className="italic text-muted-foreground">Sem permissão</span>
-                      )}
-                    </TableCell>
-                    <TableCell className="whitespace-nowrap text-right tabular-nums">
-                      {row.lead_time_days != null ? `${row.lead_time_days} d` : "—"}
-                    </TableCell>
-                    <TableCell>
-                      <InventoryStatusBadge tone={row.is_active ? "ok" : "neutral"}>{row.is_active ? "Sim" : "Não"}</InventoryStatusBadge>
-                    </TableCell>
-                    <TableCell className="text-right">
-                      {canRemoveLink ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={() => setDeleting(row)}
-                          aria-label={`Remover associação a ${itemLabel(row)}`}
-                        >
-                          <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
-                        </Button>
-                      ) : null}
-                    </TableCell>
+          <div className="rounded-lg border">
+            <div className="overflow-x-auto">
+              <Table className="min-w-[760px]">
+                <caption className="sr-only">Produtos e serviços associados a este fornecedor</caption>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-8">
+                      <span className="sr-only">Preferido</span>
+                      <span aria-hidden="true">★</span>
+                    </TableHead>
+                    <TableHead>Ref. fornecedor</TableHead>
+                    <TableHead>Artigo</TableHead>
+                    <TableHead>SKU</TableHead>
+                    <TableHead>Tipo</TableHead>
+                    <TableHead className="text-right">Preço</TableHead>
+                    <TableHead className="text-right">Prazo</TableHead>
+                    <TableHead>Ativo</TableHead>
+                    <TableHead className="text-right">
+                      <span className="sr-only">Ações</span>
+                    </TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((row) => (
+                    <TableRow key={row.id}>
+                      <TableCell>
+                        {row.is_preferred ? (
+                          <span title="Preferido">
+                            <Star className="h-4 w-4 fill-amber-400 text-amber-400" aria-hidden="true" />
+                            <span className="sr-only">Preferido</span>
+                          </span>
+                        ) : null}
+                      </TableCell>
+                      <TableCell className="font-mono text-[13px]">
+                        {canViewPricing ? row.supplier_sku || "—" : <span className="italic text-muted-foreground">Sem permissão</span>}
+                      </TableCell>
+                      <TableCell className="font-medium">{itemLabel(row)}</TableCell>
+                      <TableCell className="font-mono text-[13px]">{itemSku(row)}</TableCell>
+                      <TableCell>{row.item_type === "product" ? "Produto" : "Serviço"}</TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {canViewPricing ? (
+                          row.purchase_price != null ? `${row.purchase_price} ${row.currency}` : "—"
+                        ) : (
+                          <span className="italic text-muted-foreground">Sem permissão</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="whitespace-nowrap text-right tabular-nums">
+                        {row.lead_time_days != null ? `${row.lead_time_days} d` : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <InventoryStatusBadge tone={row.is_active ? "ok" : "neutral"}>{row.is_active ? "Sim" : "Não"}</InventoryStatusBadge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {canRemoveLink ? (
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={() => setDeleting(row)}
+                            aria-label={`Remover associação a ${itemLabel(row)}`}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
+                          </Button>
+                        ) : null}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-sm text-muted-foreground">
+              <span role="status">
+                A mostrar {rows.length} artigo{rows.length === 1 ? "" : "s"}
+                {items.hasNextPage ? " (há mais)" : ""}
+              </span>
+              {items.isFetchNextPageError ? (
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="text-destructive">Não foi possível carregar mais artigos.</span>
+                  <Button type="button" variant="outline" size="sm" className="min-h-8" onClick={() => void items.fetchNextPage()}>
+                    Tentar de novo
+                  </Button>
+                </span>
+              ) : items.hasNextPage ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="min-h-8"
+                  onClick={() => void items.fetchNextPage()}
+                  aria-disabled={items.isFetchingNextPage}
+                  disabled={items.isFetchingNextPage}
+                >
+                  {items.isFetchingNextPage ? "A carregar…" : "Carregar mais"}
+                </Button>
+              ) : null}
+            </div>
           </div>
         )}
       </section>

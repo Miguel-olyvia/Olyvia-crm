@@ -125,7 +125,8 @@ export function SupplierSheet({
   const pricesPending = supplierId && canPricing && orgStats?.pricesPending ? orgStats.pricesPending.get(supplierId) ?? 0 : 0;
 
   const items = useSupplierItems(supplierId, canViewPricing, open && !permLoading);
-  const itemsCount = items.data?.length ?? 0;
+  // Páginas de 50 sem contagem (contar passava os 8 s): o separador mostra o que já está carregado, com «+» se houver mais.
+  const itemsCount: number | string = items.hasNextPage ? `${items.rows.length}+` : items.rows.length;
 
   // Faixa "à espera": email e data do convite (rpc_supplier_portal_status, só para quem gere o portal).
   const invite = useSupplierPortalInvite(supplierId, open && awaiting && canManagePortal);
@@ -183,7 +184,7 @@ export function SupplierSheet({
     void queryClient.invalidateQueries({ queryKey: supplierPortalInviteKey(supplierId) });
   };
 
-  const tabs: { id: SupplierSheetTab; label: string; count?: number }[] = isNew
+  const tabs: { id: SupplierSheetTab; label: string; count?: number | string }[] = isNew
     ? [{ id: "dados", label: "Dados" }]
     : [
         { id: "resumo", label: "Resumo" },

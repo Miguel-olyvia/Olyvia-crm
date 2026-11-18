@@ -28,7 +28,7 @@ vi.mock("../contract/useSupplierContracts", () => ({ useSupplierContractOrgStatu
 vi.mock("../useSupplierSheetData", () => ({
   supplierItemsKey: (id: string) => ["items", id],
   supplierPortalInviteKey: (id: string | null) => ["invite", id],
-  useSupplierItems: () => ({ data: linhas.rows, isLoading: false, isError: false }),
+  useSupplierItems: () => ({ rows: linhas.rows, isLoading: false, isError: false, hasNextPage: false }),
   useSupplierPortalInvite: () => ({ data: null }),
 }));
 
