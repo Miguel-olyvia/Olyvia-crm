@@ -49,6 +49,13 @@ export const ACORDADA_MS = 60_000;
 const PALAVRAS_FRASE_NATURAL = 6;
 /** 18/11: quantos ecrãs seguidos a IA pode percorrer num pedido («abre o Carlos, vai à proposta e muda o prazo»). */
 export const MAX_RONDAS = 6;
+/** 18/11 (Rúben: «há vezes em que simplesmente não me ouve… tenho de parar, esperar e falar calmamente»):
+ *  · SURDA_MS: o Chrome deteta fala mas não devolve palavras (sessão presa) → recomeça a sessão;
+ *  · RECICLAR_MS: uma sessão contínua longa degrada-se e acaba sozinha, às vezes a meio de uma frase → renova-se num silêncio;
+ *  · ECO_MS: depois de a Olyvia falar, o que se ouve ainda pode ser a voz dela (o eco nas colunas). */
+export const SURDA_MS = 3500;
+export const RECICLAR_MS = 45_000;
+export const ECO_MS = 2500;
 /** Quanto tempo (ms) uma pergunta «Confirmas?» fica à espera do «sim». */
 export const CONFIRMAR_MS = 45_000;
 const CHAVE_VOZ = "olyvia-voz";
@@ -61,7 +68,8 @@ interface Reconhecedor {
   lang: string; continuous: boolean; interimResults: boolean;
   onstart: (() => void) | null; onresult: ((e: ResultadoVoz) => void) | null;
   onerror: ((e: { error?: string }) => void) | null; onend: (() => void) | null;
-  start(): void; stop(): void;
+  onspeechstart?: (() => void) | null; onspeechend?: (() => void) | null;
+  start(): void; stop(): void; abort?(): void;
 }
 type ConstrutorVoz = new () => Reconhecedor;
 const classeVoz = (): ConstrutorVoz | null => {
@@ -80,6 +88,12 @@ const EXEMPLOS = ["vai aos negócios", "abre o negócio do Carlos e vai à propo
 const avisa = (nome: string, detail: unknown) => window.dispatchEvent(new CustomEvent(nome, { detail }));
 
 const NAO_ENCONTREI = "não encontrei o passo";
+/** 18/11: o que se ouviu é só a voz da Olyvia a voltar pelas colunas (todas as palavras estão no que ela disse). */
+export function eEco(ouvido: string, dito: string): boolean {
+  const ditas = new Set(normal(dito).split(" ").filter(Boolean));
+  const ouvidas = normal(ouvido).split(" ").filter(Boolean);
+  return ouvidas.length > 0 && ouvidas.every((w) => ditas.has(w));
+}
 /** Vai ao passo na fase que está aberta; true se existe (o NegocioSimples responde em `ok`, de forma síncrona). */
 function tentarPasso(passo: string): boolean {
   const d = { passo, tentar: true, ok: false };
@@ -176,6 +190,8 @@ export function OlyviaComando() {
   const aGravarRef = useRef(aGravar);
   aGravarRef.current = aGravar;
   const aFalarRef = useRef(false);
+  /** 18/11: o que a Olyvia está a dizer em voz alta e até quando pode haver eco (a escuta continua ligada enquanto fala). */
+  const falaRef = useRef<{ texto: string; ecoAte: number }>({ texto: "", ecoAte: 0 });
   /** O «arrancar» da escuta contínua (o efeito põe-no aqui), para voltar a ouvir quando acaba de falar. */
   const retomarRef = useRef<(() => void) | null>(null);
   const falarAlto = useCallback((t: string) => {
@@ -186,13 +202,15 @@ export function OlyviaComando() {
     const vozes = s.getVoices();
     const v = vozes.find((x) => /^pt[-_]PT/i.test(x.lang)) ?? vozes.find((x) => /^pt/i.test(x.lang));
     if (v) u.voice = v;
+    // 18/11 (Rúben: «há vezes em que não me ouve»): antes desligava a escuta enquanto falava e só voltava depois — o que se dizia
+    // nesse intervalo perdia-se. Agora continua a ouvir: o eco da própria voz ignora-se, e «Olyvia, …» interrompe-a.
     aFalarRef.current = true;
-    const r = recRef.current;
-    if (r) { recRef.current = null; r.onend = null; try { r.stop(); } catch { /* ignore */ } setAEscutar(false); }
+    falaRef.current = { texto: t, ecoAte: Number.POSITIVE_INFINITY };
     let seguro: ReturnType<typeof setTimeout> | null = null;
     const acabar = () => {
       if (!aFalarRef.current) return;
       aFalarRef.current = false;
+      falaRef.current = { texto: t, ecoAte: Date.now() + ECO_MS };
       if (seguro) clearTimeout(seguro);
       setTimeout(() => retomarRef.current?.(), 250);
     };
@@ -494,6 +512,7 @@ export function OlyviaComando() {
     if (!C) { setAviso({ msg: "O browser não ouve aqui — escreve o comando.", ok: false }); return; }
     if (aGravar) { setAviso({ msg: "A gravação está a usar o micro — escreve o comando.", ok: false }); return; }
     if (aOuvir) { acabarUmaVez.current?.(); return; }
+    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
     const r = new C();
     r.lang = "pt-PT"; r.continuous = true; r.interimResults = true;
     let dito = "", feito = false, t: ReturnType<typeof setTimeout> | null = null;
@@ -580,6 +599,9 @@ export function OlyviaComando() {
     let espera: ReturnType<typeof setTimeout> | null = null;
     /** 18/11: o que está à espera da pausa; se o browser fechar a sessão de reconhecimento entretanto, faz-se logo (não se perde). */
     let agirPendente: (() => void) | null = null;
+    /** 18/11: a sessão de reconhecimento em curso — quando começou, a última palavra devolvida e desde quando o Chrome ouve fala. */
+    let sessao: { r: Reconhecedor; inicio: number; ultimo: number; falaDesde: number | null } | null = null;
+    let ultimoReinicio = 0;
     /** A última ordem feita (para completar uma dita aos bocados: «abre o Carlos» … «Mendes»). */
     let ultima: { frase: string; acao: string; em: number } | null = null;
     // 17/11 (Rúben: «é chato estar sempre a dizer Olyvia, a primeira vez chega»): «Olyvia» acorda-a; acordada, as frases curtas são
@@ -604,9 +626,20 @@ export function OlyviaComando() {
       // sempre a ouvir tudo sem cortar»): quando age a meio de uma frase (numa pausa), o que se disse a seguir NÃO se perde — guarda-se
       // quantas palavras do resultado ainda em curso já foram usadas (`prefixo`) e o resto continua a contar
       let usados = 0, prefixo = 0, inicio = Date.now();
-      r.onstart = () => { inicio = Date.now(); setAEscutar(true); };
+      const z = { r, inicio, ultimo: Date.now(), falaDesde: null as number | null };
+      sessao = z;
+      r.onstart = () => { inicio = Date.now(); z.inicio = inicio; z.ultimo = inicio; setAEscutar(true); };
+      r.onspeechstart = () => { if (z.falaDesde == null) z.falaDesde = Date.now(); };
+      r.onspeechend = () => { z.falaDesde = null; };
+      /** Dá como usado tudo o que já se ouviu nesta sessão (o resultado em curso conta até à última palavra). */
+      const consumir = (lista: ResultadoVoz["results"][number][], final: boolean) => {
+        const ate = lista.length;
+        if (final) { usados = ate; prefixo = 0; }
+        else { usados = ate - 1; prefixo = (lista[ate - 1]?.[0]?.transcript ?? "").trim().split(/\s+/).filter(Boolean).length; }
+      };
       r.onresult = (e) => {
         cancelamentos = 0;
+        z.ultimo = Date.now();
         if (espera) { clearTimeout(espera); espera = null; }
         agirPendente = null;
         const lista = Array.from(e.results);
@@ -615,6 +648,14 @@ export function OlyviaComando() {
         const txt = partes.join(" ").replace(/\s+/g, " ").trim();
         const final = !!lista[lista.length - 1]?.isFinal, ate = lista.length;
         if (!txt) { if (final) { usados = ate; prefixo = 0; } return; }
+        // 18/11: enquanto a Olyvia fala (e um pouco depois), o que se ouve pode ser a voz dela nas colunas. Ignora-se — a não ser
+        // «Olyvia, …», que a cala e segue como uma ordem.
+        const fala = falaRef.current;
+        if (Date.now() < fala.ecoAte) {
+          const interrompe = temGatilho(txt);
+          if ((aFalarRef.current && !interrompe) || (!aFalarRef.current && eEco(txt, fala.texto))) { consumir(lista, final); return; }
+          if (interrompe && aFalarRef.current) { try { window.speechSynthesis?.cancel(); } catch { /* ignore */ } }
+        }
         const comGatilho = temGatilho(txt);
         // 17/11 (gravação do Rúben: falava em frases naturais e ela adormecia a meio): acordada, qualquer fala renova o tempo — não só as
         // ordens que resultam
@@ -666,6 +707,7 @@ export function OlyviaComando() {
       };
       r.onend = () => {
         recRef.current = null; setAEscutar(false);
+        if (sessao === z) sessao = null;
         if (agirPendente) { if (espera) clearTimeout(espera); espera = null; const f = agirPendente; agirPendente = null; f(); }
         if (Date.now() - inicio >= 2000) cancelamentos = 0;
         if (cancelamentos >= 3) {
@@ -673,7 +715,7 @@ export function OlyviaComando() {
           setAviso({ msg: "O micro está ocupado noutro separador ou programa. Toca aqui para eu ouvir neste.", ok: false });
           return;
         }
-        if (ativoRef.current && !parado && !precisaGesto && !aFalarRef.current) setTimeout(arrancar, cancelamentos ? 600 * cancelamentos : 100);
+        if (ativoRef.current && !parado && !precisaGesto) setTimeout(arrancar, cancelamentos ? 600 * cancelamentos : 100);
       };
       recRef.current = r;
       // 17/11 (Rúben: «às vezes deixa de ouvir, não sei porquê»): se o browser recusa arrancar (ainda a fechar a sessão anterior), antes
@@ -681,9 +723,27 @@ export function OlyviaComando() {
       try { r.start(); } catch { recRef.current = null; setTimeout(arrancar, 800); }
     };
     arrancar();
-    retomarRef.current = () => { if (ativoRef.current && !parado && !aFalarRef.current) arrancar(); };
-    // e uma vigia: ligada, sem reconhecimento ativo e sem estar à espera de um toque → volta a ouvir (o Chrome às vezes termina sem «end»)
-    const vigia = setInterval(() => { if (ativoRef.current && !parado && !precisaGesto && !recRef.current && !aFalarRef.current) arrancar(); }, 4000);
+    retomarRef.current = () => { if (ativoRef.current && !parado) arrancar(); };
+    /** Fecha a sessão (sem esperar pelo «end», que numa sessão presa às vezes não vem) e abre outra logo a seguir. */
+    const reiniciar = (r: Reconhecedor) => {
+      r.onend = null; r.onerror = null; r.onresult = null;
+      if (recRef.current === r) recRef.current = null;
+      sessao = null;
+      if (agirPendente) { if (espera) clearTimeout(espera); espera = null; const f = agirPendente; agirPendente = null; f(); }
+      try { if (r.abort) r.abort(); else r.stop(); } catch { /* ignore */ }
+      setTimeout(arrancar, 150);
+    };
+    // a vigia, a cada segundo: ligada e sem reconhecimento ativo → volta a ouvir (o Chrome às vezes termina sem «end»); 18/11: sessão
+    // «surda» (há fala há SURDA_MS e nenhuma palavra) → recomeça; sessão com RECICLAR_MS, num silêncio → renova-se antes que acabe a meio
+    const vigia = setInterval(() => {
+      if (!ativoRef.current || parado || precisaGesto) return;
+      if (!recRef.current) { arrancar(); return; }
+      const z = sessao, agora = Date.now();
+      if (!z || z.r !== recRef.current) return;
+      const surda = z.falaDesde != null && agora - z.falaDesde > SURDA_MS && agora - z.ultimo > SURDA_MS && agora - ultimoReinicio > 8000;
+      const velha = agora - z.inicio > RECICLAR_MS && z.falaDesde == null && !espera && agora - z.ultimo > 2000;
+      if (surda || velha) { ultimoReinicio = agora; reiniciar(z.r); }
+    }, 1000);
     const noGesto = () => { precisaGesto = false; avisouGesto = false; cancelamentos = 0; if (ativoRef.current && !recRef.current) arrancar(); };
     window.addEventListener("pointerdown", noGesto);
     window.addEventListener("keydown", noGesto);

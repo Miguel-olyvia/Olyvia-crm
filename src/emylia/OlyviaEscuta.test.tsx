@@ -10,7 +10,7 @@ vi.mock("./gravador", () => ({ useGravacao: () => ({ estado: g.estado, falas: g.
 // a IA (olyvia-comando): por omissão não há (como antes de a função estar publicada)
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { functions: { invoke: (n: string, o: { body: { frase: string } }) => (g.invoke ? g.invoke(n, o) : Promise.resolve({ data: null, error: new Error("sem função") })) } } }));
 
-import { ACORDADA_MS, OlyviaComando, PAUSA_A_MEIO, PAUSA_FRASE, PAUSA_ORDEM } from "./OlyviaComando";
+import { ACORDADA_MS, ECO_MS, OlyviaComando, PAUSA_A_MEIO, PAUSA_FRASE, PAUSA_ORDEM, RECICLAR_MS, SURDA_MS, eEco } from "./OlyviaComando";
 
 type Res = { transcript: string }[] & { isFinal: boolean };
 class Falso {
@@ -19,6 +19,8 @@ class Falso {
   onresult: ((e: { results: Res[] }) => void) | null = null;
   onerror: ((e: { error?: string }) => void) | null = null;
   onend: (() => void) | null = null;
+  onspeechstart: (() => void) | null = null;
+  onspeechend: (() => void) | null = null;
   start() { ativos.push(this); this.onstart?.(); }
   stop() { this.parado = true; this.onend?.(); }
 }
@@ -295,7 +297,8 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     const rec = ultimo();
     falar(rec, res("olyvia", true));
     act(() => { vi.advanceTimersByTime(ACORDADA_MS - 1000); });
-    falar(rec, res("olyvia", true), res("hum deixa-me ver"));
+    // (18/11: entretanto a sessão renovou-se num silêncio — a fala chega à sessão nova)
+    falar(ultimo(), res("hum deixa-me ver"));
     act(() => { vi.advanceTimersByTime(ACORDADA_MS - 1000); });
     expect(screen.getByRole("button", { name: "Olyvia — a ouvir-te" })).toBeInTheDocument();
   });
@@ -307,12 +310,15 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     falar(rec, res("olyvia", true));
     act(() => { vi.advanceTimersByTime(ACORDADA_MS + 10); });
     expect(screen.getByRole("button", { name: "Olyvia — à escuta (diz «Olyvia»)" })).toBeInTheDocument();
-    falar(rec, res("olyvia", true), res("vai ao catálogo", true));
+    // (18/11: a sessão renovou-se num silêncio — as falas seguintes chegam à sessão nova)
+    const r2 = ultimo();
+    expect(r2).not.toBe(rec);
+    falar(r2, res("vai ao catálogo", true));
     expect(loc()).toBe("/negocios?vista=hoje");
-    falar(rec, res("olyvia", true), res("vai ao catálogo", true), res("olyvia", true));
-    falar(rec, res("olyvia", true), res("vai ao catálogo", true), res("olyvia", true), res("obrigado", true));
+    falar(r2, res("vai ao catálogo", true), res("olyvia", true));
+    falar(r2, res("vai ao catálogo", true), res("olyvia", true), res("obrigado", true));
     expect(screen.getByRole("button", { name: "Olyvia — à escuta (diz «Olyvia»)" })).toBeInTheDocument();
-    falar(rec, res("olyvia", true), res("vai ao catálogo", true), res("olyvia", true), res("obrigado", true), res("vai ao catálogo", true));
+    falar(r2, res("vai ao catálogo", true), res("olyvia", true), res("obrigado", true), res("vai ao catálogo", true));
     expect(loc()).toBe("/negocios?vista=hoje");
   });
 
@@ -380,5 +386,72 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     expect(localStorage.getItem("olyvia-escuta")).toBe("1");
     act(() => { fireEvent.pointerDown(window); });
     expect(ativos).toHaveLength(2);
+  });
+});
+
+describe("18/11 (Rúben: «há vezes em que simplesmente não me ouve… tenho de parar, esperar e falar calmamente»)", () => {
+  it("sessão surda: o Chrome ouve fala mas não devolve palavras → recomeça sozinha e a fala seguinte conta", () => {
+    vi.useFakeTimers();
+    render(arvore("/negocios?vista=hoje"));
+    const preso = ultimo();
+    act(() => { preso.onspeechstart?.(); vi.advanceTimersByTime(SURDA_MS + 1200); });
+    expect(preso.parado).toBe(true);
+    const novo = ultimo();
+    expect(novo).not.toBe(preso);
+    falar(novo, res("olyvia vai aos negócios", true));
+    act(() => { vi.advanceTimersByTime(PAUSA_ORDEM + 50); });
+    expect(loc()).toBe("/negocios");
+  });
+
+  it("a meio de uma fala normal (com palavras a chegar) não recomeça", () => {
+    vi.useFakeTimers();
+    render(arvore("/negocios?vista=hoje"));
+    const rec = ultimo();
+    act(() => { rec.onspeechstart?.(); });
+    for (let i = 0; i < 6; i++) { act(() => { vi.advanceTimersByTime(1000); }); falar(rec, res(`conversa solta ${i}`)); }
+    expect(rec.parado).toBe(false);
+    expect(ultimo()).toBe(rec);
+  });
+
+  it("uma sessão longa renova-se num silêncio (antes que o Chrome a feche a meio de uma frase)", () => {
+    vi.useFakeTimers();
+    render(arvore("/negocios?vista=hoje"));
+    const rec = ultimo();
+    act(() => { vi.advanceTimersByTime(RECICLAR_MS + 1500); });
+    expect(rec.parado).toBe(true);
+    expect(ultimo()).not.toBe(rec);
+  });
+
+  it("enquanto a Olyvia fala, não desliga a escuta: ignora o eco dela, e «Olyvia, …» interrompe-a e manda", async () => {
+    vi.useFakeTimers();
+    const falou: string[] = []; let cancelada = 0;
+    class Fala { onend: (() => void) | null = null; onerror: (() => void) | null = null; lang = ""; rate = 1; voice: unknown = null; constructor(public text: string) {} }
+    vi.stubGlobal("SpeechSynthesisUtterance", Fala);
+    Object.defineProperty(window, "speechSynthesis", { configurable: true, value: { getVoices: () => [], cancel: () => { cancelada++; }, speak: (u: Fala) => { falou.push(u.text); } } });
+    g.invoke = async () => ({ data: { acoes: [], resposta: "A obra dura cinco dias úteis.", continuar: false }, error: null });
+    render(arvore("/negocios?vista=hoje"));
+    const rec = ultimo();
+    falar(rec, res("olyvia quanto tempo vai durar esta obra e quem está na equipa", true));
+    await act(async () => { await vi.advanceTimersByTimeAsync(PAUSA_FRASE + 100); });
+    {
+      expect(falou).toEqual(["A obra dura cinco dias úteis."]);
+      expect(rec.parado).toBe(false); // continua a ouvir
+      // o eco: as palavras dela, ignoradas
+      falar(rec, res("olyvia quanto tempo vai durar esta obra e quem está na equipa", true), res("a obra dura cinco dias"));
+      act(() => { vi.advanceTimersByTime(PAUSA_FRASE + 100); });
+      expect(loc()).toBe("/negocios?vista=hoje");
+      // «Olyvia, vai aos negócios» por cima: cala-a e faz
+      falar(rec, res("olyvia quanto tempo vai durar esta obra e quem está na equipa", true), res("a obra dura cinco dias olyvia vai aos negócios", true));
+      act(() => { vi.advanceTimersByTime(PAUSA_ORDEM + 100); });
+      expect(cancelada).toBeGreaterThan(0);
+      expect(loc()).toBe("/negocios");
+      delete (window as unknown as { speechSynthesis?: unknown }).speechSynthesis;
+    }
+  });
+
+  it("o eco é só o que ela disse; o resto é da pessoa", () => {
+    expect(eEco("a obra dura cinco", "A obra dura cinco dias úteis.")).toBe(true);
+    expect(eEco("vai aos negócios", "A obra dura cinco dias úteis.")).toBe(false);
+    expect(ECO_MS).toBeGreaterThan(1000);
   });
 });
