@@ -13,6 +13,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { renderHook, waitFor, act } from "@testing-library/react";
 import { ReactNode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 // ---- Mocks ----
 const rpcMock = vi.fn();
@@ -36,9 +37,18 @@ vi.mock("@/contexts/CompanyContext", () => ({
 }));
 
 import { PermissionsProvider, usePermissions } from "@/contexts/PermissionsContext";
+import { permissionLabel, registerPermissionNames } from "@/components/inventory/ui/permissionReason";
 
+// 18/11/2026: o provider lê o catálogo anew_permissions (nomes dos avisos) por react-query, por isso precisa do QueryClientProvider,
+// como em App.tsx. Um cliente novo por teste, sem repetições.
+let queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+beforeEach(() => {
+  queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+});
 const wrapper = ({ children }: { children: ReactNode }) => (
-  <PermissionsProvider>{children}</PermissionsProvider>
+  <QueryClientProvider client={queryClient}>
+    <PermissionsProvider>{children}</PermissionsProvider>
+  </QueryClientProvider>
 );
 
 // Use a unique session.user.id per test so the module-level cache key never collides.
@@ -288,6 +298,66 @@ describe("PermissionsContext (P2.a — RPC-backed)", () => {
     renderHook(() => usePermissions(), { wrapper });
     await waitFor(() => expect(rpcMock).toHaveBeenCalled());
 
+    // 18/11/2026: a única leitura direta permitida é o catálogo anew_permissions (nomes dos avisos de «sem permissão»).
+    const tabelas = fromSpy.mock.calls.map((c) => c[0]);
+    for (const t of ["anew_users", "anew_hierarchy", "anew_memberships", "anew_roles", "anew_role_permissions"]) {
+      expect(tabelas).not.toContain(t);
+    }
+    expect(tabelas.every((t) => t === "anew_permissions")).toBe(true);
+  });
+});
+
+// ---- 18/11/2026: nomes das permissões (anew_permissions) para os avisos de «sem permissão» ----
+describe("PermissionsContext — nomes do catálogo para os motivos", () => {
+  afterEach(() => registerPermissionNames([]));
+
+  const comCatalogo = async (resposta: { data: unknown; error: unknown }) => {
+    const order = vi.fn().mockResolvedValue(resposta);
+    const select = vi.fn(() => ({ order }));
+    const fromSpy = vi.fn(() => ({ select }));
+    const { supabase } = await import("@/integrations/supabase/client");
+    (supabase as any).from = fromSpy;
+    return { fromSpy, select, order };
+  };
+
+  it("lê anew_permissions (select *, por display_order), regista os nomes e muda a identidade de hasPermission", async () => {
+    useCompanyMock.mockReturnValue({ activeCompany: { id: "org-1" }, userType: "member" });
+    rpcMock.mockResolvedValue({ data: { business_user_id: "biz-1", is_system_admin: false, permissions: [] }, error: null });
+    // O catálogo só responde depois de as permissões estarem carregadas, para ver o re-render que a chegada dos nomes provoca.
+    let responder: (v: { data: unknown; error: unknown }) => void = () => {};
+    const { fromSpy, select, order } = await comCatalogo({ data: [], error: null });
+    order.mockReturnValue(new Promise((r) => { responder = r; }));
+
+    const { result } = renderHook(() => usePermissions(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() => expect(order).toHaveBeenCalled());
+    const antes = result.current.hasPermission;
+    expect(permissionLabel("inventory.edit")).toBe("Editar inventário (inventory.edit)");
+
+    await act(async () => { responder({ data: [{ code: "inventory.edit", name: "Editar registos de inventário" }], error: null }); });
+    await waitFor(() => expect(result.current.hasPermission).not.toBe(antes));
+    expect(permissionLabel("inventory.edit")).toBe("Editar registos de inventário (inventory.edit)");
+    expect(fromSpy).toHaveBeenCalledWith("anew_permissions");
+    expect(select).toHaveBeenCalledWith("*");
+    expect(order).toHaveBeenCalledWith("display_order");
+  });
+
+  it("falha na leitura: silêncio, ficam os nomes estáticos", async () => {
+    useCompanyMock.mockReturnValue({ activeCompany: { id: "org-1" }, userType: "member" });
+    rpcMock.mockResolvedValue({ data: { business_user_id: "biz-1", is_system_admin: false, permissions: [] }, error: null });
+    const { order } = await comCatalogo({ data: null, error: new Error("rede") });
+
+    const { result } = renderHook(() => usePermissions(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() => expect(order).toHaveBeenCalled());
+    expect(permissionLabel("inventory.edit")).toBe("Editar inventário (inventory.edit)");
+  });
+
+  it("sem sessão (userType vazio) não lê o catálogo", async () => {
+    useCompanyMock.mockReturnValue({ activeCompany: null, userType: "" });
+    const { fromSpy } = await comCatalogo({ data: [], error: null });
+    const { result } = renderHook(() => usePermissions(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
     expect(fromSpy).not.toHaveBeenCalled();
   });
 });

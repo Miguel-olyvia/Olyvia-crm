@@ -2,17 +2,35 @@
 // - «todas de» (requireAll): só as que faltam, ligadas com «e» → «Sem permissão: falta A e B. Peça acesso a um administrador.»
 // - «qualquer de»: as alternativas, ligadas com «ou» → «Sem permissão: requer A ou B. Peça acesso a um administrador.»
 // Cada permissão aparece pelo nome legível com o código entre parênteses («Editar inventário (inventory.edit)»); sem nome
-// conhecido, só o código. Os nomes vêm do catálogo estático do editor de perfis (permissoesExemplo.ts), sem ir à base.
-// Puro (sem React): RowActions > usePermissionGate, FrotaShell e os botões que calculam a permissão à mão usam-no.
+// conhecido, só o código. O nome vem primeiro da base (anew_permissions.name, o mesmo do servidor/fn_permissoes_rotulo),
+// registado pelo PermissionsProvider com registerPermissionNames quando o catálogo chega; antes disso (ou se a leitura falhar),
+// do catálogo estático do editor de perfis (permissoesExemplo.ts); sem nenhum, só o código.
+// Sem React nem Supabase: RowActions > usePermissionGate, FrotaShell e os botões que calculam a permissão à mão usam-no.
 import { PERMISSOES } from "@/components/utilizadores-perfis/permissoesExemplo";
 
 type PermissionList = string | readonly string[];
 
-const NOMES: ReadonlyMap<string, string> = new Map(PERMISSOES.map((p) => [p.codigo, p.nome]));
+const NOMES_ESTATICOS: ReadonlyMap<string, string> = new Map(PERMISSOES.map((p) => [p.codigo, p.nome]));
 
-/** «Editar inventário (inventory.edit)»; sem nome conhecido, o código. */
+/** Nomes da base (anew_permissions). Substituído por inteiro a cada registo; vazio até o catálogo chegar. */
+let nomesDaBase: ReadonlyMap<string, string> = new Map();
+
+/**
+ * Regista os nomes do catálogo da base (anew_permissions: code, name). Substitui os anteriores (o catálogo vem sempre inteiro);
+ * nomes vazios ficam de fora (cai no estático). `registerPermissionNames([])` volta só ao estático.
+ */
+export function registerPermissionNames(rows: readonly { code: string; name: string | null }[]): void {
+  const mapa = new Map<string, string>();
+  for (const r of rows) {
+    const nome = r.name?.trim();
+    if (r.code && nome) mapa.set(r.code, nome);
+  }
+  nomesDaBase = mapa;
+}
+
+/** «Editar registos de inventário (inventory.edit)»: nome da base, senão o estático; sem nenhum, o código. */
 export const permissionLabel = (code: string): string => {
-  const nome = NOMES.get(code);
+  const nome = nomesDaBase.get(code) ?? NOMES_ESTATICOS.get(code);
   return nome ? `${nome} (${code})` : code;
 };
 

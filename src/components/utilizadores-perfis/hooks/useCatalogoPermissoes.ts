@@ -3,10 +3,10 @@
 // permissões que ele próprio tem.
 import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { supabase } from "@/integrations/supabase/client";
+import { CATALOGO_PERMISSOES_QUERY_KEY, lerCatalogoPermissoes } from "@/lib/catalogoPermissoes";
 import { usePermissions } from "@/hooks/usePermissions";
 import { permissoesVisiveis, type Editor } from "../logica";
-import { mensagemDeErro, permissoesDoMenu, type LinhaPermissao } from "../rolesReais";
+import { mensagemDeErro, permissoesDoMenu } from "../rolesReais";
 import type { Permissao } from "../tipos";
 
 export interface CatalogoPermissoes {
@@ -20,15 +20,9 @@ export interface CatalogoPermissoes {
   erro: string | null;
 }
 
-async function lerCatalogo(): Promise<LinhaPermissao[]> {
-  const { data, error } = await supabase.from("anew_permissions").select("*").order("display_order");
-  if (error) throw error;
-  return (data ?? []) as unknown as LinhaPermissao[];
-}
-
 export function useCatalogoPermissoes(): CatalogoPermissoes {
   const { permissions, isSystemAdmin, loading } = usePermissions();
-  const consulta = useQuery({ queryKey: ["anew_permissions"], queryFn: lerCatalogo });
+  const consulta = useQuery({ queryKey: CATALOGO_PERMISSOES_QUERY_KEY, queryFn: lerCatalogoPermissoes });
   const catalogo = useMemo(() => permissoesDoMenu(consulta.data ?? []), [consulta.data]);
   const editor = useMemo<Editor>(() => ({ administradorSistema: !!isSystemAdmin, codigos: permissions ?? [] }), [isSystemAdmin, permissions]);
   const visiveis = useMemo(() => permissoesVisiveis(catalogo, editor), [catalogo, editor]);

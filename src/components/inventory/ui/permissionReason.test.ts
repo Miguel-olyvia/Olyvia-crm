@@ -1,6 +1,6 @@
 // 18/11/2026: o aviso de «sem permissão» diz só o que falta (todas de → «falta A e B») ou as alternativas (qualquer de → «requer A ou B»).
-import { describe, expect, it } from "vitest";
-import { missingPermissionsReason, permissionLabel, permissionReason } from "./permissionReason";
+import { afterEach, describe, expect, it } from "vitest";
+import { missingPermissionsReason, permissionLabel, permissionReason, registerPermissionNames } from "./permissionReason";
 
 const tem = (...codigos: string[]) => (c: string) => codigos.includes(c);
 const SUFIXO = "Peça acesso a um administrador.";
@@ -12,6 +12,43 @@ describe("permissionLabel", () => {
   });
   it("sem nome conhecido, só o código", () => {
     expect(permissionLabel("codigo.que.nao.existe")).toBe("codigo.que.nao.existe");
+  });
+});
+
+// 18/11/2026: o nome vem primeiro da base (anew_permissions.name, o mesmo do servidor e do editor); sem ele, o estático.
+describe("permissionLabel — nomes da base (registerPermissionNames)", () => {
+  afterEach(() => registerPermissionNames([]));
+
+  it("o nome da base ganha ao estático", () => {
+    registerPermissionNames([{ code: "inventory.edit", name: "Editar registos de inventário" }]);
+    expect(permissionLabel("inventory.edit")).toBe("Editar registos de inventário (inventory.edit)");
+  });
+  it("código sem nome na base (ou nome vazio/null): fica o estático", () => {
+    registerPermissionNames([
+      { code: "inventory.edit", name: "Editar registos de inventário" },
+      { code: "purchase_orders.receive", name: null },
+      { code: "purchase_orders.view", name: "  " },
+    ]);
+    expect(permissionLabel("purchase_orders.receive")).toBe("Receber encomendas de compra (purchase_orders.receive)");
+    expect(permissionLabel("purchase_orders.view")).toBe("Ver encomendas de compra (purchase_orders.view)");
+  });
+  it("sem base nem estático: só o código; com base, mesmo sem estático, o nome da base", () => {
+    registerPermissionNames([{ code: "so.na.base", name: "Só na base" }]);
+    expect(permissionLabel("codigo.que.nao.existe")).toBe("codigo.que.nao.existe");
+    expect(permissionLabel("so.na.base")).toBe("Só na base (so.na.base)");
+  });
+  it("um novo registo substitui o anterior; [] volta ao estático", () => {
+    registerPermissionNames([{ code: "inventory.edit", name: "Nome antigo" }]);
+    registerPermissionNames([{ code: "inventory.edit", name: "Editar registos de inventário" }]);
+    expect(permissionLabel("inventory.edit")).toBe("Editar registos de inventário (inventory.edit)");
+    registerPermissionNames([]);
+    expect(permissionLabel("inventory.edit")).toBe("Editar inventário (inventory.edit)");
+  });
+  it("os motivos usam o nome da base", () => {
+    registerPermissionNames([{ code: "inventory.edit", name: "Editar registos de inventário" }]);
+    expect(missingPermissionsReason(["purchase_orders.receive", "inventory.edit"], true, tem("purchase_orders.receive"))).toBe(
+      `Sem permissão: falta Editar registos de inventário (inventory.edit). ${SUFIXO}`,
+    );
   });
 });
 

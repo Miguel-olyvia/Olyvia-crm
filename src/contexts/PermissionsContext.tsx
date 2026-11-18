@@ -2,6 +2,10 @@ import { createContext, useContext, useState, useEffect, useCallback, useMemo, u
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { expandPermissions, permissionSetHas } from "@/lib/permissionAliases";
+import { useQuery } from "@tanstack/react-query";
+import { CATALOGO_PERMISSOES_QUERY_KEY, lerCatalogoPermissoes } from "@/lib/catalogoPermissoes";
+import { registerPermissionNames } from "@/components/inventory/ui/permissionReason";
+import { permissaoDaBase } from "@/components/utilizadores-perfis/rolesReais";
 
 interface PermissionsContextType {
   permissions: string[];
@@ -56,6 +60,27 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   loadingRef.current = loading;
   companyIdRef.current = activeCompany?.id;
   userTypeRef.current = userType;
+
+  // 18/11/2026: nomes das permissões para os avisos de «sem permissão» (permissionReason.ts) — os mesmos de anew_permissions.name
+  // que o servidor usa. Mesma chave/leitura do editor de perfis (useCatalogoPermissoes), por isso partilham a cache. Só com sessão
+  // (userType vazio = sem conta). Falha = silêncio: ficam os nomes estáticos. Os motivos são calculados no render, por isso quando
+  // os nomes chegam `nomesVersao` muda a identidade de hasPermission/hasAnyPermission e o valor do contexto → os consumidores
+  // (usePermissionGate, FrotaShell, botões que calculam à mão, incluindo os useCallback/useMemo que dependem de hasPermission)
+  // voltam a calcular o texto.
+  const catalogoNomes = useQuery({
+    queryKey: CATALOGO_PERMISSOES_QUERY_KEY,
+    queryFn: lerCatalogoPermissoes,
+    enabled: !!userType,
+    staleTime: 60 * 60 * 1000,
+    retry: false,
+  });
+  const [nomesVersao, setNomesVersao] = useState(0);
+  useEffect(() => {
+    if (!catalogoNomes.data) return;
+    // 18/11: o mesmo nome que o editor de perfis mostra (permissaoDaBase: rótulos próprios > tradução > anew_permissions.name).
+    registerPermissionNames(catalogoNomes.data.map((l) => ({ code: l.code, name: permissaoDaBase(l).nome })));
+    setNomesVersao((v) => v + 1);
+  }, [catalogoNomes.data]);
 
   useEffect(() => {
     if (!userType) {
@@ -163,11 +188,14 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   // identifies the role but does not bypass permissions".
   const hasPermission = useCallback((permissionCode: string): boolean => {
     return permissionSetHas(permissionSet, permissionCode);
-  }, [permissionSet]);
+    // nomesVersao: não entra no cálculo; muda a identidade quando chegam os nomes das permissões (ver catalogoNomes acima).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permissionSet, nomesVersao]);
 
   const hasAnyPermission = useCallback((permissionCodes: string[]): boolean => {
     return permissionCodes.some(code => permissionSetHas(permissionSet, code));
-  }, [permissionSet]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permissionSet, nomesVersao]);
 
   const hasModuleAccess = useCallback((module: string): boolean => {
     for (const p of permissionSet) {
