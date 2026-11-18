@@ -73,7 +73,12 @@ describe("as necessidades da planta", () => {
     const ajustado = necessidades({ ...base, ajustes: { "inst-san": { q: 2 }, prot: { fora: true } } });
     expect(ajustado.find((x) => x.id === "inst-san")).toMatchObject({ q: 2, total: 280, ajustada: true });
     expect(totais(ajustado).semIva).toBe(t0.semIva + 140 - TABELA.protecoes);
-    expect(t0.comIva).toBe(Math.round(t0.semIva * 1.23 * 100) / 100);
+    // 18/11: o IVA por linha: os trabalhos a 6%, as peças e os materiais a 23%
+    const l0 = necessidades(base);
+    const trab = l0.filter((x) => x.grupo === "Trabalhos").reduce((s, x) => s + x.total, 0), resto = l0.filter((x) => x.grupo !== "Trabalhos").reduce((s, x) => s + x.total, 0);
+    expect(trab).toBeGreaterThan(0);
+    expect(t0.taxas.map((x) => x.taxa)).toEqual(resto ? [0.06, 0.23] : [0.06]);
+    expect(t0.comIva).toBeCloseTo(trab * 1.06 + resto * 1.23, 1);
   });
 
   it("«aplicar o estilo» escolhe para as peças novas e trocadas, e para as paredes e o chão", () => {

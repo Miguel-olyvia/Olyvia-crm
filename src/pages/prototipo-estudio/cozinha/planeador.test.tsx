@@ -54,7 +54,9 @@ describe("as regras do planeador", () => {
     expect(ls.filter((l) => l.grupo === "Eletrodomésticos").map((l) => l.cat).sort()).toEqual(["exaustor", "forno", "lava", "placa", "torneira"]);
     expect(ls.find((l) => l.id === "serv-sv-montagem-cozinha")?.q).toBe(6);
     expect(ls.find((l) => l.id === "serv-sv-recortes")?.q).toBe(2);
-    expect(totalDaCozinha(c).comIva).toBeCloseTo(totalDaCozinha(c).semIva * 1.23, 1);
+    // 18/11: a montagem a 6%, os móveis, o tampo e os eletrodomésticos a 23%
+    const mont = ls.filter((l) => l.grupo === "Montagem").reduce((s, l) => s + l.total, 0), resto = ls.filter((l) => l.grupo !== "Montagem").reduce((s, l) => s + l.total, 0);
+    expect(totalDaCozinha(c).comIva).toBeCloseTo(mont * 1.06 + resto * 1.23, 1);
   });
   it("avisa quando passa da parede, quando falta o lava-loiça e a placa sem exaustor", () => {
     const c = cozinha();

@@ -6,9 +6,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { PECAS, areaChaoM2, areaParedesM2, type PecaPlanta } from "@/emylia/planta";
 import { ACOMPANHA, CORES, NOME_CATEGORIA, combina, coresPara, produto, produtosDe, type Categoria, type Cor, type Estilo, type Produto } from "./catalogoFake";
-import { IVA, alturaFinalCm, escolherProduto, estadoDaPeca, totais, type Projeto } from "./necessidadesEstudio";
+import { alturaFinalCm, escolherProduto, estadoDaPeca, totais, type Projeto } from "./necessidadesEstudio";
 import { Ilustracao } from "./Ilustracao";
 import { EV_PROCURAR, bateComPesquisa, procurarNoCatalogo } from "./pesquisaEstudio";
+import { pct } from "./ivaEstudio";
 
 export const eur = (n: number) => n.toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
 export const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
@@ -88,10 +89,10 @@ export function Resumo({ t, porEscolher, grande = false }: { t: ReturnType<typeo
   const comIva = useContagem(t.comIva);
   return (
     <section aria-label="Orçamento" className={cn("rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]", grande && "bg-foreground text-background")}>
-      <p className={cn("text-sm", grande ? "text-background/70" : "text-muted-foreground")}>Orçamento, com IVA a {Math.round(IVA * 100)}%</p>
+      <p className={cn("text-sm", grande ? "text-background/70" : "text-muted-foreground")}>Orçamento, com IVA</p>
       <p className={cn("font-semibold tabular-nums tracking-tight", grande ? "text-4xl" : "text-3xl")}>{eur(comIva)}</p>
-      <p className={cn("text-sm", grande ? "text-background/70" : "text-muted-foreground")}>{eur(t.semIva)} sem IVA{porEscolher ? ` · ${porEscolher} por escolher` : ""}</p>
-      {grande && <p className="mt-3 text-xs text-background/60">Com IVA a 6% se a casa estiver numa área de reabilitação urbana: por confirmar.</p>}
+      <p className={cn("text-sm", grande ? "text-background/70" : "text-muted-foreground")}>{eur(t.semIva)} sem IVA{t.taxas.length ? ` · IVA a ${t.taxas.map((x) => pct(x.taxa)).join(" e ")}` : ""}{porEscolher ? ` · ${porEscolher} por escolher` : ""}</p>
+      {grande && <p className="mt-3 text-xs text-background/60">A obra toda com IVA a 6% se a casa estiver numa área de reabilitação urbana: por confirmar.</p>}
     </section>
   );
 }

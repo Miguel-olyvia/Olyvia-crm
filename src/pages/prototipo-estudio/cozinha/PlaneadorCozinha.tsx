@@ -12,6 +12,7 @@ import { CATALOGO, produto, type Produto } from "../catalogoFake";
 import { CHAVE_ESTUDIO } from "../daVisita";
 import type { Projeto } from "../necessidadesEstudio";
 import { Ilustracao } from "../Ilustracao";
+import { pct } from "../ivaEstudio";
 import {
   ACABAMENTOS, MODELOS, NOME_FRENTE, PUXADORES, acabamentoDoEstilo, avisos, comprimento, cozinhaDeExemplo, cozinhaParaParede, duplicar, juntar, lerCozinha, linhasDaCozinha,
   moduloDe, mover, mudar, novoModulo, porNoLugar, postos, precoDoMovel, produtosPara, tirar, totalDaCozinha, type Cozinha, type Frente, type LinhaCozinha, type Modelo, type Modulo,
@@ -563,6 +564,9 @@ function Resumo({ c, fechar, doEstudio, voltar }: { c: Cozinha; fechar: () => vo
         </div>
         <div className="space-y-3 border-t border-border px-5 py-4">
           <p className="flex items-baseline justify-between"><span className="text-sm text-muted-foreground">Sem IVA</span><span className="tabular-nums">{eur2(t.semIva)}</span></p>
+          {t.taxas.map((x) => (
+            <p key={x.taxa} className="flex items-baseline justify-between"><span className="text-sm text-muted-foreground">IVA {pct(x.taxa)} <span className="text-xs">sobre {eur2(x.base)}</span></span><span className="tabular-nums">{eur2(x.iva)}</span></p>
+          ))}
           <p className="flex items-baseline justify-between"><span className="font-medium">Com IVA</span><span className="text-2xl font-semibold tabular-nums">{eur2(t.comIva)}</span></p>
           {doEstudio && <button type="button" className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-full bg-primary px-4 font-medium text-primary-foreground hover:bg-primary/90" onClick={voltar}><ArrowLeft className="h-4 w-4" aria-hidden="true" />Levar para o Estúdio</button>}
         </div>

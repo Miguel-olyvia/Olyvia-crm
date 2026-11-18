@@ -3,7 +3,7 @@
 // de parede e o exaustor). O tampo cobre os baixos seguidos. Os eletrodomésticos, o lava-loiça, a torneira e o tampo são os produtos do
 // catálogo do Estúdio (catalogoFake.ts); os corpos e as frentes têm preços de teste. Só regras; o 3D é cena.ts e o ecrã PlaneadorCozinha.tsx.
 import { CATALOGO, SERVICOS, produto, type Categoria, type Produto } from "../catalogoFake";
-import { IVA } from "../necessidadesEstudio";
+import { taxaDoGrupo, totaisPorTaxa, type TotaisIva } from "../ivaEstudio";
 
 export type Fila = "baixo" | "parede";
 /** O modelo do módulo: o que é e o que leva. */
@@ -253,9 +253,9 @@ export function linhasDaCozinha(c: Cozinha): LinhaCozinha[] {
   return out;
 }
 
-export function totalDaCozinha(c: Cozinha): { semIva: number; comIva: number } {
-  const semIva = r2(linhasDaCozinha(c).reduce((s, l) => s + l.total, 0));
-  return { semIva, comIva: r2(semIva * (1 + IVA)) };
+/** 18/11: com o IVA por linha, como no Estúdio: a montagem a 6%, os móveis, o tampo e os eletrodomésticos a 23%. */
+export function totalDaCozinha(c: Cozinha): TotaisIva {
+  return totaisPorTaxa(linhasDaCozinha(c).map((l) => ({ total: l.total, taxa: taxaDoGrupo(l.grupo) })));
 }
 
 // ---------------------------------------------------------------- de omissão, e a partir do Estúdio

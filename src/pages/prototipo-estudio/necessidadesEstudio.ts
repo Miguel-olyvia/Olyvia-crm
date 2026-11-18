@@ -7,6 +7,7 @@
 // O comercial ajusta a quantidade ou tira uma linha; o ajuste fica marcado. Os preços do Estúdio são de teste (catalogoFake.ts).
 import { PASSO, PECAS, areaChaoM2, areaParedesM2, encaixar, juntarPeca, type PecaPlanta, type Planta, type Ponto, type TipoPeca } from "@/emylia/planta";
 import { sitioDeQuemSai } from "./posicoesDepois";
+import { IVA_PECAS, taxaDoGrupo, totaisPorTaxa, type TotaisIva } from "./ivaEstudio";
 import { linhasDaCozinha, type Cozinha } from "./cozinha/modelo";
 import { TIPOS_COZINHA } from "@/emylia/planta";
 import { ACOMPANHA, ACOMPANHA_SEMPRE, NOME_CATEGORIA, ficouDeTeste, SERVICOS, melhorPara, produto, produtosDe, servico, type Categoria, type Estilo, type Servico } from "./catalogoFake";
@@ -95,7 +96,8 @@ export const TABELA = {
   protecoes: 95,
   quebras: 1.1,
 };
-export const IVA = 0.23;
+/** A taxa das peças e dos materiais (os trabalhos vão a 6%: ivaEstudio.ts). */
+export const IVA = IVA_PECAS;
 
 const AGUA: TipoPeca[] = ["base", "banheira", "sanita", "bide", "movel", "lava", "maquina"];
 /** Para os textos: a base, a banheira, a sanita, a porta e a janela são femininas; o resto é masculino. */
@@ -222,10 +224,10 @@ export function necessidades(p: Projeto): Linha[] {
   });
 }
 
-export function totais(linhas: readonly Linha[]): { semIva: number; iva: number; comIva: number } {
-  const semIva = r2(linhas.filter((l) => !l.fora).reduce((s, l) => s + l.total, 0));
-  const iva = r2(semIva * IVA);
-  return { semIva, iva, comIva: r2(semIva + iva) };
+/** 18/11: o IVA por linha (ivaEstudio.ts): os trabalhos a 6%, as peças e os materiais a 23%. As linhas tiradas não contam. */
+export const taxaDaLinha = (l: Pick<Linha, "grupo">): number => taxaDoGrupo(l.grupo);
+export function totais(linhas: readonly Linha[]): TotaisIva {
+  return totaisPorTaxa(linhas.filter((l) => !l.fora).map((l) => ({ total: l.total, taxa: taxaDaLinha(l) })));
 }
 
 /** «Aplicar o estilo»: cada peça trocada ou nova sem produto, e o revestimento e o pavimento, ficam com o que melhor combina. */

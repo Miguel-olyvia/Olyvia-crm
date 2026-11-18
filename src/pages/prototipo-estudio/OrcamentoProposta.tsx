@@ -3,11 +3,14 @@
 //  · cada grupo com o total dele; cada linha com o desenho do produto na cor dele (o material com a amostra), o porquê, a quantidade
 //    num campo discreto e o total; tirar e repor sem sair da linha;
 //  · ao lado, o orçamento com o IVA e as três partes.
+// 18/11 (Rúben: «IVA por linha, 6% para serviços»): cada parte com a sua taxa (os trabalhos a 6%, as peças e os materiais a 23%) e o IVA
+// de cada taxa à parte.
 import { motion, useReducedMotion } from "framer-motion";
 import { Hammer, Package, Paintbrush, RotateCcw, Wrench, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CATALOGO, type Produto } from "./catalogoFake";
-import { IVA, type Grupo, type Linha, type Projeto, totais } from "./necessidadesEstudio";
+import { type Grupo, type Linha, type Projeto, taxaDaLinha, totais } from "./necessidadesEstudio";
+import { pct } from "./ivaEstudio";
 import { Ilustracao } from "./Ilustracao";
 import { eur, nf, useContagem } from "./pecasEstudio";
 
@@ -118,26 +121,32 @@ export function LinhasProposta({ linhas, setP, irParaPeca }: { linhas: Linha[]; 
   );
 }
 
-/** O orçamento ao lado da proposta: o total com IVA a contar, e as partes por baixo. */
+/** O orçamento ao lado da proposta: o total com IVA a contar, e as partes por baixo, cada uma com a sua taxa e o IVA de cada taxa. */
 export function ResumoProposta({ linhas, porEscolher }: { linhas: Linha[]; porEscolher: number }) {
   const t = totais(linhas);
   const comIva = useContagem(t.comIva);
-  const partes = GRUPOS.map((x) => ({ g: x.g, v: somaDe(linhas.filter((l) => l.grupo === x.g)) })).filter((x) => x.v > 0);
+  const partes = GRUPOS.map((x) => ({ g: x.g, v: somaDe(linhas.filter((l) => l.grupo === x.g)), taxa: taxaDaLinha({ grupo: x.g }) })).filter((x) => x.v > 0);
   return (
     <section aria-label="Orçamento" className="overflow-hidden rounded-2xl bg-foreground text-background shadow-lg">
       <div className="p-6">
-        <p className="text-sm text-background/70">Orçamento, com IVA a {Math.round(IVA * 100)}%</p>
+        <p className="text-sm text-background/70">Orçamento, com IVA</p>
         <p className="mt-1 text-4xl font-semibold tabular-nums tracking-tight">{eur(comIva)}</p>
         {porEscolher > 0 && <p className="mt-2 inline-flex rounded-full bg-amber-300/20 px-2.5 py-0.5 text-sm text-amber-200">{porEscolher} por escolher no catálogo</p>}
       </div>
       <dl className="space-y-2 border-t border-background/10 px-6 py-4 text-sm">
         {partes.map((x) => (
-          <div key={x.g} className="flex justify-between gap-4"><dt className="text-background/70">{x.g}</dt><dd className="tabular-nums">{eur(x.v)}</dd></div>
+          <div key={x.g} className="flex justify-between gap-4">
+            <dt className="text-background/70">{x.g} <span className="ml-1 rounded-full bg-background/10 px-1.5 py-px text-xs tabular-nums text-background/80">IVA {pct(x.taxa)}</span></dt>
+            <dd className="tabular-nums">{eur(x.v)}</dd>
+          </div>
         ))}
         <div className="flex justify-between gap-4 border-t border-background/10 pt-2"><dt className="text-background/70">Sem IVA</dt><dd className="font-medium tabular-nums">{eur(t.semIva)}</dd></div>
-        <div className="flex justify-between gap-4"><dt className="text-background/70">IVA {Math.round(IVA * 100)}%</dt><dd className="tabular-nums">{eur(t.iva)}</dd></div>
+        {t.taxas.map((x) => (
+          <div key={x.taxa} className="flex justify-between gap-4"><dt className="text-background/70">IVA {pct(x.taxa)} <span className="text-xs text-background/50">sobre {eur(x.base)}</span></dt><dd className="tabular-nums">{eur(x.iva)}</dd></div>
+        ))}
+        <div className="flex justify-between gap-4 border-t border-background/10 pt-2"><dt className="font-medium">Com IVA</dt><dd className="font-semibold tabular-nums">{eur(t.comIva)}</dd></div>
       </dl>
-      <p className="border-t border-background/10 px-6 py-3 text-xs text-background/60">Com IVA a 6% se a casa estiver numa área de reabilitação urbana: por confirmar.</p>
+      <p className="border-t border-background/10 px-6 py-3 text-xs text-background/60">A obra toda com IVA a 6% se a casa estiver numa área de reabilitação urbana: por confirmar.</p>
     </section>
   );
 }
