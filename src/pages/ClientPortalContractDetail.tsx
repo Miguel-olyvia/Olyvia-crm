@@ -32,6 +32,8 @@ import {
   type MensagemDoPortal,
 } from "@/portal-i18n";
 import { injectSignaturesIntoBlock, resolveContractDocument, downloadContractDocumentPdf } from "@/components/contracts/contractDocument";
+import { contratoUsaVersoes } from "@/components/contracts/contractVersions";
+import { VersaoDoContrato } from "@/components/contracts/VersaoDoContrato";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const ClientPortalContractDetail = () => {
@@ -74,6 +76,32 @@ const ClientPortalContractDetail = () => {
     loadData();
     logView();
   }, [id]);
+
+  // As versões de idioma do corpo. Um contrato de sempre (português, sem versões) não passa por aqui e mostra-se
+  // como antes. Um contrato com versões ou noutro idioma mostra-se pelo MESMO resolver que o PDF
+  // (resolveContractDocument → versoes): uma secção por idioma, já com variáveis e assinaturas resolvidas.
+  // «naoCongelar»: quem só vê o contrato no portal não o congela.
+  const usaVersoes = !!contract?.contract_body_html && contratoUsaVersoes(contract.contract_body_html, contract);
+  type VersoesDoPortal = { estado: "a-carregar" } | { estado: "falhou" } | { estado: "pronto"; versoes: Array<{ codigo: string; bodyHtml: string }> };
+  const [versoesDoPortal, setVersoesDoPortal] = useState<VersoesDoPortal>({ estado: "a-carregar" });
+  useEffect(() => {
+    if (!usaVersoes || !contract?.organization_id) return;
+    let vivo = true;
+    setVersoesDoPortal({ estado: "a-carregar" });
+    resolveContractDocument(contract, contract.organization_id, undefined, { naoCongelar: true })
+      .then((documento) => {
+        if (!vivo) return;
+        setVersoesDoPortal(documento?.versoes?.length ? { estado: "pronto", versoes: documento.versoes } : { estado: "falhou" });
+      })
+      .catch((error) => {
+        console.error("[portal] contract versions failed:", error);
+        captureFlowError(error, "client-portal-contract");
+        if (vivo) setVersoesDoPortal({ estado: "falhou" });
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [usaVersoes, contract]);
 
   async function logView() {
     try {
@@ -465,6 +493,25 @@ const ClientPortalContractDetail = () => {
               </Button>
             </CardHeader>
             <CardContent>
+              {usaVersoes && versoesDoPortal.estado === "a-carregar" && (
+                <div aria-busy="true" role="status" aria-label={t("pc.contratoDet.corpo.titulo")}>
+                  <Skeleton className="h-64 w-full" />
+                </div>
+              )}
+              {usaVersoes && versoesDoPortal.estado === "pronto" && (
+                <div className="space-y-8">
+                  {versoesDoPortal.versoes.map((versao) => (
+                    <VersaoDoContrato
+                      key={versao.codigo}
+                      codigo={versao.codigo}
+                      bodyHtml={versao.bodyHtml}
+                      mostrarEtiqueta={versoesDoPortal.versoes.length > 1}
+                      classeCorpo="prose prose-sm max-w-none dark:prose-invert"
+                    />
+                  ))}
+                </div>
+              )}
+              {(!usaVersoes || versoesDoPortal.estado === "falhou") && (
               <div
                 className="prose prose-sm max-w-none dark:prose-invert"
                 dangerouslySetInnerHTML={{
@@ -487,6 +534,7 @@ const ClientPortalContractDetail = () => {
                   ),
                 }}
               />
+              )}
             </CardContent>
           </Card>
         )}

@@ -35,6 +35,17 @@ export function dividirCorpoDoContrato(html: string, contrato: unknown): CorpoDi
   return { segmentos: [{ codigo: idiomas.length === 1 ? idiomas[0] : IDIOMA_BASE, html }], comMarcas: false };
 }
 
+/**
+ * O contrato tem versões de idioma (marcas olv-versao no corpo) ou um idioma que não é só o português
+ * (`__idiomas`/`language`)? Só estes passam pelo resolver por versões nos ecrãs; os de sempre (sem marcas e em
+ * português) continuam a ser mostrados tal e qual como antes.
+ */
+export function contratoUsaVersoes(html: string, contrato: unknown): boolean {
+  if (dividirCorpoDoContrato(html, contrato).comMarcas) return true;
+  const idiomas = idiomasDoDocumento(contrato as Parameters<typeof idiomasDoDocumento>[0]);
+  return idiomas.length > 1 || idiomas[0] !== IDIOMA_BASE;
+}
+
 /** O inverso: com marcas, cada segmento volta ao seu wrapper (a 2.ª e seguintes com quebra de página). */
 export function juntarSegmentos(segmentos: readonly VersaoDoCorpo[], comMarcas: boolean): string {
   if (!comMarcas) return segmentos[0]?.html ?? "";

@@ -1090,7 +1090,21 @@ function resolverSegmentoDoContrato(html: string, ctx: SegmentoDoContrato): stri
   );
 }
 
-export async function resolveContractDocument(contract: any, orgId: string, activeCompanyName?: string): Promise<ResolvedContractDocument | null> {
+export interface ResolveContractDocumentOptions {
+  /**
+   * Não grava a cópia congelada ao ler. Para os ecrãs que só mostram (pré-visualização do CRM, portal do
+   * cliente): quem vê não deve ser quem congela, e a pré-visualização pode mostrar um corpo que ainda não foi
+   * guardado. Por omissão (PDF, descarregar) congela-se como sempre.
+   */
+  naoCongelar?: boolean;
+}
+
+export async function resolveContractDocument(
+  contract: any,
+  orgId: string,
+  activeCompanyName?: string,
+  opcoes?: ResolveContractDocumentOptions,
+): Promise<ResolvedContractDocument | null> {
   if (!contract || !orgId) return null;
 
   // A minuta que ESTE contrato usou, congelada no momento em que foi criado.
@@ -1223,7 +1237,7 @@ export async function resolveContractDocument(contract: any, orgId: string, acti
     // ou activos SEM data de assinatura -- assinou so a empresa. Sem os incluir,
     // ficavam de fora do congelamento e continuavam a mudar com a minuta, ao
     // mesmo tempo que o ecra os trancava por estarem assinados.
-    if (isContractInForce(contract) && contract.id) {
+    if (!opcoes?.naoCongelar && isContractInForce(contract) && contract.id) {
       void (supabase as any)
         .from("client_contracts")
         .update({ contract_body_frozen_html: bodyHtml, contract_frozen_at: new Date().toISOString() })
