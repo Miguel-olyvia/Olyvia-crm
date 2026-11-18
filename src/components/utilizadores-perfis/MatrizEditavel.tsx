@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { ArvorePermissoes } from "./ArvorePermissoes";
 import { ConfirmarAcao } from "./ConfirmarAcao";
 import type { EdicaoMatriz } from "./GrelhaRecursoAcao";
-import { alternarPermissao, definirConjunto, definirModulo, emFaltaDetalhe, perigosasNovas, podeAlterar } from "./matriz";
+import { alternarPermissao, definirConjunto, definirModulo, emFaltaDetalhe, exigidasNoCatalogo, perigosasNovas, podeAlterar } from "./matriz";
 import type { Permissao } from "./tipos";
 
 interface MatrizEditavelProps {
@@ -48,6 +48,17 @@ export function MatrizEditavel({ visiveis, concedidas, aoMudar, somenteLeitura, 
     ];
     return t("usersProfiles.form.matrix.needs", { names: partes.join(` ${t("usersProfiles.form.matrix.and")} `) });
   };
+  /**
+   * 18/11: «Precisa também de: «A» e «B»» — mostrado SEMPRE na dica da permissão (não só quando bloqueada), para quem edita saber
+   * que sem elas a permissão não serve. Só as que estão no catálogo de quem edita (as de fora não bloqueiam).
+   */
+  const exigeTambem = (codigo: string) => {
+    const exigidas = exigidasNoCatalogo(codigo, visiveis);
+    if (exigidas.length === 0) return null;
+    return t("usersProfiles.form.matrix.alsoNeeds", {
+      names: exigidas.map((c) => `«${nomes([c])}»`).join(` ${t("usersProfiles.form.matrix.and")} `),
+    });
+  };
   /** As que estavam concedidas e saem sem terem sido pedidas (dependiam de uma que saiu). */
   const arrastadas = (seguintes: string[], pedidas: string[]) => concedidas.filter((c) => !seguintes.includes(c) && !pedidas.includes(c));
 
@@ -61,6 +72,7 @@ export function MatrizEditavel({ visiveis, concedidas, aoMudar, somenteLeitura, 
     desativada: somenteLeitura,
     bloqueada: (codigo) => !podeAlterar(codigo, concedidas, visiveis),
     motivoBloqueio,
+    exigeTambem,
     aoAlternar: (p) => {
       if (somenteLeitura) return;
       if (!podeAlterar(p.codigo, concedidas, visiveis)) {

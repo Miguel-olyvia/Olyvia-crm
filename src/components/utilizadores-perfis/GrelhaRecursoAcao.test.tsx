@@ -185,3 +185,29 @@ describe("GrelhaRecursoAcao (editor de papéis, v2)", () => {
     expect(within(t).queryByRole("checkbox")).not.toBeInTheDocument();
   });
 });
+
+describe("18/11: a dica diz «Precisa também de» (EXIGE_TAMBEM), bloqueada ou não", () => {
+  const CAT_PO: Permissao[] = [
+    p("purchase_orders.view", "Ver encomendas de compra"),
+    p("purchase_orders.revert_receipt", "Reverter receção de encomendas de compra"),
+    p("inventory.view", "Ver inventário"), p("inventory.edit", "Editar inventário"),
+  ];
+  const TEXTO = "Precisa também de: «Editar inventário»";
+
+  it("sem inventory.edit: bloqueada, e a descrição acessível diz o que exige", () => {
+    render(<Editor visiveis={CAT_PO} inicial={["purchase_orders.view"]} />);
+    abrir("Inventário");
+    const descricoes = screen.getAllByText(TEXTO);
+    expect(descricoes.length).toBeGreaterThan(0);
+    // A descrição está ligada ao controlo da permissão (aria-describedby).
+    const controlo = document.querySelector(`[aria-describedby="${descricoes[0].closest("[id]")?.id}"]`);
+    expect(controlo).not.toBeNull();
+    expect(controlo).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("com inventory.edit (já se pode marcar), o texto continua na dica", () => {
+    render(<Editor visiveis={CAT_PO} inicial={["purchase_orders.view", "inventory.view", "inventory.edit"]} />);
+    abrir("Inventário");
+    expect(screen.getAllByText(TEXTO).length).toBeGreaterThan(0);
+  });
+});

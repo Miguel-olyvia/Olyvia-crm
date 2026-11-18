@@ -234,6 +234,42 @@ describe("11/11: receber mercadoria por leitura exige as três juntas (F13)", ()
   });
 });
 
+describe("18/11: saída de EC e reverter receção exigem inventory.edit (o servidor recusa sem ela)", () => {
+  const SAIDA_EC = "client_orders.confirm_stock_exit";
+  const REVERTER = "purchase_orders.revert_receipt";
+  const EDITAR_STOCK = "inventory.edit";
+
+  it("exigem inventory.edit; a dependência normal (o Ver do módulo) fica igual", () => {
+    expect(exigidasDe(SAIDA_EC)).toEqual([EDITAR_STOCK]);
+    expect(dependenciasDe(SAIDA_EC)).toEqual(["client_orders.view"]);
+    expect(exigidasDe(REVERTER)).toEqual([EDITAR_STOCK]);
+    expect(dependenciasDe(REVERTER)).toEqual(["purchase_orders.view"]);
+  });
+
+  it("não se marcam sem inventory.edit, e diz o que falta", () => {
+    const cat = catalogo();
+    expect(podeAlterar(SAIDA_EC, ["client_orders.view"], cat)).toBe(false);
+    expect(emFaltaDetalhe(SAIDA_EC, ["client_orders.view"], cat)).toEqual({ qualquerDe: [], todas: [EDITAR_STOCK] });
+    expect(emFaltaDetalhe(SAIDA_EC, [], cat)).toEqual({ qualquerDe: ["client_orders.view"], todas: [EDITAR_STOCK] });
+    expect(podeAlterar(SAIDA_EC, ["client_orders.view", "inventory.view", EDITAR_STOCK], cat)).toBe(true);
+    expect(podeAlterar(REVERTER, ["purchase_orders.view"], cat)).toBe(false);
+    expect(podeAlterar(REVERTER, ["purchase_orders.view", "inventory.view", EDITAR_STOCK], cat)).toBe(true);
+  });
+
+  it("tirar inventory.edit arrasta-as; o contrário não", () => {
+    const cat = catalogo();
+    const tem = ["client_orders.view", "purchase_orders.view", "inventory.view", EDITAR_STOCK, SAIDA_EC, REVERTER];
+    const sem = alternarPermissao(tem, EDITAR_STOCK, cat);
+    expect(sem).not.toContain(SAIDA_EC);
+    expect(sem).not.toContain(REVERTER);
+    expect(alternarPermissao(tem, SAIDA_EC, cat)).toContain(EDITAR_STOCK);
+  });
+
+  it("as que têm uso sozinhas continuam sem exigências (purchase_orders.receive/create, inventory.count)", () => {
+    ["purchase_orders.receive", "purchase_orders.create", "inventory.count"].forEach((c) => expect(exigidasDe(c), c).toEqual([]));
+  });
+});
+
 // ---------------------------------------------------------------------------------------------------------------------------------
 // 3: em uso ⇔ verificado
 // ---------------------------------------------------------------------------------------------------------------------------------

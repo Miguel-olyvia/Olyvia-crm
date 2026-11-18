@@ -84,10 +84,21 @@ export const EXPLICITAS: Readonly<Record<string, readonly string[]>> = {
  * - hr.pessoas.conta.criar: criar a conta a partir da ficha de RH cria um utilizador, por isso exige também Criar utilizadores.
  * - receiving.receive: dar entrada na Receção passa por receiving.receive, purchase_orders.receive (a PO) e inventory.edit (o stock);
  *   sem as três juntas a entrada recusa. purchase_orders.receive NÃO exige as outras (tem uso sozinha: guias de remessa).
+ * 18/11 (lidas na última definição de cada RPC, 20270108220000/20270108240000):
+ * - client_orders.confirm_stock_exit: confirmar, repartir e reverter a saída de stock de uma EC (rpc_confirm_client_order_stock_exit,
+ *   _split, rpc_revert_client_order_stock_exit) e ligar uma Saída manual a uma EC (rpc_decrement_stock com p_sale_source_type
+ *   'contract') exigem também inventory.edit e client_orders.view. client_orders.view já é a dependência normal (o «Ver» do módulo),
+ *   por isso aqui só entra inventory.edit. Sem ela a permissão não serve para nada.
+ * - purchase_orders.revert_receipt: rpc_revert_purchase_order_receipt exige também inventory.edit (a reversão tira o stock).
+ * Ficam de fora, por terem uso sozinhas: purchase_orders.create (rpc_request_missing_from_supplier pede também client_orders.view,
+ * mas criar POs à mão não), purchase_orders.receive (guias, ver acima; passar para stock e anular o resto pedem inventory.edit),
+ * inventory.count (contar não pede inventory.edit; só finalizar a contagem).
  */
 export const EXIGE_TAMBEM: Readonly<Record<string, readonly string[]>> = {
   "hr.pessoas.conta.criar": ["users.create"],
   "receiving.receive": ["purchase_orders.receive", "inventory.edit"],
+  "client_orders.confirm_stock_exit": ["inventory.edit"],
+  "purchase_orders.revert_receipt": ["inventory.edit"],
 };
 
 /** O que `codigo` exige também (todas); vazio = nada. */

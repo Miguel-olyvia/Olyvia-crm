@@ -76,6 +76,7 @@ import {
   suppliersLink,
   parsePurchaseOrdersParams,
   receivingLink,
+  usePermissionGate,
   type PoStatusFilter,
 } from "@/components/inventory/ui";
 import { PoKpis, PO_VALUE_PERMISSION } from "@/components/purchase-orders/PoKpis";
@@ -527,6 +528,11 @@ const PurchaseOrders = () => {
   const { toast } = useToast();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission } = usePermissions();
+  // 18/11: "Passar para stock" e "Reverter receção" no diálogo da PO recebida — sem as duas
+  // permissões ficam desativados com o motivo (só as que faltam), em vez de desaparecerem.
+  const permissionGate = usePermissionGate();
+  const releaseToStockGate = permissionGate(["purchase_orders.receive", "inventory.edit"], true);
+  const revertReceiptGate = permissionGate(["purchase_orders.revert_receipt", "inventory.edit"], true);
   const [searchParams, setSearchParams] = useSearchParams();
   // Filtros de estado/fornecedor da lista lidos do URL (parsers de inventoryLinks):
   // ?status= aceita também late/portal; valores desconhecidos caem em "all".
@@ -3555,20 +3561,32 @@ const PurchaseOrders = () => {
                       {/* Recebida: só de leitura — passar para stock e reverter por
                           linha (mesmas permissões que antes no aviso do diálogo). */}
                       {isOrderReceivedLock && releasableLines.length > 0 && (
-                        <PermissionGate permissions={["purchase_orders.receive", "inventory.edit"]} requireAll>
-                          <Button type="button" variant="outline" onClick={() => void handleReleaseFromOrderDialog()}>
-                            <PackageCheck className="w-4 h-4 mr-2" />
-                            Passar para stock
-                          </Button>
-                        </PermissionGate>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          aria-disabled={!releaseToStockGate.allowed || undefined}
+                          title={releaseToStockGate.reason}
+                          className={releaseToStockGate.allowed ? undefined : "cursor-not-allowed opacity-50"}
+                          onClick={() => { if (releaseToStockGate.allowed) void handleReleaseFromOrderDialog(); }}
+                        >
+                          <PackageCheck className="w-4 h-4 mr-2" />
+                          Passar para stock
+                          {releaseToStockGate.reason ? <span className="sr-only">{`: ${releaseToStockGate.reason}`}</span> : null}
+                        </Button>
                       )}
                       {isOrderReceivedLock && editingOrderMeta?.hasReceivedLines && (
-                        <PermissionGate permissions={["purchase_orders.revert_receipt", "inventory.edit"]} requireAll>
-                          <Button type="button" variant="outline" onClick={handleRevertFromOrderDialog}>
-                            <Undo2 className="w-4 h-4 mr-2" />
-                            {t('purchaseOrders.revert.action')}
-                          </Button>
-                        </PermissionGate>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          aria-disabled={!revertReceiptGate.allowed || undefined}
+                          title={revertReceiptGate.reason}
+                          className={revertReceiptGate.allowed ? undefined : "cursor-not-allowed opacity-50"}
+                          onClick={() => { if (revertReceiptGate.allowed) handleRevertFromOrderDialog(); }}
+                        >
+                          <Undo2 className="w-4 h-4 mr-2" />
+                          {t('purchaseOrders.revert.action')}
+                          {revertReceiptGate.reason ? <span className="sr-only">{`: ${revertReceiptGate.reason}`}</span> : null}
+                        </Button>
                       )}
                       {isOrderReadOnly ? (
                         // Fecho completo (repõe o formulário) — o Cancelar abaixo só

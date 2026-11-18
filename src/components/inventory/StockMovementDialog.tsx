@@ -24,6 +24,7 @@ import {
 } from "./movement/movementKinds";
 import { MovementTypeCards } from "./movement/MovementTypeCards";
 import { ProductPicker, type ProductOption } from "./movement/ProductPicker";
+import { usePermissionGate } from "./ui/RowActions";
 
 export type { MovementType } from "./movement/movementKinds";
 
@@ -154,6 +155,12 @@ export default function StockMovementDialog({
 }: StockMovementDialogProps) {
   const { toast } = useToast();
   const { t } = useTranslation();
+  // 18/11/2026: ligar a Saída a uma Encomenda Cliente (p_sale_source_type='contract' em
+  // rpc_decrement_stock) é servir a EC — o servidor passa a exigir o mesmo que confirmar a saída na
+  // EC. Sem as três, o seletor fica desativado com o aviso das que faltam; a Saída sem EC não muda.
+  const permissionGate = usePermissionGate();
+  const ecLinkGate = permissionGate(["inventory.edit", "client_orders.confirm_stock_exit", "client_orders.view"], true);
+  const canLinkClientOrder = ecLinkGate.allowed;
 
   // Dois passos, como no protótipo: 1 = escolher o tipo, 2 = formulário.
   const [step, setStep] = useState<1 | 2>(defaultMovementType ? 2 : 1);
@@ -855,7 +862,7 @@ export default function StockMovementDialog({
                   {/* `modal` no Popover: o conteúdo vai para um portal fora do
                       DialogContent e, sem isto, o focus trap do diálogo rouba o
                       foco ao CommandInput e o dropdown fecha-se sozinho. */}
-                  <Popover modal open={clientOrderPickerOpen} onOpenChange={setClientOrderPickerOpen}>
+                  <Popover modal open={clientOrderPickerOpen} onOpenChange={(next) => setClientOrderPickerOpen(next && canLinkClientOrder)}>
                     <PopoverTrigger asChild>
                       <Button
                         id="smd-client-order"
@@ -863,7 +870,9 @@ export default function StockMovementDialog({
                         variant="outline"
                         role="combobox"
                         aria-expanded={clientOrderPickerOpen}
-                        className="w-full justify-between font-normal"
+                        aria-disabled={!canLinkClientOrder || undefined}
+                        aria-describedby="smd-client-order-help"
+                        className={cn("w-full justify-between font-normal", !canLinkClientOrder && "cursor-not-allowed opacity-50")}
                         disabled={clientOrderLoading}
                       >
                         <span className="truncate">
@@ -903,10 +912,12 @@ export default function StockMovementDialog({
                       </Command>
                     </PopoverContent>
                   </Popover>
-                  <p className="text-xs text-muted-foreground">
-                    {clientOrderLoading
-                      ? "A carregar produtos da encomenda…"
-                      : "Preenche as linhas com os produtos da encomenda (continua editável) e fica rastreável em \"Encomendas Clientes\"."}
+                  <p id="smd-client-order-help" className="text-xs text-muted-foreground">
+                    {!canLinkClientOrder
+                      ? ecLinkGate.reason
+                      : clientOrderLoading
+                        ? "A carregar produtos da encomenda…"
+                        : "Preenche as linhas com os produtos da encomenda (continua editável) e fica rastreável em \"Encomendas Clientes\"."}
                   </p>
                 </div>
               )}
