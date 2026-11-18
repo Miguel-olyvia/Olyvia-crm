@@ -27,7 +27,7 @@ describe("criar produto: erro do ramo", () => {
     expect(screen.getByRole("alert")).toHaveTextContent("Já existe «Rega» aqui.");
     expect(lerCatalogo().produtos.some((p) => p.n === "Mangueira")).toBe(false);
     // mexer na classificação tira o aviso (já não vale)
-    fireEvent.click(screen.getByRole("combobox", { name: "Categoria" }));
+    fireEvent.click(screen.getByRole("combobox", { name: /^Categoria( |$)/ }));
     fireEvent.click(screen.getAllByRole("option")[1]);
     expect(screen.queryByRole("alert")).toBeNull();
   });

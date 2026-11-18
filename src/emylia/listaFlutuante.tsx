@@ -15,12 +15,12 @@ const MARGEM = 8; // o que fica livre até à borda da área visível
 
 export interface PosicaoLista { style: CSSProperties; paraCima: boolean }
 /** A área visível: `top` e `height` do visualViewport (ou da janela) e a altura do viewport de layout (a referência do `bottom` de um elemento fixo). */
-export interface Vista { top: number; height: number; layoutHeight: number }
+export interface Vista { top: number; height: number; layoutHeight: number; /** A largura do viewport de layout; sem ela, a da janela. */ layoutWidth?: number }
 
 /** A área visível agora. Com window.visualViewport (teclado virtual) é essa; sem ele, a janela. */
 export function vistaAtual(): Vista {
   const vv = typeof window !== "undefined" ? window.visualViewport : null;
-  return { top: vv?.offsetTop ?? 0, height: vv?.height ?? window.innerHeight, layoutHeight: document.documentElement.clientHeight || window.innerHeight };
+  return { top: vv?.offsetTop ?? 0, height: vv?.height ?? window.innerHeight, layoutHeight: document.documentElement.clientHeight || window.innerHeight, layoutWidth: document.documentElement.clientWidth || window.innerWidth };
 }
 
 /** Onde pôr a lista: por baixo do campo, ou por cima se por baixo não couber e por cima houver mais espaço. Função pura (testável). */
@@ -28,8 +28,12 @@ export function posicaoDaLista(r: { left: number; top: number; bottom: number; w
   const baixo = v.top + v.height - r.bottom - FOLGA - MARGEM;
   const cima = r.top - v.top - FOLGA - MARGEM;
   const paraCima = baixo < Math.min(ALTURA_MAX, 200) && cima > baixo;
-  const espaco = Math.max(96, paraCima ? cima : baixo);
-  const base: CSSProperties = { position: "fixed", left: r.left, width: r.width, maxHeight: Math.min(ALTURA_MAX, espaco), zIndex: Z_LISTA_FLUTUANTE };
+  // nunca mais alta do que o espaço real da área visível (a 400% de zoom ou com o teclado virtual); nunca fora do ecrã na horizontal
+  const espaco = Math.max(0, paraCima ? cima : baixo);
+  const vw = v.layoutWidth ?? (typeof window !== "undefined" ? window.innerWidth : r.left + r.width + MARGEM);
+  const largura = Math.max(0, Math.min(r.width, vw - 2 * MARGEM));
+  const esquerda = Math.max(MARGEM, Math.min(r.left, vw - MARGEM - largura));
+  const base: CSSProperties = { position: "fixed", left: esquerda, width: largura, maxHeight: Math.min(ALTURA_MAX, espaco), zIndex: Z_LISTA_FLUTUANTE };
   return { paraCima, style: paraCima ? { ...base, bottom: v.layoutHeight - r.top + FOLGA } : { ...base, top: r.bottom + FOLGA } };
 }
 
@@ -82,7 +86,7 @@ export function ListaFlutuante({ ancora, children, className, aoSairDaVista }: {
   if (!pos || typeof document === "undefined") return null;
   return createPortal(
     // pointer-events-auto: dentro de um diálogo modal o <body> pode ter pointer-events: none
-    <div data-lista-flutuante="" data-para-cima={pos.paraCima ? "" : undefined} style={pos.style} onMouseDown={(e: MouseEvent) => e.preventDefault()}
+    <div data-lista-flutuante="" data-para-cima={pos.paraCima ? "" : undefined} style={pos.style} onMouseDown={(e: MouseEvent) => { if (!(e.target as HTMLElement).closest?.("input")) e.preventDefault(); }}
       className={cn("pointer-events-auto overflow-auto rounded-xl border border-border bg-popover p-1 shadow-lg motion-safe:animate-in motion-safe:fade-in-0", className)}>
       {children}
     </div>,

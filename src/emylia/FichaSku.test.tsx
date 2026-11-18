@@ -203,7 +203,7 @@ describe("Ficha: casos de borda da confirmação", () => {
     base.responder = (f) => (f === "cat_guardar_produto_tabelas" ? erro("CT002", "Não foi possível.") : f === "cat_produto_stock" ? ok({ gere_stock: true, pode_editar: true, armazens: [] }) : ok({ ok: true }));
     ficha();
     const sec = screen.getByRole("region", { name: "Classificação" });
-    fireEvent.click(within(sec).getByRole("combobox", { name: "Categoria" }));
+    fireEvent.click(within(sec).getByRole("combobox", { name: /^Categoria( |$)/ }));
     fireEvent.click(screen.getByRole("option", { name: "Cozinha" })); // a lista flutua no body
     fireEvent.click(within(sec).getByRole("button", { name: "Guardar classificação" }));
     await waitFor(() => expect(within(sec).getByRole("alert")).toBeInTheDocument());
@@ -216,7 +216,7 @@ describe("Ficha: depois de mudar a classificação, oferece recalcular (não rec
     ficha();
     expect(screen.queryByText(/não muda sozinha/)).toBeNull();
     const sec = screen.getByRole("region", { name: "Classificação" });
-    fireEvent.click(within(sec).getByRole("combobox", { name: "Categoria" }));
+    fireEvent.click(within(sec).getByRole("combobox", { name: /^Categoria( |$)/ }));
     fireEvent.click(screen.getByRole("option", { name: "Cozinha" }));
     fireEvent.click(within(sec).getByRole("button", { name: "Guardar classificação" }));
     await waitFor(() => expect(screen.getByText(/A referência não muda sozinha/)).toBeInTheDocument());

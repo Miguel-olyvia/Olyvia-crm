@@ -160,7 +160,7 @@ function NovoModelo({ elegiveis, modelos, g, onCriar, onFechar }: {
   const [sub, setSub] = useState<ItemCombo | null>(null);
   const [numTxt, setNumTxt] = useState("");
   const itens = useMemo<ItemCombo[]>(() => elegiveis.map((s) => ({ id: s.id, nome: `${s.cat} › ${s.nome}` })), [elegiveis]);
-  const focar = useCallback((el: HTMLInputElement | null) => { el?.focus(); }, []);
+  const focar = useCallback((el: HTMLButtonElement | null) => { el?.focus(); }, []);
   const escolhida = elegiveis.find((s) => s.id === sub?.id) ?? null;
   // o número que a base daria (o seguinte ao maior que se vê); confirma-se ao guardar
   const proximo = escolhida ? Math.max(0, ...modelos.filter((m) => m.subcategoria.id === escolhida.id).map((m) => m.numero)) + 1 : null;

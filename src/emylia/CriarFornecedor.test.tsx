@@ -46,7 +46,13 @@ function abrir(tab: "Produtos" | "Consumíveis", r: FichaProdutoReal | null = re
   fireEvent.click(screen.getByRole("tab", { name: tab }));
   fireEvent.click(screen.getByRole("button", { name: "Criar" }));
 }
-const campo = () => screen.getByRole("combobox", { name: "Fornecedor" }) as HTMLInputElement;
+const campo = () => screen.getByRole("combobox", { name: /^Fornecedor( |$)/ }) as HTMLButtonElement;
+/** O que o botão mostra sem escolha (o placeholder por omissão). */
+const VAZIO = "Escolher…";
+/** Mais de 7 fornecedores: o painel tem campo de pesquisa (as listas curtas não têm). */
+const MUITOS = [...Array.from({ length: 6 }, (_, i) => ({ id: `f0000000-0000-4000-a000-0000000001${i}0`, nome: `Fornecedor extra ${i + 1}`, nif: null, email: null, ativo: true }))];
+const comMuitos = () => { const l = LISTA(true); base.respostas.cat_ler_fornecedores = { data: { ...l.data, fornecedores: [...l.data.fornecedores, ...MUITOS] }, error: null }; };
+const pesquisa = () => screen.getByRole("combobox", { name: /^Pesquisar Fornecedor( |$)/ });
 const pronto = async () => { await waitFor(() => expect(campo()).not.toBeDisabled()); };
 const opcoes = () => screen.getAllByRole("option").map((o) => o.textContent?.replace(/\s*\(escolhida\)$/, ""));
 const escolher = async (nome: string) => { await pronto(); fireEvent.click(campo()); fireEvent.click(screen.getByRole("option", { name: nome })); };
@@ -60,7 +66,7 @@ const preencherConsumivel = () => {
 };
 /** As funções cat_* chamadas: só a leitura dos fornecedores, nenhuma escrita. */
 // 16/11: as leituras da lista de Produtos por páginas (cat_ler_produtos_pagina/contagens) não são escritas
-const LISTA_POR_PAGINAS = ["cat_ler_produtos_pagina", "cat_ler_produtos_contagens"];
+const LISTA_POR_PAGINAS = ["cat_ler_produtos_pagina", "cat_ler_produtos_contagens", "cat_ler_marcas_do_filtro"];
 const escritas = () => base.chamadas.map((c) => c.f).filter((f) => f.startsWith("cat_") && !LISTA_POR_PAGINAS.includes(f));
 const novoFornecedor = async () => { await pronto(); fireEvent.click(campo()); fireEvent.click(screen.getByRole("option", { name: "Novo fornecedor…" })); return screen.getByRole("group", { name: "Novo fornecedor" }); };
 
@@ -72,16 +78,25 @@ describe("produto: campo Fornecedor real", () => {
     expect(opcoes()).toEqual(["Sem fornecedor", "Ânodo Lda", "Sanitop", "Novo fornecedor…"]);
     expect(base.chamadas.filter((c) => c.f === "cat_ler_fornecedores")).toEqual([{ f: "cat_ler_fornecedores", a: { p_org: ORG } }]);
   });
-  it("pesquisa sem acentos nem maiúsculas", async () => {
+  it("pesquisa (no painel, com mais de 7 fornecedores) sem acentos nem maiúsculas; o botão não muda", async () => {
+    comMuitos();
     abrir("Produtos");
     await pronto();
-    fireEvent.change(campo(), { target: { value: "anodo" } });
+    fireEvent.click(campo());
+    fireEvent.change(pesquisa(), { target: { value: "anodo" } });
     expect(opcoes()).toEqual(["Ânodo Lda", "Novo fornecedor…"]);
+    expect(campo().textContent).toBe(VAZIO);
+  });
+  it("com poucos fornecedores o painel não tem campo de pesquisa", async () => {
+    abrir("Produtos");
+    await pronto();
+    fireEvent.click(campo());
+    expect(screen.queryByRole("combobox", { name: /^Pesquisar Fornecedor( |$)/ })).toBeNull();
   });
   it("escolher um fornecedor: o produto novo leva o id e o nome; nada se liga à base ainda", async () => {
     abrir("Produtos");
     await escolher("Sanitop");
-    expect(campo().value).toBe("Sanitop");
+    expect(campo().textContent).toBe("Sanitop");
     preencherProduto();
     fireEvent.click(screen.getByRole("button", { name: "Criar o produto" }));
     expect(lerCatalogo().produtos.find((p) => p.n === "Base de duche")).toMatchObject({ fornecedor: "Sanitop", fornecedorId: F2 });
@@ -92,7 +107,7 @@ describe("produto: campo Fornecedor real", () => {
     await escolher("Sanitop");
     fireEvent.click(campo());
     fireEvent.click(screen.getByRole("option", { name: "Sem fornecedor" }));
-    expect(campo().value).toBe("");
+    expect(campo().textContent).toBe(VAZIO);
     preencherProduto();
     fireEvent.click(screen.getByRole("button", { name: "Criar o produto" }));
     const p = lerCatalogo().produtos.find((x) => x.n === "Base de duche")!;
@@ -113,9 +128,11 @@ describe("produto: fornecedor novo", () => {
     expect(screen.getByRole("group", { name: "Novo fornecedor" })).toBeInTheDocument();
   });
   it("o nome escrito na pesquisa vem para o formulário", async () => {
+    comMuitos();
     abrir("Produtos");
     await pronto();
-    fireEvent.change(campo(), { target: { value: "Cerâmicas do Norte" } });
+    fireEvent.click(campo());
+    fireEvent.change(pesquisa(), { target: { value: "Cerâmicas do Norte" } });
     fireEvent.click(screen.getByRole("option", { name: "Novo fornecedor…" }));
     expect(screen.getByLabelText("Nome do novo fornecedor")).toHaveValue("Cerâmicas do Norte");
   });
@@ -133,7 +150,7 @@ describe("produto: fornecedor novo", () => {
     fireEvent.change(within(g).getByLabelText("Email (opcional)"), { target: { value: "sem-arroba" } });
     fireEvent.click(within(g).getByRole("button", { name: "Usar este fornecedor" }));
     expect(within(g).getByRole("alert")).toHaveTextContent(/email/i);
-    expect(campo().value).toBe("");
+    expect(campo().textContent).toBe(VAZIO);
   });
   it("ficar pendente: mostra «É novo», devolve o foco ao campo, e só ao criar o produto o modelo leva o pendente; a base não é tocada", async () => {
     abrir("Produtos");
@@ -143,7 +160,7 @@ describe("produto: fornecedor novo", () => {
     fireEvent.change(within(g).getByLabelText("Email (opcional)"), { target: { value: "a@novo.pt" } });
     fireEvent.click(within(g).getByRole("button", { name: "Usar este fornecedor" }));
     expect(screen.queryByRole("group", { name: "Novo fornecedor" })).toBeNull();
-    expect(campo().value).toBe("Novo Lda");
+    expect(campo().textContent).toBe("Novo Lda");
     expect(screen.getByText("É novo: cria-se quando o produto for gravado.")).toBeInTheDocument();
     await waitFor(() => expect(campo()).toHaveFocus());
     preencherProduto();
@@ -157,14 +174,14 @@ describe("produto: fornecedor novo", () => {
     fireEvent.click(within(g).getByRole("button", { name: "Cancelar" }));
     expect(screen.queryByRole("group", { name: "Novo fornecedor" })).toBeNull();
     await waitFor(() => expect(campo()).toHaveFocus());
-    expect(campo().value).toBe("");
+    expect(campo().textContent).toBe(VAZIO);
   });
   it("coincidência de nome (sem acentos nem maiúsculas): avisa e escolhe o existente, sem criar", async () => {
     abrir("Produtos");
     const g = await novoFornecedor();
     fireEvent.change(within(g).getByLabelText("Nome do novo fornecedor"), { target: { value: "ANODO lda" } });
     fireEvent.click(within(g).getByRole("button", { name: "Usar este fornecedor" }));
-    expect(campo().value).toBe("Ânodo Lda");
+    expect(campo().textContent).toBe("Ânodo Lda");
     expect(screen.getByText("Já existe o fornecedor «Ânodo Lda»: ficou escolhido esse.")).toBeInTheDocument();
     preencherProduto();
     fireEvent.click(screen.getByRole("button", { name: "Criar o produto" }));
@@ -176,7 +193,7 @@ describe("produto: fornecedor novo", () => {
     fireEvent.change(within(g).getByLabelText("Nome do novo fornecedor"), { target: { value: "Outro nome" } });
     fireEvent.change(within(g).getByLabelText("NIF (opcional)"), { target: { value: "500 100 200" } });
     fireEvent.click(within(g).getByRole("button", { name: "Usar este fornecedor" }));
-    expect(campo().value).toBe("Sanitop");
+    expect(campo().textContent).toBe("Sanitop");
   });
   it("coincide com um desativado: diz porquê e não escolhe", async () => {
     abrir("Produtos");
@@ -184,7 +201,7 @@ describe("produto: fornecedor novo", () => {
     fireEvent.change(within(g).getByLabelText("Nome do novo fornecedor"), { target: { value: "antigo desativado" } });
     fireEvent.click(within(g).getByRole("button", { name: "Usar este fornecedor" }));
     expect(within(g).getByRole("alert")).toHaveTextContent(/desativado/);
-    expect(campo().value).toBe("");
+    expect(campo().textContent).toBe(VAZIO);
   });
 });
 
@@ -197,7 +214,7 @@ describe("produto: sem permissão para criar fornecedores", () => {
     expect(opcoes()).toEqual(["Sem fornecedor", "Ânodo Lda", "Sanitop"]);
     expect(screen.getByText(/Sem permissão para criar fornecedores \(suppliers\.create\)/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("option", { name: "Sanitop" }));
-    expect(campo().value).toBe("Sanitop");
+    expect(campo().textContent).toBe("Sanitop");
   });
 });
 

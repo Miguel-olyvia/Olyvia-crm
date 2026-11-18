@@ -127,7 +127,7 @@ export function GestaoSubcategorias({ real, anunciar }: { real: FichaProdutoReal
 function NovaSubcategoria({ elegiveis, g, aGravar, msg, onFechar }: { elegiveis: CategoriaGestao[]; g: Ctx; aGravar: boolean; msg: (onde: string) => string | null; onFechar: () => void }) {
   const [cat, setCat] = useState<ItemCombo | null>(null);
   const itens = useMemo<ItemCombo[]>(() => elegiveis.map((c) => ({ id: c.id, nome: c.nome })), [elegiveis]);
-  const focar = useCallback((el: HTMLInputElement | null) => { el?.focus(); }, []);
+  const focar = useCallback((el: HTMLButtonElement | null) => { el?.focus(); }, []);
   const escolhida = elegiveis.find((c) => c.id === cat?.id) ?? null;
   const exige = escolhida ? null : cat ? "Essa categoria já não está disponível: escolha outra." : "Escolha a categoria.";
   return (

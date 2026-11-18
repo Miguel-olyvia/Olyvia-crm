@@ -19,7 +19,7 @@ function Caixa({ inicial = MODELO_VAZIO, aoMudar, ...p }: { inicial?: ModeloEsco
   const [v, setV] = useState(inicial);
   return <CampoModelo modelos={MODELOS} sub="s1" subNova={false} podeCriar valor={v} onChange={(x) => { setV(x); aoMudar?.(x); }} {...p} />;
 }
-const campo = () => screen.getByRole("combobox", { name: "Modelo" }) as HTMLInputElement;
+const campo = () => screen.getByRole("combobox", { name: /^Modelo( |$)/ }) as HTMLButtonElement;
 const opcoes = () => screen.getAllByRole("option").map((o) => o.textContent?.replace(/\s*\(escolhida\)$/, ""));
 
 describe("CampoModelo", () => {
@@ -49,18 +49,27 @@ describe("CampoModelo", () => {
     fireEvent.click(campo());
     fireEvent.click(screen.getByRole("option", { name: "0002 · STONE PLUS" }));
     expect(aoMudar).toHaveBeenLastCalledWith({ id: "m2", novo: null });
-    expect(campo().value).toBe("0002 · STONE PLUS");
+    expect(campo()).toHaveTextContent("0002 · STONE PLUS");
     fireEvent.click(campo());
     fireEvent.click(screen.getByRole("option", { name: "Sem modelo" }));
     expect(aoMudar).toHaveBeenLastCalledWith(MODELO_VAZIO);
-    expect(campo().value).toBe("");
+    expect(campo()).toHaveTextContent(/^Escolher…$/);
   });
-  it("a pesquisa acha por nome sem acentos nem maiúsculas, e por número", () => {
-    render(<Caixa />);
-    fireEvent.change(campo(), { target: { value: "stone" } });
+  it("a pesquisa (no painel, com mais de 7 modelos) acha por nome sem acentos nem maiúsculas, e por número; o botão não muda", () => {
+    const muitos: ModeloK[] = [...MODELOS, ...Array.from({ length: 6 }, (_, i): ModeloK => ({ id: `x${i}`, n: `EXTRA ${i}`, numero: 10 + i, sub: "s1", ativo: true }))];
+    render(<Caixa modelos={muitos} />);
+    fireEvent.click(campo());
+    const pesquisa = () => screen.getByRole("combobox", { name: /^Pesquisar Modelo( |$)/ });
+    fireEvent.change(pesquisa(), { target: { value: "stone" } });
     expect(opcoes()).toEqual(["0002 · STONE PLUS", "Novo modelo…"]);
-    fireEvent.change(campo(), { target: { value: "0001" } });
+    fireEvent.change(pesquisa(), { target: { value: "0001" } });
     expect(opcoes()).toEqual(["0001 · SORTY", "Novo modelo…"]);
+    expect(campo()).toHaveTextContent(/^Escolher…$/);
+  });
+  it("com poucos modelos (7 opções ou menos) o painel não tem campo de pesquisa", () => {
+    render(<Caixa />);
+    fireEvent.click(campo());
+    expect(screen.queryByRole("combobox", { name: /^Pesquisar Modelo( |$)/ })).toBeNull();
   });
   it("«Novo modelo…» abre um nome; fica pendente («é novo: cria-se quando o produto for gravado») e não chama a base", () => {
     const aoMudar = vi.fn();
@@ -70,7 +79,7 @@ describe("CampoModelo", () => {
     fireEvent.change(screen.getByLabelText("Nome do novo modelo"), { target: { value: "  Rio   Alto " } });
     fireEvent.click(screen.getByRole("button", { name: "Criar" }));
     expect(aoMudar).toHaveBeenLastCalledWith({ id: "", novo: "Rio Alto" });
-    expect(campo().value).toBe("Rio Alto");
+    expect(campo()).toHaveTextContent("Rio Alto");
     expect(screen.getByText(/É novo: cria-se quando o produto for gravado/)).toBeInTheDocument();
     expect(screen.queryByRole("group", { name: "Novo modelo" })).toBeNull();
   });
@@ -106,7 +115,7 @@ describe("CampoModelo", () => {
   });
   it("o modelo atual desativado (já era o do produto) continua à vista, «(desativada)», e não se escolhe de novo", () => {
     render(<Caixa inicial={{ id: "m3", novo: null }} original="m3" />);
-    expect(campo().value).toBe("0007 · ZEUS (desativada)");
+    expect(campo()).toHaveTextContent("0007 · ZEUS (desativada)");
     fireEvent.click(campo());
     expect(opcoes()).not.toContain("0007 · ZEUS");
   });

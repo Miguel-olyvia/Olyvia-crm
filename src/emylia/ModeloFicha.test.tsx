@@ -53,7 +53,7 @@ const ficha = (o: { p?: Produto; r?: FichaProdutoReal; modelos?: ModeloK[] | und
     modelos={"modelos" in o ? o.modelos : MODELOS} />);
   return { anunciar, r, sec: screen.getByRole("region", { name: "Classificação" }) };
 };
-const combo = (ctx: HTMLElement, nome: string) => within(ctx).getByRole("combobox", { name: nome }) as HTMLInputElement;
+const combo = (ctx: HTMLElement, nome: string) => within(ctx).getByRole("combobox", { name: new RegExp(`^${nome}( |$)`) }) as HTMLButtonElement;
 const escolher = (ctx: HTMLElement, campo: string, opcao: string) => { fireEvent.click(combo(ctx, campo)); fireEvent.click(screen.getByRole("option", { name: opcao })); };
 const guardar = (sec: HTMLElement) => fireEvent.click(within(sec).getByRole("button", { name: "Guardar classificação" }));
 const ordemDasChamadas = () => base.chamadas.map((c) => c.f).filter((f) => ["cat_guardar_produto_tabelas", "cat_ler_categorias_gestao", "cat_guardar_modelo", "cat_guardar_produto_modelo"].includes(f));
@@ -61,9 +61,9 @@ const ordemDasChamadas = () => base.chamadas.map((c) => c.f).filter((f) => ["cat
 describe("ficha: o campo Modelo", () => {
   it("vem a seguir à Subcategoria, mostra o modelo atual com o número e só oferece os da subcategoria do produto", () => {
     const { sec } = ficha();
-    const ordem = within(sec).getAllByRole("combobox").map((c) => c.getAttribute("aria-label"));
+    const ordem = within(sec).getAllByRole("combobox").map((c) => document.querySelector(`label[for="${c.id}"]`)?.textContent ?? c.getAttribute("aria-label")); // o nome vem do rótulo visível quando o há
     expect(ordem).toEqual(["Marca", "Categoria", "Subcategoria", "Modelo"]);
-    expect(combo(sec, "Modelo").value).toBe("0001 · SORTY");
+    expect(combo(sec, "Modelo").textContent).toBe("0001 · SORTY");
     fireEvent.click(combo(sec, "Modelo"));
     expect(screen.getAllByRole("option").map((o) => o.textContent?.replace(/\s*\(escolhida\)$/, ""))).toEqual(["Sem modelo", "0001 · SORTY", "0002 · STONE PLUS", "Novo modelo…"]);
   });
@@ -113,7 +113,7 @@ describe("ficha: gravar o modelo", () => {
   it("mudar a subcategoria tira o modelo (é da subcategoria): guarda a classificação e depois desliga o modelo antigo", async () => {
     const { sec } = ficha();
     escolher(sec, "Subcategoria", "Louças");
-    expect(combo(sec, "Modelo").value).toBe("");
+    expect(combo(sec, "Modelo").textContent).toBe("Escolher…");
     guardar(sec);
     await waitFor(() => expect(chamadasDe("cat_guardar_produto_modelo")).toHaveLength(1));
     expect(ordemDasChamadas()).toEqual(["cat_guardar_produto_tabelas", "cat_guardar_produto_modelo"]);

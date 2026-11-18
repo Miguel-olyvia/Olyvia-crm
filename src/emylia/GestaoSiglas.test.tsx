@@ -197,7 +197,7 @@ describe("Separador «Referência (SKU)»", () => {
   // os blocos configuráveis são os que vêm depois dos três fixos (categoria, subcategoria, número)
   const nomes = (bloco: HTMLElement) => within(bloco).getAllByRole("listitem").slice(3).map((l) => (l.textContent ?? "").replace(/^\d+\.\s*/, "").split(/Entra|Subir|Descer/)[0].trim());
   const escolherCombo = (bloco: HTMLElement, rotulo: string, opcao: string) => {
-    fireEvent.click(within(bloco).getByRole("combobox", { name: rotulo }));
+    fireEvent.click(within(bloco).getByRole("combobox", { name: new RegExp(`^${rotulo}( |$)`) }));
     fireEvent.click(screen.getByRole("option", { name: opcao }));
   };
   const comModelos = () => {
@@ -226,16 +226,16 @@ describe("Separador «Referência (SKU)»", () => {
   it("escolher categoria, subcategoria e MODELO usa as siglas reais e o número do modelo: «Sigla: …», «Modelo escolhido: SORTY → 0001» e o exemplo", async () => {
     comModelos();
     const { bloco } = await abrir();
-    expect(within(bloco).getByRole("combobox", { name: "Subcategoria" })).toBeDisabled();
+    expect(within(bloco).getByRole("combobox", { name: /^Subcategoria( |$)/ })).toBeDisabled();
     expect(within(bloco).getByText(/Escolha primeiro a categoria/)).toBeInTheDocument();
-    expect(within(bloco).getByRole("combobox", { name: "Modelo" })).toBeDisabled();
+    expect(within(bloco).getByRole("combobox", { name: /^Modelo( |$)/ })).toBeDisabled();
     expect(within(bloco).getByText(/Escolha primeiro a subcategoria/)).toBeInTheDocument();
     escolherCombo(bloco, "Categoria", "Casa de banho");
     expect(within(bloco).getByText("Sigla: BC")).toBeInTheDocument();
     escolherCombo(bloco, "Subcategoria", "Torneiras");
     expect(within(bloco).getByText("Sigla: TO")).toBeInTheDocument();
     // só os modelos da subcategoria escolhida, com o número
-    fireEvent.click(within(bloco).getByRole("combobox", { name: "Modelo" }));
+    fireEvent.click(within(bloco).getByRole("combobox", { name: /^Modelo( |$)/ }));
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Nenhum", "0001 · SORTY", "0003 · STONE PLUS"]);
     fireEvent.click(screen.getByRole("option", { name: "0003 · STONE PLUS" }));
     expect(within(bloco).getByTestId("exemplo-sku")).toHaveTextContent("BC-TO-0003-AZ-60X30");
@@ -250,14 +250,14 @@ describe("Separador «Referência (SKU)»", () => {
     escolherCombo(bloco, "Subcategoria", "Torneiras");
     escolherCombo(bloco, "Modelo", "0001 · SORTY");
     escolherCombo(bloco, "Subcategoria", "Louças");
-    expect(within(bloco).getByRole("combobox", { name: "Modelo" })).toHaveValue("");
+    expect(within(bloco).getByRole("combobox", { name: /^Modelo( |$)/ }).textContent).toBe("Escolher…");
     cleanup();
     base.responder = (f) => (f === "cat_ler_categorias_gestao" ? { data: categorias(), error: null } : f === "cat_ler_atributos_gestao" ? { data: atributos(), error: null }
       : f === "cat_ler_modelos_gestao" ? erro("PGRST202", "Could not find the function") : { data: { ok: true }, error: null });
     const r = await abrir();
     escolherCombo(r.bloco, "Categoria", "Casa de banho");
     escolherCombo(r.bloco, "Subcategoria", "Torneiras");
-    await waitFor(() => expect(within(r.bloco).getByRole("combobox", { name: "Modelo" })).toBeDisabled());
+    await waitFor(() => expect(within(r.bloco).getByRole("combobox", { name: /^Modelo( |$)/ })).toBeDisabled());
     expect(within(r.bloco).getByText("Ainda não disponível nesta base")).toBeInTheDocument();
   });
   it("uma subcategoria sem sigla avisa «Falta a sigla» (a vermelho) e o atalho leva ao separador Subcategorias", async () => {
@@ -278,7 +278,7 @@ describe("Separador «Referência (SKU)»", () => {
     escolherCombo(bloco, "Categoria", "Casa de banho");
     escolherCombo(bloco, "Subcategoria", "Torneiras");
     escolherCombo(bloco, "Categoria", "Ferramentas");
-    expect(within(bloco).getByRole("combobox", { name: "Subcategoria" })).toHaveValue("");
+    expect(within(bloco).getByRole("combobox", { name: /^Subcategoria( |$)/ }).textContent).toBe("Escolher…");
     expect(within(bloco).getByText("Sigla: FER")).toBeInTheDocument();
   });
   it("Descer/Subir mudam a ordem no ecrã, anunciam a posição e o exemplo acompanha; Guardar manda TODOS os atributos pela ordem nova", async () => {
