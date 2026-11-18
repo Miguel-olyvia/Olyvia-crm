@@ -386,6 +386,7 @@ export default function PublicProposal() {
           commercial={portalData.commercial}
           company={portalData.company}
           mode="portal"
+          idiomasDoDocumento={portalData.idiomasDoDocumento}
           statusLabel={statusLabel}
           canActOnProposal={canActOnProposal}
           actionLoading={accepting || rejecting}

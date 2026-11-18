@@ -8,14 +8,15 @@ import { ordenarPorRegisto, parseEscolha, serializarEscolha } from "@/lib/idioma
 
 const PREFIXO = "olyvia:idioma-contrato";
 
-export function chavePreferencia(utilizadorId: string, minutaId: string): string {
-  return `${PREFIXO}:${utilizadorId}:${minutaId}`;
+/** `prefixo` separa quem usa isto: contratos (omissão) e propostas não partilham preferências. */
+export function chavePreferencia(utilizadorId: string, minutaId: string, prefixo: string = PREFIXO): string {
+  return `${prefixo}:${utilizadorId}:${minutaId}`;
 }
 
 /** A última escolha guardada, ou null (nada guardado, valor ilegível ou armazenamento indisponível). */
-export function lerPreferencia(utilizadorId: string, minutaId: string): string[] | null {
+export function lerPreferencia(utilizadorId: string, minutaId: string, prefixo: string = PREFIXO): string[] | null {
   try {
-    const bruto = window.localStorage.getItem(chavePreferencia(utilizadorId, minutaId));
+    const bruto = window.localStorage.getItem(chavePreferencia(utilizadorId, minutaId, prefixo));
     if (!bruto || !/^[a-z]{2}(\+[a-z]{2})*$/i.test(bruto)) return null;
     return parseEscolha(bruto);
   } catch {
@@ -23,9 +24,14 @@ export function lerPreferencia(utilizadorId: string, minutaId: string): string[]
   }
 }
 
-export function guardarPreferencia(utilizadorId: string, minutaId: string, escolha: readonly string[]): void {
+export function guardarPreferencia(
+  utilizadorId: string,
+  minutaId: string,
+  escolha: readonly string[],
+  prefixo: string = PREFIXO,
+): void {
   try {
-    window.localStorage.setItem(chavePreferencia(utilizadorId, minutaId), serializarEscolha(escolha));
+    window.localStorage.setItem(chavePreferencia(utilizadorId, minutaId, prefixo), serializarEscolha(escolha));
   } catch {
     /* sem armazenamento: perde-se a pré-seleção, nada mais */
   }
@@ -49,6 +55,7 @@ export function useEscolhaDeIdiomas(
   minutaId: string | null | undefined,
   disponiveis: readonly string[],
   base: string,
+  prefixo: string = PREFIXO,
 ): EscolhaDeIdiomas {
   const [utilizadorId, setUtilizadorId] = useState<string | null>(null);
   const [manual, setManual] = useState<{ minutaId: string | null; escolha: string[] } | null>(null);
@@ -79,19 +86,19 @@ export function useEscolhaDeIdiomas(
     const lista = chaveDisponiveis ? chaveDisponiveis.split("+") : [];
     const feita = manual && manual.minutaId === (minutaId ?? null) ? dentroDosDisponiveis(manual.escolha, lista) : [];
     if (feita.length > 0) return feita;
-    const guardada = utilizadorId && minutaId ? dentroDosDisponiveis(lerPreferencia(utilizadorId, minutaId), lista) : [];
+    const guardada = utilizadorId && minutaId ? dentroDosDisponiveis(lerPreferencia(utilizadorId, minutaId, prefixo), lista) : [];
     return guardada.length > 0 ? guardada : [base];
-  }, [manual, minutaId, utilizadorId, chaveDisponiveis, base]);
+  }, [manual, minutaId, utilizadorId, chaveDisponiveis, base, prefixo]);
 
   const mudar = useCallback(
     (nova: string[]) => {
       setManual({ minutaId: minutaId ?? null, escolha: nova });
       if (!minutaId) return;
       void obterUtilizador().then((id) => {
-        if (id) guardarPreferencia(id, minutaId, nova);
+        if (id) guardarPreferencia(id, minutaId, nova, prefixo);
       });
     },
-    [minutaId, obterUtilizador],
+    [minutaId, obterUtilizador, prefixo],
   );
 
   return { escolha, mudar };

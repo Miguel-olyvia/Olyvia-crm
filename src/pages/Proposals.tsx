@@ -100,6 +100,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { SendProposalDialog } from "@/components/proposals/SendProposalDialog";
 import { ProposalSendHistory } from "@/components/proposals/ProposalSendHistory";
 import { ProposalDetailsDialog } from "@/components/proposals/ProposalDetailsDialog";
+import { ChipIdiomaProposta } from "@/components/proposals/ChipIdiomaProposta";
 import { ProposalRejectReasonDialog, type ProposalRejectionDecision } from "@/components/proposals/ProposalRejectReasonDialog";
 import { ProposalWorkflowConfig } from "@/components/proposals/ProposalWorkflowConfig";
 import { PipelineBreadcrumb } from "@/components/pipeline/PipelineBreadcrumb";
@@ -160,6 +161,8 @@ interface Proposal {
   proposal_number?: string | null;
   published_at?: string | null;
   has_unpublished_changes?: boolean | null;
+  /** Idioma(s) do documento: nulo = português; «en», «pt+en»… */
+  language?: string | null;
 }
 
 interface DealSearchResult {
@@ -198,7 +201,7 @@ const PROPOSALS_LIST_SELECT =
   "rejection_reason_code, rejection_notes, tracking_token, last_viewed_at, view_count, organization_id, " +
   "entity_id, root_organization_id, proposal_number, rejection_reason_id, is_deleted, deleted_at, deleted_by, " +
   "signature_image, assigned_to, published_at, published_snapshot_hash, has_unpublished_changes, " +
-  "decided_snapshot_hash, decided_published_at, " +
+  "decided_snapshot_hash, decided_published_at, language, " +
   "deals(id, title, probability), proposal_workflow_stages(*), proposal_items(subtotal, vat_amount, total), quotes!proposal_id(desconto_global_percent)";
 
 const Proposals = () => {
@@ -3953,6 +3956,7 @@ const Proposals = () => {
                                       </div>
                                     )}
                                     <span className="font-medium text-sm">{proposal.title}</span>
+                                    <ChipIdiomaProposta language={proposal.language} className="ml-1.5 align-middle" />
                                     {subtitle && (
                                       <div className={cn("text-[11px] mt-0.5", subtitle.color)}>{subtitle.text}</div>
                                     )}

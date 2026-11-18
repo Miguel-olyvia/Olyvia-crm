@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState, useCallback } from "react";
+﻿import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { searchEntityIds } from "@/lib/clientSearch";
@@ -32,6 +32,14 @@ import { MissingTemplateDialog } from "@/components/common/MissingTemplateDialog
 import { proposalTitleFromTemplate } from "@/lib/proposalTitleFromTemplate";
 import { markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
 import { computeInlineLinePersistTotals } from "@/utils/quotes/inlineLinePersistTotals";
+import { SeletorIdiomaDocumento } from "@/components/idiomaDocumento/SeletorIdiomaDocumento";
+import { useEscolhaDeIdiomas } from "@/components/contracts/idiomaPreferido";
+import { IDIOMA_BASE, idiomasDisponiveisProposta, ordenarPorRegisto, parseEscolha } from "@/lib/idiomaDocumento";
+import {
+  PREFIXO_PREFERENCIA_PROPOSTA,
+  decidirGravacaoDoIdioma,
+  gravarIdiomaDaProposta,
+} from "@/components/proposals/idiomaDaProposta";
 
 /**
  * Freezes the resolved template's full config into the new proposal at
@@ -134,7 +142,7 @@ export function ProposalCreateDialog({
   const missingTemplateOkRef = useRef(false);
 
   const [workflowStages, setWorkflowStages] = useState<WorkflowStage[]>([]);
-  const [proposalTemplates, setProposalTemplates] = useState<Array<{ id: string; name: string; is_default: boolean }>>([]);
+  const [proposalTemplates, setProposalTemplates] = useState<Array<{ id: string; name: string; is_default: boolean; design_settings?: Record<string, unknown> | null }>>([]);
   const [originalStageId, setOriginalStageId] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
@@ -165,6 +173,36 @@ export function ProposalCreateDialog({
 
   const [proposalItems, setProposalItems] = useState<ProposalItem[]>([]);
   const [inlineQuotes, setInlineQuotes] = useState<InlineQuoteData[]>([]);
+
+  // Idioma do documento (proposals.language; nulo = português). O seletor só existe quando o template escolhido
+  // tem 2 ou mais idiomas. Ao criar, a pré-seleção é o último idioma usado com este template; ao editar, é o que a
+  // proposta tem gravado, e enquanto não se mexer no seletor não se escreve nada.
+  const templateEscolhido = proposalTemplates.find((tmpl) => tmpl.id === formData.template_id) ?? null;
+  const templateParaIdiomas = useMemo(
+    () => (templateEscolhido ? { design_settings: templateEscolhido.design_settings ?? null } : null),
+    [templateEscolhido],
+  );
+  const idiomasDisponiveis = useMemo(() => idiomasDisponiveisProposta(templateParaIdiomas), [templateParaIdiomas]);
+  // proposal_templates não tem coluna de idioma base: a base de uma proposta é sempre o português.
+  const idiomaBase = IDIOMA_BASE;
+  const seletorDeIdiomaVisivel = idiomasDisponiveis.length >= 2;
+  const { escolha: escolhaPreferida, mudar: mudarPreferencia } = useEscolhaDeIdiomas(
+    formData.template_id || null,
+    idiomasDisponiveis,
+    idiomaBase,
+    PREFIXO_PREFERENCIA_PROPOSTA,
+  );
+  const [idiomaGravado, setIdiomaGravado] = useState<string | null>(null);
+  const [idiomaTocado, setIdiomaTocado] = useState(false);
+  const escolhaDeIdiomas = useMemo(() => {
+    if (!editingId || idiomaTocado) return escolhaPreferida;
+    const gravados = ordenarPorRegisto(parseEscolha(idiomaGravado)).filter((c) => idiomasDisponiveis.includes(c));
+    return gravados.length > 0 ? gravados : [idiomaBase];
+  }, [editingId, idiomaTocado, escolhaPreferida, idiomaGravado, idiomasDisponiveis, idiomaBase]);
+  const aoMudarIdioma = (nova: string[]) => {
+    setIdiomaTocado(true);
+    mudarPreferencia(nova);
+  };
 
   // Deal lookup. Routed through the shared scoped search so it applies
   // deals.view (not proposals.view) and can reach deals the user owns
@@ -229,7 +267,7 @@ export function ProposalCreateDialog({
     setWorkflowStages(stages);
 
     const { data: tmpl } = await (supabase as any).from("proposal_templates")
-      .select("id, name, is_default").eq("organization_id", activeCompany.id).eq("template_type", "proposal").eq("is_active", true).order("name");
+      .select("id, name, is_default, design_settings").eq("organization_id", activeCompany.id).eq("template_type", "proposal").eq("is_active", true).order("name");
     setProposalTemplates(tmpl || []);
   }, [activeCompany?.id]);
 
@@ -250,6 +288,8 @@ export function ProposalCreateDialog({
         deal_id: p.deal_id || "", valid_until: p.valid_until || "", notes: p.notes || "",
         stage_id: stageId, template_id: p.template_id || "",
       });
+      setIdiomaGravado(p.language ?? null);
+      setIdiomaTocado(false);
       if (p.deal_id && p.deals) {
         setSelectedDeal({ id: p.deals.id, title: p.deals.title, probability: p.deals.probability ?? null, entity_id: p.deals.entity_id ?? p.entity_id ?? null });
       }
@@ -288,6 +328,7 @@ export function ProposalCreateDialog({
     setSelectedContact(null); setContactSearch(""); setContactSearchResults([]); setShowContactDropdown(false);
     setSelectedQuotes([]); setQuoteSearch(""); setQuoteSearchResults([]);
     setProposalItems([]); setInlineQuotes([]); setFieldErrors({});
+    setIdiomaGravado(null); setIdiomaTocado(false);
   }, [workflowStages]);
 
   const handleClose = (isOpen: boolean) => {
@@ -382,10 +423,17 @@ export function ProposalCreateDialog({
         template_snapshot: templateSnapshot,
       };
 
+      // Idioma: só entra no insert quando há algo a gravar (inglês ou «os dois»); com português o insert é o de sempre.
+      const idiomaDaCriacao = seletorDeIdiomaVisivel
+        ? decidirGravacaoDoIdioma({ modo: "criar", escolha: escolhaDeIdiomas })
+        : null;
+
+      const linhaNova = { ...proposalData, created_by: businessUserId };
       await supabase.rpc('set_audit_context', { p_user_id: businessUserId, p_source: 'ui' });
       const { data, error } = await supabase
         .from("proposals")
-        .insert({ ...proposalData, created_by: businessUserId })
+        // `language` ainda não consta dos tipos gerados da tabela, por isso a linha com idioma é afirmada como a de sempre.
+        .insert(idiomaDaCriacao ? ({ ...linhaNova, ...idiomaDaCriacao } as typeof linhaNova) : linhaNova)
         .select("id")
         .single();
       if (error) throw error;
@@ -531,6 +579,9 @@ export function ProposalCreateDialog({
 
       let savedProposalId: string | null = null;
       let savedProposal: any = null;
+      // O idioma vai num update à parte (as RPCs não têm parâmetro `language`): só quando há algo a gravar.
+      // Se falhar, a proposta já existe e a pessoa é avisada, em vez de a gravação inteira parecer ter falhado.
+      let idiomaPorGravar: { language: string | null } | null = null;
       if (editingId) {
         const { data, error } = await supabase.rpc('rpc_update_proposal', {
           p_id: editingId,
@@ -543,6 +594,9 @@ export function ProposalCreateDialog({
         if (error) throw error;
         savedProposal = data;
         savedProposalId = editingId;
+        if (seletorDeIdiomaVisivel && idiomaTocado) {
+          idiomaPorGravar = decidirGravacaoDoIdioma({ modo: "editar", escolha: escolhaDeIdiomas, gravado: idiomaGravado });
+        }
         let workflowFailed = false;
         if (formData.stage_id && originalStageId && formData.stage_id !== originalStageId) {
           try {
@@ -575,7 +629,21 @@ export function ProposalCreateDialog({
         if (error) throw error;
         savedProposal = data;
         savedProposalId = data.id;
+        if (seletorDeIdiomaVisivel) {
+          idiomaPorGravar = decidirGravacaoDoIdioma({ modo: "criar", escolha: escolhaDeIdiomas });
+        }
         toast({ title: t('proposals.toast.createSuccess') });
+      }
+
+      if (savedProposalId && idiomaPorGravar) {
+        const resultado = await gravarIdiomaDaProposta(savedProposalId, idiomaPorGravar.language, businessUserId);
+        if (!resultado.ok) {
+          toast({
+            title: "A proposta ficou guardada, mas o idioma do documento não",
+            description: "Abre a proposta, escolhe o idioma outra vez e guarda. " + resultado.erro,
+            variant: "default",
+          });
+        }
       }
 
       if (savedProposalId) {
@@ -846,6 +914,20 @@ export function ProposalCreateDialog({
                   <AlertTriangle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
                   <span>Nenhum template escolhido.</span>
                 </p>
+              )}
+              {seletorDeIdiomaVisivel && (
+                <div className="space-y-1.5 pt-2">
+                  <Label className="text-sm">Idioma do documento</Label>
+                  <SeletorIdiomaDocumento
+                    disponiveis={idiomasDisponiveis}
+                    valor={escolhaDeIdiomas}
+                    onChange={aoMudarIdioma}
+                    rotulo="Idioma do documento"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Define o idioma do portal e do PDF desta proposta. Com «Português + English» o documento leva as duas versões.
+                  </p>
+                </div>
               )}
             </div>
 

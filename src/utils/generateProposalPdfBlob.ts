@@ -53,7 +53,7 @@ async function generateFromQuotePdfs(
     // Fetch proposal basic data for filename + template resolution
     const { data, error: propErr } = await (supabase as any)
       .from('proposals')
-      .select('id, proposal_number, title, template_id, template_snapshot, organization_id')
+      .select('id, proposal_number, title, template_id, template_snapshot, organization_id, language')
       .eq('id', proposalId)
       .maybeSingle();
     if (propErr) throw propErr;
