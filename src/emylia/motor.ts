@@ -3889,7 +3889,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     tratarSeguranca(id: number, k: string) {
       // 9/11 (Lote 1, K): mexer na obra que não é a execução das tarefas pede negocios.obra.planear (obra_guardar_negocio)
       if (!exigePerm("obra.planear")) return;
-      const d = deal(id); (d.obra.seg ??= {})[k] = agora();
+      // 18/11: a data (dd/mm hh:mm), não «hoje hh:mm», que no dia seguinte continuava a dizer «hoje»
+      const t = new Date(), p2 = (n: number) => String(n).padStart(2, "0");
+      const d = deal(id); (d.obra.seg ??= {})[k] = `${p2(t.getDate())}/${p2(t.getMonth() + 1)} ${p2(t.getHours())}:${p2(t.getMinutes())}`;
       log(d, "Obra: segurança · " + (NOME_SEGURANCA[k] ?? k) + " tratado");
     },
     /* -------------------------------------------- 21/10: o validador junta, muda de fase e tira tarefas (tarefasValidador.ts) */
