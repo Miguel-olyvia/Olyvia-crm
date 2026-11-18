@@ -33,9 +33,13 @@ export interface No {
 export interface CategoriaProdutoK { id: string; n: string; pai: string | null; ordem: number; inativa?: true; origem?: string }
 /** 16/11 (20270118300000): um modelo de produto. `sub`: o nó da árvore da subcategoria onde está (o mesmo id que Produto.no e CategoriaProdutoK). */
 export interface ModeloK { id: string; n: string; numero: number; sub: string; ativo: boolean }
-/** 13/11: a medida de um produto (atributo do tipo «medida»): 2D (largura × comprimento) ou 3D (com espessura), em cm ou mm. */
-export interface MedidaAtributo { tipo: "2D" | "3D"; largura: DimensaoMedida; comprimento: DimensaoMedida; espessura: DimensaoMedida | null; unidade: "cm" | "mm" }
-/** Uma dimensão da medida: um número ou um intervalo {de, ate} (de < ate; cada valor > 0, até 100000, no máximo 3 casas decimais). */
+/** 13/11: a medida de um produto (atributo do tipo «medida»): 1D (uma só dimensão), 2D (largura × comprimento) ou 3D (com espessura), em cm ou mm. */
+export type MedidaAtributo = Medida1D | Medida2D3D;
+export interface Medida2D3D { tipo: "2D" | "3D"; largura: DimensaoMedida; comprimento: DimensaoMedida; espessura: DimensaoMedida | null; unidade: "cm" | "mm" }
+/** 1D: a dimensão que se mede e o seu valor (número ou intervalo). */
+export interface Medida1D { tipo: "1D"; dimensao: DimensaoUnica; valor: DimensaoMedida; unidade: "cm" | "mm" }
+export type DimensaoUnica = "largura" | "altura" | "comprimento" | "espessura";
+/** Uma dimensão da medida: um número ou um intervalo {de, ate} (de < ate; até > 0 e até 100000, no máximo 3 casas decimais; o «de» pode ser 0). */
 export type DimensaoMedida = number | { de: number; ate: number };
 /** 13/11: o valor de um atributo num produto: uma opção da lista (opcaoId, com o texto em `valor`) ou uma medida. */
 /** `inativa`: a opção escolhida foi desativada depois (a lista já não a traz); o valor mantém-se até alguém o trocar. */

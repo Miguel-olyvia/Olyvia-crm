@@ -8,10 +8,10 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CAMPO, NOTA, Campo, Chips, Num, Retirar } from "./pecasForm";
 import { ListaFlutuante } from "./listaFlutuante";
-import { dimensaoParaTexto, dimensaoVazia, errosDimensao, lerDimensao, mesmosAtributos, normalizarHex, resumoAtributos, textoMedida, textoValor, type DimensaoTexto } from "./atributosTexto";
+import { DIMENSOES_1D, dimensaoParaTexto, dimensaoVazia, errosDimensao, lerDimensao, mesmosAtributos, normalizarHex, resumoAtributos, rotuloValor1D, textoMedida, textoValor, type DimensaoTexto } from "./atributosTexto";
 import { criarOpcaoAtributo, gravarAtributos, type FichaProdutoReal } from "./fichaProdutoDados";
 import { mudarCatalogo } from "./v2/catalogoStore";
-import type { AtributoDef, AtributoProduto, MedidaAtributo, OpcaoAtributo, Produto } from "./v2/catalogoModelo";
+import type { AtributoDef, AtributoProduto, DimensaoUnica, MedidaAtributo, OpcaoAtributo, Produto } from "./v2/catalogoModelo";
 
 /** O quadrado da cor. Sem hex: neutro, a tracejado. Nunca está sozinho: o nome e o hex vêm escritos ao lado. */
 export function Amostra({ hex, testId }: { hex: string | null; testId?: string }) {
@@ -24,15 +24,21 @@ export function Amostra({ hex, testId }: { hex: string | null; testId?: string }
 /* ------------------------------------------------------------------ o que está escolhido, ainda por validar */
 type Unidade = "cm" | "mm";
 /** `texto`: o nome da opção escolhida; `inativa`: a opção foi desativada (já não vem na lista, mas o valor mantém-se). */
-interface Linha { id: string; opcao: string | null; texto: string; inativa: boolean; tipo: "2D" | "3D"; l: DimensaoTexto; c: DimensaoTexto; e: DimensaoTexto; un: Unidade }
-const dosValores = (a: AtributoProduto): Linha => ({
-  id: a.atributoId, opcao: a.opcaoId ?? null, texto: a.valor ?? "", inativa: !!a.inativa, tipo: a.medida?.tipo ?? "2D", l: dimensaoParaTexto(a.medida?.largura),
-  c: dimensaoParaTexto(a.medida?.comprimento), e: dimensaoParaTexto(a.medida?.espessura), un: a.medida?.unidade ?? "cm",
-});
-const linhaNova = (id: string): Linha => ({ id, opcao: null, texto: "", inativa: false, tipo: "2D", l: dimensaoVazia(), c: dimensaoVazia(), e: dimensaoVazia(), un: "cm" });
+type TipoMedida = "1D" | "2D" | "3D";
+/** `l`, `c`, `e`: as dimensões de 2D/3D; `dim` e `v`: a dimensão e o valor de 1D. Os campos que não se aplicam ao tipo escolhido ficam em memória mas não se enviam. */
+interface Linha { id: string; opcao: string | null; texto: string; inativa: boolean; tipo: TipoMedida; l: DimensaoTexto; c: DimensaoTexto; e: DimensaoTexto; dim: DimensaoUnica | null; v: DimensaoTexto; un: Unidade }
+const dosValores = (a: AtributoProduto): Linha => {
+  const m = a.medida, m1 = m?.tipo === "1D" ? m : null, m23 = m && m.tipo !== "1D" ? m : null;
+  return {
+    id: a.atributoId, opcao: a.opcaoId ?? null, texto: a.valor ?? "", inativa: !!a.inativa, tipo: m?.tipo ?? "2D", l: dimensaoParaTexto(m23?.largura),
+    c: dimensaoParaTexto(m23?.comprimento), e: dimensaoParaTexto(m23?.espessura), dim: m1?.dimensao ?? null, v: dimensaoParaTexto(m1?.valor), un: m?.unidade ?? "cm",
+  };
+};
+const linhaNova = (id: string): Linha => ({ id, opcao: null, texto: "", inativa: false, tipo: "2D", l: dimensaoVazia(), c: dimensaoVazia(), e: dimensaoVazia(), dim: null, v: dimensaoVazia(), un: "cm" });
 
-/** A medida escrita, se estiver completa (cada dimensão um número > 0 ou um intervalo de < até; em 3D também a espessura). */
+/** A medida escrita, se estiver completa (cada dimensão um número > 0 ou um intervalo de < até; em 3D também a espessura; em 1D a dimensão e o valor). */
 function medidaDe(L: Linha): MedidaAtributo | null {
+  if (L.tipo === "1D") { const v = lerDimensao(L.v).v; return L.dim && v != null ? { tipo: "1D", dimensao: L.dim, valor: v, unidade: L.un } : null; }
   const l = lerDimensao(L.l).v, c = lerDimensao(L.c).v, e = lerDimensao(L.e).v;
   if (l == null || c == null) return null;
   if (L.tipo === "3D") return e != null ? { tipo: "3D", largura: l, comprimento: c, espessura: e, unidade: L.un } : null;
@@ -250,14 +256,28 @@ export function AtributosEditor({ defs, inicial, onChange, real, vazio }: {
             </div>
             {d.tipo === "medida" ? (
               <div className="grid gap-3">
-                <Chips<"2D" | "3D"> rot="Tipo de medida" opcoes={[["2D", "2D"], ["3D", "3D"]] as const} v={L.tipo} set={(v) => mudar(d.id, { tipo: v })} />
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <Dimensao rot="Largura" d={L.l} un={L.un} set={(v, emitir) => mudar(d.id, { l: v }, emitir)} />
-                  <Dimensao rot="Comprimento" d={L.c} un={L.un} set={(v, emitir) => mudar(d.id, { c: v }, emitir)} />
-                  {L.tipo === "3D" && <Dimensao rot="Espessura" d={L.e} un={L.un} set={(v, emitir) => mudar(d.id, { e: v }, emitir)} />}
+                <div className="grid gap-1.5">
+                  <span aria-hidden="true" className="text-sm text-muted-foreground">Tipo de medida</span>
+                  <Chips<TipoMedida> rot="Tipo de medida" opcoes={[["1D", "1D"], ["2D", "2D"], ["3D", "3D"]] as const} v={L.tipo} set={(v) => mudar(d.id, { tipo: v })} />
                 </div>
+                {L.tipo === "1D" ? (
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="grid content-start gap-1.5">
+                      <span aria-hidden="true" className="text-sm text-muted-foreground">Dimensão da medida</span>
+                      <Chips<DimensaoUnica | null> rot="Dimensão da medida" opcoes={DIMENSOES_1D} v={L.dim} set={(v) => mudar(d.id, { dim: v })} />
+                    </div>
+                    <Dimensao rot={rotuloValor1D(L.dim)} d={L.v} un={L.un} set={(v, emitir) => mudar(d.id, { v }, emitir)} />
+                  </div>
+                ) : (
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <Dimensao rot="Largura" d={L.l} un={L.un} set={(v, emitir) => mudar(d.id, { l: v }, emitir)} />
+                    <Dimensao rot="Comprimento" d={L.c} un={L.un} set={(v, emitir) => mudar(d.id, { c: v }, emitir)} />
+                    {L.tipo === "3D" && <Dimensao rot="Espessura" d={L.e} un={L.un} set={(v, emitir) => mudar(d.id, { e: v }, emitir)} />}
+                  </div>
+                )}
                 <Chips<Unidade> rot="Unidade da medida" opcoes={[["cm", "cm"], ["mm", "mm"]] as const} v={L.un} set={(v) => mudar(d.id, { un: v })} />
-                {!medidaDe(L) && <p className={NOTA}>Preencha a largura e o comprimento{L.tipo === "3D" ? " e a espessura" : ""} para a medida contar.</p>}
+                {!medidaDe(L) && <p className={NOTA}>{L.tipo === "1D" ? "Escolha a dimensão e preencha o valor para a medida contar." : `Preencha a largura e o comprimento${L.tipo === "3D" ? " e a espessura" : ""} para a medida contar.`}</p>}
+                {L.tipo === "1D" && !medidaDe(L) && inicial.some((a) => a.atributoId === d.id && a.medida) && <p role="status" className={NOTA}>Guardar assim remove a medida gravada.</p>}
               </div>
             ) : (
               <>

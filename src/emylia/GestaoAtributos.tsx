@@ -1,7 +1,7 @@
 // 13/11: o ecrã de GESTÃO dos atributos do Catálogo (Medida, Cor, Tonalidade, Tipo de grelha, Textura, Brilho): criar e renomear atributos;
 // criar, renomear, mudar a cor, ativar/desativar e ordenar opções. Só com products.edit (sem ela, leitura). Usa as peças do Catálogo
 // (pecasForm, Amostra). Quem decide é a base (cat_* de 20270117600000): aqui só se mostra o que ela devolve e se relê depois de cada gravação.
-// A Medida é fixa (2D/3D + números, escreve-se em cada produto): só informação. Os atributos não se desativam.
+// A Medida é fixa (1D/2D/3D + números, escreve-se em cada produto): só informação. Os atributos não se desativam.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp, Loader2, Pencil, Plus, Search, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -410,7 +410,7 @@ function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pen
 
       <div id={painel}>
         {aberta && (a.tipo === "medida" ? (
-          <p className={cn(NOTA, "mt-3")}>Medida fixa: 2D ou 3D, com largura, comprimento (e espessura em 3D) em cm ou mm. Escreve-se em cada produto; não tem lista de opções nem cor.</p>
+          <p className={cn(NOTA, "mt-3")}>Medida fixa: 1D, 2D ou 3D, em cm ou mm. Em 1D escolhe-se uma dimensão (largura, altura, comprimento ou espessura) e o seu valor; em 2D a largura e o comprimento; em 3D também a espessura. Escreve-se em cada produto; não tem lista de opções nem cor.</p>
         ) : (
           <>
             {a.opcoes.length > 0 ? (
