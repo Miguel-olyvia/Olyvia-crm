@@ -267,7 +267,7 @@ export function OlyviaComando() {
       const repete = r.acoes.length > 0 && (vistos.has(assinatura) || r.acoes.every((a) => a.tipo === "navegar" && feito.includes(`fui a ${a.texto}`)));
       vistos.add(assinatura);
       if (repete) {
-        terminar(frase, r.resposta && !r.continuar ? r.resposta : "Não encontro isso aqui. Diz-me onde está, ou de outra maneira.", false, porVoz);
+        terminar(frase, "Fiquei por aqui: não encontro mais do que isto. Se não é isto, diz-me de outra maneira.", false, porVoz);
         return true;
       }
       // o que não se desfaz: faz-se o que vem antes, e pergunta-se

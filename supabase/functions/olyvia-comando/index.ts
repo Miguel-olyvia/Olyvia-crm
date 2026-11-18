@@ -56,6 +56,8 @@ Recebes o ecrã atual:
 - a página (o endereço) e o texto que se lê nela (pode vir cortado);
 - os elementos que se podem tocar, numerados [n]: o tipo (botao, ligacao, separador, caixa, lista, interruptor), o texto, o valor ou o
   estado, e a zona onde estão (a janela aberta, a linha da lista, a secção). «fora de vista» = existe mais abaixo, mas carregar funciona;
+  «inativo» = ainda não se pode carregar: falta escrever ou escolher alguma coisa antes (ex.: o «Enviar» acende depois de escrever a
+  mensagem; escreve e põe "continuar": true, e carrega no ecrã seguinte);
 - as perguntas do formulário, numeradas à parte {n}, com as respostas possíveis;
 - os passos do negócio aberto e as páginas principais da app;
 - a conversa até aqui (para perceberes «e o outro?», «abre esse», «volta a pôr como estava») e o que já fizeste neste pedido.
@@ -82,8 +84,9 @@ Regras:
    fazer com este ecrã e põe "continuar": true; recebes o ecrã novo e o que já fizeste, e segues. Quando o pedido estiver cumprido (ou
    não houver mais nada a fazer), "continuar": false. Não repitas o que já está feito. Depois de abrir uma janela ou um menu, continua
    (a opção que se quer aparece no ecrã seguinte).
-4. O que não se desfaz (enviar, apagar, assinar, aceitar, pagar, registar, emitir, cancelar, concluir) só se a pessoa o pedir claramente;
-   a app confirma com ela antes. Nunca o faças por tua iniciativa.
+4. O que não se desfaz (enviar, apagar, assinar, aceitar, pagar, registar, emitir, cancelar, concluir, arrancar a obra) só se a pessoa
+   o pedir claramente («manda», «envia», «apaga» são pedidos claros: faz até ao fim); a app confirma com ela antes de carregar. Nunca o
+   faças por tua iniciativa.
 5. Perguntas («quanto custa a proposta?», «o que falta aqui?», «quem é o técnico?»): responde em 'resposta' com o que está no ecrã, sem
    ações. Se não estiver neste ecrã mas souberes onde está, vai lá ("continuar": true) e responde no ecrã seguinte.
 6. Ambíguo (dois clientes parecidos, dois botões iguais em zonas diferentes que podem ser): pergunta em 'resposta' qual, sem ações.
@@ -94,7 +97,10 @@ Regras:
    Com ações, diz o que fizeste («Abri a proposta do Carlos Mendes.»). Num passo intermédio (continuar), 'resposta' pode ficar vazia.
 10. Ir a uma página já cumpre os pedidos de «ver», «mostrar», «abrir» essa página: «quero ver as obras a decorrer» é navegar a Operações
    com "continuar": false. Nunca andes de página em página à procura de alguma coisa, e nunca voltes a fazer o que já está em «já fiz».
-   Se o ecrã diz «Sem permissão», está vazio ou não tem o que se pede, pára ("continuar": false) e diz isso em 'resposta'.`;
+   Se o ecrã diz «Sem permissão», está vazio ou não tem o que se pede, pára ("continuar": false) e diz isso em 'resposta'.
+11. «Abre o negócio X» é "abrir_negocio" (com 'fase' se a disser), mesmo que se veja um cartão da obra com o mesmo nome: a obra e o
+   negócio são páginas diferentes, e os passos (Proposta, Contrato, …) só existem dentro do negócio. "passo" só com passos na lista.
+   Em 'resposta' nunca digas que fizeste o que ainda não está feito: num passo intermédio deixa-a vazia.`;
 
 const ESQUEMA = {
   type: "OBJECT",
@@ -157,7 +163,7 @@ export function acoesValidas(acoes: AcaoIa[], p: Pedido): AcaoIa[] {
   const { campos, elementos, destinos } = p;
   return (acoes ?? []).filter((a) => {
     const el = a.elemento != null ? elementos[a.elemento] : undefined;
-    if (a.tipo === "clicar") return !!el;
+    if (a.tipo === "clicar") return !!el && !(el.estado ?? "").includes("inativo");
     if (a.tipo === "escrever") return !!el && el.tipo === "caixa" && a.texto != null;
     if (a.tipo === "escolher") return !!el && el.tipo === "lista" && !!a.texto;
     if (a.tipo === "opcao") return a.campo != null && campos[a.campo]?.tipo === "opcoes" && a.opcao != null && a.opcao >= 0 && a.opcao < (campos[a.campo].opcoes?.length ?? 0);
@@ -166,6 +172,8 @@ export function acoesValidas(acoes: AcaoIa[], p: Pedido): AcaoIa[] {
     if (a.tipo === "navegar") return !!a.texto && destinos.includes(a.texto);
     if (a.tipo === "scroll") return ["baixo", "cima", "topo", "fundo"].includes(a.texto ?? "");
     if (a.tipo === "limpar" || a.tipo === "voltar") return true;
+    // os passos só existem com um negócio aberto (18/11: na página da obra pedia «Proposta» e não acontecia nada)
+    if (a.tipo === "passo") return (p.passos ?? []).length > 0 && !!a.texto && ((p.passos ?? []).includes(a.texto) || ["fim", "proximo", "anterior"].includes(a.texto));
     return !!a.texto;
   });
 }
@@ -198,7 +206,9 @@ serve(async (req) => {
     try {
       const r = await gerarJson<{ acoes: AcaoIa[]; resposta: string; continuar?: boolean }>({ modelo: MODELO, partes: [{ text: ecraParaTexto(p) }], esquema: ESQUEMA, instrucaoSistema: INSTRUCAO });
       const acoes = acoesValidas(r.acoes, p);
-      return json({ acoes, resposta: r.resposta ?? "", continuar: !!r.continuar && acoes.length > 0, motor: `gemini:${MODELO}` });
+      // se nada do que a IA quis fazer é possível, não se diz que se fez
+      const resposta = (r.acoes ?? []).length > 0 && acoes.length === 0 ? "Isso não consigo fazer a partir deste ecrã." : r.resposta ?? "";
+      return json({ acoes, resposta, continuar: !!r.continuar && acoes.length > 0, motor: `gemini:${MODELO}` });
     } catch (e) {
       if (e instanceof ErroGemini && (e.status === 429 || e.status >= 500)) return json({ error: "Gemini indisponível", retry: true }, 503);
       throw e;

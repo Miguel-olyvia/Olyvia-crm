@@ -44,7 +44,7 @@ describe("quando agir (18/11: não cortar)", () => {
 });
 
 describe("o ecrã para a IA", () => {
-  it("lista o que se toca, com a zona, sem a própria Olyvia nem o que está desligado ou escondido; passwords nunca", () => {
+  it("lista o que se toca, com a zona, sem a própria Olyvia nem o que está escondido (o inativo vai marcado); passwords nunca", () => {
     document.body.innerHTML = `
       <main>
         <section><h2>Propostas</h2>
@@ -66,11 +66,13 @@ describe("o ecrã para a IA", () => {
       "botao:Abrir@Ana Silva · 900 €",
       "caixa:Prazo=3 semanas",
       "lista:Estado=Enviada",
+      "botao:Desligado",
       "ligacao:Pessoas",
       "separador:Resumo",
     ]);
     expect(e.elementos.find((x) => x.tipo === "lista")?.opcoes).toEqual(["Rascunho", "Enviada"]);
     expect(e.elementos.find((x) => x.tipo === "separador")?.estado).toBe("escolhido");
+    expect(e.elementos.find((x) => x.texto === "Desligado")?.estado).toBe("inativo");
     expect(e.nos).toHaveLength(e.elementos.length);
     expect(e.texto).toMatch(/Carlos Mendes/);
     expect(e.texto).not.toMatch(/Olyvia/);
@@ -78,6 +80,8 @@ describe("o ecrã para a IA", () => {
   it("o que não se desfaz", () => {
     for (const n of ["Enviar proposta", "Apagar", "Assinar contrato", "Registar fatura", "Marcar como perdido"]) expect(eIrreversivel(n)).toBe(true);
     for (const n of ["Abrir", "Proposta", "Guardar rascunho", "Próximo passo", "Ver mais"]) expect(eIrreversivel(n)).toBe(false);
+    for (const n of ["Arrancar a obra", "Encomendar materiais", "Adjudicar"]) expect(eIrreversivel(n)).toBe(true);
+    expect(eIrreversivel("TESTE FLUXO 16/11 Claude · Casa de banho Arrancar a obra · qua, 18 nov")).toBe(false);
   });
 });
 
@@ -166,7 +170,7 @@ describe("a IA com o ecrã inteiro", () => {
     render(<MemoryRouter initialEntries={["/pessoas"]}><OlyviaComando /></MemoryRouter>);
     await pedir("quero ver as obras que estão a decorrer agora");
     expect(n).toBe(2);
-    expect(screen.getByRole("status").textContent).toMatch(/Não encontro isso aqui/);
+    expect(screen.getByRole("status").textContent).toMatch(/Fiquei por aqui/);
   });
 
   it("sem permissão na página nova: diz e pára", async () => {

@@ -85,6 +85,8 @@ function estadoDe(el: HTMLElement): string | undefined {
   if (el.getAttribute("aria-selected") === "true" || el.getAttribute("data-state") === "active") e.push("escolhido");
   if (el.getAttribute("aria-expanded") === "true") e.push("aberto");
   if (el.getAttribute("aria-current") && el.getAttribute("aria-current") !== "false") e.push("atual");
+  // 18/11: o «Enviar» da conversa só acende depois de escrever; a IA tem de saber que existe
+  if (desligado(el)) e.push("inativo");
   return e.length ? e.join(", ") : undefined;
 }
 
@@ -127,7 +129,7 @@ export function lerEcra(excluir: ReadonlySet<Element> = new Set()): Ecra {
   const aVista: { el: HTMLElement; e: ElementoEcra }[] = [], fora: { el: HTMLElement; e: ElementoEcra }[] = [];
   const vistos = new Set<string>();
   for (const el of Array.from(document.querySelectorAll<HTMLElement>(SELETOR))) {
-    if (excluir.has(el) || desligado(el) || !visivel(el)) continue;
+    if (excluir.has(el) || !visivel(el)) continue;
     // um botão dentro de outro (o cartão inteiro é um botão, com «Abrir» lá dentro): fica o de dentro, que é o que se diz
     const tipo = tipoDe(el);
     if (!tipo) continue;
@@ -221,7 +223,9 @@ export function escolherEm(el: HTMLElement, texto: string): boolean {
 
 /** O que não se desfaz: pede sempre confirmação («Vou carregar em "Enviar proposta". Confirmas?»). */
 export const IRREVERSIVEL = /\b(?:enviar|envia|reenviar|eliminar|elimina|apagar|apaga|excluir|remover|remove|assinar|assina|aceitar|aceita|pagar|paga|registar|regista|emitir|emite|cancelar|anular|perdid[oa]|descartar|arquivar|terminar sess|sair|logout|revogar|repor password|submeter|confirmar|aprovar|aprova|rejeitar|recusar|concluir|finalizar|fechar (?:o )?(?:negocio|obra|fatura)|marcar como (?:paga|pago|perdido|ganho)|dar (?:baixa|entrada))/i;
-export const eIrreversivel = (nome: string): boolean => IRREVERSIVEL.test(normal(nome));
+/** 18/11: o que mexe na obra ou nas compras, só quando o botão COMEÇA assim (o cartão «TESTE · … Arrancar a obra · qua» abre-se sem perguntar). */
+const IRREVERSIVEL_INICIO = /^(?:arrancar|iniciar|comecar) (?:a )?obra|^(?:encomendar|adjudicar|faturar|gerar (?:a )?fatura|emitir)/i;
+export const eIrreversivel = (nome: string): boolean => { const n = normal(nome); return IRREVERSIVEL.test(n) || IRREVERSIVEL_INICIO.test(n); };
 
 /** Espera que o ecrã assente depois de uma ação (a página nova a carregar, a janela a abrir): sem mudanças por `calma` ms, ou `max`. */
 export function assentar(max = 2500, calma = 350): Promise<void> {
