@@ -17,7 +17,7 @@ import { terminadasDe } from "../estudioObra/ComandoObra";
 afterEach(cleanup);
 
 const plano = (): Plano => ({
-  estado: "em curso", dia: 1, origem: "manual", inicio: "2026-11-16",
+  estado: "em curso", dia: 1, inicio: "2026-11-16",
   tasks: [
     { nome: "Demolição", svcs: [], dia: 0, dur: 1, sk: "Pedreiro", h: 8, tec: "t1", fase: 1, exec: { estado: "validada", horas: 8, fotos: [] } },
     { nome: "Canalização", svcs: [], dia: 1, dur: 1, sk: "Canalizador", h: 8, tec: "t2", fase: 2, exec: { estado: "em curso", horas: 2, fotos: [] } },
@@ -174,6 +174,22 @@ describe("o mesmo dado no Hoje do técnico e no Estúdio da obra", () => {
     render(<HojeTecnico {...ctxDe(S)} />);
     const sec = screen.getByRole("region", { name: /Terminadas hoje/ });
     expect(within(sec).getByText(/dada por feita por/)).toBeTruthy();
+  });
+});
+
+describe("«Técnicos» (super admin): o técnico mostrado não salta", () => {
+  it("o primeiro com trabalho fica no ecrã depois de o responsável lhe dar a tarefa por feita", () => {
+    const { S, tec } = obraDeHoje();
+    S.role = "operacoes";
+    const ctx = ctxDe(S, { verTecnicos: { escolher: () => {} } });
+    const eu = () => screen.getByRole("heading", { level: 1 }).textContent;
+    const r = render(<HojeTecnico {...ctx} />);
+    const antes = eu();
+    expect(antes).toContain(TECS.find((x) => x.id === tec)!.n.split(" ")[0]);
+    for (const w of trabalhoDoTecnico(S.deals, tec)) ctx.A.darPorFeita(w.d.id, w.ti, { fotos: ["data:image/png;base64,AA"], nota: "" });
+    r.rerender(<HojeTecnico {...ctx} />);
+    expect(eu()).toBe(antes);
+    expect(screen.getByRole("region", { name: /Terminadas hoje/ })).toBeTruthy();
   });
 });
 

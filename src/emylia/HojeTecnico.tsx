@@ -131,13 +131,19 @@ function EscolherTecnico({ ctx, eu }: { ctx: Ctx; eu: string }) {
 
 export function HojeTecnico(ctx: Ctx) {
   const { S, A, run } = ctx;
+  // 19/11 (testarh): o técnico mostrado sem escolha (o primeiro com trabalho) fica o mesmo quando a releitura das obras lhe tira o
+  // trabalho de hoje (o responsável validou-lhe a tarefa); antes, o ecrã saltava para outro técnico
+  const mostrado = useRef<string | null>(null);
   const comTrabalho = tecnicosComTrabalho(S.deals);
   // 23/10: o técnico real fica no seu (o ligado à conta) e não troca; sem nenhum ligado, o aviso
   const fixo = ctx.tecnicoFixo;
   if (fixo && !(fixo.ref && TECS.some((x) => x.id === fixo.ref))) return <SemTecnicoLigado />;
   // 24/10: uma organização real ainda sem técnicos de obra (criam-se em Utilizadores): nada para ver como técnico
   if (!TECS.length) return <SemTecnicos />;
-  const eu = fixo?.ref ? fixo.ref : S.tec && TECS.some((x) => x.id === S.tec) ? S.tec : comTrabalho[0] ?? (TECS.some((x) => x.id === "hn") ? "hn" : TECS[0].id);
+  const eu = fixo?.ref ? fixo.ref : S.tec && TECS.some((x) => x.id === S.tec) ? S.tec
+    : mostrado.current && TECS.some((x) => x.id === mostrado.current) ? mostrado.current
+    : comTrabalho[0] ?? (TECS.some((x) => x.id === "hn") ? "hn" : TECS[0].id);
+  mostrado.current = eu;
   // 30/10 (visto no browser): com os técnicos do RH não há o "hn" do exemplo; sem trabalho para ninguém, rebentava (tec undefined)
   const tec = TECS.find((x) => x.id === eu)!;
   const hoje = trabalhoDoTecnico(S.deals, eu);
@@ -202,7 +208,7 @@ export function HojeTecnico(ctx: Ctx) {
         </section>
       )}
 
-      {!hoje.length && (
+      {!hoje.length && !fechadas.length && (
         <div className={cn(CARTAO, "mt-6 p-6 text-center")}>
           <Sparkles className="mx-auto h-8 w-8 text-primary" aria-hidden="true" />
           <p className="mt-2 text-[15px]">Sem trabalho para si hoje{comTrabalho.length && !fixo ? `. Experimente ver como ${TECS.find((t) => t.id === comTrabalho[0])?.n.split(" ")[0]}.` : "."}</p>
