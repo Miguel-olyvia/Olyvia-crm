@@ -17,6 +17,11 @@ import {
 import { ColumnOrderList } from "./ColumnOrderList";
 import { ManualTablesSection } from "./ManualTablesSection";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
+import { tDoc } from "@/lib/idiomaDocumento/dicionario";
+import { CamposComuns, type VersaoEmEdicao } from "./versoes/CamposComuns";
+import { ID_CAMPO_MINUTA, ID_NOTA_COMUM } from "./versoes/idsDeIdioma";
+import { useNomeParaFrase } from "./versoes/nomeParaFrase";
+import { useTranslation } from "@/hooks/useTranslation";
 
 export type TemplateDocSettings = Partial<DocumentSettings> & {
   show_quote_items?: boolean;
@@ -41,7 +46,14 @@ interface Props {
   onChange: (next: TemplateDocSettings) => void;
   bodyHtml?: string;
   onBodyHtmlChange?: (next: string) => void;
+  /**
+   * Presente quando se edita uma versão de idioma (não o base): `value` traz os textos dessa versão e só eles
+   * (títulos do cabeçalho, rodapé e título da tabela) são editáveis; o resto é comum a todos os idiomas.
+   */
+  versao?: VersaoEmEdicao;
 }
+
+const ID_TITULO_TABELA = ID_CAMPO_MINUTA.quote_items_title;
 
 const COLUMN_LABELS: Record<QuoteItemsColumnKey, string> = {
   description: "Descrição",
@@ -51,7 +63,9 @@ const COLUMN_LABELS: Record<QuoteItemsColumnKey, string> = {
   total: "Total",
 };
 
-export function TemplateDocSettingsPanel({ orgName, value, onChange, bodyHtml, onBodyHtmlChange }: Props) {
+export function TemplateDocSettingsPanel({ orgName, value, onChange, bodyHtml, onBodyHtmlChange, versao }: Props) {
+  const { t } = useTranslation();
+  const nomeParaFrase = useNomeParaFrase();
   const merged = {
     logo_url: null,
     primary_color: "#7C3AED",
@@ -113,36 +127,51 @@ export function TemplateDocSettingsPanel({ orgName, value, onChange, bodyHtml, o
   return (
     <ScrollArea className="h-full">
       <div className="space-y-5 p-4">
-        <StylePresetsSelector onSelect={handleChange} currentSettings={merged} />
+        {versao && (
+          <p id={ID_NOTA_COMUM} className="text-xs italic text-muted-foreground">
+            {t("contractTemplates.versoes.comum.nota", { base: nomeParaFrase(versao.base) })}
+          </p>
+        )}
+        <CamposComuns versao={versao}>
+          <StylePresetsSelector onSelect={handleChange} currentSettings={merged} />
+        </CamposComuns>
         <Separator />
-        <DocumentHeaderSettings settings={merged} onChange={handleChange} orgName={orgName} />
+        <DocumentHeaderSettings settings={merged} onChange={handleChange} orgName={orgName} versao={versao} />
         <Separator />
-        <DocumentFooterSettings settings={merged} onChange={handleChange} />
+        <DocumentFooterSettings settings={merged} onChange={handleChange} versao={versao} />
         <Separator />
-        <DocumentPageSettings settings={merged} onChange={handleChange} />
+        <CamposComuns versao={versao}>
+          <DocumentPageSettings settings={merged} onChange={handleChange} />
+        </CamposComuns>
         <Separator />
         <div className="space-y-3">
+          <CamposComuns versao={versao}>
           <div className="flex items-center justify-between">
             <div>
               <Label className="text-sm font-medium">Lista de Artigos</Label>
               <p className="text-xs text-muted-foreground">Incluir tabela de artigos do orçamento na minuta</p>
             </div>
             <Switch
+              aria-label="Lista de Artigos"
               checked={value.show_quote_items === true}
               onCheckedChange={(v) => onChange({ ...value, show_quote_items: v })}
             />
           </div>
+          </CamposComuns>
+          {versao && <p className="text-[11px] text-muted-foreground">{t("contractTemplates.versoes.tabela.nota")}</p>}
           {value.show_quote_items && (
             <div className="space-y-4 pl-2 border-l-2 border-muted">
               <div className="space-y-1">
-                <Label className="text-xs">Título da secção</Label>
+                <Label className="text-xs" htmlFor={ID_TITULO_TABELA}>Título da secção</Label>
                 <Input
+                  id={ID_TITULO_TABELA}
                   value={value.quote_items_title ?? ""}
-                  placeholder="Artigos do Orçamento"
+                  placeholder={versao ? tDoc(versao.codigo, "doc.tabela.tituloArtigos") : "Artigos do Orçamento"}
                   onChange={(e) => onChange({ ...value, quote_items_title: e.target.value })}
                 />
               </div>
 
+              <CamposComuns versao={versao}>
               <div className="flex items-center justify-between text-sm">
                 <div>
                   <span>Mostrar apenas descrição</span>
@@ -263,6 +292,7 @@ export function TemplateDocSettingsPanel({ orgName, value, onChange, bodyHtml, o
               <p className="text-[11px] text-muted-foreground">
                 A tabela aparece como bloco visível no editor da minuta. Título, colunas e cores atualizam o bloco automaticamente.
               </p>
+              </CamposComuns>
             </div>
           )}
         </div>

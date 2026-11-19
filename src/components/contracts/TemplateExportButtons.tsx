@@ -6,6 +6,7 @@ import { toast } from "@/lib/toast";
 import { substituteVariables, SAMPLE_VARIABLE_DATA } from "@/utils/contractVariables";
 import { useDocumentSettings } from "@/hooks/useDocumentSettings";
 import { renderContractHeaderHtml } from "./contractHeader";
+import { tDoc } from "@/lib/idiomaDocumento/dicionario";
 import DOMPurify from "dompurify";
 
 function sanitizeHtml(html: string): string {
@@ -65,6 +66,14 @@ interface TemplateExportButtonsProps {
   docSettingsOverride?: any;
   /** Optional sample data (e.g. preview data merged with real org header). Falls back to SAMPLE_VARIABLE_DATA. */
   sampleData?: Record<string, any>;
+  /** Idioma do texto exportado (palavras do cabeçalho, datas, campos em falta e «Página X de Y»). Omissão: português. */
+  idioma?: string;
+}
+
+/** «Página 1 de 3» / «Page 1 of 3», no idioma do documento. */
+// eslint-disable-next-line react-refresh/only-export-components
+export function textoDePaginaDoPdf(idioma: string | undefined, pagina: number, total: number): string {
+  return tDoc(idioma, "doc.pagina", { x: pagina, y: total });
 }
 
 function downloadBlob(blob: Blob, filename: string) {
@@ -105,17 +114,19 @@ ${bodyHtml}
  * with each top-level block tagged `data-pdf-section` so the exporter can paginate
  * without ever cutting a paragraph / list item / table in half.
  */
-function buildPdfRenderContainer(opts: {
+// eslint-disable-next-line react-refresh/only-export-components
+export function buildPdfRenderContainer(opts: {
   bodyHtml: string;
   ds: any;
   sampleData?: Record<string, any>;
+  idioma?: string;
 }): HTMLDivElement {
-  const { bodyHtml, ds } = opts;
+  const { bodyHtml, ds, idioma } = opts;
   const sampleData = opts.sampleData ?? SAMPLE_VARIABLE_DATA;
   const fontFamily = ds?.font_family || "Arial, sans-serif";
 
   // 1) Substitui {{var}} pelos valores (org real ou sample).
-  const filled = substituteVariables(bodyHtml, sampleData);
+  const filled = idioma ? substituteVariables(bodyHtml, sampleData, false, idioma) : substituteVariables(bodyHtml, sampleData);
   const safeBody = sanitizeHtml(filled);
 
   // 2) Parse + limpeza: tirar o fundo lilás das variáveis e marcar secções.
@@ -159,7 +170,7 @@ function buildPdfRenderContainer(opts: {
   container.style.lineHeight = "1.6";
 
   // Header — mesma função usada pelo preview (fonte única de verdade).
-  const headerHtml = renderContractHeaderHtml(ds, sampleData as any);
+  const headerHtml = renderContractHeaderHtml(ds, sampleData as any, idioma);
 
   // Footer is rendered per-page (see exportContainerToPdf), NOT inline,
   // to avoid it being pushed to a near-empty trailing page when it doesn't
@@ -174,8 +185,9 @@ async function exportContainerToPdf(opts: {
   container: HTMLDivElement;
   ds: any;
   filename: string;
+  idioma?: string;
 }) {
-  const { container, ds, filename } = opts;
+  const { container, ds, filename, idioma } = opts;
   const [{ default: jsPDF }, { default: html2canvas }] = await Promise.all([
     import("jspdf"),
     import("html2canvas"),
@@ -371,7 +383,7 @@ async function exportContainerToPdf(opts: {
         });
       }
       if (showPageNum) {
-        pdf.text(`Página ${i} de ${total}`, pageWidthMm / 2, pageNumBaselineY, { align: "center" });
+        pdf.text(textoDePaginaDoPdf(idioma, i, total), pageWidthMm / 2, pageNumBaselineY, { align: "center" });
       }
     }
 
@@ -383,7 +395,7 @@ async function exportContainerToPdf(opts: {
   void PX_PER_MM;
 }
 
-export function TemplateExportButtons({ templateName, bodyHtml, variant = "icon", docSettingsOverride, sampleData }: TemplateExportButtonsProps) {
+export function TemplateExportButtons({ templateName, bodyHtml, variant = "icon", docSettingsOverride, sampleData, idioma }: TemplateExportButtonsProps) {
   const [exporting, setExporting] = useState<string | null>(null);
   const { settings: orgDocSettings } = useDocumentSettings();
   const ds = docSettingsOverride ?? orgDocSettings;
@@ -407,12 +419,13 @@ export function TemplateExportButtons({ templateName, bodyHtml, variant = "icon"
   const handleExportPdf = async () => {
     setExporting("pdf");
     try {
-      const container = buildPdfRenderContainer({ bodyHtml, ds, sampleData: effectiveSample });
+      const container = buildPdfRenderContainer({ bodyHtml, ds, sampleData: effectiveSample, idioma });
       const safeName = templateName.replace(/[^a-zA-Z0-9À-ÿ\s-_]/g, "").trim() || "minuta";
       await exportContainerToPdf({
         container,
         ds,
         filename: `${safeName}_preview.pdf`,
+        idioma,
       });
       toast.success("PDF exportado com dados de exemplo");
     } catch (err: any) {

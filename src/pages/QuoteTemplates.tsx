@@ -21,6 +21,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useCompany } from "@/contexts/CompanyContext";
 import { PermissionGate } from "@/components/PermissionGate";
 import { ProposalTemplateEditor } from "@/components/ProposalTemplateEditor";
+import { ChipsDeIdiomas } from "@/components/proposals/versoes/ChipsDeIdiomas";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
@@ -49,6 +50,9 @@ interface ProposalTemplate {
   is_default: boolean;
   is_active: boolean;
   created_at: string;
+  // Vêm no `select("*")`; servem para mostrar os idiomas do template (design_settings.versions).
+  sections?: unknown;
+  design_settings?: unknown;
 }
 
 export default function QuoteTemplates() {
@@ -255,6 +259,7 @@ export default function QuoteTemplates() {
                         <Palette className="h-4 w-4 text-primary" />
                         <span className="font-medium">{template.name}</span>
                         {template.is_default && <Star className="h-4 w-4 text-yellow-500 fill-yellow-500" />}
+                        <ChipsDeIdiomas template={template} />
                       </div>
                     </TableCell>
                     <TableCell>

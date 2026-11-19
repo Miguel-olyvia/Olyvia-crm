@@ -60,6 +60,8 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { INTERNAL_ASSIGNMENT_EXCLUDED_ROLES } from "@/constants/userTypeRoles";
 import { downloadContractDocumentPdf, resolveContractDocument, gatherContractData, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
+import { prepararGeracaoDoContrato } from "@/components/contracts/geracaoIdioma";
+import { idiomasDoDocumento } from "@/lib/idiomaDocumento";
 import { substituteVariables } from "@/utils/contractVariables";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -99,6 +101,9 @@ interface Template {
   id: string;
   name: string;
   body_html?: string | null;
+  /** Idioma do texto base da minuta e as suas versões (doc_settings.versions): decidem os idiomas em que se gera. */
+  language?: string | null;
+  doc_settings?: Record<string, unknown> | null;
 }
 
 const statusColors: Record<string, string> = {
@@ -780,7 +785,7 @@ const ClientContracts = () => {
       if (!activeCompany?.id) return [];
       const { data, error } = await (supabase as any)
         .from("client_contract_templates")
-        .select("id, name, body_html")
+        .select("id, name, body_html, language, doc_settings")
         .eq("organization_id", activeCompany.id)
         .eq("is_active", true)
         .order("name");
@@ -997,7 +1002,7 @@ const ClientContracts = () => {
 
     const { data: template } = await (supabase as any)
       .from("client_contract_templates")
-      .select("body_html")
+      .select("body_html, language, doc_settings")
       .eq("id", replacement.contract_template_id)
       .single();
     if (!template?.body_html) return replacement.contract_number || null;
@@ -1006,11 +1011,15 @@ const ClientContracts = () => {
       { entity_id: replacement.entity_id || null, client_id: replacement.client_id, contract_template_id: replacement.contract_template_id },
       replacement.organization_id,
     );
-    const withPrompts = applyPromptValues(template.body_html, replacement.prompt_values || undefined);
+    // O substituto mantém o(s) idioma(s) do contrato anulado (prompt_values copiado): em português sem versões,
+    // o corpo é o body_html da minuta tal e qual, como sempre.
+    const geracao = prepararGeracaoDoContrato(template, idiomasDoDocumento(replacement), undefined);
+    const withPrompts = applyPromptValues(geracao.corpoHtml, replacement.prompt_values || undefined);
     const finalHtml = injectSignatoryIntoSignatureBlock(
       withPrompts,
       (variableData as any).signatario_nome,
       (variableData as any).signatario_cargo,
+      geracao.idiomaDaAssinatura,
     );
 
     const businessUserId = await resolveCurrentBusinessUserId();
@@ -1080,7 +1089,7 @@ const ClientContracts = () => {
   };
 
   const createMutation = useMutation({
-    mutationFn: async (data: typeof formData & { prompt_values?: Record<string, string> }) => {
+    mutationFn: async (data: typeof formData & { prompt_values?: Record<string, string>; idiomas?: string[] }) => {
       const { data: user } = await supabase.auth.getUser();
       if (!user.user) throw new Error("Not authenticated");
       if (!activeCompany?.id) throw new Error("No company selected");
@@ -1123,14 +1132,21 @@ const ClientContracts = () => {
       } catch { /* fallback */ }
       // Auto-generate contract body from template if selected
       let contractBodyHtml: string | null = null;
+      // O que se grava em prompt_values e o idioma em que se procura o bloco de assinatura. Só português (ou uma
+      // minuta sem versões): o corpo é o body_html da minuta tal e qual e os valores são os de sempre, sem __idiomas.
+      let promptValuesAGravar = data.prompt_values;
+      let idiomaDaAssinatura: string | undefined;
       if (data.template_id) {
         const { data: tpl } = await (supabase as any)
           .from("client_contract_templates")
-          .select("body_html")
+          .select("body_html, language, doc_settings")
           .eq("id", data.template_id)
           .single();
         if (tpl?.body_html) {
-          contractBodyHtml = tpl.body_html;
+          const geracao = prepararGeracaoDoContrato(tpl, data.idiomas, data.prompt_values);
+          contractBodyHtml = geracao.corpoHtml;
+          promptValuesAGravar = geracao.promptValues;
+          idiomaDaAssinatura = geracao.idiomaDaAssinatura;
         }
       }
 
@@ -1151,6 +1167,7 @@ const ClientContracts = () => {
           withPrompts,
           (variableData as any).signatario_nome,
           (variableData as any).signatario_cargo,
+          idiomaDaAssinatura,
         );
       }
 
@@ -1170,7 +1187,7 @@ const ClientContracts = () => {
         p_payment_terms: data.payment_terms || null,
         p_contract_body_html: contractBodyHtml,
         p_final_body_html: finalBodyHtml,
-        p_prompt_values: data.prompt_values && Object.keys(data.prompt_values).length > 0 ? data.prompt_values : null,
+        p_prompt_values: promptValuesAGravar && Object.keys(promptValuesAGravar).length > 0 ? promptValuesAGravar : null,
       };
       // Dentro de um negócio (fecho v4) o contrato nasce ligado, por neg_criar_contrato; fora dele grava como sempre.
       const ligadoAoNegocio = escolherGravacaoDeContrato({ criarNoNegocioId: negocioNovo }) === "neg_criar_contrato";
@@ -1435,7 +1452,7 @@ const ClientContracts = () => {
     setIsDialogOpen(true);
   };
 
-  const handleDialogSave = (data: { proposal_id: string; template_id: string; start_date: string; end_date: string; notes: string; payment_terms: string; prompt_values?: Record<string, string>; id?: string }) => {
+  const handleDialogSave = (data: { proposal_id: string; template_id: string; start_date: string; end_date: string; notes: string; payment_terms: string; prompt_values?: Record<string, string>; id?: string; idiomas?: string[] }) => {
     if (data.start_date && data.end_date && new Date(data.end_date) <= new Date(data.start_date)) {
       toast.error(t('clientContracts.toast.endDateBeforeStart'));
       return;

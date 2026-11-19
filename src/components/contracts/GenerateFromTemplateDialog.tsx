@@ -1,5 +1,6 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import DOMPurify from "dompurify";
+import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -12,11 +13,19 @@ import {
 import { substituteVariables, type ContractVariableData } from "@/utils/contractVariables";
 import { gatherContractData, applyQuoteItemsToken, fetchTemplateSignatory, injectSignatoryIntoSignatureBlock } from "@/components/contracts/contractDocument";
 import { useNavigate } from "react-router-dom";
+import { IDIOMA_BASE, aplicarVersaoContrato, dividirEmVersoes, idiomaBaseDoTemplate, idiomasDisponiveisContrato } from "@/lib/idiomaDocumento";
+import { SeletorIdiomaDocumento } from "@/components/idiomaDocumento/SeletorIdiomaDocumento";
+import { juntarSegmentos } from "@/components/contracts/contractVersions";
+import { prepararGeracaoDoContrato } from "@/components/contracts/geracaoIdioma";
+import { useEscolhaDeIdiomas } from "@/components/contracts/idiomaPreferido";
+import { VersaoDoContrato } from "@/components/contracts/VersaoDoContrato";
+import { useTranslation } from "@/hooks/useTranslation";
 
 interface Template {
   id: string;
   name: string;
   body_html: string;
+  language?: string | null;
   doc_settings?: any;
   is_default: boolean;
 }
@@ -28,7 +37,63 @@ interface GenerateFromTemplateDialogProps {
   contract: any;
   orgId: string | undefined;
   hasExistingBody: boolean;
-  onGenerated: (html: string, templateId: string, templateName: string) => void;
+  /** `idiomas`: os idiomas com que o corpo foi composto (sempre ["pt"] numa minuta sem versões ou só em português). */
+  onGenerated: (html: string, templateId: string, templateName: string, idiomas: string[]) => void;
+}
+
+/** O que a minuta precisa para montar o corpo: dados do contrato e signatário, lidos uma vez ao escolher a minuta. */
+interface ContextoDaGeracao {
+  variableData: Awaited<ReturnType<typeof gatherContractData>>;
+  signatario: { name?: string | null; roleName?: string | null } | null;
+}
+
+interface CorpoGerado {
+  /** Pré-substituição (com os tokens {{…}}), com tabela e signatário: o que se entrega a quem gera. */
+  finalHtml: string;
+  /** Uma entrada por versão, com as variáveis em destaque. Uma só, portuguesa, no caso de sempre. */
+  previewVersoes: Array<{ codigo: string; html: string }>;
+  idiomas: string[];
+}
+
+/**
+ * Monta o corpo da minuta nos idiomas escolhidos. Só português = o pipeline de sempre, com as mesmas chamadas e
+ * os mesmos argumentos. Com outros idiomas, cada versão leva as tabelas no seu idioma (só a última recebe a
+ * tabela de artigos em falta) e o signatário procura-se no idioma da última, onde a assinatura é única.
+ */
+function montarCorpo(template: Template, ctx: ContextoDaGeracao, escolha: string[]): CorpoGerado {
+  const { variableData, signatario } = ctx;
+  const geracao = prepararGeracaoDoContrato(template, escolha, undefined);
+
+  if (geracao.idiomaDaAssinatura === undefined) {
+    const templateDocSettings = template.doc_settings || {};
+    const primaryColor = templateDocSettings?.primary_color || "#7C3AED";
+    const baseWithItems = applyQuoteItemsToken(template.body_html, variableData, templateDocSettings, primaryColor);
+    const baseWithSignatory = injectSignatoryIntoSignatureBlock(baseWithItems, signatario?.name, signatario?.roleName);
+    return {
+      finalHtml: baseWithSignatory,
+      previewVersoes: [{ codigo: geracao.idiomas[0], html: substituteVariables(baseWithSignatory, variableData, true) }],
+      idiomas: geracao.idiomas,
+    };
+  }
+
+  const segmentos = dividirEmVersoes(geracao.corpoHtml, idiomaBaseDoTemplate(template));
+  const comItens = segmentos.map((segmento, indice) => {
+    const definicoes: Record<string, unknown> = aplicarVersaoContrato(template, segmento.codigo).doc_settings || {};
+    const cor = typeof definicoes.primary_color === "string" && definicoes.primary_color ? definicoes.primary_color : "#7C3AED";
+    const anexarTabela = indice === segmentos.length - 1;
+    return { codigo: segmento.codigo, html: applyQuoteItemsToken(segmento.html, variableData, definicoes, cor, anexarTabela, segmento.codigo) };
+  });
+  const finalHtml = injectSignatoryIntoSignatureBlock(
+    juntarSegmentos(comItens, true),
+    signatario?.name,
+    signatario?.roleName,
+    geracao.idiomaDaAssinatura,
+  );
+  const previewVersoes = dividirEmVersoes(finalHtml).map((segmento) => ({
+    codigo: segmento.codigo,
+    html: substituteVariables(segmento.html, variableData, true, segmento.codigo),
+  }));
+  return { finalHtml, previewVersoes, idiomas: geracao.idiomas };
 }
 
 type Step = "select" | "preview";
@@ -37,10 +102,10 @@ export function GenerateFromTemplateDialog({
   open, onOpenChange, templates, contract, orgId, hasExistingBody, onGenerated,
 }: GenerateFromTemplateDialogProps) {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [step, setStep] = useState<Step>("select");
   const [selectedTemplate, setSelectedTemplate] = useState<Template | null>(null);
-  const [previewHtml, setPreviewHtml] = useState("");
-  const [finalHtml, setFinalHtml] = useState("");
+  const [contexto, setContexto] = useState<ContextoDaGeracao | null>(null);
   const [loading, setLoading] = useState(false);
   const [previewingId, setPreviewingId] = useState<string | null>(null);
   const [quickPreviewHtml, setQuickPreviewHtml] = useState("");
@@ -50,11 +115,37 @@ export function GenerateFromTemplateDialog({
     [templates]
   );
 
+  // Idiomas da minuta escolhida e a escolha feita (pré-selecionada com o último idioma usado com esta minuta).
+  const idiomasDisponiveis = useMemo(() => idiomasDisponiveisContrato(selectedTemplate), [selectedTemplate]);
+  const { escolha: escolhaIdiomas, mudar: mudarIdiomas } = useEscolhaDeIdiomas(
+    selectedTemplate?.id ?? null,
+    idiomasDisponiveis,
+    idiomaBaseDoTemplate(selectedTemplate),
+  );
+
+  // O corpo gerado e a pré-visualização seguem a minuta, os dados lidos e a escolha de idiomas.
+  const resultado = useMemo(() => {
+    if (!selectedTemplate || !contexto) return null;
+    try {
+      return { corpo: montarCorpo(selectedTemplate, contexto, escolhaIdiomas) };
+    } catch (erro) {
+      return { erro };
+    }
+  }, [selectedTemplate, contexto, escolhaIdiomas]);
+  const corpo = resultado && "corpo" in resultado ? resultado.corpo : null;
+
+  useEffect(() => {
+    if (!resultado || !("erro" in resultado)) return;
+    const mensagem = resultado.erro instanceof Error ? resultado.erro.message : String(resultado.erro);
+    toast.error("Erro ao preparar preview: " + mensagem);
+    setContexto(null);
+    setStep("select");
+  }, [resultado]);
+
   const handleReset = () => {
     setStep("select");
     setSelectedTemplate(null);
-    setPreviewHtml("");
-    setFinalHtml("");
+    setContexto(null);
     setPreviewingId(null);
     setQuickPreviewHtml("");
   };
@@ -69,20 +160,11 @@ export function GenerateFromTemplateDialog({
     setSelectedTemplate(template);
     try {
       const variableData = await gatherContractData(contract, orgId);
-      const templateDocSettings = template.doc_settings || {};
-      const primaryColor = templateDocSettings?.primary_color || "#7C3AED";
-      const baseWithItems = applyQuoteItemsToken(template.body_html, variableData, templateDocSettings, primaryColor);
       const sig = await fetchTemplateSignatory(template.id);
-      const baseWithSignatory = injectSignatoryIntoSignatureBlock(
-        baseWithItems,
-        sig?.name,
-        sig?.roleName,
-      );
-      const highlightedHtml = substituteVariables(baseWithSignatory, variableData, true);
-      setPreviewHtml(highlightedHtml);
-      // Pass pre-substitution HTML so handleGenerated can detect ALL custom tokens
-      // (including "fixed" vars with defaults). finalizeGeneration applies substituteVariables.
-      setFinalHtml(baseWithSignatory);
+      // O corpo (com tabela e signatário, ainda com os tokens {{…}}) monta-se em `montarCorpo`: o handleGenerated
+      // precisa da versão pré-substituição para detetar TODAS as variáveis a preencher (incluindo as «fixas»
+      // com valor por omissão); o finalizeGeneration é que aplica o substituteVariables.
+      setContexto({ variableData, signatario: sig });
       setStep("preview");
     } catch (err: any) {
       toast.error("Erro ao preparar preview: " + err.message);
@@ -92,8 +174,8 @@ export function GenerateFromTemplateDialog({
   };
 
   const handleConfirm = () => {
-    if (!selectedTemplate || !finalHtml) return;
-    onGenerated(finalHtml, selectedTemplate.id, selectedTemplate.name);
+    if (!selectedTemplate || !corpo?.finalHtml) return;
+    onGenerated(corpo.finalHtml, selectedTemplate.id, selectedTemplate.name, corpo.idiomas);
     handleClose(false);
   };
 
@@ -297,6 +379,14 @@ export function GenerateFromTemplateDialog({
               </div>
             </div>
 
+            {/* Idioma(s) do contrato: só aparece quando a minuta tem mais de um. */}
+            {idiomasDisponiveis.length >= 2 && (
+              <div className="flex flex-wrap items-center gap-3">
+                <Label className="text-xs font-medium">{t("contractTemplates.versoes.seletor.idiomaDoContrato")}</Label>
+                <SeletorIdiomaDocumento disponiveis={idiomasDisponiveis} valor={escolhaIdiomas} onChange={mudarIdiomas} />
+              </div>
+            )}
+
             {/* A4-style preview.
                 Definite height, not flex-1 + max-h: DialogContent's base class
                 is `grid`, and Tailwind emits `.grid` after `.flex`, so the
@@ -309,10 +399,24 @@ export function GenerateFromTemplateDialog({
                 uses a definite height for the same reason. */}
             <ScrollArea className="h-[55vh]">
               <div className="mx-auto bg-white dark:bg-gray-950 shadow-lg border rounded-lg" style={{ maxWidth: "210mm", padding: "20mm 25mm" }}>
-                <div
-                  className="prose prose-sm dark:prose-invert max-w-none"
-                  dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(previewHtml) }}
-                />
+                {corpo && corpo.previewVersoes.length === 1 && corpo.previewVersoes[0].codigo === IDIOMA_BASE ? (
+                  <div
+                    className="prose prose-sm dark:prose-invert max-w-none"
+                    dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(corpo.previewVersoes[0].html) }}
+                  />
+                ) : (
+                  <div className="space-y-8">
+                    {corpo?.previewVersoes.map((versao) => (
+                      <VersaoDoContrato
+                        key={versao.codigo}
+                        codigo={versao.codigo}
+                        bodyHtml={versao.html}
+                        mostrarEtiqueta={corpo.previewVersoes.length > 1}
+                        classeCorpo="prose prose-sm dark:prose-invert max-w-none"
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             </ScrollArea>
 

@@ -18,8 +18,12 @@ import { FillPromptVariablesDialog, type PromptVariable } from "@/components/con
 import { useDocumentSettings } from "@/hooks/useDocumentSettings";
 import { useCooldown, cooldownLabel, OTP_COOLDOWN_SECONDS } from "@/hooks/useCooldown";
 import { OtpCooldownNotice } from "@/components/ui/otp-cooldown-notice";
-import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignaturesIntoBlock, UNFREEZE_CONTRACT_COLUMNS, isContractInForce } from "@/components/contracts/contractDocument";
-import { renderContractHeaderHtml } from "@/components/contracts/contractHeader";
+import { gatherContractData, applyQuoteItemsToken, applyFormulaChips, stripVariableChips, injectSignaturesIntoBlock, resolveContractDocument, UNFREEZE_CONTRACT_COLUMNS, isContractInForce } from "@/components/contracts/contractDocument";
+import { renderContractHeaderHtml, type ContractHeaderSettings } from "@/components/contracts/contractHeader";
+import { contratoUsaVersoes, dividirCorpoDoContrato, juntarSegmentos } from "@/components/contracts/contractVersions";
+import { CHAVE_IDIOMAS } from "@/components/contracts/geracaoIdioma";
+import { VersaoDoContrato } from "@/components/contracts/VersaoDoContrato";
+import { IDIOMA_BASE, serializarEscolha } from "@/lib/idiomaDocumento";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp";
@@ -27,6 +31,37 @@ import { InputOTP, InputOTPGroup, InputOTPSlot } from "@/components/ui/input-otp
 interface ContractBodyTabProps {
   contract: any;
   readOnly?: boolean;
+}
+
+/** As definições de uma página da pré-visualização por versões (as da organização com as da versão por cima). */
+type DefinicoesDaPagina = ContractHeaderSettings & {
+  page_orientation?: string | null;
+  margin_top?: number | null;
+  margin_right?: number | null;
+  margin_bottom?: number | null;
+  margin_left?: number | null;
+  body_font?: string | null;
+  body_font_size?: number | null;
+  show_header?: boolean | null;
+  show_footer?: boolean | null;
+  footer_text?: string | null;
+};
+
+/** Os idiomas só português (ou sem idiomas): o caso de sempre, que não grava nem muda nada de novo. */
+function soPortugues(idiomas: readonly string[] | undefined): boolean {
+  return !idiomas || idiomas.length === 0 || (idiomas.length === 1 && idiomas[0] === IDIOMA_BASE);
+}
+
+/** Resumo curto de um texto, para a chave da consulta da pré-visualização mudar quando o corpo muda. */
+function resumoDoTexto(texto: string): string {
+  let h = 5381;
+  for (let i = 0; i < texto.length; i += 1) h = ((h << 5) + h + texto.charCodeAt(i)) | 0;
+  return `${texto.length}:${h}`;
+}
+
+/** Os valores já guardados do contrato, sem a escolha de idiomas (para a poder repor ou tirar). */
+function semEscolhaDeIdiomas(valores: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(valores).filter(([chave]) => chave !== CHAVE_IDIOMAS));
 }
 
 export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
@@ -45,7 +80,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   // Prompt-at-fill custom variables dialog state
   const [promptDialogOpen, setPromptDialogOpen] = useState(false);
   const [pendingPromptVars, setPendingPromptVars] = useState<PromptVariable[]>([]);
-  const [pendingGeneration, setPendingGeneration] = useState<{ html: string; templateId: string; templateName: string } | null>(null);
+  const [pendingGeneration, setPendingGeneration] = useState<{ html: string; templateId: string; templateName: string; idiomas?: string[] } | null>(null);
 
   // SMS OTP state for company signature
   const [otpStep, setOtpStep] = useState<"idle" | "sending" | "input" | "verifying" | "verified">("idle");
@@ -136,6 +171,39 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   });
   const previewContext = { variableData, organization } as any;
 
+  // Um contrato com versões de idioma (ou noutro idioma que não o português) mostra-se pelo MESMO resolver que o
+  // PDF e o portal usam (resolveContractDocument → versoes), uma secção por idioma. Os de sempre (português, sem
+  // marcas) continuam a ser mostrados como antes, sem passar por aqui. «naoCongelar»: ver não é congelar, e o
+  // corpo pode ainda não estar guardado.
+  const usaVersoes = !!bodyHtml && contratoUsaVersoes(bodyHtml, contract);
+  const { data: documentoPorVersoes, isLoading: aCarregarVersoes } = useQuery({
+    queryKey: [
+      "contract-preview-versoes",
+      contract?.id,
+      activeCompany?.id,
+      resumoDoTexto(bodyHtml || ""),
+      contract?.company_signature_date ?? null,
+      contract?.signature_date ?? null,
+      contract?.contract_body_frozen_html ? 1 : 0,
+    ],
+    queryFn: async () => {
+      try {
+        return await resolveContractDocument(
+          { ...contract, contract_body_html: bodyHtml },
+          activeCompany!.id,
+          activeCompany?.name,
+          { naoCongelar: true },
+        );
+      } catch (e) {
+        // Sem o resolver, mostra-se o ecrã de sempre; o erro fica registado.
+        captureFlowError(e, "db-error-leaked-to-ui");
+        return null;
+      }
+    },
+    enabled: usaVersoes && !!contract && !!activeCompany?.id,
+    staleTime: 0,
+  });
+
   const saveMutation = useMutation({
     mutationFn: async (html: string) => {
       const businessUserId = await resolveCurrentBusinessUserId();
@@ -159,10 +227,22 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     onError: (err: any) => toast.error("Erro ao guardar: " + err.message),
   });
 
-  const finalizeGeneration = async (html: string, templateId: string, templateName: string, promptValues: Record<string, string>) => {
+  const finalizeGeneration = async (html: string, templateId: string, templateName: string, promptValues: Record<string, string>, idiomas?: string[]) => {
+    const apenasPortugues = soPortugues(idiomas);
     // Apply auto-resolved substitutions (empresa_nome, etc.) — html may be raw baseWithItems
     // from GenerateFromTemplateDialog which passes pre-substitution HTML to allow full token detection.
-    const base = variableData ? substituteVariables(html, variableData as any) : html;
+    // Com versões de idioma, as variáveis resolvem-se POR SEGMENTO, com o idioma do wrapper (como no resolver
+    // do PDF): as datas por extenso saem no idioma da versão; dinheiro e números não mudam.
+    let base = html;
+    if (variableData && apenasPortugues) {
+      base = substituteVariables(html, variableData);
+    } else if (variableData) {
+      const { segmentos, comMarcas } = dividirCorpoDoContrato(html, { prompt_values: { [CHAVE_IDIOMAS]: serializarEscolha(idiomas ?? []) } });
+      base = juntarSegmentos(
+        segmentos.map((s) => ({ codigo: s.codigo, html: substituteVariables(s.html, variableData, false, s.codigo) })),
+        comMarcas,
+      );
+    }
     // Bake prompt values filled by the user permanently into the body.
     let withPrompts = base;
     for (const [k, v] of Object.entries(promptValues)) {
@@ -177,7 +257,14 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     setIsEditing(true);
     toast.success(`Contrato gerado a partir da minuta "${templateName}". Reveja e guarde.`);
     const updatePayload: any = { contract_template_id: templateId };
-    if (promptValues && Object.keys(promptValues).length > 0) {
+    const valoresAnteriores: Record<string, unknown> = contract?.prompt_values || {};
+    if (!apenasPortugues) {
+      // Regista os idiomas do contrato: o resto da app lê-os por idiomasDoDocumento().
+      updatePayload.prompt_values = { ...semEscolhaDeIdiomas({ ...valoresAnteriores, ...promptValues }), [CHAVE_IDIOMAS]: serializarEscolha(idiomas ?? []) };
+    } else if (CHAVE_IDIOMAS in valoresAnteriores) {
+      // Regenerado só em português um contrato que era noutro(s) idioma(s): a escolha antiga sai.
+      updatePayload.prompt_values = semEscolhaDeIdiomas({ ...valoresAnteriores, ...promptValues });
+    } else if (promptValues && Object.keys(promptValues).length > 0) {
       // Merge with existing prompt_values so previously filled keys persist.
       updatePayload.prompt_values = { ...(contract?.prompt_values || {}), ...promptValues };
     }
@@ -203,7 +290,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     });
   };
 
-  const handleGenerated = async (html: string, templateId: string, templateName: string) => {
+  const handleGenerated = async (html: string, templateId: string, templateName: string, idiomas?: string[]) => {
     try {
       const unknownKeys = extractPromptTokens(html);
 
@@ -231,7 +318,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
 
         if (prompts.length > 0) {
           setPendingPromptVars(prompts);
-          setPendingGeneration({ html, templateId, templateName });
+          setPendingGeneration({ html, templateId, templateName, idiomas });
           setPromptDialogOpen(true);
           return;
         }
@@ -241,7 +328,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
       console.error("Falha a detectar variáveis a preencher:", e);
     }
 
-    finalizeGeneration(html, templateId, templateName, {});
+    finalizeGeneration(html, templateId, templateName, {}, idiomas);
   };
 
   // ── SMS OTP flow for company signature ──
@@ -402,7 +489,60 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
     resetOtpState();
   };
 
+  // A pré-visualização por versões: uma «página» por idioma, com o cabeçalho e o rodapé dessa versão.
+  const renderVersoesDoContrato = (documento: NonNullable<typeof documentoPorVersoes>) => {
+    const varios = documento.versoes.length > 1;
+    return (
+      <div className="flex flex-col items-center gap-6 overflow-auto max-h-[70vh]">
+        {documento.versoes.map((versao) => {
+          const definicoes = { ...(docSettings ?? {}), ...versao.settings } as DefinicoesDaPagina;
+          const horizontal = definicoes.page_orientation === "landscape";
+          return (
+            <VersaoDoContrato
+              key={versao.codigo}
+              codigo={versao.codigo}
+              bodyHtml={versao.bodyHtml}
+              mostrarEtiqueta={varios}
+              className="bg-white shadow-lg border"
+              style={{
+                width: horizontal ? "297mm" : "210mm",
+                minHeight: horizontal ? "210mm" : "297mm",
+                padding: `${definicoes.margin_top ?? 20}mm ${definicoes.margin_right ?? 20}mm ${definicoes.margin_bottom ?? 20}mm ${definicoes.margin_left ?? 20}mm`,
+                fontFamily: definicoes.body_font || "'Segoe UI', sans-serif",
+                fontSize: `${definicoes.body_font_size || 11}pt`,
+                color: "#1a1a1a",
+                lineHeight: "1.6",
+              }}
+              classeCorpo="contract-body-content"
+              antes={
+                definicoes.show_header !== false ? (
+                  <div
+                    dangerouslySetInnerHTML={{
+                      __html: DOMPurify.sanitize(renderContractHeaderHtml(definicoes, { ...documento.variableData }, versao.codigo)),
+                    }}
+                  />
+                ) : null
+              }
+              depois={
+                definicoes.show_footer !== false && definicoes.footer_text ? (
+                  <div style={{ paddingTop: "16px", borderTop: "1px solid #e5e7eb", textAlign: "center", fontSize: "7pt", color: "#9ca3af" }}>
+                    {definicoes.footer_text}
+                  </div>
+                ) : null
+              }
+            />
+          );
+        })}
+      </div>
+    );
+  };
+
   const renderDocumentPreview = () => {
+    if (usaVersoes) {
+      if (aCarregarVersoes) return <p className="py-8 text-center text-sm text-muted-foreground">A carregar a pré-visualização…</p>;
+      if (documentoPorVersoes?.versoes?.length) return renderVersoesDoContrato(documentoPorVersoes);
+      // Sem documento do resolver (falhou ou não há corpo): segue o ecrã de sempre.
+    }
     const ds = docSettings as any;
     const variableData = previewContext?.variableData;
     const organization = previewContext?.organization;
@@ -623,7 +763,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
         variables={pendingPromptVars}
         onConfirm={(values) => {
           if (pendingGeneration) {
-            finalizeGeneration(pendingGeneration.html, pendingGeneration.templateId, pendingGeneration.templateName, values);
+            finalizeGeneration(pendingGeneration.html, pendingGeneration.templateId, pendingGeneration.templateName, values, pendingGeneration.idiomas);
           }
           setPendingPromptVars([]);
           setPendingGeneration(null);
