@@ -10,6 +10,7 @@
 import { totaisIva, type Estado, type Negocio } from "./motor";
 import { prestacoes, type Prestacao } from "./planoObra";
 import { daFaturaUnica, tranchesDoPlano, valorTranche, type FaturaReg } from "./v2/financeiro";
+import { assinadas, nomeParcela, parcelasAdenda } from "./adendas";
 
 const hojeISO = (): string => new Date().toISOString().slice(0, 10);
 const tranchesDe = (d: Negocio) => tranchesDoPlano(d.f.pagamento, d.orc?.pagFases);
@@ -89,7 +90,10 @@ export const porPagarAntesDoAuto = (S: Estado, d: Negocio): Parcela[] => parcela
 
 /** O que falta para enviar o auto de receção (vazio: pode enviar-se). */
 export function faltaParaAuto(S: Estado, d: Negocio): string[] {
-  return porPagarAntesDoAuto(S, d).map((x) => (x.fatura ? `receber o pagamento da ${x.fatura.numero} (${nomeDaParcela(x)})` : `faturar e receber ${nomeDaParcela(x)}`));
+  const F = porPagarAntesDoAuto(S, d).map((x) => (x.fatura ? `receber o pagamento da ${x.fatura.numero} (${nomeDaParcela(x)})` : `faturar e receber ${nomeDaParcela(x)}`));
+  // as adendas assinadas pagam-se nas mesmas parcelas: a do fim também antes da entrega
+  for (const a of assinadas(d)) for (const x of parcelasAdenda(d, a)) if (!x.ft?.recibo) F.push(`${x.ft ? "receber" : "faturar e receber"} a ${nomeParcela(x.i)} da adenda ${a.n}`);
+  return F;
 }
 
 /** «a parcela do arranque (25%)», «a parcela final (50%)». */
@@ -101,7 +105,9 @@ export function nomeDaParcela(x: Pick<Parcela, "momento" | "p" | "l">): string {
 /** As parcelas a seguir à 1.ª que já caíram no Financeiro e não estão pagas (os passos do Financeiro na Obra). */
 export const parcelasNoFinanceiro = (S: Estado, d: Negocio): Parcela[] =>
   // a obra já entregue (com o auto de receção, de antes desta regra): não volta a pedir nada ao Financeiro
-  d.obra.auto || d.anulado ? [] : parcelasDoContrato(S, d).filter((x) => x.i > 0 && x.devida && !x.paga);
+  // (antes do arranque pedido e da obra a andar, nenhuma a seguir à 1.ª é devida: nem se faz a conta)
+  d.obra.auto || d.anulado || !(d.f.arranque_pedido || d.obra.plano?.estado === "em curso" || d.obra.plano?.estado === "concluída") ? []
+    : parcelasDoContrato(S, d).filter((x) => x.i > 0 && x.devida && !x.paga);
 
 /** Junta a fatura da parcela às do negócio (a 1.ª, a do passo Fatura, entra como fatura registada: já está na base). */
 export function comFaturaDaParcela(S: Estado, d: Negocio, x: Parcela, numero: string, hoje = hojeISO()): FaturaReg[] {

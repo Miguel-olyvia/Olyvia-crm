@@ -142,3 +142,15 @@ describe("as parcelas pelas condições de pagamento", () => {
     expect(minhas(S, "financeiro").some((x) => x.d.id === d.id && x.p.act === "abrir")).toBe(true);
   });
 });
+
+describe("as adendas também antes da entrega", () => {
+  it("uma adenda assinada com uma parcela por pagar segura o auto de receção", () => {
+    const { S, A, d } = prontaAArrancar("100% na adjudicação");
+    A.arrancar(d.id);
+    concluir(d);
+    d.adendas = [{ n: "AD 2026/1027-9", estado: "assinada", criada: "19/11", linhas: [{ k: "x", n: "Trabalho a mais", q: 1, preco: 100, custo: 50 }] } as unknown as NonNullable<Negocio["adendas"]>[number]];
+    expect(faltaParaAuto(S, d)).toEqual(["faturar e receber a 1.ª parcela da adenda AD 2026/1027-9"]);
+    A.enviarAuto(d.id);
+    expect(d.obra.auto ?? null).toBeNull();
+  });
+});
