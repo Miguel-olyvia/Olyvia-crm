@@ -55,6 +55,21 @@ export async function lerProntidoes(sb: SupabaseClient, org: string, contratos: 
     contrato: String(x.contract_id), linhasProntas: Number(x.lines_ready ?? 0), reservadas: Number(x.units_in_stock_reserved ?? 0),
     aChegar: Number(x.units_on_po ?? 0), emFalta: Number(x.units_missing ?? 0), servidas: Number(x.units_served ?? 0), precisas: Number(x.units_needed ?? 0),
   }));
+  // 19/11 (20270124010000): do que falta, o que se pode pedir e porquê o resto não. Sem a função (base por atualizar) ou com erro,
+  // fica a prontidão como estava (a obra diz «encomendar ao fornecedor» sem distinguir).
+  if (lidas.some((p) => p.emFalta > 0)) {
+    const causas = await sb.rpc("rpc_client_order_missing_causes" as never, { p_organization_id: org, p_contract_ids: lidas.filter((p) => p.emFalta > 0).map((p) => p.contrato) } as never);
+    if (!causas.error && Array.isArray(causas.data)) {
+      const porContrato = new Map((causas.data as Record<string, unknown>[]).map((c) => [String(c.contract_id), c]));
+      for (const p of lidas) {
+        const c = porContrato.get(p.contrato);
+        if (!c || !("units_requestable" in c)) continue;
+        p.aPedir = Math.min(p.emFalta, Number(c.units_requestable ?? 0));
+        p.semFornecedor = Number(c.lines_no_supplier ?? 0);
+        p.unidadeIncompativel = Number(c.lines_incompatible_uom ?? 0);
+      }
+    }
+  }
   definirProntidoes(lidas);
   return lidas;
 }

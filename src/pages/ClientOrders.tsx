@@ -47,6 +47,7 @@ import {
 import { ClientOrderDetailSheet, ClientOrderInfoGrid, type ClientOrderInfoItem } from "@/components/client-orders/ClientOrderDetailSheet";
 import { ClientOrderDiagnosticSection } from "@/components/client-orders/ClientOrderDiagnosticSection";
 import { ClientOrderLineSource } from "@/components/client-orders/ClientOrderLineSource";
+import { MISSING_CAUSE_TEXT, blockedMissingSummary, missingBlockReason } from "@/components/client-orders/missingCause";
 import { ClientOrderLineStateBadge, ClientOrderLineStateLegend, clientOrderLineState } from "@/components/client-orders/clientOrderLineState";
 import { ClientOrderProductPicker, type ClientOrderCatalogProduct } from "@/components/client-orders/ClientOrderProductPicker";
 import { useClientOrderPoStates } from "@/components/client-orders/useClientOrderPoStates";
@@ -302,6 +303,9 @@ interface ClientOrderDocumentLine {
   // fornecedor preferencial" (false). null/ausente = desconhecido (serviços ou
   // RPC ainda sem o campo).
   has_preferred_supplier?: boolean | null;
+  // 20270124010000 (auditoria 19/11): porque é que a falta não se pode pedir, com o critério do pedido ao fornecedor
+  // (no_preferred_supplier | incompatible_supplier_uom); null = pode; ausente = base sem a migration (vale has_preferred_supplier).
+  request_block_reason?: string | null;
   // Categoria principal e subcategoria do produto, só para agrupar as linhas
   // no PDF (não se mostram no ecrã). null em serviços e produtos sem
   // categoria; ausentes enquanto a RPC não tiver os campos.
@@ -317,12 +321,22 @@ interface ClientOrderDocumentLine {
 // 'sem_fornecedor' = quantidade em falta sem pedido ao fornecedor. A causa
 // depende de has_preferred_supplier; ver getLineStatusColor/Label.
 type MissingSupplierKind = 'toRequest' | 'noPreferred' | 'unknown';
-const getMissingSupplierKind = (line: Pick<ClientOrderDocumentLine, 'has_preferred_supplier'>): MissingSupplierKind =>
-  line.has_preferred_supplier === true
-    ? 'toRequest'
-    : line.has_preferred_supplier === false
-      ? 'noPreferred'
-      : 'unknown';
+// 19/11: a causa vem de request_block_reason (sem fornecedor preferido ou unidade incompatível; missingCause.ts).
+const getMissingSupplierKind = (line: Pick<ClientOrderDocumentLine, 'has_preferred_supplier' | 'request_block_reason' | 'item_type'>): MissingSupplierKind => {
+  const cause = missingBlockReason(line);
+  return cause === null ? 'toRequest' : cause ? 'noPreferred' : 'unknown';
+};
+/** O que clientOrderLineState recebe como "tem fornecedor": pode pedir-se (true), está preso (false) ou não se sabe. */
+const canRequestLine = (line: Pick<ClientOrderDocumentLine, 'has_preferred_supplier' | 'request_block_reason' | 'item_type'>): boolean | null | undefined => {
+  const cause = missingBlockReason(line);
+  return cause === null ? true : cause ? false : line.has_preferred_supplier;
+};
+
+// 19/11 (auditoria): o botão desligado diz porquê. Com linhas em falta presas, a causa e quantas; senão, como antes.
+const nothingToRequestReason = (doc: { lines?: ClientOrderDocumentLine[] | null }): string => {
+  const presas = blockedMissingSummary(doc.lines ?? []);
+  return presas ? `Nada se pode pedir: ${presas}.` : 'Nada em falta que se possa pedir';
+};
 
 // Chave única por linha do documento: um bundle devolve várias linhas com o
 // mesmo quote_line_id (uma por componente).
@@ -1876,7 +1890,11 @@ const ClientOrders = () => {
       case 'sem_fornecedor': {
         const kind = getMissingSupplierKind(line);
         if (kind === 'toRequest') return t('clientOrders.lineStatus.missingToRequest');
-        if (kind === 'noPreferred') return t('clientOrders.lineStatus.noSupplier');
+        if (kind === 'noPreferred') {
+          return missingBlockReason(line) === 'incompatible_supplier_uom'
+            ? `Em falta — ${MISSING_CAUSE_TEXT.incompatible_supplier_uom}`
+            : t('clientOrders.lineStatus.noSupplier');
+        }
         return t('clientOrders.lineStatus.missingNoRequest');
       }
       case 'servico':
@@ -2927,11 +2945,11 @@ const ClientOrders = () => {
         permission: 'client_orders.edit',
       },
       {
-        label: 'Pedir em falta ao fornecedor',
+        label: 'Pedir o que falta ao fornecedor',
         icon: ShoppingCart,
         onSelect: () => setRequestMissingConfirmOpen(true),
         disabled: !doc.can_request_missing || requestingMissing || confirmingAll,
-        disabledReason: !doc.can_request_missing ? 'Nada em falta que se possa pedir' : 'A pedir…',
+        disabledReason: !doc.can_request_missing ? nothingToRequestReason(doc) : 'A pedir…',
         permission: ['purchase_orders.create', 'client_orders.view'],
         requireAllPermissions: true,
       },
@@ -3085,7 +3103,7 @@ const ClientOrders = () => {
     const requestReason = !canRequestMissing
       ? (requestMissingGate.reason ?? 'Sem permissão para pedir ao fornecedor')
       : !doc.can_request_missing
-        ? 'Nada em falta que se possa pedir'
+        ? nothingToRequestReason(doc)
         : null;
     const missingCount = asQty(doc.missing_lines_count);
     return (
@@ -3112,7 +3130,7 @@ const ClientOrders = () => {
           {requestingMissing
             ? <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
             : <ShoppingCart className="mr-2 h-4 w-4" aria-hidden="true" />}
-          Pedir em falta ao fornecedor{missingCount > 0 && !requestReason ? ` (${missingCount})` : ''}
+          Pedir o que falta ao fornecedor{missingCount > 0 && !requestReason ? ` (${missingCount})` : ''}
         </BlockedButton>
         {canConfirmStockExit && pending.length > 0 && !singleEach && (
           <Select
@@ -3278,7 +3296,8 @@ const ClientOrders = () => {
     }
     const missingHere = line.item_type !== 'service'
       && (line.line_status === 'sem_fornecedor' || asQty(line.qty_missing) > 0)
-      && line.has_preferred_supplier !== false;
+      // 19/11: só as linhas que o pedido consegue mesmo pedir (com fornecedor preferido e unidade compatível)
+      && !missingBlockReason(line);
     if (missingHere && detailData?.can_request_missing && !canRequestMissing) {
       nodes.push(renderBlockedLineAction('missing', 'Pedir em falta', requestMissingGate.reason));
     } else if (missingHere && detailData?.can_request_missing) {
@@ -3830,7 +3849,7 @@ const ClientOrders = () => {
                           </TableCell>
                           <TableCell className="align-top">
                             <ClientOrderLineStateBadge
-                              state={clientOrderLineState(line.line_status, line.has_preferred_supplier)}
+                              state={clientOrderLineState(line.line_status, canRequestLine(line))}
                               title={getLineStatusLabel(line)}
                             />
                           </TableCell>

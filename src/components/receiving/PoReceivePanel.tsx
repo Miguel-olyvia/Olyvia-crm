@@ -46,7 +46,7 @@ import { OrigemChipRec, SeloExpedida, SeloNova, SeloRec } from "./PorReceberList
 import { receivablePosQueryKey } from "./useReceivablePos";
 import { VerGuiaButton } from "./VerGuiaButton";
 import { PoCancelRemainderDialog, type CancelTarget } from "./PoCancelRemainderDialog";
-import { faltaPo, fmtUn, lineUnitLabel, localDay, novaConfirmacao, poRecebivel, textoFalta, type ReceivableLine, type ReceivablePo } from "./porReceber";
+import { faltaPo, fmtUn, lineIntegerOnly, lineUnitLabel, localDay, novaConfirmacao, poRecebivel, textoFalta, type ReceivableLine, type ReceivablePo } from "./porReceber";
 import { runTotals, textoEntrada, type PoRunView } from "./poRun";
 
 const STATUS_LABEL: Record<string, string> = {
@@ -369,9 +369,10 @@ function PanelBody({
       return;
     }
     for (const x of itens) {
-      if (!Number.isInteger(x.qty) || x.qty < 1) {
+      // 19/11: decimais só num produto que se mede (m², ml, kg) lido na sua unidade; embalagens e o que se conta, inteiros
+      if (lineIntegerOnly(x.line) && (!Number.isInteger(x.qty) || x.qty < 1)) {
         setErro(
-          `Quantidades inteiras: ${x.line.name} (${fmtUn(x.qty)}). A receção pelo cesto, como o leitor, só aceita unidades inteiras — para frações use a receção na encomenda.`,
+          `Quantidades inteiras: ${x.line.name} (${fmtUn(x.qty)}). Esta linha conta-se em unidades ou embalagens inteiras.`,
         );
         return;
       }

@@ -158,6 +158,15 @@ export const CODIGO_ESCREVER_CONVERSA = CODIGO_GRAVAR_NEGOCIO;
  *  encomendas de um negócio), seja qual for o papel escolhido; sem ela o servidor recusa sempre, por isso o «A ver como» armazém sozinho
  *  já não basta. Sem conta real, o papel, como até aqui. O modo de teste (o super admin) continua a poder. */
 export const podeAprovarPo = (role: Papel, teste: boolean): boolean => (temCodigoReal(CODIGO_APROVAR_PO) ?? role === "armazem") || teste;
+/** 19/11 (auditoria, lote 2): pedir o que falta ao fornecedor (rpc_request_missing_from_supplier: purchase_orders.create E
+ *  client_orders.view, este já lido em CODIGOS_VISTAS). */
+export const CODIGO_PEDIR_FALTA = "purchase_orders.create";
+/** 19/11: o botão «Pedir o que falta ao fornecedor» no passo Materiais da obra. Com conta real, quem tem as duas permissões do servidor;
+ *  sem conta real, o papel Compras e armazém, como o aprovar. O modo de teste (o super admin) também. */
+export const podePedirFalta = (role: Papel, teste: boolean): boolean => {
+  const tem = [temCodigoReal(CODIGO_PEDIR_FALTA), temCodigoReal("client_orders.view")];
+  return (tem.includes(null) ? role === "armazem" : tem.every(Boolean)) || teste;
+};
 /** 9/11 (Lote 1, I): o porquê de a caixa de envio da conversa da obra estar desligada (com conta real e sem pessoas.edit), ou undefined. */
 export const semEnvioNaConversa = (): string | undefined =>
   temCodigoReal(CODIGO_ESCREVER_CONVERSA) === false ? "Escrever ao cliente pede a permissão pessoas.edit (editar negócios)." : undefined;
