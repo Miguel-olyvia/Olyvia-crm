@@ -947,10 +947,10 @@ export function BotaoTesteCliente({ d, acao, tamanho = "default" }: { d: Negocio
 }
 
 // FERRAMENTAS-TESTE (temporário, remover antes da main)
-// 11/11 (Rafael): no passo «À espera do cliente», qualquer membro ativo da organização (perfis normais) aceita a proposta / assina o
+// 11/11 (Rafael), 19/11 só o super admin (auditoria): no passo «À espera do cliente», o super admin aceita a proposta / assina o
 // contrato como o cliente, pela Edge Function client-portal-action («simular_cliente»), o mesmo caminho do painel de teste. Só aparece no
 // ambiente de testes (testarh, localhost ou VITE_FERRAMENTAS_TESTE=1) E quando a base diz que sim
-// (fn_modo_teste_simular_cliente_para_mim: modo de teste ligado E membro ativo); em produção o modo de teste está desligado.
+// (fn_modo_teste_simular_cliente_para_mim: modo de teste ligado E super admin, migração 20270123500000); em produção o modo de teste está desligado.
 const ambienteDoBotaoTeste = () => ambienteDeTeste(import.meta.env.VITE_FERRAMENTAS_TESTE as string | undefined, typeof window === "undefined" ? undefined : window.location.hostname);
 export function BotaoTesteSimularCliente({ d, acao, tamanho = "default", ambiente = ambienteDoBotaoTeste }: { d: Negocio; acao: "aceitar" | "assinar"; tamanho?: "lg" | "default"; /** para os testes */ ambiente?: () => boolean }) {
   const teste = useSimularClienteTeste();

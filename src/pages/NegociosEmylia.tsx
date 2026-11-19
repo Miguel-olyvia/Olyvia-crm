@@ -769,7 +769,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
         },
       });
     });
-    // FERRAMENTAS-TESTE (temporário, remover antes da main): aceitar/assinar como o cliente para membros ativos (perfis normais)
+    // FERRAMENTAS-TESTE (temporário, remover antes da main): aceitar/assinar como o cliente no passo do negócio (19/11: só o super admin)
     void podeSimularClienteTeste(supabase, org).then((pode) => {
       if (!vivo) return;
       definirSimularClienteTeste(!pode ? null : {
