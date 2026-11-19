@@ -20,6 +20,7 @@ const db = vi.hoisted(() => ({
   forms: (() => Promise.resolve({ data: null, error: null })) as () => Promise<Result>,
   writes: [] as Write[],
   toastError: vi.fn(),
+  formsWriteError: null as unknown,
 }));
 
 vi.mock("@/integrations/supabase/client", () => {
@@ -30,7 +31,7 @@ vi.mock("@/integrations/supabase/client", () => {
   const chain = (table: string) => {
     let wrote = false;
     const result = (): Promise<Result> => {
-      if (wrote) return Promise.resolve({ data: null, error: null });
+      if (wrote) return Promise.resolve({ data: null, error: table === "forms" ? db.formsWriteError : null });
       if (table === "forms") return db.forms();
       if (table === "form_branding") return Promise.resolve({ data: db.brandingRow, error: null });
       if (table === "email_templates") return Promise.resolve({ data: OPTIONS, error: null });
@@ -97,6 +98,7 @@ beforeEach(() => {
   db.forms = i18n(["en"]);
   db.writes = [];
   db.toastError.mockClear();
+  db.formsWriteError = null;
 });
 
 describe("FormBrandingConfig: modelo de email por idioma", () => {
@@ -175,5 +177,122 @@ describe("FormBrandingConfig: modelo de email por idioma", () => {
     await screen.findByRole("group", { name: GROUP });
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
     expect(document.querySelector("#confirmation-email-template")).toBeNull();
+  });
+});
+
+describe("FormBrandingConfig: SMS de confirmação por idioma", () => {
+  const SMS_GROUP = "Mensagem do SMS: textos por idioma";
+  const settingsWithSms = {
+    other: 1,
+    i18n: {
+      default_locale: "pt",
+      enabled_locales: ["en"],
+      content: { branding: { en: { form_title: "Title", confirmation_sms_message: "Hi there" } }, steps: { s1: { en: { title: "Step" } } } },
+    },
+  };
+  const loadSettings = (settings: unknown) => () => Promise.resolve({ data: { settings }, error: null });
+  const smsRow = () => ({ ...row(null), confirmation_sms_enabled: true, confirmation_sms_message: "Texto PT" });
+  const writesTo = (table: string) => db.writes.filter((w) => w.table === table);
+
+  async function openSms() {
+    renderDialog();
+    await openEmailsTab();
+    const group = await screen.findByRole("group", { name: SMS_GROUP });
+    return {
+      pt: within(group).getByRole("textbox", { name: "Mensagem do SMS — Português" }) as HTMLTextAreaElement,
+      en: within(group).getByRole("textbox", { name: "Mensagem do SMS — English" }) as HTMLTextAreaElement,
+    };
+  }
+
+  async function clickSave() {
+    fireEvent.click(await screen.findByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(writesTo("form_branding").length).toBeGreaterThan(0));
+  }
+
+  beforeEach(() => {
+    db.brandingRow = smsRow();
+    db.forms = loadSettings(settingsWithSms);
+  });
+
+  it("mostra o texto de cada idioma: a coluna no por omissão, a sobreposição nos outros", async () => {
+    const { pt, en } = await openSms();
+    expect(pt).toHaveValue("Texto PT");
+    expect(en).toHaveValue("Hi there");
+  });
+
+  it("editar o texto de um idioma grava na sobreposição do formulário, sem perder o resto, e não toca na coluna", async () => {
+    const { en } = await openSms();
+    fireEvent.change(en, { target: { value: "Hello {{lead_name}}" } });
+    await clickSave();
+    const forms = writesTo("forms");
+    expect(forms).toHaveLength(1);
+    expect(forms[0].payload).toEqual({
+      settings: {
+        other: 1,
+        i18n: {
+          default_locale: "pt",
+          enabled_locales: ["en"],
+          content: {
+            branding: { en: { form_title: "Title", confirmation_sms_message: "Hello {{lead_name}}" } },
+            steps: { s1: { en: { title: "Step" } } },
+          },
+        },
+      },
+    });
+    const branding = writesTo("form_branding")[0].payload;
+    expect(branding).not.toHaveProperty("confirmation_sms_by_locale");
+    expect(branding.confirmation_sms_message).toBe("Texto PT");
+  });
+
+  it("editar o texto do idioma por omissão grava só na coluna, e não mexe nas definições do formulário", async () => {
+    const { pt } = await openSms();
+    fireEvent.change(pt, { target: { value: "Novo PT" } });
+    await clickSave();
+    expect(writesTo("forms")).toHaveLength(0);
+    expect(writesTo("form_branding")[0].payload.confirmation_sms_message).toBe("Novo PT");
+  });
+
+  it("guardar sem mexer no SMS não grava nas definições do formulário nem leva chaves novas", async () => {
+    await openSms();
+    await clickSave();
+    expect(writesTo("forms")).toHaveLength(0);
+    expect(writesTo("form_branding")[0].payload).not.toHaveProperty("confirmation_sms_by_locale");
+  });
+
+  it("limpar o texto de um idioma apaga-o da sobreposição (volta a valer a coluna)", async () => {
+    const { en } = await openSms();
+    fireEvent.change(en, { target: { value: "" } });
+    await clickSave();
+    const settings = writesTo("forms")[0].payload.settings as { i18n: { content: { branding: Record<string, Record<string, string>> } } };
+    expect(settings.i18n.content.branding.en).toEqual({ form_title: "Title" });
+  });
+
+  it("se a gravação das definições falhar, avisa e não guarda mais nada (nada fica a meio)", async () => {
+    db.formsWriteError = { message: "sem permissão" };
+    const { en } = await openSms();
+    fireEvent.change(en, { target: { value: "Hello" } });
+    fireEvent.click(await screen.findByRole("button", { name: "Guardar" }));
+    await waitFor(() => expect(db.toastError).toHaveBeenCalled());
+    expect(writesTo("form_branding")).toHaveLength(0);
+  });
+
+  it("com o i18n a falhar mostra a caixa única, e editar o SMS grava só a coluna", async () => {
+    db.forms = () => Promise.resolve({ data: null, error: { message: "falhou" } });
+    renderDialog();
+    await openEmailsTab();
+    await waitFor(() => expect(document.querySelector("#confirmation-sms-message")).not.toBeNull());
+    expect(screen.queryByRole("group", { name: SMS_GROUP })).not.toBeInTheDocument();
+    fireEvent.change(document.querySelector("#confirmation-sms-message") as HTMLTextAreaElement, { target: { value: "So PT" } });
+    await clickSave();
+    expect(writesTo("forms")).toHaveLength(0);
+    expect(writesTo("form_branding")[0].payload.confirmation_sms_message).toBe("So PT");
+  });
+
+  it("um formulário só em português mantém a caixa única de sempre", async () => {
+    db.forms = loadSettings({ i18n: { default_locale: "pt", enabled_locales: [] } });
+    renderDialog();
+    await openEmailsTab();
+    await waitFor(() => expect(document.querySelector("#confirmation-sms-message")).not.toBeNull());
+    expect(screen.queryByRole("group", { name: SMS_GROUP })).not.toBeInTheDocument();
   });
 });

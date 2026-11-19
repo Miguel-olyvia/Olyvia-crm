@@ -39,6 +39,7 @@ import {
   normalizeEmailLocaleTemplates,
   type EmailLocaleTemplates,
 } from "@/lib/formEmailLocales";
+import { applySmsOverlay, persistSmsByLocale, readSmsByLocale, smsChanges } from "@/lib/formSmsLocales";
 
 const TRANSLATABLE_BRANDING_KEYS = [
   "form_title",
@@ -304,6 +305,10 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
   // muda de forma (um seletor -> um por idioma) depois de aparecer.
   const [i18nLoading, setI18nLoading] = useState(true);
   const i18nRequest = useRef(0);
+  // SMS de confirmação por idioma: o texto dos idiomas que não são o por omissão vive em
+  // forms.settings.i18n (ver lib/formSmsLocales.ts). Edita-se aqui e grava-se ao «Guardar».
+  const [smsDraft, setSmsDraft] = useState<Record<string, string>>({});
+  const loadedSms = useRef<Record<string, string>>({});
   const [emailTemplateOptions, setEmailTemplateOptions] = useState<EmailTemplateOption[]>([]);
   const [smtpOptions, setSmtpOptions] = useState<SmtpOption[]>([]);
 
@@ -325,6 +330,9 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
       const cfg = readI18nConfig(data?.settings);
       setI18nConfig(cfg);
       setActiveLocale(cfg.default_locale || DEFAULT_FORM_LOCALE);
+      const sms = readSmsByLocale(cfg, activeEmailLocales(cfg));
+      loadedSms.current = sms;
+      setSmsDraft(sms);
     } catch (e) {
       if (request !== i18nRequest.current) return;
       console.error("Failed to load form languages", e);
@@ -332,6 +340,8 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
       // forms.settings.i18n, e o mapa de modelos por idioma fica como veio da base.
       setI18nConfig({ default_locale: DEFAULT_FORM_LOCALE, enabled_locales: [], content: {} });
       setActiveLocale(DEFAULT_FORM_LOCALE);
+      loadedSms.current = {};
+      setSmsDraft({});
       toast.error("Erro ao carregar os idiomas do formulário");
     } finally {
       if (request === i18nRequest.current) setI18nLoading(false);
@@ -509,6 +519,15 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
 
     setSaving(true);
     try {
+      // Primeiro o SMS dos outros idiomas (forms.settings): se falhar, nada mais se grava e o erro aparece.
+      const smsEdits = smsChanges(loadedSms.current, smsDraft, emailLocales.slice(1));
+      if (Object.keys(smsEdits).length > 0) {
+        await persistSmsByLocale(formId, smsEdits);
+        const merged = applySmsOverlay(i18nConfig, smsEdits);
+        setI18nConfig(merged);
+        loadedSms.current = readSmsByLocale(merged, emailLocales);
+      }
+
       const { scheduling_invite_delays_hours, email_locale_templates, ...rest } = branding;
       const updatePayload: any = {
         ...rest,
@@ -1061,6 +1080,8 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
                     emailTemplateOptions={emailTemplateOptions}
                     smtpOptions={smtpOptions}
                     activeLocales={emailLocales}
+                    smsByLocale={smsDraft}
+                    onSmsLocaleChange={(locale, value) => setSmsDraft((draft) => ({ ...draft, [locale]: value }))}
                   />
                 )}
               </TabsContent>

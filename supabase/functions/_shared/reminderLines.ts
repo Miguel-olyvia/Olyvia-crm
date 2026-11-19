@@ -8,7 +8,7 @@ import type { FormEmailConfig } from "./formEmails.ts";
 import { scheduleSms } from "./sendSms.ts";
 import { buildAudienceVars, pickAudienceTemplateId } from "./audienceTemplates.ts";
 import type { Audience } from "./audienceTemplates.ts";
-import { buildReminderMail, reminderSmsTemplate } from "./reminderContent.ts";
+import { buildReminderMail, formatVisitWhen, reminderSmsTemplate } from "./reminderContent.ts";
 import { pickReminderSender } from "./reminderSender.ts";
 import { reminderRuleFor } from "./reminderRule.ts";
 
@@ -112,20 +112,26 @@ export async function createReminderLines(p: CreateReminderLinesParams): Promise
 
   let emails = 0;
   for (const t of targets) {
-    const vars = buildAudienceVars(
-      { ...p.clientVars, ...(t.tech ? { technician_name: t.tech.name } : {}) },
-      t.audience,
-      {
-        cancelUrl: p.clientVars.cancel_url,
-        confirmUrl: p.confirmUrl,
-        leadPhone: p.leadPhone,
-        leadEmail: p.leadEmail,
-        address: p.address,
-        appointmentUrl: p.appointmentUrl,
-      },
-    );
+    // A data segue o idioma do CLIENTE (so as palavras); o comercial (aviso interno) fica em portugues.
+    const when = formatVisitWhen(p.startIso, t.audience === "client" ? p.locale : null);
+    const vars = {
+      ...buildAudienceVars(
+        { ...p.clientVars, ...(t.tech ? { technician_name: t.tech.name } : {}) },
+        t.audience,
+        {
+          cancelUrl: p.clientVars.cancel_url,
+          confirmUrl: p.confirmUrl,
+          leadPhone: p.leadPhone,
+          leadEmail: p.leadEmail,
+          address: p.address,
+          appointmentUrl: p.appointmentUrl,
+        },
+      ),
+      meeting_date: when,
+      meeting_datetime: when,
+    };
     const template = await templateFor(t.audience);
-    const mail = buildReminderMail({ audience: t.audience, template, vars, brand: cfg });
+    const mail = buildReminderMail({ audience: t.audience, template, vars, brand: cfg, lang: p.locale });
     const sender = pickReminderSender({
       kind: t.audience,
       technicianUserId: t.tech?.userId,
@@ -160,8 +166,11 @@ export async function createReminderLines(p: CreateReminderLinesParams): Promise
   let sms = 0;
   if (cfg.reminder_sms_enabled && p.leadPhone && clientRemindAt) {
     const includeLink = cfg.confirmation_sms_include_link === true;
+    const clientWhen = formatVisitWhen(p.startIso, p.locale);
     const smsVars = {
       ...p.clientVars,
+      meeting_date: clientWhen,
+      meeting_datetime: clientWhen,
       cancel_url: includeLink ? p.clientVars.cancel_url ?? "" : "",
       confirm_url: includeLink ? p.confirmUrl : "",
     };
@@ -174,6 +183,7 @@ export async function createReminderLines(p: CreateReminderLinesParams): Promise
         rescheduled: p.rescheduled,
         withConfirmLink: includeLink && !p.rescheduled && !!p.confirmUrl,
         withManageLink: includeLink && p.rescheduled && !!p.clientVars.cancel_url,
+        lang: p.locale,
       }),
       scheduledFor: clientRemindAt,
       entityType: p.entityType,

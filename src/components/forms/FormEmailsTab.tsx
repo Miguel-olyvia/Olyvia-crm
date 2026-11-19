@@ -1,13 +1,12 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
-import { SmsVariableButtons } from "@/components/forms/SmsVariableButtons";
+import { useMemo } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useTranslation } from "@/hooks/useTranslation";
 import { activeEmailLocales } from "@/lib/formEmailLocales";
 import { PurposeTemplateField } from "@/components/forms/emails/EmailTemplateField";
 import { EmailsCommercialSection } from "@/components/forms/emails/EmailsCommercialSection";
+import { ConfirmationSmsSection } from "@/components/forms/emails/ConfirmationSmsSection";
 import { SwitchHeader, TEMPLATE_DEFAULT } from "@/components/forms/emails/EmailsTabParts";
 import type { EmailTemplateOption, EmailsTabFields, SmtpOption } from "@/components/forms/emails/emailsTabTypes";
 
@@ -25,6 +24,13 @@ interface FormEmailsTabProps<T extends EmailsTabFields> {
    * é o de sempre (um seletor por finalidade).
    */
   activeLocales?: string[];
+  /** Texto do SMS de confirmação dos idiomas que não são o por omissão (forms.settings.i18n). */
+  smsByLocale?: Record<string, string>;
+  /**
+   * Guarda o texto do SMS de um idioma que não é o por omissão. Sem isto o SMS fica numa só mensagem,
+   * como sempre; com isto e mais de um idioma ativo, o separador mostra uma mensagem por idioma.
+   */
+  onSmsLocaleChange?: (locale: string, value: string) => void;
 }
 
 /** Separador «Emails»: primeiro o que é do cliente, depois o que é do comercial, no fim o envio. */
@@ -34,6 +40,8 @@ export function FormEmailsTab<T extends EmailsTabFields>({
   emailTemplateOptions,
   smtpOptions,
   activeLocales,
+  smsByLocale,
+  onSmsLocaleChange,
 }: FormEmailsTabProps<T>) {
   const { t } = useTranslation();
   const set = (patch: Partial<EmailsTabFields>) => onChange({ ...branding, ...patch });
@@ -44,55 +52,6 @@ export function FormEmailsTab<T extends EmailsTabFields>({
   const templateLabel = t("emailAudience.templateLabel");
   const systemDefault = t("emailAudience.systemDefault");
   const templateProps = { options: emailTemplateOptions, branding, onPatch: set, locales, label: templateLabel, defaultLabel: systemDefault };
-
-  // Última posição do cursor na caixa do SMS (guardada ao perder o foco, p. ex. ao clicar num botão).
-  const smsRef = useRef<HTMLTextAreaElement>(null);
-  const smsCaret = useRef<{ start: number; end: number } | null>(null);
-  const pendingCaret = useRef<number | null>(null);
-  const rememberSmsCaret = () => {
-    const el = smsRef.current;
-    if (el) smsCaret.current = { start: el.selectionStart, end: el.selectionEnd };
-  };
-  const insertSmsVariable = (key: string) => {
-    const el = smsRef.current;
-    const text = branding.confirmation_sms_message;
-    const live = el && document.activeElement === el ? { start: el.selectionStart, end: el.selectionEnd } : null;
-    const range = live ?? smsCaret.current ?? { start: text.length, end: text.length };
-    const start = Math.min(range.start, text.length);
-    const end = Math.min(Math.max(range.end, start), text.length);
-    const token = `{{${key}}}`;
-    const nextText = text.slice(0, start) + token + text.slice(end);
-    const caret = start + token.length;
-    if (nextText === text) {
-      // O valor não muda, logo não há re-render a esperar: aplica já.
-      pendingCaret.current = null;
-      applyCaret(caret);
-      return;
-    }
-    pendingCaret.current = caret;
-    set({ confirmation_sms_message: nextText });
-  };
-  const applyCaret = (pos: number) => {
-    const el = smsRef.current;
-    if (!el) return;
-    el.focus();
-    el.setSelectionRange(pos, pos);
-    smsCaret.current = { start: pos, end: pos };
-  };
-  // Ao desligar o SMS a caixa desmonta: o cursor guardado deixa de valer.
-  useEffect(() => {
-    if (!branding.confirmation_sms_enabled) {
-      smsCaret.current = null;
-      pendingCaret.current = null;
-    }
-  }, [branding.confirmation_sms_enabled]);
-  // Depois de a mensagem mudar, devolve o foco à caixa com o cursor a seguir ao que entrou.
-  useLayoutEffect(() => {
-    const pos = pendingCaret.current;
-    if (pos == null) return;
-    pendingCaret.current = null;
-    applyCaret(pos);
-  }, [branding.confirmation_sms_message]);
 
   return (
     <>
@@ -115,44 +74,13 @@ export function FormEmailsTab<T extends EmailsTabFields>({
               groupLabel={t("emailAudience.groupConfirmation")}
             />
           )}
-          <div className="border-t pt-3">
-            <SwitchHeader
-              small
-              id="confirmation-sms-enabled"
-              label="Também por SMS"
-              description="Além do email, envia um SMS de confirmação ao número indicado pelo cliente."
-              checked={branding.confirmation_sms_enabled}
-              onChange={(v) => set({ confirmation_sms_enabled: v })}
-            />
-          </div>
-          {branding.confirmation_sms_enabled && (
-            <div className="space-y-3">
-              <div className="space-y-1">
-                <Label htmlFor="confirmation-sms-message" className="text-xs">Mensagem do SMS</Label>
-                <Textarea
-                  id="confirmation-sms-message"
-                  ref={smsRef}
-                  value={branding.confirmation_sms_message}
-                  onChange={(e) => set({ confirmation_sms_message: e.target.value })}
-                  onBlur={rememberSmsCaret}
-                  placeholder='Deixe vazio para usar a mensagem base: "{{company_name}}: a sua visita ficou marcada para {{meeting_date}}. Aguarde o nosso contacto telefónico para confirmação da visita."'
-                  rows={3}
-                />
-                <SmsVariableButtons
-                  includeLink={branding.confirmation_sms_include_link}
-                  onInsert={insertSmsVariable}
-                />
-              </div>
-              <SwitchHeader
-                small
-                id="confirmation-sms-include-link"
-                label="Incluir link de gerir/cancelar no SMS"
-                description="Desligado por omissão. Só ligue depois de confirmar o envio de um SMS de teste com o link."
-                checked={branding.confirmation_sms_include_link}
-                onChange={(v) => set({ confirmation_sms_include_link: v })}
-              />
-            </div>
-          )}
+          <ConfirmationSmsSection
+            branding={branding}
+            set={set}
+            locales={locales}
+            smsByLocale={smsByLocale}
+            onSmsLocaleChange={onSmsLocaleChange}
+          />
         </div>
 
         <div className="space-y-3 rounded-lg border p-3">

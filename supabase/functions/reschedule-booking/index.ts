@@ -3,12 +3,9 @@ import {
   loadFormEmailConfig,
   loadTemplate,
   sendEmailNow,
-  renderHtml,
-  renderSubject,
   parseEmailList,
   uniqueEmails,
   buildManageUrl,
-  defaultMeetingHtml,
   shouldNotifyClient,
 } from '../_shared/formEmails.ts';
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
@@ -16,6 +13,8 @@ import { initSentry, captureError } from "../_shared/sentry.ts";
 import { buildAudienceVars, pickAudienceTemplateId } from "../_shared/audienceTemplates.ts";
 import { createReminderLines } from "../_shared/reminderLines.ts";
 import { formatVisitWhen } from "../_shared/reminderContent.ts";
+import { formatVisitDate, resolveLeadLocale } from "../_shared/emailDefaults.ts";
+import { buildRescheduleMail } from "../_shared/bookingMails.ts";
 import { anyReminderEnabled, reminderRuleFor } from "../_shared/reminderRule.ts";
 import { resolveRescheduleTarget, validateRescheduleSlot } from "../_shared/rescheduleSlots.ts";
 import { needsNewReminderLines } from "../_shared/reminderReconcile.ts";
@@ -84,7 +83,8 @@ Deno.serve(async (req: Request) => {
     await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, clientIp);
 
     const { token, slot_start, slot_end, lang } = await req.json();
-    const leadLocale = (typeof lang === 'string' && lang.trim()) ? lang.trim().toLowerCase() : null;
+    // Idioma da pessoa: o `lang` do pedido; sem ele, o guardado na lead (anew_leads.locale), mais abaixo.
+    let leadLocale = resolveLeadLocale(lang, null);
 
     if (!token || typeof token !== 'string') {
       return json({ error: 'Token em falta ou inválido.', code: 'INVALID' });
@@ -120,6 +120,16 @@ Deno.serve(async (req: Request) => {
         .eq('scheduled_visit_id', itemId)
         .maybeSingle();
       leadId = leadByVisit?.id || null;
+    }
+
+    if (!leadLocale && leadId) {
+      const { data: storedLead } = await supabase
+        .from('anew_leads')
+        .select('locale')
+        .eq('id', leadId)
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+      leadLocale = resolveLeadLocale(null, storedLead?.locale);
     }
 
     // 4. A duracao vem da marcacao ORIGINAL -- nunca do slot_end do cliente
@@ -196,6 +206,10 @@ Deno.serve(async (req: Request) => {
       hour: '2-digit',
       minute: '2-digit',
     });
+
+    // Datas dos emails: a do CLIENTE segue o idioma dele (so as palavras); a do comercial (aviso
+    // interno) fica em portugues. `formattedWhen` (portugues) e o que a pagina recebe na resposta.
+    const whenForClient = formatVisitDate(slot_start, leadLocale, true);
 
     // Lembretes: acompanham a visita. Os que ja estao ligados a ela (criados na
     // marcacao) sao acertados aqui e pelo processador: movem-se para
@@ -377,8 +391,8 @@ Deno.serve(async (req: Request) => {
         lead_phone: leadPhone,
         company_name: orgRow?.name || '',
         technician_name: technicianName,
-        meeting_date: formattedWhen,
-        meeting_datetime: formattedWhen,
+        meeting_date: whenForClient,
+        meeting_datetime: whenForClient,
         location: item.location || '',
         cancel_url: cancelLink,
       };
@@ -387,10 +401,7 @@ Deno.serve(async (req: Request) => {
       // sem nenhum configurado, o texto padrao do PROPRIO lado (nunca o do outro,
       // nem o aviso de nova reuniao). O comercial nunca recebe os links do cliente.
       const buildMail = async (kind: 'client' | 'technician') => {
-        const defaultSubject = kind === 'client'
-          ? 'A sua visita foi reagendada'
-          : 'Reunião reagendada — {{lead_name}}';
-        const vars = buildAudienceVars(baseVars, kind, {
+        const vars = buildAudienceVars(kind === 'technician' ? { ...baseVars, meeting_date: formattedWhen, meeting_datetime: formattedWhen } : baseVars, kind, {
           cancelUrl: cancelLink,
           leadPhone,
           leadEmail,
@@ -398,32 +409,25 @@ Deno.serve(async (req: Request) => {
           appointmentUrl: `${siteUrlEnv.replace(/\/+$/, '')}/scheduling`,
         });
         const tpl = await loadTemplate(supabase, pickAudienceTemplateId(emailCfg, 'reschedule', kind, leadLocale));
-        if (tpl?.body_html) {
-          return {
-            subject: renderSubject(tpl.subject || defaultSubject, vars),
-            html: renderHtml(tpl.body_html, vars),
-          };
-        }
-        return {
-          subject: renderSubject(defaultSubject, vars),
-          html: defaultMeetingHtml({
-            audience: kind,
-            leadPhone: kind === 'technician' ? (leadPhone || undefined) : undefined,
-            leadEmail: kind === 'technician' ? (leadEmail || undefined) : undefined,
-            address: kind === 'technician' ? (item.location || undefined) : undefined,
-            appointmentUrl: kind === 'technician' ? `${siteUrlEnv.replace(/\/+$/, '')}/scheduling` : undefined,
-            heading: 'Reunião reagendada',
-            intro: kind === 'client'
-              ? 'A sua visita foi reagendada para a data abaixo.'
-              : 'Uma visita foi reagendada para a data abaixo.',
-            leadName: leadName,
-            when: formattedWhen,
-            location: item.location || undefined,
-            technicianName: technicianName || undefined,
-            cancelUrl: kind === 'client' ? (cancelLink || undefined) : undefined,
-            primaryColor: emailCfg?.primary_color, logoUrl: emailCfg?.logo_url,
-          }),
-        };
+        // Modelo escolhido manda; sem modelo, texto por omissao (_shared/bookingMails.ts): ao cliente no
+        // idioma dele, ao comercial sempre em portugues. Portugues identico ao de sempre.
+        return buildRescheduleMail({
+          kind,
+          template: tpl,
+          vars,
+          lang: leadLocale,
+          leadName,
+          leadPhone: leadPhone || undefined,
+          leadEmail: leadEmail || undefined,
+          address: item.location || undefined,
+          appointmentUrl: `${siteUrlEnv.replace(/\/+$/, '')}/scheduling`,
+          when: kind === 'technician' ? formattedWhen : whenForClient,
+          location: item.location || undefined,
+          technicianName: technicianName || undefined,
+          cancelUrl: cancelLink || undefined,
+          primaryColor: emailCfg?.primary_color,
+          logoUrl: emailCfg?.logo_url,
+        });
       };
 
       // (a) Client: friendly confirmation of the new slot. Has its own toggle

@@ -8,6 +8,8 @@
 // SMTP. All helpers are fail-soft — callers should wrap in try/catch and never
 // let an email failure break the booking/lead flow.
 
+import { MAIL_TEXTS, mailLangFor, normalizeMailLang } from "./emailDefaults.ts";
+
 export interface FormEmailConfig {
   confirmation_email_enabled: boolean;
   confirmation_email_template_id: string | null;
@@ -371,22 +373,25 @@ export function defaultSchedulingInviteHtml(opts: {
   resumeUrl: string;
   ctaLabel?: string;
   unsubscribeUrl?: string;
+  /** Idioma da pessoa: `en` traduz; qualquer outro (ou em falta) sai em portugues, como sempre. */
+  lang?: string | null;
 }): string {
-  const hi = opts.leadName ? `Olá ${escapeHtml(opts.leadName)},` : "Olá,";
-  const cta = escapeHtml(opts.ctaLabel || "Agendar a minha visita");
+  const t = MAIL_TEXTS[normalizeMailLang(opts.lang)].invite;
+  const hi = opts.leadName ? t.greetingWithName.replace("{name}", () => escapeHtml(opts.leadName)) : t.greeting;
+  const cta = escapeHtml(opts.ctaLabel || t.cta);
   const from = opts.companyName ? ` — ${escapeHtml(opts.companyName)}` : "";
   const unsub = opts.unsubscribeUrl
     ? `<p style="margin:6px 0 0;color:#9ca3af;font-size:12px">
-         <a href="${encodeURI(opts.unsubscribeUrl)}" style="color:#9ca3af;text-decoration:underline">Já não quero receber estes lembretes</a>
+         <a href="${encodeURI(opts.unsubscribeUrl)}" style="color:#9ca3af;text-decoration:underline">${t.unsubscribe}</a>
        </p>`
     : "";
   return `
   <div style="font-family:Inter,system-ui,sans-serif;max-width:520px;margin:0 auto;color:#1F2937">
-    <h2 style="margin:0 0 8px">Falta só agendar a sua visita${from}</h2>
+    <h2 style="margin:0 0 8px">${t.heading}${from}</h2>
     <p style="margin:0 0 12px;color:#4b5563">${hi}</p>
     <p style="margin:0 0 16px;color:#4b5563">
-      Recebemos o seu pedido de orçamento, mas ainda falta escolher a data da sua
-      <strong>visita técnica gratuita</strong>. É rápido — escolha o horário que lhe der mais jeito:
+      ${t.bodyBefore}
+      <strong>${t.bodyStrong}</strong>${t.bodyAfter}
     </p>
     <p style="margin:24px 0">
       <a href="${encodeURI(opts.resumeUrl)}"
@@ -394,7 +399,7 @@ export function defaultSchedulingInviteHtml(opts: {
                 padding:12px 22px;border-radius:10px;font-weight:600">${cta}</a>
     </p>
     <p style="margin:16px 0 0;color:#9ca3af;font-size:13px">
-      Se já agendou ou não pretende avançar, pode ignorar este email.
+      ${t.ignore}
     </p>
     ${unsub}
   </div>`;
@@ -429,11 +434,17 @@ export function defaultMeetingHtml(opts: {
   // "Abrir na agenda". Sem audience: o desenho antigo (avisos internos ainda nao
   // separados).
   audience?: "client" | "technician";
+  /**
+   * Idioma dos rotulos fixos («Data / hora», «Confirmo a visita»...). `en` traduz ao CLIENTE; o comercial
+   * (audience "technician") fica sempre em portugues; idioma em falta ou desconhecido = portugues, como sempre.
+   */
+  lang?: string | null;
   leadPhone?: string;
   leadEmail?: string;
   address?: string;
   appointmentUrl?: string;
 }): string {
+  const L = MAIL_TEXTS[mailLangFor(opts.audience, opts.lang)].labels;
   const brand = safeHexColor(opts.primaryColor, "#85D3BE");
   // logoUrl e um URL guardado pelo proprio sistema (upload em Personalizacao),
   // nao texto livre digitado no email -- seguro como src.
@@ -447,34 +458,34 @@ export function defaultMeetingHtml(opts: {
       </tr>`;
   const rows: string[] = [];
   if (opts.audience === "technician") {
-    rows.push(row("Lead", opts.leadName || "-"));
-    if (opts.leadPhone) rows.push(row("Telefone", opts.leadPhone));
-    if (opts.leadEmail) rows.push(row("Email", opts.leadEmail));
+    rows.push(row(L.lead, opts.leadName || "-"));
+    if (opts.leadPhone) rows.push(row(L.phone, opts.leadPhone));
+    if (opts.leadEmail) rows.push(row(L.email, opts.leadEmail));
   } else if (opts.audience !== "client") {
-    rows.push(row("Cliente", opts.leadName || "-"));
+    rows.push(row(L.client, opts.leadName || "-"));
   }
-  rows.push(row("Data / hora", opts.when || "-"));
+  rows.push(row(L.dateTime, opts.when || "-"));
   if (opts.audience === "technician") {
     const where = opts.address || opts.location;
-    if (where) rows.push(row("Morada", where));
+    if (where) rows.push(row(L.address, where));
   } else if (opts.location) {
-    rows.push(row("Local", opts.location));
+    rows.push(row(L.place, opts.location));
   }
-  if (opts.technicianName) rows.push(row("Técnico", opts.technicianName));
+  if (opts.technicianName) rows.push(row(L.technician, opts.technicianName));
 
   // cancelUrl/confirmUrl are system-built URLs (buildManageUrl / confirm-booking token), not free user text — safe as href.
   const confirmButton = opts.confirmUrl
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px auto 0"><tr><td style="border-radius:10px;background:#059669">
-        <a href="${encodeURI(opts.confirmUrl)}" style="display:inline-block;padding:13px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;font-family:Inter,system-ui,sans-serif">Confirmo a visita</a>
+        <a href="${encodeURI(opts.confirmUrl)}" style="display:inline-block;padding:13px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;font-family:Inter,system-ui,sans-serif">${L.confirmVisit}</a>
       </td></tr></table>`
     : "";
   const cancel = opts.cancelUrl
-    ? `<p style="margin:${opts.confirmUrl ? "14px" : "24px"} 0 0;text-align:center"><a href="${encodeURI(opts.cancelUrl)}" style="color:#6b7280;font-size:13px;text-decoration:underline">Gerir ou cancelar agendamento</a></p>`
+    ? `<p style="margin:${opts.confirmUrl ? "14px" : "24px"} 0 0;text-align:center"><a href="${encodeURI(opts.cancelUrl)}" style="color:#6b7280;font-size:13px;text-decoration:underline">${L.manageOrCancel}</a></p>`
     : "";
   // appointmentUrl e um URL construido pelo sistema (site + /scheduling), so para o comercial.
   const agendaButton = opts.audience === "technician" && opts.appointmentUrl
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px auto 0"><tr><td style="border-radius:10px;background:#111827">
-        <a href="${encodeURI(opts.appointmentUrl)}" style="display:inline-block;padding:13px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;font-family:Inter,system-ui,sans-serif">Abrir na agenda</a>
+        <a href="${encodeURI(opts.appointmentUrl)}" style="display:inline-block;padding:13px 32px;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;font-family:Inter,system-ui,sans-serif">${L.openAgenda}</a>
       </td></tr></table>`
     : "";
 
@@ -544,7 +555,7 @@ export async function sendLeadConfirmationEmail(
       organizationId: params.organizationId,
       smtpId: emailCfg.email_smtp_id,
       to: params.leadEmail,
-      subject: renderSubject(tpl.subject || "Confirmação", vars),
+      subject: renderSubject(tpl.subject || MAIL_TEXTS[mailLangFor("client", params.leadLocale)].confirmationFallbackSubject, vars),
       html: renderHtml(tpl.body_html, vars),
     });
   } catch (err) {
@@ -661,6 +672,7 @@ export async function queueSchedulingInviteRecovery(
       companyName: org?.name || "",
       resumeUrl,
       unsubscribeUrl,
+      lang: params.leadLocale,
     });
 
     const delays = Array.isArray(inviteCfg?.scheduling_invite_delays_hours) && inviteCfg!.scheduling_invite_delays_hours!.length > 0
@@ -674,7 +686,7 @@ export async function queueSchedulingInviteRecovery(
         organizationId: params.organizationId,
         userId: inviteUserId,
         toEmail: params.leadEmail,
-        subject: "Falta agendar a sua visita técnica gratuita",
+        subject: MAIL_TEXTS[mailLangFor("client", params.leadLocale)].invite.subject,
         bodyHtml: html,
         scheduledFor: new Date(Date.now() + hours * 3600000).toISOString(),
         entityType: "lead_scheduling_invite",

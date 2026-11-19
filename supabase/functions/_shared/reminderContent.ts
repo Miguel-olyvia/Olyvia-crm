@@ -2,25 +2,24 @@
 // sem Deno. E usado na marcacao (book-slot), no reagendamento pelo link
 // (reschedule-booking) e no envio (processadores), para o texto ser sempre o
 // mesmo e para, no envio, a hora e o comercial serem os ACTUAIS da visita.
+//
+// Idioma: o CLIENTE recebe o texto por omissao no idioma dele (`lang`; so `en` tem versao inglesa,
+// o resto e portugues, como sempre). O COMERCIAL recebe sempre portugues (aviso interno). Ver emailDefaults.ts.
 
 import { defaultMeetingHtml, renderHtml, renderSubject } from "./formEmails.ts";
+import { MAIL_TEXTS, formatVisitDate, mailLangFor, normalizeMailLang, reminderSmsText } from "./emailDefaults.ts";
 import type { Audience } from "./audienceTemplates.ts";
 
-/** Assunto por omissao, um por destinatario: o comercial nunca recebe o texto do cliente. */
-export const DEFAULT_REMINDER_SUBJECT_CLIENT = "Lembrete da sua visita — {{meeting_date}}";
-export const DEFAULT_REMINDER_SUBJECT_TECHNICIAN = "Lembrete: visita a {{lead_name}} — {{meeting_date}}";
+/** Assunto por omissao, um por destinatario, em portugues: o comercial nunca recebe o texto do cliente. */
+export const DEFAULT_REMINDER_SUBJECT_CLIENT = MAIL_TEXTS.pt.reminder.clientSubject;
+export const DEFAULT_REMINDER_SUBJECT_TECHNICIAN = MAIL_TEXTS.pt.reminder.technicianSubject;
 
-/** Data/hora de uma visita, como aparece nos emails e SMS (fuso de Lisboa). */
-export function formatVisitWhen(iso: string): string {
-  return new Date(iso).toLocaleString("pt-PT", {
-    timeZone: "Europe/Lisbon",
-    weekday: "long",
-    day: "numeric",
-    month: "long",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+/**
+ * Data/hora de uma visita, como aparece nos emails e SMS (fuso de Lisboa). Sem `lang` (ou pt, ou
+ * desconhecido) e o texto de sempre; em `en` so as palavras mudam.
+ */
+export function formatVisitWhen(iso: string, lang?: string | null): string {
+  return formatVisitDate(iso, lang, true);
 }
 
 export interface ReminderBrand {
@@ -38,10 +37,14 @@ export function buildReminderMail(opts: {
   template: ReminderTemplate | null;
   vars: Record<string, string>;
   brand: ReminderBrand | null;
+  /** Idioma da pessoa; so o cliente o segue. */
+  lang?: string | null;
 }): { subject: string; html: string } {
   const { audience, template, vars, brand } = opts;
   const isClient = audience === "client";
-  const defaultSubject = isClient ? DEFAULT_REMINDER_SUBJECT_CLIENT : DEFAULT_REMINDER_SUBJECT_TECHNICIAN;
+  const lang = mailLangFor(audience, opts.lang);
+  const t = MAIL_TEXTS[lang].reminder;
+  const defaultSubject = isClient ? t.clientSubject : t.technicianSubject;
   const subject = renderSubject(template?.subject || defaultSubject, vars);
   if (template?.body_html) {
     return { subject, html: renderHtml(template.body_html, vars) };
@@ -50,10 +53,9 @@ export function buildReminderMail(opts: {
     subject,
     html: defaultMeetingHtml({
       audience,
-      heading: isClient ? "Lembrete da sua visita" : "Lembrete de visita",
-      intro: isClient
-        ? "Este é um lembrete da sua visita agendada."
-        : "Lembrete: tem uma visita agendada com a lead abaixo.",
+      lang,
+      heading: isClient ? t.clientHeading : t.technicianHeading,
+      intro: isClient ? t.clientIntro : t.technicianIntro,
       leadName: vars.lead_name || "",
       leadPhone: isClient ? undefined : (vars.lead_phone || undefined),
       leadEmail: isClient ? undefined : (vars.lead_email || undefined),
@@ -70,12 +72,16 @@ export function buildReminderMail(opts: {
   };
 }
 
-/** Variaveis guardadas na linha, com a hora, o local e o comercial ACTUAIS da visita. */
+/**
+ * Variaveis guardadas na linha, com a hora, o local e o comercial ACTUAIS da visita.
+ * `lang`: idioma da data (so as palavras); sem ele, portugues como sempre.
+ */
 export function withFreshVisitVars(
   stored: Record<string, string>,
   fresh: { startIso: string; location?: string | null; technicianName?: string | null },
+  lang?: string | null,
 ): Record<string, string> {
-  const when = formatVisitWhen(fresh.startIso);
+  const when = formatVisitWhen(fresh.startIso, lang);
   return {
     ...stored,
     meeting_date: when,
@@ -103,9 +109,8 @@ export function reminderSmsTemplate(opts: {
   withConfirmLink: boolean;
   /** Acrescenta " Gerir: {{cancel_url}}". */
   withManageLink: boolean;
+  /** Idioma do cliente; sem ele (ou desconhecido), portugues como sempre. */
+  lang?: string | null;
 }): string {
-  let text = `${opts.companyName || "A empresa"}: lembrete da sua visita${opts.rescheduled ? " reagendada" : ""} para {{meeting_date}}.`;
-  if (opts.withConfirmLink) text += " Confirme: {{confirm_url}}";
-  if (opts.withManageLink) text += " Gerir: {{cancel_url}}";
-  return text;
+  return reminderSmsText(normalizeMailLang(opts.lang), opts);
 }

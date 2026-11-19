@@ -239,6 +239,9 @@ export default function BookingManage() {
   const [searchParams] = useSearchParams();
   const token = searchParams.get("token") || "";
   const lang: Lang = (searchParams.get("lang") || "").toLowerCase().startsWith("en") ? "en" : "pt";
+  // Idioma enviado ao servidor para os emails: so o que o link traz. Sem ele, o servidor usa o idioma
+  // guardado na lead (o do formulario que preencheu); «pt» por omissao da pagina nao o deve sobrepor.
+  const requestLang = (searchParams.get("lang") || "").trim() || undefined;
   const t = STRINGS[lang];
 
   const [view, setView] = useState<View>("loading");
@@ -300,7 +303,7 @@ export default function BookingManage() {
     setSubmitting(true);
     setActionError(null);
     try {
-      const data = await callFn("cancel-booking", { token, lang });
+      const data = await callFn("cancel-booking", { token, lang: requestLang });
       if (data?.success) {
         setConfirmCancelOpen(false);
         setView("cancelled");
@@ -323,7 +326,7 @@ export default function BookingManage() {
         token,
         slot_start: selectedSlot.start,
         slot_end: selectedSlot.end,
-        lang,
+        lang: requestLang,
       });
       if (data?.success) {
         setBooking((prev) =>

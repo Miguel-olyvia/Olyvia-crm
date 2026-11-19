@@ -150,3 +150,37 @@ describe('createReminderLines: o texto de cada lado', () => {
     expect(row.body_html).not.toContain('Abrir na agenda');
   });
 });
+
+describe('createReminderLines: o idioma da pessoa', () => {
+  const START_EN_DATE = 'Monday, 5 October 2026 at 11:00';
+  const START_PT_DATE = 'segunda-feira, 5 de outubro de 2026 às 11:00';
+
+  it('sem idioma (ou pt, ou desconhecido) o texto, as datas e o SMS são os de hoje', async () => {
+    for (const locale of ['pt', 'fr', '', null as unknown as string]) {
+      const { client, technician, inserted } = await run(cfg({ reminder_sms_enabled: true }), { locale });
+      expect(client[0].subject).toBe(`Lembrete da sua visita — ${START_PT_DATE}`);
+      expect(client[0].content_vars.meeting_date).toBe(START_PT_DATE);
+      expect(technician[0].subject).toBe(`Lembrete: visita a Rita Sousa — ${START_PT_DATE}`);
+      expect(inserted.scheduled_sms[0].message).toBe('Acme: lembrete da sua visita para {{meeting_date}}.');
+      expect(inserted.scheduled_sms[0].content_vars.meeting_date).toBe(START_PT_DATE);
+    }
+  });
+
+  it('cliente em inglês: email, data e SMS em inglês; o comercial continua em português', async () => {
+    const { client, technician, inserted } = await run(cfg({ reminder_sms_enabled: true }), { locale: 'en' });
+    expect(client[0].subject).toBe(`Reminder of your visit — ${START_EN_DATE}`);
+    expect(client[0].body_html).toContain('This is a reminder of your scheduled visit.');
+    expect(client[0].content_vars.meeting_date).toBe(START_EN_DATE);
+    expect(client[0].content_vars.meeting_datetime).toBe(START_EN_DATE);
+    expect(client[0].locale).toBe('en');
+    expect(technician[0].subject).toBe(`Lembrete: visita a Rita Sousa — ${START_PT_DATE}`);
+    expect(technician[0].content_vars.meeting_date).toBe(START_PT_DATE);
+    expect(inserted.scheduled_sms[0].message).toBe('Acme: reminder of your visit on {{meeting_date}}.');
+    expect(inserted.scheduled_sms[0].content_vars.meeting_date).toBe(START_EN_DATE);
+  });
+
+  it('reagendado, em inglês: o SMS diz «rescheduled»', async () => {
+    const { inserted } = await run(cfg({ reminder_sms_enabled: true }), { locale: 'en', rescheduled: true });
+    expect(inserted.scheduled_sms[0].message).toBe('Acme: reminder of your rescheduled visit on {{meeting_date}}.');
+  });
+});
