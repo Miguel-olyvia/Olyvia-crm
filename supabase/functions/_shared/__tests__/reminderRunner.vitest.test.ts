@@ -553,3 +553,74 @@ describe('cancelLegacyVisitReminders', () => {
     expect(['s', 't'].map((i) => st('scheduled_sms', i))).toEqual(['cancelled', 'pending']);
   });
 });
+
+describe('renderLinkedEmail / renderLinkedSms: o idioma da pessoa (row.locale)', () => {
+  const FRIDAY_EN = 'Friday, 2 October 2026 at 11:00';
+  const FRIDAY_PT = 'sexta-feira, 2 de outubro de 2026 às 11:00';
+
+  it('cliente com locale en: assunto, texto e data em inglês', async () => {
+    const db = world();
+    const res = await renderLinkedEmail(db, { ...db.tables.scheduled_emails[0], locale: 'en' });
+    expect(res.kind).toBe('ok');
+    const mail = (res as any).value as { subject: string; html: string };
+    expect(mail.subject).toBe(`Reminder of your visit — ${FRIDAY_EN}`);
+    expect(mail.html).toContain('This is a reminder of your scheduled visit.');
+    expect(mail.html).toContain(FRIDAY_EN);
+    expect(mail.html).not.toContain('Lembrete');
+  });
+
+  it.each([['pt'], [null], [undefined], ['fr'], ['']])('cliente com locale %j: português como hoje', async (locale) => {
+    const db = world();
+    const res = await renderLinkedEmail(db, { ...db.tables.scheduled_emails[0], locale });
+    const mail = (res as any).value as { subject: string; html: string };
+    expect(mail.subject).toBe(`Lembrete da sua visita — ${FRIDAY_PT}`);
+    expect(mail.html).toContain('Este é um lembrete da sua visita agendada.');
+  });
+
+  it('comercial com locale en continua em português (aviso interno)', async () => {
+    const db = world();
+    const res = await renderLinkedEmail(db, { ...db.tables.scheduled_emails[1], locale: 'en' });
+    const mail = (res as any).value as { subject: string; html: string };
+    expect(mail.subject).toBe(`Lembrete: visita a Rita — ${FRIDAY_PT}`);
+    expect(mail.html).toContain(FRIDAY_PT);
+  });
+
+  it('SMS com locale en: a data da mensagem sai em inglês; sem locale, em português', async () => {
+    const db = world();
+    const msg = 'Acme: reminder of your visit on {{meeting_date}}.';
+    const en = await renderLinkedSms(db, { ...db.tables.scheduled_sms[0], locale: 'en', message: msg });
+    expect(en).toEqual({ kind: 'ok', value: `Acme: reminder of your visit on ${FRIDAY_EN}.` });
+    const pt = await renderLinkedSms(db, db.tables.scheduled_sms[0]);
+    expect(pt).toEqual({ kind: 'ok', value: `Acme: lembrete da sua visita para ${FRIDAY_PT}.` });
+  });
+});
+
+describe('reconcileItem: linhas religadas de uma pessoa em inglês refazem o texto em inglês', () => {
+  it('assunto, corpo e SMS refeitos com a data nova e as palavras em inglês', async () => {
+    const later = START + 24 * H;
+    const db = world({ itemStart: later, formHours: 24 });
+    db.tables.scheduled_emails.forEach((r) => {
+      r.content_vars = null;
+      r.locale = 'en';
+      r.subject = 'Reminder: old';
+      r.body_html = '<p>old</p>';
+    });
+    db.tables.scheduled_sms.forEach((r) => {
+      r.content_vars = null;
+      r.locale = 'en';
+      r.message = 'Acme: reminder of your visit on old date.';
+    });
+    db.tables.anew_leads = [{ id: 'lead-1', field_values: { email: 'rita@x.pt', first_name: 'Rita', last_name: 'Sousa', phone: '+351900' } }];
+    db.tables.anew_organizations = [{ id: 'org-1', name: 'Acme' }];
+    await reconcileItem(db, ITEM, NOW);
+    const mail = byId(db, 'scheduled_emails', 'e-client');
+    expect(mail.subject).toContain('Reminder of your visit');
+    expect(mail.body_html).toContain('Saturday, 3 October 2026 at 11:00');
+    const ana = byId(db, 'scheduled_emails', 'e-ana');
+    expect(ana.subject).toContain('Lembrete');
+    const sms = byId(db, 'scheduled_sms', 's-client');
+    expect(sms.message).toBe('Acme: reminder of your rescheduled visit on {{meeting_date}}.');
+    const out = await renderLinkedSms(db, sms);
+    expect((out as any).value).toContain('Saturday, 3 October 2026 at 11:00');
+  });
+});

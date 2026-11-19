@@ -7,11 +7,9 @@ import {
   loadFormEmailConfig,
   loadTemplate,
   sendEmailNow,
-  renderHtml,
   renderSubject,
   parseEmailList,
   uniqueEmails,
-  defaultMeetingHtml,
   pickTemplateId,
   buildManageUrl,
 } from '../_shared/formEmails.ts';
@@ -25,6 +23,9 @@ import { evaluateOwnerDay, makeOwnerDeps, ownerResourcesForSlot } from '../_shar
 import { buildAudienceVars } from '../_shared/audienceTemplates.ts';
 import { createReminderLines } from '../_shared/reminderLines.ts';
 import { formatVisitWhen } from '../_shared/reminderContent.ts';
+import { defaultConfirmationSms, formatVisitDate, normalizeMailLang, resolveLeadLocale } from '../_shared/emailDefaults.ts';
+import { buildBookingConfirmationMail, buildMeetingNotifyMail } from '../_shared/bookingMails.ts';
+import { pickConfirmationSmsMessage, smsByLocaleFromSettings } from '../_shared/confirmationSms.ts';
 import { reminderRuleFor } from '../_shared/reminderRule.ts';
 
 initSentry();
@@ -121,12 +122,14 @@ Deno.serve(async (req: Request) => {
       lead_id,
       lang,
     } = parsed.data;
-    const leadLocale = (typeof lang === 'string' && lang.trim()) ? lang.trim().toLowerCase() : null;
+    // Idioma da pessoa: o `lang` do pedido (idioma em que preenche o formulario); se o pedido nao o traz,
+    // ao enviar os emails le-se o guardado na lead (anew_leads.locale).
+    let leadLocale = resolveLeadLocale(lang, null);
 
     // 1. Get form info
     const { data: form, error: formError } = await supabase
       .from('forms')
-      .select('id, organization_id')
+      .select('id, organization_id, settings')
       .eq('id', form_id)
       .eq('is_active', true)
       .single();
@@ -976,11 +979,21 @@ Deno.serve(async (req: Request) => {
         .eq('id', organizationId)
         .maybeSingle();
 
+      if (!leadLocale && lead?.id) {
+        const { data: storedLead } = await supabase
+          .from('anew_leads')
+          .select('locale')
+          .eq('id', lead.id)
+          .eq('organization_id', organizationId)
+          .maybeSingle();
+        leadLocale = resolveLeadLocale(null, storedLead?.locale);
+      }
+
       const leadFullName = [leadFirstName, leadLastName].filter(Boolean).join(' ') || 'Lead';
-      const whenFormatted = new Date(slot_start).toLocaleString('pt-PT', {
-        timeZone: 'Europe/Lisbon', weekday: 'long', day: 'numeric', month: 'long',
-        hour: '2-digit', minute: '2-digit',
-      });
+      // A data do CLIENTE segue o idioma dele (so as palavras; sem idioma, portugues como sempre);
+      // a do comercial (aviso interno) fica sempre em portugues.
+      const whenFormatted = formatVisitDate(slot_start, leadLocale, false);
+      const whenInternal = formatVisitDate(slot_start, null, false);
       const siteUrlEnv = Deno.env.get('SITE_URL') || 'https://olyvia.lovable.app';
       const cancelLink = bookingToken?.token
         ? buildManageUrl(emailCfg?.booking_manage_url_template, leadLocale, bookingToken.token, siteUrlEnv)
@@ -1008,18 +1021,20 @@ Deno.serve(async (req: Request) => {
       if (emailCfg?.confirmation_email_enabled && leadEmail) {
         const confTemplateId = pickTemplateId(emailCfg, 'confirmation', leadLocale, emailCfg.confirmation_email_template_id);
         const confTpl = confTemplateId ? await loadTemplate(supabase, confTemplateId) : null;
-        const confHtml = confTpl?.body_html
-          ? renderHtml(confTpl.body_html, baseVars)
-          : defaultMeetingHtml({
-              audience: 'client',
-              heading: 'Visita confirmada',
-              intro: 'A sua visita foi agendada com sucesso.',
-              leadName: leadFullName, when: whenFormatted,
-              location: fullLocation || undefined,
-              technicianName: technicianName || undefined,
-              cancelUrl: cancelLink || undefined,
-              primaryColor: emailCfg.primary_color, logoUrl: emailCfg.logo_url,
-            });
+        // Modelo escolhido para o idioma manda; sem modelo, texto por omissao no idioma da pessoa
+        // (_shared/bookingMails.ts; portugues identico ao de sempre).
+        const confMail = buildBookingConfirmationMail({
+          template: confTpl,
+          vars: baseVars,
+          lang: leadLocale,
+          leadName: leadFullName,
+          when: whenFormatted,
+          location: fullLocation || undefined,
+          technicianName: technicianName || undefined,
+          cancelUrl: cancelLink || undefined,
+          primaryColor: emailCfg.primary_color,
+          logoUrl: emailCfg.logo_url,
+        });
         await sendEmailNow({
           organizationId,
           // SEM userId de proposito: esta marcacao vem sempre de um formulario
@@ -1035,8 +1050,8 @@ Deno.serve(async (req: Request) => {
           // configurado), nunca uma identidade pessoal.
           smtpId: emailCfg.email_smtp_id,
           to: leadEmail,
-          subject: renderSubject(confTpl?.subject || 'Confirmação da sua visita — {{meeting_date}}', baseVars),
-          html: confHtml,
+          subject: confMail.subject,
+          html: confMail.html,
         });
       }
 
@@ -1057,9 +1072,17 @@ Deno.serve(async (req: Request) => {
         // omissao como para a personalizada, sem exigir reescrever o texto.
         const includeLink = emailCfg.confirmation_sms_include_link === true;
         const smsBaseVars = includeLink ? baseVars : { ...baseVars, cancel_url: '' };
-        const smsTemplate = emailCfg.confirmation_sms_message?.trim()
-          ? emailCfg.confirmation_sms_message
-          : `${orgRow?.name || 'A empresa'}: a sua visita ficou marcada para {{meeting_date}}. Aguarde o nosso contacto telefónico para confirmação da visita.${includeLink && cancelLink ? ' Gerir/cancelar: {{cancel_url}}' : ''}`;
+        // Texto do idioma da pessoa (forms.settings.i18n.content.branding[idioma].confirmation_sms_message);
+        // sem ele, a coluna unica (idioma por omissao do formulario); sem ela, o texto por omissao do
+        // idioma (confirmationSms.ts / emailDefaults.ts; portugues identico ao de sempre).
+        const smsTemplate = pickConfirmationSmsMessage({
+          column: emailCfg.confirmation_sms_message,
+          byLocale: smsByLocaleFromSettings(form.settings),
+          locale: leadLocale,
+        }) ?? defaultConfirmationSms(normalizeMailLang(leadLocale), {
+          companyName: orgRow?.name || '',
+          withCancelLink: includeLink && !!cancelLink,
+        });
         const smsMessage = renderSubject(smsTemplate, smsBaseVars);
         const smsResult = await sendSmsNow({
           toPhone: String(leadPhone),
@@ -1100,38 +1123,40 @@ Deno.serve(async (req: Request) => {
           const tpl = await loadTemplate(supabase, pickTemplateId(emailCfg, 'meeting_notify', leadLocale, emailCfg?.meeting_notify_template_id));
           // Destinatario: comercial (e extras internos). cancel_url/confirm_url,
           // que sao os links do CLIENTE, ficam vazios mesmo num modelo proprio.
-          const notifyVars = buildAudienceVars(baseVars, 'technician', {
-            leadPhone: String(leadPhone || ''),
-            leadEmail: leadEmail || '',
-            address: fullLocation || '',
+          const notifyVars = {
+            ...buildAudienceVars(baseVars, 'technician', {
+              leadPhone: String(leadPhone || ''),
+              leadEmail: leadEmail || '',
+              address: fullLocation || '',
+              appointmentUrl: `${siteUrlEnv.replace(/\/+$/, '')}/scheduling`,
+            }),
+            // Aviso interno: a data fica em portugues mesmo que o cliente use outro idioma.
+            meeting_date: whenInternal,
+            meeting_datetime: whenInternal,
+          };
+          // Sem cancelUrl de propósito: é o link de autogestão do CLIENTE, não uma ação do comercial --
+          // confundia quem recebia este aviso interno, parecendo um botão seu. Sempre em portugues.
+          const notifyMail = buildMeetingNotifyMail({
+            template: tpl,
+            vars: notifyVars,
+            leadName: leadFullName,
+            leadPhone: String(leadPhone || '') || undefined,
+            leadEmail: leadEmail || undefined,
+            address: fullLocation || undefined,
             appointmentUrl: `${siteUrlEnv.replace(/\/+$/, '')}/scheduling`,
+            when: whenInternal,
+            location: fullLocation || undefined,
+            technicianName: technicianName || undefined,
+            primaryColor: emailCfg?.primary_color,
+            logoUrl: emailCfg?.logo_url,
           });
-          const subject = renderSubject(tpl?.subject || 'Nova reunião agendada — {{lead_name}}', notifyVars);
-          const html = tpl?.body_html
-            ? renderHtml(tpl.body_html, notifyVars)
-            : defaultMeetingHtml({
-                audience: 'technician',
-                leadPhone: String(leadPhone || '') || undefined,
-                leadEmail: leadEmail || undefined,
-                address: fullLocation || undefined,
-                appointmentUrl: `${siteUrlEnv.replace(/\/+$/, '')}/scheduling`,
-                heading: 'Nova reunião agendada',
-                intro: 'Foi marcada uma nova visita através do formulário.',
-                leadName: leadFullName, when: whenFormatted,
-                location: fullLocation || undefined,
-                technicianName: technicianName || undefined,
-                // Sem cancelUrl de propósito: é o link de autogestão do
-                // CLIENTE, não uma ação do comercial -- confundia quem
-                // recebia este aviso interno, parecendo um botão seu.
-                primaryColor: emailCfg?.primary_color, logoUrl: emailCfg?.logo_url,
-              });
           // SEM userId, mesmo motivo do email ao cliente (regra 13, ver acima):
           // com userId presente, o envio ia pelo SMTP PESSOAL de quem calhava
           // ser createdBy (o primeiro membro activo da organizacao, ao acaso),
           // nunca pelo SMTP do formulario que emailCfg.email_smtp_id ja
           // resolve -- confirmado ao vivo: o aviso ao comercial falhava por
           // autenticacao mesmo com o SMTP da organizacao correcto e testado.
-          await sendEmailNow({ organizationId, smtpId: emailCfg?.email_smtp_id, to: notifyList[0], recipients: notifyList, subject, html });
+          await sendEmailNow({ organizationId, smtpId: emailCfg?.email_smtp_id, to: notifyList[0], recipients: notifyList, subject: notifyMail.subject, html: notifyMail.html });
         }
       }
 

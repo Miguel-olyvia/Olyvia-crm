@@ -302,11 +302,13 @@ async function rebuildLegacyContent(
     const technicianName = audience === "technician" && channel === "email"
       ? (own?.name ?? null)
       : (technicians.map((t) => t.name).filter(Boolean).join(", ") || null);
+    // Idioma da pessoa (a linha guarda-o em `locale`): so o cliente o segue; o comercial fica em portugues.
+    const lang = audience === "client" ? (row.locale ?? null) : null;
     const vars = withFreshVisitVars(base, {
       startIso: item.start_datetime,
       location: item.location,
       technicianName,
-    });
+    }, lang);
     if (channel === "sms") {
       return {
         content_vars: vars,
@@ -315,10 +317,11 @@ async function rebuildLegacyContent(
           rescheduled: true,
           withConfirmLink: false,
           withManageLink: false,
+          lang,
         }),
       };
     }
-    const mail = buildReminderMail({ audience, template, vars, brand: cfg });
+    const mail = buildReminderMail({ audience, template, vars, brand: cfg, lang: row.locale });
     return { content_vars: vars, subject: mail.subject, body_html: mail.html };
   } catch (err) {
     // So a montagem (pura) chega aqui: falha sempre da mesma maneira, cancela-se com motivo.
@@ -474,13 +477,14 @@ export async function renderLinkedEmail(
     const technicianName = audience === "technician"
       ? (own?.name ?? null)
       : (techs.map((t) => t.name).filter(Boolean).join(", ") || null);
+    // A data segue o idioma do cliente (so as palavras); o comercial fica em portugues.
     const vars = withFreshVisitVars(stored, {
       startIso: item.start_datetime,
       location: item.location,
       technicianName,
-    });
+    }, audience === "client" ? (row.locale ?? null) : null);
     const template = row.template_id ? await loadTemplate(supabase, row.template_id) : null;
-    return { kind: "ok", value: buildReminderMail({ audience, template, vars, brand: cfg }) };
+    return { kind: "ok", value: buildReminderMail({ audience, template, vars, brand: cfg, lang: row.locale }) };
   } catch (err) {
     console.error("[reminderRunner] renderLinkedEmail failed, o lembrete fica para o proximo lote:", err);
     return { kind: "defer", reason: "montagem do email falhou" };
@@ -513,7 +517,7 @@ export async function renderLinkedSms(supabase: any, row: any): Promise<LinkedRe
       startIso: item.start_datetime,
       location: item.location,
       technicianName: techs.map((t) => t.name).filter(Boolean).join(", ") || null,
-    });
+    }, row.locale ?? null);
     const text = renderSubject(message, vars);
     if (/\{\{\w+\}\}/.test(text)) return { kind: "cancel", reason: REASON_CONTENT_UNRECOVERABLE };
     return { kind: "ok", value: text };

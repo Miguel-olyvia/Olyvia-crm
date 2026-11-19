@@ -1337,6 +1337,9 @@ export default function PublicLeadForm() {
         field_values: formValues,
         campaign_id: formConfig.campaign_id || campaignId || undefined,
         source_id: resolvedSourceId || null,
+        // Idioma em que a pessoa preenche o formulario: o servidor escolhe o modelo de email e o texto
+        // do email/SMS de confirmacao por este idioma (sem ele, usa o guardado na lead).
+        lang: currentLocale || undefined,
       })
     });
 

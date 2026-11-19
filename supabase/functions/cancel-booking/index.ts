@@ -2,17 +2,16 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import {
   loadFormEmailConfig,
   sendEmailNow,
-  renderSubject,
   parseEmailList,
   uniqueEmails,
   buildManageUrl,
-  defaultMeetingHtml,
   shouldNotifyClient,
   loadTemplate,
-  renderHtml,
 } from '../_shared/formEmails.ts';
 import { buildAudienceVars, pickAudienceTemplateId } from '../_shared/audienceTemplates.ts';
 import { cancelLegacyVisitReminders } from '../_shared/reminderRunner.ts';
+import { formatVisitDate, resolveLeadLocale } from '../_shared/emailDefaults.ts';
+import { buildCancelMail } from '../_shared/bookingMails.ts';
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 
@@ -82,7 +81,8 @@ Deno.serve(async (req: Request) => {
     await recordRateLimitAttempt(supabase, RATE_LIMIT_BUCKET, clientIp);
 
     const { token, lang } = await req.json();
-    const leadLocale = (typeof lang === 'string' && lang.trim()) ? lang.trim().toLowerCase() : null;
+    // Idioma da pessoa: o `lang` do pedido; sem ele, o guardado na lead (anew_leads.locale), mais abaixo.
+    let leadLocale = resolveLeadLocale(lang, null);
 
     if (!token || typeof token !== 'string') {
       return json({ error: 'Token em falta ou inválido.', code: 'INVALID' });
@@ -134,6 +134,16 @@ Deno.serve(async (req: Request) => {
         .eq('scheduled_visit_id', itemId)
         .maybeSingle();
       leadId = leadByVisit?.id || null;
+    }
+
+    if (!leadLocale && leadId) {
+      const { data: storedLead } = await supabase
+        .from('anew_leads')
+        .select('locale')
+        .eq('id', leadId)
+        .eq('organization_id', organizationId)
+        .maybeSingle();
+      leadLocale = resolveLeadLocale(null, storedLead?.locale);
     }
 
     // Resolve the assigned technician's name + email NOW, BEFORE step 4 deletes
@@ -290,17 +300,10 @@ Deno.serve(async (req: Request) => {
         .maybeSingle();
 
       // Original slot — the visit that was cancelled.
-      const formattedWhen = item.start_datetime
-        ? new Date(item.start_datetime).toLocaleString('pt-PT', {
-            timeZone: 'Europe/Lisbon',
-            weekday: 'long',
-            day: 'numeric',
-            month: 'long',
-            year: 'numeric',
-            hour: '2-digit',
-            minute: '2-digit',
-          })
-        : '';
+      // A data do CLIENTE segue o idioma dele (so as palavras; sem idioma, portugues como sempre);
+      // a do comercial (aviso interno) fica sempre em portugues.
+      const formattedWhen = item.start_datetime ? formatVisitDate(item.start_datetime, leadLocale, true) : '';
+      const whenInternal = item.start_datetime ? formatVisitDate(item.start_datetime, null, true) : '';
 
       const siteUrlEnv = Deno.env.get('SITE_URL') || 'https://olyvia.lovable.app';
       // Manage link is informational only here (token is now burned).
@@ -327,10 +330,7 @@ Deno.serve(async (req: Request) => {
       // Modelo proprio por destinatario (cancel_client / cancel_technician); sem
       // nenhum configurado, o texto padrao abaixo, exactamente como antes.
       const buildMail = async (kind: 'client' | 'technician') => {
-        const defaultSubject = kind === 'client'
-          ? 'A sua visita foi cancelada'
-          : 'Visita cancelada — {{lead_name}}';
-        const vars = buildAudienceVars(baseVars, kind, {
+        const vars = buildAudienceVars(kind === 'technician' ? { ...baseVars, meeting_date: whenInternal, meeting_datetime: whenInternal } : baseVars, kind, {
           cancelUrl: manageLink,
           leadPhone,
           leadEmail,
@@ -339,31 +339,24 @@ Deno.serve(async (req: Request) => {
         });
         const templateId = pickAudienceTemplateId(emailCfg, 'cancel', kind, leadLocale);
         const tpl = await loadTemplate(supabase, templateId);
-        if (tpl?.body_html) {
-          return {
-            subject: renderSubject(tpl.subject || defaultSubject, vars),
-            html: renderHtml(tpl.body_html, vars),
-          };
-        }
-        return {
-          subject: renderSubject(defaultSubject, vars),
-          html: defaultMeetingHtml({
-            audience: kind,
-            leadPhone: kind === 'technician' ? (leadPhone || undefined) : undefined,
-            leadEmail: kind === 'technician' ? (leadEmail || undefined) : undefined,
-            address: kind === 'technician' ? (item.location || undefined) : undefined,
-            appointmentUrl: kind === 'technician' ? `${siteUrlEnv.replace(/\/+$/, '')}/scheduling` : undefined,
-            heading: 'Visita cancelada',
-            intro: kind === 'client'
-              ? 'A sua visita agendada foi cancelada.'
-              : 'Uma visita agendada foi cancelada.',
-            leadName: leadName,
-            when: formattedWhen,
-            location: item.location || undefined,
-            technicianName: technicianName || undefined,
-            primaryColor: emailCfg?.primary_color, logoUrl: emailCfg?.logo_url,
-          }),
-        };
+        // Modelo escolhido manda; sem modelo, texto por omissao (_shared/bookingMails.ts): ao cliente no
+        // idioma dele, ao comercial sempre em portugues. Portugues identico ao de sempre.
+        return buildCancelMail({
+          kind,
+          template: tpl,
+          vars,
+          lang: leadLocale,
+          leadName,
+          leadPhone: leadPhone || undefined,
+          leadEmail: leadEmail || undefined,
+          address: item.location || undefined,
+          appointmentUrl: `${siteUrlEnv.replace(/\/+$/, '')}/scheduling`,
+          when: kind === 'technician' ? whenInternal : formattedWhen,
+          location: item.location || undefined,
+          technicianName: technicianName || undefined,
+          primaryColor: emailCfg?.primary_color,
+          logoUrl: emailCfg?.logo_url,
+        });
       };
 
       // (a) Technician + extra notify emails: internal cancellation notice.
