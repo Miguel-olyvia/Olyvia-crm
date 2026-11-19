@@ -9,7 +9,7 @@
 // O cartão do negócio só lê o estado da encomenda no Inventário (reservada, encomendada ao fornecedor, saída).
 import { resumoErp } from "./erpEticadata";
 import { itemCatalogo, normal } from "./catalogo";
-import { DIAS, LINHAS, PAPEIS, TECS, calcMats, acertoDoValorPendente, conflitos, difDoAcerto, retificacaoPorPagar, diaDeFerias, eur, medidasEPlanoAbertos, mudancasDeValor, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
+import { DIAS, LINHAS, PAPEIS, TECS, calcMats, acertoDoValorPendente, conflitos, difDoAcerto, retificacaoPorPagar, diaDeFerias, eur, margemSemAdenda, medidasEPlanoAbertos, mudancasDeValor, nfmt, pct, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
 import { custosDe, perfilIdDe, receitaDe } from "./v2/custosModelo";
 import { HORAS_DIA } from "./ganttOrcamento";
 import { PERFIL_DO_SK, tecnicosDoPerfil } from "./equipa/tecnicos";
@@ -743,7 +743,12 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
   // o Financeiro fatura-a e valida o pagamento; se baixa, o Financeiro regista a nota de crédito. A encomenda de cliente espera pela paga.
   const ac = d.f.acerto_valor;
   if (ac) L.push({ id: "ac", trilho: "plano", estado: "feito", who: ac === "nota de crédito" ? "financeiro" : "comercial",
-    t: ac === "sem adenda" ? "Acerto do valor: sem acerto" : ac === "nota de crédito" ? `Nota de crédito ${d.f.nota_credito ?? ""}`.trim() : `Retificação ${ac} no Financeiro`, sub: "" });
+    t: ac === "sem adenda" ? `Acerto do valor: sem acerto${d.f.acerto_sem_adenda_por ? ` (${d.f.acerto_sem_adenda_aprov === "ok" ? "aprovado por " : ""}${d.f.acerto_sem_adenda_por})` : ""}` : ac === "nota de crédito" ? `Nota de crédito ${d.f.nota_credito ?? ""}`.trim() : `Retificação ${ac} no Financeiro`, sub: "" });
+  // 19/11 (auditoria): «Seguir sem adenda» com a margem abaixo do mínimo espera pela Direção
+  else if (acertoDoValorPendente(d) && d.f.acerto_sem_adenda_aprov === "pedida") {
+    const M = margemSemAdenda(d, S);
+    L.push({ id: "ac", trilho: "plano", estado: "agora", who: "direcao", t: "Seguir sem adenda: aprovar a margem", sub: `${M ? `Sem adenda, a margem fica em ${pct(M.m)} com as medidas novas (mínimo ${S.cfg.min}%). ` : ""}${mudancasDeValor(d).join("; ")}.`, act: "aprovarSemAdenda", btn: "Aprovar sem adenda" });
+  }
   else if (acertoDoValorPendente(d)) L.push(difDoAcerto(d, S) > 0.004
     ? { id: "ac", trilho: "plano", estado: "agora", who: "comercial", t: "O valor mudou: enviar a retificação ao Financeiro", sub: `${mudancasDeValor(d).join("; ")}.`, act: "adendaDoValor", btn: "Enviar ao Financeiro" }
     : { id: "ac", trilho: "plano", estado: "agora", who: "financeiro", t: "O valor baixou: registar a nota de crédito", sub: `${mudancasDeValor(d).join("; ")}. Emita-a no Eticadata e registe o número no negócio.` });

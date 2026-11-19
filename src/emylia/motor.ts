@@ -1422,6 +1422,17 @@ function orcamentoRefeito(d: Negocio, S: Estado, med?: Partial<Record<CampoMedid
   sincronizarEfeitos(c, S); sincronizarDemolicao(c, S);
   return c;
 }
+/** 19/11 (auditoria): «Seguir sem adenda» deixa o preço da proposta aceite (o congelado, se o houver) com o trabalho das medidas novas: a
+ *  margem é a desse preço contra o custo do orçamento refeito com as medidas retificadas (orcamentoRefeito). Abaixo do mínimo da
+ *  organização (S.cfg.min), como no envio da proposta, pede a aprovação da Direção. Sem orçamento (ou sem dar para refazer), null. */
+export function margemSemAdenda(d: Negocio, S: Estado): { m: number; min: number; abaixo: boolean; pf: number; custo: number } | null {
+  if (!d.orc) return null;
+  try {
+    const B = orcamentoRefeito(d, S, medidasRetificadas(d));
+    const pf = d.orc.totalAceite?.pf ?? tot(d, S).pf, custo = tot(B, S).custo, m = pf > 0 ? (pf - custo) / pf : 0, min = S.cfg.min / 100;
+    return { m, min, abaixo: m < min - 1e-9, pf: r2(pf), custo: r2(custo) };
+  } catch { return null; }
+}
 /** O que a proposta refeita com as medidas `med` vai valer (sem IVA, com o desconto), e de onde vem a diferença: `medidas` (o orçamento
  *  refeito com as medidas da visita contra o refeito com as novas) e `acertos` (o que refazer já junta sem mudar medidas: as linhas do
  *  levantamento, como as proteções e o transporte, que a proposta enviada não tinha). `dif` = medidas + acertos. Sem orçamento, null. */
@@ -2577,15 +2588,54 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       ecSePronta(d, "Emitida com a nota de crédito registada");
       return true;
     },
-    /** 12/11: o comercial decide que o acerto não se cobra (a diferença é pequena, ou desce): fica registado e o negócio segue. */
-    semAdendaDoValor(id: number) {
-      if (!exigePerm("orcamento.editar")) return;
+    /** 12/11: o comercial decide que o acerto não se cobra (a diferença é pequena, ou desce): fica registado e o negócio segue.
+     *  19/11 (auditoria): com a margem do orçamento refeito abaixo do mínimo (margemSemAdenda), como no envio da proposta, só com a Direção:
+     *  quem não aprova margens pede a aprovação (aprovarSemAdenda); a Direção decide logo. Fica registado quem decidiu. Devolve se seguiu. */
+    semAdendaDoValor(id: number): boolean {
+      if (!exigePerm("orcamento.editar")) return false;
       const d = deal(id);
-      if (!acertoDoValorPendente(d)) return;
+      if (!acertoDoValorPendente(d)) return false;
+      const M = margemSemAdenda(d, S);
+      if (M?.abaixo && d.f.acerto_sem_adenda_aprov !== "ok" && !podeNeg(S.role, "margin.approve")) {
+        if (d.f.acerto_sem_adenda_aprov !== "pedida") {
+          d.f.acerto_sem_adenda_aprov = "pedida";
+          log(d, `Seguir sem adenda: pedida aprovação à Direção (${PAPEIS[S.role].n}) · margem ${pct(M.m)} com as medidas novas, mínimo ${S.cfg.min}%`, "w");
+        }
+        avisar({ msg: "Pedido enviado à Direção", sub: `Sem adenda, a margem fica em ${pct(M.m)} (mínimo ${S.cfg.min}%). Aparece no Hoje da Direção.`, kind: "" });
+        return false;
+      }
+      const porDirecao = !!M?.abaixo && d.f.acerto_sem_adenda_aprov !== "ok";
       d.f.acerto_valor = "sem adenda";
-      log(d, `Sem adenda do acerto (${PAPEIS[S.role].n}): ${mudancasDeValor(d).join("; ")}`, "w");
+      d.f.acerto_sem_adenda_por = PAPEIS[S.role].n;
+      if (porDirecao) d.f.acerto_sem_adenda_aprov = "ok";
+      log(d, `Sem adenda do acerto (${PAPEIS[S.role].n}${porDirecao ? ", com a margem abaixo do mínimo: decisão da Direção" : ""}): ${mudancasDeValor(d).join("; ")}${M ? ` · margem ${pct(M.m)}` : ""}`, "w");
       avisar({ msg: "Segue sem acerto", sub: "O valor fica o da proposta aceite", kind: "ok" });
       ecSePronta(d, "Emitida sem acerto do valor");
+      return true;
+    },
+    /** 19/11 (auditoria): a Direção aprova seguir sem adenda (a margem com as medidas novas fica abaixo do mínimo): o negócio segue. */
+    aprovarSemAdenda(id: number): boolean {
+      if (!exigePerm("margin.approve")) return false;
+      const d = deal(id);
+      if (!acertoDoValorPendente(d) || d.f.acerto_sem_adenda_aprov !== "pedida") return false;
+      d.f.acerto_sem_adenda_aprov = "ok";
+      d.f.acerto_valor = "sem adenda";
+      d.f.acerto_sem_adenda_por = PAPEIS[S.role].n;
+      const M = margemSemAdenda(d, S);
+      log(d, `Sem adenda do acerto: aprovado pela Direção (${PAPEIS[S.role].n})${M ? ` · margem ${pct(M.m)}, mínimo ${S.cfg.min}%` : ""}: ${mudancasDeValor(d).join("; ")}`, "w");
+      avisar({ msg: "Aprovado: segue sem acerto", sub: "O valor fica o da proposta aceite", kind: "ok" });
+      ecSePronta(d, "Emitida sem acerto do valor");
+      return true;
+    },
+    /** 19/11 (auditoria): a Direção recusa seguir sem adenda: o comercial prepara a adenda do acerto (ou ajusta). */
+    recusarSemAdenda(id: number): boolean {
+      if (!exigePerm("margin.approve")) return false;
+      const d = deal(id);
+      if (d.f.acerto_sem_adenda_aprov !== "pedida") return false;
+      delete d.f.acerto_sem_adenda_aprov;
+      log(d, `Seguir sem adenda recusado pela Direção (${PAPEIS[S.role].n}): o acerto faz-se numa adenda`, "x");
+      avisar({ msg: "Recusado", sub: "O comercial prepara a adenda do acerto", kind: "bad" });
+      return true;
     },
     /** 21/10: a versão nova faz-se num só sítio: mexer nos produtos da visita refaz o orçamento logo (sem voltar à visita);
      *  os preços, o desconto e as linhas à mão mantêm-se (preservarManuais). Só com a proposta por enviar. */
