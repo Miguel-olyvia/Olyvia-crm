@@ -7,7 +7,7 @@ import { Check, Clock, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { eur, valorSinal, type Negocio } from "./motor";
 import { resumoErp } from "./erpEticadata";
-import { em3, ibanAVista, metodoDe, referenciaMb, useDadosPagamento } from "./pagamentoCliente";
+import { em3, ibanAVista, mbDisponivel, metodoDe, referenciaMb, useDadosPagamento } from "./pagamentoCliente";
 import type { Ctx } from "./pecas";
 import { SEM_PERM, podeNeg } from "./permissoes";
 
@@ -27,7 +27,8 @@ export function PagamentoDoCliente({ S, A, run, d }: Ctx & { d: Negocio }) {
     ["Fatura", ft.n],
     ["Valor a pagar", eur(valor) + " € com IVA"],
     ["Como paga", d.f.metodo ? metodo : "o cliente escolhe no portal"],
-    ...(metodo === "Referência MB" ? [["Entidade · referência (de teste)", `${empresa?.mbEntidade ?? "sem entidade"} · ${em3(referenciaMb(d.id, ft.n))}`] as [string, string]] : []),
+    // 19/11 (auditoria): a referência Multibanco só com o prestador de pagamentos configurado (mbDisponivel); sem ele não há referência real
+    ...(metodo === "Referência MB" ? [mbDisponivel(empresa) ? ["Entidade · referência", `${empresa?.mbEntidade} · ${em3(referenciaMb(d.id, ft.n))}`] as [string, string] : ["Referência MB", "indisponível (sem prestador de pagamentos ligado)"] as [string, string]] : []),
     ...(metodo === "MB Way" ? [["MB Way para", empresa?.mbway ?? "sem número"] as [string, string]] : []),
     ...(metodo === "Transferência" ? [["IBAN", empresa?.iban ? ibanAVista(empresa.iban) : "ainda não indicado"] as [string, string]] : []),
     ["No Eticadata", d.fin.erp ? resumoErp(d.fin.erp) : "ainda não lido aqui (a Olyvia verifica sozinha de 10 em 10 minutos)"],
