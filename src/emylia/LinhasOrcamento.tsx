@@ -222,8 +222,9 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
                   {(sub || zonaTxt) && <span className="tabular-nums">{[sub, zonaTxt].filter(Boolean).join(" · ")}</span>}
                   {l.t === "mat" && <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", O.cls)}>{O.t}</span>}
                   {ajustado && !(l.t === "mat" && l.livre) && <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">preço ajustado</span>}
-                  {/* 26/10: a taxa de IVA à vista quando não é a de sempre (ou numa linha livre) */}
-                  {(l.iva || (l.t === "mat" && l.livre) || ivaDaLinha(l, S) !== (l.t === "mat" ? 23 : 6)) && <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">IVA {ivaDaLinha(l, S)}%</span>}
+                  {/* 26/10: a taxa de IVA à vista quando não é a de sempre (ou numa linha livre). 19/11: a taxa congelada ao enviar (l.iva) só se
+                      mostra quando não é a de sempre */}
+                  {((l.t === "mat" && l.livre) || ivaDaLinha(l, S) !== (l.t === "mat" ? 23 : 6)) && <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">IVA {ivaDaLinha(l, S)}%</span>}
                 </p>
               </div>
               {tabela && zonas.length > 0 && <ZonaDaLinha ctx={ctx} d={d} i={i} nome={nome} compacto />}

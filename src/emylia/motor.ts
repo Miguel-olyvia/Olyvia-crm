@@ -252,6 +252,9 @@ export interface Orcamento {
   aprov: null | "pedida" | "ok";
   enviada: string | null;
   aceite: string | null;
+  /** 19/11 (auditoria): os totais da versão aceite (sem IVA, com o desconto; e com IVA), calculados uma vez e congelados (congelarTotalAceite):
+   *  são os que vão para a base (preco_final, total_com_iva) e não mudam com o Catálogo. Limpam-se com uma versão nova. */
+  totalAceite?: { pf: number; total: number };
   contrato: null | "enviado" | "assinado";
   /** 15/10: como o cliente assinou o contrato no portal (desenho no ecrã ou Chave Móvel Digital). Os exemplos antigos não a têm. */
   assinatura?: Assinatura | null;
@@ -1265,11 +1268,13 @@ export function custoCongelado(S: Estado, sid: SvcId, cu: number, quando: string
   const total = mo + s.eq + s.cons + estr;
   return { h: s.h, oficios, mo, eq: s.eq, cons: s.cons, taxaEstr: r2(taxaEstr), estr, ajuste: r2(cu - total), q: quando };
 }
-/** Congela o custo de cada linha da proposta (os serviços por ofício; os produtos com o fornecedor). As linhas já congeladas ficam. */
+/** Congela o custo de cada linha da proposta (os serviços por ofício; os produtos com o fornecedor). As linhas já congeladas ficam.
+ *  19/11 (auditoria): também a taxa de IVA de cada linha (a do Catálogo, agora): o total da proposta enviada não muda com o Catálogo. */
 export function congelarProposta(d: Negocio, S: Estado, quando: string): void {
   const o = d.orc;
   if (!o) return;
   const K = catalogoLigado();
+  for (const l of o.linhas) if (l.iva == null) l.iva = ivaDaLinha(l, S);
   for (const l of o.linhas) {
     if (l.t === "svc") { if (!l.det) { const c = custoCongelado(S, l.sid, l.cu, quando); if (c) l.det = c; } continue; }
     if (l.prod || !l.d.startsWith(PREFIXO_PROD)) continue;
@@ -1282,8 +1287,16 @@ export function congelarProposta(d: Negocio, S: Estado, quando: string): void {
 /** 22/10 (fase 2): as propostas já enviadas de um Estado de antes ficam congeladas como estão (o custo da linha mantém-se). */
 export function congelarEnviadas(S: Estado): boolean {
   let mudou = false;
-  for (const d of S.deals) if (d.orc?.enviada && d.orc.linhas.some((l) => l.t === "svc" && !l.det)) { congelarProposta(d, S, d.orc.enviada); mudou = true; }
+  for (const d of S.deals) if (d.orc?.enviada && d.orc.linhas.some((l) => (l.t === "svc" && !l.det) || l.iva == null)) { congelarProposta(d, S, d.orc.enviada); mudou = true; }
   return mudou;
+}
+/** 19/11 (auditoria): os totais da versão aceite (ou com o contrato assinado), calculados uma vez e congelados em `o.totalAceite`. A base
+ *  recebe-os (preco_final, total_com_iva) e já não se recalculam a cada gravação. Null se a versão ainda não está aceite. */
+export function congelarTotalAceite(d: Negocio, S: Estado): { pf: number; total: number } | null {
+  const o = d.orc;
+  if (!o || !(o.aceite || o.contrato === "assinado")) return null;
+  if (!o.totalAceite) o.totalAceite = { pf: r2(tot(d, S).pf), total: r2(totaisIva(d, S).total) };
+  return o.totalAceite;
 }
 /** 22/10 (fase 2): a mão de obra da proposta por ofício (horas e custo): a congelada nas linhas enviadas, senão a de agora. */
 export function oficiosDaProposta(d: Negocio, S: Estado): { perfil: string; n: string; h: number; custo: number }[] {
@@ -2485,7 +2498,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         // 22/10 (fase 2): as linhas como foram enviadas (com o custo congelado) e o desconto
         linhas: structuredClone(o.linhas), desconto: o.desconto });
       if (o.contrato === "enviado") log(d, "Contrato CT 2026/" + d.id + " anulado (a proposta vai mudar)", "w");
-      o.enviada = null; o.verif = false; o.aprov = null; o.aceite = null; o.contrato = null; o.pedidoCliente = null;
+      o.enviada = null; o.verif = false; o.aprov = null; o.aceite = null; o.contrato = null; o.pedidoCliente = null; delete o.totalAceite;
       const porque = [...motivos, nota.trim()].filter(Boolean).join(", ").toLowerCase();
       log(d, `Proposta v${n} substituída${!porque ? "" : motivos.includes(MOTIVO_MEDIDAS) ? ": " + porque : ": o cliente pediu " + porque}`, "w");
       if (onde === "visita") {
@@ -2853,6 +2866,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     aceitar(id: number) {
       const d = deal(id); d.orc!.aceite = "hoje"; d.orc!.pedidoCliente = null; log(d, "O cliente aceitou a proposta no portal");
+      // 19/11 (auditoria): a taxa de IVA de cada linha e os totais da versão aceite ficam congelados (não mudam com o Catálogo)
+      congelarProposta(d, S, d.orc!.enviada && d.orc!.enviada !== "hoje" ? d.orc!.enviada : agora());
+      congelarTotalAceite(d, S);
       // 12/11 (Rúben: «a validação das medidas e do plano da obra só vêm depois do Financeiro»): aceite, passa logo a Financeiro (fatura e
       // pagamento). O plano nasce já do orçamento, por aprovar, mas as medidas e a aprovação esperam pelo pagamento validado (na Obra).
       criarCliente(S, d);

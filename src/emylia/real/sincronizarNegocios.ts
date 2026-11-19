@@ -3,7 +3,7 @@
 // Emylia) cria-se primeiro pelo caminho do CRM: a "Nova lead" (pessoa em anew_entities + negócio por neg_criar_negocio). O número que a
 // base lhe dá passa a ser o id do negócio na Emylia.
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { tot, totaisIva, type Estado, type Negocio } from "../motor";
+import { congelarTotalAceite, tot, totaisIva, type Estado, type Negocio } from "../motor";
 import { gravarNovaLead, NegocioNaoCriado } from "@/hooks/pessoas/novaLead/gravarNovaLead";
 import { criarNegocioNovaLead, novoIdNegocio } from "@/hooks/pessoas/novaLead/criarNegocioNovaLead";
 import { resolverOrgRaiz } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
@@ -150,9 +150,12 @@ export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado,
         for (const a of await gravarObra(sb, org, refs.get(d.id)!.id, paraObra(d))) out.avisos.push(`${d.nome}: ${a}`);
         fotoObraDe(foto).set(d.id, m);
       }
-      const L = paraLinhas(d);
+      // 19/11 (auditoria): a versão aceite (ou com o contrato assinado) leva os totais congelados uma vez (congelarTotalAceite), que já não
+      // se recalculam a cada gravação; as outras, os de agora. A taxa de IVA de cada linha vai sempre (a do Catálogo, quando a linha não a tem).
+      const fixo = congelarTotalAceite(d, S);
+      const L = paraLinhas(d, new Date(), S);
       const atual = L.orcamentos.find((o) => o.estado !== "substituido");
-      if (atual && d.orc) {
+      if (atual && d.orc && !fixo) {
         atual.preco_final = Math.round(tot(d, S).pf * 100) / 100;
         atual.total_com_iva = Math.round(totaisIva(d, S).total * 100) / 100;
       }
