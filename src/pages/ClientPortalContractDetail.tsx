@@ -110,7 +110,10 @@ const ClientPortalContractDetail = () => {
   // "pending_signature" e o nome actual do estado (ver ClientContracts.tsx) --
   // "pending"/"sent" mantidos so por seguranca, para contratos antigos que
   // possam ainda ter esses valores gravados.
-  const canSign = contract && (contract.status === "pending_signature" || contract.status === "draft" || contract.status === "pending" || contract.status === "sent");
+  // 19/11 (auditoria): um rascunho ("draft") ja nao se assina -- o servidor
+  // (client-portal-action, sign_contract) recusa-o; sem o botao, o cliente nao
+  // pede o codigo por SMS para nada.
+  const canSign = contract && (contract.status === "pending_signature" || contract.status === "pending" || contract.status === "sent");
   const isSigned = contract?.status === "signed";
 
   // Descarregar o PDF do contrato. Usa exactamente o mesmo caminho do CRM
