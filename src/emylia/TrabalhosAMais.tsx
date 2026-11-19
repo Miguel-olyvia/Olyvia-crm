@@ -19,7 +19,7 @@ import { ecDaAdenda, porEncomendarDe } from "./encomendasAjuste";
 import { ecNoServidor } from "./preparacaoObra";
 import {
   MOTIVOS_ADENDA, adendaBloqueada, alertasAdenda, diasAdenda, estadoAdenda, faturaAValidar, nomeParcela, parcelaFaturavel, parcelasAdenda, previsaoLinha, primeiraPaga, proximaParcela,
-  totaisAdenda, totaisLinhas, valorContrato, versaoAdenda, type Adenda, type LinhaAdenda,
+  textoIvaPorTaxa, totaisAdenda, totaisLinhas, valorContrato, versaoAdenda, type Adenda, type LinhaAdenda,
 } from "./adendas";
 import { RegistarFaturaAdendaErp } from "./FaturaErp";
 
@@ -162,6 +162,8 @@ export function TrabalhosAMais(ctx: Ctx & { d: Negocio }) {
                   <div className="min-w-0">
                     <p className="text-[15px] font-semibold">{a.n}{v > 1 ? ` · v${v}` : ""} · {a.linhas.map((x) => x.n).join(", ")}</p>
                     <p className="text-sm tabular-nums text-muted-foreground">+{eur(TA.total)} € · +{dd} {dd === 1 ? "dia" : "dias"} · {a.motivo.toLowerCase()}</p>
+                    {/* 19/11 (auditoria): o IVA por taxa (os produtos a 23%, a mão de obra a 6%) */}
+                    <p className="text-sm tabular-nums text-muted-foreground">{textoIvaPorTaxa(TA)}</p>
                   </div>
                   <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-sm font-medium", E.cor)}>{E.t}</span>
                 </div>
@@ -242,7 +244,7 @@ export function TrabalhosAMais(ctx: Ctx & { d: Negocio }) {
           {/* as contas ao vivo, com o IVA por taxa */}
           <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted/50 p-3 text-sm">
             <div><p className="text-muted-foreground">Sem IVA</p><p className="text-[15px] font-semibold tabular-nums">+{eur(T.base)} €</p></div>
-            <div><p className="text-muted-foreground">Com IVA {T.mat > 0 ? "(6% e 23%)" : "(6%)"}</p><p className="text-[15px] font-semibold tabular-nums">+{eur(T.total)} €</p></div>
+            <div><p className="text-muted-foreground">Com IVA ({[T.mo > 0.004 || T.mat <= 0.004 ? "6%" : "", T.mat > 0.004 ? "23%" : ""].filter(Boolean).join(" e ")})</p><p className="text-[15px] font-semibold tabular-nums">+{eur(T.total)} €</p></div>
             <div><p className="text-muted-foreground">Prazo</p><p className="text-[15px] font-semibold tabular-nums">+{diasAdenda(linhas)} {diasAdenda(linhas) === 1 ? "dia" : "dias"}</p></div>
           </div>
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

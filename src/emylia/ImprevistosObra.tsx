@@ -249,7 +249,7 @@ function PropostaImprevisto({ ctx, d, im, fechar, porDisparar }: { ctx: Ctx; d: 
       </div>
       <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted/50 p-3 text-sm">
         <div><p className="text-muted-foreground">Sem IVA</p><p className="text-[15px] font-semibold tabular-nums">+{eur(T.base)} €</p></div>
-        <div><p className="text-muted-foreground">Com IVA {T.mat > 0 ? "(6% e 23%)" : "(6%)"}</p><p className="text-[15px] font-semibold tabular-nums">+{eur(T.total)} €</p></div>
+        <div><p className="text-muted-foreground">Com IVA ({[T.mo > 0.004 || T.mat <= 0.004 ? "6%" : "", T.mat > 0.004 ? "23%" : ""].filter(Boolean).join(" e ")})</p><p className="text-[15px] font-semibold tabular-nums">+{eur(T.total)} €</p></div>
         <div><p className="text-muted-foreground">Prazo</p><p className="text-[15px] font-semibold tabular-nums">+{nfmt(dd)} {dd === 1 ? "dia" : "dias"}</p></div>
       </div>
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

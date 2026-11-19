@@ -2189,7 +2189,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 22/10: o €/h é o do perfil escolhido (a média dos técnicos dele no RH), não 25 €/h fixos
       const hp = horaDoPerfil(S, x.perfil);
       S.svc[sid] = { n: x.n.trim(), un: "vg", h: r2(x.h), eh: hp.eh, eq: 0, cons, preco: r2(x.preco), perfil: x.perfil, ...(hp.perfilId ? { perfilId: hp.perfilId } : {}), ...(hp.semCusto ? { semCusto: true } : {}) };
-      linhas.push({ sid, n: x.n.trim(), un: "vg", q: 1, pu: r2(x.preco), h: r2(x.h), perfil: x.perfil, ...(hp.perfilId ? { perfilId: hp.perfilId } : {}), livre: true, mats: x.mats.map((m) => ({ ...m })) });
+      // 19/11 (auditoria): a linha livre é mão de obra (6%); os materiais dela vão à parte, a 23% (totaisLinhas)
+      linhas.push({ sid, n: x.n.trim(), un: "vg", q: 1, pu: r2(x.preco), h: r2(x.h), perfil: x.perfil, ...(hp.perfilId ? { perfilId: hp.perfilId } : {}), livre: true, mats: x.mats.map((m) => ({ ...m })), iva: 6 });
     });
     return linhas;
   };
@@ -2506,22 +2507,30 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const desc = 1 - (o.desconto || 0) / 100;
       const A0 = orcamentoRefeito(d, S), B0 = orcamentoRefeito(d, S, medidasRetificadas(d));
       // os serviços: a quantidade a mais de cada um, ao preço por unidade da proposta
-      const qtd = (x: Negocio) => { const m = new Map<string, { q: number; pu: number }>(); for (const l of x.orc!.linhas) if (l.t === "svc") { const y = m.get(l.sid) ?? { q: 0, pu: l.pu }; y.q += l.q; m.set(l.sid, y); } return m; };
-      const qa = qtd(A0), qb = qtd(B0), itens: { sid: string; q: number }[] = [], puDe = new Map<string, number>();
-      for (const [sid, b] of qb) { const dq = r2(b.q - (qa.get(sid)?.q ?? 0)); if (dq > 0.001) { itens.push({ sid, q: dq }); puDe.set(sid, b.pu); } }
+      // 19/11 (auditoria): com a taxa de IVA da linha do orçamento (ivaDaLinha), como na proposta
+      const qtd = (x: Negocio) => { const m = new Map<string, { q: number; pu: number; iva: TaxaIva }>(); for (const l of x.orc!.linhas) if (l.t === "svc") { const y = m.get(l.sid) ?? { q: 0, pu: l.pu, iva: ivaDaLinha(l, S) }; y.q += l.q; m.set(l.sid, y); } return m; };
+      const qa = qtd(A0), qb = qtd(B0), itens: { sid: string; q: number }[] = [], puDe = new Map<string, number>(), ivaDe = new Map<string, TaxaIva>();
+      for (const [sid, b] of qb) { const dq = r2(b.q - (qa.get(sid)?.q ?? 0)); if (dq > 0.001) { itens.push({ sid, q: dq }); puDe.set(sid, b.pu); ivaDe.set(sid, b.iva); } }
       // os produtos (e o que não é serviço): só o valor a mais
       const mi = impactoDasMedidas(d, S, medidasRetificadas(d));
       const prods = (mi?.linhas ?? []).filter((x) => x.tipo !== "servico" && x.v > 0.005);
       const pi = impactoDoPlano(d, S);
+      // a taxa de cada linha que não é serviço (os produtos e o resto), pela linha do orçamento refeito (por omissão, 23%)
+      const ivaOutro = new Map<string, TaxaIva>();
+      for (const x of [A0, B0]) for (const l of x.orc!.linhas) if (l.t === "mat") ivaOutro.set(`m:${l.d}`, ivaDaLinha(l, S));
       const livres: LinhaLivre[] = pi.horas > 0.001 && pi.valor > 0.005 ? [{ n: LINHA_ACERTO_PLANO, h: r2(pi.horas), preco: r2(pi.valor / desc), perfil: S.svc[d.obra.plano?.tasks[0]?.svcs[0] ?? ""]?.perfil ?? "", mats: [] }] : [];
       const n = A.criarAdenda(id, itens, MOTIVO_ACERTO, { livres, ...(o.desconto ? { desconto: o.desconto } : {}) });
       const a = n ? d.adendas?.find((x) => x.n === n) : undefined;
       if (a) {
-        for (const l of a.linhas) { const pu = puDe.get(l.sid); if (pu != null && !l.livre) l.pu = r2(pu); }
-        if (prods.length) {
-          const sid = `livre-${d.id}-${d.adendas!.length}-p`, v = r2(prods.reduce((s, x) => s + x.v, 0) / desc), nome = `${LINHA_ACERTO_PRODUTOS}: ${prods.map((x) => `${x.n} ${x.de} → ${x.para}`).join("; ")}`;
-          S.svc[sid] = { n: nome, un: "vg", h: 0, eh: 0, eq: 0, cons: 0, preco: v, perfil: "" };
-          a.linhas.push({ sid, n: nome, un: "vg", q: 1, pu: v, h: 0, perfil: "", livre: true });
+        for (const l of a.linhas) { const pu = puDe.get(l.sid); if (pu != null && !l.livre) { l.pu = r2(pu); l.iva = ivaDe.get(l.sid) ?? l.iva; } }
+        // 19/11 (auditoria): os produtos a mais a 23% (antes, a linha livre contava toda a 6%, como mão de obra); o que tiver outra taxa
+        // na linha do orçamento vai numa linha à parte, com a dela
+        for (const taxa of [23, 6] as const) {
+          const P = prods.filter((x) => (ivaOutro.get(x.k) ?? 23) === taxa);
+          if (!P.length) continue;
+          const sid = `livre-${d.id}-${d.adendas!.length}-p${taxa === 23 ? "" : "6"}`, v = r2(P.reduce((s, x) => s + x.v, 0) / desc), nome = `${LINHA_ACERTO_PRODUTOS}: ${P.map((x) => `${x.n} ${x.de} → ${x.para}`).join("; ")}`;
+          S.svc[sid] = { n: nome, un: "vg", h: 0, eh: 0, eq: 0, cons: 0, preco: v, perfil: "", iva: taxa };
+          a.linhas.push({ sid, n: nome, un: "vg", q: 1, pu: v, h: 0, perfil: "", livre: true, iva: taxa });
         }
       } else if (!n && prods.length + itens.length + livres.length === 0) {
         avisar({ msg: "Nada a cobrar a mais", sub: "As medidas ou o plano baixam o valor: dê o desconto ao cliente fora da adenda, ou siga sem adenda", kind: "bad" });

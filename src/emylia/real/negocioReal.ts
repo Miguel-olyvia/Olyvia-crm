@@ -121,6 +121,9 @@ export interface LinhaAdendaLinha {
   ordem: number; servico: string | null; chave: string; livre: boolean; descricao: string; unidade: string; quantidade: number; preco_un: number;
   horas_un: number; perfil: string; perfil_chave: string | null; custo_un: number | null; mao_obra_un: number | null;
   materiais: { nome: string; quantidade: number; unidade: string; preco: number | null; fornecedor: string | null }[] | null;
+  /** 19/11 (auditoria): a taxa de IVA da linha (6 ou 23). As linhas antigas não a têm (contam a 6%). A tabela adenda_linhas ainda não
+   *  tem a coluna: até lá, a base não a guarda (e a linha volta sem ela). */
+  taxa_iva?: number | null;
 }
 export interface LinhaAdendaVersao {
   versao: number; estado: "rascunho" | "enviado" | "aceite" | "substituido" | "recusado" | "anulado"; desconto: number; verificado: boolean;
@@ -188,11 +191,13 @@ const linhaAdendaParaLinha = (x: LinhaAdendaEmylia, i: number): LinhaAdendaLinha
   ordem: i, servico: x.livre ? null : x.sid, chave: x.sid, livre: !!x.livre, descricao: x.n, unidade: x.un, quantidade: x.q, preco_un: x.pu, horas_un: x.h,
   perfil: x.perfil, perfil_chave: x.perfilId ?? null, custo_un: x.cu ?? null, mao_obra_un: x.mo ?? null,
   materiais: x.mats ? x.mats.map((m) => ({ nome: m.n, quantidade: m.q, unidade: m.un, preco: m.preco ?? null, fornecedor: m.forn ?? null })) : null,
+  ...(x.iva ? { taxa_iva: x.iva } : {}),
 });
 const linhaAdendaDeLinha = (l: LinhaAdendaLinha): LinhaAdendaEmylia => ({
   sid: l.chave, n: l.descricao, un: l.unidade, q: l.quantidade, pu: l.preco_un, h: l.horas_un, perfil: l.perfil,
   ...(l.perfil_chave ? { perfilId: l.perfil_chave } : {}), ...(l.custo_un != null ? { cu: l.custo_un } : {}), ...(l.mao_obra_un != null ? { mo: l.mao_obra_un } : {}),
   ...(l.livre ? { livre: true as const } : {}),
+  ...(l.taxa_iva === 6 || l.taxa_iva === 23 ? { iva: l.taxa_iva } : {}),
   ...(l.materiais ? { mats: l.materiais.map((m) => ({ n: m.nome, q: m.quantidade, un: m.unidade, ...(m.preco != null ? { preco: m.preco } : {}), ...(m.fornecedor ? { forn: m.fornecedor } : {}) })) } : {}),
 });
 const ESTADO_VERSAO: Record<EstadoAdenda, LinhaAdendaVersao["estado"]> = { rascunho: "rascunho", enviada: "enviado", aceite: "aceite", assinada: "aceite", recusada: "recusado", anulada: "anulado" };

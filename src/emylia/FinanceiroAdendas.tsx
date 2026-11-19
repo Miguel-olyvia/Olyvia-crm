@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
-import { assinadas, faturaAValidar, nomeParcela, parcelaFaturavel, parcelasAdenda, primeiraPaga, proximaParcela, totaisAdenda } from "./adendas";
+import { assinadas, faturaAValidar, nomeParcela, parcelaFaturavel, parcelasAdenda, primeiraPaga, proximaParcela, textoIvaPorTaxa, totaisAdenda } from "./adendas";
 import { RegistarFaturaAdendaErp } from "./FaturaErp";
 import { ecDaAdenda, porEncomendarDe } from "./encomendasAjuste";
 import { EC_ADENDA_NO_PAGAMENTO } from "./preparacaoObra";
@@ -47,7 +47,7 @@ export function AdendasNoFinanceiro({ ctx, d }: { ctx: Ctx; d: Negocio; /** 19/1
         const fat = parcelaFaturavel(d, a), aValidar = faturaAValidar(a);
         return (
           <div key={a.n} className="rounded-2xl border border-border bg-card p-4" data-testid={`fin-adenda-${a.n}`}>
-            <p className="text-[15px] font-semibold">Adenda {a.n} <span className="font-normal tabular-nums text-muted-foreground">· {eur(T.total)} € com IVA ({eur(T.mo)} € de mão de obra + IVA a 6%{T.mat > 0 ? `, ${eur(T.mat)} € de materiais + IVA a 23%` : ""})</span></p>
+            <p className="text-[15px] font-semibold">Adenda {a.n} <span className="font-normal tabular-nums text-muted-foreground">· {eur(T.total)} € com IVA ({textoIvaPorTaxa(T)})</span></p>
             <ol className="mt-1 divide-y divide-border">
               {P.flatMap((x) => {
                 const f = x.ft, nome = `${nomeParcela(x.i)} (${x.l.toLowerCase()}, ${Math.round(x.p * 100)}%) · ${eur(x.v)} €`;
