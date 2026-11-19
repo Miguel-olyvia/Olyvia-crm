@@ -25,7 +25,6 @@ import { useState } from "react";
 import { FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { proximo, type Estado, type Negocio } from "./motor";
-import { RES_INTERESSADO } from "./campos";
 import { fotoExemplo } from "./obraOps";
 import { COR_FASE } from "./planoObra";
 import { instrucoesDe } from "./trabalhoObra";
@@ -60,8 +59,7 @@ export function passoDeTeste(d: Negocio, S: Estado, A?: Ctx["A"]): PassoTeste {
     const navega = !!A && typeof (A as unknown as Record<string, unknown>)[p.act] === "function" && p.act !== "registarFaturaErp";
     return { tipo: "ecra", act: p.act, arg: p.arg, t: p.t, sub: p.sub, btn: p.btn, navega };
   }
-  // 19/11 (auditoria): «Registar chamada» pede o resultado; avançar é a chamada com o cliente interessado
-  if (p.act && p.btn) return { tipo: "acao", act: p.act, arg: p.act === "contactar" ? RES_INTERESSADO : p.arg, t: p.t, sub: p.sub, btn: p.btn };
+  if (p.act && p.btn) return { tipo: "acao", act: p.act, arg: p.arg, t: p.t, sub: p.sub, btn: p.btn };
   return { tipo: "espera", t: p.t, sub: p.sub };
 }
 

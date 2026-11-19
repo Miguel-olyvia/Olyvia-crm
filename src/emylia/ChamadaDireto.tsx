@@ -198,11 +198,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   function guardarAnalise(ins: Insights, fs: readonly Fala[]) {
     const dados: InsightsGuardados = { insights: ins, tempos: fs.map((f) => f.inicio), em: new Date().toISOString(), metricas: metricasDaConversa(fs) };
     setAnalise(dados);
-    ctx.run(() => {
-      ctx.A.campo(d.id, chaveInsights, JSON.stringify(dados));
-      // 19/11 (auditoria): a chamada analisada ficou registada: na Lead, o negócio passa a Contacto
-      if (modo === "chamada") ctx.A.chamadaFeita(d.id);
-    });
+    ctx.run(() => ctx.A.campo(d.id, chaveInsights, JSON.stringify(dados)));
   }
 
   /** Analisar outra vez (ou pela primeira vez, numa conversa gravada antes de haver análise). */
@@ -344,8 +340,6 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
         if (CHAVES_ESPECIAIS.has(p.k) || MEDIDA.test(p.k)) aplicarEspecial(p.k, valor);
         else ctx.A.campo(d.id, p.k, juntarVarios(defs.get(p.k), d.f[p.k] || "", valor));
       }
-      // 19/11 (auditoria): o que a chamada disse entrou nos campos: na Lead, o negócio passa a Contacto
-      if (modo === "chamada") ctx.A.chamadaFeita(d.id);
     });
     setAplicadas(entram.map((p) => p.l));
     // o dia combinado entrou: «Marcar a visita» marca-a sozinha (o comercial livre mais perto a essa hora) e o ecrã vai lá

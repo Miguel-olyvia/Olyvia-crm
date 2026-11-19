@@ -29,7 +29,7 @@ describe("a Lead e o Contacto, como na chamada", () => {
     const S = seed();
     const d = S.deals.find((x) => x.fase === 1)!;
     const titulos = passosDaFase(ctxDe(S), d, true, 1).map((p) => p.titulo);
-    expect(titulos.slice(0, 5)).toEqual(["Chamada", "O que o cliente quer", "Morada da obra", "Qualificação", "Marcar a visita com o comercial"]);
+    expect(titulos.slice(0, 5)).toEqual(["Chamada", "O que o cliente quer", "Morada da obra", "Qualificação", "Marcar a visita"]);
     expect(titulos).not.toContain("Preparar a visita");
   });
 

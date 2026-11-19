@@ -73,15 +73,6 @@ import { NOTE_STATUS_LABEL, fetchDeliveryNote, noteLabel, type DeliveryNoteFull 
 import { LearnCodeDialog } from "@/components/receiving/LearnCodeDialog";
 import { pickReceivingWarehouse } from "@/components/receiving/receivingWarehouse";
 import {
-  cleanReceivingQtyText,
-  isValidReceivingQty,
-  normalizeReceivingQty,
-  parseReceivingQty,
-  receivingIntegerOnly,
-  receivingQtyError,
-  receivingQtyText,
-} from "@/components/receiving/receivingQty";
-import {
   describeLearnResult,
   productCodeErrorMessage,
   productCodeKey,
@@ -92,7 +83,7 @@ import { ToastAction } from "@/components/ui/toast";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 // Vista lista (protótipo da Receção com dados reais): Por receber | Recebidas | Guias e o painel "Dar entrada".
 import { todayIsoLocal } from "@/components/purchase-orders/poListUtils";
-import { FILTROS_REC, lineIntegerOnly, lineUnitLabel, poRecebivel, type FiltrosRec, type ReceivableLine, type ReceivablePo } from "@/components/receiving/porReceber";
+import { FILTROS_REC, lineUnitLabel, poRecebivel, type FiltrosRec, type ReceivableLine, type ReceivablePo } from "@/components/receiving/porReceber";
 import { resolveReceivingCode, type NoteMatch } from "@/components/receiving/resolveReceivingCode";
 import {
   openNotesCountQueryKey,
@@ -210,8 +201,6 @@ interface Candidate {
   uom_id: string | null;
   uom_code: string | null;
   units_per_uom: number;
-  /** 20270124020000: o campo só aceita inteiros (embalagem ou unidade que se conta). Ausente na base por atualizar. */
-  integer_qty?: boolean;
   open_lines: OpenLine[];
   /** Só com guia: anunciado / recebido pela guia (unidades de stock). */
   delivery_note?: { announced: boolean; announced_units: number; received_units: number };
@@ -293,8 +282,6 @@ interface BasketEntry {
   uomId: string | null;
   uomCode: string | null;
   unitsPerUom: number;
-  /** 19/11: a quantidade só aceita inteiros (integer_qty da leitura); ausente, decide a unidade (receivingIntegerOnly). */
-  integerQty?: boolean;
   code: string;
   openLines: OpenLine[];
   quantity: number;
@@ -403,7 +390,7 @@ interface ScanRow {
 /** Entrada livre guardada em sessionStorage (sem pré-visualização nem estado de envio). */
 type StoredEntry = Pick<
   BasketEntry,
-  "id" | "key" | "productId" | "name" | "sku" | "uomId" | "uomCode" | "unitsPerUom" | "integerQty" | "code" | "openLines" | "quantity" | "poItemId"
+  "id" | "key" | "productId" | "name" | "sku" | "uomId" | "uomCode" | "unitsPerUom" | "code" | "openLines" | "quantity" | "poItemId"
 >;
 
 interface StoredBasket {
@@ -1280,7 +1267,6 @@ const toStoredEntry = (e: BasketEntry): StoredEntry => ({
   uomId: e.uomId,
   uomCode: e.uomCode,
   unitsPerUom: e.unitsPerUom,
-  integerQty: e.integerQty,
   code: e.code,
   openLines: e.openLines,
   quantity: e.quantity,
@@ -1291,9 +1277,8 @@ const toStoredEntry = (e: BasketEntry): StoredEntry => ({
 const fromStoredEntry = (s: StoredEntry): BasketEntry => ({
   ...s,
   openLines: Array.isArray(s.openLines) ? s.openLines : [],
-  // 19/11: decimais nas unidades que se medem (receivingIntegerOnly)
-  quantity: normalizeReceivingQty(Number(s.quantity), receivingIntegerOnly({ ...s, unitsPerUom: Number(s.unitsPerUom) || 1 })),
-  qtyText: receivingQtyText(normalizeReceivingQty(Number(s.quantity), receivingIntegerOnly({ ...s, unitsPerUom: Number(s.unitsPerUom) || 1 }))),
+  quantity: Math.max(1, Math.floor(Number(s.quantity))),
+  qtyText: String(Math.max(1, Math.floor(Number(s.quantity)))),
   unitsPerUom: Number(s.unitsPerUom) || 1,
   showAdvanced: !!s.poItemId,
 });
@@ -1301,7 +1286,7 @@ const fromStoredEntry = (s: StoredEntry): BasketEntry => ({
 /** Volta a pôr uma entrada no estado livre (para regressar ao cesto). */
 const freeEntry = (e: BasketEntry): BasketEntry => ({
   ...e,
-  qtyText: receivingQtyText(e.quantity),
+  qtyText: String(e.quantity),
   preview: undefined,
   requestId: undefined,
   submitting: false,
@@ -1444,8 +1429,7 @@ function receivedFromResult(
   };
 }
 
-// 19/11: inteiro ≥ 1 numa embalagem ou unidade que se conta; decimal > 0 num produto que se mede (receivingQty.ts)
-const qtyValid = (e: BasketEntry) => isValidReceivingQty(e.qtyText, e.quantity, receivingIntegerOnly(e));
+const qtyValid = (e: BasketEntry) => e.qtyText !== "" && Number(e.qtyText) === e.quantity && e.quantity >= 1;
 
 // ── Página ──
 
@@ -2695,7 +2679,7 @@ export default function Receiving() {
             ? {
                 ...e,
                 quantity: q,
-                qtyText: receivingQtyText(q),
+                qtyText: String(q),
                 openLines: c.open_lines,
                 poItemId: stillValid ? e.poItemId : null,
                 submitError: undefined,
@@ -2713,7 +2697,6 @@ export default function Receiving() {
           uomId: c.uom_id,
           uomCode: c.uom_code,
           unitsPerUom: Number(c.units_per_uom) || 1,
-          ...(typeof c.integer_qty === "boolean" ? { integerQty: c.integer_qty } : {}),
           code: lookup.code,
           openLines: c.open_lines,
           quantity: 1,
@@ -3147,21 +3130,15 @@ export default function Receiving() {
     setBasket((prev) => prev.map((e) => (e.id === id && !isLocked(e) ? { ...e, ...patch } : e)));
   };
 
-  // 19/11: inteiro numa embalagem ou unidade que se conta; decimais (até 3 casas) num produto que se mede
-  const integerOnlyOf = (id: string) => {
-    const e = basketRef.current.find((x) => x.id === id);
-    return e ? receivingIntegerOnly(e) : true;
-  };
   const setQuantity = (id: string, q: number) => {
-    const qty = normalizeReceivingQty(q, integerOnlyOf(id));
-    editEntry(id, { quantity: qty, qtyText: receivingQtyText(qty), submitError: undefined });
+    const qty = Math.max(1, Math.floor(q));
+    editEntry(id, { quantity: qty, qtyText: String(qty), submitError: undefined });
   };
 
   const handleQtyText = (id: string, text: string) => {
-    const integer = integerOnlyOf(id);
-    const clean = cleanReceivingQtyText(text, integer);
-    const n = parseReceivingQty(clean);
-    if (clean !== "" && Number.isFinite(n) && (integer ? Number.isInteger(n) && n >= 1 : n > 0)) {
+    const clean = text.replace(/[^\d]/g, "").slice(0, 9);
+    const n = Number.parseInt(clean, 10);
+    if (clean !== "" && Number.isFinite(n) && n >= 1) {
       editEntry(id, { qtyText: clean, quantity: n, submitError: undefined });
     } else {
       editEntry(id, { qtyText: clean });
@@ -3224,7 +3201,7 @@ export default function Receiving() {
 
   const handleQtyBlur = (entry: BasketEntry) => {
     clearQtyIdle();
-    if (!qtyValid(entry)) editEntry(entry.id, { qtyText: receivingQtyText(entry.quantity) });
+    if (!qtyValid(entry)) editEntry(entry.id, { qtyText: String(entry.quantity) });
   };
 
   const removeEntry = (id: string) => {
@@ -3937,8 +3914,6 @@ export default function Receiving() {
       uomId: line.uomId,
       uomCode: line.uomCode,
       unitsPerUom: line.unitsPerUom || 1,
-      // 19/11: decimais num produto que se mede (a unidade do produto, lida com a encomenda)
-      integerQty: lineIntegerOnly(line),
       code: "",
       openLines: [
         {
@@ -3964,7 +3939,7 @@ export default function Receiving() {
         },
       ],
       quantity: qty,
-      qtyText: receivingQtyText(qty),
+      qtyText: String(qty),
       poItemId: line.id,
       showAdvanced: true,
     }));
@@ -5573,8 +5548,6 @@ function BasketCard({
   const lines = sameUnitLines(entry.openLines);
   const openTotal = lines.reduce((s, l) => s + Number(l.open_quantity), 0);
   const qtyId = `qty-${entry.id}`;
-  // 19/11: decimais nos produtos que se medem (m², ml, kg); inteiros nas embalagens e no que se conta
-  const integerQty = receivingIntegerOnly(entry);
   const poId = `po-${entry.id}`;
   const ackId = `ack-${entry.id}`;
 
@@ -5625,9 +5598,9 @@ function BasketCard({
             onFocus={(ev) => onQtyFocus(ev.currentTarget)}
             onKeyDown={onQtyKeyDown}
             onBlur={onQtyBlur}
-            inputMode={integerQty ? "numeric" : "decimal"}
-            pattern={integerQty ? "[0-9]*" : undefined}
-            maxLength={integerQty ? 9 : 13}
+            inputMode="numeric"
+            pattern="[0-9]*"
+            maxLength={9}
             enterKeyHint="done"
             autoComplete="off"
             disabled={locked}
@@ -5650,7 +5623,7 @@ function BasketCard({
             {entry.unitsPerUom > 1 && qtyValid && ` = ${fmt(entry.quantity * entry.unitsPerUom)} un`}
           </span>
         </div>
-        {!qtyValid && <p className="text-sm text-destructive">{receivingQtyError(integerQty)}</p>}
+        {!qtyValid && <p className="text-sm text-destructive">A quantidade tem de ser um número inteiro, 1 ou mais.</p>}
 
         {/* Linha de PO específica (avançado) */}
         <div>

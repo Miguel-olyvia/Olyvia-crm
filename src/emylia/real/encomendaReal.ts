@@ -7,16 +7,12 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { EC_ESTADOS, type EstadoEc, type EstadoLinhaEc } from "../inventario/ec";
 import type { FasePo, LinhaResumoNeg, PoResumoNeg, ResumoEcNeg } from "../inventario/ponteNegocios";
-import { missingBlockReason } from "@/components/client-orders/missingCause";
 
 export interface LinhaDocEc {
   quote_line_id: string; item_type: "product" | "service"; product_id: string | null; product_name: string | null; product_sku: string | null;
   quantity: number | null; unidade: string | null; line_status: string | null; purchase_order_id: string | null;
   qty_needed: number | null; qty_reserved: number | null; qty_ordered: number | null; qty_received: number | null; qty_missing: number | null;
   qty_served: number | null; has_preferred_supplier: boolean | null;
-  /** 19/11 (20270124010000): porque é que a falta não se pode pedir ao fornecedor (no_preferred_supplier | incompatible_supplier_uom);
-   *  null = pode; ausente = a base sem a migration (vale has_preferred_supplier). */
-  request_block_reason?: string | null;
   /** A saída de stock (movimento «saida») que serviu a linha; null sem saída. Uma «venda» (a baixa no stock ao validar o pagamento)
    *  também conta como servida na base, mas o material ainda está no armazém. */
   stock_exit_movement_id?: string | null;
@@ -52,8 +48,7 @@ export function estadoDaLinha(l: LinhaDocEc): EstadoLinhaEc {
   // chegou do fornecedor para esta linha conta; antes, com a receção feita e a reserva a 0, a linha ficava "parcial" e a obra não arrancava
   if (q > 0 && servido + Math.max(res, rec) >= q) return rec > 0 ? "recvpo" : "ready";
   if (ped > rec) return "waitpo";
-  // 19/11: presa com o critério do pedido ao fornecedor (sem fornecedor preferido OU a unidade do fornecedor incompatível)
-  if (n(l.qty_missing) > 0 && missingBlockReason(l)) return "nosup";
+  if (n(l.qty_missing) > 0 && l.has_preferred_supplier === false) return "nosup";
   if (res > 0 || servido > 0) return "partial";
   return "missing";
 }
@@ -67,12 +62,9 @@ export function resumoDaBase(doc: DocEc, pos: readonly PoBase[]): ResumoEcNeg {
     const servido = n(l.qty_served), pronto = n(l.qty_reserved), aChegar = Math.max(0, n(l.qty_ordered) - n(l.qty_received));
     const semForn = st === "nosup" ? n(l.qty_missing) : 0;
     const po = l.purchase_order_id ? porId.get(l.purchase_order_id) : undefined;
-    // 19/11: a causa concreta da linha presa, e o que se pode pedir ao fornecedor («Pedir o que falta ao fornecedor»)
-    const causa = semForn > 0 ? missingBlockReason(l) ?? undefined : undefined;
-    const pedir = st !== "nosup" && missingBlockReason(l) === null ? Math.max(0, n(l.qty_missing)) : 0;
     return {
       ec, id: l.quote_line_id, sku: l.product_sku ?? "", n: l.product_name ?? "Produto", q, un: l.unidade ?? "un", st, rotulo: l.line_status ?? st,
-      aBordo: false, saida: servido, pronto, aChegar, semForn, pos: po ? [po] : [], ...(causa ? { causa } : {}), ...(pedir > 0 ? { pedir } : {}),
+      aBordo: false, saida: servido, pronto, aChegar, semForn, pos: po ? [po] : [],
     };
   });
   const servidas = linhas.filter((l) => l.st === "served").length, prontas = linhas.filter((l) => l.st === "ready" || l.st === "recvpo").length;
@@ -102,36 +94,6 @@ export async function aprovarPoReal(sb: SupabaseClient, uuid: string): Promise<{
   if (error) throw new Error(error.message || "Não foi possível aprovar a encomenda a fornecedor.");
   const r = (data ?? {}) as { published?: boolean; warning?: string | null };
   return { publicada: r.published === true, aviso: r.warning ?? null };
-}
-
-/* ------------------------------------------------------------------ 19/11: pedir o que falta ao fornecedor */
-// O mesmo botão do Inventário (Encomendas de cliente, «Pedir o que falta ao fornecedor»), no passo Materiais da obra: a mesma RPC
-// (rpc_request_missing_from_supplier, que exige purchase_orders.create e client_orders.view). A página liga quem pede (com a
-// releitura das encomendas); fora dela não há botão.
-export interface ResultadoPedido { criadas: number; linhas: number; semFornecedor: number; outras: number; erros: number }
-type Pedidor = (contrato: string) => Promise<void>;
-let pedidor: Pedidor | null = null;
-export const definirPedidorFalta = (f: Pedidor | null): void => { pedidor = f; };
-export const pedidorFalta = (): Pedidor | null => pedidor;
-
-/** Pede ao fornecedor o que falta na encomenda de cliente (o contrato). A mensagem de erro da base volta tal como vem. */
-export async function pedirFaltaReal(sb: SupabaseClient, contrato: string): Promise<ResultadoPedido> {
-  const { data, error } = await sb.rpc("rpc_request_missing_from_supplier" as never, { p_contract_id: contrato } as never);
-  if (error) throw new Error(error.message || "Não foi possível pedir o que falta ao fornecedor.");
-  const r = (data ?? {}) as Record<string, unknown>;
-  return { criadas: n(r.purchase_orders_created), linhas: n(r.items_created), semFornecedor: n(r.skipped_no_supplier), outras: n(r.skipped_other), erros: n(r.errors) };
-}
-
-/** O aviso do resultado, em palavras. */
-export function textoPedido(r: ResultadoPedido): { msg: string; sub: string; kind: "ok" | "bad" } {
-  const mat = (x: number) => `${x} ${x === 1 ? "material" : "materiais"}`;
-  const presos = [r.semFornecedor ? `${mat(r.semFornecedor)} sem fornecedor preferido` : "", r.outras ? `${mat(r.outras)} com a unidade do fornecedor incompatível` : "",
-    r.erros ? `${r.erros} com erro` : ""].filter(Boolean).join(", ");
-  if (r.linhas > 0) {
-    const novas = r.criadas ? ` em ${r.criadas === 1 ? "1 encomenda nova" : `${r.criadas} encomendas novas`}` : "";
-    return { msg: "Pedido ao fornecedor", sub: `${mat(r.linhas)} pedidos${novas}, por aprovar nas Compras.${presos ? ` Ficaram de fora: ${presos}.` : ""}`, kind: "ok" };
-  }
-  return { msg: "Nada pedido ao fornecedor", sub: presos ? `Ficaram de fora: ${presos}. Resolva no Catálogo.` : "Não havia nada em falta para pedir.", kind: presos ? "bad" : "ok" };
 }
 
 /* ------------------------------------------------------------------ os resumos reais (pela referência do negócio) */

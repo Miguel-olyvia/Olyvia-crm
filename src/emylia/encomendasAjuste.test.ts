@@ -16,7 +16,7 @@ const preparar = () => {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
   return { S, A, d };
 };
-const pagar = ({ A, d }: ReturnType<typeof preparar>) => { preencher(d); A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id);
+const pagar = ({ A, d }: ReturnType<typeof preparar>) => { preencher(d); A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); A.retificarMedidas(d.id);
   // 16/11: uma tarefa nova no plano muda o valor; aqui a empresa segue sem acerto (o acerto ao Financeiro tem os seus testes)
   A.role("comercial"); A.semAdendaDoValor(d.id);
   A.role("operacoes"); A.aprovarPlano(d.id); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ };

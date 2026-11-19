@@ -12,7 +12,7 @@ function comAcerto(min?: number): { S: Estado; d: Negocio; A: ReturnType<typeof 
   A.aceitar(d.id); S.role = "comercial"; A.enviarContrato(d.id); A.assinar(d.id);
   S.role = "financeiro"; d.fin.fatura = { n: "FT TESTE/1031", q: "hoje" }; A.validar(d.id);
   const [k] = camposMedida(LINHAS[d.linha])[0];
-  S.role = "operacoes"; A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id, { [k]: medida(d.visita.med, k) + 2 });
+  S.role = "operacoes"; A.retificarMedidas(d.id, { [k]: medida(d.visita.med, k) + 2 });
   if (min != null) S.cfg.min = min;
   return { S, d, A };
 }

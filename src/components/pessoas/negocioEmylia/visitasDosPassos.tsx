@@ -1,13 +1,11 @@
 // As visitas do negócio da Emylia com o agendamento do CRM, ligadas pelo ponto de extensão `ajustarPassos` (a Emylia, src/emylia, não se edita): o passo «Visitas»
-// (fase da Visita) e o passo «Marcar a visita» (fase do Contacto, a primeira visita) trocam o corpo da Emylia por VisitasDoCrm; o passo «Estúdio» (19/11) recebe-as
-// para o bloco «Visitas» do topo dele (VisitasNoEstudio). Compõe com comTemplatesNosPassos
+// (fase da Visita) e o passo «Marcar a visita» (fase do Contacto, a primeira visita) trocam o corpo da Emylia por VisitasDoCrm. Compõe com comTemplatesNosPassos
 // (os ids são outros) e com comPassosConfiguraveis. Os outros passos ficam como a Emylia os montou.
 import type { Passo } from "@/emylia/CamposFase";
 import type { Negocio } from "@/emylia/motor";
 import { semSombras, type VisitaDoNegocio } from "@/hooks/pessoas/useVisitasDoNegocio";
 import { marcasDoEspelho } from "./espelhoVisitaEmylia";
 import { VisitasDoCrm, type ContextoDasVisitas } from "./VisitasDoCrm";
-import { VisitasDoEstudioCtx } from "@/emylia/VisitasNoEstudio";
 
 export type { ContextoDasVisitas };
 
@@ -29,9 +27,6 @@ export function resumoDaVisitaCrm(v: Pick<VisitaDoNegocio, "dia" | "hora">): str
 export function comVisitasDoCrm(passos: Passo[], c: ContextoDasVisitas): Passo[] {
   return passos.map((p) => {
     if (p.id === "visitas") return { ...p, corpo: <VisitasDoCrm c={c} modo="visitas" /> };
-    // 19/11 (auditoria): no fluxo do Estúdio o passo «Visitas» não está na lista; as visitas ficam no topo do passo Estúdio (VisitasNoEstudio),
-    // e aqui são as da agenda do CRM (remarcar, cancelar, marcar outra)
-    if (p.id === "estudio") return { ...p, corpo: <VisitasDoEstudioCtx.Provider value={<VisitasDoCrm c={c} modo="visitas" />}>{p.corpo}</VisitasDoEstudioCtx.Provider> };
     if (p.id === "vaga") {
       const crm = visitaAtivaDoCrm(c.visitasCrm, c.d);
       return {

@@ -9,11 +9,8 @@ import {
   FASES, LINHAS, PAPEIS, nomeLinha, visitaFeita, visitas,
   acertoDoValorPendente, adendaDoAcerto, margemSemAdenda, retificacaoPorPagar, alertas, bloqueado, camposMedida, mudancasDeValor, impactoDasMedidas, impactoDoPlano, medidasRetificadas, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
-  SEM_ORCAMENTO, semOrcamento, semVisitaPelaChamada,
+  SEM_ORCAMENTO, semOrcamento,
 } from "./motor";
-import { RegistarChamada } from "./RegistarChamada";
-import { VisitasNoEstudio, temVisitaAtiva } from "./VisitasNoEstudio";
-import { rotuloVaga, type Vaga } from "./vagaData";
 import { AREA, CONTACTO, DECISAO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PECAS_WC, PROPOSTA, contagem, divisaoPrincipal, divisoesEscolhidas, efetivo, emFalta, grupoVisita, gruposArea, type Def, type Grupo } from "./campos";
 import { PlantaDivisao } from "./PlantaDivisao";
 import { AgendaDaPropostaCartao } from "./AgendaDaProposta";
@@ -371,27 +368,23 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       // 11/11: o passo «vaga» é a agenda do CRM (VisitasDoCrm: tipo, dia, os comerciais livres, hora e morada); marcar a visita passa o
       // negócio a Visita e a lead e o negócio para o comercial escolhido (20270114310000)
       ...(soAteAoContacto() ? [passoPassarAoComercial()] : [{ id: "vaga", titulo: "Marcar a visita com o comercial", icone: CalendarClock,
-        feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: semVisitaPelaChamada(d) && !v.slot ? (
-        // 19/11 (auditoria): sem «Atendeu · interessado» não se marca a visita; diz-se porquê (o motor também recusa)
-        <p role="note" className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{semVisitaPelaChamada(d)}</p>
-      ) : (
+        feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Vagas em {d.f.localidade || (d.local || "").split(",").pop() || "—"}. Em cada vaga, quem está livre e mais perto.</p>
           {/* 2/11 (reunião): a sugestão de quem vai, pela agenda (livre a essa hora) e pela proximidade (visitas perto nesse dia) */}
-          {/* 19/11 (auditoria): a vaga vai com a data completa (o ano), não só com o texto */}
           <div className="flex flex-wrap gap-2">
             {vagasVisita().map((s) => {
-              const sg = sugerirQuemVai(S.deals, d, s, opcoesDaVisita()), rotulo = rotuloVaga(s);
+              const sg = sugerirQuemVai(S.deals, d, s, opcoesDaVisita());
               return (
-                <button key={s.data + s.hora} type="button" onClick={go(() => A.marcarVisita(d.id, s, sg?.quem))} title={sg ? `${sg.nome}: ${sg.motivo}${sg.ocupados.length ? ` · ocupados: ${sg.ocupados.join(", ")}` : ""}` : undefined}
+                <button key={s} type="button" onClick={go(() => A.marcarVisita(d.id, s, sg?.quem))} title={sg ? `${sg.nome}: ${sg.motivo}${sg.ocupados.length ? ` · ocupados: ${sg.ocupados.join(", ")}` : ""}` : undefined}
                   className="rounded-xl border border-border bg-card px-3 py-2 text-left text-sm font-medium transition hover:-translate-y-0.5 hover:border-primary hover:bg-primary/5 hover:text-primary hover:shadow-[var(--shadow-sm)]">
-                  <span className="block"><CalendarClock className="mr-1.5 inline h-4 w-4" />{rotulo}</span>
+                  <span className="block"><CalendarClock className="mr-1.5 inline h-4 w-4" />{s}</span>
                   {sg && <span className="mt-0.5 block text-xs font-normal text-muted-foreground">{sg.nome} · {sg.motivo}</span>}
                 </button>
               );
             })}
           </div>
-          <OutraData INP={INP} ROT={ROT} marcar={(vaga) => go(() => A.marcarVisita(d.id, vaga, sugerirQuemVai(S.deals, d, vaga, opcoesDaVisita())?.quem))()} />
+          <OutraData INP={INP} ROT={ROT} marcar={(slot) => go(() => A.marcarVisita(d.id, slot, sugerirQuemVai(S.deals, d, slot, opcoesDaVisita())?.quem))()} />
         </div>
       ) } as Passo]),
     ];
@@ -494,16 +487,13 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       // parecia não fazer nada. Conta-se aqui também, como na lista de passos, para o bloco acender e abrir no campo em falta.
       const faltaNec = (aValidar(d, "nec") ? (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length : 0)
         + (aValidar(d, ESCOLHAS.titulo) && !E(ESCOLHAS).oculto ? emFalta([E(ESCOLHAS)], d.f).length : 0);
-      // 19/11 (auditoria): o passo «Visitas» saiu da lista; com a única visita cancelada o levantamento não fecha. As visitas ficam no topo
-      // do Estúdio (remarcar, cancelar, marcar outra) e o bloco acende quando falta uma que conte.
-      const faltaVisitas = !temVisitaAtiva(d) && (aValidar(d, "visitas") || visitas(d).length > 0) ? 1 : 0;
       passos = [
         ...passos.slice(0, ate).filter((x) => x.id !== "visitas" && x.id !== areaId),
         { id: "estudio", titulo: "Estúdio", icone: Sparkles,
-          feito: !!pr && Object.keys(pr.escolhas).length + (pr.porColocar ?? []).length + (pr.servicos ?? []).length > 0 && medOk === nMed && passoNec.feito === true && temVisitaAtiva(d),
-          falta: faltaVisitas + faltaArea + faltaMed + faltaNec || undefined,
+          feito: !!pr && Object.keys(pr.escolhas).length + (pr.porColocar ?? []).length + (pr.servicos ?? []).length > 0 && medOk === nMed && passoNec.feito === true,
+          falta: faltaArea + faltaMed + faltaNec || undefined,
           resumo: [pr ? "projeto guardado" : "por abrir", d.f.duracao_obra ? `obra: ${d.f.duracao_obra}` : ""].filter(Boolean),
-          corpo: <div className="space-y-10"><VisitasNoEstudio ctx={ctx} d={d} falta={faltaVisitas} /><EstudioNaVisita ctx={ctx} d={d} /><FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
+          corpo: <div className="space-y-10"><EstudioNaVisita ctx={ctx} d={d} /><FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
             ...(passoArea ? [{ id: "area", titulo: passoArea.titulo, resumo: passoArea.resumo.join(" · ") || "por preencher", corpo: passoArea.corpo, falta: faltaArea }] : []),
             ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", resumo: resumoMedidas.join(" · ") || "por preencher", corpo: corpoMedidas(false), falta: faltaMed }]),
             { id: "nec", titulo: "Necessidades do cliente", resumo: passoNec.resumo.join(" · ") || "por juntar", corpo: passoNec.corpo, falta: faltaNec },
@@ -666,8 +656,6 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
       <p id={idSemPerm} className="max-w-sm text-sm text-muted-foreground sm:text-right">{SEM_PERM[falta].sub}</p>
     </div>
   );
-  // 19/11 (auditoria): «Registar chamada» pede o resultado da chamada (sem valor por omissão) e, para voltar a ligar, o dia
-  if (p.act === "contactar" && meu) return <RegistarChamada ctx={ctx} d={d} tamanho={tamanho} />;
   // 15/10: o cliente pediu alterações no portal: o botão abre a nova versão já com o que ele pediu
   if (p.act === "pedidoCliente" && meu) return <NovaVersao ctx={ctx} d={d} texto={p.btn} />;
   // 22/10: a fatura emitida no Eticadata: o número escreve-se aqui e confirma-se no ERP
@@ -977,14 +965,21 @@ export function BotaoTesteSimularCliente({ d, acao, tamanho = "default", ambient
   );
 }
 
-/** Marcar a visita noutro dia e hora que não as vagas sugeridas. 19/11 (auditoria): a vaga vai com a data completa (antes, slotDe deitava fora o ano). */
-function OutraData({ INP, ROT, marcar }: { INP: string; ROT: string; marcar: (vaga: Vaga) => void }) {
+const DIA_SEMANA = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
+/** "2026-10-22" e "14:30" → "qui 22/10 · 14:30", o mesmo formato das vagas. */
+export const slotDe = (dia: string, hora: string) => {
+  const [a, m, n] = dia.split("-").map(Number);
+  return `${DIA_SEMANA[new Date(a, m - 1, n).getDay()]} ${String(n).padStart(2, "0")}/${String(m).padStart(2, "0")} · ${hora}`;
+};
+
+/** Marcar a visita noutro dia e hora que não as vagas sugeridas. */
+function OutraData({ INP, ROT, marcar }: { INP: string; ROT: string; marcar: (slot: string) => void }) {
   const [dia, setDia] = useState(""), [hora, setHora] = useState("10:00");
   return (
     <div className="flex flex-wrap items-end gap-3 pt-2">
       <label className={ROT}>Outro dia<input type="date" value={dia} onChange={(e) => setDia(e.target.value)} className={cn(INP, "w-44")} /></label>
       <label className={ROT}>Hora<input type="time" step={900} value={hora} onChange={(e) => setHora(e.target.value)} className={cn(INP, "w-28")} /></label>
-      <Button type="button" variant="outline" disabled={!dia || !hora} onClick={() => marcar({ data: dia, hora })}><CalendarClock className="mr-1.5 h-4 w-4" />Marcar visita</Button>
+      <Button type="button" variant="outline" disabled={!dia || !hora} onClick={() => marcar(slotDe(dia, hora))}><CalendarClock className="mr-1.5 h-4 w-4" />Marcar visita</Button>
     </div>
   );
 }

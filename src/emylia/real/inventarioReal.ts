@@ -8,68 +8,15 @@ import type { DestinoInventario, LigacaoReal, Negocio } from "../motor";
 import { definirProntidoes, type ProntidaoReal } from "../inventario/prontidaoReal";
 import { clientOrdersLink, purchaseOrdersLink, receivingLink } from "@/components/inventory/ui/inventoryLinks";
 
-/* 19/11 (auditoria): sem a permissão das encomendas (client_orders.view) a leitura falha e antes a lista vinha vazia: o arranque ficava
-   «a ler» para sempre. Agora a falha fica guardada por contrato e o passo diz o que é: sem permissão (e a quem pedir) ou a leitura falhou. */
-/** Porque é que a prontidão de um contrato não se leu: sem a permissão das encomendas, ou outro erro da base. */
-export type FalhaProntidao = "sem-permissao" | "erro";
-const falhas = new Map<string, FalhaProntidao>();
-/** A falha da última leitura da prontidão deste contrato (undefined: leu-se, ou ainda está a ler). */
-export const falhaProntidao = (contrato: string): FalhaProntidao | undefined => falhas.get(contrato);
-/** Só para testes. */
-export function limparFalhasProntidao(): void { falhas.clear(); }
-/** O que se diz a quem não tem a permissão das encomendas de cliente. */
-export const SEM_PERMISSAO_MATERIAIS = "Para ver os materiais, peça a permissão Encomendas de cliente ao administrador.";
-/** O erro da base é de permissão? (fn_cat_exigir: ERRCODE insufficient_privilege, HINT no_permission) */
-export function erroDePermissao(e: { code?: string; hint?: string; message?: string } | null | undefined): boolean {
-  if (!e) return false;
-  return e.code === "42501" || e.hint === "no_permission" || /permiss|client_orders\.view/i.test(e.message ?? "");
-}
-/** O que falta para arrancar quando a prontidão não se leu (vazio: não falhou). */
-export function faltaPorFalha(contrato: string): string[] {
-  const f = falhas.get(contrato);
-  return f === "sem-permissao" ? ["ver os materiais: peça a permissão Encomendas de cliente ao administrador"]
-    : f === "erro" ? ["confirmar os materiais nas Encomendas de cliente (a leitura falhou: recarregue a página)"] : [];
-}
-/** A frase dos materiais quando a prontidão não se leu (null: não falhou). */
-export function textoPorFalha(numero: string, contrato: string): string | null {
-  const f = falhas.get(contrato);
-  return f === "sem-permissao" ? `Encomenda de cliente ${numero} emitida. ${SEM_PERMISSAO_MATERIAIS}`
-    : f === "erro" ? `Encomenda de cliente ${numero} emitida. Os materiais não se leram: recarregue a página.` : null;
-}
-
-/** A prontidão das encomendas de cliente dos negócios lidos (só as emitidas). Sem permissão de ver encomendas (ou com erro), não guarda
- *  prontidão nenhuma: guarda a falha (falhaProntidao), para o passo não ficar «a ler». */
+/** A prontidão das encomendas de cliente dos negócios lidos (só as emitidas). Sem permissão de ver encomendas (ou com erro), não guarda nada. */
 export async function lerProntidoes(sb: SupabaseClient, org: string, contratos: readonly string[]): Promise<ProntidaoReal[]> {
   if (!contratos.length) return [];
-  const ids = [...new Set(contratos)];
-  const { data, error } = await sb.rpc("rpc_client_order_list_readiness" as never, { p_organization_id: org, p_contract_ids: ids } as never);
-  if (error) {
-    const f: FalhaProntidao = erroDePermissao(error as { code?: string; hint?: string; message?: string }) ? "sem-permissao" : "erro";
-    for (const c of ids) falhas.set(c, f);
-    // avisa quem desenha (sem prontidões novas): o passo troca o «a ler» pelo motivo
-    definirProntidoes([]);
-    return [];
-  }
-  for (const c of ids) falhas.delete(c);
+  const { data, error } = await sb.rpc("rpc_client_order_list_readiness" as never, { p_organization_id: org, p_contract_ids: [...new Set(contratos)] } as never);
+  if (error) return [];
   const lidas = ((data as Record<string, unknown>[] | null) ?? []).map((x): ProntidaoReal => ({
     contrato: String(x.contract_id), linhasProntas: Number(x.lines_ready ?? 0), reservadas: Number(x.units_in_stock_reserved ?? 0),
     aChegar: Number(x.units_on_po ?? 0), emFalta: Number(x.units_missing ?? 0), servidas: Number(x.units_served ?? 0), precisas: Number(x.units_needed ?? 0),
   }));
-  // 19/11 (20270124010000): do que falta, o que se pode pedir e porquê o resto não. Sem a função (base por atualizar) ou com erro,
-  // fica a prontidão como estava (a obra diz «encomendar ao fornecedor» sem distinguir).
-  if (lidas.some((p) => p.emFalta > 0)) {
-    const causas = await sb.rpc("rpc_client_order_missing_causes" as never, { p_organization_id: org, p_contract_ids: lidas.filter((p) => p.emFalta > 0).map((p) => p.contrato) } as never);
-    if (!causas.error && Array.isArray(causas.data)) {
-      const porContrato = new Map((causas.data as Record<string, unknown>[]).map((c) => [String(c.contract_id), c]));
-      for (const p of lidas) {
-        const c = porContrato.get(p.contrato);
-        if (!c || !("units_requestable" in c)) continue;
-        p.aPedir = Math.min(p.emFalta, Number(c.units_requestable ?? 0));
-        p.semFornecedor = Number(c.lines_no_supplier ?? 0);
-        p.unidadeIncompativel = Number(c.lines_incompatible_uom ?? 0);
-      }
-    }
-  }
   definirProntidoes(lidas);
   return lidas;
 }

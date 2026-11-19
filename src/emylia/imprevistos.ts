@@ -33,8 +33,6 @@ export interface Imprevisto {
   adenda?: string;
   /** com a proposta recusada (ou sem proposta): o que o gestor decidiu */
   decisao?: string;
-  /** 19/11 (auditoria): «Faltou material» no Hoje do técnico: é da empresa (o gestor encomenda o que falta), não vai ao cliente */
-  tipo?: "material";
 }
 /** Uma linha livre da proposta de um imprevisto: o trabalho, as horas, o preço sem IVA e os materiais. */
 export interface LinhaLivre { n: string; h: number; preco: number; perfil: string; mats: MatTarefa[] }

@@ -67,7 +67,7 @@ describe("permDoCampo: a permissão de cada resposta, como fn_neg_marcas_permiss
 /** Cada ação: a permissão que pede e como chamá-la (num Estado já normalizado). */
 type Caso = [string, PermNeg, (A: ReturnType<typeof acoes>, S: Estado) => unknown];
 const CASOS: Caso[] = [
-  ["contactar", "contacto.registar", (A, S) => A.contactar(algum(S, (d) => d.fase === 0).id, "Atendeu · interessado")],
+  ["contactar", "contacto.registar", (A, S) => A.contactar(algum(S, (d) => d.fase === 0).id)],
   ["campo resultado", "contacto.registar", (A, S) => A.campo(algum(S).id, "resultado", "Não atendeu")],
   ["campo tentativas", "contacto.registar", (A, S) => A.campo(algum(S).id, "tentativas", "3")],
   ["campo religar", "contacto.registar", (A, S) => A.campo(algum(S).id, "religar", "2026-11-10")],

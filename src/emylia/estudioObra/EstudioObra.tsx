@@ -44,7 +44,6 @@ import { ROTULO_VIVO, conflitosNovos, rotuloVivo, dataDoDia, derrapagem, diasDeA
 import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
 import { custoDosNossos, pedePorque, type AjusteObra } from "./quemPaga";
 import { PorqueAjuste, type ImprevistoInicial } from "./PorqueAjuste";
-import { tomarPainelObra } from "./painelPedido";
 import { AdendasDaObra } from "./AdendasObra";
 import { definirQuemAssina } from "./quemAssina";
 import { useNomeParaMarcaDagua } from "@/hooks/useNomeParaMarcaDagua";
@@ -136,11 +135,6 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
     if (k && !antes) { entrouPainel.current = noEndereco; mexeu.current = true; }
     setPainelUrl(k, { substituir: !!antes || !k });
   };
-  // 19/11 (auditoria): o painel pedido de fora (o Hoje: «O cliente pediu uma alteração» abre a tarefa, onde «Porquê?» › «O cliente pediu»
-  // prepara a adenda): abre-se à chegada, como se se tivesse tocado nele
-  const pedidoFora = useRef<string | null>(null);
-  if (pedidoFora.current === null) pedidoFora.current = tomarPainelObra(d.id);
-  useEffect(() => { const x = pedidoFora.current ? descodificarPainel(pedidoFora.current, d.obra.plano) : null; if (x) setPainel(x); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const [previa, setPrevia] = useState<Previa | null>(null);
   const [outra, setOutra] = useState<Negocio | null>(null);
   // o imprevisto a ser registado (painel): o atraso dele mostra-se já no plano vivo, sem a caixa de aplicar

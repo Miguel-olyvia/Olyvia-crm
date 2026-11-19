@@ -29,7 +29,7 @@ function prontaAArrancar(pagamento: string) {
   d.f.pagamento = pagamento;
   preencher(d, FINANCEIRO); preencher(d, [OBRA[0]]);
   A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
-  A.role("operacoes"); A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id); A.aprovarPlano(d.id);
+  A.role("operacoes"); A.retificarMedidas(d.id); A.aprovarPlano(d.id);
   expect(aprovarPos(REF)).toBe("");
   expect(receberTudo(REF)).toBe("");
   return { S, A, d, avisos };

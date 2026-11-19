@@ -5,7 +5,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CalendarClock, Plus } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { responsavelPelaVisita, semVisitaPelaChamada, visitaPassadaPeloServidor, visitas as numerosDe, type Negocio } from "@/emylia/motor";
+import { responsavelPelaVisita, visitaPassadaPeloServidor, visitas as numerosDe, type Negocio } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,7 @@ import { useExecutarAcao } from "../useExecutarAcao";
 import { moradaPorOmissaoDaVisita } from "./moradaPorOmissaoDaVisita";
 import { EstadoHonesto } from "./EstadoHonesto";
 import {
-  aplicarEspelho, calcularEspelho, escreverDoFormulario, marcasDoEspelho, visitasSoDaEmylia,
+  aplicarEspelho, calcularEspelho, escreverDoFormulario, marcasDoEspelho, vagaDoMotor, visitasSoDaEmylia,
 } from "./espelhoVisitaEmylia";
 import { MarcarVisitaNegocio, type VisitaGravada } from "./MarcarVisitaNegocio";
 import { preparadoNoNegocio } from "./preparadoDaVisita";
@@ -127,16 +127,11 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
     // 12/11: a base já passou o negócio a Visita (passou_a_visita): o ecrã acompanha-a, sem o portão do Contacto; senão a gravação seguinte
     // mandava a fase 1 e desfazia a passagem. A visita do motor não se cria: o espelho põe a do CRM no número seguinte.
     if (g.passouAVisita) { visitaPassadaPeloServidor(d, g.passouAVisita); return undefined; }
-    if (modo !== "primeira" || d.fase > 1 || g.remarcada) return undefined;
-    // 19/11 (auditoria): «Tudo na chamada» marca a visita ainda na Lead: a chamada fica registada (o negócio passa a Contacto) e, com as
-    // respostas do Contacto completas, segue para a Visita (antes só se agia na fase 1 e o negócio ficava em «Por contactar»)
-    if (d.fase === 0) ctx.A.chamadaFeita(d.id);
-    if (d.fase !== 1) return undefined;
+    if (modo !== "primeira" || d.fase !== 1 || g.remarcada) return undefined;
     const antes = numerosDe(d).length;
     // 4/11: a visita fica com quem foi escolhido na agenda (e não com quem está ligado)
     const quem = g.visita.recursos.map((r) => nomes.get(r) ?? "").filter(Boolean).join(" e ");
-    // 19/11 (auditoria): a vaga com a data completa (o ano), e não o texto «qui 15/10 · 10:00»
-    ctx.A.marcarVisita(d.id, { data: g.visita.dia, hora: g.visita.hora }, quem || undefined);
+    ctx.A.marcarVisita(d.id, vagaDoMotor(g.visita.dia, g.visita.hora), quem || undefined);
     return antes === 0 && d.fase >= 2 ? numerosDe(d).find((n) => !d.f[`v${n}_crm`]) : undefined;
   };
   // 5/11: a chamada em direto pediu que a visita se marque sozinha (marcacaoDaChamada.ts)
@@ -153,12 +148,12 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
       if (g.responsavel) responsavelPelaVisita(d, g.responsavel);
       return n;
     }, g.presentes);
-    if (modo === "primeira" && d.fase < 2) setAviso(AVISO_SEM_PASSAR);
+    if (modo === "primeira" && d.fase < 2) setAviso("A visita ficou marcada no CRM, mas o negócio ainda não passou à fase da visita: faltam respostas do Contacto (veja o aviso). Complete-as e use «Passar à visita».");
   };
   const passarComAMarcada = (v: VisitaDoNegocio): void => {
     setAviso(null);
     refletir(visitasCrm, { visitaId: v.id }, () => passarAVisita({ visitaId: v.id, visita: v, presentes: "", remarcada: false, responsavel: null }));
-    if (d.fase < 2) setAviso(AVISO_SEM_PASSAR);
+    if (d.fase < 2) setAviso("O negócio ainda não passou à fase da visita: faltam respostas do Contacto (veja o aviso).");
   };
   const cancelar = (v: VisitaDoNegocio): void => {
     acao.executar(() => acoes.cancelar(v.id).then(() => undefined), () => refletir(visitasCrm.map((x) => (x.id === v.id ? { ...x, estado: "cancelada" as const } : x)), null));
@@ -198,13 +193,10 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
     </div>
   );
   const legadas = visitasSoDaEmylia(d);
-  // 19/11 (auditoria): a primeira visita só se marca com a chamada «Atendeu · interessado» (o motor recusa o resto); sem isso, diz-se porquê
-  // e não se mostra a agenda (senão a visita ficava no CRM e o negócio parado)
-  const semChamada = modo === "primeira" && d.fase <= 1 && ativas.length === 0 ? semVisitaPelaChamada(d) : null;
   const semVisitas = visitasCrm.length === 0 && legadas.length === 0;
   return (
     <div className="max-w-3xl space-y-4">
-      {modo === "primeira" && ativas.length > 0 && d.fase <= 1 && (
+      {modo === "primeira" && ativas.length > 0 && d.fase === 1 && (
         <EstadoHonesto titulo="Já há uma visita marcada no CRM para este negócio.">
           <Button type="button" className={cn("mt-2 min-h-11", FOCO)} disabled={!podeGerir} aria-describedby={semGerir ? idSemGerir : undefined} onClick={() => passarComAMarcada(ativas[0] as VisitaDoNegocio)}>Passar à visita</Button>
         </EstadoHonesto>
@@ -212,8 +204,7 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
       {semGerir && <p id={idSemGerir} className="text-[15px] text-muted-foreground">{SEM_PERM["visita.gerir"].sub}</p>}
       {aviso && <p role="alert" className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{aviso}</p>}
       <ErroAcao chave={acao.erro} chaveExtra={acao.erroExtra} />
-      {semVisitas && !aMarcar && !semChamada && <EstadoHonesto titulo="Ainda não há visitas marcadas neste negócio." />}
-      {semChamada && <p role="note" className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{semChamada}</p>}
+      {semVisitas && !aMarcar && <EstadoHonesto titulo="Ainda não há visitas marcadas neste negócio." />}
       {visitasCrm.map((v, i) => (
         <div key={v.id} className="space-y-3">
           <CartaoDaVisita
@@ -237,7 +228,7 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
           dia={d.f[`v${n}_data`] || ""} hora={d.f[`v${n}_hora`] || ""} quem={(d.f[`v${n}_quem`] || "").split(" (")[0] ?? ""}
         />
       ))}
-      {semChamada ? null : (aMarcar || (semVisitas && aRemarcar === null)) ? formulario() : (
+      {(aMarcar || (semVisitas && aRemarcar === null)) ? formulario() : (
         !d.visita.fechada && c.podeEditar && aRemarcar === null && (
           <button
             type="button" onClick={() => { if (podeGerir) setAMarcar(true); }} disabled={!podeGerir} aria-describedby={semGerir ? idSemGerir : undefined}
@@ -250,9 +241,6 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
     </div>
   );
 }
-
-/** 19/11 (auditoria): o aviso quando a visita ficou no CRM mas o negócio não passou à Visita (antes falava de um botão que na Lead não existia). */
-const AVISO_SEM_PASSAR = "A visita ficou marcada no CRM, mas o negócio ainda não passou à fase da visita: faltam respostas do Contacto (veja o aviso). Complete-as e carregue em «Passar à visita», aqui em cima.";
 
 /** «Quem vai estar» que o negócio da Emylia guardou para esta visita (o CRM não o devolve a este ecrã). */
 function presentesDe(d: Negocio, v: VisitaDoNegocio): string {

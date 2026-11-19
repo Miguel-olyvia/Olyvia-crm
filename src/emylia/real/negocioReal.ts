@@ -121,8 +121,8 @@ export interface LinhaAdendaLinha {
   ordem: number; servico: string | null; chave: string; livre: boolean; descricao: string; unidade: string; quantidade: number; preco_un: number;
   horas_un: number; perfil: string; perfil_chave: string | null; custo_un: number | null; mao_obra_un: number | null;
   materiais: { nome: string; quantidade: number; unidade: string; preco: number | null; fornecedor: string | null }[] | null;
-  /** 19/11 (auditoria): a taxa de IVA da linha (6 ou 23). As linhas das adendas vivem em quote_lines (as propostas da adenda): desde
-   *  20270124030000 a base grava-a (iva_percent com iva_explicita) e devolve-a; as linhas antigas voltam com null (contam a 6%). */
+  /** 19/11 (auditoria): a taxa de IVA da linha (6 ou 23). As linhas antigas não a têm (contam a 6%). A tabela adenda_linhas ainda não
+   *  tem a coluna: até lá, a base não a guarda (e a linha volta sem ela). */
   taxa_iva?: number | null;
 }
 export interface LinhaAdendaVersao {
@@ -193,19 +193,13 @@ const linhaAdendaParaLinha = (x: LinhaAdendaEmylia, i: number): LinhaAdendaLinha
   materiais: x.mats ? x.mats.map((m) => ({ nome: m.n, quantidade: m.q, unidade: m.un, preco: m.preco ?? null, fornecedor: m.forn ?? null })) : null,
   ...(x.iva ? { taxa_iva: x.iva } : {}),
 });
-/** 19/11: a taxa de uma linha da adenda lida da base. Primeiro a da base (20270124030000: taxa_iva, 6 ou 23). Só nas linhas antigas
- *  (gravadas antes, sem taxa) se deduz pelo nome: a dos produtos do acerto volta a 23% (a «-p6» é a que fica a 6%); as outras, 6%. */
-export function ivaDaLinhaLida(l: Pick<LinhaAdendaLinha, "taxa_iva" | "livre" | "descricao" | "chave">): { iva?: 6 | 23 } {
-  const taxa = l.taxa_iva == null ? null : Number(l.taxa_iva);
-  if (taxa === 6 || taxa === 23) return { iva: taxa };
-  if (taxa == null && l.livre && l.descricao.startsWith(LINHA_ACERTO_PRODUTOS) && !l.chave.endsWith("-p6")) return { iva: 23 };
-  return {};
-}
 const linhaAdendaDeLinha = (l: LinhaAdendaLinha): LinhaAdendaEmylia => ({
   sid: l.chave, n: l.descricao, un: l.unidade, q: l.quantidade, pu: l.preco_un, h: l.horas_un, perfil: l.perfil,
   ...(l.perfil_chave ? { perfilId: l.perfil_chave } : {}), ...(l.custo_un != null ? { cu: l.custo_un } : {}), ...(l.mao_obra_un != null ? { mo: l.mao_obra_un } : {}),
   ...(l.livre ? { livre: true as const } : {}),
-  ...ivaDaLinhaLida(l),
+  ...(l.taxa_iva === 6 || l.taxa_iva === 23 ? { iva: l.taxa_iva }
+    // 19/11: enquanto adenda_linhas não guarda a taxa, a linha dos produtos do acerto volta a 23% pelo nome (a «-p6» é a que fica a 6%)
+    : l.livre && l.descricao.startsWith(LINHA_ACERTO_PRODUTOS) && !l.chave.endsWith("-p6") ? { iva: 23 as const } : {}),
   ...(l.materiais ? { mats: l.materiais.map((m) => ({ n: m.nome, q: m.quantidade, un: m.unidade, ...(m.preco != null ? { preco: m.preco } : {}), ...(m.fornecedor ? { forn: m.fornecedor } : {}) })) } : {}),
 });
 const ESTADO_VERSAO: Record<EstadoAdenda, LinhaAdendaVersao["estado"]> = { rascunho: "rascunho", enviada: "enviado", aceite: "aceite", assinada: "aceite", recusada: "recusado", anulada: "anulado" };

@@ -31,8 +31,7 @@ import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema,
   textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
 import { comFaturaDaParcela, faltaParaAuto, nomeDaParcela, parcelaDoArranquePorPagar, parcelasDoContrato } from "./parcelas";
-import { agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, FALTA_EC_AUTOMATICA, ecNoServidor, marcarEcNoServidor, retificacaoAceite, faltaMedirTexto, medicoesDe, supervisorDasMedidas, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
-import { pedirPainelObra } from "./estudioObra/painelPedido";
+import { agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, FALTA_EC_AUTOMATICA, ecNoServidor, marcarEcNoServidor, retificacaoAceite, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
@@ -42,8 +41,7 @@ import { lembrarErp, lerFaturaErp, resumoErp, type InfoErp } from "./erpEticadat
 import { lerInventario, pedirAbrirEcInv, pedirRececaoClienteInv } from "./inventario/loja";
 import { origemAtual, pedirRota } from "./navegacao";
 import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitosLevantamento";
-import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, RES_INTERESSADO, RES_NUMERO_ERRADO, RES_PERDA, RES_RELIGAR, RESULTADOS_CHAMADA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
-import { isoDoDia, rotuloVaga, vagaDe, type Vaga } from "./vagaData";
+import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 import { RESPONSAVEIS_OBRA, chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
 import { quemVaiPorOmissao } from "./equipa/membros";
 import { TECNICOS, ausenteNoRh, custoHoraDe, garantirTecnicos, perfilDoTecnico, temAusenciasRh, tecnicosIniciais, usarTecnicos, type FichaTecnico, type Tecnico } from "./equipa/tecnicos";
@@ -585,12 +583,12 @@ export function seed(): Estado {
     if (d.fase < 2 || d.vis) continue;
     const feita = d.fase >= 3 || d.id === 1035;
     criarVisita(d, visitaDoSlot(d.visita.slot || "qui 01/10 · 10:00", { estado: feita ? "Feita" : "Marcada", presentes: d.f.presentes || "O cliente",
-      combinado: feita ? "Levantamento feito, com medidas e fotografias." : "" }, INICIO_DO_EXEMPLO));
+      combinado: feita ? "Levantamento feito, com medidas e fotografias." : "" }));
   }
   {
     const j = by0(S, 1050);
     j.vis = [];
-    criarVisita(j, visitaDoSlot("qua 17/09 · 10:00", { estado: "Feita", presentes: "O casal", combinado: "Medidas e fotos tiradas. O casal quer base de duche e móvel suspenso." }, INICIO_DO_EXEMPLO));
+    criarVisita(j, visitaDoSlot("qua 17/09 · 10:00", { estado: "Feita", presentes: "O casal", combinado: "Medidas e fotos tiradas. O casal quer base de duche e móvel suspenso." }));
     criarVisita(j, { tipo: "Escolha de materiais", estado: "Feita", data: "2026-09-19", hora: "15:00", quem: "Hugo (técnico)", presentes: "O casal", duracao: "1 h",
       combinado: "Escolhido o cerâmico 30×60 branco mate e o pavimento a imitar madeira." });
   }
@@ -807,10 +805,11 @@ function exemplo(d: Negocio): Record<string, string> {
 }
 
 /* ------------------------------------------------------------------ visitas */
-// 19/11 (auditoria): o dia da visita vem da vaga com a data completa (vagaData.ts); o texto antigo sem ano lê-se com o ano mais perto no
-// futuro (antes ficava sempre 2026). Os exemplos do protótipo são de 2026: leem-se a contar do início desse ano.
-const INICIO_DO_EXEMPLO = new Date(2026, 0, 1);
-const diaDaVaga = (slot: string | Vaga, hoje?: Date): Vaga => vagaDe(slot, hoje) ?? { data: "", hora: "" };
+const MESES_DIA = (slot: string) => {
+  // "qui 15/10 · 10:00" → { data: "2026-10-15", hora: "10:00" }
+  const m = /(\d{1,2})\/(\d{1,2}).*?(\d{1,2}:\d{2})/.exec(slot);
+  return m ? { data: `2026-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`, hora: m[3] } : { data: "", hora: "" };
+};
 export const visitas = (d: Negocio) => d.vis || [];
 export const campoVisita = (d: Negocio, n: number, k: string) => d.f[`v${n}_${k}`] || "";
 export function criarVisita(d: Negocio, dados: Record<string, string>): number {
@@ -820,7 +819,7 @@ export function criarVisita(d: Negocio, dados: Record<string, string>): number {
   return n;
 }
 export const visitaFeita = (d: Negocio) => visitas(d).some((n) => campoVisita(d, n, "estado") === "Feita");
-const visitaDoSlot = (slot: string | Vaga, extra: Record<string, string>, hoje?: Date) => ({ tipo: "Levantamento", quem: "Rúben (comercial)", duracao: "1 h 30", ...diaDaVaga(slot, hoje), ...extra });
+const visitaDoSlot = (slot: string, extra: Record<string, string>) => ({ tipo: "Levantamento", quem: "Rúben (comercial)", duracao: "1 h 30", ...MESES_DIA(slot), ...extra });
 
 /* ------------------------------------------------------------------ cálculo */
 export const r2 = (x: number) => Math.round(x * 100) / 100;
@@ -1514,33 +1513,6 @@ export function acertarFaseDasMedidas(d: Negocio): boolean {
 export const SEM_ORCAMENTO = "Este negócio está na fase Negócio mas não tem orçamento. Peça a quem o gere para o refazer.";
 // só a fase 3: na Obra (5) o motor pode estar sem orçamento com a EC emitida no servidor (protegerObra.test.ts) e pede o plano
 export const semOrcamento = (d: Negocio): boolean => d.fase === 3 && !d.orc && !d.anulado && !d.perdido;
-/** 19/11 (auditoria): «2026-11-20» → «20/11/2026» (o dia combinado para voltar a ligar). */
-const diaPorExtenso = (iso: string): string => { const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso); return m ? `${m[3]}/${m[2]}/${m[1]}` : iso; };
-/** 19/11 (auditoria): o dia útil a seguir a `hoje`, em ISO (o «Voltar a ligar em» por omissão quando não se escolhe outro). */
-export function proximoDiaUtil(hoje = new Date()): string {
-  const x = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() + 1);
-  while (x.getDay() === 0 || x.getDay() === 6) x.setDate(x.getDate() + 1);
-  return isoDoDia(x);
-}
-/** 19/11 (auditoria): porque é que a visita ainda não se marca, pelo resultado da chamada; `null` com o cliente interessado. */
-export function semVisitaPelaChamada(d: Negocio): string | null {
-  const r = d.f.resultado || "";
-  if (r === RES_INTERESSADO) return null;
-  if (!r) return `Registe primeiro como correu a chamada: a visita marca-se com o cliente «${RES_INTERESSADO}».`;
-  if (RES_RELIGAR.includes(r)) return `A chamada ficou como «${r}». Volte a ligar e registe a chamada: com o cliente interessado, marca-se a visita.`;
-  return `A chamada ficou como «${r}». Se o cliente mudou de ideias, registe outra chamada com «${RES_INTERESSADO}».`;
-}
-/** 19/11 (auditoria): o próximo passo do Contacto pelo resultado da chamada (sem resultado, voltar a ligar, perdido); `null` com o cliente
- *  interessado (segue a visita). */
-function passoDaChamada(d: Negocio): Proximo | null {
-  const r = d.f.resultado || "";
-  if (r === RES_INTERESSADO) return null;
-  if (!r) return { t: "Registar a chamada", sub: "Escolha como correu a chamada.", btn: "Registar chamada", act: "contactar", who: "comercial" };
-  if (RES_RELIGAR.includes(r)) return { t: "Voltar a ligar", sub: d.f.religar ? `Ficou combinado voltar a ligar a ${diaPorExtenso(d.f.religar)} (${r.toLowerCase()}). Depois, registe como correu a chamada.` : `${r}. Escolha o dia para voltar a ligar.`, btn: "Registar chamada", act: "contactar", who: "comercial" };
-  return { t: "Marcar como perdido", sub: r === RES_NUMERO_ERRADO
-    ? "O número está errado. Se tiver outro contacto, corrija-o e registe outra chamada; senão, dê o negócio como perdido."
-    : "O cliente não tem interesse. Se mudar de ideias, registe outra chamada.", btn: "Marcar como perdido", act: "perder", who: "comercial" };
-}
 export function proximo(d: Negocio, S: Estado): Proximo {
   if (d.anulado) return { t: d.orc?.vendaDireta ? "Venda anulada" : "Contrato anulado", sub: `${d.anulado.motivo} · ${d.anulado.q}`, who: null };
   if (d.perdido) return { t: "Negócio perdido", who: null };
@@ -1548,17 +1520,13 @@ export function proximo(d: Negocio, S: Estado): Proximo {
   const o = d.orc;
   switch (d.fase) {
     case 0: return { t: "Registar a chamada", sub: "Ligar ao cliente e anotar o resultado.", btn: "Registar chamada", act: "contactar", who: "comercial" };
-    case 1: {
-      // 19/11 (auditoria): o resultado da chamada decide (voltar a ligar, perdido); a visita só com o cliente interessado
-      const pc = contactoConcluido(d) ? null : passoDaChamada(d);
-      if (pc) return pc;
+    case 1:
       // 11/11 (fim de contacto): a assistente comercial (contacto.registar sem nenhuma permissão além do contacto) acaba o Contacto com
       // «Passar ao comercial»; depois espera. O comercial vê o negócio pronto para marcar a visita.
       if (soAteAoContacto()) return contactoConcluido(d)
         ? { t: "Com o comercial", sub: "Contacto concluído: o comercial marca a visita.", who: "comercial", wait: true }
         : { t: "Passar ao comercial", sub: "Acabada a chamada, o comercial marca a visita.", btn: "Passar ao comercial", act: "passarAoComercial", who: "comercial" };
       return { t: "Marcar a visita", sub: contactoConcluido(d) ? "Contacto concluído pela assistente: pronto para marcar a visita." : "Escolher uma vaga na agenda do comercial.", btn: "Marcar visita", act: "marcarVisita", who: "comercial" };
-    }
     case 2: return { t: "Fechar o levantamento", sub: d.orc ? "Mude o que precisa. Ao fechar, o orçamento refaz-se com o que mudou." : "Confirmar o local, as necessidades e as medidas.", btn: "Fechar levantamento", act: "fecharVisita", who: "comercial" };
     case 3:
       if (!o!.enviada) {
@@ -1636,9 +1604,6 @@ export function proximo(d: Negocio, S: Estado): Proximo {
 
 export const aberto = (S: Estado) => S.deals.filter((d) => !d.perdido);
 
-/** 19/11 (auditoria): os pedidos do cliente que o técnico deixou na obra e o gestor ainda não abriu. */
-export const pedidosDoClientePorTratar = (d: Negocio): EntradaDiario[] =>
-  d.obra.plano?.estado === "em curso" ? (d.obra.diario ?? []).filter((e) => e.pedido && !e.pedido.tratado) : [];
 export function minhas(S: Estado, role: Papel) {
   const L: { d: Negocio; p: Proximo; dir?: boolean }[] = [];
   for (const d of aberto(S)) {
@@ -1660,15 +1625,11 @@ export function minhas(S: Estado, role: Papel) {
     // 9/11 (Lote 1, C): os do gestor também a quem, com conta real, decide os imprevistos e planeia a obra (o que o servidor exige)
     const gestor = role === "operacoes" || pelaPermissao(role, ["obra.imprevistos", "obra.planear"]);
     for (const im of imprevistosPorTratar(d)) {
-      if (gestor) L.push({ d, p: im.tipo === "material" && im.estado === "aberto"
-        ? { t: `Faltou material · ${im.tarefas.join(", ")}`, sub: `${im.texto} (${im.quem}). Encomende o que falta e retome a tarefa.`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" }
-        : im.estado === "aberto"
+      if (gestor) L.push({ d, p: im.estado === "aberto"
         ? { t: `Imprevisto · ${im.texto}`, sub: `${im.grav === "impede" ? "Tarefas paradas" : `O plano andou ${im.atraso ?? 0} ${im.atraso === 1 ? "dia" : "dias"}`}. Faça a proposta ao cliente.`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" }
         : { t: `Imprevisto · o cliente não aceitou`, sub: `${im.texto} · decida o que fazer`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" } });
       if (role === "comercial" && im.estado === "recusado") L.push({ d, p: { t: "O cliente não aceitou a proposta do imprevisto", sub: `${im.texto} · fale com ${d.nome.split(" ")[0]}`, who: "comercial" } });
     }
-    // 19/11 (auditoria): os pedidos do cliente que o técnico deixou no Hoje dele (o gestor prepara a adenda no Estúdio da obra)
-    if (gestor) for (const e of pedidosDoClientePorTratar(d)) L.push({ d, p: { t: `O cliente pediu uma alteração · ${e.pedido!.tarefa}`, sub: `${e.pedido!.texto} (${e.quem}). Na tarefa, «Porquê?» › «O cliente pediu» prepara a adenda.`, btn: "Abrir a tarefa", act: "abrirPedidoCliente", arg: e.pedido!.id, who: "operacoes" } });
     // 3/11: os problemas reportados pelo cliente que esperam pelo gestor (outra proposta, a proposta recusada, a resposta por enviar)
     if (gestor) for (const pr of problemasPorTratar(d)) L.push({ d, p: { t: `Problema do cliente · ${pr.texto}`, sub: pr.estado === "recusado" ? "O cliente não aceitou a proposta · decida o que fazer" : pr.estado === "aberto" ? "Faça outra proposta" : "A resposta ao cliente não seguiu · envie-a de novo", btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" } });
     // 21/10: as adendas, com o mesmo percurso do orçamento: cada passo de quem é (comercial, Direção, Jurídico)
@@ -1726,13 +1687,6 @@ const agora = () => {
   return "hoje " + String(t.getHours()).padStart(2, "0") + ":" + String(t.getMinutes()).padStart(2, "0");
 };
 function log(d: Negocio, t: string, k: Evento["k"] = "a") { d.hist.unshift({ t, q: agora(), k }); }
-/** 19/11 (auditoria): a pessoa da conta ligada (o ecrã real define-a: NegociosEmylia, a pessoa do RH e o nome). O que ela aceita fica com o
- *  nome dela, não com o papel. Sem ela (o protótipo), conta o técnico que se vê ou o nome do papel. */
-let pessoaLigada: { id: string | null; nome: string } | null = null;
-export function definirPessoaLigada(p: { id: string | null; nome: string } | null): void {
-  pessoaLigada = p && p.nome.trim() ? { id: p.id, nome: p.nome.trim() } : null;
-}
-export const lerPessoaLigada = (): { id: string | null; nome: string } | null => pessoaLigada;
 /** 11/11 (20270114310000): marcar a visita passou a lead e o negócio para o comercial dela. A base já o gravou (e a linha no histórico); aqui
  *  junta-se a mesma linha ao histórico do ecrã (neg_guardar_negocio substitui o histórico pelo do ecrã) e o comercial da lead. */
 export function responsavelPelaVisita(d: Negocio, r: { id: string; nome: string; lead: boolean }): void {
@@ -2150,7 +2104,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
   /** 16/11: a encomenda de cliente que esperava pelo acerto do valor (a retificação paga, a nota de crédito ou seguir sem acerto): com o
    *  pagamento validado, o plano aprovado e o contrato assinado (ou a venda direta), emite-se; numa organização real, a base. */
   const ecSePronta = (d: Negocio, como: string) => {
-    if (d.obra.ec || !d.fin.pago || !retificacaoAceite(d) || !planoAprovado(d) || !(d.orc?.contrato === "assinado" || d.orc?.vendaDireta) || acertoDoValorPendente(d) || retificacaoPorPagar(d)) return;
+    if (d.obra.ec || !d.fin.pago || !planoAprovado(d) || !(d.orc?.contrato === "assinado" || d.orc?.vendaDireta) || acertoDoValorPendente(d) || retificacaoPorPagar(d)) return;
     if (real) avisar({ msg: "A encomenda de cliente é emitida ao gravar", sub: "Vai para as Encomendas de cliente: stock reservado; o que falta vai ao fornecedor", kind: "auto", atraso: 500 });
     else if (emitirEc(d)) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: como, kind: "auto", atraso: 500 });
   };
@@ -2164,8 +2118,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     // 9/11 (Rúben: «a encomenda a cliente só acontece depois do plano de obra estar aprovado»): com o plano já aprovado emite-se agora;
     // senão, emite-se quando as Operações o aprovarem (aprovarPlano; numa organização real, a base ao gravar o plano aprovado)
     // 16/11 (o fluxo em vigor): também a venda direta espera pelo plano aprovado, e as duas pela retificação paga (como a base)
-    // 19/11 (auditoria): e as medidas aceites (como a base, 20270123050000)
-    const ok = retificacaoAceite(d) && planoAprovado(d) && (d.orc?.contrato === "assinado" || !!d.orc?.vendaDireta) && !retificacaoPorPagar(d) ? emitirEc(d) : false;
+    const ok = planoAprovado(d) && (d.orc?.contrato === "assinado" || !!d.orc?.vendaDireta) && !retificacaoPorPagar(d) ? emitirEc(d) : false;
     fase(d, 5);
     const F = faltaParaArrancar(d, undefined, S);
     avisar({ msg: "Recibo " + rc.n + " " + como, sub: "Passou a Obra" + (F.length ? " · falta " + F.join(", ") : " · pronta a arrancar"), kind: "ok" });
@@ -2184,14 +2137,6 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     if (r) { d.f.data_pag = r.data; d.f.comprovativo = r.n + (r.meio ? " · " + r.meio : ""); }
     log(d, `Pagamento confirmado no Eticadata · ${d.fin.fatura!.n} paga${r ? " com o " + r.n : ""}`);
     pago(d, { n: r?.n || "recibo no ERP", q: r ? r.data.slice(8, 10) + "/" + r.data.slice(5, 7) : "hoje" }, "no Eticadata");
-  };
-  /** 19/11 (auditoria): quem aceita (a pessoa, não o papel): a da conta; no protótipo, o técnico que se vê, ou o nome do papel. */
-  const quemAceita = (): { n: string; id: string } => {
-    if (pessoaLigada) return { n: pessoaLigada.nome, id: pessoaLigada.id ?? "" };
-    const t = S.role === "tecnico" ? TECS.find((x) => x.id === S.tec) : undefined;
-    if (t) return { n: t.n, id: t.id };
-    const nome = PAPEIS[S.role].nome;
-    return { n: nome === "Filipe" ? "Filipe Rocha" : nome, id: "" };
   };
   /** 9/11: o plano da obra aprovado (ou já em curso, ou concluído): a encomenda de cliente só depois dele. */
   const planoAprovado = (d: Negocio): boolean => ["aprovado", "em curso", "concluída"].includes(d.obra.plano?.estado ?? "");
@@ -2385,9 +2330,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
   };
   const extrasVisita = (d: Negocio) => {
     const L = LINHAS[d.linha], v = d.visita, x: { id: string; t: string }[] = [];
-    // 19/11 (auditoria): o aviso diz o que fazer (antes, «Uma visita por cancelar»); no Estúdio, o bloco «Visitas» acende
-    if (!visitaFeita(d) && !visitas(d).some((n) => campoVisita(d, n, "estado") !== "Cancelada"))
-      x.push({ id: "visitas", t: visitas(d).length > 1 ? "Marque outra visita (todas foram canceladas)" : visitas(d).length ? "Marque outra visita (a única foi cancelada)" : "Marque a visita" });
+    if (!visitaFeita(d) && !visitas(d).some((n) => campoVisita(d, n, "estado") !== "Cancelada")) x.push({ id: "visitas", t: "Uma visita por cancelar" });
     const semMedida = camposMedida(L).filter(([k]) => medidaEmFalta(v.med, k));
     if (semMedida.length) x.push({ id: "medidas", t: "Medidas: " + semMedida.map(([, l]) => l).join(", ") });
     const servicos = servicosVisita(d).length;
@@ -2490,72 +2433,28 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       avisar({ msg: "Pedido trazido para a Olyvia", sub: `${p.nome} · fase ${FASES[0]}`, kind: "ok" });
       return id;
     },
-    /** 19/11 (auditoria): regista a chamada com o resultado escolhido (sem valor por omissão). Na Lead passa a Contacto; no Contacto é mais
-     *  uma tentativa. «Não atendeu» e «Ligar mais tarde» guardam o dia para voltar a ligar (`religar`, que a lista «Contactar hoje» lê; sem
-     *  dia escolhido, o dia útil seguinte); «Sem interesse» e «Número errado» propõem dar o negócio como perdido (proximo). */
-    contactar(id: number, resultado?: string, religar?: string) {
-      if (!exigePerm("contacto.registar")) return;
-      const d = deal(id);
-      if (d.fase > 1 || d.perdido || d.anulado) return;
-      const r = resultado?.trim() ?? "";
-      // sem resultado (ex.: o botão do passo numa lista, o Hoje): abre o negócio, onde «Registar chamada» pede o resultado
-      if (!(RESULTADOS_CHAMADA as readonly string[]).includes(r)) {
-        S.view = "negocio"; S.deal = d.id; S.confirmPerda = null;
-        avisar({ msg: "Escolha como correu a chamada", sub: "No fim da fase, em «Registar chamada»: " + RESULTADOS_CHAMADA.join(", ") + ".", kind: "" });
-        return;
-      }
-      if (d.fase === 0 && !portao(d, LEAD)) return;
-      d.f.tentativas = String(d.fase === 0 && !d.f.tentativas ? 1 : (Number(d.f.tentativas) || 0) + 1);
-      d.f.resultado = r;
-      const volta = RES_RELIGAR.includes(r) ? (religar && /^\d{4}-\d{2}-\d{2}$/.test(religar) ? religar : proximoDiaUtil()) : "";
-      if (volta || d.f.religar) d.f.religar = volta;
-      log(d, "Chamada registada · " + r + (volta ? " · voltar a ligar a " + diaPorExtenso(volta) : ""), RES_PERDA.includes(r) ? "w" : "a");
-      const daLead = d.fase === 0;
-      if (daLead) fase(d, 1);
-      avisar(r === RES_INTERESSADO ? { msg: "Chamada registada", sub: daLead ? "Passou a Contacto. A seguir, marcar a visita." : "A seguir, marcar a visita.", kind: "ok" }
-        : volta ? { msg: "Fica para voltar a ligar", sub: `A ${diaPorExtenso(volta)}. Aparece em «Contactar hoje» nesse dia.`, kind: "ok" }
-        : { msg: "Chamada registada", sub: `${r}: pode marcar o negócio como perdido.`, kind: "" });
-    },
-    /** 19/11 (auditoria): a chamada gravada foi analisada (ou o resultado dela escrito nos campos): um negócio ainda na Lead passa a Contacto. */
-    chamadaFeita(id: number) {
-      const d = deal(id);
-      if (d.fase !== 0 || d.perdido || d.anulado) return;
-      if (!exigePerm("contacto.registar")) return;
-      if (!d.f.tentativas) d.f.tentativas = "1";
-      log(d, "Chamada registada" + (d.f.resultado ? " · " + d.f.resultado : " (analisada)"));
-      fase(d, 1);
-    },
+    contactar(id: number) { if (!exigePerm("contacto.registar")) return; const d = deal(id); if (!portao(d, LEAD)) return; if (!d.f.resultado) d.f.resultado = "Atendeu · interessado"; if (!d.f.tentativas) d.f.tentativas = "1"; log(d, "Chamada registada · " + d.f.resultado); fase(d, 1); avisar({ msg: "Chamada registada", sub: "Passou a Contacto", kind: "ok" }); },
     /** 11/11 (fim de contacto): a assistente comercial acaba o Contacto (as respostas da chamada, o que o cliente quer, a morada e a
      *  qualificação) e passa o negócio ao comercial: fica em Contacto, com a marca contacto_concluido (uma resposta, sem colunas novas). */
     passarAoComercial(id: number) {
       if (!exigePerm("contacto.registar")) return;
       const d = deal(id);
       if (d.fase !== 1 || contactoConcluido(d)) return;
-      // 19/11 (auditoria): só se passa ao comercial com o cliente interessado (é ele que marca a visita)
-      const porque = semVisitaPelaChamada(d);
-      if (porque) { avisar({ msg: "Ainda não passa ao comercial", sub: porque, kind: "bad" }); return; }
       if (!portao(d, CONTACTO)) return;
       d.f[CHAVE_CONTACTO_CONCLUIDO] = isoDia(new Date());
       log(d, "Contacto concluído · passou ao comercial");
       avisar({ msg: "Passou ao comercial", sub: "O comercial vê o negócio pronto para marcar a visita. Quando a visita for marcada, o negócio e a lead passam para esse comercial.", kind: "ok" });
     },
-    /** 19/11 (auditoria): `slot` é a vaga com a data completa ({ data: "2027-01-14", hora: "10:00" }); um texto antigo («qui 15/10 · 10:00»)
-     *  ainda se aceita, com o ano mais perto no futuro. Só com a chamada «Atendeu · interessado» (semVisitaPelaChamada). */
-    marcarVisita(id: number, slot?: string | Vaga, quemSugerido?: string) {
+    marcarVisita(id: number, slot?: string, quemSugerido?: string) {
       if (!exigePerm("visita.gerir")) return;
       const d = deal(id);
       // 11/11: com conta real nunca se marca sem a vaga escolhida na agenda (o SLOTS[0] do protótipo deu uma visita no passado, sem comercial)
       if (!slot && comPermissoesReais()) { avisar({ msg: "Escolha o comercial e o dia", sub: "Marque a visita na agenda: o comercial, o dia e a hora.", kind: "bad" }); return; }
-      const porque = d.fase <= 1 ? semVisitaPelaChamada(d) : null;
-      if (porque) { avisar({ msg: "A visita ainda não se marca", sub: porque, kind: "bad" }); return; }
-      if (!portao(d, CONTACTO)) return;
-      // sem vaga (só no protótipo), a primeira da demonstração, de 2026 como as outras datas do exemplo
-      const vaga = typeof slot === "object" ? slot : !slot ? diaDaVaga(SLOTS[0], INICIO_DO_EXEMPLO) : null;
-      d.visita.slot = vaga ? rotuloVaga(vaga) : typeof slot === "string" && slot ? slot : SLOTS[0];
+      if (!portao(d, CONTACTO)) return; d.visita.slot = slot || SLOTS[0];
       // 23/10: com a equipa real, a visita fica na agenda de quem a marca (e não na do Rúben de exemplo)
       // 2/11: ou de quem a Olyvia sugeriu para a vaga (livre e mais perto: sugestaoVisita.ts)
       const quem = quemSugerido || quemVaiPorOmissao();
-      if (!visitas(d).length) criarVisita(d, visitaDoSlot(vaga ?? d.visita.slot, { estado: "Marcada", presentes: d.f.presentes ?? "", duracao: d.f.duracao || "1 h", quem })); /* 4/11: sem «Preparar a visita», 1 h */ log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda de " + quem.replace(/\s*\(.*\)\s*$/, ""), kind: "ok" }); },
+      if (!visitas(d).length) criarVisita(d, visitaDoSlot(d.visita.slot, { estado: "Marcada", presentes: d.f.presentes ?? "", duracao: d.f.duracao || "1 h", quem })); /* 4/11: sem «Preparar a visita», 1 h */ log(d, "Visita marcada para " + d.visita.slot); fase(d, 2); avisar({ msg: "Visita marcada", sub: d.visita.slot + " · fica na agenda de " + quem.replace(/\s*\(.*\)\s*$/, ""), kind: "ok" }); },
     fecharVisita(id: number) {
       // 3/11: fechar o levantamento é da visita; o orçamento que nasce aqui o servidor só o deixa mudar com negocios.orcamento.editar (sem
       // ela, neg_guardar_negocio repõe os totais da base e recusa se o orçamento mudar)
@@ -3098,7 +2997,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 16/11: o contrato assina-se antes do pagamento: segue o Financeiro. (Um negócio antigo, já pago e com o plano aprovado, emite a
       // encomenda de cliente se não houver retificação por pagar; numa organização real, a base.)
       avisar({ msg: "Contrato assinado", sub: d.fin.pago ? "Segue a encomenda de cliente" : "Segue o Financeiro: a fatura e o pagamento", kind: "auto" });
-      if (d.fin.pago && retificacaoAceite(d) && planoAprovado(d) && !retificacaoPorPagar(d) && !d.obra.ec && !real && emitirEc(d)) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Emitida com o contrato assinado", kind: "auto", atraso: 500 });
+      if (d.fin.pago && planoAprovado(d) && !retificacaoPorPagar(d) && !d.obra.ec && !real && emitirEc(d)) avisar({ msg: "Encomenda " + d.obra.ec!.n + " no Inventário", sub: "Emitida com o contrato assinado", kind: "auto", atraso: 500 });
       if (acertoDoValorPendente(d)) avisar({ msg: "O valor mudou", sub: `${mudancasDeValor(d).join("; ")}. A retificação volta ao Financeiro.`, kind: "auto", atraso: 900 });
     },
     /** 9/11: o supervisor retifica as medidas no local e aceita-as (o primeiro passo da Obra); sem valores, ficam as da visita. */
@@ -3107,8 +3006,6 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const d = deal(id);
       // 12/11 (Rúben: «a validação das medidas e do plano só vêm depois do Financeiro»)
       if (!medidasEPlanoAbertos(d)) { avisar({ msg: "Primeiro, o pagamento", sub: "As medidas confirmam-se depois de o Financeiro validar o pagamento", kind: "bad" }); return; }
-      // 19/11 (auditoria): aceitar as medidas pede quem as foi medir (o supervisor escolhido pelo gestor da obra)
-      if (!d.f.supervisor_medidas) { avisar({ msg: "Falta escolher quem vai medir", sub: "O gestor da obra escolhe o supervisor no passo Medidas; depois, ele aceita as medidas no local.", kind: "bad" }); return; }
       // 11/11 (Rúben: «medidas e plano em simultâneo»): o plano pode estar aprovado antes das medidas; se elas mudarem (face às da visita ou
       // às aceites antes), o plano volta a «por aprovar» e diz-se porquê
       const mudaram: string[] = [];
@@ -3122,29 +3019,12 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const voltou = !!p0 && p0.estado === "aprovado" && mudaram.length > 0;
       if (voltou) { p0!.estado = "por aprovar"; log(d, `Plano volta a por aprovar: as medidas mudaram (${mudaram.join("; ")})`, "w"); }
       if (notas !== undefined) d.f.retif_notas = notas.trim();
-      // 19/11 (auditoria): fica a pessoa que aceitou (a da conta; no protótipo, o técnico que se vê ou o gestor), não o papel («Operações»)
-      const quem = quemAceita();
-      d.f.retif_aceite = isoDia(new Date()); d.f.retif_por = quem.n; d.f.retif_por_id = quem.id;
-      log(d, `Medidas retificadas no local e aceites por ${quem.n}`);
+      d.f.retif_aceite = isoDia(new Date()); d.f.retif_por = PAPEIS[S.role].n;
+      log(d, "Medidas retificadas no local e aceites");
       // 10/11: aceite no portal do cliente, o plano não nasceu (é da equipa): nasce agora, por aprovar
       if (!d.obra.plano && d.orc?.aceite && !noPortalReal) { prepararPlanoDe(d, S); log(d, "Plano da obra gerado do orçamento · " + d.obra.plano!.tasks.length + " tarefas · por aprovar (Operações)"); }
       if (voltou) avisar({ msg: "Medidas aceites · o plano volta a por aprovar", sub: `As medidas mudaram (${mudaram.join("; ")}). As Operações revêem o plano e aprovam de novo.`, kind: "ok" });
-      else avisar({ msg: "Medidas aceites", sub: planoAprovado(d) ? "Com o plano aprovado, segue a encomenda de cliente" : "Segue o plano: as Operações aprovam-no. Se o valor mudou, primeiro a adenda do acerto", kind: "ok" });
-      // um plano aprovado antes das medidas (de antes de 19/11): a encomenda que esperava por elas sai agora
-      if (!voltou) ecSePronta(d, "Emitida com as medidas aceites");
-    },
-    /** 19/11 (auditoria): o gestor da obra escolhe quem vai medir ao local (a pessoa do RH, pelo id dos técnicos). Fica em
-     *  d.f.supervisor_medidas (não no «Responsável de obra») e a pessoa recebe o aviso e o passo «Medir no local» no Hoje dela. */
-    supervisorMedidas(id: number, tec: string) {
-      if (!exigePerm("obra.planear")) return;
-      const d = deal(id), t = TECS.find((x) => x.id === tec);
-      if (!t) { avisar({ msg: "Escolha uma pessoa da lista", kind: "bad" }); return; }
-      if (d.f.retif_aceite) { avisar({ msg: "As medidas já estão aceites", sub: "Para medir de novo, primeiro «Voltar a retificar»", kind: "bad" }); return; }
-      if (d.f.supervisor_medidas === tec) return;
-      d.f.supervisor_medidas = tec;
-      log(d, `Medidas: ${t.n} vai medir no local`);
-      if (d.obra.plano) avisarTecnico(d.obra.plano, -1, `Medir no local: ${d.nome} (${d.f.morada || d.local}). Aceite as medidas no Estúdio das medidas.`, agora(), tec);
-      avisar({ msg: `${t.n} vai medir no local`, sub: "Tem o passo «Medir no local» no Hoje dele", kind: "ok" });
+      else avisar({ msg: "Medidas aceites", sub: planoAprovado(d) ? "Com o plano aprovado, segue a encomenda de cliente" : "Falta as Operações aprovarem o plano; depois, a encomenda de cliente", kind: "ok" });
     },
     abrirRetificacao(id: number) { S.view = "negocio"; S.deal = id; S.op = null; },
     /** Volta a emitir a encomenda de cliente no Inventário (se não chegou lá ao validar o pagamento). */
@@ -4241,9 +4121,6 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const d = deal(id);
       // 12/11 (Rúben: «a validação das medidas e do plano só vêm depois do Financeiro»)
       if (!medidasEPlanoAbertos(d)) { avisar({ msg: "Primeiro, o pagamento", sub: "O plano aprova-se depois de o Financeiro validar o pagamento", kind: "bad" }); return; }
-      // 19/11 (auditoria): as medidas aceites no local vêm antes do plano (antes aprovava-se sem elas e a encomenda de cliente dava-as como
-      // aceites). A base também: a encomenda de cliente só sai com elas (20270123050000)
-      if (!retificacaoAceite(d)) { avisar({ msg: "Primeiro, as medidas", sub: faltaMedirTexto(d), kind: "bad" }); return; }
       // 16/11 (o fluxo em vigor): se as medidas ou o plano mudaram o valor, primeiro a retificação vai ao Financeiro (ou a nota de crédito,
       // ou segue sem acerto); só depois se aprova o plano. Assim a base nunca emite a encomenda de cliente com o acerto por decidir.
       if (acertoDoValorPendente(d)) { avisar({ msg: "Primeiro, a retificação", sub: `O valor mudou (${mudancasDeValor(d).join("; ")}). O comercial envia a retificação ao Financeiro, ou o Financeiro regista a nota de crédito; depois, aprova-se o plano`, kind: "bad" }); return; }
@@ -4257,7 +4134,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 9/11: o plano aprovado (com o pagamento validado e o contrato assinado) emite a encomenda de cliente; numa organização real, a base
       // 16/11 (o fluxo em vigor): o contrato já vem assinado antes do pagamento (ou é venda direta); a retificação que muda o valor volta ao
       // Financeiro e a encomenda espera pela fatura dela paga
-      if (!d.obra.ec && retificacaoPorPagar(d)) avisar({ msg: "Falta a retificação paga", sub: "O Financeiro fatura a retificação e valida o pagamento; depois, sai a encomenda de cliente", kind: "auto", atraso: 500 });
+      if (!d.obra.ec && !retificacaoAceite(d)) avisar({ msg: "Falta aceitar as medidas", sub: "O supervisor confirma as medidas no local. Se mudarem, o plano volta a por aprovar.", kind: "auto", atraso: 500 });
+      else if (!d.obra.ec && retificacaoPorPagar(d)) avisar({ msg: "Falta a retificação paga", sub: "O Financeiro fatura a retificação e valida o pagamento; depois, sai a encomenda de cliente", kind: "auto", atraso: 500 });
       else if (!d.obra.ec && d.orc?.contrato !== "assinado" && !d.orc?.vendaDireta) avisar({ msg: "Falta o contrato assinado", sub: "O cliente assina o contrato no portal; depois, sai a encomenda de cliente", kind: "auto", atraso: 500 });
       else if (!d.obra.ec && d.fin.pago) {
         if (real) avisar({ msg: "A encomenda de cliente é emitida ao gravar", sub: "O plano aprovado manda-a para as Encomendas de cliente: stock reservado; o que falta vai ao fornecedor", kind: "auto", atraso: 500 });
@@ -4432,8 +4310,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /* -------------------------------------------- 21/10: os imprevistos a meio da obra (imprevistos.ts) e a fatura das adendas */
     /** O técnico (no Hoje) ou o gestor (na página da obra) registam o que encontraram: impede (as tarefas param) ou atrasa (o plano anda). */
     registarImprevisto(id: number, m: { texto: string; onde: string; foto?: string; grav: Gravidade; tarefas: number[]; dias?: number;
-      /** 11/11 (Estúdio da obra): mais fotografias e o custo estimado (sem IVA) para o cliente */ fotos?: string[]; custo?: number;
-      /** 19/11 (auditoria): «Faltou material» (o Hoje do técnico): é da empresa; não vai ao portal do cliente */ tipo?: "material" }): string | null {
+      /** 11/11 (Estúdio da obra): mais fotografias e o custo estimado (sem IVA) para o cliente */ fotos?: string[]; custo?: number }): string | null {
       // 6/11 (permissões): quem executa (negocios.obra.executar: o técnico no Hoje) ou quem decide os imprevistos (negocios.obra.imprevistos: o gestor)
       if (!podeNeg(S.role, "obra.executar") && !podeNeg(S.role, "obra.imprevistos")) {
         avisar({ msg: "Sem permissão para registar o imprevisto", sub: "Registar um imprevisto na obra pede a permissão negocios.obra.executar ou negocios.obra.imprevistos.", kind: "bad" });
@@ -4448,7 +4325,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const quem = S.role === "tecnico" ? TECS.find((x) => x.id === (S.tec ?? "hn"))?.n ?? "Técnico" : PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome;
       const fotos = (m.fotos ?? (m.foto ? [m.foto] : [])).slice(0, 4);
       const im: Imprevisto = { id: novoIdImprevisto(d), q: agora(), dia: p.dia, quem, texto, onde: m.onde.trim(), foto: fotos[0] ?? m.foto, grav: m.grav, tarefas: m.tarefas.map((ti) => p.tasks[ti]?.nome).filter(Boolean), estado: "aberto",
-        ...(fotos.length > 1 ? { fotos } : {}), ...(m.custo && m.custo > 0 ? { custo: Math.round(m.custo * 100) / 100 } : {}), ...(m.tipo ? { tipo: m.tipo } : {}) };
+        ...(fotos.length > 1 ? { fotos } : {}), ...(m.custo && m.custo > 0 ? { custo: Math.round(m.custo * 100) / 100 } : {}) };
       let fim: { antes: string; depois: string } | undefined;
       if (m.grav === "impede") bloquear(p, m.tarefas, im.id);
       else {
@@ -4458,44 +4335,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       }
       (d.obra.imprevistos ??= []).push(im);
       for (const ti of m.tarefas) if (p.tasks[ti]?.tec) avisarTecnico(p, ti, `${p.tasks[ti].nome}: ${m.grav === "impede" ? "parada por um imprevisto" : `atrasa ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"}`} (${texto})`, agora());
-      // o cliente vê no portal (as novidades da obra), em linguagem simples. 19/11: o material em falta não (é da empresa: o gestor encomenda)
+      // o cliente vê no portal (as novidades da obra), em linguagem simples
       const fimTxt = fim ?? { antes: rotuloDia(p, fimDe(p.tasks) - 1), depois: rotuloDia(p, fimDe(p.tasks) - 1) };
-      if (m.tipo !== "material") (d.obra.alteracoes ??= []).unshift({ q: agora(), dia: p.dia, quem, t: `Imprevisto: ${texto}`, motivo: MOTIVO_IMPREVISTO, fimAntes: fimTxt.antes, fimDepois: fimTxt.depois, cliente: true, avisoCliente: avisoClienteImprevisto(im, fim) });
+      (d.obra.alteracoes ??= []).unshift({ q: agora(), dia: p.dia, quem, t: `Imprevisto: ${texto}`, motivo: MOTIVO_IMPREVISTO, fimAntes: fimTxt.antes, fimDepois: fimTxt.depois, cliente: true, avisoCliente: avisoClienteImprevisto(im, fim) });
       (d.obra.diario ??= []).push({ q: agora(), quem, t: `Imprevisto${im.onde ? " (" + im.onde + ")" : ""}: ${texto} · ${m.grav === "impede" ? "impede de continuar" : `atrasa ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"}`}`, k: "ocorrencia", ...(fotos.length ? { fotos } : {}) });
       log(d, `Imprevisto ${im.id} registado por ${quem}: ${texto} · ${m.grav === "impede" ? `${im.tarefas.join(", ")} parad${im.tarefas.length === 1 ? "a" : "as"}` : `o plano anda ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"}`}`, "w");
-      if (m.tipo === "material") avisar({ msg: "Falta de material registada", sub: "O gestor da obra vê-a no Hoje dele e encomenda o que falta", kind: "ok" });
-      else avisar({ msg: "Imprevisto registado", sub: m.grav === "impede" ? "As tarefas afetadas param. O gestor prepara a proposta ao cliente" : `O plano andou ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"} · o cliente foi avisado`, kind: "ok" });
+      avisar({ msg: "Imprevisto registado", sub: m.grav === "impede" ? "As tarefas afetadas param. O gestor prepara a proposta ao cliente" : `O plano andou ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"} · o cliente foi avisado`, kind: "ok" });
       return im.id;
-    },
-    /** 19/11 (auditoria): «O cliente pediu uma alteração» no Hoje do técnico. Quem planeia a obra abre já a tarefa no Estúdio da obra (onde
-     *  «Porquê?» › «O cliente pediu» prepara a adenda); o técnico deixa o pedido ao gestor: fica no diário da obra (uma ocorrência, o que a base
-     *  deixa o técnico gravar) e aparece no Hoje do gestor. Devolve o número do pedido ("" quando abriu o Estúdio; null se não deu). */
-    pedidoDoCliente(id: number, ti: number, texto: string): string | null {
-      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti], o = texto.trim();
-      if (!p || !t || p.estado !== "em curso") { avisar({ msg: "Só com a obra em curso", kind: "bad" }); return null; }
-      if (podeNeg(S.role, "obra.planear")) { A.abrirTarefaNoEstudio(id, ti); return ""; }
-      if (!podeNeg(S.role, "obra.executar")) { avisar({ msg: "Sem permissão para registar o pedido", sub: "Pede a permissão negocios.obra.executar.", kind: "bad" }); return null; }
-      if (!o) { avisar({ msg: "Escreva o que o cliente pediu", kind: "bad" }); return null; }
-      const quem = TECS.find((x) => x.id === (S.tec ?? "hn"))?.n ?? "Técnico";
-      const n = (d.obra.diario ?? []).filter((e) => e.pedido).length + 1, pid = `PC-${d.id}-${n}`;
-      (d.obra.diario ??= []).push({ q: agora(), quem, t: `O cliente pediu uma alteração (${t.nome}): ${o}`, k: "ocorrencia", pedido: { id: pid, tarefa: t.nome, texto: o } });
-      log(d, `Pedido do cliente na obra, registado por ${quem} (${t.nome}): ${o}`);
-      avisar({ msg: "Pedido enviado ao gestor da obra", sub: "Ele vê-o no Hoje dele e prepara a adenda com o cliente", kind: "ok" });
-      return pid;
-    },
-    /** 19/11: o gestor abre o pedido do cliente que o técnico deixou: fica tratado e abre a tarefa no Estúdio da obra. */
-    abrirPedidoCliente(id: number, pid?: string) {
-      if (!exigePerm("obra.planear")) return;
-      const d = deal(id), e = (d.obra.diario ?? []).find((x) => x.pedido?.id === pid), p = d.obra.plano;
-      if (!e?.pedido || !p) { A.abrirPlano(id); return; }
-      if (!e.pedido.tratado) e.pedido.tratado = agora();
-      const ti = p.tasks.findIndex((t) => t.nome === e.pedido!.tarefa && t.exec?.estado !== "validada");
-      if (ti >= 0) A.abrirTarefaNoEstudio(id, ti); else A.abrirPlano(id);
-    },
-    /** 19/11: abre a tarefa no Estúdio da obra (as Operações, com o painel da tarefa aberto). */
-    abrirTarefaNoEstudio(id: number, ti: number) {
-      pedirPainelObra(id, `tarefa-${ti}`);
-      A.abrirPlano(id);
     },
     /** O gestor transforma o imprevisto em trabalho extra: uma adenda (origem «imprevisto na obra») que vai ao portal do cliente. */
     proporImprevisto(id: number, imId: string, itens: { sid: string; q: number }[], livres: LinhaLivre[], m: { enviar?: boolean } = {}): string | null {
@@ -4527,9 +4373,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       else if (k === "seguir") { im.estado = "fechado"; desbloquear(p, im.id); }
       else im.estado = "recusado";
       log(d, `Imprevisto ${im.id}: ${im.decisao}`, k === "suspender" ? "x" : "w");
-      // 19/11: o material em falta é da empresa: o cliente não foi avisado dele, nem é avisado da decisão
-      if (im.tipo === "material" && k === "seguir") im.decisao = "Material resolvido" + (nota.trim() ? ` · ${nota.trim()}` : "");
-      if (k !== "refazer" && im.tipo !== "material") (d.obra.alteracoes ??= []).unshift({ q: agora(), dia: p.dia, quem: "Filipe Rocha", t: `Imprevisto: ${D.t.toLowerCase()}`, motivo: MOTIVO_IMPREVISTO,
+      if (k !== "refazer") (d.obra.alteracoes ??= []).unshift({ q: agora(), dia: p.dia, quem: "Filipe Rocha", t: `Imprevisto: ${D.t.toLowerCase()}`, motivo: MOTIVO_IMPREVISTO,
         fimAntes: rotuloDia(p, fimDe(p.tasks) - 1), fimDepois: rotuloDia(p, fimDe(p.tasks) - 1), cliente: true,
         avisoCliente: k === "seguir" ? `Sobre o problema encontrado (${im.texto.toLowerCase().replace(/\.$/, "")}): seguimos a obra sem esse trabalho.` : `Sobre o problema encontrado (${im.texto.toLowerCase().replace(/\.$/, "")}): a obra fica suspensa até combinarmos consigo.` });
       avisar({ msg: D.t, sub: k === "seguir" ? "As tarefas paradas continuam" : k === "refazer" ? "Faça a nova proposta no imprevisto" : "As tarefas ficam paradas", kind: "ok" });
@@ -4770,12 +4614,6 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const fat = DA_LEAD.find(([, lead]) => lead === k)?.[0];
       if (fat && !d.fin.pago && (!d.f[fat]?.trim() || d.f[fat] === d.f[k])) d.f[fat] = v.trim();
       d.f[k] = v;
-      // 19/11 (auditoria): o resultado da chamada escrito na Lead («Tudo na chamada», ou o que a análise da chamada preencheu) regista-a:
-      // o negócio passa a Contacto, como no «Registar chamada»
-      if (k === "resultado" && v.trim() && d.fase === 0 && !d.perdido && !d.anulado) {
-        if (!d.f.tentativas) d.f.tentativas = "1";
-        log(d, "Chamada registada · " + v.trim()); fase(d, 1);
-      }
       // 19/10: as prestações "Por fases" guardam-se com a escolha (a mesma fonte para a proposta, o portal e o Financeiro V2); outra condição esquece-as
       if (k === "pagamento" && d.orc && !d.orc.enviada) {
         if (v !== PAGAMENTO_FASES && v !== PAGAMENTO_MEDIDA) delete d.orc.pagFases;

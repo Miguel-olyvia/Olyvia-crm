@@ -8,19 +8,17 @@ import { createPortal } from "react-dom";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import {
-  AlertTriangle, ArrowRight, Camera, Check, ChevronDown, Clock, HardHat, ImagePlus, ListChecks, MapPin, MessageSquare, Minus, Package, PackageX, Phone, Plus, Ruler, ShieldCheck, Sparkles, Wrench, X,
+  AlertTriangle, ArrowRight, Camera, Check, ChevronDown, Clock, HardHat, ImagePlus, ListChecks, MapPin, Minus, Package, Phone, Plus, ShieldCheck, Sparkles, Wrench, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { LINHAS, TECS, camposMedida, medida, nfmt, type Negocio } from "./motor";
+import { TECS, nfmt, type Negocio } from "./motor";
 import { rotuloOficios } from "./equipa/tecnicos";
 import { hfmt } from "./horasFmt";
 import type { Ctx } from "./pecas";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
-import { medicoesDe, rotuloDia } from "./preparacaoObra";
-import { podeNeg } from "./permissoes";
-import { AbrirEstudioMedidas } from "./estudioPlano/EstudioMedidas";
+import { rotuloDia } from "./preparacaoObra";
 import { RESPONSAVEL_OBRA, equipamentosDaObra, estadoDe, fotoExemplo, materiaisPorFase, nomeCurtoTarefa } from "./obraOps";
 import { useInventario } from "./inventario/loja";
 import { resumoEcNegocio } from "./inventario/ponteNegocios";
@@ -38,7 +36,7 @@ const MinhaAgenda = lazy(() => import("./equipa/MinhaAgenda"));
 
 const saudacao = (h: number) => (h < 12 ? "Bom dia" : h < 20 ? "Boa tarde" : "Boa noite");
 const CARTAO = "rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]";
-const RAPIDAS = ["Correu como previsto.", "Falta acabar amanhã."];
+const RAPIDAS = ["Correu como previsto.", "Falta acabar amanhã.", "Faltou material.", "O cliente pediu uma alteração."];
 
 /** 23/10: o técnico real sem técnico de obra ligado à conta: em vez de ver (e poder trocar para) a agenda de outro técnico, o aviso.
  *  09/11: também o perfil «Ser técnico de obra» sem a conta ligada a uma pessoa do RH (NegociosEmylia). */
@@ -149,7 +147,6 @@ export function HojeTecnico(ctx: Ctx) {
   // 30/10 (visto no browser): com os técnicos do RH não há o "hn" do exemplo; sem trabalho para ninguém, rebentava (tec undefined)
   const tec = TECS.find((x) => x.id === eu)!;
   const hoje = trabalhoDoTecnico(S.deals, eu);
-  const medir = medicoesDe(S.deals, eu).length;
   const seguir = aSeguirDoTecnico(S.deals, eu);
   const fechadas = terminadasHoje(S.deals, eu);
   const horas = hoje.reduce((a, x) => a + horasPorDia(x.t), 0);
@@ -189,7 +186,6 @@ export function HojeTecnico(ctx: Ctx) {
       </p>
 
       <AvisosDoTecnico ctx={ctx} eu={eu} />
-      <MedirNoLocal ctx={ctx} eu={eu} />
       <ul className="mt-6 space-y-6">
         {hoje.map((x) => <li key={x.d.id + ":" + x.ti}><TarefaDeHoje ctx={ctx} d={x.d} ti={x.ti} /></li>)}
       </ul>
@@ -212,7 +208,7 @@ export function HojeTecnico(ctx: Ctx) {
         </section>
       )}
 
-      {!hoje.length && !fechadas.length && !medir && (
+      {!hoje.length && !fechadas.length && (
         <div className={cn(CARTAO, "mt-6 p-6 text-center")}>
           <Sparkles className="mx-auto h-8 w-8 text-primary" aria-hidden="true" />
           <p className="mt-2 text-[15px]">Sem trabalho para si hoje{comTrabalho.length && !fixo ? `. Experimente ver como ${TECS.find((t) => t.id === comTrabalho[0])?.n.split(" ")[0]}.` : "."}</p>
@@ -250,9 +246,7 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
   const [abertoAntes, setAbertoAntes] = useState(ex === "por fazer");
   const [hist, setHist] = useState(false);
   // 21/10: uma só porta para os problemas: o imprevisto (impede, atrasa) ou só avisar o responsável (ImprevistosObra.tsx)
-  // 19/11 (auditoria): «Faltou material» abre o mesmo registo já preenchido (tipo material); «O cliente pediu uma alteração» abre o pedido
-  const [problema, setProblema] = useState<false | "geral" | "material">(false);
-  const [pedido, setPedido] = useState(false);
+  const [problema, setProblema] = useState(false);
   const im = t.bloqueio ? d.obra.imprevistos?.find((x) => x.id === t.bloqueio) : undefined;
   const [mais, setMais] = useState(false);
   const todos = feitos.length === I.passos.length;
@@ -288,7 +282,7 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
 
         {im && (
           <p role="status" className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/[0.06] px-3 py-2.5 text-[15px]"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" aria-hidden="true" />
-            <span><b className="font-semibold">Parada por um imprevisto:</b> {im.texto}. Não avance nesta tarefa: {im.tipo === "material" ? "o gestor da obra trata do material" : im.estado === "proposta" ? "o cliente está a decidir a proposta" : im.estado === "recusado" ? "o responsável está a decidir" : "o responsável prepara a proposta ao cliente"}. Recebe um aviso quando puder continuar.</span></p>
+            <span><b className="font-semibold">Parada por um imprevisto:</b> {im.texto}. Não avance nesta tarefa: {im.estado === "proposta" ? "o cliente está a decidir a proposta" : im.estado === "recusado" ? "o responsável está a decidir" : "o responsável prepara a proposta ao cliente"}. Recebe um aviso quando puder continuar.</span></p>
         )}
 
         {/* 1. antes de começar */}
@@ -350,8 +344,7 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
                     <button type="button" onClick={() => setMais(true)} className="min-h-11 text-[15px] font-medium text-primary underline-offset-4 hover:underline">{todos || ultimoDia ? "Terminar a tarefa" : "Enviar mais um registo"}</button>
                   </div>
                 </div>
-              ) : <RegistoDoDia ctx={ctx} d={d} ti={ti} podeTerminar={todos || ultimoDia} cor={cor} enviado={() => setMais(false)}
-                    faltouMaterial={() => { setPedido(false); setProblema("material"); }} pedidoCliente={() => { setProblema(false); setPedido(true); }} />}
+              ) : <RegistoDoDia ctx={ctx} d={d} ti={ti} podeTerminar={todos || ultimoDia} cor={cor} enviado={() => setMais(false)} />}
             </section>
           </>
         )}
@@ -365,82 +358,12 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
           <button type="button" onClick={() => setHist(!hist)} aria-expanded={hist} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-primary underline-offset-4 hover:underline">
             {hist ? "Esconder o histórico" : `Histórico da tarefa (${enviosDe(t).length})`}<ChevronDown className={cn("h-4 w-4 transition-transform", hist && "rotate-180")} aria-hidden="true" />
           </button>
-          {!problema && <button type="button" onClick={() => setProblema("geral")} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"><AlertTriangle className="h-4 w-4" aria-hidden="true" />Registar imprevisto</button>}
+          {!problema && <button type="button" onClick={() => setProblema(true)} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"><AlertTriangle className="h-4 w-4" aria-hidden="true" />Registar imprevisto</button>}
         </div>
         {hist && <div className="motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200"><HistoricoTarefa t={t} p={p} /></div>}
-        {problema && <RegistarImprevisto key={problema} ctx={ctx} d={d} ti={ti} fechar={() => setProblema(false)}
-          {...(problema === "material" ? { inicial: { tipo: "material" as const, texto: `Faltou material para ${nomeCurtoTarefa(t.nome).toLowerCase()}: ` } } : {})} />}
-        {pedido && <PedidoDoCliente ctx={ctx} d={d} ti={ti} fechar={() => setPedido(false)} />}
+        {problema && <RegistarImprevisto ctx={ctx} d={d} ti={ti} fechar={() => setProblema(false)} />}
       </div>
     </article>
-  );
-}
-
-/** 19/11 (auditoria): «O cliente pediu uma alteração». Quem planeia a obra abre já a tarefa no Estúdio da obra («Porquê?» › «O cliente
- *  pediu» prepara a adenda); o técnico escreve o que o cliente pediu e o pedido vai ao gestor da obra (no Hoje dele). */
-function PedidoDoCliente({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negocio; ti: number; fechar: () => void }) {
-  const { S, A, run } = ctx;
-  const [texto, setTexto] = useState("");
-  const planeia = podeNeg(S.role, "obra.planear");
-  const t = d.obra.plano!.tasks[ti];
-  return (
-    <div role="group" aria-label="O cliente pediu uma alteração" className="space-y-4 rounded-2xl border border-border bg-card p-4 animate-in fade-in-0 slide-in-from-top-1 sm:p-5">
-      <div className="flex items-start justify-between gap-3">
-        <p className="flex items-center gap-2 text-base font-semibold"><MessageSquare className="h-5 w-5 text-primary" aria-hidden="true" />O cliente pediu uma alteração</p>
-        <button type="button" onClick={fechar} aria-label="Fechar" className="grid h-10 w-10 place-items-center rounded-lg text-muted-foreground hover:bg-muted"><X className="h-4 w-4" /></button>
-      </div>
-      {planeia ? (
-        <>
-          <p className="text-[15px] text-muted-foreground">Abra a tarefa no Estúdio da obra: mude o que o cliente pediu e, em «Porquê?», escolha «O cliente pediu». A adenda fica pronta a enviar.</p>
-          <Button size="lg" onClick={() => run(() => { A.pedidoDoCliente(d.id, ti, texto); fechar(); })}>Abrir no Estúdio da obra<ArrowRight className="ml-2 h-4 w-4" aria-hidden="true" /></Button>
-        </>
-      ) : (
-        <>
-          <label className="block space-y-1.5">
-            <span className="text-[15px] font-medium">O que pediu o cliente?</span>
-            <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={2} placeholder="Ex.: quer o nicho do duche 20 cm mais largo"
-              className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-          </label>
-          <p className="text-sm text-muted-foreground">Vai para o gestor da obra, com a tarefa ({nomeCurtoTarefa(t.nome)}). Ele combina com o cliente e prepara a adenda. Continue o que estava combinado.</p>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <Button variant="ghost" size="lg" onClick={fechar}>Cancelar</Button>
-            <Button size="lg" disabled={!texto.trim()} onClick={() => run(() => { if (A.pedidoDoCliente(d.id, ti, texto) != null) fechar(); })}>Enviar ao gestor da obra</Button>
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-/** 19/11 (auditoria): o passo «Medir no local» de quem o gestor da obra escolheu para medir: a obra, as medidas da visita a conferir e o
- *  Estúdio das medidas (para quem pode aceitá-las; sem a permissão, diz-se a quem pedir). */
-function MedirNoLocal({ ctx, eu }: { ctx: Ctx; eu: string }) {
-  const L = medicoesDe(ctx.S.deals, eu);
-  if (!L.length) return null;
-  const pode = podeNeg(ctx.S.role, "obra.planear");
-  return (
-    <section aria-labelledby="ht-medir" className="mt-6">
-      <h2 id="ht-medir" className="flex items-center gap-2 text-xl font-semibold tracking-tight"><Ruler className="h-5 w-5 text-primary" aria-hidden="true" />Medir no local</h2>
-      <ul className="mt-3 space-y-3">
-        {L.map((d) => {
-          const CM = camposMedida(LINHAS[d.linha]), morada = d.f.morada || d.local;
-          return (
-            <li key={d.id} className={cn(CARTAO, "space-y-3 p-4")}>
-              <div>
-                <p className="text-base font-semibold">{d.nome} · {d.servico}</p>
-                <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center gap-1.5 text-[15px] text-primary underline-offset-4 hover:underline"><MapPin className="h-4 w-4" aria-hidden="true" />{morada}</a>
-              </div>
-              {pode ? <AbrirEstudioMedidas ctx={ctx} d={d} /> : (
-                <>
-                  {CM.length > 0 && <ul className="flex flex-wrap gap-2">{CM.slice(0, 6).map(([k, l]) => <li key={k} className="rounded-full bg-muted px-3 py-1 text-sm"><span className="text-muted-foreground">{l.split(" (")[0]}</span> <b className="font-semibold tabular-nums">{nfmt(medida(d.visita.med, k))}</b></li>)}</ul>}
-                  <p className="text-sm text-muted-foreground">Confira estas medidas no local. Aceitá-las no Estúdio das medidas pede a permissão Planear a obra: peça-a ao administrador, ou passe as medidas ao gestor da obra.</p>
-                </>
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </section>
   );
 }
 
@@ -547,8 +470,7 @@ function Num({ n, ok }: { n: number; ok: boolean }) {
 }
 
 /** O registo do dia: horas (as previstas para hoje, já sugeridas), fotografias e o que fez. Um envio: vai ao responsável e ao portal. */
-function RegistoDoDia({ ctx, d, ti, podeTerminar, cor, enviado, faltouMaterial, pedidoCliente }: { ctx: Ctx; d: Negocio; ti: number; podeTerminar: boolean; cor: string; enviado: () => void;
-  /** 19/11 (auditoria): as duas ações que eram só texto */ faltouMaterial: () => void; pedidoCliente: () => void }) {
+function RegistoDoDia({ ctx, d, ti, podeTerminar, cor, enviado }: { ctx: Ctx; d: Negocio; ti: number; podeTerminar: boolean; cor: string; enviado: () => void }) {
   const { A, run } = ctx;
   const p = d.obra.plano!, t = p.tasks[ti];
   const [horas, setHoras] = useState(horasPorDia(t));
@@ -589,9 +511,6 @@ function RegistoDoDia({ ctx, d, ti, podeTerminar, cor, enviado, faltouMaterial, 
         <label htmlFor={`nota-${d.id}-${ti}`} className="text-sm font-medium text-muted-foreground">O que fez hoje</label>
         <div className="mt-1.5 flex flex-wrap gap-1.5">
           {RAPIDAS.map((r) => <button key={r} type="button" onClick={() => setNota((n) => (n.trim() ? n.trim() + " " : "") + r)} className="min-h-9 rounded-full border border-input px-3 text-sm hover:border-foreground/40">{r}</button>)}
-          {/* 19/11 (auditoria): eram só texto na nota; agora avisam quem trata (o gestor da obra) */}
-          <button type="button" onClick={() => { setNota((n) => (n.trim() ? n.trim() + " " : "") + "Faltou material."); faltouMaterial(); }} className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-warning/50 bg-warning/[0.08] px-3 text-sm hover:border-warning"><PackageX className="h-3.5 w-3.5" aria-hidden="true" />Faltou material</button>
-          <button type="button" onClick={() => { setNota((n) => (n.trim() ? n.trim() + " " : "") + "O cliente pediu uma alteração."); pedidoCliente(); }} className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-primary/40 bg-primary/[0.06] px-3 text-sm hover:border-primary"><MessageSquare className="h-3.5 w-3.5" aria-hidden="true" />O cliente pediu uma alteração</button>
         </div>
         <textarea id={`nota-${d.id}-${ti}`} value={nota} onChange={(e) => setNota(e.target.value)} rows={3} placeholder="Ex.: assentei as paredes do duche e metade do chão; amanhã betumo as juntas."
           className="mt-2 w-full rounded-xl border border-input bg-background px-3 py-2.5 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />

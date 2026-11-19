@@ -4,7 +4,7 @@
 // 26/10 (2.ª volta): usa o que a 1.ª volta pediu (linha "Remodelação geral", linhas livres, IVA por linha, produto sem a instalação,
 // prestações à medida e as faturas de todas as prestações), sem contornos à mão. As lacunas já corrigidas não podem voltar.
 import { beforeEach, describe, expect, it } from "vitest";
-import { TECS, acoes, ivaDaLinha, porZonaDe, r2, tot, totaisIva, type Aviso, type Estado, type Negocio } from "../motor";
+import { acoes, ivaDaLinha, porZonaDe, r2, tot, totaisIva, type Aviso, type Estado, type Negocio } from "../motor";
 import { estadoVazio } from "../estadoOrganizacao";
 import { OBRA, PROPOSTA } from "../campos";
 import { ligarCatalogo } from "../produtosVisita";
@@ -113,7 +113,7 @@ describe("caso real: contrato CC-2026-0331 da Anabela Schroeder", () => {
     expect(d().fin.tranches?.map((f) => [f.tranche, !!f.pagamento])).toEqual([[TR[0].id, true]]);
 
     /* ---------------- 5b. na Obra: as medidas e o plano; com os dois, o contrato (o valor da proposta); assinado, a encomenda */
-    { const papel = S.role; S.role = "operacoes"; A.supervisorMedidas(id, TECS[0].id), A.retificarMedidas(id); A.aprovarPlano(id); S.role = papel; }
+    { const papel = S.role; S.role = "operacoes"; A.retificarMedidas(id); A.aprovarPlano(id); S.role = papel; }
     expect(d().obra.plano!.estado).toBe("aprovado");
     { const papel = S.role; S.role = "comercial";
       A.enviarContrato(id);
