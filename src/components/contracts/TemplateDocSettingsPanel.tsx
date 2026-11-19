@@ -19,7 +19,7 @@ import { ManualTablesSection } from "./ManualTablesSection";
 import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { tDoc } from "@/lib/idiomaDocumento/dicionario";
 import { CamposComuns, type VersaoEmEdicao } from "./versoes/CamposComuns";
-import { ID_NOTA_COMUM } from "./versoes/idsDeIdioma";
+import { ID_CAMPO_MINUTA, ID_NOTA_COMUM } from "./versoes/idsDeIdioma";
 import { useNomeParaFrase } from "./versoes/nomeParaFrase";
 import { useTranslation } from "@/hooks/useTranslation";
 
@@ -53,7 +53,7 @@ interface Props {
   versao?: VersaoEmEdicao;
 }
 
-const ID_TITULO_TABELA = "olv-minuta-titulo-tabela";
+const ID_TITULO_TABELA = ID_CAMPO_MINUTA.quote_items_title;
 
 const COLUMN_LABELS: Record<QuoteItemsColumnKey, string> = {
   description: "Descrição",

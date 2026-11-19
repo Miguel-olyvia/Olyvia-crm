@@ -1,7 +1,10 @@
-import { useCallback, useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from "react";
 import { aplicarVersaoContrato, calcularCompletude, idiomaBaseDoTemplate, normalizarCodigo } from "@/lib/idiomaDocumento";
+import { useIrParaCampo } from "@/components/templates/versoes/irParaCampo";
+import { ID_CAMPO_MINUTA } from "./idsDeIdioma";
 import {
   adicionarVersao,
+  alvoDaLinha,
   camposDoIdioma,
   codigosDasVersoes,
   escreverCorpo,
@@ -10,6 +13,7 @@ import {
   linhasDeVerificacao,
   marcarRevisto,
   removerVersao,
+  type ChaveDeVerificacao,
   type EstadoMinuta,
   type LinhaDeVerificacao,
 } from "./versoesDoTemplate";
@@ -19,6 +23,14 @@ export interface FormularioComVersoes {
   language?: string | null;
   body_html: string;
   doc_settings: object | null;
+}
+
+/** Os separadores do editor de minutas onde vivem os campos da lista de verificação. */
+export type SeparadorDaMinuta = "editor" | "template_layout";
+
+export interface OpcoesDoHook {
+  /** Muda para o separador onde o campo vive («Editor» para o corpo, «Layout da Minuta» para o resto). */
+  abrirSeparador?: (separador: SeparadorDaMinuta) => void;
 }
 
 export interface ResumoDaVersao {
@@ -35,7 +47,7 @@ export interface ResumoDaVersao {
  * chave `versions` nunca é escrita. Com versões, o idioma ativo decide o que o editor de texto, o painel de
  * layout e a pré-visualização mostram e para onde vai o que se escreve.
  */
-export function useVersoesDoTemplate<T extends FormularioComVersoes>(formData: T, setFormData: Dispatch<SetStateAction<T>>) {
+export function useVersoesDoTemplate<T extends FormularioComVersoes>(formData: T, setFormData: Dispatch<SetStateAction<T>>, opcoes: OpcoesDoHook = {}) {
   const [escolhido, setEscolhido] = useState<string | null>(null);
   const [adicionando, setAdicionando] = useState(false);
 
@@ -82,6 +94,29 @@ export function useVersoesDoTemplate<T extends FormularioComVersoes>(formData: T
   }, [estado, versoes]);
 
   const linhas = useMemo<LinhaDeVerificacao[]>(() => linhasDeVerificacao(estado, ativo), [estado, ativo]);
+
+  // «Ir para o campo»: os campos do layout vivem noutros componentes e encontram-se por id estável.
+  const campo = useIrParaCampo<string>({
+    abrirSeparador: (alvo) => opcoes.abrirSeparador?.(alvo === "corpo" ? "editor" : "template_layout"),
+    localizar: (alvo) => {
+      const id = ID_CAMPO_MINUTA[alvo];
+      return id ? document.getElementById(id) : null;
+    },
+  });
+  // Se o campo não está no ecrã, volta-se à lista (separador Editor), onde o aviso se lê.
+  const campoNaoAchado = campo.naoEncontrado !== null;
+  const abrirSeparadorAtual = useRef(opcoes.abrirSeparador);
+  abrirSeparadorAtual.current = opcoes.abrirSeparador;
+  useEffect(() => {
+    if (campoNaoAchado) abrirSeparadorAtual.current?.("editor");
+  }, [campoNaoAchado]);
+  const irParaCampo = useCallback(
+    (linha: ChaveDeVerificacao) => {
+      if (ehBase) return;
+      campo.irPara(alvoDaLinha(estado, ativo, linha));
+    },
+    [campo, ehBase, estado, ativo],
+  );
 
   const definirAtivo = useCallback(
     (codigo: string) => {
@@ -142,6 +177,9 @@ export function useVersoesDoTemplate<T extends FormularioComVersoes>(formData: T
     preview,
     completudes,
     linhas,
+    irParaCampo,
+    /** O último «ir para o campo» não achou o campo no ecrã (a opção que o mostra está desligada no layout). */
+    campoNaoEncontrado: campoNaoAchado,
     definirAtivo,
     setCorpo,
     setSettings,

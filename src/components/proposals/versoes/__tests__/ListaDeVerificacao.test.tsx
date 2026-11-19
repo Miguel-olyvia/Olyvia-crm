@@ -21,6 +21,8 @@ function montar(extra: Partial<React.ComponentProps<typeof ListaDeVerificacao>> 
     desatualizado: false,
     onMarcarAtualizada: vi.fn(),
     onRemover: vi.fn(),
+    onIrPara: vi.fn(),
+    naoEncontrado: null,
     ...extra,
   };
   render(<ListaDeVerificacao {...props} />);
@@ -86,4 +88,56 @@ describe("ListaDeVerificacao", () => {
     fireEvent.click(within(screen.getByRole("alertdialog")).getByRole("button", { name: "Remover" }));
     expect(props.onRemover).toHaveBeenCalledWith("en");
   });
+
+  describe("ir para o campo", () => {
+    it("cada item é um botão «Ir para: <campo>» com o estado como descrição", () => {
+      montar();
+      const botao = screen.getByRole("button", { name: "Ir para: Texto do rodapé" });
+      expect(botao.tagName).toBe("BUTTON");
+      expect(botao).toHaveAttribute("type", "button");
+      expect(botao).toHaveAccessibleDescription("Traduzido");
+      expect(screen.getByRole("button", { name: "Ir para: Corpo do email" })).toHaveAccessibleDescription("Em falta");
+      expect(screen.getByRole("button", { name: "Ir para: Termos e condições" })).toHaveAccessibleDescription("Igual ao português");
+    });
+
+    it("os campos de secção levam o nome da secção no nome do botão", () => {
+      montar();
+      expect(screen.getByRole("button", { name: "Ir para: Secção «Condições Gerais» · Título visível na proposta" })).toBeInTheDocument();
+    });
+
+    it("clicar chama onIrPara com a chave do campo (texto e secção)", () => {
+      const props = montar();
+      fireEvent.click(screen.getByRole("button", { name: "Ir para: Texto do rodapé" }));
+      expect(props.onIrPara).toHaveBeenLastCalledWith("footer_text");
+      fireEvent.click(screen.getByRole("button", { name: /^Ir para: Secção/ }));
+      expect(props.onIrPara).toHaveBeenLastCalledWith("sections.terms.sectionLabel");
+    });
+
+    it("os botões têm alvo de 44px e são focáveis pelo teclado", () => {
+      montar();
+      for (const botao of screen.getAllByRole("button", { name: /^Ir para:/ })) {
+        expect(botao.className).toContain("min-h-11");
+        botao.focus();
+        expect(botao).toHaveFocus();
+        expect(botao).not.toHaveAttribute("tabindex", "-1");
+      }
+    });
+
+    it("o português continua visível dentro do cartão e o estado também por escrito", () => {
+      montar();
+      expect(screen.getByText("Rodapé em português")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Ir para: Texto do rodapé" })).toHaveTextContent("Traduzido");
+    });
+
+    it("campo que não se conseguiu mostrar: avisa, sem mudar mais nada", () => {
+      montar({ naoEncontrado: "email_body" });
+      expect(screen.getByRole("status")).toHaveTextContent("Não foi possível mostrar este campo no editor.");
+    });
+
+    it("sem pedido falhado não há aviso", () => {
+      montar();
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+  });
 });
+

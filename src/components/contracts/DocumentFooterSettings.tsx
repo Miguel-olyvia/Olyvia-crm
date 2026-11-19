@@ -7,6 +7,7 @@ import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useNomeParaFrase } from "./versoes/nomeParaFrase";
 import { CamposComuns, type VersaoEmEdicao } from "./versoes/CamposComuns";
+import { ID_CAMPO_MINUTA } from "./versoes/idsDeIdioma";
 
 interface Props {
   settings: DocumentSettings;
@@ -41,6 +42,7 @@ export function DocumentFooterSettings({ settings, onChange, versao }: Props) {
           <div className="space-y-1">
             <Label className="text-xs">Texto do rodapé</Label>
             <Textarea
+              id={versao ? ID_CAMPO_MINUTA.footer_text : undefined}
               value={settings.footer_text || ""}
               onChange={(e) => onChange({ footer_text: e.target.value || null })}
               placeholder={versao ? textoBase || undefined : "Ex: Documento gerado automaticamente pelo sistema Olyvia"}

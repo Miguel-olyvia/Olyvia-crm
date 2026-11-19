@@ -48,7 +48,7 @@ import { contractTemplateFormSchema } from "@/lib/validations";
 import { tDoc } from "@/lib/idiomaDocumento/dicionario";
 import { useVersoesDoTemplate } from "@/components/contracts/versoes/useVersoesDoTemplate";
 import { BarraDeIdiomasDoTemplate, BotaoAdicionarIdioma } from "@/components/contracts/versoes/BarraDeIdiomasDoTemplate";
-import { ID_BOTAO_ADICIONAR_IDIOMA, idDaAbaDeIdioma } from "@/components/contracts/versoes/idsDeIdioma";
+import { ID_BOTAO_ADICIONAR_IDIOMA, ID_CAMPO_MINUTA, idDaAbaDeIdioma } from "@/components/contracts/versoes/idsDeIdioma";
 import { useNomeParaFrase } from "@/components/contracts/versoes/nomeParaFrase";
 import { ListaDeVerificacaoDaVersao } from "@/components/contracts/versoes/ListaDeVerificacaoDaVersao";
 import { ChipsDeIdiomasDoCartao } from "@/components/contracts/versoes/ChipsDeIdiomasDoCartao";
@@ -91,7 +91,8 @@ const ContractTemplates = () => {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [formData, setFormData] = useState({ name: "", body_html: "", is_active: true, is_default: false, signatory_user_id: null as string | null, signatory_role_id: null as string | null, doc_settings: null as TemplateDocSettings | null, language: "pt" as string | null });
   // Versões por idioma da minuta: sem versões o idioma ativo é o base e nada muda.
-  const versoes = useVersoesDoTemplate(formData, setFormData);
+  const [editorTab, setEditorTab] = useState<string>("editor");
+  const versoes = useVersoesDoTemplate(formData, setFormData, { abrirSeparador: setEditorTab });
   const nomeParaFrase = useNomeParaFrase();
   // Ao remover a ÚLTIMA versão a barra desaparece: o foco volta ao botão «Adicionar idioma» do cabeçalho.
   const focarAdicionarAoSairDaBarra = useRef(false);
@@ -109,7 +110,6 @@ const ContractTemplates = () => {
   const [conflitoAtualizadoEm, setConflitoAtualizadoEm] = useState<string | null>(null);
   const [previewIdioma, setPreviewIdioma] = useState("pt");
   const [showBaseTemplates, setShowBaseTemplates] = useState(false);
-  const [editorTab, setEditorTab] = useState<string>("editor");
   const [otpDialogOpen, setOtpDialogOpen] = useState(false);
   const [pendingSignatory, setPendingSignatory] = useState<Signatory | null>(null);
   
@@ -784,6 +784,9 @@ const ContractTemplates = () => {
                           </div>
                         );
                       })()}
+                      {/* Numa versão, o envólucro leva o id estável que «ir para o campo» usa; no base não há envólucro. */}
+                      {(() => {
+                      const editorDoCorpo = (
                       <RichTextEditor
                         key={versoes.ativo}
                         ref={editorRef}
@@ -807,8 +810,11 @@ const ContractTemplates = () => {
                           </>
                         }
                       />
+                      );
+                      return versoes.ehBase ? editorDoCorpo : <div id={ID_CAMPO_MINUTA.corpo}>{editorDoCorpo}</div>;
+                      })()}
                       {!versoes.ehBase && (
-                        <ListaDeVerificacaoDaVersao linhas={versoes.linhas} base={versoes.base} />
+                        <ListaDeVerificacaoDaVersao linhas={versoes.linhas} base={versoes.base} onIrPara={versoes.irParaCampo} naoEncontrado={versoes.campoNaoEncontrado} />
                       )}
                     </div>
                   </TabsContent>

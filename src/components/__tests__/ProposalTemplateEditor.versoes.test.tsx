@@ -353,6 +353,41 @@ describe("ProposalTemplateEditor — foco e acessibilidade", () => {
   });
 });
 
+// ---- Ir para o campo a partir de «O que falta traduzir» ---------------------------------------------------
+describe("ProposalTemplateEditor — ir para o campo", () => {
+  it("clicar no cartão leva ao campo do inglês; escrever passa-o a «Traduzido» e guardar grava a versão", async () => {
+    await abrir();
+    await adicionarIngles(true);
+    const cartao = () => screen.getByRole("button", { name: "Ir para: Texto do rodapé" });
+    expect(cartao()).toHaveAccessibleDescription("Igual ao português");
+
+    fireEvent.click(cartao());
+    await waitFor(() => expect(screen.getByLabelText("Texto do rodapé")).toHaveFocus());
+    fireEvent.change(screen.getByLabelText("Texto do rodapé"), { target: { value: "English footer" } });
+    expect(cartao()).toHaveAccessibleDescription("Traduzido");
+
+    await guardar();
+    const design = gravacoes()[0].payload!.design_settings as { versions: { en: Record<string, unknown> } };
+    expect(design.versions.en.footer_text).toBe("English footer");
+    expect(gravacoes()[0].payload!.footer_text).toBe("Rodapé em português");
+  });
+
+  it("um cartão de secção muda para «Secções» e foca o título do inglês", async () => {
+    await abrir();
+    await adicionarIngles(true);
+    abaTexto("Conteúdo");
+    fireEvent.click(screen.getByRole("button", { name: /^Ir para: Secção «Condições Gerais»/ }));
+    await waitFor(() => expect(screen.getByLabelText("Condições Gerais · Título visível na proposta")).toHaveFocus());
+    expect(screen.getByRole("tab", { name: "Secções" })).toHaveAttribute("data-state", "active");
+  });
+
+  it("no português (idioma base) não há lista de verificação nem ids de campo", async () => {
+    await abrir();
+    expect(screen.queryByRole("button", { name: /^Ir para:/ })).toBeNull();
+    expect(document.querySelector("[data-destacado]")).toBeNull();
+  });
+});
+
 // ---- Guarda de concorrência ---------------------------------------------------------------------------
 describe("ProposalTemplateEditor — guarda de concorrência", () => {
   it("se mais ninguém tocou mas nenhuma linha foi atualizada: mantém a mensagem de sem permissão", async () => {

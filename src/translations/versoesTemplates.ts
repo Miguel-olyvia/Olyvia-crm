@@ -48,6 +48,8 @@ export const versoesTemplatesTranslations: Record<string, Record<string, string>
     'contractTemplates.versoes.checklist.traduzido': 'Translated',
     'contractTemplates.versoes.checklist.igual': 'Same as {base}',
     'contractTemplates.versoes.checklist.falta': 'Missing',
+    'contractTemplates.versoes.checklist.irPara': 'Go to: {nome}',
+    'contractTemplates.versoes.checklist.naoEncontrado': 'This text only shows up when the matching option is switched on in the template layout.',
 
     'contractTemplates.versoes.cartao.idiomas': 'Languages: {lista}',
     'contractTemplates.versoes.cartao.incompleto': '{codigo} incomplete',
@@ -101,6 +103,8 @@ export const versoesTemplatesTranslations: Record<string, Record<string, string>
     'contractTemplates.versoes.checklist.traduzido': 'Traduzido',
     'contractTemplates.versoes.checklist.igual': 'Igual ao {base}',
     'contractTemplates.versoes.checklist.falta': 'Em falta',
+    'contractTemplates.versoes.checklist.irPara': 'Ir para: {nome}',
+    'contractTemplates.versoes.checklist.naoEncontrado': 'Este texto só aparece quando a opção correspondente está ligada no layout da minuta.',
 
     'contractTemplates.versoes.cartao.idiomas': 'Idiomas: {lista}',
     'contractTemplates.versoes.cartao.incompleto': '{codigo} incompleto',

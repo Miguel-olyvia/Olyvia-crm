@@ -15,6 +15,7 @@ import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUplo
 import { getSafeFileExtension } from "@/utils/secureFileUpload";
 import { tDoc } from "@/lib/idiomaDocumento/dicionario";
 import { CamposComuns, type VersaoEmEdicao } from "./versoes/CamposComuns";
+import { ID_CAMPO_MINUTA } from "./versoes/idsDeIdioma";
 
 interface Props {
   settings: DocumentSettings;
@@ -23,6 +24,9 @@ interface Props {
   /** Presente quando se edita uma versão de idioma: só os textos do bloco do contrato são editáveis. */
   versao?: VersaoEmEdicao;
 }
+
+/** Id estável do campo só quando se edita uma versão de idioma (o painel global reutiliza este componente). */
+const idDoCampo = (versao: unknown, chave: string) => (versao ? ID_CAMPO_MINUTA[chave] : undefined);
 
 const LOGO_SIZES = [
   { value: "small", label: "Pequeno" },
@@ -388,6 +392,7 @@ export function DocumentHeaderSettings({ settings, onChange, orgName, versao }: 
               <div className="space-y-1">
                 <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Título</Label>
                 <Input
+                  id={idDoCampo(versao, "contract_block_title")}
                   value={settings.contract_block_title ?? "CONTRATO"}
                   onChange={(e) => onChange({ contract_block_title: e.target.value })}
                   placeholder={sugestao("doc.cabecalho.titulo")}
@@ -407,6 +412,7 @@ export function DocumentHeaderSettings({ settings, onChange, orgName, versao }: 
                 <div className="space-y-1">
                   <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Label nº</Label>
                   <Input
+                    id={idDoCampo(versao, "contract_block_number_label")}
                     value={settings.contract_block_number_label ?? "CONTRATO Nº"}
                     onChange={(e) => onChange({ contract_block_number_label: e.target.value })}
                     placeholder={sugestao("doc.cabecalho.numero")}
@@ -436,6 +442,7 @@ export function DocumentHeaderSettings({ settings, onChange, orgName, versao }: 
               {settings.contract_block_show_date !== false && (
                 <div className="grid grid-cols-2 gap-2">
                   <Input
+                    id={idDoCampo(versao, "contract_block_date_label")}
                     value={settings.contract_block_date_label ?? "Data:"}
                     onChange={(e) => onChange({ contract_block_date_label: e.target.value })}
                     placeholder={sugestao("doc.cabecalho.data")}
@@ -462,6 +469,7 @@ export function DocumentHeaderSettings({ settings, onChange, orgName, versao }: 
               {settings.contract_block_show_commercial !== false && (
                 <div className="grid grid-cols-2 gap-2">
                   <Input
+                    id={idDoCampo(versao, "contract_block_commercial_label")}
                     value={settings.contract_block_commercial_label ?? "Comercial:"}
                     onChange={(e) => onChange({ contract_block_commercial_label: e.target.value })}
                     placeholder={sugestao("doc.cabecalho.comercial")}

@@ -4,6 +4,7 @@ import { buildQuoteItemsChipHtml, readQuoteItemsChipConfig } from "@/components/
 import { DEFAULT_QUOTE_ITEMS_CONFIG } from "@/components/contracts/DataTableConfigForm";
 import {
   adicionarVersao,
+  alvoDaLinha,
   camposDoIdioma,
   codigosDasVersoes,
   escreverCorpo,
@@ -335,3 +336,32 @@ describe("linhasDeVerificacao", () => {
     expect(pendentes).toBe(calcularCompletude(m, "en").faltam.length);
   });
 });
+
+describe("alvoDaLinha (para onde leva cada item da lista de verificação)", () => {
+  it("cada linha simples leva ao seu campo", () => {
+    const m = comEn();
+    expect(alvoDaLinha(m, "en", "corpo")).toBe("corpo");
+    expect(alvoDaLinha(m, "en", "titulo_cabecalho")).toBe("contract_block_title");
+    expect(alvoDaLinha(m, "en", "rodape")).toBe("footer_text");
+    expect(alvoDaLinha(m, "en", "tabela")).toBe("quote_items_title");
+  });
+
+  it("os outros rótulos levam ao primeiro que ainda falta traduzir", () => {
+    const base = minuta();
+    (base.doc_settings as any).contract_block_date_label = "Data:";
+    (base.doc_settings as any).contract_block_commercial_label = "Comercial:";
+    let m = adicionarVersao(base, "en", true);
+    expect(alvoDaLinha(m, "en", "rotulos")).toBe("contract_block_number_label");
+    m = { ...m, ...escreverSettings(m, "en", { ...camposDoIdioma(m, "en").settings, contract_block_number_label: "CONTRACT No." }) };
+    expect(alvoDaLinha(m, "en", "rotulos")).toBe("contract_block_date_label");
+    m = { ...m, ...escreverSettings(m, "en", { ...camposDoIdioma(m, "en").settings, contract_block_date_label: "Date:" }) };
+    expect(alvoDaLinha(m, "en", "rotulos")).toBe("contract_block_commercial_label");
+  });
+
+  it("com todos os rótulos traduzidos, leva ao primeiro que o português tem", () => {
+    let m = adicionarVersao(minuta(), "en", true);
+    m = { ...m, ...escreverSettings(m, "en", { ...camposDoIdioma(m, "en").settings, contract_block_number_label: "CONTRACT No." }) };
+    expect(alvoDaLinha(m, "en", "rotulos")).toBe("contract_block_number_label");
+  });
+});
+

@@ -1,3 +1,4 @@
+import type { RefCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -18,6 +19,8 @@ interface SeccoesPorIdiomaProps {
   seccoes: SeccaoParaTraduzir[];
   valorDaSeccao: (seccaoId: string, campo: CampoDeSeccao) => string;
   onEscrever: (seccaoId: string, campo: CampoDeSeccao, valor: string) => void;
+  /** Regista o envólucro de cada campo (chave `sections.<id>.<campo>`) para «ir para o campo». */
+  registar?: (chave: string) => RefCallback<HTMLElement>;
 }
 
 /** Os tipos de secção que mostram um título próprio na proposta (o mesmo critério do editor em português). */
@@ -53,7 +56,7 @@ function camposDe(seccao: SeccaoParaTraduzir, t: (chave: string) => string): Cam
   return campos;
 }
 
-export function SeccoesPorIdioma({ codigo, seccoes, valorDaSeccao, onEscrever }: SeccoesPorIdiomaProps) {
+export function SeccoesPorIdioma({ codigo, seccoes, valorDaSeccao, onEscrever, registar }: SeccoesPorIdiomaProps) {
   const { t } = useTranslation();
   const idioma = nomeNaFrase(t, codigo);
 
@@ -82,7 +85,7 @@ export function SeccoesPorIdioma({ codigo, seccoes, valorDaSeccao, onEscrever }:
               className: "text-xs",
             };
             return (
-              <div key={campo} className="space-y-1">
+              <div key={campo} ref={registar?.(`sections.${seccao.id}.${campo}`)} className="space-y-1 p-1">
                 <Label htmlFor={id} className="text-xs text-muted-foreground">{rotulo}</Label>
                 {longo ? <Textarea {...props} className="min-h-[90px] text-xs" /> : <Input {...props} className="h-9 text-xs" />}
                 {portugues && (

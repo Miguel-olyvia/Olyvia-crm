@@ -1,3 +1,4 @@
+import type { RefCallback } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -27,6 +28,10 @@ interface ConteudoPorIdiomaProps {
   base: BaseDoConteudo;
   valorDoTexto: (campo: string) => string;
   onEscrever: (campo: string, valor: string) => void;
+  /** Regista o envólucro de cada campo (a chave é o nome do campo) para «ir para o campo». */
+  registar?: (chave: string) => RefCallback<HTMLElement>;
+  /** Mostra os emails de verificação mesmo com a verificação por email desligada (para se poder traduzir o que a lista pede). */
+  mostrarVerificacao?: boolean;
 }
 
 type Tipo = "linha" | "caixa" | "html";
@@ -43,7 +48,8 @@ function htmlVazio(html: string): boolean {
   return textoSimples(html) === "" && !/<img\b/i.test(html);
 }
 
-function CampoDeTexto({ campo, tipo, linhas, codigo, base, valor, onEscrever }: CampoDaLista & {
+function CampoDeTexto({ campo, tipo, linhas, codigo, base, valor, onEscrever, registar }: CampoDaLista & {
+  registar?: (chave: string) => RefCallback<HTMLElement>;
   codigo: string;
   base: string;
   valor: string;
@@ -57,7 +63,7 @@ function CampoDeTexto({ campo, tipo, linhas, codigo, base, valor, onEscrever }: 
   const portugues = textoSimples(base);
 
   return (
-    <div className="space-y-1">
+    <div ref={registar?.(campo)} className="space-y-1 p-1">
       <Label id={`${id}-rotulo`} htmlFor={tipo === "html" ? undefined : id} className="text-xs">{rotulo}</Label>
       <p id={ajuda} className="line-clamp-3 text-xs text-muted-foreground">
         <span className="font-medium">{t("proposalTemplateEditor.versions.field.inPortuguese")}: </span>
@@ -84,14 +90,14 @@ function CampoDeTexto({ campo, tipo, linhas, codigo, base, valor, onEscrever }: 
   );
 }
 
-export function ConteudoPorIdioma({ codigo, base, valorDoTexto, onEscrever }: ConteudoPorIdiomaProps) {
+export function ConteudoPorIdioma({ codigo, base, valorDoTexto, onEscrever, registar, mostrarVerificacao = false }: ConteudoPorIdiomaProps) {
   const { t } = useTranslation();
-  const comVerificacao = base.accept_enabled !== false && base.accept_verification_method === "email";
+  const comVerificacao = mostrarVerificacao || (base.accept_enabled !== false && base.accept_verification_method === "email");
   const mostrarCabecalho = typeof base.header_text === "string" && base.header_text.trim() !== "";
 
   const bloco = (campos: CampoDaLista[]) =>
     campos.map((c) => (
-      <CampoDeTexto key={c.campo} {...c} codigo={codigo} base={base[c.campo] ?? ""} valor={valorDoTexto(c.campo)} onEscrever={onEscrever} />
+      <CampoDeTexto key={c.campo} {...c} codigo={codigo} base={base[c.campo] ?? ""} valor={valorDoTexto(c.campo)} onEscrever={onEscrever} registar={registar} />
     ));
 
   return (

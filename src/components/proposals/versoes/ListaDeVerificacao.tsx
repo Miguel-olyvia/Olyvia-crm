@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { AlertTriangle, CheckCircle2, CircleDashed, Copy, Trash2 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,10 @@ interface ListaDeVerificacaoProps {
   desatualizado: boolean;
   onMarcarAtualizada: () => void;
   onRemover: (codigo: string) => void;
+  /** Clicar num item leva ao campo (separador, scroll, foco e destaque). */
+  onIrPara: (chave: string) => void;
+  /** O último pedido não encontrou o campo no editor. */
+  naoEncontrado: string | null;
 }
 
 const ICONE: Record<EstadoDoCampo, typeof CheckCircle2> = { traduzido: CheckCircle2, igual: Copy, falta: CircleDashed };
@@ -33,7 +37,9 @@ const CHAVE_ESTADO: Record<EstadoDoCampo, string> = {
   falta: "proposalTemplateEditor.versions.checklist.status.missing",
 };
 
-export function ListaDeVerificacao({ codigo, campos, seccoes, desatualizado, onMarcarAtualizada, onRemover }: ListaDeVerificacaoProps) {
+export function ListaDeVerificacao({ codigo, campos, seccoes, desatualizado, onMarcarAtualizada, onRemover, onIrPara, naoEncontrado }: ListaDeVerificacaoProps) {
+  const idBase = useId();
+  const [listaAberta, setListaAberta] = useState(() => campos.some((c) => c.estado !== "traduzido"));
   const { t } = useTranslation();
   const [confirmarRemocao, setConfirmarRemocao] = useState(false);
   const idioma = nomeNaFrase(t, codigo);
@@ -62,7 +68,14 @@ export function ListaDeVerificacao({ codigo, campos, seccoes, desatualizado, onM
         </Alert>
       )}
 
-      <details open={porTraduzir > 0}>
+      {naoEncontrado && (
+        <p role="status" className="text-xs text-amber-700 dark:text-amber-300">
+          {t("proposalTemplateEditor.versions.checklist.notFound")}
+        </p>
+      )}
+
+      {/* Aberta só ao início (se falta algo): não pode fechar-se sozinha quando se traduz o último campo. */}
+      <details open={listaAberta} onToggle={(e) => setListaAberta(e.currentTarget.open)}>
         <summary className="flex min-h-11 cursor-pointer items-center justify-between gap-2 rounded-md text-sm font-medium focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <span>{t("proposalTemplateEditor.versions.checklist.title")}</span>
           <span className={porTraduzir > 0 ? "text-xs text-amber-700 dark:text-amber-300" : "text-xs text-emerald-700 dark:text-emerald-300"}>
@@ -76,15 +89,21 @@ export function ListaDeVerificacao({ codigo, campos, seccoes, desatualizado, onM
             {campos.map((c) => {
               const Icone = ICONE[c.estado];
               return (
-                <li key={c.chave} className="rounded-md border p-2 text-xs">
-                  <div className="flex items-start justify-between gap-2">
+                <li key={c.chave} className="rounded-md border text-xs">
+                  <button
+                    type="button"
+                    aria-label={t("proposalTemplateEditor.versions.checklist.goTo", { field: nomeDoCampo(c) })}
+                    aria-describedby={`${idBase}-${c.chave.replace(/\W/g, "_")}`}
+                    onClick={() => onIrPara(c.chave)}
+                    className="flex min-h-11 w-full items-start justify-between gap-2 rounded-md p-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
                     <span className="font-medium">{nomeDoCampo(c)}</span>
-                    <span className={`inline-flex shrink-0 items-center gap-1 ${COR[c.estado]}`}>
+                    <span id={`${idBase}-${c.chave.replace(/\W/g, "_")}`} className={`inline-flex shrink-0 items-center gap-1 ${COR[c.estado]}`}>
                       <Icone className="h-3.5 w-3.5" aria-hidden="true" />
                       {t(CHAVE_ESTADO[c.estado])}
                     </span>
-                  </div>
-                  <p className="mt-1 line-clamp-2 text-muted-foreground">
+                  </button>
+                  <p className="line-clamp-2 px-2 pb-2 text-muted-foreground">
                     <span className="font-medium">{t("proposalTemplateEditor.versions.checklist.portuguese")}: </span>
                     {textoSimples(c.base)}
                   </p>

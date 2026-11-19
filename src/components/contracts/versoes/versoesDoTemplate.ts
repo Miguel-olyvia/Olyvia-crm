@@ -207,6 +207,27 @@ function estadoDoTexto(base: unknown, versao: unknown): EstadoDeVerificacao {
   return mesmoTexto(versao, base) ? "igual" : "traduzido";
 }
 
+const CAMPO_DA_LINHA: Record<Exclude<ChaveDeVerificacao, "rotulos">, string> = {
+  corpo: "corpo",
+  titulo_cabecalho: "contract_block_title",
+  rodape: "footer_text",
+  tabela: "quote_items_title",
+};
+
+/**
+ * O campo para onde um item da lista de verificação leva: `corpo` ou a chave do doc_settings. Os «outros
+ * rótulos» levam ao primeiro que ainda falta traduzir (ou, se estão todos feitos, ao primeiro que o base tem).
+ */
+export function alvoDaLinha(m: EstadoMinuta, codigo: string, chave: ChaveDeVerificacao): string {
+  if (chave !== "rotulos") return CAMPO_DA_LINHA[chave];
+  const ds = docSettings(m);
+  const c = normalizarCodigo(codigo);
+  const v = c ? versaoBruta(m, c) : undefined;
+  const cabecalho = v && ehObjeto(v.header) ? v.header : {};
+  const presentes = ROTULOS_SECUNDARIOS.filter((k) => naoVazio(ds[k]));
+  return presentes.find((k) => estadoDoTexto(ds[k], cabecalho[k]) !== "traduzido") ?? presentes[0] ?? ROTULOS_SECUNDARIOS[0];
+}
+
 function linhaSimples(chave: ChaveDeVerificacao, base: unknown, versao: unknown): LinhaDeVerificacao | null {
   if (!naoVazio(base)) return null;
   const estado = estadoDoTexto(base, versao);

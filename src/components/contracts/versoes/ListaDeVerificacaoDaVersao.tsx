@@ -4,12 +4,16 @@ import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { useNomeParaFrase } from "./nomeParaFrase";
-import type { EstadoDeVerificacao, LinhaDeVerificacao } from "./versoesDoTemplate";
+import type { ChaveDeVerificacao, EstadoDeVerificacao, LinhaDeVerificacao } from "./versoesDoTemplate";
 
 interface Props {
   linhas: LinhaDeVerificacao[];
   /** Código do idioma base (o texto que se mostra ao lado). */
   base: string;
+  /** Clicar num item leva ao campo (separador, scroll, foco e destaque). */
+  onIrPara: (chave: ChaveDeVerificacao) => void;
+  /** O último pedido não achou o campo no ecrã. */
+  naoEncontrado: boolean;
 }
 
 const ESTILO: Record<EstadoDeVerificacao, { classe: string; Icone: typeof Check }> = {
@@ -22,7 +26,7 @@ const ESTILO: Record<EstadoDeVerificacao, { classe: string; Icone: typeof Check 
  * O que falta traduzir na versão ativa: um estado por texto (escrito por extenso, não só por cor) e, num
  * painel recolhível, o texto no idioma base ao lado. Sem linhas (idioma base) não mostra nada.
  */
-export function ListaDeVerificacaoDaVersao({ linhas, base }: Props) {
+export function ListaDeVerificacaoDaVersao({ linhas, base, onIrPara, naoEncontrado }: Props) {
   const { t } = useTranslation();
   const nomeParaFrase = useNomeParaFrase();
   const titulo = useId();
@@ -52,6 +56,7 @@ export function ListaDeVerificacaoDaVersao({ linhas, base }: Props) {
       </div>
 
       {tudoFeito && <p className="text-sm text-emerald-700 dark:text-emerald-400">{t("contractTemplates.versoes.checklist.completo")}</p>}
+      {naoEncontrado && <p role="status" className="text-xs text-amber-700 dark:text-amber-400">{t("contractTemplates.versoes.checklist.naoEncontrado")}</p>}
 
       <ul id={lista} className="space-y-2">
         {linhas.map((linha) => {
@@ -59,11 +64,17 @@ export function ListaDeVerificacaoDaVersao({ linhas, base }: Props) {
           const nome = t(`contractTemplates.versoes.checklist.${linha.chave}`);
           return (
             <li key={linha.chave} className="text-sm">
-              <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                aria-label={t("contractTemplates.versoes.checklist.irPara", { nome })}
+                aria-describedby={`${lista}-${linha.chave}`}
+                onClick={() => onIrPara(linha.chave)}
+                className="flex min-h-11 w-full flex-wrap items-center gap-2 rounded-md px-1 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
                 <Icone className={cn("h-4 w-4 shrink-0", classe)} aria-hidden="true" />
                 <span>{linha.pendentes > 1 ? `${nome} (${linha.pendentes})` : nome}</span>{" "}
-                <span className={cn("text-xs font-medium", classe)}>{t(`contractTemplates.versoes.checklist.${linha.estado}`, { base: nomeBase })}</span>
-              </div>
+                <span id={`${lista}-${linha.chave}`} className={cn("text-xs font-medium", classe)}>{t(`contractTemplates.versoes.checklist.${linha.estado}`, { base: nomeBase })}</span>
+              </button>
               {aberto && linha.textoBase && (
                 <blockquote lang={base} className="mt-1 max-h-24 overflow-auto rounded border-l-2 border-muted-foreground/30 bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
                   {linha.textoBase}

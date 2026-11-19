@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { ListaDeVerificacaoDaVersao } from "../ListaDeVerificacaoDaVersao";
@@ -12,9 +12,11 @@ const LINHAS: LinhaDeVerificacao[] = [
   { chave: "rotulos", estado: "falta", textoBase: "CONTRATO Nº · Data:", textoVersao: "", pendentes: 2 },
 ];
 
-function montar(linhas: LinhaDeVerificacao[], lingua: "pt" | "en" = "pt") {
+function montar(linhas: LinhaDeVerificacao[], lingua: "pt" | "en" = "pt", naoEncontrado = false) {
   localStorage.setItem("language", lingua);
-  return render(<LanguageProvider><ListaDeVerificacaoDaVersao linhas={linhas} base="pt" /></LanguageProvider>);
+  const onIrPara = vi.fn();
+  const r = render(<LanguageProvider><ListaDeVerificacaoDaVersao linhas={linhas} base="pt" onIrPara={onIrPara} naoEncontrado={naoEncontrado} /></LanguageProvider>);
+  return { ...r, onIrPara };
 }
 
 beforeEach(() => localStorage.clear());
@@ -76,4 +78,63 @@ describe("ListaDeVerificacaoDaVersao", () => {
     montar(LINHAS);
     expect(screen.getByRole("button", { name: /Mostrar o texto/ }).className).toContain("min-h-11");
   });
+
+  describe("ir para o campo", () => {
+    it("cada item é um botão «Ir para: <campo>» com o estado como descrição", () => {
+      montar(LINHAS);
+      const corpo = screen.getByRole("button", { name: "Ir para: Corpo da minuta" });
+      expect(corpo.tagName).toBe("BUTTON");
+      expect(corpo).toHaveAttribute("type", "button");
+      expect(corpo).toHaveAccessibleDescription("Igual ao português");
+      expect(screen.getByRole("button", { name: "Ir para: Título do cabeçalho" })).toHaveAccessibleDescription("Em falta");
+      expect(screen.getByRole("button", { name: "Ir para: Rodapé" })).toHaveAccessibleDescription("Traduzido");
+      expect(screen.getByRole("button", { name: "Ir para: Título da tabela de artigos" })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: "Ir para: Outros rótulos do cabeçalho" })).toBeInTheDocument();
+    });
+
+    it("clicar chama onIrPara com a chave da linha", () => {
+      const { onIrPara } = montar(LINHAS);
+      for (const [nome, chave] of [
+        ["Ir para: Corpo da minuta", "corpo"],
+        ["Ir para: Título do cabeçalho", "titulo_cabecalho"],
+        ["Ir para: Rodapé", "rodape"],
+        ["Ir para: Título da tabela de artigos", "tabela"],
+        ["Ir para: Outros rótulos do cabeçalho", "rotulos"],
+      ] as const) {
+        fireEvent.click(screen.getByRole("button", { name: nome }));
+        expect(onIrPara).toHaveBeenLastCalledWith(chave);
+      }
+    });
+
+    it("alvos de 44px e focáveis pelo teclado", () => {
+      montar(LINHAS);
+      for (const botao of screen.getAllByRole("button", { name: /^Ir para:/ })) {
+        expect(botao.className).toContain("min-h-11");
+        botao.focus();
+        expect(botao).toHaveFocus();
+      }
+    });
+
+    it("em inglês o nome do botão muda de língua", () => {
+      montar(LINHAS, "en");
+      expect(screen.getByRole("button", { name: "Go to: Template text" })).toBeInTheDocument();
+    });
+
+    it("campo que não está visível no layout: avisa, por escrito", () => {
+      montar(LINHAS, "pt", true);
+      expect(screen.getByRole("status")).toHaveTextContent("Este texto só aparece quando a opção correspondente está ligada no layout da minuta.");
+    });
+
+    it("sem pedido falhado não há aviso", () => {
+      montar(LINHAS);
+      expect(screen.queryByRole("status")).toBeNull();
+    });
+
+    it("o painel com o texto em português continua a funcionar", () => {
+      montar(LINHAS);
+      fireEvent.click(screen.getByRole("button", { name: "Mostrar o texto em português" }));
+      expect(screen.getByText("CONTRATO")).toHaveAttribute("lang", "pt");
+    });
+  });
 });
+

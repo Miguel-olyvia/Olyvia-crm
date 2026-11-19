@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { LanguageProvider } from "@/contexts/LanguageContext";
 import { TemplateDocSettingsPanel, type TemplateDocSettings } from "../../TemplateDocSettingsPanel";
+import { ID_CAMPO_MINUTA } from "../idsDeIdioma";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: { id: "org-teste", name: "Org de teste" } }) }));
@@ -129,3 +130,37 @@ describe("TemplateDocSettingsPanel numa versão de idioma", () => {
     expect(screen.getByDisplayValue("www.exemplo.pt")).toBeEnabled();
   });
 });
+
+describe("ids estáveis dos campos («ir para o campo»)", () => {
+  const IDS_DE_VERSAO = [
+    "contract_block_title",
+    "contract_block_number_label",
+    "contract_block_date_label",
+    "contract_block_commercial_label",
+    "footer_text",
+    "quote_items_title",
+  ] as const;
+
+  it("numa versão, cada campo traduzível tem o seu id e o id é do próprio campo de texto", () => {
+    const { container } = montar({ versao: EN });
+    for (const chave of IDS_DE_VERSAO) {
+      const el = container.querySelector(`#${ID_CAMPO_MINUTA[chave]}`);
+      expect(el, chave).not.toBeNull();
+      expect(["INPUT", "TEXTAREA"]).toContain(el!.tagName);
+      expect(el).toBeEnabled();
+    }
+  });
+
+  it("os ids são únicos no documento", () => {
+    const { container } = montar({ versao: EN });
+    for (const chave of IDS_DE_VERSAO) expect(container.querySelectorAll(`#${ID_CAMPO_MINUTA[chave]}`)).toHaveLength(1);
+  });
+
+  it("no idioma base os campos do cabeçalho e do rodapé não levam id (o painel global reutiliza-os)", () => {
+    const { container } = montar();
+    for (const chave of ["contract_block_title", "contract_block_number_label", "contract_block_date_label", "contract_block_commercial_label", "footer_text"] as const) {
+      expect(container.querySelector(`#${ID_CAMPO_MINUTA[chave]}`), chave).toBeNull();
+    }
+  });
+});
+
