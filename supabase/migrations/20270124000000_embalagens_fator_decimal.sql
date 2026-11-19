@@ -258,7 +258,8 @@ DO $m$
 DECLARE
   r record; d text;
 BEGIN
-  FOR r IN SELECT x FROM unnest(ARRAY['public.rpc_supplier_catalog(uuid)', 'public.rpc_supplier_catalog_search(uuid,text,integer)']) AS t(x) LOOP
+  -- 19/11 (aplicação): só rpc_supplier_catalog; rpc_supplier_catalog_search lê-a (FROM public.rpc_supplier_catalog(...)) e não tem o texto
+  FOR r IN SELECT x FROM unnest(ARRAY['public.rpc_supplier_catalog(uuid)']) AS t(x) LOOP
     IF to_regprocedure(r.x) IS NULL THEN
       RAISE NOTICE '% não existe nesta base: nada a fazer.', r.x;
       CONTINUE;
