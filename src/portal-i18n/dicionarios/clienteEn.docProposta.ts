@@ -5,6 +5,8 @@ export const clienteEnDocProposta: Record<string, string> = {
   // Default status and general labels
   "pc.docProposta.estadoOmissao": "Awaiting decision",
   "pc.docProposta.baixarPdf": "Download PDF",
+  // Language selector (only when the proposal has more than one language): accessible name of the PT | EN group
+  "pc.docProposta.idioma.rotulo": "Document language",
   "pc.docProposta.itens": "Items",
   "pc.docProposta.taxaServico": "Service fee",
 

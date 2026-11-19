@@ -13,7 +13,8 @@ import { traduzir } from "@/portal-i18n/traduzir";
 import { traduzirEm } from "@/portal-i18n/traduzirEm";
 import { ehPortalIdioma, type PortalIdioma } from "@/portal-i18n/tipos";
 import type { PortalTraducao } from "@/portal-i18n/usePortalT";
-import { aplicarVersaoProposta, normalizarCodigo, obterIdioma } from "@/lib/idiomaDocumento";
+import { aplicarVersaoProposta, idiomaVisivelDoDocumento, normalizarCodigo, obterIdioma } from "@/lib/idiomaDocumento";
+import { SeletorVersaoDoDocumento } from "@/components/idiomaDocumento/SeletorVersaoDoDocumento";
 import { computeQuoteTotals, computeLineVatAmount, aggregateQuoteTotals } from "@/utils/quotes/computeQuoteTotals";
 import { getLineDisplayUnitPrice } from "@/utils/quotes/quoteLinePricing";
 
@@ -55,6 +56,16 @@ interface ProposalPortalDocumentProps {
    * Quem decide os idiomas é quem chama (ver resolverIdiomasDaProposta): este componente mostra o que lhe pedem.
    */
   idiomasDoDocumento?: string[];
+  /**
+   * Como se mostram os idiomas quando há mais de um. «sequencia» (omissão, o CRM): todas as versões seguidas, cada uma
+   * com o seu título. «seletor» (portal do cliente): um seletor no topo e SÓ a versão escolhida; as palavras do ecrã
+   * (cartões, botões, OTP) seguem essa versão. Com um só idioma é igual nos dois modos e não há seletor.
+   */
+  modoVersoes?: "sequencia" | "seletor";
+  /** Só no modo seletor: o idioma escolhido. Sem ele (ou fora dos idiomas do documento) vale o da interface, depois o primeiro. */
+  idiomaEscolhido?: string | null;
+  /** Só no modo seletor: o cliente escolheu outro idioma. Sem isto o componente guarda a escolha por si. */
+  onIdiomaEscolhidoChange?: (codigo: string) => void;
   statusLabel?: string;
   canActOnProposal?: boolean;
   actionLoading?: boolean;
@@ -176,6 +187,9 @@ export function ProposalPortalDocument({
   mode = "preview",
   idioma = "pt",
   idiomasDoDocumento,
+  modoVersoes = "sequencia",
+  idiomaEscolhido,
+  onIdiomaEscolhidoChange,
   statusLabel,
   canActOnProposal = false,
   actionLoading = false,
@@ -202,11 +216,24 @@ export function ProposalPortalDocument({
   // português. Um idioma sem dicionário de ecrã (es, fr) não se oferece: mostrá-lo misturaria o texto dessa versão com
   // palavras de outra língua.
   const chaveIdiomas = (idiomasDoDocumento ?? []).join("+");
-  const codigos = useMemo<PortalIdioma[]>(() => {
+  const todosOsCodigos = useMemo<PortalIdioma[]>(() => {
     const pedidos = chaveIdiomas.split("+").map((c) => normalizarCodigo(c)).filter((c): c is PortalIdioma => ehPortalIdioma(c));
     const unicos = Array.from(new Set(pedidos));
     return unicos.length > 0 ? unicos : [ehPortalIdioma(idioma) ? idioma : "pt"];
   }, [chaveIdiomas, idioma]);
+  // No modo seletor com mais de um idioma só uma versão se mostra: a escolhida (por quem chama, ou aqui por estado
+  // próprio), senão o idioma da interface, senão a primeira. A seleção de orçamentos e as secções escolhidas usam
+  // chaves que não dependem do idioma, e este estado não se perde ao trocar.
+  const [idiomaInterno, setIdiomaInterno] = useState<string | null>(null);
+  const comSeletor = modoVersoes === "seletor" && todosOsCodigos.length > 1;
+  const idiomaVisivel = comSeletor
+    ? (idiomaVisivelDoDocumento({ disponiveis: todosOsCodigos, escolhido: idiomaEscolhido ?? idiomaInterno, idiomaDaInterface: idioma }) as PortalIdioma)
+    : null;
+  const codigos = useMemo<PortalIdioma[]>(() => (idiomaVisivel ? [idiomaVisivel] : todosOsCodigos), [idiomaVisivel, todosOsCodigos]);
+  const escolherIdioma = (codigo: string) => {
+    setIdiomaInterno(codigo);
+    onIdiomaEscolhidoChange?.(codigo);
+  };
   // Uma versão por idioma: o template resolvido (a MESMA referência se não houver versão) e as palavras do ecrã.
   const versoes = useMemo<VersaoDoDocumento[]>(
     () =>
@@ -998,6 +1025,18 @@ export function ProposalPortalDocument({
 
   return (
     <div className="space-y-5" style={{ fontFamily }}>
+      {/* Seletor de versão (só no portal, só com mais de um idioma): por cima de tudo, uma versão de cada vez */}
+      {comSeletor && idiomaVisivel && (
+        <div>
+          <SeletorVersaoDoDocumento
+            idiomas={todosOsCodigos}
+            valor={idiomaVisivel}
+            rotulo={t("pc.docProposta.idioma.rotulo")}
+            onChange={escolherIdioma}
+          />
+        </div>
+      )}
+
       {/* Decision Banner - only for portal mode when can act */}
       {!isPreview && canActOnProposal && otpStep !== "verified" && (
         <div className="rounded-xl border bg-gradient-to-r from-primary/5 to-primary/10 p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4">
@@ -1129,7 +1168,12 @@ export function ProposalPortalDocument({
               </section>
             );
           })
-        : renderMiolo(versoes[0], true)}
+        : comSeletor
+          ? (() => {
+              const miolo = renderMiolo(versoes[0], true);
+              return miolo ? <section lang={versoes[0].codigo} className="space-y-5">{miolo}</section> : null;
+            })()
+          : renderMiolo(versoes[0], true)}
 
       {/* OTP SMS Verification Section */}
       {canActOnProposal && (

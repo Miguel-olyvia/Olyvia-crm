@@ -46,6 +46,8 @@ export const clientePtContratoDet: Record<string, string> = {
   "pc.contratoDet.corpo.titulo": "Corpo do Contrato",
   "pc.contratoDet.corpo.descarregarPdf": "Descarregar PDF",
   "pc.contratoDet.corpo.aGerar": "A gerar…",
+  // Seletor de versão (só quando o contrato tem mais de um idioma): nome acessível do grupo PT | EN
+  "pc.contratoDet.idioma.rotulo": "Idioma do contrato",
   "pc.contratoDet.pdf.nomePadrao": "Contrato",
   "pc.contratoDet.pdf.naoGerar": "Não foi possível gerar o PDF",
   "pc.contratoDet.pdf.semOrganizacao": "Contrato sem organização associada.",

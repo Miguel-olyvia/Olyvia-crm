@@ -25,6 +25,8 @@ import { useToast } from "@/hooks/use-toast";
 import { useCooldown, OTP_COOLDOWN_SECONDS } from "@/hooks/useCooldown";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { resolverIdiomasDaProposta } from "@/utils/idiomasDaProposta";
+import { idiomaVisivelDoDocumento } from "@/lib/idiomaDocumento";
+import { ehPortalIdioma } from "@/portal-i18n/tipos";
 import { MOTIVOS_REJEICAO_PROPOSTA } from "@/components/portal/motivosRejeicao";
 import {
   mensagemDeChave,
@@ -64,6 +66,9 @@ const ClientPortalProposalDetail = () => {
   const [questionText, setQuestionText] = useState("");
   const [selectedQuoteIds, setSelectedQuoteIds] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<any[]>([]);
+  // A versão de idioma que o cliente escolheu no seletor (só há seletor com mais de um idioma). Vazia = ainda não
+  // escolheu: vale o idioma da interface. Fica na página para o PDF descarregar a mesma versão que se está a ver.
+  const [idiomaEscolhido, setIdiomaEscolhido] = useState<string | null>(null);
 
   // OTP states
   const [otpStep, setOtpStep] = useState<"idle" | "sending" | "input" | "verifying" | "verified">("idle");
@@ -110,6 +115,7 @@ const ClientPortalProposalDetail = () => {
 
   useEffect(() => {
     if (!id) return;
+    setIdiomaEscolhido(null);
     void reloadPortalData();
     void loadAttachments();
     void logView();
@@ -424,6 +430,13 @@ const ClientPortalProposalDetail = () => {
     template: portalData.template,
     idiomaDoPortal: idioma,
   });
+  // Com mais de um idioma o portal mostra UMA versão de cada vez (seletor no topo do documento) e o PDF leva a mesma.
+  // Só contam os idiomas que o portal sabe escrever (os mesmos que o documento oferece); com um só, tudo como antes.
+  const idiomasComSeletor = idiomasDoDocumento.filter(ehPortalIdioma);
+  const idiomaVisivel = idiomasComSeletor.length > 1
+    ? idiomaVisivelDoDocumento({ disponiveis: idiomasComSeletor, escolhido: idiomaEscolhido, idiomaDaInterface: idioma })
+    : null;
+  const idiomasDoPdf = idiomaVisivel ? [idiomaVisivel] : idiomasDoDocumento;
 
   return (
     <ClientPortalLayout>
@@ -443,6 +456,9 @@ const ClientPortalProposalDetail = () => {
           mode="portal"
           idioma={idioma}
           idiomasDoDocumento={idiomasDoDocumento}
+          modoVersoes="seletor"
+          idiomaEscolhido={idiomaEscolhido}
+          onIdiomaEscolhidoChange={setIdiomaEscolhido}
           statusLabel={statusLabel}
           canActOnProposal={canActOnProposal}
           actionLoading={actionLoading}
@@ -492,7 +508,7 @@ const ClientPortalProposalDetail = () => {
                 });
                 return;
               }
-              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, payload, { idiomas: idiomasDoDocumento });
+              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, payload, { idiomas: idiomasDoPdf });
               downloadBlob(blob, fileName);
             } catch (e: unknown) {
               toast({

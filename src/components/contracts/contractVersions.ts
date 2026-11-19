@@ -2,7 +2,15 @@
 // em segmentos para o resolver e voltar a juntá-los. Sem marcas (corpo antigo, de uma só língua) é UM segmento e
 // o corpo sai tal e qual — o português de hoje.
 
-import { dividirEmVersoes, idiomasDoDocumento, IDIOMA_BASE, type VersaoDoCorpo } from "@/lib/idiomaDocumento";
+import {
+  dividirEmVersoes,
+  extrairBlocoDeAssinatura,
+  htmlDaAssinaturaUnica,
+  idiomasDoDocumento,
+  IDIOMA_BASE,
+  temBlocoDeAssinatura,
+  type VersaoDoCorpo,
+} from "@/lib/idiomaDocumento";
 
 /** Uma versão do documento pronta a imprimir: o corpo já resolvido (sem wrapper) e as definições dessa língua. */
 export interface ContractVersion<S> {
@@ -52,4 +60,40 @@ export function juntarSegmentos(segmentos: readonly VersaoDoCorpo[], comMarcas: 
   return segmentos
     .map((s, i) => `<div class="olv-versao olv-versao-${s.codigo}"${i > 0 ? ` style="${ESTILO_NOVA_PAGINA}"` : ""}>${s.html}</div>`)
     .join("\n");
+}
+
+/**
+ * O corpo de UMA versão para a mostrar (ou imprimir) sozinha. A composição deixa o bloco de assinatura só na última
+ * versão que o tem; quem vê outra versão precisa de o ver na sua: anexa-se-lhe a frase «esta assinatura vale para
+ * as duas versões» e o bloco da última, já com o carimbo (nos dois idiomas) se o cliente assinou. A assinatura é uma
+ * só (OTP): isto só mostra onde se assina. Uma versão que já tem o seu bloco, ou um documento sem bloco em lado
+ * nenhum, sai como está.
+ */
+export function bodyDaVersaoComAssinatura(versoes: ReadonlyArray<{ codigo: string; bodyHtml: string }>, codigo: string): string {
+  const escolhida = versoes.find((v) => v.codigo === codigo) ?? versoes[0];
+  if (!escolhida) return "";
+  if (versoes.length < 2) return escolhida.bodyHtml;
+
+  const comBloco = versoes.map((v) => temBlocoDeAssinatura(v.bodyHtml, v.codigo));
+  const dadora = comBloco.lastIndexOf(true);
+  if (dadora < 0 || versoes[dadora] === escolhida || comBloco[versoes.indexOf(escolhida)]) return escolhida.bodyHtml;
+
+  const bloco = extrairBlocoDeAssinatura(versoes[dadora].bodyHtml, versoes[dadora].codigo);
+  if (!bloco) return escolhida.bodyHtml;
+  return escolhida.bodyHtml + htmlDaAssinaturaUnica(versoes.map((v) => v.codigo)) + bloco;
+}
+
+/**
+ * O documento resolvido só com a versão escolhida (e o bloco de assinatura nela), para o PDF do portal. Com uma só
+ * versão, ou um código que o documento não tem, devolve o próprio documento. Não altera o recebido.
+ */
+export function soAVersaoDoContrato<V extends { codigo: string; bodyHtml: string }, D extends { bodyHtml: string; versoes: V[] }>(
+  documento: D,
+  codigo: string,
+): D {
+  const versoes = documento.versoes ?? [];
+  const escolhida = versoes.find((v) => v.codigo === codigo);
+  if (versoes.length < 2 || !escolhida) return documento;
+  const bodyHtml = bodyDaVersaoComAssinatura(versoes, codigo);
+  return { ...documento, bodyHtml, versoes: [{ ...escolhida, bodyHtml }] } as D;
 }

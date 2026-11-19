@@ -198,6 +198,23 @@ function localizarMarcado(raiz: ParentNode): LocalizacaoDaAssinatura | null {
   };
 }
 
+/** O texto do elemento com os blocos separados por um espaço (o `textContent` cola «…1.2.3.4» a «O CLIENTE»). */
+function textoSeparado(el: Element): string {
+  const partes: string[] = [];
+  const passeio = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  for (let no = passeio.nextNode(); no; no = passeio.nextNode()) partes.push(no.textContent ?? "");
+  return partes.join(" ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * O elemento menciona esta parte? Pelo texto corrido e, se não, pelo texto com os blocos separados: um bloco já
+ * carimbado (nome, data e IP por cima da linha) cola o último número do carimbo à etiqueta da parte, e o `\b` das
+ * frases deixava de a reconhecer. Só acrescenta correspondências, nunca tira.
+ */
+function mencionaParte(frase: RegExp, el: Element): boolean {
+  return frase.test(el.textContent || "") || frase.test(textoSeparado(el));
+}
+
 /**
  * O contentor cujos PRÓPRIOS filhos diretos já se dividem em duas colunas de assinatura genuínas (cada uma com
  * a sua linha) — uma menciona o cliente/segunda parte, a outra não. Ignora wrappers de 1 filho e containers
@@ -206,10 +223,10 @@ function localizarMarcado(raiz: ParentNode): LocalizacaoDaAssinatura | null {
 function procurarColunas(raiz: ParentNode, frases: FrasesDeAssinatura): { contentor: Element; empresa: Element; cliente: Element } | null {
   for (const el of candidatos(raiz)) {
     const text = (el.textContent || "").replace(/\s+/g, " ").trim();
-    if (!frases.segundaParte.test(text) || text.length >= 400) continue;
+    if (!mencionaParte(frases.segundaParte, el) || text.length >= 400) continue;
     const kids = Array.from(el.children);
     if (kids.length < 2) continue;
-    const cliente = kids.find((k) => frases.segundaParte.test(k.textContent || ""));
+    const cliente = kids.find((k) => mencionaParte(frases.segundaParte, k));
     const empresa = kids.find((k) => k !== cliente);
     if (!cliente || !empresa) continue;
     if (hasLineMarker(cliente) && hasLineMarker(empresa)) return { contentor: el, empresa, cliente };
@@ -301,6 +318,21 @@ export function removerBlocoDeAssinatura(
   bloco.linhas.forEach((l) => l.remove());
   bloco.principais.forEach((p) => p.remove());
   return { html: modelo.innerHTML, removido: true };
+}
+
+/**
+ * O bloco de assinatura (com as linhas decorativas que o antecedem, pela ordem original) como html, para o repetir
+ * noutra versão que não o tem. É uma leitura: o html recebido não se altera. Sem bloco, null.
+ */
+export function extrairBlocoDeAssinatura(
+  html: string | null | undefined,
+  codigo?: string,
+  idiomas?: readonly string[],
+): string | null {
+  const modelo = abrir(html);
+  const bloco = modelo ? encontrarBloco(modelo.content, { idioma: codigo, idiomas }) : null;
+  if (!bloco) return null;
+  return [...[...bloco.linhas].reverse(), ...bloco.principais].map((el) => el.outerHTML).join("");
 }
 
 /** Põe `fragmento` imediatamente antes do bloco de assinatura (antes das suas linhas decorativas). */

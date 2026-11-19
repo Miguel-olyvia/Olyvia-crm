@@ -1,8 +1,10 @@
-import { useId, useRef } from "react";
+import { useId } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
-import { obterIdioma, ordenarPorRegisto } from "@/lib/idiomaDocumento/registo";
+import { ordenarPorRegisto } from "@/lib/idiomaDocumento/registo";
+import { ALVO_DO_SELETOR as ALVO, nomeNativoDoIdioma as nomeNativo } from "./apoioDoSeletor";
+import { SegmentadoDeIdiomas } from "./SegmentadoDeIdiomas";
 
 /**
  * Escolha do(s) idioma(s) com que um documento é gerado.
@@ -24,73 +26,10 @@ export interface SeletorIdiomaDocumentoProps {
   className?: string;
 }
 
-function nomeNativo(codigo: string): string {
-  return obterIdioma(codigo)?.nomeNativo ?? codigo;
-}
-
 /** A escolha efetiva: o que está em `valor` e existe em `disponiveis`; vazio cai no primeiro disponível. */
 function escolhaEfetiva(disponiveis: string[], valor: readonly string[]): string[] {
   const pedida = ordenarPorRegisto(valor).filter((c) => disponiveis.includes(c));
   return pedida.length > 0 ? pedida : disponiveis.slice(0, 1);
-}
-
-const ALVO = "min-h-11"; // 44px: alvo tátil mínimo
-
-function Segmentado({ opcoes, escolha, rotulo, className, onChange }: {
-  opcoes: string[][];
-  escolha: string[];
-  rotulo: string;
-  className?: string;
-  onChange: (escolha: string[]) => void;
-}) {
-  const refs = useRef<Array<HTMLButtonElement | null>>([]);
-  const chave = escolha.join("+");
-  const atual = Math.max(0, opcoes.findIndex((o) => o.join("+") === chave));
-
-  const escolher = (indice: number, mover: boolean) => {
-    if (mover) refs.current[indice]?.focus();
-    if (indice !== atual) onChange(opcoes[indice]);
-  };
-
-  const aoTeclar = (e: React.KeyboardEvent, indice: number) => {
-    const n = opcoes.length;
-    const destino =
-      e.key === "ArrowRight" || e.key === "ArrowDown" ? (indice + 1) % n
-      : e.key === "ArrowLeft" || e.key === "ArrowUp" ? (indice + n - 1) % n
-      : e.key === "Home" ? 0
-      : e.key === "End" ? n - 1
-      : null;
-    if (destino === null) return;
-    e.preventDefault();
-    escolher(destino, true);
-  };
-
-  return (
-    <div role="radiogroup" aria-label={rotulo} className={cn("inline-flex flex-wrap gap-1 rounded-lg border bg-muted p-1", className)}>
-      {opcoes.map((opcao, i) => {
-        const marcada = i === atual;
-        return (
-          <button
-            key={opcao.join("+")}
-            ref={(el) => { refs.current[i] = el; }}
-            type="button"
-            role="radio"
-            aria-checked={marcada}
-            tabIndex={marcada ? 0 : -1}
-            onClick={() => escolher(i, false)}
-            onKeyDown={(e) => aoTeclar(e, i)}
-            className={cn(
-              ALVO,
-              "rounded-md px-4 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ring-offset-background",
-              marcada ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:bg-background/60 hover:text-foreground",
-            )}
-          >
-            {opcao.map(nomeNativo).join(" + ")}
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 function Caixas({ disponiveis, escolha, rotulo, className, onChange }: {
@@ -145,7 +84,7 @@ export function SeletorIdiomaDocumento({ disponiveis, valor, onChange, rotulo, c
 
   if (lista.length === 2) {
     const opcoes = [[lista[0]], [lista[1]], [lista[0], lista[1]]];
-    return <Segmentado opcoes={opcoes} escolha={escolha} rotulo={nome} className={className} onChange={onChange} />;
+    return <SegmentadoDeIdiomas opcoes={opcoes} escolha={escolha} rotulo={nome} className={className} onChange={onChange} />;
   }
   return <Caixas disponiveis={lista} escolha={escolha} rotulo={nome} className={className} onChange={onChange} />;
 }

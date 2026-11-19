@@ -5,6 +5,7 @@ export * from "./escolha";
 export * from "./versoes";
 export * from "./composicao";
 export * from "./assinaturas";
+export * from "./idiomaVisivel";
 export * from "./completude";
 export * from "./dicionario";
 export * from "./datas";

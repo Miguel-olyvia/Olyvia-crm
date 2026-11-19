@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
@@ -32,8 +32,10 @@ import {
   type MensagemDoPortal,
 } from "@/portal-i18n";
 import { injectSignaturesIntoBlock, resolveContractDocument, downloadContractDocumentPdf } from "@/components/contracts/contractDocument";
-import { contratoUsaVersoes } from "@/components/contracts/contractVersions";
+import { bodyDaVersaoComAssinatura, contratoUsaVersoes, soAVersaoDoContrato } from "@/components/contracts/contractVersions";
 import { VersaoDoContrato } from "@/components/contracts/VersaoDoContrato";
+import { SeletorVersaoDoDocumento } from "@/components/idiomaDocumento/SeletorVersaoDoDocumento";
+import { idiomaVisivelDoDocumento } from "@/lib/idiomaDocumento";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 const ClientPortalContractDetail = () => {
@@ -71,8 +73,13 @@ const ClientPortalContractDetail = () => {
   // ativa acompanha o documento em vez de o esconder.
   useSyncActiveOrgWithDocument(contract?.organization_id);
 
+  // A versão de idioma que o cliente escolheu no seletor (só há seletor com mais de uma versão). Vazia = ainda não
+  // escolheu: vale o idioma da interface do portal, se o contrato o tem, senão a primeira versão.
+  const [idiomaEscolhido, setIdiomaEscolhido] = useState<string | null>(null);
+
   useEffect(() => {
     if (!id) return;
+    setIdiomaEscolhido(null);
     loadData();
     logView();
   }, [id]);
@@ -102,6 +109,22 @@ const ClientPortalContractDetail = () => {
       vivo = false;
     };
   }, [usaVersoes, contract]);
+
+  // Com mais de uma versão mostra-se UMA de cada vez, com um seletor no topo. A versão que não tem o bloco de
+  // assinatura (a composição só o deixa na última) leva o da última anexado: a assinatura (OTP) é uma só e vale para
+  // as duas, e o cliente vê onde se assina e o carimbo em qualquer idioma. Com uma só versão, tudo como antes.
+  const versoesProntas = useMemo(
+    () => (usaVersoes && versoesDoPortal.estado === "pronto" ? versoesDoPortal.versoes : []),
+    [usaVersoes, versoesDoPortal],
+  );
+  const comSeletor = versoesProntas.length > 1;
+  const idiomaVisivel = comSeletor
+    ? idiomaVisivelDoDocumento({ disponiveis: versoesProntas.map((v) => v.codigo), escolhido: idiomaEscolhido, idiomaDaInterface: idioma })
+    : null;
+  const versaoAMostrar = useMemo(
+    () => (idiomaVisivel ? { codigo: idiomaVisivel, bodyHtml: bodyDaVersaoComAssinatura(versoesProntas, idiomaVisivel) } : null),
+    [idiomaVisivel, versoesProntas],
+  );
 
   async function logView() {
     try {
@@ -164,7 +187,9 @@ const ClientPortalContractDetail = () => {
         return;
       }
       const label = contract.contract_number || contract.title || t("pc.contratoDet.pdf.nomePadrao");
-      await downloadContractDocumentPdf(resolved, label, label);
+      // Com seletor, o PDF leva só a versão que o cliente está a ver (o PDF com os dois idiomas continua no CRM).
+      const paraPdf = idiomaVisivel ? soAVersaoDoContrato(resolved, idiomaVisivel) : resolved;
+      await downloadContractDocumentPdf(paraPdf, label, label);
     } catch (error: any) {
       console.error("[portal] contract PDF download failed:", error);
       captureFlowError(error, "client-portal-contract");
@@ -499,16 +524,32 @@ const ClientPortalContractDetail = () => {
                 </div>
               )}
               {usaVersoes && versoesDoPortal.estado === "pronto" && (
-                <div className="space-y-8">
-                  {versoesDoPortal.versoes.map((versao) => (
-                    <VersaoDoContrato
-                      key={versao.codigo}
-                      codigo={versao.codigo}
-                      bodyHtml={versao.bodyHtml}
-                      mostrarEtiqueta={versoesDoPortal.versoes.length > 1}
-                      classeCorpo="prose prose-sm max-w-none dark:prose-invert"
-                    />
-                  ))}
+                <div className="space-y-5">
+                  {comSeletor && idiomaVisivel && versaoAMostrar ? (
+                    <>
+                      <SeletorVersaoDoDocumento
+                        idiomas={versoesProntas.map((v) => v.codigo)}
+                        valor={idiomaVisivel}
+                        rotulo={t("pc.contratoDet.idioma.rotulo")}
+                        onChange={setIdiomaEscolhido}
+                      />
+                      <VersaoDoContrato
+                        key={versaoAMostrar.codigo}
+                        codigo={versaoAMostrar.codigo}
+                        bodyHtml={versaoAMostrar.bodyHtml}
+                        classeCorpo="prose prose-sm max-w-none dark:prose-invert"
+                      />
+                    </>
+                  ) : (
+                    versoesDoPortal.versoes.map((versao) => (
+                      <VersaoDoContrato
+                        key={versao.codigo}
+                        codigo={versao.codigo}
+                        bodyHtml={versao.bodyHtml}
+                        classeCorpo="prose prose-sm max-w-none dark:prose-invert"
+                      />
+                    ))
+                  )}
                 </div>
               )}
               {(!usaVersoes || versoesDoPortal.estado === "falhou") && (

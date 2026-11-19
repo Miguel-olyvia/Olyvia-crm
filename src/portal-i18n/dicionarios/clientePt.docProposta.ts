@@ -5,6 +5,8 @@ export const clientePtDocProposta: Record<string, string> = {
   // Estado por omissão e rótulos gerais
   "pc.docProposta.estadoOmissao": "A aguardar decisão",
   "pc.docProposta.baixarPdf": "Download PDF",
+  // Seletor de versão (só quando a proposta tem mais de um idioma): nome acessível do grupo PT | EN
+  "pc.docProposta.idioma.rotulo": "Idioma do documento",
   "pc.docProposta.itens": "Itens",
   "pc.docProposta.taxaServico": "Taxa de Serviço",
 
