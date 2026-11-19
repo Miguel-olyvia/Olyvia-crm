@@ -4,6 +4,8 @@ import { z } from "npm:zod";
 import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
 import { validateOrgScope, checkUserPermission } from "../_shared/auth.ts";
 import { withRetryResult } from "../_shared/retry.ts";
+import { buildPortalAccessMail } from "../_shared/documentMails.ts";
+import { fetchDocumentLanguages, mailLangsOf } from "../_shared/documentLanguage.ts";
 
 const requestSchema = z.object({
   // "direct_sale" saiu (20261204600000_venda_direta_confirmacao_manual.sql):
@@ -76,15 +78,6 @@ function generateTempPassword(length = 8): string {
     result += chars[arr[i] % chars.length];
   }
   return result;
-}
-
-function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#x27;");
 }
 
 serve(async (req: Request) => {
@@ -336,6 +329,8 @@ serve(async (req: Request) => {
       .eq("id", entityId)
       .maybeSingle();
     const contactName = entity?.first_name || entity?.display_name || "Cliente";
+    // Sem nome na ficha: o email diz «Cliente» / «Client» conforme o idioma do documento.
+    const contactNameMissing = !(entity?.first_name || entity?.display_name);
 
     // Get organization name
     const { data: org } = await supabase
@@ -344,6 +339,7 @@ serve(async (req: Request) => {
       .eq("id", organization_id)
       .maybeSingle();
     const orgName = org?.name || "a empresa";
+    const orgNameMissing = !org?.name;
 
     // Get client role ID
     const { data: clientRole } = await supabase
@@ -1131,61 +1127,24 @@ serve(async (req: Request) => {
     }
 
     const smtpConfig = resolvedSmtp.smtp;
-    const callerName = callerAnew?.name || caller.email || "A equipa";
-    const docLabelByType: Record<typeof document_type, string> = {
-      proposal: "proposta",
-      quote: "orçamento",
-      contract: "contrato",
-    };
-    const docLabel = docLabelByType[document_type];
-
-    // BASE-USR-012: escape all user-controlled strings before interpolating into HTML
-    const safeContactName = escapeHtml(contactName);
-    const safeDocumentTitle = escapeHtml(documentTitle);
-    const safeOrgName = escapeHtml(orgName);
-    const safeCallerName = escapeHtml(callerName);
-    const safeDocLabel = escapeHtml(docLabel);
-
-    let emailSubject: string;
-    let emailHtml: string;
-
-    if (hasCredentials) {
-      emailSubject = `Acesso ao Portal — ${safeOrgName}`;
-      emailHtml = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #333;">Ol&aacute;, ${safeContactName}!</h2>
-          <p>Foi-lhe criado um acesso ao portal de <strong>${safeOrgName}</strong>.</p>
-          <p>Tem uma <strong>${safeDocLabel}</strong> dispon&iacute;vel para consulta: <em>${safeDocumentTitle}</em></p>
-
-          <div style="background: #f5f5f5; border-radius: 8px; padding: 16px; margin: 20px 0;">
-            <p style="margin: 0 0 8px;"><strong>Aceda ao portal:</strong></p>
-            <p style="margin: 0 0 4px;"><a href="${finalLoginUrl}" style="color: #2563eb;">${finalLoginUrl}</a></p>
-            <p style="margin: 0 0 4px;"><strong>Email:</strong> ${escapeHtml(email)}</p>
-            <p style="margin: 0;"><strong>Password tempor&aacute;ria:</strong> ${tempPassword}</p>
-          </div>
-
-          <p style="color: #666; font-size: 14px;">Recomendamos que altere a password no primeiro acesso.</p>
-
-          <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-          <p style="color: #999; font-size: 13px;">Enviado por ${safeCallerName} &mdash; ${safeOrgName}</p>
-        </div>
-      `;
-    } else {
-      emailSubject = `Nova ${safeDocLabel} dispon&iacute;vel — ${safeOrgName}`;
-      emailHtml = `
-        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-          <h2 style="color: #333;">Ol&aacute;, ${safeContactName}!</h2>
-          <p>Tem uma nova <strong>${safeDocLabel}</strong> dispon&iacute;vel no seu portal: <em>${safeDocumentTitle}</em></p>
-          <p>Aceda em: <a href="${finalLoginUrl}" style="color: #2563eb;">${finalLoginUrl}</a></p>
-          ${linkedExistingAccount
-            ? `<p>Entre com o email e a password que j&aacute; usa no portal. Depois de entrar, escolha <strong>${safeOrgName}</strong> no seletor de empresa.</p>`
-            : ""}
-
-          <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-          <p style="color: #999; font-size: 13px;">Enviado por ${safeCallerName} &mdash; ${safeOrgName}</p>
-        </div>
-      `;
-    }
+    // O email segue o idioma do DOCUMENTO (proposta: proposals.language; contrato: prompt_values.__idiomas;
+    // nulo = pt). Com dois idiomas (pt+en) leva as duas versoes no mesmo corpo.
+    const documentLangs = mailLangsOf(
+      await fetchDocumentLanguages(supabase, document_type, document_id, organization_id),
+    );
+    const { subject: emailSubject, html: emailHtml } = buildPortalAccessMail({
+      hasCredentials,
+      docType: document_type,
+      contactName: contactNameMissing ? null : contactName,
+      orgName: orgNameMissing ? null : orgName,
+      documentTitle,
+      callerName: callerAnew?.name || caller.email || null,
+      email,
+      tempPassword,
+      finalLoginUrl,
+      linkedExistingAccount,
+      langs: documentLangs,
+    });
 
     let emailSent = false;
     let emailError = "";

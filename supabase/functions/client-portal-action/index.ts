@@ -6,6 +6,10 @@ import { resolveNotifyTarget, type NotifyTarget } from "../_shared/portalNotifyT
 import { withRetryResult } from "../_shared/retry.ts";
 import { resolveProposalStageId } from "../_shared/proposalWorkflowStage.ts";
 import { detectClientIp } from "../_shared/clientIp.ts";
+import { portalMessage } from "../_shared/documentMails.ts";
+import type { PortalMessageKey } from "../_shared/documentMails.ts";
+import { fetchDocumentLanguages, firstMailLang } from "../_shared/documentLanguage.ts";
+import type { MailLang } from "../_shared/emailDefaults.ts";
 
 const requestSchema = z.object({
   action: z.string(),
@@ -24,11 +28,12 @@ initSentry();
 // expirado, já assinado, activo) ou um contrato eliminado é recusado.
 const PORTAL_SIGNABLE_CONTRACT_STATUSES = ["pending_signature", "draft", "pending", "sent"];
 
-const contractNotSignable = (corsHeaders: Record<string, string>) =>
+// `message` ja vem no idioma do documento (ver portalMsg, dentro do handler).
+const contractNotSignable = (corsHeaders: Record<string, string>, message: string) =>
   new Response(
     JSON.stringify({
       error: "contract_not_signable",
-      message: "Este contrato já não está disponível para assinatura.",
+      message,
     }),
     { status: 409, headers: corsHeaders },
   );
@@ -236,6 +241,28 @@ serve(async (req) => {
       return (scoped as any)?.id ?? null;
     }
     const forbidden = () => new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: corsHeaders });
+
+    // ── Mensagem de erro mostrada AO CLIENTE, no idioma do documento ──
+    // Primeiro idioma da escolha do documento (proposals.language / prompt_values.__idiomas; nulo = pt).
+    // So le o idioma quando ha erro para mostrar (o caminho normal nao paga nada) e so depois de assertOwnership.
+    // As notificacoes para o comercial NAO passam por aqui: ficam sempre em portugues.
+    async function portalMsg(
+      key: PortalMessageKey,
+      column: "proposal_id" | "quote_id" | "contract_id" | "direct_sale_id",
+      id: string,
+    ): Promise<string> {
+      const documentType = column === "proposal_id" ? "proposal" : column === "contract_id" ? "contract" : null;
+      let lang: MailLang = "pt";
+      if (documentType) {
+        try {
+          const { orgId } = await resolveDocEntity(column, id);
+          lang = firstMailLang(await fetchDocumentLanguages(supabase, documentType, id, orgId));
+        } catch (e) {
+          console.warn("[client-portal-action] idioma do documento nao lido; mensagem em portugues:", e);
+        }
+      }
+      return portalMessage(key, lang);
+    }
 
     // ── OTP single-use guard: atomically claim a verified OTP. ──
     // Combines lookup + consume in one UPDATE..WHERE..RETURNING so concurrent
@@ -472,7 +499,7 @@ serve(async (req) => {
 
         const safeReason = reason ? sanitizeReason(reason) : null;
         if (reason && !safeReason) {
-          return new Response(JSON.stringify({ error: "Motivo deve ter entre 10 e 500 caracteres" }), { status: 400, headers: corsHeaders });
+          return new Response(JSON.stringify({ error: await portalMsg("reason_length", "quote_id", quote_id) }), { status: 400, headers: corsHeaders });
         }
 
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
@@ -596,7 +623,7 @@ serve(async (req) => {
         const otpClaim = await consumeVerifiedOtp("proposal", proposal_id, "proposal_signature");
         if (!otpClaim.ok) {
           return new Response(
-            JSON.stringify({ error: "otp_required", message: "OTP inválido, expirado ou já utilizado. Peça um novo código." }),
+            JSON.stringify({ error: "otp_required", message: await portalMsg("otp_required", "proposal_id", proposal_id) }),
             { status: 403, headers: corsHeaders },
           );
         }
@@ -786,7 +813,7 @@ serve(async (req) => {
 
         const safeReasonText = reason_text ? sanitizeReason(reason_text) : null;
         if (reason_text && !safeReasonText) {
-          return new Response(JSON.stringify({ error: "Motivo deve ter entre 10 e 500 caracteres" }), { status: 400, headers: corsHeaders });
+          return new Response(JSON.stringify({ error: await portalMsg("reason_length", "proposal_id", proposal_id) }), { status: 400, headers: corsHeaders });
         }
 
         const now = new Date().toISOString();
@@ -855,13 +882,13 @@ serve(async (req) => {
           if (signableError) {
             console.error("[client-portal-action] sign_contract: falha a ler o estado do contrato");
             return new Response(
-              JSON.stringify({ error: "contract_check_unavailable", message: "Não foi possível validar o contrato. Tente novamente." }),
+              JSON.stringify({ error: "contract_check_unavailable", message: await portalMsg("contract_check_unavailable", "contract_id", contract_id) }),
               { status: 503, headers: corsHeaders },
             );
           }
           if (!signable || signable.deleted_at || !PORTAL_SIGNABLE_CONTRACT_STATUSES.includes(signable.status)) {
             console.warn("[client-portal-action] sign_contract recusado: contrato não assinável", { status: signable?.status ?? null, deleted: !!signable?.deleted_at });
-            return contractNotSignable(corsHeaders);
+            return contractNotSignable(corsHeaders, await portalMsg("contract_not_signable", "contract_id", contract_id));
           }
         }
 
@@ -869,7 +896,7 @@ serve(async (req) => {
         const otpClaim = await consumeVerifiedOtp("contract", contract_id, "contract_signature");
         if (!otpClaim.ok) {
           return new Response(
-            JSON.stringify({ error: "otp_required", message: "OTP inválido, expirado ou já utilizado. Peça um novo código." }),
+            JSON.stringify({ error: "otp_required", message: await portalMsg("otp_required", "contract_id", contract_id) }),
             { status: 403, headers: corsHeaders },
           );
         }
@@ -908,7 +935,7 @@ serve(async (req) => {
             console.error("[client-portal-action] sign_contract: não foi possível repor o OTP", otpErr);
           }
           return new Response(
-            JSON.stringify({ error: "sign_unavailable", message: "Não foi possível registar a assinatura. Tente novamente dentro de instantes." }),
+            JSON.stringify({ error: "sign_unavailable", message: await portalMsg("sign_unavailable", "contract_id", contract_id) }),
             { status: 503, headers: corsHeaders },
           );
         }
@@ -917,7 +944,7 @@ serve(async (req) => {
         // dispara e o cliente não vê sucesso.
         if (signError || !signedRows || signedRows.length === 0) {
           console.warn("[client-portal-action] sign_contract recusado na gravação", { code: signError?.code ?? null, rows: signedRows?.length ?? 0 });
-          return contractNotSignable(corsHeaders);
+          return contractNotSignable(corsHeaders, await portalMsg("contract_not_signable", "contract_id", contract_id));
         }
 
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
@@ -979,7 +1006,7 @@ serve(async (req) => {
 
         const safeReasonText = reason_text ? sanitizeReason(reason_text) : null;
         if (reason_text && !safeReasonText) {
-          return new Response(JSON.stringify({ error: "Motivo deve ter entre 10 e 500 caracteres" }), { status: 400, headers: corsHeaders });
+          return new Response(JSON.stringify({ error: await portalMsg("reason_length", "contract_id", contract_id) }), { status: 400, headers: corsHeaders });
         }
 
         const now = new Date().toISOString();
@@ -1024,7 +1051,7 @@ serve(async (req) => {
           ? message.replace(/<[^>]*>/g, "").trim().slice(0, 2000)
           : "";
         if (safeMessage.length < 1) {
-          return new Response(JSON.stringify({ error: "Mensagem inválida" }), { status: 400, headers: corsHeaders });
+          return new Response(JSON.stringify({ error: await portalMsg("invalid_message", filterCol, document_id) }), { status: 400, headers: corsHeaders });
         }
 
         // B4 — rate limit: 5 questions/hour per (portal_user, document_type, document_id)
@@ -1038,7 +1065,7 @@ serve(async (req) => {
           .eq("action", "question")
           .gte("created_at", oneHourAgo);
         if ((recentCount ?? 0) >= 5) {
-          return new Response(JSON.stringify({ error: "Limite de perguntas atingido. Tente novamente mais tarde." }), { status: 429, headers: corsHeaders });
+          return new Response(JSON.stringify({ error: await portalMsg("question_limit", filterCol, document_id) }), { status: 429, headers: corsHeaders });
         }
 
         const docLabel = document_type === "proposal" ? "proposta" : document_type === "quote" ? "orçamento" : "contrato";

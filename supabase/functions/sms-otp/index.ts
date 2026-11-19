@@ -10,6 +10,9 @@ const requestSchema = z.object({
 
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
+import { invalidCodeMessage, otpSmsText, portalMessage } from "../_shared/documentMails.ts";
+import { fetchDocumentLanguages, firstMailLang } from "../_shared/documentLanguage.ts";
+import type { MailLang } from "../_shared/emailDefaults.ts";
 
 initSentry();
 
@@ -86,6 +89,9 @@ serve(async (req) => {
 
     let phoneNumber: string | null = null;
     let callerName: string | null = null;
+    // Idioma do SMS e das mensagens mostradas ao CLIENTE: o primeiro idioma do documento (proposals.language /
+    // prompt_values.__idiomas; com pt+en, so o primeiro). Sem documento acessivel, ou para o comercial (CRM), pt.
+    let msgLang: MailLang = "pt";
 
     // Helper to resolve phone for an anew_user
     const resolveAnewUserPhone = async (anewUser: any): Promise<string | null> => {
@@ -318,7 +324,10 @@ serve(async (req) => {
                 .limit(1);
               hasAccess = (scopedAccess?.length ?? 0) > 0;
             }
-            if (hasAccess) phoneEntityId = docEntityId;
+            if (hasAccess) {
+              phoneEntityId = docEntityId;
+              msgLang = firstMailLang(await fetchDocumentLanguages(supabase, refType, refId, docOrgId));
+            }
           }
         } catch (e) {
           console.error("[sms-otp] resolve document entity failed:", e);
@@ -362,7 +371,7 @@ serve(async (req) => {
       }
 
       if (!phoneNumber) {
-        return new Response(JSON.stringify({ error: "no_phone", message: "Não foi encontrado um número de telefone associado à sua conta. Atualize o seu perfil e adicione um telemóvel principal." }), {
+        return new Response(JSON.stringify({ error: "no_phone", message: portalMessage("no_phone", msgLang) }), {
           status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -378,7 +387,7 @@ serve(async (req) => {
         .gte("created_at", tenMinAgo);
 
       if ((count || 0) >= 3) {
-        return new Response(JSON.stringify({ error: "rate_limit", message: "Demasiados pedidos. Aguarde alguns minutos antes de tentar novamente." }), {
+        return new Response(JSON.stringify({ error: "rate_limit", message: portalMessage("rate_limit", msgLang) }), {
           status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -403,7 +412,7 @@ serve(async (req) => {
       });
 
       // Send SMS via SMSAPI
-      const smsMessage = `O seu código de verificação é: ${code}. Válido por 5 minutos.`;
+      const smsMessage = otpSmsText(code, msgLang);
       const cleanPhone = phoneNumber.replace("+", "");
 
       const smsRes = await fetch("https://api.smsapi.com/sms.do", {
@@ -425,7 +434,7 @@ serve(async (req) => {
 
       if (smsResult.error) {
         console.error("[sms-otp] SMSAPI error:", smsResult.error, smsResult.message);
-        return new Response(JSON.stringify({ error: "sms_failed", message: "Falha ao enviar SMS. Tente novamente." }), {
+        return new Response(JSON.stringify({ error: "sms_failed", message: portalMessage("sms_failed", msgLang) }), {
           status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -461,14 +470,14 @@ serve(async (req) => {
         .maybeSingle();
 
       if (!otpRecord) {
-        return new Response(JSON.stringify({ error: "expired", message: "Código expirado ou inválido. Solicite um novo código." }), {
+        return new Response(JSON.stringify({ error: "expired", message: portalMessage("expired", msgLang) }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
 
       // Check max attempts
       if (otpRecord.attempts >= otpRecord.max_attempts) {
-        return new Response(JSON.stringify({ error: "max_attempts", message: "Número máximo de tentativas excedido. Solicite um novo código." }), {
+        return new Response(JSON.stringify({ error: "max_attempts", message: portalMessage("max_attempts", msgLang) }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }
@@ -484,7 +493,7 @@ serve(async (req) => {
         const remaining = otpRecord.max_attempts - otpRecord.attempts - 1;
         return new Response(JSON.stringify({
           error: "invalid_code",
-          message: `Código incorreto. ${remaining > 0 ? `Restam ${remaining} tentativas.` : "Solicite um novo código."}`,
+          message: invalidCodeMessage(remaining, msgLang),
         }), {
           status: 400, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });

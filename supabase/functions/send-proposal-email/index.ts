@@ -2,6 +2,8 @@ import { serve } from "https://deno.land/std@0.190.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.39.3";
 import { resolveSmtpForAuthenticatedUser, sendEmailViaSMTP, sanitizeSmtpError, smtpNotFoundMessage } from "../_shared/smtp.ts";
 import { resolveDocumentOwner } from "../_shared/documentOwnerSender.ts";
+import { buildProposalEmail } from "../_shared/documentMails.ts";
+import { mailLangsOf, proposalLanguages } from "../_shared/documentLanguage.ts";
 import { z } from "npm:zod";
 
 import { getCorsHeadersExtended } from "../_shared/cors.ts";
@@ -47,124 +49,6 @@ function sanitizeEmailList(list: unknown, max = 10): string[] {
     if (out.length >= max) break;
   }
   return out;
-}
-
-function escapeHtml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
-
-// Generate proposal email HTML
-function generateProposalEmailHtml(
-  proposal: any,
-  publicUrl: string,
-  customMessage?: string,
-  senderName?: string
-): string {
-  // Frozen at proposal-creation time — always wins when present, so editing
-  // the shared template never retroactively changes an existing proposal's
-  // send email. Only proposals created before this column existed fall back
-  // to the live join.
-  const template = proposal.template_snapshot || proposal.proposal_templates;
-  const primaryColor = template?.primary_color || "#3b82f6";
-
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${proposal.title}</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: 'Inter', Arial, sans-serif; background-color: #f5f5f5;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 40px 20px;">
-    <tr>
-      <td align="center">
-        <table width="600" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-          <!-- Header -->
-          <tr>
-            <td style="background: linear-gradient(135deg, ${primaryColor}, #1e40af); padding: 40px; text-align: center;">
-              ${template?.logo_url ?
-                `<img src="${template.logo_url}" alt="Logo" style="max-height: 60px; margin-bottom: 20px;">` : ''
-              }
-              <h1 style="color: #ffffff; margin: 0; font-size: 24px;">${proposal.title}</h1>
-            </td>
-          </tr>
-          
-          <!-- Content -->
-          <tr>
-            <td style="padding: 40px;">
-              ${customMessage ? `
-                <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
-                  ${escapeHtml(customMessage)}
-                </p>
-              ` : `
-                <p style="color: #374151; font-size: 16px; line-height: 1.6; margin-bottom: 24px;">
-                  ${senderName ? `${senderName} enviou-lhe` : 'Foi-lhe enviada'} uma proposta para análise.
-                </p>
-              `}
-              
-              ${proposal.description ? `
-                <p style="color: #6b7280; font-size: 14px; line-height: 1.6; margin-bottom: 24px;">
-                  ${escapeHtml(proposal.description?.substring(0, 200) ?? '')}${proposal.description.length > 200 ? '...' : ''}
-                </p>
-              ` : ''}
-              
-              <!-- Value Box -->
-              <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f9fafb; border-radius: 8px; margin-bottom: 24px;">
-                <tr>
-                  <td style="padding: 20px; text-align: center;">
-                    <p style="color: #6b7280; margin: 0 0 8px 0; font-size: 14px;">Valor da Proposta</p>
-                    <p style="color: ${primaryColor}; margin: 0; font-size: 32px; font-weight: bold;">
-                      ${new Intl.NumberFormat('pt-PT', { style: 'currency', currency: proposal.currency || 'EUR' }).format(proposal.value)}
-                    </p>
-                  </td>
-                </tr>
-              </table>
-              
-              ${proposal.valid_until ? `
-                <p style="color: #6b7280; font-size: 14px; text-align: center; margin-bottom: 24px;">
-                  Válida até: <strong>${new Date(proposal.valid_until).toLocaleDateString('pt-PT')}</strong>
-                </p>
-              ` : ''}
-              
-              <!-- CTA Button -->
-              <table width="100%" cellpadding="0" cellspacing="0">
-                <tr>
-                  <td align="center">
-                    <a href="${publicUrl}" style="display: inline-block; background-color: ${primaryColor}; color: #ffffff; text-decoration: none; padding: 16px 40px; border-radius: 8px; font-weight: 600; font-size: 16px;">
-                      Ver Proposta Completa
-                    </a>
-                  </td>
-                </tr>
-              </table>
-            </td>
-          </tr>
-          
-          <!-- Footer -->
-          <tr>
-            <td style="background-color: #f9fafb; padding: 24px; text-align: center; border-top: 1px solid #e5e7eb;">
-              <p style="color: #9ca3af; font-size: 12px; margin: 0;">
-                Enviado automaticamente
-              </p>
-              ${template?.footer_text ? `
-                <p style="color: #9ca3af; font-size: 12px; margin: 8px 0 0 0;">
-                  ${template.footer_text}
-                </p>
-              ` : ''}
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-  `;
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -335,8 +219,17 @@ const handler = async (req: Request): Promise<Response> => {
     const trackingPixelUrl = `${supabaseUrl}/functions/v1/track-proposal-view?t=${proposal.tracking_token}`;
 
     // Generate email HTML with tracking pixel
-    const emailSubject = subject || `Proposta: ${proposal.title}`;
-    let emailHtml = generateProposalEmailHtml(proposal, publicUrl, message, senderName || undefined);
+    // Idioma da proposta (proposals.language; nulo = pt): o email e o assunto por omissao seguem-no.
+    const builtEmail = buildProposalEmail({
+      proposal,
+      publicUrl,
+      customMessage: message,
+      senderName: senderName || undefined,
+      subject,
+      langs: mailLangsOf(proposalLanguages(proposal)),
+    });
+    const emailSubject = builtEmail.subject;
+    let emailHtml = builtEmail.html;
     
     // Add tracking pixel at the end of the email
     emailHtml = emailHtml.replace('</body>', `<img src="${trackingPixelUrl}" width="1" height="1" style="display:none" alt="" /></body>`);

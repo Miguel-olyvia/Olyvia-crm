@@ -85,6 +85,70 @@ export interface MailTexts {
     confirm: string;
     manage: string;
   };
+  /** Emails e SMS ao CLIENTE sobre propostas e contratos (no idioma do documento). */
+  documents: DocumentTexts;
+}
+
+/** Textos dos emails e SMS que o cliente recebe ao ter uma proposta ou um contrato. {chaves} sao substituidas por quem os usa. */
+export interface DocumentTexts {
+  /** Nomes que faltam (ficha sem nome, empresa sem nome, quem envia sem nome). */
+  genericClient: string;
+  genericCompany: string;
+  genericTeam: string;
+  docLabels: { proposal: string; quote: string; contract: string };
+  proposalMail: {
+    subject: string;
+    introWithSender: string;
+    introNoSender: string;
+    valueLabel: string;
+    validUntil: string;
+    cta: string;
+    sentAutomatically: string;
+  };
+  verification: {
+    title: string;
+    subjectAccept: string;
+    subjectReject: string;
+    actionAccept: string;
+    actionReject: string;
+    intro: string;
+    expires: string;
+    ignore: string;
+  };
+  portalAccess: {
+    subjectWithCredentials: string;
+    subjectNewDocument: string;
+    greeting: string;
+    credentialsIntro: string;
+    credentialsDocument: string;
+    accessLabel: string;
+    emailLabel: string;
+    passwordLabel: string;
+    changePassword: string;
+    newDocument: string;
+    accessAt: string;
+    linkedAccount: string;
+    sentBy: string;
+  };
+  otpSms: string;
+  messages: {
+    noPhone: string;
+    rateLimit: string;
+    smsFailed: string;
+    expired: string;
+    maxAttempts: string;
+    invalidCodeWrong: string;
+    invalidCodeRemaining: string;
+    invalidCodeRemainingOne: string;
+    invalidCodeRequestNew: string;
+    contractNotSignable: string;
+    otpRequired: string;
+    contractCheckUnavailable: string;
+    signUnavailable: string;
+    reasonLength: string;
+    invalidMessage: string;
+    questionLimit: string;
+  };
 }
 
 export const MAIL_TEXTS: Record<MailLang, MailTexts> = {
@@ -157,6 +221,66 @@ export const MAIL_TEXTS: Record<MailLang, MailTexts> = {
       confirm: "Confirme: {{confirm_url}}",
       manage: "Gerir: {{cancel_url}}",
     },
+    documents: {
+      genericClient: "Cliente",
+      genericCompany: "a empresa",
+      genericTeam: "A equipa",
+      docLabels: { proposal: "proposta", quote: "orçamento", contract: "contrato" },
+      proposalMail: {
+        subject: "Proposta: {title}",
+        introWithSender: "{name} enviou-lhe uma proposta para análise.",
+        introNoSender: "Foi-lhe enviada uma proposta para análise.",
+        valueLabel: "Valor da Proposta",
+        validUntil: "Válida até:",
+        cta: "Ver Proposta Completa",
+        sentAutomatically: "Enviado automaticamente",
+      },
+      verification: {
+        title: "Código de Verificação",
+        subjectAccept: "Código de Verificação - Aceitar Proposta",
+        subjectReject: "Código de Verificação - Recusar Proposta",
+        actionAccept: "aceitar",
+        actionReject: "recusar",
+        intro: "Olá <strong>{name}</strong>, para {action} a proposta \"<strong>{title}</strong>\", introduza o seguinte código:",
+        expires: "Este código expira em 15 minutos.",
+        ignore: "Se não solicitou este código, pode ignorar este email.",
+      },
+      portalAccess: {
+        subjectWithCredentials: "Acesso ao Portal — {org}",
+        // O «&iacute;» no ASSUNTO e o que o codigo sempre enviou (o assunto e texto simples): mantido de proposito.
+        subjectNewDocument: "Nova {doc} dispon&iacute;vel — {org}",
+        greeting: "Ol&aacute;, {name}!",
+        credentialsIntro: "Foi-lhe criado um acesso ao portal de <strong>{org}</strong>.",
+        credentialsDocument: "Tem uma <strong>{doc}</strong> dispon&iacute;vel para consulta: <em>{title}</em>",
+        accessLabel: "Aceda ao portal:",
+        emailLabel: "Email:",
+        passwordLabel: "Password tempor&aacute;ria:",
+        changePassword: "Recomendamos que altere a password no primeiro acesso.",
+        newDocument: "Tem uma nova <strong>{doc}</strong> dispon&iacute;vel no seu portal: <em>{title}</em>",
+        accessAt: "Aceda em:",
+        linkedAccount: "Entre com o email e a password que j&aacute; usa no portal. Depois de entrar, escolha <strong>{org}</strong> no seletor de empresa.",
+        sentBy: "Enviado por {caller} &mdash; {org}",
+      },
+      otpSms: "O seu código de verificação é: {code}. Válido por 5 minutos.",
+      messages: {
+        noPhone: "Não foi encontrado um número de telefone associado à sua conta. Atualize o seu perfil e adicione um telemóvel principal.",
+        rateLimit: "Demasiados pedidos. Aguarde alguns minutos antes de tentar novamente.",
+        smsFailed: "Falha ao enviar SMS. Tente novamente.",
+        expired: "Código expirado ou inválido. Solicite um novo código.",
+        maxAttempts: "Número máximo de tentativas excedido. Solicite um novo código.",
+        invalidCodeWrong: "Código incorreto.",
+        invalidCodeRemaining: "Restam {n} tentativas.",
+        invalidCodeRemainingOne: "Restam {n} tentativas.",
+        invalidCodeRequestNew: "Solicite um novo código.",
+        contractNotSignable: "Este contrato já não está disponível para assinatura.",
+        otpRequired: "OTP inválido, expirado ou já utilizado. Peça um novo código.",
+        contractCheckUnavailable: "Não foi possível validar o contrato. Tente novamente.",
+        signUnavailable: "Não foi possível registar a assinatura. Tente novamente dentro de instantes.",
+        reasonLength: "Motivo deve ter entre 10 e 500 caracteres",
+        invalidMessage: "Mensagem inválida",
+        questionLimit: "Limite de perguntas atingido. Tente novamente mais tarde.",
+      },
+    },
   },
   en: {
     labels: {
@@ -226,6 +350,65 @@ export const MAIL_TEXTS: Record<MailLang, MailTexts> = {
       reminderTail: "on {{meeting_date}}.",
       confirm: "Confirm: {{confirm_url}}",
       manage: "Manage: {{cancel_url}}",
+    },
+    documents: {
+      genericClient: "Client",
+      genericCompany: "the company",
+      genericTeam: "The team",
+      docLabels: { proposal: "proposal", quote: "quote", contract: "contract" },
+      proposalMail: {
+        subject: "Proposal: {title}",
+        introWithSender: "{name} sent you a proposal for review.",
+        introNoSender: "A proposal has been sent to you for review.",
+        valueLabel: "Proposal value",
+        validUntil: "Valid until:",
+        cta: "View full proposal",
+        sentAutomatically: "Sent automatically",
+      },
+      verification: {
+        title: "Verification Code",
+        subjectAccept: "Verification Code - Accept Proposal",
+        subjectReject: "Verification Code - Reject Proposal",
+        actionAccept: "accept",
+        actionReject: "reject",
+        intro: "Hello <strong>{name}</strong>, to {action} the proposal \"<strong>{title}</strong>\", please enter the following code:",
+        expires: "This code expires in 15 minutes.",
+        ignore: "If you did not request this code, you can ignore this email.",
+      },
+      portalAccess: {
+        subjectWithCredentials: "Portal access — {org}",
+        subjectNewDocument: "New {doc} available — {org}",
+        greeting: "Hello, {name}!",
+        credentialsIntro: "An access to the portal of <strong>{org}</strong> has been created for you.",
+        credentialsDocument: "You have a <strong>{doc}</strong> available to view: <em>{title}</em>",
+        accessLabel: "Access the portal:",
+        emailLabel: "Email:",
+        passwordLabel: "Temporary password:",
+        changePassword: "We recommend that you change your password the first time you log in.",
+        newDocument: "You have a new <strong>{doc}</strong> available in your portal: <em>{title}</em>",
+        accessAt: "Log in at:",
+        linkedAccount: "Log in with the email and password you already use in the portal. Once logged in, choose <strong>{org}</strong> in the company selector.",
+        sentBy: "Sent by {caller} &mdash; {org}",
+      },
+      otpSms: "Your verification code is: {code}. Valid for 5 minutes.",
+      messages: {
+        noPhone: "No phone number was found for your account. Please update your profile and add a main mobile number.",
+        rateLimit: "Too many requests. Please wait a few minutes before trying again.",
+        smsFailed: "Failed to send the SMS. Please try again.",
+        expired: "The code has expired or is invalid. Please request a new code.",
+        maxAttempts: "Maximum number of attempts exceeded. Please request a new code.",
+        invalidCodeWrong: "Incorrect code.",
+        invalidCodeRemaining: "{n} attempts left.",
+        invalidCodeRemainingOne: "{n} attempt left.",
+        invalidCodeRequestNew: "Please request a new code.",
+        contractNotSignable: "This contract is no longer available for signing.",
+        otpRequired: "The code is invalid, expired or has already been used. Please request a new code.",
+        contractCheckUnavailable: "The contract could not be validated. Please try again.",
+        signUnavailable: "The signature could not be recorded. Please try again in a moment.",
+        reasonLength: "The reason must be between 10 and 500 characters",
+        invalidMessage: "Invalid message",
+        questionLimit: "Question limit reached. Please try again later.",
+      },
     },
   },
 };

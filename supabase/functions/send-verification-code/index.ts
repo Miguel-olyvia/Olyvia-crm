@@ -4,6 +4,8 @@ import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 import { resolveProposalStageId } from "../_shared/proposalWorkflowStage.ts";
 import { detectClientIp, detectUserAgent } from "../_shared/clientIp.ts";
 import { checkRateLimit, recordRateLimitAttempt, getClientIp, rateLimitResponse } from "../_shared/rateLimit.ts";
+import { buildVerificationMail } from "../_shared/documentMails.ts";
+import { mailLangsOf, proposalLanguages } from "../_shared/documentLanguage.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -72,98 +74,6 @@ async function sendEmailViaSMTP(
   });
 
   await client.close();
-}
-
-// Generate verification email HTML from template or default
-function generateVerificationEmailHtml(
-  code: string, 
-  proposalTitle: string,
-  clientName: string,
-  action: "accept" | "reject",
-  templateBody?: string
-): string {
-  if (templateBody) {
-    // Use template with variable replacement
-    const htmlContent = templateBody
-      .replace(/\{\{codigo\}\}/g, code)
-      .replace(/\{\{titulo_proposta\}\}/g, proposalTitle)
-      .replace(/\{\{nome_cliente\}\}/g, clientName)
-      .replace(/\{\{acao\}\}/g, action === "accept" ? "aceitar" : "recusar");
-    
-    return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Código de Verificação</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: 'Inter', Arial, sans-serif; background-color: #f5f5f5;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 40px 20px;">
-    <tr>
-      <td align="center">
-        <table width="500" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-          <tr>
-            <td style="padding: 40px;">
-              ${htmlContent}
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-    `;
-  }
-
-  // Default template
-  const actionText = action === "accept" ? "aceitar" : "recusar";
-  return `
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Código de Verificação</title>
-</head>
-<body style="margin: 0; padding: 0; font-family: 'Inter', Arial, sans-serif; background-color: #f5f5f5;">
-  <table width="100%" cellpadding="0" cellspacing="0" style="background-color: #f5f5f5; padding: 40px 20px;">
-    <tr>
-      <td align="center">
-        <table width="500" cellpadding="0" cellspacing="0" style="background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-          <tr>
-            <td style="background: linear-gradient(135deg, #10b981, #059669); padding: 30px; text-align: center;">
-              <h1 style="color: #ffffff; margin: 0; font-size: 20px;">Código de Verificação</h1>
-            </td>
-          </tr>
-          <tr>
-            <td style="padding: 40px; text-align: center;">
-              <p style="color: #374151; font-size: 16px; margin-bottom: 16px;">
-                Olá <strong>${clientName}</strong>, para ${actionText} a proposta "<strong>${proposalTitle}</strong>", introduza o seguinte código:
-              </p>
-              
-              <div style="background-color: #f3f4f6; border-radius: 12px; padding: 24px; margin: 24px 0;">
-                <p style="font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #111827; margin: 0;">
-                  ${code}
-                </p>
-              </div>
-              
-              <p style="color: #6b7280; font-size: 14px; margin-top: 24px;">
-                Este código expira em 15 minutos.
-              </p>
-              <p style="color: #9ca3af; font-size: 12px; margin-top: 16px;">
-                Se não solicitou este código, pode ignorar este email.
-              </p>
-            </td>
-          </tr>
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>
-  `;
 }
 
 const handler = async (req: Request): Promise<Response> => {
@@ -375,29 +285,23 @@ const handler = async (req: Request): Promise<Response> => {
         throw new Error("Configuração SMTP não encontrada");
       }
 
-      // Get client name from entity if available
-      const clientName = "Cliente";
-
-      // Get template body if available.
-      // A copia congelada da proposta manda sobre o modelo vivo, pela mesma
-      // razao que o PDF e o portal: editar o modelo partilhado nao deve mudar
-      // o que e mandado a proposito de uma proposta ja enviada.
+      // Texto do email: a copia congelada da proposta manda sobre o modelo vivo, pela mesma
+      // razao que o PDF e o portal: editar o modelo partilhado nao deve mudar o que e mandado
+      // a proposito de uma proposta ja enviada. O idioma e o da proposta (proposals.language;
+      // nulo = pt): assunto e corpo vem da versao desse idioma no modelo (design_settings.versions),
+      // com fallback ao texto base e depois ao texto por omissao.
       const emailTemplate = proposal.template_snapshot || proposal.proposal_templates;
-      const templateBody = emailTemplate?.verification_email_body || null;
-      const emailSubject = emailTemplate?.verification_email_subject
-        ? emailTemplate.verification_email_subject
-            .replace(/\{\{titulo_proposta\}\}/g, proposal.title)
-        : `Código de Verificação - ${action === "accept" ? "Aceitar" : "Recusar"} Proposta`;
+      const verificationMail = buildVerificationMail({
+        code,
+        proposalTitle: proposal.title,
+        action,
+        template: emailTemplate,
+        langs: mailLangsOf(proposalLanguages(proposal)),
+      });
+      const emailSubject = verificationMail.subject;
+      const emailHtml = verificationMail.html;
 
       // Send email
-      const emailHtml = generateVerificationEmailHtml(
-        code, 
-        proposal.title, 
-        clientName, 
-        action || "accept",
-        templateBody
-      );
-      
       await sendEmailViaSMTP(
         smtpConfig,
         recipient,

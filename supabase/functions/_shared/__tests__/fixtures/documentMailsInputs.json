@@ -1,0 +1,64 @@
+{
+  "proposalEmail": {
+    "cases": [
+      {
+        "name": "basico",
+        "proposal": { "title": "Casa de banho completa", "description": null, "currency": "EUR", "value": 12345.6, "valid_until": null, "template_snapshot": null, "proposal_templates": null },
+        "publicUrl": "https://app.test/client-portal/proposals/p1",
+        "customMessage": null,
+        "senderName": null,
+        "subject": null
+      },
+      {
+        "name": "completo",
+        "proposal": {
+          "title": "Remodelacao da cozinha",
+          "description": "Descricao da proposta para o cliente ver. Inclui demolicao, canalizacao, eletricidade, azulejos, bancada, moveis, eletrodomesticos e pintura final de todas as paredes e tetos da divisao, com garantia de dois anos sobre a mao de obra e os materiais aplicados em obra por tecnicos certificados.",
+          "currency": "USD",
+          "value": 1999.5,
+          "valid_until": "2026-12-31T00:00:00Z",
+          "template_snapshot": { "primary_color": "#123ABC", "logo_url": "https://cdn.test/logo.png", "footer_text": "Acme Lda - NIF 500000000" },
+          "proposal_templates": { "primary_color": "#ff0000", "logo_url": null, "footer_text": "rodape vivo" }
+        },
+        "publicUrl": "https://app.test/client-portal/proposals/p2",
+        "customMessage": "Ola Rita,\nsegue a proposta <b>combinada</b>.",
+        "senderName": "Ana Silva",
+        "subject": "Proposta personalizada"
+      },
+      {
+        "name": "semSnapshotComJoin",
+        "proposal": {
+          "title": "Pintura",
+          "description": "Curta.",
+          "currency": null,
+          "value": 800,
+          "valid_until": "2027-01-02T00:00:00Z",
+          "template_snapshot": null,
+          "proposal_templates": { "primary_color": "#ff0000", "logo_url": "https://cdn.test/l2.png", "footer_text": "rodape vivo" }
+        },
+        "publicUrl": "https://app.test/client-portal/proposals/p3",
+        "customMessage": "",
+        "senderName": "Joao",
+        "subject": ""
+      }
+    ]
+  },
+  "verification": {
+    "cases": [
+      { "name": "omissaoAceitar", "code": "123456", "proposalTitle": "Casa de banho completa", "clientName": "Cliente", "action": "accept", "templateBody": null, "templateSubject": null },
+      { "name": "omissaoRecusar", "code": "654321", "proposalTitle": "Remodelacao da cozinha", "clientName": "Cliente", "action": "reject", "templateBody": null, "templateSubject": null },
+      { "name": "modeloAceitar", "code": "111222", "proposalTitle": "Pintura", "clientName": "Cliente", "action": "accept", "templateBody": "<p>Codigo {{codigo}} para {{acao}} {{titulo_proposta}} ({{nome_cliente}}). Outra vez {{codigo}}.</p>", "templateSubject": "Codigo para {{titulo_proposta}}" },
+      { "name": "modeloRecusar", "code": "333444", "proposalTitle": "Pintura", "clientName": "Cliente", "action": "reject", "templateBody": "<p>{{acao}}</p>", "templateSubject": null }
+    ]
+  },
+  "portalAccess": {
+    "cases": [
+      { "name": "credenciaisProposta", "hasCredentials": true, "docType": "proposal", "contactName": "Rita <Sousa>", "orgName": "Acme & Filhos", "documentTitle": "Casa \"de\" banho", "callerName": "Ana Silva", "email": "rita@x.pt", "tempPassword": "Tmp-Pass_123", "finalLoginUrl": "https://app.test/auth", "linkedExistingAccount": false },
+      { "name": "credenciaisContrato", "hasCredentials": true, "docType": "contract", "contactName": "Rita", "orgName": "Acme", "documentTitle": "CT-2026-001", "callerName": "Ana", "email": "rita@x.pt", "tempPassword": "Zz9", "finalLoginUrl": "https://app.test/auth", "linkedExistingAccount": false },
+      { "name": "novoDocProposta", "hasCredentials": false, "docType": "proposal", "contactName": "Rita", "orgName": "Acme", "documentTitle": "Pintura", "callerName": "Ana", "email": "rita@x.pt", "tempPassword": "", "finalLoginUrl": "https://app.test/auth", "linkedExistingAccount": false },
+      { "name": "novoDocContratoLigada", "hasCredentials": false, "docType": "contract", "contactName": "Rita", "orgName": "Acme", "documentTitle": "CT-2026-002", "callerName": "Ana", "email": "rita@x.pt", "tempPassword": "", "finalLoginUrl": "https://app.test/auth", "linkedExistingAccount": true },
+      { "name": "novoDocOrcamento", "hasCredentials": false, "docType": "quote", "contactName": "Cliente", "orgName": "a empresa", "documentTitle": "Orcamento", "callerName": "A equipa", "email": "rita@x.pt", "tempPassword": "", "finalLoginUrl": "https://app.test/auth", "linkedExistingAccount": false }
+    ]
+  },
+  "otpSms": { "codes": ["123456", "900001"] }
+}
