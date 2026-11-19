@@ -7,6 +7,8 @@
 import { z } from "zod";
 import { codigoPostalValido, normalizarCodigoPostal } from "@/lib/addresses/validarMorada";
 import type { SpSupplierData, SpSupplierDataInput } from "@/lib/supplierPortal/spRpc";
+import { traduzir } from "@/portal-i18n/traduzir";
+import type { ParamsDeTraducao } from "@/portal-i18n/tipos";
 
 export const DEFAULT_PHONE_COUNTRY_CODE = "+351";
 
@@ -27,14 +29,34 @@ export interface SupplierDataFormValues {
 export type SupplierDataField = keyof SupplierDataFormValues;
 export type SupplierDataErrors = Partial<Record<SupplierDataField, string>>;
 
-export const SUPPLIER_DATA_MESSAGES = {
-  nameRequired: "O nome da empresa é obrigatório.",
-  emailInvalid: "Formato de email inválido.",
-  phoneInvalid: "O telefone só pode ter números, espaços e os sinais + ( ) - . /",
-  postalCodeInvalid: "Código postal inválido (formato 0000-000).",
-  websiteInvalid: "Endereço do website inválido (ex.: www.empresa.pt).",
-  tooLong: (max: number) => `Máximo de ${max} caracteres.`,
-} as const;
+/** As mensagens de validação, já no idioma pedido. */
+export interface SupplierDataMessages {
+  nameRequired: string;
+  emailInvalid: string;
+  phoneInvalid: string;
+  postalCodeInvalid: string;
+  websiteInvalid: string;
+  tooLong: (max: number) => string;
+}
+
+type Traduzir = (chave: string, params?: ParamsDeTraducao) => string;
+
+/** Mensagens de validação a partir de uma função `t` (a do idioma do portal). */
+export function supplierDataMessages(t: Traduzir): SupplierDataMessages {
+  return {
+    nameRequired: t("sp.dados.erro.nomeObrigatorio"),
+    emailInvalid: t("sp.dados.erro.emailInvalido"),
+    phoneInvalid: t("sp.dados.erro.telefoneInvalido"),
+    postalCodeInvalid: t("sp.dados.erro.codigoPostalInvalido"),
+    websiteInvalid: t("sp.dados.erro.websiteInvalido"),
+    tooLong: (max) => t("sp.dados.erro.demasiadoLongo", { max }),
+  };
+}
+
+/** As mensagens em português: o que `validateSupplierData` usa quando não se passa outro idioma. */
+export const SUPPLIER_DATA_MESSAGES: SupplierDataMessages = supplierDataMessages((chave, params) =>
+  traduzir("pt", chave, params),
+);
 
 const trim = (v: unknown): string => (typeof v === "string" ? v.trim() : "");
 
@@ -94,35 +116,37 @@ export function normalizeSupplierData(values: SupplierDataFormValues): SupplierD
   };
 }
 
-const optional = (max: number) => z.string().max(max, SUPPLIER_DATA_MESSAGES.tooLong(max));
-
-const supplierDataSchema = z
-  .object({
-    name: z.string().min(1, SUPPLIER_DATA_MESSAGES.nameRequired).max(200, SUPPLIER_DATA_MESSAGES.tooLong(200)),
-    contact_person: optional(200),
-    email: z
-      .string()
-      .max(255, SUPPLIER_DATA_MESSAGES.tooLong(255))
-      .refine((v) => v === "" || z.string().email().safeParse(v).success, SUPPLIER_DATA_MESSAGES.emailInvalid),
-    phone: z
-      .string()
-      .max(20, SUPPLIER_DATA_MESSAGES.tooLong(20))
-      .refine((v) => v === "" || /^[0-9 ()+./-]+$/.test(v), SUPPLIER_DATA_MESSAGES.phoneInvalid),
-    phone_country_code: optional(10),
-    address: optional(255),
-    postal_code: optional(20),
-    city: optional(100),
-    country: optional(100),
-    website: z
-      .string()
-      .max(255, SUPPLIER_DATA_MESSAGES.tooLong(255))
-      .refine((v) => v === "" || websiteValid(v), SUPPLIER_DATA_MESSAGES.websiteInvalid),
-  })
-  .superRefine((v, ctx) => {
-    if (v.postal_code && isPortugal(v.country) && !codigoPostalValido(v.postal_code)) {
-      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["postal_code"], message: SUPPLIER_DATA_MESSAGES.postalCodeInvalid });
-    }
-  });
+/** O esquema de validação com as mensagens dadas (as regras são as mesmas em qualquer idioma). */
+function buildSupplierDataSchema(messages: SupplierDataMessages) {
+  const optional = (max: number) => z.string().max(max, messages.tooLong(max));
+  return z
+    .object({
+      name: z.string().min(1, messages.nameRequired).max(200, messages.tooLong(200)),
+      contact_person: optional(200),
+      email: z
+        .string()
+        .max(255, messages.tooLong(255))
+        .refine((v) => v === "" || z.string().email().safeParse(v).success, messages.emailInvalid),
+      phone: z
+        .string()
+        .max(20, messages.tooLong(20))
+        .refine((v) => v === "" || /^[0-9 ()+./-]+$/.test(v), messages.phoneInvalid),
+      phone_country_code: optional(10),
+      address: optional(255),
+      postal_code: optional(20),
+      city: optional(100),
+      country: optional(100),
+      website: z
+        .string()
+        .max(255, messages.tooLong(255))
+        .refine((v) => v === "" || websiteValid(v), messages.websiteInvalid),
+    })
+    .superRefine((v, ctx) => {
+      if (v.postal_code && isPortugal(v.country) && !codigoPostalValido(v.postal_code)) {
+        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["postal_code"], message: messages.postalCodeInvalid });
+      }
+    });
+}
 
 /** Só os campos alterados; {} = sem alterações (o servidor só marca a confirmação). */
 export type SupplierDataPayload = Partial<SpSupplierDataInput>;
@@ -134,13 +158,15 @@ export type SupplierDataValidation =
 /**
  * Normaliza e valida; devolve o primeiro erro de cada campo ou o payload a
  * enviar (só o que mudou face a `initial`, os valores vindos da ficha).
+ * `messages` dá o idioma das mensagens (português se não se passar).
  */
 export function validateSupplierData(
   values: SupplierDataFormValues,
   initial: SupplierDataFormValues,
+  messages: SupplierDataMessages = SUPPLIER_DATA_MESSAGES,
 ): SupplierDataValidation {
   const normalized = normalizeSupplierData(values);
-  const parsed = supplierDataSchema.safeParse(normalized);
+  const parsed = buildSupplierDataSchema(messages).safeParse(normalized);
   if (!parsed.success) {
     const errors: SupplierDataErrors = {};
     for (const issue of parsed.error.issues) {

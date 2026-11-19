@@ -1,0 +1,50 @@
+// Supplier portal, shipments (shipping with a delivery note): shipments card and ship dialog (sp.envios.*).
+// The delivery note statuses map the database codes to these keys; the received / partially received statuses
+// reuse sp.estado.*.
+export const fornecedorEnEnvios: Record<string, string> = {
+  "sp.envios.titulo": "Shipments ({n})",
+  "sp.envios.resumo": "Shipped and still-to-ship quantities per line",
+  "sp.envios.coluna.artigo": "Item",
+  "sp.envios.coluna.encomendado": "Ordered",
+  "sp.envios.coluna.expedido": "Shipped",
+  "sp.envios.coluna.porExpedir": "To ship",
+  "sp.envios.coluna.expedir": "Ship",
+  "sp.envios.artigoOmissao": "Item",
+  "sp.envios.nenhuma": "You have not shipped this order yet.",
+  "sp.envios.guias": "Delivery notes",
+  "sp.envios.guia": "Delivery note {numero}",
+  "sp.envios.linhasDaGuia": "Lines of delivery note {numero}",
+  "sp.envios.data": "Date",
+  "sp.envios.transportador": "Carrier",
+
+  "sp.envios.estado.aCaminho": "On its way",
+  "sp.envios.estado.anulada": "Voided",
+
+  "sp.envios.dialogo.titulo": "Ship order {numero}",
+  "sp.envios.dialogo.descricao":
+    "Enter the delivery note that travels with the goods. {empresa}'s warehouse books the goods in using this number.",
+  "sp.envios.dialogo.guia": "Delivery note no.",
+  "sp.envios.dialogo.dataExpedicao": "Shipping date",
+  "sp.envios.dialogo.transportador": "Carrier (optional)",
+  "sp.envios.dialogo.transportadorPlaceholder": "E.g. own transport, carrier company, licence plate…",
+  "sp.envios.dialogo.ficheiro": "Delivery note file (optional)",
+  "sp.envios.dialogo.ficheiroAjuda": "PDF or photo of the delivery note.",
+  "sp.envios.dialogo.quantidades": "Quantities to ship",
+  "sp.envios.dialogo.expedirTudo": "Ship everything",
+  "sp.envios.dialogo.limpar": "Clear",
+  "sp.envios.dialogo.resumoQuantidades": "Quantity to ship per line (maximum = what is still to ship)",
+  "sp.envios.dialogo.quantidadeAria": "Quantity to ship: {nome}",
+  "sp.envios.dialogo.observacoes": "Notes (optional)",
+  "sp.envios.dialogo.observacoesPlaceholder": "E.g. 2 pallets, unloading with a forklift",
+  "sp.envios.dialogo.cancelar": "Cancel",
+  "sp.envios.dialogo.botao": "Ship · {qtd}",
+
+  "sp.envios.erro.quantidadeInvalida": "Invalid quantity.",
+  "sp.envios.erro.maximo": "Maximum {max}.",
+  "sp.envios.erro.soInteiros": "Whole numbers only.",
+  "sp.envios.erro.indiqueGuia": "Enter the delivery note number.",
+  "sp.envios.erro.indiqueData": "Enter the shipping date.",
+  "sp.envios.erro.dataAntesEncomenda": "The date cannot be earlier than the order ({data}).",
+  "sp.envios.erro.corrijaQuantidades": "Correct the quantities marked.",
+  "sp.envios.erro.indiqueQuantidade": "Enter the quantity to ship on at least one line.",
+};

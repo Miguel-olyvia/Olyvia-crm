@@ -6,6 +6,7 @@
 // · Assinado: o mesmo link mostra o plano da obra (fases e datas, sem custos nem margens).
 // As ações são as do motor, por isso o negócio no protótipo passa de fase como hoje (e o outro separador vê-o pelo storage).
 import { useMemo, useState, type ReactNode } from "react";
+import { usePortalT } from "@/portal-i18n";
 import { ArrowLeft, Armchair, Check, ChevronRight, ClipboardCheck, Clock, Copy, Eye, FileText, Grid3x3, Hammer, MessageSquareText, PenLine, Plug, Scale, X, XCircle, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NaFrente } from "./NaFrente";
@@ -38,6 +39,9 @@ import { RESPONSAVEL_OBRA } from "./obraOps";
 export interface PortalReal {
   abrirProposta: () => void;
   abrirContrato: (() => void) | null;
+  /** 19/11: a proposta e o contrato (os do negócio, não os das adendas) abrem SEMPRE o documento do template, nas páginas reais
+   *  (abrirProposta/abrirContrato), em vez do desenho da V1. Só o portal real o liga; o CRM e o protótipo ficam como estavam. */
+  documentosNoTemplate?: boolean;
   conversa: ReactNode;
   /** A assinatura do auto de receção (o código por SMS), com as observações do cliente; `voltar` fecha-a. */
   receberObra: (reservas: string | undefined, voltar: () => void) => ReactNode;
@@ -136,6 +140,23 @@ function Chips({ opcoes, on, mudar, rotulo, nome = (x: string) => x }: { opcoes:
         );
       })}
     </div>
+  );
+}
+
+/** O cartão que leva ao documento do template (a página real da proposta ou do contrato), no lugar do desenho da V1. */
+function CartaoDocumento({ tipo, abrir }: { tipo: "proposta" | "contrato"; abrir: () => void }) {
+  const { t } = usePortalT();
+  return (
+    <section aria-label={t(`pc.docNegocio.${tipo}.titulo`)} className="space-y-3 rounded-2xl bg-white p-4 shadow-sm">
+      <div className="flex items-start gap-3">
+        <FileText className="mt-0.5 h-5 w-5 shrink-0 text-slate-500" aria-hidden="true" />
+        <div>
+          <h2 className="text-base font-semibold">{t(`pc.docNegocio.${tipo}.titulo`)}</h2>
+          <p className="text-[15px] text-slate-600">{t(`pc.docNegocio.${tipo}.texto`)}</p>
+        </div>
+      </div>
+      <Botao onClick={abrir}>{t(`pc.docNegocio.${tipo}.abrir`)}</Botao>
+    </section>
   );
 }
 
@@ -349,10 +370,18 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
       ...faturasAdenda(a).map((f): [string, string, boolean] => ["ft:" + f.n, `Fatura ${f.n} · adenda ${a.n}, ${nomeParcela(f.i)}${f.recibo ? ` · paga (recibo ${f.recibo.n})` : ""}`, true]),
     ];
   });
+  // 19/11, portal real: a proposta e o contrato do negócio abrem o documento do template (páginas reais), nunca o desenho da V1;
+  // sem o contrato real (abrirContrato nulo) não há como o abrir no template, e por isso não se lista.
+  const noTemplate = !!real?.documentosNoTemplate;
+  const abrirDocumento = (k: string) => {
+    if (noTemplate && k === "proposta") return real!.abrirProposta();
+    if (noTemplate && k === "contrato" && real!.abrirContrato) return real!.abrirContrato();
+    setDoc(k);
+  };
   const docs: [string, string, boolean][] = [
     ["proposta", `Proposta PR 2026/${d.id}`, !!o?.enviada],
     // 15/10: as adendas assinadas juntam-se ao contrato (o documento do contrato mostra-as)
-    ["contrato", `Contrato CT 2026/${d.id}${adendasAssinadas ? ` + ${adendasAssinadas} ${adendasAssinadas === 1 ? "adenda" : "adendas"}` : ""}`, !!o?.contrato],
+    ["contrato", `Contrato CT 2026/${d.id}${adendasAssinadas ? ` + ${adendasAssinadas} ${adendasAssinadas === 1 ? "adenda" : "adendas"}` : ""}`, !!o?.contrato && !(noTemplate && !real?.abrirContrato)],
     ...docsAdenda,
     ["encomenda", d.obra.ec ? `Nota de encomenda ${d.obra.ec.n}` : "", !!d.obra.ec],
     // 3/11: paga no Eticadata ou validada à mão no CRM, o cliente vê-a como paga
@@ -838,14 +867,18 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
           )}
 
           {/* o documento do passo de agora, inteiro: a proposta para aceitar, o contrato para assinar */}
-          {P.estado === "rever" && <div className="-mx-4 sm:mx-0" aria-label={ad ? "A proposta da adenda" : "A proposta"} role="region"><PropostaDoc S={S} d={d} a={ad ?? undefined} /></div>}
-          {P.estado === "assinar" && <div className="-mx-4 sm:mx-0" aria-label={ad ? "A adenda" : "O contrato"} role="region"><ContratoDoc S={S} d={d} a={ad ?? undefined} /></div>}
+          {P.estado === "rever" && (noTemplate && !ad
+            ? <CartaoDocumento tipo="proposta" abrir={real!.abrirProposta} />
+            : <div className="-mx-4 sm:mx-0" aria-label={ad ? "A proposta da adenda" : "A proposta"} role="region"><PropostaDoc S={S} d={d} a={ad ?? undefined} /></div>)}
+          {P.estado === "assinar" && (noTemplate && !ad
+            ? (real!.abrirContrato ? <CartaoDocumento tipo="contrato" abrir={real!.abrirContrato} /> : null)
+            : <div className="-mx-4 sm:mx-0" aria-label={ad ? "A adenda" : "O contrato"} role="region"><ContratoDoc S={S} d={d} a={ad ?? undefined} /></div>)}
           {P.estado === "auto" && <div className="-mx-4 sm:mx-0" aria-label="O auto de receção" role="region"><AutoRececaoDoc d={d} /></div>}
-          {P.estado === "relatorio" && <RelatorioObra S={S} d={d} docs={docs.filter(([k, t, ok]) => t && ok && k !== "relatorio").map(([k, t]) => [k, t])} abrirDoc={setDoc} />}
+          {P.estado === "relatorio" && <RelatorioObra S={S} d={d} docs={docs.filter(([k, t, ok]) => t && ok && k !== "relatorio").map(([k, t]) => [k, t])} abrirDoc={abrirDocumento} />}
           {(P.estado === "preparar" || P.estado === "pedido" || (P.estado === "sem" && !!ad)) && (
-            verProposta
+            verProposta && !(noTemplate && !ad)
               ? <div className="-mx-4 sm:mx-0" aria-label={ad ? "A proposta da adenda" : "A proposta"} role="region"><PropostaDoc S={S} d={d} a={ad ?? undefined} /></div>
-              : <Botao ghost onClick={() => setVerProposta(true)}>{P.estado === "preparar" ? "Ver a proposta que aceitou" : "Ver a proposta atual"}</Botao>
+              : <Botao ghost onClick={noTemplate && !ad ? real!.abrirProposta : () => setVerProposta(true)}>{P.estado === "preparar" ? "Ver a proposta que aceitou" : "Ver a proposta atual"}</Botao>
           )}
           {P.estado === "sem" && !ad && <p className="rounded-2xl bg-white p-4 text-[15px] shadow-sm">{o?.versoes?.length ? `A nova versão da proposta (v${versaoAtual(o)}) está a ser preparada, com o que pediu.` : "A sua proposta está a ser preparada."} Avisamos aqui quando estiver pronta.</p>}
 
@@ -856,7 +889,7 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
               <ul>
                 {docs.filter(([, t, ok]) => t && ok).map(([k, t]) => (
                   <li key={k}>
-                    <button type="button" onClick={() => setDoc(k)} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-2 text-left text-[15px] hover:bg-slate-50">
+                    <button type="button" onClick={() => abrirDocumento(k)} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-2 text-left text-[15px] hover:bg-slate-50">
                       <FileText className="h-4 w-4 text-slate-500" aria-hidden="true" /><span className="flex-1">{t}</span><ChevronRight className="h-4 w-4 text-slate-400" aria-hidden="true" />
                     </button>
                   </li>

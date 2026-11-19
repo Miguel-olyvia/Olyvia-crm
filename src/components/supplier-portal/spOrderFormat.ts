@@ -1,5 +1,11 @@
 // Portal do Fornecedor (F3.2) — rótulos e formatação das encomendas.
+// Só as PALAVRAS seguem o idioma do portal. Dinheiro, quantidades, dd/mm/aaaa e horas ficam como sempre (pt-PT),
+// nos dois idiomas. Os códigos de estado da base não mudam: só se mapeiam para chaves `sp.estado.*`.
+import type { PortalTraducao } from "@/portal-i18n";
 import type { SpOrderSla, SpOrderStatus, SpPublicationStatus } from "@/lib/supplierPortal/spRpc";
+
+/** A função `t` de `usePortalT()`. */
+type Traduz = PortalTraducao["t"];
 
 /** "YYYY-MM-DD" → "dd/mm/aaaa" sem passar por Date (evita desvios de fuso). */
 export function formatSpDate(value: string | null | undefined): string {
@@ -42,44 +48,56 @@ export const SP_TONE_CLASS: Record<Tone, string> = {
   cancelled: "bg-red-100 text-red-900 border-red-200 dark:bg-red-500/15 dark:text-red-200 dark:border-red-500/30",
 };
 
-/** Estado da resposta do fornecedor: Nova / Vista / Confirmada. */
-export function spPublicationBadge(status: SpPublicationStatus): { label: string; tone: Tone } {
-  if (status === "confirmed") return { label: "Confirmada", tone: "confirmed" };
-  if (status === "viewed") return { label: "Vista", tone: "viewed" };
-  return { label: "Nova", tone: "new" };
+/** Estado da resposta do fornecedor: Nova / Vista / Confirmada (chave do dicionário, não texto). */
+export function spPublicationBadge(status: SpPublicationStatus): { labelKey: string; tone: Tone } {
+  if (status === "confirmed") return { labelKey: "sp.estado.confirmada", tone: "confirmed" };
+  if (status === "viewed") return { labelKey: "sp.estado.vista", tone: "viewed" };
+  return { labelKey: "sp.estado.nova", tone: "new" };
 }
 
 /** Estado da encomenda na empresa, só quando já avançou (null para "encomendada"). */
-export function spOrderStatusBadge(status: SpOrderStatus): { label: string; tone: Tone } | null {
-  if (status === "cancelled") return { label: "Cancelada", tone: "cancelled" };
-  if (status === "received") return { label: "Recebida", tone: "received" };
-  if (status === "partially_received") return { label: "Parcialmente recebida", tone: "partial" };
+export function spOrderStatusBadge(status: SpOrderStatus): { labelKey: string; tone: Tone } | null {
+  if (status === "cancelled") return { labelKey: "sp.estado.cancelada", tone: "cancelled" };
+  if (status === "received") return { labelKey: "sp.estado.recebida", tone: "received" };
+  if (status === "partially_received") return { labelKey: "sp.estado.parcialmenteRecebida", tone: "partial" };
   return null;
 }
 
 /** "N dia" / "N dias". */
-export function spDaysText(n: number): string {
-  return `${n} ${Math.abs(n) === 1 ? "dia" : "dias"}`;
+export function spDaysText(n: number, t: Traduz): string {
+  return t(Math.abs(n) === 1 ? "sp.encomendas.sla.dia" : "sp.encomendas.sla.dias", { n });
 }
 
 /** Etiqueta de alerta do prazo (SLA) — só em risco/ultrapassado; null nos restantes casos. */
-export function spSlaBadge(sla: SpOrderSla | null | undefined): { label: string; title: string; tone: Tone } | null {
+export function spSlaBadge(
+  sla: SpOrderSla | null | undefined,
+  t: Traduz,
+): { label: string; title: string; tone: Tone } | null {
   if (!sla?.status || sla.status === "ok") return null;
-  const due = formatSpDate(sla.due_date);
+  const data = formatSpDate(sla.due_date);
   if (sla.status === "overdue") {
     const late = Math.max(1, sla.days_late ?? 1);
-    return { label: `Atrasada · ${late} d`, title: `Prazo de entrega (SLA) ultrapassado: era ${due}, ${spDaysText(late)} de atraso`, tone: "cancelled" };
+    return {
+      label: t("sp.encomendas.sla.atrasada", { n: late }),
+      title: t("sp.encomendas.sla.tituloAtrasada", { data, dias: spDaysText(late, t) }),
+      tone: "cancelled",
+    };
   }
   const left = Math.max(0, sla.days_left ?? 0);
   return {
-    label: "Em risco",
-    title: `Prazo de entrega (SLA) a terminar: ${due}${left === 0 ? ", termina hoje" : `, faltam ${spDaysText(left)}`}`,
+    label: t("sp.encomendas.sla.emRisco"),
+    title:
+      left === 0
+        ? t("sp.encomendas.sla.tituloRiscoHoje", { data })
+        : t("sp.encomendas.sla.tituloRiscoFaltam", { data, dias: spDaysText(left, t) }),
     tone: "new",
   };
 }
 
 /** Origem do prazo, para o texto do aviso. */
-export function spSlaSourceText(sla: SpOrderSla): string {
-  if (sla.source === "promised") return "data que indicou na confirmação";
-  return sla.contract_days != null ? `prazo do contrato: ${spDaysText(sla.contract_days)} a contar do envio` : "prazo do contrato";
+export function spSlaSourceText(sla: SpOrderSla, t: Traduz): string {
+  if (sla.source === "promised") return t("sp.encomendas.sla.origemPrometida");
+  return sla.contract_days != null
+    ? t("sp.encomendas.sla.origemContratoDias", { dias: spDaysText(sla.contract_days, t) })
+    : t("sp.encomendas.sla.origemContrato");
 }

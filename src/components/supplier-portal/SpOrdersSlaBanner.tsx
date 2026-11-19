@@ -1,16 +1,15 @@
 import { Link, useLocation } from "react-router-dom";
 import { AlertTriangle, ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { usePortalT, type PortalTraducao } from "@/portal-i18n";
 import { useSpOrdersSlaAlert } from "@/components/supplier-portal/useSpOrdersToConfirm";
 
 /** Lista filtrada só pelas encomendas com prazo em risco/ultrapassado (SupplierPortalOrders, ?sla=alerta). */
 export const SP_SLA_ALERT_ORDERS_HREF = "/supplier-portal/orders?estado=all&sla=alerta";
 
 /** "N encomenda(s) em risco ou com prazo de entrega ultrapassado". */
-export function spSlaAlertText(alert: number): string {
-  return alert === 1
-    ? "1 encomenda em risco ou com prazo de entrega ultrapassado"
-    : `${alert.toLocaleString("pt-PT")} encomendas em risco ou com prazo de entrega ultrapassado`;
+export function spSlaAlertText(alert: number, tn: PortalTraducao["tn"]): string {
+  return tn("sp.encomendas.sla.alerta.um", "sp.encomendas.sla.alerta.varios", alert);
 }
 
 /**
@@ -20,6 +19,7 @@ export function spSlaAlertText(alert: number): string {
  */
 export function SpOrdersSlaBanner() {
   const location = useLocation();
+  const { t, tn } = usePortalT();
   const { alert, overdue } = useSpOrdersSlaAlert();
   if (!alert || alert <= 0 || location.pathname === "/supplier-portal/orders") return null;
 
@@ -27,7 +27,7 @@ export function SpOrdersSlaBanner() {
   return (
     <div
       role="region"
-      aria-label="Prazos de entrega"
+      aria-label={t("sp.encomendas.sla.regiao")}
       className={cn(
         "border-b px-4 py-2 md:px-6",
         isOverdue
@@ -38,13 +38,13 @@ export function SpOrdersSlaBanner() {
       <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-x-4 gap-y-1">
         <p className="flex min-w-0 items-center gap-2 text-sm font-medium">
           <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
-          <span>{spSlaAlertText(alert)}</span>
+          <span>{spSlaAlertText(alert, tn)}</span>
         </p>
         <Link
           to={SP_SLA_ALERT_ORDERS_HREF}
           className="inline-flex min-h-6 items-center gap-1 rounded text-sm font-medium underline underline-offset-2 hover:no-underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          Ver encomendas
+          {t("sp.encomendas.sla.verEncomendas")}
           <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
         </Link>
       </div>

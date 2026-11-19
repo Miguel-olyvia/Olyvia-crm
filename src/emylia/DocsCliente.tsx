@@ -9,20 +9,23 @@ import { cn } from "@/lib/utils";
 import { useInventario } from "./inventario/loja";
 import { linhasDaObra, totaisDaEc } from "./encomendasAjuste";
 import { ESTADO_PO_POR_APROVAR, estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio, type ResumoEcNeg } from "./inventario/ponteNegocios";
-import { LINHAS, PAPEIS, calcMats, eur, linhaCalc, nfmt, tot, type Assinatura, type Estado, type Negocio } from "./motor";
+import { LINHAS, PAPEIS, eur, linhaCalc, nfmt, tot, type Assinatura, type Estado, type Negocio } from "./motor";
 import { FASES_OBRA, fasesPadrao, type FaseObra } from "./fasesObra";
 import { SeloAssinatura } from "./AssinaturaContrato";
 import { modoReal, nifEmpresa, nomeEmpresa, nomeFiscalEmpresa } from "./acessosPortal";
 import { LINHA_DEMOLICAO } from "./entulho";
-import { ESCOLHAS } from "./campos";
 import type { Ctx } from "./pecas";
 import { rotuloDia } from "./preparacaoObra";
-import { adendaComoEnviada, assinadas, diasAdenda, impactoNoPlano, materiaisAdenda, nomeParcela, parcelasAdenda, totaisAdenda, valorContrato, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda } from "./adendas";
+import { adendaComoEnviada, diasAdenda, impactoNoPlano, materiaisAdenda, nomeParcela, parcelasAdenda, totaisAdenda, valorContrato, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda } from "./adendas";
 import { materiaisDoServico } from "./tarefasValidador";
 import { ehRefProblema } from "./problemasCliente";
-import { porFase, linhaDeMaterial, quantidade, escolhasVisiveis, fornecidosPeloCliente, type Grupo } from "./propostaConteudo";
+import { linhaDeMaterial, quantidade, type Grupo } from "./propostaConteudo";
 import { Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
-import { COR_FASE, dataCurta, deIso, diaDaPrestacao, diasDaObra, faseDosMateriais, iniciosRapidos, planoObra, prestacoes, valoresPrestacoes } from "./planoObra";
+import { COR_FASE, dataCurta, diasDaObra, faseDosMateriais } from "./planoObra";
+import {
+  adendasDoContrato, comDataCurta, conteudoPorFase, dataDe, diasDoPlano, fasesDosServicos, fimPrevistoData, inicioDaObra, materiaisDaProposta,
+  planeamentoDaObra, prazoDaProposta, prestacoesDaProposta, validadeDaProposta,
+} from "./propostaDados";
 
 // 23/10 (2.0): o nome e o NIF são os da organização (com o nome fiscal, se o tiver); o subtítulo e a morada ainda são os do
 // exemplo (a organização ainda não tem morada)
@@ -71,23 +74,12 @@ function QuadroIva({ T, parte = 1, rotulo = "Total" }: { T: ReturnType<typeof to
 }
 /** As prestações das condições de pagamento (com "Por fases", as guardadas no plano da obra: planoObra.ts). */
 export function tranches(d: Negocio, total: number, S?: Estado): { l: string; p: number; v: number; quando?: string }[] {
-  const pr = prestacoes(d.f.pagamento, d.orc?.pagFases);
-  // com o estado, a data prevista de cada prestação (o dia em que acaba a fase, pelo plano da obra)
-  let quando: ((t: (typeof pr)[number]) => string | undefined) | null = null;
-  if (S && d.orc) {
-    const P = planoObra(d, S), n = Math.max(1, Math.ceil(P.dias - 1e-9));
-    const cal = diasDaObra(d.orc.inicioObra ? deIso(d.orc.inicioObra) : iniciosRapidos(new Date())[0].data, n);
-    quando = (t) => (t.fase === 0 ? undefined : dataCurta(cal[Math.min(n - 1, Math.max(0, Math.ceil(diaDaPrestacao(P, t) - 1e-9) - 1))]));
-  }
-  const vs = valoresPrestacoes(total, pr);
-  return pr.map((t, i) => ({ l: t.l, p: t.p, v: vs[i], quando: quando?.(t) }));
+  // com o estado, a data prevista de cada prestação (o dia em que acaba a fase, pelo plano da obra): propostaDados.ts
+  return comDataCurta(prestacoesDaProposta(d, total, S));
 }
 const data = (iso?: string) => (iso ? iso.split("-").reverse().join("/") : "a definir");
 function fimPrevisto(inicio?: string, dias?: string): string {
-  if (!inicio || !dias) return "a definir";
-  const d = new Date(inicio + "T12:00:00"); let n = Number(dias);
-  while (n > 1) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) n--; }
-  return d.toLocaleDateString("pt-PT");
+  return fimPrevistoData(inicio, dias)?.toLocaleDateString("pt-PT") ?? "a definir";
 }
 /** Os tipos de documento com link do portal. */
 export const TIPOS_DOC = ["proposta", "contrato", "fatura", "encomenda", "adenda"] as const;
@@ -131,20 +123,17 @@ function Totais({ d, S }: { d: Negocio; S: Estado }) {
 /* ------------------------------------------------------------------ como vai decorrer a obra (14/10) */
 /** Na proposta: as fases da obra com as datas (do plano da obra do orçamento) e quando se paga cada prestação. Sem custos. */
 function ObraNaProposta({ S, d }: { S: Estado; d: Negocio }) {
-  const P = planoObra(d, S);
-  const fases = P.fases.filter((f) => f.fim > f.inicio);
-  if (!fases.length) return null;
-  const n = Math.max(1, Math.ceil(P.dias - 1e-9));
-  const inicio = d.orc?.inicioObra ? deIso(d.orc.inicioObra) : iniciosRapidos(new Date())[0].data;
-  const cal = diasDaObra(inicio, n);
-  const dia = (x: number) => dataCurta(cal[Math.min(cal.length - 1, Math.max(0, x))]);
-  const periodo = (a: number, b: number) => { const i = Math.floor(a), j = Math.ceil(b - 1e-9) - 1; return j <= i ? dia(i) : `${dia(i)} a ${dia(j)}`; };
+  // as fases com as datas: propostaDados.ts (planeamentoDaObra), o mesmo do documento do portal
+  const P = planeamentoDaObra(d, S);
+  if (!P) return null;
+  const { fases } = P;
+  const periodo = (f: (typeof fases)[number]) => (f.de === f.ate ? dataCurta(f.de) : `${dataCurta(f.de)} a ${dataCurta(f.ate)}`);
   return (
     <section aria-label="Como vai decorrer a obra">
       <p className="mb-2 text-xs uppercase tracking-wider text-slate-500">Como vai decorrer a obra</p>
       {/* a obra numa barra: cada fase com a sua largura (os dias) */}
       <div className="flex h-3 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
-        {fases.map((f) => <span key={f.n} className="h-full border-r-2 border-white last:border-r-0" style={{ width: `${((f.fim - f.inicio) / P.dias) * 100}%`, background: COR_FASE[f.n] }} />)}
+        {fases.map((f) => <span key={f.n} className="h-full border-r-2 border-white last:border-r-0" style={{ width: `${(f.dias / P.diasTotal) * 100}%`, background: COR_FASE[f.n] }} />)}
       </div>
       <ol className="mt-3 grid gap-2 sm:grid-cols-2">
         {fases.map((f) => (
@@ -152,14 +141,14 @@ function ObraNaProposta({ S, d }: { S: Estado; d: Negocio }) {
             <span className="mt-1 h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: COR_FASE[f.n] }} aria-hidden="true" />
             <span className="min-w-0">
               <span className="block font-medium">{f.n}. {f.nome}</span>
-              <span className="block text-sm text-slate-600">{periodo(f.inicio, f.fim)} · {nfmt(f.fim - f.inicio)} {f.fim - f.inicio === 1 ? "dia útil" : "dias úteis"}</span>
-              <span className="block text-sm text-slate-500">{f.tarefas.map((t) => t.nome).join(", ")}</span>
+              <span className="block text-sm text-slate-600">{periodo(f)} · {nfmt(f.dias)} {f.dias === 1 ? "dia útil" : "dias úteis"}</span>
+              <span className="block text-sm text-slate-500">{f.tarefas.join(", ")}</span>
             </span>
           </li>
         ))}
       </ol>
       <p className="mt-3 text-sm text-slate-600">
-        Início previsto a {dia(0)} e fim a {dia(n - 1)}, só em dias úteis (sem fins de semana nem feriados).
+        Início previsto a {dataCurta(P.inicio)} e fim a {dataCurta(P.fim)}, só em dias úteis (sem fins de semana nem feriados).
       </p>
     </section>
   );
@@ -168,11 +157,6 @@ function ObraNaProposta({ S, d }: { S: Estado; d: Negocio }) {
 /* ------------------------------------------------------------------ proposta (14/10: o documento formal, em páginas A4) */
 const MESES_LONGOS = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
 const longa = (x: Date) => `${x.getDate()} de ${MESES_LONGOS[x.getMonth()]} de ${x.getFullYear()}`;
-/** "05/10" → 5 de outubro de 2026; "hoje…" ou vazio → hoje. */
-function dataDe(q: string | null | undefined): Date {
-  const m = q?.match(/^(\d{1,2})\/(\d{1,2})/);
-  return m ? new Date(2026, Number(m[2]) - 1, Number(m[1])) : new Date();
-}
 
 /** Uma página A4 (794 × 1123 px no ecrã); no telemóvel cresce com o conteúdo. */
 function Pagina({ n, total, numero, capa, children }: { n: number; total: number; numero: string; capa?: boolean; children: ReactNode }) {
@@ -327,18 +311,15 @@ export function PropostaDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) 
   if (a) return <PropostaAdenda S={S} d={d} a={a} />;
   const o = d.orc!, L = LINHAS[d.linha], T = totais(d, S), desconto = o.desconto || 0, k = 1 - desconto / 100;
   const numero = `PR 2026/${d.id}${o.versoes?.length ? ` · v${o.versoes.length + 1}` : ""}`;
-  const emitida = dataDe(o.enviada);
-  const dv = Number((d.f.validade || "30 dias").match(/\d+/)?.[0] ?? 30);
-  const ate = new Date(emitida); ate.setDate(ate.getDate() + dv);
-  const P = planoObra(d, S), dias = Math.max(1, Math.ceil(P.dias - 1e-9));
+  // a validade, o prazo, as fases e os materiais: propostaDados.ts (o mesmo do documento do portal)
+  const { emitida, ate } = validadeDaProposta(d);
+  const dias = diasDoPlano(d, S);
   // o prazo que se promete ao cliente: o da proposta (o comercial pode dar folga); sem ele, o do plano
-  const prazo = Number(d.f.prazo_exec) || dias;
-  const inicio = o.inicioObra ? deIso(o.inicioObra) : iniciosRapidos(new Date())[0].data;
-  const cal = diasDaObra(inicio, dias);
+  const prazo = prazoDaProposta(d, S);
+  const cal = diasDaObra(inicioDaObra(d), dias);
   const tr = tranches(d, T.total, S);
   // as linhas por fase da obra (os serviços pela fase da tarefa; os materiais pela descrição; a demolição na 1)
-  const faseDe = new Map<string, FaseObra>();
-  for (const t of P.tarefas) if (!faseDe.has(t.svc ?? t.chave)) faseDe.set(t.svc ?? t.chave, t.fase); // 26/10: um «MO Modelo», pela 1.ª parte
+  const faseDe = fasesDosServicos(d, S);
   const linhas = o.linhas.map((l) => {
     const x = linhaCalc(l, S), fase: FaseObra = l.t === "mat" ? (l.d === LINHA_DEMOLICAO ? 1 : faseDosMateriais(l.d)) : (faseDe.get(l.sid) ?? 4);
     return l.t === "svc"
@@ -348,10 +329,7 @@ export function PropostaDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) 
         : { fase, nome: nomeNaTabela(l.d), q: 1, un: "vg", pu: x.preco * k, total: x.preco * k, mat: true };
   });
   // "O que vamos fazer": por fase, em grupos curtos e sem os prefixos técnicos das linhas (propostaConteudo.ts)
-  const conteudo = porFase(o.linhas.map((l) => {
-    if (l.t === "svc") { const x = linhaCalc(l, S); return { fase: faseDe.get(l.sid) ?? 4, t: "svc" as const, nome: x.s!.n, q: l.q, un: x.s!.un }; }
-    return { fase: l.d === LINHA_DEMOLICAO ? 1 : faseDosMateriais(l.d), t: "mat" as const, d: l.d };
-  }));
+  const conteudo = conteudoPorFase(d, S, faseDe);
   const fases = FASES_OBRA.filter((f) => linhas.some((x) => x.fase === f.n));
   // 26/10: com zonas da obra, o orçamento detalhado agrupa-se por zona (a quantidade e o valor de cada linha nessa zona)
   // nos produtos, o nome sem a quantidade total ("Tinta … · 222 un") e a unidade do produto: a linha da zona mostra só a parte dela
@@ -367,11 +345,7 @@ export function PropostaDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) 
       return { ...linhas[x.i], ...(p ? { nome: p.n, un: p.un } : {}), q: x.q, pu: (x.valor * k) / (x.q || 1), total: x.valor * k };
     }),
   }));
-  const mats = calcMats(d, S, true).filter((x) => x.q > 0);
-  const prods = (d.visita.prod ?? []).filter((p) => p.q > 0);
-  const escolhas = escolhasVisiveis(ESCOLHAS.campos.filter((c) => d.f[c.k] && c.k !== "materiais_cliente").map((c) => [c.l, d.f[c.k]] as const));
-  const fornecidos = fornecidosPeloCliente(d, S);
-  const escolhidos = prods.filter((p) => !p.cliente);
+  const M = materiaisDaProposta(d, S);
   const comercial = PAPEIS.comercial.nome;
   const total = 4;
 
@@ -420,8 +394,8 @@ export function PropostaDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) 
             })}
           </ol>
         </section>
-        <MateriaisEscolhas mats={mats.map((x) => ({ k: x.n, nome: x.n, det: quantidade(x.q, x.un) }))} escolhidos={escolhidos.map((p) => ({ k: p.id, nome: p.n, det: quantidade(p.q, p.un) }))}
-          fornecidos={fornecidos} escolhas={escolhas} nec={!prods.length ? d.visita.nec : []} />
+        <MateriaisEscolhas mats={M.mats} escolhidos={M.escolhidos}
+          fornecidos={M.fornecidos} escolhas={M.escolhas.map(({ l, v }) => (v === undefined ? { l } : { l, v }))} nec={M.nec} />
       </Pagina>
 
       {/* ---------------- 3. o orçamento detalhado */}
@@ -812,32 +786,30 @@ function ContratoAdenda({ S, d, a }: { S: Estado; d: Negocio; a: Adenda }) {
 
 /** As adendas assinadas, anexas ao contrato (15/10): o que muda, o valor e o prazo, e a assinatura do cliente. */
 function AdendasDoContrato({ S, d }: { S: Estado; d: Negocio }) {
-  const as = assinadas(d);
-  if (!as.length) return null;
-  const V = valorContrato(d, S);
+  // as adendas assinadas e o valor do contrato com elas: propostaDados.ts (o mesmo do documento do portal)
+  const V = adendasDoContrato(d, S);
+  if (!V) return null;
+  const as = V.adendas;
   return (
     <section aria-label="Adendas ao contrato" className="rounded-xl border border-slate-200 p-4">
       <h3 className="font-semibold">Adendas ao contrato</h3>
       <p className="text-sm text-slate-600">Fazem parte deste contrato. O resto mantém-se.</p>
       <ul className="mt-3 divide-y divide-slate-200">
-        {as.map((a) => {
-          const total = totaisAdenda(a).total, dias = diasAdenda(a.linhas);
-          return (
-            <li key={a.n} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3">
-              <div className="min-w-0 flex-1">
-                <p className="font-medium">{a.n} · {a.linhas.map((x) => x.n).join(", ")}</p>
-                <p className="text-sm text-slate-600">+{eur(total)} € com IVA · +{dias} {dias === 1 ? "dia útil" : "dias úteis"} · {a.motivo.toLowerCase()}</p>
-                <p className="text-sm text-emerald-700">Assinada{a.assinatura ? ` · ${a.assinatura.q}` : a.assinada ? ` · ${a.assinada}` : ""}</p>
-              </div>
-              {a.assinatura && <SeloAssinatura a={a.assinatura} compacto />}
-            </li>
-          );
-        })}
+        {as.map((x) => (
+          <li key={x.n} className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 py-3">
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">{x.n} · {x.trabalhos.join(", ")}</p>
+              <p className="text-sm text-slate-600">+{eur(x.total)} € com IVA · +{x.dias} {x.dias === 1 ? "dia útil" : "dias úteis"} · {x.motivo.toLowerCase()}</p>
+              <p className="text-sm text-emerald-700">Assinada{x.assinada ? ` · ${x.assinada}` : ""}</p>
+            </div>
+            {x.a.assinatura && <SeloAssinatura a={x.a.assinatura} compacto />}
+          </li>
+        ))}
       </ul>
       {/* 21/10: o valor do contrato com as adendas (o preço da cláusula fica o assinado) */}
       <div className="mt-1 space-y-1 border-t border-slate-200 pt-3">
         <div className="flex justify-between text-slate-600"><span>Contrato</span><span className="tabular-nums">{eur(V.contrato)} €</span></div>
-        <div className="flex justify-between text-slate-600"><span>{as.length === 1 ? "Adenda" : `${as.length} adendas`}</span><span className="tabular-nums">+{eur(V.adendas)} €</span></div>
+        <div className="flex justify-between text-slate-600"><span>{as.length === 1 ? "Adenda" : `${as.length} adendas`}</span><span className="tabular-nums">+{eur(V.somaAdendas)} €</span></div>
         <div className="flex justify-between font-semibold"><span>Valor do contrato, com IVA</span><span className="tabular-nums">{eur(V.total)} €</span></div>
       </div>
     </section>

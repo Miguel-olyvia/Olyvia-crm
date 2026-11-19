@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
 import { usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContext";
@@ -15,8 +14,7 @@ import {
   ArrowRight, Clock, AlertCircle, CheckCircle2, Send, UserPlus,
   PenLine, HelpCircle, Building2, Globe,
 } from "lucide-react";
-import { format } from "date-fns";
-import { pt } from "date-fns/locale";
+import { usePortalFormato, usePortalT } from "@/portal-i18n";
 
 function getInitials(name?: string | null): string {
   if (!name) return "?";
@@ -30,19 +28,10 @@ function getInitials(name?: string | null): string {
   return initials || "?";
 }
 
-const STATUS_MAP: Record<string, { label: string; color: string; bg: string }> = {
-  sent: { label: "A aguardar", color: "#7C3AED", bg: "#F3E8FF" },
-  pending: { label: "A aguardar", color: "#7C3AED", bg: "#F3E8FF" },
-  draft: { label: "Rascunho", color: "#6B7280", bg: "#F3F4F6" },
-  accepted: { label: "Aceite", color: "#059669", bg: "#D1FAE5" },
-  rejected: { label: "Rejeitada", color: "#DC2626", bg: "#FEE2E2" },
-  expired: { label: "Expirada", color: "#DC2626", bg: "#FEE2E2" },
-  active: { label: "Ativo", color: "#059669", bg: "#D1FAE5" },
-  signed: { label: "Assinado", color: "#059669", bg: "#D1FAE5" },
-};
-
 const ClientPortal = () => {
   const navigate = useNavigate();
+  const { t, tn } = usePortalT();
+  const { formatarData } = usePortalFormato();
   const [userName, setUserName] = useState("");
   const [orgInfo, setOrgInfo] = useState<{ name: string; email?: string; phone?: string; website?: string } | null>(null);
   const [proposals, setProposals] = useState<any[]>([]);
@@ -133,8 +122,8 @@ const ClientPortal = () => {
     return () => { cancelled = true; };
   }, [activeOrg, orgsLoading]);
 
-  const firstName = userName.split(" ")[0] || "Cliente";
-  const today = format(new Date(), "EEEE, d 'de' MMMM 'de' yyyy", { locale: pt });
+  const firstName = userName.split(" ")[0] || t("pc.inicio.clienteSemNome");
+  const today = formatarData(new Date(), "diaSemanaLongo");
 
   // M2: formatCurrency now imported from @/lib/utils
 
@@ -148,31 +137,31 @@ const ClientPortal = () => {
     ...proposals.filter(p => p.status === "accepted").map(p => ({
       icon: CheckCircle2,
       color: "#059669",
-      text: `Proposta "${p.title}" aceite`,
+      text: t("pc.inicio.atividade.propostaAceite", { titulo: p.title }),
       date: p.created_at,
     })),
     ...(portal.contractCount > 0 ? [{
       icon: PenLine,
       color: "#3B82F6",
-      text: `Contrato gerado a partir da proposta`,
+      text: t("pc.inicio.atividade.contratoGerado"),
       date: proposals.find(p => p.status === "accepted")?.created_at || portal.pendingActions.find(a => a.type === "contract")?.date || new Date().toISOString(),
     }] : []),
     ...(portal.documentCount > 0 ? [{
       icon: FolderOpen,
       color: "#059669",
-      text: `${portal.documentCount} documento${portal.documentCount !== 1 ? "s" : ""} disponível${portal.documentCount !== 1 ? "eis" : ""}`,
+      text: tn("pc.inicio.atividade.documentos.um", "pc.inicio.atividade.documentos.varios", portal.documentCount, { n: portal.documentCount }),
       date: proposals[0]?.created_at || new Date().toISOString(),
     }] : []),
     ...proposals.map(p => ({
       icon: Send,
       color: "#3B82F6",
-      text: `Proposta "${p.title}" disponibilizada`,
+      text: t("pc.inicio.atividade.propostaDisponibilizada", { titulo: p.title }),
       date: p.created_at,
     })),
     {
       icon: UserPlus,
       color: "#7C3AED",
-      text: "Conta de acesso ao portal criada",
+      text: t("pc.inicio.atividade.contaCriada"),
       date: portalCreatedAt || proposals[proposals.length - 1]?.created_at || new Date().toISOString(),
     },
   ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()).slice(0, 8);
@@ -185,7 +174,7 @@ const ClientPortal = () => {
       <ClientPortalLayout>
         <div className="space-y-6">
           <div>
-            <h1 className="text-2xl font-bold text-foreground">Olá, {firstName} 👋</h1>
+            <h1 className="text-2xl font-bold text-foreground">{t("pc.inicio.ola", { nome: firstName })}</h1>
             <p className="text-muted-foreground capitalize text-sm mt-0.5">{today}</p>
           </div>
           <PortalOrgsErrorState />
@@ -199,7 +188,7 @@ const ClientPortal = () => {
       <div className="space-y-6">
         {/* Greeting */}
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Olá, {firstName} 👋</h1>
+          <h1 className="text-2xl font-bold text-foreground">{t("pc.inicio.ola", { nome: firstName })}</h1>
           <p className="text-muted-foreground capitalize text-sm mt-0.5">{today}</p>
         </div>
 
@@ -216,13 +205,13 @@ const ClientPortal = () => {
               </div>
               <div className="flex-1">
                 <h3 className="text-lg font-bold">
-                  Tem {totalPending} {totalPending === 1 ? "ação pendente" : "ações pendentes"}
+                  {tn("pc.inicio.banner.um", "pc.inicio.banner.varios", totalPending, { n: totalPending })}
                 </h3>
                 {pendingProposals.length > 0 && (
                   <p className="text-sm text-white/80 mt-1">
                     {pendingProposals[0].title} · {formatCurrency(pendingProposals[0].value)}
                     {pendingProposals[0].valid_until && (
-                      <> · Válida até {format(new Date(pendingProposals[0].valid_until), "d MMM yyyy", { locale: pt })}</>
+                      <> · {t("pc.inicio.validaAte", { data: formatarData(pendingProposals[0].valid_until) })}</>
                     )}
                   </p>
                 )}
@@ -238,7 +227,7 @@ const ClientPortal = () => {
                   }
                 }}
               >
-                Ver {pendingProposals.length > 0 ? "proposta" : "contrato"}
+                {pendingProposals.length > 0 ? t("pc.inicio.banner.verProposta") : t("pc.inicio.banner.verContrato")}
                 <ArrowRight className="h-4 w-4" />
               </Button>
             </div>
@@ -258,7 +247,7 @@ const ClientPortal = () => {
           >
             <CardContent className="p-5">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium text-muted-foreground">Propostas</p>
+                <p className="text-sm font-medium text-muted-foreground">{t("pc.inicio.cartao.propostas")}</p>
                 <div className="p-2 rounded-lg" style={{ backgroundColor: "#F3E8FF" }}>
                   <FileText className="h-5 w-5" style={{ color: "#7C3AED" }} />
                 </div>
@@ -270,7 +259,7 @@ const ClientPortal = () => {
               </div>
               {!portal.loading && portal.pendingProposals > 0 && (
                 <p className="text-xs font-medium mt-1.5" style={{ color: "#7C3AED" }}>
-                  {portal.pendingProposals} a aguardar decisão
+                  {t("pc.inicio.cartao.aguardamDecisao", { n: portal.pendingProposals })}
                 </p>
               )}
             </CardContent>
@@ -287,7 +276,7 @@ const ClientPortal = () => {
           >
             <CardContent className="p-5">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium text-muted-foreground">Contratos</p>
+                <p className="text-sm font-medium text-muted-foreground">{t("pc.inicio.cartao.contratos")}</p>
                 <div className="p-2 rounded-lg" style={{ backgroundColor: "#DBEAFE" }}>
                   <ScrollText className="h-5 w-5" style={{ color: "#3B82F6" }} />
                 </div>
@@ -299,7 +288,7 @@ const ClientPortal = () => {
               </div>
               {!portal.loading && portal.activeContracts > 0 && (
                 <p className="text-xs font-medium mt-1.5" style={{ color: "#3B82F6" }}>
-                  {portal.activeContracts} ativo{portal.activeContracts !== 1 ? "s" : ""}
+                  {tn("pc.inicio.cartao.ativos.um", "pc.inicio.cartao.ativos.varios", portal.activeContracts, { n: portal.activeContracts })}
                 </p>
               )}
             </CardContent>
@@ -313,7 +302,7 @@ const ClientPortal = () => {
           >
             <CardContent className="p-5">
               <div className="flex items-center justify-between mb-3">
-                <p className="text-sm font-medium text-muted-foreground">Documentos</p>
+                <p className="text-sm font-medium text-muted-foreground">{t("pc.inicio.cartao.documentos")}</p>
                 <div className="p-2 rounded-lg" style={{ backgroundColor: "#D1FAE5" }}>
                   <FolderOpen className="h-5 w-5" style={{ color: "#059669" }} />
                 </div>
@@ -336,7 +325,7 @@ const ClientPortal = () => {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Clock className="h-4 w-4 text-muted-foreground" />
-                  Ações Pendentes
+                  {t("pc.inicio.acoes.titulo")}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -347,7 +336,7 @@ const ClientPortal = () => {
                 ) : portal.pendingActions.length === 0 ? (
                   <div className="text-center py-6">
                     <CheckCircle2 className="h-8 w-8 mx-auto mb-2" style={{ color: "#059669" }} />
-                    <p className="text-sm text-muted-foreground">Não tem ações pendentes de momento.</p>
+                    <p className="text-sm text-muted-foreground">{t("pc.inicio.acoes.vazio")}</p>
                   </div>
                 ) : (
                   <div className="space-y-2">
@@ -370,10 +359,13 @@ const ClientPortal = () => {
                             )}
                           </div>
                           <div>
-                            <p className="text-sm font-medium">{action.title}</p>
+                            <p className="text-sm font-medium">
+                              {action.title ||
+                                (action.type === "proposal" ? t("pc.inicio.acoes.propostaSemTitulo") : t("pc.inicio.acoes.contratoSemTitulo"))}
+                            </p>
                             <p className="text-xs text-muted-foreground">
-                              {action.type === "proposal" ? "Proposta" : "Contrato"} ·{" "}
-                              {format(new Date(action.date), "d MMM yyyy", { locale: pt })}
+                              {action.type === "proposal" ? t("pc.inicio.acoes.tipoProposta") : t("pc.inicio.acoes.tipoContrato")} ·{" "}
+                              {formatarData(action.date)}
                             </p>
                           </div>
                         </div>
@@ -387,7 +379,7 @@ const ClientPortal = () => {
                               : `/client-portal/contracts/${action.id}`
                           )}
                         >
-                          Ver e decidir
+                          {t("pc.inicio.acoes.verEDecidir")}
                           <ArrowRight className="h-3 w-3" />
                         </Button>
                       </div>
@@ -403,7 +395,7 @@ const ClientPortal = () => {
                 <div className="flex items-center justify-between">
                   <CardTitle className="text-base flex items-center gap-2">
                     <FileText className="h-4 w-4 text-muted-foreground" />
-                    As suas Propostas
+                    {t("pc.inicio.propostas.titulo")}
                   </CardTitle>
                   <Button
                     variant="ghost"
@@ -412,7 +404,7 @@ const ClientPortal = () => {
                     style={{ color: "#7C3AED" }}
                     onClick={() => navigate("/client-portal/negocios")}
                   >
-                    Ver todas <ArrowRight className="h-3 w-3" />
+                    {t("pc.inicio.propostas.verTodas")} <ArrowRight className="h-3 w-3" />
                   </Button>
                 </div>
               </CardHeader>
@@ -423,10 +415,10 @@ const ClientPortal = () => {
                   </div>
                 ) : proposals.length === 0 ? (
                   <div className="text-center py-4">
-                    <p className="text-sm text-muted-foreground">Sem propostas disponíveis.</p>
+                    <p className="text-sm text-muted-foreground">{t("pc.inicio.propostas.vazio")}</p>
                     {hasMultiple && (
                       <p className="text-xs text-muted-foreground mt-1.5">
-                        Se esperava ver outras, troque de empresa no seletor no topo da página.
+                        {t("pc.inicio.propostas.trocarEmpresa")}
                       </p>
                     )}
                   </div>
@@ -448,7 +440,7 @@ const ClientPortal = () => {
                               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                                 {p.proposal_number && <span>{p.proposal_number} ·</span>}
                                 <span>{formatCurrency(p.value)}</span>
-                                <span>· {format(new Date(p.created_at), "d MMM yyyy", { locale: pt })}</span>
+                                <span>· {formatarData(p.created_at)}</span>
                               </div>
                             </div>
                           </div>
@@ -465,7 +457,7 @@ const ClientPortal = () => {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Clock className="h-4 w-4 text-muted-foreground" />
-                  Atividade Recente
+                  {t("pc.inicio.atividade.titulo")}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -474,7 +466,7 @@ const ClientPortal = () => {
                     {[1, 2, 3].map(i => <Skeleton key={i} className="h-10 w-full" />)}
                   </div>
                 ) : activityItems.length === 0 ? (
-                  <p className="text-sm text-muted-foreground text-center py-4">Sem atividade recente.</p>
+                  <p className="text-sm text-muted-foreground text-center py-4">{t("pc.inicio.atividade.vazio")}</p>
                 ) : (
                   <div className="relative">
                     <div className="absolute left-[19px] top-3 bottom-3 w-px bg-border" />
@@ -490,7 +482,7 @@ const ClientPortal = () => {
                           <div className="pt-0.5">
                             <p className="text-sm text-foreground">{item.text}</p>
                             <p className="text-[11px] text-muted-foreground">
-                              {format(new Date(item.date), "d MMM yyyy", { locale: pt })}
+                              {formatarData(item.date)}
                             </p>
                           </div>
                         </div>
@@ -507,7 +499,7 @@ const ClientPortal = () => {
             {/* Commercial Card */}
             <Card style={{ borderRadius: 12 }}>
               <CardHeader className="pb-3">
-                <CardTitle className="text-base">O seu Comercial</CardTitle>
+                <CardTitle className="text-base">{t("pc.inicio.comercial.titulo")}</CardTitle>
               </CardHeader>
               <CardContent>
                 {portal.loading ? (
@@ -522,11 +514,11 @@ const ClientPortal = () => {
                       className="h-14 w-14 rounded-full flex items-center justify-center text-white text-lg font-bold mx-auto"
                       style={{ backgroundColor: "#7C3AED" }}
                     >
-                      {getInitials(portal.commercial.name)}
+                      {getInitials(portal.commercial.name || t("pc.inicio.comercial.semNome"))}
                     </div>
                     <div>
-                      <p className="font-semibold text-foreground">{portal.commercial.name}</p>
-                      <p className="text-xs text-muted-foreground">Gestor Comercial</p>
+                      <p className="font-semibold text-foreground">{portal.commercial.name || t("pc.inicio.comercial.semNome")}</p>
+                      <p className="text-xs text-muted-foreground">{t("pc.inicio.comercial.cargo")}</p>
                     </div>
 
                     <div className="space-y-2 text-left">
@@ -554,14 +546,14 @@ const ClientPortal = () => {
                       {portal.commercial.phone && (
                         <a href={`tel:${portal.commercial.phone}`} className="flex-1">
                           <Button variant="outline" size="sm" className="w-full gap-1.5 text-xs">
-                            <Phone className="h-3.5 w-3.5" /> Ligar
+                            <Phone className="h-3.5 w-3.5" /> {t("pc.inicio.comercial.ligar")}
                           </Button>
                         </a>
                       )}
                       {portal.commercial.email && (
                         <a href={`mailto:${portal.commercial.email}`} className="flex-1">
                           <Button variant="outline" size="sm" className="w-full gap-1.5 text-xs">
-                            <Mail className="h-3.5 w-3.5" /> Email
+                            <Mail className="h-3.5 w-3.5" /> {t("pc.inicio.comercial.email")}
                           </Button>
                         </a>
                       )}
@@ -586,7 +578,7 @@ const ClientPortal = () => {
                   </div>
                 ) : (
                   <p className="text-sm text-muted-foreground text-center py-4">
-                    Informação do comercial indisponível.
+                    {t("pc.inicio.comercial.indisponivel")}
                   </p>
                 )}
               </CardContent>
@@ -597,27 +589,27 @@ const ClientPortal = () => {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <HelpCircle className="h-4 w-4 text-muted-foreground" />
-                  Informação
+                  {t("pc.inicio.faq.titulo")}
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-4">
                   <div>
-                    <p className="text-sm font-medium text-foreground">Como funciona o portal?</p>
+                    <p className="text-sm font-medium text-foreground">{t("pc.inicio.faq.comoFunciona.pergunta")}</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Aqui pode consultar as suas propostas, aceitar ou rejeitar, ver contratos e documentos associados.
+                      {t("pc.inicio.faq.comoFunciona.resposta")}
                     </p>
                   </div>
                   <div className="border-t pt-3">
-                    <p className="text-sm font-medium text-foreground">Tem dúvidas?</p>
+                    <p className="text-sm font-medium text-foreground">{t("pc.inicio.faq.duvidas.pergunta")}</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Contacte o seu comercial diretamente ou envie uma dúvida a partir de qualquer proposta ou contrato.
+                      {t("pc.inicio.faq.duvidas.resposta")}
                     </p>
                   </div>
                   <div className="border-t pt-3">
-                    <p className="text-sm font-medium text-foreground">As propostas expiram?</p>
+                    <p className="text-sm font-medium text-foreground">{t("pc.inicio.faq.expiram.pergunta")}</p>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Sim, cada proposta tem uma data de validade. Após essa data, a proposta expira automaticamente.
+                      {t("pc.inicio.faq.expiram.resposta")}
                     </p>
                   </div>
                 </div>
@@ -629,7 +621,7 @@ const ClientPortal = () => {
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Building2 className="h-4 w-4 text-muted-foreground" />
-                  Empresa
+                  {t("pc.inicio.empresa.titulo")}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -667,7 +659,7 @@ const ClientPortal = () => {
                     </a>
                   )}
                   {!orgInfo?.email && !orgInfo?.phone && !orgInfo?.website && orgInfo?.name && (
-                    <p className="text-xs text-muted-foreground">Contacte o seu comercial para mais informações.</p>
+                    <p className="text-xs text-muted-foreground">{t("pc.inicio.empresa.contacteComercial")}</p>
                   )}
                 </div>
               </CardContent>

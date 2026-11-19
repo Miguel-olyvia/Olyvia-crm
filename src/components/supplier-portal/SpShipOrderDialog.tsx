@@ -24,6 +24,7 @@ import {
   spProductLines,
   spToShipByLine,
 } from "@/components/supplier-portal/spShipping";
+import { mensagemDeChave, resolverMensagem, usePortalT, type MensagemDoPortal } from "@/portal-i18n";
 
 const NOTE_MAX = 60;
 const CARRIER_MAX = 120;
@@ -78,6 +79,7 @@ export function SpShipOrderDialog({
   onError,
   allowAttachment = false,
 }: Props) {
+  const { t, idioma } = usePortalT();
   const toShip = useMemo(() => spToShipByLine(shipments), [shipments]);
   const lines = useMemo(
     () => spProductLines(order.lines).filter((l) => (toShip.get(l.id) ?? 0) > 0),
@@ -94,9 +96,10 @@ export function SpShipOrderDialog({
   const [notes, setNotes] = useState("");
   const [qty, setQty] = useState<Record<string, string>>({});
   const [file, setFile] = useState<File | null>(null);
-  const [noteError, setNoteError] = useState<string | null>(null);
-  const [dateError, setDateError] = useState<string | null>(null);
-  const [linesError, setLinesError] = useState<string | null>(null);
+  // Os erros guardam-se como chave e traduzem-se ao mostrar (mudar de idioma com o erro visível muda o erro).
+  const [noteError, setNoteError] = useState<MensagemDoPortal | null>(null);
+  const [dateError, setDateError] = useState<MensagemDoPortal | null>(null);
+  const [linesError, setLinesError] = useState<MensagemDoPortal | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const noteRef = useRef<HTMLInputElement>(null);
   const wasOpen = useRef(false);
@@ -118,14 +121,14 @@ export function SpShipOrderDialog({
     wasOpen.current = open;
   }, [open, lines, toShip]);
 
-  const lineError = (lineId: string): string | null => {
+  const lineError = (lineId: string): MensagemDoPortal | null => {
     const line = lines.find((l) => l.id === lineId);
     if (!line) return null;
     const max = toShip.get(lineId) ?? 0;
     const n = parseQty(qty[lineId] ?? "");
-    if (Number.isNaN(n) || n < 0) return "Quantidade inválida.";
-    if (n > max) return `Máximo ${formatSpQty(max)}.`;
-    if (spLineRequiresIntegerQty(line) && !Number.isInteger(n)) return "Só números inteiros.";
+    if (Number.isNaN(n) || n < 0) return mensagemDeChave("sp.envios.erro.quantidadeInvalida");
+    if (n > max) return mensagemDeChave("sp.envios.erro.maximo", { max: formatSpQty(max) });
+    if (spLineRequiresIntegerQty(line) && !Number.isInteger(n)) return mensagemDeChave("sp.envios.erro.soInteiros");
     return null;
   };
 
@@ -135,17 +138,17 @@ export function SpShipOrderDialog({
   }, 0);
 
   const validate = (): boolean => {
-    const nErr = noteNumber.trim() ? null : "Indique o número da guia de remessa.";
+    const nErr = noteNumber.trim() ? null : mensagemDeChave("sp.envios.erro.indiqueGuia");
     const dErr = !/^\d{4}-\d{2}-\d{2}$/.test(shipDate)
-      ? "Indique a data de expedição."
+      ? mensagemDeChave("sp.envios.erro.indiqueData")
       : minDate && shipDate < minDate
-        ? `A data não pode ser anterior à encomenda (${formatSpDate(minDate)}).`
+        ? mensagemDeChave("sp.envios.erro.dataAntesEncomenda", { data: formatSpDate(minDate) })
         : null;
     const anyLineError = lines.some((l) => lineError(l.id));
     const lErr = anyLineError
-      ? "Corrija as quantidades assinaladas."
+      ? mensagemDeChave("sp.envios.erro.corrijaQuantidades")
       : totalQty <= 0
-        ? "Indique a quantidade a expedir em pelo menos uma linha."
+        ? mensagemDeChave("sp.envios.erro.indiqueQuantidade")
         : null;
     setNoteError(nErr);
     setDateError(dErr);
@@ -196,10 +199,9 @@ export function SpShipOrderDialog({
         }}
       >
         <DialogHeader>
-          <DialogTitle>Expedir encomenda {order.order_number}</DialogTitle>
+          <DialogTitle>{t("sp.envios.dialogo.titulo", { numero: order.order_number })}</DialogTitle>
           <DialogDescription>
-            Indique a guia de remessa que segue com a mercadoria. O armazém da {order.company.name} dá entrada a partir
-            deste número.
+            {t("sp.envios.dialogo.descricao", { empresa: order.company.name })}
           </DialogDescription>
         </DialogHeader>
 
@@ -214,7 +216,7 @@ export function SpShipOrderDialog({
         >
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="sp-ship-note">Nº da guia de remessa</Label>
+              <Label htmlFor="sp-ship-note">{t("sp.envios.dialogo.guia")}</Label>
               <Input
                 id="sp-ship-note"
                 ref={noteRef}
@@ -233,12 +235,12 @@ export function SpShipOrderDialog({
               />
               {noteError && (
                 <p id="sp-ship-note-error" className="text-xs text-destructive" role="alert">
-                  {noteError}
+                  {resolverMensagem(noteError, idioma)}
                 </p>
               )}
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="sp-ship-date">Data de expedição</Label>
+              <Label htmlFor="sp-ship-date">{t("sp.envios.dialogo.dataExpedicao")}</Label>
               <Input
                 id="sp-ship-date"
                 type="date"
@@ -256,26 +258,26 @@ export function SpShipOrderDialog({
               />
               {dateError && (
                 <p id="sp-ship-date-error" className="text-xs text-destructive" role="alert">
-                  {dateError}
+                  {resolverMensagem(dateError, idioma)}
                 </p>
               )}
             </div>
             <div className="space-y-1.5 sm:col-span-2">
-              <Label htmlFor="sp-ship-carrier">Transportador (opcional)</Label>
+              <Label htmlFor="sp-ship-carrier">{t("sp.envios.dialogo.transportador")}</Label>
               <Input
                 id="sp-ship-carrier"
                 className="h-11"
                 value={carrier}
                 maxLength={CARRIER_MAX}
                 onChange={(e) => setCarrier(e.target.value)}
-                placeholder="Ex.: transporte próprio, transportadora, matrícula…"
+                placeholder={t("sp.envios.dialogo.transportadorPlaceholder")}
               />
             </div>
           </div>
 
           {allowAttachment && (
             <div className="space-y-1.5">
-              <Label htmlFor="sp-ship-file">Ficheiro da guia de remessa (opcional)</Label>
+              <Label htmlFor="sp-ship-file">{t("sp.envios.dialogo.ficheiro")}</Label>
               <Input
                 id="sp-ship-file"
                 type="file"
@@ -285,31 +287,31 @@ export function SpShipOrderDialog({
                 onChange={(e) => setFile(e.target.files?.[0] ?? null)}
               />
               <p id="sp-ship-file-help" className="text-xs text-muted-foreground">
-                PDF ou foto da guia.
+                {t("sp.envios.dialogo.ficheiroAjuda")}
               </p>
             </div>
           )}
 
           <div role="group" aria-labelledby="sp-ship-lines-title" className="space-y-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <p id="sp-ship-lines-title" className="text-sm font-medium">Quantidades a expedir</p>
+              <p id="sp-ship-lines-title" className="text-sm font-medium">{t("sp.envios.dialogo.quantidades")}</p>
               <div className="flex gap-2">
                 <Button type="button" variant="outline" className="h-11" onClick={() => setAll(true)}>
-                  Expedir tudo
+                  {t("sp.envios.dialogo.expedirTudo")}
                 </Button>
                 <Button type="button" variant="ghost" className="h-11" onClick={() => setAll(false)}>
-                  Limpar
+                  {t("sp.envios.dialogo.limpar")}
                 </Button>
               </div>
             </div>
             <div className="overflow-x-auto rounded-md border">
               <table className="w-full text-sm">
-                <caption className="sr-only">Quantidade a expedir por linha (máximo = o que falta expedir)</caption>
+                <caption className="sr-only">{t("sp.envios.dialogo.resumoQuantidades")}</caption>
                 <thead className="bg-muted/50 text-left text-xs text-muted-foreground">
                   <tr>
-                    <th scope="col" className="px-3 py-2 font-medium">Artigo</th>
-                    <th scope="col" className="px-3 py-2 text-right font-medium">Por expedir</th>
-                    <th scope="col" className="px-3 py-2 text-right font-medium">Expedir</th>
+                    <th scope="col" className="px-3 py-2 font-medium">{t("sp.envios.coluna.artigo")}</th>
+                    <th scope="col" className="px-3 py-2 text-right font-medium">{t("sp.envios.coluna.porExpedir")}</th>
+                    <th scope="col" className="px-3 py-2 text-right font-medium">{t("sp.envios.coluna.expedir")}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -318,7 +320,7 @@ export function SpShipOrderDialog({
                     const unit = spLineUnitCode(l);
                     const integer = spLineRequiresIntegerQty(l);
                     const err = lineError(l.id);
-                    const name = l.description || l.supplier_sku || l.sku || "Artigo";
+                    const name = l.description || l.supplier_sku || l.sku || t("sp.envios.artigoOmissao");
                     const errId = `sp-ship-qty-error-${l.id}`;
                     return (
                       <tr key={l.id} className="border-t align-top">
@@ -337,7 +339,7 @@ export function SpShipOrderDialog({
                             min={0}
                             max={max}
                             step={integer ? 1 : "any"}
-                            aria-label={`Quantidade a expedir: ${name}`}
+                            aria-label={t("sp.envios.dialogo.quantidadeAria", { nome: name })}
                             aria-invalid={!!err}
                             aria-describedby={err ? errId : undefined}
                             className="ml-auto h-11 w-28 text-right"
@@ -349,7 +351,7 @@ export function SpShipOrderDialog({
                           />
                           {err && (
                             <p id={errId} className="mt-1 text-xs text-destructive">
-                              {err}
+                              {resolverMensagem(err, idioma)}
                             </p>
                           )}
                         </td>
@@ -361,27 +363,27 @@ export function SpShipOrderDialog({
             </div>
             {linesError && (
               <p className="text-xs text-destructive" role="alert">
-                {linesError}
+                {resolverMensagem(linesError, idioma)}
               </p>
             )}
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="sp-ship-notes">Observações (opcional)</Label>
+            <Label htmlFor="sp-ship-notes">{t("sp.envios.dialogo.observacoes")}</Label>
             <Textarea
               id="sp-ship-notes"
               rows={2}
               maxLength={NOTES_MAX}
               value={notes}
               onChange={(e) => setNotes(e.target.value.slice(0, NOTES_MAX))}
-              placeholder="Ex.: 2 paletes, descarga com empilhador"
+              placeholder={t("sp.envios.dialogo.observacoesPlaceholder")}
             />
           </div>
         </form>
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button variant="outline" className="h-11" onClick={() => onOpenChange(false)} disabled={submitting}>
-            Cancelar
+            {t("sp.envios.dialogo.cancelar")}
           </Button>
           <Button type="submit" form="sp-ship-order-form" className="h-11 gap-2" disabled={submitting}>
             {submitting ? (
@@ -389,7 +391,7 @@ export function SpShipOrderDialog({
             ) : (
               <Truck className="h-4 w-4" aria-hidden="true" />
             )}
-            Expedir · {formatSpQty(totalQty)}
+            {t("sp.envios.dialogo.botao", { qtd: formatSpQty(totalQty) })}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -10,6 +10,9 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import type { Database, Json } from "@/integrations/supabase/types";
+import { lerIdioma } from "@/portal-i18n/armazemIdioma";
+import { traduzir } from "@/portal-i18n/traduzir";
+import type { PortalIdioma } from "@/portal-i18n/tipos";
 
 // Fotos do catálogo (Edge supplier-catalog-image): upload / remover / reordenar e URL público.
 export {
@@ -449,14 +452,17 @@ export class SupplierPortalRpcError extends Error {
   readonly code: string | null;
   readonly hint: string | null;
   readonly details: string | null;
-  /** Mensagens próprias da chamada, por hint (sobrepõem-se às genéricas de spErrorMessage). */
+  /**
+   * Mensagens próprias da chamada, por hint (sobrepõem-se às genéricas de spErrorMessage). Os valores são CHAVES
+   * do dicionário do portal (`sp.erro.*`), traduzidas ao mostrar, no idioma de então.
+   */
   readonly hintMessages: Partial<Record<SpErrorHint, string>>;
 
   constructor(
     raw: { message?: string; code?: string; hint?: string; details?: string } | null | undefined,
     hintMessages: Partial<Record<SpErrorHint, string>> = {},
   ) {
-    super(raw?.message || "Erro desconhecido");
+    super(raw?.message || traduzir(lerIdioma(), "sp.erro.desconhecido"));
     this.name = "SupplierPortalRpcError";
     this.code = raw?.code ?? null;
     this.hint = raw?.hint ?? null;
@@ -474,53 +480,55 @@ export function isNoSupplierAccess(err: unknown): boolean {
 }
 
 /**
- * Mensagem para o utilizador. O ecrã decide pelo `hint` (estável); a
- * `message` do servidor vem em português e serve para validação/conflitos.
+ * Mensagem para o utilizador, no idioma do portal (por omissão o que está ativo agora). O ecrã decide pelo `hint`
+ * (estável); a `message` do servidor vem em português e fica como vem (not_found, too_many_rows, conflict,
+ * validation, order_closed e duplicate_note quando o servidor manda texto): só as mensagens de recurso se traduzem.
  */
-export function spErrorMessage(err: unknown): string {
+export function spErrorMessage(err: unknown, idioma: PortalIdioma = lerIdioma()): string {
+  const t = (chave: string): string => traduzir(idioma, chave);
   const hint = getSpHint(err);
   const raw = err instanceof Error ? err.message : "";
   const code = err instanceof SupplierPortalRpcError ? err.code : null;
 
   const own = err instanceof SupplierPortalRpcError && hint ? err.hintMessages[hint as SpErrorHint] : undefined;
-  if (own) return own;
+  if (own) return t(own);
 
   switch (hint) {
     case "no_supplier_access":
-      return "Sem acesso ativo ao portal do fornecedor. Contacte a empresa que o convidou.";
+      return t("sp.erro.semAcesso");
     case "not_owner":
-      return "Só o utilizador principal da conta pode alterar o catálogo.";
+      return t("sp.erro.soPrincipalCatalogo");
     case "not_found":
-      return raw || "O artigo não existe ou já não está disponível.";
+      return raw || t("sp.erro.naoEncontrado");
     case "too_many_rows":
-      return raw || "Demasiadas linhas: o máximo é 5000 por importação.";
+      return raw || t("sp.erro.demasiadasLinhas");
     case "conflict":
-      return raw || "Já existe um artigo com esta referência.";
+      return raw || t("sp.erro.jaExiste");
     case "validation":
-      return raw || "Dados inválidos.";
+      return raw || t("sp.erro.dadosInvalidos");
     case "stale_revision":
-      return "A empresa atualizou esta encomenda entretanto. Reveja os dados atualizados e confirme de novo.";
+      return t("sp.erro.encomendaAtualizada");
     case "order_closed":
-      return raw || "Esta encomenda já foi recebida ou cancelada: já não pode ser confirmada.";
+      return raw || t("sp.erro.encomendaFechada");
     case "not_confirmed":
-      return "Confirme a encomenda antes de a expedir.";
+      return t("sp.erro.confirmeAntesDeExpedir");
     case "duplicate_note":
-      return raw || "Já existe uma guia com este número para esta empresa. Verifique o número da guia.";
+      return raw || t("sp.erro.guiaRepetida");
     default:
       break;
   }
 
   const lower = raw.toLowerCase();
   if (lower.includes("failed to fetch") || lower.includes("network") || lower.includes("load failed")) {
-    return "Sem ligação ao servidor. Verifique a ligação à internet e tente novamente.";
+    return t("sp.erro.semLigacao");
   }
   if (code === "57014" || lower.includes("statement timeout")) {
-    return "A operação demorou demasiado tempo. Tente novamente ou use um ficheiro mais pequeno.";
+    return t("sp.erro.demorou");
   }
   if (code === "42501") {
-    return "Sem permissão para esta operação.";
+    return t("sp.erro.semPermissao");
   }
-  return raw || "Ocorreu um erro inesperado. Tente novamente.";
+  return raw || t("sp.erro.inesperado");
 }
 
 // ─── Chamadas ───────────────────────────────────────────────────────────────
@@ -714,7 +722,7 @@ export function isSpFunctionMissing(err: unknown): boolean {
 
 /** not_owner nestas RPCs não é sobre o catálogo: mensagem própria. */
 const SUPPLIER_DATA_HINT_MESSAGES: Partial<Record<SpErrorHint, string>> = {
-  not_owner: "Só o responsável principal da conta pode fazer esta alteração.",
+  not_owner: "sp.erro.soPrincipalDados",
 };
 
 export async function spGetMySupplierData(): Promise<SpMySupplierData> {
@@ -758,13 +766,13 @@ export async function spUpdateMySupplierData(data: Partial<SpSupplierDataInput>)
 
 /** Mensagens próprias da expedição (o genérico fala de confirmar / artigos). */
 const SHIP_HINT_MESSAGES: Partial<Record<SpErrorHint, string>> = {
-  not_found: "A encomenda não existe ou já não está disponível no portal.",
-  order_closed: "Esta encomenda já foi recebida ou cancelada: já não pode ser expedida.",
+  not_found: "sp.erro.encomendaNaoDisponivel",
+  order_closed: "sp.erro.encomendaFechadaExpedir",
 };
 
 const ATTACH_HINT_MESSAGES: Partial<Record<SpErrorHint, string>> = {
-  not_found: "A guia não existe ou já não está disponível no portal.",
-  order_closed: "Esta guia foi cancelada pela empresa: já não pode anexar ficheiros.",
+  not_found: "sp.erro.guiaNaoDisponivel",
+  order_closed: "sp.erro.guiaCancelada",
 };
 
 const blankToNull = (v: string | null | undefined): string | null => {
@@ -870,9 +878,10 @@ export async function spAttachDeliveryNoteFile(params: {
 
 /** Erro de tipo/tamanho do anexo antes de carregar; null = serve. */
 export function deliveryNoteFileProblem(file: { type: string; size: number }): string | null {
-  if (!SP_DELIVERY_NOTE_FILE_TYPES[file.type]) return "Tipo de ficheiro não permitido (só PDF, JPEG, PNG ou WEBP).";
-  if (file.size <= 0) return "O ficheiro está vazio.";
-  if (file.size > SP_DELIVERY_NOTE_FILE_MAX_BYTES) return "O ficheiro tem de ter até 10 MB.";
+  const idioma = lerIdioma();
+  if (!SP_DELIVERY_NOTE_FILE_TYPES[file.type]) return traduzir(idioma, "sp.erro.ficheiroTipo");
+  if (file.size <= 0) return traduzir(idioma, "sp.erro.ficheiroVazio");
+  if (file.size > SP_DELIVERY_NOTE_FILE_MAX_BYTES) return traduzir(idioma, "sp.erro.ficheiroGrande");
   return null;
 }
 
@@ -880,7 +889,7 @@ export function deliveryNoteFileProblem(file: { type: string; size: number }): s
 export function deliveryNoteFilePath(orgId: string, noteId: string, mime: string, id: string = crypto.randomUUID()): string {
   const ext = SP_DELIVERY_NOTE_FILE_TYPES[mime];
   if (!ext) {
-    throw new SupplierPortalRpcError({ message: "Tipo de ficheiro não permitido (só PDF, JPEG, PNG ou WEBP).", hint: "validation" });
+    throw new SupplierPortalRpcError({ message: traduzir(lerIdioma(), "sp.erro.ficheiroTipo"), hint: "validation" });
   }
   return `${orgId}/supplier-delivery-notes/${noteId}/${id}.${ext}`;
 }
@@ -928,7 +937,9 @@ export async function spUploadDeliveryNoteFile(params: {
     .from("documents-quarantine")
     .upload(path, params.file, { contentType: params.file.type, upsert: false });
   if (uploadError) {
-    throw new SupplierPortalRpcError({ message: `O ficheiro não foi carregado: ${uploadError.message}` });
+    throw new SupplierPortalRpcError({
+      message: traduzir(lerIdioma(), "sp.erro.ficheiroNaoCarregado", { motivo: uploadError.message }),
+    });
   }
 
   const { data, error } = await supabase.functions.invoke("validate-upload", {
@@ -937,7 +948,7 @@ export async function spUploadDeliveryNoteFile(params: {
   const body = data as { ok?: boolean; attachment?: SpAttachDeliveryNoteFileResult } | null;
   if (error || !body?.ok || !body.attachment) {
     const e = await readEdgeError(error, data);
-    throw new SupplierPortalRpcError({ message: e.message || "O ficheiro foi recusado.", hint: e.hint }, ATTACH_HINT_MESSAGES);
+    throw new SupplierPortalRpcError({ message: e.message || traduzir(lerIdioma(), "sp.erro.ficheiroRecusado"), hint: e.hint }, ATTACH_HINT_MESSAGES);
   }
   return body.attachment;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
@@ -19,28 +19,43 @@ import { useToast } from "@/hooks/use-toast";
 import { useCooldown, cooldownLabel, OTP_COOLDOWN_SECONDS } from "@/hooks/useCooldown";
 import { OtpCooldownNotice } from "@/components/ui/otp-cooldown-notice";
 import { ArrowLeft, ScrollText, Download, CheckSquare, FileDown, Smartphone, ShieldCheck, Loader2 } from "lucide-react";
-import { format } from "date-fns";
-import { pt } from "date-fns/locale";
 import DOMPurify from "dompurify";
 import { formatCurrency } from "@/lib/utils";
-import { CONTRACT_STATUS_LABELS as STATUS_LABELS } from "@/constants/contractStatus";
+import { MOTIVOS_REJEICAO_CONTRATO } from "@/components/portal/motivosRejeicao";
+import {
+  mensagemDeChave,
+  mensagemDeTexto,
+  resolverMensagem,
+  usePortalFormato,
+  usePortalT,
+  type MensagemDoPortal,
+} from "@/portal-i18n";
 import { PassosDoNegocio, passoDoNegocio } from "@/components/portal/negocio/PassosDoNegocio";
 import { ConversaDoNegocio } from "@/components/portal/negocio/ConversaDoNegocio";
+import { ClausulasObra } from "@/components/portal/obra/ClausulasObra";
+import { contratoDaVista } from "@/components/portal/obra/dadosObra";
+import { useVistaObra } from "@/components/portal/obra/useVistaObra";
 import { injectSignaturesIntoBlock, resolveContractDocument, downloadContractDocumentPdf } from "@/components/contracts/contractDocument";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
-const REJECTION_REASONS = [
-  "Condições não adequadas",
-  "Preço alto",
-  "Encontrei alternativa",
-  "Vou adiar",
-  "Outro",
-];
+// Código de estado do contrato (vem da base, não muda) -> chave da etiqueta. Um estado sem etiqueta aparece como o código.
+const ESTADO_CHAVES: Readonly<Record<string, string>> = {
+  draft: "pc.contratoDet.estado.draft",
+  pending: "pc.contratoDet.estado.pending",
+  sent: "pc.contratoDet.estado.sent",
+  active: "pc.contratoDet.estado.active",
+  signed: "pc.contratoDet.estado.signed",
+  rejected: "pc.contratoDet.estado.rejected",
+  expired: "pc.contratoDet.estado.expired",
+  cancelled: "pc.contratoDet.estado.cancelled",
+};
 
 const ClientPortalContractDetail = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { t, idioma } = usePortalT();
+  const { formatarData, formatarDataHora } = usePortalFormato();
   const otpCooldown = useCooldown(OTP_COOLDOWN_SECONDS);
   const otpSendingRef = useRef(false);
 
@@ -55,7 +70,9 @@ const ClientPortalContractDetail = () => {
   // O Reenviar não muda o passo (o campo do código fica); só desactiva o botão durante o pedido.
   const [reenviando, setReenviando] = useState(false);
   const [maskedPhone, setMaskedPhone] = useState("");
-  const [otpError, setOtpError] = useState("");
+  // Guarda a CHAVE (ou o texto do servidor) e traduz ao mostrar: mudar de idioma muda o erro visível.
+  const [otpErro, setOtpError] = useState<MensagemDoPortal | null>(null);
+  const otpError = resolverMensagem(otpErro, idioma);
 
   const [showReject, setShowReject] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
@@ -67,6 +84,12 @@ const ClientPortalContractDetail = () => {
   // Link de email pode abrir um contrato de outra empresa do grupo: a empresa
   // ativa acompanha o documento em vez de o esconder.
   useSyncActiveOrgWithDocument(contract?.organization_id);
+
+  // O negócio do contrato com a vista do cliente: por baixo da minuta, as cláusulas do negócio e as adendas assinadas (só leitura;
+  // o corpo gravado do contrato não muda). Sem vista, fica como sempre.
+  const vistaObra = useVistaObra(contract?.negocio_id, "client-portal-contract");
+  const contractStatus: string | undefined = contract?.status;
+  const obra = useMemo(() => contratoDaVista(vistaObra, { proposta: "accepted", contrato: contractStatus }), [vistaObra, contractStatus]);
 
   useEffect(() => {
     if (!id) return;
@@ -129,22 +152,22 @@ const ClientPortalContractDetail = () => {
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const handleDownloadContractPdf = async () => {
     if (!contract?.organization_id) {
-      toast({ title: "Não foi possível gerar o PDF", description: "Contrato sem organização associada.", variant: "destructive" });
+      toast({ title: t("pc.contratoDet.pdf.naoGerar"), description: t("pc.contratoDet.pdf.semOrganizacao"), variant: "destructive" });
       return;
     }
     setDownloadingPdf(true);
     try {
       const resolved = await resolveContractDocument(contract, contract.organization_id);
       if (!resolved) {
-        toast({ title: "Não foi possível gerar o PDF", description: "Este contrato ainda não tem conteúdo.", variant: "destructive" });
+        toast({ title: t("pc.contratoDet.pdf.naoGerar"), description: t("pc.contratoDet.pdf.semConteudo"), variant: "destructive" });
         return;
       }
-      const label = contract.contract_number || contract.title || "Contrato";
+      const label = contract.contract_number || contract.title || t("pc.contratoDet.tituloPadrao");
       await downloadContractDocumentPdf(resolved, label, label);
     } catch (error: any) {
       console.error("[portal] contract PDF download failed:", error);
       captureFlowError(error, "client-portal-contract");
-      toast({ title: "Erro ao gerar o PDF", description: error?.message || "Tente novamente.", variant: "destructive" });
+      toast({ title: t("pc.contratoDet.pdf.erroTitulo"), description: error?.message || t("pc.contratoDet.pdf.tenteNovamente"), variant: "destructive" });
     } finally {
       setDownloadingPdf(false);
     }
@@ -162,7 +185,7 @@ const ClientPortalContractDetail = () => {
     otpSendingRef.current = true;
     if (isResend) setReenviando(true);
     else setOtpStep("sending");
-    setOtpError("");
+    setOtpError(null);
     try {
       const { data, error } = await supabase.functions.invoke("sms-otp", {
         body: { action: "send_otp", reference_id: id, reference_type: "contract", purpose: "contract_signature" },
@@ -171,7 +194,7 @@ const ClientPortalContractDetail = () => {
       if (error) throw new Error(error.message);
       if (data?.error) {
         if (data.error === "no_phone") {
-          setOtpError("Não foi encontrado um número de telefone associado à sua conta. Contacte o comercial.");
+          setOtpError(mensagemDeChave("pc.contratoDet.sms.semTelefone"));
           if (!isResend) setOtpStep("idle");
           return;
         }
@@ -181,12 +204,12 @@ const ClientPortalContractDetail = () => {
       setMaskedPhone(data.masked_phone || "");
       setOtpStep("input");
       if (!isResend) otpCooldown.iniciar();
-      toast({ title: "Código SMS enviado", description: `Enviámos um código para ${data.masked_phone}` });
+      toast({ title: t("pc.contratoDet.sms.enviadoTitulo"), description: t("pc.contratoDet.sms.enviadoTexto", { telefone: data.masked_phone }) });
     } catch (err: any) {
-      setOtpError(err.message);
+      setOtpError(mensagemDeTexto(err.message));
       if (!isResend) setOtpStep("idle");
       captureFlowError(err, "client-portal-contract");
-      toast({ title: "Erro ao enviar SMS", description: err.message, variant: "destructive" });
+      toast({ title: t("pc.contratoDet.sms.erroEnviar"), description: err.message, variant: "destructive" });
     } finally {
       otpSendingRef.current = false;
       setReenviando(false);
@@ -204,7 +227,7 @@ const ClientPortalContractDetail = () => {
     if (!id) return; // H4
     if (otpCode.length !== 6) return;
     setOtpStep("verifying");
-    setOtpError("");
+    setOtpError(null);
     try {
       const { data, error } = await supabase.functions.invoke("sms-otp", {
         body: { action: "verify_otp", reference_id: id, reference_type: "contract", code: otpCode, purpose: "contract_signature" },
@@ -212,7 +235,7 @@ const ClientPortalContractDetail = () => {
 
       if (error) throw new Error(error.message);
       if (data?.error) {
-        setOtpError(data.message || "Código inválido");
+        setOtpError(data.message ? mensagemDeTexto(data.message) : mensagemDeChave("pc.contratoDet.sms.codigoInvalido"));
         setOtpStep("input");
         setOtpCode("");
         return;
@@ -222,7 +245,7 @@ const ClientPortalContractDetail = () => {
       await signContractAfterOtp();
       setOtpStep("verified");
     } catch (err: any) {
-      setOtpError(err.message);
+      setOtpError(mensagemDeTexto(err.message));
       setOtpStep("input");
       setOtpCode("");
     }
@@ -271,11 +294,11 @@ const ClientPortalContractDetail = () => {
       }
       if (data?.error) throw new Error(data.message || data.error);
 
-      toast({ title: "Contrato assinado com sucesso! 🎉", description: "Obrigado pela sua confirmação." });
+      toast({ title: t("pc.contratoDet.assinatura.sucessoTitulo"), description: t("pc.contratoDet.assinatura.sucessoTexto") });
       await loadData(); // M11
     } catch (err: any) {
       captureFlowError(err, "client-portal-contract");
-      toast({ title: "Erro ao assinar", description: err.message, variant: "destructive" });
+      toast({ title: t("pc.contratoDet.assinatura.erroTitulo"), description: err.message, variant: "destructive" });
       throw err; // M9 — propagate so verify catch resets step
     } finally {
       setActionLoading(false);
@@ -289,14 +312,14 @@ const ClientPortalContractDetail = () => {
       await supabase.functions.invoke("client-portal-action", {
         body: { action: "reject_contract", contract_id: id, reason_code: rejectReason, reason_text: rejectNotes },
       });
-      toast({ title: "Contrato rejeitado", description: "Obrigado pelo seu feedback." });
+      toast({ title: t("pc.contratoDet.rejeitar.feitoTitulo"), description: t("pc.contratoDet.rejeitar.feitoTexto") });
       setShowReject(false);
       setRejectReason("");
       setRejectNotes("");
       await loadData(); // M11
     } catch (err: any) {
       captureFlowError(err, "client-portal-contract");
-      toast({ title: "Erro", description: err.message, variant: "destructive" });
+      toast({ title: t("pc.contratoDet.erro"), description: err.message, variant: "destructive" });
     } finally {
       setActionLoading(false);
     }
@@ -309,12 +332,12 @@ const ClientPortalContractDetail = () => {
       await supabase.functions.invoke("client-portal-action", {
         body: { action: "ask_question", document_type: "contract", document_id: id, message: questionText.trim() },
       });
-      toast({ title: "Dúvida enviada!", description: "O comercial será notificado e entrará em contacto." });
+      toast({ title: t("pc.contratoDet.duvida.enviadaTitulo"), description: t("pc.contratoDet.duvida.enviadaTexto") });
       setShowQuestion(false);
       setQuestionText("");
     } catch (err: any) {
       captureFlowError(err, "client-portal-contract");
-      toast({ title: "Erro", description: err.message, variant: "destructive" });
+      toast({ title: t("pc.contratoDet.erro"), description: err.message, variant: "destructive" });
     } finally {
       setActionLoading(false);
     }
@@ -336,9 +359,9 @@ const ClientPortalContractDetail = () => {
     return (
       <ClientPortalLayout>
         <div className="text-center py-12">
-          <p className="text-muted-foreground">Contrato não encontrado.</p>
+          <p className="text-muted-foreground">{t("pc.contratoDet.naoEncontrado")}</p>
           <Button variant="ghost" onClick={() => navigate("/client-portal/negocios")} className="mt-4">
-            <ArrowLeft className="h-4 w-4 mr-2" /> Voltar
+            <ArrowLeft className="h-4 w-4 mr-2" /> {t("pc.contratoDet.voltar")}
           </Button>
         </div>
       </ClientPortalLayout>
@@ -349,20 +372,20 @@ const ClientPortalContractDetail = () => {
     <ClientPortalLayout>
       <div className="space-y-5 max-w-4xl mx-auto py-4">
         <Button variant="ghost" size="sm" onClick={() => navigate("/client-portal/negocios")} className="gap-1">
-          <ArrowLeft className="h-4 w-4" /> Voltar
+          <ArrowLeft className="h-4 w-4" /> {t("pc.contratoDet.voltar")}
         </Button>
 
         {contract.negocio_id && (
-          <PassosDoNegocio passo={passoDoNegocio("accepted", contract.status)} titulo={contract.contract_number || "Contrato"} total={contract.total_value} />
+          <PassosDoNegocio passo={passoDoNegocio("accepted", contract.status)} titulo={contract.contract_number || t("pc.contratoDet.tituloPadrao")} total={contract.total_value} />
         )}
 
         {/* Decision Banner */}
         {canSign && otpStep !== "verified" && (
           <div className="rounded-xl border bg-gradient-to-r from-primary/5 to-primary/10 p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <div className="flex-1">
-              <h3 className="text-lg font-bold text-foreground">Contrato aguarda a sua decisão</h3>
+              <h3 className="text-lg font-bold text-foreground">{t("pc.contratoDet.banner.decisaoTitulo")}</h3>
               <p className="text-sm text-muted-foreground mt-1">
-                Reveja o contrato abaixo, aceite ou peça alterações.
+                {t("pc.contratoDet.banner.decisaoTexto")}
               </p>
             </div>
           </div>
@@ -371,20 +394,20 @@ const ClientPortalContractDetail = () => {
         {/* Signed Banner */}
         {isSigned && (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 dark:bg-emerald-950 dark:border-emerald-800 p-5">
-            <h3 className="text-lg font-bold text-emerald-700 dark:text-emerald-300">✅ Contrato assinado</h3>
+            <h3 className="text-lg font-bold text-emerald-700 dark:text-emerald-300">{t("pc.contratoDet.banner.assinado")}</h3>
             {contract.signature_date && (
               <p className="text-sm text-emerald-600 dark:text-emerald-400 mt-1">
-                Assinado em {format(new Date(contract.signature_date), "d 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt })}
+                {t("pc.contratoDet.assinadoEm", { data: formatarDataHora(contract.signature_date, "longo") })}
               </p>
             )}
             {contract.signed_by_name && (
               <p className="text-sm text-emerald-600 dark:text-emerald-400 mt-1">
-                Assinado por: <span className="font-semibold">{contract.signed_by_name}</span>
+                {t("pc.contratoDet.banner.assinadoPor")} <span className="font-semibold">{contract.signed_by_name}</span>
               </p>
             )}
             {contract.signature_ip && (
               <p className="text-xs text-emerald-500 dark:text-emerald-500 mt-1">
-                IP: {contract.signature_ip} • Verificação por SMS OTP
+                {t("pc.contratoDet.banner.ip", { ip: contract.signature_ip })}
               </p>
             )}
           </div>
@@ -393,24 +416,24 @@ const ClientPortalContractDetail = () => {
         {/* Rejected Banner */}
         {isRejected && (
           <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-5">
-            <h3 className="text-lg font-bold text-destructive">❌ Contrato rejeitado</h3>
+            <h3 className="text-lg font-bold text-destructive">{t("pc.contratoDet.banner.rejeitado")}</h3>
           </div>
         )}
 
         {/* Cancelled Banner */}
         {isCancelled && (
           <div className="rounded-xl border border-destructive/20 bg-destructive/5 p-5">
-            <h3 className="text-lg font-bold text-destructive">🚫 Contrato anulado</h3>
+            <h3 className="text-lg font-bold text-destructive">{t("pc.contratoDet.banner.anulado")}</h3>
             {contract.cancellation_reason && (
-              <p className="text-sm text-muted-foreground mt-1">Motivo: {contract.cancellation_reason}</p>
+              <p className="text-sm text-muted-foreground mt-1">{t("pc.contratoDet.banner.motivo", { motivo: contract.cancellation_reason })}</p>
             )}
             {contract.cancelled_at && (
               <p className="text-xs text-muted-foreground mt-1">
-                Anulado em {format(new Date(contract.cancelled_at), "d 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt })}
+                {t("pc.contratoDet.anuladoEm", { data: formatarDataHora(contract.cancelled_at, "longo") })}
               </p>
             )}
             <p className="text-sm text-muted-foreground mt-2">
-              Este contrato deixou de estar em vigor. Se lhe for enviado um contrato substituto, encontrará essa notificação separadamente.
+              {t("pc.contratoDet.banner.anuladoTexto")}
             </p>
           </div>
         )}
@@ -421,37 +444,37 @@ const ClientPortalContractDetail = () => {
             <div>
               <CardTitle className="flex items-center gap-2">
                 <ScrollText className="h-5 w-5" />
-                Contrato {contract.contract_number || ""}
+                {t("pc.contratoDet.dados.titulo", { numero: contract.contract_number || "" })}
               </CardTitle>
             </div>
             <Badge variant="outline" className="shrink-0">
-              📋 {STATUS_LABELS[contract.status] || contract.status}
+              📋 {Object.prototype.hasOwnProperty.call(ESTADO_CHAVES, contract.status) ? t(ESTADO_CHAVES[contract.status]) : contract.status}
             </Badge>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               {contract.contract_number && (
                 <div className="bg-muted/50 rounded-lg p-3">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Número</p>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">{t("pc.contratoDet.dados.numero")}</p>
                   <p className="font-bold text-lg">{contract.contract_number}</p>
                 </div>
               )}
               {contract.total_value != null && (
                 <div className="bg-muted/50 rounded-lg p-3">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Valor</p>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">{t("pc.contratoDet.dados.valor")}</p>
                   <p className="font-bold text-lg text-primary">{formatCurrency(contract.total_value)}</p>
                 </div>
               )}
               {contract.start_date && (
                 <div className="bg-muted/50 rounded-lg p-3">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Início</p>
-                  <p className="font-bold text-lg">{format(new Date(contract.start_date), "dd/MM/yyyy", { locale: pt })}</p>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">{t("pc.contratoDet.dados.inicio")}</p>
+                  <p className="font-bold text-lg">{formatarData(contract.start_date, "numerico")}</p>
                 </div>
               )}
               {contract.end_date && (
                 <div className="bg-muted/50 rounded-lg p-3">
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Fim</p>
-                  <p className="font-bold text-lg">{format(new Date(contract.end_date), "dd/MM/yyyy", { locale: pt })}</p>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">{t("pc.contratoDet.dados.fim")}</p>
+                  <p className="font-bold text-lg">{formatarData(contract.end_date, "numerico")}</p>
                 </div>
               )}
             </div>
@@ -462,7 +485,7 @@ const ClientPortalContractDetail = () => {
         {contract.contract_body_html && (
           <Card>
             <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0">
-              <CardTitle className="text-base">Corpo do Contrato</CardTitle>
+              <CardTitle className="text-base">{t("pc.contratoDet.corpo.titulo")}</CardTitle>
               <Button
                 variant="outline"
                 size="sm"
@@ -473,7 +496,7 @@ const ClientPortalContractDetail = () => {
                 {downloadingPdf
                   ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
                   : <FileDown className="h-3.5 w-3.5" />}
-                {downloadingPdf ? "A gerar…" : "Descarregar PDF"}
+                {downloadingPdf ? t("pc.contratoDet.corpo.aGerar") : t("pc.contratoDet.corpo.descarregarPdf")}
               </Button>
             </CardHeader>
             <CardContent>
@@ -504,11 +527,14 @@ const ClientPortalContractDetail = () => {
           </Card>
         )}
 
+        {/* As cláusulas do negócio e as adendas assinadas (a vista do cliente), por baixo da minuta */}
+        {obra && <ClausulasObra dados={obra} idioma={idioma} />}
+
         {/* Documents */}
         {documents.length > 0 && (
           <Card>
             <CardHeader>
-              <CardTitle className="text-base">Documentos Anexos</CardTitle>
+              <CardTitle className="text-base">{t("pc.contratoDet.anexos.titulo")}</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
@@ -518,12 +544,12 @@ const ClientPortalContractDetail = () => {
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{doc.file_name}</p>
                       <p className="text-xs text-muted-foreground">
-                        {doc.document_type} • {format(new Date(doc.created_at), "d MMM yyyy", { locale: pt })}
+                        {doc.document_type} • {formatarData(doc.created_at)}
                       </p>
                     </div>
                     <Button variant="ghost" size="sm" onClick={async () => {
                       const { data, error } = await supabase.storage.from("documents").download(doc.file_url);
-                      if (error || !data) { toast({ title: "Erro ao descarregar", variant: "destructive" }); return; }
+                      if (error || !data) { toast({ title: t("pc.contratoDet.anexos.erroDescarregar"), variant: "destructive" }); return; }
                       // M3: full download pattern (Firefox/Safari safe)
                       const url = URL.createObjectURL(data);
                       const a = document.createElement("a");
@@ -549,10 +575,10 @@ const ClientPortalContractDetail = () => {
             <CardHeader>
               <CardTitle className="text-base flex items-center gap-2">
                 <Smartphone className="h-5 w-5" />
-                Verificação por SMS
+                {t("pc.contratoDet.sms.titulo")}
               </CardTitle>
               <p className="text-sm text-muted-foreground">
-                Para aceitar este contrato, enviaremos um código de verificação por SMS para o seu telemóvel.
+                {t("pc.contratoDet.sms.descricao")}
               </p>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -565,7 +591,7 @@ const ClientPortalContractDetail = () => {
                     disabled={actionLoading}
                   >
                     <Smartphone className="h-5 w-5" />
-                    Enviar código SMS
+                    {t("pc.contratoDet.sms.enviarCodigo")}
                   </Button>
                   {otpError && (
                     <p className="text-sm text-destructive">{otpError}</p>
@@ -576,7 +602,7 @@ const ClientPortalContractDetail = () => {
               {otpStep === "sending" && (
                 <div className="text-center space-y-3 py-4">
                   <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
-                  <p className="text-sm text-muted-foreground">A enviar código SMS...</p>
+                  <p className="text-sm text-muted-foreground">{t("pc.contratoDet.sms.aEnviar")}</p>
                 </div>
               )}
 
@@ -584,9 +610,9 @@ const ClientPortalContractDetail = () => {
                 <div className="text-center space-y-4">
                   <div className="space-y-1">
                     <p className="text-sm text-muted-foreground">
-                      Código enviado para <span className="font-mono font-bold text-foreground">{maskedPhone}</span>
+                      {t("pc.contratoDet.sms.codigoEnviadoPara")} <span className="font-mono font-bold text-foreground">{maskedPhone}</span>
                     </p>
-                    <p className="text-xs text-muted-foreground">Válido por 5 minutos</p>
+                    <p className="text-xs text-muted-foreground">{t("pc.contratoDet.sms.validade")}</p>
                   </div>
                   <div className="flex justify-center">
                     <InputOTP autoFocus maxLength={6} value={otpCode} onChange={setOtpCode}>
@@ -603,10 +629,10 @@ const ClientPortalContractDetail = () => {
                   {otpError && (
                     <p className="text-sm text-destructive">{otpError}</p>
                   )}
-                  <OtpCooldownNotice activo={otpCooldown.activo} />
+                  <OtpCooldownNotice activo={otpCooldown.activo} texto={t("pc.contratoDet.otp.aguarde")} />
                   <div className="flex gap-3 justify-center">
                     <Button variant="outline" size="sm" onClick={handleResendOtp} disabled={actionLoading || otpCooldown.activo || reenviando}>
-                      {cooldownLabel("Reenviar código", otpCooldown.restante)}
+                      {cooldownLabel(t("pc.contratoDet.sms.reenviar"), otpCooldown.restante)}
                     </Button>
                     <Button
                       size="sm"
@@ -615,7 +641,7 @@ const ClientPortalContractDetail = () => {
                       disabled={otpCode.length !== 6 || actionLoading}
                     >
                       <ShieldCheck className="h-4 w-4" />
-                      Verificar
+                      {t("pc.contratoDet.sms.verificar")}
                     </Button>
                   </div>
                 </div>
@@ -624,14 +650,14 @@ const ClientPortalContractDetail = () => {
               {otpStep === "verifying" && (
                 <div className="text-center space-y-3 py-4">
                   <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
-                  <p className="text-sm text-muted-foreground">A verificar código e assinar contrato...</p>
+                  <p className="text-sm text-muted-foreground">{t("pc.contratoDet.sms.aVerificar")}</p>
                 </div>
               )}
 
               {otpStep === "verified" && (
                 <div className="text-center space-y-3 py-4">
                   <ShieldCheck className="h-10 w-10 mx-auto text-emerald-600" />
-                  <p className="text-sm font-medium text-emerald-600">Código verificado! Contrato assinado com sucesso.</p>
+                  <p className="text-sm font-medium text-emerald-600">{t("pc.contratoDet.sms.verificado")}</p>
                 </div>
               )}
             </CardContent>
@@ -643,8 +669,8 @@ const ClientPortalContractDetail = () => {
           <Card className="bg-muted/30">
             <CardContent className="pt-6">
               <div className="text-center mb-4">
-                <h3 className="text-xl font-bold">Pronto para avançar?</h3>
-                <p className="text-sm text-muted-foreground mt-1">Aceite o contrato via SMS ou solicite alterações.</p>
+                <h3 className="text-xl font-bold">{t("pc.contratoDet.decisao.titulo")}</h3>
+                <p className="text-sm text-muted-foreground mt-1">{t("pc.contratoDet.decisao.texto")}</p>
               </div>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">
                 <Button
@@ -654,7 +680,7 @@ const ClientPortalContractDetail = () => {
                   disabled={actionLoading}
                   onClick={() => setShowQuestion(true)}
                 >
-                  💬 Tenho dúvidas
+                  {t("pc.contratoDet.decisao.duvidas")}
                 </Button>
                 <Button
                   variant="destructive"
@@ -663,7 +689,7 @@ const ClientPortalContractDetail = () => {
                   disabled={actionLoading}
                   onClick={() => setShowReject(true)}
                 >
-                  ✕ Rejeitar
+                  {t("pc.contratoDet.decisao.rejeitar")}
                 </Button>
                 <Button
                   size="lg"
@@ -673,7 +699,7 @@ const ClientPortalContractDetail = () => {
                   onClick={handleSendOtp}
                 >
                   <CheckSquare className="h-5 w-5 text-white" />
-                  <span className="text-white">Aceitar e Assinar</span>
+                  <span className="text-white">{t("pc.contratoDet.decisao.aceitar")}</span>
                 </Button>
               </div>
             </CardContent>
@@ -684,18 +710,18 @@ const ClientPortalContractDetail = () => {
         <Dialog open={showLeitura} onOpenChange={setShowLeitura}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Leu o contrato e aceita os termos?</DialogTitle>
+              <DialogTitle>{t("pc.contratoDet.leitura.titulo")}</DialogTitle>
               <DialogDescription>
-                Ao assinar, aceita o contrato {contract.contract_number || ""} tal como está escrito acima. A seguir enviamos um código por SMS para confirmar a assinatura.
+                {t("pc.contratoDet.leitura.descricao", { numero: contract.contract_number || "" })}
               </DialogDescription>
             </DialogHeader>
             <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm">
               <input type="checkbox" className="mt-0.5 h-5 w-5 shrink-0 accent-primary" checked={leuAceita} onChange={(e) => setLeuAceita(e.target.checked)} />
-              <span>Li o contrato e aceito os seus termos e condições.</span>
+              <span>{t("pc.contratoDet.leitura.caixa")}</span>
             </label>
             <DialogFooter>
-              <Button variant="ghost" onClick={() => setShowLeitura(false)}>Voltar ao contrato</Button>
-              <Button onClick={confirmarLeitura} disabled={!leuAceita || actionLoading}>Assinar e receber o código</Button>
+              <Button variant="ghost" onClick={() => setShowLeitura(false)}>{t("pc.contratoDet.leitura.voltar")}</Button>
+              <Button onClick={confirmarLeitura} disabled={!leuAceita || actionLoading}>{t("pc.contratoDet.leitura.assinar")}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -704,31 +730,31 @@ const ClientPortalContractDetail = () => {
         <Dialog open={showReject} onOpenChange={setShowReject}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>Rejeitar Contrato</DialogTitle>
-              <DialogDescription>Indique o motivo da rejeição.</DialogDescription>
+              <DialogTitle>{t("pc.contratoDet.rejeitar.titulo")}</DialogTitle>
+              <DialogDescription>{t("pc.contratoDet.rejeitar.descricao")}</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <label className="text-sm font-medium">Motivo</label>
+                <label className="text-sm font-medium">{t("pc.contratoDet.rejeitar.motivo")}</label>
                 <Select value={rejectReason} onValueChange={setRejectReason}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Selecione um motivo" />
+                    <SelectValue placeholder={t("pc.contratoDet.rejeitar.motivoPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
-                    {REJECTION_REASONS.map((r) => (
-                      <SelectItem key={r} value={r}>{r}</SelectItem>
+                    {MOTIVOS_REJEICAO_CONTRATO.map((motivo) => (
+                      <SelectItem key={motivo.valor} value={motivo.valor}>{t(motivo.chave)}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-medium">Comentário (opcional)</label>
-                <Textarea value={rejectNotes} onChange={(e) => setRejectNotes(e.target.value)} placeholder="Adicione um comentário..." rows={3} />
+                <label className="text-sm font-medium">{t("pc.contratoDet.rejeitar.comentario")}</label>
+                <Textarea value={rejectNotes} onChange={(e) => setRejectNotes(e.target.value)} placeholder={t("pc.contratoDet.rejeitar.comentarioPlaceholder")} rows={3} />
               </div>
             </div>
             <DialogFooter>
-              <Button variant="ghost" onClick={() => setShowReject(false)}>Cancelar</Button>
-              <Button variant="destructive" onClick={handleRejectContract} disabled={actionLoading}>Confirmar Rejeição</Button>
+              <Button variant="ghost" onClick={() => setShowReject(false)}>{t("pc.contratoDet.rejeitar.cancelar")}</Button>
+              <Button variant="destructive" onClick={handleRejectContract} disabled={actionLoading}>{t("pc.contratoDet.rejeitar.confirmar")}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -740,18 +766,18 @@ const ClientPortalContractDetail = () => {
         <Dialog open={showQuestion} onOpenChange={setShowQuestion}>
           <DialogContent className="sm:max-w-md">
             <DialogHeader>
-              <DialogTitle>💬 Tenho dúvidas</DialogTitle>
-              <DialogDescription>Envie a sua dúvida ao comercial responsável.</DialogDescription>
+              <DialogTitle>{t("pc.contratoDet.duvida.titulo")}</DialogTitle>
+              <DialogDescription>{t("pc.contratoDet.duvida.descricao")}</DialogDescription>
             </DialogHeader>
             <Textarea
               value={questionText}
               onChange={(e) => setQuestionText(e.target.value)}
-              placeholder="Escreva a sua dúvida..."
+              placeholder={t("pc.contratoDet.duvida.placeholder")}
               rows={4}
             />
             <DialogFooter>
-              <Button variant="ghost" onClick={() => setShowQuestion(false)}>Cancelar</Button>
-              <Button onClick={handleAskQuestion} disabled={actionLoading || !questionText.trim()}>Enviar Dúvida</Button>
+              <Button variant="ghost" onClick={() => setShowQuestion(false)}>{t("pc.contratoDet.duvida.cancelar")}</Button>
+              <Button onClick={handleAskQuestion} disabled={actionLoading || !questionText.trim()}>{t("pc.contratoDet.duvida.enviar")}</Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>

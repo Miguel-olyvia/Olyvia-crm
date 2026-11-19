@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency } from "@/lib/utils";
+import { usePortalT } from "@/portal-i18n";
 
 interface NegocioDoCliente {
   negocioId: string;
@@ -62,6 +63,7 @@ async function lerNegocios(org: PortalOrg): Promise<NegocioDoCliente[]> {
 
 const ClientPortalNegocios = () => {
   const navigate = useNavigate();
+  const { t, tn } = usePortalT();
   const { activeOrg, isLoading: orgsLoading, isError: orgsError, hasMultiple } = usePortalCompany();
   // Acompanha as mudanças: lê ao abrir, de 20 em 20 segundos e ao voltar ao separador (o contrato nasce quando o cliente aceita; a proposta nova chega do CRM).
   const consulta = useQuery({
@@ -97,7 +99,7 @@ const ClientPortalNegocios = () => {
   return (
     <ClientPortalLayout>
       <div className="space-y-4">
-        <h2 className="text-xl font-bold text-foreground">Os Meus Negócios</h2>
+        <h2 className="text-xl font-bold text-foreground">{t("pc.negocios.lista.titulo")}</h2>
         {loading ? (
           <div className="space-y-3">{[1, 2].map((i) => <Skeleton key={i} className="h-24 w-full" />)}</div>
         ) : orgsError || falhou ? (
@@ -106,8 +108,8 @@ const ClientPortalNegocios = () => {
           <Card>
             <CardContent className="py-8 text-center">
               <Briefcase className="mx-auto mb-2 h-8 w-8 text-muted-foreground" aria-hidden="true" />
-              <p className="text-muted-foreground">Não tem negócios disponíveis.</p>
-              {hasMultiple && <p className="mt-1.5 text-xs text-muted-foreground">Se esperava ver outros, troque de empresa no seletor no topo da página.</p>}
+              <p className="text-muted-foreground">{t("pc.negocios.lista.vazio")}</p>
+              {hasMultiple && <p className="mt-1.5 text-xs text-muted-foreground">{t("pc.negocios.lista.vazioOutros")}</p>}
             </CardContent>
           </Card>
         ) : (
@@ -125,15 +127,15 @@ const ClientPortalNegocios = () => {
                       </div>
                       <div className="flex shrink-0 items-center gap-2">
                         {(naoLidas.data?.[n.negocioId] ?? 0) > 0 && (
-                          <Badge className="text-xs">{naoLidas.data?.[n.negocioId]} {naoLidas.data?.[n.negocioId] === 1 ? "mensagem nova" : "mensagens novas"}</Badge>
+                          <Badge className="text-xs">{tn("pc.negocios.lista.novas.um", "pc.negocios.lista.novas.varios", naoLidas.data?.[n.negocioId] ?? 0)}</Badge>
                         )}
-                        <Badge variant="secondary" className="text-xs">{PASSOS_PORTAL[n.passo - 1].nome}</Badge>
-                        <Button variant="ghost" size="sm" onClick={() => abrir(n)} aria-label={`Abrir ${n.titulo}`}>
-                          Abrir <ArrowRight className="ml-1 h-3 w-3" aria-hidden="true" />
+                        <Badge variant="secondary" className="text-xs">{t(PASSOS_PORTAL[n.passo - 1].nome)}</Badge>
+                        <Button variant="ghost" size="sm" onClick={() => abrir(n)} aria-label={t("pc.negocios.lista.abrirNegocio", { titulo: n.titulo })}>
+                          {t("pc.negocios.lista.abrir")} <ArrowRight className="ml-1 h-3 w-3" aria-hidden="true" />
                         </Button>
                       </div>
                     </div>
-                    <div className="grid grid-cols-5 gap-1.5" role="img" aria-label={`Passo ${n.passo} de ${PASSOS_PORTAL.length}: ${PASSOS_PORTAL[n.passo - 1].nome}`}>
+                    <div className="grid grid-cols-5 gap-1.5" role="img" aria-label={t("pc.negocios.lista.passoAria", { passo: n.passo, total: PASSOS_PORTAL.length, nome: t(PASSOS_PORTAL[n.passo - 1].nome) })}>
                       {PASSOS_PORTAL.map((p) => <div key={p.id} className={`h-1.5 rounded-full ${p.id <= n.passo ? "bg-primary" : "bg-muted"}`} />)}
                     </div>
                   </CardContent>

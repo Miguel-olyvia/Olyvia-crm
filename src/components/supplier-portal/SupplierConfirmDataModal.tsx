@@ -11,6 +11,7 @@ import { SupplierDataForm } from "@/components/supplier-portal/SupplierDataForm"
 import { useSpMySupplierData } from "@/components/supplier-portal/useSpMySupplierData";
 import { SpMobileField } from "@/components/supplier-portal/contract/SpMobileField";
 import { useSpMobileInput } from "@/components/supplier-portal/contract/useSpMobileInput";
+import { PortalSeletorIdioma, usePortalT } from "@/portal-i18n";
 
 interface SupplierConfirmDataModalProps {
   open: boolean;
@@ -26,6 +27,7 @@ interface SupplierConfirmDataModalProps {
 export function SupplierConfirmDataModal({ open }: SupplierConfirmDataModalProps) {
   const { markProfileConfirmed, refresh } = useSupplierPortal();
   const { toast } = useToast();
+  const { t } = usePortalT();
   const { data, error, isLoading, isError, refetch, isFetching, invalidate } = useSpMySupplierData(open);
   const navigate = useNavigate();
   const [signingOut, setSigningOut] = useState(false);
@@ -63,21 +65,20 @@ export function SupplierConfirmDataModal({ open }: SupplierConfirmDataModalProps
         onEscapeKeyDown={(e) => e.preventDefault()}
         onPointerDownOutside={(e) => e.preventDefault()}
       >
-        <DialogHeader>
+        {/* O seletor do cabeçalho do portal fica inerte atrás do modal: este é o que se usa aqui. */}
+        <PortalSeletorIdioma compacto className="absolute right-4 top-4" />
+        <DialogHeader className="pr-28">
           <div className="flex items-center gap-2 mb-1">
             <Building2 className="h-5 w-5 text-primary" aria-hidden="true" />
-            <DialogTitle>Confirme os seus dados</DialogTitle>
+            <DialogTitle>{t("sp.primeiroAcesso.confirmar.titulo")}</DialogTitle>
           </div>
-          <DialogDescription>
-            Reveja os dados da sua empresa e corrija o que for preciso. As empresas com que trabalha passam a usar
-            estes dados nas encomendas.
-          </DialogDescription>
+          <DialogDescription>{t("sp.primeiroAcesso.confirmar.descricao")}</DialogDescription>
         </DialogHeader>
 
         {isLoading && (
           <div className="py-10 flex justify-center" role="status" aria-live="polite">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
-            <span className="sr-only">A carregar os dados…</span>
+            <span className="sr-only">{t("sp.primeiroAcesso.confirmar.aCarregar")}</span>
           </div>
         )}
 
@@ -86,7 +87,7 @@ export function SupplierConfirmDataModal({ open }: SupplierConfirmDataModalProps
             <p className="text-sm text-destructive">{spErrorMessage(error)}</p>
             <Button type="button" variant="outline" className="h-11 gap-2" onClick={() => void refetch()} disabled={isFetching}>
               <RefreshCw className={isFetching ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
-              Tentar de novo
+              {t("sp.primeiroAcesso.confirmar.tentarNovamente")}
             </Button>
           </div>
         )}
@@ -95,9 +96,12 @@ export function SupplierConfirmDataModal({ open }: SupplierConfirmDataModalProps
           <SupplierDataForm
             initial={data}
             idPrefix="sp-confirm-data"
-            submitLabel="Confirmar dados"
+            submitLabel={t("sp.primeiroAcesso.confirmar.botao")}
             onSaved={() => {
-              toast({ title: "Dados confirmados", description: "Obrigado. Os dados da sua empresa estão atualizados." });
+              toast({
+                title: t("sp.primeiroAcesso.confirmar.confirmados"),
+                description: t("sp.primeiroAcesso.confirmar.confirmadosDescricao"),
+              });
               void invalidate();
               markProfileConfirmed();
             }}
@@ -112,7 +116,8 @@ export function SupplierConfirmDataModal({ open }: SupplierConfirmDataModalProps
                   error={mobile.error}
                   disabled={mobile.loading}
                   required
-                  hint="Identifica-o na sua conta. É para este número que enviamos o código SMS quando assinar um contrato."
+                  label={t("sp.primeiroAcesso.confirmar.telemovel")}
+                  hint={t("sp.primeiroAcesso.confirmar.telemovelDica")}
                 />
               ) : null
             }
@@ -128,7 +133,7 @@ export function SupplierConfirmDataModal({ open }: SupplierConfirmDataModalProps
             disabled={signingOut}
           >
             <LogOut className="h-4 w-4" aria-hidden="true" />
-            Sair
+            {t("sp.primeiroAcesso.confirmar.sair")}
           </Button>
         </div>
       </DialogContent>
