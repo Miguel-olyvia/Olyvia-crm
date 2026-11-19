@@ -29,7 +29,7 @@ function preparar() {
   const avisar = vi.fn();
   const A = acoes(S, avisar, (fn) => fn());
   A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
-  A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
+  A.role("operacoes"); (A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   A.role("comercial");
   A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu");
   adendaAssinada(A, d.id, N);

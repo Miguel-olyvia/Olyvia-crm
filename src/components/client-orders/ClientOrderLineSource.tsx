@@ -5,6 +5,7 @@
 // fornecedor preferencial). Quantidades qty_* em unidades de stock.
 import type { ReactNode } from "react";
 import { DocumentLink } from "@/components/inventory/ui";
+import { missingCauseText } from "./missingCause";
 
 export interface ClientOrderLineSourceData {
   item_type: "product" | "service";
@@ -20,6 +21,8 @@ export interface ClientOrderLineSourceData {
   qty_missing?: number | null;
   qty_served?: number | null;
   has_preferred_supplier?: boolean | null;
+  /** 20270124010000: porque é que a falta não se pode pedir (no_preferred_supplier | incompatible_supplier_uom); null = pode. */
+  request_block_reason?: string | null;
 }
 
 const num = (v: unknown): number => {
@@ -104,7 +107,8 @@ export function ClientOrderLineSource({ line, poState, onOpenPo, extra }: Props)
     parts.push(
       <div key="missing" className="text-red-700 dark:text-red-400">
         <b>{fmt(missing > 0 ? missing : num(line.quantity))}</b>{" "}
-        {line.has_preferred_supplier === false ? "sem fornecedor preferencial" : "em falta, por pedir ao fornecedor"}
+        {/* 19/11: a causa concreta (sem fornecedor preferido, ou a unidade do fornecedor incompatível) */}
+        {missingCauseText(line) || "em falta, por pedir ao fornecedor"}
       </div>,
     );
   }

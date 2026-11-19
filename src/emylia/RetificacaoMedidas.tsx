@@ -1,126 +1,97 @@
-// 9/11 (Rúben, o fluxo novo: «… financeiro valida pagamento do cliente → operação valida plano de obra e ajusta + supervisor faz retificação
-// de medidas aceite → contrato aceite → encomenda a fornecedor e ter tudo → início da obra (primeiro passo retificação de medidas pelo
-// supervisor)»). O primeiro passo da Obra: o supervisor vai ao local e confirma as medidas da visita (o chão, as paredes, os pontos…). As
-// medidas retificadas ficam ao lado das da visita, com a diferença; «Aceitar as medidas» fecha o passo e deixa as Operações aprovarem o
-// plano (e só depois se assina o contrato). O orçamento aceite não muda: se as medidas mudarem o preço, faz-se uma adenda.
-// 12/11 (Rúben: «a validação das medidas e do plano da obra só vêm depois do Financeiro»): na Obra, depois do pagamento validado; se o valor
-// mudar, o acerto faz-se numa adenda depois do contrato (motor: adendaDoValor).
-import { useMemo, useState } from "react";
-import { Check, RotateCcw, Ruler } from "lucide-react";
+// O passo Medidas da Obra (9/11; o fluxo em vigor a 19/11): depois do pagamento validado, o gestor da obra escolhe quem vai medir (uma pessoa
+// do RH, avisada no Hoje dela, com o passo «Medir no local»); essa pessoa vai ao local e, no Estúdio das medidas (o único caminho para as
+// mudar e aceitar), confere as medidas da visita e aceita-as. Só depois as Operações aprovam o plano. Se a retificação mudar o valor, segue a
+// adenda do acerto ao Financeiro (ou a nota de crédito, se baixar) antes da encomenda de cliente.
+// 19/11 (auditoria): o formulário que havia aqui (outro «Aceitar as medidas», com os mesmos campos do Estúdio) passou a resumo só de leitura;
+// quem mede deixou de ser o «Responsável de obra» (um nome) e passou a ser a pessoa (d.f.supervisor_medidas, A.supervisorMedidas).
+import { RotateCcw, Ruler } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { LINHAS, PAPEIS, camposMedida, impactoDasMedidas, medida, nfmt, type Negocio } from "./motor";
+import { LINHAS, PAPEIS, TECS, camposMedida, medida, medidasRetificadas, nfmt, type Negocio } from "./motor";
 import { SEM_PERM, podeNeg } from "./permissoes";
 import type { Ctx } from "./pecas";
 import { AbrirEstudioMedidas } from "./estudioPlano/EstudioMedidas";
-import { podeRetificar } from "./preparacaoObra";
-import { ImpactoNoOrcamento, linhasDoImpacto } from "./estudioPlano/ImpactoNoOrcamento";
-import { OBRA, efetivo } from "./campos";
-
-const numero = (s: string) => Number(String(s).replace(",", "."));
+import { planoAprovadoDe, podeRetificar, supervisorDasMedidas } from "./preparacaoObra";
+import { rotuloOficios } from "./equipa/tecnicos";
 
 export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const CM = camposMedida(LINHAS[d.linha]);
   const aceite = d.f.retif_aceite;
-  const [valores, setValores] = useState<Record<string, string>>(() =>
-    Object.fromEntries(CM.map(([k]) => [k, d.f[`retif_${k}`] ?? String(medida(d.visita.med, k) || "")])));
-  const [notas, setNotas] = useState(d.f.retif_notas ?? "");
-  // 11/11: só quem planeia a obra (o supervisor, nas Operações) as confirma; os outros veem-nas e sabem de quem é o passo
+  // 11/11: só quem planeia a obra (o gestor e o supervisor, nas Operações) escolhe quem mede e aceita; os outros veem e sabem de quem é o passo
   const meu = podeNeg(ctx.S.role, "obra.planear");
-  const pode = !aceite && podeRetificar(d) && meu;
-  const mudadas = CM.filter(([k]) => { const v = numero(valores[k] ?? ""); return Number.isFinite(v) && Math.abs(v - medida(d.visita.med, k)) > 0.001; });
-  // 11/11 (Rúben): o impacto no orçamento ao vivo, enquanto se escreve
-  const impacto = useMemo(() => impactoDasMedidas(d, ctx.S, Object.fromEntries(CM.map(([k]) => [k, numero(valores[k] ?? "")]).filter(([, v]) => Number.isFinite(v as number)))),
-    [valores, d.orc]); // eslint-disable-line react-hooks/exhaustive-deps
+  const aberto = podeRetificar(d);
+  const sup = supervisorDasMedidas(d);
+  const retif = medidasRetificadas(d);
 
   return (
     <div className="space-y-5">
       <div className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4">
         <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><Ruler className="h-5 w-5" /></span>
         <div className="min-w-0 text-[15px]">
-          <p className="font-semibold">{aceite ? `Medidas aceites a ${aceite.split("-").reverse().join("/")}${d.f.retif_por ? `, por ${d.f.retif_por}` : ""}` : "O supervisor confirma as medidas no local"}</p>
+          <p className="font-semibold">{aceite ? `Medidas aceites a ${aceite.split("-").reverse().join("/")}${d.f.retif_por ? `, por ${d.f.retif_por}` : ""}` : sup ? `${sup.n} mede no local` : "Medir no local"}</p>
           <p className="text-muted-foreground">{aceite
-            ? (["aprovado", "em curso", "concluída"].includes(d.obra.plano?.estado ?? "") ? "Com o plano aprovado, segue a encomenda de cliente." : "Com o plano aprovado pelas Operações, segue a encomenda de cliente.")
-            : podeRetificar(d) ? "Compare com as da visita e corrija o que for preciso. As Operações aprovam o plano ao mesmo tempo; se as medidas mudarem um plano já aprovado, ele volta a por aprovar. Com os dois, segue a encomenda de cliente; se o valor mudar, a retificação passa primeiro pelo Financeiro." : "Depois de o cliente aceitar a proposta."}</p>
+            ? (planoAprovadoDe(d) ? "Com o plano aprovado, segue a encomenda de cliente." : "Segue o plano: as Operações aprovam-no. Se a retificação mudou o valor, primeiro a adenda do acerto.")
+            : aberto ? "O gestor da obra escolhe quem vai medir. Essa pessoa vê o pedido no Hoje dela, confere as medidas da visita no local e aceita-as no Estúdio das medidas. Depois, as Operações aprovam o plano. Se a retificação mudar o valor, segue a adenda do acerto ao Financeiro."
+            : "As medidas abrem depois de o Financeiro validar o pagamento."}</p>
         </div>
       </div>
 
-      {/* 19/11 (Rúben: «o gestor da obra pede as medidas e atribui o supervisor»): quem vai medir, escolhido aqui (o responsável de obra) */}
-      {(() => {
-        const c = efetivo(ctx.S.campos, OBRA[0]).campos.find((x) => x.k === "responsavel");
-        if (!c?.op?.length || (aceite && !d.f.responsavel)) return null;
-        return (
-          <label className="grid max-w-md gap-1.5 text-[15px] font-medium">
-            Supervisor que vai medir
-            <select value={d.f.responsavel ?? ""} disabled={!pode} onChange={(e) => ctx.run(() => ctx.A.campo(d.id, "responsavel", e.target.value))}
-              className="h-11 rounded-lg border border-input bg-background px-3 text-[15px] font-normal outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-70">
-              <option value="">Escolher o supervisor</option>
-              {c.op.map((o) => <option key={o} value={o}>{o}</option>)}
-            </select>
-            {!aceite && <span className="text-sm font-normal text-muted-foreground">O gestor da obra escolhe quem vai ao local. Com as medidas aceites e o plano aprovado, segue para o fornecedor: a compra e a entrega dos materiais.</span>}
-          </label>
-        );
-      })()}
+      {/* 19/11 (auditoria): quem vai medir é uma pessoa do RH (como no Hoje do técnico e na página Técnicos), não o «Responsável de obra» */}
+      {aberto && !aceite && (
+        <label className="grid max-w-md gap-1.5 text-[15px] font-medium">
+          Quem vai medir
+          <select value={d.f.supervisor_medidas ?? ""} disabled={!meu} onChange={(e) => { const v = e.target.value; if (v) ctx.run(() => ctx.A.supervisorMedidas(d.id, v)); }}
+            className="h-11 rounded-lg border border-input bg-background px-3 text-[15px] font-normal outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-70">
+            <option value="">Escolher a pessoa</option>
+            {TECS.map((x) => <option key={x.id} value={x.id}>{x.n} · {rotuloOficios(x)}</option>)}
+          </select>
+          <span className="text-sm font-normal text-muted-foreground">{sup ? `${sup.n} tem o passo «Medir no local» no Hoje dele.` : "Escolhida a pessoa, ela recebe o aviso e o passo «Medir no local» no Hoje dela."}</span>
+        </label>
+      )}
 
-      {/* 9/11: o Estúdio das medidas, pensado para o telemóvel no local (a planta, os botões grandes, aceitar) */}
-      {meu ? <AbrirEstudioMedidas ctx={ctx} d={d} /> : !aceite && podeRetificar(d) && (
+      {/* 9/11: o Estúdio das medidas, pensado para o telemóvel no local (a planta, os botões grandes, aceitar): o único caminho principal */}
+      {meu ? (aberto && !aceite && !sup
+        ? <p className="rounded-xl bg-muted/60 px-4 py-3 text-[15px] text-muted-foreground">Escolha quem vai medir: depois abre-se aqui o Estúdio das medidas.</p>
+        : <AbrirEstudioMedidas ctx={ctx} d={d} />)
+        : !aceite && aberto && (
         <p className="flex flex-wrap items-center gap-x-2 rounded-xl bg-muted/60 px-4 py-3 text-[15px]">
-          <span>Este passo é do supervisor, nas Operações.</span>
+          <span>Este passo é das Operações: quem vai medir aceita as medidas no local.</span>
           {/* 11/11 (F3): a permissão em falta, como nos outros passos (o servidor também a pede: 20270113110000) */}
           <span className="w-full text-muted-foreground">{SEM_PERM["obra.planear"].sub}</span>
           <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={() => ctx.run(() => ctx.A.role("operacoes"))}>Mudar para {PAPEIS.operacoes.n}</button>
         </p>
       )}
 
+      {/* o resumo, só de leitura: as da visita e as aceites (as medidas mudam-se no Estúdio) */}
       {CM.length ? (
-        <div className="overflow-hidden rounded-2xl border border-border">
-          <div className="grid grid-cols-[minmax(0,1fr)_6rem_8rem] gap-3 bg-muted/60 px-4 py-2 text-xs font-medium text-muted-foreground">
-            <span>Medida</span><span className="text-right">Na visita</span><span>Retificada</span>
+        <div className="overflow-hidden rounded-2xl border border-border" role="table" aria-label="As medidas">
+          <div role="row" className="grid grid-cols-[minmax(0,1fr)_6rem_6rem] gap-3 bg-muted/60 px-4 py-2 text-xs font-medium text-muted-foreground">
+            <span role="columnheader">Medida</span><span role="columnheader" className="text-right">Na visita</span><span role="columnheader" className="text-right">{aceite ? "Aceite" : "No local"}</span>
           </div>
-          <ul className="divide-y divide-border">
+          <div role="rowgroup" className="divide-y divide-border">
             {CM.map(([k, l]) => {
-              const antes = medida(d.visita.med, k), v = numero(valores[k] ?? ""), dif = Number.isFinite(v) ? v - antes : 0;
+              const antes = medida(d.visita.med, k), v = retif[k], dif = v != null ? v - antes : 0;
               return (
-                <li key={k} className="grid grid-cols-[minmax(0,1fr)_6rem_8rem] items-center gap-3 px-4 py-2">
-                  <span className="min-w-0 text-[15px]">{l}{Math.abs(dif) > 0.001 && <span className={cn("ml-2 rounded-full px-2 text-xs font-medium", dif > 0 ? "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200" : "bg-muted")}>{dif > 0 ? "+" : ""}{nfmt(dif)}</span>}</span>
-                  <span className="text-right tabular-nums text-muted-foreground">{nfmt(antes)}</span>
-                  <input aria-label={`${l}, retificada`} type="number" min={0} step={0.5} value={valores[k] ?? ""} disabled={!pode}
-                    onChange={(e) => setValores((x) => ({ ...x, [k]: e.target.value }))}
-                    className="h-11 w-full rounded-lg border border-input bg-background px-3 text-[15px] tabular-nums disabled:opacity-70" />
-                </li>
+                <div role="row" key={k} className="grid grid-cols-[minmax(0,1fr)_6rem_6rem] items-center gap-3 px-4 py-2.5">
+                  <span role="cell" className="min-w-0 text-[15px]">{l}{Math.abs(dif) > 0.001 && <span className={cn("ml-2 rounded-full px-2 text-xs font-medium", dif > 0 ? "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200" : "bg-muted")}>{dif > 0 ? "+" : ""}{nfmt(dif)}</span>}</span>
+                  <span role="cell" className="text-right tabular-nums text-muted-foreground">{nfmt(antes)}</span>
+                  <span role="cell" className="text-right tabular-nums">{v != null ? nfmt(v) : "—"}</span>
+                </div>
               );
             })}
-          </ul>
+          </div>
         </div>
-      ) : <p className="text-[15px] text-muted-foreground">Esta linha não tem medidas: o supervisor só confirma o local nas notas.</p>}
+      ) : <p className="text-[15px] text-muted-foreground">Esta linha não tem medidas: quem mede só confirma o local, nas notas.</p>}
 
-      {impacto && CM.length > 0 && (
-        <ImpactoNoOrcamento atual={impacto.atual} linhas={linhasDoImpacto(mudadas.length, impacto)} detalhe={mudadas.length ? impacto.linhas : []} />
-      )}
+      {d.f.retif_notas && <p className="rounded-xl bg-muted/60 px-4 py-3 text-[15px]"><span className="font-medium">Notas de quem mediu:</span> {d.f.retif_notas}</p>}
 
-      {mudadas.length > 0 && (
-        <p className="rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-900/20 dark:text-amber-200">
-          {mudadas.length} {mudadas.length === 1 ? "medida mudou" : "medidas mudaram"} em relação à visita. Antes do contrato, a proposta refaz-se com o orçamento novo (um botão, no passo Contrato) e o cliente aceita a versão nova.
-        </p>
-      )}
-
-      <label className="grid gap-1.5 text-sm font-medium">Notas do supervisor (opcional)
-        <textarea value={notas} onChange={(e) => setNotas(e.target.value)} disabled={!pode} rows={3} placeholder="Ex.: a parede do fundo tem 2,35 m até ao teto falso; a base de duche cabe com 5 cm de folga"
-          className="rounded-lg border border-input bg-background px-3 py-2 text-[15px] disabled:opacity-70" />
-      </label>
-
-      <div className="flex flex-wrap gap-2">
-        {!aceite ? meu && (
-          <Button type="button" className="min-h-11" disabled={!pode}
-            onClick={() => ctx.run(() => ctx.A.retificarMedidas(d.id, Object.fromEntries(CM.map(([k]) => [k, numero(valores[k] ?? "")]).filter(([, v]) => Number.isFinite(v as number))), notas))}>
-            <Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Aceitar as medidas
-          </Button>
-        ) : meu && d.obra.plano?.estado === "por aprovar" ? (
+      {aceite && meu && d.obra.plano?.estado === "por aprovar" && (
+        <div>
           <Button type="button" variant="outline" className="min-h-11" onClick={() => ctx.run(() => ctx.A.campo(d.id, "retif_aceite", ""))}>
             <RotateCcw className="mr-1.5 h-4 w-4" aria-hidden="true" />Voltar a retificar
           </Button>
-        ) : null}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

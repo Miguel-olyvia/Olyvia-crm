@@ -79,7 +79,7 @@ describe("portal do cliente: o percurso guiado", () => {
     d.fin.fatura = { n: "FT 2026/1", q: "hoje" }; d.f.comprovativo = "TRF 1"; d.f.conta = "Banco A"; d.f.data_pag = "2026-11-09";
     S.role = "financeiro"; A.validar(d.id);
     expect(d.fase).toBe(5);
-    S.role = "operacoes"; A.retificarMedidas(d.id); A.resolverConflitos(d.id); A.aprovarPlano(d.id);
+    S.role = "operacoes"; A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id); A.resolverConflitos(d.id); A.aprovarPlano(d.id);
     expect(d.obra.plano?.estado).toBe("aprovado");
     expect(d.obra.ec).toBeTruthy(); // pago, medidas e plano: sai a encomenda de cliente
     r.rerender(<Portal S={S} d={d} A={A} />);

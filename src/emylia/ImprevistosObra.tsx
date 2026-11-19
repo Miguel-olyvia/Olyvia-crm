@@ -26,11 +26,15 @@ const OFICIOS = ["Canalização", "Eletricidade", "Revestimentos", "Carpintaria"
 
 /* ================================================================== registar */
 type Escolha = Gravidade | "aviso";
-export function RegistarImprevisto({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negocio; ti?: number; fechar: () => void }) {
+/** 19/11 (auditoria): o que o registo leva já preenchido: «Faltou material» (o Hoje do técnico) abre-o com o tipo e o texto. */
+export interface InicialImprevisto { tipo?: "material"; texto?: string }
+
+export function RegistarImprevisto({ ctx, d, ti, fechar, inicial }: { ctx: Ctx; d: Negocio; ti?: number; fechar: () => void; inicial?: InicialImprevisto }) {
   const { A, run } = ctx;
   const p = d.obra.plano!;
   const afetaveis = tarefasAfetaveis(p);
-  const [texto, setTexto] = useState("");
+  const material = inicial?.tipo === "material";
+  const [texto, setTexto] = useState(inicial?.texto ?? "");
   const [onde, setOnde] = useState("");
   const [foto, setFoto] = useState<string | null>(null);
   const [grav, setGrav] = useState<Escolha>("impede");
@@ -38,21 +42,21 @@ export function RegistarImprevisto({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negoci
   const [dias, setDias] = useState(1);
   const input = useRef<HTMLInputElement>(null);
   const juntar = async (f?: File | null) => { if (!f) return; try { setFoto(await lerFoto(f)); } catch { /* sem leitura */ } };
-  const falta = [!texto.trim() && "o que encontrou", grav !== "aviso" && !tarefas.length && "as tarefas afetadas"].filter(Boolean) as string[];
+  const falta = [!texto.trim() && (material ? "o material que faltou" : "o que encontrou"), grav !== "aviso" && !tarefas.length && "as tarefas afetadas"].filter(Boolean) as string[];
   const enviar = () => run(() => {
     if (grav === "aviso") A.ocorrencia(d.id, (ti != null ? `${p.tasks[ti].nome}: ` : "") + texto.trim() + (onde.trim() ? ` (${onde.trim()})` : ""));
-    else A.registarImprevisto(d.id, { texto, onde, grav, tarefas, dias, ...(foto ? { foto } : {}) });
+    else A.registarImprevisto(d.id, { texto, onde, grav, tarefas, dias, ...(foto ? { foto } : {}), ...(material ? { tipo: "material" as const } : {}) });
     fechar();
   });
   return (
     <div role="group" aria-label="Registar imprevisto" className="space-y-5 rounded-2xl border border-border bg-card p-4 animate-in fade-in-0 slide-in-from-top-1 sm:p-5">
       <div className="flex items-start justify-between gap-3">
-        <p className="flex items-center gap-2 text-base font-semibold"><AlertTriangle className="h-5 w-5 text-warning" aria-hidden="true" />Registar imprevisto</p>
+        <p className="flex items-center gap-2 text-base font-semibold"><AlertTriangle className="h-5 w-5 text-warning" aria-hidden="true" />{material ? "Faltou material" : "Registar imprevisto"}</p>
         <button type="button" onClick={fechar} aria-label="Fechar" className="grid h-10 w-10 place-items-center rounded-lg text-muted-foreground hover:bg-muted"><X className="h-4 w-4" /></button>
       </div>
       <label className="block space-y-1.5">
-        <span className="text-[15px] font-medium">O que encontrou?</span>
-        <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={2} placeholder="Ex.: cano de esgoto podre por baixo da base de duche"
+        <span className="text-[15px] font-medium">{material ? "Que material faltou?" : "O que encontrou?"}</span>
+        <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={2} placeholder={material ? "Ex.: faltam 2 caixas de cola flexível e 1 saco de betume" : "Ex.: cano de esgoto podre por baixo da base de duche"}
           className="w-full rounded-xl border border-input bg-background px-3 py-2.5 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
       </label>
       <div className="grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
@@ -67,6 +71,7 @@ export function RegistarImprevisto({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negoci
             : <Button variant="outline" className="min-h-12" onClick={() => input.current?.click()}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />Fotografia</Button>}
         </div>
       </div>
+      {material ? <p className="rounded-xl bg-muted/60 px-3 py-2.5 text-[15px]">A tarefa fica parada até o material chegar. O gestor da obra vê o aviso no Hoje dele e encomenda o que falta. O cliente não é avisado.</p> : (
       <fieldset>
         <legend className="text-[15px] font-medium">Que efeito tem?</legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-3">
@@ -77,7 +82,7 @@ export function RegistarImprevisto({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negoci
             </button>
           ))}
         </div>
-      </fieldset>
+      </fieldset>)}
       {grav !== "aviso" && (
         <fieldset>
           <legend className="text-[15px] font-medium">Que tarefas afeta?</legend>
@@ -102,7 +107,7 @@ export function RegistarImprevisto({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negoci
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
         {falta.length > 0 && <p className="text-sm text-muted-foreground sm:mr-auto">Falta {falta.join(" e ")}.</p>}
         <Button variant="ghost" size="lg" onClick={fechar}>Cancelar</Button>
-        <Button size="lg" disabled={falta.length > 0} onClick={enviar}>{grav === "aviso" ? "Avisar o responsável" : "Registar o imprevisto"}</Button>
+        <Button size="lg" disabled={falta.length > 0} onClick={enviar}>{material ? "Avisar o gestor da obra" : grav === "aviso" ? "Avisar o responsável" : "Registar o imprevisto"}</Button>
       </div>
     </div>
   );
@@ -141,7 +146,14 @@ function CartaoImprevisto({ ctx, d, im, porDisparar }: { ctx: Ctx; d: Negocio; i
         <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-sm font-medium", ESTADO[im.estado][1])}>{im.estado === "proposta" && a?.estado === "rascunho" ? "adenda por disparar" : ESTADO[im.estado][0]}</span>
       </div>
 
-      {im.estado === "aberto" && !propor && (
+      {/* 19/11 (auditoria): «Faltou material» é da empresa: o gestor encomenda o que falta e retoma a tarefa (o cliente não é chamado) */}
+      {im.estado === "aberto" && im.tipo === "material" && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          {pode ? <Button className="min-h-11" onClick={go(() => A.decidirImprevisto(d.id, im.id, "seguir", "material encomendado"))}>O material chegou: retomar a tarefa</Button>
+            : <p className="text-sm text-muted-foreground">O gestor da obra encomenda o que falta e retoma a tarefa.</p>}
+        </div>
+      )}
+      {im.estado === "aberto" && im.tipo !== "material" && !propor && (
         <div className="mt-3 flex flex-wrap items-center gap-3">
           {pode ? <Button className="min-h-11" onClick={() => setPropor(true)}>Fazer a proposta ao cliente</Button> : <p className="text-sm text-muted-foreground">O gestor da obra faz a proposta ao cliente.</p>}
           {pode && <button type="button" onClick={go(() => A.decidirImprevisto(d.id, im.id, "seguir", "sem custo para o cliente"))} className="min-h-11 text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Resolver sem custo para o cliente</button>}
