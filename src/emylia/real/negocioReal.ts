@@ -198,7 +198,7 @@ const linhaAdendaParaLinha = (x: LinhaAdendaEmylia, i: number): LinhaAdendaLinha
 export function ivaDaLinhaLida(l: Pick<LinhaAdendaLinha, "taxa_iva" | "livre" | "descricao" | "chave">): { iva?: 6 | 23 } {
   const taxa = l.taxa_iva == null ? null : Number(l.taxa_iva);
   if (taxa === 6 || taxa === 23) return { iva: taxa };
-  if (taxa == null && l.livre && l.descricao.startsWith(LINHA_ACERTO_PRODUTOS) && !l.chave.endsWith("-p6")) return { iva: 23 };
+  // 19/11 (testarh, 1009): sem a taxa na base é uma linha antiga, assinada a 6%: não se adivinha (mudava o total de uma adenda assinada)
   return {};
 }
 const linhaAdendaDeLinha = (l: LinhaAdendaLinha): LinhaAdendaEmylia => ({

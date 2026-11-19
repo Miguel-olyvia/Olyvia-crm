@@ -16,8 +16,8 @@ describe("ivaDaLinhaLida", () => {
     // a base devolve numeric: "23.00" ou 23.00 contam como 23
     expect(ivaDaLinhaLida(lida({ taxa_iva: "23.00" as unknown as number }))).toEqual({ iva: 23 });
   });
-  it("só nas linhas antigas (sem taxa) se deduz pelo nome: os produtos do acerto a 23%, a «-p6» e as outras sem taxa (6%)", () => {
-    expect(ivaDaLinhaLida(lida({ taxa_iva: null, descricao: `${LINHA_ACERTO_PRODUTOS} da medida`, chave: "acerto-p" }))).toEqual({ iva: 23 });
+  it("19/11 (1009): sem taxa na base é uma linha antiga, assinada a 6%: nada se deduz pelo nome (não muda o total de uma adenda assinada)", () => {
+    expect(ivaDaLinhaLida(lida({ taxa_iva: null, descricao: `${LINHA_ACERTO_PRODUTOS} da medida`, chave: "acerto-p" }))).toEqual({});
     expect(ivaDaLinhaLida(lida({ descricao: `${LINHA_ACERTO_PRODUTOS} da medida`, chave: "acerto-p6" }))).toEqual({});
     expect(ivaDaLinhaLida(lida({ descricao: "Mão de obra" }))).toEqual({});
   });
