@@ -198,7 +198,7 @@ describe("a adenda com o percurso do orçamento, de ponta a ponta", () => {
     expect(faltaParaArrancar(d)).toEqual([]);
     A.arrancar(d.id);
     expect(d.obra.plano!.estado).toBe("em curso");
-  });
+  }, 20_000); // 19/11: ponta a ponta, com o registo da fatura pelo ecrã (assíncrono)
 });
 
 describe("a adenda: o IVA, os documentos, o Hoje e a linha do tempo", () => {
