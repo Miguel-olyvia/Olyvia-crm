@@ -776,6 +776,13 @@ const ClientOrders = () => {
   const [createItems,setCreateItems] = useState<ManualClientOrderItem[]>([]);
   // Unidade de stock dos produtos das linhas — quantidade inteira em unidades contáveis.
   const productUom = useProductBaseUomCodes(createItems.map((item) => item.product_id));
+  // Mesma regra na saída de stock da encomenda aberta: só unidades contáveis
+  // (un, pcs, caixa…) exigem quantidade inteira; m², ml, kg… saem com decimais.
+  const detailProductUom = useProductBaseUomCodes((detailData?.lines || []).map((l) => l.product_id));
+  const stockExitRequiresInteger = (productId: string) => requiresIntegerQty({
+    hasProduct: true,
+    baseUomCode: detailProductUom.getBaseCode(productId),
+  });
   const [showItemsDialog, setShowItemsDialog] = useState(false);
 
   // Checklist de saída de stock (linhas stock_disponivel_confirmar e
@@ -1301,6 +1308,7 @@ const ClientOrders = () => {
     const warehouses = options.filter((wh) => quantity > 0 && asQty(wh.quantity) >= quantity);
     const capacityOf = (id: string) => asQty(byId.get(id)?.quantity);
     const totalCapacity = roundQty(options.reduce((sum, wh) => sum + asQty(wh.quantity), 0));
+    const integer = stockExitRequiresInteger(productId);
 
     let suggested: StockExitAllocation[] | null = null;
     const fromAlloc = Array.from(allocById, ([warehouse_id, qty]) => ({ warehouse_id, quantity: qty }))
@@ -1310,14 +1318,14 @@ const ClientOrders = () => {
       quantity > 0
       && fromAlloc.length > 0
       && roundQty(fromAlloc.reduce((sum, a) => sum + a.quantity, 0)) === quantity
-      && fromAlloc.every((a) => Number.isInteger(a.quantity) && byId.has(a.warehouse_id) && a.quantity <= capacityOf(a.warehouse_id))
+      && fromAlloc.every((a) => (!integer || Number.isInteger(a.quantity)) && byId.has(a.warehouse_id) && a.quantity <= capacityOf(a.warehouse_id))
     ) {
       suggested = fromAlloc;
     } else if (warehouses.length > 0) {
       const preferred = groupLines.map((l) => l.suggested_warehouse_id).find((id) => !!id && warehouses.some((wh) => wh.warehouse_id === id));
       suggested = [{ warehouse_id: preferred ?? warehouses[0].warehouse_id, quantity }];
     }
-    return { product_id: productId, quantity, warehouses, options, totalCapacity, suggested, lineKeys: groupLines.map(lineKey) };
+    return { product_id: productId, quantity, integer, warehouses, options, totalCapacity, suggested, lineKeys: groupLines.map(lineKey) };
   };
 
   // Confirma a saída de um produto: 1 armazém → rpc_confirm_client_order_stock_exit;
@@ -1348,9 +1356,13 @@ const ClientOrders = () => {
     group.options.forEach((wh) => {
       const raw = (draft?.[wh.warehouse_id] ?? '').trim().replace(',', '.');
       if (raw === '') return;
-      const n = Number(raw);
-      if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
-        if (!invalid) invalid = `Quantidade inválida em ${wh.warehouse_name} — use números inteiros`;
+      const n = roundQty(Number(raw));
+      if (!Number.isFinite(n) || n < 0 || (group.integer && !Number.isInteger(n))) {
+        if (!invalid) {
+          invalid = group.integer
+            ? `Quantidade inválida em ${wh.warehouse_name} — este produto conta-se em unidades inteiras`
+            : `Quantidade inválida em ${wh.warehouse_name}`;
+        }
         return;
       }
       if (n > asQty(wh.quantity)) {
@@ -1372,11 +1384,14 @@ const ClientOrders = () => {
     if (!detailData || !line.product_id) return;
     const group = getProductExitGroup(line.product_id, detailData.lines);
     const key = lineKey(line);
-    // p_quantity é integer na RPC — a reserva em unidades base pode não ser.
-    if (!(group.quantity > 0) || !Number.isInteger(group.quantity) || allocations.length === 0) {
+    // Decimais só em unidades mensuráveis (m², ml, kg…); unidades contáveis
+    // saem em números inteiros (o servidor recusa o resto).
+    if (!(group.quantity > 0) || (group.integer && !Number.isInteger(group.quantity)) || allocations.length === 0) {
       toast({
         title: t('clientOrders.toast.stockExitError'),
-        description: t('clientOrders.toast.confirmAllSkippedNonInteger', { count: 1 }),
+        description: group.integer && !Number.isInteger(group.quantity)
+          ? t('clientOrders.toast.stockExitNonIntegerCountable', { qty: formatDiagnosticNumber(group.quantity) })
+          : t('clientOrders.dialog.noWarehouseAvailable'),
         variant: "destructive",
       });
       return;
@@ -1501,9 +1516,9 @@ const ClientOrders = () => {
       // Sequencial de propósito: cada saída mexe no saldo do mesmo armazém e
       // a RPC valida o stock disponível no momento.
       for (const group of pending) {
-        // p_quantity é integer na RPC — uma quantidade decimal em unidades de
-        // stock não pode ser confirmada daqui.
-        if (!Number.isInteger(group.quantity)) {
+        // Unidades contáveis só saem em números inteiros; m², ml, kg… aceitam
+        // decimais (a quantidade já vem arredondada por roundQty).
+        if (group.integer && !Number.isInteger(group.quantity)) {
           skippedNonInteger++;
           continue;
         }
@@ -3170,9 +3185,9 @@ const ClientOrders = () => {
                 </span>
                 <Input
                   type="number"
-                  inputMode="numeric"
+                  inputMode={group.integer ? 'numeric' : 'decimal'}
                   min={0}
-                  step={1}
+                  step={group.integer ? 1 : 'any'}
                   max={asQty(wh.quantity)}
                   className="h-8 w-20 text-right text-xs tabular-nums"
                   value={draft?.[wh.warehouse_id] ?? ''}
@@ -3788,7 +3803,7 @@ const ClientOrders = () => {
                           </TableCell>
                           <TableCell className="text-right align-top">
                             <div className="inline-flex items-center justify-end gap-1">
-                              <b className="tabular-nums">{line.quantity}</b>
+                              <b className="tabular-nums">{formatDiagnosticNumber(asQty(line.quantity))}</b>
                               {line.line_locked ? (
                                 <span
                                   className="inline-flex text-muted-foreground"

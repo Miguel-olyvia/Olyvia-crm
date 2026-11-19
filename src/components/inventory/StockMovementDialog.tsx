@@ -25,6 +25,8 @@ import {
 import { MovementTypeCards } from "./movement/MovementTypeCards";
 import { ProductPicker, type ProductOption } from "./movement/ProductPicker";
 import { usePermissionGate } from "./ui/RowActions";
+import { useProductBaseUomCodes } from "@/hooks/useProductBaseUomCodes";
+import { requiresIntegerQty } from "@/utils/quotes/integerQty";
 
 export type { MovementType } from "./movement/movementKinds";
 
@@ -91,7 +93,10 @@ interface MovementLine {
   sourceLineStatus?: "servido_por_stock" | "recebido" | "a_aguardar_encomenda" | "sem_fornecedor";
 }
 
-const STOCK_INTEGER_ONLY_MSG = "O stock só regista unidades inteiras.";
+const STOCK_INTEGER_ONLY_MSG = "Este produto conta-se em unidades inteiras.";
+
+const formatStockQty = (value: number): string =>
+  new Intl.NumberFormat("pt-PT", { maximumFractionDigits: 3 }).format(value);
 
 // Reserva de stock para Encomendas Clientes assinadas (20261204310000), por
 // produto e ao nível da ORGANIZAÇÃO (todos os armazéns) — resultado de
@@ -180,6 +185,11 @@ export default function StockMovementDialog({
   const [submitting, setSubmitting] = useState(false);
 
   const [lines, setLines] = useState<MovementLine[]>([makeEmptyLine(defaultProductId)]);
+  // Unidade de stock de cada produto: só as contáveis (un, pcs, caixa…) exigem
+  // quantidade inteira; m², ml, kg… aceitam decimais.
+  const productUom = useProductBaseUomCodes(lines.map((l) => l.productId));
+  const lineRequiresInteger = (productId: string) =>
+    requiresIntegerQty({ hasProduct: !!productId, baseUomCode: productUom.getBaseCode(productId) });
 
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [productsLoaded, setProductsLoaded] = useState(false);
@@ -583,21 +593,25 @@ export default function StockMovementDialog({
   const addLine = () => setLines((prev) => [...prev, makeEmptyLine()]);
   const removeLine = (key: string) => setLines((prev) => (prev.length > 1 ? prev.filter((l) => l.key !== key) : prev));
 
-  // O stock conta-se em unidades inteiras. Antes era parseInt, que truncava
-  // em silêncio (1,5 → 1); agora um decimal é recusado na validação.
-  const parseLineQty = (raw: string): number => Number(String(raw).trim().replace(",", "."));
+  // Unidades contáveis só aceitam inteiros (antes era parseInt, que truncava
+  // em silêncio 1,5 → 1); unidades mensuráveis (m², ml, kg…) aceitam decimais.
+  // Arredonda o ruído de vírgula flutuante.
+  const parseLineQty = (raw: string): number => {
+    const n = Number(String(raw).trim().replace(",", "."));
+    return Number.isFinite(n) ? Math.round(n * 1e6) / 1e6 : n;
+  };
 
   const validateLine = (line: MovementLine): string | null => {
     if (!line.productId) return "Escolhe um produto.";
     const qty = parseLineQty(line.quantity);
     if (!line.quantity.trim() || !Number.isFinite(qty) || qty <= 0) return "Quantidade tem de ser positiva.";
-    if (!Number.isInteger(qty)) return STOCK_INTEGER_ONLY_MSG;
+    if (lineRequiresInteger(line.productId) && !Number.isInteger(qty)) return STOCK_INTEGER_ONLY_MSG;
     if (needsSupplier && !line.itemSupplierId) return "Escolhe o fornecedor.";
     return null;
   };
 
   const runLineRpc = async (line: MovementLine): Promise<{ error: any }> => {
-    // validateLine já garantiu um inteiro positivo.
+    // validateLine já garantiu um valor positivo (inteiro nas unidades contáveis).
     const qty = parseLineQty(line.quantity);
     switch (movementType) {
       case "entrada":
@@ -974,9 +988,9 @@ export default function StockMovementDialog({
                         <Input
                           id={`smd-q${index}`}
                           type="number"
-                          min={1}
-                          step={1}
-                          inputMode="numeric"
+                          min={lineRequiresInteger(line.productId) ? 1 : 0}
+                          step={lineRequiresInteger(line.productId) ? 1 : "any"}
+                          inputMode={lineRequiresInteger(line.productId) ? "numeric" : "decimal"}
                           value={line.quantity}
                           onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
                         />
@@ -1075,14 +1089,14 @@ export default function StockMovementDialog({
                           {unlinkedReserved && (
                             <span className="block">
                               {t('inventory.movement.unlinkedReservedWarning', {
-                                qty: Math.round(unlinkedReserved.qty_reserved * 1e6) / 1e6,
+                                qty: formatStockQty(Math.round(unlinkedReserved.qty_reserved * 1e6) / 1e6),
                                 count: Math.max(1, unlinkedReserved.orders_count),
                               })}
                             </span>
                           )}
                           {consumption && (
                             <span className={unlinkedReserved ? "block mt-1" : undefined}>
-                              {t('inventory.movement.reservedWarning', { qty: consumption.qty, count: consumption.orders })}
+                              {t('inventory.movement.reservedWarning', { qty: formatStockQty(consumption.qty), count: consumption.orders })}
                             </span>
                           )}
                         </AlertDescription>

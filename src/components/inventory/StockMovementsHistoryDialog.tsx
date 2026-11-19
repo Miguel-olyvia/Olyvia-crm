@@ -9,6 +9,10 @@ import {
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 
+// Quantidades decimais (m², ml, kg…) em pt-PT.
+const formatQty = (value: unknown): string =>
+  new Intl.NumberFormat("pt-PT", { maximumFractionDigits: 3 }).format(Number(value) || 0);
+
 const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   entrada: "Entrada",
   saida: "Saída",
@@ -106,9 +110,9 @@ export default function StockMovementsHistoryDialog({
                     </Badge>
                   </TableCell>
                   <TableCell className="text-right">
-                    {INCREASING_TYPES.has(row.movement_type) ? "+" : "-"}{row.quantity}
+                    {INCREASING_TYPES.has(row.movement_type) ? "+" : "-"}{formatQty(row.quantity)}
                   </TableCell>
-                  <TableCell className="text-right">{row.balance_after}</TableCell>
+                  <TableCell className="text-right">{formatQty(row.balance_after)}</TableCell>
                   <TableCell className="font-mono text-xs">{row.document_number}</TableCell>
                   <TableCell className="text-muted-foreground text-xs">
                     {[row.counterparty, row.notes].filter(Boolean).join(" · ") || "-"}

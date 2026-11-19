@@ -37,6 +37,7 @@ import {
   type CountImportErrorRow,
   type CountImportPreview,
 } from "@/components/inventory/counts/countImport";
+import { requiresIntegerQty } from "@/utils/quotes/integerQty";
 import { ReasonButton } from "@/components/inventory/counts/ReasonButton";
 import CategorySubcategoryFilter from "@/components/inventory/CategorySubcategoryFilter";
 import { productMatchesCategoryIds, useProductCategories } from "@/hooks/useProductCategories";
@@ -82,8 +83,18 @@ interface InventoryCountLineRow {
     barcode: string | null;
     category_id: string | null;
     subcategory_id: string | null;
+    // Unidade de stock (products.uom_id → uom.code): só as contáveis exigem
+    // quantidade inteira na contagem.
+    uom?: { code: string | null } | null;
   } | null;
 }
+
+// Arredonda o ruído de vírgula flutuante e formata em pt-PT (vírgula decimal).
+const roundCountQty = (value: number): number => Math.round(value * 1e6) / 1e6;
+const formatCountQty = (value: number): string =>
+  new Intl.NumberFormat("pt-PT", { maximumFractionDigits: 3 }).format(value);
+const lineRequiresInteger = (line: InventoryCountLineRow): boolean =>
+  requiresIntegerQty({ hasProduct: true, baseUomCode: line.products?.uom?.code ?? null });
 
 interface MovementRow {
   id: string;
@@ -326,7 +337,7 @@ export default function InventoryCountDetailDialog({
       const { data: lineData, error: lineError } = await fetchAllRows(() =>
         supabase
           .from("inventory_count_lines")
-          .select("id, product_id, system_quantity_at_start, counted_quantity, counted_at, discrepancy_resolution, resolution_notes, moved_during_count, stock_movement_id, products(name, sku, barcode, category_id, subcategory_id)")
+          .select("id, product_id, system_quantity_at_start, counted_quantity, counted_at, discrepancy_resolution, resolution_notes, moved_during_count, stock_movement_id, products(name, sku, barcode, category_id, subcategory_id, uom:uom_id(code))")
           .eq("inventory_count_id", countId)
           .order("name", { foreignTable: "products", ascending: true })
       );
@@ -682,9 +693,17 @@ export default function InventoryCountDetailDialog({
 
     const trimmed = (raw ?? "").trim();
     if (trimmed === "") return; // nada a gravar
-    const qty = Number(trimmed);
-    if (!Number.isFinite(qty) || qty < 0 || !Number.isInteger(qty)) {
-      toast({ title: t('stockCounts.toast.quantityError'), description: t('stockCounts.detail.lines.countedQty'), variant: "destructive" });
+    const parsed = Number(trimmed.replace(",", "."));
+    const qty = Number.isFinite(parsed) ? roundCountQty(parsed) : parsed;
+    const integerOnly = lineRequiresInteger(line);
+    if (!Number.isFinite(qty) || qty < 0 || (integerOnly && !Number.isInteger(qty))) {
+      toast({
+        title: t('stockCounts.toast.quantityError'),
+        description: integerOnly && Number.isFinite(qty) && qty >= 0
+          ? "Este produto conta-se em unidades inteiras."
+          : t('stockCounts.detail.lines.countedQty'),
+        variant: "destructive",
+      });
       setQuantityDrafts((prev) => ({ ...prev, [lineId]: line.counted_quantity != null ? String(line.counted_quantity) : "" }));
       return;
     }
@@ -1068,7 +1087,7 @@ export default function InventoryCountDetailDialog({
   };
 
   const getDiff = (line: InventoryCountLineRow): number | null => (
-    line.counted_quantity == null ? null : line.counted_quantity - line.system_quantity_at_start
+    line.counted_quantity == null ? null : roundCountQty(line.counted_quantity - line.system_quantity_at_start)
   );
 
   const getResolutionLabel = (resolution: string) => {
@@ -1321,7 +1340,7 @@ export default function InventoryCountDetailDialog({
                               <div className="font-mono text-xs text-muted-foreground">{line.products.sku}</div>
                             )}
                           </TableCell>
-                          <TableCell className="text-right tabular-nums">{line.system_quantity_at_start}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatCountQty(line.system_quantity_at_start)}</TableCell>
                           <TableCell className="text-right">
                             {line.moved_during_count ? (
                               <Badge
@@ -1338,15 +1357,15 @@ export default function InventoryCountDetailDialog({
                           {/* A app não guarda a quantidade movida durante a contagem
                               (só a marca moved_during_count): o esperado é o
                               sistema no início, que é o que a finalização valida. */}
-                          <TableCell className="text-right tabular-nums">{line.system_quantity_at_start}</TableCell>
+                          <TableCell className="text-right tabular-nums">{formatCountQty(line.system_quantity_at_start)}</TableCell>
                           <TableCell className="text-right">
                             {canCount && isActive ? (
                               <Input
                                 ref={(el) => { quantityInputRefs.current[line.id] = el; }}
                                 type="number"
                                 min={0}
-                                step={1}
-                                inputMode="numeric"
+                                step={lineRequiresInteger(line) ? 1 : "any"}
+                                inputMode={lineRequiresInteger(line) ? "numeric" : "decimal"}
                                 aria-label={`Contada ${productName}`}
                                 className="w-24 ml-auto text-right"
                                 value={quantityDrafts[line.id] ?? ""}
@@ -1357,7 +1376,7 @@ export default function InventoryCountDetailDialog({
                                 onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
                               />
                             ) : (
-                              <span className="tabular-nums">{line.counted_quantity ?? "—"}</span>
+                              <span className="tabular-nums">{line.counted_quantity != null ? formatCountQty(line.counted_quantity) : "—"}</span>
                             )}
                           </TableCell>
                           <TableCell className="text-right">
@@ -1366,7 +1385,7 @@ export default function InventoryCountDetailDialog({
                             ) : diff === 0 ? (
                               <InventoryStatusBadge tone="ok">0</InventoryStatusBadge>
                             ) : (
-                              <InventoryStatusBadge tone="bad">{diff > 0 ? `+${diff}` : diff}</InventoryStatusBadge>
+                              <InventoryStatusBadge tone="bad">{diff > 0 ? `+${formatCountQty(diff)}` : formatCountQty(diff)}</InventoryStatusBadge>
                             )}
                           </TableCell>
                           <TableCell>
@@ -1496,9 +1515,9 @@ export default function InventoryCountDetailDialog({
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
-                          {INCREASING_TYPES.has(row.movement_type) ? "+" : "-"}{row.quantity}
+                          {INCREASING_TYPES.has(row.movement_type) ? "+" : "-"}{formatCountQty(Number(row.quantity))}
                         </TableCell>
-                        <TableCell className="text-right">{row.balance_after}</TableCell>
+                        <TableCell className="text-right">{row.balance_after != null ? formatCountQty(Number(row.balance_after)) : "—"}</TableCell>
                         <TableCell className="font-mono text-xs">{row.document_number}</TableCell>
                         <TableCell className="text-muted-foreground text-xs">
                           {[row.counterparty, row.notes].filter(Boolean).join(" · ") || "-"}

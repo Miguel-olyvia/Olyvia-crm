@@ -67,6 +67,7 @@ import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { gravarDefinicoesImportadas } from "@/lib/inventario/definicoesImportacao";
 import { stockDeleteAction } from "@/lib/inventario/stockEliminar";
 import { PedidosCarrinhasPainel } from "@/components/frota/PedidosCarrinha";
+import { requiresIntegerQty } from "@/utils/quotes/integerQty";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
   products?: { name: string; sku?: string | null; barcode?: string | null; category_id?: string | null; subcategory_id?: string | null; product_categories?: { name: string } | null };
@@ -133,8 +134,9 @@ const stockSchema = z.object({
   path: ["maximum_quantity"],
 });
 
-// Mesmo texto que o StockMovementDialog: o stock só regista unidades inteiras.
-const STOCK_INTEGER_ONLY_MSG = "O stock só regista unidades inteiras.";
+// Mesmo texto que o StockMovementDialog: só as unidades contáveis (un, pcs,
+// caixa…) exigem quantidade inteira; m², ml, kg… aceitam decimais.
+const STOCK_INTEGER_ONLY_MSG = "Este produto conta-se em unidades inteiras.";
 // Motivo dos ajustes gerados pela importação (como "Stock inicial" na criação).
 const CSV_IMPORT_REASON = "Importação CSV";
 
@@ -181,6 +183,9 @@ const toNum = (value: unknown): number => {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
 };
+
+// Arredonda o ruído de vírgula flutuante das quantidades decimais.
+const roundQty = (value: number): number => Math.round(value * 1e6) / 1e6;
 
 const formatQty = (value: number): string =>
   new Intl.NumberFormat('pt-PT', { maximumFractionDigits: 2 }).format(value);
@@ -719,7 +724,7 @@ const Stocks = () => {
         const { data, error } = await fetchAllRows(() =>
           (supabase as any)
             .from("products")
-            .select("id, name")
+            .select("id, name, uom:uom_id(code)")
             .eq("organization_id", activeCompany.id)
             .order("name", { ascending: true })
             .order("id", { ascending: true })
@@ -738,6 +743,14 @@ const Stocks = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeCompany?.id, dialogOpen, importDialogOpen, productsLoaded]);
 
+  // Unidade de stock do produto (products.uom_id → uom.code, carregada com a
+  // lista de produtos): só as contáveis exigem quantidade inteira.
+  const productRequiresInteger = (productId: string | null | undefined): boolean =>
+    requiresIntegerQty({
+      hasProduct: !!productId,
+      baseUomCode: products.find((p) => p.id === productId)?.uom?.code ?? null,
+    });
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
@@ -750,6 +763,11 @@ const Stocks = () => {
       setFieldErrors(errors);
       const firstError = validation.error.errors[0];
       toast({ title: t('stocks.toast.error'), description: firstError.message, variant: "destructive" });
+      return;
+    }
+    if (!editingStock && productRequiresInteger(formData.product_id) && !Number.isInteger(roundQty(Number(formData.quantity) || 0))) {
+      setFieldErrors({ quantity: STOCK_INTEGER_ONLY_MSG });
+      toast({ title: t('stocks.toast.error'), description: STOCK_INTEGER_ONLY_MSG, variant: "destructive" });
       return;
     }
     setFieldErrors({});
@@ -808,7 +826,7 @@ const Stocks = () => {
           if (error) throw error;
         });
 
-        const initialQty = Math.trunc(Number(formData.quantity) || 0);
+        const initialQty = roundQty(Number(formData.quantity) || 0);
         let initialQtyError: string | null = null;
         if (initialQty > 0) {
           const { error: adjustError } = await supabase.rpc("rpc_adjust_stock", {
@@ -828,7 +846,7 @@ const Stocks = () => {
           captureFlowError(new Error(initialQtyError), "stock-lifecycle");
           toast({
             title: "Stock criado sem a quantidade inicial",
-            description: `A linha foi criada com 0 un. Não foi possível registar as ${initialQty} un iniciais (${initialQtyError}). Usa Registar movimento → Ajuste.`,
+            description: `A linha foi criada com 0. Não foi possível registar a quantidade inicial (${formatQty(initialQty)}) (${initialQtyError}). Usa Registar movimento → Ajuste.`,
             variant: "destructive",
           });
         } else {
@@ -1389,7 +1407,9 @@ const Stocks = () => {
 
         // Linha existente: célula vazia mantém o valor atual (não zera stock
         // nem definições). Linha nova: célula vazia = 0, como antes.
-        const rawQty = toNumberOrNull(values[2]);
+        // Quantidade aceita vírgula decimal (m², ml, kg…).
+        const rawQtyRaw = toNumberOrNull(values[2]?.replace(',', '.'));
+        const rawQty = rawQtyRaw === null ? null : roundQty(rawQtyRaw);
         const rawMin = toNumberOrNull(values[3]);
         const rawMax = toNumberOrNull(values[4]);
         const rawReorder = toNumberOrNull(values[5]);
@@ -1412,7 +1432,7 @@ const Stocks = () => {
           rowErrors.push(`Linha ${lineNumber} (${values[0]}): ${firstError.message}`);
           return;
         }
-        if (!Number.isInteger(candidate.quantity)) {
+        if (productRequiresInteger(product.id) && !Number.isInteger(candidate.quantity)) {
           rowErrors.push(`Linha ${lineNumber} (${values[0]}): ${STOCK_INTEGER_ONLY_MSG}`);
           return;
         }
@@ -1425,7 +1445,7 @@ const Stocks = () => {
           reorder_point: validated.reorder_point,
           location: validated.location || null,
         };
-        const delta = existing ? validated.quantity - toNum(existing.quantity) : validated.quantity;
+        const delta = existing ? roundQty(validated.quantity - toNum(existing.quantity)) : validated.quantity;
         const settingsChanged = existing
           ? settings.minimum_quantity !== toNum(existing.minimum_quantity)
             || settings.maximum_quantity !== toNum(existing.maximum_quantity)
@@ -1771,7 +1791,8 @@ const Stocks = () => {
                     id="quantity"
                     type="number"
                     min={0}
-                    step={1}
+                    step={productRequiresInteger(formData.product_id) ? 1 : "any"}
+                    inputMode={productRequiresInteger(formData.product_id) ? "numeric" : "decimal"}
                     value={formData.quantity}
                     readOnly={Boolean(editingStock)}
                     aria-describedby="quantity-help"
@@ -1779,7 +1800,7 @@ const Stocks = () => {
                       if (editingStock) return;
                       setFormData({
                         ...formData,
-                        quantity: parseInt(e.target.value) || 0,
+                        quantity: Number(e.target.value) || 0,
                       });
                     }}
                     required

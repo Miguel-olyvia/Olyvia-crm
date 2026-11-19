@@ -162,6 +162,10 @@ const formatCoordinates = (w: Pick<WarehouseData, "latitude" | "longitude">): st
 
 const STATS_PAGE_SIZE = 1000;
 const EMPTY_STATS: WarehouseStats = { products: 0, value: 0, belowReorder: 0 };
+// Quantidades de stock decimais (m², ml, kg…) em pt-PT.
+const formatStockQty = (value: unknown): string =>
+  new Intl.NumberFormat("pt-PT", { maximumFractionDigits: 3 }).format(Number(value) || 0);
+
 const formatEur = (value: number) =>
   new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(value);
 
@@ -1268,9 +1272,9 @@ const Warehouses = () => {
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">
-                      {INCREASING_TYPES.has(row.movement_type) ? "+" : "-"}{row.quantity}
+                      {INCREASING_TYPES.has(row.movement_type) ? "+" : "-"}{formatStockQty(row.quantity)}
                     </TableCell>
-                    <TableCell className="text-right">{row.balance_after}</TableCell>
+                    <TableCell className="text-right">{formatStockQty(row.balance_after)}</TableCell>
                     <TableCell className="font-mono text-xs">{row.document_number}</TableCell>
                   </TableRow>
                 ))
