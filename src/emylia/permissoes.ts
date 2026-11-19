@@ -114,6 +114,8 @@ const PERM_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
   retificarMedidas: ["obra.planear"],
   // 11/11 (fim de contacto): a assistente comercial passa o negócio ao comercial (A.passarAoComercial, a resposta contacto_concluido)
   passarAoComercial: ["contacto.registar"],
+  // 19/11 (auditoria): «Sem interesse» ou «Número errado» na chamada propõem dar o negócio como perdido (A.perder → neg_perder_negocio)
+  perder: ["negocio.perder"],
 };
 /** 9/11 (revisão do Lote 2): os passos que pedem UMA de várias permissões. «Verificar no ERP» (A.verificarErp) só lê o Eticadata: basta
  *  negocios.registar_fatura OU negocios.validar_pagamento; sem nenhuma, o botão fica desligado antes de qualquer leitura. A primeira da

@@ -53,12 +53,26 @@ export const LEAD: Grupo[] = [
   },
 ];
 
+// 19/11 (auditoria): o resultado da chamada decide o próximo passo (motor.ts, proximo e contactar): só com o cliente interessado se marca a
+// visita; sem resposta (ou «ligar mais tarde») volta-se a ligar no dia combinado (`religar`, que a lista «Contactar hoje» lê); sem interesse
+// ou com o número errado propõe-se dar o negócio como perdido.
+export const RES_INTERESSADO = "Atendeu · interessado";
+export const RES_MAIS_TARDE = "Atendeu · ligar mais tarde";
+export const RES_NAO_ATENDEU = "Não atendeu";
+export const RES_SEM_INTERESSE = "Sem interesse";
+export const RES_NUMERO_ERRADO = "Número errado";
+export const RESULTADOS_CHAMADA = [RES_INTERESSADO, RES_MAIS_TARDE, RES_NAO_ATENDEU, RES_SEM_INTERESSE, RES_NUMERO_ERRADO] as const;
+/** Os resultados que pedem voltar a ligar (com a data em `religar`). */
+export const RES_RELIGAR: readonly string[] = [RES_MAIS_TARDE, RES_NAO_ATENDEU];
+/** Os resultados que propõem dar o negócio como perdido. */
+export const RES_PERDA: readonly string[] = [RES_SEM_INTERESSE, RES_NUMERO_ERRADO];
+
 export const CONTACTO: Grupo[] = [
   {
     titulo: "Chamada",
     campos: [
-      { k: "resultado", l: "Resultado", t: "escolha", op: ["Atendeu · interessado", "Atendeu · ligar mais tarde", "Não atendeu", "Sem interesse", "Número errado"] },
-      { k: "religar", l: "Voltar a ligar em", t: "data", se: { k: "resultado", v: ["Atendeu · ligar mais tarde", "Não atendeu"] } },
+      { k: "resultado", l: "Resultado", t: "escolha", op: [...RESULTADOS_CHAMADA] },
+      { k: "religar", l: "Voltar a ligar em", t: "data", se: { k: "resultado", v: [...RES_RELIGAR] } },
     ],
   },
   {

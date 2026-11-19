@@ -4,7 +4,7 @@
 // (http://localhost:5174/sem-conta?caso=anabela), para seguir o resto do fluxo no ecrã, clique a clique.
 // A equipa é falsa (um técnico por ofício, com "(teste)" no nome e um custo por hora inventado).
 import { faltaProdutosVisita, garantirServico, r2, totaisIva, type acoes, type Estado, type LinhaOrc, type Negocio, type Tarefa } from "../motor";
-import { CONTACTO, EXTERIOR, INTERIOR, ESCOLHAS, LEAD, OBRA, PROPOSTA, emFalta, grupoVisita, gruposArea, prefixoDivisao, type Grupo } from "../campos";
+import { CONTACTO, EXTERIOR, INTERIOR, ESCOLHAS, LEAD, OBRA, PROPOSTA, RES_INTERESSADO, emFalta, grupoVisita, gruposArea, prefixoDivisao, type Grupo } from "../campos";
 import { catalogo0 } from "../v2/catalogoModelo";
 import { parcelasNoFinanceiro } from "../parcelas";
 import { BRUTO_SERVICOS } from "../dados/mudelarServicos";
@@ -106,7 +106,7 @@ export function montarAnabela(S: Estado, A: Acoes, avisos: { msg: string; sub?: 
   };
   for (const [k, v] of Object.entries(F)) A.campo(id, k, v);
   preencher(d(), LEAD);
-  A.contactar(id);
+  A.contactar(id, RES_INTERESSADO);
   garantir(d().fase === 1, "contactar");
   preencher(d(), CONTACTO);
   A.marcarVisita(id);

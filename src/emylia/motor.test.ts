@@ -29,7 +29,7 @@ describe("protótipo de Negócios", () => {
     const d = () => S.deals.find((x) => x.id === id)!;
 
     preencher(d(), LEAD);
-    A.contactar(id);
+    A.contactar(id, "Atendeu · interessado");
     expect(d().fase).toBe(1);
     preencher(d(), CONTACTO);
     A.marcarVisita(id);
@@ -246,7 +246,7 @@ describe("a visita fica feita sozinha", () => {
     const A = acoes(S, () => {}, (fn) => fn());
     const id = 1043;
     const d = () => S.deals.find((x) => x.id === id)!;
-    preencher(d(), LEAD); A.contactar(id);
+    preencher(d(), LEAD); A.contactar(id, "Atendeu · interessado");
     preencher(d(), CONTACTO); A.marcarVisita(id);
     Object.assign(d().visita.med, { pav: 6, par: 18, pts: 3, pcs: 4 });
     A.campo(id, "nota", "x");
@@ -264,7 +264,7 @@ describe("a visita fica feita sozinha", () => {
     const A = acoes(S, () => {}, (fn) => fn());
     const id = 1043;
     const d = () => S.deals.find((x) => x.id === id)!;
-    preencher(d(), LEAD); A.contactar(id);
+    preencher(d(), LEAD); A.contactar(id, "Atendeu · interessado");
     preencher(d(), CONTACTO); A.marcarVisita(id);
     A.cancelarVisita(id, 1);
     preencher(d(), [EXTERIOR, INTERIOR, AREA, ESCOLHAS]);
