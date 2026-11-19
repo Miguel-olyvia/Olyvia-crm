@@ -10,6 +10,7 @@ import { resolverOrgRaiz } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
 import { paraLinhas } from "./negocioReal";
 import { gravarNegocio, gravarObra, type IdsServico } from "./negocioBase";
 import { obraVazia, paraObra } from "./obraReal";
+import { canonico, novidadesDaObra, obraJunta, porNoSitio } from "./juntarObra";
 import { gravarFinanceiro, novasNoFinanceiro } from "./financeiroReal";
 
 export interface RefNegocio { id: string; entityId: string }
@@ -24,8 +25,9 @@ export function marcaNegocio(d: Negocio): string {
 /** 28/10 (20261231999000): a obra grava-se à parte (obra_guardar_negocio), quando muda. A fotografia dela vive ao lado da fotografia do
  *  negócio, presa ao mesmo Map: quem chama não muda. Um negócio sem fotografia da obra compara com a obra vazia (sem plano, nada a gravar). */
 const fotosObra = new WeakMap<Map<number, string>, Map<number, string>>();
-export const marcaObra = (d: Negocio): string => JSON.stringify(d.obra ?? null);
-const OBRA_VAZIA = JSON.stringify(obraVazia());
+// 19/11: com as chaves por ordem (canonico): a obra lida da base (jsonb) e a do ecrã comparam-se pelo conteúdo, não pela ordem das chaves
+export const marcaObra = (d: Negocio): string => canonico(d.obra ?? null);
+const OBRA_VAZIA = canonico(obraVazia());
 const fotoObraDe = (foto: Map<number, string>): Map<number, string> => {
   let m = fotosObra.get(foto);
   if (!m) { m = new Map(); fotosObra.set(foto, m); }
@@ -83,12 +85,46 @@ async function criarNoCrm(sb: SupabaseClient, org: string, d: Negocio): Promise<
  *  a organização para o ecrã ter a encomenda da base (o contrato, o número) e a ligação ao Inventário. */
 export interface Sincronizacao { gravados: number; erros: string[]; avisos: string[]; reler?: boolean }
 
+/** 19/11: as obras como estão agora na base (obra_ler_negocios: o id do negócio na base → o estado da Emylia). null: não se leu. */
+export type LerObras = () => Promise<Map<string, unknown> | null>;
+
+/**
+ * 19/11 (Rúben: o técnico termina uma tarefa e isso tem de contar no Estúdio da obra, e o contrário). Junta às obras deste ecrã o que
+ * outra pessoa gravou na base depois de este ecrã as ler: o «feita» do técnico, a validação do gestor, os registos e o diário. O que
+ * este ecrã mudou e ainda não gravou fica (obraJunta). A fotografia passa a ser a da base: a obra só se volta a gravar se este ecrã
+ * tiver mudanças suas. Devolve os negócios que mudaram, com o que mudou nas tarefas (para o aviso).
+ */
+export function juntarObrasDaBase(S: Estado, refs: ReadonlyMap<number, RefNegocio>, foto: Map<number, string>, lidas: ReadonlyMap<string, unknown>,
+  hoje = new Date()): { d: Negocio; novidades: string[] }[] {
+  const fotoObra = fotoObraDe(foto), out: { d: Negocio; novidades: string[] }[] = [];
+  for (const d of S.deals) {
+    const ref = refs.get(d.id);
+    if (!ref || !lidas.has(ref.id) || !d.obra) continue;
+    const antes = JSON.parse(fotoObra.get(d.id) ?? OBRA_VAZIA) as Negocio["obra"];
+    const { obra, base } = obraJunta(antes, d.obra, lidas.get(ref.id), hoje);
+    const marcaBase = canonico(base);
+    if (marcaBase === canonico(antes)) continue; // ninguém gravou nada novo
+    const mudou = canonico(obra) !== marcaObra(d);
+    const novidades = mudou ? novidadesDaObra(d.obra, obra) : [];
+    if (mudou) porNoSitio(d.obra, obra);
+    fotoObra.set(d.id, marcaBase);
+    if (mudou) out.push({ d, novidades });
+  }
+  return out;
+}
+
 /** Grava os negócios que mudaram. Atualiza `refs` e a fotografia com o que ficou gravado. Os de `soLeitura` (negócios do CRM, com
  *  documentos do CRM) nunca se gravam: a base recusa-os (NE005) e um que faltasse em `refs` criava uma lead nova. */
 export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado, refs: Map<number, RefNegocio>, foto: Map<number, string>, ids: IdsServico,
-  soLeitura: ReadonlySet<number> = new Set(), opcoes: { soObra?: boolean } = {}): Promise<Sincronizacao> {
+  soLeitura: ReadonlySet<number> = new Set(), opcoes: { soObra?: boolean; lerObras?: LerObras } = {}): Promise<Sincronizacao> {
   const out: Sincronizacao = { gravados: 0, erros: [], avisos: [] };
   const falhados = new Set<number>(), contados = new Set<number>();
+  // 19/11: antes de gravar uma obra, junta-se o que outra pessoa gravou nela entretanto (o técnico no Hoje, o gestor no Estúdio): a obra
+  // grava-se inteira e um ecrã aberto há mais tempo apagava-o. Sem leitura (ou com erro), grava-se como antes.
+  if (opcoes.lerObras && S.deals.some((d) => !soLeitura.has(d.id) && refs.has(d.id) && obraMudou(d, foto))) {
+    try { const lidas = await opcoes.lerObras(); if (lidas) juntarObrasDaBase(S, refs, foto, lidas); }
+    catch { /* grava-se como antes */ }
+  }
   // 09/11 (20270111100000): quem só lê as obras (sem pessoas.view, com negocios.obra.executar) recebe o negócio reduzido e a base recusa-lhe
   // neg_guardar_negocio (CT001): só se grava a obra (obra_guardar_negocio)
   for (const d of opcoes.soObra ? [] : negociosMudados(S.deals, foto)) {
@@ -110,8 +146,9 @@ export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado,
       if (antes && await juntarRespostasDaBase(sb, refs.get(d.id)!.id, JSON.parse(antes) as Negocio, d)) out.reler = true;
       // 10/11: na passagem ao Financeiro a obra grava-se antes do negócio (12/11: o plano nasce com a proposta aceite, por aprovar)
       if (antes && (JSON.parse(antes) as Negocio).fase < 4 && d.fase >= 4 && obraMudou(d, foto)) {
+        const m = marcaObra(d);
         for (const a of await gravarObra(sb, org, refs.get(d.id)!.id, paraObra(d))) out.avisos.push(`${d.nome}: ${a}`);
-        fotoObraDe(foto).set(d.id, marcaObra(d));
+        fotoObraDe(foto).set(d.id, m);
       }
       const L = paraLinhas(d);
       const atual = L.orcamentos.find((o) => o.estado !== "substituido");
@@ -132,8 +169,10 @@ export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado,
   for (const d of S.deals) {
     if (soLeitura.has(d.id) || falhados.has(d.id) || !refs.has(d.id) || !obraMudou(d, foto)) continue;
     try {
+      // 19/11: a fotografia é a do que foi gravado (uma ação feita durante a gravação fica por gravar, e grava-se a seguir)
+      const m = marcaObra(d);
       for (const a of await gravarObra(sb, org, refs.get(d.id)!.id, paraObra(d))) out.avisos.push(`${d.nome}: ${a}`);
-      fotoObra.set(d.id, marcaObra(d));
+      fotoObra.set(d.id, m);
       if (!contados.has(d.id)) out.gravados++;
     } catch (e) {
       out.erros.push(`${d.nome} (obra): ${(e as Error).message}`);

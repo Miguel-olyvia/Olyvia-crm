@@ -24,7 +24,7 @@ import { useInventario } from "./inventario/loja";
 import { resumoEcNegocio } from "./inventario/ponteNegocios";
 import { useMateriaisDaObra } from "./real/materiaisObraReal";
 import {
-  aSeguirDoTecnico, diaDaTarefa, enviosDe, horasPorDia, instrucoesDe, passosFeitos, rotuloDiaTarefa, tecnicosComTrabalho, trabalhoDoTecnico, type ASeguir,
+  aSeguirDoTecnico, diaDaTarefa, enviosDe, horasPorDia, instrucoesDe, passosFeitos, rotuloDiaTarefa, tecnicosComTrabalho, terminadasHoje, trabalhoDoTecnico, type ASeguir,
 } from "./trabalhoObra";
 import { AvatarTec, ChipEstado, EnvioItem, HistoricoTarefa, Miniaturas } from "./AcompanhamentoObra";
 import { lerFoto } from "./ObraOperacoes";
@@ -142,6 +142,7 @@ export function HojeTecnico(ctx: Ctx) {
   const tec = TECS.find((x) => x.id === eu)!;
   const hoje = trabalhoDoTecnico(S.deals, eu);
   const seguir = aSeguirDoTecnico(S.deals, eu);
+  const fechadas = terminadasHoje(S.deals, eu);
   const horas = hoje.reduce((a, x) => a + horasPorDia(x.t), 0);
   const obras = new Set(hoje.map((x) => x.d.id)).size;
   const agora = new Date();
@@ -175,13 +176,31 @@ export function HojeTecnico(ctx: Ctx) {
         </div>
       </div>
       <p className="mt-3 text-lg text-muted-foreground">
-        {hoje.length ? <>Hoje tem <b className="font-semibold text-foreground">{hoje.length} {hoje.length === 1 ? "tarefa" : "tarefas"}</b> em {obras} {obras === 1 ? "obra" : "obras"} · cerca de {hfmt(horas)} h.</> : "Hoje não tem tarefas por fazer."}
+        {hoje.length ? <>Hoje tem <b className="font-semibold text-foreground">{hoje.length} {hoje.length === 1 ? "tarefa" : "tarefas"}</b> em {obras} {obras === 1 ? "obra" : "obras"} · cerca de {hfmt(horas)} h.</> : fechadas.length ? "Hoje já não tem tarefas por fazer." : "Hoje não tem tarefas por fazer."}
       </p>
 
       <AvisosDoTecnico ctx={ctx} eu={eu} />
       <ul className="mt-6 space-y-6">
         {hoje.map((x) => <li key={x.d.id + ":" + x.ti}><TarefaDeHoje ctx={ctx} d={x.d} ti={x.ti} /></li>)}
       </ul>
+
+      {/* 19/11: o que ficou terminado e validado hoje (por si, ou dado por feito pelo responsável no Estúdio da obra) */}
+      {fechadas.length > 0 && (
+        <section aria-labelledby="ht-terminadas" className="mt-6">
+          <h2 id="ht-terminadas" className="text-[15px] font-semibold">Terminadas hoje <span className="font-normal text-muted-foreground">· {fechadas.length}</span></h2>
+          <ul className="mt-2 divide-y divide-border rounded-2xl border border-success/30 bg-success/[0.05]">
+            {fechadas.map((x) => (
+              <li key={x.d.id + ":" + x.ti} className="flex items-start gap-3 px-4 py-3">
+                <Check className="mt-0.5 h-5 w-5 shrink-0 text-success" aria-hidden="true" />
+                <span className="min-w-0">
+                  <span className="block text-[15px] font-medium" title={x.t.nome}>{nomeCurtoTarefa(x.t.nome)}</span>
+                  <span className="block text-sm text-muted-foreground">{x.d.nome} · {x.porOutro ? `dada por feita por ${x.quem}` : `validada por ${x.quem}`}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {!hoje.length && (
         <div className={cn(CARTAO, "mt-6 p-6 text-center")}>

@@ -52,7 +52,7 @@ type Foco = { k: "fase"; n: number } | { k: "tec"; id: string | null } | null;
 type Retrato = { dia: number; dur: number; h: number; tec: string | null }[];
 type Arrasto = { ti: number; tipo: "mover" | "durar"; dx: number; x: number; y: number };
 
-export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: () => void }) {
+export function EstudioPlano({ ctx, d, fechar, voltar = "Voltar ao negócio" }: { ctx: Ctx; d: Negocio; fechar: () => void; voltar?: string }) {
   const { S, A, run } = ctx;
   const reduzir = useReduzir();
   const p = d.obra.plano;
@@ -264,7 +264,7 @@ export function EstudioPlano({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar:
         <header className="border-b border-border bg-card/95 backdrop-blur">
           <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
-              <Button type="button" variant="outline" className="min-h-11" onClick={fechar}><ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden="true" />Voltar ao negócio</Button>
+              <Button type="button" variant="outline" className="min-h-11" onClick={fechar}><ArrowLeft className="mr-1.5 h-4 w-4" aria-hidden="true" />{voltar}</Button>
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Estúdio do plano</p>
                 <h1 id="estudio-plano-titulo" className="truncate text-xl font-semibold tracking-tight">{d.nome} · {d.servico || "Obra"}</h1>

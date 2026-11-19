@@ -7,16 +7,30 @@ import { PackageCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { LINHAS, aberto, eur, nfmt, r2, type StockKey } from "./motor";
 import type { Ctx } from "./pecas";
-import { ListaObras, PaginaObra } from "./ObraOperacoes";
+import { ListaObras } from "./ObraOperacoes";
+import { EstudioObra } from "./estudioObra/EstudioObra";
+import { EstudioPlano } from "./estudioPlano/EstudioPlano";
 import { useInventario } from "./inventario/loja";
 import { estadoLinhaNegocio, linhaDoResumo, resumoEcNegocio } from "./inventario/ponteNegocios";
 import { linhasDaObra, totaisDaEc } from "./encomendasAjuste";
 
-/** As Operações (15/10: refeitas em ObraOperacoes.tsx): a lista de obras, ou a página da obra aberta. */
+/** As Operações (15/10: refeitas em ObraOperacoes.tsx): a lista de obras e, por cima, a obra aberta.
+ *  19/11 (Rúben: «as Operações da obra têm de ser o Estúdio da obra, não o outro antigo»): abrir uma obra (o cartão, «Abrir nas
+ *  Operações», o endereço ?obra=…, a agenda do técnico) abre o Estúdio da obra; com o plano por aprovar, o Estúdio do plano. A página
+ *  antiga (PaginaObra) já não se abre daqui: a conversa com o cliente e os problemas dele estão no separador «Cliente» do Estúdio,
+ *  «Arrancar a obra» é o botão principal e as fotografias estão no «Diário» e em cada tarefa. Fechar volta à lista das Operações. */
 export function OperacoesSimples(ctx: Ctx) {
-  const d = ctx.S.op ? ctx.S.deals.find((x) => x.id === ctx.S.op) : null;
-  if (d && d.obra.plano) return <PaginaObra ctx={ctx} d={d} />;
-  return <ListaObras {...ctx} />;
+  const { S, A, run } = ctx;
+  const d = S.op ? S.deals.find((x) => x.id === S.op) : null;
+  const voltar = () => run(() => A.nav("operacoes"));
+  return (
+    <>
+      <ListaObras {...ctx} />
+      {d?.obra.plano && (d.obra.plano.estado === "por aprovar"
+        ? <EstudioPlano key={`plano-${d.id}`} ctx={ctx} d={d} fechar={voltar} voltar="Operações" />
+        : <EstudioObra key={`obra-${d.id}`} ctx={ctx} d={d} fechar={voltar} voltar="Operações" />)}
+    </>
+  );
 }
 
 /** O nome de cada material de stock (pela chave), a partir dos modelos. */

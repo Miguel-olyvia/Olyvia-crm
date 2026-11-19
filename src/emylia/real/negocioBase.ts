@@ -158,6 +158,14 @@ export async function lerNegocios(sb: SupabaseClient, org: string, ids: IdsServi
   });
 }
 
+/** 19/11: só as obras, como estão agora na base (obra_ler_negocios, a mesma leitura do abrir): o id do negócio → o estado da Emylia.
+ *  Com erro (ou sem a função), null: quem chama continua como antes. */
+export async function lerObras(sb: SupabaseClient, org: string): Promise<Map<string, unknown> | null> {
+  const { data, error } = await sb.rpc("obra_ler_negocios" as never, { p_org: org } as never);
+  if (error) return null;
+  return new Map(((data as { negocio_id: string; emylia: unknown }[] | null) ?? []).map((o) => [o.negocio_id, o.emylia]));
+}
+
 /** Grava a obra do negócio e devolve os avisos (ex.: um técnico sem o ofício da tarefa). Numa base sem a função, não faz nada. */
 export async function gravarObra(sb: SupabaseClient, org: string, negocioId: string, obra: ObraBase): Promise<string[]> {
   const { data, error } = await sb.rpc("obra_guardar_negocio" as never, { p_org: org, p_negocio_id: negocioId, p_obra: obra } as never);
