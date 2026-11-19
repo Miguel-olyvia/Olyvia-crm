@@ -9,7 +9,8 @@
 //  - O comercial NUNCA recebe cancel_url nem confirm_url (os links do cliente),
 //    mesmo com um modelo personalizado: as variaveis ficam vazias.
 
-import { pickTemplateId } from "./formEmails.ts";
+import { pickTemplateChoice } from "./formEmails.ts";
+import type { TemplateSource } from "./emailDefaults.ts";
 import type { EmailPurpose, FormEmailConfig } from "./formEmails.ts";
 
 export type AudienceEvent = "reminder" | "reschedule" | "cancel";
@@ -54,8 +55,18 @@ export function pickAudienceTemplateId(
   audience: Audience,
   locale: string | null | undefined,
 ): string | null {
+  return pickAudienceTemplateChoice(cfg, event, audience, locale).id;
+}
+
+/** Como pickAudienceTemplateId, mas diz de onde veio o modelo (idioma da pessoa, coluna ou nenhum). */
+export function pickAudienceTemplateChoice(
+  cfg: FormEmailConfig | null,
+  event: AudienceEvent,
+  audience: Audience,
+  locale: string | null | undefined,
+): { id: string | null; source: TemplateSource } {
   const slot = audience === "technician" ? technicianSlot(cfg, event) : clientSlot(cfg, event);
-  return pickTemplateId(cfg, slot.purpose, locale, slot.column);
+  return pickTemplateChoice(cfg, slot.purpose, locale, slot.column);
 }
 
 export interface AudienceVarsExtra {

@@ -184,3 +184,82 @@ describe('createReminderLines: o idioma da pessoa', () => {
     expect(inserted.scheduled_sms[0].message).toBe('Acme: reminder of your rescheduled visit on {{meeting_date}}.');
   });
 });
+
+describe('createReminderLines: a data segue o idioma do texto realmente usado', () => {
+  const PT = 'segunda-feira, 5 de outubro de 2026 às 11:00';
+  const EN = 'Monday, 5 October 2026 at 11:00';
+  const TEMPLATES: Record<string, { subject: string; body_html: string }> = {
+    'rem-col': { subject: 'Lembrete — {{meeting_date}}', body_html: '<p>Olá, a sua visita é {{meeting_date}}</p>' },
+    'rem-en': { subject: 'Reminder — {{meeting_date}}', body_html: '<p>Hi, your visit is {{meeting_date}}</p>' },
+  };
+
+  async function runT(over: Partial<FormEmailConfig>, extra: Partial<CreateReminderLinesParams> = {}) {
+    const inserted: Record<string, any[]> = { scheduled_emails: [], scheduled_sms: [] };
+    const db = {
+      from: (table: string) => ({
+        insert: (row: any) => {
+          (inserted[table] ||= []).push(row);
+          return Promise.resolve({ error: null });
+        },
+        select: () => ({
+          eq: (_c: string, id: string) => ({ maybeSingle: () => Promise.resolve({ data: TEMPLATES[id] ?? null, error: null }) }),
+        }),
+      }),
+    };
+    await createReminderLines({
+      supabase: db, organizationId: 'org-1', itemId: 'item-1', formId: 'form-1', locale: 'en',
+      cfg: cfg({ reminder_template_id: 'rem-col', ...over }), startIso: iso(START), entityType: 'leads', entityId: 'lead-1',
+      createdBy: 'user-1', companyName: 'Acme',
+      clientVars: { lead_name: 'Rita', meeting_date: 'x', location: 'Rua A', technician_name: 'Ana', cancel_url: 'https://app.test/m?token=abc' },
+      confirmUrl: '', leadEmail: 'rita@x.pt', leadPhone: '910000000', address: 'Rua A', appointmentUrl: 'https://app.test/scheduling',
+      technicians: [{ email: 'ana@x.pt', userId: 'u-ana', name: 'Ana' }], rescheduled: false, now: NOW, ...extra,
+    });
+    const client = inserted.scheduled_emails.find((r) => r.audience === 'client');
+    const technician = inserted.scheduled_emails.find((r) => r.audience === 'technician');
+    return { client, technician };
+  }
+
+  it('o cenário do utilizador: modelo da coluna (pt), pessoa em inglês, sem modelo en -> texto e data em pt', async () => {
+    const { client } = await runT({});
+    expect(client.subject).toBe(`Lembrete — ${PT}`);
+    expect(client.body_html).toContain(PT);
+    expect(client.content_vars.meeting_date).toBe(PT);
+    // fica registado para o envio refazer a data no mesmo idioma
+    expect(client.content_vars.content_lang).toBe('pt');
+  });
+
+  it('com modelo escolhido para o inglês -> data em inglês', async () => {
+    const { client } = await runT({ email_locale_templates: { reminder: { en: 'rem-en' } } });
+    expect(client.subject).toBe(`Reminder — ${EN}`);
+    expect(client.body_html).toContain(EN);
+    expect(client.content_vars.meeting_date).toBe(EN);
+    expect(client.content_vars.content_lang).toBeUndefined();
+  });
+
+  it('sem modelo nenhum -> texto e data em inglês', async () => {
+    const { client } = await runT({ reminder_template_id: null });
+    expect(client.subject).toBe(`Reminder of your visit — ${EN}`);
+    expect(client.body_html).toContain('This is a reminder of your scheduled visit.');
+    expect(client.content_vars.meeting_date).toBe(EN);
+    expect(client.content_vars.content_lang).toBeUndefined();
+  });
+
+  it('com o inglês como idioma por omissão do formulário, o modelo da coluna é inglês', async () => {
+    const { client } = await runT({}, { formDefaultLocale: 'en', locale: 'pt' });
+    expect(client.content_vars.meeting_date).toBe(EN);
+    expect(client.content_vars.content_lang).toBe('en');
+  });
+
+  it('pessoa em português com modelo da coluna: tudo como sempre (nada acrescentado)', async () => {
+    const { client } = await runT({}, { locale: 'pt' });
+    expect(client.subject).toBe(`Lembrete — ${PT}`);
+    expect(client.content_vars.meeting_date).toBe(PT);
+    expect(client.content_vars.content_lang).toBeUndefined();
+  });
+
+  it('o comercial fica sempre em português', async () => {
+    const { technician } = await runT({ reminder_technician_template_id: null });
+    expect(technician.content_vars.meeting_date).toBe(PT);
+    expect(technician.content_vars.content_lang).toBeUndefined();
+  });
+});

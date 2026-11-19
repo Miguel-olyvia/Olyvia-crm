@@ -6,7 +6,8 @@
 import { loadTemplate, scheduleEmail } from "./formEmails.ts";
 import type { FormEmailConfig } from "./formEmails.ts";
 import { scheduleSms } from "./sendSms.ts";
-import { buildAudienceVars, pickAudienceTemplateId } from "./audienceTemplates.ts";
+import { buildAudienceVars, pickAudienceTemplateChoice, pickAudienceTemplateId } from "./audienceTemplates.ts";
+import { contentLang, normalizeMailLang } from "./emailDefaults.ts";
 import type { Audience } from "./audienceTemplates.ts";
 import { buildReminderMail, formatVisitWhen, reminderSmsTemplate } from "./reminderContent.ts";
 import { pickReminderSender } from "./reminderSender.ts";
@@ -25,6 +26,8 @@ export interface CreateReminderLinesParams {
   itemId: string;
   formId: string | null;
   locale: string | null;
+  /** Idioma por omissao do formulario (forms.settings.i18n.default_locale); sem ele, pt. */
+  formDefaultLocale?: string | null;
   cfg: FormEmailConfig;
   startIso: string;
   entityType: "leads" | "clients";
@@ -112,8 +115,20 @@ export async function createReminderLines(p: CreateReminderLinesParams): Promise
 
   let emails = 0;
   for (const t of targets) {
-    // A data segue o idioma do CLIENTE (so as palavras); o comercial (aviso interno) fica em portugues.
-    const when = formatVisitWhen(p.startIso, t.audience === "client" ? p.locale : null);
+    // As palavras da data seguem o idioma do TEXTO REALMENTE USADO: o do modelo escolhido para o idioma da
+    // pessoa, o idioma por omissao do formulario se cair no modelo da coluna unica, o da pessoa se nao ha
+    // modelo. O comercial (aviso interno) fica sempre em portugues.
+    const template = await templateFor(t.audience);
+    const choice = pickAudienceTemplateChoice(cfg, "reminder", t.audience, p.locale);
+    const lang = t.audience === "client"
+      ? contentLang({
+        source: choice.source,
+        templateUsed: !!template?.body_html,
+        personLocale: p.locale,
+        formDefaultLocale: p.formDefaultLocale,
+      })
+      : "pt";
+    const when = formatVisitWhen(p.startIso, lang);
     const vars = {
       ...buildAudienceVars(
         { ...p.clientVars, ...(t.tech ? { technician_name: t.tech.name } : {}) },
@@ -129,9 +144,10 @@ export async function createReminderLines(p: CreateReminderLinesParams): Promise
       ),
       meeting_date: when,
       meeting_datetime: when,
+      // Guardado so quando difere do idioma da pessoa: o envio refaz a data nesse idioma.
+      ...(t.audience === "client" && lang !== normalizeMailLang(p.locale) ? { content_lang: lang } : {}),
     };
-    const template = await templateFor(t.audience);
-    const mail = buildReminderMail({ audience: t.audience, template, vars, brand: cfg, lang: p.locale });
+    const mail = buildReminderMail({ audience: t.audience, template, vars, brand: cfg, lang: p.locale, templateLang: lang });
     const sender = pickReminderSender({
       kind: t.audience,
       technicianUserId: t.tech?.userId,

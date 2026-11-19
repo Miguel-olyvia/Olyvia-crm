@@ -280,3 +280,34 @@ export function reminderSmsText(
   if (opts.withManageLink) text += ` ${t.manage}`;
   return text;
 }
+
+/** De onde veio o modelo de um email: do idioma da pessoa, da coluna unica (idioma por omissao) ou de lado nenhum. */
+export type TemplateSource = "locale" | "column" | "none";
+
+/**
+ * Idioma do TEXTO REALMENTE USADO num email ou SMS. As palavras da data seguem este idioma, nao o da pessoa:
+ *  - modelo escolhido para o idioma da pessoa      -> o da pessoa;
+ *  - modelo da coluna unica (idioma por omissao)   -> o idioma por omissao do formulario (nunca ingles so
+ *    porque a pessoa preencheu em ingles);
+ *  - sem modelo (texto por omissao do sistema)     -> o da pessoa (en tem versao; os outros caem em pt).
+ * `templateUsed` e false quando nao houve modelo utilizavel (nenhum, apagado ou sem corpo): usa-se o texto
+ * por omissao, no idioma da pessoa.
+ */
+export function contentLang(p: {
+  source: TemplateSource;
+  templateUsed: boolean;
+  personLocale: unknown;
+  formDefaultLocale: unknown;
+}): MailLang {
+  if (p.templateUsed && p.source === "column") return normalizeMailLang(p.formDefaultLocale);
+  return normalizeMailLang(p.personLocale);
+}
+
+/** Idioma por omissao do formulario (forms.settings.i18n.default_locale); sem ele, pt. Em minusculas. */
+export function defaultLocaleFromSettings(settings: unknown): string {
+  const i18n = settings && typeof settings === "object" && !Array.isArray(settings)
+    ? (settings as Record<string, unknown>).i18n
+    : null;
+  const value = i18n && typeof i18n === "object" ? (i18n as Record<string, unknown>).default_locale : null;
+  return typeof value === "string" && value.trim() ? value.trim().toLowerCase() : "pt";
+}

@@ -39,13 +39,18 @@ export function buildReminderMail(opts: {
   brand: ReminderBrand | null;
   /** Idioma da pessoa; so o cliente o segue. */
   lang?: string | null;
+  /** Idioma do modelo usado (o por omissao do formulario se for o da coluna unica); so para o assunto por omissao. */
+  templateLang?: string | null;
 }): { subject: string; html: string } {
   const { audience, template, vars, brand } = opts;
   const isClient = audience === "client";
   const lang = mailLangFor(audience, opts.lang);
   const t = MAIL_TEXTS[lang].reminder;
+  const tt = MAIL_TEXTS[mailLangFor(audience, opts.templateLang ?? opts.lang)].reminder;
   const defaultSubject = isClient ? t.clientSubject : t.technicianSubject;
-  const subject = renderSubject(template?.subject || defaultSubject, vars);
+  // Com modelo, um assunto em falta cai no por omissao do idioma do modelo; sem modelo, no da pessoa.
+  const templateSubject = isClient ? tt.clientSubject : tt.technicianSubject;
+  const subject = renderSubject(template?.subject || (template?.body_html ? templateSubject : defaultSubject), vars);
   if (template?.body_html) {
     return { subject, html: renderHtml(template.body_html, vars) };
   }
