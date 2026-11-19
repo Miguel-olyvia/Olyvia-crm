@@ -109,7 +109,7 @@ const PERM_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
   // 19/11: as parcelas do contrato a seguir à 1.ª (a do arranque, a do fim), como as adendas
   registarFaturaParcela: ["finance.invoice"], validarParcela: ["finance.validate_payment"], enviarAuto: ["obra.fechar"],
   // 6/11: os passos da obra (as Operações) pedem negocios.obra.planear, como o motor (A.aprovarPlano, A.arrancar)
-  gerarPlano: ["obra.planear"], aprovarPlano: ["obra.planear"], arrancar: ["obra.planear"], abrirRetificacao: ["obra.planear"],
+  gerarPlano: ["obra.planear"], aprovarPlano: ["obra.planear"], arrancar: ["obra.planear"], abrirRetificacao: ["obra.planear"], abrirPedidoCliente: ["obra.planear"], supervisorMedidas: ["obra.planear"],
   // 11/11 (F3): aceitar as medidas (A.retificarMedidas e as respostas retif_*) pede o mesmo que o passo (neg_guardar_negocio, 20270113110000)
   retificarMedidas: ["obra.planear"],
   // 11/11 (fim de contacto): a assistente comercial passa o negócio ao comercial (A.passarAoComercial, a resposta contacto_concluido)

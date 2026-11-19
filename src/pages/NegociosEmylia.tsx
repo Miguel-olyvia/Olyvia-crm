@@ -15,7 +15,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { tecnicosComTrabalho } from "@/emylia/trabalhoObra";
-import { TECS, acertarDiaDasObras, acoes, definirPerdaReal, definirRelogioReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Negocio, type Papel, type Vista } from "@/emylia/motor";
+import { TECS, acertarDiaDasObras, acoes, definirPerdaReal, definirPessoaLigada, definirRelogioReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Negocio, type Papel, type Vista } from "@/emylia/motor";
 import { anularPerdaReal, mensagemDaPerda, perderNegocioReal } from "@/emylia/real/perdaReal";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
@@ -930,6 +930,9 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   // 30/10: sem ler o RH (sem permissão nele), a pessoa vem da conta pelos papéis (neg_meus_papeis)
   const eu = minha.loading ? null : { pessoaId: minha.pessoaId ?? meus?.pessoa?.id ?? null, nome: minha.nome ?? meus?.pessoa?.nome ?? nomeConta ?? "Eu" };
   nomeEu.current = eu && eu.nome !== "Eu" ? eu.nome : "";
+  // 19/11 (auditoria): o que a conta aceita (as medidas) fica com a pessoa, não com o papel
+  useEffect(() => { definirPessoaLigada(eu && eu.nome !== "Eu" ? { id: eu.pessoaId, nome: eu.nome } : null); }, [eu?.pessoaId, eu?.nome]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => definirPessoaLigada(null), []);
   const tecConta = pronto ? tecnicoDaConta(S.tecnicos ?? [], eu) : null;
   useEffect(() => {
     if (!pronto) return;

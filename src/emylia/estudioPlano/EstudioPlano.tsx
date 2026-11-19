@@ -28,7 +28,7 @@ import type { Ctx } from "../pecas";
 import { NaFrente } from "../NaFrente";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
 import { dataCurta, diasDaObra, isoDia } from "../planoObra";
-import { blocosForaDaObra, inicioDoPlano, motivoOcupado, obraQueOcupa, obrasDosTecnicos, ocupacaoDosTecnicos, planoComAgendaDeHoje, retificacaoAceite, tecnicosDoOficio } from "../preparacaoObra";
+import { blocosForaDaObra, inicioDoPlano, motivoOcupado, obraQueOcupa, obrasDosTecnicos, ocupacaoDosTecnicos, planoComAgendaDeHoje, retificacaoAceite, faltaMedirTexto, tecnicosDoOficio } from "../preparacaoObra";
 import { NovaTarefa } from "../PlanoInterativo";
 import { pelaPermissao, podeNeg } from "../permissoes";
 import { InfoDoNegocio } from "./InfoDoNegocio";
@@ -109,8 +109,9 @@ export function EstudioPlano({ ctx, d, fechar, voltar = "Voltar ao negócio" }: 
   const planeia = podeNeg(S.role, "obra.planear"), pago = medidasEPlanoAbertos(d);
   // 17/11 (teste do fluxo de 16/11): com o valor mudado e o acerto por decidir, aprovar era recusado sem nada no ecrã; agora diz-se porquê
   const acertoPorDecidir = acertoDoValorPendente(d);
-  const podeAprovar = p.estado === "por aprovar" && planeia && pago && !acertoPorDecidir && !alertas.some((a) => a.m === "de férias");
-  const porque = p.estado !== "por aprovar" ? "" : !pago ? "O plano aprova-se depois de o Financeiro validar o pagamento." : !planeia ? "Quem aprova o plano são as Operações." : acertoPorDecidir ? "O valor mudou: primeiro a retificação vai ao Financeiro (a adenda do acerto, ou a nota de crédito se baixou); depois, aprova-se o plano." : alertas.some((a) => a.m === "de férias") ? "Há um técnico de férias numa tarefa." : "";
+  // 19/11 (auditoria): as medidas aceites no local vêm antes do plano (A.aprovarPlano recusa sem elas)
+  const podeAprovar = p.estado === "por aprovar" && planeia && pago && medidasOk && !acertoPorDecidir && !alertas.some((a) => a.m === "de férias");
+  const porque = p.estado !== "por aprovar" ? "" : !pago ? "O plano aprova-se depois de o Financeiro validar o pagamento." : !medidasOk ? faltaMedirTexto(d) : !planeia ? "Quem aprova o plano são as Operações." : acertoPorDecidir ? "O valor mudou: primeiro a retificação vai ao Financeiro (a adenda do acerto, ou a nota de crédito se baixou); depois, aprova-se o plano." : alertas.some((a) => a.m === "de férias") ? "Há um técnico de férias numa tarefa." : "";
   const fimData = dias[Math.max(0, fim - 1)];
   const fazer = (fn: () => void) => run(fn);
   const retrato = (): Retrato => p.tasks.map((t) => ({ dia: t.dia, dur: t.dur, h: t.h, tec: t.tec }));
@@ -275,7 +276,7 @@ export function EstudioPlano({ ctx, d, fechar, voltar = "Voltar ao negócio" }: 
                 onClick={() => setPainel(painel?.k === "info" ? null : { k: "info" })}><FolderOpen className="mr-1.5 h-4 w-4" aria-hidden="true" />A obra</Button>
               {/* 12/11: o plano aprova-se depois do pagamento */}
               {d.fin.pago ? <Estado ok t="Pago" /> : !pago && <Estado ok={false} t="À espera do pagamento" />}
-              {!medidasOk && <span title="O supervisor confirma as medidas ao mesmo tempo; se mudarem, o plano volta a por aprovar"><Estado ok={false} t="Medidas em curso" icone={<Ruler className="h-3.5 w-3.5" aria-hidden="true" />} /></span>}
+              {!medidasOk && <span title="O plano aprova-se depois das medidas aceites no local"><Estado ok={false} t="Medidas por aceitar" icone={<Ruler className="h-3.5 w-3.5" aria-hidden="true" />} /></span>}
               {/* os alertas levam à lista (com a correção) */}
               <button type="button" onClick={() => secAlertas.current?.scrollIntoView({ behavior: reduzir ? "auto" : "smooth", block: "start" })}
                 className={cn("inline-flex min-h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-transform hover:-translate-y-px", alertas.length ? "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200" : "bg-success/10 text-success")}>

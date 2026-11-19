@@ -27,7 +27,7 @@ const maisArea = (d: Negocio) => { const [k] = camposMedida(LINHAS[d.linha])[0];
 const assinarNoPortal = (A: Ac, id: number, n: string) => { A.aceitarAdenda(id, n); A.enviarContratoAdenda(id, n); A.simularAdenda(id, n); };
 const comAcertoAssinadoPeloComercial = () => {
   const r = assinadoEPago();
-  r.S.role = "operacoes"; r.A.retificarMedidas(r.d.id, maisArea(r.d));
+  r.S.role = "operacoes"; r.A.supervisorMedidas(r.d.id, "hn"), r.A.retificarMedidas(r.d.id, maisArea(r.d));
   r.S.role = "comercial";
   const n = r.A.adendaDoValor(r.d.id)!;
   assinarNoPortal(r.A, r.d.id, n);
@@ -88,7 +88,7 @@ describe("a retificação assinada pelo comercial: as tarefas entram com as Oper
   });
   it("assinada por quem planeia, as tarefas entram logo (como antes)", () => {
     const r = assinadoEPago();
-    r.S.role = "operacoes"; r.A.retificarMedidas(r.d.id, maisArea(r.d));
+    r.S.role = "operacoes"; r.A.supervisorMedidas(r.d.id, "hn"), r.A.retificarMedidas(r.d.id, maisArea(r.d));
     r.S.role = "direcao";
     const n = r.A.adendaDoValor(r.d.id);
     if (!n) return; // a Direção sem orcamento.editar/proposta.decidir neste seed: nada a verificar
