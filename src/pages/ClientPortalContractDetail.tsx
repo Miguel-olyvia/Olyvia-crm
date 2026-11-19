@@ -34,6 +34,7 @@ import { PassosDoNegocio, passoDoNegocio } from "@/components/portal/negocio/Pas
 import { ConversaDoNegocio } from "@/components/portal/negocio/ConversaDoNegocio";
 import { ClausulasObra } from "@/components/portal/obra/ClausulasObra";
 import { contratoDaVista } from "@/components/portal/obra/dadosObra";
+import { contratoObraPdf, documentoObraHtml } from "@/components/portal/obra/documentoObraPdf";
 import { useVistaObra } from "@/components/portal/obra/useVistaObra";
 import { injectSignaturesIntoBlock, resolveContractDocument, downloadContractDocumentPdf } from "@/components/contracts/contractDocument";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
@@ -163,7 +164,10 @@ const ClientPortalContractDetail = () => {
         return;
       }
       const label = contract.contract_number || contract.title || t("pc.contratoDet.tituloPadrao");
-      await downloadContractDocumentPdf(resolved, label, label);
+      // Com a vista do negócio, o PDF leva por baixo da minuta as cláusulas do negócio e as adendas assinadas (o que o
+      // ecrã mostra), no idioma do documento. Só na apresentação: o corpo gravado do contrato não muda.
+      const paraPdf = obra ? { ...resolved, bodyHtml: resolved.bodyHtml + documentoObraHtml(contratoObraPdf(obra, idioma)) } : resolved;
+      await downloadContractDocumentPdf(paraPdf, label, label);
     } catch (error: any) {
       console.error("[portal] contract PDF download failed:", error);
       captureFlowError(error, "client-portal-contract");

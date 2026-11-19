@@ -511,7 +511,9 @@ const ClientPortalProposalDetail = () => {
                 });
                 return;
               }
-              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, payload);
+              // Com a vista do negócio, o PDF leva também a obra (os mesmos blocos do ecrã), no idioma do documento.
+              const obraNoPdf = obra ? { dados: obra, idioma, cor: portalData.template?.primary_color || undefined } : null;
+              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, payload, obraNoPdf);
               downloadBlob(blob, fileName);
             } catch (e: unknown) {
               toast({

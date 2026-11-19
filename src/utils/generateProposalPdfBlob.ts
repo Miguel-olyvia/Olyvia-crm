@@ -5,6 +5,9 @@ import { generateQuotePdfBlob } from '@/utils/generateQuotePdfBlob';
 import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate, resolveProposalBrandingTemplate, mergeProposalBranding } from '@/utils/quotePdfTemplate';
 import { aggregateQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
 import { captureFlowError } from '@/lib/observability/captureFlowError';
+import { generateObraPdfBlob, type ObraNoPdf } from '@/utils/generateObraPdfBlob';
+
+export type { ObraNoPdf } from '@/utils/generateObraPdfBlob';
 
 /**
  * Proposal, quotes, lines and fees already loaded by the caller.
@@ -29,6 +32,7 @@ export interface ProposalPdfPrefetch {
 async function generateFromQuotePdfs(
   proposalId: string,
   prefetched?: ProposalPdfPrefetch,
+  obra?: ObraNoPdf | null,
 ): Promise<{ blob: Blob; fileName: string }> {
   let proposal: any = prefetched?.proposal ?? null;
   if (!prefetched) {
@@ -192,6 +196,20 @@ async function generateFromQuotePdfs(
     }
   }
 
+  // O conteúdo da obra (só quando o chamador tem a vista do negócio: hoje, o portal) vem depois dos orçamentos. Sem
+  // páginas de orçamento não se acrescenta: o documento sem o orçamento não é a proposta. Se falhar, a proposta sai na
+  // mesma com os orçamentos (é o documento que conta) e o motivo vai para a consola e para o Sentry.
+  if (obra && merged.getPageCount() > 0) {
+    try {
+      const src = await PDFDocument.load(await (await generateObraPdfBlob(obra)).arrayBuffer());
+      const copied = await merged.copyPages(src, src.getPageIndices());
+      copied.forEach((page) => merged.addPage(page));
+    } catch (e) {
+      console.error('[generateProposalPdfBlob] Failed obra content:', e);
+      captureFlowError(e, 'proposal-document-export');
+    }
+  }
+
   if (merged.getPageCount() === 0) {
     // A mensagem antiga dizia so "nao foi possivel gerar nenhuma pagina": o
     // motivo morria na consola e quem a lia ficava sem saber o que fazer.
@@ -219,12 +237,16 @@ async function generateFromQuotePdfs(
  * its associated quotes (each rendered with its own configured template, in
  * proposal document context — hence the "Proposta ..." title/number instead
  * of "Orçamento"/quote number).
+ *
+ * `obra` (opcional): o conteúdo da obra do negócio (a vista do cliente), no idioma do documento, acrescentado em
+ * páginas próprias depois dos orçamentos. Sem ele, o PDF é o de sempre.
  */
 export async function generateProposalPdfBlob(
   proposalId: string,
   prefetched?: ProposalPdfPrefetch,
+  obra?: ObraNoPdf | null,
 ): Promise<{ blob: Blob; fileName: string }> {
-  return generateFromQuotePdfs(proposalId, prefetched);
+  return generateFromQuotePdfs(proposalId, prefetched, obra);
 }
 
 export function downloadBlob(blob: Blob, fileName: string) {
