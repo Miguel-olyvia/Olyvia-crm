@@ -14,6 +14,7 @@ import { clienteEnEmpresas } from "./clienteEn.empresas";
 import { clienteEnLogin } from "./clienteEn.login";
 import { clienteEnDocumentos } from "./clienteEn.documentos";
 import { clienteEnEstado } from "./clienteEn.estado";
+import { clienteEnIdiomaDocumento } from "./clienteEn.idiomaDocumento";
 export const clienteEn: Record<string, string> = {
   ...clienteEnLayout,
   ...clienteEnEmpresas,
@@ -28,6 +29,7 @@ export const clienteEn: Record<string, string> = {
   ...clienteEnDocObra,
   ...clienteEnDocNegocio,
   ...clienteEnNegocioPagina,
+  ...clienteEnIdiomaDocumento,
   // Layout
   "pc.layout.titulo": "Customer Portal",
   "pc.layout.menu.inicio": "Home",

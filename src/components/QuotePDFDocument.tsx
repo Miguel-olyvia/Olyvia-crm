@@ -5,6 +5,7 @@ import { round2 } from '@/utils/quotes/inlineQuoteVatCalculation';
 import { getBundleComponents, isBundleLine } from '@/utils/quotes/bundleComponents';
 import { computeQuoteTotals, getLineVatLabel, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
 import { getLineDisplayUnitPrice } from '@/utils/quotes/quoteLinePricing';
+import { IDIOMA_BASE, normalizarCodigo, tDoc, type ParametrosDoc } from '@/lib/idiomaDocumento';
 
 Font.registerHyphenationCallback((word) => [word]);
 
@@ -214,10 +215,30 @@ interface QuotePDFProps {
    * a validade em dias dos orçamentos.
    */
   documentContext?:
-    | { kind: 'quote' }
-    | { kind: 'proposal'; number?: string | null; title?: string | null }
-    | { kind: 'direct_sale'; number?: string | null; validUntil?: string | null };
+    | { kind: 'quote'; idioma?: string }
+    | { kind: 'proposal'; number?: string | null; title?: string | null; idioma?: string }
+    | { kind: 'direct_sale'; number?: string | null; validUntil?: string | null; idioma?: string };
+  // `idioma` (código de 2 letras, omissão pt) escolhe as palavras fixas do documento (doc.proposta.* no dicionário
+  // do núcleo src/lib/idiomaDocumento). Só mudam as palavras: o dinheiro (€ + toFixed(2)), as datas numéricas e os
+  // textos dos dados (linhas, nomes, notas) ficam como estão.
 }
+
+/** Sem caixa, sem acentos e com os espaços juntos: para reconhecer um rótulo de fábrica escrito de outra maneira. */
+const normalizarTitulo = (texto: string): string =>
+  texto.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** Chaves (sem o prefixo doc.proposta.) dos títulos de fábrica de cada tipo de secção. */
+const TITULOS_DE_FABRICA: Record<string, string[]> = {
+  header: ['titulo.proposta', 'titulo.orcamento', 'titulo.vendaDireta'],
+  company_info: ['seccao.empresa'],
+  client_info: ['seccao.cliente'],
+  notes: ['seccao.notas'],
+  quote_items: ['detalhes.orcamento', 'detalhes.proposta', 'detalhes.vendaDireta'],
+  validity: ['seccao.validade'],
+  value: ['valor.orcamento', 'valor.proposta', 'valor.vendaDireta'],
+  terms: ['seccao.condicoes'],
+  custom: ['seccao.outra'],
+};
 
 // Extract attributes from a line as a list of { label, value, priceImpact }
 const getLineAttributes = (line: any): { label: string; value: string; priceImpact: number }[] => {
@@ -262,6 +283,18 @@ const resolveTemplateText = (template: any, section: any, keys: string[]): strin
 };
 
 export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], user, descontoPercent = 0, proposalTemplate = null, renderContext = null, strictVariables = false, hideTotals = false, totalsOverride, documentContext = { kind: 'quote' } }: QuotePDFProps) => {
+  // Palavras fixas do documento no idioma pedido (português por omissão; um código sem dicionário usa o português).
+  const idioma = normalizarCodigo(documentContext?.idioma) ?? IDIOMA_BASE;
+  const emPortugues = idioma === IDIOMA_BASE;
+  const tp = (chave: string, params?: ParametrosDoc): string => tDoc(idioma, `doc.proposta.${chave}`, params);
+  // O editor de modelos grava por omissão os títulos em português («CLIENTE», «PROPOSTA»…). Fora do português, um
+  // título igual a um destes (sem caixa nem acentos) traduz-se; o que a organização escreveu de facto fica como vem.
+  const traduzSeDeFabrica = (valor: string, tipo: string): string => {
+    if (emPortugues || !valor) return valor;
+    const alvo = normalizarTitulo(valor);
+    const chave = (TITULOS_DE_FABRICA[tipo] ?? []).find((c) => normalizarTitulo(tDoc(IDIOMA_BASE, `doc.proposta.${c}`)) === alvo);
+    return chave ? tp(chave) : valor;
+  };
   /**
    * Helper para os 3 blocos configuráveis (client_info, company_info, footer).
    * Backward-compat: se não houver renderContext ou se fieldModes[key] estiver
@@ -299,11 +332,12 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   // rotulos da venda direta -- o resto do modelo (cores, logotipo, rodape,
   // termos) aplica-se tal e qual.
   const ehVendaDireta = documentContext?.kind === 'direct_sale';
-  const rotuloDocumento = ehVendaDireta ? 'VENDA DIRETA' : ehProposta ? 'PROPOSTA' : 'ORÇAMENTO';
-  const rotuloDetalhes = ehVendaDireta ? 'DETALHES DA VENDA DIRETA' : ehProposta ? 'DETALHES DA PROPOSTA' : 'DETALHES DO ORÇAMENTO';
-  const rotuloValor = ehVendaDireta ? 'VALOR DA VENDA DIRETA' : ehProposta ? 'VALOR DA PROPOSTA' : 'VALOR DO ORÇAMENTO';
+  const tipoDeDocumento = ehVendaDireta ? 'vendaDireta' : ehProposta ? 'proposta' : 'orcamento';
+  const rotuloDocumento = tp(`titulo.${tipoDeDocumento}`);
+  const rotuloDetalhes = tp(`detalhes.${tipoDeDocumento}`);
+  const rotuloValor = tp(`valor.${tipoDeDocumento}`);
 
-  const headerTitle = proposalTemplate?.sections?.find?.((section: any) => section?.type === 'header')?.settings?.customTitle || rotuloDocumento;
+  const headerTitle = traduzSeDeFabrica(proposalTemplate?.sections?.find?.((section: any) => section?.type === 'header')?.settings?.customTitle, 'header') || rotuloDocumento;
   const showCompanyInfo = proposalTemplate?.show_company_info !== false;
   const showClientInfo = proposalTemplate?.show_client_info !== false;
   const showValidity = proposalTemplate?.show_validity !== false;
@@ -385,7 +419,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   // each kept as its own separate named row (never merged/summed).
   const feeRows: { name: string; value: number }[] = totalsOverride
     ? totalsOverride.fees
-    : fees.map((fee) => ({ name: fee.service_fee_types?.name || 'Taxa', value: parseFloat(String(fee.calculated_value || 0)) }));
+    : fees.map((fee) => ({ name: fee.service_fee_types?.name || tp('total.taxaOmissao'), value: parseFloat(String(fee.calculated_value || 0)) }));
 
 
   // Preço unitário pela fonte única: o preço de venda definido manda mesmo
@@ -418,10 +452,10 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   // Get status badge styling
   const getStatusStyle = (status: string) => {
     const statusConfig: Record<string, { bg: string; color: string; text: string }> = {
-      rascunho: { bg: '#fef3c7', color: '#92400e', text: 'Rascunho' },
-      enviado: { bg: '#dbeafe', color: '#1e40af', text: 'Enviado' },
-      aceite: { bg: '#d1fae5', color: '#065f46', text: 'Aceite' },
-      perdido: { bg: '#fee2e2', color: '#991b1b', text: 'Perdido' },
+      rascunho: { bg: '#fef3c7', color: '#92400e', text: tp('estado.rascunho') },
+      enviado: { bg: '#dbeafe', color: '#1e40af', text: tp('estado.enviado') },
+      aceite: { bg: '#d1fae5', color: '#065f46', text: tp('estado.aceite') },
+      perdido: { bg: '#fee2e2', color: '#991b1b', text: tp('estado.perdido') },
     };
     return statusConfig[status] || { bg: '#f3f4f6', color: '#374151', text: status };
   };
@@ -432,10 +466,10 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     ? proposalTemplate.sections
     : [
         { id: 'header', type: 'header', label: 'Cabeçalho', visible: true, settings: { customTitle: rotuloDocumento } },
-        { id: 'client_info', type: 'client_info', label: 'Cliente', visible: true, settings: { sectionLabel: 'CLIENTE' } },
-        { id: 'notes', type: 'notes', label: 'Notas', visible: true, settings: { sectionLabel: 'NOTAS' } },
+        { id: 'client_info', type: 'client_info', label: 'Cliente', visible: true, settings: { sectionLabel: tp('seccao.cliente') } },
+        { id: 'notes', type: 'notes', label: 'Notas', visible: true, settings: { sectionLabel: tp('seccao.notas') } },
         { id: 'quote_items', type: 'quote_items', label: 'Detalhes do Orçamento', visible: true, settings: { sectionLabel: rotuloDetalhes } },
-        { id: 'terms', type: 'terms', label: 'Condições Gerais', visible: true, settings: { sectionLabel: 'CONDIÇÕES GERAIS' } },
+        { id: 'terms', type: 'terms', label: 'Condições Gerais', visible: true, settings: { sectionLabel: tp('seccao.condicoes') } },
         { id: 'footer', type: 'footer', label: 'Rodapé', visible: true, settings: {} },
       ];
 
@@ -444,7 +478,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   const footerSection = visibleSections.find((section: any) => section.type === 'footer');
   const bodySections = visibleSections.filter((section: any) => !['header', 'footer'].includes(section.type));
   const hasValueSection = bodySections.some((section: any) => section.type === 'value');
-  const sectionLabel = (section: any, fallback: string) => section?.settings?.sectionLabel || section?.label || fallback;
+  const sectionLabel = (section: any, fallback: string) => traduzSeDeFabrica(section?.settings?.sectionLabel || section?.label, section?.type) || fallback;
 
   // Numa proposta o cabeçalho identifica a proposta (P-...), não o orçamento
   // que está a ser renderizado por baixo. O número da proposta só entra quando
@@ -459,9 +493,9 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
   const renderHeader = (section: any) => (
     <View fixed style={headerStyle}>
       <View style={styles.headerLeft}>
-        <Text style={[styles.title, { color: textColor }]}>{ehVendaDireta ? rotuloDocumento : (section?.settings?.customTitle || headerTitle)}</Text>
+        <Text style={[styles.title, { color: textColor }]}>{ehVendaDireta ? rotuloDocumento : (traduzSeDeFabrica(section?.settings?.customTitle, 'header') || headerTitle)}</Text>
         <Text style={styles.quoteNumber}>{headerNumber}</Text>
-        <Text style={styles.quoteDate}>Data: {new Date(quote.created_at).toLocaleDateString('pt-PT')}</Text>
+        <Text style={styles.quoteDate}>{tp('data')} {new Date(quote.created_at).toLocaleDateString('pt-PT')}</Text>
       </View>
       {logoSource && section?.settings?.showLogo !== false && <Image src={logoSource} style={styles.logo} />}
     </View>
@@ -487,12 +521,12 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     const address = fieldValue(section, 'companyAddress', 'company.address', companyFullAddress || '');
     return (
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'EMPRESA')}</Text>
-        <View style={styles.row}><Text style={styles.label}>Nome:</Text><Text style={styles.value}>{name}</Text></View>
-        {vat     && <View style={styles.row}><Text style={styles.label}>NIF:</Text><Text style={styles.value}>{vat}</Text></View>}
-        {email   && <View style={styles.row}><Text style={styles.label}>Email:</Text><Text style={styles.value}>{email}</Text></View>}
-        {phone   && <View style={styles.row}><Text style={styles.label}>Telefone:</Text><Text style={styles.value}>{phone}</Text></View>}
-        {address && <View style={styles.row}><Text style={styles.label}>Morada:</Text><Text style={styles.value}>{address}</Text></View>}
+        <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, tp('seccao.empresa'))}</Text>
+        <View style={styles.row}><Text style={styles.label}>{tp('nome')}</Text><Text style={styles.value}>{name}</Text></View>
+        {vat     && <View style={styles.row}><Text style={styles.label}>{tp('nif')}</Text><Text style={styles.value}>{vat}</Text></View>}
+        {email   && <View style={styles.row}><Text style={styles.label}>{tp('email')}</Text><Text style={styles.value}>{email}</Text></View>}
+        {phone   && <View style={styles.row}><Text style={styles.label}>{tp('telefone')}</Text><Text style={styles.value}>{phone}</Text></View>}
+        {address && <View style={styles.row}><Text style={styles.label}>{tp('morada')}</Text><Text style={styles.value}>{address}</Text></View>}
       </View>
     );
   })() : null;
@@ -505,15 +539,15 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     const address = fieldValue(section, 'clientAddress', 'client.address', clientAddress);
     return (
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'CLIENTE')}</Text>
-        <View style={styles.row}><Text style={styles.label}>Nome:</Text><Text style={styles.value}>{name}</Text></View>
-        {vat     && <View style={styles.row}><Text style={styles.label}>NIF:</Text><Text style={styles.value}>{vat}</Text></View>}
-        {email   && <View style={styles.row}><Text style={styles.label}>Email:</Text><Text style={styles.value}>{email}</Text></View>}
-        {phone   && <View style={styles.row}><Text style={styles.label}>Telefone:</Text><Text style={styles.value}>{phone}</Text></View>}
+        <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, tp('seccao.cliente'))}</Text>
+        <View style={styles.row}><Text style={styles.label}>{tp('nome')}</Text><Text style={styles.value}>{name}</Text></View>
+        {vat     && <View style={styles.row}><Text style={styles.label}>{tp('nif')}</Text><Text style={styles.value}>{vat}</Text></View>}
+        {email   && <View style={styles.row}><Text style={styles.label}>{tp('email')}</Text><Text style={styles.value}>{email}</Text></View>}
+        {phone   && <View style={styles.row}><Text style={styles.label}>{tp('telefone')}</Text><Text style={styles.value}>{phone}</Text></View>}
         {/* Morada fiscal = principal da entidade; morada de entrega = a
             escolhida no orçamento (obra_endereco, gravado com site_address_id). */}
-        {address && <View style={styles.row}><Text style={styles.label}>Morada fiscal:</Text><Text style={styles.value}>{address}</Text></View>}
-        {quote.obra_endereco && <View style={styles.row}><Text style={styles.label}>Morada de entrega:</Text><Text style={styles.value}>{quote.obra_endereco}</Text></View>}
+        {address && <View style={styles.row}><Text style={styles.label}>{tp('moradaFiscal')}</Text><Text style={styles.value}>{address}</Text></View>}
+        {quote.obra_endereco && <View style={styles.row}><Text style={styles.label}>{tp('moradaEntrega')}</Text><Text style={styles.value}>{quote.obra_endereco}</Text></View>}
       </View>
     );
   })() : null;
@@ -523,7 +557,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     const notes = templateContent || quote.obra_notas || quote.client_notes;
     return notes ? (
       <View style={styles.section}>
-        <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'NOTAS')}</Text>
+        <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, tp('seccao.notas'))}</Text>
         <View style={{ padding: 8, backgroundColor: contentBlockBg, borderWidth: 1, borderColor, borderRadius: 4 }}>
           <Text style={{ fontSize: 9, color: secondaryTextColor, lineHeight: 1.4 }}>{notes}</Text>
         </View>
@@ -537,13 +571,13 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
         <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{ehVendaDireta ? rotuloDetalhes : sectionLabel(section, rotuloDetalhes)}</Text>
         <View style={styles.table}>
           <View style={[styles.tableHeader, { backgroundColor: quoteHeaderBg, color: quoteHeaderText }]}> 
-            <Text style={columnStyles.sku}>SKU</Text>
-            <Text style={columnStyles.description}>Descrição</Text>
-            <Text style={columnStyles.unit}>Unid.</Text>
-            <Text style={columnStyles.quantity}>Qtd.</Text>
-            <Text style={columnStyles.unitPrice}>P. Unit.</Text>
-            <Text style={columnStyles.iva}>IVA</Text>
-            <Text style={columnStyles.total}>Total</Text>
+            <Text style={columnStyles.sku}>{tp('sku')}</Text>
+            <Text style={columnStyles.description}>{tp('tabela.descricao')}</Text>
+            <Text style={columnStyles.unit}>{tp('tabela.unid')}</Text>
+            <Text style={columnStyles.quantity}>{tp('tabela.qtd')}</Text>
+            <Text style={columnStyles.unitPrice}>{tp('tabela.precoUnit')}</Text>
+            <Text style={columnStyles.iva}>{tp('tabela.iva')}</Text>
+            <Text style={columnStyles.total}>{tp('tabela.total')}</Text>
           </View>
         </View>
       </View>
@@ -552,7 +586,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
         {(() => {
           const sections = new Map<string, any[]>();
           lines.forEach((line) => {
-            const sectionName = line.section_name || 'Geral';
+            const sectionName = line.section_name || tp('seccao.geral');
             if (!sections.has(sectionName)) sections.set(sectionName, []);
             sections.get(sectionName)!.push(line);
           });
@@ -576,7 +610,8 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
                 const unidade = line.unidade || 'UN';
                 const lineIvaOverride = (line as any)?.selected_attributes?.iva_override;
                 const hasLineIvaOverride = typeof lineIvaOverride === "number" && !Number.isNaN(lineIvaOverride);
-                const ivaDisplay = getLineVatLabel(line);
+                const ivaBruto = getLineVatLabel(line);
+                const ivaDisplay = ivaBruto === 'Mista' ? tp('iva.mista') : ivaBruto;
 
                 return (
                   <View key={line.id} wrap={false}>
@@ -598,12 +633,12 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
                     ) : null}
                     {showBundleBadge && bundleComponents.length === 0 && (
                       <View style={{ paddingLeft: 18, paddingRight: 8, paddingVertical: 4, borderBottom: '1 solid #e5e7eb', backgroundColor: '#fef3c7' }}>
-                        <Text style={{ fontSize: 7, color: '#92400e', fontStyle: 'italic' as const }}>Bundle sem detalhe de componentes guardado. Reabra o item no editor e volte a adicionar para gravar a composição.</Text>
+                        <Text style={{ fontSize: 7, color: '#92400e', fontStyle: 'italic' as const }}>{tp('bundle.semDetalhe')}</Text>
                       </View>
                     )}
                     {bundleComponents.length > 0 && (
                       <View style={{ paddingLeft: 18, paddingRight: 8, paddingVertical: 6, borderBottom: '1 solid #e5e7eb', backgroundColor: '#f8fafc', borderLeftWidth: 2, borderLeftColor: brandColor }}>
-                        <Text style={{ fontSize: 7, color: '#6b7280', marginBottom: 4, fontWeight: 'bold' as const, textTransform: 'uppercase' as const }}>Componentes do bundle:</Text>
+                        <Text style={{ fontSize: 7, color: '#6b7280', marginBottom: 4, fontWeight: 'bold' as const, textTransform: 'uppercase' as const }}>{tp('bundle.componentes')}</Text>
                         {bundleComponents.map((component, idx) => {
                           const effectiveQty = component.quantity * (quantity || 1);
                           const componentTotal = round2(component.unit_price) * effectiveQty;
@@ -614,8 +649,8 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
                                 <Text style={{ fontSize: 8, color: '#111827', fontWeight: 'bold' as const, minWidth: 70, textAlign: 'right' }}>€{componentTotal.toFixed(2)}</Text>
                               </View>
                               <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
-                                <Text style={{ fontSize: 7, color: '#6b7280', flex: 1 }}>{component.sku ? `SKU: ${component.sku} · ` : ''}Qtd: {effectiveQty.toFixed(2)} · P. Unit.: €{component.unit_price.toFixed(2)}</Text>
-                                <Text style={{ fontSize: 7, color: '#374151', minWidth: 52, textAlign: 'right' }}>IVA {(hasLineIvaOverride ? Number(lineIvaOverride) : component.vat_rate).toFixed(0)}%</Text>
+                                <Text style={{ fontSize: 7, color: '#6b7280', flex: 1 }}>{component.sku ? `${tp('sku')}: ${component.sku} · ` : ''}{tp('qtdDoisPontos')} {effectiveQty.toFixed(2)} · {tp('precoUnitDoisPontos')} €{component.unit_price.toFixed(2)}</Text>
+                                <Text style={{ fontSize: 7, color: '#374151', minWidth: 52, textAlign: 'right' }}>{tp('ivaTaxa', { taxa: (hasLineIvaOverride ? Number(lineIvaOverride) : component.vat_rate).toFixed(0) })}</Text>
                               </View>
                               {component.attributes.length > 0 && (
                                 <View style={{ marginTop: 3, paddingLeft: 8, borderLeftWidth: 1, borderLeftColor: '#cbd5e1' }}>
@@ -629,7 +664,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
                     )}
                     {lineAttrs.length > 0 && (
                       <View style={{ paddingLeft: 18, paddingRight: 8, paddingVertical: 5, borderBottom: '1 solid #e5e7eb', backgroundColor: '#f9fafb', borderLeftWidth: 2, borderLeftColor: brandColor }}>
-                        <Text style={{ fontSize: 7, color: '#6b7280', marginBottom: 2, fontWeight: 'bold' as const, textTransform: 'uppercase' as const }}>Características selecionadas:</Text>
+                        <Text style={{ fontSize: 7, color: '#6b7280', marginBottom: 2, fontWeight: 'bold' as const, textTransform: 'uppercase' as const }}>{tp('caracteristicas')}</Text>
                         {lineAttrs.map((a, idx) => <View key={idx} style={{ flexDirection: 'row', marginBottom: 1, alignItems: 'center' }}><Text style={{ fontSize: 8, color: '#374151', flex: 1 }}><Text style={{ color: '#6b7280' }}>• {a.label}: </Text><Text style={{ fontWeight: 'bold' as const, color: '#111827' }}>{a.value}</Text></Text></View>)}
                       </View>
                     )}
@@ -646,7 +681,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
 
   const renderTerms = (section: any) => (quote.conditions || (showTerms && termsText)) ? (
     <View style={styles.section} wrap={false}>
-      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'CONDIÇÕES GERAIS')}</Text>
+      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, tp('seccao.condicoes'))}</Text>
       <View style={{ padding: 8, backgroundColor: contentBlockBg, borderWidth: 1, borderColor, borderRadius: 4 }}>
         <Text style={{ fontSize: 9, color: secondaryTextColor, lineHeight: 1.4 }}>{quote.conditions || termsText}</Text>
       </View>
@@ -667,16 +702,16 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
 
   const renderValidity = (section: any) => ehVendaDireta ? (showValidity && vendaDiretaValidaAte ? (
     <View style={styles.section}>
-      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'VALIDADE')}</Text>
+      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, tp('seccao.validade'))}</Text>
       <View style={{ padding: 8, backgroundColor: contentBlockBg, borderWidth: 1, borderColor, borderRadius: 4 }}>
-        <Text style={{ fontSize: 9, color: secondaryTextColor }}>Esta proposta de venda é válida até {vendaDiretaValidaAte}.</Text>
+        <Text style={{ fontSize: 9, color: secondaryTextColor }}>{tp('validade.vendaDireta', { data: vendaDiretaValidaAte })}</Text>
       </View>
     </View>
   ) : null) : showValidity ? (
     <View style={styles.section}>
-      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'VALIDADE')}</Text>
+      <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, tp('seccao.validade'))}</Text>
       <View style={{ padding: 8, backgroundColor: contentBlockBg, borderWidth: 1, borderColor, borderRadius: 4 }}>
-        <Text style={{ fontSize: 9, color: secondaryTextColor }}>Este orçamento é válido por {quote.validade_dias || 30} dias a partir da data de emissão.</Text>
+        <Text style={{ fontSize: 9, color: secondaryTextColor }}>{tp('validade.orcamento', { dias: quote.validade_dias || 30 })}</Text>
       </View>
     </View>
   ) : null;
@@ -685,11 +720,11 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     if (hideTotals) return null;
     return (
     <View style={styles.totalsSection} wrap={false} minPresenceAhead={95}>
-      <View style={styles.totalsRow}><Text style={styles.totalLabel}>Subtotal Produtos (sem IVA):</Text><Text style={styles.totalValue}>€{subtotalBruto.toFixed(2)}</Text></View>
-      {showDiscountRow && <View style={styles.totalsRow}><Text style={[styles.totalLabel, { color: '#dc2626' }]}>Desconto Global{discountPercentLabel !== null ? ` (${discountPercentLabel}%)` : ''}:</Text><Text style={[styles.totalValue, { color: '#dc2626' }]}>-€{discountValue.toFixed(2)}</Text></View>}
+      <View style={styles.totalsRow}><Text style={styles.totalLabel}>{tp('total.subtotalProdutos')}</Text><Text style={styles.totalValue}>€{subtotalBruto.toFixed(2)}</Text></View>
+      {showDiscountRow && <View style={styles.totalsRow}><Text style={[styles.totalLabel, { color: '#dc2626' }]}>{tp('total.desconto')}{discountPercentLabel !== null ? ` (${discountPercentLabel}%)` : ''}:</Text><Text style={[styles.totalValue, { color: '#dc2626' }]}>-€{discountValue.toFixed(2)}</Text></View>}
       {feeRows.length > 0 && (() => {
         if (totalsOverride) {
-          return (<View style={{ marginTop: 5, marginBottom: 3, width: '50%', alignSelf: 'flex-end' }}><Text style={{ fontSize: 9, fontWeight: 'bold' as const, color: '#374151', textAlign: 'left' }}>Taxas de Serviço:</Text></View>);
+          return (<View style={{ marginTop: 5, marginBottom: 3, width: '50%', alignSelf: 'flex-end' }}><Text style={{ fontSize: 9, fontWeight: 'bold' as const, color: '#374151', textAlign: 'left' }}>{tp('total.taxas')}</Text></View>);
         }
         const feeRates = Array.from(new Set(fees.map(f => {
           const base = parseFloat(String(f.calculated_value || 0));
@@ -698,18 +733,18 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
           return rateField > 0 ? rateField : (base > 0 && storedVat > 0 ? Math.round((storedVat / base) * 100) : 0);
         }).filter(r => r > 0)));
         const rateLabel = feeRates.length === 1 ? `${feeRates[0].toFixed(0)}%` : '';
-        return (<View style={{ marginTop: 5, marginBottom: 3, width: '50%', alignSelf: 'flex-end' }}><Text style={{ fontSize: 9, fontWeight: 'bold' as const, color: '#374151', textAlign: 'left' }}>Taxas de Serviço{rateLabel ? ` (IVA ${rateLabel})` : ''}:</Text></View>);
+        return (<View style={{ marginTop: 5, marginBottom: 3, width: '50%', alignSelf: 'flex-end' }}><Text style={{ fontSize: 9, fontWeight: 'bold' as const, color: '#374151', textAlign: 'left' }}>{rateLabel ? tp('total.taxasIva', { taxa: rateLabel }) : tp('total.taxas')}</Text></View>);
       })()}
       {feeRows.length > 0 && <>{feeRows.map((fee, index) => (
         <React.Fragment key={index}>
           <View style={styles.totalsRow}><Text style={styles.totalLabel}>{fee.name}:</Text><Text style={styles.totalValue}>€{fee.value.toFixed(2)}</Text></View>
         </React.Fragment>
       ))}</>}
-      <View style={[styles.totalsRow, { marginTop: 8, borderTopWidth: 1, borderTopColor: '#e5e7eb', paddingTop: 5 }]}><Text style={[styles.totalLabel, { fontWeight: 'bold' as const }]}>SUBTOTAL (sem IVA):</Text><Text style={[styles.totalValue, { fontWeight: 'bold' as const }]}>€{subtotalWithFees.toFixed(2)}</Text></View>
-      {vatBreakdown.map((v) => <View key={v.rate} style={styles.totalsRow}><Text style={styles.totalLabel}>IVA {v.rate.toFixed(0)}%:</Text><Text style={styles.totalValue}>€{v.vat.toFixed(2)}</Text></View>)}
-      {roundedFeeVatBreakdown.map((f, i) => <View key={`fee-vat-${i}`} style={styles.totalsRow}><Text style={styles.totalLabel}>IVA {f.rate.toFixed(0)}% ({f.name}):</Text><Text style={styles.totalValue}>€{f.vat.toFixed(2)}</Text></View>)}
-      <View style={styles.totalsRow}><Text style={[styles.totalLabel, { fontWeight: 'bold' as const }]}>IVA Total:</Text><Text style={[styles.totalValue, { fontWeight: 'bold' as const }]}>€{totalIva.toFixed(2)}</Text></View>
-      <View style={[styles.totalsRow, styles.grandTotal]}><Text style={[styles.totalLabel, { fontWeight: 'bold' as const }]}>TOTAL GERAL (c/ IVA):</Text><Text style={[styles.totalValue, { fontWeight: 'bold' as const }]}>€{total.toFixed(2)}</Text></View>
+      <View style={[styles.totalsRow, { marginTop: 8, borderTopWidth: 1, borderTopColor: '#e5e7eb', paddingTop: 5 }]}><Text style={[styles.totalLabel, { fontWeight: 'bold' as const }]}>{tp('total.subtotalSemIva')}</Text><Text style={[styles.totalValue, { fontWeight: 'bold' as const }]}>€{subtotalWithFees.toFixed(2)}</Text></View>
+      {vatBreakdown.map((v) => <View key={v.rate} style={styles.totalsRow}><Text style={styles.totalLabel}>{tp('total.iva', { taxa: v.rate.toFixed(0) })}</Text><Text style={styles.totalValue}>€{v.vat.toFixed(2)}</Text></View>)}
+      {roundedFeeVatBreakdown.map((f, i) => <View key={`fee-vat-${i}`} style={styles.totalsRow}><Text style={styles.totalLabel}>{tp('total.ivaTaxa', { taxa: f.rate.toFixed(0), nome: f.name })}</Text><Text style={styles.totalValue}>€{f.vat.toFixed(2)}</Text></View>)}
+      <View style={styles.totalsRow}><Text style={[styles.totalLabel, { fontWeight: 'bold' as const }]}>{tp('total.ivaTotal')}</Text><Text style={[styles.totalValue, { fontWeight: 'bold' as const }]}>€{totalIva.toFixed(2)}</Text></View>
+      <View style={[styles.totalsRow, styles.grandTotal]}><Text style={[styles.totalLabel, { fontWeight: 'bold' as const }]}>{tp('total.geral')}</Text><Text style={[styles.totalValue, { fontWeight: 'bold' as const }]}>€{total.toFixed(2)}</Text></View>
     </View>
     );
   };
@@ -726,7 +761,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
 
   const renderCustom = (section: any) => {
     const content = stripHtml(section?.settings?.content || section?.settings?.text || '');
-    return content ? <View style={styles.section}><Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, 'SECÇÃO')}</Text><Text style={{ fontSize: 9, color: '#374151', lineHeight: 1.4 }}>{content}</Text></View> : null;
+    return content ? <View style={styles.section}><Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{sectionLabel(section, tp('seccao.outra'))}</Text><Text style={{ fontSize: 9, color: '#374151', lineHeight: 1.4 }}>{content}</Text></View> : null;
   };
 
   const renderSection = (section: any) => {
@@ -775,12 +810,12 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
                 const footerCompanyEmail   = fieldValue(footerSection, 'footerCompanyEmail',   'company.email',   company?.email   || '');
                 return showCompanyInfo && (
                   <View style={styles.footerSection}>
-                    <Text style={styles.footerTitle}>EMPRESA</Text>
+                    <Text style={styles.footerTitle}>{tp('seccao.empresa')}</Text>
                     <Text style={styles.footerText}>{footerCompanyName}</Text>
-                    {footerCompanyVat     && <Text style={styles.footerText}>NIF: {footerCompanyVat}</Text>}
+                    {footerCompanyVat     && <Text style={styles.footerText}>{tp('nif')} {footerCompanyVat}</Text>}
                     {footerCompanyAddress && <Text style={styles.footerText}>{footerCompanyAddress}</Text>}
-                    {footerCompanyPhone   && <Text style={styles.footerText}>Tel: {footerCompanyPhone}</Text>}
-                    {footerCompanyEmail   && <Text style={styles.footerText}>Email: {footerCompanyEmail}</Text>}
+                    {footerCompanyPhone   && <Text style={styles.footerText}>{tp('tel')} {footerCompanyPhone}</Text>}
+                    {footerCompanyEmail   && <Text style={styles.footerText}>{tp('email')} {footerCompanyEmail}</Text>}
                   </View>
                 );
               })()}
@@ -791,16 +826,16 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
                 const cPhone = fieldValue(footerSection, 'footerContactPhone', 'commercial.phone', user.phone || '');
                 return (
                   <View style={styles.footerSection}>
-                    <Text style={styles.footerTitle}>CONTACTO</Text>
+                    <Text style={styles.footerTitle}>{tp('rodape.contacto')}</Text>
                     <Text style={styles.footerText}>{cName}</Text>
-                    {cEmail && <Text style={styles.footerText}>Email: {cEmail}</Text>}
-                    {cPhone && <Text style={styles.footerText}>Tel: {cPhone}</Text>}
+                    {cEmail && <Text style={styles.footerText}>{tp('email')} {cEmail}</Text>}
+                    {cPhone && <Text style={styles.footerText}>{tp('tel')} {cPhone}</Text>}
                   </View>
                 );
               })()}
             </View>
             {footerText && <Text style={[styles.footerText, { textAlign: 'center', marginTop: 2 }]}>{footerText}</Text>}
-            <View style={footerBottomRowStyle}><Text style={footerBrandTextStyle}>{company?.name || (ehVendaDireta ? 'Venda Direta' : 'Orçamento')}</Text></View>
+            <View style={footerBottomRowStyle}><Text style={footerBrandTextStyle}>{company?.name || (ehVendaDireta ? tp('rodape.vendaDireta') : tp('rodape.orcamento'))}</Text></View>
           </View>
         )}
       </Page>

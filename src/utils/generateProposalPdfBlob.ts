@@ -6,6 +6,8 @@ import { fetchQuotePdfTemplateById, fetchDefaultQuotePdfTemplate, resolveProposa
 import { aggregateQuoteTotals, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
 import { captureFlowError } from '@/lib/observability/captureFlowError';
 import { generateObraPdfBlob, type ObraNoPdf } from '@/utils/generateObraPdfBlob';
+import { IDIOMA_BASE, aplicarVersaoProposta, nomeDoIdioma, type TemplatePropostaLike } from '@/lib/idiomaDocumento';
+import { resolverIdiomasDaProposta } from '@/utils/idiomasDaProposta';
 
 export type { ObraNoPdf } from '@/utils/generateObraPdfBlob';
 
@@ -25,21 +27,42 @@ export interface ProposalPdfPrefetch {
     template_id?: string | null;
     template_snapshot?: unknown;
     organization_id?: string | null;
+    /** Escolha de idiomas já gravada (a coluna `language` e `prompt_values.__idiomas`). */
+    language?: string | null;
+    prompt_values?: Record<string, unknown> | null;
   } | null;
   quotes: Array<{ quote: any; lines: any[]; fees: any[] }>;
 }
+
+/** Opções do PDF da proposta. */
+export interface ProposalPdfOptions {
+  /**
+   * Idiomas do documento, por ordem (["pt"], ["en"], ["pt","en"]): uma passagem por idioma, cada uma com todos os
+   * orçamentos, juntas num só PDF. Só contam os que o modelo da proposta oferece. Sem isto, o que a proposta tiver
+   * gravado (idiomasDoDocumento) e, não havendo nada, o português de sempre.
+   */
+  idiomas?: readonly string[];
+}
+
+/** O modelo com a versão do idioma aplicada (a mesma referência se não houver versão, ou se não houver modelo). */
+const comVersao = <T extends object>(modelo: T | null, idioma: string): T | null =>
+  modelo ? (aplicarVersaoProposta(modelo as TemplatePropostaLike, idioma) as unknown as T) : modelo;
+
+/** As linhas de modelo (tipos da base) lidas como modelo de proposta, só para saber que idiomas oferecem. */
+const comoModeloDeProposta = (modelo: unknown): TemplatePropostaLike | null => (modelo ?? null) as TemplatePropostaLike | null;
 
 async function generateFromQuotePdfs(
   proposalId: string,
   prefetched?: ProposalPdfPrefetch,
   obra?: ObraNoPdf | null,
+  opcoes: ProposalPdfOptions = {},
 ): Promise<{ blob: Blob; fileName: string }> {
   let proposal: any = prefetched?.proposal ?? null;
   if (!prefetched) {
     // Fetch proposal basic data for filename + template resolution
     const { data, error: propErr } = await (supabase as any)
       .from('proposals')
-      .select('id, proposal_number, title, template_id, template_snapshot, organization_id')
+      .select('id, proposal_number, title, template_id, template_snapshot, organization_id, language')
       .eq('id', proposalId)
       .maybeSingle();
     if (propErr) throw propErr;
@@ -53,6 +76,13 @@ async function generateFromQuotePdfs(
   // resolveProposalBrandingTemplate.
   const explicitProposalTemplate = await resolveProposalBrandingTemplate(proposal);
   const orgDefaultTemplate = await fetchDefaultQuotePdfTemplate(proposal?.organization_id || null);
+
+  // Os idiomas oferecidos são os do modelo que manda na proposta (o explícito; sem ele, o de orçamento por omissão).
+  const idiomas = resolverIdiomasDaProposta({
+    escolha: opcoes.idiomas,
+    linha: proposal,
+    template: comoModeloDeProposta(explicitProposalTemplate ?? orgDefaultTemplate),
+  });
 
   // Resolve quote ids linked to this proposal
   let resolvedQuotes: Array<{ id: string; quote_number?: string | null; template_id?: string | null; created_at?: string | null }> = [];
@@ -142,58 +172,93 @@ async function generateFromQuotePdfs(
 
   const merged = await PDFDocument.create();
   const lastQuoteId = resolvedQuotes[resolvedQuotes.length - 1]?.id;
+
+  // O modelo do orçamento lê-se UMA vez por modelo, e não por orçamento e por idioma. Guarda-se a promessa (e não o
+  // valor): se a leitura falhar, falha dentro do try do orçamento que a pede, como antes, e não a geração inteira.
+  const modelosDosOrcamentos = new Map<string, ReturnType<typeof fetchQuotePdfTemplateById>>();
+  for (const quote of resolvedQuotes) {
+    if (quote.template_id && !modelosDosOrcamentos.has(quote.template_id)) {
+      const leitura = fetchQuotePdfTemplateById(quote.template_id);
+      leitura.catch(() => undefined); // já tratada: o erro aparece quando o orçamento a esperar
+      modelosDosOrcamentos.set(quote.template_id, leitura);
+    }
+  }
   // Continua-se a tentar os orcamentos seguintes -- um partido nao deve levar
   // os outros atras. O motivo de cada falha vai para a consola e para o
   // Sentry; ao utilizador nao se mostra o erro cru, mostra-se o que ele pode
   // fazer.
-  let houveFalha = false;
   // Uma falha a CARREGAR o gerador (e nao a executa-lo) quer dizer que a
   // pagina esta aberta desde antes de uma publicacao e pede um pedaco de
   // codigo que ja nao existe. Nada tem a ver com esta proposta, e recarregar
   // resolve -- por isso e a unica classe que merece mensagem propria.
   let versaoDesactualizada = false;
+  // Idiomas em que pelo menos um orçamento falhou (só serve quando se pedem vários idiomas).
+  const idiomasComFalha: string[] = [];
 
-  for (const quote of resolvedQuotes) {
-    try {
-      // Structural template: the quote's own (compatible layout for the
-      // items table/bundles), falling back to the org default quote template.
-      const structuralTemplate = (quote.template_id
-        ? await fetchQuotePdfTemplateById(quote.template_id)
-        : null) ?? orgDefaultTemplate;
-      // Branding on top: the proposal's own selected template (title, colors,
-      // footer/terms/thank-you), when one is configured.
-      const templateForQuote = mergeProposalBranding(structuralTemplate, explicitProposalTemplate);
-      const isLastQuote = quote.id === lastQuoteId;
-      // Mark this render as proposal-context so a quote missing a variable
-      // referenced only by the proposal template renders (blank/placeholder)
-      // instead of being silently dropped from the merged PDF.
-      const { blob } = await generateQuotePdfBlob(quote.id, {
-        prefetched: prefetched?.quotes.find(q => q.quote.id === quote.id),
-        templateOverride: templateForQuote,
-        documentContext: {
-          kind: 'proposal',
-          number: proposal?.proposal_number ?? null,
-          title: proposal?.title ?? null,
-        },
-        // Hide every quote's own totals except the last, which instead shows
-        // the single aggregated "Valor da Proposta" block for the whole
-        // merged document. Single-quote proposals keep default behavior.
-        hideTotals: aggregatedTotals ? !isLastQuote : false,
-        totalsOverride: aggregatedTotals && isLastQuote ? aggregatedTotals : undefined,
-      });
-      const arrayBuffer = await blob.arrayBuffer();
-      const src = await PDFDocument.load(arrayBuffer);
-      const copied = await merged.copyPages(src, src.getPageIndices());
-      copied.forEach((page) => merged.addPage(page));
-    } catch (e) {
-      console.error(`[generateProposalPdfBlob] Failed quote ${quote.id}:`, e);
-      captureFlowError(e, 'proposal-document-export');
-      houveFalha = true;
-      const motivo = e instanceof Error ? e.message : String(e);
-      if (/dynamically imported module|Importing a module script failed|error loading dynamically/i.test(motivo)) {
-        versaoDesactualizada = true;
+  // Uma passagem por idioma (o português primeiro, se for pedido), cada uma com todos os orçamentos: o documento
+  // junto é «toda a versão em português» seguida de «toda a versão em inglês». Com um só idioma é a passagem de sempre.
+  for (const idioma of idiomas) {
+    for (const quote of resolvedQuotes) {
+      try {
+        // Structural template: the quote's own (compatible layout for the
+        // items table/bundles), falling back to the org default quote template.
+        const structuralTemplate = (quote.template_id
+          ? await modelosDosOrcamentos.get(quote.template_id)
+          : null) ?? orgDefaultTemplate;
+        // Branding on top: the proposal's own selected template (title, colors,
+        // footer/terms/thank-you), when one is configured. Os dois modelos já
+        // vão resolvidos para o idioma (sem versões, é a mesma referência).
+        const templateForQuote = mergeProposalBranding(
+          comVersao(structuralTemplate, idioma),
+          comVersao(explicitProposalTemplate, idioma),
+        );
+        const isLastQuote = quote.id === lastQuoteId;
+        // Mark this render as proposal-context so a quote missing a variable
+        // referenced only by the proposal template renders (blank/placeholder)
+        // instead of being silently dropped from the merged PDF.
+        const { blob } = await generateQuotePdfBlob(quote.id, {
+          prefetched: prefetched?.quotes.find(q => q.quote.id === quote.id),
+          templateOverride: templateForQuote,
+          documentContext: {
+            kind: 'proposal',
+            number: proposal?.proposal_number ?? null,
+            title: proposal?.title ?? null,
+            // O português não leva `idioma`: é o que o documento já fazia sem ele.
+            ...(idioma !== IDIOMA_BASE ? { idioma } : {}),
+          },
+          // Hide every quote's own totals except the last, which instead shows
+          // the single aggregated "Valor da Proposta" block for the whole
+          // merged document (em cada versão). Single-quote proposals keep default behavior.
+          hideTotals: aggregatedTotals ? !isLastQuote : false,
+          totalsOverride: aggregatedTotals && isLastQuote ? aggregatedTotals : undefined,
+        });
+        const arrayBuffer = await blob.arrayBuffer();
+        const src = await PDFDocument.load(arrayBuffer);
+        const copied = await merged.copyPages(src, src.getPageIndices());
+        copied.forEach((page) => merged.addPage(page));
+      } catch (e) {
+        console.error(`[generateProposalPdfBlob] Failed quote ${quote.id} (${idioma}):`, e);
+        captureFlowError(e, 'proposal-document-export');
+        if (!idiomasComFalha.includes(idioma)) idiomasComFalha.push(idioma);
+        const motivo = e instanceof Error ? e.message : String(e);
+        if (/dynamically imported module|Importing a module script failed|error loading dynamically/i.test(motivo)) {
+          versaoDesactualizada = true;
+        }
       }
     }
+  }
+
+  // Com vários idiomas, um PDF a que falta uma versão (ou orçamentos de uma versão) não sai em silêncio: quem o
+  // descarrega julgaria que está completo. Com um só idioma mantém-se o que sempre se fez (sai o que se produziu).
+  // (Sem página nenhuma vale o erro geral, mais abaixo, como sempre.) Verifica-se antes da obra: não se gera para nada.
+  if (idiomas.length > 1 && idiomasComFalha.length > 0 && merged.getPageCount() > 0) {
+    if (versaoDesactualizada) {
+      throw new Error('Há uma versão nova da aplicação. Recarregue a página (Ctrl+F5) e tente novamente.');
+    }
+    throw new Error(
+      `Não foi possível produzir a versão em ${idiomasComFalha.map((c) => nomeDoIdioma(c)).join(' e em ')} deste documento. ` +
+        'O PDF não foi gerado para não sair incompleto; tente novamente.',
+    );
   }
 
   // O conteúdo da obra (só quando o chamador tem a vista do negócio: hoje, o portal) vem depois dos orçamentos. Sem
@@ -239,14 +304,18 @@ async function generateFromQuotePdfs(
  * of "Orçamento"/quote number).
  *
  * `obra` (opcional): o conteúdo da obra do negócio (a vista do cliente), no idioma do documento, acrescentado em
- * páginas próprias depois dos orçamentos. Sem ele, o PDF é o de sempre.
+ * páginas próprias depois dos orçamentos (uma só vez, no fim). Sem ele, o PDF é o de sempre.
+ *
+ * `opcoes.idiomas` (opcional): os idiomas do documento (ver ProposalPdfOptions); o portal passa só a versão que o
+ * cliente está a ver, e a obra deve vir nesse mesmo idioma.
  */
 export async function generateProposalPdfBlob(
   proposalId: string,
   prefetched?: ProposalPdfPrefetch,
   obra?: ObraNoPdf | null,
+  opcoes?: ProposalPdfOptions,
 ): Promise<{ blob: Blob; fileName: string }> {
-  return generateFromQuotePdfs(proposalId, prefetched, obra);
+  return generateFromQuotePdfs(proposalId, prefetched, obra, opcoes);
 }
 
 export function downloadBlob(blob: Blob, fileName: string) {

@@ -15,6 +15,7 @@ import { clientePtEmpresas } from "./clientePt.empresas";
 import { clientePtLogin } from "./clientePt.login";
 import { clientePtDocumentos } from "./clientePt.documentos";
 import { clientePtEstado } from "./clientePt.estado";
+import { clientePtIdiomaDocumento } from "./clientePt.idiomaDocumento";
 export const clientePt: Record<string, string> = {
   ...clientePtLayout,
   ...clientePtEmpresas,
@@ -29,6 +30,7 @@ export const clientePt: Record<string, string> = {
   ...clientePtDocObra,
   ...clientePtDocNegocio,
   ...clientePtNegocioPagina,
+  ...clientePtIdiomaDocumento,
   // Moldura
   "pc.layout.titulo": "Portal do Cliente",
   "pc.layout.menu.inicio": "Início",

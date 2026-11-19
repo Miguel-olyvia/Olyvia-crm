@@ -107,6 +107,7 @@ export function ProposalPortalPreview({ open, onOpenChange, proposalId }: Propos
                     commercial={portalData.commercial}
                     company={portalData.company}
                     mode="preview"
+                    idiomasDoDocumento={portalData.idiomasDoDocumento}
                     statusLabel={statusLabel}
                     canActOnProposal={canActOnProposal}
                     onDownloadPdf={handleDownloadPdf}

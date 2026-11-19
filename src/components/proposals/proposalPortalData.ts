@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { resolverIdiomasDaProposta } from "@/utils/idiomasDaProposta";
 
 export interface ProposalPortalCommercial {
   name: string;
@@ -15,6 +16,20 @@ export interface ProposalPortalData {
   quoteLines: Record<string, any[]>;
   quoteFees: Record<string, any[]>;
   commercial: ProposalPortalCommercial | null;
+  /**
+   * Idiomas do documento, por ordem, já decididos (ver resolverIdiomasDaProposta): a escolha pedida, senão o que a
+   * proposta tem gravado, senão o idioma do botão do portal se o template tiver essa versão, senão português.
+   * Quem desenha pode voltar a decidir (o cliente troca o idioma do botão sem recarregar a proposta).
+   */
+  idiomasDoDocumento: string[];
+}
+
+/** Opções da leitura: nenhuma é obrigatória, e sem elas o documento fica em português como sempre. */
+export interface ProposalPortalLoadOptions {
+  /** Escolha explícita de idiomas (["pt","en"]); só contam os que o template oferece. */
+  idiomas?: readonly string[];
+  /** Idioma do botão do portal do cliente; só conta se o template tiver essa versão. */
+  idiomaDoPortal?: string | null;
 }
 
 // H5: minimal shape returned by get_commercial_info RPC.
@@ -147,6 +162,7 @@ async function resolveCommercialForProposal(
 
 export async function loadProposalPortalData(
   proposalId: string,
+  opcoes: ProposalPortalLoadOptions = {},
 ): Promise<ProposalPortalData | null> {
   // H5: typed query; verifica erro explicitamente.
   const { data: proposal, error: proposalErr } = await supabase
@@ -282,5 +298,11 @@ export async function loadProposalPortalData(
     quoteLines,
     quoteFees,
     commercial,
+    idiomasDoDocumento: resolverIdiomasDaProposta({
+      escolha: opcoes.idiomas,
+      linha: proposal,
+      template,
+      idiomaDoPortal: opcoes.idiomaDoPortal,
+    }),
   };
 }
