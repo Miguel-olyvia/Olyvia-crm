@@ -1,17 +1,22 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowRight, Building2, ClipboardList, Info, Package } from "lucide-react";
+import { AlertTriangle, ArrowRight, Building2, ClipboardList, Info, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useSupplierPortal } from "@/contexts/SupplierPortalContext";
 import { isNoSupplierAccess, spCatalogList } from "@/lib/supplierPortal/spRpc";
-import { useSpOrdersToConfirm } from "@/components/supplier-portal/useSpOrdersToConfirm";
+import { useSpOrdersSlaAlert, useSpOrdersToConfirm } from "@/components/supplier-portal/useSpOrdersToConfirm";
+import { SP_SLA_ALERT_ORDERS_HREF, spSlaAlertText } from "@/components/supplier-portal/SpOrdersSlaBanner";
+import { cn } from "@/lib/utils";
 
 /** Portal do Fornecedor — início: boas-vindas, encomendas por confirmar, empresas com acesso e atalho para o catálogo. */
 export default function SupplierPortal() {
   const { user, account, companies, companiesError, canManageCatalog, refresh } = useSupplierPortal();
   const { count: toConfirm, isError: toConfirmError } = useSpOrdersToConfirm();
+  const { alert: slaAlert, overdue: slaOverdue } = useSpOrdersSlaAlert();
+  const hasSlaAlert = !!slaAlert && slaAlert > 0;
+  const slaIsOverdue = (slaOverdue ?? 0) > 0;
   const [activeItems, setActiveItems] = useState<number | null>(null);
   const [countError, setCountError] = useState(false);
 
@@ -65,7 +70,28 @@ export default function SupplierPortal() {
                   : `${toConfirm.toLocaleString("pt-PT")} encomendas por confirmar`)}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-3">
+          {hasSlaAlert && (
+            <div
+              className={cn(
+                "flex flex-col gap-2 rounded-md border p-3 sm:flex-row sm:items-center sm:justify-between",
+                slaIsOverdue
+                  ? "border-red-200 bg-red-50 text-red-900 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-100"
+                  : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-100",
+              )}
+            >
+              <p className="flex items-center gap-2 text-sm font-medium">
+                <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
+                {spSlaAlertText(slaAlert)}
+              </p>
+              <Button asChild variant="outline" className="h-11 gap-2 bg-background">
+                <Link to={SP_SLA_ALERT_ORDERS_HREF}>
+                  Ver prazos em risco
+                  <ArrowRight className="h-4 w-4" aria-hidden="true" />
+                </Link>
+              </Button>
+            </div>
+          )}
           <Button asChild className="h-11 w-full sm:w-auto gap-2" variant={toConfirm ? "default" : "outline"}>
             <Link to={toConfirm ? "/supplier-portal/orders?estado=to_confirm" : "/supplier-portal/orders"}>
               {toConfirm ? "Ver encomendas por confirmar" : "Ver encomendas"}

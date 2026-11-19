@@ -179,6 +179,24 @@ export type SpOrderStatus = "pending" | "ordered" | "partially_received" | "rece
 export type SpPublicationStatus = "sent" | "viewed" | "confirmed";
 export type SpOrderFilter = "all" | "to_confirm" | "confirmed" | "open" | "received" | "cancelled";
 
+/**
+ * Prazo de entrega (SLA) da encomenda: o mais cedo entre o prazo do contrato
+ * (contract_days a contar do envio) e a data prometida pelo fornecedor.
+ * status null = encomenda fechada ou sem prazo; at_risk = faltam 0–2 dias.
+ */
+export type SpOrderSlaStatus = "ok" | "at_risk" | "overdue";
+
+export interface SpOrderSla {
+  due_date: string | null;
+  source: "contract" | "promised" | null;
+  status: SpOrderSlaStatus | null;
+  days_left: number | null;
+  days_late: number | null;
+  contract_days: number | null;
+  promised_date: string | null;
+  contract_due_date: string | null;
+}
+
 export interface SpOrderListItem {
   purchase_order_id: string;
   order_number: string;
@@ -198,9 +216,15 @@ export interface SpOrderListItem {
   total: number;
   currency: string;
   can_confirm: boolean;
+  /** Opcional: ausente enquanto a BD não devolver o SLA. */
+  sla?: SpOrderSla | null;
 }
 
-export type SpOrderCounts = Record<SpOrderFilter, number>;
+export type SpOrderCounts = Record<SpOrderFilter, number> & {
+  /** Em risco + ultrapassadas, em todo o âmbito do fornecedor (não depende do filtro). */
+  sla_alert?: number;
+  sla_overdue?: number;
+};
 
 export interface SpOrderListResult {
   total: number;
@@ -261,6 +285,8 @@ export interface SpOrderDetail {
   sent_by: { name: string | null; email: string | null; phone: string | null } | null;
   lines: SpOrderLine[];
   totals: { subtotal: number; vat_total: number; total: number };
+  /** Opcional: ausente enquanto a BD não devolver o SLA. */
+  sla?: SpOrderSla | null;
 }
 
 export interface SpMarkViewedResult {
@@ -633,6 +659,8 @@ export async function spListOrders(params: {
       open: data?.counts?.open ?? 0,
       received: data?.counts?.received ?? 0,
       cancelled: data?.counts?.cancelled ?? 0,
+      ...(typeof data?.counts?.sla_alert === "number" ? { sla_alert: data.counts.sla_alert } : {}),
+      ...(typeof data?.counts?.sla_overdue === "number" ? { sla_overdue: data.counts.sla_overdue } : {}),
     },
     items: Array.isArray(data?.items) ? data.items : [],
   };
