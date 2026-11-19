@@ -231,6 +231,11 @@ export interface LinhaResumoNeg {
   saida: number; pronto: number; aChegar: number; semForn: number;
   /** as encomendas a fornecedor desta linha (id, fornecedor, estado e a data prometida no portal) */
   pos: PoResumoNeg[];
+  /** 19/11 (encomenda real): porque é que a falta (semForn) não se pode pedir: sem fornecedor preferido ou a unidade do fornecedor
+   *  incompatível. Sem o campo (o Inventário do browser), «sem fornecedor». */
+  causa?: "no_preferred_supplier" | "incompatible_supplier_uom";
+  /** 19/11 (encomenda real): o que falta e se pode pedir ao fornecedor («Pedir o que falta ao fornecedor»). */
+  pedir?: number;
 }
 export interface ResumoEcNeg {
   id: string; eliminada: boolean; estado: EstadoEc; rotulo: string; linhas: LinhaResumoNeg[];
@@ -318,8 +323,11 @@ export function faltaMateriais(r: ResumoEcNeg | null | undefined): string[] {
   if (r.eliminada) return [`uma encomenda de cliente válida: a ${r.id} foi eliminada no Inventário`];
   const F: string[] = [];
   const mat = (n: number) => `${n} ${n === 1 ? "material" : "materiais"}`;
-  const semForn = r.linhas.filter((l) => !garantida(l) && l.semForn > 0).length;
-  if (semForn) F.push(`escolher o fornecedor de ${mat(semForn)} no Inventário`);
+  const presas = r.linhas.filter((l) => !garantida(l) && l.semForn > 0);
+  // 19/11: com a causa da base, cada uma nas suas palavras (e onde se resolve: o Catálogo); sem ela, como antes
+  const semForn = presas.filter((l) => l.causa !== "incompatible_supplier_uom").length, unidade = presas.length - semForn;
+  if (semForn) F.push(presas.some((l) => l.causa) ? `escolher o fornecedor preferido de ${mat(semForn)} no Catálogo` : `escolher o fornecedor de ${mat(semForn)} no Inventário`);
+  if (unidade) F.push(`corrigir a unidade do fornecedor de ${mat(unidade)} no Catálogo (é incompatível com a do produto)`);
   const porAprovar = r.pos.filter((p) => p.fase === "por aprovar");
   if (porAprovar.length) F.push(`aprovar ${porAprovar.length === 1 ? "a encomenda a fornecedor" : "as encomendas a fornecedor"} ${porAprovar.map((p) => p.id).join(", ")} no Inventário (Compras)`);
   const porReceber = posDaInicial(r).filter((p) => p.fase === "no portal" || p.fase === "por email" || p.fase === "parcial");
@@ -328,7 +336,7 @@ export function faltaMateriais(r: ResumoEcNeg | null | undefined): string[] {
     F.push(`receber no armazém ${porReceber.length === 1 ? "a encomenda" : "as encomendas"} ${porReceber.map((p) => p.id).join(", ")}${data ? " (prevista a " + ddmm(data) + ")" : ""}`);
   }
   const outras = r.linhas.filter((l) => l.ec === r.id && !garantida(l) && !(l.semForn > 0) && !(l.aChegar > 0)).length;
-  if (outras) F.push(`reservar no armazém o que falta de ${mat(outras)} ("Pedir o que falta", no Inventário)`);
+  if (outras) F.push(`pedir ao fornecedor ou reservar no armazém o que falta de ${mat(outras)} («Pedir o que falta ao fornecedor»)`);
   // salvaguarda: nada acima mas a encomenda não está pronta (não devia acontecer)
   if (!F.length && !r.pronta) F.push("receber no armazém todos os materiais da encomenda de cliente");
   return F;

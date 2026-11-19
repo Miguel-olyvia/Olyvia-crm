@@ -65,7 +65,7 @@ export function ClientOrderRowActions({
       permission: "client_orders.edit",
     },
     {
-      label: "Pedir em falta ao fornecedor",
+      label: "Pedir o que falta ao fornecedor",
       icon: Truck,
       onSelect: onRequestMissing,
       permission: ["purchase_orders.create", "client_orders.view"],

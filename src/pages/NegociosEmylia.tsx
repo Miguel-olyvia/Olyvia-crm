@@ -71,7 +71,7 @@ import { definirOrgErp } from "@/emylia/erpEticadata";
 import { usePaginaInteira } from "@/hooks/usePaginaInteira";
 import { aplicarNomesPapeis, aplicarPermissoesReais, definirPapeisEscolhiveis, aplicarGestoresObra, lerGestoresObra, lerMeusPapeis, papeisPermitidos, papelDeAbertura, reporNomesPapeis, VISTAS_NEGOCIO, type MeusPapeis } from "@/emylia/real/papeisReal";
 import { atribuirPorAtribuir } from "@/emylia/preparacaoObra";
-import { aprovarPoReal, definirAprovadorPo } from "@/emylia/real/encomendaReal";
+import { aprovarPoReal, definirAprovadorPo, definirPedidorFalta, pedirFaltaReal, textoPedido } from "@/emylia/real/encomendaReal";
 import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste";
 import { definirMateriaisReais } from "@/emylia/tarefasValidador";
 import { lerCatalogo } from "@/emylia/v2/catalogoStore";
@@ -795,6 +795,20 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
       } finally { redesenhar(); }
     });
     return () => definirAprovadorPo(null);
+  }, [org, avisar, carregarEncomendas, redesenhar]);
+  // 19/11 (auditoria, lote 2): «Pedir o que falta ao fornecedor» no passo Materiais da obra, a RPC do Inventário; depois relê as encomendas
+  useEffect(() => {
+    if (!org) return;
+    definirPedidorFalta(async (contrato) => {
+      try {
+        avisar(textoPedido(await pedirFaltaReal(supabase, contrato)));
+        const relidos = await lerNegocios(supabase, org, ids.current, S.campos, { semSugestoes: soExecucaoRef.current });
+        await carregarEncomendas(relidos);
+      } catch (e) {
+        avisar({ msg: "Não foi possível pedir ao fornecedor", sub: (e as Error).message, kind: "bad" });
+      } finally { redesenhar(); }
+    });
+    return () => definirPedidorFalta(null);
   }, [org, avisar, carregarEncomendas, redesenhar]);
   // 30/10 (20270101350000): os materiais novos da obra (o Gestor de obra) vão à encomenda a fornecedor da base, pendente para Compras
   useEffect(() => {
