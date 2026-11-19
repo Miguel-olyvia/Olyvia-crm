@@ -9,7 +9,7 @@
 // O cartão do negócio só lê o estado da encomenda no Inventário (reservada, encomendada ao fornecedor, saída).
 import { resumoErp } from "./erpEticadata";
 import { itemCatalogo, normal } from "./catalogo";
-import { DIAS, LINHAS, PAPEIS, TECS, calcMats, acertoDoValorPendente, conflitos, difDoAcerto, retificacaoPorPagar, diaDeFerias, eur, medidasEPlanoAbertos, mudancasDeValor, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
+import { DIAS, LINHAS, PAPEIS, TECS, calcMats, acertoDoValorPendente, conflitos, difDoAcerto, retificacaoPorPagar, diaDeFerias, eur, margemSemAdenda, medidasEPlanoAbertos, mudancasDeValor, nfmt, pct, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
 import { custosDe, perfilIdDe, receitaDe } from "./v2/custosModelo";
 import { HORAS_DIA } from "./ganttOrcamento";
 import { PERFIL_DO_SK, tecnicosDoPerfil } from "./equipa/tecnicos";
@@ -743,7 +743,12 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
   // o Financeiro fatura-a e valida o pagamento; se baixa, o Financeiro regista a nota de crédito. A encomenda de cliente espera pela paga.
   const ac = d.f.acerto_valor;
   if (ac) L.push({ id: "ac", trilho: "plano", estado: "feito", who: ac === "nota de crédito" ? "financeiro" : "comercial",
-    t: ac === "sem adenda" ? "Acerto do valor: sem acerto" : ac === "nota de crédito" ? `Nota de crédito ${d.f.nota_credito ?? ""}`.trim() : `Retificação ${ac} no Financeiro`, sub: "" });
+    t: ac === "sem adenda" ? `Acerto do valor: sem acerto${d.f.acerto_sem_adenda_por ? ` (${d.f.acerto_sem_adenda_aprov === "ok" ? "aprovado por " : ""}${d.f.acerto_sem_adenda_por})` : ""}` : ac === "nota de crédito" ? `Nota de crédito ${d.f.nota_credito ?? ""}`.trim() : `Retificação ${ac} no Financeiro`, sub: "" });
+  // 19/11 (auditoria): «Seguir sem adenda» com a margem abaixo do mínimo espera pela Direção
+  else if (acertoDoValorPendente(d) && d.f.acerto_sem_adenda_aprov === "pedida") {
+    const M = margemSemAdenda(d, S);
+    L.push({ id: "ac", trilho: "plano", estado: "agora", who: "direcao", t: "Seguir sem adenda: aprovar a margem", sub: `${M ? `Sem adenda, a margem fica em ${pct(M.m)} com as medidas novas (mínimo ${S.cfg.min}%). ` : ""}${mudancasDeValor(d).join("; ")}.`, act: "aprovarSemAdenda", btn: "Aprovar sem adenda" });
+  }
   else if (acertoDoValorPendente(d)) L.push(difDoAcerto(d, S) > 0.004
     ? { id: "ac", trilho: "plano", estado: "agora", who: "comercial", t: "O valor mudou: enviar a retificação ao Financeiro", sub: `${mudancasDeValor(d).join("; ")}.`, act: "adendaDoValor", btn: "Enviar ao Financeiro" }
     : { id: "ac", trilho: "plano", estado: "agora", who: "financeiro", t: "O valor baixou: registar a nota de crédito", sub: `${mudancasDeValor(d).join("; ")}. Emita-a no Eticadata e registe o número no negócio.` });
@@ -788,11 +793,10 @@ export function passosPagamentoAdenda(d: Negocio, a: Adenda): PassoPrep[] {
   const f0 = faturasAdenda(a).find((f) => f.i === 0), x = parcelasAdenda(d, a)[0], parc = nomeParcela(0);
   const id = a.n, mats = porEncomendarDe(d, a.n).length > 0 || !!ecDaAdenda(d, a.n);
   const ft: PassoPrep = f0
-    ? { id: "ft-ad-" + id, trilho: "pag", estado: "feito", who: "financeiro", t: `Fatura ${f0.n} · adenda ${a.n} · ${parc}`, sub: `Emitida ${f0.q.startsWith("hoje") ? f0.q : "a " + f0.q} · ${eur(f0.v)} €.` }
-    // na V2 a Olyvia não emite faturas: regista-se a do programa certificado no Financeiro do negócio (sem botão aqui), como no contrato
-    : lerVersao() !== "atual"
-    ? { id: "ft-ad-" + id, trilho: "pag", estado: "agora", who: "financeiro", t: `Registar a fatura da adenda ${a.n} · ${parc}`, sub: `${x ? eur(x.v) + " € · " : ""}Emita-a no programa de faturação certificado e registe-a no Financeiro do negócio.` }
-    : { id: "ft-ad-" + id, trilho: "pag", estado: "agora", who: "financeiro", t: `Emitir a fatura da adenda ${a.n} · ${parc}`, sub: `${x ? eur(x.v) + " € · " : ""}Vai para o portal do cliente.`, act: "faturarAdendas", arg: a.n, btn: "Emitir a fatura" };
+    ? { id: "ft-ad-" + id, trilho: "pag", estado: "feito", who: "financeiro", t: `Fatura ${f0.n} · adenda ${a.n} · ${parc}`, sub: `Registada ${f0.q.startsWith("hoje") ? f0.q : "a " + f0.q} · ${eur(f0.v)} €.` }
+    // 19/11 (auditoria): a Olyvia não emite faturas (antes, na «Atual», inventava o número): emite-se no Eticadata e regista-se o número no
+    // negócio, como as parcelas do contrato. O botão leva ao campo onde se escreve (abrirFaturaAdenda)
+    : { id: "ft-ad-" + id, trilho: "pag", estado: "agora", who: "financeiro", t: `Registar a fatura da adenda ${a.n} · ${parc}`, sub: `${x ? eur(x.v) + " € com IVA · " : ""}Emita-a no Eticadata e registe o número no negócio: vai ao portal do cliente.`, act: "abrirFaturaAdenda", arg: a.n, btn: "Registar a fatura" };
   const rc = f0?.recibo;
   const pg: PassoPrep = rc
     ? { id: "pg-ad-" + id, trilho: "pag", estado: "feito", who: "financeiro", t: `Pagamento validado · adenda ${a.n}`, sub: `Recibo ${rc.n}.` }

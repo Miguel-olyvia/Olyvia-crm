@@ -24,7 +24,7 @@ import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { PAGAMENTO_FASES, PAGAMENTO_MEDIDA, deIso, erroPrestacoes, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
 import {
-  MOTIVO_IMPREVISTO, adendaBloqueada, congelarAdenda, alertasAdenda, assinadas, diasAdenda, faturaAValidar, faturasAdenda, margemAdenda, nomeParcela, parcelaFaturavel, porFaturar, primeiraPaga, proximaParcela,
+  MOTIVO_IMPREVISTO, adendaBloqueada, congelarAdenda, alertasAdenda, assinadas, diasAdenda, faturaAValidar, faturasAdenda, margemAdenda, nomeParcela, parcelaFaturavel, primeiraPaga, proximaParcela, alvoFaturaAdenda,
   LINHA_ACERTO_PLANO, LINHA_ACERTO_PRODUTOS, MOTIVO_ACERTO, MOTIVOS_ADENDA, juntarAoPlano, linhaAdenda, linhasComTarefa, precoSugeridoLivre, totaisAdenda, totalAdenda, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda,
 } from "./adendas";
 import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
@@ -252,6 +252,9 @@ export interface Orcamento {
   aprov: null | "pedida" | "ok";
   enviada: string | null;
   aceite: string | null;
+  /** 19/11 (auditoria): os totais da versão aceite (sem IVA, com o desconto; e com IVA), calculados uma vez e congelados (congelarTotalAceite):
+   *  são os que vão para a base (preco_final, total_com_iva) e não mudam com o Catálogo. Limpam-se com uma versão nova. */
+  totalAceite?: { pf: number; total: number };
   contrato: null | "enviado" | "assinado";
   /** 15/10: como o cliente assinou o contrato no portal (desenho no ecrã ou Chave Móvel Digital). Os exemplos antigos não a têm. */
   assinatura?: Assinatura | null;
@@ -1265,11 +1268,13 @@ export function custoCongelado(S: Estado, sid: SvcId, cu: number, quando: string
   const total = mo + s.eq + s.cons + estr;
   return { h: s.h, oficios, mo, eq: s.eq, cons: s.cons, taxaEstr: r2(taxaEstr), estr, ajuste: r2(cu - total), q: quando };
 }
-/** Congela o custo de cada linha da proposta (os serviços por ofício; os produtos com o fornecedor). As linhas já congeladas ficam. */
+/** Congela o custo de cada linha da proposta (os serviços por ofício; os produtos com o fornecedor). As linhas já congeladas ficam.
+ *  19/11 (auditoria): também a taxa de IVA de cada linha (a do Catálogo, agora): o total da proposta enviada não muda com o Catálogo. */
 export function congelarProposta(d: Negocio, S: Estado, quando: string): void {
   const o = d.orc;
   if (!o) return;
   const K = catalogoLigado();
+  for (const l of o.linhas) if (l.iva == null) l.iva = ivaDaLinha(l, S);
   for (const l of o.linhas) {
     if (l.t === "svc") { if (!l.det) { const c = custoCongelado(S, l.sid, l.cu, quando); if (c) l.det = c; } continue; }
     if (l.prod || !l.d.startsWith(PREFIXO_PROD)) continue;
@@ -1282,8 +1287,16 @@ export function congelarProposta(d: Negocio, S: Estado, quando: string): void {
 /** 22/10 (fase 2): as propostas já enviadas de um Estado de antes ficam congeladas como estão (o custo da linha mantém-se). */
 export function congelarEnviadas(S: Estado): boolean {
   let mudou = false;
-  for (const d of S.deals) if (d.orc?.enviada && d.orc.linhas.some((l) => l.t === "svc" && !l.det)) { congelarProposta(d, S, d.orc.enviada); mudou = true; }
+  for (const d of S.deals) if (d.orc?.enviada && d.orc.linhas.some((l) => (l.t === "svc" && !l.det) || l.iva == null)) { congelarProposta(d, S, d.orc.enviada); mudou = true; }
   return mudou;
+}
+/** 19/11 (auditoria): os totais da versão aceite (ou com o contrato assinado), calculados uma vez e congelados em `o.totalAceite`. A base
+ *  recebe-os (preco_final, total_com_iva) e já não se recalculam a cada gravação. Null se a versão ainda não está aceite. */
+export function congelarTotalAceite(d: Negocio, S: Estado): { pf: number; total: number } | null {
+  const o = d.orc;
+  if (!o || !(o.aceite || o.contrato === "assinado")) return null;
+  if (!o.totalAceite) o.totalAceite = { pf: r2(tot(d, S).pf), total: r2(totaisIva(d, S).total) };
+  return o.totalAceite;
 }
 /** 22/10 (fase 2): a mão de obra da proposta por ofício (horas e custo): a congelada nas linhas enviadas, senão a de agora. */
 export function oficiosDaProposta(d: Negocio, S: Estado): { perfil: string; n: string; h: number; custo: number }[] {
@@ -1408,6 +1421,17 @@ function orcamentoRefeito(d: Negocio, S: Estado, med?: Partial<Record<CampoMedid
   c.orc = o;
   sincronizarEfeitos(c, S); sincronizarDemolicao(c, S);
   return c;
+}
+/** 19/11 (auditoria): «Seguir sem adenda» deixa o preço da proposta aceite (o congelado, se o houver) com o trabalho das medidas novas: a
+ *  margem é a desse preço contra o custo do orçamento refeito com as medidas retificadas (orcamentoRefeito). Abaixo do mínimo da
+ *  organização (S.cfg.min), como no envio da proposta, pede a aprovação da Direção. Sem orçamento (ou sem dar para refazer), null. */
+export function margemSemAdenda(d: Negocio, S: Estado): { m: number; min: number; abaixo: boolean; pf: number; custo: number } | null {
+  if (!d.orc) return null;
+  try {
+    const B = orcamentoRefeito(d, S, medidasRetificadas(d));
+    const pf = d.orc.totalAceite?.pf ?? tot(d, S).pf, custo = tot(B, S).custo, m = pf > 0 ? (pf - custo) / pf : 0, min = S.cfg.min / 100;
+    return { m, min, abaixo: m < min - 1e-9, pf: r2(pf), custo: r2(custo) };
+  } catch { return null; }
 }
 /** O que a proposta refeita com as medidas `med` vai valer (sem IVA, com o desconto), e de onde vem a diferença: `medidas` (o orçamento
  *  refeito com as medidas da visita contra o refeito com as novas) e `acertos` (o que refazer já junta sem mudar medidas: as linhas do
@@ -2159,18 +2183,23 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     if (!a.faturas) { const F = faturasAdenda(a); if (!F.length) return F; a.faturas = F; delete a.fatura; delete a.recibo; delete a.pag; }
     return a.faturas;
   };
-  /** 21/10 (decisão C): a fatura da parcela seguinte da adenda, com o valor congelado (o número vem do motor ou do programa certificado). */
-  const emitirParcela = (d: Negocio, a: Adenda, numero: string, registada: boolean): FaturaAdenda | null => {
+  /** 21/10 (decisão C): a fatura da parcela seguinte da adenda, com o valor congelado. 19/11 (auditoria): o número é sempre o do Eticadata
+   *  (a Olyvia não emite faturas): `info` é a leitura do ERP (null: registada sem ligação; undefined: sem leitura, como na V2). */
+  const registarParcela = (d: Negocio, a: Adenda, numero: string, info?: InfoErp | null): FaturaAdenda | null => {
     const x = proximaParcela(d, a);
     if (!x) return null;
     const F = faturaDaAdenda(a);
     if (!a.faturas) a.faturas = F;
     const f: FaturaAdenda = { n: numero, q: agora(), i: x.i, l: x.l, p: x.p, v: x.v };
     a.faturas.push(f);
-    log(d, registada
-      ? `Fatura ${f.n} registada (adenda ${a.n}, ${nomeParcela(f.i)}: ${x.l.toLowerCase()}, ${eur(f.v)} € com IVA) · emitida no programa certificado`
-      : `${f.n} emitida (adenda ${a.n}, ${nomeParcela(f.i)}: ${x.l.toLowerCase()}, ${eur(f.v)} € com IVA) e enviada ao portal do cliente`);
+    const onde = info ? `confirmada no Eticadata · ${resumoErp(info)}` : info === null ? "sem confirmar no Eticadata (sem ligação ao ERP)" : "emitida no programa certificado";
+    log(d, `Fatura ${f.n} registada (adenda ${a.n}, ${nomeParcela(f.i)}: ${x.l.toLowerCase()}, ${eur(f.v)} € com IVA) · ${onde}`);
     return f;
+  };
+  /** 19/11 (auditoria): o número já está noutra fatura do negócio (a do contrato, uma parcela ou outra adenda)? */
+  const faturaJaRegistada = (d: Negocio, numero: string): boolean => {
+    const k = numero.trim().toLowerCase(), igual = (x?: string | null) => !!x && x.trim().toLowerCase() === k;
+    return igual(d.fin.fatura?.n) || (d.fin.tranches ?? []).some((t) => igual(t.numero)) || (d.adendas ?? []).some((a) => faturasAdenda(a).some((f) => igual(f.n)));
   };
   /** A adenda pelo número, ou (sem ele) a primeira do negócio que satisfaz `cond` (as ações do Hoje só levam o negócio). */
   const adendaDe = (d: Negocio, n: string | undefined, cond: (a: Adenda) => boolean): Adenda | undefined =>
@@ -2184,7 +2213,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 22/10: o €/h é o do perfil escolhido (a média dos técnicos dele no RH), não 25 €/h fixos
       const hp = horaDoPerfil(S, x.perfil);
       S.svc[sid] = { n: x.n.trim(), un: "vg", h: r2(x.h), eh: hp.eh, eq: 0, cons, preco: r2(x.preco), perfil: x.perfil, ...(hp.perfilId ? { perfilId: hp.perfilId } : {}), ...(hp.semCusto ? { semCusto: true } : {}) };
-      linhas.push({ sid, n: x.n.trim(), un: "vg", q: 1, pu: r2(x.preco), h: r2(x.h), perfil: x.perfil, ...(hp.perfilId ? { perfilId: hp.perfilId } : {}), livre: true, mats: x.mats.map((m) => ({ ...m })) });
+      // 19/11 (auditoria): a linha livre é mão de obra (6%); os materiais dela vão à parte, a 23% (totaisLinhas)
+      linhas.push({ sid, n: x.n.trim(), un: "vg", q: 1, pu: r2(x.preco), h: r2(x.h), perfil: x.perfil, ...(hp.perfilId ? { perfilId: hp.perfilId } : {}), livre: true, mats: x.mats.map((m) => ({ ...m })), iva: 6 });
     });
     return linhas;
   };
@@ -2479,7 +2509,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         // 22/10 (fase 2): as linhas como foram enviadas (com o custo congelado) e o desconto
         linhas: structuredClone(o.linhas), desconto: o.desconto });
       if (o.contrato === "enviado") log(d, "Contrato CT 2026/" + d.id + " anulado (a proposta vai mudar)", "w");
-      o.enviada = null; o.verif = false; o.aprov = null; o.aceite = null; o.contrato = null; o.pedidoCliente = null;
+      o.enviada = null; o.verif = false; o.aprov = null; o.aceite = null; o.contrato = null; o.pedidoCliente = null; delete o.totalAceite;
       const porque = [...motivos, nota.trim()].filter(Boolean).join(", ").toLowerCase();
       log(d, `Proposta v${n} substituída${!porque ? "" : motivos.includes(MOTIVO_MEDIDAS) ? ": " + porque : ": o cliente pediu " + porque}`, "w");
       if (onde === "visita") {
@@ -2501,22 +2531,30 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const desc = 1 - (o.desconto || 0) / 100;
       const A0 = orcamentoRefeito(d, S), B0 = orcamentoRefeito(d, S, medidasRetificadas(d));
       // os serviços: a quantidade a mais de cada um, ao preço por unidade da proposta
-      const qtd = (x: Negocio) => { const m = new Map<string, { q: number; pu: number }>(); for (const l of x.orc!.linhas) if (l.t === "svc") { const y = m.get(l.sid) ?? { q: 0, pu: l.pu }; y.q += l.q; m.set(l.sid, y); } return m; };
-      const qa = qtd(A0), qb = qtd(B0), itens: { sid: string; q: number }[] = [], puDe = new Map<string, number>();
-      for (const [sid, b] of qb) { const dq = r2(b.q - (qa.get(sid)?.q ?? 0)); if (dq > 0.001) { itens.push({ sid, q: dq }); puDe.set(sid, b.pu); } }
+      // 19/11 (auditoria): com a taxa de IVA da linha do orçamento (ivaDaLinha), como na proposta
+      const qtd = (x: Negocio) => { const m = new Map<string, { q: number; pu: number; iva: TaxaIva }>(); for (const l of x.orc!.linhas) if (l.t === "svc") { const y = m.get(l.sid) ?? { q: 0, pu: l.pu, iva: ivaDaLinha(l, S) }; y.q += l.q; m.set(l.sid, y); } return m; };
+      const qa = qtd(A0), qb = qtd(B0), itens: { sid: string; q: number }[] = [], puDe = new Map<string, number>(), ivaDe = new Map<string, TaxaIva>();
+      for (const [sid, b] of qb) { const dq = r2(b.q - (qa.get(sid)?.q ?? 0)); if (dq > 0.001) { itens.push({ sid, q: dq }); puDe.set(sid, b.pu); ivaDe.set(sid, b.iva); } }
       // os produtos (e o que não é serviço): só o valor a mais
       const mi = impactoDasMedidas(d, S, medidasRetificadas(d));
       const prods = (mi?.linhas ?? []).filter((x) => x.tipo !== "servico" && x.v > 0.005);
       const pi = impactoDoPlano(d, S);
+      // a taxa de cada linha que não é serviço (os produtos e o resto), pela linha do orçamento refeito (por omissão, 23%)
+      const ivaOutro = new Map<string, TaxaIva>();
+      for (const x of [A0, B0]) for (const l of x.orc!.linhas) if (l.t === "mat") ivaOutro.set(`m:${l.d}`, ivaDaLinha(l, S));
       const livres: LinhaLivre[] = pi.horas > 0.001 && pi.valor > 0.005 ? [{ n: LINHA_ACERTO_PLANO, h: r2(pi.horas), preco: r2(pi.valor / desc), perfil: S.svc[d.obra.plano?.tasks[0]?.svcs[0] ?? ""]?.perfil ?? "", mats: [] }] : [];
       const n = A.criarAdenda(id, itens, MOTIVO_ACERTO, { livres, ...(o.desconto ? { desconto: o.desconto } : {}) });
       const a = n ? d.adendas?.find((x) => x.n === n) : undefined;
       if (a) {
-        for (const l of a.linhas) { const pu = puDe.get(l.sid); if (pu != null && !l.livre) l.pu = r2(pu); }
-        if (prods.length) {
-          const sid = `livre-${d.id}-${d.adendas!.length}-p`, v = r2(prods.reduce((s, x) => s + x.v, 0) / desc), nome = `${LINHA_ACERTO_PRODUTOS}: ${prods.map((x) => `${x.n} ${x.de} → ${x.para}`).join("; ")}`;
-          S.svc[sid] = { n: nome, un: "vg", h: 0, eh: 0, eq: 0, cons: 0, preco: v, perfil: "" };
-          a.linhas.push({ sid, n: nome, un: "vg", q: 1, pu: v, h: 0, perfil: "", livre: true });
+        for (const l of a.linhas) { const pu = puDe.get(l.sid); if (pu != null && !l.livre) { l.pu = r2(pu); l.iva = ivaDe.get(l.sid) ?? l.iva; } }
+        // 19/11 (auditoria): os produtos a mais a 23% (antes, a linha livre contava toda a 6%, como mão de obra); o que tiver outra taxa
+        // na linha do orçamento vai numa linha à parte, com a dela
+        for (const taxa of [23, 6] as const) {
+          const P = prods.filter((x) => (ivaOutro.get(x.k) ?? 23) === taxa);
+          if (!P.length) continue;
+          const sid = `livre-${d.id}-${d.adendas!.length}-p${taxa === 23 ? "" : "6"}`, v = r2(P.reduce((s, x) => s + x.v, 0) / desc), nome = `${LINHA_ACERTO_PRODUTOS}: ${P.map((x) => `${x.n} ${x.de} → ${x.para}`).join("; ")}`;
+          S.svc[sid] = { n: nome, un: "vg", h: 0, eh: 0, eq: 0, cons: 0, preco: v, perfil: "", iva: taxa };
+          a.linhas.push({ sid, n: nome, un: "vg", q: 1, pu: v, h: 0, perfil: "", livre: true, iva: taxa });
         }
       } else if (!n && prods.length + itens.length + livres.length === 0) {
         avisar({ msg: "Nada a cobrar a mais", sub: "As medidas ou o plano baixam o valor: dê o desconto ao cliente fora da adenda, ou siga sem adenda", kind: "bad" });
@@ -2550,15 +2588,54 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       ecSePronta(d, "Emitida com a nota de crédito registada");
       return true;
     },
-    /** 12/11: o comercial decide que o acerto não se cobra (a diferença é pequena, ou desce): fica registado e o negócio segue. */
-    semAdendaDoValor(id: number) {
-      if (!exigePerm("orcamento.editar")) return;
+    /** 12/11: o comercial decide que o acerto não se cobra (a diferença é pequena, ou desce): fica registado e o negócio segue.
+     *  19/11 (auditoria): com a margem do orçamento refeito abaixo do mínimo (margemSemAdenda), como no envio da proposta, só com a Direção:
+     *  quem não aprova margens pede a aprovação (aprovarSemAdenda); a Direção decide logo. Fica registado quem decidiu. Devolve se seguiu. */
+    semAdendaDoValor(id: number): boolean {
+      if (!exigePerm("orcamento.editar")) return false;
       const d = deal(id);
-      if (!acertoDoValorPendente(d)) return;
+      if (!acertoDoValorPendente(d)) return false;
+      const M = margemSemAdenda(d, S);
+      if (M?.abaixo && d.f.acerto_sem_adenda_aprov !== "ok" && !podeNeg(S.role, "margin.approve")) {
+        if (d.f.acerto_sem_adenda_aprov !== "pedida") {
+          d.f.acerto_sem_adenda_aprov = "pedida";
+          log(d, `Seguir sem adenda: pedida aprovação à Direção (${PAPEIS[S.role].n}) · margem ${pct(M.m)} com as medidas novas, mínimo ${S.cfg.min}%`, "w");
+        }
+        avisar({ msg: "Pedido enviado à Direção", sub: `Sem adenda, a margem fica em ${pct(M.m)} (mínimo ${S.cfg.min}%). Aparece no Hoje da Direção.`, kind: "" });
+        return false;
+      }
+      const porDirecao = !!M?.abaixo && d.f.acerto_sem_adenda_aprov !== "ok";
       d.f.acerto_valor = "sem adenda";
-      log(d, `Sem adenda do acerto (${PAPEIS[S.role].n}): ${mudancasDeValor(d).join("; ")}`, "w");
+      d.f.acerto_sem_adenda_por = PAPEIS[S.role].n;
+      if (porDirecao) d.f.acerto_sem_adenda_aprov = "ok";
+      log(d, `Sem adenda do acerto (${PAPEIS[S.role].n}${porDirecao ? ", com a margem abaixo do mínimo: decisão da Direção" : ""}): ${mudancasDeValor(d).join("; ")}${M ? ` · margem ${pct(M.m)}` : ""}`, "w");
       avisar({ msg: "Segue sem acerto", sub: "O valor fica o da proposta aceite", kind: "ok" });
       ecSePronta(d, "Emitida sem acerto do valor");
+      return true;
+    },
+    /** 19/11 (auditoria): a Direção aprova seguir sem adenda (a margem com as medidas novas fica abaixo do mínimo): o negócio segue. */
+    aprovarSemAdenda(id: number): boolean {
+      if (!exigePerm("margin.approve")) return false;
+      const d = deal(id);
+      if (!acertoDoValorPendente(d) || d.f.acerto_sem_adenda_aprov !== "pedida") return false;
+      d.f.acerto_sem_adenda_aprov = "ok";
+      d.f.acerto_valor = "sem adenda";
+      d.f.acerto_sem_adenda_por = PAPEIS[S.role].n;
+      const M = margemSemAdenda(d, S);
+      log(d, `Sem adenda do acerto: aprovado pela Direção (${PAPEIS[S.role].n})${M ? ` · margem ${pct(M.m)}, mínimo ${S.cfg.min}%` : ""}: ${mudancasDeValor(d).join("; ")}`, "w");
+      avisar({ msg: "Aprovado: segue sem acerto", sub: "O valor fica o da proposta aceite", kind: "ok" });
+      ecSePronta(d, "Emitida sem acerto do valor");
+      return true;
+    },
+    /** 19/11 (auditoria): a Direção recusa seguir sem adenda: o comercial prepara a adenda do acerto (ou ajusta). */
+    recusarSemAdenda(id: number): boolean {
+      if (!exigePerm("margin.approve")) return false;
+      const d = deal(id);
+      if (d.f.acerto_sem_adenda_aprov !== "pedida") return false;
+      delete d.f.acerto_sem_adenda_aprov;
+      log(d, `Seguir sem adenda recusado pela Direção (${PAPEIS[S.role].n}): o acerto faz-se numa adenda`, "x");
+      avisar({ msg: "Recusado", sub: "O comercial prepara a adenda do acerto", kind: "bad" });
+      return true;
     },
     /** 21/10: a versão nova faz-se num só sítio: mexer nos produtos da visita refaz o orçamento logo (sem voltar à visita);
      *  os preços, o desconto e as linhas à mão mantêm-se (preservarManuais). Só com a proposta por enviar. */
@@ -2839,6 +2916,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     aceitar(id: number) {
       const d = deal(id); d.orc!.aceite = "hoje"; d.orc!.pedidoCliente = null; log(d, "O cliente aceitou a proposta no portal");
+      // 19/11 (auditoria): a taxa de IVA de cada linha e os totais da versão aceite ficam congelados (não mudam com o Catálogo)
+      congelarProposta(d, S, d.orc!.enviada && d.orc!.enviada !== "hoje" ? d.orc!.enviada : agora());
+      congelarTotalAceite(d, S);
       // 12/11 (Rúben: «a validação das medidas e do plano da obra só vêm depois do Financeiro»): aceite, passa logo a Financeiro (fatura e
       // pagamento). O plano nasce já do orçamento, por aprovar, mas as medidas e a aprovação esperam pelo pagamento validado (na Obra).
       criarCliente(S, d);
@@ -4368,27 +4448,25 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const pr = deal(id).obra.problemas?.find((x) => x.id === pid);
       if (pr?.resposta && !pr.respondida) pr.respondida = agora();
     },
-    /** O Financeiro emite a fatura da 1.ª parcela de cada adenda assinada sem faturas (vai para o portal do cliente, que paga com o método
-     *  que escolher). 21/10 (decisão C): as parcelas são as do contrato; as seguintes emitem-se no Financeiro do negócio (faturarParcelaAdenda). */
+    /** 19/11 (auditoria): a Olyvia não emite faturas das adendas (antes, na versão «Atual», inventava «FT 2026/n» com um contador do
+     *  browser). Emitem-se no Eticadata e registam-se com o número (registarFaturaAdenda), como as parcelas do contrato. Fica a recusa,
+     *  para quem ainda a chamar. */
     faturarAdendas(id: number, n?: string) {
-      const d = deal(id);
       if (!exigePerm("finance.invoice")) return;
-      if (lerVersao() !== "atual") { avisar({ msg: "A fatura não se emite na Olyvia", sub: "Emita-a no programa de faturação certificado", kind: "bad" }); return; }
-      // 22/10: com o número (o passo ft-ad-<n>, o Financeiro da adenda), só a dessa adenda; sem ele, todas as por faturar
-      const F = porFaturar(d).filter((a) => !n || a.n === n).map((a) => emitirParcela(d, a, "FT 2026/" + S.ft++, false)).filter((x): x is FaturaAdenda => !!x);
-      if (F.length) avisar({ msg: F.length === 1 ? `${F[0].n} emitida` : `${F.length} faturas emitidas`, sub: "Da adenda · enviada ao portal do cliente", kind: "ok" });
+      avisar({ msg: "A Olyvia não emite faturas", sub: "Emita a fatura da adenda no Eticadata e registe o número no negócio («Registar a fatura»)", kind: "bad" });
+      void id; void n;
     },
-    /** 21/10 (decisão C): a fatura da parcela seguinte da adenda (pela ordem; como no contrato, a final no fim da obra). */
+    /** 19/11 (auditoria): como faturarAdendas, recusa: a fatura de cada parcela regista-se com o número do Eticadata. */
     faturarParcelaAdenda(id: number, n: string) {
-      const d = deal(id), a = d.adendas?.find((x) => x.n === n);
       if (!exigePerm("finance.invoice")) return;
-      if (lerVersao() !== "atual") { avisar({ msg: "A fatura não se emite na Olyvia", sub: "Emita-a no programa de faturação certificado", kind: "bad" }); return; }
-      if (!a) return;
-      // 21/10: como no contrato: as seguintes só depois de paga a 1.ª; a do fim da obra só com a obra concluída (adendas.ts: parcelaFaturavel)
-      const pf = parcelaFaturavel(d, a);
-      if (pf.motivo) { if (pf.p) avisar({ msg: `A ${nomeParcela(pf.p.i)} ainda não se fatura`, sub: `Adenda ${a.n} · ${pf.motivo}`, kind: "bad" }); return; }
-      const f = emitirParcela(d, a, "FT 2026/" + S.ft++, false);
-      if (f) avisar({ msg: `${f.n} emitida`, sub: `Adenda ${a.n} · ${nomeParcela(f.i)} · enviada ao portal do cliente`, kind: "ok" });
+      avisar({ msg: "A Olyvia não emite faturas", sub: "Emita a fatura da adenda no Eticadata e registe o número no negócio («Registar a fatura»)", kind: "bad" });
+      void id; void n;
+    },
+    /** 19/11 (auditoria): o passo «Registar a fatura» de uma adenda (Hoje do Financeiro): abre o negócio no sítio onde se escreve o número. */
+    abrirFaturaAdenda(id: number, n?: string) {
+      const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "assinada" && !!proximaParcela(d, x));
+      S.view = "negocio"; S.deal = id; S.confirmPerda = null;
+      S.pulse = a ? alvoFaturaAdenda(a.n) : null;
     },
     /** O Financeiro confirma que o pagamento de uma fatura de adenda entrou: sai o recibo. 21/10: como `validar` no contrato, não espera
      *  pelo aviso do cliente no portal (o aviso só informa): valida a fatura mais antiga por pagar, pela ordem das parcelas (a 1.ª antes de
@@ -4425,14 +4503,27 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!d.obra.ec?.ref) { avisar({ msg: "Primeiro, a encomenda de cliente inicial", sub: "A das adendas pagas emite-se logo a seguir a ela", kind: "bad" }); return; }
       if (!encomendarAdendas(d)) avisar({ msg: "Nada por encomendar", sub: "As adendas pagas já têm a encomenda no Inventário", kind: "" });
     },
-    /** V2 (21/10): regista a fatura da parcela seguinte da adenda, emitida no programa certificado (a Olyvia não emite faturas na V2). */
-    registarFaturaAdenda(id: number, n: string, numero: string): boolean {
+    /** A fatura da parcela seguinte da adenda, emitida no Eticadata e registada aqui com o número (21/10: só na V2; 19/11, auditoria: em
+     *  todas as versões, como as parcelas do contrato). `info` é a leitura do ERP (RegistarFaturaAdendaErp): null, sem ligação. */
+    registarFaturaAdenda(id: number, n: string, numero: string, info?: InfoErp | null): boolean {
       const d = deal(id), a = d.adendas?.find((x) => x.n === n);
       if (!exigePerm("finance.invoice")) return false;
-      if (!a || !numero.trim()) return false;
+      const num = numero.trim().replace(/\s+/g, " ");
+      if (!a) return false;
+      if (!num) { avisar({ msg: "Escreva o número da fatura", sub: "Como aparece no Eticadata", kind: "bad" }); return false; }
       const pf = parcelaFaturavel(d, a);
       if (pf.motivo) { if (pf.p) avisar({ msg: `A ${nomeParcela(pf.p.i)} ainda não se regista`, sub: `Adenda ${a.n} · ${pf.motivo}`, kind: "bad" }); return false; }
-      return !!emitirParcela(d, a, numero.trim(), true);
+      if (faturaJaRegistada(d, num)) { avisar({ msg: `A fatura ${num} já está registada`, sub: "Cada parcela tem a sua fatura", kind: "bad" }); return false; }
+      if (info?.estado === "anulada") { avisar({ msg: `A fatura ${num} está anulada no Eticadata`, sub: "Registe a fatura em vigor", kind: "bad" }); return false; }
+      const f = registarParcela(d, a, num, info);
+      if (!f) return false;
+      if (info) lembrarErp(num, info);
+      avisar({ msg: `Fatura ${num} registada`, sub: `Adenda ${a.n} · ${nomeParcela(f.i)} · ${info ? "no Eticadata: " + resumoErp(info) : info === null ? "sem ligação ao Eticadata: valide o pagamento à mão" : "vai para o portal do cliente"}`, kind: "ok" });
+      if (info && Math.abs(info.total - f.v) > 0.01)
+        avisar({ msg: `O total da ${num} no Eticadata não é o da parcela`, sub: `ERP: ${eur(info.total)} € · ${nomeParcela(f.i)} da adenda ${a.n}: ${eur(f.v)} €. Confirme o número da fatura.`, kind: "bad", atraso: 400 });
+      if (info && nifDiferente(d, info))
+        avisar({ msg: "O NIF da fatura no ERP não é o do negócio", sub: `ERP: ${info.nif} · negócio: ${d.f.nif_fat}. Confirme o número da fatura.`, kind: "bad", atraso: 400 });
+      return true;
     },
     aprender(id: number) {
       const d = deal(id); const s = S.svc.revest; const old = s.h; s.h = r2(s.h * REAL.revest); d.obra.aprendido = true;

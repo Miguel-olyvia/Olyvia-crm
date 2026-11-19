@@ -11,7 +11,8 @@ export function normalParaComparar(d0: Negocio, HOJE: Date): unknown {
   delete d.fresh; delete d.valida; delete d.atraso; delete d.acesso;
   d.obra = { plano: null, mats: null, real: null, aprendido: false };
   d.quando = q(d.quando);
-  d.hist = d.hist.map((e) => ({ ...e, q: q(e.q) }));
+  // 19/11: o autor volta sempre (vazio quando não se sabe: deLinhas, 3/11)
+  d.hist = d.hist.map((e) => ({ ...e, q: q(e.q), quem: e.quem ?? "" }));
   if (d.anulado) d.anulado.q = q(d.anulado.q);
   delete (d.fin as Record<string, unknown>).erp;
   if (d.fin.fatura) d.fin.fatura.q = q(d.fin.fatura.q);

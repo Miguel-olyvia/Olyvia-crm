@@ -1,8 +1,8 @@
 // 21/10/2026 (decisão B): a adenda assinada junta as tarefas ao plano, mas os materiais dela só vão para o Inventário quando o Financeiro
 // valida o pagamento DESSA adenda (como no contrato). Testado pelos ecrãs: Do contrato à obra (bolinhas por adenda nos Materiais e no Plano,
 // a lista para arrancar), o Financeiro (fatura e pagamento da adenda), o portal do cliente (paga), os Materiais, a nota de encomenda e o Hoje.
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { eur, minhas, seed, type Estado, type Negocio } from "./motor";
 import { FINANCEIRO, OBRA, emFalta, type Grupo } from "./campos";
 import { esquecerInventario, lerInventario } from "./inventario/loja";
@@ -18,6 +18,10 @@ import { faltaParaArrancar } from "./preparacaoObra";
 import { receberTudo } from "./testeObra";
 import { totaisAdenda } from "./adendas";
 import { adendaAssinada } from "./testeAdenda";
+import { registarNoEcra } from "./testeFaturaAdenda";
+
+// 19/11 (auditoria): a fatura da adenda regista-se com o número do Eticadata; aqui o ERP não responde (regista-se sem confirmar)
+vi.mock("./erpEticadata", async (orig) => ({ ...(await orig<typeof import("./erpEticadata")>()), lerFaturaErp: vi.fn(async () => ({ ok: false, motivo: "sem_ligacao", msg: "Sem ligação ao Eticadata." })) }));
 
 afterEach(() => { cleanup(); localStorage.clear(); });
 beforeEach(() => { esquecerInventario(); });
@@ -65,7 +69,7 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     expect(within(condicoes()).getByText("Encomenda da adenda AD 2026/1027-1").closest("li")!.textContent).toMatch(/por fazer/);
   });
 
-  it("o gate antes do arranque inclui a adenda; o Financeiro fatura, o cliente paga no portal, o Financeiro valida e a EC-1027-A1 nasce ligada à adenda", () => {
+  it("o gate antes do arranque inclui a adenda; o Financeiro fatura, o cliente paga no portal, o Financeiro valida e a EC-1027-A1 nasce ligada à adenda", async () => {
     const { S, A, d } = preparar();
     A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
     expect(receberTudo("CT 2026/1027")).toBe("");
@@ -73,8 +77,8 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     expect(faltaParaArrancar(d)).toEqual([`faturar a 1.ª parcela da adenda ${N} e receber o pagamento`]);
     A.arrancar(d.id);
     expect(d.obra.plano!.estado).toBe("aprovado");
-    // o Hoje do Financeiro: emitir a fatura da adenda
-    expect(minhas(S, "financeiro").some((x) => x.d === d && x.p.act === "faturarAdendas")).toBe(true);
+    // o Hoje do Financeiro: registar a fatura da adenda (19/11: emitida no Eticadata; a Olyvia não a emite)
+    expect(minhas(S, "financeiro").some((x) => x.d === d && x.p.act === "abrirFaturaAdenda")).toBe(true);
 
     // o Financeiro, no passo Financeiro do negócio: a adenda com o valor com IVA, emite a fatura
     S.role = "financeiro";
@@ -82,10 +86,12 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     let bloco = screen.getByTestId(`fin-adenda-${N}`);
     expect(bloco.textContent).toContain(`${eur(totaisAdenda(d.adendas![0]).total)} € com IVA`);
     expect(bloco.textContent).toMatch(/Emite-se quando o pagamento da 1\.ª parcela da adenda for validado\./);
-    fireEvent.click(within(bloco).getByRole("button", { name: "Emitir a fatura" }));
+    expect(within(bloco).queryByRole("button", { name: "Emitir a fatura" })).toBeNull();
+    await registarNoEcra(bloco, "FAT 15200126/610");
     const a = d.adendas![0], ft = () => a.faturas![0];
-    // 21/10 (decisão C): a 1.ª parcela (50%, como no contrato)
-    expect(ft()).toMatchObject({ i: 0, p: 0.5, n: expect.stringMatching(/^FT 2026\//) });
+    await waitFor(() => expect(a.faturas?.length).toBe(1));
+    // 21/10 (decisão C): a 1.ª parcela (50%, como no contrato), com o número do Eticadata
+    expect(ft()).toMatchObject({ i: 0, p: 0.5, n: "FAT 15200126/610" });
     // 21/10: como no contrato, valida-se sem o aviso do cliente no portal (o aviso só informa)
     expect((within(bloco).getByRole("button", { name: "Validar o pagamento" }) as HTMLButtonElement).disabled).toBe(false);
     cleanup();
@@ -170,19 +176,18 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     expect(faltaParaArrancar(d).some((x) => /adenda/.test(x))).toBe(false);
   });
 
-  it("V2: o Financeiro regista a fatura da adenda (do programa certificado) no próprio Financeiro do negócio", () => {
+  it("V2: o Financeiro regista a fatura da adenda (do programa certificado) no próprio Financeiro do negócio", async () => {
     const { S, d } = preparar();
     localStorage.setItem(CHAVE_VERSAO, "1");
     S.role = "financeiro";
     render(<Montar S={S}>{(ctx) => <FinanceiroV2 {...ctx} d={d} />}</Montar>);
     const bloco = screen.getByTestId(`fin-adenda-${N}`);
     expect(within(bloco).queryByRole("button", { name: "Emitir a fatura" })).toBeNull();
-    fireEvent.change(within(bloco).getByLabelText(`Número da fatura da adenda ${N}`), { target: { value: "FT 2026/777" } });
-    fireEvent.click(within(bloco).getByRole("button", { name: "Registar a fatura" }));
-    expect(d.adendas![0].faturas![0].n).toBe("FT 2026/777");
+    await registarNoEcra(bloco, "FT 2026/777");
+    await waitFor(() => expect(d.adendas![0].faturas?.[0]?.n).toBe("FT 2026/777"));
     expect(bloco.textContent).toMatch(/Fatura FT 2026\/777 registada/);
-    // o Hoje da V2 diz para registar, sem o botão que emitiria
+    // o Hoje diz para registar e leva ao campo do número (19/11: igual em todas as versões; nunca um botão que emite)
     d.adendas![0].faturas = [];
-    expect(minhas(S, "financeiro").find((x) => x.d === d && x.p.t === "Registar a fatura da adenda")?.p.act).toBeUndefined();
+    expect(minhas(S, "financeiro").find((x) => x.d === d && x.p.t.startsWith("Registar a fatura da adenda"))?.p).toMatchObject({ act: "abrirFaturaAdenda", btn: "Registar a fatura" });
   });
 });

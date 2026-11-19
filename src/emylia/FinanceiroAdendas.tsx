@@ -1,15 +1,16 @@
 // As adendas no Financeiro do negócio (21/10/2026): cada adenda assinada fatura-se e paga-se nas mesmas parcelas do contrato
 // (decisão C: uma fatura por parcela, por omissão 50% na adjudicação + 50% no fim); com a 1.ª parcela paga, os materiais dela vão
 // numa encomenda própria para o Inventário (decisão B, como no contrato: nada se encomenda antes do pagamento).
-// As ações são as do motor (faturarAdendas / faturarParcelaAdenda, validarPagamentosAdenda; na V2, registarFaturaAdenda): aqui só se
-// desenha o caminho, um passo por parcela (a fatura e o pagamento) e a encomenda.
-import { useState, type ReactNode } from "react";
+// As ações são as do motor (registarFaturaAdenda, validarPagamentosAdenda): aqui só se desenha o caminho, um passo por parcela (a fatura e o
+// pagamento) e a encomenda. 19/11 (auditoria): a Olyvia não emite faturas em nenhuma versão: o número é o do Eticadata (RegistarFaturaAdendaErp).
+import type { ReactNode } from "react";
 import { Check, Circle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
-import { assinadas, faturaAValidar, nomeParcela, parcelaFaturavel, parcelasAdenda, primeiraPaga, proximaParcela, totaisAdenda, type Adenda, type ParcelaAdenda } from "./adendas";
+import { assinadas, faturaAValidar, nomeParcela, parcelaFaturavel, parcelasAdenda, primeiraPaga, proximaParcela, textoIvaPorTaxa, totaisAdenda } from "./adendas";
+import { RegistarFaturaAdendaErp } from "./FaturaErp";
 import { ecDaAdenda, porEncomendarDe } from "./encomendasAjuste";
 import { EC_ADENDA_NO_PAGAMENTO } from "./preparacaoObra";
 
@@ -29,22 +30,7 @@ function Passo({ feito, titulo, texto, children }: { feito: boolean; titulo: str
   );
 }
 
-/** V2: o número da fatura emitida no programa certificado, registado na Olyvia (a da parcela seguinte). */
-function RegistarFatura({ ctx, d, a, x }: { ctx: Ctx; d: Negocio; a: Adenda; x: ParcelaAdenda }) {
-  const [num, setNum] = useState("");
-  const id = `ft-ad-${a.n.replace(/\W/g, "")}-${x.i}`;
-  return (
-    <div className="mt-2 flex flex-wrap items-end gap-2">
-      <label htmlFor={id} className="text-sm">
-        <span className="block text-muted-foreground">Número da fatura da adenda {a.n}{x.i > 0 ? ` (${nomeParcela(x.i)})` : ""}</span>
-        <input id={id} value={num} onChange={(e) => setNum(e.target.value)} placeholder="FT 2026/…" className="mt-1 h-11 w-44 rounded-lg border border-input bg-card px-3 text-[15px]" />
-      </label>
-      <Button className="min-h-11" variant="outline" disabled={!num.trim()} onClick={() => ctx.run(() => { ctx.A.registarFaturaAdenda(d.id, a.n, num); })}>Registar a fatura</Button>
-    </div>
-  );
-}
-
-export function AdendasNoFinanceiro({ ctx, d, v2 = false }: { ctx: Ctx; d: Negocio; v2?: boolean }) {
+export function AdendasNoFinanceiro({ ctx, d }: { ctx: Ctx; d: Negocio; /** 19/11: já não muda nada (a fatura regista-se igual em todas as versões) */ v2?: boolean }) {
   const { S, A, go } = ctx;
   const L = assinadas(d);
   if (!L.length) return null;
@@ -61,16 +47,14 @@ export function AdendasNoFinanceiro({ ctx, d, v2 = false }: { ctx: Ctx; d: Negoc
         const fat = parcelaFaturavel(d, a), aValidar = faturaAValidar(a);
         return (
           <div key={a.n} className="rounded-2xl border border-border bg-card p-4" data-testid={`fin-adenda-${a.n}`}>
-            <p className="text-[15px] font-semibold">Adenda {a.n} <span className="font-normal tabular-nums text-muted-foreground">· {eur(T.total)} € com IVA ({eur(T.mo)} € de mão de obra + IVA a 6%{T.mat > 0 ? `, ${eur(T.mat)} € de materiais + IVA a 23%` : ""})</span></p>
+            <p className="text-[15px] font-semibold">Adenda {a.n} <span className="font-normal tabular-nums text-muted-foreground">· {eur(T.total)} € com IVA ({textoIvaPorTaxa(T)})</span></p>
             <ol className="mt-1 divide-y divide-border">
               {P.flatMap((x) => {
                 const f = x.ft, nome = `${nomeParcela(x.i)} (${x.l.toLowerCase()}, ${Math.round(x.p * 100)}%) · ${eur(x.v)} €`;
                 return [
-                  <Passo key={"f" + x.i} feito={!!f} titulo={f ? `Fatura ${f.n} ${v2 ? "registada" : "emitida"} · ${nomeParcela(x.i)}` : `${v2 ? "Registar" : "Emitir"} a fatura da ${nome}`}
-                    texto={f ? `A ${f.q}, no portal do cliente · ${eur(f.v)} €.` : prox?.i !== x.i ? "Depois da parcela anterior." : fat.motivo ? fat.motivo : v2 ? "Emita-a no programa de faturação certificado e registe-a aqui." : "Só o Financeiro emite. Vai para o portal do cliente."}>
-                    {!f && prox?.i === x.i && fin && (v2
-                      ? (fat.motivo ? null : <RegistarFatura ctx={ctx} d={d} a={a} x={x} />)
-                      : <Button size="sm" className="mt-2 min-h-10" disabled={!!fat.motivo} onClick={go(() => (x.i === 0 ? A.faturarAdendas(d.id, a.n) : A.faturarParcelaAdenda(d.id, a.n)))}>Emitir a fatura</Button>)}
+                  <Passo key={"f" + x.i} feito={!!f} titulo={f ? `Fatura ${f.n} registada · ${nomeParcela(x.i)}` : `Registar a fatura da ${nome}`}
+                    texto={f ? `A ${f.q}, no portal do cliente · ${eur(f.v)} €.` : prox?.i !== x.i ? "Depois da parcela anterior." : fat.motivo ? fat.motivo : "Emita-a no Eticadata e escreva aqui o número. Vai para o portal do cliente."}>
+                    {!f && prox?.i === x.i && fin && !fat.motivo && <RegistarFaturaAdendaErp ctx={ctx} d={d} a={a} i={x.i} />}
                   </Passo>,
                   <Passo key={"p" + x.i} feito={!!f?.recibo} titulo={f?.recibo ? `Pagamento validado · recibo ${f.recibo.n}` : `Validar o pagamento da ${nomeParcela(x.i)}`}
                     texto={f?.recibo ? `Confirmado a ${f.recibo.q}${f.pag?.comprovativo ? " · " + f.pag.comprovativo : ""}.` : !f ? "Depois da fatura."

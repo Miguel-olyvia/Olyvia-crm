@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   FASES, LINHAS, PAPEIS, nomeLinha, visitaFeita, visitas,
-  acertoDoValorPendente, adendaDoAcerto, retificacaoPorPagar, alertas, bloqueado, camposMedida, mudancasDeValor, impactoDasMedidas, impactoDoPlano, medidasRetificadas, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
+  acertoDoValorPendente, adendaDoAcerto, margemSemAdenda, retificacaoPorPagar, alertas, bloqueado, camposMedida, mudancasDeValor, impactoDasMedidas, impactoDoPlano, medidasRetificadas, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
   SEM_ORCAMENTO, semOrcamento,
 } from "./motor";
@@ -984,6 +984,26 @@ function OutraData({ INP, ROT, marcar }: { INP: string; ROT: string; marcar: (sl
   );
 }
 
+/** 19/11 (auditoria): «Seguir sem adenda» com a margem abaixo do mínimo (margemSemAdenda) espera pela Direção: diz-se antes de carregar,
+ *  e o pedido fica à vista; a Direção aprova ou recusa aqui. */
+function SemAdendaDirecao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+  const M = margemSemAdenda(d, ctx.S), pedida = d.f.acerto_sem_adenda_aprov === "pedida", direcao = podeNeg(ctx.S.role, "margin.approve");
+  if (!M?.abaixo && !pedida) return null;
+  const margem = M ? `Sem adenda, a margem fica em ${pct(M.m)} com as medidas novas (mínimo ${ctx.S.cfg.min}%).` : "";
+  if (!pedida) return <p className="text-sm text-muted-foreground">{margem} {direcao ? "Seguir sem adenda fica como decisão da Direção." : "Seguir sem adenda pede a aprovação da Direção."}</p>;
+  return (
+    <div className="space-y-2 rounded-xl bg-warning/10 px-3 py-2 text-[15px]" role="status">
+      <p>{margem} À espera da Direção para seguir sem adenda.</p>
+      {direcao
+        ? <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" className="min-h-10" onClick={() => ctx.run(() => { ctx.A.aprovarSemAdenda(d.id); })}>Aprovar sem adenda</Button>
+            <Button type="button" size="sm" variant="outline" className="min-h-10" onClick={() => ctx.run(() => { ctx.A.recusarSemAdenda(d.id); })}>Recusar</Button>
+          </div>
+        : <button type="button" className="text-sm font-medium text-primary underline-offset-4 hover:underline" onClick={() => ctx.run(() => ctx.A.role("direcao"))}>Mudar para {PAPEIS.direcao.n}</button>}
+    </div>
+  );
+}
+
 /** 12/11 (Rúben: as medidas e o plano depois do Financeiro; se mudarem o valor, «adenda»): com o contrato assinado, o que mudou o valor, os
  *  euros, e a adenda do acerto (preparar, ou seguir sem ela). Preparada, mostra a adenda com as ações dela (verificar, enviar...). */
 function AcertoDoValor({ ctx, d }: { ctx: Ctx; d: Negocio }) {
@@ -1009,8 +1029,9 @@ function AcertoDoValor({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <Button type="button" className="min-h-11" disabled={!pode} onClick={() => ctx.run(() => { ctx.A.adendaDoValor(d.id); })}>Preparar a adenda</Button>
-          <Button type="button" variant="ghost" className="min-h-11" disabled={!pode} onClick={() => ctx.run(() => ctx.A.semAdendaDoValor(d.id))}>Seguir sem adenda</Button>
+          <Button type="button" variant="ghost" className="min-h-11" disabled={!pode || d.f.acerto_sem_adenda_aprov === "pedida"} onClick={() => ctx.run(() => { ctx.A.semAdendaDoValor(d.id); })}>Seguir sem adenda</Button>
         </div>
+        <SemAdendaDirecao ctx={ctx} d={d} />
         {!pode && <p className="text-sm text-muted-foreground">Quem prepara a adenda é o comercial. <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={() => ctx.run(() => ctx.A.role("comercial"))}>Mudar para {PAPEIS.comercial.n}</button></p>}
       </>}
     </section>
@@ -1038,8 +1059,9 @@ export function NotaDeCredito({ ctx, d, R, dif, podeComercial }: { ctx: Ctx; d: 
             className="min-h-11 w-56 rounded-lg border border-input bg-background px-3 text-[15px] disabled:opacity-50" />
         </label>
         <Button type="submit" className="min-h-11" disabled={!podeFin || !numero.trim()}>Registar nota de crédito</Button>
-        {podeComercial && <Button type="button" variant="ghost" className="min-h-11" onClick={() => ctx.run(() => ctx.A.semAdendaDoValor(d.id))}>Seguir sem acerto</Button>}
+        {podeComercial && <Button type="button" variant="ghost" className="min-h-11" disabled={d.f.acerto_sem_adenda_aprov === "pedida"} onClick={() => ctx.run(() => { ctx.A.semAdendaDoValor(d.id); })}>Seguir sem acerto</Button>}
       </form>
+      <SemAdendaDirecao ctx={ctx} d={d} />
       {!podeFin && <p className="text-sm text-muted-foreground">Quem regista a nota de crédito é o Financeiro.</p>}
     </section>
   );

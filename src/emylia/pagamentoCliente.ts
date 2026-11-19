@@ -5,9 +5,12 @@
 import { useSyncExternalStore } from "react";
 
 /** 4/11: os dados da empresa para o cliente pagar (negocio_dados_pagamento, 20270106700000). Um campo vazio é nulo. */
-export interface DadosPagamento { titular: string | null; iban: string | null; mbEntidade: string | null; mbway: string | null; sepaCredor: string | null }
+export interface DadosPagamento { titular: string | null; iban: string | null; mbEntidade: string | null; mbway: string | null; sepaCredor: string | null;
+  /** 19/11 (auditoria): o prestador de pagamentos que gera as referências Multibanco (ex.: SIBS, Easypay, ifthenpay). A base ainda não o
+   *  tem (mb_prestador): até haver um, a referência Multibanco não se mostra (a que a Olyvia gera aqui é de teste, não se paga). */
+  mbPrestador?: string | null }
 
-/** Os de exemplo, só para o protótipo (e os testes): no CRM real e no portal vêm da base. */
+/** Os de exemplo, só para o protótipo (e os testes): no CRM real e no portal vêm da base. 19/11: sem prestador, sem referência Multibanco. */
 export const PAGAMENTO_EXEMPLO: DadosPagamento = { titular: "Mudelar, Lda.", iban: "PT50 0035 0000 1234 5678 9015 4", mbEntidade: "21312", mbway: "912 345 678", sepaCredor: "PT12ZZZ123456" };
 
 const txt = (v: unknown) => (typeof v === "string" && v.trim() ? v.trim() : null);
@@ -16,7 +19,10 @@ export function lerDadosPagamento(raw: unknown): DadosPagamento | null {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
   const d = { titular: txt(r.titular), iban: txt(r.iban), mbEntidade: txt(r.mb_entidade), mbway: txt(r.mbway), sepaCredor: txt(r.sepa_credor) };
-  return Object.values(d).some(Boolean) ? d : null;
+  if (!Object.values(d).some(Boolean)) return null;
+  // 19/11 (auditoria): o prestador só quando a base o tiver (a coluna mb_prestador ainda não existe)
+  const mbPrestador = txt(r.mb_prestador);
+  return mbPrestador ? { ...d, mbPrestador } : d;
 }
 /** Para gravar (neg_dados_pagamento_guardar). */
 export const paraGravar = (d: DadosPagamento) => ({ titular: d.titular ?? "", iban: d.iban ?? "", mb_entidade: d.mbEntidade ?? "", mbway: d.mbway ?? "", sepa_credor: d.sepaCredor ?? "" });
@@ -64,9 +70,13 @@ export const METODOS_PAGAMENTO = ["Transferência", "Referência MB", "MB Way", 
 export type MetodoPagamento = (typeof METODOS_PAGAMENTO)[number];
 /** O método guardado no negócio, ou a transferência quando ainda não há escolha (ou era um método antigo, ex.: cheque). */
 export const metodoDe = (m?: string): MetodoPagamento => (METODOS_PAGAMENTO as readonly string[]).includes(m ?? "") ? (m as MetodoPagamento) : "Transferência";
-/** As formas que a empresa pode receber: a transferência está sempre (sem IBAN, o portal diz que falta); as outras só com os seus dados. */
+/** 19/11 (auditoria): a referência Multibanco só com um prestador de pagamentos configurado (que gera referências a sério) e a entidade.
+ *  Sem ele, a que a Olyvia gera (referenciaMb) é de teste: mostrá-la ao cliente como real levava-o a pagar para uma referência que não existe. */
+export const mbDisponivel = (d: DadosPagamento | null | undefined): boolean => !!d?.mbEntidade && !!d?.mbPrestador;
+/** As formas que a empresa pode receber: a transferência está sempre (sem IBAN, o portal diz que falta); as outras só com os seus dados.
+ *  19/11 (auditoria): a referência Multibanco só com o prestador (mbDisponivel). */
 export const metodosDe = (d: DadosPagamento | null): MetodoPagamento[] => METODOS_PAGAMENTO.filter((m) =>
-  m === "Transferência" || (m === "Referência MB" ? !!d?.mbEntidade : m === "MB Way" ? !!d?.mbway : !!d?.sepaCredor));
+  m === "Transferência" || (m === "Referência MB" ? mbDisponivel(d) : m === "MB Way" ? !!d?.mbway : !!d?.sepaCredor));
 
 /** Um IBAN português para o débito direto: PT50 e 21 dígitos (espaços à parte). */
 export const ibanValido = (iban: string) => /^PT50\d{21}$/.test(iban.replace(/\s/g, "").toUpperCase());

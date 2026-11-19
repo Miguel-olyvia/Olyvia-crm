@@ -72,7 +72,7 @@ describe("1. «O cliente pediu»: paga o cliente", () => {
     expect(percursoAdenda(d, a)).toMatchObject({ t: "Assinada · fatura por emitir", quem: "Financeiro" });
     // o fluxo de pagamento da adenda: a 1.ª parcela faturada e paga
     A.role("financeiro");
-    A.faturarParcelaAdenda(d.id, n);
+    A.registarFaturaAdenda(d.id, n, "FAT TESTE/QP1");
     expect(percursoAdenda(d, a).t).toMatch(/por pagar \(1\.ª parcela\)/);
     A.validarPagamentosAdenda(d.id, n);
     expect(percursoAdenda(d, a).i).toBeGreaterThanOrEqual(3);
