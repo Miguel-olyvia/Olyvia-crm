@@ -21,7 +21,7 @@ import {
   MOTIVOS_ADENDA, adendaBloqueada, alertasAdenda, diasAdenda, estadoAdenda, faturaAValidar, nomeParcela, parcelaFaturavel, parcelasAdenda, previsaoLinha, primeiraPaga, proximaParcela,
   totaisAdenda, totaisLinhas, valorContrato, versaoAdenda, type Adenda, type LinhaAdenda,
 } from "./adendas";
-import { lerVersao } from "./versaoPrototipo";
+import { RegistarFaturaAdendaErp } from "./FaturaErp";
 
 /** 21/10: o próximo passo de uma adenda (o comercial, a Direção, o Jurídico) e os do cliente, simulados no protótipo.
  *  Serve o cartão dos Trabalhos a mais e o do imprevisto (ImprevistosObra.tsx). */
@@ -70,7 +70,7 @@ export function AcoesAdenda({ ctx, d, a, editar }: { ctx: Ctx; d: Negocio; a: Ad
 /** As parcelas da adenda (as mesmas do contrato): a fatura e o pagamento de cada uma. */
 function ParcelasAdenda({ ctx, d, a }: { ctx: Ctx; d: Negocio; a: Adenda }) {
   const { S, A, go } = ctx;
-  const P = parcelasAdenda(d, a), prox = proximaParcela(d, a), fin = S.role === "financeiro", atual = lerVersao() === "atual";
+  const P = parcelasAdenda(d, a), prox = proximaParcela(d, a), fin = S.role === "financeiro";
   // 21/10: como no contrato: a seguinte só depois de paga a 1.ª (a do fim, com a obra concluída); valida-se pela ordem das parcelas
   const fat = parcelaFaturavel(d, a), aValidar = faturaAValidar(a);
   return (
@@ -80,7 +80,8 @@ function ParcelasAdenda({ ctx, d, a }: { ctx: Ctx; d: Negocio; a: Adenda }) {
           {nomeParcela(x.i)} ({x.l.toLowerCase()}, {Math.round(x.p * 100)}%) · {eur(x.v)} €: {x.ft ? (x.ft.recibo ? `${x.ft.n}, paga (${x.ft.recibo.n})` : `${x.ft.n}, ${x.ft.pag?.comprovativo ? `o cliente avisou: ${x.ft.pag.comprovativo}` : "por pagar no portal"}`) : "por faturar"}
         </p>
       ))}
-      {fin && atual && prox && <Button size="sm" className="min-h-10" disabled={!!fat.motivo} onClick={go(() => (prox.i === 0 ? A.faturarAdendas(d.id, a.n) : A.faturarParcelaAdenda(d.id, a.n)))}>Emitir a fatura da {nomeParcela(prox.i)}</Button>}
+      {/* 19/11 (auditoria): a Olyvia não emite a fatura: escreve-se o número do Eticadata, confirma-se no ERP e regista-se (como no contrato) */}
+      {fin && prox && !fat.motivo && <RegistarFaturaAdendaErp ctx={ctx} d={d} a={a} i={prox.i} />}
       {fin && aValidar.f && <Button size="sm" className="ml-2 min-h-10" onClick={go(() => A.validarPagamentosAdenda(d.id, a.n))}>Validar o pagamento</Button>}
       {fin && prox && fat.motivo && <p className="text-sm text-muted-foreground">{nomeParcela(prox.i)}: {fat.motivo.replace(/^./, (c) => c.toLowerCase())}</p>}
     </div>

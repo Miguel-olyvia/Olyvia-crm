@@ -24,7 +24,7 @@ import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
 import { PAGAMENTO_FASES, PAGAMENTO_MEDIDA, deIso, erroPrestacoes, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
 import {
-  MOTIVO_IMPREVISTO, adendaBloqueada, congelarAdenda, alertasAdenda, assinadas, diasAdenda, faturaAValidar, faturasAdenda, margemAdenda, nomeParcela, parcelaFaturavel, porFaturar, primeiraPaga, proximaParcela,
+  MOTIVO_IMPREVISTO, adendaBloqueada, congelarAdenda, alertasAdenda, assinadas, diasAdenda, faturaAValidar, faturasAdenda, margemAdenda, nomeParcela, parcelaFaturavel, primeiraPaga, proximaParcela, alvoFaturaAdenda,
   LINHA_ACERTO_PLANO, LINHA_ACERTO_PRODUTOS, MOTIVO_ACERTO, MOTIVOS_ADENDA, juntarAoPlano, linhaAdenda, linhasComTarefa, precoSugeridoLivre, totaisAdenda, totalAdenda, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda,
 } from "./adendas";
 import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
@@ -2159,18 +2159,23 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     if (!a.faturas) { const F = faturasAdenda(a); if (!F.length) return F; a.faturas = F; delete a.fatura; delete a.recibo; delete a.pag; }
     return a.faturas;
   };
-  /** 21/10 (decisão C): a fatura da parcela seguinte da adenda, com o valor congelado (o número vem do motor ou do programa certificado). */
-  const emitirParcela = (d: Negocio, a: Adenda, numero: string, registada: boolean): FaturaAdenda | null => {
+  /** 21/10 (decisão C): a fatura da parcela seguinte da adenda, com o valor congelado. 19/11 (auditoria): o número é sempre o do Eticadata
+   *  (a Olyvia não emite faturas): `info` é a leitura do ERP (null: registada sem ligação; undefined: sem leitura, como na V2). */
+  const registarParcela = (d: Negocio, a: Adenda, numero: string, info?: InfoErp | null): FaturaAdenda | null => {
     const x = proximaParcela(d, a);
     if (!x) return null;
     const F = faturaDaAdenda(a);
     if (!a.faturas) a.faturas = F;
     const f: FaturaAdenda = { n: numero, q: agora(), i: x.i, l: x.l, p: x.p, v: x.v };
     a.faturas.push(f);
-    log(d, registada
-      ? `Fatura ${f.n} registada (adenda ${a.n}, ${nomeParcela(f.i)}: ${x.l.toLowerCase()}, ${eur(f.v)} € com IVA) · emitida no programa certificado`
-      : `${f.n} emitida (adenda ${a.n}, ${nomeParcela(f.i)}: ${x.l.toLowerCase()}, ${eur(f.v)} € com IVA) e enviada ao portal do cliente`);
+    const onde = info ? `confirmada no Eticadata · ${resumoErp(info)}` : info === null ? "sem confirmar no Eticadata (sem ligação ao ERP)" : "emitida no programa certificado";
+    log(d, `Fatura ${f.n} registada (adenda ${a.n}, ${nomeParcela(f.i)}: ${x.l.toLowerCase()}, ${eur(f.v)} € com IVA) · ${onde}`);
     return f;
+  };
+  /** 19/11 (auditoria): o número já está noutra fatura do negócio (a do contrato, uma parcela ou outra adenda)? */
+  const faturaJaRegistada = (d: Negocio, numero: string): boolean => {
+    const k = numero.trim().toLowerCase(), igual = (x?: string | null) => !!x && x.trim().toLowerCase() === k;
+    return igual(d.fin.fatura?.n) || (d.fin.tranches ?? []).some((t) => igual(t.numero)) || (d.adendas ?? []).some((a) => faturasAdenda(a).some((f) => igual(f.n)));
   };
   /** A adenda pelo número, ou (sem ele) a primeira do negócio que satisfaz `cond` (as ações do Hoje só levam o negócio). */
   const adendaDe = (d: Negocio, n: string | undefined, cond: (a: Adenda) => boolean): Adenda | undefined =>
@@ -4368,27 +4373,25 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const pr = deal(id).obra.problemas?.find((x) => x.id === pid);
       if (pr?.resposta && !pr.respondida) pr.respondida = agora();
     },
-    /** O Financeiro emite a fatura da 1.ª parcela de cada adenda assinada sem faturas (vai para o portal do cliente, que paga com o método
-     *  que escolher). 21/10 (decisão C): as parcelas são as do contrato; as seguintes emitem-se no Financeiro do negócio (faturarParcelaAdenda). */
+    /** 19/11 (auditoria): a Olyvia não emite faturas das adendas (antes, na versão «Atual», inventava «FT 2026/n» com um contador do
+     *  browser). Emitem-se no Eticadata e registam-se com o número (registarFaturaAdenda), como as parcelas do contrato. Fica a recusa,
+     *  para quem ainda a chamar. */
     faturarAdendas(id: number, n?: string) {
-      const d = deal(id);
       if (!exigePerm("finance.invoice")) return;
-      if (lerVersao() !== "atual") { avisar({ msg: "A fatura não se emite na Olyvia", sub: "Emita-a no programa de faturação certificado", kind: "bad" }); return; }
-      // 22/10: com o número (o passo ft-ad-<n>, o Financeiro da adenda), só a dessa adenda; sem ele, todas as por faturar
-      const F = porFaturar(d).filter((a) => !n || a.n === n).map((a) => emitirParcela(d, a, "FT 2026/" + S.ft++, false)).filter((x): x is FaturaAdenda => !!x);
-      if (F.length) avisar({ msg: F.length === 1 ? `${F[0].n} emitida` : `${F.length} faturas emitidas`, sub: "Da adenda · enviada ao portal do cliente", kind: "ok" });
+      avisar({ msg: "A Olyvia não emite faturas", sub: "Emita a fatura da adenda no Eticadata e registe o número no negócio («Registar a fatura»)", kind: "bad" });
+      void id; void n;
     },
-    /** 21/10 (decisão C): a fatura da parcela seguinte da adenda (pela ordem; como no contrato, a final no fim da obra). */
+    /** 19/11 (auditoria): como faturarAdendas, recusa: a fatura de cada parcela regista-se com o número do Eticadata. */
     faturarParcelaAdenda(id: number, n: string) {
-      const d = deal(id), a = d.adendas?.find((x) => x.n === n);
       if (!exigePerm("finance.invoice")) return;
-      if (lerVersao() !== "atual") { avisar({ msg: "A fatura não se emite na Olyvia", sub: "Emita-a no programa de faturação certificado", kind: "bad" }); return; }
-      if (!a) return;
-      // 21/10: como no contrato: as seguintes só depois de paga a 1.ª; a do fim da obra só com a obra concluída (adendas.ts: parcelaFaturavel)
-      const pf = parcelaFaturavel(d, a);
-      if (pf.motivo) { if (pf.p) avisar({ msg: `A ${nomeParcela(pf.p.i)} ainda não se fatura`, sub: `Adenda ${a.n} · ${pf.motivo}`, kind: "bad" }); return; }
-      const f = emitirParcela(d, a, "FT 2026/" + S.ft++, false);
-      if (f) avisar({ msg: `${f.n} emitida`, sub: `Adenda ${a.n} · ${nomeParcela(f.i)} · enviada ao portal do cliente`, kind: "ok" });
+      avisar({ msg: "A Olyvia não emite faturas", sub: "Emita a fatura da adenda no Eticadata e registe o número no negócio («Registar a fatura»)", kind: "bad" });
+      void id; void n;
+    },
+    /** 19/11 (auditoria): o passo «Registar a fatura» de uma adenda (Hoje do Financeiro): abre o negócio no sítio onde se escreve o número. */
+    abrirFaturaAdenda(id: number, n?: string) {
+      const d = deal(id), a = adendaDe(d, n, (x) => x.estado === "assinada" && !!proximaParcela(d, x));
+      S.view = "negocio"; S.deal = id; S.confirmPerda = null;
+      S.pulse = a ? alvoFaturaAdenda(a.n) : null;
     },
     /** O Financeiro confirma que o pagamento de uma fatura de adenda entrou: sai o recibo. 21/10: como `validar` no contrato, não espera
      *  pelo aviso do cliente no portal (o aviso só informa): valida a fatura mais antiga por pagar, pela ordem das parcelas (a 1.ª antes de
@@ -4425,14 +4428,27 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!d.obra.ec?.ref) { avisar({ msg: "Primeiro, a encomenda de cliente inicial", sub: "A das adendas pagas emite-se logo a seguir a ela", kind: "bad" }); return; }
       if (!encomendarAdendas(d)) avisar({ msg: "Nada por encomendar", sub: "As adendas pagas já têm a encomenda no Inventário", kind: "" });
     },
-    /** V2 (21/10): regista a fatura da parcela seguinte da adenda, emitida no programa certificado (a Olyvia não emite faturas na V2). */
-    registarFaturaAdenda(id: number, n: string, numero: string): boolean {
+    /** A fatura da parcela seguinte da adenda, emitida no Eticadata e registada aqui com o número (21/10: só na V2; 19/11, auditoria: em
+     *  todas as versões, como as parcelas do contrato). `info` é a leitura do ERP (RegistarFaturaAdendaErp): null, sem ligação. */
+    registarFaturaAdenda(id: number, n: string, numero: string, info?: InfoErp | null): boolean {
       const d = deal(id), a = d.adendas?.find((x) => x.n === n);
       if (!exigePerm("finance.invoice")) return false;
-      if (!a || !numero.trim()) return false;
+      const num = numero.trim().replace(/\s+/g, " ");
+      if (!a) return false;
+      if (!num) { avisar({ msg: "Escreva o número da fatura", sub: "Como aparece no Eticadata", kind: "bad" }); return false; }
       const pf = parcelaFaturavel(d, a);
       if (pf.motivo) { if (pf.p) avisar({ msg: `A ${nomeParcela(pf.p.i)} ainda não se regista`, sub: `Adenda ${a.n} · ${pf.motivo}`, kind: "bad" }); return false; }
-      return !!emitirParcela(d, a, numero.trim(), true);
+      if (faturaJaRegistada(d, num)) { avisar({ msg: `A fatura ${num} já está registada`, sub: "Cada parcela tem a sua fatura", kind: "bad" }); return false; }
+      if (info?.estado === "anulada") { avisar({ msg: `A fatura ${num} está anulada no Eticadata`, sub: "Registe a fatura em vigor", kind: "bad" }); return false; }
+      const f = registarParcela(d, a, num, info);
+      if (!f) return false;
+      if (info) lembrarErp(num, info);
+      avisar({ msg: `Fatura ${num} registada`, sub: `Adenda ${a.n} · ${nomeParcela(f.i)} · ${info ? "no Eticadata: " + resumoErp(info) : info === null ? "sem ligação ao Eticadata: valide o pagamento à mão" : "vai para o portal do cliente"}`, kind: "ok" });
+      if (info && Math.abs(info.total - f.v) > 0.01)
+        avisar({ msg: `O total da ${num} no Eticadata não é o da parcela`, sub: `ERP: ${eur(info.total)} € · ${nomeParcela(f.i)} da adenda ${a.n}: ${eur(f.v)} €. Confirme o número da fatura.`, kind: "bad", atraso: 400 });
+      if (info && nifDiferente(d, info))
+        avisar({ msg: "O NIF da fatura no ERP não é o do negócio", sub: `ERP: ${info.nif} · negócio: ${d.f.nif_fat}. Confirme o número da fatura.`, kind: "bad", atraso: 400 });
+      return true;
     },
     aprender(id: number) {
       const d = deal(id); const s = S.svc.revest; const old = s.h; s.h = r2(s.h * REAL.revest); d.obra.aprendido = true;

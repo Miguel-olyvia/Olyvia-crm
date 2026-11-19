@@ -7,7 +7,7 @@ import { FINANCEIRO, OBRA, emFalta, type Grupo } from "./campos";
 import { paradasPor, tarefasAfetaveis } from "./imprevistos";
 import { receberTudo } from "./testeObra";
 import { fimDe } from "./ajustesPlano";
-import { adendaAssinada } from "./testeAdenda";
+import { adendaAssinada, registarFaturasAdenda } from "./testeAdenda";
 import { totaisAdenda } from "./adendas";
 
 const foto = "data:image/svg+xml;utf8,x";
@@ -100,9 +100,9 @@ describe("imprevistos a meio da obra", () => {
     expect(nova.mats).toEqual([{ n: "Tubo PVC 110", q: 2, un: "tubo", preco: 9 }]);
     expect(lerInventario().ecs.some((e) => e.origin.ref === "CT 2026/1027 · A1" && !e.deleted)).toBe(false);
     // o Financeiro: a fatura própria da adenda, no Hoje dele
-    expect(minhas(S, "financeiro").some((x) => x.d === d && x.p.act === "faturarAdendas")).toBe(true);
-    A.role("financeiro"); A.faturarAdendas(d.id);
-    expect(a.faturas![0].n).toMatch(/^FT 2026\/\d+$/);
+    expect(minhas(S, "financeiro").some((x) => x.d === d && x.p.act === "abrirFaturaAdenda")).toBe(true);
+    A.role("financeiro"); registarFaturasAdenda(A, d);
+    expect(a.faturas![0].n).toMatch(/^FAT TESTE\/\d+$/);
     // o cliente paga no portal por débito direto; o Financeiro valida e sai o recibo
     A.escolherMetodo(d.id, "Débito direto", n);
     A.autorizarDebito(d.id, "PT50 ···· 0154", "Tiago Almeida", n);

@@ -8,7 +8,7 @@ import { ImprevistosNaObra, RegistarImprevisto } from "./ImprevistosObra";
 import { PortalCliente } from "./PortalCliente";
 import { juntarAjustes, type Alteracao } from "./trabalhoObra";
 import { precoSugeridoLivre } from "./adendas";
-import { adendaAssinada } from "./testeAdenda";
+import { adendaAssinada, registarFaturasAdenda } from "./testeAdenda";
 
 afterEach(cleanup);
 
@@ -69,7 +69,7 @@ describe("imprevistos no ecrã", () => {
     r.unmount();
     // o cliente assina; o Financeiro fatura; no portal paga por referência MB
     adendaAssinada(A, d.id, a.n);
-    A.role("financeiro"); A.faturarAdendas(d.id);
+    A.role("financeiro"); registarFaturasAdenda(A, d);
     render(<Montar S={S} A={A}>{(c) => <PortalCliente ctx={c} d={d} fechar={() => {}} />}</Montar>);
     const pag = screen.getByText(`Pagar a fatura ${a.faturas![0].n}`).closest("section, li, div[class]")!;
     expect(pag).toBeTruthy();

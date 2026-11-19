@@ -215,6 +215,8 @@ export function faturaAValidar(a: Adenda): { f?: FaturaAdenda; motivo: string | 
   if (F[0].i !== 0 && !primeiraPaga(a)) return { motivo: `Primeiro, a fatura da ${nomeParcela(0)} da adenda ${a.n}.` };
   return { f: F[0], motivo: null };
 }
+/** 19/11 (auditoria): o sinal (S.pulse) que leva o negócio aberto ao campo do número da fatura da adenda `n` («Registar a fatura» do Hoje). */
+export const alvoFaturaAdenda = (n: string) => "ft-ad:" + n;
 /** As adendas assinadas sem nenhuma fatura (a 1.ª parcela por faturar), para o Hoje do Financeiro. */
 export const porFaturar = (d: Negocio) => assinadas(d).filter((a) => !faturasAdenda(a).length);
 /** As faturas das adendas por pagar e, delas, as que o cliente já disse que pagou (para validar). */
