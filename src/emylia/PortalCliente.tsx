@@ -5,8 +5,8 @@
 // · Contrato gerado: aparece no mesmo link, por assinar, com o contrato à vista.
 // · Assinado: o mesmo link mostra o plano da obra (fases e datas, sem custos nem margens).
 // As ações são as do motor, por isso o negócio no protótipo passa de fase como hoje (e o outro separador vê-o pelo storage).
-import { useMemo, useState, type ReactNode } from "react";
-import { usePortalT } from "@/portal-i18n";
+import { useMemo, useRef, useState, type ReactNode } from "react";
+import { traduzirEm, type PortalIdioma, type PortalTraducao } from "@/portal-i18n";
 import { ArrowLeft, Armchair, Check, ChevronRight, ClipboardCheck, Clock, Copy, Eye, FileText, Grid3x3, Hammer, MessageSquareText, PenLine, Plug, Scale, X, XCircle, type LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { NaFrente } from "./NaFrente";
@@ -15,10 +15,9 @@ import type { Ctx } from "./pecas";
 import { ContratoDoc, FaturaDoc, NotaEncomendaDoc, PropostaDoc, TITULOS_CLAUSULAS, totais, tranches } from "./DocsCliente";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA, type FaseObra } from "./fasesObra";
-import { rotuloDia } from "./preparacaoObra";
 import { useInventario } from "./inventario/loja";
 import { resumoEcNegocio } from "./inventario/ponteNegocios";
-import { MOTIVOS_RECUSA_ADENDA, adendaComoEnviada, assinadas, diasAdenda, faturasAdenda, nomeParcela, porPagar, primeiraPaga, totaisAdenda, valorContrato, versaoAdenda } from "./adendas";
+import { MOTIVOS_RECUSA_ADENDA, adendaComoEnviada, assinadas, diasAdenda, faturasAdenda, porPagar, primeiraPaga, totaisAdenda, valorContrato, versaoAdenda } from "./adendas";
 import { AssinaturaContrato } from "./AssinaturaContrato";
 import { AutoRececaoDoc } from "./AutoRececao";
 import { RelatorioObra } from "./RelatorioObra";
@@ -31,6 +30,7 @@ import { Conversa } from "./ConversaObra";
 import type { FaturaReg } from "./v2/financeiro";
 import { nomeEmpresa } from "./acessosPortal";
 import { RESPONSAVEL_OBRA } from "./obraOps";
+import { CHAVE_CLAUSULA, CHAVE_FASE_CURTA, CHAVE_METODO, CHAVE_MOTIVO, rotuloDiaEm } from "./portalClienteIdioma";
 
 /** 2/11: o portal real (/client-portal/negocios/:id). A proposta aceita-se e o contrato assina-se nas páginas reais do portal (com o
  *  código por SMS e a client-portal-action); a conversa é a da base (negocio_mensagens); o auto de receção assina-se com o código por
@@ -55,12 +55,14 @@ export interface PortalReal {
   aviso?: string | null;
 }
 
-/** Os passos do percurso, pela ordem. */
+/** Os passos do percurso, pela ordem (em português; o ecrã traduz pelas chaves de CHAVES_PASSOS, em pc.negocioPag.*). */
 export const PASSOS_PORTAL = ["Rever a proposta", "Aceitar", "Assinar o contrato", "Acompanhar o serviço", "Receber o serviço"] as const;
-const CURTO = ["Proposta", "Aceitar", "Contrato", "Serviço", "Receção"];
+const CHAVES_PASSOS = ["pc.negocioPag.passos.1", "pc.negocioPag.passos.2", "pc.negocioPag.passos.3", "pc.negocioPag.passos.4", "pc.negocioPag.passos.5"] as const;
+const CHAVES_CURTO = ["pc.negocioPag.curto.1", "pc.negocioPag.curto.2", "pc.negocioPag.curto.3", "pc.negocioPag.curto.4", "pc.negocioPag.curto.5"] as const;
 /** 21/10: os passos da adenda (o mesmo percurso do orçamento): a proposta, aceitar, o contrato da adenda, assinar e pagar. */
 export const PASSOS_ADENDA = ["Proposta da adenda", "Aceitar", "Contrato da adenda", "Assinar", "Pagar"] as const;
-const CURTO_ADENDA = ["Proposta", "Aceitar", "Contrato", "Assinar", "Pagar"];
+const CHAVES_PASSOS_ADENDA = ["pc.negocioPag.passosAdenda.1", "pc.negocioPag.passosAdenda.2", "pc.negocioPag.passosAdenda.3", "pc.negocioPag.passosAdenda.4", "pc.negocioPag.passosAdenda.5"] as const;
+const CHAVES_CURTO_ADENDA = ["pc.negocioPag.curtoAdenda.1", "pc.negocioPag.curtoAdenda.2", "pc.negocioPag.curtoAdenda.3", "pc.negocioPag.curtoAdenda.4", "pc.negocioPag.curtoAdenda.5"] as const;
 
 type EstadoPortal = "rever" | "pedido" | "recusada" | "preparar" | "revisao" | "assinar" | "obra" | "pagar" | "auto" | "relatorio" | "sem";
 /** 21/10: a adenda a meio do percurso (a proposta por responder, a nova versão a preparar, o contrato dela, a 1.ª parcela por pagar). */
@@ -96,15 +98,12 @@ export function passoPortal(d: Negocio): { i: number; estado: EstadoPortal; aden
 }
 
 const ICONE_FASE: Record<number, LucideIcon> = { 1: Hammer, 2: Plug, 3: Grid3x3, 4: Armchair };
-/** Os motivos de alteração, nas palavras do cliente (por dentro guardam-se os mesmos da "Nova versão" do comercial). */
-const PARA_CLIENTE: Record<string, string> = {
-  "Outros materiais": "Materiais ou acabamentos", "Juntar ou tirar trabalhos": "Juntar ou tirar trabalhos", "Baixar o preço": "O preço",
-  "Outras datas": "As datas", "Outra forma de pagamento": "A forma de pagamento",
-};
-const doCliente = (m: string) => PARA_CLIENTE[m] ?? m;
+/** Os motivos de alteração e de recusa, nas palavras do cliente: as do dicionário (por dentro guardam-se os mesmos da "Nova versão" do comercial). */
+const motivoDe = (L: PortalTraducao, m: string) => (CHAVE_MOTIVO[m] ? L.t(CHAVE_MOTIVO[m]) : m);
+const clausulaDe = (L: PortalTraducao, c: string) => (CHAVE_CLAUSULA[c] ? L.t(CHAVE_CLAUSULA[c]) : c);
 
 /** Uma linha "rótulo · valor" com o botão de copiar (diz "Copiado" por um momento). */
-function Copiar({ rotulo, valor, mostrar }: { rotulo: string; valor: string; mostrar?: string }) {
+function Copiar({ rotulo, valor, mostrar, L }: { rotulo: string; valor: string; mostrar?: string; L: PortalTraducao }) {
   const [ok, setOk] = useState(false);
   const copiar = async () => {
     try { await navigator.clipboard.writeText(valor); } catch { /* sem acesso à área de transferência */ }
@@ -115,11 +114,11 @@ function Copiar({ rotulo, valor, mostrar }: { rotulo: string; valor: string; mos
       <dt className="text-sm text-slate-500">{rotulo}</dt>
       <dd className="flex min-w-0 items-center gap-1">
         <span className="min-w-0 break-all text-right text-[15px] font-semibold tabular-nums">{mostrar ?? valor}</span>
-        <button type="button" onClick={copiar} aria-label={`Copiar ${rotulo.toLowerCase()}`}
+        <button type="button" onClick={copiar} aria-label={L.t("pc.negocioPag.pagar.copiar", { rotulo: rotulo.toLowerCase() })}
           className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-slate-500 outline-none hover:bg-slate-100 focus-visible:ring-2 focus-visible:ring-slate-900">
           {ok ? <Check className="h-4 w-4 text-emerald-700" aria-hidden="true" /> : <Copy className="h-4 w-4" aria-hidden="true" />}
         </button>
-        <span className="sr-only" aria-live="polite">{ok ? "Copiado" : ""}</span>
+        <span className="sr-only" aria-live="polite">{ok ? L.t("pc.negocioPag.pagar.copiado") : ""}</span>
       </dd>
     </div>
   );
@@ -144,8 +143,8 @@ function Chips({ opcoes, on, mudar, rotulo, nome = (x: string) => x }: { opcoes:
 }
 
 /** O cartão que leva ao documento do template (a página real da proposta ou do contrato), no lugar do desenho da V1. */
-function CartaoDocumento({ tipo, abrir }: { tipo: "proposta" | "contrato"; abrir: () => void }) {
-  const { t } = usePortalT();
+function CartaoDocumento({ tipo, abrir, L }: { tipo: "proposta" | "contrato"; abrir: () => void; L: PortalTraducao }) {
+  const { t } = L;
   return (
     <section aria-label={t(`pc.docNegocio.${tipo}.titulo`)} className="space-y-3 rounded-2xl bg-white p-4 shadow-sm">
       <div className="flex items-start gap-3">
@@ -178,13 +177,16 @@ function emitidaEm(q: string): Date {
 
 /** 21/10: pagar uma fatura no portal (a do contrato ou a de uma adenda): o valor, a escolha da forma de pagar e só os dados dessa.
  *  `alvo` é onde ficam o método e o comprovativo (os campos do negócio, ou os da adenda). */
-function PagarFatura({ numero, montante, vence, refMb, refTeste = true, alvo, titular, verFatura, escolher, pago, autorizar }: {
+function PagarFatura({ numero, montante, vence, refMb, refTeste = true, alvo, titular, verFatura, escolher, pago, autorizar, L }: {
   numero: string; montante: string; vence: string; refMb: string;
   /** 19/11: a referência é a gerada aqui (sem o prestador de pagamentos ligado): diz-se ao cliente que é de teste. */
   refTeste?: boolean;
   alvo: Record<string, string>; titular: string;
   verFatura: () => void; escolher: (m: string) => void; pago: (ref: string) => void; autorizar: (ibanCurto: string, titular: string) => void;
+  /** o idioma do portal (a omissão, o português, vem do PortalCliente) */
+  L: PortalTraducao;
 }) {
+  const { t } = L;
   const [ref, setRef] = useState("");
   // o débito direto: o IBAN e o titular da conta do cliente, e a autorização
   const [ibanCli, setIbanCli] = useState("");
@@ -193,34 +195,34 @@ function PagarFatura({ numero, montante, vence, refMb, refTeste = true, alvo, ti
   const empresa = useDadosPagamento();
   if (alvo.comprovativo) return (
     <p className="flex items-center gap-2 text-[15px] text-emerald-700"><Check className="h-4 w-4" aria-hidden="true" />
-      {alvo.metodo === "Débito direto" && alvo.debito_iban ? `Débito direto autorizado na conta ${alvo.debito_iban}. O valor é debitado a ${vence}.` : `Comprovativo enviado (${alvo.comprovativo}). Estamos a confirmar.`}</p>
+      {alvo.metodo === "Débito direto" && alvo.debito_iban ? t("pc.negocioPag.pagar.debitoAutorizado", { iban: alvo.debito_iban, vence }) : t("pc.negocioPag.pagar.comprovativo", { comprovativo: alvo.comprovativo })}</p>
   );
   // 4/11: só as formas que a empresa recebe (com os dados dela); uma escolha antiga que já não está volta à transferência
   const formas = metodosDe(empresa);
   const metodo = formas.includes(metodoDe(alvo.metodo)) ? metodoDe(alvo.metodo) : "Transferência", ibanOk = ibanValido(ibanCli), nomeConta = titularCli ?? titular;
   const jaPaguei = (
     <div className="space-y-2 border-t border-slate-200 pt-4">
-      <p className="text-[15px] font-medium">Já pagou? Avise-nos</p>
-      <input value={ref} onChange={(ev) => setRef(ev.target.value)} placeholder={metodo === "Referência MB" ? "N.º do talão ou do pagamento (opcional)" : metodo === "MB Way" ? "Referência do MB Way (opcional)" : "Referência ou n.º da transferência (opcional)"} aria-label="Referência do pagamento" className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] outline-none focus:border-slate-900" />
-      <Botao onClick={() => pago(ref)}>Já paguei</Botao>
+      <p className="text-[15px] font-medium">{t("pc.negocioPag.pagar.jaPagou")}</p>
+      <input value={ref} onChange={(ev) => setRef(ev.target.value)} placeholder={metodo === "Referência MB" ? t("pc.negocioPag.pagar.phTalao") : metodo === "MB Way" ? t("pc.negocioPag.pagar.phMbWay") : t("pc.negocioPag.pagar.phTransferencia")} aria-label={t("pc.negocioPag.pagar.refAria")} className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] outline-none focus:border-slate-900" />
+      <Botao onClick={() => pago(ref)}>{t("pc.negocioPag.pagar.jaPaguei")}</Botao>
     </div>
   );
   return (
     <div className="space-y-4">
       <div className="flex items-end justify-between gap-3">
-        <p><span className="block text-xs uppercase tracking-[0.12em] text-slate-500">A pagar</span><span className="text-2xl font-semibold tabular-nums">{montante} €</span></p>
+        <p><span className="block text-xs uppercase tracking-[0.12em] text-slate-500">{t("pc.negocioPag.pagar.aPagar")}</span><span className="text-2xl font-semibold tabular-nums">{montante} €</span></p>
         <button type="button" onClick={verFatura} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-slate-900 underline-offset-4 hover:underline">
-          <FileText className="h-4 w-4" aria-hidden="true" />Ver a fatura
+          <FileText className="h-4 w-4" aria-hidden="true" />{t("pc.negocioPag.pagar.verFatura")}
         </button>
       </div>
       <div className="space-y-2">
-        <p className="text-[15px] font-medium">Como quer pagar?</p>
-        <div role="radiogroup" aria-label="Como quer pagar" className={cn("grid gap-2", formas.length > 3 ? "grid-cols-2 sm:grid-cols-4" : formas.length === 3 ? "grid-cols-3" : formas.length === 2 ? "grid-cols-2" : "grid-cols-1")}>
+        <p className="text-[15px] font-medium">{t("pc.negocioPag.pagar.comoPagar")}</p>
+        <div role="radiogroup" aria-label={t("pc.negocioPag.pagar.comoPagarAria")} className={cn("grid gap-2", formas.length > 3 ? "grid-cols-2 sm:grid-cols-4" : formas.length === 3 ? "grid-cols-3" : formas.length === 2 ? "grid-cols-2" : "grid-cols-1")}>
           {formas.map((m) => (
             <button key={m} type="button" role="radio" aria-checked={metodo === m} onClick={() => escolher(m)}
               className={cn("min-h-12 rounded-xl border px-2 text-[14px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-slate-900 focus-visible:ring-offset-2",
                 metodo === m ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white text-slate-800 hover:border-slate-500")}>
-              {m}
+              {CHAVE_METODO[m] ? t(CHAVE_METODO[m]) : m}
             </button>
           ))}
         </div>
@@ -228,66 +230,69 @@ function PagarFatura({ numero, montante, vence, refMb, refTeste = true, alvo, ti
       {/* 19/11 (auditoria): só com o prestador de pagamentos configurado (metodosDe → mbDisponivel); sem ele, a opção nem aparece */}
       {metodo === "Referência MB" && <>
         <div className="rounded-xl border border-slate-200 px-4 py-1">
-          <p className="pt-2 text-sm font-semibold">Multibanco ou homebanking</p>
+          <p className="pt-2 text-sm font-semibold">{t("pc.negocioPag.pagar.multibanco")}</p>
           <dl className="divide-y divide-slate-100">
-            <Copiar rotulo="Entidade" valor={empresa?.mbEntidade ?? ""} />
-            <Copiar rotulo="Referência" valor={refMb} mostrar={em3(refMb)} />
-            <Copiar rotulo="Montante" valor={montante} mostrar={`${montante} €`} />
+            <Copiar L={L} rotulo={t("pc.negocioPag.pagar.rotEntidade")} valor={empresa?.mbEntidade ?? ""} />
+            <Copiar L={L} rotulo={t("pc.negocioPag.pagar.rotReferencia")} valor={refMb} mostrar={em3(refMb)} />
+            <Copiar L={L} rotulo={t("pc.negocioPag.pagar.rotMontante")} valor={montante} mostrar={`${montante} €`} />
           </dl>
-          {refTeste && <p className="pb-2 text-sm text-amber-800">Referência de teste: o prestador de pagamentos ainda não está ligado. Para já, pague por transferência ou fale connosco.</p>}
+          {refTeste && <p className="pb-2 text-sm text-amber-800">{t("pc.negocioPag.pagar.refTeste")}</p>}
         </div>
         {jaPaguei}
       </>}
       {metodo === "MB Way" && <>
         <div className="rounded-xl border border-slate-200 px-4 py-1">
-          <p className="pt-2 text-sm font-semibold">MB Way</p>
-          <p className="text-sm text-slate-600">Na app MB Way, escolha «Enviar dinheiro» para este número.</p>
+          <p className="pt-2 text-sm font-semibold">{t("pc.negocioPag.pagar.mbWay")}</p>
+          <p className="text-sm text-slate-600">{t("pc.negocioPag.pagar.mbWayAjuda")}</p>
           <dl className="divide-y divide-slate-100">
-            <Copiar rotulo="Número" valor={(empresa?.mbway ?? "").replace(/\s/g, "")} mostrar={empresa?.mbway ?? ""} />
-            <Copiar rotulo="Mensagem" valor={numero} />
-            <Copiar rotulo="Montante" valor={montante} mostrar={`${montante} €`} />
+            <Copiar L={L} rotulo={t("pc.negocioPag.pagar.rotNumero")} valor={(empresa?.mbway ?? "").replace(/\s/g, "")} mostrar={empresa?.mbway ?? ""} />
+            <Copiar L={L} rotulo={t("pc.negocioPag.pagar.rotMensagem")} valor={numero} />
+            <Copiar L={L} rotulo={t("pc.negocioPag.pagar.rotMontante")} valor={montante} mostrar={`${montante} €`} />
           </dl>
-          {empresa?.titular && <p className="pb-2 text-sm text-slate-500">Em nome de {empresa.titular}.</p>}
+          {empresa?.titular && <p className="pb-2 text-sm text-slate-500">{t("pc.negocioPag.pagar.emNomeDe", { titular: empresa.titular })}</p>}
         </div>
         {jaPaguei}
       </>}
       {metodo === "Transferência" && (empresa?.iban ? <>
         <div className="rounded-xl border border-slate-200 px-4 py-1">
-          <p className="pt-2 text-sm font-semibold">Transferência bancária</p>
+          <p className="pt-2 text-sm font-semibold">{t("pc.negocioPag.pagar.transferencia")}</p>
           <dl className="divide-y divide-slate-100">
-            <Copiar rotulo="IBAN" valor={empresa.iban.replace(/\s/g, "")} mostrar={ibanAVista(empresa.iban)} />
-            <Copiar rotulo="Descritivo" valor={numero} />
-            <Copiar rotulo="Montante" valor={montante} mostrar={`${montante} €`} />
+            <Copiar L={L} rotulo={t("pc.negocioPag.pagar.rotIban")} valor={empresa.iban.replace(/\s/g, "")} mostrar={ibanAVista(empresa.iban)} />
+            <Copiar L={L} rotulo={t("pc.negocioPag.pagar.rotDescritivo")} valor={numero} />
+            <Copiar L={L} rotulo={t("pc.negocioPag.pagar.rotMontante")} valor={montante} mostrar={`${montante} €`} />
           </dl>
-          {empresa.titular && <p className="pb-2 text-sm text-slate-500">Titular: {empresa.titular}.</p>}
+          {empresa.titular && <p className="pb-2 text-sm text-slate-500">{t("pc.negocioPag.pagar.titular", { titular: empresa.titular })}</p>}
         </div>
         {jaPaguei}
       </> : (
         <>
-          <p className="rounded-xl bg-amber-50 px-4 py-3 text-[15px] text-amber-900">A empresa ainda não indicou o IBAN para a transferência. Fale connosco pela conversa e enviamos os dados.</p>
+          <p className="rounded-xl bg-amber-50 px-4 py-3 text-[15px] text-amber-900">{t("pc.negocioPag.pagar.semIban")}</p>
           {/* 19/11: já pagou por outro caminho (com os dados que lhe enviámos): continua a poder avisar */}
           {jaPaguei}
         </>
       ))}
       {metodo === "Débito direto" && (
         <div className="space-y-3 rounded-xl border border-slate-200 p-4">
-          <p className="text-sm font-semibold">Débito direto na sua conta</p>
-          <p className="text-sm text-slate-600">Debitamos {montante} € a {vence}, e as próximas prestações no vencimento de cada fatura. Pode cancelar no seu banco.</p>
+          <p className="text-sm font-semibold">{t("pc.negocioPag.pagar.debito")}</p>
+          <p className="text-sm text-slate-600">{t("pc.negocioPag.pagar.debitoTexto", { montante, vence })}</p>
           <label className="block space-y-1">
-            <span className="text-sm text-slate-600">IBAN da sua conta</span>
+            <span className="text-sm text-slate-600">{t("pc.negocioPag.pagar.ibanConta")}</span>
             <input value={ibanCli} onChange={(ev) => setIbanCli(ev.target.value)} placeholder="PT50 0000 0000 0000 0000 0000 0" inputMode="text" autoComplete="off"
               aria-invalid={ibanCli.trim() !== "" && !ibanOk} aria-describedby={ibanCli.trim() !== "" && !ibanOk ? `iban-erro-${numero}` : undefined} className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] tabular-nums outline-none focus:border-slate-900" />
           </label>
-          {ibanCli.trim() !== "" && !ibanOk && <p id={`iban-erro-${numero}`} className="-mt-2 text-sm text-red-700">Um IBAN português tem PT50 e 21 dígitos.</p>}
+          {ibanCli.trim() !== "" && !ibanOk && <p id={`iban-erro-${numero}`} className="-mt-2 text-sm text-red-700">{t("pc.negocioPag.pagar.ibanInvalido")}</p>}
           <label className="block space-y-1">
-            <span className="text-sm text-slate-600">Titular da conta</span>
+            <span className="text-sm text-slate-600">{t("pc.negocioPag.pagar.titularConta")}</span>
             <input value={nomeConta} onChange={(ev) => setTitularCli(ev.target.value)} className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] outline-none focus:border-slate-900" />
           </label>
           <label className="flex items-start gap-3 text-sm text-slate-700">
             <input type="checkbox" checked={autorizo} onChange={(ev) => setAutorizo(ev.target.checked)} className="mt-0.5 h-5 w-5 shrink-0 accent-slate-900" />
-            Autorizo {empresa?.titular ? `a ${empresa.titular}` : "a empresa"} a debitar na minha conta os valores das faturas deste contrato (autorização SEPA{empresa?.sepaCredor ? `, credor ${empresa.sepaCredor}` : ""}).
+            {t("pc.negocioPag.pagar.autorizo", {
+              quem: empresa?.titular ? t("pc.negocioPag.pagar.quemTitular", { titular: empresa.titular }) : t("pc.negocioPag.pagar.quemEmpresa"),
+              credor: empresa?.sepaCredor ? t("pc.negocioPag.pagar.credor", { credor: empresa.sepaCredor }) : "",
+            })}
           </label>
-          <Botao disabled={!ibanOk || !autorizo || !nomeConta.trim()} onClick={() => autorizar(ibanCurto(ibanCli), nomeConta)}>Autorizar o débito</Botao>
+          <Botao disabled={!ibanOk || !autorizo || !nomeConta.trim()} onClick={() => autorizar(ibanCurto(ibanCli), nomeConta)}>{t("pc.negocioPag.pagar.autorizar")}</Botao>
         </div>
       )}
     </div>
@@ -296,8 +301,14 @@ function PagarFatura({ numero, montante, vence, refMb, refTeste = true, alvo, ti
 
 /** `previa` (23/10): "Ver como o cliente", aberto pela equipa: tudo à vista, nada se grava (as ações não correm e diz-se porquê).
  *  `outrosPedidos` (23/10): o cliente com vários negócios volta à lista deles (PortalClienteConta.tsx). */
-export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real }: { ctx: Ctx; d: Negocio; fechar: () => void; previa?: boolean; outrosPedidos?: () => void; real?: PortalReal }) {
+/** `idioma` (2/11, portal real): o idioma do portal; só o ClientPortalNegocio o passa (do usePortalIdioma). Sem a prop o ecrã sai em português,
+ *  como sempre (o CRM, a pré-visualização e o protótipo não leem o idioma do portal). O documento inline das adendas (DocsCliente) fica em português. */
+export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real, idioma = "pt" }: { ctx: Ctx; d: Negocio; fechar: () => void; previa?: boolean; outrosPedidos?: () => void; real?: PortalReal; idioma?: PortalIdioma }) {
   const { S, A } = ctx;
+  const L = traduzirEm(idioma);
+  const raiz = useRef<HTMLDivElement>(null);
+  const parcela = (i: number) => L.t("pc.negocioPag.parcela", { n: i + 1 });
+  const motivo = (m: string) => motivoDe(L, m), clausula = (c: string) => clausulaDe(L, c);
   // 12/11: na pré-visualização, o negócio como vai para o cliente (real/vistaCliente.ts): sem custos, notas e histórico internos
   const dLimpo = useMemo(() => (previa ? negocioParaCliente(d0) : null), [previa, d0]);
   const d = dLimpo ?? d0;
@@ -320,7 +331,7 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
   const o = d.orc, p = d.obra.plano, nome = d.nome.split(" ")[0];
   const T = o ? totais(d, S) : null;
   const P = passoPortal(d);
-  const topo = () => { try { document.querySelector('[aria-label^="Portal do cliente"]')?.scrollTo({ top: 0, behavior: "smooth" }); } catch { /* sem scroll */ } };
+  const topo = () => { try { raiz.current?.scrollTo({ top: 0, behavior: "smooth" }); } catch { /* sem scroll */ } };
   const fazer = (fn: () => void) => { setConfirmar(null); run(fn); topo(); };
 
   // o que mais espera pelo cliente, depois do contrato: adendas e o pagamento
@@ -330,12 +341,12 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
   const nomeTranche = (f: FaturaReg) => {
     const tr = T ? tranches(d, T.total) : [];
     const i = f.tranche === "unica" ? 0 : Number(f.tranche.replace(/\D/g, "")) - 1;
-    return tr[i]?.l ?? "Prestação";
+    return tr[i]?.l ?? L.t("pc.negocioPag.outros.prestacao");
   };
   for (const f of faturasReais.filter((x) => !x.pagamento)) {
     outros.push({
-      id: "tr-" + f.id, t: `Pagar a fatura ${f.numero}`, sub: `${nomeTranche(f)} · emitida a ${f.data.split("-").reverse().join("/")}`,
-      corpo: <PagarReal numero={f.numero} real={real!} montante={eur(f.valor)} vence={vencimento(new Date(f.data + "T12:00:00"), d.f.vencimento || "15 dias")} refMb={referenciaMb(d.id, f.numero)} titular={d.nome} verFatura={() => setDoc("tr:" + f.id)} />,
+      id: "tr-" + f.id, t: L.t("pc.negocioPag.outros.pagarFatura", { n: f.numero }), sub: L.t("pc.negocioPag.outros.emitida", { prestacao: nomeTranche(f), data: f.data.split("-").reverse().join("/") }),
+      corpo: <PagarReal L={L} numero={f.numero} real={real!} montante={eur(f.valor)} vence={vencimento(new Date(f.data + "T12:00:00"), d.f.vencimento || "15 dias")} refMb={referenciaMb(d.id, f.numero)} titular={d.nome} verFatura={() => setDoc("tr:" + f.id)} />,
     });
   }
   if (d.fin.fatura && !d.fin.pago && T && !faturasReais.some((f) => f.numero === d.fin.fatura?.n)) {
@@ -343,8 +354,8 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
     const ft = d.fin.fatura, t0 = tranches(d, T.total)[0];
     const vence = vencimento(emitidaEm(ft.q), d.f.vencimento || "15 dias");
     outros.push({
-      id: "pag", t: `Pagar a fatura ${ft.n}`, sub: `${t0.l} · vence a ${vence}`,
-      corpo: real ? <PagarReal numero={ft.n} real={real} montante={eur(t0.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} titular={d.nome} verFatura={() => setDoc("fatura")} /> : <PagarFatura numero={ft.n} montante={eur(t0.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={d.f} titular={d.nome} verFatura={() => setDoc("fatura")}
+      id: "pag", t: L.t("pc.negocioPag.outros.pagarFatura", { n: ft.n }), sub: L.t("pc.negocioPag.outros.vence", { prestacao: t0.l, vence }),
+      corpo: real ? <PagarReal L={L} numero={ft.n} real={real} montante={eur(t0.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} titular={d.nome} verFatura={() => setDoc("fatura")} /> : <PagarFatura L={L} numero={ft.n} montante={eur(t0.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={d.f} titular={d.nome} verFatura={() => setDoc("fatura")}
         escolher={(m) => run(() => A.escolherMetodo(d.id, m))} pago={(r) => fazer(() => A.avisarPagamento(d.id, r))} autorizar={(i, t) => fazer(() => A.autorizarDebito(d.id, i, t))} />,
     });
   }
@@ -353,8 +364,8 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
   for (const { a, f: ft } of [...porPagar(d)].sort((x, y) => x.f.i - y.f.i)) {
     const vence = vencimento(emitidaEm(ft.q), "15 dias");
     outros.push({
-      id: "pag-" + ft.n, t: `Pagar a fatura ${ft.n}`, sub: `Adenda ${a.n} · ${nomeParcela(ft.i)} (${ft.l.toLowerCase()}) · vence a ${vence}${ft.i > 0 && !primeiraPaga(a) ? ` · primeiro, a ${nomeParcela(0)}` : ""}`,
-      corpo: real ? <PagarReal numero={ft.n} real={real} montante={eur(ft.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} titular={d.nome} verFatura={() => setDoc("ft:" + ft.n)} /> : <PagarFatura numero={ft.n} montante={eur(ft.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={ft.pag ?? {}} titular={d.nome} verFatura={() => setDoc("ft:" + ft.n)}
+      id: "pag-" + ft.n, t: L.t("pc.negocioPag.outros.pagarFatura", { n: ft.n }), sub: L.t("pc.negocioPag.outros.adenda", { n: a.n, parcela: parcela(ft.i), fatura: ft.l.toLowerCase(), vence }) + (ft.i > 0 && !primeiraPaga(a) ? L.t("pc.negocioPag.outros.primeiro", { parcela: parcela(0) }) : ""),
+      corpo: real ? <PagarReal L={L} numero={ft.n} real={real} montante={eur(ft.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} titular={d.nome} verFatura={() => setDoc("ft:" + ft.n)} /> : <PagarFatura L={L} numero={ft.n} montante={eur(ft.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={ft.pag ?? {}} titular={d.nome} verFatura={() => setDoc("ft:" + ft.n)}
         escolher={(m) => run(() => A.escolherMetodo(d.id, m, ft.n))} pago={(r) => fazer(() => A.avisarPagamento(d.id, r, ft.n))} autorizar={(i, t) => fazer(() => A.autorizarDebito(d.id, i, t, ft.n))} />,
     });
   }
@@ -362,12 +373,13 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
   const adendasAssinadas = assinadas(d).length, au = d.obra.auto;
   // 21/10: o que é de cada adenda, a partir da proposta enviada (também as que não aceitou ou foram retiradas, com o estado)
   const docsAdenda = (d.adendas ?? []).filter((a) => a.enviada || a.versoes?.length).flatMap((a): [string, string, boolean][] => {
-    const est = a.estado === "recusada" ? " · não aceite" : a.estado === "anulada" ? " · retirada" : a.estado === "rascunho" ? " · a nova versão está a ser preparada" : a.estado === "enviada" ? " · por responder" : "";
+    const chaveEst = a.estado === "recusada" ? "pc.negocioPag.doc.naoAceite" : a.estado === "anulada" ? "pc.negocioPag.doc.retirada" : a.estado === "rascunho" ? "pc.negocioPag.doc.novaVersao" : a.estado === "enviada" ? "pc.negocioPag.doc.porResponder" : null;
+    const est = chaveEst ? ` · ${L.t(chaveEst)}` : "";
     const v = versaoAdenda(adendaComoEnviada(a));
     return [
-      ["prop:" + a.n, `Proposta da adenda ${a.n}${v > 1 ? ` (v${v})` : ""}${est}`, true],
-      ["ct:" + a.n, `Adenda ${a.n} ao contrato${a.estado === "assinada" ? " · assinada" : " · por assinar"}`, a.estado === "assinada" || (a.estado === "aceite" && a.contrato === "enviado")],
-      ...faturasAdenda(a).map((f): [string, string, boolean] => ["ft:" + f.n, `Fatura ${f.n} · adenda ${a.n}, ${nomeParcela(f.i)}${f.recibo ? ` · paga (recibo ${f.recibo.n})` : ""}`, true]),
+      ["prop:" + a.n, L.t("pc.negocioPag.doc.tPropostaAdenda", { n: a.n }) + (v > 1 ? ` (v${v})` : "") + est, true],
+      ["ct:" + a.n, L.t("pc.negocioPag.doc.tAdendaContrato", { n: a.n }) + ` · ${L.t(a.estado === "assinada" ? "pc.negocioPag.doc.adendaAssinada" : "pc.negocioPag.doc.adendaPorAssinar")}`, a.estado === "assinada" || (a.estado === "aceite" && a.contrato === "enviado")],
+      ...faturasAdenda(a).map((f): [string, string, boolean] => ["ft:" + f.n, L.t("pc.negocioPag.doc.tFaturaAdenda", { n: f.n, adenda: a.n, parcela: parcela(f.i) }) + (f.recibo ? ` · ${L.t("pc.negocioPag.doc.pagaRecibo", { n: f.recibo.n })}` : ""), true]),
     ];
   });
   // 19/11, portal real: a proposta e o contrato do negócio abrem o documento do template (páginas reais), nunca o desenho da V1;
@@ -379,17 +391,17 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
     setDoc(k);
   };
   const docs: [string, string, boolean][] = [
-    ["proposta", `Proposta PR 2026/${d.id}`, !!o?.enviada],
+    ["proposta", L.t("pc.negocioPag.doc.tPropostaPr", { id: d.id }), !!o?.enviada],
     // 15/10: as adendas assinadas juntam-se ao contrato (o documento do contrato mostra-as)
-    ["contrato", `Contrato CT 2026/${d.id}${adendasAssinadas ? ` + ${adendasAssinadas} ${adendasAssinadas === 1 ? "adenda" : "adendas"}` : ""}`, !!o?.contrato && !(noTemplate && !real?.abrirContrato)],
+    ["contrato", L.t("pc.negocioPag.doc.tContratoCt", { id: d.id }) + (adendasAssinadas ? ` + ${L.tn("pc.negocioPag.doc.maisUmaAdenda", "pc.negocioPag.doc.maisAdendas", adendasAssinadas)}` : ""), !!o?.contrato && !(noTemplate && !real?.abrirContrato)],
     ...docsAdenda,
-    ["encomenda", d.obra.ec ? `Nota de encomenda ${d.obra.ec.n}` : "", !!d.obra.ec],
+    ["encomenda", d.obra.ec ? L.t("pc.negocioPag.doc.tEncomenda", { n: d.obra.ec.n }) : "", !!d.obra.ec],
     // 3/11: paga no Eticadata ou validada à mão no CRM, o cliente vê-a como paga
-    ["fatura", d.fin.fatura ? `Fatura ${d.fin.fatura.n}${d.fin.pago ? ` · paga${d.fin.recibo ? ` (recibo ${d.fin.recibo.n})` : ""}` : " · por pagar"}` : "", !!d.fin.fatura && !faturasReais.some((f) => f.numero === d.fin.fatura?.n)],
+    ["fatura", d.fin.fatura ? L.t("pc.negocioPag.doc.tFatura", { n: d.fin.fatura.n }) + (d.fin.pago ? ` · ${d.fin.recibo ? L.t("pc.negocioPag.doc.pagaRecibo", { n: d.fin.recibo.n }) : L.t("pc.negocioPag.doc.paga")}` : ` · ${L.t("pc.negocioPag.doc.porPagar")}`) : "", !!d.fin.fatura && !faturasReais.some((f) => f.numero === d.fin.fatura?.n)],
     ...faturasReais.map((f): [string, string, boolean] => ["tr:" + f.id,
-      `Fatura ${f.numero} · ${nomeTranche(f)}${f.pagamento ? ` · paga${f.recibo ? ` (recibo ${f.recibo})` : ""}` : " · por pagar"}`, true]),
-    ["auto", au ? `Auto de receção ${au.n}` : "", !!au],
-    ["relatorio", "Relatório da obra", au?.estado === "assinado"],
+      L.t("pc.negocioPag.doc.tFaturaPrestacao", { n: f.numero, prestacao: nomeTranche(f) }) + (f.pagamento ? ` · ${f.recibo ? L.t("pc.negocioPag.doc.pagaRecibo", { n: f.recibo }) : L.t("pc.negocioPag.doc.paga")}` : ` · ${L.t("pc.negocioPag.doc.porPagar")}`), true]),
+    ["auto", au ? L.t("pc.negocioPag.doc.tAuto", { n: au.n }) : "", !!au],
+    ["relatorio", L.t("pc.negocioPag.doc.tRelatorio"), au?.estado === "assinado"],
   ];
   const daAdenda = (n: string) => d.adendas?.find((x) => x.n === n);
   const corpoDoc = (k: string) => k === "proposta" ? <PropostaDoc S={S} d={d} /> : k === "contrato" ? <ContratoDoc S={S} d={d} /> : k === "encomenda" ? <NotaEncomendaDoc d={d} /> : k === "fatura" ? <FaturaDoc S={S} d={d} />
@@ -420,12 +432,12 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
   if (P.estado === "rever" && (ad ? !!TA : o && T)) {
     agora = resposta === "escolher" ? (
       <>
-        <h2 className="text-xl font-semibold">O que prefere?</h2>
-        <p className="mt-1 text-[15px] text-slate-600">Diga-nos o que não está bem. Respondemos neste mesmo link.</p>
+        <h2 className="text-xl font-semibold">{L.t("pc.negocioPag.escolher.titulo")}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{L.t("pc.negocioPag.escolher.sub")}</p>
         <ul className="mt-4 grid gap-3">
           {([
-            ["alterar", MessageSquareText, "Pedir alterações", ad ? "Diga o que mudaria. Preparamos uma nova versão da adenda e recebe-a aqui." : "Diga o que mudaria. Preparamos uma nova proposta e recebe-a aqui."],
-            ["recusar", XCircle, ad ? "Não aceitar a adenda" : "Recusar a proposta", ad ? "Não quer estes trabalhos. O contrato e a obra ficam como estão." : "Não quer avançar com a obra."],
+            ["alterar", MessageSquareText, L.t("pc.negocioPag.escolher.alterar"), ad ? L.t("pc.negocioPag.escolher.alterarAdenda") : L.t("pc.negocioPag.escolher.alterarProposta")],
+            ["recusar", XCircle, ad ? L.t("pc.negocioPag.escolher.recusarAdenda") : L.t("pc.negocioPag.escolher.recusarProposta"), ad ? L.t("pc.negocioPag.escolher.recusarAdendaSub") : L.t("pc.negocioPag.escolher.recusarPropostaSub")],
           ] as const).map(([k, Ic, t, sub]) => (
             <li key={k}><button type="button" onClick={() => responder(k)}
               className="flex min-h-20 w-full items-start gap-3 rounded-xl border border-slate-300 bg-white p-4 text-left outline-none transition-colors hover:border-slate-500 focus-visible:ring-2 focus-visible:ring-slate-900">
@@ -435,60 +447,60 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
             </button></li>
           ))}
         </ul>
-        <div className="mt-3"><Botao ghost onClick={() => responder(null)}>Voltar à proposta</Botao></div>
+        <div className="mt-3"><Botao ghost onClick={() => responder(null)}>{L.t("pc.negocioPag.escolher.voltarProposta")}</Botao></div>
       </>
     ) : resposta === "alterar" ? (
       <>
-        <h2 className="text-xl font-semibold">O que gostava de mudar?</h2>
-        <p className="mt-1 text-[15px] text-slate-600">Escolha o que se aplica. Pode escolher mais do que um.</p>
-        <div className="mt-4"><Chips rotulo="O que gostava de mudar" opcoes={MOTIVOS_VERSAO} on={motivos} mudar={setMotivos} nome={doCliente} /></div>
+        <h2 className="text-xl font-semibold">{L.t("pc.negocioPag.alterar.titulo")}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{L.t("pc.negocioPag.alterar.sub")}</p>
+        <div className="mt-4"><Chips rotulo={L.t("pc.negocioPag.alterar.aria")} opcoes={MOTIVOS_VERSAO} on={motivos} mudar={setMotivos} nome={motivo} /></div>
         <label className="mt-4 block">
-          <span className="text-[15px] font-medium">Conte-nos o que mudaria</span>
-          <textarea value={texto} onChange={(ev) => setTexto(ev.target.value)} rows={3} placeholder="Ex.: azulejo mais claro, começar em novembro…"
+          <span className="text-[15px] font-medium">{L.t("pc.negocioPag.alterar.label")}</span>
+          <textarea value={texto} onChange={(ev) => setTexto(ev.target.value)} rows={3} placeholder={L.t("pc.negocioPag.alterar.placeholder")}
             className="mt-1.5 w-full rounded-xl border border-slate-300 p-3 text-[15px] outline-none focus:border-slate-900" />
         </label>
         <div className="mt-4 grid gap-2">
-          <Botao disabled={!motivos.length && !texto.trim()} onClick={() => { fazer(() => (ad ? A.pedirAlteracoesAdenda(d.id, ad.n, texto, motivos) : A.pedirAlteracoes(d.id, texto, motivos))); responder(null); }}>Enviar o pedido</Botao>
-          <Botao ghost onClick={() => responder("escolher")}>Voltar</Botao>
+          <Botao disabled={!motivos.length && !texto.trim()} onClick={() => { fazer(() => (ad ? A.pedirAlteracoesAdenda(d.id, ad.n, texto, motivos) : A.pedirAlteracoes(d.id, texto, motivos))); responder(null); }}>{L.t("pc.negocioPag.alterar.enviar")}</Botao>
+          <Botao ghost onClick={() => responder("escolher")}>{L.t("pc.negocioPag.voltar")}</Botao>
         </div>
       </>
     ) : resposta === "recusar" ? (
       <>
-        <h2 className="text-xl font-semibold">{ad ? "Porque não quer estes trabalhos?" : "Porque não quer avançar?"}</h2>
-        <p className="mt-1 text-[15px] text-slate-600">{ad ? "O contrato e a obra ficam como estão. " : "Ajuda-nos a melhorar. "}Se for só uma parte, <button type="button" onClick={() => responder("alterar")} className="font-medium text-slate-900 underline underline-offset-4">peça antes alterações</button>.</p>
-        <div className="mt-4"><Chips rotulo={ad ? "Porque não quer estes trabalhos" : "Porque não quer avançar"} opcoes={ad ? MOTIVOS_RECUSA_ADENDA : MOTIVOS_RECUSA} on={motivos} mudar={setMotivos} /></div>
+        <h2 className="text-xl font-semibold">{ad ? L.t("pc.negocioPag.recusar.tituloAdenda") : L.t("pc.negocioPag.recusar.tituloProposta")}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{ad ? L.t("pc.negocioPag.recusar.introAdenda") : L.t("pc.negocioPag.recusar.introProposta")}{" "}{L.t("pc.negocioPag.recusar.parte")}{" "}<button type="button" onClick={() => responder("alterar")} className="font-medium text-slate-900 underline underline-offset-4">{L.t("pc.negocioPag.recusar.pecaAlteracoes")}</button>.</p>
+        <div className="mt-4"><Chips rotulo={ad ? L.t("pc.negocioPag.recusar.ariaAdenda") : L.t("pc.negocioPag.recusar.ariaProposta")} opcoes={ad ? MOTIVOS_RECUSA_ADENDA : MOTIVOS_RECUSA} on={motivos} mudar={setMotivos} nome={motivo} /></div>
         <label className="mt-4 block">
-          <span className="text-[15px] font-medium">Quer acrescentar alguma coisa? <span className="font-normal text-slate-500">(opcional)</span></span>
+          <span className="text-[15px] font-medium">{L.t("pc.negocioPag.recusar.acrescentar")} <span className="font-normal text-slate-500">{L.t("pc.negocioPag.recusar.opcional")}</span></span>
           <textarea value={texto} onChange={(ev) => setTexto(ev.target.value)} rows={2}
             className="mt-1.5 w-full rounded-xl border border-slate-300 p-3 text-[15px] outline-none focus:border-slate-900" />
         </label>
         <div className="mt-4 grid gap-2">
           {ad
-            ? <Botao perigo disabled={!motivos.length && !texto.trim()} onClick={() => { const m = [...motivos, texto.trim()].filter(Boolean).join(" · "); fazer(() => A.recusarAdenda(d.id, ad.n, m)); responder(null); }}>Não aceitar a adenda</Botao>
-            : <Botao perigo disabled={!motivos.length} onClick={() => { fazer(() => A.recusarProposta(d.id, motivos, texto)); responder(null); }}>Recusar a proposta</Botao>}
-          <Botao ghost onClick={() => responder("escolher")}>Voltar</Botao>
+            ? <Botao perigo disabled={!motivos.length && !texto.trim()} onClick={() => { const m = [...motivos, texto.trim()].filter(Boolean).join(" · "); fazer(() => A.recusarAdenda(d.id, ad.n, m)); responder(null); }}>{L.t("pc.negocioPag.escolher.recusarAdenda")}</Botao>
+            : <Botao perigo disabled={!motivos.length} onClick={() => { fazer(() => A.recusarProposta(d.id, motivos, texto)); responder(null); }}>{L.t("pc.negocioPag.escolher.recusarProposta")}</Botao>}
+          <Botao ghost onClick={() => responder("escolher")}>{L.t("pc.negocioPag.voltar")}</Botao>
         </div>
       </>
     ) : ad && TA ? (
       // 21/10: a proposta da adenda, como a do orçamento: o total com IVA, os dias a mais e o valor do contrato antes e depois
       <>
-        <p className="text-sm font-medium text-slate-500">Trabalhos a mais · passo 1 de 5{ad.versoes?.length ? ` · versão ${versaoAdenda(ad)}, com o que pediu` : ""}</p>
-        <h2 className="mt-0.5 text-xl font-semibold">Reveja a proposta da adenda {ad.n}</h2>
-        <p className="mt-1 text-[15px] text-slate-600">{ad.linhas.map((x) => x.n).join(", ")}. Está toda aqui em baixo: o que vamos fazer, os materiais, o plano, o preço e as condições.</p>
+        <p className="text-sm font-medium text-slate-500">{L.t("pc.negocioPag.passoAdendaDe", { n: 1 })}{ad.versoes?.length ? ` · ${L.t("pc.negocioPag.versaoPedida", { v: versaoAdenda(ad) })}` : ""}</p>
+        <h2 className="mt-0.5 text-xl font-semibold">{L.t("pc.negocioPag.rever.adendaTitulo", { n: ad.n })}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{L.t("pc.negocioPag.rever.adendaTexto", { trabalhos: ad.linhas.map((x) => x.n).join(", ") })}</p>
         <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-200 pt-4">
-          <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">A mais, com IVA</dt><dd className="text-lg font-semibold tabular-nums">{eur(TA.total)} €</dd></div>
-          <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">Prazo</dt><dd className="text-lg font-semibold tabular-nums">+{diasAdenda(ad.linhas)} {diasAdenda(ad.linhas) === 1 ? "dia útil" : "dias úteis"}</dd></div>
+          <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">{L.t("pc.negocioPag.rever.aMais")}</dt><dd className="text-lg font-semibold tabular-nums">{eur(TA.total)} €</dd></div>
+          <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">{L.t("pc.negocioPag.rever.prazo")}</dt><dd className="text-lg font-semibold tabular-nums">+{L.tn("pc.docObra.diaUtil", "pc.docObra.diasUteis", diasAdenda(ad.linhas))}</dd></div>
         </dl>
-        <p className="mt-3 text-sm tabular-nums text-slate-500">O contrato passa de {eur(valorContrato(d, S).total)} € para {eur(valorContrato(d, S).total + TA.total)} €, com IVA.</p>
+        <p className="mt-3 text-sm tabular-nums text-slate-500">{L.t("pc.negocioPag.rever.contratoPassa", { de: eur(valorContrato(d, S).total), para: eur(valorContrato(d, S).total + TA.total) })}</p>
       </>
     ) : (
       <>
-        <p className="text-sm font-medium text-slate-500">Passo 1 de 5{o.versoes?.length ? ` · versão ${versaoAtual(o)}, com o que pediu` : ""}</p>
-        <h2 className="mt-0.5 text-xl font-semibold">Reveja a sua proposta</h2>
-        <p className="mt-1 text-[15px] text-slate-600">Está toda aqui em baixo: o que vamos fazer, fase a fase, os materiais, o preço e as condições.</p>
+        <p className="text-sm font-medium text-slate-500">{L.t("pc.negocioPag.passoDe", { n: 1 })}{o.versoes?.length ? ` · ${L.t("pc.negocioPag.versaoPedida", { v: versaoAtual(o) })}` : ""}</p>
+        <h2 className="mt-0.5 text-xl font-semibold">{L.t("pc.negocioPag.rever.titulo")}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{L.t("pc.negocioPag.rever.texto")}</p>
         <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-200 pt-4">
-          <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">Total, com IVA</dt><dd className="text-lg font-semibold tabular-nums">{eur(T.total)} €</dd></div>
-          <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">Prazo</dt><dd className="text-lg font-semibold tabular-nums">{d.f.prazo_exec ? `${d.f.prazo_exec} dias úteis` : "a combinar"}</dd></div>
+          <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">{L.t("pc.negocioPag.rever.totalIva")}</dt><dd className="text-lg font-semibold tabular-nums">{eur(T.total)} €</dd></div>
+          <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">{L.t("pc.negocioPag.rever.prazo")}</dt><dd className="text-lg font-semibold tabular-nums">{d.f.prazo_exec ? L.t("pc.docObra.diasUteis", { n: d.f.prazo_exec }) : L.t("pc.negocioPag.rever.aCombinar")}</dd></div>
         </dl>
       </>
     );
@@ -496,12 +508,12 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
     const pc = ad ? ad.pedidoCliente! : o!.pedidoCliente!;
     agora = (
       <>
-        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />Pedido enviado</p>
-        <h2 className="mt-2 text-xl font-semibold">{ad ? `Estamos a preparar uma nova versão da adenda ${ad.n}` : "Estamos a preparar uma nova proposta"}</h2>
-        <p className="mt-1 text-[15px] text-slate-600">Recebe-a aqui, neste mesmo link. Não precisa de fazer nada agora.</p>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />{L.t("pc.negocioPag.pedido.enviado")}</p>
+        <h2 className="mt-2 text-xl font-semibold">{ad ? L.t("pc.negocioPag.pedido.tituloAdenda", { n: ad.n }) : L.t("pc.negocioPag.pedido.tituloProposta")}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{L.t("pc.negocioPag.pedido.texto")}</p>
         <div className="mt-4 border-t border-slate-200 pt-4">
-          <p className="text-sm font-medium text-slate-500">O que pediu</p>
-          {pc.motivos.length > 0 && <p className="mt-1 text-[15px]">{pc.motivos.map(doCliente).join(" · ")}</p>}
+          <p className="text-sm font-medium text-slate-500">{L.t("pc.negocioPag.pedido.oQuePediu")}</p>
+          {pc.motivos.length > 0 && <p className="mt-1 text-[15px]">{pc.motivos.map(motivo).join(" · ")}</p>}
           {pc.nota && <p className="mt-1 text-[15px] text-slate-600">«{pc.nota}»</p>}
         </div>
       </>
@@ -509,9 +521,9 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
   } else if (P.estado === "recusada") {
     agora = (
       <>
-        <p className="flex items-center gap-2 text-[15px] font-semibold text-slate-600"><XCircle className="h-5 w-5" aria-hidden="true" />Proposta recusada</p>
-        <h2 className="mt-2 text-xl font-semibold">Obrigado por nos dizer</h2>
-        <p className="mt-1 text-[15px] text-slate-600">Ficamos à disposição. Se mudar de ideias, fale connosco: preparamos uma nova proposta.</p>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-slate-600"><XCircle className="h-5 w-5" aria-hidden="true" />{L.t("pc.negocioPag.recusada.etiqueta")}</p>
+        <h2 className="mt-2 text-xl font-semibold">{L.t("pc.negocioPag.recusada.titulo")}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{L.t("pc.negocioPag.recusada.texto")}</p>
       </>
     );
   } else if (P.estado === "preparar" && !ad && !o?.contratoVersoes?.length && (outros.some((x) => x.id === "pag" || x.id.startsWith("tr-")) || d.fin.pago || faturasReais.some((f) => f.pagamento))) {
@@ -520,27 +532,27 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
     const porPagar = outros.some((x) => x.id === "pag" || x.id.startsWith("tr-"));
     agora = (
       <>
-        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />{porPagar ? "Proposta aceite" : "Pagamento recebido"}</p>
-        <h2 className="mt-2 text-xl font-semibold">{porPagar ? "Primeiro, o pagamento do adiantamento" : "Estamos a preparar a sua obra"}</h2>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />{porPagar ? L.t("pc.negocioPag.aceite.proposta") : L.t("pc.negocioPag.aceite.pagamentoRecebido")}</p>
+        <h2 className="mt-2 text-xl font-semibold">{porPagar ? L.t("pc.negocioPag.aceite.primeiroPagamento") : L.t("pc.negocioPag.aceite.estamosAPreparar")}</h2>
         <p className="mt-1 text-[15px] text-slate-600">{porPagar
-          ? "A fatura está aqui em baixo, em «Também precisa de si». O contrato aparece também aqui, neste mesmo link, para assinar. Com o pagamento confirmado, medimos o local e fechamos o plano da obra."
-          : "O contrato aparece aqui, neste mesmo link, para assinar. Ao mesmo tempo, medimos o local e fechamos o plano da obra. Não precisa de fazer nada agora."}</p>
+          ? L.t("pc.negocioPag.aceite.textoPorPagar")
+          : L.t("pc.negocioPag.aceite.textoPago")}</p>
       </>
     );
   } else if (P.estado === "preparar") {
     agora = (
       <>
-        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />{ad ? `Adenda ${ad.n} aceite` : "Proposta aceite"}</p>
-        <h2 className="mt-2 text-xl font-semibold">{(ad ?? o)?.contratoVersoes?.length ? (ad ? "A nova versão do contrato da adenda está quase pronta" : "A nova versão do contrato está quase pronta") : ad ? "O contrato da adenda está a ser preparado" : "O contrato está a ser preparado"}</h2>
-        <p className="mt-1 text-[15px] text-slate-600">Segue a proposta que aceitou. Quando estiver pronto, aparece aqui, neste mesmo link, para assinar. Não precisa de fazer nada agora.</p>
-        <p className="mt-3 flex items-center gap-2 text-sm text-slate-500"><Clock className="h-4 w-4" aria-hidden="true" />Normalmente fica pronto no mesmo dia.</p>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />{ad ? L.t("pc.negocioPag.aceite.adenda", { n: ad.n }) : L.t("pc.negocioPag.aceite.proposta")}</p>
+        <h2 className="mt-2 text-xl font-semibold">{(ad ?? o)?.contratoVersoes?.length ? (ad ? L.t("pc.negocioPag.preparar.versaoContratoAdenda") : L.t("pc.negocioPag.preparar.versaoContrato")) : ad ? L.t("pc.negocioPag.preparar.contratoAdenda") : L.t("pc.negocioPag.preparar.contrato")}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{L.t("pc.negocioPag.preparar.texto")}</p>
+        <p className="mt-3 flex items-center gap-2 text-sm text-slate-500"><Clock className="h-4 w-4" aria-hidden="true" />{L.t("pc.negocioPag.preparar.mesmoDia")}</p>
       </>
     );
   } else if (P.estado === "assinar") {
     // 15/10: assinar abre aqui, no cartão do passo: Chave Móvel Digital ou código por SMS (AssinaturaContrato.tsx)
     agora = confirmar === "assinar" ? (
       ad && real
-        ? real.assinarComSms({ titulo: `Assinar a adenda ${ad.n}`, texto: `Li e aceito a adenda ${ad.n} ao contrato CT 2026/${d.id}.`, acao: "Assinar a adenda", fim: "adenda_assinar", ref: ad.n, voltar: () => setConfirmar(null) })
+        ? real.assinarComSms({ titulo: L.t("pc.negocioPag.assinar.adendaTitulo", { n: ad.n }), texto: L.t("pc.negocioPag.assinar.adendaLi", { n: ad.n, id: d.id }), acao: L.t("pc.negocioPag.assinar.adenda"), fim: "adenda_assinar", ref: ad.n, voltar: () => setConfirmar(null) })
         : ad
         ? <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} telemovel={d.tel} contrato={ad.n} aceito={`Li e aceito a adenda ${ad.n} ao contrato CT 2026/${d.id}.`} acao="Assinar a adenda" voltar="Voltar à adenda"
             onAssinar={(as) => fazer(() => A.assinarAdendaCom(d.id, ad.n, as))} onCancelar={() => setConfirmar(null)} />
@@ -549,59 +561,59 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
     ) : (
       pedirContrato ? (
       <>
-        <h2 className="text-xl font-semibold">{ad ? "O que quer mudar no contrato da adenda?" : "O que quer mudar no contrato?"}</h2>
-        <p className="mt-1 text-[15px] text-slate-600">Escolha as cláusulas e diga o que não lhe agrada em cada uma. A nossa equipa jurídica revê e a nova versão aparece aqui.</p>
-        <div className="mt-4"><Chips rotulo="Cláusulas a mudar" opcoes={TITULOS_CLAUSULAS} on={Object.keys(cls)} mudar={(v) => setCls((a) => Object.fromEntries(v.map((c) => [c, a[c] ?? ""])))} /></div>
+        <h2 className="text-xl font-semibold">{ad ? L.t("pc.negocioPag.pedirContrato.tituloAdenda") : L.t("pc.negocioPag.pedirContrato.titulo")}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{L.t("pc.negocioPag.pedirContrato.texto")}</p>
+        <div className="mt-4"><Chips rotulo={L.t("pc.negocioPag.pedirContrato.aria")} nome={clausula} opcoes={TITULOS_CLAUSULAS} on={Object.keys(cls)} mudar={(v) => setCls((a) => Object.fromEntries(v.map((c) => [c, a[c] ?? ""])))} /></div>
         {Object.keys(cls).map((c) => (
           <label key={c} className="mt-4 block animate-in fade-in-0">
-            <span className="text-[15px] font-medium">{c}: o que não lhe agrada</span>
+            <span className="text-[15px] font-medium">{L.t("pc.negocioPag.pedirContrato.naoAgrada", { clausula: clausula(c) })}</span>
             <textarea value={cls[c]} rows={2} onChange={(ev) => setCls((a) => ({ ...a, [c]: ev.target.value }))}
               className="mt-1.5 w-full rounded-xl border border-slate-300 p-3 text-[15px] outline-none focus:border-slate-900" />
           </label>
         ))}
         <div className="mt-4 grid gap-2">
           <Botao disabled={!Object.keys(cls).length || Object.values(cls).some((x) => !x.trim())}
-            onClick={() => { const cs = Object.entries(cls).map(([c, nota]) => ({ c, nota })); fazer(() => (ad ? A.pedirAlteracoesContratoAdenda(d.id, ad.n, cs) : A.pedirAlteracoesContrato(d.id, cs))); setPedirContrato(false); setCls({}); }}>Enviar o pedido</Botao>
-          <Botao ghost onClick={() => { setPedirContrato(false); setCls({}); }}>Voltar ao contrato</Botao>
+            onClick={() => { const cs = Object.entries(cls).map(([c, nota]) => ({ c, nota })); fazer(() => (ad ? A.pedirAlteracoesContratoAdenda(d.id, ad.n, cs) : A.pedirAlteracoesContrato(d.id, cs))); setPedirContrato(false); setCls({}); }}>{L.t("pc.negocioPag.alterar.enviar")}</Botao>
+          <Botao ghost onClick={() => { setPedirContrato(false); setCls({}); }}>{L.t("pc.negocioPag.pedirContrato.voltar")}</Botao>
         </div>
       </>
     ) : ad ? (
       // 21/10: o contrato da adenda, como o contrato: lê-se em baixo e assina-se com a Chave Móvel Digital ou o código por SMS
       <>
-        <p className="text-sm font-medium text-slate-500">Trabalhos a mais · passo 4 de 5{ad.contratoRevisto ? ` · versão ${(ad.contratoVersoes?.length ?? 0) + 1}, revista a seu pedido` : ""}</p>
-        <h2 className="mt-0.5 text-xl font-semibold">Assinar a adenda {ad.n}</h2>
-        <p className="mt-1 text-[15px] text-slate-600">{ad.linhas.map((x) => x.n).join(", ")}. A adenda segue a proposta que aceitou. Assinada, junta-se ao contrato e os trabalhos entram no plano da obra.</p>
+        <p className="text-sm font-medium text-slate-500">{L.t("pc.negocioPag.passoAdendaDe", { n: 4 })}{ad.contratoRevisto ? ` · ${L.t("pc.negocioPag.versaoRevista", { v: (ad.contratoVersoes?.length ?? 0) + 1 })}` : ""}</p>
+        <h2 className="mt-0.5 text-xl font-semibold">{L.t("pc.negocioPag.assinar.adendaTitulo", { n: ad.n })}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{L.t("pc.negocioPag.assinar.adendaTexto", { trabalhos: ad.linhas.map((x) => x.n).join(", ") })}</p>
         {TA && <dl className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-200 pt-4">
-          <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">A mais, com IVA</dt><dd className="text-lg font-semibold tabular-nums">{eur(TA.total)} €</dd></div>
-          <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">Prazo</dt><dd className="text-lg font-semibold tabular-nums">+{diasAdenda(ad.linhas)} {diasAdenda(ad.linhas) === 1 ? "dia útil" : "dias úteis"}</dd></div>
+          <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">{L.t("pc.negocioPag.rever.aMais")}</dt><dd className="text-lg font-semibold tabular-nums">{eur(TA.total)} €</dd></div>
+          <div><dt className="text-xs uppercase tracking-[0.12em] text-slate-500">{L.t("pc.negocioPag.rever.prazo")}</dt><dd className="text-lg font-semibold tabular-nums">+{L.tn("pc.docObra.diaUtil", "pc.docObra.diasUteis", diasAdenda(ad.linhas))}</dd></div>
         </dl>}
       </>
     ) : (
       <>
-        <p className="text-sm font-medium text-slate-500">Passo 3 de 5{o?.contratoRevisto ? ` · versão ${(o.contratoVersoes?.length ?? 0) + 1}, revista a seu pedido` : ""}</p>
-        <h2 className="mt-0.5 text-xl font-semibold">Assinar o contrato</h2>
-        <p className="mt-1 text-[15px] text-slate-600">O contrato CT 2026/{d.id} segue a proposta que aceitou. Leia-o aqui em baixo e assine quando estiver pronto.</p>
+        <p className="text-sm font-medium text-slate-500">{L.t("pc.negocioPag.passoDe", { n: 3 })}{o?.contratoRevisto ? ` · ${L.t("pc.negocioPag.versaoRevista", { v: (o.contratoVersoes?.length ?? 0) + 1 })}` : ""}</p>
+        <h2 className="mt-0.5 text-xl font-semibold">{L.t("pc.negocioPag.assinar.contratoTitulo")}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{L.t("pc.negocioPag.assinar.contratoTexto", { id: d.id })}</p>
       </>
     ));
   } else if (P.estado === "revisao" && (ad ? ad.contratoPedido : o?.contratoPedido)) {
     const cp = ad ? ad.contratoPedido! : o!.contratoPedido!;
     agora = (
       <>
-        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />Pedido enviado</p>
-        <h2 className="mt-2 flex items-start gap-2 text-xl font-semibold"><Scale className="mt-1 h-5 w-5 shrink-0 text-slate-500" aria-hidden="true" />{ad ? "O contrato da adenda está a ser revisto pela nossa equipa jurídica" : "O contrato está a ser revisto pela nossa equipa jurídica"}</h2>
-        <p className="mt-1 text-[15px] text-slate-600">Quando estiver revisto, a nova versão aparece aqui, neste mesmo link, para assinar. Não precisa de fazer nada agora.</p>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />{L.t("pc.negocioPag.pedido.enviado")}</p>
+        <h2 className="mt-2 flex items-start gap-2 text-xl font-semibold"><Scale className="mt-1 h-5 w-5 shrink-0 text-slate-500" aria-hidden="true" />{ad ? L.t("pc.negocioPag.revisao.tituloAdenda") : L.t("pc.negocioPag.revisao.titulo")}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{L.t("pc.negocioPag.revisao.texto")}</p>
         <div className="mt-4 border-t border-slate-200 pt-4">
-          <p className="text-sm font-medium text-slate-500">O que pediu</p>
-          <ul className="mt-1 space-y-1">{cp.clausulas.map((x) => <li key={x.c} className="text-[15px]"><b className="font-medium">{x.c}:</b> <span className="text-slate-600">«{x.nota}»</span></li>)}</ul>
+          <p className="text-sm font-medium text-slate-500">{L.t("pc.negocioPag.pedido.oQuePediu")}</p>
+          <ul className="mt-1 space-y-1">{cp.clausulas.map((x) => <li key={x.c} className="text-[15px]"><b className="font-medium">{clausula(x.c)}:</b> <span className="text-slate-600">«{x.nota}»</span></li>)}</ul>
         </div>
       </>
     );
   } else if (P.estado === "sem" && ad) {
     agora = (
       <>
-        <p className="text-sm font-medium text-slate-500">Trabalhos a mais</p>
-        <h2 className="mt-0.5 text-xl font-semibold">A nova versão da adenda {ad.n} (v{versaoAdenda(ad)}) está a ser preparada</h2>
-        <p className="mt-1 text-[15px] text-slate-600">Com o que pediu. Avisamos aqui quando estiver pronta; não precisa de fazer nada agora.</p>
+        <p className="text-sm font-medium text-slate-500">{L.t("pc.negocioPag.trabalhosMais")}</p>
+        <h2 className="mt-0.5 text-xl font-semibold">{L.t("pc.negocioPag.adendaNova.titulo", { n: ad.n, v: versaoAdenda(ad) })}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{L.t("pc.negocioPag.adendaNova.texto")}</p>
       </>
     );
   } else if (P.estado === "pagar" && ad) {
@@ -609,11 +621,11 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
     const f0 = faturasAdenda(ad).find((f) => f.i === 0);
     agora = (
       <>
-        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />Adenda {ad.n} assinada</p>
-        <h2 className="mt-2 text-xl font-semibold">{f0 ? `Pagar a ${nomeParcela(0)} da adenda` : `A fatura da ${nomeParcela(0)} está a caminho`}</h2>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />{L.t("pc.negocioPag.adendaPagar.assinada", { n: ad.n })}</p>
+        <h2 className="mt-2 text-xl font-semibold">{f0 ? L.t("pc.negocioPag.adendaPagar.titulo", { parcela: parcela(0) }) : L.t("pc.negocioPag.adendaPagar.faturaCaminho", { parcela: parcela(0) })}</h2>
         <p className="mt-1 text-[15px] text-slate-600">{f0
-          ? f0.pag?.comprovativo ? "Já nos avisou do pagamento: estamos a confirmar. Depois, os materiais dos trabalhos a mais encomendam-se." : "Os dados para pagar estão aqui em baixo. Com o pagamento confirmado, os materiais dos trabalhos a mais encomendam-se."
-          : "Paga-se nas mesmas parcelas do contrato. A fatura aparece aqui, neste mesmo link, com os dados para pagar."}</p>
+          ? f0.pag?.comprovativo ? L.t("pc.negocioPag.adendaPagar.textoAvisado") : L.t("pc.negocioPag.adendaPagar.textoPagar")
+          : L.t("pc.negocioPag.adendaPagar.textoCaminho")}</p>
       </>
     );
   } else if (P.estado === "auto" && au) {
@@ -622,26 +634,26 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
         onAssinar={(as) => fazer(() => A.assinarAuto(d.id, as, receber === "obs" ? obs : undefined))} onCancelar={() => setConfirmar(null)} />
     ) : (
       <>
-        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />Obra concluída</p>
-        <h2 className="mt-2 text-xl font-semibold">Receber o serviço</h2>
-        <p className="mt-1 text-[15px] text-slate-600">Veja a obra com calma. Depois assine o auto de receção: a garantia começa nesse dia e recebe aqui o relatório da obra, com tudo o que fizemos.</p>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />{L.t("pc.negocioPag.auto.etiqueta")}</p>
+        <h2 className="mt-2 text-xl font-semibold">{L.t("pc.negocioPag.auto.titulo")}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{L.t("pc.negocioPag.auto.texto")}</p>
         <fieldset className="mt-4 border-t border-slate-200 pt-4">
-          <legend className="text-[15px] font-medium">Como encontrou a obra?</legend>
+          <legend className="text-[15px] font-medium">{L.t("pc.negocioPag.auto.comoEncontrou")}</legend>
           <div className="mt-2 grid gap-2 sm:grid-cols-2">
-            {([["ok", "Está tudo bem"], ["obs", "Tenho uma observação"]] as const).map(([k, t]) => (
+            {([["ok", "pc.negocioPag.auto.tudoBem"], ["obs", "pc.negocioPag.auto.observacao"]] as const).map(([k, t]) => (
               <button key={k} type="button" aria-pressed={receber === k} onClick={() => setReceber(k)}
                 className={cn("flex min-h-12 items-center gap-2 rounded-xl border px-4 text-left text-[15px] font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-slate-900",
                   receber === k ? "border-slate-900 bg-slate-900 text-white" : "border-slate-300 bg-white hover:border-slate-500")}>
-                {receber === k && <Check className="h-4 w-4" aria-hidden="true" />}{t}
+                {receber === k && <Check className="h-4 w-4" aria-hidden="true" />}{L.t(t)}
               </button>
             ))}
           </div>
           {receber === "obs" && (
             <label className="mt-3 block animate-in fade-in-0">
-              <span className="text-[15px] font-medium">A sua observação</span>
-              <textarea value={obs} onChange={(ev) => setObs(ev.target.value)} rows={3} placeholder="Ex.: falta rejuntar um azulejo atrás da porta"
+              <span className="text-[15px] font-medium">{L.t("pc.negocioPag.auto.suaObservacao")}</span>
+              <textarea value={obs} onChange={(ev) => setObs(ev.target.value)} rows={3} placeholder={L.t("pc.negocioPag.auto.exObservacao")}
                 className="mt-1.5 w-full rounded-xl border border-slate-300 p-3 text-[15px] outline-none focus:border-slate-900" />
-              <span className="text-sm text-slate-500">Fica escrita no auto; o responsável de obra resolve-a ao abrigo da garantia.</span>
+              <span className="text-sm text-slate-500">{L.t("pc.negocioPag.auto.fica")}</span>
             </label>
           )}
         </fieldset>
@@ -650,30 +662,30 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
   } else if (P.estado === "relatorio" && au) {
     agora = (
       <>
-        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><ClipboardCheck className="h-5 w-5" aria-hidden="true" />Obra recebida · auto {au.n} assinado</p>
-        <h2 className="mt-2 text-xl font-semibold">O relatório da sua obra</h2>
-        <p className="mt-1 text-[15px] text-slate-600">Tudo o que fizemos, com as fotografias, os materiais e a garantia. Fica sempre aqui, neste link. Obrigado pela confiança.</p>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><ClipboardCheck className="h-5 w-5" aria-hidden="true" />{L.t("pc.negocioPag.relatorio.etiqueta", { n: au.n })}</p>
+        <h2 className="mt-2 text-xl font-semibold">{L.t("pc.negocioPag.relatorio.titulo")}</h2>
+        <p className="mt-1 text-[15px] text-slate-600">{L.t("pc.negocioPag.relatorio.texto")}</p>
       </>
     );
   } else if (P.estado === "obra") {
     const ultimo = fasesObra.length ? Math.max(...fasesObra.map((x) => x.i1)) : 0;
     agora = (
       <>
-        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />{o?.vendaDireta ? "Proposta aceite" : "Contrato assinado"}</p>
-        <h2 className="mt-2 text-xl font-semibold">A sua obra</h2>
+        <p className="flex items-center gap-2 text-[15px] font-semibold text-emerald-700"><Check className="h-5 w-5" aria-hidden="true" />{o?.vendaDireta ? L.t("pc.negocioPag.obra.propostaAceite") : L.t("pc.negocioPag.obra.contratoAssinado")}</p>
+        <h2 className="mt-2 text-xl font-semibold">{L.t("pc.negocioPag.obra.titulo")}</h2>
         <p className="mt-1 text-[15px] text-slate-600">
-          {p?.estado === "concluída" ? "Concluída. Obrigado pela confiança."
+          {p?.estado === "concluída" ? L.t("pc.negocioPag.obra.concluida")
             : p?.estado === "em curso" ? (() => {
                 // o que a equipa está a fazer hoje e quando acaba, numa frase
                 // 12/11: o dia pelo calendário (o p.dia da vista fica parado até alguém da equipa abrir o negócio)
                 const k = diaDeHoje(p), hoje = [...new Set(tarefasDoCliente(p).filter((t) => t.dia <= k && k < t.dia + t.dur && t.exec?.estado !== "validada").map((t) => t.nome.toLowerCase()))];
-                const fim = rotuloDia(p, Math.max(...p.tasks.map((t) => t.dia + t.dur)) - 1);
-                return `Em curso. ${hoje.length ? `Hoje a equipa está em ${hoje.join(" e ")}. ` : ""}A obra acaba a ${fim}. Em baixo vê as fotografias de cada trabalho.`;
+                const fim = rotuloDiaEm(p, Math.max(...p.tasks.map((t) => t.dia + t.dur)) - 1, L.idioma);
+                return L.t("pc.negocioPag.obra.emCurso", { hoje: hoje.length ? L.t("pc.negocioPag.obra.hoje", { trabalhos: hoje.join(L.t("pc.negocioPag.obra.e")) }) : "", fim });
               })()
-            : p && p.origem === "orcamento" && fasesObra.length ? `Começa a ${rotuloDia(p, 0)} e acaba a ${rotuloDia(p, ultimo)}.`
-            : "As datas confirmam-se em breve; avisamos aqui."}
+            : p && p.origem === "orcamento" && fasesObra.length ? L.t("pc.negocioPag.obra.datas", { inicio: rotuloDiaEm(p, 0, L.idioma), fim: rotuloDiaEm(p, ultimo, L.idioma) })
+            : L.t("pc.negocioPag.obra.semDatas")}
         </p>
-        {d.adendas?.at(-1)?.estado === "recusada" && <p className="mt-3 border-t border-slate-200 pt-3 text-sm text-slate-600">Não aceitou a adenda {d.adendas.at(-1)!.n}: a obra segue como no contrato. Se quiser outra coisa, escreva-nos aqui em baixo.</p>}
+        {d.adendas?.at(-1)?.estado === "recusada" && <p className="mt-3 border-t border-slate-200 pt-3 text-sm text-slate-600">{L.t("pc.negocioPag.obra.adendaNaoAceite", { n: d.adendas.at(-1)!.n })}</p>}
       </>
     );
   }
@@ -684,8 +696,8 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
   const obraVisivel = !!p && (!!o?.vendaDireta || o?.contrato === "assinado") && P.estado !== "relatorio";
   // 2/11, portal real: aceitar a adenda pede o código por SMS (no lugar da confirmação da V1)
   if (real && ad && TA && P.estado === "rever" && confirmar === "aceitar") {
-    agora = real.assinarComSms({ titulo: `Aceitar a adenda ${ad.n}`, texto: `De ${eur(TA.total)} € com IVA, mais ${diasAdenda(ad.linhas)} ${diasAdenda(ad.linhas) === 1 ? "dia útil" : "dias úteis"} de obra.`,
-      acao: "Aceitar a adenda", fim: "adenda_aceitar", ref: ad.n, voltar: () => setConfirmar(null) });
+    agora = real.assinarComSms({ titulo: L.t("pc.negocioPag.aceitarAdenda.acao") + ` ${ad.n}`, texto: L.t("pc.negocioPag.aceitarAdenda.texto", { total: eur(TA.total), dias: L.tn("pc.docObra.diaUtil", "pc.docObra.diasUteis", diasAdenda(ad.linhas)) }),
+      acao: L.t("pc.negocioPag.aceitarAdenda.acao"), fim: "adenda_aceitar", ref: ad.n, voltar: () => setConfirmar(null) });
   }
 
   /* ---------------------------------------------- a barra fixa em baixo: o próximo passo sempre à mão */
@@ -693,26 +705,26 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
   const barraReal = !real ? null : ad && P.estado === "rever" ? (
     resposta || confirmar === "aceitar" ? null : (
       <div className="flex flex-col gap-1 sm:flex-row-reverse sm:items-center sm:gap-3">
-        <div className="sm:w-64"><Botao onClick={() => { setConfirmar("aceitar"); topo(); }}>Aceitar a adenda</Botao></div>
-        <button type="button" onClick={() => responder("escolher")} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">Pedir alterações ou recusar</button>
+        <div className="sm:w-64"><Botao onClick={() => { setConfirmar("aceitar"); topo(); }}>{L.t("pc.negocioPag.aceitarAdenda.acao")}</Botao></div>
+        <button type="button" onClick={() => responder("escolher")} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">{L.t("pc.negocioPag.pedirOuRecusar")}</button>
       </div>
     )
   ) : ad && P.estado === "assinar" ? (
     confirmar === "assinar" || pedirContrato ? null : (
       <div className="flex flex-col gap-1 sm:flex-row-reverse sm:items-center sm:gap-3">
-        <div className="sm:w-64"><Botao onClick={() => { setConfirmar("assinar"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar a adenda</span></Botao></div>
-        <button type="button" onClick={() => { setPedirContrato(true); topo(); }} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">Pedir alterações à adenda</button>
+        <div className="sm:w-64"><Botao onClick={() => { setConfirmar("assinar"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />{L.t("pc.negocioPag.assinar.adenda")}</span></Botao></div>
+        <button type="button" onClick={() => { setPedirContrato(true); topo(); }} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">{L.t("pc.negocioPag.assinar.pedirAdenda")}</button>
       </div>
     )
   ) : !ad && P.estado === "rever" ? (
-    <div className="sm:ml-auto sm:w-72"><Botao onClick={real.abrirProposta}>Responder à proposta</Botao></div>
+    <div className="sm:ml-auto sm:w-72"><Botao onClick={real.abrirProposta}>{L.t("pc.negocioPag.responder")}</Botao></div>
   ) : !ad && P.estado === "assinar" && real.abrirContrato ? (
-    <div className="sm:ml-auto sm:w-72"><Botao onClick={real.abrirContrato}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar o contrato</span></Botao></div>
+    <div className="sm:ml-auto sm:w-72"><Botao onClick={real.abrirContrato}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />{L.t("pc.negocioPag.assinar.contratoTitulo")}</span></Botao></div>
   ) : P.estado === "auto" ? (
     confirmar === "auto" ? null : (
       <div className="flex flex-col gap-1 sm:flex-row-reverse sm:items-center sm:gap-3">
-        <div className="sm:w-72"><Botao disabled={!receber || (receber === "obs" && !obs.trim())} onClick={() => { setConfirmar("auto"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar o auto de receção</span></Botao></div>
-        {!receber && <p className="text-center text-sm text-slate-500 sm:mr-auto sm:text-left">Diga primeiro como encontrou a obra.</p>}
+        <div className="sm:w-72"><Botao disabled={!receber || (receber === "obs" && !obs.trim())} onClick={() => { setConfirmar("auto"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />{L.t("pc.negocioPag.auto.assinar")}</span></Botao></div>
+        {!receber && <p className="text-center text-sm text-slate-500 sm:mr-auto sm:text-left">{L.t("pc.negocioPag.auto.digaPrimeiro")}</p>}
       </div>
     )
   ) : null;
@@ -720,44 +732,44 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
     confirmar === "aceitar" ? (
       <div className="space-y-2">
         {ad
-          ? <p className="text-[15px]">Aceitar a adenda {ad.n}, de <b className="tabular-nums">{TA ? eur(TA.total) : ""} €</b> com IVA?</p>
-          : <p className="text-[15px]">Aceitar a proposta PR 2026/{d.id}, de <b className="tabular-nums">{T ? eur(T.total) : ""} €</b> com IVA?</p>}
-        <div className="grid grid-cols-2 gap-2"><Botao ghost onClick={() => setConfirmar(null)}>Voltar</Botao><Botao onClick={() => fazer(() => (ad ? A.aceitarAdenda(d.id, ad.n) : A.aceitar(d.id)))}>Aceitar</Botao></div>
+          ? <p className="text-[15px]">{L.t("pc.negocioPag.confirmar.adenda", { n: ad.n })} <b className="tabular-nums">{TA ? eur(TA.total) : ""} €</b> {L.t("pc.negocioPag.confirmar.iva")}</p>
+          : <p className="text-[15px]">{L.t("pc.negocioPag.confirmar.proposta", { id: d.id })} <b className="tabular-nums">{T ? eur(T.total) : ""} €</b> {L.t("pc.negocioPag.confirmar.iva")}</p>}
+        <div className="grid grid-cols-2 gap-2"><Botao ghost onClick={() => setConfirmar(null)}>{L.t("pc.negocioPag.voltar")}</Botao><Botao onClick={() => fazer(() => (ad ? A.aceitarAdenda(d.id, ad.n) : A.aceitar(d.id)))}>{L.t("pc.negocioPag.aceitar")}</Botao></div>
       </div>
     ) : (
       <div className="flex flex-col gap-1 sm:flex-row-reverse sm:items-center sm:gap-3">
-        <div className="sm:w-64"><Botao onClick={() => setConfirmar("aceitar")}>{ad ? "Aceitar a adenda" : "Aceitar a proposta"}</Botao></div>
-        <button type="button" onClick={() => responder("escolher")} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">Pedir alterações ou recusar</button>
+        <div className="sm:w-64"><Botao onClick={() => setConfirmar("aceitar")}>{ad ? L.t("pc.negocioPag.aceitarAdenda.acao") : L.t("pc.negocioPag.aceitarProposta")}</Botao></div>
+        <button type="button" onClick={() => responder("escolher")} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">{L.t("pc.negocioPag.pedirOuRecusar")}</button>
       </div>
     )
   ) : P.estado === "auto" ? (
     confirmar === "auto" ? null : (
       <div className="flex flex-col gap-1 sm:flex-row-reverse sm:items-center sm:gap-3">
-        <div className="sm:w-72"><Botao disabled={!receber || (receber === "obs" && !obs.trim())} onClick={() => { setConfirmar("auto"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />Assinar o auto de receção</span></Botao></div>
-        {!receber && <p className="text-center text-sm text-slate-500 sm:mr-auto sm:text-left">Diga primeiro como encontrou a obra.</p>}
+        <div className="sm:w-72"><Botao disabled={!receber || (receber === "obs" && !obs.trim())} onClick={() => { setConfirmar("auto"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />{L.t("pc.negocioPag.auto.assinar")}</span></Botao></div>
+        {!receber && <p className="text-center text-sm text-slate-500 sm:mr-auto sm:text-left">{L.t("pc.negocioPag.auto.digaPrimeiro")}</p>}
       </div>
     )
   ) : P.estado === "assinar" ? (
     confirmar === "assinar" || pedirContrato ? null : (
       <div className="flex flex-col gap-1 sm:flex-row-reverse sm:items-center sm:gap-3">
-        <div className="sm:w-64"><Botao onClick={() => { setConfirmar("assinar"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />{ad ? "Assinar a adenda" : "Assinar o contrato"}</span></Botao></div>
-        <button type="button" onClick={() => { setPedirContrato(true); topo(); }} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">{ad ? "Pedir alterações à adenda" : "Pedir alterações ao contrato"}</button>
+        <div className="sm:w-64"><Botao onClick={() => { setConfirmar("assinar"); topo(); }}><span className="inline-flex items-center gap-2"><PenLine className="h-4 w-4" aria-hidden="true" />{ad ? L.t("pc.negocioPag.assinar.adenda") : L.t("pc.negocioPag.assinar.contratoTitulo")}</span></Botao></div>
+        <button type="button" onClick={() => { setPedirContrato(true); topo(); }} className="min-h-11 text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline sm:mr-auto">{ad ? L.t("pc.negocioPag.assinar.pedirAdenda") : L.t("pc.negocioPag.assinar.pedirContrato")}</button>
       </div>
     )
   ) : null;
 
   return (
     <NaFrente>
-    <div className="fixed inset-0 z-[90] overflow-y-auto bg-slate-100 text-slate-900 animate-in fade-in-0 duration-200" role="dialog" aria-modal="true" aria-label={`Portal do cliente: ${d.nome}`}>
+    <div className="fixed inset-0 z-[90] overflow-y-auto bg-slate-100 text-slate-900 animate-in fade-in-0 duration-200" role="dialog" aria-modal="true" aria-label={L.t("pc.negocioPag.portalAria", { nome: d.nome })} ref={raiz}>
       <div className="sticky top-0 z-20 flex items-center justify-between gap-3 border-b border-slate-200 bg-white/90 px-4 py-2 backdrop-blur">
         <p className="text-sm font-semibold tracking-[0.18em] text-slate-900">{nomeEmpresa().toUpperCase()}</p>
         <div className="flex items-center gap-1">
           {outrosPedidos && !doc && (
             <button type="button" onClick={outrosPedidos} className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-[15px] font-medium text-slate-700 hover:bg-slate-200">
-              <ArrowLeft className="h-4 w-4" aria-hidden="true" />Os meus pedidos
+              <ArrowLeft className="h-4 w-4" aria-hidden="true" />{L.t("pc.negocioPag.meusPedidos")}
             </button>
           )}
-          <button type="button" onClick={doc ? () => setDoc(null) : fechar} aria-label={doc ? "Voltar ao portal" : "Fechar o portal"} className="grid h-11 w-11 place-items-center rounded-lg hover:bg-slate-200"><X className="h-5 w-5" /></button>
+          <button type="button" onClick={doc ? () => setDoc(null) : fechar} aria-label={doc ? L.t("pc.negocioPag.voltarPortal") : L.t("pc.negocioPag.fechar")} className="grid h-11 w-11 place-items-center rounded-lg hover:bg-slate-200"><X className="h-5 w-5" /></button>
         </div>
       </div>
       {/* 23/10: "Ver como o cliente": a equipa só vê; responder (aceitar, assinar, pagar, escrever) é só do cliente */}
@@ -780,29 +792,30 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
       ) : (
         <div className={cn("mx-auto w-full max-w-3xl space-y-5 px-4 pt-6", barra ? "pb-44" : "pb-10")}>
           <header>
-            <h1 className="text-2xl font-semibold">Olá, {nome}</h1>
+            <h1 className="text-2xl font-semibold">{L.t("pc.negocioPag.ola", { nome })}</h1>
             <p className="text-[15px] text-slate-600">{d.servico} · {d.f.morada || d.local}</p>
           </header>
 
           {/* o percurso: onde está e o que vem a seguir */}
-          <ol className="grid grid-cols-5 gap-1.5" aria-label="O seu percurso">
-            {(ad ? PASSOS_ADENDA : PASSOS_PORTAL).map((t, i) => {
+          <ol className="grid grid-cols-5 gap-1.5" aria-label={L.t("pc.negocioPag.percurso")}>
+            {(ad ? CHAVES_PASSOS_ADENDA : CHAVES_PASSOS).map((chave, i) => {
+              const t = L.t(chave);
               const feito = i < P.i || (P.estado === "relatorio" && i === 4);
               const aqui = i === P.i && !feito;
               return (
-                <li key={t} aria-current={aqui ? "step" : undefined}>
+                <li key={chave} aria-current={aqui ? "step" : undefined}>
                   <span className={cn("block h-1.5 rounded-full transition-colors duration-500", feito ? "bg-slate-900" : aqui ? "bg-[#5a36bf]" : "bg-slate-300")} aria-hidden="true" />
                   <span className={cn("mt-1.5 flex items-center gap-1 text-xs sm:text-sm", aqui ? "font-semibold text-slate-900" : feito ? "text-slate-700" : "text-slate-500")}>
                     {feito && <Check className="hidden h-3.5 w-3.5 shrink-0 sm:block" aria-hidden="true" />}
-                    <span className="sm:hidden" aria-hidden="true">{(ad ? CURTO_ADENDA : CURTO)[i]}</span><span className="sr-only sm:not-sr-only">{t}</span>
-                    {feito && <span className="sr-only"> (feito)</span>}
+                    <span className="sm:hidden" aria-hidden="true">{L.t((ad ? CHAVES_CURTO_ADENDA : CHAVES_CURTO)[i])}</span><span className="sr-only sm:not-sr-only">{t}</span>
+                    {feito && <span className="sr-only"> {L.t("pc.negocioPag.feito")}</span>}
                   </span>
                 </li>
               );
             })}
           </ol>
 
-          {agora && <section aria-label="Agora" className="rounded-2xl bg-white p-5 shadow-sm animate-in fade-in-0 slide-in-from-bottom-1 duration-300">{agora}</section>}
+          {agora && <section aria-label={L.t("pc.negocioPag.agora")} className="rounded-2xl bg-white p-5 shadow-sm animate-in fade-in-0 slide-in-from-bottom-1 duration-300">{agora}</section>}
 
           {/* 12/11: a obra a andar (o progresso e as datas) e tudo o que aconteceu, do mais recente para o mais antigo (ObraNoPortal.tsx) */}
           {/* com o contrato assinado, sempre (também com uma adenda por responder e com o auto por assinar); depois, o relatório conta tudo */}
@@ -810,8 +823,8 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
           {obraVisivel && <HistoricoObraPortal d={d} />}
           {/* o plano da obra (depois de assinar; 21/10: também com a 1.ª parcela de uma adenda por pagar) */}
           {naObra && fasesObra.length > 0 && p && (
-            <section aria-label="O plano da obra" className="rounded-2xl bg-white p-5 shadow-sm">
-              <h2 className="text-lg font-semibold tracking-tight">O plano, fase a fase</h2>
+            <section aria-label={L.t("pc.negocioPag.obra.planoAria")} className="rounded-2xl bg-white p-5 shadow-sm">
+              <h2 className="text-lg font-semibold tracking-tight">{L.t("pc.negocioPag.obra.plano")}</h2>
               {/* 21/10: em cada trabalho, as fotografias e as notas dos técnicos (12/11: o progresso e os avisos passaram para cima) */}
               <ol className="mt-4">
                 {fasesObra.map(({ f, ts, i0, i1, estado }, k) => {
@@ -823,10 +836,10 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
                         {estado === "feita" ? <Check className="h-[18px] w-[18px]" /> : <Ic className="h-[18px] w-[18px]" />}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="text-[15px] font-semibold">{FASES_OBRA[f - 1].curto}</p>
-                        <p className="text-sm tabular-nums text-slate-500">{rotuloDia(p, i0)}{i1 > i0 ? ` a ${rotuloDia(p, i1)}` : ""}</p>
-                        {estado === "agora" && <p className="text-sm font-medium text-[#5a36bf]">A decorrer</p>}
-                        {estado === "feita" && <p className="text-sm font-medium text-emerald-700">Feita</p>}
+                        <p className="text-[15px] font-semibold">{CHAVE_FASE_CURTA[f] ? L.t(CHAVE_FASE_CURTA[f]) : FASES_OBRA[f - 1].curto}</p>
+                        <p className="text-sm tabular-nums text-slate-500">{rotuloDiaEm(p, i0, L.idioma)}{i1 > i0 ? ` ${L.t("pc.negocioPag.obra.ate")} ${rotuloDiaEm(p, i1, L.idioma)}` : ""}</p>
+                        {estado === "agora" && <p className="text-sm font-medium text-[#5a36bf]">{L.t("pc.negocioPag.obra.aDecorrer")}</p>}
+                        {estado === "feita" && <p className="text-sm font-medium text-emerald-700">{L.t("pc.negocioPag.obra.feita")}</p>}
                         {p.estado === "em curso" || p.estado === "concluída"
                           ? <TrabalhosDaFase p={p} ts={ts} />
                           : <p className="text-sm text-slate-600">{[...new Set(ts.map((t) => t.nome))].join(" · ")}</p>}
@@ -835,27 +848,27 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
                   );
                 })}
               </ol>
-              {d.obra.ec && <MateriaisPortal d={d} />}
+              {d.obra.ec && <MateriaisPortal d={d} L={L} />}
             </section>
           )}
           {/* 21/10: a conversa com a equipa da obra (o gestor responde na página da obra) */}
           {real ? (
-            <section aria-label="Fale com a equipa" className="space-y-2">
+            <section aria-label={L.t("pc.negocioPag.conversa.aria")} className="space-y-2">
               {real.conversa}
-              {RESPONSAVEL_OBRA.tel && <p className="px-1 text-sm text-slate-500">Também pode ligar a {RESPONSAVEL_OBRA.n}: {RESPONSAVEL_OBRA.tel}.</p>}
+              {RESPONSAVEL_OBRA.tel && <p className="px-1 text-sm text-slate-500">{L.t("pc.negocioPag.conversa.ligar", { nome: RESPONSAVEL_OBRA.n, tel: RESPONSAVEL_OBRA.tel })}</p>}
             </section>
           ) : (naObra || !!ad || P.estado === "auto") && (
             <section aria-labelledby="conversa-portal-t" className="rounded-2xl bg-white p-5 shadow-sm">
-              <h2 id="conversa-portal-t" className="text-lg font-semibold tracking-tight">Fale com a equipa</h2>
-              <p className="mb-3 text-sm text-slate-500">O responsável de obra responde aqui. Também pode ligar: 917 300 210.</p>
-              <Conversa msgs={d.obra.chat ?? []} eu="cliente" enviar={(t) => run(() => A.mensagemObra(d.id, "cliente", t))} vazio="Escreva-nos: dúvidas, pedidos ou o que precisar."
-                rapidas={["Obrigada!", "A que horas chegam amanhã?", "Podem ligar-me?"]} />
+              <h2 id="conversa-portal-t" className="text-lg font-semibold tracking-tight">{L.t("pc.negocioPag.conversa.aria")}</h2>
+              <p className="mb-3 text-sm text-slate-500">{L.t("pc.negocioPag.conversa.texto")}</p>
+              <Conversa msgs={d.obra.chat ?? []} eu="cliente" enviar={(t) => run(() => A.mensagemObra(d.id, "cliente", t))} vazio={L.t("pc.negocioPag.conversa.vazio")}
+                rapidas={[L.t("pc.negocioPag.conversa.rapida1"), L.t("pc.negocioPag.conversa.rapida2"), L.t("pc.negocioPag.conversa.rapida3")]} />
             </section>
           )}
 
           {outros.length > 0 && (
-            <section aria-label="O que precisa de si" className="space-y-3">
-              <h2 className="text-lg font-semibold tracking-tight">Também precisa de si</h2>
+            <section aria-label={L.t("pc.negocioPag.outros.aria")} className="space-y-3">
+              <h2 className="text-lg font-semibold tracking-tight">{L.t("pc.negocioPag.outros.titulo")}</h2>
               {outros.map((x) => (
                 <div key={x.id} className="rounded-2xl bg-white p-4 shadow-sm">
                   <p className="text-[15px] font-semibold">{x.t}</p>
@@ -868,24 +881,24 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
 
           {/* o documento do passo de agora, inteiro: a proposta para aceitar, o contrato para assinar */}
           {P.estado === "rever" && (noTemplate && !ad
-            ? <CartaoDocumento tipo="proposta" abrir={real!.abrirProposta} />
-            : <div className="-mx-4 sm:mx-0" aria-label={ad ? "A proposta da adenda" : "A proposta"} role="region"><PropostaDoc S={S} d={d} a={ad ?? undefined} /></div>)}
+            ? <CartaoDocumento tipo="proposta" abrir={real!.abrirProposta} L={L} />
+            : <div className="-mx-4 sm:mx-0" aria-label={ad ? L.t("pc.negocioPag.doc.propostaAdenda") : L.t("pc.negocioPag.doc.proposta")} role="region"><PropostaDoc S={S} d={d} a={ad ?? undefined} /></div>)}
           {P.estado === "assinar" && (noTemplate && !ad
-            ? (real!.abrirContrato ? <CartaoDocumento tipo="contrato" abrir={real!.abrirContrato} /> : null)
-            : <div className="-mx-4 sm:mx-0" aria-label={ad ? "A adenda" : "O contrato"} role="region"><ContratoDoc S={S} d={d} a={ad ?? undefined} /></div>)}
-          {P.estado === "auto" && <div className="-mx-4 sm:mx-0" aria-label="O auto de receção" role="region"><AutoRececaoDoc d={d} /></div>}
+            ? (real!.abrirContrato ? <CartaoDocumento tipo="contrato" abrir={real!.abrirContrato} L={L} /> : null)
+            : <div className="-mx-4 sm:mx-0" aria-label={ad ? L.t("pc.negocioPag.doc.adenda") : L.t("pc.negocioPag.doc.contrato")} role="region"><ContratoDoc S={S} d={d} a={ad ?? undefined} /></div>)}
+          {P.estado === "auto" && <div className="-mx-4 sm:mx-0" aria-label={L.t("pc.negocioPag.doc.auto")} role="region"><AutoRececaoDoc d={d} /></div>}
           {P.estado === "relatorio" && <RelatorioObra S={S} d={d} docs={docs.filter(([k, t, ok]) => t && ok && k !== "relatorio").map(([k, t]) => [k, t])} abrirDoc={abrirDocumento} />}
           {(P.estado === "preparar" || P.estado === "pedido" || (P.estado === "sem" && !!ad)) && (
             verProposta && !(noTemplate && !ad)
-              ? <div className="-mx-4 sm:mx-0" aria-label={ad ? "A proposta da adenda" : "A proposta"} role="region"><PropostaDoc S={S} d={d} a={ad ?? undefined} /></div>
-              : <Botao ghost onClick={noTemplate && !ad ? real!.abrirProposta : () => setVerProposta(true)}>{P.estado === "preparar" ? "Ver a proposta que aceitou" : "Ver a proposta atual"}</Botao>
+              ? <div className="-mx-4 sm:mx-0" aria-label={ad ? L.t("pc.negocioPag.doc.propostaAdenda") : L.t("pc.negocioPag.doc.proposta")} role="region"><PropostaDoc S={S} d={d} a={ad ?? undefined} /></div>
+              : <Botao ghost onClick={noTemplate && !ad ? real!.abrirProposta : () => setVerProposta(true)}>{P.estado === "preparar" ? L.t("pc.negocioPag.doc.verAceite") : L.t("pc.negocioPag.doc.verAtual")}</Botao>
           )}
-          {P.estado === "sem" && !ad && <p className="rounded-2xl bg-white p-4 text-[15px] shadow-sm">{o?.versoes?.length ? `A nova versão da proposta (v${versaoAtual(o)}) está a ser preparada, com o que pediu.` : "A sua proposta está a ser preparada."} Avisamos aqui quando estiver pronta.</p>}
+          {P.estado === "sem" && !ad && <p className="rounded-2xl bg-white p-4 text-[15px] shadow-sm">{o?.versoes?.length ? L.t("pc.negocioPag.doc.semVersao", { v: versaoAtual(o) }) : L.t("pc.negocioPag.doc.semProposta")} {L.t("pc.negocioPag.doc.avisamos")}</p>}
 
           {/* os documentos */}
           {P.estado !== "relatorio" && docs.some(([, t, ok]) => t && ok) && (
-            <section aria-label="Documentos" className="rounded-2xl bg-white p-2 shadow-sm">
-              <h2 className="px-2 pt-2 text-base font-semibold">Documentos</h2>
+            <section aria-label={L.t("pc.negocioPag.doc.lista")} className="rounded-2xl bg-white p-2 shadow-sm">
+              <h2 className="px-2 pt-2 text-base font-semibold">{L.t("pc.negocioPag.doc.lista")}</h2>
               <ul>
                 {docs.filter(([, t, ok]) => t && ok).map(([k, t]) => (
                   <li key={k}>
@@ -901,7 +914,7 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
       )}
 
       {!doc && barra && (
-        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 px-4 pb-[calc(0.75rem_+_env(safe-area-inset-bottom))] pt-3 backdrop-blur" role="region" aria-label="Próximo passo">
+        <div className="fixed inset-x-0 bottom-0 z-20 border-t border-slate-200 bg-white/95 px-4 pb-[calc(0.75rem_+_env(safe-area-inset-bottom))] pt-3 backdrop-blur" role="region" aria-label={L.t("pc.negocioPag.proximoPasso")}>
           <div className="mx-auto w-full max-w-3xl">{barra}</div>
         </div>
       )}
@@ -913,7 +926,7 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
 /** 2/11, portal real: a fatura e o valor (sem dados bancários de exemplo) e o aviso de que pagou (portal_neg_responder). */
 /** 19/11 (Rúben): no portal real, cada fatura com a escolha da forma de pagar e os dados dela (a referência Multibanco: entidade, referência e
  *  montante), como no protótipo. A escolha fica neste browser e vai com o aviso «Já paguei» ao Financeiro. */
-function PagarReal({ numero, real, montante, vence, refMb, titular, verFatura }: { numero: string; real: PortalReal; montante: string; vence: string; refMb: string; titular: string; verFatura: () => void }) {
+function PagarReal({ numero, real, montante, vence, refMb, titular, verFatura, L }: { numero: string; real: PortalReal; montante: string; vence: string; refMb: string; titular: string; verFatura: () => void; L: PortalTraducao }) {
   const chave = `olyvia-portal-metodo:${numero}`;
   const [metodo, setMetodo] = useState(() => { try { return localStorage.getItem(chave) ?? ""; } catch { return ""; } });
   const [erro, setErro] = useState<string | null>(null);
@@ -925,13 +938,13 @@ function PagarReal({ numero, real, montante, vence, refMb, titular, verFatura }:
   const avisar = (ref: string, m: string) => { setErro(null); real.avisarPagamento(numero, ref.trim(), m).catch((e: Error) => setErro(e.message)); };
   if (avisado) return (
     <div className="space-y-3">
-      <p><span className="block text-xs uppercase tracking-[0.12em] text-slate-500">A pagar</span><span className="text-2xl font-semibold tabular-nums">{montante} €</span></p>
-      <p role="status" className="flex items-center gap-2 text-[15px] text-emerald-700"><Check className="h-4 w-4" aria-hidden="true" />Recebemos o seu aviso. O Financeiro confirma o pagamento e envia-lhe o recibo.</p>
+      <p><span className="block text-xs uppercase tracking-[0.12em] text-slate-500">{L.t("pc.negocioPag.pagar.aPagar")}</span><span className="text-2xl font-semibold tabular-nums">{montante} €</span></p>
+      <p role="status" className="flex items-center gap-2 text-[15px] text-emerald-700"><Check className="h-4 w-4" aria-hidden="true" />{L.t("pc.negocioPag.pagar.recebemosAviso")}</p>
     </div>
   );
   return (
     <div className="space-y-3">
-      <PagarFatura numero={numero} montante={montante} vence={vence} refMb={refMb} alvo={{ metodo }} titular={titular} verFatura={verFatura}
+      <PagarFatura L={L} numero={numero} montante={montante} vence={vence} refMb={refMb} alvo={{ metodo }} titular={titular} verFatura={verFatura}
         escolher={escolher} pago={(r) => avisar(r, usado)} autorizar={(i, t) => avisar(`Débito direto autorizado na conta ${i} (${t})`, "Débito direto")} />
       {erro && <p role="alert" className="text-sm text-red-700">{erro}</p>}
     </div>
@@ -939,8 +952,8 @@ function PagarReal({ numero, real, montante, vence, refMb, titular, verFatura }:
 }
 
 /** 16/10: o que o cliente vê dos materiais, lido da encomenda no Inventário novo. */
-function MateriaisPortal({ d }: { d: Negocio }) {
+function MateriaisPortal({ d, L }: { d: Negocio; L: PortalTraducao }) {
   const inv = resumoEcNegocio(useInventario(), d.obra.ec?.ref);
-  const texto = !d.obra.ec?.ref ? "todos prontos para a obra." : !inv ? "encomendados." : inv.pronta ? "todos prontos para a obra." : inv.tot.aFornecedor ? (inv.pos.every((x) => x.fase === "por aprovar") ? "uma parte já está reservada; o resto está a ser encomendado." : "uma parte já está reservada; o resto foi encomendado ao fornecedor.") : "a preparar.";
-  return <p className="mt-4 border-t border-slate-200 pt-3 text-sm text-slate-600">Materiais: {texto}</p>;
+  const texto = L.t(!d.obra.ec?.ref ? "pc.negocioPag.obra.materiaisProntos" : !inv ? "pc.negocioPag.obra.materiaisEncomendados" : inv.pronta ? "pc.negocioPag.obra.materiaisProntos" : inv.tot.aFornecedor ? (inv.pos.every((x) => x.fase === "por aprovar") ? "pc.negocioPag.obra.materiaisReservado" : "pc.negocioPag.obra.materiaisFornecedor") : "pc.negocioPag.obra.materiaisPreparar");
+  return <p className="mt-4 border-t border-slate-200 pt-3 text-sm text-slate-600">{L.t("pc.negocioPag.obra.materiais", { texto })}</p>;
 }

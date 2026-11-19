@@ -8,6 +8,7 @@ import { clienteEnContratoDet } from "./clienteEn.contratoDet";
 import { clienteEnDocProposta } from "./clienteEn.docProposta";
 import { clienteEnDocObra } from "./clienteEn.docObra";
 import { clienteEnDocNegocio } from "./clienteEn.docNegocio";
+import { clienteEnNegocioPagina } from "./clienteEn.negocioPagina";
 import { clienteEnLayout } from "./clienteEn.layout";
 import { clienteEnEmpresas } from "./clienteEn.empresas";
 import { clienteEnLogin } from "./clienteEn.login";
@@ -26,6 +27,7 @@ export const clienteEn: Record<string, string> = {
   ...clienteEnDocProposta,
   ...clienteEnDocObra,
   ...clienteEnDocNegocio,
+  ...clienteEnNegocioPagina,
   // Layout
   "pc.layout.titulo": "Customer Portal",
   "pc.layout.menu.inicio": "Home",

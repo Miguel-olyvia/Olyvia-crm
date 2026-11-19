@@ -9,6 +9,7 @@ import { clientePtContratoDet } from "./clientePt.contratoDet";
 import { clientePtDocProposta } from "./clientePt.docProposta";
 import { clientePtDocObra } from "./clientePt.docObra";
 import { clientePtDocNegocio } from "./clientePt.docNegocio";
+import { clientePtNegocioPagina } from "./clientePt.negocioPagina";
 import { clientePtLayout } from "./clientePt.layout";
 import { clientePtEmpresas } from "./clientePt.empresas";
 import { clientePtLogin } from "./clientePt.login";
@@ -27,6 +28,7 @@ export const clientePt: Record<string, string> = {
   ...clientePtDocProposta,
   ...clientePtDocObra,
   ...clientePtDocNegocio,
+  ...clientePtNegocioPagina,
   // Moldura
   "pc.layout.titulo": "Portal do Cliente",
   "pc.layout.menu.inicio": "Início",
