@@ -8,7 +8,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: vi.fn() } }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
 
-import { seed, type Estado, type Negocio } from "./motor";
+import { seed, type Estado, type Negocio, TECS } from "./motor";
 import { FINANCEIRO, emFalta } from "./campos";
 import { esquecerInventario } from "./inventario/loja";
 import { linhasDaObra } from "./encomendasAjuste";
@@ -125,7 +125,9 @@ function obraComEncomendaReal(linhas: (nomes: string[]) => LinhaDocEc[]) {
   let A!: Parameters<Parameters<typeof Montar>[0]["children"]>[0]["A"];
   render(<Montar S={S}>{(ctx) => { A = ctx.A; return null; }}</Montar>);
   cleanup();
-  A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
+  A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes");
+  // lote 2 (obra): aceitar as medidas pede quem mede escolhido
+  A.supervisorMedidas(d.id, TECS[0].id); (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   const ec = d.obra.ec!;
   expect(ec.ref).toBeTruthy();
   ec.contrato = "c-1027";
