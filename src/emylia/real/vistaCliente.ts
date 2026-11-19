@@ -240,7 +240,7 @@ export type TipoResposta = "pagamento" | "adenda_aceitar" | "adenda_recusar" | "
 /** O que portal_neg_responder gravou (fn_neg_resposta_json). `negocio` é o uuid; `ref` o número da fatura ou da adenda. */
 export interface RespostaCliente {
   id: string; negocio: string; tipo: TipoResposta; ref: string; nome: string; telemovel: string | null; em: string; assinatura: string | null;
-  dados: { referencia?: string; motivos?: string[]; nota?: string; motivo?: string; clausulas?: { c: string; nota: string }[] };
+  dados: { referencia?: string; /** 19/11: a forma de pagar escolhida no portal */ metodo?: string; motivos?: string[]; nota?: string; motivo?: string; clausulas?: { c: string; nota: string }[] };
 }
 
 type AcoesMotor = ReturnType<typeof import("../motor").acoes>;
@@ -251,7 +251,8 @@ export function aplicarResposta(d: Negocio, A: AcoesMotor, r: RespostaCliente): 
   try {
     switch (r.tipo) {
       case "pagamento": {
-        const ref = x.referencia?.trim() ?? "";
+        // 19/11: a forma de pagar escolhida no portal vai à frente da referência (o Financeiro vê como o cliente pagou)
+        const ref = [x.metodo?.trim(), x.referencia?.trim()].filter(Boolean).join(" · ");
         const daAdenda = (d.adendas ?? []).some((a) => (a.faturas ?? (a.fatura ? [a.fatura] : [])).some((f) => f.n === r.ref));
         if (daAdenda) A.avisarPagamento(d.id, ref, r.ref);
         else if (d.fin.fatura?.n === r.ref && !d.fin.pago) A.avisarPagamento(d.id, ref);

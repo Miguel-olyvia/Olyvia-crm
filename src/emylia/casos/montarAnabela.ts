@@ -6,6 +6,7 @@
 import { faltaProdutosVisita, garantirServico, r2, totaisIva, type acoes, type Estado, type LinhaOrc, type Negocio, type Tarefa } from "../motor";
 import { CONTACTO, EXTERIOR, INTERIOR, ESCOLHAS, LEAD, OBRA, PROPOSTA, emFalta, grupoVisita, gruposArea, prefixoDivisao, type Grupo } from "../campos";
 import { catalogo0 } from "../v2/catalogoModelo";
+import { parcelasNoFinanceiro } from "../parcelas";
 import { BRUTO_SERVICOS } from "../dados/mudelarServicos";
 import { custosDe, horaPerfil, derivarServicos } from "../v2/custosModelo";
 import { guardarFichaTecnico, usarTecnicos } from "../equipa/tecnicos";
@@ -286,6 +287,13 @@ export function avancarObraAMeio(S: Estado, A: Acoes, id: number, receber: (ref:
   const ref = d().obra.ec?.ref;
   if (ref) { const e = receber(ref); garantir(!e, "receber os materiais: " + e); }
   A.arrancar(id);
+  // 19/11 (Rúben): as prestações antes do início caem no Financeiro ao carregar em «Arrancar a obra»; pagas, a obra arranca
+  if (d().obra.plano!.estado !== "em curso") {
+    S.role = "financeiro";
+    for (const x of parcelasNoFinanceiro(S, d())) { A.registarFaturaParcela(id, x.id, `FT 2026/${500 + x.i}`); A.validarParcela(id, x.id); }
+    S.role = "operacoes";
+    A.arrancar(id);
+  }
   garantir(d().obra.plano!.estado === "em curso", "arrancar a obra");
 
   const p = d().obra.plano!;

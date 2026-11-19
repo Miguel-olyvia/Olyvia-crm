@@ -23,6 +23,7 @@ import { lerVersao } from "./versaoPrototipo";
 import type { Inventario } from "./inventario/tipos";
 import { assinadas, diasAdenda, faturasAdenda, nomeParcela, parcelasAdenda, primeiraPaga, type Adenda } from "./adendas";
 import { ecDaAdenda, linhasDaEc, porEncomendarDe, totaisDaEc } from "./encomendasAjuste";
+import { nomeDaParcela, parcelaDoArranquePorPagar, parcelasNoFinanceiro, type Parcela } from "./parcelas";
 
 /* ------------------------------------------------------------------ a encomenda de cliente */
 export interface LinhaEc {
@@ -764,14 +765,20 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
   // 21/10: a 1.ª parcela de cada adenda assinada, com os mesmos dois passos do contrato (a fatura e o pagamento validado): é ela que
   // emite a encomenda dos materiais da adenda no Inventário. As parcelas seguintes ficam no Financeiro do negócio, como as do contrato.
   for (const a of assinadas(d)) L.push(...passosPagamentoAdenda(d, a));
+  // 19/11 (Rúben): as parcelas do contrato a seguir à 1.ª, quando caem no Financeiro (a do arranque, ao carregar em «Arrancar a obra»;
+  // a do fim, antes da entrega): a fatura e o pagamento validado, como a 1.ª
+  for (const x of parcelasNoFinanceiro(S, d)) L.push(...passosDaParcela(x));
 
   // o arranque
   const F = faltaParaArrancar(d, undefined, S);
+  const pa = !F.length && d.f.arranque_pedido ? parcelaDoArranquePorPagar(S, d) : null;
   L.push(p.estado === "em curso" || p.estado === "concluída"
     ? { id: "go", trilho: "obra", estado: "feito", who: "operacoes", t: p.estado === "concluída" ? "Obra concluída" : "Obra em curso", sub: "" }
     : F.length
       ? { id: "go", trilho: "obra", estado: "espera", who: "operacoes", t: "Arrancar a obra", sub: `Falta ${F.join(", ")}.` }
-      : { id: "go", trilho: "obra", estado: "agora", who: "operacoes", t: "Arrancar a obra", sub: "Está tudo pronto.", act: "arrancar", btn: "Arrancar a obra" });
+      : pa
+      ? { id: "go", trilho: "obra", estado: "espera", who: "operacoes", t: "Arrancar a obra", sub: `À espera de ${nomeDaParcela(pa)} paga, no Financeiro.` }
+      : { id: "go", trilho: "obra", estado: "agora", who: "operacoes", t: "Arrancar a obra", sub: d.f.arranque_pedido ? "A parcela do arranque está paga." : "Está tudo pronto.", act: "arrancar", btn: "Arrancar a obra" });
   void S;
   return L;
 }
@@ -792,6 +799,21 @@ export function passosPagamentoAdenda(d: Negocio, a: Adenda): PassoPrep[] {
     : { id: "pg-ad-" + id, trilho: "pag", estado: f0 ? "agora" : "espera", who: "financeiro", t: `Validar o pagamento da adenda ${a.n} · ${parc}`,
       sub: !f0 ? "Depois da fatura." : `${f0.pag?.comprovativo ? `O cliente avisou no portal: ${f0.pag.comprovativo}. ` : ""}Confirmar que o valor da ${f0.n} entrou. O recibo sai sozinho${mats ? " e a encomenda dos materiais da adenda vai para o Inventário" : ""}.`,
       act: f0 ? "validarPagamentosAdenda" : undefined, arg: a.n, btn: "Validar o pagamento" };
+  return [ft, pg];
+}
+
+/** 19/11: os passos de uma parcela do contrato a seguir à 1.ª (ids "ft-pr-<t>" e "pg-pr-<t>"): registar a fatura do Eticadata (no negócio,
+ *  onde se escreve o número) e validar o pagamento («Ok, já foi paga»). */
+export function passosDaParcela(x: Parcela): PassoPrep[] {
+  const nome = nomeDaParcela(x), Nome = nome[0].toUpperCase() + nome.slice(1);
+  const ft: PassoPrep = x.fatura
+    ? { id: "ft-pr-" + x.id, trilho: "pag", estado: "feito", who: "financeiro", t: `Fatura ${x.fatura.numero} · ${nome}`, sub: `${eur(x.fatura.valor)} € · no portal do cliente.` }
+    : { id: "ft-pr-" + x.id, trilho: "pag", estado: "agora", who: "financeiro", t: `Faturar ${nome}`, sub: `${eur(x.v)} € com IVA. Emita-a no Eticadata e registe o número no negócio: vai ao portal do cliente.`, act: "abrir", btn: "Registar a fatura" };
+  const pg: PassoPrep = x.paga
+    ? { id: "pg-pr-" + x.id, trilho: "pag", estado: "feito", who: "financeiro", t: `${Nome} paga`, sub: x.fatura?.recibo ? `Recibo ${x.fatura.recibo}.` : "" }
+    : { id: "pg-pr-" + x.id, trilho: "pag", estado: x.fatura ? "agora" : "espera", who: "financeiro", t: `Validar o pagamento · ${nome}`,
+      sub: !x.fatura ? "Depois da fatura." : `Confirmar que o valor da ${x.fatura.numero} entrou.${x.momento === "arranque" ? " Paga, a obra pode arrancar." : x.momento === "fim" ? " Paga, há auto de receção." : ""}`,
+      act: x.fatura ? "validarParcela" : undefined, arg: x.id, btn: "Ok, já foi paga" };
   return [ft, pg];
 }
 

@@ -223,7 +223,7 @@ function DatasPagamento({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       </div>
       <div className="flex flex-wrap items-center gap-2.5">
         <span className="w-full text-[15px] text-muted-foreground sm:w-40">Pagamento</span>
-        {["100% na adjudicação", "50% + 50% no fim", "30% + 40% + 30%", "Por fases"].map((x) => (
+        {["100% na adjudicação", "50% + 50% no fim", "50% + 25% no arranque + 25% no fim", "30% + 40% + 30%", "Por fases"].map((x) => (
           <button key={x} type="button" aria-pressed={pag === x} onClick={() => run(() => A.campo(d.id, "pagamento", x))} className={chip(pag === x)}>{pag === x && <Check className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />}{x}</button>
         ))}
       </div>

@@ -15,6 +15,7 @@ import type { Ctx } from "./pecas";
 import { AbrirEstudioMedidas } from "./estudioPlano/EstudioMedidas";
 import { podeRetificar } from "./preparacaoObra";
 import { ImpactoNoOrcamento, linhasDoImpacto } from "./estudioPlano/ImpactoNoOrcamento";
+import { OBRA, efetivo } from "./campos";
 
 const numero = (s: string) => Number(String(s).replace(",", "."));
 
@@ -43,6 +44,23 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             : podeRetificar(d) ? "Compare com as da visita e corrija o que for preciso. As Operações aprovam o plano ao mesmo tempo; se as medidas mudarem um plano já aprovado, ele volta a por aprovar. Com os dois, segue a encomenda de cliente; se o valor mudar, a retificação passa primeiro pelo Financeiro." : "Depois de o cliente aceitar a proposta."}</p>
         </div>
       </div>
+
+      {/* 19/11 (Rúben: «o gestor da obra pede as medidas e atribui o supervisor»): quem vai medir, escolhido aqui (o responsável de obra) */}
+      {(() => {
+        const c = efetivo(ctx.S.campos, OBRA[0]).campos.find((x) => x.k === "responsavel");
+        if (!c?.op?.length || (aceite && !d.f.responsavel)) return null;
+        return (
+          <label className="grid max-w-md gap-1.5 text-[15px] font-medium">
+            Supervisor que vai medir
+            <select value={d.f.responsavel ?? ""} disabled={!pode} onChange={(e) => ctx.run(() => ctx.A.campo(d.id, "responsavel", e.target.value))}
+              className="h-11 rounded-lg border border-input bg-background px-3 text-[15px] font-normal outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-70">
+              <option value="">Escolher o supervisor</option>
+              {c.op.map((o) => <option key={o} value={o}>{o}</option>)}
+            </select>
+            {!aceite && <span className="text-sm font-normal text-muted-foreground">O gestor da obra escolhe quem vai ao local. Com as medidas aceites e o plano aprovado, segue para o fornecedor: a compra e a entrega dos materiais.</span>}
+          </label>
+        );
+      })()}
 
       {/* 9/11: o Estúdio das medidas, pensado para o telemóvel no local (a planta, os botões grandes, aceitar) */}
       {meu ? <AbrirEstudioMedidas ctx={ctx} d={d} /> : !aceite && podeRetificar(d) && (

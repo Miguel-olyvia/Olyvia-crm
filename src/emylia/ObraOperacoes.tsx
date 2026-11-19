@@ -46,6 +46,7 @@ import { imprevistosDe } from "./imprevistos";
 import { verificarPlano, type PontoPlano } from "./verificacaoPlano";
 import { useParamUrl } from "./usarParamUrl";
 import { hfmt } from "./horasFmt";
+import { nomeDaParcela, parcelaDoArranquePorPagar } from "./parcelas";
 
 export { hfmt };
 
@@ -298,8 +299,10 @@ export function PaginaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
       : C.length ? "Há um técnico de férias numa tarefa. Troque-o ou adie a tarefa antes de aprovar." : "O plano está pronto para aprovar. Confirme as datas e os técnicos; pode ajustar qualquer tarefa.";
     botao = <Button size="lg" disabled={!d.fin.pago || !!C.length} onClick={go(() => A.aprovarPlano(d.id))}>Aprovar o plano</Button>;
   } else if (p.estado === "aprovado") {
-    frase = F.length ? `Falta ${F.join(", ")}.` : "Tudo pronto.";
-    botao = <Button size="lg" disabled={!!F.length} onClick={go(() => A.arrancar(d.id))}>Arrancar a obra</Button>;
+    // 19/11 (Rúben): no 50-25-25, o 1.º clique manda a parcela do arranque ao Financeiro; a obra arranca com ela paga
+    const pa = !F.length && d.f.arranque_pedido ? parcelaDoArranquePorPagar(S, d) : null;
+    frase = F.length ? `Falta ${F.join(", ")}.` : pa ? `À espera de ${nomeDaParcela(pa)} paga, no Financeiro.` : "Tudo pronto.";
+    botao = <Button size="lg" disabled={!!F.length || !!pa} onClick={go(() => A.arrancar(d.id))}>Arrancar a obra</Button>;
   } else if (p.estado === "em curso") {
     frase = `Dia ${p.dia + 1} de ${fim} · ${rotuloDia(p, p.dia)}`;
     // a validação faz-se no próprio cartão (Agora); o encerrar só aparece na reta final e só fica ativo com tudo completo

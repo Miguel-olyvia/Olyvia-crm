@@ -30,6 +30,7 @@ import {
 import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
   textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
+import { comFaturaDaParcela, faltaParaAuto, nomeDaParcela, parcelaDoArranquePorPagar, parcelasDoContrato } from "./parcelas";
 import { agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, FALTA_EC_AUTOMATICA, ecNoServidor, marcarEcNoServidor, retificacaoAceite, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
@@ -271,7 +272,7 @@ export interface Orcamento {
   /** O início previsto da obra ("aaaa-mm-dd"), para pôr o plano em datas (planoObra.ts). Sem ele, a próxima segunda-feira. */
   inicioObra?: string;
   /** As prestações do plano "Por fases" (planoObra.ts: sugerirPorFases), guardadas quando se escolhe. */
-  pagFases?: { l: string; p: number; fase: 0 | 1 | 2 | 3 | 4 | "fim" }[];
+  pagFases?: { l: string; p: number; fase: 0 | 1 | 2 | 3 | 4 | "fim" | "arranque" }[];
   /** Pessoas por ofício no plano da obra (1 por omissão; 2 = reforço: menos dias, as mesmas horas). */
   equipa?: number;
   /** As versões anteriores da proposta (14/10): enviadas ao cliente e substituídas a pedido dele. A atual é a versoes.length + 1. */
@@ -1557,10 +1558,19 @@ export function proximo(d: Negocio, S: Estado): Proximo {
         // 21/10: só a adenda por pagar (ou por encomendar) segura o arranque: é do Financeiro
         if (F.length && F.every((x) => /adenda/.test(x))) return { t: "À espera da adenda", sub: "Para arrancar falta " + F.join(", ") + ".", who: "financeiro", wait: true };
         if (F.length) return { t: "À espera dos materiais", sub: "Para arrancar falta " + F.join(", ") + ".", btn: "Abrir Inventário", act: "abrirInv", who: "armazem" };
-        return { t: "Operações: arrancar a obra", sub: "Plano aprovado e materiais garantidos.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
+        // 19/11 (Rúben): no 50-25-25, «Arrancar a obra» manda a parcela do arranque ao Financeiro; a obra arranca com ela paga
+        const pa = d.f.arranque_pedido ? parcelaDoArranquePorPagar(S, d) : null;
+        if (pa) return { t: "À espera da parcela do arranque", sub: `${pa.fatura ? `A ${pa.fatura.numero}` : "A fatura"} da parcela do arranque (${eur(pa.v)} €) está no Financeiro. Paga, as Operações arrancam a obra.`, who: "financeiro", wait: true };
+        return { t: "Operações: arrancar a obra", sub: d.f.arranque_pedido ? "A parcela do arranque está paga: já se pode arrancar." : "Plano aprovado e materiais garantidos.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
       }
       if (p.estado === "em curso") return { t: "Obra em curso", sub: "As Operações registam o fim da obra.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
       if (d.obra.auto?.estado === "por assinar") return { t: "À espera do auto de receção", sub: `O ${d.obra.auto.n} está no portal do cliente para assinar. Assinado, começa a garantia e o cliente recebe o relatório da obra.`, who: "cliente", wait: true, sim: "auto" };
+      // 19/11 (Rúben: «no fim, antes de entregar a obra, fatura para pagar; sem isso não há auto de receção»)
+      if (p.estado === "concluída" && !d.obra.auto && !d.anulado) {
+        const FA = faltaParaAuto(S, d);
+        if (FA.length) return { t: "À espera da fatura final paga", sub: "Sem ela não há auto de receção. Falta " + FA.join(", ") + ".", who: "financeiro", wait: true };
+        return { t: "Enviar o auto de receção", sub: "As parcelas do contrato estão pagas: o auto vai ao portal do cliente.", btn: "Enviar o auto", act: "enviarAuto", who: "operacoes" };
+      }
       if (!d.obra.aprendido) return { t: "Rever a margem real", sub: "A obra acabou. Comparar o previsto com o real.", btn: "Ver resultado", act: "irObra", who: "comercial" };
       return { t: "Negócio fechado", sub: "O cliente fica em Clientes, com o histórico.", done: true };
     }
@@ -1585,7 +1595,7 @@ export function minhas(S: Estado, role: Papel) {
       if (passoDe(role, p.who, p.act) && !p.wait && !p.done) L.push({ d, p });
       // 21/10: com a obra a andar (ou concluída), a 1.ª parcela de uma adenda assinada depois continua a ser do Financeiro: os mesmos
       // passos do bloco Pagamento (preparacaoObra.ts: passosPagamentoAdenda), sem linhas à parte no Hoje
-      if (d.fase >= 4 && d.obra.plano && !d.anulado) for (const a of passosAgora(d, S)) if (passoDe(role, a.who, a.act) && /^(ft|pg)-ad-/.test(a.id)) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, arg: a.arg, who: a.who } });
+      if (d.fase >= 4 && d.obra.plano && !d.anulado) for (const a of passosAgora(d, S)) if (passoDe(role, a.who, a.act) && /^(ft|pg)-(ad|pr)-/.test(a.id)) L.push({ d, p: { t: a.t, sub: a.sub, btn: a.btn, act: a.act, arg: a.arg, who: a.who } });
     }
     // 21/10: os imprevistos da obra (o gestor propõe ou decide; o comercial fala com o cliente que recusou) e as faturas das adendas
     // 9/11 (Lote 1, C): os do gestor também a quem, com conta real, decide os imprevistos e planeia a obra (o que o servidor exige)
@@ -3251,6 +3261,39 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       log(d, `Pagamento da ${numeroFatura} validado · ${rc} emitido`);
       return rc;
     },
+    /** 19/11 (Rúben): a fatura de uma parcela a seguir à 1.ª (a do arranque, a do fim…), emitida no Eticadata, registada aqui com o número
+     *  quando é a vez dela. Vai para o portal do cliente com os dados para pagar. */
+    registarFaturaParcela(id: number, tranche: string, numero: string): boolean {
+      if (!exigePerm("finance.invoice")) return false;
+      const d = deal(id), x = parcelasDoContrato(S, d).find((p) => p.id === tranche), n = numero.trim().replace(/\s+/g, " ");
+      if (!x || x.i === 0 || x.fatura) return false;
+      if (!d.fin.pago) { avisar({ msg: "Primeiro, a 1.ª parcela paga", sub: "As parcelas seguintes faturam-se depois", kind: "bad" }); return false; }
+      if (!x.devida) { avisar({ msg: "Ainda não é a vez desta parcela", sub: x.momento === "arranque" ? "Cai no Financeiro quando as Operações carregam em «Arrancar a obra»" : x.momento === "fim" ? "Cai no Financeiro no fim da obra, antes da entrega" : "Cai no Financeiro com a obra a andar", kind: "bad" }); return false; }
+      if (!n) { avisar({ msg: "Escreva o número da fatura", sub: "Como aparece no Eticadata", kind: "bad" }); return false; }
+      if ((d.fin.tranches ?? []).some((f) => f.numero.trim().toLowerCase() === n.toLowerCase()) || d.fin.fatura?.n.trim().toLowerCase() === n.toLowerCase()) { avisar({ msg: `A fatura ${n} já está registada`, sub: "Cada parcela tem a sua fatura", kind: "bad" }); return false; }
+      d.fin.tranches = comFaturaDaParcela(S, d, x, n);
+      log(d, `Fatura ${n} registada · ${nomeDaParcela(x)} · ${eur(x.v)} € · enviada ao portal do cliente`);
+      avisar({ msg: `Fatura ${n} registada`, sub: "Vai para o portal do cliente, com os dados para pagar", kind: "ok" });
+      avisarDocumento(d, "fatura", "Fatura " + n);
+      return true;
+    },
+    /** 19/11: o pagamento de uma parcela a seguir à 1.ª, validado pelo Financeiro («Ok, já foi paga»): o recibo. Paga a do arranque, as
+     *  Operações arrancam a obra; paga a última com a obra concluída, o auto de receção vai ao cliente. */
+    validarParcela(id: number, tranche: string) {
+      if (!exigePerm("finance.validate_payment")) return;
+      const d = deal(id), x = parcelasDoContrato(S, d).find((p) => p.id === tranche);
+      if (!x || x.i === 0 || !x.fatura || x.paga) return;
+      const rc = "RC 2026/" + S.rc++, num = x.fatura.numero;
+      d.fin.tranches = (d.fin.tranches ?? []).map((f) => (f.numero === num && !f.pagamento ? { ...f, pagamento: { data: new Date().toISOString().slice(0, 10), conta: d.f.conta || "", ref: "Validado no CRM" }, recibo: rc } : f));
+      log(d, `Pagamento da ${num} validado · ${nomeDaParcela(x)} · ${rc} emitido`);
+      if (x.momento === "arranque") { avisar({ msg: "Parcela do arranque paga · " + rc, sub: "As Operações já podem arrancar a obra", kind: "ok" }); return; }
+      const FA = faltaParaAuto(S, d);
+      if (d.obra.plano?.estado === "concluída" && !d.obra.auto && !FA.length) {
+        if (podeNeg(S.role, "obra.fechar")) { A.enviarAuto(id); avisar({ msg: "Fatura final paga · " + rc, sub: "O auto de receção foi ao portal do cliente", kind: "ok" }); return; }
+        avisar({ msg: "Fatura final paga · " + rc, sub: "As Operações enviam o auto de receção ao cliente", kind: "ok" }); return;
+      }
+      avisar({ msg: "Pagamento validado · " + rc, sub: FA.length ? "Falta " + FA.join(", ") : "As parcelas do contrato estão todas pagas", kind: "ok" });
+    },
     validar(id: number) {
       const d = deal(id);
       if (!exigePerm("finance.validate_payment")) return;
@@ -4025,6 +4068,17 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 19/10: o pagamento, o plano e os materiais garantidos no Inventário (preparacaoObra.ts: faltaParaArrancar)
       { const F = faltaParaArrancar(d, undefined, S); if (F.length) { avisar({ msg: "Ainda não dá para arrancar", sub: "Falta " + F.join(", "), kind: "bad" }); return; } }
       if (!portao(d, [OBRA[0]])) return;
+      // 19/11 (Rúben): no 50-25-25, carregar em «Arrancar a obra» manda a parcela do arranque ao Financeiro, que valida o pagamento;
+      // a obra só arranca com ela paga (depois, as Operações carregam outra vez)
+      const pa = parcelaDoArranquePorPagar(S, d);
+      if (pa) {
+        if (!d.f.arranque_pedido) {
+          d.f.arranque_pedido = new Date().toISOString().slice(0, 10);
+          log(d, `Arranque pedido pelas Operações · ${nomeDaParcela(pa)}, ${eur(pa.v)} €, foi ao Financeiro`);
+          avisar({ msg: "A parcela do arranque foi ao Financeiro", sub: `${eur(pa.v)} € com IVA. A obra arranca quando o pagamento for validado.`, kind: "auto" });
+        } else avisar({ msg: "À espera da parcela do arranque", sub: `${pa.fatura ? `A ${pa.fatura.numero}` : "A fatura"} tem de estar paga e validada pelo Financeiro.`, kind: "bad" });
+        return;
+      }
       // 23/10: com o relógio real, a obra começa hoje (o plano mantém a ordem e a duração das tarefas)
       if (relogioReal && d.obra.plano!.origem === "orcamento") arrancarHoje(d.obra.plano!);
       d.obra.plano!.estado = "em curso"; log(d, "Obra arrancou"); avisar({ msg: "Obra em curso", sub: "Os técnicos registam as horas na app", kind: "ok" });
@@ -4053,8 +4107,11 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!portao(d, [OBRA[1]])) return;
       d.obra.plano!.estado = "concluída"; d.obra.real = realObra(d, S); d.obra.realFases = realPorFase(d, S);
       log(d, "Obra concluída · margem real " + pct(d.obra.real.m));
-      A.enviarAuto(id); // 15/10: o auto de receção vai logo ao portal do cliente
-      avisar({ msg: "Obra concluída", sub: "Margem real " + pct(d.obra.real.m) + " · o comercial vê o resultado no negócio", kind: "ok", act: { label: "Ver negócio", fn: () => run(() => { A.abrir(id); A.irObra(); }) } });
+      // 15/10: o auto de receção vai logo ao portal do cliente. 19/11 (Rúben): só com a fatura final paga; senão, espera pelo Financeiro
+      const FA = faltaParaAuto(S, d);
+      if (!FA.length) A.enviarAuto(id);
+      else log(d, "O auto de receção espera pela fatura final paga · falta " + FA.join(", "), "w");
+      avisar({ msg: "Obra concluída", sub: FA.length ? "O auto de receção vai ao cliente depois da fatura final paga · falta " + FA.join(", ") : "Margem real " + pct(d.obra.real.m) + " · o comercial vê o resultado no negócio", kind: "ok", act: { label: "Ver negócio", fn: () => run(() => { A.abrir(id); A.irObra(); }) } });
     },
     /* ---------------------------------------------- auto de receção e adendas assinadas no portal (15/10) */
     /** O auto de receção da obra concluída vai ao portal do cliente (uma vez). */
@@ -4062,6 +4119,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!exigePerm("obra.fechar")) return;
       const d = deal(id);
       if (d.obra.plano?.estado !== "concluída" || d.obra.auto) return;
+      // 19/11 (Rúben): «sem a fatura final paga não há auto de receção da obra»
+      { const FA = faltaParaAuto(S, d); if (FA.length) { avisar({ msg: "Ainda não há auto de receção", sub: "Primeiro, a fatura final paga: falta " + FA.join(", "), kind: "bad" }); return; } }
       d.obra.auto = { n: "AR 2026/" + d.id, q: agora(), estado: "por assinar" };
       log(d, "Auto de receção " + d.obra.auto.n + " enviado ao portal do cliente");
       avisarDocumento(d, "auto", "Auto de receção " + d.obra.auto.n);

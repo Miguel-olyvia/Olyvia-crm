@@ -237,7 +237,7 @@ const ClientPortalNegocio = () => {
             acao={acao} voltar={voltar} voltarTexto="Voltar à adenda"
             confirmar={async () => { await responder(fim, ref); voltar(); }} />
         ),
-        avisarPagamento: (numero, referencia) => responder("pagamento", numero, referencia ? { referencia } : {}),
+        avisarPagamento: (numero, referencia, metodo) => responder("pagamento", numero, { ...(referencia ? { referencia } : {}), ...(metodo ? { metodo } : {}) }),
         avisados: v.respostas.filter((r) => r.tipo === "pagamento").map((r) => r.ref),
         aviso,
       }}

@@ -15,7 +15,7 @@ import type { Ctx } from "./pecas";
 import { iconeOficio } from "./LinhasOrcamento";
 import { HORAS_DIA, TAREFA_DEMOLICAO, diasDeHoras, ordemDoPlano, prazoProposta, type TarefaPrevista } from "./ganttOrcamento";
 import {
-  COR_FASE, PAGAMENTO_FASES, PAGAMENTO_MEDIDA, curvaCusto, dataCurta, deIso, diaDaPrestacao, diaSemana, diasDaObra, feriadosSaltados, iniciosRapidos, isoDia, nomeMes, planoObra,
+  COR_FASE, PAGAMENTO_50_25_25, PAGAMENTO_FASES, PAGAMENTO_MEDIDA, curvaCusto, dataCurta, deIso, diaDaPrestacao, diaSemana, diasDaObra, feriadosSaltados, iniciosRapidos, isoDia, nomeMes, planoObra,
   prestacoes, valoresPrestacoes, recebidoAte, sugerirPorFases, tesouraria, type FasePlano, type Plano, type Prestacao,
 } from "./planoObra";
 import { totais } from "./DocsCliente";
@@ -655,7 +655,7 @@ function DetalheTarefa({ t, d, ctx, fechado, direcao, inicio, PD, td, mover }: {
 }
 
 /* ================================================================== os pagamentos e a tesouraria */
-const OPCOES_PAG = ["100% na adjudicação", "50% + 50% no fim", "30% + 40% + 30%", PAGAMENTO_FASES, PAGAMENTO_MEDIDA];
+const OPCOES_PAG = ["100% na adjudicação", "50% + 50% no fim", PAGAMENTO_50_25_25, "30% + 40% + 30%", PAGAMENTO_FASES, PAGAMENTO_MEDIDA];
 function Pagamentos({ P, d, ctx, calendario, fechado, prest, sugerido }: {
   P: Plano; d: Negocio; ctx: Pick<Ctx, "S" | "A" | "run">; calendario: Date[]; fechado: boolean; prest: Prestacao[]; sugerido: Prestacao[];
 }) {

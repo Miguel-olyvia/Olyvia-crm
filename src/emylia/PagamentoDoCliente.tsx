@@ -27,7 +27,7 @@ export function PagamentoDoCliente({ S, A, run, d }: Ctx & { d: Negocio }) {
     ["Fatura", ft.n],
     ["Valor a pagar", eur(valor) + " € com IVA"],
     ["Como paga", d.f.metodo ? metodo : "o cliente escolhe no portal"],
-    ...(metodo === "Referência MB" ? [["Entidade · referência", `${empresa?.mbEntidade ?? "sem entidade"} · ${em3(referenciaMb(d.id, ft.n))}`] as [string, string]] : []),
+    ...(metodo === "Referência MB" ? [["Entidade · referência (de teste)", `${empresa?.mbEntidade ?? "sem entidade"} · ${em3(referenciaMb(d.id, ft.n))}`] as [string, string]] : []),
     ...(metodo === "MB Way" ? [["MB Way para", empresa?.mbway ?? "sem número"] as [string, string]] : []),
     ...(metodo === "Transferência" ? [["IBAN", empresa?.iban ? ibanAVista(empresa.iban) : "ainda não indicado"] as [string, string]] : []),
     ["No Eticadata", d.fin.erp ? resumoErp(d.fin.erp) : "ainda não lido aqui (a Olyvia verifica sozinha de 10 em 10 minutos)"],

@@ -308,7 +308,8 @@ const linhaMaterial = (m: { n: string; un: string; q: number; produto: string | 
     estrutura_un: 0, ajuste_un: 0, congelado_em: null, oficios: [] },
   zonas: null,
 });
-const marcoDe = (p: Prestacao, i: number): LinhaPrestacao["marco"] => (p.fase === "fim" ? "fim" : p.fase === 0 ? (i === 0 ? "adjudicacao" : "antes") : "fase");
+// 19/11: a do arranque da obra vai como "antes" (a base não tem o marco do arranque; o rótulo diz qual é)
+const marcoDe = (p: Prestacao, i: number): LinhaPrestacao["marco"] => (p.fase === "fim" ? "fim" : p.fase === 0 || p.fase === "arranque" ? (i === 0 ? "adjudicacao" : "antes") : "fase");
 const prestacoesDe = (d: Negocio): { L: LinhaPrestacao[]; porFases: boolean } => {
   const P = prestacoes(d.f.pagamento?.trim() || undefined, d.orc?.pagFases);
   return {

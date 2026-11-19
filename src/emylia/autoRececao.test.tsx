@@ -26,6 +26,8 @@ const ASS: Assinatura = { tipo: "digital", nome: "Tiago Almeida", q: "30/10/2026
 function obraAcabada() {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
   d.fase = 5; d.obra.plano!.estado = "em curso"; // como depois do recibo
+  // 19/11 (Rúben): sem a fatura final paga não há auto de receção; aqui, o contrato pago de uma vez (parcelas.test.ts trata as outras)
+  d.f.pagamento = "100% na adjudicação"; d.fin.fatura = { n: "FT 2026/1027", q: "hoje" }; d.fin.pago = true; d.fin.recibo = { n: "RC 2026/1027", q: "hoje" };
   S.role = "operacoes"; // 3/11: encerrar a obra pede negocios.obra.fechar (o Gestor de obra)
   preencher(d, OBRA);
   completarParaEncerrar(d);

@@ -50,6 +50,8 @@ import { BotaoAcessoPortal, EstadoAcessoPortal } from "./AcessoPortalNegocio";
 import { usePermPortalDoPasso } from "./permPortalPasso";
 import { DocumentosParaCliente } from "./DocumentosParaCliente";
 import { PagamentoDoCliente } from "./PagamentoDoCliente";
+import { ParcelasDoContrato, QUANDO_CAI } from "./ParcelasDoContrato";
+import { parcelasDoContrato } from "./parcelas";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
@@ -551,6 +553,10 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
             {agora && !ft && (
               <p className="rounded-2xl bg-primary/[0.06] px-4 py-3 text-[15px]">
                 A faturar agora: <span className="font-semibold">{agora.l}</span> ({Math.round(agora.p * 100)}%) · <span className="font-semibold tabular-nums">{eur(agora.v)} €</span> com IVA
+                {/* 19/11 (Rúben): as parcelas seguintes e quando caem no Financeiro */}
+                {parcelasDoContrato(S, d).slice(1).map((x) => (
+                  <span key={x.id} className="mt-1 block text-muted-foreground">Depois: {String(Math.round(x.p * 10000) / 100).replace(".", ",")}% · {eur(x.v)} € · {QUANDO_CAI[x.momento].toLowerCase()}</span>
+                ))}
               </p>
             )}
             <section aria-label="Registar a fatura" className="space-y-2 rounded-2xl border border-border bg-card p-4">
@@ -603,6 +609,12 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           corpo: <MateriaisObra {...ctx} d={d} /> };
       })()] : []),
       g(OBRA[0], Hammer), g(OBRA[1], Check),
+      // 19/11 (Rúben): as parcelas do contrato a seguir à 1.ª (a do arranque, a do fim antes da entrega), no Financeiro
+      ...(o && parcelasDoContrato(S, d).length > 1 ? [(() => {
+        const P = parcelasDoContrato(S, d), pagas = P.filter((x) => x.paga).length;
+        return { id: "parcelas", titulo: "Pagamentos", icone: Euro, feito: pagas === P.length, semAvancar: true,
+          resumo: [`${pagas} de ${P.length} ${P.length === 1 ? "parcela paga" : "parcelas pagas"}`], corpo: <ParcelasDoContrato ctx={ctx} d={d} /> };
+      })()] : []),
     ];
   }
   // os grupos que a empresa escondeu não aparecem

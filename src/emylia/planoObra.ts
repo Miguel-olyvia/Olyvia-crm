@@ -171,10 +171,13 @@ export function curvaCusto(P: Plano): { x: number; c: number }[] {
 // é o que já se recebeu menos o que já se gastou, sem IVA (o IVA não é da empresa). "Por fases" (14/10) é o plano
 // sugerido para a obra nunca ficar a descoberto: cada prestação paga o que se gasta até à seguinte.
 
-/** Uma prestação: a percentagem do total e quando se recebe. `fase`: 0 = na adjudicação; 1–3 = no fim dessa fase; "fim". */
-export interface Prestacao { l: string; p: number; fase: 0 | FaseObra | "fim" }
+/** Uma prestação: a percentagem do total e quando se recebe. `fase`: 0 = na adjudicação; 1–3 = no fim dessa fase; "fim".
+ *  19/11 (Rúben): "arranque" = quando as Operações carregam em «Arrancar a obra» (a obra só arranca com ela paga). */
+export interface Prestacao { l: string; p: number; fase: 0 | FaseObra | "fim" | "arranque" }
 
 export const PAGAMENTO_FASES = "Por fases";
+/** 19/11 (Rúben): 50% no início, 25% no arranque da obra e 25% no fim, antes da entrega (sem ela paga não há auto de receção). */
+export const PAGAMENTO_50_25_25 = "50% + 25% no arranque + 25% no fim";
 /** 26/10: as prestações escritas à mão, como vêm no contrato (o caso real: 30% na adjudicação, 20% um mês antes do início, 15% no
  *  início, 10% na retificação das medidas da cozinha e 25% no fim). Guardam-se no orçamento, como as "Por fases". */
 export const PAGAMENTO_MEDIDA = "À medida";
@@ -198,7 +201,7 @@ export function erroPrestacoes(L: Prestacao[]): string | null {
 
 /** O dia (em dias úteis desde o início) em que a prestação se recebe. */
 export function diaDaPrestacao(P: Plano, x: Prestacao): number {
-  if (x.fase === 0) return 0;
+  if (x.fase === 0 || x.fase === "arranque") return 0;
   if (x.fase === "fim") return P.dias;
   return P.fases.find((f) => f.n === x.fase)?.fim ?? P.dias;
 }
@@ -208,6 +211,7 @@ export function prestacoes(pagamento: string | undefined, guardadas?: Prestacao[
   const pg = pagamento || "50% + 50% no fim";
   if ((pg === PAGAMENTO_FASES || pg === PAGAMENTO_MEDIDA) && guardadas?.length) return guardadas;
   if (pg.startsWith("100")) return [{ l: "Na adjudicação", p: 1, fase: 0 }];
+  if (pg.startsWith("50% + 25%")) return [{ l: "Na adjudicação", p: 0.5, fase: 0 }, { l: "No arranque da obra", p: 0.25, fase: "arranque" }, { l: "No fim, antes da entrega", p: 0.25, fase: "fim" }];
   if (pg.startsWith("30")) return [{ l: "Na adjudicação", p: 0.3, fase: 0 }, { l: "A meio da obra", p: 0.4, fase: 2 }, { l: "No fim da obra", p: 0.3, fase: "fim" }];
   return [{ l: "Na adjudicação", p: 0.5, fase: 0 }, { l: "No fim da obra", p: 0.5, fase: "fim" }];
 }

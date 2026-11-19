@@ -103,6 +103,8 @@ const PERM_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
   aprovarAdenda: ["margin.approve"], validar: ["finance.validate_payment"], registarFaturaErp: ["finance.invoice"],
   // 13/11 (20270117200000): faturar as adendas e validar os pagamentos delas são do Financeiro (neg_registar_fatura, neg_validar_pagamento)
   faturarAdendas: ["finance.invoice"], validarPagamentosAdenda: ["finance.validate_payment"],
+  // 19/11: as parcelas do contrato a seguir à 1.ª (a do arranque, a do fim), como as adendas
+  registarFaturaParcela: ["finance.invoice"], validarParcela: ["finance.validate_payment"], enviarAuto: ["obra.fechar"],
   // 6/11: os passos da obra (as Operações) pedem negocios.obra.planear, como o motor (A.aprovarPlano, A.arrancar)
   gerarPlano: ["obra.planear"], aprovarPlano: ["obra.planear"], arrancar: ["obra.planear"], abrirRetificacao: ["obra.planear"],
   // 11/11 (F3): aceitar as medidas (A.retificarMedidas e as respostas retif_*) pede o mesmo que o passo (neg_guardar_negocio, 20270113110000)

@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { acoes, seed, type Estado, type Negocio } from "../motor";
 import type { Ctx } from "../pecas";
 import { PortalCliente } from "../PortalCliente";
+import { definirDadosPagamento } from "../pagamentoCliente";
 import { totais } from "../DocsCliente";
 import { aplicarRececao, aplicarResposta, caber, comEstadoReal, encomendaParaCliente, lerVista, negocioParaCliente, vistaDoCliente, type RespostaCliente, type VistaCliente } from "./vistaCliente";
 
@@ -192,7 +193,8 @@ describe("portal real com o ecrã da V1", () => {
     const { avisarPagamento } = montar(v);
     fireEvent.change(screen.getByRole("textbox", { name: "Referência do pagamento" }), { target: { value: "TRF 123" } });
     fireEvent.click(screen.getByRole("button", { name: "Já paguei" }));
-    expect(avisarPagamento).toHaveBeenCalledWith("FT 2026/10", "TRF 123");
+    // 19/11: com a forma de pagar escolhida (a transferência, por omissão)
+    expect(avisarPagamento).toHaveBeenCalledWith("FT 2026/10", "TRF 123", "Transferência");
     cleanup();
     montar(v, { avisados: ["FT 2026/10"] });
     expect(screen.getByText(/Recebemos o seu aviso/)).toBeTruthy();
@@ -249,11 +251,17 @@ describe("portal real com o ecrã da V1", () => {
   it("obra em curso: o plano fase a fase, a conversa da base e sem dados bancários de exemplo", () => {
     const { S, d } = comObra();
     d.fin.fatura = { n: "FT 2026/1", q: "01/11/2026" }; d.fin.pago = false;
+    // a página real troca os dados de pagamento de exemplo pelos da empresa (aqui, nenhuns)
+    const repor = definirDadosPagamento(null);
     montar(vistaDoCliente(d, S));
     expect(screen.getByRole("heading", { name: "O plano, fase a fase" })).toBeTruthy();
     expect(screen.getByText("CONVERSA-REAL")).toBeTruthy();
     expect(screen.getByText("Pagar a fatura FT 2026/1")).toBeTruthy();
-    expect(document.body.textContent).not.toMatch(/Dados de exemplo|PT50 0035|Como quer pagar/);
+    expect(document.body.textContent).not.toMatch(/Dados de exemplo|PT50 0035/);
+    // 19/11 (Rúben): o cliente escolhe no portal como paga; sem os dados da empresa, só a transferência, e diz que falta o IBAN
+    expect(screen.getByRole("radiogroup", { name: "Como quer pagar" })).toBeTruthy();
+    expect(screen.getByText(/ainda não indicou o IBAN/)).toBeTruthy();
+    repor();
   });
 
   it("proposta por responder: o botão abre a proposta real", () => {

@@ -43,8 +43,8 @@ export interface PortalReal {
   receberObra: (reservas: string | undefined, voltar: () => void) => ReactNode;
   /** Aceitar ou assinar a adenda com o código por SMS; `voltar` fecha-a. */
   assinarComSms: (o: { titulo: string; texto: string; acao: string; fim: "adenda_aceitar" | "adenda_assinar"; ref: string; voltar: () => void }) => ReactNode;
-  /** Avisar que pagou a fatura (o número), com a referência do pagamento. Rejeita com a mensagem do erro. */
-  avisarPagamento: (numero: string, referencia: string) => Promise<void>;
+  /** Avisar que pagou a fatura (o número), com a referência do pagamento e (19/11) a forma que escolheu. Rejeita com a mensagem do erro. */
+  avisarPagamento: (numero: string, referencia: string, metodo?: string) => Promise<void>;
   /** As faturas de que o cliente já avisou o pagamento (à espera do Financeiro). */
   avisados: readonly string[];
   /** a resposta a uma ação que ainda não tem caminho no portal real */
@@ -157,8 +157,11 @@ function emitidaEm(q: string): Date {
 
 /** 21/10: pagar uma fatura no portal (a do contrato ou a de uma adenda): o valor, a escolha da forma de pagar e só os dados dessa.
  *  `alvo` é onde ficam o método e o comprovativo (os campos do negócio, ou os da adenda). */
-function PagarFatura({ numero, montante, vence, refMb, alvo, titular, verFatura, escolher, pago, autorizar }: {
-  numero: string; montante: string; vence: string; refMb: string; alvo: Record<string, string>; titular: string;
+function PagarFatura({ numero, montante, vence, refMb, refTeste = true, alvo, titular, verFatura, escolher, pago, autorizar }: {
+  numero: string; montante: string; vence: string; refMb: string;
+  /** 19/11: a referência é a gerada aqui (sem o prestador de pagamentos ligado): diz-se ao cliente que é de teste. */
+  refTeste?: boolean;
+  alvo: Record<string, string>; titular: string;
   verFatura: () => void; escolher: (m: string) => void; pago: (ref: string) => void; autorizar: (ibanCurto: string, titular: string) => void;
 }) {
   const [ref, setRef] = useState("");
@@ -209,6 +212,7 @@ function PagarFatura({ numero, montante, vence, refMb, alvo, titular, verFatura,
             <Copiar rotulo="Referência" valor={refMb} mostrar={em3(refMb)} />
             <Copiar rotulo="Montante" valor={montante} mostrar={`${montante} €`} />
           </dl>
+          {refTeste && <p className="pb-2 text-sm text-amber-800">Referência de teste: o prestador de pagamentos ainda não está ligado. Para já, pague por transferência ou fale connosco.</p>}
         </div>
         {jaPaguei}
       </>}
@@ -237,7 +241,11 @@ function PagarFatura({ numero, montante, vence, refMb, alvo, titular, verFatura,
         </div>
         {jaPaguei}
       </> : (
-        <p className="rounded-xl bg-amber-50 px-4 py-3 text-[15px] text-amber-900">A empresa ainda não indicou o IBAN para a transferência. Fale connosco pela conversa e enviamos os dados.</p>
+        <>
+          <p className="rounded-xl bg-amber-50 px-4 py-3 text-[15px] text-amber-900">A empresa ainda não indicou o IBAN para a transferência. Fale connosco pela conversa e enviamos os dados.</p>
+          {/* 19/11: já pagou por outro caminho (com os dados que lhe enviámos): continua a poder avisar */}
+          {jaPaguei}
+        </>
       ))}
       {metodo === "Débito direto" && (
         <div className="space-y-3 rounded-xl border border-slate-200 p-4">
@@ -305,7 +313,7 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
   for (const f of faturasReais.filter((x) => !x.pagamento)) {
     outros.push({
       id: "tr-" + f.id, t: `Pagar a fatura ${f.numero}`, sub: `${nomeTranche(f)} · emitida a ${f.data.split("-").reverse().join("/")}`,
-      corpo: <PagarReal numero={f.numero} real={real!} montante={eur(f.valor)} verFatura={() => setDoc("tr:" + f.id)} />,
+      corpo: <PagarReal numero={f.numero} real={real!} montante={eur(f.valor)} vence={vencimento(new Date(f.data + "T12:00:00"), d.f.vencimento || "15 dias")} refMb={referenciaMb(d.id, f.numero)} titular={d.nome} verFatura={() => setDoc("tr:" + f.id)} />,
     });
   }
   if (d.fin.fatura && !d.fin.pago && T && !faturasReais.some((f) => f.numero === d.fin.fatura?.n)) {
@@ -314,7 +322,7 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
     const vence = vencimento(emitidaEm(ft.q), d.f.vencimento || "15 dias");
     outros.push({
       id: "pag", t: `Pagar a fatura ${ft.n}`, sub: `${t0.l} · vence a ${vence}`,
-      corpo: real ? <PagarReal numero={ft.n} real={real} montante={eur(t0.v)} verFatura={() => setDoc("fatura")} /> : <PagarFatura numero={ft.n} montante={eur(t0.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={d.f} titular={d.nome} verFatura={() => setDoc("fatura")}
+      corpo: real ? <PagarReal numero={ft.n} real={real} montante={eur(t0.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} titular={d.nome} verFatura={() => setDoc("fatura")} /> : <PagarFatura numero={ft.n} montante={eur(t0.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={d.f} titular={d.nome} verFatura={() => setDoc("fatura")}
         escolher={(m) => run(() => A.escolherMetodo(d.id, m))} pago={(r) => fazer(() => A.avisarPagamento(d.id, r))} autorizar={(i, t) => fazer(() => A.autorizarDebito(d.id, i, t))} />,
     });
   }
@@ -324,7 +332,7 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
     const vence = vencimento(emitidaEm(ft.q), "15 dias");
     outros.push({
       id: "pag-" + ft.n, t: `Pagar a fatura ${ft.n}`, sub: `Adenda ${a.n} · ${nomeParcela(ft.i)} (${ft.l.toLowerCase()}) · vence a ${vence}${ft.i > 0 && !primeiraPaga(a) ? ` · primeiro, a ${nomeParcela(0)}` : ""}`,
-      corpo: real ? <PagarReal numero={ft.n} real={real} montante={eur(ft.v)} verFatura={() => setDoc("ft:" + ft.n)} /> : <PagarFatura numero={ft.n} montante={eur(ft.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={ft.pag ?? {}} titular={d.nome} verFatura={() => setDoc("ft:" + ft.n)}
+      corpo: real ? <PagarReal numero={ft.n} real={real} montante={eur(ft.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} titular={d.nome} verFatura={() => setDoc("ft:" + ft.n)} /> : <PagarFatura numero={ft.n} montante={eur(ft.v)} vence={vence} refMb={referenciaMb(d.id, ft.n)} alvo={ft.pag ?? {}} titular={d.nome} verFatura={() => setDoc("ft:" + ft.n)}
         escolher={(m) => run(() => A.escolherMetodo(d.id, m, ft.n))} pago={(r) => fazer(() => A.avisarPagamento(d.id, r, ft.n))} autorizar={(i, t) => fazer(() => A.autorizarDebito(d.id, i, t, ft.n))} />,
     });
   }
@@ -869,37 +877,26 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real 
 }
 
 /** 2/11, portal real: a fatura e o valor (sem dados bancários de exemplo) e o aviso de que pagou (portal_neg_responder). */
-function PagarReal({ numero, real, montante, verFatura }: { numero: string; real: PortalReal; montante: string; verFatura: () => void }) {
-  const [ref, setRef] = useState("");
-  const [aEnviar, setAEnviar] = useState(false);
+/** 19/11 (Rúben): no portal real, cada fatura com a escolha da forma de pagar e os dados dela (a referência Multibanco: entidade, referência e
+ *  montante), como no protótipo. A escolha fica neste browser e vai com o aviso «Já paguei» ao Financeiro. */
+function PagarReal({ numero, real, montante, vence, refMb, titular, verFatura }: { numero: string; real: PortalReal; montante: string; vence: string; refMb: string; titular: string; verFatura: () => void }) {
+  const chave = `olyvia-portal-metodo:${numero}`;
+  const [metodo, setMetodo] = useState(() => { try { return localStorage.getItem(chave) ?? ""; } catch { return ""; } });
   const [erro, setErro] = useState<string | null>(null);
   const avisado = real.avisados.includes(numero);
-  const avisar = async () => {
-    setAEnviar(true); setErro(null);
-    try { await real.avisarPagamento(numero, ref.trim()); } catch (e) { setErro((e as Error).message); } finally { setAEnviar(false); }
-  };
+  const escolher = (m: string) => { setMetodo(m); try { localStorage.setItem(chave, m); } catch { /* sem armazenamento: só nesta visita */ } };
+  const avisar = (ref: string, m: string) => { setErro(null); real.avisarPagamento(numero, ref.trim(), m).catch((e: Error) => setErro(e.message)); };
+  if (avisado) return (
+    <div className="space-y-3">
+      <p><span className="block text-xs uppercase tracking-[0.12em] text-slate-500">A pagar</span><span className="text-2xl font-semibold tabular-nums">{montante} €</span></p>
+      <p role="status" className="flex items-center gap-2 text-[15px] text-emerald-700"><Check className="h-4 w-4" aria-hidden="true" />Recebemos o seu aviso. O Financeiro confirma o pagamento e envia-lhe o recibo.</p>
+    </div>
+  );
   return (
     <div className="space-y-3">
-      <div className="flex items-end justify-between gap-3">
-        <p><span className="block text-xs uppercase tracking-[0.12em] text-slate-500">A pagar</span><span className="text-2xl font-semibold tabular-nums">{montante} €</span></p>
-        <button type="button" onClick={verFatura} className="inline-flex min-h-11 items-center gap-1.5 text-[15px] font-medium text-slate-900 underline-offset-4 hover:underline">
-          <FileText className="h-4 w-4" aria-hidden="true" />Ver a fatura
-        </button>
-      </div>
-      {avisado ? (
-        <p role="status" className="flex items-center gap-2 text-[15px] text-emerald-700"><Check className="h-4 w-4" aria-hidden="true" />Recebemos o seu aviso. O Financeiro confirma o pagamento e envia-lhe o recibo.</p>
-      ) : (
-        <>
-          <p className="text-sm text-slate-600">Pague com os dados da fatura que lhe enviámos. Se precisar deles outra vez, peça-os na conversa.</p>
-          <div className="space-y-2 border-t border-slate-200 pt-3">
-            <p className="text-[15px] font-medium">Já pagou? Avise-nos</p>
-            <input value={ref} onChange={(ev) => setRef(ev.target.value)} placeholder="Referência ou n.º da transferência (opcional)" aria-label="Referência do pagamento"
-              className="h-12 w-full rounded-xl border border-slate-300 px-3 text-[15px] outline-none focus:border-slate-900" />
-            <Botao disabled={aEnviar} onClick={() => void avisar()}>{aEnviar ? "A enviar…" : "Já paguei"}</Botao>
-            {erro && <p role="alert" className="text-sm text-red-700">{erro}</p>}
-          </div>
-        </>
-      )}
+      <PagarFatura numero={numero} montante={montante} vence={vence} refMb={refMb} alvo={{ metodo }} titular={titular} verFatura={verFatura}
+        escolher={escolher} pago={(r) => avisar(r, metodoDe(metodo))} autorizar={(i, t) => avisar(`Débito direto autorizado na conta ${i} (${t})`, "Débito direto")} />
+      {erro && <p role="alert" className="text-sm text-red-700">{erro}</p>}
     </div>
   );
 }

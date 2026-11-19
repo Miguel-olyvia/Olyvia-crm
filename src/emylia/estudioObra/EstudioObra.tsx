@@ -50,6 +50,7 @@ import { useNomeParaMarcaDagua } from "@/hooks/useNomeParaMarcaDagua";
 import { modoReal } from "../acessosPortal";
 import { DocumentosDaObra, ProjetoEm3D } from "./DocumentosObra";
 import { documentosEnviados, porResponder } from "./enviadosAoCliente";
+import { nomeDaParcela, parcelaDoArranquePorPagar } from "../parcelas";
 
 const SEM = ["D", "S", "T", "Q", "Q", "S", "S"];
 const MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
@@ -266,8 +267,10 @@ export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: 
   };
   const pedidos = precisaDeTi(ctx, d, ir);
   // o botão principal: um só, pelo momento da obra
+  // 19/11 (Rúben): no 50-25-25, o 1.º clique manda a parcela do arranque ao Financeiro; a obra arranca com ela paga
+  const parcelaArranque = p.estado === "aprovado" && d.f.arranque_pedido ? parcelaDoArranquePorPagar(S, d) : null;
   const principal = p.estado === "aprovado"
-    ? { t: "Arrancar a obra", icone: Rocket, desligado: faltaArrancar.length > 0 || !planeia, porque: faltaArrancar.length ? `Falta ${faltaArrancar.join(", ")}.` : !planeia ? "Quem arranca a obra são as Operações." : "", fn: () => fazer(() => A.arrancar(d.id)) }
+    ? { t: "Arrancar a obra", icone: Rocket, desligado: faltaArrancar.length > 0 || !planeia || !!parcelaArranque, porque: faltaArrancar.length ? `Falta ${faltaArrancar.join(", ")}.` : parcelaArranque ? `À espera de ${nomeDaParcela(parcelaArranque)} paga, no Financeiro.` : !planeia ? "Quem arranca a obra são as Operações." : "", fn: () => fazer(() => A.arrancar(d.id)) }
     : vivo && PV.length ? { t: PV.length === 1 ? "Validar a tarefa feita" : `Validar ${PV.length} tarefas feitas`, icone: CheckCircle2, desligado: !planeia, porque: "", fn: () => fazer(() => A.validarVarias(d.id, PV)) }
     : vivo && !falta.length ? { t: "Encerrar a obra", icone: CalendarCheck, desligado: !planeia, porque: "", fn: () => fazer(() => A.fimObra(d.id)) }
     : vivo ? { t: "Registar imprevisto", icone: AlertTriangle, desligado: false, porque: "", fn: () => setPainel({ k: "imprevisto" }) }

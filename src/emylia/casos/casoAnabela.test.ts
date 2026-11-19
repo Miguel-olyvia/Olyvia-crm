@@ -15,7 +15,8 @@ import { pontosEncerrar } from "../encerrarObra";
 import { seguranca } from "../obraOps";
 import { PAGAMENTO_MEDIDA, planoObra, prestacoes, type Prestacao } from "../planoObra";
 import { faturasDe, guardarFaturas, tranchesDe, totalComIva } from "../v2/estadoV2";
-import { registarFatura, resumoFin, validarPagamento, valorTranche } from "../v2/financeiro";
+import { resumoFin } from "../v2/financeiro";
+import { parcelasNoFinanceiro } from "../parcelas";
 import { ZONAS, TAXA, OFICIAL, PAGAMENTO, PRAZO_CONTRATO } from "./propostaAnabela";
 import { K_ANABELA, LINHAS_P, SVC_DO_SKU, montarAnabela, preencher } from "./montarAnabela";
 
@@ -156,6 +157,16 @@ describe("caso real: contrato CC-2026-0331 da Anabela Schroeder", () => {
     const ref = d().obra.ec?.ref;
     console.log("ENCOMENDA DE CLIENTE:", d().obra.ec?.n, ref);
     if (ref) expect(receberTudo(ref)).toBe("");
+    // 19/11 (Rúben): as prestações antes do início (1 mês antes, no início, na retificação das medidas) caem no Financeiro ao carregar em
+    // «Arrancar a obra»; a obra só arranca com elas pagas. As do fim, antes do auto de receção.
+    const pagarParcelas = () => {
+      const papel = S.role; S.role = "financeiro";
+      for (const x of parcelasNoFinanceiro(S, d())) { expect(A.registarFaturaParcela(id, x.id, `FT 2026/${500 + x.i}`)).toBe(true); A.validarParcela(id, x.id); }
+      S.role = papel;
+    };
+    A.arrancar(id);
+    expect(d().obra.plano!.estado).toBe("aprovado");
+    pagarParcelas();
     A.arrancar(id);
     expect(d().obra.plano!.estado, "arrancar: " + JSON.stringify(avisos.slice(-2))).toBe("em curso");
 
@@ -177,6 +188,9 @@ describe("caso real: contrato CC-2026-0331 da Anabela Schroeder", () => {
     console.log("PARA ENCERRAR FALTA:", falta.map((x) => `${x.t} (${x.sub})`).join(" | ") || "nada");
     A.fimObra(id);
     expect(d().obra.plano!.estado, "fim: " + JSON.stringify(avisos.slice(-2))).toBe("concluída");
+    // sem a fatura final paga não há auto de receção
+    expect(d().obra.auto ?? null).toBeNull();
+    pagarParcelas();
     A.enviarAuto(id);
     A.assinarAuto(id, { tipo: "sms", nome: "Anabela Correia", q: "18/12/2026 17:00", id: "OTP-AUTO" });
     expect(d().obra.auto?.estado).toBe("assinado");
@@ -185,12 +199,8 @@ describe("caso real: contrato CC-2026-0331 da Anabela Schroeder", () => {
     /* ---------------- 7. as outras 4 prestações: faturadas e pagas, gravadas no negócio */
     const total = totalComIva(S, d());
     expect(r2(total)).toBe(OFICIAL.total);
-    let fs = faturasDe(S, d());
-    TR.slice(1).forEach((t, i) => {
-      fs = registarFatura(fs, { numero: `FT 2026/${501 + i}`, data: "2026-12-18", valor: valorTranche(total, TR, t.id), tranche: t.id });
-      fs = validarPagamento(fs, fs.at(-1)!.id, { data: "2026-12-19", conta: "Banco A · conta à ordem", ref: "Transferência " + t.nome }, `RG 2026/${501 + i}`);
-    });
-    guardarFaturas(S, id, fs);
+    // 19/11: já registadas e pagas no arranque e antes do auto (FT 2026/501 a 504)
+    expect(d().fin.tranches!.slice(1).map((f) => f.numero)).toEqual(TR.slice(1).map((_, i) => `FT 2026/${501 + i}`));
     const R = resumoFin(total, TR, d().fin.tranches!);
     console.log("FINANCEIRO · faturado", R.faturado, "· pago", R.pago, "·", d().fin.tranches!.map((f) => `${f.numero} ${f.valor}`).join(" | "));
     expect(R.completo).toBe(true);
