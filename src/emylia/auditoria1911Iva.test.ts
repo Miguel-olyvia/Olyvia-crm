@@ -48,7 +48,7 @@ describe("a taxa nas linhas novas", () => {
     S.role = "financeiro"; d.fin.fatura = { n: "FT TESTE/1031", q: "hoje" }; A.validar(d.id);
     const med: Record<string, number> = {};
     for (const [k] of camposMedida(LINHAS[d.linha])) med[k] = medida(d.visita.med, k) + 3;
-    S.role = "operacoes"; A.retificarMedidas(d.id, med);
+    S.role = "operacoes"; A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id, med);
     S.role = "comercial"; expect(A.adendaDoValor(d.id)).toBeTruthy();
     const a = adendaDoAcerto(d)!;
     const prods = a.linhas.find((l) => l.n.startsWith(LINHA_ACERTO_PRODUTOS))!;
