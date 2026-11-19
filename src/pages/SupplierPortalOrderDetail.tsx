@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Building2, CheckCircle2, Download, Info, Loader2, RefreshCw, Truck } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Building2, CheckCircle2, Clock, Download, Info, Loader2, RefreshCw, Truck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -20,6 +20,7 @@ import {
   spUploadDeliveryNoteFile,
   type SpOrderDetail,
   type SpOrderLine,
+  type SpOrderSla,
 } from "@/lib/supplierPortal/spRpc";
 import { SP_ORDERS_QUERY_KEY } from "@/components/supplier-portal/useSpOrdersToConfirm";
 import { SpOrderBadges } from "@/components/supplier-portal/SpOrderBadges";
@@ -33,6 +34,8 @@ import {
   formatSpDateTime,
   formatSpMoney,
   formatSpQty,
+  spDaysText,
+  spSlaSourceText,
 } from "@/components/supplier-portal/spOrderFormat";
 
 function attributesText(line: SpOrderLine): string {
@@ -81,6 +84,54 @@ function orderContentKey(o: SpOrderDetail): string {
 
 function snapshotOf(o: SpOrderDetail): ConfirmSnapshot {
   return { purchaseOrderId: o.purchase_order_id, revision: o.publication.revision, contentKey: orderContentKey(o) };
+}
+
+/**
+ * Aviso de prazo de entrega (SLA): em risco (âmbar) ou ultrapassado (vermelho).
+ * Nada quando está dentro do prazo, fechada ou sem prazo.
+ */
+function SpSlaAlert({ sla }: { sla: SpOrderSla | null | undefined }) {
+  if (!sla || (sla.status !== "at_risk" && sla.status !== "overdue")) return null;
+  const due = formatSpDate(sla.due_date);
+  const source = spSlaSourceText(sla);
+
+  if (sla.status === "overdue") {
+    const late = Math.max(1, sla.days_late ?? 1);
+    // Prazo vindo só da data prometida, sem contrato com prazo: não falar de contrato.
+    const noContract = sla.source === "promised" && sla.contract_days == null;
+    return (
+      <Alert variant="destructive" className="border-2 bg-red-50 dark:bg-red-500/10">
+        <AlertTriangle className="h-4 w-4" />
+        <AlertTitle>Prazo de entrega (SLA) ultrapassado</AlertTitle>
+        <AlertDescription className="space-y-1">
+          {noContract ? (
+            <p>
+              Prazo era {due} · {spDaysText(late)} de atraso face à data que indicou.
+            </p>
+          ) : (
+            <p>
+              Prazo era {due} ({source}) · {spDaysText(late)} de atraso. O incumprimento fica registado no SLA do contrato
+              com a empresa.
+            </p>
+          )}
+        </AlertDescription>
+      </Alert>
+    );
+  }
+
+  const left = Math.max(0, sla.days_left ?? 0);
+  return (
+    <Alert
+      role="status"
+      className="border-2 border-amber-400 bg-amber-50 text-amber-950 dark:bg-amber-500/10 dark:text-amber-100 dark:border-amber-500/40"
+    >
+      <Clock className="h-4 w-4 !text-amber-700 dark:!text-amber-300" />
+      <AlertTitle>Atenção: esta encomenda está perto de falhar o prazo de entrega (SLA)</AlertTitle>
+      <AlertDescription>
+        Prazo: {due} · {left === 0 ? "termina hoje" : `faltam ${spDaysText(left)}`} ({source}).
+      </AlertDescription>
+    </Alert>
+  );
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {
@@ -275,7 +326,12 @@ export default function SupplierPortalOrderDetail() {
           <div className="min-w-0 space-y-1">
             <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Encomenda {order.order_number}</h1>
             <p className="text-sm text-muted-foreground truncate">{order.company.name}</p>
-            <SpOrderBadges orderStatus={order.order_status} publicationStatus={pub.status} shippingState={shippingState} />
+            <SpOrderBadges
+              orderStatus={order.order_status}
+              publicationStatus={pub.status}
+              shippingState={shippingState}
+              sla={order.sla}
+            />
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 md:flex gap-2 shrink-0">
@@ -306,6 +362,9 @@ export default function SupplierPortalOrderDetail() {
           )}
         </div>
       </div>
+
+      {/* Prazo (SLA) primeiro: é o aviso mais importante. */}
+      <SpSlaAlert sla={order.sla} />
 
       {changedWhileConfirming && !isConfirmed && (
         <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:bg-amber-500/10 dark:text-amber-100 dark:border-amber-500/30">
@@ -363,6 +422,21 @@ export default function SupplierPortalOrderDetail() {
               <Field label="Número">{order.order_number}</Field>
               <Field label="Data da encomenda">{formatSpDate(order.order_date)}</Field>
               <Field label="Entrega pedida">{formatSpDate(order.expected_delivery)}</Field>
+              {order.sla?.status && order.sla.due_date && (
+                <Field label="Prazo (SLA)">
+                  <span
+                    className={
+                      order.sla.status === "overdue"
+                        ? "font-medium text-red-700 dark:text-red-300"
+                        : order.sla.status === "at_risk"
+                          ? "font-medium text-amber-800 dark:text-amber-200"
+                          : undefined
+                    }
+                  >
+                    {formatSpDate(order.sla.due_date)}
+                  </span>
+                </Field>
+              )}
               <Field label="Enviada em">{formatSpDateTime(pub.sent_at)}</Field>
               <Field label="Vista em">{formatSpDateTime(pub.viewed_at)}</Field>
               {order.sent_by && (

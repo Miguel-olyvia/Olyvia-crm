@@ -1,5 +1,5 @@
 // Portal do Fornecedor (F3.2) — rótulos e formatação das encomendas.
-import type { SpOrderStatus, SpPublicationStatus } from "@/lib/supplierPortal/spRpc";
+import type { SpOrderSla, SpOrderStatus, SpPublicationStatus } from "@/lib/supplierPortal/spRpc";
 
 /** "YYYY-MM-DD" → "dd/mm/aaaa" sem passar por Date (evita desvios de fuso). */
 export function formatSpDate(value: string | null | undefined): string {
@@ -55,4 +55,31 @@ export function spOrderStatusBadge(status: SpOrderStatus): { label: string; tone
   if (status === "received") return { label: "Recebida", tone: "received" };
   if (status === "partially_received") return { label: "Parcialmente recebida", tone: "partial" };
   return null;
+}
+
+/** "N dia" / "N dias". */
+export function spDaysText(n: number): string {
+  return `${n} ${Math.abs(n) === 1 ? "dia" : "dias"}`;
+}
+
+/** Etiqueta de alerta do prazo (SLA) — só em risco/ultrapassado; null nos restantes casos. */
+export function spSlaBadge(sla: SpOrderSla | null | undefined): { label: string; title: string; tone: Tone } | null {
+  if (!sla?.status || sla.status === "ok") return null;
+  const due = formatSpDate(sla.due_date);
+  if (sla.status === "overdue") {
+    const late = Math.max(1, sla.days_late ?? 1);
+    return { label: `Atrasada · ${late} d`, title: `Prazo de entrega (SLA) ultrapassado: era ${due}, ${spDaysText(late)} de atraso`, tone: "cancelled" };
+  }
+  const left = Math.max(0, sla.days_left ?? 0);
+  return {
+    label: "Em risco",
+    title: `Prazo de entrega (SLA) a terminar: ${due}${left === 0 ? ", termina hoje" : `, faltam ${spDaysText(left)}`}`,
+    tone: "new",
+  };
+}
+
+/** Origem do prazo, para o texto do aviso. */
+export function spSlaSourceText(sla: SpOrderSla): string {
+  if (sla.source === "promised") return "data que indicou na confirmação";
+  return sla.contract_days != null ? `prazo do contrato: ${spDaysText(sla.contract_days)} a contar do envio` : "prazo do contrato";
 }

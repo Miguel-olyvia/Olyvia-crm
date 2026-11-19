@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Search } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ChevronRight, ClipboardList, RefreshCw, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -10,13 +10,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { useSupplierPortal } from "@/contexts/SupplierPortalContext";
-import { isNoSupplierAccess, spErrorMessage, spListOrders, type SpOrderFilter } from "@/lib/supplierPortal/spRpc";
+import { isNoSupplierAccess, spErrorMessage, spListOrders, type SpOrderFilter, type SpOrderListItem } from "@/lib/supplierPortal/spRpc";
 import { SP_ORDERS_QUERY_KEY } from "@/components/supplier-portal/useSpOrdersToConfirm";
 import { SpOrderBadges } from "@/components/supplier-portal/SpOrderBadges";
 import { formatSpDate, formatSpMoney } from "@/components/supplier-portal/spOrderFormat";
 
 const PAGE_SIZE = 25;
 const ALL_COMPANIES = "__all__";
+/** Filtro rápido «prazo em risco/ultrapassado» (?sla=alerta): sem filtro na RPC, filtra no cliente as encomendas em curso. */
+const SLA_PARAM = "sla";
+const SLA_ALERT = "alerta";
+/** Máximo da RPC (LEAST(p_limit, 200)). */
+const SLA_FETCH_LIMIT = 200;
+
+function hasSlaAlert(o: SpOrderListItem): boolean {
+  return o.sla?.status === "at_risk" || o.sla?.status === "overdue";
+}
 
 const FILTERS: { value: SpOrderFilter; label: string }[] = [
   { value: "to_confirm", label: "Por confirmar" },
@@ -38,6 +47,7 @@ export default function SupplierPortalOrders() {
   const [params, setParams] = useSearchParams();
 
   const filter = parseFilter(params.get("estado"));
+  const slaOnly = params.get(SLA_PARAM) === SLA_ALERT;
   const orgParam = params.get("empresa");
   const orgId = orgParam && companies.some((c) => c.organization_id === orgParam) ? orgParam : null;
 
@@ -57,6 +67,20 @@ export default function SupplierPortalOrders() {
     );
   };
 
+  /** Escolher um separador de estado desliga o filtro rápido do prazo. */
+  const selectFilter = (value: SpOrderFilter) => {
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value === "to_confirm") next.delete("estado");
+        else next.set("estado", value);
+        next.delete(SLA_PARAM);
+        return next;
+      },
+      { replace: true },
+    );
+  };
+
   // Pesquisa com atraso para não chamar a RPC a cada tecla.
   useEffect(() => {
     const t = window.setTimeout(() => setSearch(searchInput.trim()), 300);
@@ -65,12 +89,15 @@ export default function SupplierPortalOrders() {
 
   useEffect(() => {
     setPage(0);
-  }, [filter, orgId, search]);
+  }, [filter, orgId, search, slaOnly]);
 
   const accountId = account?.id ?? null;
   const query = useQuery({
-    queryKey: [SP_ORDERS_QUERY_KEY, accountId, "list", filter, orgId, search, page],
-    queryFn: () => spListOrders({ orgId, status: filter, search, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
+    queryKey: [SP_ORDERS_QUERY_KEY, accountId, "list", slaOnly ? "sla-alert" : filter, orgId, search, slaOnly ? 0 : page],
+    queryFn: () =>
+      slaOnly
+        ? spListOrders({ orgId, status: "open", search, limit: SLA_FETCH_LIMIT, offset: 0 })
+        : spListOrders({ orgId, status: filter, search, limit: PAGE_SIZE, offset: page * PAGE_SIZE }),
     enabled: !!accountId,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
@@ -83,12 +110,21 @@ export default function SupplierPortalOrders() {
   }, [query.error, refresh]);
 
   const data = query.data;
-  const items = useMemo(() => data?.items ?? [], [data]);
-  const total = data?.total ?? 0;
-  const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const from = total === 0 ? 0 : page * PAGE_SIZE + 1;
-  const to = Math.min(total, (page + 1) * PAGE_SIZE);
+  const items = useMemo(() => {
+    const all = data?.items ?? [];
+    return slaOnly ? all.filter(hasSlaAlert) : all;
+  }, [data, slaOnly]);
+  const total = slaOnly ? items.length : data?.total ?? 0;
+  const pageSize = slaOnly ? Math.max(1, total) : PAGE_SIZE;
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const from = total === 0 ? 0 : page * pageSize + 1;
+  const to = Math.min(total, (page + 1) * pageSize);
   const showCompany = companies.length > 1;
+  const slaAlertCount = data?.counts?.sla_alert;
+  /** Só há SLA se a BD já o devolver (evita uma coluna vazia). */
+  const showSla = items.some((o) => o.sla != null);
+  /** Em curso além do limite da RPC: o filtro rápido pode não mostrar todas. */
+  const slaTruncated = slaOnly && (data?.total ?? 0) > SLA_FETCH_LIMIT;
 
   useEffect(() => {
     if (data && page > 0 && page >= pageCount) setPage(pageCount - 1);
@@ -118,7 +154,7 @@ export default function SupplierPortalOrders() {
       {/* Separadores de estado com contagem (counts não dependem do estado escolhido). */}
       <div role="tablist" aria-label="Estado das encomendas" className="flex gap-1 overflow-x-auto border-b">
         {FILTERS.map((f) => {
-          const selected = f.value === filter;
+          const selected = !slaOnly && f.value === filter;
           const count = data?.counts?.[f.value];
           return (
             <button
@@ -126,7 +162,7 @@ export default function SupplierPortalOrders() {
               type="button"
               role="tab"
               aria-selected={selected}
-              onClick={() => updateParam("estado", f.value === "to_confirm" ? null : f.value)}
+              onClick={() => selectFilter(f.value)}
               className={cn(
                 "flex items-center gap-1.5 h-11 px-3 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition-colors",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset",
@@ -150,6 +186,43 @@ export default function SupplierPortalOrders() {
           );
         })}
       </div>
+
+      {(slaOnly || (slaAlertCount ?? 0) > 0) && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            aria-pressed={slaOnly}
+            onClick={() => updateParam(SLA_PARAM, slaOnly ? null : SLA_ALERT)}
+            className={cn(
+              "h-11 gap-2",
+              slaOnly
+                ? "border-red-300 bg-red-50 text-red-900 hover:bg-red-100 dark:border-red-500/40 dark:bg-red-500/15 dark:text-red-100"
+                : "border-amber-300 text-amber-900 hover:bg-amber-50 dark:border-amber-500/40 dark:text-amber-100 dark:hover:bg-amber-500/10",
+            )}
+          >
+            <AlertTriangle className="h-4 w-4" aria-hidden="true" />
+            Prazo em risco ou ultrapassado
+            {slaAlertCount !== undefined && (
+              <span className="rounded-full bg-red-600 px-1.5 text-[11px] leading-5 min-w-5 text-center text-white">
+                {slaAlertCount}
+              </span>
+            )}
+          </Button>
+          {slaOnly && (
+            <Button variant="ghost" className="h-11 gap-1.5 text-muted-foreground" onClick={() => updateParam(SLA_PARAM, null)}>
+              <X className="h-4 w-4" aria-hidden="true" />
+              Ver todas
+            </Button>
+          )}
+        </div>
+      )}
+
+      {slaTruncated && (
+        <p className="text-xs text-muted-foreground">
+          Mostra apenas as {SLA_FETCH_LIMIT} encomendas em curso mais recentes. Use a pesquisa ou o filtro de empresa para
+          encontrar as restantes.
+        </p>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
         <div className="space-y-1">
@@ -211,10 +284,18 @@ export default function SupplierPortalOrders() {
         <div className="rounded-lg border bg-background py-12 px-4 text-center space-y-2">
           <ClipboardList className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden="true" />
           <p className="text-sm font-medium text-foreground">
-            {search || orgId ? "Nenhuma encomenda com estes filtros." : filter === "to_confirm" ? "Não tem encomendas por confirmar." : "Sem encomendas."}
+            {slaOnly
+              ? search || orgId
+                ? "Nenhuma encomenda com prazo em risco ou ultrapassado com estes filtros."
+                : "Não tem encomendas com prazo em risco ou ultrapassado."
+              : search || orgId
+                ? "Nenhuma encomenda com estes filtros."
+                : filter === "to_confirm"
+                  ? "Não tem encomendas por confirmar."
+                  : "Sem encomendas."}
           </p>
-          {filter !== "all" && (
-            <Button variant="link" onClick={() => updateParam("estado", "all")}>
+          {(slaOnly || filter !== "all") && (
+            <Button variant="link" onClick={() => selectFilter("all")}>
               Ver todas as encomendas
             </Button>
           )}
@@ -234,7 +315,12 @@ export default function SupplierPortalOrders() {
                       <p className="font-semibold text-foreground">{o.order_number}</p>
                       <p className="text-xs text-muted-foreground truncate">{o.organization.name}</p>
                     </div>
-                    <SpOrderBadges orderStatus={o.order_status} publicationStatus={o.publication_status} className="justify-end" />
+                    <SpOrderBadges
+                      orderStatus={o.order_status}
+                      publicationStatus={o.publication_status}
+                      sla={o.sla}
+                      className="justify-end"
+                    />
                   </div>
                   <div className="flex items-center justify-between text-xs text-muted-foreground">
                     <span>
@@ -242,8 +328,21 @@ export default function SupplierPortalOrders() {
                     </span>
                     <span className="font-medium text-foreground">{formatSpMoney(o.total, o.currency)}</span>
                   </div>
-                  {o.promised_date && (
-                    <p className="text-xs text-muted-foreground">Entrega prevista: {formatSpDate(o.promised_date)}</p>
+                  {(o.promised_date || o.sla?.status) && (
+                    <p className="text-xs text-muted-foreground">
+                      {o.promised_date && <>Entrega prevista: {formatSpDate(o.promised_date)}</>}
+                      {o.promised_date && o.sla?.status && " · "}
+                      {o.sla?.status && (
+                        <span
+                          className={cn(
+                            o.sla.status === "overdue" && "font-medium text-red-700 dark:text-red-300",
+                            o.sla.status === "at_risk" && "font-medium text-amber-800 dark:text-amber-200",
+                          )}
+                        >
+                          Prazo (SLA): {formatSpDate(o.sla.due_date)}
+                        </span>
+                      )}
+                    </p>
                   )}
                 </Link>
               </li>
@@ -260,6 +359,7 @@ export default function SupplierPortalOrders() {
                   <TableHead>Data</TableHead>
                   <TableHead>Entrega pedida</TableHead>
                   <TableHead>Entrega prevista</TableHead>
+                  {showSla && <TableHead>Prazo (SLA)</TableHead>}
                   <TableHead className="text-right">Linhas</TableHead>
                   <TableHead className="text-right">Total</TableHead>
                   <TableHead>Estado</TableHead>
@@ -285,10 +385,20 @@ export default function SupplierPortalOrders() {
                     <TableCell>{formatSpDate(o.order_date)}</TableCell>
                     <TableCell>{formatSpDate(o.expected_delivery)}</TableCell>
                     <TableCell>{formatSpDate(o.promised_date)}</TableCell>
+                    {showSla && (
+                      <TableCell
+                        className={cn(
+                          o.sla?.status === "overdue" && "font-medium text-red-700 dark:text-red-300",
+                          o.sla?.status === "at_risk" && "font-medium text-amber-800 dark:text-amber-200",
+                        )}
+                      >
+                        {o.sla?.status ? formatSpDate(o.sla.due_date) : "—"}
+                      </TableCell>
+                    )}
                     <TableCell className="text-right tabular-nums">{o.lines}</TableCell>
                     <TableCell className="text-right tabular-nums">{formatSpMoney(o.total, o.currency)}</TableCell>
                     <TableCell>
-                      <SpOrderBadges orderStatus={o.order_status} publicationStatus={o.publication_status} />
+                      <SpOrderBadges orderStatus={o.order_status} publicationStatus={o.publication_status} sla={o.sla} />
                     </TableCell>
                   </TableRow>
                 ))}

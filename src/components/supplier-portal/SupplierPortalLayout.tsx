@@ -11,6 +11,7 @@ import { SupplierFirstLoginModal } from "@/components/supplier-portal/SupplierFi
 import { SupplierConfirmDataModal } from "@/components/supplier-portal/SupplierConfirmDataModal";
 import { useSpOrdersToConfirm } from "@/components/supplier-portal/useSpOrdersToConfirm";
 import { SpContractPendingBanner, SpContractPendingPrompt } from "@/components/supplier-portal/contract/SpContractPending";
+import { SpOrdersSlaBanner } from "@/components/supplier-portal/SpOrdersSlaBanner";
 import { useSpContractsList } from "@/components/supplier-portal/contract/useSpContracts";
 import { pendingContract } from "@/lib/supplierContracts/portal";
 
@@ -200,6 +201,7 @@ export function SupplierPortalLayout({ children }: { children: ReactNode }) {
         </div>
       </nav>
 
+      <SpOrdersSlaBanner />
       <SpContractPendingBanner enabled={contractNoticesOn} />
 
       <main className="flex-1 w-full max-w-7xl mx-auto p-3 sm:p-4 md:p-6">{children}</main>

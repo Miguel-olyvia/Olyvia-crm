@@ -9,7 +9,7 @@
 //  · FechoDaObra: o que falta para fechar, a segurança, a vistoria e o auto, e encerrar.
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowUpRight, Camera, Check, CheckCircle2, ChevronRight, Clock, MessageSquare, Minus, Package, Pause, Play, Plus, RotateCcw, Scissors, Send, ShieldCheck, TrendingUp, Undo2, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, Camera, Check, CheckCircle2, ChevronRight, Clock, Minus, Package, Pause, Play, Plus, RotateCcw, Scissors, Send, ShieldCheck, TrendingUp, Undo2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, eur, nfmt, type MatTarefa, type Negocio, type Plano, type Tarefa } from "../motor";
@@ -27,7 +27,7 @@ import { materiaisDaTarefa } from "../tarefasValidador";
 import { custosDosMateriais } from "../preparacaoObra";
 import { EditorMateriais } from "../PlanoInterativo";
 import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
-import { lerFoto } from "../ObraOperacoes";
+import { ConversaDoClienteNaObra, lerFoto } from "../ObraOperacoes";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { useInventario } from "../inventario/loja";
 import { resumoEcNegocio } from "../inventario/ponteNegocios";
@@ -412,18 +412,18 @@ export function ClienteDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const { S, A, run } = ctx;
   const planeia = podeNeg(S.role, "obra.planear");
   const [texto, setTexto] = useState("");
-  const porLer = (d.obra.chat ?? []).filter((m) => m.de === "cliente" && !m.lida).length;
   const vistos = (d.obra.alteracoes ?? []).filter((a) => a.cliente && a.avisoCliente);
   const ads = d.adendas ?? [];
   return (
     <div className="grid gap-5 lg:grid-cols-2">
+      {/* 19/11: a conversa com o cliente e os problemas que ele reporta vivem aqui (a página antiga da obra saiu das Operações) */}
+      <ConversaDoClienteNaObra ctx={ctx} d={d} />
       <section aria-label="Avisar o cliente" className="space-y-3 rounded-2xl border border-border bg-card p-4">
         <p className="text-sm font-semibold">Avisar o cliente</p>
         <p className="text-sm text-muted-foreground">Aparece nas novidades da obra, no portal dele. Para mudar datas, use o plano: o aviso vai com a mudança.</p>
         <div className="flex flex-wrap gap-2">{AVISOS_RAPIDOS.map((x) => <button key={x} type="button" onClick={() => setTexto(x)} className={chip(texto === x)}>{x}</button>)}</div>
         <textarea value={texto} onChange={(e) => setTexto(e.target.value)} rows={2} placeholder="Escreva o aviso" aria-label="O aviso ao cliente" className="w-full rounded-xl border border-input bg-background px-3 py-2 text-[15px]" />
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <Button type="button" variant="ghost" className="min-h-10 rounded-full" onClick={() => run(() => A.abrirPlano(d.id))}><MessageSquare className="mr-1.5 h-4 w-4" aria-hidden="true" />A conversa{porLer ? ` · ${porLer} por ler` : ""}</Button>
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Button type="button" variant="outline" className="min-h-10 rounded-full" disabled={!planeia || !texto.trim()} onClick={() => { run(() => A.avisarClienteObra(d.id, texto)); setTexto(""); }}><Send className="mr-1.5 h-4 w-4" aria-hidden="true" />Avisar no portal</Button>
         </div>
       </section>

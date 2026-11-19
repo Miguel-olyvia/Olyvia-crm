@@ -1576,6 +1576,21 @@ function useConversaObra(ctx: Ctx, d: Negocio) {
   return c;
 }
 
+/** 19/11 (Rúben: «as Operações da obra têm de ser o Estúdio da obra, não o outro antigo»): a conversa com o cliente e os problemas que
+ *  ele reporta nela, no separador «Cliente» do Estúdio da obra (antes só na página antiga da obra). Com a leitura reduzida, nada. */
+export function ConversaDoClienteNaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+  const conversa = useConversaObra(ctx, d);
+  const [aberto, setAberto] = useState<string | null>(null);
+  if (ctx.leituraReduzida) return null;
+  const abrir = (k: string) => { setAberto(k); window.setTimeout(() => document.getElementById("obra-problemas")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
+  return (
+    <div className="lg:col-span-2 [&>section:first-child]:mt-0">
+      <ProblemasDoCliente ctx={ctx} d={d} conversa={conversa} abrir={aberto} setAbrir={setAberto} />
+      <ConversaNaObra ctx={ctx} d={d} conversa={conversa} abrirProblema={abrir} />
+    </div>
+  );
+}
+
 /** 21/10: a conversa com o cliente (o mesmo fio do portal do cliente). Ao abrir, as mensagens do cliente ficam lidas. */
 function ConversaNaObra({ ctx, d, conversa, abrirProblema }: { ctx: Ctx; d: Negocio; conversa: ReturnType<typeof useConversaObra>; abrirProblema: (k: string) => void }) {
   const { org, msgs, marcarLidas, enviar } = conversa, porLer = msgs.filter((m) => m.de === "cliente" && !m.lida).length;

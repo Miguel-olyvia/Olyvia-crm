@@ -61,10 +61,10 @@ import { definirGuardarDadosLead, definirPodeAtribuirLead } from "@/emylia/Dados
 import { usePodeAtribuirComercial } from "@/hooks/pessoas/usePodeAtribuirComercial";
 import { useVisitasDoNegocio } from "@/hooks/pessoas/useVisitasDoNegocio";
 import { lerComerciais } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
-import { idsServico, lerNegocios, negocioParaOEcra, type IdsServico } from "@/emylia/real/negocioBase";
+import { idsServico, lerNegocios, lerObras, negocioParaOEcra, type IdsServico } from "@/emylia/real/negocioBase";
 import { aplicarRececao, aplicarResposta, lerRececoes, lerRespostas, marcarRespostas, publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
 import { avisarCliente } from "@/emylia/real/avisosCliente";
-import { fotografarNegocios, gravarMudancas, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
+import { fotografarNegocios, gravarMudancas, juntarObrasDaBase, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
 import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real/inventarioReal";
 import { aoMudarProntidao } from "@/emylia/inventario/prontidaoReal";
 import { definirOrgErp } from "@/emylia/erpEticadata";
@@ -379,7 +379,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
       do {
         deNovo.current = false;
         // 09/11 (20270111100000): com a leitura reduzida só se grava a obra (neg_guardar_negocio recusa-o; sem o «Não gravou»)
-        const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current, new Set([...soLeitura.current, ...bloqueadosAssistente()]), { soObra: soExecucaoRef.current });
+        const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current, new Set([...soLeitura.current, ...bloqueadosAssistente()]), { soObra: soExecucaoRef.current, lerObras: () => lerObras(supabase, org) });
         if (r.reler) relerFinanceiro = true;
         if (relerPedido.current) { relerPedido.current = false; relerFinanceiro = true; }
         if (r.erros.length) { semErros = false; setGravacao({ k: "erro", t: r.erros.join(" · ") }); avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
@@ -424,6 +424,32 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
       redesenhar();
     }
   }, [org, S, avisar, redesenhar, aplicarLidos, publicarVistasCliente, avisarClientes]);
+
+  // 19/11 (Rúben: «o técnico, ao completar uma task, que esteja ligado o input de término no Estúdio da obra», e o contrário): as obras
+  // releem-se da base a cada 20 s (com o separador à vista e nada a gravar). O que outra pessoa gravou (o técnico no Hoje, o gestor no
+  // Estúdio) entra aqui sem apagar o que este ecrã ainda não gravou (juntarObrasDaBase), e diz-se o que mudou nas tarefas.
+  useEffect(() => {
+    if (!org || !pronto) return;
+    let vivo = true, aLer = false;
+    const ler = async () => {
+      if (aLer || aGravar.current || document.hidden || !S.deals.some((d) => d.obra?.plano)) return;
+      aLer = true;
+      try {
+        const lidas = await lerObras(supabase, org);
+        if (!vivo || !lidas || aGravar.current) return;
+        const mudados = juntarObrasDaBase(S, refs.current, foto.current, lidas);
+        if (!mudados.length) return;
+        const N = mudados.flatMap((m) => m.novidades.map((t) => ({ d: m.d, t })));
+        if (N.length === 1) avisar({ msg: N[0].t, sub: N[0].d.nome, kind: "ok" });
+        else if (N.length > 1) avisar({ msg: `${N.length} tarefas mudaram`, sub: [...new Set(N.map((x) => x.d.nome))].join(" · "), kind: "ok" });
+        redesenhar();
+      } catch { /* tenta-se na próxima volta */ } finally { aLer = false; }
+    };
+    const t = window.setInterval(() => void ler(), 20000);
+    const visivel = () => { if (!document.hidden) void ler(); };
+    document.addEventListener("visibilitychange", visivel);
+    return () => { vivo = false; window.clearInterval(t); document.removeEventListener("visibilitychange", visivel); };
+  }, [org, pronto, S, avisar, redesenhar]);
 
   // 28/10: a encomenda de cliente e as encomendas a fornecedor de cada negócio, da base (as emitidas no servidor)
   const carregarEncomendas = useCallback(async (lidos: readonly NegocioLido[]) => {

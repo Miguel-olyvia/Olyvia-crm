@@ -108,7 +108,8 @@ function LerQuemAssina() {
   return null;
 }
 
-export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: Negocio; fechar: (mexeu?: boolean) => void; endereco?: boolean }) {
+/** 19/11: `voltar`: para onde volta o botão do cabeçalho (nas Operações, «Operações»; por omissão, o negócio). */
+export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar ao negócio" }: { ctx: Ctx; d: Negocio; fechar: (mexeu?: boolean) => void; endereco?: boolean; voltar?: string }) {
   const { S, A, run } = ctx;
   const reduzir = useReduzir();
   const p = d.obra.plano;
@@ -285,7 +286,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true }: { ctx: Ctx; d: 
         <header className="border-b border-border bg-card/95 backdrop-blur">
           <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
-              <Button type="button" variant="outline" className="min-h-11 shrink-0" onClick={sair} aria-label="Voltar ao negócio"><ArrowLeft className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">Voltar ao negócio</span></Button>
+              <Button type="button" variant="outline" className="min-h-11 shrink-0" onClick={sair} aria-label={voltar}><ArrowLeft className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">{voltar}</span></Button>
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Estúdio da obra</p>
                 <h1 id="estudio-obra-titulo" className="truncate text-xl font-semibold tracking-tight">{d.nome} · {d.servico || "Obra"}</h1>

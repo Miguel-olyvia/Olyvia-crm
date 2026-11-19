@@ -170,6 +170,26 @@ export function trabalhoDoTecnico(deals: Negocio[], tec: string, desvio = 0): Tr
   }
   return L;
 }
+/** 19/11 (Rúben: concluir no Estúdio da obra mostra-se no Hoje do técnico): as tarefas do técnico que ficaram terminadas e validadas
+ *  hoje (por ele, ou dadas por feitas no Estúdio pelo responsável). Saem da lista de trabalho, mas o técnico vê que estão fechadas e por
+ *  quem. `quem`: quem a validou; `porOutro`: foi o responsável que a deu por feita (sem registo de «feita» do técnico). */
+export interface TerminadaHoje extends TrabalhoHoje { quem: string; porOutro: boolean }
+export function terminadasHoje(deals: Negocio[], tec: string): TerminadaHoje[] {
+  const L: TerminadaHoje[] = [];
+  const nome = TECS.find((x) => x.id === tec)?.n;
+  for (const d of deals) {
+    const p = d.obra.plano;
+    if (d.perdido || !p || p.estado !== "em curso") continue;
+    p.tasks.forEach((t, ti) => {
+      if (t.tec !== tec || estadoDe(t) !== "validada") return;
+      const E = enviosDe(t), val = [...E].reverse().find((e) => e.k === "validada");
+      if (!val || val.dia !== p.dia) return;
+      const feita = [...E].reverse().find((e) => e.k === "feita");
+      L.push({ d, ti, t, quem: val.quem, porOutro: !!feita && !!nome && feita.quem !== nome });
+    });
+  }
+  return L;
+}
 /** Os técnicos que têm trabalho hoje em alguma obra (para escolher "quem sou"). */
 export function tecnicosComTrabalho(deals: Negocio[]): string[] {
   return TECS.map((x) => x.id).filter((id) => trabalhoDoTecnico(deals, id).length > 0);

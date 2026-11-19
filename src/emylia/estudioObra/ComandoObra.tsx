@@ -13,7 +13,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, ArrowUpRight, CalendarCheck, Camera, Check, ChevronLeft, ChevronRight, Euro, Flame, Gauge, HardHat, Inbox, Package, Send, Sparkles, Truck, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { TECS, eur, nfmt, type Estado, type Negocio } from "../motor";
+import { TECS, eur, nfmt, type Estado, type Negocio, type Plano } from "../motor";
 import type { Ctx } from "../pecas";
 import { COR_FASE } from "../fasesObra";
 import { dataCurta } from "../planoObra";
@@ -65,6 +65,12 @@ function Anel({ valor, cor = "hsl(var(--primary))" }: { valor: number; cor?: str
     </svg>
   );
 }
+/** 19/11 (Rúben: o técnico terminar uma tarefa tem de contar no Estúdio): as terminadas são as validadas e as que o técnico deu por
+ *  feitas no Hoje (à espera da validação). */
+export function terminadasDe(p: Plano): string {
+  const v = p.tasks.map((t) => estadoVivo(t, p)), pv = v.filter((x) => x === "feita").length, n = v.filter((x) => x === "validada").length + pv;
+  return `${n} de ${p.tasks.length} ${p.tasks.length === 1 ? "terminada" : "terminadas"}${pv ? ` · ${pv} por validar` : ""}`;
+}
 export function Pulso({ d, S, dias, prev, margem, precisa, ir }: { d: Negocio; S: Estado; dias: Date[]; prev: Previsao; margem: MargemViva | null; precisa: number; ir: Ir }) {
   const p = d.obra.plano!, quando = quandoDe(dias);
   const ims = imprevistosDe(d), abertos = ims.filter((i) => i.estado !== "fechado" && i.estado !== "aprovado");
@@ -73,7 +79,7 @@ export function Pulso({ d, S, dias, prev, margem, precisa, ir }: { d: Negocio; S
   return (
     <section aria-label="O pulso da obra" className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
       <Mosaico rotulo="Feito" icone={<Gauge className="h-4 w-4" />} onClick={() => ir.aba("execucao")} extra={<Anel valor={progresso(p)} />}
-        sub={`${p.tasks.filter((t) => estadoVivo(t, p) === "validada").length} de ${p.tasks.length} validadas`}>
+        sub={terminadasDe(p)}>
         <Contagem valor={Math.round(progresso(p) * 100)} fmt={(n) => `${Math.round(n)}%`} de={0} />
       </Mosaico>
       <Mosaico rotulo="Fim provável" icone={<CalendarCheck className="h-4 w-4" />} onClick={ir.previsao} tom={dif > 0 ? "mau" : dif < 0 ? "bom" : undefined}
