@@ -1,0 +1,50 @@
+// Portal do fornecedor, envios (expedições com guia de remessa): cartão das expedições e diálogo de expedir (sp.envios.*).
+// Os estados das guias mapeiam os códigos da base para estas chaves; os estados recebida / parcialmente recebida
+// reutilizam sp.estado.*.
+export const fornecedorPtEnvios: Record<string, string> = {
+  "sp.envios.titulo": "Expedições ({n})",
+  "sp.envios.resumo": "Quantidades expedidas e por expedir por linha",
+  "sp.envios.coluna.artigo": "Artigo",
+  "sp.envios.coluna.encomendado": "Encomendado",
+  "sp.envios.coluna.expedido": "Expedido",
+  "sp.envios.coluna.porExpedir": "Por expedir",
+  "sp.envios.coluna.expedir": "Expedir",
+  "sp.envios.artigoOmissao": "Artigo",
+  "sp.envios.nenhuma": "Ainda não expediu esta encomenda.",
+  "sp.envios.guias": "Guias de remessa",
+  "sp.envios.guia": "Guia {numero}",
+  "sp.envios.linhasDaGuia": "Linhas da guia {numero}",
+  "sp.envios.data": "Data",
+  "sp.envios.transportador": "Transportador",
+
+  "sp.envios.estado.aCaminho": "A caminho",
+  "sp.envios.estado.anulada": "Anulada",
+
+  "sp.envios.dialogo.titulo": "Expedir encomenda {numero}",
+  "sp.envios.dialogo.descricao":
+    "Indique a guia de remessa que segue com a mercadoria. O armazém da {empresa} dá entrada a partir deste número.",
+  "sp.envios.dialogo.guia": "Nº da guia de remessa",
+  "sp.envios.dialogo.dataExpedicao": "Data de expedição",
+  "sp.envios.dialogo.transportador": "Transportador (opcional)",
+  "sp.envios.dialogo.transportadorPlaceholder": "Ex.: transporte próprio, transportadora, matrícula…",
+  "sp.envios.dialogo.ficheiro": "Ficheiro da guia de remessa (opcional)",
+  "sp.envios.dialogo.ficheiroAjuda": "PDF ou foto da guia.",
+  "sp.envios.dialogo.quantidades": "Quantidades a expedir",
+  "sp.envios.dialogo.expedirTudo": "Expedir tudo",
+  "sp.envios.dialogo.limpar": "Limpar",
+  "sp.envios.dialogo.resumoQuantidades": "Quantidade a expedir por linha (máximo = o que falta expedir)",
+  "sp.envios.dialogo.quantidadeAria": "Quantidade a expedir: {nome}",
+  "sp.envios.dialogo.observacoes": "Observações (opcional)",
+  "sp.envios.dialogo.observacoesPlaceholder": "Ex.: 2 paletes, descarga com empilhador",
+  "sp.envios.dialogo.cancelar": "Cancelar",
+  "sp.envios.dialogo.botao": "Expedir · {qtd}",
+
+  "sp.envios.erro.quantidadeInvalida": "Quantidade inválida.",
+  "sp.envios.erro.maximo": "Máximo {max}.",
+  "sp.envios.erro.soInteiros": "Só números inteiros.",
+  "sp.envios.erro.indiqueGuia": "Indique o número da guia de remessa.",
+  "sp.envios.erro.indiqueData": "Indique a data de expedição.",
+  "sp.envios.erro.dataAntesEncomenda": "A data não pode ser anterior à encomenda ({data}).",
+  "sp.envios.erro.corrijaQuantidades": "Corrija as quantidades assinaladas.",
+  "sp.envios.erro.indiqueQuantidade": "Indique a quantidade a expedir em pelo menos uma linha.",
+};

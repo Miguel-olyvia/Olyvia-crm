@@ -18,6 +18,7 @@ import { ClientPortalLayout } from "@/components/portal/ClientPortalLayout";
 import { PortalOrgsErrorState } from "@/components/portal/PortalOrgsErrorState";
 import { ConversaDoNegocio } from "@/components/portal/negocio/ConversaDoNegocio";
 import { Skeleton } from "@/components/ui/skeleton";
+import { marcarMensagem, mensagemDeChave, mensagemDeTexto, resolverMensagem, resolverMensagemMarcada, usePortalT, type MensagemDoPortal } from "@/portal-i18n";
 import { PortalCliente } from "@/emylia/PortalCliente";
 import { acoes, seed, type Estado, type PedidoClausula } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
@@ -72,6 +73,8 @@ function CodigoSms({ subtitulo, titulo, texto, acao, referenceType, purpose, neg
   subtitulo: string; titulo: string; texto: string; acao: string; referenceType: string; purpose: string; negocioId: string;
   voltar: () => void; voltarTexto: string; confirmar: () => Promise<void>;
 }) {
+  const { t, idioma } = usePortalT();
+  // O erro guarda-se como texto: o do servidor fica como vem; o nosso leva a CHAVE marcada e traduz-se ao mostrar.
   const [fase, setFase] = useState<"inicio" | "a-enviar" | "codigo" | "a-verificar">("inicio");
   const [codigo, setCodigo] = useState("");
   const [tel, setTel] = useState("");
@@ -85,7 +88,7 @@ function CodigoSms({ subtitulo, titulo, texto, acao, referenceType, purpose, neg
     try {
       const { data, error } = await supabase.functions.invoke("sms-otp", { body: { action: "send_otp", ...ref } });
       if (error) throw new Error(error.message);
-      if (data?.error) throw new Error(data.message || "Não foi possível enviar o código.");
+      if (data?.error) throw new Error(data.message || marcarMensagem("pc.negocios.sms.erroEnvio"));
       setTel(data?.masked_phone ?? ""); setFase("codigo");
     } catch (e) { setErro((e as Error).message); setFase("inicio"); } finally { aEnviar.current = false; }
   };
@@ -95,7 +98,7 @@ function CodigoSms({ subtitulo, titulo, texto, acao, referenceType, purpose, neg
     try {
       const v = await supabase.functions.invoke("sms-otp", { body: { action: "verify_otp", ...ref, code: codigo } });
       if (v.error) throw new Error(v.error.message);
-      if (v.data?.error) throw new Error(v.data.message || "Código inválido.");
+      if (v.data?.error) throw new Error(v.data.message || marcarMensagem("pc.negocios.sms.erroCodigo"));
       await confirmar();
     } catch (e) { setErro((e as Error).message); setCodigo(""); setFase("codigo"); }
   };
@@ -105,25 +108,25 @@ function CodigoSms({ subtitulo, titulo, texto, acao, referenceType, purpose, neg
     <div className="space-y-4">
       <p className="text-sm font-medium text-slate-500">{subtitulo}</p>
       <h2 className="text-xl font-semibold">{titulo}</h2>
-      <p className="text-[15px] text-slate-600">{texto} Para confirmar, enviamos um código por SMS para o seu telemóvel.</p>
+      <p className="text-[15px] text-slate-600">{texto} {t("pc.negocios.sms.confirmar")}</p>
       {fase === "inicio" || fase === "a-enviar" ? (
         <button type="button" onClick={enviar} disabled={fase === "a-enviar"} className={`${botao} bg-slate-900 text-white hover:bg-slate-800`}>
-          {fase === "a-enviar" ? "A enviar o código…" : "Enviar o código por SMS"}
+          {fase === "a-enviar" ? t("pc.negocios.sms.aEnviar") : t("pc.negocios.sms.enviar")}
         </button>
       ) : (
         <div className="space-y-3">
           <label className="block space-y-1">
-            <span className="text-[15px] font-medium">Código que recebeu{tel ? ` em ${tel}` : ""}</span>
+            <span className="text-[15px] font-medium">{tel ? t("pc.negocios.sms.codigoEm", { tel }) : t("pc.negocios.sms.codigo")}</span>
             <input value={codigo} onChange={(e) => setCodigo(e.target.value.replace(/\D/g, "").slice(0, 6))} inputMode="numeric" autoComplete="one-time-code"
               aria-invalid={!!erro} className="h-12 w-full rounded-xl border border-slate-300 px-3 text-center text-xl tracking-[0.4em] tabular-nums outline-none focus:border-slate-900" />
           </label>
           <button type="button" onClick={assinar} disabled={codigo.length !== 6 || fase === "a-verificar"} className={`${botao} bg-slate-900 text-white hover:bg-slate-800`}>
-            {fase === "a-verificar" ? "A confirmar…" : acao}
+            {fase === "a-verificar" ? t("pc.negocios.sms.aConfirmar") : acao}
           </button>
-          <button type="button" onClick={enviar} className="min-h-11 w-full text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline">Enviar outro código</button>
+          <button type="button" onClick={enviar} className="min-h-11 w-full text-[15px] font-medium text-slate-600 underline-offset-4 hover:underline">{t("pc.negocios.sms.outro")}</button>
         </div>
       )}
-      {erro && <p role="alert" className="rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-[15px] text-red-900">{erro}</p>}
+      {erro && <p role="alert" className="rounded-xl border border-red-300 bg-red-50 px-3 py-2 text-[15px] text-red-900">{resolverMensagemMarcada(erro, idioma)}</p>}
       <button type="button" onClick={voltar} className={`${botao} border border-slate-300 bg-white text-slate-800 hover:border-slate-500`}>{voltarTexto}</button>
     </div>
   );
@@ -134,7 +137,9 @@ const ClientPortalNegocio = () => {
   const navigate = useNavigate();
   const qc = useQueryClient();
   const { activeOrg, isLoading: orgsLoading, isError: orgsError } = usePortalCompany();
-  const [aviso, setAviso] = useState<string | null>(null);
+  const { t, idioma } = usePortalT();
+  // O aviso guarda a CHAVE (ou o texto do servidor, que fica como vem) e traduz-se ao mostrar.
+  const [aviso, setAviso] = useState<MensagemDoPortal | null>(null);
 
   const vista = useQuery({
     queryKey: ["portal-negocio-vista", id],
@@ -178,7 +183,7 @@ const ClientPortalNegocio = () => {
     await reler();
   };
   const responderComAviso = (tipo: TipoResposta, ref: string, dados: Record<string, unknown>) => {
-    void responder(tipo, ref, dados).catch((e: Error) => setAviso(e.message));
+    void responder(tipo, ref, dados).catch((e: Error) => setAviso(mensagemDeTexto(e.message)));
   };
 
   const v = vista.data ?? null;
@@ -194,7 +199,7 @@ const ClientPortalNegocio = () => {
       pedirAlteracoesContratoAdenda: (_id, n, cs) => responderComAviso("adenda_contrato_alterar", String(n), { clausulas: (cs as PedidoClausula[]) ?? [] }),
     };
     const A = new Proxy({}, {
-      get: (_t, nome: string) => naBase[nome] ?? (() => setAviso("Isto ainda não se faz por aqui. Escreva-nos na conversa e tratamos consigo.")),
+      get: (_t, nome: string) => naBase[nome] ?? (() => setAviso(mensagemDeChave("pc.negocios.detalhe.avisoSemAcao"))),
     }) as ReturnType<typeof acoes>;
     return { S, A, run: (fn) => { try { fn(); } catch { /* nada corre no motor */ } }, go: (fn) => () => fn(), q: "" };
   }, [v, docs.data, activeOrg?.organizationId, activeOrg?.name]); // eslint-disable-line react-hooks/exhaustive-deps -- responder só usa o id e o qc
@@ -219,13 +224,14 @@ const ClientPortalNegocio = () => {
       d={d}
       fechar={() => navigate("/client-portal/negocios")}
       real={{
-        abrirProposta: () => (D?.propostaId ? navigate(`/client-portal/proposals/${D.propostaId}`) : setAviso("A proposta ainda não está disponível. Tente daqui a pouco.")),
+        documentosNoTemplate: true, // a proposta e o contrato abrem o documento do template (as páginas reais), nunca o desenho da V1
+        abrirProposta: () => (D?.propostaId ? navigate(`/client-portal/proposals/${D.propostaId}`) : setAviso(mensagemDeChave("pc.negocios.detalhe.propostaIndisponivel"))),
         abrirContrato: D?.contratoId ? () => navigate(`/client-portal/contracts/${D.contratoId}`) : null,
         conversa: <ConversaDoNegocio negocioId={id} />,
         receberObra: (reservas, voltar) => d.obra.auto ? (
-          <CodigoSms negocioId={id} referenceType="negocio_auto" purpose="auto_rececao" subtitulo={`Receber o serviço · auto ${d.obra.auto.n}`}
-            titulo="Assinar o auto de receção" texto={reservas ? `Fica escrita a sua observação: «${reservas}».` : "Diz que está tudo bem."}
-            acao="Assinar o auto" voltar={voltar} voltarTexto="Voltar ao auto"
+          <CodigoSms negocioId={id} referenceType="negocio_auto" purpose="auto_rececao" subtitulo={t("pc.negocios.receber.subtitulo", { n: d.obra.auto.n })}
+            titulo={t("pc.negocios.receber.titulo")} texto={reservas ? t("pc.negocios.receber.comReservas", { reservas }) : t("pc.negocios.receber.semReservas")}
+            acao={t("pc.negocios.receber.acao")} voltar={voltar} voltarTexto={t("pc.negocios.receber.voltar")}
             confirmar={async () => {
               const r = await rpc("portal_neg_receber_obra", { p_negocio_id: id, p_auto: d.obra.auto!.n, p_reservas: reservas ?? null });
               if (r.error) throw new Error(r.error.message);
@@ -233,13 +239,13 @@ const ClientPortalNegocio = () => {
             }} />
         ) : null,
         assinarComSms: ({ titulo, texto, acao, fim, ref, voltar }) => (
-          <CodigoSms negocioId={id} referenceType="negocio_adenda" purpose={fim} subtitulo={`Trabalhos a mais · adenda ${ref}`} titulo={titulo} texto={texto}
-            acao={acao} voltar={voltar} voltarTexto="Voltar à adenda"
+          <CodigoSms negocioId={id} referenceType="negocio_adenda" purpose={fim} subtitulo={t("pc.negocios.adenda.subtitulo", { ref })} titulo={titulo} texto={texto}
+            acao={acao} voltar={voltar} voltarTexto={t("pc.negocios.adenda.voltar")}
             confirmar={async () => { await responder(fim, ref); voltar(); }} />
         ),
         avisarPagamento: (numero, referencia, metodo) => responder("pagamento", numero, { ...(referencia ? { referencia } : {}), ...(metodo ? { metodo } : {}) }),
         avisados: v.respostas.filter((r) => r.tipo === "pagamento").map((r) => r.ref),
-        aviso,
+        aviso: aviso ? resolverMensagem(aviso, idioma) : null,
       }}
     />
   );

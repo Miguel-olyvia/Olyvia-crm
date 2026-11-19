@@ -9,6 +9,7 @@ import { Conversa } from "@/emylia/ConversaObra";
 import { fotoDoPortal, fotoParaEnvio, mensagemDaLinha, type LinhaMensagem } from "@/emylia/real/conversaReal";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { marcarMensagem, resolverMensagemMarcada, usePortalT } from "@/portal-i18n";
 
 type RespostaRpc = { data: unknown; error: { message: string } | null };
 const rpc = (fn: string, args: Record<string, unknown>): PromiseLike<RespostaRpc> =>
@@ -20,6 +21,7 @@ const ATUALIZAR_CADA_MS = 10_000;
 
 export function ConversaDoNegocio({ negocioId }: { negocioId: string }) {
   const cliente = useQueryClient();
+  const { t, idioma } = usePortalT();
   const consulta = useQuery({
     queryKey: [CHAVE_MENSAGENS_PORTAL, negocioId],
     queryFn: async (): Promise<LinhaMensagem[]> => {
@@ -40,7 +42,8 @@ export function ConversaDoNegocio({ negocioId }: { negocioId: string }) {
         ? await rpc("portal_neg_mensagem_enviar_fotos", { p_negocio_id: negocioId, p_texto: texto, p_fotos: await Promise.all(fotos.map((f) => fotoParaEnvio(f))) })
         : await rpc("portal_neg_mensagem_enviar", { p_negocio_id: negocioId, p_texto: texto });
       if (error) throw new Error(error.message);
-      if (!data || typeof data !== "object") throw new Error("Resposta inesperada do servidor: a mensagem pode ter seguido, confirme na conversa.");
+      // o erro guarda a CHAVE (marcada) e traduz-se ao mostrar; o texto do servidor (acima) fica como vem
+      if (!data || typeof data !== "object") throw new Error(marcarMensagem("pc.negocios.conversa.respostaInesperada"));
       return data as LinhaMensagem;
     },
     onSuccess: async (nova) => {
@@ -70,21 +73,21 @@ export function ConversaDoNegocio({ negocioId }: { negocioId: string }) {
   return (
     <Card>
       <CardHeader className="pb-2">
-        <CardTitle className="flex items-center gap-2 text-base"><MessageCircle className="h-4 w-4" aria-hidden="true" />Conversa com a equipa</CardTitle>
+        <CardTitle className="flex items-center gap-2 text-base"><MessageCircle className="h-4 w-4" aria-hidden="true" />{t("pc.negocios.conversa.titulo")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
         {consulta.isLoading ? (
-          <p role="status" className="text-sm text-muted-foreground">A carregar a conversa…</p>
+          <p role="status" className="text-sm text-muted-foreground">{t("pc.negocios.conversa.aCarregar")}</p>
         ) : consulta.isError && !consulta.data ? (
-          <p role="alert" className="text-[15px] text-destructive">Não foi possível ler a conversa. Tente de novo daqui a pouco.</p>
+          <p role="alert" className="text-[15px] text-destructive">{t("pc.negocios.conversa.erroLer")}</p>
         ) : (
           <Conversa
             msgs={linhas.map(mensagemDaLinha)} eu="cliente" enviar={(t, fotos) => enviar.mutateAsync({ texto: t, fotos }).then(() => true, () => false)}
-            vazio="Ainda sem mensagens. Escreva à equipa: respondemos por aqui. Se houver um problema na obra, junte fotografias." anexar fotoDe={fotoDoPortal}
+            vazio={t("pc.negocios.conversa.vazio")} anexar fotoDe={fotoDoPortal}
           />
         )}
-        {consulta.isError && consulta.data && <p role="status" className="text-sm text-muted-foreground">Não foi possível atualizar a conversa; a tentar de novo…</p>}
-        {enviar.isError && <p role="alert" className="text-[15px] text-destructive">{enviar.error instanceof Error ? enviar.error.message : "Não foi possível enviar a mensagem."}</p>}
+        {consulta.isError && consulta.data && <p role="status" className="text-sm text-muted-foreground">{t("pc.negocios.conversa.erroAtualizar")}</p>}
+        {enviar.isError && <p role="alert" className="text-[15px] text-destructive">{enviar.error instanceof Error ? resolverMensagemMarcada(enviar.error.message, idioma) : t("pc.negocios.conversa.erroEnviar")}</p>}
       </CardContent>
     </Card>
   );

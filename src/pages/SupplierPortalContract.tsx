@@ -49,29 +49,34 @@ import { sanitizeRichHtml } from "@/utils/sanitize";
 import { useSupplierPortal } from "@/contexts/SupplierPortalContext";
 import { isNoSupplierAccess, isSpFunctionMissing } from "@/lib/supplierPortal/spRpc";
 import {
-  KIND_LABEL,
   STATUS_TONE,
-  conditionsRows,
   contractRef,
-  eventText,
   fmtData,
   fmtDataHora,
   type SupplierContractFile,
   type SupplierContractStatus,
 } from "@/lib/supplierContracts/tipos";
-import { downloadContractFile, uploadContractFile, validateContractFile, CONTRACT_ANNEX_MIME } from "@/lib/supplierContracts/acoes";
+import { downloadContractFile, uploadContractFile, CONTRACT_ANNEX_MIME } from "@/lib/supplierContracts/acoes";
 import {
   defaultContractId,
-  describeSpContractError,
-  describeSpWithdrawError,
   expiringContract,
   spContractsRpc,
-  spStatusLabel,
   type SpContractSummary,
   type SpContractDetail,
   type SpContractsList,
 } from "@/lib/supplierContracts/portal";
 import { getSpHint } from "@/lib/supplierPortal/spRpc";
+import {
+  descreverErroContrato,
+  descreverErroRetirar,
+  linhasDeCondicoes,
+  mensagemErroFicheiroContrato,
+  rotuloEstadoContrato,
+  rotuloTipoContrato,
+  textoDoEvento,
+  validarFicheiroContrato,
+} from "@/lib/supplierPortal/textosContrato";
+import { resolverMensagem, usePortalT } from "@/portal-i18n";
 import type { InventoryTone } from "@/components/inventory/ui/tones";
 import {
   useInvalidateSpContracts,
@@ -105,9 +110,10 @@ function spTone(c: StatusInput): InventoryTone {
 }
 
 function StatusBadge({ contract }: { contract: StatusInput }) {
+  const { t } = usePortalT();
   return (
     <Badge variant="outline" className={cn("font-medium", TONE_CLASS[spTone(contract)])}>
-      {spStatusLabel(contract)}
+      {rotuloEstadoContrato(contract, t)}
     </Badge>
   );
 }
@@ -117,32 +123,34 @@ function StatusBadge({ contract }: { contract: StatusInput }) {
  * membro → só leitura.
  */
 function ProposeArea({ list, onPropose }: { list: SpContractsList; onPropose: () => void }) {
+  const { t } = usePortalT();
   const targets = list.proposal_targets ?? [];
   if (targets.length === 0) return null;
-  const free = targets.filter((t) => t.can_propose);
-  const blocked = targets.filter((t) => t.has_open_contract);
+  const free = targets.filter((x) => x.can_propose);
+  const blocked = targets.filter((x) => x.has_open_contract);
   if (!list.is_owner) {
     return (
       <p className="flex items-start gap-2 text-sm text-muted-foreground">
         <Lock className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
-        Só o responsável principal da conta pode propor um contrato.
+        {t("sp.contrato.propor.soPrincipal")}
       </p>
     );
   }
+  const empresas = blocked.map((x) => x.organization_name || t("sp.contrato.aEmpresa")).join(", ");
   return (
     <div className="space-y-2">
       {free.length > 0 && (
         <Button type="button" className="h-11 gap-2" onClick={onPropose}>
-          <Send className="h-4 w-4" aria-hidden="true" /> Propor contrato
+          <Send className="h-4 w-4" aria-hidden="true" /> {t("sp.contrato.propor.botao")}
         </Button>
       )}
       {blocked.length > 0 && (
         <p className="flex items-start gap-2 text-sm text-muted-foreground" role="note">
           <Info className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <span>
-            {free.length === 0 ? "Não pode propor um contrato agora: " : "Não pode propor a "}
-            já há um contrato em curso com {blocked.map((t) => t.organization_name || "a empresa").join(", ")}. Só pode
-            haver um de cada vez: aguarde que termine ou, se for uma proposta sua, retire-a primeiro.
+            {free.length === 0
+              ? t("sp.contrato.propor.bloqueioAgora", { empresas })
+              : t("sp.contrato.propor.bloqueioAlgumas", { empresas })}
           </span>
         </p>
       )}
@@ -173,6 +181,7 @@ function Section({ title, icon, children, className }: { title: string; icon: Re
 
 export default function SupplierPortalContract() {
   const { refresh } = useSupplierPortal();
+  const { t } = usePortalT();
   const [params, setParams] = useSearchParams();
   const list = useSpContractsList();
   const requestedId = params.get("id");
@@ -183,7 +192,7 @@ export default function SupplierPortalContract() {
   const expiring = expiringContract(list.data);
   const invalidate = useInvalidateSpContracts();
   const [proposeOpen, setProposeOpen] = useState(false);
-  const proposeTargets = (list.data?.proposal_targets ?? []).filter((t) => t.can_propose);
+  const proposeTargets = (list.data?.proposal_targets ?? []).filter((x) => x.can_propose);
 
   useEffect(() => {
     if ((list.isError && isNoSupplierAccess(list.error)) || (detail.isError && isNoSupplierAccess(detail.error))) void refresh();
@@ -200,10 +209,8 @@ export default function SupplierPortalContract() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="space-y-1">
-          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Contrato</h1>
-          <p className="text-sm text-muted-foreground">
-            As condições comerciais acordadas com as empresas com que trabalha: prazos, pagamento, portes e devoluções.
-          </p>
+          <h1 className="text-xl sm:text-2xl font-semibold text-foreground">{t("sp.contrato.titulo")}</h1>
+          <p className="text-sm text-muted-foreground">{t("sp.contrato.descricao")}</p>
         </div>
         {list.data && (
           <div className="w-full sm:w-auto sm:max-w-md">
@@ -217,12 +224,17 @@ export default function SupplierPortalContract() {
           <AlertTriangle className="h-4 w-4" aria-hidden="true" />
           <AlertTitle>
             {expiring.days_to_expiry === 0
-              ? `O contrato ${contractRef(expiring)} expira hoje`
-              : `O contrato ${contractRef(expiring)} expira em ${expiring.days_to_expiry} ${expiring.days_to_expiry === 1 ? "dia" : "dias"}`}
+              ? t("sp.contrato.expira.hoje", { ref: contractRef(expiring) })
+              : t(expiring.days_to_expiry === 1 ? "sp.contrato.expira.emUm" : "sp.contrato.expira.emVarios", {
+                  ref: contractRef(expiring),
+                  n: expiring.days_to_expiry,
+                })}
           </AlertTitle>
           <AlertDescription>
-            Válido até {fmtData(expiring.valid_until)}. Fale com {expiring.organization_name || "a empresa"} para preparar a
-            renovação: a nova versão aparece aqui para assinar.
+            {t("sp.contrato.expira.descricao", {
+              data: fmtData(expiring.valid_until),
+              empresa: expiring.organization_name || t("sp.contrato.aEmpresa"),
+            })}
           </AlertDescription>
         </Alert>
       )}
@@ -230,7 +242,7 @@ export default function SupplierPortalContract() {
       {list.isLoading && (
         <div className="py-16 flex justify-center" role="status" aria-live="polite">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
-          <span className="sr-only">A carregar o contrato…</span>
+          <span className="sr-only">{t("sp.contrato.aCarregar")}</span>
         </div>
       )}
 
@@ -238,14 +250,12 @@ export default function SupplierPortalContract() {
         <Card>
           <CardContent className="py-8 text-center space-y-3" role="alert">
             <p className="text-sm text-destructive">
-              {isSpFunctionMissing(list.error)
-                ? "Esta funcionalidade ainda não está disponível. Tente mais tarde."
-                : describeSpContractError(list.error)}
+              {isSpFunctionMissing(list.error) ? t("sp.contrato.indisponivel") : descreverErroContrato(list.error, t)}
             </p>
             {!isSpFunctionMissing(list.error) && (
               <Button type="button" variant="outline" className="h-11 gap-2" onClick={() => void list.refetch()} disabled={list.isFetching}>
                 <RefreshCw className={list.isFetching ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
-                Tentar de novo
+                {t("sp.contrato.tentarNovamente")}
               </Button>
             )}
           </CardContent>
@@ -256,10 +266,10 @@ export default function SupplierPortalContract() {
         <Card>
           <CardContent className="py-10 text-center space-y-2">
             <FileSignature className="mx-auto h-8 w-8 text-muted-foreground" aria-hidden="true" />
-            <p className="text-sm font-medium text-foreground">Ainda não tem nenhum contrato</p>
+            <p className="text-sm font-medium text-foreground">{t("sp.contrato.vazio.titulo")}</p>
             <p className="text-sm text-muted-foreground">
-              Quando uma empresa lhe enviar um contrato, aparece aqui para o rever e assinar.
-              {list.data.is_owner && proposeTargets.length > 0 ? " Também pode ser o primeiro a propor as suas condições." : ""}
+              {t("sp.contrato.vazio.texto")}
+              {list.data.is_owner && proposeTargets.length > 0 ? ` ${t("sp.contrato.vazio.proporExtra")}` : ""}
             </p>
           </CardContent>
         </Card>
@@ -267,8 +277,8 @@ export default function SupplierPortalContract() {
 
       {list.data && contracts.length > 0 && (
         <div className="grid gap-6 lg:grid-cols-[minmax(0,16rem)_1fr]">
-          <nav aria-label="Versões do contrato" className="space-y-2">
-            <h2 className="text-sm font-semibold text-foreground">Versões</h2>
+          <nav aria-label={t("sp.contrato.versoes.aria")} className="space-y-2">
+            <h2 className="text-sm font-semibold text-foreground">{t("sp.contrato.versoes.titulo")}</h2>
             <ul className="space-y-2">
               {contracts.map((c) => {
                 const active = c.id === selectedId;
@@ -299,16 +309,16 @@ export default function SupplierPortalContract() {
             {detail.isLoading && (
               <div className="py-16 flex justify-center" role="status" aria-live="polite">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-hidden="true" />
-                <span className="sr-only">A carregar a versão…</span>
+                <span className="sr-only">{t("sp.contrato.aCarregarVersao")}</span>
               </div>
             )}
             {detail.isError && !isNoSupplierAccess(detail.error) && (
               <Card>
                 <CardContent className="py-8 text-center space-y-3" role="alert">
-                  <p className="text-sm text-destructive">{describeSpContractError(detail.error)}</p>
+                  <p className="text-sm text-destructive">{descreverErroContrato(detail.error, t)}</p>
                   <Button type="button" variant="outline" className="h-11 gap-2" onClick={() => void detail.refetch()} disabled={detail.isFetching}>
                     <RefreshCw className={detail.isFetching ? "h-4 w-4 animate-spin" : "h-4 w-4"} aria-hidden="true" />
-                    Tentar de novo
+                    {t("sp.contrato.tentarNovamente")}
                   </Button>
                 </CardContent>
               </Card>
@@ -355,7 +365,10 @@ function ContractView({
   onAutoSignHandled: () => void;
 }) {
   const { toast } = useToast();
+  const { t, idioma } = usePortalT();
   const invalidate = useInvalidateSpContracts();
+  const empresa = c.organization_name || t("sp.contrato.aEmpresa");
+  const empresaMaiusc = c.organization_name || t("sp.contrato.aEmpresaMaiusc");
   const [signOpen, setSignOpen] = useState(false);
   const [refuseOpen, setRefuseOpen] = useState(false);
   const [withdrawOpen, setWithdrawOpen] = useState(false);
@@ -390,7 +403,11 @@ function ContractView({
     const r = await downloadContractFile(f.id);
     setOpening(null);
     if (r.error) {
-      toast({ title: "Não foi possível abrir o ficheiro", description: r.error.message, variant: "destructive" });
+      toast({
+        title: t("sp.contrato.toast.naoAbriu"),
+        description: resolverMensagem(mensagemErroFicheiroContrato(r.error), idioma),
+        variant: "destructive",
+      });
       return;
     }
     window.open(r.data.url, "_blank", "noopener,noreferrer");
@@ -400,10 +417,10 @@ function ContractView({
     setWithdrawing(true);
     try {
       await spContractsRpc.withdraw(c.id);
-      toast({ title: "Proposta retirada", description: `${c.organization_name || "A empresa"} foi avisada.` });
+      toast({ title: t("sp.contrato.toast.retirada"), description: t("sp.contrato.toast.retiradaDescricao", { empresa: empresaMaiusc }) });
       setWithdrawOpen(false);
     } catch (err) {
-      toast({ title: "Não foi possível retirar a proposta", description: describeSpWithdrawError(err), variant: "destructive" });
+      toast({ title: t("sp.contrato.toast.naoRetirou"), description: descreverErroRetirar(err, t), variant: "destructive" });
       const hint = getSpHint(err);
       if (hint === "invalid_state" || hint === "not_found" || hint === "not_owner") setWithdrawOpen(false);
     } finally {
@@ -415,53 +432,66 @@ function ContractView({
   const onPickMain = async (file: File | undefined) => {
     if (mainRef.current) mainRef.current.value = "";
     if (!file) return;
-    const problem = validateContractFile(file, "contrato_fornecedor");
+    const problem = validarFicheiroContrato(file, "contrato_fornecedor");
     if (problem) {
-      toast({ title: "Ficheiro não aceite", description: problem, variant: "destructive" });
+      toast({ title: t("sp.contrato.toast.ficheiroRecusado"), description: resolverMensagem(problem, idioma), variant: "destructive" });
       return;
     }
     setUploadingMain(true);
     const r = await uploadContractFile(c.id, "contrato_fornecedor", file);
     setUploadingMain(false);
     if (r.error) {
-      toast({ title: "Não foi possível carregar o PDF", description: r.error.message, variant: "destructive" });
+      toast({
+        title: t("sp.contrato.toast.naoCarregouPdf"),
+        description: resolverMensagem(mensagemErroFicheiroContrato(r.error), idioma),
+        variant: "destructive",
+      });
       if (r.error.error === "invalid_state") stale();
       return;
     }
-    toast({ title: "PDF do contrato carregado", description: `${r.data.file_name} foi enviado à empresa com a proposta.` });
+    toast({
+      title: t("sp.contrato.toast.pdfCarregado"),
+      description: t("sp.contrato.toast.pdfCarregadoDescricao", { nome: r.data.file_name }),
+    });
     void invalidate();
   };
 
   const onPickFile = async (file: File | undefined) => {
     if (fileRef.current) fileRef.current.value = "";
     if (!file) return;
-    const problem = validateContractFile(file, "anexo");
+    const problem = validarFicheiroContrato(file, "anexo");
     if (problem) {
-      toast({ title: "Ficheiro não aceite", description: problem, variant: "destructive" });
+      toast({ title: t("sp.contrato.toast.ficheiroRecusado"), description: resolverMensagem(problem, idioma), variant: "destructive" });
       return;
     }
     setUploading(true);
     const r = await uploadContractFile(c.id, "anexo", file);
     setUploading(false);
     if (r.error) {
-      toast({ title: "Não foi possível anexar", description: r.error.message, variant: "destructive" });
+      toast({
+        title: t("sp.contrato.toast.naoAnexou"),
+        description: resolverMensagem(mensagemErroFicheiroContrato(r.error), idioma),
+        variant: "destructive",
+      });
       if (r.error.error === "invalid_state") stale();
       return;
     }
     toast({
-      title: r.data.already_registered ? "Este ficheiro já estava anexado" : "Documento anexado",
+      title: r.data.already_registered ? t("sp.contrato.toast.jaAnexado") : t("sp.contrato.toast.anexado"),
       description: r.data.already_registered
         ? undefined
-        : `${r.data.file_name} foi enviado à empresa com ${isProposed ? "a proposta" : "o contrato"}.`,
+        : t(isProposed ? "sp.contrato.toast.anexadoProposta" : "sp.contrato.toast.anexadoContrato", { nome: r.data.file_name }),
     });
     void invalidate();
   };
 
   const conditionRows = [
-    ...conditionsRows(c.conditions),
+    ...linhasDeCondicoes(c.conditions, t),
     {
-      label: "Validade",
-      value: `${c.valid_from ? `De ${fmtData(c.valid_from)}` : "Desde a assinatura"} ${c.valid_until ? `até ${fmtData(c.valid_until)}` : "· sem termo"}`,
+      label: t("sp.contrato.cond.validade"),
+      value: `${c.valid_from ? t("sp.contrato.cond.validadeDe", { data: fmtData(c.valid_from) }) : t("sp.contrato.cond.desdeAssinatura")} ${
+        c.valid_until ? t("sp.contrato.cond.validadeAte", { data: fmtData(c.valid_until) }) : t("sp.contrato.cond.semTermo")
+      }`,
     },
   ];
 
@@ -477,11 +507,13 @@ function ContractView({
             <CardTitle className="text-base">{c.title}</CardTitle>
             <CardDescription>
               {c.organization_name ? `${c.organization_name} · ` : ""}
-              {KIND_LABEL[c.kind]}
+              {rotuloTipoContrato(c.kind, t)}
               {c.sent_at
-                ? ` · enviado em ${fmtData(c.sent_at)}`
+                ? ` · ${t("sp.contrato.cartao.enviadoEm", { data: fmtData(c.sent_at) })}`
                 : fromPortal
-                  ? ` · proposto em ${fmtData(c.created_at)}${c.proposed_by_name ? ` por ${c.proposed_by_name}` : ""}`
+                  ? ` · ${t("sp.contrato.cartao.propostoEm", { data: fmtData(c.created_at) })}${
+                      c.proposed_by_name ? ` ${t("sp.contrato.cartao.porNome", { nome: c.proposed_by_name })}` : ""
+                    }`
                   : ""}
             </CardDescription>
           </div>
@@ -493,19 +525,19 @@ function ContractView({
               onClick={() => setWithdrawOpen(true)}
             >
               <Ban className="h-4 w-4" aria-hidden="true" />
-              Retirar proposta
+              {t("sp.contrato.cartao.retirar")}
             </Button>
           )}
           {canSign && (
             <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
               <Button type="button" className="h-11 gap-2" onClick={() => setSignOpen(true)}>
                 <PenTool className="h-4 w-4" aria-hidden="true" />
-                Assinar
+                {t("sp.contrato.cartao.assinar")}
               </Button>
               {c.can_refuse && (
                 <Button type="button" variant="outline" className="h-11 gap-2 text-destructive hover:text-destructive" onClick={() => setRefuseOpen(true)}>
                   <XCircle className="h-4 w-4" aria-hidden="true" />
-                  Recusar
+                  {t("sp.contrato.cartao.recusar")}
                 </Button>
               )}
             </div>
@@ -515,29 +547,25 @@ function ContractView({
         {c.status === "sent" && !c.is_owner && (
           <Alert>
             <Lock className="h-4 w-4" aria-hidden="true" />
-            <AlertDescription>
-              Pode consultar este contrato. Só o responsável principal da conta o pode assinar, recusar ou anexar
-              documentos.
-            </AlertDescription>
+            <AlertDescription>{t("sp.contrato.aviso.soConsulta")}</AlertDescription>
           </Alert>
         )}
         {c.status === "sent" && c.is_owner && !c.can_sign && (
           <Alert>
             <Info className="h-4 w-4" aria-hidden="true" />
-            <AlertDescription>Este contrato foi enviado a outra conta do seu fornecedor: só essa conta o pode assinar.</AlertDescription>
+            <AlertDescription>{t("sp.contrato.aviso.outraConta")}</AlertDescription>
           </Alert>
         )}
         {isProposed && (
           <Alert>
             <Clock className="h-4 w-4" aria-hidden="true" />
-            <AlertTitle>À espera de resposta</AlertTitle>
+            <AlertTitle>{t("sp.contrato.aviso.esperaTitulo")}</AlertTitle>
             <AlertDescription>
-              Enviou esta proposta a {c.organization_name || "a empresa"}. A empresa aceita-a e prepara o contrato para assinar,
-              ou recusa-a com um motivo.
+              {t("sp.contrato.aviso.espera", { empresa })}
               {c.can_withdraw
-                ? " Enquanto não responder, pode retirá-la."
+                ? ` ${t("sp.contrato.aviso.esperaRetirar")}`
                 : !c.is_owner
-                  ? " Só o responsável principal da conta a pode retirar ou juntar-lhe documentos."
+                  ? ` ${t("sp.contrato.aviso.esperaSoResponsavel")}`
                   : ""}
             </AlertDescription>
           </Alert>
@@ -545,33 +573,26 @@ function ContractView({
         {c.status === "draft" && fromPortal && (
           <Alert>
             <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden="true" />
-            <AlertTitle>Proposta aceite — em preparação</AlertTitle>
-            <AlertDescription>
-              {c.organization_name || "A empresa"} aceitou a sua proposta e está a preparar o contrato. Quando o enviar,
-              aparece aqui para o rever e assinar com código SMS. Abaixo estão as condições que propôs.
-            </AlertDescription>
+            <AlertTitle>{t("sp.contrato.aviso.aceiteTitulo")}</AlertTitle>
+            <AlertDescription>{t("sp.contrato.aviso.aceite", { empresa: empresaMaiusc })}</AlertDescription>
           </Alert>
         )}
         {withdrawn && (
           <Alert>
             <Info className="h-4 w-4" aria-hidden="true" />
-            <AlertDescription>
-              Retirou esta proposta em {fmtDataHora(c.cancelled_at)}. Pode propor outra quando quiser.
-            </AlertDescription>
+            <AlertDescription>{t("sp.contrato.aviso.retirada", { data: fmtDataHora(c.cancelled_at) })}</AlertDescription>
           </Alert>
         )}
         {c.status === "signed_supplier" && (
           <Alert>
             <Info className="h-4 w-4" aria-hidden="true" />
-            <AlertDescription>
-              Assinado por si. Falta a contra-assinatura da empresa: as condições entram em vigor logo que o faça.
-            </AlertDescription>
+            <AlertDescription>{t("sp.contrato.aviso.assinadoPorSi")}</AlertDescription>
           </Alert>
         )}
       </CardHeader>
 
       <CardContent className="space-y-6">
-        <Section title="Condições comerciais" icon={<FileText className="h-4 w-4 text-primary" aria-hidden="true" />}>
+        <Section title={t("sp.contrato.condicoes")} icon={<FileText className="h-4 w-4 text-primary" aria-hidden="true" />}>
           <dl className="divide-y rounded-lg border px-3">
             {conditionRows.map((r) => (
               <Row key={r.label} label={r.label}>
@@ -581,12 +602,12 @@ function ContractView({
           </dl>
         </Section>
 
-        <Section title="Documento" icon={<FileSignature className="h-4 w-4 text-primary" aria-hidden="true" />}>
+        <Section title={t("sp.contrato.documento.titulo")} icon={<FileSignature className="h-4 w-4 text-primary" aria-hidden="true" />}>
           {c.document_html ? (
             <div
               className="prose prose-sm max-h-[60vh] max-w-none overflow-y-auto rounded-lg border bg-white p-4 text-black sm:p-6 dark:prose-invert dark:bg-gray-950 dark:text-white [&_table]:w-full [&_td]:border [&_td]:px-2 [&_td]:py-1 [&_th]:border [&_th]:bg-muted/40 [&_th]:px-2 [&_th]:py-1 [&_th]:text-left"
               tabIndex={0}
-              aria-label={`Texto do contrato ${label}`}
+              aria-label={t("sp.contrato.documento.aria", { ref: label })}
               // HTML congelado no envio pelo servidor (modelo validado + valores escapados); sanitizado sempre ao mostrar.
               dangerouslySetInnerHTML={{ __html: sanitizeRichHtml(c.document_html) }}
             />
@@ -594,18 +615,16 @@ function ContractView({
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3">
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{mainFile.file_name}</p>
-                <p className="text-xs text-muted-foreground">Contrato em PDF · {fmtKb(mainFile.size_bytes)}</p>
+                <p className="text-xs text-muted-foreground">{t("sp.contrato.documento.pdf", { tamanho: fmtKb(mainFile.size_bytes) })}</p>
               </div>
               <Button type="button" variant="outline" className="h-11 gap-2" onClick={() => void openFile(mainFile)} disabled={opening === mainFile.id}>
                 {opening === mainFile.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
-                Abrir PDF
+                {t("sp.contrato.documento.abrirPdf")}
               </Button>
             </div>
           ) : c.can_attach_main ? (
             <div className="space-y-2 rounded-lg border border-dashed p-3">
-              <p className="text-sm">
-                Falta o PDF do seu contrato: a empresa precisa dele para avaliar a proposta. Só pode ser carregado uma vez.
-              </p>
+              <p className="text-sm">{t("sp.contrato.documento.faltaPdf")}</p>
               <input
                 ref={mainRef}
                 id={`sp-contract-main-${c.id}`}
@@ -617,21 +636,19 @@ function ContractView({
               />
               <Button type="button" className="h-11 gap-2" onClick={() => mainRef.current?.click()} disabled={uploadingMain}>
                 {uploadingMain ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Upload className="h-4 w-4" aria-hidden="true" />}
-                {uploadingMain ? "A carregar…" : "Carregar PDF do contrato"}
+                {uploadingMain ? t("sp.contrato.documento.aCarregar") : t("sp.contrato.documento.carregarPdf")}
               </Button>
             </div>
           ) : isProposed || c.status === "draft" ? (
             <p className="text-sm text-muted-foreground">
-              {c.origin === "modelo"
-                ? "O texto do contrato é preparado pela empresa a partir do modelo dela, depois de aceitar a proposta."
-                : "O PDF do contrato ainda não foi carregado."}
+              {c.origin === "modelo" ? t("sp.contrato.documento.textoDoModelo") : t("sp.contrato.documento.pdfPorCarregar")}
             </p>
           ) : (
-            <p className="text-sm text-muted-foreground">O documento não está disponível.</p>
+            <p className="text-sm text-muted-foreground">{t("sp.contrato.documento.indisponivel")}</p>
           )}
           {c.document_sha256 && (
             <p className="text-xs text-muted-foreground">
-              Impressão digital do documento (SHA-256):{" "}
+              {t("sp.contrato.documento.impressao")}{" "}
               <code className="font-mono" title={c.document_sha256}>
                 {shortHash(c.document_sha256)}
               </code>
@@ -639,9 +656,9 @@ function ContractView({
           )}
         </Section>
 
-        <Section title="Anexos" icon={<Paperclip className="h-4 w-4 text-primary" aria-hidden="true" />}>
+        <Section title={t("sp.contrato.anexos.titulo")} icon={<Paperclip className="h-4 w-4 text-primary" aria-hidden="true" />}>
           {annexes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Sem anexos.</p>
+            <p className="text-sm text-muted-foreground">{t("sp.contrato.anexos.nenhum")}</p>
           ) : (
             <ul className="divide-y rounded-lg border">
               {annexes.map((f) => (
@@ -649,7 +666,7 @@ function ContractView({
                   <div className="min-w-0">
                     <p className="truncate text-sm">{f.file_name}</p>
                     <p className="text-xs text-muted-foreground">
-                      {fmtKb(f.size_bytes)} · {f.uploaded_via === "portal" ? "anexado por si" : "da empresa"} · {fmtDataHora(f.created_at)}
+                      {fmtKb(f.size_bytes)} · {f.uploaded_via === "portal" ? t("sp.contrato.anexos.porSi") : t("sp.contrato.anexos.daEmpresa")} · {fmtDataHora(f.created_at)}
                     </p>
                   </div>
                   <Button
@@ -658,7 +675,7 @@ function ContractView({
                     className="h-11 min-w-11"
                     onClick={() => void openFile(f)}
                     disabled={opening === f.id}
-                    aria-label={`Descarregar ${f.file_name}`}
+                    aria-label={t("sp.contrato.anexos.descarregar", { nome: f.file_name })}
                   >
                     {opening === f.id ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Download className="h-4 w-4" aria-hidden="true" />}
                   </Button>
@@ -679,32 +696,32 @@ function ContractView({
               />
               <Button type="button" variant="outline" className="h-11 gap-2" onClick={() => fileRef.current?.click()} disabled={uploading}>
                 {uploading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : <Upload className="h-4 w-4" aria-hidden="true" />}
-                {uploading ? "A anexar…" : "Anexar documento"}
+                {uploading ? t("sp.contrato.anexos.aAnexar") : t("sp.contrato.anexos.anexar")}
               </Button>
               <p className="text-xs text-muted-foreground">
-                PDF, JPEG ou PNG até 15 MB (ex.: certidões, seguros, tabela de preços).{" "}
-                {isProposed ? "Os anexos seguem com a proposta." : "Os anexos ficam ligados à assinatura."}
+                {t("sp.contrato.anexos.formatos")}{" "}
+                {isProposed ? t("sp.contrato.anexos.seguemProposta") : t("sp.contrato.anexos.ficamAssinatura")}
               </p>
             </div>
           )}
         </Section>
 
         {(c.supplier_signed_at || c.company_signed_at) && (
-          <Section title="Assinaturas" icon={<ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />}>
+          <Section title={t("sp.contrato.assinaturas.titulo")} icon={<ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />}>
             <dl className="divide-y rounded-lg border px-3">
               {c.supplier_signed_at && (
-                <Row label="Fornecedor (código SMS)">
+                <Row label={t("sp.contrato.assinaturas.fornecedor")}>
                   {c.supplier_signed_by_name || "—"} · {fmtDataHora(c.supplier_signed_at)}
                   {c.supplier_signed_phone_masked ? ` · ${c.supplier_signed_phone_masked}` : ""}
                 </Row>
               )}
               {c.company_signed_at && (
-                <Row label="Empresa">
+                <Row label={t("sp.contrato.assinaturas.empresa")}>
                   {c.company_signed_by_name || "—"} · {fmtDataHora(c.company_signed_at)}
                 </Row>
               )}
               {c.supplier_signature_sha256 && (
-                <Row label="Selo da assinatura">
+                <Row label={t("sp.contrato.assinaturas.selo")}>
                   <code className="font-mono text-xs" title={c.supplier_signature_sha256}>
                     {shortHash(c.supplier_signature_sha256)}
                   </code>
@@ -716,12 +733,12 @@ function ContractView({
 
         {c.status === "refused" && (
           <Section
-            title={refusedByCompany ? "Proposta recusada pela empresa" : "Recusado por si"}
+            title={refusedByCompany ? t("sp.contrato.recusa.pelaEmpresa") : t("sp.contrato.recusa.porSi")}
             icon={<XCircle className="h-4 w-4 text-destructive" aria-hidden="true" />}
           >
             <dl className="divide-y rounded-lg border px-3">
-              <Row label="Quando">{fmtDataHora(c.refused_at)}</Row>
-              <Row label="Motivo">
+              <Row label={t("sp.contrato.recusa.quando")}>{fmtDataHora(c.refused_at)}</Row>
+              <Row label={t("sp.contrato.recusa.motivo")}>
                 <span className="whitespace-pre-wrap">{c.refusal_reason || "—"}</span>
               </Row>
             </dl>
@@ -731,12 +748,12 @@ function ContractView({
         {c.events.length > 0 && (
           <details className="group">
             <summary className="flex min-h-11 cursor-pointer items-center gap-1.5 text-sm font-semibold">
-              <History className="h-4 w-4" aria-hidden="true" /> Histórico ({c.events.length})
+              <History className="h-4 w-4" aria-hidden="true" /> {t("sp.contrato.historico", { n: c.events.length })}
             </summary>
             <ol className="mt-2 space-y-1 border-l pl-3">
               {[...c.events].reverse().map((e) => (
                 <li key={e.id} className="text-sm">
-                  <span className="text-xs text-muted-foreground">{fmtDataHora(e.created_at)}</span> · {eventText(e)}
+                  <span className="text-xs text-muted-foreground">{fmtDataHora(e.created_at)}</span> · {textoDoEvento(e, t)}
                 </li>
               ))}
             </ol>
@@ -758,15 +775,12 @@ function ContractView({
       <AlertDialog open={withdrawOpen} onOpenChange={(v) => !withdrawing && setWithdrawOpen(v)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Retirar a proposta {label}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {c.organization_name || "A empresa"} deixa de a poder aceitar. A proposta fica no histórico como retirada e pode
-              propor outra depois.
-            </AlertDialogDescription>
+            <AlertDialogTitle>{t("sp.contrato.retirar.titulo", { ref: label })}</AlertDialogTitle>
+            <AlertDialogDescription>{t("sp.contrato.retirar.descricao", { empresa: empresaMaiusc })}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel className="h-11" disabled={withdrawing}>
-              Voltar
+              {t("sp.contrato.retirar.voltar")}
             </AlertDialogCancel>
             <AlertDialogAction
               className="h-11 gap-2 bg-destructive text-destructive-foreground hover:bg-destructive/90"
@@ -777,7 +791,7 @@ function ContractView({
               disabled={withdrawing}
             >
               {withdrawing && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
-              Retirar proposta
+              {t("sp.contrato.retirar.botao")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -37,6 +37,7 @@ import {
   spDaysText,
   spSlaSourceText,
 } from "@/components/supplier-portal/spOrderFormat";
+import { usePortalT } from "@/portal-i18n";
 
 function attributesText(line: SpOrderLine): string {
   const attrs = line.selected_attributes || {};
@@ -91,9 +92,10 @@ function snapshotOf(o: SpOrderDetail): ConfirmSnapshot {
  * Nada quando está dentro do prazo, fechada ou sem prazo.
  */
 function SpSlaAlert({ sla }: { sla: SpOrderSla | null | undefined }) {
+  const { t } = usePortalT();
   if (!sla || (sla.status !== "at_risk" && sla.status !== "overdue")) return null;
   const due = formatSpDate(sla.due_date);
-  const source = spSlaSourceText(sla);
+  const source = spSlaSourceText(sla, t);
 
   if (sla.status === "overdue") {
     const late = Math.max(1, sla.days_late ?? 1);
@@ -102,16 +104,13 @@ function SpSlaAlert({ sla }: { sla: SpOrderSla | null | undefined }) {
     return (
       <Alert variant="destructive" className="border-2 bg-red-50 dark:bg-red-500/10">
         <AlertTriangle className="h-4 w-4" />
-        <AlertTitle>Prazo de entrega (SLA) ultrapassado</AlertTitle>
+        <AlertTitle>{t("sp.encomendaDet.sla.ultrapassado")}</AlertTitle>
         <AlertDescription className="space-y-1">
           {noContract ? (
-            <p>
-              Prazo era {due} · {spDaysText(late)} de atraso face à data que indicou.
-            </p>
+            <p>{t("sp.encomendaDet.sla.atrasoSemContrato", { data: due, dias: spDaysText(late, t) })}</p>
           ) : (
             <p>
-              Prazo era {due} ({source}) · {spDaysText(late)} de atraso. O incumprimento fica registado no SLA do contrato
-              com a empresa.
+              {t("sp.encomendaDet.sla.atrasoComContrato", { data: due, origem: source, dias: spDaysText(late, t) })}
             </p>
           )}
         </AlertDescription>
@@ -126,9 +125,11 @@ function SpSlaAlert({ sla }: { sla: SpOrderSla | null | undefined }) {
       className="border-2 border-amber-400 bg-amber-50 text-amber-950 dark:bg-amber-500/10 dark:text-amber-100 dark:border-amber-500/40"
     >
       <Clock className="h-4 w-4 !text-amber-700 dark:!text-amber-300" />
-      <AlertTitle>Atenção: esta encomenda está perto de falhar o prazo de entrega (SLA)</AlertTitle>
+      <AlertTitle>{t("sp.encomendaDet.sla.risco")}</AlertTitle>
       <AlertDescription>
-        Prazo: {due} · {left === 0 ? "termina hoje" : `faltam ${spDaysText(left)}`} ({source}).
+        {left === 0
+          ? t("sp.encomendaDet.sla.riscoHoje", { data: due, origem: source })
+          : t("sp.encomendaDet.sla.riscoFaltam", { data: due, dias: spDaysText(left, t), origem: source })}
       </AlertDescription>
     </Alert>
   );
@@ -146,6 +147,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 /** Portal do Fornecedor — detalhe da encomenda (sp_get_order / sp_mark_order_viewed / sp_confirm_order / sp_ship_order). */
 export default function SupplierPortalOrderDetail() {
   const { id = "" } = useParams<{ id: string }>();
+  const { t, tn, idioma } = usePortalT();
   const { account, refresh } = useSupplierPortal();
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -199,10 +201,10 @@ export default function SupplierPortalOrderDetail() {
     setConfirmSnapshot(null);
     setChangedWhileConfirming(true);
     toast({
-      title: "A encomenda foi alterada",
-      description: "A empresa alterou a encomenda. Reveja-a antes de confirmar.",
+      title: t("sp.encomendaDet.alterada.titulo"),
+      description: t("sp.encomendaDet.alterada.toast"),
     });
-  }, [confirmOpen, confirmSnapshot, order, toast]);
+  }, [confirmOpen, confirmSnapshot, order, toast, t]);
 
   const openConfirm = (o: SpOrderDetail) => {
     setConfirmSnapshot(snapshotOf(o));
@@ -234,8 +236,8 @@ export default function SupplierPortalOrderDetail() {
       await downloadSpOrderPdf(o);
     } catch (err) {
       toast({
-        title: "Não foi possível gerar o PDF",
-        description: err instanceof Error ? err.message : "Tente novamente.",
+        title: t("sp.encomendaDet.pdfErro"),
+        description: err instanceof Error ? err.message : t("sp.encomendaDet.tenteNovamente"),
         variant: "destructive",
       });
     } finally {
@@ -246,7 +248,7 @@ export default function SupplierPortalOrderDetail() {
   if (query.isLoading) {
     return (
       <p className="py-16 text-center text-sm text-muted-foreground" role="status">
-        A carregar encomenda…
+        {t("sp.encomendaDet.aCarregar")}
       </p>
     );
   }
@@ -257,24 +259,22 @@ export default function SupplierPortalOrderDetail() {
     return (
       <div className="max-w-lg mx-auto py-10 space-y-4 text-center">
         <h1 className="text-lg font-semibold text-foreground">
-          {notFound ? "Encomenda não disponível" : "Não foi possível abrir a encomenda"}
+          {notFound ? t("sp.encomendaDet.naoDisponivel.titulo") : t("sp.encomendaDet.naoAbre")}
         </h1>
         <p className="text-sm text-muted-foreground">
-          {notFound
-            ? "Esta encomenda não existe, foi retirada do portal pela empresa ou já não tem acesso a ela."
-            : spErrorMessage(query.error)}
+          {notFound ? t("sp.encomendaDet.naoDisponivel.texto") : spErrorMessage(query.error, idioma)}
         </p>
         <div className="flex flex-col sm:flex-row gap-2 justify-center">
           {!notFound && (
             <Button className="h-11 gap-2" onClick={() => void query.refetch()}>
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              Tentar de novo
+              {t("sp.erro.tentarDeNovo")}
             </Button>
           )}
           <Button asChild variant="outline" className="h-11 gap-2">
             <Link to="/supplier-portal/orders">
               <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-              Voltar às encomendas
+              {t("sp.encomendaDet.voltarLista")}
             </Link>
           </Button>
         </div>
@@ -304,7 +304,7 @@ export default function SupplierPortalOrderDetail() {
       <Button asChild variant="ghost" className="h-11 -ml-2 gap-2 text-muted-foreground">
         <Link to="/supplier-portal/orders">
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
-          Encomendas
+          {t("sp.encomendaDet.voltar")}
         </Link>
       </Button>
 
@@ -324,7 +324,7 @@ export default function SupplierPortalOrderDetail() {
             </div>
           )}
           <div className="min-w-0 space-y-1">
-            <h1 className="text-xl sm:text-2xl font-semibold text-foreground">Encomenda {order.order_number}</h1>
+            <h1 className="text-xl sm:text-2xl font-semibold text-foreground">{t("sp.encomendaDet.titulo", { numero: order.order_number })}</h1>
             <p className="text-sm text-muted-foreground truncate">{order.company.name}</p>
             <SpOrderBadges
               orderStatus={order.order_status}
@@ -346,18 +346,18 @@ export default function SupplierPortalOrderDetail() {
             ) : (
               <Download className="h-4 w-4" aria-hidden="true" />
             )}
-            {downloading ? "A gerar PDF…" : "Descarregar PDF"}
+            {downloading ? t("sp.encomendaDet.aGerarPdf") : t("sp.encomendaDet.descarregarPdf")}
           </Button>
           {order.can_confirm && (
             <Button className="h-11 gap-2" onClick={() => openConfirm(order)}>
               <CheckCircle2 className="h-4 w-4" aria-hidden="true" />
-              Confirmar encomenda
+              {t("sp.encomendaDet.confirmar")}
             </Button>
           )}
           {canShip && (
             <Button className="h-11 gap-2" onClick={openShip}>
               <Truck className="h-4 w-4" aria-hidden="true" />
-              Expedir encomenda
+              {t("sp.encomendaDet.expedir")}
             </Button>
           )}
         </div>
@@ -369,10 +369,8 @@ export default function SupplierPortalOrderDetail() {
       {changedWhileConfirming && !isConfirmed && (
         <Alert className="border-amber-300 bg-amber-50 text-amber-950 dark:bg-amber-500/10 dark:text-amber-100 dark:border-amber-500/30">
           <Info className="h-4 w-4 !text-amber-700 dark:!text-amber-300" />
-          <AlertTitle>A encomenda foi alterada</AlertTitle>
-          <AlertDescription>
-            A empresa alterou a encomenda enquanto a confirmava. Reveja as linhas abaixo antes de confirmar.
-          </AlertDescription>
+          <AlertTitle>{t("sp.encomendaDet.alterada.titulo")}</AlertTitle>
+          <AlertDescription>{t("sp.encomendaDet.alterada.texto")}</AlertDescription>
         </Alert>
       )}
 
@@ -380,8 +378,7 @@ export default function SupplierPortalOrderDetail() {
         <Alert>
           <Info className="h-4 w-4" />
           <AlertDescription>
-            A empresa atualizou esta encomenda (versão {pub.revision}, enviada em {formatSpDateTime(pub.sent_at)}). Reveja as
-            linhas antes de confirmar.
+            {t("sp.encomendaDet.versao", { n: pub.revision, data: formatSpDateTime(pub.sent_at) })}
           </AlertDescription>
         </Alert>
       )}
@@ -390,13 +387,13 @@ export default function SupplierPortalOrderDetail() {
         <Alert className="border-emerald-300 bg-emerald-50 text-emerald-950 dark:bg-emerald-500/10 dark:text-emerald-100 dark:border-emerald-500/30">
           <CheckCircle2 className="h-4 w-4 !text-emerald-700 dark:!text-emerald-300" />
           <AlertTitle>
-            Confirmada em {formatSpDateTime(pub.confirmed_at)}
-            {pub.confirmed_by_name ? ` por ${pub.confirmed_by_name}` : ""}
-            {pub.promised_date ? ` · entrega prevista ${formatSpDate(pub.promised_date)}` : ""}
+            {t("sp.encomendaDet.confirmadaEm", { data: formatSpDateTime(pub.confirmed_at) })}
+            {pub.confirmed_by_name ? t("sp.encomendaDet.confirmadaPor", { nome: pub.confirmed_by_name }) : ""}
+            {pub.promised_date ? t("sp.encomendaDet.entregaPrevistaAviso", { data: formatSpDate(pub.promised_date) }) : ""}
           </AlertTitle>
           <AlertDescription className="space-y-1">
-            {pub.supplier_comment && <p className="whitespace-pre-wrap">Comentário: {pub.supplier_comment}</p>}
-            {pub.promised_date && pub.promised_date_accepted && <p>A empresa aceitou a data de entrega prevista.</p>}
+            {pub.supplier_comment && <p className="whitespace-pre-wrap">{t("sp.encomendaDet.comentario", { texto: pub.supplier_comment })}</p>}
+            {pub.promised_date && pub.promised_date_accepted && <p>{t("sp.encomendaDet.dataAceite")}</p>}
           </AlertDescription>
         </Alert>
       )}
@@ -406,8 +403,8 @@ export default function SupplierPortalOrderDetail() {
           <Info className="h-4 w-4" />
           <AlertDescription>
             {order.order_status === "received"
-              ? "Esta encomenda já foi recebida pela empresa."
-              : "Esta encomenda foi cancelada pela empresa."}
+              ? t("sp.encomendaDet.jaRecebida")
+              : t("sp.encomendaDet.jaCancelada")}
           </AlertDescription>
         </Alert>
       )}
@@ -415,15 +412,15 @@ export default function SupplierPortalOrderDetail() {
       <div className="grid gap-4 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Encomenda</CardTitle>
+            <CardTitle className="text-base">{t("sp.encomendaDet.cartao.encomenda")}</CardTitle>
           </CardHeader>
           <CardContent>
             <dl className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
-              <Field label="Número">{order.order_number}</Field>
-              <Field label="Data da encomenda">{formatSpDate(order.order_date)}</Field>
-              <Field label="Entrega pedida">{formatSpDate(order.expected_delivery)}</Field>
+              <Field label={t("sp.encomendaDet.campo.numero")}>{order.order_number}</Field>
+              <Field label={t("sp.encomendaDet.campo.dataEncomenda")}>{formatSpDate(order.order_date)}</Field>
+              <Field label={t("sp.encomendaDet.campo.entregaPedida")}>{formatSpDate(order.expected_delivery)}</Field>
               {order.sla?.status && order.sla.due_date && (
-                <Field label="Prazo (SLA)">
+                <Field label={t("sp.encomendas.coluna.prazoSla")}>
                   <span
                     className={
                       order.sla.status === "overdue"
@@ -437,10 +434,10 @@ export default function SupplierPortalOrderDetail() {
                   </span>
                 </Field>
               )}
-              <Field label="Enviada em">{formatSpDateTime(pub.sent_at)}</Field>
-              <Field label="Vista em">{formatSpDateTime(pub.viewed_at)}</Field>
+              <Field label={t("sp.encomendaDet.campo.enviadaEm")}>{formatSpDateTime(pub.sent_at)}</Field>
+              <Field label={t("sp.encomendaDet.campo.vistaEm")}>{formatSpDateTime(pub.viewed_at)}</Field>
               {order.sent_by && (
-                <Field label="Responsável">
+                <Field label={t("sp.encomendaDet.campo.responsavel")}>
                   <span className="block">{order.sent_by.name || "—"}</span>
                   {order.sent_by.email && (
                     <a href={`mailto:${order.sent_by.email}`} className="block text-primary hover:underline break-all">
@@ -460,14 +457,14 @@ export default function SupplierPortalOrderDetail() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Empresa</CardTitle>
+            <CardTitle className="text-base">{t("sp.encomendaDet.cartao.empresa")}</CardTitle>
           </CardHeader>
           <CardContent>
             <dl className="space-y-3">
-              <Field label="Nome">{order.company.name}</Field>
-              {order.company.nif && <Field label="NIF">{order.company.nif}</Field>}
-              {companyAddress && <Field label="Morada">{companyAddress}</Field>}
-              {order.company.phone && <Field label="Telefone">{order.company.phone}</Field>}
+              <Field label={t("sp.encomendaDet.campo.nome")}>{order.company.name}</Field>
+              {order.company.nif && <Field label={t("sp.encomendaDet.campo.nif")}>{order.company.nif}</Field>}
+              {companyAddress && <Field label={t("sp.encomendaDet.campo.morada")}>{companyAddress}</Field>}
+              {order.company.phone && <Field label={t("sp.encomendaDet.campo.telefone")}>{order.company.phone}</Field>}
             </dl>
           </CardContent>
         </Card>
@@ -476,7 +473,7 @@ export default function SupplierPortalOrderDetail() {
       {order.supplier_notes && (
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Notas da empresa</CardTitle>
+            <CardTitle className="text-base">{t("sp.encomendaDet.notas")}</CardTitle>
           </CardHeader>
           <CardContent>
             <p className="text-sm whitespace-pre-wrap text-foreground">{order.supplier_notes}</p>
@@ -486,20 +483,20 @@ export default function SupplierPortalOrderDetail() {
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Linhas ({order.lines.length})</CardTitle>
+          <CardTitle className="text-base">{t("sp.encomendaDet.linhas", { n: order.lines.length })}</CardTitle>
         </CardHeader>
         <CardContent className="p-0 sm:p-6 sm:pt-0">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Referência</TableHead>
-                  <TableHead>Descrição</TableHead>
-                  <TableHead className="text-right">Qtd.</TableHead>
-                  <TableHead className="text-right">Preço unit.</TableHead>
-                  <TableHead className="text-right">IVA</TableHead>
-                  <TableHead className="text-right">Total</TableHead>
-                  {hasReceipts && <TableHead className="text-right">Recebido</TableHead>}
+                  <TableHead>{t("sp.encomendaDet.coluna.referencia")}</TableHead>
+                  <TableHead>{t("sp.encomendaDet.coluna.descricao")}</TableHead>
+                  <TableHead className="text-right">{t("sp.encomendaDet.coluna.qtd")}</TableHead>
+                  <TableHead className="text-right">{t("sp.encomendaDet.coluna.precoUnit")}</TableHead>
+                  <TableHead className="text-right">{t("sp.encomendaDet.coluna.iva")}</TableHead>
+                  <TableHead className="text-right">{t("sp.encomendaDet.coluna.total")}</TableHead>
+                  {hasReceipts && <TableHead className="text-right">{t("sp.encomendaDet.coluna.recebido")}</TableHead>}
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -514,7 +511,7 @@ export default function SupplierPortalOrderDetail() {
                         {l.supplier_sku ? (
                           <>
                             <span className="block font-semibold text-foreground">{l.supplier_sku}</span>
-                            {l.sku && <span className="block text-xs text-muted-foreground">Nossa ref.: {l.sku}</span>}
+                            {l.sku && <span className="block text-xs text-muted-foreground">{t("sp.encomendaDet.nossaRef", { ref: l.sku })}</span>}
                           </>
                         ) : (
                           <span className="text-muted-foreground">{l.sku || "—"}</span>
@@ -556,15 +553,15 @@ export default function SupplierPortalOrderDetail() {
           </div>
           <dl className="mt-4 ml-auto w-full sm:w-72 space-y-1 px-4 pb-4 sm:px-0 sm:pb-0 text-sm">
             <div className="flex justify-between">
-              <dt className="text-muted-foreground">Subtotal (sem IVA)</dt>
+              <dt className="text-muted-foreground">{t("sp.encomendaDet.subtotal")}</dt>
               <dd className="tabular-nums">{formatSpMoney(order.totals.subtotal, order.currency)}</dd>
             </div>
             <div className="flex justify-between">
-              <dt className="text-muted-foreground">IVA</dt>
+              <dt className="text-muted-foreground">{t("sp.encomendaDet.iva")}</dt>
               <dd className="tabular-nums">{formatSpMoney(order.totals.vat_total, order.currency)}</dd>
             </div>
             <div className="flex justify-between border-t pt-1 font-semibold">
-              <dt>Total</dt>
+              <dt>{t("sp.encomendaDet.total")}</dt>
               <dd className="tabular-nums">{formatSpMoney(order.totals.total, order.currency)}</dd>
             </div>
           </dl>
@@ -574,12 +571,12 @@ export default function SupplierPortalOrderDetail() {
       {shipmentsError && (
         <Alert variant="destructive">
           <Info className="h-4 w-4" />
-          <AlertTitle>Não foi possível ler as expedições</AlertTitle>
+          <AlertTitle>{t("sp.encomendaDet.expedicoesErro")}</AlertTitle>
           <AlertDescription className="space-y-2">
-            <p>{spErrorMessage(shipmentsError)}</p>
+            <p>{spErrorMessage(shipmentsError, idioma)}</p>
             <Button variant="outline" className="h-11 gap-2" onClick={() => void shipmentsQuery.refetch()}>
               <RefreshCw className="h-4 w-4" aria-hidden="true" />
-              Tentar de novo
+              {t("sp.erro.tentarDeNovo")}
             </Button>
           </AlertDescription>
         </Alert>
@@ -598,17 +595,19 @@ export default function SupplierPortalOrderDetail() {
           onShipped={(res, file) => {
             const n = res.lines.length;
             toast({
-              title: res.already_shipped ? "Expedição já registada" : "Encomenda expedida",
-              description: `Guia de remessa ${res.note_number} · ${n} ${n === 1 ? "linha" : "linhas"}.`,
+              title: res.already_shipped ? t("sp.encomendaDet.expedida.jaRegistada") : t("sp.encomendaDet.expedida.titulo"),
+              description: tn("sp.encomendaDet.expedida.guia.um", "sp.encomendaDet.expedida.guia.varios", n, {
+                guia: res.note_number,
+              }),
             });
             setShipRevision(null);
             if (file) {
               spUploadDeliveryNoteFile({ orgId: res.organization_id, noteId: res.delivery_note_id, file })
-                .then(() => toast({ title: "Ficheiro da guia anexado" }))
+                .then(() => toast({ title: t("sp.encomendaDet.expedida.anexado") }))
                 .catch((err: unknown) =>
                   toast({
-                    title: "A guia foi registada, mas o ficheiro não foi anexado",
-                    description: err instanceof Error ? err.message : "Tente anexar de novo.",
+                    title: t("sp.encomendaDet.expedida.anexoFalhou"),
+                    description: err instanceof Error ? err.message : t("sp.encomendaDet.expedida.anexoTente"),
                     variant: "destructive",
                   }),
                 )
@@ -627,13 +626,13 @@ export default function SupplierPortalOrderDetail() {
             toast({
               title:
                 hint === "stale_revision"
-                  ? "Encomenda atualizada pela empresa"
+                  ? t("sp.encomendaDet.expedirErro.stale")
                   : hint === "duplicate_note"
-                    ? "Guia de remessa repetida"
+                    ? t("sp.encomendaDet.expedirErro.guiaRepetida")
                     : hint === "order_closed" || hint === "not_confirmed"
-                      ? "Já não é possível expedir"
-                      : "Não foi possível expedir",
-              description: spErrorMessage(err),
+                      ? t("sp.encomendaDet.expedirErro.fechada")
+                      : t("sp.encomendaDet.expedirErro.geral"),
+              description: spErrorMessage(err, idioma),
               variant: hint === "stale_revision" ? "default" : "destructive",
             });
             // Estes mudam o que se pode expedir: fecha e relê. Validação/guia
@@ -655,10 +654,10 @@ export default function SupplierPortalOrderDetail() {
           revision={confirmSnapshot.revision}
           onConfirmed={(res) => {
             toast({
-              title: res.already_confirmed ? "Encomenda já estava confirmada" : "Encomenda confirmada",
+              title: res.already_confirmed ? t("sp.encomendaDet.confirmada.jaEstava") : t("sp.encomendaDet.confirmada.titulo"),
               description: res.promised_date
-                ? `Entrega prevista: ${formatSpDate(res.promised_date)}.`
-                : "A empresa foi avisada.",
+                ? t("sp.encomendaDet.confirmada.entregaPrevista", { data: formatSpDate(res.promised_date) })
+                : t("sp.encomendaDet.confirmada.empresaAvisada"),
             });
             void reload();
           }}
@@ -671,11 +670,11 @@ export default function SupplierPortalOrderDetail() {
             toast({
               title:
                 hint === "stale_revision"
-                  ? "Encomenda atualizada pela empresa"
+                  ? t("sp.encomendaDet.confirmarErro.stale")
                   : hint === "order_closed"
-                    ? "Já não é possível confirmar"
-                    : "Não foi possível confirmar",
-              description: spErrorMessage(err),
+                    ? t("sp.encomendaDet.confirmarErro.fechada")
+                    : t("sp.encomendaDet.confirmarErro.geral"),
+              description: spErrorMessage(err, idioma),
               variant: hint === "stale_revision" ? "default" : "destructive",
             });
             if (hint === "stale_revision" || hint === "order_closed" || hint === "not_found") {

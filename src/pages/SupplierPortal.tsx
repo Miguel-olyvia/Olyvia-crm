@@ -9,10 +9,12 @@ import { isNoSupplierAccess, spCatalogList } from "@/lib/supplierPortal/spRpc";
 import { useSpOrdersSlaAlert, useSpOrdersToConfirm } from "@/components/supplier-portal/useSpOrdersToConfirm";
 import { SP_SLA_ALERT_ORDERS_HREF, spSlaAlertText } from "@/components/supplier-portal/SpOrdersSlaBanner";
 import { cn } from "@/lib/utils";
+import { usePortalT } from "@/portal-i18n";
 
 /** Portal do Fornecedor — início: boas-vindas, encomendas por confirmar, empresas com acesso e atalho para o catálogo. */
 export default function SupplierPortal() {
   const { user, account, companies, companiesError, canManageCatalog, refresh } = useSupplierPortal();
+  const { t, tn } = usePortalT();
   const { count: toConfirm, isError: toConfirmError } = useSpOrdersToConfirm();
   const { alert: slaAlert, overdue: slaOverdue } = useSpOrdersSlaAlert();
   const hasSlaAlert = !!slaAlert && slaAlert > 0;
@@ -45,11 +47,12 @@ export default function SupplierPortal() {
     <div className="space-y-6">
       <div className="space-y-1">
         <h1 className="text-xl sm:text-2xl font-semibold text-foreground">
-          {firstName ? `Olá, ${firstName}` : "Bem-vindo"}
+          {firstName ? t("sp.inicio.ola", { nome: firstName }) : t("sp.inicio.boasVindas")}
         </h1>
         <p className="text-sm text-muted-foreground">
-          Portal do Fornecedor de <span className="font-medium text-foreground">{account?.display_name}</span>. Aqui
-          recebe e confirma as encomendas e mantém o seu catálogo atualizado para as empresas com quem trabalha.
+          {t("sp.inicio.introAntes")}
+          <span className="font-medium text-foreground">{account?.display_name}</span>
+          {t("sp.inicio.introDepois")}
         </p>
       </div>
 
@@ -57,17 +60,15 @@ export default function SupplierPortal() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <ClipboardList className="h-4 w-4 text-primary" aria-hidden="true" />
-            Encomendas
+            {t("sp.inicio.encomendas.titulo")}
           </CardTitle>
           <CardDescription>
-            {toConfirm === null && !toConfirmError && "A contar encomendas…"}
-            {toConfirmError && "Não foi possível contar as encomendas."}
+            {toConfirm === null && !toConfirmError && t("sp.inicio.encomendas.aContar")}
+            {toConfirmError && t("sp.inicio.encomendas.erroContar")}
             {toConfirm !== null &&
               (toConfirm === 0
-                ? "Não tem encomendas por confirmar."
-                : toConfirm === 1
-                  ? "1 encomenda por confirmar"
-                  : `${toConfirm.toLocaleString("pt-PT")} encomendas por confirmar`)}
+                ? t("sp.inicio.encomendas.nenhumaPorConfirmar")
+                : tn("sp.encomendas.porConfirmar.um", "sp.encomendas.porConfirmar.varios", toConfirm))}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -82,11 +83,11 @@ export default function SupplierPortal() {
             >
               <p className="flex items-center gap-2 text-sm font-medium">
                 <AlertTriangle className="h-4 w-4 shrink-0" aria-hidden="true" />
-                {spSlaAlertText(slaAlert)}
+                {spSlaAlertText(slaAlert, tn)}
               </p>
               <Button asChild variant="outline" className="h-11 gap-2 bg-background">
                 <Link to={SP_SLA_ALERT_ORDERS_HREF}>
-                  Ver prazos em risco
+                  {t("sp.inicio.encomendas.verPrazos")}
                   <ArrowRight className="h-4 w-4" aria-hidden="true" />
                 </Link>
               </Button>
@@ -94,7 +95,7 @@ export default function SupplierPortal() {
           )}
           <Button asChild className="h-11 w-full sm:w-auto gap-2" variant={toConfirm ? "default" : "outline"}>
             <Link to={toConfirm ? "/supplier-portal/orders?estado=to_confirm" : "/supplier-portal/orders"}>
-              {toConfirm ? "Ver encomendas por confirmar" : "Ver encomendas"}
+              {toConfirm ? t("sp.inicio.encomendas.verPorConfirmar") : t("sp.inicio.encomendas.ver")}
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Link>
           </Button>
@@ -105,27 +106,24 @@ export default function SupplierPortal() {
         <CardHeader className="pb-3">
           <CardTitle className="text-base flex items-center gap-2">
             <Package className="h-4 w-4 text-primary" aria-hidden="true" />
-            Catálogo
+            {t("sp.inicio.catalogo.titulo")}
           </CardTitle>
           <CardDescription>
-            {activeItems === null && !countError && "A contar artigos…"}
-            {countError && "Não foi possível contar os artigos."}
-            {activeItems !== null &&
-              (activeItems === 1 ? "1 artigo ativo" : `${activeItems.toLocaleString("pt-PT")} artigos ativos`)}
+            {activeItems === null && !countError && t("sp.inicio.catalogo.aContar")}
+            {countError && t("sp.inicio.catalogo.erroContar")}
+            {activeItems !== null && tn("sp.inicio.catalogo.ativos.um", "sp.inicio.catalogo.ativos.varios", activeItems)}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {!canManageCatalog && (
             <Alert>
               <Info className="h-4 w-4" />
-              <AlertDescription>
-                Pode consultar o catálogo. Só o utilizador principal da conta pode alterá-lo.
-              </AlertDescription>
+              <AlertDescription>{t("sp.inicio.catalogo.soConsulta")}</AlertDescription>
             </Alert>
           )}
           <Button asChild className="h-11 w-full sm:w-auto gap-2">
             <Link to="/supplier-portal/catalog">
-              {canManageCatalog ? "Gerir catálogo" : "Ver catálogo"}
+              {canManageCatalog ? t("sp.inicio.catalogo.gerir") : t("sp.inicio.catalogo.ver")}
               <ArrowRight className="h-4 w-4" aria-hidden="true" />
             </Link>
           </Button>
@@ -134,15 +132,15 @@ export default function SupplierPortal() {
 
       <section className="space-y-3" aria-labelledby="sp-companies-title">
         <h2 id="sp-companies-title" className="text-base font-semibold text-foreground">
-          Empresas com acesso
+          {t("sp.inicio.empresas.titulo")}
         </h2>
         {companiesError && (
           <Alert variant="destructive">
-            <AlertDescription>Não foi possível carregar a lista de empresas. Recarregue a página.</AlertDescription>
+            <AlertDescription>{t("sp.inicio.empresas.erro")}</AlertDescription>
           </Alert>
         )}
         {!companiesError && companies.length === 0 && (
-          <p className="text-sm text-muted-foreground">Nenhuma empresa com acesso ativo.</p>
+          <p className="text-sm text-muted-foreground">{t("sp.inicio.empresas.nenhuma")}</p>
         )}
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {companies.map((c) => (
@@ -167,7 +165,7 @@ export default function SupplierPortal() {
                 </p>
                 {c.granted_at && (
                   <p className="text-xs text-muted-foreground">
-                    Desde {new Date(c.granted_at).toLocaleDateString("pt-PT")}
+                    {t("sp.inicio.empresas.desde", { data: new Date(c.granted_at).toLocaleDateString("pt-PT") })}
                   </p>
                 )}
               </div>

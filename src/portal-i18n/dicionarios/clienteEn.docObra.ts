@@ -1,0 +1,108 @@
+// Customer portal, the works blocks in the template document (src/components/portal/obra): the proposal and the contract clauses,
+// in English. Money and numbers do not change with the language.
+export const clienteEnDocObra: Record<string, string> = {
+  "pc.docObra.aria": "The works",
+  "pc.docObra.diaUtil": "{n} working day",
+  "pc.docObra.diasUteis": "{n} working days",
+
+  // Block titles
+  "pc.docObra.titulo.fazer": "What we will do",
+  "pc.docObra.titulo.materiais": "Materials and choices",
+  "pc.docObra.titulo.planeamento": "Schedule",
+  "pc.docObra.titulo.pagamento": "Payment",
+  "pc.docObra.titulo.condicoes": "Terms",
+  "pc.docObra.titulo.aceitacao": "Acceptance",
+
+  // 01 What we will do
+  "pc.docObra.fazer.modelo": "Renovation with the \"{modelo}\" model.",
+  "pc.docObra.fazer.fases": "The works are split into phases, in the order they happen.",
+  "pc.docObra.fase.rotulo": "Phase {n}",
+  "pc.docObra.fase.nome1": "Preparatory works and demolition",
+  "pc.docObra.fase.nome2": "Infrastructure (technical installations)",
+  "pc.docObra.fase.nome3": "Coverings and base finishes",
+  "pc.docObra.fase.nome4": "Final fitting and fine finishes",
+  "pc.docObra.fase.curto1": "Preparation and demolition",
+  "pc.docObra.fase.curto2": "Infrastructure",
+  "pc.docObra.fase.curto3": "Coverings",
+  "pc.docObra.fase.curto4": "Final fitting",
+  "pc.docObra.grupo.trabalhos": "Works",
+  "pc.docObra.grupo.preparacao": "Preparation and protection",
+  "pc.docObra.grupo.materiais": "Materials",
+  "pc.docObra.grupo.cliente": "Supplied by you",
+  "pc.docObra.fixo.demolicao": "Demolition and rubble removal",
+  "pc.docObra.fixo.demolicaoDet": "licensed operator, with e-GAR",
+  "pc.docObra.fixo.incluidosModelo": "included in the model",
+
+  // 02 Materials and choices
+  "pc.docObra.mat.incluidos": "Included in the model",
+  "pc.docObra.mat.escolhidos": "Chosen with you",
+  "pc.docObra.mat.poupa": "you save {valor}",
+  "pc.docObra.mat.poupaTotal": "In total, you save {valor} before VAT, already deducted from the price.",
+  "pc.docObra.mat.escolhas": "Your choices",
+  "pc.docObra.escolha.mobilidadeReduzida": "Reduced mobility",
+
+  // 04 Schedule
+  "pc.docObra.plan.periodo": "{de} to {ate}",
+  "pc.docObra.plan.resumo": "Planned start on {inicio} and end on {fim}, working days only (no weekends or public holidays).",
+
+  // 05 Payment
+  "pc.docObra.pag.momento": "When",
+  "pc.docObra.pag.percentagem": "Percentage",
+  "pc.docObra.pag.valor": "Amount incl. VAT",
+  "pc.docObra.pag.previsto": "expected {data}",
+  "pc.docObra.pag.texto": "By bank transfer, Multibanco reference or direct debit, as you choose in the portal. Each instalment has its own invoice, sent to the portal.",
+  "pc.docObra.prest.adjudicacao": "On award",
+  "pc.docObra.prest.arranque": "When the works start",
+  "pc.docObra.prest.fimEntrega": "At the end, before handover",
+  "pc.docObra.prest.meio": "Halfway through the works",
+  "pc.docObra.prest.fimObra": "At the end of the works",
+  "pc.docObra.prest.fimFase": "At the end of phase {n} ({fase})",
+
+  // 06 Terms
+  "pc.docObra.cond.prazo": "Completion time: {prazo}, from the agreed start, excluding weekends and public holidays.",
+  "pc.docObra.cond.garantia": "{garantia} warranty on labour, from the acceptance report; materials carry the manufacturer's warranty.",
+  "pc.docObra.cond.validade": "Proposal valid until {data}.",
+  "pc.docObra.cond.extra": "Work not described in this proposal is only done with your agreement, in an addendum with its price and time.",
+  "pc.docObra.garantia.umAno": "1 year",
+  "pc.docObra.garantia.doisAnos": "2 years",
+  "pc.docObra.garantia.cincoAnos": "5 years",
+
+  // 07 Acceptance
+  "pc.docObra.aceit.empresa": "For {empresa}",
+  "pc.docObra.aceit.cliente": "The client",
+  "pc.docObra.aceit.aceite": "Accepted in the client portal on {data}.",
+  "pc.docObra.aceit.pode": "You can accept on this page, with the code we send you by SMS: who, when and from where is recorded.",
+
+  // Contract: the deal clauses
+  "pc.docObra.ct.titulo": "Deal clauses",
+  "pc.docObra.ct.clausula": "Clause {n} · {titulo}",
+  "pc.docObra.ct.revista": "revised",
+  "pc.docObra.ct.t.objeto": "Scope",
+  "pc.docObra.ct.t.preco": "Price",
+  "pc.docObra.ct.t.pagamento": "Payment",
+  "pc.docObra.ct.t.prazo": "Time",
+  "pc.docObra.ct.t.garantia": "Warranty",
+  "pc.docObra.ct.t.condicoes": "General terms",
+  "pc.docObra.ct.objeto": "The {servico} works at {local}: {servicos}, and the materials of the chosen model.",
+  "pc.docObra.ct.preco": "{base} before VAT: {mo} of labour, with VAT at 6% ({ivaMo}), and {mat} of materials, with VAT at 23% ({ivaMat}). Total incl. VAT: {total}.",
+  "pc.docObra.ct.prestacao": "{momento}: {p}%, {valor}",
+  "pc.docObra.ct.prestacaoPrevista": "{momento} (expected: {data}): {p}%, {valor}",
+  "pc.docObra.ct.prazo": "Start {inicio}, with {dias} working days of execution: expected end on {fim}.",
+  "pc.docObra.ct.inicioA": "on {data}",
+  "pc.docObra.ct.inicioPorMarcar": "to be scheduled",
+  "pc.docObra.ct.aDefinir": "to be defined",
+  "pc.docObra.ct.multa": "Delays attributable to the company give rise to a penalty, under the general terms.",
+  "pc.docObra.ct.garantia": "{garantia} on labour, from the date of the acceptance report. Materials carry the manufacturer's warranty.",
+  "pc.docObra.ct.condicoes": "The company's general terms, given to the client with the proposal, are part of this contract.",
+
+  // Contract: the signed addenda
+  "pc.docObra.ad.titulo": "Contract addenda",
+  "pc.docObra.ad.texto": "They are part of this contract. Everything else stays the same.",
+  "pc.docObra.ad.linha": "+{total} incl. VAT · {dias} · {motivo}",
+  "pc.docObra.ad.assinada": "Signed",
+  "pc.docObra.ad.assinadaEm": "Signed · {data}",
+  "pc.docObra.ad.contrato": "Contract",
+  "pc.docObra.ad.uma": "Addendum",
+  "pc.docObra.ad.varias": "{n} addenda",
+  "pc.docObra.ad.valorTotal": "Contract value, incl. VAT",
+};

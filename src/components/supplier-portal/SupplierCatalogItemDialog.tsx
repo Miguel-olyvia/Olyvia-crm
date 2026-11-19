@@ -29,7 +29,7 @@ import {
   type SpCategoria,
 } from "@/lib/supplierPortal/spRpc";
 import { skuPrevisto } from "@/lib/supplierPortal/skuPortal";
-import { CORES, corCanonica, UNIDADES } from "@/lib/supplierPortal/listasArtigo";
+import { UNIDADES } from "@/lib/supplierPortal/listasArtigo";
 import { UNIDADES_SERVICO, kindOf, useDistritos, type ItemKind } from "@/lib/supplierPortal/servicoCatalogo";
 // Fotos: importadas do módulo próprio (o spRpc reexporta-as) para os testes que simulam o spRpc continuarem válidos.
 import {
@@ -37,12 +37,19 @@ import {
   CATALOG_IMAGE_MIME,
   CatalogImageError,
   catalogImageUrl,
-  describeCatalogImageError,
   removeCatalogImage,
   setMainCatalogImage,
   uploadCatalogImage,
-  validateCatalogImageFile,
 } from "@/lib/supplierPortal/catalogImages";
+import {
+  corCanonicaPortal,
+  juntarMensagens,
+  mensagemErroFoto,
+  opcoesDeCor,
+  opcoesDeUnidade,
+  validarFotoCatalogo,
+} from "@/lib/supplierPortal/textosCatalogo";
+import { mensagemDeChave, mensagemDeTexto, resolverMensagem, traduzir, usePortalT, type MensagemDoPortal } from "@/portal-i18n";
 
 /** As categorias por empresa cliente, pela ordem em que vêm (a base já ordena por empresa). */
 export function gruposEmpresa(cs: readonly SpCategoria[]): [string, SpCategoria[]][] {
@@ -71,7 +78,8 @@ interface PendingPhoto {
   /** URL local (object URL) para a pré-visualização; vazio sem suporte. */
   preview: string;
   status: "queued" | "uploading" | "error";
-  error?: string;
+  /** A mensagem fica como mensagem (chave ou texto do servidor) e traduz-se ao mostrar. */
+  error?: MensagemDoPortal;
 }
 
 let pendingSeq = 0;
@@ -150,9 +158,13 @@ const SERVICE_TEXT_FIELDS = ["supplier_ref", "name", "description", "unit_label"
 export function SupplierCatalogItemDialog({
   open, item: itemProp, onOpenChange, onSaved, onNoAccess, onImagesChanged, canEditPhotos = true,
 }: SupplierCatalogItemDialogProps) {
+  const { t, idioma } = usePortalT();
   const [form, setForm] = useState<FormState>(() => toForm(itemProp));
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Os erros ficam em estado como mensagens (chave, texto do servidor ou função do idioma) e traduzem-se ao mostrar:
+  // mudar de idioma com o erro visível muda também o erro. O que vem do servidor fica como vem.
+  const [erro, setErro] = useState<MensagemDoPortal | null>(null);
+  const error = resolverMensagem(erro, idioma);
   // Artigo novo gravado nesta abertura (as fotos falharam e o diálogo ficou aberto): passa a editar esse.
   const [createdItem, setCreatedItem] = useState<SpCatalogItem | null>(null);
   const item = itemProp ?? createdItem;
@@ -162,7 +174,8 @@ export function SupplierCatalogItemDialog({
   const [paths, setPaths] = useState<string[]>(() => itemProp?.image_paths ?? []);
   const [pending, setPending] = useState<PendingPhoto[]>([]);
   const [photoBusy, setPhotoBusy] = useState<string | null>(null);
-  const [photoError, setPhotoError] = useState<string | null>(null);
+  const [photoErro, setPhotoErro] = useState<MensagemDoPortal | null>(null);
+  const photoError = photoErro ? resolverMensagem(photoErro, idioma) : null;
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const pendingRef = useRef<PendingPhoto[]>([]);
@@ -175,12 +188,12 @@ export function SupplierCatalogItemDialog({
   useEffect(() => {
     if (open) {
       setForm(toForm(itemProp));
-      setError(null);
+      setErro(null);
       setCreatedItem(null);
       setPaths(itemProp?.image_paths ?? []);
       setPending((prev) => { prev.forEach((p) => revokePreview(p.preview)); return []; });
       setPhotoBusy(null);
-      setPhotoError(null);
+      setPhotoErro(null);
       setConfirmRemove(null);
     }
   }, [open, itemProp]);
@@ -233,10 +246,10 @@ export function SupplierCatalogItemDialog({
   const uploadPending = async (
     base: SpCatalogItem,
     entries: PendingPhoto[],
-  ): Promise<{ latest: SpCatalogItem | null; failed: number; firstError: string | null; noAccess: boolean }> => {
+  ): Promise<{ latest: SpCatalogItem | null; failed: number; firstError: MensagemDoPortal | null; noAccess: boolean }> => {
     let latest: SpCatalogItem | null = null;
     let failed = 0;
-    let firstError: string | null = null;
+    let firstError: MensagemDoPortal | null = null;
     for (const entry of entries) {
       updatePending(entry.key, { status: "uploading", error: undefined });
       try {
@@ -246,7 +259,7 @@ export function SupplierCatalogItemDialog({
         dropPending(entry.key);
       } catch (err) {
         if (isNoAccessImageError(err)) return { latest, failed: failed + 1, firstError, noAccess: true };
-        const msg = describeCatalogImageError(err);
+        const msg = mensagemErroFoto(err);
         failed += 1;
         firstError ??= msg;
         updatePending(entry.key, { status: "error", error: msg });
@@ -257,21 +270,24 @@ export function SupplierCatalogItemDialog({
 
   const handleFiles = async (list: FileList | null) => {
     if (!list || list.length === 0 || !canEditPhotos) return;
-    setPhotoError(null);
+    setPhotoErro(null);
     const accepted: PendingPhoto[] = [];
-    const problems: string[] = [];
+    const problems: MensagemDoPortal[] = [];
     let count = photoCount;
     for (const file of Array.from(list)) {
-      const why = validateCatalogImageFile(file, count);
+      const why = validarFotoCatalogo(file, count);
       if (why) {
-        problems.push(count >= CATALOG_IMAGE_MAX_COUNT ? why : `${file.name}: ${why}`);
+        // «nome.jpg: motivo» (o nome do ficheiro não se traduz); no limite, só o motivo.
+        problems.push(
+          count >= CATALOG_IMAGE_MAX_COUNT ? why : { de: (idioma) => `${file.name}: ${resolverMensagem(why, idioma)}` },
+        );
         if (count >= CATALOG_IMAGE_MAX_COUNT) break;
         continue;
       }
       count += 1;
       accepted.push({ key: `p${++pendingSeq}`, file, preview: makePreview(file), status: "queued" });
     }
-    if (problems.length) setPhotoError(problems.join(" "));
+    if (problems.length) setPhotoErro(juntarMensagens(problems));
     if (accepted.length === 0) return;
     setPending((prev) => [...prev, ...accepted]);
     // Artigo já existe: carrega já. Artigo novo: ficam em fila até gravar.
@@ -279,18 +295,18 @@ export function SupplierCatalogItemDialog({
       const r = await uploadPending(item, accepted);
       if (r.noAccess) { onNoAccess(); return; }
       if (r.latest) onImagesChanged?.(r.latest);
-      if (r.failed) setPhotoError(r.firstError);
+      if (r.failed) setPhotoErro(r.firstError);
     }
   };
 
   const retryPending = async (entry: PendingPhoto) => {
     if (!item) return;
-    setPhotoError(null);
+    setPhotoErro(null);
     const r = await uploadPending(item, [entry]);
     if (r.noAccess) { onNoAccess(); return; }
     if (r.latest) onImagesChanged?.(r.latest);
-    if (r.failed) setPhotoError(r.firstError);
-    else if (!pendingRef.current.some((p) => p.key !== entry.key && p.status === "error")) setError(null);
+    if (r.failed) setPhotoErro(r.firstError);
+    else if (!pendingRef.current.some((p) => p.key !== entry.key && p.status === "error")) setErro(null);
   };
 
   /** Artigo novo: a foto em fila passa a ser a 1.ª (a principal ao gravar). */
@@ -303,7 +319,7 @@ export function SupplierCatalogItemDialog({
   const runPhotoAction = async (path: string, action: () => Promise<{ item: { image_paths: string[] } }>) => {
     if (!item) return;
     setPhotoBusy(path);
-    setPhotoError(null);
+    setPhotoErro(null);
     try {
       const res = await action();
       const next = mergeItem(item, res.item);
@@ -311,7 +327,7 @@ export function SupplierCatalogItemDialog({
       onImagesChanged?.(next);
     } catch (err) {
       if (isNoAccessImageError(err)) { onNoAccess(); return; }
-      setPhotoError(describeCatalogImageError(err));
+      setPhotoErro(mensagemErroFoto(err));
     } finally {
       setPhotoBusy(null);
     }
@@ -321,27 +337,27 @@ export function SupplierCatalogItemDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
+    setErro(null);
     if (!form.supplier_ref.trim() || !form.name.trim()) {
-      setError("A referência e o nome são obrigatórios.");
+      setErro(mensagemDeChave("sp.catalogo.artigo.erro.obrigatorios"));
       return;
     }
     if (isService) {
       if (!form.unit_label) {
-        setError("Escolha a unidade do serviço.");
+        setErro(mensagemDeChave("sp.catalogo.artigo.erro.unidadeServico"));
         return;
       }
       if (form.service_districts.length === 0) {
-        setError("Escolha pelo menos um distrito na zona de atuação.");
+        setErro(mensagemDeChave("sp.catalogo.artigo.erro.zona"));
         return;
       }
     } else {
       if (categorias && !categoria) {
-        setError("Escolha a categoria. O SKU faz-se com ela.");
+        setErro(mensagemDeChave("sp.catalogo.artigo.erro.categoria"));
         return;
       }
       if (categorias && categoria && categoria.subcategorias.length && !subcategoria) {
-        setError("Escolha a subcategoria. O SKU faz-se com ela.");
+        setErro(mensagemDeChave("sp.catalogo.artigo.erro.subcategoria"));
         return;
       }
     }
@@ -365,7 +381,7 @@ export function SupplierCatalogItemDialog({
       const created = res.created || !!createdItem;
       let saved: SpCatalogItem = res.item;
       // 29/10: a classificação grava-se a seguir; a base gera o SKU e devolve o artigo com ele
-      let classifyError: string | null = null;
+      let classifyError: MensagemDoPortal | null = null;
       if (!isService && categorias && categoria) {
         try {
           saved = (await spCatalogClassificarItem(saved.id, {
@@ -374,7 +390,7 @@ export function SupplierCatalogItemDialog({
         } catch (err) {
           if (isNoSupplierAccess(err)) { onNoAccess(); return; }
           // o artigo ficou gravado; falta a classificação
-          classifyError = `O artigo foi gravado, mas a categoria não: ${spErrorMessage(err)}`;
+          classifyError = mensagemDeChave("sp.catalogo.artigo.erro.categoriaNaoGravada", { erro: spErrorMessage(err) });
         }
       }
       // Fotos em fila (artigo novo, ou as que falharam antes): só agora há id. O artigo já está gravado.
@@ -386,20 +402,26 @@ export function SupplierCatalogItemDialog({
         if (r.latest) saved = { ...saved, image_paths: r.latest.image_paths };
         if (r.failed) {
           onImagesChanged?.(saved);
-          setError(
-            `${classifyError ? `${classifyError} ` : ""}O artigo foi gravado, mas ${r.failed === 1 ? "1 foto não foi carregada" : `${r.failed} fotos não foram carregadas`}: ${r.firstError} Tente de novo na foto.`,
-          );
+          const nFalhas = r.failed;
+          const primeiroErro = r.firstError;
+          setErro({
+            de: (lang) => {
+              const fotos = traduzir(lang, nFalhas === 1 ? "sp.catalogo.artigo.erro.fotoUma" : "sp.catalogo.artigo.erro.fotosVarias", { n: nFalhas });
+              const motivo = traduzir(lang, "sp.catalogo.artigo.erro.fotosFalharam", { fotos, erro: resolverMensagem(primeiroErro, lang) });
+              return `${classifyError ? `${resolverMensagem(classifyError, lang)} ` : ""}${motivo}`;
+            },
+          });
           return;
         }
       }
-      if (classifyError) setError(classifyError);
+      if (classifyError) setErro(classifyError);
       onSaved(saved, created);
     } catch (err) {
       if (isNoSupplierAccess(err)) {
         onNoAccess();
         return;
       }
-      setError(spErrorMessage(err));
+      setErro(mensagemDeTexto(spErrorMessage(err)));
     } finally {
       setSaving(false);
     }
@@ -409,106 +431,110 @@ export function SupplierCatalogItemDialog({
     <Dialog open={open} onOpenChange={(o) => !saving && !uploading && !photoBusy && onOpenChange(o)}>
       <DialogContent className="sm:max-w-2xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>{isEdit ? (isService ? "Editar serviço" : "Editar artigo") : isService ? "Novo serviço" : "Novo artigo"}</DialogTitle>
+          <DialogTitle>
+            {isEdit
+              ? (isService ? t("sp.catalogo.artigo.tituloEditarServico") : t("sp.catalogo.artigo.tituloEditar"))
+              : isService ? t("sp.catalogo.artigo.tituloNovoServico") : t("sp.catalogo.artigo.tituloNovo")}
+          </DialogTitle>
           <DialogDescription>
             {isEdit
-              ? "Altere os dados do artigo. Campos vazios ficam sem valor."
+              ? t("sp.catalogo.artigo.descricaoEditar")
               : isService
-                ? "Preencha a referência, o nome, a unidade e a zona de atuação."
-                : "Preencha pelo menos a referência e o nome."}
+                ? t("sp.catalogo.artigo.descricaoNovoServico")
+                : t("sp.catalogo.artigo.descricaoNovo")}
           </DialogDescription>
         </DialogHeader>
 
         <form id="sp-item-form" onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2 space-y-1.5">
-            <Label id="sp-kind-label">Tipo</Label>
+            <Label id="sp-kind-label">{t("sp.catalogo.artigo.tipo")}</Label>
             <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-labelledby="sp-kind-label">
               {(["produto", "servico"] as const).map((k) => (
                 <Button key={k} type="button" role="radio" aria-checked={form.item_kind === k} className="h-11"
                   variant={form.item_kind === k ? "default" : "outline"} onClick={() => setKind(k)}>
-                  {k === "produto" ? "Produto" : "Serviço"}
+                  {k === "produto" ? t("sp.catalogo.tipo.produto") : t("sp.catalogo.tipo.servico")}
                 </Button>
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
-              {isService ? "Mão de obra ou subempreitada (ex.: eletricista, canalizador)." : "Material que vende e entrega."}
+              {isService ? t("sp.catalogo.artigo.tipoServicoDica") : t("sp.catalogo.artigo.tipoProdutoDica")}
             </p>
           </div>
-          <Field id="sp-ref" label="Referência *">
+          <Field id="sp-ref" label={t("sp.catalogo.artigo.referencia")}>
             <Input id="sp-ref" className="h-11" maxLength={100} value={form.supplier_ref}
               onChange={(e) => set("supplier_ref", e.target.value)} required autoComplete="off" />
           </Field>
           {isService ? (
             <div className="hidden sm:block" aria-hidden="true" />
           ) : (
-            <Field id="sp-barcode" label="Código de barras" hint="8 a 14 dígitos">
+            <Field id="sp-barcode" label={t("sp.catalogo.artigo.codigoBarras")} hint={t("sp.catalogo.artigo.codigoBarrasDica")}>
               <Input id="sp-barcode" className="h-11" inputMode="numeric" maxLength={20} value={form.barcode}
                 onChange={(e) => set("barcode", e.target.value)} autoComplete="off" />
             </Field>
           )}
-          <Field id="sp-name" label="Nome *" className="sm:col-span-2">
+          <Field id="sp-name" label={t("sp.catalogo.artigo.nome")} className="sm:col-span-2">
             <Input id="sp-name" className="h-11" maxLength={300} value={form.name}
               onChange={(e) => set("name", e.target.value)} required />
           </Field>
-          <Field id="sp-desc" label="Descrição" className="sm:col-span-2">
+          <Field id="sp-desc" label={t("sp.catalogo.artigo.descricao")} className="sm:col-span-2">
             <Textarea id="sp-desc" rows={3} maxLength={2000} value={form.description}
               onChange={(e) => set("description", e.target.value)} />
           </Field>
           {!isService && (
-            <Field id="sp-brand" label="Marca">
+            <Field id="sp-brand" label={t("sp.catalogo.artigo.marca")}>
               <Input id="sp-brand" className="h-11" maxLength={100} value={form.brand}
                 onChange={(e) => set("brand", e.target.value)} />
             </Field>
           )}
-          <Field id="sp-unit" label={isService ? "Unidade *" : "Unidade"}>
+          <Field id="sp-unit" label={isService ? t("sp.catalogo.artigo.unidadeObrigatoria") : t("sp.catalogo.artigo.unidade")}>
             <select id="sp-unit" className={SELECT} value={form.unit_label}
               onChange={(e) => set("unit_label", e.target.value)}>
-              <option value="">Escolha a unidade</option>
+              <option value="">{t("sp.catalogo.artigo.escolhaUnidade")}</option>
               {form.unit_label && !unidades.some(([v]) => v === form.unit_label) && <option value={form.unit_label}>{form.unit_label}</option>}
-              {unidades.map(([v, r]) => <option key={v} value={v}>{r}</option>)}
+              {opcoesDeUnidade(isService, idioma).map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </Field>
           {isService ? (
-            <Field id="sp-mob" label="Prazo de mobilização (dias)" hint="Dias até poder começar a obra">
+            <Field id="sp-mob" label={t("sp.catalogo.artigo.mobilizacao")} hint={t("sp.catalogo.artigo.mobilizacaoDica")}>
               <Input id="sp-mob" className="h-11" inputMode="numeric" value={form.mobilization_days}
                 onChange={(e) => set("mobilization_days", e.target.value)} />
             </Field>
           ) : (
-            <Field id="sp-upp" label="Unidades por embalagem">
+            <Field id="sp-upp" label={t("sp.catalogo.artigo.unidadesEmbalagem")}>
               <Input id="sp-upp" className="h-11" inputMode="decimal" value={form.units_per_pack}
                 onChange={(e) => set("units_per_pack", e.target.value)} />
             </Field>
           )}
           <div className="grid grid-cols-[1fr_6rem] gap-3">
-            <Field id="sp-price" label="Preço (sem IVA)">
+            <Field id="sp-price" label={t("sp.catalogo.artigo.preco")}>
               <Input id="sp-price" className="h-11" inputMode="decimal" value={form.base_price}
                 onChange={(e) => set("base_price", e.target.value)} />
             </Field>
-            <Field id="sp-currency" label="Moeda">
+            <Field id="sp-currency" label={t("sp.catalogo.artigo.moeda")}>
               <Input id="sp-currency" className="h-11 uppercase" maxLength={3} value={form.currency}
                 onChange={(e) => set("currency", e.target.value.toUpperCase())} />
             </Field>
           </div>
           {isService && (
             <fieldset className="sm:col-span-2 space-y-1.5">
-              <legend className="text-sm font-medium leading-none">Zona de atuação *</legend>
-              <p className="text-xs text-muted-foreground">Os distritos onde faz este serviço.</p>
+              <legend className="text-sm font-medium leading-none">{t("sp.catalogo.artigo.zona")}</legend>
+              <p className="text-xs text-muted-foreground">{t("sp.catalogo.artigo.zonaDica")}</p>
               {distritosErro ? (
                 <p className="text-sm text-destructive">{distritosErro}</p>
               ) : !distritos ? (
-                <p className="text-sm text-muted-foreground">A carregar os distritos…</p>
+                <p className="text-sm text-muted-foreground">{t("sp.catalogo.artigo.aCarregarDistritos")}</p>
               ) : (
                 <>
                   <div className="flex flex-wrap gap-2">
                     <Button type="button" variant="outline" size="sm" className="h-9"
                       onClick={() => set("service_districts", distritos.map((d) => d.code))}>
-                      Todos
+                      {t("sp.catalogo.artigo.todos")}
                     </Button>
                     <Button type="button" variant="ghost" size="sm" className="h-9" disabled={form.service_districts.length === 0}
                       onClick={() => set("service_districts", [])}>
-                      Limpar
+                      {t("sp.catalogo.artigo.limpar")}
                     </Button>
-                    <span className="text-xs text-muted-foreground self-center">{form.service_districts.length} escolhido(s)</span>
+                    <span className="text-xs text-muted-foreground self-center">{t("sp.catalogo.artigo.escolhidos", { n: form.service_districts.length })}</span>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-1 rounded-md border p-3 max-h-56 overflow-y-auto">
                     {distritos.map((d) => (
@@ -525,11 +551,11 @@ export function SupplierCatalogItemDialog({
           )}
           {!isService && (
             <>
-              <Field id="sp-moq" label="Quantidade mínima">
+              <Field id="sp-moq" label={t("sp.catalogo.artigo.minimo")}>
                 <Input id="sp-moq" className="h-11" inputMode="decimal" value={form.moq}
                   onChange={(e) => set("moq", e.target.value)} />
               </Field>
-              <Field id="sp-lead" label="Prazo de entrega (dias)">
+              <Field id="sp-lead" label={t("sp.catalogo.artigo.prazo")}>
                 <Input id="sp-lead" className="h-11" inputMode="numeric" value={form.lead_time_days}
                   onChange={(e) => set("lead_time_days", e.target.value)} />
               </Field>
@@ -537,10 +563,10 @@ export function SupplierCatalogItemDialog({
           )}
           {categorias && !isService && (
             <>
-              <Field id="sp-cat" label="Categoria *">
+              <Field id="sp-cat" label={t("sp.catalogo.artigo.categoria")}>
                 <select id="sp-cat" className={SELECT} value={form.categoria_id}
                   onChange={(e) => setForm((f) => ({ ...f, categoria_id: e.target.value, subcategoria_id: "" }))}>
-                  <option value="">Escolha a categoria</option>
+                  <option value="">{t("sp.catalogo.artigo.escolhaCategoria")}</option>
                   {/* as categorias são de cada empresa cliente: com mais de uma empresa, agrupam-se pelo nome dela */}
                   {gruposEmpresa(categorias).length > 1
                     ? gruposEmpresa(categorias).map(([empresa, cs]) => (
@@ -551,33 +577,36 @@ export function SupplierCatalogItemDialog({
                     : categorias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
                 </select>
               </Field>
-              <Field id="sp-subcat" label={categoria?.subcategorias.length ? "Subcategoria *" : "Subcategoria"}>
+              <Field id="sp-subcat" label={categoria?.subcategorias.length ? t("sp.catalogo.artigo.subcategoriaObrigatoria") : t("sp.catalogo.artigo.subcategoria")}>
                 <select id="sp-subcat" className={SELECT} value={form.subcategoria_id} disabled={!categoria?.subcategorias.length}
                   onChange={(e) => set("subcategoria_id", e.target.value)}>
-                  <option value="">{categoria && !categoria.subcategorias.length ? "Esta categoria não tem" : "Escolha a subcategoria"}</option>
+                  <option value="">{categoria && !categoria.subcategorias.length ? t("sp.catalogo.artigo.semSubcategorias") : t("sp.catalogo.artigo.escolhaSubcategoria")}</option>
                   {categoria?.subcategorias.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}
                 </select>
               </Field>
-              <Field id="sp-medida" label="Medida" hint="ex.: 30x60, 80x120, 1,5">
+              <Field id="sp-medida" label={t("sp.catalogo.artigo.medida")} hint={t("sp.catalogo.artigo.medidaDica")}>
                 <Input id="sp-medida" className="h-11" maxLength={40} value={form.medida}
                   onChange={(e) => set("medida", e.target.value)} autoComplete="off" />
               </Field>
-              <Field id="sp-cor" label="Cor" hint="Escolha da lista ou escreva uma cor nova">
+              <Field id="sp-cor" label={t("sp.catalogo.artigo.cor")} hint={t("sp.catalogo.artigo.corDica")}>
                 <Input id="sp-cor" className="h-11" maxLength={40} value={form.cor} list="sp-cores"
-                  onChange={(e) => set("cor", e.target.value)} onBlur={() => set("cor", corCanonica(form.cor))} autoComplete="off" />
-                <datalist id="sp-cores">{CORES.map((c) => <option key={c} value={c} />)}</datalist>
+                  onChange={(e) => set("cor", e.target.value)} onBlur={() => set("cor", corCanonicaPortal(form.cor, idioma))} autoComplete="off" />
+                {/* O valor que se grava é o nome em português; em inglês o rótulo mostra o nome inglês. */}
+                <datalist id="sp-cores">
+                  {opcoesDeCor(idioma).map((c) => <option key={c.value} value={c.value} label={idioma === "pt" ? undefined : c.label} />)}
+                </datalist>
               </Field>
               <div className="sm:col-span-2 rounded-md border bg-muted/40 p-3" aria-live="polite">
-                <p className="text-sm text-muted-foreground">SKU</p>
+                <p className="text-sm text-muted-foreground">{t("sp.catalogo.artigo.sku")}</p>
                 <p className="font-mono text-base">
-                  {skuVisto ?? "Escolha a categoria"}
+                  {skuVisto ?? t("sp.catalogo.artigo.skuEscolha")}
                 </p>
-                <p className="text-xs text-muted-foreground">Gera-se ao gravar. O número de 4 algarismos é o seguinte desta subcategoria.</p>
+                <p className="text-xs text-muted-foreground">{t("sp.catalogo.artigo.skuNota")}</p>
               </div>
             </>
           )}
           <PhotosSection
-            name={form.name.trim() || item?.name || "Artigo"}
+            name={form.name.trim() || item?.name || t("sp.catalogo.foto.nomePadrao")}
             paths={paths}
             pending={pending}
             canEdit={canEditPhotos}
@@ -595,7 +624,7 @@ export function SupplierCatalogItemDialog({
           />
           {isEdit && (
             <div className="sm:col-span-2 flex items-center justify-between rounded-md border p-3 min-h-11">
-              <Label htmlFor="sp-active" className="cursor-pointer">Artigo ativo</Label>
+              <Label htmlFor="sp-active" className="cursor-pointer">{t("sp.catalogo.artigo.ativo")}</Label>
               <Switch id="sp-active" checked={form.is_active} onCheckedChange={(v) => set("is_active", v)} />
             </div>
           )}
@@ -609,10 +638,12 @@ export function SupplierCatalogItemDialog({
 
         <DialogFooter className="gap-2 sm:gap-0">
           <Button type="button" variant="outline" className="h-11" onClick={() => onOpenChange(false)} disabled={saving}>
-            Cancelar
+            {t("sp.catalogo.artigo.cancelar")}
           </Button>
           <Button type="submit" form="sp-item-form" className="h-11" disabled={saving || uploading || !!photoBusy}>
-            {saving ? (uploading ? "A carregar fotos..." : "A guardar...") : isEdit ? "Guardar alterações" : "Criar artigo"}
+            {saving
+              ? (uploading ? t("sp.catalogo.artigo.aCarregarFotos") : t("sp.catalogo.artigo.aGuardar"))
+              : isEdit ? t("sp.catalogo.artigo.guardar") : t("sp.catalogo.artigo.criar")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -620,16 +651,16 @@ export function SupplierCatalogItemDialog({
       <AlertDialog open={!!confirmRemove} onOpenChange={(o) => { if (!o) setConfirmRemove(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Remover a foto?</AlertDialogTitle>
+            <AlertDialogTitle>{t("sp.catalogo.foto.remover.titulo")}</AlertDialogTitle>
             <AlertDialogDescription>
               {confirmRemove && paths[0] === confirmRemove && paths.length > 1
-                ? "É a foto principal: a seguinte passa a ser a principal. "
+                ? `${t("sp.catalogo.foto.remover.principal")} `
                 : ""}
-              A foto é apagada e não pode ser recuperada.
+              {t("sp.catalogo.foto.remover.apagada")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel className="h-11">Cancelar</AlertDialogCancel>
+            <AlertDialogCancel className="h-11">{t("sp.catalogo.artigo.cancelar")}</AlertDialogCancel>
             <AlertDialogAction
               className="h-11 bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={() => {
@@ -638,7 +669,7 @@ export function SupplierCatalogItemDialog({
                 if (path) void removePhoto(path);
               }}
             >
-              Remover foto
+              {t("sp.catalogo.foto.remover.botao")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -674,24 +705,26 @@ function PhotosSection({
   name, paths, pending, canEdit, isNew, busyPath, disabled, error, fileInputRef,
   onFiles, onMakeMain, onAskRemove, onRetry, onDropPending, onQueueAsMain,
 }: PhotosSectionProps) {
+  const { t, idioma } = usePortalT();
   const total = paths.length + pending.length;
   const full = total >= CATALOG_IMAGE_MAX_COUNT;
   const locked = disabled || !!busyPath || pending.some((p) => p.status === "uploading");
-  const photoAlt = (i: number) => (i === 0 ? `${name} (foto principal)` : `${name} (foto ${i + 1})`);
+  const photoAlt = (i: number) =>
+    i === 0 ? t("sp.catalogo.foto.altPrincipal", { nome: name }) : t("sp.catalogo.foto.alt", { nome: name, n: i + 1 });
 
   return (
     <fieldset className="sm:col-span-2 space-y-2">
-      <legend className="text-sm font-medium leading-none">Fotos (até {CATALOG_IMAGE_MAX_COUNT})</legend>
+      <legend className="text-sm font-medium leading-none">{t("sp.catalogo.foto.titulo", { max: CATALOG_IMAGE_MAX_COUNT })}</legend>
       <p className="text-xs text-muted-foreground">
         {canEdit
-          ? `JPEG, PNG ou WEBP até 5 MB. A 1.ª é a principal. Cada cor é um artigo à parte, com as suas fotos.${isNew ? " As fotos carregam-se depois de criar o artigo." : ""}`
-          : "Só o utilizador principal da conta pode alterar as fotos."}
+          ? `${t("sp.catalogo.foto.ajuda")}${isNew ? ` ${t("sp.catalogo.foto.ajudaNovo")}` : ""}`
+          : t("sp.catalogo.foto.soLeitura")}
       </p>
 
-      {total === 0 && !canEdit && <p className="text-sm text-muted-foreground">Sem fotos.</p>}
+      {total === 0 && !canEdit && <p className="text-sm text-muted-foreground">{t("sp.catalogo.foto.semFotos")}</p>}
 
       {(total > 0 || canEdit) && (
-        <ul className="grid grid-cols-2 sm:grid-cols-4 gap-2" aria-label={`Fotos de ${name}`}>
+        <ul className="grid grid-cols-2 sm:grid-cols-4 gap-2" aria-label={t("sp.catalogo.foto.lista", { nome: name })}>
           {paths.map((path, i) => {
             const url = catalogImageUrl(path);
             const busy = busyPath === path;
@@ -699,10 +732,10 @@ function PhotosSection({
               <li key={path} className="space-y-1">
                 <div className={TILE} aria-busy={busy}>
                   {url && <img src={url} alt={photoAlt(i)} loading="lazy" decoding="async" className="h-full w-full object-cover" />}
-                  {i === 0 && <span className={MAIN_BADGE}>Principal</span>}
+                  {i === 0 && <span className={MAIN_BADGE}>{t("sp.catalogo.foto.principal")}</span>}
                   {busy && (
                     <span className="absolute inset-0 flex items-center justify-center bg-background/60">
-                      <Loader2 className="h-5 w-5 animate-spin" aria-label="A atualizar a foto" />
+                      <Loader2 className="h-5 w-5 animate-spin" aria-label={t("sp.catalogo.foto.aAtualizar")} />
                     </span>
                   )}
                 </div>
@@ -710,12 +743,12 @@ function PhotosSection({
                   <div className="flex gap-1">
                     {i > 0 && (
                       <Button type="button" variant="outline" size="icon" className="h-9 w-9" disabled={locked}
-                        onClick={() => onMakeMain(path)} aria-label={`Marcar a foto ${i + 1} como principal`} title="Marcar como principal">
+                        onClick={() => onMakeMain(path)} aria-label={t("sp.catalogo.foto.marcarN", { n: i + 1 })} title={t("sp.catalogo.foto.marcarTitulo")}>
                         <Star className="h-4 w-4" aria-hidden="true" />
                       </Button>
                     )}
                     <Button type="button" variant="outline" size="icon" className="h-9 w-9" disabled={locked}
-                      onClick={() => onAskRemove(path)} aria-label={`Remover a foto ${i + 1}`} title="Remover">
+                      onClick={() => onAskRemove(path)} aria-label={t("sp.catalogo.foto.removerN", { n: i + 1 })} title={t("sp.catalogo.foto.removerTitulo")}>
                       <Trash2 className="h-4 w-4 text-destructive" aria-hidden="true" />
                     </Button>
                   </div>
@@ -733,9 +766,13 @@ function PhotosSection({
                   ) : (
                     <span className="flex h-full items-center justify-center p-1 text-center text-[11px] text-muted-foreground break-all">{p.file.name}</span>
                   )}
-                  {i === 0 && <span className={MAIN_BADGE}>Principal</span>}
+                  {i === 0 && <span className={MAIN_BADGE}>{t("sp.catalogo.foto.principal")}</span>}
                   <span className="absolute bottom-0 left-0 right-0 bg-background/85 px-1 text-[11px] leading-5 text-center">
-                    {p.status === "uploading" ? "A carregar…" : p.status === "error" ? "Falhou" : "Por carregar"}
+                    {p.status === "uploading"
+                      ? t("sp.catalogo.foto.aCarregar")
+                      : p.status === "error"
+                        ? t("sp.catalogo.foto.falhou")
+                        : t("sp.catalogo.foto.porCarregar")}
                   </span>
                   {p.status === "uploading" && (
                     <span className="absolute inset-0 flex items-center justify-center bg-background/50">
@@ -743,23 +780,23 @@ function PhotosSection({
                     </span>
                   )}
                 </div>
-                {p.status === "error" && p.error && <p className="text-xs text-destructive">{p.error}</p>}
+                {p.status === "error" && p.error && <p className="text-xs text-destructive">{resolverMensagem(p.error, idioma)}</p>}
                 {canEdit && p.status !== "uploading" && (
                   <div className="flex gap-1">
                     {p.status === "error" && !isNew && (
                       <Button type="button" variant="outline" size="icon" className="h-9 w-9" disabled={locked}
-                        onClick={() => onRetry(p)} aria-label={`Tentar de novo carregar ${p.file.name}`} title="Tentar de novo">
+                        onClick={() => onRetry(p)} aria-label={t("sp.catalogo.foto.tentarNovamenteNome", { nome: p.file.name })} title={t("sp.catalogo.foto.tentarNovamente")}>
                         <RotateCcw className="h-4 w-4" aria-hidden="true" />
                       </Button>
                     )}
                     {isNew && paths.length === 0 && j > 0 && (
                       <Button type="button" variant="outline" size="icon" className="h-9 w-9" disabled={locked}
-                        onClick={() => onQueueAsMain(p.key)} aria-label={`Marcar ${p.file.name} como principal`} title="Marcar como principal">
+                        onClick={() => onQueueAsMain(p.key)} aria-label={t("sp.catalogo.foto.marcarNome", { nome: p.file.name })} title={t("sp.catalogo.foto.marcarTitulo")}>
                         <Star className="h-4 w-4" aria-hidden="true" />
                       </Button>
                     )}
                     <Button type="button" variant="outline" size="icon" className="h-9 w-9" disabled={locked}
-                      onClick={() => onDropPending(p.key)} aria-label={`Retirar ${p.file.name}`} title="Retirar">
+                      onClick={() => onDropPending(p.key)} aria-label={t("sp.catalogo.foto.retirarNome", { nome: p.file.name })} title={t("sp.catalogo.foto.retirar")}>
                       <X className="h-4 w-4" aria-hidden="true" />
                     </Button>
                   </div>
@@ -773,7 +810,7 @@ function PhotosSection({
                 className="aspect-square h-auto w-full flex-col gap-1 border-dashed text-xs"
                 onClick={() => fileInputRef.current?.click()}>
                 <ImagePlus className="h-5 w-5" aria-hidden="true" />
-                Adicionar foto
+                {t("sp.catalogo.foto.adicionar")}
                 <span className="text-muted-foreground">{total}/{CATALOG_IMAGE_MAX_COUNT}</span>
               </Button>
             </li>
@@ -786,7 +823,7 @@ function PhotosSection({
           type="file"
           className="sr-only"
           tabIndex={-1}
-          aria-label="Escolher fotos do artigo"
+          aria-label={t("sp.catalogo.foto.escolher")}
           accept={CATALOG_IMAGE_MIME.join(",")}
           multiple
           disabled={locked || full}
@@ -796,7 +833,7 @@ function PhotosSection({
           }}
         />
       )}
-      {canEdit && full && <p className="text-xs text-muted-foreground">Chegou ao máximo de {CATALOG_IMAGE_MAX_COUNT} fotos. Remova uma para pôr outra.</p>}
+      {canEdit && full && <p className="text-xs text-muted-foreground">{t("sp.catalogo.foto.maximo", { max: CATALOG_IMAGE_MAX_COUNT })}</p>}
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
     </fieldset>
   );

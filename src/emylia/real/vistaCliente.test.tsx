@@ -280,4 +280,53 @@ describe("portal real com o ecrã da V1", () => {
     expect(abrirContrato).toHaveBeenCalledTimes(1);
     expect(screen.queryByText(/Chave Móvel Digital/)).toBeNull();
   });
+
+  // 19/11: no portal real a proposta e o contrato abrem SEMPRE o documento do template (as páginas reais), nunca o desenho da V1.
+  describe("documentos do template (documentosNoTemplate)", () => {
+    it("proposta por responder: cartão com botão para a página real, sem o desenho da V1", () => {
+      const { S, d } = comObra();
+      const o = d.orc!; o.aceite = null; o.contrato = null;
+      const { abrirProposta } = montar(vistaDoCliente(d, S), { documentosNoTemplate: true });
+      expect(screen.queryByRole("region", { name: "A proposta" })).toBeNull();
+      expect(screen.queryByText("O que vamos fazer")).toBeNull();
+      fireEvent.click(within(screen.getByRole("region", { name: "A sua proposta" })).getByRole("button", { name: "Abrir a proposta" }));
+      expect(abrirProposta).toHaveBeenCalledTimes(1);
+    });
+
+    it("contrato por assinar: cartão com botão para a página real, sem o desenho da V1", () => {
+      const { S, d } = comObra();
+      d.orc!.contrato = "enviado";
+      const { abrirContrato } = montar(vistaDoCliente(d, S), { documentosNoTemplate: true });
+      expect(screen.queryByRole("region", { name: "O contrato" })).toBeNull();
+      fireEvent.click(within(screen.getByRole("region", { name: "O seu contrato" })).getByRole("button", { name: "Abrir o contrato" }));
+      expect(abrirContrato).toHaveBeenCalledTimes(1);
+    });
+
+    it("lista de documentos: a proposta e o contrato levam à página real e não abrem o desenho da V1", () => {
+      const { S, d } = comObra();
+      const { abrirProposta, abrirContrato } = montar(vistaDoCliente(d, S), { documentosNoTemplate: true });
+      const lista = screen.getByRole("region", { name: "Documentos" });
+      fireEvent.click(within(lista).getByRole("button", { name: /^Proposta PR/ }));
+      expect(abrirProposta).toHaveBeenCalledTimes(1);
+      fireEvent.click(within(lista).getByRole("button", { name: /^Contrato CT/ }));
+      expect(abrirContrato).toHaveBeenCalledTimes(1);
+      expect(screen.queryByRole("button", { name: "Voltar ao portal" })).toBeNull(); // nenhum documento da V1 ficou aberto
+    });
+
+    it("sem o contrato real, o contrato não aparece na lista (não há como o abrir no template)", () => {
+      const { S, d } = comObra();
+      montar(vistaDoCliente(d, S), { documentosNoTemplate: true, abrirContrato: null });
+      const lista = screen.getByRole("region", { name: "Documentos" });
+      expect(within(lista).queryByRole("button", { name: /^Contrato CT/ })).toBeNull();
+      expect(within(lista).getByRole("button", { name: /^Proposta PR/ })).toBeTruthy();
+    });
+
+    it("sem a opção (CRM e protótipo), a lista abre o documento da V1 como antes", () => {
+      const { S, d } = comObra();
+      const { abrirProposta } = montar(vistaDoCliente(d, S));
+      fireEvent.click(within(screen.getByRole("region", { name: "Documentos" })).getByRole("button", { name: /^Proposta PR/ }));
+      expect(abrirProposta).not.toHaveBeenCalled();
+      expect(screen.getByRole("button", { name: "Voltar ao portal" })).toBeTruthy();
+    });
+  });
 });

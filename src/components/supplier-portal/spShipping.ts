@@ -1,6 +1,7 @@
 // Portal do Fornecedor — expedição com guia de remessa: regras puras (sem React).
 import type { SpOrderDetail, SpOrderLine, SpOrderShipments } from "@/lib/supplierPortal/spRpc";
 import { requiresIntegerQty } from "@/utils/quotes/integerQty";
+import type { PortalTraducao } from "@/portal-i18n";
 
 export type SpShippingState = "partially_shipped" | "shipped";
 
@@ -70,23 +71,23 @@ export function spLineUnitCode(line: SpOrderLine): string {
   return line.uom_code || (units === 1 ? line.base_uom_code : null) || "";
 }
 
-/** Estado de cada guia de remessa, em português. */
-export function spShipmentStatusLabel(status: string | null | undefined): string {
+/** Estado de cada guia de remessa, no idioma do portal (`t` de usePortalT). O código desconhecido volta como veio. */
+export function spShipmentStatusLabel(status: string | null | undefined, t: PortalTraducao["t"]): string {
   switch (status) {
     case "open":
     case "pending":
     case "shipped":
     case "in_transit":
-      return "A caminho";
+      return t("sp.envios.estado.aCaminho");
     case "partially_received":
     case "partial":
-      return "Parcialmente recebida";
+      return t("sp.estado.parcialmenteRecebida");
     case "received":
     case "closed":
-      return "Recebida";
+      return t("sp.estado.recebida");
     case "cancelled":
     case "void":
-      return "Anulada";
+      return t("sp.envios.estado.anulada");
     default:
       return status || "—";
   }

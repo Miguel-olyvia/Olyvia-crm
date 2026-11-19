@@ -1,0 +1,21 @@
+// First-access modal (changing the temporary password), in English: `pc.login.*` keys.
+export const clienteEnLogin: Record<string, string> = {
+  "pc.login.titulo": "Welcome to the Portal!",
+  "pc.login.descricao": "For your security, please change your temporary password before continuing.",
+  "pc.login.novaPassword": "New password",
+  "pc.login.novaPlaceholder": "At least 8 characters",
+  "pc.login.mostrarPassword": "Show password",
+  "pc.login.esconderPassword": "Hide password",
+  "pc.login.confirmarPassword": "Confirm password",
+  "pc.login.confirmarPlaceholder": "Repeat the password",
+  "pc.login.submeter": "Change password and sign in",
+  "pc.login.aAlterar": "Changing...",
+  "pc.login.sucesso.titulo": "Password changed successfully",
+  "pc.login.sucesso.descricao": "Your new password is now active.",
+  "pc.login.erro.titulo": "Error",
+  "pc.login.erro.alterar": "Could not change password",
+  "pc.login.erro.minimo": "The password must be at least 8 characters long.",
+  "pc.login.erro.confirmar": "Please confirm the password.",
+  "pc.login.erro.naoCoincidem": "The passwords do not match.",
+  "pc.login.erro.invalido": "Invalid data.",
+};

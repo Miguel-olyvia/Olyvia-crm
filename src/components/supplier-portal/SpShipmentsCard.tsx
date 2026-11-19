@@ -11,9 +11,11 @@ import {
   spShippedByLine,
   spToShipByLine,
 } from "@/components/supplier-portal/spShipping";
+import { usePortalT } from "@/portal-i18n";
 
 /** Cartão "Expedições": resumo por linha (expedido / por expedir) e cada guia de remessa. */
 export function SpShipmentsCard({ order, data }: { order: SpOrderDetail; data: SpOrderShipments }) {
+  const { t } = usePortalT();
   const shipped = spShippedByLine(data);
   const toShip = spToShipByLine(data);
   const products = spProductLines(order.lines);
@@ -25,19 +27,19 @@ export function SpShipmentsCard({ order, data }: { order: SpOrderDetail; data: S
       <CardHeader className="pb-2">
         <CardTitle className="text-base flex items-center gap-2">
           <Truck className="h-4 w-4" aria-hidden="true" />
-          Expedições ({shipments.length})
+          {t("sp.envios.titulo", { n: shipments.length })}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4 p-0 sm:p-6 sm:pt-0">
         <div className="overflow-x-auto">
           <Table>
-            <caption className="sr-only">Quantidades expedidas e por expedir por linha</caption>
+            <caption className="sr-only">{t("sp.envios.resumo")}</caption>
             <TableHeader>
               <TableRow>
-                <TableHead>Artigo</TableHead>
-                <TableHead className="text-right">Encomendado</TableHead>
-                <TableHead className="text-right">Expedido</TableHead>
-                <TableHead className="text-right">Por expedir</TableHead>
+                <TableHead>{t("sp.envios.coluna.artigo")}</TableHead>
+                <TableHead className="text-right">{t("sp.envios.coluna.encomendado")}</TableHead>
+                <TableHead className="text-right">{t("sp.envios.coluna.expedido")}</TableHead>
+                <TableHead className="text-right">{t("sp.envios.coluna.porExpedir")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -70,24 +72,24 @@ export function SpShipmentsCard({ order, data }: { order: SpOrderDetail; data: S
         </div>
 
         {shipments.length === 0 ? (
-          <p className="px-4 pb-4 sm:px-0 sm:pb-0 text-sm text-muted-foreground">Ainda não expediu esta encomenda.</p>
+          <p className="px-4 pb-4 sm:px-0 sm:pb-0 text-sm text-muted-foreground">{t("sp.envios.nenhuma")}</p>
         ) : (
-          <ul className="space-y-3 px-4 pb-4 sm:px-0 sm:pb-0" aria-label="Guias de remessa">
+          <ul className="space-y-3 px-4 pb-4 sm:px-0 sm:pb-0" aria-label={t("sp.envios.guias")}>
             {shipments.map((s) => (
               <li key={s.id} className="rounded-md border p-3 space-y-2">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-mono font-semibold text-foreground">Guia {s.note_number}</p>
+                  <p className="font-mono font-semibold text-foreground">{t("sp.envios.guia", { numero: s.note_number })}</p>
                   <Badge variant="outline" className="font-medium">
-                    {spShipmentStatusLabel(s.status)}
+                    {spShipmentStatusLabel(s.status, t)}
                   </Badge>
                 </div>
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
                   <div>
-                    <dt className="text-xs text-muted-foreground">Data</dt>
+                    <dt className="text-xs text-muted-foreground">{t("sp.envios.data")}</dt>
                     <dd>{formatSpDate(s.date)}</dd>
                   </div>
                   <div>
-                    <dt className="text-xs text-muted-foreground">Transportador</dt>
+                    <dt className="text-xs text-muted-foreground">{t("sp.envios.transportador")}</dt>
                     <dd className="break-words">{s.carrier || "—"}</dd>
                   </div>
                 </dl>
@@ -97,14 +99,14 @@ export function SpShipmentsCard({ order, data }: { order: SpOrderDetail; data: S
                     <span className="truncate">{s.file.name}</span>
                   </p>
                 )}
-                <ul className="text-sm divide-y" aria-label={`Linhas da guia ${s.note_number}`}>
+                <ul className="text-sm divide-y" aria-label={t("sp.envios.linhasDaGuia", { numero: s.note_number })}>
                   {s.lines.map((sl) => {
                     const l = lineById.get(sl.purchase_order_item_id);
                     const unit = l ? spLineUnitCode(l) : "";
                     return (
                       <li key={sl.purchase_order_item_id} className="flex justify-between gap-3 py-1">
                         <span className="min-w-0 truncate">
-                          {l ? l.supplier_sku || l.sku || l.description || "Artigo" : "Artigo"}
+                          {l ? l.supplier_sku || l.sku || l.description || t("sp.envios.artigoOmissao") : t("sp.envios.artigoOmissao")}
                           {l?.description && (l.supplier_sku || l.sku) ? (
                             <span className="text-muted-foreground"> · {l.description}</span>
                           ) : null}

@@ -9,6 +9,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContext";
 import { cn } from "@/lib/utils";
+import { usePortalT } from "@/portal-i18n";
 
 // Seletor de empresa do portal do cliente.
 //
@@ -46,6 +47,7 @@ function OrgAvatar({ org, size }: { org: PortalOrg; size: "sm" | "md" }) {
 
 export function PortalCompanySwitcher() {
   const { portalOrgs, activeOrg, setActiveOrg, hasMultiple } = usePortalCompany();
+  const { t } = usePortalT();
 
   if (!hasMultiple || !activeOrg) return null;
 
@@ -54,7 +56,7 @@ export function PortalCompanySwitcher() {
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          aria-label={`Empresa ativa: ${activeOrg.name}. Trocar de empresa`}
+          aria-label={t("pc.empresas.ativaAria", { nome: activeOrg.name })}
           className="flex items-center gap-1.5 min-w-0 min-h-[36px] rounded-lg px-2 py-1 -ml-2 text-left transition-colors hover:bg-muted/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED] focus-visible:ring-offset-1"
         >
           <span className="min-w-0">
@@ -62,7 +64,7 @@ export function PortalCompanySwitcher() {
               {activeOrg.name}
             </span>
             <span className="block text-[11px] font-medium leading-tight" style={{ color: "#7C3AED" }}>
-              Portal do Cliente
+              {t("pc.layout.titulo")}
             </span>
           </span>
           <ChevronsUpDown className="h-4 w-4 text-muted-foreground shrink-0" />
@@ -71,7 +73,7 @@ export function PortalCompanySwitcher() {
 
       <DropdownMenuContent align="start" className="w-[min(18rem,calc(100vw-2rem))]">
         <DropdownMenuLabel className="text-xs text-muted-foreground font-normal">
-          As suas empresas
+          {t("pc.empresas.titulo")}
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
         {portalOrgs.map((org) => {
