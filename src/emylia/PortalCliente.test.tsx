@@ -6,7 +6,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { acoes, proximo, seed, type Estado, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { PortalCliente, passoPortal } from "./PortalCliente";
-import { PAGAMENTO_EXEMPLO, definirDadosPagamento } from "./pagamentoCliente";
 
 afterEach(cleanup);
 
@@ -79,7 +78,7 @@ describe("portal do cliente: o percurso guiado", () => {
     d.fin.fatura = { n: "FT 2026/1", q: "hoje" }; d.f.comprovativo = "TRF 1"; d.f.conta = "Banco A"; d.f.data_pag = "2026-11-09";
     S.role = "financeiro"; A.validar(d.id);
     expect(d.fase).toBe(5);
-    S.role = "operacoes"; A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id); A.resolverConflitos(d.id); A.aprovarPlano(d.id);
+    S.role = "operacoes"; A.retificarMedidas(d.id); A.resolverConflitos(d.id); A.aprovarPlano(d.id);
     expect(d.obra.plano?.estado).toBe("aprovado");
     expect(d.obra.ec).toBeTruthy(); // pago, medidas e plano: sai a encomenda de cliente
     r.rerender(<Portal S={S} d={d} A={A} />);
@@ -127,7 +126,7 @@ describe("portal do cliente: o percurso guiado", () => {
     expect(screen.getByText("Obrigado por nos dizer")).toBeTruthy();
   });
 
-  it("a fatura por pagar: o valor, ver a fatura e a transferência; sem prestador de pagamentos, nada de referência Multibanco", () => {
+  it("a fatura por pagar: o valor, ver a fatura e a referência Multibanco para copiar", () => {
     const { S, d, r } = montar();
     d.orc!.aceite = "hoje"; d.orc!.contrato = "assinado";
     d.fin.fatura = { n: "FT 2026/418", q: "15/10" };
@@ -135,34 +134,14 @@ describe("portal do cliente: o percurso guiado", () => {
     render(<Portal S={S} d={d} A={acoes(S, vi.fn(), (fn) => fn())} />);
     expect(screen.getByText("Pagar a fatura FT 2026/418")).toBeTruthy();
     expect(screen.getByRole("button", { name: /Ver a fatura/ })).toBeTruthy();
-    // 21/10: sem escolha é transferência
+    // 21/10: sem escolha é transferência; o cliente pode mudar para a referência MB
     expect(screen.getByRole("radio", { name: "Transferência" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("button", { name: "Copiar iban" })).toBeTruthy();
-    // 19/11 (auditoria): a referência gerada aqui é de teste: sem prestador, a opção não aparece (ficam a transferência e o MB Way)
-    expect(screen.queryByRole("radio", { name: "Referência MB" })).toBeNull();
-    expect(screen.getByRole("radio", { name: "MB Way" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Copiar referência" })).toBeNull();
-    // uma escolha antiga da referência MB volta à transferência
-    cleanup();
-    d.f.metodo = "Referência MB";
-    render(<Portal S={S} d={d} A={acoes(S, vi.fn(), (fn) => fn())} />);
-    expect(screen.getByRole("radio", { name: "Transferência" }).getAttribute("aria-checked")).toBe("true");
-    expect(screen.queryByRole("button", { name: "Copiar referência" })).toBeNull();
-  });
-
-  it("19/11: com um prestador de pagamentos configurado, a referência Multibanco volta a aparecer", () => {
-    const desfazer = definirDadosPagamento({ ...PAGAMENTO_EXEMPLO, mbPrestador: "Prestador de teste" });
-    try {
-      const { S, d, r } = montar();
-      d.orc!.aceite = "hoje"; d.orc!.contrato = "assinado";
-      d.fin.fatura = { n: "FT 2026/418", q: "15/10" };
-      r.unmount();
-      render(<Portal S={S} d={d} A={acoes(S, vi.fn(), (fn) => fn())} />);
-      fireEvent.click(screen.getByRole("radio", { name: "Referência MB" }));
-      expect(d.f.metodo).toBe("Referência MB");
-      expect(screen.getByRole("button", { name: "Copiar referência" })).toBeTruthy();
-      expect(screen.queryByRole("button", { name: "Copiar iban" })).toBeNull();
-    } finally { desfazer(); }
+    fireEvent.click(screen.getByRole("radio", { name: "Referência MB" }));
+    expect(d.f.metodo).toBe("Referência MB");
+    expect(screen.getByRole("button", { name: "Copiar referência" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Copiar iban" })).toBeNull();
   });
 
   it("a fatura por débito direto: o IBAN do cliente e a autorização, e fica só com os últimos 4 dígitos", () => {

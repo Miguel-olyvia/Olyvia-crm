@@ -8,7 +8,7 @@ import { ImprevistosNaObra, RegistarImprevisto } from "./ImprevistosObra";
 import { PortalCliente } from "./PortalCliente";
 import { juntarAjustes, type Alteracao } from "./trabalhoObra";
 import { precoSugeridoLivre } from "./adendas";
-import { adendaAssinada, registarFaturasAdenda } from "./testeAdenda";
+import { adendaAssinada } from "./testeAdenda";
 
 afterEach(cleanup);
 
@@ -67,17 +67,16 @@ describe("imprevistos no ecrã", () => {
     expect(screen.getByText("à espera do cliente")).toBeTruthy();
     expect(screen.getByText(new RegExp(`^Adenda ${a.n.replace(/[/-]/g, "\\$&")} ·`))).toBeTruthy();
     r.unmount();
-    // o cliente assina; o Financeiro fatura; no portal paga por MB Way (19/11: sem prestador de pagamentos, não há referência MB)
+    // o cliente assina; o Financeiro fatura; no portal paga por referência MB
     adendaAssinada(A, d.id, a.n);
-    A.role("financeiro"); registarFaturasAdenda(A, d);
+    A.role("financeiro"); A.faturarAdendas(d.id);
     render(<Montar S={S} A={A}>{(c) => <PortalCliente ctx={c} d={d} fechar={() => {}} />}</Montar>);
     const pag = screen.getByText(`Pagar a fatura ${a.faturas![0].n}`).closest("section, li, div[class]")!;
     expect(pag).toBeTruthy();
     const grupo = screen.getAllByRole("radiogroup", { name: "Como quer pagar" }).at(-1)!;
-    expect(within(grupo).queryByRole("radio", { name: "Referência MB" })).toBeNull();
-    fireEvent.click(within(grupo).getByRole("radio", { name: "MB Way" }));
-    expect(a.faturas![0].pag?.metodo).toBe("MB Way");
-    expect(d.f.metodo).not.toBe("MB Way");
+    fireEvent.click(within(grupo).getByRole("radio", { name: "Referência MB" }));
+    expect(a.faturas![0].pag?.metodo).toBe("Referência MB");
+    expect(d.f.metodo).not.toBe("Referência MB");
   });
 
   it("os ajustes seguidos à mesma tarefa juntam-se com o efeito líquido", () => {

@@ -98,24 +98,19 @@ export const podeNeg = (p: Papel, x: PermNeg): boolean => {
  *  uma delas, o botão fica desligado e diz qual falta, em vez de o clique ser recusado depois. */
 const PERM_DO_PASSO: Readonly<Record<string, readonly PermNeg[]>> = {
   contactar: ["contacto.registar"], marcarVisita: ["visita.gerir"], fecharVisita: ["visita.preencher", "orcamento.editar"],
-  pedidoCliente: ["orcamento.editar"], adendaDoValor: ["orcamento.editar", "proposta.decidir"], registarNotaCredito: ["finance.invoice"], semAdendaDoValor: ["orcamento.editar"],
-  // 19/11 (auditoria): seguir sem adenda com a margem abaixo do mínimo é da Direção
-  aprovarSemAdenda: ["margin.approve"], recusarSemAdenda: ["margin.approve"], enviar: ["proposta.enviar"], enviarAdenda: ["proposta.enviar"],
+  pedidoCliente: ["orcamento.editar"], adendaDoValor: ["orcamento.editar", "proposta.decidir"], registarNotaCredito: ["finance.invoice"], semAdendaDoValor: ["orcamento.editar"], enviar: ["proposta.enviar"], enviarAdenda: ["proposta.enviar"],
   enviarContrato: ["contrato.editar"], enviarContratoAdenda: ["contrato.editar"], abrirRevisao: ["contrato.editar"], abrirRevisaoAdenda: ["contrato.editar"],
   aprovarAdenda: ["margin.approve"], validar: ["finance.validate_payment"], registarFaturaErp: ["finance.invoice"],
   // 13/11 (20270117200000): faturar as adendas e validar os pagamentos delas são do Financeiro (neg_registar_fatura, neg_validar_pagamento)
-  // 19/11 (auditoria): a fatura da adenda regista-se com o número do Eticadata (abrirFaturaAdenda leva ao campo; registarFaturaAdenda)
-  faturarAdendas: ["finance.invoice"], abrirFaturaAdenda: ["finance.invoice"], registarFaturaAdenda: ["finance.invoice"], validarPagamentosAdenda: ["finance.validate_payment"],
+  faturarAdendas: ["finance.invoice"], validarPagamentosAdenda: ["finance.validate_payment"],
   // 19/11: as parcelas do contrato a seguir à 1.ª (a do arranque, a do fim), como as adendas
   registarFaturaParcela: ["finance.invoice"], validarParcela: ["finance.validate_payment"], enviarAuto: ["obra.fechar"],
   // 6/11: os passos da obra (as Operações) pedem negocios.obra.planear, como o motor (A.aprovarPlano, A.arrancar)
-  gerarPlano: ["obra.planear"], aprovarPlano: ["obra.planear"], arrancar: ["obra.planear"], abrirRetificacao: ["obra.planear"], abrirPedidoCliente: ["obra.planear"], supervisorMedidas: ["obra.planear"],
+  gerarPlano: ["obra.planear"], aprovarPlano: ["obra.planear"], arrancar: ["obra.planear"], abrirRetificacao: ["obra.planear"],
   // 11/11 (F3): aceitar as medidas (A.retificarMedidas e as respostas retif_*) pede o mesmo que o passo (neg_guardar_negocio, 20270113110000)
   retificarMedidas: ["obra.planear"],
   // 11/11 (fim de contacto): a assistente comercial passa o negócio ao comercial (A.passarAoComercial, a resposta contacto_concluido)
   passarAoComercial: ["contacto.registar"],
-  // 19/11 (auditoria): «Sem interesse» ou «Número errado» na chamada propõem dar o negócio como perdido (A.perder → neg_perder_negocio)
-  perder: ["negocio.perder"],
 };
 /** 9/11 (revisão do Lote 2): os passos que pedem UMA de várias permissões. «Verificar no ERP» (A.verificarErp) só lê o Eticadata: basta
  *  negocios.registar_fatura OU negocios.validar_pagamento; sem nenhuma, o botão fica desligado antes de qualquer leitura. A primeira da
@@ -158,15 +153,6 @@ export const CODIGO_ESCREVER_CONVERSA = CODIGO_GRAVAR_NEGOCIO;
  *  encomendas de um negócio), seja qual for o papel escolhido; sem ela o servidor recusa sempre, por isso o «A ver como» armazém sozinho
  *  já não basta. Sem conta real, o papel, como até aqui. O modo de teste (o super admin) continua a poder. */
 export const podeAprovarPo = (role: Papel, teste: boolean): boolean => (temCodigoReal(CODIGO_APROVAR_PO) ?? role === "armazem") || teste;
-/** 19/11 (auditoria, lote 2): pedir o que falta ao fornecedor (rpc_request_missing_from_supplier: purchase_orders.create E
- *  client_orders.view, este já lido em CODIGOS_VISTAS). */
-export const CODIGO_PEDIR_FALTA = "purchase_orders.create";
-/** 19/11: o botão «Pedir o que falta ao fornecedor» no passo Materiais da obra. Com conta real, quem tem as duas permissões do servidor;
- *  sem conta real, o papel Compras e armazém, como o aprovar. O modo de teste (o super admin) também. */
-export const podePedirFalta = (role: Papel, teste: boolean): boolean => {
-  const tem = [temCodigoReal(CODIGO_PEDIR_FALTA), temCodigoReal("client_orders.view")];
-  return (tem.includes(null) ? role === "armazem" : tem.every(Boolean)) || teste;
-};
 /** 9/11 (Lote 1, I): o porquê de a caixa de envio da conversa da obra estar desligada (com conta real e sem pessoas.edit), ou undefined. */
 export const semEnvioNaConversa = (): string | undefined =>
   temCodigoReal(CODIGO_ESCREVER_CONVERSA) === false ? "Escrever ao cliente pede a permissão pessoas.edit (editar negócios)." : undefined;

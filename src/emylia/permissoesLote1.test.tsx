@@ -103,14 +103,10 @@ describe("B · BotaoFase (a página do negócio)", () => {
     const { S, d } = naLead();
     S.role = "comercial";
     render(<Montar S={S}>{(ctx) => <BotaoFase ctx={ctx} d={d} />}</Montar>);
-    // 19/11 (auditoria): «Registar chamada» pede primeiro o resultado (sem valor por omissão); escolhido, o botão liga
-    expect((botao(/Registar chamada/) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(screen.getByLabelText("Atendeu · interessado"));
     expect((botao(/Registar chamada/) as HTMLButtonElement).disabled).toBe(false);
     cleanup();
     reais(["contacto.registar"]);
     render(<Montar S={S}>{(ctx) => <BotaoFase ctx={ctx} d={d} />}</Montar>);
-    fireEvent.click(screen.getByLabelText("Atendeu · interessado"));
     expect((botao(/Registar chamada/) as HTMLButtonElement).disabled).toBe(false);
   });
 
@@ -125,7 +121,6 @@ describe("B · BotaoFase (a página do negócio)", () => {
     reais(["contacto.registar"]);
     render(<Montar S={S}>{(ctx) => <BotaoFase ctx={ctx} d={d} />}</Montar>);
     expect(botao(/Mudar para/)).toBeNull();
-    fireEvent.click(screen.getByLabelText("Atendeu · interessado"));
     const b = botao(/Registar chamada/) as HTMLButtonElement;
     expect(b.disabled).toBe(false);
     fireEvent.click(b);

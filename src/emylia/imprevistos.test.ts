@@ -7,7 +7,7 @@ import { FINANCEIRO, OBRA, emFalta, type Grupo } from "./campos";
 import { paradasPor, tarefasAfetaveis } from "./imprevistos";
 import { receberTudo } from "./testeObra";
 import { fimDe } from "./ajustesPlano";
-import { adendaAssinada, registarFaturasAdenda } from "./testeAdenda";
+import { adendaAssinada } from "./testeAdenda";
 import { totaisAdenda } from "./adendas";
 
 const foto = "data:image/svg+xml;utf8,x";
@@ -21,7 +21,7 @@ const obra1027 = () => {
   const encher = (gs: Grupo[]) => { for (let i = 0; i < 5; i++) for (const c of emFalta(gs, d.f)) d.f[c.k] = c.op ? c.op[0] : c.t === "sim_nao" ? "Não" : c.t === "numero" || c.t === "contador" ? "1" : c.t === "data" ? "2026-10-20" : "x"; };
   encher(FINANCEIRO); encher([OBRA[0]]);
   A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
-  A.role("operacoes"); (A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id), A.aprovarPlano(d.id));
+  A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   expect(receberTudo("CT 2026/1027")).toBe("");
   A.arrancar(d.id);
   expect(d.obra.plano!.estado).toBe("em curso");
@@ -100,9 +100,9 @@ describe("imprevistos a meio da obra", () => {
     expect(nova.mats).toEqual([{ n: "Tubo PVC 110", q: 2, un: "tubo", preco: 9 }]);
     expect(lerInventario().ecs.some((e) => e.origin.ref === "CT 2026/1027 · A1" && !e.deleted)).toBe(false);
     // o Financeiro: a fatura própria da adenda, no Hoje dele
-    expect(minhas(S, "financeiro").some((x) => x.d === d && x.p.act === "abrirFaturaAdenda")).toBe(true);
-    A.role("financeiro"); registarFaturasAdenda(A, d);
-    expect(a.faturas![0].n).toMatch(/^FAT TESTE\/\d+$/);
+    expect(minhas(S, "financeiro").some((x) => x.d === d && x.p.act === "faturarAdendas")).toBe(true);
+    A.role("financeiro"); A.faturarAdendas(d.id);
+    expect(a.faturas![0].n).toMatch(/^FT 2026\/\d+$/);
     // o cliente paga no portal por débito direto; o Financeiro valida e sai o recibo
     A.escolherMetodo(d.id, "Débito direto", n);
     A.autorizarDebito(d.id, "PT50 ···· 0154", "Tiago Almeida", n);

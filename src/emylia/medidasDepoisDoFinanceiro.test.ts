@@ -26,7 +26,7 @@ const pagar = (S: Estado, d: Negocio, A: Ac) => {
   A.validar(d.id);
 };
 const assinadoEPago = () => { const r = aceite(); assinar(r.S, r.d, r.A); pagar(r.S, r.d, r.A); return r; };
-const medidas = (S: Estado, d: Negocio, A: Ac, med?: Record<string, number>) => { S.role = "operacoes"; A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id, med); };
+const medidas = (S: Estado, d: Negocio, A: Ac, med?: Record<string, number>) => { S.role = "operacoes"; A.retificarMedidas(d.id, med); };
 const aprovar = (S: Estado, d: Negocio, A: Ac) => { S.role = "operacoes"; A.resolverConflitos(d.id); A.aprovarPlano(d.id); };
 const maisArea = (d: Negocio) => { const [k] = camposMedida(LINHAS[d.linha])[0]; return { [k]: medida(d.visita.med, k) + 2 }; };
 const menosArea = (d: Negocio) => { const [k] = camposMedida(LINHAS[d.linha])[0]; return { [k]: Math.max(0.5, medida(d.visita.med, k) - 1) }; };
@@ -69,9 +69,7 @@ describe("o contrato antes do pagamento (16/11)", () => {
     expect(d.fase).toBe(5);
     expect(d.obra.ec).toBeFalsy();
     const acts = minhas(S, "operacoes").filter((x) => x.d.id === d.id).map((x) => x.p.act);
-    // 19/11 (auditoria): primeiro as medidas (aceites no local), depois o plano
-    expect(acts).toContain("abrirRetificacao");
-    expect(acts).not.toContain("aprovarPlano");
+    expect(acts).toEqual(expect.arrayContaining(["abrirRetificacao", "aprovarPlano"]));
     expect(faltaParaArrancar(d)[0]).toBe("retificar as medidas");
   });
   it("sem mudança de valor: com as medidas e o plano, sai a encomenda de cliente (o contrato já está assinado)", () => {
@@ -84,10 +82,7 @@ describe("o contrato antes do pagamento (16/11)", () => {
   });
   it("medidas mudadas com o plano já aprovado: o plano volta a por aprovar e diz porquê", () => {
     const { S, d, A } = assinadoEPago();
-    // 19/11 (auditoria): o plano só se aprova com as medidas aceites; medidas aceites de novo e mudadas, o plano volta a por aprovar
-    medidas(S, d, A);
     aprovar(S, d, A);
-    expect(d.obra.plano?.estado).toBe("aprovado");
     medidas(S, d, A, maisArea(d));
     expect(d.obra.plano?.estado).toBe("por aprovar");
     expect(d.hist.some((l) => /Plano volta a por aprovar: as medidas mudaram/.test(l.t))).toBe(true);

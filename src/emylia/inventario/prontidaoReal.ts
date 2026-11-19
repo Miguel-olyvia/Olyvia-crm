@@ -5,9 +5,6 @@
 /** O que rpc_client_order_list_readiness devolve por contrato (as unidades, sem as linhas). */
 export interface ProntidaoReal {
   contrato: string; linhasProntas: number; reservadas: number; aChegar: number; emFalta: number; servidas: number; precisas: number;
-  /** 19/11 (rpc_client_order_missing_causes, 20270124010000): do que está em falta, o que se pode pedir ao fornecedor, e quantas linhas
-   *  estão presas sem fornecedor preferido ou com a unidade do fornecedor incompatível. Ausentes: a base ainda não o diz. */
-  aPedir?: number; semFornecedor?: number; unidadeIncompativel?: number;
 }
 
 import { encomendaReal } from "../real/encomendaReal";
@@ -39,16 +36,7 @@ export const prontaReal = (p: ProntidaoReal | undefined): boolean => !!p && p.em
 export function faltaMateriaisReal(p: ProntidaoReal | undefined): string[] {
   if (!p) return ["confirmar os materiais nas Encomendas de cliente (a ler)"];
   const F: string[] = [];
-  const mat = (n: number) => `${n} ${n === 1 ? "material" : "materiais"}`;
-  if (p.emFalta > 0 && p.aPedir === undefined) F.push(`encomendar ao fornecedor ${un(p.emFalta)} («Pedir o que falta ao fornecedor», nas Encomendas de cliente)`);
-  // 19/11: com as causas da base, o botão só aparece para o que se pode mesmo pedir; o resto diz porquê e onde se resolve
-  if (p.emFalta > 0 && p.aPedir !== undefined) {
-    if (p.aPedir > 0) F.push(`encomendar ao fornecedor ${un(p.aPedir)} («Pedir o que falta ao fornecedor»)`);
-    if (p.semFornecedor) F.push(`escolher o fornecedor preferido de ${mat(p.semFornecedor)} no Catálogo (sem ele, o que falta não se pode pedir)`);
-    if (p.unidadeIncompativel) F.push(`corrigir a unidade do fornecedor de ${mat(p.unidadeIncompativel)} no Catálogo (é incompatível com a do produto)`);
-    // salvaguarda: a falta sem causa nem nada a pedir (a leitura mudou entre as duas chamadas): como antes
-    if (!p.aPedir && !p.semFornecedor && !p.unidadeIncompativel) F.push(`encomendar ao fornecedor ${un(p.emFalta)} («Pedir o que falta ao fornecedor»)`);
-  }
+  if (p.emFalta > 0) F.push(`encomendar ao fornecedor ${un(p.emFalta)} («Pedir o que falta», nas Encomendas de cliente)`);
   if (p.aChegar > 0) F.push(`receber no armazém ${un(p.aChegar)} encomendadas ao fornecedor`);
   return F;
 }

@@ -2,8 +2,6 @@
 // local, com o telemóvel. A planta da visita (corrige-se uma parede com o dedo, e o chão e as paredes em m² saem dela), cada medida com
 // o valor da visita ao lado e botões grandes de − e +, as notas, e «Aceitar as medidas» fixo em baixo (A.retificarMedidas; a planta
 // corrigida fica em f.retif_planta). As Operações aprovam o plano depois.
-// 19/11 (auditoria): é o único caminho para mudar e aceitar as medidas (o passo Medidas da página é só o resumo); abre-se com quem vai
-// medir escolhido (d.f.supervisor_medidas) e, se o valor mudar, segue a adenda do acerto ao Financeiro.
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { usePainelUrl } from "../usarParamUrl";
 import { AnimatePresence, motion } from "framer-motion";
@@ -16,7 +14,7 @@ import { NaFrente } from "../NaFrente";
 import { EditorPlanta } from "../EditorPlanta";
 import { areaChaoM2, areaParedesM2, gravarPlanta, lerPlanta, peDireitoDoCampo, type Planta } from "../planta";
 import { Brilho, Contagem, MOLA, VistoDesenho, useReduzir } from "../movimento";
-import { podeRetificar, supervisorDasMedidas } from "../preparacaoObra";
+import { podeRetificar } from "../preparacaoObra";
 import { ImpactoNoOrcamento, linhasDoImpacto } from "./ImpactoNoOrcamento";
 import { permEmFaltaDoPasso } from "../permissoes";
 
@@ -67,7 +65,7 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
         <header className="flex items-center gap-3 border-b border-border bg-card px-4 py-3">
           <Button type="button" variant="ghost" className="min-h-11" aria-label="Voltar" onClick={fechar}><ArrowLeft className="h-5 w-5" /></Button>
           <div className="min-w-0">
-            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Medidas no local{supervisorDasMedidas(d) ? ` · ${supervisorDasMedidas(d)!.n}` : ""}</p>
+            <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Medidas no local</p>
             <h1 id="estudio-medidas-titulo" className="truncate text-lg font-semibold">{d.nome}</h1>
           </div>
         </header>
@@ -147,9 +145,9 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
         <div className="border-t border-border bg-card/95 px-4 py-3 backdrop-blur">
           <div className="mx-auto flex max-w-6xl items-center justify-between gap-3">
             <p className="text-sm text-muted-foreground" aria-live="polite">{mudadas
-              ? <>{mudadas} {mudadas === 1 ? "medida corrigida" : "medidas corrigidas"}{Math.abs(dif) > 0.004 && <> · <span className="font-semibold text-foreground">{dif > 0 ? "+" : "−"}<Contagem valor={Math.abs(dif)} fmt={eur} /> €</span><span className="sr-only">{eur(Math.abs(dif))} €</span> no orçamento</>}. Se o valor mudar, segue a adenda do acerto ao Financeiro.{d.obra.plano?.estado === "aprovado" && " O plano já aprovado volta a por aprovar."}</>
+              ? <>{mudadas} {mudadas === 1 ? "medida corrigida" : "medidas corrigidas"}{Math.abs(dif) > 0.004 && <> · <span className="font-semibold text-foreground">{dif > 0 ? "+" : "−"}<Contagem valor={Math.abs(dif)} fmt={eur} /> €</span><span className="sr-only">{eur(Math.abs(dif))} €</span> no orçamento</>}. Antes do contrato, a proposta refaz-se com o orçamento novo.{d.obra.plano?.estado === "aprovado" && " O plano já aprovado volta a por aprovar."}</>
               : "Tudo como na visita."}</p>
-            <Button type="button" size="lg" className="min-h-12 shrink-0" disabled={feito || !podeRetificar(d) || !d.f.supervisor_medidas} onClick={aceitar}><Check className="mr-1.5 h-5 w-5" aria-hidden="true" />Aceitar as medidas</Button>
+            <Button type="button" size="lg" className="min-h-12 shrink-0" disabled={feito || !podeRetificar(d)} onClick={aceitar}><Check className="mr-1.5 h-5 w-5" aria-hidden="true" />Aceitar as medidas</Button>
           </div>
         </div>
 
@@ -160,7 +158,7 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
                 className="flex flex-col items-center gap-3 rounded-3xl bg-card px-10 py-8 shadow-2xl">
                 <span className="relative grid h-16 w-16 place-items-center rounded-full bg-success/15 text-success"><Brilho ativo /><VistoDesenho on grande className="h-9 w-9" /></span>
                 <p className="text-lg font-semibold">Medidas aceites</p>
-                <p className="text-sm text-muted-foreground">{d.obra.plano && ["aprovado", "em curso"].includes(d.obra.plano.estado) ? "Com o plano aprovado, segue a encomenda de cliente." : "Segue o plano: as Operações aprovam-no."}</p>
+                <p className="text-sm text-muted-foreground">{d.obra.plano && ["aprovado", "em curso"].includes(d.obra.plano.estado) ? "Com o plano aprovado, segue a encomenda de cliente." : "Com o plano aprovado pelas Operações, segue a encomenda de cliente."}</p>
               </motion.div>
             </motion.div>
           )}
@@ -194,8 +192,7 @@ export function AbrirEstudioMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const [aberto, setAberto] = usePainelUrl("estudio", "medidas");
   const reduzir = useReduzir();
   // 11/11 (F3): sem negocios.obra.planear o estúdio não abre (aceitar as medidas pede-a; o aviso fica no passo)
-  // 19/11 (auditoria): e com quem vai medir escolhido (o gestor escolhe-o no passo Medidas)
-  if (d.f.retif_aceite || !podeRetificar(d) || !d.f.supervisor_medidas || permEmFaltaDoPasso(ctx.S, "retificarMedidas")) return null;
+  if (d.f.retif_aceite || !podeRetificar(d) || permEmFaltaDoPasso(ctx.S, "retificarMedidas")) return null;
   const CM = camposMedida(LINHAS[d.linha]);
   return (
     <>

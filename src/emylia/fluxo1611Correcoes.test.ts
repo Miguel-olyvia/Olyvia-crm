@@ -22,15 +22,11 @@ const assinadoEPago = () => {
   return r;
 };
 const maisArea = (d: Negocio) => { const [k] = camposMedida(LINHAS[d.linha])[0]; return { [k]: medida(d.visita.med, k) + 2 }; };
-// 19/11 (acerto dos testes): desde 18/11 a retificação vai ao portal (já assinada pela empresa) e é o cliente que a aceita e assina; o
-// comercial (que não planeia) está no ecrã quando a assinatura chega
-const assinarNoPortal = (A: Ac, id: number, n: string) => { A.aceitarAdenda(id, n); A.enviarContratoAdenda(id, n); A.simularAdenda(id, n); };
 const comAcertoAssinadoPeloComercial = () => {
   const r = assinadoEPago();
-  r.S.role = "operacoes"; r.A.supervisorMedidas(r.d.id, "hn"), r.A.retificarMedidas(r.d.id, maisArea(r.d));
+  r.S.role = "operacoes"; r.A.retificarMedidas(r.d.id, maisArea(r.d));
   r.S.role = "comercial";
   const n = r.A.adendaDoValor(r.d.id)!;
-  assinarNoPortal(r.A, r.d.id, n);
   return { ...r, n };
 };
 const tarefasDa = (d: Negocio, n: string) => (d.obra.plano?.tasks ?? []).filter((t) => t.adenda === n);
@@ -88,11 +84,10 @@ describe("a retificação assinada pelo comercial: as tarefas entram com as Oper
   });
   it("assinada por quem planeia, as tarefas entram logo (como antes)", () => {
     const r = assinadoEPago();
-    r.S.role = "operacoes"; r.A.supervisorMedidas(r.d.id, "hn"), r.A.retificarMedidas(r.d.id, maisArea(r.d));
+    r.S.role = "operacoes"; r.A.retificarMedidas(r.d.id, maisArea(r.d));
     r.S.role = "direcao";
     const n = r.A.adendaDoValor(r.d.id);
     if (!n) return; // a Direção sem orcamento.editar/proposta.decidir neste seed: nada a verificar
-    assinarNoPortal(r.A, r.d.id, n);
     expect(tarefasDa(r.d, n).length).toBeGreaterThan(0);
     expect(acertosPorJuntar(r.d)).toEqual([]);
   });

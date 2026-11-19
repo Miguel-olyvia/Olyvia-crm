@@ -7,8 +7,8 @@
 // o contrato da adenda, gerado pelo comercial (com a revisão das cláusulas pelo Jurídico, se o cliente pedir) → assinada (CMD/SMS) →
 // faturas por parcela (as mesmas parcelas do contrato) → pagamento validado. A 1.ª parcela paga emite a encomenda dos materiais.
 // IVA: a mão de obra (os serviços) a 6% e os materiais (os escolhidos nas linhas livres) a 23%, como no orçamento.
-import { TECS, alertas, bloqueado, custoUnLinha, eur, garantirServico, horaDoPerfil, ivaDaLinha, servicoDoCatalogo, r2, tot, totaisIva, IVA_MAT, IVA_MO,
-  type Alerta, type TaxaIva, type Assinatura, type Estado, type LinhaOrc, type MatTarefa, type Negocio, type Orcamento, type Plano, type Tarefa } from "./motor";
+import { TECS, alertas, bloqueado, custoUnLinha, garantirServico, horaDoPerfil, servicoDoCatalogo, r2, tot, totaisIva, IVA_MAT, IVA_MO,
+  type Alerta, type Assinatura, type Estado, type LinhaOrc, type MatTarefa, type Negocio, type Orcamento, type Plano, type Tarefa } from "./motor";
 import { diasDeHoras } from "./ganttOrcamento";
 import { fasesPadrao, type FaseObra } from "./fasesObra";
 import { skDaTarefa, tecnicoDoOficio } from "./preparacaoObra";
@@ -23,11 +23,7 @@ export interface LinhaAdenda { sid: string; n: string; un: string; q: number; pu
   /** 22/10 (fase 3): a mão de obra por unidade congelada com o cu (horas × €/h dos ofícios): o previsto da obra para as tarefas da adenda */
   mo?: number;
   /** 21/10: uma linha livre (de um imprevisto): o trabalho descrito à mão, com as horas e os materiais escolhidos */
-  livre?: true; mats?: MatTarefa[];
-  /** 19/11 (auditoria): a taxa de IVA da linha (q × pu): nos serviços, a do orçamento (ivaDaLinha: 6%, ou 23% nas subempreitadas de
-   *  materiais); nos produtos (a linha de produtos do acerto), 23%. As linhas antigas não a têm e ficam a 6%, como antes (não muda o
-   *  total de documentos já assinados). Os materiais das linhas livres (`mats`) vão sempre a 23%. */
-  iva?: TaxaIva }
+  livre?: true; mats?: MatTarefa[] }
 /** 21/10: rascunho (por verificar e enviar) → enviada (a proposta no portal) → aceite (o contrato da adenda) → assinada;
  *  "recusada" pelo cliente no portal (com o porquê) ou "anulada" pelo comercial antes da assinatura; o número não se reutiliza. */
 export type EstadoAdenda = "rascunho" | "enviada" | "aceite" | "assinada" | "recusada" | "anulada";
@@ -75,18 +71,16 @@ export const MOTIVO_IMPREVISTO = "Imprevisto na obra";
 /** 21/10: porque o cliente não aceita a adenda, nas palavras dele (no portal). */
 export const MOTIVOS_RECUSA_ADENDA = ["O preço", "Não preciso destes trabalhos", "O prazo", "Quero falar primeiro"];
 
-/** 19/11 (auditoria): a taxa de IVA de um serviço na adenda, a mesma do orçamento (motor.ivaDaLinha: a do serviço do Catálogo). */
-export const ivaDoServico = (S: Pick<Estado, "svc">, sid: string): TaxaIva => ivaDaLinha({ t: "svc", sid, q: 0, cu: 0, pu: 0 }, S);
 /** Uma linha da adenda: o serviço (do Catálogo, entra em uso se ainda não estava), a quantidade, o preço e as horas por unidade. */
 export function linhaAdenda(S: Estado, sid: string, q: number): LinhaAdenda | null {
   const s = garantirServico(S, sid);
   if (!s) return null;
-  return { sid, n: s.n, un: s.un, q, pu: r2(s.preco), h: s.h, perfil: s.perfil, ...(s.perfilId ? { perfilId: s.perfilId } : {}), iva: ivaDoServico(S, sid) };
+  return { sid, n: s.n, un: s.un, q, pu: r2(s.preco), h: s.h, perfil: s.perfil, ...(s.perfilId ? { perfilId: s.perfilId } : {}) };
 }
 /** A mesma linha sem mexer no estado (a pré-visualização ao criar): o preço e as horas que o cliente vai receber. */
 export function previsaoLinha(S: Estado, sid: string, q: number): LinhaAdenda | null {
   const s = S.svc[sid] ?? servicoDoCatalogo(sid, S);
-  return s ? { sid, n: s.n, un: s.un, q, pu: r2(s.preco), h: s.h, perfil: s.perfil, ...(s.perfilId ? { perfilId: s.perfilId } : {}), iva: s.iva === 23 ? 23 : 6 } : null;
+  return s ? { sid, n: s.n, un: s.un, q, pu: r2(s.preco), h: s.h, perfil: s.perfil, ...(s.perfilId ? { perfilId: s.perfilId } : {}) } : null;
 }
 /** 12/11 (Rúben: as medidas e o plano depois do Financeiro; se mudarem o valor, uma adenda): o motivo da adenda do acerto. */
 export const MOTIVO_ACERTO = "Acerto das medidas e do plano da obra";
@@ -107,20 +101,15 @@ export const emCurso = (a: Adenda) => a.estado === "rascunho" || a.estado === "e
 export type TotaisIva = ReturnType<typeof totaisIva>;
 /** Os materiais das linhas livres (os escolhidos à mão), com o preço ao cliente. */
 const matsLivres = (L: LinhaAdenda[]) => L.flatMap((x) => (x.livre ? x.mats ?? [] : []));
-/** 21/10: os totais da adenda com o IVA por taxa (o mesmo formato do orçamento, para o QuadroIva), depois do desconto. Como em
- *  motor.totaisIva, `mo` é a parte a 6% e `mat` a parte a 23%. 19/11 (auditoria): cada linha pela sua taxa (`iva`; sem ela, 6%, como as
- *  adendas antigas); os materiais das linhas livres a 23%. */
+/** 21/10: os totais da adenda com o IVA por taxa (o mesmo formato do orçamento, para o QuadroIva): a mão de obra (os serviços) a 6%
+ *  e os materiais das linhas livres a 23%, depois do desconto. */
 export function totaisLinhas(L: LinhaAdenda[], desconto = 0): TotaisIva {
   const k = 1 - (desconto || 0) / 100;
-  const a23 = L.reduce((a, x) => a + (x.iva === 23 ? x.q * x.pu : 0), 0), a6 = L.reduce((a, x) => a + (x.iva === 23 ? 0 : x.q * x.pu), 0);
-  const mo = a6 * k, mat = (a23 + matsLivres(L).reduce((a, m) => a + (m.preco ?? 0) * m.q, 0)) * k;
+  const mo = L.reduce((a, x) => a + x.q * x.pu, 0) * k, mat = matsLivres(L).reduce((a, m) => a + (m.preco ?? 0) * m.q, 0) * k;
   const ivaMo = mo * IVA_MO, ivaMat = mat * IVA_MAT;
   return { mo, mat, ivaMo, ivaMat, base: mo + mat, iva: ivaMo + ivaMat, total: mo + mat + ivaMo + ivaMat };
 }
 export const totaisAdenda = (a: Pick<Adenda, "linhas" | "desconto">) => totaisLinhas(a.linhas, a.desconto);
-/** 19/11 (auditoria): o IVA por taxa, numa frase curta («12 000,00 € a 6% + 720,00 € de IVA · 500,00 € a 23% + 115,00 € de IVA»). */
-export const textoIvaPorTaxa = (T: TotaisIva): string =>
-  [T.mo > 0.004 ? `${eur(T.mo)} € a 6% + ${eur(T.ivaMo)} € de IVA` : "", T.mat > 0.004 ? `${eur(T.mat)} € a 23% + ${eur(T.ivaMat)} € de IVA` : ""].filter(Boolean).join(" · ");
 /** Sem IVA (mão de obra e materiais). */
 export const totalAdenda = (L: LinhaAdenda[], desconto = 0) => r2(totaisLinhas(L, desconto).base);
 /** Com IVA (6% na mão de obra, 23% nos materiais). */
@@ -226,8 +215,6 @@ export function faturaAValidar(a: Adenda): { f?: FaturaAdenda; motivo: string | 
   if (F[0].i !== 0 && !primeiraPaga(a)) return { motivo: `Primeiro, a fatura da ${nomeParcela(0)} da adenda ${a.n}.` };
   return { f: F[0], motivo: null };
 }
-/** 19/11 (auditoria): o sinal (S.pulse) que leva o negócio aberto ao campo do número da fatura da adenda `n` («Registar a fatura» do Hoje). */
-export const alvoFaturaAdenda = (n: string) => "ft-ad:" + n;
 /** As adendas assinadas sem nenhuma fatura (a 1.ª parcela por faturar), para o Hoje do Financeiro. */
 export const porFaturar = (d: Negocio) => assinadas(d).filter((a) => !faturasAdenda(a).length);
 /** As faturas das adendas por pagar e, delas, as que o cliente já disse que pagou (para validar). */

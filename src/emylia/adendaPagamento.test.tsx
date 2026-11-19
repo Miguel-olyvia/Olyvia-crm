@@ -4,7 +4,7 @@
 // As parcelas seguintes só se faturam depois de paga a 1.ª (a do fim, com a obra concluída).
 // Os caminhos que falhavam: A (duas faturas, sem aviso no portal: validar não fazia nada), B (o cliente paga a 2.ª, o Financeiro valida:
 // sem EC), o estado antigo do CT 1038 (as duas emitidas, nenhuma paga); C (pago no portal e validado) e E (só mão de obra) já iam bem.
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { acoes, minhas, seed, type Estado, type Negocio } from "./motor";
 import { FINANCEIRO, OBRA, emFalta, type Grupo } from "./campos";
@@ -15,15 +15,12 @@ import { Hoje } from "./Hoje";
 import { PortalCliente } from "./PortalCliente";
 import { TrabalhosAMais } from "./TrabalhosAMais";
 import { Montar } from "./v2/testeV2";
-import { alvoFaturaAdenda, faturaAValidar, parcelaFaturavel, parcelasAdenda, primeiraPaga, type Adenda } from "./adendas";
+import { faturaAValidar, parcelaFaturavel, parcelasAdenda, primeiraPaga, type Adenda } from "./adendas";
 import { passosPreparacao } from "./preparacaoObra";
 import { ecDaAdenda, kAjuste, numeroAdenda } from "./encomendasAjuste";
 import { fazer } from "./pecas";
-import { adendaAssinada, registarFaturasAdenda } from "./testeAdenda";
-import { registarNoEcra } from "./testeFaturaAdenda";
+import { adendaAssinada } from "./testeAdenda";
 
-// 19/11 (auditoria): a fatura da adenda regista-se com o número do Eticadata; aqui o ERP não responde (regista-se sem confirmar)
-vi.mock("./erpEticadata", async (orig) => ({ ...(await orig<typeof import("./erpEticadata")>()), lerFaturaErp: vi.fn(async () => ({ ok: false, motivo: "sem_ligacao", msg: "Sem ligação ao Eticadata." })) }));
 afterEach(() => { cleanup(); localStorage.clear(); });
 beforeEach(() => { esquecerInventario(); });
 
@@ -37,7 +34,7 @@ function preparar(soMaoDeObra = false) {
   const avisar = vi.fn();
   const A: A_ = acoes(S, avisar, (fn) => fn());
   A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
-  A.role("operacoes"); (A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id), A.aprovarPlano(d.id));
+  A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   A.role("comercial");
   if (soMaoDeObra) A.criarAdenda(d.id, [], "Surpresa em obra", { livres: [{ n: "Afinar as portas", h: 4, preco: 300, perfil: "Montador", mats: [] }] });
   else A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu");
@@ -47,7 +44,7 @@ function preparar(soMaoDeObra = false) {
 }
 /** O estado de antes da correção (como o CT 1038): a 1.ª e a 2.ª parcela já emitidas, nenhuma paga. */
 function duasFaturasAntigas(A: A_, d: Negocio, a: Adenda) {
-  A.role("financeiro"); registarFaturasAdenda(A, d);
+  A.role("financeiro"); A.faturarAdendas(d.id);
   const P = parcelasAdenda(d, a);
   a.faturas!.push({ n: "FT 2026/422", q: "21/10", i: 1, l: P[1].l, p: P[1].p, v: P[1].v });
   a.faturas![0].n = "FT 2026/421";
@@ -66,22 +63,16 @@ const linhaHoje = (t: RegExp): HTMLElement => screen.getByText(t).closest("li") 
 
 describe("o pagamento da adenda no bloco Pagamento, como o contrato", () => {
   it("o bloco Pagamento mostra a fatura e o pagamento da 1.ª parcela da adenda e só fica pronto com ela paga", () => {
-    const { S, A, d } = preparar();
+    const { S, d } = preparar();
     S.role = "financeiro";
     caminho(S, d);
     const bloco = blocoPagamento();
-    expect(within(bloco).getByText(`Registar a fatura da adenda ${N} · 1.ª parcela`)).toBeTruthy();
+    expect(within(bloco).getByText(`Emitir a fatura da adenda ${N} · 1.ª parcela`)).toBeTruthy();
     expect(within(bloco).getByText(`Validar o pagamento da adenda ${N} · 1.ª parcela`).closest("li")!.textContent).toMatch(/Depois da fatura\./);
     expect(within(bloco).queryByText("pronto")).toBeNull();
-    // 19/11 (auditoria): «Registar a fatura» leva ao negócio, ao campo do número (a Olyvia não emite); regista-se o do Eticadata
-    fireEvent.click(within(bloco).getByRole("button", { name: "Registar a fatura" }));
-    expect(S).toMatchObject({ view: "negocio", deal: d.id, pulse: alvoFaturaAdenda(N) });
-    expect(d.adendas![0].faturas ?? []).toHaveLength(0);
-    cleanup();
-    A.registarFaturaAdenda(d.id, N, "FAT 15200126/901");
-    caminho(S, d);
+    // emitir no próprio bloco
+    fireEvent.click(within(bloco).getByRole("button", { name: "Emitir a fatura" }));
     const f0 = d.adendas![0].faturas![0];
-    expect(f0.n).toBe("FAT 15200126/901");
     expect(within(blocoPagamento()).getByText(`Fatura ${f0.n} · adenda ${N} · 1.ª parcela`)).toBeTruthy();
     expect(within(blocoPagamento()).queryByText("pronto")).toBeNull();
   });
@@ -166,7 +157,7 @@ describe("o pagamento da adenda no bloco Pagamento, como o contrato", () => {
 
   it("caminho C: o cliente paga a 1.ª no portal, o Financeiro valida no Financeiro do negócio: EC-1027-A1", () => {
     const { S, A, d, a } = preparar();
-    A.role("financeiro"); registarFaturasAdenda(A, d);
+    A.role("financeiro"); A.faturarAdendas(d.id);
     render(<Montar S={S}>{(ctx) => <PortalCliente ctx={ctx} d={d} fechar={() => {}} />}</Montar>);
     const c = screen.getByText(`Pagar a fatura ${a.faturas![0].n}`).parentElement!;
     fireEvent.click(within(c).getByRole("radio", { name: "Transferência" }));
@@ -184,7 +175,7 @@ describe("o pagamento da adenda no bloco Pagamento, como o contrato", () => {
 
   it("caminho E: só mão de obra: «Sem materiais a encomendar»; validar a 1.ª parcela no bloco Pagamento não emite encomenda", () => {
     const { S, A, d, a } = preparar(true);
-    A.role("financeiro"); registarFaturasAdenda(A, d);
+    A.role("financeiro"); A.faturarAdendas(d.id);
     S.role = "financeiro";
     caminho(S, d);
     expect(screen.getByText(`Encomenda da adenda ${N}`).closest("li")!.textContent).toMatch(/Sem materiais a encomendar/);
@@ -203,14 +194,12 @@ describe("o pagamento da adenda no bloco Pagamento, como o contrato", () => {
     const a2 = d.adendas!.find((x) => x !== a) as Adenda, N2 = a2.n;
     adendaAssinada(A, d.id, N2);
     A.role("financeiro");
-    // o passo «Registar a fatura» da adenda 2 leva o número dela: abre o campo dela e regista-se só a dela
-    const ft2 = minhas(S, "financeiro").find((x) => x.d === d && x.p.act === "abrirFaturaAdenda" && x.p.arg === N2)!;
+    // o passo "Emitir a fatura" da adenda 2 leva o número: emite só a dela
+    const ft2 = minhas(S, "financeiro").find((x) => x.d === d && x.p.act === "faturarAdendas" && x.p.arg === N2)!;
     fazer(A, ft2.p.act!, d.id, ft2.p.arg);
-    expect(S.pulse).toBe(alvoFaturaAdenda(N2));
-    registarFaturasAdenda(A, d, N2);
     expect(a2.faturas?.find((f) => f.i === 0)).toBeTruthy();
     expect(a.faturas ?? []).toHaveLength(0);
-    registarFaturasAdenda(A, d, N);
+    A.faturarAdendas(d.id, N);
     // o Hoje do Financeiro tem as duas tarefas de validar, cada uma com o número da sua adenda
     expect(minhas(S, "financeiro").filter((x) => x.d === d && x.p.act === "validarPagamentosAdenda").map((x) => x.p.arg)).toEqual([N, N2]);
     S.role = "financeiro";
@@ -288,7 +277,7 @@ describe("o pagamento da adenda no bloco Pagamento, como o contrato", () => {
     expect(i2).toBe(i1 + 1);
     expect(itens[i1]).toMatch(/por fazer/);
     cleanup();
-    A.role("financeiro"); registarFaturasAdenda(A, d); A.validarPagamentosAdenda(d.id);
+    A.role("financeiro"); A.faturarAdendas(d.id); A.validarPagamentosAdenda(d.id);
     caminho(S, d);
     const it2 = within(screen.getByRole("list", { name: "Condições para arrancar" })).getAllByRole("listitem").map((x) => x.textContent ?? "");
     expect(it2.find((t) => t.startsWith(`1.ª parcela da adenda ${N} paga`))).toMatch(/\(feito\)/);
@@ -297,24 +286,23 @@ describe("o pagamento da adenda no bloco Pagamento, como o contrato", () => {
 });
 
 describe("as parcelas seguintes da adenda, como no contrato", () => {
-  it("a 2.ª (no fim da obra) só se fatura com a 1.ª paga e a obra concluída: o campo do número só aparece então", async () => {
+  it("a 2.ª (no fim da obra) só se fatura com a 1.ª paga e a obra concluída: o botão fica desativado até lá", () => {
     const { S, A, d, a } = preparar();
-    A.role("financeiro"); registarFaturasAdenda(A, d);
+    A.role("financeiro"); A.faturarAdendas(d.id);
     expect(parcelaFaturavel(d, a)).toMatchObject({ p: { i: 1, fim: true }, motivo: "Depois de paga a 1.ª parcela." });
     // a ação também recusa (não só o botão)
-    A.registarFaturaAdenda(d.id, N, "FAT TESTE/2P");
+    A.faturarParcelaAdenda(d.id, N);
     expect(a.faturas).toHaveLength(1);
     S.role = "financeiro";
     render(<Montar S={S}>{(ctx) => <DocumentosSimples {...ctx} d={d} />}</Montar>);
     let bloco = screen.getByTestId(`fin-adenda-${N}`);
-    const campo = () => within(screen.getByTestId(`fin-adenda-${N}`)).queryByLabelText(/Número da fatura no Eticadata/);
-    expect(campo()).toBeNull();
-    expect(within(bloco).queryByRole("button", { name: "Emitir a fatura" })).toBeNull();
+    const emitir = () => within(screen.getByTestId(`fin-adenda-${N}`)).getByRole("button", { name: "Emitir a fatura" }) as HTMLButtonElement;
+    expect(emitir().disabled).toBe(true);
     expect(bloco.textContent).toMatch(/Depois de paga a 1\.ª parcela\./);
     cleanup();
     // os Trabalhos a mais: o mesmo
     render(<Montar S={S}>{(ctx) => <TrabalhosAMais {...ctx} d={d} />}</Montar>);
-    expect(screen.queryByLabelText(/Número da fatura no Eticadata/)).toBeNull();
+    expect((screen.getByRole("button", { name: "Emitir a fatura da 2.ª parcela" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/2\.ª parcela: depois de paga a 1\.ª parcela\./)).toBeTruthy();
     // e o pagamento da 1.ª valida-se sem o aviso do cliente
     expect((screen.getByRole("button", { name: "Validar o pagamento" }) as HTMLButtonElement).disabled).toBe(false);
@@ -324,20 +312,19 @@ describe("as parcelas seguintes da adenda, como no contrato", () => {
     expect(parcelaFaturavel(d, a).motivo).toBe("No fim da obra, com a obra concluída.");
     render(<Montar S={S}>{(ctx) => <DocumentosSimples {...ctx} d={d} />}</Montar>);
     bloco = screen.getByTestId(`fin-adenda-${N}`);
-    expect(campo()).toBeNull();
+    expect(emitir().disabled).toBe(true);
     expect(bloco.textContent).toMatch(/No fim da obra, com a obra concluída\./);
     cleanup();
-    A.registarFaturaAdenda(d.id, N, "FAT TESTE/2P");
+    A.faturarParcelaAdenda(d.id, N);
     expect(a.faturas).toHaveLength(1);
 
     // a obra concluída: já se fatura
     d.obra.plano!.estado = "concluída";
     expect(parcelaFaturavel(d, a).motivo).toBeNull();
     render(<Montar S={S}>{(ctx) => <DocumentosSimples {...ctx} d={d} />}</Montar>);
-    expect(campo()).toBeTruthy();
-    await registarNoEcra(screen.getByTestId(`fin-adenda-${N}`), "FAT 15200126/902");
-    await waitFor(() => expect(a.faturas).toHaveLength(2));
-    expect(a.faturas![1].n).toBe("FAT 15200126/902");
+    expect(emitir().disabled).toBe(false);
+    fireEvent.click(emitir());
+    expect(a.faturas).toHaveLength(2);
     expect(a.faturas![1].i).toBe(1);
   });
 
@@ -346,14 +333,14 @@ describe("as parcelas seguintes da adenda, como no contrato", () => {
     const ids = passosPreparacao(d, S).filter((x) => x.trilho === "pag").map((x) => x.id);
     expect(ids).toEqual(["ft", "pg", `ft-ad-${N}`, `pg-ad-${N}`]);
     const fat = minhas(S, "financeiro").filter((x) => x.d === d && /adenda/.test(x.p.t));
-    expect(fat.map((x) => x.p.t)).toEqual([`Registar a fatura da adenda ${N} · 1.ª parcela`]);
-    A.role("financeiro"); registarFaturasAdenda(A, d);
+    expect(fat.map((x) => x.p.t)).toEqual([`Emitir a fatura da adenda ${N} · 1.ª parcela`]);
+    A.role("financeiro"); A.faturarAdendas(d.id);
     expect(minhas(S, "financeiro").filter((x) => x.d === d && /adenda/.test(x.p.t)).map((x) => x.p.t)).toEqual([`Validar o pagamento da adenda ${N} · 1.ª parcela`]);
   });
 
   it("com a obra já em curso, a adenda assinada depois continua no Hoje do Financeiro", () => {
     const { S, A, d } = preparar();
-    A.role("financeiro"); registarFaturasAdenda(A, d);
+    A.role("financeiro"); A.faturarAdendas(d.id);
     d.obra.plano!.estado = "em curso";
     expect(minhas(S, "financeiro").filter((x) => x.d === d && x.p.act === "validarPagamentosAdenda")).toHaveLength(1);
     A.validarPagamentosAdenda(d.id);

@@ -22,14 +22,7 @@ describe("os dados da empresa para pagar", () => {
   it("a transferência está sempre; o Multibanco, o MB Way e o débito direto só com os seus dados", () => {
     expect(metodosDe(null)).toEqual(["Transferência"]);
     expect(metodosDe({ titular: null, iban: "PT50", mbEntidade: null, mbway: "912345678", sepaCredor: null })).toEqual(["Transferência", "MB Way"]);
-    // 19/11 (auditoria): sem o prestador de pagamentos, a referência Multibanco não aparece (a gerada aqui é de teste)
-    expect(metodosDe(PAGAMENTO_EXEMPLO)).toEqual(["Transferência", "MB Way", "Débito direto"]);
-    expect(metodosDe({ ...PAGAMENTO_EXEMPLO, mbPrestador: "Prestador" })).toEqual(["Transferência", "Referência MB", "MB Way", "Débito direto"]);
-    expect(metodosDe({ ...PAGAMENTO_EXEMPLO, mbEntidade: null, mbPrestador: "Prestador" })).toEqual(["Transferência", "MB Way", "Débito direto"]);
-  });
-  it("19/11: o prestador lê-se da base quando ela o tiver (mb_prestador); sem ele, fica de fora", () => {
-    expect(lerDadosPagamento({ mb_entidade: "12345", mb_prestador: " Easypay " })).toMatchObject({ mbEntidade: "12345", mbPrestador: "Easypay" });
-    expect(lerDadosPagamento({ mb_entidade: "12345" })).not.toHaveProperty("mbPrestador");
+    expect(metodosDe(PAGAMENTO_EXEMPLO)).toEqual(["Transferência", "Referência MB", "MB Way", "Débito direto"]);
   });
 
   it("o protótipo fica com os de exemplo; a página real troca-os e, ao sair, voltam", () => {

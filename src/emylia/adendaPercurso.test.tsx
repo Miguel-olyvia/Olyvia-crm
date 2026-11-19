@@ -2,8 +2,8 @@
 // no portal (pedir alterações → versão 2 com o mesmo número → aceitar), o contrato da adenda gerado pelo comercial, a assinatura por SMS,
 // a fatura da 1.ª parcela (as parcelas do contrato), o pagamento no portal, a validação (a encomenda da adenda nasce) e o arranque.
 // E: o IVA por taxa (6% na mão de obra, 23% nos materiais), "Ver a fatura" abre a fatura, o Hoje de cada um, os documentos e a linha do tempo.
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { eur, minhas, seed, type Estado, type Negocio } from "./motor";
 import { FINANCEIRO, OBRA, emFalta, type Grupo } from "./campos";
 import { esquecerInventario, lerInventario } from "./inventario/loja";
@@ -15,11 +15,7 @@ import { faltaParaArrancar } from "./preparacaoObra";
 import { receberTudo } from "./testeObra";
 import { historiaDaObra } from "./historiaObra";
 import { totaisAdenda, versaoAdenda } from "./adendas";
-import { adendaAssinada, registarFaturasAdenda } from "./testeAdenda";
-import { registarNoEcra } from "./testeFaturaAdenda";
-
-// 19/11 (auditoria): a fatura da adenda regista-se com o número do Eticadata; aqui o ERP não responde (regista-se sem confirmar)
-vi.mock("./erpEticadata", async (orig) => ({ ...(await orig<typeof import("./erpEticadata")>()), lerFaturaErp: vi.fn(async () => ({ ok: false, motivo: "sem_ligacao", msg: "Sem ligação ao Eticadata." })) }));
+import { adendaAssinada } from "./testeAdenda";
 
 afterEach(() => { cleanup(); localStorage.clear(); });
 beforeEach(() => { esquecerInventario(); });
@@ -35,7 +31,7 @@ function preparar() {
   render(<Montar S={S}>{(ctx) => { A = ctx.A; return null; }}</Montar>);
   cleanup();
   A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
-  A.role("operacoes"); (A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id), A.aprovarPlano(d.id));
+  A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   A.role("comercial");
   return { S, A, d };
 }
@@ -45,7 +41,7 @@ const cartao = () => screen.getByRole("listitem", { name: `Adenda ${N}` });
 const tarefa = (S: Estado, d: Negocio, papel: Parameters<typeof minhas>[1], t: string | RegExp) => minhas(S, papel).find((x) => x.d === d && (typeof t === "string" ? x.p.t === t : t.test(x.p.t)));
 
 describe("a adenda com o percurso do orçamento, de ponta a ponta", () => {
-  it("verificar → Direção aprova → enviar → o cliente pede alterações → v2 → aceita → contrato → assina por SMS → 1.ª parcela → paga → validada → EC → arranque", async () => {
+  it("verificar → Direção aprova → enviar → o cliente pede alterações → v2 → aceita → contrato → assina por SMS → 1.ª parcela → paga → validada → EC → arranque", () => {
     const { S, A, d } = preparar();
     A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu", { desconto: 25 });
     const a = d.adendas![0];
@@ -148,17 +144,14 @@ describe("a adenda com o percurso do orçamento, de ponta a ponta", () => {
     expect(d.obra.plano!.tasks.some((t) => t.adenda === N)).toBe(true);
     cleanup();
 
-    // 9. o Financeiro regista a fatura da 1.ª parcela (50%, como no contrato), emitida no Eticadata (19/11: a Olyvia não a emite)
-    expect(tarefa(S, d, "financeiro", /^Registar a fatura da adenda AD 2026\/1027-1 · 1\.ª parcela$/)?.p).toMatchObject({ act: "abrirFaturaAdenda", btn: "Registar a fatura" });
+    // 9. o Financeiro emite a fatura da 1.ª parcela (50%, como no contrato)
+    expect(tarefa(S, d, "financeiro", /^Emitir a fatura da adenda AD 2026\/1027-1 · 1\.ª parcela$/)?.p.act).toBe("faturarAdendas");
     S.role = "financeiro";
     render(<Montar S={S}>{(ctx) => <DocumentosSimples {...ctx} d={d} />}</Montar>);
     const bloco = screen.getByTestId(`fin-adenda-${N}`);
-    expect(bloco.textContent).toMatch(/Registar a fatura da 1\.ª parcela \(na adjudicação, 50%\)/);
-    expect(within(bloco).queryByRole("button", { name: "Emitir a fatura" })).toBeNull();
-    await registarNoEcra(bloco, "FAT 15200126/700");
-    await waitFor(() => expect(a.faturas?.length).toBe(1));
+    expect(bloco.textContent).toMatch(/Emitir a fatura da 1\.ª parcela \(na adjudicação, 50%\)/);
+    fireEvent.click(within(bloco).getByRole("button", { name: "Emitir a fatura" }));
     const f0 = a.faturas![0];
-    expect(f0.n).toBe("FAT 15200126/700");
     expect(f0).toMatchObject({ i: 0, p: 0.5 });
     expect(f0.v).toBeCloseTo(totaisAdenda(a).total / 2, 1);
     cleanup();
@@ -194,11 +187,11 @@ describe("a adenda com o percurso do orçamento, de ponta a ponta", () => {
     // 12. o arranque: os materiais recebidos e o plano aprovado de novo (a adenda reabriu-o)
     expect(receberTudo("CT 2026/1027")).toBe("");
     expect(receberTudo("CT 2026/1027 · A1")).toBe("");
-    A.role("operacoes"); (A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id), A.aprovarPlano(d.id));
+    A.role("operacoes"); (A.retificarMedidas(d.id), A.aprovarPlano(d.id));
     expect(faltaParaArrancar(d)).toEqual([]);
     A.arrancar(d.id);
     expect(d.obra.plano!.estado).toBe("em curso");
-  }, 20_000); // 19/11: ponta a ponta, com o registo da fatura pelo ecrã (assíncrono)
+  });
 });
 
 describe("a adenda: o IVA, os documentos, o Hoje e a linha do tempo", () => {
@@ -251,7 +244,7 @@ describe("a adenda: o IVA, os documentos, o Hoje e a linha do tempo", () => {
     const { S, A, d } = preparar();
     A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu");
     adendaAssinada(A, d.id, N);
-    A.role("financeiro"); registarFaturasAdenda(A, d); A.role("comercial");
+    A.role("financeiro"); A.faturarAdendas(d.id); A.role("comercial");
     const n2 = A.criarAdenda(d.id, [{ sid: "pint", q: 5 }], "O cliente pediu")!;
     A.verificarEnviarAdenda(d.id, n2); A.recusarAdenda(d.id, n2, "O prazo");
     const n3 = A.criarAdenda(d.id, [{ sid: "pint", q: 3 }], "Erro de medição")!;

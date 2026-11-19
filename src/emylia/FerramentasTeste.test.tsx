@@ -89,8 +89,7 @@ describe("ferramentas de teste: os botões", () => {
     const espiao = vi.spyOn(ctx.A, "contactar");
     render(<FerramentasTeste ctx={ctx} d={lead} ambiente={() => true} />);
     fireEvent.click(screen.getByRole("button", { name: /^Avançar:/ }));
-    // 19/11 (auditoria): «Registar chamada» pede o resultado; avançar regista a chamada com o cliente interessado
-    expect(espiao).toHaveBeenCalledWith(lead.id, "Atendeu · interessado");
+    expect(espiao).toHaveBeenCalledWith(lead.id);
   });
 });
 

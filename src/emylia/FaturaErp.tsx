@@ -1,6 +1,6 @@
 // 22/10/2026: a fatura do Eticadata no V1. O Financeiro emite no ERP e escreve aqui o número; a Olyvia lê no ERP o estado (erpEticadata.ts)
 // e, quando estiver paga, o negócio passa à Obra com o recibo do ERP. Sem ligação ao ERP, regista-se na mesma e valida-se à mão.
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { ArrowRight, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -9,7 +9,6 @@ import type { Ctx } from "./pecas";
 import { lerFaturaErp, resumoErp } from "./erpEticadata";
 import { SEM_PERM, pelaPermissao, pelaPermissaoAlguma, podeNeg, podeVerificarErp } from "./permissoes";
 import { FINANCEIRO, efetivo, emFalta } from "./campos";
-import { alvoFaturaAdenda, nomeParcela, type Adenda } from "./adendas";
 
 /** De quanto em quanto tempo a Olyvia volta a ler o ERP enquanto a fatura está por pagar e o negócio está aberto. */
 const INTERVALO_MS = 60_000;
@@ -68,53 +67,6 @@ export function RegistarFaturaErp({ ctx, d, tamanho = "lg", aEsquerda = false, s
         <p id={`fat-erp-erro-${d.id}`} role="alert" className="text-sm text-destructive">
           {erro.msg}
           {erro.semLigacao && <> <button type="button" className="font-medium underline underline-offset-4" onClick={go(() => A.registarFaturaErp(d.id, numero.trim().replace(/\s+/g, " "), null, semDados))}>Registar sem confirmar</button></>}
-        </p>
-      )}
-    </form>
-  );
-}
-
-/** 19/11 (auditoria): a fatura de uma parcela da adenda, como a do contrato: o Financeiro emite-a no Eticadata e escreve aqui o número; a
- *  Olyvia confirma-a no ERP e regista-a (A.registarFaturaAdenda). A Olyvia nunca inventa o número. Sem ligação ao ERP, regista-se sem
- *  confirmar. O «Registar a fatura» do Hoje (A.abrirFaturaAdenda) traz o cursor para aqui. */
-export function RegistarFaturaAdendaErp({ ctx, d, a, i }: { ctx: Ctx; d: Negocio; a: Adenda; /** a parcela */ i: number }) {
-  const { A, go, S } = ctx;
-  const [numero, setNumero] = useState("");
-  const [aLer, setALer] = useState(false);
-  const [erro, setErro] = useState<{ msg: string; semLigacao: boolean } | null>(null);
-  const campo = useRef<HTMLInputElement>(null);
-  const id = useId();
-  const alvo = S.pulse === alvoFaturaAdenda(a.n);
-  useEffect(() => {
-    if (!alvo) return;
-    campo.current?.scrollIntoView?.({ behavior: "smooth", block: "center" });
-    campo.current?.focus();
-  }, [alvo]);
-  if (!podeNeg(S.role, "finance.invoice")) return <p className="mt-2 text-sm text-muted-foreground">{SEM_PERM["finance.invoice"].sub}</p>;
-  const limpo = () => numero.trim().replace(/\s+/g, " ");
-  const registar = async (e: FormEvent) => {
-    e.preventDefault();
-    const n = limpo();
-    if (!n) { setErro({ msg: "Escreva o número da fatura, como aparece no Eticadata.", semLigacao: false }); return; }
-    setALer(true); setErro(null);
-    const r = await lerFaturaErp(n);
-    setALer(false);
-    if ("info" in r) { go(() => { A.registarFaturaAdenda(d.id, a.n, n, r.info); })(); return; }
-    setErro({ msg: r.msg, semLigacao: r.motivo === "sem_ligacao" });
-  };
-  return (
-    <form onSubmit={registar} className="mt-2 grid gap-1.5" aria-label={`Registar a fatura da adenda ${a.n}`}>
-      <label htmlFor={id} className="text-sm text-muted-foreground">Número da fatura no Eticadata · adenda {a.n}, {nomeParcela(i)}</label>
-      <div className="flex flex-wrap gap-2">
-        <input id={id} ref={campo} value={numero} onChange={(e) => setNumero(e.target.value)} placeholder="FAT 15200126/538" autoComplete="off"
-          className="h-11 min-w-0 flex-1 rounded-lg border border-input bg-background px-3 text-[15px] outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 sm:max-w-xs"
-          aria-invalid={!!erro} aria-describedby={erro ? id + "-erro" : undefined} />
-        <Button type="submit" className="min-h-11" disabled={aLer || !numero.trim()}>{aLer ? "A confirmar no ERP…" : "Registar a fatura"}</Button>
-      </div>
-      {erro && (
-        <p id={id + "-erro"} role="alert" className="text-sm text-destructive">
-          {erro.msg}
-          {erro.semLigacao && <> <button type="button" className="font-medium underline underline-offset-4" onClick={go(() => { A.registarFaturaAdenda(d.id, a.n, limpo(), null); })}>Registar sem confirmar</button></>}
         </p>
       )}
     </form>

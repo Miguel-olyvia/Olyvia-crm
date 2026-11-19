@@ -19,9 +19,9 @@ import { ecDaAdenda, porEncomendarDe } from "./encomendasAjuste";
 import { ecNoServidor } from "./preparacaoObra";
 import {
   MOTIVOS_ADENDA, adendaBloqueada, alertasAdenda, diasAdenda, estadoAdenda, faturaAValidar, nomeParcela, parcelaFaturavel, parcelasAdenda, previsaoLinha, primeiraPaga, proximaParcela,
-  textoIvaPorTaxa, totaisAdenda, totaisLinhas, valorContrato, versaoAdenda, type Adenda, type LinhaAdenda,
+  totaisAdenda, totaisLinhas, valorContrato, versaoAdenda, type Adenda, type LinhaAdenda,
 } from "./adendas";
-import { RegistarFaturaAdendaErp } from "./FaturaErp";
+import { lerVersao } from "./versaoPrototipo";
 
 /** 21/10: o próximo passo de uma adenda (o comercial, a Direção, o Jurídico) e os do cliente, simulados no protótipo.
  *  Serve o cartão dos Trabalhos a mais e o do imprevisto (ImprevistosObra.tsx). */
@@ -70,7 +70,7 @@ export function AcoesAdenda({ ctx, d, a, editar }: { ctx: Ctx; d: Negocio; a: Ad
 /** As parcelas da adenda (as mesmas do contrato): a fatura e o pagamento de cada uma. */
 function ParcelasAdenda({ ctx, d, a }: { ctx: Ctx; d: Negocio; a: Adenda }) {
   const { S, A, go } = ctx;
-  const P = parcelasAdenda(d, a), prox = proximaParcela(d, a), fin = S.role === "financeiro";
+  const P = parcelasAdenda(d, a), prox = proximaParcela(d, a), fin = S.role === "financeiro", atual = lerVersao() === "atual";
   // 21/10: como no contrato: a seguinte só depois de paga a 1.ª (a do fim, com a obra concluída); valida-se pela ordem das parcelas
   const fat = parcelaFaturavel(d, a), aValidar = faturaAValidar(a);
   return (
@@ -80,8 +80,7 @@ function ParcelasAdenda({ ctx, d, a }: { ctx: Ctx; d: Negocio; a: Adenda }) {
           {nomeParcela(x.i)} ({x.l.toLowerCase()}, {Math.round(x.p * 100)}%) · {eur(x.v)} €: {x.ft ? (x.ft.recibo ? `${x.ft.n}, paga (${x.ft.recibo.n})` : `${x.ft.n}, ${x.ft.pag?.comprovativo ? `o cliente avisou: ${x.ft.pag.comprovativo}` : "por pagar no portal"}`) : "por faturar"}
         </p>
       ))}
-      {/* 19/11 (auditoria): a Olyvia não emite a fatura: escreve-se o número do Eticadata, confirma-se no ERP e regista-se (como no contrato) */}
-      {fin && prox && !fat.motivo && <RegistarFaturaAdendaErp ctx={ctx} d={d} a={a} i={prox.i} />}
+      {fin && atual && prox && <Button size="sm" className="min-h-10" disabled={!!fat.motivo} onClick={go(() => (prox.i === 0 ? A.faturarAdendas(d.id, a.n) : A.faturarParcelaAdenda(d.id, a.n)))}>Emitir a fatura da {nomeParcela(prox.i)}</Button>}
       {fin && aValidar.f && <Button size="sm" className="ml-2 min-h-10" onClick={go(() => A.validarPagamentosAdenda(d.id, a.n))}>Validar o pagamento</Button>}
       {fin && prox && fat.motivo && <p className="text-sm text-muted-foreground">{nomeParcela(prox.i)}: {fat.motivo.replace(/^./, (c) => c.toLowerCase())}</p>}
     </div>
@@ -162,8 +161,6 @@ export function TrabalhosAMais(ctx: Ctx & { d: Negocio }) {
                   <div className="min-w-0">
                     <p className="text-[15px] font-semibold">{a.n}{v > 1 ? ` · v${v}` : ""} · {a.linhas.map((x) => x.n).join(", ")}</p>
                     <p className="text-sm tabular-nums text-muted-foreground">+{eur(TA.total)} € · +{dd} {dd === 1 ? "dia" : "dias"} · {a.motivo.toLowerCase()}</p>
-                    {/* 19/11 (auditoria): o IVA por taxa (os produtos a 23%, a mão de obra a 6%) */}
-                    <p className="text-sm tabular-nums text-muted-foreground">{textoIvaPorTaxa(TA)}</p>
                   </div>
                   <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-sm font-medium", E.cor)}>{E.t}</span>
                 </div>
@@ -244,7 +241,7 @@ export function TrabalhosAMais(ctx: Ctx & { d: Negocio }) {
           {/* as contas ao vivo, com o IVA por taxa */}
           <div className="grid grid-cols-3 gap-2 rounded-xl bg-muted/50 p-3 text-sm">
             <div><p className="text-muted-foreground">Sem IVA</p><p className="text-[15px] font-semibold tabular-nums">+{eur(T.base)} €</p></div>
-            <div><p className="text-muted-foreground">Com IVA ({[T.mo > 0.004 || T.mat <= 0.004 ? "6%" : "", T.mat > 0.004 ? "23%" : ""].filter(Boolean).join(" e ")})</p><p className="text-[15px] font-semibold tabular-nums">+{eur(T.total)} €</p></div>
+            <div><p className="text-muted-foreground">Com IVA {T.mat > 0 ? "(6% e 23%)" : "(6%)"}</p><p className="text-[15px] font-semibold tabular-nums">+{eur(T.total)} €</p></div>
             <div><p className="text-muted-foreground">Prazo</p><p className="text-[15px] font-semibold tabular-nums">+{diasAdenda(linhas)} {diasAdenda(linhas) === 1 ? "dia" : "dias"}</p></div>
           </div>
           <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">

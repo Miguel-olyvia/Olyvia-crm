@@ -71,9 +71,7 @@ const INSIGHTS = {
 const campo = vi.fn();
 const servicoDaChamada = vi.fn();
 const servicosDoPedido = vi.fn();
-// 19/11 (auditoria): a chamada analisada passa a Lead a Contacto (A.chamadaFeita)
-const chamadaFeita = vi.fn();
-const ctx = { A: { campo, servicoDaChamada, servicosDoPedido, chamadaFeita }, run: (fn: () => void) => fn(),
+const ctx = { A: { campo, servicoDaChamada, servicosDoPedido }, run: (fn: () => void) => fn(),
   S: { svc: { s1: { n: "Canalização" }, s2: { n: "Pintura" } } } } as unknown as Ctx;
 const d = { id: 7, f: { imovel: "Moradia" }, linhaPorDefinir: true, linha: "wc" } as unknown as Negocio;
 
@@ -126,7 +124,6 @@ describe("ChamadaDireto (4/11, na nuvem)", () => {
     // 9/11: e a transcrição inteira fica no negócio (antes de preencher)
     expect(campo).toHaveBeenCalledWith(7, "transcricao_chamada", expect.stringContaining("Cliente: É um apartamento no terceiro andar."));
     expect(campo).toHaveBeenCalledTimes(5);
-    expect(chamadaFeita).toHaveBeenCalledWith(7); // 19/11: o que a chamada disse entrou: na Lead, passa a Contacto
     // o tipo de serviço e os serviços do Catálogo vão pelas ações próprias (só os nomes que existem no Catálogo)
     expect(servicoDaChamada).toHaveBeenCalledWith(7, "wc");
     expect(servicosDoPedido).toHaveBeenCalledWith(7, ["s1", "s2"]);

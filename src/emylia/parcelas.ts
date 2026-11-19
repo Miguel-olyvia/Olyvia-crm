@@ -4,13 +4,11 @@
 // · 50-25-25: 50% no início; 25% no arranque (carregar em «Arrancar a obra» manda-a ao Financeiro; a obra só arranca com ela paga);
 //   25% no fim, antes da entrega.
 // Em todos: «no fim, antes de entregar a obra, fatura para pagar; sem isso não há auto de receção da obra».
-// · 30-40-30 e «Por fases» (19/11, auditoria): a parcela do fim de uma fase só cai no Financeiro com as tarefas dessa fase feitas no plano,
-//   ou passada a data do fim dela (antes caía logo no arranque).
 // A 1.ª parcela é a fatura do negócio (d.fin.fatura, o passo Fatura do Financeiro). As seguintes são faturas de prestação (d.fin.tranches,
 // chave t2, t3…), registadas e pagas pelas funções do servidor como as outras (real/financeiroReal.ts).
 // Sem React nem o estadoV2 (que puxa os documentos): o motor e a preparação da obra importam isto.
 import { totaisIva, type Estado, type Negocio } from "./motor";
-import { deIso, diasDaObra, isoDia, prestacoes, type Prestacao } from "./planoObra";
+import { prestacoes, type Prestacao } from "./planoObra";
 import { daFaturaUnica, tranchesDoPlano, valorTranche, type FaturaReg } from "./v2/financeiro";
 import { assinadas, nomeParcela, parcelasAdenda } from "./adendas";
 
@@ -61,50 +59,13 @@ const tarefasFeitas = (d: Negocio): boolean => {
   return !!p && p.tasks.length > 0 && p.tasks.every((t) => t.exec?.estado === "feita" || t.exec?.estado === "validada");
 };
 
-const feitaOuValidada = (t: { exec?: { estado?: string } | null }) => t.exec?.estado === "feita" || t.exec?.estado === "validada";
-
-/** 19/11 (auditoria): as tarefas do plano da fase de uma parcela «a meio da obra» (as da fase; sem nenhuma nessa fase, as das fases
- *  anteriores, que acabam antes dela). */
-function tarefasDaFase(d: Negocio, fase: number): { dia: number; dur: number; exec?: { estado?: string } | null }[] {
-  const T = d.obra.plano?.tasks ?? [];
-  const daFase = T.filter((t) => t.fase === fase);
-  return daFase.length ? daFase : T.filter((t) => t.fase != null && t.fase < fase);
-}
-
-/** 19/11 (auditoria): o último dia (aaaa-mm-dd) das tarefas dessa fase no plano, pelo início da obra; null sem datas (planos de exemplo). */
-export function fimDaFase(d: Negocio, fase: number): string | null {
-  const p = d.obra.plano, T = tarefasDaFase(d, fase);
-  const ini = p?.inicio ?? (d.f.inicio && /^\d{4}-\d{2}-\d{2}/.test(d.f.inicio) ? d.f.inicio.slice(0, 10) : null);
-  // 19/11: sem uma data ISO válida não há fim da fase (um início inválido congelava o browser em diasDaObra)
-  const iso = ini && /^\d{4}-\d{2}-\d{2}/.test(ini) ? ini.slice(0, 10) : null;
-  if (!p || !T.length || !iso || Number.isNaN(deIso(iso).getTime()) || p.origem !== "orcamento") return null;
-  const fim = T.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
-  const ds = diasDaObra(deIso(iso), fim);
-  return ds[fim - 1] ? isoDia(ds[fim - 1]) : null;
-}
-
-/** 19/11 (auditoria): a parcela do fim de uma fase («30% + 40% + 30%», «Por fases») é devida com as tarefas dessa fase feitas no plano, ou
- *  passada a data do fim dessa fase. Antes caía logo no arranque (bastava a obra estar em curso). */
-export function faseAcabou(d: Negocio, fase: number, hoje: string = hojeISO()): boolean {
-  const T = tarefasDaFase(d, fase);
-  if (!T.length) return false;
-  if (T.every(feitaOuValidada)) return true;
-  const fim = fimDaFase(d, fase);
-  return !!fim && hoje > fim;
-}
-
 /** Já é a vez desta parcela? O início: com a proposta aceite. O arranque: quando as Operações carregam em «Arrancar a obra» (d.f.arranque_pedido)
- *  ou com a obra a andar. Durante a obra (19/11): com a obra a andar E a fase dela acabada (faseAcabou); sem a fase, com a obra a andar.
- *  O fim: com as tarefas todas feitas ou a obra concluída. */
-export function devidaNoMomento(d: Negocio, m: MomentoParcela, fase?: Prestacao["fase"], hoje?: string): boolean {
+ *  ou com a obra a andar. Durante a obra: com a obra a andar. O fim: com as tarefas todas feitas ou a obra concluída. */
+export function devidaNoMomento(d: Negocio, m: MomentoParcela): boolean {
   const e = d.obra.plano?.estado;
   if (m === "inicio") return !!d.orc?.aceite;
   if (m === "arranque") return !!d.f.arranque_pedido || e === "em curso" || e === "concluída";
-  if (m === "obra") {
-    if (e === "concluída") return true;
-    if (e !== "em curso") return false;
-    return typeof fase === "number" && fase > 0 ? faseAcabou(d, fase, hoje) : true;
-  }
+  if (m === "obra") return e === "em curso" || e === "concluída";
   return e === "concluída" || (e === "em curso" && tarefasFeitas(d));
 }
 
@@ -116,7 +77,7 @@ export function parcelasDoContrato(S: Estado, d: Negocio): Parcela[] {
     const fatura = fs.find((f) => f.tranche === t.id) ?? (i === 0 && d.fin.fatura ? fs.find((f) => f.numero === d.fin.fatura!.n) : undefined);
     const momento = momentoDe(L, i);
     const paga = i === 0 ? d.fin.pago || !!fatura?.pagamento : !!fatura?.pagamento;
-    return { i, id: t.id, l: L[i]?.l ?? t.nome, p: L[i]?.p ?? t.pct / 100, v: valorTranche(total, T, t.id), momento, devida: devidaNoMomento(d, momento, L[i]?.fase), fatura, paga };
+    return { i, id: t.id, l: L[i]?.l ?? t.nome, p: L[i]?.p ?? t.pct / 100, v: valorTranche(total, T, t.id), momento, devida: devidaNoMomento(d, momento), fatura, paga };
   });
 }
 

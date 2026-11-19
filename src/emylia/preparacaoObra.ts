@@ -9,7 +9,7 @@
 // O cartão do negócio só lê o estado da encomenda no Inventário (reservada, encomendada ao fornecedor, saída).
 import { resumoErp } from "./erpEticadata";
 import { itemCatalogo, normal } from "./catalogo";
-import { DIAS, LINHAS, PAPEIS, TECS, calcMats, acertoDoValorPendente, conflitos, difDoAcerto, retificacaoPorPagar, diaDeFerias, eur, margemSemAdenda, medidasEPlanoAbertos, mudancasDeValor, nfmt, pct, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
+import { DIAS, LINHAS, PAPEIS, TECS, calcMats, acertoDoValorPendente, conflitos, difDoAcerto, retificacaoPorPagar, diaDeFerias, eur, medidasEPlanoAbertos, mudancasDeValor, nfmt, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
 import { custosDe, perfilIdDe, receitaDe } from "./v2/custosModelo";
 import { HORAS_DIA } from "./ganttOrcamento";
 import { PERFIL_DO_SK, tecnicosDoPerfil } from "./equipa/tecnicos";
@@ -19,7 +19,6 @@ import { precoProduto } from "./produtosVisita";
 import { faltaMateriais, posDaInicial, resumoEcNegocio, textoResumoEc, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import { lerInventario } from "./inventario/loja";
 import { faltaMateriaisReal, prontidaoDe, textoProntidaoReal, usarProntidao } from "./inventario/prontidaoReal";
-import { faltaPorFalha, textoPorFalha } from "./real/inventarioReal";
 import { lerVersao } from "./versaoPrototipo";
 import type { Inventario } from "./inventario/tipos";
 import { assinadas, diasAdenda, faturasAdenda, nomeParcela, parcelasAdenda, primeiraPaga, type Adenda } from "./adendas";
@@ -114,52 +113,9 @@ export function gerarEncCliente(d: Negocio, S: Estado, n: string, quando: string
 // aceite → Financeiro (fatura e pagamento validado) → o supervisor retifica as medidas e as Operações validam e ajustam o plano (ao mesmo
 // tempo) → contrato assinado → encomenda de cliente (e a fornecedor) e tudo recebido → início da obra. Se as medidas ou o plano mudarem o
 // valor, uma adenda depois do contrato (o acerto). A venda direta não tem obra a medir nem contrato.
-/** 19/11 (auditoria): o dia a partir do qual as medidas aceites vêm antes do plano e da encomenda de cliente (no ecrã e na base:
- *  20270123050000, fn_neg_medidas_aceites). As encomendas emitidas antes disso são do fluxo antigo. */
-export const MEDIDAS_ANTES_DO_PLANO = "2026-11-19";
-/** O dia (aaaa-mm-dd) de uma data do motor: «aaaa-mm-dd…» ou «dd/mm[ hh:mm]» (as lidas da base, deIso, e as do exemplo). As datas sem ano
- *  são de 2026 de setembro a dezembro (a Emylia começou em setembro de 2026) e de 2027 nos outros meses. «hoje …» não tem dia: null. */
-export function diaDaData(q: string | null | undefined): string | null {
-  if (!q) return null;
-  const s = q.trim();
-  let m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
-  m = /^(?:[a-zç]{3}\s+)?(\d{1,2})\/(\d{1,2})(?:\/(\d{4}))?/i.exec(s);
-  if (!m) return null;
-  const mes = +m[2], ano = m[3] ? +m[3] : mes >= 9 ? 2026 : 2027;
-  return `${ano}-${String(mes).padStart(2, "0")}-${String(+m[1]).padStart(2, "0")}`;
-}
-/** 19/11 (auditoria): a encomenda de cliente é do fluxo antigo, de antes de as medidas aceites serem precisas: as obras antigas do exemplo
- *  (sem origem no Inventário nem contrato na base, o mesmo critério dos materiais: «encomenda sem ref») e as emitidas antes de
- *  MEDIDAS_ANTES_DO_PLANO. As do fluxo novo (emitidas no protótipo agora, ou pela base desde 19/11) não contam como medidas aceites. */
-export function ecDoFluxoAntigo(d: Pick<Negocio, "obra">): boolean {
-  const ec = d.obra.ec;
-  if (!ec) return false;
-  if (!ec.ref && !ec.contrato) return true;
-  const dia = diaDaData(ec.emitida?.q ?? ec.criada);
-  return !!dia && dia < MEDIDAS_ANTES_DO_PLANO;
-}
-/** As medidas retificadas pelo supervisor e aceites (o primeiro passo da Obra). A venda direta não tem obra a medir. 19/11 (auditoria): a
- *  encomenda de cliente só conta nos negócios do fluxo antigo (ecDoFluxoAntigo); antes contava qualquer uma e um plano aprovado sem as
- *  medidas deixava-as dadas como aceites. */
-export const retificacaoAceite = (d: Negocio): boolean => !!d.f.retif_aceite || !!d.orc?.vendaDireta || ecDoFluxoAntigo(d);
-/** 19/11 (auditoria): quem vai medir ao local (d.f.supervisor_medidas): uma pessoa do RH, pelo id (o mesmo dos técnicos de obra, TECS, que
- *  o Hoje do técnico e a página Técnicos usam). Antes era um nome no campo «Responsável de obra» e ninguém era avisado. */
-export const supervisorDasMedidas = (d: Pick<Negocio, "f">): { id: string; n: string } | null => {
-  const id = d.f.supervisor_medidas;
-  if (!id) return null;
-  return TECS.find((x) => x.id === id) ?? { id, n: "a pessoa escolhida" };
-};
-/** 19/11: as medidas que esperam por esta pessoa no local (o passo «Medir no local» do Hoje dela): escolhida para medir, com o pagamento
- *  validado e as medidas por aceitar. */
-export const medicoesDe = (deals: readonly Negocio[], tec: string): Negocio[] =>
-  deals.filter((d) => !d.anulado && !d.perdido && d.f.supervisor_medidas === tec && !d.f.retif_aceite && medidasEPlanoAbertos(d));
-/** 19/11: o que falta para as medidas estarem aceites, numa frase (o aviso de «Aprovar o plano» sem elas). */
-export function faltaMedirTexto(d: Pick<Negocio, "f">): string {
-  const sup = supervisorDasMedidas(d);
-  return sup ? `Falta ${sup.n} medir no local e aceitar as medidas no Estúdio das medidas. Depois, aprova-se o plano.`
-    : "Falta escolher quem vai medir e aceitar as medidas no local. Depois, aprova-se o plano.";
-}
+/** As medidas retificadas pelo supervisor e aceites (o primeiro passo da Obra). */
+// os negócios de antes, com a encomenda já emitida pelo fluxo antigo, não ficam presos a um passo que não existia
+export const retificacaoAceite = (d: Negocio): boolean => !!d.f.retif_aceite || !!d.orc?.vendaDireta || !!d.obra.ec;
 /** O contrato assinado (na venda direta não há contrato). */
 export const contratoAssinado = (d: Negocio): boolean => d.orc?.contrato === "assinado" || !!d.orc?.vendaDireta;
 /** O plano aprovado pelas Operações (ou já em curso, ou concluído). */
@@ -618,8 +574,6 @@ export const TRILHOS: { k: Trilho; t: string }[] = [
 ];
 /** O plano espera pelo pagamento confirmado. */
 export const SO_DEPOIS_DO_PAGAMENTO = "Depois de confirmado o pagamento.";
-/** 19/11 (auditoria): o plano espera pelas medidas aceites no local. */
-export const SO_DEPOIS_DAS_MEDIDAS = "Depois das medidas aceites no local.";
 /** A encomenda de cliente nasce do pagamento validado (no Inventário novo). */
 export const EC_NO_PAGAMENTO = "Emite-se com o pagamento validado, o plano aprovado e o contrato assinado.";
 
@@ -661,8 +615,7 @@ export function faltaParaArrancar(d: Negocio, db?: Inventario | null, S?: Estado
     // 16/11: a retificação por faturar ou por pagar segura a encomenda (o acerto e as adendas entram a seguir)
     else if (!acertoDoValorPendente(d) && !retificacaoPorPagar(d)) F.push(ecNoServidor(S) ? FALTA_EC_AUTOMATICA : "emitir a encomenda de cliente");
   }
-  // 19/11 (auditoria): sem a permissão das encomendas a prontidão não se lê: diz-se isso (e a quem pedir), não «a ler»
-  else if (usarProntidao(d.obra.ec)) { const fx = faltaPorFalha(d.obra.ec.contrato); F.push(...(fx.length ? fx : faltaMateriaisReal(prontidaoDe(d.obra.ec.contrato)))); }
+  else if (usarProntidao(d.obra.ec)) F.push(...faltaMateriaisReal(prontidaoDe(d.obra.ec.contrato)));
   else if (d.obra.ec.ref) F.push(...faltaMateriais(resumoEcNegocio(db ?? lerInventario(), d.obra.ec.ref)));
   // 12/11: o valor que as medidas ou o plano mudaram acerta-se antes de arrancar (a adenda, ou seguir sem ela)
   if (acertoDoValorPendente(d)) F.push("enviar a retificação ao Financeiro (ou a nota de crédito)");
@@ -699,7 +652,7 @@ export function semEncomendaCliente(d: Negocio, S?: Estado | null): string {
 /** A frase dos materiais da obra: a encomenda de cliente e o estado dela no Inventário (as obras antigas do exemplo já os têm na obra). */
 export function textoMateriais(d: Negocio, r: ResumoEcNeg | null, S?: Estado | null): string {
   if (!d.obra.ec) return semEncomendaCliente(d, S);
-  if (usarProntidao(d.obra.ec)) return textoPorFalha(d.obra.ec.n, d.obra.ec.contrato) ?? textoProntidaoReal(d.obra.ec.n, prontidaoDe(d.obra.ec.contrato));
+  if (usarProntidao(d.obra.ec)) return textoProntidaoReal(d.obra.ec.n, prontidaoDe(d.obra.ec.contrato));
   if (!d.obra.ec.ref) return "Obra do exemplo: os materiais já estão na obra.";
   return r ? `Encomenda de cliente ${r.id}: ${textoResumoEc(r)}` : `Encomenda de cliente ${d.obra.ec.n} emitida.`;
 }
@@ -760,21 +713,15 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
   }
   // 9/11: o supervisor retifica as medidas no local (11/11: ao mesmo tempo que as Operações aprovam o plano). 12/11 (Rúben: «só vêm
   // depois do Financeiro»): os dois esperam pelo pagamento validado
-  const abertos = medidasEPlanoAbertos(d), medidasOk = retificacaoAceite(d), sup = supervisorDasMedidas(d);
+  const abertos = medidasEPlanoAbertos(d);
   // 16/11: a venda direta também retifica as medidas (depois do pagamento, como o caminho com contrato)
-  // 19/11 (auditoria): o gestor da obra escolhe quem vai medir (a pessoa do RH, avisada no Hoje dela); essa pessoa mede e aceita no Estúdio
-  // das medidas; só depois se aprova o plano
-  L.push(medidasOk
+  L.push(retificacaoAceite(d)
     ? { id: "ret", trilho: "plano", estado: "feito", who: "operacoes", t: "Medidas retificadas e aceites", sub: d.f.retif_aceite ? `A ${d.f.retif_aceite.split("-").reverse().join("/")}${d.f.retif_por ? `, por ${d.f.retif_por}` : ""}.` : "" }
     : !abertos
-    ? { id: "ret", trilho: "plano", estado: "espera", who: "operacoes", t: "Medir no local", sub: SO_DEPOIS_DO_PAGAMENTO }
-    : !sup
-    ? { id: "ret", trilho: "plano", estado: "agora", who: "operacoes", t: "Escolher quem vai medir", sub: "O gestor da obra escolhe o supervisor. Ele vê o pedido no Hoje dele, mede no local e aceita as medidas.", act: "abrirRetificacao", btn: "Escolher quem mede" }
-    : { id: "ret", trilho: "plano", estado: "agora", who: "operacoes", t: `Medir no local · ${sup.n}`, sub: "Aceita as medidas no Estúdio das medidas. Depois, aprova-se o plano.", act: "abrirRetificacao", btn: "Abrir as medidas" });
+    ? { id: "ret", trilho: "plano", estado: "espera", who: "operacoes", t: "Retificar as medidas", sub: SO_DEPOIS_DO_PAGAMENTO }
+    : { id: "ret", trilho: "plano", estado: "agora", who: "operacoes", t: "Retificar as medidas", sub: "O supervisor confirma as medidas no local.", act: "abrirRetificacao", btn: "Retificar as medidas" });
   L.push(p.estado === "por aprovar" && !abertos
     ? { id: "pl-ok", trilho: "plano", estado: "espera", who: "operacoes", t: "Aprovar o plano", sub: SO_DEPOIS_DO_PAGAMENTO }
-    : p.estado === "por aprovar" && !medidasOk
-    ? { id: "pl-ok", trilho: "plano", estado: "espera", who: "operacoes", t: "Aprovar o plano", sub: SO_DEPOIS_DAS_MEDIDAS }
     : p.estado === "por aprovar"
     ? { id: "pl-ok", trilho: "plano", estado: "agora", who: "operacoes", t: nc ? "Resolver o conflito e aprovar o plano" : "Aprovar o plano", sub: nc ? `${nc} ${nc === 1 ? "técnico de férias" : "técnicos de férias"} numa tarefa.` : "Os técnicos recebem as tarefas na app.", act: "aprovarPlano", btn: "Aprovar o plano" }
     : { id: "pl-ok", trilho: "plano", estado: "feito", who: "operacoes", t: "Plano aprovado", sub: "Técnicos avisados." });
@@ -796,12 +743,7 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
   // o Financeiro fatura-a e valida o pagamento; se baixa, o Financeiro regista a nota de crédito. A encomenda de cliente espera pela paga.
   const ac = d.f.acerto_valor;
   if (ac) L.push({ id: "ac", trilho: "plano", estado: "feito", who: ac === "nota de crédito" ? "financeiro" : "comercial",
-    t: ac === "sem adenda" ? `Acerto do valor: sem acerto${d.f.acerto_sem_adenda_por ? ` (${d.f.acerto_sem_adenda_aprov === "ok" ? "aprovado por " : ""}${d.f.acerto_sem_adenda_por})` : ""}` : ac === "nota de crédito" ? `Nota de crédito ${d.f.nota_credito ?? ""}`.trim() : `Retificação ${ac} no Financeiro`, sub: "" });
-  // 19/11 (auditoria): «Seguir sem adenda» com a margem abaixo do mínimo espera pela Direção
-  else if (acertoDoValorPendente(d) && d.f.acerto_sem_adenda_aprov === "pedida") {
-    const M = margemSemAdenda(d, S);
-    L.push({ id: "ac", trilho: "plano", estado: "agora", who: "direcao", t: "Seguir sem adenda: aprovar a margem", sub: `${M ? `Sem adenda, a margem fica em ${pct(M.m)} com as medidas novas (mínimo ${S.cfg.min}%). ` : ""}${mudancasDeValor(d).join("; ")}.`, act: "aprovarSemAdenda", btn: "Aprovar sem adenda" });
-  }
+    t: ac === "sem adenda" ? "Acerto do valor: sem acerto" : ac === "nota de crédito" ? `Nota de crédito ${d.f.nota_credito ?? ""}`.trim() : `Retificação ${ac} no Financeiro`, sub: "" });
   else if (acertoDoValorPendente(d)) L.push(difDoAcerto(d, S) > 0.004
     ? { id: "ac", trilho: "plano", estado: "agora", who: "comercial", t: "O valor mudou: enviar a retificação ao Financeiro", sub: `${mudancasDeValor(d).join("; ")}.`, act: "adendaDoValor", btn: "Enviar ao Financeiro" }
     : { id: "ac", trilho: "plano", estado: "agora", who: "financeiro", t: "O valor baixou: registar a nota de crédito", sub: `${mudancasDeValor(d).join("; ")}. Emita-a no Eticadata e registe o número no negócio.` });
@@ -846,10 +788,11 @@ export function passosPagamentoAdenda(d: Negocio, a: Adenda): PassoPrep[] {
   const f0 = faturasAdenda(a).find((f) => f.i === 0), x = parcelasAdenda(d, a)[0], parc = nomeParcela(0);
   const id = a.n, mats = porEncomendarDe(d, a.n).length > 0 || !!ecDaAdenda(d, a.n);
   const ft: PassoPrep = f0
-    ? { id: "ft-ad-" + id, trilho: "pag", estado: "feito", who: "financeiro", t: `Fatura ${f0.n} · adenda ${a.n} · ${parc}`, sub: `Registada ${f0.q.startsWith("hoje") ? f0.q : "a " + f0.q} · ${eur(f0.v)} €.` }
-    // 19/11 (auditoria): a Olyvia não emite faturas (antes, na «Atual», inventava o número): emite-se no Eticadata e regista-se o número no
-    // negócio, como as parcelas do contrato. O botão leva ao campo onde se escreve (abrirFaturaAdenda)
-    : { id: "ft-ad-" + id, trilho: "pag", estado: "agora", who: "financeiro", t: `Registar a fatura da adenda ${a.n} · ${parc}`, sub: `${x ? eur(x.v) + " € com IVA · " : ""}Emita-a no Eticadata e registe o número no negócio: vai ao portal do cliente.`, act: "abrirFaturaAdenda", arg: a.n, btn: "Registar a fatura" };
+    ? { id: "ft-ad-" + id, trilho: "pag", estado: "feito", who: "financeiro", t: `Fatura ${f0.n} · adenda ${a.n} · ${parc}`, sub: `Emitida ${f0.q.startsWith("hoje") ? f0.q : "a " + f0.q} · ${eur(f0.v)} €.` }
+    // na V2 a Olyvia não emite faturas: regista-se a do programa certificado no Financeiro do negócio (sem botão aqui), como no contrato
+    : lerVersao() !== "atual"
+    ? { id: "ft-ad-" + id, trilho: "pag", estado: "agora", who: "financeiro", t: `Registar a fatura da adenda ${a.n} · ${parc}`, sub: `${x ? eur(x.v) + " € · " : ""}Emita-a no programa de faturação certificado e registe-a no Financeiro do negócio.` }
+    : { id: "ft-ad-" + id, trilho: "pag", estado: "agora", who: "financeiro", t: `Emitir a fatura da adenda ${a.n} · ${parc}`, sub: `${x ? eur(x.v) + " € · " : ""}Vai para o portal do cliente.`, act: "faturarAdendas", arg: a.n, btn: "Emitir a fatura" };
   const rc = f0?.recibo;
   const pg: PassoPrep = rc
     ? { id: "pg-ad-" + id, trilho: "pag", estado: "feito", who: "financeiro", t: `Pagamento validado · adenda ${a.n}`, sub: `Recibo ${rc.n}.` }

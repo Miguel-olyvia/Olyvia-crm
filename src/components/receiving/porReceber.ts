@@ -13,7 +13,6 @@
 // - Falta = quantity − received_quantity de cada linha de produto (anular o resto já baixa quantity); em unidades
 //   de stock = × units_per_uom. Linhas de serviço não contam.
 
-import { receivingIntegerOnly } from "./receivingQty";
 export type PublicationStatus = "sent" | "viewed" | "confirmed" | "withdrawn";
 
 export interface ReceivablePublication {
@@ -44,14 +43,7 @@ export interface ReceivableLine {
   uomCode: string | null;
   /** Unidades de stock por unidade da linha (embalagem). */
   unitsPerUom: number;
-  /** 19/11: a unidade de stock do produto (products.uom_id → uom.code); undefined se não foi lida. */
-  productUomCode?: string | null;
 }
-
-/** 19/11 (auditoria, lote 2): a linha só recebe quantidades inteiras? Numa embalagem ou numa unidade que se conta, sim; um produto que se
- *  mede (m², ml, kg), lido na sua unidade, aceita decimais (a regra de rpc_receive_by_code, 20270124020000). */
-export const lineIntegerOnly = (l: Pick<ReceivableLine, "uomId" | "uomCode" | "unitsPerUom" | "productUomCode">): boolean =>
-  receivingIntegerOnly({ uomCode: l.uomId ? l.uomCode : (l.productUomCode ?? null), unitsPerUom: l.unitsPerUom || 1 });
 
 /** A guia de remessa mais antiga que o fornecedor expediu no portal para esta PO e que ainda está aberta. */
 export interface ReceivableShipment {

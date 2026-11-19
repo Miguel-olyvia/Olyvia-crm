@@ -252,10 +252,7 @@ export function seguranca(d: Negocio): ItemSeg[] {
 }
 
 /* ------------------------------------------------------------------ o diário de obra */
-export interface EntradaDiario { q: string; quem: string; t: string; k: "horas" | "foto" | "nota" | "ocorrencia" | "validacao" | "correcao" | "marco"; fotos?: string[];
-  /** 19/11 (auditoria): «O cliente pediu uma alteração» no Hoje do técnico: o pedido (PC-<negócio>-<n>), a tarefa (pelo nome) e quando o gestor
-   *  o abriu no Estúdio da obra. Vai no diário (uma ocorrência) porque é o que a base deixa o técnico gravar (fn_obra_execucao_permitida). */
-  pedido?: { id: string; tarefa: string; texto: string; tratado?: string } }
+export interface EntradaDiario { q: string; quem: string; t: string; k: "horas" | "foto" | "nota" | "ocorrencia" | "validacao" | "correcao" | "marco"; fotos?: string[] }
 
 /* ------------------------------------------------------------------ custos previstos e reais (Direção e Operações) */
 // 22/10 (fase 3): o previsto e o real da mão de obra da obra estão em custoObra.ts (o previsto da proposta congelada, o real das horas

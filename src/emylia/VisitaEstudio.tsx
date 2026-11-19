@@ -390,26 +390,26 @@ export function PlanoEstimado({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const [inicio, setInicio] = useState(() => inicioPorOmissao(d.f.plano_inicio));
   const [guardado, setGuardado] = useState("");
   const P = useMemo(() => planoDaVisita(d, ctx.S, inicio), [d, ctx.S, inicio, d.visita.extra, d.visita.prod, d.visita.med, d.f.plano_tecnicos, d.f.plano_equipa]); // eslint-disable-line react-hooks/exhaustive-deps
-  // 19/11 (auditoria): o dia de início grava-se logo ao mudar, como a equipa (antes só com «Guardar no negócio», e quem não carregava
-  // perdia a data: o orçamento nascia sem ela). O plano estimado e a duração acompanham.
-  const guardar = (dia: string) => {
+  const guardar = () => {
     let x: ReturnType<typeof planoDaVisita> | null = null;
-    ctx.run(() => { x = guardarPlano(ctx, d, dia); });
+    ctx.run(() => { x = guardarPlano(ctx, d, inicio); });
     const y = x as ReturnType<typeof planoDaVisita> | null;
-    setGuardado(y?.inicio && y.fim ? `Guardado no negócio: ${duracaoEmPalavras(y.dias)}, de ${dataCurta(y.inicio)} a ${dataCurta(y.fim)}.` : `Guardado no negócio: início a ${dataCurta(new Date(`${dia}T12:00:00`))}.`);
+    if (y?.inicio && y.fim) setGuardado(`Guardado: ${duracaoEmPalavras(y.dias)}, de ${dataCurta(y.inicio)} a ${dataCurta(y.fim)}.`);
   };
-  const mudarInicio = (dia: string) => { setInicio(dia); guardar(dia); };
   return (
     <section aria-labelledby={`plano-${d.id}`} className="space-y-4 rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]">
       <div>
         <h3 id={`plano-${d.id}`} className="flex items-center gap-2 text-[17px] font-semibold tracking-tight"><CalendarCheck className="h-5 w-5 text-primary" aria-hidden="true" />O plano da obra</h3>
         <p className="text-sm text-muted-foreground">Sai dos serviços das necessidades: as tarefas, o técnico livre de cada ofício e as datas. Ao fechar a visita, o orçamento e a obra seguem com ele.</p>
       </div>
-      <MapaDatasObra P={P} inicio={inicio} mudarInicio={mudarInicio}
+      <MapaDatasObra P={P} inicio={inicio} mudarInicio={setInicio}
         equipa={{ S: ctx.S, negocio: d.id, escolhas: escolhasDoNegocio(d.f), calcular: (iso) => planoDaVisita(d, ctx.S, iso),
-          mudar: (e) => { ctx.run(() => { for (const [k, v] of camposDasEscolhas(e)) ctx.A.campo(d.id, k, v); }); guardar(inicio); } }} />
+          mudar: (e) => ctx.run(() => { for (const [k, v] of camposDasEscolhas(e)) ctx.A.campo(d.id, k, v); }) }} />
       {P.tarefas.length > 0 && (
-        <p className="text-[15px]">Duração: <b className="font-semibold">{duracaoEmPalavras(P.dias)}</b>{P.fim && <> · pronta a {dataCurta(P.fim)}</>}</p>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-[15px]">Duração: <b className="font-semibold">{duracaoEmPalavras(P.dias)}</b>{P.fim && <> · pronta a {dataCurta(P.fim)}</>}</p>
+          <Button type="button" className="min-h-11" onClick={guardar}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Guardar no negócio</Button>
+        </div>
       )}
       <p role="status" className="min-h-5 text-sm text-success">{guardado}</p>
     </section>

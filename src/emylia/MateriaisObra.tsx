@@ -13,10 +13,9 @@ import { estadoLinhaNegocio, faltaMateriais, linhaDoResumo, resumoEcNegocio, typ
 import { EC_ADENDA_AUTOMATICA, ecNoServidor, entregaTarde, textoMateriais } from "./preparacaoObra";
 import { ecDaAdenda, linhasDaEc, linhasDaObra, porEncomendarDe, totaisDaEc } from "./encomendasAjuste";
 import { assinadas, primeiraPaga } from "./adendas";
-import { aprovadorPo, pedidorFalta } from "./real/encomendaReal";
+import { aprovadorPo } from "./real/encomendaReal";
 import { useModoTeste } from "./real/modoTeste";
-import { podeAprovarPo, podePedirFalta } from "./permissoes";
-import { MISSING_CAUSE_TEXT } from "@/components/client-orders/missingCause";
+import { podeAprovarPo } from "./permissoes";
 
 type Grupo = "resolver" | "caminho" | "ok";
 const GRUPOS: { k: Grupo; t: string; vazio?: string }[] = [
@@ -53,10 +52,6 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
   // 9/11 (Lote 1, D): com conta real, quem tem purchase_orders.approve, seja qual for o papel (podeAprovarPo, permissoes.ts)
   const podeAprovar = !!aprovar && podeAprovarPo(S.role, !!teste);
   const [aAprovar, setAAprovar] = useState<string | null>(null);
-  // 19/11 (auditoria, lote 2): «Pedir o que falta ao fornecedor», o mesmo botão (e a mesma RPC) das Encomendas de cliente
-  const pedir = pedidorFalta();
-  const podePedir = !!pedir && podePedirFalta(S.role, !!teste);
-  const [aPedir, setAPedir] = useState(false);
   const [aConfirmar, setAConfirmar] = useState<string | null>(null);
   const db = useInventario();
   const ec = d.obra.ec;
@@ -83,10 +78,6 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
   const nCaminho = linhas.filter((y) => y.g === "caminho").length, nResolver = linhas.filter((y) => y.g === "resolver").length;
   const falta = exemplo ? [] : usarProntidao(ec) ? faltaMateriaisReal(prontidaoDe(ec.contrato)) : faltaMateriais(r);
   const tarde = entregaTarde(d, db);
-  // 19/11: há falta que se pode mesmo pedir (com fornecedor preferido e a unidade dele compatível)? Pelas linhas da base; sem elas,
-  // pela prontidão (sem as causas, a falta toda, e o servidor diz o que ficou de fora)
-  const prontidao = ec.contrato && usarProntidao(ec) ? prontidaoDe(ec.contrato) : undefined;
-  const pedivel = !exemplo && !!ec.contrato && (prontidao ? (prontidao.aPedir ?? prontidao.emFalta) > 0 : !!r?.linhas.some((l) => (l.pedir ?? 0) > 0));
   const titulo = r?.eliminada ? "Encomenda eliminada no Inventário"
     : todosNaObra ? "Materiais todos na obra"
     : pronto ? "Materiais garantidos para arrancar"
@@ -173,11 +164,6 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
               </li>
             )}
           </ul>
-          {podePedir && pedivel && (
-            <Button className="mt-3 min-h-11" disabled={aPedir} onClick={() => { setAPedir(true); void pedir!(ec.contrato!).finally(() => setAPedir(false)); }}>
-              {aPedir ? "A pedir…" : "Pedir o que falta ao fornecedor"}
-            </Button>
-          )}
           <p className="mt-2 text-sm text-muted-foreground">Faz-se no Inventário: as Compras aprovam as encomendas a fornecedor e o Armazém recebe-as e reserva. Aqui fica o estado.</p>
         </section>
       )}
@@ -202,8 +188,7 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
                       <span className="text-[15px] tabular-nums">{nfmt(x.q)} {x.un}</span>
                     </div>
                     <p className={cn("text-sm", st.ok ? "text-success" : k === "caminho" ? "text-foreground/80" : "text-warning")}>
-                      {/* 19/11: a falta presa diz a causa concreta (sem fornecedor preferido, ou a unidade do fornecedor incompatível) */}
-                      {!st.ok && l?.causa ? MISSING_CAUSE_TEXT[l.causa] : st.t}{l?.pos.length ? <span className="text-muted-foreground"> · {l.pos.map((p) => `${p.id}, ${p.forn.replace(" (exemplo)", "")}`).join(" · ")}</span> : null}
+                      {st.t}{l?.pos.length ? <span className="text-muted-foreground"> · {l.pos.map((p) => `${p.id}, ${p.forn.replace(" (exemplo)", "")}`).join(" · ")}</span> : null}
                     </p>
                   </li>
                 );
