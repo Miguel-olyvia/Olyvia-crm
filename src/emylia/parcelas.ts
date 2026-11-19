@@ -75,9 +75,11 @@ function tarefasDaFase(d: Negocio, fase: number): { dia: number; dur: number; ex
 export function fimDaFase(d: Negocio, fase: number): string | null {
   const p = d.obra.plano, T = tarefasDaFase(d, fase);
   const ini = p?.inicio ?? (d.f.inicio && /^\d{4}-\d{2}-\d{2}/.test(d.f.inicio) ? d.f.inicio.slice(0, 10) : null);
-  if (!p || !T.length || !ini || p.origem !== "orcamento") return null;
+  // 19/11: sem uma data ISO válida não há fim da fase (um início inválido congelava o browser em diasDaObra)
+  const iso = ini && /^\d{4}-\d{2}-\d{2}/.test(ini) ? ini.slice(0, 10) : null;
+  if (!p || !T.length || !iso || Number.isNaN(deIso(iso).getTime()) || p.origem !== "orcamento") return null;
   const fim = T.reduce((a, t) => Math.max(a, t.dia + t.dur), 0);
-  const ds = diasDaObra(deIso(ini), fim);
+  const ds = diasDaObra(deIso(iso), fim);
   return ds[fim - 1] ? isoDia(ds[fim - 1]) : null;
 }
 
