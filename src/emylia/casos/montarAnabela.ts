@@ -3,7 +3,7 @@
 // Usa-se em dois sítios: o teste casoAnabela.test.ts (que segue até ao fim da obra) e o protótipo sem conta em desenvolvimento
 // (http://localhost:5174/sem-conta?caso=anabela), para seguir o resto do fluxo no ecrã, clique a clique.
 // A equipa é falsa (um técnico por ofício, com "(teste)" no nome e um custo por hora inventado).
-import { faltaProdutosVisita, garantirServico, r2, totaisIva, type acoes, type Estado, type LinhaOrc, type Negocio, type Tarefa } from "../motor";
+import { TECS, faltaProdutosVisita, garantirServico, r2, totaisIva, type acoes, type Estado, type LinhaOrc, type Negocio, type Tarefa } from "../motor";
 import { CONTACTO, EXTERIOR, INTERIOR, ESCOLHAS, LEAD, OBRA, PROPOSTA, emFalta, grupoVisita, gruposArea, prefixoDivisao, type Grupo } from "../campos";
 import { catalogo0 } from "../v2/catalogoModelo";
 import { parcelasNoFinanceiro } from "../parcelas";
@@ -276,6 +276,8 @@ export function avancarObraAMeio(S: Estado, A: Acoes, id: number, receber: (ref:
   preencher(d(), [OBRA[0]]);
   A.campo(id, "inicio", "2026-11-02");
   // 9/11 (o fluxo novo): o supervisor retifica as medidas, as Operações aprovam o plano e só então se assina o contrato
+  // 19/11 (auditoria): o gestor escolhe quem vai medir (o primeiro técnico do RH) antes de aceitar as medidas
+  if (TECS[0]) A.supervisorMedidas(id, TECS[0].id);
   A.retificarMedidas(id);
   A.aprovarPlano(id);
   garantir(d().obra.plano!.estado === "aprovado", "aprovar o plano");
