@@ -7,7 +7,7 @@ import { LINHAS, garantirServico, ivaDaLinha, type Estado, type Evento, type Lin
 import { PREFIXO_PROD, partesDoModelo, textoProduto, type ProdVisita } from "../produtosVisita";
 import type { FaturaReg } from "../v2/financeiro";
 import { prestacoes, type Prestacao } from "../planoObra";
-import { faturasAdenda, totaisLinhas, type Adenda, type EstadoAdenda, type FaturaAdenda, type LinhaAdenda as LinhaAdendaEmylia } from "../adendas";
+import { LINHA_ACERTO_PRODUTOS, faturasAdenda, totaisLinhas, type Adenda, type EstadoAdenda, type FaturaAdenda, type LinhaAdenda as LinhaAdendaEmylia } from "../adendas";
 import type { EcAjuste, EncCliente } from "../preparacaoObra";
 
 /* ------------------------------------------------------------------ datas */
@@ -197,7 +197,9 @@ const linhaAdendaDeLinha = (l: LinhaAdendaLinha): LinhaAdendaEmylia => ({
   sid: l.chave, n: l.descricao, un: l.unidade, q: l.quantidade, pu: l.preco_un, h: l.horas_un, perfil: l.perfil,
   ...(l.perfil_chave ? { perfilId: l.perfil_chave } : {}), ...(l.custo_un != null ? { cu: l.custo_un } : {}), ...(l.mao_obra_un != null ? { mo: l.mao_obra_un } : {}),
   ...(l.livre ? { livre: true as const } : {}),
-  ...(l.taxa_iva === 6 || l.taxa_iva === 23 ? { iva: l.taxa_iva } : {}),
+  ...(l.taxa_iva === 6 || l.taxa_iva === 23 ? { iva: l.taxa_iva }
+    // 19/11: enquanto adenda_linhas não guarda a taxa, a linha dos produtos do acerto volta a 23% pelo nome (a «-p6» é a que fica a 6%)
+    : l.livre && l.descricao.startsWith(LINHA_ACERTO_PRODUTOS) && !l.chave.endsWith("-p6") ? { iva: 23 as const } : {}),
   ...(l.materiais ? { mats: l.materiais.map((m) => ({ n: m.nome, q: m.quantidade, un: m.unidade, ...(m.preco != null ? { preco: m.preco } : {}), ...(m.fornecedor ? { forn: m.fornecedor } : {}) })) } : {}),
 });
 const ESTADO_VERSAO: Record<EstadoAdenda, LinhaAdendaVersao["estado"]> = { rascunho: "rascunho", enviada: "enviado", aceite: "aceite", assinada: "aceite", recusada: "recusado", anulada: "anulado" };
