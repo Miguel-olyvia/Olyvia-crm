@@ -457,6 +457,26 @@ describe("Receção · Dar entrada: robustez (revisão)", () => {
     expect(rpcCalls.filter((c) => c.name === "rpc_receive_by_code")).toHaveLength(0);
   });
 
+  it("19/11: decimais num produto que se mede (m², na sua unidade): '21,6' entra e chega à RPC como 21.6", async () => {
+    const po = poRow();
+    po.purchase_order_items = [{
+      id: "poi-1", item_type: "product", product_id: "prod-1", description: "Revestimento", sku: "RV-1", quantity: 21.6, received_quantity: 0,
+      uom_id: null, units_per_uom: 1, products: { name: "Revestimento", sku: "RV-1", uom: { code: "m2" } } as never, uom: null,
+    } as never];
+    db.purchase_orders = [po];
+    rpcHandlers.rpc_receive_by_code = (a) => ({ data: { ...receiveResult(a), units: a.p_quantity, units_per_uom: 1, uom_code: "m2" }, error: null });
+    renderPage();
+    await waitScreenReady();
+    const dlg = await openPanel();
+    fireEvent.click(within(dlg).getByRole("button", { name: "Veio diferente? Conferir linha a linha" }));
+    const campo = within(dlg).getByLabelText("Dar entrada: Revestimento");
+    fireEvent.change(campo, { target: { value: "21,6" } });
+    fireEvent.click(within(dlg).getByRole("button", { name: /Confirmar entrada/ }));
+    await waitFor(() => expect(realCalls()).toHaveLength(1), { timeout: 4000 });
+    expect(realCalls()[0].args).toMatchObject({ p_purchase_order_item_id: "poi-1", p_quantity: 21.6 });
+    expect(within(dlg).queryByText(/Quantidades inteiras/)).toBeNull();
+  });
+
   it("sem purchase_orders.view abre no leitor (não numa lista vazia)", async () => {
     perms = new Set(["receiving.view", "receiving.receive", "purchase_orders.receive", "inventory.edit"]);
     renderPage();

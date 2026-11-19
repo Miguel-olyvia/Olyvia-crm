@@ -72,7 +72,7 @@ interface PoRow {
         received_quantity: number | null;
         uom_id: string | null;
         units_per_uom: number | null;
-        products: { name: string | null; sku: string | null } | null;
+        products: { name: string | null; sku: string | null; uom?: { code: string | null } | null } | null;
         uom: { code: string | null } | null;
       }[]
     | null;
@@ -103,6 +103,8 @@ export function mapPoRow(
         uomId: i.uom_id,
         uomCode: i.uom?.code ?? null,
         unitsPerUom: Number(i.units_per_uom) || 1,
+        // 19/11: a unidade do produto (decimais nos que se medem); sem a leitura, undefined
+        ...(i.products && "uom" in i.products ? { productUomCode: i.products.uom?.code ?? null } : {}),
       };
     });
   const contractId = r.source_type === "contract" && r.source_id ? r.source_id : null;
@@ -193,7 +195,7 @@ export async function fetchReceivablePos(orgId: string): Promise<ReceivablePo[]>
     supabase
       .from("purchase_orders")
       .select(
-        "id, order_number, status, supplier_id, expected_delivery, order_date, source_type, source_id, suppliers(name), purchase_order_items(id, item_type, product_id, description, sku, quantity, received_quantity, uom_id, units_per_uom, products(name, sku), uom:uom_id(code))",
+        "id, order_number, status, supplier_id, expected_delivery, order_date, source_type, source_id, suppliers(name), purchase_order_items(id, item_type, product_id, description, sku, quantity, received_quantity, uom_id, units_per_uom, products(name, sku, uom:uom_id(code)), uom:uom_id(code))",
       )
       .eq("organization_id", orgId)
       .is("deleted_at", null)

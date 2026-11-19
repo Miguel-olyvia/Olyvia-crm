@@ -9,10 +9,17 @@ import { EstudioNaVisita, PlanoEstimado } from "./VisitaEstudio";
 import type { Ctx } from "./pecas";
 import { retangulo } from "./planta";
 import { CHAVE_ESTUDIO, abrirEstudio, devolverAoNegocio } from "@/pages/prototipo-estudio/daVisita";
+import { isoDoDia } from "./vagaData";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 afterEach(cleanup);
+// 19/11 (auditoria): as datas de início eram fixas (16 e 23 de novembro de 2026) e passaram; agora são segundas-feiras no futuro
+const segundaDaqui = (semanas: number): string => {
+  const x = new Date();
+  x.setDate(x.getDate() + ((8 - x.getDay()) % 7 || 7) + 7 * (semanas - 1));
+  return isoDoDia(x);
+};
 beforeEach(() => localStorage.clear());
 
 const montar = () => {
@@ -102,6 +109,7 @@ describe("a Visita de uma casa de banho segue o Estúdio (motor verdadeiro)", ()
     const run = (fn: () => void) => { fn(); };
     const ctx = { S, A: acoes(S, (a) => { avisos.push(`${a.msg} ${a.sub ?? ""}`); }, run), run, go: (fn: () => void) => () => run(fn), q: "" } as unknown as Ctx;
     const d = S.deals.find((x) => x.linha === "wc" && x.fase === 2)! as Negocio;
+    const inicio = segundaDaqui(2);
     // a visita com as respostas obrigatórias e as fotografias (o que a gravação e os passos preenchem)
     for (let i = 0; i < 5; i++) for (const c of emFalta([...(d.vis ?? []).map(grupoVisita), EXTERIOR, INTERIOR, AREA, ESCOLHAS], d.f)) {
       d.f[c.k] = c.op ? c.op[0] : c.t === "sim_nao" ? "Não" : c.t === "numero" || c.t === "contador" ? "1" : c.t === "data" ? "2026-10-20" : "x";
@@ -112,32 +120,38 @@ describe("a Visita de uma casa de banho segue o Estúdio (motor verdadeiro)", ()
     const p0 = JSON.parse(localStorage.getItem(CHAVE_ESTUDIO)!) as Projeto;
     const p: Projeto = {
       ...p0, antes: planta, depois: { ...planta, pecas: [{ id: "b", tipo: "base", x: 50, y: 50, w: 120, h: 70 }, { id: "s", tipo: "sanita", x: 200, y: 250, w: 36, h: 52 }] },
-      escolhas: { b: "bas-ard-p", s: "san-nexo-s" }, revestimento: "rev-tela-c", gravadoEm: Date.now(), catalogo: { inicio: "2026-11-23" },
+      escolhas: { b: "bas-ard-p", s: "san-nexo-s" }, revestimento: "rev-tela-c", gravadoEm: Date.now(), catalogo: { inicio },
     };
     localStorage.setItem(CHAVE_ESTUDIO, JSON.stringify(p));
     expect(devolverAoNegocio(p, true)).toBe(true);
     render(<EstudioNaVisita ctx={ctx} d={d} />);
-    expect(d.f.plano_inicio).toBe("2026-11-23");
+    expect(d.f.plano_inicio).toBe(inicio);
     expect(avisos.join(" | ")).toMatch(/Orçamento criado/);
     expect(d.fase).toBe(3);
-    expect(d.orc?.inicioObra).toBe("2026-11-23");
+    expect(d.orc?.inicioObra).toBe(inicio);
     // o orçamento tem os serviços do Estúdio e o plano guardado tem o técnico e as datas
     expect(d.orc!.linhas.some((l) => l.t === "svc" && l.sid === "revest")).toBe(true);
-    expect(JSON.parse(d.f.plano_estimado)[0]).toMatchObject({ inicio: "2026-11-23" });
+    expect(JSON.parse(d.f.plano_estimado)[0]).toMatchObject({ inicio });
   });
 
-  it("o plano de obra estimado guarda-se no negócio com a duração", () => {
-    const { ctx, d } = montar();
+  it("o plano de obra estimado guarda-se no negócio com a duração, logo ao mudar o dia de início (19/11: sem «Guardar no negócio»)", () => {
+    const { ctx, d, gravacoes } = montar();
     const planta = { o: { x: 50, y: 50 }, paredes: retangulo(200, 250), pecas: [] };
     const p: Projeto = {
       negocio: d.id, antes: planta, depois: { ...planta, pecas: [{ id: "b", tipo: "base", x: 50, y: 50, w: 120, h: 70 }] }, escolhas: { b: "bas-ard-p" }, acompanha: {},
       revestimento: "rev-tela-c", pavimento: "pav-tela-a", alturas: { peDireito: 250, tetoFalso: null }, estilo: { cores: [], porCategoria: {} }, ajustes: {}, gravadoEm: 1,
     };
     d.f.estudio = JSON.stringify(p);
-    d.f.plano_inicio = "2026-11-16";
-    render(<PlanoEstimado ctx={ctx} d={d} />);
-    fireEvent.click(screen.getByRole("button", { name: /Guardar no negócio/ }));
+    d.f.plano_inicio = segundaDaqui(1);
+    const { container } = render(<PlanoEstimado ctx={ctx} d={d} />);
+    expect(screen.queryByRole("button", { name: /Guardar no negócio/ })).toBeNull();
+    const outra = segundaDaqui(3), antes = gravacoes.n;
+    fireEvent.change(container.querySelector('input[type="date"]')!, { target: { value: outra } });
+    // gravou-se sem mais nenhum clique: o dia, a duração e o plano
+    expect(gravacoes.n).toBeGreaterThan(antes);
+    expect(d.f.plano_inicio).toBe(outra);
     expect(d.f.duracao_obra).toMatch(/úte?is/);
-    expect(JSON.parse(d.f.plano_estimado)[0]).toMatchObject({ inicio: "2026-11-16" });
+    expect(JSON.parse(d.f.plano_estimado)[0]).toMatchObject({ inicio: outra });
+    expect(screen.getByText(/Guardado no negócio/)).toBeInTheDocument();
   });
 });

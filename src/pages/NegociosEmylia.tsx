@@ -15,7 +15,7 @@ import { useCompany } from "@/contexts/CompanyContext";
 import { useMinhaPessoa } from "@/hooks/useMinhaPessoa";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { tecnicosComTrabalho } from "@/emylia/trabalhoObra";
-import { TECS, acertarDiaDasObras, acoes, definirPerdaReal, definirRelogioReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Negocio, type Papel, type Vista } from "@/emylia/motor";
+import { TECS, acertarDiaDasObras, acoes, definirPerdaReal, definirPessoaLigada, definirRelogioReal, herdarFaturacao, marcarAutor, PAPEIS, seed, type Aviso, type Estado, type Negocio, type Papel, type Vista } from "@/emylia/motor";
 import { anularPerdaReal, mensagemDaPerda, perderNegocioReal } from "@/emylia/real/perdaReal";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
@@ -71,7 +71,7 @@ import { definirOrgErp } from "@/emylia/erpEticadata";
 import { usePaginaInteira } from "@/hooks/usePaginaInteira";
 import { aplicarNomesPapeis, aplicarPermissoesReais, definirPapeisEscolhiveis, aplicarGestoresObra, lerGestoresObra, lerMeusPapeis, papeisPermitidos, papelDeAbertura, reporNomesPapeis, VISTAS_NEGOCIO, type MeusPapeis } from "@/emylia/real/papeisReal";
 import { atribuirPorAtribuir } from "@/emylia/preparacaoObra";
-import { aprovarPoReal, definirAprovadorPo } from "@/emylia/real/encomendaReal";
+import { aprovarPoReal, definirAprovadorPo, definirPedidorFalta, pedirFaltaReal, textoPedido } from "@/emylia/real/encomendaReal";
 import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste";
 import { definirMateriaisReais } from "@/emylia/tarefasValidador";
 import { lerCatalogo } from "@/emylia/v2/catalogoStore";
@@ -769,7 +769,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
         },
       });
     });
-    // FERRAMENTAS-TESTE (temporário, remover antes da main): aceitar/assinar como o cliente para membros ativos (perfis normais)
+    // FERRAMENTAS-TESTE (temporário, remover antes da main): aceitar/assinar como o cliente no passo do negócio (19/11: só o super admin)
     void podeSimularClienteTeste(supabase, org).then((pode) => {
       if (!vivo) return;
       definirSimularClienteTeste(!pode ? null : {
@@ -795,6 +795,20 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
       } finally { redesenhar(); }
     });
     return () => definirAprovadorPo(null);
+  }, [org, avisar, carregarEncomendas, redesenhar]);
+  // 19/11 (auditoria, lote 2): «Pedir o que falta ao fornecedor» no passo Materiais da obra, a RPC do Inventário; depois relê as encomendas
+  useEffect(() => {
+    if (!org) return;
+    definirPedidorFalta(async (contrato) => {
+      try {
+        avisar(textoPedido(await pedirFaltaReal(supabase, contrato)));
+        const relidos = await lerNegocios(supabase, org, ids.current, S.campos, { semSugestoes: soExecucaoRef.current });
+        await carregarEncomendas(relidos);
+      } catch (e) {
+        avisar({ msg: "Não foi possível pedir ao fornecedor", sub: (e as Error).message, kind: "bad" });
+      } finally { redesenhar(); }
+    });
+    return () => definirPedidorFalta(null);
   }, [org, avisar, carregarEncomendas, redesenhar]);
   // 30/10 (20270101350000): os materiais novos da obra (o Gestor de obra) vão à encomenda a fornecedor da base, pendente para Compras
   useEffect(() => {
@@ -930,6 +944,9 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   // 30/10: sem ler o RH (sem permissão nele), a pessoa vem da conta pelos papéis (neg_meus_papeis)
   const eu = minha.loading ? null : { pessoaId: minha.pessoaId ?? meus?.pessoa?.id ?? null, nome: minha.nome ?? meus?.pessoa?.nome ?? nomeConta ?? "Eu" };
   nomeEu.current = eu && eu.nome !== "Eu" ? eu.nome : "";
+  // 19/11 (auditoria): o que a conta aceita (as medidas) fica com a pessoa, não com o papel
+  useEffect(() => { definirPessoaLigada(eu && eu.nome !== "Eu" ? { id: eu.pessoaId, nome: eu.nome } : null); }, [eu?.pessoaId, eu?.nome]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => () => definirPessoaLigada(null), []);
   const tecConta = pronto ? tecnicoDaConta(S.tecnicos ?? [], eu) : null;
   useEffect(() => {
     if (!pronto) return;

@@ -7,10 +7,13 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   FASES, LINHAS, PAPEIS, nomeLinha, visitaFeita, visitas,
-  acertoDoValorPendente, adendaDoAcerto, retificacaoPorPagar, alertas, bloqueado, camposMedida, mudancasDeValor, impactoDasMedidas, impactoDoPlano, medidasRetificadas, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
+  acertoDoValorPendente, adendaDoAcerto, margemSemAdenda, retificacaoPorPagar, alertas, bloqueado, camposMedida, mudancasDeValor, impactoDasMedidas, impactoDoPlano, medidasRetificadas, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
-  SEM_ORCAMENTO, semOrcamento,
+  SEM_ORCAMENTO, semOrcamento, semVisitaPelaChamada,
 } from "./motor";
+import { RegistarChamada } from "./RegistarChamada";
+import { VisitasNoEstudio, temVisitaAtiva } from "./VisitasNoEstudio";
+import { rotuloVaga, type Vaga } from "./vagaData";
 import { AREA, CONTACTO, DECISAO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PECAS_WC, PROPOSTA, contagem, divisaoPrincipal, divisoesEscolhidas, efetivo, emFalta, grupoVisita, gruposArea, type Def, type Grupo } from "./campos";
 import { PlantaDivisao } from "./PlantaDivisao";
 import { AgendaDaPropostaCartao } from "./AgendaDaProposta";
@@ -368,23 +371,27 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       // 11/11: o passo «vaga» é a agenda do CRM (VisitasDoCrm: tipo, dia, os comerciais livres, hora e morada); marcar a visita passa o
       // negócio a Visita e a lead e o negócio para o comercial escolhido (20270114310000)
       ...(soAteAoContacto() ? [passoPassarAoComercial()] : [{ id: "vaga", titulo: "Marcar a visita com o comercial", icone: CalendarClock,
-        feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: (
+        feito: !!v.slot, resumo: v.slot ? [v.slot] : [], corpo: semVisitaPelaChamada(d) && !v.slot ? (
+        // 19/11 (auditoria): sem «Atendeu · interessado» não se marca a visita; diz-se porquê (o motor também recusa)
+        <p role="note" className="rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{semVisitaPelaChamada(d)}</p>
+      ) : (
         <div className="space-y-2">
           <p className="text-sm text-muted-foreground">Vagas em {d.f.localidade || (d.local || "").split(",").pop() || "—"}. Em cada vaga, quem está livre e mais perto.</p>
           {/* 2/11 (reunião): a sugestão de quem vai, pela agenda (livre a essa hora) e pela proximidade (visitas perto nesse dia) */}
+          {/* 19/11 (auditoria): a vaga vai com a data completa (o ano), não só com o texto */}
           <div className="flex flex-wrap gap-2">
             {vagasVisita().map((s) => {
-              const sg = sugerirQuemVai(S.deals, d, s, opcoesDaVisita());
+              const sg = sugerirQuemVai(S.deals, d, s, opcoesDaVisita()), rotulo = rotuloVaga(s);
               return (
-                <button key={s} type="button" onClick={go(() => A.marcarVisita(d.id, s, sg?.quem))} title={sg ? `${sg.nome}: ${sg.motivo}${sg.ocupados.length ? ` · ocupados: ${sg.ocupados.join(", ")}` : ""}` : undefined}
+                <button key={s.data + s.hora} type="button" onClick={go(() => A.marcarVisita(d.id, s, sg?.quem))} title={sg ? `${sg.nome}: ${sg.motivo}${sg.ocupados.length ? ` · ocupados: ${sg.ocupados.join(", ")}` : ""}` : undefined}
                   className="rounded-xl border border-border bg-card px-3 py-2 text-left text-sm font-medium transition hover:-translate-y-0.5 hover:border-primary hover:bg-primary/5 hover:text-primary hover:shadow-[var(--shadow-sm)]">
-                  <span className="block"><CalendarClock className="mr-1.5 inline h-4 w-4" />{s}</span>
+                  <span className="block"><CalendarClock className="mr-1.5 inline h-4 w-4" />{rotulo}</span>
                   {sg && <span className="mt-0.5 block text-xs font-normal text-muted-foreground">{sg.nome} · {sg.motivo}</span>}
                 </button>
               );
             })}
           </div>
-          <OutraData INP={INP} ROT={ROT} marcar={(slot) => go(() => A.marcarVisita(d.id, slot, sugerirQuemVai(S.deals, d, slot, opcoesDaVisita())?.quem))()} />
+          <OutraData INP={INP} ROT={ROT} marcar={(vaga) => go(() => A.marcarVisita(d.id, vaga, sugerirQuemVai(S.deals, d, vaga, opcoesDaVisita())?.quem))()} />
         </div>
       ) } as Passo]),
     ];
@@ -487,13 +494,16 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       // parecia não fazer nada. Conta-se aqui também, como na lista de passos, para o bloco acender e abrir no campo em falta.
       const faltaNec = (aValidar(d, "nec") ? (orcLinhas(d, S).length ? 0 : 1) + faltaProdutosVisita(d, S).length : 0)
         + (aValidar(d, ESCOLHAS.titulo) && !E(ESCOLHAS).oculto ? emFalta([E(ESCOLHAS)], d.f).length : 0);
+      // 19/11 (auditoria): o passo «Visitas» saiu da lista; com a única visita cancelada o levantamento não fecha. As visitas ficam no topo
+      // do Estúdio (remarcar, cancelar, marcar outra) e o bloco acende quando falta uma que conte.
+      const faltaVisitas = !temVisitaAtiva(d) && (aValidar(d, "visitas") || visitas(d).length > 0) ? 1 : 0;
       passos = [
         ...passos.slice(0, ate).filter((x) => x.id !== "visitas" && x.id !== areaId),
         { id: "estudio", titulo: "Estúdio", icone: Sparkles,
-          feito: !!pr && Object.keys(pr.escolhas).length + (pr.porColocar ?? []).length + (pr.servicos ?? []).length > 0 && medOk === nMed && passoNec.feito === true,
-          falta: faltaArea + faltaMed + faltaNec || undefined,
+          feito: !!pr && Object.keys(pr.escolhas).length + (pr.porColocar ?? []).length + (pr.servicos ?? []).length > 0 && medOk === nMed && passoNec.feito === true && temVisitaAtiva(d),
+          falta: faltaVisitas + faltaArea + faltaMed + faltaNec || undefined,
           resumo: [pr ? "projeto guardado" : "por abrir", d.f.duracao_obra ? `obra: ${d.f.duracao_obra}` : ""].filter(Boolean),
-          corpo: <div className="space-y-10"><EstudioNaVisita ctx={ctx} d={d} /><FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
+          corpo: <div className="space-y-10"><VisitasNoEstudio ctx={ctx} d={d} falta={faltaVisitas} /><EstudioNaVisita ctx={ctx} d={d} /><FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
             ...(passoArea ? [{ id: "area", titulo: passoArea.titulo, resumo: passoArea.resumo.join(" · ") || "por preencher", corpo: passoArea.corpo, falta: faltaArea }] : []),
             ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", resumo: resumoMedidas.join(" · ") || "por preencher", corpo: corpoMedidas(false), falta: faltaMed }]),
             { id: "nec", titulo: "Necessidades do cliente", resumo: passoNec.resumo.join(" · ") || "por juntar", corpo: passoNec.corpo, falta: faltaNec },
@@ -656,6 +666,8 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
       <p id={idSemPerm} className="max-w-sm text-sm text-muted-foreground sm:text-right">{SEM_PERM[falta].sub}</p>
     </div>
   );
+  // 19/11 (auditoria): «Registar chamada» pede o resultado da chamada (sem valor por omissão) e, para voltar a ligar, o dia
+  if (p.act === "contactar" && meu) return <RegistarChamada ctx={ctx} d={d} tamanho={tamanho} />;
   // 15/10: o cliente pediu alterações no portal: o botão abre a nova versão já com o que ele pediu
   if (p.act === "pedidoCliente" && meu) return <NovaVersao ctx={ctx} d={d} texto={p.btn} />;
   // 22/10: a fatura emitida no Eticadata: o número escreve-se aqui e confirma-se no ERP
@@ -947,10 +959,10 @@ export function BotaoTesteCliente({ d, acao, tamanho = "default" }: { d: Negocio
 }
 
 // FERRAMENTAS-TESTE (temporário, remover antes da main)
-// 11/11 (Rafael): no passo «À espera do cliente», qualquer membro ativo da organização (perfis normais) aceita a proposta / assina o
+// 11/11 (Rafael), 19/11 só o super admin (auditoria): no passo «À espera do cliente», o super admin aceita a proposta / assina o
 // contrato como o cliente, pela Edge Function client-portal-action («simular_cliente»), o mesmo caminho do painel de teste. Só aparece no
 // ambiente de testes (testarh, localhost ou VITE_FERRAMENTAS_TESTE=1) E quando a base diz que sim
-// (fn_modo_teste_simular_cliente_para_mim: modo de teste ligado E membro ativo); em produção o modo de teste está desligado.
+// (fn_modo_teste_simular_cliente_para_mim: modo de teste ligado E super admin, migração 20270123500000); em produção o modo de teste está desligado.
 const ambienteDoBotaoTeste = () => ambienteDeTeste(import.meta.env.VITE_FERRAMENTAS_TESTE as string | undefined, typeof window === "undefined" ? undefined : window.location.hostname);
 export function BotaoTesteSimularCliente({ d, acao, tamanho = "default", ambiente = ambienteDoBotaoTeste }: { d: Negocio; acao: "aceitar" | "assinar"; tamanho?: "lg" | "default"; /** para os testes */ ambiente?: () => boolean }) {
   const teste = useSimularClienteTeste();
@@ -965,21 +977,34 @@ export function BotaoTesteSimularCliente({ d, acao, tamanho = "default", ambient
   );
 }
 
-const DIA_SEMANA = ["dom", "seg", "ter", "qua", "qui", "sex", "sáb"];
-/** "2026-10-22" e "14:30" → "qui 22/10 · 14:30", o mesmo formato das vagas. */
-export const slotDe = (dia: string, hora: string) => {
-  const [a, m, n] = dia.split("-").map(Number);
-  return `${DIA_SEMANA[new Date(a, m - 1, n).getDay()]} ${String(n).padStart(2, "0")}/${String(m).padStart(2, "0")} · ${hora}`;
-};
-
-/** Marcar a visita noutro dia e hora que não as vagas sugeridas. */
-function OutraData({ INP, ROT, marcar }: { INP: string; ROT: string; marcar: (slot: string) => void }) {
+/** Marcar a visita noutro dia e hora que não as vagas sugeridas. 19/11 (auditoria): a vaga vai com a data completa (antes, slotDe deitava fora o ano). */
+function OutraData({ INP, ROT, marcar }: { INP: string; ROT: string; marcar: (vaga: Vaga) => void }) {
   const [dia, setDia] = useState(""), [hora, setHora] = useState("10:00");
   return (
     <div className="flex flex-wrap items-end gap-3 pt-2">
       <label className={ROT}>Outro dia<input type="date" value={dia} onChange={(e) => setDia(e.target.value)} className={cn(INP, "w-44")} /></label>
       <label className={ROT}>Hora<input type="time" step={900} value={hora} onChange={(e) => setHora(e.target.value)} className={cn(INP, "w-28")} /></label>
-      <Button type="button" variant="outline" disabled={!dia || !hora} onClick={() => marcar(slotDe(dia, hora))}><CalendarClock className="mr-1.5 h-4 w-4" />Marcar visita</Button>
+      <Button type="button" variant="outline" disabled={!dia || !hora} onClick={() => marcar({ data: dia, hora })}><CalendarClock className="mr-1.5 h-4 w-4" />Marcar visita</Button>
+    </div>
+  );
+}
+
+/** 19/11 (auditoria): «Seguir sem adenda» com a margem abaixo do mínimo (margemSemAdenda) espera pela Direção: diz-se antes de carregar,
+ *  e o pedido fica à vista; a Direção aprova ou recusa aqui. */
+function SemAdendaDirecao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+  const M = margemSemAdenda(d, ctx.S), pedida = d.f.acerto_sem_adenda_aprov === "pedida", direcao = podeNeg(ctx.S.role, "margin.approve");
+  if (!M?.abaixo && !pedida) return null;
+  const margem = M ? `Sem adenda, a margem fica em ${pct(M.m)} com as medidas novas (mínimo ${ctx.S.cfg.min}%).` : "";
+  if (!pedida) return <p className="text-sm text-muted-foreground">{margem} {direcao ? "Seguir sem adenda fica como decisão da Direção." : "Seguir sem adenda pede a aprovação da Direção."}</p>;
+  return (
+    <div className="space-y-2 rounded-xl bg-warning/10 px-3 py-2 text-[15px]" role="status">
+      <p>{margem} À espera da Direção para seguir sem adenda.</p>
+      {direcao
+        ? <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" className="min-h-10" onClick={() => ctx.run(() => { ctx.A.aprovarSemAdenda(d.id); })}>Aprovar sem adenda</Button>
+            <Button type="button" size="sm" variant="outline" className="min-h-10" onClick={() => ctx.run(() => { ctx.A.recusarSemAdenda(d.id); })}>Recusar</Button>
+          </div>
+        : <button type="button" className="text-sm font-medium text-primary underline-offset-4 hover:underline" onClick={() => ctx.run(() => ctx.A.role("direcao"))}>Mudar para {PAPEIS.direcao.n}</button>}
     </div>
   );
 }
@@ -1009,8 +1034,9 @@ function AcertoDoValor({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <Button type="button" className="min-h-11" disabled={!pode} onClick={() => ctx.run(() => { ctx.A.adendaDoValor(d.id); })}>Preparar a adenda</Button>
-          <Button type="button" variant="ghost" className="min-h-11" disabled={!pode} onClick={() => ctx.run(() => ctx.A.semAdendaDoValor(d.id))}>Seguir sem adenda</Button>
+          <Button type="button" variant="ghost" className="min-h-11" disabled={!pode || d.f.acerto_sem_adenda_aprov === "pedida"} onClick={() => ctx.run(() => { ctx.A.semAdendaDoValor(d.id); })}>Seguir sem adenda</Button>
         </div>
+        <SemAdendaDirecao ctx={ctx} d={d} />
         {!pode && <p className="text-sm text-muted-foreground">Quem prepara a adenda é o comercial. <button type="button" className="font-medium text-primary underline-offset-4 hover:underline" onClick={() => ctx.run(() => ctx.A.role("comercial"))}>Mudar para {PAPEIS.comercial.n}</button></p>}
       </>}
     </section>
@@ -1038,8 +1064,9 @@ export function NotaDeCredito({ ctx, d, R, dif, podeComercial }: { ctx: Ctx; d: 
             className="min-h-11 w-56 rounded-lg border border-input bg-background px-3 text-[15px] disabled:opacity-50" />
         </label>
         <Button type="submit" className="min-h-11" disabled={!podeFin || !numero.trim()}>Registar nota de crédito</Button>
-        {podeComercial && <Button type="button" variant="ghost" className="min-h-11" onClick={() => ctx.run(() => ctx.A.semAdendaDoValor(d.id))}>Seguir sem acerto</Button>}
+        {podeComercial && <Button type="button" variant="ghost" className="min-h-11" disabled={d.f.acerto_sem_adenda_aprov === "pedida"} onClick={() => ctx.run(() => { ctx.A.semAdendaDoValor(d.id); })}>Seguir sem acerto</Button>}
       </form>
+      <SemAdendaDirecao ctx={ctx} d={d} />
       {!podeFin && <p className="text-sm text-muted-foreground">Quem regista a nota de crédito é o Financeiro.</p>}
     </section>
   );

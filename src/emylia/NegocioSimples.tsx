@@ -559,6 +559,8 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos, soLeitura }: { ctx: Ctx; 
   const quem = p.who && p.who !== "cliente" && !meu ? PAPEIS[p.who].n : null;
   // 27/10 (Rúben): com a proposta pronta a enviar, o botão é sempre "Enviar proposta": em cima e em baixo de cada passo, sem "Continuar"
   const enviar = !fim && meu && p.act === "enviar" && temBotaoFase(ctx, d);
+  // 19/11 (auditoria): «Registar chamada» pede o resultado (e o dia para voltar a ligar): fica no corpo do fim, não na barra presa ao fundo
+  const chamadaNoFim = fim && p.act === "contactar";
 
   return (
     <>
@@ -604,6 +606,7 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos, soLeitura }: { ctx: Ctx; 
               </h2>
               {p.sub && <p className="mt-2 text-base text-muted-foreground">{p.sub}</p>}
               {quem && <p className="mt-2 text-base text-muted-foreground">Este passo é de {quem}.</p>}
+              {chamadaNoFim && <div className="mt-6"><SoLeitura ativo={soLeitura}><BotaoFase ctx={ctx} d={d} /></SoLeitura></div>}
             </>
           )}
         </div>
@@ -615,7 +618,7 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos, soLeitura }: { ctx: Ctx; 
         <div data-acoes-passo className="sticky bottom-0 z-30 -mx-4 mt-8 flex items-center gap-2 border-t border-border bg-background/95 py-3 pl-4 pr-[4.5rem] backdrop-blur [&:not(:has(button))]:hidden sm:static sm:mx-0 sm:mt-10 sm:justify-between sm:gap-3 sm:bg-transparent sm:px-0 sm:pb-0 sm:pt-6 sm:backdrop-blur-none">
           <div className="shrink-0 empty:hidden sm:empty:block">{ativo > 0 && <Button variant="ghost" size="lg" className="px-3 sm:px-8" onClick={() => setAtivo(ativo - 1)}>Anterior</Button>}</div>
           {fim || enviar
-            ? (temBotaoFase(ctx, d) ? <div className="min-w-0 flex-1 sm:flex-none [&_button]:w-full sm:[&_button]:w-auto"><SoLeitura ativo={soLeitura}><BotaoFase ctx={ctx} d={d} /></SoLeitura></div> : null)
+            ? (temBotaoFase(ctx, d) && !chamadaNoFim ? <div className="min-w-0 flex-1 sm:flex-none [&_button]:w-full sm:[&_button]:w-auto"><SoLeitura ativo={soLeitura}><BotaoFase ctx={ctx} d={d} /></SoLeitura></div> : null)
             : <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-none sm:flex-row sm:items-center">
               {/* no passo Orçamento por verificar, o botão é verificar: sem bloqueios o passo fica feito e avança sozinho;
                   com bloqueios, leva-os à vista (antes, o "Continuar" passava à Proposta com o orçamento por aprovar) */}
@@ -651,7 +654,9 @@ function ConfirmarPerda({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 }
 
 /** 4/11 (Rúben: «às vezes a call permite preencher logo tudo»): os passos da Lead e do Contacto seguidos, na mesma página, com os dados do
- *  cliente ao lado (DadosAoLado). Os campos são os mesmos dos passos (gravam-se como sempre); para passar de fase volta-se aos passos. */
+ *  cliente ao lado (DadosAoLado). Os campos são os mesmos dos passos (gravam-se como sempre).
+ *  19/11 (auditoria): o resultado da chamada (ou a análise dela) passa a Lead a Contacto, e a visita marcada aqui, com o Contacto completo,
+ *  passa o negócio à Visita (antes ficava em «Por contactar» com a visita já no CRM). */
 function TudoNaChamada({ ctx, d, ajustarPassos }: { ctx: Ctx; d: Negocio; ajustarPassos?: (passos: Passo[], d: Negocio) => Passo[] }) {
   const fases = [0, 1] as const;
   return (

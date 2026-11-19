@@ -52,14 +52,17 @@ export const diaUtil = (d: Date) => d.getDay() !== 0 && d.getDay() !== 6 && !fer
 
 /** O primeiro dia útil a partir de `d` (o próprio, se for útil). */
 export function proximoUtil(d: Date): Date {
+  // 19/11: uma data inválida (NaN) nunca chega a um dia útil (os «feriados» de NaN também são NaN): o browser congelava
+  if (Number.isNaN(d.getTime())) return d;
   let x = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  while (!diaUtil(x)) x = maisDias(x, 1);
+  for (let k = 0; k < 400 && !diaUtil(x); k++) x = maisDias(x, 1);
   return x;
 }
 
 /** Os `n` dias úteis da obra a partir do início (o dia 0 é o início, já ajustado a dia útil). */
 export function diasDaObra(inicio: Date, n: number): Date[] {
   const out: Date[] = [];
+  if (Number.isNaN(inicio.getTime()) || !Number.isFinite(n)) return out;
   let x = proximoUtil(inicio);
   for (let k = 0; k < n; k++) { out.push(x); x = proximoUtil(maisDias(x, 1)); }
   return out;

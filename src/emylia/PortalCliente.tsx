@@ -204,6 +204,7 @@ function PagarFatura({ numero, montante, vence, refMb, refTeste = true, alvo, ti
           ))}
         </div>
       </div>
+      {/* 19/11 (auditoria): só com o prestador de pagamentos configurado (metodosDe → mbDisponivel); sem ele, a opção nem aparece */}
       {metodo === "Referência MB" && <>
         <div className="rounded-xl border border-slate-200 px-4 py-1">
           <p className="pt-2 text-sm font-semibold">Multibanco ou homebanking</p>
@@ -884,6 +885,9 @@ function PagarReal({ numero, real, montante, vence, refMb, titular, verFatura }:
   const [metodo, setMetodo] = useState(() => { try { return localStorage.getItem(chave) ?? ""; } catch { return ""; } });
   const [erro, setErro] = useState<string | null>(null);
   const avisado = real.avisados.includes(numero);
+  // 19/11 (auditoria): a forma guardada que a empresa já não recebe (ex.: a referência Multibanco, sem prestador) volta à transferência,
+  // como no ecrã (PagarFatura): o aviso ao Financeiro leva a forma que o cliente viu
+  const formas = metodosDe(useDadosPagamento()), usado = formas.includes(metodoDe(metodo)) ? metodoDe(metodo) : "Transferência";
   const escolher = (m: string) => { setMetodo(m); try { localStorage.setItem(chave, m); } catch { /* sem armazenamento: só nesta visita */ } };
   const avisar = (ref: string, m: string) => { setErro(null); real.avisarPagamento(numero, ref.trim(), m).catch((e: Error) => setErro(e.message)); };
   if (avisado) return (
@@ -895,7 +899,7 @@ function PagarReal({ numero, real, montante, vence, refMb, titular, verFatura }:
   return (
     <div className="space-y-3">
       <PagarFatura numero={numero} montante={montante} vence={vence} refMb={refMb} alvo={{ metodo }} titular={titular} verFatura={verFatura}
-        escolher={escolher} pago={(r) => avisar(r, metodoDe(metodo))} autorizar={(i, t) => avisar(`Débito direto autorizado na conta ${i} (${t})`, "Débito direto")} />
+        escolher={escolher} pago={(r) => avisar(r, usado)} autorizar={(i, t) => avisar(`Débito direto autorizado na conta ${i} (${t})`, "Débito direto")} />
       {erro && <p role="alert" className="text-sm text-red-700">{erro}</p>}
     </div>
   );

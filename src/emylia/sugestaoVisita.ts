@@ -43,8 +43,9 @@ export function proximidade(a: { cp?: string; localidade?: string }, b: { cp?: s
 }
 
 /** A sugestão para uma vaga: entre `opcoes` (as escolhas do "Quem vai"), a pessoa livre a essa hora e mais perto. */
-export function sugerirQuemVai(deals: readonly Negocio[], d: Negocio, slot: string, opcoes: readonly string[], hoje = new Date()): SugestaoVisita | null {
-  const vaga = dataDaVaga(slot, hoje);
+export function sugerirQuemVai(deals: readonly Negocio[], d: Negocio, slot: string | { data: string; hora: string }, opcoes: readonly string[], hoje = new Date()): SugestaoVisita | null {
+  // 19/11 (auditoria): a vaga com a data completa usa-se tal e qual; só o texto antigo precisa de adivinhar o ano
+  const vaga = typeof slot === "string" ? dataDaVaga(slot, hoje) : slot.data ? slot : null;
   if (!vaga || !opcoes.length) return null;
   // primeiro os comerciais (quem vai às visitas); sem nenhum, toda a gente das opções
   const comerciais = opcoes.filter((q) => /\(comercial\)/i.test(q));

@@ -4,7 +4,7 @@ import { esquecerInventario, lerInventario } from "./inventario/loja";
 import { anularEcNoInventario, resumoEcNegocio, sincronizarEcsNegocios } from "./inventario/ponteNegocios";
 import { acoes, seed, type Negocio } from "./motor";
 import { FINANCEIRO, emFalta } from "./campos";
-import { adendaAssinada, adendaPorAssinar } from "./testeAdenda";
+import { adendaAssinada, adendaPorAssinar, registarFaturasAdenda } from "./testeAdenda";
 import { aMais, diaDaChegada, ecDaAdenda, linhasDaObra, porEncomendar, porEncomendarDe } from "./encomendasAjuste";
 import { materiaisDaTarefa } from "./tarefasValidador";
 
@@ -16,7 +16,7 @@ const preparar = () => {
   const S = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
   return { S, A, d };
 };
-const pagar = ({ A, d }: ReturnType<typeof preparar>) => { preencher(d); A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); A.retificarMedidas(d.id);
+const pagar = ({ A, d }: ReturnType<typeof preparar>) => { preencher(d); A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id);
   // 16/11: uma tarefa nova no plano muda o valor; aqui a empresa segue sem acerto (o acerto ao Financeiro tem os seus testes)
   A.role("comercial"); A.semAdendaDoValor(d.id);
   A.role("operacoes"); A.aprovarPlano(d.id); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ };
@@ -121,7 +121,7 @@ describe("encomendas de ajuste: os materiais novos depois da encomenda inicial",
     A.role("direcao"); A.encomendarMateriais(d.id);
     expect(d.obra.ecsAjuste ?? []).toEqual([]);
     // a fatura da adenda, o cliente paga no portal, o Financeiro valida: sai o recibo e a EC-1027-A1, ligada à adenda
-    A.role("financeiro"); A.faturarAdendas(d.id);
+    A.role("financeiro"); registarFaturasAdenda(A, d);
     A.avisarPagamento(d.id, "TRF 123", "AD 2026/1027-1");
     A.validarPagamentosAdenda(d.id);
     const a = d.adendas![0];
@@ -140,7 +140,7 @@ describe("encomendas de ajuste: os materiais novos depois da encomenda inicial",
     A.role("comercial");
     A.criarAdenda(d.id, [{ sid: "pint", q: 10 }], "O cliente pediu");
     adendaAssinada(A, d.id, "AD 2026/1027-1");
-    A.role("financeiro"); A.faturarAdendas(d.id);
+    A.role("financeiro"); registarFaturasAdenda(A, d);
     A.avisarPagamento(d.id, "TRF 9", "AD 2026/1027-1");
     A.validarPagamentosAdenda(d.id);
     expect(d.adendas![0].faturas![0].recibo).toBeTruthy();
@@ -160,7 +160,7 @@ describe("encomendas de ajuste: os materiais novos depois da encomenda inicial",
     A.verificarEnviarAdenda(d.id, "AD 2026/1027-1"); A.verificarEnviarAdenda(d.id, "AD 2026/1027-2");
     A.recusarAdenda(d.id, "AD 2026/1027-1", "O preço");
     A.anularAdenda(d.id, "AD 2026/1027-2");
-    A.role("financeiro"); A.faturarAdendas(d.id); A.validarPagamentosAdenda(d.id);
+    A.role("financeiro"); registarFaturasAdenda(A, d); A.validarPagamentosAdenda(d.id);
     A.role("direcao"); A.encomendarMateriais(d.id);
     expect(d.adendas!.every((a) => !a.faturas?.length)).toBe(true);
     expect(d.adendas!.map((a) => a.estado)).toEqual(["recusada", "anulada"]);

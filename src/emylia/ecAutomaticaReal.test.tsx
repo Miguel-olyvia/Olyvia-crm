@@ -43,7 +43,7 @@ function pagoEProntoParaEc(real: boolean) {
   const run = (fn: () => void) => fn();
   const A = real ? acoes(S, vi.fn(), run, { abrir: vi.fn() }) : acoes(S, vi.fn(), run);
   A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
-  A.role("operacoes"); A.retificarMedidas(d.id); A.aprovarPlano(d.id);
+  A.role("operacoes"); A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id); A.aprovarPlano(d.id);
   return { S, A, d };
 }
 
@@ -127,7 +127,7 @@ describe("organização real: a encomenda da adenda é automática", () => {
     encher(d, FINANCEIRO); encher(d, [OBRA[0]]);
     const A = acoes(S, vi.fn(), (fn) => fn());
     A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
-    A.role("operacoes"); A.retificarMedidas(d.id); A.aprovarPlano(d.id);
+    A.role("operacoes"); A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id); A.aprovarPlano(d.id);
     A.role("comercial"); A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu"); adendaAssinada(A, d.id, N);
     const a = d.adendas!.find((x) => x.n === N)!;
     a.faturas = [{ n: "FT 2026/990", q: "13/11", i: 0, l: "1.ª", p: 0.5, v: 100, recibo: { n: "RC 2026/990", q: "13/11" } }];

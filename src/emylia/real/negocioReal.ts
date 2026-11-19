@@ -3,11 +3,11 @@
 // os ramos pelo id do Catálogo: trocar por uuid é da camada da base (lerNegocios/gravarNegocios). As datas vão em ISO; na volta saem no
 // formato que o motor entende ("dd/mm hh:mm"; "aaaa-mm-dd" nas faturas e no início da obra).
 // As adendas vão também (migration 20261231990000). Fora daqui, por agora: a obra (Fase 3), a demolição e o acesso ao portal (Fase 4).
-import { LINHAS, garantirServico, type Estado, type Evento, type LinhaOrc, type Negocio, type Orcamento, type Papel, type PedidoClausula, type SvcId, type VersaoProposta } from "../motor";
+import { LINHAS, garantirServico, ivaDaLinha, type Estado, type Evento, type LinhaOrc, type Negocio, type Orcamento, type Papel, type PedidoClausula, type SvcId, type VersaoProposta } from "../motor";
 import { PREFIXO_PROD, partesDoModelo, textoProduto, type ProdVisita } from "../produtosVisita";
 import type { FaturaReg } from "../v2/financeiro";
 import { prestacoes, type Prestacao } from "../planoObra";
-import { faturasAdenda, totaisLinhas, type Adenda, type EstadoAdenda, type FaturaAdenda, type LinhaAdenda as LinhaAdendaEmylia } from "../adendas";
+import { LINHA_ACERTO_PRODUTOS, faturasAdenda, totaisLinhas, type Adenda, type EstadoAdenda, type FaturaAdenda, type LinhaAdenda as LinhaAdendaEmylia } from "../adendas";
 import type { EcAjuste, EncCliente } from "../preparacaoObra";
 
 /* ------------------------------------------------------------------ datas */
@@ -121,6 +121,9 @@ export interface LinhaAdendaLinha {
   ordem: number; servico: string | null; chave: string; livre: boolean; descricao: string; unidade: string; quantidade: number; preco_un: number;
   horas_un: number; perfil: string; perfil_chave: string | null; custo_un: number | null; mao_obra_un: number | null;
   materiais: { nome: string; quantidade: number; unidade: string; preco: number | null; fornecedor: string | null }[] | null;
+  /** 19/11 (auditoria): a taxa de IVA da linha (6 ou 23). As linhas das adendas vivem em quote_lines (as propostas da adenda): desde
+   *  20270124030000 a base grava-a (iva_percent com iva_explicita) e devolve-a; as linhas antigas voltam com null (contam a 6%). */
+  taxa_iva?: number | null;
 }
 export interface LinhaAdendaVersao {
   versao: number; estado: "rascunho" | "enviado" | "aceite" | "substituido" | "recusado" | "anulado"; desconto: number; verificado: boolean;
@@ -188,11 +191,21 @@ const linhaAdendaParaLinha = (x: LinhaAdendaEmylia, i: number): LinhaAdendaLinha
   ordem: i, servico: x.livre ? null : x.sid, chave: x.sid, livre: !!x.livre, descricao: x.n, unidade: x.un, quantidade: x.q, preco_un: x.pu, horas_un: x.h,
   perfil: x.perfil, perfil_chave: x.perfilId ?? null, custo_un: x.cu ?? null, mao_obra_un: x.mo ?? null,
   materiais: x.mats ? x.mats.map((m) => ({ nome: m.n, quantidade: m.q, unidade: m.un, preco: m.preco ?? null, fornecedor: m.forn ?? null })) : null,
+  ...(x.iva ? { taxa_iva: x.iva } : {}),
 });
+/** 19/11: a taxa de uma linha da adenda lida da base. Primeiro a da base (20270124030000: taxa_iva, 6 ou 23). Só nas linhas antigas
+ *  (gravadas antes, sem taxa) se deduz pelo nome: a dos produtos do acerto volta a 23% (a «-p6» é a que fica a 6%); as outras, 6%. */
+export function ivaDaLinhaLida(l: Pick<LinhaAdendaLinha, "taxa_iva" | "livre" | "descricao" | "chave">): { iva?: 6 | 23 } {
+  const taxa = l.taxa_iva == null ? null : Number(l.taxa_iva);
+  if (taxa === 6 || taxa === 23) return { iva: taxa };
+  if (taxa == null && l.livre && l.descricao.startsWith(LINHA_ACERTO_PRODUTOS) && !l.chave.endsWith("-p6")) return { iva: 23 };
+  return {};
+}
 const linhaAdendaDeLinha = (l: LinhaAdendaLinha): LinhaAdendaEmylia => ({
   sid: l.chave, n: l.descricao, un: l.unidade, q: l.quantidade, pu: l.preco_un, h: l.horas_un, perfil: l.perfil,
   ...(l.perfil_chave ? { perfilId: l.perfil_chave } : {}), ...(l.custo_un != null ? { cu: l.custo_un } : {}), ...(l.mao_obra_un != null ? { mo: l.mao_obra_un } : {}),
   ...(l.livre ? { livre: true as const } : {}),
+  ...ivaDaLinhaLida(l),
   ...(l.materiais ? { mats: l.materiais.map((m) => ({ n: m.nome, q: m.quantidade, un: m.unidade, ...(m.preco != null ? { preco: m.preco } : {}), ...(m.fornecedor ? { forn: m.fornecedor } : {}) })) } : {}),
 });
 const ESTADO_VERSAO: Record<EstadoAdenda, LinhaAdendaVersao["estado"]> = { rascunho: "rascunho", enviada: "enviado", aceite: "aceite", assinada: "aceite", recusada: "recusado", anulada: "anulado" };
@@ -262,12 +275,14 @@ const prodParaLinha = (p: ProdVisita, i: number): LinhaProdutoVisita => ({
   ordem: i, produto: p.id, nome: p.n, unidade: p.un, custo_un: p.custo, pvp_un: p.pvp ?? null, categoria: p.no ?? null, quantidade: p.q,
   cliente_fornece: !!p.cliente, servico: p.svc ?? null, fator: p.fator ?? null, sem_instalacao: !!p.semSvc,
 });
-function linhaParaLinha(l: LinhaOrc, i: number, prods: readonly ProdVisita[] = [], hoje: Date = new Date()): LinhaOrcamentoLinha {
+/** 19/11 (auditoria): a taxa de IVA da linha vai sempre para a base: a escrita (ou congelada ao enviar) e, sem ela, a do Catálogo (`S`). */
+function linhaParaLinha(l: LinhaOrc, i: number, prods: readonly ProdVisita[] = [], hoje: Date = new Date(), S?: Pick<Estado, "svc"> | null): LinhaOrcamentoLinha {
+  const taxa = l.iva ?? (S ? ivaDaLinha(l, S) : null);
   if (l.t === "svc") {
     const det = l.det;
     return {
       ordem: i, tipo: "servico", servico: l.sid, descricao: l.sid, unidade: null, quantidade: l.q, preco_un: l.pu, parte_iva: "mao_obra",
-      taxa_iva: l.iva ?? null, fornecedor: null, qtd_origem: null, preco_un_origem: null, custo_un_origem: null,
+      taxa_iva: taxa, fornecedor: null, qtd_origem: null, preco_un_origem: null, custo_un_origem: null,
       custo: { custo_un: l.cu, manual: !!l.cuMan, congelado: !!det, horas_un: det?.h ?? 0, mao_obra_un: det?.mo ?? 0, equipamentos_un: det?.eq ?? 0,
         consumiveis_un: det?.cons ?? 0, estrutura_hora: det?.taxaEstr ?? 0, estrutura_un: det?.estr ?? 0, ajuste_un: det?.ajuste ?? 0,
         congelado_em: det ? paraIso(det.q, hoje) : null,
@@ -278,7 +293,7 @@ function linhaParaLinha(l: LinhaOrc, i: number, prods: readonly ProdVisita[] = [
   return {
     ordem: i, tipo: l.livre ? "livre" : l.prod ? "produto" : "materiais_modelo", servico: null, descricao: l.d, unidade: l.livre?.un ?? null,
     produto: l.d.startsWith(PREFIXO_PROD) ? prods.find((p) => !p.cliente && PREFIXO_PROD + textoProduto(p) === l.d)?.id ?? null : null,
-    quantidade: 1, preco_un: l.preco, parte_iva: "materiais", taxa_iva: l.iva ?? null, fornecedor: l.prod?.forn ?? null,
+    quantidade: 1, preco_un: l.preco, parte_iva: "materiais", taxa_iva: taxa, fornecedor: l.prod?.forn ?? null,
     qtd_origem: l.livre?.q ?? l.prod?.q ?? null, preco_un_origem: l.livre?.pu ?? l.prod?.precoUn ?? null, custo_un_origem: l.prod?.custoUn ?? null,
     custo: { custo_un: l.custo, manual: false, congelado: false, horas_un: 0, mao_obra_un: 0, equipamentos_un: 0, consumiveis_un: 0, estrutura_hora: 0,
       estrutura_un: 0, ajuste_un: 0, congelado_em: null, oficios: [] },
@@ -319,7 +334,9 @@ const prestacoesDe = (d: Negocio): { L: LinhaPrestacao[]; porFases: boolean } =>
 };
 
 /** As linhas de um negócio (sem a obra, as adendas, a demolição e o acesso ao portal). */
-export function paraLinhas(d: Negocio, hoje: Date = new Date()): LinhasNegocio {
+/** 19/11 (auditoria): com o Estado (`S`), cada linha leva a taxa de IVA do Catálogo quando não tem uma; a versão aceite leva os totais
+ *  congelados (o.totalAceite, congelarTotalAceite), nunca recalculados. */
+export function paraLinhas(d: Negocio, hoje: Date = new Date(), S?: Pick<Estado, "svc"> | null): LinhasNegocio {
   const iso = (q: string | null | undefined) => paraIso(q, hoje);
   const o = d.orc;
   const v = d.visita;
@@ -330,7 +347,7 @@ export function paraLinhas(d: Negocio, hoje: Date = new Date()): LinhasNegocio {
       verificado: false, aprovacao: null, motivos_versao: vs.motivos, nota_versao: vs.nota ?? null, onde_refeita: vs.onde ?? null, pedido_cliente: null, recusa: null,
       enviado_em: iso(vs.enviada), aceite_em: null, substituido_em: iso(vs.substituida), aceite_antes_em: iso(vs.aceite ?? null),
       preco_final: Math.round(vs.total * 100) / 100, total_com_iva: vs.totalIva != null ? Math.round(vs.totalIva * 100) / 100 : null, prestacoes_por_fases: false, sem_demolicao: false,
-      linhas: vs.linhas ? vs.linhas.map((l, i, a) => linhaParaLinha(l, i, a, hoje)) : null, zonas: null, prazo: [], prestacoes: [], avisos: [], precos_manuais: null,
+      linhas: vs.linhas ? vs.linhas.map((l, i, a) => linhaParaLinha(l, i, a, hoje, S)) : null, zonas: null, prazo: [], prestacoes: [], avisos: [], precos_manuais: null,
       produtos: vs.prod ? vs.prod.map(prodParaLinha) : null, partes_fora: vs.semParte ?? null,
     });
     const pr = prestacoesDe(d);
@@ -341,9 +358,10 @@ export function paraLinhas(d: Negocio, hoje: Date = new Date()): LinhasNegocio {
       verificado: o.verif, aprovacao: o.aprov === "ok" ? "aprovada" : o.aprov === "pedida" ? "pedida" : null, motivos_versao: [], nota_versao: null, onde_refeita: null,
       pedido_cliente: o.pedidoCliente ? { motivos: o.pedidoCliente.motivos, nota: o.pedidoCliente.nota ?? null, em: iso(o.pedidoCliente.q) } : null,
       recusa: o.recusada ? { motivos: o.recusada.motivos, nota: o.recusada.nota ?? null, em: iso(o.recusada.q) } : null,
-      enviado_em: iso(o.enviada), aceite_em: iso(o.aceite), substituido_em: null, aceite_antes_em: null, preco_final: null, total_com_iva: null,
+      enviado_em: iso(o.enviada), aceite_em: iso(o.aceite), substituido_em: null, aceite_antes_em: null,
+      preco_final: o.totalAceite?.pf ?? null, total_com_iva: o.totalAceite?.total ?? null,
       prestacoes_por_fases: pr.porFases, sem_demolicao: !!o.semDemolicao,
-      linhas: [...o.linhas.map((l, i) => linhaParaLinha(l, i, d.visita.prod ?? [], hoje)),
+      linhas: [...o.linhas.map((l, i) => linhaParaLinha(l, i, d.visita.prod ?? [], hoje, S)),
         ...materiaisDoOrcamento(d).map((m, i) => linhaMaterial(m, o.linhas.length + i))], zonas: o.zonas ?? null,
       prazo: Object.entries(o.prazo ?? {}).map(([tarefa, dias]) => ({ tarefa, dias })),
       prestacoes: pr.L, avisos: Object.entries(o.avisosVistos ?? {}).filter(([, x]) => x).map(([k]) => k),
@@ -410,6 +428,8 @@ const linhaParaProd = (p: LinhaProdutoVisita): ProdVisita => ({
 } as ProdVisita);
 // 2/11 (20270102210000): sem quotes.view_costs a base devolve os custos a null (custo_un, mão de obra, custo/hora dos ofícios, custo dos
 // produtos): ficam 0 no ecrã. Ao gravar, a base repõe os da base nas linhas que já existiam (quem não vê custos não os apaga).
+// 19/11 (auditoria): a taxa vai sempre para a base (paraLinhas, com o Estado) e volta para a linha. Num rascunho, a linha fica com a taxa
+// do Catálogo do dia em que se gravou (muda-se à mão na linha).
 function linhaDeLinha(l: LinhaOrcamentoLinha): LinhaOrc {
   const zonas = l.zonas ? { zonas: l.zonas.map((z) => ({ z: z.zona, q: z.quantidade, ...(z.valor != null ? { preco: z.valor } : {}) })) } : {};
   const iva = l.taxa_iva != null ? { iva: l.taxa_iva as 6 | 23 } : {};
@@ -449,6 +469,8 @@ export function deLinhas(L: LinhasNegocio): Negocio {
       ...(mats.length && atual.aceite_em ? { matsModelo: mats.map((l) => ({ n: l.descricao, un: l.unidade ?? "", q: l.quantidade })) } : {}),
       vendaDireta: atual.venda_direta, verif: atual.verificado, aprov: atual.aprovacao === "aprovada" ? "ok" : atual.aprovacao === "pedida" ? "pedida" : null,
       enviada: atual.enviado_em ? deIso(atual.enviado_em) : null, aceite: atual.aceite_em ? deIso(atual.aceite_em) : null,
+      // 19/11 (auditoria): os totais da versão aceite, congelados (não se recalculam)
+      ...(atual.aceite_em && atual.preco_final != null && atual.total_com_iva != null ? { totalAceite: { pf: atual.preco_final, total: atual.total_com_iva } } : {}),
       contrato: cAtual?.estado === "assinado" ? "assinado" : cAtual?.estado === "enviado" ? "enviado" : null,
       ...(contratoCampos.assinatura ? { assinatura: contratoCampos.assinatura } : {}),
       avisosVistos: Object.fromEntries(atual.avisos.map((k) => [k, true])),

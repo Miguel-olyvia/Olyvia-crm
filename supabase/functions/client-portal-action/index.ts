@@ -5,6 +5,14 @@ import { isNotificationEnabled } from "../_shared/notificationSettings.ts";
 import { withRetryResult } from "../_shared/retry.ts";
 import { resolveProposalStageId } from "../_shared/proposalWorkflowStage.ts";
 import { detectClientIp } from "../_shared/clientIp.ts";
+import {
+  orcamentosParaAceitar,
+  podeAceitarOrcamento,
+  podeAssinarContrato,
+  podeSimularCliente,
+  type Recusa,
+  type VersaoDoOrcamento,
+} from "./regras.ts";
 
 const requestSchema = z.object({
   action: z.string(),
@@ -99,12 +107,13 @@ serve(async (req) => {
       const { data: doc } = await supabase.from(coluna === "proposal_id" ? "proposals" : "client_contracts")
         .select("organization_id, entity_id").eq("id", docId).maybeSingle();
       if (!doc) return new Response(JSON.stringify({ error: "not_found", message: "Documento não encontrado." }), { status: 404, headers: corsHeaders });
-      let { data: admin } = await supabase.rpc("fn_super_admin_de", { p_auth: user.id, p_org: (doc as any).organization_id });
-      // FERRAMENTAS-TESTE (temporário, remover antes da main): 11/11 (Rafael) aceitar/assinar como o cliente também para membro ativo
-      // da organização do documento (perfis normais), só com o modo de teste ligado (migração 20270114200000)
-      if (admin !== true) ({ data: admin } = await supabase.rpc("fn_modo_teste_simular_cliente_de", { p_auth: user.id, p_org: (doc as any).organization_id }));
-      if (admin !== true) {
-        return new Response(JSON.stringify({ error: "Forbidden", message: "Só o super admin da organização pode agir pelo cliente (teste)." }), { status: 403, headers: corsHeaders });
+      // 19/11 (auditoria): só o super admin (fn_super_admin_de: super admin da organização do documento ou de uma acima, ou o
+      // administrador de sistema). Saiu o atalho de 11/11 para qualquer membro ativo (fn_modo_teste_simular_cliente_de), que deixava
+      // um perfil normal aceitar e assinar pelo cliente (migração 20270123500000).
+      const { data: admin } = await supabase.rpc("fn_super_admin_de", { p_auth: user.id, p_org: (doc as any).organization_id });
+      const semSuperAdmin = podeSimularCliente(admin);
+      if (semSuperAdmin) {
+        return new Response(JSON.stringify({ error: semSuperAdmin.error, message: semSuperAdmin.message }), { status: semSuperAdmin.status, headers: corsHeaders });
       }
       // o utilizador do portal do cliente deste documento (a linha do documento, ou a do mesmo cliente nesta organização)
       let { data: pu } = await supabase.from("client_portal_users").select("auth_user_id")
@@ -253,6 +262,17 @@ serve(async (req) => {
       return (scoped as any)?.id ?? null;
     }
     const forbidden = () => new Response(JSON.stringify({ error: "Forbidden" }), { status: 403, headers: corsHeaders });
+    // uma ação recusada pelas regras (regras.ts): a frase vem em «message», que é o que o portal mostra ao cliente
+    const recusado = (r: Recusa) =>
+      r.status === 403 && r.error === "Forbidden"
+        ? forbidden()
+        : new Response(JSON.stringify({ error: r.error, message: r.message }), { status: r.status, headers: corsHeaders });
+    // a base não respondeu ao ler o estado: não se aceita nem se assina às cegas
+    const naoVerificado = (doc: string) =>
+      new Response(
+        JSON.stringify({ error: "state_unavailable", message: `Não foi possível confirmar o estado ${doc}. Tente novamente dentro de momentos.` }),
+        { status: 503, headers: corsHeaders },
+      );
 
     // ── OTP single-use guard: atomically claim a verified OTP. ──
     // Combines lookup + consume in one UPDATE..WHERE..RETURNING so concurrent
@@ -261,7 +281,7 @@ serve(async (req) => {
     // the auth_user_id rollout will have auth_user_id IS NULL and will fail
     // by design — users must request a fresh code post-deploy.
     async function consumeVerifiedOtp(
-      referenceType: "proposal" | "contract",
+      referenceType: "proposal" | "contract" | "quote",
       referenceId: string,
       purpose: string,
     ): Promise<{ ok: boolean; otpId?: string }> {
@@ -396,6 +416,23 @@ serve(async (req) => {
         const { quote_id } = params;
         if (!quote_id) return new Response(JSON.stringify({ error: "quote_id required" }), { status: 400, headers: corsHeaders });
         if (!(await assertOwnership("quote_id", quote_id))) return forbidden();
+
+        // 19/11 (auditoria): só um orçamento enviado, fora dos negócios (lá aceita-se a proposta), e com o código por SMS, como
+        // sign_proposal e sign_contract. O estado vê-se ANTES de gastar o código.
+        {
+          const { data: q, error: qErr } = await supabase.from("quotes")
+            .select("estado, deleted_at, fluxo_emylia, negocio_id").eq("id", quote_id).maybeSingle();
+          if (qErr) return naoVerificado("do orçamento");
+          const r = podeAceitarOrcamento(q as any);
+          if (r) return recusado(r);
+          const otpClaim = await consumeVerifiedOtp("quote", quote_id, "quote_acceptance");
+          if (!otpClaim.ok) {
+            return new Response(
+              JSON.stringify({ error: "otp_required", message: "Código por SMS inválido, expirado ou já utilizado. Peça um novo código." }),
+              { status: 403, headers: corsHeaders },
+            );
+          }
+        }
 
         // Update quote status
         await supabase.rpc('set_audit_context', { p_user_id: null, p_source: 'portal' });
@@ -632,6 +669,47 @@ serve(async (req) => {
           return new Response(JSON.stringify({ error: "proposal_id and signature_image required" }), { status: 400, headers: corsHeaders });
         }
         if (!(await assertOwnership("proposal_id", proposal_id))) return forbidden();
+
+        const pedidos = Array.isArray(selected_quote_ids)
+          ? selected_quote_ids.filter((id: unknown): id is string => typeof id === "string" && id.length > 0)
+          : [];
+
+        // 19/11 (auditoria): o estado da proposta e dos orçamentos vê-se ANTES de gastar o código por SMS. Nos negócios só se aceita
+        // a versão mais recente, e só enviada (uma versão nova em rascunho fecha a proposta); ver regras.ts.
+        let selectedQuoteIds: string[];
+        {
+          const { data: prop, error: propErr } = await supabase.from("proposals")
+            .select("status, negocio_id, is_deleted").eq("id", proposal_id).maybeSingle();
+          const { data: ligados, error: ligadosErr } = await supabase.from("quotes")
+            .select("id, estado, versao, fluxo_emylia, negocio_id, adenda_id, created_at")
+            .eq("proposal_id", proposal_id).is("deleted_at", null);
+          if (propErr || ligadosErr) {
+            console.error("[client-portal-action] sign_proposal: leitura do estado", propErr ?? ligadosErr);
+            return naoVerificado("da proposta");
+          }
+          const daProposta = (ligados ?? []) as (VersaoDoOrcamento & { negocio_id?: string | null; adenda_id?: string | null })[];
+          // as versões da mesma família: as da adenda, ou as do negócio (sem as das adendas)
+          const deNegocio = daProposta.find((q) => q.fluxo_emylia === true);
+          let doNegocio: VersaoDoOrcamento[] = [];
+          if (deNegocio?.adenda_id) {
+            const { data, error } = await supabase.from("quotes").select("id, estado, versao, fluxo_emylia, created_at")
+              .eq("adenda_id", deNegocio.adenda_id).is("deleted_at", null);
+            if (error) return naoVerificado("da proposta");
+            doNegocio = (data ?? []) as VersaoDoOrcamento[];
+          } else {
+            const negocioId = deNegocio?.negocio_id ?? (prop as any)?.negocio_id ?? null;
+            if (negocioId) {
+              const { data, error } = await supabase.from("quotes").select("id, estado, versao, fluxo_emylia, created_at")
+                .eq("negocio_id", negocioId).eq("fluxo_emylia", true).is("adenda_id", null).is("deleted_at", null);
+              if (error) return naoVerificado("da proposta");
+              doNegocio = (data ?? []) as VersaoDoOrcamento[];
+            }
+          }
+          const r = orcamentosParaAceitar(prop as any, daProposta, doNegocio, pedidos);
+          if (!r.ok) return recusado(r.recusa);
+          selectedQuoteIds = r.ids;
+        }
+
         // B1 — atomically claim OTP BEFORE any sign-side mutation
         const otpClaim = await consumeVerifiedOtp("proposal", proposal_id, "proposal_signature");
         if (!otpClaim.ok) {
@@ -640,10 +718,6 @@ serve(async (req) => {
             { status: 403, headers: corsHeaders },
           );
         }
-
-        const selectedQuoteIds = Array.isArray(selected_quote_ids)
-          ? selected_quote_ids.filter((id: unknown): id is string => typeof id === "string" && id.length > 0)
-          : [];
 
         if (selectedQuoteIds.length > 0) {
           const { data: proposalQuotes } = await supabase
@@ -880,6 +954,15 @@ serve(async (req) => {
           return new Response(JSON.stringify({ error: "contract_id and signature_image required" }), { status: 400, headers: corsHeaders });
         }
         if (!(await assertOwnership("contract_id", contract_id))) return forbidden();
+        // 19/11 (auditoria): só um contrato enviado para assinatura (pending_signature; "pending" e "sent" nos antigos). Um rascunho,
+        // um anulado ou um já assinado não se assinam. Vê-se ANTES de gastar o código por SMS.
+        {
+          const { data: c, error: cErr } = await supabase.from("client_contracts")
+            .select("status, deleted_at").eq("id", contract_id).maybeSingle();
+          if (cErr) return naoVerificado("do contrato");
+          const r = podeAssinarContrato(c as any);
+          if (r) return recusado(r);
+        }
         // B1 — atomically claim OTP BEFORE any sign-side mutation
         {
           const otpClaim = await consumeVerifiedOtp("contract", contract_id, "contract_signature");
