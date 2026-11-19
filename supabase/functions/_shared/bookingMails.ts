@@ -29,8 +29,13 @@ export interface BookingConfirmationParams extends Brand {
   /** Modelo escolhido para o idioma (pickTemplateId); null = texto por omissao. */
   template: MailTemplate | null;
   vars: Record<string, string>;
-  /** Idioma da pessoa (anew_leads.locale ou lang do pedido). */
+  /** Idioma da pessoa (anew_leads.locale ou lang do pedido): o do texto por omissao quando nao ha modelo. */
   lang?: string | null;
+  /**
+   * Idioma do MODELO usado (o da pessoa se for o do idioma dela; o por omissao do formulario se for o da
+   * coluna unica). So serve para o assunto por omissao de um modelo sem assunto. Sem ele, o idioma da pessoa.
+   */
+  templateLang?: string | null;
   leadName: string;
   when: string;
   location?: string;
@@ -42,6 +47,7 @@ export interface BookingConfirmationParams extends Brand {
 export function buildBookingConfirmationMail(p: BookingConfirmationParams): BuiltMail {
   const lang = mailLangFor("client", p.lang);
   const t = MAIL_TEXTS[lang].bookingConfirmation;
+  const fallbackSubject = p.template?.body_html ? MAIL_TEXTS[mailLangFor("client", p.templateLang ?? p.lang)].bookingConfirmation.subject : t.subject;
   const html = p.template?.body_html
     ? renderHtml(p.template.body_html, p.vars)
     : defaultMeetingHtml({
@@ -57,7 +63,7 @@ export function buildBookingConfirmationMail(p: BookingConfirmationParams): Buil
       primaryColor: p.primaryColor,
       logoUrl: p.logoUrl,
     });
-  return { subject: renderSubject(p.template?.subject || t.subject, p.vars), html };
+  return { subject: renderSubject(p.template?.subject || fallbackSubject, p.vars), html };
 }
 
 export interface MeetingNotifyParams extends Brand {
@@ -110,6 +116,8 @@ export interface LifecycleMailParams extends Brand {
   vars: Record<string, string>;
   /** Idioma da pessoa; so o cliente o segue. */
   lang?: string | null;
+  /** Idioma do modelo usado (ver BookingConfirmationParams.templateLang); so para o assunto por omissao. */
+  templateLang?: string | null;
   leadName: string;
   leadPhone?: string;
   leadEmail?: string;
@@ -128,8 +136,9 @@ function lifecycleMail(event: "cancel" | "reschedule", p: LifecycleMailParams): 
   const client = p.kind === "client";
   const defaultSubject = client ? t.clientSubject : t.technicianSubject;
   if (p.template?.body_html) {
+    const tt = MAIL_TEXTS[mailLangFor(p.kind, p.templateLang ?? p.lang)][event];
     return {
-      subject: renderSubject(p.template.subject || defaultSubject, p.vars),
+      subject: renderSubject(p.template.subject || (client ? tt.clientSubject : tt.technicianSubject), p.vars),
       html: renderHtml(p.template.body_html, p.vars),
     };
   }

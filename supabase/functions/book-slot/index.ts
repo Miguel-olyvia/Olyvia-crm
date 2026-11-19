@@ -11,6 +11,7 @@ import {
   parseEmailList,
   uniqueEmails,
   pickTemplateId,
+  pickTemplateChoice,
   buildManageUrl,
 } from '../_shared/formEmails.ts';
 import { sendSmsNow } from '../_shared/sendSms.ts';
@@ -23,9 +24,16 @@ import { evaluateOwnerDay, makeOwnerDeps, ownerResourcesForSlot } from '../_shar
 import { buildAudienceVars } from '../_shared/audienceTemplates.ts';
 import { createReminderLines } from '../_shared/reminderLines.ts';
 import { formatVisitWhen } from '../_shared/reminderContent.ts';
-import { defaultConfirmationSms, formatVisitDate, normalizeMailLang, resolveLeadLocale } from '../_shared/emailDefaults.ts';
+import {
+  contentLang,
+  defaultConfirmationSms,
+  defaultLocaleFromSettings,
+  formatVisitDate,
+  normalizeMailLang,
+  resolveLeadLocale,
+} from '../_shared/emailDefaults.ts';
 import { buildBookingConfirmationMail, buildMeetingNotifyMail } from '../_shared/bookingMails.ts';
-import { pickConfirmationSmsMessage, smsByLocaleFromSettings } from '../_shared/confirmationSms.ts';
+import { pickConfirmationSms, smsByLocaleFromSettings } from '../_shared/confirmationSms.ts';
 import { reminderRuleFor } from '../_shared/reminderRule.ts';
 
 initSentry();
@@ -994,6 +1002,10 @@ Deno.serve(async (req: Request) => {
       // a do comercial (aviso interno) fica sempre em portugues.
       const whenFormatted = formatVisitDate(slot_start, leadLocale, false);
       const whenInternal = formatVisitDate(slot_start, null, false);
+      // As palavras da data seguem o idioma do TEXTO REALMENTE USADO (modelo do idioma da pessoa, modelo da
+      // coluna unica = idioma por omissao do formulario, ou texto por omissao no idioma da pessoa), nunca o
+      // idioma da pessoa so por ele ser o dela: um modelo em portugues nao leva a data em ingles.
+      const formDefaultLocale = defaultLocaleFromSettings(form.settings);
       const siteUrlEnv = Deno.env.get('SITE_URL') || 'https://olyvia.lovable.app';
       const cancelLink = bookingToken?.token
         ? buildManageUrl(emailCfg?.booking_manage_url_template, leadLocale, bookingToken.token, siteUrlEnv)
@@ -1019,16 +1031,24 @@ Deno.serve(async (req: Request) => {
       //     reminder/cancel/reschedule) instead of silently sending nothing when no
       //     custom template is configured.
       if (emailCfg?.confirmation_email_enabled && leadEmail) {
-        const confTemplateId = pickTemplateId(emailCfg, 'confirmation', leadLocale, emailCfg.confirmation_email_template_id);
-        const confTpl = confTemplateId ? await loadTemplate(supabase, confTemplateId) : null;
+        const confChoice = pickTemplateChoice(emailCfg, 'confirmation', leadLocale, emailCfg.confirmation_email_template_id);
+        const confTpl = confChoice.id ? await loadTemplate(supabase, confChoice.id) : null;
+        const confLang = contentLang({
+          source: confChoice.source,
+          templateUsed: !!confTpl?.body_html,
+          personLocale: leadLocale,
+          formDefaultLocale,
+        });
+        const confWhen = formatVisitDate(slot_start, confLang, false);
         // Modelo escolhido para o idioma manda; sem modelo, texto por omissao no idioma da pessoa
         // (_shared/bookingMails.ts; portugues identico ao de sempre).
         const confMail = buildBookingConfirmationMail({
           template: confTpl,
-          vars: baseVars,
+          vars: { ...baseVars, meeting_date: confWhen, meeting_datetime: confWhen },
           lang: leadLocale,
+          templateLang: confLang,
           leadName: leadFullName,
-          when: whenFormatted,
+          when: confWhen,
           location: fullLocation || undefined,
           technicianName: technicianName || undefined,
           cancelUrl: cancelLink || undefined,
@@ -1071,18 +1091,26 @@ Deno.serve(async (req: Request) => {
         // leva o link real ou fica vazio -- vale tanto para a mensagem por
         // omissao como para a personalizada, sem exigir reescrever o texto.
         const includeLink = emailCfg.confirmation_sms_include_link === true;
-        const smsBaseVars = includeLink ? baseVars : { ...baseVars, cancel_url: '' };
         // Texto do idioma da pessoa (forms.settings.i18n.content.branding[idioma].confirmation_sms_message);
         // sem ele, a coluna unica (idioma por omissao do formulario); sem ela, o texto por omissao do
         // idioma (confirmationSms.ts / emailDefaults.ts; portugues identico ao de sempre).
-        const smsTemplate = pickConfirmationSmsMessage({
+        const smsPick = pickConfirmationSms({
           column: emailCfg.confirmation_sms_message,
           byLocale: smsByLocaleFromSettings(form.settings),
           locale: leadLocale,
-        }) ?? defaultConfirmationSms(normalizeMailLang(leadLocale), {
+        });
+        const smsTemplate = smsPick?.text ?? defaultConfirmationSms(normalizeMailLang(leadLocale), {
           companyName: orgRow?.name || '',
           withCancelLink: includeLink && !!cancelLink,
         });
+        // A data do SMS segue o idioma do texto usado: o do idioma da pessoa -> o dela; o da coluna unica
+        // -> o idioma por omissao do formulario; o texto por omissao do sistema -> o da pessoa.
+        const smsWhen = formatVisitDate(
+          slot_start,
+          contentLang({ source: smsPick?.source ?? 'none', templateUsed: !!smsPick, personLocale: leadLocale, formDefaultLocale }),
+          false,
+        );
+        const smsBaseVars = { ...(includeLink ? baseVars : { ...baseVars, cancel_url: '' }), meeting_date: smsWhen, meeting_datetime: smsWhen };
         const smsMessage = renderSubject(smsTemplate, smsBaseVars);
         const smsResult = await sendSmsNow({
           toPhone: String(leadPhone),
@@ -1206,6 +1234,7 @@ Deno.serve(async (req: Request) => {
             itemId: scheduleItem.id,
             formId: form_id,
             locale: leadLocale,
+            formDefaultLocale,
             cfg: emailCfg,
             startIso: slot_start,
             entityType: lead ? 'leads' : 'clients',

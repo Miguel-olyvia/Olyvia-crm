@@ -9,6 +9,7 @@
 // let an email failure break the booking/lead flow.
 
 import { MAIL_TEXTS, mailLangFor, normalizeMailLang } from "./emailDefaults.ts";
+import type { TemplateSource } from "./emailDefaults.ts";
 
 export interface FormEmailConfig {
   confirmation_email_enabled: boolean;
@@ -99,14 +100,28 @@ export function pickTemplateId(
   locale: string | null | undefined,
   fallbackId: string | null | undefined,
 ): string | null {
+  return pickTemplateChoice(cfg, purpose, locale, fallbackId).id;
+}
+
+/**
+ * Como pickTemplateId, mas diz de onde veio o modelo: `locale` (entrada do mapa para o idioma da pessoa),
+ * `column` (a coluna unica, idioma por omissao do formulario) ou `none`. A pesquisa e a mesma de sempre.
+ * O idioma do texto (e logo o das palavras da data) depende disto: ver contentLang em emailDefaults.ts.
+ */
+export function pickTemplateChoice(
+  cfg: FormEmailConfig | null,
+  purpose: EmailPurpose,
+  locale: string | null | undefined,
+  fallbackId: string | null | undefined,
+): { id: string | null; source: TemplateSource } {
   const map = cfg?.email_locale_templates?.[purpose] || null;
   if (map && locale) {
     const l = locale.toLowerCase().trim();
-    if (map[l]) return map[l];
+    if (map[l]) return { id: map[l], source: "locale" };
     const s = shortLocale(l);
-    if (s && map[s]) return map[s];
+    if (s && map[s]) return { id: map[s], source: "locale" };
   }
-  return fallbackId || null;
+  return fallbackId ? { id: fallbackId, source: "column" } : { id: null, source: "none" };
 }
 
 /**

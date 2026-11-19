@@ -624,3 +624,48 @@ describe('reconcileItem: linhas religadas de uma pessoa em inglês refazem o tex
     expect((out as any).value).toContain('Saturday, 3 October 2026 at 11:00');
   });
 });
+
+describe('renderLinkedEmail: a data segue o idioma do texto realmente usado (content_lang)', () => {
+  const FRIDAY_PT = 'sexta-feira, 2 de outubro de 2026 às 11:00';
+  const FRIDAY_EN = 'Friday, 2 October 2026 at 11:00';
+
+  function withTemplate(contentLang?: string) {
+    const db = world();
+    db.tables.email_templates.push({ id: 'tpl-col', subject: 'Lembrete — {{meeting_date}}', body_html: '<p>{{meeting_date}}</p>' });
+    const row = {
+      ...db.tables.scheduled_emails[0],
+      locale: 'en',
+      template_id: 'tpl-col',
+      content_vars: { ...CLIENT_VARS, ...(contentLang ? { content_lang: contentLang } : {}) },
+    };
+    return { db, row };
+  }
+
+  it('modelo da coluna (pt) para uma pessoa em inglês: a data refeita no envio continua em português', async () => {
+    const { db, row } = withTemplate('pt');
+    const res = await renderLinkedEmail(db, row);
+    expect((res as any).value).toEqual({ subject: `Lembrete — ${FRIDAY_PT}`, html: `<p>${FRIDAY_PT}</p>` });
+  });
+
+  it('content_lang en: data em inglês', async () => {
+    const { db, row } = withTemplate('en');
+    const res = await renderLinkedEmail(db, row);
+    expect((res as any).value.subject).toBe(`Lembrete — ${FRIDAY_EN}`);
+  });
+
+  it('sem content_lang (linha antiga ou texto no idioma da pessoa): idioma da pessoa, como antes', async () => {
+    const { db, row } = withTemplate();
+    const res = await renderLinkedEmail(db, row);
+    expect((res as any).value.subject).toBe(`Lembrete — ${FRIDAY_EN}`);
+  });
+
+  it('o comercial ignora content_lang e fica em português', async () => {
+    const db = world();
+    const res = await renderLinkedEmail(db, {
+      ...db.tables.scheduled_emails[1],
+      locale: 'en',
+      content_vars: { ...CLIENT_VARS, cancel_url: '', confirm_url: '', content_lang: 'en' },
+    });
+    expect((res as any).value.subject).toBe(`Lembrete: visita a Rita — ${FRIDAY_PT}`);
+  });
+});

@@ -41,13 +41,25 @@ export function pickConfirmationSmsMessage(p: {
   byLocale: Record<string, string> | null | undefined;
   locale: string | null | undefined;
 }): string | null {
+  return pickConfirmationSms(p)?.text ?? null;
+}
+
+/**
+ * Como pickConfirmationSmsMessage, mas diz de onde veio o texto: `locale` (texto do idioma da pessoa) ou
+ * `column` (coluna unica = idioma por omissao do formulario). As palavras da data seguem o idioma desse texto.
+ */
+export function pickConfirmationSms(p: {
+  column: string | null | undefined;
+  byLocale: Record<string, string> | null | undefined;
+  locale: string | null | undefined;
+}): { text: string; source: "locale" | "column" } | null {
   const map = p.byLocale ?? {};
   const locale = (p.locale ?? "").toLowerCase().trim();
   if (locale) {
     const short = locale.split(/[-_]/)[0];
     const own = (map[locale] ?? "").trim() || (short ? (map[short] ?? "").trim() : "");
-    if (own) return own;
+    if (own) return { text: own, source: "locale" };
   }
   const column = (p.column ?? "").trim();
-  return column ? (p.column as string) : null;
+  return column ? { text: p.column as string, source: "column" } : null;
 }

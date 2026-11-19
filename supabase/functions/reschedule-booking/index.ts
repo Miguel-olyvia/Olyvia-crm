@@ -10,10 +10,10 @@ import {
 } from '../_shared/formEmails.ts';
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
-import { buildAudienceVars, pickAudienceTemplateId } from "../_shared/audienceTemplates.ts";
+import { buildAudienceVars, pickAudienceTemplateChoice } from "../_shared/audienceTemplates.ts";
 import { createReminderLines } from "../_shared/reminderLines.ts";
 import { formatVisitWhen } from "../_shared/reminderContent.ts";
-import { formatVisitDate, resolveLeadLocale } from "../_shared/emailDefaults.ts";
+import { contentLang, defaultLocaleFromSettings, formatVisitDate, resolveLeadLocale } from "../_shared/emailDefaults.ts";
 import { buildRescheduleMail } from "../_shared/bookingMails.ts";
 import { anyReminderEnabled, reminderRuleFor } from "../_shared/reminderRule.ts";
 import { resolveRescheduleTarget, validateRescheduleSlot } from "../_shared/rescheduleSlots.ts";
@@ -207,9 +207,15 @@ Deno.serve(async (req: Request) => {
       minute: '2-digit',
     });
 
-    // Datas dos emails: a do CLIENTE segue o idioma dele (so as palavras); a do comercial (aviso
-    // interno) fica em portugues. `formattedWhen` (portugues) e o que a pagina recebe na resposta.
+    // `formattedWhen` (portugues) e o que a pagina recebe na resposta. Nos emails, as palavras da data
+    // seguem o idioma do TEXTO REALMENTE USADO (ver mais abaixo); o comercial (aviso interno) fica em portugues.
     const whenForClient = formatVisitDate(slot_start, leadLocale, true);
+
+    // Idioma por omissao do formulario (forms.settings.i18n.default_locale): e o do modelo da coluna unica.
+    const { data: formRow } = formId
+      ? await supabase.from('forms').select('settings').eq('id', formId).eq('organization_id', organizationId).maybeSingle()
+      : { data: null };
+    const formDefaultLocale = defaultLocaleFromSettings(formRow?.settings);
 
     // Lembretes: acompanham a visita. Os que ja estao ligados a ela (criados na
     // marcacao) sao acertados aqui e pelo processador: movem-se para
@@ -293,6 +299,7 @@ Deno.serve(async (req: Request) => {
             itemId,
             formId,
             locale: leadLocale,
+            formDefaultLocale,
             cfg: emailCfg,
             startIso: slot_start,
             entityType: 'leads',
@@ -401,14 +408,20 @@ Deno.serve(async (req: Request) => {
       // sem nenhum configurado, o texto padrao do PROPRIO lado (nunca o do outro,
       // nem o aviso de nova reuniao). O comercial nunca recebe os links do cliente.
       const buildMail = async (kind: 'client' | 'technician') => {
-        const vars = buildAudienceVars(kind === 'technician' ? { ...baseVars, meeting_date: formattedWhen, meeting_datetime: formattedWhen } : baseVars, kind, {
+        const choice = pickAudienceTemplateChoice(emailCfg, 'reschedule', kind, leadLocale);
+        const tpl = await loadTemplate(supabase, choice.id);
+        // O texto realmente usado decide o idioma da data; o comercial fica em portugues.
+        const lang = kind === 'client'
+          ? contentLang({ source: choice.source, templateUsed: !!tpl?.body_html, personLocale: leadLocale, formDefaultLocale })
+          : 'pt';
+        const when = formatVisitDate(slot_start, lang, true);
+        const vars = buildAudienceVars({ ...baseVars, meeting_date: when, meeting_datetime: when }, kind, {
           cancelUrl: cancelLink,
           leadPhone,
           leadEmail,
           address: item.location || '',
           appointmentUrl: `${siteUrlEnv.replace(/\/+$/, '')}/scheduling`,
         });
-        const tpl = await loadTemplate(supabase, pickAudienceTemplateId(emailCfg, 'reschedule', kind, leadLocale));
         // Modelo escolhido manda; sem modelo, texto por omissao (_shared/bookingMails.ts): ao cliente no
         // idioma dele, ao comercial sempre em portugues. Portugues identico ao de sempre.
         return buildRescheduleMail({
@@ -416,12 +429,13 @@ Deno.serve(async (req: Request) => {
           template: tpl,
           vars,
           lang: leadLocale,
+          templateLang: lang,
           leadName,
           leadPhone: leadPhone || undefined,
           leadEmail: leadEmail || undefined,
           address: item.location || undefined,
           appointmentUrl: `${siteUrlEnv.replace(/\/+$/, '')}/scheduling`,
-          when: kind === 'technician' ? formattedWhen : whenForClient,
+          when,
           location: item.location || undefined,
           technicianName: technicianName || undefined,
           cancelUrl: cancelLink || undefined,

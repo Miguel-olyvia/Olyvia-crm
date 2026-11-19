@@ -477,14 +477,20 @@ export async function renderLinkedEmail(
     const technicianName = audience === "technician"
       ? (own?.name ?? null)
       : (techs.map((t) => t.name).filter(Boolean).join(", ") || null);
-    // A data segue o idioma do cliente (so as palavras); o comercial fica em portugues.
+    // As palavras da data seguem o idioma do TEXTO usado: `content_lang` (guardado ao criar o lembrete, so
+    // quando difere do idioma da pessoa, p. ex. modelo da coluna em pt para uma pessoa em ingles); sem
+    // ele, o idioma da pessoa. O comercial fica em portugues.
+    const contentLang = audience === "client" ? (stored.content_lang || null) : null;
     const vars = withFreshVisitVars(stored, {
       startIso: item.start_datetime,
       location: item.location,
       technicianName,
-    }, audience === "client" ? (row.locale ?? null) : null);
+    }, audience === "client" ? (contentLang ?? row.locale ?? null) : null);
     const template = row.template_id ? await loadTemplate(supabase, row.template_id) : null;
-    return { kind: "ok", value: buildReminderMail({ audience, template, vars, brand: cfg, lang: row.locale }) };
+    return {
+      kind: "ok",
+      value: buildReminderMail({ audience, template, vars, brand: cfg, lang: row.locale, templateLang: contentLang }),
+    };
   } catch (err) {
     console.error("[reminderRunner] renderLinkedEmail failed, o lembrete fica para o proximo lote:", err);
     return { kind: "defer", reason: "montagem do email falhou" };

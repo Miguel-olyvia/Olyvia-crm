@@ -8,9 +8,9 @@ import {
   shouldNotifyClient,
   loadTemplate,
 } from '../_shared/formEmails.ts';
-import { buildAudienceVars, pickAudienceTemplateId } from '../_shared/audienceTemplates.ts';
+import { buildAudienceVars, pickAudienceTemplateChoice } from '../_shared/audienceTemplates.ts';
 import { cancelLegacyVisitReminders } from '../_shared/reminderRunner.ts';
-import { formatVisitDate, resolveLeadLocale } from '../_shared/emailDefaults.ts';
+import { contentLang, defaultLocaleFromSettings, formatVisitDate, resolveLeadLocale } from '../_shared/emailDefaults.ts';
 import { buildCancelMail } from '../_shared/bookingMails.ts';
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
@@ -300,10 +300,7 @@ Deno.serve(async (req: Request) => {
         .maybeSingle();
 
       // Original slot — the visit that was cancelled.
-      // A data do CLIENTE segue o idioma dele (so as palavras; sem idioma, portugues como sempre);
-      // a do comercial (aviso interno) fica sempre em portugues.
       const formattedWhen = item.start_datetime ? formatVisitDate(item.start_datetime, leadLocale, true) : '';
-      const whenInternal = item.start_datetime ? formatVisitDate(item.start_datetime, null, true) : '';
 
       const siteUrlEnv = Deno.env.get('SITE_URL') || 'https://olyvia.lovable.app';
       // Manage link is informational only here (token is now burned).
@@ -322,6 +319,12 @@ Deno.serve(async (req: Request) => {
         cancel_url: manageLink,
       };
 
+      // Idioma por omissao do formulario (forms.settings.i18n.default_locale): e o do modelo da coluna unica.
+      const { data: formRow } = formId
+        ? await supabase.from('forms').select('settings').eq('id', formId).eq('organization_id', organizationId).maybeSingle()
+        : { data: null };
+      const formDefaultLocale = defaultLocaleFromSettings(formRow?.settings);
+
       // A cancellation must NEVER reuse the "meeting_notify" (new-booking) template:
       // that template's copy announces a visit was *scheduled* — the exact opposite of
       // what happened — and its placeholders (e.g. {{lead_phone}}) render raw because the
@@ -330,15 +333,22 @@ Deno.serve(async (req: Request) => {
       // Modelo proprio por destinatario (cancel_client / cancel_technician); sem
       // nenhum configurado, o texto padrao abaixo, exactamente como antes.
       const buildMail = async (kind: 'client' | 'technician') => {
-        const vars = buildAudienceVars(kind === 'technician' ? { ...baseVars, meeting_date: whenInternal, meeting_datetime: whenInternal } : baseVars, kind, {
+        const choice = pickAudienceTemplateChoice(emailCfg, 'cancel', kind, leadLocale);
+        const tpl = await loadTemplate(supabase, choice.id);
+        // As palavras da data seguem o idioma do TEXTO REALMENTE USADO (modelo do idioma da pessoa, modelo
+        // da coluna unica = idioma por omissao do formulario, ou texto por omissao no idioma da pessoa);
+        // o comercial (aviso interno) fica sempre em portugues.
+        const lang = kind === 'client'
+          ? contentLang({ source: choice.source, templateUsed: !!tpl?.body_html, personLocale: leadLocale, formDefaultLocale })
+          : 'pt';
+        const when = item.start_datetime ? formatVisitDate(item.start_datetime, lang, true) : '';
+        const vars = buildAudienceVars({ ...baseVars, meeting_date: when, meeting_datetime: when }, kind, {
           cancelUrl: manageLink,
           leadPhone,
           leadEmail,
           address: item.location || '',
           appointmentUrl: `${siteUrlEnv.replace(/\/+$/, '')}/scheduling`,
         });
-        const templateId = pickAudienceTemplateId(emailCfg, 'cancel', kind, leadLocale);
-        const tpl = await loadTemplate(supabase, templateId);
         // Modelo escolhido manda; sem modelo, texto por omissao (_shared/bookingMails.ts): ao cliente no
         // idioma dele, ao comercial sempre em portugues. Portugues identico ao de sempre.
         return buildCancelMail({
@@ -346,12 +356,13 @@ Deno.serve(async (req: Request) => {
           template: tpl,
           vars,
           lang: leadLocale,
+          templateLang: lang,
           leadName,
           leadPhone: leadPhone || undefined,
           leadEmail: leadEmail || undefined,
           address: item.location || undefined,
           appointmentUrl: `${siteUrlEnv.replace(/\/+$/, '')}/scheduling`,
-          when: kind === 'technician' ? whenInternal : formattedWhen,
+          when,
           location: item.location || undefined,
           technicianName: technicianName || undefined,
           primaryColor: emailCfg?.primary_color,
