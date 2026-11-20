@@ -153,7 +153,7 @@ describe("a adenda com o percurso do orçamento, de ponta a ponta", () => {
     S.role = "financeiro";
     render(<Montar S={S}>{(ctx) => <DocumentosSimples {...ctx} d={d} />}</Montar>);
     const bloco = screen.getByTestId(`fin-adenda-${N}`);
-    expect(bloco.textContent).toMatch(/Registar a fatura da 1\.ª parcela \(na adjudicação, 50%\)/);
+    expect(bloco.textContent).toMatch(/1\.ª parcela \(na adjudicação, 50%\).*por faturar/);
     expect(within(bloco).queryByRole("button", { name: "Emitir a fatura" })).toBeNull();
     await registarNoEcra(bloco, "FAT 15200126/700");
     await waitFor(() => expect(a.faturas?.length).toBe(1));

@@ -4659,7 +4659,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!encomendarAdendas(d)) avisar({ msg: "Nada por encomendar", sub: "As adendas pagas já têm a encomenda no Inventário", kind: "" });
     },
     /** A fatura da parcela seguinte da adenda, emitida no Eticadata e registada aqui com o número (21/10: só na V2; 19/11, auditoria: em
-     *  todas as versões, como as parcelas do contrato). `info` é a leitura do ERP (RegistarFaturaAdendaErp): null, sem ligação. */
+     *  todas as versões, como as parcelas do contrato). `info` é a leitura do ERP (Pagamentos.tsx: RegistarNumero): null, sem ligação. */
     registarFaturaAdenda(id: number, n: string, numero: string, info?: InfoErp | null): boolean {
       const d = deal(id), a = d.adendas?.find((x) => x.n === n);
       if (!exigePerm("finance.invoice")) return false;
