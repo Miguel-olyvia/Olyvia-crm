@@ -257,3 +257,43 @@ describe("a perda em /negocios grava-se na base (neg_perder_negocio / neg_anular
     d.orc!.enviada = "hoje"; expect(faseDaPerda(d)).toBe("proposta");
   });
 });
+
+describe("20/11: na Visita sem negocios.visita.preencher só a agenda das visitas muda (neg_guardar_negocio, v_so_agenda)", () => {
+  it("as respostas que não são da agenda (questionário, morada, sugestões) param antes de mudar, com o aviso de visita.preencher", () => {
+    const { S, A, avisos } = montar(["visita.preencher"]);
+    const d = algum(S, (x) => x.fase === 2);
+    expect(d.fase).toBe(2);
+    const antes = { ...d.f };
+    A.campo(d.id, "cfg_pergunta_x", "Sim");
+    A.campo(d.id, "andar", "3");
+    A.moradaDaLead(d.id, { morada: "Rua Nova 1", cp: "1000-001", localidade: "Lisboa", de: "ficha" } as never);
+    A.localizacao(d.id, { morada: "Rua Velha 2", cp: "1000-002", localidade: "Lisboa", concelho: "Lisboa" }, 38.7, -9.1, 10);
+    d.sug = { andar: "2" } as never;
+    A.confirmar(d.id, ["andar"]);
+    expect(d.f).toEqual(antes);
+    expect((d.sug as Record<string, unknown>).andar).toBe("2");
+    expect(recusou(avisos, "visita.preencher")).toBe(true);
+  });
+  it("a agenda (v<n>_ de gerir) muda; com visita.preencher, o resto também; fora da Visita, como antes", () => {
+    const { S, A, avisos } = montar(["visita.preencher"]);
+    const d = algum(S, (x) => x.fase === 2);
+    A.campo(d.id, "v1_hora", "11:00");
+    expect(d.f.v1_hora).toBe("11:00");
+    expect(avisos).toEqual([]);
+    const outro = algum(S, (x) => x.fase === 3);
+    A.campo(outro.id, "obs_proposta_teste", "x");
+    expect(outro.f.obs_proposta_teste).toBe("x");
+    const m = montar([]);
+    const d2 = algum(m.S, (x) => x.fase === 2);
+    m.A.campo(d2.id, "cfg_pergunta_x", "Sim");
+    expect(d2.f.cfg_pergunta_x).toBe("Sim");
+  });
+  it("sem conta real (o protótipo), nada muda", () => {
+    const S = seed();
+    S.role = "comercial";
+    const A = acoes(S, () => {}, (fn) => fn());
+    const d = algum(S, (x) => x.fase === 2);
+    A.campo(d.id, "cfg_pergunta_x", "Sim");
+    expect(d.f.cfg_pergunta_x).toBe("Sim");
+  });
+});

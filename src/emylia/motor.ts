@@ -2080,6 +2080,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     avisar({ ...SEM_PERM[p], kind: "bad" });
     return false;
   };
+  /** 20/11 (permissões ecrã/servidor): na Visita (fase 2), com conta real e sem negocios.visita.preencher, o servidor (neg_guardar_negocio,
+   *  v_so_agenda) só aceita a agenda das visitas (v<n>_, negocios.visita.gerir); qualquer outra resposta (as do questionário configurável,
+   *  a morada, as sugestões) é recusada. Pára antes de mudar, com o aviso de visita.preencher. */
+  const exigeCampoNaVisita = (d: Negocio, ks: readonly string[]): boolean => {
+    if (!comPermissoesReais() || d.fase !== 2 || podeNeg(S.role, "visita.preencher")) return true;
+    if (ks.every((k) => permDoCampo(k) === "visita.gerir")) return true;
+    return exigePerm("visita.preencher");
+  };
   /** 4/11: registar a execução da obra (obra_guardar_negocio): quem planeia (negocios.obra.planear) passa sempre; sem ela, pede
    *  negocios.obra.executar, e o servidor só aceita as tarefas atribuídas a quem a regista (fn_obra_execucao_permitida; no ecrã, o
    *  Hoje do técnico real fica no técnico ligado à conta). */
@@ -2184,7 +2192,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
   /** 23/10: o NIF da fatura no ERP não é o do negócio (ex.: um número mal escrito, da fatura de outro cliente) */
   const nifDiferente = (d: Negocio, i: InfoErp): boolean =>
     !!(d.f.nif_fat && i.nif && i.nif.replace(/\D/g, "") !== d.f.nif_fat.replace(/\D/g, ""));
-  const pagoNoErp = (d: Negocio, i: InfoErp) => {
+  // 20/11 (permissões ecrã/servidor): validar o pagamento é de quem tem negocios.validar_pagamento (neg_validar_pagamento). Quem só
+  // regista a fatura e vê que já está paga no Eticadata não a valida: avisa e o pagamento fica por validar (antes ficava pago no ecrã e
+  // o servidor recusava). `repetido`: a verificação em segundo plano já tinha visto a fatura paga; não avisa outra vez.
+  const pagoNoErp = (d: Negocio, i: InfoErp, repetido = false) => {
+    if (!podeNeg(S.role, "finance.validate_payment")) {
+      if (!repetido) avisar({ msg: "Paga no ERP: falta o Financeiro validar o pagamento", sub: `${d.fin.fatura?.n ?? "A fatura"} está paga no Eticadata. Validar o pagamento pede a permissão negocios.validar_pagamento.`, kind: "" });
+      return;
+    }
     const r = i.recibos[i.recibos.length - 1];
     d.f.valor_recebido = String(i.pago);
     if (r) { d.f.data_pag = r.data; d.f.comprovativo = r.n + (r.meio ? " · " + r.meio : ""); }
@@ -3543,7 +3558,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         if (r.info.estado === "paga" && nifDiferente(d, r.info)) {
           // 23/10: paga no ERP, mas com outro NIF: não se valida sozinha; avisa (uma vez, se for a verificação em segundo plano)
           if (!calado || antes !== r.info.estado) avisar({ msg: `${n}: paga no ERP, mas com outro NIF`, sub: `ERP: ${r.info.nif} · negócio: ${d.f.nif_fat}. Confirme o número da fatura e valide à mão.`, kind: "bad" });
-        } else if (r.info.estado === "paga") pagoNoErp(d, r.info);
+        } else if (r.info.estado === "paga") pagoNoErp(d, r.info, calado && antes === "paga");
         else if (!calado || antes !== r.info.estado) avisar({ msg: `${n}: ${resumoErp(r.info)}`, sub: "Lido agora no Eticadata", kind: "" });
       }));
     },
@@ -4758,6 +4773,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const perm = permDoCampo(k);
       if (perm && !exigePerm(perm)) return;
       const d = deal(id);
+      if (!exigeCampoNaVisita(d, [k])) return;
       // 3/11: o NIF e o email da Lead mudaram: a faturação acompanha, se estava vazia ou igual ao que a Lead tinha (não foi escrita à parte)
       const fat = DA_LEAD.find(([, lead]) => lead === k)?.[0];
       if (fat && !d.fin.pago && (!d.f[fat]?.trim() || d.f[fat] === d.f[k])) d.f[fat] = v.trim();
@@ -4790,10 +4806,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     confirmar(id: number, ks: string[]) {
       // 3/11: confirmar a sugestão muda a resposta na base (sugerido): pede a permissão de cada campo, como o campo
       for (const p of new Set(ks.map(permDoCampo))) if (p && !exigePerm(p)) return;
-      const d = deal(id); if (d.sug) for (const k of ks) delete d.sug[k];
+      const d = deal(id);
+      if (!exigeCampoNaVisita(d, ks)) return;
+      if (d.sug) for (const k of ks) delete d.sug[k];
     },
     localizacao(id: number, m: { morada: string; cp: string; localidade: string; concelho: string }, lat: number, lon: number, precisao: number) {
       const d = deal(id), f = d.f;
+      if (!exigeCampoNaVisita(d, ["morada"])) return;
       if (d.sug) for (const k of ["morada", "cp", "localidade"]) delete d.sug[k];
       if (m.morada) f.morada = m.morada;
       if (m.cp) f.cp = m.cp;
@@ -4829,6 +4848,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     moradaDaLead(id: number, m: MoradaLead) {
       for (const p of new Set(CAMPOS_MORADA.map(permDoCampo))) if (p && !exigePerm(p)) return;
       const d = deal(id), f = d.f;
+      if (!exigeCampoNaVisita(d, CAMPOS_MORADA)) return;
       for (const k of CAMPOS_MORADA) {
         const v = m[k].trim();
         if (!v) continue;

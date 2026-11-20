@@ -30,6 +30,20 @@ describe("negócios do CRM (docs_crm): só de leitura", () => {
     expect(deBase({ ...j, negocio: { ...j.negocio, docs_crm: undefined } }, ids).docsCrm).toBe(false);
   });
 
+  it("20/11: deBase lê pode_gravar (no negócio ou ao lado), tira-o das linhas; ausente fica como antes", () => {
+    const S = seed();
+    const L = paraLinhas(S.deals[0]);
+    const j = { ...L, negocio: { ...L.negocio, id: "n1", entity_id: "e1", estado_crm: "aberto", fluxo_emylia: true, pode_gravar: false } };
+    const lido = deBase(j, ids);
+    expect(lido.podeGravar).toBe(false);
+    expect("pode_gravar" in (lido.linhas.negocio as object)).toBe(false);
+    expect(deBase({ ...j, negocio: { ...j.negocio, pode_gravar: true } }, ids).podeGravar).toBe(true);
+    expect(deBase({ ...j, negocio: { ...j.negocio, pode_gravar: undefined }, pode_gravar: false }, ids).podeGravar).toBe(false);
+    const semCampo = deBase({ ...j, negocio: { ...j.negocio, pode_gravar: undefined } }, ids);
+    expect(semCampo.podeGravar).toBeUndefined();
+    expect("podeGravar" in semCampo).toBe(false);
+  });
+
   it("gravarMudancas não grava um negócio de soLeitura (nem cria lead), e grava os outros", async () => {
     const S = seed();
     const [crm, emylia] = S.deals;

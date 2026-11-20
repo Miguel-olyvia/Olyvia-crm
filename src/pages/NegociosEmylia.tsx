@@ -48,7 +48,7 @@ import { definirMoradaDaEntidade } from "@/emylia/MoradaDeQuemPede";
 import { definirEncomendasReais, lerEncomendasReais } from "@/emylia/real/encomendaReal";
 import { refNegocio } from "@/emylia/inventario/ponteNegocios";
 import { lerFaturaErp } from "@/emylia/erpEticadata";
-import { avisoDaFase, codigosDaFase, definirVerCustos, faltaDaFase, podeNeg } from "@/emylia/permissoes";
+import { AVISO_FORA_DO_AMBITO, avisoDaFase, codigosDaFase, definirVerCustos, faltaDaFase, podeNeg } from "@/emylia/permissoes";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePodeVerCustos } from "@/hooks/usePodeVerCustos";
 import { lerPermissoesReais, usePermissoesReaisNegocio } from "@/emylia/real/usePermissoesReais";
@@ -240,6 +240,9 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   const visitasAberto = useVisitasDoNegocio(S.view === "negocio" && S.deal !== null ? refs.current.get(S.deal)?.id ?? null : null, org);
   // os negócios do CRM (com documentos do CRM): lêem-se, mas nunca se gravam por aqui
   const soLeitura = useRef(new Set<number>());
+  // 20/11 (permissões ecrã/servidor): os negócios fora do âmbito de pessoas.edit (a leitura diz pode_gravar = false; fn_neg_no_ambito):
+  // abrem só de leitura, com o aviso. Não se tiram da gravação (a obra grava-se por obra_guardar_negocio, com outras regras)
+  const foraDoAmbito = useRef(new Set<number>());
   // 11/11 (20270113130000): a permissão que cada negócio pede pela fase em que está na base (codigosDaFase); sem nenhuma delas fica só
   // de leitura, como o servidor (a assistente comercial depois de «Passar ao comercial» é um caso disto)
   const faseLida = useRef(new Map<number, readonly string[] | null>());
@@ -334,6 +337,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
     // 20/11 (20270125020000): com a versão lida, para a base recusar a gravação por cima de outra feita depois
     refs.current = new Map(lidos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId, versao: n.versao }]));
     soLeitura.current = new Set(lidos.filter((n) => n.docsCrm || catalogoFalhou.current).map((n) => n.linhas.negocio.numero));
+    foraDoAmbito.current = new Set(lidos.filter((n) => n.podeGravar === false).map((n) => n.linhas.negocio.numero));
     S.deals = lidos.map(negocioParaOEcra);
     lerFases();
     // 11/11 (teste da Obra): numa organização real o «hoje» de cada obra em curso é o do calendário (antes da fotografia: não grava só por isso)
@@ -436,6 +440,9 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
       redesenhar();
     }
   }, [org, S, avisar, redesenhar, aplicarLidos, publicarVistasCliente, avisarClientes]);
+  // 20/11 (permissões ecrã/servidor): depois de marcar (ou remarcar) a visita no CRM, relê-se: a base pode ter passado o negócio ao comercial
+  // da visita (assigned_to) e quem marcou deixar de o poder gravar (pode_gravar)
+  const relerDepoisDaVisita = (): void => { relerPedido.current = true; void gravar(); };
 
   // 19/11 (Rúben: «o técnico, ao completar uma task, que esteja ligado o input de término no Estúdio da obra», e o contrário): as obras
   // releem-se da base a cada 20 s (com o separador à vista e nada a gravar). O que outra pessoa gravou (o técnico no Hoje, o gestor no
@@ -1013,6 +1020,8 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   const doCrm = S.view === "negocio" && S.deal != null && soLeitura.current.has(S.deal);
   const faltaAqui = S.view === "negocio" && S.deal != null && !doCrm ? faltaDoNegocio(S.deal) : null;
   const comOComercialAqui = faltaAqui !== null;
+  const foraDoAmbitoAqui = S.view === "negocio" && S.deal != null && !doCrm && foraDoAmbito.current.has(S.deal);
+  const negocioSoLeitura = comOComercialAqui || foraDoAmbitoAqui;
 
   if (isLoading) return <div className="p-6 text-muted-foreground">A carregar…</div>;
   if (!org) return <div className="p-6">Escolha uma organização para ver os negócios.</div>;
@@ -1104,11 +1113,16 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
             {comOComercialAqui && (
               <p role="status" className="mx-4 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{avisoDaFase(faltaAqui as string)}</p>
             )}
-            {/* 12/11: sem a permissão da fase (e não sendo do CRM), os passos e os botões que mudam o negócio ficam desativados: nada se grava */}
-            <NegocioSimples key={S.deal} {...ctx} soLeitura={comOComercialAqui} ajustarPassos={(passos, d) => {
-              const r = refs.current.get(d.id), c = { negocioId: r?.id ?? null, ctx, d, podeEditar: !doCrm && !comOComercialAqui };
-              const ajustados = comVisitasDoCrm(comTemplatesNosPassos(passos, c), { ...c, entityId: r?.entityId ?? null, visitasCrm: r?.id ? visitasAberto.visitas : undefined });
-              return comOComercialAqui ? passosSoLeitura(ajustados) : ajustados;
+            {foraDoAmbitoAqui && (
+              <p role="status" className="mx-4 mt-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-[15px] text-amber-900">{AVISO_FORA_DO_AMBITO}</p>
+            )}
+            {/* 12/11: sem a permissão da fase (e não sendo do CRM), os passos e os botões que mudam o negócio ficam desativados: nada se grava.
+                20/11: o mesmo fora do âmbito de pessoas.edit (pode_gravar = false). Depois de marcar a visita relê-se (o negócio pode ter
+                passado ao comercial da visita e sair do âmbito de quem marcou) */}
+            <NegocioSimples key={S.deal} {...ctx} soLeitura={negocioSoLeitura} ajustarPassos={(passos, d) => {
+              const r = refs.current.get(d.id), c = { negocioId: r?.id ?? null, ctx, d, podeEditar: !doCrm && !negocioSoLeitura };
+              const ajustados = comVisitasDoCrm(comTemplatesNosPassos(passos, c), { ...c, entityId: r?.entityId ?? null, visitasCrm: r?.id ? visitasAberto.visitas : undefined, aposGravarVisita: relerDepoisDaVisita });
+              return negocioSoLeitura ? passosSoLeitura(ajustados) : ajustados;
             }} />
           </>
         : <NegociosSimples {...ctx} />}

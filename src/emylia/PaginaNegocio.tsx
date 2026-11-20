@@ -57,6 +57,7 @@ import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
 import { SEM_PERM, comPermissoesReais, contactoConcluido, passoDe, permEmFaltaDoPasso, podeNeg, podeVerCustos, soAteAoContacto } from "./permissoes";
+import { SoLeitura } from "./passosSoLeitura";
 import { useModoTeste, useSimularClienteTeste } from "./real/modoTeste";
 // FERRAMENTAS-TESTE (temporário, remover antes da main)
 import { ambienteDeTeste } from "./FerramentasTeste";
@@ -405,6 +406,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       ) }));
     }
   } else if (fase === 2) {
+    // 11/11 (20270114320000): sem negocios.visita.preencher (quem só gere as visitas), a Visita fica só de leitura menos as visitas
+    const semPreencher = comPermissoesReais() && !podeNeg(S.role, "visita.preencher");
     const CM = camposMedida(L), GA = gruposArea(S.campos, d.f).map(E);
     const medOk = CM.filter(([k]) => !medidaEmFalta(v.med, k)).length;
     const nMed = CM.length;
@@ -501,22 +504,25 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           feito: !!pr && Object.keys(pr.escolhas).length + (pr.porColocar ?? []).length + (pr.servicos ?? []).length > 0 && medOk === nMed && passoNec.feito === true && temVisitaAtiva(d),
           falta: faltaVisitas + faltaArea + faltaMed + faltaNec || undefined,
           resumo: [pr ? "projeto guardado" : "por abrir", d.f.duracao_obra ? `obra: ${d.f.duracao_obra}` : ""].filter(Boolean),
-          corpo: <div className="space-y-10"><VisitasNoEstudio ctx={ctx} d={d} falta={faltaVisitas} /><EstudioNaVisita ctx={ctx} d={d} /><FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
+          // 20/11 (permissões ecrã/servidor): sem negocios.visita.preencher, só o bloco das visitas fica fora do fieldset desativado (a
+          // assistente comercial marca, remarca e cancela; o resto do Estúdio fica só de leitura, como o servidor, v_so_agenda)
+          corpo: <div className="space-y-10"><VisitasNoEstudio ctx={ctx} d={d} falta={faltaVisitas} /><SoLeitura ativo={semPreencher}><div className="space-y-10"><EstudioNaVisita ctx={ctx} d={d} /><FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
             ...(passoArea ? [{ id: "area", titulo: passoArea.titulo, resumo: passoArea.resumo.join(" · ") || "por preencher", corpo: passoArea.corpo, falta: faltaArea }] : []),
             ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", resumo: resumoMedidas.join(" · ") || "por preencher", corpo: corpoMedidas(false), falta: faltaMed }]),
             { id: "nec", titulo: "Necessidades do cliente", resumo: passoNec.resumo.join(" · ") || "por juntar", corpo: passoNec.corpo, falta: faltaNec },
             ...(ePecas.oculto || !comWC ? [] : [{ id: "pecas", titulo: "Peças da casa de banho", resumo: ((n) => (n ? `${n} ${n === 1 ? "resposta" : "respostas"}` : "por responder"))(ePecas.campos.filter((c) => !!d.f[c.k]?.trim()).length), corpo: <Campos grupo={ePecas} {...fx} /> }]),
-          ]} /></div> },
+          ]} /></div></SoLeitura></div> },
       ];
     }
     // 11/11: a Visita (Exterior, Interior, Estúdio, Fim) é do comercial: sem negocios.visita.preencher (a assistente comercial, que só
     // marca) fica só de leitura, com a permissão em falta; o servidor recusa o mesmo (neg_guardar_negocio, 20270114320000). As visitas da
     // agenda (o passo «visitas», VisitasDoCrm) seguem negocios.visita.gerir.
-    if (comPermissoesReais() && !podeNeg(S.role, "visita.preencher")) {
+    // 20/11: o passo «estudio» já traz o seu fieldset (fora dele, as visitas); aqui só ganha o aviso
+    if (semPreencher) {
       passos = passos.map((p) => (p.id === "visitas" ? p : { ...p, corpo: (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">{SEM_PERM["visita.preencher"].sub}</p>
-          <fieldset disabled className="m-0 min-w-0 border-0 p-0">{p.corpo}</fieldset>
+          {p.id === "estudio" ? p.corpo : <SoLeitura ativo>{p.corpo}</SoLeitura>}
         </div>
       ) }));
     }

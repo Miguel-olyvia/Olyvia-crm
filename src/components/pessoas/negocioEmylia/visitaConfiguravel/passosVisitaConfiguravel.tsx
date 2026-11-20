@@ -6,6 +6,8 @@ import type { Negocio } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
 import type { PerguntaDef } from "@/components/negocio-metas/perguntasTipos";
 import type { QuestionarioForm } from "@/components/negocio-metas/questionarioForm";
+import { SEM_PERM, comPermissoesReais, podeNeg } from "@/emylia/permissoes";
+import { SoLeitura } from "@/emylia/passosSoLeitura";
 import { efeitosDaPergunta } from "./efeitosConfigurados";
 import { perguntasDaSeccao, PerguntasConfiguraveis, respondida } from "./PerguntasConfiguraveis";
 
@@ -17,6 +19,9 @@ export function comPassosConfiguraveis(passos: Passo[], ctx: Ctx, d: Negocio, q:
   if (!q || q.semBase) return passos;
   const todas: PerguntaDef[] = q.seccoes.filter((s) => s.aba !== "qualificacao").flatMap((s) => s.blocos.flatMap((b) => b.perguntas));
   const extra: Passo[] = [];
+  // 20/11 (permissões ecrã/servidor): na Visita, sem negocios.visita.preencher (quem só gere as visitas), as respostas do questionário ficam
+  // só de leitura, como os outros passos da Visita (PaginaNegocio): o servidor recusa-as (neg_guardar_negocio, v_so_agenda)
+  const semPreencher = d.fase === 2 && comPermissoesReais() && !podeNeg(ctx.S.role, "visita.preencher");
   for (const seccao of q.seccoes) {
     if (seccao.aba === "qualificacao" || seccao.especial) continue;
     const visiveis = perguntasDaSeccao(seccao, todas, d.f);
@@ -27,7 +32,12 @@ export function comPassosConfiguraveis(passos: Passo[], ctx: Ctx, d: Negocio, q:
     extra.push({
       id: idDoPassoCfg(seccao.id), titulo: seccao.titulo[0], personalizado: true, icone: ClipboardList, semAvancar: true,
       ...(visiveis.length > 0 ? { conta: { f: feitas, n: visiveis.length } } : { feito: true }), resumo,
-      corpo: <PerguntasConfiguraveis seccao={seccao} todas={todas} d={d} ctx={ctx} />,
+      corpo: semPreencher ? (
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">{SEM_PERM["visita.preencher"].sub}</p>
+          <SoLeitura ativo><PerguntasConfiguraveis seccao={seccao} todas={todas} d={d} ctx={ctx} /></SoLeitura>
+        </div>
+      ) : <PerguntasConfiguraveis seccao={seccao} todas={todas} d={d} ctx={ctx} />,
     });
   }
   if (extra.length === 0) return passos;

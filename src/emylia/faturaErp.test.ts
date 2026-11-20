@@ -4,6 +4,7 @@ import { acoes, proximo, seed, type Estado } from "./motor";
 import { lerFaturaErp, resumoErp, type InfoErp } from "./erpEticadata";
 import { CHAVE_VERSAO } from "./versaoPrototipo";
 import { definirCriadorContas, definirModoReal, type EnvioAcesso } from "./acessosPortal";
+import { CODIGO_BASE, definirPermissoesReais } from "./permissoes";
 
 // 26/10: a Edge Function erp-fatura (a ponte na rede da empresa), simulada
 const { invocar } = vi.hoisted(() => ({ invocar: vi.fn() }));
@@ -122,6 +123,38 @@ describe("a fatura do Eticadata no V1", () => {
     A.validar(1027);
     expect(d().fin.pago).toBe(true);
     expect(d().f.comprovativo).toBe("Validado à mão no CRM");
+  });
+
+  describe("20/11: paga no ERP sem negocios.validar_pagamento (só regista a fatura)", () => {
+    beforeEach(() => definirPermissoesReais({ codigos: new Set([CODIGO_BASE["finance.invoice"]]), simular: false }));
+    afterEach(() => definirPermissoesReais(null));
+    const MSG = "Paga no ERP: falta o Financeiro validar o pagamento";
+
+    it("ao registar: não valida, avisa e fica por validar", () => {
+      const avisos: { msg: string; kind?: string }[] = [];
+      acoes(S, (a) => avisos.push(a), (fn) => fn()).registarFaturaErp(1027, "FAT 15200126/12", paga());
+      expect(d().fin.fatura?.n).toBe("FAT 15200126/12");
+      expect(d().fin.erp?.estado).toBe("paga");
+      expect(d().fin.pago).toBe(false);
+      expect(d().fin.recibo).toBeFalsy();
+      expect(d().fase).toBe(4);
+      expect(avisos.find((a) => a.msg === MSG)?.kind).toBe("");
+    });
+
+    it("ao verificar no ERP: não valida; em segundo plano avisa uma só vez", async () => {
+      const avisos: string[] = [];
+      const A = acoes(S, (a) => avisos.push(a.msg), (fn) => fn());
+      A.registarFaturaErp(1027, "FAT 15200126/12", info());
+      vi.stubGlobal("fetch", resposta({ encontrada: true, ...paga() }));
+      A.verificarErp(1027, true); await esperar();
+      A.verificarErp(1027, true); await esperar();
+      expect(d().fin.pago).toBe(false);
+      expect(avisos.filter((m) => m === MSG)).toHaveLength(1);
+      // com a permissão, a mesma leitura valida
+      definirPermissoesReais({ codigos: new Set([CODIGO_BASE["finance.invoice"], CODIGO_BASE["finance.validate_payment"]]), simular: false });
+      A.verificarErp(1027); await esperar();
+      expect(d().fin.pago).toBe(true);
+    });
   });
 
   it("só o Financeiro regista", () => {
