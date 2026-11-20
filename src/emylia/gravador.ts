@@ -16,7 +16,7 @@
 // revistas. Sem captura contínua (um browser que não a deixe), fica tudo como antes.
 import { useSyncExternalStore } from "react";
 import type { Fala } from "./chamadaMotor";
-import { ONNX_BASE, TAXA, VAD_ASSETS, carregarVad, contextoRevisto, ecraAceso, linhasDaFala, semWorkers, transcreverBloco, transcreverFala, vozGuardada, vozTextoGuardado } from "./chamadaNuvem";
+import { AppAtualizada, ONNX_BASE, TAXA, VAD_ASSETS, carregarVad, contextoRevisto, ecraAceso, linhasDaFala, semWorkers, transcreverBloco, transcreverFala, vozGuardada, vozTextoGuardado } from "./chamadaNuvem";
 import { BLOCO_MAX_S, BLOCO_MIN_S, jaRevisto, juntarBloco, juntarInt16, pontoCalado, rmsMaximo } from "./blocosAudio";
 
 export type EstadoGravacao = "parado" | "a_ligar" | "a_ouvir" | "interrompida" | "a_terminar" | "terminada";
@@ -435,10 +435,39 @@ export async function iniciarGravacao(a: Abrir, continuar = false): Promise<void
     mudar({ estado: "a_ouvir", msg: "" }, true);
   } catch (e) {
     await desligarMicrofone(false);
-    mudar({ estado: mesma || g.falas.length ? "interrompida" : "parado", msg: "Sem acesso ao microfone: " + (e as Error).message }, true);
+    // 18/11 (Rúben: «preciso de gravar a chamada… quando clico não faz nada»): o separador ficou aberto durante um deploy e o pedaço do
+    // VAD já não existe no servidor. Em vez de pedir F5, recarrega sozinha e começa a gravar mal a página volte (uma vez só).
+    if (e instanceof AppAtualizada && recarregarParaGravar(a, continuar)) {
+      mudar({ estado: mesma || g.falas.length ? "interrompida" : "parado", msg: "A app foi atualizada: a recarregar a página para começar a gravar…" }, true);
+      return;
+    }
+    mudar({ estado: mesma || g.falas.length ? "interrompida" : "parado", msg: (e instanceof AppAtualizada ? "" : "Sem acesso ao microfone: ") + (e as Error).message }, true);
     throw e;
   }
 }
+
+// ---- 18/11: depois de um deploy, recarregar e continuar ----------------------------------------------------
+const CHAVE_RETOMAR = "olyvia-gravar-depois-de-recarregar";
+const RETOMAR_MS = 60_000;
+/** Guarda o pedido e recarrega a página. False se já se recarregou há pouco por isto (não entra em ciclo). */
+export function recarregarParaGravar(a: Abrir, continuar: boolean, recarregar: () => void = () => window.location.reload()): boolean {
+  try {
+    const antes = JSON.parse(sessionStorage.getItem(CHAVE_RETOMAR) ?? "null") as { em?: number } | null;
+    if (antes?.em && Date.now() - antes.em < RETOMAR_MS) { sessionStorage.removeItem(CHAVE_RETOMAR); return false; }
+    sessionStorage.setItem(CHAVE_RETOMAR, JSON.stringify({ a, continuar, em: Date.now() }));
+  } catch { return false; }
+  recarregar();
+  return true;
+}
+/** Na página nova: se ficou um pedido de gravar há menos de RETOMAR_MS, começa (com a autorização do micro já dada não precisa de toque). */
+export function retomarDepoisDeRecarregar(): void {
+  let p: { a: Abrir; continuar: boolean; em: number } | null = null;
+  try { p = JSON.parse(sessionStorage.getItem(CHAVE_RETOMAR) ?? "null"); } catch { return; }
+  if (!p?.a || Date.now() - p.em > RETOMAR_MS) { try { sessionStorage.removeItem(CHAVE_RETOMAR); } catch { /* */ } return; }
+  // fica a marca até a gravação arrancar: se voltar a falhar logo, o recarregar seguinte vê-a e não entra em ciclo
+  void iniciarGravacao(p.a, p.continuar).then(() => { try { sessionStorage.removeItem(CHAVE_RETOMAR); } catch { /* */ } }, () => undefined);
+}
+if (typeof window !== "undefined" && typeof sessionStorage !== "undefined") setTimeout(retomarDepoisDeRecarregar, 0);
 
 /** Parar o microfone, esperar pelas últimas transcrições e devolver as falas. A gravação fica «terminada» até se descartar. */
 export async function terminarGravacao(): Promise<Fala[]> {

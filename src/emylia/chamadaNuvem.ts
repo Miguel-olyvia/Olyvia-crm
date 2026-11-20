@@ -80,7 +80,8 @@ export async function gravarMicrofone(segundos: number, aoProgredir?: (s: number
 const ORT_PASTA = import.meta.env.DEV ? "/node_modules/onnxruntime-web/dist/" : VAD_ASSETS;
 const ORT_FICHEIROS = { mjs: ORT_PASTA + "ort-wasm-simd-threaded.mjs", wasm: ORT_PASTA + "ort-wasm-simd-threaded.wasm" };
 export async function semWorkers(): Promise<void> {
-  const ort = await import("onnxruntime-web/wasm");
+  let ort: typeof import("onnxruntime-web/wasm");
+  try { ort = await import("onnxruntime-web/wasm"); } catch (e) { throw pedacoEmFalta(e); }
   ort.env.wasm.numThreads = 1;
   ort.env.wasm.wasmPaths = ORT_FICHEIROS;
 }
@@ -89,16 +90,20 @@ export const ONNX_BASE = ORT_FICHEIROS as unknown as string;
 
 /** O vad-web vem num pedaço à parte. Numa aba aberta antes de um deploy novo, esse pedaço já não existe
  *  no servidor («Failed to fetch dynamically imported module»): a solução é recarregar a página. */
+/** 18/11: o erro de «a app mudou no servidor» (o gravador recarrega a página e continua). */
+export class AppAtualizada extends Error {}
 export async function carregarVad(): Promise<typeof import("@ricky0123/vad-web")> {
   try {
     return await import("@ricky0123/vad-web");
   } catch (e) {
-    const m = (e as Error).message ?? "";
-    if (/dynamically imported module|Loading chunk|Importing a module script failed/i.test(m)) {
-      throw new Error("A app foi atualizada entretanto. Recarregue a página (F5) e tente outra vez.");
-    }
-    throw e;
+    throw pedacoEmFalta(e);
   }
+}
+/** O erro de um import() que falhou: «a app mudou no servidor» quando é um pedaço que já não existe; o próprio erro, se não. */
+function pedacoEmFalta(e: unknown): unknown {
+  const m = (e as Error)?.message ?? "";
+  return /dynamically imported module|Loading chunk|Importing a module script failed|error loading dynamically/i.test(m)
+    ? new AppAtualizada("A app foi atualizada entretanto. Recarregue a página (F5) e tente outra vez.") : e;
 }
 // 11/11: o microfone é do gravador (gravador.ts) e os ficheiros transcrevem-se por blocos (transcreverAudio, em baixo); as funções
 // antigas daqui (ouvirMicrofone, falasDeFicheiro) saíram.

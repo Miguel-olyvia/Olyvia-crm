@@ -21,7 +21,7 @@ import { TEMAS_GUIA, devePedirGuia, falasParaGuia, juntarGuia, type GuiaConversa
 import { divisaoPrincipal } from "./campos";
 import { areaChaoM2, faltaFechar, gravarPlanta, plantaDaFolha, type PlantaLida } from "./planta";
 import { pedirMarcacao } from "./marcacaoDaChamada";
-import { GRUPO_VISITA, analisarConversa, audioDeFicheiro, lerFolha, gravarMicrofone, guardarVoz, pedirGuia, preencherCampos, transcreverAudio, transcreverFala, vozGuardada, wavBase64 } from "./chamadaNuvem";
+import { AppAtualizada, GRUPO_VISITA, analisarConversa, audioDeFicheiro, lerFolha, gravarMicrofone, guardarVoz, pedirGuia, preencherCampos, transcreverAudio, transcreverFala, vozGuardada, wavBase64 } from "./chamadaNuvem";
 import { descartarGravacao, escolherMicrofone, iniciarGravacao, microfoneEscolhido, microfones, painelAberto, repetirFalhadas, terminarGravacao, ultimoSomMicrofone, useGravacao, useNivelMicrofone } from "./gravador";
 import { urlDoNegocio } from "./urlNegocio";
 
@@ -170,7 +170,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
     try {
       await iniciarGravacao({ negocio: d.id, nome: d.nome, modo, voltar: urlDoNegocio(d.id) }, continuar);
     } catch (e) {
-      setMsg((e as Error).message.startsWith("Já está") ? (e as Error).message : "Sem acesso ao microfone: " + (e as Error).message);
+      setMsg((e as Error).message.startsWith("Já está") || e instanceof AppAtualizada ? (e as Error).message : "Sem acesso ao microfone: " + (e as Error).message);
     }
   }
 
