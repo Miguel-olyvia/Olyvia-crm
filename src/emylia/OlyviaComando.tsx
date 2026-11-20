@@ -14,7 +14,7 @@ import { Ear, Mic, MicOff, Sparkles, Volume2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { DESTINOS, FASES_NOMES, EV_ABRIR, EV_ESTUDIO, EV_FASE, EV_PASSO, EV_PESQUISA, EV_RESPOSTA, eConfirmacao, eRecusa, esperaAteAgir, extrairAposGatilho, extrairFase, interpretarComando, juntarLetras, limparFrase, normal, pedeParaParar, temGatilho, VERBO_PREENCHER } from "./comandoOlyvia";
 import { acompanharFala, andarNaPagina, botaoPeloNome, escreverNaPesquisa, executarPlano, lerCampos, preencherPelaFrase, type Acao } from "./preencherOlyvia";
-import { assentar, carregar, eIrreversivel, escolherEm, escreverEm, lerEcra, type Ecra } from "./ecraOlyvia";
+import { assentar, carregar, escolherEm, escreverEm, lerEcra, pedeConfirmacao, type Ecra } from "./ecraOlyvia";
 import { supabase } from "@/integrations/supabase/client";
 
 export { PAUSA_A_MEIO, PAUSA_CURTA, PAUSA_FRASE, PAUSA_ORDEM } from "./comandoOlyvia";
@@ -331,11 +331,13 @@ export function OlyviaComando() {
         return true;
       }
       // o que não se desfaz: faz-se o que vem antes, e pergunta-se
-      const k = r.acoes.findIndex((a) => a.tipo === "clicar" && a.elemento != null && eIrreversivel(ecra.elementos[a.elemento]?.texto ?? ""));
+      // 20/11: e os botões que fazem andar o negócio («Fechar levantamento», «Passar ao comercial», «Marcar visita», «Usar esta planta»)
+      const confirmar = (a: AcaoIa) => a.tipo === "clicar" && a.elemento != null && pedeConfirmacao(ecra.nos[a.elemento], ecra.elementos[a.elemento]?.texto ?? "");
+      const k = r.acoes.findIndex(confirmar);
       feito.push(...(await fazerAcoes(k === -1 ? r.acoes : r.acoes.slice(0, k), campos, ecra)));
       if (k !== -1) {
         const nome = ecra.elementos[r.acoes[k].elemento!]?.texto ?? "";
-        const resto = [r.acoes[k], ...r.acoes.slice(k + 1).filter((a) => !(a.tipo === "clicar" && a.elemento != null && eIrreversivel(ecra.elementos[a.elemento]?.texto ?? "")))];
+        const resto = [r.acoes[k], ...r.acoes.slice(k + 1).filter((a) => !confirmar(a))];
         pedirConfirmacao(`Vou carregar em «${nome}». Confirmas?`, porVoz, async () => {
           feito.push(...(await fazerAcoes(resto, campos, ecra)));
           if (r.continuar || resto.length < r.acoes.length - k) { await assentar(); await correrIa(frase, porVoz, feito, ronda + 1, vistos); }
@@ -386,7 +388,18 @@ export function OlyviaComando() {
     // «todos», «gravar a visita»); o que não se desfaz (enviar, apagar, assinar…) nunca se carrega por voz
     if (c.acao === "nada" || c.acao === "abrir-negocio" || c.acao === "ir-passo") {
       const b = botaoPeloNome(limpa);
-      if (b) { b.click(); setAviso({ msg: `«${(b.textContent ?? "").replace(/\s+/g, " ").trim() || b.getAttribute("aria-label")}»`, ok: true }); return; }
+      if (b) {
+        const nome = (b.textContent ?? "").replace(/\s+/g, " ").trim() || b.getAttribute("aria-label") || "";
+        // 20/11 (auditoria): «fechar levantamento», «passar ao comercial», «marcar visita», «usar esta planta» ditos pelo nome também perguntam
+        if (pedeConfirmacao(b, nome)) {
+          pedirConfirmacao(`Vou carregar em «${nome}». Confirmas?`, porVoz, async () => {
+            if (b.isConnected) { b.click(); setAviso({ msg: `Carreguei em «${nome}».`, ok: true }); }
+            else setAviso({ msg: `O botão «${nome}» já não está no ecrã.`, ok: false });
+          });
+          return;
+        }
+        b.click(); setAviso({ msg: `«${nome}»`, ok: true }); return;
+      }
     }
 
     // 17/11 (Rúben: «se a plataforma não entender linguagem natural por voz, isto é inútil»): uma frase natural (comprida) vai

@@ -229,6 +229,28 @@ export const IRREVERSIVEL = /\b(?:enviar|envia|reenviar|eliminar|elimina|apagar|
 const IRREVERSIVEL_INICIO = /^(?:arrancar|iniciar|comecar) (?:a )?obra|^(?:encomendar|adjudicar|faturar|gerar (?:a )?fatura|emitir)/i;
 export const eIrreversivel = (nome: string): boolean => { const n = normal(nome); return IRREVERSIVEL.test(n) || IRREVERSIVEL_INICIO.test(n); };
 
+/**
+ * 20/11 (auditoria de 19/11): os botões que fazem andar o negócio também perguntam antes («Fechar levantamento», «Passar ao comercial»,
+ * «Marcar visita», «Marcar a visita», «Usar esta planta»). Só o nome INTEIRO do botão: «Marcar a visita como feita», «Marcar visita para
+ * este negócio» ou um cartão «Fechar levantamento · Carlos» não são este botão.
+ */
+const IMPORTANTE = /^(?:fechar (?:o )?levantamento|passar (?:ao|para o) comercial|marcar (?:a )?visita|usar esta planta)$/;
+export const eImportante = (nome: string): boolean => IMPORTANTE.test(normal(nome));
+
+/**
+ * O clique pede «Confirmas?»: o que não se desfaz (pelo nome, como sempre) ou um botão importante. Um botão importante só conta quando é
+ * mesmo o botão que faz: o passo com o mesmo nome na lista dos passos (dentro de `nav` ou de uma lista `ol` com nome, ou o passo atual), um separador, uma ligação ou
+ * um botão que só abre um painel (`aria-expanded`) apenas mostram, não fazem.
+ */
+export function pedeConfirmacao(el: HTMLElement | null | undefined, nome: string = el ? nomeDe(el) : ""): boolean {
+  if (eIrreversivel(nome)) return true;
+  if (!el || !eImportante(nome)) return false;
+  if (tipoDe(el) !== "botao" || el.getAttribute("role") === "tab") return false;
+  const atual = el.getAttribute("aria-current");
+  if ((atual && atual !== "false") || el.hasAttribute("aria-expanded")) return false;
+  return !el.closest("nav,ol[aria-label],[role='tablist'],[role='navigation']");
+}
+
 /** Espera que o ecrã assente depois de uma ação (a página nova a carregar, a janela a abrir): sem mudanças por `calma` ms, ou `max`. */
 export function assentar(max = 2500, calma = 350): Promise<void> {
   return new Promise((ok) => {
