@@ -37,6 +37,7 @@ import { ligarAoCatalogo, type LinhaLevada } from "./ligarEstudio";
 import { porMedida, type Negocio } from "./motor";
 import { areaChaoM2, gravarPlanta } from "./planta";
 import type { Ctx } from "./pecas";
+import { usePrincipalDaVisita } from "./principalDaVisita";
 
 const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
 const dataCurta = (d: Date) => d.toLocaleDateString("pt-PT", { weekday: "short", day: "numeric", month: "long" });
@@ -229,6 +230,10 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const chao = salvo ? areaChaoM2(salvo.depois.paredes) : null;
 
   const nServ = (salvo?.servicos ?? []).length;
+  // 20/11 (auditoria: «um botão principal por ecrã»): com o painel da gravação à vista, o Estúdio só é o principal quando é a vez dele
+  // (a gravar, ou com a visita já gravada); antes de gravar é «Começar a gravar», no fim é «Fechar levantamento» (principalDaVisita.ts)
+  const principal = usePrincipalDaVisita(d.id);
+  const varianteEstudio = principal === null || principal === "estudio" ? "default" : "outline";
   const guardado = salvo?.gravadoEm ? new Date(salvo.gravadoEm) : null;
 
   return (
@@ -267,7 +272,7 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
               ))}
             </dl>
             <div className="mt-auto flex flex-wrap gap-2">
-              <Button type="button" className="min-h-11 flex-1 sm:flex-none" onClick={abrir}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Continuar no Estúdio</Button>
+              <Button type="button" variant={varianteEstudio} className="min-h-11 flex-1 sm:flex-none" onClick={abrir}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Continuar no Estúdio</Button>
               <Button type="button" variant="outline" className="min-h-11 flex-1 sm:flex-none" disabled={aLer} onClick={() => { void trazer(projetoDoEstudioPara(d.id) ?? salvo); }}>Trazer do Estúdio</Button>
             </div>
           </div>
@@ -282,7 +287,7 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             </div>
           </div>
           <p className="text-sm text-muted-foreground">Ao voltar, preenche sozinho as medidas e as necessidades{divisaoDoEstudio(d) === "Casa de banho" ? " e as peças da casa de banho" : ""}.</p>
-          <Button type="button" className="min-h-11 w-full sm:w-auto" onClick={abrir}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Abrir o Estúdio</Button>
+          <Button type="button" variant={varianteEstudio} className="min-h-11 w-full sm:w-auto" onClick={abrir}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Abrir o Estúdio</Button>
         </section>
       )}
       {pendentes.length > 0 && <DoEstudio ctx={ctx} d={d} linhas={pendentes} feito={(texto) => { setPendentes([]); setFeito(texto); }} />}

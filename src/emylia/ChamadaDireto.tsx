@@ -7,7 +7,7 @@
 // pré-visualização; o gravador revê a conversa em blocos contínuos, com quem fala (gravador.ts, blocosAudio.ts). No fim vêm os campos
 // e a análise da conversa (InsightsConversa), que fica no negócio. Uma gravação feita fora da app carrega-se e segue o mesmo caminho.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Camera, Check, FileAudio, Mic, PhoneOff, RotateCcw, Sparkles, Square, UserRoundCheck } from "lucide-react";
+import { Camera, Check, ChevronDown, FileAudio, Mic, PhoneOff, RotateCcw, Sparkles, Square, UserRoundCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Def, Grupo } from "./campos";
@@ -25,6 +25,7 @@ import { AppAtualizada, DURACAO_MAX_S, GRUPO_VISITA, TranscricaoIncompleta, anal
 import { descartarGravacao, escolherMicrofone, iniciarGravacao, microfoneEscolhido, microfones, painelAberto, repetirFalhadas, terminarGravacao, ultimoSomMicrofone, useGravacao, useNivelMicrofone } from "./gravador";
 import { sinc } from "./sincronizacao";
 import { urlDoNegocio } from "./urlNegocio";
+import { definirVisita, principalDaVisita, usePassoDaVisita, type GravacaoVisita, type PainelVisita } from "./principalDaVisita";
 
 /** Depois de terminar: a preencher os campos, terminado, ou erro. A gravação em si vive no gravador (gravador.ts).
  *  11/11: «a_transcrever» é um ficheiro (uma gravação carregada, ou a chamada de exemplo) a ser transcrito por blocos. */
@@ -138,6 +139,9 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   const [ficheiroPorAcabar, setFicheiroPorAcabar] = useState<FicheiroPorAcabar | null>(null);
   const [porGuardar, setPorGuardar] = useState<{ segs: Fala[]; doGravador: boolean } | null>(null);
   const [preencherFalhou, setPreencherFalhou] = useState(false);
+  // 20/11 (auditoria: «um botão principal por ecrã»): registar a voz, carregar um ficheiro, ler a folha e o exemplo ficam no «Mais»
+  const [mais, setMais] = useState(false);
+  const passoVisita = usePassoDaVisita(d.id);
 
   // o painel à vista: o indicador de baixo esconde-se
   useEffect(() => painelAberto(), []);
@@ -416,7 +420,29 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   const livre = !aOuvir && !ocupado && !interrompida && !gravacaoPorGuardar;
   const texto = msg || (minha ? g.msg : "") || (aOuvir ? (voz ? `${T.aOuvir} A sua voz está registada.` : `${T.aOuvir} Sem voz registada: as falas ficam como do cliente até registar a sua.`)
     : vivo === "a_ligar" ? "A pedir o microfone..." : outroAGravar ? `A gravar outro negócio (${g.nome}).`
-    : voz ? "Pronto. A sua voz está registada." : "Pronto. Registe a sua voz uma vez para a transcrição saber quem fala.");
+    : voz ? "Pronto. A sua voz está registada." : "Pronto. Registe a sua voz uma vez (em «Mais») para a transcrição saber quem fala.");
+
+  // 20/11 (auditoria): um só botão principal. O painel diz o seu estado (principalDaVisita.ts); na Visita, o Estúdio e o rodapé dos passos
+  // lêem a mesma decisão. Na chamada, o painel decide sozinho (os passos por baixo têm os seus botões).
+  const camposPorConfirmar = !!extracao && aplicadas === null && entram.length > 0;
+  const plantaPorConfirmar = !!plantaLida && !plantaUsada;
+  const gravacaoVisita: GravacaoVisita = interrompida && !noutroSeparador ? "interrompida" : aOuvir ? "a_gravar" : livre && !outroAGravar ? "livre" : "outro";
+  const painel: PainelVisita = {
+    gravacao: gravacaoVisita, gravada: modo === "visita" && (!!textoGuardado?.trim() || falasFim.length > 0),
+    porConfirmar: camposPorConfirmar || plantaPorConfirmar,
+  };
+  const principal = principalDaVisita({ ...painel, passo: modo === "visita" ? passoVisita : "outro" });
+  useEffect(() => {
+    if (modo === "visita") definirVisita(d.id, { painel: { gravacao: painel.gravacao, gravada: painel.gravada, porConfirmar: painel.porConfirmar } });
+  }, [modo, d.id, painel.gravacao, painel.gravada, painel.porConfirmar]);
+  useEffect(() => (modo === "visita" ? () => definirVisita(d.id, { painel: undefined }) : undefined), [modo, d.id]);
+  const variante = (p: typeof principal, forte: "default" | "destructive" = "default") => (principal === p ? forte : "outline");
+  // o que vai para o «Mais» (as mesmas condições de antes, cada uma no seu botão)
+  const podeVoz = !aOuvir && !ocupado && !interrompida;
+  const podeFolha = modo === "visita" && !ocupado;
+  const podeExemplo = !aOuvir && !ocupado && teste;
+  const temMais = podeVoz || livre || podeFolha || podeExemplo;
+  const doMais = (f: () => void) => () => { setMais(false); f(); };
 
   return (
     <section aria-labelledby={`direto-${d.id}`} className="rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]">
@@ -426,38 +452,49 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
           <p className="text-sm text-muted-foreground">{T.sub}</p>
         </div>
         <div className="flex flex-wrap items-end gap-2">
-          {!aOuvir && !ocupado && !interrompida ? (
-            <Button type="button" variant="outline" onClick={() => void registarVoz()} disabled={aGravarVoz !== null}>
-              <UserRoundCheck className="h-4 w-4" aria-hidden="true" />
-              {aGravarVoz !== null ? `A gravar... ${aGravarVoz}/${SEGUNDOS_VOZ} s` : voz ? "Registar a minha voz outra vez" : "Registar a minha voz"}
-            </Button>
-          ) : null}
-          {livre ? <Button type="button" onClick={() => void iniciar()} disabled={aGravarVoz !== null || outroAGravar}><Mic className="h-4 w-4" aria-hidden="true" />{T.iniciar}</Button> : null}
-          {interrompida && !noutroSeparador ? <Button type="button" onClick={() => void iniciar(true)}><Mic className="h-4 w-4" aria-hidden="true" />{g.pedeToque ? "Toque para continuar a gravar" : "Continuar a gravar"}</Button> : null}
+          {livre ? <Button type="button" variant={variante("gravar")} onClick={() => void iniciar()} disabled={aGravarVoz !== null || outroAGravar}><Mic className="h-4 w-4" aria-hidden="true" />{T.iniciar}</Button> : null}
+          {interrompida && !noutroSeparador ? <Button type="button" variant={variante("retomar")} onClick={() => void iniciar(true)}><Mic className="h-4 w-4" aria-hidden="true" />{g.pedeToque ? "Toque para continuar a gravar" : "Continuar a gravar"}</Button> : null}
+          {(aOuvir || interrompida) && !noutroSeparador ? <Button type="button" variant={variante("terminar", "destructive")} onClick={() => void terminar()}><PhoneOff className="h-4 w-4" aria-hidden="true" />Terminar e preencher</Button> : null}
+          {ocupado ? <Button type="button" variant="outline" disabled><Square className="h-4 w-4" aria-hidden="true" />{vivo === "a_ligar" ? "A ligar..." : fase === "a_transcrever" ? "A transcrever..." : aAnalisar ? "A analisar..." : fase === "a_preencher" ? "A preencher..." : "A terminar..."}</Button> : null}
+          {/* o que está a decorrer a partir do «Mais» fica à vista */}
+          {aGravarVoz !== null ? <Button type="button" variant="outline" disabled><UserRoundCheck className="h-4 w-4" aria-hidden="true" />{`A gravar a sua voz... ${aGravarVoz}/${SEGUNDOS_VOZ} s`}</Button> : null}
+          {aLerFolha ? <Button type="button" variant="outline" disabled><Camera className="h-4 w-4" aria-hidden="true" />A ler a folha...</Button> : null}
           {/* 11/11: uma gravação feita fora da app (o gravador do telemóvel, quando o browser não deu) transcreve-se e analisa-se igual */}
           {livre ? (
-            <>
-              <input ref={inputAudio} type="file" accept="audio/*,.m4a,.mp3,.wav,.ogg,.aac,.mp4" className="sr-only" tabIndex={-1} aria-hidden="true"
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) void transcreverFicheiro(f, "a gravação"); }} />
-              <Button type="button" variant="outline" disabled={aGravarVoz !== null || outroAGravar} onClick={() => inputAudio.current?.click()}>
-                <FileAudio className="h-4 w-4" aria-hidden="true" />Carregar gravação
-              </Button>
-            </>
+            <input ref={inputAudio} type="file" accept="audio/*,.m4a,.mp3,.wav,.ogg,.aac,.mp4" className="sr-only" tabIndex={-1} aria-hidden="true"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) void transcreverFicheiro(f, "a gravação"); }} />
           ) : null}
-          {modo === "visita" && !ocupado ? (
-            <>
-              <input ref={inputFolha} type="file" accept="image/*" capture="environment" className="sr-only" tabIndex={-1} aria-hidden="true"
-                onChange={(e) => void folhaEscolhida(e.target.files?.[0])} />
-              <Button type="button" variant="outline" disabled={aLerFolha} onClick={() => inputFolha.current?.click()}>
-                <Camera className="h-4 w-4" aria-hidden="true" />{aLerFolha ? "A ler a folha..." : "Ler a folha"}
-              </Button>
-            </>
+          {podeFolha ? (
+            <input ref={inputFolha} type="file" accept="image/*" capture="environment" className="sr-only" tabIndex={-1} aria-hidden="true"
+              onChange={(e) => void folhaEscolhida(e.target.files?.[0])} />
           ) : null}
-          {!aOuvir && !ocupado && teste ? <Button type="button" variant="outline" onClick={() => void iniciarTeste()} disabled={aGravarVoz !== null}>Testar com a chamada de exemplo</Button> : null}
-          {(aOuvir || interrompida) && !noutroSeparador ? <Button type="button" variant="destructive" onClick={() => void terminar()}><PhoneOff className="h-4 w-4" aria-hidden="true" />Terminar e preencher</Button> : null}
-          {ocupado ? <Button type="button" disabled><Square className="h-4 w-4" aria-hidden="true" />{vivo === "a_ligar" ? "A ligar..." : fase === "a_transcrever" ? "A transcrever..." : aAnalisar ? "A analisar..." : fase === "a_preencher" ? "A preencher..." : "A terminar..."}</Button> : null}
+          {temMais ? (
+            <Button type="button" variant="ghost" aria-label="Mais opções da gravação" aria-expanded={mais} aria-controls={`direto-mais-${d.id}`} onClick={() => setMais((x) => !x)}>
+              Mais<ChevronDown className={cn("h-4 w-4 transition-transform", mais && "rotate-180")} aria-hidden="true" />
+            </Button>
+          ) : null}
         </div>
       </div>
+      {temMais && mais ? (
+        <div id={`direto-mais-${d.id}`} role="group" aria-label="Mais opções da gravação" className="mt-3 flex flex-wrap gap-2 rounded-xl border border-border bg-background p-2">
+          {podeVoz ? (
+            <Button type="button" variant="outline" onClick={doMais(() => void registarVoz())} disabled={aGravarVoz !== null}>
+              <UserRoundCheck className="h-4 w-4" aria-hidden="true" />{voz ? "Registar a minha voz outra vez" : "Registar a minha voz"}
+            </Button>
+          ) : null}
+          {livre ? (
+            <Button type="button" variant="outline" disabled={aGravarVoz !== null || outroAGravar} onClick={doMais(() => inputAudio.current?.click())}>
+              <FileAudio className="h-4 w-4" aria-hidden="true" />Carregar gravação
+            </Button>
+          ) : null}
+          {podeFolha ? (
+            <Button type="button" variant="outline" disabled={aLerFolha} onClick={doMais(() => inputFolha.current?.click())}>
+              <Camera className="h-4 w-4" aria-hidden="true" />Ler a folha
+            </Button>
+          ) : null}
+          {podeExemplo ? <Button type="button" variant="outline" onClick={doMais(() => void iniciarTeste())} disabled={aGravarVoz !== null}>Testar com a chamada de exemplo</Button> : null}
+        </div>
+      ) : null}
 
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm text-muted-foreground" aria-live="polite">
         <span className={cn((fase === "erro" || interrompida) && "text-destructive")}>{texto}</span>
@@ -559,7 +596,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
             {plantaLida.confianca < 0.75 ? " Leitura incerta: confira as medidas." : ""}
           </p>
           {plantaUsada ? <span className="text-sm text-success">Na planta. Veja-a em «Medidas da área».</span> : (
-            <Button type="button" className="shrink-0" onClick={() => { ctx.A.campo(d.id, "planta", gravarPlanta(plantaDaFolha(plantaLida))); setPlantaUsada(true); }}>
+            <Button type="button" variant={principal === "confirmar" && !camposPorConfirmar ? "default" : "outline"} className="shrink-0" onClick={() => { ctx.A.campo(d.id, "planta", gravarPlanta(plantaDaFolha(plantaLida))); setPlantaUsada(true); }}>
               <Check className="h-4 w-4" aria-hidden="true" />Usar esta planta
             </Button>
           )}
@@ -587,7 +624,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
                 ))}
               </ul>
               <div className="flex flex-wrap items-center gap-3">
-                <Button type="button" onClick={aplicar} disabled={entram.length === 0 || aplicadas !== null}><Sparkles className="h-4 w-4" aria-hidden="true" />Preencher {entram.length} {entram.length === 1 ? "campo" : "campos"}</Button>
+                <Button type="button" variant={variante("confirmar")} onClick={aplicar} disabled={entram.length === 0 || aplicadas !== null}><Sparkles className="h-4 w-4" aria-hidden="true" />Preencher {entram.length} {entram.length === 1 ? "campo" : "campos"}</Button>
                 {aplicadas ? <span className="text-sm text-success">Preenchidos: {aplicadas.join(", ")}. Confira em baixo e corrija o que for preciso.</span> : null}
               </div>
             </>

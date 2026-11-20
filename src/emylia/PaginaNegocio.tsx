@@ -22,6 +22,7 @@ import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import { VisitasLista } from "./Visitas";
 import { NovaVersao } from "./VoltarAtras";
 import { RetificacaoMedidas } from "./RetificacaoMedidas";
+import { estudioMedidasEPrincipal } from "./estudioPlano/EstudioMedidas";
 import { AbrirEstudioPlano } from "./estudioPlano/EstudioPlano";
 import { AbrirEstudioObra } from "./estudioObra/EstudioObra";
 import { planoAprovadoDe, retificacaoAceite } from "./preparacaoObra";
@@ -598,6 +599,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     // venda direta, que também retifica as medidas); se a retificação mudar o valor, volta ao Financeiro (AcertoDoValor, no passo da obra).
     const semObraAMedir = !!d.orc?.vendaDireta;
     const passoRetif: Passo = { id: "retificacao", titulo: simples ? "Medidas" : "Retificação de medidas", icone: Ruler, feito: retificacaoAceite(d), semAvancar: true,
+      principalNoCorpo: estudioMedidasEPrincipal(ctx, d),
       resumo: [d.f.retif_aceite ? `aceites a ${d.f.retif_aceite.split("-").reverse().join("/")}` : "por fazer"],
       corpo: <RetificacaoMedidas ctx={ctx} d={d} /> };
     const passoContrato = passoContratoPrincipal();
@@ -647,8 +649,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
 // 6/11: PERM_DO_PASSO e permEmFaltaDoPasso passaram para permissoes.ts (o CaminhoObra também os usa, sem carregar esta página)
 export { permEmFaltaDoPasso };
 
-/** O botão do próximo passo do negócio (ou o simulador do cliente). */
-export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; tamanho?: "lg" | "default" }) {
+/** O botão do próximo passo do negócio (ou o simulador do cliente). 20/11: `variante` «outline» quando outro botão é o principal do ecrã
+ *  (na Visita, «Começar a gravar» ou «Terminar e preencher» antes de «Fechar levantamento»: principalDaVisita.ts). */
+export function BotaoFase({ ctx, d, tamanho = "lg", variante }: { ctx: Ctx; d: Negocio; tamanho?: "lg" | "default"; variante?: "default" | "outline" }) {
   const { S, A, go } = ctx;
   const idSemPerm = useId();
   // 9/11 (Lote 1, B): o passo é do papel atual OU quem entrou tem as permissões que ele pede (passoDe, só com conta real)
@@ -662,7 +665,7 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
   const portal = usePermPortalDoPasso(p.act, meu && !!p.btn && !falta);
   if (falta) return (
     <div className="grid justify-items-start gap-1 sm:justify-items-end">
-      <Button size={tamanho} disabled aria-describedby={idSemPerm}>{p.btn}</Button>
+      <Button size={tamanho} variant={variante} disabled aria-describedby={idSemPerm}>{p.btn}</Button>
       <p id={idSemPerm} className="max-w-sm text-sm text-muted-foreground sm:text-right">{SEM_PERM[falta].sub}</p>
     </div>
   );
@@ -674,15 +677,15 @@ export function BotaoFase({ ctx, d, tamanho = "lg" }: { ctx: Ctx; d: Negocio; ta
   if (p.act === "registarFaturaErp" && meu) return <RegistarFaturaErp ctx={ctx} d={d} tamanho={tamanho} />;
   if (p.btn && meu && !portal.pode) return (
     <div className="grid justify-items-start gap-1 sm:justify-items-end">
-      <Button size={tamanho} disabled aria-describedby={portal.semPermissao ? idSemPerm : undefined}>{p.btn}<ArrowRight className="ml-2 h-4 w-4" /></Button>
+      <Button size={tamanho} variant={variante} disabled aria-describedby={portal.semPermissao ? idSemPerm : undefined}>{p.btn}<ArrowRight className="ml-2 h-4 w-4" /></Button>
       {portal.semPermissao && <p id={idSemPerm} className="max-w-sm text-sm text-muted-foreground sm:text-right">{portal.motivo}</p>}
     </div>
   );
   if (p.btn) return meu
-    ? <Button size={tamanho} onClick={go(() => fazer(A, p.act!, d.id, p.arg))}>{p.btn}<ArrowRight className="ml-2 h-4 w-4" /></Button>
+    ? <Button size={tamanho} variant={variante} onClick={go(() => fazer(A, p.act!, d.id, p.arg))}>{p.btn}<ArrowRight className="ml-2 h-4 w-4" /></Button>
     : (
       <div className="grid justify-items-start gap-1 sm:justify-items-end">
-        <Button size={tamanho} disabled>{p.btn}</Button>
+        <Button size={tamanho} variant={variante} disabled>{p.btn}</Button>
         <button type="button" className="text-sm font-medium text-primary underline-offset-4 hover:underline" onClick={go(() => A.role(p.who as Papel))}>Mudar para {PAPEIS[p.who as Papel].n}</button>
       </div>
     );

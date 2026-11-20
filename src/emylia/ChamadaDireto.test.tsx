@@ -93,9 +93,15 @@ const ctx = { A: { campo, servicoDaChamada, servicosDoPedido, chamadaFeita }, ru
   S: { svc: { s1: { n: "Canalização" }, s2: { n: "Pintura" } } } } as unknown as Ctx;
 const d = { id: 7, f: { imovel: "Moradia" }, linhaPorDefinir: true, linha: "wc" } as unknown as Negocio;
 
+/** 20/11 (auditoria): o exemplo, como registar a voz, carregar um ficheiro e ler a folha, está no «Mais». */
+async function exemplo() {
+  fireEvent.click(screen.getByRole("button", { name: "Mais opções da gravação" }));
+  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+}
+
 async function correrExemplo() {
   render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+  await exemplo();
   await waitFor(() => expect(screen.getByText(/Apartamento, proprietária\./)).toBeInTheDocument());
 }
 
@@ -177,7 +183,7 @@ describe("ChamadaDireto (4/11, na nuvem)", () => {
   it("11/11: a análise da conversa aparece e fica guardada no negócio, com o tempo de cada fala", async () => {
     nuvem.preencherCampos.mockResolvedValueOnce({ ...extracao, insights: INSIGHTS });
     render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+    await exemplo();
     await waitFor(() => expect(screen.getByRole("region", { name: "O que a Olyvia percebeu da chamada" })).toBeInTheDocument());
     expect(screen.getByText(/Quente · 82/)).toBeInTheDocument();
     expect(screen.getByText("Perguntar qual é o orçamento.")).toBeInTheDocument();
@@ -230,7 +236,7 @@ describe("ChamadaDireto (4/11, na nuvem)", () => {
     render(<ChamadaDireto ctx={ctx} d={dv} grupos={GRUPOS} modo="visita" />);
     expect(screen.getByRole("heading", { name: "Gravar a visita" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Começar a gravar" })).toBeInTheDocument();
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+    await exemplo();
     await waitFor(() => expect(screen.getByText(/Casa de banho toda nova\./)).toBeInTheDocument());
     const [, grupos, tipo] = nuvem.preencherCampos.mock.calls[0];
     expect(tipo).toBe("visita");
@@ -258,7 +264,7 @@ describe("ChamadaDireto (4/11, na nuvem)", () => {
       proxima: { pergunta: "Para quando gostava de ter a obra feita?", porque: "Falta o prazo." }, alerta: null,
     });
     render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+    await exemplo();
     const guia = await screen.findByRole("region", { name: "Guia da conversa" });
     await waitFor(() => expect(screen.getByText("Para quando gostava de ter a obra feita?")).toBeInTheDocument());
     expect(nuvem.pedirGuia.mock.calls[0][1]).toBe("chamada");
@@ -305,7 +311,7 @@ describe("20/11 (auditoria de 19/11): o fim da gravação", () => {
   it("os campos falharam mas a transcrição ficou: «Preencher os campos com a transcrição guardada»", async () => {
     nuvem.preencherCampos.mockRejectedValueOnce(new Error("chamada-campos: sem rede"));
     render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+    await exemplo();
     await waitFor(() => expect(screen.getByText(/A transcrição ficou guardada no negócio, mas os campos não/)).toBeInTheDocument());
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Preencher os campos com a transcrição guardada" })); });
     await waitFor(() => expect(screen.getByText(/Apartamento, proprietária\./)).toBeInTheDocument());
@@ -333,7 +339,7 @@ describe("20/11 (auditoria de 19/11): gravação carregada de ficheiro", () => {
     const primeira = [FALAS[0]];
     nuvem.transcreverAudio.mockImplementationOnce(async () => { throw new TranscricaoIncompleta([primeira, undefined], [1], "chamada-transcrever: sem rede"); });
     render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+    await exemplo();
     await waitFor(() => expect(screen.getByText(/Uma parte de 2 não ficou transcrita/)).toBeInTheDocument());
     expect(screen.getByText("É um apartamento no terceiro andar.")).toBeInTheDocument();
     expect(nuvem.preencherCampos).not.toHaveBeenCalled();
@@ -348,7 +354,7 @@ describe("20/11 (auditoria de 19/11): gravação carregada de ficheiro", () => {
   it("também se pode seguir só com o que está transcrito", async () => {
     nuvem.transcreverAudio.mockImplementationOnce(async () => { throw new TranscricaoIncompleta([[FALAS[0]], undefined, [FALAS[1]]], [1], "sem rede"); });
     render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+    await exemplo();
     await waitFor(() => expect(screen.getByText(/Uma parte de 3 não ficou transcrita/)).toBeInTheDocument());
     await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Seguir só com o que está transcrito" })); });
     await waitFor(() => expect(screen.getByText(/Apartamento, proprietária\./)).toBeInTheDocument());
@@ -358,7 +364,7 @@ describe("20/11 (auditoria de 19/11): gravação carregada de ficheiro", () => {
   it("um ficheiro longo demais diz o máximo (a mensagem do audioDeFicheiro chega ao ecrã)", async () => {
     nuvem.audioDeFicheiro.mockRejectedValueOnce(new Error("A gravação tem 2 h 10 min. O máximo é 1 h 30 min: corte-a em partes mais curtas e carregue uma de cada vez."));
     render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
-    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+    await exemplo();
     await waitFor(() => expect(screen.getByText(/O máximo é 1 h 30 min/)).toBeInTheDocument());
     expect(nuvem.transcreverAudio).not.toHaveBeenCalled();
   });

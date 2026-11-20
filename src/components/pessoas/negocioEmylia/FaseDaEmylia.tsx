@@ -210,7 +210,7 @@ export function FaseDaEmylia({ ctx, d, soLeitura, topo, fasesFeitas, depois, ext
                     ? (comFim ? <div className="[&_button]:w-full sm:[&_button]:w-auto"><BotaoFase ctx={ctx} d={d} /></div> : null)
                     : (botaoNoPasso && d.orc
                       ? <Button type="button" size="lg" className="w-full sm:w-auto" onClick={ctx.go(() => (d.orc!.verif ? ctx.A.irVerif() : ctx.A.verificar(d.id)))}>{d.orc.verif ? t(`${N}verErros`) : t(`${N}verificar`)}</Button>
-                      : atual?.bloqueado ? null : <Button type="button" size="lg" className="w-full sm:w-auto" onClick={() => setAtivo(ativo + 1)}>{t(`${N}continuar`)}</Button>)}
+                      : atual?.bloqueado ? null : <Button type="button" size="lg" variant={atual?.principalNoCorpo ? "outline" : "default"} className="w-full sm:w-auto" onClick={() => setAtivo(ativo + 1)}>{t(`${N}continuar`)}</Button>)}
                 </div>
               )}
             </section>

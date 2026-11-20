@@ -18,7 +18,7 @@ import { areaChaoM2, areaParedesM2, gravarPlanta, lerPlanta, peDireitoDoCampo, t
 import { Brilho, Contagem, MOLA, VistoDesenho, useReduzir } from "../movimento";
 import { podeRetificar, supervisorDasMedidas } from "../preparacaoObra";
 import { ImpactoNoOrcamento, linhasDoImpacto } from "./ImpactoNoOrcamento";
-import { permEmFaltaDoPasso } from "../permissoes";
+import { permEmFaltaDoPasso, podeNeg } from "../permissoes";
 
 const numero = (s: string) => Number(String(s).replace(",", "."));
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -188,6 +188,13 @@ function BotaoRepete({ rotulo, fazer, children }: { rotulo: string; fazer: () =>
   );
 }
 
+/** 11/11 (F3) e 19/11: o cartão do Estúdio das medidas aparece (medidas por aceitar, abertas, quem mede escolhido, com a permissão). */
+export const estudioMedidasAbre = (ctx: Ctx, d: Negocio): boolean =>
+  !d.f.retif_aceite && podeRetificar(d) && !!d.f.supervisor_medidas && !permEmFaltaDoPasso(ctx.S, "retificarMedidas");
+
+/** 20/11 (auditoria: «um botão principal por ecrã»): no passo Medidas, o cartão do Estúdio é o principal (o «Continuar» passa a secundário). */
+export const estudioMedidasEPrincipal = (ctx: Ctx, d: Negocio): boolean => podeNeg(ctx.S.role, "obra.planear") && estudioMedidasAbre(ctx, d);
+
 /** O que abre o Estúdio das medidas (no passo «Medidas»): as medidas da visita, a conferir; tocar abre o Estúdio. 11/11: um cartão vivo. */
 export function AbrirEstudioMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   // 12/11: o Estúdio aberto vai para o endereço (?estudio=medidas): o «voltar» do browser fecha-o em vez de sair do negócio
@@ -195,7 +202,7 @@ export function AbrirEstudioMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const reduzir = useReduzir();
   // 11/11 (F3): sem negocios.obra.planear o estúdio não abre (aceitar as medidas pede-a; o aviso fica no passo)
   // 19/11 (auditoria): e com quem vai medir escolhido (o gestor escolhe-o no passo Medidas)
-  if (d.f.retif_aceite || !podeRetificar(d) || !d.f.supervisor_medidas || permEmFaltaDoPasso(ctx.S, "retificarMedidas")) return null;
+  if (!estudioMedidasAbre(ctx, d)) return null;
   const CM = camposMedida(LINHAS[d.linha]);
   return (
     <>

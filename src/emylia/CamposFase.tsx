@@ -328,6 +328,8 @@ export interface Passo {
   bloqueado?: boolean;
   /** 27/10: não passa sozinho ao seguinte quando as respostas ficam completas (tem mais por baixo delas, ex.: as fotografias). */
   semAvancar?: boolean;
+  /** 20/11 (auditoria: «um botão principal por ecrã»): o botão principal está no corpo do passo (ex.: o Estúdio das medidas); o «Continuar» fica secundário. */
+  principalNoCorpo?: boolean;
   resumo: string[];
   corpo: ReactNode;
 }

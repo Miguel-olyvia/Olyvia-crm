@@ -41,6 +41,7 @@ import { useParamUrl, usePainelUrl } from "./usarParamUrl";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
 import { passoDe, podeVerCustos } from "./permissoes";
 import { SoLeitura } from "./passosSoLeitura";
+import { definirVisita, usePrincipalDaVisita } from "./principalDaVisita";
 // FERRAMENTAS-TESTE (temporário, remover antes da main)
 import { FerramentasTeste } from "./FerramentasTeste";
 
@@ -279,7 +280,8 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
           <span className="text-[15px]">{naChamada
             ? "A Lead e o Contacto numa só página, com o que se sabe do cliente ao lado."
             : "A chamada deu para tudo? Preencha a Lead e o Contacto numa só página."}</span>
-          <Button variant={naChamada ? "outline" : "default"} className="min-h-11 shrink-0" onClick={() => setNaChamada((x) => !x)}>
+          {/* 20/11 (auditoria): secundário; o principal da Lead é o «Continuar» (ou o botão do passo) */}
+          <Button variant="outline" className="min-h-11 shrink-0" onClick={() => setNaChamada((x) => !x)}>
             {naChamada ? "Voltar aos passos" : "Tudo na chamada"}
           </Button>
         </div>
@@ -557,6 +559,17 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos, soLeitura }: { ctx: Ctx; 
 
   const fim = ativo >= passos.length;
   const quem = p.who && p.who !== "cliente" && !meu ? PAPEIS[p.who].n : null;
+  // 20/11 (auditoria: «um botão principal por ecrã»): na Visita, o rodapé diz o passo aberto ao painel da gravação e segue a decisão comum
+  // (principalDaVisita.ts): o «Continuar» e o «Fechar levantamento» ficam secundários quando o principal é gravar, terminar ou o Estúdio
+  const passoVisita = d.fase !== 2 ? null : fim ? "fim" : atual?.id === "estudio" ? "estudio" : "outro";
+  useEffect(() => {
+    if (passoVisita) definirVisita(d.id, { passo: passoVisita });
+    return () => { if (passoVisita) definirVisita(d.id, { passo: undefined }); };
+  }, [d.id, passoVisita]);
+  const principalVisita = usePrincipalDaVisita(d.id);
+  const secundarioNaVisita = d.fase === 2 && principalVisita !== null;
+  const varianteContinuar = atual?.principalNoCorpo || (secundarioNaVisita && principalVisita !== "continuar") ? "outline" : "default";
+  const varianteFase = secundarioNaVisita && principalVisita !== "fechar" ? "outline" : undefined;
   // 27/10 (Rúben): com a proposta pronta a enviar, o botão é sempre "Enviar proposta": em cima e em baixo de cada passo, sem "Continuar"
   const enviar = !fim && meu && p.act === "enviar" && temBotaoFase(ctx, d);
   // 19/11 (auditoria): «Registar chamada» pede o resultado (e o dia para voltar a ligar): fica no corpo do fim, não na barra presa ao fundo
@@ -618,13 +631,13 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos, soLeitura }: { ctx: Ctx; 
         <div data-acoes-passo className="sticky bottom-0 z-30 -mx-4 mt-8 flex items-center gap-2 border-t border-border bg-background/95 py-3 pl-4 pr-[4.5rem] backdrop-blur [&:not(:has(button))]:hidden sm:static sm:mx-0 sm:mt-10 sm:justify-between sm:gap-3 sm:bg-transparent sm:px-0 sm:pb-0 sm:pt-6 sm:backdrop-blur-none">
           <div className="shrink-0 empty:hidden sm:empty:block">{ativo > 0 && <Button variant="ghost" size="lg" className="px-3 sm:px-8" onClick={() => setAtivo(ativo - 1)}>Anterior</Button>}</div>
           {fim || enviar
-            ? (temBotaoFase(ctx, d) && !chamadaNoFim ? <div className="min-w-0 flex-1 sm:flex-none [&_button]:w-full sm:[&_button]:w-auto"><SoLeitura ativo={soLeitura}><BotaoFase ctx={ctx} d={d} /></SoLeitura></div> : null)
+            ? (temBotaoFase(ctx, d) && !chamadaNoFim ? <div className="min-w-0 flex-1 sm:flex-none [&_button]:w-full sm:[&_button]:w-auto"><SoLeitura ativo={soLeitura}><BotaoFase ctx={ctx} d={d} variante={varianteFase} /></SoLeitura></div> : null)
             : <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-none sm:flex-row sm:items-center">
               {/* no passo Orçamento por verificar, o botão é verificar: sem bloqueios o passo fica feito e avança sozinho;
                   com bloqueios, leva-os à vista (antes, o "Continuar" passava à Proposta com o orçamento por aprovar) */}
               {atual?.id === "orc" && d.orc && !d.orc.enviada && !completo(atual)
                 ? <Button size="lg" className="w-full sm:w-auto" disabled={soLeitura && !d.orc.verif} onClick={ctx.go(() => (d.orc!.verif ? ctx.A.irVerif() : ctx.A.verificar(d.id)))}>{d.orc.verif ? "Ver o que falta resolver" : "Verificar o orçamento"}</Button>
-                : atual?.bloqueado ? null : <Button size="lg" className="w-full sm:w-auto" onClick={() => setAtivo(ativo + 1)}>Continuar</Button>}
+                : atual?.bloqueado ? null : <Button size="lg" variant={varianteContinuar} className="w-full sm:w-auto" onClick={() => setAtivo(ativo + 1)}>Continuar</Button>}
             </div>}
         </div>
         )}
