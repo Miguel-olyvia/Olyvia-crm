@@ -95,6 +95,82 @@ export async function linkEntityEmail(
   if (error) throw error;
 }
 
+export interface EntityPrimaryContacts {
+  /** Email principal mais recente da ficha do cliente, ou null. */
+  email: string | null;
+  /** Telefone principal mais recente, já com indicativo ("+351912345678"), ou null. */
+  phone: string | null;
+}
+
+/**
+ * Lê o email e o telefone principais de UMA entidade, diretamente da base
+ * (sem cache), para o «Editar Lead» mostrar a mesma verdade que o separador
+ * Info e a proposta: o contacto principal mais recente por created_at — a
+ * mesma regra de useEntityIdentity.resolveEntities (que fica com o último de
+ * uma lista ordenada ascendente) e de validateEntityCoherence.
+ *
+ * Lê só as duas tabelas de contactos: não passa pelo resolveEntities porque
+ * esse também revela o NIF (nif-reveal) e lê moradas, o que o diálogo não
+ * precisa para isto. Um erro de leitura é lançado, não engolido: quem chama
+ * decide o que mostrar.
+ */
+export async function fetchEntityPrimaryContacts(entityId: string): Promise<EntityPrimaryContacts> {
+  const [emailsRes, phonesRes] = await Promise.all([
+    supabase
+      .from("anew_entity_emails")
+      .select("email, created_at")
+      .eq("entity_id", entityId)
+      .eq("is_primary", true)
+      .order("created_at", { ascending: false })
+      .limit(1),
+    supabase
+      .from("anew_entity_phones")
+      .select("phone_number, country_code, created_at")
+      .eq("entity_id", entityId)
+      .eq("is_primary", true)
+      .order("created_at", { ascending: false })
+      .limit(1),
+  ]);
+  if (emailsRes.error) throw emailsRes.error;
+  if (phonesRes.error) throw phonesRes.error;
+
+  const emailRow = (emailsRes.data ?? [])[0] as { email?: string | null } | undefined;
+  const phoneRow = (phonesRes.data ?? [])[0] as
+    | { phone_number?: string | null; country_code?: string | null }
+    | undefined;
+
+  const email = emailRow?.email?.trim() || null;
+  return { email, phone: composeEntityPhone(phoneRow?.phone_number, phoneRow?.country_code) };
+}
+
+/** "+351" + "912345678" → "+351912345678" (o formato que o campo de telefone da lead usa). */
+function composeEntityPhone(phoneNumber?: string | null, countryCode?: string | null): string | null {
+  const number = (phoneNumber ?? "").trim();
+  if (!number) return null;
+  if (number.startsWith("+") || number.startsWith("00")) return number;
+  const code = (countryCode ?? "").trim();
+  if (!code) return number;
+  const dialCode = code.startsWith("+") ? code : `+${code.replace(/^00/, "")}`;
+  return `${dialCode}${number.replace(/[\s().-]/g, "")}`;
+}
+
+/**
+ * Erro do email recusado por já pertencer a outra entidade da mesma
+ * organização (fn_check_email_unique_within_org: ERRCODE unique_violation,
+ * mensagem «Já existe outra entidade (<uuid>) com este email na mesma
+ * organização (<uuid>)»). Devolve o id da outra entidade quando a mensagem o
+ * traz; a base não devolve o nome.
+ */
+export function parseEmailInUseError(error: unknown): { isEmailInUse: boolean; otherEntityId: string | null } {
+  const e = (error ?? {}) as { code?: unknown; message?: unknown };
+  const message = typeof e.message === "string" ? e.message : "";
+  const mentionsOtherEntity = /outra entidade/i.test(message) && /email/i.test(message);
+  const isEmailInUse = mentionsOtherEntity || (e.code === "23505" && /email/i.test(message));
+  if (!isEmailInUse) return { isEmailInUse: false, otherEntityId: null };
+  const match = message.match(/entidade \(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)/i);
+  return { isEmailInUse: true, otherEntityId: match ? match[1] : null };
+}
+
 /** Sets an entity's primary phone — same semantics as linkEntityEmail (rpc_set_entity_primary_phone). */
 export async function linkEntityPhone(
   entityId: string,

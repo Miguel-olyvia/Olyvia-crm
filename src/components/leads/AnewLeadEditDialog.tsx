@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
@@ -27,7 +27,11 @@ import { Loader2, Save } from "lucide-react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { DynamicFormField } from "./DynamicFormField";
 import { LeadPhoneField } from "./LeadPhoneField";
-import { normalizeLegacyPhonePrefix } from "@/lib/phone/splitInternationalPhone";
+import {
+  joinInternationalPhone,
+  normalizeLegacyPhonePrefix,
+  splitInternationalPhone,
+} from "@/lib/phone/splitInternationalPhone";
 import {
   createSupabaseLeadDialogFieldDefinitionResolverClient,
   resolveLeadDialogFieldDefinitions,
@@ -35,7 +39,14 @@ import {
 } from "@/lib/leads/fieldDefinitions";
 import { leadEditGeneralFieldsSchema, leadEditNotesSchema } from "@/lib/validations";
 import { linkEntityFiscalEntity } from "@/utils/orgFiscalEntity";
-import { linkEntityAddress, linkEntityEmail, linkEntityPhone } from "@/utils/entityContactSync";
+import {
+  fetchEntityPrimaryContacts,
+  linkEntityAddress,
+  linkEntityEmail,
+  linkEntityPhone,
+  parseEmailInUseError,
+  type EntityPrimaryContacts,
+} from "@/utils/entityContactSync";
 import { checkNifCollisionOnEdit } from "@/lib/duplicateBlockingRule";
 import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
 import {
@@ -168,6 +179,35 @@ const getGeneralFieldValue = (
   return "";
 };
 
+/**
+ * The key a base field is written to: the form's mapped key, else an alias
+ * the lead already has, else the canonical key. Reading and writing must use
+ * the same key, or a second copy appears under a different one.
+ */
+const resolveGeneralWriteKey = (
+  generalKey: string,
+  values: Record<string, unknown>,
+  mappedKeys: Record<string, string>,
+): string => {
+  const aliases = GENERAL_FIELD_ALIASES[generalKey] || [generalKey];
+  return (
+    mappedKeys[generalKey] ||
+    aliases.find((alias) => Object.prototype.hasOwnProperty.call(values, alias)) ||
+    aliases[0]
+  );
+};
+
+const normEmail = (v: string | null | undefined) => (v || "").trim().toLowerCase();
+/** "+351 912 345 678", "00351912345678" e "912345678" comparam iguais. */
+const normPhone = (v: string | null | undefined) => {
+  const { dialCode, digits } = splitInternationalPhone(v || "");
+  return joinInternationalPhone(dialCode, digits);
+};
+
+/** Contact fields the dialog prefers from the client record (the entity). */
+const ENTITY_SOURCED_KEYS = ["email", "phone"] as const;
+type EntitySourcedKey = (typeof ENTITY_SOURCED_KEYS)[number];
+
 const fieldDefinitionResolverClient = createSupabaseLeadDialogFieldDefinitionResolverClient(supabase);
 
 export function AnewLeadEditDialog({
@@ -202,33 +242,85 @@ export function AnewLeadEditDialog({
   const [loading, setLoading] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
 
-  // Load field definitions and populate form when dialog opens
+  // Email/telefone que o formulário mostrou ao abrir (os da ficha do cliente
+  // quando existem). É contra eles que se decide se o utilizador os mudou.
+  const initialContactsRef = useRef<Record<EntitySourcedKey, string>>({ email: "", phone: "" });
+  // Campos base que o utilizador já editou nesta abertura: a leitura da ficha,
+  // se chegar depois, não os sobrescreve.
+  const touchedGeneralKeysRef = useRef<Set<string>>(new Set());
+  // Ignora respostas de uma abertura anterior (outro lead, ou fechar/abrir).
+  const openRequestRef = useRef(0);
+
+  // Load field definitions and the client record's contacts, and populate
+  // the form, when the dialog opens. The form stays behind the loader until
+  // both have arrived, so it never shows the lead's stale copy first and
+  // swaps it afterwards.
   useEffect(() => {
     if (open && lead) {
-      loadFieldDefs();
+      const requestId = ++openRequestRef.current;
+      touchedGeneralKeysRef.current = new Set();
       populateForm();
+      void loadFormData(requestId);
     }
   }, [open, lead]);
 
-  const loadFieldDefs = async () => {
+  const loadFormData = async (requestId: number) => {
     if (!lead) return;
     setLoading(true);
-    
-    try {
-      const resolvedDefinitions = await resolveLeadDialogFieldDefinitions(
-        {
-          campaignId: lead.campaign_id,
-          organizationId: companyId,
-        },
-        fieldDefinitionResolverClient,
-      );
 
-      setFieldDefs(resolvedDefinitions);
-    } catch (error) {
+    const definitionsPromise = resolveLeadDialogFieldDefinitions(
+      {
+        campaignId: lead.campaign_id,
+        organizationId: companyId,
+      },
+      fieldDefinitionResolverClient,
+    ).catch((error: unknown) => {
       console.error("Error loading field definitions:", error);
-    } finally {
-      setLoading(false);
+      return null;
+    });
+
+    // A ficha do cliente é a fonte do email e do telefone (é o que o separador
+    // Info e a proposta mostram). Se a leitura falhar, fica a cópia do lead.
+    const contactsPromise: Promise<EntityPrimaryContacts | null> = lead.entity_id
+      ? fetchEntityPrimaryContacts(lead.entity_id).catch((error: unknown) => {
+          console.error("Error loading the client record's contacts:", error);
+          return null;
+        })
+      : Promise.resolve(null);
+
+    const [resolvedDefinitions, entityContacts] = await Promise.all([definitionsPromise, contactsPromise]);
+    if (requestId !== openRequestRef.current) return;
+
+    const definitions = resolvedDefinitions ?? [];
+    if (resolvedDefinitions) setFieldDefs(resolvedDefinitions);
+    applyEntityContacts(entityContacts, buildGeneralKeyToFormKey(definitions));
+    setLoading(false);
+  };
+
+  const applyEntityContacts = (
+    entityContacts: EntityPrimaryContacts | null,
+    mappedKeys: Record<string, string>,
+  ) => {
+    if (!lead) return;
+    const leadCopy = { ...(lead.field_values || {}) };
+    delete leadCopy._meta;
+
+    const initial: Record<EntitySourcedKey, string> = { email: "", phone: "" };
+    for (const key of ENTITY_SOURCED_KEYS) {
+      initial[key] = entityContacts?.[key] || getGeneralFieldValue(leadCopy, key, mappedKeys);
     }
+    initialContactsRef.current = initial;
+
+    if (!entityContacts) return;
+    setFieldValues((prev) => {
+      const next = { ...prev };
+      for (const key of ENTITY_SOURCED_KEYS) {
+        const fromEntity = entityContacts[key];
+        if (!fromEntity || touchedGeneralKeysRef.current.has(key)) continue;
+        next[resolveGeneralWriteKey(key, next, mappedKeys)] = fromEntity;
+      }
+      return next;
+    });
   };
 
   const populateForm = () => {
@@ -260,12 +352,8 @@ export function AnewLeadEditDialog({
   const handleGeneralFieldChange = (generalKey: string, value: string) => {
     // Write back to the SAME key the value was read from, or editing the base
     // box would create a second copy under a different key.
-    const aliases = GENERAL_FIELD_ALIASES[generalKey] || [generalKey];
-    const existingAlias =
-      generalKeyToFormKey[generalKey] ||
-      aliases.find((alias) => Object.prototype.hasOwnProperty.call(fieldValues, alias)) ||
-      aliases[0];
-    handleFieldChange(existingAlias, value);
+    touchedGeneralKeysRef.current.add(generalKey);
+    handleFieldChange(resolveGeneralWriteKey(generalKey, fieldValues, generalKeyToFormKey), value);
     if (fieldErrors[generalKey]) {
       setFieldErrors(prev => {
         const next = { ...prev };
@@ -345,6 +433,47 @@ export function AnewLeadEditDialog({
 
     const organizationStage = candidates.find((stage) => stage.organization_id === companyId);
     return organizationStage?.id || candidates.find((stage) => stage.organization_id === null)?.id || null;
+  };
+
+  /**
+   * Erro claro quando a ficha do cliente recusa o email novo. A base só
+   * devolve o id da outra ficha («Já existe outra entidade (<id>) …»); o nome
+   * lê-se dessa ficha quando a pessoa a pode ver, senão mostra-se o id.
+   */
+  const showEmailRejected = async (emailError: unknown, email: string) => {
+    const { isEmailInUse, otherEntityId } = parseEmailInUseError(emailError);
+    if (!isEmailInUse) {
+      const reason = await getFriendlyErrorMessage(emailError);
+      toast({
+        title: t("leads.edit.emailSyncErrorTitle"),
+        description: t("leads.edit.emailSyncErrorDescription", { reason }),
+        variant: "destructive",
+      });
+      return;
+    }
+
+    let otherName: string | null = null;
+    if (otherEntityId) {
+      try {
+        const { data } = await supabase
+          .from("anew_entities")
+          .select("display_name")
+          .eq("id", otherEntityId)
+          .maybeSingle();
+        otherName = (data as { display_name?: string | null } | null)?.display_name?.trim() || null;
+      } catch (lookupError) {
+        console.error("Error reading the other client record's name:", lookupError);
+      }
+    }
+    const other = otherName && otherEntityId ? `«${otherName}» (${otherEntityId})` : otherEntityId;
+
+    toast({
+      title: t("leads.edit.emailInUseTitle"),
+      description: other
+        ? t("leads.edit.emailInUseDescription", { email, other })
+        : t("leads.edit.emailInUseDescriptionNoOther", { email }),
+      variant: "destructive",
+    });
   };
 
   const handleSave = async () => {
@@ -477,6 +606,25 @@ export function AnewLeadEditDialog({
         }
       }
 
+      // O email vai para a ficha do cliente ANTES de qualquer outra escrita.
+      // A ficha é a fonte que o separador Info e a proposta leem; se a base o
+      // recusar (ex.: já pertence a outra ficha da mesma organização), nada
+      // mais é gravado — nem o lead, nem o nome, nem o telefone — e o diálogo
+      // fica aberto com os dados para a pessoa corrigir. Só segue se mudou
+      // face ao que o formulário mostrou ao abrir (o valor da ficha).
+      if (lead.entity_id) {
+        const emailValue = readGeneralField("email", updatedFieldValues);
+        if (emailValue && normEmail(emailValue) !== normEmail(initialContactsRef.current.email)) {
+          try {
+            await linkEntityEmail(lead.entity_id, emailValue, userId);
+          } catch (emailError) {
+            console.error("Error linking lead's email:", emailError);
+            await showEmailRejected(emailError, emailValue);
+            return; // o finally envolvente limpa o `saving`
+          }
+        }
+      }
+
       // O dono e as visitas futuras da lead nunca divergem: muda-se o dono PRIMEIRO
       // (a base troca o recurso das visitas futuras). Se o novo dono não tem
       // recurso de agenda, a mudança é recusada e nada mais é gravado.
@@ -576,33 +724,13 @@ export function AnewLeadEditDialog({
           }
         }
 
-        // Email/telefone só seguem para a ficha se mudaram face ao que a lead
-        // tinha ao abrir o diálogo. Reenviar o valor antigo a cada gravação
-        // voltava a promover um contacto entretanto corrigido na ficha
-        // (ex.: noutra lead, no cliente ou no contrato).
-        const originalFieldValues = lead.field_values || {};
-        const normEmail = (v: string) => (v || "").trim().toLowerCase();
-        const normPhone = (v: string) => (v || "").replace(/\s+/g, "");
-
-        const emailValue = readGeneralField("email", updatedFieldValues);
-        const originalEmail = readGeneralField("email", originalFieldValues);
-        if (emailValue && normEmail(emailValue) !== normEmail(originalEmail)) {
-          try {
-            await linkEntityEmail(lead.entity_id, emailValue, userId);
-          } catch (emailError) {
-            console.error("Error linking lead's email:", emailError);
-            const description = await getFriendlyErrorMessage(emailError);
-            toast({
-              title: "Lead guardada, mas o email não foi atualizado na ficha do cliente",
-              description,
-              variant: "destructive",
-            });
-          }
-        }
-
+        // O telefone só segue para a ficha se mudou face ao que o formulário
+        // mostrou ao abrir (o da ficha, quando existe). Reenviar o valor antigo
+        // a cada gravação voltava a promover um contacto entretanto corrigido
+        // na ficha (ex.: noutra lead, no cliente ou no contrato). O email já
+        // foi tratado antes de gravar o lead.
         const phoneValue = readGeneralField("phone", updatedFieldValues);
-        const originalPhone = readGeneralField("phone", originalFieldValues);
-        if (phoneValue && normPhone(phoneValue) !== normPhone(originalPhone)) {
+        if (phoneValue && normPhone(phoneValue) !== normPhone(initialContactsRef.current.phone)) {
           try {
             await linkEntityPhone(lead.entity_id, phoneValue, userId);
           } catch (phoneError) {
