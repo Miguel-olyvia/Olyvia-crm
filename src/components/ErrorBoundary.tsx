@@ -1,6 +1,7 @@
 import { Component, ErrorInfo, ReactNode } from "react";
 import * as Sentry from "@sentry/react";
 import { isModuleLoadError } from "@/lib/sentry/scrub";
+import { forceReload, recarregarUmaVez } from "@/lib/recargaDeploy";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, RefreshCw, LogOut } from "lucide-react";
 
@@ -29,16 +30,12 @@ class ErrorBoundary extends Component<Props, State> {
     // throws here as a normal render error — this ErrorBoundary is a single
     // instance wrapping the whole app, so React has already unmounted
     // everything below it by this point; there is no in-memory state left to
-    // save. The one thing we control is how the user experiences it: reload
-    // once automatically (same detection/guard as the module-load handling
-    // in src/main.tsx, kept in sync manually — no shared app-wide error
-    // classifier module exists yet) so they land back on the same URL
+    // save. Reload once automatically so they land back on the same URL
     // instead of being stuck on a scary "Algo correu mal" screen.
-    if (isModuleLoadError(error) && !sessionStorage.getItem("olyvia-module-load-retried")) {
-      sessionStorage.setItem("olyvia-module-load-retried", "true");
-      window.location.reload();
-      return;
-    }
+    // 20/11: a mesma regra de main.tsx (lib/recargaDeploy.ts): uma vez, e a
+    // saltar a cache (forceReload; um reload normal podia servir o index.html
+    // antigo e falhar outra vez).
+    if (isModuleLoadError(error) && recarregarUmaVez()) return;
 
     console.error("[ErrorBoundary] Caught error:", error);
     console.error("[ErrorBoundary] Component stack:", errorInfo.componentStack);
@@ -83,7 +80,8 @@ class ErrorBoundary extends Component<Props, State> {
   handleReload = () => {
     // Reset error state first, then reload
     this.setState({ hasError: false, error: null, errorInfo: null });
-    window.location.reload();
+    // 20/11: a saltar a cache, como a recarga automática
+    forceReload();
   };
 
   handleLogout = () => {

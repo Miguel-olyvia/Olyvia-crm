@@ -13,6 +13,7 @@ import {
   SENTRY_DENY_URLS,
   SENTRY_IGNORE_ERRORS,
 } from "./lib/sentry/scrub";
+import { estaARecarregar, forceReload, instalarTratamentoDeDeploy, limparMarcaQuandoEstavel, recarregarUmaVez } from "./lib/recargaDeploy";
 
 if (import.meta.env.VITE_SENTRY_DSN) {
   Sentry.init({
@@ -46,21 +47,9 @@ const root = createRoot(document.getElementById("root")!);
 let appMounted = false;
 let updateBannerShown = false;
 
-// `location.reload()` volta a pedir o documento, mas o browser pode servir o
-// MESMO index.html em cache — que aponta para os ficheiros JS que o deploy
-// novo já removeu. O recarregamento falha exatamente como a primeira vez e a
-// pessoa fica presa no ecrã de erro a carregar em "Recarregar" sem nada
-// mudar. Um parâmetro que muda a cada tentativa torna o pedido num URL
-// diferente, o que salta a cache.
-const forceReload = () => {
-  try {
-    const url = new URL(window.location.href);
-    url.searchParams.set("v", Date.now().toString(36));
-    window.location.replace(url.toString());
-  } catch {
-    window.location.reload();
-  }
-};
+// forceReload (lib/recargaDeploy.ts): `location.reload()` podia servir o MESMO
+// index.html em cache, que aponta para os ficheiros JS que o deploy novo já
+// removeu; um parâmetro que muda a cada tentativa salta a cache.
 
 // Non-destructive notice for a stale-chunk error once the app is already
 // mounted and the user may be mid-task. Never touches the React tree.
@@ -189,36 +178,27 @@ const loadApp = async () => {
       </LanguageProvider>
     );
     appMounted = true;
+    // 20/11: montada bem, a marca da recarga automática limpa-se (passado um bocado), para um deploy seguinte voltar a recarregar sozinho
+    limparMarcaQuandoEstavel();
     startVersionPolling();
   } catch (error) {
-    if (isModuleLoadError(error) && !sessionStorage.getItem("olyvia-module-load-retried")) {
-      sessionStorage.setItem("olyvia-module-load-retried", "true");
-      // forceReload, não location.reload(): o index.html em cache aponta para
-      // os chunks que o deploy novo removeu, por isso um reload normal falha
-      // outra vez e a tentativa automática não serve de nada.
-      forceReload();
-      return;
-    }
+    // a página já se vai (vite:preloadError mandou recarregar): o que falhou entretanto não se mostra
+    if (estaARecarregar()) return;
+    // forceReload, não location.reload(): o index.html em cache aponta para os chunks que o deploy novo removeu
+    if (isModuleLoadError(error) && recarregarUmaVez()) return;
 
     Sentry.captureException(error);
     renderLoadFailure(error);
   }
 };
 
-window.addEventListener("unhandledrejection", (event) => {
-  if (isModuleLoadError(event.reason)) {
-    if (appMounted) {
-      // The app is already running — this is almost always a post-deploy
-      // stale chunk, not something the current user caused. Warn instead of
-      // wiping their in-progress work off the screen.
-      event.preventDefault();
-      showUpdateBanner();
-    } else {
-      renderLoadFailure(event.reason);
-    }
-  } else {
-    Sentry.captureException(event.reason);
-  }
+// 20/11 (auditoria, lote 3): um só tratamento para os ficheiros de um deploy antigo (vite:preloadError e as promessas rejeitadas). Com a
+// app a correr, avisa sem tirar o trabalho do ecrã; antes de montar, recarrega uma vez a saltar a cache.
+instalarTratamentoDeDeploy({
+  montada: () => appMounted,
+  aviso: showUpdateBanner,
+  falhou: renderLoadFailure,
+  outro: (erro) => Sentry.captureException(erro),
 });
 
 void loadApp();
