@@ -3,9 +3,10 @@
 // (número, data, valor, tranche e, se houver, o PDF). Ver docs/melhorias-v2-2026-10-13/README.md, ponto 1.5.
 // O contrato diz como se paga ("50% + 50% no fim"): cada parte é uma tranche, com a sua fatura, o seu pagamento e o seu recibo.
 import { r2 } from "../motor";
-import { PAGAMENTO_MEDIDA, prestacoes, type Prestacao } from "../planoObra";
+import { PAGAMENTO_MEDIDA, prestacoes, valoresPrestacoes, type Prestacao } from "../planoObra";
 
-export interface Tranche { id: string; nome: string; pct: number }
+/** `p`: a fração exata da prestação (pct é a percentagem arredondada a 2 casas, para mostrar). */
+export interface Tranche { id: string; nome: string; pct: number; p?: number }
 
 export interface Pagamento { data: string; conta: string; ref: string }
 
@@ -39,23 +40,23 @@ export const DISPARO: RegraDisparo = "primeira";
  */
 export function tranchesDoPlano(pagamento?: string, guardadas?: Prestacao[] | null): Tranche[] {
   const P = prestacoes(pagamento?.trim() || undefined, guardadas);
-  if (P.length === 1) return [{ id: "unica", nome: "Única 100%", pct: 100 }];
+  if (P.length === 1) return [{ id: "unica", nome: "Única 100%", pct: 100, p: 1 }];
   return P.map((x, i) => {
     const pct = r2(x.p * 100);
     // a do meio: o rótulo da prestação guardada ("No fim da fase 2 (canalização)" → "Fim da fase 2 (canalização)"), senão "A meio"
     const meio = /^No fim da fase/.test(x.l) ? x.l.replace(/^No f/, "F") : "A meio";
     // 26/10: à medida, o nome é o que se escreveu no contrato ("1 mês antes do início")
     const nome = pagamento?.trim() === PAGAMENTO_MEDIDA ? x.l : i === 0 ? "Adiantamento" : i === P.length - 1 ? "Final" : meio;
-    return { id: `t${i + 1}`, nome: `${nome} ${String(pct).replace(".", ",")}%`, pct };
+    return { id: `t${i + 1}`, nome: `${nome} ${String(pct).replace(".", ",")}%`, pct, p: x.p };
   });
 }
 
-/** O valor de uma tranche, com IVA, arredondado ao cêntimo. A última leva o resto, para a soma bater certo com o total. */
+/** O valor de uma tranche, com IVA, arredondado ao cêntimo. A última leva o resto, para a soma bater certo com o total.
+ *  20/11 (auditoria F12): a conta é a única, a de planoObra.ts (valoresPrestacoes), sobre a fração exata (antes, sobre pct já arredondado). */
 export function valorTranche(total: number, tranches: Tranche[], id: string): number {
   const i = tranches.findIndex((t) => t.id === id);
   if (i < 0) return 0;
-  if (i === tranches.length - 1) return r2(total - tranches.slice(0, i).reduce((a, t) => a + r2((total * t.pct) / 100), 0));
-  return r2((total * tranches[i].pct) / 100);
+  return valoresPrestacoes(total, tranches.map((t) => ({ p: t.p ?? t.pct / 100 })))[i];
 }
 
 export interface NovaFatura { numero: string; data: string; valor: number; tranche: string; pdf?: string }

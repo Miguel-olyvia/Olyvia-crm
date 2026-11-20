@@ -20,7 +20,7 @@ const obra1027 = () => {
   const S: Estado = seed(), A = acoes(S, () => {}, (fn) => fn()), d = S.deals.find((x) => x.id === 1027) as Negocio;
   const encher = (gs: Grupo[]) => { for (let i = 0; i < 5; i++) for (const c of emFalta(gs, d.f)) d.f[c.k] = c.op ? c.op[0] : c.t === "sim_nao" ? "Não" : c.t === "numero" || c.t === "contador" ? "1" : c.t === "data" ? "2026-10-20" : "x"; };
   encher(FINANCEIRO); encher([OBRA[0]]);
-  A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
+  A.role("financeiro"); A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id);
   A.role("operacoes"); (A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   expect(receberTudo("CT 2026/1027")).toBe("");
   A.arrancar(d.id);

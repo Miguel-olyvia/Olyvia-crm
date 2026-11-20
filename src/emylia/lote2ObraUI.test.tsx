@@ -28,7 +28,7 @@ function pago() {
   const A = acoes(S, () => {}, (fn) => fn());
   const d = S.deals.find((x) => x.id === 1027)! as Negocio;
   preencher(d, FINANCEIRO); preencher(d, [OBRA[0]]);
-  A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
+  A.role("financeiro"); A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id);
   A.role("operacoes");
   return { S, A, d };
 }

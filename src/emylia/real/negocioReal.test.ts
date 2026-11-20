@@ -56,7 +56,7 @@ describe("Negócio ↔ linhas das tabelas", () => {
     const TR = tranchesDe(d());
     for (const [k, v] of Object.entries({ nome_fiscal: "Anabela Schroeder", nif_fat: "123456789", serie: "FT 2026", tranche: TR[0].nome, vencimento: "Pronto pagamento", metodo: "Transferência", conta: "Banco A · conta à ordem", comprovativo: "Transferência adjudicação" })) A.campo(id, k, v);
     S.role = "financeiro";
-    A.emitir(id);
+    A.registarFaturaErp(id, `FT 2026/${id}`, null);
     A.validar(id);
     guardarFaturas(S, id, faturasDe(S, d()));
     expect(d().fin.tranches?.length).toBe(1);

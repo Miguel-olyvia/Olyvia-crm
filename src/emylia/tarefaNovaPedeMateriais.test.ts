@@ -17,7 +17,7 @@ const MATS = [{ n: "Estuque projetado", q: 3, un: "saco", produto: "p-estuque" }
 function montar(codigos: string[]) {
   const S = seed(), avisos: Aviso[] = [], A = acoes(S, (a) => avisos.push(a), (fn) => fn()), d = S.deals.find((x) => x.id === 1027)!;
   for (let i = 0; i < 5; i++) for (const c of emFalta(FINANCEIRO, d.f)) d.f[c.k] = c.op ? c.op[0] : c.t === "sim_nao" ? "Não" : c.t === "numero" || c.t === "contador" ? "1" : c.t === "data" ? "2026-10-20" : "x";
-  A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
+  A.role("financeiro"); A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id);
   d.obra.ec = { ...d.obra.ec!, contrato: "ct-1" };
   A.role("operacoes");
   const pedir = vi.fn();

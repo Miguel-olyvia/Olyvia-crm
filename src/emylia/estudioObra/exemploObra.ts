@@ -17,7 +17,7 @@ export function obraDeExemplo(): { S: Estado; d: Negocio } {
   const d = S.deals.find((x) => x.id === ID_EXEMPLO_OBRA)!;
   for (let i = 0; i < 4; i++) for (const c of emFalta(FINANCEIRO, d.f)) d.f[c.k] = c.op ? c.op[0] : c.t === "sim_nao" ? "Não" : c.t === "numero" || c.t === "contador" ? "1" : c.t === "data" ? "2026-11-03" : "x";
   const A = acoes(S, () => {}, (fn) => fn());
-  S.role = "financeiro"; A.emitir(d.id); A.validar(d.id); S.role = "operacoes";
+  S.role = "financeiro"; A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id); S.role = "operacoes";
   d.f.retif_aceite = "2026-11-03";
   const p = d.obra.plano!;
   p.inicio = INICIO_EXEMPLO;

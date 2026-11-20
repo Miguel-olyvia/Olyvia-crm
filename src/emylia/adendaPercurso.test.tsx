@@ -34,7 +34,7 @@ function preparar() {
   let A!: A;
   render(<Montar S={S}>{(ctx) => { A = ctx.A; return null; }}</Montar>);
   cleanup();
-  A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
+  A.role("financeiro"); A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id);
   A.role("operacoes"); (A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   A.role("comercial");
   return { S, A, d };

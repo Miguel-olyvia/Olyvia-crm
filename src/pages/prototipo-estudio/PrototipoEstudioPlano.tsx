@@ -22,7 +22,7 @@ function montar(): Estado {
   if (!d.f.planta) d.f.planta = gravarPlanta({ o: { x: 0, y: 0 }, paredes: retangulo(300, 400), pecas: [{ id: "porta", tipo: "porta", x: 110, y: 396, w: 80, h: 8 }] });
   if (!d.f.diag_pe_direito_m) d.f.diag_pe_direito_m = "2,5";
   const A = acoes(S, () => {}, (fn) => fn());
-  S.role = "financeiro"; A.emitir(d.id); A.validar(d.id); S.role = "operacoes";
+  S.role = "financeiro"; A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id); S.role = "operacoes";
   // 11/11 (Rúben: «falta ver quando os técnicos estão ocupados»): para se ver no exemplo, outra obra aprovada com duas pessoas desta equipa
   // nos dias em que aqui estão livres, e uns dias de férias de outra
   const p = d.obra.plano;

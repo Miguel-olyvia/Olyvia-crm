@@ -13,7 +13,7 @@ import { diasDeHoras } from "./ganttOrcamento";
 import { fasesPadrao, type FaseObra } from "./fasesObra";
 import { skDaTarefa, tecnicoDoOficio } from "./preparacaoObra";
 import { tecnicosDoPerfil } from "./equipa/tecnicos";
-import { prestacoes } from "./planoObra";
+import { prestacoes, valoresPrestacoes } from "./planoObra";
 import type { AjusteAdenda } from "./estudioObra/quemPaga";
 
 export interface LinhaAdenda { sid: string; n: string; un: string; q: number; pu: number; h: number; perfil: string;
@@ -195,12 +195,9 @@ export function parcelasAdenda(d: Negocio, a: Adenda): ParcelaAdenda[] {
   const F = faturasAdenda(a), total = r2(totaisAdenda(a).total);
   if (F.length && F.reduce((s, f) => s + f.p, 0) >= 1 - 1e-9) return F.map((f) => ({ i: f.i, l: f.l, p: f.p, v: f.v, ft: f }));
   const pr = prestacoes(d.f.pagamento, d.orc?.pagFases);
-  let acum = 0;
-  return pr.map((t, i) => {
-    const v = i === pr.length - 1 ? r2(total - acum) : r2(total * t.p);
-    acum = r2(acum + v);
-    return { i, l: t.l, p: t.p, v, ft: F.find((f) => f.i === i), ...(t.fase === "fim" && pr.length > 1 ? { fim: true as const } : {}) };
-  });
+  // 20/11 (auditoria F12): a conta única das parcelas (a do contrato, do portal e do servidor)
+  const vs = valoresPrestacoes(total, pr);
+  return pr.map((t, i) => ({ i, l: t.l, p: t.p, v: vs[i], ft: F.find((f) => f.i === i), ...(t.fase === "fim" && pr.length > 1 ? { fim: true as const } : {}) }));
 }
 /** A parcela seguinte a faturar (pela ordem: a 2.ª só depois da 1.ª), ou undefined. */
 export const proximaParcela = (d: Negocio, a: Adenda) => parcelasAdenda(d, a).find((x) => !x.ft);

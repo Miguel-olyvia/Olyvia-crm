@@ -36,7 +36,7 @@ function preparar(soMaoDeObra = false) {
   encher(FINANCEIRO); encher([OBRA[0]]);
   const avisar = vi.fn();
   const A: A_ = acoes(S, avisar, (fn) => fn());
-  A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
+  A.role("financeiro"); A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id);
   A.role("operacoes"); (A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   A.role("comercial");
   if (soMaoDeObra) A.criarAdenda(d.id, [], "Surpresa em obra", { livres: [{ n: "Afinar as portas", h: 4, preco: 300, perfil: "Montador", mats: [] }] });

@@ -28,7 +28,7 @@ function preparar() {
   encher(FINANCEIRO); encher([OBRA[0]]);
   const avisar = vi.fn();
   const A = acoes(S, avisar, (fn) => fn());
-  A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
+  A.role("financeiro"); A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id);
   A.role("operacoes"); (A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   A.role("comercial");
   A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu");

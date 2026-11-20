@@ -23,7 +23,7 @@ const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
 const preparar = () => { const S = seed(); S.role = "operacoes"; /* 4/11: o plano pede negocios.obra.planear */ return { S, A: acoes(S, () => {}, (fn) => fn()), d: S.deals.find((x) => x.id === 1027)! }; };
 // o pagamento validado emite a encomenda de cliente no Inventário novo; o plano aprova-se depois
 // 19/10: a fatura e o pagamento são do Financeiro (permissoes.ts)
-const pagar = (A: ReturnType<typeof preparar>["A"], d: ReturnType<typeof preparar>["d"]) => { preencher(d, FINANCEIRO); A.role("financeiro"); A.emitir(d.id); A.validar(d.id); A.role("operacoes"); (A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id), A.aprovarPlano(d.id)); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ A.role("operacoes"); }; // 4/11: depois do pagamento, o plano é das Operações (negocios.obra.planear)
+const pagar = (A: ReturnType<typeof preparar>["A"], d: ReturnType<typeof preparar>["d"]) => { preencher(d, FINANCEIRO); A.role("financeiro"); A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id); A.role("operacoes"); (A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id), A.aprovarPlano(d.id)); A.role("financeiro"); /* 9/11: a encomenda só com o plano aprovado */ A.role("operacoes"); }; // 4/11: depois do pagamento, o plano é das Operações (negocios.obra.planear)
 const estados = (S: ReturnType<typeof seed>, d: ReturnType<typeof preparar>["d"]) => Object.fromEntries(passosPreparacao(d, S).map((p) => [p.id, p.estado]));
 
 describe("do contrato à obra (16/10: a encomenda nasce do pagamento, no Inventário novo)", () => {
