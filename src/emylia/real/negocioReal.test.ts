@@ -119,3 +119,42 @@ describe("a vaga da visita (11/11, assistente sem visita.gerir)", () => {
     expect(paraLinhas(d, HOJE).medidas.slot).toBe("seg 16/11 · 09:00");
   });
 });
+
+describe("o email da entidade que neg_ler_negocios devolve (só para pré-preencher o cartão «Dados do cliente»)", () => {
+  /** As linhas de um negócio sem resposta `email`, com o email da entidade que a leitura da base traz. */
+  const linhasCom = (emailEntidade: string | null | undefined, respostaEmail?: string) => {
+    const d = seed().deals[0];
+    delete d.f.email;
+    const L = paraLinhas(d, HOJE);
+    L.respostas = L.respostas.filter((r) => r.campo_chave !== "email");
+    if (respostaEmail !== undefined) L.respostas.push({ campo_chave: "email", valor: respostaEmail, sugerido: false });
+    if (emailEntidade !== undefined) L.negocio.email = emailEntidade;
+    return L;
+  };
+
+  it("fica num campo à parte (emailEntidade) e NÃO entra em f.email: f.email continua sem chave", () => {
+    const d = deLinhas(linhasCom("a@b.pt"));
+    expect(d.emailEntidade).toBe("a@b.pt");
+    expect("email" in d.f).toBe(false);
+  });
+
+  it("com a resposta `email` gravada no negócio, f.email é essa e o email da entidade fica à parte", () => {
+    const d = deLinhas(linhasCom("a@b.pt", "x@y.pt"));
+    expect(d.f.email).toBe("x@y.pt");
+    expect(d.emailEntidade).toBe("a@b.pt");
+  });
+
+  it("uma resposta `email` vazia continua vazia em f.email (o fallback é do cartão, não do negócio)", () => {
+    expect(deLinhas(linhasCom("a@b.pt", "  ")).f.email).toBe("  ");
+  });
+
+  it("sem email da entidade (vazio, null ou ausente) o campo não existe", () => {
+    for (const e of ["", "  ", null, undefined]) expect("emailEntidade" in deLinhas(linhasCom(e))).toBe(false);
+  });
+
+  it("o email da entidade não vai para a base: paraLinhas não o escreve em lado nenhum", () => {
+    const d = deLinhas(linhasCom("a@b.pt"));
+    const L = paraLinhas(d, HOJE);
+    expect(JSON.stringify(L)).not.toContain("a@b.pt");
+  });
+});

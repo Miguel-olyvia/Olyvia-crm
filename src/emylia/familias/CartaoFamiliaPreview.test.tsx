@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { AtributoProduto } from "../v2/catalogoModelo";
 import { CartaoFamiliaPreview } from "./CartaoFamiliaPreview";
 import { derivarFamilia, itensDosEscolhidos } from "./derivarFamilia";
-import { DEFS, attrs, produto } from "./fixturesFamilias";
+import { A_MED, DEFS, attrs, produto } from "./fixturesFamilias";
 
 afterEach(cleanup);
 // 50 Branco, 50 Preto, 60 Branco (não há 60 Preto), 60 Pedra (sem hex)
@@ -70,6 +70,17 @@ describe("CartaoFamiliaPreview", () => {
     expect(metades).toHaveLength(2);
     expect(metades[0]).toHaveStyle({ backgroundColor: "#F5F5F0" });
     expect(metades[1]).toHaveStyle({ backgroundColor: "#000000" });
+  });
+
+  it("as faixas de medida são opções do seletor, com o texto da faixa, e escolher uma muda o SKU e o preço", () => {
+    const faixa = (de: number, ate: number): AtributoProduto[] => [{ atributoId: A_MED, medida: { tipo: "2D", largura: { de, ate }, comprimento: 70, espessura: null, unidade: "cm" } }];
+    const ps = [produto("f2", "Armário 31 a 40", { pvp: 210 }), produto("f1", "Armário 0 a 30", { pvp: 200 })];
+    const lidos = new Map<string, AtributoProduto[]>([["f2", faixa(31, 40)], ["f1", faixa(0, 30)]]);
+    const f = derivarFamilia(itensDosEscolhidos(ps, lidos, DEFS, () => undefined), { cor: null, medida: ["Medida"] }).familia;
+    render(<CartaoFamiliaPreview familia={f} />);
+    expect(medida("0–30 × 70 cm")).toBeChecked();
+    fireEvent.click(medida("31–40 × 70 cm"));
+    expect(screen.getByRole("group", { name: "Pré-visualização da família" })).toHaveTextContent("SKU-f2");
   });
 
   it("sem atributo de cor não há bolinhas (só a medida)", () => {

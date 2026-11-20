@@ -13,9 +13,10 @@
 //  2. MEDIDA 1D vs 2D/3D. Ambas são valores únicos legítimos do atributo «Medida», mas não se medem pela mesma régua: «Largura 70 cm» não é «60×60 cm». A ordem é
 //     2D/3D (por área, depois largura, comprimento, espessura) → 1D (largura < altura < comprimento < espessura; depois pelo valor) → o resto por texto (números por valor).
 //     Misturar 1D e 2D/3D na mesma família NÃO bloqueia (o núcleo emite um AVISO `medida_mista`): é provável engano no catálogo, mas é uma escolha do utilizador.
-//  3. INTERVALOS. Um intervalo («91–100 × 90 cm», «Largura 100–105 cm») descreve uma gama, não UMA medida; não é um valor de variante. O núcleo não o aceita como variante:
-//     o produto fica de fora e é um ERRO «medida em intervalo». Só conta se a medida for um dos eixos escolhidos. Para ordenar (a função tem de ser total), o intervalo
-//     entra pelo limite inferior e depois pelo superior.
+//  3. INTERVALOS (FAIXAS). Um intervalo («91–100 × 90 cm», «Largura 100–105 cm») é um valor de variante válido: no catálogo da Mudelar cada produto É uma faixa
+//     («de 0 a 30», «de 31 a 40»…). O rótulo é o texto da medida tal como o dado o diz (o nome do produto não conta); duas variantes só colidem se o texto for igual
+//     («combinação repetida»). `intervalos` continua a assinalar os atributos em faixa (informativo). Para ordenar (a função tem de ser total), o intervalo entra pelo
+//     limite inferior e depois pelo superior.
 //  4. ORDEM TOTAL E ESTÁVEL. `compararMedidas` nunca devolve 0 para textos diferentes (valores iguais, como «600×600 mm» e «60×60 cm», desempatam por texto), por isso o
 //     resultado não depende da ordem de entrada. Unidades: cm e mm (mm → cm dividindo por 10).
 import type { AtributoDef, AtributoProduto, DimensaoMedida, DimensaoUnica, MedidaAtributo, Produto } from "../v2/catalogoModelo";

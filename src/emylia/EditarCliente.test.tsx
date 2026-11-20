@@ -71,3 +71,40 @@ describe("dados do cliente", () => {
     expect(fechar).not.toHaveBeenCalled();
   });
 });
+
+describe("o email da entidade pré-preenche o cartão (só o cartão)", () => {
+  const semEmail = (): Negocio => { const d = negocio(); d.tel = "912 345 678"; delete d.f.email; return d; };
+  const ctx = () => ({ S: seed(), A: {}, run: (fn: () => void) => fn() } as unknown as Ctx);
+
+  it("sem f.email e com emailEntidade, o campo Email abre preenchido com o da entidade", () => {
+    const d = semEmail(); d.emailEntidade = "entidade@exemplo.pt";
+    expect(dadosDoNegocio(d).email).toBe("entidade@exemplo.pt");
+    render(<EditarCliente ctx={ctx()} d={d} fechar={vi.fn()} />);
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("entidade@exemplo.pt");
+    expect("email" in d.f).toBe(false);
+  });
+
+  it("com f.email, abre o do negócio (manda sobre o da entidade)", () => {
+    const d = semEmail(); d.f.email = "negocio@exemplo.pt"; d.emailEntidade = "entidade@exemplo.pt";
+    render(<EditarCliente ctx={ctx()} d={d} fechar={vi.fn()} />);
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("negocio@exemplo.pt");
+  });
+
+  it("com f.email só de espaços, vale o da entidade", () => {
+    const d = semEmail(); d.f.email = "  "; d.emailEntidade = "entidade@exemplo.pt";
+    expect(dadosDoNegocio(d).email).toBe("entidade@exemplo.pt");
+  });
+
+  it("sem nenhum dos dois, o campo abre vazio", () => {
+    const d = semEmail();
+    render(<EditarCliente ctx={ctx()} d={d} fechar={vi.fn()} />);
+    expect((screen.getByLabelText("Email") as HTMLInputElement).value).toBe("");
+  });
+
+  it("aplicarDados não conta o email pré-preenchido como mudança e, ao guardar, grava o que está no campo", () => {
+    const d = semEmail(); d.emailEntidade = "entidade@exemplo.pt";
+    const mudou = aplicarDados(d, { ...dadosDoNegocio(d), nome: "Outro Nome" });
+    expect(mudou).toEqual(["nome"]);
+    expect(d.f.email).toBe("entidade@exemplo.pt");
+  });
+});

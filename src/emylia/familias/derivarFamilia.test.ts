@@ -61,11 +61,12 @@ describe("derivarFamilia", () => {
     const dm = derivarFamilia(itensDosEscolhidos([p50, produto("pm", "Lava-loiça Velar 60x60", { pvp: 99 })], mista, DEFS, () => undefined), null);
     expect(dm.problemas.some((x) => x.tipo === "medida_mista" && x.gravidade === "aviso")).toBe(true);
   });
-  it("uma medida em intervalo, escolhida como eixo, é erro e deixa o produto de fora", () => {
+  it("uma medida em faixa, escolhida como eixo, é uma variante válida: o rótulo é a medida e não há erros", () => {
     const iv = new Map<string, AtributoProduto[]>([["p50", attrs(50, "o-branco")], ["pi", [{ atributoId: "a-medida", medida: { tipo: "1D", dimensao: "largura", valor: { de: 90, ate: 100 }, unidade: "cm" } }, { atributoId: "a-cor", opcaoId: "o-preto" }]]]);
-    const d = derivarFamilia(itensDosEscolhidos([p50, produto("pi", "Lava-loiça Velar intervalo")], iv, DEFS, () => undefined), null);
-    expect(d.problemas.some((x) => x.tipo === "intervalo" && x.gravidade === "erro" && x.produtoId === "pi")).toBe(true);
-    expect(d.familia.variantes.map((v) => v.produtoId)).toEqual(["p50"]);
+    const d = derivarFamilia(itensDosEscolhidos([p50, produto("pi", "Lava-loiça Velar faixa")], iv, DEFS, () => undefined), null);
+    expect(d.problemas.filter((x) => x.gravidade === "erro")).toEqual([]);
+    expect(d.familia.variantes.map((v) => v.produtoId)).toEqual(["p50", "pi"]);
+    expect(d.familia.medidas.map((m) => m.rotulo)).toEqual(["Largura 50 cm", "Largura 90–100 cm"]);
   });
   it("sem produtos: erros de nome e de «sem variantes»", () => {
     const d = derivarFamilia([], null);

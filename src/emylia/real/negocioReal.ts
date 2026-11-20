@@ -43,7 +43,7 @@ export const normalQ = (q: string | null | undefined, hoje?: Date) => deIso(para
 
 /* ------------------------------------------------------------------ as linhas */
 export interface LinhaNegocioBase {
-  numero: number; titulo: string; telefone: string; fase: number; linha: string; linha_por_definir: boolean; servico_pedido: string;
+  numero: number; titulo: string; telefone: string; /** O email da entidade (neg_ler_negocios: anew_entities.email, ou o principal em anew_entity_emails). Vazio na leitura só de obra; ausente ao gravar. */ email?: string | null; fase: number; linha: string; linha_por_definir: boolean; servico_pedido: string;
   morada_obra: string; origem: string; pedido_em: string | null; dono_papel: Papel; estado: "aberto" | "perdido"; motivo_perda: string | null;
   anulado_em: string | null; anulado_por: string | null; anulado_motivo: string | null; anulado_origem: string | null;
   fatura_numero: string | null; fatura_em: string | null; fatura_paga: boolean; recibo_numero: string | null; recibo_em: string | null;
@@ -458,6 +458,8 @@ export function deLinhas(L: LinhasNegocio): Negocio {
   const { cAtual, campos: contratoCampos } = docDeContratos(L.contratos);
   const f: Record<string, string> = {}, sug: Record<string, true> = {};
   for (const r of L.respostas) { f[r.campo_chave] = r.valor; if (r.sugerido) sug[r.campo_chave] = true; }
+  // o email da entidade (só para pré-preencher o cartão «Dados do cliente»): NÃO entra em f.email, que alimenta avisos, portal e vista do cliente
+  const emailEntidade = (n.email ?? "").trim();
   let orc: Orcamento | null = null;
   if (atual) {
     // 29/10: as linhas dos materiais do modelo não são linhas do orçamento da Emylia (o preço está na linha "Materiais"). Só as do orçamento
@@ -511,7 +513,7 @@ export function deLinhas(L: LinhasNegocio): Negocio {
     servico: n.servico_pedido, local: n.morada_obra, origem: n.origem, quando: deIso(n.pedido_em), dono: n.dono_papel, fase: n.fase, perdido: n.estado === "perdido",
     ...(n.motivo_perda ? { motivoPerda: n.motivo_perda } : {}),
     ...(n.anulado_em ? { anulado: { q: deIso(n.anulado_em), por: n.anulado_por ?? "", motivo: n.anulado_motivo ?? "", origem: (n.anulado_origem ?? "negocio") as "negocio" | "inventario" } } : {}),
-    f, ...(Object.keys(sug).length ? { sug } : {}), ...(L.visitas.length ? { vis: L.visitas } : {}),
+    f, ...(emailEntidade ? { emailEntidade } : {}), ...(Object.keys(sug).length ? { sug } : {}), ...(L.visitas.length ? { vis: L.visitas } : {}),
     visita: {
       slot: m.slot ?? "", nec: m.necessidades, med: { pav: m.pav, par: m.par, pts: m.pts, pcs: m.pcs, ...(m.ptf != null ? { ptf: m.ptf } : {}), ...(m.ptq != null ? { ptq: m.ptq } : {}) },
       off, extra, fotos: m.fotos_total, fechada: m.fechada, ...fotosPor,

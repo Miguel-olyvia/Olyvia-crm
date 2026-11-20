@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import type { AtributoDef, Produto } from "../v2/catalogoModelo";
 import {
   categoriaDaFamilia, eixosPorOmissao, eixosValidos, familiaPorEixos, idsDaFamilia, itemDoCatalogo, marcaDaFamilia, nomesDosAtributos, problemas,
-  produtosEmIntervalo, produtosSemValor, refDoProduto, slug, sugerirFamilia, textoSemValor, type EixosCfg, type FamiliaCfg, type ItemEixos, type ProdutoRef,
+  produtosSemValor, refDoProduto, slug, sugerirFamilia, textoSemValor, type EixosCfg, type FamiliaCfg, type ItemEixos, type ProdutoRef,
 } from "./nucleo";
 
 const item = (id: string, n: string, atributos: Record<string, string>, extra: { hex?: Record<string, string[]>; preco?: number; marca?: string; sku?: string; categoria?: string; intervalos?: string[] } = {}): ItemEixos => ({
@@ -218,25 +218,16 @@ describe("familiaPorEixos: variantes, medidas e cores", () => {
   it("um atributo repetido nos eixos conta uma vez (um único problema por produto e atributo)", () => {
     const eixos = { cor: "Medida", medida: ["Medida", "Medida"] };
     expect(produtosSemValor([item("e", "Sem nada", {})], eixos)).toHaveLength(1);
-    const iv = item("i", "Iv", { Medida: "1–2 × 3 cm" }, { intervalos: ["Medida"] });
-    expect(produtosEmIntervalo([iv], eixos)).toHaveLength(1);
   });
 
-  it("medida em intervalo: não é uma variante, é problema «medida em intervalo»; fora dos eixos não conta", () => {
+  it("uma medida em intervalo é uma variante válida: o rótulo é o texto da medida, sem erros nem avisos", () => {
     const iv = item("i", "Pav 91-100", { Medida: "91–100 × 90 cm", Cor: "Branco" }, { intervalos: ["Medida"] });
     const normal = item("n", "Pav 60", { Medida: "60×90 cm", Cor: "Branco" });
-    const eixos = { cor: "Cor", medida: ["Medida"] };
-    expect(produtosEmIntervalo([iv, normal], eixos)).toEqual([expect.objectContaining({ produtoId: "i", atributo: "Medida" })]);
-    const f = familiaPorEixos("Pav", [iv, normal], eixos).familia;
-    expect(f.variantes.map((v) => v.produtoId)).toEqual(["n"]);
-    const p = erros(f);
-    expect(p).toHaveLength(1);
-    expect(p[0]).toMatchObject({ tipo: "intervalo", produtoId: "i" });
-    expect(p[0].msg).toMatch(/medida em intervalo/);
-    expect(p[0].msg).toMatch(/91–100 × 90 cm/);
-    // o mesmo intervalo num atributo que não é eixo não bloqueia
-    expect(produtosEmIntervalo([iv], { cor: "Cor", medida: [] })).toEqual([]);
-    expect(familiaPorEixos("Pav", [iv], { cor: "Cor", medida: [] }).familia.variantes).toHaveLength(1);
+    const f = familiaPorEixos("Pav", [iv, normal], { cor: "Cor", medida: ["Medida"] }).familia;
+    expect(f.variantes.map((v) => v.produtoId)).toEqual(["n", "i"]);
+    expect(f.medidas.map((m) => m.rotulo)).toEqual(["60×90 cm", "91–100 × 90 cm"]);
+    expect(f.excluidos).toEqual([]);
+    expect(problemas(f).filter((p) => p.gravidade === "erro")).toEqual([]);
   });
 
   it("mistura de 1D e 2D no atributo Medida: aviso (não bloqueia) e ordem 2D → 1D", () => {
@@ -354,5 +345,58 @@ describe("sugerirFamilia, marcaDaFamilia e categoriaDaFamilia", () => {
     expect(categoriaDaFamilia([r("Cozinha"), r("Cozinha")])).toEqual({ categoria: "Cozinha", varias: false });
     expect(categoriaDaFamilia([r("Cozinha"), r("Banho")])).toEqual({ categoria: "Várias categorias", varias: true });
     expect(categoriaDaFamilia([r(), r()])).toEqual({ categoria: "", varias: false });
+  });
+});
+
+describe("faixas de medida (Mudelar): cada produto É uma faixa", () => {
+  // Fiel à base RH (lido a 20/11): «Armário Superior de cozinha lacado de 0 a 30x70cm Altura» tem Medida 2D { largura: { de: 1, ate: 30 }, comprimento: 70 }.
+  const DEFS_MED: AtributoDef[] = [{ id: "m", codigo: "medida", nome: "Medida", tipo: "medida", temHex: false, ordem: 1, opcoes: [] }];
+  type Dim = number | { de: number; ate: number };
+  const prod = (id: string, n: string, largura: Dim, altura: number): Produto =>
+    ({ id, n, custo: 10, pvp: 100, marca: "Mudelar", sku: id, attrs: [{ atributoId: "m", medida: { tipo: "2D", largura, comprimento: altura, espessura: null, unidade: "cm" } }] }) as unknown as Produto;
+  const FAIXAS: [number, number][] = [[1, 30], [31, 40], [41, 50], [51, 60], [61, 70], [71, 80], [81, 90], [91, 100]];
+  const dezasseis = () => FAIXAS.flatMap(([de, ate]) => [70, 90].map((h) => itemDoCatalogo(prod(`f${de}-${h}`, `Armário Superior de cozinha lacado de ${de} a ${ate}x${h}cm Altura`, { de, ate }, h), DEFS_MED)));
+  const EIXOS: EixosCfg = { cor: null, medida: ["Medida"] };
+
+  it("16 produtos (8 faixas × 2 alturas), sem cor: 0 erros, 16 variantes, uma medida por faixa (sem fundir nem duplicar), qualquer que seja a ordem de entrada", () => {
+    const itens = dezasseis();
+    const f = familiaPorEixos("Armário Superior", itens, EIXOS).familia;
+    expect(problemas(f)).toEqual([]);
+    expect(f.excluidos).toEqual([]);
+    expect(f.variantes).toHaveLength(16);
+    expect(f.medidas).toHaveLength(16);
+    const esperadas = FAIXAS.flatMap(([a, b]) => [70, 90].map((h) => `${a}–${b} × ${h} cm`));
+    expect([...f.medidas.map((m) => m.rotulo)].sort()).toEqual([...esperadas].sort());
+    // cada variante aponta para a medida da SUA faixa
+    const rotulo = new Map(f.medidas.map((m) => [m.id, m.rotulo] as const));
+    for (const v of f.variantes) {
+      const [, de, h] = /^f(\d+)-(\d+)$/.exec(v.produtoId) ?? [];
+      expect(rotulo.get(v.medidaId)).toMatch(new RegExp(`^${de}–\\d+ × ${h} cm$`));
+    }
+    expect(f.cores.map((c) => c.nome)).toEqual(["Padrão"]);
+    expect(familiaPorEixos("Armário Superior", [...itens].reverse(), EIXOS).familia).toEqual(f);
+  });
+
+  it("a medida mostrada é a do dado (1–30 na base), não a do nome do produto («de 0 a 30»)", () => {
+    const f = familiaPorEixos("A", [
+      itemDoCatalogo(prod("a", "Armário de 0 a 30x70cm Altura", { de: 1, ate: 30 }, 70), DEFS_MED),
+      itemDoCatalogo(prod("b", "Armário de 31 a 40x70cm Altura", { de: 31, ate: 40 }, 70), DEFS_MED),
+    ], EIXOS).familia;
+    expect(f.medidas.map((m) => m.rotulo)).toEqual(["1–30 × 70 cm", "31–40 × 70 cm"]);
+  });
+
+  it("duas faixas iguais em produtos diferentes continuam a ser «combinação repetida» (erro; o segundo fica de fora)", () => {
+    const a = itemDoCatalogo(prod("a", "A", { de: 1, ate: 30 }, 70), DEFS_MED), b = itemDoCatalogo(prod("b", "B", { de: 1, ate: 30 }, 70), DEFS_MED);
+    const rep = familiaPorEixos("X", [a, b], EIXOS);
+    expect(rep.conflitos).toHaveLength(1);
+    expect(rep.conflitos[0]).toMatch(/«A» e «B».*Medida: 1–30 × 70 cm/);
+    expect(problemas(rep.familia).map((p) => [p.tipo, p.gravidade])).toEqual([["repetido", "erro"]]);
+    expect(rep.familia.variantes.map((v) => v.produtoId)).toEqual(["a"]);
+  });
+
+  it("1D em faixa funciona do mesmo modo", () => {
+    const g = familiaPorEixos("X", [item("a", "A", { Medida: "Largura 21–30 cm" }, { intervalos: ["Medida"] }), item("b", "B", { Medida: "Largura 10–20 cm" }, { intervalos: ["Medida"] })], EIXOS).familia;
+    expect(problemas(g)).toEqual([]);
+    expect(g.medidas.map((m) => m.rotulo)).toEqual(["Largura 10–20 cm", "Largura 21–30 cm"]);
   });
 });
