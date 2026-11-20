@@ -22,7 +22,7 @@ import { divisaoPrincipal } from "./campos";
 import { areaChaoM2, faltaFechar, gravarPlanta, plantaDaFolha, type PlantaLida } from "./planta";
 import { pedirMarcacao } from "./marcacaoDaChamada";
 import { GRUPO_VISITA, analisarConversa, audioDeFicheiro, lerFolha, gravarMicrofone, guardarVoz, pedirGuia, preencherCampos, transcreverAudio, transcreverFala, vozGuardada, wavBase64 } from "./chamadaNuvem";
-import { descartarGravacao, escolherMicrofone, iniciarGravacao, microfoneEscolhido, microfones, painelAberto, repetirFalhadas, terminarGravacao, useGravacao } from "./gravador";
+import { descartarGravacao, escolherMicrofone, iniciarGravacao, microfoneEscolhido, microfones, painelAberto, repetirFalhadas, terminarGravacao, ultimoSomMicrofone, useGravacao, useNivelMicrofone } from "./gravador";
 import { urlDoNegocio } from "./urlNegocio";
 
 /** Depois de terminar: a preencher os campos, terminado, ou erro. A gravação em si vive no gravador (gravador.ts).
@@ -142,7 +142,8 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
     const t = window.setInterval(() => setAgora(Date.now()), 1000);
     return () => window.clearInterval(t);
   }, [vivo]);
-  if (g.nivel > 0.08) ouviuEm.current = Date.now();
+  // 19/11: o nível já não redesenha este ecrã (só a barrinha, NivelMicro); o «quase não ouve» lê a última vez que houve som
+  ouviuEm.current = Math.max(ouviuEm.current, ultimoSomMicrofone());
   const segundos = minha && g.inicioEm ? Math.max(0, Math.floor((agora - g.inicioEm) / 1000)) : 0;
   const micCalado = vivo === "a_ouvir" && agora - ouviuEm.current > 12_000;
 
@@ -425,9 +426,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
         <div className="mt-3 space-y-1.5">
           <div className="flex items-center gap-3 text-sm">
             <span className="shrink-0 text-muted-foreground">Microfone</span>
-            <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted" role="meter" aria-label="Nível do microfone" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(g.nivel * 100)}>
-              <span className={cn("block h-full rounded-full transition-[width] duration-200", g.nivel > 0.08 ? "bg-success" : "bg-muted-foreground/40")} style={{ width: `${Math.round(g.nivel * 100)}%` }} />
-            </span>
+            <NivelMicro />
           </div>
           <p className="text-xs text-muted-foreground">{g.microfone}{g.pausas ? ` · cortado ${g.pausas} ${g.pausas === 1 ? "vez" : "vezes"} e retomado` : ""}</p>
           {micCalado ? <p className="text-sm text-amber-800">O microfone quase não ouve nada. Ponha o aparelho mais perto de quem fala{mics.length > 1 ? " ou escolha outro microfone (termine e volte a começar)" : ""}.</p> : null}
@@ -603,4 +602,14 @@ function Editor({ id, def, valor, rotulo, bloqueado, onMudar }: { id: string; de
   if (t === "texto_longo") return <textarea id={id} aria-label={rotulo} value={valor} disabled={bloqueado} rows={2} onChange={(e) => onMudar(e.target.value)} className={cn(CAIXA, "h-auto py-1.5 leading-snug")} />;
   return <input id={id} aria-label={rotulo} type="text" value={valor} disabled={bloqueado} onChange={(e) => onMudar(e.target.value)} className={CAIXA}
     placeholder={t === "varios" ? (def?.op ?? []).join(", ") : undefined} />;
+}
+
+/** 19/11: a barrinha do nível do micro, a única coisa que muda 5× por segundo durante a gravação (antes mudava o ecrã inteiro). */
+function NivelMicro() {
+  const nivel = useNivelMicrofone();
+  return (
+    <span className="h-2 flex-1 overflow-hidden rounded-full bg-muted" role="meter" aria-label="Nível do microfone" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(nivel * 100)}>
+      <span className={cn("block h-full rounded-full transition-[width] duration-200", nivel > 0.08 ? "bg-success" : "bg-muted-foreground/40")} style={{ width: `${Math.round(nivel * 100)}%` }} />
+    </span>
+  );
 }

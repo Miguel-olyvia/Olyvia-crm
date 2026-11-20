@@ -6,7 +6,7 @@ const m = vi.hoisted(() => ({
   terminar: vi.fn(), descartar: vi.fn(),
 }));
 vi.mock("./gravador", () => ({
-  useGravacao: () => m.g, gravacaoAtual: () => m.g,
+  useGravacao: () => m.g, gravacaoAtual: () => m.g, useNivelMicrofone: () => 0, ultimoSomMicrofone: () => 0,
   terminarGravacao: (...a: unknown[]) => m.terminar(...a), descartarGravacao: (...a: unknown[]) => m.descartar(...a),
 }));
 vi.mock("./ChamadaDireto", () => ({ textoDaTranscricao: (f: { texto: string }[]) => f.map((x) => x.texto).join("\n") }));

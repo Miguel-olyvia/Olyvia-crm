@@ -82,6 +82,24 @@ function mudar(parcial: Partial<Gravacao>, guardar = false) {
 }
 
 export const gravacaoAtual = () => g;
+
+// 19/11 (Rúben: «a gravação faz o browser deixar de funcionar passado 1-2 minutos»): o nível do micro mudava o estado da gravação 5×
+// por segundo, e cada mudança redesenhava tudo o que a ouve (o ecrã da chamada inteiro, o Estúdio, a Olyvia). Agora o nível tem a sua
+// loja: só a barrinha o ouve.
+let nivelAgora = 0, ultimoSomEm = 0;
+const quemOuveNivel = new Set<() => void>();
+function mudarNivel(n: number) {
+  if (n > 0.08) ultimoSomEm = Date.now();
+  if (Math.abs(n - nivelAgora) <= 0.04 && n !== 0) return;
+  nivelAgora = n;
+  quemOuveNivel.forEach((f) => f());
+}
+/** O nível do micro (0 a 1), só para a barrinha. */
+export function useNivelMicrofone(): number {
+  return useSyncExternalStore((f) => { quemOuveNivel.add(f); return () => { quemOuveNivel.delete(f); }; }, () => nivelAgora, () => nivelAgora);
+}
+/** Quando o micro ouviu som pela última vez (para o aviso «não ouço nada»). */
+export const ultimoSomMicrofone = () => ultimoSomEm;
 export function useGravacao(): Gravacao {
   return useSyncExternalStore((f) => { quemOuve.add(f); return () => { quemOuve.delete(f); }; }, () => g, () => g);
 }
@@ -324,8 +342,7 @@ async function ligarMicrofone() {
     analisador.getFloatTimeDomainData(amostra);
     let e = 0;
     for (let i = 0; i < amostra.length; i++) e += amostra[i] * amostra[i];
-    const nivel = Math.min(1, Math.sqrt(e / amostra.length) * 6);
-    if (Math.abs(nivel - g.nivel) > 0.04) mudar({ nivel });
+    mudarNivel(Math.min(1, Math.sqrt(e / amostra.length) * 6));
   }, 200);
   const base = (Date.now() - (g.inicioEm ?? Date.now())) / 1000, t0 = performance.now();
   let inicioFala = base;
@@ -384,7 +401,7 @@ async function religar() {
     await ligarMicrofone();
     contarPausa();
   } catch (e) {
-    mudar({ estado: "interrompida", aFalar: false, nivel: 0, msg: "O microfone foi cortado e não voltou: toque em «Continuar a gravar». " + (e as Error).message }, true);
+    mudar({ estado: "interrompida", aFalar: false, msg: "O microfone foi cortado e não voltou: toque em «Continuar a gravar». " + (e as Error).message }, true); mudarNivel(0);
   } finally { aReligar = false; }
 }
 
@@ -440,7 +457,7 @@ export async function terminarGravacao(): Promise<Fala[]> {
   }
   await fila;
   await filaBlocos;
-  mudar({ estado: "terminada", nivel: 0, msg: "" }, true);
+  mudar({ estado: "terminada", msg: "" }, true); mudarNivel(0);
   return g.falas;
 }
 
@@ -451,7 +468,7 @@ export async function pausarGravacao(): Promise<void> {
   document.removeEventListener("visibilitychange", aoMudarVisibilidade);
   soltarEcra?.(); soltarEcra = null;
   // o estado muda antes de desligar: o «ended» das pistas não volta a ligar o microfone
-  mudar({ estado: "interrompida", aFalar: false, nivel: 0, msg: "Gravação parada. As falas estão guardadas: carregue em Continuar para gravar mais." }, true);
+  mudar({ estado: "interrompida", aFalar: false, msg: "Gravação parada. As falas estão guardadas: carregue em Continuar para gravar mais." }, true); mudarNivel(0);
   await desligarMicrofone(true);
 }
 

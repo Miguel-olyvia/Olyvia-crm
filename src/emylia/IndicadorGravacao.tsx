@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import { Mic, MicOff, Square } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { iniciarGravacao, pausarGravacao, useGravacao, usePainelAberto } from "./gravador";
+import { iniciarGravacao, pausarGravacao, useGravacao, useNivelMicrofone, usePainelAberto } from "./gravador";
 import { irPara } from "./urlNegocio";
 
 const tempo = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -37,7 +37,7 @@ export function IndicadorGravacao() {
       </span>
       {!parada && (
         <span className="hidden h-1.5 w-12 shrink-0 overflow-hidden rounded-full bg-muted sm:block" aria-hidden="true">
-          <span className={cn("block h-full rounded-full", g.nivel > 0.08 ? "bg-success" : "bg-muted-foreground/40")} style={{ width: `${Math.round(g.nivel * 100)}%` }} />
+          <BarraNivel />
         </span>
       )}
       {parada ? (
@@ -57,4 +57,10 @@ export function IndicadorGravacao() {
       </button>
     </div>
   );
+}
+
+/** 19/11: só a barrinha ouve o nível do micro (5× por segundo), não o indicador inteiro. */
+function BarraNivel() {
+  const nivel = useNivelMicrofone();
+  return <span className={cn("block h-full rounded-full", nivel > 0.08 ? "bg-success" : "bg-muted-foreground/40")} style={{ width: `${Math.round(nivel * 100)}%` }} />;
 }
