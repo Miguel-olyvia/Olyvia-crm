@@ -25,7 +25,8 @@ import { normalizarHex, textoValor } from "../atributosTexto";
 /** O nome do atributo da medida; o atributo cujo código é «medida» chama-se sempre assim no núcleo, seja qual for o nome na definição. */
 export const NOME_MEDIDA = "Medida";
 const CODIGO_MEDIDA = "medida";
-const nomeDoAtributo = (def: AtributoDef): string => ((def.codigo ?? "").trim().toLowerCase() === CODIGO_MEDIDA ? NOME_MEDIDA : def.nome);
+/** O nome com que o núcleo conhece o atributo (o de código «medida» é sempre «Medida»). Exportado para converter os eixos gravados (id) em nomes. */
+export const nomeDoAtributo = (def: Pick<AtributoDef, "codigo" | "nome">): string => ((def.codigo ?? "").trim().toLowerCase() === CODIGO_MEDIDA ? NOME_MEDIDA : def.nome);
 
 /** O que o núcleo lê de um produto: ver o cabeçalho. */
 export interface AtributosDoItem {

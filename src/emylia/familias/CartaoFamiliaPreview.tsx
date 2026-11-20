@@ -1,5 +1,5 @@
 // Famílias (interface): o cartão de pré-visualização, ao vivo, de uma família derivada. Bolinhas de cor (o hex vem da OPÇÃO do produto; sem hex não se inventa cor),
-// seletor de medida, e o SKU e o preço do PRODUTO da variante escolhida (só leitura). As combinações que não têm produto ficam aria-disabled (focáveis, com a razão).
+// seletor de medida (um eixo «cor» sem nenhuma cor definida desenha-se como botões de texto, não como bolinhas «?»), e o SKU e o preço do PRODUTO da variante escolhida (só leitura). As combinações que não têm produto ficam aria-disabled (focáveis, com a razão).
 // O FOCO (contorno exterior, afastado) distingue-se do ESTADO ESCOLHIDO (borda grossa e visto): o anel de foco do tema tem a mesma cor do primário.
 import { useId, useState, type KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
@@ -25,13 +25,21 @@ function aoTeclar(e: KeyboardEvent<HTMLButtonElement>): void {
 const FOCO = "focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-4 focus-visible:outline-primary";
 const RADIO = `inline-flex min-h-11 items-center justify-center rounded-full px-4 text-[15px] transition-colors motion-reduce:transition-none focus-visible:z-10 aria-disabled:cursor-not-allowed aria-disabled:opacity-40 ${FOCO}`;
 
-function BotaoMedida({ m, ligado, onEscolher }: { m: MedidaCfg; ligado: boolean; onEscolher: () => void }) {
+interface BotaoTextoProps { rotulo: string; ligado: boolean; onEscolher: () => void; disponivel?: boolean; idRazao?: string; razao?: string; onFoco?: () => void; onDesfoco?: () => void }
+
+/** Um valor em texto (a medida, ou o valor de um eixo «cor» sem nenhuma cor definida). Indisponível = aria-disabled (focável, com a razão), como as bolinhas. */
+function BotaoTexto({ rotulo, ligado, onEscolher, disponivel = true, idRazao, razao, onFoco, onDesfoco }: BotaoTextoProps) {
   return (
-    <button type="button" role="radio" aria-checked={ligado} tabIndex={ligado ? 0 : -1} onClick={onEscolher} onKeyDown={aoTeclar}
+    <button type="button" role="radio" aria-checked={ligado} aria-disabled={disponivel ? undefined : true} aria-describedby={disponivel ? undefined : idRazao}
+      title={disponivel ? undefined : `${rotulo}: ${razao}`} tabIndex={ligado ? 0 : -1} onClick={() => { if (disponivel) onEscolher(); }} onKeyDown={aoTeclar} onFocus={onFoco} onBlur={onDesfoco}
       className={cn(RADIO, "border-2", ligado ? "border-foreground bg-primary/10 font-semibold" : "border-input bg-background hover:bg-accent")}>
-      {ligado && <span aria-hidden="true" className="mr-1.5">✓</span>}{m.rotulo}
+      {ligado && <span aria-hidden="true" className="mr-1.5">✓</span>}{rotulo}
     </button>
   );
+}
+
+function BotaoMedida({ m, ligado, onEscolher }: { m: MedidaCfg; ligado: boolean; onEscolher: () => void }) {
+  return <BotaoTexto rotulo={m.rotulo} ligado={ligado} onEscolher={onEscolher} />;
 }
 
 interface BolinhaProps { c: CorCfg; ligada: boolean; disponivel: boolean; idRazao: string; onEscolher: () => void; onFoco: (id: string | null) => void }
@@ -63,6 +71,9 @@ export function CartaoFamiliaPreview({ familia }: { familia: FamiliaCfg }) {
   const atual = variantes.find((v) => dessa(v) && v.corId === corId) ?? variantes[0];
   const corMostrada = cores.find((c) => c.id === (emFoco ?? atual.corId));
   const comCor = eixos.cor !== null && cores.length > 0, comMedida = eixos.medida.length > 0;
+  // nenhuma cor definida (ex.: «Medida» escolhida para as bolinhas): os valores são texto, não cores; com uma só cor definida mantêm-se as bolinhas
+  const valoresEmTexto = cores.every((c) => c.hex.length === 0);
+  const razao = valoresEmTexto ? "Esta opção não existe nesta medida." : "Esta cor não existe nesta medida.";
   const detalhe = [familia.marca, familia.categoria].filter(Boolean).join(" · ");
   return (
     <div role="group" aria-label="Pré-visualização da família" className="grid max-w-md gap-3 rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)]">
@@ -73,12 +84,14 @@ export function CartaoFamiliaPreview({ familia }: { familia: FamiliaCfg }) {
       {comCor && (
         <div className="grid gap-1.5">
           <p className="text-sm font-medium text-muted-foreground">{eixos.cor}: <span className="text-foreground">{corMostrada?.nome}</span></p>
-          <span id={idRazao} className="sr-only">Esta cor não existe nesta medida.</span>
-          <div role="radiogroup" aria-label={eixos.cor ?? "Cor"} className="flex flex-wrap gap-3 p-1">
-            {cores.map((c) => (
-              <BolinhaCor key={c.id} c={c} ligada={c.id === corId} disponivel={variantes.some((v) => dessa(v) && v.corId === c.id)} idRazao={idRazao}
-                onEscolher={() => setEscolha({ medidaId, corId: c.id })} onFoco={setEmFoco} />
-            ))}
+          <span id={idRazao} className="sr-only">{razao}</span>
+          <div role="radiogroup" aria-label={eixos.cor ?? "Cor"} className={valoresEmTexto ? "flex flex-wrap gap-2 p-1" : "flex flex-wrap gap-3 p-1"}>
+            {cores.map((c) => {
+              const disponivel = variantes.some((v) => dessa(v) && v.corId === c.id), escolher = () => setEscolha({ medidaId, corId: c.id });
+              return valoresEmTexto
+                ? <BotaoTexto key={c.id} rotulo={c.nome} ligado={c.id === corId} disponivel={disponivel} idRazao={idRazao} razao={razao} onEscolher={escolher} onFoco={() => setEmFoco(c.id)} onDesfoco={() => setEmFoco(null)} />
+                : <BolinhaCor key={c.id} c={c} ligada={c.id === corId} disponivel={disponivel} idRazao={idRazao} onEscolher={escolher} onFoco={setEmFoco} />;
+            })}
           </div>
         </div>
       )}

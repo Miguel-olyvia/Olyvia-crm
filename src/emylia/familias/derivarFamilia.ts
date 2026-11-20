@@ -5,7 +5,7 @@ import {
   type EixosCfg, type FamiliaCfg, type ItemEixos, type Problema, type TipoProblema,
 } from "./nucleo";
 
-/** Uma família guardada na sessão: a derivada e os produtos que a compõem (para a reabrir com os mesmos produtos e eixos). */
+/** Uma família derivada e os produtos que a compõem: o que o assistente entrega para gravar (20/11: na base, via familiasDados). */
 export interface FamiliaGuardada { familia: FamiliaCfg; produtos: Produto[] }
 
 /** O nome da categoria de topo do produto. `no` é o id da BASE (product_categories; é o que a linha da página traz e o que `produtoDaLinha` guarda em Produto.no) ou o id do nó da árvore:

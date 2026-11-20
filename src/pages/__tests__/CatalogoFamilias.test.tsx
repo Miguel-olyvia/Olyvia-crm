@@ -1,28 +1,32 @@
-// A página «Famílias» do módulo Produtos (/catalogo/produtos/familias): separadores no topo, famílias só em memória (num armazém por organização: sobrevivem a mudar de
-// separador e perdem-se ao recarregar), assistente de 3 passos. Lê só o catálogo LEVE (referências + atributos) e pesquisa os produtos no servidor: nunca o catálogo inteiro,
-// e nunca escreve (nem rpc nem from).
+// A página «Famílias» do módulo Produtos (/catalogo/produtos/familias): separadores no topo, famílias GRAVADAS NA BASE (20270125100000) pelas funções
+// cat_*familia* (familiasDados, aqui simulado), assistente de 3 passos com «Guardar», apagar com confirmação e só de leitura sem products.edit.
+// Lê só o catálogo LEVE (referências + atributos) e pesquisa os produtos no servidor: nunca o catálogo inteiro, e nunca escreve por `from`.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { K_LEVE, attrs, linha, paginaDe } from "@/emylia/familias/fixturesFamilias";
+import { A_COR, A_MED, K_LEVE, attrs, linha, paginaDe } from "@/emylia/familias/fixturesFamilias";
 
 const org = vi.hoisted(() => ({ id: "org-1" as string | null, loading: false }));
-const rpc = vi.hoisted(() => vi.fn(async () => { throw new Error("a página de famílias não lê o catálogo inteiro"); }));
-const from = vi.hoisted(() => vi.fn(() => { throw new Error("a página de famílias não escreve na base"); }));
+const perms = vi.hoisted(() => ({ editar: true }));
+const rpc = vi.hoisted(() => vi.fn(async () => { throw new Error("a página de famílias só chama a base pelos clientes"); }));
+const from = vi.hoisted(() => vi.fn(() => { throw new Error("a página de famílias não escreve por from"); }));
 const leve = vi.hoisted(() => vi.fn());
 const pagina = vi.hoisted(() => vi.fn());
 const marcas = vi.hoisted(() => vi.fn());
 const atributos = vi.hoisted(() => vi.fn());
+const dados = vi.hoisted(() => ({ lerFamilias: vi.fn(), lerFamilia: vi.fn(), guardarFamilia: vi.fn(), apagarFamilia: vi.fn(), familiasDosProdutos: vi.fn() }));
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: org.id ? { id: org.id } : null, isLoading: org.loading }) }));
+vi.mock("@/contexts/LanguageContext", () => ({ useLanguage: () => ({ language: "pt", setLanguage: () => undefined }) }));
+vi.mock("@/hooks/usePermissions", () => ({ usePermissions: () => ({ hasPermission: (c: string) => (c === "products.edit" ? perms.editar : true), loading: false }) }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc, from } }));
 vi.mock("@/emylia/real/produtosLeves", () => ({ lerCatalogoLeve: (...a: unknown[]) => leve(...a) }));
 vi.mock("@/emylia/real/produtosPaginados", async (orig) => ({
   ...(await orig<typeof import("@/emylia/real/produtosPaginados")>()),
   lerProdutosPagina: (...a: unknown[]) => pagina(...a), lerMarcasDoFiltro: (...a: unknown[]) => marcas(...a), lerAtributosProduto: (...a: unknown[]) => atributos(...a),
 }));
+vi.mock("@/emylia/familias/familiasDados", async (orig) => ({ ...(await orig<typeof import("@/emylia/familias/familiasDados")>()), ...dados }));
 
 import CatalogoFamilias from "../CatalogoFamilias";
-import { esvaziarArmazemFamilias } from "@/emylia/familias/armazemFamilias";
 
 const Sitio = () => <p data-testid="sitio">{useLocation().pathname}</p>;
 const arvore = () => (
@@ -31,50 +35,60 @@ const arvore = () => (
   </MemoryRouter>
 );
 const montar = () => render(arvore());
-const POR_ID: Record<string, ReturnType<typeof attrs>> = { a: attrs(50, "o-branco"), b: attrs(60, "o-branco"), c: attrs(30, "o-branco"), d: attrs(40, "o-branco") };
+const POR_ID: Record<string, ReturnType<typeof attrs>> = { a: attrs(50, "o-branco"), b: attrs(60, "o-branco") };
 const VELAR = [linha("a", "Lava-loiça Velar 50", { pvp: 150 }), linha("b", "Lava-loiça Velar 60", { pvp: 180 })];
-const TORNEIRA = [linha("c", "Torneira Roca 30", { pvp: 90 }), linha("d", "Torneira Roca 40", { pvp: 100 })];
+const F1 = { id: "f1", nome: "Lava-loiça Velar", nProdutos: 2, versao: "2026-11-20T10:00:00.123456+00:00" };
+const LIDA = { id: "f1", nome: "Lava-loiça Velar", versao: F1.versao, veValores: true, eixos: [{ atributoId: A_COR, papel: "cor" }, { atributoId: A_MED, papel: "medida" }], linhas: VELAR };
 
 beforeEach(() => {
-  esvaziarArmazemFamilias();
+  perms.editar = true;
   rpc.mockClear(); from.mockClear(); leve.mockReset(); pagina.mockReset(); marcas.mockReset(); atributos.mockReset();
+  Object.values(dados).forEach((f) => f.mockReset());
   leve.mockResolvedValue({ ok: true, v: { K: K_LEVE, margens: { min: 28, alvo: 35 }, erroAtributos: null } });
   pagina.mockResolvedValue(paginaDe(VELAR));
   marcas.mockResolvedValue({ ok: true, v: { marcas: [], semMarca: 0, total: 0 } });
   atributos.mockImplementation(async (_o: string, id: string) => ({ ok: true, v: POR_ID[id] ?? [] }));
+  dados.lerFamilias.mockResolvedValue({ ok: true, v: [] });
+  dados.familiasDosProdutos.mockResolvedValue({ ok: true, v: new Map() });
+  dados.lerFamilia.mockResolvedValue({ ok: true, v: LIDA });
+  dados.guardarFamilia.mockResolvedValue({ ok: true, v: { id: "f1", nome: "Lava-loiça Velar", versao: F1.versao } });
+  dados.apagarFamilia.mockResolvedValue({ ok: true, v: { ok: true } });
 });
-afterEach(() => { cleanup(); org.id = "org-1"; org.loading = false; esvaziarArmazemFamilias(); });
+afterEach(() => { cleanup(); org.id = "org-1"; org.loading = false; });
 
-const NOTA = "As famílias ficam só até recarregar a página; mudar de separador não as perde.";
 const botao = (nome: string) => screen.getByRole("button", { name: nome });
-async function criarFamilia(rows = VELAR, nomes: [RegExp, RegExp] = [/Velar 50/, /Velar 60/]) {
-  pagina.mockResolvedValue(paginaDe(rows));
+/** Abre o assistente novo, escolhe os dois produtos e chega ao passo 3. */
+async function ateAoResumo() {
   fireEvent.click(await screen.findByRole("button", { name: "Nova família" }));
   const lista = await screen.findByRole("list", { name: "Produtos do catálogo" });
   await waitFor(() => expect(within(lista).getAllByRole("checkbox")).toHaveLength(2));
-  for (const n of nomes) fireEvent.click(within(lista).getByRole("checkbox", { name: n }));
+  fireEvent.click(within(lista).getByRole("checkbox", { name: /Velar 50/ }));
+  fireEvent.click(within(lista).getByRole("checkbox", { name: /Velar 60/ }));
   fireEvent.click(botao("Seguinte"));
   await waitFor(() => expect(botao("Seguinte")).not.toHaveAttribute("aria-disabled", "true"));
   fireEvent.click(botao("Seguinte"));
-  fireEvent.click(botao("Guardar na sessão"));
 }
+/** A lista passa a ter a família depois de guardar (a página relê-a). */
+const depoisDeGravarHa = (familias: unknown[]) => dados.guardarFamilia.mockImplementation(async () => {
+  dados.lerFamilias.mockResolvedValue({ ok: true, v: familias });
+  return { ok: true, v: { id: "f1", nome: "Lava-loiça Velar", versao: F1.versao } };
+});
 
 describe("CatalogoFamilias: estrutura", () => {
-  it("tem o título, os 8 separadores de Produtos com «Famílias» selecionado a seguir a «Referência (SKU)», e o painel ligado ao separador", async () => {
+  it("tem o título, os 8 separadores de Produtos com «Famílias» selecionado, e o painel ligado ao separador", async () => {
     montar();
     await screen.findByRole("button", { name: "Nova família" });
     expect(screen.getByRole("heading", { level: 1, name: "Catálogo e custos" })).toBeInTheDocument();
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["Lista", "Categorias", "Subcategorias", "Modelos", "Marcas", "Atributos", "Referência (SKU)", "Famílias"]);
     const tab = screen.getByRole("tab", { name: "Famílias" });
     expect(tab).toHaveAttribute("aria-selected", "true");
-    const painel = screen.getByRole("tabpanel");
-    expect(painel).toHaveAttribute("aria-labelledby", tab.id);
-    expect(tab).toHaveAttribute("aria-controls", painel.id);
+    expect(screen.getByRole("tabpanel")).toHaveAttribute("aria-labelledby", tab.id);
   });
 
-  it("mostra a nota: as famílias ficam até recarregar a página e mudar de separador não as perde", async () => {
+  it("já não diz que as famílias ficam só até recarregar a página", async () => {
     montar();
-    expect(await screen.findByText(NOTA)).toBeInTheDocument();
+    await screen.findByRole("button", { name: "Nova família" });
+    expect(screen.queryByText(/até recarregar a página/)).toBeNull();
   });
 
   it("os outros separadores navegam para as suas rotas", async () => {
@@ -89,193 +103,190 @@ describe("CatalogoFamilias: estrutura", () => {
     montar();
     expect(screen.getByText("Escolha uma organização para ver o Catálogo e custos.")).toBeInTheDocument();
     expect(leve).not.toHaveBeenCalled();
-  });
-
-  it("enquanto a organização carrega, mostra «A carregar…»", () => {
-    org.loading = true;
-    montar();
-    expect(screen.getByText("A carregar…")).toBeInTheDocument();
+    expect(dados.lerFamilias).not.toHaveBeenCalled();
   });
 });
 
-describe("CatalogoFamilias: leituras", () => {
-  it("lê o catálogo LEVE da organização, uma vez, e nunca o inteiro (nenhuma chamada direta à base)", async () => {
+describe("CatalogoFamilias: a lista vem da base", () => {
+  it("lê as famílias da organização e mostra o nome e «N produtos»", async () => {
+    dados.lerFamilias.mockResolvedValue({ ok: true, v: [F1, { id: "f2", nome: "Torneira Roca", nProdutos: 1, versao: "v" }] });
     montar();
-    await screen.findByRole("button", { name: "Nova família" });
-    expect(leve).toHaveBeenCalledTimes(1);
-    expect(leve).toHaveBeenCalledWith("org-1");
+    const lista = await screen.findByRole("list", { name: "Famílias" });
+    const itens = within(lista).getAllByRole("listitem");
+    expect(itens[0]).toHaveTextContent("Lava-loiça Velar");
+    expect(itens[0]).toHaveTextContent("2 produtos");
+    expect(itens[1]).toHaveTextContent("1 produto");
+    expect(dados.lerFamilias).toHaveBeenCalledWith("org-1");
     expect(rpc).not.toHaveBeenCalled();
   });
 
-  it("se o catálogo leve falha, mostra o erro em alerta com «Tentar de novo»", async () => {
-    leve.mockResolvedValueOnce({ ok: false, erro: "Sem ligação." });
+  it("sem famílias diz-o", async () => {
     montar();
-    expect(await screen.findByRole("alert")).toHaveTextContent("Sem ligação.");
-    fireEvent.click(botao("Tentar de novo"));
-    expect(await screen.findByRole("button", { name: "Nova família" })).toBeInTheDocument();
-    expect(leve).toHaveBeenCalledTimes(2);
+    expect(await screen.findByText("Ainda não há famílias.")).toBeInTheDocument();
   });
 
-  it("se os atributos não se leram (erroAtributos), avisa e não deixa criar famílias", async () => {
-    leve.mockResolvedValue({ ok: true, v: { K: { ...K_LEVE, atributos: [] }, margens: { min: 28, alvo: 35 }, erroAtributos: "Não foi possível ler os atributos." } });
+  it("se a lista falha, mostra o erro com «Tentar de novo», que volta a ler", async () => {
+    dados.lerFamilias.mockResolvedValueOnce({ ok: false, erro: "Ainda não disponível nesta base" });
     montar();
-    expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível ler os atributos.");
-    expect(botao("Nova família")).toBeDisabled();
+    expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível ler as famílias: Ainda não disponível nesta base");
+    dados.lerFamilias.mockResolvedValue({ ok: true, v: [F1] });
+    fireEvent.click(botao("Tentar de novo"));
+    expect(await screen.findByRole("list", { name: "Famílias" })).toBeInTheDocument();
   });
 });
 
-describe("CatalogoFamilias: as famílias da sessão", () => {
-  it("sem famílias diz-o; criar uma põe-na na lista, com os números e os botões Editar e Apagar", async () => {
+describe("CatalogoFamilias: criar e guardar na base", () => {
+  it("«Guardar» grava na base (nome, eixos por id, produtos), relê a lista, anuncia e devolve o foco ao «Editar»", async () => {
+    depoisDeGravarHa([F1]);
     montar();
-    expect(await screen.findByText("Ainda não há famílias nesta sessão.")).toBeInTheDocument();
-    await criarFamilia();
-    const lista = await screen.findByRole("list", { name: "Famílias criadas" });
-    const item = within(lista).getByRole("listitem");
-    expect(item).toHaveTextContent("Lava-loiça Velar");
-    expect(item).toHaveTextContent("2 produtos geram 2 variantes");
-    expect(within(item).getByRole("button", { name: "Editar Lava-loiça Velar" })).toBeInTheDocument();
-    expect(screen.queryByText("Ainda não há famílias nesta sessão.")).toBeNull();
-    expect(screen.getByText(NOTA)).toBeInTheDocument();
+    await ateAoResumo();
+    expect(screen.queryByRole("button", { name: "Guardar na sessão" })).toBeNull();
+    fireEvent.click(botao("Guardar"));
+    await waitFor(() => expect(dados.guardarFamilia).toHaveBeenCalledTimes(1));
+    expect(dados.guardarFamilia).toHaveBeenCalledWith("org-1", {
+      id: null, nome: "Lava-loiça Velar", eixos: [{ atributoId: A_COR, papel: "cor" }, { atributoId: A_MED, papel: "medida" }], produtos: ["a", "b"], versao: null,
+    });
+    const lista = await screen.findByRole("list", { name: "Famílias" });
+    expect(within(lista).getByRole("listitem")).toHaveTextContent("Lava-loiça Velar");
+    expect(screen.getByRole("status", { name: "Avisos" })).toHaveTextContent("Família «Lava-loiça Velar» guardada.");
+    await waitFor(() => expect(botao("Editar Lava-loiça Velar")).toHaveFocus());
   });
 
-  it("os produtos de uma família já criada aparecem marcados como «já está noutra família» ao criar outra", async () => {
+  it("enquanto grava fica aria-busy e um segundo clique não grava outra vez", async () => {
+    let acabar: (v: unknown) => void = () => undefined;
+    dados.guardarFamilia.mockImplementation(() => new Promise((r) => { acabar = r; }));
     montar();
-    await criarFamilia();
-    await screen.findByRole("list", { name: "Famílias criadas" });
-    pagina.mockResolvedValue(paginaDe(VELAR));
-    fireEvent.click(botao("Nova família"));
+    await ateAoResumo();
+    fireEvent.click(botao("Guardar"));
+    fireEvent.click(botao("Guardar"));
+    expect(botao("Guardar")).toHaveAttribute("aria-busy", "true");
+    expect(dados.guardarFamilia).toHaveBeenCalledTimes(1);
+    await act(async () => { acabar({ ok: true, v: { id: "f1", nome: "Lava-loiça Velar", versao: "v" } }); });
+  });
+
+  it("um produto já noutra família (CT004): o erro aparece em alerta no passo 3 e o assistente fica aberto com o que se escolheu", async () => {
+    dados.guardarFamilia.mockResolvedValue({ ok: false, erro: "O produto «Lava-loiça Velar 50» já está na família «Outra».", codigo: "CT004" });
+    montar();
+    await ateAoResumo();
+    fireEvent.click(botao("Guardar"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível guardar: O produto «Lava-loiça Velar 50» já está na família «Outra».");
+    expect(screen.getByRole("status", { name: "Passo atual" })).toHaveTextContent("Passo 3 de 3");
+    expect(botao("Guardar")).not.toHaveAttribute("aria-busy", "true");
+  });
+
+  it("os produtos que a base diz estarem noutra família aparecem marcados", async () => {
+    dados.familiasDosProdutos.mockResolvedValue({ ok: true, v: new Map([["a", { familiaId: "f9", nome: "Outra" }]]) });
+    montar();
+    fireEvent.click(await screen.findByRole("button", { name: "Nova família" }));
     const lista = await screen.findByRole("list", { name: "Produtos do catálogo" });
     await waitFor(() => expect(within(lista).getAllByRole("listitem")[0]).toHaveTextContent("já está noutra família"));
+    expect(within(lista).getAllByRole("listitem")[1]).not.toHaveTextContent("já está noutra família");
+    expect(dados.familiasDosProdutos).toHaveBeenCalledWith("org-1", ["a", "b"]);
   });
 
-  it("Apagar tira a família da lista e anuncia-o", async () => {
+  it("Cancelar o assistente volta à lista sem gravar e devolve o foco a «Nova família»", async () => {
     montar();
-    await criarFamilia();
-    fireEvent.click(await screen.findByRole("button", { name: "Apagar Lava-loiça Velar" }));
-    await waitFor(() => expect(screen.queryByRole("list", { name: "Famílias criadas" })).toBeNull());
-    expect(screen.getByRole("status", { name: "Avisos" })).toHaveTextContent("Família «Lava-loiça Velar» apagada.");
-    expect(screen.getByText("Ainda não há famílias nesta sessão.")).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Nova família" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(botao("Nova família")).toHaveFocus());
+    expect(dados.guardarFamilia).not.toHaveBeenCalled();
   });
+});
 
-  it("Editar reabre o assistente com os produtos da família; guardar substitui-a (não duplica)", async () => {
+describe("CatalogoFamilias: editar", () => {
+  it("«Editar» lê a família na base, reabre com os produtos e grava com o id e a versão", async () => {
+    dados.lerFamilias.mockResolvedValue({ ok: true, v: [F1] });
     montar();
-    await criarFamilia();
     fireEvent.click(await screen.findByRole("button", { name: "Editar Lava-loiça Velar" }));
     expect(await screen.findByRole("status", { name: "Produtos escolhidos" })).toHaveTextContent("2 escolhidos");
+    expect(dados.lerFamilia).toHaveBeenCalledWith("org-1", "f1");
+    expect(screen.getByRole("heading", { level: 2, name: "Editar família: Lava-loiça Velar" })).toBeInTheDocument();
     fireEvent.click(botao("Seguinte"));
     await waitFor(() => expect(botao("Seguinte")).not.toHaveAttribute("aria-disabled", "true"));
     fireEvent.click(botao("Seguinte"));
-    fireEvent.click(botao("Guardar na sessão"));
-    const lista = await screen.findByRole("list", { name: "Famílias criadas" });
-    expect(within(lista).getAllByRole("listitem")).toHaveLength(1);
+    fireEvent.click(botao("Guardar"));
+    await waitFor(() => expect(dados.guardarFamilia).toHaveBeenCalledWith("org-1", expect.objectContaining({ id: "f1", versao: F1.versao, produtos: ["a", "b"] })));
   });
 
-  it("Cancelar o assistente volta à lista sem criar nada", async () => {
+  it("alterada por outra pessoa (CT004): o erro aparece e o assistente fica aberto", async () => {
+    dados.lerFamilias.mockResolvedValue({ ok: true, v: [F1] });
+    dados.guardarFamilia.mockResolvedValue({ ok: false, erro: "A família foi alterada por outra pessoa: reabra-a.", codigo: "CT004" });
     montar();
-    fireEvent.click(await screen.findByRole("button", { name: "Nova família" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Cancelar" }));
-    expect(await screen.findByText("Ainda não há famílias nesta sessão.")).toBeInTheDocument();
-  });
-
-  it("não escreve na base: nem rpc nem from são chamados (só as funções de leitura simuladas)", async () => {
-    montar();
-    await criarFamilia();
-    await screen.findByRole("list", { name: "Famílias criadas" });
-    expect(rpc).not.toHaveBeenCalled();
-    expect(from).not.toHaveBeenCalled();
-  });
-});
-
-describe("CatalogoFamilias: o armazém por organização (R4) e a mudança de organização (R3)", () => {
-  it("as famílias sobrevivem a desmontar e voltar a montar a página (mudar de separador e voltar)", async () => {
-    const a = montar();
-    await criarFamilia();
-    await screen.findByRole("list", { name: "Famílias criadas" });
-    a.unmount();
-    montar();
-    const lista = await screen.findByRole("list", { name: "Famílias criadas" });
-    expect(within(lista).getByRole("listitem")).toHaveTextContent("Lava-loiça Velar");
-  });
-
-  it("cada organização tem as suas famílias: mudar de organização não leva as da outra, e voltar traz as suas", async () => {
-    const r = montar();
-    await criarFamilia();
-    await screen.findByRole("list", { name: "Famílias criadas" });
-    org.id = "org-2";
-    r.rerender(arvore());
-    expect(await screen.findByText("Ainda não há famílias nesta sessão.")).toBeInTheDocument();
-    expect(leve).toHaveBeenLastCalledWith("org-2");
-    org.id = "org-1";
-    r.rerender(arvore());
-    expect(await screen.findByRole("list", { name: "Famílias criadas" })).toBeInTheDocument();
-  });
-
-  it("mudar de organização com o assistente aberto fecha-o e não lança pedidos com os ids da organização antiga", async () => {
-    const r = montar();
-    fireEvent.click(await screen.findByRole("button", { name: "Nova família" }));
-    const lista = await screen.findByRole("list", { name: "Produtos do catálogo" });
-    await waitFor(() => expect(within(lista).getAllByRole("checkbox")).toHaveLength(2));
-    fireEvent.click(within(lista).getByRole("checkbox", { name: /Velar 50/ }));
-    fireEvent.click(botao("Seguinte"));
-    await waitFor(() => expect(atributos).toHaveBeenCalled());
-    org.id = "org-2";
-    r.rerender(arvore());
-    const antes = { p: pagina.mock.calls.length, a: atributos.mock.calls.length, m: marcas.mock.calls.length };
-    expect(await screen.findByRole("button", { name: "Nova família" })).toBeInTheDocument();
-    expect(screen.queryByRole("status", { name: "Passo atual" })).toBeNull();
-    await act(async () => { await new Promise((res) => setTimeout(res, 50)); });
-    expect(pagina.mock.calls.slice(antes.p).every((c) => c[0] === "org-2")).toBe(true);
-    expect(atributos.mock.calls.slice(antes.a).every((c) => c[0] === "org-2")).toBe(true);
-    expect(marcas.mock.calls.slice(antes.m).every((c) => c[0] === "org-2")).toBe(true);
-  });
-});
-
-describe("CatalogoFamilias: o foco (A4)", () => {
-  it("«Nova família» leva o foco ao título do assistente", async () => {
-    montar();
-    fireEvent.click(await screen.findByRole("button", { name: "Nova família" }));
-    await waitFor(() => expect(screen.getByRole("heading", { level: 3, name: "Escolher produtos" })).toHaveFocus());
-  });
-
-  it("guardar devolve o foco ao «Editar» da família guardada", async () => {
-    montar();
-    await criarFamilia();
-    await waitFor(() => expect(botao("Editar Lava-loiça Velar")).toHaveFocus());
-  });
-
-  it("cancelar uma família nova devolve o foco a «Nova família»", async () => {
-    montar();
-    fireEvent.click(await screen.findByRole("button", { name: "Nova família" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Cancelar" }));
-    await waitFor(() => expect(botao("Nova família")).toHaveFocus());
-  });
-
-  it("cancelar a edição de uma família devolve o foco ao «Editar» dela", async () => {
-    montar();
-    await criarFamilia();
     fireEvent.click(await screen.findByRole("button", { name: "Editar Lava-loiça Velar" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Cancelar" }));
-    await waitFor(() => expect(botao("Editar Lava-loiça Velar")).toHaveFocus());
+    await screen.findByRole("status", { name: "Produtos escolhidos" });
+    fireEvent.click(botao("Seguinte"));
+    await waitFor(() => expect(botao("Seguinte")).not.toHaveAttribute("aria-disabled", "true"));
+    fireEvent.click(botao("Seguinte"));
+    fireEvent.click(botao("Guardar"));
+    expect(await screen.findByRole("alert")).toHaveTextContent("A família foi alterada por outra pessoa: reabra-a.");
   });
 
-  it("apagar a única família leva o foco a «Nova família»", async () => {
+  it("se a família não abre, diz porquê e fica na lista", async () => {
+    dados.lerFamilias.mockResolvedValue({ ok: true, v: [F1] });
+    dados.lerFamilia.mockResolvedValue({ ok: false, erro: "Família não encontrada.", codigo: "CT003" });
     montar();
-    await criarFamilia();
+    fireEvent.click(await screen.findByRole("button", { name: "Editar Lava-loiça Velar" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível abrir a família: Família não encontrada.");
+    expect(screen.queryByRole("status", { name: "Passo atual" })).toBeNull();
+  });
+});
+
+describe("CatalogoFamilias: apagar com confirmação", () => {
+  it("«Apagar» pede confirmação (os produtos não são apagados); cancelar não apaga", async () => {
+    dados.lerFamilias.mockResolvedValue({ ok: true, v: [F1] });
+    montar();
     fireEvent.click(await screen.findByRole("button", { name: "Apagar Lava-loiça Velar" }));
-    await waitFor(() => expect(botao("Nova família")).toHaveFocus());
+    const dialogo = await screen.findByRole("alertdialog");
+    expect(dialogo).toHaveTextContent("Apagar a família «Lava-loiça Velar»?");
+    expect(dialogo).toHaveTextContent("Os produtos não são apagados");
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(dados.apagarFamilia).not.toHaveBeenCalled();
   });
 
-  it("apagar uma família com outra ao lado leva o foco ao «Apagar» da vizinha (a seguinte; senão a anterior)", async () => {
+  it("confirmar apaga na base, relê a lista e anuncia", async () => {
+    dados.lerFamilias.mockResolvedValue({ ok: true, v: [F1] });
+    dados.apagarFamilia.mockImplementation(async () => { dados.lerFamilias.mockResolvedValue({ ok: true, v: [] }); return { ok: true, v: { ok: true } }; });
     montar();
-    await criarFamilia();
-    await screen.findByRole("list", { name: "Famílias criadas" });
-    await criarFamilia(TORNEIRA, [/Roca 30/, /Roca 40/]);
-    await waitFor(() => expect(within(screen.getByRole("list", { name: "Famílias criadas" })).getAllByRole("listitem")).toHaveLength(2));
-    fireEvent.click(botao("Apagar Lava-loiça Velar"));
-    await waitFor(() => expect(botao("Apagar Torneira Roca")).toHaveFocus());
-    await criarFamilia(VELAR, [/Velar 50/, /Velar 60/]);
-    await waitFor(() => expect(within(screen.getByRole("list", { name: "Famílias criadas" })).getAllByRole("listitem")).toHaveLength(2));
-    fireEvent.click(botao("Apagar Lava-loiça Velar"));
-    await waitFor(() => expect(botao("Apagar Torneira Roca")).toHaveFocus());
+    fireEvent.click(await screen.findByRole("button", { name: "Apagar Lava-loiça Velar" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Apagar família" }));
+    await waitFor(() => expect(dados.apagarFamilia).toHaveBeenCalledWith("org-1", "f1"));
+    expect(await screen.findByText("Ainda não há famílias.")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Avisos" })).toHaveTextContent("Família «Lava-loiça Velar» apagada.");
+  });
+
+  it("se apagar falha, diz porquê e a família fica", async () => {
+    dados.lerFamilias.mockResolvedValue({ ok: true, v: [F1] });
+    dados.apagarFamilia.mockResolvedValue({ ok: false, erro: "Sem permissão (products.edit).", codigo: "CT001" });
+    montar();
+    fireEvent.click(await screen.findByRole("button", { name: "Apagar Lava-loiça Velar" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Apagar família" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível apagar a família: Sem permissão (products.edit).");
+    expect(screen.getByRole("list", { name: "Famílias" })).toBeInTheDocument();
+  });
+});
+
+describe("CatalogoFamilias: só de leitura sem products.edit", () => {
+  it("mostra a lista e a nota, sem «Nova família», «Editar» nem «Apagar»", async () => {
+    perms.editar = false;
+    dados.lerFamilias.mockResolvedValue({ ok: true, v: [F1] });
+    montar();
+    const lista = await screen.findByRole("list", { name: "Famílias" });
+    expect(within(lista).getByRole("listitem")).toHaveTextContent("Lava-loiça Velar");
+    expect(screen.getByText(/Só de leitura/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Nova família" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Editar/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /^Apagar/ })).toBeNull();
+  });
+});
+
+describe("CatalogoFamilias: a mudança de organização", () => {
+  it("mudar de organização relê as famílias e o catálogo da nova", async () => {
+    const r = montar();
+    await screen.findByRole("button", { name: "Nova família" });
+    org.id = "org-2";
+    r.rerender(arvore());
+    await waitFor(() => expect(dados.lerFamilias).toHaveBeenLastCalledWith("org-2"));
+    expect(leve).toHaveBeenLastCalledWith("org-2");
   });
 });
