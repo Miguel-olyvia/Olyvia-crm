@@ -90,6 +90,49 @@ describe("CartaoFamiliaPreview", () => {
     expect(screen.getAllByRole("radio")).toHaveLength(2);
   });
 
+  describe("o eixo do papel «cor» sem nenhuma cor definida (ex.: «Medida» escolhida para as bolinhas)", () => {
+    // a «Medida» como atributo das «bolinhas»: valores em texto («Largura 50 cm»), nenhum com hex
+    const LARG = [50, 60, 70, 80];
+    const ps = LARG.map((l) => produto(`m${l}`, `Espelho ${l}`, { pvp: l }));
+    const lidos = new Map<string, AtributoProduto[]>(LARG.map((l) => [`m${l}`, attrs(l, null)]));
+    const porMedida = () => derivarFamilia(itensDosEscolhidos(ps, lidos, DEFS, () => undefined), { cor: "Medida", medida: [] }).familia;
+
+    it("desenha botões de texto com o nome de cada valor, sem bolinhas nem «?»", () => {
+      render(<CartaoFamiliaPreview familia={porMedida()} />);
+      const grupo = screen.getByRole("radiogroup", { name: "Medida" });
+      const botoes = within(grupo).getAllByRole("radio");
+      expect(botoes.map((b) => b.textContent?.replace("✓", ""))).toEqual(["Largura 50 cm", "Largura 60 cm", "Largura 70 cm", "Largura 80 cm"]);
+      expect(within(grupo).getByRole("radio", { name: "Largura 50 cm" })).toBeChecked();
+      expect(grupo).not.toHaveTextContent("?");
+      expect(grupo.querySelectorAll("span[style]")).toHaveLength(0);
+      botoes.forEach((b) => expect(b.className).toContain("min-h-11"));
+      expect(screen.queryByRole("radio", { name: /sem cor definida/ })).toBeNull();
+    });
+
+    it("o título do eixo mantém-se e escolher um valor muda o produto, com visto só no escolhido", () => {
+      render(<CartaoFamiliaPreview familia={porMedida()} />);
+      const cartao = screen.getByRole("group", { name: "Pré-visualização da família" });
+      expect(cartao).toHaveTextContent("Medida: Largura 50 cm");
+      fireEvent.click(screen.getByRole("radio", { name: "Largura 70 cm" }));
+      expect(cartao).toHaveTextContent("Medida: Largura 70 cm");
+      expect(cartao).toHaveTextContent("SKU-m70");
+      expect(screen.getByRole("radio", { name: "Largura 70 cm" })).toHaveTextContent("✓");
+      expect(screen.getByRole("radio", { name: "Largura 50 cm" })).not.toHaveTextContent("✓");
+    });
+
+    it("as setas movem a escolha entre os botões de texto", () => {
+      render(<CartaoFamiliaPreview familia={porMedida()} />);
+      fireEvent.keyDown(screen.getByRole("radio", { name: "Largura 50 cm" }), { key: "ArrowRight" });
+      expect(screen.getByRole("radio", { name: "Largura 60 cm" })).toBeChecked();
+    });
+
+    it("com pelo menos uma cor definida continuam as bolinhas (e a que não tem hex fica tracejada com «?»)", () => {
+      render(<CartaoFamiliaPreview familia={familia()} />);
+      expect(cor("Branco")).toHaveStyle({ backgroundColor: "#F5F5F0" });
+      expect(screen.getByRole("radio", { name: /Pedra/ })).toHaveTextContent("?");
+    });
+  });
+
   it("uma família de um só produto mostra-o sem escolhas a fazer", () => {
     render(<CartaoFamiliaPreview familia={familia([P[0]])} />);
     expect(screen.getByRole("group", { name: "Pré-visualização da família" })).toHaveTextContent("SKU-p50b");
