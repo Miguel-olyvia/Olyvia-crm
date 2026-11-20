@@ -166,19 +166,7 @@ describe("o gravador da visita (9/11)", () => {
     expect(partes.every((p) => p.pcm.length <= 20 * 16000)).toBe(true);
     expect(partes.reduce((s, p) => s + p.pcm.length, 0)).toBe(Math.round(47 * 16000));
   });
-
-  // 20/11: com o alvo de 2 s (JUNTAR_S desde 13/11) o corte ficava no início e o ciclo nunca acabava (o browser congelava; este ficheiro
-  // deixava o worker dos testes pendurado). Um som com silêncio no início é o caso real: o pad antes da fala.
-  it("20/11: uma fala longa com silêncio no início corta-se sem ficar presa", async () => {
-    const { cortarLongo } = await import("./gravador");
-    const pcm = segundos(50); pcm.fill(0, 0, 16000 * 0.4);
-    const partes = cortarLongo(pcm);
-    expect(partes.length).toBeGreaterThanOrEqual(3);
-    expect(partes.every((p) => p.pcm.length >= 16000 && p.pcm.length <= 20 * 16000)).toBe(true);
-    expect(partes.reduce((s, p) => s + p.pcm.length, 0)).toBe(pcm.length);
-    // com um alvo pequeno de propósito, também avança
-    expect(cortarLongo(pcm, 2).every((p) => p.pcm.length > 0)).toBe(true);
-  });
+  // 20/11: o ciclo sem fim do cortarLongo (que deixava este ficheiro com o worker pendurado) testa-se em cortarLongo.test.ts
 });
 
 /** Uma fala de 2 s que falha as 3 tentativas (3 s, 8 s e 20 s depois) e fica para «Tentar outra vez». */

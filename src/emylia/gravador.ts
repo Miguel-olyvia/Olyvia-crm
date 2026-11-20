@@ -17,7 +17,7 @@
 //
 // 20/11 (auditoria de 19/11: «não se podem perder falas»): «Continuar a gravar» guarda e manda logo as falas por repetir; a gravação tem um
 // separador dono, com batimento (os outros só vêem); antes de recarregar depois de um deploy entrega-se a fila; depois de recarregar, com o
-// som em pausa (Safari), pede-se um toque; e uma fala de mais de 20 s já não congela o browser (cortarLongo).
+// som em pausa (Safari), pede-se um toque.
 import { useSyncExternalStore } from "react";
 import type { Fala } from "./chamadaMotor";
 import { AppAtualizada, ONNX_BASE, TAXA, VAD_ASSETS, carregarVad, contextoRevisto, ecraAceso, linhasDaFala, semWorkers, transcreverBloco, transcreverFala, vozGuardada, vozTextoGuardado } from "./chamadaNuvem";
@@ -381,25 +381,25 @@ async function desligarCaptura(entregar: boolean) {
   ctxCaptura = null;
 }
 
-/** 20/11: o alvo de cada pedaço de uma fala longa. Era JUNTAR_S, que a 13/11 passou de 15 para 2 s: a janela de procura começava no
- *  próprio início do pedaço e, se o ponto mais calado fosse esse (o silêncio antes da fala, ou um som constante), o corte não avançava e
- *  o ciclo nunca acabava. O browser congelava com qualquer fala de mais de 20 s (e os testes ficavam pendurados). */
-const ALVO_LONGO_S = 15;
-/** Corta um áudio longo em pedaços de até MAX_S, no ponto mais calado perto de cada corte. Cada pedaço tem pelo menos 1 s. */
-export function cortarLongo(pcm: Float32Array, alvoS = ALVO_LONGO_S, maxS = MAX_S): { pcm: Float32Array; desvioS: number }[] {
+/** Corta um áudio longo em pedaços de até MAX_S, no ponto mais calado perto de cada corte.
+ *  20/11 (Rúben: «a gravação quebra passado 2 minutos»; perfil do Chrome: 75 s seguidos aqui): o alvo era JUNTAR_S (2 s) e a procura
+ *  começava no próprio início do pedaço. Com o início em silêncio (o normal numa chamada com supressão de ruído), o «ponto mais calado»
+ *  era o início: o corte não avançava e o ciclo nunca acabava, o browser congelava a 100% de CPU sempre que alguém falava mais de 20 s
+ *  seguidos. Agora o alvo é perto dos 20 s (17 s, procura entre 15 e 19 s) e o corte avança sempre. */
+export function cortarLongo(pcm: Float32Array, alvoS = MAX_S - 3, maxS = MAX_S): { pcm: Float32Array; desvioS: number }[] {
   const out: { pcm: Float32Array; desvioS: number }[] = [];
   let ini = 0;
   const jan = Math.round(TAXA * 0.02);
-  alvoS = Math.max(3, Math.min(alvoS, maxS - 2));
   while (pcm.length - ini > maxS * TAXA) {
-    const de = ini + Math.max(TAXA, Math.round((alvoS - 2) * TAXA)), ate = Math.min(pcm.length - jan, ini + Math.round((alvoS + 2) * TAXA));
-    let melhor = ini + Math.round(alvoS * TAXA), menor = Infinity;
+    const alvo = ini + Math.round(alvoS * TAXA);
+    const de = ini + Math.round(Math.max(1, alvoS - 2) * TAXA), ate = Math.min(pcm.length - jan, ini + Math.round(Math.min(maxS, alvoS + 2) * TAXA));
+    let melhor = alvo, menor = Infinity;
     for (let i = de; i < ate; i += jan) {
       let e = 0;
       for (let k = 0; k < jan; k++) e += pcm[i + k] * pcm[i + k];
       if (e < menor) { menor = e; melhor = i; }
     }
-    if (melhor <= ini) melhor = ini + Math.round(alvoS * TAXA); // nunca fica no mesmo sítio
+    if (!(melhor > ini + TAXA)) melhor = alvo; // nunca fica no mesmo sítio
     out.push({ pcm: pcm.subarray(ini, melhor), desvioS: ini / TAXA });
     ini = melhor;
   }
