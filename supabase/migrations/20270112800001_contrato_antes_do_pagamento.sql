@@ -1,7 +1,10 @@
+-- Renumerada a 20/11/2026 (antes 20270112800000): havia duas migrations com a versão 20270112800000 (a outra é 20270112800000_frota_custos_so_com_fleet_costs_vistas.sql).
+-- Já estava aplicada à mão no editor SQL: mudar o nome do ficheiro não muda nada na base. O texto abaixo fica como foi aplicado
+-- (onde diz «20270112800000» a falar desta migration, leia-se 20270112800001).
 -- 20270112800000 (Rúben, 10/11/2026: «o contrato fica depois do plano da obra ser aprovado e antes do pagamento»). A ordem passa a ser:
 --   proposta aceite → o supervisor retifica as medidas → as Operações aprovam o plano → contrato assinado → Financeiro (fatura e
 --   pagamento) → encomenda de cliente → obra.
--- Só muda fn_neg_fase_minima (a de 20270112700000): a proposta aceite com as medidas e o plano já não é Financeiro (4) sozinha; é o contrato
+-- Só muda fn_neg_fase_minima (a de 20270112700001, antes 20270112700000): a proposta aceite com as medidas e o plano já não é Financeiro (4) sozinha; é o contrato
 -- assinado que a passa (como antes de 9/11). Ficam no Financeiro, como estavam: a venda direta aceite e o negócio que já tem fatura (o
 -- fluxo de 9/11). O pagamento validado e a encomenda emitida continuam a ser Obra (5).
 

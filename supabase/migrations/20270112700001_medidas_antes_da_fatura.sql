@@ -1,3 +1,6 @@
+-- Renumerada a 20/11/2026 (antes 20270112700000): havia duas migrations com a versão 20270112700000 (a outra é 20270112700000_workflows_edit_no_catalogo.sql).
+-- Já estava aplicada à mão no editor SQL: mudar o nome do ficheiro não muda nada na base. O texto abaixo fica como foi aplicado
+-- (onde diz «20270112700000» a falar desta migration, leia-se 20270112700001).
 -- 20270112700000 (Rúben, 10/11/2026: «medidas antes da fatura»). A ordem do negócio à obra passa a ser:
 --   proposta aceite → o supervisor retifica as medidas → as Operações aprovam o plano → Financeiro (fatura e pagamento) → contrato →
 --   encomenda de cliente → obra.

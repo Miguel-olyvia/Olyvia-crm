@@ -106,7 +106,7 @@ async function lerAtributos(sb: SupabaseClient, org: string): Promise<unknown> {
   }
 }
 
-/** 17/11 (20270121000000): a leitura LEVE do Catálogo. cat_ler_catalogo_servicos devolve o mesmo JSON, mas `produtos`, `precosProduto` e `fornecedores` só trazem os
+/** 17/11 (20270121000001): a leitura LEVE do Catálogo. cat_ler_catalogo_servicos devolve o mesmo JSON, mas `produtos`, `precosProduto` e `fornecedores` só trazem os
  *  produtos dos consumos dos serviços (145 na Mudelar, em vez de 29 785: 32 MB, 4 a 15 s). Sem a função na base (PGRST202, 42883) lê-se cat_ler_catalogo, como antes;
  *  qualquer outro erro (permissão, tempo) sobe tal como veio, sem voltar à leitura pesada. */
 async function lerLinhas(sb: SupabaseClient, org: string, leve: boolean): Promise<Resposta> {

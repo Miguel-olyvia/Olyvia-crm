@@ -1,3 +1,6 @@
+-- Renumerada a 20/11/2026 (antes 20270122100000): havia duas migrations com a versão 20270122100000 (a outra é 20270122100000_org_admin_todas_as_permissoes_dos_negocios.sql).
+-- Já estava aplicada à mão no editor SQL: mudar o nome do ficheiro não muda nada na base. O texto abaixo fica como foi aplicado
+-- (onde diz «20270122100000» a falar desta migration, leia-se 20270122100001).
 -- Catálogo: o resumo da lista de Produtos passa a contar os produtos sem preço de venda (base RH).
 --
 -- cat_ler_produtos_contagens(p_org uuid, p_q text, p_marca text) é recriada com a MESMA assinatura (sem overload) e

@@ -1,3 +1,6 @@
+-- Renumerada a 20/11/2026 (antes 20270121000000): havia duas migrations com a versão 20270121000000 (a outra é 20270121000000_catalogo_mudelar_produtos_servicos.sql).
+-- Já estava aplicada à mão no editor SQL: mudar o nome do ficheiro não muda nada na base. O texto abaixo fica como foi aplicado
+-- (onde diz «20270121000000» a falar desta migration, leia-se 20270121000001).
 -- 17/11: as páginas de Negócios e de Serviços davam statement timeout. Chamavam cat_ler_catalogo, que na Mudelar devolve os 29 785
 -- produtos do catálogo, os 58 893 preços e os fornecedores: 32,3 MB (4,3 s na base, 6 a 15 s até ao browser).
 -- Função NOVA cat_ler_catalogo_servicos(p_org): o MESMO JSON de cat_ler_catalogo (as mesmas chaves, o mesmo formato por elemento,

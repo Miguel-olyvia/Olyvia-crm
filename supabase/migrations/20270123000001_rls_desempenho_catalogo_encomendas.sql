@@ -1,3 +1,6 @@
+-- Renumerada a 20/11/2026 (antes 20270123000000): havia duas migrations com a versão 20270123000000 (a outra é 20270123000000_so_o_portal_aceita_e_assina.sql).
+-- Já estava aplicada à mão no editor SQL: mudar o nome do ficheiro não muda nada na base. O texto abaixo fica como foi aplicado
+-- (onde diz «20270123000000» a falar desta migration, leia-se 20270123000001).
 -- =============================================================================
 -- Desempenho das regras RLS de leitura do catálogo usado nas Encomendas a fornecedor (19/11).
 -- Base de RH (uetjghdkwbywbftedtth). Sem tabelas, colunas nem dados novos.

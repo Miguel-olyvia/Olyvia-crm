@@ -1,7 +1,7 @@
 -- ============================================================
--- Testes: 20270122100000_catalogo_contagens_sem_preco.sql (base RH)
+-- Testes: 20270122100001_catalogo_contagens_sem_preco.sql (antes 20270122100000) (base RH)
 -- ============================================================
--- ORDEM: correr ANTES do db push da 20270122100000 (falha no passo 0: a função ainda não devolve sem_preco); depois
+-- ORDEM: correr ANTES do db push da 20270122100001 (falha no passo 0: a função ainda não devolve sem_preco); depois
 -- do push termina com «OK: …». Qualquer falha: 'FALHOU: …'.
 --
 -- Tudo dentro de BEGIN … ROLLBACK: nada fica. Só a nike (b6ffce4f-f630-4933-833a-008649757a33); este teste não lê
@@ -49,7 +49,7 @@ BEGIN
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_auth, 'role', 'authenticated')::text, true);
   v_j := public.cat_ler_produtos_contagens(c_nike);
   IF NOT (v_j ? 'sem_preco') THEN
-    RAISE EXCEPTION 'FALHOU: passo 0 — cat_ler_produtos_contagens ainda não devolve sem_preco (aplicar 20270122100000).';
+    RAISE EXCEPTION 'FALHOU: passo 0 — cat_ler_produtos_contagens ainda não devolve sem_preco (aplicar 20270122100001).';
   END IF;
 END $t0$;
 
