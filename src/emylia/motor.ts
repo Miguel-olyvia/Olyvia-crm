@@ -402,6 +402,9 @@ export interface Negocio {
   moradaLead?: MoradaLead;
   /** 4/11: o que a lead trouxe na criação (Pessoas › Nova lead), lido da pessoa, para a fase Lead. Não se grava no negócio: grava-se na pessoa. */
   dadosLead?: DadosLead;
+  /** O email da entidade (neg_ler_negocios), lido ao abrir. SÓ pré-preenche o campo Email do cartão «Dados do cliente» (EditarCliente): não é o
+   *  email do negócio (f.email) e por isso não alimenta avisos, portal nem vista do cliente. Não se grava. */
+  emailEntidade?: string;
   origem: string;
   quando: string;
   dono: Papel;

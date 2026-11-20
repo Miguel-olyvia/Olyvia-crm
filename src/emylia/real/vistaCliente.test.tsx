@@ -330,3 +330,14 @@ describe("portal real com o ecrã da V1", () => {
     });
   });
 });
+
+describe("o email da entidade (só do cartão «Dados do cliente») não vai na vista do cliente", () => {
+  it("negocioParaCliente tira emailEntidade e deixa f.email como está", () => {
+    const d = seed().deals[0];
+    d.emailEntidade = "entidade@exemplo.pt"; d.f.email = "negocio@exemplo.pt";
+    const v = negocioParaCliente(d);
+    expect("emailEntidade" in v).toBe(false);
+    expect(v.f.email).toBe("negocio@exemplo.pt");
+    expect(d.emailEntidade).toBe("entidade@exemplo.pt");
+  });
+});

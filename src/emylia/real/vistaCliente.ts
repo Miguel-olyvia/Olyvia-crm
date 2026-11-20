@@ -91,6 +91,7 @@ const INTERNO = /margem|custo|lucro|€\s*\/\s*h|aprova(?:ç|c)[aã]o da dire|di
 export function negocioParaCliente(d0: Negocio, hoje = new Date()): Negocio {
   const d = structuredClone(d0);
   delete d.acesso; delete d.valida; delete d.sug;
+  delete d.emailEntidade; // só do cartão «Dados do cliente» do CRM
   d.hist = historicoParaCliente(d.hist, hoje).filter((e) => !INTERNO.test(e.t));
   if (d.orc) {
     const o = d.orc;

@@ -16,7 +16,7 @@ export interface DadosCliente { nome: string; telefone: string; email: string; n
 export function dadosDoNegocio(d: Negocio): DadosCliente {
   const telEmail = d.tel.includes("@");
   return {
-    nome: d.nome, telefone: telEmail ? "" : d.tel, email: d.f.email || (telEmail ? d.tel : ""), nif: d.f.nif || "",
+    nome: d.nome, telefone: telEmail ? "" : d.tel, email: (d.f.email ?? "").trim() ? d.f.email : d.emailEntidade || (telEmail ? d.tel : ""), nif: d.f.nif || "",
     morada: d.f.morada || "", cp: d.f.cp || "", localidade: d.f.localidade || "", fracao: d.f.fracao || "",
   };
 }
