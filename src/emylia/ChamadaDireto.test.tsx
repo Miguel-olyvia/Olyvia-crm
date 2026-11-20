@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Grupo } from "./campos";
 import type { Ctx } from "./pecas";
 import type { Negocio } from "./motor";
+import type { Fala } from "./chamadaMotor";
 
 const nuvem = vi.hoisted(() => ({
   audioDeFicheiro: vi.fn(),
@@ -274,7 +275,7 @@ describe("ChamadaDireto (4/11, na nuvem)", () => {
 /** Uma gravação do gravador, posta à mão (o que useGravacao daria). */
 const gravacao = (x: Record<string, unknown>) => ({ negocio: 7, nome: "Inês", modo: "chamada", voltar: "/x", estado: "parado", falas: [], inicioEm: 1, pausas: 0,
   pendentes: 0, falhadas: 0, aRever: 0, aFalar: false, nivel: 0, microfone: "", msg: "", noutroSeparador: false, pedeToque: false, ...x });
-const FALAS = [
+const FALAS: Fala[] = [
   { inicio: 3, fim: 5, texto: "É um apartamento no terceiro andar.", falante: "cliente", confianca_falante: 1, revista: true },
   { inicio: 7, fim: 8, texto: "Muito bem.", falante: "comercial", confianca_falante: 1, revista: true },
 ];
