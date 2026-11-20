@@ -121,13 +121,21 @@ describe("PassoAtributosFamilia: o que o núcleo diz", () => {
     expect(screen.getByRole("status", { name: "Resumo da atribuição" })).toHaveTextContent("3 produtos geram 3 variantes");
   });
 
-  it("os erros (valor em falta, medida em intervalo, repetido) vêm em role=alert, em português", () => {
-    const iv = new Map<string, AtributoProduto[]>([["a", attrs(50, "o-branco")], ["b", [{ atributoId: "a-medida", medida: { tipo: "1D", dimensao: "largura", valor: { de: 90, ate: 100 }, unidade: "cm" } }, { atributoId: "a-cor", opcaoId: "o-preto" }]], ["c", attrs(null, "o-preto")]]);
+  it("os erros (valor em falta, repetido) vêm em role=alert, em português", () => {
+    const iv = new Map<string, AtributoProduto[]>([["a", attrs(50, "o-branco")], ["b", attrs(50, "o-branco")], ["c", attrs(null, "o-preto")]]);
     const estados = new Map<string, EstadoAtributos>([...iv].map(([id, a]) => [id, { k: "ok", attrs: a }]));
     montar({ estados });
     const alerta = screen.getByRole("list", { name: "Erros dos atributos" });
-    expect(alerta).toHaveTextContent(/medida em intervalo/);
+    expect(alerta).toHaveTextContent(/têm os mesmos valores em todos os atributos/);
     expect(alerta).toHaveTextContent(/Este produto não tem Medida/);
+    expect(alerta).not.toHaveTextContent(/intervalo/);
+  });
+
+  it("uma medida em faixa é aceite: não há erros e a linha mostra a medida lida em texto", () => {
+    const faixa = new Map<string, AtributoProduto[]>([["a", attrs(50, "o-branco")], ["b", [{ atributoId: "a-medida", medida: { tipo: "1D", dimensao: "largura", valor: { de: 90, ate: 100 }, unidade: "cm" } }, { atributoId: "a-cor", opcaoId: "o-preto" }]]]);
+    montar({ produtos: [A, B], estados: new Map<string, EstadoAtributos>([...faixa].map(([id, a]) => [id, { k: "ok", attrs: a }])) });
+    expect(screen.queryByRole("list", { name: "Erros dos atributos" })).toBeNull();
+    expect(screen.getByText("Largura 90–100 cm")).toBeInTheDocument();
   });
 
   it("os avisos (cor sem hex, medida mista) vêm numa lista própria, sem role=alert", () => {
@@ -145,22 +153,22 @@ describe("PassoAtributosFamilia: o que o núcleo diz", () => {
 });
 
 describe("PassoAtributosFamilia: acessibilidade (A7, A8, A9, A11)", () => {
-  const comIntervalo = () => {
-    const iv = new Map<string, AtributoProduto[]>([["a", attrs(50, "o-branco")], ["b", [{ atributoId: "a-medida", medida: { tipo: "1D", dimensao: "largura", valor: { de: 90, ate: 100 }, unidade: "cm" } }, { atributoId: "a-cor", opcaoId: "o-preto" }]]]);
+  const comRepetido = () => {
+    const iv = new Map<string, AtributoProduto[]>([["a", attrs(50, "o-branco")], ["b", attrs(50, "o-branco")]]);
     return new Map<string, EstadoAtributos>([...iv].map(([id, a]) => [id, { k: "ok", attrs: a }]));
   };
 
   it("os erros vêm num contentor role=alert que contém a lista com nome (e não a lista como alerta)", () => {
-    montar({ produtos: [A, B], estados: comIntervalo() });
+    montar({ produtos: [A, B], estados: comRepetido() });
     const alerta = screen.getByRole("alert");
     expect(alerta.tagName).toBe("DIV");
-    expect(within(alerta).getByRole("list", { name: "Erros dos atributos" })).toHaveTextContent(/medida em intervalo/);
+    expect(within(alerta).getByRole("list", { name: "Erros dos atributos" })).toHaveTextContent(/mesmos valores/);
   });
 
   it("os erros estão ligados (aria-describedby) aos dois grupos de escolha dos eixos", () => {
-    montar({ produtos: [A, B], estados: comIntervalo() });
-    expect(screen.getByRole("group", { name: "Atributo das bolinhas de cor" })).toHaveAccessibleDescription(/medida em intervalo/);
-    expect(screen.getByRole("group", { name: "Atributos do seletor de medida" })).toHaveAccessibleDescription(/medida em intervalo/);
+    montar({ produtos: [A, B], estados: comRepetido() });
+    expect(screen.getByRole("group", { name: "Atributo das bolinhas de cor" })).toHaveAccessibleDescription(/mesmos valores/);
+    expect(screen.getByRole("group", { name: "Atributos do seletor de medida" })).toHaveAccessibleDescription(/mesmos valores/);
   });
 
   it("sem erros, os grupos não têm descrição de erro", () => {

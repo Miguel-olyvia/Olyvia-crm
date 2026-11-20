@@ -19,7 +19,7 @@ export interface ProdutoRef {
 }
 /** O mínimo que se lê de um `Produto` do catálogo (v2/catalogoModelo.ts). */
 export interface ProdutoDoCatalogo { id: string; n: string; marca?: string; sku?: string; sub?: string; categoria?: string; custo: number; pvp?: number }
-/** Um produto escolhido: o preço/SKU (`ref`), os atributos em texto, o hex de cada atributo que o tenha e os atributos cuja medida é um intervalo. */
+/** Um produto escolhido: o preço/SKU (`ref`), os atributos em texto, o hex de cada atributo que o tenha e os atributos cuja medida é uma faixa (informativo: uma faixa é um valor de variante válido). */
 export interface ItemEixos {
   ref: ProdutoRef;
   atributos: Readonly<Record<string, string>>;
@@ -32,7 +32,7 @@ export interface CorCfg { id: string; nome: string; hex: string[]; semHex: boole
 export interface MedidaCfg { id: string; rotulo: string; valores: Record<string, string> }
 /** Uma variante = um produto do catálogo: o SKU e o preço são os dele (só leitura). */
 export interface VarianteCfg { produtoId: string; produtoNome: string; sku: string; preco: number; medidaId: string; corId: string }
-export type MotivoExclusao = "produto_duplicado" | "sem_valor" | "intervalo" | "repetido";
+export type MotivoExclusao = "produto_duplicado" | "sem_valor" | "repetido";
 /** Um produto que ficou de fora das variantes (um produto pode aparecer mais de uma vez, uma por atributo em falta). */
 export interface Excluido { produtoId: string; nome: string; motivo: MotivoExclusao; msg: string }
 export interface FamiliaCfg {
@@ -108,14 +108,6 @@ export function produtosSemValor(itens: readonly Pick<ItemEixos, "ref" | "atribu
   const usados = usadosPor(eixos);
   return itens.flatMap((i) => usados.filter((x) => vazio(i.atributos[x])).map((atributo) => ({ produtoId: i.ref.id, nome: i.ref.n, atributo, msg: `«${i.ref.n}»: ${textoSemValor(atributo)}` })));
 }
-/** Os produtos cuja medida, num atributo escolhido como eixo, é um intervalo: um intervalo não é um valor único de variante. */
-export function produtosEmIntervalo(itens: readonly Pick<ItemEixos, "ref" | "atributos" | "intervalos">[], eixos: EixosCfg): { produtoId: string; nome: string; atributo: string; valor: string; msg: string }[] {
-  const usados = usadosPor(eixos);
-  return itens.flatMap((i) => usados.filter((x) => i.intervalos?.includes(x)).map((atributo) => {
-    const valor = i.atributos[atributo] ?? "";
-    return { produtoId: i.ref.id, nome: i.ref.n, atributo, valor, msg: `«${i.ref.n}»: medida em intervalo (${valor}) não é um valor único de variante: corrija no produto do catálogo ou exclua-o da família.` };
-  }));
-}
 
 /* ------------------------------------------------------------------ marca, categoria e nome derivados */
 const comum = (valores: (string | undefined)[], varias: string): { valor: string; varias: boolean } => {
@@ -161,7 +153,7 @@ export function sugerirFamilia(refs: readonly ProdutoRef[]): { nome: string; mar
 interface Valido { item: ItemEixos; valores: string[]; cor: string; hex: string[] }
 interface Separados { validos: Valido[]; excluidos: Excluido[] }
 
-/** Separa os produtos que podem ser variante dos que ficam de fora (repetido por id, sem valor, em intervalo). */
+/** Separa os produtos que podem ser variante dos que ficam de fora (repetido por id, sem valor). Uma medida em faixa é uma variante como as outras. */
 function separar(itens: readonly ItemEixos[], eixos: EixosCfg): Separados {
   const excluidos: Excluido[] = [], vistos = new Set<string>(), unicos: ItemEixos[] = [];
   for (const i of itens) {
@@ -171,7 +163,6 @@ function separar(itens: readonly ItemEixos[], eixos: EixosCfg): Separados {
   }
   const fora = new Set<string>();
   for (const x of produtosSemValor(unicos, eixos)) { fora.add(x.produtoId); excluidos.push({ produtoId: x.produtoId, nome: x.nome, motivo: "sem_valor", msg: x.msg }); }
-  for (const x of produtosEmIntervalo(unicos, eixos)) { fora.add(x.produtoId); excluidos.push({ produtoId: x.produtoId, nome: x.nome, motivo: "intervalo", msg: x.msg }); }
   const validos = unicos.filter((i) => !fora.has(i.ref.id)).map((item): Valido => ({
     item, valores: eixos.medida.map((x) => item.atributos[x].trim()),
     cor: eixos.cor ? item.atributos[eixos.cor].trim() : NOME_COR_OMISSAO, hex: eixos.cor ? [...(item.hex?.[eixos.cor] ?? [])] : [],
