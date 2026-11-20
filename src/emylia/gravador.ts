@@ -251,19 +251,25 @@ async function desligarCaptura(entregar: boolean) {
   ctxCaptura = null;
 }
 
-/** Corta um áudio longo em pedaços de até MAX_S, no ponto mais calado perto de cada corte. */
-export function cortarLongo(pcm: Float32Array, alvoS = JUNTAR_S, maxS = MAX_S): { pcm: Float32Array; desvioS: number }[] {
+/** Corta um áudio longo em pedaços de até MAX_S, no ponto mais calado perto de cada corte.
+ *  20/11 (Rúben: «a gravação quebra passado 2 minutos»; perfil do Chrome: 75 s seguidos aqui): o alvo era JUNTAR_S (2 s) e a procura
+ *  começava no próprio início do pedaço. Com o início em silêncio (o normal numa chamada com supressão de ruído), o «ponto mais calado»
+ *  era o início: o corte não avançava e o ciclo nunca acabava, o browser congelava a 100% de CPU sempre que alguém falava mais de 20 s
+ *  seguidos. Agora o alvo é perto dos 20 s (17 s, procura entre 15 e 19 s) e o corte avança sempre. */
+export function cortarLongo(pcm: Float32Array, alvoS = MAX_S - 3, maxS = MAX_S): { pcm: Float32Array; desvioS: number }[] {
   const out: { pcm: Float32Array; desvioS: number }[] = [];
   let ini = 0;
   const jan = Math.round(TAXA * 0.02);
   while (pcm.length - ini > maxS * TAXA) {
-    const de = ini + Math.round((alvoS - 2) * TAXA), ate = Math.min(pcm.length - jan, ini + Math.round((alvoS + 2) * TAXA));
-    let melhor = ini + alvoS * TAXA, menor = Infinity;
+    const alvo = ini + Math.round(alvoS * TAXA);
+    const de = ini + Math.round(Math.max(1, alvoS - 2) * TAXA), ate = Math.min(pcm.length - jan, ini + Math.round(Math.min(maxS, alvoS + 2) * TAXA));
+    let melhor = alvo, menor = Infinity;
     for (let i = de; i < ate; i += jan) {
       let e = 0;
       for (let k = 0; k < jan; k++) e += pcm[i + k] * pcm[i + k];
       if (e < menor) { menor = e; melhor = i; }
     }
+    if (!(melhor > ini + TAXA)) melhor = alvo; // nunca fica no mesmo sítio
     out.push({ pcm: pcm.subarray(ini, melhor), desvioS: ini / TAXA });
     ini = melhor;
   }
