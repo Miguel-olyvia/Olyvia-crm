@@ -65,6 +65,9 @@ import { idsServico, lerNegocios, lerObras, negocioParaOEcra, type IdsServico } 
 import { aplicarRececao, aplicarResposta, lerRececoes, lerRespostas, marcarRespostas, publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
 import { avisarCliente } from "@/emylia/real/avisosCliente";
 import { fotografarNegocios, gravarMudancas, juntarObrasDaBase, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
+import { criarReleituraObras, type ReleituraObras } from "@/emylia/real/releituraObras";
+import { iniciarReleituraPeriodica } from "@/emylia/real/relerObrasPeriodico";
+import { desligarEstudio } from "@/pages/prototipo-estudio/projetoGuardado";
 import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real/inventarioReal";
 import { aoMudarProntidao } from "@/emylia/inventario/prontidaoReal";
 import { definirOrgErp } from "@/emylia/erpEticadata";
@@ -428,28 +431,31 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   // 19/11 (Rúben: «o técnico, ao completar uma task, que esteja ligado o input de término no Estúdio da obra», e o contrário): as obras
   // releem-se da base a cada 20 s (com o separador à vista e nada a gravar). O que outra pessoa gravou (o técnico no Hoje, o gestor no
   // Estúdio) entra aqui sem apagar o que este ecrã ainda não gravou (juntarObrasDaBase), e diz-se o que mudou nas tarefas.
+  // 20/11 (auditoria, lote 3): lê tudo uma vez e depois só as obras que mudaram (obra_ler_negocios_desde; sem ela, tudo como antes); com o
+  // separador escondido o relógio pára (relerObrasPeriodico.ts). A leitura guarda onde ficou por organização (sobrevive a refazer o efeito).
+  const releitura = useRef<{ org: string; r: ReleituraObras } | null>(null);
   useEffect(() => {
     if (!org || !pronto) return;
-    let vivo = true, aLer = false;
-    const ler = async () => {
-      if (aLer || aGravar.current || document.hidden || !S.deals.some((d) => d.obra?.plano)) return;
-      aLer = true;
-      try {
-        const lidas = await lerObras(supabase, org);
-        if (!vivo || !lidas || aGravar.current) return;
+    if (releitura.current?.org !== org) releitura.current = { org, r: criarReleituraObras(supabase, org) };
+    const { r } = releitura.current;
+    return iniciarReleituraPeriodica({
+      podeLer: () => !aGravar.current && S.deals.some((d) => d.obra?.plano),
+      ler: () => r.ler(),
+      confirmar: (l) => r.confirmar(l),
+      aplicar: ({ lidas }) => {
+        if (aGravar.current) return false; // começou a gravar entretanto: esta leitura não conta (volta na seguinte)
         const mudados = juntarObrasDaBase(S, refs.current, foto.current, lidas);
-        if (!mudados.length) return;
+        if (!mudados.length) return true;
         const N = mudados.flatMap((m) => m.novidades.map((t) => ({ d: m.d, t })));
         if (N.length === 1) avisar({ msg: N[0].t, sub: N[0].d.nome, kind: "ok" });
         else if (N.length > 1) avisar({ msg: `${N.length} tarefas mudaram`, sub: [...new Set(N.map((x) => x.d.nome))].join(" · "), kind: "ok" });
         redesenhar();
-      } catch { /* tenta-se na próxima volta */ } finally { aLer = false; }
-    };
-    const t = window.setInterval(() => void ler(), 20000);
-    const visivel = () => { if (!document.hidden) void ler(); };
-    document.addEventListener("visibilitychange", visivel);
-    return () => { vivo = false; window.clearInterval(t); document.removeEventListener("visibilitychange", visivel); };
+        return true;
+      },
+    });
   }, [org, pronto, S, avisar, redesenhar]);
+  // 20/11: a página dos negócios abriu (com um estado novo): a ligação que o Estúdio tinha à página anterior deixa de valer
+  useEffect(() => { desligarEstudio(); }, []);
 
   // 28/10: a encomenda de cliente e as encomendas a fornecedor de cada negócio, da base (as emitidas no servidor)
   const carregarEncomendas = useCallback(async (lidos: readonly NegocioLido[]) => {
