@@ -21,7 +21,8 @@ import { esquecerNegociosFunc } from "./NegociosFunc";
 import { esquecerDiaADia } from "./diaADia";
 import { esquecerV2 } from "./v2/esquecerV2";
 
-/** A chave de sempre (o protótipo sem conta e os testes). */
+/** A chave de sempre (o protótipo sem conta e os testes). 20/11: a cópia antiga do protótipo (pages/prototipo-negocios), que
+ *  gravava na mesma chave, saiu; fica só esta. Não se muda o nome para não perder o que já está guardado nos browsers. */
 export const CHAVE_BASE = "olyvia-prototipo-negocios";
 
 /** A chave do Estado neste browser: sem conta, a de sempre; com conta, a da organização e de quem entrou. */

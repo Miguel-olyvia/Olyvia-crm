@@ -65,12 +65,12 @@ export const FORA_DO_MENU = {
 export const FICHEIROS_FORA_DO_MENU: readonly string[] = [...FORA_DO_MENU.paginas.map((p) => p.ficheiro), ...FORA_DO_MENU.soDelas];
 
 /**
- * PROTÓTIPO (03/11/2026): o Inventário nativo de exemplo (src/emylia/inventario, e a cópia em pages/prototipo-negocios) trabalha numa
+ * PROTÓTIPO (03/11/2026): o Inventário nativo de exemplo (src/emylia/inventario; a cópia em pages/prototipo-negocios saiu a 20/11) trabalha numa
  * base em memória com perfis de demonstração (perfil.ts) e verifica os códigos com `exigir`/`can` contra esse perfil, nunca contra a
  * base. Pode usar códigos escondidos (purchase_orders.manage, purchase_orders.view_prices...) sem que isso os torne «em uso»: continuam
  * no scan (um código desconhecido continua a falhar), só se tolera que usem as escondidas.
  */
-export const PROTOTIPO = /^(?:emylia\/inventario\/|pages\/prototipo-negocios\/)/;
+export const PROTOTIPO = /^emylia\/inventario\//;
 export const toleraEscondidas = (ficheiro: string): boolean => FICHEIROS_FORA_DO_MENU.includes(ficheiro) || PROTOTIPO.test(ficheiro);
 /** Uma escondida que uma guarda viva ainda pede, no ficheiro dessa guarda (ESCONDIDAS_COM_GUARDA). */
 export const guardaEscondida = (u: { codigo: string; ficheiro: string }): boolean =>

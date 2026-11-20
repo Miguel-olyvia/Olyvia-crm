@@ -8,8 +8,8 @@ Funciona como se fosse a app, mas **só com dados de exemplo**:
 - não usa a base de dados nem a sessão da Olyvia;
 - o que se faz fica guardado no `localStorage` do browser de quem usa.
 
-- **Rota:** `/prototipo/negocios`, pública e fora do `Layout` do CRM, registada em `src/App.tsx`.
-- **Preview:** https://olyvia-crm-git-feat-negocios-prototipo-bmgest.vercel.app/prototipo/negocios. Pede o login da equipa bmgest no Vercel.
+- **Rota:** hoje `/negocios` (`src/pages/NegociosEmylia.tsx`), com sessão. **20/11/2026:** a cópia antiga em `src/pages/prototipo-negocios` saiu; `/prototipo/negocios` e `/prototipo/chamada` redirecionam para `/negocios` (os links partilhados `?portal=` e `?login=1` vão para o portal do cliente, `/client-portal/negocios`).
+- **Preview antigo:** https://olyvia-crm-git-feat-negocios-prototipo-bmgest.vercel.app/prototipo/negocios (ramo antigo, já não reflete este código).
 - **Ramo:** `feat/negocios-prototipo`.
 - **Maquetas estáticas** (a 1.ª versão, de 08/10): `public/prototipo/maquetas.html`.
 
@@ -21,8 +21,8 @@ Funciona como se fosse a app, mas **só com dados de exemplo**:
 
 ```bash
 npm install
-npm run dev                                  # e abrir http://localhost:8080/prototipo/negocios
-npx vitest run src/pages/prototipo-negocios  # os testes do protótipo (43 ficheiros, 697 testes a 12/10/2026)
+npm run dev                                  # e abrir http://localhost:8080/negocios
+npx vitest run src/emylia                    # os testes do protótipo
 npx tsc --noEmit -p tsconfig.app.json        # o tipo (há erros antigos noutros ficheiros da app; os do protótipo têm de ficar a zero)
 ```
 

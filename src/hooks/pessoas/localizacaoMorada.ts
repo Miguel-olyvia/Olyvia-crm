@@ -1,4 +1,4 @@
-// «Estou no local»: a morada da obra a partir da localização do dispositivo, pela mesma via do protótipo (src/pages/prototipo-negocios/Localizacao.tsx):
+// «Estou no local»: a morada da obra a partir da localização do dispositivo, pela mesma via do protótipo (src/emylia/Localizacao.tsx):
 // o browser dá a posição e o OpenStreetMap (Nominatim, pesquisa inversa) dá a morada. Só se devolve rua, código postal e localidade; as coordenadas
 // ficam aqui dentro e nunca se guardam. Vive em @/hooks/pessoas porque é a única via das páginas de Pessoas e Negócio para o exterior (ver semBase.test.ts). ATENÇÃO: a CSP (`connect-src`) e a `Permissions-Policy: geolocation=()` do vercel.json bloqueiam as duas
 // coisas em produção; este módulo falha com um motivo claro (`semSuporte`, `negada`, `servico`) em vez de inventar outra via.

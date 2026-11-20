@@ -5,7 +5,7 @@ import { OlyviaComando } from "@/emylia/OlyviaComando";
 import { IndicadorGravacao } from "@/emylia/IndicadorGravacao";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route, Navigate, Outlet } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, Outlet, useLocation } from "react-router-dom";
 import { CompanyProvider } from "@/contexts/CompanyContext";
 import { PortalCompanyProvider } from "@/contexts/PortalCompanyContext";
 import { PermissionsProvider } from "@/contexts/PermissionsContext";
@@ -153,9 +153,6 @@ const DataErasureRequests = lazy(() => import("./pages/DataErasureRequests"));
 const BookingManage = lazy(() => import("./pages/BookingManage"));
 const ConviteAdmissao = lazy(() => import("./pages/ConviteAdmissao"));
 const BookingConfirm = lazy(() => import("./pages/BookingConfirm"));
-const PrototipoNegocios = lazy(() => import("./pages/prototipo-negocios/PrototipoNegocios"));
-// 4/11: a chamada em direto sem conta (o painel do «Tudo na chamada» com um negócio de exemplo)
-const PrototipoChamada = lazy(() => import("./pages/prototipo-negocios/PrototipoChamada"));
 // 5/11 (Rúben): o Estúdio do projeto (o antes, o estilo, o depois, o 3D e a proposta), com um catálogo de teste, sem conta
 const EstudioProjeto = lazy(() => import("./pages/prototipo-estudio/EstudioProjeto"));
 const PrototipoEstudioPlano = lazy(() => import("./pages/prototipo-estudio/PrototipoEstudioPlano"));
@@ -197,6 +194,13 @@ const PortalCompanyRoute = () => (
     <Outlet />
   </PortalCompanyProvider>
 );
+
+// 20/11: o endereço da cópia antiga do protótipo. Os links que ela partilhava (?portal=<código> da proposta e do contrato,
+// ?login=1 dos portais) vão para o portal do cliente; o resto vai para os Negócios.
+const PrototipoAntigo = () => {
+  const q = new URLSearchParams(useLocation().search);
+  return <Navigate to={q.has("portal") || q.has("login") ? "/client-portal/negocios" : "/negocios"} replace />;
+};
 
 const PageLoader = () => (
   <div className="min-h-screen flex items-center justify-center bg-background">
@@ -240,9 +244,11 @@ const App = () => (
                       validade do token, verificada na Edge Function. */}
                   <Route path="/admissao/:token" element={<ConviteAdmissao />} />
                   <Route path="/booking/confirm" element={<BookingConfirm />} />
-                  {/* Protótipo de Negócios (08/10/2026): dados de exemplo, sem sessão nem base de dados */}
-                  <Route path="/prototipo/negocios" element={<PrototipoNegocios />} />
-                  <Route path="/prototipo/chamada" element={<PrototipoChamada />} />
+                  {/* 20/11 (auditoria 19/11): a cópia antiga do protótipo de Negócios (pages/prototipo-negocios) saiu. Os endereços
+                      antigos levam ao sítio certo: o portal do cliente para os links partilhados (?portal=, ?login=1), os Negócios para
+                      o resto (a «Chamada em direto» é o «Tudo na chamada» de cada negócio). */}
+                  <Route path="/prototipo/negocios" element={<PrototipoAntigo />} />
+                  <Route path="/prototipo/chamada" element={<Navigate to="/negocios" replace />} />
                   <Route path="/prototipo/estudio" element={<EstudioProjeto />} />
                   <Route path="/prototipo/estudio-plano" element={<PrototipoEstudioPlano />} />
                   <Route path="/prototipo/estudio-obra" element={<PrototipoEstudioObra />} />

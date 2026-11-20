@@ -466,7 +466,7 @@ export const PERMISSOES_ESCONDIDAS: Readonly<Record<string, readonly string[]>> 
 /**
  * Códigos que o código verifica mas que NÃO existem em anew_permissions: ninguém os pode dar pelo editor (só passam a administradores
  * de sistema). Ficam listados para o teste não os confundir com permissões novas; a limpeza (criar a permissão ou trocar o código)
- * é outra tarefa. Os de src/emylia e src/pages/prototipo-negocios são do protótipo.
+ * é outra tarefa. Os de src/emylia são do protótipo.
  */
 export const CODIGOS_SEM_CATALOGO: readonly string[] = [
   "contacto.registar", "contracts.cancel", "contracts.view", "contrato.editar", "equipa.edit", "finance.invoice", "finance.validate_payment",

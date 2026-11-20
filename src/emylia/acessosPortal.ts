@@ -193,15 +193,13 @@ export const nomeFiscalEmpresa = (): string => fiscalReal.nome;
 export const modoReal = (): boolean => orgReal != null;
 
 /* ------------------------------------------------------------------ os links */
-/** O link do login dos portais (leva a sala, para entrar noutro aparelho na mesma demonstração).
+/** O link do login dos portais.
  *  23/10: `po`, a encomenda a abrir depois de entrar (2.0: o portal do fornecedor lê-a do link, lerPoDoLink). */
 export function linkLogin(po?: string): string {
-  if (typeof window === "undefined") return "/prototipo/negocios?login=1";
-  // 2.0: com a base ligada, o login real é a entrada da app
-  if (modoReal()) return `${window.location.origin}/${po ? "?po=" + encodeURIComponent(po) : ""}`;
-  let sala: string | null = null;
-  try { sala = new URLSearchParams(window.location.search).get("sala"); } catch { /* sem URL */ }
-  return `${window.location.origin}/prototipo/negocios?login=1${sala ? "&sala=" + encodeURIComponent(sala) : ""}`;
+  // 2.0: o login real é a entrada da app. 20/11: sempre (antes, sem a base, era o login simulado da cópia antiga do protótipo,
+  // /prototipo/negocios?login=1, que saiu).
+  const q = po ? "?po=" + encodeURIComponent(po) : "";
+  return typeof window === "undefined" ? `/${q}` : `${window.location.origin}/${q}`;
 }
 
 /* ------------------------------------------------------------------ o popup pendente (só neste separador) */

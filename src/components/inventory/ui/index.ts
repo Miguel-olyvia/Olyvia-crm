@@ -1,5 +1,5 @@
 // Peças partilhadas da UI nova do Inventário. Adaptadas do protótipo
-// (prototipo-negocios/inventario) para shadcn + tokens do tema — sem o contexto
+// (emylia/inventario) para shadcn + tokens do tema — sem o contexto
 // de simulação do protótipo nem dados fictícios. A API de cada peça está
 // documentada no topo do respetivo ficheiro.
 

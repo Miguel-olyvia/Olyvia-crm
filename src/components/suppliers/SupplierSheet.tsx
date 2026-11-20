@@ -1,5 +1,5 @@
 // A ficha do fornecedor numa folha lateral larga (FornecedorFolha do protótipo
-// /prototipo/negocios): migalha "Compras › Fornecedor", nome, distintivos
+// src/emylia/inventario): migalha "Compras › Fornecedor", nome, distintivos
 // (código, Ativo/Inativo, estado do portal), faixa "à espera da ficha" com
 // "Reenviar convite", separadores Resumo · Dados · Artigos e preços · Preços
 // por aprovar · Portal · Contrato, e rodapé (Guardar só em Dados).

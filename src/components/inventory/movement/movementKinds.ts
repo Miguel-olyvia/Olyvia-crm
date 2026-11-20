@@ -20,7 +20,7 @@ export interface MovementKind {
   icon: LucideIcon;
 }
 
-// Textos do protótipo (prototipo-negocios/inventario/movimentos.ts). Na
+// Textos do protótipo (emylia/inventario/movimentos.ts). Na
 // transferência sai "Pode cumprir um pedido": os pedidos de transferência
 // não existem em produção.
 export const MOVEMENT_KINDS: readonly MovementKind[] = [
