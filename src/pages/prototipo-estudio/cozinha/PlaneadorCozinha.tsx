@@ -9,7 +9,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, ChevronLeft, ChevronRight, Copy, List, Redo2, RotateCcw, RotateCw, Ruler, Save, Settings2, Trash2, Undo2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CATALOGO, produto, type Produto } from "../catalogoFake";
-import { CHAVE_ESTUDIO } from "../daVisita";
+import { guardarProjetoLocal, lerProjetoLocal, negocioDoEndereco } from "../projetoGuardado";
 import type { Projeto } from "../necessidadesEstudio";
 import { Ilustracao } from "../Ilustracao";
 import { pct } from "../ivaEstudio";
@@ -31,8 +31,14 @@ const SEPARADORES: { id: Separador; n: string }[] = [
 ];
 
 // ---------------------------------------------------------------- ler e guardar (no browser e, vindo do Estúdio, no projeto)
+// 20/11: o projeto do Estúdio de onde se veio (o do negócio do endereço, ?negocio=, na chave dele)
 function lerProjeto(): Projeto | null {
-  try { const t = localStorage.getItem(CHAVE_ESTUDIO); return t ? (JSON.parse(t) as Projeto) : null; } catch { return null; }
+  return lerProjetoLocal(negocioDoEndereco());
+}
+/** O endereço do Estúdio de onde se veio (com o negócio). */
+function voltaAoEstudio(): string {
+  const n = negocioDoEndereco();
+  return n != null ? `/prototipo/estudio?negocio=${n}` : "/prototipo/estudio";
 }
 function cozinhaInicial(doEstudio: boolean): Cozinha {
   if (doEstudio) {
@@ -49,7 +55,7 @@ function cozinhaInicial(doEstudio: boolean): Cozinha {
 function guardar(c: Cozinha, doEstudio: boolean): boolean {
   try {
     localStorage.setItem(CHAVE_COZINHA, JSON.stringify(c));
-    if (doEstudio) { const p = lerProjeto(); if (p) localStorage.setItem(CHAVE_ESTUDIO, JSON.stringify({ ...p, cozinha: c, gravadoEm: Date.now() })); }
+    if (doEstudio) { const p = lerProjeto(); if (p && !guardarProjetoLocal({ ...p, cozinha: c, gravadoEm: Date.now() })) return false; }
     return true;
   } catch { return false; }
 }
@@ -114,7 +120,7 @@ export default function PlaneadorCozinha() {
 
         <div className="pointer-events-none absolute inset-x-0 top-0 flex items-start justify-between gap-3 p-3 sm:p-4">
           <div className="pointer-events-auto flex flex-wrap gap-2">
-            {doEstudio && <button type="button" className={BOTAO_FLUT} onClick={() => { guardar(c, true); navegar("/prototipo/estudio"); }}><ArrowLeft className="h-4 w-4" aria-hidden="true" />Voltar ao Estúdio</button>}
+            {doEstudio && <button type="button" className={BOTAO_FLUT} onClick={() => { guardar(c, true); navegar(voltaAoEstudio()); }}><ArrowLeft className="h-4 w-4" aria-hidden="true" />Voltar ao Estúdio</button>}
             <button type="button" className={BOTAO_FLUT} onClick={() => setAviso(guardar(c, doEstudio) ? (doEstudio ? "Guardado no projeto do Estúdio." : "Guardado neste browser.") : "Não deu para guardar neste browser.")}>
               <Save className="h-4 w-4" aria-hidden="true" />Guardar
             </button>
@@ -171,7 +177,7 @@ export default function PlaneadorCozinha() {
       </aside>
 
       <AnimatePresence>
-        {resumo && <Resumo c={c} fechar={() => setResumo(false)} doEstudio={doEstudio} voltar={() => { guardar(c, true); navegar("/prototipo/estudio"); }} />}
+        {resumo && <Resumo c={c} fechar={() => setResumo(false)} doEstudio={doEstudio} voltar={() => { guardar(c, true); navegar(voltaAoEstudio()); }} />}
       </AnimatePresence>
     </div>
   );

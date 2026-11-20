@@ -1,7 +1,7 @@
 // 5/11: o Estúdio abre a partir da Visita: a planta, as alturas e o estilo vêm do negócio.
 import { describe, expect, it } from "vitest";
 import { gravarPlanta, retangulo } from "@/emylia/planta";
-import { abrirEstudio, coresDoTexto, devolverAoNegocio, ditosDoNegocio, estiloDasRespostas, lerVolta, pedidosDoNegocio, projetoDaVisita, CHAVE_ESTUDIO } from "./daVisita";
+import { abrirEstudio, coresDoTexto, devolverAoNegocio, ditosDoNegocio, estiloDasRespostas, lerVolta, pedidosDoNegocio, projetoDaVisita, chaveDoEstudio } from "./daVisita";
 import { estiloDosDitos } from "./estiloDaConversa";
 
 type EscolhaTeste = { peca: string; escolha: string; decidida?: boolean; acao?: "manter" | "trocar" | "remover" | "acrescentar"; cor?: "preto" | "branco" | "cinza" | "madeira" | "bege" | null; material?: string | null };
@@ -96,13 +96,15 @@ describe("o Estúdio a partir da Visita", () => {
     localStorage.clear();
     const f = { planta: gravarPlanta({ o: { x: 0, y: 0 }, paredes: retangulo(200, 150), pecas: [] }) };
     abrirEstudio("Ana", f, 7, "/negocios");
-    const guardado = JSON.parse(localStorage.getItem(CHAVE_ESTUDIO)!);
+    const guardado = JSON.parse(localStorage.getItem(chaveDoEstudio(7))!);
     guardado.escolhas = { x: "san-ria" };
-    localStorage.setItem(CHAVE_ESTUDIO, JSON.stringify(guardado));
+    localStorage.setItem(chaveDoEstudio(7), JSON.stringify(guardado));
     abrirEstudio("Ana", f, 7, "/negocios");
-    expect(JSON.parse(localStorage.getItem(CHAVE_ESTUDIO)!).escolhas).toEqual({ x: "san-ria" });
+    expect(JSON.parse(localStorage.getItem(chaveDoEstudio(7))!).escolhas).toEqual({ x: "san-ria" });
     abrirEstudio("Rui", f, 8, "/negocios");
-    expect(JSON.parse(localStorage.getItem(CHAVE_ESTUDIO)!).escolhas).toEqual({});
+    expect(JSON.parse(localStorage.getItem(chaveDoEstudio(8))!).escolhas).toEqual({});
+    // 20/11: abrir o Estúdio de outro negócio já não apaga o primeiro (uma chave por negócio)
+    expect(JSON.parse(localStorage.getItem(chaveDoEstudio(7))!).escolhas).toEqual({ x: "san-ria" });
     devolverAoNegocio({ ...guardado, negocio: 7, antes: { o: { x: 0, y: 0 }, paredes: retangulo(250, 150), pecas: [] } });
     expect(lerVolta(8)).toBeNull();
     expect(lerVolta(7)?.antes.paredes[0].c).toBe(250);

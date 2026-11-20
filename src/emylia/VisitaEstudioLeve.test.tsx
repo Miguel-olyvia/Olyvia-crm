@@ -6,7 +6,7 @@ import { acoes, seed, type Negocio } from "./motor";
 import { DoEstudio, EstudioNaVisita } from "./VisitaEstudio";
 import type { Ctx } from "./pecas";
 import { retangulo } from "./planta";
-import { CHAVE_ESTUDIO, CHAVE_VOLTA, abrirEstudio, devolverAoNegocio } from "@/pages/prototipo-estudio/daVisita";
+import { CHAVE_VOLTA, abrirEstudio, chaveDoEstudio, devolverAoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
 import { lerCatalogo, mudarCatalogo, reporCatalogo } from "./v2/catalogoStore";
 import { definirCatalogoLido } from "./real/catalogoLeve";
@@ -36,13 +36,13 @@ afterEach(() => { cleanup(); reporCatalogo(); definirCatalogoLido(ORG, false); l
 
 function projetoVoltado(d: Negocio, fechar = false): Projeto {
   expect(abrirEstudio(d.nome, d.f, d.id, "/negocios")).toBe(true);
-  const p0 = JSON.parse(localStorage.getItem(CHAVE_ESTUDIO)!) as Projeto;
+  const p0 = JSON.parse(localStorage.getItem(chaveDoEstudio(d.id))!) as Projeto;
   const planta = { o: { x: 50, y: 50 }, paredes: retangulo(200, 250), pecas: [] };
   const p: Projeto = {
     ...p0, antes: planta, depois: { ...planta, pecas: [{ id: "b", tipo: "base", x: 50, y: 50, w: 120, h: 70 }, { id: "s", tipo: "sanita", x: 200, y: 250, w: 36, h: 52 }] },
     escolhas: { b: "bas-ard-p", s: "san-nexo-s" }, revestimento: "rev-tela-c", servicos: [{ id: "sv-imperm", q: 4.6 }], gravadoEm: Date.now(),
   };
-  localStorage.setItem(CHAVE_ESTUDIO, JSON.stringify(p));
+  localStorage.setItem(chaveDoEstudio(d.id), JSON.stringify(p));
   expect(devolverAoNegocio(p, fechar)).toBe(true);
   return p;
 }

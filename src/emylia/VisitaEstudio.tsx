@@ -3,15 +3,17 @@
 // passos), o interior e a área à mão, o Estúdio, e fechar a visita. As medidas, as necessidades e as peças da casa de banho saem do
 // Estúdio e ficam num resumo dobrado no fecho, para conferir; o prazo e a decisão confirmam-se lá, com o plano de obra estimado.
 //
-// O projeto do Estúdio vive no negócio (f.estudio): o Estúdio abre noutro separador e grava neste browser; esta página ouve e guarda
-// no negócio a versão mais recente. «Voltar ao negócio» (ou «Trazer do Estúdio») passa a planta, as medidas, as respostas das peças e
+// O projeto do Estúdio vive no negócio (f.estudio): o Estúdio grava neste browser (uma chave por negócio) e, aberto daqui, também no
+// negócio de poucos em poucos segundos (20/11, pela ligação que «abrir» lhe deixa); esta página ouve e guarda no negócio a versão mais
+// recente. «Voltar ao negócio» (ou «Trazer do Estúdio») passa a planta, as medidas, as respostas das peças e
 // as necessidades (estas com revisão, ligadas ao Catálogo verdadeiro).
 import { irPara, urlDoNegocio } from "./urlNegocio";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CalendarCheck, Check, ChevronDown, MapPin, Navigation, Phone, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { CHAVE_ESTUDIO, CHAVE_VOLTA, abrirEstudio, lerVolta, projetoDoEstudioPara, projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
+import { CHAVE_VOLTA, chaveDoEstudio, guardarParaEstudio, lerVolta, projetoDoEstudioPara, projetoDoNegocio, projetoParaAbrir } from "@/pages/prototipo-estudio/daVisita";
+import { ligarEstudioAoNegocio } from "@/pages/prototipo-estudio/projetoGuardado";
 import { gruposParaEstudio } from "@/pages/prototipo-estudio/perguntasDaVisita";
 import { AREA, ESCOLHAS, EXTERIOR, INTERIOR, efetivo } from "./campos";
 import { produtosEscolhidos } from "@/pages/prototipo-estudio/sugestoesServicos";
@@ -195,7 +197,7 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
     aoVoltar();
     const aoMudar = (e: StorageEvent) => {
       if (e.key === CHAVE_VOLTA) aoVoltar();
-      else if (e.key === CHAVE_ESTUDIO) { clearTimeout(t); t = setTimeout(gravar, 800); }
+      else if (e.key === chaveDoEstudio(ref.current.d.id)) { clearTimeout(t); t = setTimeout(gravar, 800); }
     };
     window.addEventListener("storage", aoMudar);
     window.addEventListener("focus", aoVoltar);
@@ -205,12 +207,23 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 
   // 9/11 (Rúben: «a transcrição não corre enquanto estamos no Estúdio»): o Estúdio abre no mesmo separador, sem recarregar a app, e a
   // gravação da visita continua (num separador à parte o telemóvel suspendia-a); «Voltar ao negócio» volta a este negócio
+  // 20/11: a ligação que deixa o Estúdio gravar no negócio sem esta página aberta (pelo mesmo ctx.run, no negócio desta página)
+  function ligarAqui(projeto?: Projeto) {
+    ligarEstudioAoNegocio({
+      negocio: ref.current.d.id, projeto,
+      gravar: (json) => { const { ctx: c, d: n } = ref.current; c.run(() => c.A.campo(n.id, "estudio", json)); },
+      noNegocio: () => ref.current.d.f.estudio,
+    });
+  }
   const abrir = () => {
     // 11/11 (Rúben: «depois de terminar o Estúdio da visita, o utilizador deve ser redirecionado para esta screen»): volta ao passo Estúdio
     // 12/11 (Rúben: «o que faltar preencher da visita tem de ser preenchido na última fase do Estúdio»): os campos da empresa
     const campos = gruposParaEstudio({ exterior: efetivo(ctx.S.campos, EXTERIOR), interior: efetivo(ctx.S.campos, INTERIOR), area: efetivo(ctx.S.campos, AREA), escolhas: efetivo(ctx.S.campos, ESCOLHAS) });
-    if (abrirEstudio(d.nome, d.f, d.id, `${urlDoNegocio(d.id)}&passo=estudio`, divisaoDoEstudio(d), campos)) irPara("/prototipo/estudio");
-    else setFeito("Não deu para abrir o Estúdio neste browser.");
+    const p = projetoParaAbrir(d.nome, d.f, d.id, `${urlDoNegocio(d.id)}&passo=estudio`, divisaoDoEstudio(d), campos);
+    // 20/11: guardado neste browser (na chave do negócio) e na ligação; mesmo sem armazenamento, o Estúdio abre e grava no negócio
+    guardarParaEstudio(p);
+    ligarAqui(p);
+    irPara(`/prototipo/estudio?negocio=${d.id}`);
   };
   const prods = salvo ? produtosEscolhidos(salvo) : [];
   const chao = salvo ? areaChaoM2(salvo.depois.paredes) : null;

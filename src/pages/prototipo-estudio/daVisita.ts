@@ -14,7 +14,10 @@ import { PECAS } from "@/emylia/planta";
 import { catsDeTexto, corDoTexto, ditosDaConversa, type DitoEstilo } from "./estiloDaConversa";
 import { pedidosDaConversa, servicoDeTexto, tipoPecaDeTexto, type AcaoPeca, type DitoPeca, type DitoServico, type Pedidos } from "./pedidosDaConversa";
 
-export const CHAVE_ESTUDIO = "olyvia.estudio.v1";
+import { CHAVE_ESTUDIO, chaveDoEstudio, guardarProjetoLocal, lerProjetoLocal } from "./projetoGuardado";
+
+// 20/11: o projeto guarda-se numa chave por negócio (projetoGuardado.ts); CHAVE_ESTUDIO é hoje só a do projeto sem negócio
+export { CHAVE_ESTUDIO, chaveDoEstudio };
 /** 5/11: o que o Estúdio devolve ao negócio quando se carrega em «Voltar ao negócio» (a Visita lê-o e grava a planta). */
 export const CHAVE_VOLTA = "olyvia.estudio.volta";
 export interface Volta {
@@ -60,24 +63,28 @@ export function projetoDaVisita(nome: string, f: Record<string, string>, negocio
   };
 }
 
-/** Guarda o projeto para o Estúdio o abrir (o Estúdio lê-o deste browser). */
+/** Guarda o projeto para o Estúdio o abrir (o Estúdio lê-o deste browser, na chave do negócio). */
 export function guardarParaEstudio(p: Projeto): boolean {
-  try { localStorage.setItem(CHAVE_ESTUDIO, JSON.stringify(p)); return true; } catch { return false; }
+  return guardarProjetoLocal(p);
 }
 
-/** Abrir o Estúdio de um negócio: se o projeto guardado é deste negócio, continua-se (não se perde o depois); senão começa um novo. */
-export function abrirEstudio(nome: string, f: Record<string, string>, negocio: number, origem: string, divisao?: Projeto["divisao"], camposVisita?: GrupoVisita[]): boolean {
+/** O projeto com que o Estúdio de um negócio abre: se o guardado neste browser é deste negócio e mais recente, continua-se (não se perde
+ *  o depois); senão o do negócio; sem nenhum, começa um novo pela visita. */
+export function projetoParaAbrir(nome: string, f: Record<string, string>, negocio: number, origem: string, divisao?: Projeto["divisao"], camposVisita?: GrupoVisita[]): Projeto {
   // 6/11: o projeto vive no negócio (f.estudio); o deste browser só ganha se for do mesmo negócio e mais recente
   const doNegocio = projetoDoNegocio(f);
-  let local: Projeto | null = null;
-  try { const t = localStorage.getItem(CHAVE_ESTUDIO); local = t ? (JSON.parse(t) as Projeto) : null; } catch { local = null; }
-  if (local?.negocio !== negocio) local = null;
+  const local = lerProjetoLocal(negocio);
   const melhor = local && (!doNegocio || (local.gravadoEm ?? 0) >= (doNegocio.gravadoEm ?? 0)) ? local : doNegocio;
   // 11/11: as perguntas da visita que o Estúdio faz no passo «Fechar»: com as respostas que o negócio já tem
   const base = melhor ? { ...melhor, nome, origem, negocio } : projetoDaVisita(nome, f, negocio, origem, divisao);
   const prefixo = prefixoDoEstudio(f, base.divisao ?? divisao);
   const campos = camposVisita?.length ? camposVisita : base.camposVisita;
-  return guardarParaEstudio({ ...base, camposVisita: campos, prefixoPerguntas: prefixo, perguntas: { ...(base.perguntas ?? {}), ...respostasDoNegocio(f, prefixo, { camposVisita: campos }) }, ditosAntes: ditosDoNegocio(f), pedidosAntes: pedidosDoNegocio(f) });
+  return { ...base, camposVisita: campos, prefixoPerguntas: prefixo, perguntas: { ...(base.perguntas ?? {}), ...respostasDoNegocio(f, prefixo, { camposVisita: campos }) }, ditosAntes: ditosDoNegocio(f), pedidosAntes: pedidosDoNegocio(f) };
+}
+
+/** Abrir o Estúdio de um negócio: guarda neste browser o projeto com que abre (projetoParaAbrir). */
+export function abrirEstudio(nome: string, f: Record<string, string>, negocio: number, origem: string, divisao?: Projeto["divisao"], camposVisita?: GrupoVisita[]): boolean {
+  return guardarParaEstudio(projetoParaAbrir(nome, f, negocio, origem, divisao, camposVisita));
 }
 
 /** 13/11 (Rúben, «o modelo é a verdade»): as escolhas de cor que o modelo extraiu, já separadas peça a peça. A cor vem do campo
@@ -138,11 +145,7 @@ export function projetoDoNegocio(f: Record<string, string | undefined>): Projeto
 
 /** 6/11: o projeto deste negócio que o Estúdio tem neste browser (para a Visita o gravar no negócio), ou null. */
 export function projetoDoEstudioPara(negocio: number): Projeto | null {
-  try {
-    const t = localStorage.getItem(CHAVE_ESTUDIO);
-    const p = t ? (JSON.parse(t) as Projeto) : null;
-    return p?.negocio === negocio ? p : null;
-  } catch { return null; }
+  return lerProjetoLocal(negocio);
 }
 
 /** 6/11: as medidas da área que saem do Estúdio: o chão e as paredes da planta do depois (até ao teto falso), os pontos de água e
