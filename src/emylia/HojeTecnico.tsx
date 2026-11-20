@@ -29,7 +29,7 @@ import {
   aSeguirDoTecnico, diaDaTarefa, enviosDe, horasPorDia, instrucoesDe, passosFeitos, rotuloDiaTarefa, tecnicosComTrabalho, terminadasHoje, trabalhoDoTecnico, type ASeguir,
 } from "./trabalhoObra";
 import { AvatarTec, ChipEstado, EnvioItem, HistoricoTarefa, Miniaturas } from "./AcompanhamentoObra";
-import { lerFoto } from "./ObraOperacoes";
+import { EstadoFotos, FotoObra, useFotosAJuntar } from "./fotosDaObra";
 import { AvisosDoTecnico } from "./AvisosTecnico";
 import { RegistarImprevisto } from "./ImprevistosObra";
 
@@ -552,16 +552,16 @@ function RegistoDoDia({ ctx, d, ti, podeTerminar, cor, enviado, faltouMaterial, 
   const { A, run } = ctx;
   const p = d.obra.plano!, t = p.tasks[ti];
   const [horas, setHoras] = useState(horasPorDia(t));
-  const [fotos, setFotos] = useState<string[]>([]);
+  // 20/11 (auditoria, Lote 3): com a base ligada cada fotografia guarda-se logo (1600 px) e fica só a referência; sem limite escondido
+  const F = useFotosAJuntar(d.id), fotos = F.fotos;
   const [nota, setNota] = useState("");
   const input = useRef<HTMLInputElement>(null);
   const [camara, setCamara] = useState(false);
-  const juntar = async (f?: File | null) => { if (!f) return; try { const u = await lerFoto(f); setFotos((x) => [...x, u].slice(-4)); } catch { /* sem leitura */ } };
-  const falta = [!(horas > 0) && "as horas", !fotos.length && "uma fotografia", !nota.trim() && "o que fez hoje"].filter(Boolean) as string[];
-  const enviar = (feita: boolean) => run(() => { A.enviarRegisto(d.id, ti, { horas, fotos, nota, feita }); setFotos([]); setNota(""); enviado(); });
+  const falta = [!(horas > 0) && "as horas", F.aGuardar > 0 && "acabar de guardar as fotografias", !fotos.length && "uma fotografia", !nota.trim() && "o que fez hoje"].filter(Boolean) as string[];
+  const enviar = (feita: boolean) => { if (F.aGuardar > 0) return; run(() => { A.enviarRegisto(d.id, ti, { horas, fotos, nota, feita }); F.limpar(); setNota(""); enviado(); }); };
   return (
     <div className="mt-3 space-y-4">
-      {camara && <Camara titulo={t.nome} fechar={() => setCamara(false)} tirar={(u) => setFotos((x) => [...x, u].slice(-4))} semCamara={() => { setCamara(false); input.current?.click(); }} />}
+      {camara && <Camara titulo={t.nome} fechar={() => setCamara(false)} tirar={(u) => void F.juntar([u])} semCamara={() => { setCamara(false); input.current?.click(); }} />}
       <div>
         <p className="text-sm font-medium text-muted-foreground">Horas de hoje <span className="font-normal">(previstas {hfmt(horasPorDia(t))} h)</span></p>
         <span role="group" aria-label="Horas de hoje" className="mt-1.5 inline-flex items-center rounded-xl border border-input bg-card p-0.5">
@@ -571,19 +571,20 @@ function RegistoDoDia({ ctx, d, ti, podeTerminar, cor, enviado, faltouMaterial, 
         </span>
       </div>
       <div>
-        <p className="text-sm font-medium text-muted-foreground">Fotografias do trabalho <span className="font-normal">(o cliente vê-as no portal)</span></p>
+        <p className="text-sm font-medium text-muted-foreground">Fotografias do trabalho <span className="font-normal">(o cliente vê-as no portal; até {F.max} por envio)</span></p>
         <div className="mt-1.5 flex flex-wrap items-center gap-2">
           {fotos.map((f, k) => (
             <span key={k} className="relative motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
-              <img src={f} alt={`Fotografia ${k + 1}`} className="h-20 w-28 rounded-lg border border-border object-cover" />
-              <button type="button" aria-label={`Tirar a fotografia ${k + 1}`} onClick={() => setFotos(fotos.filter((_, i) => i !== k))} className="absolute -right-2 -top-2 grid h-7 w-7 place-items-center rounded-full border border-border bg-card shadow"><X className="h-3.5 w-3.5" /></button>
+              <FotoObra src={f} alt={`Fotografia ${k + 1}`} className="h-20 w-28 rounded-lg border border-border object-cover" />
+              <button type="button" aria-label={`Tirar a fotografia ${k + 1}`} onClick={() => F.tirar(k)} className="absolute -right-2 -top-2 grid h-7 w-7 place-items-center rounded-full border border-border bg-card shadow"><X className="h-3.5 w-3.5" /></button>
             </span>
           ))}
-          <input ref={input} type="file" accept="image/*" capture="environment" multiple className="sr-only" aria-label="Escolher fotografias" onChange={(e) => { for (const f of Array.from(e.target.files ?? [])) void juntar(f); e.target.value = ""; }} />
-          <Button variant="outline" className="min-h-12" onClick={() => (temCamara() ? setCamara(true) : input.current?.click())}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />Tirar fotografia</Button>
-          {temCamara() && <button type="button" onClick={() => input.current?.click()} className="inline-flex min-h-11 items-center gap-1.5 px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">Escolher da galeria</button>}
-          <button type="button" onClick={() => setFotos((x) => [...x, fotoExemplo(t.nome, cor, enviosDe(t).length + x.length)].slice(-4))} className="inline-flex min-h-11 items-center gap-1.5 px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline"><ImagePlus className="h-4 w-4" aria-hidden="true" />Usar uma de exemplo</button>
+          <input ref={input} type="file" accept="image/*" capture="environment" multiple className="sr-only" aria-label="Escolher fotografias" onChange={(e) => { void F.juntar(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+          <Button variant="outline" className="min-h-12" disabled={F.cheio} onClick={() => (temCamara() ? setCamara(true) : input.current?.click())}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />Tirar fotografia</Button>
+          {temCamara() && <button type="button" disabled={F.cheio} onClick={() => input.current?.click()} className="inline-flex min-h-11 items-center gap-1.5 px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline disabled:opacity-50">Escolher da galeria</button>}
+          <button type="button" disabled={F.cheio} onClick={() => F.juntarPronta(fotoExemplo(t.nome, cor, enviosDe(t).length + fotos.length))} className="inline-flex min-h-11 items-center gap-1.5 px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline disabled:opacity-50"><ImagePlus className="h-4 w-4" aria-hidden="true" />Usar uma de exemplo</button>
         </div>
+        <EstadoFotos aGuardar={F.aGuardar} erro={F.erro} className="mt-1.5" />
       </div>
       <div>
         <label htmlFor={`nota-${d.id}-${ti}`} className="text-sm font-medium text-muted-foreground">O que fez hoje</label>
@@ -621,7 +622,7 @@ function Camara({ titulo, fechar, tirar, semCamara }: { titulo: string; fechar: 
   const [n, setN] = useState(0);
   useEffect(() => {
     let fluxo: MediaStream | null = null, vivo = true;
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1280 } }, audio: false })
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: "environment" }, width: { ideal: 1920 } }, audio: false })
       .then((s) => {
         if (!vivo) { s.getTracks().forEach((x) => x.stop()); return; }
         fluxo = s;
@@ -635,10 +636,11 @@ function Camara({ titulo, fechar, tirar, semCamara }: { titulo: string; fechar: 
   const disparar = () => {
     const v = video.current;
     if (!v || !v.videoWidth) return;
-    const k = Math.min(1, 720 / v.videoWidth), c = document.createElement("canvas");
+    // 20/11 (auditoria, Lote 3): até 1600 px, como as fotografias da visita (é prova para o auto de receção); sem a base, reduz-se ao juntar
+    const k = Math.min(1, 1600 / Math.max(v.videoWidth, v.videoHeight)), c = document.createElement("canvas");
     c.width = Math.round(v.videoWidth * k); c.height = Math.round(v.videoHeight * k);
     c.getContext("2d")!.drawImage(v, 0, 0, c.width, c.height);
-    tirar(c.toDataURL("image/jpeg", 0.72));
+    tirar(c.toDataURL("image/jpeg", 0.8));
     setN((x) => x + 1); setFlash((x) => x + 1);
   };
   return createPortal(

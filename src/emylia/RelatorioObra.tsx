@@ -9,6 +9,7 @@ import { totaisAdenda } from "./adendas";
 import { materiaisPorFase, RESPONSAVEL_OBRA } from "./obraOps";
 import { FASES_OBRA } from "./fasesObra";
 import { fotosPorFase, garantiaAte, historiaDaObra, resumoObra, type Marco } from "./historiaObra";
+import { FotoObra } from "./fotosDaObra";
 
 const ICONE: Record<Marco["k"], LucideIcon> = {
   proposta: FileText, contrato: FileSignature, pagamento: Receipt, materiais: Package, obra: Flag, tarefa: Wrench, diario: Camera, adenda: Sparkles, auto: ClipboardCheck,
@@ -77,7 +78,7 @@ export function RelatorioObra({ S, d, docs, abrirDoc }: { S: Estado; d: Negocio;
                   {x.sub && <p className="text-sm text-slate-600">{x.sub}</p>}
                   {x.fotos && (
                     <div className="mt-2 flex gap-2 overflow-x-auto">
-                      {x.fotos.map((f, k) => <img key={k} src={f} alt={`${x.t}: fotografia ${k + 1}`} className="h-20 w-28 shrink-0 rounded-lg object-cover" />)}
+                      {x.fotos.map((f, k) => <FotoObra key={k} src={f} alt={`${x.t}: fotografia ${k + 1}`} className="h-20 w-28 shrink-0 rounded-lg object-cover" />)}
                     </div>
                   )}
                 </div>
@@ -96,7 +97,7 @@ export function RelatorioObra({ S, d, docs, abrirDoc }: { S: Estado; d: Negocio;
                 <p className="text-sm font-medium text-slate-500">{g.fase ? `Fase ${g.fase} · ${g.nome}` : g.nome}</p>
                 <ul className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-3">
                   {g.fotos.map((f, k) => (
-                    <li key={k}><figure><img src={f.src} alt={f.t} className="aspect-[4/3] w-full rounded-lg object-cover" /><figcaption className="mt-1 text-sm text-slate-600">{f.t}</figcaption></figure></li>
+                    <li key={k}><figure><FotoObra src={f.src} alt={f.t} className="aspect-[4/3] w-full rounded-lg object-cover" /><figcaption className="mt-1 text-sm text-slate-600">{f.t}</figcaption></figure></li>
                   ))}
                 </ul>
               </div>

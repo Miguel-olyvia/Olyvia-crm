@@ -24,6 +24,7 @@ import { imprevistosDe } from "../imprevistos";
 import { emCurso, valorContrato } from "../adendas";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
+import { FotoObra } from "../fotosDaObra";
 import { Contagem, MOLA, useReduzir } from "../movimento";
 import { podeNeg } from "../permissoes";
 import { estadoVivo, rotuloVivo } from "./planoVivo";
@@ -384,8 +385,8 @@ export function DiarioObra({ d, ir }: { d: Negocio; ir: Ir }) {
           <section aria-label="Antes e depois" className="space-y-2 rounded-3xl border border-border bg-card p-3">
             <p className="px-1 text-sm font-semibold">Antes e depois</p>
             <div className="relative aspect-[4/3] select-none overflow-hidden rounded-2xl bg-muted">
-              <img src={ad.antes} alt="Antes" className="absolute inset-0 h-full w-full object-cover" />
-              <div className="absolute inset-0" style={{ clipPath: `inset(0 0 0 ${corte}%)` }}><img src={ad.depois} alt="Depois" className="h-full w-full object-cover" /></div>
+              <FotoObra src={ad.antes} alt="Antes" className="absolute inset-0 h-full w-full object-cover" />
+              <div className="absolute inset-0" style={{ clipPath: `inset(0 0 0 ${corte}%)` }}><FotoObra src={ad.depois} alt="Depois" className="h-full w-full object-cover" /></div>
               <div aria-hidden="true" className="absolute inset-y-0 w-1 -translate-x-1/2 bg-white shadow" style={{ left: `${corte}%` }}><span className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full bg-white px-2 py-1 text-[10px] font-semibold text-foreground shadow">⇆</span></div>
               <span className="absolute left-2 top-2 rounded-full bg-black/50 px-2 py-0.5 text-xs text-white">Antes</span>
               <span className="absolute right-2 top-2 rounded-full bg-black/50 px-2 py-0.5 text-xs text-white">Depois</span>
@@ -400,7 +401,7 @@ export function DiarioObra({ d, ir }: { d: Negocio; ir: Ir }) {
               {fotos.slice(-12).reverse().map((f, k) => (
                 <motion.button key={k} type="button" onClick={() => ir.tarefa(f.ti)} title={f.t.nome} initial={reduzir ? false : { opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: reduzir ? 0 : 0.03 * k }}
                   className="group relative aspect-square overflow-hidden rounded-xl bg-muted">
-                  <img src={f.foto} alt={f.t.nome} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
+                  <FotoObra src={f.foto} alt={f.t.nome} className="h-full w-full object-cover transition-transform group-hover:scale-105" />
                   <span className="absolute inset-x-0 bottom-0 truncate bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1 text-[10px] text-white">{f.t.nome}</span>
                 </motion.button>
               ))}
@@ -495,7 +496,7 @@ export function FechoVivo({ d, ir }: { d: Negocio; ir: Ir }) {
         <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5">
           {ultimas.map(({ t, ti, f }) => (
             <button key={ti} type="button" onClick={() => ir.tarefa(ti)} className="group relative aspect-square overflow-hidden rounded-xl bg-muted" title={t.nome}>
-              <img src={f!} alt={t.nome} className="h-full w-full object-cover" />
+              <FotoObra src={f!} alt={t.nome} className="h-full w-full object-cover" />
               <span className="absolute inset-x-0 bottom-0 flex items-center gap-1 truncate bg-gradient-to-t from-black/60 to-transparent px-1.5 py-1 text-[10px] text-white">{estadoVivo(t, p) === "validada" && <Check className="h-3 w-3" aria-hidden="true" />}{t.nome}</span>
             </button>
           ))}

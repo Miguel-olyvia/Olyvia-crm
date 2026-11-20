@@ -14,7 +14,7 @@ import { estadoVazio } from "@/emylia/estadoOrganizacao";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
 import { carregarCamposConfig } from "@/emylia/real/camposConfig";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
-import { idsServico, lerNegocios, negocioParaOEcra, type IdsServico, type NegocioLido } from "@/emylia/real/negocioBase";
+import { idsServico, lerNegocios, MSG_ALTERADO_NOUTRO_LADO, negocioParaOEcra, type IdsServico, type NegocioLido } from "@/emylia/real/negocioBase";
 import { fotografarNegocios, gravarMudancas, marcaNegocio, negociosMudados, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
 import { publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
 import { contratosDasEcs, lerProntidoes, ligacaoInventario } from "@/emylia/real/inventarioReal";
@@ -136,7 +136,8 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
 
   /** O que a base devolveu passa a ser o estado: negócios, referências, os só de leitura e a fotografia do que está gravado. */
   const aplicarLeitura = (novos: readonly NegocioLido[]): void => {
-    refs = new Map(novos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId }]));
+    // 20/11 (20270125020000): com a versão lida, para a base recusar a gravação por cima de outra feita depois
+    refs = new Map(novos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId, versao: n.versao }]));
     lidos = new Map(novos.map((n) => [n.linhas.negocio.numero, n]));
     soLeitura = new Set(novos.filter((n) => n.docsCrm || catalogoFalhou).map((n) => n.linhas.negocio.numero));
     docsPorId = new Set(novos.filter((n) => n.docsCrm).map((n) => n.id));
@@ -203,6 +204,7 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     gravacao = { k: "a-gravar" }; mudou();
     let gravados = 0;
     let relerFinanceiro = false;
+    let alterados: string[] = [];
     try {
       do {
         deNovo = false;
@@ -214,7 +216,10 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
         // 11/11: gravado sem erros, o ecrã é a base: o negócio passado agora ao comercial fica só de leitura para a assistente
         if (!r.erros.length) marcarFases();
         if (r.reler) relerFinanceiro = true;
+        // 20/11 (20270125020000): gravado noutro lado depois de se ler: relê-se a seguir e diz-se
+        if (r.alterados?.length) alterados = [...alterados, ...r.alterados];
         if (r.erros.length) { gravacao = { k: "erro", t: r.erros.join(" · ") }; avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
+        else if (alterados.length) gravacao = { k: "erro", t: MSG_ALTERADO_NOUTRO_LADO };
         else gravacao = { k: "gravado", n: r.gravados };
         for (const a of r.avisos) avisar({ msg: "Gravado, com um aviso", sub: a, kind: "" });
       } while (deNovo);
@@ -225,6 +230,12 @@ function criarArmazem(sb: SupabaseClient, org: string): ArmazemEmylia {
     } finally {
       emGravacao = false;
       mudou();
+    }
+    // 20/11 (20270125020000): o negócio gravado noutro lado relê-se já (o que se mudou aqui nele perde-se: diz-se para o refazer)
+    if (alterados.length) {
+      try { await lerAgora(false); avisar({ msg: MSG_ALTERADO_NOUTRO_LADO, sub: alterados.join(" · "), kind: "bad" }); mudou(); }
+      catch (e) { avisar({ msg: "Não foi possível atualizar o negócio", sub: (e as Error).message, kind: "bad" }); }
+      relerFinanceiro = false;
     }
     // F3: com fatura, pagamento ou anulação no servidor, relê-se: a encomenda de cliente da base (contrato e número), a fase e a prontidão
     if (relerFinanceiro && !porGravar()) {

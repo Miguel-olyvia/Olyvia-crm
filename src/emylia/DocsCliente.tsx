@@ -42,6 +42,7 @@ export { IVA_MAT, IVA_MO } from "./motor";
 import { IVA_MAT, IVA_MO, porZonaDe, totaisIva } from "./motor";
 import type { FaturaReg } from "./v2/financeiro";
 import { PREFIXO_CLIENTE, PREFIXO_PROD, textoProduto } from "./produtosVisita";
+import { FotoObra } from "./fotosDaObra";
 
 /** 3/11: de onde vem a adenda: um imprevisto que a equipa encontrou (e onde), ou o problema que o próprio cliente nos mostrou na conversa. */
 const origemAdenda = (o: NonNullable<Adenda["origem"]>): string =>
@@ -557,7 +558,7 @@ function PropostaAdenda({ S, d, a: a0 }: { S: Estado; d: Negocio; a: Adenda }) {
       <Pagina n={2} total={total} numero={numero}>
         <section className="space-y-4">
           <Titulo n={1}>O que vamos fazer</Titulo>
-          {a.origem?.foto && <img src={a.origem.foto} alt={`Fotografia: ${a.origem.texto}`} width={320} height={192} className="max-h-48 rounded-lg object-cover" />}
+          {a.origem?.foto && <FotoObra src={a.origem.foto} alt={`Fotografia: ${a.origem.texto}`} width={320} height={192} className="max-h-48 rounded-lg object-cover" />}
           <ol className="space-y-5">
             {fases.map((f) => {
               const Ic = ICONE_FASE[f.n] ?? HardHat, cor = COR_FASE[f.n as FaseObra];
@@ -757,7 +758,7 @@ function ContratoAdenda({ S, d, a }: { S: Estado; d: Negocio; a: Adenda }) {
         <section className="rounded-xl border border-amber-200 bg-amber-50 p-3">
           <p className="font-medium">{origemAdenda(a.origem)}</p>
           <p className="text-slate-700">{a.origem.texto}</p>
-          {a.origem.foto && <img src={a.origem.foto} alt={`Fotografia: ${a.origem.texto}`} width={320} height={192} className="mt-2 max-h-48 rounded-lg object-cover" />}
+          {a.origem.foto && <FotoObra src={a.origem.foto} alt={`Fotografia: ${a.origem.texto}`} width={320} height={192} className="mt-2 max-h-48 rounded-lg object-cover" />}
         </section>
       )}
       {a.contratoRevisto && <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">Versão {versao}, revista pelo Jurídico ({a.contratoRevisto.por}) a {a.contratoRevisto.q}, a pedido do cliente.</p>}
