@@ -9,11 +9,13 @@ import { clientePtContratoDet } from "./clientePt.contratoDet";
 import { clientePtDocProposta } from "./clientePt.docProposta";
 import { clientePtDocObra } from "./clientePt.docObra";
 import { clientePtDocNegocio } from "./clientePt.docNegocio";
+import { clientePtNegocioPagina } from "./clientePt.negocioPagina";
 import { clientePtLayout } from "./clientePt.layout";
 import { clientePtEmpresas } from "./clientePt.empresas";
 import { clientePtLogin } from "./clientePt.login";
 import { clientePtDocumentos } from "./clientePt.documentos";
 import { clientePtEstado } from "./clientePt.estado";
+import { clientePtIdiomaDocumento } from "./clientePt.idiomaDocumento";
 export const clientePt: Record<string, string> = {
   ...clientePtLayout,
   ...clientePtEmpresas,
@@ -27,6 +29,8 @@ export const clientePt: Record<string, string> = {
   ...clientePtDocProposta,
   ...clientePtDocObra,
   ...clientePtDocNegocio,
+  ...clientePtNegocioPagina,
+  ...clientePtIdiomaDocumento,
   // Moldura
   "pc.layout.titulo": "Portal do Cliente",
   "pc.layout.menu.inicio": "Início",

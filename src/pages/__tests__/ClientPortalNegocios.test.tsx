@@ -1,12 +1,13 @@
 // «Os Meus Negócios» no portal do cliente, nos dois idiomas: o português fica como era; o inglês traduz as palavras
 // (títulos, passos, plurais) e deixa o dinheiro, os números e o que vem da base como estão.
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.fn();
 let propostas: unknown[] = [];
+let contratos: unknown[] = [];
 
 function cadeia(resultado: () => unknown) {
   const c: Record<string, unknown> = {};
@@ -18,7 +19,7 @@ function cadeia(resultado: () => unknown) {
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
     rpc: (...a: unknown[]) => rpc(...a),
-    from: (tabela: string) => cadeia(() => ({ data: tabela === "proposals" ? propostas : [], error: null })),
+    from: (tabela: string) => cadeia(() => ({ data: tabela === "proposals" ? propostas : tabela === "client_contracts" ? contratos : [], error: null })),
   },
 }));
 vi.mock("@/components/portal/ClientPortalLayout", () => ({
@@ -39,12 +40,17 @@ import { definirIdioma, reporIdiomaEmMemoria } from "@/portal-i18n/armazemIdioma
 import { formatCurrency } from "@/lib/utils";
 import ClientPortalNegocios from "../ClientPortalNegocios";
 
+function Caminho() {
+  return <output data-testid="caminho">{useLocation().pathname}</output>;
+}
+
 function mostrar() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <MemoryRouter>
       <QueryClientProvider client={qc}>
         <ClientPortalNegocios />
+        <Caminho />
       </QueryClientProvider>
     </MemoryRouter>,
   );
@@ -58,6 +64,7 @@ beforeEach(() => {
   rpc.mockReset();
   rpc.mockResolvedValue({ data: {}, error: null });
   propostas = [];
+  contratos = [];
   hasMultiple = false;
 });
 afterEach(() => reporIdiomaEmMemoria());
@@ -103,5 +110,39 @@ describe("ClientPortalNegocios", () => {
     expect(await screen.findByText("1 new message")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open Remodelação da cozinha" })).toHaveTextContent("Open");
     expect(screen.getByRole("img", { name: "Step 3 of 5: Sign the contract" })).toBeInTheDocument();
+  });
+
+  describe("o botão «Abrir» leva ao documento quando é isso que falta ao cliente", () => {
+    async function abrirNegocio() {
+      mostrar();
+      const botao = await screen.findByRole("button", { name: "Abrir Remodelação da cozinha" });
+      fireEvent.click(botao);
+    }
+
+    it("proposta por responder: abre a proposta", async () => {
+      propostas = [{ ...proposta, status: "draft" }];
+      await abrirNegocio();
+      expect(screen.getByTestId("caminho")).toHaveTextContent("/client-portal/proposals/p1");
+    });
+
+    it("proposta aceite e contrato por assinar: abre o contrato", async () => {
+      propostas = [proposta];
+      contratos = [{ id: "c1", status: "pending", negocio_id: "n1" }];
+      await abrirNegocio();
+      expect(screen.getByTestId("caminho")).toHaveTextContent("/client-portal/contracts/c1");
+    });
+
+    it("proposta aceite mas ainda sem contrato: abre a página do negócio", async () => {
+      propostas = [proposta];
+      await abrirNegocio();
+      expect(screen.getByTestId("caminho")).toHaveTextContent("/client-portal/negocios/n1");
+    });
+
+    it("contrato assinado, serviço a acompanhar: abre a página do negócio", async () => {
+      propostas = [proposta];
+      contratos = [{ id: "c1", status: "signed", negocio_id: "n1" }];
+      await abrirNegocio();
+      expect(screen.getByTestId("caminho")).toHaveTextContent("/client-portal/negocios/n1");
+    });
   });
 });

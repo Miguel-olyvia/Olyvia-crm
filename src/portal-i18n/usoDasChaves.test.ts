@@ -6,7 +6,7 @@ import { dicionarios } from "./dicionarios";
 
 // Os ficheiros lidos como texto (sem node:fs): ClientPortal*.tsx, components/portal/*, SupplierPortal*.tsx,
 // components/supplier-portal/*, os estados de contrato, lib/supplierPortal/*, ProposalPortal*.tsx e o modelo de
-// catálogo do fornecedor, sem testes. Se um padrão não apanha nada, o objeto vem vazio e o teste passa.
+// catálogo do fornecedor, e a página do negócio do portal real (emylia/PortalCliente.tsx + portalClienteIdioma.ts), sem testes. Se um padrão não apanha nada, o objeto vem vazio e o teste passa.
 const ficheiros = import.meta.glob(
   [
     "/src/pages/ClientPortal*.{ts,tsx}",
@@ -16,6 +16,8 @@ const ficheiros = import.meta.glob(
     "/src/constants/contractStatus.ts",
     "/src/lib/supplierPortal/*.ts",
     "/src/components/proposals/ProposalPortal*.tsx",
+    "/src/emylia/PortalCliente.tsx",
+    "/src/emylia/portalClienteIdioma.ts",
     "/src/utils/supplierPortalCatalogTemplate.ts",
     "!/src/**/*.test.*",
     "!/src/**/*.spec.*",
@@ -61,6 +63,8 @@ describe("o varrimento cobre os ficheiros fora das pastas dos portais", () => {
         "/src/lib/supplierPortal/supplierDataForm.ts",
         "/src/components/proposals/ProposalPortalDocument.tsx",
         "/src/utils/supplierPortalCatalogTemplate.ts",
+        "/src/emylia/PortalCliente.tsx",
+        "/src/emylia/portalClienteIdioma.ts",
       ]),
     );
   });
@@ -73,6 +77,11 @@ describe("o varrimento cobre os ficheiros fora das pastas dos portais", () => {
       expect(k in dicionarios.pt).toBe(false);
       expect(k in dicionarios.en).toBe(false);
     }
+  });
+
+  it("a página do negócio do portal real usa chaves pc.negocioPag.* (o PortalCliente é varrido)", () => {
+    const chaves = extrairChaves(ficheiros["/src/emylia/PortalCliente.tsx"] ?? "");
+    expect(chaves).toEqual(expect.arrayContaining(["pc.negocioPag.rever.titulo", "pc.negocioPag.pagar.jaPaguei", "pc.docObra.diasUteis"]));
   });
 
   it("e apanha chaves lá dentro (os estados de contrato têm chaves pc.estado.contrato.*)", () => {

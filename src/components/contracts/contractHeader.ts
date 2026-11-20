@@ -7,6 +7,8 @@
  * html2canvas o consiga renderizar fielmente.
  */
 
+import { tDoc } from "@/lib/idiomaDocumento/dicionario";
+
 export type ContractHeaderStyle = "simple" | "split";
 export type ContractHeaderAlign = "left" | "center" | "right";
 export type LogoSize = "small" | "medium" | "large";
@@ -71,9 +73,14 @@ function todayPt(): string {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * `idioma` (omissão "pt", código aberto) muda só as palavras que o cabeçalho escreve por si («CONTRATO»,
+ * «Data:», «NIF:», «Tel:»…). Os rótulos escolhidos no modelo mandam sempre; os valores nunca mudam.
+ */
 export function renderContractHeaderHtml(
   settings: ContractHeaderSettings | null | undefined,
   sampleData: Record<string, any> = {},
+  idioma: string = "pt",
 ): string {
   const s = settings || {};
   const primary = /^#[0-9a-fA-F]{3,8}$/.test(s.primary_color || "") ? (s.primary_color as string) : "#7C3AED";
@@ -97,10 +104,10 @@ export function renderContractHeaderHtml(
 
   // Linhas de info da empresa
   const infoLine1Parts: string[] = [];
-  if (s.show_nif !== false && nif) infoLine1Parts.push(`NIF: ${escapeHtml(nif)}`);
+  if (s.show_nif !== false && nif) infoLine1Parts.push(`${tDoc(idioma, "doc.cabecalho.nif")} ${escapeHtml(nif)}`);
   if (s.show_address !== false && morada) infoLine1Parts.push(escapeHtml(morada));
   const infoLine2Parts: string[] = [];
-  if (s.show_phone !== false && tel) infoLine2Parts.push(`Tel: ${escapeHtml(tel)}`);
+  if (s.show_phone !== false && tel) infoLine2Parts.push(`${tDoc(idioma, "doc.cabecalho.tel")} ${escapeHtml(tel)}`);
   if (s.show_email !== false && email) infoLine2Parts.push(escapeHtml(email));
   if (s.show_website && website) infoLine2Parts.push(escapeHtml(website));
 
@@ -124,15 +131,15 @@ export function renderContractHeaderHtml(
   const data = { ...sampleData, data: sampleData.data || todayPt() };
 
   const blockShow = s.contract_block_show !== false;
-  const title = s.contract_block_title || "CONTRATO";
+  const title = s.contract_block_title || tDoc(idioma, "doc.cabecalho.titulo");
   const subtitle = s.contract_block_subtitle || "";
-  const numberLabel = s.contract_block_number_label || "CONTRATO Nº";
+  const numberLabel = s.contract_block_number_label || tDoc(idioma, "doc.cabecalho.numero");
   const numberValue = fillVars(s.contract_block_number_value || "{{contrato_numero}}", data);
   const showDate = s.contract_block_show_date !== false;
-  const dateLabel = s.contract_block_date_label || "Data:";
+  const dateLabel = s.contract_block_date_label || tDoc(idioma, "doc.cabecalho.data");
   const dateValue = fillVars(s.contract_block_date_value || "{{data}}", data);
   const showCommercial = s.contract_block_show_commercial !== false;
-  const commercialLabel = s.contract_block_commercial_label || "Comercial:";
+  const commercialLabel = s.contract_block_commercial_label || tDoc(idioma, "doc.cabecalho.comercial");
   const commercialValue = fillVars(s.contract_block_commercial_value || "{{comercial_nome}}", data);
 
   const leftInner = blockShow

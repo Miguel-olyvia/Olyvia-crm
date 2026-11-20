@@ -34,8 +34,14 @@ import { PassosDoNegocio, passoDoNegocio } from "@/components/portal/negocio/Pas
 import { ConversaDoNegocio } from "@/components/portal/negocio/ConversaDoNegocio";
 import { ClausulasObra } from "@/components/portal/obra/ClausulasObra";
 import { contratoDaVista } from "@/components/portal/obra/dadosObra";
+import { contratoObraPdf, documentoObraHtml } from "@/components/portal/obra/documentoObraPdf";
 import { useVistaObra } from "@/components/portal/obra/useVistaObra";
 import { injectSignaturesIntoBlock, resolveContractDocument, downloadContractDocumentPdf } from "@/components/contracts/contractDocument";
+import { bodyDaVersaoComAssinatura, contratoUsaVersoes, soAVersaoDoContrato } from "@/components/contracts/contractVersions";
+import { VersaoDoContrato } from "@/components/contracts/VersaoDoContrato";
+import { SeletorVersaoDoDocumento } from "@/components/idiomaDocumento/SeletorVersaoDoDocumento";
+import { idiomaVisivelDoDocumento } from "@/lib/idiomaDocumento";
+import { ehPortalIdioma, type PortalIdioma } from "@/portal-i18n/tipos";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 
 // Código de estado do contrato (vem da base, não muda) -> chave da etiqueta. Um estado sem etiqueta aparece como o código.
@@ -49,6 +55,19 @@ const ESTADO_CHAVES: Readonly<Record<string, string>> = {
   expired: "pc.contratoDet.estado.expired",
   cancelled: "pc.contratoDet.estado.cancelled",
 };
+
+/**
+ * O documento resolvido com o HTML das cláusulas do negócio por baixo do corpo. O PDF imprime as `versoes` quando as há
+ * (e o resolver devolve-as sempre), por isso o HTML vai também para o fim da última versão, e não só para `bodyHtml`.
+ * Não altera o recebido.
+ */
+function comClausulasNoPdf<D extends { bodyHtml: string; versoes?: ReadonlyArray<{ bodyHtml: string }> }>(documento: D, html: string): D {
+  const versoes = documento.versoes;
+  const comCorpo = { ...documento, bodyHtml: documento.bodyHtml + html };
+  if (!versoes?.length) return comCorpo;
+  const ultima = versoes.length - 1;
+  return { ...comCorpo, versoes: versoes.map((v, i) => (i === ultima ? { ...v, bodyHtml: v.bodyHtml + html } : v)) } as D;
+}
 
 const ClientPortalContractDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -91,11 +110,64 @@ const ClientPortalContractDetail = () => {
   const contractStatus: string | undefined = contract?.status;
   const obra = useMemo(() => contratoDaVista(vistaObra, { proposta: "accepted", contrato: contractStatus }), [vistaObra, contractStatus]);
 
+  // A versão de idioma que o cliente escolheu no seletor (só há seletor com mais de uma versão). Vazia = ainda não
+  // escolheu: vale o idioma da interface do portal, se o contrato o tem, senão a primeira versão.
+  const [idiomaEscolhido, setIdiomaEscolhido] = useState<string | null>(null);
+
   useEffect(() => {
     if (!id) return;
+    setIdiomaEscolhido(null);
     loadData();
     logView();
   }, [id]);
+
+  // As versões de idioma do corpo. Um contrato de sempre (português, sem versões) não passa por aqui e mostra-se
+  // como antes. Um contrato com versões ou noutro idioma mostra-se pelo MESMO resolver que o PDF
+  // (resolveContractDocument → versoes): uma secção por idioma, já com variáveis e assinaturas resolvidas; um contrato
+  // assinado (congelado) divide-se pelas marcas, não se recalcula. «naoCongelar»: quem só vê o contrato no portal não o
+  // congela.
+  const usaVersoes = !!contract?.contract_body_html && contratoUsaVersoes(contract.contract_body_html, contract);
+  type VersoesDoPortal = { estado: "a-carregar" } | { estado: "falhou" } | { estado: "pronto"; versoes: Array<{ codigo: string; bodyHtml: string }> };
+  const [versoesDoPortal, setVersoesDoPortal] = useState<VersoesDoPortal>({ estado: "a-carregar" });
+  useEffect(() => {
+    if (!usaVersoes || !contract?.organization_id) return;
+    let vivo = true;
+    setVersoesDoPortal({ estado: "a-carregar" });
+    resolveContractDocument(contract, contract.organization_id, undefined, { naoCongelar: true })
+      .then((documento) => {
+        if (!vivo) return;
+        setVersoesDoPortal(documento?.versoes?.length ? { estado: "pronto", versoes: documento.versoes } : { estado: "falhou" });
+      })
+      .catch((error: unknown) => {
+        console.error("[portal] contract versions failed:", error);
+        captureFlowError(error, "client-portal-contract");
+        if (vivo) setVersoesDoPortal({ estado: "falhou" });
+      });
+    return () => {
+      vivo = false;
+    };
+  }, [usaVersoes, contract]);
+
+  // Com mais de uma versão mostra-se UMA de cada vez, com um seletor no topo. A versão que não tem o bloco de
+  // assinatura (a composição só o deixa na última) leva o da última anexado: a assinatura (OTP) é uma só e vale para
+  // as duas, e o cliente vê onde se assina e o carimbo em qualquer idioma. Com uma só versão, tudo como antes.
+  const versoesProntas = useMemo(
+    () => (usaVersoes && versoesDoPortal.estado === "pronto" ? versoesDoPortal.versoes : []),
+    [usaVersoes, versoesDoPortal],
+  );
+  const comSeletor = versoesProntas.length > 1;
+  const idiomaVisivel = comSeletor
+    ? idiomaVisivelDoDocumento({ disponiveis: versoesProntas.map((v) => v.codigo), escolhido: idiomaEscolhido, idiomaDaInterface: idioma })
+    : null;
+  const versaoAMostrar = useMemo(
+    () => (idiomaVisivel ? { codigo: idiomaVisivel, bodyHtml: bodyDaVersaoComAssinatura(versoesProntas, idiomaVisivel) } : null),
+    [idiomaVisivel, versoesProntas],
+  );
+  // O idioma das cláusulas do negócio (por baixo da minuta, no ecrã e no PDF): o da versão visível quando o contrato
+  // tem versões (ou um só idioma gravado) e o portal sabe escrever nesse idioma; um contrato de sempre segue o idioma
+  // do portal, como hoje.
+  const codigoVisivel = idiomaVisivel ?? (versoesProntas.length === 1 ? versoesProntas[0].codigo : null);
+  const idiomaDasClausulas: PortalIdioma = ehPortalIdioma(codigoVisivel) ? codigoVisivel : idioma;
 
   async function logView() {
     try {
@@ -163,7 +235,12 @@ const ClientPortalContractDetail = () => {
         return;
       }
       const label = contract.contract_number || contract.title || t("pc.contratoDet.tituloPadrao");
-      await downloadContractDocumentPdf(resolved, label, label);
+      // Com seletor, o PDF leva só a versão que o cliente está a ver (o PDF com os dois idiomas continua no CRM).
+      const daVersao = idiomaVisivel ? soAVersaoDoContrato(resolved, idiomaVisivel) : resolved;
+      // Com a vista do negócio, o PDF leva por baixo da minuta as cláusulas do negócio e as adendas assinadas (o que o
+      // ecrã mostra), no idioma do documento. Só na apresentação: o corpo gravado do contrato não muda.
+      const paraPdf = obra ? comClausulasNoPdf(daVersao, documentoObraHtml(contratoObraPdf(obra, idiomaDasClausulas))) : daVersao;
+      await downloadContractDocumentPdf(paraPdf, label, label);
     } catch (error: any) {
       console.error("[portal] contract PDF download failed:", error);
       captureFlowError(error, "client-portal-contract");
@@ -500,6 +577,41 @@ const ClientPortalContractDetail = () => {
               </Button>
             </CardHeader>
             <CardContent>
+              {usaVersoes && versoesDoPortal.estado === "a-carregar" && (
+                <div aria-busy="true" role="status" aria-label={t("pc.contratoDet.corpo.titulo")}>
+                  <Skeleton className="h-64 w-full" />
+                </div>
+              )}
+              {usaVersoes && versoesDoPortal.estado === "pronto" && (
+                <div className="space-y-5">
+                  {comSeletor && idiomaVisivel && versaoAMostrar ? (
+                    <>
+                      <SeletorVersaoDoDocumento
+                        idiomas={versoesProntas.map((v) => v.codigo)}
+                        valor={idiomaVisivel}
+                        rotulo={t("pc.contratoDet.idioma.rotulo")}
+                        onChange={setIdiomaEscolhido}
+                      />
+                      <VersaoDoContrato
+                        key={versaoAMostrar.codigo}
+                        codigo={versaoAMostrar.codigo}
+                        bodyHtml={versaoAMostrar.bodyHtml}
+                        classeCorpo="prose prose-sm max-w-none dark:prose-invert"
+                      />
+                    </>
+                  ) : (
+                    versoesDoPortal.versoes.map((versao) => (
+                      <VersaoDoContrato
+                        key={versao.codigo}
+                        codigo={versao.codigo}
+                        bodyHtml={versao.bodyHtml}
+                        classeCorpo="prose prose-sm max-w-none dark:prose-invert"
+                      />
+                    ))
+                  )}
+                </div>
+              )}
+              {(!usaVersoes || versoesDoPortal.estado === "falhou") && (
               <div
                 className="prose prose-sm max-w-none dark:prose-invert"
                 dangerouslySetInnerHTML={{
@@ -523,12 +635,13 @@ const ClientPortalContractDetail = () => {
                   ),
                 }}
               />
+              )}
             </CardContent>
           </Card>
         )}
 
-        {/* As cláusulas do negócio e as adendas assinadas (a vista do cliente), por baixo da minuta */}
-        {obra && <ClausulasObra dados={obra} idioma={idioma} />}
+        {/* As cláusulas do negócio e as adendas assinadas (a vista do cliente), por baixo da minuta, no idioma do documento visível */}
+        {obra && <ClausulasObra dados={obra} idioma={idiomaDasClausulas} />}
 
         {/* Documents */}
         {documents.length > 0 && (

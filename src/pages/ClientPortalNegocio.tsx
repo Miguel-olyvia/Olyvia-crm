@@ -222,6 +222,7 @@ const ClientPortalNegocio = () => {
     <PortalCliente
       ctx={ctx}
       d={d}
+      idioma={idioma}
       fechar={() => navigate("/client-portal/negocios")}
       real={{
         documentosNoTemplate: true, // a proposta e o contrato abrem o documento do template (as páginas reais), nunca o desenho da V1

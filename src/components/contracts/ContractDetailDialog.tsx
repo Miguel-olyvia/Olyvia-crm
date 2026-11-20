@@ -23,6 +23,9 @@ import {
   FileText, Calendar, User, Euro, Send, Pencil, Loader2, Clock, Building2, Hash, CreditCard, StickyNote, CheckCircle, AlertTriangle, Paperclip, Edit3,
 } from "lucide-react";
 import { contractDetailFormSchema, contractPromptValuesSchema } from "@/lib/validations";
+import { IDIOMA_BASE, idiomaBaseDoTemplate, idiomasDisponiveisContrato } from "@/lib/idiomaDocumento";
+import { SeletorIdiomaDocumento } from "@/components/idiomaDocumento/SeletorIdiomaDocumento";
+import { useEscolhaDeIdiomas } from "@/components/contracts/idiomaPreferido";
 
 interface PromptVar { key: string; label: string; description: string | null; promptType: "text" | "textarea" | "number" | "date"; }
 
@@ -32,7 +35,7 @@ interface ContractDetailDialogProps {
   contract: any | null;
   proposals: any[];
   templates: any[];
-  onSave: (data: { proposal_id: string; template_id: string; start_date: string; end_date: string; notes: string; payment_terms: string; prompt_values?: Record<string, string>; id?: string }) => void;
+  onSave: (data: { proposal_id: string; template_id: string; start_date: string; end_date: string; notes: string; payment_terms: string; prompt_values?: Record<string, string>; id?: string; idiomas?: string[] }) => void;
   saving: boolean;
   isNew?: boolean;
   /** Só a ficha da pessoa (P3): a proposta com que um contrato NOVO abre já escolhida. Sem isto nada muda. */
@@ -167,6 +170,11 @@ export function ContractDetailDialog({
   const submitPayload = () => {
 
     const payload: any = contract ? { ...formData, id: contract.id } : { ...formData };
+    // Só se envia a escolha quando há mesmo o que escolher e ela não é o português de sempre:
+    // sem versões (ou só português) o payload fica exatamente como era.
+    if (podeEscolherIdioma && !(escolhaIdiomas.length === 1 && escolhaIdiomas[0] === IDIOMA_BASE)) {
+      payload.idiomas = escolhaIdiomas;
+    }
     onSave(payload);
   };
 
@@ -188,6 +196,16 @@ export function ContractDetailDialog({
   const selectedTemplate = useMemo(
     () => templates.find((template: any) => template.id === formData.template_id) || null,
     [templates, formData.template_id]
+  );
+
+  // Idiomas em que a minuta escolhida pode ser gerada: o seletor só aparece com dois ou mais, e só ao criar
+  // (o corpo de um contrato já criado não se recompõe por aqui; para isso há «Regenerar» no separador Contrato).
+  const idiomasDisponiveis = useMemo(() => idiomasDisponiveisContrato(selectedTemplate), [selectedTemplate]);
+  const podeEscolherIdioma = !!isNew && idiomasDisponiveis.length >= 2;
+  const { escolha: escolhaIdiomas, mudar: mudarIdiomas } = useEscolhaDeIdiomas(
+    formData.template_id || null,
+    idiomasDisponiveis,
+    idiomaBaseDoTemplate(selectedTemplate),
   );
 
   // Deteta variáveis "Preencher no contrato" presentes no corpo da minuta selecionada.
@@ -483,7 +501,14 @@ export function ContractDetailDialog({
                 </Select>
               </div>
 
-
+              {podeEscolherIdioma && (
+                <div className="space-y-2">
+                  <Label className="text-xs font-medium">{t("contractTemplates.versoes.seletor.idiomaDoContrato")}</Label>
+                  <div>
+                    <SeletorIdiomaDocumento disponiveis={idiomasDisponiveis} valor={escolhaIdiomas} onChange={mudarIdiomas} />
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">

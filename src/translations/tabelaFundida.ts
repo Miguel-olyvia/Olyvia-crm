@@ -44,6 +44,8 @@ import { canalDenunciasMinhaAreaTranslations } from "@/translations/canalDenunci
 import { rhOficiosObraTranslations } from "@/translations/rhOficiosObra";
 import { rhExemploCargoSeguroTranslations } from "@/translations/rhExemploCargoSeguro";
 import { rhExemploDatasContratosTranslations } from "@/translations/rhExemploDatasContratos";
+import { versoesTemplatesTranslations } from "@/translations/versoesTemplates";
+import { proposalTemplateVersionsTranslations } from "@/translations/proposalTemplateVersions";
 
 // Merge bundle and priceContexts translations
 export const tabelaFundida: Record<string, Record<string, string>> = { ...translations } as any;
@@ -235,4 +237,14 @@ Object.keys(rhExemploCargoSeguroTranslations).forEach((lang) => {
 // rh-exemplo › datas da pessoa derivadas dos contratos (`hr.contrato.datasPessoa.*`, `hr.erro.datas.*`, `rhNova.f.dataContratacao`...) — módulo próprio, mesmo padrão.
 Object.keys(rhExemploDatasContratosTranslations).forEach((lang) => {
   tabelaFundida[lang] = { ...tabelaFundida[lang], ...rhExemploDatasContratosTranslations[lang as keyof typeof rhExemploDatasContratosTranslations] };
+});
+
+// Minutas com versões por idioma (barra de idiomas, «O que falta traduzir», chips) — módulo próprio, mesmo padrão.
+Object.keys(versoesTemplatesTranslations).forEach((lang) => {
+  tabelaFundida[lang] = { ...tabelaFundida[lang], ...versoesTemplatesTranslations[lang] };
+});
+
+// Editor de templates de proposta/orçamento com versões por idioma (`proposalTemplateEditor.versions.*`) — mesmo padrão.
+Object.keys(proposalTemplateVersionsTranslations).forEach((lang) => {
+  tabelaFundida[lang] = { ...tabelaFundida[lang], ...proposalTemplateVersionsTranslations[lang] };
 });

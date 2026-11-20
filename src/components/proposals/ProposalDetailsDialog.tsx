@@ -51,6 +51,7 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
 import { lerCustosDasLinhas, juntarCustos } from "@/lib/quotes/quoteLineCosts";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { ChipIdiomaProposta } from "@/components/proposals/ChipIdiomaProposta";
 
 const CALL_RESULT_LABELS: Record<string, string> = {
   answered: "Chamada atendida",
@@ -199,6 +200,8 @@ interface ProposalDetailsDialogProps {
   proposal: {
     id: string;
     proposal_number?: string | null;
+    /** Idioma(s) do documento: nulo = português. */
+    language?: string | null;
     title: string;
     description: string | null;
     value: number;
@@ -518,6 +521,7 @@ export function ProposalDetailsDialog({
               )}
               {proposal.proposal_number && <span className="text-muted-foreground">·</span>}
               <span>{proposal.title}</span>
+              <ChipIdiomaProposta language={extendedData?.language ?? proposal.language} />
             </DialogTitle>
             <Button variant="outline" size="sm" className="gap-1 mr-6" onClick={() => setPortalPreviewOpen(true)}>
               <Eye className="h-4 w-4" /> Preview Portal

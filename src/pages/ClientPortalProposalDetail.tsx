@@ -24,6 +24,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { useCooldown, OTP_COOLDOWN_SECONDS } from "@/hooks/useCooldown";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { resolverIdiomasDaProposta } from "@/utils/idiomasDaProposta";
+import { idiomasDisponiveisProposta, idiomaVisivelDoDocumento } from "@/lib/idiomaDocumento";
+import { ehPortalIdioma, type PortalIdioma } from "@/portal-i18n/tipos";
 import { MOTIVOS_REJEICAO_PROPOSTA } from "@/components/portal/motivosRejeicao";
 import {
   mensagemDeChave,
@@ -69,6 +72,9 @@ const ClientPortalProposalDetail = () => {
   const [questionText, setQuestionText] = useState("");
   const [selectedQuoteIds, setSelectedQuoteIds] = useState<string[]>([]);
   const [attachments, setAttachments] = useState<any[]>([]);
+  // A versão de idioma que o cliente escolheu no seletor (só há seletor com mais de um idioma). Vazia = ainda não
+  // escolheu: vale o idioma da interface. Fica na página para o PDF e a obra seguirem a versão que se está a ver.
+  const [idiomaEscolhido, setIdiomaEscolhido] = useState<string | null>(null);
 
   // OTP states
   const [otpStep, setOtpStep] = useState<"idle" | "sending" | "input" | "verifying" | "verified">("idle");
@@ -132,6 +138,7 @@ const ClientPortalProposalDetail = () => {
 
   useEffect(() => {
     if (!id) return;
+    setIdiomaEscolhido(null);
     void reloadPortalData();
     void loadAttachments();
     void logView();
@@ -439,6 +446,29 @@ const ClientPortalProposalDetail = () => {
   const canActOnProposal = !["accepted", "rejected", "expired"].includes(proposal.status);
   const statusLabelKey = proposal.status === "draft" && canActOnProposal ? "pc.propostaDet.estado.aguardaDecisao" : STATUS_LABEL_KEYS[proposal.status];
   const statusLabel = statusLabelKey ? t(statusLabelKey) : proposal.status;
+  // Idiomas do documento. Um template SEM versões de idioma fica exatamente como hoje: o documento não recebe idiomas
+  // (as palavras seguem o idioma do portal) e a obra também. Com versões, o idioma do documento é o do botão do portal
+  // quando o template tem essa versão (senão o base), ou o que a proposta gravou; decide-se ao desenhar, e não ao
+  // carregar, porque o cliente pode trocar o idioma sem recarregar a proposta. O PDF usa os mesmos.
+  const temVersoes = idiomasDisponiveisProposta(portalData.template).length > 1;
+  const idiomasDoDocumento = resolverIdiomasDaProposta({
+    linha: proposal,
+    template: portalData.template,
+    idiomaDoPortal: idioma,
+  });
+  // Com mais de um idioma o portal mostra UMA versão de cada vez (seletor no topo do documento) e o PDF leva a mesma.
+  // Só contam os idiomas que o portal sabe escrever (os mesmos que o documento oferece); com um só, tudo como antes.
+  const idiomasComSeletor = idiomasDoDocumento.filter(ehPortalIdioma);
+  const idiomaVisivel = idiomasComSeletor.length > 1
+    ? idiomaVisivelDoDocumento({ disponiveis: idiomasComSeletor, escolhido: idiomaEscolhido, idiomaDaInterface: idioma })
+    : null;
+  const idiomasDoPdf = idiomaVisivel ? [idiomaVisivel] : idiomasDoDocumento;
+  // O idioma em que o documento se lê (e em que vêm a obra e os rótulos do PDF da obra): a versão visível, a única
+  // versão do documento, ou (template sem versões) o do portal, como hoje.
+  const versaoUnica = idiomasComSeletor.length === 1 ? idiomasComSeletor[0] : null;
+  const idiomaDoDocumento: PortalIdioma = temVersoes
+    ? ((idiomaVisivel ?? versaoUnica ?? idioma) as PortalIdioma)
+    : idioma;
 
   return (
     <ClientPortalLayout>
@@ -461,7 +491,11 @@ const ClientPortalProposalDetail = () => {
           company={portalData.company}
           mode="portal"
           idioma={idioma}
-          documentoObra={obra ? <DocumentoObra dados={obra} idioma={idioma} cor={portalData.template?.primary_color || undefined} /> : undefined}
+          idiomasDoDocumento={temVersoes ? idiomasDoDocumento : undefined}
+          modoVersoes="seletor"
+          idiomaEscolhido={idiomaEscolhido}
+          onIdiomaEscolhidoChange={setIdiomaEscolhido}
+          documentoObra={obra ? <DocumentoObra dados={obra} idioma={idiomaDoDocumento} cor={portalData.template?.primary_color || undefined} /> : undefined}
           statusLabel={statusLabel}
           canActOnProposal={canActOnProposal}
           actionLoading={actionLoading}
@@ -511,7 +545,10 @@ const ClientPortalProposalDetail = () => {
                 });
                 return;
               }
-              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, payload);
+              // Com a vista do negócio, o PDF leva também a obra (os mesmos blocos do ecrã), no idioma do documento. Com
+              // várias versões, o PDF leva só a que o cliente está a ver (o PDF com todas continua no CRM).
+              const obraNoPdf = obra ? { dados: obra, idioma: idiomaDoDocumento, cor: portalData.template?.primary_color || undefined } : null;
+              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, payload, obraNoPdf, { idiomas: idiomasDoPdf });
               downloadBlob(blob, fileName);
             } catch (e: unknown) {
               toast({

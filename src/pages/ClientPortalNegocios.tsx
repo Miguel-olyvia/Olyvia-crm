@@ -61,6 +61,14 @@ async function lerNegocios(org: PortalOrg): Promise<NegocioDoCliente[]> {
   return lista;
 }
 
+/** Para onde leva o «Abrir»: quando o que falta é decidir (rever a proposta, assinar o contrato) vai direto ao documento; nos restantes casos
+ *  (e quando o contrato ainda não existe) abre a página do negócio (o percurso, a obra, a conversa). */
+function destinoDoNegocio(n: NegocioDoCliente): string {
+  if (n.passo === 1) return `/client-portal/proposals/${n.propostaId}`;
+  if (n.passo === 3 && n.contratoId) return `/client-portal/contracts/${n.contratoId}`;
+  return `/client-portal/negocios/${n.negocioId}`;
+}
+
 const ClientPortalNegocios = () => {
   const navigate = useNavigate();
   const { t, tn } = usePortalT();
@@ -92,9 +100,7 @@ const ClientPortalNegocios = () => {
   const loading = orgsLoading || (Boolean(activeOrg) && consulta.isLoading);
   const falhou = consulta.isError && !consulta.data;
 
-  // 2/11: abre o negócio inteiro (o ecrã da V1: plano da obra, acompanhamento, documentos); sem a vista do cliente, essa página abre
-  // a proposta ou o contrato, como antes.
-  const abrir = (n: NegocioDoCliente) => navigate(`/client-portal/negocios/${n.negocioId}`);
+  const abrir = (n: NegocioDoCliente) => navigate(destinoDoNegocio(n));
 
   return (
     <ClientPortalLayout>

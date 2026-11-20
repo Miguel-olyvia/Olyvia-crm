@@ -14,9 +14,12 @@ import {
 } from "lucide-react";
 import { TableInsertPopover } from "./TableInsertPopover";
 import { FormulaInsertPopover } from "./FormulaInsertPopover";
+import { htmlBlocoAssinatura } from "./versoes/blocosDeInsercao";
 
 interface Props {
   onExecCommand: (cmd: string, value?: string) => void;
+  /** Idioma do corpo que se está a editar (palavras do bloco de assinatura); omissão: português. */
+  idioma?: string;
 }
 
 const FONT_SIZES = [
@@ -43,7 +46,7 @@ const COLORS = [
   "#ca8a04", "#16a34a", "#0891b2", "#2563eb", "#7c3aed", "#c026d3",
 ];
 
-export function EnhancedToolbarButtons({ onExecCommand }: Props) {
+export function EnhancedToolbarButtons({ onExecCommand, idioma }: Props) {
   const [textColor, setTextColor] = useState("#000000");
   const [bgColor, setBgColor] = useState("#fef08a");
   const savedRangeRef = useRef<Range | null>(null);
@@ -95,22 +98,8 @@ export function EnhancedToolbarButtons({ onExecCommand }: Props) {
   }, [restoreSelection]);
 
   const insertSignatureBlock = useCallback(() => {
-    const html = `<br/><div style="margin-top:40px;">
-      <div style="display:flex;justify-content:space-between;gap:60px;">
-        <div style="flex:1;text-align:center;">
-          <div style="border-bottom:1px solid #000;margin-bottom:8px;height:40px;"></div>
-          <p style="font-size:12px;"><strong>A PRIMEIRA CONTRATANTE</strong></p>
-          <p style="font-size:11px;color:#666;">(Nome / Carimbo)</p>
-        </div>
-        <div style="flex:1;text-align:center;">
-          <div style="border-bottom:1px solid #000;margin-bottom:8px;height:40px;"></div>
-          <p style="font-size:12px;"><strong>O SEGUNDO CONTRATANTE</strong></p>
-          <p style="font-size:11px;color:#666;">(Nome / Assinatura)</p>
-        </div>
-      </div>
-    </div><br/>`;
-    document.execCommand("insertHTML", false, html);
-  }, []);
+    document.execCommand("insertHTML", false, htmlBlocoAssinatura(idioma));
+  }, [idioma]);
 
   const insertPageBreak = useCallback(() => {
     const html = `<div style="page-break-after:always;border-top:2px dashed #d1d5db;margin:20px 0;padding-top:4px;text-align:center;"><span style="font-size:10px;color:#9ca3af;">— quebra de página —</span></div>`;

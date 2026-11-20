@@ -1,6 +1,6 @@
 // As páginas da proposta e do contrato no portal do cliente com o documento da obra: com o negócio e a vista (portal_neg_vista), os
 // blocos aparecem; sem negócio ou sem vista, a página fica como antes (nem se pede a vista sem negócio).
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { seed } from "@/emylia/motor";
@@ -40,12 +40,18 @@ vi.mock("@/components/contracts/contractDocument", () => ({
   downloadContractDocumentPdf: vi.fn(),
 }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
+vi.mock("@/utils/generateProposalPdfBlob", () => ({
+  generateProposalPdfBlob: vi.fn(async () => ({ blob: new Blob(["x"]), fileName: "p.pdf" })),
+  downloadBlob: vi.fn(),
+}));
 vi.mock("@/components/proposals/proposalPortalData", () => ({
   loadProposalPortalData: () => Promise.resolve({ proposal: proposta, template: null, quotes: [], quoteLines: {}, quoteFees: {}, commercial: { name: "Rúben" }, company: null }),
 }));
 
 import ClientPortalContractDetail from "../ClientPortalContractDetail";
 import ClientPortalProposalDetail from "../ClientPortalProposalDetail";
+import { downloadContractDocumentPdf, resolveContractDocument } from "@/components/contracts/contractDocument";
+import { generateProposalPdfBlob } from "@/utils/generateProposalPdfBlob";
 
 /** A vista de um negócio do exemplo, como portal_neg_vista a devolve. */
 function vistaJson() {
@@ -64,6 +70,7 @@ beforeAll(() => {
   document.elementFromPoint = () => null;
 });
 beforeEach(() => {
+  vi.clearAllMocks();
   invoke.mockReset(); invoke.mockResolvedValue({ data: null, error: null });
   rpc.mockReset();
   contrato = { id: "c1", status: "pending", organization_id: "o1", contract_number: "C-1", total_value: 1000, contract_body_html: "<p>Minuta</p>" };
@@ -98,6 +105,36 @@ describe("contrato no portal com o documento da obra", () => {
     expect(screen.queryByTestId("clausulas-obra")).toBeNull();
   });
 
+  it.each([
+    ["pt", "Cláusulas do negócio"],
+    ["en", "Deal clauses"],
+  ] as const)("o PDF (%s): a minuta e por baixo as cláusulas do negócio, no idioma do documento", async (idioma, titulo) => {
+    act(() => definirIdioma(idioma));
+    contrato.negocio_id = "n1";
+    rpc.mockResolvedValue({ data: vistaJson(), error: null });
+    vi.mocked(resolveContractDocument).mockResolvedValue({ bodyHtml: "<p>Minuta</p>" } as never);
+    abrir("/c/c1", "/c/:id", <ClientPortalContractDetail />);
+    await screen.findByRole("heading", { name: titulo });
+    fireEvent.click(screen.getByRole("button", { name: idioma === "en" ? "Download PDF" : "Descarregar PDF" }));
+    await waitFor(() => expect(downloadContractDocumentPdf).toHaveBeenCalled());
+    const corpo = vi.mocked(downloadContractDocumentPdf).mock.calls.at(-1)![0].bodyHtml;
+    expect(corpo.startsWith("<p>Minuta</p>")).toBe(true);
+    expect(corpo).toContain(`<section data-doc-obra="contrato" lang="${idioma}"`);
+    expect(corpo).toContain(titulo);
+  });
+
+  it("o PDF sem vista: a minuta como antes, sem nada acrescentado", async () => {
+    contrato.negocio_id = "n1";
+    rpc.mockResolvedValue({ data: null, error: null });
+    vi.mocked(resolveContractDocument).mockResolvedValue({ bodyHtml: "<p>Minuta</p>" } as never);
+    abrir("/c/c1", "/c/:id", <ClientPortalContractDetail />);
+    await screen.findByText("Minuta");
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("button", { name: "Descarregar PDF" }));
+    await waitFor(() => expect(downloadContractDocumentPdf).toHaveBeenCalled());
+    expect(vi.mocked(downloadContractDocumentPdf).mock.calls.at(-1)![0].bodyHtml).toBe("<p>Minuta</p>");
+  });
+
   it("sem negócio: nem pede a vista", async () => {
     abrir("/c/c1", "/c/:id", <ClientPortalContractDetail />);
     expect(await screen.findByText("Minuta")).toBeInTheDocument();
@@ -115,6 +152,23 @@ describe("proposta no portal com o documento da obra", () => {
     expect(screen.getByRole("heading", { name: /O que vamos fazer/ })).toBeInTheDocument();
     // o comercial da proposta assina pela empresa na aceitação
     expect(screen.getAllByText("Rúben").length).toBeGreaterThan(0);
+  });
+
+  it.each(["pt", "en"] as const)("o PDF (%s): o gerador recebe a obra e o idioma do documento", async (idioma) => {
+    act(() => definirIdioma(idioma));
+    proposta.negocio_id = "n1";
+    rpc.mockResolvedValue({ data: vistaJson(), error: null });
+    const payload = { proposal: proposta, quotes: [{ quote: { id: "q1" }, lines: [], fees: [] }] };
+    invoke.mockImplementation(async (_n: string, o: { body?: { action?: string } }) =>
+      o?.body?.action === "get_proposal_pdf_data" ? { data: payload, error: null } : { data: null, error: null });
+    abrir("/p/p1", "/p/:id", <ClientPortalProposalDetail />);
+    await screen.findByTestId("documento-obra");
+    fireEvent.click(screen.getAllByRole("button", { name: /Download PDF/ })[0]);
+    await waitFor(() => expect(generateProposalPdfBlob).toHaveBeenCalled());
+    const [id, , obra] = vi.mocked(generateProposalPdfBlob).mock.calls.at(-1)!;
+    expect(id).toBe("p1");
+    expect(obra).toMatchObject({ idioma });
+    expect(obra!.dados.prestacoes.length).toBeGreaterThan(0);
   });
 
   it("sem vista: a proposta como antes", async () => {

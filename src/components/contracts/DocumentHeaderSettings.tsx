@@ -13,12 +13,20 @@ import type { DocumentSettings } from "@/hooks/useDocumentSettings";
 import { useOrgHeaderData } from "./useOrgHeaderData";
 import { getUploadErrorMessage, parseValidateUploadResponse, resolveValidateUploadErrorMessage } from "@/lib/uploadErrors";
 import { getSafeFileExtension } from "@/utils/secureFileUpload";
+import { tDoc } from "@/lib/idiomaDocumento/dicionario";
+import { CamposComuns, type VersaoEmEdicao } from "./versoes/CamposComuns";
+import { ID_CAMPO_MINUTA } from "./versoes/idsDeIdioma";
 
 interface Props {
   settings: DocumentSettings;
   onChange: (s: Partial<DocumentSettings>) => void;
   orgName?: string;
+  /** Presente quando se edita uma versão de idioma: só os textos do bloco do contrato são editáveis. */
+  versao?: VersaoEmEdicao;
 }
+
+/** Id estável do campo só quando se edita uma versão de idioma (o painel global reutiliza este componente). */
+const idDoCampo = (versao: unknown, chave: string) => (versao ? ID_CAMPO_MINUTA[chave] : undefined);
 
 const LOGO_SIZES = [
   { value: "small", label: "Pequeno" },
@@ -39,8 +47,11 @@ function validateFile(file: File): string | null {
   return null;
 }
 
-export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
+export function DocumentHeaderSettings({ settings, onChange, orgName, versao }: Props) {
   const { t } = useTranslation();
+  // Numa versão de idioma, o que não é texto é comum a todos os idiomas (desativado) e os textos têm sugestão no idioma.
+  const bloqueioComum = !!versao;
+  const sugestao = (chave: string) => (versao ? tDoc(versao.codigo, chave) : undefined);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadingRef = useRef(false);
   const { activeCompany } = useCompany();
@@ -100,6 +111,8 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
       <h4 className="text-sm font-semibold flex items-center gap-2">
         <ImageIcon className="h-4 w-4" /> Cabeçalho do Documento
       </h4>
+
+      <CamposComuns versao={versao}>
 
       {/* Estilo do cabeçalho */}
       <div className="space-y-2">
@@ -359,6 +372,7 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
         />
         Linha separadora sob o cabeçalho
       </label>
+      </CamposComuns>
 
       {/* Bloco contrato — só no estilo split */}
       {showContractBlock && (
@@ -368,6 +382,7 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
             <Switch
               checked={settings.contract_block_show !== false}
               onCheckedChange={(v) => onChange({ contract_block_show: v })}
+              disabled={bloqueioComum}
               className="h-4 w-7 [&>span]:h-3 [&>span]:w-3"
             />
           </div>
@@ -377,8 +392,10 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
               <div className="space-y-1">
                 <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Título</Label>
                 <Input
+                  id={idDoCampo(versao, "contract_block_title")}
                   value={settings.contract_block_title ?? "CONTRATO"}
                   onChange={(e) => onChange({ contract_block_title: e.target.value })}
+                  placeholder={sugestao("doc.cabecalho.titulo")}
                   className="h-8 text-sm"
                 />
               </div>
@@ -395,8 +412,10 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
                 <div className="space-y-1">
                   <Label className="text-[10px] uppercase tracking-wide text-muted-foreground">Label nº</Label>
                   <Input
+                    id={idDoCampo(versao, "contract_block_number_label")}
                     value={settings.contract_block_number_label ?? "CONTRATO Nº"}
                     onChange={(e) => onChange({ contract_block_number_label: e.target.value })}
+                    placeholder={sugestao("doc.cabecalho.numero")}
                     className="h-8 text-sm"
                   />
                 </div>
@@ -405,6 +424,7 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
                   <Input
                     value={settings.contract_block_number_value ?? "{{contrato_numero}}"}
                     onChange={(e) => onChange({ contract_block_number_value: e.target.value })}
+                    disabled={bloqueioComum}
                     className="h-8 text-sm font-mono"
                   />
                 </div>
@@ -415,19 +435,23 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
                 <Switch
                   checked={settings.contract_block_show_date !== false}
                   onCheckedChange={(v) => onChange({ contract_block_show_date: v })}
+                  disabled={bloqueioComum}
                   className="h-4 w-7 [&>span]:h-3 [&>span]:w-3"
                 />
               </div>
               {settings.contract_block_show_date !== false && (
                 <div className="grid grid-cols-2 gap-2">
                   <Input
+                    id={idDoCampo(versao, "contract_block_date_label")}
                     value={settings.contract_block_date_label ?? "Data:"}
                     onChange={(e) => onChange({ contract_block_date_label: e.target.value })}
+                    placeholder={sugestao("doc.cabecalho.data")}
                     className="h-8 text-sm"
                   />
                   <Input
                     value={settings.contract_block_date_value ?? "{{data}}"}
                     onChange={(e) => onChange({ contract_block_date_value: e.target.value })}
+                    disabled={bloqueioComum}
                     className="h-8 text-sm font-mono"
                   />
                 </div>
@@ -438,19 +462,23 @@ export function DocumentHeaderSettings({ settings, onChange, orgName }: Props) {
                 <Switch
                   checked={settings.contract_block_show_commercial !== false}
                   onCheckedChange={(v) => onChange({ contract_block_show_commercial: v })}
+                  disabled={bloqueioComum}
                   className="h-4 w-7 [&>span]:h-3 [&>span]:w-3"
                 />
               </div>
               {settings.contract_block_show_commercial !== false && (
                 <div className="grid grid-cols-2 gap-2">
                   <Input
+                    id={idDoCampo(versao, "contract_block_commercial_label")}
                     value={settings.contract_block_commercial_label ?? "Comercial:"}
                     onChange={(e) => onChange({ contract_block_commercial_label: e.target.value })}
+                    placeholder={sugestao("doc.cabecalho.comercial")}
                     className="h-8 text-sm"
                   />
                   <Input
                     value={settings.contract_block_commercial_value ?? "{{comercial_nome}}"}
                     onChange={(e) => onChange({ contract_block_commercial_value: e.target.value })}
+                    disabled={bloqueioComum}
                     className="h-8 text-sm font-mono"
                   />
                 </div>

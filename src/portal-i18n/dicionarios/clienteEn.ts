@@ -8,11 +8,13 @@ import { clienteEnContratoDet } from "./clienteEn.contratoDet";
 import { clienteEnDocProposta } from "./clienteEn.docProposta";
 import { clienteEnDocObra } from "./clienteEn.docObra";
 import { clienteEnDocNegocio } from "./clienteEn.docNegocio";
+import { clienteEnNegocioPagina } from "./clienteEn.negocioPagina";
 import { clienteEnLayout } from "./clienteEn.layout";
 import { clienteEnEmpresas } from "./clienteEn.empresas";
 import { clienteEnLogin } from "./clienteEn.login";
 import { clienteEnDocumentos } from "./clienteEn.documentos";
 import { clienteEnEstado } from "./clienteEn.estado";
+import { clienteEnIdiomaDocumento } from "./clienteEn.idiomaDocumento";
 export const clienteEn: Record<string, string> = {
   ...clienteEnLayout,
   ...clienteEnEmpresas,
@@ -26,6 +28,8 @@ export const clienteEn: Record<string, string> = {
   ...clienteEnDocProposta,
   ...clienteEnDocObra,
   ...clienteEnDocNegocio,
+  ...clienteEnNegocioPagina,
+  ...clienteEnIdiomaDocumento,
   // Layout
   "pc.layout.titulo": "Customer Portal",
   "pc.layout.menu.inicio": "Home",
