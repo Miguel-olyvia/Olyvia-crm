@@ -20,7 +20,20 @@ vi.mock("./chamadaNuvem", async (importOriginal) => {
   const real = await importOriginal<typeof import("./chamadaNuvem")>();
   return { ...real, ...nuvem };
 });
+// 20/11: a gravação do gravador pode ser posta à mão (`grav.estado`), e o descartar fica registado
+const grav = vi.hoisted(() => ({ estado: null as null | Record<string, unknown>, descartar: vi.fn() }));
+vi.mock("./gravador", async (importOriginal) => {
+  const real = await importOriginal<typeof import("./gravador")>();
+  return {
+    ...real,
+    useGravacao: () => (grav.estado ?? real.useGravacao()) as ReturnType<typeof real.useGravacao>,
+    descartarGravacao: () => { grav.descartar(); real.descartarGravacao(); },
+  };
+});
 import { ChamadaDireto } from "./ChamadaDireto";
+import { TranscricaoIncompleta } from "./chamadaNuvem";
+import { MSG_NOUTRO_SEPARADOR } from "./gravador";
+import { sinc } from "./sincronizacao";
 
 const GRUPOS: Grupo[] = [{ titulo: "Qualificação", campos: [
   { k: "imovel", l: "Tipo de imóvel", t: "escolha", op: ["Apartamento", "Moradia"] },
@@ -55,8 +68,10 @@ beforeEach(() => {
     return falas;
   });
   nuvem.preencherCampos.mockResolvedValue(extracao);
+  grav.estado = null;
+  vi.spyOn(sinc, "gravada").mockResolvedValue(true);
 });
-afterEach(() => { cleanup(); vi.clearAllMocks(); });
+afterEach(() => { cleanup(); vi.clearAllMocks(); vi.restoreAllMocks(); });
 
 const INSIGHTS = {
   resumo: "A Dona Inês quer remodelar a casa de banho.", temperatura: "quente", pontuacao: 82, porque_temperatura: "Quer começar já.",
@@ -253,5 +268,97 @@ describe("ChamadaDireto (4/11, na nuvem)", () => {
     fireEvent.click(screen.getByRole("button", { name: /Orçamento: respondido/ }));
     await act(async () => { soltar(); });
     await waitFor(() => expect(screen.queryByRole("region", { name: "Guia da conversa" })).toBeNull());
+  });
+});
+
+/** Uma gravação do gravador, posta à mão (o que useGravacao daria). */
+const gravacao = (x: Record<string, unknown>) => ({ negocio: 7, nome: "Inês", modo: "chamada", voltar: "/x", estado: "parado", falas: [], inicioEm: 1, pausas: 0,
+  pendentes: 0, falhadas: 0, aRever: 0, aFalar: false, nivel: 0, microfone: "", msg: "", noutroSeparador: false, pedeToque: false, ...x });
+const FALAS = [
+  { inicio: 3, fim: 5, texto: "É um apartamento no terceiro andar.", falante: "cliente", confianca_falante: 1, revista: true },
+  { inicio: 7, fim: 8, texto: "Muito bem.", falante: "comercial", confianca_falante: 1, revista: true },
+];
+
+describe("20/11 (auditoria de 19/11): o fim da gravação", () => {
+  it("a cópia local só se apaga depois de a base confirmar a transcrição; sem confirmação fica, com «Guardar outra vez»", async () => {
+    grav.estado = gravacao({ estado: "terminada", falas: FALAS });
+    const gravada = vi.spyOn(sinc, "gravada").mockResolvedValueOnce(false);
+    await act(async () => { render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />); });
+    await waitFor(() => expect(screen.getByText(/ainda não chegou à base/)).toBeInTheDocument());
+    expect(campo).toHaveBeenCalledWith(7, "transcricao_chamada", expect.stringContaining("Comercial: Muito bem."));
+    expect(gravada.mock.calls[0][0]).toBe("deal:7");
+    // o teste do que a base tem: a transcrição deste negócio, igual à que se gravou
+    const tem = gravada.mock.calls[0][1]!;
+    expect(tem({ f: { transcricao_chamada: campo.mock.calls[0][2] } })).toBe(true);
+    expect(tem({ f: {} })).toBe(false);
+    expect(grav.descartar).not.toHaveBeenCalled();
+    expect(nuvem.preencherCampos).not.toHaveBeenCalled();
+    // ainda por guardar: não se pode começar outra (apagava esta)
+    expect(screen.queryByRole("button", { name: "Iniciar chamada" })).toBeNull();
+    // com rede: guarda, só então apaga a cópia, e preenche
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Guardar outra vez" })); });
+    await waitFor(() => expect(screen.getByText(/Apartamento, proprietária\./)).toBeInTheDocument());
+    expect(grav.descartar).toHaveBeenCalledTimes(1);
+  });
+
+  it("os campos falharam mas a transcrição ficou: «Preencher os campos com a transcrição guardada»", async () => {
+    nuvem.preencherCampos.mockRejectedValueOnce(new Error("chamada-campos: sem rede"));
+    render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+    await waitFor(() => expect(screen.getByText(/A transcrição ficou guardada no negócio, mas os campos não/)).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Preencher os campos com a transcrição guardada" })); });
+    await waitFor(() => expect(screen.getByText(/Apartamento, proprietária\./)).toBeInTheDocument());
+    expect(nuvem.preencherCampos).toHaveBeenCalledTimes(2);
+    expect(nuvem.preencherCampos.mock.calls[1][0]).toHaveLength(2);
+  });
+
+  it("outro separador grava este negócio: vê-se, sem «Continuar a gravar» nem «Terminar»", () => {
+    grav.estado = gravacao({ estado: "interrompida", falas: FALAS, noutroSeparador: true, msg: MSG_NOUTRO_SEPARADOR });
+    render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
+    expect(screen.getByText(MSG_NOUTRO_SEPARADOR)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Continuar a gravar/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Terminar e preencher/ })).toBeNull();
+  });
+
+  it("depois de recarregar com o som em pausa (Safari), o botão diz «Toque para continuar a gravar»", () => {
+    grav.estado = gravacao({ estado: "interrompida", falas: FALAS, pedeToque: true, msg: "A página recarregou e o browser pôs o som em pausa. Toque para continuar a gravar." });
+    render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
+    expect(screen.getByRole("button", { name: "Toque para continuar a gravar" })).toBeInTheDocument();
+  });
+});
+
+describe("20/11 (auditoria de 19/11): gravação carregada de ficheiro", () => {
+  it("uma parte que falha não deita fora as outras: ficam à vista e repete-se só a que falta", async () => {
+    const primeira = [FALAS[0]];
+    nuvem.transcreverAudio.mockImplementationOnce(async () => { throw new TranscricaoIncompleta([primeira, undefined], [1], "chamada-transcrever: sem rede"); });
+    render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+    await waitFor(() => expect(screen.getByText(/Uma parte de 2 não ficou transcrita/)).toBeInTheDocument());
+    expect(screen.getByText("É um apartamento no terceiro andar.")).toBeInTheDocument();
+    expect(nuvem.preencherCampos).not.toHaveBeenCalled();
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Transcrever a parte que falta" })); });
+    await waitFor(() => expect(screen.getByText(/Apartamento, proprietária\./)).toBeInTheDocument());
+    // a segunda vez leva as partes feitas: só a que falta vai outra vez
+    expect(nuvem.transcreverAudio).toHaveBeenCalledTimes(2);
+    expect(nuvem.transcreverAudio.mock.calls[1][3]).toEqual([primeira, undefined]);
+    expect(nuvem.audioDeFicheiro).toHaveBeenCalledTimes(1); // o áudio não se abre outra vez
+  });
+
+  it("também se pode seguir só com o que está transcrito", async () => {
+    nuvem.transcreverAudio.mockImplementationOnce(async () => { throw new TranscricaoIncompleta([[FALAS[0]], undefined, [FALAS[1]]], [1], "sem rede"); });
+    render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+    await waitFor(() => expect(screen.getByText(/Uma parte de 3 não ficou transcrita/)).toBeInTheDocument());
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Seguir só com o que está transcrito" })); });
+    await waitFor(() => expect(screen.getByText(/Apartamento, proprietária\./)).toBeInTheDocument());
+    expect(nuvem.preencherCampos.mock.calls[0][0]).toHaveLength(2);
+  });
+
+  it("um ficheiro longo demais diz o máximo (a mensagem do audioDeFicheiro chega ao ecrã)", async () => {
+    nuvem.audioDeFicheiro.mockRejectedValueOnce(new Error("A gravação tem 2 h 10 min. O máximo é 1 h 30 min: corte-a em partes mais curtas e carregue uma de cada vez."));
+    render(<ChamadaDireto ctx={ctx} d={d} grupos={GRUPOS} />);
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Testar com a chamada de exemplo" })); });
+    await waitFor(() => expect(screen.getByText(/O máximo é 1 h 30 min/)).toBeInTheDocument());
+    expect(nuvem.transcreverAudio).not.toHaveBeenCalled();
   });
 });

@@ -150,36 +150,94 @@ export async function transcreverBloco(pcm: Float32Array, inicioS: number, tipo:
 export const contextoRevisto = (falas: readonly Fala[]) =>
   falas.filter((f) => f.revista).slice(-14).map((f) => `${nomeFalante(f.falante)}: ${f.texto}`).join("\n").slice(-1400);
 
-/** Um ficheiro de áudio (a gravação do telemóvel, m4a, mp3, wav, ogg) em PCM mono a 16 kHz. */
-export async function audioDeFicheiro(origem: Blob | string): Promise<Float32Array> {
+/** 20/11 (auditoria): a duração máxima de uma gravação carregada. Uma hora de áudio descodificada são ~230 MB em memória (o dobro, ou mais,
+ *  num ficheiro estéreo), e num telemóvel o separador caía. Acima disto, um ficheiro cuja duração se sabe antes de abrir é recusado (sem o
+ *  descodificar); um ficheiro sem duração conhecida abre-se e fica só com os primeiros DURACAO_MAX_S. */
+export const DURACAO_MAX_S = 90 * 60;
+const minutosDe = (s: number) => (s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min` : `${Math.round(s / 60)} min`);
+
+/** A duração (s) de um áudio, pelos metadados (sem o descodificar). null se o browser não a disser a tempo. */
+export function duracaoDoAudio(origem: Blob | string, limiteMs = 4000): Promise<number | null> {
+  return new Promise((resolver) => {
+    let url = "", el: HTMLAudioElement | null = null, feito = false;
+    const fim = (v: number | null) => {
+      if (feito) return;
+      feito = true; window.clearTimeout(t);
+      if (el) { el.onloadedmetadata = null; el.onerror = null; el.removeAttribute("src"); }
+      if (url && typeof origem !== "string") URL.revokeObjectURL(url);
+      resolver(v !== null && Number.isFinite(v) && v > 0 ? v : null);
+    };
+    const t = window.setTimeout(() => fim(null), limiteMs);
+    try {
+      url = typeof origem === "string" ? origem : URL.createObjectURL(origem);
+      el = document.createElement("audio");
+      el.preload = "metadata";
+      el.onloadedmetadata = () => fim(el!.duration);
+      el.onerror = () => fim(null);
+      el.src = url;
+    } catch { fim(null); }
+  });
+}
+
+/** Um ficheiro de áudio (a gravação do telemóvel, m4a, mp3, wav, ogg) em PCM mono a 16 kHz. 20/11: no máximo DURACAO_MAX_S (ver acima).
+ *  `duracao`: como saber a duração antes de abrir; `maxS`: o máximo (os testes dão os seus). */
+export async function audioDeFicheiro(origem: Blob | string, duracao: (o: Blob | string) => Promise<number | null> = duracaoDoAudio,
+  maxS = DURACAO_MAX_S): Promise<Float32Array> {
+  const antes = await duracao(origem).catch(() => null);
+  if (antes !== null && antes > maxS + 30) {
+    throw new Error(`A gravação tem ${minutosDe(antes)}. O máximo é ${minutosDe(maxS)}: corte-a em partes mais curtas e carregue uma de cada vez.`);
+  }
   const bytes = typeof origem === "string" ? await (await fetch(origem)).arrayBuffer() : await origem.arrayBuffer();
   const ctx = new AudioContext({ sampleRate: TAXA });
+  let dec: AudioBuffer;
   try {
-    const dec = await ctx.decodeAudioData(bytes);
-    if (dec.numberOfChannels === 1) return dec.getChannelData(0).slice();
-    // estéreo (ou mais): a média dos canais, para não perder quem só ficou num deles
-    const out = new Float32Array(dec.length);
-    for (let c = 0; c < dec.numberOfChannels; c++) { const x = dec.getChannelData(c); for (let i = 0; i < out.length; i++) out[i] += x[i] / dec.numberOfChannels; }
-    return out;
+    dec = await ctx.decodeAudioData(bytes);
   } catch {
     throw new Error("Este ficheiro de áudio não abre neste browser. Experimente m4a, mp3 ou wav.");
   } finally {
     void ctx.close().catch(() => undefined);
   }
+  const n = Math.min(dec.length, Math.round(maxS * TAXA));
+  // 20/11: sem cópias a mais. O canal 0 serve de saída: estéreo (ou mais) fica com a média dos canais lá dentro, para não perder quem só
+  // ficou num deles (antes criava-se mais um array do tamanho do áudio inteiro, e o mono copiava-se todo com slice).
+  const out = dec.getChannelData(0);
+  if (dec.numberOfChannels > 1) {
+    const outros = Array.from({ length: dec.numberOfChannels - 1 }, (_, c) => dec.getChannelData(c + 1));
+    const k = 1 / dec.numberOfChannels;
+    for (let i = 0; i < n; i++) { let s = out[i]; for (const x of outros) s += x[i]; out[i] = s * k; }
+  }
+  return n < out.length ? out.subarray(0, n) : out;
+}
+
+/** 20/11 (auditoria): um ficheiro transcrito em parte. Os blocos que falharam (3 vezes cada) ficam por fazer e os outros não se perdem:
+ *  `porBloco` dá-se outra vez a transcreverAudio, que só repete os que faltam. */
+export class TranscricaoIncompleta extends Error {
+  constructor(readonly porBloco: (Fala[] | undefined)[], readonly falhados: number[], causa: string) {
+    super(`Faltam ${falhados.length} de ${porBloco.length} partes (${causa}).`);
+  }
+  get total() { return this.porBloco.length; }
+  /** O que já está transcrito, pela ordem. */
+  get falas(): Fala[] { return this.porBloco.flatMap((x) => x ?? []).sort((a, z) => a.inicio - z.inicio); }
 }
 
 /** Um áudio inteiro (um ficheiro, a chamada de exemplo) transcrito por blocos, cada um com o fim do anterior como contexto quando já chegou.
- *  11/11: até 4 blocos ao mesmo tempo (correrEmParalelo): uma visita de 35 min passa de ~10 min para ~2 a 3 min. */
+ *  11/11: até 4 blocos ao mesmo tempo (correrEmParalelo): uma visita de 35 min passa de ~10 min para ~2 a 3 min.
+ *  20/11 (auditoria): um bloco que falha 3 vezes já não deita fora o resto. Os outros acabam e, no fim, TranscricaoIncompleta diz quais
+ *  faltam e traz os feitos; com `feitos` (os `porBloco` dela, para o mesmo áudio) só se repetem os que faltam. */
 export const BLOCOS_EM_PARALELO = 4;
-export async function transcreverAudio(pcm: Float32Array, tipo: "chamada" | "visita", aoProgredir?: (feitos: number, total: number, falas: Fala[]) => void): Promise<Fala[]> {
+export async function transcreverAudio(pcm: Float32Array, tipo: "chamada" | "visita", aoProgredir?: (feitos: number, total: number, falas: Fala[]) => void,
+  feitosAntes?: readonly (Fala[] | undefined)[]): Promise<Fala[]> {
   const blocos = cortarEmBlocos(pcm, TAXA);
-  const porBloco: (Fala[] | undefined)[] = new Array(blocos.length);
-  let feitos = 0;
+  const porBloco: (Fala[] | undefined)[] = feitosAntes && feitosAntes.length === blocos.length ? [...feitosAntes] : new Array(blocos.length);
+  let feitos = porBloco.filter((x) => x !== undefined).length;
+  const falhados: number[] = [];
+  let causa = "";
   const juntas = () => porBloco.flatMap((x) => x ?? []).sort((a, z) => a.inicio - z.inicio);
   // o que se mostra (e vai ao guia) enquanto corre: só os blocos seguidos desde o início, sem buracos (os blocos chegam fora de ordem;
   // com um buraco, o guia julgava que a conversa tinha acabado a meio)
   const seguidas = () => { const k = porBloco.findIndex((x) => x === undefined); return (k < 0 ? porBloco : porBloco.slice(0, k)).flatMap((x) => x ?? []); };
   await correrEmParalelo(blocos.length, BLOCOS_EM_PARALELO, async (i) => {
+    if (porBloco[i] !== undefined) return; // já feito numa vez anterior
     const b = blocos[i];
     const parte = pcm.subarray(b.ini, b.fim);
     let novas: Fala[] = [];
@@ -188,13 +246,17 @@ export async function transcreverAudio(pcm: Float32Array, tipo: "chamada" | "vis
       const antes = juntas().filter((f) => f.inicio < b.ini / TAXA);
       for (let tentativa = 0; ; tentativa++) {
         try { novas = await transcreverBloco(parte, b.ini / TAXA, tipo, contextoRevisto(antes)); break; }
-        catch (e) { if (tentativa >= 2) throw e; await new Promise((r) => setTimeout(r, 3000 * (tentativa + 1))); }
+        catch (e) {
+          if (tentativa >= 2) { falhados.push(i); causa = (e as Error).message ?? "falhou"; return; }
+          await new Promise((r) => setTimeout(r, 3000 * (tentativa + 1)));
+        }
       }
     }
     porBloco[i] = novas;
     feitos++;
     aoProgredir?.(feitos, blocos.length, seguidas());
   });
+  if (falhados.length) throw new TranscricaoIncompleta(porBloco, falhados.sort((a, z) => a - z), causa);
   return juntas();
 }
 

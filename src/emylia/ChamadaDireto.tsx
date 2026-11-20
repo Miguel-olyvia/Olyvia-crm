@@ -21,8 +21,9 @@ import { TEMAS_GUIA, devePedirGuia, falasParaGuia, juntarGuia, type GuiaConversa
 import { divisaoPrincipal } from "./campos";
 import { areaChaoM2, faltaFechar, gravarPlanta, plantaDaFolha, type PlantaLida } from "./planta";
 import { pedirMarcacao } from "./marcacaoDaChamada";
-import { AppAtualizada, GRUPO_VISITA, analisarConversa, audioDeFicheiro, lerFolha, gravarMicrofone, guardarVoz, pedirGuia, preencherCampos, transcreverAudio, transcreverFala, vozGuardada, wavBase64 } from "./chamadaNuvem";
+import { AppAtualizada, DURACAO_MAX_S, GRUPO_VISITA, TranscricaoIncompleta, analisarConversa, audioDeFicheiro, lerFolha, gravarMicrofone, guardarVoz, pedirGuia, preencherCampos, transcreverAudio, transcreverFala, vozGuardada, wavBase64 } from "./chamadaNuvem";
 import { descartarGravacao, escolherMicrofone, iniciarGravacao, microfoneEscolhido, microfones, painelAberto, repetirFalhadas, terminarGravacao, ultimoSomMicrofone, useGravacao, useNivelMicrofone } from "./gravador";
+import { sinc } from "./sincronizacao";
 import { urlDoNegocio } from "./urlNegocio";
 
 /** Depois de terminar: a preencher os campos, terminado, ou erro. A gravação em si vive no gravador (gravador.ts).
@@ -32,6 +33,8 @@ const EXEMPLO_URL = "/chamadas/exemplo.ogg";
 const SEGUNDOS_VOZ = 15;
 
 const tempo = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+/** 20/11: um ficheiro com partes por transcrever (o áudio fica na memória até acabar ou seguir sem elas). */
+type FicheiroPorAcabar = { pcm: Float32Array; nome: string; cortado: string; porBloco: (Fala[] | undefined)[] | undefined; falhados?: number };
 /** 9/11: a transcrição como texto, para ficar no negócio (uma linha por fala, com o tempo e quem fala). */
 export const textoDaTranscricao = (falas: readonly Fala[]) =>
   falas.map((f) => `${tempo(f.inicio)} ${nomeFalante(f.falante)}: ${f.texto}`).join("\n");
@@ -131,6 +134,10 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   const guiaTempos = useRef<number[]>([]);
   const guiaNoAr = useRef(false);
   const teste = typeof location !== "undefined" && new URLSearchParams(location.search).get("teste") === "1";
+  // 20/11 (auditoria): um ficheiro com partes por transcrever; a transcrição que a base ainda não confirmou; os campos que falharam
+  const [ficheiroPorAcabar, setFicheiroPorAcabar] = useState<FicheiroPorAcabar | null>(null);
+  const [porGuardar, setPorGuardar] = useState<{ segs: Fala[]; doGravador: boolean } | null>(null);
+  const [preencherFalhou, setPreencherFalhou] = useState(false);
 
   // o painel à vista: o indicador de baixo esconde-se
   useEffect(() => painelAberto(), []);
@@ -150,6 +157,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   const limpar = () => {
     setFalasFim([]); falasRef.current = []; setExtracao(null); setAplicadas(null); setResumoFim(""); setFase("livre"); setAnalise(null);
     setGuia(null); setGuiaErro(null); guiaUltimo.current = null; guiaTempos.current = [];
+    setFicheiroPorAcabar(null); setPorGuardar(null); setPreencherFalhou(false);
   };
   // o guia: a cada minuto revisto (umas falas revistas novas e uns segundos desde o último), um pedido pequeno, um de cada vez
   const guiaAtivo = vivo === "a_ouvir" || fase === "a_transcrever";
@@ -181,16 +189,33 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
     try {
       const pcm = await audioDeFicheiro(origem);
       const minutos = Math.max(1, Math.round(pcm.length / 16000 / 60));
-      setMsg(`A transcrever ${nome} (${minutos} min)...`);
-      const fs = await transcreverAudio(pcm, modo, (k, n, parciais) => {
-        falasRef.current = parciais; setFalasFim(parciais);
-        setMsg(`A transcrever ${nome}: parte ${k} de ${n}.`);
-      });
-      await acabar(fs, false);
+      // 20/11: um ficheiro sem duração conhecida e mais longo do que o máximo fica só com o início (dito, não escondido)
+      const cortado = pcm.length >= DURACAO_MAX_S * 16000 ? ` Só se transcrevem os primeiros ${Math.round(DURACAO_MAX_S / 60)} min.` : "";
+      setMsg(`A transcrever ${nome} (${minutos} min)...${cortado}`);
+      await transcreverPartes({ pcm, nome, cortado, porBloco: undefined });
     } catch (e) {
       setFase("erro"); setMsg(`${nome[0].toUpperCase()}${nome.slice(1)} não ficou transcrita: ${(e as Error).message}`);
     } finally {
       if (inputAudio.current) inputAudio.current.value = "";
+    }
+  }
+
+  /** 20/11 (auditoria): transcreve as partes do ficheiro que faltam. Se alguma falhar, as feitas ficam (à vista e na memória) e repetem-se só
+   *  as que faltaram; também se pode seguir só com as feitas. */
+  async function transcreverPartes(f: FicheiroPorAcabar) {
+    setFicheiroPorAcabar(null); setFase("a_transcrever");
+    try {
+      const fs = await transcreverAudio(f.pcm, modo, (k, n, parciais) => {
+        falasRef.current = parciais; setFalasFim(parciais);
+        setMsg(`A transcrever ${f.nome}: parte ${k} de ${n}.${f.cortado}`);
+      }, f.porBloco);
+      await acabar(fs, false);
+    } catch (e) {
+      if (!(e instanceof TranscricaoIncompleta)) throw e;
+      falasRef.current = e.falas; setFalasFim(e.falas);
+      setFicheiroPorAcabar({ ...f, porBloco: e.porBloco, falhados: e.falhados.length });
+      setFase("erro");
+      setMsg(`${e.falhados.length === 1 ? "Uma parte" : `${e.falhados.length} partes`} de ${e.total} não ${e.falhados.length === 1 ? "ficou transcrita" : "ficaram transcritas"} (sem rede?). As outras estão feitas e não se perdem.`);
     }
   }
   const iniciarTeste = () => transcreverFicheiro(EXEMPLO_URL, "a chamada de exemplo");
@@ -241,10 +266,33 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
 
   /** As falas acabadas: ficam no negócio (a transcrição inteira) e vão preencher os campos. */
   async function acabar(segs: Fala[], doGravador: boolean) {
-    falasRef.current = segs; setFalasFim(segs);
-    if (segs.length) ctx.run(() => ctx.A.campo(d.id, chaveTranscricao, textoDaTranscricao(segs)));
+    falasRef.current = segs; setFalasFim(segs); setPreencherFalhou(false); setPorGuardar(null);
+    if (segs.length) {
+      setFase("a_preencher"); setMsg("A guardar a transcrição no negócio...");
+      // 20/11 (auditoria): a cópia local da gravação só se apaga depois de a base confirmar que tem a transcrição. Antes apagava-se logo a
+      // seguir ao ctx.run: sem rede, ou com a gravação recusada, perdia-se a conversa toda.
+      const texto = textoDaTranscricao(segs);
+      let guardada = false;
+      try {
+        ctx.run(() => ctx.A.campo(d.id, chaveTranscricao, texto));
+        guardada = await sinc.gravada(`deal:${d.id}`, (dados) => (dados as Negocio | undefined)?.f?.[chaveTranscricao] === texto);
+      } catch { guardada = false; }
+      if (!guardada) {
+        setFase("erro"); setPorGuardar({ segs, doGravador });
+        setMsg(doGravador
+          ? "A transcrição ainda não chegou à base (sem rede?). Está guardada neste aparelho: carregue em «Guardar outra vez» quando houver rede."
+          : "A transcrição ainda não chegou à base (sem rede?). Carregue em «Guardar outra vez» quando houver rede.");
+        return;
+      }
+    }
     if (doGravador) descartarGravacao();
     if (!segs.length) { setFase("terminado"); setMsg(modo === "visita" ? "Gravação terminada sem falas transcritas." : "Chamada terminada sem falas transcritas."); return; }
+    await preencher(segs);
+  }
+
+  /** Os campos propostos e a análise, a partir das falas (já guardadas no negócio). */
+  async function preencher(segs: Fala[]) {
+    falasRef.current = segs; setFalasFim(segs); setPreencherFalhou(false);
     setFase("a_preencher"); setMsg("A preencher os campos e a analisar a conversa...");
     try {
       // 11/11: os campos e a análise da conversa no mesmo pedido (a função faz os dois em paralelo)
@@ -263,7 +311,8 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
       setResumoFim(`${segs.length} falas, guardadas no negócio.${revistas ? ` Quem fala foi corrigido em ${revistas} ${revistas === 1 ? "linha" : "linhas"}, pelo sentido da conversa.` : ""}`);
       setFase("terminado"); setMsg(`${modo === "visita" ? "Gravação terminada" : "Chamada terminada"}. Confirme o que entra nos campos.`);
     } catch (e) {
-      setFase("erro"); setMsg("A transcrição ficou guardada no negócio, mas os campos não: " + (e as Error).message);
+      setFase("erro"); setPreencherFalhou(true);
+      setMsg("A transcrição ficou guardada no negócio, mas os campos não: " + (e as Error).message);
     }
   }
 
@@ -360,7 +409,11 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
   const ocupado = vivo === "a_ligar" || vivo === "a_terminar" || fase === "a_preencher" || fase === "a_transcrever" || aAnalisar;
   // 11/11: as falas ainda por rever (a pré-visualização em direto) vêem-se mais claras enquanto se grava
   const comBlocos = aOuvir && falas.some((f) => f.revista);
-  const outroAGravar = !minha && g.negocio !== null && (g.estado === "a_ouvir" || g.estado === "a_ligar");
+  const outroAGravar = !minha && g.negocio !== null && (g.estado === "a_ouvir" || g.estado === "a_ligar" || g.noutroSeparador);
+  // 20/11: a gravação deste negócio está noutro separador (vê-se, sem continuar nem terminar); terminada mas ainda não confirmada na base
+  const noutroSeparador = minha && g.noutroSeparador;
+  const gravacaoPorGuardar = minha && vivo === "terminada";
+  const livre = !aOuvir && !ocupado && !interrompida && !gravacaoPorGuardar;
   const texto = msg || (minha ? g.msg : "") || (aOuvir ? (voz ? `${T.aOuvir} A sua voz está registada.` : `${T.aOuvir} Sem voz registada: as falas ficam como do cliente até registar a sua.`)
     : vivo === "a_ligar" ? "A pedir o microfone..." : outroAGravar ? `A gravar outro negócio (${g.nome}).`
     : voz ? "Pronto. A sua voz está registada." : "Pronto. Registe a sua voz uma vez para a transcrição saber quem fala.");
@@ -379,10 +432,10 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
               {aGravarVoz !== null ? `A gravar... ${aGravarVoz}/${SEGUNDOS_VOZ} s` : voz ? "Registar a minha voz outra vez" : "Registar a minha voz"}
             </Button>
           ) : null}
-          {!aOuvir && !ocupado && !interrompida ? <Button type="button" onClick={() => void iniciar()} disabled={aGravarVoz !== null || outroAGravar}><Mic className="h-4 w-4" aria-hidden="true" />{T.iniciar}</Button> : null}
-          {interrompida ? <Button type="button" onClick={() => void iniciar(true)}><Mic className="h-4 w-4" aria-hidden="true" />Continuar a gravar</Button> : null}
+          {livre ? <Button type="button" onClick={() => void iniciar()} disabled={aGravarVoz !== null || outroAGravar}><Mic className="h-4 w-4" aria-hidden="true" />{T.iniciar}</Button> : null}
+          {interrompida && !noutroSeparador ? <Button type="button" onClick={() => void iniciar(true)}><Mic className="h-4 w-4" aria-hidden="true" />{g.pedeToque ? "Toque para continuar a gravar" : "Continuar a gravar"}</Button> : null}
           {/* 11/11: uma gravação feita fora da app (o gravador do telemóvel, quando o browser não deu) transcreve-se e analisa-se igual */}
-          {!aOuvir && !ocupado && !interrompida ? (
+          {livre ? (
             <>
               <input ref={inputAudio} type="file" accept="audio/*,.m4a,.mp3,.wav,.ogg,.aac,.mp4" className="sr-only" tabIndex={-1} aria-hidden="true"
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) void transcreverFicheiro(f, "a gravação"); }} />
@@ -401,7 +454,7 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
             </>
           ) : null}
           {!aOuvir && !ocupado && teste ? <Button type="button" variant="outline" onClick={() => void iniciarTeste()} disabled={aGravarVoz !== null}>Testar com a chamada de exemplo</Button> : null}
-          {aOuvir || interrompida ? <Button type="button" variant="destructive" onClick={() => void terminar()}><PhoneOff className="h-4 w-4" aria-hidden="true" />Terminar e preencher</Button> : null}
+          {(aOuvir || interrompida) && !noutroSeparador ? <Button type="button" variant="destructive" onClick={() => void terminar()}><PhoneOff className="h-4 w-4" aria-hidden="true" />Terminar e preencher</Button> : null}
           {ocupado ? <Button type="button" disabled><Square className="h-4 w-4" aria-hidden="true" />{vivo === "a_ligar" ? "A ligar..." : fase === "a_transcrever" ? "A transcrever..." : aAnalisar ? "A analisar..." : fase === "a_preencher" ? "A preencher..." : "A terminar..."}</Button> : null}
         </div>
       </div>
@@ -418,6 +471,27 @@ export function ChamadaDireto({ ctx, d, grupos: gruposDoNegocio, modo = "chamada
         ) : null}
         {minha && g.falhadas > 0 ? (
           <Button type="button" size="sm" variant="outline" onClick={repetirFalhadas}><RotateCcw className="h-4 w-4" aria-hidden="true" />Tentar outra vez ({g.falhadas})</Button>
+        ) : null}
+        {/* 20/11 (auditoria): o que ficou a meio tem sempre um botão para acabar */}
+        {porGuardar && fase === "erro" ? (
+          <Button type="button" size="sm" variant="outline" onClick={() => void acabar(porGuardar.segs, porGuardar.doGravador)}><RotateCcw className="h-4 w-4" aria-hidden="true" />Guardar outra vez</Button>
+        ) : null}
+        {ficheiroPorAcabar && fase === "erro" ? (
+          <>
+            <Button type="button" size="sm" variant="outline" onClick={() => void transcreverPartes(ficheiroPorAcabar)}>
+              <RotateCcw className="h-4 w-4" aria-hidden="true" />{ficheiroPorAcabar.falhados === 1 ? "Transcrever a parte que falta" : `Transcrever as ${ficheiroPorAcabar.falhados} partes que faltam`}
+            </Button>
+            {falas.length ? (
+              <button type="button" className="text-sm text-primary underline-offset-4 hover:underline" onClick={() => { setFicheiroPorAcabar(null); void acabar(falasRef.current, false); }}>
+                Seguir só com o que está transcrito
+              </button>
+            ) : null}
+          </>
+        ) : null}
+        {preencherFalhou && fase === "erro" && (falasRef.current.length || falasGuardadas.length) ? (
+          <Button type="button" size="sm" variant="outline" onClick={() => void preencher(falasRef.current.length ? falasRef.current : falasGuardadas)}>
+            <Sparkles className="h-4 w-4" aria-hidden="true" />Preencher os campos com a transcrição guardada
+          </Button>
         ) : null}
         {fase === "terminado" ? <span>{resumoFim}</span> : null}
       </div>

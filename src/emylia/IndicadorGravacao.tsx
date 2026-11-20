@@ -32,7 +32,7 @@ export function IndicadorGravacao() {
         </span>
       )}
       <span className="min-w-0 truncate text-sm">
-        <b className="font-semibold">{parada ? "Gravação parada" : g.modo === "visita" ? "A gravar a visita" : "A gravar a chamada"}</b>
+        <b className="font-semibold">{g.noutroSeparador ? "A gravar noutro separador" : parada ? "Gravação parada" : g.modo === "visita" ? "A gravar a visita" : "A gravar a chamada"}</b>
         <span className="text-muted-foreground"> · {g.nome} · {tempo(segundos)}{g.falas.length ? ` · ${g.falas.length} ${g.falas.length === 1 ? "fala" : "falas"}` : ""}</span>
       </span>
       {!parada && (
@@ -40,10 +40,11 @@ export function IndicadorGravacao() {
           <BarraNivel />
         </span>
       )}
-      {parada ? (
+      {/* 20/11: a gravação de outro separador vê-se aqui, sem «Continuar»; depois de recarregar sozinha, o Safari pode pedir um toque */}
+      {g.noutroSeparador ? null : parada ? (
         <button type="button" className="min-h-9 shrink-0 rounded-full bg-primary px-3 text-sm font-medium text-primary-foreground"
           onClick={() => void iniciarGravacao({ negocio: g.negocio!, nome: g.nome, modo: g.modo, voltar: g.voltar }, true).catch(() => undefined)}>
-          <Mic className="mr-1 inline h-4 w-4" aria-hidden="true" />Continuar
+          <Mic className="mr-1 inline h-4 w-4" aria-hidden="true" />{g.pedeToque ? "Toque para continuar a gravar" : "Continuar"}
         </button>
       ) : g.estado === "a_ouvir" || g.estado === "a_ligar" ? (
         // 12/11 (Rúben: «ter aqui o botão para iniciar gravação e o botão para parar»): parar sem terminar (o Continuar retoma)

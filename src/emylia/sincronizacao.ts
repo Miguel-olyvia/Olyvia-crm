@@ -380,6 +380,21 @@ export class Sincronizador {
   }
 
   /** Uma mudança local: envia daqui a pouco (junta várias mudanças seguidas). */
+  /** 20/11 (auditoria do gravador: a cópia local da gravação apagava-se antes de a base ter a transcrição): espera que a parte `chave` esteja
+   *  na base tal como está neste aparelho, e com `tem` a verificar-se nela. true: confirmada (ou sem base ligada: o estado vive só neste
+   *  browser e já lá está); false: não chegou a tempo (sem rede, recusada, em conflito). */
+  async gravada(chave: string, tem: (dados: unknown) => boolean = () => true, ms = 30_000): Promise<boolean> {
+    if (!this.ligado) return true;
+    const fim = Date.now() + ms;
+    this.mudou();
+    for (;;) {
+      const p = this.estadoFonte ? this.todasAsPartes().find((x) => x.chave === chave) : undefined;
+      if (p && tem(p.dados) && !this.pendentes.has(chave) && this.json.get(chave) === JSON.stringify(p.dados)) return true;
+      if (!this.ligado || Date.now() >= fim) return false;
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
   mudou() {
     if (!this.ligado) return;
     window.clearTimeout(this.aEnviar);
