@@ -44,7 +44,8 @@ class Canal {
 }
 
 beforeEach(() => {
-  localStorage.clear(); ativos = []; g.estado = "parado"; g.falas = []; g.invoke = null; Canal.todos = [];
+  // 20/11: a escuta vem desligada por omissão; estes testes são da escuta ligada
+  localStorage.clear(); localStorage.setItem("olyvia-escuta-v2", "1"); ativos = []; g.estado = "parado"; g.falas = []; g.invoke = null; Canal.todos = [];
   vi.stubGlobal("BroadcastChannel", Canal);
   (window as unknown as { webkitSpeechRecognition: unknown }).webkitSpeechRecognition = Falso;
 });
@@ -383,7 +384,7 @@ describe("17/11: a escuta contínua da Olyvia", () => {
     act(() => { rec.onerror!({ error: "not-allowed" }); rec.onend!(); });
     act(() => { vi.advanceTimersByTime(1000); });
     expect(ativos).toHaveLength(1);
-    expect(localStorage.getItem("olyvia-escuta")).toBe("1");
+    expect(localStorage.getItem("olyvia-escuta-v2")).toBe("1");
     act(() => { fireEvent.pointerDown(window); });
     expect(ativos).toHaveLength(2);
   });
@@ -453,5 +454,55 @@ describe("18/11 (Rúben: «há vezes em que simplesmente não me ouve… tenho d
     expect(eEco("a obra dura cinco", "A obra dura cinco dias úteis.")).toBe(true);
     expect(eEco("vai aos negócios", "A obra dura cinco dias úteis.")).toBe(false);
     expect(ECO_MS).toBeGreaterThan(1000);
+  });
+});
+
+describe("20/11 (Rúben, decisão da auditoria): a escuta vem desligada e explica-se na 1.ª vez", () => {
+  it("sem escolha guardada não ouve; ligar pela 1.ª vez mostra a explicação, e só «Ligar a escuta» liga", () => {
+    localStorage.clear();
+    render(arvore("/negocios"));
+    expect(ativos).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
+    fireEvent.click(screen.getByRole("switch", { name: "Escuta sempre" }));
+    // ainda não liga: primeiro a explicação (o som vai ao Chrome, servidores da Google)
+    expect(ativos).toHaveLength(0);
+    const caixa = screen.getByRole("dialog", { name: "Ligar a escuta" });
+    expect(caixa.textContent).toMatch(/servidores da Google/);
+    fireEvent.click(screen.getByRole("button", { name: "Agora não" }));
+    expect(screen.queryByRole("dialog", { name: "Ligar a escuta" })).toBeNull();
+    expect(screen.getByRole("switch", { name: "Escuta sempre" }).getAttribute("aria-checked")).toBe("false");
+    // outra vez, e liga
+    fireEvent.click(screen.getByRole("switch", { name: "Escuta sempre" }));
+    fireEvent.click(screen.getByRole("button", { name: "Ligar a escuta" }));
+    expect(screen.getByRole("switch", { name: "Escuta sempre" }).getAttribute("aria-checked")).toBe("true");
+    expect(localStorage.getItem("olyvia-escuta-v2")).toBe("1");
+    // desligar e voltar a ligar já não pergunta
+    fireEvent.click(screen.getByRole("switch", { name: "Escuta sempre" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Escuta sempre" }));
+    expect(screen.queryByRole("dialog", { name: "Ligar a escuta" })).toBeNull();
+    expect(screen.getByRole("switch", { name: "Escuta sempre" }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("a escolha antiga (olyvia-escuta = 1, gravada a todos) não liga a escuta", () => {
+    localStorage.clear(); localStorage.setItem("olyvia-escuta", "1");
+    render(arvore("/negocios"));
+    expect(ativos).toHaveLength(0);
+  });
+
+  it("com a escuta desligada, as falas da gravação não são ordens, nem quando se liga a meio", () => {
+    localStorage.clear(); localStorage.setItem("olyvia-escuta-explicada", "1");
+    g.estado = "a gravar"; g.falas = [];
+    const { rerender } = render(arvore("/hoje"));
+    g.falas = [{ inicio: 1, fim: 2, texto: "Olyvia, vai aos negócios", falante: "A", confianca_falante: 1 }];
+    rerender(arvore("/hoje"));
+    fireEvent.click(screen.getByRole("button", { expanded: false }));
+    fireEvent.click(screen.getByRole("switch", { name: "Escuta sempre" }));
+    g.falas = [...g.falas];
+    rerender(arvore("/hoje"));
+    expect(loc()).toBe("/hoje");
+    // a fala nova, já com a escuta ligada, é ordem
+    g.falas = [...g.falas, { inicio: 5, fim: 6, texto: "Olyvia, vai aos negócios", falante: "A", confianca_falante: 1 }];
+    rerender(arvore("/hoje"));
+    expect(loc()).toBe("/negocios");
   });
 });

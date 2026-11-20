@@ -1619,10 +1619,10 @@ export function proximo(d: Negocio, S: Estado): Proximo {
         // 21/10: só a adenda por pagar (ou por encomendar) segura o arranque: é do Financeiro
         if (F.length && F.every((x) => /adenda/.test(x))) return { t: "À espera da adenda", sub: "Para arrancar falta " + F.join(", ") + ".", who: "financeiro", wait: true };
         if (F.length) return { t: "À espera dos materiais", sub: "Para arrancar falta " + F.join(", ") + ".", btn: "Abrir Inventário", act: "abrirInv", who: "armazem" };
-        // 19/11 (Rúben): no 50-25-25, «Arrancar a obra» manda a parcela do arranque ao Financeiro; a obra arranca com ela paga
-        const pa = d.f.arranque_pedido ? parcelaDoArranquePorPagar(S, d) : null;
+        // 20/11 (Rúben): no 50-25-25, a parcela do arranque cai no Financeiro com o contrato assinado; a obra arranca com ela paga
+        const pa = parcelaDoArranquePorPagar(S, d);
         if (pa) return { t: "À espera da parcela do arranque", sub: `${pa.fatura ? `A ${pa.fatura.numero}` : "A fatura"} da parcela do arranque (${eur(pa.v)} €) está no Financeiro. Paga, as Operações arrancam a obra.`, who: "financeiro", wait: true };
-        return { t: "Operações: arrancar a obra", sub: d.f.arranque_pedido ? "A parcela do arranque está paga: já se pode arrancar." : "Plano aprovado e materiais garantidos.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
+        return { t: "Operações: arrancar a obra", sub: "Plano aprovado e materiais garantidos.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
       }
       if (p.estado === "em curso") return { t: "Obra em curso", sub: "As Operações registam o fim da obra.", btn: "Abrir plano", act: "abrirPlano", who: "operacoes" };
       if (d.obra.auto?.estado === "por assinar") return { t: "À espera do auto de receção", sub: `O ${d.obra.auto.n} está no portal do cliente para assinar. Assinado, começa a garantia e o cliente recebe o relatório da obra.`, who: "cliente", wait: true, sim: "auto" };
@@ -4269,17 +4269,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 19/10: o pagamento, o plano e os materiais garantidos no Inventário (preparacaoObra.ts: faltaParaArrancar)
       { const F = faltaParaArrancar(d, undefined, S); if (F.length) { avisar({ msg: "Ainda não dá para arrancar", sub: "Falta " + F.join(", "), kind: "bad" }); return; } }
       if (!portao(d, [OBRA[0]])) return;
-      // 19/11 (Rúben): no 50-25-25, carregar em «Arrancar a obra» manda a parcela do arranque ao Financeiro, que valida o pagamento;
-      // a obra só arranca com ela paga (depois, as Operações carregam outra vez)
+      // 20/11 (Rúben): no 50-25-25, a parcela do arranque já está no Financeiro desde o contrato assinado; a obra só arranca com ela paga
       const pa = parcelaDoArranquePorPagar(S, d);
-      if (pa) {
-        if (!d.f.arranque_pedido) {
-          d.f.arranque_pedido = new Date().toISOString().slice(0, 10);
-          log(d, `Arranque pedido pelas Operações · ${nomeDaParcela(pa)}, ${eur(pa.v)} €, foi ao Financeiro`);
-          avisar({ msg: "A parcela do arranque foi ao Financeiro", sub: `${eur(pa.v)} € com IVA. A obra arranca quando o pagamento for validado.`, kind: "auto" });
-        } else avisar({ msg: "À espera da parcela do arranque", sub: `${pa.fatura ? `A ${pa.fatura.numero}` : "A fatura"} tem de estar paga e validada pelo Financeiro.`, kind: "bad" });
-        return;
-      }
+      if (pa) { avisar({ msg: "À espera da parcela do arranque", sub: `${pa.fatura ? `A ${pa.fatura.numero}` : "A fatura"} (${nomeDaParcela(pa)}, ${eur(pa.v)} €) tem de estar paga e validada pelo Financeiro.`, kind: "bad" }); return; }
       // 23/10: com o relógio real, a obra começa hoje (o plano mantém a ordem e a duração das tarefas)
       if (relogioReal && d.obra.plano!.origem === "orcamento") arrancarHoje(d.obra.plano!);
       d.obra.plano!.estado = "em curso"; log(d, "Obra arrancou"); avisar({ msg: "Obra em curso", sub: "Os técnicos registam as horas na app", kind: "ok" });

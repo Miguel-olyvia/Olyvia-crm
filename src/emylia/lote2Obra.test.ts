@@ -229,8 +229,9 @@ describe("3. as parcelas «a meio da obra» só caem com a fase delas", () => {
     expect(m("50% + 50% no fim")).toEqual(["inicio", "fim"]);
     expect(m(PAGAMENTO_50_25_25)).toEqual(["inicio", "arranque", "fim"]);
     const r = prontaAArrancar(PAGAMENTO_50_25_25);
-    expect(parcelasDoContrato(r.S, r.d).map((x) => x.devida)).toEqual([true, false, false]);
-    r.A.arrancar(r.d.id); // manda a do arranque ao Financeiro
+    // 20/11 (Rúben): a do arranque cai no Financeiro logo com o contrato assinado
+    expect(parcelasDoContrato(r.S, r.d).map((x) => x.devida)).toEqual([true, true, false]);
+    r.A.arrancar(r.d.id); // por pagar: não arranca
     expect(r.d.obra.plano!.estado).toBe("aprovado");
     expect(parcelasDoContrato(r.S, r.d).map((x) => x.devida)).toEqual([true, true, false]);
   });

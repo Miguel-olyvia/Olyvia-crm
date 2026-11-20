@@ -83,7 +83,12 @@ const paginaPublica = (p: string) => p === "/" || ESCONDER.some((x) => p === x |
 
 /** O evento que o quadro de Negócios ouve para pôr o termo na pesquisa (NegociosEmylia.tsx). */
 export const EVENTO_PESQUISA = EV_PESQUISA;
-const CHAVE_ESCUTA = "olyvia-escuta";
+// 20/11 (Rúben, decisão da auditoria): a escuta contínua vem DESLIGADA por omissão, e na 1.ª vez que se liga explica-se para onde vai o som.
+// Chave nova: a antiga ficou gravada a "1" em todos os browsers que abriram a app (o efeito grava sempre), e assim todos começam desligados.
+export const CHAVE_ESCUTA = "olyvia-escuta-v2";
+const CHAVE_ESCUTA_EXPLICADA = "olyvia-escuta-explicada";
+/** O que a pessoa lê antes de ligar a escuta pela 1.ª vez. */
+export const EXPLICACAO_ESCUTA = "Com a escuta ligada, a Olyvia ouve sempre enquanto a app está aberta, à espera de «Olyvia». O som passa pelo reconhecimento de voz do Chrome, nos servidores da Google. Podes desligar quando quiseres.";
 const EXEMPLOS = ["vai aos negócios", "abre o negócio do Carlos e vai à proposta", "quanto custa esta proposta?", "desce", "o que falta fazer aqui?"];
 const avisa = (nome: string, detail: unknown) => window.dispatchEvent(new CustomEvent(nome, { detail }));
 
@@ -137,7 +142,15 @@ export function OlyviaComando() {
   const [texto, setTexto] = useState("");
   const [aOuvir, setAOuvir] = useState(false);
   const [aviso, setAviso] = useState<{ msg: string; ok: boolean } | null>(null);
-  const [escutaSempre, setEscutaSempre] = useState<boolean>(() => { try { return localStorage.getItem(CHAVE_ESCUTA) !== "0"; } catch { return true; } });
+  const [escutaSempre, setEscutaSempre] = useState<boolean>(() => { try { return localStorage.getItem(CHAVE_ESCUTA) === "1"; } catch { return false; } });
+  const [explicarEscuta, setExplicarEscuta] = useState(false);
+  /** Ligar ou desligar a escuta; ligar pela 1.ª vez mostra primeiro a explicação. */
+  const mudarEscuta = () => {
+    if (escutaSempre) { setEscutaSempre(false); return; }
+    let explicada = false; try { explicada = localStorage.getItem(CHAVE_ESCUTA_EXPLICADA) === "1"; } catch { /* ignore */ }
+    if (explicada) setEscutaSempre(true); else setExplicarEscuta(true);
+  };
+  const ligarEscutaExplicada = () => { try { localStorage.setItem(CHAVE_ESCUTA_EXPLICADA, "1"); } catch { /* ignore */ } setExplicarEscuta(false); setEscutaSempre(true); };
   const [aEscutar, setAEscutar] = useState(false);
   const [acordada, setAcordada] = useState(false);
   const recRef = useRef<Reconhecedor | null>(null);
@@ -574,7 +587,8 @@ export function OlyviaComando() {
     // ao abrir (ou numa gravação que continua), as falas que já lá estavam não são ordens novas
     if (ultimaFala.current === null) { ultimaFala.current = fs.reduce((m, f) => Math.max(m, f.inicio), -1); return; }
     if (!fs.length) { ultimaFala.current = -1; return; }
-    if (!escutaSempre) return;
+    // escuta desligada: as falas passam sem ser ordens (e não ficam por ler: ligá-la a meio não toma as antigas como ordens)
+    if (!escutaSempre) { ultimaFala.current = fs.reduce((m, f) => Math.max(m, f.inicio), ultimaFala.current); return; }
     for (const f of fs) {
       if (f.revista || f.inicio <= ultimaFala.current) continue;
       ultimaFala.current = f.inicio;
@@ -836,11 +850,20 @@ export function OlyviaComando() {
           {temVoz.current && (
             <label className="flex items-center justify-between gap-2 rounded-xl border border-border bg-background px-3 py-2">
               <span className="flex items-center gap-2 text-sm"><Ear className="h-4 w-4 text-primary" aria-hidden="true" />{naConversa ? "A ouvir a conversa e a tomar notas — para uma ordem, diz «Olyvia, …»" : emPausa ? "A ouvir noutro separador — toca aqui para usar neste" : "Escuta sempre — diz «Olyvia» uma vez e depois fala à vontade"}</span>
-              <button type="button" role="switch" aria-checked={escutaSempre} aria-label="Escuta sempre" onClick={() => setEscutaSempre((v) => !v)}
+              <button type="button" role="switch" aria-checked={escutaSempre} aria-label="Escuta sempre" onClick={mudarEscuta}
                 className={cn("relative h-6 w-11 shrink-0 rounded-full transition-colors", escutaSempre ? "bg-primary" : "bg-muted")}>
                 <span className={cn("absolute top-0.5 h-5 w-5 rounded-full bg-background shadow transition-all", escutaSempre ? "left-[22px]" : "left-0.5")} />
               </button>
             </label>
+          )}
+          {explicarEscuta && !escutaSempre && (
+            <div role="dialog" aria-label="Ligar a escuta" className="space-y-2 rounded-xl border border-primary/40 bg-background px-3 py-2">
+              <p className="text-sm">{EXPLICACAO_ESCUTA}</p>
+              <div className="flex justify-end gap-2">
+                <button type="button" className="rounded-lg px-3 py-1.5 text-sm hover:bg-accent" onClick={() => setExplicarEscuta(false)}>Agora não</button>
+                <button type="button" className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:bg-primary/90" onClick={ligarEscutaExplicada}>Ligar a escuta</button>
+              </div>
+            </div>
           )}
         </section>
       ) : aviso && !pendente ? (

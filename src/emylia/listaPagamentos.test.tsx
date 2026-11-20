@@ -70,13 +70,11 @@ describe("a lista «Pagamentos» nos três esquemas, com uma adenda", () => {
     expect(L[3]).toMatchObject({ adenda: N, motivo: "Depois da parcela anterior." });
   });
 
-  it("50-25-25: «Arrancar a obra» põe a do arranque por faturar; no ecrã: registar o número → «Ok, já foi paga» → paga, sem botão", async () => {
-    // a adenda depois de carregar em «Arrancar a obra» (assinada antes, a 1.ª parcela dela também seguraria o arranque)
+  it("50-25-25: com o contrato assinado a do arranque fica por faturar; no ecrã: registar o número → «Ok, já foi paga» → paga, sem botão", async () => {
+    // 20/11 (Rúben): a parcela do arranque cai no Financeiro logo com o contrato assinado, sem esperar pelo «Arrancar a obra»
     const { S, A, d } = preparar(PAGAMENTO_50_25_25, false);
-    expect(resumo(S, d)[0]).toEqual(["contrato", [["paga", null], ["espera", null], ["espera", null]]]);
+    expect(resumo(S, d)[0]).toEqual(["contrato", [["paga", null], ["faturar", "registar"], ["espera", null]]]);
     expect(aprovarPos("CT 2026/1027")).toBe(""); expect(receberTudo("CT 2026/1027")).toBe("");
-    A.role("operacoes"); A.arrancar(d.id);
-    expect(d.f.arranque_pedido).toBeTruthy();
     juntarAdenda(S, A, d);
     expect(resumo(S, d)[0]).toEqual(["contrato", [["paga", null], ["faturar", "registar"], ["espera", null]]]);
 

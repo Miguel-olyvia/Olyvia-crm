@@ -274,8 +274,8 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
   };
   const pedidos = precisaDeTi(ctx, d, ir);
   // o botão principal: um só, pelo momento da obra
-  // 19/11 (Rúben): no 50-25-25, o 1.º clique manda a parcela do arranque ao Financeiro; a obra arranca com ela paga
-  const parcelaArranque = p.estado === "aprovado" && d.f.arranque_pedido ? parcelaDoArranquePorPagar(S, d) : null;
+  // 20/11 (Rúben): no 50-25-25, a parcela do arranque está no Financeiro desde o contrato assinado; a obra arranca com ela paga
+  const parcelaArranque = p.estado === "aprovado" ? parcelaDoArranquePorPagar(S, d) : null;
   const principal = p.estado === "aprovado"
     ? { t: "Arrancar a obra", icone: Rocket, desligado: faltaArrancar.length > 0 || !planeia || !!parcelaArranque, porque: faltaArrancar.length ? `Falta ${faltaArrancar.join(", ")}.` : parcelaArranque ? `À espera de ${nomeDaParcela(parcelaArranque)} paga, no Financeiro.` : !planeia ? "Quem arranca a obra são as Operações." : "", fn: () => fazer(() => A.arrancar(d.id)) }
     : vivo && PV.length ? { t: PV.length === 1 ? "Validar a tarefa feita" : `Validar ${PV.length} tarefas feitas`, icone: CheckCircle2, desligado: !planeia, porque: "", fn: () => fazer(() => A.validarVarias(d.id, PV)) }

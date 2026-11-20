@@ -1,7 +1,8 @@
 // 19/11/2026 (Rúben): as parcelas do contrato e o momento em que cada uma cai no Financeiro.
 // · 100%: uma vez, no início, antes de tudo.
 // · 50-50: 50% no início; os outros 50% no fim, antes da entrega da obra.
-// · 50-25-25: 50% no início; 25% no arranque (carregar em «Arrancar a obra» manda-a ao Financeiro; a obra só arranca com ela paga);
+// · 50-25-25: 50% no início; 25% no arranque, que cai no Financeiro logo com o contrato assinado (20/11, Rúben; antes só ao carregar em
+//   «Arrancar a obra»); a obra só arranca com ela paga;
 //   25% no fim, antes da entrega.
 // Em todos: «no fim, antes de entregar a obra, fatura para pagar; sem isso não há auto de receção da obra».
 // · 30-40-30 e «Por fases» (19/11, auditoria): a parcela do fim de uma fase só cai no Financeiro com as tarefas dessa fase feitas no plano,
@@ -93,13 +94,13 @@ export function faseAcabou(d: Negocio, fase: number, hoje: string = hojeISO()): 
   return !!fim && hoje > fim;
 }
 
-/** Já é a vez desta parcela? O início: com a proposta aceite. O arranque: quando as Operações carregam em «Arrancar a obra» (d.f.arranque_pedido)
- *  ou com a obra a andar. Durante a obra (19/11): com a obra a andar E a fase dela acabada (faseAcabou); sem a fase, com a obra a andar.
+/** Já é a vez desta parcela? O início: com a proposta aceite. O arranque (20/11, Rúben): com o contrato assinado (antes: só ao carregar em
+ *  «Arrancar a obra»), ou com o arranque pedido ou a obra a andar (negócios de antes do contrato no motor). Durante a obra (19/11): com a obra a andar E a fase dela acabada (faseAcabou); sem a fase, com a obra a andar.
  *  O fim: com as tarefas todas feitas ou a obra concluída. */
 export function devidaNoMomento(d: Negocio, m: MomentoParcela, fase?: Prestacao["fase"], hoje?: string): boolean {
   const e = d.obra.plano?.estado;
   if (m === "inicio") return !!d.orc?.aceite;
-  if (m === "arranque") return !!d.f.arranque_pedido || e === "em curso" || e === "concluída";
+  if (m === "arranque") return d.orc?.contrato === "assinado" || !!d.f.arranque_pedido || e === "em curso" || e === "concluída";
   if (m === "obra") {
     if (e === "concluída") return true;
     if (e !== "em curso") return false;
@@ -144,8 +145,8 @@ export function nomeDaParcela(x: Pick<Parcela, "momento" | "p" | "l">): string {
 /** As parcelas a seguir à 1.ª que já caíram no Financeiro e não estão pagas (os passos do Financeiro na Obra). */
 export const parcelasNoFinanceiro = (S: Estado, d: Negocio): Parcela[] =>
   // a obra já entregue (com o auto de receção, de antes desta regra): não volta a pedir nada ao Financeiro
-  // (antes do arranque pedido e da obra a andar, nenhuma a seguir à 1.ª é devida: nem se faz a conta)
-  d.obra.auto || d.anulado || !(d.f.arranque_pedido || d.obra.plano?.estado === "em curso" || d.obra.plano?.estado === "concluída") ? []
+  // (antes do contrato assinado, do arranque pedido e da obra a andar, nenhuma a seguir à 1.ª é devida: nem se faz a conta)
+  d.obra.auto || d.anulado || !(d.orc?.contrato === "assinado" || d.f.arranque_pedido || d.obra.plano?.estado === "em curso" || d.obra.plano?.estado === "concluída") ? []
     : parcelasDoContrato(S, d).filter((x) => x.i > 0 && x.devida && !x.paga);
 
 /** Junta a fatura da parcela às do negócio (a 1.ª, a do passo Fatura, entra como fatura registada: já está na base). */

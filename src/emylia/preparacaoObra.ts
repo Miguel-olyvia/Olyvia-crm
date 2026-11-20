@@ -823,20 +823,20 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
   // 21/10: a 1.ª parcela de cada adenda assinada, com os mesmos dois passos do contrato (a fatura e o pagamento validado): é ela que
   // emite a encomenda dos materiais da adenda no Inventário. As parcelas seguintes ficam no Financeiro do negócio, como as do contrato.
   for (const a of assinadas(d)) L.push(...passosPagamentoAdenda(d, a));
-  // 19/11 (Rúben): as parcelas do contrato a seguir à 1.ª, quando caem no Financeiro (a do arranque, ao carregar em «Arrancar a obra»;
+  // 19/11 (Rúben): as parcelas do contrato a seguir à 1.ª, quando caem no Financeiro (a do arranque, com o contrato assinado (20/11);
   // a do fim, antes da entrega): a fatura e o pagamento validado, como a 1.ª
   for (const x of parcelasNoFinanceiro(S, d)) L.push(...passosDaParcela(x));
 
   // o arranque
   const F = faltaParaArrancar(d, undefined, S);
-  const pa = !F.length && d.f.arranque_pedido ? parcelaDoArranquePorPagar(S, d) : null;
+  const pa = !F.length ? parcelaDoArranquePorPagar(S, d) : null;
   L.push(p.estado === "em curso" || p.estado === "concluída"
     ? { id: "go", trilho: "obra", estado: "feito", who: "operacoes", t: p.estado === "concluída" ? "Obra concluída" : "Obra em curso", sub: "" }
     : F.length
       ? { id: "go", trilho: "obra", estado: "espera", who: "operacoes", t: "Arrancar a obra", sub: `Falta ${F.join(", ")}.` }
       : pa
       ? { id: "go", trilho: "obra", estado: "espera", who: "operacoes", t: "Arrancar a obra", sub: `À espera de ${nomeDaParcela(pa)} paga, no Financeiro.` }
-      : { id: "go", trilho: "obra", estado: "agora", who: "operacoes", t: "Arrancar a obra", sub: d.f.arranque_pedido ? "A parcela do arranque está paga." : "Está tudo pronto.", act: "arrancar", btn: "Arrancar a obra" });
+      : { id: "go", trilho: "obra", estado: "agora", who: "operacoes", t: "Arrancar a obra", sub: "Está tudo pronto.", act: "arrancar", btn: "Arrancar a obra" });
   void S;
   return L;
 }

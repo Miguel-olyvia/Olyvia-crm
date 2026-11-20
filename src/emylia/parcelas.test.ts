@@ -97,16 +97,19 @@ describe("as parcelas pelas condições de pagamento", () => {
     expect(d.obra.auto?.estado).toBe("por assinar");
   });
 
-  it("50-25-25: «Arrancar a obra» manda os 25% ao Financeiro; só arranca pagos; os últimos 25% seguram o auto de receção", () => {
+  it("50-25-25: os 25% do arranque caem no Financeiro com o contrato assinado; só arranca pagos; os últimos 25% seguram o auto de receção", () => {
     const { S, A, d, avisos } = prontaAArrancar(PAGAMENTO_50_25_25);
     expect(parcelasDoContrato(S, d).map((x) => x.momento)).toEqual(["inicio", "arranque", "fim"]);
-    expect(parcelasDoContrato(S, d)[1].devida).toBe(false);
-    // o 1.º clique: a parcela do arranque cai no Financeiro; a obra não arranca
+    // 20/11 (Rúben): com o contrato assinado já é a vez da parcela do arranque, sem esperar pelo «Arrancar a obra»
+    expect(d.orc!.contrato).toBe("assinado");
+    expect(parcelasDoContrato(S, d)[1].devida).toBe(true);
+    expect(parcelasDoContrato(S, d)[2].devida).toBe(false);
+    expect(proximo(d, S)).toMatchObject({ t: "Faturar a parcela do arranque (25%)", who: "financeiro" });
+    // carregar em «Arrancar a obra» não arranca: avisa que falta a parcela
     A.arrancar(d.id);
     expect(d.obra.plano!.estado).toBe("aprovado");
-    expect(d.f.arranque_pedido).toBeTruthy();
-    expect(avisos.at(-1)).toMatch(/^A parcela do arranque foi ao Financeiro/);
-    expect(proximo(d, S)).toMatchObject({ t: "Faturar a parcela do arranque (25%)", who: "financeiro" });
+    expect(d.f.arranque_pedido).toBeFalsy();
+    expect(avisos.at(-1)).toMatch(/^À espera da parcela do arranque/);
     expect(passosPreparacao(d, S).find((x) => x.id === "go")?.estado).toBe("espera");
     // o Financeiro vê-a no Hoje
     expect(minhas(S, "financeiro").some((x) => x.d.id === d.id && /parcela do arranque/.test(x.p.t))).toBe(true);
