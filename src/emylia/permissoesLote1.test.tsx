@@ -21,7 +21,7 @@ import { CODIGOS_NEGOCIOS } from "./permissoesReais";
 import { comPapeisDasPermissoes, papeisDasPermissoes, papelInicial, type MeusPapeis } from "./real/papeisReal";
 import { esquecerInventario } from "./inventario/loja";
 import { BotaoFase } from "./PaginaNegocio";
-import { RegistarFaturaErp } from "./FaturaErp";
+import { Pagamentos } from "./Pagamentos";
 import { FINANCEIRO, emFalta } from "./campos";
 import { Conversa } from "./ConversaObra";
 import { Montar } from "./v2/testeV2";
@@ -339,44 +339,34 @@ describe("I · a caixa de envio da conversa da obra pede pessoas.edit", () => {
 });
 
 /* ------------------------------------------------------------------ L: a fatura do ERP */
-describe("L · RegistarFaturaErp: sem negocios.registar_fatura, nem formulário nem Eticadata", () => {
-  // 10/11: com os dados de faturação e da fatura preenchidos (sem eles, o formulário diz o que falta: o último caso)
-  const negocio = (comDados = true) => {
-    const { S, d } = naLead(); S.role = "financeiro";
-    if (comDados) for (const c of emFalta([FINANCEIRO[0], FINANCEIRO[1]], d.f)) d.f[c.k] = c.op ? c.op[0] : "x";
+describe("L · o número da fatura (lista «Pagamentos»): sem negocios.registar_fatura, nem campo nem Eticadata", () => {
+  // 20/11 (auditoria F10): o formulário antigo (RegistarFaturaErp) saiu; o número escreve-se só na lista «Pagamentos»
+  const negocio = () => {
+    const S = seed(), d = S.deals.find((x) => x.id === 1027)!;
+    d.orc!.contrato = "assinado"; d.fin.fatura = undefined; d.fin.pago = false; S.role = "financeiro";
     return { S, d };
   };
-  it("sem a permissão: o botão desligado, o porquê, e o ERP não é lido", () => {
+  it("sem a permissão: sem campo, diz porquê, e o ERP não é lido", () => {
     const { S, d } = negocio();
     reais([]);
-    render(<Montar S={S}>{(ctx) => <RegistarFaturaErp ctx={ctx} d={d} />}</Montar>);
-    expect((botao(/Registar fatura/) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.queryByRole("textbox")).toBeNull();
+    render(<Montar S={S}>{(ctx) => <Pagamentos ctx={ctx} d={d} />}</Montar>);
+    expect(screen.queryByLabelText(/Número da fatura no Eticadata/)).toBeNull();
     expect(screen.getByText(SEM_PERM["finance.invoice"].sub)).toBeTruthy();
     expect(erp.ler).not.toHaveBeenCalled();
   });
-  it("com ela (ou sem conta real, o Financeiro), o formulário de sempre, que lê o ERP ao registar", async () => {
+  it("com ela (ou sem conta real, o Financeiro), o campo do número", () => {
     const { S, d } = negocio();
-    erp.ler.mockResolvedValue({ motivo: "sem_ligacao", msg: "Sem ligação" });
     reais(["finance.invoice"]);
-    render(<Montar S={S}>{(ctx) => <RegistarFaturaErp ctx={ctx} d={d} />}</Montar>);
-    fireEvent.change(screen.getByRole("textbox"), { target: { value: "FAT 1/2" } });
-    fireEvent.click(botao(/Registar fatura/)!);
-    await screen.findByRole("alert");
-    expect(erp.ler).toHaveBeenCalledWith("FAT 1/2");
+    render(<Montar S={S}>{(ctx) => <Pagamentos ctx={ctx} d={d} />}</Montar>);
+    expect(screen.getByLabelText(/Número da fatura no Eticadata/)).toBeTruthy();
     cleanup();
     definirPermissoesReais(null);
-    render(<Montar S={S}>{(ctx) => <RegistarFaturaErp ctx={ctx} d={d} />}</Montar>);
-    expect(screen.getByRole("textbox")).toBeTruthy();
+    render(<Montar S={S}>{(ctx) => <Pagamentos ctx={ctx} d={d} />}</Montar>);
+    expect(screen.getByLabelText(/Número da fatura no Eticadata/)).toBeTruthy();
   });
-  it("sem os dados de faturação: o botão desligado e diz o que falta (o NIF), sem perguntar ao ERP", () => {
-    const { S, d } = negocio(false);
-    for (const c of emFalta([FINANCEIRO[0], FINANCEIRO[1]], d.f)) if (c.k !== "nif_fat") d.f[c.k] = c.op ? c.op[0] : "x";
-    render(<Montar S={S}>{(ctx) => <RegistarFaturaErp ctx={ctx} d={d} />}</Montar>);
-    expect((botao(/Registar fatura/) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.queryByRole("textbox")).toBeNull();
-    expect(screen.getByText(/falta NIF \(Dados de faturação\)/)).toBeTruthy();
-    expect(erp.ler).not.toHaveBeenCalled();
+  it("o «Próximo passo» do Financeiro já não traz um 2.º formulário: o botão abre a lista", () => {
+    const { S, d } = negocio();
+    expect(proximo(d, S)).toMatchObject({ act: "registarFaturaErp", btn: "Registar o número da fatura" });
   });
 });
 

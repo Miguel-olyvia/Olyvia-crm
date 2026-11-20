@@ -27,7 +27,6 @@ import { AbrirEstudioPlano } from "./estudioPlano/EstudioPlano";
 import { AbrirEstudioObra } from "./estudioObra/EstudioObra";
 import { planoAprovadoDe, retificacaoAceite } from "./preparacaoObra";
 import { AcoesAdenda } from "./TrabalhosAMais";
-import { RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
 import { MoradaDaObra } from "./MoradaDaObra";
 import { ServicoDaChamada } from "./ServicoDaChamada";
@@ -662,8 +661,8 @@ export function BotaoFase({ ctx, d, tamanho = "lg", variante }: { ctx: Ctx; d: N
   if (p.act === "contactar" && meu) return <RegistarChamada ctx={ctx} d={d} tamanho={tamanho} />;
   // 15/10: o cliente pediu alterações no portal: o botão abre a nova versão já com o que ele pediu
   if (p.act === "pedidoCliente" && meu) return <NovaVersao ctx={ctx} d={d} texto={p.btn} />;
-  // 22/10: a fatura emitida no Eticadata: o número escreve-se aqui e confirma-se no ERP
-  if (p.act === "registarFaturaErp" && meu) return <RegistarFaturaErp ctx={ctx} d={d} tamanho={tamanho} />;
+  // 20/11 (auditoria F10): a fatura do Eticadata regista-se só na lista «Pagamentos»: o botão (A.registarFaturaErp sem número) abre-a
+  // com o cursor no campo do número
   if (p.btn && meu && !portal.pode) return (
     <div className="grid justify-items-start gap-1 sm:justify-items-end">
       <Button size={tamanho} variant={variante} disabled aria-describedby={portal.semPermissao ? idSemPerm : undefined}>{p.btn}<ArrowRight className="ml-2 h-4 w-4" /></Button>

@@ -813,13 +813,13 @@ export function passosPreparacao(d: Negocio, S: Estado, inv?: ResumoEcNeg | null
     : lerVersao() !== "atual"
     ? { id: "ft", trilho: "pag", estado: "agora", who: "financeiro", t: "Registar a fatura", sub: "Emita-a no programa de faturação certificado e registe-a no Financeiro do negócio." }
     // 22/10: no V1 também não: emite-se no Eticadata e regista-se aqui o número (o botão abre o negócio, onde se escreve)
-    : { id: "ft", trilho: "pag", estado: "agora", who: "financeiro", t: "Registar a fatura do ERP", sub: "Emita-a no Eticadata e escreva aqui o número.", act: "registarFaturaErp", btn: "Registar fatura" });
+    : { id: "ft", trilho: "pag", estado: "agora", who: "financeiro", t: "Registar a fatura do ERP", sub: "Emita-a no Eticadata e escreva o número na lista «Pagamentos».", act: "registarFaturaErp", btn: "Registar o número da fatura" });
   L.push(d.fin.pago
     ? { id: "pg", trilho: "pag", estado: "feito", who: "financeiro", t: `Pagamento validado`, sub: d.fin.recibo ? `Recibo ${d.fin.recibo.n}.` : "" }
     // 22/10: a fatura lida no Eticadata: o pagamento confirma-se lá (FaturaErp.tsx)
     : d.fin.fatura && d.fin.erp
-    ? { id: "pg", trilho: "pag", estado: "agora", who: "financeiro", t: "À espera do pagamento", sub: `No Eticadata: ${resumoErp(d.fin.erp)}. Quando for paga, o recibo é o do ERP e a encomenda de cliente vai para o Inventário.`, act: "verificarErp", btn: "Verificar no ERP" }
-    : { id: "pg", trilho: "pag", estado: d.fin.fatura ? "agora" : "espera", who: "financeiro", t: "Validar o pagamento", sub: d.fin.fatura ? "Confirmar que o valor entrou. O recibo sai sozinho e a encomenda de cliente vai para o Inventário." : "Depois da fatura.", act: d.fin.fatura ? "validar" : undefined, btn: "Validar o pagamento" });
+    ? { id: "pg", trilho: "pag", estado: "agora", who: "financeiro", t: "À espera do pagamento", sub: `No Eticadata: ${resumoErp(d.fin.erp)}. Quando for paga, o recibo é o do ERP e a encomenda de cliente vai para o Inventário.`, act: "validar", btn: "Ok, já foi paga" }
+    : { id: "pg", trilho: "pag", estado: d.fin.fatura ? "agora" : "espera", who: "financeiro", t: "Validar o pagamento", sub: d.fin.fatura ? "Confirmar que o valor entrou. O recibo sai sozinho e a encomenda de cliente vai para o Inventário." : "Depois da fatura.", act: d.fin.fatura ? "validar" : undefined, btn: "Ok, já foi paga" });
   // 21/10: a 1.ª parcela de cada adenda assinada, com os mesmos dois passos do contrato (a fatura e o pagamento validado): é ela que
   // emite a encomenda dos materiais da adenda no Inventário. As parcelas seguintes ficam no Financeiro do negócio, como as do contrato.
   for (const a of assinadas(d)) L.push(...passosPagamentoAdenda(d, a));

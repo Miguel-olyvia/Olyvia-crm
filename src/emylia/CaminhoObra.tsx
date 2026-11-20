@@ -11,7 +11,6 @@ import { cn } from "@/lib/utils";
 import { PAPEIS, TECS, conflitos, eur, nfmt, pct, type Negocio, type Papel } from "./motor";
 import { fazer, type Ctx } from "./pecas";
 import { SEM_PERM, passoDe, permEmFaltaDoPasso } from "./permissoes";
-import { RegistarFaturaErp } from "./FaturaErp";
 import { ContratoDoc, NotaEncomendaDoc, Partilhar } from "./DocsCliente";
 import { SeloAssinatura } from "./AssinaturaContrato";
 import { AutoNoNegocio } from "./AutoRececao";
@@ -116,11 +115,8 @@ export function CaminhoObra(ctx: Ctx & { d: Negocio }) {
         {x.sub && <p className="text-sm text-muted-foreground">{x.sub.split(" · atenção: ")[0]}{x.sub.includes(" · atenção: ") && <span className="mt-0.5 flex items-start gap-1.5 text-foreground"><TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" aria-hidden="true" />{x.sub.split(" · atenção: ")[1].replace(/^./, (c) => c.toUpperCase())}.</span>}</p>}
         {x.estado !== "feito" && <div className="mt-1"><Quem who={x.who} /></div>}
         {x.estado === "agora" && x.act && x.who && (
-          // 22/10: a fatura do Eticadata: o número escreve-se aqui mesmo (FaturaErp.tsx)
-          // 9/11 (Lote 1, L): sem negocios.registar_fatura o formulário não aparece (o botão desligado diz porquê), antes de ler o Eticadata
-          deMim(x) && x.act === "registarFaturaErp" && !semPerm(x)
-            ? <div className="mt-2"><RegistarFaturaErp ctx={ctx} d={d} tamanho="default" aEsquerda /></div>
-            : deMim(x) && semPerm(x)
+          // 20/11 (auditoria F10): a fatura do Eticadata regista-se só na lista «Pagamentos»: o botão abre-a com o cursor no número
+          deMim(x) && semPerm(x)
             ? <div className="mt-2"><Button size="sm" variant="outline" className="min-h-10" disabled>{x.btn}</Button><p className="mt-1 text-sm text-muted-foreground">{SEM_PERM[semPerm(x)!].sub}</p></div>
             : deMim(x)
             ? <Button size="sm" variant={meu?.id === x.id ? "default" : "outline"} className="mt-2 min-h-10" onClick={go(() => fazer(A, x.act!, d.id, x.arg))}>{x.btn}</Button>

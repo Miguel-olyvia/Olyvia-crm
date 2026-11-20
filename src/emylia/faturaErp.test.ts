@@ -43,7 +43,7 @@ describe("a fatura do Eticadata no V1", () => {
     acoes(S, () => {}, (fn) => fn()).registarFaturaErp(1027, " FAT 15200126/12 ", info());
     expect(d().fin.fatura).toEqual({ n: "FAT 15200126/12", q: "22/10" });
     expect(d().fin.pago).toBe(false);
-    expect(proximo(d(), S)).toMatchObject({ act: "verificarErp", btn: "Verificar no ERP" });
+    expect(proximo(d(), S)).toMatchObject({ act: "validar", btn: "Ok, já foi paga" });
     expect(proximo(d(), S).sub).toContain("por pagar");
   });
 
@@ -110,9 +110,9 @@ describe("a fatura do Eticadata no V1", () => {
     expect(d().fin.fatura?.n).toBe("FAT 15200126/12");
     // 3/11: sem o Eticadata, valida-se à mão quando se quiser (opcional), com ou sem o aviso do cliente no portal
     delete d().f.comprovativo;
-    expect(proximo(d(), S)).toMatchObject({ t: "À espera do pagamento", act: "validar", btn: "Validar à mão" });
+    expect(proximo(d(), S)).toMatchObject({ t: "À espera do pagamento", act: "validar", btn: "Ok, já foi paga" });
     A.avisarPagamento(1027, "TRF 123");
-    expect(proximo(d(), S)).toMatchObject({ act: "validar", btn: "Validar pagamento" });
+    expect(proximo(d(), S)).toMatchObject({ act: "validar", btn: "Ok, já foi paga" });
   });
 
   it("3/11: validar à mão sem o aviso do cliente dá a fatura como paga", () => {

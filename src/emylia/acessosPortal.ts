@@ -1,4 +1,4 @@
-// As contas dos portais no protótipo (22/10/2026): o login dos portais (?login=1, LoginPortal.tsx) e o popup com as credenciais
+// As contas dos portais no protótipo (22/10/2026): o login dos portais (o antigo ?login=1, LoginPortal.tsx, saiu a 20/11) e o popup com as credenciais
 // (AcessoPortalDialog.tsx), para testar sem emails a sério. Só dados de teste no Estado (S.acessos, na parte "global" da sincronização):
 // nada de Supabase Auth nem de edge functions.
 // · Cliente: a conta nasce no primeiro envio ao portal (proposta, contrato, adenda, contrato da adenda), com o email da ficha do cliente e

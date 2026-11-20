@@ -1590,12 +1590,13 @@ export function proximo(d: Negocio, S: Estado): Proximo {
       // 19/10: na V2 a Olyvia não emite faturas: o Financeiro regista a do programa certificado (sem botão no passo)
       if (!d.fin.fatura && lerVersao() !== "atual") return { t: "Registar a fatura", sub: "Emita-a no programa de faturação certificado e registe-a no Financeiro do negócio.", who: "financeiro" };
       // 22/10: no V1 também não: emite-se no Eticadata, regista-se aqui o número e a Olyvia lê no ERP se já foi paga (erpEticadata.ts)
-      if (!d.fin.fatura) return { t: "Registar a fatura do ERP", sub: "Emita-a no Eticadata e escreva aqui o número. A Olyvia confirma no ERP se já foi paga.", btn: "Registar fatura", act: "registarFaturaErp", who: "financeiro" };
+      if (!d.fin.fatura) return { t: "Registar a fatura do ERP", sub: "Emita-a no Eticadata e escreva o número na lista «Pagamentos». A Olyvia confirma no ERP se já foi paga.", btn: "Registar o número da fatura", act: "registarFaturaErp", who: "financeiro" };
       // 3/11 (Rúben): a fatura vai ao portal com os dados para pagar. Seguida no Eticadata, passa a paga sozinha quando o ERP o disser;
-      // validar à mão é opcional (o botão no passo Pagamento), com ou sem o aviso do cliente no portal
-      if (d.fin.erp) return { t: "À espera do pagamento", sub: `${d.fin.fatura.n}: ${resumoErp(d.fin.erp)}. A Olyvia vê no Eticadata quando for paga; também pode validar à mão.`, btn: "Verificar no ERP", act: "verificarErp", who: "financeiro" };
-      if (d.f.comprovativo) return { t: "Validar o pagamento", sub: `O cliente diz que pagou a ${d.fin.fatura.n}${d.f.data_pag ? " a " + d.f.data_pag.split("-").reverse().join("/") : ""} · ${d.f.comprovativo}. Confirmar que o valor entrou na conta; o recibo é emitido ao validar.`, btn: "Validar pagamento", act: "validar", who: "financeiro" };
-      return { t: "À espera do pagamento", sub: `A ${d.fin.fatura.n} está no portal do cliente, com os dados para pagar. Sem ligação ao Eticadata, pode validar à mão quando o valor entrar.`, btn: "Validar à mão", act: "validar", who: "financeiro" };
+      // validar à mão é opcional, com ou sem o aviso do cliente no portal. 20/11 (auditoria F10): o mesmo botão da lista «Pagamentos»,
+      // «Ok, já foi paga»; o Eticadata é só texto (a lista volta a lê-lo sozinha a cada minuto)
+      if (d.fin.erp) return { t: "À espera do pagamento", sub: `${d.fin.fatura.n}: ${resumoErp(d.fin.erp)}. A Olyvia vê no Eticadata quando for paga.`, btn: "Ok, já foi paga", act: "validar", who: "financeiro" };
+      if (d.f.comprovativo) return { t: "Validar o pagamento", sub: `O cliente diz que pagou a ${d.fin.fatura.n}${d.f.data_pag ? " a " + d.f.data_pag.split("-").reverse().join("/") : ""} · ${d.f.comprovativo}. Confirmar que o valor entrou na conta; o recibo é emitido ao validar.`, btn: "Ok, já foi paga", act: "validar", who: "financeiro" };
+      return { t: "À espera do pagamento", sub: `A ${d.fin.fatura.n} está no portal do cliente, com os dados para pagar. Quando o valor entrar na conta, confirme aqui.`, btn: "Ok, já foi paga", act: "validar", who: "financeiro" };
     }
     case 5: {
       const p = d.obra.plano;
