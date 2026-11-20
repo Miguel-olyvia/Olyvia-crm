@@ -1,5 +1,5 @@
 -- ============================================================
--- Testes: 20270121000000_catalogo_ler_servicos_leve.sql (base RH)
+-- Testes: 20270121000001_catalogo_ler_servicos_leve.sql (antes 20270121000000) (base RH)
 -- ============================================================
 -- Tudo dentro de BEGIN … ROLLBACK, só na nike, sem escrever nada em tabelas (só pg_temp e set_config locais).
 -- Compara cat_ler_catalogo_servicos com cat_ler_catalogo para as MESMAS identidades:

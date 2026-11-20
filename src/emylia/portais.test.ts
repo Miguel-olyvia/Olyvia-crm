@@ -21,12 +21,15 @@ describe("portais do cliente e do fornecedor", () => {
 });
 
 describe("o link de partilha", () => {
-  it("cada documento de cada negócio tem um código só seu, e o link abre o portal no protótipo", async () => {
+  it("cada documento de cada negócio tem um código só seu, e o link abre o portal real do cliente (20/11)", async () => {
     const { TIPOS_DOC, tokenDoc, linkPortal } = await import("./DocsCliente");
     const S = seed();
     const codigos = S.deals.flatMap((d) => TIPOS_DOC.map((t) => tokenDoc(d, t)));
     expect(new Set(codigos).size).toBe(codigos.length);
     const d = S.deals.find((x) => x.id === 1031)!;
-    expect(linkPortal(d, "proposta")).toMatch(/\/prototipo\/negocios\?portal=[0-9A-Z]+$/);
+    // com o id do negócio na base: a página do negócio no portal; sem ele, a lista dos negócios do portal
+    expect(linkPortal(d, "proposta", "neg-uuid")).toBe(`${window.location.origin}/client-portal/negocios/neg-uuid`);
+    expect(linkPortal(d, "contrato")).toBe(`${window.location.origin}/client-portal/negocios`);
+    expect(linkPortal(d, "proposta", "neg-uuid")).not.toMatch(/prototipo/);
   });
 });

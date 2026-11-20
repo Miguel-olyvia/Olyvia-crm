@@ -237,7 +237,7 @@ describe("o plano de uma obra grande (o caso real até à obra)", () => {
   it("as partes dos «MO Modelo» vão para a fase do ofício, sem recuar; o nome curto e as iniciais", async () => {
     const { montarAnabela, avancarAteObra } = await import("./casos/montarAnabela");
     const { iniciais } = await import("./obraOps");
-    const { nomeCurtoTarefa } = await import("./ObraOperacoes");
+    const { nomeCurtoTarefa } = await import("./obraOps");
     const S = estadoVazio("org-teste");
     const { usarTecnicos } = await import("./equipa/tecnicos");
     usarTecnicos(S.tecnicos!);

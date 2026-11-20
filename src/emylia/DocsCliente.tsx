@@ -88,8 +88,11 @@ export const TIPOS_DOC = ["proposta", "contrato", "fatura", "encomenda", "adenda
 const token = (d: Negocio, tipo: string) => (d.id * 7919 + (TIPOS_DOC.indexOf(tipo as (typeof TIPOS_DOC)[number]) + 1) * 104729).toString(36).toUpperCase();
 /** O código do link de um documento (o negócio e o tipo). */
 export const tokenDoc = token;
-/** O link do portal do cliente. No protótipo abre o portal neste mesmo endereço (os dados vivem neste browser). */
-export const linkPortal = (d: Negocio, tipo: string) => `${typeof window !== "undefined" ? window.location.origin : ""}/prototipo/negocios?portal=${token(d, tipo)}`;
+/** O link do portal do cliente. 20/11: o portal real (/client-portal/negocios/<id do negócio na base>), onde o cliente entra com a conta
+ *  dele e vê a proposta, o contrato e os outros documentos do negócio. Sem o id da base (o negócio ainda não gravado, ou o protótipo sem
+ *  organização), a lista dos negócios do portal. Antes era a cópia antiga do protótipo (/prototipo/negocios?portal=<código>), que saiu. */
+export const linkPortal = (d: Negocio, _tipo: string, idBase?: string | null) =>
+  `${typeof window !== "undefined" ? window.location.origin : ""}/client-portal/negocios${idBase ? `/${encodeURIComponent(idBase)}` : ""}`;
 
 /* ------------------------------------------------------------------ a folha */
 export function Folha({ titulo, numero, data: dt, children, carimbo }: { titulo: string; numero: string; data: string; children: ReactNode; carimbo?: string }) {
@@ -912,7 +915,7 @@ function imprimir(el: HTMLElement | null, titulo: string) {
 }
 
 export function Partilhar({ ctx, d, tipo, children, estado }: { ctx: Ctx; d: Negocio; tipo: "proposta" | "contrato" | "fatura" | "encomenda" | "adenda"; children: ReactNode; estado: string }) {
-  const link = linkPortal(d, tipo);
+  const link = linkPortal(d, tipo, ctx.idNegocioBase?.(d.id));
   const [copiado, setCopiado] = useState(false);
   const [ver, setVer] = useState(false);
   const [zoom, setZoom] = useState(1);

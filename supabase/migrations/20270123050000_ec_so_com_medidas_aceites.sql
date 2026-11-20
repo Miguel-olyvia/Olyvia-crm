@@ -9,7 +9,7 @@
 -- retificacaoAceite), mas uma gravação direta do plano aprovado emitia a encomenda com as medidas da visita.
 --
 -- O que muda:
---   1. fn_neg_medidas_aceites(negócio) (nova): há retif_aceite com valor (e não sugerido), a mesma leitura de 20270112700000.
+--   1. fn_neg_medidas_aceites(negócio) (nova): há retif_aceite com valor (e não sugerido), a mesma leitura de 20270112700001 (antes 20270112700000).
 --   2. fn_neg_emitir_ec_se_pronta (trocas de texto guardadas sobre o pg_get_functiondef VIVO, que tem de ter as de 20270117960000):
 --      v_medidas_ok = venda direta (não há obra a medir) OU encomenda já emitida (o atalho dos negócios antigos, como retificacaoAceite
 --      no ecrã) OU fn_neg_medidas_aceites. Sem isso, o contrato não emite a encomenda: o negócio passa à Obra e espera, com o motivo

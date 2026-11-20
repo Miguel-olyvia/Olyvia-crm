@@ -1,4 +1,4 @@
--- 17/11: os Negócios, os Serviços e o Estúdio passaram a ler o catálogo leve (cat_ler_catalogo_servicos, 20270121000000), que só
+-- 17/11: os Negócios, os Serviços e o Estúdio passaram a ler o catálogo leve (cat_ler_catalogo_servicos, 20270121000001), que só
 -- traz os 145 produtos dos consumos. Os ecrãs que escolhem um produto da lista completa (visita, «exige produto», «passa a trazer
 -- este serviço») e a lista dos produtos de um serviço precisam agora de pesquisa no servidor. Duas funções NOVAS:
 --

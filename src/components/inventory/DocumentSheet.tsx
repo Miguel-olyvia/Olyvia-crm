@@ -1,4 +1,4 @@
-// Folha lateral de um documento (Folha do protótipo prototipo-negocios/inventario,
+// Folha lateral de um documento (Folha do protótipo emylia/inventario,
 // classes .sheet/.sh-head/.sh-info/.sh-body/.sh-foot do inventario.css) em
 // shadcn + Tailwind, para as fichas reais: encomenda a fornecedor, contagem e
 // guia do fornecedor. Só layout — a lógica, as permissões e os diálogos ficam

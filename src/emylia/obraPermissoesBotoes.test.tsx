@@ -5,7 +5,7 @@
 // Mapa: ajustar/dar por feita/validar/pedir correção/nova tarefa → negocios.obra.planear; problemas e decidir imprevistos →
 // negocios.obra.imprevistos; registar imprevisto → negocios.obra.executar OU negocios.obra.imprevistos; encerrar → negocios.obra.fechar.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: vi.fn() } }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
@@ -13,8 +13,6 @@ vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn
 import { acoes, seed, type Aviso, type Estado, type Negocio } from "./motor";
 import { CODIGO_BASE, SEM_PERM, definirPermissoesReais, type PermNeg } from "./permissoes";
 import { esquecerInventario } from "./inventario/loja";
-import { PaginaObra } from "./ObraOperacoes";
-import { TarefasDoPlano } from "./PlanoInterativo";
 import { AcaoMensagemCliente } from "./ProblemasObra";
 import { Montar } from "./v2/testeV2";
 import type { ProblemaCliente } from "./problemasCliente";
@@ -37,124 +35,15 @@ function preparar(): { S: Estado; d: Negocio } {
   return { S, d };
 }
 const botao = (n: string | RegExp) => screen.queryByRole("button", { name: n });
-/** Abre a tarefa `ti` no separador Plano (o botão do nome, à esquerda do Gantt). */
-const abrirNoPlano = (d: Negocio, ti: number) => {
-  fireEvent.click(screen.getByRole("tab", { name: "Plano" }));
-  const nome = d.obra.plano!.tasks[ti].nome;
-  fireEvent.click(screen.getAllByTitle(nome).find((x) => x.tagName === "BUTTON" && x.hasAttribute("aria-expanded"))!);
-};
 
-describe("página da obra: sem negocios.obra.*, com o papel «Gestor de obra»", () => {
-  it("não aparecem Ajustar o plano, Dar por feita, Validar, Validar várias, Registar imprevisto, Nova tarefa; «Ver registo» em vez de «Rever e validar»", () => {
-    const { S, d } = preparar();
-    reais(DA_OBRA);
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    expect(botao("Validar")).toBeNull();
-    expect(botao("Pedir correção")).toBeNull();
-    expect(botao(/Validar várias/)).toBeNull();
-    expect(screen.getByText(/tarefas feitas à espera de validação das Operações/)).toBeTruthy();
-    expect(botao(/Registar imprevisto/)).toBeNull();
-    expect(botao("Recuar um dia")).toBeNull();
-    expect(botao("Rever e validar")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Ver registo" }));
-    // o histórico abre (só ver)
-    expect(screen.getByRole("button", { name: "Fechar" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /^Histórico/ }));
-    expect(botao(/Dar por feita/)).toBeNull();
-    expect(botao(/Ajustar o plano/)).toBeNull();
-    // o plano: sem Nova tarefa
-    fireEvent.click(screen.getByRole("tab", { name: "Plano" }));
-    expect(botao(/Nova tarefa/)).toBeNull();
-  });
-
-  it("a tarefa aberta no plano (obra em curso) é só para ver: sem «Aplicar o ajuste»", () => {
-    const { S, d } = preparar();
-    reais(DA_OBRA);
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    abrirNoPlano(d, 2);
-    expect(screen.queryByText("Ajustar com a obra em curso")).toBeNull();
-    expect(botao("Aplicar o ajuste")).toBeNull();
-    // abre o detalhe (só ver)
-    expect(screen.getByRole("region", { name: d.obra.plano!.tasks[2].nome })).toBeTruthy();
-  });
-
-  it("os problemas do cliente e os imprevistos: sem «Tratar como problema», sem decidir", () => {
-    const { S, d } = preparar();
-    // um imprevisto aberto (registado com as permissões todas)
-    reais();
-    const A = acoes(S, () => undefined, (fn) => fn());
-    expect(A.registarImprevisto(d.id, { texto: "Cano roto", onde: "cozinha", grav: "impede", tarefas: [2] })).toBeTruthy();
-    reais(DA_OBRA);
-    const m = (d.obra.chat ?? []).find((x) => x.de === "cliente")!;
-    render(<Montar S={S}>{(ctx) => <AcaoMensagemCliente ctx={ctx} d={d} m={m} chave="local-0" abrir={() => undefined} />}</Montar>);
-    expect(botao("Tratar como problema")).toBeNull();
-    cleanup();
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    expect(botao(/Resolver sem custo/)).toBeNull();
-    expect(botao(/Registar imprevisto/)).toBeNull();
-  });
-
-  it("encerrar: sem negocios.obra.fechar não aparece (com planear sim)", () => {
-    const { S, d } = preparar();
-    const p = d.obra.plano!;
-    p.tasks.forEach((t) => { t.exec = { estado: "validada", horas: t.h, fotos: [] }; });
-    reais(["obra.fechar"]);
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    expect(botao(/Encerrar a obra/)).toBeNull();
-    cleanup();
-    reais();
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    expect(botao(/Encerrar a obra/)).toBeTruthy();
-  });
-});
-
-describe("página da obra: com as permissões, tudo como antes", () => {
-  it("Validar, Validar várias, Registar imprevisto, Rever e validar, Dar por feita, Ajustar o plano, Nova tarefa", () => {
-    const { S, d } = preparar();
-    reais();
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    expect(botao("Validar")).toBeTruthy();
-    expect(botao(/Validar várias/)).toBeTruthy();
-    expect(botao(/Registar imprevisto/)).toBeTruthy();
-    expect(botao("Recuar um dia")).toBeTruthy();
-    expect(botao("Ver registo")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Rever e validar" }));
-    fireEvent.click(screen.getByRole("button", { name: /^Histórico/ }));
-    expect(botao(/Dar por feita/)).toBeTruthy();
-    expect(botao(/Ajustar o plano/)).toBeTruthy();
-    // validar funciona
-    fireEvent.click(screen.getAllByRole("button", { name: "Validar" })[0]);
-    expect(d.obra.plano!.tasks.filter((t) => t.exec?.estado === "validada").length).toBe(2);
-    fireEvent.click(screen.getByRole("tab", { name: "Plano" }));
-    expect(botao(/Nova tarefa/)).toBeTruthy();
-  });
-
-  it("a tarefa aberta no plano (obra em curso) abre o ajuste ao vivo", () => {
-    const { S, d } = preparar();
-    reais();
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    abrirNoPlano(d, 2);
-    expect(screen.getByText("Ajustar com a obra em curso")).toBeTruthy();
-    expect(botao("Aplicar o ajuste")).toBeTruthy();
-  });
-
+// 20/11: os testes da página antiga da obra (PaginaObra, TarefasDoPlano) saíram com ela; o Estúdio da obra tem os seus.
+describe("a conversa da obra: com as permissões, tudo como antes", () => {
   it("«Tratar como problema» numa mensagem do cliente", () => {
     const { S, d } = preparar();
     reais();
     const m = (d.obra.chat ?? []).find((x) => x.de === "cliente")!;
     render(<Montar S={S}>{(ctx) => <AcaoMensagemCliente ctx={ctx} d={d} m={m} chave="local-0" abrir={() => undefined} />}</Montar>);
     expect(botao("Tratar como problema")).toBeTruthy();
-  });
-
-  it("sem obra.planear a Nova tarefa sai; com ela volta (o mesmo componente)", () => {
-    const { S, d } = preparar();
-    reais(["obra.planear"]);
-    render(<Montar S={S}>{(ctx) => <TarefasDoPlano ctx={ctx} d={d} />}</Montar>);
-    expect(botao(/Nova tarefa/)).toBeNull();
-    cleanup();
-    reais();
-    render(<Montar S={S}>{(ctx) => <TarefasDoPlano ctx={ctx} d={d} />}</Montar>);
-    expect(botao(/Nova tarefa/)).toBeTruthy();
   });
 });
 

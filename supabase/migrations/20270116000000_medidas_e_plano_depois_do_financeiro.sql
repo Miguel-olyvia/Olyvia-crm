@@ -3,7 +3,7 @@
 --   proposta aceite → Financeiro (fatura e pagamento validado) → Obra: o supervisor retifica as medidas e as Operações aprovam o plano
 --   (ao mesmo tempo) → contrato assinado → encomenda de cliente → obra. Se as medidas ou o plano mudarem o valor, uma adenda depois do
 --   contrato (é só do ecrã: a adenda é a de sempre).
--- O que muda na base: só fn_neg_fase_minima (a de 20270112800000). A proposta aceite volta a ser Financeiro (4) sozinha, como em
+-- O que muda na base: só fn_neg_fase_minima (a de 20270112800001, antes 20270112800000). A proposta aceite volta a ser Financeiro (4) sozinha, como em
 -- 20270112300000; o pagamento validado e a encomenda emitida continuam a ser Obra (5).
 -- O que já está na base e serve a ordem nova (não muda; a guarda de baixo confirma que está lá):
 --   - neg_registar_fatura fatura-se com a proposta aceite, sem contrato (20270112300000);

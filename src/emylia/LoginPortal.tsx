@@ -1,4 +1,4 @@
-// O login dos portais no protótipo (22/10/2026), em /prototipo/negocios?login=1, com o aspeto do login da Olyvia (src/pages/Auth.tsx):
+// O login dos portais no protótipo (22/10/2026), antes em /prototipo/negocios?login=1 (a cópia antiga saiu a 20/11: hoje ninguém o monta), com o aspeto do login da Olyvia (src/pages/Auth.tsx):
 // o mesmo ecrã para o cliente e para o fornecedor; a conta diz qual dos portais abre (acessosPortal.ts). As credenciais aparecem no popup
 // do envio (AcessoPortalDialog.tsx), por isso "Esqueceu a password?" só explica onde as encontrar.
 // · Cliente: no primeiro acesso troca a password temporária (como FirstLoginModal.tsx) e abre o portal do negócio do envio mais recente.

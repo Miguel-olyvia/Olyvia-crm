@@ -1,4 +1,4 @@
-// 17/11: a leitura LEVE do Catálogo (cat_ler_catalogo_servicos, 20270121000000). Negócios, Serviços e Estúdio deixam de ler os 29 785 produtos
+// 17/11: a leitura LEVE do Catálogo (cat_ler_catalogo_servicos, 20270121000001). Negócios, Serviços e Estúdio deixam de ler os 29 785 produtos
 // da Mudelar (32 MB, 4 a 15 s, statement timeout). Sem a função na base, voltam a cat_ler_catalogo.
 import { describe, expect, it } from "vitest";
 import { lerCatalogo } from "./lerCatalogo";
