@@ -23,7 +23,9 @@ export interface NegocioLido { id: string; entityId: string; estadoCrm: string; 
   /** A obra gravada (20261231999000). Sem ela, o negócio ainda não tem obra na base. */
   obra?: Negocio["obra"];
   /** 28/10: a encomenda de cliente emitida no servidor (20261231999700, fn_neg_ler_ec): o contrato e quando. Sem ela, ainda não há. */
-  ec?: EcBase | null }
+  ec?: EcBase | null;
+  /** 20/11 (20270125020000): a versão das gravações quando se leu (neg_versoes). Sem ela (base sem a função), grava-se como antes. */
+  versao?: number }
 export interface EcBase { contract_id: string; order_number: string | null; emitida_em: string | null }
 
 /** O negócio do motor a partir do que se leu: as linhas e, se houver, a obra. */
@@ -128,6 +130,9 @@ export function deBase(j: unknown, ids: IdsServico): NegocioLido {
  *  passam por aqui, por isso veem as mesmas sugestões que o ecrã. */
 export async function lerNegocios(sb: SupabaseClient, org: string, ids: IdsServico, campos?: CfgCampos,
   opcoes: { semSugestoes?: boolean } = {}): Promise<NegocioLido[]> {
+  // 20/11 (20270125020000): as versões ANTES dos negócios: uma gravação de outra pessoa entre as duas leituras dá, no pior caso, um conflito
+  // a mais (relê-se), nunca uma gravação por cima do que não se leu
+  const versoes = await lerVersoes(sb, org);
   const [neg, obras, autores, sugestoes] = await Promise.all([
     sb.rpc("neg_ler_negocios" as never, { p_org: org } as never),
     sb.rpc("obra_ler_negocios" as never, { p_org: org } as never),
@@ -153,10 +158,29 @@ export async function lerNegocios(sb: SupabaseClient, org: string, ids: IdsServi
       const novas = linhasSugeridas(dele, campos, new Set(n.linhas.respostas.map((r) => r.campo_chave)));
       if (novas.length) n.linhas = { ...n.linhas, respostas: [...n.linhas.respostas, ...novas] };
     }
-    const obra = porNegocio.get(n.id);
-    return obra ? { ...n, obra } : n;
+    const obra = porNegocio.get(n.id), versao = versoes?.get(n.id);
+    return { ...n, ...(obra ? { obra } : {}), ...(versao != null ? { versao } : {}) };
   });
 }
+
+/** 20/11 (20270125020000): {id do negócio → versão} dos negócios que o utilizador lê. Sem a função (ou com erro), null: grava-se como antes. */
+export async function lerVersoes(sb: SupabaseClient, org: string): Promise<Map<string, number> | null> {
+  try {
+    const { data, error } = await sb.rpc("neg_versoes" as never, { p_org: org } as never);
+    if (error || !data || typeof data !== "object" || Array.isArray(data)) return null;
+    const m = new Map<string, number>();
+    for (const [id, v] of Object.entries(data as Record<string, unknown>)) if (typeof v === "number" && Number.isFinite(v)) m.set(id, v);
+    return m;
+  } catch { return null; }
+}
+
+/** 20/11 (20270125020000): a base recusou a gravação porque o negócio foi gravado noutro lado depois de este ecrã o ler (NE015). */
+export class NegocioAlteradoNoutroLado extends Error {
+  constructor(msg = "Este negócio foi alterado noutro lado; atualizei. Volte a fazer a alteração.") { super(msg); this.name = "NegocioAlteradoNoutroLado"; }
+}
+export const MSG_ALTERADO_NOUTRO_LADO = "Este negócio foi alterado noutro lado; atualizei. Volte a fazer a alteração.";
+const eConflitoDeVersao = (e: { code?: string; message?: string } | null): boolean =>
+  e?.code === "NE015" || /alterado noutro lado/i.test(e?.message ?? "");
 
 /** 19/11: só as obras, como estão agora na base (obra_ler_negocios, a mesma leitura do abrir): o id do negócio → o estado da Emylia.
  *  Com erro (ou sem a função), null: quem chama continua como antes. */
@@ -177,9 +201,12 @@ export async function gravarObra(sb: SupabaseClient, org: string, negocioId: str
   return Array.isArray(avisos) ? avisos.map(String) : [];
 }
 
-/** Grava e devolve os avisos (ex.: uma visita que a agenda recusou por ser feriado; o resto ficou gravado). */
-export async function gravarNegocio(sb: SupabaseClient, org: string, negocioId: string, L: LinhasNegocio, ids: IdsServico): Promise<string[]> {
-  const { data, error } = await sb.rpc("neg_guardar_negocio" as never, { p_org: org, p_negocio_id: negocioId, p_linhas: paraBase(L, ids) } as never);
+/** Grava e devolve os avisos (ex.: uma visita que a agenda recusou por ser feriado; o resto ficou gravado). `versao`: a que o ecrã leu
+ *  (20270125020000); a base recusa (NegocioAlteradoNoutroLado) se outra gravação veio depois. Sem ela, grava como antes. */
+export async function gravarNegocio(sb: SupabaseClient, org: string, negocioId: string, L: LinhasNegocio, ids: IdsServico, versao?: number): Promise<string[]> {
+  const linhas = { ...paraBase(L, ids), ...(typeof versao === "number" ? { versao_lida: versao } : {}) };
+  const { data, error } = await sb.rpc("neg_guardar_negocio" as never, { p_org: org, p_negocio_id: negocioId, p_linhas: linhas } as never);
+  if (error && eConflitoDeVersao(error)) throw new NegocioAlteradoNoutroLado();
   if (error) throw new Error(error.message || "Não foi possível gravar o negócio.");
   const avisos = (data as { avisos?: unknown } | null)?.avisos;
   return Array.isArray(avisos) ? avisos.map(String) : [];

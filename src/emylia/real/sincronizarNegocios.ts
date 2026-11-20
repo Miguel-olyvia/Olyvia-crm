@@ -8,12 +8,14 @@ import { gravarNovaLead, NegocioNaoCriado } from "@/hooks/pessoas/novaLead/grava
 import { criarNegocioNovaLead, novoIdNegocio } from "@/hooks/pessoas/novaLead/criarNegocioNovaLead";
 import { resolverOrgRaiz } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
 import { paraLinhas } from "./negocioReal";
-import { gravarNegocio, gravarObra, type IdsServico } from "./negocioBase";
+import { gravarNegocio, gravarObra, NegocioAlteradoNoutroLado, type IdsServico } from "./negocioBase";
 import { obraVazia, paraObra } from "./obraReal";
 import { canonico, novidadesDaObra, obraJunta, porNoSitio } from "./juntarObra";
 import { gravarFinanceiro, novasNoFinanceiro } from "./financeiroReal";
 
-export interface RefNegocio { id: string; entityId: string }
+/** `versao` (20270125020000): a versão das gravações que este ecrã leu (neg_versoes); sobe 1 a cada gravação bem feita. Sem ela, grava-se
+ *  como antes (a base sem a função, ou um negócio lido antes dela). */
+export interface RefNegocio { id: string; entityId: string; versao?: number }
 
 /** O que conta para gravar (sem o que é só do ecrã nem o que ainda não vai para a base). */
 export function marcaNegocio(d: Negocio): string {
@@ -82,8 +84,26 @@ async function criarNoCrm(sb: SupabaseClient, org: string, d: Negocio): Promise<
 }
 
 /** F3: `reler`: houve fatura, pagamento ou anulação no servidor (a encomenda de cliente pode ter nascido ou sido cancelada): quem chama relê
- *  a organização para o ecrã ter a encomenda da base (o contrato, o número) e a ligação ao Inventário. */
-export interface Sincronizacao { gravados: number; erros: string[]; avisos: string[]; reler?: boolean }
+ *  a organização para o ecrã ter a encomenda da base (o contrato, o número) e a ligação ao Inventário.
+ *  20/11 (20270125020000): `alterados`: os negócios que a base recusou por terem sido gravados noutro lado depois de este ecrã os ler (os
+ *  nomes). Não contam como erro: quem chama relê e diz «Este negócio foi alterado noutro lado; atualizei. Volte a fazer a alteração.». */
+export interface Sincronizacao { gravados: number; erros: string[]; avisos: string[]; reler?: boolean; alterados?: string[] }
+
+/** 20/11 (auditoria, Lote 3): «hoje hh:mm» do histórico passa a «dd/mm hh:mm» ao gravar. A base só acrescenta ao histórico
+ *  (20270125030000) e reconhece cada entrada pela data e pelo texto: um separador aberto depois da meia-noite mandava a mesma entrada com
+ *  a data de amanhã. Devolve quantas mudou. */
+export function fixarDatasDoHistorico(d: Pick<Negocio, "hist">, hoje = new Date()): number {
+  const dm = `${String(hoje.getDate()).padStart(2, "0")}/${String(hoje.getMonth() + 1).padStart(2, "0")}`;
+  let n = 0;
+  for (const e of d.hist ?? []) {
+    if (typeof e.q !== "string") continue;
+    const m = /^hoje\b\s*(.*)$/i.exec(e.q.trim());
+    if (!m) continue;
+    e.q = m[1] ? `${dm} ${m[1]}` : dm;
+    n++;
+  }
+  return n;
+}
 
 /** 19/11: as obras como estão agora na base (obra_ler_negocios: o id do negócio na base → o estado da Emylia). null: não se leu. */
 export type LerObras = () => Promise<Map<string, unknown> | null>;
@@ -134,7 +154,8 @@ export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado,
         const antigo = d.id;
         const c = await criarNoCrm(sb, org, d);
         renumerar(S, antigo, c.numero);
-        refs.set(c.numero, c.ref);
+        // 20/11 (20270125020000): um negócio acabado de criar ainda não tem gravações (versão 0)
+        refs.set(c.numero, { ...c.ref, versao: 0 });
       }
       // 28/10 (20261231999700): a fatura e o pagamento novos vão primeiro pelas funções do Financeiro; o que a base devolve (o recibo, a
       // chave da fatura) fica no negócio, para o JSON que se grava a seguir bater com a base
@@ -153,18 +174,23 @@ export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado,
       // 19/11 (auditoria): a versão aceite (ou com o contrato assinado) leva os totais congelados uma vez (congelarTotalAceite), que já não
       // se recalculam a cada gravação; as outras, os de agora. A taxa de IVA de cada linha vai sempre (a do Catálogo, quando a linha não a tem).
       const fixo = congelarTotalAceite(d, S);
+      fixarDatasDoHistorico(d);
       const L = paraLinhas(d, new Date(), S);
       const atual = L.orcamentos.find((o) => o.estado !== "substituido");
       if (atual && d.orc && !fixo) {
         atual.preco_final = Math.round(tot(d, S).pf * 100) / 100;
         atual.total_com_iva = Math.round(totaisIva(d, S).total * 100) / 100;
       }
-      for (const a of await gravarNegocio(sb, org, refs.get(d.id)!.id, L, ids)) out.avisos.push(`${d.nome}: ${a}`);
+      // 20/11 (20270125020000): manda a versão que leu; gravado, a versão passa a +1 (a base trancou-a durante a gravação)
+      const ref = refs.get(d.id)!;
+      for (const a of await gravarNegocio(sb, org, ref.id, L, ids, ref.versao)) out.avisos.push(`${d.nome}: ${a}`);
+      if (typeof ref.versao === "number") ref.versao += 1;
       foto.set(d.id, marcaNegocio(d));
       out.gravados++; contados.add(d.id);
     } catch (e) {
       falhados.add(d.id);
-      out.erros.push(`${d.nome}: ${(e as Error).message}`);
+      if (e instanceof NegocioAlteradoNoutroLado) { (out.alterados ??= []).push(d.nome); out.reler = true; }
+      else out.erros.push(`${d.nome}: ${(e as Error).message}`);
     }
   }
   // a obra (depois do negócio: um negócio novo já tem o id da base)

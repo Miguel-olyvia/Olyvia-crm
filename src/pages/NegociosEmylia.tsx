@@ -54,6 +54,7 @@ import { usePodeVerCustos } from "@/hooks/usePodeVerCustos";
 import { lerPermissoesReais, usePermissoesReaisNegocio } from "@/emylia/real/usePermissoesReais";
 import { useSimularFuncao } from "@/emylia/real/simularFuncao";
 import type { NegocioLido } from "@/emylia/real/negocioBase";
+import { definirFotosObraDoPortal } from "@/emylia/real/obraFotosReal";
 import { garantirServicosDosNegocios } from "@/emylia/real/negocioReal";
 import { lerMoradaDaEntidade, lerMoradasDasPessoas, sugerirMoradas } from "@/emylia/real/moradaDaLead";
 import { gravarDadosDaLead, lerDadosDasLeads, type FonteLead } from "@/emylia/real/dadosDaLead";
@@ -61,7 +62,7 @@ import { definirGuardarDadosLead, definirPodeAtribuirLead } from "@/emylia/Dados
 import { usePodeAtribuirComercial } from "@/hooks/pessoas/usePodeAtribuirComercial";
 import { useVisitasDoNegocio } from "@/hooks/pessoas/useVisitasDoNegocio";
 import { lerComerciais } from "@/hooks/pessoas/novaLead/comerciaisNovaLead";
-import { idsServico, lerNegocios, lerObras, negocioParaOEcra, type IdsServico } from "@/emylia/real/negocioBase";
+import { idsServico, lerNegocios, lerObras, MSG_ALTERADO_NOUTRO_LADO, negocioParaOEcra, type IdsServico } from "@/emylia/real/negocioBase";
 import { aplicarRececao, aplicarResposta, lerRececoes, lerRespostas, marcarRespostas, publicarVistas, type VistasGravadas } from "@/emylia/real/vistaCliente";
 import { avisarCliente } from "@/emylia/real/avisosCliente";
 import { fotografarNegocios, gravarMudancas, juntarObrasDaBase, type RefNegocio } from "@/emylia/real/sincronizarNegocios";
@@ -327,7 +328,8 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
 
   // o que a base devolveu passa a ser o estado (a leitura ao abrir e a releitura depois do Financeiro)
   const aplicarLidos = useCallback((lidos: Awaited<ReturnType<typeof lerNegocios>>) => {
-    refs.current = new Map(lidos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId }]));
+    // 20/11 (20270125020000): com a versão lida, para a base recusar a gravação por cima de outra feita depois
+    refs.current = new Map(lidos.map((n) => [n.linhas.negocio.numero, { id: n.id, entityId: n.entityId, versao: n.versao }]));
     soLeitura.current = new Set(lidos.filter((n) => n.docsCrm || catalogoFalhou.current).map((n) => n.linhas.negocio.numero));
     S.deals = lidos.map(negocioParaOEcra);
     lerFases();
@@ -375,6 +377,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
     aGravar.current = true;
     setGravacao({ k: "a-gravar" });
     let relerFinanceiro = false, semErros = true;
+    const alterados = new Set<string>();
     try {
       do {
         deNovo.current = false;
@@ -382,6 +385,8 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
         const r = await gravarMudancas(supabase, org, S, refs.current, foto.current, ids.current, new Set([...soLeitura.current, ...bloqueadosAssistente()]), { soObra: soExecucaoRef.current, lerObras: () => lerObras(supabase, org) });
         if (r.reler) relerFinanceiro = true;
         if (relerPedido.current) { relerPedido.current = false; relerFinanceiro = true; }
+        // 20/11 (20270125020000): gravado noutro lado depois de se ler: relê-se no fim (o que se mudou aqui nesse negócio perde-se e diz-se)
+        for (const n of r.alterados ?? []) { alterados.add(n); semErros = false; }
         if (r.erros.length) { semErros = false; setGravacao({ k: "erro", t: r.erros.join(" · ") }); avisar({ msg: "Não gravou", sub: r.erros[0], kind: "bad" }); }
         else setGravacao({ k: "gravado", n: r.gravados });
         for (const a of r.avisos) avisar({ msg: "Gravado, com um aviso", sub: a, kind: "" });
@@ -414,6 +419,10 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
         aplicarLidos(relidos);
         await carregarEncomendas(relidos);
         if (!soExecucaoRef.current) await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
+      }
+      if (alterados.size) {
+        setGravacao({ k: "erro", t: MSG_ALTERADO_NOUTRO_LADO });
+        avisar({ msg: MSG_ALTERADO_NOUTRO_LADO, sub: [...alterados].join(" · "), kind: "bad" });
       }
       await publicarVistasCliente();
       await avisarClientes();
@@ -957,6 +966,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   useEffect(() => {
     if (!org) return;
     definirModoReal(org, activeCompany?.name ?? "");
+    definirFotosObraDoPortal(false); // 20/11: as fotografias da obra lêem-se como equipa (neg_obra_foto)
     const desligar = definirCriadorContas((e) => {
       if (e.conta.tipo !== "cliente") return;
       definirResultadoConta(e.n, { fase: "a criar" });
