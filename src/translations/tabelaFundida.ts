@@ -46,6 +46,7 @@ import { rhExemploCargoSeguroTranslations } from "@/translations/rhExemploCargoS
 import { rhExemploDatasContratosTranslations } from "@/translations/rhExemploDatasContratos";
 import { versoesTemplatesTranslations } from "@/translations/versoesTemplates";
 import { proposalTemplateVersionsTranslations } from "@/translations/proposalTemplateVersions";
+import { catalogoFamiliasTranslations } from "@/translations/catalogoFamilias";
 
 // Merge bundle and priceContexts translations
 export const tabelaFundida: Record<string, Record<string, string>> = { ...translations } as any;
@@ -247,4 +248,9 @@ Object.keys(versoesTemplatesTranslations).forEach((lang) => {
 // Editor de templates de proposta/orçamento com versões por idioma (`proposalTemplateEditor.versions.*`) — mesmo padrão.
 Object.keys(proposalTemplateVersionsTranslations).forEach((lang) => {
   tabelaFundida[lang] = { ...tabelaFundida[lang], ...proposalTemplateVersionsTranslations[lang] };
+});
+
+// Catálogo › Produtos › Famílias gravadas na base (`catFamilias.*`) — módulo próprio, mesmo padrão.
+Object.keys(catalogoFamiliasTranslations).forEach((lang) => {
+  tabelaFundida[lang] = { ...tabelaFundida[lang], ...catalogoFamiliasTranslations[lang as keyof typeof catalogoFamiliasTranslations] };
 });

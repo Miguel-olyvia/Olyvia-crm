@@ -7,7 +7,10 @@ import { MAX_SELECAO } from "./selecao";
 import { K_LEVE, linha, paginaDe, produto } from "./fixturesFamilias";
 
 const ORG = "11111111-1111-4111-a111-111111111111";
-const lerPagina = vi.fn(), lerMarcas = vi.fn();
+const lerPagina = vi.fn(), lerMarcas = vi.fn(), marcasFamilias = vi.fn();
+vi.mock("@/contexts/LanguageContext", () => ({ useLanguage: () => ({ language: "pt", setLanguage: () => undefined }) }));
+// 20/11: a marca «já está noutra família» vem da base (cat_familias_dos_produtos)
+vi.mock("./familiasDados", async (orig) => ({ ...(await orig<typeof import("./familiasDados")>()), familiasDosProdutos: (...a: unknown[]) => marcasFamilias(...a) }));
 vi.mock("../real/produtosPaginados", async (orig) => ({
   ...(await orig<typeof import("../real/produtosPaginados")>()),
   lerProdutosPagina: (...a: unknown[]) => lerPagina(...a),
@@ -16,16 +19,17 @@ vi.mock("../real/produtosPaginados", async (orig) => ({
 
 const LINHAS = [linha("a", "Lava-loiça Velar 50", { pvp: 150 }), linha("b", "Lava-loiça Velar 60", { pvp: 180 }), linha("c", "Lava-loiça sem preço", { pvp: null, custo: null })];
 beforeEach(() => {
-  lerPagina.mockReset(); lerMarcas.mockReset();
+  lerPagina.mockReset(); lerMarcas.mockReset(); marcasFamilias.mockReset();
   lerPagina.mockResolvedValue(paginaDe(LINHAS));
   lerMarcas.mockResolvedValue({ ok: true, v: { marcas: [{ id: null, nome: "Cunha", n: 2 }, { id: null, nome: "Roca", n: 1 }], semMarca: 0, total: 3 } });
 });
 afterEach(cleanup);
 
-interface Opc { escolhidos?: Produto[]; ocupados?: Set<string> }
+interface Opc { escolhidos?: Produto[]; ocupados?: Set<string>; familiaAtual?: string | null }
 const montar = (o: Opc = {}) => {
   const fn = { onAlternar: vi.fn(), onRemover: vi.fn(), onSelecionarPagina: vi.fn(), onLimpar: vi.fn() };
-  const r = render(<PassoEscolherFamilia org={ORG} K={K_LEVE} escolhidos={o.escolhidos ?? []} ocupados={o.ocupados ?? new Set()} {...fn} />);
+  marcasFamilias.mockResolvedValue({ ok: true, v: new Map([...(o.ocupados ?? [])].map((id) => [id, { familiaId: "f-outra", nome: "Outra" }])) });
+  const r = render(<PassoEscolherFamilia org={ORG} K={K_LEVE} escolhidos={o.escolhidos ?? []} familiaAtual={o.familiaAtual ?? null} {...fn} />);
   return { ...fn, ...r };
 };
 const combo = (nome: string) => screen.getByRole("combobox", { name: new RegExp(`^${nome}( |$)`) }) as HTMLButtonElement;
@@ -190,12 +194,26 @@ describe("PassoEscolherFamilia: a escolha", () => {
   });
 
 
-  it("produtos que já estão noutra família da sessão aparecem marcados como tal", async () => {
+  it("produtos que a base diz estarem noutra família aparecem marcados como tal (só os ids da página são pedidos)", async () => {
     montar({ ocupados: new Set(["b"]) });
-    await waitFor(() => expect(lista()).toBeInTheDocument());
-    const itens = within(lista()).getAllByRole("listitem");
-    expect(itens[1]).toHaveTextContent("já está noutra família");
-    expect(itens[0]).not.toHaveTextContent("já está noutra família");
+    await waitFor(() => expect(within(lista()).getAllByRole("listitem")[1]).toHaveTextContent("já está noutra família"));
+    expect(within(lista()).getAllByRole("listitem")[0]).not.toHaveTextContent("já está noutra família");
+    expect(marcasFamilias).toHaveBeenCalledWith(ORG, ["a", "b", "c"]);
+  });
+
+  it("os produtos da própria família que se edita não ficam marcados", async () => {
+    marcasFamilias.mockResolvedValue({ ok: true, v: new Map([["b", { familiaId: "f1", nome: "Esta" }]]) });
+    render(<PassoEscolherFamilia org={ORG} K={K_LEVE} escolhidos={[]} familiaAtual="f1" onAlternar={vi.fn()} onRemover={vi.fn()} onSelecionarPagina={vi.fn()} onLimpar={vi.fn()} />);
+    await waitFor(() => expect(marcasFamilias).toHaveBeenCalled());
+    await waitFor(() => expect(within(lista()).getAllByRole("listitem")).toHaveLength(3));
+    expect(lista()).not.toHaveTextContent("já está noutra família");
+  });
+
+  it("se a marca falha, avisa sem bloquear a escolha", async () => {
+    marcasFamilias.mockResolvedValue({ ok: false, erro: "Sem ligação." });
+    render(<PassoEscolherFamilia org={ORG} K={K_LEVE} escolhidos={[]} familiaAtual={null} onAlternar={vi.fn()} onRemover={vi.fn()} onSelecionarPagina={vi.fn()} onLimpar={vi.fn()} />);
+    expect(await screen.findByText("Não foi possível ver que produtos já estão noutras famílias.")).toBeInTheDocument();
+    await waitFor(() => expect(within(lista()).getAllByRole("checkbox")[0]).not.toBeDisabled());
   });
 
   it("«Limpar seleção» só aparece com escolhidos e chama onLimpar", async () => {
@@ -272,7 +290,7 @@ describe("PassoEscolherFamilia: marca (R1), lista anterior (R5) e acessibilidade
 
   it("cada caixa tem o nome do produto e, à parte, o detalhe (SKU, marca, preço, «já está noutra família») como descrição", async () => {
     montar({ ocupados: new Set(["b"]) });
-    await waitFor(() => expect(lista()).toBeInTheDocument());
+    await waitFor(() => expect(within(lista()).getByRole("checkbox", { name: "Lava-loiça Velar 60" })).toHaveAccessibleDescription(/já está noutra família/));
     const caixa = within(lista()).getByRole("checkbox", { name: "Lava-loiça Velar 60" });
     expect(caixa).toHaveAccessibleDescription(/SKU-b.*Cunha.*180,00 €.*já está noutra família/);
     expect(within(lista()).getByRole("checkbox", { name: "Lava-loiça Velar 50" })).not.toHaveAccessibleDescription(/já está noutra família/);

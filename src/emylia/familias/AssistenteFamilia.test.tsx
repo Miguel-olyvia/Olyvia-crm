@@ -1,15 +1,18 @@
-// O assistente de 3 passos: escolher produtos, atributos (eixos, exclusões), resumo e guardar (só em memória, via onGuardar).
+// O assistente de 3 passos: escolher produtos, atributos (eixos, exclusões), resumo e guardar (20/11: na base, por quem usa o assistente, via onGuardar assíncrono).
 // Também: o foco (A4), o indicador de passos (A5), os botões aria-disabled com o motivo (A6) e o passo 1 que conserva a pesquisa ao recuar (A13).
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AtributoProduto } from "../v2/catalogoModelo";
-import { AssistenteFamilia } from "./AssistenteFamilia";
+import { AssistenteFamilia, type FamiliaAberta } from "./AssistenteFamilia";
 import { derivarFamilia, itensDosEscolhidos, type FamiliaGuardada } from "./derivarFamilia";
 import { criarCacheAtributos } from "./usarAtributosEscolhidos";
 import { DEFS, K_LEVE, attrs, linha, paginaDe, produto } from "./fixturesFamilias";
 
 const ORG = "11111111-1111-4111-a111-111111111111";
 const lerPagina = vi.fn(), lerMarcas = vi.fn(), lerAtributos = vi.fn();
+vi.mock("@/contexts/LanguageContext", () => ({ useLanguage: () => ({ language: "pt", setLanguage: () => undefined }) }));
+const marcasFamilias = vi.fn();
+vi.mock("./familiasDados", async (orig) => ({ ...(await orig<typeof import("./familiasDados")>()), familiasDosProdutos: (...a: unknown[]) => marcasFamilias(...a) }));
 vi.mock("../real/produtosPaginados", async (orig) => ({
   ...(await orig<typeof import("../real/produtosPaginados")>()),
   lerProdutosPagina: (...a: unknown[]) => lerPagina(...a),
@@ -23,13 +26,15 @@ beforeEach(() => {
   lerPagina.mockResolvedValue(paginaDe([linha("a", "Lava-loiça Velar 50", { pvp: 150 }), linha("b", "Lava-loiça Velar 60", { pvp: 180 }), linha("c", "Lava-loiça Velar 60 preta", { pvp: 190 })]));
   lerMarcas.mockResolvedValue({ ok: true, v: { marcas: [], semMarca: 0, total: 0 } });
   lerAtributos.mockImplementation(async (_o: string, id: string) => ({ ok: true, v: POR_ID[id] ?? [] }));
+  marcasFamilias.mockReset();
+  marcasFamilias.mockResolvedValue({ ok: true, v: new Map() });
 });
 afterEach(cleanup);
 
-function montar(o: { editar?: FamiliaGuardada | null; familias?: FamiliaGuardada[] } = {}) {
-  const fn = { onGuardar: vi.fn(), onCancelar: vi.fn() };
+function montar(o: { editar?: FamiliaAberta | null; outrosIds?: string[]; guardar?: () => Promise<string | null> } = {}) {
+  const fn = { onGuardar: vi.fn<(f: FamiliaGuardada) => Promise<string | null>>(o.guardar ?? (async () => null)), onCancelar: vi.fn() };
   const cache = criarCacheAtributos();
-  render(<AssistenteFamilia org={ORG} K={K_LEVE} familias={o.familias ?? []} editar={o.editar ?? null} cacheAtributos={cache} {...fn} />);
+  render(<AssistenteFamilia org={ORG} K={K_LEVE} outrosIds={o.outrosIds ?? []} editar={o.editar ?? null} cacheAtributos={cache} {...fn} />);
   return fn;
 }
 const marcar = async (...nomes: RegExp[]) => {
@@ -233,9 +238,10 @@ describe("AssistenteFamilia: guardar", () => {
     return fn;
   };
 
-  it("«Guardar na sessão» entrega a família derivada e os produtos (objetos) escolhidos", async () => {
+  it("«Guardar» entrega a família derivada e os produtos (objetos) escolhidos", async () => {
     const { onGuardar } = await ate3();
-    fireEvent.click(botao("Guardar na sessão"));
+    expect(screen.queryByRole("button", { name: "Guardar na sessão" })).toBeNull();
+    fireEvent.click(botao("Guardar"));
     expect(onGuardar).toHaveBeenCalledTimes(1);
     const g: FamiliaGuardada = onGuardar.mock.calls[0][0];
     expect(g.familia).toMatchObject({ id: "fam:lava-loica-velar", nome: "Lava-loiça Velar", categoria: "Louças", eixos: { cor: "Cor", medida: ["Medida"] } });
@@ -246,28 +252,47 @@ describe("AssistenteFamilia: guardar", () => {
   it("com erros que bloqueiam, «Guardar» fica aria-disabled, não guarda ao clicar e o motivo diz porquê", async () => {
     const z = produto("z", "Lava-loiça Velar 70");
     const existente: FamiliaGuardada = { familia: derivarFamilia(itensDosEscolhidos([z], new Map([["z", attrs(70, "o-branco")]]), DEFS, () => undefined), null).familia, produtos: [z] };
-    const fn = montar({ familias: [existente] });
+    const fn = montar({ outrosIds: [existente.familia.id] });
     await marcar(/Velar 50/, /Velar 60$/, /Velar 60 preta/);
     seguinte();
     await esperarAtivo("Seguinte");
     seguinte();
-    expect(botao("Guardar na sessão")).toHaveAttribute("aria-disabled", "true");
+    expect(botao("Guardar")).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("status", { name: "Motivo" })).toHaveTextContent(/Para guardar: Já existe uma família com o identificador/);
-    fireEvent.click(botao("Guardar na sessão"));
+    fireEvent.click(botao("Guardar"));
     expect(fn.onGuardar).not.toHaveBeenCalled();
   });
 
   it("editar: abre com os produtos e os eixos da família, e o seu identificador não conta como repetido", async () => {
     const ps = [produto("a", "Lava-loiça Velar 50", { pvp: 150 }), produto("b", "Lava-loiça Velar 60", { pvp: 180 })];
     const lidos = new Map<string, AtributoProduto[]>([["a", POR_ID.a], ["b", POR_ID.b]]);
-    const existente: FamiliaGuardada = { familia: derivarFamilia(itensDosEscolhidos(ps, lidos, DEFS, () => "Louças"), null).familia, produtos: ps };
-    const { onGuardar } = montar({ editar: existente, familias: [existente] });
+    const derivada = derivarFamilia(itensDosEscolhidos(ps, lidos, DEFS, () => "Louças"), null).familia;
+    const existente: FamiliaAberta = { id: "f1", versao: "v1", nome: derivada.nome, produtos: ps, eixos: derivada.eixos };
+    const { onGuardar } = montar({ editar: existente, outrosIds: [] });
     expect(await screen.findByRole("status", { name: "Produtos escolhidos" })).toHaveTextContent("2 escolhidos");
     seguinte();
     await esperarAtivo("Seguinte");
     seguinte();
-    fireEvent.click(botao("Guardar na sessão"));
+    fireEvent.click(botao("Guardar"));
     expect(onGuardar).toHaveBeenCalled();
-    expect(onGuardar.mock.calls[0][0].familia.id).toBe(existente.familia.id);
+    expect(onGuardar.mock.calls[0][0].familia.id).toBe(derivada.id);
+    expect(onGuardar.mock.calls[0][0].produtos.map((p: { id: string }) => p.id)).toEqual(["a", "b"]);
+  });
+
+  it("enquanto grava: aria-busy, um segundo clique não grava; um erro aparece em alerta e o assistente fica no passo 3", async () => {
+    let acabar: (e: string | null) => void = () => undefined;
+    const fn = montar({ guardar: () => new Promise<string | null>((r) => { acabar = r; }) });
+    await marcar(/Velar 50/, /Velar 60$/, /Velar 60 preta/);
+    seguinte();
+    await esperarAtivo("Seguinte");
+    seguinte();
+    fireEvent.click(botao("Guardar"));
+    fireEvent.click(botao("Guardar"));
+    expect(fn.onGuardar).toHaveBeenCalledTimes(1);
+    expect(botao("Guardar")).toHaveAttribute("aria-busy", "true");
+    acabar("O produto «X» já está na família «Y».");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Não foi possível guardar: O produto «X» já está na família «Y».");
+    expect(botao("Guardar")).not.toHaveAttribute("aria-busy");
+    expect(estadoPasso()).toHaveTextContent("Passo 3 de 3");
   });
 });

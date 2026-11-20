@@ -2,6 +2,8 @@
 // os eixos escolhidos) e DERIVA tudo o resto com o núcleo; nada se escreve à mão e nada vai à base. A família só se entrega a quem usa o assistente (`onGuardar`), em memória.
 // O passo 1 fica montado (escondido) nos outros passos: ao recuar conserva a pesquisa, os filtros e a página. O foco nunca se perde: vai ao título do passo ao abrir e ao mudar de
 // passo, e ao vizinho (ou ao título) depois de excluir, remover ou limpar.
+// 20/11: «Guardar» grava na base por quem usa o assistente (`onGuardar` devolve o erro, ou null): enquanto grava fica aria-busy e não aceita outro clique; um erro
+// aparece em alerta no passo 3 e o assistente fica aberto com tudo o que se escolheu. A marca «já está noutra família» e os nomes das outras famílias vêm da base.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -11,7 +13,7 @@ import { PassoEscolherFamilia } from "./PassoEscolherFamilia";
 import { PassoResumoFamilia } from "./PassoResumoFamilia";
 import { categoriaDoNo, derivarFamilia, itensDosEscolhidos, problemasDoPasso, type FamiliaGuardada } from "./derivarFamilia";
 import { BTN_DESATIVAVEL, geram, plural } from "./estilosFamilias";
-import { idsEmFamilias } from "./filtrosFamilia";
+import { useTranslation } from "@/hooks/useTranslation";
 import type { EixosCfg } from "./nucleo";
 import { alternarEscolha, juntarEscolha } from "./selecao";
 import { useAtributosEscolhidos, type CacheAtributos } from "./usarAtributosEscolhidos";
@@ -21,21 +23,30 @@ const TOTAL = TITULOS.length;
 
 export interface AssistenteProps {
   org: string; K: Catalogo;
-  /** as famílias da sessão (para as marcar nos produtos e detetar identificadores repetidos) */
-  familias: readonly FamiliaGuardada[];
-  /** a família que se edita (null: uma nova) */
-  editar: FamiliaGuardada | null;
+  /** os identificadores do núcleo (`fam:` + nome) das OUTRAS famílias da organização: um nome repetido é um erro antes de ir à base */
+  outrosIds: readonly string[];
+  /** a família que se edita, lida da base (null: uma nova) */
+  editar: FamiliaAberta | null;
   cacheAtributos: CacheAtributos;
-  onGuardar: (f: FamiliaGuardada) => void; onCancelar: () => void;
+  /** grava; devolve o texto do erro (o assistente fica aberto e mostra-o) ou null */
+  onGuardar: (f: FamiliaGuardada) => Promise<string | null>; onCancelar: () => void;
 }
+
+/** Uma família gravada, aberta para editar: o id e a versão da base, os produtos (vivos) e os eixos já convertidos para os nomes do núcleo. */
+export interface FamiliaAberta { id: string; versao: string; nome: string; produtos: Produto[]; eixos: EixosCfg }
 
 /** O vizinho de um produto numa lista (o seguinte; senão o anterior): para onde vai o foco quando ele sai. */
 const vizinhoDe = (lista: readonly Produto[], id: string): Produto | undefined => { const i = lista.findIndex((p) => p.id === id); return lista[i + 1] ?? lista[i - 1]; };
 
-export function AssistenteFamilia({ org, K, familias, editar, cacheAtributos, onGuardar, onCancelar }: AssistenteProps) {
+export function AssistenteFamilia({ org, K, outrosIds, editar, cacheAtributos, onGuardar, onCancelar }: AssistenteProps) {
+  const { t } = useTranslation();
   const [passo, setPasso] = useState(1);
   const [escolhidos, setEscolhidos] = useState<Produto[]>(() => editar?.produtos ?? []);
-  const [escolhaEixos, setEscolhaEixos] = useState<EixosCfg | null>(() => editar?.familia.eixos ?? null);
+  const [escolhaEixos, setEscolhaEixos] = useState<EixosCfg | null>(() => editar?.eixos ?? null);
+  const [aGravar, setAGravar] = useState(false), [erroGravar, setErroGravar] = useState<string | null>(null);
+  /** trava o duplo clique já no mesmo instante (o estado só muda no próximo desenho) e não mexe no estado depois de desmontar */
+  const gravando = useRef(false), vivo = useRef(true);
+  useEffect(() => () => { vivo.current = false; }, []);
   const idMotivo = useId();
   const tituloRef = useRef<HTMLHeadingElement>(null), escolhidosRef = useRef(escolhidos);
   escolhidosRef.current = escolhidos;
@@ -51,9 +62,7 @@ export function AssistenteFamilia({ org, K, familias, editar, cacheAtributos, on
 
   const ids = useMemo(() => escolhidos.map((p) => p.id), [escolhidos]);
   const { estados, tentar } = useAtributosEscolhidos(org, ids, passo >= 2, cacheAtributos);
-  const idOriginal = editar?.familia.id ?? null;
-  const outrosIds = useMemo(() => familias.filter((g) => g.familia.id !== idOriginal).map((g) => g.familia.id), [familias, idOriginal]);
-  const ocupados = useMemo(() => idsEmFamilias(familias.map((g) => g.familia), idOriginal), [familias, idOriginal]);
+  const idOriginal = editar?.id ?? null;
   const noPasso1 = passo < 2;
   // o que se deriva dos atributos só se calcula a partir do passo 2 e só quando algo muda
   const itens = useMemo(() => {
@@ -83,7 +92,16 @@ export function AssistenteFamilia({ org, K, familias, editar, cacheAtributos, on
     setEscolhidos(resto);
     if (resto.length === 0) setPasso(1);
   };
-  const guardar = () => { if (!motivo && d) onGuardar({ familia: d.familia, produtos: escolhidos }); };
+  const guardar = async () => {
+    if (motivo || !d || gravando.current) return;
+    gravando.current = true;
+    setAGravar(true); setErroGravar(null);
+    const erro = await onGuardar({ familia: d.familia, produtos: escolhidos });
+    gravando.current = false;
+    if (!vivo.current) return;
+    setAGravar(false);
+    if (erro) setErroGravar(erro);
+  };
   const recuar = () => { if (passo > 1) setPasso(passo - 1); };
   const avancar = () => { if (!motivo) setPasso((p) => Math.min(TOTAL, p + 1)); };
 
@@ -107,20 +125,22 @@ export function AssistenteFamilia({ org, K, familias, editar, cacheAtributos, on
       <div className="grid gap-4 rounded-2xl border border-border bg-card p-4">
         <h3 ref={tituloRef} tabIndex={-1} className="rounded-sm text-lg font-semibold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{TITULOS[passo - 1]}</h3>
         <div hidden={passo !== 1}>
-          <PassoEscolherFamilia org={org} K={K} escolhidos={escolhidos} ocupados={ocupados} onAlternar={alternar} onRemover={remover} onSelecionarPagina={selecionarPagina} onLimpar={limpar} />
+          <PassoEscolherFamilia org={org} K={K} escolhidos={escolhidos} familiaAtual={idOriginal} onAlternar={alternar} onRemover={remover} onSelecionarPagina={selecionarPagina} onLimpar={limpar} />
         </div>
         {passo === 2 && d && (
           <PassoAtributosFamilia produtos={escolhidos} estados={estados} itens={itens} nomes={d.nomes} eixos={d.eixos} onEixos={setEscolhaEixos} onExcluir={excluir} onTentar={tentar}
             problemas={d.problemas} resumo={geram(escolhidos.length, d.familia.variantes.length)} />
         )}
         {passo === TOTAL && d && <PassoResumoFamilia familia={d.familia} problemas={d.problemas} />}
+        {passo === TOTAL && erroGravar && <p role="alert" className="text-[15px] text-destructive">{t("catFamilias.erroGuardar", { erro: erroGravar })}</p>}
+        {passo === TOTAL && aGravar && <p role="status" className="text-[15px] text-muted-foreground">{t("catFamilias.aGuardar")}</p>}
       </div>
       <div role="group" aria-label="Navegação do configurador" className="flex flex-wrap items-center gap-2">
         <p id={idMotivo} role="status" aria-label="Motivo" className="w-full text-[15px] text-muted-foreground">{motivo}</p>
         <Button type="button" variant="outline" className={BTN_DESATIVAVEL} aria-disabled={passo === 1 || undefined} onClick={recuar}>Anterior</Button>
         {passo < TOTAL
           ? <Button type="button" className={BTN_DESATIVAVEL} aria-disabled={!!motivo || undefined} aria-describedby={idMotivo} onClick={avancar}>Seguinte</Button>
-          : <Button type="button" className={BTN_DESATIVAVEL} aria-disabled={!!motivo || undefined} aria-describedby={idMotivo} onClick={guardar}>Guardar na sessão</Button>}
+          : <Button type="button" className={BTN_DESATIVAVEL} aria-disabled={!!motivo || aGravar || undefined} aria-busy={aGravar || undefined} aria-describedby={idMotivo} onClick={() => { void guardar(); }}>{t("catFamilias.guardar")}</Button>}
         <Button type="button" variant="outline" className={BTN_DESATIVAVEL} onClick={onCancelar}>Cancelar</Button>
       </div>
     </section>

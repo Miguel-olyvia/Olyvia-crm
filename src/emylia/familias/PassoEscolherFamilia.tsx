@@ -1,5 +1,6 @@
 // Famílias (interface), passo 1 «Escolher produtos»: a pesquisa é NO SERVIDOR (a base tem dezenas de milhares de produtos), com os mesmos filtros em cascata que a
 // página de Produtos, texto com debounce e páginas de 50. Os escolhidos são objetos Produto (até MAX_SELECAO). Só lê: nada se altera no catálogo.
+// 20/11: a marca «já está noutra família» passa a vir da base (useFamiliasDosProdutos), em vez das famílias da sessão.
 import { memo, useId, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -13,16 +14,18 @@ import { ErroLeitura } from "./pecasFamilias";
 import { MAX_SELECAO, produtoDaLinha, temPreco } from "./selecao";
 import { useFiltrosFamilia } from "./usarFiltrosFamilia";
 import { usePesquisaFamilias } from "./usarPesquisaFamilias";
+import { useFamiliasDosProdutos } from "./usarFamilias";
+import { useTranslation } from "@/hooks/useTranslation";
 
 export interface PassoEscolherProps {
   org: string; K: Catalogo; escolhidos: readonly Produto[];
-  /** os produtos já agrupados noutras famílias da sessão */
-  ocupados: ReadonlySet<string>;
+  /** a família que se edita (id da base; null = nova): os produtos dela não contam como «já está noutra família» */
+  familiaAtual: string | null;
   /** `onAlternar` (juntar/tirar) tem de ser estável: as linhas da lista não se redesenham sem necessidade */
   onAlternar: (p: Produto) => void; onRemover: (p: Produto) => void; onSelecionarPagina: (ps: Produto[]) => void; onLimpar: () => void;
 }
 
-export function PassoEscolherFamilia({ org, K, escolhidos, ocupados, onAlternar, onRemover, onSelecionarPagina, onLimpar }: PassoEscolherProps) {
+export function PassoEscolherFamilia({ org, K, escolhidos, familiaAtual, onAlternar, onRemover, onSelecionarPagina, onLimpar }: PassoEscolherProps) {
   const filtros = useFiltrosFamilia(K, org);
   const pag = usePesquisaFamilias(org, filtros.pesquisa, { ativa: !filtros.aEsperarMarcas });
   const [soComPreco, setSoComPreco] = useState(false);
@@ -30,6 +33,10 @@ export function PassoEscolherFamilia({ org, K, escolhidos, ocupados, onAlternar,
   const ids = useMemo(() => new Set(escolhidos.map((p) => p.id)), [escolhidos]);
   const produtos = useMemo(() => pag.linhas.map(produtoDaLinha), [pag.linhas]);
   const visiveis = useMemo(() => (soComPreco ? produtos.filter(temPreco) : produtos), [soComPreco, produtos]);
+  // a marca «já está noutra família» vem da base (cat_familias_dos_produtos), só para os ids desta página
+  const idsPagina = useMemo(() => produtos.map((p) => p.id), [produtos]);
+  const { ocupados, erro: erroMarcas } = useFamiliasDosProdutos(org, idsPagina, familiaAtual);
+  const { t } = useTranslation();
   const cheio = escolhidos.length >= MAX_SELECAO, cabem = Math.max(0, MAX_SELECAO - escolhidos.length);
   const novos = visiveis.filter((p) => !ids.has(p.id));
   const paginas = Math.max(pag.paginas, 1), paginaAtual = Math.min(Math.max(pag.pagina, 1), paginas);
@@ -55,6 +62,7 @@ export function PassoEscolherFamilia({ org, K, escolhidos, ocupados, onAlternar,
         <p role="status" aria-label="Resultados" className="text-[15px] font-medium">{estado}</p>
         <p role="status" aria-label="Produtos escolhidos" className="text-[15px] font-semibold">{escolhidos.length === 0 ? "Nenhum produto escolhido" : plural(escolhidos.length, "escolhido", "escolhidos")}</p>
       </div>
+      {erroMarcas && <p className={NOTA}>{t("catFamilias.marcas.erro")}</p>}
       {pag.erro && <ErroLeitura texto="Não foi possível ler os produtos" erro={pag.erro} tentar={pag.tentar} />}
       <div className="flex flex-wrap items-center gap-2">
         <Button type="button" variant="outline" className={BTN} disabled={cheio || novos.length === 0} onClick={() => onSelecionarPagina(visiveis)}>Selecionar os desta página</Button>
