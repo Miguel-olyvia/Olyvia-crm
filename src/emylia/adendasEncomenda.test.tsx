@@ -35,7 +35,7 @@ function preparar() {
   let A!: Parameters<Parameters<typeof Montar>[0]["children"]>[0]["A"];
   render(<Montar S={S}>{(ctx) => { A = ctx.A; return null; }}</Montar>);
   cleanup();
-  A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
+  A.role("financeiro"); A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id);
   A.role("operacoes"); (A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   A.role("comercial"); A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu"); adendaAssinada(A, d.id, N);
   return { S, A, d };
@@ -85,7 +85,7 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     render(<Montar S={S}>{(ctx) => <DocumentosSimples {...ctx} d={d} />}</Montar>);
     let bloco = screen.getByTestId(`fin-adenda-${N}`);
     expect(bloco.textContent).toContain(`${eur(totaisAdenda(d.adendas![0]).total)} € com IVA`);
-    expect(bloco.textContent).toMatch(/Emite-se quando o pagamento da 1\.ª parcela da adenda for validado\./);
+    expect(bloco.textContent).toMatch(/emite-se quando o pagamento da 1\.ª parcela da adenda for validado\./i);
     expect(within(bloco).queryByRole("button", { name: "Emitir a fatura" })).toBeNull();
     await registarNoEcra(bloco, "FAT 15200126/610");
     const a = d.adendas![0], ft = () => a.faturas![0];
@@ -93,7 +93,7 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     // 21/10 (decisão C): a 1.ª parcela (50%, como no contrato), com o número do Eticadata
     expect(ft()).toMatchObject({ i: 0, p: 0.5, n: "FAT 15200126/610" });
     // 21/10: como no contrato, valida-se sem o aviso do cliente no portal (o aviso só informa)
-    expect((within(bloco).getByRole("button", { name: "Validar o pagamento" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((within(bloco).getByRole("button", { name: "Ok, já foi paga" }) as HTMLButtonElement).disabled).toBe(false);
     cleanup();
 
     // o cliente paga no portal (o cartão da fatura da adenda)
@@ -110,7 +110,7 @@ describe("adenda com encomenda própria, no pagamento dela", () => {
     expect(minhas(S, "financeiro").some((x) => x.d === d && x.p.act === "validarPagamentosAdenda")).toBe(true);
     render(<Montar S={S}>{(ctx) => <DocumentosSimples {...ctx} d={d} />}</Montar>);
     bloco = screen.getByTestId(`fin-adenda-${N}`);
-    fireEvent.click(within(bloco).getByRole("button", { name: "Validar o pagamento" }));
+    fireEvent.click(within(bloco).getByRole("button", { name: "Ok, já foi paga" }));
     expect(ft().recibo?.n).toMatch(/^RC 2026\//);
     expect(bloco.textContent).toMatch(/Encomenda EC-1027-A1 no Inventário/);
     const ec = lerInventario().ecs.find((e) => e.id === "EC-1027-A1")!;

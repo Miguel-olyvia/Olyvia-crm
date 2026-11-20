@@ -238,8 +238,20 @@ const MOMENTO_PRESTACOES: (0 | 1 | "fim")[] = [0, 0, 0, 1, "fim"];
 
 /**
  * Leva o caso montado (montarAnabela) da proposta até à obra pronta a aprovar: as 5 prestações à medida, a proposta enviada e
- * aceite e a 1.ª prestação faturada e paga (9/11: o contrato assina-se depois, na Obra). Para ver a obra no ecrã (/sem-conta?caso=anabela-obra).
+ * aceite, o contrato assinado e a 1.ª prestação faturada e paga (20/11: o contrato antes da fatura, como no fluxo de 16/11). Para ver a obra no ecrã (/sem-conta?caso=anabela-obra).
  */
+/** O comercial gera o contrato e a cliente assina-o (SMS). Já assinado, não faz nada. */
+function assinarContrato(S: Estado, A: Acoes, id: number): void {
+  const d = () => S.deals.find((x) => x.id === id)!;
+  if (d().orc!.contrato === "assinado") return;
+  const papel = S.role;
+  S.role = "comercial";
+  A.enviarContrato(id);
+  A.assinarCom(id, { tipo: "sms", nome: "Anabela Correia", q: "12/10/2026 12:54", id: "OTP-CC-2026-0331" });
+  S.role = papel;
+  garantir(d().orc!.contrato === "assinado", "assinar o contrato");
+}
+
 export function avancarAteObra(S: Estado, A: Acoes, id: number, avisos: { msg: string; sub?: string }[] = []): void {
   const d = () => S.deals.find((x) => x.id === id)!;
   A.verificar(id);
@@ -249,11 +261,12 @@ export function avancarAteObra(S: Estado, A: Acoes, id: number, avisos: { msg: s
   A.enviar(id);
   garantir(d().orc!.enviada, "enviar a proposta: " + JSON.stringify(avisos.slice(-2)));
   A.aceitar(id);
-  // 9/11 (o fluxo novo): o contrato assina-se na Obra, depois das medidas retificadas e do plano aprovado (avancarObraAMeio)
+  // 20/11 (o fluxo em vigor desde 16/11): o contrato assina-se antes da fatura (a fatura só se regista com o contrato assinado)
+  assinarContrato(S, A, id);
   for (const [k, v] of Object.entries({ nome_fiscal: "Anabela Maria Machado Correia Schroeder", nif_fat: "123456789", morada_fiscal_igual: "Sim", email_fat: "cliente.caso@exemplo.pt", serie: "FT 2026", vencimento: "Pronto pagamento", metodo: "Transferência", conta: "Banco A · conta à ordem", comprovativo: "Transferência adjudicação (teste)" })) A.campo(id, k, v);
   const papel = S.role;
   S.role = "financeiro";
-  A.emitir(id);
+  A.registarFaturaErp(id, `FT 2026/${id}`, null);
   A.validar(id);
   S.role = papel;
   garantir(d().fin.pago && d().obra.plano, "pagar a 1.ª prestação e gerar o plano");
@@ -281,10 +294,7 @@ export function avancarObraAMeio(S: Estado, A: Acoes, id: number, receber: (ref:
   A.retificarMedidas(id);
   A.aprovarPlano(id);
   garantir(d().obra.plano!.estado === "aprovado", "aprovar o plano");
-  S.role = "comercial";
-  A.enviarContrato(id);
-  A.assinarCom(id, { tipo: "sms", nome: "Anabela Correia", q: "12/10/2026 12:54", id: "OTP-CC-2026-0331" });
-  garantir(d().orc!.contrato === "assinado", "assinar o contrato");
+  assinarContrato(S, A, id);
   S.role = "operacoes";
   const ref = d().obra.ec?.ref;
   if (ref) { const e = receber(ref); garantir(!e, "receber os materiais: " + e); }

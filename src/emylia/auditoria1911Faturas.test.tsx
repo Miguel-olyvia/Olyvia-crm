@@ -9,6 +9,7 @@ import { FINANCEIRO, OBRA, emFalta, type Grupo } from "./campos";
 import { esquecerInventario } from "./inventario/loja";
 import { Montar } from "./v2/testeV2";
 import { TrabalhosAMais } from "./TrabalhosAMais";
+import { Pagamentos } from "./Pagamentos";
 import { alvoFaturaAdenda, parcelasAdenda, type Adenda } from "./adendas";
 import { erpLembrado, lerFaturaErp, type InfoErp } from "./erpEticadata";
 import { fazer } from "./pecas";
@@ -28,7 +29,7 @@ function preparar() {
   encher(FINANCEIRO); encher([OBRA[0]]);
   const avisar = vi.fn();
   const A = acoes(S, avisar, (fn) => fn());
-  A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
+  A.role("financeiro"); A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id);
   A.role("operacoes"); (A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   A.role("comercial");
   A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu");
@@ -98,13 +99,15 @@ describe("registarFaturaAdenda: o número do Eticadata, confirmado no ERP", () =
   });
 });
 
-describe("o campo do número nos Trabalhos a mais (RegistarFaturaAdendaErp)", () => {
+// 20/11 (auditoria F10): o número regista-se na lista «Pagamentos» (Pagamentos.tsx), a mesma do Financeiro e da Obra; os Trabalhos a mais
+// só mostram o estado das parcelas
+describe("o campo do número na lista «Pagamentos»", () => {
   it("lê o número no ERP e regista a fatura com a leitura; sem botão «Emitir»", async () => {
     const { S, d, a } = preparar();
     const v = parcelasAdenda(d, a)[0].v;
     lerMock.mockResolvedValue({ ok: true, info: info(v) });
-    render(<Montar S={S}>{(ctx) => <TrabalhosAMais {...ctx} d={d} />}</Montar>);
-    const cartao = screen.getByRole("listitem", { name: `Adenda ${N}` });
+    render(<Montar S={S}>{(ctx) => <Pagamentos ctx={ctx} d={d} />}</Montar>);
+    const cartao = screen.getByTestId(`fin-adenda-${N}`);
     expect(within(cartao).queryByRole("button", { name: /Emitir a fatura/ })).toBeNull();
     await registarNoEcra(cartao, "FAT 15200126/804", false);
     await waitFor(() => expect(a.faturas?.[0]?.n).toBe("FAT 15200126/804"));
@@ -115,8 +118,8 @@ describe("o campo do número nos Trabalhos a mais (RegistarFaturaAdendaErp)", ()
   it("a fatura que não existe no ERP não se regista (e não há «Registar sem confirmar»)", async () => {
     const { S, d, a } = preparar();
     lerMock.mockResolvedValue({ ok: false, motivo: "nao_existe", msg: "A fatura FAT 9/9 não existe no Eticadata (Emp_Z004)." });
-    render(<Montar S={S}>{(ctx) => <TrabalhosAMais {...ctx} d={d} />}</Montar>);
-    const cartao = screen.getByRole("listitem", { name: `Adenda ${N}` });
+    render(<Montar S={S}>{(ctx) => <Pagamentos ctx={ctx} d={d} />}</Montar>);
+    const cartao = screen.getByTestId(`fin-adenda-${N}`);
     await registarNoEcra(cartao, "FAT 9/9", false);
     expect(await within(cartao).findByRole("alert")).toHaveTextContent(/não existe no Eticadata/);
     expect(within(cartao).queryByRole("button", { name: "Registar sem confirmar" })).toBeNull();
@@ -126,7 +129,16 @@ describe("o campo do número nos Trabalhos a mais (RegistarFaturaAdendaErp)", ()
   it("aberto pelo «Registar a fatura» do Hoje, o cursor vai para o campo do número", () => {
     const { S, A, d } = preparar();
     A.abrirFaturaAdenda(d.id, N);
-    render(<Montar S={S}>{(ctx) => <TrabalhosAMais {...ctx} d={d} />}</Montar>);
+    render(<Montar S={S}>{(ctx) => <Pagamentos ctx={ctx} d={d} />}</Montar>);
     expect(document.activeElement).toBe(screen.getByLabelText(/Número da fatura no Eticadata/));
+  });
+
+  it("os Trabalhos a mais só mostram o estado: sem campo do número nem botão de pagamento", () => {
+    const { S, d } = preparar();
+    render(<Montar S={S}>{(ctx) => <TrabalhosAMais {...ctx} d={d} />}</Montar>);
+    const cartao = screen.getByRole("listitem", { name: `Adenda ${N}` });
+    expect(within(cartao).queryByLabelText(/Número da fatura no Eticadata/)).toBeNull();
+    expect(within(cartao).queryByRole("button", { name: /Ok, já foi paga|Validar o pagamento/ })).toBeNull();
+    expect(cartao.textContent).toMatch(/registam-se em «Pagamentos»/);
   });
 });

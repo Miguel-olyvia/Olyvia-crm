@@ -28,7 +28,7 @@ function prontaAArrancar(pagamento: string) {
   const d = S.deals.find((x) => x.id === 1027)!;
   d.f.pagamento = pagamento;
   preencher(d, FINANCEIRO); preencher(d, [OBRA[0]]);
-  A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
+  A.role("financeiro"); A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id);
   A.role("operacoes"); A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id); A.aprovarPlano(d.id);
   expect(aprovarPos(REF)).toBe("");
   expect(receberTudo(REF)).toBe("");

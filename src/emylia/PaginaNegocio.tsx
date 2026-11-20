@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
   FASES, LINHAS, PAPEIS, nomeLinha, visitaFeita, visitas,
-  acertoDoValorPendente, adendaDoAcerto, margemSemAdenda, retificacaoPorPagar, alertas, bloqueado, camposMedida, mudancasDeValor, impactoDasMedidas, impactoDoPlano, medidasRetificadas, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
+  acertoDoValorPendente, adendaDoAcerto, margemSemAdenda, retificacaoPorPagar, alertas, bloqueado, camposMedida, mudancasDeValor, conflitos, custoUn, eur, faltaProdutosVisita, medida, medidaEmFalta, porMedida, fatorReal, linhaCalc, nfmt, partes, pct, proximo, quandoEQuem, r2, tot, valorSinal,
   type Estado, type Negocio, type Papel, type SvcId,
   SEM_ORCAMENTO, semOrcamento, semVisitaPelaChamada,
 } from "./motor";
@@ -27,8 +27,7 @@ import { AbrirEstudioPlano } from "./estudioPlano/EstudioPlano";
 import { AbrirEstudioObra } from "./estudioObra/EstudioObra";
 import { planoAprovadoDe, retificacaoAceite } from "./preparacaoObra";
 import { AcoesAdenda } from "./TrabalhosAMais";
-import { totalAdenda } from "./adendas";
-import { EstadoFaturaErp, RegistarFaturaErp } from "./FaturaErp";
+import { RegistarFaturaErp } from "./FaturaErp";
 import { UsarLocalizacao } from "./Localizacao";
 import { MoradaDaObra } from "./MoradaDaObra";
 import { ServicoDaChamada } from "./ServicoDaChamada";
@@ -42,8 +41,8 @@ import { FotosEtapa } from "./FotosEtapa";
 import { OrcamentoSimples } from "./OrcamentoSimples";
 import { LinhasOrcamento } from "./LinhasOrcamento";
 import { ProdutosOrcamento } from "./ProdutosOrcamento";
-import { DocumentosSimples, ObraSimples } from "./FasesSimples";
-import { ContratoDoc, Partilhar, PropostaDoc, tranches, totais } from "./DocsCliente";
+import { ObraSimples } from "./FasesSimples";
+import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
 import { Assistente, Campos, INPUT, INPUT_G, Legenda, aValidar, passoDeGrupo, resumoGrupos, type Passo } from "./CamposFase";
 import { Btn, Campo, fazer, numero, type Ctx } from "./pecas";
 import { ConfirmarAnulacao, oQueAnular, podeAnular } from "./AnularContrato";
@@ -53,9 +52,8 @@ import { estadoLinhaNegocio, resumoEcNegocio } from "./inventario/ponteNegocios"
 import { BotaoAcessoPortal, EstadoAcessoPortal } from "./AcessoPortalNegocio";
 import { usePermPortalDoPasso } from "./permPortalPasso";
 import { DocumentosParaCliente } from "./DocumentosParaCliente";
-import { PagamentoDoCliente } from "./PagamentoDoCliente";
-import { ParcelasDoContrato, QUANDO_CAI } from "./ParcelasDoContrato";
-import { parcelasDoContrato } from "./parcelas";
+import { Pagamentos, lembrarFoco } from "./Pagamentos";
+import { difDoAcerto, linhasPagamentos, resumoPagamentos } from "./listaPagamentos";
 import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
@@ -548,49 +546,30 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       // 12/11: aceite, o negócio passa a Financeiro. 16/11: o contrato é o primeiro passo de lá (passoContratoPrincipal)
     ];
   } else if (fase === 4 && simples) {
-    // 10/11 (Rúben: «não queremos muitos passos, queremos certezas»): o Financeiro em dois passos. 1) A fatura: o valor a faturar agora,
-    // os dados de faturação e da fatura, e o registo do número, tudo no mesmo sítio (o botão diz o que falta, se faltar). 2) O pagamento.
-    const TI = totais(d, S), agora = d.orc ? tranches(d, TI.total, S)[0] : null, ft = d.fin.fatura;
+    // 10/11 (Rúben: «não queremos muitos passos, queremos certezas»). 18/11: o passo só com o número da fatura, a referência e o «Ok, já
+    // foi paga». 20/11 (auditoria F10): o passo é a lista «Pagamentos» (Pagamentos.tsx), a mesma da Obra: as parcelas do contrato, as das
+    // adendas e a nota de crédito, cada uma com um só botão (registar o número → «Ok, já foi paga» → paga)
+    const L = linhasPagamentos(S, d), pc0 = L.find((x) => x.tipo === "contrato");
     const pContrato = passoContratoPrincipal();
     passos = [
       // 16/11: com contrato, primeiro o contrato assinado; depois a fatura e o pagamento
       ...(pContrato ? [pContrato] : []),
-      // 18/11 (Rúben: «o step da fatura só devia ter a fatura, a referência e "ok, já foi paga"; todos os campos são desnecessários»): um
-      // passo só, sem os campos dos dados de faturação e da fatura: o número da fatura, a referência do pagamento e o «Ok, já foi paga»
-      { id: "fatura", titulo: "Fatura", icone: Euro, feito: d.fin.pago, semAvancar: true,
-        resumo: [d.fin.pago ? `${ft?.n ?? "fatura"} · paga` : ft ? `${ft.n} · por pagar` : "por registar"],
-        corpo: (
-          <div className="space-y-6">
-            {agora && !ft && (
-              <p className="rounded-2xl bg-primary/[0.06] px-4 py-3 text-[15px]">
-                A faturar agora: <span className="font-semibold">{agora.l}</span> ({Math.round(agora.p * 100)}%) · <span className="font-semibold tabular-nums">{eur(agora.v)} €</span> com IVA
-                {/* 19/11 (Rúben): as parcelas seguintes e quando caem no Financeiro */}
-                {parcelasDoContrato(S, d).slice(1).map((x) => (
-                  <span key={x.id} className="mt-1 block text-muted-foreground">Depois: {String(Math.round(x.p * 10000) / 100).replace(".", ",")}% · {eur(x.v)} € · {QUANDO_CAI[x.momento].toLowerCase()}</span>
-                ))}
-              </p>
-            )}
-            <section aria-label="Registar a fatura" className="space-y-2 rounded-2xl border border-border bg-card p-4">
-              <h3 className="text-[17px] font-semibold tracking-tight">{ft ? `Fatura ${ft.n} registada` : "Registar a fatura"}</h3>
-              {ft ? <EstadoFaturaErp ctx={ctx} d={d} />
-                : <><p className="text-[15px] text-muted-foreground">Emita-a no Eticadata e escreva aqui o número: vai para o portal do cliente, com os dados para pagar.</p>
-                  <RegistarFaturaErp ctx={ctx} d={d} aEsquerda semDados /></>}
-            </section>
-            {ft && <PagamentoDoCliente {...ctx} d={d} />}
-          </div>
-        ) },
+      { id: "fatura", titulo: "Pagamentos", icone: Euro, feito: d.fin.pago, semAvancar: true,
+        resumo: [pc0 ? (pc0.numero ? `${pc0.numero} · ${pc0.estado === "paga" ? "paga" : "por pagar"}` : "por registar") : ""],
+        corpo: <Pagamentos ctx={ctx} d={d} /> },
     ];
   } else if (fase === 4) {
     const pContrato = passoContratoPrincipal();
     passos = [
       ...(pContrato ? [pContrato] : []), // 16/11: o contrato antes da fatura
-      { id: "docs", titulo: "Fatura e recibo", icone: Euro, feito: !!d.fin.recibo, resumo: [d.fin.fatura?.n || "fatura por emitir"], corpo: simples ? <DocumentosSimples {...ctx} d={d} /> : <div className="pg estreito"><Documentos ctx={ctx} d={d} /></div> },
-      // 3/11 (Rúben): o Pagamento não se preenche à mão: espera que o cliente diga no portal que pagou e o Financeiro só valida
-      // (PagamentoDoCliente.tsx). Os outros grupos (dados de faturação, fatura) continuam como a empresa os definiu.
+      // 20/11 (auditoria F12): sem o ramo DocumentosSimples (aqui nunca é simples: esse é o caso de cima)
+      { id: "docs", titulo: "Fatura e recibo", icone: Euro, feito: !!d.fin.recibo, resumo: [d.fin.fatura?.n || "fatura por registar"], corpo: <div className="pg estreito"><Documentos ctx={ctx} d={d} /></div> },
+      // 3/11 (Rúben): o Pagamento não se preenche à mão. 20/11 (auditoria F10): é a lista «Pagamentos», a mesma do aspeto simples e da Obra.
+      // Os outros grupos (dados de faturação, fatura) continuam como a empresa os definiu.
       ...FINANCEIRO.map((gr) => gr === FINANCEIRO[2]
         ? { id: gr.titulo, titulo: E(gr).nome || gr.titulo, icone: Euro, feito: d.fin.pago,
             resumo: [d.fin.pago ? "validado" : d.f.comprovativo ? "o cliente diz que pagou" : "à espera do cliente"],
-            corpo: <PagamentoDoCliente {...ctx} d={d} /> }
+            corpo: <Pagamentos ctx={ctx} d={d} /> }
         : g(gr, Euro)),
     ];
   } else if (fase === 5) {
@@ -621,12 +600,13 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           corpo: <MateriaisObra {...ctx} d={d} /> };
       })()] : []),
       g(OBRA[0], Hammer), g(OBRA[1], Check),
-      // 19/11 (Rúben): as parcelas do contrato a seguir à 1.ª (a do arranque, a do fim antes da entrega), no Financeiro
-      ...(o && parcelasDoContrato(S, d).length > 1 ? [(() => {
-        const P = parcelasDoContrato(S, d), pagas = P.filter((x) => x.paga).length;
-        return { id: "parcelas", titulo: "Pagamentos", icone: Euro, feito: pagas === P.length, semAvancar: true,
-          resumo: [`${pagas} de ${P.length} ${P.length === 1 ? "parcela paga" : "parcelas pagas"}`], corpo: <ParcelasDoContrato ctx={ctx} d={d} /> };
-      })()] : []),
+      // 19/11 (Rúben): as parcelas do contrato a seguir à 1.ª (a do arranque, a do fim antes da entrega), no Financeiro. 20/11 (auditoria
+      // F10): a lista «Pagamentos», a mesma do Financeiro, com as adendas e a nota de crédito; aparece quando há mais do que a 1.ª paga
+      ...(o ? (() => {
+        const L = linhasPagamentos(S, d), R = resumoPagamentos(L);
+        if (L.length < 2 && R.feitas === R.total) return [];
+        return [{ id: "parcelas", titulo: "Pagamentos", icone: Euro, feito: R.feitas === R.total, semAvancar: true, resumo: [R.texto], corpo: <Pagamentos ctx={ctx} d={d} /> }];
+      })() : []),
     ];
   }
   // os grupos que a empresa escondeu não aparecem
@@ -644,6 +624,15 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
     if (ps.id === AREA.titulo && aValidar(d, "fotos") && !(v.fotos > 0) && d.f.diag_cliente_recusou_fotos !== "Sim") ps.falta = (ps.falta || 0) + 1;
   }
   return passos;
+}
+
+/** 20/11 (auditoria F10): o passo que o sinal do Hoje abre (-1: nenhum). «Registar a fatura» de uma adenda (alvoFaturaAdenda) e do contrato
+ *  (sec-4) levam à lista «Pagamentos»: na Obra o passo «parcelas», no Financeiro o «fatura». */
+export function passoDoPulso(pulse: string | null | undefined, passos: Pick<Passo, "id">[]): number {
+  if (!pulse || !(pulse.startsWith("ft-ad:") || pulse === "sec-4")) return -1;
+  lembrarFoco(pulse);
+  const i = passos.findIndex((x) => x.id === "parcelas");
+  return i >= 0 ? i : passos.findIndex((x) => x.id === "fatura");
 }
 
 // 6/11: PERM_DO_PASSO e permEmFaltaDoPasso passaram para permissoes.ts (o CaminhoObra também os usa, sem carregar esta página)
@@ -718,6 +707,11 @@ function FaseAtual({ ctx, d }: { ctx: Ctx; d: Negocio }) {
     const i = passos.findIndex((x) => (x.falta || 0) > 0);
     if (i >= 0 && i !== ativo) setAtivo(i);
     irParaCampoEmFalta();
+  });
+  // 20/11 (auditoria F10): o «Registar a fatura» do Hoje (a da adenda ou a do contrato) abre o passo «Pagamentos», onde se escreve o número
+  useEffect(() => {
+    const i = passoDoPulso(S.pulse, passos);
+    if (i >= 0 && i !== ativo) setAtivo(i);
   });
   const total = passos.reduce((a, x) => a + (x.conta ? x.conta.n : 1), 0);
   const feitos = passos.reduce((a, x) => a + (x.conta ? x.conta.f : x.feito ? 1 : 0), 0);
@@ -1016,10 +1010,9 @@ function SemAdendaDirecao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
  *  euros, e a adenda do acerto (preparar, ou seguir sem ela). Preparada, mostra a adenda com as ações dela (verificar, enviar...). */
 function AcertoDoValor({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const R = mudancasDeValor(d), pode = podeNeg(ctx.S.role, "orcamento.editar"), a = adendaDoAcerto(d);
-  // 11/11: os euros que mudam (as medidas e o plano), para o comercial negociar com o número à frente
-  const mi = impactoDasMedidas(d, ctx.S, medidasRetificadas(d)), pi = impactoDoPlano(d, ctx.S);
-  // só o que as medidas e o plano mudam (os «acertos» do orçamento refeito não entram: a adenda não os leva)
-  const dif = a ? totalAdenda(a.linhas, a.desconto) : (mi?.medidas ?? 0) + (pi.semValor ? 0 : pi.valor);
+  // 11/11: os euros que mudam (as medidas e o plano), para o comercial negociar com o número à frente; só o que as medidas e o plano
+  // mudam (os «acertos» do orçamento refeito não entram: a adenda não os leva). 20/11: a mesma conta da nota de crédito (listaPagamentos.ts)
+  const dif = difDoAcerto(ctx.S, d);
   // 17/11 (fluxo de 16/11): se a retificação baixa o valor, não há adenda: o Financeiro emite a nota de crédito no programa certificado e
   // regista-a aqui (A.registarNotaCredito, finance.invoice); o comercial pode ainda seguir sem acerto
   const baixa = !a && dif < -0.004;
@@ -1047,11 +1040,9 @@ function AcertoDoValor({ ctx, d }: { ctx: Ctx; d: Negocio }) {
 }
 
 /** 17/11 (teste do fluxo de 16/11): a retificação baixou o valor. O Financeiro emite a nota de crédito no programa certificado e regista o
- *  número aqui (finance.invoice); com ela registada, o plano aprova-se e a encomenda de cliente segue. */
+ *  número (finance.invoice); com ela registada, o plano aprova-se e a encomenda de cliente segue. 20/11 (auditoria F10): o número
+ *  regista-se na lista «Pagamentos» (Pagamentos.tsx), como as faturas; aqui fica o porquê e o «Seguir sem acerto» do comercial. */
 export function NotaDeCredito({ ctx, d, R, dif, podeComercial }: { ctx: Ctx; d: Negocio; R: string[]; dif: number; podeComercial: boolean }) {
-  const [numero, setNumero] = useState("");
-  const podeFin = podeNeg(ctx.S.role, "finance.invoice");
-  const id = `nota-credito-${d.id}`;
   return (
     <section aria-labelledby="nota-credito-t" className="space-y-3 rounded-2xl border border-amber-300/70 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -1059,18 +1050,9 @@ export function NotaDeCredito({ ctx, d, R, dif, podeComercial }: { ctx: Ctx; d: 
         <p className="text-lg font-semibold tabular-nums">−{eur(Math.abs(dif))} € <span className="text-sm font-normal text-muted-foreground">s/ IVA</span></p>
       </div>
       <ul className="list-disc space-y-0.5 pl-5 text-[15px]">{R.map((x) => <li key={x}>{x}</li>)}</ul>
-      <p className="text-[15px] text-muted-foreground">O Financeiro emite a nota de crédito no programa de faturação certificado e regista o número aqui. Depois, aprova-se o plano e segue a encomenda de cliente.</p>
-      <form className="flex flex-wrap items-end gap-3" onSubmit={(e) => { e.preventDefault(); ctx.run(() => { if (ctx.A.registarNotaCredito(d.id, numero)) setNumero(""); }); }}>
-        <label htmlFor={id} className="space-y-1 text-[15px] font-medium">
-          <span className="block">Número da nota de crédito</span>
-          <input id={id} value={numero} onChange={(e) => setNumero(e.target.value)} disabled={!podeFin} placeholder="NC 2026/…"
-            className="min-h-11 w-56 rounded-lg border border-input bg-background px-3 text-[15px] disabled:opacity-50" />
-        </label>
-        <Button type="submit" className="min-h-11" disabled={!podeFin || !numero.trim()}>Registar nota de crédito</Button>
-        {podeComercial && <Button type="button" variant="ghost" className="min-h-11" disabled={d.f.acerto_sem_adenda_aprov === "pedida"} onClick={() => ctx.run(() => { ctx.A.semAdendaDoValor(d.id); })}>Seguir sem acerto</Button>}
-      </form>
+      <p className="text-[15px] text-muted-foreground">O Financeiro emite a nota de crédito no programa de faturação certificado e regista o número em «Pagamentos». Depois, aprova-se o plano e segue a encomenda de cliente.</p>
+      {podeComercial && <Button type="button" variant="ghost" className="min-h-11" disabled={d.f.acerto_sem_adenda_aprov === "pedida"} onClick={() => ctx.run(() => { ctx.A.semAdendaDoValor(d.id); })}>Seguir sem acerto</Button>}
       <SemAdendaDirecao ctx={ctx} d={d} />
-      {!podeFin && <p className="text-sm text-muted-foreground">Quem regista a nota de crédito é o Financeiro.</p>}
     </section>
   );
 }

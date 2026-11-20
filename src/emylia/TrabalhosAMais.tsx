@@ -18,10 +18,9 @@ import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
 import { ecDaAdenda, porEncomendarDe } from "./encomendasAjuste";
 import { ecNoServidor } from "./preparacaoObra";
 import {
-  MOTIVOS_ADENDA, adendaBloqueada, alertasAdenda, diasAdenda, estadoAdenda, faturaAValidar, nomeParcela, parcelaFaturavel, parcelasAdenda, previsaoLinha, primeiraPaga, proximaParcela,
+  MOTIVOS_ADENDA, adendaBloqueada, alertasAdenda, diasAdenda, estadoAdenda, nomeParcela, parcelasAdenda, previsaoLinha, primeiraPaga,
   textoIvaPorTaxa, totaisAdenda, totaisLinhas, valorContrato, versaoAdenda, type Adenda, type LinhaAdenda,
 } from "./adendas";
-import { RegistarFaturaAdendaErp } from "./FaturaErp";
 
 /** 21/10: o próximo passo de uma adenda (o comercial, a Direção, o Jurídico) e os do cliente, simulados no protótipo.
  *  Serve o cartão dos Trabalhos a mais e o do imprevisto (ImprevistosObra.tsx). */
@@ -67,12 +66,10 @@ export function AcoesAdenda({ ctx, d, a, editar }: { ctx: Ctx; d: Negocio; a: Ad
   );
 }
 
-/** As parcelas da adenda (as mesmas do contrato): a fatura e o pagamento de cada uma. */
-function ParcelasAdenda({ ctx, d, a }: { ctx: Ctx; d: Negocio; a: Adenda }) {
-  const { S, A, go } = ctx;
-  const P = parcelasAdenda(d, a), prox = proximaParcela(d, a), fin = S.role === "financeiro";
-  // 21/10: como no contrato: a seguinte só depois de paga a 1.ª (a do fim, com a obra concluída); valida-se pela ordem das parcelas
-  const fat = parcelaFaturavel(d, a), aValidar = faturaAValidar(a);
+/** As parcelas da adenda (as mesmas do contrato): o estado da fatura e do pagamento de cada uma. 20/11 (auditoria F10): só se veem aqui;
+ *  registar o número e o «Ok, já foi paga» fazem-se na lista «Pagamentos» (Pagamentos.tsx), a mesma do Financeiro. */
+function ParcelasAdenda({ d, a }: { d: Negocio; a: Adenda }) {
+  const P = parcelasAdenda(d, a);
   return (
     <div className="mt-2 space-y-1 text-[15px]">
       {P.map((x) => (
@@ -80,10 +77,7 @@ function ParcelasAdenda({ ctx, d, a }: { ctx: Ctx; d: Negocio; a: Adenda }) {
           {nomeParcela(x.i)} ({x.l.toLowerCase()}, {Math.round(x.p * 100)}%) · {eur(x.v)} €: {x.ft ? (x.ft.recibo ? `${x.ft.n}, paga (${x.ft.recibo.n})` : `${x.ft.n}, ${x.ft.pag?.comprovativo ? `o cliente avisou: ${x.ft.pag.comprovativo}` : "por pagar no portal"}`) : "por faturar"}
         </p>
       ))}
-      {/* 19/11 (auditoria): a Olyvia não emite a fatura: escreve-se o número do Eticadata, confirma-se no ERP e regista-se (como no contrato) */}
-      {fin && prox && !fat.motivo && <RegistarFaturaAdendaErp ctx={ctx} d={d} a={a} i={prox.i} />}
-      {fin && aValidar.f && <Button size="sm" className="ml-2 min-h-10" onClick={go(() => A.validarPagamentosAdenda(d.id, a.n))}>Validar o pagamento</Button>}
-      {fin && prox && fat.motivo && <p className="text-sm text-muted-foreground">{nomeParcela(prox.i)}: {fat.motivo.replace(/^./, (c) => c.toLowerCase())}</p>}
+      {P.some((x) => !x.ft?.recibo) && <p className="text-sm text-muted-foreground">A fatura e o pagamento de cada parcela registam-se em «Pagamentos».</p>}
     </div>
   );
 }
@@ -169,7 +163,7 @@ export function TrabalhosAMais(ctx: Ctx & { d: Negocio }) {
                 </div>
                 {a.origem && <p className="mt-1 text-sm text-muted-foreground">{ehRefProblema(a.origem.imprevisto) ? "Problema reportado pelo cliente" : "Imprevisto na obra"}: {a.origem.texto}</p>}
                 {/* 21/10 (decisão C): as faturas das parcelas (as do contrato), emitidas pelo Financeiro depois da assinatura, e o pagamento no portal */}
-                {a.estado === "assinada" && <ParcelasAdenda ctx={ctx} d={d} a={a} />}
+                {a.estado === "assinada" && <ParcelasAdenda d={d} a={a} />}
                 {/* 21/10 (decisão B): os materiais da adenda só se encomendam com a 1.ª parcela dela paga */}
                 {a.estado === "assinada" && (() => {
                   const ea = ecDaAdenda(d, a.n), pend = porEncomendarDe(d, a.n).length;

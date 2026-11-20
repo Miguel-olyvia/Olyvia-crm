@@ -36,7 +36,7 @@ function preparar(soMaoDeObra = false) {
   encher(FINANCEIRO); encher([OBRA[0]]);
   const avisar = vi.fn();
   const A: A_ = acoes(S, avisar, (fn) => fn());
-  A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
+  A.role("financeiro"); A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id);
   A.role("operacoes"); (A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id), A.aprovarPlano(d.id));
   A.role("comercial");
   if (soMaoDeObra) A.criarAdenda(d.id, [], "Surpresa em obra", { livres: [{ n: "Afinar as portas", h: 4, preco: 300, perfil: "Montador", mats: [] }] });
@@ -176,7 +176,7 @@ describe("o pagamento da adenda no bloco Pagamento, como o contrato", () => {
     render(<Montar S={S}>{(ctx) => <DocumentosSimples {...ctx} d={d} />}</Montar>);
     const bloco = screen.getByTestId(`fin-adenda-${N}`);
     expect(bloco.textContent).toMatch(/O cliente avisou no portal/);
-    fireEvent.click(within(bloco).getAllByRole("button", { name: "Validar o pagamento" })[0]);
+    fireEvent.click(within(bloco).getAllByRole("button", { name: "Ok, já foi paga" })[0]);
     expect(a.faturas![0].recibo).toBeTruthy();
     expect(d.obra.ecsAjuste?.[0]).toMatchObject({ n: "EC-1027-A1", adenda: N });
     expect(ecDaAdendaNoInventario()).toBeTruthy();
@@ -312,12 +312,12 @@ describe("as parcelas seguintes da adenda, como no contrato", () => {
     expect(within(bloco).queryByRole("button", { name: "Emitir a fatura" })).toBeNull();
     expect(bloco.textContent).toMatch(/Depois de paga a 1\.ª parcela\./);
     cleanup();
-    // os Trabalhos a mais: o mesmo
+    // e o pagamento da 1.ª valida-se sem o aviso do cliente (20/11: o «Ok, já foi paga» da lista «Pagamentos»; os Trabalhos a mais só mostram)
+    expect((within(bloco).getByRole("button", { name: "Ok, já foi paga" }) as HTMLButtonElement).disabled).toBe(false);
+    cleanup();
     render(<Montar S={S}>{(ctx) => <TrabalhosAMais {...ctx} d={d} />}</Montar>);
     expect(screen.queryByLabelText(/Número da fatura no Eticadata/)).toBeNull();
-    expect(screen.getByText(/2\.ª parcela: depois de paga a 1\.ª parcela\./)).toBeTruthy();
-    // e o pagamento da 1.ª valida-se sem o aviso do cliente
-    expect((screen.getByRole("button", { name: "Validar o pagamento" }) as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByRole("button", { name: /Ok, já foi paga|Validar o pagamento/ })).toBeNull();
     cleanup();
 
     A.validarPagamentosAdenda(d.id);

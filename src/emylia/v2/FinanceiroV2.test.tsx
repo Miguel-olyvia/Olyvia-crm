@@ -94,26 +94,21 @@ describe("Financeiro V2 · validar pagamentos", () => {
 
 describe("Financeiro V2 · ligado só na V2 e na V2 funcional", () => {
   const docs = (S: Estado, id: number) => { S.role = "financeiro"; return render(<Montar S={S}>{(ctx) => <DocumentosSimples {...ctx} d={deal(S, id)} />}</Montar>); };
-  it("V2 e V2 funcional: registar com tranches; Atual: registar a fatura do ERP", () => {
+  it("V2 e V2 funcional: registar com tranches; Atual: a lista «Pagamentos» (20/11)", () => {
     for (const [v, novo] of [["1", true], ["funcional", true], ["0", false]] as const) {
       localStorage.setItem(CHAVE_VERSAO, v);
       docs(seed(), 1027);
       expect(!!screen.queryByRole("region", { name: "Registar fatura" })).toBe(novo);
-      expect(!!screen.queryByText("Registar a fatura do ERP")).toBe(!novo);
+      expect(!!screen.queryByRole("heading", { name: "Pagamentos" })).toBe(!novo);
       cleanup();
     }
   });
-  it("na fase Obra da V2, a tranche que falta aparece no fim; na Atual também, quando o contrato tem várias prestações (26/10)", () => {
+  it("na fase Obra da V2, a tranche que falta aparece no fim; na Atual não (20/11: as parcelas estão só na lista «Pagamentos»)", () => {
     const S = seed();
     render(<Montar S={S}>{(ctx) => <ObraSimples {...ctx} d={deal(S, 1022)} />}</Montar>);
     expect(screen.getByRole("region", { name: "Faturas e pagamentos" })).toBeInTheDocument();
     cleanup();
     localStorage.setItem(CHAVE_VERSAO, "0");
-    render(<Montar S={S}>{(ctx) => <ObraSimples {...ctx} d={deal(S, 1022)} />}</Montar>);
-    expect(screen.getByRole("region", { name: "Faturas e pagamentos" })).toBeInTheDocument();
-    cleanup();
-    // pago de uma vez (uma só prestação): na Atual não há tranches por registar
-    deal(S, 1022).f.pagamento = "100% na adjudicação";
     render(<Montar S={S}>{(ctx) => <ObraSimples {...ctx} d={deal(S, 1022)} />}</Montar>);
     expect(screen.queryByRole("region", { name: "Faturas e pagamentos" })).toBeNull();
   });

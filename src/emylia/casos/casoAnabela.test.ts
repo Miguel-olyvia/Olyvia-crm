@@ -96,13 +96,20 @@ describe("caso real: contrato CC-2026-0331 da Anabela Schroeder", () => {
     expect(d().fase).toBe(4);
     expect(d().orc!.contrato).toBeFalsy();
     expect(S.clientes.some((c) => c.deal === id)).toBe(true);
+    // 20/11 (o fluxo em vigor desde 16/11): o contrato gera-se e assina-se antes da fatura (sem ele assinado, a fatura não se regista)
+    { const papel = S.role; S.role = "comercial";
+      A.enviarContrato(id);
+      expect(d().orc!.contrato).toBe("enviado");
+      A.assinarCom(id, { tipo: "sms", nome: "Anabela Correia", q: "12/10/2026 12:54", id: "OTP-CC-2026-0331" });
+      S.role = papel; }
+    expect(d().orc!.contrato).toBe("assinado");
 
     /* ---------------- 5. o Financeiro: a 1.ª prestação (adjudicação, 30%) põe a obra a andar */
     const TR = tranchesDe(d());
     expect(TR.map((t) => t.nome)).toEqual(PAGAMENTO.map(([l, p]) => `${l} ${p}%`));
     for (const [k, v] of Object.entries({ nome_fiscal: "Anabela Maria Machado Correia Schroeder", nif_fat: "123456789", morada_fiscal_igual: "Sim", email_fat: "cliente.caso@exemplo.pt", serie: "FT 2026", tranche: TR[0].nome, vencimento: "Pronto pagamento", metodo: "Transferência", conta: "Banco A · conta à ordem", comprovativo: "Transferência adjudicação" })) A.campo(id, k, v);
     S.role = "financeiro";
-    A.emitir(id);
+    A.registarFaturaErp(id, `FT 2026/${id}`, null);
     expect(d().fin.fatura).toBeTruthy();
     A.validar(id);
     expect(d().fin.pago).toBe(true);
@@ -112,14 +119,9 @@ describe("caso real: contrato CC-2026-0331 da Anabela Schroeder", () => {
     guardarFaturas(S, id, faturasDe(S, d()));
     expect(d().fin.tranches?.map((f) => [f.tranche, !!f.pagamento])).toEqual([[TR[0].id, true]]);
 
-    /* ---------------- 5b. na Obra: as medidas e o plano; com os dois, o contrato (o valor da proposta); assinado, a encomenda */
+    /* ---------------- 5b. na Obra: as medidas e o plano (o contrato já vem assinado); com os dois, a encomenda */
     { const papel = S.role; S.role = "operacoes"; A.supervisorMedidas(id, TECS[0].id), A.retificarMedidas(id); A.aprovarPlano(id); S.role = papel; }
     expect(d().obra.plano!.estado).toBe("aprovado");
-    { const papel = S.role; S.role = "comercial";
-      A.enviarContrato(id);
-      expect(d().orc!.contrato).toBe("enviado");
-      A.assinarCom(id, { tipo: "sms", nome: "Anabela Correia", q: "12/10/2026 12:54", id: "OTP-CC-2026-0331" });
-      S.role = papel; }
     expect(d().orc!.contrato).toBe("assinado");
     expect(d().fase).toBe(5);
 

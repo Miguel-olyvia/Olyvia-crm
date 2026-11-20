@@ -24,7 +24,7 @@ import { FASES, LINHAS, PAPEIS, eur0, pct, proximo, sugerirDaLead, tot, versaoAt
 import { CONTACTO, FINANCEIRO, LEAD, OBRA, PROPOSTA, EXTERIOR, INTERIOR, AREA, ESCOLHAS, DECISAO, PECAS_WC, divisoesEscolhidas, efetivo, gruposArea, nomeGrupo, type Grupo } from "./campos";
 import { Campos, type Passo } from "./CamposFase";
 import { EV_PASSO, indicePasso, responderOlyvia } from "./comandoOlyvia";
-import { BotaoFase, passosDaFase, temBotaoFase } from "./PaginaNegocio";
+import { BotaoFase, passoDoPulso, passosDaFase, temBotaoFase } from "./PaginaNegocio";
 import { OrcamentoSimples } from "./OrcamentoSimples";
 import { DocumentosSimples } from "./FasesSimples";
 import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
@@ -529,6 +529,11 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos, soLeitura }: { ctx: Ctx; 
     const i = passos.findIndex((x) => (x.falta || 0) > 0);
     if (i >= 0 && i !== ativo) setAtivo(i);
     irParaCampoEmFalta();
+  });
+  // 20/11 (auditoria F10): o «Registar a fatura» do Hoje abre o passo «Pagamentos», onde se escreve o número
+  useEffect(() => {
+    const i = passoDoPulso(S.pulse, passos);
+    if (i >= 0 && i !== ativo) setAtivo(i);
   });
 
   // um passo completo passa sozinho ao seguinte (27/10: menos os que têm mais por baixo das respostas, como as fotografias)

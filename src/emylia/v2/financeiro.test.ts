@@ -17,7 +17,7 @@ describe("tranches do plano de pagamento", () => {
     expect(tranchesDoPlano("30% + 40% + 30%").map((t) => t.nome)).toEqual(["Adiantamento 30%", "A meio 40%", "Final 30%"]);
   });
   it("100% na adjudicação: uma só tranche", () => {
-    expect(tranchesDoPlano("100% na adjudicação")).toEqual([{ id: "unica", nome: "Única 100%", pct: 100 }]);
+    expect(tranchesDoPlano("100% na adjudicação")).toEqual([{ id: "unica", nome: "Única 100%", pct: 100, p: 1 }]);
   });
   it("19/10: vazio ou desconhecido dá 50% + 50% no fim, como a proposta e o portal (prestacoes)", () => {
     for (const p of ["", undefined, "à vista"]) expect(tranchesDoPlano(p)).toEqual(T50);

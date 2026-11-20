@@ -1,10 +1,11 @@
 // 19/11/2026 (auditoria, ponto 5): a referência Multibanco que a Olyvia gera (referenciaMb) é de teste, mas aparecia ao cliente como real.
 // Agora a opção só aparece com um prestador de pagamentos configurado (mbDisponivel); a base ainda não o tem, por isso fica escondida.
+// 20/11: o «como paga» está na 1.ª linha da lista «Pagamentos» (antes PagamentoDoCliente.tsx).
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { seed } from "./motor";
 import { Montar } from "./v2/testeV2";
-import { PagamentoDoCliente } from "./PagamentoDoCliente";
+import { Pagamentos } from "./Pagamentos";
 import { PAGAMENTO_EXEMPLO, definirDadosPagamento, lerDadosPagamento, mbDisponivel, metodosDe } from "./pagamentoCliente";
 
 afterEach(() => { cleanup(); localStorage.clear(); });
@@ -23,13 +24,13 @@ describe("a referência Multibanco só com um prestador de pagamentos", () => {
     const S = seed(), d = S.deals.find((x) => x.id === 1027)!;
     d.fin.fatura = { n: "FT 2026/418", q: "15/10" }; d.fin.pago = false; d.f.metodo = "Referência MB";
     S.role = "financeiro";
-    render(<Montar S={S}>{(ctx) => <PagamentoDoCliente {...ctx} d={d} />}</Montar>);
+    render(<Montar S={S}>{(ctx) => <Pagamentos ctx={ctx} d={d} />}</Montar>);
     expect(screen.queryByText(/de teste/)).toBeNull();
     expect(screen.getByText(/indisponível \(sem prestador de pagamentos ligado\)/)).toBeTruthy();
     cleanup();
     const desfazer = definirDadosPagamento({ ...PAGAMENTO_EXEMPLO, mbPrestador: "Prestador de teste" });
     try {
-      render(<Montar S={S}>{(ctx) => <PagamentoDoCliente {...ctx} d={d} />}</Montar>);
+      render(<Montar S={S}>{(ctx) => <Pagamentos ctx={ctx} d={d} />}</Montar>);
       expect(screen.getByText("Entidade · referência")).toBeTruthy();
     } finally { desfazer(); }
   });

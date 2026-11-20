@@ -1,16 +1,15 @@
 // Financeiro e Obra na proposta simples: estados em frases, listas em vez de
 // cartões e tabelas, um botão por coisa.
-import { ArrowRight, Check, CheckCircle2, Circle, Package } from "lucide-react";
+import { ArrowRight, CheckCircle2, Package } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, conflitos, eur, fatorReal, nfmt, pct, r2, tot, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
-import { FaturaDoc, Partilhar, totais, tranches } from "./DocsCliente";
+import { FaturaDoc, Partilhar, totais } from "./DocsCliente";
 import { ObraPorFases } from "./ObraPorFases";
 import { lerVersao } from "./versaoPrototipo";
 import { FinanceiroV2 } from "./v2/FinanceiroV2";
-import { AdendasNoFinanceiro } from "./FinanceiroAdendas";
-import { EstadoFaturaErp } from "./FaturaErp";
+import { Pagamentos } from "./Pagamentos";
 import { faturasDe, totalComIva, tranchesDe } from "./v2/estadoV2";
 import { resumoFin } from "./v2/financeiro";
 import { useInventario } from "./inventario/loja";
@@ -27,59 +26,31 @@ import { ChipEstado, DiaDaObra, FitaDias } from "./AcompanhamentoObra";
 
 /** A V2 e a V2 funcional registam faturas (com tranches); a Atual fica como era. */
 const ehV2 = () => lerVersao() !== "atual";
-function Passo({ feito, titulo, texto }: { feito: boolean; titulo: string; texto: string }) {
-  return (
-    <li className="flex gap-3 py-3">
-      <span className={cn("mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full border motion-safe:transition-colors motion-safe:duration-200",
-        feito ? "border-success bg-success text-white" : "border-input text-transparent")}>
-        {feito ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <Circle className="h-2 w-2" aria-hidden="true" />}
-      </span>
-      <span className="min-w-0">
-        <span className="block text-[15px] font-medium">{titulo}</span>
-        <span className="block text-[15px] text-muted-foreground">{texto}</span>
-      </span>
-      <span className="sr-only">{feito ? "(feito)" : "(por fazer)"}</span>
-    </li>
-  );
-}
-
 export function DocumentosSimples(ctx: Ctx & { d: Negocio }) {
   const { S, d } = ctx;
   if (ehV2()) return <FinanceiroV2 {...ctx} />;
   const T = d.orc ? tot(d, S) : null, TI = totais(d, S), ft = d.fin.fatura, rc = d.fin.recibo;
-  const agora = T ? tranches(d, TI.total, S)[0] : null;
   return (
     <div className="max-w-2xl space-y-8">
       <section aria-label="Valor" className="rounded-2xl border border-border bg-card p-5">
-        {/* 26/10: o valor do contrato e, à parte, a prestação a faturar agora (antes dizia "A faturar" com o total do contrato) */}
+        {/* 26/10: o valor do contrato. 20/11: a prestação a faturar agora está na 1.ª linha de «Pagamentos» (não se repete aqui) */}
         <p className="text-[15px] text-muted-foreground">Valor do contrato, com IVA</p>
         <p className="text-3xl font-semibold tabular-nums">{T ? eur(TI.total) : "—"} €</p>
         {d.f.pagamento && <p className="mt-1 text-[15px] text-muted-foreground">{d.f.pagamento}</p>}
-        {T && !ft && agora && (
-          <p className="mt-3 rounded-xl bg-primary/[0.06] px-3 py-2 text-[15px]">
-            A faturar agora: <span className="font-semibold">{agora.l}</span> ({Math.round(agora.p * 100)}%) · <span className="font-semibold tabular-nums">{eur(agora.v)} €</span> com IVA
-          </p>
-        )}
       </section>
-      <EstadoFaturaErp ctx={ctx} d={d} />
-      <section aria-labelledby="fin-t">
-        <h3 id="fin-t" className="text-[17px] font-semibold tracking-tight">O que acontece</h3>
-        <ol className="mt-1 divide-y divide-border">
-          {/* 22/10: a fatura emite-se no Eticadata e regista-se aqui; o pagamento lê-se no ERP (FaturaErp.tsx) */}
-          <Passo feito={!!ft} titulo={ft ? `Fatura ${ft.n} registada` : "Registar a fatura do ERP"} texto={ft ? `Emitida no Eticadata a ${ft.q} e enviada ao portal do cliente.` : "O Financeiro emite-a no Eticadata e escreve aqui o número."} />
-          <Passo feito={d.fin.pago} titulo={d.fin.pago ? "Pagamento confirmado" : "O pagamento"} texto={d.fin.pago ? `Confirmado${d.f.data_pag ? " a " + d.f.data_pag.split("-").reverse().join("/") : ""}${d.f.comprovativo ? " · " + d.f.comprovativo : ""}.` : "A Olyvia vê no Eticadata quando a fatura é paga. Sem ligação ao ERP, valida-se à mão."} />
-          <Passo feito={!!rc} titulo={rc ? `Recibo ${rc.n}` : "Recibo"} texto={rc ? "O do Eticadata. A obra pôs-se a andar:" : "O do Eticadata, quando a fatura é paga. Põe a obra a andar."} />
-        </ol>
+      {/* 20/11 (auditoria F10): a lista «Pagamentos», a mesma do Financeiro e da Obra: as parcelas do contrato, as das adendas e a nota de
+          crédito, cada uma com um só botão (registar o número do Eticadata → «Ok, já foi paga»); o Eticadata só como estado, em texto */}
+      <section aria-labelledby="fin-t" className="space-y-3">
+        <h3 id="fin-t" className="text-[17px] font-semibold tracking-tight">Pagamentos</h3>
+        <Pagamentos ctx={ctx} d={d} />
         {/* 16/10: o pagamento validado emite a encomenda de cliente no Inventário e passa o negócio à Obra; depois só falta aprovar o plano.
             27/10: a lista só aparece depois do recibo, como confirmação do que aconteceu */}
         {rc && (
-          <ul className="ml-9 mt-1 space-y-1.5 text-[15px] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
+          <ul className="space-y-1.5 text-[15px] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200" aria-label="O que aconteceu com a 1.ª parcela paga">
             {["O negócio passa à Obra", "A encomenda de cliente vai para o Inventário: reserva o stock e encomenda ao fornecedor o que falta", "As Operações aprovam o plano da obra", "O cliente recebe o recibo no portal"].map((t) => <li key={t}>✓ {t}</li>)}
           </ul>
         )}
       </section>
-      {/* 21/10: as adendas assinadas, cada uma com a sua fatura, o seu pagamento e a encomenda dos materiais (decisão B) */}
-      <AdendasNoFinanceiro ctx={ctx} d={d} />
       <Partilhar ctx={ctx} d={d} tipo="fatura" estado={rc ? `paga · ${rc.n}` : ft ? `emitida ${ft.q} · por pagar` : "rascunho: ainda não emitida"}>
         <FaturaDoc S={S} d={d} />
       </Partilhar>
@@ -90,8 +61,9 @@ export function DocumentosSimples(ctx: Ctx & { d: Negocio }) {
 export function ObraSimples(ctx: Ctx & { d: Negocio }) {
   const { S, A, go, d } = ctx;
   // V2: as tranches que faltam (a final, por exemplo) registam-se e validam-se aqui, já com a obra a andar
-  // 26/10: também na versão Atual quando o contrato tem várias prestações (o caso real: cinco), para registar as faturas das outras
-  const finV2 = (ehV2() || tranchesDe(d).length > 1) && !resumoFin(totalComIva(S, d), tranchesDe(d), faturasDe(S, d)).completo;
+  // 20/11 (auditoria F10): na versão Atual já não (26/10 aparecia também com várias prestações): as parcelas registam-se e validam-se só
+  // na lista «Pagamentos» (Pagamentos.tsx), o passo da Obra a seguir a este
+  const finV2 = ehV2() && !resumoFin(totalComIva(S, d), tranchesDe(d), faturasDe(S, d)).completo;
   // os materiais lidos ao vivo do Inventário (16/10: a encomenda de cliente vive lá); o detalhe está no passo Materiais (21/10)
   const db = useInventario();
   const r = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;

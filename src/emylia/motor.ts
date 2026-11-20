@@ -22,7 +22,7 @@ import { faltaParaEncerrar } from "./encerrarObra";
 import { podeVerCustos } from "./permissoes";
 import { ARTIGOS_DEM0, LINHA_DEMOLICAO, PAR_DEM0, calcularDemolicao, fatorAcesso, itensDasLinhas, type AjustesDem, type ChaveAjuste, type ItemDem, type ParDem, type ResultadoDem } from "./entulho";
 import { ajustePrazo, prazoProposta, tarefasPrevistas } from "./ganttOrcamento";
-import { PAGAMENTO_FASES, PAGAMENTO_MEDIDA, deIso, erroPrestacoes, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, type ObraReal } from "./planoObra";
+import { PAGAMENTO_FASES, PAGAMENTO_MEDIDA, deIso, erroPrestacoes, diasDaObra, iniciosRapidos, isoDia, planoObra, prestacoes, realPorFase, sugerirPorFases, valoresPrestacoes, type ObraReal } from "./planoObra";
 import {
   MOTIVO_IMPREVISTO, adendaBloqueada, congelarAdenda, alertasAdenda, assinadas, diasAdenda, faturaAValidar, faturasAdenda, margemAdenda, nomeParcela, parcelaFaturavel, primeiraPaga, proximaParcela, alvoFaturaAdenda,
   LINHA_ACERTO_PLANO, LINHA_ACERTO_PRODUTOS, MOTIVO_ACERTO, MOTIVOS_ADENDA, juntarAoPlano, linhaAdenda, linhasComTarefa, precoSugeridoLivre, totaisAdenda, totalAdenda, versaoAdenda, type Adenda, type FaturaAdenda, type LinhaAdenda,
@@ -1057,10 +1057,12 @@ export function totaisIva(d: Negocio, S: Estado) {
   const ivaMo = mo * IVA_MO, ivaMat = mat * IVA_MAT;
   return { mo, mat, ivaMo, ivaMat, base: mo + mat, iva: ivaMo + ivaMat, total: mo + mat + ivaMo + ivaMat };
 }
-/** O valor da primeira prestação (o sinal), com IVA: o que o Financeiro espera ver entrar (14/10). */
+/** O valor da primeira prestação (o sinal), com IVA: o que o Financeiro espera ver entrar (14/10). 20/11 (auditoria F12): pela conta
+ *  única das parcelas (planoObra.ts: valoresPrestacoes), a mesma do portal, do Financeiro e do servidor. */
 export function valorSinal(d: Negocio, S: Estado): number {
   if (!d.orc) return 0;
-  return r2(totaisIva(d, S).total * (prestacoes(d.f.pagamento, d.orc.pagFases)[0]?.p ?? 1));
+  const total = totaisIva(d, S).total;
+  return valoresPrestacoes(total, prestacoes(d.f.pagamento, d.orc.pagFases))[0] ?? r2(total);
 }
 export function linhaCalc(l: LinhaOrc, S: Estado): { custo: number; preco: number; h: number; s?: Servico } {
   if (l.t === "mat") return { custo: l.custo, preco: l.preco, h: 0 };
@@ -3437,15 +3439,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       log(d, `O cliente autorizou o débito direto na conta ${ibanCurto} (${titular.trim()})`);
       avisar({ msg: "Débito direto autorizado", sub: "O valor é debitado no vencimento; o Financeiro confirma e sai o recibo", kind: "ok" });
     },
-    emitir(id: number) {
-      const d = deal(id);
-      if (!exigePerm("finance.invoice")) return;
-      // 19/10: na V2 a fatura emite-se no programa certificado e regista-se no Financeiro do negócio (registarFatura)
-      if (lerVersao() !== "atual") { avisar({ msg: "A fatura não se emite na Olyvia", sub: "Emita-a no programa de faturação certificado e registe-a no Financeiro do negócio", kind: "bad" }); return; }
-      if (!portao(d, [FINANCEIRO[0], FINANCEIRO[1]])) return;
-      d.fin.fatura = { n: "FT 2026/" + S.ft++, q: "hoje" }; log(d, d.fin.fatura.n + " emitida e enviada ao portal do cliente"); avisar({ msg: d.fin.fatura.n + " emitida", sub: "Enviada ao portal do cliente", kind: "ok" });
-      avisarDocumento(d, "fatura", "Fatura " + d.fin.fatura.n);
-    },
+    // 20/11 (auditoria F12): sem «emitir»: ainda criava «FT 2026/n» na Olyvia e só os casos de teste a usavam. A fatura emite-se no
+    // Eticadata e regista-se com o número (registarFaturaErp; as parcelas seguintes, registarFaturaParcela; as adendas, registarFaturaAdenda).
     /** V2: regista a fatura emitida no programa certificado (o número, a data "dd/mm/aaaa" e a tranche). A primeira fica também como a fatura do negócio. */
     registarFatura(id: number, numero: string, dataPt: string, nomeTranche: string): boolean {
       const d = deal(id);
@@ -4664,7 +4659,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!encomendarAdendas(d)) avisar({ msg: "Nada por encomendar", sub: "As adendas pagas já têm a encomenda no Inventário", kind: "" });
     },
     /** A fatura da parcela seguinte da adenda, emitida no Eticadata e registada aqui com o número (21/10: só na V2; 19/11, auditoria: em
-     *  todas as versões, como as parcelas do contrato). `info` é a leitura do ERP (RegistarFaturaAdendaErp): null, sem ligação. */
+     *  todas as versões, como as parcelas do contrato). `info` é a leitura do ERP (Pagamentos.tsx: RegistarNumero): null, sem ligação. */
     registarFaturaAdenda(id: number, n: string, numero: string, info?: InfoErp | null): boolean {
       const d = deal(id), a = d.adendas?.find((x) => x.n === n);
       if (!exigePerm("finance.invoice")) return false;

@@ -42,7 +42,7 @@ function pagoEProntoParaEc(real: boolean) {
   encher(d, FINANCEIRO); encher(d, [OBRA[0]]);
   const run = (fn: () => void) => fn();
   const A = real ? acoes(S, vi.fn(), run, { abrir: vi.fn() }) : acoes(S, vi.fn(), run);
-  A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
+  A.role("financeiro"); A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id);
   A.role("operacoes"); A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id); A.aprovarPlano(d.id);
   return { S, A, d };
 }
@@ -126,7 +126,7 @@ describe("organização real: a encomenda da adenda é automática", () => {
     const S: Estado = seed(), d = S.deals.find((x) => x.id === 1027) as Negocio;
     encher(d, FINANCEIRO); encher(d, [OBRA[0]]);
     const A = acoes(S, vi.fn(), (fn) => fn());
-    A.role("financeiro"); A.emitir(d.id); A.validar(d.id);
+    A.role("financeiro"); A.registarFaturaErp(d.id, `FT 2026/${d.id}`, null); A.validar(d.id);
     A.role("operacoes"); A.supervisorMedidas(d.id, "hn"), A.retificarMedidas(d.id); A.aprovarPlano(d.id);
     A.role("comercial"); A.criarAdenda(d.id, [{ sid: "pint", q: 20 }], "O cliente pediu"); adendaAssinada(A, d.id, N);
     const a = d.adendas!.find((x) => x.n === N)!;

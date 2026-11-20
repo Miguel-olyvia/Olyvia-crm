@@ -187,10 +187,16 @@ export const PAGAMENTO_MEDIDA = "À medida";
 /** 26/10: o valor (com IVA) de cada prestação: cada uma arredondada ao cêntimo e a última com o resto, para a soma bater sempre com o
  *  total (como as tranches do Financeiro, v2/financeiro.ts: valorTranche). Antes, a proposta mostrava total × % sem arredondar e a
  *  soma podia ficar a 1 cêntimo do total (o caso real: 64 971,80 € em vez de 64 971,81 €). */
+/** 20/11 (auditoria F12): é a conta ÚNICA do valor de cada parcela, em todo o lado (a proposta, o contrato, o portal, o Financeiro, as
+ *  adendas e o sinal): a mesma do servidor (neg_registar_fatura: round(total × pct, 2) e, na última, o total menos a soma das anteriores).
+ *  Antes havia três (esta, v2/financeiro.ts: valorTranche, sobre a percentagem já arredondada, e motor.ts: valorSinal). */
 export function valoresPrestacoes(total: number, L: { p: number }[]): number[] {
-  const r = (x: number) => Math.round(x * 100) / 100;
-  let resto = r(total);
-  return L.map((x, i) => { const v = i === L.length - 1 ? resto : r(total * x.p); resto = r(resto - v); return v; });
+  // ao cêntimo, como o numeric do Postgres: 0,125 × 100 dá 12,499999… em vírgula flutuante e arredondaria para baixo
+  const r = (x: number) => Math.sign(x) * Math.round(Math.abs(x) * 100 + 1e-6) / 100;
+  const t = r(total);
+  const vs = L.map((x) => r(t * x.p));
+  if (vs.length) vs[vs.length - 1] = r(t - vs.slice(0, -1).reduce((a, v) => a + v, 0));
+  return vs;
 }
 /** O que está errado nas prestações à medida (null: estão certas): pelo menos uma, cada uma com o texto e mais de 0%, e a soma 100%. */
 export function erroPrestacoes(L: Prestacao[]): string | null {
