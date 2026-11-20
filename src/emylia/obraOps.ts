@@ -6,7 +6,6 @@
 //   licenças, o diário de obra e os custos previstos e reais.
 import { TECS, type Negocio, type Plano, type Tarefa } from "./motor";
 import { RECEITAS } from "./receitas";
-import { rotuloDia } from "./preparacaoObra";
 import { linhaDoResumo, type ResumoEcNeg } from "./inventario/ponteNegocios";
 import type { Envio } from "./trabalhoObra";
 import { custoHoraDe, fichaTecnico } from "./equipa/tecnicos";
@@ -173,8 +172,6 @@ export function equipamentosDaObra(p: Plano): Equip[] {
   // a carrinha da Frota leva a equipa e o material todos os dias
   return viatura ? [{ n: viatura, origem: "Frota", tarefas: ["Transporte da equipa e do material"], dia: 0, fim }, ...L] : L;
 }
-export const quandoEquip = (p: Plano, e: { dia: number; fim: number }) =>
-  `${rotuloDia(p, e.dia)}${e.fim - e.dia > 1 ? ` a ${rotuloDia(p, e.fim - 1)}` : ""} · ${e.fim - e.dia} ${e.fim - e.dia === 1 ? "dia" : "dias"}`;
 
 /* ------------------------------------------------------------------ os materiais, por fase */
 export type EstadoMat = "na obra" | "na carrinha" | "reservado" | "recebido" | "a chegar" | "encomendado" | "por encomendar" | "em falta";

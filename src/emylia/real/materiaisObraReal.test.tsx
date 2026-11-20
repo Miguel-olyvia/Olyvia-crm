@@ -1,6 +1,6 @@
 // 09/11/2026 (20270111870000): Operações › obra › Materiais para quem não vê as encomendas de cliente (sem client_orders.view) e tem
 // negocios.obra.materiais: as linhas vêm de obra_materiais_ler (sem preços nem fornecedores). Quem vê as encomendas fica como estava.
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const rpc = vi.fn();
@@ -11,7 +11,6 @@ vi.mock("../acessosPortal", async (orig) => ({ ...(await orig<typeof import("../
 import { seed, type Estado, type Negocio } from "../motor";
 import { FINANCEIRO, emFalta } from "../campos";
 import { esquecerInventario } from "../inventario/loja";
-import { PaginaObra } from "../ObraOperacoes";
 import { definirPermissoesReais } from "../permissoes";
 import { materiaisPorFase } from "../obraOps";
 import { Montar } from "../v2/testeV2";
@@ -59,39 +58,4 @@ describe("materiais da obra pela base (obra_materiais_ler)", () => {
     expect(itens.every((x) => !x.forn)).toBe(true);
   });
 
-  it("sem client_orders.view e com negocios.obra.materiais: lê a base pelo id do negócio e mostra a lista", async () => {
-    const { S, d } = preparar();
-    rpc.mockResolvedValue({ data: BASE, error: null });
-    definirPermissoesReais({ codigos: new Set(["negocios.obra.materiais", "negocios.obra.executar"]), simular: false });
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={{ ...ctx, podeVerInventario: false, podeVerNegocio: false, idNegocioBase: () => "neg-uuid" }} d={d} />}</Montar>);
-    fireEvent.click(screen.getByRole("tab", { name: "Equipa e meios" }));
-    await waitFor(() => expect(document.getElementById("obra-mat")?.textContent).toMatch(/Encomenda de cliente EC-2026-0007/));
-    const sec = document.getElementById("obra-mat")!;
-    expect(sec.textContent).toMatch(/Torneira.*por encomendar/);
-    expect(sec.textContent).not.toMatch(/Abrir a encomenda no Inventário|Ver o negócio/);
-    expect(rpc).toHaveBeenCalledWith("obra_materiais_ler", { p_org: "org-1", p_negocio: "neg-uuid" });
-  });
-
-  it("um erro da base: só a nota discreta na secção", async () => {
-    const { S, d } = preparar();
-    rpc.mockResolvedValue({ data: null, error: { message: "Sem permissão", code: "CT001" } });
-    definirPermissoesReais({ codigos: new Set(["negocios.obra.materiais"]), simular: false });
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={{ ...ctx, podeVerInventario: false, idNegocioBase: () => "neg-uuid" }} d={d} />}</Montar>);
-    fireEvent.click(screen.getByRole("tab", { name: "Equipa e meios" }));
-    await waitFor(() => expect(document.getElementById("obra-mat")?.textContent).toMatch(/Não foi possível ler os materiais/));
-  });
-
-  it("com client_orders.view, ou sem negocios.obra.materiais: não chama a base", () => {
-    const { S, d } = preparar();
-    definirPermissoesReais({ codigos: new Set(["negocios.obra.materiais"]), simular: false });
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={{ ...ctx, podeVerInventario: true, idNegocioBase: () => "neg-uuid" }} d={d} />}</Montar>);
-    fireEvent.click(screen.getByRole("tab", { name: "Equipa e meios" }));
-    expect(document.getElementById("obra-mat")?.textContent).toMatch(/Encomenda de cliente EC-1027/);
-    cleanup();
-    definirPermissoesReais({ codigos: new Set(["negocios.obra.executar"]), simular: false });
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={{ ...ctx, podeVerInventario: false, idNegocioBase: () => "neg-uuid" }} d={d} />}</Montar>);
-    fireEvent.click(screen.getByRole("tab", { name: "Equipa e meios" }));
-    expect(document.getElementById("obra-mat")).toBeNull();
-    expect(rpc).not.toHaveBeenCalledWith("obra_materiais_ler", expect.anything());
-  });
 });

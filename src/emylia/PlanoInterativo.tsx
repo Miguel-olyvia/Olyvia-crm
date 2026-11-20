@@ -1,17 +1,16 @@
 // O plano da obra, interativo (21/10/2026), para quem valida o plano (as Operações) e para o gestor com a obra em curso:
-// · BarraTarefa: a barra do Gantt arrasta-se (o início, e para outra fase largando-a na linha de outra fase) e a ponta
-//   puxa-se (os dias). Pelo teclado: ← → o início, Shift + ← → os dias, Alt + ↑ ↓ a fase. Um toque sem arrastar abre a tarefa.
-// · TarefasDoPlano: "Nova tarefa" numa fase, a partir de um serviço: o ofício, as horas e os materiais vêm dele; o técnico livre
+// · NovaTarefa: "Nova tarefa" numa fase, a partir de um serviço: o ofício, as horas e os materiais vêm dele; o técnico livre
 //   do ofício vem escolhido. O técnico é avisado (aparece no Hoje dele: AvisosTecnico.tsx).
-// · ExtrasTarefa: no painel da tarefa, a fase, os materiais (editáveis), o aviso ao técnico (visto ou por ver) e tirar a tarefa.
+// · EditorMateriais: os materiais de uma tarefa, editáveis.
+// 20/11 (auditoria 19/11): a barra arrastável do Gantt (BarraTarefa), o painel da tarefa (ExtrasTarefa) e o botão «Nova tarefa»
+// (TarefasDoPlano) saíram com a página antiga da obra (PaginaObra), a única que os usava; o Estúdio da obra e o do plano têm os seus.
 // A lógica está em tarefasValidador.ts; o motor só a chama.
-import { useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type PointerEvent, type ReactNode } from "react";
-import { Bell, BellRing, Check, Minus, Package, Plus, Search, Trash2, X } from "lucide-react";
+import { useMemo, useState, type ReactNode } from "react";
+import { Bell, Minus, Package, Plus, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { TECS, diaDeFerias, nfmt, type MatTarefa, type Negocio, type Plano, type SvcId, type Tarefa } from "./motor";
+import { TECS, diaDeFerias, nfmt, type MatTarefa, type Negocio, type SvcId } from "./motor";
 import type { Ctx } from "./pecas";
-import { pelaPermissao, podeNeg } from "./permissoes";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
 import { rotuloDia, tecnicosDoOficio } from "./preparacaoObra";
@@ -19,102 +18,13 @@ import { IconeServico, iconeDoServico } from "./ilustracoes";
 import { AvatarTec } from "./AcompanhamentoObra";
 import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
 import { usePesquisaProdutos } from "./real/pesquisaProdutos";
-import { consumiveisConhecidos, criarTarefa, diaMinimo, materiaisDaTarefa, materiaisDoServico, oficioDe, podeTirar, tempoDoServico, ultimoAviso } from "./tarefasValidador";
-import { ecDaAdenda, porEncomendar } from "./encomendasAjuste";
-import { primeiraPaga } from "./adendas";
+import { consumiveisConhecidos, criarTarefa, diaMinimo, materiaisDoServico, oficioDe, tempoDoServico } from "./tarefasValidador";
 
 const CARTAO = "rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]";
 /** As unidades de área e de comprimento: começam em 5 e andam de 5 em 5. */
 const POR_5 = /^(m²|ml|m)$/;
 const dias = (n: number) => `${nfmt(n)} ${n === 1 ? "dia" : "dias"}`;
 const chip = (on: boolean) => cn("inline-flex min-h-11 items-center gap-2 rounded-full border px-4 text-[15px] transition-colors", on ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-foreground/40");
-
-/* ================================================================== a barra do Gantt, arrastável */
-type Arrasto = { modo: "mover" | "dur"; x: number; y: number; moveu: boolean; id: number };
-
-export function BarraTarefa({ p, t, colW, x, largura, cor, className, style, ativa, mover, durar, abrir, rotulo, children }: {
-  p: Plano; t: Tarefa; ti: number; colW: number; x: number; largura: number; cor: string; className?: string; style?: CSSProperties;
-  /** Pode arrastar (o plano ainda não arrancou e é quem o valida). */
-  ativa: boolean;
-  mover: (dia: number, fase?: number) => void; durar: (dur: number) => void; abrir: () => void; rotulo: string; children?: ReactNode;
-}) {
-  const ref = useRef<HTMLSpanElement>(null);
-  const arr = useRef<Arrasto | null>(null);
-  const [vista, setVista] = useState<{ dd: number; dy: number; fase: number | null; modo: "mover" | "dur" } | null>(null);
-
-  // a fase da linha por baixo do ponteiro (sem contar a própria barra, que anda com ele)
-  const faseEm = (cx: number, cy: number): number | null => {
-    for (const el of document.elementsFromPoint(cx, cy)) {
-      if (ref.current?.contains(el)) continue;
-      const li = (el as HTMLElement).closest?.("[data-fase]");
-      if (li) return Number(li.getAttribute("data-fase")) || null;
-    }
-    return null;
-  };
-  const baixo = (e: PointerEvent<HTMLElement>, modo: Arrasto["modo"]) => {
-    if (!ativa || e.button !== 0) return;
-    e.stopPropagation();
-    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* sem captura (ex.: eventos sintéticos) */ }
-    arr.current = { modo, x: e.clientX, y: e.clientY, moveu: false, id: e.pointerId };
-  };
-  const mexe = (e: PointerEvent<HTMLElement>) => {
-    const a = arr.current;
-    if (!a || a.id !== e.pointerId) return;
-    const dx = e.clientX - a.x, dy = e.clientY - a.y;
-    if (!a.moveu && Math.abs(dx) < 5 && Math.abs(dy) < 6) return;
-    a.moveu = true;
-    const dd = Math.round(dx / colW);
-    const fase = a.modo === "mover" && t.fase ? faseEm(e.clientX, e.clientY) : null;
-    setVista({ dd: a.modo === "dur" ? Math.max(1 - t.dur, dd) : Math.max(-t.dia, dd), dy: a.modo === "mover" ? dy : 0, fase, modo: a.modo });
-  };
-  const cima = (e: PointerEvent<HTMLElement>) => {
-    const a = arr.current;
-    if (!a || a.id !== e.pointerId) return;
-    arr.current = null;
-    const v = vista;
-    setVista(null);
-    if (!a.moveu || !v) { abrir(); return; }
-    if (v.modo === "dur") { if (v.dd) durar(t.dur + v.dd); return; }
-    const fase = v.fase && v.fase !== t.fase ? v.fase : undefined;
-    if (v.dd || fase) mover(t.dia + v.dd, fase);
-  };
-  const tecla = (e: KeyboardEvent<HTMLSpanElement>) => {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); return; }
-    if (!ativa) return;
-    const dir = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
-    if (dir && e.shiftKey) { e.preventDefault(); if (t.dur + dir >= 1) durar(t.dur + dir); return; }
-    if (dir) { e.preventDefault(); if (t.dia + dir >= 0) mover(t.dia + dir); return; }
-    const fd = e.altKey ? (e.key === "ArrowDown" ? 1 : e.key === "ArrowUp" ? -1 : 0) : 0;
-    if (fd && t.fase) { e.preventDefault(); const f = Math.min(4, Math.max(1, t.fase + fd)); if (f !== t.fase) mover(t.dia, f); }
-  };
-
-  const dd = vista?.dd ?? 0;
-  const left = x + (vista?.modo === "mover" ? dd * colW : 0), width = Math.max(10, largura + (vista?.modo === "dur" ? dd * colW : 0));
-  const novaFase = vista?.fase && vista.fase !== t.fase ? vista.fase : null;
-  const etiqueta = vista ? (vista.modo === "dur" ? dias(t.dur + dd) : rotuloDia(p, t.dia + dd)) : null;
-  return (
-    <span ref={ref} role="button" tabIndex={0} aria-label={rotulo} onKeyDown={tecla}
-      onPointerDown={(e) => baixo(e, "mover")} onPointerMove={mexe} onPointerUp={cima} onPointerCancel={() => { arr.current = null; setVista(null); }}
-      onClick={() => { if (!ativa) abrir(); }}
-      className={cn("group absolute top-0.5 h-6 touch-none select-none rounded-md outline-none focus-visible:ring-2 focus-visible:ring-foreground focus-visible:ring-offset-2 focus-visible:ring-offset-card",
-        ativa ? "cursor-grab" : "cursor-pointer", vista ? "z-20 cursor-grabbing shadow-[0_12px_28px_-10px_rgba(0,0,0,0.45)]" : "transition-[left,width] duration-300", className)}
-      style={{ ...style, left, width, background: novaFase ? COR_FASE[novaFase] : cor, transform: vista ? `translateY(${vista.dy}px) scale(1.03)` : undefined }}>
-      {etiqueta && (
-        <span className="pointer-events-none absolute -top-8 left-0 z-30 whitespace-nowrap rounded-lg bg-foreground px-2 py-1 text-xs font-medium text-background shadow-lg">
-          {etiqueta}{novaFase ? ` · para a fase ${novaFase} · ${FASES_OBRA[novaFase - 1].curto}` : ""}
-        </span>
-      )}
-      {children}
-      {ativa && (
-        // a ponta direita: puxa os dias
-        <span aria-hidden="true" onPointerDown={(e) => baixo(e, "dur")} onPointerMove={mexe} onPointerUp={cima}
-          className="absolute -right-1 top-0 grid h-6 w-4 cursor-ew-resize place-items-center opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100">
-          <span className="h-3.5 w-1 rounded-full bg-white/90 shadow" />
-        </span>
-      )}
-    </span>
-  );
-}
 
 /* ================================================================== os materiais de uma tarefa (editáveis) */
 export function EditorMateriais({ mats, mudar }: { mats: MatTarefa[]; mudar: (m: MatTarefa[]) => void }) {
@@ -185,97 +95,7 @@ export function EditorMateriais({ mats, mudar }: { mats: MatTarefa[]; mudar: (m:
   );
 }
 
-/* ================================================================== o que mais se ajusta numa tarefa */
-function EstadoAviso({ p, ti }: { p: Plano; ti: number }) {
-  const a = ultimoAviso(p, ti);
-  if (!a) return null;
-  return (
-    <p className={cn("flex items-start gap-2 rounded-xl px-3 py-2 text-sm", a.lido ? "bg-success/10" : "bg-warning/10")}>
-      {a.lido ? <Check className="mt-0.5 h-4 w-4 shrink-0 text-success" aria-hidden="true" /> : <BellRing className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />}
-      <span><b className="font-medium">{TECS.find((x) => x.id === a.tec)?.n.split(" ")[0]} {a.lido ? `viu o aviso · ${a.lido}` : "foi avisado · ainda não viu"}</b>
-        <span className="block text-muted-foreground">«{a.t}» · {a.q}</span></span>
-    </p>
-  );
-}
-
-/** No painel da tarefa: a fase, os materiais, o aviso ao técnico e tirar (só as tarefas novas). */
-export function ExtrasTarefa({ ctx, d, ti, fase = true, fechar }: { ctx: Ctx; d: Negocio; ti: number; fase?: boolean; fechar?: () => void }) {
-  const { S, A, run } = ctx;
-  const p = d.obra.plano!, t = p.tasks[ti];
-  if (!t) return null;
-  const mats = materiaisDaTarefa(t, S.svc);
-  return (
-    <div className="divide-y divide-border border-t border-border">
-      {fase && t.fase != null && (
-        <div className="py-3">
-          <p className="text-[15px]">Fase</p>
-          <div role="group" aria-label={`Fase de ${t.nome}`} className="mt-2 flex flex-wrap gap-2">
-            {FASES_OBRA.map((f) => (
-              <button key={f.n} type="button" aria-pressed={t.fase === f.n} onClick={() => run(() => A.moverTarefaPlano(d.id, ti, { fase: f.n }))} className={chip(t.fase === f.n)}>
-                <span className="h-2.5 w-2.5 rounded-full" style={{ background: COR_FASE[f.n] }} aria-hidden="true" />{f.n} · {f.curto}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-      <div className="py-3">
-        <p className="mb-2 text-[15px]">Materiais{!t.mats && mats.length > 0 && <span className="block text-sm text-muted-foreground">da receita do serviço; mude o que for preciso</span>}</p>
-        <EditorMateriais mats={mats} mudar={(m) => run(() => A.matsTarefa(d.id, ti, m))} />
-        {/* 21/10: o que se juntou à mão vai numa encomenda de cliente de ajuste (as tarefas novas encomendam-se sozinhas ao criar) */}
-        {(() => {
-          const falta = porEncomendar(p).filter((x) => x.t === t);
-          // 21/10 (decisão B): numa tarefa de adenda, os materiais esperam pelo pagamento da adenda
-          const retida = !!t.adenda && !ecDaAdenda(d, t.adenda) && !(() => { const a = d.adendas?.find((x) => x.n === t.adenda); return a && primeiraPaga(a); })();
-          return <>
-            {t.ecs?.length ? <p className="mt-2 text-sm text-muted-foreground">Encomendado em {t.ecs.join(", ")}</p> : null}
-            {falta.length > 0 && (
-              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-warning/10 px-3 py-2">
-                <span className="text-sm">Ainda não encomendado: {falta.map((x) => `${x.m.n} (${nfmt(x.q)} ${x.m.un})`).join(", ")}</span>
-                {/* 4/11 (decisão do utilizador): na obra não se encomendam materiais; sem o botão "Encomendar", só o estado */}
-                {retida
-                  ? <span className="text-sm text-muted-foreground">encomenda-se quando o pagamento da 1.ª parcela da adenda {t.adenda} for validado</span>
-                  : !d.obra.ec?.ref && <span className="text-sm text-muted-foreground">encomenda-se a seguir ao pagamento</span>}
-              </div>
-            )}
-          </>;
-        })()}
-      </div>
-      {(ultimoAviso(p, ti) || podeTirar(p, ti)) && (
-        <div className="space-y-3 py-3">
-          <EstadoAviso p={p} ti={ti} />
-          {podeTirar(p, ti) && (
-            <button type="button" onClick={() => { run(() => A.tirarTarefaPlano(d.id, ti)); fechar?.(); }}
-              className="inline-flex min-h-11 items-center gap-2 rounded-lg px-3 text-[15px] font-medium text-destructive hover:bg-destructive/10">
-              <Trash2 className="h-4 w-4" aria-hidden="true" />Tirar esta tarefa do plano
-            </button>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 /* ================================================================== a tarefa nova */
-/** "Nova tarefa" e o painel de a criar. Monta-se uma vez na página da obra (para as Operações). */
-export function TarefasDoPlano({ ctx, d }: { ctx: Ctx; d: Negocio }) {
-  const p = d.obra.plano;
-  const [aberto, setAberto] = useState(false);
-  // 6/11 (permissões): o papel E negocios.obra.planear (A.novaTarefaPlano pede-a)
-  // 9/11 (Lote 1, C): o papel, ou (conta real) só a permissão (como A.novaTarefaPlano)
-  if (!p || (ctx.S.role !== "operacoes" && !pelaPermissao(ctx.S.role, ["obra.planear"])) || !podeNeg(ctx.S.role, "obra.planear") || p.estado === "concluída") return null;
-  if (!aberto) return (
-    <button type="button" onClick={() => setAberto(true)}
-      className="group mt-4 flex min-h-14 w-full items-center gap-3 rounded-2xl border border-dashed border-input bg-card px-4 text-left transition-colors hover:border-primary hover:bg-primary/[0.03]">
-      <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary transition-transform group-hover:scale-105"><Plus className="h-5 w-5" aria-hidden="true" /></span>
-      <span className="flex-1">
-        <span className="block text-[15px] font-medium">Nova tarefa</span>
-        <span className="block text-sm text-muted-foreground">Numa fase, a partir de um serviço: técnico e materiais já sugeridos. O técnico é avisado.</span>
-      </span>
-    </button>
-  );
-  return <NovaTarefa ctx={ctx} d={d} fechar={() => setAberto(false)} />;
-}
-
 /** 11/11: `inicial` vem de tocar num dia vazio da linha de um técnico, no Estúdio do plano (começa nesse dia, com essa pessoa). */
 export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; fechar: () => void; inicial?: { dia?: number; tec?: string | null } }) {
   const { S, A, run } = ctx;

@@ -21,7 +21,6 @@ import { CODIGOS_NEGOCIOS } from "./permissoesReais";
 import { comPapeisDasPermissoes, papeisDasPermissoes, papelInicial, type MeusPapeis } from "./real/papeisReal";
 import { esquecerInventario } from "./inventario/loja";
 import { BotaoFase } from "./PaginaNegocio";
-import { PaginaObra } from "./ObraOperacoes";
 import { RegistarFaturaErp } from "./FaturaErp";
 import { FINANCEIRO, emFalta } from "./campos";
 import { Conversa } from "./ConversaObra";
@@ -209,20 +208,6 @@ describe("C · registar imprevistos e tratar problemas: o papel OU (conta real) 
     expect(com.d.obra.problemas?.[0]?.estado).toBe("descartado");
   });
 
-  it("na página da obra: «Registar imprevisto» à Direção com planear (conta real); sem planear não; sem conta real não", () => {
-    const { S, d } = obra("direcao");
-    reais(["obra.planear", "obra.imprevistos"]);
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    expect(botao(/Registar imprevisto/)).toBeTruthy();
-    cleanup();
-    reais(["obra.imprevistos", "obra.executar"]);
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    expect(botao(/Registar imprevisto/)).toBeNull();
-    cleanup();
-    definirPermissoesReais(null);
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    expect(botao(/Registar imprevisto/)).toBeNull();
-  });
 });
 
 describe("F · encerrar e decidir imprevistos pedem também negocios.obra.planear (como o servidor)", () => {
@@ -260,18 +245,6 @@ describe("F · encerrar e decidir imprevistos pedem também negocios.obra.planea
     expect(d.obra.imprevistos!.find((x) => x.id === id)!.estado).toBe("fechado");
   });
 
-  it("na página da obra, «Resolver sem custo» só aparece com imprevistos E planear", () => {
-    const { S, d, A } = obra("operacoes");
-    reais(["obra.imprevistos", "obra.planear", "obra.executar"]);
-    A.registarImprevisto(d.id, imprevisto);
-    reais(["obra.imprevistos", "obra.executar"]);
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    expect(botao(/Resolver sem custo/)).toBeNull();
-    cleanup();
-    reais(["obra.imprevistos", "obra.planear"]);
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    expect(botao(/Resolver sem custo/)).toBeTruthy();
-  });
 });
 
 describe("K · gerar o plano e tratar a segurança pedem negocios.obra.planear", () => {
@@ -303,35 +276,6 @@ describe("K · gerar o plano e tratar a segurança pedem negocios.obra.planear",
     expect(gerar(() => reais(["obra.planear"]))).toBe("por aprovar");
     expect(gerar(() => reais([], ["pessoas.edit"]))).toBe("por aprovar");
     expect(gerar(() => definirPermissoesReais(null))).toBe("por aprovar");
-  });
-});
-
-/* ------------------------------------------------------------------ J: o diário */
-describe("J · o diário de obra: planear OU executar (como o servidor), mais o que já podia", () => {
-  const abrirRegistos = () => fireEvent.click(screen.getByRole("tab", { name: "Registos" }));
-  const caixa = () => screen.queryByRole("textbox", { name: "Registar uma ocorrência" });
-  it("quem executa (executar) escreve no diário; sem nenhuma, não; a Direção e quem planeia continuam", () => {
-    const { S, d } = obra("comercial");
-    reais(["obra.executar"]);
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    abrirRegistos();
-    expect(caixa()).toBeTruthy();
-    cleanup();
-    reais([]);
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    abrirRegistos();
-    expect(caixa()).toBeNull();
-    cleanup();
-    reais(["obra.planear"]);
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    abrirRegistos();
-    expect(caixa()).toBeTruthy();
-    cleanup();
-    reais([]);
-    S.role = "direcao";
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    abrirRegistos();
-    expect(caixa()).toBeTruthy();
   });
 });
 

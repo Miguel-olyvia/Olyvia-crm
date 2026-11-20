@@ -2,7 +2,7 @@
 // (decisão do utilizador): o bloco dos Materiais e o editor da tarefa mostram o que falta, sem botão de encomendar. Quem não tem a
 // permissão vê, no separador "Equipa e meios", só o aviso. Encomendar (o motor, obra_encomendar_materiais) pede purchase_orders.create
 // ou negocios.obra.planear (20270106650000: o pedido automático da tarefa nova).
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: vi.fn() } }));
@@ -14,8 +14,6 @@ import { esquecerInventario } from "./inventario/loja";
 import { porEncomendar } from "./encomendasAjuste";
 import { materiaisDaTarefa } from "./tarefasValidador";
 import { MateriaisObra } from "./MateriaisObra";
-import { ExtrasTarefa } from "./PlanoInterativo";
-import { PaginaObra } from "./ObraOperacoes";
 import { PERMS_PAPEL, SEM_PERM, definirPermissoesReais, podeNeg } from "./permissoes";
 import { Montar } from "./v2/testeV2";
 import type { Papel } from "./motor";
@@ -55,26 +53,4 @@ describe("materiais da obra: só ver", () => {
     expect(screen.queryByText(SEM_PERM["obra.materiais"].sub)).toBeNull();
   });
 
-  it("o editor da tarefa (plano) diz o que ainda não está encomendado, sem o botão «Encomendar»", () => {
-    const { S, d, ti } = preparar();
-    render(<Montar S={S}>{(ctx) => <ExtrasTarefa ctx={ctx} d={d} ti={ti} />}</Montar>);
-    expect(screen.getByText(/^Ainda não encomendado: Silicone sanitário \(3 tubo\)$/)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: "Encomendar" })).toBeNull();
-  });
-
-  it("no separador «Equipa e meios» da página da obra: com negocios.obra.materiais vê o bloco; sem ela, só o aviso", () => {
-    const { S, d } = preparar();
-    definirPermissoesReais({ codigos: new Set(["negocios.obra.materiais"]), simular: false });
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    fireEvent.click(screen.getByRole("tab", { name: "Equipa e meios" }));
-    // o bloco dos materiais da obra (por fase), na página da obra
-    expect(document.getElementById("obra-mat")?.textContent).toMatch(/Encomenda de cliente EC-1027/);
-    expect(screen.queryByText(SEM_PERM["obra.materiais"].msg)).toBeNull();
-    cleanup();
-    definirPermissoesReais({ codigos: new Set(["purchase_orders.create"]), simular: false });
-    render(<Montar S={S}>{(ctx) => <PaginaObra ctx={ctx} d={d} />}</Montar>);
-    fireEvent.click(screen.getByRole("tab", { name: "Equipa e meios" }));
-    expect(screen.getByText("Sem permissão para ver os materiais da obra")).toBeTruthy();
-    expect(document.getElementById("obra-mat")).toBeNull();
-  });
 });
