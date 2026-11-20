@@ -15,7 +15,7 @@ import { SeletorPesquisa } from "./pecasFicha";
 import { EditorMateriais } from "./PlanoInterativo";
 import { Miniaturas } from "./AcompanhamentoObra";
 import { nomeCurtoTarefa } from "./obraOps";
-import { lerFoto } from "./ObraOperacoes";
+import { EstadoFotos, useFotosAJuntar } from "./fotosDaObra";
 import { diasAdenda, estadoAdenda, faturasAdenda, nomeParcela, precoSugeridoLivre, previsaoLinha, totaisAdenda, totaisLinhas, type LinhaAdenda } from "./adendas";
 import { AcoesAdenda } from "./TrabalhosAMais";
 import { DECISOES, GRAVIDADES, imprevistosDe, paradasPor, tarefasAfetaveis, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
@@ -36,13 +36,13 @@ export function RegistarImprevisto({ ctx, d, ti, fechar, inicial }: { ctx: Ctx; 
   const material = inicial?.tipo === "material";
   const [texto, setTexto] = useState(inicial?.texto ?? "");
   const [onde, setOnde] = useState("");
-  const [foto, setFoto] = useState<string | null>(null);
+  // 20/11 (auditoria, Lote 3): guardada na base ao escolher (fica a referência)
+  const F = useFotosAJuntar(d.id, 1), foto = F.fotos[0] ?? null;
   const [grav, setGrav] = useState<Escolha>("impede");
   const [tarefas, setTarefas] = useState<number[]>(ti != null && afetaveis.includes(ti) ? [ti] : []);
   const [dias, setDias] = useState(1);
   const input = useRef<HTMLInputElement>(null);
-  const juntar = async (f?: File | null) => { if (!f) return; try { setFoto(await lerFoto(f)); } catch { /* sem leitura */ } };
-  const falta = [!texto.trim() && (material ? "o material que faltou" : "o que encontrou"), grav !== "aviso" && !tarefas.length && "as tarefas afetadas"].filter(Boolean) as string[];
+  const falta = [!texto.trim() && (material ? "o material que faltou" : "o que encontrou"), grav !== "aviso" && !tarefas.length && "as tarefas afetadas", F.aGuardar > 0 && "acabar de guardar a fotografia"].filter(Boolean) as string[];
   const enviar = () => run(() => {
     if (grav === "aviso") A.ocorrencia(d.id, (ti != null ? `${p.tasks[ti].nome}: ` : "") + texto.trim() + (onde.trim() ? ` (${onde.trim()})` : ""));
     else A.registarImprevisto(d.id, { texto, onde, grav, tarefas, dias, ...(foto ? { foto } : {}), ...(material ? { tipo: "material" as const } : {}) });
@@ -65,10 +65,11 @@ export function RegistarImprevisto({ ctx, d, ti, fechar, inicial }: { ctx: Ctx; 
           <input value={onde} onChange={(e) => setOnde(e.target.value)} placeholder="Ex.: parede do fundo" className={ENTRADA} />
         </label>
         <div>
-          <input ref={input} type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Fotografia do imprevisto" onChange={(e) => void juntar(e.target.files?.[0])} />
+          <input ref={input} type="file" accept="image/*" capture="environment" className="sr-only" aria-label="Fotografia do imprevisto" onChange={(e) => { void F.juntar(Array.from(e.target.files ?? []).slice(0, 1)); e.target.value = ""; }} />
           {foto
-            ? <div className="flex items-center gap-2"><Miniaturas fotos={[foto]} tam="h-12 w-16" /><button type="button" onClick={() => setFoto(null)} className="min-h-11 text-sm text-muted-foreground hover:text-foreground">Tirar</button></div>
-            : <Button variant="outline" className="min-h-12" onClick={() => input.current?.click()}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />Fotografia</Button>}
+            ? <div className="flex items-center gap-2"><Miniaturas fotos={[foto]} tam="h-12 w-16" /><button type="button" onClick={() => F.tirar(0)} className="min-h-11 text-sm text-muted-foreground hover:text-foreground">Tirar</button></div>
+            : <Button variant="outline" className="min-h-12" disabled={F.aGuardar > 0} onClick={() => input.current?.click()}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />{F.aGuardar > 0 ? "A guardar…" : "Fotografia"}</Button>}
+          <EstadoFotos aGuardar={0} erro={F.erro} className="mt-1" />
         </div>
       </div>
       {material ? <p className="rounded-xl bg-muted/60 px-3 py-2.5 text-[15px]">A tarefa fica parada até o material chegar. O gestor da obra vê o aviso no Hoje dele e encomenda o que falta. O cliente não é avisado.</p> : (

@@ -3716,7 +3716,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (e.estado === "validada") return;
       if (e.estado !== "feita") e.estado = "em curso";
       if (m.horas != null) { e.horas = Math.max(0, Math.round(m.horas * 2) / 2); e.ch = custoHoraDe(t.tec); }
-      if (m.foto) e.fotos = [...e.fotos, m.foto].slice(-4);
+      // 20/11 (auditoria, Lote 3): sem limite escondido (antes ficavam só as 4 últimas); com a base ligada cada uma é só a referência «obrafoto:<id>»
+      if (m.foto) e.fotos = [...e.fotos, m.foto];
       if (m.tirarFoto != null) e.fotos = e.fotos.filter((_, i) => i !== m.tirarFoto);
       if (m.nota != null) e.nota = m.nota.trim() || undefined;
       t.exec = e;
@@ -3779,7 +3780,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const e: ExecTarefa = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
       // as horas: as registadas pelo técnico ou, sem registo, as previstas
       if (!(e.horas > 0)) { e.horas = t.h; e.ch = custoHoraDe(t.tec); }
-      e.fotos = [...e.fotos, ...m.fotos].slice(-6); e.nota = nota; e.motivo = undefined;
+      e.fotos = [...e.fotos, ...m.fotos]; e.nota = nota; e.motivo = undefined; // 20/11: todas (antes só as 6 últimas)
       e.estado = "feita"; e.feita = agora();
       (e.envios ??= []).push({ q: agora(), dia: p.dia, quem: eu, k: "feita", fotos: m.fotos.slice(), nota });
       t.exec = e;
@@ -3891,7 +3892,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const feitos = (e.passos ?? []).map((k) => I.passos[k]).filter(Boolean);
       const ja = new Set((e.envios ?? []).flatMap((x) => x.passos ?? []));
       e.horas = Math.round((e.horas + horas) * 2) / 2;
-      e.fotos = [...e.fotos, ...m.fotos].slice(-6);
+      e.fotos = [...e.fotos, ...m.fotos]; // 20/11 (auditoria, Lote 3): todas (antes só as 6 últimas, calado)
       e.nota = nota; e.motivo = undefined;
       // 22/10 (fase 3): o €/h do técnico neste registo (o real da obra valoriza estas horas assim, mesmo que o €/h mude depois)
       const envio: Envio = { q: agora(), dia: p.dia, quem, k: m.feita ? "feita" : "registo", horas, ch: custoHoraDe(t.tec), fotos: m.fotos.slice(), nota, passos: feitos.filter((x) => !ja.has(x)) };

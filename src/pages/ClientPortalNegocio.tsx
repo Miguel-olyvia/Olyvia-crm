@@ -23,6 +23,7 @@ import { PortalCliente } from "@/emylia/PortalCliente";
 import { acoes, seed, type Estado, type PedidoClausula } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
 import { definirModoReal } from "@/emylia/acessosPortal";
+import { definirFotosObraDoPortal } from "@/emylia/real/obraFotosReal";
 import { RESPONSAVEL_OBRA } from "@/emylia/obraOps";
 import { definirEncomendasReais } from "@/emylia/real/encomendaReal";
 import { definirDadosPagamento, lerDadosPagamento } from "@/emylia/pagamentoCliente";
@@ -63,6 +64,8 @@ export function estadoDoCliente(v: VistaCliente, rececao: RececaoCliente | null,
  *  gravados na vista) e o estado dos materiais, como o CRM o calculou (MateriaisPortal e NotaEncomendaDoc, pela referência da EC). */
 export function prepararGlobais(v: VistaCliente, S: Estado, orgId: string | null, orgNome: string): void {
   definirModoReal(orgId, v.empresa.nome || orgNome, { nome: v.empresa.nomeFiscal, nif: v.empresa.nif });
+  // 20/11 (auditoria, Lote 3): as fotografias da obra («obrafoto:<id>») lêem-se pela função do portal (portal_neg_obra_foto)
+  definirFotosObraDoPortal(true);
   if (v.responsavel.n) Object.assign(RESPONSAVEL_OBRA, v.responsavel);
   const refEc = S.deals[0]?.obra.ec?.ref;
   definirEncomendasReais(v.ec && refEc ? new Map([[refEc, v.ec]]) : null);

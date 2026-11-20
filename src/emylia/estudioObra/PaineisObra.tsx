@@ -27,7 +27,8 @@ import { materiaisDaTarefa } from "../tarefasValidador";
 import { custosDosMateriais } from "../preparacaoObra";
 import { EditorMateriais } from "../PlanoInterativo";
 import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
-import { ConversaDoClienteNaObra, lerFoto } from "../ObraOperacoes";
+import { ConversaDoClienteNaObra } from "../ObraOperacoes";
+import { EstadoFotos, useFotosAJuntar } from "../fotosDaObra";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { useInventario } from "../inventario/loja";
 import { resumoEcNegocio } from "../inventario/ponteNegocios";
@@ -62,20 +63,17 @@ export function ExecucaoTarefa({ ctx, d, ti, simular, simulado, imprevisto }: {
   const [modo, setModo] = useState<null | "pausar" | "corrigir" | "reabrir" | "feita">(null);
   const [motivo, setMotivo] = useState("");
   const [horasCorr, setHorasCorr] = useState<number>(TEMPOS_CORRECAO[1].h);
-  const [fotos, setFotos] = useState<string[]>([]);
+  // 20/11 (auditoria, Lote 3): as fotografias guardam-se na base ao escolher; o limite diz-se (antes ficavam só as 4 primeiras, calado)
+  const F = useFotosAJuntar(d.id), fotos = F.fotos;
   const [atraso, setAtraso] = useState(simulado || 1);
   const [parte, setParte] = useState(Math.max(1, Math.floor(t.dur / 2)));
   const input = useRef<HTMLInputElement>(null);
   const horas = t.exec?.horas ?? 0;
   const E = enviosDe(t);
   const acabou = v === "validada" || v === "feita";
-  const fechar = () => { setModo(null); setMotivo(""); setFotos([]); };
-  const juntar = async (L?: FileList | null) => {
-    if (!L) return;
-    const n: string[] = [];
-    for (const f of Array.from(L).slice(0, 4)) { try { n.push(await lerFoto(f)); } catch { /* sem leitura */ } }
-    setFotos((x) => [...x, ...n].slice(0, 4));
-  };
+  // ao cancelar, as fotografias guardadas e não enviadas apagam-se; depois de enviar ficam (já estão na obra)
+  const fechar = () => { setModo(null); setMotivo(""); F.descartar(); };
+  const fecharEnviado = () => { setModo(null); setMotivo(""); F.limpar(); };
   if (!vivo) return null;
   // o toque principal da tarefa, pelo estado dela
   const principal = !planeia ? null
@@ -139,16 +137,18 @@ export function ExecucaoTarefa({ ctx, d, ti, simular, simulado, imprevisto }: {
               </>}
               {modo === "feita" && <>
                 <p className="text-sm font-medium">Uma fotografia do trabalho feito</p>
-                <input ref={input} type="file" accept="image/*" multiple className="sr-only" aria-label="Fotografias do trabalho feito" onChange={(e) => { void juntar(e.target.files); e.target.value = ""; }} />
+                <input ref={input} type="file" accept="image/*" multiple className="sr-only" aria-label="Fotografias do trabalho feito" onChange={(e) => { void F.juntar(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
                 <div className="flex flex-wrap items-center gap-2">
                   {fotos.length > 0 && <Miniaturas fotos={fotos} tam="h-12 w-16" />}
-                  <Button type="button" variant="outline" className="min-h-10" onClick={() => input.current?.click()}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />{fotos.length ? "Mais" : "Juntar"}</Button>
+                  {fotos.length > 0 && <button type="button" onClick={() => F.tirar(fotos.length - 1)} className="min-h-10 px-2 text-sm text-muted-foreground hover:text-foreground">Tirar a última</button>}
+                  <Button type="button" variant="outline" className="min-h-10" disabled={F.cheio} onClick={() => input.current?.click()}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />{fotos.length ? "Mais" : "Juntar"}</Button>
                 </div>
+                <EstadoFotos aGuardar={F.aGuardar} erro={F.erro} />
                 <label className="grid gap-1 text-sm font-medium">Nota (opcional)
                   <input value={motivo} onChange={(e) => setMotivo(e.target.value)} placeholder="Ex.: ficou como combinado com a cliente" className="h-11 rounded-xl border border-input bg-background px-3 text-[15px]" /></label>
                 <p className="text-xs text-muted-foreground">Fica logo validada; sem horas registadas, contam as previstas ({nfmt(t.h)} h).</p>
                 <div className="flex justify-end gap-2"><Button type="button" variant="ghost" className="min-h-10" onClick={fechar}>Cancelar</Button>
-                  <Button type="button" className="min-h-10" disabled={!fotos.length} onClick={() => { run(() => { A.darPorFeita(d.id, ti, { fotos, nota: motivo }); }); fechar(); }}>Dar por feita</Button></div>
+                  <Button type="button" className="min-h-10" disabled={!fotos.length || F.aGuardar > 0} onClick={() => { run(() => { A.darPorFeita(d.id, ti, { fotos, nota: motivo }); }); fecharEnviado(); }}>Dar por feita</Button></div>
               </>}
             </div>
           </motion.div>

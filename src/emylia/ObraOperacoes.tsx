@@ -46,6 +46,8 @@ import { imprevistosDe } from "./imprevistos";
 import { verificarPlano, type PontoPlano } from "./verificacaoPlano";
 import { useParamUrl } from "./usarParamUrl";
 import { hfmt } from "./horasFmt";
+import { EstadoFotos, FotoObra, useFotosAJuntar } from "./fotosDaObra";
+import { guardarFotoObra } from "./real/obraFotosReal";
 import { nomeDaParcela, parcelaDoArranquePorPagar } from "./parcelas";
 
 export { hfmt };
@@ -126,25 +128,9 @@ function ChipExec({ e }: { e: EstadoExec }) {
   return <span className={cn("inline-flex items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-sm font-medium", TOM_EXEC[e])}><I className="h-3.5 w-3.5" aria-hidden="true" />{ROTULO_EXEC[e]}</span>;
 }
 
-/** Reduz uma fotografia a 480 px (dataURL JPEG pequeno, para caber no estado do protótipo). */
-export function lerFoto(f: File): Promise<string> {
-  return new Promise((ok, falha) => {
-    const r = new FileReader();
-    r.onerror = () => falha(r.error);
-    r.onload = () => {
-      const img = new Image();
-      img.onload = () => {
-        const k = Math.min(1, 480 / Math.max(img.width, img.height));
-        const c = document.createElement("canvas"); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
-        c.getContext("2d")?.drawImage(img, 0, 0, c.width, c.height);
-        try { ok(c.toDataURL("image/jpeg", 0.72)); } catch { ok(String(r.result)); }
-      };
-      img.onerror = () => ok(String(r.result));
-      img.src = String(r.result);
-    };
-    r.readAsDataURL(f);
-  });
-}
+/** Uma fotografia da obra para o estado (20/11, auditoria, Lote 3: real/obraFotosReal.ts). Com a base ligada e o número do negócio,
+ *  guarda-se na base (1600 px) e devolve «obrafoto:<id>»; sem a base (o protótipo), um data URL de 480 px, como antes. */
+export const lerFoto = (f: File, numero?: number): Promise<string> => guardarFotoObra(numero, f);
 
 /* ================================================================== a lista de obras */
 export function ListaObras(ctx: Ctx) {
@@ -1249,7 +1235,7 @@ function Acompanhamento({ ctx, d, sel, setSel, ajustar }: { ctx: Ctx; d: Negocio
       {/* 27/10: o que chega do terreno é um aviso no canto, por cima da página (não a empurra) */}
       {chegou && (
         <div role="status" className={cn("fixed bottom-4 right-4 z-50 flex max-w-sm items-center gap-3 rounded-2xl border bg-card p-3 shadow-lg motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200", chegou.k === "ocorrencia" ? "border-destructive/40" : "border-primary/40")}>
-          {chegou.fotos?.[0] ? <img src={chegou.fotos[0]} alt="" className="h-14 w-20 shrink-0 rounded-lg object-cover" /> : <AlertTriangle className="h-6 w-6 shrink-0 text-destructive" aria-hidden="true" />}
+          {chegou.fotos?.[0] ? <FotoObra src={chegou.fotos[0]} alt="" className="h-14 w-20 shrink-0 rounded-lg object-cover" /> : <AlertTriangle className="h-6 w-6 shrink-0 text-destructive" aria-hidden="true" />}
           <div className="min-w-0 flex-1">
             <p className={cn("text-sm font-semibold", chegou.k === "ocorrencia" ? "text-destructive" : "text-primary")}>{chegou.k === "ocorrencia" ? "Problema reportado agora" : "Novo registo do terreno"} · {chegou.quem}</p>
             <p className="line-clamp-2 text-[15px]">{chegou.t}</p>
@@ -1313,30 +1299,32 @@ function Acompanhamento({ ctx, d, sel, setSel, ajustar }: { ctx: Ctx; d: Negocio
 function DarPorFeita({ ctx, d, ti, fechar }: { ctx: Ctx; d: Negocio; ti: number; fechar: () => void }) {
   const { A, run } = ctx;
   const p = d.obra.plano!, t = p.tasks[ti];
-  const [fotos, setFotos] = useState<string[]>([]);
+  // 20/11 (auditoria, Lote 3): as fotografias guardam-se na base ao escolher; sem limite escondido
+  const F = useFotosAJuntar(d.id), fotos = F.fotos;
   const [nota, setNota] = useState("");
   const input = useRef<HTMLInputElement>(null);
-  const juntar = async (f: File) => { try { const u = await lerFoto(f); setFotos((x) => [...x, u].slice(-4)); } catch { /* sem leitura */ } };
   const cor = t.fase ? COR_FASE[t.fase] : "#7c5ce0";
+  const cancelar = () => { F.descartar(); fechar(); };
   return (
     <div className="mt-3 space-y-3 rounded-xl border border-success/30 bg-success/[0.04] p-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
       <p className="text-[15px]"><b className="font-semibold">Dar por feita sem esperar por {nomeTec(t.tec).split(" ")[0]}.</b> <span className="text-muted-foreground">Fica logo validada{t.exec?.horas ? "" : `, com as ${hfmt(t.h)} h previstas`}.</span></p>
       <div className="flex flex-wrap items-center gap-2">
         {fotos.map((f, k) => (
           <span key={k} className="relative motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
-            <img src={f} alt={`Fotografia ${k + 1}`} className="h-20 w-28 rounded-lg border border-border object-cover" />
-            <button type="button" aria-label={`Tirar a fotografia ${k + 1}`} onClick={() => setFotos(fotos.filter((_, i) => i !== k))} className="absolute -right-2 -top-2 grid h-7 w-7 place-items-center rounded-full border border-border bg-card shadow"><X className="h-3.5 w-3.5" /></button>
+            <FotoObra src={f} alt={`Fotografia ${k + 1}`} className="h-20 w-28 rounded-lg border border-border object-cover" />
+            <button type="button" aria-label={`Tirar a fotografia ${k + 1}`} onClick={() => F.tirar(k)} className="absolute -right-2 -top-2 grid h-7 w-7 place-items-center rounded-full border border-border bg-card shadow"><X className="h-3.5 w-3.5" /></button>
           </span>
         ))}
-        <input ref={input} type="file" accept="image/*" capture="environment" multiple className="sr-only" aria-label="Escolher fotografias" onChange={(e) => { for (const f of Array.from(e.target.files ?? [])) void juntar(f); e.target.value = ""; }} />
-        <Button variant="outline" className="min-h-11" onClick={() => input.current?.click()}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />{fotos.length ? "Mais uma fotografia" : "Tirar fotografia"}</Button>
-        <button type="button" onClick={() => setFotos((x) => [...x, fotoExemplo(t.nome, cor, enviosDe(t).length + x.length)].slice(-4))} className="min-h-11 px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline">Usar uma de exemplo</button>
+        <input ref={input} type="file" accept="image/*" capture="environment" multiple className="sr-only" aria-label="Escolher fotografias" onChange={(e) => { void F.juntar(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
+        <Button variant="outline" className="min-h-11" disabled={F.cheio} onClick={() => input.current?.click()}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />{fotos.length ? "Mais uma fotografia" : "Tirar fotografia"}</Button>
+        <button type="button" disabled={F.cheio} onClick={() => F.juntarPronta(fotoExemplo(t.nome, cor, enviosDe(t).length + fotos.length))} className="min-h-11 px-1 text-[15px] font-medium text-primary underline-offset-4 hover:underline disabled:opacity-50">Usar uma de exemplo</button>
       </div>
+      <EstadoFotos aGuardar={F.aGuardar} erro={F.erro} />
       <input value={nota} onChange={(e) => setNota(e.target.value)} aria-label="Nota (opcional)" placeholder="Nota (opcional): o cliente vê-a no portal"
         className="h-11 w-full rounded-lg border border-input bg-background px-3 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
       <div className="flex flex-wrap gap-2">
-        <Button className="min-h-11" disabled={!fotos.length} onClick={() => { run(() => A.darPorFeita(d.id, ti, { fotos, nota })); fechar(); }}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Dar por feita e validar</Button>
-        <Button variant="ghost" className="min-h-11" onClick={fechar}>Cancelar</Button>
+        <Button className="min-h-11" disabled={!fotos.length || F.aGuardar > 0} onClick={() => { run(() => A.darPorFeita(d.id, ti, { fotos, nota })); F.limpar(); fechar(); }}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Dar por feita e validar</Button>
+        <Button variant="ghost" className="min-h-11" onClick={cancelar}>Cancelar</Button>
       </div>
       {!fotos.length && <p className="text-sm text-muted-foreground">Falta uma fotografia do trabalho feito.</p>}
     </div>
@@ -1705,7 +1693,7 @@ function DiarioObra({ ctx, d, pode }: { ctx: Ctx; d: Negocio; pode: boolean }) {
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-muted-foreground">{x.q} · {x.quem}</p>
                   <p className="text-[15px]">{x.t}</p>
-                  {!!x.fotos?.length && <div className="mt-2 flex gap-2">{x.fotos.map((f, j) => <img key={j} src={f} alt="" className="h-16 w-24 rounded-lg border border-border object-cover" />)}</div>}
+                  {!!x.fotos?.length && <div className="mt-2 flex gap-2">{x.fotos.map((f, j) => <FotoObra key={j} src={f} alt="" className="h-16 w-24 rounded-lg border border-border object-cover" />)}</div>}
                 </div>
               </li>
             );

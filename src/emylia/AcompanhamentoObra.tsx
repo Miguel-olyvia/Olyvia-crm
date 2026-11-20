@@ -17,6 +17,7 @@ import { rotuloDia } from "./preparacaoObra";
 import { fimDe } from "./ajustesPlano";
 import { ROTULO_EXEC, estadoDe, iniciais, nomeCurtoTarefa, type EstadoExec } from "./obraOps";
 import { diaDaTarefa, enviosDe, instrucoesDe, oDia, passosFeitos, registouNoDia, rotuloDiaTarefa, tempoDoDia, type Envio } from "./trabalhoObra";
+import { FotoObra } from "./fotosDaObra";
 
 const COR_TEC = ["#7c5ce0", "#0e7490", "#b45309", "#be185d", "#15803d", "#4338ca"];
 export const corTec = (id: string | null) => COR_TEC[Math.max(0, TECS.findIndex((x) => x.id === id)) % COR_TEC.length];
@@ -49,7 +50,7 @@ export function Ampliar({ fotos, i, fechar }: { fotos: string[]; i: number; fech
   // por cima de tudo (também do portal do cliente, que já é uma camada): vai para o body
   return createPortal(
     <div role="dialog" aria-modal="true" aria-label="Fotografia" className="fixed inset-0 z-[1000] grid place-items-center bg-black/85 p-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200" onClick={fechar}>
-      <img src={fotos[k]} alt={`Fotografia ${k + 1} de ${fotos.length}`} className="max-h-[80vh] max-w-full rounded-xl object-contain shadow-2xl" onClick={(e) => e.stopPropagation()} />
+      <FotoObra src={fotos[k]} alt={`Fotografia ${k + 1} de ${fotos.length}`} className="max-h-[80vh] max-w-full rounded-xl object-contain shadow-2xl" onClick={(e) => e.stopPropagation()} />
       <button type="button" onClick={fechar} aria-label="Fechar" className="absolute right-4 top-4 grid h-11 w-11 place-items-center rounded-full bg-white/15 text-white hover:bg-white/25"><X className="h-5 w-5" /></button>
       {fotos.length > 1 && (
         <div className="absolute bottom-6 flex items-center gap-3 text-white" onClick={(e) => e.stopPropagation()}>
@@ -70,7 +71,7 @@ export function Miniaturas({ fotos, tam = "h-20 w-28" }: { fotos: string[]; tam?
       <div className="mt-2 flex flex-wrap gap-2">
         {fotos.map((f, k) => (
           <button key={k} type="button" onClick={() => setAberta(k)} aria-label={`Ampliar a fotografia ${k + 1}`} className="overflow-hidden rounded-lg border border-border transition-transform hover:scale-[1.03] focus-visible:ring-2 focus-visible:ring-primary">
-            <img src={f} alt="" className={cn("object-cover", tam)} />
+            <FotoObra src={f} alt="" className={cn("object-cover", tam)} />
           </button>
         ))}
       </div>

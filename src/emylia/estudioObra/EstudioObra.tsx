@@ -32,7 +32,7 @@ import { useInventario } from "../inventario/loja";
 import { resumoEcNegocio } from "../inventario/ponteNegocios";
 import { ImprevistosNaObra } from "../ImprevistosObra";
 import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
-import { lerFoto } from "../ObraOperacoes";
+import { EstadoFotos, useFotosAJuntar } from "../fotosDaObra";
 import { Contagem, MOLA, useReduzir } from "../movimento";
 import { EstudioPlano, PainelTarefa } from "../estudioPlano/EstudioPlano";
 import { NovaTarefa } from "../PlanoInterativo";
@@ -865,7 +865,8 @@ function NovoImprevisto({ ctx, d, ti, inicial, ocup: _ocup, fechar, mostrar }: {
   const afetaveis = tarefasAfetaveis(p);
   const [texto, setTexto] = useState("");
   const [onde, setOnde] = useState("");
-  const [fotos, setFotos] = useState<string[]>([]);
+  // 20/11 (auditoria, Lote 3): guardadas na base ao escolher (fica a referência); até 4 por imprevisto, dito no ecrã
+  const F = useFotosAJuntar(d.id, 4), fotos = F.fotos;
   const [grav, setGrav] = useState<Gravidade>("atrasa");
   const [tarefas, setTarefas] = useState<number[]>(ti != null && afetaveis.includes(ti) ? [ti] : []);
   // 12/11 (quem paga): vindo do «Porquê?», já com os dias, as horas e o ofício da mudança
@@ -875,12 +876,6 @@ function NovoImprevisto({ ctx, d, ti, inicial, ocup: _ocup, fechar, mostrar }: {
   const [preco, setPreco] = useState<number | null>(null);
   const [oficio, setOficio] = useState(inicial && OFICIOS.includes(inicial.perfil) ? inicial.perfil : "Canalização");
   const input = useRef<HTMLInputElement>(null);
-  const juntar = async (L?: FileList | null) => {
-    if (!L) return;
-    const novas: string[] = [];
-    for (const f of Array.from(L).slice(0, 4 - fotos.length)) { try { novas.push(await lerFoto(f)); } catch { /* sem leitura */ } }
-    setFotos((F) => [...F, ...novas].slice(0, 4));
-  };
   const precoV = preco ?? precoSugeridoLivre(S, horas, oficio);
   const linha: LinhaAdenda | null = custo && horas > 0 ? { sid: "livre", n: texto.trim() ? texto.trim().replace(/^./, (c) => c.toUpperCase()) : "Trabalho do imprevisto", un: "vg", q: 1, pu: precoV, h: horas, perfil: oficio, livre: true, mats: [] } : null;
   // o impacto, ao vivo: no prazo (o plano numa cópia) e no valor (a adenda)
@@ -897,7 +892,7 @@ function NovoImprevisto({ ctx, d, ti, inicial, ocup: _ocup, fechar, mostrar }: {
   const T = linha ? totaisLinhas([linha]) : null;
   const val = (() => { try { return valorContrato(d, S).total; } catch { return null; } })();
   const quando = (k: number) => { const x = dataDoDia(p, k); return x ? dataCurta(x) : `dia ${k + 1}`; };
-  const falta = [!texto.trim() && "o que encontrou", !tarefas.length && "as tarefas afetadas"].filter(Boolean) as string[];
+  const falta = [!texto.trim() && "o que encontrou", !tarefas.length && "as tarefas afetadas", F.aGuardar > 0 && "acabar de guardar as fotografias"].filter(Boolean) as string[];
   const registar = () => run(() => {
     const id = A.registarImprevisto(d.id, { texto, onde, grav, tarefas, dias, fotos, ...(linha ? { custo: linha.pu } : {}) });
     // 12/11 (Rúben): a adenda fica por disparar no alerta em cima do Estúdio (não vai já ao cliente)
@@ -924,12 +919,13 @@ function NovoImprevisto({ ctx, d, ti, inicial, ocup: _ocup, fechar, mostrar }: {
       </label>
       <div className="space-y-1.5">
         <p className="text-[15px] font-medium">Fotografias <span className="font-normal text-muted-foreground">({fotos.length} de 4)</span></p>
-        <input ref={input} type="file" accept="image/*" multiple className="sr-only" aria-label="Fotografias do imprevisto" onChange={(e) => { void juntar(e.target.files); e.target.value = ""; }} />
+        <input ref={input} type="file" accept="image/*" multiple className="sr-only" aria-label="Fotografias do imprevisto" onChange={(e) => { void F.juntar(Array.from(e.target.files ?? [])); e.target.value = ""; }} />
         <div className="flex flex-wrap items-center gap-2">
           {fotos.length > 0 && <Miniaturas fotos={fotos} tam="h-14 w-20" />}
-          {fotos.length > 0 && <button type="button" onClick={() => setFotos([])} className="min-h-11 px-2 text-sm text-muted-foreground hover:text-foreground">Tirar</button>}
-          {fotos.length < 4 && <Button type="button" variant="outline" className="min-h-11" onClick={() => input.current?.click()}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />{fotos.length ? "Mais" : "Juntar"}</Button>}
+          {fotos.length > 0 && <button type="button" onClick={F.descartar} className="min-h-11 px-2 text-sm text-muted-foreground hover:text-foreground">Tirar</button>}
+          {!F.cheio && <Button type="button" variant="outline" className="min-h-11" onClick={() => input.current?.click()}><Camera className="mr-1.5 h-4 w-4" aria-hidden="true" />{fotos.length ? "Mais" : "Juntar"}</Button>}
         </div>
+        <EstadoFotos aGuardar={F.aGuardar} erro={F.erro} />
       </div>
 
       <fieldset>
