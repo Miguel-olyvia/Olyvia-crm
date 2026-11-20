@@ -6,14 +6,15 @@
 //  4. 3D: o depois em volume, a rodar com o dedo;
 //  5. Proposta: as necessidades e o orçamento saem das duas plantas; o comercial ajusta.
 // «Mostrar ao cliente» abre a apresentação (tablet): o projeto mostra-se e não se envia (é propriedade da empresa); o projeto só vai para o
-// portal depois de a proposta ser aceite. Tudo fica neste browser (localStorage).
+// portal depois de a proposta ser aceite. 20/11: o projeto guarda-se neste browser, numa chave por negócio, e no próprio negócio
+// (f.estudio) de poucos em poucos segundos e ao sair, pela ligação que a Visita deixa ao abrir o Estúdio (projetoGuardado.ts).
 import { useEffect, useMemo, useState, useRef, Component, Suspense, lazy, type ReactNode } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, HardHat, Lock, Monitor, Paintbrush, RotateCcw, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { EditorPlanta } from "@/emylia/EditorPlanta";
-import { irPara } from "@/emylia/urlNegocio";
+import { irPara, urlDoNegocio } from "@/emylia/urlNegocio";
 import { PECAS, cantos, tiposDaDivisao, type PecaPlanta, type Planta, type TipoPeca } from "@/emylia/planta";
 import { NOME_CATEGORIA, melhorPara, produto, type Categoria, type Produto } from "./catalogoFake";
 import { aplicarEstilo, alturaFinalCm, colocar, estadoDaPeca, necessidades, sairam, totais, type Linha, type Projeto } from "./necessidadesEstudio";
@@ -32,9 +33,10 @@ import { PerguntasNoEstudio } from "./PerguntasNoEstudio";
 import type { Cena } from "./geometria3d";
 
 import { totalDaCozinha } from "./cozinha/modelo";
-import { acertarPosicoes, mudarODepois, seguirOAntes } from "./posicoesDepois";
+import { mudarODepois, seguirOAntes } from "./posicoesDepois";
 const Visualizador3D = lazy(() => import("@/emylia/planta3d/Visualizador3D"));
-import { CHAVE_ESTUDIO as CHAVE, devolverAoNegocio } from "./daVisita";
+import { devolverAoNegocio } from "./daVisita";
+import { GRAVAR_NO_NEGOCIO_MS, chaveDoEstudio, gravarNoNegocio, guardarProjetoLocal, lembrarNegocioAberto, negocioDoEndereco, projetoInicial } from "./projetoGuardado";
 import { pedeDesfazer, vozNoEstudio } from "./estudioPorVoz";
 import { useProdutosReaisNoEstudio } from "./catalogoRealDoEstudio";
 import { EV_PROCURAR } from "./pesquisaEstudio";
@@ -47,18 +49,39 @@ type Passo = (typeof PASSOS)[number];
 /** O projeto sem a hora da gravação (para saber se mudou mesmo). */
 const semHora = (x: Projeto) => JSON.stringify({ ...x, gravadoEm: undefined });
 
-function lerGuardado(): Projeto {
-  try {
-    const t = localStorage.getItem(CHAVE);
-    if (t) { const p = JSON.parse(t) as Projeto; if (p?.antes?.paredes && p.depois?.paredes) return acertarPosicoes(p); }
-  } catch { /* sem armazenamento: o exemplo */ }
-  return PROJETO_EXEMPLO;
+export default function EstudioProjeto() {
+  // 20/11: o negócio vem do endereço (?negocio=) ou do último aberto neste separador; outro negócio é outro Estúdio (key)
+  const [negocio, setNegocio] = useState(() => negocioDoEndereco());
+  useEffect(() => {
+    const h = () => { if (window.location.pathname.startsWith("/prototipo/estudio")) setNegocio(negocioDoEndereco()); };
+    window.addEventListener("popstate", h);
+    return () => window.removeEventListener("popstate", h);
+  }, []);
+  const inicial = useMemo(() => projetoInicial(negocio), [negocio]);
+  useEffect(() => { if (inicial) lembrarNegocioAberto(negocio); }, [inicial, negocio]);
+  if (!inicial) return <SemProjeto negocio={negocio!} />;
+  return <Estudio key={negocio ?? "sem"} inicial={inicial} />;
 }
 
-export default function EstudioProjeto() {
+/** 20/11: o Estúdio de um negócio que este browser não tem (outro aparelho, a página recarregada sem nada guardado): abre-se pelo negócio. */
+function SemProjeto({ negocio }: { negocio: number }) {
+  return (
+    <main className="grid min-h-screen place-items-center bg-background px-4">
+      <div className="max-w-md space-y-4 text-center">
+        <h1 className="text-2xl font-semibold tracking-tight">O projeto está no negócio</h1>
+        <p className="text-[15px] text-muted-foreground">Este browser não tem o projeto do Estúdio deste negócio. Abra-o a partir da Visita do negócio, para continuar o que lá está gravado.</p>
+        <Button type="button" className="min-h-11" onClick={() => { lembrarNegocioAberto(null); irPara(`${urlDoNegocio(negocio)}&passo=estudio`); }}>
+          <ArrowLeft className="mr-2 h-4 w-4" aria-hidden="true" />Abrir o negócio
+        </Button>
+      </div>
+    </main>
+  );
+}
+
+function Estudio({ inicial }: { inicial: Projeto }) {
   // 17/11: com sessão, os produtos verdadeiros da organização (o catálogo da Mudelar); sem ela, o catálogo de teste
   const reais = useProdutosReaisNoEstudio();
-  const [p, setP] = useState<Projeto>(lerGuardado);
+  const [p, setP] = useState<Projeto>(inicial);
   const [passo, setPasso] = useState<Passo>("Antes");
   const [aberta, setAberta] = useState<string | null>(null);
   const [mostrar, setMostrar] = useState(false);
@@ -68,23 +91,39 @@ export default function EstudioProjeto() {
   const gravado = useRef("");
   const pRef = useRef(p);
   pRef.current = p;
+  // 20/11: o que falta mandar ao negócio (com a hora com que ficou neste browser)
+  const paraONegocio = useRef<Projeto | null>(null);
+  const aVoltar = useRef(false);
   useEffect(() => {
     const conteudo = semHora(p);
     if (conteudo === gravado.current) return;
     gravado.current = conteudo;
-    try { localStorage.setItem(CHAVE, JSON.stringify({ ...p, gravadoEm: Date.now() })); } catch { /* fica só em memória */ }
+    const comHora = { ...p, gravadoEm: Date.now() };
+    paraONegocio.current = comHora;
+    guardarProjetoLocal(comHora); // sem armazenamento, fica em memória (e vai ao negócio pela ligação)
   }, [p]);
+  // 20/11: grava no negócio de poucos em poucos segundos, ao esconder o separador e ao sair do Estúdio (pela ligação da Visita). Ao
+  // «Voltar ao negócio» não: a Visita grava-o ela mesma ao abrir (gravar pelos dois lados podia pôr a versão antiga por cima).
+  useEffect(() => {
+    const mandar = () => { if (paraONegocio.current && !aVoltar.current) gravarNoNegocio(paraONegocio.current); };
+    const t = window.setInterval(mandar, GRAVAR_NO_NEGOCIO_MS);
+    const escondido = () => { if (document.visibilityState === "hidden") mandar(); };
+    document.addEventListener("visibilitychange", escondido);
+    window.addEventListener("pagehide", mandar);
+    return () => { window.clearInterval(t); document.removeEventListener("visibilitychange", escondido); window.removeEventListener("pagehide", mandar); mandar(); };
+  }, []);
   // 5/11: com o Estúdio aberto em dois separadores (ou aberto de novo pela Visita), o que um grava passa para o outro, em vez de o
   // separador mais antigo gravar por cima (perdia-se o negócio de onde veio e o «Voltar ao negócio»)
   useEffect(() => {
     const aoMudar = (e: StorageEvent) => {
-      if (e.key !== CHAVE || !e.newValue) return;
+      if (e.key !== chaveDoEstudio(pRef.current.negocio) || !e.newValue) return;
       try {
         const novo = JSON.parse(e.newValue) as Projeto;
         if (!novo?.antes?.paredes || !novo.depois?.paredes) return;
         const conteudo = semHora(novo);
         if (conteudo === semHora(pRef.current)) return; // o mesmo projeto: nada a fazer (e nada a gravar de volta)
         gravado.current = conteudo;
+        paraONegocio.current = novo;
         setP(novo);
       } catch { /* ignora o que não se percebe */ }
     };
@@ -104,6 +143,7 @@ export default function EstudioProjeto() {
   // 9/11: aberto pela Visita no mesmo separador: volta sem recarregar a app (a gravação da visita continua). Um endereço completo de outra
   // versão (projetos antigos) ou de outro sítio abre como antes. `fechar`: a Visita leva tudo e fecha a visita (o orçamento e o plano nascem)
   const voltar = (fechar: boolean) => {
+    aVoltar.current = true;
     devolverAoNegocio(p, fechar);
     const destino = p.origem ?? "/negocios";
     if (destino.startsWith("/")) { irPara(destino); return; }
@@ -163,7 +203,7 @@ export default function EstudioProjeto() {
             <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary">
               Estúdio · {reais.n ? `catálogo da empresa (${reais.n.toLocaleString("pt-PT")} produtos)` : reais.aLer ? "a ler o catálogo…" : "catálogo de teste"}
             </p>
-            <h1 className="truncate text-xl font-semibold tracking-tight">{p.nome ?? "Casa de banho do Bruno"}</h1>
+            <h1 className="truncate text-xl font-semibold tracking-tight">{p.nome ?? "Novo projeto"}</h1>
           </div>
           <div className="flex flex-wrap gap-2">
             {p.negocio !== undefined && (
@@ -294,9 +334,10 @@ export default function EstudioProjeto() {
       </motion.div>
       </AnimatePresence>
 
+      {/* 20/11: só sem negócio (num negócio, apagava o projeto dele, agora gravado no próprio negócio) */}
       <footer className="mx-auto max-w-7xl px-4 pb-24 sm:px-8">
-        <button type="button" className="inline-flex min-h-11 items-center gap-2 text-sm text-muted-foreground underline-offset-4 hover:underline"
-          onClick={() => { setP(PROJETO_EXEMPLO); setPasso("Antes"); setAviso(""); }}><RotateCcw className="h-4 w-4" aria-hidden="true" />Recomeçar com o exemplo</button>
+        {p.negocio === undefined && <button type="button" className="inline-flex min-h-11 items-center gap-2 text-sm text-muted-foreground underline-offset-4 hover:underline"
+          onClick={() => { setP({ ...PROJETO_EXEMPLO, nome: "Casa de banho do Bruno" }); setPasso("Antes"); setAviso(""); }}><RotateCcw className="h-4 w-4" aria-hidden="true" />Recomeçar com o exemplo</button>}
       </footer>
 
       {mostrar && <MostrarAoCliente p={p} t={t} fechar={() => setMostrar(false)} />}
@@ -451,7 +492,7 @@ function CartaoPlaneador({ p }: { p: Projeto }) {
         <p className="font-semibold">Os móveis da cozinha</p>
         <p className="text-muted-foreground">{c ? `${n} ${n === 1 ? "módulo" : "módulos"} planeados · ${t!.comIva.toLocaleString("pt-PT", { maximumFractionDigits: 0 })} € com IVA, já na proposta.` : "Armários baixos, altos e de parede, o tampo e os eletrodomésticos do catálogo, em 3D."}</p>
       </div>
-      <Button type="button" className="min-h-11 shrink-0" onClick={() => { window.location.href = "/prototipo/cozinha?estudio=1"; }}>{c ? "Continuar a planear" : "Abrir o planeador"}</Button>
+      <Button type="button" className="min-h-11 shrink-0" onClick={() => { irPara(`/prototipo/cozinha?estudio=1${p.negocio !== undefined ? `&negocio=${p.negocio}` : ""}`); }}>{c ? "Continuar a planear" : "Abrir o planeador"}</Button>
     </div>
   );
 }

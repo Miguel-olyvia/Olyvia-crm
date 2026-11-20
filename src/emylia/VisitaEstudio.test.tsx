@@ -7,6 +7,7 @@ import { PLANTA_VAZIA, retangulo, type Planta } from "./planta";
 import type { Ctx } from "./pecas";
 import type { Negocio } from "./motor";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
+import { chaveDoEstudio, desligarEstudio, ligacaoDoEstudio } from "@/pages/prototipo-estudio/projetoGuardado";
 
 afterEach(cleanup);
 beforeEach(() => localStorage.clear());
@@ -62,6 +63,38 @@ describe("o Estúdio na Visita", () => {
 describe("o mesmo projeto não se grava duas vezes (9/11)", () => {
   it("o projeto deste browser igual ao do negócio, só com outra hora, não se grava de novo", () => {
     localStorage.setItem("olyvia.estudio.v1", JSON.stringify(projeto({ gravadoEm: 9000 })));
+    const d = negocio({ estudio: JSON.stringify(projeto({ gravadoEm: 1000 })) });
+    const { ctx, campo } = contexto(d);
+    render(<EstudioNaVisita ctx={ctx} d={d} />);
+    fireEvent.focus(window);
+    expect(campo).not.toHaveBeenCalledWith(3, "estudio", expect.anything());
+  });
+});
+
+// 20/11 (auditoria de 19/11, lote 3): abrir o Estúdio deixa-lhe a ligação ao negócio (grava no negócio sem esta página aberta) e leva o
+// negócio no endereço; o projeto deste browser é o da chave deste negócio.
+describe("abrir o Estúdio liga-o ao negócio (20/11)", () => {
+  afterEach(() => { desligarEstudio(); window.history.replaceState({}, "", "/"); });
+
+  it("abre /prototipo/estudio?negocio=…, guarda o projeto na chave do negócio e o Estúdio grava pelo ctx.run da Visita", () => {
+    const d = negocio({ estudio: JSON.stringify(projeto({ gravadoEm: 1000 })) });
+    const { ctx, campo, run } = contexto(d);
+    render(<EstudioNaVisita ctx={ctx} d={d} />);
+    fireEvent.click(screen.getByRole("button", { name: /Continuar no Estúdio/ }));
+    expect(window.location.pathname + window.location.search).toBe("/prototipo/estudio?negocio=3");
+    expect(JSON.parse(localStorage.getItem(chaveDoEstudio(3))!).negocio).toBe(3);
+    const l = ligacaoDoEstudio(3)!;
+    expect(l).not.toBeNull();
+    expect(l.projeto?.negocio).toBe(3);
+    run.mockClear();
+    l.gravar('{"x":1}');
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(campo).toHaveBeenCalledWith(3, "estudio", '{"x":1}');
+    expect(l.noNegocio?.()).toBe('{"x":1}');
+  });
+
+  it("o Estúdio de outro negócio (outra chave) não se grava neste", () => {
+    localStorage.setItem(chaveDoEstudio(4), JSON.stringify(projeto({ negocio: 4, gravadoEm: 9000, nome: "outro" })));
     const d = negocio({ estudio: JSON.stringify(projeto({ gravadoEm: 1000 })) });
     const { ctx, campo } = contexto(d);
     render(<EstudioNaVisita ctx={ctx} d={d} />);

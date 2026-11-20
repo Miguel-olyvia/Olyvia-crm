@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { PLANTA_VAZIA, retangulo, type Planta } from "@/emylia/planta";
 import type { Projeto } from "./necessidadesEstudio";
 import { calendario, duracaoEmPalavras, etapasDaObra } from "./planoEstimado";
-import { abrirEstudio, medidasDoEstudio, projetoDoNegocio } from "./daVisita";
+import { abrirEstudio, chaveDoEstudio, medidasDoEstudio, projetoDoNegocio } from "./daVisita";
 
 const antes: Planta = { ...PLANTA_VAZIA, paredes: retangulo(200, 250), pecas: [{ id: "a-ban", tipo: "banheira", x: 0, y: 0, w: 170, h: 75 }] };
 const depois: Planta = { ...PLANTA_VAZIA, paredes: retangulo(200, 250), pecas: [{ id: "b", tipo: "base", x: 0, y: 0, w: 120, h: 70 }, { id: "s", tipo: "sanita", x: 150, y: 150, w: 36, h: 52 }, { id: "m", tipo: "movel", x: 0, y: 200, w: 80, h: 46 }] };
@@ -47,12 +47,13 @@ describe("as medidas e o projeto no negócio", () => {
     localStorage.clear();
     const f = { estudio: JSON.stringify({ ...projeto, gravadoEm: 9000, nome: "do negócio" }) };
     expect(projetoDoNegocio(f)?.gravadoEm).toBe(9000);
+    // 20/11: o que estava na chave antiga (de uma versão anterior) aproveita-se se for deste negócio
     localStorage.setItem("olyvia.estudio.v1", JSON.stringify({ ...projeto, gravadoEm: 1000 }));
     abrirEstudio("X", f, 7, "/negocios");
-    expect(JSON.parse(localStorage.getItem("olyvia.estudio.v1")!).gravadoEm).toBe(9000);
-    localStorage.setItem("olyvia.estudio.v1", JSON.stringify({ ...projeto, gravadoEm: 20000 }));
+    expect(JSON.parse(localStorage.getItem(chaveDoEstudio(7))!).gravadoEm).toBe(9000);
+    localStorage.setItem(chaveDoEstudio(7), JSON.stringify({ ...projeto, gravadoEm: 20000 }));
     abrirEstudio("X", f, 7, "/negocios");
-    expect(JSON.parse(localStorage.getItem("olyvia.estudio.v1")!).gravadoEm).toBe(20000);
+    expect(JSON.parse(localStorage.getItem(chaveDoEstudio(7))!).gravadoEm).toBe(20000);
     expect(projetoDoNegocio({ estudio: "{partido" })).toBeNull();
   });
 });

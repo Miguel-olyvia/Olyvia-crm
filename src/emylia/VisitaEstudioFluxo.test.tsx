@@ -8,7 +8,7 @@ import { AREA, ESCOLHAS, EXTERIOR, INTERIOR, emFalta, grupoVisita } from "./camp
 import { EstudioNaVisita, PlanoEstimado } from "./VisitaEstudio";
 import type { Ctx } from "./pecas";
 import { retangulo } from "./planta";
-import { CHAVE_ESTUDIO, abrirEstudio, devolverAoNegocio } from "@/pages/prototipo-estudio/daVisita";
+import { abrirEstudio, chaveDoEstudio, devolverAoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import { isoDoDia } from "./vagaData";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
 
@@ -65,7 +65,7 @@ describe("a Visita de uma casa de banho segue o Estúdio (motor verdadeiro)", ()
     const { ctx, d, gravacoes } = montar();
     // 1. abrir o Estúdio a partir da Visita
     expect(abrirEstudio(d.nome, d.f, d.id, "/negocios")).toBe(true);
-    const p0 = JSON.parse(localStorage.getItem(CHAVE_ESTUDIO)!) as Projeto;
+    const p0 = JSON.parse(localStorage.getItem(chaveDoEstudio(d.id))!) as Projeto;
     expect(p0.negocio).toBe(d.id);
     // 2. no Estúdio: a planta (2 × 2,5 m), uma base e uma sanita com produto, e a impermeabilização
     const planta = { o: { x: 50, y: 50 }, paredes: retangulo(200, 250), pecas: [] };
@@ -74,7 +74,7 @@ describe("a Visita de uma casa de banho segue o Estúdio (motor verdadeiro)", ()
       depois: { ...planta, pecas: [{ id: "b", tipo: "base", x: 50, y: 50, w: 120, h: 70 }, { id: "s", tipo: "sanita", x: 200, y: 250, w: 36, h: 52 }] },
       escolhas: { b: "bas-ard-p", s: "san-nexo-s" }, revestimento: "rev-tela-c", servicos: [{ id: "sv-imperm", q: 4.6 }], gravadoEm: Date.now(),
     };
-    localStorage.setItem(CHAVE_ESTUDIO, JSON.stringify(p));
+    localStorage.setItem(chaveDoEstudio(d.id), JSON.stringify(p));
     // 3. «Voltar ao negócio»
     expect(devolverAoNegocio(p)).toBe(true);
     const antes = gravacoes.n;
@@ -117,12 +117,12 @@ describe("a Visita de uma casa de banho segue o Estúdio (motor verdadeiro)", ()
     d.visita.fotos = 2;
     const planta = { o: { x: 50, y: 50 }, paredes: retangulo(200, 250), pecas: [] };
     expect(abrirEstudio(d.nome, d.f, d.id, "/negocios")).toBe(true);
-    const p0 = JSON.parse(localStorage.getItem(CHAVE_ESTUDIO)!) as Projeto;
+    const p0 = JSON.parse(localStorage.getItem(chaveDoEstudio(d.id))!) as Projeto;
     const p: Projeto = {
       ...p0, antes: planta, depois: { ...planta, pecas: [{ id: "b", tipo: "base", x: 50, y: 50, w: 120, h: 70 }, { id: "s", tipo: "sanita", x: 200, y: 250, w: 36, h: 52 }] },
       escolhas: { b: "bas-ard-p", s: "san-nexo-s" }, revestimento: "rev-tela-c", gravadoEm: Date.now(), catalogo: { inicio },
     };
-    localStorage.setItem(CHAVE_ESTUDIO, JSON.stringify(p));
+    localStorage.setItem(chaveDoEstudio(d.id), JSON.stringify(p));
     expect(devolverAoNegocio(p, true)).toBe(true);
     render(<EstudioNaVisita ctx={ctx} d={d} />);
     expect(d.f.plano_inicio).toBe(inicio);
