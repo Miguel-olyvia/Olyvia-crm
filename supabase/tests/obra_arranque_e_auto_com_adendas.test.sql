@@ -80,6 +80,11 @@ BEGIN
   WHERE negocio_id IN ('12303000-0000-4000-8000-000000000001', '12303000-0000-4000-8000-000000000002') AND versao = 1;
   UPDATE client_contracts SET status = 'signed', signature_image = 'OTP_SMS_VERIFIED', signed_by_name = 'Cliente do Portal', signature_date = now()
   WHERE negocio_id IN ('12303000-0000-4000-8000-000000000001', '12303000-0000-4000-8000-000000000002') AND versao = 1;
+  -- 20270126270000: a obra só arranca com a encomenda de cliente emitida, e esta só sai com as medidas aceites no local: no negócio A
+  -- aceitam-se já (como o supervisor, retif_aceite), para a EC sair ao aprovar o plano (como no fluxo real) e o caso 2 arrancar
+  INSERT INTO negocio_respostas (organization_id, negocio_id, campo_chave, divisao, valor, sugerido)
+  VALUES (current_setting('teste.org')::uuid, '12303000-0000-4000-8000-000000000001', 'retif_aceite', '', '2026-11-19', false)
+  ON CONFLICT (negocio_id, campo_chave, divisao) DO UPDATE SET valor = EXCLUDED.valor, sugerido = EXCLUDED.sugerido;
 END $t$;
 
 -- ─── o Financeiro (só o negócio A) e a obra ──────────────────────────────────
