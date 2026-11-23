@@ -781,7 +781,7 @@ function travarCamaraSeNaPeca(e: React.PointerEvent<HTMLDivElement>, alvo: AlvoA
 /** 23/11: uma malha de uma peça por fazer fica transparente. O material copia-se (os materiais dos modelos são partilhados entre peças). */
 function tornarFantasma(m: THREE.Mesh): void {
   if (m.userData.fantasma) return;
-  const um = (x: THREE.Material) => { const c = x.clone(); c.transparent = true; c.opacity = Math.min(c.opacity, 0.22); c.depthWrite = false; return c; };
+  const um = (x: THREE.Material) => { const c = x.clone(); c.transparent = true; c.opacity = Math.min(c.opacity, 0.3); c.depthWrite = false; return c; };
   m.material = Array.isArray(m.material) ? m.material.map(um) : um(m.material);
   m.userData.fantasma = true;
 }

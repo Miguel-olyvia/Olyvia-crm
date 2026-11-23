@@ -18,12 +18,13 @@ import { AutoRececaoDoc } from "../AutoRececao";
 import { usePainelUrl } from "../usarParamUrl";
 import { Vista3D } from "@/pages/prototipo-estudio/Vista3D";
 import { documentosEnviados, type DocEnviado, type TomDoc } from "./enviadosAoCliente";
-import { extrasDoContrato, obraEm3D, obraEm3DComModelos, pedidosDosExtras } from "./obra3d";
+import { comNomesDoContrato, extrasDoContrato, obraEm3D, obraEm3DComModelos, pedidosDosExtras } from "./obra3d";
+import { cenaDe } from "@/pages/prototipo-estudio/cenaDoProjeto";
 import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
 import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import { sairam } from "@/pages/prototipo-estudio/necessidadesEstudio";
 import { ouvirProdutosReais, produto, versaoProdutosReais } from "@/pages/prototipo-estudio/catalogoFake";
-import { useProdutosDoProjeto } from "@/pages/prototipo-estudio/produtosDoProjeto";
+import { produtosPedidosDoProjeto, useLerProdutos } from "@/pages/prototipo-estudio/produtosDoProjeto";
 import { PECAS } from "../planta";
 
 const TOM: Record<TomDoc, string> = {
@@ -147,24 +148,32 @@ class Falha3D extends Component<{ alternativa: ReactNode; children: ReactNode },
   render() { return this.state.erro ? this.props.alternativa : this.props.children; }
 }
 
+/** O nome de um produto na planta: sem o tipo à frente («Base de Duche ZEUS 70x150» → «ZEUS 70x150»), até três palavras. */
+export function nomeCurto(nome: string, tipo: string): string {
+  const n = nome.trim();
+  const sem = n.toLowerCase().startsWith(tipo.toLowerCase()) ? n.slice(tipo.length).trim() : n;
+  return (sem || n).split(/\s+/).slice(0, 3).join(" ");
+}
+
 export function ProjetoEm3D({ d }: { d: Negocio }) {
   // os produtos do projeto e do contrato, lidos pelo id (o Estúdio da obra não carrega o catálogo); redesenha quando chegam
-  const ex = useMemo(() => pedidosDosExtras(extrasDoContrato(d)), [d, d.visita.prod]); // eslint-disable-line react-hooks/exhaustive-deps
+  // os do contrato entram logo pelo nome (os produtos das Necessidades); a linha do catálogo junta-se quando chega
   const pr = useMemo(() => projetoDoNegocio(d.f), [d.f.estudio]); // eslint-disable-line react-hooks/exhaustive-deps
-  useProdutosDoProjeto(pr, ex);
+  const pedidos = useMemo(() => (pr ? comNomesDoContrato(d, produtosPedidosDoProjeto(pr, pedidosDosExtras(extrasDoContrato(d)))) : []), [pr, d, d.visita.prod]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLerProdutos(pedidos);
   const versao = useSyncExternalStore(ouvirProdutosReais, versaoProdutosReais);
   const O = useMemo(() => obraEm3D(d), [d, d.f.estudio, d.obra.plano, versao]); // eslint-disable-line react-hooks/exhaustive-deps
   const M = useMemo(() => obraEm3DComModelos(d), [d, d.f.estudio, d.obra.plano, versao]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [qual, setQual] = useState<"obra" | "antes">("obra");
+  const [qual, setQual] = useState<"obra" | "final" | "antes">("obra");
   const [vista, setVista] = useState<"3d" | "cima" | "pessoa">("3d");
   const [sel, setSel] = useState<string | null>(null);
   if (!O || !M) {
     return <p className="rounded-xl bg-muted/50 px-4 py-3 text-[15px] text-muted-foreground">Este negócio não tem projeto do Estúdio do projeto: o 3D aparece quando a visita é feita no Estúdio.</p>;
   }
   const opcao = (on: boolean) => cn("min-h-11 rounded-full px-4 text-[15px] font-medium transition-colors", on ? "bg-background shadow-sm" : "text-muted-foreground");
-  const titulo = qual === "obra" ? "A obra em 3D, com o que está feito" : "A divisão antes da obra";
-  const simples = <Vista3D cena={qual === "obra" ? O.cena : O.antes} titulo={titulo} />;
-  const res = qual === "obra" ? M.hoje : M.antes;
+  const titulo = qual === "obra" ? "A obra em 3D, com o que está feito" : qual === "final" ? "A obra acabada, como vai ficar" : "A divisão antes da obra";
+  const simples = <Vista3D cena={qual === "obra" ? O.cena : qual === "final" ? cenaDe(M.projeto.depois, M.projeto, true) : O.antes} titulo={titulo} />;
+  const res = qual === "obra" ? M.hoje : qual === "final" ? M.final : M.antes;
   const comModelos = res.ok && temWebGL();
   const p = M.projeto;
   return (
@@ -174,12 +183,14 @@ export function ProjetoEm3D({ d }: { d: Negocio }) {
           <div className="min-w-0">
             <h2 className="flex items-center gap-2 text-[15px] font-semibold"><Box className="h-4 w-4 text-primary" aria-hidden="true" />Como a obra vai ficar</h2>
             <p className="text-sm text-muted-foreground">
-              {qual === "obra" ? <>O projeto aprovado. <b className="font-medium text-foreground">A cores, o que já está feito</b>; transparente, o que falta{M.total ? ` (${M.feitas} de ${M.total} peças feitas)` : ""}. Só para ver.</> : "A divisão como estava antes da obra."}
+              {qual === "obra" ? <>O projeto aprovado. <b className="font-medium text-foreground">A cores, o que já está feito</b>; transparente, o que falta{M.total ? ` (${M.feitas} de ${M.total} peças feitas)` : ""}. Só para ver.</>
+                : qual === "final" ? "O projeto aprovado, com tudo feito: os produtos do contrato, o revestimento e o pavimento." : "A divisão como estava antes da obra."}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <div role="group" aria-label="O que ver" className="inline-flex rounded-full bg-muted p-1">
               <button type="button" aria-pressed={qual === "obra"} onClick={() => setQual("obra")} className={opcao(qual === "obra")}>A obra hoje</button>
+              <button type="button" aria-pressed={qual === "final"} onClick={() => setQual("final")} className={opcao(qual === "final")}>Como vai ficar</button>
               <button type="button" aria-pressed={qual === "antes"} onClick={() => setQual("antes")} className={opcao(qual === "antes")}>Antes</button>
             </div>
             {comModelos && (
@@ -212,7 +223,7 @@ export function ProjetoEm3D({ d }: { d: Negocio }) {
         <div className="grid gap-4 sm:grid-cols-2">
           <PlantaVista planta={p.antes} titulo="Antes: como está" />
           <PlantaVista planta={p.depois} titulo="Depois: como vai ficar" fantasmas={sairam(p)}
-            cor={(pc) => produto(p.escolhas[pc.id])?.hex} rotulo={(pc) => { const x = produto(p.escolhas[pc.id]); return x ? `${PECAS[pc.tipo].n} · ${x.colecao || x.n.split(" ").slice(0, 2).join(" ")}` : undefined; }} />
+            cor={(pc) => produto(p.escolhas[pc.id])?.hex} rotulo={(pc) => { const x = produto(p.escolhas[pc.id]); return x ? `${PECAS[pc.tipo].n} · ${nomeCurto(x.colecao || x.n, PECAS[pc.tipo].n)}` : undefined; }} />
         </div>
       </section>
     </div>

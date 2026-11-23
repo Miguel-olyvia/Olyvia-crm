@@ -8,10 +8,11 @@ import type { Ctx } from "../pecas";
 import type { Planta } from "../planta";
 import { EstudioObra } from "./EstudioObra";
 import { obraDeExemplo } from "./exemploObra";
-import { extrasDoContrato, obraEm3DComModelos, pedidosDosExtras } from "./obra3d";
+import { comNomesDoContrato, extrasDoContrato, obraEm3DComModelos, pedidosDosExtras } from "./obra3d";
+import { nomeCurto } from "./DocumentosObra";
 import { guardarProdutosDoProjeto, produto, type Produto } from "@/pages/prototipo-estudio/catalogoFake";
 import { ID_ESPELHO_CONTRATO, espacoDoEstudio, idColunaDuche, idResguardo } from "@/pages/prototipo-estudio/estudioNo3D";
-import { produtoDoNome, produtosPedidosDoProjeto } from "@/pages/prototipo-estudio/produtosDoProjeto";
+import { produtoDoNome, produtosPedidosDoProjeto, produtosPeloNome } from "@/pages/prototipo-estudio/produtosDoProjeto";
 import { PROJETO_EXEMPLO } from "@/pages/prototipo-estudio/exemploEstudio";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
 
@@ -118,6 +119,22 @@ describe("os produtos do projeto, lidos pelo id", () => {
     expect(e).toEqual({ espelho: ESPELHO.id, porta: PORTA.id, janela: JANELA.id });
     expect(pedidosDosExtras(e).map((x) => x.cat)).toEqual(["espelho", "porta", "janela"]);
   });
+  it("os do contrato entram logo pelo nome, antes da leitura da base", () => {
+    const { d } = obraDeExemplo();
+    const id = uuid(30);
+    d.visita.prod = [{ id, n: "Base de Duche ZEUS 70x150", un: "un", custo: 1, q: 1, no: null }] as typeof d.visita.prod;
+    const L = comNomesDoContrato(d, [{ id, cat: "base" }, { id: uuid(31), cat: "sanita" }]);
+    expect(L).toEqual([{ id, cat: "base", n: "Base de Duche ZEUS 70x150" }, { id: uuid(31), cat: "sanita" }]);
+    expect(produto(id)).toBeUndefined();
+    produtosPeloNome(L);
+    expect(produto(id)).toMatchObject({ n: "Base de Duche ZEUS 70x150", w: 150, h: 70 });
+    expect(produto(uuid(31))).toBeUndefined();
+  });
+  it("na planta, o nome curto: sem o tipo à frente e até três palavras", () => {
+    expect(nomeCurto("Base de Duche ZEUS 70x150", "Base de duche")).toBe("ZEUS 70x150");
+    expect(nomeCurto("AXIS Suspenso 1 Pio / 2 Gav", "Móvel")).toBe("AXIS Suspenso 1");
+    expect(nomeCurto("Sanita", "Sanita")).toBe("Sanita");
+  });
 });
 
 describe("a obra: o feito a cores, o que falta transparente", () => {
@@ -131,6 +148,7 @@ describe("a obra: o feito a cores, o que falta transparente", () => {
     d.obra.plano!.estado = "concluída";
     const F = obraEm3DComModelos(d)!;
     expect(F.porFazer.size).toBe(0);
+    expect(F.final.ok).toBe(true);
     expect(F.feitas).toBe(F.total);
   });
   it("o resguardo e a coluna contam com as louças; o espelho do contrato com os móveis", () => {
@@ -157,5 +175,7 @@ describe("a obra: o feito a cores, o que falta transparente", () => {
     expect(within(plantas).getByRole("img", { name: /^Antes: como está: paredes de 147, 147, 147, 147 cm; 5 peças/ })).toBeTruthy();
     expect(within(plantas).getByRole("img", { name: /^Depois: como vai ficar/ })).toBeTruthy();
     expect(within(plantas).getByText(/Base de duche · ZEUS/)).toBeTruthy();
+    fireEvent.click(within(sec).getByRole("button", { name: "Como vai ficar" }));
+    expect(within(sec).getByRole("img", { name: /A obra acabada, como vai ficar/ })).toBeTruthy();
   });
 });

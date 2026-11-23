@@ -85,6 +85,11 @@ export function extrasDoContrato(d: Negocio): ExtrasDoContrato {
 export function pedidosDosExtras(e: ExtrasDoContrato): PedidoProduto[] {
   return ([["espelho", e.espelho], ["porta", e.porta], ["janela", e.janela]] as const).flatMap(([cat, id]) => (id ? [{ id, cat }] : []));
 }
+/** Os pedidos com o nome do produto do contrato (os produtos das Necessidades), para os mostrar logo, antes da leitura da base. */
+export function comNomesDoContrato(d: Negocio, pedidos: readonly PedidoProduto[]): PedidoProduto[] {
+  const nomes = new Map((d.visita.prod ?? []).filter((x) => x.id && x.n).map((x) => [x.id, x.n] as const));
+  return pedidos.map((x) => (nomes.has(x.id) ? { ...x, n: nomes.get(x.id) } : x));
+}
 
 /** O grupo (o ofício) de cada peça do 3D com modelos: as da planta pelo tipo; o resguardo e a coluna de duche com a base; o espelho do contrato com os móveis. */
 function grupoDaPeca3D(id: string, tipoDe: ReadonlyMap<string, TipoPeca>): Grupo | undefined {
@@ -95,7 +100,8 @@ function grupoDaPeca3D(id: string, tipoDe: ReadonlyMap<string, TipoPeca>): Grupo
 }
 
 export interface Obra3DModelos {
-  projeto: Projeto; hoje: ResLegado; antes: ResLegado; porFazer: Set<string>; feitas: number; total: number;
+  /** `final`: o projeto todo feito (como vai ficar); `hoje`: com o revestimento e o pavimento só quando feitos. */
+  projeto: Projeto; hoje: ResLegado; antes: ResLegado; final: ResLegado; porFazer: Set<string>; feitas: number; total: number;
   /** Os produtos a ler pelo id (as peças, o que vai com elas, os materiais e os extras do contrato). */
   pedidos: PedidoProduto[];
 }
@@ -121,5 +127,6 @@ export function obraEm3DComModelos(d: Negocio): Obra3DModelos | null {
       if (F[g] ?? acabou) feitas++; else porFazer.add(pc.id);
     }
   }
-  return { projeto: pr, hoje, antes, porFazer, feitas, total, pedidos: produtosPedidosDoProjeto(pr, pedidosDosExtras(ex)) };
+  const final = espacoDoEstudio(pr, "depois", { espelho: produto(ex.espelho), porta: produto(ex.porta), janela: produto(ex.janela) });
+  return { projeto: pr, hoje, antes, final, porFazer, feitas, total, pedidos: comNomesDoContrato(d, produtosPedidosDoProjeto(pr, pedidosDosExtras(ex))) };
 }
