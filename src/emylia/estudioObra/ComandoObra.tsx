@@ -26,7 +26,7 @@ import { ausenteNoRh } from "../equipa/tecnicos";
 import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
 import { FotoObra } from "../fotosDaObra";
 import { Contagem, MOLA, useReduzir } from "../movimento";
-import { podeNeg } from "../permissoes";
+import { podeNeg, podeVerCustos } from "../permissoes";
 import { estadoVivo, rotuloVivo } from "./planoVivo";
 import { antesEDepois, caminhoCritico, diarioDaObra, fotografiasDaObra, hojeNaObra, margemAoVivo, pontoDaSemana, previsao, type MargemViva, type Previsao } from "./previsaoObra";
 
@@ -77,6 +77,8 @@ export function Pulso({ d, S, dias, prev, margem, precisa, ir }: { d: Negocio; S
   const ims = imprevistosDe(d), abertos = ims.filter((i) => i.estado !== "fechado" && i.estado !== "aprovado");
   const val = (() => { try { return valorContrato(d, S); } catch { return null; } })();
   const dif = prev.fimProvavel - prev.fimPlano;
+  // 23/11 (permissões): a margem e o valor só para quem vê os custos do orçamento (quotes.view_costs, a mesma regra do servidor)
+  const verCustos = podeVerCustos();
   return (
     <section aria-label="O pulso da obra" className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
       <Mosaico rotulo="Feito" icone={<Gauge className="h-4 w-4" />} onClick={() => ir.aba("execucao")} extra={<Anel valor={progresso(p)} />}
@@ -87,10 +89,10 @@ export function Pulso({ d, S, dias, prev, margem, precisa, ir }: { d: Negocio; S
         sub={<>{dif === 0 ? "como o plano" : dif > 0 ? `+${dif} face ao plano` : `${-dif} antes do plano`} · confiança {prev.confianca}</>}>
         {quando(prev.fimProvavel - 1)}
       </Mosaico>
-      <Mosaico rotulo="Margem ao vivo" icone={<Euro className="h-4 w-4" />} onClick={ir.previsao} tom={margem ? (margem.margemViva < margem.margemOrc - 0.005 ? "mau" : "bom") : undefined}
+      {verCustos && <Mosaico rotulo="Margem ao vivo" icone={<Euro className="h-4 w-4" />} onClick={ir.previsao} tom={margem ? (margem.margemViva < margem.margemOrc - 0.005 ? "mau" : "bom") : undefined}
         sub={margem ? `orçamento ${pct(margem.margemOrc)}` : "sem orçamento"}>
         {margem ? pct(margem.margemViva) : "—"}
-      </Mosaico>
+      </Mosaico>}
       <Mosaico rotulo="Precisa de ti" icone={<Inbox className="h-4 w-4" />} onClick={ir.comando} tom={precisa ? "mau" : "bom"} sub={precisa ? "toque para tratar" : "nada à espera"}>
         <Contagem valor={precisa} fmt={(n) => String(Math.round(n))} de={0} />
       </Mosaico>
@@ -98,9 +100,9 @@ export function Pulso({ d, S, dias, prev, margem, precisa, ir }: { d: Negocio; S
         sub={ims.length ? `${ims.length} no total` : "nenhum"}>
         <Contagem valor={abertos.length} fmt={(n) => String(Math.round(n))} de={0} />
       </Mosaico>
-      <Mosaico rotulo="Valor da obra" icone={<Euro className="h-4 w-4" />} onClick={() => ir.aba("cliente")} sub={[val?.adendas ? `com ${eur(val.adendas)} € de adendas` : "com IVA", (d.adendas ?? []).filter((a) => a.estado === "rascunho").length ? `${(d.adendas ?? []).filter((a) => a.estado === "rascunho").length} por disparar` : "", (d.adendas ?? []).filter((a) => emCurso(a) && a.estado !== "rascunho").length ? `${(d.adendas ?? []).filter((a) => emCurso(a) && a.estado !== "rascunho").length} à espera do cliente` : ""].filter(Boolean).join(" · ")}>
+      {verCustos && <Mosaico rotulo="Valor da obra" icone={<Euro className="h-4 w-4" />} onClick={() => ir.aba("cliente")} sub={[val?.adendas ? `com ${eur(val.adendas)} € de adendas` : "com IVA", (d.adendas ?? []).filter((a) => a.estado === "rascunho").length ? `${(d.adendas ?? []).filter((a) => a.estado === "rascunho").length} por disparar` : "", (d.adendas ?? []).filter((a) => emCurso(a) && a.estado !== "rascunho").length ? `${(d.adendas ?? []).filter((a) => emCurso(a) && a.estado !== "rascunho").length} à espera do cliente` : ""].filter(Boolean).join(" · ")}>
         {val ? `${eur(val.total)} €` : "—"}
-      </Mosaico>
+      </Mosaico>}
     </section>
   );
 }
@@ -253,7 +255,7 @@ export function PrevisaoViva({ d, dias, prev, margem, critico, ir, previsaoRef }
         <p className="h-5 text-xs tabular-nums text-muted-foreground">{sob != null ? `${quando(sob)}: ${nfmt(prev.planeadas[sob] ?? 0)} h planeadas${prev.reais[sob] != null ? ` · ${nfmt(prev.reais[sob])} h reais` : ""}` : `${nfmt(prev.feitoH)} de ${nfmt(prev.totalH)} h feitas · passe o dedo no gráfico`}</p>
       </div>
       <div className="min-w-0 space-y-4">
-        {margem && (
+        {margem && podeVerCustos() && (
           <div className="space-y-2">
             <p className="text-sm font-semibold">Margem ao vivo</p>
             {[

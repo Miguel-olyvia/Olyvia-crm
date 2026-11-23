@@ -170,7 +170,8 @@ function CartaoImprevisto({ ctx, d, im, porDisparar }: { ctx: Ctx; d: Negocio; i
           {/* 21/10: a adenda do imprevisto segue o percurso da proposta (verificação, aceitação, contrato da adenda, assinatura) */}
           {/* 27/10: o estado já está na pastilha do cartão; aqui só a adenda, o valor e os dias */}
           <span>Adenda {a.n} · {eur(totaisAdenda(a).total)} € · +{diasAdenda(a.linhas)} {diasAdenda(a.linhas) === 1 ? "dia" : "dias"}{a.estado === "rascunho" ? ` · ${estadoAdenda(a).t}` : ""}</span>
-          <div className="w-full"><AcoesAdenda ctx={ctx} d={d} a={a} /></div>
+          {/* 23/11 (permissões): os botões da adenda (contrato, retirar, marcar como visto) só para quem planeia a obra */}
+          {podeNeg(S.role, "obra.planear") && <div className="w-full"><AcoesAdenda ctx={ctx} d={d} a={a} /></div>}
         </div>
       )}
       {im.estado === "recusado" && (

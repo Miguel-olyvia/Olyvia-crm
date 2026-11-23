@@ -417,8 +417,9 @@ export function ClienteDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   return (
     <div className="grid gap-5 lg:grid-cols-2">
       {/* 19/11: a conversa com o cliente e os problemas que ele reporta vivem aqui (a página antiga da obra saiu das Operações) */}
-      <ConversaDoClienteNaObra ctx={ctx} d={d} />
-      <section aria-label="Avisar o cliente" className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <ConversaDoClienteNaObra ctx={ctx} d={d} soLer={!planeia} />
+      {/* 23/11 (permissões): sem negocios.obra.planear não se escreve ao cliente daqui */}
+      {planeia && <section aria-label="Avisar o cliente" className="space-y-3 rounded-2xl border border-border bg-card p-4">
         <p className="text-sm font-semibold">Avisar o cliente</p>
         <p className="text-sm text-muted-foreground">Aparece nas novidades da obra, no portal dele. Para mudar datas, use o plano: o aviso vai com a mudança.</p>
         <div className="flex flex-wrap gap-2">{AVISOS_RAPIDOS.map((x) => <button key={x} type="button" onClick={() => setTexto(x)} className={chip(texto === x)}>{x}</button>)}</div>
@@ -426,7 +427,7 @@ export function ClienteDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button type="button" variant="outline" className="min-h-10 rounded-full" disabled={!planeia || !texto.trim()} onClick={() => { run(() => A.avisarClienteObra(d.id, texto)); setTexto(""); }}><Send className="mr-1.5 h-4 w-4" aria-hidden="true" />Avisar no portal</Button>
         </div>
-      </section>
+      </section>}
       <section aria-label="As adendas" className="space-y-2 rounded-2xl border border-border bg-card p-4">
         <p className="text-sm font-semibold">As adendas: do disparo ao pagamento</p>
         {!ads.length ? <p className="text-sm text-muted-foreground">Sem adendas. Um pedido do cliente ou um imprevisto com custo prepara uma, por disparar.</p> : (
@@ -488,13 +489,20 @@ export function FechoDaObra({ ctx, d, irPara }: { ctx: Ctx; d: Negocio; irPara: 
         </section>
         <section aria-label="A vistoria final" className="space-y-3 rounded-2xl border border-border bg-card p-4">
           <p className="text-sm font-semibold">A vistoria final</p>
-          <label className="grid gap-1 text-sm">Data da vistoria
+          {/* 23/11 (permissões): sem negocios.obra.planear lê-se a vistoria, a satisfação e as notas, sem as mudar */}
+          {planeia ? <label className="grid gap-1 text-sm">Data da vistoria
             <input type="date" value={f.vistoria ?? ""} onChange={(e) => run(() => A.campo(d.id, "vistoria", e.target.value))} className="h-11 rounded-xl border border-input bg-background px-3 text-[15px]" /></label>
+            : <p className="text-sm">Data da vistoria: <span className="text-muted-foreground">{f.vistoria ? f.vistoria.split("-").reverse().join("/") : "por marcar"}</span></p>}
           {/* 17/11: o auto de receção não se marca à mão: gera-se ao encerrar e o cliente assina-o no portal */}
           <p className="text-sm text-muted-foreground">Auto de receção: {d.obra.auto ? `${d.obra.auto.n} · ${d.obra.auto.estado === "assinado" ? `assinado pelo cliente a ${d.obra.auto.assinado ?? d.obra.auto.q}` : "no portal do cliente, por assinar"}` : "gera-se ao encerrar a obra e vai ao portal do cliente para assinar."}</p>
+          {planeia ? <>
           <div className="space-y-1"><p className="text-sm">Satisfação do cliente</p>
             <div className="flex gap-2">{["1", "2", "3", "4", "5"].map((x) => <button key={x} type="button" aria-pressed={f.satisfacao === x} onClick={() => run(() => A.campo(d.id, "satisfacao", x))} className={cn(chip(f.satisfacao === x), "w-11 justify-center px-0")}>{x}</button>)}</div></div>
           <NotasFecho valor={f.notas_fecho ?? ""} gravar={(v) => run(() => A.campo(d.id, "notas_fecho", v))} />
+          </> : <>
+            <p className="text-sm">Satisfação do cliente: <span className="text-muted-foreground">{f.satisfacao ? `${f.satisfacao} de 5` : "por dar"}</span></p>
+            {f.notas_fecho && <p className="text-sm">Remates e notas: <span className="text-muted-foreground">{f.notas_fecho}</span></p>}
+          </>}
         </section>
       </div>
     </div>

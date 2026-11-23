@@ -148,21 +148,22 @@ function useConversaObra(ctx: Ctx, d: Negocio) {
 
 /** 19/11 (Rúben: «as Operações da obra têm de ser o Estúdio da obra, não o outro antigo»): a conversa com o cliente e os problemas que
  *  ele reporta nela, no separador «Cliente» do Estúdio da obra (antes só na página antiga da obra). Com a leitura reduzida, nada. */
-export function ConversaDoClienteNaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+/** 23/11 (permissões): `soLer` (sem negocios.obra.planear, ex.: o técnico): lê a conversa e os problemas, sem escrever nem marcar como lidas. */
+export function ConversaDoClienteNaObra({ ctx, d, soLer }: { ctx: Ctx; d: Negocio; soLer?: boolean }) {
   const conversa = useConversaObra(ctx, d);
   const [aberto, setAberto] = useState<string | null>(null);
   if (ctx.leituraReduzida) return null;
   const abrir = (k: string) => { setAberto(k); window.setTimeout(() => document.getElementById("obra-problemas")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60); };
   return (
     <div className="lg:col-span-2 [&>section:first-child]:mt-0">
-      <ProblemasDoCliente ctx={ctx} d={d} conversa={conversa} abrir={aberto} setAbrir={setAberto} />
-      <ConversaNaObra ctx={ctx} d={d} conversa={conversa} abrirProblema={abrir} />
+      <ProblemasDoCliente ctx={ctx} d={d} conversa={conversa} abrir={aberto} setAbrir={setAberto} soLer={soLer} />
+      <ConversaNaObra ctx={ctx} d={d} conversa={conversa} abrirProblema={abrir} soLer={soLer} />
     </div>
   );
 }
 
 /** 21/10: a conversa com o cliente (o mesmo fio do portal do cliente). Ao abrir, as mensagens do cliente ficam lidas. */
-function ConversaNaObra({ ctx, d, conversa, abrirProblema }: { ctx: Ctx; d: Negocio; conversa: ReturnType<typeof useConversaObra>; abrirProblema: (k: string) => void }) {
+function ConversaNaObra({ ctx, d, conversa, abrirProblema, soLer }: { ctx: Ctx; d: Negocio; conversa: ReturnType<typeof useConversaObra>; abrirProblema: (k: string) => void; soLer?: boolean }) {
   const { org, msgs, marcarLidas, enviar } = conversa, porLer = msgs.filter((m) => m.de === "cliente" && !m.lida).length;
   // 9/11 (Lote 1, I): com conta real, escrever ao cliente pede pessoas.edit (neg_mensagem_enviar); sem ela a caixa fica desligada.
   // Sem conta real, como sempre.
@@ -172,10 +173,10 @@ function ConversaNaObra({ ctx, d, conversa, abrirProblema }: { ctx: Ctx; d: Nego
       <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
         <h2 id="obra-chat-t" className={H2}>Conversa com o cliente <span className="font-normal text-muted-foreground">· {d.nome}</span>
           {porLer > 0 && <span className="ml-2 rounded-full bg-warning px-2 py-0.5 align-middle text-xs font-semibold text-white">{porLer} por ler</span>}</h2>
-        {porLer > 0 && <button type="button" onClick={marcarLidas} className="min-h-10 text-sm font-medium text-primary underline-offset-4 hover:underline">Marcar {porLer === 1 ? "1 mensagem" : `${porLer} mensagens`} como lida{porLer === 1 ? "" : "s"}</button>}
+        {porLer > 0 && !soLer && <button type="button" onClick={marcarLidas} className="min-h-10 text-sm font-medium text-primary underline-offset-4 hover:underline">Marcar {porLer === 1 ? "1 mensagem" : `${porLer} mensagens`} como lida{porLer === 1 ? "" : "s"}</button>}
       </div>
       <div className="mt-3">
-        <Conversa msgs={msgs} eu="empresa" enviar={enviar} semEnvio={semEnvio} vazio="Ainda sem mensagens. Escreva ao cliente: ele vê no portal." fotoDe={conversa.fotoDe}
+        <Conversa msgs={msgs} eu="empresa" enviar={enviar} semEnvio={semEnvio} soLer={soLer} vazio="Ainda sem mensagens. Escreva ao cliente: ele vê no portal." fotoDe={conversa.fotoDe}
           acao={(m, i) => <AcaoMensagemCliente ctx={ctx} d={d} m={m} chave={m.id ?? `local-${i}`} abrir={abrirProblema} />}
           rapidas={["Bom dia! A equipa já está na obra.", "Já pode ver as fotografias de hoje no portal.", "Vou confirmar e respondo ainda hoje."]} />
         {org && conversa.erro && <p role="alert" className="mt-2 text-[15px] text-destructive">{conversa.erro}</p>}

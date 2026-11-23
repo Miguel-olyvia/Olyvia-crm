@@ -249,6 +249,8 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
     window.setTimeout(() => (document.querySelector(`[aria-label="Imprevisto ${id}"]`) as HTMLElement | null)?.focus?.(), 300);
   };
   const agir = (a: AcaoAlerta) => {
+    // 23/11 (permissões): sem negocios.obra.planear o Estúdio é só de leitura (os cartões nem mostram as ações)
+    if (!planeia) return;
     switch (a.k) {
       case "prolongar": setPainel(null); if (!pedir({ k: "prolongar", ti: a.ti, dur: a.dur })) setPrevia({ titulo: `Pôr ${(p.tasks[a.ti]?.nome ?? "a tarefa").toLowerCase()} em dia`, k: "replanear", adiantar: false }); break;
       case "validar": fazer(() => A.validarTarefa(d.id, a.ti)); break;
@@ -268,7 +270,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
   const rolar = (r: React.RefObject<HTMLElement>) => window.setTimeout(() => r.current?.scrollIntoView({ behavior: reduzir ? "auto" : "smooth", block: "start" }), 60);
   const ir: Ir = {
     tarefa: (ti) => setPainel({ k: "tarefa", ti }), aba: (x) => setAba(x), outra: setOutra,
-    replanear: () => { setPainel(null); setAba("plano"); setPrevia({ titulo: "Pôr a obra em dia", k: "replanear", adiantar: true }); },
+    replanear: () => { if (!planeia) return; setPainel(null); setAba("plano"); setPrevia({ titulo: "Pôr a obra em dia", k: "replanear", adiantar: true }); },
     imprevisto: (id) => { setAba("plano"); if (id) window.setTimeout(() => verImprevisto(id), 80); else rolar(imprevistosRef); },
     previsao: () => { setAba("plano"); rolar(previsaoRef); }, comando: () => rolar(comandoRef),
   };
@@ -276,7 +278,8 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
   // o botão principal: um só, pelo momento da obra
   // 20/11 (Rúben): no 50-25-25, a parcela do arranque está no Financeiro desde o contrato assinado; a obra arranca com ela paga
   const parcelaArranque = p.estado === "aprovado" ? parcelaDoArranquePorPagar(S, d) : null;
-  const principal = p.estado === "aprovado"
+  // 23/11 (permissões: «o técnico pode ver a operação mas não clicar em nada»): sem negocios.obra.planear não há botão principal
+  const principal = !planeia ? null : p.estado === "aprovado"
     ? { t: "Arrancar a obra", icone: Rocket, desligado: faltaArrancar.length > 0 || !planeia || !!parcelaArranque, porque: faltaArrancar.length ? `Falta ${faltaArrancar.join(", ")}.` : parcelaArranque ? `À espera de ${nomeDaParcela(parcelaArranque)} paga, no Financeiro.` : !planeia ? "Quem arranca a obra são as Operações." : "", fn: () => fazer(() => A.arrancar(d.id)) }
     : vivo && PV.length ? { t: PV.length === 1 ? "Validar a tarefa feita" : `Validar ${PV.length} tarefas feitas`, icone: CheckCircle2, desligado: !planeia, porque: "", fn: () => fazer(() => A.validarVarias(d.id, PV)) }
     : vivo && !falta.length ? { t: "Encerrar a obra", icone: CalendarCheck, desligado: !planeia, porque: "", fn: () => fazer(() => A.fimObra(d.id)) }
@@ -300,7 +303,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Saude p={p} der={der} />
-              {vivo && !comRelogioReal() && (
+              {vivo && planeia && !comRelogioReal() && (
                 <span role="group" aria-label="Dia da obra (simulação)" className="inline-flex items-center rounded-full border border-input">
                   <button type="button" aria-label="Dia anterior" disabled={p.dia <= 0} onClick={() => fazer(() => A.irParaDia(d.id, p.dia - 1))} className="grid h-10 w-10 place-items-center rounded-full hover:bg-muted disabled:opacity-40"><ChevronLeft className="h-4 w-4" /></button>
                   <span className="px-1 text-sm tabular-nums">Dia {p.dia + 1}</span>
@@ -308,7 +311,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
                 </span>
               )}
               {vivo && planeia && <Button type="button" variant="outline" className="min-h-11 px-3 sm:px-4" aria-label="Replanear" onClick={() => { setPainel(null); setPrevia({ titulo: "Replanear a obra", k: "replanear", adiantar: true }); }}><Shuffle className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">Replanear</span></Button>}
-              {vivo && principal?.t !== "Registar imprevisto" && <Button type="button" variant="outline" className="min-h-11 px-3 sm:px-4" aria-label="Registar imprevisto" onClick={() => setPainel({ k: "imprevisto" })}><AlertTriangle className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">Imprevisto</span></Button>}
+              {vivo && planeia && principal?.t !== "Registar imprevisto" && <Button type="button" variant="outline" className="min-h-11 px-3 sm:px-4" aria-label="Registar imprevisto" onClick={() => setPainel({ k: "imprevisto" })}><AlertTriangle className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">Imprevisto</span></Button>}
               {principal && <Button type="button" className="min-h-11" disabled={principal.desligado} title={principal.porque || undefined} onClick={principal.fn}><principal.icone className="mr-1.5 h-4 w-4" aria-hidden="true" />{principal.t}</Button>}
             </div>
           </div>
@@ -326,7 +329,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
 
               {/* ------------------------------------------------------------ «E se…?»: a pré-visualização, antes de aplicar */}
               <AnimatePresence>
-                {previa && R && <PreviaPlano key="previa" ctx={ctx} d={d} previa={previa} setPrevia={setPrevia} R={R} fora={fora} dias={dias} abrirOutra={setOutra} ocup={ocup} abrirImprevisto={abrirImprevisto} />}
+                {planeia && previa && R && <PreviaPlano key="previa" ctx={ctx} d={d} previa={previa} setPrevia={setPrevia} R={R} fora={fora} dias={dias} abrirOutra={setOutra} ocup={ocup} abrirImprevisto={abrirImprevisto} />}
               </AnimatePresence>
 
               {/* ------------------------------------------------------------ 11/11: os separadores (o plano, a execução, os materiais, a equipa, o cliente, o fecho) */}
@@ -361,7 +364,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
                       <motion.p key="ok" initial={reduzir ? false : { opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2 rounded-xl bg-success/10 px-4 py-3 text-[15px] text-success">
                         <Check className="h-5 w-5" aria-hidden="true" />{acabou ? "Obra concluída." : "Tudo em dia: nada atrasado, nada à espera."}
                       </motion.p>
-                    ) : alertas.map((a) => <CartaoAlerta key={a.id} a={a} agir={agir} reduzir={reduzir} />)}
+                    ) : alertas.map((a) => <CartaoAlerta key={a.id} a={a} agir={agir} reduzir={reduzir} soLer={!planeia} />)}
                   </AnimatePresence>
                 </section>
 
@@ -369,7 +372,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
                 <section ref={imprevistosRef} aria-label="Imprevistos" className="scroll-mt-4 space-y-2">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <h2 className="text-[15px] font-semibold">Imprevistos</h2>
-                    {vivo && <Button type="button" size="sm" variant="outline" className="min-h-9" onClick={() => setPainel({ k: "imprevisto" })}><Plus className="mr-1 h-4 w-4" aria-hidden="true" />Registar</Button>}
+                    {vivo && planeia && <Button type="button" size="sm" variant="outline" className="min-h-9" onClick={() => setPainel({ k: "imprevisto" })}><Plus className="mr-1 h-4 w-4" aria-hidden="true" />Registar</Button>}
                   </div>
                   {imsAbertos.length ? <ImprevistosNaObra ctx={ctx} d={d} porDisparar /> : <p className="rounded-xl bg-muted/50 px-4 py-3 text-[15px] text-muted-foreground">{ims.length ? "Os imprevistos estão todos tratados." : "Sem imprevistos. Se aparecer um problema na obra, registe-o aqui: vê logo o impacto no prazo e no valor."}</p>}
                   {ims.filter((i) => i.estado === "fechado" || i.estado === "aprovado").length > 0 && (
@@ -404,7 +407,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
                   {aba === "materiais" && <><Entregas d={d} /><MateriaisDaObra ctx={ctx} d={d} /></>}
                   {aba === "equipa" && <AgendaEquipa ctx={ctx} d={d} dias={dias} ir={ir} />}
                   {aba === "equipa" && <EquipaDaObra ctx={ctx} d={d} dias={dias} abrirOutra={setOutra} abrir={(ti) => setPainel({ k: "tarefa", ti })} novaPara={(tec) => setPainel({ k: "nova", inicial: { tec, dia: vivo ? p.dia : undefined } })} />}
-                  {aba === "cliente" && <>{vivo && <PontoDaSemana ctx={ctx} d={d} dias={dias} />}<ClienteDaObra ctx={ctx} d={d} /></>}
+                  {aba === "cliente" && <>{vivo && planeia && <PontoDaSemana ctx={ctx} d={d} dias={dias} />}<ClienteDaObra ctx={ctx} d={d} /></>}
                   {aba === "documentos" && <DocumentosDaObra ctx={ctx} d={d} />}
                   {aba === "3d" && <ProjetoEm3D d={d} />}
                   {aba === "fecho" && <><FechoDaObra ctx={ctx} d={d} irPara={setAba} /><FechoVivo d={d} ir={ir} /></>}
@@ -414,7 +417,8 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
 
           {/* ---------------------------------------------------------------- o painel da direita */}
           <AnimatePresence>
-            {painel && (painel.k !== "tarefa" || p.tasks[painel.ti]) && (
+            {/* 23/11 (permissões): sem negocios.obra.planear só abre a tarefa (para ler); o imprevisto, a tarefa nova e o «Porquê?» não */}
+            {painel && (painel.k === "tarefa" ? !!p.tasks[painel.ti] : planeia) && (
               <motion.aside key={painel.k + (painel.k === "tarefa" ? painel.ti : "")} aria-label={painel.k === "tarefa" ? "A tarefa" : painel.k === "imprevisto" ? "Registar imprevisto" : painel.k === "porque" ? "Quem paga a mudança" : "Nova tarefa"}
                 className="absolute inset-0 z-30 w-full overflow-y-auto border-l border-border bg-card shadow-2xl sm:inset-y-0 sm:left-auto sm:right-0 sm:max-w-lg lg:relative lg:z-auto lg:shadow-none"
                 initial={reduzir ? false : { x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 40, opacity: 0 }} transition={{ duration: 0.2 }}>
@@ -496,7 +500,8 @@ const NIVEL = {
   atencao: { cx: "border-amber-300/60 bg-amber-50 dark:border-amber-800 dark:bg-amber-950/30", ic: "text-amber-700 dark:text-amber-300", I: Clock },
   oportunidade: { cx: "border-success/40 bg-success/[0.06]", ic: "text-success", I: Sparkles },
 } as const;
-function CartaoAlerta({ a, agir, reduzir }: { a: Alerta; agir: (x: AcaoAlerta) => void; reduzir: boolean }) {
+/** 23/11 (permissões): `soLer` (sem negocios.obra.planear): o alerta sem os botões das ações. */
+function CartaoAlerta({ a, agir, reduzir, soLer }: { a: Alerta; agir: (x: AcaoAlerta) => void; reduzir: boolean; soLer?: boolean }) {
   const N = NIVEL[a.nivel];
   return (
     <motion.div initial={reduzir ? false : { opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 8 }}
@@ -506,14 +511,14 @@ function CartaoAlerta({ a, agir, reduzir }: { a: Alerta; agir: (x: AcaoAlerta) =
         <div className="min-w-0 flex-1">
           <p className="text-[15px] font-medium">{a.t}</p>
           {a.sub && <p className="text-sm text-muted-foreground">{a.sub}</p>}
-          <div className="mt-2 flex flex-wrap gap-2">
+          {!soLer && <div className="mt-2 flex flex-wrap gap-2">
             {a.acoes.map((x, k) => (
               <button key={k} type="button" onClick={() => agir(x.a)}
                 className={cn("min-h-9 rounded-full px-3 text-sm font-medium", k === 0 ? "bg-foreground text-background hover:bg-foreground/90" : "border border-input bg-card hover:bg-muted")}>
                 {x.a.k === "passar" && <Lightbulb className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />}{x.a.k === "outra" && <ArrowUpRight className="mr-1 inline h-3.5 w-3.5" aria-hidden="true" />}{x.rot}
               </button>
             ))}
-          </div>
+          </div>}
         </div>
       </div>
     </motion.div>
