@@ -1,4 +1,4 @@
--- 20270126100000 — C5 (permissões, 23/11/2026): só o portal recusa uma proposta por reject_proposal_atomic.
+-- 20270126105000 — C5 (permissões, 23/11/2026): só o portal recusa uma proposta por reject_proposal_atomic.
 -- Antes: a função (SECURITY DEFINER) era executável por anon e authenticated; com p_public_token nulo só verificava se a organização da
 -- proposta era visível, por isso qualquer funcionário (técnico, compras, assistente, outro comercial) recusava qualquer proposta.
 -- Chamadores reais (código e base, 23/11): só as edge functions `reject-proposal` (portal, com o token) e `send-verification-code/verify`

@@ -93,7 +93,7 @@ Correr com `rhq.ps1 -SqlFile` (resultado: json com `falhas`). `permissoes_ambito
 ## `permissoes_lote_propostas_2311.sql` — recusar a proposta e dar a visita como feita (23/11/2026)
 
 Mesmo estilo (`BEGIN … ROLLBACK`, fixtures na transação, resultado numa exceção `@@RES … RES@@` em base64; correr com `rhq.ps1`).
-- **C5** (20270126100000): `reject_proposal_atomic` só para `service_role`. Funcionários (com e sem token) e `anon` recusados; o portal
+- **C5** (20270126105000): `reject_proposal_atomic` só para `service_role`. Funcionários (com e sem token) e `anon` recusados; o portal
   (`service_role`) recusa com o token certo (fica `rejected`, com o motivo e a data), e não recusa com token errado nem sem token.
 - **A5** (20270126110000): a dona do negócio (comercial, OWNED) dá como feita a visita que a assistente marcou, também atribuída a
   outro recurso; uma visita no futuro continua recusada (NG009); cancelar continua só de quem gere; outro comercial, a assistente

@@ -1,6 +1,6 @@
 -- ============================================================
 -- PERMISSÕES — lote propostas/visitas (23/11/2026): C5 (recusar proposta) e A5 (o dono do negócio dá a visita como feita)
--- Migrações: 20270126100000_recusar_proposta_so_portal, 20270126110000_visita_resultado_dono_negocio.
+-- Migrações: 20270126105000_recusar_proposta_so_portal, 20270126110000_visita_resultado_dono_negocio.
 -- ============================================================
 -- SÓ para a base RH (project-ref uetjghdkwbywbftedtth). NUNCA na produção (tzbfgwpckrfbqcolqxtm).
 -- Tudo em BEGIN … ROLLBACK; fixtures criadas na transação; cada ação corre num sub-bloco que acaba SEMPRE em RAISE (o que escreveu é
