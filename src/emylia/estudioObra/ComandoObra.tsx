@@ -10,7 +10,7 @@
 //  · Entregas: a linha do tempo dos materiais (chega hoje, amanhã, a dd/mm).
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowUpRight, CalendarCheck, Camera, Check, ChevronLeft, ChevronRight, Euro, HardHat, Inbox, Package, Send, Sparkles, Truck, Zap } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CalendarCheck, Camera, Check, ChevronLeft, ChevronRight, Euro, HardHat, Inbox, Package, Rocket, Send, Sparkles, Truck, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, eur, nfmt, type Estado, type Negocio, type Plano } from "../motor";
@@ -29,7 +29,7 @@ import { Contagem, MOLA, useReduzir } from "../movimento";
 import { podeNeg, podeVerCustos } from "../permissoes";
 import { derrapagem, estadoVivo, nomeCurtoTarefa, rotuloVivo } from "./planoVivo";
 import { CaminhoCritico } from "./CaminhoCritico";
-import { useInventario } from "../inventario/loja";
+import { lerInventario, useInventario } from "../inventario/loja";
 import { resumoEcNegocio } from "../inventario/ponteNegocios";
 import { antesEDepois, caminhoCritico, diarioDaObra, fotografiasDaObra, hojeNaObra, margemAoVivo, pontoDaSemana, previsao, type MargemViva, type Previsao } from "./previsaoObra";
 
@@ -154,6 +154,68 @@ export function Pulso({ d, S, dias, prev, margem, precisa, ir }: { d: Negocio; S
     </section>
   );
 }
+/* ================================================================== 23/11: a obra antes do arranque */
+// Rúben («mega next-level»): antes da primeira tarefa, «Na obra hoje» dizia «Ninguém tem trabalho marcado para hoje». Agora: a contagem, a
+// primeira tarefa e a lista do arranque com o estado de cada ponto; o primeiro que falta é o próximo passo (com o toque que o resolve).
+export interface PontoArranque { k: string; t: string; sub: string; ok: boolean; acao?: { rot: string; fn: () => void }; escolhas?: { op: string[]; fn: (v: string) => void } }
+const OPCOES_CHAVES = ["O cliente abre", "Chave entregue", "Código", "Porteiro"];
+export function pontosDoArranque(ctx: Ctx, d: Negocio, ir: Ir, dataInicio: string): PontoArranque[] {
+  const { A, run } = ctx;
+  const p = d.obra.plano!, inv = d.obra.ec?.ref ? resumoEcNegocio(lerInventario(), d.obra.ec.ref) : null;
+  const mats = materiaisPorFase(d, inv).flatMap((g) => g.itens), okM = mats.filter((m) => ["na obra", "na carrinha", "reservado", "recebido"].includes(m.estado)).length;
+  const semTec = p.tasks.filter((t) => !t.tec).length, pessoas = new Set(p.tasks.map((t) => t.tec).filter(Boolean)).size;
+  const condo = (d.f.condominio ?? "").toLowerCase() === "sim", chaves = d.f.chaves ?? "", avisado = d.f.aviso_inicio ?? "";
+  return [
+    { k: "materiais", t: mats.length ? `Materiais: ${okM} de ${mats.length} garantidos` : "Materiais: sem encomenda", sub: okM === mats.length && mats.length ? "Tudo no armazém ou a caminho da obra." : "Veja o que falta e encomende.", ok: !!mats.length && okM === mats.length, acao: { rot: "Ver materiais", fn: () => ir.aba("materiais") } },
+    { k: "equipa", t: semTec ? `Equipa: ${semTec} ${semTec === 1 ? "tarefa sem técnico" : "tarefas sem técnico"}` : `Equipa marcada: ${pessoas} ${pessoas === 1 ? "pessoa" : "pessoas"}`, sub: semTec ? "Escolha quem faz cada tarefa." : "Todas as tarefas têm quem as faça.", ok: !semTec, acao: { rot: "Ver equipa", fn: () => ir.aba("equipa") } },
+    { k: "condominio", t: condo ? "Condomínio avisado" : "Avisar o condomínio", sub: condo ? "O aviso está na entrada do prédio." : "Horário das obras e contacto do responsável, na entrada do prédio.", ok: condo, acao: condo ? undefined : { rot: "Já está avisado", fn: () => run(() => A.campo(d.id, "condominio", "Sim")) } },
+    { k: "cliente", t: avisado ? `Cliente avisado da data · ${avisado}` : "Avisar o cliente da data de início", sub: avisado ? `Sabe que começa a ${dataInicio}.` : `Começa a ${dataInicio}: confirme com o cliente e marque aqui.`, ok: !!avisado, acao: avisado ? undefined : { rot: "Já está avisado", fn: () => run(() => A.campo(d.id, "aviso_inicio", agoraCurto())) } },
+    { k: "chaves", t: chaves ? `Acesso: ${chaves}` : "Acesso à casa e chave", sub: chaves ? "A equipa sabe como entrar." : "Como é que a equipa entra no primeiro dia?", ok: !!chaves, escolhas: chaves ? undefined : { op: OPCOES_CHAVES, fn: (v) => run(() => A.campo(d.id, "chaves", v)) } },
+  ];
+}
+const agoraCurto = () => { const x = new Date(); return `${String(x.getDate()).padStart(2, "0")}/${String(x.getMonth() + 1).padStart(2, "0")}`; };
+
+function Arranque({ ctx, d, dias, ir }: { ctx: Ctx; d: Negocio; dias: Date[]; ir: Ir }) {
+  const p = d.obra.plano!, quando = quandoDe(dias), a = arranqueDe(p)!;
+  const faltam = Math.max(0, a.dia - (p.estado === "em curso" ? p.dia : 0)), ta = p.tasks[a.ti];
+  const planeia = podeNeg(ctx.S.role, "obra.planear");
+  const L = pontosDoArranque(ctx, d, ir, quando(a.dia)), proximo = L.find((x) => !x.ok), feitos = L.filter((x) => x.ok).length;
+  return (
+    <div className="space-y-3">
+      <p className="flex items-center gap-2 text-sm font-semibold"><Rocket className="h-4 w-4 text-primary" aria-hidden="true" />Arranque · {quando(a.dia)}</p>
+      <button type="button" onClick={() => ir.tarefa(a.ti)} className="flex w-full items-center gap-3 rounded-2xl bg-primary/[0.06] p-2.5 text-left hover:bg-primary/10" title={ta.nome}>
+        <AvatarTec id={ta.tec} tam="h-9 w-9" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs text-muted-foreground">{faltam ? `Daqui a ${faltam} ${faltam === 1 ? "dia útil" : "dias úteis"}` : "Hoje"} · primeira tarefa</span>
+          <span className="block truncate text-sm font-medium">{primeiro(nomeTec(ta.tec))} · {nomeCurtoTarefa(ta.nome)}</span>
+        </span>
+      </button>
+      <section aria-label="Lista do arranque" className="space-y-1.5">
+        <p className="text-xs font-medium text-muted-foreground">Pronto a arrancar: {feitos} de {L.length}</p>
+        <ul className="space-y-1">
+          {L.map((x) => (
+            <li key={x.k} className={cn("rounded-xl px-2.5 py-2", x === proximo ? "bg-amber-50 ring-1 ring-amber-300 dark:bg-amber-950/30 dark:ring-amber-700" : "")}>
+              <div className="flex items-start gap-2">
+                <span aria-hidden="true" className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full", x.ok ? "bg-success text-white" : "border-2 border-muted-foreground/40")}>{x.ok && <Check className="h-3 w-3" />}</span>
+                <span className="min-w-0 flex-1">
+                  <span className={cn("block text-sm", x.ok ? "text-foreground" : "font-medium")}>{x.t}</span>
+                  {!x.ok && <span className="block text-xs text-muted-foreground">{x === proximo ? `Próximo passo · ${x.sub}` : x.sub}</span>}
+                </span>
+                {planeia && !x.ok && x.acao && <Button type="button" size="sm" variant={x === proximo ? "default" : "outline"} className="min-h-9 shrink-0 rounded-full" onClick={x.acao.fn}>{x.acao.rot}</Button>}
+              </div>
+              {planeia && !x.ok && x.escolhas && (
+                <div className="mt-1.5 flex flex-wrap gap-1.5 pl-7">
+                  {x.escolhas.op.map((o) => <button key={o} type="button" onClick={() => x.escolhas!.fn(o)} className="min-h-9 rounded-full border border-input bg-card px-3 text-sm hover:border-primary/50">{o}</button>)}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
 /* ================================================================== o comando de hoje */
 export interface Pedido { k: string; t: string; sub?: string; rot: string; fn: () => void; nivel: "critico" | "atencao" }
 /** O que precisa do gestor, com o toque que resolve cada coisa. */
@@ -196,6 +258,7 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
         <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
         {/* quem está na obra */}
         <div className="relative min-w-0 space-y-3 border-b border-border p-4 lg:border-b-0 lg:border-r">
+          {antesDoArranque(p) && arranqueDe(p) ? <Arranque ctx={ctx} d={d} dias={dias} ir={ir} /> : <>
           <p className="flex items-center gap-2 text-sm font-semibold"><HardHat className="h-4 w-4 text-primary" aria-hidden="true" />{vivo ? `Na obra hoje · ${quando(p.dia)}` : "A obra ainda não arrancou"}</p>
           {vivo && !H.pessoas.length && <p className="text-sm text-muted-foreground">Ninguém tem trabalho marcado para hoje.</p>}
           <ul className="space-y-2">
@@ -222,6 +285,7 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
               {H.atrasadas.map(({ t, ti }) => <button key={"x" + ti} type="button" onClick={() => ir.tarefa(ti)} className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-1 text-destructive"><AlertTriangle className="h-3 w-3" aria-hidden="true" />{t.nome}</button>)}
             </div>
           )}
+          </>}
         </div>
         {/* precisa de ti */}
         <div className="relative min-w-0 space-y-2 border-b border-border p-4 lg:border-b-0 lg:border-r">

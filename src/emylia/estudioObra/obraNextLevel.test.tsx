@@ -1,7 +1,7 @@
 // 23/11 (Rúben: «procura melhorias no estúdio da obra para o deixar mega next-level»): o cabeçalho com um número herói, a obra antes do
 // arranque, a curva S, os materiais numa lista só, o 3D pelo tempo, o diário, o cliente, o fecho e o telemóvel.
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { acoes } from "../motor";
 import type { Ctx } from "../pecas";
 import { EstudioObra } from "./EstudioObra";
@@ -38,5 +38,21 @@ describe("1. o cabeçalho com um número herói", () => {
     const pulso = screen.getByRole("region", { name: "O pulso da obra" });
     const heroi = within(pulso).getByRole("button", { name: /^Começa daqui a 3 dias úteis/ });
     expect(heroi.textContent).toMatch(/3 dias úteis/);
+  });
+});
+
+describe("2. «Na obra hoje» antes do arranque", () => {
+  it("a contagem, a primeira tarefa e a lista do arranque; o primeiro ponto que falta é o próximo passo e resolve-se ali", () => {
+    const x = obraPorComecar();
+    delete x.d.f.chaves; x.d.f.condominio = "Sim";
+    montarObra(x);
+    const hoje = screen.getByRole("region", { name: "Hoje na obra" });
+    expect(within(hoje).getByText(/^Arranque · /)).toBeTruthy();
+    expect(within(hoje).getByText(/Daqui a 3 dias úteis · primeira tarefa/)).toBeTruthy();
+    const lista = within(hoje).getByRole("region", { name: "Lista do arranque" });
+    expect(within(lista).getByText("Condomínio avisado")).toBeTruthy();
+    expect(within(lista).getByText(/Próximo passo/)).toBeTruthy();
+    fireEvent.click(within(lista).getByRole("button", { name: "Chave entregue" }));
+    expect(x.d.f.chaves).toBe("Chave entregue");
   });
 });
