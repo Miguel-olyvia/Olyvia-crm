@@ -54,7 +54,11 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
     if (v === "corrigir") L.push({ id: `corrigir-${ti}`, nivel: "atencao", ti, t: `${t.nome} está a ser corrigida`, sub: t.exec?.motivo ? `Pedido: ${t.exec.motivo}` : "Voltou ao técnico.", acoes: [{ rot: "Abrir", a: { k: "tarefa", ti } }] });
     // o técnico noutra obra ou de férias nos dias que faltam
     if (vivo && t.tec && v !== "validada" && v !== "feita" && t.dia + t.dur > p.dia) {
-      const resto = { dia: Math.max(t.dia, p.dia), dur: t.dia + t.dur - Math.max(t.dia, p.dia) };
+      // 23/11 (Rúben: «clico no erro de replanear e não permite fazer nada»): com as horas da tarefa. Sem elas contava-se o dia inteiro, e
+      // qualquer hora do técnico noutra obra dava conflito, mesmo quando a tarefa cabia ao lado (até HORAS_DIA): o alerta aparecia e o
+      // replanear (que conta as horas) não tinha nada para mudar.
+      const resto0 = { dia: Math.max(t.dia, p.dia), dur: t.dia + t.dur - Math.max(t.dia, p.dia) };
+      const resto = { ...resto0, ...(t.h > 0 && t.dur > 0 ? { h: (t.h * resto0.dur) / t.dur } : {}) };
       const m = motivoOcupado(t.tec, resto, p, ocup);
       if (m) {
         const onde = m === "noutra obra" ? obraQueOcupa(S, t.tec, resto, p, d.id) : null;

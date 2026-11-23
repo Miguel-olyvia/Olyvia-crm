@@ -201,3 +201,18 @@ export function replanoDe(p: Plano, c: Plano): Replano {
   });
   return { plano: c, mudancas, fimAntes: fimDe(p.tasks), fimDepois: fimDe(c.tasks) };
 }
+
+/**
+ * 23/11 (Rúben: «é muito difícil de ver que serviços são porque é curto demais e não cabe o nome»). O nome curto de uma tarefa, para as
+ * barras do plano: a etapa de um modelo de obra («MO Modelo … · canalização» → «Canalização»), sem «Instalação de» à frente nem a
+ * unidade no fim («Instalação de Revestimento m2» → «Revestimento»). O nome inteiro fica na dica e no painel da tarefa.
+ */
+export function nomeCurtoTarefa(nome: string): string {
+  let n = nome.replace(/\s+/g, " ").trim();
+  const k = n.lastIndexOf(" · ");
+  if (k >= 0 && n.slice(k + 3).trim()) n = n.slice(k + 3).trim();
+  n = n.replace(/^(instala[çc][ãa]o|montagem|coloca[çc][ãa]o|aplica[çc][ãa]o|fornecimento e instala[çc][ãa]o)( de| do| da| dos| das)?\s+/i, "");
+  n = n.replace(/\s+(m2|m²|ml|m3|un|und|unid\.?)$/i, "").trim();
+  if (!n) return nome;
+  return n.charAt(0).toLocaleUpperCase("pt-PT") + n.slice(1);
+}

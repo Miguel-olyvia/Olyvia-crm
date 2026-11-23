@@ -12,7 +12,7 @@
 import { Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { EnderecoAtivo, escreverParamUrl, usePainelUrl, useParamUrl } from "../usarParamUrl";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Flame, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Rocket, RotateCcw, Shuffle, Sparkles, TrendingUp, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, ReceiptText, Rocket, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { comRelogioReal, eur, nfmt, type Negocio, type Plano, type Tarefa } from "../motor";
@@ -40,7 +40,7 @@ import { porqueNaoMexe, TECS } from "../motor";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { Aba, ClienteDaObra, EquipaDaObra, Execucao, ExecucaoTarefa, FechoDaObra, MateriaisDaObra } from "./PaineisObra";
 import { AgendaEquipa, ComandoHoje, DiarioObra, Entregas, FechoVivo, PontoDaSemana, PrevisaoViva, Pulso, precisaDeTi, obraViva, type Ir } from "./ComandoObra";
-import { ROTULO_VIVO, conflitosNovos, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
+import { ROTULO_VIVO, conflitosNovos, nomeCurtoTarefa, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
 import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
 import { custoDosNossos, pedePorque, type AjusteObra } from "./quemPaga";
 import { PorqueAjuste, type ImprevistoInicial } from "./PorqueAjuste";
@@ -50,12 +50,14 @@ import { definirQuemAssina } from "./quemAssina";
 import { useNomeParaMarcaDagua } from "@/hooks/useNomeParaMarcaDagua";
 import { modoReal } from "../acessosPortal";
 import { DocumentosDaObra, ProjetoEm3D } from "./DocumentosObra";
+import { ContratoDaObra } from "./ContratoObra";
 import { documentosEnviados, porResponder } from "./enviadosAoCliente";
 import { nomeDaParcela, parcelaDoArranquePorPagar } from "../parcelas";
 
 const SEM = ["D", "S", "T", "Q", "Q", "S", "S"];
 const MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out", "nov", "dez"];
-const COL = 38; // px por dia útil
+const COL_GANTT = 38; // px por dia útil
+const COL_TEC = 84; // 23/11: na vista por técnico, para o nome do serviço caber
 const LINHA = 46;
 const primeiro = (n: string) => n.split(" ")[0];
 const dd = (n: number) => `${n} ${Math.abs(n) === 1 ? "dia útil" : "dias úteis"}`;
@@ -64,8 +66,8 @@ type Previa = { titulo: string; k: "replanear"; adiantar: boolean } | { titulo: 
 type Painel = { k: "tarefa"; ti: number } | { k: "imprevisto"; ti?: number; inicial?: ImprevistoInicial } | { k: "nova"; inicial?: { dia?: number; tec?: string | null } }
   /** 12/11 (quem paga): o «Porquê?» de uma mudança com a obra em curso (volta: a tarefa aberta antes) */
   | { k: "porque"; aj: AjusteObra; volta?: number } | null;
-type AbaObra = "plano" | "execucao" | "diario" | "materiais" | "equipa" | "cliente" | "documentos" | "3d" | "fecho";
-const ABAS_OBRA: readonly AbaObra[] = ["plano", "execucao", "diario", "materiais", "equipa", "cliente", "documentos", "3d", "fecho"];
+type AbaObra = "plano" | "execucao" | "diario" | "materiais" | "equipa" | "cliente" | "contrato" | "documentos" | "3d" | "fecho";
+const ABAS_OBRA: readonly AbaObra[] = ["plano", "execucao", "diario", "materiais", "equipa", "cliente", "contrato", "documentos", "3d", "fecho"];
 
 /* 12/11 (o «voltar» do browser): o separador (?aba=equipa) e o painel aberto (?painel=tarefa-3) vivem no endereço. O painel em texto:
    tarefa-<i>, imprevisto[-<i>], nova, porque-<o ajuste em JSON>. O que não cabe (o dia e o técnico da tarefa nova, de onde veio o
@@ -340,6 +342,8 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
                 <Aba on={aba === "materiais"} rot="Materiais" n={n.materiais} aviso onClick={() => setAba("materiais")} icone={<Package className="h-4 w-4" />} />
                 <Aba on={aba === "equipa"} rot="Equipa" n={n.equipa} aviso onClick={() => setAba("equipa")} icone={<Users className="h-4 w-4" />} />
                 <Aba on={aba === "cliente"} rot="Cliente" n={n.cliente} aviso onClick={() => setAba("cliente")} icone={<MessageSquare className="h-4 w-4" />} />
+                {/* 23/11 (Rúben): as linhas do contrato, com o serviço e o produto juntos */}
+                <Aba on={aba === "contrato"} rot="Contrato" onClick={() => setAba("contrato")} icone={<ReceiptText className="h-4 w-4" />} />
                 {/* 12/11 (Rúben): os documentos enviados ao cliente e o projeto em 3D */}
                 <Aba on={aba === "documentos"} rot="Documentos" n={nDocs} onClick={() => setAba("documentos")} icone={<FileText className="h-4 w-4" />} />
                 <Aba on={aba === "3d"} rot="3D" onClick={() => setAba("3d")} icone={<Box className="h-4 w-4" />} />
@@ -408,6 +412,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
                   {aba === "equipa" && <AgendaEquipa ctx={ctx} d={d} dias={dias} ir={ir} />}
                   {aba === "equipa" && <EquipaDaObra ctx={ctx} d={d} dias={dias} abrirOutra={setOutra} abrir={(ti) => setPainel({ k: "tarefa", ti })} novaPara={(tec) => setPainel({ k: "nova", inicial: { tec, dia: vivo ? p.dia : undefined } })} />}
                   {aba === "cliente" && <>{vivo && planeia && <PontoDaSemana ctx={ctx} d={d} dias={dias} />}<ClienteDaObra ctx={ctx} d={d} /></>}
+                  {aba === "contrato" && <ContratoDaObra ctx={ctx} d={d} />}
                   {aba === "documentos" && <DocumentosDaObra ctx={ctx} d={d} />}
                   {aba === "3d" && <ProjetoEm3D d={d} />}
                   {aba === "fecho" && <><FechoDaObra ctx={ctx} d={d} irPara={setAba} /><FechoVivo d={d} ir={ir} /></>}
@@ -539,6 +544,8 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   critico: Set<number>; passar?: (ti: number, tec: string) => void;
 }) {
   const vivo = p.estado === "em curso";
+  // 23/11 (Rúben: «não se percebe que serviço é»): na vista por técnico os dias são mais largos e as barras mais altas, com o nome curto
+  const COL = vista === "tecnicos" ? COL_TEC : COL_GANTT, ALTO = vista === "tecnicos" ? 36 : 28, FAIXA = ALTO + 10;
   const [arrasto, setArrasto] = useState<Arrasto | null>(null);
   const toque = useRef<{ x: number; y: number; ti: number; tipo: "mover" | "durar" } | null>(null);
   const [sob, setSob] = useState<{ k: number; tec: string | null } | null>(null);
@@ -581,13 +588,13 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
     const atraso = diasDeAtraso(t, p), a = arrasto?.ti === ti ? arrasto : null;
     return (
       <Fragment key={ti}>
-        {b && (b.dia !== t.dia || b.dur !== t.dur) && <div aria-hidden="true" title="Previsto no orçamento" className="absolute h-[3px] rounded-full bg-foreground/30" style={{ left: b.dia * COL + 4, width: Math.max(8, b.dur * COL - 8), top: top + 31 }} />}
-        {((R && mudou(ti)) || a) && <div aria-hidden="true" className="absolute rounded-lg border-2 border-dashed border-foreground/35" style={{ left: t.dia * COL + 2, width: Math.max(COL - 4, t.dur * COL - 4), top, height: 28 }} />}
+        {b && (b.dia !== t.dia || b.dur !== t.dur) && <div aria-hidden="true" title="Previsto no orçamento" className="absolute h-[3px] rounded-full bg-foreground/30" style={{ left: b.dia * COL + 4, width: Math.max(8, b.dur * COL - 8), top: top + ALTO + 3 }} />}
+        {((R && mudou(ti)) || a) && <div aria-hidden="true" className="absolute rounded-lg border-2 border-dashed border-foreground/35" style={{ left: t.dia * COL + 2, width: Math.max(COL - 4, t.dur * COL - 4), top, height: ALTO }} />}
         {!R && atraso > 0 && (
           <div aria-hidden="true" className="absolute flex items-center justify-end rounded-r-lg bg-[repeating-linear-gradient(135deg,hsl(var(--destructive)/0.35)_0_5px,hsl(var(--destructive)/0.15)_5px_10px)] pr-1 text-[11px] font-bold text-destructive"
-            style={{ left: (t.dia + t.dur) * COL - 2, width: atraso * COL, top, height: 28 }}>+{atraso}</div>
+            style={{ left: (t.dia + t.dur) * COL - 2, width: atraso * COL, top, height: ALTO }}>+{atraso}</div>
         )}
-        <Barra t={t} n={n} v={v} p={p} sel={sel === ti} mudou={mudou(ti)} abrir={() => { if (Date.now() - largouEm.current > 350) abrir(ti); }} reduzir={reduzir} top={top} critica={critico.has(ti)}
+        <Barra t={t} n={n} v={v} p={p} sel={sel === ti} mudou={mudou(ti)} abrir={() => { if (Date.now() - largouEm.current > 350) abrir(ti); }} reduzir={reduzir} top={top} critica={critico.has(ti)} col={COL} alto={ALTO} largo={vista === "tecnicos"}
           arrasto={a} mexe={!R && podeMexer(ti)} pegar={(e, tipo) => pegar(e, ti, tipo)} />
       </Fragment>
     );
@@ -613,7 +620,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
         <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="Legenda">
           {legenda.map(([t, c]) => <li key={t} className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-4 rounded-sm" style={{ background: c }} />{t}</li>)}
           <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-[3px] w-4 rounded-full bg-foreground/30" />Previsto no orçamento</li>
-          <li className="flex items-center gap-1.5"><Flame className="h-3.5 w-3.5 text-destructive" aria-hidden="true" />Caminho crítico</li>
+          <li className="flex items-center gap-1.5"><Route className="h-3.5 w-3.5 text-primary" aria-hidden="true" />Caminho crítico (sem folga)</li>
         </ul>
       </div>
       {!R && <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">{vivo ? "As tarefas que ainda não começaram arrastam-se (o dia) e a ponta muda os dias; as outras abrem-se para gerir a execução." : "Arraste uma barra para mudar o dia; a ponta muda os dias."}{nova && vista === "tecnicos" ? " Num dia vazio, «+» cria uma tarefa." : ""}{passar && vista === "tecnicos" ? " Arraste para a linha de outra pessoa para lhe passar a tarefa." : ""}</p>}
@@ -649,7 +656,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
                   <div key={ti} className={cn("flex border-b border-border last:border-b-0", sel === ti && "bg-primary/[0.04]")}>
                     <button type="button" onClick={() => abrir(ti)} className={cn("sticky left-0 z-10 flex shrink-0 items-center gap-2 bg-card px-3 py-1.5 text-left hover:bg-muted/60 sm:px-4", rotulo)}>
                       <span className="hidden sm:block"><AvatarTec id={t.tec} tam="h-7 w-7" /></span>
-                      <span className="min-w-0"><span className="block truncate text-sm font-medium">{t.nome}</span><span className={cn("block truncate text-xs", v === "atrasada" || v === "corrigir" ? "font-medium text-destructive" : "text-muted-foreground")}>{rotuloVivo(t, p)}{atraso ? ` · +${atraso}` : ""}</span></span>
+                      <span className="min-w-0" title={t.nome}><span className="block truncate text-sm font-medium">{nomeCurtoTarefa(t.nome)}</span><span className={cn("block truncate text-xs", v === "atrasada" || v === "corrigir" ? "font-medium text-destructive" : "text-muted-foreground")}>{rotuloVivo(t, p)}{atraso ? ` · +${atraso}` : ""}</span></span>
                     </button>
                     <div className="relative" style={{ width: dias.length * COL, height: LINHA }}>{fundo()}{barra(ti, 7)}</div>
                   </div>
@@ -662,7 +669,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
             const faixas: number[] = [];
             const faixa = ts.map(({ t }) => { let f = 0; while (faixas[f] !== undefined && faixas[f] > t.dia) f++; faixas[f] = t.dia + t.dur; return f; });
             const fora = tec ? blocosForaDaObra(tec, dias, obras, deFerias) : [];
-            const altura = Math.max(1, faixas.length) * 38 + 12 + (fora.length ? 28 : 0);
+            const altura = Math.max(1, faixas.length) * FAIXA + 12 + (fora.length ? 28 : 0);
             const k = sob && sob.tec === tec ? sob.k : null;
             const ocupado = (kk: number) => ts.some(({ t }) => kk >= t.dia && kk < t.dia + t.dur) || fora.some((b) => kk >= b.ini && kk < b.fim);
             const livre = k != null && !ocupado(k) && (!vivo || k >= p.dia);
@@ -677,11 +684,11 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
                   {fundo()}
                   {nova && livre && !arrasto && !R && (
                     <button type="button" aria-label={`Nova tarefa para ${nomeTec(tec)} a ${dataCurta(dias[k!])}`} onClick={() => nova(k!, tec)}
-                      className="absolute top-1.5 grid place-items-center rounded-lg border-2 border-dashed border-primary/40 text-primary hover:bg-primary/[0.06]" style={{ left: k! * COL + 2, width: COL - 4, height: 28 }}>
+                      className="absolute top-1.5 grid place-items-center rounded-lg border-2 border-dashed border-primary/40 text-primary hover:bg-primary/[0.06]" style={{ left: k! * COL + 2, width: COL - 4, height: ALTO }}>
                       <Plus className="h-4 w-4" aria-hidden="true" />
                     </button>
                   )}
-                  {ts.map(({ ti }, j) => barra(ti, 6 + faixa[j] * 38))}
+                  {ts.map(({ ti }, j) => barra(ti, 6 + faixa[j] * FAIXA))}
                   {fora.map((b) => {
                     const largura = (b.fim - b.ini) * COL - 4, txt = b.tipo === "ferias" ? "Férias" : `${b.obra!.nome}${b.obra!.servico ? ` · ${b.obra!.servico}` : ""}`;
                     const quando = `${dataCurta(dias[b.ini])}${b.fim - b.ini > 1 ? ` a ${dataCurta(dias[b.fim - 1])}` : ""}`;
@@ -708,8 +715,9 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   );
 }
 
-function Barra({ t, n, v, p, sel, mudou, abrir, reduzir, top, arrasto, mexe, pegar, critica }: {
+function Barra({ t, n, v, p, sel, mudou, abrir, reduzir, top, arrasto, mexe, pegar, critica, col: COL = COL_GANTT, alto = 28, largo = false }: {
   t: Tarefa; n: Tarefa; v: EstadoVivo; p: Plano; sel: boolean; mudou: boolean; abrir: () => void; reduzir: boolean; top: number; critica?: boolean;
+  /** 23/11: a largura de um dia e a altura da barra (a vista por técnico é mais larga e o nome pode ir em duas linhas) */ col?: number; alto?: number; largo?: boolean;
   arrasto: Arrasto | null; mexe: boolean; pegar: (e: React.PointerEvent, tipo: "mover" | "durar") => void;
 }) {
   const cor = COR_FASE[t.fase ?? 1];
@@ -724,17 +732,18 @@ function Barra({ t, n, v, p, sel, mudou, abrir, reduzir, top, arrasto, mexe, peg
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } }}
       animate={{ left: n.dia * COL + 2 + dx, width: Math.max(COL - 4, n.dur * COL - 4 + dw), scale: arrasto ? 1.03 : 1, y: arrasto?.dy ?? 0 }}
       transition={reduzir || arrasto ? { duration: 0 } : { type: "spring", stiffness: 260, damping: 30 }}
-      aria-label={`${t.nome}: ${ROTULO_VIVO[v].toLowerCase()}, ${n.dur} ${n.dur === 1 ? "dia" : "dias"}${dataIni ? ` a partir de ${dataCurta(dataIni)}` : ""}${mudou ? " (muda)" : ""}`}
+      aria-label={`${t.nome}: ${ROTULO_VIVO[v].toLowerCase()}, ${n.dur} ${n.dur === 1 ? "dia" : "dias"}${dataIni ? ` a partir de ${dataCurta(dataIni)}` : ""}${critica ? ", no caminho crítico" : ""}${mudou ? " (muda)" : ""}`}
+      title={`${t.nome}
+${ROTULO_VIVO[v]} · ${n.dur} ${n.dur === 1 ? "dia" : "dias"}${dataIni ? ` a partir de ${dataCurta(dataIni)}` : ""}${critica ? " · caminho crítico (sem folga)" : ""}`}
       className={cn("absolute flex items-center gap-1 overflow-hidden rounded-lg px-2 text-left text-xs font-medium text-white shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
         mexe ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
-        critica && !sel && v !== "atrasada" && "ring-2 ring-amber-500/80 ring-offset-1 ring-offset-card",
         sel && "ring-2 ring-foreground ring-offset-2 ring-offset-card", v === "atrasada" && "ring-2 ring-destructive ring-offset-1 ring-offset-card", mudou && "ring-2 ring-primary ring-offset-1 ring-offset-card")}
-      style={{ top, height: 28, touchAction: mexe ? "none" : undefined, zIndex: arrasto ? 20 : undefined,
+      style={{ top, height: alto, touchAction: mexe ? "none" : undefined, zIndex: arrasto ? 20 : undefined,
         background: v === "parada" || v === "pausada" ? "repeating-linear-gradient(135deg,#64748b 0 6px,#94a3b8 6px 12px)" : (v === "em curso" || v === "hoje" || v === "atrasada") ? `color-mix(in srgb, ${fundo} 45%, transparent)` : v === "por começar" ? `color-mix(in srgb, ${fundo} 80%, white)` : fundo }}>
       {(v === "em curso" || v === "hoje" || v === "atrasada") && <motion.span aria-hidden="true" className="absolute inset-y-0 left-0" style={{ background: fundo }} initial={reduzir ? false : { width: 0 }} animate={{ width: `${Math.round(feito * 100)}%` }} transition={{ duration: 0.6, ease: "easeOut" }} />}
       {I && <I className="relative h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
-      {critica && !I && <Flame className="relative h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
-      <span className="relative truncate drop-shadow-sm">{t.nome}</span>
+      {critica && !I && <Route className="relative h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden="true" />}
+      <span className={cn("relative drop-shadow-sm", largo ? "line-clamp-2 whitespace-normal break-words text-[11px] leading-tight" : "truncate")}>{nomeCurtoTarefa(t.nome)}</span>
       {arrasto && passos !== 0 && <span className="relative ml-auto shrink-0 rounded bg-black/25 px-1 text-[10px] tabular-nums">{passos > 0 ? "+" : ""}{passos}</span>}
       {mexe && <span onPointerDown={(e) => pegar(e, "durar")} aria-hidden="true" className="absolute inset-y-0 right-0 w-3 cursor-ew-resize bg-white/0 hover:bg-white/30" />}
     </motion.button>
@@ -797,7 +806,7 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
           <p className={cn("text-sm font-medium", df > 0 ? "text-destructive" : df < 0 ? "text-success" : "text-muted-foreground")}>{df === 0 ? "a mesma data" : df > 0 ? `+${dd(df)} (era ${quando(R.fimAntes - 1)})` : `${dd(-df)} mais cedo (era ${quando(R.fimAntes - 1)})`}</p>
         </div>
         <div className="rounded-xl bg-card p-3 ring-1 ring-border sm:col-span-2">
-          <p className="text-xs text-muted-foreground">{R.mudancas.length ? `${R.mudancas.length} ${R.mudancas.length === 1 ? "tarefa muda" : "tarefas mudam"}` : "Nada muda"}</p>
+          <p className="text-xs text-muted-foreground">{R.mudancas.length ? `${R.mudancas.length} ${R.mudancas.length === 1 ? "tarefa muda" : "tarefas mudam"}` : "Nada a mudar"}</p>
           <ul className="mt-1 space-y-0.5 text-sm">
             {R.mudancas.slice(0, 6).map((m) => (
               <li key={m.ti} className="flex flex-wrap items-center gap-x-2">
@@ -850,9 +859,18 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
           <label className="flex min-h-10 cursor-pointer items-center gap-2 text-[15px]"><input type="checkbox" checked={cliente} onChange={(e) => setCliente(e.target.checked)} className="h-4 w-4 accent-[hsl(var(--primary))]" />Avisar o cliente no portal</label>
         </div>
       )}
+      {/* 23/11 (Rúben: «clico no erro de replanear e não permite fazer nada»): sem nada a mudar, diz porquê e o que se pode fazer */}
+      {!R.mudancas.length && (
+        <p role="status" className="rounded-xl bg-muted/60 px-4 py-3 text-[15px]">
+          <b className="font-medium">O plano já está em dia.</b> As tarefas começam o mais cedo possível e os técnicos têm horas livres nesses dias.
+          {" "}Para mudar uma tarefa, arraste a barra no plano, ou abra-a para a passar a outro técnico.
+        </p>
+      )}
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        <Button type="button" variant="ghost" size="lg" onClick={() => setPrevia(null)}>Cancelar</Button>
-        <Button type="button" size="lg" disabled={!R.mudancas.length} onClick={aplicar}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Aplicar ao plano</Button>
+        {R.mudancas.length ? <>
+          <Button type="button" variant="ghost" size="lg" onClick={() => setPrevia(null)}>Cancelar</Button>
+          <Button type="button" size="lg" onClick={aplicar}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Aplicar ao plano</Button>
+        </> : <Button type="button" size="lg" variant="outline" onClick={() => setPrevia(null)}>Fechar</Button>}
       </div>
       </>}
     </motion.section>
