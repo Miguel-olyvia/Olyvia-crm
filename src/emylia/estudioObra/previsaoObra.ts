@@ -15,7 +15,7 @@ import { porEncomendarDe } from "../encomendasAjuste";
 import { custosDosMateriais } from "../preparacaoObra";
 import { enviosDe } from "../trabalhoObra";
 import { fimDe } from "../ajustesPlano";
-import { estadoVivo, feitoDe } from "./planoVivo";
+import { estadoVivo, nomeCurtoTarefa, feitoDe } from "./planoVivo";
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
@@ -171,7 +171,7 @@ export function antesEDepois(d: Negocio): { antes: string; depois: string } | nu
  *  seguir e quando acaba. `dataDe` dá a data de um índice de dia. */
 export function pontoDaSemana(p: Plano, dataDe: (k: number) => string): string {
   const hoje = p.estado === "em curso" ? p.dia : 0;
-  const nomes = (L: Tarefa[]) => L.map((t) => t.nome.toLowerCase()).join(", ").replace(/, ([^,]*)$/, " e $1");
+  const nomes = (L: Tarefa[]) => [...new Set(L.map((t) => nomeCurtoTarefa(t.nome).toLowerCase()))].join(", ").replace(/, ([^,]*)$/, " e $1");
   const feitas = p.tasks.filter((t) => { const v = estadoVivo(t, p); return (v === "validada" || v === "feita") && enviosDe(t).some((e) => e.dia >= hoje - 4); });
   const decorrer = p.tasks.filter((t) => { const v = estadoVivo(t, p); return v === "em curso" || v === "hoje" || v === "atrasada" || v === "corrigir"; });
   const seguir = p.tasks.filter((t) => t.dia > hoje && t.dia <= hoje + 5 && estadoVivo(t, p) === "por começar");

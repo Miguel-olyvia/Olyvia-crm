@@ -211,7 +211,8 @@ export function nomeCurtoTarefa(nome: string): string {
   let n = nome.replace(/\s+/g, " ").trim();
   const k = n.lastIndexOf(" · ");
   if (k >= 0 && n.slice(k + 3).trim()) n = n.slice(k + 3).trim();
-  n = n.replace(/^(instala[çc][ãa]o|montagem|coloca[çc][ãa]o|aplica[çc][ãa]o|fornecimento e instala[çc][ãa]o)( de| do| da| dos| das)?\s+/i, "");
+  // só «Instalação de» (o resto, «Montagem de louças», «Aplicação de …», diz o que é)
+  n = n.replace(/^(fornecimento e instala[çc][ãa]o|instala[çc][ãa]o)( de| do| da| dos| das)?\s+/i, "");
   n = n.replace(/\s+(m2|m²|ml|m3|un|und|unid\.?)$/i, "").trim();
   if (!n) return nome;
   return n.charAt(0).toLocaleUpperCase("pt-PT") + n.slice(1);

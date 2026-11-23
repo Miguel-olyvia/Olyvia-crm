@@ -18,6 +18,8 @@ import { fimDe } from "./ajustesPlano";
 import { estadoDe, progresso } from "./obraOps";
 import { enviosDe, type Envio } from "./trabalhoObra";
 import type { ResumoEcNeg } from "./inventario/ponteNegocios";
+// 23/11: ao cliente, o nome curto do trabalho («Canalização», não «MO Modelo Remodelação Completa … · canalização»)
+import { nomeCurtoTarefa } from "./estudioObra/planoVivo";
 
 /* ------------------------------------------------------------------ as datas */
 const doisD = (n: number) => String(n).padStart(2, "0");
@@ -173,10 +175,10 @@ export function historicoDaObra(d: Negocio, hoje = new Date()): MarcoCliente[] {
     // os registos dos técnicos, o fim de cada trabalho e a verificação do responsável de obra
     for (const t of tarefasDoCliente(p)) {
       for (const e of enviosDoCliente(t)) {
-        const quando = quandoNoPlano(p, e.dia, e.q, hoje), base = { quando, tarefa: t.nome, fase: t.fase, fotos: e.fotos?.length ? e.fotos : undefined, nota: e.nota?.trim() || undefined };
-        if (e.k === "validada") pôr({ ...base, k: "concluida", t: `${t.nome}: concluído`, sub: "Verificado pelo responsável de obra." });
-        else if (e.k === "feita") pôr({ ...base, k: "acabou", t: `${primeiroNome(e.quem)} acabou ${t.nome.toLowerCase()}`, sub: "Falta a verificação do responsável de obra." });
-        else pôr({ ...base, k: "tecnico", t: `${primeiroNome(e.quem)} esteve na obra`, sub: t.nome });
+        const quando = quandoNoPlano(p, e.dia, e.q, hoje), base = { quando, tarefa: nomeCurtoTarefa(t.nome), fase: t.fase, fotos: e.fotos?.length ? e.fotos : undefined, nota: e.nota?.trim() || undefined };
+        if (e.k === "validada") pôr({ ...base, k: "concluida", t: `${nomeCurtoTarefa(t.nome)}: concluído`, sub: "Verificado pelo responsável de obra." });
+        else if (e.k === "feita") pôr({ ...base, k: "acabou", t: `${primeiroNome(e.quem)} acabou ${nomeCurtoTarefa(t.nome).toLowerCase()}`, sub: "Falta a verificação do responsável de obra." });
+        else pôr({ ...base, k: "tecnico", t: `${primeiroNome(e.quem)} esteve na obra`, sub: nomeCurtoTarefa(t.nome) });
       }
     }
     // os avisos de mudança do plano que a equipa deu ao cliente
@@ -238,7 +240,7 @@ export function progressoDaObra(d: Negocio, hoje = new Date()): ProgressoCliente
     const estado: EstadoCliente = concluida || e === "validada" ? "concluída" : e === "feita" ? "a verificar" : e === "em curso" || e === "corrigir" ? "a decorrer"
       : emCurso && k >= t.dia && k <= fimT ? "hoje" : "por começar";
     const atrasada = emCurso && (estado === "a decorrer" || estado === "por começar") && k > fimT ? rotuloDia(p, fimT) : undefined;
-    return { nome: t.nome, ...(t.fase ? { fase: t.fase } : {}), estado, de: rotuloDia(p, t.dia), ate: rotuloDia(p, fimT), ...(atrasada ? { atrasada } : {}) };
+    return { nome: nomeCurtoTarefa(t.nome), ...(t.fase ? { fase: t.fase } : {}), estado, de: rotuloDia(p, t.dia), ate: rotuloDia(p, fimT), ...(atrasada ? { atrasada } : {}) };
   });
   const ordem = tarefasDoCliente(p);
   const porInicio = (a: TarefaCliente, b: TarefaCliente) => ordem[tarefas.indexOf(a)].dia - ordem[tarefas.indexOf(b)].dia;
