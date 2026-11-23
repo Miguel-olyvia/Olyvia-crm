@@ -45,6 +45,35 @@ serve(async (req) => {
       console.error("[process-scheduled-emails] reconcile failed (non-fatal):", reconcileErr);
     }
 
+    // Confirmacoes de visita do modo 'agenda_confirm' por enviar (a rede de
+    // seguranca do ecra da Agenda). So chama a send-visit-confirmation quando ha
+    // linhas vencidas; sem a tabela (migration por aplicar) ou com erro, salta.
+    // Fail-soft: nunca impede os emails deste lote.
+    let visitConfirmations: unknown = null;
+    try {
+      const { data: dueConfirmations, error: dueErr } = await supabase
+        .from("visit_confirmation_sends")
+        .select("id")
+        .eq("status", "pending")
+        .lte("next_attempt_at", new Date().toISOString())
+        .limit(1);
+      if (!dueErr && Array.isArray(dueConfirmations) && dueConfirmations.length > 0) {
+        const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/send-visit-confirmation`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            // A mesma credencial interna com que o cron chamou esta funcao.
+            Authorization: req.headers.get("Authorization") ?? "",
+          },
+          body: JSON.stringify({}),
+          signal: AbortSignal.timeout(25_000),
+        });
+        visitConfirmations = await res.json().catch(() => ({ status: res.status }));
+      }
+    } catch (confirmErr) {
+      console.error("[process-scheduled-emails] visit confirmations failed (non-fatal):", confirmErr);
+    }
+
     // Mais antigas primeiro, e sem as linhas que ja foram vistas nesta corrida.
     const fetchDue = async (excludeIds: readonly string[]) => {
       let q = supabase
@@ -72,7 +101,7 @@ serve(async (req) => {
     const pendingEmails = batch.rows;
     const unreconciled = batch.unreconciled;
     if (pendingEmails.length === 0) {
-      return new Response(JSON.stringify({ processed: 0, deferred: batch.deferred, reconcile: reconcileSummary }), {
+      return new Response(JSON.stringify({ processed: 0, deferred: batch.deferred, reconcile: reconcileSummary, visit_confirmations: visitConfirmations }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
@@ -235,7 +264,7 @@ serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ processed, cancelled, failed, deferred, reconcile: reconcileSummary, ...smtpResolutionSummary }),
+      JSON.stringify({ processed, cancelled, failed, deferred, reconcile: reconcileSummary, visit_confirmations: visitConfirmations, ...smtpResolutionSummary }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {

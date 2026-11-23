@@ -48,7 +48,14 @@ export interface EmailsTabFields {
    * monolingues, que continuam a usar só as colunas `*_template_id`.
    */
   email_locale_templates?: EmailLocaleTemplates;
+  /**
+   * Quando sai a confirmação ao cliente (form_branding.confirmation_send_on). Ausente = 'booking'
+   * (ao marcar, como sempre). Opcional para não se gravar enquanto a coluna não foi lida da base.
+   */
+  confirmation_send_on?: ConfirmationSendOn;
 }
+
+export type ConfirmationSendOn = "booking" | "agenda_confirm";
 
 /** Aplica uma alteração parcial ao branding (o pai guarda o objeto completo). */
 export type EmailsTabPatch = (patch: Partial<EmailsTabFields>) => void;

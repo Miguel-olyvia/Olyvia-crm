@@ -20583,6 +20583,7 @@ export type Database = {
           reschedule_notify_email: boolean
           reschedule_notify_sms: boolean
           reschedule_sms_message: string | null
+          send_confirmation_on_confirm: boolean
           show_holidays: boolean
           show_weekends: boolean
           timezone: string
@@ -20615,6 +20616,7 @@ export type Database = {
           reschedule_notify_email?: boolean
           reschedule_notify_sms?: boolean
           reschedule_sms_message?: string | null
+          send_confirmation_on_confirm?: boolean
           show_holidays?: boolean
           show_weekends?: boolean
           timezone?: string
@@ -20647,6 +20649,7 @@ export type Database = {
           reschedule_notify_email?: boolean
           reschedule_notify_sms?: boolean
           reschedule_sms_message?: string | null
+          send_confirmation_on_confirm?: boolean
           show_holidays?: boolean
           show_weekends?: boolean
           timezone?: string

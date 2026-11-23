@@ -23,6 +23,7 @@ import { toast } from '@/lib/toast';
 import { scheduleItemSchema } from '@/lib/validations';
 import type { ScheduleItem, ScheduleBoard, ScheduleResource, ScheduleItemStatus, BoardModule } from '@/types/scheduling';
 import { ConfirmedByClientBadge } from './ConfirmedByClientBadge';
+import { VisitConfirmationStatus } from './VisitConfirmationStatus';
 
 interface ScheduleItemDialogProps {
   open: boolean;
@@ -451,6 +452,9 @@ export function ScheduleItemDialog({
                   </SelectContent>
                 </Select>
                 <ConfirmedByClientBadge confirmedAt={item?.confirmed_at} />
+                {item?.id && (
+                  <VisitConfirmationStatus itemId={item.id} savedStatus={item.status} pendingStatus={formData.status} />
+                )}
               </div>
             )}
 

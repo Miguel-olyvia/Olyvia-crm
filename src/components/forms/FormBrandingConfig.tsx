@@ -131,6 +131,11 @@ interface BrandingData {
   scheduling_invite_delays_hours: string;
   /** Modelo de email por idioma: {finalidade: {idioma: id}} (ver lib/formEmailLocales). */
   email_locale_templates: EmailLocaleTemplates;
+  /**
+   * Quando sai a confirmação ao cliente. Só existe no objeto se veio da base (coluna da migration
+   * 20261229600000) ou se foi escolhido no ecrã: ausente, não se envia no gravar.
+   */
+  confirmation_send_on?: "booking" | "agenda_confirm";
 }
 
 const defaultBranding: BrandingData = {
@@ -486,6 +491,9 @@ export function FormBrandingConfig({ open, onOpenChange, formId, formName }: For
             ? (data as any).scheduling_invite_delays_hours.join(", ")
             : "24",
           email_locale_templates: localeTemplates,
+          ...("confirmation_send_on" in data
+            ? { confirmation_send_on: (data as { confirmation_send_on?: unknown }).confirmation_send_on === "agenda_confirm" ? "agenda_confirm" as const : "booking" as const }
+            : {}),
         });
       } else {
         loadedLocaleTemplates.current = {};

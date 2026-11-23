@@ -19,6 +19,7 @@ import { anyReminderEnabled, reminderRuleFor } from "../_shared/reminderRule.ts"
 import { resolveRescheduleTarget, validateRescheduleSlot } from "../_shared/rescheduleSlots.ts";
 import { needsNewReminderLines } from "../_shared/reminderReconcile.ts";
 import { cancelLegacyVisitReminders, loadVisitTechnicians, reconcileItem } from "../_shared/reminderRunner.ts";
+import { loadVisitConfirmationState } from "../_shared/visitConfirmation.ts";
 
 initSentry();
 
@@ -247,7 +248,10 @@ Deno.serve(async (req: Request) => {
 
       const emailCfg = formId ? await loadFormEmailConfig(supabase, formId) : null;
 
-      if (leadId && createNewReminders && emailCfg && anyReminderEnabled(emailCfg)) {
+      // Modo 'agenda_confirm': a visita remarcada fica por confirmar; os lembretes so
+      // nascem quando a empresa a confirmar (send-visit-confirmation). Modo de hoje: igual.
+      const confirmationState = await loadVisitConfirmationState(supabase, itemId);
+      if (leadId && createNewReminders && confirmationState.mode === 'booking' && emailCfg && anyReminderEnabled(emailCfg)) {
         const { data: lead } = await supabase
           .from('anew_leads')
           .select('field_values, entity_id, created_by, assigned_to')

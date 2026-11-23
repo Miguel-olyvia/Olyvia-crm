@@ -81,6 +81,20 @@ export function FormEmailsTab<T extends EmailsTabFields>({
             smsByLocale={smsByLocale}
             onSmsLocaleChange={onSmsLocaleChange}
           />
+          <div className="space-y-1">
+            <Label htmlFor="confirmation-send-on" className="text-xs">{t("visitConfirmation.form.label")}</Label>
+            <Select
+              value={branding.confirmation_send_on ?? "booking"}
+              onValueChange={(v) => set({ confirmation_send_on: v === "agenda_confirm" ? "agenda_confirm" : "booking" })}
+            >
+              <SelectTrigger id="confirmation-send-on" aria-describedby="confirmation-send-on-help"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="booking">{t("visitConfirmation.form.onBooking")}</SelectItem>
+                <SelectItem value="agenda_confirm">{t("visitConfirmation.form.onAgendaConfirm")}</SelectItem>
+              </SelectContent>
+            </Select>
+            <p id="confirmation-send-on-help" className="text-xs text-muted-foreground">{t("visitConfirmation.form.help")}</p>
+          </div>
         </div>
 
         <div className="space-y-3 rounded-lg border p-3">

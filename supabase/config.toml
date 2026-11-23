@@ -104,6 +104,12 @@ verify_jwt = true
 [functions.backfill-entity-names]
 verify_jwt = false
 
+# Chamada pelo ecra da Agenda (JWT do utilizador) e por process-scheduled-emails
+# (credencial interna do cron, que nao e um JWT). A funcao autentica-se sozinha
+# (resolveCallerIdentity + ambito scheduling.items.edit).
+[functions.send-visit-confirmation]
+verify_jwt = false
+
 [functions.process-scheduled-emails]
 verify_jwt = false
 

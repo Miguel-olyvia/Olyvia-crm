@@ -22,6 +22,7 @@ import { useCompany } from '@/contexts/CompanyContext';
 import { useScheduling } from '@/hooks/useScheduling';
 import { useScheduleSettings } from '@/hooks/useScheduleSettings';
 import { notifyClientOfScheduleChange, detectScheduleChanges, type ScheduleChange } from '@/lib/scheduling/notifyClientOfScheduleChange';
+import { becameConfirmed, triggerConfirmationsForItems, triggerVisitConfirmation } from '@/lib/scheduling/visitConfirmation';
 import { useTranslation } from '@/hooks/useTranslation';
 import { ScheduleCalendarView } from '@/components/scheduling/ScheduleCalendarView';
 import { ScheduleItemDialog } from '@/components/scheduling/ScheduleItemDialog';
@@ -313,6 +314,13 @@ export default function Scheduling() {
     });
   };
 
+  // Confirmação ao cliente no modo «confirmar na Agenda». Corre em segundo plano, depois de gravar.
+  const sendConfirmationNow = (itemId: string) => {
+    void triggerVisitConfirmation(itemId).then(r => {
+      if (r && (r.sent ?? 0) > 0) toast.info(t('visitConfirmation.bulkTriggered', { count: 1 }));
+    });
+  };
+
   const handleItemDrop = async (itemId: string, newStart: Date, newEnd: Date) => {
     const prevItem = items.find(i => i.id === itemId);
     if (await rescheduleItem(itemId, newStart, newEnd)) {
@@ -352,6 +360,10 @@ export default function Scheduling() {
       const prevItem = selectedItem && selectedItem.id === data.id ? selectedItem : items.find(i => i.id === data.id) ?? null;
       if (await updateItem(data.id, data)) {
         toast.success(t('scheduling.item.updateSuccess'));
+        // Modo «confirmar na Agenda»: a confirmação ao cliente sai já (a fila na base é a rede de segurança).
+        if (becameConfirmed(prevItem?.status, data.status) && prevItem?.confirmation_send_on === 'agenda_confirm') {
+          sendConfirmationNow(data.id);
+        }
         const assigneesResult = await updateAssignees(data.id, assigneeIds);
         setItems(await fetchItemsRef.current(filters));
         notifyIfEnabled(data.id, detectScheduleChanges(prevItem, data, assigneesResult ? assigneeIds : null));
@@ -367,7 +379,13 @@ export default function Scheduling() {
       }
     } else {
       const newItem = await createItem(data, assigneeIds);
-      if (newItem) setItems(prev => [...prev, newItem]);
+      if (newItem) {
+        setItems(prev => [...prev, newItem]);
+        // Visita criada já confirmada numa organização com o interruptor do CRM ligado.
+        if (newItem.status === 'confirmed' && newItem.confirmation_send_on === 'agenda_confirm') {
+          sendConfirmationNow(newItem.id);
+        }
+      }
     }
   };
   const handleDeleteItem = async (id: string) => { if (await deleteItem(id)) setItems(prev => prev.filter(item => item.id !== id)); };
@@ -579,11 +597,15 @@ export default function Scheduling() {
               teamMemberIds={teamMemberIds}
               onConfirmItems={async (ids) => {
                 if (!ids || ids.length === 0) return 0;
-                let ok = 0;
+                const confirmedIds: string[] = [];
                 for (const id of ids) {
-                  if (await updateItem(id, { status: 'confirmed' })) ok++;
+                  if (await updateItem(id, { status: 'confirmed' })) confirmedIds.push(id);
                 }
-                return ok;
+                // So as visitas em modo «confirmar na Agenda» chamam o envio; as outras ficam como sempre.
+                void triggerConfirmationsForItems(confirmedIds).then(count => {
+                  if (count > 0) toast.info(t('visitConfirmation.bulkTriggered', { count }));
+                });
+                return confirmedIds.length;
               }}
               onEditBoard={(board) => { setSelectedBoard(board); setBoardDialogOpen(true); }}
               onNewBoard={() => { setSelectedBoard(null); setBoardDialogOpen(true); }}

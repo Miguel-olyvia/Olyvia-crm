@@ -304,6 +304,43 @@ export async function sendEmailNow(params: {
 }
 
 /**
+ * Como sendEmailNow, mas devolve o motivo da falha (para ficar visivel no ecra).
+ * Nao substitui sendEmailNow: os chamadores de sempre continuam iguais.
+ */
+export async function sendEmailDetailed(params: {
+  organizationId: string;
+  smtpId?: string | null;
+  to: string;
+  subject: string;
+  html: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  try {
+    const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/send-email`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")}`,
+      },
+      body: JSON.stringify({
+        organization_id: params.organizationId,
+        ...(params.smtpId ? { smtp_id: params.smtpId } : {}),
+        to: params.to,
+        subject: params.subject,
+        html: params.html,
+      }),
+    });
+    const result = await res.json().catch(() => ({}));
+    if (result?.error) {
+      return { ok: false, error: typeof result.error === "string" ? result.error : JSON.stringify(result.error) };
+    }
+    if (!res.ok) return { ok: false, error: `send-email respondeu ${res.status}` };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
  * Insert a scheduled email row using the CANONICAL scheduled_emails shape
  * (to_email + user_id + body_html), so process-scheduled-emails can deliver it.
  */

@@ -7,6 +7,7 @@ import { directSalesTranslations } from "@/translations/directSales";
 import { todayTranslations } from "@/translations/today";
 import { versoesTemplatesTranslations } from "@/translations/versoesTemplates";
 import { proposalTemplateVersionsTranslations } from "@/translations/proposalTemplateVersions";
+import { visitConfirmationTranslations } from "@/translations/visitConfirmation";
 
 type Language = 'en' | 'pt' | 'es' | 'fr' | 'de';
 
@@ -33,6 +34,10 @@ Object.keys(versoesTemplatesTranslations).forEach((lang) => {
 // Editor de templates de proposta com versões por idioma — módulo próprio, mesmo padrão.
 Object.keys(proposalTemplateVersionsTranslations).forEach((lang) => {
   mergedTranslations[lang] = { ...mergedTranslations[lang], ...proposalTemplateVersionsTranslations[lang] };
+});
+// Confirmacao da visita ao cliente quando a empresa confirma na Agenda — modulo proprio, mesmo padrao.
+Object.keys(visitConfirmationTranslations).forEach((lang) => {
+  mergedTranslations[lang] = { ...mergedTranslations[lang], ...visitConfirmationTranslations[lang] };
 });
 
 export const useTranslation = () => {

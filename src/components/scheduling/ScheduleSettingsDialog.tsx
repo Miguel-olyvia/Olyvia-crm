@@ -651,6 +651,19 @@ export function ScheduleSettingsDialog({ open, onOpenChange, companyId }: Schedu
 
             <div className="flex items-center justify-between">
               <div>
+                <Label htmlFor="send-confirmation-on-confirm">{t('visitConfirmation.settings.label')}</Label>
+                <p className="text-sm text-muted-foreground">{t('visitConfirmation.settings.help')}</p>
+              </div>
+              <Switch
+                id="send-confirmation-on-confirm"
+                checked={formData.send_confirmation_on_confirm ?? false}
+                onCheckedChange={(v) => setFormData(prev => ({ ...prev, send_confirmation_on_confirm: v }))}
+                disabled={!canEditSettings}
+              />
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div>
                 <Label htmlFor="notify-reschedule">{t('scheduling.settings.notifyOnReschedule')}</Label>
                 <p className="text-sm text-muted-foreground">{t('scheduling.settings.notifyOnRescheduleDesc')}</p>
               </div>

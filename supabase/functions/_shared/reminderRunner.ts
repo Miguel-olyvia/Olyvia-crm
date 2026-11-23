@@ -19,6 +19,7 @@ import { buildReminderMail, parseContentVars, reminderSmsTemplate, withFreshVisi
 import { isCancelledStatus, planReminderActions, REASON_CONTENT_UNRECOVERABLE, REASON_VISIT_GONE } from "./reminderReconcile.ts";
 import type { CurrentTechnician, ReminderAction, ReminderLine } from "./reminderReconcile.ts";
 import { pickReminderSender } from "./reminderSender.ts";
+import { REASON_AWAITING_AGENDA_CONFIRMATION, shouldCancelReminderForVisit } from "./visitConfirmation.ts";
 
 const DAY_MS = 86_400_000;
 
@@ -463,13 +464,18 @@ export async function renderLinkedEmail(
   try {
     const stored = parseContentVars(row.content_vars);
     if (!row.schedule_item_id || !stored) return { kind: "stored" };
+    // "*": inclui confirmation_send_on sem falhar enquanto a coluna nao existir (codigo antes da migration).
     const { data: item, error } = await supabase
       .from("schedule_items")
-      .select("status, start_datetime, location")
+      .select("*")
       .eq("id", row.schedule_item_id)
       .maybeSingle();
     if (error) return { kind: "defer", reason: "leitura da visita falhou" };
     if (!item || isCancelledStatus(item.status)) return { kind: "cancel", reason: REASON_VISIT_GONE };
+    // Modo 'agenda_confirm': visita por confirmar nao leva lembrete (a confirmacao cria os novos).
+    if (shouldCancelReminderForVisit(item.confirmation_send_on, item.status)) {
+      return { kind: "cancel", reason: REASON_AWAITING_AGENDA_CONFIRMATION };
+    }
     const cfg = await loadFormEmailConfig(supabase, row.form_id);
     const techs = await loadVisitTechnicians(supabase, row.schedule_item_id);
     const audience = row.audience === "technician" ? "technician" : "client";
@@ -513,11 +519,14 @@ export async function renderLinkedSms(supabase: any, row: any): Promise<LinkedRe
     }
     const { data: item, error } = await supabase
       .from("schedule_items")
-      .select("status, start_datetime, location")
+      .select("*")
       .eq("id", row.schedule_item_id)
       .maybeSingle();
     if (error) return { kind: "defer", reason: "leitura da visita falhou" };
     if (!item || isCancelledStatus(item.status)) return { kind: "cancel", reason: REASON_VISIT_GONE };
+    if (shouldCancelReminderForVisit(item.confirmation_send_on, item.status)) {
+      return { kind: "cancel", reason: REASON_AWAITING_AGENDA_CONFIRMATION };
+    }
     const techs = await loadVisitTechnicians(supabase, row.schedule_item_id);
     const vars = withFreshVisitVars(stored, {
       startIso: item.start_datetime,

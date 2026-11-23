@@ -81,6 +81,11 @@ export interface ScheduleItem {
   duration_minutes?: number;
   /** Quando o cliente confirmou pelo link do lembrete; null se nao confirmou ou se a visita mudou de hora. */
   confirmed_at?: string | null;
+  /**
+   * Quando sai a confirmacao ao cliente (gravado ao criar a visita). null/booking = ao marcar (de sempre);
+   * agenda_confirm = quando a empresa confirma na Agenda (send-visit-confirmation).
+   */
+  confirmation_send_on?: 'booking' | 'agenda_confirm' | null;
   client_id?: string;
   lead_id?: string;
   deal_id?: string;

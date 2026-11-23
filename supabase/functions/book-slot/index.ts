@@ -7,11 +7,9 @@ import {
   loadFormEmailConfig,
   loadTemplate,
   sendEmailNow,
-  renderSubject,
   parseEmailList,
   uniqueEmails,
   pickTemplateId,
-  pickTemplateChoice,
   buildManageUrl,
 } from '../_shared/formEmails.ts';
 import { sendSmsNow } from '../_shared/sendSms.ts';
@@ -25,15 +23,16 @@ import { buildAudienceVars } from '../_shared/audienceTemplates.ts';
 import { createReminderLines } from '../_shared/reminderLines.ts';
 import { formatVisitWhen } from '../_shared/reminderContent.ts';
 import {
-  contentLang,
-  defaultConfirmationSms,
   defaultLocaleFromSettings,
   formatVisitDate,
-  normalizeMailLang,
   resolveLeadLocale,
 } from '../_shared/emailDefaults.ts';
-import { buildBookingConfirmationMail, buildMeetingNotifyMail } from '../_shared/bookingMails.ts';
-import { pickConfirmationSms, smsByLocaleFromSettings } from '../_shared/confirmationSms.ts';
+import { buildMeetingNotifyMail } from '../_shared/bookingMails.ts';
+import {
+  buildConfirmationEmailContent,
+  buildConfirmationSmsText,
+  loadFormConfirmationSendOn,
+} from '../_shared/visitConfirmation.ts';
 import { reminderRuleFor } from '../_shared/reminderRule.ts';
 
 initSentry();
@@ -150,6 +149,13 @@ Deno.serve(async (req: Request) => {
     }
 
     const organizationId = form.organization_id;
+
+    // Quando sai a confirmacao ao cliente (form_branding.confirmation_send_on):
+    // 'booking' (omissao) = logo aqui, como sempre; 'agenda_confirm' = quando a
+    // empresa confirmar a visita na Agenda (send-visit-confirmation). Leitura
+    // tolerante: sem a coluna, ou com erro, e 'booking'.
+    const confirmationSendOn = await loadFormConfirmationSendOn(supabase, form_id);
+    const sendConfirmationNow = confirmationSendOn === 'booking';
 
     // Regra 16: garante que o feriado do ano da marcação já está gravado em
     // schedule_holidays antes de qualquer RPC correr -- ver ensureHolidays.ts
@@ -776,6 +782,8 @@ Deno.serve(async (req: Request) => {
         location_lat: clientLat,
         location_lng: clientLng,
         priority: 0,
+        // So no modo novo: no de hoje a coluna nao se escreve (fica NULL = modo antigo).
+        ...(sendConfirmationNow ? {} : { confirmation_send_on: confirmationSendOn }),
         metadata: {
           ...(lead ? { lead_id: lead.id } : {}),
           ...(submissionClientId ? { client_id: submissionClientId } : {}),
@@ -953,8 +961,10 @@ Deno.serve(async (req: Request) => {
                 organization_id: organizationId,
                 type: 'schedule_booking',
                 kind: 'notification',
-                title: 'Nova visita agendada',
-                message: `${leadFullNameForNotif} agendou uma visita para ${whenFormattedForNotif}`,
+                title: sendConfirmationNow ? 'Nova visita agendada' : 'Nova visita por confirmar',
+                message: sendConfirmationNow
+                  ? `${leadFullNameForNotif} agendou uma visita para ${whenFormattedForNotif}`
+                  : `${leadFullNameForNotif} pediu uma visita para ${whenFormattedForNotif}. Confirme-a na Agenda para o cliente receber a confirmação.`,
                 link: '/scheduling',
                 entity_type: 'schedule_item',
                 entity_id: scheduleItem.id,
@@ -1030,30 +1040,22 @@ Deno.serve(async (req: Request) => {
       //     we have a client email; falls back to the branded default (same as
       //     reminder/cancel/reschedule) instead of silently sending nothing when no
       //     custom template is configured.
-      if (emailCfg?.confirmation_email_enabled && leadEmail) {
-        const confChoice = pickTemplateChoice(emailCfg, 'confirmation', leadLocale, emailCfg.confirmation_email_template_id);
-        const confTpl = confChoice.id ? await loadTemplate(supabase, confChoice.id) : null;
-        const confLang = contentLang({
-          source: confChoice.source,
-          templateUsed: !!confTpl?.body_html,
-          personLocale: leadLocale,
-          formDefaultLocale,
-        });
-        const confWhen = formatVisitDate(slot_start, confLang, false);
+      // No modo 'agenda_confirm' a confirmacao NAO sai aqui: sai quando a empresa
+      // confirmar a visita na Agenda (send-visit-confirmation, mesma montagem).
+      if (sendConfirmationNow && emailCfg?.confirmation_email_enabled && leadEmail) {
         // Modelo escolhido para o idioma manda; sem modelo, texto por omissao no idioma da pessoa
-        // (_shared/bookingMails.ts; portugues identico ao de sempre).
-        const confMail = buildBookingConfirmationMail({
-          template: confTpl,
-          vars: { ...baseVars, meeting_date: confWhen, meeting_datetime: confWhen },
-          lang: leadLocale,
-          templateLang: confLang,
-          leadName: leadFullName,
-          when: confWhen,
-          location: fullLocation || undefined,
-          technicianName: technicianName || undefined,
-          cancelUrl: cancelLink || undefined,
-          primaryColor: emailCfg.primary_color,
-          logoUrl: emailCfg.logo_url,
+        // (_shared/visitConfirmation.ts -> bookingMails.ts; portugues identico ao de sempre).
+        const confMail = await buildConfirmationEmailContent({
+          supabase,
+          emailCfg,
+          leadLocale,
+          formDefaultLocale,
+          startIso: slot_start,
+          baseVars,
+          leadFullName,
+          fullLocation: fullLocation || '',
+          technicianName,
+          cancelLink,
         });
         await sendEmailNow({
           organizationId,
@@ -1079,39 +1081,21 @@ Deno.serve(async (req: Request) => {
       // canal independente. Falha de envio nao bloqueia a marcacao (fail-soft,
       // igual ao email); a regra 11 (alerta interno quando falha) fica para
       // outro pedido, tal como ja acontece hoje para o email.
-      if (emailCfg?.confirmation_sms_enabled && leadPhone) {
-        // Regra 2: mensagem configuravel por campanha (confirmation_sms_message,
-        // mesmas variaveis {{...}} que os modelos de email, renderizadas com a
-        // mesma funcao renderSubject -- texto simples, sem HTML). Sem
-        // configuracao, cai para a mensagem por omissao com o aviso de
-        // contacto telefonico ja incluido.
-        // Regra 2 (continuacao): a conta SMSAPI partilhada recusa SMS com link
-        // para remetentes nao verificados (erro 94, confirmado ao vivo 22/09).
-        // confirmation_sms_include_link (omissao false) decide se {{cancel_url}}
-        // leva o link real ou fica vazio -- vale tanto para a mensagem por
-        // omissao como para a personalizada, sem exigir reescrever o texto.
-        const includeLink = emailCfg.confirmation_sms_include_link === true;
-        // Texto do idioma da pessoa (forms.settings.i18n.content.branding[idioma].confirmation_sms_message);
-        // sem ele, a coluna unica (idioma por omissao do formulario); sem ela, o texto por omissao do
-        // idioma (confirmationSms.ts / emailDefaults.ts; portugues identico ao de sempre).
-        const smsPick = pickConfirmationSms({
-          column: emailCfg.confirmation_sms_message,
-          byLocale: smsByLocaleFromSettings(form.settings),
-          locale: leadLocale,
-        });
-        const smsTemplate = smsPick?.text ?? defaultConfirmationSms(normalizeMailLang(leadLocale), {
+      if (sendConfirmationNow && emailCfg?.confirmation_sms_enabled && leadPhone) {
+        // Regra 2: mensagem configuravel por campanha (confirmation_sms_message, mesmas variaveis {{...}}),
+        // texto do idioma da pessoa, senao a coluna unica, senao o texto por omissao do idioma. A conta
+        // SMSAPI partilhada recusa SMS com link de remetentes nao verificados (erro 94): {{cancel_url}} so
+        // leva o link com confirmation_sms_include_link. Montagem em _shared/visitConfirmation.ts.
+        const smsMessage = buildConfirmationSmsText({
+          emailCfg,
+          formSettings: form.settings,
+          leadLocale,
+          formDefaultLocale,
           companyName: orgRow?.name || '',
-          withCancelLink: includeLink && !!cancelLink,
+          cancelLink,
+          baseVars,
+          startIso: slot_start,
         });
-        // A data do SMS segue o idioma do texto usado: o do idioma da pessoa -> o dela; o da coluna unica
-        // -> o idioma por omissao do formulario; o texto por omissao do sistema -> o da pessoa.
-        const smsWhen = formatVisitDate(
-          slot_start,
-          contentLang({ source: smsPick?.source ?? 'none', templateUsed: !!smsPick, personLocale: leadLocale, formDefaultLocale }),
-          false,
-        );
-        const smsBaseVars = { ...(includeLink ? baseVars : { ...baseVars, cancel_url: '' }), meeting_date: smsWhen, meeting_datetime: smsWhen };
-        const smsMessage = renderSubject(smsTemplate, smsBaseVars);
         const smsResult = await sendSmsNow({
           toPhone: String(leadPhone),
           message: smsMessage,
@@ -1199,7 +1183,9 @@ Deno.serve(async (req: Request) => {
       const remindOk = (rule: { enabled: boolean; hoursBefore: number }) =>
         rule.enabled && new Date(slot_start).getTime() - rule.hoursBefore * 3600000 > Date.now();
       const clientReminderOk = remindOk(clientReminder);
-      if (emailCfg && (clientReminderOk || remindOk(technicianReminder))) {
+      // Modo 'agenda_confirm': os lembretes (e o link "Confirmo") so nascem quando
+      // a confirmacao for enviada (send-visit-confirmation).
+      if (sendConfirmationNow && emailCfg && (clientReminderOk || remindOk(technicianReminder))) {
         {
           // Regra 12: link "Confirmo a visita" -- so nasce aqui, porque so
           // faz sentido pedir confirmacao quando existe um lembrete a sair.
@@ -1286,6 +1272,8 @@ Deno.serve(async (req: Request) => {
         scheduled_end: slot_end,
         scheduled_start_formatted: formattedStart,
         cancel_url: cancelUrl,
+        // Modo novo: o ecra de sucesso pode dizer que a confirmacao vem depois.
+        ...(sendConfirmationNow ? {} : { confirmation_pending: true }),
       }),
       { status: 201, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

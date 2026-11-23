@@ -13,6 +13,7 @@ import { getCorsHeadersExtended } from '../_shared/cors.ts';
 import { checkRateLimit, recordRateLimitAttempt, rateLimitResponse } from '../_shared/rateLimit.ts';
 import { initSentry, captureError } from '../_shared/sentry.ts';
 import { resolveNoticeKind, buildNoticeCopy, resolveNoticeChannels } from '../_shared/scheduleChangeNotice.ts';
+import { loadVisitConfirmationState, shouldSuppressClientChangeNotice } from '../_shared/visitConfirmation.ts';
 import { z } from 'npm:zod';
 
 initSentry();
@@ -153,6 +154,14 @@ Deno.serve(async (req: Request) => {
     }
     if (new Date(item.start_datetime).getTime() <= Date.now()) {
       return json({ sent: { email: false, sms: false }, skipped: 'past' });
+    }
+
+    // Modo 'agenda_confirm' (confirmacao ao cliente so quando a empresa confirma):
+    // antes de a confirmacao ter saido o cliente nao recebeu nada a corrigir, por
+    // isso mudar a hora ou o comercial nao o avisa. Depois de saida, segue os
+    // interruptores de sempre. Modo de hoje (ou leitura falhada): nada muda.
+    if (shouldSuppressClientChangeNotice(await loadVisitConfirmationState(admin, itemId))) {
+      return json({ sent: { email: false, sms: false }, skipped: 'not_confirmed_yet' });
     }
 
     const { data: settings } = await admin

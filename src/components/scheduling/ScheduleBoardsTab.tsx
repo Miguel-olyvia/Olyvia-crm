@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import type { ScheduleBoard, ScheduleItem, ScheduleResource } from '@/types/scheduling';
 import { ConfirmedByClientBadge } from './ConfirmedByClientBadge';
+import { countAgendaConfirmItems } from '@/lib/scheduling/visitConfirmation';
 import type { ScopeLevel } from '@/hooks/usePermissionScope';
 
 interface BoardStats {
@@ -330,6 +331,17 @@ export function ScheduleBoardsTab({
     [pendingTodayItems],
   );
 
+  // Quantas destas visitas mandam a confirmação ao cliente quando forem confirmadas
+  // (modo «confirmar na Agenda»). Uma leitura por lista; sem a migration, fica 0.
+  const [willSendCount, setWillSendCount] = useState(0);
+  const actionableIdsKey = actionablePendingToday.map(p => p.id).join(',');
+  useEffect(() => {
+    if (!actionableIdsKey) { setWillSendCount(0); return; }
+    let cancelled = false;
+    void countAgendaConfirmItems(actionableIdsKey.split(',')).then(n => { if (!cancelled) setWillSendCount(n); });
+    return () => { cancelled = true; };
+  }, [actionableIdsKey]);
+
   const handleConfirmAll = useCallback(async () => {
     if (!onConfirmItems) return;
     const ids = actionablePendingToday.map(p => p.id);
@@ -401,6 +413,11 @@ export function ScheduleBoardsTab({
             {totalActionable < totalPending && (
               <span className="block text-xs text-amber-700/80 dark:text-amber-400/80 mt-1">
                 {totalPending - totalActionable} fora do teu âmbito de ação.
+              </span>
+            )}
+            {willSendCount > 0 && (
+              <span className="block text-xs text-amber-700/80 dark:text-amber-400/80 mt-1">
+                {t('visitConfirmation.bulkWillSend', { count: willSendCount })}
               </span>
             )}
           </div>
