@@ -23,6 +23,11 @@ describe("traducoes da confirmacao da visita", () => {
     }
   });
 
+  it.each(langs)("%s nao tem textos do interruptor da organizacao (a confirmacao configura-se so no formulario)", (lang) => {
+    const stale = Object.keys(visitConfirmationTranslations[lang]).filter((k) => k.startsWith("visitConfirmation.settings."));
+    expect(stale).toEqual([]);
+  });
+
   it("os motivos de nao envio da funcao tem texto", () => {
     for (const code of ["not_confirmed", "past", "time_changed", "visit_gone", "mode_booking"]) {
       expect(visitConfirmationTranslations.pt[`visitConfirmation.reason.${code}`]).toBeTruthy();

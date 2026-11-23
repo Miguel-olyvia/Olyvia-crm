@@ -29,11 +29,6 @@ export interface ScheduleSettings {
   reassign_sms_message: string | null;
   notify_client_smtp_id: string | null;
   notify_client_sms_include_link: boolean;
-  /**
-   * Visitas criadas no CRM: confirmação ao cliente quando passam a confirmadas (migration 20261229600000).
-   * Opcional e fora das omissões: só se grava depois de lido da base ou mudado no ecrã.
-   */
-  send_confirmation_on_confirm?: boolean;
   lunch_window_start: string | null;
   lunch_window_end: string | null;
   lunch_duration_minutes: number | null;
@@ -77,6 +72,21 @@ const DEFAULT_SETTINGS: Omit<ScheduleSettings, 'id' | 'organization_id'> = {
   lunch_duration_minutes: null,
 };
 
+/**
+ * Colunas de schedule_settings que existem na base mas já não pertencem a este ecrã.
+ * `send_confirmation_on_confirm` (migration 20261229600000) deixou de ter interruptor: a
+ * confirmação da visita configura-se só no formulário e as visitas marcadas no CRM nunca
+ * enviam. A coluna fica inerte (false por omissão); o ecrã não a lê nem a grava, para um
+ * valor antigo nunca regressar à base.
+ */
+const INERT_COLUMNS = ['send_confirmation_on_confirm'] as const;
+
+function withoutInertColumns<T extends object>(row: T): T {
+  const copy = { ...row } as Record<string, unknown>;
+  for (const column of INERT_COLUMNS) delete copy[column];
+  return copy as T;
+}
+
 export function useScheduleSettings(companyId?: string) {
   const { t } = useTranslation();
   const [settings, setSettings] = useState<ScheduleSettings | null>(null);
@@ -96,7 +106,7 @@ export function useScheduleSettings(companyId?: string) {
       if (error && error.code !== 'PGRST116') throw error;
       
       if (data) {
-        setSettings(data as ScheduleSettings);
+        setSettings(withoutInertColumns(data) as ScheduleSettings);
       } else {
         // Return default settings if none exist (id empty means needs insert)
         setSettings({
@@ -153,7 +163,8 @@ export function useScheduleSettings(companyId?: string) {
     }
   }, [companyId]);
 
-  const saveSettings = useCallback(async (newSettings: Partial<ScheduleSettings>) => {
+  const saveSettings = useCallback(async (requestedSettings: Partial<ScheduleSettings>) => {
+    const newSettings = withoutInertColumns(requestedSettings);
     try {
       const businessUserId = await resolveCurrentBusinessUserId();
       if (!businessUserId) throw new Error('Business user not resolved');
@@ -183,7 +194,7 @@ export function useScheduleSettings(companyId?: string) {
           .single();
 
         if (error) throw error;
-        setSettings(data as ScheduleSettings);
+        setSettings(withoutInertColumns(data) as ScheduleSettings);
       }
 
       toast.success(t('scheduling.settings.saveSuccess'));

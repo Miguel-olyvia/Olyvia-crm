@@ -30,8 +30,6 @@ export const visitConfirmationTranslations: Record<string, Record<string, string
     'visitConfirmation.form.onBooking': 'As soon as the client books the visit',
     'visitConfirmation.form.onAgendaConfirm': 'When the visit is confirmed in the Schedule',
     'visitConfirmation.form.help': 'With “When the visit is confirmed in the Schedule”, the confirmation email and SMS and the reminders only go out once someone at the company marks the visit as confirmed. Visits already booked do not change.',
-    'visitConfirmation.settings.label': 'Confirm visits created in the CRM to the client',
-    'visitConfirmation.settings.help': 'When a visit created here (with a lead or client) becomes confirmed, the client receives the confirmation by email and SMS. Applies only to visits created after you turn this on.',
   },
   pt: {
     'visitConfirmation.title': 'Confirmação ao cliente',
@@ -61,8 +59,6 @@ export const visitConfirmationTranslations: Record<string, Record<string, string
     'visitConfirmation.form.onBooking': 'Logo que o cliente marca a visita',
     'visitConfirmation.form.onAgendaConfirm': 'Quando a visita é confirmada na Agenda',
     'visitConfirmation.form.help': 'Com «Quando a visita é confirmada na Agenda», o email e o SMS de confirmação e os lembretes só saem quando alguém da empresa marca a visita como confirmada. As visitas já marcadas não mudam.',
-    'visitConfirmation.settings.label': 'Confirmar ao cliente as visitas criadas no CRM',
-    'visitConfirmation.settings.help': 'Quando uma visita criada aqui (com lead ou cliente) passa a confirmada, o cliente recebe a confirmação por email e SMS. Só vale para as visitas criadas depois de ligar.',
   },
   es: {
     'visitConfirmation.title': 'Confirmación al cliente',
@@ -92,8 +88,6 @@ export const visitConfirmationTranslations: Record<string, Record<string, string
     'visitConfirmation.form.onBooking': 'En cuanto el cliente reserva la visita',
     'visitConfirmation.form.onAgendaConfirm': 'Cuando la visita se confirma en la Agenda',
     'visitConfirmation.form.help': 'Con «Cuando la visita se confirma en la Agenda», el email y el SMS de confirmación y los recordatorios solo se envían cuando alguien de la empresa marca la visita como confirmada. Las visitas ya reservadas no cambian.',
-    'visitConfirmation.settings.label': 'Confirmar al cliente las visitas creadas en el CRM',
-    'visitConfirmation.settings.help': 'Cuando una visita creada aquí (con lead o cliente) pasa a confirmada, el cliente recibe la confirmación por email y SMS. Solo se aplica a las visitas creadas después de activarlo.',
   },
   fr: {
     'visitConfirmation.title': 'Confirmation au client',
@@ -123,8 +117,6 @@ export const visitConfirmationTranslations: Record<string, Record<string, string
     'visitConfirmation.form.onBooking': 'Dès que le client réserve la visite',
     'visitConfirmation.form.onAgendaConfirm': 'Quand la visite est confirmée dans l’Agenda',
     'visitConfirmation.form.help': 'Avec « Quand la visite est confirmée dans l’Agenda », l’e-mail et le SMS de confirmation et les rappels ne partent que lorsqu’une personne de l’entreprise marque la visite comme confirmée. Les visites déjà réservées ne changent pas.',
-    'visitConfirmation.settings.label': 'Confirmer au client les visites créées dans le CRM',
-    'visitConfirmation.settings.help': 'Lorsqu’une visite créée ici (avec un lead ou un client) devient confirmée, le client reçoit la confirmation par e-mail et SMS. Ne s’applique qu’aux visites créées après l’activation.',
   },
   de: {
     'visitConfirmation.title': 'Bestätigung an den Kunden',
@@ -154,7 +146,5 @@ export const visitConfirmationTranslations: Record<string, Record<string, string
     'visitConfirmation.form.onBooking': 'Sobald der Kunde den Termin bucht',
     'visitConfirmation.form.onAgendaConfirm': 'Wenn der Termin im Kalender bestätigt wird',
     'visitConfirmation.form.help': 'Mit „Wenn der Termin im Kalender bestätigt wird“ werden Bestätigungs-E-Mail, SMS und Erinnerungen erst gesendet, wenn jemand aus dem Unternehmen den Termin als bestätigt markiert. Bereits gebuchte Termine ändern sich nicht.',
-    'visitConfirmation.settings.label': 'Im CRM erstellte Termine dem Kunden bestätigen',
-    'visitConfirmation.settings.help': 'Wenn ein hier erstellter Termin (mit Lead oder Kunde) bestätigt wird, erhält der Kunde die Bestätigung per E-Mail und SMS. Gilt nur für Termine, die nach dem Einschalten erstellt werden.',
   },
 };
