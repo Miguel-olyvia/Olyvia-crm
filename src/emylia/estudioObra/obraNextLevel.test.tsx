@@ -212,3 +212,13 @@ describe("C, D e E. sem cortes; o 3D antes do arranque", () => {
     expect(sec.textContent).toMatch(/A obra ainda não começou/);
   });
 });
+
+describe("G. as saídas para a obra", () => {
+  it("por dia e por quem leva, com o estado", () => {
+    montarObra();
+    fireEvent.click(screen.getByRole("tab", { name: /Materiais/ }));
+    const sec = screen.getByRole("region", { name: "Saídas para a obra" });
+    expect(within(sec).getAllByRole("listitem").length).toBeGreaterThan(0);
+    expect(sec.textContent).toMatch(/leva \d+ materia/);
+  });
+});

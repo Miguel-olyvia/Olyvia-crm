@@ -348,6 +348,19 @@ export function MateriaisDaObra({ ctx, d, dias = [] }: { ctx: Ctx; d: Negocio; d
     return { ti: q.ti, t: tt, contrato: q.contrato, precisa: dia ? dataCurta(dia) : tt ? `dia ${tt.dia + 1}` : "", tarde: !!(m.chega && dia && m.chega > isoDe(dia)) };
   };
   const tarde = G.flatMap((g) => g.itens.filter((m) => linhaDe(g.fase, m).tarde));
+  // as saídas: os materiais agrupados pelo dia e por quem faz a tarefa que precisa deles
+  const saidas = (() => {
+    const M = new Map<string, { dia: number; quando: string; tec: string | null; tarefas: string[]; itens: (typeof todos)[number][]; naObra: boolean; pronto: boolean }>();
+    for (const g of G) for (const m of g.itens) {
+      const x = linhaDe(g.fase, m);
+      if (!x.t) continue;
+      const k = `${x.t.dia}:${x.t.tec ?? ""}`, cur = M.get(k) ?? { dia: x.t.dia, quando: x.precisa, tec: x.t.tec, tarefas: [], itens: [], naObra: true, pronto: true };
+      cur.tarefas.push(nomeCurtoTarefa(x.t.nome)); cur.itens.push(m);
+      cur.naObra &&= m.estado === "na obra"; cur.pronto &&= OK_MAT.has(m.estado);
+      M.set(k, cur);
+    }
+    return [...M.values()].sort((a, b) => a.dia - b.dia);
+  })();
   return (
     <div className="space-y-6">
       <section aria-label="O que chegou e o que falta" className="space-y-3">
@@ -401,6 +414,33 @@ export function MateriaisDaObra({ ctx, d, dias = [] }: { ctx: Ctx; d: Negocio; d
           })}
         </div>
       </section>
+
+      {/* 23/11 (revisão: «a saída do armazém para a obra»): no dia de cada tarefa, o que sai do armazém e quem o leva */}
+      {saidas.length > 0 && (
+        <section aria-label="Saídas para a obra" className="space-y-3">
+          <div>
+            <p className="text-sm font-semibold">Saídas para a obra</p>
+            <p className="text-sm text-muted-foreground">O que sai do armazém, em que dia e quem leva: o material de cada tarefa, no dia em que ela começa.</p>
+          </div>
+          <ol className="space-y-2">
+            {saidas.map((x) => (
+              <li key={`${x.dia}:${x.tec ?? ""}`} className="flex flex-wrap items-start gap-3 rounded-2xl border border-border bg-card p-3">
+                <span className="w-24 shrink-0 text-sm font-semibold tabular-nums">{x.quando}</span>
+                <span className="flex min-w-0 flex-1 items-start gap-2">
+                  <AvatarTec id={x.tec} tam="h-7 w-7" />
+                  <span className="min-w-0">
+                    <span className="block text-sm"><b className="font-medium">{primeiro(nomeTec(x.tec)) || "Sem técnico"}</b> leva {x.itens.length} {x.itens.length === 1 ? "material" : "materiais"} · {[...new Set(x.tarefas)].join(", ")}</span>
+                    <span className="block text-xs text-muted-foreground">{x.itens.map((m) => `${m.n} · ${nfmt(m.q)} ${m.un}`).join(" · ")}</span>
+                  </span>
+                </span>
+                <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", x.naObra ? "bg-success/15 text-success" : x.pronto ? "bg-primary/10 text-primary" : "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200")}>
+                  {x.naObra ? "na obra" : x.pronto ? "pronto a sair" : "ainda não está no armazém"}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
 
       {planeia && (
         <section aria-label="Pedir mais ou devolver" className="space-y-3 rounded-2xl border border-border bg-card p-4">
