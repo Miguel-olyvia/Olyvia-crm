@@ -366,7 +366,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
               {/* troca logo (sem esperar pela saída do anterior), com uma entrada curta */}
               <motion.div key={aba} role="tabpanel" initial={reduzir ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }} className="space-y-6">
                   {aba === "plano" && <>
-                  {viva.prev && !previa && <PrevisaoViva d={d} dias={dias} prev={viva.prev} margem={viva.margem} critico={viva.critico} ir={ir} previsaoRef={previsaoRef} />}
+                  {viva.prev && !previa && <PrevisaoViva d={d} S={S} dias={dias} prev={viva.prev} margem={viva.margem} critico={viva.critico} ir={ir} previsaoRef={previsaoRef} />}
               {/* ------------------------------------------------------------ o plano vivo */}
               <GanttVivo titulo={previa ? "O plano, se aplicar" : R ? "O plano, com o imprevisto" : "O plano vivo"} p={p} R={R} dias={dias} sel={painel?.k === "tarefa" ? painel.ti : null} abrir={(ti) => setPainel({ k: "tarefa", ti })} imprevistos={ims.map((i) => ({ id: i.id, dia: i.dia, texto: i.texto }))} reduzir={reduzir}
                 vista={vista} setVista={setVista} podeMexer={podeMexer} mover={(ti, m) => mudar(ti, () => ctxObra.A.ajustarTarefa(d.id, ti, m))}

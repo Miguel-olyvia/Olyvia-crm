@@ -13,9 +13,12 @@ import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, ArrowUpRight, CalendarCheck, Camera, Check, ChevronLeft, ChevronRight, Euro, FileText, HardHat, Inbox, Package, Rocket, Send, Sparkles, Truck, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { TECS, eur, nfmt, type Estado, type Negocio, type Plano } from "../motor";
+import { TECS, eur, linhaCalc, nfmt, type Estado, type Negocio, type Plano } from "../motor";
 import type { Ctx } from "../pecas";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
+import { custoObra } from "../custoObra";
+import { faseDosMateriais } from "../planoObra";
+import { LINHA_DEMOLICAO } from "../entulho";
 import { dataCurta } from "../planoObra";
 import { blocosForaDaObra, obrasDosTecnicos } from "../preparacaoObra";
 import { materiaisPorFase, progresso } from "../obraOps";
@@ -137,14 +140,15 @@ export function Pulso({ d, S, dias, prev, margem, precisa, ir }: { d: Negocio; S
               {Math.abs(desvioPp) < 0.05 ? "Igual ao orçamento" : `${desvioPp > 0 ? "+" : "−"}${nfmt(Math.round(Math.abs(desvioPp) * 10) / 10)} pp face ao orçamento`}
             </span>}
             {margem && <span className="block text-xs text-muted-foreground">Orçamento: {pct(margem.margemOrc)} · {eur(margem.valor - margem.custoVivo)} € de margem</span>}
+            {/* 23/11 (revisão: «cada coisa num sítio só»): os desvios estão aqui; o Plano já não repete a margem */}
+            {margem && ([["Mão de obra até hoje", -margem.desvioMO], ["O resto, a este ritmo", -margem.projecao], ["Materiais a mais", -margem.materiais], ["Atrasos e erros nossos", -(margem.nossos ?? 0)]] as [string, number][]).filter(([, v]) => Math.abs(v) > 0.5).map(([l, v]) => (
+              <span key={l} className="mt-0.5 flex justify-between gap-2 text-xs"><span>{l}</span><span className={cn("tabular-nums", v < 0 ? "text-destructive" : "text-success")}>{v > 0 ? "+" : ""}{eur(v)} €</span></span>
+            ))}
           </button>
         ) : <div className="hidden lg:block" />}
       </div>
       {/* o resto, secundário e sem cortes */}
       <div className="flex flex-wrap gap-2">
-        <button type="button" onClick={ir.comando} className={cn(secundario, precisa && "border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200")}>
-          <Inbox className="h-4 w-4" aria-hidden="true" />Precisa de ti: <b className="font-semibold tabular-nums">{precisa || "nada"}</b>
-        </button>
         <button type="button" onClick={() => ir.imprevisto()} className={cn(secundario, abertos.length && "border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200")}>
           <AlertTriangle className="h-4 w-4" aria-hidden="true" />Imprevistos: <b className="font-semibold tabular-nums">{abertos.length ? `${abertos.length} em aberto` : ims.length ? `${ims.length} tratados` : "nenhum"}</b>
         </button>
@@ -257,7 +261,14 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
   const vivo = p.estado === "em curso";
   // o que vem a seguir: as entregas de material e as tarefas de amanhã
   const entregas = materiaisPorFase(d).flatMap((g) => g.itens).filter((m) => m.estado === "a chegar" || m.estado === "encomendado" || m.estado === "por encomendar" || m.estado === "em falta").slice(0, 3);
-  const amanha = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.dia === p.dia + 1);
+  // 23/11 (revisão: «A seguir devia mostrar os próximos dias úteis»): os próximos 3 dias com trabalho a começar (antes do arranque, os do
+  // arranque), cada um com quem e o quê
+  const desde = antesDoArranque(p) ? (arranqueDe(p)?.dia ?? 0) : p.dia + 1;
+  const proximos: { k: number; L: { t: (typeof p.tasks)[number]; ti: number }[] }[] = [];
+  for (let k = desde; k < desde + 60 && proximos.length < 3; k++) {
+    const L = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.dia === k);
+    if (L.length) proximos.push({ k, L });
+  }
   const visiveis = pedidos.filter((x) => !feitos.includes(x.k));
   return (
     <section ref={comandoRef} aria-label="Hoje na obra" className="scroll-mt-4 overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
@@ -322,15 +333,82 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
                 <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", m.quando ? "bg-primary/10 text-primary" : "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200")}>{m.quando ? `chega a ${m.quando}` : m.estado}</span>
               </li>
             ))}</ul>
-          ) : <p className="text-sm text-muted-foreground">Os materiais estão todos garantidos.</p>}
-          {amanha.length > 0 && (
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Amanhã começa</p>
-              {amanha.map(({ t, ti }) => <button key={ti} type="button" onClick={() => ir.tarefa(ti)} className="flex w-full items-center gap-2 rounded-xl px-1 py-0.5 text-left text-sm hover:bg-muted"><AvatarTec id={t.tec} tam="h-6 w-6" /><span className="truncate">{t.nome}</span></button>)}
-            </div>
+          ) : <p className="flex items-center gap-1.5 text-sm text-success"><Check className="h-4 w-4" aria-hidden="true" />Os materiais estão todos garantidos.</p>}
+          {proximos.length > 0 && (
+            <ol className="space-y-2.5">
+              {proximos.map(({ k, L }) => (
+                <li key={k}>
+                  <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">{k === p.dia + 1 && !antesDoArranque(p) ? "Amanhã · " : ""}{quando(k)}</p>
+                  {L.map(({ t, ti }) => (
+                    <button key={ti} type="button" onClick={() => ir.tarefa(ti)} title={t.nome} className="mt-1 flex w-full items-center gap-2 rounded-xl px-1 py-0.5 text-left text-sm hover:bg-muted">
+                      <AvatarTec id={t.tec} tam="h-6 w-6" /><span className="min-w-0 truncate"><b className="font-medium">{primeiro(nomeTec(t.tec))}</b> · {nomeCurtoTarefa(t.nome)}</span>
+                      {t.dur > 1 && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{t.dur} dias</span>}
+                    </button>
+                  ))}
+                </li>
+              ))}
+            </ol>
           )}
         </div>
       </div>
+    </section>
+  );
+}
+
+/* ================================================================== 23/11: o custo ao vivo por fase */
+// Revisão de 23/11 («continua a melhorar»): no lugar da margem repetida, o custo de cada fase da obra: a mão de obra prevista contra a real
+// (as horas registadas × o custo da hora de quem as fez, custoObra.ts) e os materiais do orçamento dessa fase. Liga à margem do cabeçalho:
+// o desvio total é o mesmo «Mão de obra até hoje».
+export function custoPorFase(d: Negocio, S: Estado) {
+  const K = custoObra(d, S);
+  const mat = new Map<number, number>();
+  for (const l of d.orc?.linhas ?? []) {
+    if (l.t !== "mat") continue;
+    const f = l.d === LINHA_DEMOLICAO ? 1 : faseDosMateriais(l.d);
+    mat.set(f, (mat.get(f) ?? 0) + (linhaCalc(l, S).custo || 0));
+  }
+  return FASES_OBRA.map((f) => {
+    const mo = K.fases.find((x) => x.fase === f.n), ls = K.linhas.filter((l) => (l.fase ?? 0) === f.n);
+    const comReal = ls.filter((l) => l.real != null);
+    return { n: f.n, nome: f.curto, moPrev: mo?.prev ?? 0, moReal: mo?.real ?? 0, desvio: mo?.desvio ?? 0, hPrev: ls.reduce((a, l) => a + l.hPrev, 0), hReal: comReal.reduce((a, l) => a + (l.hReal ?? 0), 0), registadas: comReal.length, tarefas: ls.length, mat: mat.get(f.n) ?? 0 };
+  }).filter((x) => x.tarefas || x.mat);
+}
+
+function CustoPorFase({ d, S }: { d: Negocio; S?: Estado }) {
+  const reduzir = useReduzir();
+  if (!S || !podeVerCustos() || !d.orc) return <div className="hidden lg:block" />;
+  let L: ReturnType<typeof custoPorFase>;
+  try { L = custoPorFase(d, S); } catch { return <div className="hidden lg:block" />; }
+  const algumReal = L.some((x) => x.registadas > 0), maxPrev = Math.max(1, ...L.map((x) => x.moPrev + x.mat));
+  return (
+    <section aria-label="O custo por fase" className="min-w-0 space-y-3">
+      <div>
+        <p className="text-sm font-semibold">O custo por fase</p>
+        <p className="text-xs text-muted-foreground">{algumReal ? "A mão de obra real (as horas registadas × o custo da hora) contra a prevista, e os materiais do orçamento." : "Ainda sem horas registadas: o orçado de cada fase, mão de obra e materiais."}</p>
+      </div>
+      <ul className="space-y-3">
+        {L.map((x) => {
+          const Ic = ICONE_DA_FASE[x.n] ?? Package, cor = COR_FASE[x.n];
+          const prev = x.moPrev + x.mat, vivo = prev + x.desvio;
+          return (
+            <li key={x.n} className="space-y-1">
+              <div className="flex items-center gap-2 text-sm">
+                <span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-white" style={{ background: cor }}><Ic className="h-3.5 w-3.5" /></span>
+                <span className="min-w-0 flex-1 font-medium">{x.nome}</span>
+                <span className="tabular-nums">{eur(algumReal ? vivo : prev)} €</span>
+                {algumReal && Math.abs(x.desvio) > 0.5 && <span className={cn("text-xs tabular-nums", x.desvio > 0 ? "text-destructive" : "text-success")}>{x.desvio > 0 ? "+" : ""}{eur(x.desvio)} €</span>}
+              </div>
+              <div className="flex h-2 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                <motion.div className="h-full" style={{ background: cor }} initial={reduzir ? false : { width: 0 }} animate={{ width: `${(x.moPrev / maxPrev) * 100}%` }} transition={{ duration: 0.6 }} />
+                <motion.div className="h-full opacity-40" style={{ background: cor }} initial={reduzir ? false : { width: 0 }} animate={{ width: `${(x.mat / maxPrev) * 100}%` }} transition={{ duration: 0.6 }} />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Mão de obra {eur(x.moPrev)} € ({nfmt(Math.round(x.hPrev * 10) / 10)} h){x.registadas ? ` · real ${eur(x.moReal)} € em ${nfmt(Math.round(x.hReal * 10) / 10)} h (${x.registadas} de ${x.tarefas} ${x.tarefas === 1 ? "tarefa" : "tarefas"})` : ""} · materiais {eur(x.mat)} €
+              </p>
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }
@@ -372,7 +450,7 @@ function CalendarioFases({ p, quando }: { p: Plano; quando: (k: number) => strin
   );
 }
 
-export function PrevisaoViva({ d, dias, prev, margem, critico, ir, previsaoRef }: { d: Negocio; dias: Date[]; prev: Previsao; margem: MargemViva | null; critico: Set<number>; ir: Ir; previsaoRef: React.RefObject<HTMLElement> }) {
+export function PrevisaoViva({ d, S, dias, prev, margem: _margem, critico, ir, previsaoRef }: { d: Negocio; S?: Estado; dias: Date[]; prev: Previsao; margem: MargemViva | null; critico: Set<number>; ir: Ir; previsaoRef: React.RefObject<HTMLElement> }) {
   const reduzir = useReduzir();
   const p = d.obra.plano!, quando = quandoDe(dias);
   const W = 640, H = 180, n = Math.max(2, prev.planeadas.length, prev.ate), max = Math.max(prev.totalH, ...prev.reais, 1);
@@ -384,15 +462,6 @@ export function PrevisaoViva({ d, dias, prev, margem, critico, ir, previsaoRef }
   const antes = antesDoArranque(p);
   // a previsão: do real de hoje ao total no fim provável, com a margem de datas (de … até)
   const realHoje = prev.reais[prev.reais.length - 1] ?? 0, fimK = Math.min(n - 1, prev.fimProvavel - 1);
-  const verMargem = !!margem && podeVerCustos();
-  const desvios = margem ? [
-    { l: "Mão de obra até hoje", v: -margem.desvioMO },
-    { l: "O resto, a este ritmo", v: -margem.projecao },
-    { l: "Materiais a mais", v: -margem.materiais },
-    ...(margem.nossos ? [{ l: "Atrasos e erros nossos", v: -margem.nossos }] : []),
-  ].filter((x) => Math.abs(x.v) > 0.5) : [];
-  const dpp = margem ? (margem.margemViva - margem.margemOrc) * 100 : 0;
-  const escala = (m: number) => `${Math.max(0, Math.min(100, (m / Math.max(0.5, (margem?.margemOrc ?? 0.3) * 1.5)) * 100))}%`;
   return (
     <section ref={previsaoRef} aria-label="A previsão viva" className="scroll-mt-4 grid grid-cols-1 gap-4 rounded-3xl border border-border bg-card p-4 shadow-sm lg:grid-cols-[1.6fr_1fr] sm:p-5">
       {antes ? <CalendarioFases p={p} quando={quando} /> : (
@@ -432,28 +501,8 @@ export function PrevisaoViva({ d, dias, prev, margem, critico, ir, previsaoRef }
         <p className="h-5 text-xs tabular-nums text-muted-foreground">{sob != null ? `${quando(sob)}: ${nfmt(prev.planeadas[sob] ?? 0)} h planeadas${prev.reais[sob] != null ? ` · ${nfmt(prev.reais[sob])} h reais` : ""}` : `${nfmt(prev.feitoH)} de ${nfmt(prev.totalH)} h feitas · passe o dedo no gráfico`}</p>
       </div>
       )}
-      <div className="min-w-0 space-y-4">
-        {verMargem && margem && (
-          <section aria-label="Margem ao vivo" className="space-y-3">
-            <div className="flex items-end justify-between gap-2">
-              <p className="text-sm font-semibold">Margem ao vivo</p>
-              <p className={cn("text-xs font-medium", dpp < -0.05 ? "text-destructive" : dpp > 0.05 ? "text-success" : "text-muted-foreground")}>{Math.abs(dpp) < 0.05 ? "Igual ao orçamento" : `${dpp > 0 ? "+" : "−"}${nfmt(Math.round(Math.abs(dpp) * 10) / 10)} pp face ao orçamento`}</p>
-            </div>
-            <p className="text-3xl font-semibold tabular-nums">{pct(margem.margemViva)} <span className="text-base font-normal text-muted-foreground">· {eur(margem.valor - margem.custoVivo)} €</span></p>
-            {/* um só indicador: a barra é a margem de hoje, o traço é a do orçamento */}
-            <div className="relative h-3 rounded-full bg-muted" role="img" aria-label={`Margem de hoje ${pct(margem.margemViva)}; do orçamento ${pct(margem.margemOrc)}`}>
-              <motion.div className={cn("absolute inset-y-0 left-0 rounded-full", dpp < -0.05 ? "bg-destructive" : "bg-primary")} initial={reduzir ? false : { width: 0 }} animate={{ width: escala(margem.margemViva) }} transition={{ duration: 0.7 }} />
-              <span aria-hidden="true" className="absolute -inset-y-1 w-0.5 rounded-full bg-foreground" style={{ left: escala(margem.margemOrc) }} />
-            </div>
-            <p className="text-xs text-muted-foreground">O traço é a margem do orçamento: {pct(margem.margemOrc)} · {eur(margem.valor - margem.custoOrc)} €.</p>
-            {desvios.length ? (
-              <ul className="space-y-1 text-sm">
-                {desvios.map((x) => <li key={x.l} className="flex justify-between gap-2"><span>{x.l}</span><span className={cn("tabular-nums", x.v < 0 ? "text-destructive" : "text-success")}>{x.v > 0 ? "+" : ""}{eur(x.v)} €</span></li>)}
-              </ul>
-            ) : <p className="flex items-center gap-1.5 rounded-xl bg-success/10 px-3 py-2 text-sm text-success"><Check className="h-4 w-4" aria-hidden="true" />Sem desvios: a obra está no orçamento.</p>}
-          </section>
-        )}
-      </div>
+      {/* 23/11 (revisão: «cada coisa num sítio só»): a margem está no cabeçalho; aqui, o custo por fase */}
+      <CustoPorFase d={d} S={S} />
       {/* 23/11 (Rúben: «a lista deve ser refeita, muito mais bonita, corrida, com as fases bem identificadas e icons»): a toda a largura */}
       <CaminhoCritico p={p} critico={critico} quando={quando} abrir={ir.tarefa} />
     </section>

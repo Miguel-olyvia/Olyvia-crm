@@ -66,9 +66,10 @@ describe("3. a curva S e a margem", () => {
     const pv = screen.getByRole("region", { name: "A previsão viva" });
     expect(within(pv).getByRole("img", { name: /fim provável/ })).toBeTruthy();
     expect(within(pv).getByText("Previsão")).toBeTruthy();
-    const m = within(pv).getByRole("region", { name: "Margem ao vivo" });
-    expect(within(m).getAllByRole("img")).toHaveLength(1);
-    expect(within(m).queryByText("Do orçamento")).toBeNull();
+    // revisão de 23/11: a margem fica só no cabeçalho; no Plano, o custo por fase
+    expect(within(pv).queryByText("Margem ao vivo")).toBeNull();
+    const c = within(pv).getByRole("region", { name: "O custo por fase" });
+    expect(within(c).getAllByText(/Mão de obra .* € \(/).length).toBeGreaterThan(0);
   });
   it("antes do arranque: o calendário das fases em vez da curva vazia", () => {
     montarObra(obraPorComecar());
@@ -183,5 +184,21 @@ describe("9. o telemóvel do gestor", () => {
     fireEvent.click(within(nav).getByRole("button", { name: "Imprevisto" }));
     expect(screen.getByRole("complementary", { name: "Registar imprevisto" })).toBeTruthy();
     expect(within(nav).getByRole("button", { name: /Validar a tarefa feita/ })).toBeTruthy();
+  });
+});
+
+describe("A e B. sem repetições; «A seguir» com os próximos dias", () => {
+  it("«Precisa de ti» só no painel; a margem só no cabeçalho", () => {
+    montarObra();
+    const pulso = screen.getByRole("region", { name: "O pulso da obra" });
+    expect(within(pulso).queryByText(/Precisa de ti/)).toBeNull();
+    expect(screen.getAllByText("Margem ao vivo")).toHaveLength(1);
+  });
+  it("antes do arranque, «A seguir» mostra os primeiros dias de trabalho, com quem e o quê", () => {
+    const x = obraPorComecar();
+    montarObra(x);
+    const hoje = screen.getByRole("region", { name: "Hoje na obra" });
+    const p = x.d.obra.plano!, primeira = [...p.tasks].sort((a, b) => a.dia - b.dia)[0];
+    expect(within(hoje).getAllByTitle(primeira.nome).length).toBe(2); // o cartão do arranque e «A seguir»
   });
 });
