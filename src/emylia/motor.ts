@@ -871,8 +871,10 @@ export function criarOrc(d: Negocio, S: Estado): Orcamento {
     const sv = garantirServico(S, sid);
     if (sv && t.q > 0) linhas.push(linhaSvc(d, S, sid, t.q, sv));
   }
-  // os materiais do modelo descem pelo que os produtos escolhidos já cobrem (sem produtos, ficam iguais)
-  const mm = materiaisDoModelo(L.mat, prod, d.visita.manter, undefined, d.visita.semParte, !!d.f.estudio);
+  // os materiais do modelo descem pelo que os produtos escolhidos já cobrem (sem produtos, ficam iguais).
+  // 23/11 (teste real P-2026-0932, Mudelar): com um «MO Modelo» do Catálogo no orçamento não entram: o modelo já inclui os materiais
+  // e o pequeno material, e os produtos vêm em linhas próprias (antes sobrava «colas e pequeno material», 216,80 €, que o contrato não tem).
+  const mm = temModeloNasLinhas(linhas) ? null : materiaisDoModelo(L.mat, prod, d.visita.manter, undefined, d.visita.semParte, !!d.f.estudio);
   if (mm) linhas.push({ t: "mat", d: L.mat.d, custo: mm.custo, preco: mm.preco });
   linhas.push(...linhasDosProdutos(prod), ...linhasClienteCompra(d.visita, servicosVisita(d), d.f.materiais_cliente === "Sim"));
   const o: Orcamento = { modelo: L.modelo, linhas, desconto: 0, vendaDireta: false, verif: false, aprov: null, enviada: null, aceite: null, contrato: null, avisosVistos: {} };
@@ -967,10 +969,12 @@ export function sincronizarDemolicao(d: Negocio, _S: Estado) {
 
 /** 26/10: o orçamento tem um serviço dos «Modelos de obra» do Catálogo (MO Modelo Remodelação Completa…), que já inclui a demolição,
  *  o entulho, as proteções e a logística. */
-export const temModeloDeObra = (o: Orcamento): boolean => o.linhas.some((l) => l.t === "svc" && itemCatalogo(l.sid)?.cat === "Modelos de obra");
+export const temModeloDeObra = (o: Orcamento): boolean => temModeloNasLinhas(o.linhas);
+const temModeloNasLinhas = (linhas: LinhaOrc[]): boolean => linhas.some((l) => l.t === "svc" && itemCatalogo(l.sid)?.cat === "Modelos de obra");
 /** 26/10: as proteções e o transporte do levantamento que um «MO Modelo» do Catálogo já inclui (o caso real P-2026-0109: a Mudelar não
- *  as cobra à parte). O estacionamento pago, o amianto e as percentagens continuam a entrar. */
-const NO_MODELO_DE_OBRA = new Set(["diag_distancia_entrada", "diag_portas_proteger", "diag_mobilada", "tem_elevador", "andar"]);
+ *  as cobra à parte). O estacionamento pago, o amianto e as percentagens continuam a entrar.
+ *  23/11 (teste real P-2026-0932): a aspiração do pó dos cortes também (o modelo inclui a delimitação, proteção e isolamento da zona). */
+const NO_MODELO_DE_OBRA = new Set(["diag_distancia_entrada", "diag_portas_proteger", "diag_mobilada", "tem_elevador", "andar", "diag_local_cortes"]);
 /** 26/10: o efeito do gás do levantamento já está num serviço do orçamento (a anulação, c7; a instalação, c34 ou a subempreitada). */
 const GAS_NO_ORCAMENTO: Record<string, SvcId[]> = { Anular: ["c7"], Instalar: ["c34", "s-moisgas", "s-matisgas"] };
 
@@ -1027,7 +1031,8 @@ export function sincronizarEfeitos(d: Negocio, _S: Estado) {
     .filter((e) => !(e.k === "diag_gas" && (GAS_NO_ORCAMENTO[d.f.diag_gas] ?? []).some((sid) => o.linhas.some((l) => l.t === "svc" && l.sid === sid && l.q > 0))))
     .filter((e) => !(modelo && NO_MODELO_DE_OBRA.has(e.k)));
   const fator = ef.find((e) => e.t === "material")?.fator ?? 1;
-  const mm = materiaisDoModelo(L.mat, d.visita.prod ?? [], d.visita.manter, undefined, d.visita.semParte, !!d.f.estudio);
+  // 23/11: com um «MO Modelo» os materiais do modelo não entram (o modelo já os inclui; ver criarOrc)
+  const mm = modelo ? null : materiaisDoModelo(L.mat, d.visita.prod ?? [], d.visita.manter, undefined, d.visita.semParte, !!d.f.estudio);
   if (tinhaMat && fator > 0 && mm) o.linhas.push({ t: "mat", d: L.mat.d, custo: r2(mm.custo * fator), preco: r2(mm.preco * fator) });
   let bc = 0, bp = 0;
   for (const l of o.linhas) if (l.t === "svc") { bc += l.cu * l.q; bp += l.pu * l.q; }

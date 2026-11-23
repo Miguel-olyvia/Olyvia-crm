@@ -222,6 +222,28 @@ describe("o levantamento com um «MO Modelo» no orçamento", () => {
     expect(lev().some((x) => /Proteção|Plástico|Cobrir|Transporte/.test(x))).toBe(false);
     expect(lev().some((x) => x.startsWith("Estacionamento pago"))).toBe(true);
   });
+
+  // 23/11 (teste real P-2026-0932, Mudelar): o contrato tem o «MO Modelo» e os produtos em linhas próprias; o orçamento juntava ainda
+  // a estimativa dos materiais do modelo («colas e pequeno material», 216,80 €) e a aspiração do pó dos cortes (50 €), que o modelo inclui.
+  it("os materiais do modelo e a aspiração dos cortes não entram (o modelo já os inclui); sem o modelo, entram", () => {
+    const { S, A, d } = preparar();
+    const mat = LINHAS[d.linha].mat.d;
+    const temMat = () => d.orc!.linhas.some((l) => l.t === "mat" && l.d === mat);
+    const aspiracao = () => d.orc!.linhas.some((l) => l.t === "mat" && l.d === "Levantamento · Aspiração de pó nos cortes");
+    A.campo(d.id, "diag_local_cortes", "Na própria área");
+    expect(aspiracao()).toBe(true);
+    expect(temMat()).toBe(true);
+    const sid = SID("MOMRCCBC");
+    S.svc[sid] = servicoDoCatalogo(sid, S)!;
+    d.orc!.linhas.push({ t: "svc", sid, q: 1, cu: 0, pu: S.svc[sid].preco });
+    A.campo(d.id, "diag_local_cortes", "Na própria área");
+    expect(aspiracao()).toBe(false);
+    expect(temMat()).toBe(false);
+    // tirado o modelo, voltam
+    d.orc!.linhas = d.orc!.linhas.filter((l) => !(l.t === "svc" && l.sid === sid));
+    A.campo(d.id, "diag_local_cortes", "Na própria área");
+    expect(aspiracao()).toBe(true);
+  });
 });
 
 describe("o valor das prestações", () => {
