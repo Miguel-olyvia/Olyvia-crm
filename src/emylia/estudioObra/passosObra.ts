@@ -10,7 +10,7 @@ import { nomeCurtoTarefa } from "./planoVivo";
 /** Os campos de planeamento de uma tarefa (o que se anula). A execução (os registos do técnico, a validação) nunca se toca. */
 const CAMPOS = ["nome", "dia", "dur", "h", "tec", "deps", "semDeps", "nota", "mats", "fase", "sk", "perfilId", "svcs", "nova", "q"] as const;
 export type TarefaPlano = Partial<Pick<Tarefa, (typeof CAMPOS)[number]>>;
-export interface RetratoPlano { tasks: TarefaPlano[]; estado: string }
+export interface RetratoPlano { tasks: TarefaPlano[]; estado: string; /** 23/11: os dias em que cada técnico pode vir */ restricoes?: { tec: string; dias: number[] }[] }
 export interface Retrato { plano: RetratoPlano; fora: Record<string, string>; hist: number }
 
 const tirar = (t: Tarefa): TarefaPlano => {
@@ -34,7 +34,7 @@ function foraDe(d: Negocio): Record<string, string> {
 export function retratoDe(d: Negocio): Retrato | null {
   const p = d.obra.plano;
   if (!p) return null;
-  return { plano: { tasks: p.tasks.map(tirar), estado: p.estado }, fora: foraDe(d), hist: d.hist.length };
+  return { plano: { tasks: p.tasks.map(tirar), estado: p.estado, ...(p.restricoes?.length ? { restricoes: JSON.parse(JSON.stringify(p.restricoes)) } : {}) }, fora: foraDe(d), hist: d.hist.length };
 }
 
 const PORQUE: Record<string, string> = {
@@ -79,6 +79,7 @@ export function descrever(a: RetratoPlano, b: RetratoPlano, quando: (k: number) 
     else if (x.h !== t.h) out.push(`${nome}: horas mudadas`);
     else if (x.nota !== t.nota) out.push(`${nome}: nota mudada`);
   });
+  if (JSON.stringify(a.restricoes ?? []) !== JSON.stringify(b.restricoes ?? [])) out.unshift("Os dias de um técnico mudaram");
   if (a.estado !== b.estado && !out.length) out.push(`Plano: ${a.estado} → ${b.estado}`);
   return out.length ? out[0] + (out.length > 1 ? ` (e mais ${out.length - 1})` : "") : "Mudança no plano";
 }

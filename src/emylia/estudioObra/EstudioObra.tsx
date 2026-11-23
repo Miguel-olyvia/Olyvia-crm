@@ -20,7 +20,7 @@ import type { Ctx } from "../pecas";
 import { NaFrente } from "../NaFrente";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
 import { dataCurta, diasDaObra, isoDia } from "../planoObra";
-import { blocosForaDaObra, faltaParaArrancar, inicioDoPlano, motivoOcupado, obraQueOcupa, obrasDosTecnicos, ocupacaoDosTecnicos, tecnicosDoOficio } from "../preparacaoObra";
+import { diasQuePode, blocosForaDaObra, faltaParaArrancar, inicioDoPlano, motivoOcupado, obraQueOcupa, obrasDosTecnicos, ocupacaoDosTecnicos, tecnicosDoOficio } from "../preparacaoObra";
 import { materiaisPorFase, porValidar, progresso } from "../obraOps";
 import { enviosDe, MOTIVOS_AJUSTE } from "../trabalhoObra";
 import { fimDe } from "../ajustesPlano";
@@ -40,13 +40,14 @@ import { porqueNaoMexe, TECS } from "../motor";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { DispersaoDaEquipa, Aba, ClienteDaObra, EquipaDaObra, Execucao, ExecucaoTarefa, FechoDaObra, MateriaisDaObra } from "./PaineisObra";
 import { AgendaEquipa, ComandoHoje, DiarioObra, FechoVivo, PontoDaSemana, PrevisaoViva, Pulso, precisaDeTi, obraViva, type Ir } from "./ComandoObra";
-import { ROTULO_VIVO, comLigacao, conflitosNovos, ligacoesDoPlano, nomeCurtoTarefa, porqueNaoLigar, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
+import { ROTULO_VIVO, comLigacao, comRestricao, naoCabem, conflitosNovos, ligacoesDoPlano, nomeCurtoTarefa, porqueNaoLigar, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
 import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
 import { custoDosNossos, pedePorque, type AjusteObra } from "./quemPaga";
 import { PorqueAjuste, type ImprevistoInicial } from "./PorqueAjuste";
 import { tomarPainelObra } from "./painelPedido";
 import { AdendasDaObra } from "./AdendasObra";
 import { AvisarTecnicos } from "./AvisarTecnicos";
+import { DiasDoTecnico } from "./DiasDoTecnico";
 import { avisosPorDar, comTecnicos, marcasDe, segurarAvisos, type MarcaTarefa } from "./avisosTecnicos";
 import { definirQuemAssina } from "./quemAssina";
 import { useNomeParaMarcaDagua } from "@/hooks/useNomeParaMarcaDagua";
@@ -70,7 +71,9 @@ const dd = (n: number) => `${n} ${Math.abs(n) === 1 ? "dia útil" : "dias úteis
 
 type Previa = { titulo: string; k: "replanear"; adiantar: boolean } | { titulo: string; k: "atraso"; ti: number; dias: number }
   /** 23/11: pôr («ligar») ou tirar a ligação «para só começa quando de acaba» */
-  | { titulo: string; k: "ligar"; para: number; de: number; ligar: boolean };
+  | { titulo: string; k: "ligar"; para: number; de: number; ligar: boolean }
+  /** 23/11 (revisão: «o Elvis só pode na quinta»): o técnico só pode nos dias da semana dados (null: tirar) */
+  | { titulo: string; k: "restricao"; tec: string; dias: number[] | null };
 type Painel = { k: "tarefa"; ti: number } | { k: "imprevisto"; ti?: number; inicial?: ImprevistoInicial } | { k: "nova"; inicial?: { dia?: number; tec?: string | null } }
   /** 12/11 (quem paga): o «Porquê?» de uma mudança com a obra em curso (volta: a tarefa aberta antes) */
   | { k: "porque"; aj: AjusteObra; volta?: number } | null;
@@ -257,7 +260,8 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   if (!p) return null;
   // as outras obras (para os técnicos noutra obra): lê-se a cada desenho, porque o estado muda no sítio
   const ocup = ocupacaoDosTecnicos(S, d.id);
-  const R: Replano | null = previa ? (previa.k === "atraso" ? simularAtraso(p, previa.ti, previa.dias, ocup) : previa.k === "ligar" ? replanear(comLigacao(p, previa.para, previa.de, previa.ligar), ocup, { adiantar: false }) : replanear(p, ocup, { adiantar: previa.adiantar }))
+  const R: Replano | null = previa ? (previa.k === "atraso" ? simularAtraso(p, previa.ti, previa.dias, ocup) : previa.k === "ligar" ? replanear(comLigacao(p, previa.para, previa.de, previa.ligar), ocup, { adiantar: false })
+    : previa.k === "restricao" ? replanear(comRestricao(p, previa.tec, previa.dias), ocup, { adiantar: false }) : replanear(p, ocup, { adiantar: previa.adiantar }))
     : fantasma && painel?.k === "imprevisto" ? replanoDe(p, fantasma) : null;
   const fora: ConflitoFora[] = R ? conflitosNovos(S, d, R.plano) : [];
   const alertas = alertasDaObra(d, S, ocup, inv);
@@ -316,6 +320,12 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   const pedirLigacao = (para: number, de: number, ligar: boolean) => {
     const a = nomeCurtoTarefa(p.tasks[para]?.nome ?? ""), b = nomeCurtoTarefa(p.tasks[de]?.nome ?? "");
     setPrevia({ titulo: ligar ? `Ligar: ${a} só começa quando ${b} acabar` : `Tirar a ligação: ${a} deixa de esperar por ${b}`, k: "ligar", para, de, ligar });
+  };
+  // 23/11 (revisão: «o Elvis só pode na quinta»): o «E se…?» com os dias em que o técnico pode vir (a partir do controlo à vista no Plano)
+  const pedirRestricao = (tec: string, ds: number[] | null) => {
+    const nome = (nomeTec(tec) || tec).split(" ")[0];
+    setPrevia({ titulo: ds && ds.length ? `${nome} só pode ${diasQuePode(ds)}` : `${nome} volta a poder todos os dias`, k: "restricao", tec, dias: ds && ds.length ? ds : null });
+    window.setTimeout(() => document.querySelector('[aria-label="Antes de aplicar"]')?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
   };
   const abrirImprevisto = (x: ImprevistoInicial) => { setPrevia(null); setPainel({ k: "imprevisto", ti: x.ti, inicial: x }); };
   const n = {
@@ -460,6 +470,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
                 nova={podeCriar ? (dia, tec) => setPainel({ k: "nova", inicial: { dia, tec } }) : undefined} obras={obras} deFerias={deFerias} abrirOutra={setOutra}
                 critico={viva.critico} passar={planeia && !acabou ? (ti, tec) => mudar(ti, () => A.trocarTec(d.id, ti, tec)) : undefined}
                 ligar={planeia && !acabou ? (para, de) => pedirLigacao(para, de, true) : undefined} />
+              {planeia && !acabou && <DiasDoTecnico p={p} pedir={pedirRestricao} />}
 
               <div className="grid gap-6 lg:grid-cols-2">
                 {/* ------------------------------------------------------------ os alertas */}
@@ -987,7 +998,7 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
   const { A, run } = ctx;
   const reduzir = useReduzir();
   // o motivo por omissão segue o que acontece: espera por um técnico, só adianta, ou um atraso (sem motivo escolhido, fica «Pôr o plano em dia»)
-  const [motivo, setMotivo] = useState<string>(previa.k === "atraso" ? "Imprevisto na obra" : R.mudancas.some((m) => m.espera) ? "Técnico indisponível"
+  const [motivo, setMotivo] = useState<string>(previa.k === "atraso" ? "Imprevisto na obra" : previa.k === "restricao" ? "Técnico indisponível" : R.mudancas.some((m) => m.espera) ? "Técnico indisponível"
     : R.mudancas.length && R.mudancas.every((m) => m.tipo === "adiantada") ? "Mais rápido do que previsto" : "");
   const p0 = d.obra.plano!;
   // quem do mesmo ofício está livre para a tarefa que espera (a partir de quando podia começar sem esperar)
@@ -997,11 +1008,15 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
   };
   const [cliente, setCliente] = useState(true);
   const df = R.fimDepois - R.fimAntes;
+  // 23/11: as tarefas do técnico com dias marcados que, mesmo replaneadas, caem num dia em que ele não pode
+  const i0 = inicioDoPlano(p0), datasR = i0 ? diasDaObra(i0, R.fimDepois + 5) : [];
+  const nc = previa.k === "restricao" && previa.dias ? naoCabem(R.plano, previa.tec, previa.dias, (k) => datasR[k] ?? null) : [];
   // a obra onde está o técnico por quem a tarefa espera (nos dias em que ela começaria pela ordem do plano)
   const esperaObra = (m: Replano["mudancas"][number]) => (m.espera ? obraQueOcupa(ctx.S, m.espera.tec, { dia: Math.min(m.de.dia, m.para.dia), dur: Math.abs(m.para.dia - m.de.dia) + m.para.dur }, R.plano, d.id) : null);
   const quando = (k: number) => (dias[k] ? dataCurta(dias[k]) : `dia ${k + 1}`);
   const aplicar = () => {
     if (previa.k === "ligar") run(() => A.ligarTarefas(d.id, previa.para, previa.de, previa.ligar, { motivo, cliente: cliente && R.mudancas.length > 0 }));
+    else if (previa.k === "restricao") run(() => A.restricaoTecnico(d.id, previa.tec, previa.dias, { motivo: motivo || "Técnico indisponível", cliente: cliente && R.mudancas.length > 0 }));
     else run(() => A.replanearObra(d.id, { adiantar: previa.k === "replanear" && previa.adiantar, motivo, cliente, ...(previa.k === "atraso" ? { atraso: { ti: previa.ti, dias: previa.dias } } : {}) }));
     setPrevia(null);
   };
@@ -1043,7 +1058,7 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
                 {m.tipo === "adiantada" ? <FastForward className="h-3.5 w-3.5 text-success" aria-hidden="true" /> : <TrendingUp className="h-3.5 w-3.5 text-amber-700" aria-hidden="true" />}
                 <span className="font-medium" title={m.nome}>{nomeCurtoTarefa(m.nome)}</span>
                 <span className="text-muted-foreground">{m.tipo === "prolongada" ? `${m.de.dur} → ${m.para.dur} dias` : `${quando(m.de.dia)} → ${quando(m.para.dia)}`}</span>
-                {m.espera && <span className="text-amber-800 dark:text-amber-300">· espera pelo {primeiro(nomeTec(m.espera.tec))} ({m.espera.motivo === "noutra obra" && esperaObra(m) ? <>está na obra <button type="button" onClick={() => abrirOutra(esperaObra(m)!)} className="font-medium underline underline-offset-2 hover:no-underline">{esperaObra(m)!.nome}</button></> : `está ${m.espera.motivo}`})</span>}
+                {m.espera && <span className="text-amber-800 dark:text-amber-300">· espera pelo {primeiro(nomeTec(m.espera.tec))} ({m.espera.motivo === "noutra obra" && esperaObra(m) ? <>está na obra <button type="button" onClick={() => abrirOutra(esperaObra(m)!)} className="font-medium underline underline-offset-2 hover:no-underline">{esperaObra(m)!.nome}</button></> : m.espera.motivo.startsWith("só ") ? m.espera.motivo : `está ${m.espera.motivo}`})</span>}
                 {m.espera && livresPara(m).map((x) => (
                   <button key={x.id} type="button" onClick={() => run(() => A.trocarTec(d.id, m.ti, x.id))}
                     className="inline-flex min-h-8 items-center gap-1 rounded-full border border-primary/40 bg-card px-2.5 text-sm font-medium text-primary hover:bg-primary/[0.06]">
@@ -1056,6 +1071,30 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
           </ul>
         </div>
       </div>
+
+      {/* 23/11: as tarefas do técnico que não cabem nos dias dele (vários dias seguidos): passar a outro do ofício */}
+      {nc.length > 0 && previa.k === "restricao" && (
+        <div role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+          <p className="font-medium">Não {nc.length === 1 ? "cabe" : "cabem"} só {previa.dias ? diasQuePode(previa.dias) : ""}:</p>
+          <ul className="mt-1 space-y-1.5">
+            {nc.map((ti) => {
+              const t = p0.tasks[ti];
+              return (
+                <li key={ti} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span><b className="font-medium" title={t.nome}>{nomeCurtoTarefa(t.nome)}</b> ({t.dur} {t.dur === 1 ? "dia" : "dias"} seguidos)</span>
+                  {tecnicosDoOficio(t).filter((x) => x.id !== previa.tec && motivoOcupado(x.id, { dia: R.plano.tasks[ti].dia, dur: t.dur, h: t.h }, R.plano, ocup) == null).slice(0, 2).map((x) => (
+                    <button key={x.id} type="button" onClick={() => run(() => A.trocarTec(d.id, ti, x.id))}
+                      className="inline-flex min-h-8 items-center gap-1 rounded-full border border-primary/40 bg-card px-2.5 text-sm font-medium text-primary hover:bg-primary/[0.06]">
+                      <Lightbulb className="h-3.5 w-3.5" aria-hidden="true" />Passar para {primeiro(x.n)}, que está livre
+                    </button>
+                  ))}
+                </li>
+              );
+            })}
+          </ul>
+          <p className="mt-1.5 text-amber-800/90 dark:text-amber-200/80">Se aplicar na mesma, {nc.length === 1 ? "fica nos dias que o plano lhe dá" : "ficam nos dias que o plano lhes dá"}, fora dos dias dele.</p>
+        </div>
+      )}
 
       {/* o impacto nas outras obras dos mesmos técnicos */}
       <div className={cn("rounded-xl p-3 text-sm", fora.length ? "bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200" : "bg-success/10 text-success")}>
@@ -1093,14 +1132,17 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
       {!R.mudancas.length && previa.k === "ligar" && (
         <p role="status" className="rounded-xl bg-muted/60 px-4 py-3 text-[15px]"><b className="font-medium">As datas não mudam.</b> {previa.ligar ? "A ligação fica no plano: se a primeira atrasar, a outra espera." : "A ligação sai do plano; as datas ficam como estão."}</p>
       )}
-      {!R.mudancas.length && previa.k !== "ligar" && (
+      {!R.mudancas.length && previa.k === "restricao" && (
+        <p role="status" className="rounded-xl bg-muted/60 px-4 py-3 text-[15px]"><b className="font-medium">As datas não mudam.</b> {previa.dias ? "Os dias ficam no plano: os próximos replaneamentos contam com eles." : "A restrição sai do plano; as datas ficam como estão."}</p>
+      )}
+      {!R.mudancas.length && previa.k !== "ligar" && previa.k !== "restricao" && (
         <p role="status" className="rounded-xl bg-muted/60 px-4 py-3 text-[15px]">
           <b className="font-medium">O plano já está em dia.</b> As tarefas começam o mais cedo possível e os técnicos têm horas livres nesses dias.
           {" "}Para mudar uma tarefa, arraste a barra no plano, ou abra-a para a passar a outro técnico.
         </p>
       )}
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        {R.mudancas.length || previa.k === "ligar" ? <>
+        {R.mudancas.length || previa.k === "ligar" || previa.k === "restricao" ? <>
           <Button type="button" variant="ghost" size="lg" onClick={() => setPrevia(null)}>Cancelar</Button>
           <Button type="button" size="lg" onClick={aplicar}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />{previa.k === "ligar" ? (previa.ligar ? "Ligar e aplicar" : "Tirar e aplicar") : "Aplicar ao plano"}</Button>
         </> : <Button type="button" size="lg" variant="outline" onClick={() => setPrevia(null)}>Fechar</Button>}

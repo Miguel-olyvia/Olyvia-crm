@@ -413,6 +413,13 @@ export function extensaoTarefa(t: Extensao): [number, number] {
 export const sobrepostas = (a: Extensao, b: Extensao) => { const [a0, a1] = extensaoTarefa(a), [b0, b1] = extensaoTarefa(b); return a0 < b1 - 1e-6 && b0 < a1 - 1e-6; };
 
 /** Porque é que um técnico não está livre para uma tarefa (null: livre). */
+const NOMES_DIAS = ["domingos", "segundas", "terças", "quartas", "quintas", "sextas", "sábados"];
+/** «às quintas», «às segundas e quintas» (os dias em que um técnico pode vir a uma obra). */
+export function diasQuePode(dias: readonly number[]): string {
+  const L = [...dias].sort((a, b) => a - b).map((x) => NOMES_DIAS[x]);
+  return "às " + (L.length > 1 ? `${L.slice(0, -1).join(", ")} e ${L[L.length - 1]}` : L[0] ?? "");
+}
+
 export function motivoOcupado(tecId: string, t: Extensao, plano: Plano, ocupados: Map<string, Set<string>>, outras: readonly (Extensao & Pick<Tarefa, "tec">)[] = []): string | null {
   const tec = TECS.find((x) => x.id === tecId);
   if (!tec) return null;
@@ -421,6 +428,9 @@ export function motivoOcupado(tecId: string, t: Extensao, plano: Plano, ocupados
   const i0 = inicioDoPlano(plano);
   if (i0) {
     const ds = diasDaObra(i0, t.dia + t.dur);
+    // 23/11 (revisão: «o Elvis só pode na quinta»): os dias da semana em que o técnico pode vir a esta obra
+    const rs = plano.restricoes?.find((r) => r.tec === tecId);
+    if (rs) for (let k = t.dia; k < t.dia + t.dur; k++) if (ds[k] && !rs.dias.includes(ds[k].getDay())) return `só pode ${diasQuePode(rs.dias)}`;
     const fora = ocupados.get(tecId);
     // 12/11: com as horas (Ocupacao), a tarefa cabe ao lado de outra obra enquanto o dia não passar das HORAS_DIA
     const carga = ocupados instanceof Ocupacao ? ocupados : null, h = horasPorDia(t);

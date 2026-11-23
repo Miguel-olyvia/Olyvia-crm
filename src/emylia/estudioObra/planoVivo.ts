@@ -293,3 +293,24 @@ export function comLigacao(p: Plano, para: number, de: number, ligar: boolean): 
   if (!t.semDeps.length) delete t.semDeps;
   return c;
 }
+
+/** 23/11 (revisão: «Olyvia, o Elvis só pode na quinta»): uma cópia do plano em que o técnico só pode vir nos dias da semana dados
+ *  (1 = segunda … 5 = sexta); `null` (ou vazio) tira a restrição. O replaneamento conta com ela (motivoOcupado). */
+export function comRestricao(p: Plano, tec: string, dias: readonly number[] | null): Plano {
+  const c = copia(p);
+  const L = (p.restricoes ?? []).filter((r) => r.tec !== tec).map((r) => ({ tec: r.tec, dias: [...r.dias] }));
+  if (dias && dias.length) L.push({ tec, dias: [...new Set(dias)].sort((a, b) => a - b) });
+  if (L.length) c.restricoes = L; else delete c.restricoes;
+  return c;
+}
+
+/** As tarefas do técnico, por começar, que mesmo replaneadas caem num dia em que ele não pode (as de vários dias seguidos não cabem
+ *  só às quintas): para as passar a outro ou as dividir. `dataDe` dá a data de um dia do plano. */
+export function naoCabem(p: Plano, tec: string, dias: readonly number[], dataDe: (k: number) => Date | null): number[] {
+  return p.tasks.map((t, ti) => ti).filter((ti) => {
+    const t = p.tasks[ti];
+    if (t.tec !== tec || comecada(t) || ["validada", "feita"].includes(estadoVivo(t, p))) return false;
+    for (let k = t.dia; k < t.dia + t.dur; k++) { const x = dataDe(k); if (x && !dias.includes(x.getDay())) return true; }
+    return false;
+  });
+}

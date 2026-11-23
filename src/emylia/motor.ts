@@ -7,7 +7,7 @@ import type { FaturaReg } from "./v2/financeiro";
 import { erroZonasLinha, limparZonas, porZona, type GrupoZona, type ZonaLinha } from "./zonasOrcamento";
 import { diferencas, fimDe, guardarBase, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
 import { NOME_SEGURANCA, faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
-import { comLigacao, nomeCurtoTarefa, porqueNaoLigar, replanear, simularAtraso } from "./estudioObra/planoVivo";
+import { comLigacao, comRestricao, nomeCurtoTarefa, porqueNaoLigar, replanear, simularAtraso } from "./estudioObra/planoVivo";
 import { porNaTarefa, type RetratoPlano } from "./estudioObra/passosObra";
 import { lerQuemAssina } from "./estudioObra/quemAssina";
 import { MOTIVO_QUEM_PAGA, aplicarNoPlano, custoDaHora, guardarAjuste, impactoAjuste, type AjusteAdenda, type AjusteObra, type ImpactoAjuste } from "./estudioObra/quemPaga";
@@ -32,7 +32,7 @@ import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema,
   textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, pedidoDeAtraso, textoPedidoAtraso, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
 import { comFaturaDaParcela, faltaParaAuto, nomeDaParcela, parcelaDoArranquePorPagar, parcelasDoContrato } from "./parcelas";
-import { agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, FALTA_EC_AUTOMATICA, ecNoServidor, marcarEcNoServidor, retificacaoAceite, faltaMedirTexto, medicoesDe, supervisorDasMedidas, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
+import { diasQuePode, agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, FALTA_EC_AUTOMATICA, ecNoServidor, marcarEcNoServidor, retificacaoAceite, faltaMedirTexto, medicoesDe, supervisorDasMedidas, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { pedirPainelObra } from "./estudioObra/painelPedido";
 import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
@@ -371,6 +371,9 @@ export interface Plano {
   fimAceite?: { dias: number; quem: string; q: string };
   /** 21/10: os avisos aos técnicos quando o gestor cria ou muda uma tarefa (tarefasValidador.ts: avisarTecnico); aparecem no Hoje do técnico. */
   avisos?: AvisoTec[];
+  /** 23/11 (revisão: «o Elvis só pode na quinta»): os dias da semana (1 = segunda … 5 = sexta) em que um técnico pode vir a esta obra.
+   *  O replaneamento e a escolha de técnicos contam com eles (preparacaoObra.ts: motivoOcupado). */
+  restricoes?: { tec: string; dias: number[] }[];
 }
 export interface AvisoTec { tec: string; ti: number; t: string; q: string; lido?: string }
 export interface MatObra { n: string; un: string; k: StockKey; q: number; res: number; falta: number }
@@ -3752,6 +3755,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         porNaTarefa(t, x);
       });
       if ((p.estado === "aprovado" || p.estado === "por aprovar") && (r.estado === "aprovado" || r.estado === "por aprovar")) p.estado = r.estado as Plano["estado"];
+      // 23/11: os dias em que cada técnico pode vir voltam com o plano
+      if (r.restricoes?.length) p.restricoes = JSON.parse(JSON.stringify(r.restricoes)); else delete p.restricoes;
       const quem = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome, t2 = `${modo === "anular" ? "Anulado" : "Refeito"}: ${texto}`;
       log(d, `Plano: ${t2}`);
       (d.obra.diario ??= []).push({ q: agora(), quem, t: t2, k: "marco" });
@@ -4092,6 +4097,36 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       log(d, `Plano em obra: ${texto} · acaba a ${fimDepois}${fimAntes !== fimDepois ? ` (era ${fimAntes})` : ""}`, r.fimDepois > r.fimAntes ? "w" : "a");
       avisar({ msg: r.fimDepois < r.fimAntes ? "Obra adiantada" : r.fimDepois > r.fimAntes ? "Plano posto em dia" : "Plano reorganizado", sub: `${fimAntes === fimDepois ? "A data de fim mantém-se" : `Acaba a ${fimDepois} (era ${fimAntes})`}${m.cliente ? " · o cliente vê o aviso no portal" : ""}`, kind: "ok" });
       return n;
+    },
+    /** 23/11 (revisão: «Olyvia, o Elvis só pode na quinta»): o técnico passa a só poder vir a esta obra nos dias da semana dados (1 = segunda …
+     *  5 = sexta; null tira a restrição). O plano replaneia com isso (sem adiantar) e as mudanças aplicam-se; fica nas alterações, no diário e
+     *  no histórico. Os avisos aos técnicos seguem o caminho de sempre (no Estúdio da obra, à espera do toque do gestor). */
+    restricaoTecnico(id: number, tec: string, dias: number[] | null, m: { motivo?: string; cliente?: boolean } = {}): boolean {
+      if (!exigePerm("obra.planear")) return false;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado === "concluída") return false;
+      const c = comRestricao(p, tec, dias);
+      if (c.restricoes) p.restricoes = c.restricoes; else delete p.restricoes;
+      const r = replanear(p, ocupacaoDosTecnicos(S, d.id), { adiantar: false });
+      const fimAntes = rotuloDia(p, r.fimAntes - 1);
+      if (r.mudancas.length) {
+        guardarBase(p);
+        for (const x of r.mudancas) {
+          const tt = p.tasks[x.ti];
+          tt.dia = x.para.dia; tt.dur = x.para.dur;
+          if (p.estado === "em curso") avisarTecnico(p, x.ti, `${tt.nome}: ${x.tipo === "adiantada" ? "começa mais cedo" : "começa mais tarde"}, a ${rotuloDia(p, tt.dia)}`, agora());
+        }
+      }
+      const quem = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome, nome = (TECS.find((x) => x.id === tec)?.n ?? tec).split(" ")[0];
+      const texto = dias && dias.length ? `${nome} só pode ${diasQuePode(dias)}` : `${nome} volta a poder todos os dias`;
+      const fimDepois = rotuloDia(p, r.fimDepois - 1), n = r.mudancas.length;
+      const alt: Alteracao = { q: agora(), dia: p.dia, quem, t: `${texto}${n ? ` (${n} ${n === 1 ? "tarefa muda" : "tarefas mudam"})` : ""}`, motivo: m.motivo?.trim() || "Técnico indisponível", fimAntes, fimDepois, cliente: !!m.cliente };
+      if (m.cliente && fimAntes !== fimDepois) alt.avisoCliente = `Reorganizámos o plano da obra. A obra passa a acabar a ${fimDepois} (antes: ${fimAntes}).`;
+      (d.obra.alteracoes ??= []).unshift(alt);
+      (d.obra.diario ??= []).push({ q: agora(), quem, t: `${texto} · fim: ${fimAntes === fimDepois ? "mantém-se" : `${fimAntes} → ${fimDepois}`}`, k: "marco" });
+      log(d, `Plano: ${texto}${fimAntes !== fimDepois ? ` · acaba a ${fimDepois} (era ${fimAntes})` : ""}`, r.fimDepois > r.fimAntes ? "w" : "a");
+      avisar({ msg: texto, sub: fimAntes === fimDepois ? "A data de fim mantém-se" : `Acaba a ${fimDepois} (era ${fimAntes})`, kind: "ok" });
+      return true;
     },
     /** 23/11 (revisão: «Avisar os técnicos afetados»): o gestor avisa, com um toque, os técnicos a quem a obra mudou (o Estúdio da obra junta
      *  a lista: avisosTecnicos.ts). Cada aviso fica no Hoje do técnico; fica uma linha no histórico (não no diário). */
