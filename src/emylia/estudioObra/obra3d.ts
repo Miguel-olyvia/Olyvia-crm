@@ -7,6 +7,11 @@ import type { TipoPeca } from "../planta";
 import { cenaDe } from "@/pages/prototipo-estudio/cenaDoProjeto";
 import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import type { Cena } from "@/pages/prototipo-estudio/geometria3d";
+import { ID_ESPELHO_CONTRATO, espacoDoEstudio } from "@/pages/prototipo-estudio/estudioNo3D";
+import { produto } from "@/pages/prototipo-estudio/catalogoFake";
+import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
+import { produtosPedidosDoProjeto, type PedidoProduto } from "@/pages/prototipo-estudio/produtosDoProjeto";
+import type { ResLegado } from "@/emylia/planta3d/ligacao";
 import { estadoVivo } from "./planoVivo";
 
 type Grupo = "paredes" | "chao" | "loucas" | "moveis" | "equipamentos";
@@ -57,4 +62,64 @@ export function obraEm3D(d: Negocio): Obra3D | null {
     cena: { ...depois, caixas, corParede: F.paredes === false ? antes.corParede : depois.corParede, corChao: F.chao === false ? antes.corChao : depois.corChao },
     antes, feitas, total, nome: pr.nome,
   };
+}
+
+// ------------------------------------------------------------------ 23/11: o 3D com modelos (o mesmo do passo «3D» do Estúdio)
+// Rúben: «o 3D ainda é genérico: caixas cinzentas sem os produtos nem os materiais». O 3D da obra passa a ser o do Estúdio (os modelos,
+// os produtos do contrato, o revestimento e o pavimento como materiais), com o mesmo «a cores o feito, transparente o que falta».
+
+/** O que o contrato tem e a planta não desenha como peça (vem de «Mais produtos» das Necessidades): o espelho, a porta e a janela. */
+export interface ExtrasDoContrato { espelho?: string; porta?: string; janela?: string }
+export function extrasDoContrato(d: Negocio): ExtrasDoContrato {
+  const out: ExtrasDoContrato = {};
+  for (const x of d.visita.prod ?? []) {
+    if (x.cliente || !x.id) continue;
+    const n = x.n ?? "";
+    if (!out.espelho && /espelho/i.test(n) && !/arm[áa]rio/i.test(n)) out.espelho = x.id;
+    else if (!out.porta && /^\s*porta\b/i.test(n) && !/porta[\s-]*(rolos|toalhas|elixir|sab|escovas)/i.test(n)) out.porta = x.id;
+    else if (!out.janela && /janela/i.test(n)) out.janela = x.id;
+  }
+  return out;
+}
+/** Os extras como pedidos de produtos (para os ler pelo id). */
+export function pedidosDosExtras(e: ExtrasDoContrato): PedidoProduto[] {
+  return ([["espelho", e.espelho], ["porta", e.porta], ["janela", e.janela]] as const).flatMap(([cat, id]) => (id ? [{ id, cat }] : []));
+}
+
+/** O grupo (o ofício) de cada peça do 3D com modelos: as da planta pelo tipo; o resguardo e a coluna de duche com a base; o espelho do contrato com os móveis. */
+function grupoDaPeca3D(id: string, tipoDe: ReadonlyMap<string, TipoPeca>): Grupo | undefined {
+  if (id === ID_ESPELHO_CONTRATO) return "moveis";
+  const base = id.replace(/-(resguardo|coluna-duche)$/, "");
+  const tipo = tipoDe.get(base);
+  return tipo ? GRUPO_DA_PECA[tipo] : undefined;
+}
+
+export interface Obra3DModelos {
+  projeto: Projeto; hoje: ResLegado; antes: ResLegado; porFazer: Set<string>; feitas: number; total: number;
+  /** Os produtos a ler pelo id (as peças, o que vai com elas, os materiais e os extras do contrato). */
+  pedidos: PedidoProduto[];
+}
+/** A obra em 3D com modelos: o depois com os produtos do contrato e o feito marcado (`porFazer`: as peças transparentes), e o antes. */
+export function obraEm3DComModelos(d: Negocio): Obra3DModelos | null {
+  const pr = projetoDoNegocio(d.f), p = d.obra.plano;
+  if (!pr) return null;
+  const ex = extrasDoContrato(d), F = p ? feitoPorGrupo(p) : null, acabou = p?.estado === "concluída";
+  const hoje = espacoDoEstudio(pr, "depois", {
+    semRevestimento: F?.paredes === false, semPavimento: F?.chao === false,
+    espelho: produto(ex.espelho), porta: produto(ex.porta), janela: produto(ex.janela),
+  });
+  const antes = espacoDoEstudio(pr, "antes");
+  const tipoDe = new Map(pr.depois.pecas.map((pc) => [pc.id, pc.tipo] as const));
+  const porFazer = new Set<string>();
+  let feitas = 0, total = 0;
+  if (hoje.ok) {
+    for (const pc of hoje.espaco.pecas) {
+      const g = grupoDaPeca3D(pc.id, tipoDe);
+      if (!g) continue;
+      total++;
+      if (!F) continue; // sem plano: o projeto todo a cores, nada contado como feito
+      if (F[g] ?? acabou) feitas++; else porFazer.add(pc.id);
+    }
+  }
+  return { projeto: pr, hoje, antes, porFazer, feitas, total, pedidos: produtosPedidosDoProjeto(pr, pedidosDosExtras(ex)) };
 }

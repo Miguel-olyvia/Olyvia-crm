@@ -36,6 +36,8 @@ export interface Visualizador3DProps {
   camara?: { chave: string; pos: V3; alvo: V3 } | null;
   /** Mover a peça escolhida arrastando-a no 3D (as regras e a gravação vêm da planta). Sem isto, só se escolhe. */
   mover?: Mover3D;
+  /** 23/11 (o Estúdio da obra): as peças ainda por fazer, desenhadas transparentes. */
+  porFazer?: ReadonlySet<string>;
 }
 
 type V3 = [number, number, number];
@@ -776,8 +778,16 @@ function travarCamaraSeNaPeca(e: React.PointerEvent<HTMLDivElement>, alvo: AlvoA
   if (raio.intersectObject(grupo, true).length) controls.enabled = false;
 }
 
-interface PropsPeca { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; onSel: (id: string) => void; mover?: Mover3D; arrasto: Arrasto | null; setArrasto: (a: Arrasto | null) => void; alvo: { current: AlvoArrasto } }
-function Peca({ p: original, m, etiquetas, selecionada, onSel, mover, arrasto, setArrasto, alvo }: PropsPeca) {
+/** 23/11: uma malha de uma peça por fazer fica transparente. O material copia-se (os materiais dos modelos são partilhados entre peças). */
+function tornarFantasma(m: THREE.Mesh): void {
+  if (m.userData.fantasma) return;
+  const um = (x: THREE.Material) => { const c = x.clone(); c.transparent = true; c.opacity = Math.min(c.opacity, 0.22); c.depthWrite = false; return c; };
+  m.material = Array.isArray(m.material) ? m.material.map(um) : um(m.material);
+  m.userData.fantasma = true;
+}
+
+interface PropsPeca { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; fantasma?: boolean; onSel: (id: string) => void; mover?: Mover3D; arrasto: Arrasto | null; setArrasto: (a: Arrasto | null) => void; alvo: { current: AlvoArrasto } }
+function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel, mover, arrasto, setArrasto, alvo }: PropsPeca) {
   const grupoRef = useRef<THREE.Group>(null);
   useEffect(() => {
     if (!selecionada || !mover) return;
@@ -832,7 +842,7 @@ function Peca({ p: original, m, etiquetas, selecionada, onSel, mover, arrasto, s
   const base = p.altura; // altura da base ao chão (peças de parede e peças sobre a bancada)
   const corpo = useRef<THREE.Group>(null);
   // todas as peças fazem e recebem sombra (os modelos do HTML já vêm assim; as paramétricas marcam-se aqui)
-  useEffect(() => { corpo.current?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = true; m.receiveShadow = true; } }); });
+  useEffect(() => { corpo.current?.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh) { m.castShadow = !fantasma; m.receiveShadow = true; if (fantasma) tornarFantasma(m); } }); });
   // de onde veio cada modelo da peça (GLB, procedural, ou procedural porque o GLB falhou), para a etiqueta
   const [fontes, setFontes] = useState<Record<string, string>>({});
   const avisar = useCallback((chave: string, fonte: string) => setFontes((f) => (f[chave] === fonte ? f : { ...f, [chave]: fonte })), []);
@@ -887,7 +897,7 @@ function ParedeCena({ parede, indice, espaco }: { parede: Parede; indice: number
 }
 function AberturaCena({ a, esp, z }: { a: Abertura; esp: number; z: number }) {
   const x = a.posicao + a.largura / 2, aro = 0.05, e = esp + 0.02;
-  const cor = a.tipo === "porta" ? "#a98467" : "#f1f1ee";
+  const cor = a.cor ?? (a.tipo === "porta" ? "#a98467" : "#f1f1ee");
   return (
     <group position={[x, 0, z]}>
       <Caixa p={[-a.largura / 2 + aro / 2, a.peitoril + a.altura / 2, 0]} s={[aro, a.altura, e]} cor={cor} />
@@ -901,7 +911,7 @@ function AberturaCena({ a, esp, z }: { a: Abertura; esp: number; z: number }) {
         </>
       ) : (
         <>
-          <Caixa p={[0, (a.altura - aro) / 2, 0]} s={[a.largura - 2 * aro, a.altura - aro, 0.04]} cor="#c19a76" r={0.6} />
+          <Caixa p={[0, (a.altura - aro) / 2, 0]} s={[a.largura - 2 * aro, a.altura - aro, 0.04]} cor={a.cor ?? "#c19a76"} r={0.6} />
           <Caixa p={[a.largura / 2 - aro - 0.08, a.altura * 0.48, 0.035]} s={[0.12, 0.02, 0.03]} cor="#9a9a9a" r={0.3} />
         </>
       )}
@@ -1020,7 +1030,7 @@ function EstudioAmbiente() {
   return null;
 }
 
-export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover }: Visualizador3DProps) {
+export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover, porFazer }: Visualizador3DProps) {
   const [arrasto, setArrasto] = useState<Arrasto | null>(null);
   const alvo = useRef<AlvoArrasto>({ grupo: null, camera: null, controls: null });
   return (
@@ -1035,7 +1045,7 @@ export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas
         <Superficies espaco={espaco} teto={teto && vista !== "cima"} />
         {espaco.paredes.map((p, i) => <ParedeCena key={p.id} parede={p} indice={i} espaco={espaco} />)}
         <SombraDeContacto espaco={espaco} />
-        {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} onSel={onSelecionar} mover={mover} arrasto={arrasto} setArrasto={setArrasto} alvo={alvo} /> : null; })}
+        {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={porFazer?.has(p.id) ? `${p.id}:por-fazer` : p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} fantasma={!!porFazer?.has(p.id)} onSel={onSelecionar} mover={mover} arrasto={arrasto} setArrasto={setArrasto} alvo={alvo} /> : null; })}
         {arrasto?.lugar && <GuiaParede espaco={espaco} x={arrasto.lugar.x} y={arrasto.lugar.y} altura={arrasto.parede ? arrasto.lugar.altura : null} />}
         <PonteCamara alvo={alvo} />
       </Canvas>

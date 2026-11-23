@@ -163,7 +163,17 @@ export const versaoProdutosReais = () => versaoReais;
 /** Os produtos de onde se escolhe numa categoria: os verdadeiros, se houver; senão, os de teste. */
 const daCategoria = (cat: Categoria): Produto[] => REAIS_CAT.get(cat) ?? CATALOGO.filter((p) => p.cat === cat);
 
-export const produto = (id: string | undefined): Produto | undefined => (id ? REAIS_ID.get(id) ?? CATALOGO.find((x) => x.id === id) : undefined);
+// 23/11 (Rúben: «o 3D real no Estúdio da obra»): os produtos de um projeto lidos um a um pelo id (produtosDoProjeto.ts), para o 3D e a
+// planta saberem o que foi escolhido mesmo quando não está nas páginas que o Estúdio pré-carrega. Não entram nas listas de onde se escolhe.
+let DO_PROJETO = new Map<string, Produto>();
+/** Junta estes produtos (pelo id) aos que o desenho e o 3D conhecem. */
+export function guardarProdutosDoProjeto(lista: readonly Produto[]): void {
+  if (!lista.length) return;
+  DO_PROJETO = new Map([...DO_PROJETO, ...lista.map((p) => [p.id, p] as const)]);
+  versaoReais++;
+  ouvintesReais.forEach((f) => f());
+}
+export const produto = (id: string | undefined): Produto | undefined => (id ? REAIS_ID.get(id) ?? DO_PROJETO.get(id) ?? CATALOGO.find((x) => x.id === id) : undefined);
 /** 17/11: um produto do catálogo de teste numa categoria que já tem produtos verdadeiros (um projeto feito antes de o catálogo verdadeiro chegar). */
 export const ficouDeTeste = (id: string | undefined): boolean => {
   const p = id && !REAIS_ID.has(id) ? CATALOGO.find((x) => x.id === id) : undefined;

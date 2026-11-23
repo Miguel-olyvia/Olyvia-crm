@@ -17,7 +17,9 @@ export type TipoAbertura = "porta" | "janela";
 
 export interface Parede { id: string; a: Ponto; b: Ponto; espessura: number }
 /** `posicao`: distância (m) do início da parede ao início da abertura. */
-export interface Abertura { id: string; tipo: TipoAbertura; parede: string; posicao: number; largura: number; altura: number; peitoril: number }
+export interface Abertura { id: string; tipo: TipoAbertura; parede: string; posicao: number; largura: number; altura: number; peitoril: number;
+  /** 23/11: a cor do produto escolhido (a porta ou a janela do contrato); sem ela, a de sempre. */
+  cor?: string }
 /** Uma peça: UM produto do catálogo (pelo id). `x`,`y`: centro (m); `rotacao`: graus (frente da peça para o interior = 0 quando encosta a uma parede horizontal em cima). */
 export interface PecaProduto {
   id: string; produtoId: string; x: number; y: number; rotacao: number; paredeEncosto: string | null; largura: number; profundidade: number;

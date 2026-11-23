@@ -39,6 +39,7 @@ import { devolverAoNegocio } from "./daVisita";
 import { GRAVAR_NO_NEGOCIO_MS, chaveDoEstudio, gravarNoNegocio, guardarProjetoLocal, lembrarNegocioAberto, negocioDoEndereco, projetoInicial } from "./projetoGuardado";
 import { pedeDesfazer, vozNoEstudio } from "./estudioPorVoz";
 import { useProdutosReaisNoEstudio } from "./catalogoRealDoEstudio";
+import { useProdutosDoProjeto } from "./produtosDoProjeto";
 import { EV_PROCURAR } from "./pesquisaEstudio";
 import { ACOMPANHA } from "./catalogoFake";
 import { EV_ESTUDIO } from "@/emylia/comandoOlyvia";
@@ -82,6 +83,8 @@ function Estudio({ inicial }: { inicial: Projeto }) {
   // 17/11: com sessão, os produtos verdadeiros da organização (o catálogo da Mudelar); sem ela, o catálogo de teste
   const reais = useProdutosReaisNoEstudio();
   const [p, setP] = useState<Projeto>(inicial);
+  // 23/11: os produtos já escolhidos, lidos pelo id (um achado pela pesquisa não está nas páginas pré-carregadas e saía sem cor)
+  useProdutosDoProjeto(p);
   const [passo, setPasso] = useState<Passo>("Antes");
   const [aberta, setAberta] = useState<string | null>(null);
   const [mostrar, setMostrar] = useState(false);

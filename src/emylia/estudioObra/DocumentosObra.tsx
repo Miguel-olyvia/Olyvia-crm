@@ -3,7 +3,7 @@
 //  · Documentos: o que foi para o portal do cliente (documentosObra.ts), quando e em que estado; abrir cada um por cima (o «voltar» fecha,
 //    ?doc=) e reenviar o acesso ao cliente com esse documento (pede confirmação; numa conta real, a permissão do portal);
 //  · 3D: o projeto do Estúdio do projeto em volume (obra3d.ts), só para ver: o que está feito a cores, o que falta transparente.
-import { useEffect, useMemo, useState } from "react";
+import { Component, Suspense, lazy, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { Box, Check, FileText, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -18,7 +18,13 @@ import { AutoRececaoDoc } from "../AutoRececao";
 import { usePainelUrl } from "../usarParamUrl";
 import { Vista3D } from "@/pages/prototipo-estudio/Vista3D";
 import { documentosEnviados, type DocEnviado, type TomDoc } from "./enviadosAoCliente";
-import { obraEm3D } from "./obra3d";
+import { extrasDoContrato, obraEm3D, obraEm3DComModelos, pedidosDosExtras } from "./obra3d";
+import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
+import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
+import { sairam } from "@/pages/prototipo-estudio/necessidadesEstudio";
+import { ouvirProdutosReais, produto, versaoProdutosReais } from "@/pages/prototipo-estudio/catalogoFake";
+import { useProdutosDoProjeto } from "@/pages/prototipo-estudio/produtosDoProjeto";
+import { PECAS } from "../planta";
 
 const TOM: Record<TomDoc, string> = {
   ok: "bg-success/15 text-success", espera: "bg-warning/15 text-amber-800 dark:text-amber-300", mau: "bg-destructive/10 text-destructive", neutro: "bg-muted text-muted-foreground",
@@ -116,29 +122,99 @@ function DocAberto({ ctx, d, x, fechar }: { ctx: Ctx; d: Negocio; x: DocEnviado;
   );
 }
 
-/* ================================================================== o projeto em 3D */
+/* ================================================================== o projeto em 3D e as plantas */
+// 23/11 (Rúben: «o 3D ainda é genérico… quero o 3D real do projeto aprovado e a planta antes e depois»). O 3D com modelos do passo «3D»
+// do Estúdio (os produtos do contrato, o revestimento e o pavimento como materiais), com o feito a cores e o que falta transparente; sem
+// WebGL (ou se o 3D com modelos falhar), o 3D simples de antes. Por baixo, as duas plantas do Estúdio: como está e como vai ficar.
+const Visualizador3D = lazy(() => import("@/emylia/planta3d/Visualizador3D"));
+
+let webgl: boolean | null = null;
+/** Se o browser desenha 3D (WebGL). Pergunta-se uma vez. */
+function temWebGL(): boolean {
+  if (webgl !== null) return webgl;
+  try {
+    const c = document.createElement("canvas");
+    webgl = !!(window.WebGLRenderingContext && (c.getContext("webgl2") || c.getContext("webgl")));
+  } catch { webgl = false; }
+  return webgl;
+}
+
+/** Se o 3D com modelos falhar (um modelo que não abre), fica o 3D simples em vez de partir o ecrã. */
+class Falha3D extends Component<{ alternativa: ReactNode; children: ReactNode }, { erro: boolean }> {
+  state = { erro: false };
+  static getDerivedStateFromError() { return { erro: true }; }
+  componentDidCatch(e: unknown) { console.warn("[obra] o 3D com modelos falhou; fica o simples:", e); }
+  render() { return this.state.erro ? this.props.alternativa : this.props.children; }
+}
+
 export function ProjetoEm3D({ d }: { d: Negocio }) {
-  const O = useMemo(() => obraEm3D(d), [d, d.f.estudio, d.obra.plano]); // eslint-disable-line react-hooks/exhaustive-deps
+  // os produtos do projeto e do contrato, lidos pelo id (o Estúdio da obra não carrega o catálogo); redesenha quando chegam
+  const ex = useMemo(() => pedidosDosExtras(extrasDoContrato(d)), [d, d.visita.prod]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pr = useMemo(() => projetoDoNegocio(d.f), [d.f.estudio]); // eslint-disable-line react-hooks/exhaustive-deps
+  useProdutosDoProjeto(pr, ex);
+  const versao = useSyncExternalStore(ouvirProdutosReais, versaoProdutosReais);
+  const O = useMemo(() => obraEm3D(d), [d, d.f.estudio, d.obra.plano, versao]); // eslint-disable-line react-hooks/exhaustive-deps
+  const M = useMemo(() => obraEm3DComModelos(d), [d, d.f.estudio, d.obra.plano, versao]); // eslint-disable-line react-hooks/exhaustive-deps
   const [qual, setQual] = useState<"obra" | "antes">("obra");
-  if (!O) {
+  const [vista, setVista] = useState<"3d" | "cima" | "pessoa">("3d");
+  const [sel, setSel] = useState<string | null>(null);
+  if (!O || !M) {
     return <p className="rounded-xl bg-muted/50 px-4 py-3 text-[15px] text-muted-foreground">Este negócio não tem projeto do Estúdio do projeto: o 3D aparece quando a visita é feita no Estúdio.</p>;
   }
   const opcao = (on: boolean) => cn("min-h-11 rounded-full px-4 text-[15px] font-medium transition-colors", on ? "bg-background shadow-sm" : "text-muted-foreground");
+  const titulo = qual === "obra" ? "A obra em 3D, com o que está feito" : "A divisão antes da obra";
+  const simples = <Vista3D cena={qual === "obra" ? O.cena : O.antes} titulo={titulo} />;
+  const res = qual === "obra" ? M.hoje : M.antes;
+  const comModelos = res.ok && temWebGL();
+  const p = M.projeto;
   return (
-    <section aria-label="O projeto em 3D" className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="flex items-center gap-2 text-[15px] font-semibold"><Box className="h-4 w-4 text-primary" aria-hidden="true" />Como a obra vai ficar</h2>
-          <p className="text-sm text-muted-foreground">
-            {qual === "obra" ? <>O projeto aprovado. <b className="font-medium text-foreground">A cores, o que já está feito</b>; transparente, o que falta{O.total ? ` (${O.feitas} de ${O.total} peças feitas)` : ""}. Só para ver.</> : "A divisão como estava antes da obra."}
-          </p>
+    <div className="space-y-8">
+      <section aria-label="O projeto em 3D" className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-2 text-[15px] font-semibold"><Box className="h-4 w-4 text-primary" aria-hidden="true" />Como a obra vai ficar</h2>
+            <p className="text-sm text-muted-foreground">
+              {qual === "obra" ? <>O projeto aprovado. <b className="font-medium text-foreground">A cores, o que já está feito</b>; transparente, o que falta{M.total ? ` (${M.feitas} de ${M.total} peças feitas)` : ""}. Só para ver.</> : "A divisão como estava antes da obra."}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <div role="group" aria-label="O que ver" className="inline-flex rounded-full bg-muted p-1">
+              <button type="button" aria-pressed={qual === "obra"} onClick={() => setQual("obra")} className={opcao(qual === "obra")}>A obra hoje</button>
+              <button type="button" aria-pressed={qual === "antes"} onClick={() => setQual("antes")} className={opcao(qual === "antes")}>Antes</button>
+            </div>
+            {comModelos && (
+              <div role="group" aria-label="A vista" className="inline-flex rounded-full bg-muted p-1">
+                {([["3d", "3D"], ["cima", "De cima"], ["pessoa", "Pessoa"]] as const).map(([v, n]) => (
+                  <button key={v} type="button" aria-pressed={vista === v} onClick={() => setVista(v)} className={opcao(vista === v)}>{n}</button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
-        <div role="group" aria-label="O que ver" className="inline-flex rounded-full bg-muted p-1">
-          <button type="button" aria-pressed={qual === "obra"} onClick={() => setQual("obra")} className={opcao(qual === "obra")}>A obra hoje</button>
-          <button type="button" aria-pressed={qual === "antes"} onClick={() => setQual("antes")} className={opcao(qual === "antes")}>Antes</button>
+        {comModelos && res.ok ? (
+          <div className="h-[62vh] min-h-[420px] overflow-hidden rounded-2xl border border-border">
+            <Falha3D alternativa={simples}>
+              <Suspense fallback={<p className="grid h-full place-items-center text-[15px] text-muted-foreground">A abrir o 3D…</p>}>
+                <Visualizador3D espaco={res.espaco} modelos={res.modelos} vista={vista} teto={false} etiquetas={false} descricao={titulo}
+                  selecionada={sel} onSelecionar={setSel} porFazer={qual === "obra" ? M.porFazer : undefined} />
+              </Suspense>
+            </Falha3D>
+          </div>
+        ) : simples}
+        {comModelos && <p className="text-sm text-muted-foreground">Arraste para rodar. Toque numa peça para ver o nome e a medida.</p>}
+      </section>
+
+      <section aria-label="As plantas antes e depois" className="space-y-3">
+        <div>
+          <h2 className="text-[15px] font-semibold">As plantas</h2>
+          <p className="text-sm text-muted-foreground">Como está e como vai ficar, com as medidas das paredes. A tracejado, o que sai.</p>
         </div>
-      </div>
-      <Vista3D cena={qual === "obra" ? O.cena : O.antes} titulo={qual === "obra" ? "A obra em 3D, com o que está feito" : "A divisão antes da obra"} />
-    </section>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <PlantaVista planta={p.antes} titulo="Antes: como está" />
+          <PlantaVista planta={p.depois} titulo="Depois: como vai ficar" fantasmas={sairam(p)}
+            cor={(pc) => produto(p.escolhas[pc.id])?.hex} rotulo={(pc) => { const x = produto(p.escolhas[pc.id]); return x ? `${PECAS[pc.tipo].n} · ${x.colecao || x.n.split(" ").slice(0, 2).join(" ")}` : undefined; }} />
+        </div>
+      </section>
+    </div>
   );
 }
