@@ -48,7 +48,7 @@ import { RESPONSAVEIS_OBRA, chaveBase, divisaoPrincipal, divisoesEscolhidas, gru
 import { quemVaiPorOmissao } from "./equipa/membros";
 import { TECNICOS, ausenteNoRh, custoHoraDe, garantirTecnicos, perfilDoTecnico, temAusenciasRh, tecnicosIniciais, usarTecnicos, type FichaTecnico, type Tecnico } from "./equipa/tecnicos";
 import { custoObra } from "./custoObra";
-import { contaCliente, emailDaFicha, emailOk, enviarAcesso, lerPedidoEmail, modoReal, pedirEmailPortal, telefoneDaFicha, telefoneNormal, telefoneOk, type ContaPortal, type DocPortal, type EnvioPortal, type EstadoContaPortal } from "./acessosPortal";
+import { contaCliente, emailDaFicha, emailOk, enviarAcesso, separarContacto, lerPedidoEmail, modoReal, pedirEmailPortal, telefoneDaFicha, telefoneNormal, telefoneOk, type ContaPortal, type DocPortal, type EnvioPortal, type EstadoContaPortal } from "./acessosPortal";
 // 22/10: os custos (perfis, €/h dos técnicos, estrutura, receitas) vivem no Estado (S.custos). Só se usam dentro de funções (o
 // custosModelo também importa o motor: a ordem de carga não importa).
 import {
@@ -2501,8 +2501,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       n.nome = nome.trim(); n.tel = tel.trim();
       // 30/10 (2.0): uma pessoa que já existe traz o seu contacto da base; se não tiver nenhum, o negócio cria-se na mesma (o envio ao portal pede-o depois)
       if (!n.nome || (!n.tel && !pessoaId)) { n.err = "Falta " + (!n.nome ? "o nome" : "o telefone ou o email") + "."; return; }
+      // 23/11 (testarh, 1015 da Mudelar): o «Telefone ou email» separa-se aqui. Um email vai para o email (f.email) e o telefone fica vazio;
+      // um telefone fica em `tel`, já com o indicativo (+351 num número português de 9 algarismos). Antes o email ia para `tel` e aparecia
+      // no campo Telefone de «Quem pede».
+      const { email: emailEscrito, telefone } = separarContacto(n.tel);
+      if (!pessoaId && n.tel.includes("@") && !emailEscrito) { n.err = "O email não está completo (por exemplo nome@exemplo.pt)."; return; }
+      const email = emailEscrito || (emailPessoa && emailOk(emailPessoa.trim().toLowerCase()) ? emailPessoa.trim().toLowerCase() : "");
       const id = S.seq++;
-      S.deals.unshift(novoDeal({ id, nome: n.nome, tel: n.tel, ...(pessoaId ? { pessoaId } : {}), linha: linha ?? "geral", ...(linha ? {} : { linhaPorDefinir: true }), servico: linha ? LINHAS[linha].n : "Por definir", local: "", origem: "à mão", quando: agora(), f: { origem: "Telefone", ...(emailOk(n.tel.toLowerCase()) ? { email: n.tel.toLowerCase(), origem: "Email" } : emailPessoa && emailOk(emailPessoa) ? { email: emailPessoa } : {}) }, hist: [{ t: pessoaId ? "Negócio criado à mão para uma pessoa que já existia" : "Negócio criado à mão", q: agora(), k: "a" }], fresh: true }));
+      S.deals.unshift(novoDeal({ id, nome: n.nome, tel: telefone, ...(pessoaId ? { pessoaId } : {}), linha: linha ?? "geral", ...(linha ? {} : { linhaPorDefinir: true }), servico: linha ? LINHAS[linha].n : "Por definir", local: "", origem: "à mão", quando: agora(), f: { origem: emailEscrito ? "Email" : "Telefone", ...(email ? { email } : {}) }, hist: [{ t: pessoaId ? "Negócio criado à mão para uma pessoa que já existia" : "Negócio criado à mão", q: agora(), k: "a" }], fresh: true }));
       S.novo = null;
       // abre logo o negócio novo: o próximo passo (registar a chamada) fica à vista, sem ter de o procurar na lista
       S.view = "negocio"; S.deal = id; S.confirmPerda = null;

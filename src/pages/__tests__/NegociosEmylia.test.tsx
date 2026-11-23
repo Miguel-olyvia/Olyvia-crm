@@ -180,7 +180,8 @@ describe("Negócios (Emylia ligada à base)", { timeout: 20000 }, () => {
     fireEvent.click(screen.getAllByRole("button", { name: "Criar" })[0]);
     await waitFor(() => expect(rpc.mock.calls.some(([fn]) => fn === "neg_guardar_negocio")).toBe(true), { timeout: 5000 });
     expect(gravarNovaLead).toHaveBeenCalledTimes(1);
-    expect(gravarNovaLead.mock.calls[0][0]).toMatchObject({ organizationId: ORG, dados: { displayName: "Rui Costa", telefone: "912 345 678" } });
+    // 23/11: o telefone do cartão rápido vai com o indicativo (+351) e o email vazio (o «Telefone ou email» separa-se)
+    expect(gravarNovaLead.mock.calls[0][0]).toMatchObject({ organizationId: ORG, dados: { displayName: "Rui Costa", telefone: "+351912345678", email: "" } });
     const [, args] = rpc.mock.calls.find(([fn]) => fn === "neg_guardar_negocio")!;
     expect(args).toMatchObject({ p_org: ORG, p_negocio_id: "55555555-5555-4555-a555-555555555555" });
     expect((args as { p_linhas: { negocio: { numero: number; titulo: string } } }).p_linhas.negocio).toMatchObject({ numero: 1201, titulo: "Rui Costa" });

@@ -290,9 +290,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
               <TextoDaLead ctx={ctx} d={d} k="apelido" rotulo="Apelido" />
             </div>
           ) : <label className={ROT}>Nome<input key={"n" + d.nome} defaultValue={d.nome} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.nome) run(() => { d.nome = x; }); }} /></label>}
-          {/* 2/11: o telefone com o seletor de indicativo do país (um email escrito no contacto continua como estava) */}
-          {d.tel.includes("@") ? <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
-            : <div className={cn(ROT, simples && "sm:max-w-sm")}><label htmlFor={`quem-tel-${d.id}`}>Telefone</label><TelefoneComRascunho key={"t" + d.tel} id={`quem-tel-${d.id}`} d={d} run={run} classe={INP} /></div>}
+          {/* 2/11: o telefone com o seletor de indicativo do país. 23/11: sempre: um email que um negócio antigo tenha no contacto não é o
+              telefone (o campo começa vazio e o email passa para o email do negócio ao gravar o telefone, TelefoneComRascunho) */}
+          <div className={cn(ROT, simples && "sm:max-w-sm")}><label htmlFor={`quem-tel-${d.id}`}>Telefone</label><TelefoneComRascunho key={"t" + d.tel} id={`quem-tel-${d.id}`} d={d} run={run} classe={INP} /></div>
           <MoradaDeQuemPede ctx={ctx} d={d} />
           <Campos grupo={gPedido} {...fx} />
         </div>

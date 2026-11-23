@@ -94,6 +94,14 @@ export const telefoneOk = (t: string): boolean => {
   const n = telefoneNormal(t);
   return /^\+[1-9]\d{7,14}$/.test(n) && indicativoDoNumero(n) !== null;
 };
+/** 23/11: o que se escreveu em «Telefone ou email» (o cartão «Novo negócio»), separado: um email (válido, em minúsculas) vai para o
+ *  email e o telefone fica vazio; senão é o telefone, normalizado (telefoneNormal). Um email incompleto dá os dois vazios. */
+export function separarContacto(escrito: string): { email: string; telefone: string } {
+  const t = (escrito || "").trim();
+  if (!t) return { email: "", telefone: "" };
+  if (t.includes("@")) { const e = t.toLowerCase(); return { email: emailOk(e) ? e : "", telefone: "" }; }
+  return { email: "", telefone: telefoneNormal(t) };
+}
 /** 29/10: o telefone da ficha (o contacto do negócio, quando não é um email), se tiver indicativo de país (senão null). */
 export const telefoneDaFicha = (d: Negocio): string | null => {
   const t = d.tel || "";

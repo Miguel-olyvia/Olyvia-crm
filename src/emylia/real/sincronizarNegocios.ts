@@ -12,6 +12,7 @@ import { gravarNegocio, gravarObra, NegocioAlteradoNoutroLado, type IdsServico }
 import { obraVazia, paraObra } from "./obraReal";
 import { canonico, novidadesDaObra, obraJunta, porNoSitio } from "./juntarObra";
 import { gravarFinanceiro, novasNoFinanceiro } from "./financeiroReal";
+import { contactoDoNegocio, gravarContactoDaPessoaNova, gravarTelefoneDaPessoa } from "./contactoDaPessoa";
 
 /** `versao` (20270125020000): a versão das gravações que este ecrã leu (neg_versoes); sobe 1 a cada gravação bem feita. Sem ela, grava-se
  *  como antes (a base sem a função, ou um negócio lido antes dela). */
@@ -54,24 +55,28 @@ export function renumerar(S: Estado, de: number, para: number): void {
   S.seq = Math.max(S.seq, para + 1);
 }
 
-/** Cria a pessoa e o negócio pela "Nova lead" do CRM e devolve as referências e o número dado pela base. */
-async function criarNoCrm(sb: SupabaseClient, org: string, d: Negocio): Promise<{ ref: RefNegocio; numero: number }> {
+/** Cria a pessoa e o negócio pela "Nova lead" do CRM e devolve as referências e o número dado pela base. `avisos`: o contacto que não
+ *  ficou nas tabelas de contacto (a pessoa e o negócio ficaram criados). */
+async function criarNoCrm(sb: SupabaseClient, org: string, d: Negocio): Promise<{ ref: RefNegocio; numero: number; avisos: string[] }> {
   // 30/10: uma pessoa que já existia (escolhida em «Novo negócio») não se cria outra vez: só se cria o negócio dela (neg_criar_negocio, o mesmo
   // caminho de «outro negócio para quem já existe» da Nova lead).
-  let negocioId: string, entityId: string;
+  let negocioId: string, entityId: string, avisos: string[] = [];
   if (d.pessoaId) {
     negocioId = novoIdNegocio();
     entityId = d.pessoaId;
     await criarNegocioNovaLead({ organizationId: org, entityId, negocioId, titulo: d.nome });
   } else {
-    const email = d.tel.includes("@") ? d.tel.trim() : "";
+    // 23/11 (1015 da Mudelar): o email vai para o email e o telefone para o telefone (o email do negócio está em f.email; um negócio
+    // antigo pode tê-lo em `tel`), na entidade e nas tabelas de contacto (anew_entity_emails / anew_entity_phones)
+    const contacto = contactoDoNegocio(d);
     try {
       const r = await gravarNovaLead({
         organizationId: org, rootOrganizationId: await resolverOrgRaiz(org),
-        dados: { displayName: d.nome, firstName: null, lastName: null, email, telefone: email ? "" : d.tel.trim(), nif: "" },
+        dados: { displayName: d.nome, firstName: null, lastName: null, email: contacto.email, telefone: contacto.telefone, nif: "" },
         valores: {}, origemId: null, origemNome: "manual", campanhaId: null,
       });
       negocioId = r.negocioId; entityId = r.entityId;
+      avisos = await gravarContactoDaPessoaNova(sb, entityId, contacto);
     } catch (e) {
       // 5/11: a pessoa ficou criada e o negócio não: a próxima gravação só cria o negócio dela. Antes repetia a pessoa e dava email repetido.
       if (e instanceof NegocioNaoCriado) d.pessoaId = e.entityId;
@@ -80,7 +85,7 @@ async function criarNoCrm(sb: SupabaseClient, org: string, d: Negocio): Promise<
   }
   const { data, error } = await sb.from("negocios" as never).select("numero").eq("id", negocioId).single();
   if (error || !data) throw new Error("O negócio foi criado mas não se conseguiu ler o número.");
-  return { ref: { id: negocioId, entityId }, numero: Number((data as { numero: number }).numero) };
+  return { ref: { id: negocioId, entityId }, numero: Number((data as { numero: number }).numero), avisos };
 }
 
 /** F3: `reler`: houve fatura, pagamento ou anulação no servidor (a encomenda de cliente pode ter nascido ou sido cancelada): quem chama relê
@@ -156,10 +161,17 @@ export async function gravarMudancas(sb: SupabaseClient, org: string, S: Estado,
         renumerar(S, antigo, c.numero);
         // 20/11 (20270125020000): um negócio acabado de criar ainda não tem gravações (versão 0)
         refs.set(c.numero, { ...c.ref, versao: 0 });
+        for (const a of c.avisos) out.avisos.push(`${d.nome}: ${a}`);
+      }
+      const antes = foto.get(d.id);
+      // 23/11 (1015 da Mudelar): o telefone mudado no negócio («Quem pede», o pedido do envio ao portal) vai para a ficha da pessoa:
+      // neg_guardar_negocio não o grava e a leitura (neg_ler_negocios) tira-o da entidade. Se falhar, o resto grava-se e avisa-se.
+      if (antes && (JSON.parse(antes) as Negocio).tel !== d.tel) {
+        try { await gravarTelefoneDaPessoa(sb, refs.get(d.id)!.entityId, d.tel); }
+        catch (e) { out.avisos.push(`${d.nome}: o telefone não ficou na ficha da pessoa (${(e as Error).message})`); }
       }
       // 28/10 (20261231999700): a fatura e o pagamento novos vão primeiro pelas funções do Financeiro; o que a base devolve (o recibo, a
       // chave da fatura) fica no negócio, para o JSON que se grava a seguir bater com a base
-      const antes = foto.get(d.id);
       const ops = novasNoFinanceiro(antes ? (JSON.parse(antes) as Negocio) : null, d);
       if (ops.length) { out.reler = true; for (const a of await gravarFinanceiro(sb, org, refs.get(d.id)!.id, d, ops)) out.avisos.push(`${d.nome}: ${a}`); }
       // 10/11 (teste do 1026): a base substitui as respostas todas de uma vez; um ecrã aberto há mais tempo apagava o que outra pessoa

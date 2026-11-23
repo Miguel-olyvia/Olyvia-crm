@@ -52,9 +52,19 @@ export function TelefoneIndicativo({ id, valor, mudar, sair, rotulo = "Telefone"
   );
 }
 
-/** O telefone do negócio («Quem pede»): escreve-se aqui e grava-se no negócio ao sair do número ou ao mudar o indicativo. */
-export function TelefoneComRascunho({ id, d, run, classe }: { id?: string; d: { tel: string }; run: (fn: () => void) => void; classe?: string }) {
+/** O telefone do negócio («Quem pede»): escreve-se aqui e grava-se no negócio ao sair do número ou ao mudar o indicativo. Com a base
+ *  ligada, o telefone novo vai também para a ficha da pessoa (gravarMudancas → gravarTelefoneDaPessoa).
+ *  23/11: um negócio antigo com um email no contacto (`tel`) mostra o telefone vazio; ao gravar o telefone, o email passa para o email
+ *  do negócio (f.email), se ainda não tiver um. */
+export function TelefoneComRascunho({ id, d, run, classe }: { id?: string; d: { tel: string; f?: Record<string, string | undefined> }; run: (fn: () => void) => void; classe?: string }) {
   const [v, setV] = useState(d.tel);
-  const gravar = (x: string) => { const t = x.trim(); if (t && t !== d.tel) run(() => { d.tel = t; }); };
+  const gravar = (x: string) => {
+    const t = x.trim();
+    if (!t || t === d.tel || t.includes("@")) return;
+    run(() => {
+      if (d.tel.includes("@") && d.f && !d.f.email) d.f.email = d.tel.trim().toLowerCase();
+      d.tel = t;
+    });
+  };
   return <TelefoneIndicativo id={id} valor={v} mudar={setV} sair={gravar} classeInput={classe} />;
 }
