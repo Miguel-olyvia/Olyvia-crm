@@ -2,7 +2,7 @@
 // as medidas e a cor que vêm dos atributos do produto, o modelo do catálogo 3D com essas medidas, o estado do modelo (o que se vai ver)
 // e a cena mínima: uma divisão pequena com a peça ao centro e a câmara a apontar-lhe.
 import type { AtributoDef, AtributoProduto, DimensaoMedida } from "../v2/catalogoModelo";
-import { LARGURA_ALTURA, modeloDoProduto, temModeloGenerico, temModeloHtml, type NoCat, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
+import { LARGURA_ALTURA, alturaDeSanitaDeChao, modeloDoProduto, temModeloGenerico, temModeloHtml, type NoCat, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
 import { espacoVazio, paredesDoContorno, PE_DIREITO_OMISSAO, type Espaco, type PecaProduto } from "./modelo";
 
 /** As dimensões do modelo que a medida diz, em cm; o que não diz fica de fora (vem do nome ou das omissões do tipo). */
@@ -50,7 +50,7 @@ export function medidaDosAtributos(attrs: readonly AtributoProduto[] | undefined
  * banheira, o maior é a largura e o menor a profundidade, e a espessura é a altura; espelho, quadro, radiador, toalheiro, resguardo e roupeiro, o comprimento
  * é a altura e a espessura a profundidade; os outros, o comprimento é a profundidade e a espessura a altura. Nada que sirva: null.
  */
-export function dimensoesDaMedida(tipo: TipoMockup, m: MedidaCm): MedidasParciais | null {
+export function dimensoesDaMedida(tipo: TipoMockup, m: MedidaCm, nome?: string): MedidasParciais | null {
   const { largura: l, comprimento: c, espessura: e, altura: a } = m;
   let r: MedidasParciais;
   if (tipo === "base_duche" || tipo === "banheira") {
@@ -58,6 +58,8 @@ export function dimensoesDaMedida(tipo: TipoMockup, m: MedidaCm): MedidasParciai
     r = { larguraCm: lados.length ? Math.max(...lados) : undefined, profundidadeCm: lados.length === 2 ? Math.min(...lados) : undefined, alturaCm: e ?? a };
   } else if (LARGURA_ALTURA.includes(tipo)) r = { larguraCm: l, alturaCm: c ?? a, profundidadeCm: e };
   else r = { larguraCm: l, profundidadeCm: c, alturaCm: e ?? a };
+  // a sanita de chão com depósito não tem menos de 60 cm de altura (a mesma regra do catálogo e da planta); sem o nome, a medida fica como vem
+  if (nome !== undefined && r.alturaCm !== undefined) r = { ...r, alturaCm: alturaDeSanitaDeChao(tipo, nome, r.alturaCm) };
   const dito = Object.fromEntries(Object.entries(r).filter(([, v]) => v !== undefined)) as MedidasParciais;
   return Object.keys(dito).length ? dito : null;
 }
@@ -82,7 +84,7 @@ const ID_PREVIA = "previa-produto";
 export function modeloParaPrevia({ nome, sub, no, arvore, medida, cor }: EntradaPrevia): ProdutoModelo3D {
   const p = { id: ID_PREVIA, n: nome.trim(), sub: sub?.trim() || undefined, no };
   let m = modeloDoProduto(p, arvore);
-  const medidas = medida ? dimensoesDaMedida(m.tipo, medida) : null;
+  const medidas = medida ? dimensoesDaMedida(m.tipo, medida, p.n) : null;
   if (medidas) {
     const d = m.dimensoes;
     m = modeloDoProduto({ ...p, dim: [medidas.larguraCm ?? d.larguraCm, medidas.profundidadeCm ?? d.profundidadeCm, medidas.alturaCm ?? d.alturaCm] }, arvore);

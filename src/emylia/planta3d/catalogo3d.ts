@@ -57,10 +57,29 @@ export interface ProdutoModelo3D {
   fam?: { familiaId: string; medidaId: string; acabId: string; sku: string; preco: number };
 }
 
+/**
+ * A sanita de chão COM depósito: a altura que o produto traz (do nome, da medida dos atributos ou de `dim`) abaixo de 60 cm não é a total mas a do assento
+ * ou da taça (a receita genérica usa-a como altura total: o depósito ficava achatado e, abaixo de 40 cm, a taça encolhia); passa à altura-padrão de 78 cm.
+ */
+export const ALTURA_MIN_SANITA_COM_DEPOSITO_CM = 60;
+export const ALTURA_SANITA_COM_DEPOSITO_CM = 78;
+
+/**
+ * A altura (cm) de uma peça, corrigida para a sanita de chão com depósito (a omissão da opção `deposito` pelo nome: a BTW sem a palavra depósito não conta):
+ * abaixo de 60 cm, 78 cm; de 60 cm para cima, a que vem. Outros tipos (a sanita suspensa incluída) e a BTW sem depósito ficam como vêm. É o único sítio da regra:
+ * o catálogo, a planta (modeloDoProduto, extrairDimensoes) e a pré-visualização do formulário (dimensoesDaMedida) chamam-no.
+ */
+export function alturaDeSanitaDeChao(tipo: TipoMockup, nome: string, alturaCm: number): number {
+  if (tipo !== "sanita" || alturaCm >= ALTURA_MIN_SANITA_COM_DEPOSITO_CM) return alturaCm;
+  const cg = categoriaDoTipo(tipo, nome, true);
+  const comDeposito = !!cg && opcoesComOmissao(cg, tipo, {}, nome).deposito === true;
+  return comDeposito ? ALTURA_SANITA_COM_DEPOSITO_CM : alturaCm;
+}
+
 interface Espec { rotulo: string; mont: Montagem; alt: number; dim: [number, number, number]; cor: string }
 /** Por tipo: o nome, a montagem, a altura ao chão de omissão (m, peças de parede), as dimensões de omissão (cm: largura, profundidade, altura) e a cor. */
 export const ESPEC: Record<TipoMockup, Espec> = {
-  sanita: { rotulo: "Sanita de chão", mont: "chao", alt: 0, dim: [37, 65, 78], cor: "#f7f7f5" },
+  sanita: { rotulo: "Sanita de chão", mont: "chao", alt: 0, dim: [37, 65, ALTURA_SANITA_COM_DEPOSITO_CM], cor: "#f7f7f5" },
   sanita_suspensa: { rotulo: "Sanita suspensa", mont: "parede", alt: 0, dim: [36, 53, 40], cor: "#f7f7f5" },
   bide: { rotulo: "Bidé", mont: "chao", alt: 0, dim: [36, 55, 40], cor: "#f7f7f5" },
   banheira: { rotulo: "Banheira", mont: "chao", alt: 0, dim: [170, 70, 55], cor: "#f4f6f7" },
@@ -239,7 +258,7 @@ export function extrairDimensoes(nome: string, tipo: TipoMockup): Dimensoes {
   const [a, b, c] = v;
   if (tipo === "base_duche" || tipo === "banheira") return { larguraCm: Math.max(a, b), profundidadeCm: Math.min(a, b), alturaCm: c ?? al, deNome: true };
   if (LARGURA_ALTURA.includes(tipo) && c === undefined) return { larguraCm: a, profundidadeCm: pd, alturaCm: b, deNome: true };
-  return { larguraCm: a, profundidadeCm: b, alturaCm: c ?? al, deNome: true };
+  return { larguraCm: a, profundidadeCm: b, alturaCm: alturaDeSanitaDeChao(tipo, nome, c ?? al), deNome: true };
 }
 
 /**
@@ -290,7 +309,7 @@ function comMedidasDoGenerico(d: Dimensoes, id: string, o: Readonly<Record<strin
 /** O produto do catálogo mais o seu mockup 3D (paramétrico, com a dimensão real; `urls`: o GLB de cada produto, quando existir). */
 export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], urls: Readonly<Record<string, string>> = {}): ProdutoModelo3D {
   const tipo = tipoMockupDe(p, arvore);
-  let d: Dimensoes = p.dim ? { larguraCm: p.dim[0], profundidadeCm: p.dim[1], alturaCm: p.dim[2], deNome: true } : extrairDimensoes(p.n, tipo);
+  let d: Dimensoes = p.dim ? { larguraCm: p.dim[0], profundidadeCm: p.dim[1], alturaCm: alturaDeSanitaDeChao(tipo, p.n, p.dim[2]), deNome: true } : extrairDimensoes(p.n, tipo);
   const e = ESPEC[tipo];
   // o modelo do HTML do produto (pelo nome e pela medida): lava-loiça, placa e torneira com o modelo e as medidas do HTML; tampo com a chapa
   const h = modeloHtmlDoProduto(p.n, tipo);
