@@ -32,6 +32,7 @@ import { EstadoFotos, useFotosAJuntar } from "../fotosDaObra";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { useInventario } from "../inventario/loja";
 import { EscolherTarefa, ICONE_DA_FASE, iconeDaTarefa } from "./CaminhoCritico";
+import { dispersaoDaEquipa } from "./dispersaoEquipa";
 import { resumoEcNegocio } from "../inventario/ponteNegocios";
 import { useReduzir, MOLA } from "../movimento";
 import { podeNeg } from "../permissoes";
@@ -468,6 +469,49 @@ export function MateriaisDaObra({ ctx, d, dias = [] }: { ctx: Ctx; d: Negocio; d
         </section>
       )}
     </div>
+  );
+}
+
+/* ================================================================== 23/11: a dispersão da equipa */
+export function DispersaoDaEquipa({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+  const { S, A, run } = ctx;
+  const p = d.obra.plano!;
+  const planeia = podeNeg(S.role, "obra.planear");
+  const ocup = ocupacaoDosTecnicos(S, d.id);
+  const D = dispersaoDaEquipa(p, ocup);
+  const [feito, setFeito] = useState(false);
+  if (!D) return null;
+  return (
+    <section aria-label="A equipa dispersa" className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50/60 p-4 dark:border-amber-800 dark:bg-amber-950/20">
+      <div className="flex items-start gap-3">
+        <Users className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" aria-hidden="true" />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">{D.pessoas} pessoas para {D.tarefas} tarefas em {D.dias} dias úteis</p>
+          <p className="text-sm text-muted-foreground">Numa obra pequena, cada pessoa a mais é mais uma deslocação e mais uma passagem de mão. Juntando tarefas em quem já cá está (do ofício e livre nesses dias):</p>
+        </div>
+      </div>
+      <dl className="grid grid-cols-3 gap-2 text-center">
+        {([["Pessoas", D.pessoas, D.depois], ["Idas à obra", D.deslocacoesAntes, D.deslocacoesDepois], ["Fim e horas", "=", "="]] as [string, number | string, number | string][]).map(([l, a, b]) => (
+          <div key={l} className="rounded-xl bg-card p-2 ring-1 ring-border">
+            <dt className="text-xs text-muted-foreground">{l}</dt>
+            <dd className="text-lg font-semibold tabular-nums">{a === b ? "não mudam" : <>{a} <span className="text-muted-foreground">→</span> {b}</>}</dd>
+          </div>
+        ))}
+      </dl>
+      <ul className="space-y-1 text-sm">
+        {D.passagens.map((x) => (
+          <li key={x.ti} className="flex flex-wrap items-center gap-2" title={p.tasks[x.ti].nome}>
+            <span className="font-medium">{nomeCurtoTarefa(p.tasks[x.ti].nome)}</span>
+            <span className="text-muted-foreground">{primeiro(nomeTec(x.de))} → {primeiro(nomeTec(x.para))}</span>
+          </li>
+        ))}
+      </ul>
+      {planeia && (
+        <Button type="button" className="min-h-11 rounded-full" disabled={feito} onClick={() => { run(() => D.passagens.forEach((x) => A.trocarTec(d.id, x.ti, x.para))); setFeito(true); }}>
+          <Check className="mr-1.5 h-4 w-4" aria-hidden="true" />{feito ? "Aplicado" : `Juntar: ${D.passagens.length} ${D.passagens.length === 1 ? "passagem" : "passagens"}`}
+        </Button>
+      )}
+    </section>
   );
 }
 

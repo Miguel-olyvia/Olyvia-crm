@@ -38,7 +38,7 @@ import { EstudioPlano, PainelTarefa } from "../estudioPlano/EstudioPlano";
 import { NovaTarefa } from "../PlanoInterativo";
 import { porqueNaoMexe, TECS } from "../motor";
 import { ausenteNoRh } from "../equipa/tecnicos";
-import { Aba, ClienteDaObra, EquipaDaObra, Execucao, ExecucaoTarefa, FechoDaObra, MateriaisDaObra } from "./PaineisObra";
+import { DispersaoDaEquipa, Aba, ClienteDaObra, EquipaDaObra, Execucao, ExecucaoTarefa, FechoDaObra, MateriaisDaObra } from "./PaineisObra";
 import { AgendaEquipa, ComandoHoje, DiarioObra, FechoVivo, PontoDaSemana, PrevisaoViva, Pulso, precisaDeTi, obraViva, type Ir } from "./ComandoObra";
 import { ROTULO_VIVO, conflitosNovos, nomeCurtoTarefa, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
 import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
@@ -423,6 +423,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
                   {aba === "execucao" && <Execucao ctx={ctx} d={d} dias={dias} abrir={(ti) => setPainel({ k: "tarefa", ti })} />}
                   {aba === "diario" && <DiarioObra d={d} ir={ir} dias={dias} />}
                   {aba === "materiais" && <MateriaisDaObra ctx={ctx} d={d} dias={dias} />}
+                  {aba === "equipa" && <DispersaoDaEquipa ctx={ctx} d={d} />}
                   {aba === "equipa" && <AgendaEquipa ctx={ctx} d={d} dias={dias} ir={ir} />}
                   {aba === "equipa" && <EquipaDaObra ctx={ctx} d={d} dias={dias} abrirOutra={setOutra} abrir={(ti) => setPainel({ k: "tarefa", ti })} novaPara={(tec) => setPainel({ k: "nova", inicial: { tec, dia: vivo ? p.dia : undefined } })} />}
                   {aba === "cliente" && (

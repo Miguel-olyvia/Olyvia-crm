@@ -8,6 +8,8 @@ import { EstudioObra } from "./EstudioObra";
 import { obraDeExemplo } from "./exemploObra";
 import { obraEm3DNoDia, tarefaDaPeca } from "./obra3d";
 import { diasComRegistos, resumoDoDia } from "./resumoDoDia";
+import { dispersaoDaEquipa } from "./dispersaoEquipa";
+import { ocupacaoDosTecnicos } from "../preparacaoObra";
 import { definirEncomendasReais, resumoDaBase, type LinhaDocEc } from "../real/encomendaReal";
 
 afterEach(() => { cleanup(); definirEncomendasReais(null); });
@@ -220,5 +222,15 @@ describe("G. as saídas para a obra", () => {
     const sec = screen.getByRole("region", { name: "Saídas para a obra" });
     expect(within(sec).getAllByRole("listitem").length).toBeGreaterThan(0);
     expect(sec.textContent).toMatch(/leva \d+ materia/);
+  });
+});
+
+describe("H. a equipa dispersa", () => {
+  it("com poucas pessoas para a obra, não há aviso", () => {
+    const { S, d } = obraDeExemplo();
+    expect(dispersaoDaEquipa(d.obra.plano!, ocupacaoDosTecnicos(S, d.id))).toBeNull();
+    montarObra();
+    fireEvent.click(screen.getByRole("tab", { name: /Equipa/ }));
+    expect(screen.queryByRole("region", { name: "A equipa dispersa" })).toBeNull();
   });
 });
