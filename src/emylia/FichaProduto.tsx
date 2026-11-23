@@ -14,6 +14,7 @@ import { dataPT } from "./v2/custosModelo";
 import { margemEmPalavras } from "./fichaServico";
 import { BarraMargem } from "./CriarNoCatalogo";
 import { StockArmazens } from "./StockArmazens";
+import { Modelo3DProduto } from "./Modelo3DProduto";
 import { AtributosFicha } from "./AtributosProduto";
 import { ClassificacaoFicha } from "./ClassificacaoProduto";
 import { ReferenciaFicha } from "./ReferenciaFicha";
@@ -31,6 +32,9 @@ const CARTAO = "rounded-2xl border border-border bg-card p-4 shadow-[var(--shado
 const NOTA = "text-[15px] text-muted-foreground";
 const ENTRADA_TXT = "h-11 w-full rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
 const LINK = "inline-flex min-h-11 items-center gap-1.5 text-left text-[15px] font-medium text-primary underline-offset-4 hover:underline disabled:opacity-60";
+
+/** Sem árvore (a ficha do protótipo), o 3D classifica só pelo nome e pela subcategoria; a mesma lista vazia sempre, para não refazer o 3D. */
+const SEM_ARVORE: No[] = [];
 
 function Seccao({ id, titulo, children }: { id: string; titulo: string; children: ReactNode }) {
   return (
@@ -161,6 +165,14 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
         ? <Fornecedores key={p.id} p={p} real={real} anunciar={anunciar} verCusto={verCusto} />
         : <Seccao id="fp-forn" titulo="Fornecedores"><p className={cn(NOTA, "mt-3")}>{p.fornecedor || "Sem fornecedor indicado."}</p></Seccao>}
       {real && eUuid(p.id) && <StockArmazens key={`stock-${p.id}`} productId={p.id} nome={p.n} real={real} anunciar={anunciar} />}
+
+      {/* 23/11: o 3D que o catálogo dá ao produto (só para ver; não grava nada): fechado até se pedir; a Medida e a Cor dos atributos entram nele.
+          No fim da ficha: o teste de AtributosProduto fixa «Atributos» entre o Preço e os Fornecedores. */}
+      {!cons && (
+        <Seccao id="fp-3d" titulo="Modelo 3D">
+          <div className="mt-3"><Modelo3DProduto key={p.id} nome={p.n} sub={p.sub} no={p.no} arvore={arvore ?? SEM_ARVORE} attrs={pe.attrs} defs={atributos} /></div>
+        </Seccao>
+      )}
     </article>
   );
 }

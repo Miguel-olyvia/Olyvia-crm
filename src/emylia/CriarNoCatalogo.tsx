@@ -22,6 +22,7 @@ import {
 import { podeCriarTipo, usePermissoesCatalogo } from "./permissoesCatalogo";
 import { AtributosCriar } from "./AtributosProduto";
 import { PreviaSku } from "./PreviaSku";
+import { Modelo3DProduto } from "./Modelo3DProduto";
 import { CampoFornecedor, fornecedorParaModelo } from "./CampoFornecedor";
 import { FORNECEDOR_VAZIO, type FornecedorEscolhido } from "./fornecedoresCatalogo";
 import { CampoMarca, CamposRamo, RAMO_VAZIO } from "./ClassificacaoProduto";
@@ -403,6 +404,7 @@ function FormProduto({ S, K, real, onCriado, duplicado, semServico, servicos: se
   const [img, setImg] = useState<IlustracaoKey | null>(null);
   const [verImg, setVerImg] = useState(false);
   const [attrs, setAttrs] = useState<AtributoProduto[]>([]);
+  const idModelo3D = useId();
   const servicos = useMemo(() => {
     if (servicosDados) return [...servicosDados];
     const m = new Map<string, { v: string; t: string; sub: string }>();
@@ -469,6 +471,11 @@ function FormProduto({ S, K, real, onCriado, duplicado, semServico, servicos: se
           <AtributosCriar defs={K.atributos} onChange={setAttrs} real={real} />
           {/* 16/11: o SKU que se geraria (cat_prever_sku): só na página real, e só enquanto a referência está vazia */}
           <PreviaSku real={real} categoria={nomeCat} subcategoria={nomeSub} categoriaNova={!!ramo.catNova || !!ramo.subNova} attrs={attrs} defs={K.atributos} manual={!!sku.trim()} modeloId={modelo.id || null} modeloNovo={!!modelo.novo} />
+          {/* 23/11: o 3D que o catálogo daria ao produto (só para ver): fechado até se pedir; o nome, a subcategoria e a Medida e a Cor dos atributos entram nele */}
+          <section aria-labelledby={idModelo3D} className="grid gap-2 border-t border-border pt-4">
+            <h3 id={idModelo3D} className="text-[15px] font-semibold">Modelo 3D</h3>
+            <Modelo3DProduto nome={nome} sub={nomeSub} no={no || null} arvore={arvoreCria} attrs={attrs} defs={K.atributos} />
+          </section>
         </Secao>
         <Secao i={2} titulo="Compra e venda">
           <div className="grid gap-1.5"><span className="text-[15px] font-medium">Unidade</span><Chips rot="Unidade do produto" opcoes={unidades.map((u) => [u, u] as const)} v={un} set={setUn} /></div>
