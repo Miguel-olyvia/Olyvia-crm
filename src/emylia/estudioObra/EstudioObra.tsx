@@ -12,7 +12,7 @@
 import { Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { EnderecoAtivo, escreverParamUrl, usePainelUrl, useParamUrl } from "../usarParamUrl";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, ReceiptText, Rocket, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { comRelogioReal, eur, nfmt, type Negocio, type Plano, type Tarefa } from "../motor";
@@ -51,6 +51,7 @@ import { useNomeParaMarcaDagua } from "@/hooks/useNomeParaMarcaDagua";
 import { modoReal } from "../acessosPortal";
 import { DocumentosDaObra, ProjetoEm3D } from "./DocumentosObra";
 import { ContratoDaObra } from "./ContratoObra";
+import { HistoricoObraPortal, ProgressoObraPortal } from "../ObraNoPortal";
 import { documentosEnviados, porResponder } from "./enviadosAoCliente";
 import { nomeDaParcela, parcelaDoArranquePorPagar } from "../parcelas";
 
@@ -411,7 +412,20 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
                   {aba === "materiais" && <MateriaisDaObra ctx={ctx} d={d} dias={dias} />}
                   {aba === "equipa" && <AgendaEquipa ctx={ctx} d={d} dias={dias} ir={ir} />}
                   {aba === "equipa" && <EquipaDaObra ctx={ctx} d={d} dias={dias} abrirOutra={setOutra} abrir={(ti) => setPainel({ k: "tarefa", ti })} novaPara={(tec) => setPainel({ k: "nova", inicial: { tec, dia: vivo ? p.dia : undefined } })} />}
-                  {aba === "cliente" && <>{vivo && planeia && <PontoDaSemana ctx={ctx} d={d} dias={dias} />}<ClienteDaObra ctx={ctx} d={d} /></>}
+                  {aba === "cliente" && (
+                    <div className="grid gap-5 xl:grid-cols-[1fr_420px]">
+                      <div className="min-w-0 space-y-5">{vivo && planeia && <PontoDaSemana ctx={ctx} d={d} dias={dias} />}<ClienteDaObra ctx={ctx} d={d} /></div>
+                      {/* 23/11 (Rúben: «mega next-level»): o que o cliente vê no portal, sem sair do Estúdio */}
+                      <section aria-label="O que o cliente vê no portal" className="space-y-2 xl:sticky xl:top-4 xl:self-start">
+                        <p className="flex items-center gap-1.5 text-sm font-semibold"><Smartphone className="h-4 w-4 text-primary" aria-hidden="true" />O que o cliente vê no portal</p>
+                        <p className="text-xs text-muted-foreground">Pré-visualização: o progresso e o histórico como aparecem ao cliente. Os custos, as margens e as notas da equipa nunca saem do CRM.</p>
+                        <div className="max-h-[75vh] space-y-4 overflow-y-auto rounded-[2rem] border-8 border-foreground/80 bg-background p-3 shadow-xl">
+                          <ProgressoObraPortal d={d} />
+                          <HistoricoObraPortal d={d} />
+                        </div>
+                      </section>
+                    </div>
+                  )}
                   {aba === "contrato" && <ContratoDaObra ctx={ctx} d={d} />}
                   {aba === "documentos" && <DocumentosDaObra ctx={ctx} d={d} />}
                   {aba === "3d" && <ProjetoEm3D d={d} dias={dias} abrirTarefa={(ti) => setPainel({ k: "tarefa", ti })} />}

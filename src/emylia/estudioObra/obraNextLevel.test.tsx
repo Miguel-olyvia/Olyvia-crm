@@ -146,3 +146,16 @@ describe("6. o diário automático", () => {
     expect(within(pl).getAllByRole("img").length).toBe(2);
   });
 });
+
+describe("7. o cliente", () => {
+  it("o ponto da semana pronto a rever (não se publica sozinho) e a pré-visualização do portal", () => {
+    const { A } = montarObra();
+    void A;
+    fireEvent.click(screen.getByRole("tab", { name: /Cliente/ }));
+    const ponto = screen.getByRole("region", { name: "O ponto da semana" });
+    expect(within(ponto).getByRole("button", { name: /Publicar no portal/ })).toBeTruthy();
+    const portal = screen.getByRole("region", { name: "O que o cliente vê no portal" });
+    expect(portal.textContent).toMatch(/custos/);
+    expect(portal.textContent!.length).toBeGreaterThan(200);
+  });
+});
