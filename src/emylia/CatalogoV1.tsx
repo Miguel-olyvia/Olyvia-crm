@@ -50,6 +50,8 @@ import { MateriaisModelo } from "./MateriaisModelo";
 import { podeCriarTipo, usePermissoesCatalogo } from "./permissoesCatalogo";
 import { CAMINHO_SECCAO, caminhoProduto, caminhoServico, grupoDaSeccao, idSeparadorCatalogo, separadorDaSeccao, usaLeituraLeve, type RotaCatalogo } from "./catalogoRotas";
 import { SeparadoresCatalogo } from "./SeparadoresCatalogo";
+import { catalogoParcial } from "./real/catalogoLeve";
+import { servidorLigacoes } from "./real/ligacoesServidor";
 
 type Seccao = "servicos" | "produtos" | "equipamentos" | "consumiveis" | "tecnicos" | "ligacoes";
 const SECCOES: [Seccao, string][] = [["servicos", "Serviços"], ["produtos", "Produtos"], ["equipamentos", "Equipamentos"], ["consumiveis", "Consumíveis"], ["tecnicos", "Técnicos"], ["ligacoes", "Ligações"]];
@@ -557,6 +559,9 @@ export function CatalogoV1({ S, run, real, rota }: Ctx & { real?: FichaProdutoRe
   const nomes = useMemo(() => new Map(itens.map((i) => [i.sid, i.n])), [itens]);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const catLig = useMemo(() => montarCatalogo(S, C, K), [chave, C, K]);
+  // 23/11: com o Catálogo leve (as Ligações já não leem os ~29 600 produtos) os produtos do mapa pedem-se ao servidor
+  const parcial = !!real && catalogoParcial();
+  const servidorLig = useMemo(() => (parcial && real ? servidorLigacoes(real.org) : undefined), [parcial, real?.org]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Abre o separador Ligações centrado num elemento (a partir da ficha). */
   const verLigacoes = useCallback((r: Ref) => {
     abrirLigacoesEm(r);
@@ -672,7 +677,7 @@ export function CatalogoV1({ S, run, real, rota }: Ctx & { real?: FichaProdutoRe
     equipamentos: () => <Equipamentos S={S} C={C} mudar={mudar} novo={realce?.t === "equipamento" ? realce.id : undefined} />,
     consumiveis: () => <Consumiveis todos={consumiveis} C={C} nomeServico={nomeServico} novo={realce?.t === "consumivel" ? realce.id : undefined} onAbrirConsumivel={(id) => setConsAberto(id)} real={real} anunciar={anunciar} />,
     tecnicos: () => <Tecnicos S={S} C={C} mudar={mudar} novo={realce?.t === "tecnico" ? realce.id : undefined} />,
-    ligacoes: () => <LigacoesCatalogo K={catLig} onAbrirFicha={abrir} S={S} run={run} />,
+    ligacoes: () => <LigacoesCatalogo K={catLig} onAbrirFicha={abrir} S={S} run={run} servidor={servidorLig} />,
   };
 
   return (

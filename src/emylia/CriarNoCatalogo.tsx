@@ -57,7 +57,7 @@ function Secao({ i, titulo, texto, children }: { i: number; titulo: string; text
   );
 }
 /** Procurar e juntar: escreve-se, aparecem até 8 resultados, Enter ou toque junta. */
-function Procurar({ rot, ph, opcoes, onEscolher }: { rot: string; ph: string; opcoes: { v: string; t: string; sub?: string }[]; onEscolher: (v: string) => void }) {
+export function Procurar({ rot, ph, opcoes, onEscolher }: { rot: string; ph: string; opcoes: { v: string; t: string; sub?: string }[]; onEscolher: (v: string) => void }) {
   const [q, setQ] = useState("");
   const [aberto, setAberto] = useState(false);
   const [ativo, setAtivo] = useState(0);
@@ -375,9 +375,12 @@ function FormServico({ S, C, K, onCriado }: { S: Estado; C: Custos; K: Catalogo;
 /** `duplicado` (17/11): numa página que não tem todos os produtos em memória, pergunta à base se o nome ou a referência já existem (devolve a frase de recusa, ou null).
  *  `semServico`: a página não tem os serviços; sem a secção «O serviço que traz». */
 export interface OpcoesCriarProduto { duplicado?: (o: { n: string; sku: string }) => Promise<string | null>; semServico?: boolean;
+  /** 23/11: os serviços a escolher em «O serviço que traz», quando a página não tem o Catálogo dos serviços (v = o id da base, que se grava em products.servico_id).
+   *  Sem eles, a lista é a do motor (S.svc e o Catálogo todo). */
+  servicos?: readonly { v: string; t: string; sub?: string }[];
   /** O texto do botão enquanto quem chama grava ou relê (desativa-o). */
   ocupado?: string }
-function FormProduto({ S, K, real, onCriado, duplicado, semServico, ocupado }: { S: Estado; K: Catalogo; real?: FichaProdutoReal; onCriado: (id: string, nome: string) => void } & OpcoesCriarProduto) {
+function FormProduto({ S, K, real, onCriado, duplicado, semServico, servicos: servicosDados, ocupado }: { S: Estado; K: Catalogo; real?: FichaProdutoReal; onCriado: (id: string, nome: string) => void } & OpcoesCriarProduto) {
   const [estado, setEstado] = useState<EstadoProduto>("active"), [aVerificar, setAVerificar] = useState(false);
   const [nome, setNome] = useState(""), [marca, setMarca] = useState(""), [sku, setSku] = useState(""), [forn, setForn] = useState<FornecedorEscolhido>(FORNECEDOR_VAZIO);
   const [un, setUn] = useState("un"), [custo, setCusto] = useState(""), [pvp, setPvp] = useState(""), [desc, setDesc] = useState("");
@@ -401,11 +404,12 @@ function FormProduto({ S, K, real, onCriado, duplicado, semServico, ocupado }: {
   const [verImg, setVerImg] = useState(false);
   const [attrs, setAttrs] = useState<AtributoProduto[]>([]);
   const servicos = useMemo(() => {
+    if (servicosDados) return [...servicosDados];
     const m = new Map<string, { v: string; t: string; sub: string }>();
     for (const [sid, s] of Object.entries(S.svc)) m.set(sid, { v: sid, t: s.n, sub: s.perfil });
     for (const c of CATALOGO_TODO) if (!m.has(c.id)) m.set(c.id, { v: c.id, t: c.n, sub: c.cat });
     return [...m.values()];
-  }, [S.svc, K]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [S.svc, K, servicosDados]); // eslint-disable-line react-hooks/exhaustive-deps
   const nomeSvc = servico ? servicos.find((x) => x.v === servico)?.t ?? servico : null;
   const nomeModelo = modelo.novo ?? K.modelos?.find((m) => m.id === modelo.id)?.n ?? "";
   const o = { n: nome, custo: n(custo), un, marca, ...fornecedorParaModelo(forn), no: no || null, sku, pvp: pvp.trim() ? n(pvp) : null, desc, servico, ...(img ? { img } : {}), ...(attrs.length ? { attrs } : {}), ...(real ? { estado } : {}),

@@ -21,8 +21,9 @@ import { ProdutosPagina } from "@/emylia/ProdutosPagina";
 import { SeparadoresCatalogo } from "@/emylia/SeparadoresCatalogo";
 import { CAMINHO_SECCAO, caminhoProduto, caminhoServico, idSeparadorCatalogo } from "@/emylia/catalogoRotas";
 import { ProvedorPermissoesCatalogo, permissoesCatalogo } from "@/emylia/permissoesCatalogo";
-import { diferencasCatalogo, executarCatalogo, type Rpc } from "@/emylia/real/gravarCatalogo";
+import { diferencasProdutoNovo, executarCatalogo, type Rpc } from "@/emylia/real/gravarCatalogo";
 import { lerCatalogoLeve, procurarDuplicado, type CatalogoLeve } from "@/emylia/real/produtosLeves";
+import { lerServicosDaOrganizacao, opcoesServicos, type ServicoEscolha } from "@/emylia/real/servicosDoProduto";
 import type { TipoCriar } from "@/emylia/criarCatalogo";
 import "@/emylia/prototipo.css";
 import "@/emylia/blocosPagina.css";
@@ -35,7 +36,7 @@ const rpc: Rpc = async (fn, args) => {
   const { data, error } = await supabase.rpc(fn as never, args as never);
   return { data, error };
 };
-const nomeServico = (): string => "o serviço ligado";
+const SEM_NOME_SERVICO = "o serviço ligado";
 
 export default function CatalogoProdutos() {
   usePaginaInteira();
@@ -53,6 +54,18 @@ export default function CatalogoProdutos() {
   const [aviso, setAviso] = useState<{ msg: string; n: number } | null>(null);
   const [gravacao, setGravacao] = useState<Gravacao>({ k: "parado" });
   const anunciar = useCallback((msg: string) => setAviso((a) => ({ msg, n: (a?.n ?? 0) + 1 })), []);
+  // 23/11: os serviços da organização (id, nome, referência): o «O serviço que traz» do Criar e da ficha, e o nome no «Traz:». Sem eles (sem services.view,
+  // ou a leitura falhou) o Criar fica sem a secção e a ficha mostra «o serviço ligado»; nada disto impede criar ou abrir produtos.
+  const [servicos, setServicos] = useState<ServicoEscolha[] | null>(null);
+  useEffect(() => {
+    if (!org) return undefined;
+    let vivoLeitura = true;
+    setServicos(null);
+    lerServicosDaOrganizacao(org).then((r) => { if (vivoLeitura) setServicos(r.ok ? r.v : []); }, () => { if (vivoLeitura) setServicos([]); });
+    return () => { vivoLeitura = false; };
+  }, [org]);
+  const nomesServicos = useMemo(() => new Map((servicos ?? []).map((x) => [x.id, x.nome])), [servicos]);
+  const nomeServico = useCallback((sid: string): string => nomesServicos.get(sid) ?? SEM_NOME_SERVICO, [nomesServicos]);
 
   // a página ainda está montada (uma gravação que acaba depois de sair não relê nem navega) e qual é a organização de agora
   const vivo = useRef(true);
@@ -118,7 +131,7 @@ export default function CatalogoProdutos() {
             {tentarDeNovo}
           </div>
         ) : (
-          <CriarProduto org={org} K={K} margens={margens} real={real} vivo={vivo} voltar={() => setPesquisa({}, { replace: true })}
+          <CriarProduto org={org} K={K} margens={margens} real={real} vivo={vivo} servicos={servicos} voltar={() => setPesquisa({}, { replace: true })}
             outroTipo={(t: TipoCriar) => navigate(`${CAMINHO_SECCAO.servicos}?criar=${t}`, { replace: true })} gravar={setGravacao} anunciar={anunciar}
             depoisDeGravar={async (navegar) => {
               if (navegar) manterGravacao.current = true;
@@ -132,7 +145,7 @@ export default function CatalogoProdutos() {
     corpo = (
       <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
         {separadores}
-        {painel(<FichaProdutoLeve id={id} K={K} real={real} min={margens.min} alvo={margens.alvo} voltar={irLista} anunciar={anunciar} nomeServico={nomeServico}
+        {painel(<FichaProdutoLeve id={id} K={K} real={real} min={margens.min} alvo={margens.alvo} voltar={irLista} anunciar={anunciar} nomeServico={nomeServico} servicos={servicos}
           relerReferencias={relerReferencias} onAbrirServico={(sid) => navigate(caminhoServico(sid))} />)}
       </div>
     );
@@ -170,8 +183,10 @@ export default function CatalogoProdutos() {
 }
 
 /** O formulário de criar produto. O formulário escreve no Catálogo partilhado (catalogoStore); enquanto está aberto a store leva o Catálogo leve, e ao sair volta ao que tinha. */
-function CriarProduto({ org, K, margens, real, vivo, voltar, outroTipo, gravar, depoisDeGravar, anunciar }: {
+function CriarProduto({ org, K, margens, real, vivo, servicos, voltar, outroTipo, gravar, depoisDeGravar, anunciar }: {
   org: string; K: Catalogo; margens: Margens; real: FichaProdutoReal; vivo: MutableRefObject<boolean>; voltar: () => void; outroTipo: (t: TipoCriar) => void;
+  /** 23/11: os serviços da organização (null: ainda a ler; vazio: sem eles, o formulário fica sem «O serviço que traz»). */
+  servicos: readonly ServicoEscolha[] | null;
   gravar: (g: Gravacao) => void; depoisDeGravar: (navegar: boolean) => Promise<void>; anunciar: (msg: string) => void;
 }) {
   const guardado = useRef(lerCatalogoStore());
@@ -181,6 +196,7 @@ function CriarProduto({ org, K, margens, real, vivo, voltar, outroTipo, gravar, 
     porCatalogo(K);
     return () => porCatalogo(original);
   }, [K]);
+  const opcoesSvc = useMemo(() => opcoesServicos(servicos ?? []), [servicos]);
   const gravando = useRef(false), montado = useRef(true);
   const [aGravar, setAGravar] = useState(false);
   useEffect(() => { montado.current = true; return () => { montado.current = false; }; }, []);
@@ -189,10 +205,9 @@ function CriarProduto({ org, K, margens, real, vivo, voltar, outroTipo, gravar, 
     if (gravando.current) return;
     gravando.current = true;
     setAGravar(true);
-    // o que o formulário acrescentou ao Catálogo partilhado, comparado com o leve (a mesma comparação do Catálogo inteiro, só com o produto novo a mudar)
-    const C = lerCustos();
-    const foto = (k: Catalogo) => ({ C, K: k, svc: {}, margens });
-    const chamadas = diferencasCatalogo(org, foto(K), foto(lerCatalogoStore()), { ids: { servico: new Map(), perfil: new Map(), tabelas: true }, produtos: [] });
+    // o que o formulário acrescentou ao Catálogo partilhado, comparado com o leve: SÓ o produto novo (23/11: sem receitas nem serviços, que esta página não lê;
+    // antes cada receita da store parecia um serviço novo e a gravação partia em «duplicate key services_organization_id_sku_key» depois de criar o produto)
+    const chamadas = diferencasProdutoNovo(org, K, lerCatalogoStore(), lerCustos(), margens);
     porCatalogo(K); // um segundo toque (ou uma nova tentativa, se falhar) não encontra o produto já criado
     void (async () => {
       gravar({ k: "a-gravar", n: chamadas.length });
@@ -210,6 +225,6 @@ function CriarProduto({ org, K, margens, real, vivo, voltar, outroTipo, gravar, 
   };
   return (
     <CriarNoCatalogo S={S} C={lerCustos()} K={K} run={(fn) => fn()} tipo="produto" setTipo={(t) => (t === "produto" ? undefined : outroTipo(t))} voltar={voltar} onCriado={criado} real={real}
-      produto={{ duplicado: (o) => procurarDuplicado(org, o), semServico: true, ocupado: aGravar ? "A gravar…" : undefined }} />
+      produto={{ duplicado: (o) => procurarDuplicado(org, o), semServico: !servicos?.length, servicos: opcoesSvc, ocupado: aGravar ? "A gravar…" : undefined }} />
   );
 }

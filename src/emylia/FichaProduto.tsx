@@ -19,6 +19,8 @@ import { ClassificacaoFicha } from "./ClassificacaoProduto";
 import { ReferenciaFicha } from "./ReferenciaFicha";
 import { SkuFicha } from "./SkuProduto";
 import { EstadoFicha } from "./EstadoProduto";
+import { ServicoDoProduto } from "./ServicoDoProduto";
+import type { ServicoEscolha } from "./real/servicosDoProduto";
 import type { CrmCatalogItem, CrmCatalogList, FreeSupplierRow } from "@/components/supplier-portal-crm/types";
 import {
   definirGrossistaDistribuidor, definirPreferido, definirPvp, eUuid, lerNumero, lerPrecoTabela, lerFornecedoresOrg, lerFornecedoresProduto, ligarArtigo, margemProduto, moeda, procurarArtigos, unidadeDaLigacao,
@@ -50,9 +52,11 @@ type Props = {
   arvore?: No[]; marcas?: string[];
   /** 16/11: os modelos do Catálogo (K.modelos) para o campo «Modelo» da secção «Classificação». Em falta: o campo diz «Ainda não disponível nesta base». */
   modelos?: ModeloK[];
+  /** 23/11: os serviços da organização (página leve de Produtos): com eles, a secção «Serviço que traz» deixa escolher, trocar ou tirar o serviço. Em falta ou vazia: sem a secção. */
+  servicos?: readonly ServicoEscolha[] | null;
 };
 
-export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, real, tipo = "produto", atributos, arvore, marcas, modelos }: Props) {
+export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, real, tipo = "produto", atributos, arvore, marcas, modelos, servicos }: Props) {
   const cons = tipo === "consumivel";
   // 05/11: sem products.view_cost não se mostra o custo de compra (nem a margem, nem o preço dos fornecedores)
   const verCusto = real?.podeVerCusto !== false;
@@ -132,6 +136,13 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
       {!cons && real && eUuid(p.id) && !!arvore && (
         <Seccao id="fp-class" titulo="Classificação">
           <ClassificacaoFicha p={p} arvore={arvore} marcas={marcas ?? []} modelos={modelos} real={real} anunciar={anunciarMudanca} />
+        </Seccao>
+      )}
+
+      {/* 23/11: o serviço que o produto traz (cat_definir_servico_produto), só com a lista dos serviços da organização; a chave volta ao que ficou na base depois de gravar */}
+      {!cons && real && eUuid(p.id) && !!servicos?.length && (
+        <Seccao id="fp-servico" titulo="Serviço que traz">
+          <ServicoDoProduto key={`${p.id}:${p.servico ?? ""}:${p.fatorServico ?? 1}`} produto={p} servicos={servicos} real={real} anunciar={anunciar} />
         </Seccao>
       )}
 

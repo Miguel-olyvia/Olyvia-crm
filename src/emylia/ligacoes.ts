@@ -236,15 +236,22 @@ const INSTALAVEIS = new Set<IlustracaoKey>([
   "armario-cozinha", "bancada", "lava-loica", "eletrodomestico", "exaustor", "janela", "porta", "roupeiro", "iluminacao", "avac", "esquentador",
 ]);
 
+/** 23/11: com o Catálogo leve (K.produtos é só uma parte) os problemas dos produtos não se calculam pela lista em memória:
+ *  `nosComProduto` são os ramos que têm produtos na base (as contagens do servidor) e `parcial` deixa de fora «Produtos sem serviço de instalação». */
+export interface OpcoesProblemas { nosComProduto?: readonly string[]; parcial?: boolean }
+
 /** Os problemas de dados do Catálogo, pela ordem de TIPOS_PROBLEMA e, dentro de cada tipo, por nome. */
-export function problemasCatalogo(K: CatalogoLig): Problema[] {
+export function problemasCatalogo(K: CatalogoLig, op: OpcoesProblemas = {}): Problema[] {
   const I = indice(K), P: Problema[] = [];
   for (const s of K.servicos) if (s.semReceita) P.push({ tipo: "svc-sem-receita", ref: { t: "svc", id: s.id }, n: s.n, t: "Sem receita: o custo só conta a mão de obra." });
   // os nós com produtos (contando os de baixo)
   const comProduto = new Set<string>();
-  for (const p of K.produtos) if (p.no) for (let n: No | undefined = K.arvore.find((x) => x.id === p.no); n && !comProduto.has(n.id); n = n.pai ? K.arvore.find((x) => x.id === n!.pai) : undefined) comProduto.add(n.id);
+  const subir = (no: string | null | undefined) => { for (let n: No | undefined = no ? K.arvore.find((x) => x.id === no) : undefined; n && !comProduto.has(n.id); n = n.pai ? K.arvore.find((x) => x.id === n!.pai) : undefined) comProduto.add(n.id); };
+  for (const p of K.produtos) subir(p.no);
+  for (const no of op.nosComProduto ?? []) subir(no);
+  // parcial sem as contagens do servidor: não se sabe que ramos têm produtos, por isso não se acusa nenhum
   for (const s of K.servicos) {
-    if (!s.exige || comProduto.has(s.exige)) continue;
+    if (!s.exige || comProduto.has(s.exige) || (op.parcial && !op.nosComProduto)) continue;
     const existe = K.arvore.some((x) => x.id === s.exige);
     P.push({ tipo: "svc-exige-sem-produto", ref: { t: "svc", id: s.id }, n: s.n, t: existe ? `Exige um produto de ${caminho(K.arvore, s.exige)}, mas não há nenhum.` : "Exige um produto de um ramo que já não existe." });
   }
@@ -253,7 +260,7 @@ export function problemasCatalogo(K: CatalogoLig): Problema[] {
   for (const s of K.servicos) if (s.exige) for (const n of I.ramo(s.exige)) cobertos.add(n);
   const grupoDe = (p: Produto) => (p.sub ? `s:${p.sub}` : p.no ? `n:${p.no}` : "");
   const irmaosComServico = new Set(K.produtos.filter((p) => p.servico && grupoDe(p)).map(grupoDe));
-  for (const p of K.produtos) {
+  for (const p of op.parcial ? [] : K.produtos) {
     if (p.servico || (p.no && cobertos.has(p.no))) continue;
     const devia = INSTALAVEIS.has(ilustracaoDoProduto(p, caminho(K.arvore, p.no))) || irmaosComServico.has(grupoDe(p));
     if (devia) P.push({ tipo: "prod-sem-servico", ref: { t: "prod", id: p.id }, n: p.n, t: "Sem serviço de instalação: escolhido na visita, ninguém o instala." });

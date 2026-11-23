@@ -9,6 +9,7 @@ import type { Produto } from "../v2/catalogoModelo";
 import type { No } from "../v2/catalogoModelo";
 import { juntarArvoreProdutos, type LinhaCategoriaProduto, type LinhaProduto } from "./catalogoReal";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 let parcial = false;
 let orgDoCatalogo: string | null = null;
 /** A árvore dos produtos junta à dos serviços pelo nome (juntarArvoreProdutos): o id de product_categories → o nó do Catálogo e o inverso. Sem ela, os ids são os mesmos. */
@@ -30,15 +31,24 @@ export const categoriaCruDoNo = (no: string): string => nos?.cru.get(no) ?? no;
 /** 17/11: os serviços do Catálogo lido, id da base → chave do motor. Um produto lido do servidor (cat_ler_produto) traz o servico_id da base; no negócio
  *  o serviço vai pela chave (negocioBase.paraBase recusa um id: «Serviços que não estão no Catálogo desta organização»). */
 let chaveDeServico: Map<string, string> | null = null;
+let idDeServico: Map<string, string> | null = null;
 /** Chamado por carregarCatalogo com M.ids.servico (chave → id). */
 export function definirServicosLidos(chaveParaId: ReadonlyMap<string, string>): void {
   chaveDeServico = new Map([...chaveParaId].map(([k, id]) => [id, k]));
+  idDeServico = new Map(chaveParaId);
+}
+/** 23/11: o inverso de chaveDoServicoLido, para pesquisar no servidor (products.servico_id é o id da base): a chave do motor → o id. Um id fica como está;
+ *  uma chave que o Catálogo lido não tem (ou sem Catálogo lido): undefined. */
+export function idDoServicoLido(s: string | undefined): string | undefined {
+  if (!s) return undefined;
+  if (UUID_RE.test(s)) return s;
+  return idDeServico?.get(s);
 }
 /** A chave do motor de um serviço lido pelo id (sem Catálogo lido, ou já uma chave: fica como está; um id que o Catálogo não tem: undefined). */
 export function chaveDoServicoLido(s: string | undefined): string | undefined {
   if (!s || !chaveDeServico) return s;
   if (chaveDeServico.has(s)) return chaveDeServico.get(s);
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s) ? undefined : s;
+  return UUID_RE.test(s) ? undefined : s;
 }
 
 /** Chamado por carregarCatalogo, antes de aplicar o Catálogo lido. */
@@ -52,6 +62,7 @@ export function limparCatalogoLido(): void {
   orgDoCatalogo = null;
   nos = null;
   chaveDeServico = null;
+  idDeServico = null;
 }
 /** O Catálogo em memória veio da leitura leve: K.produtos NÃO é a lista toda. */
 export const catalogoParcial = (): boolean => parcial;

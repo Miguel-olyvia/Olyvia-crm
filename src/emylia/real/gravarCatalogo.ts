@@ -141,7 +141,9 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
   const prodBase = porId(base.produtos);
   const prodA = porId(antes.K.produtos), prodD = porId(depois.K.produtos);
   const consA = porId(antes.K.consumiveisCriados ?? []);
-  const svcRef = (sid: string | undefined): string | Tmp | null => (!sid ? null : ids.servico.get(sid) ?? { tmp: "svc:" + sid });
+  // 23/11: um serviço que o Catálogo em memória não tem pela chave mas que já é um id da base (a página leve de Produtos escolhe-o da lista de
+  // serviços da organização) vai pelo id; as chaves do motor e os serviços criados agora («n-…») nunca são UUID.
+  const svcRef = (sid: string | undefined): string | Tmp | null => (!sid ? null : ids.servico.get(sid) ?? (UUID.test(sid) ? sid : { tmp: "svc:" + sid }));
   for (const p of depois.K.produtos) {
     const a = prodA.get(p.id);
     if (a && igual(a, p)) continue;
@@ -267,6 +269,16 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
     out.push({ rpc: "cat_retirar_perfil", nota: `Retirar ${a.n}`, args: { p_org: org, p_id: id } });
   }
   return out;
+}
+
+/** 23/11: criar um produto na página leve de Produtos (CatalogoProdutos) grava SÓ o produto novo (e o que lhe diz respeito: texto, fornecedor, tabelas,
+ *  atributos, modelo, estado, referência). A página não lê os serviços: o «antes» e o «depois» partilham os custos da store (lerCustos), que podem ter
+ *  as receitas de outra página, e sem os ids dos serviços cada receita parecia um serviço NOVO (cat_guardar_servico sem id → «duplicate key
+ *  services_organization_id_sku_key», com o produto já criado). Aqui os dois lados ficam com os mesmos custos e sem receitas nem serviços. */
+export function diferencasProdutoNovo(org: string, antes: Catalogo, depois: Catalogo, C: Custos, margens: { min: number; alvo: number }): Chamada[] {
+  const Cs: Custos = { ...C, receitas: {} };
+  const foto = (K: Catalogo): FotoCatalogo => ({ C: Cs, K, svc: {}, margens });
+  return diferencasCatalogo(org, foto(antes), foto(depois), { ids: { servico: new Map(), perfil: new Map(), tabelas: true }, produtos: [] });
 }
 
 /** Troca os { tmp } pelos ids que a base deu. */

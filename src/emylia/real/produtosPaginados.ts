@@ -46,19 +46,46 @@ const num = (v: unknown, omissao = 0) => (typeof v === "number" && Number.isFini
 /** Um preço da base: número finito tal como vem; qualquer outra coisa (null, falta numa base antiga) = null. */
 const precoOuNulo = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
 const nulo = (s: string) => { const t = s.trim(); return t ? t : null; };
+
+/** O que a base aceita numa pesquisa (fn_cat_termos_pesquisa, 20270118500000): até 200 caracteres e 10 palavras diferentes; fora disso recusa (CT002). */
+export const PESQUISA_MAX_PALAVRAS = 10;
+export const PESQUISA_MAX_CARACTERES = 200;
+const semAcentos = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+/** 23/11: uma pesquisa que a base aceita. Um nome real de fornecedor («Móvel AXIS Suspenso c/lavatório 60x50x36 - 2 Gav c/ Fundo Reduzido», 11 palavras) passava
+ *  do limite e o Criar parava em «A pesquisa tem no máximo 10 palavras» (a verificação de nome repetido pesquisa pelo nome). A base exige TODAS as palavras: ficar
+ *  com as 10 mais longas (as que mais separam) dá os mesmos produtos ou mais alguns, nunca menos; quem precisa do nome exato (o duplicado) confirma-o na linha.
+ *  As repetidas (sem acentos nem maiúsculas, como a base as conta) contam uma vez. */
+export function pesquisaQueCabe(q: string): string {
+  const t = q.trim();
+  if (!t) return "";
+  const vistas = new Set<string>(), palavras: string[] = [];
+  for (const w of t.split(/\s+/)) { const k = semAcentos(w); if (k && !vistas.has(k)) { vistas.add(k); palavras.push(w); } }
+  if (palavras.length <= PESQUISA_MAX_PALAVRAS && t.length <= PESQUISA_MAX_CARACTERES) return t;
+  // as mais longas primeiro (em empate, a ordem do texto); ficam pela ordem em que estavam
+  const ordem = palavras.map((w, i) => ({ w: w.slice(0, PESQUISA_MAX_CARACTERES), i })).sort((a, b) => b.w.length - a.w.length || a.i - b.i);
+  const ficam: { w: string; i: number }[] = [];
+  let tam = -1;
+  for (const x of ordem) {
+    if (ficam.length >= PESQUISA_MAX_PALAVRAS) break;
+    if (tam + 1 + x.w.length > PESQUISA_MAX_CARACTERES) continue;
+    ficam.push(x); tam += 1 + x.w.length;
+  }
+  return ficam.sort((a, b) => a.i - b.i).map((x) => x.w).join(" ");
+}
+const nuloQ = (s: string) => nulo(pesquisaQueCabe(s));
 const mensagem = (e: unknown, omissao: string) => (e instanceof Error && e.message ? e.message : omissao);
 
 /** Os argumentos de cat_ler_produtos_pagina. «Sem categoria» (p_sem_categoria) exclui a categoria e a subcategoria. */
 export function argsPagina(org: string, f: FiltroServidor, pagina: number, limite = POR_PAGINA_SERVIDOR): Record<string, unknown> {
   return {
-    p_org: org, p_q: nulo(f.q), p_categoria: f.semCategoria ? null : nulo(f.categoria), p_subcategoria: f.semCategoria ? null : nulo(f.subcategoria),
+    p_org: org, p_q: nuloQ(f.q), p_categoria: f.semCategoria ? null : nulo(f.categoria), p_subcategoria: f.semCategoria ? null : nulo(f.subcategoria),
     p_modelo: nulo(f.modelo), p_marca: nulo(f.marca), p_sem_categoria: f.semCategoria, p_limite: limite, p_pagina: pagina,
   };
 }
 
 /** Os argumentos de cat_pesquisar_produtos (20270122000000). ATENÇÃO: p_pagina vem antes de p_limite. Sem modelo, marca nem «sem categoria». */
 export function argsPesquisa(org: string, f: FiltroServidor, pagina: number, limite = POR_PAGINA_SERVIDOR): Record<string, unknown> {
-  return { p_org: org, p_q: nulo(f.q), p_servico: nulo(f.servico ?? ""), p_categoria: nulo(f.categoria), p_subcategoria: nulo(f.subcategoria), p_pagina: pagina, p_limite: limite };
+  return { p_org: org, p_q: nuloQ(f.q), p_servico: nulo(f.servico ?? ""), p_categoria: nulo(f.categoria), p_subcategoria: nulo(f.subcategoria), p_pagina: pagina, p_limite: limite };
 }
 
 /** A resposta de cat_ler_produtos_pagina; null se não for uma página (sem a lista dos produtos). */
@@ -135,7 +162,7 @@ export const lerProdutosPagina = async (org: string, f: FiltroServidor, pagina: 
 
 export async function lerProdutosContagens(org: string, q: string, marca: string): Promise<Res<ContagensProdutos>> {
   try {
-    const { data, error } = await rpcLivre("cat_ler_produtos_contagens", { p_org: org, p_q: nulo(q), p_marca: nulo(marca) });
+    const { data, error } = await rpcLivre("cat_ler_produtos_contagens", { p_org: org, p_q: nuloQ(q), p_marca: nulo(marca) });
     if (error) return { ok: false, erro: erroAmigavel(error, "Não foi possível ler as contagens.") };
     const c = contagensDe(data);
     return c ? { ok: true, v: c } : { ok: false, erro: "A base respondeu num formato que não se percebe (contagens)." };

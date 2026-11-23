@@ -8,7 +8,7 @@ import type { No, Produto } from "../v2/catalogoModelo";
 import type { Res } from "../fichaProdutoDados";
 import { SEM_FILTRO_SERVIDOR, lerProdutosPagina, type LinhaPaginaProduto } from "./produtosPaginados";
 import { lerProdutoFicha } from "./produtosLeves";
-import { categoriaCruDoNo, chaveDoServicoLido, noDoProdutoLido, registarProdutoLido } from "./catalogoLeve";
+import { categoriaCruDoNo, chaveDoServicoLido, idDoServicoLido, noDoProdutoLido, registarProdutoLido } from "./catalogoLeve";
 import { nosDeProdutoDoRamo } from "../ramoDosProdutos";
 
 export const ATRASO_PESQUISA_MS = 300;
@@ -47,7 +47,8 @@ export function usePesquisaProdutos(org: string | null, f: FiltroPesquisaProduto
     setACarregar(true); setErro(null);
     const chave = `${org}|${qAtraso}|${categoria}|${subcategoria}|${servico}|${subs}`;
     const r = subs ? await lerVariasSubcategorias(org, qAtraso, subs.split(","), pagina)
-      : await lerProdutosPagina(org, { ...SEM_FILTRO_SERVIDOR, q: qAtraso, categoria, subcategoria, ...(servico ? { servico } : {}) }, pagina);
+      // 23/11: products.servico_id é o id da base; o motor chama o serviço pela chave («demol»): converte-se (um id, ou sem Catálogo lido, fica como está)
+      : await lerProdutosPagina(org, { ...SEM_FILTRO_SERVIDOR, q: qAtraso, categoria, subcategoria, ...(servico ? { servico: idDoServicoLido(servico) ?? servico } : {}) }, pagina);
     if (eu !== pedido.current) return; // uma pesquisa mais nova já saiu
     setACarregar(false);
     if (!r.ok) { setErro(r.erro); if (!juntar) setEstado(VAZIO); return; }
@@ -128,8 +129,13 @@ export function produtoDeLinha(l: LinhaPaginaProduto): Produto {
     ...(l.sku ? { sku: l.sku } : {}), ...(pvp ? { pvp } : {}),
     ...(l.grossista != null ? { grossista: l.grossista } : {}), ...(l.distribuidor != null ? { distribuidor: l.distribuidor } : {}),
     ...(l.imagem ? { fotos: [l.imagem] } : {}),
-    ...(l.servico_id ? { servico: l.servico_id, fatorServico: l.fator_servico ?? 1 } : {}),
+    ...servicoDaLinha(l),
   };
+}
+/** 23/11: o serviço da linha pela chave do motor (a base dá o id; um serviço que o Catálogo lido não tem sai, como em escolherProdutoDoServidor). */
+function servicoDaLinha(l: LinhaPaginaProduto): Pick<Produto, "servico" | "fatorServico"> {
+  const s = l.servico_id ? chaveDoServicoLido(l.servico_id) : undefined;
+  return s ? { servico: s, fatorServico: l.fator_servico ?? 1 } : {};
 }
 
 /** A pesquisa de um ramo, já como Produto[] para os cartões da visita e do orçamento. */
