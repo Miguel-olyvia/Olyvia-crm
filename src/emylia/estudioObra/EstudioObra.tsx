@@ -594,7 +594,10 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   const cont = useRef<HTMLDivElement>(null);
   const [geo, setGeo] = useState<Record<number, { left: number; top: number }>>({});
   const [hov, setHov] = useState<number | null>(null);
-  const [aLigar, setALigar] = useState<{ de: number; x: number; y: number; alvo: number | null } | null>(null);
+  const [aLigar, setALigarEstado] = useState<{ de: number; x: number; y: number; alvo: number | null } | null>(null);
+  // o arrasto lê-se de uma referência (um gesto rápido larga antes de o estado mudar)
+  const ligarRef = useRef<{ de: number; x: number; y: number; alvo: number | null } | null>(null);
+  const setALigar = (v: { de: number; x: number; y: number; alvo: number | null } | null) => { ligarRef.current = v; setALigarEstado(v); };
   const [erroLigar, setErroLigar] = useState("");
   const medir = () => {
     const c = cont.current;
@@ -676,10 +679,11 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
     setErroLigar("");
     setALigar({ de: ti, ...noCont(e), alvo: null });
   };
-  const moverLigar = (e: React.PointerEvent) => { if (!aLigar) return; const alvo = linhaSob(e); setALigar({ ...aLigar, ...noCont(e), alvo: alvo === aLigar.de ? null : alvo }); };
+  const moverLigar = (e: React.PointerEvent) => { const l = ligarRef.current; if (!l) return; const alvo = linhaSob(e); setALigar({ ...l, ...noCont(e), alvo: alvo === l.de ? null : alvo }); };
   const largarLigar = (e: React.PointerEvent) => {
-    if (!aLigar) return;
-    const alvo = linhaSob(e), de = aLigar.de;
+    const l = ligarRef.current;
+    if (!l) return;
+    const alvo = linhaSob(e), de = l.de;
     setALigar(null);
     if (alvo == null || alvo === de) return;
     largouEm.current = Date.now();
