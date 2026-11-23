@@ -4,7 +4,7 @@
 //    ?doc=) e reenviar o acesso ao cliente com esse documento (pede confirmação; numa conta real, a permissão do portal);
 //  · 3D: o projeto do Estúdio do projeto em volume (obra3d.ts), só para ver: o que está feito a cores, o que falta transparente.
 import { Component, Suspense, lazy, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Box, Check, FileText, Pause, Play, Send, X } from "lucide-react";
+import { Box, Check, FileText, Pause, Play, Send, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Negocio, Plano } from "../motor";
@@ -26,7 +26,8 @@ import { materiaisPorFase } from "../obraOps";
 import { useInventario } from "../inventario/loja";
 import type { Inventario } from "../inventario/tipos";
 import { resumoEcNegocio } from "../inventario/ponteNegocios";
-import { nomeTec } from "../AcompanhamentoObra";
+import { AvatarTec, nomeTec } from "../AcompanhamentoObra";
+import { ICONE_DA_FASE, iconeDaTarefa } from "./CaminhoCritico";
 import { ROTULO_VIVO, estadoVivo, nomeCurtoTarefa } from "./planoVivo";
 import { cenaDe } from "@/pages/prototipo-estudio/cenaDoProjeto";
 import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
@@ -261,10 +262,12 @@ export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: 
   );
 }
 
-/** 23/11: a régua do tempo do 3D: um segmento por dia do plano, na cor da fase que nele decorre; «Hoje» volta ao que está mesmo feito. */
-function ReguaDoTempo({ plano, dias, fim, hoje, dia, setDia }: { plano: Plano; dias: Date[]; fim: number; hoje: number; dia: number | null; setDia: (k: number) => void }) {
+// 23/11 (Rúben: «não gosto desta barra de progresso»): uma só linha do tempo. As fases da obra como segmentos (o nome, o ícone e a cor
+// delas, as mesmas do Plano e do caminho crítico); até ao dia escolhido, preenchidas; depois, só em contorno. Um só cursor grande (arrasta-se,
+// e as setas do teclado andam um dia), com o dia escrito por cima; a marca de «Hoje»; as segundas-feiras como marcos de data por baixo. As
+// tarefas do dia em cartões, com o técnico e o ícone do trabalho.
+export function ReguaDoTempo({ plano, dias, fim, hoje, dia, setDia }: { plano: Plano; dias: Date[]; fim: number; hoje: number; dia: number | null; setDia: (k: number) => void }) {
   const k = dia ?? hoje;
-  // 23/11 (revisão: «um botão ▶ que passa a obra dia a dia sozinha»): um dia a cada 0,8 s, até ao fim; recomeça do início se já está no fim
   const [aTocar, setATocar] = useState(false);
   useEffect(() => {
     if (!aTocar) return;
@@ -273,38 +276,102 @@ function ReguaDoTempo({ plano, dias, fim, hoje, dia, setDia }: { plano: Plano; d
   }, [aTocar, k, fim]); // eslint-disable-line react-hooks/exhaustive-deps
   const tocar = () => { if (aTocar) { setATocar(false); return; } if (k >= fim - 1) setDia(0); setATocar(true); };
   const quando = (x: number) => (dias[x] ? dataCurta(dias[x]) : `dia ${x + 1}`);
-  const ativas = (x: number) => plano.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.dia <= x && x < t.dia + t.dur);
-  const faseDe = (x: number) => { const a = ativas(x); return a.length ? Math.max(...a.map(({ t }) => t.fase ?? 1)) : null; };
-  const A = ativas(k), f = faseDe(k);
+  const curta = (x: number) => quando(x).replace(/^[^,]+, /, "");
+  const pos = (x: number) => `${((x + 0.5) / fim) * 100}%`;
+  // as fases: cada uma do primeiro dia dela até ao início da seguinte (ou ao fim dela, a última)
+  const fases = FASES_OBRA.map((f) => {
+    const ts = plano.tasks.filter((t) => (t.fase ?? 1) === f.n);
+    return ts.length ? { n: f.n, nome: f.curto, ini: Math.min(...ts.map((t) => t.dia)), fimF: Math.max(...ts.map((t) => t.dia + t.dur)) } : null;
+  }).filter((x): x is NonNullable<typeof x> => !!x).sort((a, b) => a.ini - b.ini);
+  const segs = fases.map((f, i) => ({ ...f, ate: i + 1 < fases.length ? Math.max(f.ini + 1, fases[i + 1].ini) : Math.max(f.fimF, f.ini + 1) }));
+  const faseDe = (x: number) => segs.find((s) => x >= s.ini && x < s.ate) ?? null;
+  const marcos = Array.from({ length: fim }, (_, x) => x).filter((x) => x === 0 || x === fim - 1 || dias[x]?.getDay() === 1);
+  const ativas = plano.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.dia <= k && k < t.dia + t.dur);
+  const fk = faseDe(k), primeiroDia = segs[0]?.ini ?? 0;
   return (
-    <section aria-label="A obra dia a dia" className="space-y-2 rounded-2xl border border-border bg-card p-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-sm">
-          <b className="font-semibold">{dia == null ? "Hoje" : `Dia ${k + 1} de ${fim}`}</b> · {quando(k)}
-          {f && <span className="text-muted-foreground"> · Fase {f} · {FASES_OBRA[f - 1]?.curto}</span>}
-        </p>
-        <div className="flex gap-2">
-          <Button type="button" size="sm" className="min-h-9 rounded-full" aria-label={aTocar ? "Parar" : "Ver a obra a andar, dia a dia"} onClick={tocar}>
-            {aTocar ? <Pause className="mr-1 h-4 w-4" aria-hidden="true" /> : <Play className="mr-1 h-4 w-4" aria-hidden="true" />}{aTocar ? "Parar" : "Ver a andar"}
-          </Button>
-          {dia != null && <Button type="button" size="sm" variant="outline" className="min-h-9 rounded-full" onClick={() => { setATocar(false); setDia(hoje); }}>Voltar a hoje</Button>}
+    <section aria-label="A obra dia a dia" className="space-y-4 rounded-2xl border border-border bg-card p-4">
+      {/* o dia escolhido, o reproduzir e voltar a hoje */}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" size="icon" className="h-11 w-11 shrink-0 rounded-full" aria-label={aTocar ? "Parar" : "Ver a obra a andar, dia a dia"} onClick={tocar}>
+          {aTocar ? <Pause className="h-5 w-5" aria-hidden="true" /> : <Play className="ml-0.5 h-5 w-5" aria-hidden="true" />}
+        </Button>
+        <div className="min-w-0 flex-1">
+          <p className="text-base font-semibold leading-tight">{quando(k)}</p>
+          <p className="text-sm text-muted-foreground">
+            {k < primeiroDia ? "Antes do arranque" : `Dia ${k - primeiroDia + 1} de ${fim - primeiroDia}`}{fk ? <> · <span style={{ color: COR_FASE[fk.n] }} className="font-medium">{fk.nome}</span></> : ""}{dia == null ? " · hoje" : ""}
+          </p>
         </div>
+        {dia != null && <button type="button" onClick={() => { setATocar(false); setDia(hoje); }} className="min-h-10 shrink-0 rounded-full px-3 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Voltar a hoje</button>}
       </div>
-      <div className="flex gap-0.5" role="group" aria-label="Escolher o dia">
-        {Array.from({ length: fim }, (_, x) => {
-          const fx = faseDe(x);
+
+      {/* as fases, com o nome e o ícone (em cima, também no telemóvel) */}
+      <ul className="flex flex-wrap gap-x-4 gap-y-1.5" aria-label="As fases">
+        {segs.map((s) => {
+          const Ic = ICONE_DA_FASE[s.n] ?? Wrench;
           return (
-            <button key={x} type="button" aria-label={`${quando(x)}${fx ? `, fase ${fx}` : ", sem trabalho"}`} aria-pressed={x === k} onClick={() => setDia(x)}
-              className={cn("h-7 min-w-0 flex-1 rounded-sm transition-transform hover:scale-y-110 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary", x === k && "ring-2 ring-foreground ring-offset-1 ring-offset-card")}
-              style={{ background: fx ? COR_FASE[fx] : "hsl(var(--muted))", opacity: x <= k ? 1 : 0.35 }} />
+            <li key={s.n} className="flex items-center gap-1.5 text-xs">
+              <span aria-hidden="true" className="grid h-5 w-5 place-items-center rounded-full text-white" style={{ background: COR_FASE[s.n] }}><Ic className="h-3 w-3" /></span>
+              <span className={cn("font-medium", fk?.n === s.n ? "text-foreground" : "text-muted-foreground")}>{s.nome}</span>
+            </li>
           );
         })}
+      </ul>
+
+      {/* a linha do tempo: as fases (preenchidas até ao dia, depois em contorno), hoje e o cursor */}
+      <div className="relative pt-7">
+        {/* o dia escolhido, por cima do cursor */}
+        <span aria-hidden="true" className="pointer-events-none absolute top-0 -translate-x-1/2 whitespace-nowrap rounded-full bg-foreground px-2 py-0.5 text-xs font-semibold text-background transition-[left] duration-200" style={{ left: pos(k) }}>{curta(k)}</span>
+        <div className="relative h-4">
+          {segs.map((s) => {
+            const a = (s.ini / fim) * 100, w = ((s.ate - s.ini) / fim) * 100, cor = COR_FASE[s.n];
+            const cheio = Math.max(0, Math.min(1, (k + 1 - s.ini) / (s.ate - s.ini)));
+            return (
+              <span key={s.n} aria-hidden="true" className="absolute inset-y-0 overflow-hidden rounded-full border-2" style={{ left: `calc(${a}% + 1px)`, width: `calc(${w}% - 2px)`, borderColor: cor }}>
+                <span className="absolute inset-y-0 left-0 transition-[width] duration-200" style={{ width: `${cheio * 100}%`, background: cor }} />
+              </span>
+            );
+          })}
+          {/* hoje */}
+          {hoje >= 0 && <span aria-hidden="true" className="absolute -inset-y-1.5 w-0.5 -translate-x-1/2 rounded-full bg-foreground/70" style={{ left: pos(hoje) }} />}
+          {/* o cursor (visual); o controlo é o deslizador transparente por cima */}
+          <span aria-hidden="true" className="pointer-events-none absolute top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 rounded-full border-4 border-background shadow-md transition-[left] duration-200" style={{ left: pos(k), background: fk ? COR_FASE[fk.n] : "hsl(var(--muted-foreground))" }} />
+          <input type="range" min={0} max={fim - 1} step={1} value={k} onChange={(e) => { setATocar(false); setDia(Number(e.target.value)); }}
+            aria-label="O dia da obra" aria-valuetext={`${quando(k)}${fk ? `, ${fk.nome}` : ""}`}
+            className="absolute -inset-y-4 left-0 w-full cursor-grab opacity-0 active:cursor-grabbing" />
+        </div>
+        {/* os marcos: as segundas-feiras, o primeiro e o último dia; e a marca de hoje */}
+        <div className="relative mt-2 h-5 text-[11px] tabular-nums text-muted-foreground" aria-hidden="true">
+          {marcos.map((x) => <span key={x} className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: pos(x) }}>{curta(x)}</span>)}
+        </div>
       </div>
-      <input type="range" min={0} max={fim - 1} value={k} onChange={(e) => setDia(Number(e.target.value))} aria-label="O dia da obra" className="w-full accent-[hsl(var(--primary))]" />
-      <p className="text-xs text-muted-foreground">
-        {A.length ? <>Neste dia: {A.map(({ t }) => `${nomeCurtoTarefa(t.nome)} (${(nomeTec(t.tec) || "sem técnico").split(" ")[0]})`).join(", ")}.</> : "Neste dia não há trabalho marcado."}
-        {dia != null && " As peças aparecem a cores quando o plano as dá por feitas."}
+      <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-3 w-0.5 rounded-full bg-foreground/70" />Hoje, {curta(hoje)}</span>
+        <span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-5 rounded-full bg-primary" />Feito até ao dia escolhido</span>
+        <span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-5 rounded-full border-2 border-primary" />Por fazer</span>
       </p>
+
+      {/* as tarefas do dia */}
+      <div>
+        <p className="mb-2 text-sm font-semibold">Neste dia</p>
+        {ativas.length ? (
+          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {ativas.map(({ t, ti }) => {
+              const T = iconeDaTarefa(t.nome), cor = COR_FASE[t.fase ?? 1];
+              return (
+                <li key={ti} className="flex items-center gap-2.5 rounded-xl border border-border bg-background p-2.5" style={{ borderLeft: `4px solid ${cor}` }} title={t.nome}>
+                  <span aria-hidden="true" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: `color-mix(in srgb, ${cor} 12%, transparent)`, color: cor }}><T className="h-[18px] w-[18px]" /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{nomeCurtoTarefa(t.nome)}</span>
+                    <span className="block text-xs text-muted-foreground">{t.dur > 1 ? `dia ${k - t.dia + 1} de ${t.dur}` : "um dia"}</span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1.5 text-xs"><AvatarTec id={t.tec} tam="h-7 w-7" /><span className="hidden sm:inline">{(nomeTec(t.tec) || "Sem técnico").split(" ")[0]}</span></span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : <p className="rounded-xl bg-muted/50 px-3 py-2 text-sm text-muted-foreground">{k < primeiroDia ? "Ainda antes do arranque: a divisão como está." : "Sem trabalho marcado neste dia."}</p>}
+        {dia != null && <p className="mt-2 text-xs text-muted-foreground">No 3D, a cores o que o plano dá por feito ao fim deste dia.</p>}
+      </div>
     </section>
   );
 }

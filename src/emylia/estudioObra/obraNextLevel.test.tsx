@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { acoes } from "../motor";
 import type { Ctx } from "../pecas";
 import { EstudioObra } from "./EstudioObra";
+import { ReguaDoTempo } from "./DocumentosObra";
 import { obraDeExemplo } from "./exemploObra";
 import { obraEm3DNoDia, tarefaDaPeca } from "./obra3d";
 import { diasComRegistos, resumoDoDia } from "./resumoDoDia";
@@ -232,5 +233,22 @@ describe("H. a equipa dispersa", () => {
     montarObra();
     fireEvent.click(screen.getByRole("tab", { name: /Equipa/ }));
     expect(screen.queryByRole("region", { name: "A equipa dispersa" })).toBeNull();
+  });
+});
+
+describe("a linha do tempo do 3D", () => {
+  it("uma só linha: as fases com o nome, um cursor (deslizador) com o dia, hoje, e as tarefas do dia em cartões", () => {
+    const { d } = obraDeExemplo();
+    const p = d.obra.plano!, fim = Math.max(...p.tasks.map((t) => t.dia + t.dur));
+    let escolhido = -1;
+    render(<ReguaDoTempo plano={p} dias={[]} fim={fim} hoje={p.dia} dia={null} setDia={(k) => { escolhido = k; }} />);
+    const sec = screen.getByRole("region", { name: "A obra dia a dia" });
+    expect(within(sec).getAllByRole("slider")).toHaveLength(1); // antes eram blocos e uma linha
+    expect(within(sec).queryAllByRole("button", { name: /fase \d/ })).toHaveLength(0);
+    expect(within(within(sec).getByRole("list", { name: "As fases" })).getAllByRole("listitem").length).toBeGreaterThan(1);
+    fireEvent.change(within(sec).getByRole("slider"), { target: { value: "2" } });
+    expect(escolhido).toBe(2);
+    expect(within(sec).getByText("Neste dia")).toBeTruthy();
+    expect(within(sec).getByRole("button", { name: /Ver a obra a andar/ })).toBeTruthy();
   });
 });
