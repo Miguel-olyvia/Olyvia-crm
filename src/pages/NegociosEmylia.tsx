@@ -29,7 +29,7 @@ import { OperacoesSimples } from "@/emylia/OperacoesSimples";
 import type { Ctx } from "@/emylia/pecas";
 import { carregarCatalogo } from "@/emylia/real/carregarCatalogo";
 import { limparCatalogoLido } from "@/emylia/real/catalogoLeve";
-import { carregarCamposConfig, lerCamposConfig } from "@/emylia/real/camposConfig";
+import { carregarCamposConfig, lerCamposConfig, lerCamposConfigBase } from "@/emylia/real/camposConfig";
 import { definirEfeitosCampos, definirGravarEfeitos } from "@/emylia/efeitosLevantamento";
 import { aplicarAgenda, aplicarCompromissos, carregarAgendaReal, carregarVisitasCrm, equipaReal, tecnicoDaConta } from "@/emylia/real/agendaReal";
 import { definirVisitasCrm } from "@/emylia/equipa/visitasCrm";
@@ -633,14 +633,24 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
       if (!mp.todos) await permsLidas();
       if (!vivo) return;
       const so = !mp.todos && soExecucaoRef.current;
+      // 23/11 (revisão no 1015: «abrir o Estúdio da obra pelo endereço fica 10 a 15 s em "A ler os negócios…"»): as leituras que não
+      // dependem do Catálogo começam já, ao mesmo tempo que ele (antes iam uma a uma, depois dele); aplicam-se pela ordem de sempre
+      const ja = <T,>(p: Promise<T>) => p.then((v) => ({ v }), (e: unknown) => ({ e }));
+      const tirar = async <T,>(p: Promise<{ v: T } | { e: unknown }>): Promise<T> => { const r = await p; if ("e" in r) throw r.e; return r.v; };
+      const pEquipas = carregarEquipasObra(supabase, org).catch(() => undefined);
+      const pCampos = so ? undefined : ja(lerCamposConfigBase(supabase, org));
+      const pGestores = ja(lerGestoresObra(supabase, org));
+      const pAgenda = ja(carregarAgendaReal(supabase, org));
+      const pVisitas = ja(carregarVisitasCrm(supabase, org));
+      const pRececoes = ja(lerRececoes(supabase, org)), pRespostas = ja(lerRespostas(supabase, org));
       // 11/11 (F1): um erro do Catálogo (ex.: CT001) não bloqueia o ecrã: avisa e os negócios abrem só para consulta
       const cat = await carregarCatalogo(supabase, org, S, { semLinhasModelo: so, tolerante: true, leve: true });
       catalogoFalhou.current = !!cat.erro;
       if (cat.erro) avisar({ msg: "O Catálogo não carregou", sub: `${cat.erro} Os negócios abrem só para consulta.`, kind: "bad" });
       // 9/11: as equipas de obra da empresa (o plano escolhe a equipa toda ou nenhum membro); um erro aqui não para nada
-      await carregarEquipasObra(supabase, org).catch(() => undefined);
+      await pEquipas;
       // 3/11 (Rúben): os campos das fases e o impacto no orçamento como a organização os ajustou (Pessoas › Workflow); sem ajustes, os de sempre
-      await carregarCamposConfig(supabase, org, S, { semLer: so });
+      await carregarCamposConfig(supabase, org, S, { semLer: so, ...(pCampos ? { lido: tirar(pCampos) } : {}) });
       // 11/11 (Rúben): quem configura os campos (pessoas.config) muda o impacto de uma resposta ao lado do campo
       const gravarEfeitos: NonNullable<typeof gravarEfeitosRef.current> = async (efeitos) => {
         const { data, error } = await supabase.rpc("neg_guardar_campos_config" as never, { p_org: org, p_campos: null, p_efeitos: efeitos } as never);
@@ -651,7 +661,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
       gravarEfeitosRef.current = so ? null : gravarEfeitos;
       definirGravarEfeitos(!so && pode("pessoas.config") ? gravarEfeitos : null);
       // 30/10: o responsável de obra (o técnico vê-o no Hoje) é o Gestor de obra do RH
-      aplicarGestoresObra(await lerGestoresObra(supabase, org));
+      aplicarGestoresObra(await tirar(pGestores));
       // 30/10: os materiais que o Gestor de obra junta às tarefas são os produtos e consumíveis do Catálogo (com o id, para a encomenda)
       const K = lerCatalogo(), custo = new Map([...K.produtos.map((p) => [p.id, { preco: p.custo, forn: p.fornecedor }] as const),
         ...(K.consumiveisCriados ?? []).map((c) => [c.id, { preco: c.preco, forn: c.fornecedor }] as const)]);
@@ -660,10 +670,10 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
         return { n: p.name, q: 1, un: p.unidade ?? "un", produto: p.id, ...(c?.preco ? { preco: c.preco } : {}), ...(c?.forn ? { forn: c.forn } : {}) };
       }));
       // 28/10: as ausências aprovadas no RH dos técnicos (plano e agenda); um erro aqui não impede os negócios de abrir
-      const ag = await carregarAgendaReal(supabase, org);
+      const ag = await tirar(pAgenda);
       if (ag.erro) avisar({ msg: "A agenda do RH não carregou", sub: ag.erro, kind: "bad" });
       // 29/10: as visitas marcadas no CRM (Pipeline, agenda) também na agenda da Emylia
-      const vc = await carregarVisitasCrm(supabase, org);
+      const vc = await tirar(pVisitas);
       if (vc.erro) avisar({ msg: "As visitas da agenda do CRM não carregaram", sub: vc.erro, kind: "bad" });
       ids.current = idsServico(cat.M.ids.servico);
       const lidos = await lerNegocios(supabase, org, ids.current, S.campos, { semSugestoes: so });
@@ -688,11 +698,11 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
         redesenhar();
       });
       // 2/11 (20270103800000): o auto de receção que o cliente assinou no portal passa a assinado na obra (o relatório final); grava-se a seguir
-      const rececoes = await lerRececoes(supabase, org);
+      const rececoes = await tirar(pRececoes);
       if (!vivo) return;
       const recebidas = S.deals.filter((d) => { const ref = refs.current.get(d.id); return !!ref && aplicarRececao(d, rececoes.get(ref.id)); }).length;
       // 2/11 (20270103900000): as respostas do cliente no portal (aviso de pagamento, adendas) com as ações da V1; grava-se a seguir
-      const respostas = await lerRespostas(supabase, org);
+      const respostas = await tirar(pRespostas);
       if (!vivo) return;
       const numeroDe = new Map([...refs.current].map(([n, r]) => [r.id, n]));
       const Aresp = acoes(S, avisar, (fn) => fn());
