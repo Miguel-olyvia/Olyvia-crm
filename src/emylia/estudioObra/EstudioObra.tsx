@@ -12,7 +12,7 @@
 import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EnderecoAtivo, escreverParamUrl, usePainelUrl, useParamUrl } from "../usarParamUrl";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, HardHat, Lightbulb, Link2, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, HardHat, Lightbulb, Link2, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Redo2, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { comRelogioReal, eur, nfmt, type Negocio, type Plano, type Tarefa } from "../motor";
@@ -51,6 +51,8 @@ import { useNomeParaMarcaDagua } from "@/hooks/useNomeParaMarcaDagua";
 import { modoReal } from "../acessosPortal";
 import { DocumentosDaObra, ProjetoEm3D } from "./DocumentosObra";
 import { ContratoDaObra } from "./ContratoObra";
+import { BotoesPassos } from "./BotoesPassos";
+import { passoEntre, retratoDe, type Passo } from "./passosObra";
 import { LigacoesDaTarefa } from "./LigacoesTarefa";
 import { HistoricoObraPortal, ProgressoObraPortal } from "../ObraNoPortal";
 import { documentosEnviados, porResponder } from "./enviadosAoCliente";
@@ -99,7 +101,6 @@ function descodificarPainel(s: string, p: Plano | null | undefined): Painel {
   }
   return null;
 }
-type Retrato = { dia: number; dur: number; h: number; tec: string | null }[];
 
 const COR_VIVO: Record<EstadoVivo, string> = {
   validada: "hsl(var(--success))", feita: "#d97706", corrigir: "hsl(var(--destructive))", parada: "#64748b",
@@ -116,8 +117,65 @@ function LerQuemAssina() {
 }
 
 /** 19/11: `voltar`: para onde volta o botão do cabeçalho (nas Operações, «Operações»; por omissão, o negócio). */
-export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar ao negócio" }: { ctx: Ctx; d: Negocio; fechar: (mexeu?: boolean) => void; endereco?: boolean; voltar?: string }) {
+export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "Voltar ao negócio" }: { ctx: Ctx; d: Negocio; fechar: (mexeu?: boolean) => void; endereco?: boolean; voltar?: string }) {
+  // 23/11 (Rúben: «botões de undo e voltar para a frente para todas as alterações feitas»): cada mudança feita no Estúdio (pelo run) guarda
+  // o retrato do plano de antes e de depois (passosObra.ts); anular e refazer repõem-no pelo motor (reporPlanoObra), que grava na base
+  const passos = useRef<{ L: Passo[]; pos: number }>({ L: [], pos: 0 });
+  const [, setVerPassos] = useState(0);
+  const aRepor = useRef(false), diasRef = useRef<Date[]>([]);
+  const [notaPasso, setNotaPasso] = useState<{ t: string; mau: boolean; n: number } | null>(null);
+  const quandoP = (k: number) => (diasRef.current[k] ? dataCurta(diasRef.current[k]) : `dia ${k + 1}`);
+  const runComPassos = (fn: () => void) => {
+    const a = aRepor.current ? null : retratoDe(d);
+    ctx0.run(fn);
+    if (!a) return;
+    const b = retratoDe(d), ps = b ? passoEntre(d, a, b, quandoP) : null;
+    if (!ps) return;
+    const st = passos.current;
+    st.L = [...st.L.slice(0, st.pos), ps].slice(-60);
+    st.pos = st.L.length;
+    setVerPassos((v) => v + 1);
+  };
+  const ctx: Ctx = { ...ctx0, run: runComPassos };
   const { S, A, run } = ctx;
+  const repor = (ps: Passo, modo: "anular" | "refazer"): boolean => {
+    let ok = false;
+    aRepor.current = true;
+    try { ctx0.run(() => { ok = ctx0.A.reporPlanoObra(d.id, modo === "anular" ? ps.antes : ps.depois, ps.texto, modo); }); } finally { aRepor.current = false; }
+    return ok;
+  };
+  const anular = (): boolean => {
+    const st = passos.current, ps = st.L[st.pos - 1];
+    if (!ps) return false;
+    if (!ps.pode) { setNotaPasso({ t: `Não se anula «${ps.texto}». ${ps.porque ?? ""}`, mau: true, n: Date.now() }); return false; }
+    if (!repor(ps, "anular")) return false;
+    st.pos--; setVerPassos((v) => v + 1);
+    setNotaPasso({ t: `Anulado: ${ps.texto}`, mau: false, n: Date.now() });
+    return true;
+  };
+  const refazer = (): boolean => {
+    const st = passos.current, ps = st.L[st.pos];
+    if (!ps) return false;
+    if (!repor(ps, "refazer")) return false;
+    st.pos++; setVerPassos((v) => v + 1);
+    setNotaPasso({ t: `Refeito: ${ps.texto}`, mau: false, n: Date.now() });
+    return true;
+  };
+  /** Volta até ao passo k (o estado depois dele): anula um a um, e para num que não se anula. */
+  const voltarAte = (k: number) => { while (passos.current.pos > k + 1) if (!anular()) break; while (passos.current.pos < k + 1) if (!refazer()) break; };
+  useEffect(() => { if (!notaPasso) return; const t = setTimeout(() => setNotaPasso(null), notaPasso.mau ? 9000 : 5000); return () => clearTimeout(t); }, [notaPasso?.n]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Ctrl+Z anula; Ctrl+Shift+Z e Ctrl+Y refazem (fora das caixas de texto)
+  useEffect(() => {
+    const tecla = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
+      const k = e.key.toLowerCase(), alvo = e.target as HTMLElement | null;
+      if (alvo && (alvo.closest("input, textarea, select, [contenteditable=true]"))) return;
+      if (k === "z" && !e.shiftKey) { e.preventDefault(); anular(); }
+      else if ((k === "z" && e.shiftKey) || k === "y") { e.preventDefault(); refazer(); }
+    };
+    window.addEventListener("keydown", tecla);
+    return () => window.removeEventListener("keydown", tecla);
+  });
   const reduzir = useReduzir();
   const p = d.obra.plano;
   const db = useInventario();
@@ -166,9 +224,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
     fechar(mexeu.current);
   };
   const [vista, setVista] = useState<"gantt" | "tecnicos">("gantt");
-  const [desfazer, setDesfazer] = useState<{ snap: Retrato; ti: number; n: number } | null>(null);
-  useEffect(() => { if (!desfazer) return; const t = setTimeout(() => setDesfazer(null), 7000); return () => clearTimeout(t); }, [desfazer?.n]); // eslint-disable-line react-hooks/exhaustive-deps
-  const obras = useMemo(() => obrasDosTecnicos(S, d.id), [S, d.id, S.deals, painel, desfazer]); // eslint-disable-line react-hooks/exhaustive-deps
+  const obras = useMemo(() => obrasDosTecnicos(S, d.id), [S, d.id, S.deals, painel, passos.current.pos, passos.current.L.length]); // eslint-disable-line react-hooks/exhaustive-deps
   // Esc fecha o que está por cima: o painel, depois a pré-visualização, depois o Estúdio (com outra obra aberta, é ela que fecha)
   useEffect(() => {
     if (outra) return;
@@ -206,13 +262,9 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
   const nDocs = porResponder(documentosEnviados(d, S));
   const validadas = p.tasks.filter((t) => acabou || estadoVivo(t, p) === "validada").length;
   const fazer = (fn: () => void) => run(fn);
-  // cada mudança ao plano guarda o retrato de antes, para «Desfazer» (só se mudou mesmo)
-  const retrato = (): Retrato => p.tasks.map((t) => ({ dia: t.dia, dur: t.dur, h: t.h, tec: t.tec }));
-  const mudar = (ti: number, fn: () => void) => {
-    const snap = retrato(), n0 = p.tasks.length;
-    fazer(fn);
-    if (p.tasks.length === n0 && JSON.stringify(retrato()) !== JSON.stringify(snap)) setDesfazer({ snap, ti, n: Date.now() });
-  };
+  // 23/11: cada mudança fica nos passos (anular / refazer, no topo); o «Desfazer» de 7 segundos saiu
+  const mudar = (_ti: number, fn: () => void) => fazer(fn);
+  diasRef.current = dias;
   const deFerias = (tec: string, iso: string) => ausenteNoRh(tec, iso) || !!TECS.find((y) => y.id === tec)?.feriasDatas?.includes(iso);
   const foraDaObra = (tec: string, k: number) => { const x = dias[k]; if (!x) return false; const iso = isoDia(x); return deFerias(tec, iso) || !!ocup.get(tec)?.has(iso); };
   const podeMexer = (ti: number) => planeia && !acabou && !porqueNaoMexe(p, ti);
@@ -321,6 +373,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
                   <button type="button" aria-label="Dia seguinte" onClick={() => fazer(() => A.irParaDia(d.id, p.dia + 1))} className="grid h-10 w-10 place-items-center rounded-full hover:bg-muted"><ChevronRight className="h-4 w-4" /></button>
                 </span>
               )}
+              {planeia && !acabou && <BotoesPassos L={passos.current.L} pos={passos.current.pos} anular={anular} refazer={refazer} voltarAte={voltarAte} />}
               {vivo && planeia && <Button type="button" variant="outline" className="min-h-11 px-3 sm:px-4" aria-label="Replanear" onClick={() => { setPainel(null); setPrevia({ titulo: "Replanear a obra", k: "replanear", adiantar: true }); }}><Shuffle className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">Replanear</span></Button>}
               {vivo && planeia && principal?.t !== "Registar imprevisto" && <Button type="button" variant="outline" className="hidden min-h-11 px-3 sm:inline-flex sm:px-4" aria-label="Registar imprevisto" onClick={() => setPainel({ k: "imprevisto" })}><AlertTriangle className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">Imprevisto</span></Button>}
               {principal && <Button type="button" className="hidden min-h-11 sm:inline-flex" disabled={principal.desligado} title={principal.porque || undefined} onClick={principal.fn}><principal.icone className="mr-1.5 h-4 w-4" aria-hidden="true" />{principal.t}</Button>}
@@ -486,22 +539,17 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
             )}
           </AnimatePresence>
 
-          {/* ---------------------------------------------------------------- «Desfazer», em baixo */}
-          <div className="pointer-events-none absolute inset-x-0 bottom-5 z-40 flex justify-center px-4">
+          {/* ---------------------------------------------------------------- 23/11: o que se anulou ou refez (ou porque não), em baixo */}
+          <div aria-live="polite" className="pointer-events-none absolute inset-x-0 bottom-24 z-40 flex justify-center px-4 sm:bottom-4">
             <AnimatePresence>
-              {desfazer && (
-                <motion.div key={desfazer.n} role="status" className="pointer-events-auto flex items-center gap-3 rounded-2xl bg-foreground py-2 pl-4 pr-2 text-sm text-background shadow-2xl"
-                  initial={reduzir ? false : { opacity: 0, y: 24, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16 }} transition={MOLA}>
-                  <span className="min-w-0">
-                    {desfazer.ti >= 0 && p.tasks[desfazer.ti]
-                      ? <><b className="font-semibold">{p.tasks[desfazer.ti].nome}</b>: {dias[p.tasks[desfazer.ti].dia] ? dataCurta(dias[p.tasks[desfazer.ti].dia]) : ""}, {p.tasks[desfazer.ti].dur} {p.tasks[desfazer.ti].dur === 1 ? "dia" : "dias"}{p.tasks[desfazer.ti].tec ? ` · ${primeiro(nomeTec(p.tasks[desfazer.ti].tec))}` : ""}</>
-                      : <>Plano mudado · fica pronta a {dias[fim - 1] ? dataCurta(dias[fim - 1]) : "—"}</>}
-                  </span>
-                  <button type="button" className="inline-flex min-h-9 items-center gap-1.5 rounded-xl bg-background/15 px-3 font-medium hover:bg-background/25"
-                    onClick={() => { const s0 = desfazer.snap; setDesfazer(null); fazer(() => A.reporTarefasPlano(d.id, s0)); }}>
-                    <RotateCcw className="h-4 w-4" aria-hidden="true" />Desfazer
-                  </button>
-                  <button type="button" aria-label="Fechar" className="grid h-9 w-9 place-items-center rounded-xl hover:bg-background/15" onClick={() => setDesfazer(null)}><X className="h-4 w-4" /></button>
+              {notaPasso && (
+                <motion.div key={notaPasso.n} role="status" initial={reduzir ? false : { opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 12 }}
+                  className={cn("pointer-events-auto flex max-w-xl items-center gap-3 rounded-2xl py-2 pl-4 pr-2 text-sm shadow-2xl", notaPasso.mau ? "bg-amber-100 text-amber-950 dark:bg-amber-900 dark:text-amber-50" : "bg-foreground text-background")}>
+                  <span className="min-w-0 flex-1">{notaPasso.t}</span>
+                  {!notaPasso.mau && passos.current.pos < passos.current.L.length && (
+                    <button type="button" className="inline-flex min-h-9 items-center gap-1.5 rounded-xl px-3 font-semibold hover:bg-background/15" onClick={refazer}><Redo2 className="h-4 w-4" aria-hidden="true" />Refazer</button>
+                  )}
+                  <button type="button" aria-label="Fechar" className="grid h-9 w-9 place-items-center rounded-xl hover:bg-background/15" onClick={() => setNotaPasso(null)}><X className="h-4 w-4" /></button>
                 </motion.div>
               )}
             </AnimatePresence>

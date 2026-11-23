@@ -8,6 +8,7 @@ import { erroZonasLinha, limparZonas, porZona, type GrupoZona, type ZonaLinha } 
 import { diferencas, fimDe, guardarBase, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
 import { NOME_SEGURANCA, faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
 import { comLigacao, nomeCurtoTarefa, porqueNaoLigar, replanear, simularAtraso } from "./estudioObra/planoVivo";
+import { porNaTarefa, type RetratoPlano } from "./estudioObra/passosObra";
 import { lerQuemAssina } from "./estudioObra/quemAssina";
 import { MOTIVO_QUEM_PAGA, aplicarNoPlano, custoDaHora, guardarAjuste, impactoAjuste, type AjusteAdenda, type AjusteObra, type ImpactoAjuste } from "./estudioObra/quemPaga";
 import { aplicarAjuste, aplicarCorrecao, instrucoesDe, preverAjuste, textoAvisoCliente, type Alteracao, type AjusteVivo, type Envio } from "./trabalhoObra";
@@ -3730,6 +3731,32 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       p.tasks.forEach((t, i) => { const s = snap[i]; if (p.estado === "em curso" && porqueNaoMexe(p, i)) { if (t.exec?.estado !== "validada") t.tec = s.tec; return; } t.dia = s.dia; t.dur = s.dur; t.h = s.h; t.tec = s.tec; });
       log(d, "Plano: mudança desfeita");
       A.planoMudou(d);
+    },
+    /** 23/11 (Rúben: «botões de undo e voltar para a frente para todas as alterações»): repõe o plano de um passo do Estúdio da obra
+     *  (estudioObra/passosObra.ts): os campos de planeamento das tarefas (nunca a execução); as tarefas juntadas depois saem (só sem
+     *  registos); numa tarefa já começada, com a obra em curso, as datas ficam. Fica no histórico e no diário como «Anulado» / «Refeito». */
+    reporPlanoObra(id: number, r: RetratoPlano, texto: string, modo: "anular" | "refazer"): boolean {
+      if (!exigePerm("obra.planear")) return false;
+      const d = deal(id), p = d.obra.plano;
+      if (!p) return false;
+      if (p.estado === "concluída") { avisar({ msg: "A obra foi encerrada", sub: "O plano já não muda", kind: "bad" }); return false; }
+      if (r.tasks.length < p.tasks.length) {
+        if (p.tasks.slice(r.tasks.length).some((t) => t.exec)) { avisar({ msg: "Não se anula", sub: "Uma tarefa juntada depois já tem registos do técnico", kind: "bad" }); return false; }
+        p.tasks.splice(r.tasks.length);
+      }
+      while (p.tasks.length < r.tasks.length) p.tasks.push({ nome: "", svcs: [], dia: 0, dur: 1, sk: "", h: 0, tec: null });
+      const vivo = p.estado === "em curso";
+      p.tasks.forEach((t, i) => {
+        const x = r.tasks[i];
+        if (vivo && porqueNaoMexe(p, i)) { porNaTarefa(t, { ...x, dia: t.dia, dur: t.dur, h: t.h }); return; }
+        porNaTarefa(t, x);
+      });
+      if ((p.estado === "aprovado" || p.estado === "por aprovar") && (r.estado === "aprovado" || r.estado === "por aprovar")) p.estado = r.estado as Plano["estado"];
+      const quem = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome, t2 = `${modo === "anular" ? "Anulado" : "Refeito"}: ${texto}`;
+      log(d, `Plano: ${t2}`);
+      (d.obra.diario ??= []).push({ q: agora(), quem, t: t2, k: "marco" });
+      avisar({ msg: modo === "anular" ? "Anulado" : "Refeito", sub: texto, kind: "ok" });
+      return true;
     },
     /* -------------------------------------------- 15/10: o ciclo da tarefa na obra (obraOps.ts): técnico → fotografia → supervisor */
     /** O técnico começa a tarefa (ou volta a ela depois de uma correção). */
