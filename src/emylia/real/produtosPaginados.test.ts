@@ -227,7 +227,7 @@ describe("textoEstadoPagina (o contador por cima da lista)", () => {
   it("sem separador de milhares e com o limite da página", () => expect(t(2, 2, 1234, 1000)).toBe("Página 2 de 2 · produtos 1001–1234 de 1234"));
 });
 
-describe("23/11: a pesquisa do Estúdio (cat_estudio_procurar_produtos, 20270126000000)", () => {
+describe("23/11: a pesquisa do Estúdio (cat_estudio_procurar_produtos, 20270126050000)", () => {
   beforeEach(() => { base.chamadas = []; });
   it("os argumentos: as subcategorias numa lista, p_pagina antes de p_limite; sem subcategorias = todas", () => {
     expect(argsPesquisaEstudio(ORG, " MACBML0092 ", ["s1", "s2"], 2)).toEqual({ p_org: ORG, p_q: "MACBML0092", p_subcategorias: ["s1", "s2"], p_pagina: 2, p_limite: POR_PAGINA_SERVIDOR });

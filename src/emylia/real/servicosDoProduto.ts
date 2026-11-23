@@ -38,7 +38,7 @@ export async function definirServicoDoProduto(org: string, produto: string, serv
     const { error } = await rpcLivre("cat_definir_servico_produto", { p_org: org, p_produto: produto, p_servico: servico, p_fator: servico ? fator : 1 });
     if (error) {
       const t = erroAmigavel(error, "Não foi possível gravar o serviço.");
-      return { ok: false, erro: t === AINDA_NAO ? "Mudar o serviço na ficha ainda não está disponível nesta base (falta a migração 20270126000000)." : /^CT00\d$/.test(error.code ?? "") && error.message ? error.message : t, ...(error.code ? { codigo: error.code } : {}) };
+      return { ok: false, erro: t === AINDA_NAO ? "Mudar o serviço na ficha ainda não está disponível nesta base (falta a migração 20270126100000)." : /^CT00\d$/.test(error.code ?? "") && error.message ? error.message : t, ...(error.code ? { codigo: error.code } : {}) };
     }
     return { ok: true, v: null };
   } catch (e) {

@@ -149,7 +149,7 @@ describe("a ficha do produto: o serviço que traz", () => {
     const secao = await screen.findByRole("region", { name: "Serviço que traz" });
     fireEvent.click(within(secao).getByRole("button", { name: "Trocar" }));
     fireEvent.click(within(secao).getByRole("button", { name: "Tirar o serviço" }));
-    expect(await within(secao).findByRole("alert")).toHaveTextContent(/falta a migração 20270126000000/);
+    expect(await within(secao).findByRole("alert")).toHaveTextContent(/falta a migração 20270126100000/);
     expect(doTipo("cat_definir_servico_produto")[0].a).toMatchObject({ p_servico: null, p_fator: 1 });
   });
 });

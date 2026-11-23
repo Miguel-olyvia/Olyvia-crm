@@ -142,7 +142,7 @@ export function argsPesquisaEstudio(org: string, q: string, subcategorias: reado
   return { p_org: org, p_q: nulo(q), p_subcategorias: subcategorias.length ? [...subcategorias] : null, p_pagina: pagina, p_limite: limite };
 }
 
-/** 23/11 (20270126000000): a pesquisa do Estúdio numa só leitura para todas as subcategorias do tipo de peça. Procura também nos
+/** 23/11 (20270126050000): a pesquisa do Estúdio numa só leitura para todas as subcategorias do tipo de peça. Procura também nos
  *  atributos, aceita a referência (SKU, inteira ou parte, com ou sem traços) e devolve os mais parecidos primeiro (a referência, o nome
  *  igual, o texto seguido no nome, todas as palavras no nome, o nome mais curto). Só os produtos à venda (sem rascunhos, inativos nem
  *  sem PVP). `v: null` = a função ainda não existe na base (quem chama lê como antes, por cat_ler_produtos_pagina). */

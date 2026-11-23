@@ -63,4 +63,4 @@ END $$;
 REVOKE ALL ON FUNCTION public.cat_definir_servico_produto(uuid,uuid,uuid,numeric) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.cat_definir_servico_produto(uuid,uuid,uuid,numeric) TO authenticated, service_role;
 COMMENT ON FUNCTION public.cat_definir_servico_produto(uuid,uuid,uuid,numeric) IS
-  'Muda só o serviço que o produto traz (servico_id) e o fator; null tira-o. products.edit. 20270126000000.';
+  'Muda só o serviço que o produto traz (servico_id) e o fator; null tira-o. products.edit. 20270126100000.';

@@ -145,7 +145,7 @@ BEGIN
              'imagem', (SELECT x.u::text FROM unnest(p.image_urls) WITH ORDINALITY AS x(u, o)
                         WHERE coalesce(x.u::text, '') <> '' ORDER BY x.o LIMIT 1),
              'atributos_resumo', ra.resumo,
-             -- 20270126000000: quão parecido é com o texto (0 = SKU igual … 5 = só pelos atributos ou pelo resto)
+             -- 20270126050000: quão parecido é com o texto (0 = SKU igual … 5 = só pelos atributos ou pelo resto)
              'grau', pg.grau)
            ORDER BY pg.grau, char_length(pg.name), pg.name, pg.id)
     FROM pag pg
@@ -198,7 +198,7 @@ BEGIN
 END $function$;
 
 COMMENT ON FUNCTION public.cat_estudio_procurar_produtos(uuid, text, uuid[], integer, integer) IS
-  'Pesquisa do Estúdio (20270126000000): a página de cat_ler_produtos_pagina (permissões, cortes e chaves iguais, mais «grau») para várias subcategorias, só produtos à venda (ativos, fora de rascunho, com PVP para quem vê valores); aceita o SKU inteiro ou parte (sem traços nem espaços) e os atributos; os mais parecidos primeiro (SKU igual, parte do SKU, nome igual, texto no nome, todas as palavras no nome, resto; depois o nome mais curto).';
+  'Pesquisa do Estúdio (20270126050000): a página de cat_ler_produtos_pagina (permissões, cortes e chaves iguais, mais «grau») para várias subcategorias, só produtos à venda (ativos, fora de rascunho, com PVP para quem vê valores); aceita o SKU inteiro ou parte (sem traços nem espaços) e os atributos; os mais parecidos primeiro (SKU igual, parte do SKU, nome igual, texto no nome, todas as palavras no nome, resto; depois o nome mais curto).';
 
 REVOKE ALL ON FUNCTION public.cat_estudio_procurar_produtos(uuid, text, uuid[], integer, integer) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.cat_estudio_procurar_produtos(uuid, text, uuid[], integer, integer) TO authenticated, service_role;
