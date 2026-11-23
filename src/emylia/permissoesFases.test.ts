@@ -60,6 +60,9 @@ describe("permDoCampo: a permissão de cada resposta, como fn_neg_marcas_permiss
     ["v1_estado", "v12_quem"].forEach((k) => expect(permDoCampo(k)).toBe("visita.gerir"));
     // 11/11 (20270114320000): o combinado e o diagnóstico são preencher a visita
     ["v1_combinado", "diag_humidade", "div_cozinha_diag_bancada"].forEach((k) => expect(permDoCampo(k)).toBe("visita.preencher"));
+    // 23/11 (20270126250000): a marca da visita feita sozinha pelo motor é preencher; o estado e o resto da agenda continuam gerir
+    ["v1_auto", "v12_auto"].forEach((k) => expect(permDoCampo(k)).toBe("visita.preencher"));
+    ["v1_automatico", "v1_auto_x", "v1_data", "v1_hora", "v1_duracao"].forEach((k) => expect(permDoCampo(k)).toBe("visita.gerir"));
     ["notas", "morada", "pagamento", "nif_fat", "div_cozinha_medida", "visita", "diagnostico"].forEach((k) => expect(permDoCampo(k)).toBeNull());
   });
 });

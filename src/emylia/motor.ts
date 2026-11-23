@@ -2046,6 +2046,9 @@ export function permDoCampo(k: string): PermNeg | null {
   if (k.startsWith("retif_")) return "obra.planear";
   // 11/11 (20270114320000): o combinado e o diagnóstico são preencher a visita; o resto de v<n>_ é a agenda (gerir)
   if (/^(v[0-9]+_combinado$|diag_|div_[a-z0-9]+_diag_)/.test(k)) return "visita.preencher";
+  // 23/11 (20270126250000): a marca da visita feita sozinha pelo motor (v<n>_auto, sincronizarVisita) também é preencher a visita; no
+  // servidor, essa passagem Marcada -> Feita (e o inverso) pede negocios.visita.preencher. Mudar o estado à mão continua a ser gerir.
+  if (/^v[0-9]+_auto$/.test(k)) return "visita.preencher";
   if (/^v[0-9]+_/.test(k)) return "visita.gerir";
   return null;
 }
