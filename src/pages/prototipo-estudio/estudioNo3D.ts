@@ -2,7 +2,7 @@
 // (emylia/planta3d): a ponte dele (deLegado) passa a planta para o espaço 3D; aqui cada peça com produto escolhido leva um modelo do tipo
 // dela com a medida e a cor do produto, e o revestimento e o pavimento escolhidos dão o das paredes e do chão (o mais parecido da lista
 // dele). Os modelos detalhados (torneiras, lava-loiças, placas) entram quando os produtos do Estúdio forem os do Catálogo verdadeiro.
-import { cantos, type PecaPlanta, type Planta } from "@/emylia/planta";
+import { cantos, type LadoColuna, type PecaPlanta, type Planta } from "@/emylia/planta";
 import { centroPeca, normalInteriorCm, paredeMaisPertoCm, poligonoDe } from "@/emylia/planta3d/pecas3d";
 import { deLegado, modeloGenerico, type ResLegado } from "@/emylia/planta3d/ligacao";
 import { ESPEC, type ProdutoModelo3D, type TipoMockup } from "@/emylia/planta3d/catalogo3d";
@@ -140,13 +140,44 @@ function resguardoNo3D(pc: PecaPlanta, pl: Planta, prod: Produto): { pc: PecaPro
   const m = modeloDe("resguardo", prod, largo, 2, alto);
   return { m, pc: { id: idResguardo(pc.id), produtoId: m.produtoId, x: x / 100, y: y / 100, rotacao: anguloDe(aberto.n), paredeEncosto: null, largura: largo / 100, profundidade: 0.02, montagem: "chao", altura: 0.03, espelhada: false, nome: prod.n } };
 }
-/** A coluna de duche: na parede do fundo da base, ao meio. */
+type Lado = ReturnType<typeof ladosDe>[number];
+/** A distância (cm) do ponto `q` à parede mais perto da planta. */
+function distanciaAParede(q: { x: number; y: number }, pl: Planta): number {
+  const pts = cantos(pl.paredes, pl.o);
+  let d = Infinity;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i], b = pts[i + 1], dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / l2)) : 0;
+    d = Math.min(d, Math.hypot(q.x - (a.x + t * dx), q.y - (a.y + t * dy)));
+  }
+  return d;
+}
+/** Os lados da base onde a coluna pode ficar: o do fundo e, olhando para a base de dentro da divisão, o da esquerda e o da direita. */
+function ladosParaColunaDe(pc: PecaPlanta, pl: Planta): Partial<Record<LadoColuna, Lado>> {
+  const { aberto, fundo } = ladoAbertoEFundo(pc, pl);
+  // quem olha para a base olha na direção do fundo (v); a esquerda dele é (v.y, −v.x), com o y para baixo como na planta
+  const v = fundo.n, esq = { x: v.y, y: -v.x };
+  const lados = ladosDe(pc).filter((l) => l !== aberto && l !== fundo && Math.abs(l.n.x * v.x + l.n.y * v.y) < 1e-6);
+  const de = (sinal: number) => lados.find((l) => l.n.x * esq.x * sinal + l.n.y * esq.y * sinal > 0.5);
+  return { fundo, esquerda: de(1), direita: de(-1) };
+}
+/** 23/11: os lados da base encostados a uma parede (a coluna de duche só fica onde há parede); o fundo vem sempre. */
+export function ladosParaColuna(pc: PecaPlanta, pl: Planta): LadoColuna[] {
+  const L = ladosParaColunaDe(pc, pl);
+  return (["fundo", "esquerda", "direita"] as const).filter((k) => k === "fundo" || (L[k] && distanciaAParede(L[k]!.meio, pl) <= 6));
+}
+/** O lado da coluna de duche: o escolhido na base (PecaPlanta.coluna), se tiver parede; senão, o fundo. */
+export function ladoDaColuna(pc: PecaPlanta, pl: Planta): LadoColuna {
+  return pc.coluna && ladosParaColuna(pc, pl).includes(pc.coluna) ? pc.coluna : "fundo";
+}
+
+/** A coluna de duche: ao meio do lado da base escolhido (ladoDaColuna; ao fundo, se nada se escolheu), virada para dentro da base. */
 function colunaNo3D(pc: PecaPlanta, pl: Planta, prod: Produto): { pc: PecaProduto; m: ProdutoModelo3D } {
-  const { fundo } = ladoAbertoEFundo(pc, pl);
+  const lado = ladosParaColunaDe(pc, pl)[ladoDaColuna(pc, pl)]!;
   const [w, d, h] = ESPEC.coluna_duche.dim;
   const m = modeloDe("coluna_duche", prod, w, d, h);
-  const x = fundo.meio.x - fundo.n.x * (d / 2), y = fundo.meio.y - fundo.n.y * (d / 2);
-  return { m, pc: { id: idColunaDuche(pc.id), produtoId: m.produtoId, x: x / 100, y: y / 100, rotacao: anguloDe({ x: -fundo.n.x, y: -fundo.n.y }), paredeEncosto: null, largura: w / 100, profundidade: d / 100, montagem: "parede", altura: ESPEC.coluna_duche.alt, espelhada: false, nome: prod.n } };
+  const x = lado.meio.x - lado.n.x * (d / 2), y = lado.meio.y - lado.n.y * (d / 2);
+  return { m, pc: { id: idColunaDuche(pc.id), produtoId: m.produtoId, x: x / 100, y: y / 100, rotacao: anguloDe({ x: -lado.n.x, y: -lado.n.y }), paredeEncosto: null, largura: w / 100, profundidade: d / 100, montagem: "parede", altura: ESPEC.coluna_duche.alt, espelhada: false, nome: prod.n } };
 }
 /** O espelho do contrato: na parede do móvel, por cima dele, com a largura do nome (ou a do móvel). */
 function espelhoNo3D(movel: PecaPlanta, pl: Planta, prod: Produto): { pc: PecaProduto; m: ProdutoModelo3D } {

@@ -16,6 +16,9 @@ export type TipoPeca = "base" | "banheira" | "sanita" | "bide" | "movel" | "colu
 // 9/11: os campos do 3D do Miguel (planta3d/) entram na peça; o Estúdio e a Visita ignoram os que não usam.
 export interface PecaPlanta { id: string; tipo: TipoPeca; x: number; y: number; w: number; h: number; /** Protótipo 3D: o id do produto do catálogo que esta peça é (planta3d/). Sem ele, é uma peça genérica. */ produto?: string;
   /** Protótipo 3D (planta3d/pecas3d.ts): `x`,`y`,`w`,`h` são a caixa SEM rodar (largura ao longo da parede × profundidade) e `rot` o ângulo (graus, em torno do centro; 0 = frente para baixo). Sem `rot`, é uma peça do desenho antigo (caixa já orientada). */
+  /** 23/11 (Rúben, negócio 1015: a folha põe a coluna de duche na parede curta da base): em que lado da base fica a coluna de duche,
+   *  olhando para a base de dentro da divisão. Sem o campo, ao fundo (estudioNo3D.ts, ladoDaColuna). */
+  coluna?: LadoColuna;
   rot?: number; /** altura ao chão (cm), peças de parede */ alt?: number; mont?: "chao" | "parede"; esp?: boolean; nome?: string; /** altura da peça (cm) */ dh?: number;
   /** Famílias e conjuntos (planta3d/familias.ts, conjuntos.ts): a família, a medida e o acabamento escolhidos (variante). */
   fam?: string; med?: string; acab?: string;
@@ -27,6 +30,8 @@ export interface PecaPlanta { id: string; tipo: TipoPeca; x: number; y: number; 
   banc?: import("./planta3d/bancada").ConfigBancada;
   /** Composição modular de cozinha (planta3d/composicaoCozinha.ts): a fila de módulos. `w` = a soma das larguras. */
   coz?: import("./planta3d/composicaoCozinha").ComposicaoCozinha }
+/** O lado da base onde fica a coluna de duche (PecaPlanta.coluna). */
+export type LadoColuna = "fundo" | "esquerda" | "direita";
 export interface Ponto { x: number; y: number }
 /** `o`: onde começa a primeira parede (o primeiro toque no desenho). */
 export interface Planta { o: Ponto; paredes: Parede[]; pecas: PecaPlanta[] }

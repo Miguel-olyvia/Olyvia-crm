@@ -131,3 +131,47 @@ describe("peças rodadas no 3D (11/11)", () => {
     expect(rodadaNo3D(p, pl)).toBe(p);
   });
 });
+
+// 23/11 (Rúben, negócio 1015: «a folha põe a coluna de duche na parede da esquerda»): a coluna fica no lado da base escolhido.
+import { produtosDe } from "./catalogoFake";
+import { ladoDaColuna, ladosParaColuna } from "./estudioNo3D";
+import type { LadoColuna } from "@/emylia/planta";
+
+describe("a coluna de duche no lado escolhido da base (23/11)", () => {
+  const paredes = retangulo(147, 147);
+  const pecas1015 = (coluna?: LadoColuna): PecaPlanta[] => [
+    { id: "folha1", tipo: "base", x: 0, y: 0, w: 147, h: 70, ...(coluna ? { coluna } : {}) }, { id: "folha2", tipo: "janela", x: 33, y: -4, w: 81, h: 8 },
+    { id: "folha3", tipo: "sanita", x: 0, y: 82, w: 60, h: 36 }, { id: "folha4", tipo: "movel", x: 111, y: 71, w: 36, h: 60 },
+    { id: "folha5", tipo: "porta", x: 42, y: 143, w: 74, h: 8 }];
+  const projeto = (coluna?: LadoColuna) => {
+    const pl: Planta = { o: { x: 0, y: 0 }, paredes, pecas: pecas1015(coluna) };
+    return { ...PROJETO_EXEMPLO, antes: pl, depois: pl, escolhas: {}, acompanha: { folha1: { coluna_duche: produtosDe("coluna_duche", PROJETO_EXEMPLO.estilo, true)[0].id } } };
+  };
+  const coluna = (c?: LadoColuna) => {
+    const r = espacoDoEstudio(projeto(c), "depois");
+    if ("erro" in r || !r.ok) throw new Error("a planta do 1015 devia abrir em 3D");
+    return r.espaco.pecas.find((x) => x.id === "folha1-coluna-duche")!;
+  };
+
+  it("a base de parede a parede deixa escolher o fundo, a esquerda e a direita", () => {
+    const pl = projeto().depois;
+    expect(ladosParaColuna(pl.pecas[0], pl)).toEqual(["fundo", "esquerda", "direita"]);
+  });
+  it("sem escolha, a coluna fica ao meio do fundo (a parede da janela)", () => {
+    const c = coluna();
+    expect(c.x).toBeCloseTo(0.735, 2);
+    expect(c.y).toBeLessThan(0.1);
+  });
+  it("«Na parede da esquerda»: ao meio do lado curto da esquerda, virada para dentro da base (como na folha do 1015)", () => {
+    const c = coluna("esquerda");
+    expect(c.x).toBeLessThan(0.1);
+    expect(c.y).toBeCloseTo(0.35, 2);
+    expect(c.rotacao).toBe(90);
+    expect(coluna("direita").x).toBeGreaterThan(1.37);
+  });
+  it("um lado sem parede não se oferece, e a escolha antiga volta ao fundo", () => {
+    const pl: Planta = { o: { x: 0, y: 0 }, paredes, pecas: [{ id: "folha1", tipo: "base", x: 15, y: 0, w: 120, h: 70, coluna: "esquerda" }] };
+    expect(ladosParaColuna(pl.pecas[0], pl)).toEqual(["fundo"]);
+    expect(ladoDaColuna(pl.pecas[0], pl)).toBe("fundo");
+  });
+});
