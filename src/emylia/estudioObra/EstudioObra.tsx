@@ -9,10 +9,10 @@
 //  · os alertas, cada um com o próximo passo; os imprevistos (com fotografias, custo e dias, e o impacto no prazo e no orçamento antes de
 //    registar; com custo, a adenda vai logo ao cliente); a atividade (os ajustes ao plano).
 // A lógica está em planoVivo.ts e alertasObra.ts; as mudanças vão pelas ações do motor (A.replanearObra, A.registarImprevisto…).
-import { Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EnderecoAtivo, escreverParamUrl, usePainelUrl, useParamUrl } from "../usarParamUrl";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, HardHat, Lightbulb, Link2, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { comRelogioReal, eur, nfmt, type Negocio, type Plano, type Tarefa } from "../motor";
@@ -40,7 +40,7 @@ import { porqueNaoMexe, TECS } from "../motor";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { DispersaoDaEquipa, Aba, ClienteDaObra, EquipaDaObra, Execucao, ExecucaoTarefa, FechoDaObra, MateriaisDaObra } from "./PaineisObra";
 import { AgendaEquipa, ComandoHoje, DiarioObra, FechoVivo, PontoDaSemana, PrevisaoViva, Pulso, precisaDeTi, obraViva, type Ir } from "./ComandoObra";
-import { ROTULO_VIVO, conflitosNovos, nomeCurtoTarefa, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
+import { ROTULO_VIVO, comLigacao, conflitosNovos, ligacoesDoPlano, nomeCurtoTarefa, porqueNaoLigar, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
 import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
 import { custoDosNossos, pedePorque, type AjusteObra } from "./quemPaga";
 import { PorqueAjuste, type ImprevistoInicial } from "./PorqueAjuste";
@@ -51,6 +51,7 @@ import { useNomeParaMarcaDagua } from "@/hooks/useNomeParaMarcaDagua";
 import { modoReal } from "../acessosPortal";
 import { DocumentosDaObra, ProjetoEm3D } from "./DocumentosObra";
 import { ContratoDaObra } from "./ContratoObra";
+import { LigacoesDaTarefa } from "./LigacoesTarefa";
 import { HistoricoObraPortal, ProgressoObraPortal } from "../ObraNoPortal";
 import { documentosEnviados, porResponder } from "./enviadosAoCliente";
 import { nomeDaParcela, parcelaDoArranquePorPagar } from "../parcelas";
@@ -63,7 +64,9 @@ const LINHA = 46;
 const primeiro = (n: string) => n.split(" ")[0];
 const dd = (n: number) => `${n} ${Math.abs(n) === 1 ? "dia útil" : "dias úteis"}`;
 
-type Previa = { titulo: string; k: "replanear"; adiantar: boolean } | { titulo: string; k: "atraso"; ti: number; dias: number };
+type Previa = { titulo: string; k: "replanear"; adiantar: boolean } | { titulo: string; k: "atraso"; ti: number; dias: number }
+  /** 23/11: pôr («ligar») ou tirar a ligação «para só começa quando de acaba» */
+  | { titulo: string; k: "ligar"; para: number; de: number; ligar: boolean };
 type Painel = { k: "tarefa"; ti: number } | { k: "imprevisto"; ti?: number; inicial?: ImprevistoInicial } | { k: "nova"; inicial?: { dia?: number; tec?: string | null } }
   /** 12/11 (quem paga): o «Porquê?» de uma mudança com a obra em curso (volta: a tarefa aberta antes) */
   | { k: "porque"; aj: AjusteObra; volta?: number } | null;
@@ -180,7 +183,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
   if (!p) return null;
   // as outras obras (para os técnicos noutra obra): lê-se a cada desenho, porque o estado muda no sítio
   const ocup = ocupacaoDosTecnicos(S, d.id);
-  const R: Replano | null = previa ? (previa.k === "atraso" ? simularAtraso(p, previa.ti, previa.dias, ocup) : replanear(p, ocup, { adiantar: previa.adiantar }))
+  const R: Replano | null = previa ? (previa.k === "atraso" ? simularAtraso(p, previa.ti, previa.dias, ocup) : previa.k === "ligar" ? replanear(comLigacao(p, previa.para, previa.de, previa.ligar), ocup, { adiantar: false }) : replanear(p, ocup, { adiantar: previa.adiantar }))
     : fantasma && painel?.k === "imprevisto" ? replanoDe(p, fantasma) : null;
   const fora: ConflitoFora[] = R ? conflitosNovos(S, d, R.plano) : [];
   const alertas = alertasDaObra(d, S, ocup, inv);
@@ -237,6 +240,11 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
         return Reflect.get(o, k, r);
       },
     }),
+  };
+  // 23/11: pôr ou tirar uma ligação entre tarefas abre a pré-visualização do impacto (o fim, as tarefas que mudam, os técnicos)
+  const pedirLigacao = (para: number, de: number, ligar: boolean) => {
+    const a = nomeCurtoTarefa(p.tasks[para]?.nome ?? ""), b = nomeCurtoTarefa(p.tasks[de]?.nome ?? "");
+    setPrevia({ titulo: ligar ? `Ligar: ${a} só começa quando ${b} acabar` : `Tirar a ligação: ${a} deixa de esperar por ${b}`, k: "ligar", para, de, ligar });
   };
   const abrirImprevisto = (x: ImprevistoInicial) => { setPrevia(null); setPainel({ k: "imprevisto", ti: x.ti, inicial: x }); };
   const n = {
@@ -371,7 +379,8 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
               <GanttVivo titulo={previa ? "O plano, se aplicar" : R ? "O plano, com o imprevisto" : "O plano vivo"} p={p} R={R} dias={dias} sel={painel?.k === "tarefa" ? painel.ti : null} abrir={(ti) => setPainel({ k: "tarefa", ti })} imprevistos={ims.map((i) => ({ id: i.id, dia: i.dia, texto: i.texto }))} reduzir={reduzir}
                 vista={vista} setVista={setVista} podeMexer={podeMexer} mover={(ti, m) => mudar(ti, () => ctxObra.A.ajustarTarefa(d.id, ti, m))}
                 nova={podeCriar ? (dia, tec) => setPainel({ k: "nova", inicial: { dia, tec } }) : undefined} obras={obras} deFerias={deFerias} abrirOutra={setOutra}
-                critico={viva.critico} passar={planeia && !acabou ? (ti, tec) => mudar(ti, () => A.trocarTec(d.id, ti, tec)) : undefined} />
+                critico={viva.critico} passar={planeia && !acabou ? (ti, tec) => mudar(ti, () => A.trocarTec(d.id, ti, tec)) : undefined}
+                ligar={planeia && !acabou ? (para, de) => pedirLigacao(para, de, true) : undefined} />
 
               <div className="grid gap-6 lg:grid-cols-2">
                 {/* ------------------------------------------------------------ os alertas */}
@@ -463,7 +472,8 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
                       abrirOutra={setOutra} fechar={() => setPainel(null)} ocup={ocup} mudar={mudar} foraDaObra={foraDaObra} minDia={vivo ? p.dia : 0} notaLivre={planeia && !acabou}
                       extra={<ExecucaoTarefa ctx={ctx} d={d} ti={painel.ti} imprevisto={() => setPainel({ k: "imprevisto", ti: painel.ti })}
                         simular={(n) => setPrevia(n ? { titulo: `${t.nome}: mais ${n} ${n === 1 ? "dia" : "dias"}`, k: "atraso", ti: painel.ti, dias: n } : null)}
-                        simulado={previa?.k === "atraso" && previa.ti === painel.ti ? previa.dias : 0} />} />
+                        simulado={previa?.k === "atraso" && previa.ti === painel.ti ? previa.dias : 0} />}
+                      ligacoes={<LigacoesDaTarefa p={p} ti={painel.ti} dias={dias} mexe={planeia && !acabou} abrir={(j) => setPainel({ k: "tarefa", ti: j })} pedir={pedirLigacao} />} />
                   );
                 })()}
                 {painel.k === "nova" && <div className="p-4"><NovaTarefa key={JSON.stringify(painel.inicial ?? {})} ctx={ctxObra} d={d} inicial={painel.inicial} fechar={() => setPainel((x) => (x?.k === "porque" ? x : null))} /></div>}
@@ -563,13 +573,15 @@ function CartaoAlerta({ a, agir, reduzir, soLer }: { a: Alerta; agir: (x: AcaoAl
 // muda os dias, como no Estúdio do plano; na vista por técnico, por baixo das tarefas, onde a pessoa está fora desta obra (outra obra, que
 // abre o Estúdio dela, ou férias) e, num dia vazio, «+» cria uma tarefa para essa pessoa nesse dia.
 type Arrasto = { ti: number; tipo: "mover" | "durar"; dx: number; dy: number };
-function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista, setVista, podeMexer, mover: moverTarefa, nova, obras, deFerias, abrirOutra, critico, passar }: {
+function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista, setVista, podeMexer, mover: moverTarefa, nova, obras, deFerias, abrirOutra, critico, passar, ligar }: {
   titulo: string; p: Plano; R: Replano | null; dias: Date[]; sel: number | null; abrir: (ti: number) => void; imprevistos: { id: string; dia: number; texto: string }[]; reduzir: boolean;
   vista: "gantt" | "tecnicos"; setVista: (v: "gantt" | "tecnicos") => void; podeMexer: (ti: number) => boolean;
   mover: (ti: number, m: { dia?: number; dur?: number }) => void; nova?: (dia: number, tec: string | null) => void;
   obras: Map<string, Map<string, Negocio>>; deFerias: (tec: string, iso: string) => boolean; abrirOutra: (o: Negocio) => void;
   /** 12/11: as tarefas sem folga (realçadas) e passar uma tarefa a outra pessoa (arrastar para a linha dela, na vista por técnico) */
   critico: Set<number>; passar?: (ti: number, tec: string) => void;
+  /** 23/11 (Rúben: «criar dependências com click and drag»): ligar arrastando da ponta de uma barra para outra («para» só começa quando «de» acaba) */
+  ligar?: (para: number, de: number) => void;
 }) {
   const vivo = p.estado === "em curso";
   // 23/11 (Rúben: «não se percebe que serviço é»): na vista por técnico os dias são mais largos e as barras mais altas, com o nome curto
@@ -578,6 +590,22 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   const toque = useRef<{ x: number; y: number; ti: number; tipo: "mover" | "durar" } | null>(null);
   const [sob, setSob] = useState<{ k: number; tec: string | null } | null>(null);
   const largouEm = useRef(0); // o clique logo a seguir a um arrasto não abre a tarefa
+  // 23/11: as ligações (setas) e ligar arrastando. As setas saem das posições das linhas (data-linha) e das datas das barras.
+  const cont = useRef<HTMLDivElement>(null);
+  const [geo, setGeo] = useState<Record<number, { left: number; top: number }>>({});
+  const [hov, setHov] = useState<number | null>(null);
+  const [aLigar, setALigar] = useState<{ de: number; x: number; y: number; alvo: number | null } | null>(null);
+  const [erroLigar, setErroLigar] = useState("");
+  const medir = () => {
+    const c = cont.current;
+    if (!c) return;
+    const m: Record<number, { left: number; top: number }> = {};
+    c.querySelectorAll<HTMLElement>("[data-linha]").forEach((el) => { m[Number(el.dataset.linha)] = { left: el.offsetLeft, top: el.offsetTop }; });
+    setGeo((g) => (JSON.stringify(g) === JSON.stringify(m) ? g : m));
+  };
+  useLayoutEffect(medir);
+  useEffect(() => { window.addEventListener("resize", medir); return () => window.removeEventListener("resize", medir); }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (!erroLigar) return; const id = window.setTimeout(() => setErroLigar(""), 5000); return () => window.clearTimeout(id); }, [erroLigar]);
   const fases = FASES_OBRA.map((f) => ({ ...f, tis: p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => (t.fase ?? 1) === f.n).sort((a, b) => a.t.dia - b.t.dia).map((x) => x.ti) })).filter((f) => f.tis.length);
   const mudou = (ti: number) => !!R && (R.plano.tasks[ti].dia !== p.tasks[ti].dia || R.plano.tasks[ti].dur !== p.tasks[ti].dur);
   const legenda: [string, string][] = [["Validada", "hsl(var(--success))"], ["Por validar", "#d97706"], ["Em curso", "#7c5ce0"], ["Atrasada", "hsl(var(--destructive))"], ["Parada", "#64748b"]];
@@ -622,9 +650,65 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
           <div aria-hidden="true" className="absolute flex items-center justify-end rounded-r-lg bg-[repeating-linear-gradient(135deg,hsl(var(--destructive)/0.35)_0_5px,hsl(var(--destructive)/0.15)_5px_10px)] pr-1 text-[11px] font-bold text-destructive"
             style={{ left: (t.dia + t.dur) * COL - 2, width: atraso * COL, top, height: ALTO }}>+{atraso}</div>
         )}
-        <Barra t={t} n={n} v={v} p={p} sel={sel === ti} mudou={mudou(ti)} abrir={() => { if (Date.now() - largouEm.current > 350) abrir(ti); }} reduzir={reduzir} top={top} critica={critico.has(ti)} col={COL} alto={ALTO} largo={vista === "tecnicos"}
+        <Barra t={t} n={n} v={v} p={p} sel={sel === ti || aLigar?.alvo === ti} mudou={mudou(ti)} abrir={() => { if (Date.now() - largouEm.current > 350) abrir(ti); }} reduzir={reduzir} top={top} critica={critico.has(ti)} col={COL} alto={ALTO} largo={vista === "tecnicos"}
           arrasto={a} mexe={!R && podeMexer(ti)} pegar={(e, tipo) => pegar(e, ti, tipo)} />
+        {/* 23/11: o pegador para ligar (aparece ao passar o rato na linha, ou com a tarefa escolhida) */}
+        {ligar && !R && vista === "gantt" && (
+          <span role="button" tabIndex={-1} aria-label={`Ligar ${nomeCurtoTarefa(t.nome)} a outra tarefa (arraste até à tarefa que só começa depois)`} title="Arraste até à tarefa que só começa quando esta acabar"
+            onPointerDown={(e) => comecarLigar(e, ti)} onPointerMove={moverLigar} onPointerUp={largarLigar} onPointerCancel={() => setALigar(null)}
+            className={cn("absolute z-10 grid h-5 w-5 cursor-crosshair place-items-center rounded-full border-2 border-primary bg-card text-primary shadow-sm transition-opacity touch-none",
+              sel === ti || aLigar?.de === ti ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100")}
+            style={{ left: (n.dia + n.dur) * COL, top: top + ALTO / 2 - 10 }}>
+            <Link2 className="h-3 w-3" aria-hidden="true" />
+          </span>
+        )}
       </Fragment>
+    );
+  };
+  const noCont = (e: React.PointerEvent) => { const r = cont.current!.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const linhaSob = (e: React.PointerEvent): number | null => {
+    const el = (document.elementFromPoint(e.clientX, e.clientY) as HTMLElement | null)?.closest?.("[data-linha]") as HTMLElement | null;
+    return el ? Number(el.dataset.linha) : null;
+  };
+  const comecarLigar = (e: React.PointerEvent, ti: number) => {
+    e.stopPropagation(); e.preventDefault();
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* sem captura */ }
+    setErroLigar("");
+    setALigar({ de: ti, ...noCont(e), alvo: null });
+  };
+  const moverLigar = (e: React.PointerEvent) => { if (!aLigar) return; const alvo = linhaSob(e); setALigar({ ...aLigar, ...noCont(e), alvo: alvo === aLigar.de ? null : alvo }); };
+  const largarLigar = (e: React.PointerEvent) => {
+    if (!aLigar) return;
+    const alvo = linhaSob(e), de = aLigar.de;
+    setALigar(null);
+    if (alvo == null || alvo === de) return;
+    largouEm.current = Date.now();
+    const pq = porqueNaoLigar(p, alvo, de);
+    if (pq) { setErroLigar(pq); return; }
+    ligar?.(alvo, de);
+  };
+  // as setas: da ponta de uma barra ao início da outra, com cotovelo; discretas, realçadas na tarefa sob o rato ou escolhida; as do caminho
+  // crítico na cor do caminho crítico (o violeta da marca), nunca a vermelho
+  const setas = () => {
+    const T = R ? R.plano.tasks : p.tasks, L = ligacoesDoPlano(T);
+    const pt = (ti: number) => geo[ti] ? { l: geo[ti].left, y: geo[ti].top + 7 + ALTO / 2 } : null;
+    const meio = aLigar ? pt(aLigar.de) : null;
+    return (
+      <svg aria-hidden="true" className="pointer-events-none absolute inset-0 h-full w-full overflow-visible">
+        <defs>
+          <marker id="seta-plano" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L8,4 L0,8 z" fill="context-stroke" /></marker>
+        </defs>
+        {L.map((x) => {
+          const a = pt(x.de), b = pt(x.para);
+          if (!a || !b) return null;
+          const x1 = a.l + (T[x.de].dia + T[x.de].dur) * COL - 2, x2 = b.l + T[x.para].dia * COL + 2;
+          const d = x2 - 8 >= x1 + 6 ? `M${x1},${a.y} H${x1 + 6} V${b.y} H${x2 - 2}` : `M${x1},${a.y} H${x1 + 6} V${(a.y + b.y) / 2} H${x2 - 10} V${b.y} H${x2 - 2}`;
+          const real = hov === x.de || hov === x.para || sel === x.de || sel === x.para, crit = critico.has(x.de) && critico.has(x.para);
+          return <path key={`${x.de}-${x.para}`} d={d} fill="none" markerEnd="url(#seta-plano)" strokeLinejoin="round"
+            stroke={crit || real ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))"} strokeWidth={real ? 2 : 1.25} strokeOpacity={real ? 0.95 : crit ? 0.55 : 0.35} strokeDasharray={x.mao ? undefined : "4 3"} />;
+        })}
+        {aLigar && meio && <path d={`M${meio.l + (p.tasks[aLigar.de].dia + p.tasks[aLigar.de].dur) * COL},${meio.y} L${aLigar.x},${aLigar.y}`} fill="none" stroke="hsl(var(--primary))" strokeWidth={2} strokeDasharray="5 4" markerEnd="url(#seta-plano)" />}
+      </svg>
     );
   };
   const pessoas = [...new Set(p.tasks.map((t) => t.tec).filter((x): x is string => !!x))];
@@ -649,11 +733,14 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
           {legenda.map(([t, c]) => <li key={t} className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-4 rounded-sm" style={{ background: c }} />{t}</li>)}
           <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-[3px] w-4 rounded-full bg-foreground/30" />Previsto no orçamento</li>
           <li className="flex items-center gap-1.5"><Route className="h-3.5 w-3.5 text-primary" aria-hidden="true" />Caminho crítico (sem folga)</li>
+          {vista === "gantt" && <li className="flex items-center gap-1.5"><svg aria-hidden="true" width="18" height="8"><path d="M0,4 H14" stroke="currentColor" strokeWidth="1.5" /><path d="M12,1 L17,4 L12,7 z" fill="currentColor" /></svg>Ligação (tracejada: pelas datas)</li>}
         </ul>
       </div>
-      {!R && <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">{vivo ? "As tarefas que ainda não começaram arrastam-se (o dia) e a ponta muda os dias; as outras abrem-se para gerir a execução." : "Arraste uma barra para mudar o dia; a ponta muda os dias."}{nova && vista === "tecnicos" ? " Num dia vazio, «+» cria uma tarefa." : ""}{passar && vista === "tecnicos" ? " Arraste para a linha de outra pessoa para lhe passar a tarefa." : ""}</p>}
+      {erroLigar && <p role="alert" className="border-b border-border bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">Não se liga: {erroLigar}</p>}
+      {!R && <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">{vivo ? "As tarefas que ainda não começaram arrastam-se (o dia) e a ponta muda os dias; as outras abrem-se para gerir a execução." : "Arraste uma barra para mudar o dia; a ponta muda os dias."}{nova && vista === "tecnicos" ? " Num dia vazio, «+» cria uma tarefa." : ""}{passar && vista === "tecnicos" ? " Arraste para a linha de outra pessoa para lhe passar a tarefa." : ""}{ligar && vista === "gantt" ? " Para ligar duas tarefas, arraste o círculo da ponta de uma barra até à tarefa que só começa depois." : ""}</p>}
       <div className="overflow-x-auto" onPointerMove={arrastar} onPointerUp={largar} onPointerCancel={() => { toque.current = null; setArrasto(null); }} onPointerLeave={() => !toque.current && setSob(null)}>
-        <div className="min-w-max">
+        <div className="relative min-w-max" ref={cont}>
+          {vista === "gantt" && setas()}
           {/* os dias */}
           <div className="sticky top-0 z-10 flex border-b border-border bg-card">
             <div className={cn("sticky left-0 z-20 shrink-0 bg-card px-3 py-2 text-xs font-medium text-muted-foreground sm:px-4", rotulo)}>{vista === "gantt" ? "Tarefa" : "Técnico"}</div>
@@ -681,12 +768,12 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
               {f.tis.map((ti) => {
                 const t = p.tasks[ti], v = estadoVivo(t, p), atraso = diasDeAtraso(t, p);
                 return (
-                  <div key={ti} className={cn("flex border-b border-border last:border-b-0", sel === ti && "bg-primary/[0.04]")}>
+                  <div key={ti} className={cn("group flex border-b border-border last:border-b-0", sel === ti && "bg-primary/[0.04]", aLigar?.alvo === ti && "bg-primary/[0.08]")} onPointerEnter={() => setHov(ti)} onPointerLeave={() => setHov((h) => (h === ti ? null : h))}>
                     <button type="button" onClick={() => abrir(ti)} className={cn("sticky left-0 z-10 flex shrink-0 items-center gap-2 bg-card px-3 py-1.5 text-left hover:bg-muted/60 sm:px-4", rotulo)}>
                       <span className="hidden sm:block"><AvatarTec id={t.tec} tam="h-7 w-7" /></span>
                       <span className="min-w-0" title={t.nome}><span className="block truncate text-sm font-medium">{nomeCurtoTarefa(t.nome)}</span><span className={cn("block truncate text-xs", v === "atrasada" || v === "corrigir" ? "font-medium text-destructive" : "text-muted-foreground")}>{rotuloVivo(t, p)}{atraso ? ` · +${atraso}` : ""}</span></span>
                     </button>
-                    <div className="relative" style={{ width: dias.length * COL, height: LINHA }}>{fundo()}{barra(ti, 7)}</div>
+                    <div className="relative" data-linha={ti} style={{ width: dias.length * COL, height: LINHA }}>{fundo()}{barra(ti, 7)}</div>
                   </div>
                 );
               })}
@@ -801,7 +888,8 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
   const esperaObra = (m: Replano["mudancas"][number]) => (m.espera ? obraQueOcupa(ctx.S, m.espera.tec, { dia: Math.min(m.de.dia, m.para.dia), dur: Math.abs(m.para.dia - m.de.dia) + m.para.dur }, R.plano, d.id) : null);
   const quando = (k: number) => (dias[k] ? dataCurta(dias[k]) : `dia ${k + 1}`);
   const aplicar = () => {
-    run(() => A.replanearObra(d.id, { adiantar: previa.k === "replanear" && previa.adiantar, motivo, cliente, ...(previa.k === "atraso" ? { atraso: { ti: previa.ti, dias: previa.dias } } : {}) }));
+    if (previa.k === "ligar") run(() => A.ligarTarefas(d.id, previa.para, previa.de, previa.ligar, { motivo, cliente: cliente && R.mudancas.length > 0 }));
+    else run(() => A.replanearObra(d.id, { adiantar: previa.k === "replanear" && previa.adiantar, motivo, cliente, ...(previa.k === "atraso" ? { atraso: { ti: previa.ti, dias: previa.dias } } : {}) }));
     setPrevia(null);
   };
   return (
@@ -889,16 +977,19 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
         </div>
       )}
       {/* 23/11 (Rúben: «clico no erro de replanear e não permite fazer nada»): sem nada a mudar, diz porquê e o que se pode fazer */}
-      {!R.mudancas.length && (
+      {!R.mudancas.length && previa.k === "ligar" && (
+        <p role="status" className="rounded-xl bg-muted/60 px-4 py-3 text-[15px]"><b className="font-medium">As datas não mudam.</b> {previa.ligar ? "A ligação fica no plano: se a primeira atrasar, a outra espera." : "A ligação sai do plano; as datas ficam como estão."}</p>
+      )}
+      {!R.mudancas.length && previa.k !== "ligar" && (
         <p role="status" className="rounded-xl bg-muted/60 px-4 py-3 text-[15px]">
           <b className="font-medium">O plano já está em dia.</b> As tarefas começam o mais cedo possível e os técnicos têm horas livres nesses dias.
           {" "}Para mudar uma tarefa, arraste a barra no plano, ou abra-a para a passar a outro técnico.
         </p>
       )}
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-        {R.mudancas.length ? <>
+        {R.mudancas.length || previa.k === "ligar" ? <>
           <Button type="button" variant="ghost" size="lg" onClick={() => setPrevia(null)}>Cancelar</Button>
-          <Button type="button" size="lg" onClick={aplicar}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Aplicar ao plano</Button>
+          <Button type="button" size="lg" onClick={aplicar}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />{previa.k === "ligar" ? (previa.ligar ? "Ligar e aplicar" : "Tirar e aplicar") : "Aplicar ao plano"}</Button>
         </> : <Button type="button" size="lg" variant="outline" onClick={() => setPrevia(null)}>Fechar</Button>}
       </div>
       </>}

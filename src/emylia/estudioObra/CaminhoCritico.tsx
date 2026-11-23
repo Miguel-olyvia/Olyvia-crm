@@ -97,13 +97,14 @@ export function CaminhoCritico({ p, critico, quando, abrir }: { p: Plano; critic
 /* ------------------------------------------------------------------ 23/11: escolher uma tarefa, pelas fases da obra */
 // Rúben (Materiais › «Pedir mais ou devolver»: «melhora isto também, lista está feia»): em vez de uma nuvem de pílulas com o nome inteiro,
 // as tarefas pelas fases da obra, com o ícone e o nome curto, como no caminho crítico.
-export function EscolherTarefa({ p, tis, sel, escolher, rotulo, detalhe }: {
+export function EscolherTarefa({ p, tis, sel, escolher, rotulo, detalhe, compacto = false }: {
   p: Plano; tis: readonly number[]; sel: number | null; escolher: (ti: number | null) => void; rotulo: string;
+  /** 23/11: numa coluna estreita (o painel da tarefa), as fases umas por baixo das outras */ compacto?: boolean;
   /** o que se mostra à direita de cada tarefa (ex.: quantos materiais tem) */ detalhe?: (ti: number) => string | null;
 }) {
   const fases = FASES_OBRA.map((f) => ({ ...f, tis: tis.filter((ti) => ((p.tasks[ti]?.fase ?? 1) as FaseObra) === f.n).sort((a, b) => p.tasks[a].dia - p.tasks[b].dia || a - b) })).filter((f) => f.tis.length);
   return (
-    <div role="group" aria-label={rotulo} className="grid gap-x-6 gap-y-5 sm:grid-cols-2 xl:grid-cols-4">
+    <div role="group" aria-label={rotulo} className={cn("grid gap-x-6 gap-y-5", !compacto && "sm:grid-cols-2 xl:grid-cols-4")}>
       {fases.map((f) => {
         const Ic = ICONE_DA_FASE[f.n] ?? Wrench, cor = COR_FASE[f.n];
         return (

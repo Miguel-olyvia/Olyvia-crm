@@ -15,7 +15,7 @@ import { porEncomendarDe } from "../encomendasAjuste";
 import { custosDosMateriais } from "../preparacaoObra";
 import { enviosDe } from "../trabalhoObra";
 import { fimDe } from "../ajustesPlano";
-import { estadoVivo, nomeCurtoTarefa, feitoDe } from "./planoVivo";
+import { antecessoras, estadoVivo, nomeCurtoTarefa, feitoDe } from "./planoVivo";
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
@@ -101,7 +101,8 @@ export function caminhoCritico(p: Plano): Set<number> {
   const T = p.tasks, N = T.length, fim = fimDe(T);
   const ef = T.map((t) => t.dia + t.dur);
   const succ: { s: number; lag: number }[][] = T.map(() => []);
-  T.forEach((t, i) => T.forEach((x, j) => { if (j !== i && x.dia < t.dia && x.dia + x.dur <= t.dia + 1) succ[j].push({ s: i, lag: t.dia - (x.dia + x.dur) }); }));
+  // 23/11: as ligações das datas (menos as tiradas) e as postas à mão (planoVivo.ts: antecessoras)
+  T.forEach((t, i) => { const mao = new Set(t.deps ?? []); for (const j of antecessoras(T, i)) succ[j].push({ s: i, lag: mao.has(j) ? Math.max(0, t.dia - (T[j].dia + T[j].dur)) : t.dia - (T[j].dia + T[j].dur) }); });
   const lf = new Array(N).fill(fim);
   const ordem = T.map((_, i) => i).sort((a, b) => T[b].dia - T[a].dia);
   for (const j of ordem) {

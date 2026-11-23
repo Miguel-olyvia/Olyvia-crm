@@ -777,11 +777,12 @@ function Passador({ rotulo, valor, menos, mais, chave, setas }: { rotulo: string
 /** A tarefa aberta: quando (o início, os dias e a semana), o que se pode fazer, quem a faz, a fase, o que se faz, os materiais e a nota.
  *  11/11: partilhado com o Estúdio da obra (obra em curso): `minDia` (não começa antes de hoje), `notaLivre` (a nota muda-se mesmo numa tarefa
  *  já começada) e `extra` (a execução da tarefa, logo a seguir ao cabeçalho). */
-export function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, onde, abrirOutra, fechar, ocup, mudar, foraDaObra, minDia = 0, notaLivre, extra }: {
+export function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, onde, abrirOutra, fechar, ocup, mudar, foraDaObra, minDia = 0, notaLivre, extra, ligacoes }: {
   ctx: Ctx; d: Negocio; ti: number; editavel: boolean; podeAgir: boolean; dias: Date[]; motivo: string | null; onde: Negocio | null;
   abrirOutra: (o: Negocio) => void; fechar: () => void; ocup: Map<string, Set<string>>;
   mudar: (ti: number, fn: () => void) => void; foraDaObra: (tec: string, k: number) => boolean;
   minDia?: number; notaLivre?: boolean; extra?: ReactNode;
+  /** 23/11: as ligações da tarefa (estudioObra/LigacoesTarefa.tsx), logo a seguir à execução */ ligacoes?: ReactNode;
 }) {
   const { S, A, run } = ctx;
   const reduzir = useReduzir();
@@ -824,6 +825,7 @@ export function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, ond
         {motivo && <p className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <span>{nomeTec(t.tec)} {onde ? <>está na obra <LigacaoObra o={onde} abrir={() => abrirOutra(onde)} /> nestes dias.</> : `está ${motivo} nestes dias.`}</span></p>}
         {extra}
+        {ligacoes}
 
         {/* 11/11: quando, à mão (o início e os dias), e a semana em quadrados */}
         <section aria-label="Quando" className="space-y-2">

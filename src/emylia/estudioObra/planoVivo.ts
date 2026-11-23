@@ -82,7 +82,14 @@ const copia = (p: Plano): Plano => JSON.parse(JSON.stringify(p));
 export function replanear(p: Plano, ocup: Map<string, Set<string>>, o: { adiantar: boolean; forcar?: { ti: number; dia: number; dur: number } }): Replano {
   const c = copia(p), hoje = p.estado === "em curso" ? p.dia : -1, amanha = hoje + 1;
   const T = p.tasks, N = T.length;
-  const ordem = T.map((_, i) => i).sort((a, b) => T[a].dia - T[b].dia || (T[a].fase ?? 0) - (T[b].fase ?? 0) || a - b);
+  // 23/11: pela ordem das datas, mas uma tarefa só depois de todas as de que depende (as ligações à mão podem apontar para a frente)
+  const pre = T.map((_, i) => antecessoras(T, i));
+  const porData = T.map((_, i) => i).sort((a, b) => T[a].dia - T[b].dia || (T[a].fase ?? 0) - (T[b].fase ?? 0) || a - b);
+  const ordem: number[] = [], posto = new Set<number>();
+  while (ordem.length < N) {
+    const i = porData.find((x) => !posto.has(x) && pre[x].every((j) => posto.has(j))) ?? porData.find((x) => !posto.has(x))!;
+    ordem.push(i); posto.add(i);
+  }
   const fim: number[] = new Array(N).fill(0);
   const colocadas: number[] = [];
   const espera = new Map<number, { tec: string; motivo: string }>();
@@ -99,11 +106,12 @@ export function replanear(p: Plano, ocup: Map<string, Set<string>>, o: { adianta
     }
     if (f) n.dur = f.dur;
     // ainda não começou: depois das que vinham antes dela, com o mesmo intervalo (ou sem ele, a adiantar)
-    const antes = T.map((x, j) => j).filter((j) => j !== i && T[j].dia < t.dia && T[j].dia + T[j].dur <= t.dia + 1);
+    // 23/11: as de que depende (as das datas menos as tiradas, mais as postas à mão); uma posta à mão espera sempre que a outra acabe
+    const antes = pre[i], mao = new Set(t.deps ?? []);
     let ini = t.dia;
     if (antes.length) {
       const pelasAnteriores = Math.max(...antes.map((j) => {
-        const lag = t.dia - (T[j].dia + T[j].dur);
+        const lag0 = t.dia - (T[j].dia + T[j].dur), lag = mao.has(j) ? Math.max(0, lag0) : lag0;
         return fim[j] + (o.adiantar ? Math.min(0, lag) : lag);
       }));
       ini = o.adiantar && !t.bloqueio ? pelasAnteriores : Math.max(t.dia, pelasAnteriores);
@@ -216,4 +224,72 @@ export function nomeCurtoTarefa(nome: string): string {
   n = n.replace(/\s+(m2|m²|ml|m3|un|und|unid\.?)$/i, "").trim();
   if (!n) return nome;
   return n.charAt(0).toLocaleUpperCase("pt-PT") + n.slice(1);
+}
+
+/* ------------------------------------------------------------------ 23/11: as dependências entre tarefas */
+// Rúben: «falta permitir criar dependências com click and drag, e nos detalhes laterais também, e ter isso visual». O plano já ligava as
+// tarefas pelas datas (a regra de sempre do replanear e do caminho crítico: uma tarefa espera pelas que começam antes dela e acabam até ao
+// dia em que ela começa). Agora também à mão: `deps` (esta só começa quando aquela acaba) e `semDeps` (uma ligação pelas datas que se tirou).
+
+/** As tarefas de que `i` depende pelas datas (a regra de sempre). */
+export function implicitas(T: readonly Pick<Tarefa, "dia" | "dur">[], i: number): number[] {
+  const t = T[i];
+  return T.map((_, j) => j).filter((j) => j !== i && T[j].dia < t.dia && T[j].dia + T[j].dur <= t.dia + 1);
+}
+/** Todas as tarefas de que `i` depende: as das datas menos as tiradas, mais as postas à mão. */
+export function antecessoras(T: readonly Tarefa[], i: number): number[] {
+  const t = T[i], sem = new Set(t.semDeps ?? []);
+  return [...new Set([...implicitas(T, i).filter((j) => !sem.has(j)), ...(t.deps ?? []).filter((j) => j !== i && T[j])])];
+}
+export interface Ligacao { de: number; para: number; mao: boolean }
+/** As ligações a desenhar: as postas à mão e, das datas, só as diretas (as que acabam mais tarde de todas as antecessoras). */
+export function ligacoesDoPlano(T: readonly Tarefa[]): Ligacao[] {
+  const out: Ligacao[] = [];
+  T.forEach((t, i) => {
+    const sem = new Set(t.semDeps ?? []), imp = implicitas(T, i).filter((j) => !sem.has(j));
+    const fimMax = Math.max(-Infinity, ...imp.map((j) => T[j].dia + T[j].dur));
+    for (const j of imp) if (T[j].dia + T[j].dur === fimMax && !(t.deps ?? []).includes(j)) out.push({ de: j, para: i, mao: false });
+    for (const j of t.deps ?? []) if (j !== i && T[j]) out.push({ de: j, para: i, mao: true });
+  });
+  return out;
+}
+/** As ligações de uma tarefa (as diretas): de que depende e o que vem antes de quê. */
+export function ligacoesDaTarefa(T: readonly Tarefa[], i: number): { depende: Ligacao[]; antes: Ligacao[] } {
+  const L = ligacoesDoPlano(T);
+  return { depende: L.filter((x) => x.para === i), antes: L.filter((x) => x.de === i) };
+}
+/** Pôr «`para` só começa quando `de` acaba» cria um ciclo? (se `de` já depende, por alguma via, de `para`). */
+export function criaCiclo(T: readonly Tarefa[], para: number, de: number): boolean {
+  if (para === de) return true;
+  const visto = new Set<number>(), pilha = [de];
+  while (pilha.length) {
+    const x = pilha.pop()!;
+    if (x === para) return true;
+    if (visto.has(x)) continue;
+    visto.add(x);
+    pilha.push(...antecessoras(T, x));
+  }
+  return false;
+}
+/** Porque não se pode ligar (ou null, se pode). */
+export function porqueNaoLigar(p: Plano, para: number, de: number): string | null {
+  const T = p.tasks;
+  if (para === de) return "Uma tarefa não pode depender de si própria.";
+  if (!T[para] || !T[de]) return "Essa tarefa já não existe.";
+  if (antecessoras(T, para).includes(de)) return `«${nomeCurtoTarefa(T[para].nome)}» já depende de «${nomeCurtoTarefa(T[de].nome)}».`;
+  if (criaCiclo(T, para, de)) return `Fazia um ciclo: «${nomeCurtoTarefa(T[de].nome)}» já espera, direta ou indiretamente, por «${nomeCurtoTarefa(T[para].nome)}».`;
+  const v = estadoVivo(T[para], p);
+  if (v === "validada" || v === "feita" || comecada(T[para])) return `«${nomeCurtoTarefa(T[para].nome)}» já começou: não pode passar a esperar por outra.`;
+  return null;
+}
+/** Uma cópia do plano com a ligação posta (`ligar`) ou tirada. */
+export function comLigacao(p: Plano, para: number, de: number, ligar: boolean): Plano {
+  const c = copia(p), t = c.tasks[para];
+  const deps = new Set(t.deps ?? []), sem = new Set(t.semDeps ?? []);
+  if (ligar) { deps.add(de); sem.delete(de); }
+  else { deps.delete(de); if (implicitas(c.tasks, para).includes(de)) sem.add(de); }
+  t.deps = [...deps].sort((a, b) => a - b); t.semDeps = [...sem].sort((a, b) => a - b);
+  if (!t.deps.length) delete t.deps;
+  if (!t.semDeps.length) delete t.semDeps;
+  return c;
 }

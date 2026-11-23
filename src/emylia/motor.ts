@@ -7,7 +7,7 @@ import type { FaturaReg } from "./v2/financeiro";
 import { erroZonasLinha, limparZonas, porZona, type GrupoZona, type ZonaLinha } from "./zonasOrcamento";
 import { diferencas, fimDe, guardarBase, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
 import { NOME_SEGURANCA, faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
-import { replanear, simularAtraso } from "./estudioObra/planoVivo";
+import { comLigacao, nomeCurtoTarefa, porqueNaoLigar, replanear, simularAtraso } from "./estudioObra/planoVivo";
 import { lerQuemAssina } from "./estudioObra/quemAssina";
 import { MOTIVO_QUEM_PAGA, aplicarNoPlano, custoDaHora, guardarAjuste, impactoAjuste, type AjusteAdenda, type AjusteObra, type ImpactoAjuste } from "./estudioObra/quemPaga";
 import { aplicarAjuste, aplicarCorrecao, instrucoesDe, preverAjuste, textoAvisoCliente, type Alteracao, type AjusteVivo, type Envio } from "./trabalhoObra";
@@ -344,6 +344,8 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 15/10: uma nota das Operações para a equipa (ex.: "levar o andaime") */ nota?: string;
   /** 15/10: o que o técnico registou (horas, fotografias) e a validação do supervisor (obraOps.ts) */ exec?: ExecTarefa;
   /** 21/10: uma tarefa de correção (pedida ao recusar a validação): o índice da tarefa que corrige (trabalhoObra.ts) */ corrige?: number;
+  /** 23/11 (Rúben: «criar dependências com click and drag»): as tarefas (índices) de que esta depende à mão (só começa quando acabam), e
+   *  as que o plano ligava pelas datas e se tiraram à mão (estudioObra/planoVivo.ts: dependenciasDe). */ deps?: number[]; semDeps?: number[];
   /** 21/10: juntada pelo validador do plano (tarefasValidador.ts): a quantidade do serviço e os materiais escolhidos */ nova?: true; q?: number; mats?: MatTarefa[];
   /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[];
   /** 21/10: parada por um imprevisto (o id, imprevistos.ts) até o cliente decidir */ bloqueio?: string;
@@ -4063,6 +4065,38 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       log(d, `Plano em obra: ${texto} · acaba a ${fimDepois}${fimAntes !== fimDepois ? ` (era ${fimAntes})` : ""}`, r.fimDepois > r.fimAntes ? "w" : "a");
       avisar({ msg: r.fimDepois < r.fimAntes ? "Obra adiantada" : r.fimDepois > r.fimAntes ? "Plano posto em dia" : "Plano reorganizado", sub: `${fimAntes === fimDepois ? "A data de fim mantém-se" : `Acaba a ${fimDepois} (era ${fimAntes})`}${m.cliente ? " · o cliente vê o aviso no portal" : ""}`, kind: "ok" });
       return n;
+    },
+    /** 23/11 (Rúben: «criar dependências com click and drag»): «`para` só começa quando `de` acaba» (ligar), ou tirar essa ligação. O plano
+     *  replaneia com ela (sem adiantar nada) e as mudanças de dia aplicam-se; fica no histórico, no diário e nas alterações do plano. */
+    ligarTarefas(id: number, para: number, de: number, ligar: boolean, m: { motivo?: string; cliente?: boolean } = {}): boolean {
+      if (!exigePerm("obra.planear")) return false;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || !p.tasks[para] || !p.tasks[de]) return false;
+      if (ligar) { const pq = porqueNaoLigar(p, para, de); if (pq) { avisar({ msg: "Não se pode ligar", sub: pq, kind: "bad" }); return false; } }
+      const c = comLigacao(p, para, de, ligar), t = p.tasks[para], ct = c.tasks[para];
+      if (ct.deps) t.deps = ct.deps; else delete t.deps;
+      if (ct.semDeps) t.semDeps = ct.semDeps; else delete t.semDeps;
+      const quem = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome;
+      const a = nomeCurtoTarefa(t.nome), b = nomeCurtoTarefa(p.tasks[de].nome);
+      const texto = ligar ? `Ligação: ${a} só começa quando ${b} acabar` : `Ligação tirada: ${a} deixa de esperar por ${b}`;
+      const r = replanear(p, ocupacaoDosTecnicos(S, d.id), { adiantar: false });
+      const fimAntes = rotuloDia(p, r.fimAntes - 1);
+      if (r.mudancas.length) {
+        guardarBase(p);
+        for (const x of r.mudancas) {
+          const tt = p.tasks[x.ti];
+          tt.dia = x.para.dia; tt.dur = x.para.dur;
+          if (p.estado === "em curso") avisarTecnico(p, x.ti, `${tt.nome}: ${x.tipo === "adiantada" ? "começa mais cedo" : "começa mais tarde"}, a ${rotuloDia(p, tt.dia)}`, agora());
+        }
+      }
+      const fimDepois = rotuloDia(p, r.fimDepois - 1);
+      const alt: Alteracao = { q: agora(), dia: p.dia, quem, t: `${texto}${r.mudancas.length ? ` (${r.mudancas.length} ${r.mudancas.length === 1 ? "tarefa muda" : "tarefas mudam"})` : ""}`, motivo: m.motivo?.trim() || "Ligação entre tarefas", fimAntes, fimDepois, cliente: !!m.cliente };
+      if (m.cliente && fimAntes !== fimDepois) alt.avisoCliente = `Reorganizámos o plano da obra. A obra passa a acabar a ${fimDepois} (antes: ${fimAntes}).`;
+      (d.obra.alteracoes ??= []).unshift(alt);
+      (d.obra.diario ??= []).push({ q: agora(), quem, t: `${texto} · fim: ${fimAntes === fimDepois ? "mantém-se" : `${fimAntes} → ${fimDepois}`}`, k: "marco" });
+      log(d, `Plano: ${texto}${fimAntes !== fimDepois ? ` · acaba a ${fimDepois} (era ${fimAntes})` : ""}`, r.fimDepois > r.fimAntes ? "w" : "a");
+      avisar({ msg: ligar ? "Tarefas ligadas" : "Ligação tirada", sub: fimAntes === fimDepois ? "A data de fim mantém-se" : `Acaba a ${fimDepois} (era ${fimAntes})`, kind: "ok" });
+      return true;
     },
     /** 12/11 (Rúben: «quem paga?»): o cliente pediu o ajuste (juntar uma tarefa, prolongar, atrasar) com a obra em curso. Vai numa adenda já
      *  preenchida (as horas a mais ao preço do ofício, ou o serviço da tarefa nova), verificada e por disparar (Rúben: «não deve ser
