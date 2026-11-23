@@ -26,7 +26,8 @@
 --      (pessoas.view + quotes.view_costs|quotes.manage — a mesma regra desde 20270110200000)
 --   4. rpc_hr_picar: com ficha → hr.assiduidade.picar; sem ficha → deve recusar com mensagem de "sem ficha"
 --      (conta_sem_ficha_rh, 20270110200000)
---   5. purge_business_entity('quote', …): bloqueia sem deals.delete nesta organização ou acima (quando passa, o
+--   5. purge_business_entity('quote', …): bloqueia sem deals.delete nesta organização ou acima; desde 20270126200000 o orçamento
+--      vai antes ao Lixo dentro do sub-bloco (só se elimina o que lá está) (quando passa, o
 --      apagar é desfeito)
 --   5b. purge_business_entity simulado: a sonda fica viewer aqui e ganha, só dentro do sub-bloco, uma associação
 --      super_admin (com deals.delete) noutra organização fora da cadeia desta → tem de ser bloqueada
@@ -389,6 +390,9 @@ BEGIN
       v_exp := CASE WHEN v_exp_b THEN 'passou a guarda' ELSE 'bloqueado' END;
       v_msg := NULL; v_state := NULL; v_got_b := NULL;
       BEGIN
+        -- 20270126200000: «Eliminar definitivamente» só apaga o que está no Lixo: o orçamento vai ao Lixo (como postgres) dentro do
+        -- sub-bloco, que o RAISE desfaz
+        UPDATE quotes SET deleted_at = now() WHERE id = v_quote;
         PERFORM set_config('request.jwt.claims', v_claims, true);
         PERFORM set_config('request.jwt.claim.sub', a.auth_id::text, true);
         EXECUTE 'SET LOCAL ROLE authenticated';
@@ -440,6 +444,7 @@ BEGIN
       END IF;
       UPDATE anew_memberships SET role_id = v_role_vw WHERE user_id = c_sonda AND organization_id = c_org;
       INSERT INTO anew_memberships (user_id, organization_id, role_id, status) VALUES (c_sonda, v_org2, v_role_dd, 'active');
+      UPDATE quotes SET deleted_at = now() WHERE id = v_quote;  -- 20270126200000: no Lixo, para a recusa ser a da organização
       v_fase := 'purge';
       PERFORM set_config('request.jwt.claims', json_build_object('sub', v_sonda_auth, 'role', 'authenticated')::text, true);
       PERFORM set_config('request.jwt.claim.sub', v_sonda_auth::text, true);

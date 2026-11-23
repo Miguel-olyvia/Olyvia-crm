@@ -50,7 +50,8 @@ A partir das tabelas, não das funções testadas:
    Se não houver dados, a linha diz "sem dados".
 4. `rpc_hr_picar`: com ficha, exige `hr.assiduidade.picar`; sem ficha, deve recusar com uma mensagem de "sem ficha"
    (`conta_sem_ficha_rh`, 20270110200000).
-5. `purge_business_entity('quote', …)` (Lixo): bloqueia sem `deals.delete` nesta organização ou acima.
+5. `purge_business_entity('quote', …)` (Lixo): bloqueia sem `deals.delete` nesta organização ou acima. Desde 20270126200000 o
+   orçamento vai antes ao Lixo dentro do sub-bloco (fora do Lixo a RPC recusa sempre).
    5b. Simulado: a sonda fica `viewer` aqui e ganha, só dentro do sub-bloco, `super_admin` noutra organização (criada e
    desfeita se só houver uma) → tem de ser bloqueada (antes de 20270110200000 passava).
 6. Custos iguais nas duas vias: quando 3a e 3b leem linhas, dão ambas "com custos" ou ambas "custos a null".
@@ -65,3 +66,15 @@ o super_admin, `rpc_save_quote` (permissão + âmbito), o SELECT de `quotes`/`pr
 negócio comercial e contém o "meu" de cada ecrã; ORG = tudo), o UPDATE com as chaves de `quotes.edit`, NONE em
 `crm_scope_keys`/`get_schedule_item_scope_context`/`get_proposal_edit_scope`, e o âmbito em `soft_delete_business_entity` e
 `cancel_and_replace_contract`. O 3b de `permissoes_papeis.sql` passou a contar com o âmbito (sem negócios no âmbito = "sem linhas").
+
+## `perm_lixo_custos_obra.test.sql` — Lixo, custos dos produtos e criar a obra (20270126200000/210000/220000)
+
+Mesmo estilo (`BEGIN … ROLLBACK`, cada ação num sub-bloco que acaba em `RAISE`). Verifica:
+- C2 `purge_business_entity`: orçamento e contrato assinado VIVOS recusados a todos; no Lixo, passa com `deals.delete` (org_admin,
+  super_admin, system_admin) — incluindo um contrato assinado no Lixo (regra de negócio por decidir, só documentada); com
+  `deals.delete` OWNED só o que é seu (o alheio é recusado).
+- C3 leitura direta: `negocio_produtos` só as linhas dos negócios de `neg_ler_negocios` (e pessoas.view, como antes); `custo_un`
+  recusado (42501) a authenticated em `negocio_produtos`, `quote_versao_produtos` e `adenda_linhas`; as outras colunas legíveis; a RPC
+  continua a dar os custos só com `fn_quote_custos_pode`.
+- C4 `obra_guardar_negocio` a criar a obra do 1003: com o plano «por aprovar» (ou sem estado) passa para comercial/Financeiro/Gestor
+  de obra; «aprovado»/«em curso» só com `negocios.obra.planear` (CT001 para os outros, e a EC não é emitida).
