@@ -6,6 +6,7 @@ import { acoes } from "../motor";
 import type { Ctx } from "../pecas";
 import { EstudioObra } from "./EstudioObra";
 import { obraDeExemplo } from "./exemploObra";
+import { obraEm3DNoDia, tarefaDaPeca } from "./obra3d";
 import { definirEncomendasReais, resumoDaBase, type LinhaDocEc } from "../real/encomendaReal";
 
 afterEach(() => { cleanup(); definirEncomendasReais(null); });
@@ -97,5 +98,29 @@ describe("4. os materiais numa lista só", () => {
     expect(within(sec).getByRole("alert").textContent).toMatch(/Base de Duche ZEUS 70x150 chega depois/);
     expect(within(sec).getByText("chega a 01/02")).toBeTruthy();
     expect(within(sec).getByText("no armazém")).toBeTruthy();
+  });
+});
+
+describe("5. o 3D pelo tempo", () => {
+  it("antes da demolição, a divisão como está; no fim do plano, tudo feito; a meio, só o que o plano já acabou", () => {
+    const { d } = obraDeExemplo();
+    const p = d.obra.plano!, fim = Math.max(...p.tasks.map((t) => t.dia + t.dur));
+    const dem = p.tasks.find((t) => /demol/i.test(t.nome))!;
+    const antes = obraEm3DNoDia(d, dem.dia)!;
+    expect(antes.demolida).toBe(dem.dur > 1 ? false : true);
+    const noFim = obraEm3DNoDia(d, fim - 1)!;
+    expect(noFim.demolida).toBe(true);
+    expect(noFim.porFazer.size).toBe(0);
+    expect(noFim.feitas).toBe(noFim.total);
+    const meio = obraEm3DNoDia(d, dem.dia + dem.dur)!;
+    expect(meio.demolida).toBe(true);
+    expect(meio.porFazer.size).toBeGreaterThan(0);
+  });
+  it("tocar numa peça: a tarefa do ofício dela", () => {
+    const { d } = obraDeExemplo();
+    const r = obraEm3DNoDia(d, 99)!;
+    if (!r.cena.ok) throw new Error("devia abrir");
+    const comTarefa = r.cena.espaco.pecas.map((x) => tarefaDaPeca(d, x.id)).filter((x) => x != null);
+    expect(comTarefa.length).toBeGreaterThan(0);
   });
 });

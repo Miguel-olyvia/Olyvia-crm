@@ -115,18 +115,68 @@ export function obraEm3DComModelos(d: Negocio): Obra3DModelos | null {
     espelho: produto(ex.espelho), porta: produto(ex.porta), janela: produto(ex.janela),
   });
   const antes = espacoDoEstudio(pr, "antes");
+  const { porFazer, feitas, total } = marcarFeitas(hoje, pr, F, acabou);
+  const final = espacoDoEstudio(pr, "depois", { espelho: produto(ex.espelho), porta: produto(ex.porta), janela: produto(ex.janela) });
+  return { projeto: pr, hoje, antes, final, porFazer, feitas, total, pedidos: comNomesDoContrato(d, produtosPedidosDoProjeto(pr, pedidosDosExtras(ex))) };
+}
+
+/** As peças por fazer (transparentes) de um espaço, pelo que está feito por grupo (sem `F`: nada contado, tudo a cores). */
+function marcarFeitas(esp: ResLegado, pr: Projeto, F: Record<Grupo, boolean | null> | null, acabou: boolean) {
   const tipoDe = new Map(pr.depois.pecas.map((pc) => [pc.id, pc.tipo] as const));
   const porFazer = new Set<string>();
   let feitas = 0, total = 0;
-  if (hoje.ok) {
-    for (const pc of hoje.espaco.pecas) {
+  if (esp.ok) {
+    for (const pc of esp.espaco.pecas) {
       const g = grupoDaPeca3D(pc.id, tipoDe);
       if (!g) continue;
       total++;
-      if (!F) continue; // sem plano: o projeto todo a cores, nada contado como feito
+      if (!F) continue;
       if (F[g] ?? acabou) feitas++; else porFazer.add(pc.id);
     }
   }
-  const final = espacoDoEstudio(pr, "depois", { espelho: produto(ex.espelho), porta: produto(ex.porta), janela: produto(ex.janela) });
-  return { projeto: pr, hoje, antes, final, porFazer, feitas, total, pedidos: comNomesDoContrato(d, produtosPedidosDoProjeto(pr, pedidosDosExtras(ex))) };
+  return { porFazer, feitas, total };
+}
+
+// ------------------------------------------------------------------ 23/11 (Rúben: «mega next-level»): o 3D pelo tempo
+// Uma régua do primeiro ao último dia do plano: em cada dia, a casa de banho como o plano diz que estará ao fim desse dia (antes da
+// demolição, como está; depois, as peças e os materiais à medida que as tarefas acabam). Tocar numa peça diz a tarefa que a instala.
+const DEMOL = /demol/i;
+/** O que o plano dá como feito ao fim do dia k (pelas datas do plano, não pela execução). */
+export function feitoNoDia(p: Plano, k: number): Record<Grupo, boolean | null> {
+  const out = {} as Record<Grupo, boolean | null>;
+  for (const g of Object.keys(DE_QUE) as Grupo[]) {
+    const ts = p.tasks.filter((t) => DE_QUE[g].test(t.nome));
+    out[g] = ts.length ? ts.every((t) => t.dia + t.dur <= k + 1) : null;
+  }
+  return out;
+}
+export interface Obra3DNoDia { cena: ResLegado; porFazer: Set<string>; feitas: number; total: number; demolida: boolean }
+/** A obra em 3D ao fim do dia k do plano. Null sem projeto do Estúdio ou sem plano. */
+export function obraEm3DNoDia(d: Negocio, k: number): Obra3DNoDia | null {
+  const pr = projetoDoNegocio(d.f), p = d.obra.plano;
+  if (!pr || !p) return null;
+  const fim = Math.max(1, ...p.tasks.map((t) => t.dia + t.dur));
+  const dem = p.tasks.filter((t) => DEMOL.test(t.nome));
+  const inicio = Math.min(...p.tasks.map((t) => t.dia));
+  const demolida = dem.length ? dem.every((t) => t.dia + t.dur <= k + 1) : k >= inicio;
+  if (!demolida) {
+    const antes = espacoDoEstudio(pr, "antes");
+    return { cena: antes, porFazer: new Set(), feitas: 0, total: 0, demolida: false };
+  }
+  const ex = extrasDoContrato(d), F = feitoNoDia(p, k), acabou = k >= fim - 1;
+  const cena = espacoDoEstudio(pr, "depois", {
+    semRevestimento: F.paredes === false, semPavimento: F.chao === false,
+    espelho: produto(ex.espelho), porta: produto(ex.porta), janela: produto(ex.janela),
+  });
+  return { cena, ...marcarFeitas(cena, pr, F, acabou), demolida: true };
+}
+/** A tarefa que instala uma peça do 3D (a do ofício dela: a primeira por validar, senão a última), ou null. */
+export function tarefaDaPeca(d: Negocio, pecaId: string): number | null {
+  const pr = projetoDoNegocio(d.f), p = d.obra.plano;
+  if (!pr || !p) return null;
+  const tipoDe = new Map(pr.depois.pecas.map((pc) => [pc.id, pc.tipo] as const));
+  const g = grupoDaPeca3D(pecaId, tipoDe);
+  if (!g) return null;
+  const L = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => DE_QUE[g].test(t.nome)).sort((a, b) => a.t.dia - b.t.dia || a.ti - b.ti);
+  return (L.find(({ t }) => estadoVivo(t, p) !== "validada") ?? L[L.length - 1])?.ti ?? null;
 }

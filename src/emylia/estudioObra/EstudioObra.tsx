@@ -414,7 +414,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
                   {aba === "cliente" && <>{vivo && planeia && <PontoDaSemana ctx={ctx} d={d} dias={dias} />}<ClienteDaObra ctx={ctx} d={d} /></>}
                   {aba === "contrato" && <ContratoDaObra ctx={ctx} d={d} />}
                   {aba === "documentos" && <DocumentosDaObra ctx={ctx} d={d} />}
-                  {aba === "3d" && <ProjetoEm3D d={d} />}
+                  {aba === "3d" && <ProjetoEm3D d={d} dias={dias} abrirTarefa={(ti) => setPainel({ k: "tarefa", ti })} />}
                   {aba === "fecho" && <><FechoDaObra ctx={ctx} d={d} irPara={setAba} /><FechoVivo d={d} ir={ir} /></>}
               </motion.div>
             </div>
