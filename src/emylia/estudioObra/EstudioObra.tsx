@@ -932,7 +932,7 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
             {R.mudancas.slice(0, 6).map((m) => (
               <li key={m.ti} className="flex flex-wrap items-center gap-x-2">
                 {m.tipo === "adiantada" ? <FastForward className="h-3.5 w-3.5 text-success" aria-hidden="true" /> : <TrendingUp className="h-3.5 w-3.5 text-amber-700" aria-hidden="true" />}
-                <span className="font-medium">{m.nome}</span>
+                <span className="font-medium" title={m.nome}>{nomeCurtoTarefa(m.nome)}</span>
                 <span className="text-muted-foreground">{m.tipo === "prolongada" ? `${m.de.dur} → ${m.para.dur} dias` : `${quando(m.de.dia)} → ${quando(m.para.dia)}`}</span>
                 {m.espera && <span className="text-amber-800 dark:text-amber-300">· espera pelo {primeiro(nomeTec(m.espera.tec))} ({m.espera.motivo === "noutra obra" && esperaObra(m) ? <>está na obra <button type="button" onClick={() => abrirOutra(esperaObra(m)!)} className="font-medium underline underline-offset-2 hover:no-underline">{esperaObra(m)!.nome}</button></> : `está ${m.espera.motivo}`})</span>}
                 {m.espera && livresPara(m).map((x) => (

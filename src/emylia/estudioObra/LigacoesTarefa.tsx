@@ -24,7 +24,7 @@ export function LigacoesDaTarefa({ p, ti, dias, mexe, pedir, abrir }: {
   const Chip = ({ j }: { j: number }) => {
     const x = T[j], Ic = ICONE_DA_FASE[x.fase ?? 1], cor = COR_FASE[x.fase ?? 1];
     return (
-      <button type="button" onClick={() => abrir(j)} title={x.nome} className="flex min-w-0 items-center gap-1.5 rounded-lg border border-border bg-card px-2 py-1 text-left text-xs hover:border-primary/40">
+      <button type="button" onClick={() => abrir(j)} title={x.nome} className="flex min-w-0 max-w-full items-center gap-1.5 rounded-lg border border-border bg-card px-2 py-1 text-left text-xs hover:border-primary/40">
         <span aria-hidden="true" className="grid h-5 w-5 shrink-0 place-items-center rounded-full text-white" style={{ background: cor }}>{Ic && <Ic className="h-3 w-3" />}</span>
         <span className="truncate">{nomeCurtoTarefa(x.nome)}</span>
       </button>
@@ -49,12 +49,12 @@ export function LigacoesDaTarefa({ p, ti, dias, mexe, pedir, abrir }: {
     <section aria-label="As ligações da tarefa" className="space-y-3 rounded-2xl border border-border p-3">
       <p className="flex items-center gap-1.5 text-sm font-semibold"><Link2 className="h-4 w-4 text-primary" aria-hidden="true" />Ligações</p>
       {/* o mini-diagrama: o que vem antes, esta, o que vem depois */}
-      <div className="grid grid-cols-[1fr_auto_auto_auto_1fr] items-center gap-1.5" role="img" aria-label={`${nomeCurtoTarefa(t.nome)}: depende de ${depende.length}, ${antes.length} esperam por ela`}>
-        <div className="flex min-w-0 flex-col items-end gap-1">{depende.length ? depende.map((l) => <Chip key={l.de} j={l.de} />) : <span className="text-xs text-muted-foreground">nada antes</span>}</div>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,7rem)_auto_minmax(0,1fr)] items-center gap-1.5" role="img" aria-label={`${nomeCurtoTarefa(t.nome)}: depende de ${depende.length}, ${antes.length} esperam por ela`}>
+        <div className="flex min-w-0 flex-col items-end gap-1 overflow-hidden">{depende.length ? depende.map((l) => <Chip key={l.de} j={l.de} />) : <span className="text-xs text-muted-foreground">nada antes</span>}</div>
         <ArrowRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-        <span className="max-w-[9rem] truncate rounded-lg px-2 py-1 text-xs font-semibold text-white" style={{ background: COR_FASE[t.fase ?? 1] }} title={t.nome}>{nomeCurtoTarefa(t.nome)}</span>
+        <span className="min-w-0 truncate rounded-lg px-2 py-1 text-xs font-semibold text-white" style={{ background: COR_FASE[t.fase ?? 1] }} title={t.nome}>{nomeCurtoTarefa(t.nome)}</span>
         <ArrowRight className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-        <div className="flex min-w-0 flex-col items-start gap-1">{antes.length ? antes.map((l) => <Chip key={l.para} j={l.para} />) : <span className="text-xs text-muted-foreground">nada depois</span>}</div>
+        <div className="flex min-w-0 flex-col items-start gap-1 overflow-hidden">{antes.length ? antes.map((l) => <Chip key={l.para} j={l.para} />) : <span className="text-xs text-muted-foreground">nada depois</span>}</div>
       </div>
       <div className="space-y-1">
         <p className="text-xs font-medium text-muted-foreground">Depende de (só começa quando acabarem)</p>
