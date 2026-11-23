@@ -14,4 +14,12 @@ describe("os dados da minuta do contrato", () => {
     expect(v.proposta_data).toBe("2026-11-17");
     expect(v.proposta_validade).toBe("30 dias");
   });
+
+  it("23/11: o ano é o da proposta real e o número do contrato é o do negócio (CT <ano>/<n.º>)", () => {
+    const S = seed();
+    const d = structuredClone(S.deals.find((x) => x.orc)!) as Negocio;
+    const v = dadosDaMinuta(d, { ctx: { S } } as never, "Mudelar", {}, { numero: "P-2027-0001", data: "02/01/2027", criadaEm: "2027-01-02T10:00:00Z" });
+    expect(v.proposta_numero?.startsWith(`PR 2027/${d.id}`)).toBe(true);
+    expect(v.contrato_numero).toBe(`CT ${new Date().getFullYear()}/${d.id}`);
+  });
 });

@@ -97,12 +97,13 @@ export function useDadosDaProposta(negocioId: string | null) {
     queryKey: ["pessoas-proposta-do-negocio", negocioId],
     enabled: negocioId !== null,
     staleTime: 30_000,
-    queryFn: async (): Promise<{ numero: string; data: string } | null> => {
-      const { data, error } = await tabela("proposals").select("proposal_number, created_at").eq("negocio_id", negocioId).is("deleted_at", null).order("created_at", { ascending: false });
+    queryFn: async (): Promise<{ numero: string; data: string; criadaEm: string | null; id: string | null } | null> => {
+      const { data, error } = await tabela("proposals").select("id, proposal_number, created_at").eq("negocio_id", negocioId).is("deleted_at", null).order("created_at", { ascending: false });
       if (error) throw new Error(error.message);
-      const p = ((data as { proposal_number?: string | null; created_at?: string | null }[] | null) ?? [])[0];
+      const p = ((data as { id?: string | null; proposal_number?: string | null; created_at?: string | null }[] | null) ?? [])[0];
       if (!p?.proposal_number) return null;
-      return { numero: p.proposal_number, data: p.created_at ? new Date(p.created_at).toLocaleDateString("pt-PT") : "" };
+      // criadaEm (ISO): o ano do número mostrado («PR <ano>/<n.º do negócio>», src/lib/numeroDocumento.ts); id: a proposta real, para o documento do passo
+      return { numero: p.proposal_number, data: p.created_at ? new Date(p.created_at).toLocaleDateString("pt-PT") : "", criadaEm: p.created_at ?? null, id: p.id ?? null };
     },
   });
 }

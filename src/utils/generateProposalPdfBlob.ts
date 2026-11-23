@@ -8,6 +8,7 @@ import { captureFlowError } from '@/lib/observability/captureFlowError';
 import { generateObraPdfBlob, type ObraNoPdf } from '@/utils/generateObraPdfBlob';
 import { IDIOMA_BASE, aplicarVersaoProposta, nomeDoIdioma, type TemplatePropostaLike } from '@/lib/idiomaDocumento';
 import { resolverIdiomasDaProposta } from '@/utils/idiomasDaProposta';
+import { textosComVariaveis, type VariaveisDaProposta } from '@/lib/textoDaProposta';
 
 export type { ObraNoPdf } from '@/utils/generateObraPdfBlob';
 
@@ -42,6 +43,10 @@ export interface ProposalPdfOptions {
    * gravado (idiomasDoDocumento) e, não havendo nada, o português de sempre.
    */
   idiomas?: readonly string[];
+  /** 23/11: o número que se mostra (numeroDaProposta: «PR 2026/1031» numa proposta de negócio). Sem ele, o proposal_number guardado. */
+  numeroMostrado?: string;
+  /** 23/11: os valores das variáveis dos textos do template ({{condicoes_pagamento}}, …). Sem eles, uma variável conhecida fica vazia. */
+  variaveis?: VariaveisDaProposta | null;
 }
 
 /** O modelo com a versão do idioma aplicada (a mesma referência se não houver versão, ou se não houver modelo). */
@@ -208,9 +213,11 @@ async function generateFromQuotePdfs(
         // Branding on top: the proposal's own selected template (title, colors,
         // footer/terms/thank-you), when one is configured. Os dois modelos já
         // vão resolvidos para o idioma (sem versões, é a mesma referência).
+        // 23/11: as variáveis dos textos do template de proposta ({{condicoes_pagamento}}, …); sem variáveis, a MESMA referência
+        const brandingDoIdioma = comVersao(explicitProposalTemplate, idioma);
         const templateForQuote = mergeProposalBranding(
           comVersao(structuralTemplate, idioma),
-          comVersao(explicitProposalTemplate, idioma),
+          brandingDoIdioma ? textosComVariaveis(brandingDoIdioma, opcoes.variaveis) : brandingDoIdioma,
         );
         const isLastQuote = quote.id === lastQuoteId;
         // Mark this render as proposal-context so a quote missing a variable
@@ -221,7 +228,7 @@ async function generateFromQuotePdfs(
           templateOverride: templateForQuote,
           documentContext: {
             kind: 'proposal',
-            number: proposal?.proposal_number ?? null,
+            number: opcoes.numeroMostrado || (proposal?.proposal_number ?? null),
             title: proposal?.title ?? null,
             // O português não leva `idioma`: é o que o documento já fazia sem ele.
             ...(idioma !== IDIOMA_BASE ? { idioma } : {}),
@@ -291,7 +298,8 @@ async function generateFromQuotePdfs(
   // Convert Uint8Array to a fresh ArrayBuffer to satisfy BlobPart typing
   const ab = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
   const blob = new Blob([ab], { type: 'application/pdf' });
-  const safeNumber = proposal?.proposal_number || proposalId;
+  // «PR 2026/1031 · v2» não serve num nome de ficheiro: «PR-2026-1031-v2»
+  const safeNumber = (opcoes.numeroMostrado ? opcoes.numeroMostrado.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '') : '') || proposal?.proposal_number || proposalId;
   const fileName = `Proposta_${safeNumber}_${new Date().toISOString().split('T')[0]}.pdf`;
 
   return { blob, fileName };

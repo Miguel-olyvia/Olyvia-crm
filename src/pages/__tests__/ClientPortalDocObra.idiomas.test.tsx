@@ -158,7 +158,9 @@ describe("proposta: os blocos da obra seguem a versão visível", () => {
     const [id, , obra, opcoes] = vi.mocked(generateProposalPdfBlob).mock.calls.at(-1)!;
     expect(id).toBe("p1");
     expect(obra).toMatchObject({ idioma: "en" });
-    expect(opcoes).toEqual({ idiomas: ["en"] });
+    // 23/11: com a vista do negócio, o PDF leva também o número do negócio (PR <ano>/<n.º>) e as variáveis do template
+    expect(opcoes).toMatchObject({ idiomas: ["en"], numeroMostrado: expect.stringMatching(/^PR \d{4}\/\d+/) });
+    expect(opcoes?.variaveis?.condicoes_pagamento).toBeTruthy();
   });
 
   it("template com versão inglesa e portal em inglês (um só idioma): documento, obra e PDF em inglês, sem seletor", async () => {
@@ -174,6 +176,6 @@ describe("proposta: os blocos da obra seguem a versão visível", () => {
     await waitFor(() => expect(generateProposalPdfBlob).toHaveBeenCalled());
     const [, , obra, opcoes] = vi.mocked(generateProposalPdfBlob).mock.calls.at(-1)!;
     expect(obra).toMatchObject({ idioma: "en" });
-    expect(opcoes).toEqual({ idiomas: ["en"] });
+    expect(opcoes).toMatchObject({ idiomas: ["en"], numeroMostrado: expect.stringMatching(/^PR \d{4}\/\d+/) });
   });
 });

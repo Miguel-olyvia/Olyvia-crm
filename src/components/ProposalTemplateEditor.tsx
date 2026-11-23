@@ -79,6 +79,7 @@ import { BarraDeIdiomas } from "@/components/proposals/versoes/BarraDeIdiomas";
 import { PainelDaVersao } from "@/components/proposals/versoes/PainelDaVersao";
 import { useVersoesDaProposta } from "@/components/proposals/versoes/useVersoesDaProposta";
 import { comVersoesNoDesign, idDaAba, separarVersoes } from "@/components/proposals/versoes/modeloVersoes";
+import { VariaveisDoTemplate } from "@/components/proposals/versoes/VariaveisDoTemplate";
 
 // Mock data for preview
 const mockProposal = {
@@ -1579,6 +1580,13 @@ export function ProposalTemplateEditor({ templateId, onClose, initialTemplateTyp
                           rows={4}
                           className="text-xs"
                         />
+                        {/* 23/11: as variáveis do negócio ({{condicoes_pagamento}}, …), só nos templates de proposta */}
+                        {config.template_type === "proposal" && (
+                          <VariaveisDoTemplate
+                            termos={config.terms_conditions || ""}
+                            aoMudarTermos={(v) => setConfig(p => ({ ...p, terms_conditions: v }))}
+                          />
+                        )}
                       </div>
                       <div className="space-y-2">
                         <Label className="text-xs">Mensagem na Proposta</Label>

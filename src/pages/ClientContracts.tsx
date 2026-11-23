@@ -82,6 +82,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { useNumerosDosNegociosCrm } from "@/hooks/pessoas/useNumerosDosNegociosCrm";
+import { numeroDoContrato } from "@/lib/numeroDocumento";
 
 interface ClientContract {
   id: string;
@@ -855,6 +857,13 @@ const ClientContracts = () => {
     }
     return result;
   }, [contracts, statusFilter, searchQuery, onlyMine, currentUserId, dateFrom, dateTo, comercialFilter]);
+
+  // 23/11: nos contratos de um negócio, o número como a Emylia o mostra (CT <ano>/<n.º do negócio>); nos outros, o guardado
+  const numerosDosNegocios = useNumerosDosNegociosCrm(filteredContracts.map((c) => (c as { negocio_id?: string | null }).negocio_id));
+  const numeroDoContratoMostrado = (c: { negocio_id?: string | null; contract_number?: string | null; created_at?: string | null }): string => {
+    const x = c.negocio_id ? numerosDosNegocios.get(c.negocio_id) : undefined;
+    return numeroDoContrato({ numeroNegocio: x?.numero ?? null, criadoEm: c.created_at ?? null, guardado: c.contract_number ?? null });
+  };
 
   // KPIs — calculados NO SERVIDOR (client_contracts_list_metrics).
   //
@@ -2093,7 +2102,7 @@ const ClientContracts = () => {
                             className="font-mono font-semibold text-primary hover:underline cursor-pointer text-left"
                             onClick={() => handleEdit(contract)}
                           >
-                            {contract.contract_number || "-"}
+                            {numeroDoContratoMostrado(contract) || "-"}
                           </button>
                           {subtitle && <p className="text-[10px] text-muted-foreground mt-0.5 max-w-[140px]">{subtitle}</p>}
                         </div>

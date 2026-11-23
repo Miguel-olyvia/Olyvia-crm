@@ -52,6 +52,8 @@ import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
 import { lerCustosDasLinhas, juntarCustos } from "@/lib/quotes/quoteLineCosts";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { ChipIdiomaProposta } from "@/components/proposals/ChipIdiomaProposta";
+import { useNumerosDosNegociosCrm } from "@/hooks/pessoas/useNumerosDosNegociosCrm";
+import { numeroDaProposta } from "@/lib/numeroDocumento";
 
 const CALL_RESULT_LABELS: Record<string, string> = {
   answered: "Chamada atendida",
@@ -212,6 +214,8 @@ interface ProposalDetailsDialogProps {
     created_at: string;
     notes: string | null;
     deal_id: string | null;
+    /** 23/11: o negócio da proposta (o número mostrado passa a ser «PR <ano>/<n.º do negócio>»). */
+    negocio_id?: string | null;
     deals: { id: string; title: string } | null;
     proposal_workflow_stages?: {
       id: string;
@@ -506,6 +510,13 @@ export function ProposalDetailsDialog({
     return acc;
   }, {});
 
+  // 23/11: numa proposta de negócio, o número como a Emylia o mostra (PR <ano>/<n.º do negócio>); sem negócio, o guardado
+  const numerosDoNegocio = useNumerosDosNegociosCrm([proposal?.negocio_id]);
+  const doNegocio = proposal?.negocio_id ? numerosDoNegocio.get(proposal.negocio_id) : undefined;
+  const numeroMostrado = proposal
+    ? numeroDaProposta({ numeroNegocio: doNegocio?.numero ?? null, versao: doNegocio?.versao ?? null, criadoEm: proposal.created_at, guardado: proposal.proposal_number ?? null })
+    : "";
+
   if (!proposal) return null;
 
   return (
@@ -516,10 +527,10 @@ export function ProposalDetailsDialog({
           <div className="flex items-center justify-between">
             <DialogTitle className="flex items-center gap-2 text-xl">
               <FileText className="w-5 h-5 text-primary" />
-              {proposal.proposal_number && (
-                <span className="font-mono text-primary">{proposal.proposal_number}</span>
+              {numeroMostrado && (
+                <span className="font-mono text-primary">{numeroMostrado}</span>
               )}
-              {proposal.proposal_number && <span className="text-muted-foreground">·</span>}
+              {numeroMostrado && <span className="text-muted-foreground">·</span>}
               <span>{proposal.title}</span>
               <ChipIdiomaProposta language={extendedData?.language ?? proposal.language} />
             </DialogTitle>

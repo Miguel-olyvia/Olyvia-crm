@@ -9,6 +9,8 @@ import { usePortalCompany, type PortalOrg } from "@/contexts/PortalCompanyContex
 import { PortalOrgsErrorState } from "@/components/portal/PortalOrgsErrorState";
 import { useClientPortalData } from "@/hooks/useClientPortalData";
 import { formatCurrency } from "@/lib/utils";
+import { useNumerosDosNegocios } from "@/components/portal/obra/useNumerosDosNegocios";
+import { numeroDaProposta } from "@/lib/numeroDocumento";
 import {
   FileText, ScrollText, FolderOpen, Phone, Mail, MessageCircle,
   ArrowRight, Clock, AlertCircle, CheckCircle2, Send, UserPlus,
@@ -36,6 +38,12 @@ const ClientPortal = () => {
   const [orgInfo, setOrgInfo] = useState<{ name: string; email?: string; phone?: string; website?: string } | null>(null);
   const [proposals, setProposals] = useState<any[]>([]);
   const [proposalsLoading, setProposalsLoading] = useState(true);
+  // 23/11: o número das propostas de um negócio como a Emylia o mostra (PR <ano>/<n.º do negócio>); as outras, o guardado
+  const numerosDosNegocios = useNumerosDosNegocios(proposals.slice(0, 5).map((p: { negocio_id?: string | null }) => p.negocio_id));
+  const numeroDe = (p: { negocio_id?: string | null; proposal_number?: string | null; created_at?: string | null }): string => {
+    const x = p.negocio_id ? numerosDosNegocios.get(p.negocio_id) : undefined;
+    return numeroDaProposta({ numeroNegocio: x?.numero ?? null, versao: x?.versao ?? null, criadoEm: p.created_at ?? null, guardado: p.proposal_number ?? null });
+  };
   const [portalCreatedAt, setPortalCreatedAt] = useState<string | null>(null);
   // Empresa ativa do portal — antes esta página fazia `.limit(1)` sem
   // `order by` sobre client_portal_users, ou seja, escolhia a empresa à sorte.
@@ -93,7 +101,7 @@ const ClientPortal = () => {
 
       let query = supabase
         .from("proposals")
-        .select("id, title, proposal_number, value, created_at, valid_until, status")
+        .select("id, title, proposal_number, value, created_at, valid_until, status, negocio_id")
         .order("created_at", { ascending: false });
 
       // Par (organização, entidade) desta empresa; sem entidade resta a coluna
@@ -438,7 +446,7 @@ const ClientPortal = () => {
                             <div className="min-w-0">
                               <p className="text-sm font-medium truncate">{p.title}</p>
                               <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                {p.proposal_number && <span>{p.proposal_number} ·</span>}
+                                {numeroDe(p) && <span>{numeroDe(p)} ·</span>}
                                 <span>{formatCurrency(p.value)}</span>
                                 <span>· {formatarData(p.created_at)}</span>
                               </div>

@@ -43,6 +43,7 @@ import { SeletorVersaoDoDocumento } from "@/components/idiomaDocumento/SeletorVe
 import { idiomaVisivelDoDocumento } from "@/lib/idiomaDocumento";
 import { ehPortalIdioma, type PortalIdioma } from "@/portal-i18n/tipos";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { numeroDoContrato } from "@/lib/numeroDocumento";
 
 // Código de estado do contrato (vem da base, não muda) -> chave da etiqueta. Um estado sem etiqueta aparece como o código.
 const ESTADO_CHAVES: Readonly<Record<string, string>> = {
@@ -109,6 +110,8 @@ const ClientPortalContractDetail = () => {
   const vistaObra = useVistaObra(contract?.negocio_id, "client-portal-contract");
   const contractStatus: string | undefined = contract?.status;
   const obra = useMemo(() => contratoDaVista(vistaObra, { proposta: "accepted", contrato: contractStatus }), [vistaObra, contractStatus]);
+  // 23/11: o número como a Emylia o mostra («CT 2026/<n.º do negócio>», da vista); sem a vista, o contract_number guardado.
+  const numeroDoContratoMostrado = numeroDoContrato({ numeroNegocio: vistaObra?.d?.id ?? null, criadoEm: contract?.created_at ?? null, guardado: contract?.contract_number ?? null });
 
   // A versão de idioma que o cliente escolheu no seletor (só há seletor com mais de uma versão). Vazia = ainda não
   // escolheu: vale o idioma da interface do portal, se o contrato o tem, senão a primeira versão.
@@ -234,13 +237,13 @@ const ClientPortalContractDetail = () => {
         toast({ title: t("pc.contratoDet.pdf.naoGerar"), description: t("pc.contratoDet.pdf.semConteudo"), variant: "destructive" });
         return;
       }
-      const label = contract.contract_number || contract.title || t("pc.contratoDet.tituloPadrao");
+      const label = numeroDoContratoMostrado || contract.title || t("pc.contratoDet.tituloPadrao");
       // Com seletor, o PDF leva só a versão que o cliente está a ver (o PDF com os dois idiomas continua no CRM).
       const daVersao = idiomaVisivel ? soAVersaoDoContrato(resolved, idiomaVisivel) : resolved;
       // Com a vista do negócio, o PDF leva por baixo da minuta as cláusulas do negócio e as adendas assinadas (o que o
       // ecrã mostra), no idioma do documento. Só na apresentação: o corpo gravado do contrato não muda.
       const paraPdf = obra ? comClausulasNoPdf(daVersao, documentoObraHtml(contratoObraPdf(obra, idiomaDasClausulas))) : daVersao;
-      await downloadContractDocumentPdf(paraPdf, label, label);
+      await downloadContractDocumentPdf(paraPdf, label, label.replace(/[\\/:*?"<>|·]+/g, "-").replace(/\s+/g, " ").trim());
     } catch (error: any) {
       console.error("[portal] contract PDF download failed:", error);
       captureFlowError(error, "client-portal-contract");
@@ -453,7 +456,7 @@ const ClientPortalContractDetail = () => {
         </Button>
 
         {contract.negocio_id && (
-          <PassosDoNegocio passo={passoDoNegocio("accepted", contract.status)} titulo={contract.contract_number || t("pc.contratoDet.tituloPadrao")} total={contract.total_value} />
+          <PassosDoNegocio passo={passoDoNegocio("accepted", contract.status)} titulo={numeroDoContratoMostrado || t("pc.contratoDet.tituloPadrao")} total={contract.total_value} />
         )}
 
         {/* Decision Banner */}
@@ -521,7 +524,7 @@ const ClientPortalContractDetail = () => {
             <div>
               <CardTitle className="flex items-center gap-2">
                 <ScrollText className="h-5 w-5" />
-                {t("pc.contratoDet.dados.titulo", { numero: contract.contract_number || "" })}
+                {t("pc.contratoDet.dados.titulo", { numero: numeroDoContratoMostrado })}
               </CardTitle>
             </div>
             <Badge variant="outline" className="shrink-0">
@@ -530,10 +533,10 @@ const ClientPortalContractDetail = () => {
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-              {contract.contract_number && (
+              {numeroDoContratoMostrado && (
                 <div className="bg-muted/50 rounded-lg p-3">
                   <p className="text-xs text-muted-foreground uppercase tracking-wide">{t("pc.contratoDet.dados.numero")}</p>
-                  <p className="font-bold text-lg">{contract.contract_number}</p>
+                  <p className="font-bold text-lg">{numeroDoContratoMostrado}</p>
                 </div>
               )}
               {contract.total_value != null && (
@@ -825,7 +828,7 @@ const ClientPortalContractDetail = () => {
             <DialogHeader>
               <DialogTitle>{t("pc.contratoDet.leitura.titulo")}</DialogTitle>
               <DialogDescription>
-                {t("pc.contratoDet.leitura.descricao", { numero: contract.contract_number || "" })}
+                {t("pc.contratoDet.leitura.descricao", { numero: numeroDoContratoMostrado })}
               </DialogDescription>
             </DialogHeader>
             <label className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm">

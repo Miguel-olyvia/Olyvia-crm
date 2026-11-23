@@ -10,6 +10,8 @@ import { formatarData } from "@/portal-i18n/formato";
 import { traduzirEm } from "@/portal-i18n/traduzirEm";
 import type { PortalIdioma } from "@/portal-i18n/tipos";
 import type { PropostaObra } from "./dadosObra";
+import type { CapaObra, OrcamentoObra } from "./capaEOrcamento";
+import { CapaDaObra, OrcamentoDetalhadoObra } from "./CapaEOrcamentoObra";
 import { dataCurtaEm, diasUteis, garantiaDe, momentoDaPrestacao, nomeDaFase, nomeDoGrupo, numero, rotuloDaEscolha, textoDoMotor } from "./textosObra";
 
 type T = ReturnType<typeof traduzirEm>["t"];
@@ -19,6 +21,8 @@ export interface DocumentoObraProps {
   idioma?: PortalIdioma;
   /** A cor principal do template (os números das secções). */
   cor?: string;
+  /** 23/11: o «03 Orçamento detalhado» da Emylia, só quando não há o orçamento do template (o passo «Proposta» antes da proposta real). */
+  orcamento?: OrcamentoObra | null;
 }
 
 /** Um bloco numerado do documento ("01 · O que vamos fazer"). */
@@ -215,7 +219,13 @@ function Aceitacao({ dados, t }: { dados: PropostaObra; t: T }) {
 }
 
 /** Os blocos da obra, pela ordem do documento da Emylia (a 03 é o orçamento do template, que vem antes). */
-export function DocumentoObra({ dados, idioma = "pt", cor }: DocumentoObraProps) {
+/** 23/11: a carta e o resumo da capa (onde o template não escreve o cabeçalho), para o documento do template pôr no topo (prop capaObra). */
+export function CapaDoDocumento({ capa, idioma = "pt" }: { capa: CapaObra; idioma?: PortalIdioma }) {
+  const { idioma: lingua, t } = traduzirEm(idioma);
+  return <CapaDaObra capa={capa} t={t} idioma={lingua} />;
+}
+
+export function DocumentoObra({ dados, idioma = "pt", cor, orcamento }: DocumentoObraProps) {
   const { idioma: lingua, t } = traduzirEm(idioma);
   const M = dados.materiais;
   const temMateriais = M.mats.length + M.escolhidos.length + M.nec.length + M.fornecidos.length + M.escolhas.length > 0;
@@ -223,6 +233,7 @@ export function DocumentoObra({ dados, idioma = "pt", cor }: DocumentoObraProps)
     <section aria-label={t("pc.docObra.aria")} className="space-y-5" data-testid="documento-obra">
       {dados.fases.length > 0 && <BlocoObra n={1} titulo={t("pc.docObra.titulo.fazer")} cor={cor}><OQueVamosFazer dados={dados} t={t} /></BlocoObra>}
       {temMateriais && <BlocoObra n={2} titulo={t("pc.docObra.titulo.materiais")} cor={cor}><MateriaisEscolhas dados={dados} t={t} /></BlocoObra>}
+      {orcamento && orcamento.grupos.length > 0 && <BlocoObra n={3} titulo={t("pc.docObra.titulo.orcamento")} cor={cor}><OrcamentoDetalhadoObra orc={orcamento} t={t} /></BlocoObra>}
       {dados.planeamento && <BlocoObra n={4} titulo={t("pc.docObra.titulo.planeamento")} cor={cor}><Planeamento dados={dados} t={t} idioma={lingua} /></BlocoObra>}
       <BlocoObra n={5} titulo={t("pc.docObra.titulo.pagamento")} cor={cor}><Pagamento dados={dados} t={t} idioma={lingua} /></BlocoObra>
       <BlocoObra n={6} titulo={t("pc.docObra.titulo.condicoes")} cor={cor}><Condicoes dados={dados} t={t} idioma={lingua} /></BlocoObra>
