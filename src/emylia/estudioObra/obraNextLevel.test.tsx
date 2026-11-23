@@ -159,3 +159,18 @@ describe("7. o cliente", () => {
     expect(portal.textContent!.length).toBeGreaterThan(200);
   });
 });
+
+describe("8. o fecho", () => {
+  it("o auto de receção antes de encerrar: os trabalhos com o nome curto, o antes e o depois com a planta final e a garantia", () => {
+    const x = obraDeExemplo();
+    x.d.f.garantia = "5 anos";
+    montarObra(x);
+    fireEvent.click(screen.getByRole("tab", { name: /Fecho/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Pré-visualizar o auto/ }));
+    const dlg = screen.getByRole("dialog", { name: "O auto de receção" });
+    expect(within(dlg).getByRole("region", { name: "Trabalhos executados" })).toBeTruthy();
+    expect(within(dlg).getByRole("img", { name: /^A planta final/ })).toBeTruthy();
+    expect(within(dlg).getByRole("region", { name: "Garantia" }).textContent).toMatch(/5 anos/);
+    expect(x.d.obra.auto ?? null).toBeNull(); // só para ver: o auto não se cria
+  });
+});

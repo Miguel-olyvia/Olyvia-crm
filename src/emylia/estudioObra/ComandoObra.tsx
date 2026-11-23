@@ -10,7 +10,7 @@
 //  · Entregas: a linha do tempo dos materiais (chega hoje, amanhã, a dd/mm).
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowUpRight, CalendarCheck, Camera, Check, ChevronLeft, ChevronRight, Euro, HardHat, Inbox, Package, Rocket, Send, Sparkles, Truck, Zap } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CalendarCheck, Camera, Check, ChevronLeft, ChevronRight, Euro, FileText, HardHat, Inbox, Package, Rocket, Send, Sparkles, Truck, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, eur, nfmt, type Estado, type Negocio, type Plano } from "../motor";
@@ -29,6 +29,8 @@ import { Contagem, MOLA, useReduzir } from "../movimento";
 import { podeNeg, podeVerCustos } from "../permissoes";
 import { derrapagem, estadoVivo, nomeCurtoTarefa, rotuloVivo } from "./planoVivo";
 import { CaminhoCritico, ICONE_DA_FASE } from "./CaminhoCritico";
+import { AutoRececaoDoc } from "../AutoRececao";
+import { NaFrente } from "../NaFrente";
 import { diasComRegistos, resumoDoDia } from "./resumoDoDia";
 import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
 import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
@@ -710,10 +712,33 @@ export function Entregas({ d }: { d: Negocio }) {
 /* ================================================================== o fecho: as fotografias finais, o auto e a garantia */
 export function FechoVivo({ d, ir }: { d: Negocio; ir: Ir }) {
   const p = d.obra.plano!;
+  // 23/11 (Rúben: «mega next-level»): o auto de receção antes de existir (um rascunho, só para ver; o verdadeiro nasce ao encerrar)
+  const [verAuto, setVerAuto] = useState(false);
+  const rascunho: Negocio = d.obra.auto ? d : { ...d, obra: { ...d.obra, auto: { n: "Rascunho", q: "", estado: "por assinar" } } };
   const ultimas = p.tasks.map((t, ti) => ({ t, ti, f: [...(t.exec?.envios ?? [])].reverse().find((e) => e.fotos?.length)?.fotos?.[0] ?? t.exec?.fotos?.[0] })).filter((x) => x.f);
   const auto = d.obra.auto;
   return (
     <section aria-label="A vistoria e a garantia" className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-primary/[0.05] p-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">O auto de receção</p>
+          <p className="text-xs text-muted-foreground">{d.obra.auto ? `${d.obra.auto.n} · ${d.obra.auto.estado}` : "Nasce ao encerrar a obra e vai ao portal para o cliente assinar. Veja já como fica: os trabalhos por fase, o antes e o depois, a planta final e a garantia."}</p>
+        </div>
+        <Button type="button" variant="outline" className="min-h-10 rounded-full" onClick={() => setVerAuto(true)}><FileText className="mr-1.5 h-4 w-4" aria-hidden="true" />{d.obra.auto ? "Ver o auto" : "Pré-visualizar o auto"}</Button>
+      </div>
+      {verAuto && (
+        <NaFrente>
+          <div className="fixed inset-0 z-[60] flex justify-center bg-black/40 sm:items-center sm:p-6" onClick={() => setVerAuto(false)}>
+            <div role="dialog" aria-modal="true" aria-label="O auto de receção" onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-4xl flex-col bg-card shadow-2xl sm:h-auto sm:max-h-[92vh] sm:rounded-2xl">
+              <div className="flex items-center justify-between gap-3 border-b border-border p-4">
+                <p className="font-semibold">{d.obra.auto ? "O auto de receção" : "O auto de receção (pré-visualização)"}</p>
+                <Button type="button" variant="ghost" className="min-h-10" aria-label="Fechar" onClick={() => setVerAuto(false)}><X className="h-4 w-4" /></Button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-4"><AutoRececaoDoc d={rascunho} /></div>
+            </div>
+          </div>
+        </NaFrente>
+      )}
       <p className="text-sm font-semibold">As fotografias da vistoria</p>
       {ultimas.length ? (
         <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5">
