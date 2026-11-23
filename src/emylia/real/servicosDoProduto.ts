@@ -1,7 +1,7 @@
 // 23/11: o serviço que um produto traz (products.servico_id e fator_servico), na página LEVE de Produtos (CatalogoProdutos), que não lê o Catálogo dos serviços.
 //   · ao criar: a lista dos serviços da organização (a tabela services, pela RLS: quem não tem services.view recebe a lista vazia e o formulário fica sem a secção);
 //     o id escolhido grava-se pela mesma cat_guardar_produto de sempre (p_servico_id, p_fator_servico).
-//   · na ficha: cat_definir_servico_produto (20270126000000) muda só o serviço e o fator, sem regravar o resto do produto.
+//   · na ficha: cat_definir_servico_produto (20270126100000) muda só o serviço e o fator, sem regravar o resto do produto.
 import { AINDA_NAO, erroAmigavel, rpcLivre, type Res } from "../fichaProdutoDados";
 
 export interface ServicoEscolha { id: string; nome: string; sku: string | null }

@@ -172,7 +172,7 @@ let contexto: { org: string; subs: Map<Categoria, string[]> } | null = null;
 
 export { bateComPesquisa, grauDaPesquisa, ordenarPorPesquisa } from "./pesquisaEstudio";
 
-/** 23/11: a base ainda não tem cat_estudio_procurar_produtos (20270126000000): a pesquisa lê como antes, subcategoria a subcategoria. */
+/** 23/11: a base ainda não tem cat_estudio_procurar_produtos (20270126050000): a pesquisa lê como antes, subcategoria a subcategoria. */
 let semPesquisaNova = false;
 
 /** Procura no catálogo inteiro da organização, nas subcategorias deste tipo de peça, e junta o que encontrar aos produtos do Estúdio.

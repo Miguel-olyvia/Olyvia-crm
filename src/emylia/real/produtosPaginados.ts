@@ -137,7 +137,7 @@ export async function lerPesquisaProdutos(org: string, f: FiltroServidor, pagina
   return l.ok ? { ok: true, v: { ...l.v, aviso: f.servico ? "A pesquisa por serviço ainda não existe nesta base: a lista não está filtrada pelo serviço." : "A pesquisa de produtos ainda não existe nesta base: a lista é a de sempre." } } : { ok: false, erro: l.erro };
 }
 
-/** 23/11 (20270126000000): os argumentos de cat_estudio_procurar_produtos. ATENÇÃO: p_pagina vem antes de p_limite. */
+/** 23/11 (20270126050000): os argumentos de cat_estudio_procurar_produtos. ATENÇÃO: p_pagina vem antes de p_limite. */
 export function argsPesquisaEstudio(org: string, q: string, subcategorias: readonly string[], pagina: number, limite = POR_PAGINA_SERVIDOR): Record<string, unknown> {
   return { p_org: org, p_q: nulo(q), p_subcategorias: subcategorias.length ? [...subcategorias] : null, p_pagina: pagina, p_limite: limite };
 }
