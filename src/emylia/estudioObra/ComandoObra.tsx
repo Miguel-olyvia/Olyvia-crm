@@ -20,7 +20,7 @@ import { dataCurta } from "../planoObra";
 import { blocosForaDaObra, obrasDosTecnicos } from "../preparacaoObra";
 import { materiaisPorFase, progresso } from "../obraOps";
 import { porEncomendarDe } from "../encomendasAjuste";
-import { imprevistosDe } from "../imprevistos";
+import { imprevistosDe, pedidoDeAtraso, textoPedidoAtraso } from "../imprevistos";
 import { emCurso, valorContrato } from "../adendas";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
@@ -116,6 +116,8 @@ export function precisaDeTi(ctx: Ctx, d: Negocio, ir: Ir): Pedido[] {
   if (!podeNeg(S.role, "obra.planear") || p.estado !== "em curso") return L;
   p.tasks.forEach((t, ti) => { if (estadoVivo(t, p) === "feita") L.push({ k: "v" + ti, t: `Validar ${t.nome.toLowerCase()}`, sub: `${primeiro(nomeTec(t.tec))} deu-a por feita, com ${t.exec?.fotos.length ?? 0} ${t.exec?.fotos.length === 1 ? "fotografia" : "fotografias"}`, rot: "Validar", fn: () => run(() => A.validarTarefa(d.id, ti)), nivel: "atencao" }); });
   for (const im of imprevistosDe(d)) {
+    // 23/11: o pedido de atraso do técnico: aceitar ou recusar no imprevisto
+    if (pedidoDeAtraso(im)) { L.push({ k: "i" + im.id, t: textoPedidoAtraso(im), sub: "Aceite (o plano anda e o cliente é avisado) ou recuse", rot: "Decidir", fn: () => ir.imprevisto(im.id), nivel: "critico" }); continue; }
     if (im.estado === "aberto") L.push({ k: "i" + im.id, t: `Imprevisto: ${im.texto}`, sub: "Falta a proposta ao cliente (ou resolver sem custo)", rot: "Tratar", fn: () => ir.imprevisto(im.id), nivel: "critico" });
     if (im.estado === "recusado") L.push({ k: "i" + im.id, t: `O cliente recusou: ${im.texto}`, sub: "Decida o que fazer", rot: "Decidir", fn: () => ir.imprevisto(im.id), nivel: "critico" });
   }

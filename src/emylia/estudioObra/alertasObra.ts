@@ -2,7 +2,7 @@
 // liga-o à ação): o que está atrasado, o que espera pela validação ou pela decisão do cliente, os técnicos noutra obra, os materiais que
 // ainda não chegaram para a fase que vem, a conversa por ler, o fim que derrapou e a folga para adiantar.
 import { TECS, type Estado, type Negocio, type Plano } from "../motor";
-import { imprevistosDe } from "../imprevistos";
+import { imprevistosDe, pedidoDeAtraso, textoPedidoAtraso } from "../imprevistos";
 import { motivoOcupado, obraQueOcupa, tecnicosDoOficio } from "../preparacaoObra";
 import { materiaisPorFase } from "../obraOps";
 import type { ResumoEcNeg } from "../inventario/ponteNegocios";
@@ -68,6 +68,8 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
 
   // os imprevistos que esperam pela empresa (a proposta ao cliente, ou decidir depois de ele recusar) e os que esperam pelo cliente
   for (const im of imprevistosDe(d)) {
+    // 23/11: o pedido de atraso do técnico: o gestor aceita (o plano anda) ou recusa
+    if (pedidoDeAtraso(im)) { L.push({ id: `im-${im.id}`, nivel: "critico", t: textoPedidoAtraso(im), sub: "Aceite (o plano anda e o cliente é avisado) ou recuse (o plano fica igual).", acoes: [{ rot: "Decidir", a: { k: "imprevisto", id: im.id } }] }); continue; }
     if (im.estado === "aberto") L.push({ id: `im-${im.id}`, nivel: "critico", t: `Imprevisto: ${im.texto}`, sub: im.grav === "impede" ? "As tarefas afetadas estão paradas. Faça a proposta ao cliente, ou resolva sem custo." : `Atrasou ${dias(im.atraso ?? 1)}. Falta decidir se tem custo para o cliente.`, acoes: [{ rot: "Tratar", a: { k: "imprevisto", id: im.id } }] });
     if (im.estado === "recusado") L.push({ id: `im-${im.id}`, nivel: "critico", t: `O cliente não aceitou: ${im.texto}`, sub: "Decida: seguir sem esse trabalho, fazer outra proposta ou suspender.", acoes: [{ rot: "Decidir", a: { k: "imprevisto", id: im.id } }] });
     // 12/11: a adenda por disparar está no alerta das adendas, em cima

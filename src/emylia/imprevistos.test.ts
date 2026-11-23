@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { esquecerInventario, lerInventario } from "./inventario/loja";
 import { acoes, minhas, seed, type Estado, type Negocio } from "./motor";
 import { FINANCEIRO, OBRA, emFalta, type Grupo } from "./campos";
-import { paradasPor, tarefasAfetaveis } from "./imprevistos";
+import { paradasPor, tarefasAfetaveis, textoPedidoAtraso } from "./imprevistos";
+import { alertasDaObra } from "./estudioObra/alertasObra";
 import { receberTudo } from "./testeObra";
 import { fimDe } from "./ajustesPlano";
 import { adendaAssinada, registarFaturasAdenda } from "./testeAdenda";
@@ -125,6 +126,70 @@ describe("imprevistos a meio da obra", () => {
     // com o pagamento da adenda validado, a encomenda dela nasce no Inventário, ligada à adenda
     expect(lerInventario().ecs.some((e) => e.origin.ref === "CT 2026/1027 · A1" && !e.deleted)).toBe(true);
     expect(d.obra.ecsAjuste!.find((x) => x.adenda === n)?.n).toBe("EC-1027-A1");
+  });
+
+  // 23/11: o «Atrasa» do técnico (sem negocios.obra.planear) é um pedido ao gestor da obra, que o aceita (o plano anda) ou recusa
+  const datas = (p: { tasks: { dia: number; dur: number }[] }) => JSON.stringify(p.tasks.map((t) => [t.dia, t.dur]));
+  const pedir = () => {
+    const o = obra1022(), { A, d, p } = o, ti = tarefasAfetaveis(p).find((i) => p.tasks[i].dia > p.dia)!;
+    A.role("tecnico");
+    const id = A.registarImprevisto(d.id, { texto: "Cano de esgoto podre", onde: "", grav: "atrasa", tarefas: [ti], dias: 2 })!;
+    return { ...o, ti, id };
+  };
+  it("pedido de atraso do técnico: grava o imprevisto com os dias pedidos; o plano, o cliente e os avisos ficam iguais; o gestor vê-o", () => {
+    const { S, A, d, p } = obra1022();
+    const ti = tarefasAfetaveis(p).find((i) => p.tasks[i].dia > p.dia)!;
+    const antes = datas(p), alt = (d.obra.alteracoes ?? []).length, avisos = JSON.stringify(p.avisos ?? []);
+    A.role("tecnico");
+    const id = A.registarImprevisto(d.id, { texto: "Cano de esgoto podre", onde: "", grav: "atrasa", tarefas: [ti], dias: 2 })!;
+    expect(id).toBe("IM-1022-1");
+    expect(datas(p)).toBe(antes);
+    expect(p.tasks[ti].bloqueio).toBeUndefined();
+    const im = d.obra.imprevistos![0];
+    expect(im).toMatchObject({ grav: "atrasa", atraso: 2, pedido: "pendente", estado: "aberto", tarefas: [p.tasks[ti].nome] });
+    expect((d.obra.alteracoes ?? []).length).toBe(alt);
+    expect(JSON.stringify(p.avisos ?? [])).toBe(avisos);
+    expect(d.obra.diario!.at(-1)).toMatchObject({ k: "ocorrencia" });
+    expect(d.obra.diario!.at(-1)!.t).toMatch(/pede para atrasar 2 dias$/);
+    expect(textoPedidoAtraso(im)).toMatch(/ pede para atrasar 2 dias: Cano de esgoto podre$/);
+    expect(minhas(S, "operacoes").some((x) => x.d === d && x.p.t === textoPedidoAtraso(im))).toBe(true);
+    expect(alertasDaObra(d, S, new Map()).some((x) => x.t === textoPedidoAtraso(im))).toBe(true);
+  });
+  it("o gestor aceita o pedido: o plano anda os dias pedidos, o cliente é avisado e o técnico também; o imprevisto segue aberto", () => {
+    const { A, d, p, ti, id } = pedir();
+    const fim = fimDe(p.tasks);
+    A.role("tecnico");
+    expect(A.aceitarAtraso(d.id, id)).toBe(false);
+    expect(fimDe(p.tasks)).toBe(fim);
+    A.role("operacoes");
+    expect(A.aceitarAtraso(d.id, id)).toBe(true);
+    expect(fimDe(p.tasks)).toBe(fim + 2);
+    expect(d.obra.imprevistos![0]).toMatchObject({ pedido: "aceite", estado: "aberto", atraso: 2 });
+    expect(d.obra.alteracoes![0]).toMatchObject({ cliente: true });
+    expect(d.obra.alteracoes![0].avisoCliente).toMatch(/Atrasa alguns trabalhos\. A obra passa a acabar/);
+    if (p.tasks[ti].tec) expect(p.avisos!.some((a) => a.tec === p.tasks[ti].tec && /aceitou o atraso de 2 dias/.test(a.t))).toBe(true);
+    // não se aceita duas vezes
+    expect(A.aceitarAtraso(d.id, id)).toBe(false);
+    expect(fimDe(p.tasks)).toBe(fim + 2);
+  });
+  it("o gestor recusa o pedido: o plano fica igual, o cliente não é avisado, o imprevisto fecha com a decisão", () => {
+    const { S, A, d, p, id } = pedir();
+    const antes = datas(p), alt = (d.obra.alteracoes ?? []).length;
+    A.role("operacoes");
+    expect(A.recusarAtraso(d.id, id, "dá para fazer no prazo")).toBe(true);
+    expect(datas(p)).toBe(antes);
+    expect((d.obra.alteracoes ?? []).length).toBe(alt);
+    expect(d.obra.imprevistos![0]).toMatchObject({ pedido: "recusado", estado: "fechado", decisao: "Atraso recusado pelo gestor da obra · dá para fazer no prazo" });
+    expect(minhas(S, "operacoes").some((x) => x.d === d && /pede para atrasar/.test(x.p.t))).toBe(false);
+  });
+  it("«atrasa» de quem planeia continua igual: o plano anda logo, sem pedido", () => {
+    const { A, d, p } = obra1022();
+    const fim = fimDe(p.tasks), ti = tarefasAfetaveis(p).find((i) => p.tasks[i].dia > p.dia)!;
+    A.role("operacoes");
+    A.registarImprevisto(d.id, { texto: "Parede com humidade", onde: "", grav: "atrasa", tarefas: [ti], dias: 1 });
+    expect(fimDe(p.tasks)).toBe(fim + 1);
+    expect(d.obra.imprevistos![0].pedido).toBeUndefined();
+    expect(A.aceitarAtraso(d.id, d.obra.imprevistos![0].id)).toBe(false);
   });
 
   it("só a equipa da obra regista, com a obra em curso", () => {

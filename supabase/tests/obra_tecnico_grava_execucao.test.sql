@@ -1,4 +1,4 @@
--- 23/11 (20270125700000): o técnico de obra volta a gravar a execução e o imprevisto «impede» da sua tarefa.
+-- 23/11 (20270125700000 + 20270125800000): o técnico de obra volta a gravar a execução e o imprevisto «impede» da sua tarefa.
 -- SÓ na base do ramo RH (uetjghdkwbywbftedtth). Nunca na de produção.
 -- Obra OB-1009 (negócio 0d6314e6-…), técnicos Gustavo Silva (e9baeebd-…) e Lucas Andrade (623cd1a4-…); supervisor de obra e
 -- Org Admin com negocios.obra.planear. Tudo em BEGIN … ROLLBACK; cada caso corre num sub-bloco que acaba sempre em RAISE
@@ -9,6 +9,10 @@
 --   · O imprevisto do técnico (motor.registarImprevisto sem negocios.obra.planear): só o imprevisto, a paragem da tarefa dele e a
 --     ocorrência no diário; sem alterações/aviso ao cliente (essas continuam recusadas, como as datas, a validação, o «atrasa» e as
 --     tarefas de outros). As datas da tabela (ops_obra_tarefa) não se recusam ao técnico: ficam as da base (caso 14).
+--   · 23/11 (20270125800000, pedido de atraso): o «Atrasa» do técnico é um pedido (grav 'atrasa', pedido 'pendente', atraso = dias):
+--     passa nas tarefas dele sem mudar o plano (06); recusado em tarefas de outros, com aviso ao cliente, com as datas mudadas, com
+--     custo, sem dias ou sem gravidade (18-23); aceitar/recusar o pedido gravado é de quem planeia (24-26: o técnico não; o gestor sim,
+--     e ao aceitar o plano anda). Os casos 01-17 ficam iguais (regressão).
 BEGIN;
 CREATE TEMP TABLE _rel (n serial, caso text, conta text, esperado text, obtido text) ON COMMIT DROP;
 CREATE TEMP TABLE _contas (ordem int, conta text, email text, tec text, tecnico boolean, auth uuid) ON COMMIT DROP;
@@ -62,13 +66,18 @@ DECLARE
   n CONSTANT uuid := '0d6314e6-9ad2-4b65-b9b9-76a7431a9da3';
   ob jsonb := pg_temp.obra('0d6314e6-9ad2-4b65-b9b9-76a7431a9da3');
   e jsonb; c record; k int; v jsonb; ver text; mi int; oi int; vi int; im jsonb; alt jsonb; esp text; caso text; i int; ch text;
+  pe jsonb; dias jsonb; -- 23/11: o pedido de atraso e as datas do plano (dia, dur) antes
   CASOS CONSTANT text[] := ARRAY['01 gravar sem mudar', '02 execução: a sua tarefa em curso (estado Emylia + tabela)', '03 marcar como lido o seu aviso',
     '04 imprevisto «impede» na sua tarefa (o que o motor manda sem planear)', '05 o mesmo + aviso novo para si',
     '10 imprevisto com alteração/aviso ao cliente', '11 imprevisto «impede» na tarefa de outro', '12 imprevisto «atrasa» na sua tarefa',
     '13 replanear: o dia da sua tarefa', '14 datas da tarefa na tabela (passa, mas não se gravam)', '15 validar a sua tarefa', '16 só a alteração com aviso ao cliente',
-    '17 marcar como lido o aviso de outro'];
+    '17 marcar como lido o aviso de outro',
+    '06 pedido de atraso na sua tarefa (o plano não muda)', '18 pedido de atraso na tarefa de outro', '19 pedido de atraso com aviso ao cliente',
+    '20 pedido de atraso com as datas mudadas', '21 pedido de atraso com custo', '22 pedido de atraso sem dias', '23 imprevisto sem gravidade',
+    '24 aceitar o pedido gravado (o plano anda)', '25 recusar o pedido gravado', '26 aceitar o pedido sem aviso ao cliente'];
 BEGIN
   e := ob->'emylia';
+  dias := (SELECT jsonb_agg(jsonb_build_array(t->'dia', t->'dur') ORDER BY w) FROM jsonb_array_elements(e->'plano'->'tasks') WITH ORDINALITY x(t, w));
   FOR c IN SELECT * FROM _contas ORDER BY ordem LOOP
     -- a tarefa dele (por começar), a de outro e um aviso dele / de outro no plano
     mi := CASE WHEN c.tec = 'e9baeebd-8984-4d6d-bbfc-001bfc4140f4' OR NOT c.tecnico THEN 4 ELSE 3 END;
@@ -113,12 +122,44 @@ BEGIN
         WHEN '15' THEN
           v := jsonb_set(ob, ARRAY['emylia', 'plano', 'tasks', mi::text, 'exec'], '{"estado":"validada","validada":"hoje 10:00","envios":[{"k":"validada","q":"hoje 10:00"}]}');
         WHEN '16' THEN v := jsonb_set(ob, '{emylia,alteracoes}', jsonb_build_array(alt) || coalesce(e->'alteracoes', '[]'));
+        -- 23/11: o pedido de atraso (o que motor.registarImprevisto manda sem planear: o imprevisto e a ocorrência no diário)
+        WHEN '06', '18', '19', '20', '21', '22', '23' THEN
+          pe := im || '{"grav":"atrasa","atraso":2,"pedido":"pendente"}';
+          IF left(caso, 2) = '18' THEN pe := jsonb_set(pe, '{tarefas}', jsonb_build_array(e->'plano'->'tasks'->oi->>'nome')); END IF;
+          IF left(caso, 2) = '21' THEN pe := pe || '{"custo":150}'; END IF;
+          IF left(caso, 2) = '22' THEN pe := pe - 'atraso'; END IF;
+          IF left(caso, 2) = '23' THEN pe := pe - 'grav'; END IF;
+          v := jsonb_set(ob, '{emylia,imprevistos}', coalesce(e->'imprevistos', '[]') || jsonb_build_array(pe));
+          v := jsonb_set(v, '{emylia,diario}', coalesce(e->'diario', '[]') || '[{"q":"hoje 10:00","quem":"Teste","t":"Imprevisto: teste · pede para atrasar 2 dias","k":"ocorrencia"}]');
+          IF left(caso, 2) = '19' THEN v := jsonb_set(v, '{emylia,alteracoes}', jsonb_build_array(alt) || coalesce(e->'alteracoes', '[]')); END IF;
+          IF left(caso, 2) = '20' THEN v := jsonb_set(v, ARRAY['emylia', 'plano', 'tasks', mi::text, 'dur'], to_jsonb((e->'plano'->'tasks'->mi->>'dur')::numeric + 2)); END IF;
+          IF left(caso, 2) = '06' THEN
+            ver := format($v$SELECT CASE WHEN (SELECT jsonb_agg(jsonb_build_array(t->'dia', t->'dur') ORDER BY w) FROM jsonb_array_elements(o.estado_emylia->'plano'->'tasks') WITH ORDINALITY x(t, w)) = %L::jsonb
+                                         THEN 'plano igual' ELSE 'plano mudou' END FROM ops_obra o WHERE o.negocio_id = %L$v$, dias, n);
+          END IF;
+        -- 23/11: aceitar/recusar o pedido já gravado (a base com o pedido; repõe-se depois do caso)
+        WHEN '24', '25', '26' THEN
+          pe := im || '{"grav":"atrasa","atraso":2,"pedido":"pendente"}';
+          UPDATE ops_obra SET estado_emylia = jsonb_set(e, '{imprevistos}', coalesce(e->'imprevistos', '[]') || jsonb_build_array(pe)) WHERE negocio_id = n;
+          v := jsonb_set(ob, '{emylia,imprevistos}', coalesce(e->'imprevistos', '[]') || jsonb_build_array(pe || CASE WHEN left(caso, 2) = '25'
+                 THEN '{"pedido":"recusado","estado":"fechado","decisao":"Atraso recusado pelo gestor da obra"}'::jsonb ELSE '{"pedido":"aceite"}'::jsonb END));
+          IF left(caso, 2) IN ('24', '26') THEN
+            v := jsonb_set(v, ARRAY['emylia', 'plano', 'tasks', mi::text, 'dur'], to_jsonb((e->'plano'->'tasks'->mi->>'dur')::numeric + 2));
+            v := jsonb_set(v, '{emylia,diario}', coalesce(e->'diario', '[]') || '[{"q":"hoje 10:00","quem":"Teste","t":"Atraso de 2 dias aceite","k":"nota"}]');
+          END IF;
+          IF left(caso, 2) = '24' THEN v := jsonb_set(v, '{emylia,alteracoes}', jsonb_build_array(alt) || coalesce(e->'alteracoes', '[]')); END IF;
+          ver := format($v$SELECT CASE WHEN (SELECT jsonb_agg(jsonb_build_array(t->'dia', t->'dur') ORDER BY w) FROM jsonb_array_elements(o.estado_emylia->'plano'->'tasks') WITH ORDINALITY x(t, w)) = %L::jsonb
+                                       THEN 'plano igual' ELSE 'plano andou' END FROM ops_obra o WHERE o.negocio_id = %L$v$, dias, n);
       END CASE;
       -- o técnico só passa nos casos 01-05; quem planeia passa em todos
       esp := CASE WHEN left(caso, 2) = '14' THEN CASE WHEN c.tecnico THEN 'PASSA data ignorada' ELSE 'PASSA data gravada' END
+                  WHEN left(caso, 2) = '06' THEN 'PASSA plano igual'
+                  WHEN left(caso, 2) IN ('24', '26') AND NOT c.tecnico THEN 'PASSA plano andou'
+                  WHEN left(caso, 2) = '25' AND NOT c.tecnico THEN 'PASSA plano igual'
                   WHEN NOT c.tecnico OR left(caso, 1) = '0' THEN 'PASSA' ELSE 'CT001' END;
       INSERT INTO _rel (caso, conta, esperado, obtido)
       VALUES (caso, c.conta, esp, pg_temp.tentar(c.auth, format('SELECT public.obra_guardar_negocio(%L,%L,%L)::text', o, n, v), ver));
+      IF left(caso, 2) IN ('24', '25', '26') THEN UPDATE ops_obra SET estado_emylia = e WHERE negocio_id = n; END IF;
     END LOOP;
   END LOOP;
 END $t$;

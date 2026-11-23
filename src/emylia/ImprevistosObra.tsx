@@ -1,6 +1,7 @@
 // Os imprevistos a meio da obra (21/10/2026), no ecrã (a lógica está em imprevistos.ts e no motor):
 // · RegistarImprevisto: o técnico (no Hoje) ou o gestor (na página da obra) dizem o que encontraram, onde, com fotografia, a gravidade e as
 //   tarefas afetadas. Uma só porta para os problemas: «só avisar o responsável» fica no diário, sem mexer no plano.
+//   23/11: o técnico (sem negocios.obra.planear) só escolhe as tarefas dele e o «Atrasa» dele é um pedido que o gestor aceita ou recusa.
 // · ImprevistosNaObra: o gestor vê cada imprevisto com UM próximo passo: fazer a proposta ao cliente, esperar pela resposta, ou decidir
 //   quando o cliente não aceitou. A proposta é uma adenda (serviços do Catálogo e/ou uma linha livre com horas, preço e materiais).
 import { useMemo, useRef, useState } from "react";
@@ -18,7 +19,7 @@ import { nomeCurtoTarefa } from "./obraOps";
 import { EstadoFotos, useFotosAJuntar } from "./fotosDaObra";
 import { diasAdenda, estadoAdenda, faturasAdenda, nomeParcela, precoSugeridoLivre, previsaoLinha, totaisAdenda, totaisLinhas, type LinhaAdenda } from "./adendas";
 import { AcoesAdenda } from "./TrabalhosAMais";
-import { DECISOES, GRAVIDADES, imprevistosDe, paradasPor, tarefasAfetaveis, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
+import { DECISOES, gravidadesPara, imprevistosDe, paradasPor, pedidoDeAtraso, tarefasAfetaveis, tarefasAfetaveisDe, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
 
 const chip = (on: boolean) => cn("inline-flex min-h-11 items-center gap-1.5 rounded-full border px-4 text-[15px] transition-colors", on ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-foreground/40");
 const ENTRADA = "h-12 w-full rounded-xl border border-input bg-background px-3 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring";
@@ -30,9 +31,12 @@ type Escolha = Gravidade | "aviso";
 export interface InicialImprevisto { tipo?: "material"; texto?: string }
 
 export function RegistarImprevisto({ ctx, d, ti, fechar, inicial }: { ctx: Ctx; d: Negocio; ti?: number; fechar: () => void; inicial?: InicialImprevisto }) {
-  const { A, run } = ctx;
+  const { S, A, run } = ctx;
   const p = d.obra.plano!;
-  const afetaveis = tarefasAfetaveis(p);
+  // 23/11: sem negocios.obra.planear (o técnico no Hoje dele) só as tarefas atribuídas a ele (as da tarefa aberta, ou as do técnico
+  // escolhido): o servidor recusa um imprevisto em tarefas de outros; e «Atrasa» passa a ser um pedido ao gestor da obra
+  const planeia = podeNeg(S.role, "obra.planear");
+  const afetaveis = planeia ? tarefasAfetaveis(p) : tarefasAfetaveisDe(p, (ti != null ? p.tasks[ti]?.tec : null) ?? S.tec);
   const material = inicial?.tipo === "material";
   const [texto, setTexto] = useState(inicial?.texto ?? "");
   const [onde, setOnde] = useState("");
@@ -76,7 +80,7 @@ export function RegistarImprevisto({ ctx, d, ti, fechar, inicial }: { ctx: Ctx; 
       <fieldset>
         <legend className="text-[15px] font-medium">Que efeito tem?</legend>
         <div className="mt-2 grid gap-2 sm:grid-cols-3">
-          {[...GRAVIDADES, { k: "aviso" as const, t: "Só avisar", sub: "Fica no diário; o plano não muda" }].map((g) => (
+          {[...gravidadesPara(planeia), { k: "aviso" as const, t: "Só avisar", sub: "Fica no diário; o plano não muda" }].map((g) => (
             <button key={g.k} type="button" aria-pressed={grav === g.k} onClick={() => setGrav(g.k)}
               className={cn("min-h-11 rounded-xl border p-3 text-left transition-colors", grav === g.k ? "border-primary bg-primary/[0.06] ring-1 ring-primary" : "border-input hover:border-foreground/40")}>
               <span className="block text-[15px] font-medium">{g.t}</span><span className="block text-sm text-muted-foreground">{g.sub}</span>
@@ -97,7 +101,7 @@ export function RegistarImprevisto({ ctx, d, ti, fechar, inicial }: { ctx: Ctx; 
       )}
       {grav === "atrasa" && (
         <div className="flex flex-wrap items-center gap-3">
-          <span className="text-[15px] font-medium">Atrasa</span>
+          <span className="text-[15px] font-medium">{planeia ? "Atrasa" : "Pedir para atrasar"}</span>
           <span role="group" aria-label="Dias de atraso" className="inline-flex items-center rounded-lg border border-input">
             <button type="button" aria-label="Menos um dia" disabled={dias <= 1} onClick={() => setDias(dias - 1)} className="grid h-11 w-11 place-items-center hover:bg-muted disabled:opacity-40"><Minus className="h-4 w-4" /></button>
             <span className="min-w-[4.5rem] text-center text-[15px] tabular-nums">{dias} {dias === 1 ? "dia" : "dias"}</span>
@@ -108,7 +112,7 @@ export function RegistarImprevisto({ ctx, d, ti, fechar, inicial }: { ctx: Ctx; 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-end">
         {falta.length > 0 && <p className="text-sm text-muted-foreground sm:mr-auto">Falta {falta.join(" e ")}.</p>}
         <Button variant="ghost" size="lg" onClick={fechar}>Cancelar</Button>
-        <Button size="lg" disabled={falta.length > 0} onClick={enviar}>{material ? "Avisar o gestor da obra" : grav === "aviso" ? "Avisar o responsável" : "Registar o imprevisto"}</Button>
+        <Button size="lg" disabled={falta.length > 0} onClick={enviar}>{material ? "Avisar o gestor da obra" : grav === "aviso" ? "Avisar o responsável" : grav === "atrasa" && !planeia ? "Pedir ao gestor da obra" : "Registar o imprevisto"}</Button>
       </div>
     </div>
   );
@@ -134,6 +138,8 @@ function CartaoImprevisto({ ctx, d, im, porDisparar }: { ctx: Ctx; d: Negocio; i
   // 9/11 (Lote 1, F): propor e decidir mudam um imprevisto gravado: o servidor pede também negocios.obra.planear (como A.proporImprevisto)
   const pode = podeNeg(S.role, "obra.imprevistos") && podeNeg(S.role, "obra.planear");
   const par = paradasPor(d.obra.plano, im.id), a = im.adenda ? d.adendas?.find((x) => x.n === im.adenda) : undefined;
+  // 23/11: o pedido de atraso do técnico espera pelo gestor (aceitar: o plano anda; recusar: fica igual) antes da proposta ao cliente
+  const pedido = pedidoDeAtraso(im), dt = `${im.atraso ?? 1} ${im.atraso === 1 ? "dia" : "dias"}`;
   return (
     <article aria-label={`Imprevisto ${im.id}`} className={cn("rounded-xl border p-4", im.estado === "aberto" || im.estado === "recusado" ? "border-destructive/40 bg-destructive/[0.04]" : "border-border")}>
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -141,10 +147,10 @@ function CartaoImprevisto({ ctx, d, im, porDisparar }: { ctx: Ctx; d: Negocio; i
           {im.foto && <Miniaturas fotos={[im.foto]} tam="h-14 w-20" />}
           <div className="min-w-0">
             <p className="text-base font-semibold">{im.texto}</p>
-            <p className="text-sm text-muted-foreground">{im.quem.split(" ")[0]} · {im.q}{im.onde ? ` · ${im.onde}` : ""} · {im.grav === "impede" ? (par.length ? `parad${par.length === 1 ? "a" : "as"}: ${par.map((t) => nomeCurtoTarefa(t.nome)).join(", ")}` : "impedia de continuar") : `atrasou ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"}`}</p>
+            <p className="text-sm text-muted-foreground">{im.quem.split(" ")[0]} · {im.q}{im.onde ? ` · ${im.onde}` : ""} · {im.grav === "impede" ? (par.length ? `parad${par.length === 1 ? "a" : "as"}: ${par.map((t) => nomeCurtoTarefa(t.nome)).join(", ")}` : "impedia de continuar") : pedido ? `pede para atrasar ${dt} · ${im.tarefas.map(nomeCurtoTarefa).join(", ")}` : `atrasou ${dt}`}</p>
           </div>
         </div>
-        <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-sm font-medium", ESTADO[im.estado][1])}>{im.estado === "proposta" && a?.estado === "rascunho" ? "adenda por disparar" : ESTADO[im.estado][0]}</span>
+        <span className={cn("shrink-0 rounded-full px-2.5 py-0.5 text-sm font-medium", ESTADO[im.estado][1])}>{pedido ? "pedido de atraso" : im.estado === "proposta" && a?.estado === "rascunho" ? "adenda por disparar" : ESTADO[im.estado][0]}</span>
       </div>
 
       {/* 19/11 (auditoria): «Faltou material» é da empresa: o gestor encomenda o que falta e retoma a tarefa (o cliente não é chamado) */}
@@ -154,7 +160,16 @@ function CartaoImprevisto({ ctx, d, im, porDisparar }: { ctx: Ctx; d: Negocio; i
             : <p className="text-sm text-muted-foreground">O gestor da obra encomenda o que falta e retoma a tarefa.</p>}
         </div>
       )}
-      {im.estado === "aberto" && im.tipo !== "material" && !propor && (
+      {pedido && (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          {pode ? <>
+            <Button className="min-h-11" onClick={go(() => A.aceitarAtraso(d.id, im.id))}>Aceitar o atraso</Button>
+            <Button variant="outline" className="min-h-11" onClick={go(() => A.recusarAtraso(d.id, im.id))}>Recusar</Button>
+            <p className="w-full text-sm text-muted-foreground">Aceitar: o plano anda {dt} e o cliente é avisado. Recusar: o plano fica igual.</p>
+          </> : <p className="text-sm text-muted-foreground">O gestor da obra decide se o plano anda.</p>}
+        </div>
+      )}
+      {im.estado === "aberto" && im.tipo !== "material" && !pedido && !propor && (
         <div className="mt-3 flex flex-wrap items-center gap-3">
           {pode ? <Button className="min-h-11" onClick={() => setPropor(true)}>Fazer a proposta ao cliente</Button> : <p className="text-sm text-muted-foreground">O gestor da obra faz a proposta ao cliente.</p>}
           {pode && <button type="button" onClick={go(() => A.decidirImprevisto(d.id, im.id, "seguir", "sem custo para o cliente"))} className="min-h-11 text-sm font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Resolver sem custo para o cliente</button>}

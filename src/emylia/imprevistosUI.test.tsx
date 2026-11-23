@@ -90,4 +90,68 @@ describe("imprevistos no ecrã", () => {
     expect(J).toHaveLength(1);
     expect(J[0]).toMatchObject({ t: "Canalização: 1 → 2 dias", fimAntes: "qua 22 out", fimDepois: "qui 23 out", n: 2, motivo: "Imprevisto na obra · Mais rápido do que previsto" });
   });
+
+  // 23/11: o «Atrasa» do técnico é um pedido ao gestor da obra; a lista de tarefas do técnico só tem as dele
+  const datas = (p: { tasks: { dia: number; dur: number }[] }) => JSON.stringify(p.tasks.map((t) => [t.dia, t.dur]));
+  it("o técnico só vê as suas tarefas e «Atrasa» passa a «Pedir para atrasar»: o pedido vai ao gestor e o plano não muda", () => {
+    const { S, A, d, p } = obra();
+    A.role("tecnico");
+    const af = (t: (typeof p.tasks)[number]) => t.exec?.estado !== "validada" && t.corrige == null;
+    // uma tarefa dele com outra tarefa afetável de outro técnico (a que não pode aparecer)
+    const ti = p.tasks.findIndex((t) => af(t) && !!t.tec && p.tasks.some((o) => af(o) && o.tec !== t.tec));
+    expect(ti).toBeGreaterThanOrEqual(0);
+    const antes = datas(p);
+    render(<Montar S={S} A={A}>{(c) => <RegistarImprevisto ctx={c} d={d} ti={ti} fechar={() => {}} />}</Montar>);
+    const tarefas = within(screen.getByRole("group", { name: "Registar imprevisto" })).getByText("Que tarefas afeta?").parentElement!;
+    const nomes = within(tarefas).getAllByRole("button").map((b) => b.textContent);
+    expect(nomes.length).toBeGreaterThan(0);
+    for (const n of nomes) expect(p.tasks.find((t) => t.nome === n)?.tec).toBe(p.tasks[ti].tec);
+    expect(screen.queryByText("Atrasa")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /Pedir para atrasar/ }));
+    expect(screen.getByText("O gestor da obra decide; o plano só muda se ele aceitar")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Mais um dia" }));
+    fireEvent.change(screen.getByLabelText("O que encontrou?"), { target: { value: "Cano de esgoto podre" } });
+    fireEvent.click(screen.getByRole("button", { name: "Pedir ao gestor da obra" }));
+    expect(d.obra.imprevistos![0]).toMatchObject({ grav: "atrasa", atraso: 2, pedido: "pendente", estado: "aberto" });
+    expect(datas(p)).toBe(antes);
+  });
+  it("quem planeia continua a ver «Atrasa» e todas as tarefas afetáveis", () => {
+    const { S, A, d, p } = obra();
+    A.role("operacoes");
+    render(<Montar S={S} A={A}>{(c) => <RegistarImprevisto ctx={c} d={d} fechar={() => {}} />}</Montar>);
+    expect(screen.getByText("O plano anda os dias que indicar; o cliente é avisado")).toBeTruthy();
+    const tarefas = screen.getByText("Que tarefas afeta?").parentElement!;
+    expect(within(tarefas).getAllByRole("button").length).toBe(p.tasks.filter((t) => t.exec?.estado !== "validada" && t.corrige == null).length);
+  });
+  it("o pedido no cartão do imprevisto: o técnico vê que o gestor decide; o gestor aceita e o plano anda", () => {
+    const { S, A, d, p } = obra();
+    const ti = p.tasks.findIndex((t) => t.dia > p.dia && t.corrige == null);
+    A.role("tecnico");
+    A.registarImprevisto(d.id, { texto: "Cano de esgoto podre", onde: "", grav: "atrasa", tarefas: [ti], dias: 2 });
+    const um = render(<Montar S={S} A={A}>{(c) => <ImprevistosNaObra ctx={c} d={d} />}</Montar>);
+    expect(screen.getByText("O gestor da obra decide se o plano anda.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Aceitar o atraso" })).toBeNull();
+    um.unmount();
+    A.role("operacoes");
+    const antes = datas(p);
+    render(<Montar S={S} A={A}>{(c) => <ImprevistosNaObra ctx={c} d={d} />}</Montar>);
+    expect(screen.getByText("pedido de atraso")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Fazer a proposta ao cliente" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Aceitar o atraso" }));
+    expect(datas(p)).not.toBe(antes);
+    expect(d.obra.imprevistos![0].pedido).toBe("aceite");
+    expect(screen.getByRole("button", { name: "Fazer a proposta ao cliente" })).toBeTruthy();
+  });
+  it("o gestor recusa o pedido: o plano fica igual e o imprevisto fecha", () => {
+    const { S, A, d, p } = obra();
+    const ti = p.tasks.findIndex((t) => t.dia > p.dia && t.corrige == null);
+    A.role("tecnico");
+    A.registarImprevisto(d.id, { texto: "Cano de esgoto podre", onde: "", grav: "atrasa", tarefas: [ti], dias: 2 });
+    A.role("operacoes");
+    const antes = datas(p);
+    render(<Montar S={S} A={A}>{(c) => <ImprevistosNaObra ctx={c} d={d} />}</Montar>);
+    fireEvent.click(screen.getByRole("button", { name: "Recusar" }));
+    expect(datas(p)).toBe(antes);
+    expect(d.obra.imprevistos![0]).toMatchObject({ pedido: "recusado", estado: "fechado" });
+  });
 });

@@ -29,7 +29,7 @@ import {
 } from "./adendas";
 import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema, livresDoProblema, novoIdProblema, problemaDaAdenda, problemaDaMensagem, problemasPorTratar, tarefaDoProblema, textoRespostaComOrcamento,
   textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
-import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
+import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, pedidoDeAtraso, textoPedidoAtraso, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
 import { comFaturaDaParcela, faltaParaAuto, nomeDaParcela, parcelaDoArranquePorPagar, parcelasDoContrato } from "./parcelas";
 import { agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, FALTA_EC_AUTOMATICA, ecNoServidor, marcarEcNoServidor, retificacaoAceite, faltaMedirTexto, medicoesDe, supervisorDasMedidas, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { pedirPainelObra } from "./estudioObra/painelPedido";
@@ -1673,6 +1673,9 @@ export function minhas(S: Estado, role: Papel) {
     for (const im of imprevistosPorTratar(d)) {
       if (gestor) L.push({ d, p: im.tipo === "material" && im.estado === "aberto"
         ? { t: `Faltou material · ${im.tarefas.join(", ")}`, sub: `${im.texto} (${im.quem}). Encomende o que falta e retome a tarefa.`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" }
+        // 23/11: o pedido de atraso do técnico: o gestor aceita (o plano anda) ou recusa, no imprevisto da obra
+        : pedidoDeAtraso(im)
+        ? { t: textoPedidoAtraso(im), sub: `${im.tarefas.join(", ")}. Aceite (o plano anda e o cliente é avisado) ou recuse (o plano fica igual).`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" }
         : im.estado === "aberto"
         ? { t: `Imprevisto · ${im.texto}`, sub: `${im.grav === "impede" ? "Tarefas paradas" : `O plano andou ${im.atraso ?? 0} ${im.atraso === 1 ? "dia" : "dias"}`}. Faça a proposta ao cliente.`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" }
         : { t: `Imprevisto · o cliente não aceitou`, sub: `${im.texto} · decida o que fazer`, btn: "Abrir a obra", act: "abrirPlano", who: "operacoes" } });
@@ -4461,6 +4464,17 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const fotos = (m.fotos ?? (m.foto ? [m.foto] : [])).slice(0, 4);
       const im: Imprevisto = { id: novoIdImprevisto(d), q: agora(), dia: p.dia, quem, texto, onde: m.onde.trim(), foto: fotos[0] ?? m.foto, grav: m.grav, tarefas: m.tarefas.map((ti) => p.tasks[ti]?.nome).filter(Boolean), estado: "aberto",
         ...(fotos.length > 1 ? { fotos } : {}), ...(m.custo && m.custo > 0 ? { custo: Math.round(m.custo * 100) / 100 } : {}), ...(m.tipo ? { tipo: m.tipo } : {}) };
+      // 23/11: sem negocios.obra.planear (o técnico no Hoje dele), «Atrasa» é um PEDIDO ao gestor da obra: grava-se o imprevisto com os
+      // dias pedidos, sem mexer no plano nem avisar o cliente (o servidor recusaria, CT001); o gestor aceita (A.aceitarAtraso) ou recusa.
+      if (m.grav === "atrasa" && m.tipo !== "material" && !podeNeg(S.role, "obra.planear")) {
+        const dias = Math.max(1, Math.round(m.dias ?? 1)), dt = `${dias} ${dias === 1 ? "dia" : "dias"}`;
+        Object.assign(im, { atraso: dias, pedido: "pendente" as const });
+        (d.obra.imprevistos ??= []).push(im);
+        (d.obra.diario ??= []).push({ q: agora(), quem, t: `Imprevisto${im.onde ? " (" + im.onde + ")" : ""}: ${texto} · pede para atrasar ${dt}`, k: "ocorrencia", ...(fotos.length ? { fotos } : {}) });
+        log(d, `Imprevisto ${im.id} registado por ${quem}: ${texto} · pede para atrasar ${dt} (${im.tarefas.join(", ")}) · o gestor da obra decide`, "w");
+        avisar({ msg: "Pedido de atraso enviado ao gestor da obra", sub: "O plano só muda se ele aceitar", kind: "ok" });
+        return im.id;
+      }
       let fim: { antes: string; depois: string } | undefined;
       if (m.grav === "impede") bloquear(p, m.tarefas, im.id);
       else {
@@ -4530,6 +4544,39 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const foi = A.verificarEnviarAdenda(id, n);
       log(d, `Imprevisto ${im.id}: proposta ${n} ${foi ? "enviada ao cliente" : "por enviar (margem abaixo do mínimo)"}`, foi ? "a" : "w");
       return n;
+    },
+    /** 23/11: o gestor da obra aceita o pedido de atraso do técnico: o plano anda os dias pedidos (como o «Atrasa» de quem planeia), o
+     *  cliente é avisado e os técnicos das tarefas também. O imprevisto fica aberto (falta decidir se tem custo para o cliente). */
+    aceitarAtraso(id: number, imId: string): boolean {
+      // como decidirImprevisto: mudar um imprevisto gravado pede negocios.obra.imprevistos e negocios.obra.planear (o servidor também)
+      if (!exigePerm("obra.imprevistos") || !exigePerm("obra.planear")) return false;
+      const d = deal(id), p = d.obra.plano, im = d.obra.imprevistos?.find((x) => x.id === imId);
+      if (!im || !p || !pedidoDeAtraso(im)) return false;
+      if (p.estado !== "em curso") { avisar({ msg: "Só com a obra em curso", kind: "bad" }); return false; }
+      const tis = im.tarefas.map((n) => p.tasks.findIndex((t) => t.nome === n && t.exec?.estado !== "validada")).filter((ti) => ti >= 0);
+      const dias = Math.max(1, Math.round(im.atraso ?? 1)), dt = `${dias} ${dias === 1 ? "dia" : "dias"}`;
+      const r = atrasar(p, tis, dias), fim = { antes: rotuloDia(p, r.fimAntes - 1), depois: rotuloDia(p, r.fimDepois - 1) };
+      const quem = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome;
+      Object.assign(im, { atraso: dias, pedido: "aceite" as const });
+      for (const ti of tis) if (p.tasks[ti]?.tec) avisarTecnico(p, ti, `${p.tasks[ti].nome}: o gestor aceitou o atraso de ${dt} (${im.texto})`, agora());
+      (d.obra.alteracoes ??= []).unshift({ q: agora(), dia: p.dia, quem, t: `Imprevisto: ${im.texto}`, motivo: MOTIVO_IMPREVISTO, fimAntes: fim.antes, fimDepois: fim.depois, cliente: true, avisoCliente: avisoClienteImprevisto(im, fim) });
+      (d.obra.diario ??= []).push({ q: agora(), quem, t: `Atraso de ${dt} aceite (pedido por ${im.quem}): ${im.texto}`, k: "nota" });
+      log(d, `Imprevisto ${im.id}: ${quem} aceitou o atraso de ${dt} pedido por ${im.quem} · o plano anda`, "w");
+      avisar({ msg: "Atraso aceite", sub: `O plano andou ${dt} · o cliente foi avisado`, kind: "ok" });
+      return true;
+    },
+    /** 23/11: o gestor da obra recusa o pedido de atraso do técnico: o plano fica igual, o cliente não é avisado; o imprevisto fecha com a decisão. */
+    recusarAtraso(id: number, imId: string, nota = ""): boolean {
+      if (!exigePerm("obra.imprevistos") || !exigePerm("obra.planear")) return false;
+      const d = deal(id), p = d.obra.plano, im = d.obra.imprevistos?.find((x) => x.id === imId);
+      if (!im || !pedidoDeAtraso(im)) return false;
+      const quem = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome;
+      // o técnico das tarefas fica a saber (no Hoje dele) que o plano não muda
+      if (p) for (const n of im.tarefas) { const ti = p.tasks.findIndex((t) => t.nome === n); if (ti >= 0 && p.tasks[ti].tec) avisarTecnico(p, ti, `${n}: o gestor não aceitou o atraso; o plano fica igual (${im.texto})`, agora()); }
+      Object.assign(im, { pedido: "recusado" as const, estado: "fechado" as const, decisao: `Atraso recusado pelo gestor da obra${nota.trim() ? ` · ${nota.trim()}` : ""}` });
+      log(d, `Imprevisto ${im.id}: ${quem} recusou o atraso de ${im.atraso ?? 1} ${im.atraso === 1 ? "dia" : "dias"} pedido por ${im.quem}${nota.trim() ? ` · ${nota.trim()}` : ""}`);
+      avisar({ msg: "Pedido de atraso recusado", sub: "O plano fica como estava", kind: "ok" });
+      return true;
     },
     /** Com a proposta recusada (ou sem proposta), o gestor decide: seguir sem o trabalho, fazer outra proposta ou suspender a obra. */
     decidirImprevisto(id: number, imId: string, k: Decisao, nota = "") {
