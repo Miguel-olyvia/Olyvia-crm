@@ -696,6 +696,8 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   const barra = (ti: number, top: number) => {
     const t = p.tasks[ti], n = R ? R.plano.tasks[ti] : t, v = estadoVivo(t, p), b = p.base?.[ti];
     const atraso = diasDeAtraso(t, p), a = arrasto?.ti === ti ? arrasto : null;
+    // 23/11 (revisão: «P…», «T…»): na vista Gantt, o nome vai à direita da barra quando não cabe nela
+    const cabe = vista !== "gantt" || nomeCurtoTarefa(t.nome).length * 6.4 + 26 <= n.dur * COL - 4;
     return (
       <Fragment key={ti}>
         {b && (b.dia !== t.dia || b.dur !== t.dur) && <div aria-hidden="true" title="Previsto no orçamento" className="absolute h-[3px] rounded-full bg-foreground/30" style={{ left: b.dia * COL + 4, width: Math.max(8, b.dur * COL - 8), top: top + ALTO + 3 }} />}
@@ -704,7 +706,8 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
           <div aria-hidden="true" className="absolute flex items-center justify-end rounded-r-lg bg-[repeating-linear-gradient(135deg,hsl(var(--destructive)/0.35)_0_5px,hsl(var(--destructive)/0.15)_5px_10px)] pr-1 text-[11px] font-bold text-destructive"
             style={{ left: (t.dia + t.dur) * COL - 2, width: atraso * COL, top, height: ALTO }}>+{atraso}</div>
         )}
-        <Barra t={t} n={n} v={v} p={p} sel={sel === ti || aLigar?.alvo === ti} mudou={mudou(ti)} abrir={() => { if (Date.now() - largouEm.current > 350) abrir(ti); }} reduzir={reduzir} top={top} critica={critico.has(ti)} col={COL} alto={ALTO} largo={vista === "tecnicos"}
+        {!cabe && <span aria-hidden="true" className="pointer-events-none absolute z-[2] whitespace-nowrap text-xs font-medium text-foreground/80" style={{ left: (n.dia + n.dur) * COL + (ligar && !R ? 22 : 6), top: top + ALTO / 2 - 8 }}>{nomeCurtoTarefa(t.nome)}</span>}
+        <Barra semTexto={!cabe} t={t} n={n} v={v} p={p} sel={sel === ti || aLigar?.alvo === ti} mudou={mudou(ti)} abrir={() => { if (Date.now() - largouEm.current > 350) abrir(ti); }} reduzir={reduzir} top={top} critica={critico.has(ti)} col={COL} alto={ALTO} largo={vista === "tecnicos"}
           arrasto={a} mexe={!R && podeMexer(ti)} pegar={(e, tipo) => pegar(e, ti, tipo)} />
         {/* 23/11: o pegador para ligar (aparece ao passar o rato na linha, ou com a tarefa escolhida) */}
         {ligar && !R && vista === "gantt" && (
@@ -826,7 +829,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
                   <div key={ti} className={cn("group flex border-b border-border last:border-b-0", sel === ti && "bg-primary/[0.04]", aLigar?.alvo === ti && "bg-primary/[0.08]")} onPointerEnter={() => setHov(ti)} onPointerLeave={() => setHov((h) => (h === ti ? null : h))}>
                     <button type="button" onClick={() => abrir(ti)} className={cn("sticky left-0 z-10 flex shrink-0 items-center gap-2 bg-card px-3 py-1.5 text-left hover:bg-muted/60 sm:px-4", rotulo)}>
                       <span className="hidden sm:block"><AvatarTec id={t.tec} tam="h-7 w-7" /></span>
-                      <span className="min-w-0" title={t.nome}><span className="block truncate text-sm font-medium">{nomeCurtoTarefa(t.nome)}</span><span className={cn("block truncate text-xs", v === "atrasada" || v === "corrigir" ? "font-medium text-destructive" : "text-muted-foreground")}>{rotuloVivo(t, p)}{atraso ? ` · +${atraso}` : ""}</span></span>
+                      <span className="min-w-0" title={t.nome}><span className="block truncate text-sm font-medium">{nomeCurtoTarefa(t.nome)}</span>{(v !== "por começar" || atraso > 0) && <span className={cn("block truncate text-xs", v === "atrasada" || v === "corrigir" ? "font-medium text-destructive" : "text-muted-foreground")}>{rotuloVivo(t, p)}{atraso ? ` · +${atraso}` : ""}</span>}</span>
                     </button>
                     <div className="relative" data-linha={ti} style={{ width: dias.length * COL, height: LINHA }}>{fundo()}{barra(ti, 7)}</div>
                   </div>
@@ -885,9 +888,10 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   );
 }
 
-function Barra({ t, n, v, p, sel, mudou, abrir, reduzir, top, arrasto, mexe, pegar, critica, col: COL = COL_GANTT, alto = 28, largo = false }: {
+function Barra({ t, n, v, p, sel, mudou, abrir, reduzir, top, arrasto, mexe, pegar, critica, col: COL = COL_GANTT, alto = 28, largo = false, semTexto = false }: {
   t: Tarefa; n: Tarefa; v: EstadoVivo; p: Plano; sel: boolean; mudou: boolean; abrir: () => void; reduzir: boolean; top: number; critica?: boolean;
   /** 23/11: a largura de um dia e a altura da barra (a vista por técnico é mais larga e o nome pode ir em duas linhas) */ col?: number; alto?: number; largo?: boolean;
+  /** 23/11: o nome não cabe e vai à direita da barra */ semTexto?: boolean;
   arrasto: Arrasto | null; mexe: boolean; pegar: (e: React.PointerEvent, tipo: "mover" | "durar") => void;
 }) {
   const cor = COR_FASE[t.fase ?? 1];
@@ -914,7 +918,7 @@ ${ROTULO_VIVO[v]} · ${n.dur} ${n.dur === 1 ? "dia" : "dias"}${dataIni ? ` a par
       {I && <I className="relative h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
       {/* na vista por técnico, uma barra de um dia é só para o nome (o caminho crítico fica na dica e no rótulo) */}
       {critica && !I && !(largo && n.dur < 2) && <Route className="relative h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden="true" />}
-      <span lang="pt-PT" className={cn("relative drop-shadow-sm", largo ? "line-clamp-2 whitespace-normal hyphens-auto text-[11px] leading-tight" : "truncate")}>{nomeCurtoTarefa(t.nome)}</span>
+      {!semTexto && <span lang="pt-PT" className={cn("relative drop-shadow-sm", largo ? "line-clamp-2 whitespace-normal hyphens-auto text-[11px] leading-tight" : "truncate")}>{nomeCurtoTarefa(t.nome)}</span>}
       {arrasto && passos !== 0 && <span className="relative ml-auto shrink-0 rounded bg-black/25 px-1 text-[10px] tabular-nums">{passos > 0 ? "+" : ""}{passos}</span>}
       {mexe && <span onPointerDown={(e) => pegar(e, "durar")} aria-hidden="true" className="absolute inset-y-0 right-0 w-3 cursor-ew-resize bg-white/0 hover:bg-white/30" />}
     </motion.button>
