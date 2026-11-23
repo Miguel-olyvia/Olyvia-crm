@@ -414,14 +414,16 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
         {/* 23/11 (Rúben: «mega next-level», o telemóvel do gestor em obra): as ações ao alcance do polegar, em baixo; no ecrã largo ficam no topo */}
         {(vivo || p.estado === "aprovado") && (
           <nav aria-label="Ações rápidas" className="fixed inset-x-0 bottom-0 z-40 flex gap-2 border-t border-border bg-card/95 px-3 pt-2 backdrop-blur sm:hidden" style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}>
-            <Button type="button" variant="outline" className="relative min-h-12 flex-1 rounded-2xl" onClick={() => { setAba("plano"); ir.comando(); }}>
-              <Zap className="mr-1.5 h-4 w-4 text-amber-600" aria-hidden="true" />Precisa de ti
+            {/* 23/11 (revisão a 390 px: o botão principal saía do ecrã): com o principal, os outros dois ficam só com o ícone (e o número) */}
+            <Button type="button" variant="outline" aria-label={`Precisa de ti${pedidos.length ? ` (${pedidos.length})` : ""}`} title="Precisa de ti"
+              className={cn("relative min-h-12 rounded-2xl", principal ? "min-w-12 shrink-0 px-3" : "min-w-0 flex-1")} onClick={() => { setAba("plano"); ir.comando(); }}>
+              <Zap className={cn("h-4 w-4 text-amber-600", !principal && "mr-1.5")} aria-hidden="true" />{!principal && "Precisa de ti"}
               {pedidos.length > 0 && <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-900">{pedidos.length}</span>}
             </Button>
             {vivo && planeia && principal?.t !== "Registar imprevisto" && (
-              <Button type="button" variant="outline" className="min-h-12 flex-1 rounded-2xl" onClick={() => setPainel({ k: "imprevisto" })}><AlertTriangle className="mr-1.5 h-4 w-4" aria-hidden="true" />Imprevisto</Button>
+              <Button type="button" variant="outline" aria-label="Imprevisto" title="Imprevisto" className={cn("min-h-12 rounded-2xl", principal ? "min-w-12 shrink-0 px-3" : "min-w-0 flex-1")} onClick={() => setPainel({ k: "imprevisto" })}><AlertTriangle className={cn("h-4 w-4", !principal && "mr-1.5")} aria-hidden="true" />{!principal && "Imprevisto"}</Button>
             )}
-            {principal && <Button type="button" className="min-h-12 flex-1 rounded-2xl" disabled={principal.desligado} onClick={principal.fn}><principal.icone className="mr-1.5 h-4 w-4" aria-hidden="true" /><span className="truncate">{principal.t}</span></Button>}
+            {principal && <Button type="button" className="min-h-12 min-w-0 flex-1 rounded-2xl" disabled={principal.desligado} onClick={principal.fn}><principal.icone className="mr-1.5 h-4 w-4 shrink-0" aria-hidden="true" /><span className="truncate">{principal.t}</span></Button>}
           </nav>
         )}
         <div className="relative flex min-h-0 flex-1">
@@ -758,7 +760,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
         )}
         {!cabe && <span aria-hidden="true" className="pointer-events-none absolute z-[2] whitespace-nowrap text-xs font-medium text-foreground/80" style={{ left: fimVisto * COL + (ligar && !R ? 22 : 6), top: top + ALTO / 2 - 8 }}>{nomeCurtoTarefa(t.nome)}</span>}
         <Barra semTexto={!cabe} t={t} n={n} v={v} p={p} sel={sel === ti || aLigar?.alvo === ti} mudou={mudou(ti)} abrir={() => { if (Date.now() - largouEm.current > 350) abrir(ti); }} reduzir={reduzir} top={top} critica={critico.has(ti)} col={COL} alto={ALTO} largo={vista === "tecnicos"}
-          arrasto={a} mexe={!R && podeMexer(ti)} pegar={(e, tipo) => pegar(e, ti, tipo)} />
+          arrasto={a} mexe={!R && podeMexer(ti)} pegar={(e, tipo) => pegar(e, ti, tipo)} premir={ligar && !R && vista === "gantt" ? (e) => premir(e, ti) : undefined} />
         {/* 23/11: o pegador para ligar (aparece ao passar o rato na linha, ou com a tarefa escolhida) */}
         {ligar && !R && vista === "gantt" && (
           <span role="button" tabIndex={-1} aria-label={`Ligar ${nomeCurtoTarefa(t.nome)} a outra tarefa (arraste até à tarefa que só começa depois)`} title="Arraste até à tarefa que só começa quando esta acabar"
@@ -783,6 +785,31 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
     setErroLigar("");
     setALigar({ de: ti, ...noCont(e), alvo: null });
   };
+  // 23/11 (revisão: «ligar dependências com o dedo: pressão longa na barra e arrastar»): no telemóvel, carregar sem mexer meio segundo
+  // numa barra começa a ligação (como o círculo da ponta); mexer antes disso é o arrastar de sempre. Enquanto se liga, a página não rola.
+  const premido = useRef<{ x: number; y: number; t: number } | null>(null);
+  const semRolar = useRef<((ev: TouchEvent) => void) | null>(null);
+  const soltarRolar = () => { if (semRolar.current) { document.removeEventListener("touchmove", semRolar.current); semRolar.current = null; } };
+  useEffect(() => soltarRolar, []);
+  const premir = (e: React.PointerEvent, ti: number) => {
+    if (e.pointerType === "mouse" || !ligar || R || vista !== "gantt") return;
+    const x = e.clientX, y = e.clientY, id = e.pointerId, el = e.currentTarget as HTMLElement;
+    const t = window.setTimeout(() => {
+      if (premido.current?.t !== t) return;
+      premido.current = null;
+      toque.current = null; setArrasto(null);
+      try { el.setPointerCapture(id); } catch { /* sem captura */ }
+      try { navigator.vibrate?.(25); } catch { /* sem vibração */ }
+      soltarRolar();
+      const fn = (ev: TouchEvent) => { if (ev.cancelable) ev.preventDefault(); };
+      document.addEventListener("touchmove", fn, { passive: false });
+      semRolar.current = fn;
+      setErroLigar("");
+      setALigar({ de: ti, ...noCont({ clientX: x, clientY: y } as React.PointerEvent), alvo: null });
+    }, 450);
+    premido.current = { x, y, t };
+  };
+  const largarPremido = () => { if (premido.current) { window.clearTimeout(premido.current.t); premido.current = null; } };
   const moverLigar = (e: React.PointerEvent) => { const l = ligarRef.current; if (!l) return; const alvo = linhaSob(e); setALigar({ ...l, ...noCont(e), alvo: alvo === l.de ? null : alvo }); };
   const largarLigar = (e: React.PointerEvent) => {
     const l = ligarRef.current;
@@ -855,7 +882,10 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
       </div>
       {erroLigar && <p role="alert" className="border-b border-border bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">Não se liga: {erroLigar}</p>}
       {!R && <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">{vivo ? "As tarefas que ainda não começaram arrastam-se (o dia) e a ponta muda os dias; as outras abrem-se para gerir a execução." : "Arraste uma barra para mudar o dia; a ponta muda os dias."}{nova && vista === "tecnicos" ? " Num dia vazio, «+» cria uma tarefa." : ""}{passar && vista === "tecnicos" ? " Arraste para a linha de outra pessoa para lhe passar a tarefa." : ""}{ligar && vista === "gantt" ? " Para ligar duas tarefas, arraste o círculo da ponta de uma barra até à tarefa que só começa depois." : ""}</p>}
-      <div className="overflow-x-auto" onPointerMove={arrastar} onPointerUp={largar} onPointerCancel={() => { toque.current = null; setArrasto(null); }} onPointerLeave={() => !toque.current && setSob(null)}>
+      <div className="overflow-x-auto"
+        onPointerMove={(e) => { if (premido.current && Math.hypot(e.clientX - premido.current.x, e.clientY - premido.current.y) > 10) largarPremido(); if (ligarRef.current) moverLigar(e); else arrastar(e); }}
+        onPointerUp={(e) => { largarPremido(); if (ligarRef.current) { soltarRolar(); largouEm.current = Date.now(); largarLigar(e); toque.current = null; setArrasto(null); } else largar(e); }}
+        onPointerCancel={() => { largarPremido(); soltarRolar(); if (ligarRef.current) setALigar(null); toque.current = null; setArrasto(null); }} onPointerLeave={() => !toque.current && setSob(null)}>
         <div className="relative min-w-max" ref={cont}>
           {vista === "gantt" && setas()}
           {/* os dias */}
@@ -953,10 +983,11 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   );
 }
 
-function Barra({ t, n, v, p, sel, mudou, abrir, reduzir, top, arrasto, mexe, pegar, critica, col: COL = COL_GANTT, alto = 28, largo = false, semTexto = false }: {
+function Barra({ t, n, v, p, sel, mudou, abrir, reduzir, top, arrasto, mexe, pegar, critica, col: COL = COL_GANTT, alto = 28, largo = false, semTexto = false, premir }: {
   t: Tarefa; n: Tarefa; v: EstadoVivo; p: Plano; sel: boolean; mudou: boolean; abrir: () => void; reduzir: boolean; top: number; critica?: boolean;
   /** 23/11: a largura de um dia e a altura da barra (a vista por técnico é mais larga e o nome pode ir em duas linhas) */ col?: number; alto?: number; largo?: boolean;
   /** 23/11: o nome não cabe e vai à direita da barra */ semTexto?: boolean;
+  /** 23/11: no telemóvel, a pressão longa começa a ligação */ premir?: (e: React.PointerEvent) => void;
   arrasto: Arrasto | null; mexe: boolean; pegar: (e: React.PointerEvent, tipo: "mover" | "durar") => void;
 }) {
   const cor = COR_FASE[t.fase ?? 1];
@@ -967,7 +998,8 @@ function Barra({ t, n, v, p, sel, mudou, abrir, reduzir, top, arrasto, mexe, peg
   const dx = arrasto?.tipo === "mover" ? arrasto.dx : 0, dw = arrasto?.tipo === "durar" ? arrasto.dx : 0;
   const passos = arrasto ? Math.round(arrasto.dx / COL) : 0;
   return (
-    <motion.button type="button" onClick={abrir} onPointerDown={(e) => mexe && pegar(e, "mover")} initial={false}
+    <motion.button type="button" onClick={abrir} onPointerDown={(e) => { premir?.(e); if (mexe) pegar(e, "mover"); }} initial={false}
+      onContextMenu={premir ? (e) => e.preventDefault() : undefined}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } }}
       animate={{ left: n.dia * COL + 2 + dx, width: Math.max(COL - 4, n.dur * COL - 4 + dw), scale: arrasto ? 1.03 : 1, y: arrasto?.dy ?? 0 }}
       transition={reduzir || arrasto ? { duration: 0 } : { type: "spring", stiffness: 260, damping: 30 }}
@@ -977,7 +1009,7 @@ ${ROTULO_VIVO[v]} · ${n.dur} ${n.dur === 1 ? "dia" : "dias"}${dataIni ? ` a par
       className={cn("absolute flex items-center gap-1 overflow-hidden rounded-lg px-2 text-left text-xs font-medium text-white shadow-sm outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2",
         mexe ? "cursor-grab active:cursor-grabbing" : "cursor-pointer",
         sel && "ring-2 ring-foreground ring-offset-2 ring-offset-card", v === "atrasada" && "ring-2 ring-destructive ring-offset-1 ring-offset-card", mudou && "ring-2 ring-primary ring-offset-1 ring-offset-card")}
-      style={{ top, height: alto, touchAction: mexe ? "none" : undefined, zIndex: arrasto ? 20 : undefined,
+      style={{ top, height: alto, touchAction: mexe ? "none" : undefined, zIndex: arrasto ? 20 : undefined, WebkitTouchCallout: premir ? "none" : undefined, userSelect: premir ? "none" : undefined,
         background: v === "parada" || v === "pausada" ? "repeating-linear-gradient(135deg,#64748b 0 6px,#94a3b8 6px 12px)" : (v === "em curso" || v === "hoje" || v === "atrasada") ? `color-mix(in srgb, ${fundo} 45%, transparent)` : v === "por começar" ? `color-mix(in srgb, ${fundo} 80%, white)` : fundo }}>
       {(v === "em curso" || v === "hoje" || v === "atrasada") && <motion.span aria-hidden="true" className="absolute inset-y-0 left-0" style={{ background: fundo }} initial={reduzir ? false : { width: 0 }} animate={{ width: `${Math.round(feito * 100)}%` }} transition={{ duration: 0.6, ease: "easeOut" }} />}
       {I && <I className="relative h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
