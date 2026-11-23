@@ -18,6 +18,7 @@ import { AutoRececaoDoc } from "../AutoRececao";
 import { usePainelUrl } from "../usarParamUrl";
 import { Vista3D } from "@/pages/prototipo-estudio/Vista3D";
 import { documentosEnviados, type DocEnviado, type TomDoc } from "./enviadosAoCliente";
+import { antesDoArranque } from "./ComandoObra";
 import { comNomesDoContrato, extrasDoContrato, obraEm3D, obraEm3DComModelos, obraEm3DNoDia, pedidosDosExtras, tarefaDaPeca } from "./obra3d";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
 import { dataCurta } from "../planoObra";
@@ -186,10 +187,12 @@ export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: 
     return <p className="rounded-xl bg-muted/50 px-4 py-3 text-[15px] text-muted-foreground">Este negócio não tem projeto do Estúdio do projeto: o 3D aparece quando a visita é feita no Estúdio.</p>;
   }
   const opcao = (on: boolean) => cn("min-h-11 rounded-full px-4 text-[15px] font-medium transition-colors", on ? "bg-background shadow-sm" : "text-muted-foreground");
-  const titulo = qual === "obra" ? "A obra em 3D, com o que está feito" : qual === "final" ? "A obra acabada, como vai ficar" : "A divisão antes da obra";
-  const simples = <Vista3D cena={qual === "obra" ? O.cena : qual === "final" ? cenaDe(M.projeto.depois, M.projeto, true) : O.antes} titulo={titulo} />;
-  const res = qual === "obra" ? (noDia?.cena ?? M.hoje) : qual === "final" ? M.final : M.antes;
-  const porFazer = qual === "obra" ? (noDia ? noDia.porFazer : M.porFazer) : undefined;
+  // 23/11 (revisão): antes do arranque, «A obra hoje» é a divisão como está (o antes), não o depois transparente
+  const aindaNao = !!plano && antesDoArranque(plano) && diaSel == null;
+  const titulo = qual === "obra" && aindaNao ? "A divisão como está, antes da obra" : qual === "obra" ? "A obra em 3D, com o que está feito" : qual === "final" ? "A obra acabada, como vai ficar" : "A divisão antes da obra";
+  const simples = <Vista3D cena={qual === "obra" ? (aindaNao ? O.antes : O.cena) : qual === "final" ? cenaDe(M.projeto.depois, M.projeto, true) : O.antes} titulo={titulo} />;
+  const res = qual === "obra" ? (noDia?.cena ?? (aindaNao ? M.antes : M.hoje)) : qual === "final" ? M.final : M.antes;
+  const porFazer = qual === "obra" && !aindaNao ? (noDia ? noDia.porFazer : M.porFazer) : undefined;
   const comModelos = res.ok && temWebGL();
   const p = M.projeto;
   return (
@@ -199,7 +202,8 @@ export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: 
           <div className="min-w-0">
             <h2 className="flex items-center gap-2 text-[15px] font-semibold"><Box className="h-4 w-4 text-primary" aria-hidden="true" />Como a obra vai ficar</h2>
             <p className="text-sm text-muted-foreground">
-              {qual === "obra" ? <>{noDia ? "O plano neste dia." : "O projeto aprovado."} <b className="font-medium text-foreground">A cores, o que {noDia ? "o plano dá por feito" : "já está feito"}</b>; transparente, o que falta{(noDia ?? M).total ? ` (${(noDia ?? M).feitas} de ${(noDia ?? M).total} peças feitas)` : noDia && !noDia.demolida ? " (ainda antes da demolição)" : ""}. Só para ver.</>
+              {qual === "obra" && aindaNao ? <>A obra ainda não começou: <b className="font-medium text-foreground">a divisão como está hoje</b>. Use a régua para a ver a ser feita, dia a dia.</>
+                : qual === "obra" ? <>{noDia ? "O plano neste dia." : "O projeto aprovado."} <b className="font-medium text-foreground">A cores, o que {noDia ? "o plano dá por feito" : "já está feito"}</b>; transparente, o que falta{(noDia ?? M).total ? ` (${(noDia ?? M).feitas} de ${(noDia ?? M).total} peças feitas)` : noDia && !noDia.demolida ? " (ainda antes da demolição)" : ""}. Só para ver.</>
                 : qual === "final" ? "O projeto aprovado, com tudo feito: os produtos do contrato, o revestimento e o pavimento." : "A divisão como estava antes da obra."}
             </p>
           </div>
@@ -219,7 +223,7 @@ export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: 
           </div>
         </div>
         {comModelos && res.ok ? (
-          <div className="h-[62vh] min-h-[420px] overflow-hidden rounded-2xl border border-border">
+          <div className={cn("overflow-hidden rounded-2xl border border-border", qual === "obra" && plano ? "h-[48vh] min-h-[320px]" : "h-[62vh] min-h-[420px]")}>
             <Falha3D alternativa={simples}>
               <Suspense fallback={<p className="grid h-full place-items-center text-[15px] text-muted-foreground">A abrir o 3D…</p>}>
                 <Visualizador3D espaco={res.espaco} modelos={res.modelos} vista={vista} teto={false} etiquetas={false} descricao={titulo}

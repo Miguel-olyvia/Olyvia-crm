@@ -434,10 +434,10 @@ function CalendarioFases({ p, quando }: { p: Plano; quando: (k: number) => strin
         {fases.map((f) => {
           const Ic = ICONE_DA_FASE[f.n] ?? Package, cor = COR_FASE[f.n];
           return (
-            <li key={f.n} className="grid grid-cols-[9.5rem_1fr] items-center gap-3 sm:grid-cols-[12rem_1fr]">
+            <li key={f.n} className="grid grid-cols-[11rem_1fr] items-center gap-3 sm:grid-cols-[14rem_1fr]">
               <span className="flex min-w-0 items-center gap-2 text-sm">
                 <span aria-hidden="true" className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-white" style={{ background: cor }}><Ic className="h-4 w-4" /></span>
-                <span className="min-w-0"><span className="block truncate font-medium">{f.curto}</span><span className="block text-xs tabular-nums text-muted-foreground">{f.fim - f.ini === 1 ? quando(f.ini) : `${curta(f.ini)} – ${curta(f.fim - 1)}`}</span></span>
+                <span className="min-w-0"><span className="block font-medium leading-tight">{f.curto}</span><span className="block text-xs tabular-nums text-muted-foreground">{f.fim - f.ini === 1 ? quando(f.ini) : `${curta(f.ini)} – ${curta(f.fim - 1)}`}</span></span>
               </span>
               <span className="relative block h-3 rounded-full bg-muted" aria-hidden="true">
                 <span className="absolute inset-y-0 rounded-full" style={{ left: `${(f.ini / fim) * 100}%`, width: `${Math.max(2, ((f.fim - f.ini) / fim) * 100)}%`, background: cor }} />

@@ -369,7 +369,7 @@ export function MateriaisDaObra({ ctx, d, dias = [] }: { ctx: Ctx; d: Negocio; d
           {G.map((g) => {
             const Ic = ICONE_DA_FASE[g.fase] ?? Package, cor = COR_FASE[g.fase];
             return (
-              <div key={g.fase} role="group" aria-label={`Fase ${g.fase} · ${FASES_OBRA[g.fase - 1]?.curto}`} className="overflow-hidden rounded-2xl border border-border bg-card">
+              <div key={g.fase} role="group" aria-label={`Fase ${g.fase} · ${FASES_OBRA[g.fase - 1]?.curto}`} className={cn("overflow-hidden rounded-2xl border border-border bg-card", g.itens.length > 6 && "lg:col-span-2")}>
                 <div className="flex items-center gap-2.5 border-b border-border px-3 py-2.5">
                   <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-white" style={{ background: cor }}><Ic className="h-4 w-4" /></span>
                   <div className="min-w-0">
@@ -378,11 +378,12 @@ export function MateriaisDaObra({ ctx, d, dias = [] }: { ctx: Ctx; d: Negocio; d
                   </div>
                   <p className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">{g.itens.filter((m) => OK_MAT.has(m.estado)).length} de {g.itens.length} garantidos</p>
                 </div>
-                <ul>
+                {/* 23/11 (revisão): uma fase com muitos materiais ocupa a largura toda, em duas colunas (a grelha fica equilibrada) */}
+                <ul className={cn(g.itens.length > 6 && "lg:grid lg:grid-cols-2 lg:gap-x-6")}>
                   {g.itens.map((m, k) => {
                     const x = linhaDe(g.fase, m);
                     return (
-                      <li key={k} className={cn("flex items-center gap-3 border-b border-border px-3 py-2 last:border-b-0", x.tarde && "bg-destructive/[0.05]")}>
+                      <li key={k} className={cn("flex items-center gap-3 border-b border-border px-3 py-2", x.tarde && "bg-destructive/[0.05]")}>
                         <span className="min-w-0 flex-1">
                           <span className="block text-sm font-medium">{m.n} <span className="font-normal text-muted-foreground">· {nfmt(m.q)} {m.un}</span>{!x.contrato && <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">modelo de obra</span>}</span>
                           {x.t && <span className="block text-xs text-muted-foreground">Precisa a {x.precisa} · <button type="button" title={x.t.nome} onClick={() => setTi(x.ti)} className="underline-offset-2 hover:underline">{nomeCurtoTarefa(x.t.nome)}</button></span>}

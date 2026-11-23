@@ -202,3 +202,13 @@ describe("A e B. sem repetições; «A seguir» com os próximos dias", () => {
     expect(within(hoje).getAllByTitle(primeira.nome).length).toBe(2); // o cartão do arranque e «A seguir»
   });
 });
+
+describe("C, D e E. sem cortes; o 3D antes do arranque", () => {
+  it("antes do arranque, «A obra hoje» no 3D é a divisão como está", () => {
+    montarObra(obraPorComecar());
+    fireEvent.click(screen.getByRole("tab", { name: /3D/ }));
+    const sec = screen.getByRole("region", { name: "O projeto em 3D" });
+    expect(within(sec).getByRole("img", { name: /^A divisão como está, antes da obra/ })).toBeTruthy();
+    expect(sec.textContent).toMatch(/A obra ainda não começou/);
+  });
+});
