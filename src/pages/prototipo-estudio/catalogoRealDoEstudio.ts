@@ -14,11 +14,14 @@ import { lerPesquisaDoEstudio, lerProdutosPagina, SEM_FILTRO_SERVIDOR, type Linh
 import type { ResultadoProcura } from "./pesquisaEstudio";
 import { CATALOGO, CORES, ouvirProdutosReais, produtosReais, usarProdutosReais, versaoProdutosReais, type Categoria, type Cor, type Produto } from "./catalogoFake";
 
+/** 24/11 (contratos reais da Mudelar, MD 1610 e outros): o mesmo cerâmico ou porcelânico (Surface Arena, Marfil 120x60) vai à parede
+ *  e ao chão; a parede só procurava em «Cerâmico» e o chão só em «Porcelânico», e o RP0010 da parede dava «0 resultados». */
+const CERAMICOS = ["Cerâmico", "Cerâmico Laminado", "Porcelânico"];
 /** As subcategorias da Mudelar de cada tipo de peça do Estúdio (pelo nome, sem acentos nem maiúsculas). */
 export const CATEGORIAS_REAIS: Partial<Record<Categoria, string[]>> = {
   base: ["Bases Duche"], banheira: ["Banheiras"], sanita: ["Sanitas"], bide: ["Bidés"], movel: ["Móveis de lavatório"],
   coluna: ["Colunas"], espelho: ["Espelhos"], toalheiro: ["Toalheiros"], coluna_duche: ["Colunas Duche"], resguardo: ["Resguardos de Duche"],
-  torneira: ["Torneira Lavatório", "Torneira Pé Alto"], revestimento: ["Cerâmico", "Cerâmico Laminado"], pavimento: ["Porcelânico", "SPC"],
+  torneira: ["Torneira Lavatório", "Torneira Pé Alto"], revestimento: CERAMICOS, pavimento: [...CERAMICOS, "SPC"],
   lava: ["Cubas compósito", "Cubas inox"], placa: ["Placas"], forno: ["Fornos"], frigorifico: ["Frigoríficos"], maquina: ["Máquinas lavar loiça"],
   exaustor: ["Exaustores"], armario: ["Armários de Coluna"],
 };
@@ -146,22 +149,24 @@ async function lerPedidos(org: string, pedidos: readonly Pedido[], vistos: Map<s
   };
 }
 
+const chaveVista = (cat: Categoria, id: string) => `${cat}:${id}`;
 /** Junta aos já vistos os produtos novos destas linhas do servidor (com a mão de obra) e devolve-os. */
 async function juntarLinhas(grupos: readonly { cat: Categoria; linhas: readonly LinhaPaginaProduto[] }[], vistos: Map<string, Produto>): Promise<Produto[]> {
   const novos: Produto[] = [];
   for (const { cat, linhas } of grupos) {
     for (const l of linhas) {
-      if (vistos.has(l.id)) continue;
+      // 24/11: pela categoria e pelo id: o mesmo porcelânico entra no revestimento e no pavimento
+      if (vistos.has(chaveVista(cat, l.id))) continue;
       // as colunas de duche: só as colunas (os braços, os pratos e os chuveiros de encastre vão com elas)
       if (cat === "coluna_duche" && !/^\s*coluna/i.test(l.nome)) continue;
       const x = produtoDaLinha(l, cat);
-      if (x) { vistos.set(l.id, x); novos.push(x); }
+      if (x) { vistos.set(chaveVista(cat, l.id), x); novos.push(x); }
     }
   }
   // a mão de obra pelo serviço ligado; se a leitura falhar, ficam os valores de referência
   let comMao = novos;
   try { comMao = await maoDeObraDosServicos(novos); } catch { /* fica a de referência */ }
-  for (const x of comMao) vistos.set(x.id, x);
+  for (const x of comMao) vistos.set(chaveVista(x.cat, x.id), x);
   return comMao;
 }
 

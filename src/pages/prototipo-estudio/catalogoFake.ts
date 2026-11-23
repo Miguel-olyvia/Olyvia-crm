@@ -154,7 +154,9 @@ const ouvintesReais = new Set<() => void>();
 /** Passa a usar estes produtos verdadeiros (vazio = só o catálogo de teste). */
 export function usarProdutosReais(lista: readonly Produto[]): void {
   REAIS = [...lista];
-  REAIS_ID = new Map(REAIS.map((p) => [p.id, p]));
+  // 24/11: o mesmo produto pode vir em duas categorias (o porcelânico na parede e no chão): fica o primeiro
+  REAIS_ID = new Map();
+  for (const p of REAIS) if (!REAIS_ID.has(p.id)) REAIS_ID.set(p.id, p);
   REAIS_CAT = new Map();
   for (const p of REAIS) REAIS_CAT.set(p.cat, [...(REAIS_CAT.get(p.cat) ?? []), p]);
   versaoReais++;
