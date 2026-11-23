@@ -27,6 +27,8 @@ import { SeletorDeTemplate } from "./SeletorDeTemplate";
 import { OrcamentoPdf } from "./OrcamentoPdf";
 import { DocumentoDaPropostaNoPasso } from "./DocumentoDaPropostaNoPasso";
 import { trocarFolhaDaProposta } from "./trocarFolhaDaProposta";
+import { EscolhaDasVersoes } from "./EscolhaDasVersoes";
+import { useVersoesDaPropostaNoPasso } from "./versoesDaPropostaNoPasso";
 
 export interface ContextoDosTemplates { negocioId: string | null; ctx: Ctx; d: Negocio; podeEditar: boolean }
 
@@ -146,9 +148,15 @@ function TemplateDaProposta({ c, children }: { c: ContextoDosTemplates; children
     "--tpl-primaria": cor(tpl.primary_color), "--tpl-secundaria": cor(tpl.secondary_color), "--tpl-destaque": cor(tpl.accent_color),
     "--tpl-texto": cor(tpl.text_color), "--tpl-fonte": fonte(tpl.font_family), "--tpl-fonte-titulos": fonte(tpl.heading_font_family),
   } as CSSProperties) : {}), [tpl]);
+  // 23/11: as versões de idioma do template (só com versões aparece a escolha; a folha e o envio usam a mesma)
+  const versoes = useVersoesDaPropostaNoPasso(c.negocioId, tpl);
   // 23/11: no lugar da folha da Emylia (Partilhar + PropostaDoc), o documento do template, o mesmo que o cliente vê no portal
   const trocado = trocarFolhaDaProposta(children, (
-    <DocumentoDaPropostaNoPasso negocioId={c.negocioId} d={c.d} S={c.ctx.S} tpl={tpl} empresa={{ nome: org.nome, logo: org.logo }} />
+    <div className="space-y-3">
+      <EscolhaDasVersoes v={versoes} sitio="folha" />
+      <DocumentoDaPropostaNoPasso negocioId={c.negocioId} d={c.d} S={c.ctx.S} tpl={tpl} empresa={{ nome: org.nome, logo: org.logo }}
+        leitura={versoes.leitura} idiomas={versoes.idiomasDaFolha} />
+    </div>
   ));
   return (
     <div className="space-y-6">
@@ -175,7 +183,8 @@ function TemplateDaProposta({ c, children }: { c: ContextoDosTemplates; children
           {tpl && <TextosDoTemplate tpl={tpl} />}
         </>
       )}
-      <EnviarParaPortal negocioId={c.negocioId} tipo="proposal" podeEditar={c.podeEditar} />
+      <EnviarParaPortal negocioId={c.negocioId} tipo="proposal" podeEditar={c.podeEditar}
+        antesDeEnviar={versoes.antesDeEnviar} extra={<EscolhaDasVersoes v={versoes} sitio="envio" />} />
     </div>
   );
 }

@@ -8,11 +8,11 @@
 // A vista do cliente monta-se aqui a partir do negócio (vistaDoCliente: d sem custos), sem precisar da vista gravada.
 // Regra do dono: «o que está escrito no template é o verdadeiro»: onde o template tem cabeçalho, ele manda; sem cabeçalho, a carta e o
 // resumo da Emylia. Os textos do template levam as variáveis ({{condicoes_pagamento}}, …) com os dados deste negócio.
-import { useEffect, useState } from "react";
+// 23/11: com versões de idioma no template, quem embrulha o passo passa `idiomas` (a escolha): uma versão, ou várias com o seletor do
+// portal no topo (uma de cada vez). Sem `idiomas`, os da proposta real, como antes. Dinheiro e números não mudam com o idioma.
 import type { Estado, Negocio } from "@/emylia/motor";
 import { vistaDoCliente } from "@/emylia/real/vistaCliente";
 import { ProposalPortalDocument } from "@/components/proposals/ProposalPortalDocument";
-import { loadProposalPortalData, type ProposalPortalData } from "@/components/proposals/proposalPortalData";
 import { CapaDoDocumento, DocumentoObra } from "@/components/portal/obra/DocumentoObra";
 import { propostaDaVista, type VistaDoPortal } from "@/components/portal/obra/dadosObra";
 import { capaDaVista } from "@/components/portal/obra/capaEOrcamento";
@@ -20,8 +20,8 @@ import { orcamentoDaVista } from "@/components/portal/obra/orcamentoObra";
 import { variaveisDaObra } from "@/components/portal/obra/variaveisDaObra";
 import { numeroDaProposta, numeroDaPropostaDoNegocio, versaoDaProposta } from "@/lib/numeroDocumento";
 import { temTextoUtil } from "@/lib/textoDaProposta";
-import { captureFlowError } from "@/lib/observability/captureFlowError";
-import { useDadosDaProposta, type TemplateDeAspeto } from "@/hooks/pessoas/useTemplatesDeDocumento";
+import type { TemplateDeAspeto } from "@/hooks/pessoas/useTemplatesDeDocumento";
+import { usePropostaDoPasso, type LeituraDaProposta } from "./versoesDaPropostaNoPasso";
 
 export interface DocumentoDaPropostaNoPassoProps {
   negocioId: string | null;
@@ -31,38 +31,23 @@ export interface DocumentoDaPropostaNoPassoProps {
   tpl: TemplateDeAspeto | null;
   /** O nome e o logótipo reais da organização (para o documento antes da proposta real). */
   empresa: { nome: string; logo: string | null };
+  /** A leitura da proposta real, quando quem chama já a fez (usePropostaDoPasso); sem ela, lê-se aqui. */
+  leitura?: LeituraDaProposta;
+  /** Os idiomas a mostrar (a escolha do passo, já dentro dos do template); sem eles, os da proposta real. */
+  idiomas?: string[];
 }
-
-type Leitura = { estado: "sem-proposta" | "a-ler" | "pronta" | "erro"; dados: ProposalPortalData | null; erro: string | null };
 
 const ESTADO: Record<string, string> = {
   draft: "Rascunho", sent: "A aguardar decisão", pending: "A aguardar decisão", accepted: "Proposta aceite", rejected: "Proposta rejeitada", expired: "Proposta expirada",
 };
 
-/** A proposta real do negócio (o documento do portal), lida pelo mesmo caminho do «Preview Portal». */
-function usePropostaReal(propostaId: string | null): Leitura {
-  const [l, setL] = useState<Leitura>({ estado: propostaId ? "a-ler" : "sem-proposta", dados: null, erro: null });
-  useEffect(() => {
-    if (!propostaId) { setL({ estado: "sem-proposta", dados: null, erro: null }); return; }
-    let vivo = true;
-    setL({ estado: "a-ler", dados: null, erro: null });
-    loadProposalPortalData(propostaId)
-      .then((dados) => { if (vivo) setL(dados?.proposal ? { estado: "pronta", dados, erro: null } : { estado: "sem-proposta", dados: null, erro: null }); })
-      .catch((e: unknown) => {
-        captureFlowError(e, "proposal-workflow");
-        if (vivo) setL({ estado: "erro", dados: null, erro: e instanceof Error ? e.message : "erro desconhecido" });
-      });
-    return () => { vivo = false; };
-  }, [propostaId]);
-  return l;
-}
-
 /** O estado da proposta do negócio no motor, nas palavras da base (o que o documento usa para «aceite»/«recusada»). */
 const estadoDoMotor = (d: Negocio): string => (d.orc?.aceite ? "accepted" : d.orc?.recusada ? "rejected" : d.orc?.enviada ? "sent" : "draft");
 
-export function DocumentoDaPropostaNoPasso({ negocioId, d, S, tpl, empresa }: DocumentoDaPropostaNoPassoProps) {
-  const dadosDaProposta = useDadosDaProposta(negocioId);
-  const real = usePropostaReal(dadosDaProposta.data?.id ?? null);
+export function DocumentoDaPropostaNoPasso({ negocioId, d, S, tpl, empresa, leitura, idiomas }: DocumentoDaPropostaNoPassoProps) {
+  // com a leitura de quem chama, não se lê outra vez (negocioId null não lê)
+  const propria = usePropostaDoPasso(leitura ? null : negocioId);
+  const real = leitura ?? propria;
   if (!d.orc) return null;
   // o motor muda d e S no sítio (ctx.run): calcula-se a cada desenho, como a folha da Emylia
   const vista: VistaDoPortal = vistaDoCliente(d, S);
@@ -104,7 +89,8 @@ export function DocumentoDaPropostaNoPasso({ negocioId, d, S, tpl, empresa }: Do
         commercial={real.dados?.commercial ?? null}
         company={real.dados?.company ?? { name: empresa.nome, logo_url: empresa.logo }}
         mode="preview"
-        idiomasDoDocumento={real.dados?.idiomasDoDocumento}
+        idiomasDoDocumento={idiomas ?? real.dados?.idiomasDoDocumento}
+        modoVersoes={idiomas && idiomas.length > 1 ? "seletor" : undefined}
         statusLabel={ESTADO[status] ?? status}
         numeroMostrado={numero}
         variaveis={variaveis}
