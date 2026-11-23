@@ -49,7 +49,7 @@ export function CaminhoCritico({ p, critico, quando, abrir }: { p: Plano; critic
           <h3 className="flex items-center gap-1.5 text-sm font-semibold"><Route className="h-4 w-4 text-primary" aria-hidden="true" />Caminho crítico</h3>
           <p className="text-xs text-muted-foreground">Não há nada de errado nestas tarefas: não têm folga. Se uma atrasar, a obra acaba mais tarde.</p>
         </div>
-        {fases.length > 0 && <p className="text-xs tabular-nums text-muted-foreground">{fases.reduce((s, f) => s + f.tarefas.length, 0)} tarefas · de {quando(fases[0].tarefas[0].t.dia)} a {quando(Math.max(...fases.flatMap((f) => f.tarefas.map((x) => x.t.dia + x.t.dur - 1))))}</p>}
+        {fases.length > 0 && <p className="text-xs tabular-nums text-muted-foreground">{((n) => `${n} ${n === 1 ? "tarefa" : "tarefas"}`)(fases.reduce((s, f) => s + f.tarefas.length, 0))} · de {quando(fases[0].tarefas[0].t.dia)} a {quando(Math.max(...fases.flatMap((f) => f.tarefas.map((x) => x.t.dia + x.t.dur - 1))))}</p>}
       </div>
       {!fases.length ? <p className="text-sm text-muted-foreground">Todas as tarefas por fazer têm folga.</p> : (
         <ol className="grid gap-x-6 gap-y-5 sm:grid-cols-2 xl:grid-cols-4">
