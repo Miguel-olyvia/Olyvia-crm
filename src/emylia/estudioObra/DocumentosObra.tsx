@@ -285,7 +285,10 @@ export function ReguaDoTempo({ plano, dias, fim, hoje, dia, setDia }: { plano: P
   }).filter((x): x is NonNullable<typeof x> => !!x).sort((a, b) => a.ini - b.ini);
   const segs = fases.map((f, i) => ({ ...f, ate: i + 1 < fases.length ? Math.max(f.ini + 1, fases[i + 1].ini) : Math.max(f.fimF, f.ini + 1) }));
   const faseDe = (x: number) => segs.find((s) => x >= s.ini && x < s.ate) ?? null;
-  const marcos = Array.from({ length: fim }, (_, x) => x).filter((x) => x === 0 || x === fim - 1 || dias[x]?.getDay() === 1);
+  // as datas por baixo: as segundas, o primeiro e o último dia; duas muito juntas («28 dez», «29 dez») ficam numa só (a última ganha)
+  const perto = Math.max(2, Math.round(fim * 0.09));
+  const marcos = Array.from({ length: fim }, (_, x) => x).filter((x) => x === 0 || x === fim - 1 || dias[x]?.getDay() === 1)
+    .reduce<number[]>((acc, x) => { if (acc.length && x - acc[acc.length - 1] < perto) { if (x === fim - 1 && acc.length > 1) acc[acc.length - 1] = x; return acc; } acc.push(x); return acc; }, []);
   const ativas = plano.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.dia <= k && k < t.dia + t.dur);
   const fk = faseDe(k), primeiroDia = segs[0]?.ini ?? 0;
   return (
@@ -304,50 +307,49 @@ export function ReguaDoTempo({ plano, dias, fim, hoje, dia, setDia }: { plano: P
         {dia != null && <button type="button" onClick={() => { setATocar(false); setDia(hoje); }} className="min-h-10 shrink-0 rounded-full px-3 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Voltar a hoje</button>}
       </div>
 
-      {/* as fases, com o nome e o ícone (em cima, também no telemóvel) */}
-      <ul className="flex flex-wrap gap-x-4 gap-y-1.5" aria-label="As fases">
-        {segs.map((s) => {
-          const Ic = ICONE_DA_FASE[s.n] ?? Wrench;
-          return (
-            <li key={s.n} className="flex items-center gap-1.5 text-xs">
-              <span aria-hidden="true" className="grid h-5 w-5 place-items-center rounded-full text-white" style={{ background: COR_FASE[s.n] }}><Ic className="h-3 w-3" /></span>
-              <span className={cn("font-medium", fk?.n === s.n ? "text-foreground" : "text-muted-foreground")}>{s.nome}</span>
-            </li>
-          );
-        })}
-      </ul>
-
-      {/* a linha do tempo: as fases (preenchidas até ao dia, depois em contorno), hoje e o cursor */}
+      {/* 23/11 (revisão: «segmentos só em contorno e sem nome»): a linha do tempo é feita das fases, cada uma com a cor, o ícone e o nome
+          dentro (o nome some quando não cabe; fica o ícone e a dica). Até ao dia escolhido, a cor cheia; depois, a cor clara. */}
       <div className="relative pt-7">
         {/* o dia escolhido, por cima do cursor */}
         <span aria-hidden="true" className="pointer-events-none absolute top-0 -translate-x-1/2 whitespace-nowrap rounded-full bg-foreground px-2 py-0.5 text-xs font-semibold text-background transition-[left] duration-200" style={{ left: pos(k) }}>{curta(k)}</span>
-        <div className="relative h-4">
+        <div className="relative h-9">
           {segs.map((s) => {
-            const a = (s.ini / fim) * 100, w = ((s.ate - s.ini) / fim) * 100, cor = COR_FASE[s.n];
+            const a = (s.ini / fim) * 100, w = ((s.ate - s.ini) / fim) * 100, cor = COR_FASE[s.n], Ic = ICONE_DA_FASE[s.n] ?? Wrench;
             const cheio = Math.max(0, Math.min(1, (k + 1 - s.ini) / (s.ate - s.ini)));
+            const rotulo = (claro: boolean) => (
+              <span className="flex h-full items-center gap-1.5 overflow-hidden px-2 text-xs font-semibold" style={{ color: claro ? "#fff" : cor }}>
+                <Ic className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="truncate">{s.nome}</span>
+              </span>
+            );
             return (
-              <span key={s.n} aria-hidden="true" className="absolute inset-y-0 overflow-hidden rounded-full border-2" style={{ left: `calc(${a}% + 1px)`, width: `calc(${w}% - 2px)`, borderColor: cor }}>
-                <span className="absolute inset-y-0 left-0 transition-[width] duration-200" style={{ width: `${cheio * 100}%`, background: cor }} />
+              <span key={s.n} title={`${s.nome}: ${quando(s.ini)} a ${quando(s.ate - 1)}`} className={cn("absolute inset-y-0 overflow-hidden rounded-lg ring-inset", fk?.n === s.n && "ring-2")}
+                style={{ left: `calc(${a}% + 1px)`, width: `calc(${w}% - 2px)`, background: `color-mix(in srgb, ${cor} 16%, hsl(var(--card)))`, ["--tw-ring-color" as string]: cor }}>
+                {rotulo(false)}
+                {cheio > 0 && (
+                  <span aria-hidden="true" className="absolute inset-y-0 left-0 overflow-hidden transition-[width] duration-200" style={{ width: `${cheio * 100}%`, background: cor }}>
+                    <span className="absolute inset-y-0 left-0" style={{ width: `${100 / cheio}%` }}>{rotulo(true)}</span>
+                  </span>
+                )}
               </span>
             );
           })}
           {/* hoje */}
-          {hoje >= 0 && <span aria-hidden="true" className="absolute -inset-y-1.5 w-0.5 -translate-x-1/2 rounded-full bg-foreground/70" style={{ left: pos(hoje) }} />}
-          {/* o cursor (visual); o controlo é o deslizador transparente por cima */}
-          <span aria-hidden="true" className="pointer-events-none absolute top-1/2 h-7 w-7 -translate-x-1/2 -translate-y-1/2 rounded-full border-4 border-background shadow-md transition-[left] duration-200" style={{ left: pos(k), background: fk ? COR_FASE[fk.n] : "hsl(var(--muted-foreground))" }} />
+          {hoje >= 0 && <span aria-hidden="true" className="absolute -inset-y-1.5 z-[1] w-0.5 -translate-x-1/2 rounded-full bg-foreground/80" style={{ left: pos(hoje) }} />}
+          {/* o cursor (visual): um pegador alto que não tapa o nome da fase; o controlo é o deslizador transparente por cima */}
+          <span aria-hidden="true" className="pointer-events-none absolute top-1/2 z-[2] h-12 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-background shadow-md transition-[left] duration-200" style={{ left: pos(k), background: fk ? COR_FASE[fk.n] : "hsl(var(--foreground))" }} />
           <input type="range" min={0} max={fim - 1} step={1} value={k} onChange={(e) => { setATocar(false); setDia(Number(e.target.value)); }}
             aria-label="O dia da obra" aria-valuetext={`${quando(k)}${fk ? `, ${fk.nome}` : ""}`}
-            className="absolute -inset-y-4 left-0 w-full cursor-grab opacity-0 active:cursor-grabbing" />
+            className="absolute -inset-y-3 left-0 z-[3] w-full cursor-grab opacity-0 active:cursor-grabbing" />
         </div>
-        {/* os marcos: as segundas-feiras, o primeiro e o último dia; e a marca de hoje */}
+        {/* os marcos: as segundas-feiras, o primeiro e o último dia (dois muito juntos ficam num só: o fim ganha) */}
         <div className="relative mt-2 h-5 text-[11px] tabular-nums text-muted-foreground" aria-hidden="true">
           {marcos.map((x) => <span key={x} className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: pos(x) }}>{curta(x)}</span>)}
         </div>
       </div>
       <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-3 w-0.5 rounded-full bg-foreground/70" />Hoje, {curta(hoje)}</span>
-        <span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-5 rounded-full bg-primary" />Feito até ao dia escolhido</span>
-        <span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-5 rounded-full border-2 border-primary" />Por fazer</span>
+        <span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-5 rounded bg-primary" />Feito até ao dia escolhido</span>
+        <span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-5 rounded bg-primary/20" />Por fazer</span>
       </p>
 
       {/* as tarefas do dia */}

@@ -245,7 +245,9 @@ describe("a linha do tempo do 3D", () => {
     const sec = screen.getByRole("region", { name: "A obra dia a dia" });
     expect(within(sec).getAllByRole("slider")).toHaveLength(1); // antes eram blocos e uma linha
     expect(within(sec).queryAllByRole("button", { name: /fase \d/ })).toHaveLength(0);
-    expect(within(within(sec).getByRole("list", { name: "As fases" })).getAllByRole("listitem").length).toBeGreaterThan(1);
+    // as fases são os segmentos da linha, cada um com o nome e as datas na dica (já não há legenda solta por cima)
+    expect(within(sec).queryByRole("list", { name: "As fases" })).toBeNull();
+    expect(within(sec).getAllByTitle(/^.+: .+ a .+$/).length).toBeGreaterThan(1);
     fireEvent.change(within(sec).getByRole("slider"), { target: { value: "2" } });
     expect(escolhido).toBe(2);
     expect(within(sec).getByText("Neste dia")).toBeTruthy();
