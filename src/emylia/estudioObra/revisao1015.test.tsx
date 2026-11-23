@@ -14,9 +14,9 @@ describe("revisão no 1015", () => {
   it("diário: cada sequência de anular e refazer fica numa só linha", () => {
     const L = [e("Ligação: A só começa quando B acabar"), e("Anulado: X"), e("Refeito: X"), e("Anulado: X"), e("Refeito: X"), e("Anulado: Y"), e("Refeito: Y"), e("Obra: registo")];
     const R = juntarPassos(L).map((x) => x.t);
-    expect(R).toEqual(["Ligação: A só começa quando B acabar", "3 mudanças anuladas e refeitas no plano (ficou igual)", "Obra: registo"]);
+    expect(R).toEqual(["Ligação: A só começa quando B acabar", "No plano: 3 mudanças anuladas e refeitas (ficou igual)", "Obra: registo"]);
     expect(juntarPassos([e("Anulado: nota em Pintura: TESTE")]).map((x) => x.t)).toEqual(["Anulado: nota em Pintura: TESTE"]);
-    expect(juntarPassos([e("Anulado: X"), e("Anulado: Y")]).map((x) => x.t)).toEqual(["2 anuladas no plano"]);
+    expect(juntarPassos([e("Anulado: X"), e("Anulado: Y")]).map((x) => x.t)).toEqual(["No plano: 2 anuladas"]);
   });
   it("cliente: antes do 1.º trabalho a obra «começa» nesse dia (o arranque administrativo fica para dentro)", () => {
     const { d } = obraDeExemplo(), p = d.obra.plano!;

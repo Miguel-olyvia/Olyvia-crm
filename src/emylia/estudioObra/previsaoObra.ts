@@ -153,7 +153,8 @@ export function juntarPassos<T extends { t: string; k: string }>(L: T[]): T[] {
       ...(sobra.length ? [sobra.length === 1 && !pares ? `Anulado: ${sobra[0]}` : m(sobra.length, "anulada", "anuladas")] : []),
       ...(re.length > pares ? [m(re.length - pares, "refeita", "refeitas")] : []),
     ];
-    out.push({ ...run[run.length - 1], t: `${partes.join(", ")}${!sobra.length && re.length === pares ? " no plano (ficou igual)" : " no plano"}`.replace(/^Anulado: (.*) no plano$/, "Anulado: $1") });
+    const so1 = sobra.length === 1 && !pares && re.length === pares;
+    out.push({ ...run[run.length - 1], t: so1 ? partes[0] : `No plano: ${partes.join("; ")}${!sobra.length && re.length === pares ? " (ficou igual)" : ""}` });
     i = j;
   }
   return out;
