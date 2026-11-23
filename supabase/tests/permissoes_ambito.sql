@@ -140,7 +140,11 @@ BEGIN
   SELECT n.id INTO v_n_meu FROM negocios n WHERE n.organization_id = c_org AND n.deleted_at IS NULL AND n.numero IS NOT NULL
     AND EXISTS (SELECT 1 FROM quotes q WHERE q.negocio_id = n.id AND q.deleted_at IS NULL)
     ORDER BY n.numero LIMIT 1;
+  -- 23/11: um negócio ganho/perdido só muda o comercial pelas funções neg_* (fn_negocios_fechado_so_leitura, NG028); a preparação do
+  -- teste passa pela mesma variável (só nesta transação), senão o teste parava aqui conforme o estado do 1.º negócio
+  PERFORM set_config('app.neg_via_funcao', 'on', true);
   UPDATE negocios SET assigned_to = c_rafael WHERE id = v_n_meu;
+  PERFORM set_config('app.neg_via_funcao', '', true);
 
   SELECT o.negocio_id, o.id, t.id INTO v_n_tar, v_obra, v_tarefa FROM ops_obra o JOIN negocios n ON n.id = o.negocio_id
     JOIN ops_obra_tarefa t ON t.obra_id = o.id
@@ -392,7 +396,11 @@ BEGIN
   END IF;
   IF v_c_meu IS NOT NULL THEN
     v_res := pg_temp.amb_exec(v_ra, format($q$SELECT public.cancel_and_replace_contract(%L, 'teste', false)::text$q$, v_c_meu));
-    PERFORM pg_temp.amb_reg('Rafael comercial OWNED', 'H4 cancel_and_replace_contract dele', 'passou a guarda', pg_temp.amb_guarda(v_res, 'insufficient_permission'), left(v_res, 160));
+    -- 20270126000000: anular pede também client_contracts.cancel (o perfil comercial pode não a ter): o esperado vem das tabelas
+    PERFORM pg_temp.amb_reg('Rafael comercial OWNED', 'H4 cancel_and_replace_contract dele',
+      CASE WHEN EXISTS (SELECT 1 FROM anew_role_permissions rp WHERE rp.role_id = v_role_com AND rp.permission_code = 'client_contracts.cancel')
+           THEN 'passou a guarda' ELSE 'bloqueado' END,
+      pg_temp.amb_guarda(v_res, 'insufficient_permission'), left(v_res, 160));
   END IF;
   v_res := pg_temp.amb_exec(v_ma, format($q$SELECT public.cancel_and_replace_contract(%L, 'teste', false)::text$q$, coalesce(v_c_alh, v_c_meu)));
   PERFORM pg_temp.amb_reg('Miguel super_admin', 'H5 cancel_and_replace_contract alheio', 'passou a guarda', pg_temp.amb_guarda(v_res, 'insufficient_permission'), left(v_res, 160));

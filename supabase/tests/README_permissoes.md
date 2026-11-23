@@ -78,3 +78,14 @@ Mesmo estilo (`BEGIN … ROLLBACK`, cada ação num sub-bloco que acaba em `RAIS
   continua a dar os custos só com `fn_quote_custos_pode`.
 - C4 `obra_guardar_negocio` a criar a obra do 1003: com o plano «por aprovar» (ou sem estado) passa para comercial/Financeiro/Gestor
   de obra; «aprovado»/«em curso» só com `negocios.obra.planear` (CT001 para os outros, e a EC não é emitida).
+
+## `permissoes_contratos_portal.test.sql` — lote Contratos/Portal (23/11, 20270126000000–20270126020000)
+
+Mesmo método (`BEGIN … ROLLBACK`, sub-blocos que acabam em `RAISE`, fixtures «LC2311» na Mudelar). Contas: comercial A (dona),
+comercial B, Financeiro, org_admin, super_admin. Verifica: anular (`cancel_and_replace_contract`, `rpc_update_client_contract_status`
+'cancelled') pede `client_contracts.cancel` + o edit/âmbito de sempre, e o contrato assinado de um negócio da Emylia é recusado e
+apontado para o Negócio (`neg_anular_contrato` continua igual); pôr/tirar do portal (`client_portal_documents`) pede a permissão de
+`create-client-portal-access` na organização + o documento no âmbito (`fn_portal_doc_no_ambito`, a mesma que a edge function chama);
+`republish_proposal_snapshot` com âmbito; `rpc_contra_assinar_contrato('signatario_minuta')` com o âmbito de `client_contracts.edit`.
+Correr com `rhq.ps1 -SqlFile` (resultado: json com `falhas`). `permissoes_ambito.sql` H4 passou a calcular o esperado com
+`client_contracts.cancel` do perfil comercial.

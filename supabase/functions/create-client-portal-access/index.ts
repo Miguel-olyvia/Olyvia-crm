@@ -170,6 +170,27 @@ serve(async (req: Request) => {
       );
     }
 
+    // ── Âmbito (23/11/2026, auditoria de permissões A3): o documento tem de estar no âmbito de quem pede — a mesma regra das
+    // políticas de client_portal_documents (fn_portal_doc_no_ambito → fn_doc_no_ambito_acao: o dono e a cadeia do negócio,
+    // TEAM/ORG pelas linhas de âmbito, admins). Antes bastava a organização: o comercial B publicava / reenviava as credenciais
+    // de um documento do comercial A. Com o JWT de quem pede; um erro fecha (não segue sem verificar).
+    const { data: noAmbito, error: ambitoError } = await callerClient.rpc("fn_portal_doc_no_ambito", {
+      p_tipo: document_type, p_id: document_id,
+    });
+    if (ambitoError) {
+      console.error("[create-client-portal-access] fn_portal_doc_no_ambito failed:", ambitoError);
+      return new Response(
+        JSON.stringify({ error: "Não foi possível verificar o âmbito do documento. Tente novamente." }),
+        { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+    if (noAmbito !== true) {
+      return new Response(
+        JSON.stringify({ error: "Sem permissão para este documento: está fora do seu âmbito (ou não existe)." }),
+        { status: 403, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
+    }
+
     // 1. Get document and its entity
     let entityId: string | null = null;
     let documentTitle = "";
