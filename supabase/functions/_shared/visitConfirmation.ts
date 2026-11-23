@@ -104,6 +104,34 @@ export function shouldCancelReminderForVisit(mode: unknown, status: unknown): bo
   return !REMINDER_OK_STATUSES.has(String(status ?? ""));
 }
 
+/**
+ * Uma linha em 'sending' ha mais tempo que isto foi deixada para tras (a funcao
+ * caiu). E o mesmo limiar da limpeza em fn_visit_confirmation_claim (SQL: 10 minutos).
+ */
+export const STALE_SENDING_MINUTES = 10;
+
+/** So o que `rpc` precisa do cliente com o JWT do utilizador (testavel sem rede). */
+type RpcClient = { rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: unknown }> };
+
+/**
+ * O utilizador tem scheduling.items.edit? Mesma verificacao que as RPCs da base
+ * usam (has_scheduling_permission). Falha FECHADA: erro, excecao ou resposta que
+ * nao seja `true` = sem permissao.
+ */
+export async function callerCanEditSchedule(userClient: RpcClient, authUid: string): Promise<boolean> {
+  if (!authUid) return false;
+  try {
+    const { data, error } = await userClient.rpc("has_scheduling_permission", {
+      user_id: authUid,
+      permission_code: "scheduling.items.edit",
+    });
+    if (error) return false;
+    return data === true;
+  } catch {
+    return false;
+  }
+}
+
 export const MAX_SEND_ATTEMPTS = 3;
 const BACKOFF_BASE_MS = 5 * 60_000;
 

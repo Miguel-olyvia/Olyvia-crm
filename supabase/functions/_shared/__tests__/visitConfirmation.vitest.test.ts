@@ -1,7 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   buildConfirmationEmailContent,
   buildConfirmationSmsText,
+  callerCanEditSchedule,
   decideAfterAttempt,
   loadFormConfirmationSendOn,
   loadVisitConfirmationState,
@@ -237,5 +238,29 @@ describe('processador de lembretes: defesa do modo novo', () => {
       schedule_item_assignees: { data: [] },
     });
     expect(await renderLinkedSms(db, row)).toMatchObject({ kind: 'ok' });
+  });
+});
+
+describe('callerCanEditSchedule (achado 6: permissao antes de aceitar o pedido do ecra)', () => {
+  const client = (result: unknown) => ({ rpc: vi.fn(async () => result) });
+
+  it('pede scheduling.items.edit ao utilizador e aceita so um true', async () => {
+    const c = client({ data: true, error: null });
+    expect(await callerCanEditSchedule(c, 'auth-1')).toBe(true);
+    expect(c.rpc).toHaveBeenCalledWith('has_scheduling_permission', { user_id: 'auth-1', permission_code: 'scheduling.items.edit' });
+  });
+
+  it('sem permissao (false), resposta estranha, erro ou excecao: recusa', async () => {
+    expect(await callerCanEditSchedule(client({ data: false, error: null }), 'a')).toBe(false);
+    expect(await callerCanEditSchedule(client({ data: 'true', error: null }), 'a')).toBe(false);
+    expect(await callerCanEditSchedule(client({ data: null, error: null }), 'a')).toBe(false);
+    expect(await callerCanEditSchedule(client({ data: true, error: { message: 'x' } }), 'a')).toBe(false);
+    expect(await callerCanEditSchedule({ rpc: async () => { throw new Error('rede'); } }, 'a')).toBe(false);
+  });
+
+  it('sem identificador do utilizador nem chega a perguntar', async () => {
+    const c = client({ data: true, error: null });
+    expect(await callerCanEditSchedule(c, '')).toBe(false);
+    expect(c.rpc).not.toHaveBeenCalled();
   });
 });

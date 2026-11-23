@@ -36,6 +36,7 @@ function memoryDb(seed: Record<string, Row[]>) {
       in: (c: string, vs: unknown[]) => { filters.push((r) => vs.includes(r[c])); return b; },
       is: (c: string, v: unknown) => { filters.push((r) => (r[c] ?? null) === v); return b; },
       gt: (c: string, v: string) => { filters.push((r) => String(r[c]) > v); return b; },
+      not: (c: string, op: string, v: unknown) => { filters.push((r) => (op === 'is' ? (r[c] ?? null) !== v : true)); return b; },
       order: () => b,
       limit: (n: number) => { limitN = n; return b; },
       update: (p: Row) => { mode = 'update'; patch = p; return b; },
@@ -150,10 +151,173 @@ describe('processClaimedRows: a empresa confirmou, sai a confirmacao', () => {
     expect(t.createReminders).not.toHaveBeenCalled();
   });
 
-  it('uma nova tentativa (attempts > 1) nao recria os lembretes', async () => {
+  it('o reenvio nao conta como a linha que cria os lembretes (so as automaticas)', async () => {
+    const t = setup(seed());
+    await processClaimedRows([claimed('email', { kind: 'resend' }), claimed('sms', { kind: 'resend' })], t.deps);
+    expect(t.createReminders).not.toHaveBeenCalled();
+  });
+});
+
+describe('processClaimedRows: lembretes decididos por «esta visita e hora ainda nao tem»', () => {
+  const stampedRow = (over: Row = {}): Row => ({
+    id: 'prev', organization_id: ORG, schedule_item_id: 'item-1', channel: 'email', kind: 'auto',
+    status: 'sent', visit_start_snapshot: START, reminders_created_at: '2026-11-23T09:00:00.000Z', ...over,
+  });
+
+  it('2.a tentativa com sucesso cria os lembretes se a 1.a falhou antes de os criar, e marca a linha', async () => {
     const t = setup(seed());
     await processClaimedRows([claimed('sms', { attempts: 2 })], t.deps);
+    expect(t.createReminders).toHaveBeenCalledTimes(1);
+    expect(t.q('q-sms').reminders_created_at).toBe(NOW.toISOString());
+  });
+
+  it('cria uma so vez por visita mesmo com dois canais no mesmo lote (marca a primeira linha)', async () => {
+    const t = setup(seed());
+    await processClaimedRows([claimed('email'), claimed('sms')], t.deps);
+    expect(t.createReminders).toHaveBeenCalledTimes(1);
+    expect(t.q('q-email').reminders_created_at).toBe(NOW.toISOString());
+    expect(t.q('q-sms').reminders_created_at).toBeUndefined();
+  });
+
+  it('ja criados para esta visita e hora (linha anterior marcada): nao recria, mesmo com a hora escrita de outra forma', async () => {
+    const t = setup(seed());
+    t.tables.visit_confirmation_sends.push(stampedRow({ visit_start_snapshot: '2026-11-30T10:00:00+00:00' }));
+    await processClaimedRows([claimed('sms', { attempts: 2 })], t.deps);
     expect(t.createReminders).not.toHaveBeenCalled();
+  });
+
+  it('lembretes criados para OUTRA hora nao contam: a hora nova volta a criar', async () => {
+    const t = setup(seed());
+    t.tables.visit_confirmation_sends.push(stampedRow({ visit_start_snapshot: '2026-11-29T10:00:00.000Z' }));
+    await processClaimedRows([claimed('sms')], t.deps);
+    expect(t.createReminders).toHaveBeenCalledTimes(1);
+  });
+
+  it('tentativa que volta a fila (nao e definitiva) nao cria; a seguinte, com sucesso, cria', async () => {
+    const retry = setup(seed(), { emailOk: false });
+    await processClaimedRows([claimed('email')], retry.deps);
+    expect(retry.q('q-email').status).toBe('pending');
+    expect(retry.createReminders).not.toHaveBeenCalled();
+    const next = setup(seed());
+    await processClaimedRows([claimed('email', { attempts: 2 })], next.deps);
+    expect(next.createReminders).toHaveBeenCalledTimes(1);
+  });
+
+  it('um canal que volta a fila e o outro enviado: os lembretes saem pelo que foi enviado', async () => {
+    const t = setup(seed(), { emailOk: false });
+    await processClaimedRows([claimed('email'), claimed('sms')], t.deps);
+    expect(t.createReminders).toHaveBeenCalledTimes(1);
+    expect(t.q('q-sms').reminders_created_at).toBe(NOW.toISOString());
+    expect(t.q('q-email').reminders_created_at).toBeUndefined();
+  });
+
+  it('tentativa definitiva falhada (3.a) tambem cria os lembretes', async () => {
+    const t = setup(seed(), { emailOk: false });
+    await processClaimedRows([claimed('email', { attempts: 3 })], t.deps);
+    expect(t.q('q-email').status).toBe('failed');
+    expect(t.createReminders).toHaveBeenCalledTimes(1);
+  });
+
+  it('visita que deixou de ser valida (hora mudou) nao cria lembretes', async () => {
+    const t = setup(seed({ item: { start_datetime: '2026-12-01T10:00:00.000Z' } }));
+    await processClaimedRows([claimed('email', { attempts: 2 })], t.deps);
+    expect(t.createReminders).not.toHaveBeenCalled();
+    expect(t.q('q-email').reminders_created_at).toBeUndefined();
+  });
+
+  it('se criar os lembretes falha, a linha NAO fica marcada (a proxima tentativa refaz)', async () => {
+    const t = setup(seed());
+    t.createReminders.mockRejectedValueOnce(new Error('rede'));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await processClaimedRows([claimed('email')], t.deps);
+    spy.mockRestore();
+    expect(t.q('q-email').status).toBe('sent');
+    expect(t.q('q-email').reminders_created_at).toBeUndefined();
+  });
+});
+
+describe('processClaimedRows: visita reconfirmada a MESMA hora (linha tecnica «reminders», sem enviar nada)', () => {
+  function withRemindersRow(s: ReturnType<typeof seed>, over: Row = {}) {
+    const t = setup(s);
+    const row = { ...claimed('email'), id: 'q-rem', channel: 'reminders', kind: 'reminders', attempts: 1, ...over } as unknown as ClaimedConfirmationRow;
+    t.tables.visit_confirmation_sends.push({ ...row, status: 'sending' });
+    return { t, row };
+  }
+
+  it('sem lembretes activos refaz-os, marca a linha e nao envia email nem SMS', async () => {
+    const s = seed();
+    s.scheduled_emails = [];
+    const { t, row } = withRemindersRow(s);
+    const res = await processClaimedRows([row], t.deps);
+    expect(t.sendEmail).not.toHaveBeenCalled();
+    expect(t.sendSms).not.toHaveBeenCalled();
+    expect(t.createReminders).toHaveBeenCalledTimes(1);
+    expect(t.q('q-rem')).toMatchObject({ status: 'skipped', skip_reason: 'reminders_only', reminders_created_at: NOW.toISOString() });
+    expect(res.reminders).toBe(2);
+  });
+
+  it('com lembretes ainda activos (pendentes) nao os recria', async () => {
+    const { t, row } = withRemindersRow(seed());
+    await processClaimedRows([row], t.deps);
+    expect(t.createReminders).not.toHaveBeenCalled();
+    expect(t.q('q-rem').status).toBe('skipped');
+  });
+
+  it('visita que deixou de estar confirmada: saltada, sem lembretes', async () => {
+    const s = seed({ item: { status: 'scheduled' } });
+    s.scheduled_emails = [];
+    const { t, row } = withRemindersRow(s);
+    await processClaimedRows([row], t.deps);
+    expect(t.createReminders).not.toHaveBeenCalled();
+    expect(t.q('q-rem')).toMatchObject({ status: 'skipped', skip_reason: 'not_confirmed' });
+  });
+});
+
+describe('processClaimedRows: orcamento de tempo', () => {
+  it('passado o orcamento deixa de enviar e devolve as linhas por tratar a pending, sem gastar a tentativa', async () => {
+    const t = setup(seed());
+    let calls = 0;
+    t.deps.shouldStop = () => ++calls > 1; // 1.a (inicio do grupo): continua; 2.a (antes da 2.a linha): para
+    const res = await processClaimedRows([claimed('email'), claimed('sms', { attempts: 2 })], t.deps);
+    expect(t.sendEmail).toHaveBeenCalledTimes(1);
+    expect(t.sendSms).not.toHaveBeenCalled();
+    expect(t.q('q-sms')).toMatchObject({ status: 'pending', attempts: 1 });
+    expect(res).toMatchObject({ sent: 1, released: 1 });
+    // o que ja foi tratado continua a contar: lembretes criados pela linha enviada
+    expect(t.createReminders).toHaveBeenCalledTimes(1);
+  });
+
+  it('visitas seguintes (nem o contexto se carrega) voltam todas a pending', async () => {
+    const t = setup(seed());
+    t.tables.visit_confirmation_sends.push({ id: 'q-other', status: 'sending', attempts: 1, channel: 'email', kind: 'auto' });
+    let calls = 0;
+    t.deps.shouldStop = () => ++calls > 1;
+    const other = { ...claimed('email'), id: 'q-other', schedule_item_id: 'item-2' };
+    const res = await processClaimedRows([claimed('email'), other], t.deps);
+    expect(t.sendEmail).toHaveBeenCalledTimes(1);
+    expect(t.q('q-other')).toMatchObject({ status: 'pending', attempts: 0 });
+    expect(res.released).toBe(1);
+  });
+
+  it('sem orcamento definido processa tudo (comportamento anterior)', async () => {
+    const t = setup(seed());
+    const res = await processClaimedRows([claimed('email'), claimed('sms')], t.deps);
+    expect(res.released).toBe(0);
+    expect(res.sent).toBe(2);
+  });
+});
+
+describe('processClaimedRows: linhas caducadas devolvidas pela base como falhadas', () => {
+  it('avisa o comercial no sino, nao envia nada e nao mexe na linha', async () => {
+    const t = setup(seed());
+    const expired = { ...claimed('email', { attempts: 3 }), status: 'failed', error_message: 'Envio interrompido; confirme com o cliente ou reenvie' };
+    const res = await processClaimedRows([expired], t.deps);
+    expect(t.sendEmail).not.toHaveBeenCalled();
+    expect(res.interrupted).toBe(1);
+    expect(t.tables.notifications).toHaveLength(1);
+    expect(t.tables.notifications[0]).toMatchObject({ user_id: 'auth-ana', entity_id: 'item-1', type: 'visit_confirmation_failed' });
+    expect(String(t.tables.notifications[0].message)).toContain('Envio interrompido');
+    expect(t.q('q-email').status).toBe('sending'); // a linha de teste nao foi tocada; a base ja a marcou failed
   });
 });
 

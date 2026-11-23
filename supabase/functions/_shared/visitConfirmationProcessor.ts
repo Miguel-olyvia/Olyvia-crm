@@ -9,8 +9,18 @@
 //  - canal desligado no formulario ou sem contacto: 'skipped' com o motivo;
 //  - falha: volta a fila com espera crescente; a 3.a fica 'failed' e avisa o
 //    comercial no sino;
-//  - lembretes (e o link "Confirmo") criam-se aqui, so na primeira tentativa
-//    de uma linha automatica, depois de cancelar os lembretes antigos da visita.
+//  - lembretes (e o link "Confirmo") criam-se aqui, depois de cancelar os
+//    lembretes antigos da visita, na primeira linha automatica dessa visita+hora
+//    que termine bem ou de vez (enviada, saltada por canal/contacto, ou falhada
+//    na ultima tentativa) e que ainda nao os tenha criado
+//    (visit_confirmation_sends.reminders_created_at). Uma tentativa que volta a
+//    fila nao os cria; a seguinte cria;
+//  - linha tecnica kind 'reminders' (visita reconfirmada a MESMA hora): so refaz
+//    os lembretes se nao ha nenhum activo; nunca envia nada ao cliente;
+//  - orcamento de tempo (deps.shouldStop): passado o orcamento deixa de pegar em
+//    linhas novas e devolve as nao tratadas a 'pending', sem gastar a tentativa;
+//  - linhas devolvidas pela base ja como 'failed' (presas em 'sending' e sem
+//    tentativas por gastar): so se avisa o comercial no sino.
 
 import { loadFormEmailConfig, buildManageUrl } from "./formEmails.ts";
 import type { FormEmailConfig } from "./formEmails.ts";
@@ -35,10 +45,14 @@ export interface ClaimedConfirmationRow {
   id: string;
   organization_id: string;
   schedule_item_id: string;
-  channel: ConfirmationChannel;
-  kind: "auto" | "resend";
+  /** 'reminders' so na linha tecnica (kind 'reminders'): nao e um canal de envio. */
+  channel: ConfirmationChannel | "reminders";
+  kind: "auto" | "resend" | "reminders";
   visit_start_snapshot: string;
   attempts: number;
+  /** 'sending' nas reclamadas; 'failed' nas que a base devolve por terem caducado. */
+  status?: string;
+  error_message?: string | null;
 }
 
 export interface SendResult {
@@ -53,6 +67,11 @@ export interface ProcessorDeps {
   createReminders: (p: CreateReminderLinesParams) => Promise<CreateReminderLinesResult>;
   siteUrl: string;
   now: () => Date;
+  /**
+   * Orcamento de tempo: perguntado antes de cada visita e de cada linha seguinte.
+   * Devolve true quando ja nao ha tempo para pegar em mais nada.
+   */
+  shouldStop?: () => boolean;
 }
 
 export interface ProcessSummary {
@@ -62,6 +81,10 @@ export interface ProcessSummary {
   retried: number;
   failed: number;
   reminders: number;
+  /** Reclamadas mas devolvidas a 'pending' por falta de tempo. */
+  released: number;
+  /** Caducadas em 'sending' e falhadas de vez pela base: so se avisou o comercial. */
+  interrupted: number;
 }
 
 /** Motivos de 'skipped' (codigos: o ecra traduz-os). */
@@ -74,7 +97,11 @@ export type SkipReason =
   | "email_disabled"
   | "sms_disabled"
   | "no_email"
-  | "no_phone";
+  | "no_phone"
+  | "reminders_only";
+
+/** Motivos em que a visita continua valida: nao sai este canal, mas os lembretes nascem. */
+const VALID_VISIT_SKIPS: ReadonlySet<string> = new Set(["email_disabled", "sms_disabled", "no_email", "no_phone"]);
 
 interface VisitItem {
   id: string;
@@ -261,6 +288,8 @@ function skipReasonFor(row: ClaimedConfirmationRow, ctx: VisitContext | null, no
   if (ctx.item.status !== "confirmed") return "not_confirmed";
   if (new Date(ctx.item.start_datetime).getTime() <= now.getTime()) return "past";
   if (row.kind === "auto" && !SAME_INSTANT(row.visit_start_snapshot, ctx.item.start_datetime)) return "time_changed";
+  // A linha tecnica dos lembretes nao envia nada: nao depende de canal nem de contacto.
+  if (row.kind === "reminders") return null;
   const cfg = ctx.emailCfg;
   if (row.channel === "email") {
     if (ctx.formId && !cfg?.confirmation_email_enabled) return "email_disabled";
@@ -470,14 +499,85 @@ async function ensureReminders(ctx: VisitContext, deps: ProcessorDeps): Promise<
   return res.emails + res.sms;
 }
 
+/** Ja ha lembretes criados pela confirmacao para ESTA visita e ESTA hora? */
+async function remindersAlreadyCreated(db: SupabaseLike, ctx: VisitContext): Promise<boolean> {
+  const { data, error } = await db
+    .from("visit_confirmation_sends")
+    .select("visit_start_snapshot")
+    .eq("schedule_item_id", ctx.item.id)
+    .not("reminders_created_at", "is", null);
+  failIf(error, "visit_confirmation_sends");
+  const rows = (Array.isArray(data) ? data : []) as Record<string, unknown>[];
+  return rows.some((r) => SAME_INSTANT(str(r.visit_start_snapshot), ctx.item.start_datetime));
+}
+
+/** A visita tem lembretes pendentes (email ou SMS)? Para a linha tecnica 'reminders'. */
+async function hasActiveReminders(db: SupabaseLike, itemId: string): Promise<boolean> {
+  const [em, sm] = await Promise.all([
+    db.from("scheduled_emails").select("id").eq("schedule_item_id", itemId).eq("status", "pending").limit(1),
+    db.from("scheduled_sms").select("id").eq("schedule_item_id", itemId).eq("status", "pending").limit(1),
+  ]);
+  failIf(em.error || sm.error, "lembretes pendentes");
+  return [em.data, sm.data].some((d) => Array.isArray(d) && d.length > 0);
+}
+
+async function stampRemindersCreated(db: SupabaseLike, id: string, now: Date): Promise<void> {
+  const { error } = await db
+    .from("visit_confirmation_sends")
+    .update({ reminders_created_at: now.toISOString(), updated_at: now.toISOString() })
+    .eq("id", id);
+  if (error) console.error("[visitConfirmation] marcar os lembretes como criados falhou:", errMessage(error));
+}
+
+/** Devolve linhas reclamadas e nao tratadas a 'pending', sem gastar a tentativa. Devolve quantas. */
+async function releaseRows(db: SupabaseLike, rows: ClaimedConfirmationRow[], now: Date): Promise<number> {
+  let released = 0;
+  for (const r of rows) {
+    const { error } = await db
+      .from("visit_confirmation_sends")
+      .update({ status: "pending", attempts: Math.max(0, r.attempts - 1), claimed_at: null, updated_at: now.toISOString() })
+      .eq("id", r.id)
+      .eq("status", "sending");
+    // Se falhar fica em 'sending' e a limpeza da base trata-a passados 10 minutos.
+    if (error) console.error("[visitConfirmation] devolver a fila falhou:", errMessage(error));
+    else released++;
+  }
+  return released;
+}
+
+/** Linhas que a base devolveu ja falhadas (caducaram em 'sending'): avisa o comercial. Nunca lanca. */
+async function noticeInterruptedRows(rows: ClaimedConfirmationRow[], deps: ProcessorDeps): Promise<number> {
+  for (const row of rows) {
+    if (row.channel !== "email" && row.channel !== "sms") continue;
+    try {
+      const ctx = await loadContext(deps.supabase, row.schedule_item_id, row.organization_id);
+      if (ctx) await notifyFailure(deps.supabase, ctx, row.channel, row.error_message || "Envio interrompido");
+    } catch (e) {
+      console.error("[visitConfirmation] aviso do envio interrompido nao gravado (nao fatal):", errMessage(e));
+    }
+  }
+  return rows.length;
+}
+
 /** Processa linhas ja reclamadas, agrupadas por visita. Nunca lanca: cada erro fica na linha. */
 export async function processClaimedRows(rows: ClaimedConfirmationRow[], deps: ProcessorDeps): Promise<ProcessSummary> {
-  const summary: ProcessSummary = { processed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, reminders: 0 };
-  const byItem = new Map<string, ClaimedConfirmationRow[]>();
-  for (const r of rows) byItem.set(r.schedule_item_id, [...(byItem.get(r.schedule_item_id) ?? []), r]);
+  const summary: ProcessSummary = { processed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, reminders: 0, released: 0, interrupted: 0 };
+  summary.interrupted = await noticeInterruptedRows(rows.filter((r) => r.status === "failed"), deps);
 
+  const byItem = new Map<string, ClaimedConfirmationRow[]>();
+  for (const r of rows.filter((x) => x.status !== "failed")) {
+    byItem.set(r.schedule_item_id, [...(byItem.get(r.schedule_item_id) ?? []), r]);
+  }
+
+  let stopped = false;
   for (const [itemId, itemRows] of byItem) {
     const now = deps.now();
+    if (!stopped && deps.shouldStop?.()) stopped = true;
+    if (stopped) {
+      summary.released += await releaseRows(deps.supabase, itemRows, now);
+      continue;
+    }
+
     let ctx: VisitContext | null = null;
     let loadError: string | null = null;
     try {
@@ -487,22 +587,45 @@ export async function processClaimedRows(rows: ClaimedConfirmationRow[], deps: P
     }
 
     let cancelLink: string | null = null;
-    let firstAutoValid = false;
-    for (const row of itemRows) {
+    // 1.a linha automatica desta visita que acabou bem ou de vez: e ela que cria os lembretes.
+    let reminderCarrier: ClaimedConfirmationRow | null = null;
+    for (let i = 0; i < itemRows.length; i++) {
+      const row = itemRows[i];
+      if (i > 0 && !stopped && deps.shouldStop?.()) stopped = true;
+      if (stopped) {
+        summary.released += await releaseRows(deps.supabase, [row], now);
+        continue;
+      }
       summary.processed++;
+      let visitValid = false;
       try {
         if (loadError) throw new Error(loadError);
         const skip = skipReasonFor(row, ctx, now);
-        if (skip === null || skip === "email_disabled" || skip === "sms_disabled" || skip === "no_email" || skip === "no_phone") {
-          // A visita e valida: os lembretes nascem mesmo que este canal nao saia.
-          if (row.kind === "auto" && row.attempts <= 1) firstAutoValid = true;
-        }
+        visitValid = skip === null || VALID_VISIT_SKIPS.has(skip);
         if (skip) {
           await finishRow(deps.supabase, row.id, { status: "skipped", skip_reason: skip, error_message: null }, now);
           summary.skipped++;
+          // A visita e valida: os lembretes nascem mesmo que este canal nao saia.
+          if (visitValid && row.kind === "auto" && !reminderCarrier) reminderCarrier = row;
           continue;
         }
         const visit = ctx as VisitContext;
+
+        if (row.kind === "reminders") {
+          // Reconfirmada a mesma hora: so refaz os lembretes se nenhum esta activo.
+          const active = await hasActiveReminders(deps.supabase, visit.item.id);
+          if (!active) summary.reminders += await ensureReminders(visit, deps);
+          await finishRow(deps.supabase, row.id, {
+            status: "skipped",
+            skip_reason: "reminders_only",
+            error_message: null,
+            ...(active ? {} : { reminders_created_at: now.toISOString() }),
+          }, now);
+          summary.skipped++;
+          continue;
+        }
+
+        if (row.channel !== "email" && row.channel !== "sms") throw new Error(`canal desconhecido: ${row.channel}`);
         if (cancelLink === null) cancelLink = await manageLink(deps.supabase, visit, deps.siteUrl, now);
         const { result, recipient } = await sendOne(row, visit, cancelLink, deps);
         const decision = decideAfterAttempt({ attempts: row.attempts, ok: result.ok, error: result.error, now });
@@ -519,6 +642,8 @@ export async function processClaimedRows(rows: ClaimedConfirmationRow[], deps: P
           summary.failed++;
           await notifyFailure(deps.supabase, visit, row.channel, decision.error ?? "");
         }
+        // Enviada ou falhada de vez conta; a que volta a fila nao (a seguinte cria).
+        if (decision.status !== "pending" && row.kind === "auto" && !reminderCarrier) reminderCarrier = row;
       } catch (e) {
         const decision = decideAfterAttempt({ attempts: row.attempts, ok: false, error: errMessage(e), now });
         await finishRow(deps.supabase, row.id, {
@@ -527,14 +652,21 @@ export async function processClaimedRows(rows: ClaimedConfirmationRow[], deps: P
           ...(decision.nextAttemptAt ? { next_attempt_at: decision.nextAttemptAt } : {}),
         }, now);
         if (decision.status === "pending") summary.retried++;
-        else summary.failed++;
+        else {
+          summary.failed++;
+          if (visitValid && row.kind === "auto" && !reminderCarrier) reminderCarrier = row;
+        }
       }
     }
 
-    if (firstAutoValid && ctx) {
+    if (reminderCarrier && ctx) {
       try {
-        summary.reminders += await ensureReminders(ctx, deps);
+        if (!(await remindersAlreadyCreated(deps.supabase, ctx))) {
+          summary.reminders += await ensureReminders(ctx, deps);
+          await stampRemindersCreated(deps.supabase, reminderCarrier.id, deps.now());
+        }
       } catch (e) {
+        // Sem marca: a proxima linha desta visita e hora volta a tentar.
         console.error("[visitConfirmation] lembretes nao criados (nao fatal):", errMessage(e));
       }
     }

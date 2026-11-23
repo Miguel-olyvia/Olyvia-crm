@@ -51,7 +51,30 @@
 -- confirmation, notify-schedule-change, reminderRunner, process-scheduled-
 -- emails, ecras). SEM esse codigo nada muda: os interruptores estao desligados.
 -- Aplicar ESTA migration ANTES de publicar as funcoes e o front-end.
+--
+-- DECISOES DA REVISAO (o que cada uma faz, em poucas palavras)
+--   * Limite de confirmacoes AUTOMATICAS: no maximo 4 por visita e canal em 24 h
+--     (o gatilho nao enfileira mais). Conta so 'auto' e separado do limite dos
+--     reenvios (3), porque arrastar a visita 15 min e reconfirmar gera uma linha
+--     'auto' nova por cada hora nova -- sem este tecto era um SMS por arrasto.
+--   * Linha presa em 'sending' ha mais de 10 min: volta a 'pending' se ainda
+--     tem tentativas (attempts < 3), senao fica 'failed' e fn_visit_confirmation_claim
+--     devolve-a ao chamador, que avisa o comercial no sino (a limpeza e SQL e nao
+--     chama o aviso; devolve a linha e quem processa avisa na mesma passagem).
+--     Risco assumido: se a funcao morreu DEPOIS de enviar e ANTES de gravar, o
+--     cliente pode receber a confirmacao duas vezes.
+--   * Lembretes: reminders_created_at diz se esta linha ja criou os lembretes da
+--     hora; confirmada -> agendada -> confirmada A MESMA HORA nao cria linha
+--     'auto' (indice unico) e por isso o gatilho enfileira uma linha tecnica
+--     (kind e channel = 'reminders') que so refaz os lembretes, sem enviar nada.
+--     O ecra nunca a ve (rpc_visit_confirmation_status ignora-a).
+--   * O destinatario (email/telefone) so sai a quem tem scheduling.items.edit.
+--   * O modo por omissao corre DEPOIS do espelho contact_id -> lead_id (nome
+--     do gatilho com «zz»: os gatilhos do mesmo evento correm por ordem alfabetica).
 -- =============================================================================
+
+-- Nunca ficar a espera de um lock numa tabela quente (schedule_items) ao aplicar.
+SET lock_timeout = '5s';
 
 -- 1. Modo por formulario --------------------------------------------------------
 ALTER TABLE public.form_branding
@@ -105,8 +128,8 @@ CREATE TABLE IF NOT EXISTS public.visit_confirmation_sends (
   id                   uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   organization_id      uuid NOT NULL REFERENCES public.anew_organizations(id) ON DELETE CASCADE,
   schedule_item_id     uuid NOT NULL REFERENCES public.schedule_items(id) ON DELETE CASCADE,
-  channel              text NOT NULL CHECK (channel IN ('email', 'sms')),
-  kind                 text NOT NULL DEFAULT 'auto' CHECK (kind IN ('auto', 'resend')),
+  channel              text NOT NULL CHECK (channel IN ('email', 'sms', 'reminders')),
+  kind                 text NOT NULL DEFAULT 'auto' CHECK (kind IN ('auto', 'resend', 'reminders')),
   visit_start_snapshot timestamptz NOT NULL,
   status               text NOT NULL DEFAULT 'pending'
                          CHECK (status IN ('pending', 'sending', 'sent', 'failed', 'skipped')),
@@ -118,6 +141,7 @@ CREATE TABLE IF NOT EXISTS public.visit_confirmation_sends (
   recipient            text,
   requested_by_auth    uuid,
   sent_at              timestamptz,
+  reminders_created_at timestamptz,
   created_at           timestamptz NOT NULL DEFAULT now(),
   updated_at           timestamptz NOT NULL DEFAULT now()
 );
@@ -178,8 +202,11 @@ REVOKE ALL ON FUNCTION public.fn_schedule_items_confirmation_mode_default() FROM
 REVOKE ALL ON FUNCTION public.fn_schedule_items_confirmation_mode_default() FROM anon;
 REVOKE ALL ON FUNCTION public.fn_schedule_items_confirmation_mode_default() FROM authenticated;
 
-DROP TRIGGER IF EXISTS trg_schedule_items_confirmation_mode_default ON public.schedule_items;
-CREATE TRIGGER trg_schedule_items_confirmation_mode_default
+-- «zz» no nome: os gatilhos BEFORE INSERT correm por ordem alfabetica, e este tem
+-- de correr DEPOIS de trg_schedule_items_sync_lead_contact (que preenche lead_id a
+-- partir de contact_id); antes dele a visita so com contact_id ficava sem modo.
+DROP TRIGGER IF EXISTS trg_schedule_items_zz_confirmation_mode_default ON public.schedule_items;
+CREATE TRIGGER trg_schedule_items_zz_confirmation_mode_default
   BEFORE INSERT ON public.schedule_items
   FOR EACH ROW
   WHEN (NEW.confirmation_send_on IS NULL AND NEW.time_off_type IS NULL)
@@ -192,6 +219,12 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path TO 'public', 'pg_temp'
 AS $function$
+DECLARE
+  -- Tecto de confirmacoes AUTOMATICAS por visita e canal em 24 h: cada hora nova
+  -- gera uma linha 'auto' nova (indice unico por hora), por isso arrastar a visita
+  -- e reconfirmar repetidamente seria um email/SMS por arrasto ao cliente.
+  k_max_auto_per_day constant integer := 4;
+  v_inserted integer;
 BEGIN
   -- So a PASSAGEM a confirmada conta (confirmed -> confirmed nao reenvia).
   IF TG_OP = 'UPDATE' THEN
@@ -207,7 +240,32 @@ BEGIN
     (organization_id, schedule_item_id, channel, kind, visit_start_snapshot, requested_by_auth)
   SELECT NEW.organization_id, NEW.id, c.channel, 'auto', NEW.start_datetime, auth.uid()
   FROM (VALUES ('email'), ('sms')) AS c(channel)
+  WHERE (
+    SELECT count(*)
+    FROM public.visit_confirmation_sends v
+    WHERE v.schedule_item_id = NEW.id
+      AND v.channel = c.channel
+      AND v.kind = 'auto'
+      AND v.created_at > now() - interval '24 hours'
+  ) < k_max_auto_per_day
   ON CONFLICT (schedule_item_id, channel, visit_start_snapshot) WHERE kind = 'auto' DO NOTHING;
+  GET DIAGNOSTICS v_inserted = ROW_COUNT;
+
+  -- Nenhuma confirmacao nova (mesma hora ja confirmada antes, ou tecto atingido):
+  -- os lembretes foram cancelados quando a visita deixou de estar confirmada, por
+  -- isso enfileira-se uma linha tecnica que so os refaz, sem enviar nada ao cliente.
+  IF v_inserted = 0 THEN
+    INSERT INTO public.visit_confirmation_sends
+      (organization_id, schedule_item_id, channel, kind, visit_start_snapshot, requested_by_auth)
+    SELECT NEW.organization_id, NEW.id, 'reminders', 'reminders', NEW.start_datetime, auth.uid()
+    WHERE NOT EXISTS (
+      SELECT 1
+      FROM public.visit_confirmation_sends r
+      WHERE r.schedule_item_id = NEW.id
+        AND r.kind = 'reminders'
+        AND r.status IN ('pending', 'sending')
+    );
+  END IF;
 
   RETURN NULL;
 END;
@@ -249,6 +307,10 @@ STABLE
 SECURITY DEFINER
 SET search_path TO 'public', 'pg_temp'
 AS $function$
+DECLARE
+  -- O destinatario (email/telefone do cliente) so sai a quem pode editar a visita;
+  -- quem so a pode ver recebe o estado de cada canal, com o destinatario a NULL.
+  v_can_edit boolean := public.has_scheduling_permission(auth.uid(), 'scheduling.items.edit');
 BEGIN
   IF p_item_ids IS NULL OR cardinality(p_item_ids) = 0 THEN
     RETURN;
@@ -262,13 +324,15 @@ BEGIN
 
   RETURN QUERY
   SELECT si.id, si.confirmation_send_on, q.channel, q.kind, q.status, q.attempts,
-         q.error_message, q.skip_reason, q.recipient, q.sent_at, q.created_at, q.visit_start_snapshot
+         q.error_message, q.skip_reason, CASE WHEN v_can_edit THEN q.recipient ELSE NULL END,
+         q.sent_at, q.created_at, q.visit_start_snapshot
   FROM public.schedule_items si
   LEFT JOIN LATERAL (
     SELECT DISTINCT ON (v.channel) v.*
     FROM public.visit_confirmation_sends v
     WHERE v.schedule_item_id = si.id
       AND v.organization_id = si.organization_id
+      AND v.kind <> 'reminders'
     ORDER BY v.channel, v.created_at DESC
   ) q ON true
   WHERE si.id = ANY (p_item_ids)
@@ -385,18 +449,37 @@ SECURITY DEFINER
 SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
+  k_max_attempts constant integer := 3;  -- o mesmo MAX_SEND_ATTEMPTS da edge function
   v_limit integer := LEAST(GREATEST(COALESCE(p_limit, 20), 1), 50);
   v_row   public.visit_confirmation_sends;
 BEGIN
-  -- Uma linha presa em 'sending' ha mais de 10 minutos (a funcao caiu a meio)
-  -- passa a falhada: pode ter saido, por isso nao se repete sozinha -- fica o
-  -- botao Reenviar.
+  -- Uma linha presa em 'sending' ha mais de 10 minutos (a funcao caiu a meio):
+  -- com tentativas por gastar volta a fila e e reclamada logo a seguir...
   UPDATE public.visit_confirmation_sends
-     SET status = 'failed',
-         error_message = COALESCE(error_message, 'Envio interrompido; confirme com o cliente ou reenvie'),
+     SET status = 'pending',
+         claimed_at = NULL,
+         next_attempt_at = now(),
+         error_message = COALESCE(error_message, 'Envio interrompido; volta a tentar'),
          updated_at = now()
    WHERE status = 'sending'
-     AND claimed_at < now() - interval '10 minutes';
+     AND claimed_at < now() - interval '10 minutes'
+     AND attempts < k_max_attempts;
+
+  -- ...e com as tentativas esgotadas passa a falhada. A linha e DEVOLVIDA ao
+  -- chamador (ja com status 'failed', nao 'sending'): quem processa avisa o
+  -- comercial no sino, porque aqui em SQL nao ha como chamar esse aviso.
+  FOR v_row IN
+    UPDATE public.visit_confirmation_sends
+       SET status = 'failed',
+           error_message = COALESCE(error_message, 'Envio interrompido; confirme com o cliente ou reenvie'),
+           updated_at = now()
+     WHERE status = 'sending'
+       AND claimed_at < now() - interval '10 minutes'
+       AND attempts >= k_max_attempts
+    RETURNING *
+  LOOP
+    RETURN NEXT v_row;
+  END LOOP;
 
   -- FOR ... IN UPDATE ... RETURNING (forma documentada do PL/pgSQL para DML com RETURNING).
   FOR v_row IN
@@ -499,9 +582,28 @@ BEGIN
   ) OR NOT EXISTS (
     SELECT 1 FROM pg_trigger
     WHERE tgrelid = 'public.schedule_items'::regclass AND NOT tgisinternal
-      AND tgname::text = 'trg_schedule_items_confirmation_mode_default'
+      AND tgname::text = 'trg_schedule_items_zz_confirmation_mode_default'
   ) THEN
     RAISE EXCEPTION 'Gatilhos de confirmacao em falta em schedule_items';
+  END IF;
+  -- O modo por omissao tem de correr DEPOIS do espelho contact_id -> lead_id
+  -- (ordem dos gatilhos do mesmo evento: alfabetica, em collation C).
+  IF EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgrelid = 'public.schedule_items'::regclass AND NOT tgisinternal
+      AND tgname::text = 'trg_schedule_items_sync_lead_contact'
+      AND tgname::text COLLATE "C" > 'trg_schedule_items_zz_confirmation_mode_default' COLLATE "C"
+  ) THEN
+    RAISE EXCEPTION 'O gatilho do modo por omissao corre antes do espelho contact_id -> lead_id';
+  END IF;
+
+  -- Coluna que diz se a linha ja criou os lembretes da hora
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'visit_confirmation_sends'
+      AND column_name = 'reminders_created_at'
+  ) THEN
+    RAISE EXCEPTION 'visit_confirmation_sends.reminders_created_at em falta';
   END IF;
 
   -- Funcoes: SECURITY DEFINER com search_path fixo

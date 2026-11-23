@@ -93,6 +93,17 @@ describe("VisitConfirmationStatus", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalledWith("visitConfirmation.resendError|error=Limite de reenvios atingido"));
   });
 
+  it("quem so pode ver recebe o destinatario nulo: o estado mostra-se igual e o ecra nunca o exibe", async () => {
+    fetchMock.mockResolvedValue(status({
+      email: { status: "sent", sent_at: new Date(2026, 10, 23, 10, 32).toISOString(), recipient: null },
+      sms: { status: "sent", sent_at: new Date(2026, 10, 23, 10, 33).toISOString(), recipient: null },
+    }));
+    const { container } = render(<VisitConfirmationStatus itemId="i1" savedStatus="confirmed" pendingStatus="confirmed" />);
+    expect(await screen.findByText("visitConfirmation.state.sent|time=10:32")).toBeInTheDocument();
+    expect(screen.getByText("visitConfirmation.state.sent|time=10:33")).toBeInTheDocument();
+    expect(container.textContent).not.toContain("null");
+  });
+
   it("visita confirmada mas nao gravada como confirmada: sem botao de reenviar", async () => {
     fetchMock.mockResolvedValue(status({}));
     render(<VisitConfirmationStatus itemId="i1" savedStatus="scheduled" pendingStatus="confirmed" />);

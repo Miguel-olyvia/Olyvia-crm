@@ -13,6 +13,7 @@ import { getCorsHeadersExtended } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { reconcileDrift, reconcileDueItems, renderLinkedEmail } from "../_shared/reminderRunner.ts";
 import { collectDueBatch, decideRendered, DUE_BATCH_SIZE, isHeldBack } from "../_shared/reminderBatch.ts";
+import { dispatchVisitConfirmations } from "../_shared/visitConfirmationDispatch.ts";
 
 initSentry();
 
@@ -46,33 +47,22 @@ serve(async (req) => {
     }
 
     // Confirmacoes de visita do modo 'agenda_confirm' por enviar (a rede de
-    // seguranca do ecra da Agenda). So chama a send-visit-confirmation quando ha
-    // linhas vencidas; sem a tabela (migration por aplicar) ou com erro, salta.
+    // seguranca do ecra da Agenda). Corre DEPOIS do lote de lembretes e sem o
+    // atrasar: com EdgeRuntime.waitUntil vai para segundo plano e a resposta sai
+    // logo; sem ele espera-se, mas so a seguir ao lote. So chama a
+    // send-visit-confirmation quando ha linhas pendentes vencidas ou presas em
+    // 'sending'; sem a tabela (migration por aplicar) ou com erro, salta.
     // Fail-soft: nunca impede os emails deste lote.
-    let visitConfirmations: unknown = null;
-    try {
-      const { data: dueConfirmations, error: dueErr } = await supabase
-        .from("visit_confirmation_sends")
-        .select("id")
-        .eq("status", "pending")
-        .lte("next_attempt_at", new Date().toISOString())
-        .limit(1);
-      if (!dueErr && Array.isArray(dueConfirmations) && dueConfirmations.length > 0) {
-        const res = await fetch(`${Deno.env.get("SUPABASE_URL")}/functions/v1/send-visit-confirmation`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            // A mesma credencial interna com que o cron chamou esta funcao.
-            Authorization: req.headers.get("Authorization") ?? "",
-          },
-          body: JSON.stringify({}),
-          signal: AbortSignal.timeout(25_000),
-        });
-        visitConfirmations = await res.json().catch(() => ({ status: res.status }));
-      }
-    } catch (confirmErr) {
-      console.error("[process-scheduled-emails] visit confirmations failed (non-fatal):", confirmErr);
-    }
+    const runVisitConfirmations = () => {
+      const edge = (globalThis as { EdgeRuntime?: { waitUntil?: (p: Promise<unknown>) => void } }).EdgeRuntime;
+      return dispatchVisitConfirmations({
+        supabase,
+        url: `${Deno.env.get("SUPABASE_URL")}/functions/v1/send-visit-confirmation`,
+        // A mesma credencial interna com que o cron chamou esta funcao.
+        authorization: req.headers.get("Authorization") ?? "",
+        waitUntil: typeof edge?.waitUntil === "function" ? (p) => edge.waitUntil!(p) : null,
+      });
+    };
 
     // Mais antigas primeiro, e sem as linhas que ja foram vistas nesta corrida.
     const fetchDue = async (excludeIds: readonly string[]) => {
@@ -101,6 +91,7 @@ serve(async (req) => {
     const pendingEmails = batch.rows;
     const unreconciled = batch.unreconciled;
     if (pendingEmails.length === 0) {
+      const visitConfirmations = await runVisitConfirmations();
       return new Response(JSON.stringify({ processed: 0, deferred: batch.deferred, reconcile: reconcileSummary, visit_confirmations: visitConfirmations }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -263,6 +254,8 @@ serve(async (req) => {
       }
     }
 
+    // So agora, com o lote dos lembretes ja tratado.
+    const visitConfirmations = await runVisitConfirmations();
     return new Response(
       JSON.stringify({ processed, cancelled, failed, deferred, reconcile: reconcileSummary, visit_confirmations: visitConfirmations, ...smtpResolutionSummary }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }

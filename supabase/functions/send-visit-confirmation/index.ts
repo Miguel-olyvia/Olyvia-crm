@@ -7,6 +7,7 @@ import { initSentry, captureError } from '../_shared/sentry.ts';
 import { sendEmailDetailed } from '../_shared/formEmails.ts';
 import { sendSmsNow } from '../_shared/sendSms.ts';
 import { createReminderLines } from '../_shared/reminderLines.ts';
+import { callerCanEditSchedule } from '../_shared/visitConfirmation.ts';
 import { processClaimedRows } from '../_shared/visitConfirmationProcessor.ts';
 import type { ClaimedConfirmationRow } from '../_shared/visitConfirmationProcessor.ts';
 
@@ -22,7 +23,8 @@ initSentry();
  * Duas formas de chamar (verify_jwt = false em config.toml; autentica-se aqui):
  *  - Ecra da Agenda, logo a seguir a gravar (JWT do utilizador):
  *      POST { schedule_item_id } -> processa SO as linhas dessa visita.
- *      Exige scheduling.items.edit com ambito sobre a visita.
+ *      Exige a permissao scheduling.items.edit (has_scheduling_permission) E ambito
+ *      sobre a visita; o destinatario sai sempre da ficha, nunca do pedido.
  *  - Processamento em lote (process-scheduled-emails a cada minuto, com a
  *    credencial interna que ja traz do cron):
  *      POST { } ou { schedule_item_id } -> processa as linhas pendentes.
@@ -30,7 +32,9 @@ initSentry();
  * A linha e reclamada (pending -> sending) por fn_visit_confirmation_claim com
  * FOR UPDATE SKIP LOCKED: os dois caminhos nunca enviam a mesma linha duas vezes.
  *
- * Resposta 200: { processed, sent, skipped, retried, failed, reminders }
+ * Resposta 200: { processed, sent, skipped, retried, failed, reminders, released, interrupted }
+ * (released = reclamadas e devolvidas a 'pending' por falta de tempo; interrupted =
+ * caducadas em 'sending' e falhadas pela base, de que so se avisou o comercial).
  */
 
 const requestSchema = z.object({
@@ -40,7 +44,11 @@ const requestSchema = z.object({
 const RATE_LIMIT_BUCKET = 'send-visit-confirmation';
 const RATE_LIMIT_MAX_ATTEMPTS = 10;
 const RATE_LIMIT_WINDOW_MINUTES = 10;
-const BATCH_LIMIT = 25;
+// Lote pequeno e com orcamento de tempo: o process-scheduled-emails espera por esta
+// funcao ate 25 s, e uma linha reclamada e nao tratada ficava presa em 'sending'.
+const BATCH_LIMIT = 8;
+// Passado este tempo deixa de pegar em linhas novas e devolve as restantes a 'pending'.
+const TIME_BUDGET_MS = 15_000;
 
 Deno.serve(async (req: Request) => {
   const corsHeaders = getCorsHeadersExtended(req);
@@ -81,6 +89,10 @@ Deno.serve(async (req: Request) => {
         Deno.env.get('SUPABASE_ANON_KEY')!,
         { global: { headers: { Authorization: req.headers.get('Authorization') ?? '' } } },
       );
+      // Primeiro a permissao (a mesma que as RPCs usam), depois o ambito sobre a visita.
+      if (!(await callerCanEditSchedule(userClient, caller.authUid))) {
+        return json({ error: 'Sem permissao para editar agendamentos.' }, 403);
+      }
       const { data: scopeRows } = await userClient.rpc('get_schedule_item_scope_context', {
         p_org_id: item.organization_id,
         p_permission_code: 'scheduling.items.edit',
@@ -120,10 +132,12 @@ Deno.serve(async (req: Request) => {
     }
     const rows = (Array.isArray(claimed) ? claimed : []) as ClaimedConfirmationRow[];
     if (rows.length === 0) {
-      return json({ processed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, reminders: 0 });
+      return json({ processed: 0, sent: 0, skipped: 0, retried: 0, failed: 0, reminders: 0, released: 0, interrupted: 0 });
     }
 
+    const startedAt = Date.now();
     const summary = await processClaimedRows(rows, {
+      shouldStop: () => Date.now() - startedAt > TIME_BUDGET_MS,
       supabase: admin,
       sendEmail: (p) => sendEmailDetailed(p),
       sendSms: (p) => sendSmsNow(p),
