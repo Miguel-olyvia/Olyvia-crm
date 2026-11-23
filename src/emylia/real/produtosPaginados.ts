@@ -89,7 +89,7 @@ export function contagensDe(r: unknown): ContagensProdutos | null {
 }
 
 type ResPagina = { ok: true; v: PaginaProdutos } | { ok: false; erro: string; codigo?: string; mensagemBase?: string };
-async function lerPaginaDe(fn: "cat_pesquisar_produtos" | "cat_ler_produtos_pagina", args: Record<string, unknown>): Promise<ResPagina> {
+async function lerPaginaDe(fn: "cat_pesquisar_produtos" | "cat_ler_produtos_pagina" | "cat_estudio_procurar_produtos", args: Record<string, unknown>): Promise<ResPagina> {
   try {
     const { data, error } = await rpcLivre(fn, args);
     if (error) return { ok: false, erro: erroAmigavel(error, "Não foi possível ler os produtos."), ...(error.code ? { codigo: error.code } : {}), mensagemBase: error.message ?? "" };
@@ -108,6 +108,22 @@ export async function lerPesquisaProdutos(org: string, f: FiltroServidor, pagina
   if (!funcaoNomeadaEmFalta({ code: r.codigo, message: r.mensagemBase }, "cat_pesquisar_produtos")) return { ok: false, erro: r.erro };
   const l = await lerPaginaDe("cat_ler_produtos_pagina", argsPagina(org, { ...f, servico: undefined }, pagina));
   return l.ok ? { ok: true, v: { ...l.v, aviso: f.servico ? "A pesquisa por serviço ainda não existe nesta base: a lista não está filtrada pelo serviço." : "A pesquisa de produtos ainda não existe nesta base: a lista é a de sempre." } } : { ok: false, erro: l.erro };
+}
+
+/** 23/11 (20270126000000): os argumentos de cat_estudio_procurar_produtos. ATENÇÃO: p_pagina vem antes de p_limite. */
+export function argsPesquisaEstudio(org: string, q: string, subcategorias: readonly string[], pagina: number, limite = POR_PAGINA_SERVIDOR): Record<string, unknown> {
+  return { p_org: org, p_q: nulo(q), p_subcategorias: subcategorias.length ? [...subcategorias] : null, p_pagina: pagina, p_limite: limite };
+}
+
+/** 23/11 (20270126000000): a pesquisa do Estúdio numa só leitura para todas as subcategorias do tipo de peça. Procura também nos
+ *  atributos, aceita a referência (SKU, inteira ou parte, com ou sem traços) e devolve os mais parecidos primeiro (a referência, o nome
+ *  igual, o texto seguido no nome, todas as palavras no nome, o nome mais curto). Só os produtos à venda (sem rascunhos, inativos nem
+ *  sem PVP). `v: null` = a função ainda não existe na base (quem chama lê como antes, por cat_ler_produtos_pagina). */
+export async function lerPesquisaDoEstudio(org: string, q: string, subcategorias: readonly string[], pagina: number): Promise<Res<PaginaProdutos | null>> {
+  const r = await lerPaginaDe("cat_estudio_procurar_produtos", argsPesquisaEstudio(org, q, subcategorias, pagina));
+  if (r.ok) return r;
+  if (funcaoNomeadaEmFalta({ code: r.codigo, message: r.mensagemBase }, "cat_estudio_procurar_produtos")) return { ok: true, v: null };
+  return { ok: false, erro: r.erro };
 }
 
 /** A página da lista; com `servico` no filtro é a pesquisa por serviço (cat_pesquisar_produtos). */

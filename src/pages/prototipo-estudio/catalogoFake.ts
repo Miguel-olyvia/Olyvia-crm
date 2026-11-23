@@ -49,6 +49,10 @@ export interface Produto {
   destaque?: string;
   /** 17/11: o serviço do catálogo que instala este produto (o nome); `inst` é então o preço dele × o fator. */
   instServico?: string;
+  /** 23/11: a referência (SKU) do produto no catálogo verdadeiro; a pesquisa do Estúdio encontra-o por ela. */
+  ref?: string;
+  /** 23/11: o resto do texto onde a pesquisa procura (marca, subcategoria e todos os atributos; `destaque` é só o começo). */
+  procura?: string;
 }
 
 const P = (id: string, cat: Categoria, n: string, colecao: string, cores: Cor[], preco: number, inst: number, extra: Partial<Produto> = {}): Produto =>

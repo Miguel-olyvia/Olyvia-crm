@@ -38,11 +38,24 @@ const SINONIMOS: string[][] = [
 /** A raiz de uma palavra dita (sem o plural e o género: «douradas» → «dourad», «pretos» → «pret»). */
 const raiz = (w: string) => (w.length > 4 ? w.replace(/(as|os|es|a|o|s)$/, "") : w);
 
-/** Os termos da pesquisa batem todos com o nome, o modelo ou os atributos (sem acentos nem maiúsculas; com sinónimos e plurais). */
+/** Só as letras e os algarismos, sem acentos nem maiúsculas: «DBBD-0098» e «dbbd 0098» são a mesma referência. */
+export const compacto = (s: string) => semAcento(s).replace(/[^a-z0-9]/g, "");
+/** Uma referência procura-se a partir de 3 caracteres (menos do que isso apanhava quase todas). */
+const MIN_REF = 3;
+
+/** 23/11 (Rúben: «procurar pela referência dá 0 resultados»): o texto é a referência (SKU) do produto, inteira ou parte dela. */
+export function bateComReferencia(p: Produto, q: string): boolean {
+  const c = compacto(q), ref = compacto(p.ref ?? "");
+  return c.length >= MIN_REF && !!ref && ref.includes(c);
+}
+
+/** Os termos da pesquisa batem todos com o nome, o modelo ou os atributos (sem acentos nem maiúsculas; com sinónimos e plurais).
+ *  23/11: ou o texto é a referência (SKU) do produto, inteira ou em parte. */
 export function bateComPesquisa(p: Produto, q: string): boolean {
   const termos = semAcento(q).split(/\s+/).filter(Boolean);
   if (!termos.length) return true;
-  const texto = semAcento(`${p.n} ${p.colecao} ${p.destaque ?? ""}`);
+  if (bateComReferencia(p, q)) return true;
+  const texto = semAcento(`${p.n} ${p.colecao} ${p.destaque ?? ""} ${p.ref ?? ""} ${p.procura ?? ""}`);
   return termos.every((t) => {
     if (texto.includes(t)) return true;
     const r = raiz(t);
@@ -52,11 +65,37 @@ export function bateComPesquisa(p: Produto, q: string): boolean {
   });
 }
 
+/** 23/11 (Rúben: «o produto com o nome quase inteiro nunca apareceu»): quanto um produto se parece com o texto (menor = mais
+ *  parecido). 0 a referência exata; 1 parte da referência; 2 o nome igual; 3 o texto seguido dentro do nome; 4 todas as palavras no
+ *  nome; 5 o resto (pelo modelo, pelos atributos, por sinónimos). */
+export function grauDaPesquisa(p: Produto, q: string): number {
+  const c = compacto(q), ref = compacto(p.ref ?? "");
+  if (c && ref && ref === c) return 0;
+  if (bateComReferencia(p, q)) return 1;
+  const frase = semAcento(q).replace(/\s+/g, " "), nome = semAcento(p.n).replace(/\s+/g, " ");
+  if (!frase) return 5;
+  if (nome === frase) return 2;
+  if (nome.includes(frase)) return 3;
+  return frase.split(" ").every((t) => nome.includes(t)) ? 4 : 5;
+}
+
+/** Os resultados de uma pesquisa, os mais parecidos primeiro: o grau, depois o nome mais curto (o mais exato), depois o nome. */
+export function ordenarPorPesquisa(lista: readonly Produto[], q: string): Produto[] {
+  return lista
+    .map((p) => ({ p, g: grauDaPesquisa(p, q), l: p.n.length }))
+    .sort((a, b) => a.g - b.g || a.l - b.l || a.p.n.localeCompare(b.p.n, "pt"))
+    .map((x) => x.p);
+}
+
 /** O evento que manda a lista de produtos aberta procurar (a Olyvia: «procura sanitas glamic»). */
 export const EV_PROCURAR = "estudio-procurar";
 
-/** Procura no catálogo inteiro da empresa (as subcategorias deste tipo de peça) e junta o que encontrar. 0 sem catálogo verdadeiro. */
-export async function procurarNoCatalogo(cat: Categoria, q: string): Promise<number> {
+/** O que a procura no catálogo da empresa trouxe: quantos produtos novos entraram e se o servidor tem mais páginas. */
+export interface ResultadoProcura { novos: number; haMais: boolean }
+
+/** Procura no catálogo inteiro da empresa (as subcategorias deste tipo de peça) e junta o que encontrar. `pagina` > 1 traz os
+ *  seguintes («Ver mais»). Sem catálogo verdadeiro: nada novo e nada mais. */
+export async function procurarNoCatalogo(cat: Categoria, q: string, pagina = 1): Promise<ResultadoProcura> {
   const m = await import("./catalogoRealDoEstudio");
-  return m.procurarNoCatalogoReal(cat, q);
+  return m.procurarNoCatalogoReal(cat, q, pagina);
 }

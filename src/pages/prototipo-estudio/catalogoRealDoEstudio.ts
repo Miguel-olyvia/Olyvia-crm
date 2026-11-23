@@ -10,7 +10,8 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useCompanyOpcional } from "@/contexts/CompanyContext";
 import { supabase } from "@/integrations/supabase/client";
-import { lerProdutosPagina, SEM_FILTRO_SERVIDOR, type LinhaPaginaProduto } from "@/emylia/real/produtosPaginados";
+import { lerPesquisaDoEstudio, lerProdutosPagina, SEM_FILTRO_SERVIDOR, type LinhaPaginaProduto } from "@/emylia/real/produtosPaginados";
+import type { ResultadoProcura } from "./pesquisaEstudio";
 import { CATALOGO, CORES, ouvirProdutosReais, produtosReais, usarProdutosReais, versaoProdutosReais, type Categoria, type Cor, type Produto } from "./catalogoFake";
 
 /** As subcategorias da Mudelar de cada tipo de peça do Estúdio (pelo nome, sem acentos nem maiúsculas). */
@@ -61,6 +62,9 @@ export function produtoDaLinha(l: LinhaPaginaProduto, cat: Categoria): Produto |
     ...tamanhoNaPlanta(cat, medidasDoTexto(l.nome)),
     ...(molde?.z0 !== undefined ? { z0: molde.z0, z1: molde.z1 } : {}),
     ...(l.atributos_resumo ? { destaque: l.atributos_resumo.slice(0, 120) } : {}),
+    // 23/11: a referência e o resto do texto, para a pesquisa do Estúdio (pelo SKU, pela marca, pela subcategoria, por todos os atributos)
+    ...(l.sku?.trim() ? { ref: l.sku.trim() } : {}),
+    ...(() => { const t = [l.marca, l.subcategoria, l.atributos_resumo].filter(Boolean).join(" "); return t ? { procura: t } : {}; })(),
   };
 }
 
@@ -129,18 +133,28 @@ export const PAGINAS_A_MAIS = 2;
 
 /** Lê os pedidos (8 de cada vez) e junta aos já vistos os produtos novos, com a mão de obra. Devolve também as subcategorias que têm
  *  mais páginas (para pré-carregar). */
-async function lerPedidos(org: string, pedidos: readonly Pedido[], vistos: Map<string, Produto>): Promise<{ novos: Produto[]; comMais: { p: Pedido; paginas: number }[] }> {
+async function lerPedidos(org: string, pedidos: readonly Pedido[], vistos: Map<string, Produto>): Promise<{ novos: Produto[]; comMais: { p: Pedido; paginas: number }[]; haMais: boolean }> {
   const respostas = await aos(pedidos.map((p) => async () => {
     const r = await lerProdutosPagina(org, { ...SEM_FILTRO_SERVIDOR, subcategoria: p.sub, q: p.q }, p.pagina);
     return { p, linhas: r.ok ? r.v.produtos : [], paginas: r.ok ? r.v.paginas : 1 };
   }), 8);
+  const novos = await juntarLinhas(respostas.map(({ p, linhas }) => ({ cat: p.cat, linhas })), vistos);
+  return {
+    novos,
+    comMais: respostas.filter((r) => !r.p.q && r.paginas > r.p.pagina).map((r) => ({ p: r.p, paginas: r.paginas })),
+    haMais: respostas.some((r) => r.paginas > r.p.pagina),
+  };
+}
+
+/** Junta aos já vistos os produtos novos destas linhas do servidor (com a mão de obra) e devolve-os. */
+async function juntarLinhas(grupos: readonly { cat: Categoria; linhas: readonly LinhaPaginaProduto[] }[], vistos: Map<string, Produto>): Promise<Produto[]> {
   const novos: Produto[] = [];
-  for (const { p, linhas } of respostas) {
+  for (const { cat, linhas } of grupos) {
     for (const l of linhas) {
       if (vistos.has(l.id)) continue;
       // as colunas de duche: só as colunas (os braços, os pratos e os chuveiros de encastre vão com elas)
-      if (p.cat === "coluna_duche" && !/^\s*coluna/i.test(l.nome)) continue;
-      const x = produtoDaLinha(l, p.cat);
+      if (cat === "coluna_duche" && !/^\s*coluna/i.test(l.nome)) continue;
+      const x = produtoDaLinha(l, cat);
       if (x) { vistos.set(l.id, x); novos.push(x); }
     }
   }
@@ -148,7 +162,7 @@ async function lerPedidos(org: string, pedidos: readonly Pedido[], vistos: Map<s
   let comMao = novos;
   try { comMao = await maoDeObraDosServicos(novos); } catch { /* fica a de referência */ }
   for (const x of comMao) vistos.set(x.id, x);
-  return { novos: comMao, comMais: respostas.filter((r) => !r.p.q && r.paginas > r.p.pagina).map((r) => ({ p: r.p, paginas: r.paginas })) };
+  return comMao;
 }
 
 // ------------------------------------------------------------------ 17/11 (Rúben: «no Estúdio permitia fazer pesquisas dos produtos»)
@@ -156,17 +170,32 @@ async function lerPedidos(org: string, pedidos: readonly Pedido[], vistos: Map<s
 /** O que a pesquisa precisa de saber do carregamento: a organização e as subcategorias de cada tipo de peça. */
 let contexto: { org: string; subs: Map<Categoria, string[]> } | null = null;
 
-export { bateComPesquisa } from "./pesquisaEstudio";
+export { bateComPesquisa, grauDaPesquisa, ordenarPorPesquisa } from "./pesquisaEstudio";
+
+/** 23/11: a base ainda não tem cat_estudio_procurar_produtos (20270126000000): a pesquisa lê como antes, subcategoria a subcategoria. */
+let semPesquisaNova = false;
 
 /** Procura no catálogo inteiro da organização, nas subcategorias deste tipo de peça, e junta o que encontrar aos produtos do Estúdio.
- *  Devolve quantos novos chegaram (0 sem sessão ou sem catálogo verdadeiro). Chama-se por pesquisaEstudio.ts (carregado à parte). */
-export async function procurarNoCatalogoReal(cat: Categoria, q: string): Promise<number> {
+ *  `pagina` > 1 traz a página seguinte da mesma pesquisa («Ver mais»). Devolve quantos novos chegaram e se o servidor tem mais
+ *  (nada sem sessão ou sem catálogo verdadeiro). Chama-se por pesquisaEstudio.ts (carregado à parte).
+ *  23/11 (Rúben: «procurar pela referência dá 0 resultados»; «o produto nunca apareceu, nem com o nome quase inteiro»): com a função
+ *  nova, uma só leitura que aceita a referência, procura nos atributos e traz os mais parecidos primeiro; sem ela, a de antes. */
+export async function procurarNoCatalogoReal(cat: Categoria, q: string, pagina = 1): Promise<ResultadoProcura> {
   const c = contexto, subs = c?.subs.get(cat) ?? [];
-  if (!c || !subs.length || semAcento(q).length < 2) return 0;
+  const texto = q.trim();
+  if (!c || !subs.length || semAcento(texto).length < 2) return { novos: 0, haMais: false };
   const vistos = new Map(produtosReais().map((p) => [p.id, p]));
-  const { novos } = await lerPedidos(c.org, subs.map((sub) => ({ cat, sub, q: q.trim(), pagina: 1 })), vistos);
+  let novos: Produto[] = [], haMais = false;
+  const r = semPesquisaNova ? null : await lerPesquisaDoEstudio(c.org, texto, subs, pagina);
+  if (r?.ok && r.v) {
+    novos = await juntarLinhas([{ cat, linhas: r.v.produtos }], vistos);
+    haMais = r.v.paginas > r.v.pagina;
+  } else {
+    if (r?.ok && r.v === null) semPesquisaNova = true;
+    ({ novos, haMais } = await lerPedidos(c.org, subs.map((sub) => ({ cat, sub, q: texto, pagina })), vistos));
+  }
   if (novos.length) usarProdutosReais([...vistos.values()]);
-  return novos.length;
+  return { novos: novos.length, haMais };
 }
 
 /** Os produtos verdadeiros do Estúdio, de todas as categorias. Devolve logo a 1.ª página de cada subcategoria (e de cada cor) e, por

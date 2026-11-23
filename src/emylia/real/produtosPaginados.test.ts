@@ -10,7 +10,7 @@ vi.mock("@/integrations/supabase/client", () => ({
   supabase: { rpc: vi.fn(async (f: string, a: Record<string, unknown>) => { base.chamadas.push({ f, a }); return base.responder(f, a); }) },
 }));
 
-import { argsPagina, argsPesquisa, lerAtributosProduto, lerMarcasDoFiltro, lerModeloDoProduto, lerProdutosContagens, lerProdutosPagina, paginaDe, contagensDe, SEM_FILTRO_SERVIDOR, POR_PAGINA_SERVIDOR, textoEstadoPagina } from "./produtosPaginados";
+import { argsPagina, argsPesquisa, argsPesquisaEstudio, lerPesquisaDoEstudio, lerAtributosProduto, lerMarcasDoFiltro, lerModeloDoProduto, lerProdutosContagens, lerProdutosPagina, paginaDe, contagensDe, SEM_FILTRO_SERVIDOR, POR_PAGINA_SERVIDOR, textoEstadoPagina } from "./produtosPaginados";
 
 const ORG = "11111111-1111-4111-a111-111111111111";
 const P1 = "88888888-8888-4888-a888-888888888881";
@@ -225,4 +225,22 @@ describe("textoEstadoPagina (o contador por cima da lista)", () => {
   });
   it("vazio continua a frase de hoje", () => expect(t(1, 0, 0)).toBe("0 produtos"));
   it("sem separador de milhares e com o limite da página", () => expect(t(2, 2, 1234, 1000)).toBe("Página 2 de 2 · produtos 1001–1234 de 1234"));
+});
+
+describe("23/11: a pesquisa do Estúdio (cat_estudio_procurar_produtos, 20270126000000)", () => {
+  beforeEach(() => { base.chamadas = []; });
+  it("os argumentos: as subcategorias numa lista, p_pagina antes de p_limite; sem subcategorias = todas", () => {
+    expect(argsPesquisaEstudio(ORG, " MACBML0092 ", ["s1", "s2"], 2)).toEqual({ p_org: ORG, p_q: "MACBML0092", p_subcategorias: ["s1", "s2"], p_pagina: 2, p_limite: POR_PAGINA_SERVIDOR });
+    expect(argsPesquisaEstudio(ORG, "", [], 1).p_subcategorias).toBeNull();
+  });
+  it("lê a página; sem a função na base devolve v: null (quem chama lê como antes); outro erro é erro", async () => {
+    base.responder = () => ({ data: { total: 1, pagina: 1, limite: 50, paginas: 1, produtos: [{ id: "p1", nome: "Móvel", sku: "MACBML0092" }] }, error: null });
+    const r = await lerPesquisaDoEstudio(ORG, "MACBML0092", ["s1"], 1);
+    expect(r.ok && r.v?.produtos[0].id).toBe("p1");
+    expect(base.chamadas.at(-1)?.f).toBe("cat_estudio_procurar_produtos");
+    base.responder = () => ({ data: null, error: { code: "PGRST202", message: "Could not find the function public.cat_estudio_procurar_produtos" } });
+    expect(await lerPesquisaDoEstudio(ORG, "x1", ["s1"], 1)).toEqual({ ok: true, v: null });
+    base.responder = () => ({ data: null, error: { code: "42501", message: "permission denied" } });
+    expect((await lerPesquisaDoEstudio(ORG, "x1", ["s1"], 1)).ok).toBe(false);
+  });
 });
