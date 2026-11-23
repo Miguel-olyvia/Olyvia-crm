@@ -4093,6 +4093,18 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       avisar({ msg: r.fimDepois < r.fimAntes ? "Obra adiantada" : r.fimDepois > r.fimAntes ? "Plano posto em dia" : "Plano reorganizado", sub: `${fimAntes === fimDepois ? "A data de fim mantém-se" : `Acaba a ${fimDepois} (era ${fimAntes})`}${m.cliente ? " · o cliente vê o aviso no portal" : ""}`, kind: "ok" });
       return n;
     },
+    /** 23/11 (revisão: «Avisar os técnicos afetados»): o gestor avisa, com um toque, os técnicos a quem a obra mudou (o Estúdio da obra junta
+     *  a lista: avisosTecnicos.ts). Cada aviso fica no Hoje do técnico; fica uma linha no histórico (não no diário). */
+    avisarTecnicos(id: number, L: { tec: string; ti: number; t: string }[]): number {
+      if (!exigePerm("obra.planear")) return 0;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || !L.length) return 0;
+      for (const x of L) avisarTecnico(p, x.ti, x.t, agora(), x.tec);
+      const nomes = [...new Set(L.map((x) => (TECS.find((y) => y.id === x.tec)?.n ?? x.tec).split(" ")[0]))];
+      log(d, `Plano: técnicos avisados (${nomes.join(", ")})`);
+      avisar({ msg: nomes.length === 1 ? `${nomes[0]} avisado` : `${nomes.length} técnicos avisados`, sub: "A mudança fica marcada no Hoje de cada um", kind: "ok" });
+      return nomes.length;
+    },
     /** 23/11 (Rúben: «criar dependências com click and drag»): «`para` só começa quando `de` acaba» (ligar), ou tirar essa ligação. O plano
      *  replaneia com ela (sem adiantar nada) e as mudanças de dia aplicam-se; fica no histórico, no diário e nas alterações do plano. */
     ligarTarefas(id: number, para: number, de: number, ligar: boolean, m: { motivo?: string; cliente?: boolean } = {}): boolean {

@@ -15,7 +15,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, HardHat, Lightbulb, Link2, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Redo2, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { comRelogioReal, eur, nfmt, type Negocio, type Plano, type Tarefa } from "../motor";
+import { comRelogioReal, eur, nfmt, type AvisoTec, type Negocio, type Plano, type Tarefa } from "../motor";
 import type { Ctx } from "../pecas";
 import { NaFrente } from "../NaFrente";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
@@ -46,6 +46,8 @@ import { custoDosNossos, pedePorque, type AjusteObra } from "./quemPaga";
 import { PorqueAjuste, type ImprevistoInicial } from "./PorqueAjuste";
 import { tomarPainelObra } from "./painelPedido";
 import { AdendasDaObra } from "./AdendasObra";
+import { AvisarTecnicos } from "./AvisarTecnicos";
+import { avisosPorDar, comTecnicos, marcasDe, segurarAvisos, type MarcaTarefa } from "./avisosTecnicos";
 import { definirQuemAssina } from "./quemAssina";
 import { useNomeParaMarcaDagua } from "@/hooks/useNomeParaMarcaDagua";
 import { modoReal } from "../acessosPortal";
@@ -127,9 +129,22 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   const reposicoes = useRef(0);
   const [notaPasso, setNotaPasso] = useState<{ t: string; mau: boolean; n: number } | null>(null);
   const quandoP = (k: number) => (diasRef.current[k] ? dataCurta(diasRef.current[k]) : `dia ${k + 1}`);
+  // 23/11 (revisão: «Avisar os técnicos afetados»): as tarefas mudadas aqui (dias ou técnico) e o plano do último aviso; os avisos que o
+  // motor daria logo ficam à espera do toque do gestor (avisosTecnicos.ts)
+  const baseAv = useRef<MarcaTarefa[] | null>(null), tocadas = useRef(new Set<number>());
+  if (!baseAv.current && d.obra.plano) baseAv.current = marcasDe(d.obra.plano);
+  const comSeguro = (fn: () => void) => () => {
+    const pp = d.obra.plano, av0: AvisoTec[] = pp?.avisos ? JSON.parse(JSON.stringify(pp.avisos)) : [], m0 = pp ? marcasDe(pp) : [];
+    fn();
+    const p1 = d.obra.plano;
+    if (!p1) return;
+    if (m0.length !== p1.tasks.length) { baseAv.current = marcasDe(p1); tocadas.current.clear(); return; }
+    p1.tasks.forEach((t, ti) => { if (t.dia !== m0[ti].dia || t.dur !== m0[ti].dur || (t.tec ?? null) !== m0[ti].tec) tocadas.current.add(ti); });
+    if (comTecnicos(p1)) segurarAvisos(p1, av0, m0);
+  };
   const runComPassos = (fn: () => void) => {
     const a = aRepor.current ? null : retratoDe(d);
-    ctx0.run(fn);
+    ctx0.run(comSeguro(fn));
     if (!a) return;
     const b = retratoDe(d), ps = b ? passoEntre(d, a, b, quandoP) : null;
     if (!ps) return;
@@ -143,7 +158,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   const repor = (ps: Passo, modo: "anular" | "refazer"): boolean => {
     let ok = false;
     aRepor.current = true;
-    try { ctx0.run(() => { ok = ctx0.A.reporPlanoObra(d.id, modo === "anular" ? ps.antes : ps.depois, ps.texto, modo); }); } finally { aRepor.current = false; }
+    try { ctx0.run(comSeguro(() => { ok = ctx0.A.reporPlanoObra(d.id, modo === "anular" ? ps.antes : ps.depois, ps.texto, modo); })); } finally { aRepor.current = false; }
     if (ok) reposicoes.current++;
     return ok;
   };
@@ -268,6 +283,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   // 23/11: cada mudança fica nos passos (anular / refazer, no topo); o «Desfazer» de 7 segundos saiu
   const mudar = (_ti: number, fn: () => void) => fazer(fn);
   diasRef.current = dias;
+  const porAvisar = comTecnicos(p) && baseAv.current ? avisosPorDar(p, baseAv.current, quandoP).filter((x) => tocadas.current.has(x.ti)) : [];
   const deFerias = (tec: string, iso: string) => ausenteNoRh(tec, iso) || !!TECS.find((y) => y.id === tec)?.feriasDatas?.includes(iso);
   const foraDaObra = (tec: string, k: number) => { const x = dias[k]; if (!x) return false; const iso = isoDia(x); return deFerias(tec, iso) || !!ocup.get(tec)?.has(iso); };
   const podeMexer = (ti: number) => planeia && !acabou && !porqueNaoMexe(p, ti);
@@ -411,6 +427,13 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
               <AnimatePresence>
                 {planeia && previa && R && <PreviaPlano key="previa" ctx={ctx} d={d} previa={previa} setPrevia={setPrevia} R={R} fora={fora} dias={dias} abrirOutra={setOutra} ocup={ocup} abrirImprevisto={abrirImprevisto} />}
               </AnimatePresence>
+
+              {/* ------------------------------------------------------------ 23/11: avisar os técnicos a quem a obra mudou (só com o toque do gestor) */}
+              {planeia && !previa && porAvisar.length > 0 && (
+                <AvisarTecnicos key={porAvisar.map((x) => x.tec + x.t).join("|")} L={porAvisar}
+                  avisar={(L) => { run(() => A.avisarTecnicos(d.id, L)); const pa = d.obra.plano; if (pa && baseAv.current) for (const x of L) baseAv.current[x.ti] = { dia: pa.tasks[x.ti].dia, dur: pa.tasks[x.ti].dur, tec: pa.tasks[x.ti].tec ?? null }; setVerPassos((v) => v + 1); }}
+                  agoraNao={() => { if (d.obra.plano) baseAv.current = marcasDe(d.obra.plano); tocadas.current.clear(); setVerPassos((v) => v + 1); }} />
+              )}
 
               {/* ------------------------------------------------------------ 11/11: os separadores (o plano, a execução, os materiais, a equipa, o cliente, o fecho) */}
               <div role="tablist" aria-label="O que gerir" className="-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">

@@ -8,11 +8,12 @@ import { createPortal } from "react-dom";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import {
-  AlertTriangle, ArrowRight, Camera, Check, ChevronDown, Clock, HardHat, ImagePlus, ListChecks, MapPin, MessageSquare, Minus, Package, PackageX, Phone, Plus, Ruler, ShieldCheck, Sparkles, Wrench, X,
+  AlertTriangle, ArrowRight, BellRing, Camera, Check, ChevronDown, Clock, HardHat, ImagePlus, ListChecks, MapPin, MessageSquare, Minus, Package, PackageX, Phone, Plus, Ruler, ShieldCheck, Sparkles, Wrench, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { LINHAS, TECS, camposMedida, medida, nfmt, type Negocio } from "./motor";
+import { LINHAS, TECS, camposMedida, medida, nfmt, type Negocio, type Plano } from "./motor";
+import { avisosPorVer } from "./tarefasValidador";
 import { rotuloOficios } from "./equipa/tecnicos";
 import { hfmt } from "./horasFmt";
 import type { Ctx } from "./pecas";
@@ -266,6 +267,7 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
           <span className="rounded-full bg-white shadow-sm"><ChipEstado e={ex} /></span>
         </div>
         <h2 className="mt-0.5 text-2xl font-semibold tracking-tight" title={t.nome}>{nomeCurtoTarefa(t.nome)}</h2>
+        <Mudou p={p} ti={ti} tec={t.tec} claro />
         <p className="mt-1 text-[15px] text-white/90">{d.nome} · {d.servico}</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white/15 px-3 text-sm hover:bg-white/25"><MapPin className="h-4 w-4" aria-hidden="true" />{morada}</a>
@@ -489,6 +491,17 @@ function Preparacao({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
 }
 
 /** 21/10: uma tarefa que vem a seguir: quando começa, quem está a trabalhar antes (ao vivo) e, num toque, o que preparar. */
+/** 23/11 (revisão: «no Hoje de cada técnico fica a mudança marcada»): a tarefa que o gestor mudou, com o aviso ainda por ver. */
+function Mudou({ p, ti, tec, claro = false }: { p: Plano; ti: number; tec: string | null | undefined; claro?: boolean }) {
+  const a = tec ? avisosPorVer(p, tec).filter((x) => x.a.ti === ti).at(-1)?.a : undefined;
+  if (!a) return null;
+  return (
+    <p className={cn("mt-1.5 inline-flex max-w-full items-start gap-1.5 rounded-lg px-2 py-1 text-sm font-medium", claro ? "bg-white/90 text-amber-900" : "bg-warning/[0.12] text-amber-900 dark:text-amber-200")}>
+      <BellRing className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Mudou: {a.t}</span>
+    </p>
+  );
+}
+
 function TarefaASeguir({ ctx, x, eu }: { ctx: Ctx; x: ASeguir; eu: string }) {
   const { d, t, ti, antes, faltam } = x;
   const p = d.obra.plano!, cor = t.fase ? COR_FASE[t.fase] : "#7c5ce0";
@@ -513,6 +526,7 @@ function TarefaASeguir({ ctx, x, eu }: { ctx: Ctx; x: ASeguir; eu: string }) {
             <div className="min-w-0">
               <p className="text-base font-semibold" title={t.nome}>{nomeCurtoTarefa(t.nome)}</p>
               <p className="text-sm text-muted-foreground">{d.nome} · {d.f.localidade || d.local.split(",").pop()?.trim()}</p>
+              <Mudou p={p} ti={ti} tec={eu} />
             </div>
             <span className="shrink-0 rounded-full bg-primary/[0.08] px-2.5 py-1 text-sm font-medium text-primary first-letter:uppercase">{quando}</span>
           </div>
