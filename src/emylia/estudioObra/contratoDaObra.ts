@@ -6,6 +6,7 @@ import { ivaDaLinha, linhaCalc, totaisIva, type Estado, type LinhaOrc, type Nego
 import { itemCatalogo } from "../catalogo";
 import { PREFIXO_CLIENTE, PREFIXO_PROD, catalogoLigado, textoProduto, type ProdVisita } from "../produtosVisita";
 import { nomeCurtoTarefa } from "./planoVivo";
+import { skuLido } from "@/pages/prototipo-estudio/produtosDoProjeto";
 
 export interface LinhaContrato { sku?: string; nome: string; q: number; un: string; pu: number; iva: number; total: number; tipo: "servico" | "produto" | "livre"; cliente?: boolean }
 export interface GrupoContrato { n: number; titulo: string; linhas: LinhaContrato[]; total: number }
@@ -21,7 +22,8 @@ export function contratoDaObra(d: Negocio, S: Estado): ContratoDaObra | null {
   const o = d.orc;
   if (!o) return null;
   const k = 1 - (o.desconto || 0) / 100;
-  const skuProduto = (id: string) => catalogoLigado()?.produtos.find((x) => x.id === id)?.sku;
+  // a referência do Catálogo carregado; sem ele, a lida pela pesquisa (ContratoObra.tsx: useSkus)
+  const skuProduto = (id: string) => catalogoLigado()?.produtos.find((x) => x.id === id)?.sku ?? skuLido(id);
   type G = { pos: number; titulo: string; linhas: LinhaContrato[]; sid?: string };
   const grupos: G[] = [];
   const porServico = new Map<string, G>();

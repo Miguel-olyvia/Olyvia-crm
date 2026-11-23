@@ -5,11 +5,15 @@ import { cn } from "@/lib/utils";
 import { eur, type Negocio } from "../motor";
 import type { Ctx } from "../pecas";
 import { contratoDaObra } from "./contratoDaObra";
+import { useSkus } from "@/pages/prototipo-estudio/produtosDoProjeto";
 
 const qtd = (q: number) => String(Math.round(q * 100) / 100).replace(".", ",");
 
 export function ContratoDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
-  const C = useMemo(() => contratoDaObra(d, ctx.S), [d, d.orc, ctx.S]); // eslint-disable-line react-hooks/exhaustive-deps
+  // as referências dos produtos do contrato (sem o Catálogo carregado, pela pesquisa do catálogo)
+  const prods = useMemo(() => (d.visita.prod ?? []).filter((x) => !x.cliente).map((x) => ({ id: x.id, n: x.n })), [d.visita.prod]);
+  const v = useSkus(prods);
+  const C = useMemo(() => contratoDaObra(d, ctx.S), [d, d.orc, ctx.S, v]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!C || !C.grupos.length) return <p className="rounded-xl bg-muted/50 px-4 py-3 text-[15px] text-muted-foreground">Este negócio ainda não tem orçamento aceite.</p>;
   const num = "px-3 py-2 text-right tabular-nums whitespace-nowrap";
   return (

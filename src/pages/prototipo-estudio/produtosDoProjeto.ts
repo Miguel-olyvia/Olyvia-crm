@@ -105,3 +105,34 @@ export function useProdutosDoProjeto(p: Projeto | null, extras: readonly PedidoP
   const pedidos = useMemo(() => (p ? produtosPedidosDoProjeto(p, extras) : []), [p, extras]);
   useLerProdutos(pedidos);
 }
+
+// ------------------------------------------------------------------ 23/11: a referência (SKU) dos produtos do contrato
+const skus = new Map<string, string | null>();
+const skusALer = new Set<string>();
+let versaoSkus = 0;
+const ouvintesSkus = new Set<() => void>();
+/** Lê a referência de cada produto pela pesquisa do catálogo (pelo nome, confirmado pelo id). Cada uma lê-se uma vez por sessão. */
+export async function lerSkus(org: string, produtos: readonly { id: string; n: string }[]): Promise<void> {
+  const faltam = produtos.filter((x) => UUID.test(x.id) && !skus.has(x.id) && !skusALer.has(x.id));
+  if (!faltam.length) return;
+  faltam.forEach((x) => skusALer.add(x.id));
+  await Promise.all(faltam.map(async (x) => {
+    try {
+      const pg = await lerProdutosPagina(org, { ...SEM_FILTRO_SERVIDOR, q: x.n }, 1);
+      if (!pg.ok) return; // fica por ler (tenta-se na próxima vez)
+      skus.set(x.id, pg.v.produtos.find((l) => l.id === x.id)?.sku ?? null);
+      versaoSkus++;
+      ouvintesSkus.forEach((f) => f());
+    } catch { /* fica por ler */ } finally { skusALer.delete(x.id); }
+  }));
+}
+/** O SKU de um produto já lido (undefined: ainda não se sabe). */
+export const skuLido = (id: string): string | undefined => skus.get(id) ?? undefined;
+/** Lê as referências destes produtos e redesenha quando chegam. */
+export function useSkus(produtos: readonly { id: string; n: string }[]): number {
+  const org = useCompanyOpcional()?.activeCompany?.id ?? null;
+  const v = useSyncExternalStore((f) => { ouvintesSkus.add(f); return () => { ouvintesSkus.delete(f); }; }, () => versaoSkus);
+  const chave = JSON.stringify(produtos);
+  useEffect(() => { if (org && chave !== "[]") void lerSkus(org, JSON.parse(chave)); }, [org, chave]);
+  return v;
+}
