@@ -31,10 +31,11 @@ import { ConversaDoClienteNaObra } from "../ObraOperacoes";
 import { EstadoFotos, useFotosAJuntar } from "../fotosDaObra";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { useInventario } from "../inventario/loja";
+import { EscolherTarefa, ICONE_DA_FASE } from "./CaminhoCritico";
 import { resumoEcNegocio } from "../inventario/ponteNegocios";
 import { useReduzir, MOLA } from "../movimento";
 import { podeNeg } from "../permissoes";
-import { ROTULO_VIVO, diasDeAtraso, estadoVivo, type EstadoVivo } from "./planoVivo";
+import { ROTULO_VIVO, diasDeAtraso, estadoVivo, nomeCurtoTarefa, type EstadoVivo } from "./planoVivo";
 
 const primeiro = (n: string) => n.split(" ")[0];
 const dd = (n: number) => `${n} ${Math.abs(n) === 1 ? "dia" : "dias"}`;
@@ -305,7 +306,7 @@ export function MateriaisDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <div className="grid gap-3 lg:grid-cols-2">
           {G.map((g) => (
             <div key={g.fase} className="rounded-2xl border border-border bg-card p-3">
-              <p className="mb-1.5 flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full" style={{ background: COR_FASE[g.fase] }} />Fase {g.fase} · {FASES_OBRA[g.fase - 1]?.curto}</p>
+              <p className="mb-2 flex items-center gap-2 text-sm font-semibold">{((Ic) => <span aria-hidden="true" className="grid h-7 w-7 place-items-center rounded-full text-white" style={{ background: COR_FASE[g.fase] }}><Ic className="h-4 w-4" /></span>)(ICONE_DA_FASE[g.fase] ?? Package)}Fase {g.fase} · {FASES_OBRA[g.fase - 1]?.curto}</p>
               <ul className="space-y-1">
                 {g.itens.map((m, k) => (
                   <li key={k} className="flex items-center justify-between gap-3 text-sm">
@@ -325,13 +326,15 @@ export function MateriaisDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             <p className="text-sm font-semibold">Pedir mais ou devolver</p>
             <p className="text-sm text-muted-foreground">Escolha a tarefa e mude as quantidades. O que sobe vai ao fornecedor numa encomenda de ajuste; o que desce volta ao armazém no fim da obra.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {p.tasks.map((x, i) => estadoVivo(x, p) === "validada" ? null : (
-              <button key={i} type="button" aria-pressed={ti === i} onClick={() => setTi(ti === i ? null : i)} className={chip(ti === i)}>{x.nome}</button>
-            ))}
-          </div>
+          {/* 23/11 (Rúben: «lista está feia»): as tarefas pelas fases da obra, com ícones e nomes curtos */}
+          <EscolherTarefa p={p} rotulo="A tarefa" sel={ti} escolher={setTi}
+            tis={p.tasks.map((_, i) => i).filter((i) => estadoVivo(p.tasks[i], p) !== "validada")}
+            detalhe={(i) => { const n = (p.tasks[i].mats ?? materiaisDaTarefa(p.tasks[i], S.svc)).length; return n ? `${n} ${n === 1 ? "material" : "materiais"}` : null; }} />
           {t && ti != null && (
-            <EditorMateriais mats={t.mats ?? materiaisDaTarefa(t, S.svc)} mudar={(m) => run(() => A.matsTarefa(d.id, ti, m))} />
+            <div className="space-y-2 rounded-xl border border-primary/30 bg-primary/[0.03] p-3">
+              <p className="text-sm font-semibold" title={t.nome}>{nomeCurtoTarefa(t.nome)}</p>
+              <EditorMateriais mats={t.mats ?? materiaisDaTarefa(t, S.svc)} mudar={(m) => run(() => A.matsTarefa(d.id, ti, m))} />
+            </div>
           )}
           {(pend.length > 0 || sobra.length > 0) && (
             <div className="space-y-2 rounded-xl bg-muted/50 p-3 text-sm">

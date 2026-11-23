@@ -93,3 +93,49 @@ export function CaminhoCritico({ p, critico, quando, abrir }: { p: Plano; critic
     </section>
   );
 }
+
+/* ------------------------------------------------------------------ 23/11: escolher uma tarefa, pelas fases da obra */
+// Rúben (Materiais › «Pedir mais ou devolver»: «melhora isto também, lista está feia»): em vez de uma nuvem de pílulas com o nome inteiro,
+// as tarefas pelas fases da obra, com o ícone e o nome curto, como no caminho crítico.
+export function EscolherTarefa({ p, tis, sel, escolher, rotulo, detalhe }: {
+  p: Plano; tis: readonly number[]; sel: number | null; escolher: (ti: number | null) => void; rotulo: string;
+  /** o que se mostra à direita de cada tarefa (ex.: quantos materiais tem) */ detalhe?: (ti: number) => string | null;
+}) {
+  const fases = FASES_OBRA.map((f) => ({ ...f, tis: tis.filter((ti) => ((p.tasks[ti]?.fase ?? 1) as FaseObra) === f.n).sort((a, b) => p.tasks[a].dia - p.tasks[b].dia || a - b) })).filter((f) => f.tis.length);
+  return (
+    <div role="group" aria-label={rotulo} className="grid gap-x-6 gap-y-5 sm:grid-cols-2 xl:grid-cols-4">
+      {fases.map((f) => {
+        const Ic = ICONE_DA_FASE[f.n] ?? Wrench, cor = COR_FASE[f.n];
+        return (
+          <div key={f.n} className="min-w-0">
+            <div className="flex items-center gap-2.5">
+              <span aria-hidden="true" className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-white shadow-sm" style={{ background: cor }}><Ic className="h-[18px] w-[18px]" /></span>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: cor }}>Fase {f.n}</p>
+                <p className="truncate text-sm font-semibold leading-tight">{f.curto}</p>
+              </div>
+            </div>
+            <ul className="ml-[17px] mt-2 space-y-0.5 border-l-2 pl-3" style={{ borderColor: `color-mix(in srgb, ${cor} 35%, transparent)` }}>
+              {f.tis.map((ti) => {
+                const t = p.tasks[ti], T = iconeDaTarefa(t.nome), on = sel === ti, x = detalhe?.(ti);
+                return (
+                  <li key={ti}>
+                    <button type="button" aria-pressed={on} onClick={() => escolher(on ? null : ti)} title={t.nome}
+                      className={cn("flex min-h-10 w-full items-center gap-2.5 rounded-lg px-1.5 py-1 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        on ? "bg-primary/10 ring-1 ring-primary/40" : "hover:bg-muted")}>
+                      <span aria-hidden="true" className="grid h-7 w-7 shrink-0 place-items-center rounded-md" style={on ? { background: cor, color: "white" } : { background: `color-mix(in srgb, ${cor} 12%, transparent)`, color: cor }}>
+                        <T className="h-4 w-4" />
+                      </span>
+                      <span className={cn("min-w-0 flex-1 truncate text-sm", on && "font-medium")}>{nomeCurtoTarefa(t.nome)}</span>
+                      {x && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{x}</span>}
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        );
+      })}
+    </div>
+  );
+}

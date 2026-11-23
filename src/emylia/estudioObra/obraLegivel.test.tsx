@@ -11,6 +11,8 @@ import { obraDeExemplo } from "./exemploObra";
 import { alertasDaObra } from "./alertasObra";
 import { nomeCurtoTarefa, replanear } from "./planoVivo";
 import { contratoDaObra } from "./contratoDaObra";
+import { materiaisPorFase } from "../obraOps";
+import { resumoDaBase, type LinhaDocEc } from "../real/encomendaReal";
 import { caminhoPorFase, iconeDaTarefa } from "./CaminhoCritico";
 import { DoorOpen, Droplets, ShowerHead } from "lucide-react";
 
@@ -133,5 +135,34 @@ describe("o separador «Contrato»", () => {
     expect(within(sec).getByRole("columnheader", { name: "SKU" })).toBeTruthy();
     expect(within(sec).getByText("Total com IVA")).toBeTruthy();
     expect(within(sec).getAllByRole("rowgroup").length).toBeGreaterThan(2);
+  });
+});
+
+describe("os materiais da obra", () => {
+  const linha = (nome: string, recebida: boolean): LinhaDocEc => ({
+    quote_line_id: nome, item_type: "product", product_id: null, product_name: nome, product_sku: null, quantity: 1, unidade: "un", line_status: null,
+    purchase_order_id: null, qty_needed: 1, qty_reserved: recebida ? 1 : 0, qty_ordered: 1, qty_received: recebida ? 1 : 0, qty_missing: recebida ? 0 : 1,
+    qty_served: 0, has_preferred_supplier: true, request_block_reason: null,
+  });
+  it("a encomenda emitida no servidor (sem linhas na obra) mostra o que chegou e o que falta pela encomenda da base", () => {
+    const { d } = obraDeExemplo();
+    d.obra.ec!.linhas = [];
+    const inv = resumoDaBase({ order_number: "EC-2026-0026", lines: [linha("Base de Duche ZEUS 70x150", true), linha("Sanita MEGA BTW Compacta", false)] }, []);
+    const itens = materiaisPorFase(d, inv).flatMap((g) => g.itens);
+    expect(itens.map((m) => m.n).sort()).toEqual(["Base de Duche ZEUS 70x150", "Sanita MEGA BTW Compacta"]);
+    expect(itens.find((m) => m.n.startsWith("Base"))!.estado).toBe("reservado");
+    expect(itens.find((m) => m.n.startsWith("Sanita"))!.estado).not.toBe("reservado");
+  });
+  it("«Pedir mais ou devolver»: as tarefas pelas fases, com o nome curto; escolher abre os materiais dela", () => {
+    const { d } = montar();
+    fireEvent.click(screen.getByRole("tab", { name: /Materiais/ }));
+    const sec = screen.getByRole("region", { name: "Pedir mais ou devolver" });
+    const grupo = within(sec).getByRole("group", { name: "A tarefa" });
+    expect(within(grupo).getAllByText(/^Fase \d$/).length).toBeGreaterThan(0);
+    const p = d.obra.plano!, ti = p.tasks.findIndex((t) => t.nome === "Montagem de móveis");
+    const b = within(grupo).getByTitle(p.tasks[ti].nome);
+    expect(b.textContent).toContain(nomeCurtoTarefa(p.tasks[ti].nome));
+    fireEvent.click(b);
+    expect(b.getAttribute("aria-pressed")).toBe("true");
   });
 });

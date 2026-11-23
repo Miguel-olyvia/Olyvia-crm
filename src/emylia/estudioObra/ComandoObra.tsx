@@ -29,6 +29,8 @@ import { Contagem, MOLA, useReduzir } from "../movimento";
 import { podeNeg, podeVerCustos } from "../permissoes";
 import { estadoVivo, rotuloVivo } from "./planoVivo";
 import { CaminhoCritico } from "./CaminhoCritico";
+import { useInventario } from "../inventario/loja";
+import { resumoEcNegocio } from "../inventario/ponteNegocios";
 import { antesEDepois, caminhoCritico, diarioDaObra, fotografiasDaObra, hojeNaObra, margemAoVivo, pontoDaSemana, previsao, type MargemViva, type Previsao } from "./previsaoObra";
 
 const primeiro = (n: string) => n.split(" ")[0];
@@ -461,7 +463,10 @@ export function PontoDaSemana({ ctx, d, dias }: { ctx: Ctx; d: Negocio; dias: Da
 /* ================================================================== as entregas */
 export function Entregas({ d }: { d: Negocio }) {
   const reduzir = useReduzir();
-  const itens = materiaisPorFase(d).flatMap((g) => g.itens.map((m) => ({ ...m, fase: g.fase })));
+  // 23/11: com o estado da encomenda (a da base, numa encomenda emitida no servidor; senão a do Inventário)
+  const db = useInventario();
+  const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
+  const itens = materiaisPorFase(d, inv).flatMap((g) => g.itens.map((m) => ({ ...m, fase: g.fase })));
   const ok = new Set(["na obra", "na carrinha", "reservado", "recebido"]);
   const ordem = [...itens].sort((a, b) => Number(ok.has(a.estado)) - Number(ok.has(b.estado)) || (a.quando ?? "99").localeCompare(b.quando ?? "99"));
   if (!ordem.length) return null;
