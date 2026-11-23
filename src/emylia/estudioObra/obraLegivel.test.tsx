@@ -11,6 +11,8 @@ import { obraDeExemplo } from "./exemploObra";
 import { alertasDaObra } from "./alertasObra";
 import { nomeCurtoTarefa, replanear } from "./planoVivo";
 import { contratoDaObra } from "./contratoDaObra";
+import { caminhoPorFase, iconeDaTarefa } from "./CaminhoCritico";
+import { DoorOpen, Droplets, ShowerHead } from "lucide-react";
 
 afterEach(cleanup);
 
@@ -43,11 +45,31 @@ describe("o nome curto das tarefas nas barras", () => {
 });
 
 describe("o caminho crítico não parece um erro", () => {
-  it("as tarefas do caminho crítico não têm o vermelho dos erros", () => {
-    montar();
-    const pv = screen.getByText("Caminho crítico").closest("div")!;
-    expect(within(pv as HTMLElement).getByText(/Não há nada de errado nestas tarefas/)).toBeTruthy();
-    expect(pv.innerHTML).not.toMatch(/destructive/);
+  it("uma linha do tempo pelas fases da obra, com ícones e nomes curtos, sem o vermelho dos erros", () => {
+    const { d } = montar();
+    const sec = screen.getByRole("region", { name: "Caminho crítico" });
+    expect(within(sec).getByText(/Não há nada de errado nestas tarefas/)).toBeTruthy();
+    expect(sec.innerHTML).not.toMatch(/destructive/);
+    const fases = within(sec).getAllByText(/^Fase \d$/).map((x) => Number(x.textContent!.slice(5)));
+    expect(fases.length).toBeGreaterThan(0);
+    expect([...fases].sort()).toEqual(fases); // pela ordem da obra
+    const tarefas = within(sec).getAllByRole("button");
+    expect(tarefas.length).toBeGreaterThan(0);
+    for (const b of tarefas) {
+      const t = d.obra.plano!.tasks.find((x) => x.nome === b.getAttribute("title"))!;
+      expect(b.textContent).toContain(nomeCurtoTarefa(t.nome));
+      expect(b.querySelector("svg")).toBeTruthy(); // o ícone do trabalho
+    }
+  });
+  it("o ícone pelo trabalho e as fases pela fase da tarefa", () => {
+    expect(iconeDaTarefa("MO Modelo Remodelação Completa - Casa de Banho Comum · canalização")).toBe(Droplets);
+    expect(iconeDaTarefa("Instalação de Base de Duche")).toBe(ShowerHead);
+    expect(iconeDaTarefa("Instalação de Porta em CPL")).toBe(DoorOpen);
+    const { d } = obraDeExemplo();
+    const p = d.obra.plano!;
+    const F = caminhoPorFase(p, new Set(p.tasks.map((_, i) => i)));
+    expect(F.map((f) => f.n)).toEqual([...F.map((f) => f.n)].sort());
+    for (const f of F) for (const x of f.tarefas) expect(x.t.fase ?? 1).toBe(f.n);
   });
 });
 

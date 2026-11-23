@@ -10,7 +10,7 @@
 //  · Entregas: a linha do tempo dos materiais (chega hoje, amanhã, a dd/mm).
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowUpRight, CalendarCheck, Camera, Check, ChevronLeft, ChevronRight, Euro, Gauge, HardHat, Inbox, Package, Route, Send, Sparkles, Truck, Zap } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CalendarCheck, Camera, Check, ChevronLeft, ChevronRight, Euro, Gauge, HardHat, Inbox, Package, Send, Sparkles, Truck, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, eur, nfmt, type Estado, type Negocio, type Plano } from "../motor";
@@ -27,7 +27,8 @@ import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
 import { FotoObra } from "../fotosDaObra";
 import { Contagem, MOLA, useReduzir } from "../movimento";
 import { podeNeg, podeVerCustos } from "../permissoes";
-import { estadoVivo, nomeCurtoTarefa, rotuloVivo } from "./planoVivo";
+import { estadoVivo, rotuloVivo } from "./planoVivo";
+import { CaminhoCritico } from "./CaminhoCritico";
 import { antesEDepois, caminhoCritico, diarioDaObra, fotografiasDaObra, hojeNaObra, margemAoVivo, pontoDaSemana, previsao, type MargemViva, type Previsao } from "./previsaoObra";
 
 const primeiro = (n: string) => n.split(" ")[0];
@@ -227,7 +228,6 @@ export function PrevisaoViva({ d, dias, prev, margem, critico, ir, previsaoRef }
   const hoje = p.estado === "em curso" ? p.dia : -1;
   const [sob, setSob] = useState<number | null>(null);
   const svg = useRef<SVGSVGElement>(null);
-  const crit = [...critico].map((ti) => ({ ti, t: p.tasks[ti] })).sort((a, b) => a.t.dia - b.t.dia);
   return (
     <section ref={previsaoRef} aria-label="A previsão viva" className="scroll-mt-4 grid grid-cols-1 gap-4 rounded-3xl border border-border bg-card p-4 shadow-sm lg:grid-cols-[1.6fr_1fr] sm:p-5">
       <div className="min-w-0 space-y-2">
@@ -279,17 +279,9 @@ export function PrevisaoViva({ d, dias, prev, margem, critico, ir, previsaoRef }
             })}
           </div>
         )}
-        <div className="space-y-1.5">
-          <p className="flex items-center gap-1.5 text-sm font-semibold"><Route className="h-4 w-4 text-primary" aria-hidden="true" />Caminho crítico</p>
-          {/* 23/11 (Rúben: «parece que estão errados, por estarem a vermelho»): não é um erro, é onde não há folga */}
-          <p className="text-xs text-muted-foreground">Não há nada de errado nestas tarefas: não têm folga. Se uma atrasar, a obra acaba mais tarde.</p>
-          <div className="flex flex-wrap gap-1.5">{crit.length ? crit.map(({ t, ti }) => (
-            <button key={ti} type="button" onClick={() => ir.tarefa(ti)} title={t.nome} className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-sm hover:border-primary/40 hover:bg-primary/[0.05]">
-              <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: COR_FASE[t.fase ?? 1] }} />{nomeCurtoTarefa(t.nome)}<span className="text-xs text-muted-foreground">{quando(t.dia)}</span>
-            </button>
-          )) : <span className="text-sm text-muted-foreground">Todas as tarefas por fazer têm folga.</span>}</div>
-        </div>
       </div>
+      {/* 23/11 (Rúben: «a lista deve ser refeita, muito mais bonita, corrida, com as fases bem identificadas e icons»): a toda a largura */}
+      <CaminhoCritico p={p} critico={critico} quando={quando} abrir={ir.tarefa} />
     </section>
   );
 }
