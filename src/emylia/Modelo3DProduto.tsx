@@ -5,12 +5,12 @@ import { Box } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { cn } from "@/lib/utils";
 import { Previa3DProduto } from "./Previa3DProduto";
-import { corDosAtributos, medidasDosAtributos } from "./planta3d/previaProduto3d";
+import { corDosAtributos, medidaDosAtributos } from "./planta3d/previaProduto3d";
 import type { NoCat } from "./planta3d/catalogo3d";
 import type { AtributoDef, AtributoProduto } from "./v2/catalogoModelo";
 
-/** Espera depois de a última tecla no nome antes de redesenhar o 3D (ms). */
-const ESPERA_NOME_MS = 350;
+/** Espera depois da última tecla (no nome ou numa medida) antes de redesenhar o 3D (ms). */
+const ESPERA_MS = 350;
 
 export interface Modelo3DProdutoProps {
   nome: string; sub?: string | null; no: string | null; arvore: readonly NoCat[];
@@ -18,12 +18,13 @@ export interface Modelo3DProdutoProps {
   attrs?: readonly AtributoProduto[]; defs?: readonly AtributoDef[];
 }
 
-/** O 3D aberto: nasce com o nome de agora e, ao escrever, espera um instante antes de se redesenhar. Só existe enquanto está aberto. */
+/** O 3D aberto: nasce com o que há agora e, ao escrever o nome ou as medidas, espera um instante antes de se redesenhar. Só existe enquanto está aberto. */
 function Aberto({ nome, sub, no, arvore, attrs, defs }: Modelo3DProdutoProps) {
-  const nomeEspera = useDebounce(nome, ESPERA_NOME_MS);
-  const medidas = useMemo(() => medidasDosAtributos(attrs), [attrs]);
-  const cor = useMemo(() => corDosAtributos(attrs, defs), [attrs, defs]);
-  return <Previa3DProduto nome={nomeEspera} sub={sub} no={no} arvore={arvore} medidas={medidas} cor={cor} />;
+  const nomeEspera = useDebounce(nome, ESPERA_MS);
+  const attrsEspera = useDebounce(attrs, ESPERA_MS);
+  const medida = useMemo(() => medidaDosAtributos(attrsEspera), [attrsEspera]);
+  const cor = useMemo(() => corDosAtributos(attrsEspera, defs), [attrsEspera, defs]);
+  return <Previa3DProduto nome={nomeEspera} sub={sub} no={no} arvore={arvore} medida={medida} cor={cor} />;
 }
 
 export function Modelo3DProduto(props: Modelo3DProdutoProps) {
@@ -32,10 +33,11 @@ export function Modelo3DProduto(props: Modelo3DProdutoProps) {
   return (
     <div className="grid gap-3">
       <p className="text-[15px] text-muted-foreground">Só para ver: o 3D que o catálogo daria a este produto, pelo nome, pela subcategoria e pelas medidas. Não grava nada.</p>
+      {/* o rótulo fica sempre «Ver em 3D» e quem diz se está aberto é o aria-expanded (o fundo também muda): um rótulo que muda E um aria-expanded diziam a mesma coisa duas vezes */}
       <button type="button" aria-expanded={aberto} aria-controls={idPainel} onClick={() => setAberto((v) => !v)}
-        className={cn("inline-flex min-h-11 items-center gap-2 justify-self-start rounded-lg border border-input bg-card px-4 text-[15px] font-medium transition-colors hover:bg-muted",
+        className={cn("inline-flex min-h-11 items-center gap-2 justify-self-start rounded-lg border border-input bg-card px-4 text-[15px] font-medium transition-colors hover:bg-muted aria-expanded:border-primary aria-expanded:bg-muted",
           "focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25")}>
-        <Box className="h-4 w-4 text-primary" aria-hidden="true" />{aberto ? "Fechar o 3D" : "Ver em 3D"}
+        <Box className="h-4 w-4 text-primary" aria-hidden="true" />Ver em 3D
       </button>
       <div id={idPainel}>
         {aberto && <Aberto {...props} />}

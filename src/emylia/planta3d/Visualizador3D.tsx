@@ -38,6 +38,8 @@ export interface Visualizador3DProps {
   mover?: Mover3D;
   /** 23/11 (o Estúdio da obra): as peças ainda por fazer, desenhadas transparentes. */
   porFazer?: ReadonlySet<string>;
+  /** 23/11 (a pré-visualização de um produto num formulário longo): a roda do rato não faz zoom e o toque vertical rola a página; só se roda a peça. Sem isto, como sempre. */
+  rolarPagina?: boolean;
 }
 
 type V3 = [number, number, number];
@@ -934,7 +936,7 @@ function Superficies({ espaco, teto }: { espaco: Espaco; teto: boolean }) {
 }
 
 /* ------------------------------------------------------------------ câmaras */
-function Camaras({ vista, espaco, camara }: { vista: Vista3D; espaco: Espaco; camara?: Visualizador3DProps["camara"] }) {
+function Camaras({ vista, espaco, camara, semZoom = false }: { vista: Vista3D; espaco: Espaco; camara?: Visualizador3DProps["camara"]; semZoom?: boolean }) {
   const { size } = useThree();
   const caixa = useMemo(() => {
     const xs = espaco.paredes.map((p) => p.a.x), ys = espaco.paredes.map((p) => p.a.y);
@@ -964,7 +966,7 @@ function Camaras({ vista, espaco, camara }: { vista: Vista3D; espaco: Espaco; ca
     return (
       <>
         <PerspectiveCamera key={`cam-${camara.chave}`} makeDefault position={camara.pos} fov={35} near={0.02} far={200} />
-        <OrbitControls key={`oc-${camara.chave}`} makeDefault target={camara.alvo} maxPolarAngle={Math.PI / 2.02} minDistance={0.2} maxDistance={maior * 4 + 6} />
+        <OrbitControls key={`oc-${camara.chave}`} makeDefault target={camara.alvo} maxPolarAngle={Math.PI / 2.02} minDistance={0.2} maxDistance={maior * 4 + 6} enableZoom={!semZoom} />
       </>
     );
   }
@@ -972,7 +974,7 @@ function Camaras({ vista, espaco, camara }: { vista: Vista3D; espaco: Espaco; ca
   return (
     <>
       <PerspectiveCamera key="3d" makeDefault position={[cx + d, d * 0.9, cz + d]} fov={40} near={0.1} far={200} />
-      <OrbitControls key="oc-3d" makeDefault target={[cx, pe / 3, cz]} maxPolarAngle={Math.PI / 2.02} minDistance={1} maxDistance={maior * 4 + 6} />
+      <OrbitControls key="oc-3d" makeDefault target={[cx, pe / 3, cz]} maxPolarAngle={Math.PI / 2.02} minDistance={1} maxDistance={maior * 4 + 6} enableZoom={!semZoom} />
     </>
   );
 }
@@ -1030,18 +1032,26 @@ function EstudioAmbiente() {
   return null;
 }
 
-export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover, porFazer }: Visualizador3DProps) {
+/** O OrbitControls põe `touch-action: none` no canvas ao ligar-se (o toque vertical deixa de rolar a página); aqui volta a deixar o toque vertical à página, depois de ele se ligar. */
+function ToqueRolaPagina() {
+  const gl = useThree((s) => s.gl), controls = useThree((s) => s.controls);
+  useEffect(() => { if (controls) gl.domElement.style.touchAction = "pan-y"; }, [gl, controls]);
+  return null;
+}
+
+export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover, porFazer, rolarPagina = false }: Visualizador3DProps) {
   const [arrasto, setArrasto] = useState<Arrasto | null>(null);
   const alvo = useRef<AlvoArrasto>({ grupo: null, camera: null, controls: null });
   return (
-    <div role="img" aria-label={descricao} className="h-full w-full touch-none" onPointerDownCapture={(e) => { if (mover) travarCamaraSeNaPeca(e, alvo.current); }}
+    <div role="img" aria-label={descricao} className={rolarPagina ? "h-full w-full touch-pan-y" : "h-full w-full touch-none"} onPointerDownCapture={(e) => { if (mover) travarCamaraSeNaPeca(e, alvo.current); }}
       onPointerUpCapture={() => { if (!arrasto && alvo.current.controls) alvo.current.controls.enabled = true; }}>
       {/* como o HTML: ACES com exposição 1,08, sombras suaves (PCF), ambiente de estúdio e fundo claro neutro */}
       <Canvas frameloop="demand" dpr={[1, 1.5]} shadows="soft" gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.08, preserveDrawingBuffer: true }} onPointerMissed={() => onSelecionar(null)}>
         <color attach="background" args={["#ecebe7"]} />
         <EstudioAmbiente />
         <LuzEstudio espaco={espaco} />
-        <Camaras vista={vista} espaco={espaco} camara={vista === "3d" ? camara : null} />
+        <Camaras vista={vista} espaco={espaco} camara={vista === "3d" ? camara : null} semZoom={rolarPagina} />
+        {rolarPagina && <ToqueRolaPagina />}
         <Superficies espaco={espaco} teto={teto && vista !== "cima"} />
         {espaco.paredes.map((p, i) => <ParedeCena key={p.id} parede={p} indice={i} espaco={espaco} />)}
         <SombraDeContacto espaco={espaco} />

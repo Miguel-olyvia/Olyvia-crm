@@ -2,43 +2,64 @@
 // as medidas e a cor que vêm dos atributos do produto, o modelo do catálogo 3D com essas medidas, o estado do modelo (o que se vai ver)
 // e a cena mínima: uma divisão pequena com a peça ao centro e a câmara a apontar-lhe.
 import type { AtributoDef, AtributoProduto, DimensaoMedida } from "../v2/catalogoModelo";
-import { modeloDoProduto, temModeloGenerico, temModeloHtml, type NoCat, type ProdutoModelo3D } from "./catalogo3d";
+import { LARGURA_ALTURA, modeloDoProduto, temModeloGenerico, temModeloHtml, type NoCat, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
 import { espacoVazio, paredesDoContorno, PE_DIREITO_OMISSAO, type Espaco, type PecaProduto } from "./modelo";
 
-/** As medidas que os atributos dizem, em cm; o que não dizem fica de fora (vem do nome ou das omissões do tipo). */
+/** As dimensões do modelo que a medida diz, em cm; o que não diz fica de fora (vem do nome ou das omissões do tipo). */
 export interface MedidasParciais { larguraCm?: number; profundidadeCm?: number; alturaCm?: number }
+/** A medida do atributo, em cm, tal como está nos atributos (largura, comprimento, espessura; o 1D «altura» à parte). Só leva o que é legível. */
+export interface MedidaCm { largura?: number; comprimento?: number; espessura?: number; altura?: number }
 
-/** Acima disto (cm) uma medida não é de um produto de catálogo: é um engano de unidade e não se desenha. */
-const MAX_CM = 1000;
+/** De 5 a 400 cm, os mesmos limites das medidas lidas do nome (dimensoesDoNome): fora disto não é a medida de um produto de catálogo (é um engano de unidade), não se desenha,
+ *  e a câmara (que se afasta até 12 m) enquadra sempre a peça. */
+const MIN_CM = 5, MAX_CM = 400;
 const ARREDONDAR = (cm: number) => Math.round(cm * 10) / 10;
 
-/** Uma dimensão em cm: o número, ou o limite superior (`ate`) de um intervalo; mm passa a cm. Ilegível (0, negativa, NaN, enorme): undefined. */
+/** Uma dimensão em cm: o número, ou o limite superior (`ate`) de um intervalo; mm passa a cm. Ilegível (zero, negativa, NaN, fora de 5 a 400 cm): undefined. */
 function emCm(d: DimensaoMedida | null | undefined, unidade: "cm" | "mm"): number | undefined {
   const v = typeof d === "number" ? d : d && typeof d === "object" ? d.ate : Number.NaN;
   if (typeof v !== "number" || !Number.isFinite(v) || v <= 0) return undefined;
   const cm = ARREDONDAR(unidade === "mm" ? v / 10 : v);
-  return cm > 0 && cm <= MAX_CM ? cm : undefined;
+  return cm >= MIN_CM && cm <= MAX_CM ? cm : undefined;
 }
 
 /**
- * A medida do produto (o atributo do tipo «medida») em centímetros, para a peça 3D. 2D: largura × comprimento (a profundidade); 3D: mais a espessura,
- * que é a altura. 1D: a largura ou o comprimento dá a largura, a altura dá a altura, a espessura não diz nada. Sem medida legível: null.
+ * A medida do produto (o atributo do tipo «medida») em centímetros. 2D: largura e comprimento; 3D: mais a espessura. 1D: a largura ou o comprimento dá a
+ * largura, a altura dá a altura, a espessura não diz nada. Sem medida legível: null. Como isto se reparte por largura, profundidade e altura depende do
+ * tipo do produto: `dimensoesDaMedida`.
  */
-export function medidasDosAtributos(attrs: readonly AtributoProduto[] | undefined): MedidasParciais | null {
+export function medidaDosAtributos(attrs: readonly AtributoProduto[] | undefined): MedidaCm | null {
   const m = attrs?.find((a) => a.medida)?.medida;
   if (!m) return null;
-  const r: MedidasParciais = {};
+  const r: MedidaCm = {};
   if (m.tipo === "1D") {
     const v = emCm(m.valor, m.unidade);
-    if (v !== undefined && (m.dimensao === "largura" || m.dimensao === "comprimento")) r.larguraCm = v;
-    else if (v !== undefined && m.dimensao === "altura") r.alturaCm = v;
+    if (v !== undefined && (m.dimensao === "largura" || m.dimensao === "comprimento")) r.largura = v;
+    else if (v !== undefined && m.dimensao === "altura") r.altura = v;
   } else {
-    const l = emCm(m.largura, m.unidade), p = emCm(m.comprimento, m.unidade), a = emCm(m.espessura, m.unidade);
-    if (l !== undefined) r.larguraCm = l;
-    if (p !== undefined) r.profundidadeCm = p;
-    if (a !== undefined) r.alturaCm = a;
+    const l = emCm(m.largura, m.unidade), c = emCm(m.comprimento, m.unidade), e = emCm(m.espessura, m.unidade);
+    if (l !== undefined) r.largura = l;
+    if (c !== undefined) r.comprimento = c;
+    if (e !== undefined) r.espessura = e;
   }
   return Object.keys(r).length ? r : null;
+}
+
+/**
+ * A medida do atributo repartida por largura, profundidade e altura como o classificador faz com os números do nome (extrairDimensoes): base de duche e
+ * banheira, o maior é a largura e o menor a profundidade, e a espessura é a altura; espelho, quadro, radiador, toalheiro, resguardo e roupeiro, o comprimento
+ * é a altura e a espessura a profundidade; os outros, o comprimento é a profundidade e a espessura a altura. Nada que sirva: null.
+ */
+export function dimensoesDaMedida(tipo: TipoMockup, m: MedidaCm): MedidasParciais | null {
+  const { largura: l, comprimento: c, espessura: e, altura: a } = m;
+  let r: MedidasParciais;
+  if (tipo === "base_duche" || tipo === "banheira") {
+    const lados = [l, c].filter((x): x is number => x !== undefined);
+    r = { larguraCm: lados.length ? Math.max(...lados) : undefined, profundidadeCm: lados.length === 2 ? Math.min(...lados) : undefined, alturaCm: e ?? a };
+  } else if (LARGURA_ALTURA.includes(tipo)) r = { larguraCm: l, alturaCm: c ?? a, profundidadeCm: e };
+  else r = { larguraCm: l, profundidadeCm: c, alturaCm: e ?? a };
+  const dito = Object.fromEntries(Object.entries(r).filter(([, v]) => v !== undefined)) as MedidasParciais;
+  return Object.keys(dito).length ? dito : null;
 }
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -50,18 +71,19 @@ export function corDosAtributos(attrs: readonly AtributoProduto[] | undefined, d
   return hex && HEX.test(hex) ? hex : undefined;
 }
 
-export interface EntradaPrevia { nome: string; sub?: string; no: string | null; arvore: readonly NoCat[]; medidas?: MedidasParciais | null; cor?: string }
+export interface EntradaPrevia { nome: string; sub?: string; no: string | null; arvore: readonly NoCat[]; medida?: MedidaCm | null; cor?: string }
 const ID_PREVIA = "previa-produto";
 
 /**
- * O modelo do catálogo 3D do produto que se está a escrever: o classificador de sempre (pela subcategoria, pelo nome e pelo ramo da árvore), com as
- * medidas dos atributos por cima das do nome (o que os atributos não dizem vem do nome ou das omissões do tipo) e a cor do atributo Cor, que o
- * classificador não lê.
+ * O modelo do catálogo 3D do produto que se está a escrever: o classificador de sempre (pela subcategoria, pelo nome e pelo ramo da árvore), com a
+ * medida dos atributos por cima da do nome (repartida pelo tipo que o classificador deu; o que ela não diz vem do nome ou das omissões do tipo) e a cor do
+ * atributo Cor, que o classificador não lê.
  */
-export function modeloParaPrevia({ nome, sub, no, arvore, medidas, cor }: EntradaPrevia): ProdutoModelo3D {
+export function modeloParaPrevia({ nome, sub, no, arvore, medida, cor }: EntradaPrevia): ProdutoModelo3D {
   const p = { id: ID_PREVIA, n: nome.trim(), sub: sub?.trim() || undefined, no };
   let m = modeloDoProduto(p, arvore);
-  if (medidas && Object.keys(medidas).length) {
+  const medidas = medida ? dimensoesDaMedida(m.tipo, medida) : null;
+  if (medidas) {
     const d = m.dimensoes;
     m = modeloDoProduto({ ...p, dim: [medidas.larguraCm ?? d.larguraCm, medidas.profundidadeCm ?? d.profundidadeCm, medidas.alturaCm ?? d.alturaCm] }, arvore);
   }

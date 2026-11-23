@@ -3,24 +3,25 @@
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const ctl = vi.hoisted(() => ({ importado: false }));
-vi.mock("./planta3d/Visualizador3D", () => {
-  ctl.importado = true;
-  return {
-    default: (p: { espaco: { pecas: { largura: number; nome?: string }[] }; descricao: string }) =>
-      <div data-testid="canvas3d" role="img" aria-label={p.descricao} data-nome={p.espaco.pecas[0].nome} data-largura={p.espaco.pecas[0].largura} />,
-  };
-});
-const base = vi.hoisted(() => ({ respostas: {} as Record<string, { data: unknown; error: unknown }> }));
+vi.mock("./planta3d/Visualizador3D", () => ({
+  default: (p: { espaco: { pecas: { largura: number; nome?: string }[] }; descricao: string }) =>
+    <div data-testid="canvas3d" role="img" aria-label={p.descricao} data-nome={p.espaco.pecas[0].nome} data-largura={p.espaco.pecas[0].largura} />,
+}));
+// o Supabase simulado regista as funções chamadas e as escritas (insert, update, upsert, delete), para provar que abrir o 3D não grava nada
+const base = vi.hoisted(() => ({ respostas: {} as Record<string, { data: unknown; error: unknown }>, rpcs: [] as string[], escritas: [] as string[] }));
 vi.mock("@/integrations/supabase/client", () => {
-  const cadeia = () => {
+  const cadeia = (tabela: string) => {
     const c: Record<string, unknown> = {};
     for (const k of ["select", "eq", "is", "order", "limit"]) c[k] = () => c;
+    for (const k of ["insert", "update", "upsert", "delete"]) c[k] = () => { base.escritas.push(`${tabela}.${k}`); return c; };
     c.then = (ok: (r: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(ok);
     return c;
   };
-  return { supabase: { rpc: vi.fn(async (f: string) => base.respostas[f] ?? { data: null, error: null }), from: vi.fn(() => cadeia()) } };
+  return { supabase: { rpc: vi.fn(async (f: string) => { base.rpcs.push(f); return base.respostas[f] ?? { data: null, error: null }; }), from: vi.fn((t: string) => cadeia(t)) } };
 });
+/** As funções da base que escrevem (cat_guardar_*, cat_definir_*, cat_criar_*…) e qualquer insert, update, upsert ou delete. */
+const ESCRITA = /^cat_(guardar|definir|criar|eliminar|apagar|gravar|mudar|ligar|importar)|insert|update|upsert|delete/i;
+const escritasFeitas = () => [...base.rpcs.filter((f) => ESCRITA.test(f)), ...base.escritas];
 
 import { acoes, seed } from "./motor";
 import { CatalogoV1 } from "./CatalogoV1";
@@ -35,7 +36,7 @@ const DEFS: AtributoDef[] = [{ id: "a-med", codigo: "medida", nome: "Medida", ti
 const PID = "11111111-2222-4333-8444-555555555555";
 const real: FichaProdutoReal = { org: "org-1", podeEditar: true, podeMudarPrecos: true, recarregar: vi.fn(async () => {}) };
 
-beforeEach(() => { base.respostas = { cat_produto_stock: { data: { gere_stock: true, pode_editar: true, armazens: [] }, error: null } }; });
+beforeEach(() => { base.respostas = { cat_produto_stock: { data: { gere_stock: true, pode_editar: true, armazens: [] }, error: null } }; base.rpcs = []; base.escritas = []; });
 afterEach(() => { cleanup(); reporCustos(); reporCatalogo(); });
 
 describe("Modelo 3D ao criar um produto", () => {
@@ -46,13 +47,12 @@ describe("Modelo 3D ao criar um produto", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Produtos" }));
     fireEvent.click(screen.getByRole("button", { name: "Criar" }));
   };
-  it("a secção «Modelo 3D» está lá, dentro de «O produto», fechada e sem o three carregado", () => {
+  it("a secção «Modelo 3D» está lá, dentro de «O produto», fechada e sem canvas", () => {
     abrirCriar();
     const produto = screen.getByRole("region", { name: "O produto" });
     const sec = within(produto).getByRole("region", { name: "Modelo 3D" });
     expect(within(sec).getByRole("button", { name: "Ver em 3D" })).toHaveAttribute("aria-expanded", "false");
     expect(screen.queryByTestId("canvas3d")).toBeNull();
-    expect(ctl.importado).toBe(false);
   });
   it("abrir mostra o 3D do nome escrito; o resto do formulário continua igual", async () => {
     abrirCriar();
@@ -62,12 +62,15 @@ describe("Modelo 3D ao criar um produto", () => {
     expect(screen.getByRole("region", { name: "Compra e venda" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Criar o produto" })).toBeInTheDocument();
   });
-  it("não grava nada por abrir o 3D: o botão «Criar o produto» continua desativado sem custo", async () => {
+  it("não grava nada por abrir e fechar o 3D: nenhuma função de escrita nem insert, update, upsert ou delete, e o produto não se cria", async () => {
     abrirCriar();
     fireEvent.change(screen.getByLabelText("Nome do produto"), { target: { value: "Sanita suspensa Rimless" } });
     fireEvent.click(screen.getByRole("button", { name: "Ver em 3D" }));
     await screen.findByTestId("canvas3d");
     await waitFor(() => expect(screen.getByRole("button", { name: "Criar o produto" })).toBeDisabled());
+    fireEvent.click(screen.getByRole("button", { name: "Ver em 3D" }));
+    expect(screen.queryByTestId("canvas3d")).toBeNull();
+    expect(escritasFeitas()).toEqual([]);
   });
 });
 
@@ -88,6 +91,15 @@ describe("Modelo 3D ao editar um produto (ficha)", () => {
     const c = await screen.findByTestId("canvas3d");
     expect(c.getAttribute("data-nome")).toBe("Sanita suspensa Rimless");
     expect(c.getAttribute("data-largura")).toBe("0.4");
+  });
+  it("não grava nada por abrir e fechar o 3D", async () => {
+    ficha();
+    fireEvent.click(screen.getByRole("button", { name: "Ver em 3D" }));
+    await screen.findByTestId("canvas3d");
+    fireEvent.click(screen.getByRole("button", { name: "Ver em 3D" }));
+    expect(screen.queryByTestId("canvas3d")).toBeNull();
+    expect(base.rpcs.length).toBeGreaterThan(0); // o mock vê as leituras da ficha: sem escritas, o teste não é vazio
+    expect(escritasFeitas()).toEqual([]);
   });
   it("um consumível não tem a secção", () => {
     ficha(PROD, "consumivel");

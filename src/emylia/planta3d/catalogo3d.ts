@@ -225,7 +225,7 @@ export function dimensoesDoNome(nome: string): number[] | null {
 }
 
 /** Tipos cujo nome, com dois números, diz largura × altura (peças planas ou altas). */
-const LARGURA_ALTURA: TipoMockup[] = ["roupeiro", "espelho", "quadro", "radiador", "toalheiro", "resguardo"];
+export const LARGURA_ALTURA: readonly TipoMockup[] = ["roupeiro", "espelho", "quadro", "radiador", "toalheiro", "resguardo"];
 
 /**
  * As dimensões reais de um produto. Do nome, quando as traz; senão a tabela de omissões do tipo.
