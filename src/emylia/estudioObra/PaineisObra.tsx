@@ -315,7 +315,20 @@ export function Execucao({ ctx, d, abrir, dias }: { ctx: Ctx; d: Negocio; abrir:
 
 /* ================================================================== os materiais */
 const OK_MAT = new Set(["na obra", "na carrinha", "reservado", "recebido"]);
-export function MateriaisDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+/** 23/11 (Rúben: «mega next-level»): a tarefa que precisa de cada material: a que instala o produto (o serviço que ele traz, nos produtos
+ *  do contrato) ou, sem ela, a primeira por validar da fase dele. E se o material vem do contrato ou do modelo de obra. */
+export function quemPrecisa(d: Negocio, fase: number, nome: string): { ti: number | null; contrato: boolean } {
+  const p = d.obra.plano!, norm = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const prod = (d.visita.prod ?? []).find((x) => norm(x.n) === norm(nome));
+  const L = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => estadoVivo(t, p) !== "validada").sort((a, b) => a.t.dia - b.t.dia || a.ti - b.ti);
+  const porSvc = prod?.svc ? L.find(({ t }) => t.svcs.includes(prod.svc!)) : undefined;
+  const daFase = L.find(({ t }) => (t.fase ?? 1) === fase);
+  return { ti: (porSvc ?? daFase)?.ti ?? null, contrato: !!prod };
+}
+const isoDe = (x: Date) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+const ROTULO_MAT: Record<string, string> = { reservado: "no armazém", recebido: "no armazém", "na obra": "na obra", "na carrinha": "na carrinha" };
+
+export function MateriaisDaObra({ ctx, d, dias = [] }: { ctx: Ctx; d: Negocio; dias?: Date[] }) {
   const { S, A, run } = ctx;
   const db = useInventario();
   const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
@@ -329,6 +342,12 @@ export function MateriaisDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   // o custo do que se pede a mais (ou volta ao armazém): o preço do material, se o tiver; senão o da receita do orçamento
   const custo = (L: { m: MatTarefa; q: number }[]) => L.reduce((a, x) => a + x.q * (x.m.preco ?? custosDosMateriais(d, [{ n: x.m.n, q: x.q }])[0]?.custo ?? 0), 0);
   const cPend = custo(pend), cSobra = custo(sobra);
+  // a tarefa que precisa de cada material, o dia dela e se o material chega tarde
+  const linhaDe = (fase: number, m: (typeof todos)[number]) => {
+    const q = quemPrecisa(d, fase, m.n), tt = q.ti != null ? p.tasks[q.ti] : null, dia = tt ? dias[tt.dia] : undefined;
+    return { ti: q.ti, t: tt, contrato: q.contrato, precisa: dia ? dataCurta(dia) : tt ? `dia ${tt.dia + 1}` : "", tarde: !!(m.chega && dia && m.chega > isoDe(dia)) };
+  };
+  const tarde = G.flatMap((g) => g.itens.filter((m) => linhaDe(g.fase, m).tarde));
   return (
     <div className="space-y-6">
       <section aria-label="O que chegou e o que falta" className="space-y-3">
@@ -340,20 +359,45 @@ export function MateriaisDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           {d.obra.ec && <Button type="button" variant="outline" className="min-h-10 rounded-full" onClick={() => run(() => A.abrirInv(d.id))}><ArrowUpRight className="mr-1.5 h-4 w-4" aria-hidden="true" />No Inventário</Button>}
         </div>
         {todos.length > 0 && <div className="h-2 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div className="h-full rounded-full bg-success transition-[width] duration-500" style={{ width: `${(ok / todos.length) * 100}%` }} /></div>}
+        {tarde.length > 0 && (
+          <p role="alert" className="flex items-start gap-2 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />{tarde.length === 1 ? `${tarde[0].n} chega depois de a tarefa que precisa dele começar.` : `${tarde.length} materiais chegam depois de as tarefas que precisam deles começarem.`}
+          </p>
+        )}
+        {/* 23/11: uma lista só (antes, «As entregas» repetia esta): por fase, com o dia em que a tarefa precisa e quando chega */}
         <div className="grid gap-3 lg:grid-cols-2">
-          {G.map((g) => (
-            <div key={g.fase} className="rounded-2xl border border-border bg-card p-3">
-              <p className="mb-2 flex items-center gap-2 text-sm font-semibold">{((Ic) => <span aria-hidden="true" className="grid h-7 w-7 place-items-center rounded-full text-white" style={{ background: COR_FASE[g.fase] }}><Ic className="h-4 w-4" /></span>)(ICONE_DA_FASE[g.fase] ?? Package)}Fase {g.fase} · {FASES_OBRA[g.fase - 1]?.curto}</p>
-              <ul className="space-y-1">
-                {g.itens.map((m, k) => (
-                  <li key={k} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="min-w-0 truncate">{m.n} <span className="text-muted-foreground">· {nfmt(m.q)} {m.un}</span></span>
-                    <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", OK_MAT.has(m.estado) ? "bg-success/15 text-success" : "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200")}>{m.estado}{m.quando ? ` · ${m.quando}` : ""}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          {G.map((g) => {
+            const Ic = ICONE_DA_FASE[g.fase] ?? Package, cor = COR_FASE[g.fase];
+            return (
+              <div key={g.fase} role="group" aria-label={`Fase ${g.fase} · ${FASES_OBRA[g.fase - 1]?.curto}`} className="overflow-hidden rounded-2xl border border-border bg-card">
+                <div className="flex items-center gap-2.5 border-b border-border px-3 py-2.5">
+                  <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-white" style={{ background: cor }}><Ic className="h-4 w-4" /></span>
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: cor }}>Fase {g.fase}</p>
+                    <p className="truncate text-sm font-semibold leading-tight">{FASES_OBRA[g.fase - 1]?.curto}</p>
+                  </div>
+                  <p className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">{g.itens.filter((m) => OK_MAT.has(m.estado)).length} de {g.itens.length} garantidos</p>
+                </div>
+                <ul>
+                  {g.itens.map((m, k) => {
+                    const x = linhaDe(g.fase, m);
+                    return (
+                      <li key={k} className={cn("flex items-center gap-3 border-b border-border px-3 py-2 last:border-b-0", x.tarde && "bg-destructive/[0.05]")}>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium">{m.n} <span className="font-normal text-muted-foreground">· {nfmt(m.q)} {m.un}</span>{!x.contrato && <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">modelo de obra</span>}</span>
+                          {x.t && <span className="block text-xs text-muted-foreground">Precisa a {x.precisa} · <button type="button" title={x.t.nome} onClick={() => setTi(x.ti)} className="underline-offset-2 hover:underline">{nomeCurtoTarefa(x.t.nome)}</button></span>}
+                          {x.tarde && <span className="block text-xs font-medium text-destructive">Chega depois de a tarefa começar</span>}
+                        </span>
+                        <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", OK_MAT.has(m.estado) ? "bg-success/15 text-success" : x.tarde ? "bg-destructive/10 text-destructive" : "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200")}>
+                          {OK_MAT.has(m.estado) ? ROTULO_MAT[m.estado] ?? m.estado : m.quando ? `chega a ${m.quando}` : m.estado}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })}
         </div>
       </section>
 

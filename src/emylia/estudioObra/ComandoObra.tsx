@@ -176,6 +176,7 @@ export function pontosDoArranque(ctx: Ctx, d: Negocio, ir: Ir, dataInicio: strin
 const agoraCurto = () => { const x = new Date(); return `${String(x.getDate()).padStart(2, "0")}/${String(x.getMonth() + 1).padStart(2, "0")}`; };
 
 function Arranque({ ctx, d, dias, ir }: { ctx: Ctx; d: Negocio; dias: Date[]; ir: Ir }) {
+  useInventario(); // redesenha quando a encomenda da base chega (os materiais da lista)
   const p = d.obra.plano!, quando = quandoDe(dias), a = arranqueDe(p)!;
   const faltam = Math.max(0, a.dia - (p.estado === "em curso" ? p.dia : 0)), ta = p.tasks[a.ti];
   const planeia = podeNeg(ctx.S.role, "obra.planear");

@@ -6,8 +6,9 @@ import { acoes } from "../motor";
 import type { Ctx } from "../pecas";
 import { EstudioObra } from "./EstudioObra";
 import { obraDeExemplo } from "./exemploObra";
+import { definirEncomendasReais, resumoDaBase, type LinhaDocEc } from "../real/encomendaReal";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); definirEncomendasReais(null); });
 
 export function montarObra(x = obraDeExemplo()) {
   const A = acoes(x.S, () => {}, (fn) => fn());
@@ -72,5 +73,29 @@ describe("3. a curva S e a margem", () => {
     const pv = screen.getByRole("region", { name: "A previsão viva" });
     expect(within(pv).getByText("As fases da obra")).toBeTruthy();
     expect(within(pv).queryByText("Horas planeadas e reais")).toBeNull();
+  });
+});
+
+describe("4. os materiais numa lista só", () => {
+  it("por fase, com o dia em que a tarefa precisa, a origem e o alerta do que chega tarde", () => {
+    const x = obraDeExemplo();
+    x.d.obra.ec!.linhas = []; x.d.obra.ec!.ref = "CT 2026/1027";
+    const linha = (nome: string, po: string | null, recebida: boolean): LinhaDocEc => ({
+      quote_line_id: nome, item_type: "product", product_id: null, product_name: nome, product_sku: null, quantity: 1, unidade: "un", line_status: null,
+      purchase_order_id: po, qty_needed: 1, qty_reserved: recebida ? 1 : 0, qty_ordered: 1, qty_received: recebida ? 1 : 0, qty_missing: recebida ? 0 : 1,
+      qty_served: 0, has_preferred_supplier: true, request_block_reason: null,
+    });
+    const inv = resumoDaBase({ order_number: "EC-1", lines: [linha("Base de Duche ZEUS 70x150", "po-1", false), linha("Cola cimentícia C2", null, true)] },
+      [{ id: "po-1", order_number: "PO-1", status: "approved", expected_delivery: "2027-02-01", fornecedor: "Fornecedor Demo", publicada: true, prometida: "2027-02-01" }]);
+    definirEncomendasReais(new Map([[x.d.obra.ec!.ref!, inv]]));
+    montarObra(x);
+    fireEvent.click(screen.getByRole("tab", { name: /Materiais/ }));
+    expect(screen.queryByRole("region", { name: "As entregas" })).toBeNull();
+    const sec = screen.getByRole("region", { name: "O que chegou e o que falta" });
+    expect(within(sec).getAllByText(/^Precisa a /).length).toBeGreaterThan(0);
+    expect(within(sec).getAllByText("modelo de obra").length).toBe(2); // nenhum dos dois está nos produtos do contrato do exemplo
+    expect(within(sec).getByRole("alert").textContent).toMatch(/Base de Duche ZEUS 70x150 chega depois/);
+    expect(within(sec).getByText("chega a 01/02")).toBeTruthy();
+    expect(within(sec).getByText("no armazém")).toBeTruthy();
   });
 });

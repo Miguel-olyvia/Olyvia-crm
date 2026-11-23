@@ -175,7 +175,8 @@ export function equipamentosDaObra(p: Plano): Equip[] {
 
 /* ------------------------------------------------------------------ os materiais, por fase */
 export type EstadoMat = "na obra" | "na carrinha" | "reservado" | "recebido" | "a chegar" | "encomendado" | "por encomendar" | "em falta";
-export interface Mat { n: string; q: number; un: string; estado: EstadoMat; quando?: string; forn?: string }
+export interface Mat { n: string; q: number; un: string; estado: EstadoMat; quando?: string; forn?: string;
+  /** 23/11: a data prometida pelo fornecedor (ISO), para comparar com o dia da tarefa que precisa do material */ chega?: string }
 /** A fase em que o material entra, só pelo nome. 02/11: mora em fasesObra.ts (a regra única); fica aqui para os imports de sempre. */
 export { faseDoMaterial };
 
@@ -229,7 +230,8 @@ export function materiaisPorFase(d: Negocio, inv?: ResumoEcNeg | null, lidas?: r
       estado = li.st === "served" ? "na obra" : li.aBordo ? "na carrinha" : li.st === "ready" || li.st === "recvpo" ? "reservado" : li.aChegar > 0 ? (porAprovar ? "por encomendar" : pr ? "a chegar" : "encomendado") : "em falta";
       quando = estado === "a chegar" && pr ? `${pr.slice(8, 10)}/${pr.slice(5, 7)}` : undefined;
     } else if (x.falta > 0) estado = d.obra.ec?.ref ? "por encomendar" : "em falta";
-    return { n: x.n, q: x.q, un: x.un, estado, quando, forn, fase: faseNaObra(F, x) };
+    const chega = li?.pos.find((p) => p.prometida)?.prometida ?? undefined;
+    return { n: x.n, q: x.q, un: x.un, estado, quando, forn, ...(chega && estado === "a chegar" ? { chega } : {}), fase: faseNaObra(F, x) };
   });
   return [1, 2, 3, 4].map((f) => ({ fase: f, itens: itens.filter((x) => x.fase === f).map(({ fase: _f, ...m }) => m) })).filter((g) => g.itens.length);
 }
