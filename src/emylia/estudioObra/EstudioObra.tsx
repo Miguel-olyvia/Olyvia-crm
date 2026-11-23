@@ -742,8 +742,9 @@ ${ROTULO_VIVO[v]} · ${n.dur} ${n.dur === 1 ? "dia" : "dias"}${dataIni ? ` a par
         background: v === "parada" || v === "pausada" ? "repeating-linear-gradient(135deg,#64748b 0 6px,#94a3b8 6px 12px)" : (v === "em curso" || v === "hoje" || v === "atrasada") ? `color-mix(in srgb, ${fundo} 45%, transparent)` : v === "por começar" ? `color-mix(in srgb, ${fundo} 80%, white)` : fundo }}>
       {(v === "em curso" || v === "hoje" || v === "atrasada") && <motion.span aria-hidden="true" className="absolute inset-y-0 left-0" style={{ background: fundo }} initial={reduzir ? false : { width: 0 }} animate={{ width: `${Math.round(feito * 100)}%` }} transition={{ duration: 0.6, ease: "easeOut" }} />}
       {I && <I className="relative h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
-      {critica && !I && <Route className="relative h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden="true" />}
-      <span className={cn("relative drop-shadow-sm", largo ? "line-clamp-2 whitespace-normal break-words text-[11px] leading-tight" : "truncate")}>{nomeCurtoTarefa(t.nome)}</span>
+      {/* na vista por técnico, uma barra de um dia é só para o nome (o caminho crítico fica na dica e no rótulo) */}
+      {critica && !I && !(largo && n.dur < 2) && <Route className="relative h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden="true" />}
+      <span lang="pt-PT" className={cn("relative drop-shadow-sm", largo ? "line-clamp-2 whitespace-normal hyphens-auto text-[11px] leading-tight" : "truncate")}>{nomeCurtoTarefa(t.nome)}</span>
       {arrasto && passos !== 0 && <span className="relative ml-auto shrink-0 rounded bg-black/25 px-1 text-[10px] tabular-nums">{passos > 0 ? "+" : ""}{passos}</span>}
       {mexe && <span onPointerDown={(e) => pegar(e, "durar")} aria-hidden="true" className="absolute inset-y-0 right-0 w-3 cursor-ew-resize bg-white/0 hover:bg-white/30" />}
     </motion.button>
