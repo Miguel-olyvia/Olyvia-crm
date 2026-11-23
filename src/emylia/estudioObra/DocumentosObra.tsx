@@ -199,7 +199,7 @@ export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: 
           <div className="min-w-0">
             <h2 className="flex items-center gap-2 text-[15px] font-semibold"><Box className="h-4 w-4 text-primary" aria-hidden="true" />Como a obra vai ficar</h2>
             <p className="text-sm text-muted-foreground">
-              {qual === "obra" ? <>O projeto aprovado. <b className="font-medium text-foreground">A cores, o que já está feito</b>; transparente, o que falta{M.total ? ` (${M.feitas} de ${M.total} peças feitas)` : ""}. Só para ver.</>
+              {qual === "obra" ? <>{noDia ? "O plano neste dia." : "O projeto aprovado."} <b className="font-medium text-foreground">A cores, o que {noDia ? "o plano dá por feito" : "já está feito"}</b>; transparente, o que falta{(noDia ?? M).total ? ` (${(noDia ?? M).feitas} de ${(noDia ?? M).total} peças feitas)` : noDia && !noDia.demolida ? " (ainda antes da demolição)" : ""}. Só para ver.</>
                 : qual === "final" ? "O projeto aprovado, com tudo feito: os produtos do contrato, o revestimento e o pavimento." : "A divisão como estava antes da obra."}
             </p>
           </div>

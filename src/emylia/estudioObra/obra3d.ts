@@ -34,7 +34,7 @@ export function feitoPorGrupo(p: Plano): Record<Grupo, boolean | null> {
   const acabou = p.estado === "concluída";
   const out = {} as Record<Grupo, boolean | null>;
   for (const g of Object.keys(DE_QUE) as Grupo[]) {
-    const ts = p.tasks.filter((t) => DE_QUE[g].test(t.nome));
+    const ts = p.tasks.filter((t) => DE_QUE[g].test(t.nome) && !(g === "paredes" && /teto/i.test(t.nome)));
     out[g] = acabou ? true : ts.length ? ts.every((t) => feita(t, p)) : null;
   }
   return out;
@@ -65,6 +65,7 @@ export function obraEm3D(d: Negocio): Obra3D | null {
 }
 
 // ------------------------------------------------------------------ 23/11: o 3D com modelos (o mesmo do passo «3D» do Estúdio)
+// 23/11: a pintura do teto não conta para as paredes (as paredes ficam com o revestimento quando ele acaba).
 // Rúben: «o 3D ainda é genérico: caixas cinzentas sem os produtos nem os materiais». O 3D da obra passa a ser o do Estúdio (os modelos,
 // os produtos do contrato, o revestimento e o pavimento como materiais), com o mesmo «a cores o feito, transparente o que falta».
 
@@ -145,7 +146,7 @@ const DEMOL = /demol/i;
 export function feitoNoDia(p: Plano, k: number): Record<Grupo, boolean | null> {
   const out = {} as Record<Grupo, boolean | null>;
   for (const g of Object.keys(DE_QUE) as Grupo[]) {
-    const ts = p.tasks.filter((t) => DE_QUE[g].test(t.nome));
+    const ts = p.tasks.filter((t) => DE_QUE[g].test(t.nome) && !(g === "paredes" && /teto/i.test(t.nome)));
     out[g] = ts.length ? ts.every((t) => t.dia + t.dur <= k + 1) : null;
   }
   return out;
