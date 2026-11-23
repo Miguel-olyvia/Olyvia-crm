@@ -174,3 +174,14 @@ describe("8. o fecho", () => {
     expect(x.d.obra.auto ?? null).toBeNull(); // só para ver: o auto não se cria
   });
 });
+
+describe("9. o telemóvel do gestor", () => {
+  it("a barra do polegar: «Precisa de ti» com a contagem, o imprevisto e a ação principal", () => {
+    montarObra();
+    const nav = screen.getByRole("navigation", { name: "Ações rápidas" });
+    expect(within(nav).getByRole("button", { name: /Precisa de ti/ })).toBeTruthy();
+    fireEvent.click(within(nav).getByRole("button", { name: "Imprevisto" }));
+    expect(screen.getByRole("complementary", { name: "Registar imprevisto" })).toBeTruthy();
+    expect(within(nav).getByRole("button", { name: /Validar a tarefa feita/ })).toBeTruthy();
+  });
+});

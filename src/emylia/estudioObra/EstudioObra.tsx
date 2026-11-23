@@ -12,7 +12,7 @@
 import { Fragment, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { EnderecoAtivo, escreverParamUrl, usePainelUrl, useParamUrl } from "../usarParamUrl";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, HardHat, Lightbulb, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { comRelogioReal, eur, nfmt, type Negocio, type Plano, type Tarefa } from "../motor";
@@ -314,15 +314,28 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
                 </span>
               )}
               {vivo && planeia && <Button type="button" variant="outline" className="min-h-11 px-3 sm:px-4" aria-label="Replanear" onClick={() => { setPainel(null); setPrevia({ titulo: "Replanear a obra", k: "replanear", adiantar: true }); }}><Shuffle className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">Replanear</span></Button>}
-              {vivo && planeia && principal?.t !== "Registar imprevisto" && <Button type="button" variant="outline" className="min-h-11 px-3 sm:px-4" aria-label="Registar imprevisto" onClick={() => setPainel({ k: "imprevisto" })}><AlertTriangle className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">Imprevisto</span></Button>}
-              {principal && <Button type="button" className="min-h-11" disabled={principal.desligado} title={principal.porque || undefined} onClick={principal.fn}><principal.icone className="mr-1.5 h-4 w-4" aria-hidden="true" />{principal.t}</Button>}
+              {vivo && planeia && principal?.t !== "Registar imprevisto" && <Button type="button" variant="outline" className="hidden min-h-11 px-3 sm:inline-flex sm:px-4" aria-label="Registar imprevisto" onClick={() => setPainel({ k: "imprevisto" })}><AlertTriangle className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">Imprevisto</span></Button>}
+              {principal && <Button type="button" className="hidden min-h-11 sm:inline-flex" disabled={principal.desligado} title={principal.porque || undefined} onClick={principal.fn}><principal.icone className="mr-1.5 h-4 w-4" aria-hidden="true" />{principal.t}</Button>}
             </div>
           </div>
           {principal?.porque && <p className="mx-auto max-w-[1500px] px-4 pb-2 text-sm text-amber-800 dark:text-amber-300 sm:px-6">{principal.porque}</p>}
         </header>
 
+        {/* 23/11 (Rúben: «mega next-level», o telemóvel do gestor em obra): as ações ao alcance do polegar, em baixo; no ecrã largo ficam no topo */}
+        {(vivo || p.estado === "aprovado") && (
+          <nav aria-label="Ações rápidas" className="fixed inset-x-0 bottom-0 z-40 flex gap-2 border-t border-border bg-card/95 px-3 pt-2 backdrop-blur sm:hidden" style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}>
+            <Button type="button" variant="outline" className="relative min-h-12 flex-1 rounded-2xl" onClick={() => { setAba("plano"); ir.comando(); }}>
+              <Zap className="mr-1.5 h-4 w-4 text-amber-600" aria-hidden="true" />Precisa de ti
+              {pedidos.length > 0 && <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-900">{pedidos.length}</span>}
+            </Button>
+            {vivo && planeia && principal?.t !== "Registar imprevisto" && (
+              <Button type="button" variant="outline" className="min-h-12 flex-1 rounded-2xl" onClick={() => setPainel({ k: "imprevisto" })}><AlertTriangle className="mr-1.5 h-4 w-4" aria-hidden="true" />Imprevisto</Button>
+            )}
+            {principal && <Button type="button" className="min-h-12 flex-1 rounded-2xl" disabled={principal.desligado} onClick={principal.fn}><principal.icone className="mr-1.5 h-4 w-4" aria-hidden="true" /><span className="truncate">{principal.t}</span></Button>}
+          </nav>
+        )}
         <div className="relative flex min-h-0 flex-1">
-          <main className="min-w-0 flex-1 overflow-y-auto">
+          <main className="min-w-0 flex-1 overflow-y-auto pb-24 sm:pb-0">
             <div className="mx-auto max-w-[1500px] space-y-6 px-4 py-5 sm:px-6">
               {/* ------------------------------------------------------------ 12/11: o pulso (os números, que se tocam) e o comando de hoje */}
               {/* 12/11 (Rúben): as adendas por disparar e o percurso das que andam, em cima, sem sair do Estúdio */}
