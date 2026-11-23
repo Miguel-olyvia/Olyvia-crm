@@ -57,7 +57,10 @@ export function passoEntre(d: Negocio, a: Retrato, b: Retrato, quando: (k: numbe
   const removida = b.plano.tasks.length < a.plano.tasks.length;
   if (!mudouPlano && !fora.length) return null;
   const novos = d.hist.slice(0, Math.max(0, b.hist - a.hist)).map((e) => e.t.replace(/^Plano( em obra)?: /, ""));
-  const texto = novos.length ? novos[novos.length - 1] : descrever(a.plano, b.plano, quando);
+  // o texto do histórico, com o nome curto das tarefas («nota em Demolição e remoção», não «MO Modelo … · demolição e remoção»)
+  const curto = (x: string) => [...new Set(b.plano.tasks.map((t) => t.nome ?? ""))].filter((n) => n.length > 3).sort((p, q) => q.length - p.length)
+    .reduce((acc, n) => acc.split(n).join(nomeCurtoTarefa(n)), x);
+  const texto = novos.length ? curto(novos[novos.length - 1]) : descrever(a.plano, b.plano, quando);
   const motivo = removida ? "removidas" : fora.find((k) => k !== "removidas");
   return { n: Date.now() + Math.random(), texto, antes: a.plano, depois: b.plano, pode: !motivo, ...(motivo ? { porque: PORQUE[motivo] } : {}) };
 }

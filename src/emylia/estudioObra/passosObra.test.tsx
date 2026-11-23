@@ -27,7 +27,7 @@ describe("os passos do Estúdio da obra", () => {
     expect(ps.pode).toBe(true);
     expect(ps.antes.tasks[mont].nota).toBeUndefined();
     expect(ps.depois.tasks[mont].nota).toBe("levar o andaime");
-    void p;
+    expect(ps.texto).toBe(`nota em ${p.tasks[mont].nome}: levar o andaime`.replace(p.tasks[mont].nome, "Montagem de móveis"));
   });
   it("com o aviso ao cliente, a ligação fica na lista mas não se anula (o cliente já viu)", () => {
     const { d, mont, rev, A } = obra();

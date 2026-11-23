@@ -123,6 +123,8 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   const passos = useRef<{ L: Passo[]; pos: number }>({ L: [], pos: 0 });
   const [, setVerPassos] = useState(0);
   const aRepor = useRef(false), diasRef = useRef<Date[]>([]);
+  // quantas vezes se anulou ou refez: o painel aberto volta a ler a tarefa (uma nota anulada não fica na caixa de texto)
+  const reposicoes = useRef(0);
   const [notaPasso, setNotaPasso] = useState<{ t: string; mau: boolean; n: number } | null>(null);
   const quandoP = (k: number) => (diasRef.current[k] ? dataCurta(diasRef.current[k]) : `dia ${k + 1}`);
   const runComPassos = (fn: () => void) => {
@@ -142,6 +144,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
     let ok = false;
     aRepor.current = true;
     try { ctx0.run(() => { ok = ctx0.A.reporPlanoObra(d.id, modo === "anular" ? ps.antes : ps.depois, ps.texto, modo); }); } finally { aRepor.current = false; }
+    if (ok) reposicoes.current++;
     return ok;
   };
   const anular = (): boolean => {
@@ -521,7 +524,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
                   const t = p.tasks[painel.ti], m = t.tec ? motivoOcupado(t.tec, t, p, ocup, p.tasks.filter((_, i) => i !== painel.ti)) : null;
                   const onde = m === "noutra obra" && t.tec ? obraQueOcupa(S, t.tec, t, p, d.id) : null;
                   return (
-                    <PainelTarefa key={painel.ti} ctx={ctxObra} d={d} ti={painel.ti} editavel={podeMexer(painel.ti)} podeAgir={planeia && !acabou} dias={dias} motivo={m} onde={onde}
+                    <PainelTarefa key={`${painel.ti}:${reposicoes.current}`} ctx={ctxObra} d={d} ti={painel.ti} editavel={podeMexer(painel.ti)} podeAgir={planeia && !acabou} dias={dias} motivo={m} onde={onde}
                       abrirOutra={setOutra} fechar={() => setPainel(null)} ocup={ocup} mudar={mudar} foraDaObra={foraDaObra} minDia={vivo ? p.dia : 0} notaLivre={planeia && !acabou}
                       extra={<ExecucaoTarefa ctx={ctx} d={d} ti={painel.ti} imprevisto={() => setPainel({ k: "imprevisto", ti: painel.ti })}
                         simular={(n) => setPrevia(n ? { titulo: `${t.nome}: mais ${n} ${n === 1 ? "dia" : "dias"}`, k: "atraso", ti: painel.ti, dias: n } : null)}
