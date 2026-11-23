@@ -14,6 +14,9 @@ npx supabase db query --linked -f <caminho>/supabase/tests/permissoes_papeis.sql
 O resultado é o último `SELECT`: uma linha por verificação
 (`papel_conta | verificacao | esperado | obtido | resultado | detalhe`) e uma linha `TOTAL` com o número de FALHAS.
 
+Com `rhq.ps1` (corta ~100 s) não cabe de uma vez: correr por blocos de contas (filtrar `_perm_contas` por `ordem` logo depois de
+o preencher, e o 5b só num dos blocos) e somar os `TOTAL`.
+
 ## Não deixa alterações
 
 - Tudo em `BEGIN … ROLLBACK`; cada ação corre num sub-bloco que acaba sempre em `RAISE` (o que a ação escreveu é desfeito
@@ -27,15 +30,15 @@ O resultado é o último `SELECT`: uma linha por verificação
 
 Todas as associações ativas da organização `b6ffce4f-…` (só a primeira de cliente), mais a conta-sonda
 `1999rubencmail@gmail.com` (super_admin sem ficha RH) com o papel trocado para `system_admin`, `viewer` e
-`teste_rh_so_ponto` (o caso "tem `hr.assiduidade.picar` mas não tem ficha"). Os Papéis no Negócio (armazém, financeiro,
-comercial, operações, técnico) aparecem no rótulo `[neg: …]`.
+`teste_rh_so_ponto` (o caso "tem `hr.assiduidade.picar` mas não tem ficha"). O papel `tecnico` aparece no rótulo `[neg: tecnico]`.
 
 ## Como se calcula o esperado
 
 A partir das tabelas, não das funções testadas:
 - **perfil** — `anew_role_permissions` do papel da associação ativa não-cliente na organização;
-- **papel** — `neg_papeis_permissoes` dos Papéis no Negócio da ficha ligada (`pessoas_papeis_negocio`, + `tecnico` por
-  `fn_rh_pessoa_tecnica`);
+- **papel** — `neg_papeis_permissoes` do papel `tecnico`, o único que conta desde 17/11 (como `fn_neg_papeis`): ficha ligada e
+  `fn_rh_pessoa_tecnica` OU perfil `negocios.obra.tecnico`. Os Papéis no Negócio de `pessoas_papeis_negocio` já não contam, nem
+  no âmbito do 3b (`v_neg_tudo` sem o ramo do «Papel no Negócio explícito»);
 - **admin** — associação ativa ao papel global `system_admin`.
 
 ## O que cobre
@@ -61,7 +64,8 @@ A partir das tabelas, não das funções testadas:
 Mesmo estilo (`BEGIN … ROLLBACK`, sessão impersonada, esperado calculado das tabelas). Cria os seus dados na transação: o Rafael
 passa a `comercial` (OWNED), fica dono de um negócio/orçamento/proposta/contrato, ganha uma tarefa na obra de outro negócio, e
 lidera uma equipa de teste. Verifica: `neg_ler_negocios`/`obra_ler_negocios` (dono + tarefas; ORG; TEAM; NONE), as guardas de
-`neg_guardar_negocio`/`obra_guardar_negocio`, quem entra só pelo Papel no Negócio e os técnicos (veem tudo, sem guarda de âmbito),
+`neg_guardar_negocio`/`obra_guardar_negocio`, as contas que eram só Papel no Negócio (desde 17/11: sem `pessoas.view` no perfil dá
+CT001, o técnico lê a vista reduzida — só onde tem tarefas; nenhuma tem guarda de âmbito ao gravar) e os técnicos,
 o super_admin, `rpc_save_quote` (permissão + âmbito), o SELECT de `quotes`/`proposals`/`client_contracts` (OWNED = a cadeia do
 negócio comercial e contém o "meu" de cada ecrã; ORG = tudo), o UPDATE com as chaves de `quotes.edit`, NONE em
 `crm_scope_keys`/`get_schedule_item_scope_context`/`get_proposal_edit_scope`, e o âmbito em `soft_delete_business_entity` e

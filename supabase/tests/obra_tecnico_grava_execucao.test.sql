@@ -114,7 +114,7 @@ BEGIN
         WHEN '13' THEN v := jsonb_set(ob, ARRAY['emylia', 'plano', 'tasks', mi::text, 'dia'], to_jsonb((e->'plano'->'tasks'->mi->>'dia')::numeric + 1));
         WHEN '14' THEN
           ch := (SELECT x->>'chave' FROM jsonb_array_elements(ob->'tarefas') x WHERE x->>'pessoa' = coalesce(c.tec, 'e9baeebd-8984-4d6d-bbfc-001bfc4140f4') AND x->>'estado' = 'por_fazer' LIMIT 1);
-          v := jsonb_set(ob, '{tarefas}', (SELECT jsonb_agg(CASE WHEN x->>'chave' = ch THEN jsonb_set(x, '{inicio}', to_jsonb(coalesce((x->>'inicio')::date, current_date) + 1)) ELSE x END) FROM jsonb_array_elements(ob->'tarefas') x));
+          v := jsonb_set(ob, '{tarefas}', (SELECT jsonb_agg(CASE WHEN x->>'chave' = ch THEN jsonb_set(jsonb_set(x, '{inicio}', to_jsonb(coalesce((x->>'inicio')::date, current_date) + 1)), '{fim}', to_jsonb(greatest(coalesce((x->>'fim')::date, current_date), coalesce((x->>'inicio')::date, current_date) + 1))) ELSE x END) FROM jsonb_array_elements(ob->'tarefas') x));
           -- sem planear a gravação passa mas as datas da tabela ficam as da base (só a execução se grava)
           ver := format($v$SELECT CASE WHEN t.inicio_planeado IS NOT DISTINCT FROM %L::date THEN 'data ignorada' ELSE 'data gravada' END
                            FROM ops_obra_tarefa t JOIN ops_obra ob ON ob.id = t.obra_id WHERE ob.negocio_id = %L AND t.chave = %L$v$,
