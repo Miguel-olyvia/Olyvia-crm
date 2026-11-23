@@ -521,7 +521,8 @@ export function AgendaEquipa({ ctx, d, dias, ir }: { ctx: Ctx; d: Negocio; dias:
   // a semana: começa na segunda da semana de hoje (ou do início)
   const hoje = p.estado === "em curso" ? p.dia : 0;
   const segundaDe = (k: number) => { let j = k; while (j > 0 && dias[j] && dias[j].getDay() !== 1) j--; return j; };
-  const [ini, setIni] = useState(() => segundaDe(hoje));
+  // 23/11 (revisão no 1015): antes do arranque, abre na semana da primeira tarefa (na de hoje a obra ainda não tem nada)
+  const [ini, setIni] = useState(() => segundaDe(antesDoArranque(p) ? arranqueDe(p)?.dia ?? hoje : hoje));
   const semana = Array.from({ length: 5 }, (_, j) => ini + j).filter((k) => k < dias.length);
   const pessoas = [...new Set(p.tasks.map((t) => t.tec).filter((x): x is string => !!x))];
   const [arr, setArr] = useState<number | null>(null); // a tarefa a ser arrastada

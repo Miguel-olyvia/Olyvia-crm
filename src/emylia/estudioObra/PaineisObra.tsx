@@ -554,7 +554,7 @@ export function EquipaDaObra({ ctx, d, dias, abrirOutra, novaPara, abrir }: {
               {planeia && porFazer.length > 0 && <Button type="button" size="sm" variant="ghost" className="min-h-9 rounded-full" onClick={() => setPassar(passar === tec ? null : tec)}><Users className="mr-1 h-4 w-4" aria-hidden="true" />Passar as tarefas</Button>}
             </div>
             <ul className="mt-2 flex flex-wrap gap-1.5">
-              {ts.map(({ t, ti }) => <li key={ti}><button type="button" onClick={() => abrir(ti)} className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-border px-3 text-sm hover:bg-muted"><span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: COR_FASE[t.fase ?? 1] }} />{t.nome}<ChipVivo t={t} p={p} /></button></li>)}
+              {ts.map(({ t, ti }) => <li key={ti}><button type="button" onClick={() => abrir(ti)} className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-border px-3 text-sm hover:bg-muted"><span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: COR_FASE[t.fase ?? 1] }} /><span title={t.nome}>{nomeCurtoTarefa(t.nome)}</span>{estadoVivo(t, p) !== "por começar" && <ChipVivo t={t} p={p} />}</button></li>)}
             </ul>
             <AnimatePresence>
               {passar === tec && (
