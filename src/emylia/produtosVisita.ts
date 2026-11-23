@@ -8,7 +8,7 @@
 // Só tipos de motor.ts e do Catálogo: assim o motor pode usar este ficheiro sem ciclos de importação.
 import type { Catalogo, No, Produto, Regra } from "./v2/catalogoModelo";
 import type { LinhaOrc, MedKey, Medidas, SvcId } from "./motor";
-import { nosDeProdutoDoRamo } from "./ramoDosProdutos";
+import { nosDeProdutoDoRamo, nosDoObjeto } from "./ramoDosProdutos";
 
 export const PREFIXO_PROD = "Produto · ";
 export const PREFIXO_CLIENTE = "Fornecido pelo cliente · ";
@@ -69,6 +69,12 @@ export function nosDoRamo(A: No[], no: string): Set<string> {
   const pai = x.pai ? A.find((y) => y.id === x.pai) : null;
   const [oficio, sub] = pai ? [pai.n, x.n] : [x.n, undefined];
   for (const p of nosDeProdutoDoRamo(A, oficio, sub)) for (const y of nosAbaixo(A, p)) r.add(y);
+  return r;
+}
+/** 23/11: os nós de uma troca: o ramo do serviço (nosDoRamo) e as categorias de produto que são o objeto da pergunta («o espelho» → Espelhos), com os de baixo. */
+export function ramoDaTroca(A: No[], no: string, pergunta?: string | null): Set<string> {
+  const r = nosDoRamo(A, no);
+  for (const p of nosDoObjeto(A, pergunta)) for (const y of nosAbaixo(A, p)) r.add(y);
   return r;
 }
 /** "Canalização › Louças e torneiras". */
@@ -169,9 +175,10 @@ export function obrigacoes(K: Catalogo, sids: SvcId[], v: NecVisita, clienteForn
     const no = ex[sid];
     if (!no || !K.arvore.some((x) => x.id === no)) return [];
     // 26/10: com os ramos equivalentes (parede e pavimento), um produto de qualquer deles cumpre
-    const ramo = new Set([no, ...(K.equivalentes ?? []).filter((g) => g.includes(no)).flat()].flatMap((n) => [...nosDoRamo(K.arvore, n)]));
-    const por = prod.filter((p) => p.no && ramo.has(p.no) && p.q > 0).map((p) => p.n);
     const pergunta = K.perguntaManter?.[sid]?.trim() || null, resp = v.manter?.[sid];
+    // 23/11: com as categorias de produto que são o objeto da pergunta («o espelho» → Espelhos), como o seletor da troca
+    const ramo = new Set([no, ...(K.equivalentes ?? []).filter((g) => g.includes(no)).flat()].flatMap((n) => [...ramoDaTroca(K.arvore, n, pergunta)]));
+    const por = prod.filter((p) => p.no && ramo.has(p.no) && p.q > 0).map((p) => p.n);
     const estado: EstadoObrigacao =
       pergunta && resp === "sim" ? "mantem"
         : por.length ? "produto"
@@ -195,9 +202,10 @@ export function linhasClienteCompra(v: NecVisita, sids: SvcId[], clienteFornece:
   return sids.filter((s) => c[s] && v.manter?.[s] !== "sim").map((s) => ({ t: "mat", d: PREFIXO_CLIENTE + c[s], custo: 0, preco: 0 }));
 }
 
-/** Os produtos que se podem escolher num ramo (sem os consumíveis das receitas, que não são escolha do cliente). */
-export function produtosDoRamo(K: Catalogo, no: string, consumiveis: Set<string>): Produto[] {
-  const ramo = nosDoRamo(K.arvore, no);
+/** Os produtos que se podem escolher num ramo (sem os consumíveis das receitas, que não são escolha do cliente).
+ *  23/11: com a pergunta da troca, também os das categorias de produto que são o objeto dela (ramoDaTroca). */
+export function produtosDoRamo(K: Catalogo, no: string, consumiveis: Set<string>, pergunta?: string | null): Produto[] {
+  const ramo = ramoDaTroca(K.arvore, no, pergunta);
   return K.produtos.filter((p) => p.no && ramo.has(p.no) && !consumiveis.has(p.n));
 }
 
@@ -225,6 +233,11 @@ export function fotografia(p: Produto, q: number, cliente = false, alvo?: number
   const pvp = venda(p, alvo);
   if (pvp != null) v.pvp = pvp;
   return v;
+}
+/** 23/11: um produto do Catálogo a partir da fotografia da visita (para o repor como estava, ex.: o «Desfazer» do «Mantém»). */
+export function produtoDaFotografia(v: ProdVisita): Produto {
+  return { id: v.id, n: v.n, un: v.un, custo: v.custo, marca: "", fornecedor: "", data: "", no: v.no,
+    ...(v.svc ? { servico: v.svc, fatorServico: v.fator ?? 1 } : {}), ...(v.pvp != null ? { pvp: v.pvp } : {}) };
 }
 /** Junta (ou substitui) um produto na lista. */
 export const juntarProduto = (prod: ProdVisita[], v: ProdVisita): ProdVisita[] =>

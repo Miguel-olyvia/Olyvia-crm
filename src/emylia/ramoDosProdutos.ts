@@ -35,6 +35,25 @@ const RAMO_DA_CATEGORIA = new Map<string, [string, string]>(MAPA.flatMap(([subs,
 /** O ramo do motor (ofício, sub) de uma categoria de produto, pelo nome; null se não está no mapa. */
 export const ramoDaCategoriaProduto = (nome: string): [string, string] | null => RAMO_DA_CATEGORIA.get(sem(nome)) ?? null;
 
+const VAZIAS = new Set(["a", "o", "as", "os", "e", "de", "do", "da", "dos", "das", "com", "em"]);
+/** O que a pergunta pergunta, em palavras: «O cliente mantém o espelho?» → ["espelho"]; sem «mantém…», nada. */
+function palavrasDoObjeto(pergunta: string | null | undefined): string[] {
+  const m = pergunta && /mant[ée]m\s+(.+?)\s*\??\s*$/i.exec(pergunta);
+  return m ? sem(m[1]).split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !VAZIAS.has(w)) : [];
+}
+/**
+ * 23/11 (testarh, Mudelar: «O cliente mantém o espelho?» → «Troca» não encontrava o «Espelho Simples C/ORLA ALUMÍNIO 60x50», da categoria de produto
+ * «Móveis & Arrumação Casa de Banho › Espelhos»; nem a porta, de «Portas › Portas Interiores», que o mapa não tem). As categorias de produto (soProduto)
+ * que são o objeto da pergunta, pelo nome: a primeira palavra da categoria é a palavra da pergunta ou o plural dela («espelho» → «Espelhos»,
+ * «porta» → «Portas Interiores»; «Porta-rolos» não conta). Servem a troca mesmo quando o ramo do serviço não as tem no mapa.
+ */
+export function nosDoObjeto(arvore: readonly No[], pergunta: string | null | undefined): string[] {
+  const pal = palavrasDoObjeto(pergunta);
+  if (!pal.length) return [];
+  const formas = new Set(pal.flatMap((w) => [w, w + "s", w + "es"]));
+  return arvore.filter((x) => x.soProduto && formas.has(sem(x.n).split(" ")[0])).map((x) => x.id);
+}
+
 /** Os nós só de produtos (soProduto) da árvore que pertencem ao ramo (ofício, sub) do motor. */
 export function nosDeProdutoDoRamo(arvore: readonly No[], oficio: string, sub?: string): string[] {
   return arvore.filter((x) => {

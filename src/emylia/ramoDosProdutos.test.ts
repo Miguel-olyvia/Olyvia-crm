@@ -1,8 +1,8 @@
 // 17/11 (A-Z na Mudelar): os produtos da árvore dos PRODUTOS («Sanitas», «Bases Duche») contam no ramo do motor («Canalização › Louças e torneiras»).
 import { describe, expect, it } from "vitest";
 import type { No } from "./v2/catalogoModelo";
-import { nosDeProdutoDoRamo, ramoDaCategoriaProduto } from "./ramoDosProdutos";
-import { ativosDoPacote, emFaltaProdutos, nosDoRamo, pacoteSubstituido, partesDoModelo, type ProdVisita } from "./produtosVisita";
+import { nosDeProdutoDoRamo, nosDoObjeto, ramoDaCategoriaProduto } from "./ramoDosProdutos";
+import { ativosDoPacote, emFaltaProdutos, nosDoRamo, obrigacoes, pacoteSubstituido, partesDoModelo, produtosDoRamo, ramoDaTroca, type ProdVisita } from "./produtosVisita";
 import { filtroDoRamo } from "./real/pesquisaProdutos";
 
 const ARVORE: No[] = [
@@ -73,3 +73,51 @@ describe("17/11: a visita do Estúdio sem mão de obra a dobrar", () => {
   });
 });
 
+
+describe("23/11: a troca do espelho e da porta (testarh, Mudelar)", () => {
+  // a árvore como na Mudelar: o espelho e a porta só se sabem pela categoria de produto (catalogo_categoria_id nulo)
+  const A: No[] = [
+    { id: "carp", n: "Carpintaria", pai: null }, { id: "mwc", n: "Móveis de casa de banho", pai: "carp" }, { id: "acc", n: "Acessórios WC", pai: "carp" },
+    { id: "mob", n: "Móveis & Arrumação Casa de Banho", pai: null, soProduto: true },
+    { id: "esp", n: "Espelhos", pai: "mob", soProduto: true }, { id: "mlav", n: "Móveis de lavatório", pai: "mob", soProduto: true },
+    { id: "por", n: "Portas", pai: null, soProduto: true }, { id: "pint", n: "Portas Interiores", pai: "por", soProduto: true },
+    { id: "aces", n: "Acessórios Casa de Banho", pai: null, soProduto: true },
+    { id: "pr", n: "Porta-rolos", pai: "aces", soProduto: true }, { id: "tol", n: "Toalheiros", pai: "aces", soProduto: true },
+  ];
+  const ESPELHO = { id: "MACBE0073", n: "Espelho Simples C/ORLA ALUMÍNIO 60x50", sku: "MACBE0073", custo: 20, un: "un", marca: "", fornecedor: "", data: "", no: "esp" };
+  const PORTA = { id: "PPI0001", n: "Porta de Abrir CPL Branca 70 cm", sku: "PPI0001", custo: 80, un: "un", marca: "", fornecedor: "", data: "", no: "pint" };
+
+  it("as categorias de produto que são o objeto da pergunta, pelo nome (o plural conta; «Porta-rolos» não)", () => {
+    expect(nosDoObjeto(A, "O cliente mantém o espelho?")).toEqual(["esp"]);
+    expect(nosDoObjeto(A, "O cliente mantém a porta?").sort()).toEqual(["pint", "por"]);
+    expect(nosDoObjeto(A, null)).toEqual([]);
+    expect(nosDoObjeto(A, "Escolher o produto")).toEqual([]);
+  });
+
+  it("os produtos da troca vêm também da categoria do objeto, mesmo que o ramo do serviço não a tenha; e cumprem a obrigação", () => {
+    const K = { arvore: A, produtos: [ESPELHO, PORTA], exigeProduto: { sEsp: "acc", sPorta: "carp" }, perguntaManter: { sEsp: "O cliente mantém o espelho?", sPorta: "O cliente mantém a porta?" } } as never;
+    // o ramo «Acessórios WC» não tem os espelhos: sem a pergunta, nada; com ela, o espelho
+    expect(produtosDoRamo(K, "acc", new Set())).toEqual([]);
+    expect(produtosDoRamo(K, "acc", new Set(), "O cliente mantém o espelho?").map((p) => p.id)).toEqual(["MACBE0073"]);
+    expect(produtosDoRamo(K, "carp", new Set()).map((p) => p.id)).not.toContain("PPI0001");
+    expect(produtosDoRamo(K, "carp", new Set(), "O cliente mantém a porta?").map((p) => p.id)).toContain("PPI0001");
+    expect(ramoDaTroca(A, "acc", "O cliente mantém o espelho?").has("esp")).toBe(true);
+    // escolhido, a troca fica resolvida (o mesmo ramo do seletor e da obrigação)
+    const prod: ProdVisita[] = [{ id: "MACBE0073", n: ESPELHO.n, un: "un", custo: 20, q: 1, no: "esp" }, { id: "PPI0001", n: PORTA.n, un: "un", custo: 80, q: 1, no: "pint" }];
+    expect(obrigacoes(K, ["sEsp", "sPorta"], { prod, manter: { sEsp: "nao", sPorta: "nao" } }).map((o) => o.estado)).toEqual(["produto", "produto"]);
+    expect(obrigacoes(K, ["sEsp"], { prod: [], manter: { sEsp: "nao" } })[0].estado).toBe("falta");
+  });
+
+  it("a pesquisa no servidor junta a categoria do objeto ao filtro do ramo (e não repete a que o ramo já tem)", () => {
+    // «Móveis de casa de banho» já vai pela categoria-mãe dos móveis (Espelhos incluídos): fica igual
+    expect(filtroDoRamo(A, "mwc", "O cliente mantém o espelho?")).toEqual(filtroDoRamo(A, "mwc"));
+    expect(filtroDoRamo(A, "mwc")).toEqual({ categoria: "mob" });
+    // «Acessórios WC» vai pela categoria dos acessórios (Toalheiros, Porta-rolos); o espelho junta a subcategoria Espelhos
+    expect(filtroDoRamo(A, "acc")).toEqual({ categoria: "aces" });
+    expect(filtroDoRamo(A, "acc", "O cliente mantém o espelho?")).toEqual({ subcategorias: ["esp"], categorias: ["aces"] });
+    // a porta: o ramo «Carpintaria» não tem portas no mapa; entra a categoria Portas (de topo) e a subcategoria Portas Interiores
+    const f = filtroDoRamo(A, "carp", "O cliente mantém a porta?");
+    expect(f.categorias).toContain("por");
+    expect(f.subcategorias).toContain("pint");
+  });
+});

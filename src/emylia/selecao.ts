@@ -6,7 +6,7 @@
 import { normal } from "./catalogo";
 import { nfmt, servicosVisita, type MedKey, type Negocio, type Servico, type SvcId, type acoes } from "./motor";
 import type { Catalogo, No, Produto } from "./v2/catalogoModelo";
-import { nosDoRamo, precoProduto, qtdSugerida, textoClienteCompra, type Obrigacao } from "./produtosVisita";
+import { nosDoRamo, precoProduto, produtoDaFotografia, qtdSugerida, ramoDaTroca, textoClienteCompra, type Obrigacao, type ProdVisita } from "./produtosVisita";
 import { categoriaDe, ilustracaoDoCatalogo, medidaDaSugestao, nomeCurto, objetoDaPergunta, palavrasDe, procurarServicos, qtdNaVisita, sugestaoQtd, tituloObrigacao, type TileServico } from "./necessidades";
 import type { IlustracaoKey } from "./ilustracoes";
 
@@ -213,12 +213,31 @@ export function tocarProduto(A: Pick<A, "produto" | "tirarProduto">, K: Catalogo
   return "juntou";
 }
 
-/** "Mantém" ou "Troca". Mantém tira os produtos que se tinham escolhido para esta troca (e, com eles, a instalação que traziam). */
-export function responderTroca(A: Pick<A, "manter" | "tirarProduto">, K: Catalogo, d: Negocio, o: Pick<Obrigacao, "sid" | "no">, r: "sim" | "nao") {
+/**
+ * "Mantém" ou "Troca". Mantém tira os produtos que se tinham escolhido para esta troca (e, com eles, a instalação que traziam).
+ * 23/11 (testarh, negócio 1015: a base de duche, a coluna, a sanita e a torneira do Estúdio saíram sem se dar por isso): devolve os que tirou
+ * e a resposta de antes, para o ecrã dizer quantos saíram e deixar desfazer (desfazerMantem).
+ */
+export function responderTroca(A: Pick<A, "manter" | "tirarProduto">, K: Catalogo, d: Negocio, o: Pick<Obrigacao, "sid" | "no"> & { pergunta?: string | null }, r: "sim" | "nao"):
+  { antes: "sim" | "nao" | undefined; tirados: ProdVisita[] } {
+  const antes = d.visita.manter?.[o.sid];
   A.manter(d.id, o.sid, r);
+  const tirados: ProdVisita[] = [];
   if (r === "sim") {
-    const ramo = nosDoRamo(K.arvore, o.no);
-    for (const p of [...(d.visita.prod ?? [])]) if (p.no && ramo.has(p.no)) A.tirarProduto(d.id, p.id);
+    const ramo = ramoDaTroca(K.arvore, o.no, o.pergunta);
+    for (const p of [...(d.visita.prod ?? [])]) if (p.no && ramo.has(p.no)) { tirados.push({ ...p }); A.tirarProduto(d.id, p.id); }
+  }
+  return { antes, tirados };
+}
+/** 23/11: desfaz um «Mantém»: a resposta de antes e os produtos que ele tirou, com a quantidade, o «fornecido pelo cliente» e o «sem a instalação». */
+export function desfazerMantem(A: Pick<A, "manter" | "produto" | "produtoQtd" | "produtoCliente" | "produtoSemServico">, d: Negocio, sid: SvcId,
+  r: { antes: "sim" | "nao" | undefined; tirados: ProdVisita[] }) {
+  A.manter(d.id, sid, r.antes ?? null);
+  for (const p of r.tirados) {
+    A.produto(d.id, produtoDaFotografia(p), p.q);
+    if (d.visita.prod?.find((x) => x.id === p.id)?.q !== p.q) A.produtoQtd(d.id, p.id, p.q);
+    if (p.cliente) A.produtoCliente(d.id, p.id, true);
+    if (p.semSvc) A.produtoSemServico(d.id, p.id, true);
   }
 }
 

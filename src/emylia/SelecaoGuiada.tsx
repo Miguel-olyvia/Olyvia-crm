@@ -23,13 +23,13 @@ import { produtoParaTocar, useProdutosDoRamo } from "./real/pesquisaProdutos";
 import { produtosDoRamoPorPartes } from "./real/ramoPorPartes";
 import { orcLinhas } from "./ServicosCatalogo";
 import { FotoOuIlustracao, IconeServico, Ilustracao, ilustracaoDe, type IlustracaoKey } from "./ilustracoes";
-import { nosDoRamo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, type Obrigacao } from "./produtosVisita";
+import { obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, ramoDaTroca, type Obrigacao } from "./produtosVisita";
 import {
   filtrarProdutos, ilustracaoDoCatalogo, medidaDaSugestao, nomeCurto, objetoDaPergunta, obrigacoesAMostrar, ordenarParaObjeto, resumoNecessidades,
   servicoLeitura, tilesServicos, tocarProdutoGuiado, type TileServico,
 } from "./necessidades";
 import {
-  CORES, blocosFornece, categoriaFiltro, categoriasDaLista, contavel, encurtar, escreverCores, fornecerTodos, lerCores, marcarFornece, poupanca, quantidadeDaRegra,
+  CORES, blocosFornece, categoriaFiltro, categoriasDaLista, contavel, desfazerMantem, encurtar, escreverCores, fornecerTodos, lerCores, marcarFornece, poupanca, quantidadeDaRegra,
   notaNaLinha, oficiosPorUso, ordenarMobilidade, ordenarParaTroca, passosSelecao, qtdServicoAoEscolher, responderTroca, servicosFiltrados, textoQtd, tocarProduto,
   tocarServico, trocaResolvida, vizinho, type BlocoFornece, type ItemFornece, type PassoSel,
 } from "./selecao";
@@ -185,7 +185,7 @@ export function SelecaoGuiada(ctx: P) {
               <div className="mt-5">
                 {atual.tipo === "escolhas" && <PassoEscolhas ctx={ctx} />}
                 {atual.tipo === "servicos" && <PassoServicos ctx={ctx} K={K} tiles={tiles} avisar={avisar} />}
-                {atual.tipo === "pergunta" && atual.o && <PassoPergunta key={atual.o.sid} ctx={ctx} K={K} o={atual.o} tiles={tiles} resolvido={() => avancarSozinho(atual.k)} />}
+                {atual.tipo === "pergunta" && atual.o && <PassoPergunta key={atual.o.sid} ctx={ctx} K={K} o={atual.o} tiles={tiles} resolvido={() => avancarSozinho(atual.k)} avisar={avisar} />}
                 {atual.tipo === "outros" && <PassoOutros ctx={ctx} K={K} obr={obr} />}
                 {atual.tipo === "fornece" && <PassoFornece ctx={ctx} obr={obr} faseSvc={faseSvc} />}
                 {atual.tipo === "resumo" && <PassoResumo ctx={ctx} K={K} passos={passos} obr={obr} ir={ir} tiles={tiles} faseSvc={faseSvc} />}
@@ -373,6 +373,9 @@ function Filtros({ q, setQ, fase, setFase, tipo, setTipo, tipos, n, nomes, pesqu
   );
 }
 
+/** 23/11: o modelo rápido em que se tocou, por negócio (o passo «O que se faz» desmonta-se ao avançar e volta a montar-se ao voltar). */
+const MODELO_TOCADO = new Map<number, string>();
+
 function PassoServicos({ ctx, K, tiles, avisar }: { ctx: P; K: Catalogo; tiles: TileServico[]; avisar: (t: string, desfazer: () => void) => void }) {
   const { S, A, run, d } = ctx;
   const C = useCustos();
@@ -398,11 +401,16 @@ function PassoServicos({ ctx, K, tiles, avisar }: { ctx: P; K: Catalogo; tiles: 
   const grupos = porFase(visiveis, grupoDe);
   const escolhidosNaFase = (f: FaseObra) => tiles.filter((t) => t.on && fasesDoSid(t.sid)[0] === f).length;
   const animar = visiveis.length <= ANIMAR_ATE;
-  const atual = modeloAtual(tiles);
+  // 23/11: o modelo em que se tocou (fica enquanto a etapa estiver aberta nesta sessão); sem toque, só a «Remodelação completa» aparece escolhida
+  const [aplicado, setAplicadoEstado] = useState<string | null>(() => MODELO_TOCADO.get(d.id) ?? null);
+  const setAplicado = (x: string | null) => { if (x) MODELO_TOCADO.set(d.id, x); else MODELO_TOCADO.delete(d.id); setAplicadoEstado(x); };
+  const atual = modeloAtual(tiles, aplicado);
 
   const usarModelo = (m: ModeloRapido) => {
     let mudados: SvcId[] = [];
     run(() => { mudados = aplicarModelo(A, d, tiles, m); });
+    const antes = aplicado;
+    setAplicado(m.id);
     if (!mudados.length) return;
     vibrar(10, reduzir);
     // a cascata pela ordem em que os cartões estão no ecrã
@@ -411,6 +419,7 @@ function PassoServicos({ ctx, K, tiles, avisar }: { ctx: P; K: Catalogo; tiles: 
     setCascataDe(new Map(ord.map((sid, j) => [sid, j * 0.06])));
     avisar(plural(mudados.length, "serviço mudou", "serviços mudaram"), () => {
       run(() => desfazerModelo(A, d, mudados));
+      setAplicado(antes);
       setCascataDe(new Map(ord.map((sid, j) => [sid, j * 0.06])));
     });
   };
@@ -492,12 +501,15 @@ function VerMais({ n, onMais }: { n: number; onMais: () => void }) {
 }
 
 /* ================================================================== uma lista de produtos (pesquisa, filtros, os primeiros) */
-function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe, servidor }: {
+function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe, servidor, todos }: {
   ctx: P; K: Catalogo; produtos: Produto[]; onTocar: (p: Produto) => "juntou" | "tirou" | void; rotulo: string;
   /** Agrupar pelas fases da obra (Mais produtos). */
   faseDe?: (p: Produto) => FaseObra;
-  /** 17/11: Catálogo leve: os produtos (do ramo `no`, ou todos) procuram-se no servidor com o texto escrito, em vez de se filtrar `produtos`; sem os filtros de tipo e de fase. */
-  servidor?: { org: string; no: string | null };
+  /** 17/11: Catálogo leve: os produtos (do ramo `no`, ou todos) procuram-se no servidor com o texto escrito, em vez de se filtrar `produtos`; sem os filtros de tipo e de fase.
+   *  23/11: com a pergunta da troca, também nas categorias de produto que são o objeto dela («o espelho» → Espelhos). */
+  servidor?: { org: string; no: string | null; pergunta?: string | null };
+  /** 23/11: onde procurar quando a pesquisa na lista (o ramo) não dá nada: o resto do Catálogo (no servidor, sem o filtro do ramo), com aviso. */
+  todos?: Produto[];
 }) {
   const { A, run, d } = ctx;
   const reduzir = useReduzir();
@@ -505,7 +517,11 @@ function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe, servidor }: 
   const [cat, setCat] = useState<string | null>(null);
   const [fase, setFase] = useState<FaseObra | null>(null);
   const [n, setN] = useState(PRIMEIROS_PROD);
-  const srv = useProdutosDoRamo(servidor?.org ?? null, K.arvore, servidor?.no ?? null, q, !!servidor);
+  const srv = useProdutosDoRamo(servidor?.org ?? null, K.arvore, servidor?.no ?? null, q, !!servidor, servidor?.pergunta);
+  // 23/11: a pesquisa no ramo não deu nada (ex.: o ramo do serviço não tem a categoria do produto, ou a referência é de outro ramo): procura-se em todo o Catálogo
+  const comFora = !!todos && !!q.trim();
+  const srvFora = useProdutosDoRamo(servidor?.org ?? null, K.arvore, null, q,
+    comFora && !!servidor?.no && !srv.aCarregar && !srv.erro && !srv.produtos.filter((p) => !CONSUMIVEIS.has(p.n)).length);
   const [erroTocar, setErroTocar] = useState<string | null>(null);
   const lendo = useRef(false);
   const [aLer, setALer] = useState(false);
@@ -515,9 +531,15 @@ function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe, servidor }: 
     const t = cat ? f.filter((p) => categoriaFiltro(p, K.arvore) === cat) : f;
     return faseDe ? filtrarPorFase(t, fase, (p) => [faseDe(p)]) : t;
   }, [produtos, K.arvore, q, cat, fase]); // eslint-disable-line react-hooks/exhaustive-deps
-  const lista = servidor ? srv.produtos.filter((p) => !CONSUMIVEIS.has(p.n)) : filtrada;
-  const haMais = servidor ? srv.maisPaginas : lista.length > n;
-  const grande = servidor ? true : produtos.length > PRIMEIROS_PROD;
+  const doRamo = servidor ? srv.produtos.filter((p) => !CONSUMIVEIS.has(p.n)) : filtrada;
+  const foraLocal = useMemo(() => (!servidor && comFora && !filtrada.length ? filtrarProdutos(todos!, K.arvore, { q }) : []), [servidor, comFora, filtrada, todos, K.arvore, q]);
+  const fora = !doRamo.length && comFora ? (servidor ? (servidor.no ? srvFora.produtos.filter((p) => !CONSUMIVEIS.has(p.n)) : []) : foraLocal) : [];
+  const lista = doRamo.length ? doRamo : fora;
+  const usaFora = !doRamo.length && fora.length > 0;
+  const lido = usaFora ? srvFora : srv;
+  const haMais = servidor ? lido.maisPaginas : lista.length > n;
+  // 23/11: numa troca (com `todos`) a pesquisa aparece sempre, mesmo com poucos produtos no ramo (a referência procura-se no resto do Catálogo)
+  const grande = servidor ? true : produtos.length > PRIMEIROS_PROD || !!todos;
   // juntar lê o produto inteiro (traz o serviço que instala) e mete-o no Catálogo antes de o motor o usar; tirar só precisa do id
   const tocarCartao = (p: Produto): "juntou" | "tirou" | void => {
     if (!servidor) return onTocar(p);
@@ -576,7 +598,8 @@ function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe, servidor }: 
       {erroTocar && <p role="alert" className="text-[15px] text-destructive">Não foi possível juntar o produto: {erroTocar}</p>}
       {aLer && <p role="status" className="text-[15px] text-muted-foreground">A ler o produto…</p>}
       {servidor && srv.erro && <p role="alert" className="text-[15px] text-destructive">Não foi possível procurar: {srv.erro}</p>}
-      {servidor && srv.aCarregar && !lista.length ? (
+      {fora.length > 0 && <p role="status" className="text-[15px] text-muted-foreground">Nada em {rotulo.toLowerCase()} com "{q.trim()}". Estes são do resto do Catálogo: confirme que é o produto certo.</p>}
+      {servidor && (srv.aCarregar || srvFora.aCarregar) && !lista.length ? (
         <p className="text-[15px] text-muted-foreground" aria-live="polite">A procurar…</p>
       ) : !lista.length ? (
         <Vazio texto={q.trim() ? `Nada com "${q.trim()}". Procure pela marca ou pela referência, ou tire o filtro.` : "Não há produtos com estes filtros."}
@@ -597,22 +620,27 @@ function ListaProdutos({ ctx, K, produtos, onTocar, rotulo, faseDe, servidor }: 
           <ul className={GRELHA_PROD} aria-label={rotulo}>{visiveis.map(cartao)}</ul>
         </LayoutGroup>
       )}
-      {haMais && <VerMais n={servidor ? Math.min(MAIS, Math.max(srv.total - lista.length, 1)) : Math.min(MAIS, lista.length - n)} onMais={() => (servidor ? srv.maisUma() : setN((x) => x + MAIS))} />}
+      {haMais && <VerMais n={servidor ? Math.min(MAIS, Math.max(lido.total - lista.length, 1)) : Math.min(MAIS, lista.length - n)} onMais={() => (servidor ? lido.maisUma() : setN((x) => x + MAIS))} />}
     </div>
   );
 }
 
 /* ================================================================== uma troca: "Mantém / Troca" e os produtos */
-function PassoPergunta({ ctx, K, o, tiles, resolvido }: { ctx: P; K: Catalogo; o: Obrigacao; tiles: TileServico[]; resolvido: () => void }) {
+function PassoPergunta({ ctx, K, o, tiles, resolvido, avisar }: {
+  ctx: P; K: Catalogo; o: Obrigacao; tiles: TileServico[]; resolvido: () => void; avisar?: (t: string, desfazer: () => void) => void;
+}) {
   const { A, run, d } = ctx;
   const v = d.visita, resp = v.manter?.[o.sid];
   const obj = objetoDaPergunta(o.pergunta);
   const mob = d.f.mobilidade_reduzida === "Sim";
   const produtos = useMemo(
-    () => ordenarMobilidade(ordenarParaTroca(ordenarParaObjeto(produtosDoRamo(K, o.no, CONSUMIVEIS), obj?.comArtigo ?? null), obj?.comArtigo, K.arvore), mob),
-    [K, o.no, obj?.comArtigo, mob],
+    () => ordenarMobilidade(ordenarParaTroca(ordenarParaObjeto(produtosDoRamo(K, o.no, CONSUMIVEIS, o.pergunta), obj?.comArtigo ?? null), obj?.comArtigo, K.arvore), mob),
+    [K, o.no, o.pergunta, obj?.comArtigo, mob],
   );
-  const ramo = useMemo(() => nosDoRamo(K.arvore, o.no), [K.arvore, o.no]);
+  // 23/11: o ramo do serviço e as categorias de produto que são o objeto da pergunta («o espelho» → Espelhos)
+  const ramo = useMemo(() => ramoDaTroca(K.arvore, o.no, o.pergunta), [K.arvore, o.no, o.pergunta]);
+  // 23/11: quando a pesquisa no ramo não dá nada, procura-se no resto do Catálogo (sem os consumíveis)
+  const todos = useMemo(() => K.produtos.filter((p) => !CONSUMIVEIS.has(p.n)), [K.produtos]);
   const troca = !o.pergunta || resp === "nao" || (resp !== "sim" && (v.prod ?? []).some((p) => p.no && ramo.has(p.no)));
   const listaRef = useRef<HTMLDivElement>(null);
   // a resposta mais provável, destacada mas não escolhida (só enquanto não há resposta)
@@ -623,7 +651,14 @@ function PassoPergunta({ ctx, K, o, tiles, resolvido }: { ctx: P; K: Catalogo; o
   const [pedeMob] = useState(() => !!campoMob && !d.f.mobilidade_reduzida);
 
   const responder = (r: "sim" | "nao") => {
-    run(() => responderTroca(A, K, d, o, r));
+    let res: ReturnType<typeof responderTroca> = { antes: undefined, tirados: [] };
+    run(() => { res = responderTroca(A, K, d, o, r); });
+    // 23/11: os produtos que o «Mantém» tirou (os do Estúdio, ou escolhidos antes) dizem-se, com «Desfazer»
+    const tirados = res;
+    if (tirados.tirados.length && avisar) {
+      const nomes = tirados.tirados.map((p) => encurtar(p.n).nome).join(", ");
+      avisar(`Mantém: ${plural(tirados.tirados.length, "produto saiu", "produtos saíram")} (${nomes})`, () => run(() => desfazerMantem(A, d, o.sid, tirados)));
+    }
     if (r === "sim") resolvido();
     else setTimeout(() => listaRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" }), 120);
   };
@@ -667,8 +702,8 @@ function PassoPergunta({ ctx, K, o, tiles, resolvido }: { ctx: P; K: Catalogo; o
       )}
       {troca && (
         <div ref={listaRef} className="scroll-mt-24">
-          <ListaProdutos ctx={ctx} K={K} produtos={produtos} onTocar={tocar} rotulo={obj ? `Produtos: ${obj.comArtigo}` : "Produtos"}
-            servidor={catalogoParcial() && orgDoCatalogoLido() ? { org: orgDoCatalogoLido()!, no: o.no } : undefined} />
+          <ListaProdutos ctx={ctx} K={K} produtos={produtos} onTocar={tocar} rotulo={obj ? `Produtos: ${obj.comArtigo}` : "Produtos"} todos={todos}
+            servidor={catalogoParcial() && orgDoCatalogoLido() ? { org: orgDoCatalogoLido()!, no: o.no, pergunta: o.pergunta } : undefined} />
           {avisoRamo && <p role="status" className="mt-2 text-sm text-warning-foreground">{avisoRamo}</p>}
         </div>
       )}
@@ -699,7 +734,7 @@ function PassoOutros({ ctx, K, obr }: { ctx: P; K: Catalogo; obr: Obrigacao[] })
   const { S, A, run, d } = ctx;
   const mob = d.f.mobilidade_reduzida === "Sim";
   const produtos = useMemo(() => {
-    const ramos = obr.map((o) => nosDoRamo(K.arvore, o.no));
+    const ramos = obr.map((o) => ramoDaTroca(K.arvore, o.no, o.pergunta));
     const fora = K.produtos.filter((p) => !CONSUMIVEIS.has(p.n) && !ramos.some((r) => p.no && r.has(p.no)));
     // os do ofício dos serviços escolhidos primeiro (ordem estável)
     const ofDe = (no: string | null) => { let x = no ? K.arvore.find((y) => y.id === no) : undefined; while (x?.pai) x = K.arvore.find((y) => y.id === x!.pai); return x?.id; };
@@ -817,7 +852,7 @@ function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
   // as instalações que vêm com um produto escolhido: no resumo vão no produto ("com instalação"), não numa linha à parte
   const instalados = new Set(prod.filter((p) => p.q > 0).map((p) => K.produtos.find((x) => x.id === p.id)?.servico).filter((s): s is SvcId => !!s));
   const txtProd = (ids: string[]) => ids.map((id) => { const p = nomeP(id)!; return `${encurtar(p.n).nome}${p.q !== 1 ? ` × ${nfmt(p.q)}` : ""}${p.cliente ? " (fornecido pelo cliente)" : ""}`; }).join(", ");
-  const ramos = obr.map((o) => nosDoRamo(K.arvore, o.no));
+  const ramos = obr.map((o) => ramoDaTroca(K.arvore, o.no, o.pergunta));
   const linha = (p: PassoSel): { t: string; falta?: boolean } => {
     switch (p.tipo) {
       case "escolhas": {
@@ -834,7 +869,7 @@ function PassoResumo({ ctx, K, passos, obr, ir, tiles, faseSvc }: {
         const o = p.o!;
         if (o.estado === "mantem") return { t: "Mantém" };
         if (o.estado === "cliente") return { t: "O cliente compra" };
-        const ids = prod.filter((x) => x.no && nosDoRamo(K.arvore, o.no).has(x.no)).map((x) => x.id);
+        const ids = prod.filter((x) => x.no && ramoDaTroca(K.arvore, o.no, o.pergunta).has(x.no)).map((x) => x.id);
         if (ids.length) return { t: txtProd(ids) };
         return { t: o.estado === "pergunta" ? "Falta dizer se mantém ou troca" : "Falta escolher o produto", falta: true };
       }

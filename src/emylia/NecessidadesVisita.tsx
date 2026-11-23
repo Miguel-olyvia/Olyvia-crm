@@ -22,7 +22,7 @@ import { produtoParaTocar, useProdutosDoRamo } from "./real/pesquisaProdutos";
 import { SelecaoGuiada } from "./SelecaoGuiada";
 import { FotoOuIlustracao, ilustracaoDe } from "./ilustracoes";
 import {
-  nosDoRamo, obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, textoClienteCompra, type Obrigacao, type ProdVisita,
+  obrigacoes, precoProduto, precoUnitario, produtosDoRamo, qtdSugerida, ramoDaTroca, textoClienteCompra, type Obrigacao, type ProdVisita,
 } from "./produtosVisita";
 import {
   categorias, faltaEmPalavras, filtrarProdutos, ilustracaoDoCatalogo, marcasDe, obrigacoesAMostrar, mostraCartoes, nomeCurto, objetoDaPergunta, ordenarParaObjeto, passoGuiado,
@@ -108,12 +108,12 @@ function Escolhido({ p, ctx, K, ro, clienteFornece }: { p: ProdVisita; ctx: P; K
 function Escolher({ produtos, K, alvo, ja, onTocar, rotulo, focoRef, servidor }: {
   produtos: Produto[]; K: Catalogo; alvo: number; ja: (id: string) => boolean; onTocar: (p: Produto) => void; rotulo: string; focoRef?: React.Ref<HTMLParagraphElement>;
   /** 17/11: Catálogo leve: os produtos do ramo (`no`) procuram-se no servidor (com o texto escrito) em vez de se filtrar `produtos`. */
-  servidor?: { org: string; no: string | null };
+  servidor?: { org: string; no: string | null; pergunta?: string | null };
 }) {
   const [q, setQ] = useState("");
   const [marca, setMarca] = useState<string | null>(null);
   const [n, setN] = useState(PAGINA);
-  const srv = useProdutosDoRamo(servidor?.org ?? null, K.arvore, servidor?.no ?? null, q, !!servidor);
+  const srv = useProdutosDoRamo(servidor?.org ?? null, K.arvore, servidor?.no ?? null, q, !!servidor, servidor?.pergunta);
   const grande = servidor ? true : produtos.length > PAGINA;
   const marcas = useMemo(() => (grande && !servidor ? marcasDe(produtos) : []), [produtos, grande, servidor]);
   const filtrada = useMemo(() => filtrarProdutos(produtos, K.arvore, { q, marca }), [produtos, K.arvore, q, marca]);
@@ -179,7 +179,7 @@ function BlocoObrigacao({ o, ctx, K, escolhidos, clienteFornece }: { o: Obrigaca
   const focoEscolher = useRef<HTMLParagraphElement>(null);
   const passo = passoGuiado(o);
   const mostraEscolha = !ro && mostraCartoes(passo, aberto);
-  const produtos = useMemo(() => ordenarParaObjeto(produtosDoRamo(K, o.no, CONSUMIVEIS), obj?.comArtigo ?? null), [K, o.no, obj?.comArtigo]);
+  const produtos = useMemo(() => ordenarParaObjeto(produtosDoRamo(K, o.no, CONSUMIVEIS, o.pergunta), obj?.comArtigo ?? null), [K, o.no, o.pergunta, obj?.comArtigo]);
   const prodPorId = new Set((v.prod ?? []).map((p) => p.id));
   const primeiro = escolhidos[0] && K.produtos.find((x) => x.id === escolhidos[0].id);
   const img = primeiro ? ilustracaoNo(K, primeiro) : ilustracaoDe(obj?.nome ?? o.caminho);
@@ -260,7 +260,7 @@ function BlocoObrigacao({ o, ctx, K, escolhidos, clienteFornece }: { o: Obrigaca
 
       {mostraEscolha && (
         <Escolher produtos={produtos} K={K} alvo={S.cfg.alvo} ja={(id) => prodPorId.has(id)} onTocar={tocarServidor} focoRef={focoEscolher}
-          servidor={orgPesquisa ? { org: orgPesquisa, no: o.no } : undefined}
+          servidor={orgPesquisa ? { org: orgPesquisa, no: o.no, pergunta: o.pergunta } : undefined}
           rotulo={obj ? `Escolha ${obj.comArtigo}` : `Escolha o produto de ${(o.caminho.split(" › ").pop() ?? "").toLowerCase()}`} />
       )}
 
@@ -372,7 +372,7 @@ export function ProdutosVisita(ctx: P) {
   const clienteFornece = d.f.materiais_cliente === "Sim";
   const obr = obrigacoesAMostrar(obrigacoes(K, servicosVisita(d), v, clienteFornece), d);
   // cada produto escolhido mostra-se no primeiro serviço cujo ramo o contém; os outros ficam em "Outros produtos escolhidos"
-  const ramos = obr.map((o) => nosDoRamo(K.arvore, o.no));
+  const ramos = obr.map((o) => ramoDaTroca(K.arvore, o.no, o.pergunta));
   const dono = (p: ProdVisita) => (p.no ? ramos.findIndex((r) => r.has(p.no!)) : -1);
   const outros = prod.filter((p) => dono(p) < 0);
 

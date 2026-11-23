@@ -714,3 +714,86 @@ describe("a foto do produto na seleção guiada (03/11)", () => {
     expect(linha.querySelector("svg[data-ilustracao]")).not.toBeNull();
   });
 });
+
+/* ------------------------------------------------------------------ 23/11: o teste no testarh (negócio 1015, Mudelar) */
+describe("23/11: o modelo não muda sozinho e os produtos escolhidos não saem sem se ver", () => {
+  /** Hugo Matos com a visita do Estúdio: a sanita e a base de duche (louças) e o pavimento já escolhidos. */
+  function doEstudio() {
+    const r = preparar();
+    const K = lerCatalogo();
+    r.d.f.estudio = "{}";
+    for (const n of ["Sanita compacta", "Base de duche 80×120"]) r.A.produto(r.d.id, prodN(n), 1);
+    window.localStorage.setItem(`olyvia.necessidades.passo.${r.d.id}`, "servicos");
+    return { ...r, K };
+  }
+
+  it("desmarcar serviços do pacote não escolhe «Só pavimento e paredes»; tocar nele, sim", () => {
+    const { S, d } = doEstudio();
+    render(<Montar S={S} d={d} />);
+    expect(screen.getByRole("button", { name: "Remodelação completa" })).toHaveAttribute("aria-pressed", "true");
+    for (const n of [/^Demolição/, /^Canaliza/, /^Montagem de lou|^Lou/]) {
+      const b = screen.queryAllByRole("button", { name: n }).find((x) => x.getAttribute("aria-pressed") === "true");
+      if (b) fireEvent.click(b);
+    }
+    for (const m of ["Remodelação completa", "Só louças", "Só pavimento e paredes"]) expect(screen.getByRole("button", { name: m })).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(screen.getByRole("button", { name: "Só pavimento e paredes" }));
+    expect(screen.getByRole("button", { name: "Só pavimento e paredes" })).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("desmarcar serviços do pacote e juntar o «MO Modelo» não tira produtos, nem ao avançar até ao Resumo", () => {
+    const { S, d } = doEstudio();
+    const ids = () => (d.visita.prod ?? []).filter((p) => p.q > 0).map((p) => p.id).sort();
+    const antes = ids();
+    expect(antes).toHaveLength(2);
+    render(<Montar S={S} d={d} />);
+    for (const n of [/^Demolição/, /^Canaliza/, /^Montagem de lou|^Lou/]) {
+      const b = screen.queryAllByRole("button", { name: n }).find((x) => x.getAttribute("aria-pressed") === "true");
+      if (b) fireEvent.click(b);
+    }
+    fireEvent.change(screen.getByRole("searchbox", { name: "Procurar serviço" }), { target: { value: "MO Modelo Remodelação Completa - Casa de Banho Comum" } });
+    const mo = within(screen.getByRole("list", { name: "Serviços" })).getAllByRole("button").find((b) => /Modelo remodela/i.test(b.textContent ?? ""))!;
+    fireEvent.click(mo);
+    expect(d.visita.extra["s-momrccbc"]).toBeGreaterThan(0);
+    expect(ids()).toEqual(antes);
+    for (let i = 0; i < 6 && titulo() !== "Resumo"; i++) { seguinte(); expect(ids()).toEqual(antes); }
+    expect(titulo()).toBe("Resumo");
+  });
+
+  it("«Mantém» numa troca com produtos já escolhidos diz quantos saíram e o «Desfazer» repõe-nos", () => {
+    const { S, A, d } = preparar();
+    const K = lerCatalogo();
+    for (const n of ["Sanita compacta", "Base de duche 80×120"]) A.produto(d.id, prodN(n), 1);
+    const loucas = obrigacoes(K, ["loucas"], d.visita)[0];
+    window.localStorage.setItem(`olyvia.necessidades.passo.${d.id}`, "q:" + loucas.sid);
+    render(<Montar S={S} d={d} />);
+    expect(titulo()).toBe("O cliente mantém a sanita e a base de duche?");
+    const antes = d.visita.prod!.map((p) => ({ ...p }));
+    fireEvent.click(screen.getByRole("button", { name: /^Mantém/ }));
+    expect(d.visita.manter?.loucas).toBe("sim");
+    expect(d.visita.prod!.some((p) => p.n === "Sanita compacta")).toBe(false);
+    expect(screen.getByRole("status")).toHaveTextContent(/Mantém: 2 produtos saíram \(Sanita compacta, /);
+    fireEvent.click(screen.getByRole("button", { name: "Desfazer" }));
+    expect(d.visita.manter?.loucas).toBeUndefined();
+    for (const p of antes) expect(d.visita.prod!.find((x) => x.id === p.id)).toMatchObject({ q: p.q, no: p.no, custo: p.custo });
+  });
+
+  it("na troca, a pesquisa aceita a referência e, sem nada no ramo, procura no resto do Catálogo com aviso", () => {
+    const { S, d } = preparar();
+    mudarCatalogo((k) => { k.produtos.push({ id: "MACBE0073", n: "Espelho Simples C/ORLA ALUMÍNIO 60x50", sku: "MACBE0073", custo: 20, un: "un", marca: "", fornecedor: "", data: "", no: null } as Produto); });
+    const K = lerCatalogo();
+    const loucas = obrigacoes(K, ["loucas"], d.visita)[0];
+    window.localStorage.setItem(`olyvia.necessidades.passo.${d.id}`, "q:" + loucas.sid);
+    render(<Montar S={S} d={d} />);
+    fireEvent.click(screen.getByRole("button", { name: /^Troca/ }));
+    const procurar = (t: string) => fireEvent.change(screen.getByRole("searchbox", { name: /Procurar em/ }), { target: { value: t } });
+    const achado = () => within(screen.getByRole("list", { name: /Produtos/ })).getAllByRole("listitem").map((li) => li.getAttribute("title"));
+    procurar("MACBE0073");
+    expect(screen.getByRole("status")).toHaveTextContent(/Estes são do resto do Catálogo/);
+    expect(achado()).toContain("Espelho Simples C/ORLA ALUMÍNIO 60x50");
+    procurar("orla 60x50");
+    expect(achado()).toContain("Espelho Simples C/ORLA ALUMÍNIO 60x50");
+    // no ramo há resultados: não se mistura o resto do Catálogo
+    procurar("sanita compacta");
+    expect(screen.queryByText(/Estes são do resto do Catálogo/)).toBeNull();
+  });
+});
