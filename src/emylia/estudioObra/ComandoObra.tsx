@@ -576,7 +576,7 @@ export function AgendaEquipa({ ctx, d, dias, ir }: { ctx: Ctx; d: Negocio; dias:
                         <motion.button key={ti} type="button" layout={!reduzir} draggable={planeia} onDragStart={() => setArr(ti)} onDragEnd={() => { setArr(null); setAlvo(null); }} onClick={() => ir.tarefa(ti)}
                           className={cn("flex w-full items-center gap-1 rounded-lg px-2 py-1 text-left text-xs font-medium text-white shadow-sm", planeia && "cursor-grab active:cursor-grabbing", arr === ti && "opacity-40")}
                           style={{ background: COR_FASE[t.fase ?? 1] }} title={`${t.nome} · ${rotuloVivo(t, p)}`}>
-                          <span className="truncate">{t.nome}</span>
+                          <span className="truncate">{nomeCurtoTarefa(t.nome)}</span>
                         </motion.button>
                       ))}
                       {!b && !aqui.length && <span className="block px-1 text-[11px] text-muted-foreground/70">livre</span>}
@@ -588,7 +588,7 @@ export function AgendaEquipa({ ctx, d, dias, ir }: { ctx: Ctx; d: Negocio; dias:
           })}
         </div>
       </div>
-      {arr != null && <p className="text-xs text-muted-foreground">A largar «{p.tasks[arr]?.nome}»: azul, a pessoa está livre; vermelho, está noutra obra ou de férias.</p>}
+      {arr != null && <p className="text-xs text-muted-foreground">A largar «{nomeCurtoTarefa(p.tasks[arr]?.nome ?? "")}»: azul, a pessoa está livre; vermelho, está noutra obra ou de férias.</p>}
     </section>
   );
 }
