@@ -4,7 +4,7 @@
 //    ?doc=) e reenviar o acesso ao cliente com esse documento (pede confirmação; numa conta real, a permissão do portal);
 //  · 3D: o projeto do Estúdio do projeto em volume (obra3d.ts), só para ver: o que está feito a cores, o que falta transparente.
 import { Component, Suspense, lazy, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
-import { Box, Check, FileText, Send, X } from "lucide-react";
+import { Box, Check, FileText, Pause, Play, Send, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Negocio, Plano } from "../motor";
@@ -183,6 +183,13 @@ export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: 
   const [diaSel, setDiaSel] = useState<number | null>(null);
   const noDia = useMemo(() => (diaSel == null ? null : obraEm3DNoDia(d, diaSel)), [d, diaSel, versao]); // eslint-disable-line react-hooks/exhaustive-deps
   const inv = useInventario();
+  // as peças da planta com trabalho no dia escolhido na régua (a tarefa do ofício de cada uma)
+  const doDia = useMemo(() => {
+    const out = new Set<string>();
+    if (diaSel == null || !plano || !pr) return out;
+    for (const pc of pr.depois.pecas) { const ti = tarefaDaPeca(d, pc.id), t = ti != null ? plano.tasks[ti] : null; if (t && t.dia <= diaSel && diaSel < t.dia + t.dur) out.add(pc.id); }
+    return out;
+  }, [d, diaSel, plano, pr]);
   if (!O || !M) {
     return <p className="rounded-xl bg-muted/50 px-4 py-3 text-[15px] text-muted-foreground">Este negócio não tem projeto do Estúdio do projeto: o 3D aparece quando a visita é feita no Estúdio.</p>;
   }
@@ -246,8 +253,8 @@ export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: 
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <PlantaVista planta={p.antes} titulo="Antes: como está" />
-          <PlantaVista planta={p.depois} titulo="Depois: como vai ficar" fantasmas={sairam(p)}
-            cor={(pc) => produto(p.escolhas[pc.id])?.hex} rotulo={(pc) => { const x = produto(p.escolhas[pc.id]); return x ? `${PECAS[pc.tipo].n} · ${nomeCurto(x.colecao || x.n, PECAS[pc.tipo].n)}` : undefined; }} />
+          <PlantaVista planta={p.depois} titulo={diaSel != null ? `Depois: a cores forte, o trabalho de ${dias[diaSel] ? dataCurta(dias[diaSel]) : `dia ${diaSel + 1}`}` : "Depois: como vai ficar"} fantasmas={sairam(p)}
+            cor={(pc) => (doDia.has(pc.id) ? "#7c5ce0" : produto(p.escolhas[pc.id])?.hex)} rotulo={(pc) => { const x = produto(p.escolhas[pc.id]); return x ? `${PECAS[pc.tipo].n} · ${nomeCurto(x.colecao || x.n, PECAS[pc.tipo].n)}` : undefined; }} />
         </div>
       </section>
     </div>
@@ -257,6 +264,14 @@ export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: 
 /** 23/11: a régua do tempo do 3D: um segmento por dia do plano, na cor da fase que nele decorre; «Hoje» volta ao que está mesmo feito. */
 function ReguaDoTempo({ plano, dias, fim, hoje, dia, setDia }: { plano: Plano; dias: Date[]; fim: number; hoje: number; dia: number | null; setDia: (k: number) => void }) {
   const k = dia ?? hoje;
+  // 23/11 (revisão: «um botão ▶ que passa a obra dia a dia sozinha»): um dia a cada 0,8 s, até ao fim; recomeça do início se já está no fim
+  const [aTocar, setATocar] = useState(false);
+  useEffect(() => {
+    if (!aTocar) return;
+    const id = window.setTimeout(() => { if (k >= fim - 1) setATocar(false); else setDia(k + 1); }, 800);
+    return () => window.clearTimeout(id);
+  }, [aTocar, k, fim]); // eslint-disable-line react-hooks/exhaustive-deps
+  const tocar = () => { if (aTocar) { setATocar(false); return; } if (k >= fim - 1) setDia(0); setATocar(true); };
   const quando = (x: number) => (dias[x] ? dataCurta(dias[x]) : `dia ${x + 1}`);
   const ativas = (x: number) => plano.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.dia <= x && x < t.dia + t.dur);
   const faseDe = (x: number) => { const a = ativas(x); return a.length ? Math.max(...a.map(({ t }) => t.fase ?? 1)) : null; };
@@ -268,7 +283,12 @@ function ReguaDoTempo({ plano, dias, fim, hoje, dia, setDia }: { plano: Plano; d
           <b className="font-semibold">{dia == null ? "Hoje" : `Dia ${k + 1} de ${fim}`}</b> · {quando(k)}
           {f && <span className="text-muted-foreground"> · Fase {f} · {FASES_OBRA[f - 1]?.curto}</span>}
         </p>
-        {dia != null && <Button type="button" size="sm" variant="outline" className="min-h-9 rounded-full" onClick={() => setDia(hoje)}>Voltar a hoje</Button>}
+        <div className="flex gap-2">
+          <Button type="button" size="sm" className="min-h-9 rounded-full" aria-label={aTocar ? "Parar" : "Ver a obra a andar, dia a dia"} onClick={tocar}>
+            {aTocar ? <Pause className="mr-1 h-4 w-4" aria-hidden="true" /> : <Play className="mr-1 h-4 w-4" aria-hidden="true" />}{aTocar ? "Parar" : "Ver a andar"}
+          </Button>
+          {dia != null && <Button type="button" size="sm" variant="outline" className="min-h-9 rounded-full" onClick={() => { setATocar(false); setDia(hoje); }}>Voltar a hoje</Button>}
+        </div>
       </div>
       <div className="flex gap-0.5" role="group" aria-label="Escolher o dia">
         {Array.from({ length: fim }, (_, x) => {
