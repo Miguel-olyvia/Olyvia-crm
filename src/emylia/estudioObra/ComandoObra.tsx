@@ -10,7 +10,7 @@
 //  · Entregas: a linha do tempo dos materiais (chega hoje, amanhã, a dd/mm).
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowUpRight, CalendarCheck, Camera, Check, ChevronLeft, ChevronRight, Euro, Gauge, HardHat, Inbox, Package, Send, Sparkles, Truck, Zap } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CalendarCheck, Camera, Check, ChevronLeft, ChevronRight, Euro, HardHat, Inbox, Package, Send, Sparkles, Truck, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, eur, nfmt, type Estado, type Negocio, type Plano } from "../motor";
@@ -27,7 +27,7 @@ import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
 import { FotoObra } from "../fotosDaObra";
 import { Contagem, MOLA, useReduzir } from "../movimento";
 import { podeNeg, podeVerCustos } from "../permissoes";
-import { estadoVivo, rotuloVivo } from "./planoVivo";
+import { derrapagem, estadoVivo, nomeCurtoTarefa, rotuloVivo } from "./planoVivo";
 import { CaminhoCritico } from "./CaminhoCritico";
 import { useInventario } from "../inventario/loja";
 import { resumoEcNegocio } from "../inventario/ponteNegocios";
@@ -44,72 +44,116 @@ export interface Ir {
 }
 
 /* ================================================================== o pulso */
-function Mosaico({ rotulo, icone, children, sub, tom, onClick, extra }: { rotulo: string; icone: ReactNode; children: ReactNode; sub?: ReactNode; tom?: "bom" | "mau"; onClick: () => void; extra?: ReactNode }) {
-  const reduzir = useReduzir();
-  return (
-    <motion.button type="button" onClick={onClick} whileHover={reduzir ? undefined : { y: -2 }} whileTap={reduzir ? undefined : { scale: 0.98 }}
-      className="group relative flex min-h-[92px] items-center gap-3 overflow-hidden rounded-2xl border border-border bg-card px-4 py-3 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-      {extra}
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><span aria-hidden="true" className="text-primary">{icone}</span>{rotulo}</span>
-        <span className="mt-0.5 block overflow-hidden whitespace-nowrap text-xl font-semibold tabular-nums">{children}</span>
-        {sub && <span className={cn("block truncate text-xs", tom === "mau" ? "font-medium text-destructive" : tom === "bom" ? "font-medium text-success" : "text-muted-foreground")}>{sub}</span>}
-      </span>
-      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
-    </motion.button>
-  );
-}
-function Anel({ valor, cor = "hsl(var(--primary))" }: { valor: number; cor?: string }) {
-  const reduzir = useReduzir(), r = 20, c = 2 * Math.PI * r;
-  return (
-    <svg viewBox="0 0 48 48" className="h-12 w-12 shrink-0 -rotate-90" aria-hidden="true">
-      <circle cx="24" cy="24" r={r} fill="none" stroke="hsl(var(--muted))" strokeWidth="5" />
-      <motion.circle cx="24" cy="24" r={r} fill="none" stroke={cor} strokeWidth="5" strokeLinecap="round" strokeDasharray={c}
-        initial={reduzir ? false : { strokeDashoffset: c }} animate={{ strokeDashoffset: c * (1 - Math.max(0, Math.min(1, valor))) }} transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }} />
-    </svg>
-  );
-}
 /** 19/11 (Rúben: o técnico terminar uma tarefa tem de contar no Estúdio): as terminadas são as validadas e as que o técnico deu por
  *  feitas no Hoje (à espera da validação). */
 export function terminadasDe(p: Plano): string {
   const v = p.tasks.map((t) => estadoVivo(t, p)), pv = v.filter((x) => x === "feita").length, n = v.filter((x) => x === "validada").length + pv;
   return `${n} de ${p.tasks.length} ${p.tasks.length === 1 ? "terminada" : "terminadas"}${pv ? ` · ${pv} por validar` : ""}`;
 }
+/** 23/11 (Rúben: «mega next-level»): o primeiro dia de trabalho do plano e a primeira tarefa (antes do arranque, para a contagem). */
+export function arranqueDe(p: Plano): { dia: number; ti: number } | null {
+  const L = p.tasks.map((t, ti) => ({ t, ti })).sort((a, b) => a.t.dia - b.t.dia || a.ti - b.ti);
+  return L.length ? { dia: L[0].t.dia, ti: L[0].ti } : null;
+}
+/** Ainda nada começou: nenhuma tarefa com registo e o dia de hoje antes da primeira. */
+export function antesDoArranque(p: Plano): boolean {
+  const a = arranqueDe(p);
+  return !!a && p.tasks.every((t) => !t.exec) && (p.estado !== "em curso" || p.dia < a.dia);
+}
+const dd = (n: number) => `${n} ${n === 1 ? "dia útil" : "dias úteis"}`;
+
 export function Pulso({ d, S, dias, prev, margem, precisa, ir }: { d: Negocio; S: Estado; dias: Date[]; prev: Previsao; margem: MargemViva | null; precisa: number; ir: Ir }) {
+  const reduzir = useReduzir();
   const p = d.obra.plano!, quando = quandoDe(dias);
   const ims = imprevistosDe(d), abertos = ims.filter((i) => i.estado !== "fechado" && i.estado !== "aprovado");
   const val = (() => { try { return valorContrato(d, S); } catch { return null; } })();
-  const dif = prev.fimProvavel - prev.fimPlano;
+  // o fim do contrato: o do plano que veio do orçamento (sem a derrapagem); sem ele, o do plano
+  const fimContrato = prev.fimPlano - derrapagem(p), dif = prev.fimProvavel - fimContrato;
   // 23/11 (permissões): a margem e o valor só para quem vê os custos do orçamento (quotes.view_costs, a mesma regra do servidor)
   const verCustos = podeVerCustos();
+  const antes = antesDoArranque(p), a = arranqueDe(p), feito = progresso(p);
+  const faltam = a ? Math.max(0, a.dia - (p.estado === "em curso" ? p.dia : 0)) : 0;
+  const ta = a ? p.tasks[a.ti] : null;
+  const desvioPp = margem ? (margem.margemViva - margem.margemOrc) * 100 : 0;
+  const secundario = "inline-flex min-h-10 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-sm transition-colors hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
   return (
-    <section aria-label="O pulso da obra" className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-      <Mosaico rotulo="Feito" icone={<Gauge className="h-4 w-4" />} onClick={() => ir.aba("execucao")} extra={<Anel valor={progresso(p)} />}
-        sub={terminadasDe(p)}>
-        <Contagem valor={Math.round(progresso(p) * 100)} fmt={(n) => `${Math.round(n)}%`} de={0} />
-      </Mosaico>
-      <Mosaico rotulo="Fim provável" icone={<CalendarCheck className="h-4 w-4" />} onClick={ir.previsao} tom={dif > 0 ? "mau" : dif < 0 ? "bom" : undefined}
-        sub={<>{dif === 0 ? "como o plano" : dif > 0 ? `+${dif} face ao plano` : `${-dif} antes do plano`} · confiança {prev.confianca}</>}>
-        {quando(prev.fimProvavel - 1)}
-      </Mosaico>
-      {verCustos && <Mosaico rotulo="Margem ao vivo" icone={<Euro className="h-4 w-4" />} onClick={ir.previsao} tom={margem ? (margem.margemViva < margem.margemOrc - 0.005 ? "mau" : "bom") : undefined}
-        sub={margem ? `orçamento ${pct(margem.margemOrc)}` : "sem orçamento"}>
-        {margem ? pct(margem.margemViva) : "—"}
-      </Mosaico>}
-      <Mosaico rotulo="Precisa de ti" icone={<Inbox className="h-4 w-4" />} onClick={ir.comando} tom={precisa ? "mau" : "bom"} sub={precisa ? "toque para tratar" : "nada à espera"}>
-        <Contagem valor={precisa} fmt={(n) => String(Math.round(n))} de={0} />
-      </Mosaico>
-      <Mosaico rotulo="Imprevistos" icone={<AlertTriangle className="h-4 w-4" />} onClick={() => ir.imprevisto()} tom={abertos.length ? "mau" : undefined}
-        sub={ims.length ? `${ims.length} no total` : "nenhum"}>
-        <Contagem valor={abertos.length} fmt={(n) => String(Math.round(n))} de={0} />
-      </Mosaico>
-      {verCustos && <Mosaico rotulo="Valor da obra" icone={<Euro className="h-4 w-4" />} onClick={() => ir.aba("cliente")} sub={[val?.adendas ? `com ${eur(val.adendas)} € de adendas` : "com IVA", (d.adendas ?? []).filter((a) => a.estado === "rascunho").length ? `${(d.adendas ?? []).filter((a) => a.estado === "rascunho").length} por disparar` : "", (d.adendas ?? []).filter((a) => emCurso(a) && a.estado !== "rascunho").length ? `${(d.adendas ?? []).filter((a) => emCurso(a) && a.estado !== "rascunho").length} à espera do cliente` : ""].filter(Boolean).join(" · ")}>
-        {val ? `${eur(val.total)} €` : "—"}
-      </Mosaico>}
+    <section aria-label="O pulso da obra" className="space-y-3">
+      <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr_1fr]">
+        {/* o número herói: a contagem até ao arranque, ou o dia da obra e o feito */}
+        <motion.button type="button" onClick={() => (antes && a ? ir.tarefa(a.ti) : ir.aba("execucao"))} whileTap={reduzir ? undefined : { scale: 0.99 }}
+          aria-label={antes ? `Começa daqui a ${dd(faltam)}: abrir a primeira tarefa` : `Feito: ${Math.round(feito * 100)}%, dia ${p.dia + 1} de ${prev.fimPlano}`}
+          className="relative flex items-center gap-4 overflow-hidden rounded-3xl bg-gradient-to-br from-primary to-[#432791] p-5 text-left text-white shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
+          <div aria-hidden="true" className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+          {antes ? (
+            <>
+              <span className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-white/15 text-3xl font-bold tabular-nums">{faltam}</span>
+              <span className="min-w-0">
+                <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-white/75">{faltam ? "Começa daqui a" : "Começa hoje"}</span>
+                <span className="block text-2xl font-semibold leading-tight">{faltam ? dd(faltam) : quando(a!.dia)}</span>
+                {ta && <span className="mt-0.5 block text-sm text-white/85">{quando(a!.dia)} · {primeiro(nomeTec(ta.tec))} · {nomeCurtoTarefa(ta.nome)}</span>}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="relative grid h-16 w-16 shrink-0 place-items-center">
+                <svg viewBox="0 0 48 48" className="absolute inset-0 h-16 w-16 -rotate-90" aria-hidden="true">
+                  <circle cx="24" cy="24" r="20" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="5" />
+                  <motion.circle cx="24" cy="24" r="20" fill="none" stroke="white" strokeWidth="5" strokeLinecap="round" strokeDasharray={2 * Math.PI * 20}
+                    initial={reduzir ? false : { strokeDashoffset: 2 * Math.PI * 20 }} animate={{ strokeDashoffset: 2 * Math.PI * 20 * (1 - Math.max(0, Math.min(1, feito))) }} transition={{ duration: 0.9 }} />
+                </svg>
+                <span className="text-sm font-bold tabular-nums"><Contagem valor={Math.round(feito * 100)} fmt={(n) => `${Math.round(n)}%`} de={0} /></span>
+              </span>
+              <span className="min-w-0">
+                <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-white/75">{p.estado === "concluída" ? "Obra concluída" : "Feito"}</span>
+                <span className="block text-2xl font-semibold leading-tight">Dia {Math.min(p.dia + 1, prev.fimPlano)} de {prev.fimPlano}</span>
+                <span className="mt-0.5 block text-sm text-white/85">{terminadasDe(p)}</span>
+              </span>
+            </>
+          )}
+        </motion.button>
+        {/* o fim provável contra o do contrato */}
+        <button type="button" onClick={ir.previsao} aria-label={`Fim provável: ${quando(prev.fimProvavel - 1)}`}
+          className="rounded-3xl border border-border bg-card p-4 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><CalendarCheck className="h-4 w-4 text-primary" aria-hidden="true" />Fim provável</span>
+          <span className="mt-1 block text-xl font-semibold tabular-nums">{quando(prev.fimProvavel - 1)}</span>
+          <span className={cn("mt-0.5 block text-sm", dif > 0 ? "font-medium text-destructive" : dif < 0 ? "font-medium text-success" : "text-muted-foreground")}>
+            {dif === 0 ? "No dia do contrato" : dif > 0 ? `${dd(dif)} depois do contrato` : `${dd(-dif)} antes do contrato`}
+          </span>
+          <span className="block text-xs text-muted-foreground">Contrato: {quando(fimContrato - 1)} · confiança {prev.confianca}</span>
+        </button>
+        {/* a margem com o desvio */}
+        {verCustos ? (
+          <button type="button" onClick={ir.previsao} aria-label={`Margem ao vivo: ${margem ? pct(margem.margemViva) : "sem orçamento"}`}
+            className="rounded-3xl border border-border bg-card p-4 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><Euro className="h-4 w-4 text-primary" aria-hidden="true" />Margem ao vivo</span>
+            <span className="mt-1 block text-xl font-semibold tabular-nums">{margem ? pct(margem.margemViva) : "—"}</span>
+            {margem && <span className={cn("mt-0.5 block text-sm", desvioPp < -0.05 ? "font-medium text-destructive" : desvioPp > 0.05 ? "font-medium text-success" : "text-muted-foreground")}>
+              {Math.abs(desvioPp) < 0.05 ? "Igual ao orçamento" : `${desvioPp > 0 ? "+" : "−"}${nfmt(Math.round(Math.abs(desvioPp) * 10) / 10)} pp face ao orçamento`}
+            </span>}
+            {margem && <span className="block text-xs text-muted-foreground">Orçamento: {pct(margem.margemOrc)} · {eur(margem.valor - margem.custoVivo)} € de margem</span>}
+          </button>
+        ) : <div className="hidden lg:block" />}
+      </div>
+      {/* o resto, secundário e sem cortes */}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={ir.comando} className={cn(secundario, precisa && "border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200")}>
+          <Inbox className="h-4 w-4" aria-hidden="true" />Precisa de ti: <b className="font-semibold tabular-nums">{precisa || "nada"}</b>
+        </button>
+        <button type="button" onClick={() => ir.imprevisto()} className={cn(secundario, abertos.length && "border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200")}>
+          <AlertTriangle className="h-4 w-4" aria-hidden="true" />Imprevistos: <b className="font-semibold tabular-nums">{abertos.length ? `${abertos.length} em aberto` : ims.length ? `${ims.length} tratados` : "nenhum"}</b>
+        </button>
+        {verCustos && val && (
+          <button type="button" onClick={() => ir.aba("cliente")} className={secundario}>
+            <Euro className="h-4 w-4" aria-hidden="true" />Valor da obra: <b className="font-semibold tabular-nums">{eur(val.total)} €</b>
+            <span className="text-muted-foreground">{val.adendas ? `com ${eur(val.adendas)} € de adendas` : "com IVA"}</span>
+          </button>
+        )}
+        {(d.adendas ?? []).filter((x) => x.estado === "rascunho").length > 0 && <span className={cn(secundario, "cursor-default")}>{(d.adendas ?? []).filter((x) => x.estado === "rascunho").length} adendas por disparar</span>}
+        {(d.adendas ?? []).filter((x) => emCurso(x) && x.estado !== "rascunho").length > 0 && <span className={cn(secundario, "cursor-default")}>{(d.adendas ?? []).filter((x) => emCurso(x) && x.estado !== "rascunho").length} à espera do cliente</span>}
+      </div>
     </section>
   );
 }
-
 /* ================================================================== o comando de hoje */
 export interface Pedido { k: string; t: string; sub?: string; rot: string; fn: () => void; nivel: "critico" | "atencao" }
 /** O que precisa do gestor, com o toque que resolve cada coisa. */
