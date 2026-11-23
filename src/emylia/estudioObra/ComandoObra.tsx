@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, eur, nfmt, type Estado, type Negocio, type Plano } from "../motor";
 import type { Ctx } from "../pecas";
-import { COR_FASE } from "../fasesObra";
+import { COR_FASE, FASES_OBRA } from "../fasesObra";
 import { dataCurta } from "../planoObra";
 import { blocosForaDaObra, obrasDosTecnicos } from "../preparacaoObra";
 import { materiaisPorFase, progresso } from "../obraOps";
@@ -28,7 +28,7 @@ import { FotoObra } from "../fotosDaObra";
 import { Contagem, MOLA, useReduzir } from "../movimento";
 import { podeNeg, podeVerCustos } from "../permissoes";
 import { derrapagem, estadoVivo, nomeCurtoTarefa, rotuloVivo } from "./planoVivo";
-import { CaminhoCritico } from "./CaminhoCritico";
+import { CaminhoCritico, ICONE_DA_FASE } from "./CaminhoCritico";
 import { lerInventario, useInventario } from "../inventario/loja";
 import { resumoEcNegocio } from "../inventario/ponteNegocios";
 import { antesEDepois, caminhoCritico, diarioDaObra, fotografiasDaObra, hojeNaObra, margemAoVivo, pontoDaSemana, previsao, type MargemViva, type Previsao } from "./previsaoObra";
@@ -329,35 +329,93 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
 }
 
 /* ================================================================== a previsão viva */
+// 23/11 (Rúben: «mega next-level»): a curva S das horas (o planeado, o real, hoje e a previsão até ao fim provável, com a margem de datas);
+// antes do arranque, sem nada real, o calendário das fases. A margem num só indicador: a de hoje contra a do orçamento, e só os desvios
+// que existem.
+function CalendarioFases({ p, quando }: { p: Plano; quando: (k: number) => string }) {
+  const fim = Math.max(1, ...p.tasks.map((t) => t.dia + t.dur));
+  const curta = (k: number) => quando(k).replace(/^[^,]+, /, "");
+  const fases = FASES_OBRA.map((f) => {
+    const ts = p.tasks.filter((t) => (t.fase ?? 1) === f.n);
+    return ts.length ? { ...f, ini: Math.min(...ts.map((t) => t.dia)), fim: Math.max(...ts.map((t) => t.dia + t.dur)), n: f.n, nT: ts.length } : null;
+  }).filter((x): x is NonNullable<typeof x> => !!x);
+  return (
+    <div className="min-w-0 space-y-3">
+      <div>
+        <p className="text-sm font-semibold">As fases da obra</p>
+        <p className="text-xs text-muted-foreground">Ainda sem horas registadas: o plano, fase a fase, de {quando(0 + Math.min(...fases.map((f) => f.ini)))} a {quando(fim - 1)}.</p>
+      </div>
+      <ol className="space-y-2.5">
+        {fases.map((f) => {
+          const Ic = ICONE_DA_FASE[f.n] ?? Package, cor = COR_FASE[f.n];
+          return (
+            <li key={f.n} className="grid grid-cols-[9.5rem_1fr] items-center gap-3 sm:grid-cols-[12rem_1fr]">
+              <span className="flex min-w-0 items-center gap-2 text-sm">
+                <span aria-hidden="true" className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-white" style={{ background: cor }}><Ic className="h-4 w-4" /></span>
+                <span className="min-w-0"><span className="block truncate font-medium">{f.curto}</span><span className="block text-xs tabular-nums text-muted-foreground">{f.fim - f.ini === 1 ? quando(f.ini) : `${curta(f.ini)} – ${curta(f.fim - 1)}`}</span></span>
+              </span>
+              <span className="relative block h-3 rounded-full bg-muted" aria-hidden="true">
+                <span className="absolute inset-y-0 rounded-full" style={{ left: `${(f.ini / fim) * 100}%`, width: `${Math.max(2, ((f.fim - f.ini) / fim) * 100)}%`, background: cor }} />
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
 export function PrevisaoViva({ d, dias, prev, margem, critico, ir, previsaoRef }: { d: Negocio; dias: Date[]; prev: Previsao; margem: MargemViva | null; critico: Set<number>; ir: Ir; previsaoRef: React.RefObject<HTMLElement> }) {
   const reduzir = useReduzir();
   const p = d.obra.plano!, quando = quandoDe(dias);
-  const W = 640, H = 180, n = Math.max(2, prev.planeadas.length), max = Math.max(prev.totalH, ...prev.reais, 1);
+  const W = 640, H = 180, n = Math.max(2, prev.planeadas.length, prev.ate), max = Math.max(prev.totalH, ...prev.reais, 1);
   const X = (k: number) => (k / (n - 1)) * W, Y = (h: number) => H - (h / max) * (H - 16) - 4;
   const linha = (L: number[]) => L.map((h, k) => `${k ? "L" : "M"}${X(k).toFixed(1)},${Y(h).toFixed(1)}`).join(" ");
   const hoje = p.estado === "em curso" ? p.dia : -1;
   const [sob, setSob] = useState<number | null>(null);
   const svg = useRef<SVGSVGElement>(null);
+  const antes = antesDoArranque(p);
+  // a previsão: do real de hoje ao total no fim provável, com a margem de datas (de … até)
+  const realHoje = prev.reais[prev.reais.length - 1] ?? 0, fimK = Math.min(n - 1, prev.fimProvavel - 1);
+  const verMargem = !!margem && podeVerCustos();
+  const desvios = margem ? [
+    { l: "Mão de obra até hoje", v: -margem.desvioMO },
+    { l: "O resto, a este ritmo", v: -margem.projecao },
+    { l: "Materiais a mais", v: -margem.materiais },
+    ...(margem.nossos ? [{ l: "Atrasos e erros nossos", v: -margem.nossos }] : []),
+  ].filter((x) => Math.abs(x.v) > 0.5) : [];
+  const dpp = margem ? (margem.margemViva - margem.margemOrc) * 100 : 0;
+  const escala = (m: number) => `${Math.max(0, Math.min(100, (m / Math.max(0.5, (margem?.margemOrc ?? 0.3) * 1.5)) * 100))}%`;
   return (
     <section ref={previsaoRef} aria-label="A previsão viva" className="scroll-mt-4 grid grid-cols-1 gap-4 rounded-3xl border border-border bg-card p-4 shadow-sm lg:grid-cols-[1.6fr_1fr] sm:p-5">
+      {antes ? <CalendarioFases p={p} quando={quando} /> : (
       <div className="min-w-0 space-y-2">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
             <p className="text-sm font-semibold">Horas planeadas e reais</p>
             <p className="text-xs text-muted-foreground">Ritmo {prev.ritmo >= 1 ? "a tempo" : "abaixo do plano"}: {Math.round(prev.ritmo * 100)}% · fim provável {quando(prev.fimProvavel - 1)}{prev.ate > prev.de ? ` (entre ${quando(prev.de - 1)} e ${quando(prev.ate - 1)})` : ""}</p>
           </div>
-          <ul className="flex gap-3 text-xs text-muted-foreground"><li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-0.5 w-4 border-t-2 border-dashed border-muted-foreground" />Planeadas</li><li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-1 w-4 rounded bg-primary" />Reais</li></ul>
+          <ul className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+            <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-0.5 w-4 border-t-2 border-dashed border-muted-foreground" />Planeado</li>
+            <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-1 w-4 rounded bg-primary" />Real</li>
+            <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-0.5 w-4 border-t-2 border-dotted border-primary" />Previsão</li>
+          </ul>
         </div>
-        <svg ref={svg} viewBox={`0 0 ${W} ${H}`} className="h-44 w-full touch-none" role="img" aria-label={`Horas: ${nfmt(prev.feitoH)} feitas de ${nfmt(prev.totalH)} previstas`}
+        <svg ref={svg} viewBox={`0 0 ${W} ${H}`} className="h-44 w-full touch-none" role="img" aria-label={`Horas: ${nfmt(prev.feitoH)} feitas de ${nfmt(prev.totalH)} previstas; fim provável ${quando(prev.fimProvavel - 1)}`}
           onPointerMove={(e) => { const r = svg.current!.getBoundingClientRect(); const k = Math.round(((e.clientX - r.left) / r.width) * (n - 1)); setSob(Math.max(0, Math.min(n - 1, k))); }} onPointerLeave={() => setSob(null)}>
           {[0.25, 0.5, 0.75, 1].map((f) => <line key={f} x1={0} x2={W} y1={Y(max * f)} y2={Y(max * f)} stroke="hsl(var(--border))" strokeWidth={1} />)}
-          {hoje >= 0 && <line x1={X(hoje)} x2={X(hoje)} y1={0} y2={H} stroke="hsl(var(--primary))" strokeOpacity={0.35} strokeWidth={2} />}
-          {prev.fimProvavel !== prev.fimPlano && <line x1={X(Math.min(n - 1, prev.fimProvavel - 1))} x2={X(Math.min(n - 1, prev.fimProvavel - 1))} y1={0} y2={H} stroke="hsl(var(--destructive))" strokeDasharray="4 4" strokeWidth={1.5} />}
+          {/* a margem de datas do fim provável */}
+          {prev.ate > prev.de && <rect x={X(Math.max(0, prev.de - 1))} y={0} width={Math.max(2, X(Math.min(n - 1, prev.ate - 1)) - X(Math.max(0, prev.de - 1)))} height={H} fill="hsl(var(--primary))" fillOpacity={0.07} />}
+          {hoje >= 0 && <><line x1={X(hoje)} x2={X(hoje)} y1={0} y2={H} stroke="hsl(var(--primary))" strokeOpacity={0.45} strokeWidth={2} />
+            <text x={Math.min(W - 30, X(hoje) + 4)} y={12} fontSize={11} fill="hsl(var(--primary))">hoje</text></>}
           <motion.path d={linha(prev.planeadas)} fill="none" stroke="hsl(var(--muted-foreground))" strokeWidth={2} strokeDasharray="6 5"
             initial={reduzir ? false : { pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1 }} />
           {prev.reais.length > 1 && <motion.path d={`${linha(prev.reais)} L${X(prev.reais.length - 1)},${H} L0,${H} Z`} fill="hsl(var(--primary))" fillOpacity={0.08} initial={reduzir ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }} />}
           {prev.reais.length > 0 && <motion.path d={linha(prev.reais)} fill="none" stroke="hsl(var(--primary))" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round"
             initial={reduzir ? false : { pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1.1, delay: 0.2 }} />}
+          {/* a previsão: do real de hoje ao total, no fim provável */}
+          {hoje >= 0 && fimK > hoje && <path d={`M${X(hoje).toFixed(1)},${Y(realHoje).toFixed(1)} L${X(fimK).toFixed(1)},${Y(prev.totalH).toFixed(1)}`} fill="none" stroke="hsl(var(--primary))" strokeWidth={2} strokeDasharray="2 4" strokeLinecap="round" />}
+          {hoje >= 0 && fimK > hoje && <circle cx={X(fimK)} cy={Y(prev.totalH)} r={4.5} fill="hsl(var(--card))" stroke="hsl(var(--primary))" strokeWidth={2} />}
           {sob != null && <>
             <line x1={X(sob)} x2={X(sob)} y1={0} y2={H} stroke="hsl(var(--foreground))" strokeOpacity={0.2} />
             <circle cx={X(sob)} cy={Y(prev.planeadas[sob] ?? 0)} r={4} fill="hsl(var(--muted-foreground))" />
@@ -366,28 +424,27 @@ export function PrevisaoViva({ d, dias, prev, margem, critico, ir, previsaoRef }
         </svg>
         <p className="h-5 text-xs tabular-nums text-muted-foreground">{sob != null ? `${quando(sob)}: ${nfmt(prev.planeadas[sob] ?? 0)} h planeadas${prev.reais[sob] != null ? ` · ${nfmt(prev.reais[sob])} h reais` : ""}` : `${nfmt(prev.feitoH)} de ${nfmt(prev.totalH)} h feitas · passe o dedo no gráfico`}</p>
       </div>
+      )}
       <div className="min-w-0 space-y-4">
-        {margem && podeVerCustos() && (
-          <div className="space-y-2">
-            <p className="text-sm font-semibold">Margem ao vivo</p>
-            {[
-              { l: "Do orçamento", v: margem.valor - margem.custoOrc, m: margem.margemOrc, base: true },
-              { l: "Mão de obra até hoje", v: -margem.desvioMO },
-              { l: "O resto, a este ritmo", v: -margem.projecao },
-              { l: "Materiais a mais", v: -margem.materiais },
-              ...(margem.nossos ? [{ l: "Atrasos e erros nossos", v: -margem.nossos }] : []),
-              { l: "Ao vivo", v: margem.valor - margem.custoVivo, m: margem.margemViva, base: true },
-            ].filter((x) => x.base || Math.abs(x.v) > 0.5).map((x, k) => {
-              const larg = Math.min(100, (Math.abs(x.v) / Math.max(1, margem.valor - margem.custoOrc)) * 100);
-              return (
-                <div key={k} className="space-y-0.5">
-                  <div className="flex justify-between gap-2 text-sm"><span className={cn(x.base && "font-medium")}>{x.l}</span><span className={cn("tabular-nums", !x.base && (x.v < 0 ? "text-destructive" : "text-success"))}>{x.v > 0 && !x.base ? "+" : ""}{eur(x.v)} €{x.m != null ? ` · ${pct(x.m)}` : ""}</span></div>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted"><motion.div className={cn("h-full rounded-full", x.base ? "bg-primary" : x.v < 0 ? "bg-destructive" : "bg-success")}
-                    initial={reduzir ? false : { width: 0 }} animate={{ width: `${Math.max(2, larg)}%` }} transition={{ duration: 0.7, delay: reduzir ? 0 : 0.08 * k }} /></div>
-                </div>
-              );
-            })}
-          </div>
+        {verMargem && margem && (
+          <section aria-label="Margem ao vivo" className="space-y-3">
+            <div className="flex items-end justify-between gap-2">
+              <p className="text-sm font-semibold">Margem ao vivo</p>
+              <p className={cn("text-xs font-medium", dpp < -0.05 ? "text-destructive" : dpp > 0.05 ? "text-success" : "text-muted-foreground")}>{Math.abs(dpp) < 0.05 ? "Igual ao orçamento" : `${dpp > 0 ? "+" : "−"}${nfmt(Math.round(Math.abs(dpp) * 10) / 10)} pp face ao orçamento`}</p>
+            </div>
+            <p className="text-3xl font-semibold tabular-nums">{pct(margem.margemViva)} <span className="text-base font-normal text-muted-foreground">· {eur(margem.valor - margem.custoVivo)} €</span></p>
+            {/* um só indicador: a barra é a margem de hoje, o traço é a do orçamento */}
+            <div className="relative h-3 rounded-full bg-muted" role="img" aria-label={`Margem de hoje ${pct(margem.margemViva)}; do orçamento ${pct(margem.margemOrc)}`}>
+              <motion.div className={cn("absolute inset-y-0 left-0 rounded-full", dpp < -0.05 ? "bg-destructive" : "bg-primary")} initial={reduzir ? false : { width: 0 }} animate={{ width: escala(margem.margemViva) }} transition={{ duration: 0.7 }} />
+              <span aria-hidden="true" className="absolute -inset-y-1 w-0.5 rounded-full bg-foreground" style={{ left: escala(margem.margemOrc) }} />
+            </div>
+            <p className="text-xs text-muted-foreground">O traço é a margem do orçamento: {pct(margem.margemOrc)} · {eur(margem.valor - margem.custoOrc)} €.</p>
+            {desvios.length ? (
+              <ul className="space-y-1 text-sm">
+                {desvios.map((x) => <li key={x.l} className="flex justify-between gap-2"><span>{x.l}</span><span className={cn("tabular-nums", x.v < 0 ? "text-destructive" : "text-success")}>{x.v > 0 ? "+" : ""}{eur(x.v)} €</span></li>)}
+              </ul>
+            ) : <p className="flex items-center gap-1.5 rounded-xl bg-success/10 px-3 py-2 text-sm text-success"><Check className="h-4 w-4" aria-hidden="true" />Sem desvios: a obra está no orçamento.</p>}
+          </section>
         )}
       </div>
       {/* 23/11 (Rúben: «a lista deve ser refeita, muito mais bonita, corrida, com as fases bem identificadas e icons»): a toda a largura */}

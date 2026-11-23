@@ -56,3 +56,21 @@ describe("2. «Na obra hoje» antes do arranque", () => {
     expect(x.d.f.chaves).toBe("Chave entregue");
   });
 });
+
+describe("3. a curva S e a margem", () => {
+  it("em curso: a curva com hoje e a previsão; a margem num só indicador, com o desvio", () => {
+    montarObra();
+    const pv = screen.getByRole("region", { name: "A previsão viva" });
+    expect(within(pv).getByRole("img", { name: /fim provável/ })).toBeTruthy();
+    expect(within(pv).getByText("Previsão")).toBeTruthy();
+    const m = within(pv).getByRole("region", { name: "Margem ao vivo" });
+    expect(within(m).getAllByRole("img")).toHaveLength(1);
+    expect(within(m).queryByText("Do orçamento")).toBeNull();
+  });
+  it("antes do arranque: o calendário das fases em vez da curva vazia", () => {
+    montarObra(obraPorComecar());
+    const pv = screen.getByRole("region", { name: "A previsão viva" });
+    expect(within(pv).getByText("As fases da obra")).toBeTruthy();
+    expect(within(pv).queryByText("Horas planeadas e reais")).toBeNull();
+  });
+});
