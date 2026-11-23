@@ -166,3 +166,20 @@ describe("os materiais da obra", () => {
     expect(b.getAttribute("aria-pressed")).toBe("true");
   });
 });
+
+describe("o separador «Execução»", () => {
+  it("por estado e, dentro de cada um, pelas fases da obra, com nomes curtos e sem repetir o estado do grupo", () => {
+    const { d } = montar();
+    fireEvent.click(screen.getByRole("tab", { name: /Execução/ }));
+    const p = d.obra.plano!;
+    const depois = screen.getByRole("region", { name: "Por começar" });
+    const fases = within(depois).getAllByRole("group");
+    expect(fases.length).toBeGreaterThan(0);
+    for (const f of fases) expect(f.getAttribute("aria-label")).toMatch(/^Por começar · Fase \d · /);
+    const t = p.tasks.find((x) => x.nome === "Montagem de móveis")!;
+    const b = within(depois).getByRole("button", { name: `Abrir ${t.nome}` });
+    expect(b.textContent).toContain(nomeCurtoTarefa(t.nome));
+    // o grupo já diz «Por começar»: as linhas não o repetem
+    expect(within(depois).queryAllByText("Por começar", { selector: "li *" })).toHaveLength(0);
+  });
+});

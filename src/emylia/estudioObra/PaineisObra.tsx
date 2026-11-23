@@ -9,7 +9,7 @@
 //  · FechoDaObra: o que falta para fechar, a segurança, a vistoria e o auto, e encerrar.
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowUpRight, Camera, Check, CheckCircle2, ChevronRight, Clock, Minus, Package, Pause, Play, Plus, RotateCcw, Scissors, Send, ShieldCheck, TrendingUp, Undo2, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CalendarClock, Camera, Check, CheckCircle2, ChevronRight, Clock, Minus, Package, Pause, Play, Plus, RotateCcw, Scissors, Send, ShieldCheck, TrendingUp, Undo2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, eur, nfmt, type MatTarefa, type Negocio, type Plano, type Tarefa } from "../motor";
@@ -31,7 +31,7 @@ import { ConversaDoClienteNaObra } from "../ObraOperacoes";
 import { EstadoFotos, useFotosAJuntar } from "../fotosDaObra";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { useInventario } from "../inventario/loja";
-import { EscolherTarefa, ICONE_DA_FASE } from "./CaminhoCritico";
+import { EscolherTarefa, ICONE_DA_FASE, iconeDaTarefa } from "./CaminhoCritico";
 import { resumoEcNegocio } from "../inventario/ponteNegocios";
 import { useReduzir, MOLA } from "../movimento";
 import { podeNeg } from "../permissoes";
@@ -220,54 +220,91 @@ export function ExecucaoTarefa({ ctx, d, ti, simular, simulado, imprevisto }: {
 }
 
 /* ================================================================== a execução, tarefa a tarefa */
-const GRUPOS: { k: string; t: string; v: EstadoVivo[] }[] = [
-  { k: "validar", t: "Por validar", v: ["feita"] },
-  { k: "atraso", t: "Atrasadas", v: ["atrasada"] },
-  { k: "corrigir", t: "A corrigir", v: ["corrigir"] },
-  { k: "hoje", t: "Hoje e em curso", v: ["hoje", "em curso"] },
-  { k: "paradas", t: "Pausadas e paradas", v: ["pausada", "parada"] },
-  { k: "depois", t: "Por começar", v: ["por começar"] },
-  { k: "feitas", t: "Validadas", v: ["validada"] },
+// 23/11 (Rúben, no 1015: «isto também»): os grupos pelo estado (o que pede ação primeiro) e, dentro de cada um, as tarefas pelas fases da
+// obra, como o caminho crítico e os Materiais: o ícone e a cor da fase, o ícone do trabalho, o nome curto, as datas e as horas fáceis de
+// ler. O estado de cada tarefa só aparece quando o grupo junta mais do que um (hoje e em curso, pausadas e paradas) ou há atraso.
+const GRUPOS: { k: string; t: string; v: EstadoVivo[]; ic: typeof Clock; cls: string }[] = [
+  { k: "validar", t: "Por validar", v: ["feita"], ic: Clock, cls: "text-amber-700 dark:text-amber-300" },
+  { k: "atraso", t: "Atrasadas", v: ["atrasada"], ic: AlertTriangle, cls: "text-destructive" },
+  { k: "corrigir", t: "A corrigir", v: ["corrigir"], ic: RotateCcw, cls: "text-amber-700 dark:text-amber-300" },
+  { k: "hoje", t: "Hoje e em curso", v: ["hoje", "em curso"], ic: Play, cls: "text-primary" },
+  { k: "paradas", t: "Pausadas e paradas", v: ["pausada", "parada"], ic: Pause, cls: "text-muted-foreground" },
+  { k: "depois", t: "Por começar", v: ["por começar"], ic: CalendarClock, cls: "text-primary" },
+  { k: "feitas", t: "Validadas", v: ["validada"], ic: CheckCircle2, cls: "text-success" },
 ];
+/** Horas com uma casa decimal. */
+const horas = (h: number) => nfmt(Math.round(h * 10) / 10);
 export function Execucao({ ctx, d, abrir, dias }: { ctx: Ctx; d: Negocio; abrir: (ti: number) => void; dias: Date[] }) {
   const { S, A, run } = ctx;
   const p = d.obra.plano!;
   const planeia = podeNeg(S.role, "obra.planear");
   const quando = (k: number) => (dias[k] ? dataCurta(dias[k]) : `dia ${k + 1}`);
+  const curta = (k: number) => quando(k).replace(/^[^,]+, /, ""); // «30 nov», sem o dia da semana
+  const intervalo = (a: number, b: number) => (a === b ? quando(a) : `${curta(a)} – ${curta(b)}`);
   const [verFeitas, setVerFeitas] = useState(false);
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {GRUPOS.map((g) => {
-        const L = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => g.v.includes(estadoVivo(t, p))).sort((a, b) => a.t.dia - b.t.dia);
+        const L = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => g.v.includes(estadoVivo(t, p))).sort((a, b) => a.t.dia - b.t.dia || a.ti - b.ti);
         if (!L.length) return null;
-        const escondido = g.k === "feitas" && !verFeitas;
+        const escondido = g.k === "feitas" && !verFeitas, misto = g.v.length > 1;
+        const fases = FASES_OBRA.map((f) => ({ ...f, L: L.filter(({ t }) => (t.fase ?? 1) === f.n) })).filter((f) => f.L.length);
+        const totH = L.reduce((a, x) => a + x.t.h, 0), feitoH = L.reduce((a, x) => a + (x.t.exec?.horas ?? 0), 0);
+        const G = g.ic;
         return (
-          <section key={g.k} aria-label={g.t} className="space-y-2">
-            <h3 className="flex items-center gap-2 text-sm font-semibold">{g.t} <span className="rounded-full bg-muted px-2 text-xs tabular-nums">{L.length}</span>
+          <section key={g.k} aria-label={g.t} className="space-y-3">
+            <h3 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold">
+              <G className={cn("h-4 w-4", g.cls)} aria-hidden="true" />{g.t}
+              <span className="rounded-full bg-muted px-2 text-xs tabular-nums">{L.length}</span>
+              <span className="text-xs font-normal tabular-nums text-muted-foreground">· {feitoH > 0 ? `${horas(feitoH)} de ${horas(totH)} h` : `${horas(totH)} h`} · {intervalo(L[0].t.dia, Math.max(...L.map((x) => x.t.dia + x.t.dur - 1)))}</span>
               {g.k === "feitas" && <button type="button" onClick={() => setVerFeitas((x) => !x)} className="text-xs font-normal text-primary underline-offset-4 hover:underline">{verFeitas ? "Esconder" : "Mostrar"}</button>}
             </h3>
             {!escondido && (
-              <ul className="overflow-hidden rounded-2xl border border-border bg-card">
-                {L.map(({ t, ti }) => {
-                  const v = estadoVivo(t, p);
-                  const fotos = enviosDe(t).reduce((a, e) => a + (e.fotos?.length ?? 0), 0);
+              <div className="grid gap-3 lg:grid-cols-2">
+                {fases.map((f) => {
+                  const Ic = ICONE_DA_FASE[f.n] ?? Package, cor = COR_FASE[f.n];
                   return (
-                    <li key={ti} className="flex flex-wrap items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0">
-                      <button type="button" onClick={() => abrir(ti)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                        <AvatarTec id={t.tec} />
-                        <span className="min-w-0">
-                          <span className="block truncate text-[15px] font-medium">{t.nome}</span>
-                          <span className="block truncate text-sm text-muted-foreground">{primeiro(nomeTec(t.tec))} · {quando(t.dia)}{t.dur > 1 ? ` a ${quando(t.dia + t.dur - 1)}` : ""} · {nfmt(t.exec?.horas ?? 0)}/{nfmt(t.h)} h{fotos ? ` · ${fotos} ${fotos === 1 ? "foto" : "fotos"}` : ""}</span>
-                        </span>
-                      </button>
-                      <ChipVivo t={t} p={p} />
-                      {planeia && v === "feita" && <Button type="button" size="sm" variant="outline" className="min-h-9 rounded-full" onClick={() => run(() => A.validarTarefa(d.id, ti))}><Check className="mr-1 h-4 w-4" aria-hidden="true" />Validar</Button>}
-                      {planeia && v === "pausada" && <Button type="button" size="sm" variant="outline" className="min-h-9 rounded-full" onClick={() => run(() => A.retomarTarefa(d.id, ti))}><Play className="mr-1 h-4 w-4" aria-hidden="true" />Retomar</Button>}
-                      <button type="button" aria-label={`Abrir ${t.nome}`} onClick={() => abrir(ti)} className="grid h-9 w-9 place-items-center rounded-full text-muted-foreground hover:bg-muted"><ChevronRight className="h-4 w-4" /></button>
-                    </li>
+                    <div key={f.n} role="group" aria-label={`${g.t} · Fase ${f.n} · ${f.curto}`} className="overflow-hidden rounded-2xl border border-border bg-card">
+                      <div className="flex items-center gap-2.5 border-b border-border px-3 py-2.5">
+                        <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-white" style={{ background: cor }}><Ic className="h-4 w-4" /></span>
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: cor }}>Fase {f.n}</p>
+                          <p className="truncate text-sm font-semibold leading-tight">{f.curto}</p>
+                        </div>
+                        <p className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">{f.L.length} {f.L.length === 1 ? "tarefa" : "tarefas"}</p>
+                      </div>
+                      <ul>
+                        {f.L.map(({ t, ti }) => {
+                          const v = estadoVivo(t, p), T = iconeDaTarefa(t.nome), feito = t.exec?.horas ?? 0;
+                          const fotos = enviosDe(t).reduce((a, e) => a + (e.fotos?.length ?? 0), 0);
+                          return (
+                            <li key={ti} className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 last:border-b-0">
+                              <button type="button" onClick={() => abrir(ti)} title={t.nome} aria-label={`Abrir ${t.nome}`}
+                                className="group flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                                <span aria-hidden="true" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: `color-mix(in srgb, ${cor} 12%, transparent)`, color: cor }}><T className="h-[18px] w-[18px]" /></span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-[15px] font-medium">{nomeCurtoTarefa(t.nome)}</span>
+                                  <span className="flex flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
+                                    <AvatarTec id={t.tec} tam="h-5 w-5 text-[9px]" /><span>{primeiro(nomeTec(t.tec))}</span>
+                                    <span aria-hidden="true">·</span><span className="tabular-nums">{intervalo(t.dia, t.dia + t.dur - 1)}</span>
+                                    <span aria-hidden="true">·</span><span className="tabular-nums">{feito > 0 ? `${horas(feito)} de ${horas(t.h)} h` : `${horas(t.h)} h`}</span>
+                                    {fotos > 0 && <><span aria-hidden="true">·</span><span>{fotos} {fotos === 1 ? "foto" : "fotos"}</span></>}
+                                  </span>
+                                  {feito > 0 && t.h > 0 && <span aria-hidden="true" className="mt-1 block h-1 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full" style={{ width: `${Math.min(100, (feito / t.h) * 100)}%`, background: cor }} /></span>}
+                                </span>
+                                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground" aria-hidden="true" />
+                              </button>
+                              {(misto || diasDeAtraso(t, p) > 0) && <ChipVivo t={t} p={p} />}
+                              {planeia && v === "feita" && <Button type="button" size="sm" variant="outline" className="min-h-9 rounded-full" onClick={() => run(() => A.validarTarefa(d.id, ti))}><Check className="mr-1 h-4 w-4" aria-hidden="true" />Validar</Button>}
+                              {planeia && v === "pausada" && <Button type="button" size="sm" variant="outline" className="min-h-9 rounded-full" onClick={() => run(() => A.retomarTarefa(d.id, ti))}><Play className="mr-1 h-4 w-4" aria-hidden="true" />Retomar</Button>}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
                   );
                 })}
-              </ul>
+              </div>
             )}
           </section>
         );
