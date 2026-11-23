@@ -1,6 +1,7 @@
 -- ============================================================
--- Testes: 20270126200000 (C2 purge só do Lixo + âmbito), 20270126210000 (C3 custos dos produtos do negócio) e
---         20270126220000 (C4 criar a obra só com o plano por aprovar) — auditoria de permissões 23/11 (base RH)
+-- Testes: 20270126200000 (C2 purge só do Lixo + âmbito), 20270126210000 (C3 custos dos produtos do negócio),
+--         20270126220000 (C4 criar a obra só com o plano por aprovar) — auditoria de permissões 23/11 (base RH) — e
+--         20270126230000 (C2d/C2f: contrato assinado não anulado e a EC dele não se eliminam definitivamente; restaurar continua)
 -- ============================================================
 -- SÓ para a base RH (project-ref uetjghdkwbywbftedtth). NUNCA na produção (tzbfgwpckrfbqcolqxtm).
 -- Tudo em BEGIN … ROLLBACK; cada ação corre num sub-bloco que acaba SEMPRE em RAISE (o que escreveu é desfeito mesmo quando passa).
@@ -68,6 +69,11 @@ CREATE FUNCTION pg_temp.cl(r text) RETURNS text LANGUAGE sql AS $f$
   SELECT CASE WHEN r LIKE 'passa%' THEN 'passa' WHEN r ~ '^(CT001|42501):' THEN 'bloqueado' ELSE 'erro' END
 $f$;
 
+-- 20270126230000: a recusa por regra do Lixo (23514 «Não se pode eliminar definitivamente…») distingue-se de um erro qualquer
+CREATE FUNCTION pg_temp.cl_lixo(r text) RETURNS text LANGUAGE sql AS $f$
+  SELECT CASE WHEN r LIKE '23514: Não se pode eliminar definitivamente:%' THEN 'recusado' ELSE pg_temp.cl(r) END
+$f$;
+
 CREATE FUNCTION pg_temp.reg(p_caso text, p_conta text, p_esp text, p_obt text, p_det text) RETURNS void LANGUAGE sql AS $f$
   INSERT INTO _r (caso, conta, esperado, obtido, resultado, detalhe)
   VALUES (p_caso, p_conta, p_esp, coalesce(p_obt, '<null>'), CASE WHEN p_esp = coalesce(p_obt, '<null>') THEN 'OK' ELSE 'FALHA' END, left(p_det, 220));
@@ -116,10 +122,39 @@ BEGIN
     r := pg_temp.tentar_pre(a.auth, format('UPDATE quotes SET deleted_at = now() WHERE id = %L', q1005),
                             format('SELECT public.purge_business_entity(''quote'', %L)::text', q1005));
     PERFORM pg_temp.reg('C2c purge orçamento no Lixo (Lixo legítimo)', a.conta, CASE WHEN v_tem_dd THEN 'passa' ELSE 'bloqueado' END, pg_temp.cl(r), r);
-    -- o que acontece hoje (regra de negócio, não mudada): um contrato assinado que esteja no Lixo apaga-se
+    -- 20270126230000: um contrato assinado e não anulado que esteja no Lixo (ex. o cliente apagado por engano) já não se apaga de vez;
+    --   o c1003 é também a EC do negócio (EC-2026-0022). Sem deals.delete continua «bloqueado» (a permissão vem primeiro).
     r := pg_temp.tentar_pre(a.auth, format('UPDATE client_contracts SET deleted_at = now() WHERE id = %L', c1003),
                             format('SELECT public.purge_business_entity(''contract'', %L)::text', c1003));
-    PERFORM pg_temp.reg('C2d purge contrato assinado no Lixo (hoje)', a.conta, CASE WHEN v_tem_dd THEN 'passa' ELSE 'bloqueado' END, pg_temp.cl(r), r);
+    PERFORM pg_temp.reg('C2d purge contrato assinado (e a EC dele) no Lixo', a.conta, CASE WHEN v_tem_dd THEN 'recusado' ELSE 'bloqueado' END, pg_temp.cl_lixo(r), r);
+    IF v_tem_dd THEN
+      -- C2f. casos novos da 20270126230000 (todos simulados sobre o c1003 dentro do sub-bloco, desfeitos)
+      -- f1. EC manual / venda direta (is_manual_order) assinada no Lixo → recusada, com a mensagem da encomenda
+      r := pg_temp.tentar_pre(a.auth, format('UPDATE client_contracts SET deleted_at = now(), is_manual_order = true WHERE id = %L', c1003),
+                              format('SELECT public.purge_business_entity(''contract'', %L)::text', c1003));
+      PERFORM pg_temp.reg('C2f1 purge EC manual assinada no Lixo', a.conta, 'recusado',
+        CASE WHEN pg_temp.cl_lixo(r) = 'recusado' AND r LIKE '%encomenda (EC-2026-0022)%Restaure-a do Lixo.%' THEN 'recusado' ELSE pg_temp.cl_lixo(r) END, r);
+      -- f2. EC manual de contrato anulado (o que rpc_delete_client_order deixa no Lixo) → elimina
+      r := pg_temp.tentar_pre(a.auth, format($p$UPDATE client_contracts SET deleted_at = now(), is_manual_order = true, status = 'cancelled',
+                                cancelled_at = now() WHERE id = %L$p$, c1003),
+                              format('SELECT public.purge_business_entity(''contract'', %L)::text', c1003));
+      PERFORM pg_temp.reg('C2f2 purge EC manual anulada no Lixo', a.conta, 'passa', pg_temp.cl_lixo(r), r);
+      -- f3. contrato anulado no Lixo (a EC dele também) → elimina
+      r := pg_temp.tentar_pre(a.auth, format($p$UPDATE client_contracts SET deleted_at = now(), status = 'cancelled', cancelled_at = now() WHERE id = %L$p$, c1003),
+                              format('SELECT public.purge_business_entity(''contract'', %L)::text', c1003));
+      PERFORM pg_temp.reg('C2f3 purge contrato anulado no Lixo', a.conta, 'passa', pg_temp.cl_lixo(r), r);
+      -- f4. contrato rascunho no Lixo → elimina
+      r := pg_temp.tentar_pre(a.auth, format($p$UPDATE client_contracts SET deleted_at = now(), status = 'draft' WHERE id = %L$p$, c1003),
+                              format('SELECT public.purge_business_entity(''contract'', %L)::text', c1003));
+      PERFORM pg_temp.reg('C2f4 purge contrato rascunho no Lixo', a.conta, 'passa', pg_temp.cl_lixo(r), r);
+      -- f5. restaurar do Lixo continua: o contrato assinado e a EC manual assinada
+      r := pg_temp.tentar_pre(a.auth, format('UPDATE client_contracts SET deleted_at = now() WHERE id = %L', c1003),
+                              format('SELECT public.restore_business_entity(''contract'', %L)::text', c1003));
+      PERFORM pg_temp.reg('C2f5 restaurar contrato assinado do Lixo', a.conta, 'passa', pg_temp.cl_lixo(r), r);
+      r := pg_temp.tentar_pre(a.auth, format('UPDATE client_contracts SET deleted_at = now(), is_manual_order = true WHERE id = %L', c1003),
+                              format('SELECT public.restore_business_entity(''contract'', %L)::text', c1003));
+      PERFORM pg_temp.reg('C2f5 restaurar EC manual assinada do Lixo', a.conta, 'passa', pg_temp.cl_lixo(r), r);
+    END IF;
   END LOOP;
 
   -- C2e. o âmbito: a Rita (comercial) ganha deals.delete com âmbito OWNED (só nesta transação)
