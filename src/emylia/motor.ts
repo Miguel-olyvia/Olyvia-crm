@@ -47,6 +47,7 @@ import { isoDoDia, rotuloVaga, vagaDe, type Vaga } from "./vagaData";
 import { RESPONSAVEIS_OBRA, chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
 import { quemVaiPorOmissao } from "./equipa/membros";
 import { TECNICOS, ausenteNoRh, custoHoraDe, garantirTecnicos, perfilDoTecnico, temAusenciasRh, tecnicosIniciais, usarTecnicos, type FichaTecnico, type Tecnico } from "./equipa/tecnicos";
+import { supervisorDeMedidas } from "./supervisoresMedidas";
 import { custoObra } from "./custoObra";
 import { contaCliente, emailDaFicha, emailOk, enviarAcesso, separarContacto, lerPedidoEmail, modoReal, pedirEmailPortal, telefoneDaFicha, telefoneNormal, telefoneOk, type ContaPortal, type DocPortal, type EnvioPortal, type EstadoContaPortal } from "./acessosPortal";
 // 22/10: os custos (perfis, €/h dos técnicos, estrutura, receitas) vivem no Estado (S.custos). Só se usam dentro de funções (o
@@ -3172,14 +3173,15 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
      *  d.f.supervisor_medidas (não no «Responsável de obra») e a pessoa recebe o aviso e o passo «Medir no local» no Hoje dela. */
     supervisorMedidas(id: number, tec: string) {
       if (!exigePerm("obra.planear")) return;
-      const d = deal(id), t = TECS.find((x) => x.id === tec);
+      // 23/11 (M7): ou um supervisor/gestor de obra (quem tem negocios.obra.planear no perfil, neg_gestores_obra)
+      const d = deal(id), t = TECS.find((x) => x.id === tec) ?? supervisorDeMedidas(tec);
       if (!t) { avisar({ msg: "Escolha uma pessoa da lista", kind: "bad" }); return; }
       if (d.f.retif_aceite) { avisar({ msg: "As medidas já estão aceites", sub: "Para medir de novo, primeiro «Voltar a retificar»", kind: "bad" }); return; }
       if (d.f.supervisor_medidas === tec) return;
       d.f.supervisor_medidas = tec;
       log(d, `Medidas: ${t.n} vai medir no local`);
       if (d.obra.plano) avisarTecnico(d.obra.plano, -1, `Medir no local: ${d.nome} (${d.f.morada || d.local}). Aceite as medidas no Estúdio das medidas.`, agora(), tec);
-      avisar({ msg: `${t.n} vai medir no local`, sub: "Tem o passo «Medir no local» no Hoje dele", kind: "ok" });
+      avisar({ msg: `${t.n} vai medir no local`, sub: TECS.some((x) => x.id === tec) ? "Tem o passo «Medir no local» no Hoje dele" : "Tem o passo Medidas no negócio e aceita as medidas no Estúdio das medidas", kind: "ok" });
     },
     abrirRetificacao(id: number) { S.view = "negocio"; S.deal = id; S.op = null; },
     /** Volta a emitir a encomenda de cliente no Inventário (se não chegou lá ao validar o pagamento). */

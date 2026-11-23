@@ -9,8 +9,9 @@ import type { Ctx } from "./pecas";
 import { RetificacaoMedidas } from "./RetificacaoMedidas";
 import { HojeTecnico } from "./HojeTecnico";
 import { trabalhoDoTecnico } from "./trabalhoObra";
+import { definirSupervisoresMedidas } from "./supervisoresMedidas";
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); definirSupervisoresMedidas(null); });
 Element.prototype.scrollIntoView = function () {};
 
 const preencher = (d: { f: Record<string, string> }, gs: Grupo[]) => {
@@ -61,6 +62,37 @@ describe("6. o passo Medidas: o Estúdio das medidas é o caminho; a página é 
     const { container } = render(<RetificacaoMedidas ctx={ctxDe(S, A)} d={d} />);
     expect(container.textContent).toContain("As medidas abrem depois de o Financeiro validar o pagamento.");
     expect(screen.queryByRole("combobox")).toBeNull();
+  });
+});
+
+// 23/11/2026 (permissões, M7): quem mede/retifica é o supervisor de obra: na Olyvia, os do perfil com negocios.obra.planear (neg_gestores_obra)
+describe("6b. «Quem vai medir» também lista os supervisores e gestores de obra", () => {
+  it("primeiro os supervisores, depois os técnicos (sem repetir); escolher um supervisor grava-o e mostra-o pelo nome", () => {
+    const { S, A, d } = pago();
+    definirSupervisoresMedidas([{ id: "pessoa-sup-1", n: "Dário Supervisor" }, { id: TECS[1].id, n: TECS[1].n }]);
+    const { rerender } = render(<RetificacaoMedidas ctx={ctxDe(S, A)} d={d} />);
+    const sel = screen.getByRole("combobox", { name: /Quem vai medir/ }) as HTMLSelectElement;
+    const grupos = [...sel.querySelectorAll("optgroup")].map((g) => g.label);
+    expect(grupos).toEqual(["Supervisores e gestores de obra", "Técnicos de obra"]);
+    const valores = [...sel.options].map((o) => o.value).filter(Boolean);
+    expect(valores.slice(0, 2)).toEqual(["pessoa-sup-1", TECS[1].id]);
+    expect(valores.filter((v) => v === TECS[1].id)).toHaveLength(1);
+    expect(new Set(valores)).toEqual(new Set(["pessoa-sup-1", ...TECS.map((x) => x.id)]));
+    fireEvent.change(sel, { target: { value: "pessoa-sup-1" } });
+    expect(d.f.supervisor_medidas).toBe("pessoa-sup-1");
+    rerender(<RetificacaoMedidas ctx={ctxDe(S, A)} d={d} />);
+    expect(screen.getByText("Dário Supervisor mede no local")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /Abrir o estúdio das medidas/ })).toHaveLength(1);
+  });
+
+  it("sem a lista da base (protótipo): só os técnicos, como antes; um id fora das duas listas continua recusado", () => {
+    const { S, A, d } = pago();
+    render(<RetificacaoMedidas ctx={ctxDe(S, A)} d={d} />);
+    const sel = screen.getByRole("combobox", { name: /Quem vai medir/ }) as HTMLSelectElement;
+    expect(sel.querySelectorAll("optgroup")).toHaveLength(0);
+    expect([...sel.options].map((o) => o.value).filter(Boolean)).toEqual(TECS.map((x) => x.id));
+    A.supervisorMedidas(d.id, "pessoa-desconhecida");
+    expect(d.f.supervisor_medidas).toBeFalsy();
   });
 });
 

@@ -21,6 +21,7 @@ import { lerInventario } from "./inventario/loja";
 import { faltaMateriaisReal, prontidaoDe, textoProntidaoReal, usarProntidao } from "./inventario/prontidaoReal";
 import { faltaPorFalha, textoPorFalha } from "./real/inventarioReal";
 import { lerVersao } from "./versaoPrototipo";
+import { supervisorDeMedidas } from "./supervisoresMedidas";
 import type { Inventario } from "./inventario/tipos";
 import { assinadas, diasAdenda, faturasAdenda, nomeParcela, parcelasAdenda, primeiraPaga, type Adenda } from "./adendas";
 import { ecDaAdenda, linhasDaEc, porEncomendarDe, totaisDaEc } from "./encomendasAjuste";
@@ -148,7 +149,8 @@ export const retificacaoAceite = (d: Negocio): boolean => !!d.f.retif_aceite || 
 export const supervisorDasMedidas = (d: Pick<Negocio, "f">): { id: string; n: string } | null => {
   const id = d.f.supervisor_medidas;
   if (!id) return null;
-  return TECS.find((x) => x.id === id) ?? { id, n: "a pessoa escolhida" };
+  // 23/11 (M7): ou um supervisor/gestor de obra (supervisoresMedidas.ts, de neg_gestores_obra)
+  return TECS.find((x) => x.id === id) ?? supervisorDeMedidas(id) ?? { id, n: "a pessoa escolhida" };
 };
 /** 19/11: as medidas que esperam por esta pessoa no local (o passo «Medir no local» do Hoje dela): escolhida para medir, com o pagamento
  *  validado e as medidas por aceitar. */

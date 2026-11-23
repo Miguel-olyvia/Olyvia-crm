@@ -40,6 +40,13 @@ describe("adaptarDadosNegocio: permissões do fecho", () => {
     expect(dados(["pessoas.reopen"]).podeConverter).toBe(false);
   });
 
+  // 23/11/2026 (B1): «Perder negócio» e «Anular perda» pedem negocios.perder (o servidor recusava só com pessoas.edit)
+  it("perder só com negocios.perder; sem a lista fica por restringir", () => {
+    expect(dados(["negocios.perder"]).podePerder).toBe(true);
+    expect(dados(["proposals.edit"]).podePerder).toBe(false);
+    expect(dados().podePerder).toBeUndefined();
+  });
+
   it("uma lista vazia conta como «não tem nenhuma», diferente de «não sei»", () => {
     const d = dados([]);
     expect(d.podeReabrir).toBe(false);

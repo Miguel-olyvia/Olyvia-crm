@@ -99,6 +99,8 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
   // Sem os dados da ficha real (o exemplo) pode-se sempre agir; na ficha real, só com `pessoas.edit` (e, com a bandeira da migration B, neste negócio).
   const acoes = useAcoesDoNegocio(negocio);
   const podeEditar = useDadosNegocio() === null ? true : acoes.podeAgir;
+  // 23/11 (B1): «Perder negócio» e «Anular perda» pedem também negocios.perder (o servidor recusava sem ela)
+  const podePerder = useDadosNegocio() === null ? true : acoes.podePerder;
   // Perder, anular a perda ou ganhar troca o botão que tinha o foco: o foco passa para o título, em vez de se perder.
   // O mesmo vale para o aviso do negócio e a conversão por fazer: ao gravar, o botão e o aviso saem e o foco cairia no corpo da página.
   const situacao = `${perda !== undefined}:${negocio.estadoReal ?? ""}:${negocio.alerta?.codigo ?? (negocio.alerta ? "?" : "")}:${negocio.conversaoPendente === true}`;
@@ -130,7 +132,7 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
   const faixaNegocio = comGuia ? (
     <div className="space-y-2 empty:hidden">
       {cabecalhoFicha?.faixa}
-      {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} podeAnular={podeEditar} />}
+      {perda && <PerdaDoNegocio negocio={negocio} fase={perda.fase} motivo={perda.motivo} podeAnular={podePerder} />}
       <AlertasNegocio negocio={negocio} semFecharAgora />
     </div>
   ) : undefined;
@@ -182,7 +184,7 @@ export function DetalheNegocioFicha({ negocio: negocioDaFicha, hoje, aoVoltar, i
             <GuiaDoNegocio
               negocio={negocio} hoje={hoje} item={item} fases={fases} podeEditar={podeEditar} pessoa={pessoa} atividade={atividade}
               cabecalhoFicha={cabecalhoFicha} faixa={faixaNegocio} tituloRef={titulo} semPasso={!comPasso} aoRegistarChamada={aoRegistarChamada}
-              acaoPerder={comPasso && podeEditar ? <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" rotuloChave="pessoasPagina.guia.perder" /> : undefined}
+              acaoPerder={comPasso && podePerder ? <BotaoPerderNegocio negocio={negocio} hoje={hoje} className="self-start" rotuloChave="pessoasPagina.guia.perder" /> : undefined}
               rodape={rodapeDoGuia}
             />
           </>

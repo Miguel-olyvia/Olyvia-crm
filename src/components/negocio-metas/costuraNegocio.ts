@@ -63,7 +63,7 @@ export interface DadosNegocio {
   /** Os detalhes (orçamentos, proposta e contrato) de um negócio, lidos dos documentos da ficha; `null` sem eles. */
   detalhe: (negocioId: string) => DetalheNegocio | null;
   momentoGanho: MomentoGanhoCostura | null;
-  /** `pessoas.edit`: ligar, desligar, perder, anular a perda e ganhar. */
+  /** `pessoas.edit`: ligar, desligar, perder, anular a perda e ganhar (perder e anular a perda pedem também `podePerder`). */
   podeEditar: boolean;
   /** `pessoas.create`: criar um negócio. */
   podeCriar: boolean;
@@ -88,6 +88,11 @@ export interface DadosNegocio {
   podeReabrir?: boolean;
   /** `leads.convert` (com âmbito): «Converter em cliente». Ausente conta como permitido; `false` esconde o botão (a base decide: NG007). */
   podeConverter?: boolean;
+  /**
+   * 23/11 (B1): `negocios.perder` (fn_cat_pode): «Perder negócio» e «Anular perda» (neg_perder_negocio / neg_anular_perda exigem-na).
+   * Ausente (exemplo, testes antigos, ou as permissões ainda por ler) conta como permitido; `false` esconde os dois botões.
+   */
+  podePerder?: boolean;
   /**
    * Os nomes dos comerciais REAIS da organização (a lista da página de Leads), para o «Feito por» das visitas. Ausente: ainda por ler (ou falhou), e a
    * lista fica vazia. Só a ficha real os traz; no exemplo (sem `DadosNegocio`) o «Feito por» usa os comerciais de exemplo.

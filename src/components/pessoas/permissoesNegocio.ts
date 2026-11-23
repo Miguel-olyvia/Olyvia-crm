@@ -23,6 +23,8 @@ export interface AcoesDoNegocio {
   fechado: boolean;
   /** Pode mexer neste negócio (perder, anular a perda, reabrir): permissão de edição, com o âmbito deste negócio quando a ficha o diz. */
   podeAgir: boolean;
+  /** 23/11 (B1): «Perder negócio» e «Anular perda»: pode agir e tem negocios.perder (`DadosNegocio.podePerder`, ausente = sim). */
+  podePerder: boolean;
   /** Pode editar o título, as notas, o comercial e as condições, e criar documentos: pode agir e o negócio está aberto. */
   podeEditar: boolean;
   podeApagar: boolean;
@@ -38,12 +40,12 @@ export function acoesDoNegocio(
   dados: DadosNegocio | null, negocio: NegocioMes, { perda, porNegocio }: { perda: unknown; porNegocio: boolean },
 ): AcoesDoNegocio {
   const fechado = negocioFechado(negocio, perda);
-  if (!dados) return { fechado, podeAgir: false, podeEditar: false, podeApagar: false, podeRestaurar: false };
+  if (!dados) return { fechado, podeAgir: false, podePerder: false, podeEditar: false, podeApagar: false, podeRestaurar: false };
   const campo = permissoesDoCampo(dados, negocio.id, porNegocio);
   const podeAgir = dados.podeEditar === true && campo.editar !== false;
   const podeNoLixo = podeAgir && dados.podeApagar === true;
   return {
-    fechado, podeAgir, podeEditar: podeAgir && !fechado,
+    fechado, podeAgir, podePerder: podeAgir && dados.podePerder !== false, podeEditar: podeAgir && !fechado,
     podeApagar: podeNoLixo && campo.apagar !== false, podeRestaurar: podeNoLixo && campo.restaurar !== false,
   };
 }

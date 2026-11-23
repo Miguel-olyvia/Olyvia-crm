@@ -259,15 +259,36 @@ const handler = async (req: Request): Promise<Response> => {
           }
         );
       } else {
-        // Rejeitar a proposta atomicamente (com cascata condicional a deal/lead)
+        // Rejeitar a proposta atomicamente (com cascata condicional a deal/lead).
+        // 23/11 (C5, 20270126100000): autorizado pelo codigo verificado acima, mas a RPC so aceita o token da propria proposta (com
+        // token nulo exigia auth.uid(), que com a chave de servico e nulo: a recusa com OTP falhava em silencio e o ecra dizia
+        // «Proposta recusada»). Le-se o token aqui, no servidor, e um erro da RPC ja nao passa por sucesso.
+        const { data: proposalTok, error: tokError } = await supabaseClient
+          .from("proposals")
+          .select("public_token")
+          .eq("id", proposal_id)
+          .maybeSingle();
+        if (tokError || !proposalTok?.public_token) {
+          console.error("[send-verification-code] proposal token not found:", tokError);
+          return new Response(
+            JSON.stringify({ error: "Não foi possível registar a recusa" }),
+            { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+          );
+        }
         const { error: rpcError } = await supabaseClient.rpc("reject_proposal_atomic", {
           p_proposal_id:           proposal_id,
-          p_public_token:          null, // autorizado por verificacao de codigo acima
+          p_public_token:          proposalTok.public_token,
           p_rejection_reason_code: verificationData.rejection_reason_code || null,
           p_rejection_reason:      verificationData.rejection_reason || null,
           p_rejection_notes:       verificationData.rejection_notes || null,
         });
-        if (rpcError) console.error("[send-verification-code] reject_proposal_atomic error:", rpcError);
+        if (rpcError) {
+          console.error("[send-verification-code] reject_proposal_atomic error:", rpcError);
+          return new Response(
+            JSON.stringify({ error: "Não foi possível registar a recusa" }),
+            { status: 400, headers: { "Content-Type": "application/json", ...corsHeaders } }
+          );
+        }
 
         return new Response(
           JSON.stringify({ success: true, message: "Proposta recusada", action: "reject" }),

@@ -143,6 +143,8 @@ function permissoesDoFecho(ficha: FichaDb, permissoes: readonly string[] | undef
     podeNoDocumento: (tipo, acao) => ficha.permissoes.editar === true && tem.has(`${PREFIXO_DOCUMENTO[tipo]}.${acao}`),
     podeReabrir: tem.has("pessoas.reopen"),
     podeConverter: tem.has("leads.convert"),
+    // 23/11 (B1): «Perder negócio» e «Anular perda» pedem negocios.perder no servidor (usePermissoesDoFechoNoNegocio, fn_cat_pode)
+    podePerder: tem.has("negocios.perder"),
   };
 }
 
