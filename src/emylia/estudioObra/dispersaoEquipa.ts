@@ -47,9 +47,11 @@ export function dispersaoDaEquipa(p: Plano, ocup: Map<string, Set<string>>): Dis
     }
     if (!feita) break;
   }
-  if (!passagens.length) return null;
+  const depois = new Set(atual.filter(Boolean)).size, idasAntes = deslocacoes(p, (ti) => tec[ti]), idasDepois = deslocacoes(p, (ti) => atual[ti]);
+  // só se sugere o que ganha alguma coisa (menos pessoas ou menos idas à obra); sem isso, fica o aviso sem passagens
+  const ganha = depois < pessoas || idasDepois < idasAntes;
   return {
-    pessoas, tarefas: p.tasks.length, dias, passagens, depois: new Set(atual.filter(Boolean)).size,
-    deslocacoesAntes: deslocacoes(p, (ti) => tec[ti]), deslocacoesDepois: deslocacoes(p, (ti) => atual[ti]),
+    pessoas, tarefas: p.tasks.length, dias, passagens: ganha ? passagens : [], depois: ganha ? depois : pessoas,
+    deslocacoesAntes: idasAntes, deslocacoesDepois: ganha ? idasDepois : idasAntes,
   };
 }

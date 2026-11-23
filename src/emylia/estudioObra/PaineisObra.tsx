@@ -487,9 +487,10 @@ export function DispersaoDaEquipa({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <Users className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" aria-hidden="true" />
         <div className="min-w-0">
           <p className="text-sm font-semibold">{D.pessoas} pessoas para {D.tarefas} tarefas em {D.dias} dias úteis</p>
-          <p className="text-sm text-muted-foreground">Numa obra pequena, cada pessoa a mais é mais uma deslocação e mais uma passagem de mão. Juntando tarefas em quem já cá está (do ofício e livre nesses dias):</p>
+          <p className="text-sm text-muted-foreground">Numa obra pequena, cada pessoa a mais é mais uma deslocação e mais uma passagem de mão.{D.passagens.length ? " Juntando tarefas em quem já cá está (do ofício e livre nesses dias):" : " Não há como juntar sem mudar datas: quem é do mesmo ofício não está livre nesses dias, ou cada tarefa pede um ofício diferente. Para juntar, mude o dia de uma tarefa no plano ou escolha outra pessoa na agenda."}</p>
         </div>
       </div>
+      {D.passagens.length > 0 && <>
       <dl className="grid grid-cols-3 gap-2 text-center">
         {([["Pessoas", D.pessoas, D.depois], ["Idas à obra", D.deslocacoesAntes, D.deslocacoesDepois], ["Fim e horas", "=", "="]] as [string, number | string, number | string][]).map(([l, a, b]) => (
           <div key={l} className="rounded-xl bg-card p-2 ring-1 ring-border">
@@ -511,6 +512,7 @@ export function DispersaoDaEquipa({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           <Check className="mr-1.5 h-4 w-4" aria-hidden="true" />{feito ? "Aplicado" : `Juntar: ${D.passagens.length} ${D.passagens.length === 1 ? "passagem" : "passagens"}`}
         </Button>
       )}
+      </>}
     </section>
   );
 }
