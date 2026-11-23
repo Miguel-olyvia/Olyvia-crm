@@ -636,7 +636,18 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
 }) {
   const vivo = p.estado === "em curso";
   // 23/11 (Rúben: «não se percebe que serviço é»): na vista por técnico os dias são mais largos e as barras mais altas, com o nome curto
-  const COL = vista === "tecnicos" ? COL_TEC : COL_GANTT, ALTO = vista === "tecnicos" ? 36 : 28, FAIXA = ALTO + 10;
+  // 23/11 (revisão: «zoom Dia/Semana»): na vista Gantt, os dias largos (Dia) ou estreitos (Semana, para ver a obra toda)
+  const [zoom, setZoom] = useState<"dia" | "semana">("dia");
+  const COL = vista === "tecnicos" ? COL_TEC : zoom === "semana" ? 16 : COL_GANTT, ALTO = vista === "tecnicos" ? 36 : 28, FAIXA = ALTO + 10;
+  // os saltos do calendário entre dois dias de trabalho: o fim de semana e os feriados (o plano já os salta)
+  const saltos = dias.map((x, k) => {
+    if (k === 0) return null;
+    const a = dias[k - 1], n = Math.round((x.getTime() - a.getTime()) / 864e5);
+    if (n <= 1) return null;
+    const meio = Array.from({ length: n - 1 }, (_, j) => new Date(a.getFullYear(), a.getMonth(), a.getDate() + j + 1));
+    const feriados = meio.filter((y) => y.getDay() !== 0 && y.getDay() !== 6);
+    return { k, feriado: feriados.length > 0, texto: feriados.length ? `Feriado: ${feriados.map((y) => `${y.getDate()} ${MES[y.getMonth()]}`).join(", ")}` : "Fim de semana" };
+  });
   const [arrasto, setArrasto] = useState<Arrasto | null>(null);
   const toque = useRef<{ x: number; y: number; ti: number; tipo: "mover" | "durar" } | null>(null);
   const [sob, setSob] = useState<{ k: number; tec: string | null } | null>(null);
@@ -689,15 +700,20 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   };
   const fundo = () => (
     <>
-      {dias.map((x, k) => x.getDay() === 1 && k > 0 && <div key={"s" + k} aria-hidden="true" className="absolute inset-y-0 border-l-2 border-l-foreground/10" style={{ left: k * COL }} />)}
+      {saltos.map((x) => x && <div key={"s" + x.k} aria-hidden="true" title={x.texto} className={cn("absolute inset-y-0 w-1.5 -translate-x-1/2", x.feriado ? "bg-[repeating-linear-gradient(135deg,rgb(245_158_11/0.45)_0_3px,transparent_3px_6px)]" : "bg-[repeating-linear-gradient(135deg,hsl(var(--foreground)/0.14)_0_3px,transparent_3px_6px)]")} style={{ left: x.k * COL }} />)}
       {vivo && <div aria-hidden="true" className="absolute inset-y-0 bg-primary/[0.07]" style={{ left: p.dia * COL, width: COL }} />}
+      {/* 23/11: a linha de hoje atravessa o gráfico */}
+      {vivo && <div aria-hidden="true" className="absolute inset-y-0 z-[1] w-0.5 -translate-x-1/2 bg-primary/70" style={{ left: p.dia * COL + COL / 2 }} />}
     </>
   );
   const barra = (ti: number, top: number) => {
     const t = p.tasks[ti], n = R ? R.plano.tasks[ti] : t, v = estadoVivo(t, p), b = p.base?.[ti];
     const atraso = diasDeAtraso(t, p), a = arrasto?.ti === ti ? arrasto : null;
     // 23/11 (revisão: «P…», «T…»): na vista Gantt, o nome vai à direita da barra quando não cabe nela
-    const cabe = vista !== "gantt" || nomeCurtoTarefa(t.nome).length * 6.4 + 26 <= n.dur * COL - 4;
+    const comIcone = critico.has(ti) || ["validada", "feita", "parada", "pausada", "atrasada", "corrigir"].includes(v);
+    const cabe = vista !== "gantt" || nomeCurtoTarefa(t.nome).length * 6.9 + 18 + (comIcone ? 18 : 0) <= n.dur * COL - 4;
+    // o nome à direita fica depois do atraso desenhado (+N), quando há
+    const fimVisto = n.dia + n.dur + (!R && atraso > 0 ? atraso : 0);
     return (
       <Fragment key={ti}>
         {b && (b.dia !== t.dia || b.dur !== t.dur) && <div aria-hidden="true" title="Previsto no orçamento" className="absolute h-[3px] rounded-full bg-foreground/30" style={{ left: b.dia * COL + 4, width: Math.max(8, b.dur * COL - 8), top: top + ALTO + 3 }} />}
@@ -706,7 +722,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
           <div aria-hidden="true" className="absolute flex items-center justify-end rounded-r-lg bg-[repeating-linear-gradient(135deg,hsl(var(--destructive)/0.35)_0_5px,hsl(var(--destructive)/0.15)_5px_10px)] pr-1 text-[11px] font-bold text-destructive"
             style={{ left: (t.dia + t.dur) * COL - 2, width: atraso * COL, top, height: ALTO }}>+{atraso}</div>
         )}
-        {!cabe && <span aria-hidden="true" className="pointer-events-none absolute z-[2] whitespace-nowrap text-xs font-medium text-foreground/80" style={{ left: (n.dia + n.dur) * COL + (ligar && !R ? 22 : 6), top: top + ALTO / 2 - 8 }}>{nomeCurtoTarefa(t.nome)}</span>}
+        {!cabe && <span aria-hidden="true" className="pointer-events-none absolute z-[2] whitespace-nowrap text-xs font-medium text-foreground/80" style={{ left: fimVisto * COL + (ligar && !R ? 22 : 6), top: top + ALTO / 2 - 8 }}>{nomeCurtoTarefa(t.nome)}</span>}
         <Barra semTexto={!cabe} t={t} n={n} v={v} p={p} sel={sel === ti || aLigar?.alvo === ti} mudou={mudou(ti)} abrir={() => { if (Date.now() - largouEm.current > 350) abrir(ti); }} reduzir={reduzir} top={top} critica={critico.has(ti)} col={COL} alto={ALTO} largo={vista === "tecnicos"}
           arrasto={a} mexe={!R && podeMexer(ti)} pegar={(e, tipo) => pegar(e, ti, tipo)} />
         {/* 23/11: o pegador para ligar (aparece ao passar o rato na linha, ou com a tarefa escolhida) */}
@@ -786,11 +802,20 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
               </button>
             ))}
           </div>
+          {vista === "gantt" && (
+            <div role="group" aria-label="Zoom" className="inline-flex rounded-full border border-input p-0.5 text-sm">
+              {([["dia", "Dia"], ["semana", "Semana"]] as const).map(([k, l]) => (
+                <button key={k} type="button" aria-pressed={zoom === k} onClick={() => setZoom(k)} className={cn("min-h-9 rounded-full px-3 font-medium transition-colors", zoom === k ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}>{l}</button>
+              ))}
+            </div>
+          )}
         </div>
         <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="Legenda">
           {legenda.map(([t, c]) => <li key={t} className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-4 rounded-sm" style={{ background: c }} />{t}</li>)}
           <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-[3px] w-4 rounded-full bg-foreground/30" />Previsto no orçamento</li>
           <li className="flex items-center gap-1.5"><Route className="h-3.5 w-3.5 text-primary" aria-hidden="true" />Caminho crítico (sem folga)</li>
+          <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-3 w-0.5 rounded-full bg-primary/70" />Hoje</li>
+          <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-3 w-1.5 bg-[repeating-linear-gradient(135deg,rgb(245_158_11/0.6)_0_2px,transparent_2px_4px)]" />Feriado</li>
           {vista === "gantt" && <li className="flex items-center gap-1.5"><svg aria-hidden="true" width="18" height="8"><path d="M0,4 H14" stroke="currentColor" strokeWidth="1.5" /><path d="M12,1 L17,4 L12,7 z" fill="currentColor" /></svg>Ligação (tracejada: pelas datas)</li>}
         </ul>
       </div>
@@ -806,10 +831,16 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
               const im = imprevistos.filter((i) => i.dia === k);
               const hoje = vivo && k === p.dia;
               return (
-                <div key={k} className={cn("relative shrink-0 py-1.5 text-center text-xs tabular-nums", x.getDay() === 1 && k > 0 && "border-l-2 border-l-foreground/15", hoje && "bg-primary/10")} style={{ width: COL }}>
+                <div key={k} className={cn("relative shrink-0 py-1.5 text-center text-xs tabular-nums", x.getDay() === 1 && k > 0 && "border-l-2 border-l-foreground/15", hoje && "bg-primary/10")} style={{ width: COL }}
+                  title={saltos[k]?.feriado ? `${saltos[k]!.texto} (antes deste dia)` : undefined}>
+                  {zoom === "semana" && vista === "gantt" ? (
+                    (x.getDay() === 1 || k === 0) ? <span className="absolute left-0.5 top-1.5 whitespace-nowrap text-[11px] font-medium text-muted-foreground">{x.getDate()} {MES[x.getMonth()]}</span> : null
+                  ) : <>
                   <span className="block text-muted-foreground">{k === 0 || x.getDate() === 1 ? MES[x.getMonth()] : SEM[x.getDay()]}</span>
                   <span className={cn("block font-medium", hoje && "text-primary")}>{x.getDate()}</span>
-                  {hoje && <span className="block text-[10px] font-semibold uppercase text-primary">hoje</span>}
+                  </>}
+                  {saltos[k]?.feriado && <span aria-hidden="true" className="absolute -left-1 top-0.5 h-1.5 w-1.5 rounded-full bg-amber-500" />}
+                  {hoje && !(zoom === "semana" && vista === "gantt") && <span className="block text-[10px] font-semibold uppercase text-primary">hoje</span>}
                   {im.length > 0 && <span title={im.map((i) => `Imprevisto: ${i.texto}`).join("\n")} aria-label={`Imprevisto neste dia: ${im.map((i) => i.texto).join(", ")}`} className="absolute right-0.5 top-0.5 grid h-4 w-4 place-items-center rounded-full bg-destructive text-[10px] font-bold text-white">!</span>}
                 </div>
               );
