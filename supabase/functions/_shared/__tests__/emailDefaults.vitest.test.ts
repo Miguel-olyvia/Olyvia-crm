@@ -318,12 +318,27 @@ describe('SMS por omissão', () => {
     }
   });
 
-  it('confirmação em inglês', () => {
+  it('confirmação em português: diz confirmada, sem «aguarde» nem «ficou marcada»', () => {
+    expect(defaultConfirmationSms('pt', { companyName: 'Acme', withCancelLink: false })).toBe(
+      'Acme: a sua visita está confirmada para {{meeting_date}}.',
+    );
+    expect(defaultConfirmationSms('pt', { companyName: '', withCancelLink: true })).toBe(
+      'A empresa: a sua visita está confirmada para {{meeting_date}}. Gerir/cancelar: {{cancel_url}}',
+    );
+  });
+
+  it('confirmação em inglês: diz confirmed, sem «please wait»', () => {
     expect(defaultConfirmationSms('en', { companyName: 'Acme', withCancelLink: false })).toBe(
-      'Acme: your visit has been scheduled for {{meeting_date}}. Please wait for our phone call to confirm the visit.',
+      'Acme: your visit is confirmed for {{meeting_date}}.',
     );
     expect(defaultConfirmationSms('en', { companyName: '', withCancelLink: true })).toBe(
-      'The company: your visit has been scheduled for {{meeting_date}}. Please wait for our phone call to confirm the visit. Manage/cancel: {{cancel_url}}',
+      'The company: your visit is confirmed for {{meeting_date}}. Manage/cancel: {{cancel_url}}',
+    );
+  });
+
+  it('o lembrete e o resto do vocabulário de SMS não mudam com a confirmação', () => {
+    expect(reminderSmsText('pt', { companyName: 'Acme', rescheduled: true, withConfirmLink: true, withManageLink: true })).toBe(
+      'Acme: lembrete da sua visita reagendada para {{meeting_date}}. Confirme: {{confirm_url}} Gerir: {{cancel_url}}',
     );
   });
 });

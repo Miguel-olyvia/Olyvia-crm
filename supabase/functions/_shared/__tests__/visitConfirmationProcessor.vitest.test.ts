@@ -138,6 +138,29 @@ describe('processClaimedRows: a empresa confirmou, sai a confirmacao', () => {
     expect(String(remArgs.confirmUrl)).toContain('/booking/confirm?token=');
   });
 
+  it('SMS sem mensagem configurada: texto por omissao de confirmacao, sem «aguarde»', async () => {
+    const t = setup(seed());
+    await processClaimedRows([claimed('sms')], t.deps);
+    const message = String((t.sendSms.mock.calls[0][0] as { message: string }).message);
+    expect(message).toBe('Acme: a sua visita está confirmada para segunda-feira, 30 de novembro às 10:00.');
+    expect(message.toLowerCase()).not.toMatch(/aguarde|ficou marcada/);
+    expect(t.tables.sms_logs[0].message).toBe(message);
+  });
+
+  it('SMS com link de cancelamento ligado: confirmada + Gerir/cancelar', async () => {
+    const t = setup(seed({ branding: { confirmation_sms_include_link: true } }));
+    await processClaimedRows([claimed('sms')], t.deps);
+    const message = String((t.sendSms.mock.calls[0][0] as { message: string }).message);
+    expect(message).toMatch(/^Acme: a sua visita está confirmada para segunda-feira, 30 de novembro às 10:00\. Gerir\/cancelar: https:\/\/app\.test\//);
+    expect(message.toLowerCase()).not.toMatch(/aguarde|ficou marcada/);
+  });
+
+  it('SMS com mensagem configurada no formulario: essa manda', async () => {
+    const t = setup(seed({ branding: { confirmation_sms_message: 'Ola {{lead_name}}, visita {{meeting_date}}' } }));
+    await processClaimedRows([claimed('sms')], t.deps);
+    expect((t.sendSms.mock.calls[0][0] as { message: string }).message).toBe('Ola Rita Sousa, visita segunda-feira, 30 de novembro às 10:00');
+  });
+
   it('o link de gerir usa um token de cancelar valido (cria-o se nao existir)', async () => {
     const t = setup(seed());
     await processClaimedRows([claimed('email')], t.deps);

@@ -10,8 +10,8 @@
 import { normalizeLocaleCode } from "@/lib/formEmailLocales";
 
 export const SMS_BASE_MESSAGE = {
-  pt: "{{company_name}}: a sua visita ficou marcada para {{meeting_date}}. Aguarde o nosso contacto telefónico para confirmação da visita.",
-  en: "{{company_name}}: your visit has been scheduled for {{meeting_date}}. Please wait for our phone call to confirm the visit.",
+  pt: "{{company_name}}: a sua visita está confirmada para {{meeting_date}}.",
+  en: "{{company_name}}: your visit is confirmed for {{meeting_date}}.",
 } as const;
 
 export function smsBaseMessageFor(locale: string | null | undefined): string {

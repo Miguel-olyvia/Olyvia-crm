@@ -184,6 +184,64 @@ describe('buildConfirmationSmsText (extraido do book-slot, igual ao de hoje)', (
   });
 });
 
+describe('buildConfirmationSmsText: o texto por omissao e sempre o de confirmacao (book-slot e processador iguais)', () => {
+  const base = {
+    formSettings: null,
+    formDefaultLocale: 'pt',
+    companyName: 'Acme',
+    cancelLink: 'https://g/x',
+    baseVars: { lead_name: 'Rita', cancel_url: 'https://g/x' },
+    startIso: '2026-12-02T09:00:00Z',
+  };
+  const PT = 'Acme: a sua visita está confirmada para quarta-feira, 2 de dezembro às 09:00.';
+  const withLink = cfg({ confirmation_sms_include_link: true });
+
+  it('pt: diz confirmada, com e sem link, sem «aguarde» nem «ficou marcada»', () => {
+    const semLink = buildConfirmationSmsText({ ...base, emailCfg: cfg(), leadLocale: 'pt' });
+    const comLink = buildConfirmationSmsText({ ...base, emailCfg: withLink, leadLocale: 'pt' });
+    expect(semLink).toBe(PT);
+    expect(comLink).toBe(`${PT} Gerir/cancelar: https://g/x`);
+    for (const t of [semLink, comLink]) expect(t.toLowerCase()).not.toMatch(/aguarde|ficou marcada/);
+  });
+
+  it('en: diz confirmed, com e sem link, sem «please wait»', () => {
+    const semLink = buildConfirmationSmsText({ ...base, emailCfg: cfg(), leadLocale: 'en' });
+    const comLink = buildConfirmationSmsText({ ...base, emailCfg: withLink, leadLocale: 'en-GB' });
+    expect(semLink).toBe('Acme: your visit is confirmed for Wednesday, 2 December at 09:00.');
+    expect(comLink).toBe('Acme: your visit is confirmed for Wednesday, 2 December at 09:00. Manage/cancel: https://g/x');
+    for (const t of [semLink, comLink]) expect(t.toLowerCase()).not.toMatch(/please wait|has been scheduled/);
+  });
+
+  it('es, fr e de seguem o portugues (so existem pt e en), nunca o texto de «aguarde»', () => {
+    for (const l of ['es', 'fr', 'de']) {
+      expect(buildConfirmationSmsText({ ...base, emailCfg: cfg(), leadLocale: l })).toBe(PT);
+    }
+  });
+
+  it('sem link de cancelamento disponivel nao o escreve, mesmo com a opcao ligada', () => {
+    expect(buildConfirmationSmsText({ ...base, cancelLink: '', emailCfg: withLink, leadLocale: 'pt' })).toBe(PT);
+  });
+
+  it('mensagem configurada na coluna continua a mandar', () => {
+    const t = buildConfirmationSmsText({
+      ...base,
+      emailCfg: cfg({ confirmation_sms_message: 'Ola {{lead_name}}, ate {{meeting_date}}' }),
+      leadLocale: 'pt',
+    });
+    expect(t).toBe('Ola Rita, ate quarta-feira, 2 de dezembro às 09:00');
+  });
+
+  it('mensagem por idioma (forms.settings) manda sobre a coluna e sobre o texto por omissao', () => {
+    const t = buildConfirmationSmsText({
+      ...base,
+      formSettings: { i18n: { content: { branding: { en: { confirmation_sms_message: 'Hi {{lead_name}}' } } } } },
+      emailCfg: cfg({ confirmation_sms_message: 'COLUNA' }),
+      leadLocale: 'en',
+    });
+    expect(t).toBe('Hi Rita');
+  });
+});
+
 describe('buildConfirmationEmailContent', () => {
   it('sem modelo: texto por omissao com o local e o link de gerir', async () => {
     const mail = await buildConfirmationEmailContent({

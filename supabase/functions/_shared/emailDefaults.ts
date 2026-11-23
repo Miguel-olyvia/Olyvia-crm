@@ -213,7 +213,7 @@ export const MAIL_TEXTS: Record<MailLang, MailTexts> = {
     },
     sms: {
       companyFallback: "A empresa",
-      confirmationBody: "a sua visita ficou marcada para {{meeting_date}}. Aguarde o nosso contacto telefónico para confirmação da visita.",
+      confirmationBody: "a sua visita está confirmada para {{meeting_date}}.",
       manageCancel: "Gerir/cancelar: {{cancel_url}}",
       reminderHead: "lembrete da sua visita",
       reminderHeadRescheduled: "lembrete da sua visita reagendada",
@@ -343,7 +343,7 @@ export const MAIL_TEXTS: Record<MailLang, MailTexts> = {
     },
     sms: {
       companyFallback: "The company",
-      confirmationBody: "your visit has been scheduled for {{meeting_date}}. Please wait for our phone call to confirm the visit.",
+      confirmationBody: "your visit is confirmed for {{meeting_date}}.",
       manageCancel: "Manage/cancel: {{cancel_url}}",
       reminderHead: "reminder of your visit",
       reminderHeadRescheduled: "reminder of your rescheduled visit",
@@ -440,7 +440,9 @@ export function formatVisitDate(iso: string, lang: unknown, includeYear: boolean
 }
 
 /**
- * SMS de confirmacao por omissao (quando o formulario nao tem mensagem para o idioma).
+ * SMS de confirmacao por omissao (quando o formulario nao tem mensagem para o idioma). Diz sempre que a
+ * visita esta CONFIRMADA, tanto no modo «ao marcar» (book-slot) como em «ao confirmar na Agenda»: o que muda
+ * entre os modos e QUANDO a mensagem sai, nunca o que diz.
  * `withCancelLink`: a mensagem leva o link de gerir/cancelar ({{cancel_url}}).
  */
 export function defaultConfirmationSms(
