@@ -407,7 +407,7 @@ export function EstudioObra({ ctx, d, fechar, endereco = true, voltar = "Voltar 
               )}
                   </>}
                   {aba === "execucao" && <Execucao ctx={ctx} d={d} dias={dias} abrir={(ti) => setPainel({ k: "tarefa", ti })} />}
-                  {aba === "diario" && <DiarioObra d={d} ir={ir} />}
+                  {aba === "diario" && <DiarioObra d={d} ir={ir} dias={dias} />}
                   {aba === "materiais" && <MateriaisDaObra ctx={ctx} d={d} dias={dias} />}
                   {aba === "equipa" && <AgendaEquipa ctx={ctx} d={d} dias={dias} ir={ir} />}
                   {aba === "equipa" && <EquipaDaObra ctx={ctx} d={d} dias={dias} abrirOutra={setOutra} abrir={(ti) => setPainel({ k: "tarefa", ti })} novaPara={(tec) => setPainel({ k: "nova", inicial: { tec, dia: vivo ? p.dia : undefined } })} />}

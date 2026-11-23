@@ -7,6 +7,7 @@ import type { Ctx } from "../pecas";
 import { EstudioObra } from "./EstudioObra";
 import { obraDeExemplo } from "./exemploObra";
 import { obraEm3DNoDia, tarefaDaPeca } from "./obra3d";
+import { diasComRegistos, resumoDoDia } from "./resumoDoDia";
 import { definirEncomendasReais, resumoDaBase, type LinhaDocEc } from "../real/encomendaReal";
 
 afterEach(() => { cleanup(); definirEncomendasReais(null); });
@@ -122,5 +123,26 @@ describe("5. o 3D pelo tempo", () => {
     if (!r.cena.ok) throw new Error("devia abrir");
     const comTarefa = r.cena.espaco.pecas.map((x) => tarefaDaPeca(d, x.id)).filter((x) => x != null);
     expect(comTarefa.length).toBeGreaterThan(0);
+  });
+});
+
+describe("6. o diário automático", () => {
+  it("o resumo do dia a partir dos registos: quem fez o quê, as horas, as notas e as fotografias", () => {
+    const { d } = obraDeExemplo();
+    const p = d.obra.plano!;
+    const L = diasComRegistos(p);
+    expect(L.length).toBeGreaterThan(0);
+    const R = resumoDoDia(p, 1)!;
+    expect(R.frase).toMatch(/h registadas/);
+    expect(R.linhas.some((x) => /Canalização/.test(x.t) && /feita/.test(x.t))).toBe(true);
+    expect(R.linhas.some((x) => x.nota === "Ensaio de pressão feito, 30 min sem perdas")).toBe(true);
+    expect(resumoDoDia(p, 40)).toBeNull();
+  });
+  it("no separador Diário: o resumo e as plantas antes e depois", () => {
+    montarObra();
+    fireEvent.click(screen.getByRole("tab", { name: /Diário/ }));
+    expect(screen.getByRole("region", { name: "O resumo do dia" }).textContent).toMatch(/h registadas/);
+    const pl = screen.getByRole("region", { name: "As plantas antes e depois" });
+    expect(within(pl).getAllByRole("img").length).toBe(2);
   });
 });

@@ -29,6 +29,10 @@ import { Contagem, MOLA, useReduzir } from "../movimento";
 import { podeNeg, podeVerCustos } from "../permissoes";
 import { derrapagem, estadoVivo, nomeCurtoTarefa, rotuloVivo } from "./planoVivo";
 import { CaminhoCritico, ICONE_DA_FASE } from "./CaminhoCritico";
+import { diasComRegistos, resumoDoDia } from "./resumoDoDia";
+import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
+import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
+import { sairam } from "@/pages/prototipo-estudio/necessidadesEstudio";
 import { lerInventario, useInventario } from "../inventario/loja";
 import { resumoEcNegocio } from "../inventario/ponteNegocios";
 import { antesEDepois, caminhoCritico, diarioDaObra, fotografiasDaObra, hojeNaObra, margemAoVivo, pontoDaSemana, previsao, type MargemViva, type Previsao } from "./previsaoObra";
@@ -538,12 +542,52 @@ export function AgendaEquipa({ ctx, d, dias, ir }: { ctx: Ctx; d: Negocio; dias:
 }
 
 /* ================================================================== o diário */
-export function DiarioObra({ d, ir }: { d: Negocio; ir: Ir }) {
+/** 23/11 (Rúben: «mega next-level»): o resumo do dia, montado dos registos dos técnicos (resumoDoDia.ts), com a escolha do dia. */
+function ResumoDoDia({ d, dias }: { d: Negocio; dias: Date[] }) {
+  const p = d.obra.plano!, quando = quandoDe(dias);
+  const L = useMemo(() => diasComRegistos(p), [p, p.tasks]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [k, setK] = useState<number | null>(null);
+  const dia = k ?? L[0] ?? null, R = dia != null ? resumoDoDia(p, dia) : null;
+  return (
+    <section aria-label="O resumo do dia" className="space-y-3 rounded-3xl border border-primary/30 bg-primary/[0.03] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-sm font-semibold"><Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />O resumo do dia</p>
+        {L.length > 1 && (
+          <div role="group" aria-label="O dia" className="flex flex-wrap gap-1">
+            {L.slice(0, 6).map((x) => <button key={x} type="button" aria-pressed={x === dia} onClick={() => setK(x)} className={cn("min-h-9 rounded-full border px-3 text-xs", x === dia ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-foreground/40")}>{quando(x)}</button>)}
+          </div>
+        )}
+      </div>
+      {!R ? <p className="text-sm text-muted-foreground">O resumo aparece no fim do primeiro dia de trabalho: as horas, as notas e as fotografias que os técnicos registam no Hoje.</p> : (
+        <>
+          <p className="text-[15px]"><b className="font-semibold">{quando(R.dia)}.</b> {R.frase}</p>
+          <ul className="space-y-2">
+            {R.linhas.map((x, j) => (
+              <li key={j} className="flex gap-2.5 text-sm">
+                <AvatarTec id={TECS.find((t) => t.n === x.quem)?.id ?? null} tam="h-7 w-7" />
+                <span className="min-w-0 flex-1">
+                  <span className="block">{x.t}</span>
+                  {x.nota && <span className="block text-muted-foreground">«{x.nota}»</span>}
+                  {x.fotos.length > 0 && <span className="mt-1 block"><Miniaturas fotos={x.fotos} tam="h-12 w-16" /></span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+
+export function DiarioObra({ d, ir, dias = [] }: { d: Negocio; ir: Ir; dias?: Date[] }) {
   const reduzir = useReduzir();
   const F = diarioDaObra(d), ad = antesEDepois(d), fotos = fotografiasDaObra(d.obra.plano);
   const [corte, setCorte] = useState(50);
   const [n, setN] = useState(12);
+  const pr = useMemo(() => projetoDoNegocio(d.f), [d.f.estudio]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
+    <div className="space-y-5">
+    {d.obra.plano && <ResumoDoDia d={d} dias={dias} />}
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_1.2fr]">
       <div className="min-w-0 space-y-4">
         {ad ? (
@@ -558,7 +602,17 @@ export function DiarioObra({ d, ir }: { d: Negocio; ir: Ir }) {
             </div>
             <input type="range" min={0} max={100} value={corte} onChange={(e) => setCorte(Number(e.target.value))} aria-label="Comparar o antes e o depois" className="w-full accent-[hsl(var(--primary))]" />
           </section>
-        ) : <p className="rounded-2xl bg-muted/50 px-4 py-3 text-sm text-muted-foreground">O antes e o depois aparece quando houver fotografias dos técnicos.</p>}
+        ) : <p className="rounded-2xl bg-muted/50 px-4 py-3 text-sm text-muted-foreground">O antes e o depois em fotografias aparece quando os técnicos as registarem.</p>}
+        {/* 23/11: o antes e o depois também nas plantas do Estúdio, lado a lado */}
+        {pr && (
+          <section aria-label="As plantas antes e depois" className="space-y-2 rounded-3xl border border-border bg-card p-3">
+            <p className="px-1 text-sm font-semibold">As plantas: antes e depois</p>
+            <div className="grid grid-cols-2 gap-2">
+              <PlantaVista planta={pr.antes} titulo="Antes" />
+              <PlantaVista planta={pr.depois} titulo="Depois" fantasmas={sairam(pr)} />
+            </div>
+          </section>
+        )}
         {fotos.length > 0 && (
           <section aria-label="As fotografias" className="space-y-2 rounded-3xl border border-border bg-card p-3">
             <p className="flex items-center gap-1.5 px-1 text-sm font-semibold"><Camera className="h-4 w-4 text-primary" aria-hidden="true" />{fotos.length} {fotos.length === 1 ? "fotografia" : "fotografias"}</p>
@@ -591,6 +645,7 @@ export function DiarioObra({ d, ir }: { d: Negocio; ir: Ir }) {
         )}
         {F.length > n && <button type="button" onClick={() => setN(n + 12)} className="min-h-10 text-sm font-medium text-primary">Ver mais</button>}
       </section>
+    </div>
     </div>
   );
 }
