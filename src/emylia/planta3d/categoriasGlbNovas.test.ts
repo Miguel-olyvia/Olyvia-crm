@@ -1,4 +1,4 @@
-// Os 7 genéricos novos (ainda não ligados à app): estrutura, geometria em 3 tamanhos e nos extremos para todas as combinações de opções,
+// Os 7 genéricos novos (ligados à app no fim de CATEGORIAS_GLB): estrutura, geometria em 3 tamanhos e nos extremos para todas as combinações de opções,
 // as partes condicionais (`ver`) e as omissões que o nome do produto dá.
 import { describe, expect, it } from "vitest";
 import { CATEGORIAS_GLB, categoriaDoTipo, opcoesComOmissao, type CategoriaGlb, type ParamsGenerico, type V3 } from "./categoriasGlb";
@@ -59,18 +59,23 @@ const parte = (c: CategoriaGlb, nome: string) => {
 const omissoes = (id: string, t: TipoMockup, nome: string) => opcoesComOmissao(cat(id), t, {}, nome);
 
 describe("genéricos novos: estrutura", () => {
-  it("são os 7 pedidos, com ids únicos e sem colidir com os 28 que já existem", () => {
+  it("são os 7 pedidos, com ids únicos e sem colidir com os 28 que já existem (ligados no fim da tabela)", () => {
     expect(CATEGORIAS_GLB_NOVAS.map((c) => c.id)).toEqual(IDS);
-    const antigos = new Set(CATEGORIAS_GLB.map((c) => c.id));
+    const antigos = new Set(CATEGORIAS_GLB.filter((c) => !CATEGORIAS_GLB_NOVAS.includes(c)).map((c) => c.id));
     expect(antigos.size).toBe(28);
     for (const id of IDS) expect(antigos.has(id)).toBe(false);
+    expect(CATEGORIAS_GLB.slice(-7)).toEqual(CATEGORIAS_GLB_NOVAS);
   });
 
-  it("ainda não estão ligados à app: o classificador nunca os devolve", () => {
-    const tipos: TipoMockup[] = ["bancada", "tampo", "lava_loica", "eletro", "candeeiro", "acessorio"];
-    for (const t of tipos) for (const n of ["Encimera 80x46", "Lava-louças UNA 2 CUBAS", "Máquina lavar roupa", "Termoacumulador 80L", "Aplique LED", "Garrafeira", "Piaçaba"]) {
-      const c = categoriaDoTipo(t, n);
-      expect(c === undefined || !IDS.includes(c.id)).toBe(true);
+  it("ligados à app: o classificador de produtos devolve-os pelo tipo e pelo nome; sem nome, ou fora do classificador, nunca", () => {
+    const casos: [TipoMockup, string, string][] = [
+      ["bancada", "Encimera 80x46", "tampo_wc"], ["lava_loica", "Lava-louças UNA 2 CUBAS", "lava_loica"], ["eletro", "Máquina lavar roupa", "maquina_roupa"],
+      ["eletro", "Termoacumulador 80L", "termoacumulador"], ["candeeiro", "Aplique LED", "aplique"], ["eletro", "Garrafeira", "garrafeira"], ["acessorio", "Piaçaba", "acessorio"],
+    ];
+    for (const [t, n, id] of casos) {
+      expect(categoriaDoTipo(t, n, true)?.id, n).toBe(id);
+      expect(categoriaDoTipo(t, "", true)?.id ?? "", t).not.toBe(id);
+      expect(categoriaDoTipo(t, n)?.id ?? "", n).not.toBe(id);
     }
   });
 

@@ -1,11 +1,11 @@
 // Os 7 genéricos NOVOS para os produtos que hoje ficam sem modelo (quadro «subcategoria → modelo genérico 3D», 23/11): tampo de WC, lava-loiça
 // de encastrar, máquina de roupa, termoacumulador/esquentador, aplique LED, garrafeira e acessório pequeno de parede.
 //
-// AINDA NÃO ESTÃO LIGADOS À APP. Estão aqui para o dono os ver e aprovar (página «Genéricos 3D novos para aprovar», no vault) e para os testes.
-// A ligação fica para depois da aprovação: juntá-los a CATEGORIAS_GLB (categoriasGlb.ts), as regras por subcategoria no classificador
-// (catalogo3d.ts: `tipoMockupDe` e, para os eletrodomésticos, o `nome` de cada categoria), as omissões de medidas por tipo (ESPEC) e o gerador
-// dos GLB (public/modelos3d/genericos/<id>.glb). Os tipos usados (`bancada`, `tampo`, `lava_loica`, `eletro`, `candeeiro`, `acessorio`) já existem
-// em TipoMockup; não é preciso acrescentar nenhum.
+// LIGADOS À APP (aprovados pelo dono, 23/11): CATEGORIAS_GLB (categoriasGlb.ts) junta-os no fim, depois dos 28, para nada do que já casava mudar;
+// o classificador (catalogo3d.ts) põe as medidas de omissão de cada um (`medidasDeOmissaoNovas`); os GLB estão em
+// public/modelos3d/genericos/<id>.glb, gerados por scripts/gerar-modelos-glb-novos.mjs a partir desta tabela. Todos são `soComProduto`: só os
+// escolhe um produto do catálogo (pelo nome); as peças sem nome (antigas, do Estúdio, das famílias) não mudam. Os tipos usados (`bancada`,
+// `tampo`, `lava_loica`, `eletro`, `candeeiro`, `acessorio`) já existiam em TipoMockup.
 //
 // As mesmas convenções da tabela principal: metros; origem no centro da base (x de −w/2 a w/2, y de 0 a h, z de −d/2 a d/2, a frente em +z e as
 // costas, encostadas à parede, em −z); cada parte é uma peça unitária (±0,5) escalada por `esc`, rodada por `rot` (Euler XYZ) e posta em `pos`;
@@ -43,7 +43,7 @@ function cubaDoTampo({ w, d, h, o }: ParamsGenerico): { x: number; z: number; cw
 }
 const comCuba = ligado("cuba");
 const TAMPO_WC: CategoriaGlb = {
-  id: "tampo_wc", rotulo: "Tampo ou bancada (com ou sem cuba)", tipos: ["bancada", "tampo"],
+  id: "tampo_wc", rotulo: "Tampo ou bancada (com ou sem cuba)", tipos: ["bancada", "tampo"], soComProduto: true,
   opcoes: [
     { id: "cuba", rotulo: "Com cuba integrada", tipo: "sim", omissao: (_t, n) => /lavabo|lavat|cuba|bacia/i.test(n) && !/s(em|in) (lavabo|cuba)/i.test(n) },
     {
@@ -95,7 +95,7 @@ function pecasDaCuba(i: 0 | 1, ver: NonNullable<Ver>): ParteGlb[] {
 }
 const duasCubas = e("cubas", "2");
 const LAVA_LOICA: CategoriaGlb = {
-  id: "lava_loica", rotulo: "Lava-loiça de encastrar (cuba)", tipos: ["lava_loica"],
+  id: "lava_loica", rotulo: "Lava-loiça de encastrar (cuba)", tipos: ["lava_loica"], soComProduto: true,
   opcoes: [
     { id: "cubas", rotulo: "Cubas", tipo: "lista", valores: [{ id: "1", rotulo: "Uma cuba" }, { id: "2", rotulo: "Duas cubas" }], omissao: (_t, n) => (/\b2 cubas|duas cubas|dupla|1[,.]5 cubas|cuba e meia/i.test(n) ? "2" : "1") },
     { id: "escorredor", rotulo: "Com escorredor", tipo: "sim", omissao: (_t, n) => /escorr/i.test(n) },
@@ -137,7 +137,7 @@ const naFrenteMaq = (nome: string, forma: ParteGlb["forma"], mat: MaterialGlb, f
   }, ver);
 const naoSecar = (p: ParamsGenerico): boolean => p.o.tipo !== "secar";
 const MAQUINA_ROUPA: CategoriaGlb = {
-  id: "maquina_roupa", rotulo: "Máquina de lavar ou secar roupa", tipos: ["eletro"], nome: /m[áa]quina.*(roupa)|secar roupa|lavar roupa/i,
+  id: "maquina_roupa", rotulo: "Máquina de lavar ou secar roupa", tipos: ["eletro"], nome: /m[áa]quina.*(roupa)|secar roupa|lavar roupa/i, soComProduto: true,
   opcoes: [
     {
       id: "tipo", rotulo: "Máquina de", tipo: "lista", valores: [{ id: "lavar", rotulo: "Lavar" }, { id: "lavar_secar", rotulo: "Lavar e secar" }, { id: "secar", rotulo: "Secar" }],
@@ -185,7 +185,7 @@ function painelTermo(p: ParamsGenerico): { x: number; y: number; z: number } {
   return deitado(p) ? { x: p.w * 0.3, y: k.y - k.dia * 0.15, z: k.z + k.dia / 2 } : { x: 0, y: k.y - k.comp * 0.3, z: k.z + k.dia / 2 };
 }
 const TERMOACUMULADOR: CategoriaGlb = {
-  id: "termoacumulador", rotulo: "Termoacumulador ou esquentador", tipos: ["eletro"], nome: /termoacumul|esquentador|cilindro.*(l\b|litros)/i, parede: { alt: 1.2 },
+  id: "termoacumulador", rotulo: "Termoacumulador ou esquentador", tipos: ["eletro"], nome: /termoacumul|esquentador|cilindro.*(l\b|litros)/i, parede: { alt: 1.2 }, soComProduto: true,
   opcoes: [
     { id: "forma", rotulo: "Forma", tipo: "lista", valores: [{ id: "cilindro", rotulo: "Cilindro" }, { id: "caixa", rotulo: "Caixa" }], omissao: (_t, n) => (/esquentador|slim|plano|flat|rectang/i.test(n) ? "caixa" : "cilindro") },
     { id: "orientacao", rotulo: "Montagem", tipo: "lista", valores: [{ id: "vertical", rotulo: "Vertical" }, { id: "horizontal", rotulo: "Horizontal" }], omissao: (_t, n) => (/horiz/i.test(n) ? "horizontal" : "vertical") },
@@ -218,7 +218,7 @@ const fixacaoAplique = (d: number): number => min(0.02, d * 0.3);
 const DIFUSOR = 0.004;
 const pontaAplique = (p: ParamsGenerico): number => (p.o.pontas === false ? 0 : min(0.012, p.w * 0.05));
 const APLIQUE: CategoriaGlb = {
-  id: "aplique", rotulo: "Aplique LED (barra de luz)", tipos: ["candeeiro"], nome: /aplique|barra (de )?led|led bar/i, parede: { alt: 1.9, prof: 0.06 },
+  id: "aplique", rotulo: "Aplique LED (barra de luz)", tipos: ["candeeiro"], nome: /aplique|barra (de )?led|led bar/i, parede: { alt: 1.9, prof: 0.06 }, soComProduto: true,
   opcoes: [
     { id: "luz", rotulo: "A luz sai", tipo: "lista", valores: [{ id: "frente", rotulo: "Para a frente" }, { id: "baixo", rotulo: "Para baixo" }], omissao: "frente" },
     { id: "pontas", rotulo: "Pontas metálicas", tipo: "sim", omissao: true },
@@ -256,7 +256,7 @@ function interiorG(p: ParamsGenerico): { wi: number; y0: number; hi: number; nPr
 }
 const zPortaG = (d: number): number => -d / 2 + fundoG(d) + PORTA_G / 2;
 const GARRAFEIRA: CategoriaGlb = {
-  id: "garrafeira", rotulo: "Garrafeira (porta de vidro)", tipos: ["eletro"], nome: /garrafeira|wine|vinho|sommelier/i,
+  id: "garrafeira", rotulo: "Garrafeira (porta de vidro)", tipos: ["eletro"], nome: /garrafeira|wine|vinho|sommelier/i, soComProduto: true,
   opcoes: [
     { id: "encastre", rotulo: "De encastrar (grelha em baixo)", tipo: "sim", omissao: (_t, n) => /encastr|integr/i.test(n) },
     { id: "garrafas", rotulo: "Mostrar as garrafas", tipo: "sim", omissao: true },
@@ -302,8 +302,14 @@ const GARRAFEIRA: CategoriaGlb = {
 /** A espessura da roseta (a base redonda que aparafusa à parede, m). */
 const roseta = (d: number): number => min(0.01, d * 0.2);
 const forma = (f: string): NonNullable<Ver> => e("forma", f);
+/**
+ * Os acessórios que NÃO levam este genérico (ficam na caixa de reserva, como estavam): sifões e válvulas, bancos, cadeiras, nichos, escovas,
+ * cestos e os auxiliares de pé. O resto do tipo `acessorio` (kits, cabides, piaçabas, porta-rolos, pegas de segurança) leva-o.
+ */
+const NAO_ACESSORIO = /sif[ãa]o|sif[õo]es|v[áa]lvula|\bbancos?\b|cadeira|nicho|escova|\bcestos?\b|auxiliar/i;
 const ACESSORIO: CategoriaGlb = {
-  id: "acessorio", rotulo: "Acessório de parede (barra, cabide, piaçaba, porta-rolos)", tipos: ["acessorio"], parede: { alt: 0.9, prof: 0.1 },
+  id: "acessorio", rotulo: "Acessório de parede (barra, cabide, piaçaba, porta-rolos)", tipos: ["acessorio"], parede: { alt: 0.9, prof: 0.1 }, soComProduto: true,
+  nome: new RegExp(`^(?!.*(?:${NAO_ACESSORIO.source}))`, "i"),
   opcoes: [{
     id: "forma", rotulo: "Forma", tipo: "lista",
     valores: [{ id: "barra", rotulo: "Barra ou pega de segurança" }, { id: "cabide", rotulo: "Cabide" }, { id: "piacaba", rotulo: "Piaçaba" }, { id: "porta_rolos", rotulo: "Porta-rolos" }],
@@ -360,7 +366,7 @@ const ACESSORIO: CategoriaGlb = {
   ],
 };
 
-/** Os genéricos novos, por ordem de produtos que servem (ainda não ligados: ver o comentário no topo). */
+/** Os genéricos novos, por ordem de produtos que servem (ligados no fim de CATEGORIAS_GLB: ver o comentário no topo). */
 export const CATEGORIAS_GLB_NOVAS: CategoriaGlb[] = [TAMPO_WC, LAVA_LOICA, MAQUINA_ROUPA, TERMOACUMULADOR, APLIQUE, GARRAFEIRA, ACESSORIO];
 
 /** O intervalo aceite e os tamanhos típicos de cada genérico novo (m, [largura, profundidade, altura]). */
@@ -378,3 +384,50 @@ export const MEDIDAS_GENERICOS_NOVOS: Record<string, MedidasGenerico> = {
 export const MEDIDAS_ACESSORIO_POR_FORMA: Record<string, V3> = {
   barra: [0.3, 0.08, 0.07], cabide: [0.05, 0.06, 0.07], piacaba: [0.1, 0.13, 0.38], porta_rolos: [0.16, 0.1, 0.12],
 };
+
+/** O esquentador a gás de parede típico (m, [largura, profundidade, altura]): 11 a 15 litros por minuto. */
+const ESQUENTADOR: V3 = [0.31, 0.22, 0.58];
+/** A profundidade de um termoacumulador plano («slim»), m. */
+const PROF_SLIM = 0.3;
+/** Até quantas garrafas a garrafeira é a média (acima, a grande). */
+const GARRAFAS_MEDIA = 24;
+/** Um número seguido de «cm» no nome («Aplique LED Beatriz 60CM», «Pega De Segurança 30cm»): a largura, em metros. */
+function larguraDoNome(nome: string): number | undefined {
+  const m = nome.match(/(\d{2,3}(?:[.,]\d)?)\s*cm\b/i);
+  return m ? Number(m[1].replace(",", ".")) / 100 : undefined;
+}
+/** Um número seguido de «L» ou «litros» no nome («Termoacumulador VULCANO 150L»). */
+function litrosDoNome(nome: string): number | undefined {
+  const m = nome.match(/(\d{1,3})\s*(?:l|litros)\b/i);
+  return m ? Number(m[1]) : undefined;
+}
+/**
+ * As medidas de omissão (m, [largura, profundidade, altura]) de um produto que usa um genérico novo, quando o nome não traz as três: pelas
+ * opções já resolvidas e pelo nome (a largura «NNcm», os litros do termoacumulador, as garrafas da garrafeira, a forma do acessório).
+ * O esquentador não fica com os 60×60×85 do tipo `eletro`; o tampo não fica com os 90 cm de altura do tipo `bancada`. Nenhuma se o id não é novo.
+ */
+export function medidasDeOmissaoNovas(id: string, o: Readonly<Record<string, string | boolean>>, nome: string): V3 | undefined {
+  const m = MEDIDAS_GENERICOS_NOVOS[id];
+  if (!m) return undefined;
+  const dentro = (v: V3): V3 => [limitar(v[0], m.min[0], m.max[0]), limitar(v[1], m.min[1], m.max[1]), limitar(v[2], m.min[2], m.max[2])];
+  const largura = larguraDoNome(nome), t = m.tamanhos;
+  switch (id) {
+    case "tampo_wc": return dentro([largura ?? t.mediano[0], t.mediano[1], 0.12]);
+    case "lava_loica": return dentro(o.cubas === "2" ? t.mediano : [0.5, 0.44, 0.2]);
+    case "termoacumulador": {
+      if (o.chamine === true) return dentro(ESQUENTADOR);
+      const l = litrosDoNome(nome) ?? 80, v = l <= 50 ? t.pequeno : l <= 100 ? t.mediano : t.grande;
+      return dentro(o.forma === "caixa" ? [v[0], PROF_SLIM, v[2]] : v);
+    }
+    case "aplique": return dentro([largura ?? t.mediano[0], t.mediano[1], t.mediano[2]]);
+    case "garrafeira": {
+      const g = nome.match(/(\d{1,3})\s*garrafas/i);
+      return g && Number(g[1]) > GARRAFAS_MEDIA ? t.grande : t.mediano;
+    }
+    case "acessorio": {
+      const v = MEDIDAS_ACESSORIO_POR_FORMA[String(o.forma)] ?? t.mediano;
+      return dentro(o.forma === "barra" && largura ? [largura, v[1], v[2]] : v);
+    }
+    default: return dentro(t.mediano);
+  }
+}

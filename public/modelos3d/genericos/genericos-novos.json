@@ -1,0 +1,51 @@
+[
+ {
+  "categoria": "tampo_wc",
+  "url": "/modelos3d/genericos/tampo_wc.glb",
+  "triangulos": 264,
+  "partes": 8,
+  "bytes": 11796
+ },
+ {
+  "categoria": "lava_loica",
+  "url": "/modelos3d/genericos/lava_loica.glb",
+  "triangulos": 432,
+  "partes": 22,
+  "bytes": 29040
+ },
+ {
+  "categoria": "maquina_roupa",
+  "url": "/modelos3d/genericos/maquina_roupa.glb",
+  "triangulos": 468,
+  "partes": 11,
+  "bytes": 16840
+ },
+ {
+  "categoria": "termoacumulador",
+  "url": "/modelos3d/genericos/termoacumulador.glb",
+  "triangulos": 1684,
+  "partes": 10,
+  "bytes": 24580
+ },
+ {
+  "categoria": "aplique",
+  "url": "/modelos3d/genericos/aplique.glb",
+  "triangulos": 348,
+  "partes": 5,
+  "bytes": 8832
+ },
+ {
+  "categoria": "garrafeira",
+  "url": "/modelos3d/genericos/garrafeira.glb",
+  "triangulos": 7272,
+  "partes": 102,
+  "bytes": 175964
+ },
+ {
+  "categoria": "acessorio",
+  "url": "/modelos3d/genericos/acessorio.glb",
+  "triangulos": 2096,
+  "partes": 20,
+  "bytes": 39728
+ }
+]

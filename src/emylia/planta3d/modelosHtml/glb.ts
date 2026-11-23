@@ -11,7 +11,8 @@ import { materiaisDaLavaLoica } from "./index";
 import { materiaisDaPlaca } from "./placas";
 import { KERAN_SPECS } from "./specs";
 import { V, nomearMateriais } from "./util";
-import type { CategoriaGlb, MaterialGlb, ParamsGenerico } from "../categoriasGlb";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
+import type { CategoriaGlb, FormaGlb, MaterialGlb, ParamsGenerico } from "../categoriasGlb";
 
 /** O interruptor único: `false` volta aos construtores procedurais em todo o lado (peças soltas e bancada). */
 export const USAR_GLB = true;
@@ -134,11 +135,31 @@ export function materiaisGenericos(cor: string, acab?: { metalness: number; roug
     agua: new THREE.MeshPhysicalMaterial({ color: "#b9d3db", roughness: 0.05, transmission: 0, clearcoat: 1, opacity: 0.85, transparent: true }),
   });
 }
+/** As formas unitárias (centradas, de lado 1), as mesmas do gerador dos GLB; partilhadas por todas as peças e nunca libertadas (são 4). */
+const formasUnitarias = new Map<FormaGlb, THREE.BufferGeometry>();
+function formaUnitaria(f: FormaGlb): THREE.BufferGeometry {
+  const tida = formasUnitarias.get(f);
+  if (tida) return tida;
+  const g = f === "caixa" ? new THREE.BoxGeometry(1, 1, 1) : f === "caixaR" ? new RoundedBoxGeometry(1, 1, 1, 2, 0.12) : f === "cilindro" ? new THREE.CylinderGeometry(0.5, 0.5, 1, 24) : new THREE.SphereGeometry(0.5, 20, 12);
+  formasUnitarias.set(f, g);
+  return g;
+}
+/**
+ * Uma parte marcada `emRuntime` que o GLB (gerado antes dela) não tem: constrói-se aqui, com a forma unitária e o material da parte. Assim uma
+ * parte nova de uma categoria antiga (os pés do móvel de lavatório) não obriga a refazer o GLB. Qualquer outra parte em falta continua a ser erro.
+ */
+function parteConstruida(parte: CategoriaGlb["partes"][number], mats: Readonly<Record<MaterialGlb, THREE.Material>>): THREE.Mesh {
+  const m = new THREE.Mesh(formaUnitaria(parte.forma), mats[parte.mat]);
+  m.name = parte.nome; m.userData.material = parte.mat; m.castShadow = true; m.receiveShadow = true;
+  return m;
+}
+
 /** Monta o genérico de uma categoria: cada parte (nó do GLB) vai para a posição e a escala que a tabela dá para estas medidas e opções. */
 export function montarGenerico(cena: THREE.Object3D, c: CategoriaGlb, p: ParamsGenerico, cor: string, acab?: { metalness: number; roughness: number }): ModeloMontado {
   const mats = materiaisGenericos(cor, acab), grupo = vestir(cena, mats);
   for (const parte of c.partes) {
-    const no = grupo.getObjectByName(parte.nome);
+    let no = grupo.getObjectByName(parte.nome);
+    if (!no && parte.emRuntime) { no = parteConstruida(parte, mats); grupo.add(no); }
     if (!no) throw new Error(`O GLB genérico «${c.id}» não tem a parte «${parte.nome}»`);
     const k = parte.colocar(p);
     no.position.set(...k.pos); no.scale.set(...k.esc); no.rotation.set(...(k.rot ?? [0, 0, 0]));

@@ -9,6 +9,7 @@ import type { TipoPeca } from "../planta";
 import type { TipoEspaco } from "./modelo";
 import { modeloHtmlDoProduto } from "./htmlDoCatalogo";
 import { categoriaDoTipo, categoriaPorId, opcoesComOmissao } from "./categoriasGlb";
+import { medidasDeOmissaoNovas } from "./categoriasGlbNovas";
 
 export type TipoMockup =
   | "caixa" | "sanita" | "sanita_suspensa" | "bide" | "banheira" | "base_duche" | "lavatorio" | "movel_lavatorio" | "coluna" | "coluna_duche" | "movel"
@@ -157,6 +158,8 @@ const REGRAS: [RegExp, TipoMockup][] = [
   [/torneira|misturadora|chuveiro higien/, "torneira"],
   [/toalheiro/, "toalheiro"],
   [/radiador/, "radiador"],
+  // o cesto «de coluna de duche» é um acessório, não uma coluna (antes da regra da coluna)
+  [/\bcestos?\b/, "acessorio"],
   [/coluna.*duche|duche.*coluna|colunas duche/, "coluna_duche"],
   [/base.*duche|bases duche|prato de duche/, "base_duche"],
   [/pega de seguranca|cabide|porta-rolos|porta rolos|piacaba|nicho|escova|\bbancos?\b|\bkit/, "acessorio"],
@@ -258,8 +261,30 @@ export function temModeloHtml(m: ProdutoModelo3D): boolean {
 export const MOSTRAR_GENERICOS = true;
 /** O produto usa um modelo genérico da sua categoria (não tem o do HTML e o tipo tem categoria). */
 export function temModeloGenerico(m: ProdutoModelo3D): boolean {
-  const pr = m.mockup3d.params;
-  return !(pr && "html" in pr && pr.html) && pr?.k !== "chapa" && pr?.k !== "bancada" && !!(categoriaPorId(m.mockup3d.generico?.id) ?? categoriaDoTipo(m.mockup3d.tipo, m.nome));
+  return !temGeometriaPropria(m.mockup3d.params) && !!(categoriaPorId(m.mockup3d.generico?.id) ?? categoriaDoTipo(m.mockup3d.tipo, m.nome));
+}
+/**
+ * A peça tem geometria própria e nunca usa um genérico: o modelo do HTML, a chapa, a bancada composta, e o tampo e o lava-loiça das famílias
+ * (os dois últimos passaram a ter genérico do tipo, `tampo_wc` e `lava_loica`, que não lhes pode tomar o lugar).
+ */
+export function temGeometriaPropria(pr: ParamsMockup | undefined): boolean {
+  return !!pr && (("html" in pr && !!pr.html) || pr.k === "chapa" || pr.k === "bancada" || pr.k === "tampo" || pr.k === "lava_loica");
+}
+
+/** A altura de omissão do resguardo de banheira (cm): o de duche fica com os 195 do tipo. */
+const ALTURA_RESGUARDO_BANHEIRA_CM = 150;
+/** O móvel de lavatório suspenso: o tampo a 85 cm do chão, e nunca a menos de 30 cm. */
+const TOPO_MOVEL_SUSPENSO = 0.85, ALTURA_MIN_SUSPENSO = 0.3;
+/**
+ * As medidas de um produto que usa um genérico novo (categoriasGlbNovas.ts) quando o nome não traz as três: as do genérico (pelo nome e pelas
+ * opções); com duas no nome («140x46»), ficam a largura e a profundidade do nome e a altura do genérico. Com as três no nome, ficam as do nome.
+ */
+function comMedidasDoGenerico(d: Dimensoes, id: string, o: Readonly<Record<string, string | boolean>>, nome: string): Dimensoes {
+  const m = medidasDeOmissaoNovas(id, o, nome);
+  if (!m) return d;
+  const v = dimensoesDoNome(nome), cm = (x: number) => Math.round(x * 1000) / 10;
+  if (v && v.length === 3) return d;
+  return v ? { larguraCm: v[0], profundidadeCm: v[1], alturaCm: cm(m[2]), deNome: true } : { larguraCm: cm(m[0]), profundidadeCm: cm(m[1]), alturaCm: cm(m[2]), deNome: false };
 }
 
 /** O produto do catálogo mais o seu mockup 3D (paramétrico, com a dimensão real; `urls`: o GLB de cada produto, quando existir). */
@@ -283,18 +308,24 @@ export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], ur
     params = { k: "torneira", estilo: t.estilo, altura: t.altura / 1000, saida: t.saida / 1000, alcance: t.alcance / 1000, base: t.base / 1000 };
     d = { larguraCm: t.base / 10, profundidadeCm: (t.alcance + t.base / 2) / 10, alturaCm: t.altura / 10, deNome: true };
   }
-  const cg = !params || (params.k === "torneira" && !params.html) ? categoriaDoTipo(tipo, p.n) : undefined;
+  const cg = !params || (params.k === "torneira" && !params.html) ? categoriaDoTipo(tipo, p.n, true) : undefined;
   // os genéricos presos à parede (armário de parede, exaustor, prateleira): a profundidade típica quando o nome só dá largura × altura
   const nomeTemTres = /\d+\s*[x×]\s*\d+\s*[x×]\s*\d+/i.test(p.n);
   if (cg?.parede?.prof && !p.dim && !nomeTemTres) d = { ...d, profundidadeCm: cg.parede.prof * 100 };
+  const o = cg ? opcoesComOmissao(cg, tipo, {}, p.n) : undefined;
+  if (cg && o && !p.dim) d = comMedidasDoGenerico(d, cg.id, o, p.n);
+  // o resguardo de banheira é mais baixo do que o de duche, quando o nome não diz a altura
+  if (tipo === "resguardo" && !d.deNome && /banheira|banera/.test(sem(p.n))) d = { ...d, alturaCm: ALTURA_RESGUARDO_BANHEIRA_CM };
   const mockup3d: Mockup3D = { tipo, largura: d.larguraCm / 100, profundidade: d.profundidadeCm / 100, altura: d.alturaCm / 100, cor: e.cor, ...(params ? { params } : {}), ...(urls[p.id] ? { url: urls[p.id] } : {}),
-    ...(cg ? { generico: { id: cg.id, o: opcoesComOmissao(cg, tipo, {}, p.n) } } : {}) };
+    ...(cg && o ? { generico: { id: cg.id, o } } : {}) };
+  // o móvel de lavatório suspenso fica preso à parede, com o tampo a 85 cm do chão
+  const suspenso = cg?.id === "movel_lavatorio" && o?.apoio === "suspenso";
   // a altura ao chão: o lava-loiça fica com o rebordo por baixo do tampo (a 88,8 cm), a placa e a torneira em cima dele (90 cm)
   // e as peças de parede genéricas ficam à altura da categoria (armário de parede 145 cm, exaustor 150, prateleira 150)
-  const alt = h?.tipo === "lava_loica" ? (88.8 - d.alturaCm) / 100 : cg?.parede ? cg.parede.alt : e.alt;
+  const alt = h?.tipo === "lava_loica" ? (88.8 - d.alturaCm) / 100 : suspenso ? Math.max(ALTURA_MIN_SUSPENSO, TOPO_MOVEL_SUSPENSO - d.alturaCm / 100) : cg?.parede ? cg.parede.alt : e.alt;
   return {
     produtoId: p.id, nome: p.n, tipo, dimensoes: d, mockup3d, marca: p.marca, fornecedor: p.fornecedor, custo: p.custo, categoria: p.sub || caminhoDe(arvore, p.no) || e.rotulo,
-    montagem: cg?.parede ? "parede" : e.mont, alturaOmissao: alt, demo: !!p.demo,
+    montagem: cg?.parede || suspenso ? "parede" : e.mont, alturaOmissao: alt, demo: !!p.demo,
   };
 }
 

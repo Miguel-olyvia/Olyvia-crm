@@ -6,7 +6,7 @@ import { Component, Suspense, createContext, useCallback, useContext, useEffect,
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { ContactShadows, Html, OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
-import type { MaterialMockup, Mockup3D, ParamsMockup, ProdutoModelo3D } from "./catalogo3d";
+import { temGeometriaPropria, type MaterialMockup, type Mockup3D, type ParamsMockup, type ProdutoModelo3D } from "./catalogo3d";
 import { ehModeloTorneira, construirTorneira } from "./modelosHtml/torneiras";
 import { libertarMateriais } from "./modelosHtml/util";
 import { construirLavaLoica, ehModeloLavaLoica } from "./modelosHtml";
@@ -321,7 +321,7 @@ function TorneiraCozinha({ w, d, h, cor, mat, p }: { w: number; d: number; h: nu
 type PropsParam = { tipo: ProdutoModelo3D["tipo"]; w: number; d: number; h: number; cor: string; mat?: MaterialMockup; params?: ParamsMockup; recortes?: { x: number; z: number; w: number; d: number }[]; opc?: OpcoesPeca; generico?: Mockup3D["generico"] };
 /** A categoria genérica que a peça usa (a do produto, escolhida pelo nome; senão a do tipo; nenhuma se tiver o modelo do HTML). */
 const categoriaDaPeca = (tipo: ProdutoModelo3D["tipo"], params?: ParamsMockup, generico?: Mockup3D["generico"]): CategoriaGlb | undefined =>
-  (USAR_GLB_GENERICOS && !(params && "html" in params && params.html) && params?.k !== "chapa" && params?.k !== "bancada" && params?.k !== "cozinha" ? categoriaPorId(generico?.id) ?? categoriaDoTipo(tipo) : undefined);
+  (USAR_GLB_GENERICOS && !temGeometriaPropria(params) && params?.k !== "cozinha" ? categoriaPorId(generico?.id) ?? categoriaDoTipo(tipo) : undefined);
 function AvisoFonte({ chave, fonte }: { chave: string; fonte: string }) { useFonte(chave, fonte); return null; }
 /** O GLB genérico da categoria com as medidas, a cor e as opções desta peça (a geometria é partilhada por todos os produtos da categoria). */
 function GenericoGlb({ c, tipo, w, d, h, cor, mat, opc, generico }: PropsParam & { c: CategoriaGlb }) {
