@@ -4464,14 +4464,18 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         fim = { antes: rotuloDia(p, r.fimAntes - 1), depois: rotuloDia(p, r.fimDepois - 1) };
       }
       (d.obra.imprevistos ??= []).push(im);
-      for (const ti of m.tarefas) if (p.tasks[ti]?.tec) avisarTecnico(p, ti, `${p.tasks[ti].nome}: ${m.grav === "impede" ? "parada por um imprevisto" : `atrasa ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"}`} (${texto})`, agora());
+      // 23/11 (F2): sem negocios.obra.planear (o técnico no Hoje dele) o servidor só aceita o imprevisto, a paragem das tarefas dele e a
+      // ocorrência no diário (fn_obra_execucao_permitida): sem aviso a si próprio (trocaria o aviso por ler da tarefa) nem alteração/aviso
+      // ao cliente (a gravação era recusada, CT001). O cliente fica a saber pela proposta do gestor.
+      const planeia = podeNeg(S.role, "obra.planear");
+      if (planeia) for (const ti of m.tarefas) if (p.tasks[ti]?.tec) avisarTecnico(p, ti, `${p.tasks[ti].nome}: ${m.grav === "impede" ? "parada por um imprevisto" : `atrasa ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"}`} (${texto})`, agora());
       // o cliente vê no portal (as novidades da obra), em linguagem simples. 19/11: o material em falta não (é da empresa: o gestor encomenda)
       const fimTxt = fim ?? { antes: rotuloDia(p, fimDe(p.tasks) - 1), depois: rotuloDia(p, fimDe(p.tasks) - 1) };
-      if (m.tipo !== "material") (d.obra.alteracoes ??= []).unshift({ q: agora(), dia: p.dia, quem, t: `Imprevisto: ${texto}`, motivo: MOTIVO_IMPREVISTO, fimAntes: fimTxt.antes, fimDepois: fimTxt.depois, cliente: true, avisoCliente: avisoClienteImprevisto(im, fim) });
+      if (m.tipo !== "material" && planeia) (d.obra.alteracoes ??= []).unshift({ q: agora(), dia: p.dia, quem, t: `Imprevisto: ${texto}`, motivo: MOTIVO_IMPREVISTO, fimAntes: fimTxt.antes, fimDepois: fimTxt.depois, cliente: true, avisoCliente: avisoClienteImprevisto(im, fim) });
       (d.obra.diario ??= []).push({ q: agora(), quem, t: `Imprevisto${im.onde ? " (" + im.onde + ")" : ""}: ${texto} · ${m.grav === "impede" ? "impede de continuar" : `atrasa ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"}`}`, k: "ocorrencia", ...(fotos.length ? { fotos } : {}) });
       log(d, `Imprevisto ${im.id} registado por ${quem}: ${texto} · ${m.grav === "impede" ? `${im.tarefas.join(", ")} parad${im.tarefas.length === 1 ? "a" : "as"}` : `o plano anda ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"}`}`, "w");
       if (m.tipo === "material") avisar({ msg: "Falta de material registada", sub: "O gestor da obra vê-a no Hoje dele e encomenda o que falta", kind: "ok" });
-      else avisar({ msg: "Imprevisto registado", sub: m.grav === "impede" ? "As tarefas afetadas param. O gestor prepara a proposta ao cliente" : `O plano andou ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"} · o cliente foi avisado`, kind: "ok" });
+      else avisar({ msg: "Imprevisto registado", sub: m.grav === "impede" ? "As tarefas afetadas param. O gestor prepara a proposta ao cliente" : `O plano andou ${im.atraso} ${im.atraso === 1 ? "dia" : "dias"}${planeia ? " · o cliente foi avisado" : ""}`, kind: "ok" });
       return im.id;
     },
     /** 19/11 (auditoria): «O cliente pediu uma alteração» no Hoje do técnico. Quem planeia a obra abre já a tarefa no Estúdio da obra (onde

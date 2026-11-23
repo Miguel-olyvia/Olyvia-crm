@@ -31,17 +31,28 @@ const obra1027 = () => {
 describe("imprevistos a meio da obra", () => {
   beforeEach(() => { esquecerInventario(); });
 
-  it("«impede»: o técnico regista com fotografia; as tarefas afetadas param e o cliente é avisado; o gestor vê no Hoje", () => {
+  it("«impede»: o técnico regista com fotografia; as tarefas afetadas param; o gestor vê no Hoje (sem aviso ao cliente: é do gestor)", () => {
     const { S, A, d, p } = obra1022();
     const ti = tarefasAfetaveis(p).find((i) => p.tasks[i].dia >= p.dia)!;
+    const alt = (d.obra.alteracoes ?? []).length, avisos = JSON.stringify(p.avisos ?? []);
     A.role("tecnico");
     const id = A.registarImprevisto(d.id, { texto: "Cano de esgoto podre por baixo da base", onde: "Casa de banho, parede do fundo", foto, grav: "impede", tarefas: [ti] })!;
     expect(id).toBe("IM-1022-1");
     expect(p.tasks[ti].bloqueio).toBe(id);
     expect(d.obra.imprevistos![0]).toMatchObject({ estado: "aberto", grav: "impede", foto, tarefas: [p.tasks[ti].nome] });
-    expect(d.obra.alteracoes![0].avisoCliente).toMatch(/^Encontrámos um problema na obra \(casa de banho, parede do fundo\): Cano de esgoto podre/);
+    // 23/11 (F2): sem negocios.obra.planear o servidor só aceita o imprevisto, a paragem e a ocorrência (fn_obra_execucao_permitida)
+    expect((d.obra.alteracoes ?? []).length).toBe(alt);
+    expect(JSON.stringify(p.avisos ?? [])).toBe(avisos);
     expect(d.obra.diario!.at(-1)).toMatchObject({ k: "ocorrencia", fotos: [foto] });
     expect(minhas(S, "operacoes").some((x) => x.d === d && x.p.t.startsWith("Imprevisto · Cano"))).toBe(true);
+  });
+
+  it("«impede» registado por quem planeia: o cliente é avisado", () => {
+    const { A, d, p } = obra1022();
+    const ti = tarefasAfetaveis(p).find((i) => p.tasks[i].dia >= p.dia)!;
+    A.role("operacoes");
+    A.registarImprevisto(d.id, { texto: "Cano de esgoto podre por baixo da base", onde: "Casa de banho, parede do fundo", foto, grav: "impede", tarefas: [ti] });
+    expect(d.obra.alteracoes![0].avisoCliente).toMatch(/^Encontrámos um problema na obra \(casa de banho, parede do fundo\): Cano de esgoto podre/);
   });
 
   it("«atrasa»: o plano anda os dias indicados e a data de fim muda", () => {
