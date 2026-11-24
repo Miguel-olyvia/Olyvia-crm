@@ -41,11 +41,17 @@ function atributoDe(a: Bruto): AtributoGestao {
   };
 }
 
+/** Erros da base que chegam em bruto (nome de constraint) e têm uma frase em português. 23514 + product_attributes_has_photo_check: tirar a cor a um atributo que tem fotos. */
+function traduzirErro(e: { code?: string; message?: string } | null | undefined): string | null {
+  if (e?.code === "23514" && /product_attributes_has_photo_check/.test(e.message ?? "")) return "Este atributo tem fotos nas opções: remova as fotos antes de tirar a cor.";
+  return null;
+}
+
 /** Corre uma função da base e devolve o resultado; qualquer falha (erro da base ou da rede) volta como texto para mostrar. */
 export async function chamar(fn: string, args: Record<string, unknown>, omissao: string): Promise<ResG<unknown>> {
   try {
     const { data, error } = await rpcLivre(fn, args);
-    if (error || data == null) return { ok: false, erro: erroAmigavel(error, omissao), codigo: error?.code };
+    if (error || data == null) return { ok: false, erro: traduzirErro(error) ?? erroAmigavel(error, omissao), codigo: error?.code };
     return { ok: true, v: data };
   } catch (e) {
     return { ok: false, erro: (e as Error).message || omissao };

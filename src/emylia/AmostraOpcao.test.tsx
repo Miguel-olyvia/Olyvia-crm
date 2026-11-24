@@ -32,10 +32,16 @@ describe("AmostraOpcao", () => {
     expect(raiz(container)).toHaveAttribute("aria-hidden", "true");
     expect(sb.buckets).toContain("catalogo-opcoes");
   });
-  it("a foto vence o hex: com os dois, só se vê a foto", () => {
+  it("a foto vence o hex (a imagem cobre-o), mas o hex fica por baixo enquanto a foto carrega", () => {
     const { container } = render(<AmostraOpcao foto={CAMINHO} hex="#112233" nome="Carvalho" />);
     expect(container.querySelector("img")).not.toBeNull();
-    expect(raiz(container).style.backgroundColor).toBe("");
+    expect(raiz(container).style.backgroundColor).toBe("rgb(17, 34, 51)");
+    expect(raiz(container).className).not.toContain("border-dashed");
+  });
+  it("só com foto (sem hex) não é o neutro tracejado", () => {
+    const { container } = render(<AmostraOpcao foto={CAMINHO} hex={null} nome="Carvalho" />);
+    expect(container.querySelector("img")).not.toBeNull();
+    expect(raiz(container).className).not.toContain("border-dashed");
   });
   it("sem foto, o hex desenha o quadrado e fica em data-hex", () => {
     const { container } = render(<AmostraOpcao foto={null} hex="#112233" nome="Azul" testId="a" />);

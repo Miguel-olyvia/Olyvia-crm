@@ -6,6 +6,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { BUCKET_FOTOS_OPCOES } from "./fotoOpcaoUrl";
 import { chamar, type ResG } from "./atributosGestao";
+import { mensagemDoStorage } from "./fotoOpcao";
 
 export interface ResultadoFoto { foto: string | null; antiga: string | null; antiga_orfa: boolean }
 
@@ -37,12 +38,15 @@ async function limparAntiga(r: ResultadoFoto): Promise<void> {
 
 /** Carrega a foto já convertida e liga-a à opção. Se a base recusar, o ficheiro novo apaga-se; se aceitar, apaga-se o antigo (se ficou órfão). */
 export async function guardarFotoOpcao(org: string, opcao: string, foto: Blob): Promise<ResG<ResultadoFoto>> {
-  const caminho = `${org}/${crypto.randomUUID()}.webp`;
+  let caminho = "";
   try {
-    const { error } = await supabase.storage.from(BUCKET_FOTOS_OPCOES).upload(caminho, foto, { contentType: "image/webp", upsert: false });
-    if (error) return { ok: false, erro: `Não foi possível carregar a foto${error.message ? ` (${error.message})` : ""}.` };
+    // o randomUUID fica DENTRO do try: fora de um contexto seguro (http) não existe e lança, e isso não pode deixar o ecrã preso
+    caminho = `${org}/${crypto.randomUUID()}.webp`;
+    // o nome é novo em cada foto (nunca se sobrepõe), por isso a cache pode ser longa
+    const { error } = await supabase.storage.from(BUCKET_FOTOS_OPCOES).upload(caminho, foto, { contentType: "image/webp", upsert: false, cacheControl: "31536000" });
+    if (error) return { ok: false, erro: mensagemDoStorage(error.message) };
   } catch (e) {
-    return { ok: false, erro: (e as Error).message || "Não foi possível carregar a foto." };
+    return { ok: false, erro: mensagemDoStorage((e as Error).message) };
   }
   const r = await definirFotoOpcao(org, opcao, caminho);
   if (!r.ok) { await apagarFicheiros([caminho]); return r; }

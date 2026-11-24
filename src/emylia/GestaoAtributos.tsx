@@ -45,7 +45,7 @@ interface Erro { onde: string; msg: string }
 /* ------------------------------------------------------------------ formulário de uma opção (criar e editar) */
 /** `temFoto`: o atributo tem foto, e então o hex é opcional (a foto pode ser a única cor). Ao enviar, `hex` é o #RRGGBB, null (sem hex) ou '' (limpar o hex que a opção tinha). */
 function OpcaoForm({ temHex, temFoto, inicial, rotulo, criar, bloqueado, erro, idGuardar, onEnviar, onCancelar }: {
-  temHex: boolean; temFoto: boolean; inicial: { nome: string; hex: string | null }; rotulo: string; criar: boolean; bloqueado: boolean; erro: string | null; idGuardar: string;
+  temHex: boolean; temFoto: boolean; inicial: { nome: string; hex: string | null; foto?: string | null }; rotulo: string; criar: boolean; bloqueado: boolean; erro: string | null; idGuardar: string;
   onEnviar: (nome: string, hex: string | null) => void; onCancelar: () => void;
 }) {
   const [nome, setNome] = useState(inicial.nome), [hex, setHex] = useState(inicial.hex ?? "");
@@ -68,7 +68,7 @@ function OpcaoForm({ temHex, temFoto, inicial, rotulo, criar, bloqueado, erro, i
           <Campo rot="Cor em hexadecimal (#RRGGBB)" dica={temFoto ? "Opcional: a foto pode ser a cor. Ex.: #1A2B3C" : criar ? "Obrigatório nas cores. Ex.: #1A2B3C" : undefined}>{(id) => (
             <>
               <span className="flex items-center gap-2">
-                <AmostraOpcao hex={hexOk} nome={nome} />
+                <AmostraOpcao foto={inicial.foto} hex={hexOk} nome={nome} />
                 <input id={id} value={hex} onChange={(e) => setHex(e.target.value)} placeholder="#RRGGBB" maxLength={7} autoCapitalize="off" spellCheck={false}
                   aria-invalid={hexFormato} aria-describedby={hexFormato ? msgHex : undefined} className={cn(CAMPO, "tabular-nums")} />
               </span>
@@ -207,11 +207,17 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
       if (novos.length) setAbertos((s) => new Set([...s, ...novos]));
     }).then(async (ok) => {
       if (!ok) return;
-      // não se sabe qual é o atributo criado: o formulário fica aberto com o aviso (o atributo existe, sem foto)
-      if (comFoto && novos.length !== 1) { setErro({ onde: "novo", msg: `O atributo «${nome}» foi criado, mas não foi possível ligar «Tem foto». Confirme na lista.` }); return; }
+      // o formulário fecha sempre (deixá-lo aberto convidava a criar o atributo outra vez, duplicado)
       fechar("novo-atributo");
-      // o interruptor «Tem foto» liga-se depois de o atributo existir; a recusa da base aparece no próprio atributo (que fica criado, sem foto)
-      if (comFoto) await correr(() => definirFotoAtributo(org, novos[0], true), `Atributo «${nome}» com foto.`, `atr:${novos[0]}`);
+      // não se sabe qual é o atributo criado: o aviso fica na página
+      if (comFoto && novos.length !== 1) { setErro({ onde: "pagina", msg: `O atributo «${nome}» foi criado, mas não foi possível ligar «Tem foto». Confirme na lista abaixo: não o crie outra vez.` }); return; }
+      // o interruptor «Tem foto» liga-se depois de o atributo existir; se a base recusar, o atributo fica criado SEM foto e a mensagem aparece nele
+      if (comFoto) {
+        await correr(async () => {
+          const r = await definirFotoAtributo(org, novos[0], true);
+          return r.ok === false ? { ...r, erro: `O atributo «${nome}» foi criado sem foto: ${r.erro} A foto só se escolhe ao criar o atributo: avise a equipa técnica antes de lhe juntar opções.` } : r;
+        }, `Atributo «${nome}» com foto.`, `atr:${novos[0]}`);
+      }
     });
   };
   const gravarNomeAtributo = (a: AtributoGestao, nome: string) =>
@@ -299,6 +305,7 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
               )}
             </div>
           )}
+          {msg("pagina") && <p className="text-[15px] text-red-700 dark:text-red-400" role="alert">{msg("pagina")}</p>}
           {!lista.length && <p className={NOTA}>Ainda não há atributos.</p>}
           {lista.length > 1 && (
             <div>
@@ -495,7 +502,7 @@ function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pen
                           )}
                           {podeEditar && aberto?.t === "editarOpcao" && aberto.id === o.id && (
                             <>
-                              <OpcaoForm temHex={a.temHex} temFoto={a.temFoto} inicial={{ nome: o.nome, hex: o.hex }} rotulo="Guardar opção" criar={false} bloqueado={aGravar || !!pendOpcao}
+                              <OpcaoForm temHex={a.temHex} temFoto={a.temFoto} inicial={{ nome: o.nome, hex: o.hex, foto: o.foto }} rotulo="Guardar opção" criar={false} bloqueado={aGravar || !!pendOpcao}
                                 erro={pendOpcao ? null : msg(`ed:${o.id}`)} idGuardar={`gu-${o.id}`}
                                 onEnviar={(n, h) => onPedirGravar(o, n, h)} onCancelar={() => fechar(`ed-${o.id}`)} />
                               {pendOpcao && <Confirmar p={pendOpcao} aGravar={aGravar} erro={msg(`ed:${o.id}`)} onConfirmar={onConfirmar} onVoltar={onVoltarConfirmar} />}

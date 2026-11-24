@@ -7,7 +7,7 @@ const base = vi.hoisted(() => ({
   chamadas: [] as { f: string; a: Record<string, unknown> }[],
   responder: (() => ({ data: null, error: null })) as (f: string, a: Record<string, unknown>) => { data: unknown; error: unknown },
   /** o storage simulado (bucket catalogo-opcoes): o que se enviou e o que se apagou, e se o envio falha */
-  envios: [] as { bucket: string; caminho: string; tipo: string | undefined; upsert: boolean | undefined; blob: Blob }[],
+  envios: [] as { bucket: string; caminho: string; tipo: string | undefined; upsert: boolean | undefined; cache: string | undefined; blob: Blob }[],
   remocoes: [] as string[][],
   falhaEnvio: null as string | null,
 }));
@@ -24,9 +24,9 @@ vi.mock("@/integrations/supabase/client", () => {
       from: vi.fn(() => cadeia()),
       storage: {
         from: (bucket: string) => ({
-          upload: vi.fn(async (caminho: string, blob: Blob, o?: { contentType?: string; upsert?: boolean }) => {
+          upload: vi.fn(async (caminho: string, blob: Blob, o?: { contentType?: string; upsert?: boolean; cacheControl?: string }) => {
             if (base.falhaEnvio) return { data: null, error: { message: base.falhaEnvio } };
-            base.envios.push({ bucket, caminho, tipo: o?.contentType, upsert: o?.upsert, blob });
+            base.envios.push({ bucket, caminho, tipo: o?.contentType, upsert: o?.upsert, cache: o?.cacheControl, blob });
             return { data: { path: caminho }, error: null };
           }),
           remove: vi.fn(async (caminhos: string[]) => { base.remocoes.push(caminhos); return { data: [], error: null }; }),
@@ -762,9 +762,9 @@ describe("GestaoAtributos: foto na opção (a migration ainda não está aplicad
   it("os rótulos: «Adicionar foto» na que não tem, «Trocar foto» e «Remover foto» na que tem, com o nome da opção", async () => {
     await abrir();
     expect(botaoFoto("Adicionar foto à opção «Pinho»")).toHaveTextContent("Adicionar foto");
-    expect(botaoFoto("Trocar a foto da opção «Carvalho»")).toHaveTextContent("Trocar foto");
-    expect(botaoFoto("Remover a foto da opção «Carvalho»")).toHaveTextContent("Remover foto");
-    expect(screen.queryByRole("button", { name: "Remover a foto da opção «Pinho»" })).toBeNull();
+    expect(botaoFoto("Trocar foto da opção «Carvalho»")).toHaveTextContent("Trocar foto");
+    expect(botaoFoto("Remover foto da opção «Carvalho»")).toHaveTextContent("Remover foto");
+    expect(screen.queryByRole("button", { name: "Remover foto da opção «Pinho»" })).toBeNull();
     expect(screen.getByLabelText("Ficheiro da foto da opção «Pinho»")).toHaveAttribute("type", "file");
   });
 
@@ -782,7 +782,7 @@ describe("GestaoAtributos: foto na opção (a migration ainda não está aplicad
     expect(chamadasDe("cat_foto_opcao")).toHaveLength(0);
     fireEvent.click(within(previa).getByRole("button", { name: "Guardar foto" }));
     await waitFor(() => expect(chamadasDe("cat_foto_opcao")).toHaveLength(1));
-    expect(base.envios).toEqual([expect.objectContaining({ bucket: "catalogo-opcoes", caminho: `${ORG}/${NOVO}.webp`, tipo: "image/webp", upsert: false })]);
+    expect(base.envios).toEqual([expect.objectContaining({ bucket: "catalogo-opcoes", caminho: `${ORG}/${NOVO}.webp`, tipo: "image/webp", upsert: false, cache: "31536000" })]);
     expect(chamadasDe("cat_foto_opcao")[0].a).toEqual({ p_org: ORG, p_opcao: O_PINHO, p_foto: `${ORG}/${NOVO}.webp` });
     await waitFor(() => expect(anunciar).toHaveBeenCalledWith("Foto de «Pinho» guardada."));
     await waitFor(() => expect(chamadasDe("cat_ler_atributos_gestao")).toHaveLength(2));
@@ -859,7 +859,7 @@ describe("GestaoAtributos: foto na opção (a migration ainda não está aplicad
     await abrir();
     await escolher("Pinho");
     fireEvent.click(within(await screen.findByRole("group", { name: /Pré-visualização/ })).getByRole("button", { name: "Guardar foto" }));
-    expect(await screen.findByText(/Não foi possível carregar a foto/)).toBeInTheDocument();
+    expect(await screen.findByText("Não tem permissão para carregar fotos.")).toBeInTheDocument();
     expect(chamadasDe("cat_foto_opcao")).toHaveLength(0);
     expect(base.remocoes).toEqual([]);
   });
@@ -870,7 +870,7 @@ describe("GestaoAtributos: foto na opção (a migration ainda não está aplicad
     render(<GestaoAtributos real={REAL()} voltar={vi.fn()} anunciar={anunciar} />);
     await screen.findByRole("region", { name: "Madeira" });
     abrirTodos();
-    fireEvent.click(botaoFoto("Remover a foto da opção «Carvalho»"));
+    fireEvent.click(botaoFoto("Remover foto da opção «Carvalho»"));
     await waitFor(() => expect(chamadasDe("cat_foto_opcao")).toHaveLength(1));
     expect(chamadasDe("cat_foto_opcao")[0].a).toEqual({ p_org: ORG, p_opcao: O_CARV, p_foto: null });
     await waitFor(() => expect(base.remocoes).toEqual([[F1]]));
@@ -881,7 +881,7 @@ describe("GestaoAtributos: foto na opção (a migration ainda não está aplicad
   it("remover com a antiga ainda usada por outra opção: não apaga o ficheiro", async () => {
     base.responder = (f) => (f === "cat_ler_atributos_gestao" ? { data: atual(), error: null } : f === "cat_foto_opcao" ? ok({ foto: null, antiga: F1, antiga_orfa: false }) : ok({}));
     await abrir();
-    fireEvent.click(botaoFoto("Remover a foto da opção «Carvalho»"));
+    fireEvent.click(botaoFoto("Remover foto da opção «Carvalho»"));
     await waitFor(() => expect(chamadasDe("cat_ler_atributos_gestao")).toHaveLength(2));
     expect(base.remocoes).toEqual([]);
   });
@@ -997,8 +997,137 @@ describe("GestaoAtributos: foto na opção (a migration ainda não está aplicad
       fireEvent.click(screen.getByRole("checkbox", { name: /Tem cor/ }));
       fireEvent.click(screen.getByRole("checkbox", { name: /Tem foto/ }));
       fireEvent.click(screen.getByRole("button", { name: "Criar atributo" }));
-      expect(await screen.findByText("Só os atributos de cor podem ter foto.")).toBeInTheDocument();
+      const aviso = await screen.findByText(/foi criado sem foto/);
+      expect(aviso).toHaveTextContent("O atributo «Acabamento» foi criado sem foto: Só os atributos de cor podem ter foto.");
+      expect(aviso.closest("[role='alert']")).not.toBeNull();
       expect(screen.getByRole("region", { name: "Acabamento" })).toBeInTheDocument();
     });
+  });
+
+  describe("revisão: robustez e acessibilidade", () => {
+    const abrirPrevia = async (opcao = "Pinho") => {
+      await abrir();
+      await escolher(opcao);
+      return screen.findByRole("group", { name: `Pré-visualização da foto da opção «${opcao}»` });
+    };
+    const guardarFoto = (previa: HTMLElement) => within(previa).getByRole("button", { name: "Guardar foto" });
+
+    it("os rótulos dos botões começam pelo texto visível (WCAG 2.5.3)", async () => {
+      await abrir();
+      for (const [visivel, rotulo] of [["Adicionar foto", "Adicionar foto à opção «Pinho»"], ["Trocar foto", "Trocar foto da opção «Carvalho»"], ["Remover foto", "Remover foto da opção «Carvalho»"]]) {
+        expect(botaoFoto(rotulo).textContent?.trim()).toBe(visivel);
+        expect(rotulo.startsWith(visivel)).toBe(true);
+      }
+    });
+
+    it("ao aparecer a pré-visualização o foco passa para «Guardar foto» (o botão de origem ficou desligado durante a leitura)", async () => {
+      const previa = await abrirPrevia();
+      await waitFor(() => expect(guardarFoto(previa)).toHaveFocus());
+    });
+
+    it("uma foto recusada devolve o foco ao botão de origem", async () => {
+      vi.mocked(prepararFotoOpcao).mockResolvedValue({ ok: false, erro: "A foto tem mais de 5 MB." });
+      await abrir();
+      await escolher("Pinho");
+      await screen.findByText("A foto tem mais de 5 MB.");
+      await waitFor(() => expect(botaoFoto("Adicionar foto à opção «Pinho»")).toHaveFocus());
+    });
+
+    it("se a base recusa ao guardar, o foco volta a «Guardar foto» e a pré-visualização fica", async () => {
+      base.responder = (f) => (f === "cat_ler_atributos_gestao" ? { data: atual(), error: null } : f === "cat_foto_opcao" ? erro("CT003", "Sem permissão.") : ok({}));
+      const previa = await abrirPrevia();
+      fireEvent.click(guardarFoto(previa));
+      await screen.findByText("Sem permissão.");
+      await waitFor(() => expect(guardarFoto(screen.getByRole("group", { name: /Pré-visualização/ }))).toHaveFocus());
+    });
+
+    it("remover que falha devolve o foco ao botão «Remover foto»", async () => {
+      base.responder = (f) => (f === "cat_ler_atributos_gestao" ? { data: atual(), error: null } : f === "cat_foto_opcao" ? erro("CT003", "Sem permissão.") : ok({}));
+      await abrir();
+      botaoFoto("Remover foto da opção «Carvalho»").focus();
+      fireEvent.click(botaoFoto("Remover foto da opção «Carvalho»"));
+      await screen.findByText("Sem permissão.");
+      await waitFor(() => expect(botaoFoto("Remover foto da opção «Carvalho»")).toHaveFocus());
+    });
+
+    it("randomUUID a falhar (contexto não seguro): o erro aparece, nada se envia e o ecrã não fica preso em «A guardar a foto…»", async () => {
+      (crypto.randomUUID as unknown as ReturnType<typeof vi.fn>).mockImplementation(() => { throw new TypeError("crypto.randomUUID is not a function"); });
+      const previa = await abrirPrevia();
+      fireEvent.click(guardarFoto(previa));
+      expect(await screen.findByText("Não foi possível carregar a foto.")).toBeInTheDocument();
+      expect(base.envios).toHaveLength(0);
+      expect(chamadasDe("cat_foto_opcao")).toHaveLength(0);
+      expect(screen.queryByText("A guardar a foto…")).toBeNull();
+      await waitFor(() => expect(guardarFoto(screen.getByRole("group", { name: /Pré-visualização/ }))).toBeEnabled());
+    });
+
+    it("duplo clique em «Guardar foto» carrega e liga uma só vez", async () => {
+      const previa = await abrirPrevia();
+      const botao = guardarFoto(previa);
+      fireEvent.click(botao);
+      fireEvent.click(botao);
+      await waitFor(() => expect(chamadasDe("cat_ler_atributos_gestao")).toHaveLength(2));
+      expect(base.envios).toHaveLength(1);
+      expect(chamadasDe("cat_foto_opcao")).toHaveLength(1);
+    });
+
+    it("duplo clique em «Remover foto» liga uma só vez", async () => {
+      await abrir();
+      const botao = botaoFoto("Remover foto da opção «Carvalho»");
+      fireEvent.click(botao);
+      fireEvent.click(botao);
+      await waitFor(() => expect(chamadasDe("cat_ler_atributos_gestao")).toHaveLength(2));
+      expect(chamadasDe("cat_foto_opcao")).toHaveLength(1);
+    });
+
+    it("se o ecrã desaparece durante a leitura da foto, não se cria o endereço temporário da pré-visualização", async () => {
+      let acabar: (v: Awaited<ReturnType<typeof prepararFotoOpcao>>) => void = () => undefined;
+      vi.mocked(prepararFotoOpcao).mockReturnValue(new Promise((r) => { acabar = r; }));
+      await abrir();
+      await escolher("Pinho");
+      await screen.findByText("A preparar a foto…");
+      cleanup();
+      acabar({ ok: true, v: { blob: new Blob([new Uint8Array(10)], { type: "image/webp" }), largura: 10, altura: 10, bytes: 10 } });
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(URL.createObjectURL).not.toHaveBeenCalled();
+    });
+
+    it("o campo de ficheiro escondido fica fora da ordem do Tab (o botão é que o abre)", async () => {
+      await abrir();
+      expect(screen.getByLabelText("Ficheiro da foto da opção «Pinho»")).toHaveAttribute("tabindex", "-1");
+    });
+
+    it("editar uma opção só com foto: a amostra do formulário mostra a foto (não o neutro tracejado)", async () => {
+      await abrir();
+      fireEvent.click(screen.getByRole("button", { name: "Editar Carvalho" }));
+      expect(li(sec("Madeira"), "Carvalho").querySelectorAll("img").length).toBe(2);
+    });
+
+    it("criar com «Tem foto» sem se saber qual é o atributo novo: fecha o formulário, avisa na página e não liga nada (um novo clique não cria duplicado)", async () => {
+      base.responder = (f) => (f === "cat_ler_atributos_gestao" ? { data: lidoFoto(), error: null } : ok({}));
+      await abrir();
+      fireEvent.click(screen.getByRole("button", { name: "Novo atributo" }));
+      fireEvent.change(screen.getByLabelText("Nome do atributo"), { target: { value: "Acabamento" } });
+      fireEvent.click(screen.getByRole("checkbox", { name: /Tem cor/ }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /Tem foto/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Criar atributo" }));
+      const aviso = await screen.findByText(/não foi possível ligar «Tem foto»/);
+      expect(aviso.closest("[role='alert']")).not.toBeNull();
+      expect(screen.queryByRole("button", { name: "Criar atributo" })).toBeNull();
+      expect(chamadasDe("cat_guardar_atributo")).toHaveLength(1);
+      expect(chamadasDe("cat_definir_foto_atributo")).toHaveLength(0);
+    });
+  });
+
+  it("cor desligada num atributo com fotos: o erro 23514 da base vem em português, sem o texto cru", async () => {
+    base.responder = (f) => (f === "cat_ler_atributos_gestao" ? { data: atual(), error: null }
+      : f === "cat_guardar_atributo" ? erro("23514", "new row for relation \"product_attributes\" violates check constraint \"product_attributes_has_photo_check\"") : ok({}));
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Novo atributo" }));
+    fireEvent.change(screen.getByLabelText("Nome do atributo"), { target: { value: "Madeiras" } });
+    fireEvent.click(screen.getByRole("button", { name: "Criar atributo" }));
+    expect(await screen.findByText("Este atributo tem fotos nas opções: remova as fotos antes de tirar a cor.")).toBeInTheDocument();
+    expect(screen.queryByText(/product_attributes_has_photo_check/)).toBeNull();
   });
 });

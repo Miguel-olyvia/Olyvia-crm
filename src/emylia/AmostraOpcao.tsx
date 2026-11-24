@@ -19,7 +19,7 @@ export function AmostraOpcao({ foto, hex, nome, tamanho = 24, testId, className 
   const { url, aoFalhar } = useFotoOpcao(foto);
   return (
     <span aria-hidden="true" data-testid={testId} data-hex={hex ?? ""} data-opcao={nome} data-foto={url ? foto : undefined}
-      style={{ width: tamanho, height: tamanho, ...(!url && hex ? { backgroundColor: hex } : {}) }}
+      style={{ width: tamanho, height: tamanho, ...(hex ? { backgroundColor: hex } : {}) }}
       className={cn("inline-block shrink-0 overflow-hidden", url || hex ? "border border-foreground/20 bg-muted" : "border border-dashed border-muted-foreground/60", className ?? "rounded-md")}>
       {url && <img src={url} alt="" loading="lazy" onError={aoFalhar} className="block h-full w-full object-cover" />}
     </span>
