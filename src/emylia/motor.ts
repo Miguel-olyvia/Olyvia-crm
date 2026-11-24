@@ -980,8 +980,10 @@ export const temModeloDeObra = (o: Orcamento): boolean => temModeloNasLinhas(o.l
 const temModeloNasLinhas = (linhas: LinhaOrc[]): boolean => linhas.some((l) => l.t === "svc" && itemCatalogo(l.sid)?.cat === "Modelos de obra");
 /** 26/10: as proteções e o transporte do levantamento que um «MO Modelo» do Catálogo já inclui (o caso real P-2026-0109: a Mudelar não
  *  as cobra à parte). O estacionamento pago, o amianto e as percentagens continuam a entrar.
- *  23/11 (teste real P-2026-0932): a aspiração do pó dos cortes também (o modelo inclui a delimitação, proteção e isolamento da zona). */
-const NO_MODELO_DE_OBRA = new Set(["diag_distancia_entrada", "diag_portas_proteger", "diag_mobilada", "tem_elevador", "andar", "diag_local_cortes"]);
+ *  23/11 (teste real P-2026-0932): a aspiração do pó dos cortes também (o modelo inclui a delimitação, proteção e isolamento da zona).
+ *  24/11 (contrato real P-2026-1089, MD 1610: casa de banho sem janela, MO Modelo 1): o «+3% sem janela» também não entra (o preço do
+ *  modelo é fechado). As outras percentagens continuam a entrar. */
+const NO_MODELO_DE_OBRA = new Set(["diag_distancia_entrada", "diag_portas_proteger", "diag_mobilada", "tem_elevador", "andar", "diag_local_cortes", "diag_janela"]);
 /** 26/10: o efeito do gás do levantamento já está num serviço do orçamento (a anulação, c7; a instalação, c34 ou a subempreitada). */
 const GAS_NO_ORCAMENTO: Record<string, SvcId[]> = { Anular: ["c7"], Instalar: ["c34", "s-moisgas", "s-matisgas"] };
 

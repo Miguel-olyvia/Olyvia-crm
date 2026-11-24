@@ -244,6 +244,19 @@ describe("o levantamento com um «MO Modelo» no orçamento", () => {
     A.campo(d.id, "diag_local_cortes", "Na própria área");
     expect(aspiracao()).toBe(true);
   });
+
+  // 24/11 (contrato real P-2026-1089, MD 1610): casa de banho sem janela com o MO Modelo 1; o contrato não tem o «+3% sem janela».
+  it("o «+3% sem janela» não entra com um MO Modelo (o preço do modelo é fechado); sem o modelo, entra", () => {
+    const { S, A, d } = preparar();
+    const semJanela = () => d.orc!.linhas.some((l) => l.t === "mat" && /Sem janela/.test(l.d));
+    A.campo(d.id, "diag_janela", "Não");
+    expect(semJanela()).toBe(true);
+    const sid = SID("MOMRCCBC");
+    S.svc[sid] = servicoDoCatalogo(sid, S)!;
+    d.orc!.linhas.push({ t: "svc", sid, q: 1, cu: 0, pu: S.svc[sid].preco });
+    A.campo(d.id, "diag_janela", "Não");
+    expect(semJanela()).toBe(false);
+  });
 });
 
 describe("o valor das prestações", () => {
