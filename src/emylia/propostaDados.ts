@@ -44,7 +44,7 @@ export function fasesDosServicos(d: Negocio, S: Estado): Map<string, FaseObra> {
  *  descrição; a demolição na 1). */
 export function conteudoPorFase(d: Negocio, S: Estado, faseDe = fasesDosServicos(d, S)): FaseProposta[] {
   return porFase((d.orc?.linhas ?? []).map((l) => {
-    if (l.t === "svc") { const x = linhaCalc(l, S); return { fase: faseDe.get(l.sid) ?? 4, t: "svc" as const, nome: x.s!.n, q: l.q, un: x.s!.un }; }
+    if (l.t === "svc") { const x = linhaCalc(l, S); return { fase: faseDe.get(l.sid) ?? 4, t: "svc" as const, nome: (x.s?.n ?? "Serviço"), q: l.q, un: (x.s?.un ?? "") }; }
     return { fase: l.d === LINHA_DEMOLICAO ? 1 : faseDosMateriais(l.d), t: "mat" as const, d: l.d };
   }));
 }
@@ -141,7 +141,7 @@ export function dadosDasClausulas(d: Negocio, S: Estado): ClausulasDados {
   const o = d.orc!, T = totaisIva(d, S);
   return {
     servico: d.servico, morada: d.f.morada || d.local, localidade: d.f.localidade || "",
-    servicos: o.linhas.filter((l) => l.t === "svc").map((l) => linhaCalc(l, S).s!.n),
+    servicos: o.linhas.filter((l) => l.t === "svc").map((l) => (linhaCalc(l, S).s?.n ?? "serviço")),
     T, prestacoes: prestacoesDaProposta(d, T.total, S),
     prazo: { inicio: d.f.inicio_prev || null, dias: d.f.prazo_exec || null, fim: fimPrevistoData(d.f.inicio_prev, d.f.prazo_exec), multa: d.f.multa === "Sim" },
     garantia: d.f.garantia || null,

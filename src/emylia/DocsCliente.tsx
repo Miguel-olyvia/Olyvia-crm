@@ -324,7 +324,7 @@ export function orcamentoDetalhado(d: Negocio, S: Estado) {
   const linhas = o.linhas.map((l) => {
     const x = linhaCalc(l, S), fase: FaseObra = l.t === "mat" ? (l.d === LINHA_DEMOLICAO ? 1 : faseDosMateriais(l.d)) : (faseDe.get(l.sid) ?? 4);
     return l.t === "svc"
-      ? { fase, nome: x.s!.n, q: l.q, un: x.s!.un, pu: (x.preco * k) / (l.q || 1), total: x.preco * k, mat: false }
+      ? { fase, nome: (x.s?.n ?? "Serviço"), q: l.q, un: (x.s?.un ?? ""), pu: (x.preco * k) / (l.q || 1), total: x.preco * k, mat: false }
       : l.livre // 26/10: a linha livre com a quantidade, a unidade e o preço por unidade que se escreveram
         ? { fase, nome: l.d, q: l.livre.q, un: l.livre.un, pu: (x.preco * k) / (l.livre.q || 1), total: x.preco * k, mat: true }
         : { fase, nome: nomeNaTabela(l.d), q: 1, un: "vg", pu: x.preco * k, total: x.preco * k, mat: true };
@@ -689,7 +689,7 @@ export function clausulasContrato(d: Negocio, S: Estado, a?: Adenda): { titulo: 
     Garantia: `${d.f.garantia || "2 anos"} sobre a mão de obra, a contar da data do auto de receção da obra. Os materiais têm a garantia do fabricante.`,
     "Condições gerais": `Mantém-se tudo o resto do contrato ${numeroDoContratoDoNegocio(d)}, incluindo as condições gerais da empresa.`,
   } : {
-    Objeto: `Os trabalhos de ${d.servico.toLowerCase()} em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${o.linhas.filter((l) => l.t === "svc").map((l) => linhaCalc(l, S).s!.n.toLowerCase()).join(", ")}, e os materiais do modelo escolhido.`,
+    Objeto: `Os trabalhos de ${d.servico.toLowerCase()} em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${o.linhas.filter((l) => l.t === "svc").map((l) => (linhaCalc(l, S).s?.n ?? "serviço").toLowerCase()).join(", ")}, e os materiais do modelo escolhido.`,
     "Preço": `${eur(T.base)} € sem IVA: ${eur(T.mo)} € de mão de obra, com IVA a 6% (${eur(T.ivaMo)} €), e ${eur(T.mat)} € de materiais, com IVA a 23% (${eur(T.ivaMat)} €). Total com IVA: ${eur(T.total)} €.`,
     Pagamento: tr.map((t) => `${t.l}${t.quando ? ` (previsto: ${t.quando})` : ""}: ${Math.round(t.p * 100)}%, ${eur(t.v)} €`),
     Prazo: `Início ${d.f.inicio_prev ? `a ${data(d.f.inicio_prev)}` : "por marcar"}, com ${d.f.prazo_exec || "—"} dias úteis de execução: fim previsto a ${fimPrevisto(d.f.inicio_prev, d.f.prazo_exec)}.${d.f.multa === "Sim" ? " O atraso imputável à empresa dá lugar a penalização, nos termos das condições gerais." : ""}`,

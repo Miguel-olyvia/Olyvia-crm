@@ -196,15 +196,15 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
         const x = linhaCalc(l, S), m = x.preco > 0 ? (x.preco - x.custo) / x.preco : 0;
         const cor = x.preco <= 0 ? "bg-muted text-muted-foreground" : m < min ? "bg-destructive/10 text-destructive" : m < alvo - 0.005 ? "bg-warning/15 text-warning" : "bg-success/10 text-success";
         const origem = origemLinha(l), O = ORIGEM[origem];
-        const nome = l.t === "svc" ? x.s!.n : l.d.replace(/^(Produto · |Fornecido pelo cliente · |Levantamento · )/, "");
-        const Ic = l.t === "svc" ? iconeOficio(CATALOGO.find((c) => c.id === l.sid)?.cat ?? x.s!.perfil) : O.ic;
+        const nome = l.t === "svc" ? (x.s?.n ?? "Serviço") : l.d.replace(/^(Produto · |Fornecido pelo cliente · |Levantamento · )/, "");
+        const Ic = l.t === "svc" ? iconeOficio(CATALOGO.find((c) => c.id === l.sid)?.cat ?? x.s?.perfil ?? "") : O.ic;
         const dem = origem === "demolicao", veCusto = ver && (!dem || direcao); // o custo da demolição só a Direção o vê
-        const sub = l.t === "svc" ? `${nfmt(l.q)} ${x.s!.un} × ${eur(l.pu)} €` : l.livre ? `${nfmt(l.livre.q)} ${l.livre.un} × ${eur(l.livre.pu)} €` : origem === "modelo" ? "estimativa dos materiais do modelo" : dem && o.demolicao?.r ? resumoDemolicao(o.demolicao.r) : "";
+        const sub = l.t === "svc" ? `${nfmt(l.q)} ${(x.s?.un ?? "")} × ${eur(l.pu)} €` : l.livre ? `${nfmt(l.livre.q)} ${l.livre.un} × ${eur(l.livre.pu)} €` : origem === "modelo" ? "estimativa dos materiais do modelo" : dem && o.demolicao?.r ? resumoDemolicao(o.demolicao.r) : "";
         const ajustado = l.t === "mat" && o.precosMan?.[l.d] != null;
         const zonaTxt = !tabela && fechado && l.zonas?.length ? (l.zonas.length === 1 ? l.zonas[0].z : l.zonas.map((z) => `${z.z} ${nfmt(z.q)}`).join(", ")) : "";
         // 27/10 (Rúben): a caixa dizia o preço por unidade por baixo de um valor que é o total da linha (2 121,00 € abria 106,05).
         // Agora diz o que é: o preço por unidade (com a unidade) nos serviços e nas linhas livres; o valor da linha nas outras.
-        const unEditar = l.t === "svc" ? x.s!.un : l.t === "mat" && l.livre ? l.livre.un : null;
+        const unEditar = l.t === "svc" ? (x.s?.un ?? "") : l.t === "mat" && l.livre ? l.livre.un : null;
         const qEditar = l.t === "svc" ? l.q : l.t === "mat" && l.livre ? l.livre.q : 1;
         const valorEditar = l.t === "svc" ? l.pu : l.t === "mat" && l.livre ? l.livre.pu : l.preco;
         const s = l.t === "svc" ? x.s! : null, novo = s && l.t === "svc" ? custoUnLinha(s, S) : 0, mud = !!s && !fechado && l.t === "svc" && !l.cuMan && Math.abs(novo - l.cu) > 0.004;
