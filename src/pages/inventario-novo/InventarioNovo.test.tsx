@@ -172,6 +172,21 @@ describe("o novo Inventário", () => {
     expect(screen.getByTestId("onde")).toHaveTextContent("/inventory/novo/hoje");
   });
 
+  it("fatia 3: o «E se…?» do botão principal no Hoje (fechado não lê nada) e o Anular/Refazer no cabeçalho", async () => {
+    perms = new Set([...TODAS, "client_orders.confirm_stock_exit"]);
+    todayPayload = { ...payload(), client_orders: { ...payload().client_orders!, ready_to_ship: 2 } };
+    montar();
+    await screen.findByText("Hoje clássico (embebido)");
+    expect(cabecalho().getByRole("group", { name: "Anular e refazer" })).toBeInTheDocument();
+    expect(cabecalho().getByRole("button", { name: /Dar saída/ })).toBeInTheDocument();
+    const abrir = screen.getByRole("button", { name: "E se… Dar saída?" });
+    expect(abrir).toHaveAttribute("aria-expanded", "false");
+    expect(screen.queryByRole("region", { name: "E se confirmares a saída?" })).toBeNull();
+    fireEvent.click(abrir);
+    expect(await screen.findByRole("region", { name: "E se confirmares a saída?" })).toBeInTheDocument();
+    expect(screen.getByTestId("onde")).toHaveTextContent("/inventory/novo/hoje");
+  });
+
   it("Esc sem diálogo aberto volta ao clássico; «Voltar ao clássico» também", async () => {
     const { unmount } = montar();
     await screen.findByText("Hoje clássico (embebido)");

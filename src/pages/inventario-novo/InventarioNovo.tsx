@@ -9,11 +9,14 @@
 // · Esc com uma folha ou diálogo aberto ([role=dialog][data-state=open]) não faz nada: fecha-se a folha primeiro.
 // · Fatia 2: o painel do produto à direita (Existências → "Ver produto", ?painel=produto:<id>) e, no telemóvel, a barra do
 //   polegar em baixo (BarraPolegar) com o botão principal, que no cabeçalho só aparece a partir de `sm`.
-import { Suspense, useEffect, useRef, useState } from "react";
+// · Fatia 3: o "E se…?" (ESeInventario, só leitura) do botão principal — no cabeçalho ("E se…?" ao lado de "Receber PO-x" /
+//   "Dar saída") e no Hoje, por cima do Comando —; e o ↶ Anular / ↷ Refazer (BotoesAnular) ligado ao livro desta sessão
+//   (useLivroDaSessao: os movimentos que este utilizador fez desde que abriu o novo Inventário) e às reversões que já existem.
+import { Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, ArrowLeftRight, Check, ShieldAlert, Truck, PackageCheck, ShoppingCart } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowLeftRight, Check, ChevronDown, ShieldAlert, Sparkles, Truck, PackageCheck, ShoppingCart } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -28,6 +31,7 @@ import { InventarioEmbebido } from "@/components/inventory/ui/embebido";
 import { receivingLink } from "@/components/inventory/ui/inventoryLinks";
 import { permissionReason } from "@/components/inventory/ui/permissionReason";
 import { Button } from "@/components/ui/button";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NaFrente } from "@/emylia/NaFrente";
 import { MOLA, useReduzir } from "@/emylia/movimento";
@@ -35,11 +39,14 @@ import { cn } from "@/lib/utils";
 import { NavegadorDoInventario, paraSeparador } from "./navegadorInventario";
 import { PulsoInventario } from "./PulsoInventario";
 import { ComandoInventario } from "./ComandoInventario";
-import { botaoPrincipal, precisaDeTi, saudeDoInventario } from "./contasComando";
+import { botaoPrincipal, poAtrasada, precisaDeTi, saudeDoInventario } from "./contasComando";
 import { PainelProduto } from "./PainelProduto";
 import { ProcurarProduto } from "./ProcurarProduto";
 import { BarraPolegar } from "./BarraPolegar";
 import { usePainelProduto } from "./painelUrl";
+import { ESeInventario, type AcaoESe } from "./ESeInventario";
+import { BotoesAnular } from "./BotoesAnular";
+import { MARGEM_RELOGIO_MS, useLivroDaSessao } from "./useLivroDaSessao";
 import { caminhoSeparador, eChaveSeparador, separadorDe, separadoresVisiveis, type ChaveSeparador } from "./separadores";
 
 const CLASSICO = "/inventory";
@@ -88,6 +95,21 @@ function PilulaSaude({ tom, texto }: { tom: "bad" | "warn" | "ok"; texto: string
 }
 
 const ICONE_PRINCIPAL = { receber: Truck, saida: PackageCheck, aprovar: ShoppingCart, movimento: ArrowLeftRight } as const;
+
+/** O "E se…?" do botão principal no Hoje (por cima do Comando): fechado, não lê nada; aberto, mostra o impacto sem gravar. */
+function ESeNoHoje({ rotulo, children }: { rotulo: string; children: ReactNode }) {
+  const [aberto, setAberto] = useState(false);
+  const id = useId();
+  return (
+    <div className="space-y-2">
+      <Button type="button" variant="outline" className="min-h-11 rounded-2xl" aria-expanded={aberto} aria-controls={id} onClick={() => setAberto((x) => !x)}>
+        <Sparkles className="mr-1.5 h-4 w-4 text-primary" aria-hidden="true" />E se… {rotulo}?
+        <ChevronDown className={cn("ml-1.5 h-4 w-4 transition-transform", aberto && "rotate-180")} aria-hidden="true" />
+      </Button>
+      <div id={id}>{aberto && children}</div>
+    </div>
+  );
+}
 
 export default function InventarioNovo() {
   const { aba } = useParams();
@@ -181,6 +203,21 @@ export default function InventarioNovo() {
     staleTime: 5 * 60 * 1000,
   });
 
+  // Fatia 3: o "E se…?" do botão principal (só receber e dar saída) e o livro da sessão para o Anular/Refazer.
+  const poPrincipal = principal.tipo === "receber" ? poAtrasada(posRecebiveis, todayIsoLocal()) : null;
+  const acaoESe: AcaoESe | null = principal.tipo === "receber" && poPrincipal ? { tipo: "receber", po: poPrincipal, to: principal.to }
+    : principal.tipo === "saida" ? { tipo: "saida", to: principal.to } : null;
+  const [eSeAberto, setESeAberto] = useState(false);
+  const eSe = (fechar?: () => void) => acaoESe && (
+    <ESeInventario acao={acaoESe} orgId={orgId} podePrever={gatePrincipal.allowed}
+      bloqueio={gatePrincipal.allowed ? null : (gatePrincipal.reason ?? null)} ir={(to) => { fechar?.(); navigate(to); }} />
+  );
+  // A abertura vem do relógio do cliente, que pode estar adiantado em relação ao servidor (created_at é do servidor): tira-se
+  // uma margem de 2 minutos para não perder os primeiros movimentos. Os que foram feitos ANTES de abrir e caem nessa margem
+  // entram no livro, mas só os do próprio utilizador (lerLivro filtra created_by = current_business_user_id()) — aceitável.
+  const [aberturaSessao] = useState(() => new Date(Date.now() - MARGEM_RELOGIO_MS).toISOString());
+  const livro = useLivroDaSessao(orgId, aberturaSessao, ativo?.chave ?? "", !loading);
+
   const carregarPrincipal = () => {
     if (principal.tipo === "movimento") setMovimentoAberto(true);
     else navigate(principal.to);
@@ -207,7 +244,18 @@ export default function InventarioNovo() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {!loading && <BotoesAnular orgId={orgId} movimentos={livro.movimentos} recarregar={livro.recarregar} aoMudarStock={aoMudarStock} />}
               {saude && <PilulaSaude tom={saude.tom} texto={saude.texto} />}
+              {!loading && visiveis.length > 0 && acaoESe && (
+                <Popover open={eSeAberto} onOpenChange={setESeAberto}>
+                  <PopoverTrigger asChild>
+                    <Button type="button" variant="outline" className="hidden min-h-11 sm:inline-flex">
+                      <Sparkles className="mr-1.5 h-4 w-4 text-primary" aria-hidden="true" />E se…?
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-[min(30rem,92vw)] rounded-2xl p-2">{eSe(() => setESeAberto(false))}</PopoverContent>
+                </Popover>
+              )}
               {!loading && visiveis.length > 0 && (
                 <BlockedButton type="button" className="hidden min-h-11 sm:inline-flex" blockedReason={gatePrincipal.allowed ? null : gatePrincipal.reason} side="bottom" onClick={carregarPrincipal}>
                   <IconePrincipal className="mr-1.5 h-4 w-4" aria-hidden="true" />{principal.rotulo}
@@ -259,6 +307,7 @@ export default function InventarioNovo() {
                 {ativo.chave === "hoje" && (
                   <>
                     <PulsoInventario verFila={() => comandoRef.current?.scrollIntoView?.({ behavior: reduzir ? "auto" : "smooth", block: "start" })} />
+                    {acaoESe && <ESeNoHoje rotulo={principal.rotulo}>{eSe()}</ESeNoHoje>}
                     <ComandoInventario ref={comandoRef} />
                   </>
                 )}
@@ -299,6 +348,7 @@ export default function InventarioNovo() {
             void queryClient.invalidateQueries({ queryKey: ["inventory-today-recent-movements", orgId] });
             void queryClient.invalidateQueries({ queryKey: inventoryTodayQueryKey(orgId) });
             if (canReceivable) void queryClient.invalidateQueries({ queryKey: receivablePosQueryKey(orgId) });
+            livro.recarregar();
           }}
         />
       )}

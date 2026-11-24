@@ -5,7 +5,10 @@ import { Check, History, Lock, Redo2, Undo2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Passo } from "./passosObra";
 
-export function BotoesPassos({ L, pos, anular, refazer, voltarAte }: { L: Passo[]; pos: number; anular: () => void; refazer: () => void; voltarAte: (k: number) => void }) {
+/** O que os botões leem de um passo (24/11: só o tipo alargado, para o novo Inventário também os usar; o Estúdio passa Passo). */
+export type PassoBotao = Pick<Passo, "n" | "texto" | "pode" | "porque">;
+
+export function BotoesPassos({ L, pos, anular, refazer, voltarAte }: { L: PassoBotao[]; pos: number; anular: () => void; refazer: () => void; voltarAte: (k: number) => void }) {
   const [lista, setLista] = useState(false);
   const caixa = useRef<HTMLDivElement>(null);
   useEffect(() => {
