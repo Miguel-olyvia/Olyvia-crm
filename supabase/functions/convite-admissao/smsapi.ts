@@ -8,6 +8,7 @@
  * SMSAPI (traz o numero). Uma falha sai so como CODIGO. Timeout de 8 s.
  */
 import type { PedidoSms, ResultadoSms } from "./accoesDocumentos.ts";
+import { type ListaEnvios, telefonePermitido } from "../_shared/enviosPermitidos.ts";
 
 export const URL_SMSAPI = "https://api.smsapi.com/sms.do";
 const TIMEOUT_MS = 8000;
@@ -20,12 +21,15 @@ export interface DepsSmsApi {
     ok: boolean;
     json(): Promise<unknown>;
   }>;
+  /** 24/11: ENVIOS_SO_PARA lida (enviosPermitidos.ts); com lista, só esses telefones recebem (ambiente de teste com dados reais). */
+  soPara?: ListaEnvios;
 }
 
 export function criarEnviadorSms(deps: DepsSmsApi): (pedido: PedidoSms) => Promise<ResultadoSms> {
   return async (pedido) => {
     if (typeof deps.token !== "string" || deps.token.trim() === "") return { enviado: false, erroCodigo: "sms_nao_configurado" };
     if (!TELEMOVEL_E164.test(pedido.telefone) || pedido.texto.trim() === "") return { enviado: false, erroCodigo: "pedido_invalido" };
+    if (!telefonePermitido(pedido.telefone, deps.soPara ?? null)) return { enviado: false, erroCodigo: "sms_bloqueado_teste" };
     const controlo = new AbortController();
     const temporizador = setTimeout(() => controlo.abort(), TIMEOUT_MS);
     try {

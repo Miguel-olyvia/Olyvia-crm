@@ -1,4 +1,5 @@
 import nodemailer from "npm:nodemailer@6.9.14";
+import { lerListaEnvios, MENSAGEM_BLOQUEIO, separarDestinatarios } from "./enviosPermitidos.ts";
 
 export interface EmailAttachment {
   filename: string;
@@ -206,6 +207,15 @@ export async function sendEmailViaSMTP(
   const secure = smtpConfig.smtp_secure ?? smtpConfig.secure ?? false;
   const fromEmail = smtpConfig.from_email || user || (Array.isArray(payload.to) ? payload.to[0] : payload.to);
   const fromName = smtpConfig.from_name || "Olyvia";
+
+  // 24/11: num ambiente de teste com dados reais (ENVIOS_SO_PARA), só se envia para a lista; os outros destinatários saem do envio.
+  const lista = lerListaEnvios(Deno.env.get("ENVIOS_SO_PARA"));
+  if (lista) {
+    const para = separarDestinatarios(payload.to, lista), cc = separarDestinatarios(payload.cc, lista);
+    if (para.bloqueados.length || cc.bloqueados.length) console.warn(`[smtp] ENVIOS_SO_PARA: ${para.bloqueados.length + cc.bloqueados.length} destinatário(s) bloqueado(s)`);
+    if (!para.permitidos.length) throw new Error(MENSAGEM_BLOQUEIO);
+    payload = { ...payload, to: para.permitidos, cc: cc.permitidos };
+  }
 
   const transporter = nodemailer.createTransport({
     host,
