@@ -55,6 +55,7 @@ const LeadContactResults = lazy(() => import("./pages/LeadContactResults"));
 
 const Stocks = lazy(() => import("./pages/Stocks"));
 const InventoryToday = lazy(() => import("./pages/InventoryToday"));
+const InventarioNovo = lazy(() => import("./pages/inventario-novo/InventarioNovo"));
 const StockMovements = lazy(() => import("./pages/StockMovements"));
 const Warehouses = lazy(() => import("./pages/Warehouses"));
 const Frota = lazy(() => import("./pages/frota/Frota"));
@@ -369,6 +370,8 @@ const App = () => (
                       <Route path="/bundles" element={<Navigate to="/catalogo-custos" replace />} />
                       {/* Inventário › Hoje e Movimentos (livro stock_movements): mesma permissão de leitura que a RLS exige (inventory.view). */}
                       <Route path="/inventory" element={<ProtectedRoute permission="inventory.view"><InventoryToday /></ProtectedRoute>} />
+                      {/* O novo Inventário (moldura do Estúdio com os 9 ecrãs clássicos embebidos): a permissão OR do item Inventário no menu (menuConfig.ts). */}
+                      <Route path="/inventory/novo/:aba?" element={<ProtectedRoute permissions={["inventory.view", "purchase_orders.view", "suppliers.view", "client_orders.view", "receiving.view", "warehouses.view"]}><InventarioNovo /></ProtectedRoute>} />
                       <Route path="/stock-movements" element={<ProtectedRoute permission="inventory.view"><StockMovements /></ProtectedRoute>} />
                       <Route path="/stocks" element={<ProtectedRoute permission="inventory.view"><Stocks /></ProtectedRoute>} />
                       <Route path="/warehouses" element={<ProtectedRoute permission="warehouses.view"><Warehouses /></ProtectedRoute>} />

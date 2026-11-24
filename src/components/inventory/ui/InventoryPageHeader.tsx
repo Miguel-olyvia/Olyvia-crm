@@ -5,8 +5,9 @@
 //         migalha "Inventário › Compras/Armazém"; sem área = só "Inventário" e
 //         sem separadores (ex.: Hoje).
 //   actions: botões à direita (.ph-actions).
-import type { ReactNode } from "react";
+import { useContext, type ReactNode } from "react";
 import { InventoryAreaTabs, INVENTORY_AREA_LABEL, type InventoryArea } from "./InventoryAreaTabs";
+import { InventarioEmbebido } from "./embebido";
 
 export type { InventoryArea } from "./InventoryAreaTabs";
 
@@ -19,9 +20,11 @@ interface InventoryPageHeaderProps {
 }
 
 export function InventoryPageHeader({ title, description, area, actions }: InventoryPageHeaderProps) {
+  // No novo Inventário os separadores são os da moldura (src/pages/inventario-novo).
+  const embebido = useContext(InventarioEmbebido);
   return (
     <div>
-      {area ? <InventoryAreaTabs area={area} /> : null}
+      {area && !embebido ? <InventoryAreaTabs area={area} /> : null}
       {/* .ph: alinhado em baixo, margem 14px/16px; .crumbs 12.5px; h1 22px. */}
       <div className="mb-4 mt-3.5 flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
         <div className="min-w-0">

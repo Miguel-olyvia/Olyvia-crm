@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useContext, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowLeftRight, ArrowRight, Truck, Warehouse } from "lucide-react";
+import { ArrowDown, ArrowLeftRight, ArrowRight, Sparkles, Truck, Warehouse } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -46,6 +46,7 @@ import { todayIsoLocal } from "@/components/purchase-orders/poListUtils";
 import { useMovementDocumentLinks, type MovementDocumentLinks } from "@/hooks/useMovementDocumentLinks";
 import { cn } from "@/lib/utils";
 import { TRIGGER_LABEL, normalizeStockDeductionTrigger } from "@/components/inventory/InventorySettingsCard";
+import { InventarioEmbebido } from "@/components/inventory/ui/embebido";
 
 // "Hoje" do Inventário, como o Hoje do 2.0 (HojeInv.tsx): o fluxo em cinco
 // passos (venda assinada → encomenda cliente → Sim/Não: stock ou PO → receção
@@ -382,6 +383,8 @@ const InventoryToday = () => {
   const { hasPermission } = usePermissions();
   const { t } = useTranslation();
   const [movementDialogOpen, setMovementDialogOpen] = useState(false);
+  // Dentro do novo Inventário (src/pages/inventario-novo) não se mostra o convite para o abrir.
+  const embebido = useContext(InventarioEmbebido);
 
   const { data: today } = useInventoryToday();
   const queue = getInventoryQueueItems(today, hasPermission);
@@ -474,6 +477,11 @@ const InventoryToday = () => {
           description={t("inventory.today.description")}
           actions={
             <>
+              {!embebido ? (
+                <Button variant="outline" asChild>
+                  <Link to="/inventory/novo"><Sparkles className="mr-2 h-4 w-4" /> Experimentar o novo Inventário</Link>
+                </Button>
+              ) : null}
               <PermissionGate permission="inventory.edit">
                 <Button variant="outline" onClick={() => setMovementDialogOpen(true)}>
                   <ArrowLeftRight className="mr-2 h-4 w-4" /> Registar movimento
