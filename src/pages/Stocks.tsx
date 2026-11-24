@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useCallback, useRef, Fragment } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, Fragment, useContext } from "react";
 import { z } from "zod";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import Layout from "@/components/Layout";
@@ -31,7 +31,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
-import { useAvisosInventario } from "@/components/inventory/ui/embebido";
+import { InventarioEmbebido, useAvisosInventario } from "@/components/inventory/ui/embebido";
 import { useCompany } from "@/contexts/CompanyContext";
 import { Plus, Pencil, Trash2, Download, Upload, ArrowLeftRight, History, RotateCcw, ListOrdered, ChevronDown, ChevronRight, ClipboardList, Lock, Search } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -45,6 +45,7 @@ import {
   KpiTile,
   KpiGrid,
   RowActions,
+  type RowActionEntry,
   parseStocksParams,
   stockMovementsLink,
   toneText,
@@ -69,6 +70,8 @@ import { gravarDefinicoesImportadas } from "@/lib/inventario/definicoesImportaca
 import { stockDeleteAction } from "@/lib/inventario/stockEliminar";
 import { PedidosCarrinhasPainel } from "@/components/frota/PedidosCarrinha";
 import { requiresIntegerQty } from "@/utils/quotes/integerQty";
+import { StockBarraEmbebida, StockCartoes, comSufixo, type AcoesCartao, type ModoExistencias } from "@/components/inventory/stocks/StockCartoes";
+import { usePainelProduto } from "@/pages/inventario-novo/painelUrl";
 
 type Stock = Database["public"]["Tables"]["stocks"]["Row"] & {
   products?: { name: string; sku?: string | null; barcode?: string | null; category_id?: string | null; subcategory_id?: string | null; product_categories?: { name: string } | null };
@@ -240,6 +243,9 @@ const Stocks = () => {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [subcategoryFilter, setSubcategoryFilter] = useState("all");
   const [searchParams, setSearchParams] = useSearchParams();
+  // Novo Inventário: o painel do produto da moldura (?painel=produto:<id>); abrir outro com um já aberto substitui a
+  // entrada do histórico. Fora da moldura não se usa.
+  const [produtoNoPainel, abrirNoPainel] = usePainelProduto();
   // ?q= (pesquisa global do topo → produto) entra já na pesquisa da lista,
   // sem um primeiro pedido sem filtro.
   const [searchTerm, setSearchTerm] = useState(() => parseStocksParams(searchParams).q ?? "");
@@ -253,6 +259,9 @@ const Stocks = () => {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const gate = usePermissionGate();
   const canEditStock = gate("inventory.edit").allowed;
+  // Dentro do novo Inventário: cartões do artefacto (StockCartoes) ou a tabela clássica; fora, sempre a página clássica.
+  const embebido = useContext(InventarioEmbebido);
+  const [modoEmbebido, setModoEmbebido] = useState<ModoExistencias>("cartoes");
 
   // KPIs do topo (rpc_inventory_today.stock). Sem a RPC ou sem o bloco: escondidos.
   const { data: inventoryToday } = useInventoryToday();
@@ -541,7 +550,8 @@ const Stocks = () => {
     if (loadMoreRef.current) observer.observe(loadMoreRef.current);
     observerRef.current = observer;
     return () => observerRef.current?.disconnect();
-  }, [loading, hasMore, loadingMore, page, loadStocks]);
+    // modoEmbebido: no novo Inventário o alternador Cartões/Tabela troca o elemento do loadMoreRef.
+  }, [loading, hasMore, loadingMore, page, loadStocks, modoEmbebido]);
 
   // Reservas dos produtos visíveis — só os ainda não pedidos, em lotes. Uma
   // listagem reiniciada (filtros, refresh depois de um movimento, outra
@@ -1019,6 +1029,45 @@ const Stocks = () => {
     );
   };
 
+  // Itens do ⋯ de uma linha de stock (os mesmos na tabela e nos cartões do novo Inventário).
+  const stockMenuItems = (stock: Stock): RowActionEntry[] => [
+    {
+      label: "Editar",
+      icon: Pencil,
+      onSelect: () => openEditDialog(stock),
+      permission: "inventory.edit",
+    },
+    {
+      label: "Registar ajuste",
+      icon: ClipboardList,
+      onSelect: () => openMovement({ productId: stock.product_id, warehouseId: stock.warehouse_id, movementType: "ajuste" }),
+      permission: "inventory.edit",
+    },
+    {
+      // Diálogo rápido dos últimos movimentos — o mesmo de antes.
+      label: "Últimos movimentos (rápido)",
+      icon: History,
+      onSelect: () => {
+        setHistoryContext({
+          productId: stock.product_id,
+          warehouseId: stock.warehouse_id,
+          productName: stock.products?.name,
+          warehouseName: stock.warehouses?.name,
+        });
+        setHistoryDialogOpen(true);
+      },
+    },
+    "separator",
+    {
+      label: "Eliminar",
+      icon: Trash2,
+      destructive: true,
+      onSelect: () => handleDelete(stock.id),
+      permission: "inventory.delete",
+      ...stockDeleteAction(stock.quantity, t),
+    },
+  ];
+
   // Ações da linha (td.act do mockup): Movimento · Histórico · ⋯ — mesmas
   // permissões de antes (inventory.edit / inventory.view / inventory.delete; eram stocks.*, sem catálogo).
   const renderStockActions = (stock: Stock) => {
@@ -1059,43 +1108,7 @@ const Stocks = () => {
         <RowActions
           modal={false}
           menuLabel={`Mais ações — ${label}`}
-          items={[
-            {
-              label: "Editar",
-              icon: Pencil,
-              onSelect: () => openEditDialog(stock),
-              permission: "inventory.edit",
-            },
-            {
-              label: "Registar ajuste",
-              icon: ClipboardList,
-              onSelect: () => openMovement({ productId: stock.product_id, warehouseId: stock.warehouse_id, movementType: "ajuste" }),
-              permission: "inventory.edit",
-            },
-            {
-              // Diálogo rápido dos últimos movimentos — o mesmo de antes.
-              label: "Últimos movimentos (rápido)",
-              icon: History,
-              onSelect: () => {
-                setHistoryContext({
-                  productId: stock.product_id,
-                  warehouseId: stock.warehouse_id,
-                  productName: stock.products?.name,
-                  warehouseName: stock.warehouses?.name,
-                });
-                setHistoryDialogOpen(true);
-              },
-            },
-            "separator",
-            {
-              label: "Eliminar",
-              icon: Trash2,
-              destructive: true,
-              onSelect: () => handleDelete(stock.id),
-              permission: "inventory.delete",
-              ...stockDeleteAction(stock.quantity, t),
-            },
-          ]}
+          items={stockMenuItems(stock)}
         />
       </div>
     );
@@ -1639,9 +1652,362 @@ const Stocks = () => {
     );
   }
 
+  // O diálogo de criar/editar stock e o conteúdo do de importar: os mesmos na página clássica (no cabeçalho) e no
+  // novo Inventário (sem cabeçalho; abertos pela barra e pelos cartões).
+  const aoMudarImportar = (open: boolean) => {
+    if (importing) return;
+    setImportDialogOpen(open);
+    if (open) setImportResult(null);
+  };
+  const conteudoImportar = (
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>{t('stocks.import.title')}</DialogTitle>
+      </DialogHeader>
+      <div className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          {t('stocks.import.description')}
+        </p>
+        <Input
+          type="file"
+          accept=".csv"
+          onChange={handleImport}
+          disabled={importing}
+        />
+        <p className="text-xs text-muted-foreground">
+          As quantidades não são escritas diretamente: stocks novos são criados a 0 e as diferenças ficam registadas como ajuste ("{CSV_IMPORT_REASON}"). Em stocks já existentes, células vazias mantêm o valor atual.
+        </p>
+        {importing && (
+          <p className="text-sm text-muted-foreground" role="status">A importar…</p>
+        )}
+        {importResult && (
+          <div className="rounded-md border p-3 text-sm space-y-2" role="status">
+            <ul className="space-y-0.5">
+              <li>{importResult.created} stock(s) criado(s)</li>
+              <li>{importResult.adjustedUp} ajuste(s) positivo(s) (+{formatQty(importResult.unitsUp)} un)</li>
+              <li>{importResult.adjustedDown} ajuste(s) negativo(s) (−{formatQty(importResult.unitsDown)} un)</li>
+              <li>{importResult.settingsOnly} só com definições atualizadas</li>
+              <li>{importResult.unchanged} sem alterações</li>
+            </ul>
+            {importResult.errors.length > 0 && (
+              <div>
+                <p className="font-medium text-destructive">{importResult.errors.length} linha(s) com erro:</p>
+                <ul className="mt-1 max-h-48 overflow-y-auto list-disc pl-5 text-destructive">
+                  {importResult.errors.map((err, i) => (
+                    <li key={i}>{err}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </DialogContent>
+  );
+  const dialogoStock = (
+    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+      <DialogContent>
+      <DialogHeader>
+        <DialogTitle>
+          {editingStock ? t('stocks.editStock') : t('stocks.addStock')}
+        </DialogTitle>
+      </DialogHeader>
+      <form onSubmit={handleSubmit} className="space-y-4">
+        <div>
+          <Label htmlFor="product_id">{t('stocks.form.product')}</Label>
+          <Select
+            value={formData.product_id}
+            onValueChange={(value) =>
+              setFormData({ ...formData, product_id: value })
+            }
+            disabled={Boolean(editingStock)}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder={t('stocks.form.selectProduct')} />
+            </SelectTrigger>
+            <SelectContent>
+              {products.map((product) => (
+                <SelectItem key={product.id} value={product.id}>
+                  {product.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {fieldErrors.product_id && <p className="text-sm text-destructive mt-1">{fieldErrors.product_id}</p>}
+        </div>
+        <div>
+          <Label htmlFor="warehouse_id">{t('stocks.form.warehouse')}</Label>
+          <Select
+            value={formData.warehouse_id}
+            onValueChange={(value) =>
+              setFormData({ ...formData, warehouse_id: value })
+            }
+            disabled={Boolean(editingStock)}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder={t('stocks.form.selectWarehouse')} />
+            </SelectTrigger>
+            <SelectContent>
+              {warehouses.map((warehouse) => (
+                <SelectItem key={warehouse.id} value={warehouse.id}>
+                  {warehouse.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {fieldErrors.warehouse_id && <p className="text-sm text-destructive mt-1">{fieldErrors.warehouse_id}</p>}
+        </div>
+        <div>
+          <Label htmlFor="quantity">
+            {editingStock ? t('stocks.form.quantity') : "Quantidade inicial"}
+          </Label>
+          <Input
+            id="quantity"
+            type="number"
+            min={0}
+            step={productRequiresInteger(formData.product_id) ? 1 : "any"}
+            inputMode={productRequiresInteger(formData.product_id) ? "numeric" : "decimal"}
+            value={formData.quantity}
+            readOnly={Boolean(editingStock)}
+            aria-describedby="quantity-help"
+            onChange={(e) => {
+              if (editingStock) return;
+              setFormData({
+                ...formData,
+                quantity: Number(e.target.value) || 0,
+              });
+            }}
+            required
+            className={cn(
+              fieldErrors.quantity ? "border-destructive" : "",
+              editingStock ? "bg-muted cursor-not-allowed" : "",
+            )}
+          />
+          {fieldErrors.quantity && <p className="text-sm text-destructive mt-1">{fieldErrors.quantity}</p>}
+          {editingStock ? (
+            <div id="quantity-help" className="mt-1 flex flex-wrap items-center gap-2">
+              <p className="text-xs text-muted-foreground">
+                Para alterar a quantidade usa Registar movimento → Ajuste.
+              </p>
+              <PermissionGate permission="inventory.edit">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const stock = editingStock;
+                    setDialogOpen(false);
+                    setMovementContext({
+                      productId: stock.product_id,
+                      warehouseId: stock.warehouse_id,
+                      movementType: "ajuste",
+                    });
+                    setMovementDialogOpen(true);
+                  }}
+                >
+                  <ArrowLeftRight className="mr-1 h-3.5 w-3.5" /> Registar ajuste
+                </Button>
+              </PermissionGate>
+            </div>
+          ) : (
+            <p id="quantity-help" className="text-xs text-muted-foreground mt-1">
+              Fica registada como movimento de ajuste ("Stock inicial"). Depois de criada, a quantidade só muda por Registar movimento.
+            </p>
+          )}
+        </div>
+        <div>
+          <Label htmlFor="minimum_quantity">{t('stocks.form.minimumQuantity')}</Label>
+          <Input
+            id="minimum_quantity"
+            type="number"
+            value={formData.minimum_quantity}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                minimum_quantity: parseInt(e.target.value) || 0,
+              })
+            }
+            className={fieldErrors.minimum_quantity ? "border-destructive" : ""}
+          />
+          {fieldErrors.minimum_quantity && <p className="text-sm text-destructive mt-1">{fieldErrors.minimum_quantity}</p>}
+        </div>
+        <div>
+          <Label htmlFor="maximum_quantity">{t('stocks.form.maximumQuantity')}</Label>
+          <Input
+            id="maximum_quantity"
+            type="number"
+            value={formData.maximum_quantity}
+            onChange={(e) =>
+              setFormData({
+                ...formData,
+                maximum_quantity: parseInt(e.target.value) || 0,
+              })
+            }
+            className={fieldErrors.maximum_quantity ? "border-destructive" : ""}
+          />
+          {fieldErrors.maximum_quantity && <p className="text-sm text-destructive mt-1">{fieldErrors.maximum_quantity}</p>}
+        </div>
+        {isVanWarehouse(formData.warehouse_id) ? (
+          <div>
+            <Label>{t('stocks.form.reorderPoint')}</Label>
+            <p className="text-sm text-muted-foreground mt-1" data-testid="reorder-point-van">
+              Carrinha da Frota: sem ponto de encomenda (fica a 0 e a carrinha não entra no stock baixo). A quantidade mínima é o mínimo da carrinha, que a Frota usa para pedir reposição.
+            </p>
+          </div>
+        ) : (
+          <div>
+            <Label htmlFor="reorder_point">{t('stocks.form.reorderPoint')}</Label>
+            <Input
+              id="reorder_point"
+              type="number"
+              value={formData.reorder_point}
+              onChange={(e) =>
+                setFormData({
+                  ...formData,
+                  reorder_point: parseInt(e.target.value) || 0,
+                })
+              }
+              className={fieldErrors.reorder_point ? "border-destructive" : ""}
+            />
+            {fieldErrors.reorder_point && <p className="text-sm text-destructive mt-1">{fieldErrors.reorder_point}</p>}
+          </div>
+        )}
+        <div>
+          <Label htmlFor="location">{t('stocks.form.location')}</Label>
+          <Input
+            id="location"
+            value={formData.location}
+            onChange={(e) =>
+              setFormData({ ...formData, location: e.target.value })
+            }
+            placeholder={t('stocks.form.locationPlaceholder')}
+            className={fieldErrors.location ? "border-destructive" : ""}
+          />
+          {fieldErrors.location && <p className="text-sm text-destructive mt-1">{fieldErrors.location}</p>}
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setDialogOpen(false)}
+          >
+            {t('stocks.form.cancel')}
+          </Button>
+          <Button type="submit">
+            {editingStock ? t('stocks.form.update') : t('stocks.form.create')}
+          </Button>
+        </div>
+      </form>
+    </DialogContent>
+  </Dialog>
+  );
+
+  // ---- Novo Inventário (embebido): só o que os cartões e a barra precisam, sobre o mesmo estado e os mesmos handlers.
+  // As ações de um cartão: "Movimento" visível e o resto no ⋯, com as permissões da tabela (linha: Histórico + o ⋯ da
+  // linha; produto: o Histórico do produto + as ações de cada armazém, que na tabela estão nas linhas abertas).
+  const acoesDoCartao = (linhas: Stock[], productId: string): AcoesCartao => {
+    const menuLabel = `Mais ações — ${linhas[0]?.products?.name ?? "stock"}`;
+    const sufixo = (s: Stock) => (view === "product" ? ` · ${s.warehouses?.name ?? "—"}` : "");
+    const items: RowActionEntry[] = view === "product"
+      ? [{ label: "Histórico do produto", icon: ListOrdered, onSelect: () => navigate(stockMovementsLink({ product: productId })), permission: "inventory.view" }]
+      : [];
+    if (showDeleted) {
+      const restaurar = t('stocks.restore') || 'Restaurar';
+      if (view === "warehouse" && linhas.length === 1) {
+        return { primary: { label: restaurar, icon: RotateCcw, onClick: () => handleRestore(linhas[0].id), permission: "inventory.delete" }, items, menuLabel };
+      }
+      linhas.forEach((s) => items.push({ label: `${restaurar}${sufixo(s)}`, icon: RotateCcw, onSelect: () => handleRestore(s.id), permission: "inventory.delete" }));
+      return { primary: null, items, menuLabel };
+    }
+    linhas.forEach((s) => {
+      items.push("separator", ...comSufixo([
+        { label: "Histórico", icon: ListOrdered, onSelect: () => navigate(stockMovementsLink({ product: s.product_id, warehouse: s.warehouse_id })), permission: "inventory.view" },
+        ...stockMenuItems(s),
+      ], sufixo(s)));
+    });
+    return {
+      primary: {
+        label: "Movimento",
+        icon: ArrowLeftRight,
+        onClick: () => openMovement({ productId, warehouseId: linhas.length === 1 ? linhas[0].warehouse_id : undefined }),
+        permission: "inventory.edit",
+      },
+      items,
+      menuLabel,
+    };
+  };
+  // Clicar num cartão abre o painel do produto da moldura: abrirNoPainel = o abrir() do usePainelProduto (lá em cima).
+  // Contagens dos chips: Stock Baixo / Excesso = os KPIs de hoje (rpc_inventory_today); a do filtro ativo = as linhas
+  // carregadas (com filtro de estado carrega-se tudo); "Todos" = as linhas carregadas (+ se ainda há páginas).
+  const contagemAtiva = (estado: StockStatusFilter): number | null => (!loading && statusFilter === estado ? stocks.length : null);
+  const contagensChips = {
+    all: loading || statusFilter !== "all" ? null : hasMore ? `${stocks.length}+` : stocks.length,
+    low: stockKpis?.below_reorder_point ?? contagemAtiva("low"),
+    normal: contagemAtiva("normal"),
+    overstock: stockKpis?.overstock ?? contagemAtiva("overstock"),
+  };
+  // Os mesmos filtros que o indicador do botão "Filtros" conta (StockBarraEmbebida: vista, armazém, categoria, eliminados),
+  // para não sobrar um "1" depois de limpar. A pesquisa e o estado também se limpam, como antes.
+  const filtrosAtivos = view !== "product" || warehouseFilter !== "all" || categoryFilter !== "all" || subcategoryFilter !== "all" || showDeleted;
+  const limparFiltros = () => {
+    setSearchTerm("");
+    setCategoryFilter("all");
+    setSubcategoryFilter("all");
+    setWarehouseFilter("all");
+    setStatusFilter("all");
+    setView("product");
+    setShowDeleted(false);
+  };
+
   return (
     <>
       <div className="space-y-6">
+        {embebido ? (
+          <>
+            <StockBarraEmbebida
+              pesquisa={searchTerm}
+              aoPesquisar={setSearchTerm}
+              vista={view}
+              aoMudarVista={setView}
+              armazem={warehouseFilter}
+              armazens={warehouses}
+              aoMudarArmazem={setWarehouseFilter}
+              categoria={categoryFilter}
+              subcategoria={subcategoryFilter}
+              aoMudarCategoria={({ categoryId, subcategoryId }) => {
+                setCategoryFilter(categoryId);
+                setSubcategoryFilter(subcategoryId);
+              }}
+              mostrarEliminados={showDeleted}
+              aoMudarEliminados={setShowDeleted}
+              filtrosAtivos={filtrosAtivos}
+              aoLimpar={limparFiltros}
+              estado={statusFilter}
+              aoMudarEstado={setStatusFilter}
+              contagens={contagensChips}
+              valorEmStock={stockKpis?.value != null ? formatEur(Number(stockKpis.value)) : null}
+              unidadesReservadas={stockKpis?.reserved_units != null ? formatQty(Number(stockKpis.reserved_units)) : null}
+              modo={modoEmbebido}
+              aoMudarModo={setModoEmbebido}
+              aoExportar={handleExport}
+              aoImportar={() => aoMudarImportar(true)}
+              aoMovimento={() => {
+                setMovementContext({});
+                setMovementDialogOpen(true);
+              }}
+              bloqueioMovimento={gate("inventory.edit").reason ?? null}
+              aoAdicionar={() => {
+                resetForm();
+                setDialogOpen(true);
+              }}
+              bloqueioAdicionar={gate("inventory.create").reason ?? null}
+            />
+            <Dialog open={importDialogOpen} onOpenChange={aoMudarImportar}>
+              {conteudoImportar}
+            </Dialog>
+            {dialogoStock}
+          </>
+        ) : (
         <InventoryPageHeader
           area="warehouse"
           title={t('sidebar.inventoryStocks')}
@@ -1656,60 +2022,14 @@ const Stocks = () => {
             <PermissionGate permission="inventory.import">
               <Dialog
                 open={importDialogOpen}
-                onOpenChange={(open) => {
-                  if (importing) return;
-                  setImportDialogOpen(open);
-                  if (open) setImportResult(null);
-                }}
+                onOpenChange={aoMudarImportar}
               >
                 <DialogTrigger asChild>
                   <Button variant="outline">
                     <Upload className="mr-2 h-4 w-4" /> {t('stocks.import')}
                   </Button>
                 </DialogTrigger>
-                <DialogContent>
-                  <DialogHeader>
-                    <DialogTitle>{t('stocks.import.title')}</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <p className="text-sm text-muted-foreground">
-                      {t('stocks.import.description')}
-                    </p>
-                    <Input
-                      type="file"
-                      accept=".csv"
-                      onChange={handleImport}
-                      disabled={importing}
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      As quantidades não são escritas diretamente: stocks novos são criados a 0 e as diferenças ficam registadas como ajuste ("{CSV_IMPORT_REASON}"). Em stocks já existentes, células vazias mantêm o valor atual.
-                    </p>
-                    {importing && (
-                      <p className="text-sm text-muted-foreground" role="status">A importar…</p>
-                    )}
-                    {importResult && (
-                      <div className="rounded-md border p-3 text-sm space-y-2" role="status">
-                        <ul className="space-y-0.5">
-                          <li>{importResult.created} stock(s) criado(s)</li>
-                          <li>{importResult.adjustedUp} ajuste(s) positivo(s) (+{formatQty(importResult.unitsUp)} un)</li>
-                          <li>{importResult.adjustedDown} ajuste(s) negativo(s) (−{formatQty(importResult.unitsDown)} un)</li>
-                          <li>{importResult.settingsOnly} só com definições atualizadas</li>
-                          <li>{importResult.unchanged} sem alterações</li>
-                        </ul>
-                        {importResult.errors.length > 0 && (
-                          <div>
-                            <p className="font-medium text-destructive">{importResult.errors.length} linha(s) com erro:</p>
-                            <ul className="mt-1 max-h-48 overflow-y-auto list-disc pl-5 text-destructive">
-                              {importResult.errors.map((err, i) => (
-                                <li key={i}>{err}</li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                </DialogContent>
+                {conteudoImportar}
               </Dialog>
             </PermissionGate>
             <PermissionGate permission="inventory.edit">
@@ -1734,211 +2054,18 @@ const Stocks = () => {
                 {t('stocks.addStock')}
               </Button>
             </PermissionGate>
-            <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-              <DialogContent>
-              <DialogHeader>
-                <DialogTitle>
-                  {editingStock ? t('stocks.editStock') : t('stocks.addStock')}
-                </DialogTitle>
-              </DialogHeader>
-              <form onSubmit={handleSubmit} className="space-y-4">
-                <div>
-                  <Label htmlFor="product_id">{t('stocks.form.product')}</Label>
-                  <Select
-                    value={formData.product_id}
-                    onValueChange={(value) =>
-                      setFormData({ ...formData, product_id: value })
-                    }
-                    disabled={Boolean(editingStock)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder={t('stocks.form.selectProduct')} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {products.map((product) => (
-                        <SelectItem key={product.id} value={product.id}>
-                          {product.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {fieldErrors.product_id && <p className="text-sm text-destructive mt-1">{fieldErrors.product_id}</p>}
-                </div>
-                <div>
-                  <Label htmlFor="warehouse_id">{t('stocks.form.warehouse')}</Label>
-                  <Select
-                    value={formData.warehouse_id}
-                    onValueChange={(value) =>
-                      setFormData({ ...formData, warehouse_id: value })
-                    }
-                    disabled={Boolean(editingStock)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder={t('stocks.form.selectWarehouse')} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {warehouses.map((warehouse) => (
-                        <SelectItem key={warehouse.id} value={warehouse.id}>
-                          {warehouse.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {fieldErrors.warehouse_id && <p className="text-sm text-destructive mt-1">{fieldErrors.warehouse_id}</p>}
-                </div>
-                <div>
-                  <Label htmlFor="quantity">
-                    {editingStock ? t('stocks.form.quantity') : "Quantidade inicial"}
-                  </Label>
-                  <Input
-                    id="quantity"
-                    type="number"
-                    min={0}
-                    step={productRequiresInteger(formData.product_id) ? 1 : "any"}
-                    inputMode={productRequiresInteger(formData.product_id) ? "numeric" : "decimal"}
-                    value={formData.quantity}
-                    readOnly={Boolean(editingStock)}
-                    aria-describedby="quantity-help"
-                    onChange={(e) => {
-                      if (editingStock) return;
-                      setFormData({
-                        ...formData,
-                        quantity: Number(e.target.value) || 0,
-                      });
-                    }}
-                    required
-                    className={cn(
-                      fieldErrors.quantity ? "border-destructive" : "",
-                      editingStock ? "bg-muted cursor-not-allowed" : "",
-                    )}
-                  />
-                  {fieldErrors.quantity && <p className="text-sm text-destructive mt-1">{fieldErrors.quantity}</p>}
-                  {editingStock ? (
-                    <div id="quantity-help" className="mt-1 flex flex-wrap items-center gap-2">
-                      <p className="text-xs text-muted-foreground">
-                        Para alterar a quantidade usa Registar movimento → Ajuste.
-                      </p>
-                      <PermissionGate permission="inventory.edit">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => {
-                            const stock = editingStock;
-                            setDialogOpen(false);
-                            setMovementContext({
-                              productId: stock.product_id,
-                              warehouseId: stock.warehouse_id,
-                              movementType: "ajuste",
-                            });
-                            setMovementDialogOpen(true);
-                          }}
-                        >
-                          <ArrowLeftRight className="mr-1 h-3.5 w-3.5" /> Registar ajuste
-                        </Button>
-                      </PermissionGate>
-                    </div>
-                  ) : (
-                    <p id="quantity-help" className="text-xs text-muted-foreground mt-1">
-                      Fica registada como movimento de ajuste ("Stock inicial"). Depois de criada, a quantidade só muda por Registar movimento.
-                    </p>
-                  )}
-                </div>
-                <div>
-                  <Label htmlFor="minimum_quantity">{t('stocks.form.minimumQuantity')}</Label>
-                  <Input
-                    id="minimum_quantity"
-                    type="number"
-                    value={formData.minimum_quantity}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        minimum_quantity: parseInt(e.target.value) || 0,
-                      })
-                    }
-                    className={fieldErrors.minimum_quantity ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.minimum_quantity && <p className="text-sm text-destructive mt-1">{fieldErrors.minimum_quantity}</p>}
-                </div>
-                <div>
-                  <Label htmlFor="maximum_quantity">{t('stocks.form.maximumQuantity')}</Label>
-                  <Input
-                    id="maximum_quantity"
-                    type="number"
-                    value={formData.maximum_quantity}
-                    onChange={(e) =>
-                      setFormData({
-                        ...formData,
-                        maximum_quantity: parseInt(e.target.value) || 0,
-                      })
-                    }
-                    className={fieldErrors.maximum_quantity ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.maximum_quantity && <p className="text-sm text-destructive mt-1">{fieldErrors.maximum_quantity}</p>}
-                </div>
-                {isVanWarehouse(formData.warehouse_id) ? (
-                  <div>
-                    <Label>{t('stocks.form.reorderPoint')}</Label>
-                    <p className="text-sm text-muted-foreground mt-1" data-testid="reorder-point-van">
-                      Carrinha da Frota: sem ponto de encomenda (fica a 0 e a carrinha não entra no stock baixo). A quantidade mínima é o mínimo da carrinha, que a Frota usa para pedir reposição.
-                    </p>
-                  </div>
-                ) : (
-                  <div>
-                    <Label htmlFor="reorder_point">{t('stocks.form.reorderPoint')}</Label>
-                    <Input
-                      id="reorder_point"
-                      type="number"
-                      value={formData.reorder_point}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          reorder_point: parseInt(e.target.value) || 0,
-                        })
-                      }
-                      className={fieldErrors.reorder_point ? "border-destructive" : ""}
-                    />
-                    {fieldErrors.reorder_point && <p className="text-sm text-destructive mt-1">{fieldErrors.reorder_point}</p>}
-                  </div>
-                )}
-                <div>
-                  <Label htmlFor="location">{t('stocks.form.location')}</Label>
-                  <Input
-                    id="location"
-                    value={formData.location}
-                    onChange={(e) =>
-                      setFormData({ ...formData, location: e.target.value })
-                    }
-                    placeholder={t('stocks.form.locationPlaceholder')}
-                    className={fieldErrors.location ? "border-destructive" : ""}
-                  />
-                  {fieldErrors.location && <p className="text-sm text-destructive mt-1">{fieldErrors.location}</p>}
-                </div>
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => setDialogOpen(false)}
-                  >
-                    {t('stocks.form.cancel')}
-                  </Button>
-                  <Button type="submit">
-                    {editingStock ? t('stocks.form.update') : t('stocks.form.create')}
-                  </Button>
-                </div>
-              </form>
-            </DialogContent>
-          </Dialog>
+            {dialogoStock}
           </>
           }
         />
+        )}
 
         {/* Pedidos de reposição das carrinhas da Frota (passo 2: transferir), só com inventory.edit e com pedidos. */}
         {activeCompany?.id ? <PedidosCarrinhasPainel organizationId={activeCompany.id} aoMudar={refresh} /> : null}
 
         {/* KPIs (rpc_inventory_today.stock) — só aparecem com a RPC aplicada;
             cada cartão some se o seu valor vier a null. */}
-        {stockKpis && stockKpiCount > 0 && (
+        {!embebido && stockKpis && stockKpiCount > 0 && (
           <KpiGrid className={KPI_GRID_COLS[stockKpiCount]}>
             {stockKpis.value != null && (
               <KpiTile
@@ -1982,6 +2109,7 @@ const Stocks = () => {
 
         {/* Filtros (card .filters do mockup): pesquisa, categoria/subcategoria,
             armazém, estado, ver eliminados; pílulas da vista por baixo. */}
+        {!embebido && (
         <div className="space-y-3 rounded-lg border bg-card p-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="relative w-full max-w-xs">
@@ -2058,8 +2186,49 @@ const Stocks = () => {
           </div>
           <FilterPills<StockView> ariaLabel="Vista" value={view} onChange={setView} options={VIEW_OPTIONS} />
         </div>
+        )}
 
-        {!loading && stocks.length === 0 ? (
+        {embebido && modoEmbebido === "cartoes" ? (
+          !loading && stocks.length === 0 ? (
+            <InventoryEmptyState
+              title="Sem stock com estes filtros"
+              description={showDeleted ? "Não há linhas de stock eliminadas com estes filtros." : undefined}
+            />
+          ) : (
+            <div className="space-y-3">
+              {loading ? (
+                <p role="status" className="py-6 text-center text-sm text-muted-foreground">{t('stocks.loading')}</p>
+              ) : (
+                <StockCartoes
+                  vista={view}
+                  grupos={productGroups}
+                  porCategoria={groupedStocks}
+                  reservas={reservationByProduct}
+                  stockOrg={orgStockByProduct}
+                  mostrarEliminados={showDeleted}
+                  filtroEstadoAtivo={statusFilter !== "all"}
+                  estadoDe={getStockStatusCode}
+                  eCarrinha={isVanWarehouse}
+                  formatQty={formatQty}
+                  acoes={acoesDoCartao}
+                  aoAbrir={abrirNoPainel}
+                  selecionado={produtoNoPainel}
+                />
+              )}
+              {/* O mesmo scroll infinito da tabela (loadMoreRef). */}
+              <div ref={loadMoreRef} className="flex flex-wrap items-center justify-between gap-2 px-1 py-2 text-sm text-muted-foreground">
+                <span role="status">
+                  {stocks.length} linha(s) carregada(s){view === "product" ? ` · ${productGroups.length} produto(s)` : ""}
+                </span>
+                {loadingMore ? (
+                  <span>{t('stocks.loadingMore') || 'A carregar mais...'}</span>
+                ) : !hasMore && !loading && stocks.length > 0 ? (
+                  <span>{t('stocks.allLoaded') || 'Todos carregados'}</span>
+                ) : null}
+              </div>
+            </div>
+          )
+        ) : !loading && stocks.length === 0 ? (
           <InventoryEmptyState
             title="Sem stock com estes filtros"
             description={showDeleted ? "Não há linhas de stock eliminadas com estes filtros." : undefined}
