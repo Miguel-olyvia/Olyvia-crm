@@ -66,6 +66,16 @@ const frente = (nome: string, mat: MaterialGlb, f: (p: ParamsGenerico) => [numbe
 const puxador = (nome: string, f: (p: ParamsGenerico) => [number, number], ver?: ParteGlb["ver"]): ParteGlb =>
   caixa(nome, "metal", (p) => { const [x, y] = f(p); return { pos: [x, y, p.d / 2 + 0.025], esc: [min(0.16, p.w * 0.35), 0.012, 0.014] }; }, ver);
 
+/** Um armário com duas portas e pelo menos o dobro da altura na largura (a coluna AXIS 40 × 160): as portas vão uma por cima da outra, não lado a lado. */
+const portasEmpilhadas = (p: ParamsGenerico): boolean => p.o.duas !== false && p.h >= 2 * p.w;
+/** A folha `i` (0: a esquerda, ou a de baixo se empilhadas; 1: a direita, ou a de cima) de um armário, com a espessura `e` e o centro `dz` à frente da caixa (m). */
+function folhaArmario(p: ParamsGenerico, i: 0 | 1, e: number, dz: number): Colocacao {
+  const { w, d, h } = p, z = d / 2 + dz;
+  if (portasEmpilhadas(p)) return { pos: [0, h / 4 + (i * h) / 2, z], esc: [w - 0.008, h / 2 - 0.008, e] };
+  const n = p.o.duas === false ? 1 : 2;
+  return { pos: [n === 1 ? 0 : (i === 0 ? -w : w) / 4, h / 2, z], esc: [w / n - 0.008, h - 0.01, e] };
+}
+
 /** Um botão redondo virado para a frente (eixo do cilindro em z), no centro (x, y) da face da frente. */
 const botao = (nome: string, f: (p: ParamsGenerico) => [number, number], r = 0.034, ver?: ParteGlb["ver"]): ParteGlb =>
   ({ nome, forma: "cilindro", mat: "metal", colocar: (p) => { const [x, y] = f(p); return { pos: [x, y, p.d / 2 + 0.012], esc: [r, 0.02, r], rot: [Math.PI / 2, 0, 0] }; }, ...(ver ? { ver } : {}) });
@@ -469,11 +479,15 @@ export const CATEGORIAS_GLB: CategoriaGlb[] = [...CATEGORIAS_COZINHA,
     ],
     partes: [
       { nome: "caixa", forma: "caixa", mat: "corpo", colocar: ({ w, d, h }) => ({ pos: [0, h / 2, 0], esc: [w, h, d] }) },
-      { nome: "porta_esq", forma: "caixa", mat: "corpo", ver: (p) => p.o.frente !== "espelho", colocar: ({ w, d, h, o }) => { const n = o.duas === false ? 1 : 2; return { pos: [n === 1 ? 0 : -w / 4, h / 2, d / 2 + 0.009], esc: [w / n - 0.008, h - 0.01, 0.018] }; } },
-      { nome: "porta_dir", forma: "caixa", mat: "corpo", ver: (p) => p.o.frente !== "espelho" && p.o.duas !== false, colocar: ({ w, d, h }) => ({ pos: [w / 4, h / 2, d / 2 + 0.009], esc: [w / 2 - 0.008, h - 0.01, 0.018] }) },
-      { nome: "espelho_esq", forma: "caixa", mat: "espelho", ver: (p) => p.o.frente === "espelho", colocar: ({ w, d, h, o }) => { const n = o.duas === false ? 1 : 2; return { pos: [n === 1 ? 0 : -w / 4, h / 2, d / 2 + 0.004], esc: [w / n - 0.008, h - 0.01, 0.006] }; } },
-      { nome: "espelho_dir", forma: "caixa", mat: "espelho", ver: (p) => p.o.frente === "espelho" && p.o.duas !== false, colocar: ({ w, d, h }) => ({ pos: [w / 4, h / 2, d / 2 + 0.004], esc: [w / 2 - 0.008, h - 0.01, 0.006] }) },
-      { nome: "puxador", forma: "caixa", mat: "metal", ver: (p) => p.o.frente !== "espelho", colocar: ({ w, d, h, o }) => ({ pos: [o.duas === false ? w / 2 - 0.04 : -0.03, h / 2, d / 2 + 0.025], esc: [0.012, min(0.14, h * 0.3), 0.014] }) },
+      // 24/11: «_esq» é a de baixo e «_dir» a de cima quando as portas vão empilhadas (coluna alta e estreita, como a AXIS 40 × 160); os nomes são os do GLB
+      { nome: "porta_esq", forma: "caixa", mat: "corpo", ver: (p) => p.o.frente !== "espelho", colocar: (p) => folhaArmario(p, 0, 0.018, 0.009) },
+      { nome: "porta_dir", forma: "caixa", mat: "corpo", ver: (p) => p.o.frente !== "espelho" && p.o.duas !== false, colocar: (p) => folhaArmario(p, 1, 0.018, 0.009) },
+      { nome: "espelho_esq", forma: "caixa", mat: "espelho", ver: (p) => p.o.frente === "espelho", colocar: (p) => folhaArmario(p, 0, 0.006, 0.004) },
+      { nome: "espelho_dir", forma: "caixa", mat: "espelho", ver: (p) => p.o.frente === "espelho" && p.o.duas !== false, colocar: (p) => folhaArmario(p, 1, 0.006, 0.004) },
+      // empilhadas: um puxador horizontal fino entre a porta de baixo e a de cima; lado a lado: vertical, junto ao meio (ou à direita, com uma porta só)
+      { nome: "puxador", forma: "caixa", mat: "metal", ver: (p) => p.o.frente !== "espelho", colocar: (p) => (portasEmpilhadas(p)
+        ? { pos: [0, p.h / 2, p.d / 2 + 0.022], esc: [min(0.16, p.w * 0.6), 0.012, 0.014] }
+        : { pos: [p.o.duas === false ? p.w / 2 - 0.04 : -0.03, p.h / 2, p.d / 2 + 0.025], esc: [0.012, min(0.14, p.h * 0.3), 0.014] }) },
     ],
   },
   {

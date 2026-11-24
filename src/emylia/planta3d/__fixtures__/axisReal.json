@@ -1,0 +1,247 @@
+{
+  "_origem": "Lido na base RH (Mudelar) a 24/11/2026 com a conta do dono, so leituras: cat_ler_produto, cat_ler_atributos_produto, cat_ler_atributos_definicoes, cat_ler_referencias_produtos (recortes verbatim).",
+  "produtos": {
+    "artisan": {
+      "id": "f22c0398-dfb1-4832-bd0f-7e84f925e550",
+      "name": "Coluna Suspensa AXIS 40x160x25 - Corpo e Frente Artisan (Lacado/Melamina, +90€, entrega 4/5 sem.)",
+      "uom": "un",
+      "estado": "active",
+      "modelo3d": null,
+      "categoria": "Móveis & Arrumação Casa de Banho",
+      "category_id": "8e6b17bf-cc1d-4361-b4c2-26e7939c7cb0",
+      "subcategoria": "Colunas",
+      "subcategory_id": "0f910153-2ab2-4d4c-8c50-ee3d9b190649",
+      "image_urls": null,
+      "tipo_catalogo": "produto"
+    },
+    "denver": {
+      "id": "9483633f-10d6-422a-bd7d-3dab39981de7",
+      "name": "Coluna Suspensa AXIS 40x160x25 - Corpo e Frente Denver (Lacado/Melamina, +90€, entrega 4/5 sem.)",
+      "uom": "un",
+      "estado": "active",
+      "modelo3d": null,
+      "categoria": "Móveis & Arrumação Casa de Banho",
+      "category_id": "8e6b17bf-cc1d-4361-b4c2-26e7939c7cb0",
+      "subcategoria": "Colunas",
+      "subcategory_id": "0f910153-2ab2-4d4c-8c50-ee3d9b190649",
+      "image_urls": null,
+      "tipo_catalogo": "produto"
+    },
+    "oak": {
+      "id": "0455b741-f940-40cb-b9d2-80e8ae00ba38",
+      "name": "Coluna Suspensa AXIS 40x160x25 - Todo Oak",
+      "uom": "un",
+      "estado": "active",
+      "modelo3d": null,
+      "categoria": "Móveis & Arrumação Casa de Banho",
+      "category_id": "8e6b17bf-cc1d-4361-b4c2-26e7939c7cb0",
+      "subcategoria": "Colunas",
+      "subcategory_id": "0f910153-2ab2-4d4c-8c50-ee3d9b190649",
+      "image_urls": null,
+      "tipo_catalogo": "produto"
+    }
+  },
+  "atributos": {
+    "artisan": {
+      "valores": [
+        {
+          "ativa": true,
+          "opcao": null,
+          "valor": "40 × 160 × 25 cm",
+          "medida": {
+            "tipo": "3D",
+            "largura": 40,
+            "unidade": "cm",
+            "espessura": 25,
+            "comprimento": 160
+          },
+          "atributo": "8c2361bb-146b-4643-8091-f212de868c6f"
+        },
+        {
+          "ativa": true,
+          "opcao": "9b3bb5d6-e0d4-45e0-85a3-656bb2679221",
+          "valor": "Artisan",
+          "medida": null,
+          "atributo": "cfc181eb-ec45-478b-a76d-c256e0000eb3"
+        },
+        {
+          "ativa": true,
+          "opcao": "6c5f2c16-1420-4a62-9d8f-8199cc149364",
+          "valor": "Artisan",
+          "medida": null,
+          "atributo": "f1e37039-87fc-44b6-b0d2-138beb38332e"
+        }
+      ]
+    },
+    "denver": {
+      "valores": [
+        {
+          "ativa": true,
+          "opcao": null,
+          "valor": "40 × 160 × 25 cm",
+          "medida": {
+            "tipo": "3D",
+            "largura": 40,
+            "unidade": "cm",
+            "espessura": 25,
+            "comprimento": 160
+          },
+          "atributo": "8c2361bb-146b-4643-8091-f212de868c6f"
+        },
+        {
+          "ativa": true,
+          "opcao": "e5174f11-90a1-4d7a-bc26-6d02fd6d3367",
+          "valor": "Denver",
+          "medida": null,
+          "atributo": "cfc181eb-ec45-478b-a76d-c256e0000eb3"
+        },
+        {
+          "ativa": true,
+          "opcao": "526d7afb-cddc-421f-b2ce-2a889a876041",
+          "valor": "Denver",
+          "medida": null,
+          "atributo": "f1e37039-87fc-44b6-b0d2-138beb38332e"
+        }
+      ]
+    },
+    "oak": {
+      "valores": [
+        {
+          "ativa": true,
+          "opcao": null,
+          "valor": "40 × 160 × 25 cm",
+          "medida": {
+            "tipo": "3D",
+            "largura": 40,
+            "unidade": "cm",
+            "espessura": 25,
+            "comprimento": 160
+          },
+          "atributo": "8c2361bb-146b-4643-8091-f212de868c6f"
+        },
+        {
+          "ativa": true,
+          "opcao": "8ff15d73-aeaf-4960-ad46-17200c1cc3fb",
+          "valor": "Oak",
+          "medida": null,
+          "atributo": "cfc181eb-ec45-478b-a76d-c256e0000eb3"
+        },
+        {
+          "ativa": true,
+          "opcao": "f6fb206f-7e00-4873-b6ec-4f87619d86f2",
+          "valor": "Oak",
+          "medida": null,
+          "atributo": "f1e37039-87fc-44b6-b0d2-138beb38332e"
+        }
+      ]
+    }
+  },
+  "definicoes": {
+    "atributos": [
+      {
+        "id": "8c2361bb-146b-4643-8091-f212de868c6f",
+        "nome": "Medida",
+        "tipo": "medida",
+        "ordem": 1,
+        "codigo": "medida",
+        "opcoes": [],
+        "tem_hex": false,
+        "tem_foto": false
+      },
+      {
+        "id": "cfc181eb-ec45-478b-a76d-c256e0000eb3",
+        "nome": "Cor do corpo",
+        "tipo": "lista",
+        "ordem": 11,
+        "codigo": "cor_corpo",
+        "opcoes": [
+          {
+            "id": "e5174f11-90a1-4d7a-bc26-6d02fd6d3367",
+            "hex": null,
+            "foto": "3242e925-da26-459a-8258-be04d904e355/8ae2a8cb-ca75-42ef-b037-1f56d8936ff0.webp",
+            "nome": "Denver",
+            "ordem": 22,
+            "sigla": "DEN",
+            "valor": "Denver"
+          },
+          {
+            "id": "9b3bb5d6-e0d4-45e0-85a3-656bb2679221",
+            "hex": null,
+            "foto": "3242e925-da26-459a-8258-be04d904e355/0e8b282e-69bf-454b-bd0b-fb55e7b51b3c.webp",
+            "nome": "Artisan",
+            "ordem": 24,
+            "sigla": "ART",
+            "valor": "Artisan"
+          },
+          {
+            "id": "8ff15d73-aeaf-4960-ad46-17200c1cc3fb",
+            "hex": null,
+            "foto": "3242e925-da26-459a-8258-be04d904e355/f8799ace-866c-4e1a-ab80-4768969dfba5.webp",
+            "nome": "Oak",
+            "ordem": 27,
+            "sigla": "OAK",
+            "valor": "Oak"
+          }
+        ],
+        "tem_hex": true,
+        "tem_foto": true
+      },
+      {
+        "id": "f1e37039-87fc-44b6-b0d2-138beb38332e",
+        "nome": "Cor da frente",
+        "tipo": "lista",
+        "ordem": 12,
+        "codigo": "cor_frente",
+        "opcoes": [
+          {
+            "id": "526d7afb-cddc-421f-b2ce-2a889a876041",
+            "hex": null,
+            "foto": "3242e925-da26-459a-8258-be04d904e355/8ae2a8cb-ca75-42ef-b037-1f56d8936ff0.webp",
+            "nome": "Denver",
+            "ordem": 22,
+            "sigla": "DEN",
+            "valor": "Denver"
+          },
+          {
+            "id": "6c5f2c16-1420-4a62-9d8f-8199cc149364",
+            "hex": null,
+            "foto": "3242e925-da26-459a-8258-be04d904e355/0e8b282e-69bf-454b-bd0b-fb55e7b51b3c.webp",
+            "nome": "Artisan",
+            "ordem": 24,
+            "sigla": "ART",
+            "valor": "Artisan"
+          },
+          {
+            "id": "f6fb206f-7e00-4873-b6ec-4f87619d86f2",
+            "hex": null,
+            "foto": "3242e925-da26-459a-8258-be04d904e355/f8799ace-866c-4e1a-ab80-4768969dfba5.webp",
+            "nome": "Oak",
+            "ordem": 27,
+            "sigla": "OAK",
+            "valor": "Oak"
+          }
+        ],
+        "tem_hex": true,
+        "tem_foto": true
+      }
+    ]
+  },
+  "categoriasProduto": [
+    {
+      "id": "8e6b17bf-cc1d-4361-b4c2-26e7939c7cb0",
+      "name": "Móveis & Arrumação Casa de Banho",
+      "ativa": true,
+      "modelo3d": null,
+      "parent_id": null,
+      "sort_order": 10
+    },
+    {
+      "id": "0f910153-2ab2-4d4c-8c50-ee3d9b190649",
+      "name": "Colunas",
+      "ativa": true,
+      "modelo3d": null,
+      "parent_id": "8e6b17bf-cc1d-4361-b4c2-26e7939c7cb0",
+      "sort_order": 1
+    }
+  ]
+}

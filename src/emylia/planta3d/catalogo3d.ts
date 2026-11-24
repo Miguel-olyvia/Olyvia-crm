@@ -275,6 +275,9 @@ export function extrairDimensoes(nome: string, tipo: TipoMockup): Dimensoes {
   const [a, b, c] = v;
   if (tipo === "base_duche" || tipo === "banheira") return { larguraCm: Math.max(a, b), profundidadeCm: Math.min(a, b), alturaCm: c ?? al, deNome: true };
   if (LARGURA_ALTURA.includes(tipo) && c === undefined) return { larguraCm: a, profundidadeCm: pd, alturaCm: b, deNome: true };
+  // 24/11: a coluna é sempre mais alta do que funda: com três números («Coluna Suspensa AXIS 40x160x25», largura × altura × profundidade, como a Medida da
+  // Mudelar) o maior dos dois últimos é a altura e o menor a profundidade, seja qual for a ordem; lido como largura × profundidade × altura ficava deitada
+  if (tipo === "coluna" && c !== undefined) return { larguraCm: a, profundidadeCm: Math.min(b, c), alturaCm: Math.max(b, c), deNome: true };
   return { larguraCm: a, profundidadeCm: b, alturaCm: alturaDeSanitaDeChao(tipo, nome, c ?? al), deNome: true };
 }
 
