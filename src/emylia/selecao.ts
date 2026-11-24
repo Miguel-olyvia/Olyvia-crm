@@ -6,7 +6,7 @@
 import { normal } from "./catalogo";
 import { nfmt, servicosVisita, type MedKey, type Negocio, type Servico, type SvcId, type acoes } from "./motor";
 import type { Catalogo, No, Produto } from "./v2/catalogoModelo";
-import { nosDoRamo, precoProduto, produtoDaFotografia, qtdSugerida, ramoDaTroca, textoClienteCompra, type Obrigacao, type ProdVisita } from "./produtosVisita";
+import { nosDoRamo, precoProduto, produtoDaFotografia, produtoDeOutroRamo, qtdSugerida, ramoDaTroca, textoClienteCompra, type Obrigacao, type ProdVisita } from "./produtosVisita";
 import { categoriaDe, ilustracaoDoCatalogo, medidaDaSugestao, nomeCurto, objetoDaPergunta, palavrasDe, procurarServicos, qtdNaVisita, sugestaoQtd, tituloObrigacao, type TileServico } from "./necessidades";
 import type { IlustracaoKey } from "./ilustracoes";
 
@@ -225,7 +225,8 @@ export function responderTroca(A: Pick<A, "manter" | "tirarProduto">, K: Catalog
   const tirados: ProdVisita[] = [];
   if (r === "sim") {
     const ramo = ramoDaTroca(K.arvore, o.no, o.pergunta);
-    for (const p of [...(d.visita.prod ?? [])]) if (p.no && ramo.has(p.no)) { tirados.push({ ...p }); A.tirarProduto(d.id, p.id); }
+    // 24/11: o porcelânico da parede não sai com o «Mantém o pavimento» (vale nos dois ramos; a instalação dele é a do revestimento)
+    for (const p of [...(d.visita.prod ?? [])]) if (p.no && ramo.has(p.no) && !produtoDeOutroRamo(K.arvore, o, p)) { tirados.push({ ...p }); A.tirarProduto(d.id, p.id); }
   }
   return { antes, tirados };
 }

@@ -2,8 +2,9 @@
 import { describe, expect, it } from "vitest";
 import type { No } from "./v2/catalogoModelo";
 import { nosDeProdutoDoRamo, nosDoObjeto, ramoDaCategoriaProduto } from "./ramoDosProdutos";
-import { ativosDoPacote, emFaltaProdutos, nosDoRamo, obrigacoes, pacoteSubstituido, partesDoModelo, produtosDoRamo, ramoDaTroca, type ProdVisita } from "./produtosVisita";
+import { ativosDoPacote, emFaltaProdutos, nosDoRamo, obrigacoes, pacoteSubstituido, partesDoModelo, produtoDeOutroRamo, produtosDoRamo, ramoDaTroca, type ProdVisita } from "./produtosVisita";
 import { filtroDoRamo } from "./real/pesquisaProdutos";
+import { responderTroca } from "./selecao";
 
 const ARVORE: No[] = [
   { id: "can", n: "Canalização", pai: null }, { id: "lt", n: "Louças e torneiras", pai: "can" },
@@ -33,6 +34,30 @@ describe("o cerâmico e o porcelânico na parede e no chão (24/11)", () => {
     // sem a parte do chão, conta na da parede
     const [soParede] = partesDoModelo({ ...mat, partes: [mat.partes[0]] }, prod, undefined, [], ARVORE);
     expect(soParede.custo).toBe(300);
+  });
+});
+
+// 24/11 (contrato real MD 1605): «O cliente mantém o pavimento?» → «Mantém» tirava também o porcelânico escolhido para a parede.
+describe("o «Mantém» de uma troca não tira o produto que é da outra (24/11)", () => {
+  const AZULEJO: ProdVisita = { id: "RP0041", n: "Revestimento BRANCO - PURO NATURAL", un: "m2", custo: 14.84, q: 2, no: "por", svc: "sRev" };
+  const LADRILHO: ProdVisita = { id: "RP0099", n: "Pavimento porcelânico", un: "m2", custo: 15, q: 5, no: "por", svc: "sPav" };
+  const SANITA: ProdVisita = { id: "SAN1", n: "Sanita compacta", un: "un", custo: 90, q: 1, no: "san", svc: "sSan" };
+  it("o porcelânico com a instalação do revestimento é da parede; com a do pavimento, do chão; o de um só ramo não muda", () => {
+    expect(produtoDeOutroRamo(ARVORE, { sid: "sPav", no: "pav" }, AZULEJO)).toBe(true);
+    expect(produtoDeOutroRamo(ARVORE, { sid: "sPav", no: "pav" }, LADRILHO)).toBe(false);
+    expect(produtoDeOutroRamo(ARVORE, { sid: "sRev", no: "par" }, AZULEJO)).toBe(false);
+    expect(produtoDeOutroRamo(ARVORE, { sid: "sLt", no: "lt" }, SANITA)).toBe(false);
+    expect(produtoDeOutroRamo(ARVORE, { sid: "sPav", no: "pav" }, { ...AZULEJO, svc: undefined })).toBe(false);
+  });
+  it("«Mantém o pavimento» tira o ladrilho do chão e deixa o azulejo da parede", () => {
+    const d = { id: "n1", visita: { prod: [AZULEJO, LADRILHO], manter: {} as Record<string, "sim" | "nao"> } } as never as Parameters<typeof responderTroca>[2];
+    const tirados: string[] = [];
+    const A = { manter: (_: string, sid: string, r: "sim" | "nao") => { d.visita.manter = { ...d.visita.manter, [sid]: r }; },
+      tirarProduto: (_: string, id: string) => { tirados.push(id); d.visita.prod = (d.visita.prod ?? []).filter((x) => x.id !== id); } } as never;
+    const r = responderTroca(A, { arvore: ARVORE } as never, d, { sid: "sPav", no: "pav", pergunta: "O cliente mantém o pavimento?" }, "sim");
+    expect(tirados).toEqual(["RP0099"]);
+    expect(r.tirados.map((p) => p.id)).toEqual(["RP0099"]);
+    expect((d.visita.prod ?? []).map((p) => p.id)).toEqual(["RP0041"]);
   });
 });
 

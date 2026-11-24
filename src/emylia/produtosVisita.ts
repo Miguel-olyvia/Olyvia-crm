@@ -8,7 +8,7 @@
 // Só tipos de motor.ts e do Catálogo: assim o motor pode usar este ficheiro sem ciclos de importação.
 import type { Catalogo, No, Produto, Regra } from "./v2/catalogoModelo";
 import type { LinhaOrc, MedKey, Medidas, SvcId } from "./motor";
-import { nosDeProdutoDoRamo, nosDoObjeto, ramoDaCategoriaProduto } from "./ramoDosProdutos";
+import { nosDeProdutoDoRamo, nosDoObjeto, ramoDaCategoriaProduto, ramosDaCategoriaProduto } from "./ramoDosProdutos";
 
 export const PREFIXO_PROD = "Produto · ";
 export const PREFIXO_CLIENTE = "Fornecido pelo cliente · ";
@@ -76,6 +76,21 @@ export function ramoDaTroca(A: No[], no: string, pergunta?: string | null): Set<
   const r = nosDoRamo(A, no);
   for (const p of nosDoObjeto(A, pergunta)) for (const y of nosAbaixo(A, p)) r.add(y);
   return r;
+}
+/**
+ * 24/11 (contrato real MD 1605 no testarh: «O cliente mantém o pavimento?» → «Mantém» tirou o azulejo da PAREDE). Uma categoria de produto que vale
+ * em dois ramos (o porcelânico e o cerâmico: parede e chão, ramoDosProdutos.ts) entra no ramo das duas trocas. O produto é da outra quando a
+ * instalação que traz é outro serviço (o porcelânico da parede traz a «Instalação de Revestimento», não a do pavimento). Um produto debaixo
+ * do próprio nó da troca é sempre dela; as categorias de um só ramo não mudam.
+ */
+export function produtoDeOutroRamo(A: No[], o: { sid: SvcId; no: string }, p: Pick<ProdVisita, "no" | "svc">): boolean {
+  if (!p.no || !p.svc || p.svc === o.sid || nosAbaixo(A, o.no).has(p.no)) return false;
+  // a categoria do produto (ou uma de cima) que o mapa conhece
+  for (let c = A.find((y) => y.id === p.no); c; c = c.pai ? A.find((y) => y.id === c!.pai) : undefined) {
+    const rs = ramosDaCategoriaProduto(c.n);
+    if (rs.length) return rs.length > 1;
+  }
+  return false;
 }
 /** "Canalização › Louças e torneiras". */
 export function caminhoNo(A: No[], id: string | null | undefined): string {
