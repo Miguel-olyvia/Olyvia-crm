@@ -7,15 +7,17 @@
 // · Um separador sem a permissão da rota clássica não aparece; pedido no endereço, mostra "Sem acesso" (como a rota).
 // · As ligações dos ecrãs embebidos ficam cá dentro (NavegadorDoInventario); "Voltar ao clássico" e Esc saem para /inventory.
 // · Esc com uma folha ou diálogo aberto ([role=dialog][data-state=open]) não faz nada: fecha-se a folha primeiro.
+// · Fatia 2: o painel do produto à direita (Existências → "Ver produto", ?painel=produto:<id>) e, no telemóvel, a barra do
+//   polegar em baixo (BarraPolegar) com o botão principal, que no cabeçalho só aparece a partir de `sm`.
 import { Suspense, useEffect, useRef, useState } from "react";
-import { motion } from "framer-motion";
+import { AnimatePresence, motion } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowLeft, ArrowLeftRight, Check, ShieldAlert, Truck, PackageCheck, ShoppingCart } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
-import { INVENTORY_TODAY_PERMISSIONS, inventoryTodayQueryKey, useInventoryToday } from "@/hooks/useInventoryToday";
+import { getReceivingSummary, INVENTORY_TODAY_PERMISSIONS, inventoryTodayQueryKey, useInventoryToday } from "@/hooks/useInventoryToday";
 import { useReceivablePos, receivablePosQueryKey } from "@/components/receiving/useReceivablePos";
 import { todayIsoLocal } from "@/components/purchase-orders/poListUtils";
 import StockMovementDialog from "@/components/inventory/StockMovementDialog";
@@ -23,15 +25,21 @@ import { BlockedButton } from "@/components/inventory/ui/DisabledReason";
 import { usePermissionGate } from "@/components/inventory/ui/RowActions";
 import { useInventoryCounters } from "@/components/inventory/ui/useInventoryCounters";
 import { InventarioEmbebido } from "@/components/inventory/ui/embebido";
+import { receivingLink } from "@/components/inventory/ui/inventoryLinks";
+import { permissionReason } from "@/components/inventory/ui/permissionReason";
 import { Button } from "@/components/ui/button";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NaFrente } from "@/emylia/NaFrente";
 import { MOLA, useReduzir } from "@/emylia/movimento";
 import { cn } from "@/lib/utils";
-import { NavegadorDoInventario } from "./navegadorInventario";
+import { NavegadorDoInventario, paraSeparador } from "./navegadorInventario";
 import { PulsoInventario } from "./PulsoInventario";
 import { ComandoInventario } from "./ComandoInventario";
-import { botaoPrincipal, saudeDoInventario } from "./contasComando";
+import { botaoPrincipal, precisaDeTi, saudeDoInventario } from "./contasComando";
+import { PainelProduto } from "./PainelProduto";
+import { ProcurarProduto } from "./ProcurarProduto";
+import { BarraPolegar } from "./BarraPolegar";
+import { usePainelProduto } from "./painelUrl";
 import { caminhoSeparador, eChaveSeparador, separadorDe, separadoresVisiveis, type ChaveSeparador } from "./separadores";
 
 const CLASSICO = "/inventory";
@@ -126,6 +134,35 @@ export default function InventarioNovo() {
   const gatePrincipal = gate(principal.permissoes, true);
   const IconePrincipal = ICONE_PRINCIPAL[principal.tipo];
   const saude = saudeDoInventario(today, hasPermission);
+  // O "Precisa de ti" da barra do polegar: o mesmo número da coluna do Comando (precisaDeTi).
+  const posRecebiveis = canReceivable ? (receivable.data ?? null) : null;
+  const nPedidos = today || posRecebiveis
+    ? precisaDeTi(today, posRecebiveis ? getReceivingSummary(posRecebiveis, todayIsoLocal()) : null, hasPermission).length
+    : null;
+
+  // O painel do produto (só no separador Existências).
+  const [produtoAberto, abrirProduto, fecharProduto] = usePainelProduto();
+  const painelVisivel = ativo?.chave === "existencias" && !!produtoAberto;
+  // A lista do Stocks.tsx vive em estado local e não ouve as invalidações do react-query: depois de um movimento feito no
+  // painel, mudar a `key` do ecrã embebido volta a montá-lo e ele relê tudo (os filtros ficam, estão no endereço).
+  // O sentido inverso (movimento numa linha do Stocks) está no comentário do topo do PainelProduto.tsx.
+  const [versao, setVersao] = useState(0);
+  const aoMudarStock = () => setVersao((v) => v + 1);
+
+  // "Precisa de ti" (barra do polegar): o Hoje, até ao Comando. Noutro separador, primeiro troca e depois rola.
+  const [irAoComando, setIrAoComando] = useState(false);
+  const rolarAoComando = () => comandoRef.current?.scrollIntoView?.({ behavior: reduzir ? "auto" : "smooth", block: "start" });
+  useEffect(() => {
+    if (!irAoComando || ativo?.chave !== "hoje") return;
+    setIrAoComando(false);
+    rolarAoComando();
+  }, [irAoComando, ativo?.chave]); // eslint-disable-line react-hooks/exhaustive-deps
+  const irPrecisaDeTi = () => {
+    if (ativo?.chave === "hoje") rolarAoComando();
+    else { setIrAoComando(true); navigate(caminhoSeparador("hoje")); }
+  };
+  const irLerCodigo = () => navigate(paraSeparador(receivingLink({ vista: "leitor" })));
+  const podeSeparador = (chave: ChaveSeparador) => visiveis.some((s) => s.chave === chave);
 
   // Armazéns para o diálogo de movimento: a mesma leitura (e a mesma cache) do Hoje clássico; só com o diálogo em vista.
   const { data: armazens = [] } = useQuery({
@@ -172,13 +209,25 @@ export default function InventarioNovo() {
             <div className="flex flex-wrap items-center gap-2">
               {saude && <PilulaSaude tom={saude.tom} texto={saude.texto} />}
               {!loading && visiveis.length > 0 && (
-                <BlockedButton type="button" className="min-h-11" blockedReason={gatePrincipal.allowed ? null : gatePrincipal.reason} side="bottom" onClick={carregarPrincipal}>
+                <BlockedButton type="button" className="hidden min-h-11 sm:inline-flex" blockedReason={gatePrincipal.allowed ? null : gatePrincipal.reason} side="bottom" onClick={carregarPrincipal}>
                   <IconePrincipal className="mr-1.5 h-4 w-4" aria-hidden="true" />{principal.rotulo}
                 </BlockedButton>
               )}
             </div>
           </div>
         </header>
+
+        {/* ---------------------------------------------------------------- a barra do polegar (só no telemóvel) */}
+        {!loading && visiveis.length > 0 && !painelVisivel && (
+          <BarraPolegar
+            pedidos={nPedidos}
+            bloqueioHoje={podeSeparador("hoje") ? null : permissionReason(["inventory.view"])}
+            bloqueioRececao={podeSeparador("rececao") ? null : permissionReason(["receiving.view"])}
+            irPrecisaDeTi={irPrecisaDeTi}
+            irLerCodigo={irLerCodigo}
+            principal={{ rotulo: principal.rotulo, Icone: IconePrincipal, bloqueio: gatePrincipal.allowed ? null : (gatePrincipal.reason ?? null), carregar: carregarPrincipal }}
+          />
+        )}
 
         {/* ---------------------------------------------------------------- os separadores, fixos no topo:
             fora do <main> (que é o que rola), para nenhum "sticky" dos ecrãs embebidos (ex.: o leitor da Receção) os tapar. */}
@@ -191,8 +240,10 @@ export default function InventarioNovo() {
             </div>
         </div>
 
-        <main ref={mainRef} className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-[1500px] px-4 pb-24 pt-3 sm:px-6">
+        <div className="relative flex min-h-0 flex-1">
+        <main ref={mainRef} className="min-h-0 min-w-0 flex-1 overflow-y-auto">
+          {/* pb: no telemóvel, a barra do polegar (≈ 4 rem + a zona segura) não tapa o fim do ecrã */}
+          <div className="mx-auto max-w-[1500px] px-4 pb-[calc(7rem+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:pb-24">
             {loading ? (
               <div className="flex items-center justify-center py-24"><OlyviaLoader size={40} /></div>
             ) : !ativo ? (
@@ -211,10 +262,11 @@ export default function InventarioNovo() {
                     <ComandoInventario ref={comandoRef} />
                   </>
                 )}
+                {ativo.chave === "existencias" && <ProcurarProduto aoEscolher={abrirProduto} />}
                 <InventarioEmbebido.Provider value={true}>
                   <NavegadorDoInventario>
                     <Suspense fallback={<div className="flex items-center justify-center py-24"><OlyviaLoader size={40} /></div>}>
-                      {Componente && <Componente key={ativo.chave} />}
+                      {Componente && <Componente key={ativo.chave + ":" + versao} />}
                     </Suspense>
                   </NavegadorDoInventario>
                 </InventarioEmbebido.Provider>
@@ -222,6 +274,18 @@ export default function InventarioNovo() {
             )}
           </div>
         </main>
+
+        {/* ---------------------------------------------------------------- o painel da direita (como o do Estúdio) */}
+        <AnimatePresence>
+          {painelVisivel && produtoAberto && (
+            <motion.div key={produtoAberto}
+              className="absolute inset-0 z-30 w-full border-l border-border bg-card shadow-2xl sm:inset-y-0 sm:left-auto sm:right-0 sm:max-w-md lg:relative lg:z-auto lg:w-[420px] lg:max-w-none lg:shrink-0 lg:shadow-none"
+              initial={reduzir ? false : { x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 40, opacity: 0 }} transition={{ duration: 0.2 }}>
+              <PainelProduto produtoId={produtoAberto} fechar={fecharProduto} aoMudarStock={aoMudarStock} />
+            </motion.div>
+          )}
+        </AnimatePresence>
+        </div>
       </motion.div>
 
       {orgId && principal.tipo === "movimento" && gatePrincipal.allowed && (

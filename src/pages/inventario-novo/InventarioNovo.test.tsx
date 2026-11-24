@@ -1,7 +1,7 @@
 // A moldura do novo Inventário: os separadores com a permissão da rota clássica, o ecrã clássico embebido (sem os
 // separadores antigos, com as ligações a ficarem cá dentro), o botão principal e o Esc.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, Link, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useContext } from "react";
@@ -69,6 +69,9 @@ vi.mock("@/pages/ClientOrders", () => ({ default: () => <p>Saídas clássico</p>
 import InventarioNovo, { escDeveSair } from "./InventarioNovo";
 
 afterEach(cleanup);
+
+// Fatia 2: o botão principal também está na barra do polegar (só no telemóvel); estes testes são os do cabeçalho.
+const cabecalho = () => within(document.querySelector("header") as HTMLElement);
 
 const TODAS = ["inventory.view", "purchase_orders.view", "suppliers.view", "client_orders.view", "receiving.view", "warehouses.view", "inventory.edit"];
 const payload = (): InventoryTodayPayload => ({
@@ -145,7 +148,7 @@ describe("o novo Inventário", () => {
   it("o botão principal: POs por aprovar → Aprovar encomendas, bloqueado sem purchase_orders.approve", async () => {
     montar();
     await screen.findByText("Hoje clássico (embebido)");
-    const b = screen.getByRole("button", { name: /Aprovar encomendas/ });
+    const b = cabecalho().getByRole("button", { name: /Aprovar encomendas/ });
     expect(b).toHaveAttribute("aria-disabled", "true");
     fireEvent.click(b);
     expect(screen.getByTestId("onde")).toHaveTextContent("/inventory/novo/hoje");
@@ -155,7 +158,7 @@ describe("o novo Inventário", () => {
     perms = new Set([...TODAS, "purchase_orders.approve"]);
     montar();
     await screen.findByText("Hoje clássico (embebido)");
-    fireEvent.click(screen.getByRole("button", { name: /Aprovar encomendas/ }));
+    fireEvent.click(cabecalho().getByRole("button", { name: /Aprovar encomendas/ }));
     expect(screen.getByTestId("onde")).toHaveTextContent("/inventory/novo/encomendas?status=pending");
   });
 
@@ -163,7 +166,7 @@ describe("o novo Inventário", () => {
     todayPayload = { ...payload(), purchases: { ...payload().purchases!, pending_approval: 0 } };
     montar();
     await screen.findByText("Hoje clássico (embebido)");
-    fireEvent.click(screen.getByRole("button", { name: /Registar movimento/ }));
+    fireEvent.click(cabecalho().getByRole("button", { name: /Registar movimento/ }));
     expect(screen.getByRole("dialog", { name: "Registar movimento" })).toBeInTheDocument();
     act(() => { fireEvent.keyDown(window, { key: "Escape" }); });
     expect(screen.getByTestId("onde")).toHaveTextContent("/inventory/novo/hoje");
