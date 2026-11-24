@@ -42,10 +42,15 @@ export const ramoDaCategoriaProduto = (nome: string): [string, string] | null =>
 export const ramosDaCategoriaProduto = (nome: string): [string, string][] => RAMOS_DA_CATEGORIA.get(sem(nome)) ?? [];
 
 const VAZIAS = new Set(["a", "o", "as", "os", "e", "de", "do", "da", "dos", "das", "com", "em"]);
-/** O que a pergunta pergunta, em palavras: «O cliente mantém o espelho?» → ["espelho"]; sem «mantém…», nada. */
+/**
+ * O que a pergunta pergunta, em palavras: «O cliente mantém o espelho?» → ["espelho"]; sem «mantém…», nada. Conta só o nome de cada objeto
+ * (a primeira palavra cheia de cada parte, as partes separadas por «e» ou vírgula): «a sanita e o bidé» → ["sanita", "bide"], mas
+ * «a torneira do bidé» → ["torneira"]. 24/11 (contrato real MD 1601): «Mantém» na torneira do bidé tirava o próprio bidé.
+ */
 function palavrasDoObjeto(pergunta: string | null | undefined): string[] {
   const m = pergunta && /mant[ée]m\s+(.+?)\s*\??\s*$/i.exec(pergunta);
-  return m ? sem(m[1]).split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !VAZIAS.has(w)) : [];
+  if (!m) return [];
+  return sem(m[1]).split(/,|\s+e\s+/).map((parte) => parte.split(/[^a-z0-9]+/).find((w) => w.length > 2 && !VAZIAS.has(w))).filter((w): w is string => !!w);
 }
 /**
  * 23/11 (testarh, Mudelar: «O cliente mantém o espelho?» → «Troca» não encontrava o «Espelho Simples C/ORLA ALUMÍNIO 60x50», da categoria de produto
@@ -56,7 +61,7 @@ function palavrasDoObjeto(pergunta: string | null | undefined): string[] {
 export function nosDoObjeto(arvore: readonly No[], pergunta: string | null | undefined): string[] {
   const pal = palavrasDoObjeto(pergunta);
   if (!pal.length) return [];
-  const formas = new Set(pal.flatMap((w) => [w, w + "s", w + "es"]));
+  const formas = new Set(pal.flatMap((w) => [w, w + "s", w + "es", w.replace(/l$/, "is")]));
   return arvore.filter((x) => x.soProduto && formas.has(sem(x.n).split(" ")[0])).map((x) => x.id);
 }
 

@@ -155,6 +155,18 @@ describe("23/11: a troca do espelho e da porta (testarh, Mudelar)", () => {
     expect(nosDoObjeto(A, "Escolher o produto")).toEqual([]);
   });
 
+  // 24/11 (contrato real MD 1601): «O cliente mantém a torneira do bidé?» → «Mantém» tirava o bidé. Conta o nome do objeto, não o complemento.
+  it("o objeto é o nome de cada parte: «a torneira do bidé» é a torneira; «a sanita e o bidé» são os dois; «o móvel» são os Móveis", () => {
+    const B: No[] = [
+      { id: "lou", n: "Louças", pai: null, soProduto: true }, { id: "bid", n: "Bidés", pai: "lou", soProduto: true }, { id: "san", n: "Sanitas", pai: "lou", soProduto: true },
+      { id: "tor", n: "Torneiras", pai: null, soProduto: true }, { id: "mov", n: "Móveis de lavatório", pai: null, soProduto: true }, { id: "lav", n: "Lavatórios", pai: "lou", soProduto: true },
+    ];
+    expect(nosDoObjeto(B, "O cliente mantém a torneira do bidé?")).toEqual(["tor"]);
+    expect(nosDoObjeto(B, "O cliente mantém a sanita e o bidé?").sort()).toEqual(["bid", "san"]);
+    expect(nosDoObjeto(B, "O cliente mantém o móvel de lavatório?")).toEqual(["mov"]);
+    expect(nosDoObjeto(B, "O cliente mantém o lavatório?")).toEqual(["lav"]);
+  });
+
   it("os produtos da troca vêm também da categoria do objeto, mesmo que o ramo do serviço não a tenha; e cumprem a obrigação", () => {
     const K = { arvore: A, produtos: [ESPELHO, PORTA], exigeProduto: { sEsp: "acc", sPorta: "carp" }, perguntaManter: { sEsp: "O cliente mantém o espelho?", sPorta: "O cliente mantém a porta?" } } as never;
     // o ramo «Acessórios WC» não tem os espelhos: sem a pergunta, nada; com ela, o espelho
