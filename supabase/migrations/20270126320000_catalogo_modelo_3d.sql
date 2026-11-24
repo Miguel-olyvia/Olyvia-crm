@@ -153,14 +153,14 @@ CREATE OR REPLACE FUNCTION public.cat_definir_modelo_3d(p_org uuid, p_alvo text,
  SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
-  -- a mesma permissão que cat_guardar_produto_tabelas e cat_guardar_categoria_produto exigem
-  v_user uuid := public.fn_cat_exigir(p_org, 'products.edit');
   c_max_texto constant integer := 200;
   v_alvo text := lower(btrim(coalesce(p_alvo, '')));
   v_modelo text;
   v_anterior text;
-  v_cat_org uuid;
 BEGIN
+  -- a mesma permissão que cat_guardar_produto_tabelas e cat_guardar_categoria_produto exigem (CT001 sem ela)
+  PERFORM public.fn_cat_exigir(p_org, 'products.edit');
+
   IF v_alvo NOT IN ('produto', 'categoria') THEN
     RAISE EXCEPTION 'Indique se o modelo 3D é de um produto ou de uma categoria.' USING ERRCODE = 'CT002';
   END IF;
@@ -191,13 +191,16 @@ BEGIN
   ELSE
     -- a mesma chave e a mesma ordem de cat_guardar_categoria_produto: primeiro a organização, depois a linha
     PERFORM pg_advisory_xact_lock(hashtextextended('cat_categorias_produto:' || p_org::text, 0));
-    SELECT pc.organization_id, pc.modelo_3d INTO v_cat_org, v_anterior FROM product_categories pc
-    WHERE pc.id = p_id AND pc.deleted_at IS NULL AND (pc.organization_id = p_org OR pc.organization_id IS NULL)
-    FOR NO KEY UPDATE;
-    IF NOT FOUND THEN RAISE EXCEPTION 'Categoria não encontrada.' USING ERRCODE = 'CT003'; END IF;
-    IF v_cat_org IS NULL THEN
+    -- a partilhada (organization_id NULL) recusa-se sem lhe trancar a linha
+    IF EXISTS (SELECT 1 FROM product_categories pc
+               WHERE pc.id = p_id AND pc.deleted_at IS NULL AND pc.organization_id IS NULL) THEN
       RAISE EXCEPTION 'Categoria partilhada: não se pode alterar aqui.' USING ERRCODE = 'CT002';
     END IF;
+    -- só se tranca a linha da própria organização; apagada ou de outra organização = não encontrada
+    SELECT pc.modelo_3d INTO v_anterior FROM product_categories pc
+    WHERE pc.id = p_id AND pc.deleted_at IS NULL AND pc.organization_id = p_org
+    FOR NO KEY UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'Categoria não encontrada.' USING ERRCODE = 'CT003'; END IF;
 
     UPDATE product_categories pc SET modelo_3d = v_modelo
     WHERE pc.id = p_id AND pc.modelo_3d IS DISTINCT FROM v_modelo;
