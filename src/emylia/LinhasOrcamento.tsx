@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CATALOGO } from "./catalogo";
-import { TAXAS_IVA, custoUnLinha, eur, ivaDaLinha, linhaCalc, nfmt, pct, r2, type LinhaOrc, type Negocio } from "./motor";
+import { TAXAS_IVA, custoUnLinha, eur, ivaDaLinha, ivaPadraoDaLinha, linhaCalc, nfmt, pct, r2, type LinhaOrc, type Negocio, type TaxaIva } from "./motor";
 import { LinhaLivre } from "./LinhaLivre";
 import { ZonaDaLinha, ZonasDaObra } from "./ZonasDaObra";
 import { numero, type Ctx } from "./pecas";
@@ -224,7 +224,17 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
                   {ajustado && !(l.t === "mat" && l.livre) && <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">preço ajustado</span>}
                   {/* 26/10: a taxa de IVA à vista quando não é a de sempre (ou numa linha livre). 19/11: a taxa congelada ao enviar (l.iva) só se
                       mostra quando não é a de sempre */}
-                  {((l.t === "mat" && l.livre) || ivaDaLinha(l, S) !== (l.t === "mat" ? 23 : 6)) && <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">IVA {ivaDaLinha(l, S)}%</span>}
+                  {/* 24/11 (MD 1594): nos materiais e produtos, a taxa escolhe-se aqui (23%, 6% ou 0%); fora do de sempre, fica destacada */}
+                  {l.t === "mat" && !fechado ? (
+                    <label className="inline-flex items-center">
+                      <span className="sr-only">IVA de {nome}</span>
+                      <select value={ivaDaLinha(l, S)} onChange={(e) => { const v = Number(e.target.value) as TaxaIva; run(() => A.ivaLinha(d.id, i, v)); }}
+                        className={cn("h-9 cursor-pointer rounded-full border px-2 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+                          ivaDaLinha(l, S) !== 23 ? "border-primary/40 bg-primary/10 text-foreground" : "border-input bg-card text-muted-foreground")}>
+                        {TAXAS_IVA.map((v) => <option key={v} value={v}>IVA {v}%{v === 0 ? " · autoliquidação" : ""}</option>)}
+                      </select>
+                    </label>
+                  ) : ((l.t === "mat" && l.livre) || ivaDaLinha(l, S) !== (l.t === "mat" ? 23 : 6)) && <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">IVA {ivaDaLinha(l, S)}%</span>}
                 </p>
               </div>
               {tabela && zonas.length > 0 && <ZonaDaLinha ctx={ctx} d={d} i={i} nome={nome} compacto />}
@@ -341,16 +351,20 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
     })}
     </div>
     <LinhaLivre ctx={ctx} d={d} />
-    {/* 24/11 (contrato MD 1600, cliente empresa): o orçamento todo a 0% (autoliquidação) de uma vez; repor volta cada linha à sua taxa */}
+    {/* 24/11: o IVA do orçamento todo de uma vez: a 0% (autoliquidação, cliente empresa: MD 1600) ou a 6% (MD 1594); repor volta cada
+        linha à sua taxa (6% nos serviços, 23% nos materiais e produtos, a do Catálogo nas subempreitadas) */}
     {!fechado && o.linhas.length > 0 && (() => {
-      const tudo0 = o.linhas.every((l) => ivaDaLinha(l, S) === 0);
+      const todas = (t: TaxaIva) => o.linhas.every((l) => ivaDaLinha(l, S) === t);
+      const mexido = o.linhas.some((l) => ivaDaLinha(l, S) !== ivaPadraoDaLinha(l, S));
+      const btn = "inline-flex min-h-11 items-center font-medium text-primary underline-offset-4 hover:underline";
       return (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
-          <span className="text-muted-foreground">{tudo0 ? "Todas as linhas com IVA a 0% (autoliquidação)." : "Cliente empresa com autoliquidação do IVA?"}</span>
-          <button type="button" onClick={() => run(() => A.ivaTodasLinhas(d.id, tudo0 ? null : 0))}
-            className="inline-flex min-h-11 items-center font-medium text-primary underline-offset-4 hover:underline">
-            {tudo0 ? "Repor o IVA de cada linha" : "Pôr todas as linhas a 0%"}
-          </button>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+          <span className="text-muted-foreground">
+            {todas(0) ? "Todas as linhas com IVA a 0% (autoliquidação)." : todas(6) ? "Todas as linhas com IVA a 6%." : "IVA de todas as linhas:"}
+          </span>
+          {!todas(0) && <button type="button" onClick={() => run(() => A.ivaTodasLinhas(d.id, 0))} className={btn}>Pôr todas a 0% (autoliquidação)</button>}
+          {!todas(6) && <button type="button" onClick={() => run(() => A.ivaTodasLinhas(d.id, 6))} className={btn}>Pôr todas a 6%</button>}
+          {mexido && <button type="button" onClick={() => run(() => A.ivaTodasLinhas(d.id, null))} className={btn}>Repor o IVA de cada linha</button>}
         </div>
       );
     })()}

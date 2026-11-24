@@ -53,8 +53,10 @@ export function CapaDaObra({ capa, t, idioma }: { capa: CapaObra; t: T; idioma: 
 
 export function OrcamentoDetalhadoObra({ orc, t }: { orc: OrcamentoObra; t: T }) {
   const totais: [string, number, boolean][] = [
-    [t("pc.docObra.orc.mo"), orc.mo, false], [t("pc.docObra.orc.mat"), orc.mat, false],
-    [t("pc.docObra.orc.ivaMo"), orc.ivaMo, true], [t("pc.docObra.orc.ivaMat"), orc.ivaMat, true],
+    // 24/11 (MD 1594): com produtos a 6% ou valor a 0%, as partes pela taxa
+    ...(((orc.prod6 ?? 0) > 0.004 || (orc.isento ?? 0) > 0.004)
+      ? [[t("pc.docObra.orc.base6"), orc.mo, false], [t("pc.docObra.orc.base23"), orc.mat, false], [t("pc.docObra.orc.iva6"), orc.ivaMo, true], [t("pc.docObra.orc.iva23"), orc.ivaMat, true]] as [string, number, boolean][]
+      : [[t("pc.docObra.orc.mo"), orc.mo, false], [t("pc.docObra.orc.mat"), orc.mat, false], [t("pc.docObra.orc.ivaMo"), orc.ivaMo, true], [t("pc.docObra.orc.ivaMat"), orc.ivaMat, true]] as [string, number, boolean][]),
     // 24/11: a parte a 0% (autoliquidação), só quando a há
     ...((orc.isento ?? 0) > 0.004 ? [[t("pc.docObra.orc.isento"), orc.isento!, false] as [string, number, boolean]] : []),
   ];

@@ -43,5 +43,7 @@ export type TituloDoGrupo = { tipo: "fase"; n: FaseObra } | { tipo: "zona"; zona
 export interface GrupoDoOrcamento { chave: string; titulo: TituloDoGrupo; cor: string | null; linhas: LinhaOrcamentoDoc[]; subtotal: number }
 export interface OrcamentoObra { grupos: GrupoDoOrcamento[]; desconto: number; mo: number; mat: number; ivaMo: number; ivaMat: number; total: number;
   /** 24/11: a parte a 0% (autoliquidação). */
-  isento?: number }
+  isento?: number;
+  /** 24/11 (MD 1594): os produtos a 6% (as partes dizem-se pela taxa). */
+  prod6?: number }
 

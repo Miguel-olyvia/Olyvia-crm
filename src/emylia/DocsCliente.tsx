@@ -40,7 +40,7 @@ const EMPRESA = {
 
 // IVA na proposta: a mão de obra (os serviços) a 6% e os materiais a 23%.
 export { IVA_MAT, IVA_MO } from "./motor";
-import { IVA_MAT, IVA_MO, MENCAO_AUTOLIQUIDACAO, porZonaDe, totaisIva, type TotaisIva } from "./motor";
+import { IVA_MAT, IVA_MO, MENCAO_AUTOLIQUIDACAO, partesPorTaxa, porZonaDe, totaisIva, type TotaisIva } from "./motor";
 import type { FaturaReg } from "./v2/financeiro";
 import { PREFIXO_CLIENTE, PREFIXO_PROD, textoProduto } from "./produtosVisita";
 import { FotoObra } from "./fotosDaObra";
@@ -53,8 +53,9 @@ export const totais = totaisIva;
 /** As linhas de IVA de um valor (o total ou uma tranche), na proporção do orçamento. */
 function linhasIva(T: ReturnType<typeof totais>, parte = 1) {
   return [
-    { l: "Mão de obra", base: T.mo * parte, taxa: IVA_MO, iva: T.ivaMo * parte },
-    { l: "Materiais", base: T.mat * parte, taxa: IVA_MAT, iva: T.ivaMat * parte },
+    // 24/11 (MD 1594): com produtos a 6% (ou valor a 0%), as partes dizem-se pela taxa
+    { l: partesPorTaxa(T) ? "A 6%" : "Mão de obra", base: T.mo * parte, taxa: IVA_MO, iva: T.ivaMo * parte },
+    { l: partesPorTaxa(T) ? "A 23%" : "Materiais", base: T.mat * parte, taxa: IVA_MAT, iva: T.ivaMat * parte },
     // 24/11: a parte a 0% (autoliquidação), com a menção por baixo do quadro
     { l: "Autoliquidação", base: T.isento * parte, taxa: 0, iva: 0 },
   ].filter((x) => x.base > 0);
@@ -63,10 +64,10 @@ function linhasIva(T: ReturnType<typeof totais>, parte = 1) {
 export function MencaoAutoliquidacao({ T }: { T: Pick<TotaisIva, "isento"> }) {
   return T.isento > 0.004 ? <p className="mt-2 text-left text-sm text-slate-600">{MENCAO_AUTOLIQUIDACAO}</p> : null;
 }
-/** 24/11: a cláusula do preço por taxa. Sem nada a 0%, o texto de sempre (`soMo`: o das adendas, que só junta os materiais se os houver);
- *  com uma parte a 0%, só as partes que têm valor e a menção da autoliquidação. */
+/** 24/11: a cláusula do preço por taxa. Sem nada a 0% nem produtos a 6%, o texto de sempre (`soMo`: o das adendas, que só junta os
+ *  materiais se os houver); senão, só as partes que têm valor, pela taxa, e a menção da autoliquidação quando há valor a 0%. */
 export function textoPrecoContrato(T: TotaisIva, soMo = false): string {
-  if (T.isento <= 0.004) {
+  if (!partesPorTaxa(T)) {
     return soMo
       ? `${eur(T.base)} € sem IVA: ${eur(T.mo)} € de mão de obra, com IVA a 6% (${eur(T.ivaMo)} €)${T.mat > 0 ? `, e ${eur(T.mat)} € de materiais, com IVA a 23% (${eur(T.ivaMat)} €)` : ""}. Total com IVA: ${eur(T.total)} €.`
       : `${eur(T.base)} € sem IVA: ${eur(T.mo)} € de mão de obra, com IVA a 6% (${eur(T.ivaMo)} €), e ${eur(T.mat)} € de materiais, com IVA a 23% (${eur(T.ivaMat)} €). Total com IVA: ${eur(T.total)} €.`;
@@ -74,10 +75,10 @@ export function textoPrecoContrato(T: TotaisIva, soMo = false): string {
   const partes = [
     T.mo > 0.004 ? `${eur(T.mo)} € com IVA a 6% (${eur(T.ivaMo)} €)` : "",
     T.mat > 0.004 ? `${eur(T.mat)} € com IVA a 23% (${eur(T.ivaMat)} €)` : "",
-    `${eur(T.isento)} € com IVA a 0%`,
+    T.isento > 0.004 ? `${eur(T.isento)} € com IVA a 0%` : "",
   ].filter(Boolean);
   const lista = partes.length > 1 ? `${partes.slice(0, -1).join(", ")} e ${partes[partes.length - 1]}` : partes[0];
-  return `${eur(T.base)} € sem IVA: ${lista}. Total com IVA: ${eur(T.total)} €. ${MENCAO_AUTOLIQUIDACAO}`;
+  return `${eur(T.base)} € sem IVA: ${lista}. Total com IVA: ${eur(T.total)} €.${T.isento > 0.004 ? ` ${MENCAO_AUTOLIQUIDACAO}` : ""}`;
 }
 function QuadroIva({ T, parte = 1, rotulo = "Total" }: { T: ReturnType<typeof totais>; parte?: number; rotulo?: string }) {
   const ls = linhasIva(T, parte);
@@ -483,10 +484,11 @@ export function PropostaDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) 
           </div>
           <div className="ml-auto w-full max-w-sm space-y-1.5 border-t border-slate-900 pt-3 text-[14px]">
             {desconto > 0 && <div className="flex justify-between text-slate-600"><span>Desconto incluído nos preços</span><span className="tabular-nums">{desconto}%</span></div>}
-            <div className="flex justify-between"><span>Mão de obra, sem IVA</span><span className="tabular-nums">{eur(T.mo)} €</span></div>
-            <div className="flex justify-between"><span>Materiais, sem IVA</span><span className="tabular-nums">{eur(T.mat)} €</span></div>
-            <div className="flex justify-between text-slate-600"><span>IVA a 6% (mão de obra)</span><span className="tabular-nums">{eur(T.ivaMo)} €</span></div>
-            <div className="flex justify-between text-slate-600"><span>IVA a 23% (materiais)</span><span className="tabular-nums">{eur(T.ivaMat)} €</span></div>
+            {/* 24/11 (MD 1594): com produtos a 6% (ou valor a 0%), as partes pela taxa */}
+            <div className="flex justify-between"><span>{partesPorTaxa(T) ? "A 6%, sem IVA" : "Mão de obra, sem IVA"}</span><span className="tabular-nums">{eur(T.mo)} €</span></div>
+            <div className="flex justify-between"><span>{partesPorTaxa(T) ? "A 23%, sem IVA" : "Materiais, sem IVA"}</span><span className="tabular-nums">{eur(T.mat)} €</span></div>
+            <div className="flex justify-between text-slate-600"><span>{partesPorTaxa(T) ? "IVA a 6%" : "IVA a 6% (mão de obra)"}</span><span className="tabular-nums">{eur(T.ivaMo)} €</span></div>
+            <div className="flex justify-between text-slate-600"><span>{partesPorTaxa(T) ? "IVA a 23%" : "IVA a 23% (materiais)"}</span><span className="tabular-nums">{eur(T.ivaMat)} €</span></div>
             {T.isento > 0.004 && <div className="flex justify-between"><span>Com IVA a 0% (autoliquidação)</span><span className="tabular-nums">{eur(T.isento)} €</span></div>}
             <div className="flex justify-between border-t border-slate-300 pt-2 text-lg font-semibold text-slate-900"><span>Total</span><span className="tabular-nums">{eur(T.total)} €</span></div>
             <MencaoAutoliquidacao T={T} />

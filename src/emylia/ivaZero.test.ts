@@ -1,7 +1,7 @@
 // 24/11/2026 (Rúben, contrato MD 1600, Enigma da Avenida, cliente empresa): o IVA a 0% por linha (a autoliquidação), além de 6% e 23%.
 // A proposta real P-2026-1081 tem todas as linhas a «IVA 0 %», o total igual ao subtotal (7 437,48 €) e a menção «IVA AUTOLIQUIDAÇÃO».
 import { beforeEach, describe, expect, it } from "vitest";
-import { MENCAO_AUTOLIQUIDACAO, acoes, ivaDaLinha, seed, taxaIvaDe, totaisIva, type Estado } from "./motor";
+import { MENCAO_AUTOLIQUIDACAO, acoes, ivaDaLinha, ivaPadraoDaLinha, linhaCalc, partesPorTaxa, seed, taxaIvaDe, totaisIva, type Estado } from "./motor";
 import { textoIvaPorTaxa, totaisLinhas, type LinhaAdenda } from "./adendas";
 import { textoPrecoContrato } from "./DocsCliente";
 import { adendaDeLinhas, adendaParaLinhas, deLinhas, ivaDaLinhaLida, paraLinhas } from "./real/negocioReal";
@@ -111,15 +111,52 @@ describe("as adendas a 0%", () => {
 
 describe("os textos", () => {
   it("sem nada a 0%, a cláusula do preço fica a de sempre", () => {
-    const T = { mo: 100, mat: 200, isento: 0, ivaMo: 6, ivaMat: 46, base: 300, iva: 52, total: 352 };
+    const T = { mo: 100, mat: 200, isento: 0, ivaMo: 6, ivaMat: 46, base: 300, iva: 52, total: 352, prod6: 0 };
     expect(textoPrecoContrato(T)).toBe("300,00 € sem IVA: 100,00 € de mão de obra, com IVA a 6% (6,00 €), e 200,00 € de materiais, com IVA a 23% (46,00 €). Total com IVA: 352,00 €.");
   });
   it("tudo a 0% (o MD 1600): o total é o sem IVA, com a menção da autoliquidação", () => {
-    const T = { mo: 0, mat: 0, isento: 7437.48, ivaMo: 0, ivaMat: 0, base: 7437.48, iva: 0, total: 7437.48 };
+    const T = { mo: 0, mat: 0, isento: 7437.48, ivaMo: 0, ivaMat: 0, base: 7437.48, iva: 0, total: 7437.48, prod6: 0 };
     expect(textoPrecoContrato(T)).toBe(`7.437,48 € sem IVA: 7.437,48 € com IVA a 0%. Total com IVA: 7.437,48 €. ${MENCAO_AUTOLIQUIDACAO}`);
   });
   it("misto: só as partes com valor", () => {
-    const T = { mo: 100, mat: 0, isento: 50, ivaMo: 6, ivaMat: 0, base: 150, iva: 6, total: 156 };
+    const T = { mo: 100, mat: 0, isento: 50, ivaMo: 6, ivaMat: 0, base: 150, iva: 6, total: 156, prod6: 0 };
     expect(textoPrecoContrato(T)).toBe(`150,00 € sem IVA: 100,00 € com IVA a 6% (6,00 €) e 50,00 € com IVA a 0%. Total com IVA: 156,00 €. ${MENCAO_AUTOLIQUIDACAO}`);
+  });
+});
+
+// 24/11 (contrato MD 1594, P-2026-0088): todas as linhas a 6%, incluindo 46 produtos (15 057 € sem IVA). Os produtos também escolhem a taxa.
+describe("produtos a 6%", () => {
+  it("uma linha de produto a 6%: sai dos 23% e entra na parte a 6%, contada em prod6; repor volta aos 23%", () => {
+    const { S, A, d } = preparar();
+    const iM = d.orc!.linhas.findIndex((l) => l.t === "mat");
+    const l = d.orc!.linhas[iM], v = linhaCalc(l, S).preco;
+    expect(ivaPadraoDaLinha(l, S)).toBe(23);
+    const antes = totaisIva(d, S);
+    A.ivaLinha(d.id, iM, 6);
+    const T = totaisIva(d, S);
+    expect(T.mat).toBeCloseTo(antes.mat - v, 6);
+    expect(T.mo).toBeCloseTo(antes.mo + v, 6);
+    expect(T.prod6).toBeCloseTo(v, 6);
+    expect(T.total).toBeCloseTo(antes.total - v * 0.17, 6);
+    expect(partesPorTaxa(T)).toBe(v > 0.004);
+    A.ivaLinha(d.id, iM, null);
+    expect(totaisIva(d, S).total).toBeCloseTo(antes.total, 6);
+  });
+
+  it("«Pôr todas a 6%»: sem nada a 23%, o total é o sem IVA × 1,06; e grava-se e lê-se de volta", () => {
+    const { S, A, d } = preparar();
+    A.ivaTodasLinhas(d.id, 6);
+    const T = totaisIva(d, S);
+    expect(T.mat).toBe(0);
+    expect(T.isento).toBe(0);
+    expect(T.total).toBeCloseTo(T.base * 1.06, 6);
+    const volta = deLinhas(paraLinhas(d, new Date(), S));
+    expect(volta.orc!.linhas.every((l) => l.iva === 6)).toBe(true);
+    expect(totaisIva(volta, S).total).toBeCloseTo(T.total, 6);
+  });
+
+  it("a cláusula do preço diz as partes pela taxa (não «mão de obra»), sem a menção da autoliquidação", () => {
+    const T = { mo: 15057, mat: 0, isento: 0, ivaMo: 903.42, ivaMat: 0, base: 15057, iva: 903.42, total: 15960.42, prod6: 15057 };
+    expect(textoPrecoContrato(T)).toBe("15.057,00 € sem IVA: 15.057,00 € com IVA a 6% (903,42 €). Total com IVA: 15.960,42 €.");
   });
 });

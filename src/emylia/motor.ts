@@ -1069,25 +1069,37 @@ export const IVA_MO = 0.06, IVA_MAT = 0.23;
  *  os materiais, os produtos, o levantamento e a demolição a 23%. */
 export function ivaDaLinha(l: LinhaOrc, S?: Pick<Estado, "svc"> | null): TaxaIva {
   if (l.iva != null) return l.iva; // 24/11: o 0% é uma taxa escrita (antes, `if (l.iva)` deitava-o fora)
+  return ivaPadraoDaLinha(l, S);
+}
+/** 24/11: a taxa de uma linha sem a escrita nela: a do serviço do Catálogo (6%, ou 23%), e 23% nos materiais e produtos. */
+export function ivaPadraoDaLinha(l: LinhaOrc, S?: Pick<Estado, "svc"> | null): TaxaIva {
   if (l.t === "mat") return 23;
   return S?.svc[l.sid]?.iva === 23 ? 23 : 6;
 }
 /** Os totais com IVA de um orçamento ou de uma adenda: a parte a 6% («mo»), a parte a 23% («mat») e, 24/11, a parte a 0% («isento», a
  *  autoliquidação), o IVA de cada uma, a base (as três) e o total. */
-export interface TotaisIva { mo: number; mat: number; isento: number; ivaMo: number; ivaMat: number; base: number; iva: number; total: number }
+export interface TotaisIva { mo: number; mat: number; isento: number; ivaMo: number; ivaMat: number; base: number; iva: number; total: number;
+  /** 24/11 (MD 1594): quanto dos materiais e produtos está a 6% (já dentro de «mo»). Com ele, os documentos dizem as partes pela taxa
+   *  («a 6%») em vez de «mão de obra» e «materiais». */
+  prod6: number }
 /** 24/11: os totais a partir da base de cada taxa (já com o desconto). */
-export function totaisDasPartes(mo: number, mat: number, isento = 0): TotaisIva {
+export function totaisDasPartes(mo: number, mat: number, isento = 0, prod6 = 0): TotaisIva {
   const ivaMo = mo * IVA_MO, ivaMat = mat * IVA_MAT;
-  return { mo, mat, isento, ivaMo, ivaMat, base: mo + mat + isento, iva: ivaMo + ivaMat, total: mo + mat + isento + ivaMo + ivaMat };
+  return { mo, mat, isento, ivaMo, ivaMat, base: mo + mat + isento, iva: ivaMo + ivaMat, total: mo + mat + isento + ivaMo + ivaMat, prod6 };
 }
+/** 24/11: os documentos dizem as partes pela taxa (e não «mão de obra» e «materiais») quando há valor a 0% ou produtos a 6%. */
+export const partesPorTaxa = (T: Pick<TotaisIva, "isento" | "prod6">): boolean => T.isento > 0.004 || (T.prod6 ?? 0) > 0.004;
 /** Os totais com IVA do orçamento (a fonte única: documentos, portal, Financeiro): a mão de obra e os materiais, depois do desconto, e o IVA de cada parte. */
 export function totaisIva(d: Negocio, S: Estado): TotaisIva {
   if (!d.orc) return totaisDasPartes(0, 0, 0);
   const k = 1 - (d.orc.desconto || 0) / 100; // o desconto reparte-se pelas partes
-  let mo = 0, mat = 0, isento = 0;
-  // 26/10: pela taxa de cada linha («mo» é a parte a 6%, «mat» a parte a 23%; 24/11: «isento» a parte a 0%)
-  for (const l of d.orc.linhas) { const p = linhaCalc(l, S).preco * k, t = ivaDaLinha(l, S); if (t === 23) mat += p; else if (t === 0) isento += p; else mo += p; }
-  return totaisDasPartes(mo, mat, isento);
+  let mo = 0, mat = 0, isento = 0, prod6 = 0;
+  // 26/10: pela taxa de cada linha («mo» é a parte a 6%, «mat» a parte a 23%; 24/11: «isento» a parte a 0%, e os produtos a 6% à parte)
+  for (const l of d.orc.linhas) {
+    const p = linhaCalc(l, S).preco * k, t = ivaDaLinha(l, S);
+    if (t === 23) mat += p; else if (t === 0) isento += p; else { mo += p; if (l.t === "mat") prod6 += p; }
+  }
+  return totaisDasPartes(mo, mat, isento, prod6);
 }
 /** O valor da primeira prestação (o sinal), com IVA: o que o Financeiro espera ver entrar (14/10). 20/11 (auditoria F12): pela conta
  *  única das parcelas (planoObra.ts: valoresPrestacoes), a mesma do portal, do Financeiro e do servidor. */
