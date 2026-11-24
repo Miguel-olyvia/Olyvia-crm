@@ -177,6 +177,22 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
                 {p ? p + "%" : "Sem"}
               </button>
             ))}
+            {/* 24/11 (contratos reais da Mudelar com 2%, 2,5%…): um desconto à medida; grava-se ao sair do campo ou com Enter */}
+            <label className={cn("flex min-h-11 items-center gap-1.5 rounded-lg border px-3 text-[15px]",
+              DESCONTOS.includes(o.desconto) ? "border-input bg-card" : "border-primary bg-primary/10 font-medium text-primary")}>
+              <span>Outro</span>
+              <input key={`${d.id}-${o.desconto}`} type="text" inputMode="decimal" disabled={fechado} aria-label="Outro desconto, em percentagem"
+                defaultValue={DESCONTOS.includes(o.desconto) ? "" : String(o.desconto).replace(".", ",")}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                onBlur={(e) => {
+                  const t = e.target.value.trim();
+                  if (!t) return;
+                  const v = Math.round(parseFloat(t.replace(",", ".")) * 100) / 100;
+                  if (Number.isFinite(v) && v >= 0 && v <= 50 && v !== o.desconto) run(() => { o.desconto = v; mudou(); });
+                }}
+                className="w-14 bg-transparent text-right outline-none disabled:opacity-60" />
+              <span aria-hidden="true">%</span>
+            </label>
           </div>
         </div>
         <button type="button" role="switch" aria-checked={o.vendaDireta} disabled={fechado} onClick={() => run(() => A.vendaDireta(d.id, !o.vendaDireta))}
