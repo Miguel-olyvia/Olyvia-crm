@@ -235,8 +235,10 @@ BEGIN
 
   -- a antiga fica órfã só se nenhuma OUTRA opção a usa (a cópia de foto partilha o ficheiro)
   IF o.foto IS NOT NULL AND o.foto IS DISTINCT FROM v_foto THEN
+    -- só as opções desta organização contam (um caminho alheio posto por UPDATE directo não segura o ficheiro)
     v_orfa := NOT EXISTS (SELECT 1 FROM attribute_option_group_values x
-                          WHERE x.foto_path = o.foto AND x.id <> p_opcao);
+                          JOIN attribute_option_groups xg ON xg.id = x.group_id
+                          WHERE x.foto_path = o.foto AND x.id <> p_opcao AND xg.organization_id = p_org);
   END IF;
 
   RETURN jsonb_build_object('foto', v_foto, 'antiga', o.foto, 'antiga_orfa', v_orfa);
