@@ -3,7 +3,7 @@
 // e a cena mínima (um espaço pequeno com a peça ao centro). Aqui não há mocks: é a lógica real; o desenho em WebGL só se verifica ao vivo.
 import { describe, expect, it } from "vitest";
 import type { AtributoDef, AtributoProduto } from "../v2/catalogoModelo";
-import { cenaDoProduto, corDosAtributos, dimensoesDaMedida, estadoDoModelo, medidaDosAtributos, modeloParaPrevia, type MedidaCm } from "./previaProduto3d";
+import { cenaDoProduto, corDosAtributos, dimensoesDaMedida, estadoDoModelo, fotoDosAtributos, medidaDosAtributos, modeloParaPrevia, type MedidaCm } from "./previaProduto3d";
 
 const med = (m: AtributoProduto["medida"]): AtributoProduto[] => [{ atributoId: "a-med", medida: m }];
 
@@ -83,6 +83,48 @@ describe("dimensoesDaMedida: a medida reparte-se por largura, profundidade e alt
   });
 });
 
+// 24/11, lido na base RH (Mudelar, só leitura): nos móveis, colunas e armários o atributo 3D é largura × COMPRIMENTO = ALTURA × ESPESSURA = PROFUNDIDADE
+// (Colunas, 940 produtos: comprimento 35 a 170 cm, espessura 20 a 32; Móveis de lavatório, 9496: comprimento 50 a 81, espessura 36 a 45). Nos tampos, bancadas
+// e lavabos de pousar o comprimento é a profundidade e a espessura a altura (Tampos e Bancadas WC: 8 cm de espessura); nas bases, banheiras e bancadas ficam como estavam.
+describe("dimensoesDaMedida: móveis, colunas e armários têm o comprimento na ALTURA e a espessura na PROFUNDIDADE", () => {
+  it("a coluna suspensa AXIS 40 × 160 × 25 cm: 0,40 m de largura, 1,60 m de altura e 0,25 m de profundidade", () => {
+    expect(dimensoesDaMedida("coluna", { largura: 40, comprimento: 160, espessura: 25 })).toEqual({ larguraCm: 40, alturaCm: 160, profundidadeCm: 25 });
+  });
+  it("o móvel de lavatório 80 × 50 × 45: 50 é a altura e 45 a profundidade", () => {
+    expect(dimensoesDaMedida("movel_lavatorio", { largura: 80, comprimento: 50, espessura: 45 })).toEqual({ larguraCm: 80, alturaCm: 50, profundidadeCm: 45 });
+  });
+  it("armário alto, armário de espelho, coluna de duche e móvel: a mesma regra", () => {
+    for (const t of ["armario_alto", "armario_espelho", "coluna_duche", "movel"] as const) {
+      expect(dimensoesDaMedida(t, { largura: 60, comprimento: 70, espessura: 30 })).toEqual({ larguraCm: 60, alturaCm: 70, profundidadeCm: 30 });
+    }
+  });
+  it("a coluna sai mais ALTA do que larga e do que funda (a medida real do dono, pelo classificador inteiro)", () => {
+    const m = modeloParaPrevia({ nome: "Coluna Suspensa AXIS 40x160x25 - Corpo e Frente Artisan", sub: "Colunas", no: null, arvore: [], medida: { largura: 40, comprimento: 160, espessura: 25 } });
+    expect(m.tipo).toBe("coluna");
+    expect(m.dimensoes).toMatchObject({ larguraCm: 40, alturaCm: 160, profundidadeCm: 25 });
+    expect(m.dimensoes.alturaCm).toBeGreaterThan(m.dimensoes.larguraCm);
+    expect(m.dimensoes.alturaCm).toBeGreaterThan(m.dimensoes.profundidadeCm);
+    const cena = cenaDoProduto(m).espaco.pecas[0];
+    expect([cena.largura, cena.profundidade]).toEqual([0.4, 0.25]);
+  });
+  it("o móvel de lavatório da Mudelar (Móvel COIMBRA c/lavatório 80x50x45) sai com 50 de altura e 45 de profundidade", () => {
+    const m = modeloParaPrevia({ nome: "Móvel COIMBRA c/lavatório 80x50x45", sub: "Móveis de lavatório", no: null, arvore: [], medida: { largura: 80, comprimento: 50, espessura: 45 } });
+    expect(m.tipo).toBe("movel_lavatorio");
+    expect([m.dimensoes.larguraCm, m.dimensoes.alturaCm, m.dimensoes.profundidadeCm]).toEqual([80, 50, 45]);
+  });
+  it("o que já estava certo não muda: base de duche, banheira, resguardo, e o tampo e o lavabo de pousar (comprimento = profundidade, espessura = altura)", () => {
+    expect(dimensoesDaMedida("base_duche", { largura: 80, comprimento: 120, espessura: 3 })).toEqual({ larguraCm: 120, profundidadeCm: 80, alturaCm: 3 });
+    expect(dimensoesDaMedida("banheira", { largura: 70, comprimento: 170, espessura: 55 })).toEqual({ larguraCm: 170, profundidadeCm: 70, alturaCm: 55 });
+    expect(dimensoesDaMedida("resguardo", { largura: 80, comprimento: 195, espessura: 4 })).toEqual({ larguraCm: 80, alturaCm: 195, profundidadeCm: 4 });
+    expect(dimensoesDaMedida("bancada", { largura: 80, comprimento: 46, espessura: 8 })).toEqual({ larguraCm: 80, profundidadeCm: 46, alturaCm: 8 });
+    expect(dimensoesDaMedida("lavatorio", { largura: 60, comprimento: 46, espessura: 8 })).toEqual({ larguraCm: 60, profundidadeCm: 46, alturaCm: 8 });
+    expect(dimensoesDaMedida("caixa", { largura: 100, comprimento: 360, espessura: 8 })).toEqual({ larguraCm: 100, profundidadeCm: 360, alturaCm: 8 });
+  });
+  it("sem a espessura (2D), a altura do móvel vem do comprimento e a profundidade fica a do tipo", () => {
+    expect(dimensoesDaMedida("coluna", { largura: 40, comprimento: 160 })).toEqual({ larguraCm: 40, alturaCm: 160 });
+  });
+});
+
 const COR: AtributoDef = { id: "a-cor", codigo: "cor", nome: "Cor", tipo: "lista", temHex: true, ordem: 2, opcoes: [
   { id: "o-preto", valor: "Preto", nome: "Preto", hex: "#000000", ordem: 1 }, { id: "o-sem", valor: "Sem", nome: "Sem amostra", hex: null, ordem: 2 }, { id: "o-mau", valor: "Mau", nome: "Mau", hex: "azul", ordem: 3 },
 ] };
@@ -106,9 +148,64 @@ describe("corDosAtributos: a cor (hex) da opção escolhida no atributo Cor", ()
   });
 });
 
+// A foto da opção de cor: a prioridade é «Cor do corpo», depois «Cor da frente», depois «Cor» (ou o único atributo de cor); a foto é a da OPÇÃO escolhida; sem foto, sem textura.
+const cor = (id: string, nome: string, opcoes: { id: string; foto?: string | null; hex?: string | null }[], extra: Partial<AtributoDef> = {}): AtributoDef =>
+  ({ id, codigo: nome.toLowerCase().replace(/ /g, "_"), nome, tipo: "lista", temHex: true, ordem: 1, opcoes: opcoes.map((o, i) => ({ id: o.id, valor: o.id, nome: o.id, hex: o.hex ?? null, foto: o.foto ?? null, ordem: i })), ...extra });
+const escolha = (atributoId: string, opcaoId: string): AtributoProduto => ({ atributoId, opcaoId });
+const NOGAL = "org/nogal.webp", ARTISAN = "org/artisan.webp", FRENTE = "org/frente.webp";
+
+describe("fotoDosAtributos: o caminho da foto da opção de cor escolhida (corpo > frente > cor)", () => {
+  const corpo = cor("a-corpo", "Cor do corpo", [{ id: "o-artisan", foto: ARTISAN }, { id: "o-liso", foto: null, hex: "#fff" }]);
+  const frente = cor("a-frente", "Cor da frente", [{ id: "o-frente", foto: FRENTE }]);
+  const simples = cor("a-cor", "Cor", [{ id: "o-nogal", foto: NOGAL }]);
+  it("um só atributo «Cor», com a opção Nogal que tem foto: dá a foto do Nogal (o Revestimento Porcelânico Sajónia Nogal)", () => {
+    expect(fotoDosAtributos([escolha("a-cor", "o-nogal")], [simples])).toBe(NOGAL);
+  });
+  it("o corpo tem prioridade sobre a frente e sobre a cor", () => {
+    expect(fotoDosAtributos([escolha("a-cor", "o-nogal"), escolha("a-frente", "o-frente"), escolha("a-corpo", "o-artisan")], [simples, frente, corpo])).toBe(ARTISAN);
+  });
+  it("sem corpo escolhido, a frente tem prioridade sobre a cor", () => {
+    expect(fotoDosAtributos([escolha("a-cor", "o-nogal"), escolha("a-frente", "o-frente")], [simples, frente, corpo])).toBe(FRENTE);
+  });
+  it("o atributo de prioridade mais alta que tem opção escolhida manda, mesmo que a opção não tenha foto (continua a cor, não vai buscar a foto de outro atributo)", () => {
+    expect(fotoDosAtributos([escolha("a-corpo", "o-liso"), escolha("a-cor", "o-nogal")], [simples, corpo])).toBeNull();
+  });
+  it("sem foto na opção, sem atributos, sem escolha, sem definições ou opção que não existe: null", () => {
+    expect(fotoDosAtributos([escolha("a-corpo", "o-liso")], [corpo])).toBeNull();
+    expect(fotoDosAtributos(undefined, [simples])).toBeNull();
+    expect(fotoDosAtributos([], [simples])).toBeNull();
+    expect(fotoDosAtributos([escolha("a-cor", "o-nogal")], undefined)).toBeNull();
+    expect(fotoDosAtributos([{ atributoId: "a-cor" }], [simples])).toBeNull();
+    expect(fotoDosAtributos([escolha("a-cor", "nao-existe")], [simples])).toBeNull();
+  });
+  it("sem atributo com o nome «Cor», o único atributo de cor (com hex ou foto) conta; vários sem nome certo: null (não se adivinha)", () => {
+    const tom = cor("a-tom", "Tonalidade", [{ id: "o-t", foto: NOGAL }]);
+    const outra = cor("a-outra", "Outra cor", [{ id: "o-o", foto: ARTISAN }]);
+    expect(fotoDosAtributos([escolha("a-tom", "o-t")], [tom])).toBe(NOGAL);
+    expect(fotoDosAtributos([escolha("a-tom", "o-t"), escolha("a-outra", "o-o")], [tom, outra])).toBeNull();
+  });
+  it("um atributo que não é de cor (sem hex nem foto) nunca dá foto", () => {
+    const brilho = cor("a-bri", "Brilho", [{ id: "o-b", foto: NOGAL }], { temHex: false, temFoto: false });
+    expect(fotoDosAtributos([escolha("a-bri", "o-b")], [brilho])).toBeNull();
+  });
+  it("«Cor do corpo» e «Cor da frente» reconhecem-se sem acentos nem maiúsculas", () => {
+    const c = cor("a-c", "COR DO CORPO", [{ id: "o-1", foto: ARTISAN }]);
+    expect(fotoDosAtributos([escolha("a-c", "o-1")], [c])).toBe(ARTISAN);
+  });
+});
+
 describe("modeloParaPrevia: o classificador do catálogo com a medida e a cor do formulário", () => {
   const base = { sub: undefined, no: null, arvore: [] };
   const d = (m: ReturnType<typeof modeloParaPrevia>) => [m.dimensoes.larguraCm, m.dimensoes.profundidadeCm, m.dimensoes.alturaCm];
+  it("a textura entra no mockup3d do modelo (e a cor lisa continua lá, de base)", () => {
+    const textura = { url: "https://x/nogal.webp", ladoCm: 40 };
+    const m = modeloParaPrevia({ nome: "Revestimento PORCELÂNICO SAJONIA NOGAL 19,5x120", no: null, arvore: [], cor: "#aa8844", textura });
+    expect(m.mockup3d.textura).toEqual(textura);
+    expect(m.mockup3d.cor).toBe("#aa8844");
+  });
+  it("sem textura, o modelo não leva o campo (o das plantas e dos outros usos fica como estava)", () => {
+    expect("textura" in modeloParaPrevia({ nome: "Coluna", no: null, arvore: [] }).mockup3d).toBe(false);
+  });
   it("sem medida, as do nome (o classificador de sempre)", () => {
     const m = modeloParaPrevia({ ...base, nome: "Espelho LED 80x70" });
     expect(m.dimensoes.larguraCm).toBe(80);
@@ -200,6 +297,18 @@ describe("cenaDoProduto: um espaço mínimo com a peça ao centro", () => {
     expect(a.camara.chave).toBe(b.camara.chave);
     expect(a.camara.chave).not.toBe(c.camara.chave);
     expect(a.camara.pos.every(Number.isFinite)).toBe(true);
+  });
+  it("o zoom tem limites à medida da peça: não entra no objecto (mais que o raio) nem se afasta demais, e a câmara de partida cabe lá dentro", () => {
+    for (const [nome, medida] of [["Torneira Teste", undefined], ["Roupeiro", { largura: 300, comprimento: 260 }], ["Coluna", { largura: 40, comprimento: 160, espessura: 25 }]] as [string, MedidaCm | undefined][]) {
+      const { camara, modelos } = cena(nome, medida), d = Object.values(modelos)[0].dimensoes;
+      const raio = Math.hypot(d.larguraCm, d.profundidadeCm, d.alturaCm) / 200;
+      const dist = Math.hypot(camara.pos[0] - camara.alvo[0], camara.pos[1] - camara.alvo[1], camara.pos[2] - camara.alvo[2]);
+      expect(camara.distMin).toBeGreaterThanOrEqual(raio);
+      expect(camara.distMax).toBeGreaterThan(camara.distMin);
+      expect(dist).toBeGreaterThanOrEqual(camara.distMin);
+      expect(dist).toBeLessThanOrEqual(camara.distMax);
+      expect(camara.distMax).toBeLessThanOrEqual(dist * 3 + 0.001); // não se afasta demais: no máximo umas 3 vezes a distância de partida
+    }
   });
   it("uma peça de parede fica à altura de omissão e a câmara sobe com ela", () => {
     const { espaco, camara } = cena("Sanita suspensa Rimless");

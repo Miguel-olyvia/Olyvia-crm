@@ -2,7 +2,7 @@
 // three só entra no pacote ao abrir o visualizador. Recebe o espaço (modelo.ts) e os produtos do catálogo com o mockup de cada um (catalogo3d.ts);
 // cada mockup é geometria paramétrica com a dimensão real do produto. Se o produto tiver `mockup3d.url` (GLB), carrega-se esse modelo e a
 // geometria paramétrica fica de reserva. Sem sombras (o protótipo não precisa) e com o ciclo de desenho sob pedido (frameloop demand).
-import { Component, Suspense, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Component, Suspense, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { ContactShadows, Html, OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
@@ -19,6 +19,7 @@ import { USAR_GLB, criarMaterialEspelho, lerGlb, montarGenerico, montarModelo, r
 import { BANCADA_OMISSAO, CHAPA_OMISSAO, TOPO_BANCADA_MM, ficheiroDaChapa, mudarChapa, selecaoChapa, type ConfigBancada } from "./bancada";
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
 import { repeticoes, revestimentoDaSuperficie, type Revestimento } from "./revestimentos";
+import { aplicarTextura, pedirTextura, retirarTextura } from "./texturaProduto";
 
 export type Vista3D = "cima" | "3d" | "pessoa";
 export interface Visualizador3DProps {
@@ -33,14 +34,21 @@ export interface Visualizador3DProps {
   selecionada: string | null;
   onSelecionar: (id: string | null) => void;
   /** Uma câmara pedida (metros, no mundo): as vistas da bancada (perspetiva ¾, perfil, frente, traseira, de cima, detalhe da bica). Muda ao mudar a chave. */
-  camara?: { chave: string; pos: V3; alvo: V3 } | null;
+  camara?: { chave: string; pos: V3; alvo: V3; /** até onde o zoom aproxima e afasta a câmara do alvo (m); sem eles, 0,2 m e o tamanho da divisão */ distMin?: number; distMax?: number } | null;
   /** Mover a peça escolhida arrastando-a no 3D (as regras e a gravação vêm da planta). Sem isto, só se escolhe. */
   mover?: Mover3D;
   /** 23/11 (o Estúdio da obra): as peças ainda por fazer, desenhadas transparentes. */
   porFazer?: ReadonlySet<string>;
-  /** 23/11 (a pré-visualização de um produto num formulário longo): a roda do rato não faz zoom e o toque vertical rola a página; só se roda a peça. Sem isto, como sempre. */
+  /** 23/11 (a pré-visualização de um produto num formulário longo): o toque vertical rola a página, a roda do rato só faz zoom com `zoomRoda` (senão rola a página) e o
+   *  deslocamento lateral desliga-se; roda-se a peça e a pinça aproxima e afasta. Sem isto, como sempre. */
   rolarPagina?: boolean;
+  /** Com `rolarPagina`: a roda do rato faz zoom (quem usa liga-o depois de o utilizador clicar ou focar o 3D e desliga-o ao sair). Sem `rolarPagina` não faz nada. */
+  zoomRoda?: boolean;
+  /** Entrega os comandos do zoom (aproximar, afastar, repor a vista) a quem tem botões ou teclas fora do canvas; fica a null enquanto não há câmara pronta. */
+  comandos?: MutableRefObject<ComandosVista | null>;
 }
+/** O que se pode pedir à câmara de fora do canvas (botões e teclas): aproximar e afastar respeitam as distâncias mínima e máxima da câmara; repor volta à vista de partida. */
+export interface ComandosVista { aproximar: () => void; afastar: () => void; repor: () => void }
 
 type V3 = [number, number, number];
 /** O espelho é prateado neutro (sem tom azulado) e o vidro claro é neutro: os mesmos tons dos genéricos (modelosHtml/glb.ts). */
@@ -114,13 +122,41 @@ function useRevestimento(r: Revestimento, w: number, h: number): THREE.MeshLambe
 }
 
 /* ------------------------------------------------------------------ pequenas peças */
-const Caixa = ({ p, s, cor, r = 0.6 }: { p: V3; s: V3; cor: string; r?: number }) => (
-  <mesh position={p}><boxGeometry args={s} /><meshStandardMaterial color={cor} roughness={r} /></mesh>
-);
+/**
+ * 24/11: a textura da foto da opção de cor de UMA peça (só a pré-visualização do produto a põe; a planta não): a textura carregada, a cor lisa do corpo (as partes dessa
+ * cor levam a foto; as outras, como os puxadores, ficam como são) e as propriedades de material que a aplicam (mapa e shader por posição no mundo). Sem ela, tudo como sempre.
+ */
+interface TexturaDaPeca { tex: THREE.Texture; cor: string; lado: number; props: { map: THREE.Texture; onBeforeCompile: THREE.Material["onBeforeCompile"]; customProgramCacheKey: () => string } }
+const TexturaCtx = createContext<TexturaDaPeca | null>(null);
+/** A textura do modelo (por URL, com cache): null enquanto carrega, se o modelo não a tem, ou se a imagem falhar (fica a cor lisa). Liberta-se ao desmontar a peça. */
+function useTexturaDoModelo(textura: Mockup3D["textura"], cor: string): TexturaDaPeca | null {
+  const invalidate = useThree((s) => s.invalidate);
+  const [tex, setTex] = useState<THREE.Texture | null>(null);
+  const url = textura?.url, lado = textura?.ladoCm ?? 0;
+  useEffect(() => {
+    if (!url) { setTex(null); return; }
+    const largar = pedirTextura(url, (t) => { setTex(t); invalidate(); });
+    return () => { largar(); setTex(null); };
+  }, [url, invalidate]);
+  return useMemo(() => {
+    if (!tex) return null;
+    // as propriedades saem de um material de molde (nunca desenhado), para haver um só sítio que sabe aplicar a foto
+    const molde = new THREE.MeshStandardMaterial();
+    aplicarTextura(molde, tex, lado);
+    const props = { map: tex, onBeforeCompile: molde.onBeforeCompile, customProgramCacheKey: molde.customProgramCacheKey };
+    molde.dispose();
+    return { tex, cor, lado, props };
+  }, [tex, cor, lado]);
+}
+const Caixa = ({ p, s, cor, r = 0.6 }: { p: V3; s: V3; cor: string; r?: number }) => {
+  const tx = useContext(TexturaCtx), com = !!tx && tx.cor === cor;
+  return <mesh position={p}><boxGeometry args={s} /><meshStandardMaterial key={com ? "tx" : "liso"} color={com ? "#ffffff" : cor} roughness={r} {...(com && tx ? tx.props : {})} /></mesh>;
+};
 /** Um cilindro achatado em elipse: raio 0,5 em x e z, escalado para `ex` × `ez`. */
-const Elipse = ({ p, ex, ez, h, cor, topo = 0.5 }: { p: V3; ex: number; ez: number; h: number; cor: string; topo?: number }) => (
-  <mesh position={p} scale={[ex, 1, ez]}><cylinderGeometry args={[topo, 0.5, h, 28]} /><meshStandardMaterial color={cor} roughness={0.25} /></mesh>
-);
+const Elipse = ({ p, ex, ez, h, cor, topo = 0.5 }: { p: V3; ex: number; ez: number; h: number; cor: string; topo?: number }) => {
+  const tx = useContext(TexturaCtx), com = !!tx && tx.cor === cor;
+  return <mesh position={p} scale={[ex, 1, ez]}><cylinderGeometry args={[topo, 0.5, h, 28]} /><meshStandardMaterial key={com ? "tx" : "liso"} color={com ? "#ffffff" : cor} roughness={0.25} {...(com && tx ? tx.props : {})} /></mesh>;
+};
 /** As frentes (portas) de um móvel, com puxadores, na face de +z. */
 function Frentes({ w, h, d, n, cor, y0 = 0, vertical = false }: { w: number; h: number; d: number; n: number; cor: string; y0?: number; vertical?: boolean }) {
   const folga = 0.006, lw = (w - folga * (n + 1)) / n;
@@ -335,6 +371,16 @@ function GenericoGlb({ c, tipo, w, d, h, cor, mat, opc, generico }: PropsParam &
   const t = useMemo(() => montarGenerico(cena, c, { w, d, h, o: JSON.parse(chave) as Record<string, string | boolean> }, corFinal, metal === undefined ? undefined : { metalness: metal, roughness: rugos ?? 0.4 }), [cena, c, w, d, h, chave, corFinal, metal, rugos]);
   useEffect(() => () => t.libertar(), [t]);
   const invalidate = useThree((s) => s.invalidate);
+  // 24/11: a foto da opção de cor vai para o material `corpo` (o que leva a cor do produto); os outros (metal, vidro, puxadores) ficam como são
+  const tx = useContext(TexturaCtx);
+  useEffect(() => {
+    if (!tx) return;
+    const corpos = new Set<THREE.MeshStandardMaterial>();
+    t.grupo.traverse((o) => { const m = (o as THREE.Mesh).material; if ((o as THREE.Mesh).isMesh && !Array.isArray(m) && m.name === "corpo") corpos.add(m as THREE.MeshStandardMaterial); });
+    corpos.forEach((m) => aplicarTextura(m, tx.tex, tx.lado));
+    invalidate();
+    return () => corpos.forEach((m) => retirarTextura(m));
+  }, [t, tx, invalidate]);
   useEffect(() => { invalidate(); }, [t, invalidate]);
   useFonte("generico", "GLB genérico");
   return <primitive object={t.grupo} />;
@@ -838,6 +884,7 @@ function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel,
     return () => window.removeEventListener("keydown", tecla, true);
   }, [arrasto?.id, original.id, controls, setArrasto, invalidate]);
   const { tipo, altura, cor, url } = m.mockup3d;
+  const texturaDaPeca = useTexturaDoModelo(m.mockup3d.textura, cor);
   const reserva = <ErroDoModelo nome={m.nome} w={p.largura} d={p.profundidade} h={altura}><Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} mat={m.mockup3d.material} params={m.mockup3d.params} recortes={p.recortes} opc={p.opc} generico={m.mockup3d.generico} /></ErroDoModelo>;
   const escolhido = modeloEscolhido(m);
   const nf = (n: number) => Math.round(n * 100).toString();
@@ -852,9 +899,11 @@ function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel,
   return (
     <group ref={grupoRef} position={[p.x, base, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]} onClick={(e) => { e.stopPropagation(); onSel(p.id); }} {...eventos}>
       <group ref={corpo} scale={[p.espelhada ? -1 : 1, 1, 1]}>
-        <AvisarFonte.Provider value={avisar}>
-          {url ? <Reserva reserva={reserva}><Suspense fallback={reserva}><ModeloGLB url={url} w={p.largura} d={p.profundidade} h={altura} /></Suspense></Reserva> : reserva}
-        </AvisarFonte.Provider>
+        <TexturaCtx.Provider value={texturaDaPeca}>
+          <AvisarFonte.Provider value={avisar}>
+            {url ? <Reserva reserva={reserva}><Suspense fallback={reserva}><ModeloGLB url={url} w={p.largura} d={p.profundidade} h={altura} /></Suspense></Reserva> : reserva}
+          </AvisarFonte.Provider>
+        </TexturaCtx.Provider>
       </group>
       {selecionada && <Contorno w={p.largura} d={p.profundidade} y={Math.min(altura, 0.02)} />}
       {(etiquetas || selecionada) && (
@@ -936,7 +985,7 @@ function Superficies({ espaco, teto }: { espaco: Espaco; teto: boolean }) {
 }
 
 /* ------------------------------------------------------------------ câmaras */
-function Camaras({ vista, espaco, camara, semZoom = false }: { vista: Vista3D; espaco: Espaco; camara?: Visualizador3DProps["camara"]; semZoom?: boolean }) {
+function Camaras({ vista, espaco, camara, contido = false }: { vista: Vista3D; espaco: Espaco; camara?: Visualizador3DProps["camara"]; contido?: boolean }) {
   const { size } = useThree();
   const caixa = useMemo(() => {
     const xs = espaco.paredes.map((p) => p.a.x), ys = espaco.paredes.map((p) => p.a.y);
@@ -966,7 +1015,7 @@ function Camaras({ vista, espaco, camara, semZoom = false }: { vista: Vista3D; e
     return (
       <>
         <PerspectiveCamera key={`cam-${camara.chave}`} makeDefault position={camara.pos} fov={35} near={0.02} far={200} />
-        <OrbitControls key={`oc-${camara.chave}`} makeDefault target={camara.alvo} maxPolarAngle={Math.PI / 2.02} minDistance={0.2} maxDistance={maior * 4 + 6} enableZoom={!semZoom} />
+        <OrbitControls key={`oc-${camara.chave}`} makeDefault target={camara.alvo} maxPolarAngle={Math.PI / 2.02} minDistance={camara.distMin ?? 0.2} maxDistance={Math.min(camara.distMax ?? Infinity, maior * 4 + 6)} enablePan={!contido} />
       </>
     );
   }
@@ -974,7 +1023,7 @@ function Camaras({ vista, espaco, camara, semZoom = false }: { vista: Vista3D; e
   return (
     <>
       <PerspectiveCamera key="3d" makeDefault position={[cx + d, d * 0.9, cz + d]} fov={40} near={0.1} far={200} />
-      <OrbitControls key="oc-3d" makeDefault target={[cx, pe / 3, cz]} maxPolarAngle={Math.PI / 2.02} minDistance={1} maxDistance={maior * 4 + 6} enableZoom={!semZoom} />
+      <OrbitControls key="oc-3d" makeDefault target={[cx, pe / 3, cz]} maxPolarAngle={Math.PI / 2.02} minDistance={1} maxDistance={maior * 4 + 6} enablePan={!contido} />
     </>
   );
 }
@@ -1039,19 +1088,56 @@ function ToqueRolaPagina() {
   return null;
 }
 
-export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover, porFazer, rolarPagina = false }: Visualizador3DProps) {
+/** O que se usa do OrbitControls para o zoom por botões e teclas (o drei só o dá como EventDispatcher). */
+interface ControlosOrbita { object: THREE.Camera; target: THREE.Vector3; minDistance: number; maxDistance: number; update: () => void; saveState: () => void; reset: () => void }
+/** O passo de cada toque em «Aproximar» e «Afastar»: a distância ao alvo passa a 80 % ou a 125 %. */
+const PASSO_ZOOM = 0.8;
+
+/** Os comandos do zoom, fora do canvas: aproximar e afastar mexem na distância ao alvo (dentro dos limites do OrbitControls), repor volta à vista de partida. */
+function ComandosDaVista({ comandos }: { comandos: MutableRefObject<ComandosVista | null> }) {
+  const controls = useThree((s) => s.controls) as unknown as ControlosOrbita | null, invalidate = useThree((s) => s.invalidate);
+  useEffect(() => {
+    if (!controls) return;
+    controls.saveState();
+    const mudar = (fator: number) => {
+      const v = controls.object.position.clone().sub(controls.target), d = v.length();
+      if (d === 0) return;
+      const nova = Math.min(controls.maxDistance, Math.max(controls.minDistance, d * fator));
+      controls.object.position.copy(controls.target).add(v.multiplyScalar(nova / d));
+      controls.update(); invalidate();
+    };
+    const meus: ComandosVista = { aproximar: () => mudar(PASSO_ZOOM), afastar: () => mudar(1 / PASSO_ZOOM), repor: () => { controls.reset(); invalidate(); } };
+    comandos.current = meus;
+    return () => { if (comandos.current === meus) comandos.current = null; };
+  }, [controls, comandos, invalidate]);
+  return null;
+}
+
+export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover, porFazer, rolarPagina = false, zoomRoda = false, comandos }: Visualizador3DProps) {
   const [arrasto, setArrasto] = useState<Arrasto | null>(null);
   const alvo = useRef<AlvoArrasto>({ grupo: null, camera: null, controls: null });
+  // com `rolarPagina`, a roda do rato só chega ao OrbitControls quando `zoomRoda`: senão a página rola (o OrbitControls ouve o canvas e dá-lhe preventDefault, por isso
+  // corta-se antes, na captura, e o navegador faz o que faria sem o 3D)
+  const raiz = useRef<HTMLDivElement>(null), rodaLigada = useRef(zoomRoda);
+  rodaLigada.current = zoomRoda;
+  useEffect(() => {
+    const el = raiz.current;
+    if (!el || !rolarPagina) return;
+    const cortar = (e: WheelEvent) => { if (!rodaLigada.current) e.stopPropagation(); };
+    el.addEventListener("wheel", cortar, { capture: true });
+    return () => el.removeEventListener("wheel", cortar, { capture: true });
+  }, [rolarPagina]);
   return (
-    <div role="img" aria-label={descricao} className={rolarPagina ? "h-full w-full touch-pan-y" : "h-full w-full touch-none"} onPointerDownCapture={(e) => { if (mover) travarCamaraSeNaPeca(e, alvo.current); }}
+    <div ref={raiz} role="img" aria-label={descricao} className={rolarPagina ? "h-full w-full touch-pan-y" : "h-full w-full touch-none"} onPointerDownCapture={(e) => { if (mover) travarCamaraSeNaPeca(e, alvo.current); }}
       onPointerUpCapture={() => { if (!arrasto && alvo.current.controls) alvo.current.controls.enabled = true; }}>
       {/* como o HTML: ACES com exposição 1,08, sombras suaves (PCF), ambiente de estúdio e fundo claro neutro */}
       <Canvas frameloop="demand" dpr={[1, 1.5]} shadows="soft" gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.08, preserveDrawingBuffer: true }} onPointerMissed={() => onSelecionar(null)}>
         <color attach="background" args={["#ecebe7"]} />
         <EstudioAmbiente />
         <LuzEstudio espaco={espaco} />
-        <Camaras vista={vista} espaco={espaco} camara={vista === "3d" ? camara : null} semZoom={rolarPagina} />
+        <Camaras vista={vista} espaco={espaco} camara={vista === "3d" ? camara : null} contido={rolarPagina} />
         {rolarPagina && <ToqueRolaPagina />}
+        {comandos && <ComandosDaVista comandos={comandos} />}
         <Superficies espaco={espaco} teto={teto && vista !== "cima"} />
         {espaco.paredes.map((p, i) => <ParedeCena key={p.id} parede={p} indice={i} espaco={espaco} />)}
         <SombraDeContacto espaco={espaco} />

@@ -5,7 +5,9 @@ import { Box } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { cn } from "@/lib/utils";
 import { Previa3DProduto } from "./Previa3DProduto";
-import { corDosAtributos, medidaDosAtributos } from "./planta3d/previaProduto3d";
+import { urlDaFotoOpcao } from "./fotoOpcaoUrl";
+import { corDosAtributos, fotoDosAtributos, medidaDosAtributos } from "./planta3d/previaProduto3d";
+import { LADO_TEXTURA_CM } from "./planta3d/texturaProduto";
 import type { NoCat } from "./planta3d/catalogo3d";
 import type { AtributoDef, AtributoProduto } from "./v2/catalogoModelo";
 
@@ -24,7 +26,10 @@ function Aberto({ nome, sub, no, arvore, attrs, defs }: Modelo3DProdutoProps) {
   const attrsEspera = useDebounce(attrs, ESPERA_MS);
   const medida = useMemo(() => medidaDosAtributos(attrsEspera), [attrsEspera]);
   const cor = useMemo(() => corDosAtributos(attrsEspera, defs), [attrsEspera, defs]);
-  return <Previa3DProduto nome={nomeEspera} sub={sub} no={no} arvore={arvore} medida={medida} cor={cor} />;
+  // a foto da opção de cor escolhida (corpo > frente > cor) passa a textura do 3D; sem foto (ou sem URL do storage), a cor lisa de sempre
+  const caminhoFoto = useMemo(() => fotoDosAtributos(attrsEspera, defs), [attrsEspera, defs]);
+  const textura = useMemo(() => { const url = caminhoFoto ? urlDaFotoOpcao(caminhoFoto) : null; return url ? { url, ladoCm: LADO_TEXTURA_CM } : undefined; }, [caminhoFoto]);
+  return <Previa3DProduto nome={nomeEspera} sub={sub} no={no} arvore={arvore} medida={medida} cor={cor} textura={textura} />;
 }
 
 export function Modelo3DProduto(props: Modelo3DProdutoProps) {

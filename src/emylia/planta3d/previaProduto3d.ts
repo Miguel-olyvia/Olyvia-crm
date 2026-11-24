@@ -2,7 +2,8 @@
 // as medidas e a cor que vêm dos atributos do produto, o modelo do catálogo 3D com essas medidas, o estado do modelo (o que se vai ver)
 // e a cena mínima: uma divisão pequena com a peça ao centro e a câmara a apontar-lhe.
 import type { AtributoDef, AtributoProduto, DimensaoMedida } from "../v2/catalogoModelo";
-import { LARGURA_ALTURA, alturaDeSanitaDeChao, modeloDoProduto, temModeloGenerico, temModeloHtml, type NoCat, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
+import { COMPRIMENTO_NA_ALTURA, alturaDeSanitaDeChao, modeloDoProduto, sem, temModeloGenerico, temModeloHtml, type NoCat, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
+import type { TexturaModelo } from "./texturaProduto";
 import { espacoVazio, paredesDoContorno, PE_DIREITO_OMISSAO, type Espaco, type PecaProduto } from "./modelo";
 
 /** As dimensões do modelo que a medida diz, em cm; o que não diz fica de fora (vem do nome ou das omissões do tipo). */
@@ -47,8 +48,9 @@ export function medidaDosAtributos(attrs: readonly AtributoProduto[] | undefined
 
 /**
  * A medida do atributo repartida por largura, profundidade e altura como o classificador faz com os números do nome (extrairDimensoes): base de duche e
- * banheira, o maior é a largura e o menor a profundidade, e a espessura é a altura; espelho, quadro, radiador, toalheiro, resguardo e roupeiro, o comprimento
- * é a altura e a espessura a profundidade; os outros, o comprimento é a profundidade e a espessura a altura. Nada que sirva: null.
+ * banheira, o maior é a largura e o menor a profundidade, e a espessura é a altura; espelho, quadro, radiador, toalheiro, resguardo, roupeiro e também os
+ * móveis, colunas e armários (COMPRIMENTO_NA_ALTURA, lido na base: colunas e móveis de lavatório), o comprimento é a altura e a espessura a profundidade;
+ * os outros (tampo, bancada, lavabo…), o comprimento é a profundidade e a espessura a altura. Nada que sirva: null.
  */
 export function dimensoesDaMedida(tipo: TipoMockup, m: MedidaCm, nome?: string): MedidasParciais | null {
   const { largura: l, comprimento: c, espessura: e, altura: a } = m;
@@ -56,7 +58,7 @@ export function dimensoesDaMedida(tipo: TipoMockup, m: MedidaCm, nome?: string):
   if (tipo === "base_duche" || tipo === "banheira") {
     const lados = [l, c].filter((x): x is number => x !== undefined);
     r = { larguraCm: lados.length ? Math.max(...lados) : undefined, profundidadeCm: lados.length === 2 ? Math.min(...lados) : undefined, alturaCm: e ?? a };
-  } else if (LARGURA_ALTURA.includes(tipo)) r = { larguraCm: l, alturaCm: c ?? a, profundidadeCm: e };
+  } else if (COMPRIMENTO_NA_ALTURA.includes(tipo)) r ={ larguraCm: l, alturaCm: c ?? a, profundidadeCm: e };
   else r = { larguraCm: l, profundidadeCm: c, alturaCm: e ?? a };
   // a sanita de chão com depósito não tem menos de 60 cm de altura (a mesma regra do catálogo e da planta); sem o nome, a medida fica como vem
   if (nome !== undefined && r.alturaCm !== undefined) r = { ...r, alturaCm: alturaDeSanitaDeChao(tipo, nome, r.alturaCm) };
@@ -73,7 +75,24 @@ export function corDosAtributos(attrs: readonly AtributoProduto[] | undefined, d
   return hex && HEX.test(hex) ? hex : undefined;
 }
 
-export interface EntradaPrevia { nome: string; sub?: string; no: string | null; arvore: readonly NoCat[]; medida?: MedidaCm | null; cor?: string }
+/**
+ * O caminho da foto (`{org}/{uuid}.webp`) da opção de cor escolhida, para a textura do 3D: o atributo de cor com opção escolhida e a prioridade mais alta manda
+ * («Cor do corpo», depois «Cor da frente», depois «Cor»; sem nenhum destes nomes, o único atributo de cor). Se a opção dele não tem foto, não há textura (não se vai
+ * buscar a foto de outro atributo: seria a de outra parte do produto). Atributo de cor: o que tem hex ou foto. Sem foto, sem atributos ou sem escolha: null.
+ */
+export function fotoDosAtributos(attrs: readonly AtributoProduto[] | undefined, defs: readonly AtributoDef[] | undefined): string | null {
+  if (!attrs?.length || !defs?.length) return null;
+  const cores = defs.filter((d) => d.temHex || d.temFoto);
+  const prioridade = (d: AtributoDef): number => { const n = sem(d.nome).trim(); return n === "cor do corpo" ? 0 : n === "cor da frente" ? 1 : n === "cor" || d.codigo.toLowerCase() === "cor" ? 2 : -1; };
+  const nomeadas = cores.map((d) => ({ d, p: prioridade(d) })).filter((x) => x.p >= 0).sort((a, b) => a.p - b.p).map((x) => x.d);
+  for (const def of nomeadas.length ? nomeadas : cores.length === 1 ? cores : []) {
+    const escolhido = attrs.find((a) => a.atributoId === def.id && a.opcaoId);
+    if (escolhido) return def.opcoes.find((o) => o.id === escolhido.opcaoId)?.foto || null;
+  }
+  return null;
+}
+
+export interface EntradaPrevia { nome: string; sub?: string; no: string | null; arvore: readonly NoCat[]; medida?: MedidaCm | null; cor?: string; /** a foto da opção de cor (URL público) */ textura?: TexturaModelo }
 const ID_PREVIA = "previa-produto";
 
 /**
@@ -81,7 +100,7 @@ const ID_PREVIA = "previa-produto";
  * medida dos atributos por cima da do nome (repartida pelo tipo que o classificador deu; o que ela não diz vem do nome ou das omissões do tipo) e a cor do
  * atributo Cor, que o classificador não lê.
  */
-export function modeloParaPrevia({ nome, sub, no, arvore, medida, cor }: EntradaPrevia): ProdutoModelo3D {
+export function modeloParaPrevia({ nome, sub, no, arvore, medida, cor, textura }: EntradaPrevia): ProdutoModelo3D {
   const p = { id: ID_PREVIA, n: nome.trim(), sub: sub?.trim() || undefined, no };
   let m = modeloDoProduto(p, arvore);
   const medidas = medida ? dimensoesDaMedida(m.tipo, medida, p.n) : null;
@@ -89,7 +108,8 @@ export function modeloParaPrevia({ nome, sub, no, arvore, medida, cor }: Entrada
     const d = m.dimensoes;
     m = modeloDoProduto({ ...p, dim: [medidas.larguraCm ?? d.larguraCm, medidas.profundidadeCm ?? d.profundidadeCm, medidas.alturaCm ?? d.alturaCm] }, arvore);
   }
-  return cor ? { ...m, mockup3d: { ...m.mockup3d, cor } } : m;
+  if (!cor && !textura) return m;
+  return { ...m, mockup3d: { ...m.mockup3d, ...(cor ? { cor } : {}), ...(textura ? { textura } : {}) } };
 }
 
 /**
@@ -104,9 +124,12 @@ export function estadoDoModelo(m: ProdutoModelo3D): EstadoPrevia {
 }
 
 type V3 = [number, number, number];
-export interface CenaProduto { espaco: Espaco; modelos: Record<string, ProdutoModelo3D>; camara: { chave: string; pos: V3; alvo: V3 } }
+/** `distMin` e `distMax`: até onde o zoom aproxima e afasta a câmara do alvo (m), à medida da peça. */
+export interface CenaProduto { espaco: Espaco; modelos: Record<string, ProdutoModelo3D>; camara: { chave: string; pos: V3; alvo: V3; distMin: number; distMax: number } }
 
 const FOLGA_M = 1, LADO_MIN_M = 1.5, FOLGA_PE_DIREITO_M = 0.3, DIST_MIN_M = 1, DIST_MAX_M = 12;
+/** O zoom: não entra no objecto (um pouco mais do que o raio da caixa da peça, e nunca a menos de 25 cm) e afasta-se, no máximo, 3 vezes a distância de partida. */
+const FOLGA_RAIO = 1.1, ZOOM_MIN_M = 0.25, ZOOM_AFASTAR = 3;
 /** A direcção de onde a câmara olha (a mesma diagonal da vista 3D do visualizador: de frente e de lado, um pouco por cima). */
 const DIRECAO: V3 = [1, 0.6, 1];
 
@@ -130,5 +153,6 @@ export function cenaDoProduto(m: ProdutoModelo3D): CenaProduto {
   const norma = Math.hypot(...DIRECAO), k = dist / norma;
   const pos: V3 = [alvo[0] + DIRECAO[0] * k, alvo[1] + DIRECAO[1] * k, alvo[2] + DIRECAO[2] * k];
   const chave = [w, p, a, base].map((v) => Math.round(v * 100)).join("x");
-  return { espaco, modelos: { [m.produtoId]: m }, camara: { chave, pos, alvo } };
+  const distMin = Math.min(dist, Math.max(ZOOM_MIN_M, (Math.hypot(w, p, a) / 2) * FOLGA_RAIO));
+  return { espaco, modelos: { [m.produtoId]: m }, camara: { chave, pos, alvo, distMin, distMax: dist * ZOOM_AFASTAR } };
 }

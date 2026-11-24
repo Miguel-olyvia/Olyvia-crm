@@ -48,6 +48,8 @@ export interface Mockup3D {
   tipo: TipoMockup; largura: number; profundidade: number; altura: number; cor: string; url?: string; material?: MaterialMockup; params?: ParamsMockup;
   /** o modelo genérico da categoria (categoriasGlb.ts), escolhido pelo tipo e pelo nome, com as omissões das opções que o nome dá */
   generico?: { id: string; o: Record<string, string | boolean> };
+  /** 24/11: a foto da opção de cor (URL público e o lado em cm de cada repetição): o Visualizador3D aplica-a ao corpo da peça. Só a pré-visualização do produto a põe; sem ela, a cor lisa. */
+  textura?: import("./texturaProduto").TexturaModelo;
 }
 export interface Dimensoes { larguraCm: number; profundidadeCm: number; alturaCm: number; deNome: boolean }
 export interface ProdutoModelo3D {
@@ -245,6 +247,15 @@ export function dimensoesDoNome(nome: string): number[] | null {
 
 /** Tipos cujo nome, com dois números, diz largura × altura (peças planas ou altas). */
 export const LARGURA_ALTURA: readonly TipoMockup[] = ["roupeiro", "espelho", "quadro", "radiador", "toalheiro", "resguardo"];
+
+/**
+ * Os tipos cuja Medida 3D (o atributo largura × comprimento × espessura) é largura × ALTURA × PROFUNDIDADE: as peças planas ou altas de LARGURA_ALTURA mais os móveis,
+ * colunas e armários. Lido na base RH (Mudelar, 24/11): nas Colunas (940 produtos) o comprimento vai de 35 a 170 cm e a espessura de 20 a 32; nos Móveis de lavatório
+ * (9496) o comprimento vai de 50 a 81 e a espessura de 36 a 45; ou seja, o comprimento é a altura e a espessura a profundidade (o nome «40x160x25» de uma coluna é
+ * largura × altura × profundidade). Os outros tipos (tampo, bancada, lavabo, bases, banheiras…) ficam com o comprimento na profundidade e a espessura na altura.
+ * Só a Medida dos atributos usa esta lista; a leitura do nome (extrairDimensoes) continua com LARGURA_ALTURA.
+ */
+export const COMPRIMENTO_NA_ALTURA: readonly TipoMockup[] = [...LARGURA_ALTURA, "movel_lavatorio", "coluna", "coluna_duche", "armario_alto", "armario_espelho", "movel"];
 
 /**
  * As dimensões reais de um produto. Do nome, quando as traz; senão a tabela de omissões do tipo.
