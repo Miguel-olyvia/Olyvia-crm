@@ -32,12 +32,12 @@ export function ToastEscuro({ aviso, fechar }: { aviso: AvisoEscuro | null; fech
           className="pointer-events-auto flex max-w-[min(560px,100%)] items-center gap-2.5 rounded-2xl bg-foreground py-2 pl-4 pr-2 text-[14.5px] text-background shadow-2xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-bottom-2">
           <span className="min-w-0">{aviso.texto}</span>
           <button type="button"
-            className="min-h-9 shrink-0 rounded-xl border border-white/25 px-3 text-sm font-semibold hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-background"
+            className="min-h-9 shrink-0 rounded-xl border border-background/25 px-3 text-sm font-semibold hover:bg-background/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-background"
             onClick={() => { const f = aviso.acao.fazer; fechar(); f(); }}>
             {aviso.acao.rotulo}
           </button>
           <button type="button" aria-label="Fechar aviso"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-background"
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-xl hover:bg-background/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-background"
             onClick={fechar}>
             <X className="h-4 w-4" aria-hidden="true" />
           </button>

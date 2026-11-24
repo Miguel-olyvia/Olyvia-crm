@@ -57,9 +57,11 @@ export interface BotoesAnularProps {
   recarregar: () => void;
   /** Depois de reverter aqui (o Existências embebido relê). */
   aoMudarStock?: () => void;
+  /** Fatia 4: o toast escuro é da moldura (um só, partilhado com o "Restaurar"); sem isto, o BotoesAnular mostra o seu. */
+  avisar?: (a: AvisoEscuro) => void;
 }
 
-export function BotoesAnular({ orgId, movimentos, recarregar, aoMudarStock }: BotoesAnularProps) {
+export function BotoesAnular({ orgId, movimentos, recarregar, aoMudarStock, avisar }: BotoesAnularProps) {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const gate = usePermissionGate();
@@ -81,7 +83,8 @@ export function BotoesAnular({ orgId, movimentos, recarregar, aoMudarStock }: Bo
   const [aReverter, setAReverter] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [aVer, setAVer] = useState(false);
-  const [aviso, setAviso] = useState<AvisoEscuro | null>(null);
+  const [avisoLocal, setAvisoLocal] = useState<AvisoEscuro | null>(null);
+  const setAviso = (a: AvisoEscuro) => (avisar ?? setAvisoLocal)(a);
   /** Os movimentos revertidos AQUI (com as parcelas irmãs): o toast "Saída revertida" é o último, sem "Anulado" por cima. */
   const acabeiDeReverter = useRef<Set<string>>(new Set());
   /** Guarda síncrona: um segundo Ctrl+Z (ou clique) enquanto o primeiro ainda lê a EC não abre outra leitura nem outro diálogo. */
@@ -238,7 +241,7 @@ export function BotoesAnular({ orgId, movimentos, recarregar, aoMudarStock }: Bo
         </AlertDialogContent>
       </AlertDialog>
 
-      <ToastEscuro aviso={aviso} fechar={() => setAviso(null)} />
+      {!avisar && <ToastEscuro aviso={avisoLocal} fechar={() => setAvisoLocal(null)} />}
     </>
   );
 }

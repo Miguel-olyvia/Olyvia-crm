@@ -31,6 +31,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
+import { useAvisosInventario } from "@/components/inventory/ui/embebido";
 import { useCompany } from "@/contexts/CompanyContext";
 import { Plus, Pencil, Trash2, Download, Upload, ArrowLeftRight, History, RotateCcw, ListOrdered, ChevronDown, ChevronRight, ClipboardList, Lock, Search } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -204,6 +205,7 @@ const STOCK_SELECT = `
 const Stocks = () => {
   const { t } = useTranslation();
   const { toast } = useToast();
+  const avisos = useAvisosInventario(); // só dentro do novo Inventário; fora é null
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [products, setProducts] = useState<any[]>([]);
@@ -881,6 +883,7 @@ const Stocks = () => {
         title: t('stocks.toast.deleteSuccess'),
         description: t('stocks.toast.deleteSuccessDesc'),
       });
+      avisos?.("eliminado", { tipo: "stock", id, rotulo: stocks.find((s) => s.id === id)?.products?.name ?? null });
 
       refresh();
     } catch (error: any) {

@@ -1,5 +1,5 @@
 // O novo Inventário (/inventory/novo/:aba?): uma moldura como o Estúdio da obra (EstudioObra.tsx) — ecrã inteiro por cima
-// da app (NaFrente), cabeçalho com o sobretítulo violeta, a pílula de saúde e UM botão principal, separadores em pílula
+// da app (NaFrenteInventario; era o NaFrente), cabeçalho com o sobretítulo violeta, a pílula de saúde e UM botão principal, separadores em pílula
 // fixos no topo — com os 9 ecrãs clássicos do Inventário embebidos TAL COMO ESTÃO, um por separador. No Hoje, o Pulso e o
 // Comando ficam por cima do Hoje clássico. Só a UI muda: os ecrãs, as permissões e as consultas são as de sempre.
 //
@@ -12,7 +12,13 @@
 // · Fatia 3: o "E se…?" (ESeInventario, só leitura) do botão principal — no cabeçalho ("E se…?" ao lado de "Receber PO-x" /
 //   "Dar saída") e no Hoje, por cima do Comando —; e o ↶ Anular / ↷ Refazer (BotoesAnular) ligado ao livro desta sessão
 //   (useLivroDaSessao: os movimentos que este utilizador fez desde que abriu o novo Inventário) e às reversões que já existem.
-import { Suspense, useEffect, useId, useRef, useState, type ReactNode } from "react";
+// · Fatia 4: a festa (FestaInventario) quando o livro traz uma receção/saída nova; e o "Restaurar" no toast escuro quando um
+//   ecrã embebido elimina (AvisosInventario → restaurarInventario.ts: a mesma RPC e a mesma permissão do "Ver eliminados").
+//   O toast escuro é um só, da moldura (o Anular/Refazer do BotoesAnular usa o mesmo).
+// · Fatia 5: separadores com role=tablist/tab/tabpanel, setas ←/→ (Home/End) com roving tabindex; a camada própria
+//   (NaFrenteInventario, sem o .calma) para respeitar o modo escuro; no Hoje, o cabeçalho não repete o «Registar movimento»
+//   que o Hoje clássico já mostra.
+import { Suspense, useEffect, useId, useRef, useState, type KeyboardEvent as KeyboardEventReact, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -27,13 +33,13 @@ import StockMovementDialog from "@/components/inventory/StockMovementDialog";
 import { BlockedButton } from "@/components/inventory/ui/DisabledReason";
 import { usePermissionGate } from "@/components/inventory/ui/RowActions";
 import { useInventoryCounters } from "@/components/inventory/ui/useInventoryCounters";
-import { InventarioEmbebido } from "@/components/inventory/ui/embebido";
+import { AvisosInventario, InventarioEmbebido, type AvisarInventario } from "@/components/inventory/ui/embebido";
 import { receivingLink } from "@/components/inventory/ui/inventoryLinks";
 import { permissionReason } from "@/components/inventory/ui/permissionReason";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useToast } from "@/hooks/use-toast";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
-import { NaFrente } from "@/emylia/NaFrente";
 import { MOLA, useReduzir } from "@/emylia/movimento";
 import { cn } from "@/lib/utils";
 import { NavegadorDoInventario, paraSeparador } from "./navegadorInventario";
@@ -48,8 +54,16 @@ import { ESeInventario, type AcaoESe } from "./ESeInventario";
 import { BotoesAnular } from "./BotoesAnular";
 import { MARGEM_RELOGIO_MS, useLivroDaSessao } from "./useLivroDaSessao";
 import { caminhoSeparador, eChaveSeparador, separadorDe, separadoresVisiveis, type ChaveSeparador } from "./separadores";
+import { NaFrenteInventario } from "./NaFrenteInventario";
+import { FestaInventario, useFestaDoLivro } from "./FestaInventario";
+import { ToastEscuro, type AvisoEscuro } from "./ToastEscuro";
+import { RESTAURAR, restaurar, textoEliminado, textoRestaurado } from "./restaurarInventario";
+import type { ClienteRpc } from "./anularInventario";
 
 const CLASSICO = "/inventory";
+/** O único painel dos separadores (só o ativo está montado). */
+const ID_PAINEL = "inventario-novo-painel";
+const idAba = (chave: ChaveSeparador) => `inventario-novo-aba-${chave}`;
 
 /** "Terça-feira, 24 de novembro". */
 function dataDeHoje(): string {
@@ -70,13 +84,18 @@ export function escDeveSair(e: Pick<KeyboardEvent, "key" | "defaultPrevented" | 
   return !!alvo.closest("[data-moldura-inventario]");
 }
 
-/** Um separador em pílula, com o indicador que desliza (layoutId) e o contador do menu. */
-function Aba({ on, rotulo, n, onClick }: { on: boolean; rotulo: string; n: number | null; onClick: () => void }) {
+/** Um separador em pílula, com o indicador que desliza (layoutId, com a MOLA) e o contador do menu.
+ *  Roving tabindex: só o separador ativo (ou o primeiro, sem nenhum ativo) entra no Tab; as setas andam entre eles. */
+function Aba({ chave, on, foco, rotulo, n, onClick, onKeyDown, refAba }: {
+  chave: ChaveSeparador; on: boolean; foco: boolean; rotulo: string; n: number | null; onClick: () => void;
+  onKeyDown: (e: KeyboardEventReact<HTMLButtonElement>) => void; refAba: (el: HTMLButtonElement | null) => void;
+}) {
   const reduzir = useReduzir();
   return (
-    <button type="button" role="tab" aria-selected={on} onClick={onClick}
+    <button type="button" role="tab" id={idAba(chave)} data-chave={chave} aria-selected={on} aria-controls={on ? ID_PAINEL : undefined}
+      tabIndex={foco ? 0 : -1} onClick={onClick} onKeyDown={onKeyDown} ref={refAba}
       className={cn("relative inline-flex min-h-10 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3.5 text-sm font-semibold transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-muted",
         on ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
       {on && <motion.span layoutId="aba-inventario" aria-hidden="true" className="absolute inset-0 rounded-full bg-card shadow-sm" transition={reduzir ? { duration: 0 } : MOLA} />}
       <span className="relative">{rotulo}</span>
@@ -104,7 +123,7 @@ function ESeNoHoje({ rotulo, children }: { rotulo: string; children: ReactNode }
     <div className="space-y-2">
       <Button type="button" variant="outline" className="min-h-11 rounded-2xl" aria-expanded={aberto} aria-controls={id} onClick={() => setAberto((x) => !x)}>
         <Sparkles className="mr-1.5 h-4 w-4 text-primary" aria-hidden="true" />E se… {rotulo}?
-        <ChevronDown className={cn("ml-1.5 h-4 w-4 transition-transform", aberto && "rotate-180")} aria-hidden="true" />
+        <ChevronDown className={cn("ml-1.5 h-4 w-4 transition-transform motion-reduce:transition-none", aberto && "rotate-180")} aria-hidden="true" />
       </Button>
       <div id={id}>{aberto && children}</div>
     </div>
@@ -117,6 +136,7 @@ export default function InventarioNovo() {
   const location = useLocation();
   const queryClient = useQueryClient();
   const reduzir = useReduzir();
+  const { toast } = useToast();
   const { activeCompany } = useCompany();
   const orgId = activeCompany?.id ?? null;
   const { hasPermission, loading } = usePermissions();
@@ -218,6 +238,60 @@ export default function InventarioNovo() {
   const [aberturaSessao] = useState(() => new Date(Date.now() - MARGEM_RELOGIO_MS).toISOString());
   const livro = useLivroDaSessao(orgId, aberturaSessao, ativo?.chave ?? "", !loading);
 
+  // Fatia 4: a festa (uma receção/saída nova no livro) e o toast escuro da moldura (Anular/Refazer e Restaurar).
+  const festa = useFestaDoLivro(livro.movimentos, orgId);
+  const [aviso, setAviso] = useState<AvisoEscuro | null>(null);
+  const restaurarAgora = async (e: Parameters<AvisarInventario>[1]) => {
+    // O mesmo gate do "Restaurar" de "Ver eliminados" (o do render em que o aviso nasceu; o servidor volta a validar).
+    if (!gate(RESTAURAR[e.tipo].permissao).allowed) return;
+    try {
+      await restaurar(supabase as unknown as ClienteRpc, e.tipo, e.id);
+      toast({ title: textoRestaurado(e) });
+      // O ecrã embebido guarda a lista em estado local: volta a montá-lo (relê); e os números do Hoje.
+      aoMudarStock();
+      if (orgId) void queryClient.invalidateQueries({ queryKey: inventoryTodayQueryKey(orgId) });
+      // As mesmas chaves que o refreshAll do Warehouses.tsx (e o que depende de armazéns/stock) invalida depois de restaurar:
+      // o staleTime global é 5 min, sem isto estatísticas e listas de armazéns ficavam desatualizadas.
+      for (const k of ["organization-inventory-settings", "warehouses-stock-stats", "inventory-today-warehouses", "client-orders-status-summary", "client-order-po-states"]) {
+        void queryClient.invalidateQueries({ queryKey: [k] });
+      }
+    } catch (err) {
+      toast({ title: "Erro ao restaurar", description: (err as { message?: string } | null)?.message, variant: "destructive" });
+    }
+  };
+  /** O que os ecrãs embebidos avisam (handleDelete com sucesso). Só com a permissão de restaurar é que há toast. */
+  const avisarInventario: AvisarInventario = (evento, e) => {
+    if (evento !== "eliminado" || !gate(RESTAURAR[e.tipo].permissao).allowed) return;
+    setAviso({ n: Date.now(), texto: textoEliminado(e), acao: { rotulo: "Restaurar", fazer: () => { void restaurarAgora(e); } } });
+  };
+
+  // Fatia 5: as setas ←/→ (e Home/End) andam entre os separadores e abrem-nos; o foco vai com elas (roving tabindex).
+  const abas = useRef(new Map<ChaveSeparador, HTMLButtonElement>());
+  const teclaAbas = (e: KeyboardEventReact<HTMLButtonElement>) => {
+    if (!visiveis.length) return;
+    const atual = visiveis.findIndex((s) => s.chave === e.currentTarget.dataset.chave);
+    let i: number;
+    if (e.key === "ArrowRight") i = (atual + 1) % visiveis.length;
+    else if (e.key === "ArrowLeft") i = (atual - 1 + visiveis.length) % visiveis.length;
+    else if (e.key === "Home") i = 0;
+    else if (e.key === "End") i = visiveis.length - 1;
+    else return;
+    e.preventDefault();
+    const alvo = visiveis[i].chave;
+    const el = abas.current.get(alvo);
+    el?.focus();
+    el?.scrollIntoView?.({ block: "nearest", inline: "nearest", behavior: reduzir ? "auto" : "smooth" });
+    if (ativo?.chave !== alvo) navigate(caminhoSeparador(alvo));
+  };
+  // O separador ativo fica à vista na fila (no telemóvel os separadores rolam na horizontal).
+  useEffect(() => {
+    if (ativo?.chave) abas.current.get(ativo.chave)?.scrollIntoView?.({ block: "nearest", inline: "nearest" });
+  }, [ativo?.chave]);
+  const abaComFoco = ativo?.chave ?? visiveis[0]?.chave ?? null;
+
+  // No Hoje, o Hoje clássico já tem o «Registar movimento» (PermissionGate inventory.edit): o cabeçalho não o repete.
+  const principalRepetido = ativo?.chave === "hoje" && principal.tipo === "movimento" && hasPermission("inventory.edit");
+
   const carregarPrincipal = () => {
     if (principal.tipo === "movimento") setMovimentoAberto(true);
     else navigate(principal.to);
@@ -226,9 +300,11 @@ export default function InventarioNovo() {
   const Componente = ativo?.Componente;
 
   return (
-    <NaFrente>
-      <motion.div className="fixed inset-0 flex flex-col overflow-hidden bg-background" role="dialog" aria-modal="true" aria-labelledby="inventario-novo-titulo"
-        initial={reduzir ? false : { opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.25, ease: "easeOut" }}>
+    <NaFrenteInventario>
+      {/* Uma página em ecrã inteiro, não um diálogo modal: os diálogos, popovers e toasts dos ecrãs embebidos vivem fora
+          desta camada (no body / no #root), por isso aria-modal="true" escondia-os aos leitores de ecrã. */}
+      <motion.div className="fixed inset-0 flex flex-col overflow-hidden bg-background text-foreground" role="region" aria-labelledby="inventario-novo-titulo"
+        initial={reduzir ? false : { opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} transition={reduzir ? { duration: 0 } : { duration: 0.25, ease: "easeOut" }}>
         {/* ---------------------------------------------------------------- o cabeçalho */}
         <header data-moldura-inventario="" className="border-b border-border bg-card/95 backdrop-blur">
           <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
@@ -244,7 +320,7 @@ export default function InventarioNovo() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {!loading && <BotoesAnular orgId={orgId} movimentos={livro.movimentos} recarregar={livro.recarregar} aoMudarStock={aoMudarStock} />}
+              {!loading && <BotoesAnular orgId={orgId} movimentos={livro.movimentos} recarregar={livro.recarregar} aoMudarStock={aoMudarStock} avisar={setAviso} />}
               {saude && <PilulaSaude tom={saude.tom} texto={saude.texto} />}
               {!loading && visiveis.length > 0 && acaoESe && (
                 <Popover open={eSeAberto} onOpenChange={setESeAberto}>
@@ -256,7 +332,7 @@ export default function InventarioNovo() {
                   <PopoverContent align="end" className="w-[min(30rem,92vw)] rounded-2xl p-2">{eSe(() => setESeAberto(false))}</PopoverContent>
                 </Popover>
               )}
-              {!loading && visiveis.length > 0 && (
+              {!loading && visiveis.length > 0 && !principalRepetido && (
                 <BlockedButton type="button" className="hidden min-h-11 sm:inline-flex" blockedReason={gatePrincipal.allowed ? null : gatePrincipal.reason} side="bottom" onClick={carregarPrincipal}>
                   <IconePrincipal className="mr-1.5 h-4 w-4" aria-hidden="true" />{principal.rotulo}
                 </BlockedButton>
@@ -282,8 +358,10 @@ export default function InventarioNovo() {
         <div data-moldura-inventario="" className="shrink-0 border-b border-border/60 bg-background/95 px-4 pb-2 pt-3 backdrop-blur sm:px-6">
             <div role="tablist" aria-label="Inventário" className="mx-auto flex max-w-[1500px] gap-1 overflow-x-auto rounded-full bg-muted p-1 shadow-sm [scrollbar-width:none]">
               {visiveis.map((s) => (
-                <Aba key={s.chave} on={ativo?.chave === s.chave} rotulo={s.rotulo} n={counterFor(s.counterKey)}
-                  onClick={() => { if (ativo?.chave !== s.chave) navigate(caminhoSeparador(s.chave)); }} />
+                <Aba key={s.chave} chave={s.chave} on={ativo?.chave === s.chave} foco={abaComFoco === s.chave} rotulo={s.rotulo} n={counterFor(s.counterKey)}
+                  onClick={() => { if (ativo?.chave !== s.chave) navigate(caminhoSeparador(s.chave)); }}
+                  onKeyDown={teclaAbas}
+                  refAba={(el) => { if (el) abas.current.set(s.chave, el); else abas.current.delete(s.chave); }} />
               ))}
             </div>
         </div>
@@ -303,7 +381,7 @@ export default function InventarioNovo() {
                 </div>
               ) : null
             ) : (
-              <div role="tabpanel" aria-label={ativo.rotulo} className="space-y-6">
+              <div role="tabpanel" id={ID_PAINEL} aria-labelledby={idAba(ativo.chave)} className="space-y-6">
                 {ativo.chave === "hoje" && (
                   <>
                     <PulsoInventario verFila={() => comandoRef.current?.scrollIntoView?.({ behavior: reduzir ? "auto" : "smooth", block: "start" })} />
@@ -313,11 +391,13 @@ export default function InventarioNovo() {
                 )}
                 {ativo.chave === "existencias" && <ProcurarProduto aoEscolher={abrirProduto} />}
                 <InventarioEmbebido.Provider value={true}>
-                  <NavegadorDoInventario>
-                    <Suspense fallback={<div className="flex items-center justify-center py-24"><OlyviaLoader size={40} /></div>}>
-                      {Componente && <Componente key={ativo.chave + ":" + versao} />}
-                    </Suspense>
-                  </NavegadorDoInventario>
+                  <AvisosInventario.Provider value={avisarInventario}>
+                    <NavegadorDoInventario>
+                      <Suspense fallback={<div className="flex items-center justify-center py-24"><OlyviaLoader size={40} /></div>}>
+                        {Componente && <Componente key={ativo.chave + ":" + versao} />}
+                      </Suspense>
+                    </NavegadorDoInventario>
+                  </AvisosInventario.Provider>
                 </InventarioEmbebido.Provider>
               </div>
             )}
@@ -329,12 +409,17 @@ export default function InventarioNovo() {
           {painelVisivel && produtoAberto && (
             <motion.div key={produtoAberto}
               className="absolute inset-0 z-30 w-full border-l border-border bg-card shadow-2xl sm:inset-y-0 sm:left-auto sm:right-0 sm:max-w-md lg:relative lg:z-auto lg:w-[420px] lg:max-w-none lg:shrink-0 lg:shadow-none"
-              initial={reduzir ? false : { x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={{ x: 40, opacity: 0 }} transition={{ duration: 0.2 }}>
+              initial={reduzir ? false : { x: 40, opacity: 0 }} animate={{ x: 0, opacity: 1 }} exit={reduzir ? { opacity: 0 } : { x: 40, opacity: 0 }}
+              transition={reduzir ? { duration: 0.1 } : { duration: 0.2 }}>
               <PainelProduto produtoId={produtoAberto} fechar={fecharProduto} aoMudarStock={aoMudarStock} />
             </motion.div>
           )}
         </AnimatePresence>
         </div>
+
+        {/* ---------------------------------------------------------------- a festa e o toast escuro (um só) */}
+        <FestaInventario festa={festa} />
+        <ToastEscuro aviso={aviso} fechar={() => setAviso(null)} />
       </motion.div>
 
       {orgId && principal.tipo === "movimento" && gatePrincipal.allowed && (
@@ -352,6 +437,6 @@ export default function InventarioNovo() {
           }}
         />
       )}
-    </NaFrente>
+    </NaFrenteInventario>
   );
 }

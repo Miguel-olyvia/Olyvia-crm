@@ -27,8 +27,8 @@ export function BarraPolegar({ pedidos, bloqueioHoje, bloqueioRececao, irPrecisa
     <nav aria-label="Ações rápidas" className="fixed inset-x-0 bottom-0 z-40 flex gap-2 border-t border-border bg-card/95 px-3 pt-2 backdrop-blur pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:hidden">
       <BlockedButton type="button" variant="outline" side="top" className={cn("relative", lado)} title="Precisa de ti"
         aria-label={`Precisa de ti${pedidos ? ` (${pedidos})` : ""}`} blockedReason={bloqueioHoje} onClick={irPrecisaDeTi}>
-        <Zap className={cn("h-4 w-4 text-amber-600", !compacto && "mr-1.5")} aria-hidden="true" />{!compacto && "Precisa de ti"}
-        {!!pedidos && <span aria-hidden="true" className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-900">{pedidos}</span>}
+        <Zap className={cn("h-4 w-4 text-amber-700 dark:text-amber-400", !compacto && "mr-1.5")} aria-hidden="true" />{!compacto && "Precisa de ti"}
+        {!!pedidos && <span aria-hidden="true" className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-900 dark:bg-amber-900/40 dark:text-amber-100">{pedidos}</span>}
       </BlockedButton>
       <BlockedButton type="button" variant="outline" side="top" className={lado} title="Ler código" aria-label="Ler código"
         blockedReason={bloqueioRececao} onClick={irLerCodigo}>

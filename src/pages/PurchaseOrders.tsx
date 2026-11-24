@@ -41,6 +41,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useAvisosInventario } from "@/components/inventory/ui/embebido";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Badge } from "@/components/ui/badge";
@@ -528,6 +529,7 @@ const PurchaseOrders = () => {
   const [pendingClientOrderLines, setPendingClientOrderLines] = useState<{ product_id: string; quantity: number }[]>([]);
   const [clientOrderLinesLoading, setClientOrderLinesLoading] = useState(false);
   const { toast } = useToast();
+  const avisos = useAvisosInventario(); // só dentro do novo Inventário; fora é null
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission } = usePermissions();
   // 18/11: "Passar para stock" e "Reverter receção" no diálogo da PO recebida — sem as duas
@@ -1410,6 +1412,7 @@ const PurchaseOrders = () => {
       toast({
         title: t('purchaseOrders.toast.deleteSuccess'),
       });
+      avisos?.("eliminado", { tipo: "po", id, rotulo: orders.find((o) => o.id === id)?.order_number ?? null });
 
       loadData();
       return true;

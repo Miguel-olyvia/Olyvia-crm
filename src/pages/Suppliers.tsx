@@ -17,6 +17,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
+import { useAvisosInventario } from "@/components/inventory/ui/embebido";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -121,6 +122,7 @@ const Suppliers = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const handledDeepLinkRef = useRef<string | null>(null);
   const { toast } = useToast();
+  const avisos = useAvisosInventario(); // só dentro do novo Inventário; fora é null
   const { activeCompany, userType, companies, isLoading: companyLoading } = useCompany();
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -564,6 +566,7 @@ const Suppliers = () => {
       toast({
         title: t("suppliers.toast.deleteSuccess"),
       });
+      avisos?.("eliminado", { tipo: "fornecedor", id: supplierToDelete.id, rotulo: supplierToDelete.name ?? null });
 
       setDeleteDialogOpen(false);
       setSupplierToDelete(null);

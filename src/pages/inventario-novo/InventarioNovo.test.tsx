@@ -8,12 +8,24 @@ import { useContext } from "react";
 import type { InventoryTodayPayload } from "@/hooks/useInventoryToday";
 import type { ReceivablePo } from "@/components/receiving/porReceber";
 
+// As linhas que cada tabela devolve (o livro da sessão: stock_movements + purchase_order_receipts); o resto vem vazio.
+const linhas = vi.hoisted(() => ({ porTabela: {} as Record<string, unknown[]> }));
+const rpc = vi.hoisted(() => ({ fn: null as null | ((nome: string, args?: unknown) => unknown) }));
 vi.mock("@/integrations/supabase/client", () => {
-  const chain: Record<string, unknown> = {};
-  for (const k of ["select", "eq", "is", "order", "limit", "in", "range"]) chain[k] = () => chain;
-  chain.then = (ok: (v: unknown) => unknown) => Promise.resolve({ data: [], error: null }).then(ok);
-  return { supabase: { from: () => chain, rpc: vi.fn() } };
+  const from = (tabela: string) => {
+    const chain: Record<string, unknown> = {};
+    for (const k of ["select", "eq", "is", "order", "limit", "in", "range", "gte", "not"]) chain[k] = () => chain;
+    chain.then = (ok: (v: unknown) => unknown) => Promise.resolve({ data: linhas.porTabela[tabela] ?? [], error: null }).then(ok);
+    return chain;
+  };
+  return { supabase: { from, rpc: (nome: string, args?: unknown) => Promise.resolve(rpc.fn ? rpc.fn(nome, args) : { data: null, error: null }) } };
 });
+// O movimento reduzido (prefers-reduced-motion), controlado por teste.
+const movimento = vi.hoisted(() => ({ reduzir: false }));
+vi.mock("@/emylia/movimento", async (orig) => ({
+  ...(await orig<typeof import("@/emylia/movimento")>()),
+  useReduzir: () => movimento.reduzir,
+}));
 vi.mock("@/contexts/CompanyContext", () => ({ useCompany: () => ({ activeCompany: { id: "org-1", name: "Grupo BMLar" }, isLoading: false }) }));
 let perms = new Set<string>();
 vi.mock("@/hooks/usePermissions", () => ({
@@ -63,7 +75,21 @@ vi.mock("@/pages/Receiving", () => ({ default: () => <p>Receção clássico</p> 
 vi.mock("@/pages/Stocks", () => ({ default: () => <p>Existências clássico</p> }));
 vi.mock("@/pages/StockMovements", () => ({ default: () => <p>Movimentos clássico</p> }));
 vi.mock("@/pages/StockCounts", () => ({ default: () => <p>Contagens clássico</p> }));
-vi.mock("@/pages/Warehouses", () => ({ default: () => <p>Armazéns clássico</p> }));
+// O Armazéns de exemplo elimina como o handleDelete clássico: no ramo de sucesso, uma linha avisos?.("eliminado", …).
+vi.mock("@/pages/Warehouses", async () => {
+  const { useAvisosInventario } = await import("@/components/inventory/ui/embebido");
+  return {
+    default: function ArmazensExemplo() {
+      const avisos = useAvisosInventario();
+      return (
+        <div>
+          <p>Armazéns clássico</p>
+          <button type="button" onClick={() => avisos?.("eliminado", { tipo: "armazem", id: "w-1", rotulo: "Central" })}>Eliminar armazém</button>
+        </div>
+      );
+    },
+  };
+});
 vi.mock("@/pages/ClientOrders", () => ({ default: () => <p>Saídas clássico</p> }));
 
 import InventarioNovo, { escDeveSair } from "./InventarioNovo";
@@ -104,7 +130,10 @@ function montar(em = "/inventory/novo/hoje") {
 }
 
 describe("o novo Inventário", () => {
-  beforeEach(() => { perms = new Set(TODAS); todayPayload = payload(); receivable = []; });
+  beforeEach(() => {
+    perms = new Set(TODAS); todayPayload = payload(); receivable = [];
+    linhas.porTabela = {}; rpc.fn = null; movimento.reduzir = false;
+  });
 
   it("os separadores seguem as permissões das rotas clássicas: sem permissão, o separador não aparece", async () => {
     perms = new Set(["inventory.view", "client_orders.view"]);
@@ -163,13 +192,95 @@ describe("o novo Inventário", () => {
   });
 
   it("sem nada pendente: Registar movimento abre o diálogo; Esc com o diálogo aberto não fecha o Inventário", async () => {
+    // Fatia 5: no Hoje o cabeçalho não repete o «Registar movimento» do Hoje clássico; noutro separador continua lá.
     todayPayload = { ...payload(), purchases: { ...payload().purchases!, pending_approval: 0 } };
-    montar();
-    await screen.findByText("Hoje clássico (embebido)");
+    montar("/inventory/novo/movimentos");
+    await screen.findByText("Movimentos clássico", undefined, { timeout: 8000 });
     fireEvent.click(cabecalho().getByRole("button", { name: /Registar movimento/ }));
     expect(screen.getByRole("dialog", { name: "Registar movimento" })).toBeInTheDocument();
     act(() => { fireEvent.keyDown(window, { key: "Escape" }); });
+    expect(screen.getByTestId("onde")).toHaveTextContent("/inventory/novo/movimentos");
+  });
+
+  it("fatia 5: no Hoje, com inventory.edit, o cabeçalho não repete o «Registar movimento» do Hoje clássico", async () => {
+    todayPayload = { ...payload(), purchases: { ...payload().purchases!, pending_approval: 0 } };
+    montar();
+    await screen.findByText("Hoje clássico (embebido)");
+    expect(cabecalho().queryByRole("button", { name: /Registar movimento/ })).toBeNull();
+    // sem inventory.edit o Hoje clássico não o mostra (PermissionGate): o cabeçalho mantém-no, bloqueado com o motivo
+    cleanup();
+    perms = new Set(TODAS.filter((p) => p !== "inventory.edit"));
+    montar();
+    await screen.findByText("Hoje clássico (embebido)");
+    expect(cabecalho().getByRole("button", { name: /Registar movimento/ })).toHaveAttribute("aria-disabled", "true");
+  });
+
+  it("fatia 5: os separadores — tablist/tab/tabpanel ligados, roving tabindex e as setas ←/→ (Home/End) mudam de separador com o foco", async () => {
+    montar();
+    await screen.findByText("Hoje clássico (embebido)");
+    const hoje = screen.getByRole("tab", { name: /^Hoje/ });
+    const painel = screen.getByRole("tabpanel");
+    expect(hoje).toHaveAttribute("aria-selected", "true");
+    expect(hoje).toHaveAttribute("aria-controls", painel.id);
+    expect(painel).toHaveAttribute("aria-labelledby", hoje.id);
+    expect(hoje).toHaveAttribute("tabindex", "0");
+    expect(screen.getByRole("tab", { name: /^Encomendas/ })).toHaveAttribute("tabindex", "-1");
+    expect(screen.getAllByRole("tab").filter((t) => t.getAttribute("tabindex") === "0")).toHaveLength(1);
+
+    hoje.focus();
+    fireEvent.keyDown(hoje, { key: "ArrowRight" });
+    const encomendas = screen.getByRole("tab", { name: /^Encomendas/ });
+    expect(screen.getByTestId("onde")).toHaveTextContent("/inventory/novo/encomendas");
+    expect(document.activeElement).toBe(encomendas);
+    expect(encomendas).toHaveAttribute("aria-selected", "true");
+    expect(encomendas).toHaveAttribute("tabindex", "0");
+    expect(hoje).toHaveAttribute("tabindex", "-1");
+
+    fireEvent.keyDown(encomendas, { key: "ArrowLeft" });
     expect(screen.getByTestId("onde")).toHaveTextContent("/inventory/novo/hoje");
+    expect(document.activeElement).toBe(hoje);
+
+    // ← no primeiro dá a volta ao último; Home volta ao primeiro
+    fireEvent.keyDown(hoje, { key: "ArrowLeft" });
+    const ultima = screen.getAllByRole("tab").at(-1) as HTMLElement;
+    expect(document.activeElement).toBe(ultima);
+    expect(screen.getByTestId("onde")).toHaveTextContent("/inventory/novo/saidas");
+    fireEvent.keyDown(ultima, { key: "Home" });
+    expect(document.activeElement).toBe(hoje);
+    expect(screen.getByTestId("onde")).toHaveTextContent("/inventory/novo/hoje");
+  });
+
+  it("fatia 5: a moldura não é um diálogo modal (os diálogos/popovers dos ecrãs ficam fora dela) e não força a paleta clara (.calma)", async () => {
+    montar();
+    await screen.findByText("Hoje clássico (embebido)");
+    const titulo = screen.getByRole("heading", { level: 1 });
+    const moldura = screen.getByRole("region", { name: titulo.textContent ?? "" });
+    expect(moldura).not.toHaveAttribute("aria-modal");
+    expect(moldura.closest(".calma")).toBeNull();
+    expect(moldura.closest("[data-camada-inventario]")).not.toBeNull();
+  });
+
+  it("fatia 4: eliminar num ecrã embebido → o toast oferece «Restaurar» (warehouses.delete), que chama a mesma RPC do ecrã", async () => {
+    perms = new Set([...TODAS, "warehouses.delete"]);
+    const chamadas: Array<[string, unknown]> = [];
+    rpc.fn = (nome, args) => { chamadas.push([nome, args]); return { data: null, error: null }; };
+    montar("/inventory/novo/armazens");
+    fireEvent.click(await screen.findByRole("button", { name: "Eliminar armazém" }, { timeout: 8000 }));
+    const toast = screen.getByTestId("toast-escuro");
+    expect(toast).toHaveTextContent("Armazém Central eliminado.");
+    expect(toast.closest("[aria-live=polite]")).not.toBeNull();
+    fireEvent.click(within(toast).getByRole("button", { name: "Restaurar" }));
+    await vi.waitFor(() => expect(chamadas).toContainEqual(["rpc_restore_warehouse", { p_id: "w-1" }]));
+    expect(screen.queryByTestId("toast-escuro")).toBeNull();
+  });
+
+  it("fatia 4: sem a permissão do «Restaurar» do ecrã (warehouses.delete) não há toast nem RPC", async () => {
+    const chamadas: string[] = [];
+    rpc.fn = (nome) => { chamadas.push(nome); return { data: null, error: null }; };
+    montar("/inventory/novo/armazens");
+    fireEvent.click(await screen.findByRole("button", { name: "Eliminar armazém" }, { timeout: 8000 }));
+    expect(screen.queryByTestId("toast-escuro")).toBeNull();
+    expect(chamadas.filter((n) => n.startsWith("rpc_restore"))).toEqual([]);
   });
 
   it("fatia 3: o «E se…?» do botão principal no Hoje (fechado não lê nada) e o Anular/Refazer no cabeçalho", async () => {
@@ -197,6 +308,62 @@ describe("o novo Inventário", () => {
     await screen.findByText("Hoje clássico (embebido)");
     fireEvent.click(screen.getByRole("button", { name: "Voltar ao clássico" }));
     expect(screen.getByTestId("onde")).toHaveTextContent(/^\/inventory$/);
+  });
+
+  describe("fatia 4: a festa", () => {
+    const rececao = (id: string) => ({
+      id, movement_type: "entrada", document_type: "compra", document_number: "PO-2026-0007", quantity: 6, product_id: "p-1",
+      warehouse_id: "w-1", reference_id: "poi-1", sale_source_type: null, sale_source_id: null, reversal_of_movement_id: null,
+      created_at: new Date().toISOString(), products: { name: "Torneira" }, warehouses: { name: "Central" },
+    });
+    const comLivro = (ids: string[]) => {
+      linhas.porTabela = {
+        stock_movements: ids.map(rececao),
+        purchase_order_receipts: ids.map((id) => ({ purchase_order_id: "po-7", purchase_order_item_id: "poi-1", stock_movement_id: id })),
+      };
+    };
+    const reler = async () => { await act(async () => { window.dispatchEvent(new Event("focus")); await new Promise((r) => setTimeout(r, 700)); }); };
+    let vibracoes: unknown[];
+    beforeEach(() => {
+      perms = new Set([...TODAS, "purchase_orders.revert_receipt"]);
+      rpc.fn = (nome) => ({ data: nome === "current_business_user_id" ? "u-1" : null, error: null });
+      vibracoes = [];
+      Object.defineProperty(navigator, "vibrate", { configurable: true, value: (p: unknown) => { vibracoes.push(p); return true; } });
+    });
+
+    it("não dispara na primeira leitura (o que já lá estava ao abrir)", async () => {
+      comLivro(["m-antes"]);
+      montar();
+      await screen.findByText("Hoje clássico (embebido)");
+      await reler();
+      expect(screen.queryByTestId("festa")).toBeNull();
+      expect(vibracoes).toEqual([]);
+    });
+
+    it("dispara com uma receção nova no livro (e vibra)", async () => {
+      comLivro(["m-antes"]);
+      montar();
+      await screen.findByText("Hoje clássico (embebido)");
+      await reler();
+      comLivro(["m-nova", "m-antes"]);
+      await reler();
+      expect(await screen.findByTestId("festa")).toBeInTheDocument();
+      expect(vibracoes).toEqual([[10, 30, 10]]);
+      expect(screen.getByTestId("toast-escuro")).toHaveTextContent("Receção de PO-2026-0007");
+    });
+
+    it("com prefers-reduced-motion não há festa nem vibração: fica só o toast", async () => {
+      movimento.reduzir = true;
+      comLivro([]);
+      montar();
+      await screen.findByText("Hoje clássico (embebido)");
+      await reler();
+      comLivro(["m-nova"]);
+      await reler();
+      expect(await screen.findByTestId("toast-escuro")).toHaveTextContent("Receção de PO-2026-0007");
+      expect(screen.queryByTestId("festa")).toBeNull();
+      expect(vibracoes).toEqual([]);
+    });
   });
 
   it("escDeveSair: não com uma folha aberta, nem já tratado, nem dentro de uma caixa de texto", () => {

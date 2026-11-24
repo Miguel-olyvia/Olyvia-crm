@@ -95,7 +95,7 @@ export const ComandoInventario = forwardRef<HTMLElement>(function ComandoInventa
           )}
           {agora.length > MAX && <p className="text-xs text-muted-foreground">e mais {agora.length - MAX}</p>}
         </Coluna>
-        <Coluna titulo="Precisa de ti" n={pedidos.length} icone={<Zap className="h-4 w-4 text-amber-600" aria-hidden="true" />}>
+        <Coluna titulo="Precisa de ti" n={pedidos.length} icone={<Zap className="h-4 w-4 text-amber-700 dark:text-amber-400" aria-hidden="true" />}>
           <AnimatePresence initial={false} mode="popLayout">
             {!pedidos.length ? (
               <motion.p key="ok" initial={reduzir ? false : { opacity: 0, scale: 0.97 }} animate={{ opacity: 1, scale: 1 }}
