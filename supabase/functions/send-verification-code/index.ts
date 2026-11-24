@@ -4,6 +4,7 @@ import { SMTPClient } from "https://deno.land/x/denomailer@1.6.0/mod.ts";
 import { resolveProposalStageId } from "../_shared/proposalWorkflowStage.ts";
 import { detectClientIp, detectUserAgent } from "../_shared/clientIp.ts";
 import { checkRateLimit, recordRateLimitAttempt, getClientIp, rateLimitResponse } from "../_shared/rateLimit.ts";
+import { emailPermitido, lerListaEnvios, MENSAGEM_BLOQUEIO } from "../_shared/enviosPermitidos.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -51,6 +52,8 @@ async function sendEmailViaSMTP(
   subject: string,
   html: string
 ) {
+  // 24/11: num ambiente de teste com dados reais (ENVIOS_SO_PARA), o código só sai para os emails da lista.
+  if (!emailPermitido(to, lerListaEnvios(Deno.env.get("ENVIOS_SO_PARA")))) throw new Error(MENSAGEM_BLOQUEIO);
   const client = new SMTPClient({
     connection: {
       hostname: smtpConfig.smtp_host,
