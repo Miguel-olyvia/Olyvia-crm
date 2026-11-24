@@ -1,53 +1,55 @@
 // O que o QuotePDFDocument produzia em português ANTES de ganhar `documentContext.idioma`, um cenário de cada vez
 // (ver QuotePDFDocument.fixtures.tsx): o texto inteiro e o SHA-1 da árvore (tipos, estilos e textos). Capturado do
 // componente original; não se edita à mão: se um destes mudar, o PDF em português de sempre mudou.
+// Árvores atualizadas uma vez (fix/pdf-proposta-sobreposicao): as duas Views de embrulho das linhas da tabela
+// passaram a Fragment; trocar de volta esses Fragments por VIEW dá exatamente os SHA-1 anteriores. Texto igual.
 export const PT_PDF_BASELINE: Record<string, { arvore: string; texto: string }> = {
   orcamentoPadrao: {
-    arvore: "35029a27f49c7c46390611f8dbf9a82b3ad9a575",
+    arvore: "4f07e2d06255814e30115f16bae15d3b40c829a2",
     texto: "ORÇAMENTOQ-1Data: 05/03/2026CLIENTENome:Ana SilvaNIF:123456789Email:ana@exemplo.ptTelefone:910000000Morada fiscal:Rua B, 2, 4000-001, PortoMorada de entrega:Rua da Obra, 3NOTASNota ao clienteDETALHES DO ORÇAMENTOSKUDescriçãoUnid.Qtd.P. Unit.IVATotalSKU-AArtigo aUN2.00€500.0023%€1000.00Descrição do artigo a1Artigo bUN1.00€50.006%€50.00Características selecionadas:• Cor: BrancoSubtotal Produtos (sem IVA):€1050.00Desconto Global (10%):-€105.00Taxas de Serviço (IVA 23%):Deslocação:€20.00SUBTOTAL (sem IVA):€965.00IVA 6%:€2.70IVA 23%:€211.60IVA Total:€214.30TOTAL GERAL (c/ IVA):€1179.30EMPRESAMudelar LdaNIF: 500000000Rua A, 1, 1000-001, LisboaTel: 210000000Email: geral@mudelar.ptCONTACTORita CostaEmail: rita@exemplo.ptTel: 912345678Mudelar Lda",
   },
   orcamentoModelo: {
-    arvore: "438f3936f9afdd290ca7543430fd604f984834af",
+    arvore: "3710b27e3a44a7ca25ca852c277dc559fbf7905e",
     texto: "PROPOSTAQ-1Data: 05/03/2026EMPRESANome:Mudelar LdaNIF:500000000Email:geral@mudelar.ptTelefone:210000000Morada:Rua A, 1, 1000-001, LisboaCLIENTENome:Ana SilvaNIF:123456789Email:ana@exemplo.ptTelefone:910000000Morada fiscal:Rua B, 2, 4000-001, PortoMorada de entrega:Rua da Obra, 3DESCRIÇÃOCabeçalho da organizaçãoNOTASNota ao clienteDETALHES DA PROPOSTASKUDescriçãoUnid.Qtd.P. Unit.IVATotalSKU-AArtigo aUN2.00€500.0023%€1000.00Descrição do artigo a1Artigo bUN1.00€50.006%€50.00Características selecionadas:• Cor: BrancoVALIDADEEste orçamento é válido por 30 dias a partir da data de emissão.VALOR DA PROPOSTASubtotal Produtos (sem IVA):€1050.00Desconto Global (10%):-€105.00Taxas de Serviço (IVA 23%):Deslocação:€20.00SUBTOTAL (sem IVA):€965.00IVA 6%:€2.70IVA 23%:€211.60IVA Total:€214.30TOTAL GERAL (c/ IVA):€1179.30CONDIÇÕES GERAISPagamento a 30 diasObrigado!SECÇÃOGarantia de 2 anosEMPRESAMudelar LdaNIF: 500000000Rua A, 1, 1000-001, LisboaTel: 210000000Email: geral@mudelar.ptCONTACTORita CostaEmail: rita@exemplo.ptTel: 912345678Obrigado pela preferênciaMudelar Lda",
   },
   propostaPadrao: {
-    arvore: "681e8bc5421b113c3b9edc15242527eae14b26b1",
+    arvore: "13be89b7f1b766cb2c0fcc666696d25dbaa72248",
     texto: "PROPOSTAP-2026-001Data: 05/03/2026CLIENTENome:Ana SilvaNIF:123456789Email:ana@exemplo.ptTelefone:910000000Morada fiscal:Rua B, 2, 4000-001, PortoMorada de entrega:Rua da Obra, 3NOTASNota ao clienteDETALHES DA PROPOSTASKUDescriçãoUnid.Qtd.P. Unit.IVATotalSKU-AArtigo aUN2.00€500.0023%€1000.00Descrição do artigo a1Artigo bUN1.00€50.006%€50.00Características selecionadas:• Cor: BrancoSubtotal Produtos (sem IVA):€1050.00Desconto Global (10%):-€105.00Taxas de Serviço (IVA 23%):Deslocação:€20.00SUBTOTAL (sem IVA):€965.00IVA 6%:€2.70IVA 23%:€211.60IVA Total:€214.30TOTAL GERAL (c/ IVA):€1179.30EMPRESAMudelar LdaNIF: 500000000Rua A, 1, 1000-001, LisboaTel: 210000000Email: geral@mudelar.ptCONTACTORita CostaEmail: rita@exemplo.ptTel: 912345678Mudelar Lda",
   },
   propostaModelo: {
-    arvore: "0643fc9b315bcbcb882209e9d4612e8d5ee36e8a",
+    arvore: "c27cb6861aa22535b59e08cb328ee7604504e471",
     texto: "PROPOSTAP-2026-001Data: 05/03/2026EMPRESANome:Mudelar LdaNIF:500000000Email:geral@mudelar.ptTelefone:210000000Morada:Rua A, 1, 1000-001, LisboaCLIENTENome:Ana SilvaNIF:123456789Email:ana@exemplo.ptTelefone:910000000Morada fiscal:Rua B, 2, 4000-001, PortoMorada de entrega:Rua da Obra, 3DESCRIÇÃOCabeçalho da organizaçãoNOTASNota ao clienteDETALHES DA PROPOSTASKUDescriçãoUnid.Qtd.P. Unit.IVATotalSKU-AArtigo aUN2.00€500.0023%€1000.00Descrição do artigo a1Artigo bUN1.00€50.006%€50.00Características selecionadas:• Cor: BrancoVALIDADEEste orçamento é válido por 30 dias a partir da data de emissão.VALOR DA PROPOSTASubtotal Produtos (sem IVA):€1050.00Desconto Global (10%):-€105.00Taxas de Serviço (IVA 23%):Deslocação:€20.00SUBTOTAL (sem IVA):€965.00IVA 6%:€2.70IVA 23%:€211.60IVA Total:€214.30TOTAL GERAL (c/ IVA):€1179.30CONDIÇÕES GERAISPagamento a 30 diasObrigado!SECÇÃOGarantia de 2 anosEMPRESAMudelar LdaNIF: 500000000Rua A, 1, 1000-001, LisboaTel: 210000000Email: geral@mudelar.ptCONTACTORita CostaEmail: rita@exemplo.ptTel: 912345678Obrigado pela preferênciaMudelar Lda",
   },
   propostaSeccoes: {
-    arvore: "334de233d1ed06140f7e232227fd6d3edb6db4e5",
+    arvore: "071a08ce7b3aef92e2c0a2b73d8be5e508e18755",
     texto: "PROPOSTAP-2026-001Data: 05/03/2026EMPRESANome:Mudelar LdaNIF:500000000Email:geral@mudelar.ptTelefone:210000000Morada:Rua A, 1, 1000-001, LisboaCLIENTENome:Ana SilvaNIF:123456789Email:ana@exemplo.ptTelefone:910000000Morada fiscal:Rua B, 2, 4000-001, PortoMorada de entrega:Rua da Obra, 3DESCRIÇÃOCabeçalho da organizaçãoNOTASNota ao clienteDETALHES DA PROPOSTASKUDescriçãoUnid.Qtd.P. Unit.IVATotalGeral1Artigo aUN2.00€50.0023%€100.001[BUNDLE] Artigo dUN2.00€50.0023%€100.00Bundle sem detalhe de componentes guardado. Reabra o item no editor e volte a adicionar para gravar a composição.Cozinha1Artigo bUN2.00€50.0023%€100.001[BUNDLE] Artigo cUN2.00€50.00Mista€100.00Componentes do bundle:• Tampo€80.00SKU: T-1 · Qtd: 2.00 · P. Unit.: €40.00IVA 23%– Acabamento: Mate• Montagem€40.00Qtd: 2.00 · P. Unit.: €20.00IVA 6%VALIDADEEste orçamento é válido por 30 dias a partir da data de emissão.VALOR DA PROPOSTASubtotal Produtos (sem IVA):€400.00Desconto Global (10%):-€40.00Taxas de Serviço (IVA 23%):Deslocação:€20.00SUBTOTAL (sem IVA):€380.00IVA 6%:€1.80IVA 23%:€80.50IVA Total:€82.30TOTAL GERAL (c/ IVA):€462.30CONDIÇÕES GERAISPagamento a 30 diasObrigado!SECÇÃOGarantia de 2 anosEMPRESAMudelar LdaNIF: 500000000Rua A, 1, 1000-001, LisboaTel: 210000000Email: geral@mudelar.ptCONTACTORita CostaEmail: rita@exemplo.ptTel: 912345678Obrigado pela preferênciaMudelar Lda",
   },
   propostaTaxas: {
-    arvore: "32d7ad2ced6fc0318c9042bb97c560c84465e884",
+    arvore: "98eb2d3c88aa0f8267b0432a98f7ce6045b9bc43",
     texto: "PROPOSTAP-2026-001Data: 05/03/2026EMPRESANome:Mudelar LdaNIF:500000000Email:geral@mudelar.ptTelefone:210000000Morada:Rua A, 1, 1000-001, LisboaCLIENTENome:Ana SilvaNIF:123456789Email:ana@exemplo.ptTelefone:910000000Morada fiscal:Rua B, 2, 4000-001, PortoMorada de entrega:Rua da Obra, 3DESCRIÇÃOCabeçalho da organizaçãoNOTASNota ao clienteDETALHES DA PROPOSTASKUDescriçãoUnid.Qtd.P. Unit.IVATotalSKU-AArtigo aUN2.00€500.0023%€1000.00Descrição do artigo a1Artigo bUN1.00€50.006%€50.00Características selecionadas:• Cor: BrancoVALIDADEEste orçamento é válido por 30 dias a partir da data de emissão.VALOR DA PROPOSTASubtotal Produtos (sem IVA):€1050.00Desconto Global (10%):-€105.00Taxas de Serviço:Deslocação:€20.00Taxa:€5.00SUBTOTAL (sem IVA):€970.00IVA 6%:€3.00IVA 23%:€211.60IVA Total:€214.60TOTAL GERAL (c/ IVA):€1184.60CONDIÇÕES GERAISPagamento a 30 diasObrigado!SECÇÃOGarantia de 2 anosEMPRESAMudelar LdaNIF: 500000000Rua A, 1, 1000-001, LisboaTel: 210000000Email: geral@mudelar.ptCONTACTORita CostaEmail: rita@exemplo.ptTel: 912345678Obrigado pela preferênciaMudelar Lda",
   },
   propostaSemTotais: {
-    arvore: "55c03e8c1f2401f9f104dae8da7ed7ef0b21db83",
+    arvore: "73c7c0785d50740037d2f14678451e6f50d82fa1",
     texto: "PROPOSTAP-2026-001Data: 05/03/2026EMPRESANome:Mudelar LdaNIF:500000000Email:geral@mudelar.ptTelefone:210000000Morada:Rua A, 1, 1000-001, LisboaCLIENTENome:Ana SilvaNIF:123456789Email:ana@exemplo.ptTelefone:910000000Morada fiscal:Rua B, 2, 4000-001, PortoMorada de entrega:Rua da Obra, 3DESCRIÇÃOCabeçalho da organizaçãoNOTASNota ao clienteDETALHES DA PROPOSTASKUDescriçãoUnid.Qtd.P. Unit.IVATotalSKU-AArtigo aUN2.00€500.0023%€1000.00Descrição do artigo a1Artigo bUN1.00€50.006%€50.00Características selecionadas:• Cor: BrancoVALIDADEEste orçamento é válido por 30 dias a partir da data de emissão.CONDIÇÕES GERAISPagamento a 30 diasObrigado!SECÇÃOGarantia de 2 anosEMPRESAMudelar LdaNIF: 500000000Rua A, 1, 1000-001, LisboaTel: 210000000Email: geral@mudelar.ptCONTACTORita CostaEmail: rita@exemplo.ptTel: 912345678Obrigado pela preferênciaMudelar Lda",
   },
   propostaAgregada: {
-    arvore: "bdd8c4286773f0d3b13c236ed96ba6af44f83d83",
+    arvore: "408b47325a90d458be8cf799f34d50a486109469",
     texto: "PROPOSTAP-2026-001Data: 05/03/2026EMPRESANome:Mudelar LdaNIF:500000000Email:geral@mudelar.ptTelefone:210000000Morada:Rua A, 1, 1000-001, LisboaCLIENTENome:Ana SilvaNIF:123456789Email:ana@exemplo.ptTelefone:910000000Morada fiscal:Rua B, 2, 4000-001, PortoMorada de entrega:Rua da Obra, 3DESCRIÇÃOCabeçalho da organizaçãoNOTASNota ao clienteDETALHES DA PROPOSTASKUDescriçãoUnid.Qtd.P. Unit.IVATotalSKU-AArtigo aUN2.00€500.0023%€1000.00Descrição do artigo a1Artigo bUN1.00€50.006%€50.00Características selecionadas:• Cor: BrancoVALIDADEEste orçamento é válido por 30 dias a partir da data de emissão.VALOR DA PROPOSTASubtotal Produtos (sem IVA):€300.00Desconto Global (10%):-€30.00Taxas de Serviço:Deslocação:€20.00SUBTOTAL (sem IVA):€290.00IVA 23%:€62.10IVA 23% (Deslocação):€4.60IVA Total:€66.70TOTAL GERAL (c/ IVA):€356.70CONDIÇÕES GERAISPagamento a 30 diasObrigado!SECÇÃOGarantia de 2 anosEMPRESAMudelar LdaNIF: 500000000Rua A, 1, 1000-001, LisboaTel: 210000000Email: geral@mudelar.ptCONTACTORita CostaEmail: rita@exemplo.ptTel: 912345678Obrigado pela preferênciaMudelar Lda",
   },
   propostaSemDesconto: {
-    arvore: "9c0cf0642a030ec82c53e0a355a009327f45bd70",
+    arvore: "e4d22fe41429335168ff92616576a20a26b8fd8c",
     texto: "PROPOSTAP-2026-001Data: 05/03/2026EMPRESANome:Mudelar LdaNIF:500000000Email:geral@mudelar.ptTelefone:210000000Morada:Rua A, 1, 1000-001, LisboaCLIENTENome:Ana SilvaNIF:123456789Email:ana@exemplo.ptTelefone:910000000Morada fiscal:Rua B, 2, 4000-001, PortoMorada de entrega:Rua da Obra, 3DESCRIÇÃOCabeçalho da organizaçãoNOTASNota ao clienteDETALHES DA PROPOSTASKUDescriçãoUnid.Qtd.P. Unit.IVATotalSKU-AArtigo aUN2.00€500.0023%€1000.00Descrição do artigo a1Artigo bUN1.00€50.006%€50.00Características selecionadas:• Cor: BrancoVALIDADEEste orçamento é válido por 30 dias a partir da data de emissão.VALOR DA PROPOSTASubtotal Produtos (sem IVA):€1050.00SUBTOTAL (sem IVA):€1050.00IVA 6%:€3.00IVA 23%:€230.00IVA Total:€233.00TOTAL GERAL (c/ IVA):€1283.00CONDIÇÕES GERAISPagamento a 30 diasObrigado!SECÇÃOGarantia de 2 anosEMPRESAMudelar LdaNIF: 500000000Rua A, 1, 1000-001, LisboaTel: 210000000Email: geral@mudelar.ptObrigado pela preferênciaMudelar Lda",
   },
   vendaDireta: {
-    arvore: "a15cdba222d6756c9b8cf211d0c8f1d859133f40",
+    arvore: "c8c2dd1f6e2998229746d2f14e8f757337321f3f",
     texto: "VENDA DIRETAVD-2026-0001Data: 05/03/2026CLIENTENome:Ana SilvaNIF:123456789Email:ana@exemplo.ptTelefone:910000000Morada fiscal:Rua B, 2, 4000-001, PortoMorada de entrega:Rua da Obra, 3NOTASNota ao clienteDETALHES DA VENDA DIRETASKUDescriçãoUnid.Qtd.P. Unit.IVATotalSKU-AArtigo aUN2.00€500.0023%€1000.00Descrição do artigo a1Artigo bUN1.00€50.006%€50.00Características selecionadas:• Cor: BrancoSubtotal Produtos (sem IVA):€1050.00Desconto Global (10%):-€105.00Taxas de Serviço (IVA 23%):Deslocação:€20.00SUBTOTAL (sem IVA):€965.00IVA 6%:€2.70IVA 23%:€211.60IVA Total:€214.30TOTAL GERAL (c/ IVA):€1179.30EMPRESAMudelar LdaNIF: 500000000Rua A, 1, 1000-001, LisboaTel: 210000000Email: geral@mudelar.ptCONTACTORita CostaEmail: rita@exemplo.ptTel: 912345678Mudelar Lda",
   },
   vendaDiretaModelo: {
-    arvore: "e178b47aa9e8c1d4ad4a339887c97cb0f9ea8615",
+    arvore: "69852bb057f566b5b9216c72daf2cb61aaecff32",
     texto: "VENDA DIRETAVD-2026-0001Data: 05/03/2026EMPRESANome:Mudelar LdaNIF:500000000Email:geral@mudelar.ptTelefone:210000000Morada:Rua A, 1, 1000-001, LisboaCLIENTENome:Ana SilvaNIF:123456789Email:ana@exemplo.ptTelefone:910000000Morada fiscal:Rua B, 2, 4000-001, PortoMorada de entrega:Rua da Obra, 3DESCRIÇÃOCabeçalho da organizaçãoNOTASNota ao clienteDETALHES DA VENDA DIRETASKUDescriçãoUnid.Qtd.P. Unit.IVATotalSKU-AArtigo aUN2.00€500.0023%€1000.00Descrição do artigo a1Artigo bUN1.00€50.006%€50.00Características selecionadas:• Cor: BrancoVALOR DA VENDA DIRETASubtotal Produtos (sem IVA):€1050.00Desconto Global (10%):-€105.00Taxas de Serviço (IVA 23%):Deslocação:€20.00SUBTOTAL (sem IVA):€965.00IVA 6%:€2.70IVA 23%:€211.60IVA Total:€214.30TOTAL GERAL (c/ IVA):€1179.30CONDIÇÕES GERAISPagamento a 30 diasObrigado!SECÇÃOGarantia de 2 anosEMPRESAMudelar LdaNIF: 500000000Rua A, 1, 1000-001, LisboaTel: 210000000Email: geral@mudelar.ptCONTACTORita CostaEmail: rita@exemplo.ptTel: 912345678Obrigado pela preferênciaMudelar Lda",
   },
   semNada: {
-    arvore: "d7ef687dbfb1b5790387b759952fe5c6826a1d3a",
+    arvore: "f19591f968b6cf008c19c1d9cb85af3f2cc604c7",
     texto: "PROPOSTAN/AData: 05/03/2026CLIENTENome:DETALHES DA PROPOSTASKUDescriçãoUnid.Qtd.P. Unit.IVATotalSubtotal Produtos (sem IVA):€0.00SUBTOTAL (sem IVA):€0.00IVA Total:€0.00TOTAL GERAL (c/ IVA):€0.00EMPRESAOrçamento",
   },
 };

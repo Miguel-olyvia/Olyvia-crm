@@ -582,7 +582,10 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
         </View>
       </View>
 
-      <View>
+      {/* Linhas em Fragment, e não dentro de Views de embrulho: assim cada linha (wrap={false}) é irmã do
+          cabeçalho da tabela. Quando a 1.ª linha de um embrulho não cabia no resto da página, o @react-pdf
+          deixava o embrulho inteiro nessa página e encolhia-o à altura disponível, e as linhas sobrepunham-se. */}
+      <>
         {(() => {
           const sections = new Map<string, any[]>();
           lines.forEach((line) => {
@@ -594,7 +597,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
           const hasMultipleSections = sectionEntries.length > 1;
 
           return sectionEntries.map(([sectionName, sectionLines]) => (
-            <View key={sectionName}>
+            <React.Fragment key={sectionName}>
               {hasMultipleSections && (
                 <View style={{ backgroundColor: '#f3f4f6', paddingVertical: 4, paddingHorizontal: 8, marginTop: 4 }}>
                   <Text style={{ fontSize: 9, fontWeight: 'bold' as const, color: '#374151' }}>{sectionName}</Text>
@@ -671,10 +674,10 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
                   </View>
                 );
               })}
-            </View>
+            </React.Fragment>
           ));
         })()}
-      </View>
+      </>
       {!hideTotals && !hasValueSection && renderTotals()}
     </View>
   );
