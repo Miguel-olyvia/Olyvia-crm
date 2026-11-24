@@ -9,6 +9,9 @@ import { IDIOMA_BASE, normalizarCodigo, tDoc, type ParametrosDoc } from '@/lib/i
 
 Font.registerHyphenationCallback((word) => [word]);
 
+/** Componentes de um bundle que ficam sempre na mesma página que o título da linha e «COMPONENTES DO BUNDLE». */
+const BUNDLE_COMPONENTES_COM_TITULO = 2;
+
 const styles = StyleSheet.create({
   page: {
     paddingTop: 30,
@@ -565,12 +568,12 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     ) : null;
   };
 
-  const renderQuoteItems = (section: any) => (
-    <View>
+  const renderQuoteItems = (section: any) => {
+    const tableHeader = (
       <View style={styles.section}>
         <Text style={[styles.sectionTitle, { backgroundColor: surfaceColor, color: textColor }]}>{ehVendaDireta ? rotuloDetalhes : sectionLabel(section, rotuloDetalhes)}</Text>
         <View style={styles.table}>
-          <View style={[styles.tableHeader, { backgroundColor: quoteHeaderBg, color: quoteHeaderText }]}> 
+          <View style={[styles.tableHeader, { backgroundColor: quoteHeaderBg, color: quoteHeaderText }]}>
             <Text style={columnStyles.sku}>{tp('sku')}</Text>
             <Text style={columnStyles.description}>{tp('tabela.descricao')}</Text>
             <Text style={columnStyles.unit}>{tp('tabela.unid')}</Text>
@@ -581,10 +584,20 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
           </View>
         </View>
       </View>
+    );
 
-      {/* Linhas em Fragment, e não dentro de Views de embrulho: assim cada linha (wrap={false}) é irmã do
-          cabeçalho da tabela. Quando a 1.ª linha de um embrulho não cabia no resto da página, o @react-pdf
-          deixava o embrulho inteiro nessa página e encolhia-o à altura disponível, e as linhas sobrepunham-se. */}
+    // Sem View de embrulho (e sem a da secção, ver o corpo da página): os blocos da tabela são filhos diretos da
+    // página. Dentro de um embrulho aninhado, um 1.º bloco que não cabia no resto da página fazia o @react-pdf
+    // deixar o embrulho inteiro nessa página, encolhido, e as linhas sobrepunham-se.
+    return (
+    <>
+      {lines.length === 0 && tableHeader}
+
+      {/* Linhas em Fragment, e não dentro de Views de embrulho: assim cada bloco (wrap={false}) é irmão dos
+          outros. Quando o 1.º bloco de um embrulho não cabia no resto da página, o @react-pdf deixava o embrulho
+          inteiro nessa página e encolhia-o à altura disponível, e as linhas sobrepunham-se.
+          O cabeçalho da tabela (e a barra da secção) vão no mesmo bloco indivisível que o início da 1.ª linha:
+          nunca ficam sozinhos no fim de uma página. */}
       <>
         {(() => {
           const sections = new Map<string, any[]>();
@@ -596,14 +609,19 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
           const sectionEntries = Array.from(sections.entries());
           const hasMultipleSections = sectionEntries.length > 1;
 
-          return sectionEntries.map(([sectionName, sectionLines]) => (
+          return sectionEntries.map(([sectionName, sectionLines], sectionIdx) => (
             <React.Fragment key={sectionName}>
-              {hasMultipleSections && (
-                <View style={{ backgroundColor: '#f3f4f6', paddingVertical: 4, paddingHorizontal: 8, marginTop: 4 }}>
-                  <Text style={{ fontSize: 9, fontWeight: 'bold' as const, color: '#374151' }}>{sectionName}</Text>
-                </View>
-              )}
-              {sectionLines.map((line: any) => {
+              {sectionLines.map((line: any, lineIdx: number) => {
+                const prefix = lineIdx === 0 ? (
+                  <>
+                    {sectionIdx === 0 && tableHeader}
+                    {hasMultipleSections && (
+                      <View style={{ backgroundColor: '#f3f4f6', paddingVertical: 4, paddingHorizontal: 8, marginTop: 4 }}>
+                        <Text style={{ fontSize: 9, fontWeight: 'bold' as const, color: '#374151' }}>{sectionName}</Text>
+                      </View>
+                    )}
+                  </>
+                ) : null;
                 const unitPrice = calculateUnitPrice(line);
                 const quantity = parseFloat(String(line.qt || 0));
                 const lineTotal = parseFloat(String(line.total_sem_iva || 0));
@@ -616,9 +634,57 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
                 const ivaBruto = getLineVatLabel(line);
                 const ivaDisplay = ivaBruto === 'Mista' ? tp('iva.mista') : ivaBruto;
 
-                return (
+                // Um bundle com muitos componentes pode partir-se entre páginas, mas só entre componentes: o título
+                // da linha, a descrição e «COMPONENTES DO BUNDLE» ficam com os primeiros componentes (nunca um título
+                // órfão no fim da página) e cada componente seguinte é um bloco indivisível.
+                const splitBundle = bundleComponents.length > BUNDLE_COMPONENTES_COM_TITULO;
+                // Quando o bundle se parte, o espaço entre um componente e o seguinte passa da margem de baixo de um
+                // para o espaço de cima do pedaço seguinte (mesma distância): assim um pedaço que começa no topo de
+                // uma página não tem o texto encostado ao limite do fundo.
+                const renderComponent = (component: (typeof bundleComponents)[number], idx: number) => {
+                  const effectiveQty = component.quantity * (quantity || 1);
+                  const componentTotal = round2(component.unit_price) * effectiveQty;
+                  const marginBottom = splitBundle && idx >= BUNDLE_COMPONENTES_COM_TITULO - 1 ? 0 : 4;
+                  return (
+                    <View key={`${component.name}-${idx}`} style={{ marginBottom, paddingBottom: 4, borderBottom: idx === bundleComponents.length - 1 ? 'none' : '1 solid #e5e7eb' }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 1 }}>
+                        <Text style={{ fontSize: 8, color: '#111827', fontWeight: 'bold' as const, flex: 1, marginRight: 8 }}>• {component.name}</Text>
+                        <Text style={{ fontSize: 8, color: '#111827', fontWeight: 'bold' as const, minWidth: 70, textAlign: 'right' }}>€{componentTotal.toFixed(2)}</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
+                        <Text style={{ fontSize: 7, color: '#6b7280', flex: 1 }}>{component.sku ? `${tp('sku')}: ${component.sku} · ` : ''}{tp('qtdDoisPontos')} {effectiveQty.toFixed(2)} · {tp('precoUnitDoisPontos')} €{component.unit_price.toFixed(2)}</Text>
+                        <Text style={{ fontSize: 7, color: '#374151', minWidth: 52, textAlign: 'right' }}>{tp('ivaTaxa', { taxa: (hasLineIvaOverride ? Number(lineIvaOverride) : component.vat_rate).toFixed(0) })}</Text>
+                      </View>
+                      {component.attributes.length > 0 && (
+                        <View style={{ marginTop: 3, paddingLeft: 8, borderLeftWidth: 1, borderLeftColor: '#cbd5e1' }}>
+                          {component.attributes.map((a, aIdx) => <Text key={aIdx} style={{ fontSize: 7, color: '#374151', marginBottom: 1 }}><Text style={{ color: '#6b7280' }}>– {a.label}: </Text><Text style={{ fontWeight: 'bold' as const, color: '#111827' }}>{a.value}</Text></Text>)}
+                        </View>
+                      )}
+                    </View>
+                  );
+                };
+                // Caixa dos componentes (fundo claro e barra à esquerda). Quando o bundle se parte entre páginas,
+                // cada pedaço leva a sua parte da caixa: o primeiro o espaço de cima, o último o de baixo e o traço.
+                const componentsBox = (children: React.ReactNode, first: boolean, last: boolean) => (
+                  <View style={{ paddingLeft: 18, paddingRight: 8, paddingTop: first ? 6 : 4, paddingBottom: last ? (splitBundle ? 10 : 6) : 0, borderBottom: last ? '1 solid #e5e7eb' : 'none', backgroundColor: '#f8fafc', borderLeftWidth: 2, borderLeftColor: brandColor }}>
+                    {children}
+                  </View>
+                );
+                const attrsBlock = lineAttrs.length > 0 ? (
+                  <View style={{ paddingLeft: 18, paddingRight: 8, paddingVertical: 5, borderBottom: '1 solid #e5e7eb', backgroundColor: '#f9fafb', borderLeftWidth: 2, borderLeftColor: brandColor }}>
+                    <Text style={{ fontSize: 7, color: '#6b7280', marginBottom: 2, fontWeight: 'bold' as const, textTransform: 'uppercase' as const }}>{tp('caracteristicas')}</Text>
+                    {lineAttrs.map((a, idx) => <View key={idx} style={{ flexDirection: 'row', marginBottom: 1, alignItems: 'center' }}><Text style={{ fontSize: 8, color: '#374151', flex: 1 }}><Text style={{ color: '#6b7280' }}>• {a.label}: </Text><Text style={{ fontWeight: 'bold' as const, color: '#111827' }}>{a.value}</Text></Text></View>)}
+                  </View>
+                ) : null;
+                const componentsTitle = (
+                  <Text style={{ fontSize: 7, color: '#6b7280', marginBottom: 4, fontWeight: 'bold' as const, textTransform: 'uppercase' as const }}>{tp('bundle.componentes')}</Text>
+                );
+                const componentsInHead = splitBundle ? bundleComponents.slice(0, BUNDLE_COMPONENTES_COM_TITULO) : bundleComponents;
+
+                const head = (
                   <View key={line.id} wrap={false}>
-                    <View style={[styles.tableRow, { borderBottomColor: borderColor, backgroundColor: quoteRowAltBg }]}> 
+                    {prefix}
+                    <View style={[styles.tableRow, { borderBottomColor: borderColor, backgroundColor: quoteRowAltBg }]}>
                       <Text style={columnStyles.sku}>{line.products?.sku || line.services?.sku || line.ordem?.toString() || '-'}</Text>
                       <View style={columnStyles.description}>
                         <Text>{showBundleBadge && <Text style={{ fontSize: 7, color: brandColor, fontWeight: 'bold' as const }}>[BUNDLE] </Text>}{line.descricao_snapshot || ''}</Text>
@@ -639,39 +705,27 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
                         <Text style={{ fontSize: 7, color: '#92400e', fontStyle: 'italic' as const }}>{tp('bundle.semDetalhe')}</Text>
                       </View>
                     )}
-                    {bundleComponents.length > 0 && (
-                      <View style={{ paddingLeft: 18, paddingRight: 8, paddingVertical: 6, borderBottom: '1 solid #e5e7eb', backgroundColor: '#f8fafc', borderLeftWidth: 2, borderLeftColor: brandColor }}>
-                        <Text style={{ fontSize: 7, color: '#6b7280', marginBottom: 4, fontWeight: 'bold' as const, textTransform: 'uppercase' as const }}>{tp('bundle.componentes')}</Text>
-                        {bundleComponents.map((component, idx) => {
-                          const effectiveQty = component.quantity * (quantity || 1);
-                          const componentTotal = round2(component.unit_price) * effectiveQty;
-                          return (
-                            <View key={`${component.name}-${idx}`} style={{ marginBottom: 4, paddingBottom: 4, borderBottom: idx === bundleComponents.length - 1 ? 'none' : '1 solid #e5e7eb' }}>
-                              <View style={{ flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 1 }}>
-                                <Text style={{ fontSize: 8, color: '#111827', fontWeight: 'bold' as const, flex: 1, marginRight: 8 }}>• {component.name}</Text>
-                                <Text style={{ fontSize: 8, color: '#111827', fontWeight: 'bold' as const, minWidth: 70, textAlign: 'right' }}>€{componentTotal.toFixed(2)}</Text>
-                              </View>
-                              <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
-                                <Text style={{ fontSize: 7, color: '#6b7280', flex: 1 }}>{component.sku ? `${tp('sku')}: ${component.sku} · ` : ''}{tp('qtdDoisPontos')} {effectiveQty.toFixed(2)} · {tp('precoUnitDoisPontos')} €{component.unit_price.toFixed(2)}</Text>
-                                <Text style={{ fontSize: 7, color: '#374151', minWidth: 52, textAlign: 'right' }}>{tp('ivaTaxa', { taxa: (hasLineIvaOverride ? Number(lineIvaOverride) : component.vat_rate).toFixed(0) })}</Text>
-                              </View>
-                              {component.attributes.length > 0 && (
-                                <View style={{ marginTop: 3, paddingLeft: 8, borderLeftWidth: 1, borderLeftColor: '#cbd5e1' }}>
-                                  {component.attributes.map((a, aIdx) => <Text key={aIdx} style={{ fontSize: 7, color: '#374151', marginBottom: 1 }}><Text style={{ color: '#6b7280' }}>– {a.label}: </Text><Text style={{ fontWeight: 'bold' as const, color: '#111827' }}>{a.value}</Text></Text>)}
-                                </View>
-                              )}
-                            </View>
-                          );
-                        })}
-                      </View>
-                    )}
-                    {lineAttrs.length > 0 && (
-                      <View style={{ paddingLeft: 18, paddingRight: 8, paddingVertical: 5, borderBottom: '1 solid #e5e7eb', backgroundColor: '#f9fafb', borderLeftWidth: 2, borderLeftColor: brandColor }}>
-                        <Text style={{ fontSize: 7, color: '#6b7280', marginBottom: 2, fontWeight: 'bold' as const, textTransform: 'uppercase' as const }}>{tp('caracteristicas')}</Text>
-                        {lineAttrs.map((a, idx) => <View key={idx} style={{ flexDirection: 'row', marginBottom: 1, alignItems: 'center' }}><Text style={{ fontSize: 8, color: '#374151', flex: 1 }}><Text style={{ color: '#6b7280' }}>• {a.label}: </Text><Text style={{ fontWeight: 'bold' as const, color: '#111827' }}>{a.value}</Text></Text></View>)}
-                      </View>
-                    )}
+                    {componentsInHead.length > 0 && componentsBox(<>{componentsTitle}{componentsInHead.map(renderComponent)}</>, true, !splitBundle)}
+                    {!splitBundle && attrsBlock}
                   </View>
+                );
+                if (!splitBundle) return head;
+
+                const rest = bundleComponents.slice(BUNDLE_COMPONENTES_COM_TITULO);
+                return (
+                  <React.Fragment key={line.id}>
+                    {head}
+                    {rest.map((component, k) => {
+                      const idx = BUNDLE_COMPONENTES_COM_TITULO + k;
+                      const isLast = k === rest.length - 1;
+                      return (
+                        <View key={`${line.id}-c${idx}`} wrap={false}>
+                          {componentsBox(renderComponent(component, idx), false, isLast)}
+                          {isLast && attrsBlock}
+                        </View>
+                      );
+                    })}
+                  </React.Fragment>
                 );
               })}
             </React.Fragment>
@@ -679,8 +733,9 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
         })()}
       </>
       {!hideTotals && !hasValueSection && renderTotals()}
-    </View>
-  );
+    </>
+    );
+  };
 
   const renderTerms = (section: any) => (quote.conditions || (showTerms && termsText)) ? (
     <View style={styles.section} wrap={false}>
@@ -793,7 +848,9 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
             .map((section: any) => ({ section, node: renderSection(section) }))
             .filter((e: any) => e.node);
           const last = rendered.length - 1;
-          return rendered.map((e: any, idx: number) => (
+          return rendered.map((e: any, idx: number) => e.section.type === 'quote_items' ? (
+            <React.Fragment key={e.section.id || e.section.type}>{e.node}</React.Fragment>
+          ) : (
             <View
               key={e.section.id || e.section.type}
               style={idx === last ? { marginBottom: 0 } : undefined}
