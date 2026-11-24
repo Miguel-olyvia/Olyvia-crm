@@ -92,6 +92,18 @@ export function produtoDeOutroRamo(A: No[], o: { sid: SvcId; no: string }, p: Pi
   }
   return false;
 }
+/**
+ * 24/11 (contrato real MD 1588 no testarh: «O cliente mantém o lavatório?» → «Mantém» tirou a base de duche, a coluna e a torneira, que estão
+ * no mesmo ramo «Louças e torneiras»). O que o «Mantém» tira: quando a pergunta nomeia o objeto («o lavatório», «a sanita e o bidé») e o Catálogo
+ * tem essa categoria, só os produtos dela; senão, o ramo todo da troca, como antes.
+ */
+export function nosQueOMantemTira(A: No[], no: string, pergunta?: string | null): Set<string> {
+  const objeto = nosDoObjeto(A, pergunta);
+  if (!objeto.length) return ramoDaTroca(A, no, pergunta);
+  const r = new Set<string>();
+  for (const id of objeto) for (const y of nosAbaixo(A, id)) r.add(y);
+  return r;
+}
 /** "Canalização › Louças e torneiras". */
 export function caminhoNo(A: No[], id: string | null | undefined): string {
   const n = id ? A.find((x) => x.id === id) : undefined;

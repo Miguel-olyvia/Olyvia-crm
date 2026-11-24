@@ -61,6 +61,22 @@ describe("o «Mantém» de uma troca não tira o produto que é da outra (24/11)
   });
 });
 
+// 24/11 (contrato real MD 1588): «O cliente mantém o lavatório?» → «Mantém» tirava a base, a coluna e a torneira do mesmo ramo.
+describe("o «Mantém» de uma pergunta com objeto só tira o objeto (24/11)", () => {
+  it("«Mantém o lavatório» tira o lavatório e deixa a base de duche; sem objeto conhecido, o ramo todo", () => {
+    const BASE: ProdVisita = { id: "DBBD0008", n: "Base de Duche STONE PLUS 70x140", un: "un", custo: 117, q: 1, no: "bd", svc: "sBase" };
+    const LAV: ProdVisita = { id: "LAV1", n: "Lavatório de pousar", un: "un", custo: 60, q: 1, no: "lav", svc: "sLav" };
+    const d = { id: "n2", visita: { prod: [BASE, LAV], manter: {} as Record<string, "sim" | "nao"> } } as never as Parameters<typeof responderTroca>[2];
+    const tirados: string[] = [];
+    const A = { manter: () => {}, tirarProduto: (_: string, id: string) => { tirados.push(id); d.visita.prod = (d.visita.prod ?? []).filter((x) => x.id !== id); } } as never;
+    responderTroca(A, { arvore: ARVORE } as never, d, { sid: "sLav", no: "lt", pergunta: "O cliente mantém o lavatório?" }, "sim");
+    expect(tirados).toEqual(["LAV1"]);
+    // sem objeto que o Catálogo conheça, tira o ramo todo da troca (a base sai)
+    responderTroca(A, { arvore: ARVORE } as never, d, { sid: "sLt", no: "lt", pergunta: "O cliente mantém as louças?" }, "sim");
+    expect(tirados).toEqual(["LAV1", "DBBD0008"]);
+  });
+});
+
 describe("o ramo do motor das categorias de produto", () => {
   it("pelo nome, sem acentos nem apóstrofos", () => {
     expect(ramoDaCategoriaProduto("Sanitas")).toEqual(["Canalização", "Louças e torneiras"]);
