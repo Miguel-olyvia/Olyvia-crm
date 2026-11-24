@@ -54,6 +54,8 @@ export interface Mockup3D {
   generico?: { id: string; o: Record<string, string | boolean> };
   /** 24/11: a foto da opção de cor (URL público e o lado em cm de cada repetição): o Visualizador3D aplica-a ao corpo da peça. Só a pré-visualização do produto a põe; sem ela, a cor lisa. */
   textura?: import("./texturaProduto").TexturaModelo;
+  /** 24/11: a aparência de cada zona do objecto (frente, corpo…), dos atributos «Cor da frente», «Cor do corpo»…; só a pré-visualização do produto a põe. Sem ela (ou com `porZona: false`), a foto ou cor única de sempre. */
+  zonas?: import("./zonasGlb").ZonasDoProduto;
 }
 export interface Dimensoes { larguraCm: number; profundidadeCm: number; alturaCm: number; deNome: boolean }
 export interface ProdutoModelo3D {

@@ -8,6 +8,7 @@ import { Previa3DProduto } from "./Previa3DProduto";
 import { urlDaFotoOpcao } from "./fotoOpcaoUrl";
 import { corDosAtributos, fotoDosAtributos, medidaDosAtributos } from "./planta3d/previaProduto3d";
 import { LADO_TEXTURA_CM } from "./planta3d/texturaProduto";
+import { zonasDosAtributos, zonasVisuais } from "./planta3d/zonasGlb";
 import type { NoCat } from "./planta3d/catalogo3d";
 import { resolverDoNo, textoDaOrigem } from "./planta3d/modelos3dEscolha";
 import { aplicacaoDosAtributos, medidaDoRevestimento } from "./planta3d/revestimentoPrevia";
@@ -36,7 +37,9 @@ function Aberto({ nome, sub, no, arvore, attrs, defs, modelo3d }: Modelo3DProdut
   // 24/11: um revestimento lê a Medida sem os limites do modelo 3D (a espessura em mm de um laminado) e o atributo «Aplicação» (chão ou parede por omissão)
   const medidaRevestimento = useMemo(() => medidaDoRevestimento(attrsEspera), [attrsEspera]);
   const aplicacao = useMemo(() => aplicacaoDosAtributos(attrsEspera, defs), [attrsEspera, defs]);
-  return <Previa3DProduto nome={nomeEspera} sub={sub} no={no} arvore={arvore} medida={medida} cor={cor} textura={textura} modelo3d={modelo3d} medidaRevestimento={medidaRevestimento} aplicacao={aplicacao} />;
+  // 24/11 (fase 1): a aparência de cada zona pelo nome do atributo («Cor da frente» → frente, «Cor do corpo» → corpo, «Cor» → o resto); sem estes atributos, nada muda
+  const zonas = useMemo(() => { const z = zonasDosAtributos(attrsEspera, defs); return z ? zonasVisuais(z, urlDaFotoOpcao) : undefined; }, [attrsEspera, defs]);
+  return <Previa3DProduto nome={nomeEspera} sub={sub} no={no} arvore={arvore} medida={medida} cor={cor} textura={textura} modelo3d={modelo3d} medidaRevestimento={medidaRevestimento} aplicacao={aplicacao} zonas={zonas} painelMedidas />;
 }
 
 export function Modelo3DProduto(props: Modelo3DProdutoProps) {

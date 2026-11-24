@@ -2,7 +2,9 @@
 // as medidas e a cor que vêm dos atributos do produto, o modelo do catálogo 3D com essas medidas, o estado do modelo (o que se vai ver)
 // e a cena mínima: uma divisão pequena com a peça ao centro e a câmara a apontar-lhe.
 import type { AtributoDef, AtributoProduto, DimensaoMedida } from "../v2/catalogoModelo";
-import { COMPRIMENTO_NA_ALTURA, alturaDeSanitaDeChao, modeloDoProduto, sem, temModeloGenerico, temModeloHtml, type NoCat, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
+import { alturaDeSanitaDeChao, modeloDoProduto, sem, temModeloGenerico, temModeloHtml, type NoCat, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
+import { eixosPorOmissao, validarEixos, type Eixos } from "./eixosMedida";
+import type { ZonasDoProduto } from "./zonasGlb";
 import type { TexturaModelo } from "./texturaProduto";
 import { espacoVazio, paredesDoContorno, PE_DIREITO_OMISSAO, type Espaco, type PecaProduto } from "./modelo";
 
@@ -51,15 +53,12 @@ export function medidaDosAtributos(attrs: readonly AtributoProduto[] | undefined
  * banheira, o maior é a largura e o menor a profundidade, e a espessura é a altura; espelho, quadro, radiador, toalheiro, resguardo, roupeiro e também os
  * móveis, colunas e armários (COMPRIMENTO_NA_ALTURA, lido na base: colunas e móveis de lavatório), o comprimento é a altura e a espessura a profundidade;
  * os outros (tampo, bancada, lavabo…), o comprimento é a profundidade e a espessura a altura. Nada que sirva: null.
+ * 24/11: essa regra é `eixosPorOmissao(tipo)`; `eixos` (escolhidos à mão no painel «Medidas», só para ver) manda sobre ela, e sem eixos (ou inválidos) dá exactamente o que dava.
  */
-export function dimensoesDaMedida(tipo: TipoMockup, m: MedidaCm, nome?: string): MedidasParciais | null {
-  const { largura: l, comprimento: c, espessura: e, altura: a } = m;
-  let r: MedidasParciais;
-  if (tipo === "base_duche" || tipo === "banheira") {
-    const lados = [l, c].filter((x): x is number => x !== undefined);
-    r = { larguraCm: lados.length ? Math.max(...lados) : undefined, profundidadeCm: lados.length === 2 ? Math.min(...lados) : undefined, alturaCm: e ?? a };
-  } else if (COMPRIMENTO_NA_ALTURA.includes(tipo)) r ={ larguraCm: l, alturaCm: c ?? a, profundidadeCm: e };
-  else r = { larguraCm: l, profundidadeCm: c, alturaCm: e ?? a };
+export function dimensoesDaMedida(tipo: TipoMockup, m: MedidaCm, nome?: string, eixos?: Eixos | null): MedidasParciais | null {
+  // 24/11: que campo da Medida dá a largura, a altura e a profundidade: os que vêm (escolhidos à mão, só para ver) ou, sem eles ou inválidos, a regra de hoje por tipo (eixosPorOmissao)
+  const ex = validarEixos(eixos) ?? eixosPorOmissao(tipo, m);
+  let r: MedidasParciais = { larguraCm: m[ex.largura], profundidadeCm: m[ex.profundidade], alturaCm: m[ex.altura] ?? m.altura };
   // a sanita de chão com depósito não tem menos de 60 cm de altura (a mesma regra do catálogo e da planta); sem o nome, a medida fica como vem
   if (nome !== undefined && r.alturaCm !== undefined) r = { ...r, alturaCm: alturaDeSanitaDeChao(tipo, nome, r.alturaCm) };
   const dito = Object.fromEntries(Object.entries(r).filter(([, v]) => v !== undefined)) as MedidasParciais;
@@ -96,24 +95,33 @@ export interface EntradaPrevia {
   nome: string; sub?: string; no: string | null; arvore: readonly NoCat[]; medida?: MedidaCm | null; cor?: string; /** a foto da opção de cor (URL público) */ textura?: TexturaModelo;
   /** O «Modelo 3D» escolhido no próprio produto (o que se está a escolher no formulário ou o gravado); a subcategoria e a categoria vêm da árvore. */
   modelo3d?: string | null;
+  /** 24/11: os eixos da Medida escolhidos à mão no painel «Medidas» (só para ver); sem eles, a regra de hoje por tipo. */
+  eixos?: Eixos | null;
+  /** 24/11: a aparência de cada zona (frente, corpo…), dos atributos «Cor da frente», «Cor do corpo»…; sem ela, a foto ou cor única de hoje. */
+  zonas?: ZonasDoProduto;
 }
 const ID_PREVIA = "previa-produto";
+
+/** O tipo de mockup que o classificador dá ao produto (antes da medida): o painel «Medidas» precisa dele para a regra de omissão dos eixos. */
+export function tipoDaPrevia({ nome, sub, no, arvore, modelo3d }: Pick<EntradaPrevia, "nome" | "sub" | "no" | "arvore" | "modelo3d">): TipoMockup {
+  return modeloDoProduto({ id: ID_PREVIA, n: nome.trim(), sub: sub?.trim() || undefined, no, ...(modelo3d ? { modelo3d } : {}) }, arvore).tipo;
+}
 
 /**
  * O modelo do catálogo 3D do produto que se está a escrever: o classificador de sempre (pela subcategoria, pelo nome e pelo ramo da árvore), com a
  * medida dos atributos por cima da do nome (repartida pelo tipo que o classificador deu; o que ela não diz vem do nome ou das omissões do tipo) e a cor do
  * atributo Cor, que o classificador não lê.
  */
-export function modeloParaPrevia({ nome, sub, no, arvore, medida, cor, textura, modelo3d }: EntradaPrevia): ProdutoModelo3D {
+export function modeloParaPrevia({ nome, sub, no, arvore, medida, cor, textura, modelo3d, eixos, zonas }: EntradaPrevia): ProdutoModelo3D {
   const p = { id: ID_PREVIA, n: nome.trim(), sub: sub?.trim() || undefined, no, ...(modelo3d ? { modelo3d } : {}) };
   let m = modeloDoProduto(p, arvore);
-  const medidas = medida ? dimensoesDaMedida(m.tipo, medida, p.n) : null;
+  const medidas = medida ? dimensoesDaMedida(m.tipo, medida, p.n, eixos) : null;
   if (medidas) {
     const d = m.dimensoes;
     m = modeloDoProduto({ ...p, dim: [medidas.larguraCm ?? d.larguraCm, medidas.profundidadeCm ?? d.profundidadeCm, medidas.alturaCm ?? d.alturaCm] }, arvore);
   }
-  if (!cor && !textura) return m;
-  return { ...m, mockup3d: { ...m.mockup3d, ...(cor ? { cor } : {}), ...(textura ? { textura } : {}) } };
+  if (!cor && !textura && !zonas) return m;
+  return { ...m, mockup3d: { ...m.mockup3d, ...(cor ? { cor } : {}), ...(textura ? { textura } : {}), ...(zonas ? { zonas } : {}) } };
 }
 
 /**

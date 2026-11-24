@@ -4,7 +4,10 @@
 import { Component, Suspense, lazy, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import type { ComandosVista, RevestimentoVisual } from "./planta3d/Visualizador3D";
-import { cenaDoProduto, estadoDoModelo, modeloParaPrevia, type EstadoPrevia, type MedidaCm } from "./planta3d/previaProduto3d";
+import { cenaDoProduto, estadoDoModelo, modeloParaPrevia, tipoDaPrevia, type EstadoPrevia, type MedidaCm } from "./planta3d/previaProduto3d";
+import { eixosPorOmissao, temCamposParaEixos, textoDasMedidas, trocarEixo, type Eixos } from "./planta3d/eixosMedida";
+import { zonasDoModelo, type ZonaGlb, type ZonasDoProduto } from "./planta3d/zonasGlb";
+import { InterruptorMedidas, PainelMedidas, PainelZonas } from "./Previa3DPaineis";
 import type { NoCat, ProdutoModelo3D } from "./planta3d/catalogo3d";
 import type { TexturaModelo } from "./planta3d/texturaProduto";
 import { niveisDoNo } from "./planta3d/modelos3dEscolha";
@@ -55,6 +58,10 @@ export interface Previa3DProdutoProps {
   medidaRevestimento?: MedidaRevestimento | null;
   /** 24/11: o atributo «Aplicação» do produto (Pavimento, Parede): manda sobre a subcategoria na vista por omissão de um revestimento automático. */
   aplicacao?: string | null;
+  /** 24/11 (fase 1): a aparência de cada zona (Cor da frente, Cor do corpo…), dos atributos do produto; sem ela, a foto ou cor única de sempre. */
+  zonas?: ZonasDoProduto;
+  /** 24/11 (fase 1): mostra o painel «Medidas» (escolher os eixos da Medida, só para ver). Só a secção «Modelo 3D» do produto o liga. */
+  painelMedidas?: boolean;
 }
 
 const ROTULO_SUPERFICIE: Record<SuperficieRev, string> = { chao: "No chão", parede: "Na parede" };
@@ -78,7 +85,7 @@ function textoDeAjuda(foco: boolean, dentro: boolean): string {
 }
 
 /** O 3D: a conta do modelo e da cena, o aviso e o visualizador (lazy). Corre dentro do Falha3D, por isso uma excepção aqui também fica na alternativa. */
-function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRevestimento, aplicacao }: Previa3DProdutoProps) {
+function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRevestimento, aplicacao, zonas, painelMedidas = false }: Previa3DProdutoProps) {
   // o zoom: botões (sempre), pinça (toque), e roda do rato e teclas + e − só com o 3D focado (e a roda só com o rato lá dentro), para a página continuar a rolar
   const comandos = useRef<ComandosVista | null>(null), idAjuda = useId();
   const [foco, setFoco] = useState(false), [dentro, setDentro] = useState(false);
@@ -87,7 +94,16 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
     if (MAIS.has(e.key)) { e.preventDefault(); comandos.current?.aproximar(); }
     else if (MENOS.has(e.key)) { e.preventDefault(); comandos.current?.afastar(); }
   };
-  const modelo = useMemo(() => modeloParaPrevia({ nome, sub: sub ?? undefined, no, arvore, medida, cor, textura, modelo3d }), [nome, sub, no, arvore, medida, cor, textura, modelo3d]);
+  // 24/11 (fase 1): os eixos escolhidos à mão (null: a regra automática do tipo), as cotas, e a zona apontada (rato ou teclado) ou fixa (clique) no painel «Zonas». Nada disto grava.
+  const tipo = useMemo(() => tipoDaPrevia({ nome, sub: sub ?? undefined, no, arvore, modelo3d }), [nome, sub, no, arvore, modelo3d]);
+  const [eixosEscolhidos, setEixosEscolhidos] = useState<Eixos | null>(null);
+  useEffect(() => { setEixosEscolhidos(null); }, [tipo]);
+  const [cotas, setCotas] = useState(false);
+  const [zonaApontada, setZonaApontada] = useState<ZonaGlb | null>(null), [zonaFixa, setZonaFixa] = useState<ZonaGlb | null>(null);
+  const modelo = useMemo(() => modeloParaPrevia({ nome, sub: sub ?? undefined, no, arvore, medida, cor, textura, modelo3d, eixos: eixosEscolhidos, zonas }), [nome, sub, no, arvore, medida, cor, textura, modelo3d, eixosEscolhidos, zonas]);
+  const eixosEmVigor = eixosEscolhidos ?? eixosPorOmissao(tipo, medida);
+  const zonasDoObjecto = useMemo(() => zonasDoModelo(modelo), [modelo]);
+  useEffect(() => { if (zonaFixa && !zonasDoObjecto.some((z) => z.zona === zonaFixa)) setZonaFixa(null); }, [zonaFixa, zonasDoObjecto]);
   // 24/11: um revestimento (escolhido, ou automático na categoria Revestimentos) mostra-se como superfície: a vista por omissão vem da regra única
   // (revestimentoPrevia.ts, superficieDaPrevia) e o interruptor muda-a só aqui, sem gravar nada; outro produto fica exactamente como antes
   const niveis = useMemo(() => niveisDoNo(arvore, no), [arvore, no]);
@@ -121,9 +137,11 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
           className="h-full outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40">
           <Suspense fallback={<div className="grid h-full place-items-center"><Estado texto="A carregar o 3D…" /></div>}>
             <Visualizador3D espaco={cena.espaco} modelos={cena.modelos} vista="3d" teto={false} etiquetas={false} descricao={descricao}
-              selecionada={null} onSelecionar={SEM_ESCOLHA} camara={cena.camara} rolarPagina zoomRoda={foco && dentro} comandos={comandos} revestimento={revestimento} />
+              selecionada={null} onSelecionar={SEM_ESCOLHA} camara={cena.camara} rolarPagina zoomRoda={foco && dentro} comandos={comandos} revestimento={revestimento}
+              cotas={cotas && !superficie} zonaRealcada={zonaApontada ?? zonaFixa} />
           </Suspense>
         </div>
+        {!superficie && <InterruptorMedidas ligado={cotas} aoMudar={setCotas} className="absolute left-2 top-2" />}
         {superficie && (
           <>
             <p className="pointer-events-none absolute left-2 top-2 rounded-md bg-card/95 px-2.5 py-1 text-[15px] font-semibold text-foreground shadow-sm">{ROTULO_SUPERFICIE[superficie]}</p>
@@ -142,6 +160,15 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
       </div>
       <p id={idAjuda} className={NOTA}>{textoDeAjuda(foco, dentro)}</p>
       {aviso && <Estado texto={aviso} />}
+      {/* o equivalente em texto das cotas, para leitores de ecrã: a região viva existe sempre (vazia e escondida com as cotas desligadas) para a mudança se anunciar */}
+      <p aria-live="polite" className={cotas && !superficie ? NOTA : "sr-only"}>{cotas && !superficie ? textoDasMedidas(d) : ""}</p>
+      {painelMedidas && !superficie && medida && temCamposParaEixos(medida) && (
+        <PainelMedidas medida={medida} eixos={eixosEmVigor} manual={eixosEscolhidos !== null} dimensoes={d}
+          aoEscolher={(eixo, campo) => setEixosEscolhidos(trocarEixo(eixosEmVigor, eixo, campo))} aoRepor={() => setEixosEscolhidos(null)} />
+      )}
+      {!superficie && zonasDoObjecto.length >= 2 && (
+        <PainelZonas zonas={zonasDoObjecto} pintadaPor={zonas?.zonas} fixa={zonaFixa} aoApontar={setZonaApontada} aoFixar={setZonaFixa} />
+      )}
     </div>
   );
 }

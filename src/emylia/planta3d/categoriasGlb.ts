@@ -22,7 +22,10 @@ export interface ParamsGenerico { w: number; d: number; h: number; o: Readonly<R
 export interface Colocacao { pos: V3; esc: V3; rot?: V3 }
 /** `emRuntime`: parte acrescentada depois de o GLB da categoria ser gerado; o visualizador constrói-a com a forma unitária (as outras, se
  * faltarem no GLB, continuam a ser erro, e a peça cai no mockup paramétrico de reserva). */
-export interface ParteGlb { nome: string; forma: FormaGlb; mat: MaterialGlb; colocar: (p: ParamsGenerico) => Colocacao; ver?: (p: ParamsGenerico) => boolean; emRuntime?: boolean }
+/** 24/11: a zona do objecto a que uma parte pertence (zonasGlb.ts): o que um atributo de cor pode pintar. */
+export type ZonaGlb = "frente" | "corpo" | "tampo" | "puxadores" | "pes" | "estofo";
+/** `zona`: a zona da parte quando o nome estável não chega (opcional; sem ela, `zonaDaParte` decide pelo nome e pelo material). */
+export interface ParteGlb { nome: string; forma: FormaGlb; mat: MaterialGlb; colocar: (p: ParamsGenerico) => Colocacao; ver?: (p: ParamsGenerico) => boolean; emRuntime?: boolean; zona?: ZonaGlb }
 /** A omissão de uma opção: fixa, ou do tipo e do nome do produto (ex.: «Frigorífico DE ENCASTRE» abre com «de encastrar» ligado). */
 export type OmissaoGlb<T> = T | ((t: TipoMockup, nome: string) => T);
 export type OpcaoGlb =

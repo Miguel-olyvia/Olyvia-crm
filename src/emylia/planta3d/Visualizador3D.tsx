@@ -4,7 +4,7 @@
 // geometria paramétrica fica de reserva. Sem sombras (o protótipo não precisa) e com o ciclo de desenho sob pedido (frameloop demand).
 import { Component, Suspense, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
-import { ContactShadows, Html, OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
+import { ContactShadows, Html, Line, OrbitControls, OrthographicCamera, PerspectiveCamera } from "@react-three/drei";
 import * as THREE from "three";
 import { temGeometriaPropria, type MaterialMockup, type Mockup3D, type ParamsMockup, type ProdutoModelo3D } from "./catalogo3d";
 import { ehModeloTorneira, construirTorneira } from "./modelosHtml/torneiras";
@@ -21,6 +21,10 @@ import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco
 import { repeticoes, revestimentoDaSuperficie, type Revestimento } from "./revestimentos";
 import { aplicarTextura, pedirTextura, retirarTextura, type TexturaModelo } from "./texturaProduto";
 import { corDaJunta, type AmostraNoMundo, type PlanoRevestimento } from "./revestimentoPrevia";
+import { textoDeCm } from "./eixosMedida";
+import type { ZonaGlb, ZonasDoProduto } from "./zonasGlb";
+import { aplicarAparenciaDasZonas, criarMateriaisDeZona } from "./zonasMateriais";
+import { useTexturasPorUrl } from "./useTexturasPorUrl";
 
 export type Vista3D = "cima" | "3d" | "pessoa";
 export interface Visualizador3DProps {
@@ -49,6 +53,10 @@ export interface Visualizador3DProps {
   comandos?: MutableRefObject<ComandosVista | null>;
   /** 24/11 (a pré-visualização de um revestimento): uma amostra de peças com juntas, no chão ou na parede (revestimentoPrevia.ts). Sem isto, nada muda. */
   revestimento?: RevestimentoVisual | null;
+  /** 24/11 (fase 1, a pré-visualização de um produto): as cotas (largura, altura, profundidade) nas arestas da caixa da peça. Sem isto, nada se desenha. */
+  cotas?: boolean;
+  /** 24/11 (fase 1): a zona do objecto a realçar (brilho), a que o utilizador aponta no painel «Zonas». Sem isto, nada se realça. */
+  zonaRealcada?: ZonaGlb | null;
 }
 /** A amostra de um revestimento: onde fica e as peças (revestimentoPrevia.ts), a cor lisa das peças e, se houver, a foto da cor (mapeada no mundo, como nas peças). */
 export interface RevestimentoVisual { amostra: AmostraNoMundo; cor: string; textura?: TexturaModelo }
@@ -133,6 +141,9 @@ function useRevestimento(r: Revestimento, w: number, h: number): THREE.MeshLambe
  */
 interface TexturaDaPeca { tex: THREE.Texture; cor: string; lado: number; props: { map: THREE.Texture; onBeforeCompile: THREE.Material["onBeforeCompile"]; customProgramCacheKey: () => string } }
 const TexturaCtx = createContext<TexturaDaPeca | null>(null);
+/** 24/11 (fase 1): a aparência de cada zona da peça e a zona realçada. Passa por contexto DENTRO do canvas (a Peca fornece-o); sem fornecedor, nada de zonas: como sempre. */
+interface ZonasDaPeca { zonas?: ZonasDoProduto; realce?: ZonaGlb | null }
+const ZonasCtx = createContext<ZonasDaPeca>({});
 /** A textura do modelo (por URL, com cache): null enquanto carrega, se o modelo não a tem, ou se a imagem falhar (fica a cor lisa). Liberta-se ao desmontar a peça. */
 function useTexturaDoModelo(textura: Mockup3D["textura"], cor: string): TexturaDaPeca | null {
   const invalidate = useThree((s) => s.invalidate);
@@ -376,16 +387,18 @@ function GenericoGlb({ c, tipo, w, d, h, cor, mat, opc, generico }: PropsParam &
   const t = useMemo(() => montarGenerico(cena, c, { w, d, h, o: JSON.parse(chave) as Record<string, string | boolean> }, corFinal, metal === undefined ? undefined : { metalness: metal, roughness: rugos ?? 0.4 }), [cena, c, w, d, h, chave, corFinal, metal, rugos]);
   useEffect(() => () => t.libertar(), [t]);
   const invalidate = useThree((s) => s.invalidate);
-  // 24/11: a foto da opção de cor vai para o material `corpo` (o que leva a cor do produto); os outros (metal, vidro, puxadores) ficam como são
-  const tx = useContext(TexturaCtx);
+  // 24/11: a foto da opção de cor vai para o material `corpo` (o que leva a cor do produto); os outros (metal, vidro, puxadores) ficam como são.
+  // Fase 1: o `corpo` passa a ser UM material por zona (frente, corpo, tampo, pés, estofo: zonasMateriais.ts), cada um com a sua foto ou cor (`zonas`, só a pré-visualização do produto
+  // as põe) e o realce da zona apontada no painel «Zonas». Sem `zonas` (ou com todas iguais) a foto única (corpo > frente > cor) vai para todas as zonas: o que se via antes.
+  const tx = useContext(TexturaCtx), zc = useContext(ZonasCtx);
+  const zm = useMemo(() => criarMateriaisDeZona(t.grupo, c), [t, c]);
+  useEffect(() => () => zm.libertar(), [zm]);
+  const urls = useMemo(() => (zc.zonas?.porZona ? Object.values(zc.zonas.zonas).flatMap((z) => (z?.textura ? [z.textura.url] : [])) : []), [zc.zonas]);
+  const texturas = useTexturasPorUrl(urls, invalidate);
   useEffect(() => {
-    if (!tx) return;
-    const corpos = new Set<THREE.MeshStandardMaterial>();
-    t.grupo.traverse((o) => { const m = (o as THREE.Mesh).material; if ((o as THREE.Mesh).isMesh && !Array.isArray(m) && m.name === "corpo") corpos.add(m as THREE.MeshStandardMaterial); });
-    corpos.forEach((m) => aplicarTextura(m, tx.tex, tx.lado));
+    aplicarAparenciaDasZonas(zm.porZona, { corBase: corFinal, zonas: zc.zonas, texturas, unica: tx ? { tex: tx.tex, lado: tx.lado } : null, realce: zc.realce });
     invalidate();
-    return () => corpos.forEach((m) => retirarTextura(m));
-  }, [t, tx, invalidate]);
+  }, [zm, zc.zonas, zc.realce, texturas, tx, corFinal, invalidate]);
   useEffect(() => { invalidate(); }, [t, invalidate]);
   useFonte("generico", "GLB genérico");
   return <primitive object={t.grupo} />;
@@ -744,6 +757,34 @@ function Contorno({ w, d, y }: { w: number; d: number; y: number }) {
   return <mesh geometry={geo} position={[0, y + 0.004, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={2}><meshBasicMaterial color="#7c3aed" transparent opacity={0.55} depthWrite={false} side={THREE.DoubleSide} /></mesh>;
 }
 
+/**
+ * 24/11 (fase 1): as cotas da peça: três linhas de dimensão nas arestas da caixa (largura no topo da frente, profundidade em baixo à direita, altura à esquerda: assim os três rótulos não se sobrepõem na vista de partida), em forma de chaveta (a linha de chamada
+ * sai da aresta, corre ao longo dela e volta), com o rótulo «Largura 40 cm» a meio. A caixa vai de -w/2 a w/2, -d/2 a d/2 e 0 a h (m). Os rótulos são só para ver (aria-hidden): a mesma
+ * informação está em texto fora do canvas (Previa3DProduto). As linhas ignoram a profundidade (vêem-se através da peça).
+ */
+const COR_COTA = "#0b6b63";
+function Cotas({ w, d, h }: { w: number; d: number; h: number }) {
+  const off = Math.min(0.3, Math.max(0.07, Math.max(w, d, h) * 0.1));
+  const xE = -w / 2 - off, xD = w / 2 + off, zF = d / 2 + off;
+  const cotas: { chave: string; rotulo: string; pontos: V3[]; meio: V3 }[] = [
+    { chave: "largura", rotulo: `Largura ${textoDeCm(w * 100)} cm`, pontos: [[-w / 2, h, d / 2], [-w / 2, h, zF], [w / 2, h, zF], [w / 2, h, d / 2]], meio: [0, h, zF] },
+    { chave: "profundidade", rotulo: `Profundidade ${textoDeCm(d * 100)} cm`, pontos: [[w / 2, 0, -d / 2], [xD, 0, -d / 2], [xD, 0, d / 2], [w / 2, 0, d / 2]], meio: [xD, 0, 0] },
+    { chave: "altura", rotulo: `Altura ${textoDeCm(h * 100)} cm`, pontos: [[-w / 2, 0, d / 2], [xE, 0, d / 2], [xE, h, d / 2], [-w / 2, h, d / 2]], meio: [xE, h / 2, d / 2] },
+  ];
+  return (
+    <group>
+      {cotas.map((c) => (
+        <group key={c.chave}>
+          <Line points={c.pontos} color={COR_COTA} lineWidth={1.6} depthTest={false} renderOrder={6} />
+          <Html position={c.meio} center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
+            <div aria-hidden="true" data-cota={c.chave} className="whitespace-nowrap rounded border border-teal-800/40 bg-white/95 px-1.5 py-0.5 text-[12px] font-semibold leading-tight text-teal-900 shadow-sm">{c.rotulo}</div>
+          </Html>
+        </group>
+      ))}
+    </group>
+  );
+}
+
 /** Que modelo do HTML a peça usa (mostrado na etiqueta): assim vê-se logo se um produto caiu num modelo genérico. */
 function modeloEscolhido(m: ProdutoModelo3D): string | null {
   const pr = m.mockup3d.params;
@@ -839,8 +880,8 @@ function tornarFantasma(m: THREE.Mesh): void {
   m.userData.fantasma = true;
 }
 
-interface PropsPeca { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; fantasma?: boolean; onSel: (id: string) => void; mover?: Mover3D; arrasto: Arrasto | null; setArrasto: (a: Arrasto | null) => void; alvo: { current: AlvoArrasto } }
-function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel, mover, arrasto, setArrasto, alvo }: PropsPeca) {
+interface PropsPeca { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; fantasma?: boolean; onSel: (id: string) => void; mover?: Mover3D; arrasto: Arrasto | null; setArrasto: (a: Arrasto | null) => void; alvo: { current: AlvoArrasto }; cotas?: boolean; realce?: ZonaGlb | null }
+function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel, mover, arrasto, setArrasto, alvo, cotas = false, realce = null }: PropsPeca) {
   const grupoRef = useRef<THREE.Group>(null);
   useEffect(() => {
     if (!selecionada || !mover) return;
@@ -890,6 +931,7 @@ function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel,
   }, [arrasto?.id, original.id, controls, setArrasto, invalidate]);
   const { tipo, altura, cor, url } = m.mockup3d;
   const texturaDaPeca = useTexturaDoModelo(m.mockup3d.textura, cor);
+  const zonasDaPeca = useMemo<ZonasDaPeca>(() => ({ zonas: m.mockup3d.zonas, realce }), [m.mockup3d.zonas, realce]);
   const reserva = <ErroDoModelo nome={m.nome} w={p.largura} d={p.profundidade} h={altura}><Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} mat={m.mockup3d.material} params={m.mockup3d.params} recortes={p.recortes} opc={p.opc} generico={m.mockup3d.generico} /></ErroDoModelo>;
   const escolhido = modeloEscolhido(m);
   const nf = (n: number) => Math.round(n * 100).toString();
@@ -905,11 +947,14 @@ function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel,
     <group ref={grupoRef} position={[p.x, base, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]} onClick={(e) => { e.stopPropagation(); onSel(p.id); }} {...eventos}>
       <group ref={corpo} scale={[p.espelhada ? -1 : 1, 1, 1]}>
         <TexturaCtx.Provider value={texturaDaPeca}>
-          <AvisarFonte.Provider value={avisar}>
-            {url ? <Reserva reserva={reserva}><Suspense fallback={reserva}><ModeloGLB url={url} w={p.largura} d={p.profundidade} h={altura} /></Suspense></Reserva> : reserva}
-          </AvisarFonte.Provider>
+          <ZonasCtx.Provider value={zonasDaPeca}>
+            <AvisarFonte.Provider value={avisar}>
+              {url ? <Reserva reserva={reserva}><Suspense fallback={reserva}><ModeloGLB url={url} w={p.largura} d={p.profundidade} h={altura} /></Suspense></Reserva> : reserva}
+            </AvisarFonte.Provider>
+          </ZonasCtx.Provider>
         </TexturaCtx.Provider>
       </group>
+      {cotas && <Cotas w={p.largura} d={p.profundidade} h={altura} />}
       {selecionada && <Contorno w={p.largura} d={p.profundidade} y={Math.min(altura, 0.02)} />}
       {(etiquetas || selecionada) && (
         <Html position={[0, Math.max(altura, 0.3) + 0.12, 0]} center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
@@ -1180,7 +1225,7 @@ function ComandosDaVista({ comandos }: { comandos: MutableRefObject<ComandosVist
   return null;
 }
 
-export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover, porFazer, rolarPagina = false, zoomRoda = false, comandos, revestimento }: Visualizador3DProps) {
+export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover, porFazer, rolarPagina = false, zoomRoda = false, comandos, revestimento, cotas = false, zonaRealcada = null }: Visualizador3DProps) {
   const [arrasto, setArrasto] = useState<Arrasto | null>(null);
   const alvo = useRef<AlvoArrasto>({ grupo: null, camera: null, controls: null });
   // com `rolarPagina`, a roda do rato só chega ao OrbitControls quando `zoomRoda`: senão a página rola (o OrbitControls ouve o canvas e dá-lhe preventDefault, por isso
@@ -1209,7 +1254,7 @@ export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas
         {espaco.paredes.map((p, i) => <ParedeCena key={p.id} parede={p} indice={i} espaco={espaco} />)}
         <SombraDeContacto espaco={espaco} />
         {revestimento && <AmostraRevestimento r={revestimento} />}
-        {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={porFazer?.has(p.id) ? `${p.id}:por-fazer` : p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} fantasma={!!porFazer?.has(p.id)} onSel={onSelecionar} mover={mover} arrasto={arrasto} setArrasto={setArrasto} alvo={alvo} /> : null; })}
+        {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={porFazer?.has(p.id) ? `${p.id}:por-fazer` : p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} fantasma={!!porFazer?.has(p.id)} onSel={onSelecionar} mover={mover} arrasto={arrasto} setArrasto={setArrasto} alvo={alvo} cotas={cotas} realce={zonaRealcada} /> : null; })}
         {arrasto?.lugar && <GuiaParede espaco={espaco} x={arrasto.lugar.x} y={arrasto.lugar.y} altura={arrasto.parede ? arrasto.lugar.altura : null} />}
         <PonteCamara alvo={alvo} />
       </Canvas>
