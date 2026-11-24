@@ -110,3 +110,23 @@ describe("lerCatalogo com soServicos: não lê o que é dos Produtos", () => {
     expect(L.modelos).toBeDefined();
   });
 });
+
+describe("lerCatalogo: foto na opção de atributo (cat_ler_atributos_definicoes)", () => {
+  const CAMINHO = `${ORG}/44444444-4444-4444-a444-444444444444.webp`;
+  const defs = (cor: Record<string, unknown>) => ({ atributos: [{ id: "a-cor", codigo: "cor", nome: "Cor", tipo: "lista", tem_hex: true, ordem: 1, ...cor }], produtos: [] });
+  const ler = async (data: unknown) => {
+    const c = cliente({ ...comum, cat_ler_atributos_definicoes: () => ({ data, error: null }), cat_ler_catalogo: () => ({ data: INTEIRO, error: null }) });
+    return lerCatalogo(c.sb, ORG);
+  };
+  it("a foto da opção e o interruptor do atributo chegam às linhas tal como a base os devolve", async () => {
+    const L = await ler(defs({ tem_foto: true, opcoes: [{ id: "o-1", valor: "A", nome: "A", hex: null, foto: CAMINHO, ordem: 1 }] }));
+    expect(L.atributos?.defs[0]).toMatchObject({ tem_foto: true });
+    expect(L.atributos?.defs[0].opcoes[0]).toMatchObject({ foto: CAMINHO });
+  });
+  it("com a função antiga (sem as chaves), as linhas lêem-se na mesma e ninguém inventa foto", async () => {
+    const L = await ler(defs({ opcoes: [{ id: "o-1", valor: "A", nome: "A", hex: "#112233", ordem: 1 }] }));
+    expect(L.atributos?.defs).toHaveLength(1);
+    expect(L.atributos?.defs[0].tem_foto).toBeUndefined();
+    expect(L.atributos?.defs[0].opcoes[0].foto).toBeUndefined();
+  });
+});

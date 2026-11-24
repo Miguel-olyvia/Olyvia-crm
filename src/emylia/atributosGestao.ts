@@ -8,9 +8,15 @@ import { erroAmigavel, rpcLivre } from "./fichaProdutoDados";
 export type ResG<T> = { ok: true; v: T } | { ok: false; erro: string; codigo?: string };
 
 /** `sigla` (20270118000000): o código da opção no SKU (AZ, PZ); null = ainda sem. */
-export interface OpcaoGestao { id: string; valor: string; nome: string; hex: string | null; ordem: number; ativo: boolean; usados: number | null; sigla: string | null }
+export interface OpcaoGestao {
+  id: string; valor: string; nome: string; hex: string | null; ordem: number; ativo: boolean; usados: number | null; sigla: string | null;
+  /** A foto (caminho `{org}/{uuid}.webp` no bucket `catalogo-opcoes`); null = sem foto, e também enquanto a base não devolver o campo. */
+  foto: string | null;
+}
 export interface AtributoGestao {
   id: string; codigo: string; nome: string; tipo: "lista" | "medida"; temHex: boolean; ordem: number; ativo: boolean;
+  /** O interruptor «Tem foto» (escolhido ao criar o atributo de cor); false enquanto a base não devolver o campo. */
+  temFoto: boolean;
   usados: number | null; opcoes: OpcaoGestao[];
   /** 20270118000000: a posição no SKU (1…n; null = ainda sem) e se o atributo entra no SKU. */
   skuOrdem: number | null; skuEntra: boolean;
@@ -23,12 +29,12 @@ const contagem = (x: unknown): number | null => (typeof x === "number" && Number
 function opcaoDe(o: Bruto): OpcaoGestao {
   return {
     id: texto(o.id), valor: texto(o.valor), nome: texto(o.nome) || texto(o.valor), hex: texto(o.hex) || null,
-    ordem: contagem(o.ordem) ?? 0, ativo: o.ativo !== false, usados: contagem(o.usados), sigla: texto(o.sigla).trim() || null,
+    ordem: contagem(o.ordem) ?? 0, ativo: o.ativo !== false, usados: contagem(o.usados), sigla: texto(o.sigla).trim() || null, foto: texto(o.foto) || null,
   };
 }
 function atributoDe(a: Bruto): AtributoGestao {
   return {
-    id: texto(a.id), codigo: texto(a.codigo), nome: texto(a.nome), tipo: a.tipo === "medida" ? "medida" : "lista", temHex: a.tem_hex === true,
+    id: texto(a.id), codigo: texto(a.codigo), nome: texto(a.nome), tipo: a.tipo === "medida" ? "medida" : "lista", temHex: a.tem_hex === true, temFoto: a.tem_foto === true,
     ordem: contagem(a.ordem) ?? 0, ativo: a.ativo !== false, usados: contagem(a.usados),
     opcoes: Array.isArray(a.opcoes) ? (a.opcoes as Bruto[]).map(opcaoDe) : [],
     skuOrdem: contagem(a.sku_ordem), skuEntra: a.sku_entra !== false,

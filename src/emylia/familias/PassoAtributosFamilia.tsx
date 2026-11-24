@@ -112,7 +112,7 @@ function LinhaProduto({ p, estado, item, nomes, eixos, onExcluir, onTentar }: Li
     <tr id={`linha-atr-${p.id}`} tabIndex={-1} aria-busy={estado.k === "a-ler"} className="border-b border-border align-top last:border-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
       <th scope="row" className={`break-words text-left font-medium ${CEL}`}>{p.n}</th>
       {estado.k === "ok" && item
-        ? nomes.map((n) => <td key={n} className={`break-words ${CEL}`}><Valor valor={item.atributos[n]?.trim() ?? ""} hex={item.hex?.[n]} comoCor={eixos.cor === n} usado={usados.includes(n)} /></td>)
+        ? nomes.map((n) => <td key={n} className={`break-words ${CEL}`}><Valor valor={item.atributos[n]?.trim() ?? ""} hex={item.hex?.[n]} foto={item.foto?.[n]} comoCor={eixos.cor === n} usado={usados.includes(n)} /></td>)
         : (
           <td colSpan={Math.max(nomes.length, 1)} className={CEL}>
             {estado.k === "erro"
@@ -133,14 +133,14 @@ function LinhaProduto({ p, estado, item, nomes, eixos, onExcluir, onTentar }: Li
 }
 
 /** O valor de um atributo; o das bolinhas leva a amostra (decorativa) com o hex da opção e o nome em texto (sem hex: diz-o, não inventa cor). */
-function Valor({ valor, hex, comoCor, usado }: { valor: string; hex: readonly string[] | undefined; comoCor: boolean; usado: boolean }) {
+function Valor({ valor, hex, foto, comoCor, usado }: { valor: string; hex: readonly string[] | undefined; foto: string | undefined; comoCor: boolean; usado: boolean }) {
   if (!valor) return <span className={usado ? "text-destructive" : "text-muted-foreground"}>sem valor</span>;
   if (!comoCor) return <>{valor}</>;
   return (
     <span className="inline-flex min-h-8 flex-wrap items-center gap-2">
-      {hex && hex.length > 0 && <AmostraDeCor hex={hex} />}
+      {((hex && hex.length > 0) || foto) && <AmostraDeCor hex={hex ?? []} foto={foto} />}
       <span className="break-words">{valor}</span>
-      {(!hex || hex.length === 0) && <span className="text-sm text-muted-foreground">sem hex</span>}
+      {(!hex || hex.length === 0) && !foto && <span className="text-sm text-muted-foreground">sem hex</span>}
     </span>
   );
 }

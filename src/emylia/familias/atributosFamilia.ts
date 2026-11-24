@@ -3,6 +3,7 @@
 // ENTRADA: `Produto.attrs` (AtributoProduto[]: opção da lista ou medida) + as `AtributoDef` (v2/catalogoModelo.ts). SAÍDA (`atributosDoItem`): o que o núcleo lê —
 //   atributos  nome do atributo → texto (`textoValor`, o mesmo texto que o catálogo mostra: «Largura 70 cm», «60×60 cm», «Branco»)
 //   hex        nome do atributo → lista de hex, SÓ de atributos com `temHex`, e sempre vindo da OPÇÃO (nunca do nome: nada se adivinha)
+//   foto       nome do atributo → caminho da foto da OPÇÃO (bucket `catalogo-opcoes`), SÓ de atributos com `temHex` e só quando a opção tem foto; sem nenhuma, a chave nem existe
 //   intervalos nomes dos atributos cuja medida tem algum intervalo {de, ate}
 //   avisos     o que se ignorou (hex inválido)
 //
@@ -32,6 +33,7 @@ export const nomeDoAtributo = (def: Pick<AtributoDef, "codigo" | "nome">): strin
 export interface AtributosDoItem {
   atributos: Record<string, string>;
   hex: Record<string, string[]>;
+  foto?: Record<string, string>;
   intervalos: string[];
   avisos: string[];
 }
@@ -70,6 +72,7 @@ export function atributosDoItem(produto: Pick<Produto, "attrs">, defs: readonly 
     const o = usada.opcaoId ? def.opcoes.find((x) => x.id === usada.opcaoId) : undefined, { validos, maus } = hexDaOpcao(o?.hex);
     for (const m of maus) r.avisos.push(`«${nome}»: hex inválido «${m}» ignorado.`);
     if (validos.length) r.hex[nome] = validos;
+    if (o?.foto) r.foto = { ...r.foto, [nome]: o.foto };
   }
   return r;
 }

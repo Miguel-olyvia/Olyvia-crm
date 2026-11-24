@@ -168,7 +168,7 @@ export async function criarOpcaoAtributo(org: string, atributoId: string, valor:
     const { data, error } = await rpcLivre("cat_guardar_opcao", { p_org: org, p_atributo: atributoId, p_valor: valor, p_hex: hex });
     const o = (data as { opcao?: OpcaoAtributo } | null)?.opcao;
     if (error || !o?.id) return { ok: false, erro: erroAmigavel(error, "Não foi possível criar a opção.") };
-    return { ok: true, v: { id: o.id, valor: o.valor, nome: o.nome || o.valor, hex: o.hex ?? null, ordem: o.ordem ?? 0 } };
+    return { ok: true, v: { id: o.id, valor: o.valor, nome: o.nome || o.valor, hex: o.hex ?? null, foto: typeof o.foto === "string" && o.foto ? o.foto : null, ordem: o.ordem ?? 0 } };
   } catch (e) {
     return { ok: false, erro: (e as Error).message || "Não foi possível criar a opção." };
   }

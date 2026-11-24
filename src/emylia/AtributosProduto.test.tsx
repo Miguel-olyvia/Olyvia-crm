@@ -18,6 +18,7 @@ vi.mock("@/integrations/supabase/client", () => {
     supabase: {
       rpc: vi.fn(async (f: string, a: Record<string, unknown>) => { base.chamadas.push({ f, a }); return base.respostas[f] ?? { data: null, error: null }; }),
       from: vi.fn(() => cadeia()),
+      storage: { from: (b: string) => ({ getPublicUrl: (c: string) => ({ data: { publicUrl: `https://cdn.teste/${b}/${c}` } }) }) },
     },
   };
 });
@@ -1000,6 +1001,85 @@ describe("combobox do valor (padrão ARIA 1.2)", () => {
       expect(cb).toHaveAttribute("aria-expanded", "true");
       fireEvent.click(cb);
       expect(cb).toHaveAttribute("aria-expanded", "false");
+    });
+  });
+});
+
+describe("foto na opção de atributo (a base pode não a devolver ainda: tudo opcional)", () => {
+  const CAMINHO = "org-1/11111111-1111-4111-a111-111111111111.webp";
+  const URL_FOTO = `https://cdn.teste/catalogo-opcoes/${CAMINHO}`;
+  const MADEIRA: AtributoDef = { id: A_COR, codigo: "cor", nome: "Cor", tipo: "lista", temHex: true, temFoto: true, ordem: 1, opcoes: [
+    { id: "f1", valor: "Carvalho", nome: "Carvalho", hex: null, foto: CAMINHO, ordem: 1 },
+    { id: "f2", valor: "Nogueira", nome: "Nogueira", hex: "#5C4033", foto: CAMINHO, ordem: 2 },
+    { id: "f3", valor: "Pinho", nome: "Pinho", hex: null, foto: null, ordem: 3 },
+    { id: "f4", valor: "Preto", nome: "Preto", hex: "#000000", ordem: 4 },
+  ] };
+  const montar = (o: { inicial?: AtributoProduto[]; r?: FichaProdutoReal } = {}) => {
+    render(<AtributosEditor defs={[MADEIRA]} inicial={o.inicial ?? [{ atributoId: A_COR }]} onChange={vi.fn()} real={"r" in o ? o.r : real()} />);
+    return screen.getByRole("combobox", { name: "Cor" });
+  };
+
+  it("na lista de opções a foto vence o hex; sem foto vê-se o hex; sem nenhum dos dois, «sem hex» (e a opção só com foto não diz «sem hex»)", () => {
+    fireEvent.click(montar());
+    const carv = screen.getByRole("option", { name: /^Carvalho/ });
+    expect(carv.querySelector("img")?.getAttribute("src")).toBe(URL_FOTO);
+    expect(carv.querySelector("img")?.getAttribute("alt")).toBe("");
+    expect(carv).not.toHaveTextContent("sem hex");
+    const nogu = screen.getByRole("option", { name: /^Nogueira/ });
+    expect(nogu.querySelector("img")).not.toBeNull();
+    expect(nogu).toHaveTextContent("#5C4033");
+    const pinho = screen.getByRole("option", { name: /^Pinho/ });
+    expect(pinho.querySelector("img")).toBeNull();
+    expect(pinho).toHaveTextContent("sem hex");
+    expect(screen.getByRole("option", { name: /^Preto/ }).querySelector("[data-hex='#000000']")).not.toBeNull();
+  });
+
+  it("a opção escolhida mostra a foto ao lado do nome no próprio campo", () => {
+    montar({ inicial: [{ atributoId: A_COR, opcaoId: "f1", valor: "Carvalho" }] });
+    expect(document.querySelector(`img[src='${URL_FOTO}']`)).not.toBeNull();
+  });
+
+  it("sem permissão para editar (só leitura) a ficha mostra a foto da opção com o nome escrito", () => {
+    ficha({ p: { ...PROD, attrs: [{ atributoId: A_COR, opcaoId: "f1", valor: "Carvalho" }] }, r: real(false), atributos: [MADEIRA] });
+    const sec = screen.getByRole("region", { name: "Atributos" });
+    expect(within(sec).getByText("Cor: Carvalho")).toBeInTheDocument();
+    expect(sec.querySelector(`img[src='${URL_FOTO}']`)).not.toBeNull();
+  });
+
+  it("uma base antiga (opções sem `foto` e atributo sem `temFoto`) funciona como sempre", () => {
+    const antigo: AtributoDef = { ...MADEIRA, temFoto: undefined, opcoes: MADEIRA.opcoes.map(({ foto: _f, ...o }) => o) };
+    render(<AtributosEditor defs={[antigo]} inicial={[{ atributoId: A_COR }]} onChange={vi.fn()} real={real()} />);
+    fireEvent.click(screen.getByRole("combobox", { name: "Cor" }));
+    expect(document.querySelector("img")).toBeNull();
+    expect(screen.getByRole("option", { name: /^Carvalho/ })).toHaveTextContent("sem hex");
+  });
+
+  describe("«Nova opção…» num atributo com foto", () => {
+    const abrirNova = (def: AtributoDef) => {
+      render(<AtributosEditor defs={[def]} inicial={[{ atributoId: A_COR }]} onChange={vi.fn()} real={real()} />);
+      fireEvent.click(screen.getByRole("combobox", { name: "Cor" }));
+      fireEvent.click(screen.getByRole("option", { name: "Nova opção…" }));
+    };
+    it("o hex é opcional: com só o nome o botão liga e cria com p_hex null", async () => {
+      base.respostas.cat_guardar_opcao = { data: { opcao: { id: "f9", valor: "Freixo", nome: "Freixo", hex: null, foto: null, ordem: 9 } }, error: null };
+      abrirNova(MADEIRA);
+      fireEvent.change(screen.getByLabelText("Nome da opção"), { target: { value: "Freixo" } });
+      expect(screen.getByRole("button", { name: "Criar opção" })).toBeEnabled();
+      expect(screen.getByText(/Opcional/)).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Criar opção" }));
+      await waitFor(() => expect(base.chamadas.filter((c) => c.f === "cat_guardar_opcao")).toHaveLength(1));
+      expect(base.chamadas.find((c) => c.f === "cat_guardar_opcao")!.a).toEqual({ p_org: "org-1", p_atributo: A_COR, p_valor: "Freixo", p_hex: null });
+    });
+    it("mesmo opcional, um hex escrito mal continua a bloquear", () => {
+      abrirNova(MADEIRA);
+      fireEvent.change(screen.getByLabelText("Nome da opção"), { target: { value: "Freixo" } });
+      fireEvent.change(screen.getByLabelText("Cor em hexadecimal (#RRGGBB)"), { target: { value: "#00GG00" } });
+      expect(screen.getByRole("button", { name: "Criar opção" })).toBeDisabled();
+    });
+    it("no atributo de cor sem foto o hex continua obrigatório", () => {
+      abrirNova({ ...MADEIRA, temFoto: false });
+      fireEvent.change(screen.getByLabelText("Nome da opção"), { target: { value: "Freixo" } });
+      expect(screen.getByRole("button", { name: "Criar opção" })).toBeDisabled();
     });
   });
 });

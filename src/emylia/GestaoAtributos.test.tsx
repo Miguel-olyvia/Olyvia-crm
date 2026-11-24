@@ -6,6 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const base = vi.hoisted(() => ({
   chamadas: [] as { f: string; a: Record<string, unknown> }[],
   responder: (() => ({ data: null, error: null })) as (f: string, a: Record<string, unknown>) => { data: unknown; error: unknown },
+  /** o storage simulado (bucket catalogo-opcoes): o que se enviou e o que se apagou, e se o envio falha */
+  envios: [] as { bucket: string; caminho: string; tipo: string | undefined; upsert: boolean | undefined; blob: Blob }[],
+  remocoes: [] as string[][],
+  falhaEnvio: null as string | null,
 }));
 vi.mock("@/integrations/supabase/client", () => {
   const cadeia = () => {
@@ -18,13 +22,28 @@ vi.mock("@/integrations/supabase/client", () => {
     supabase: {
       rpc: vi.fn(async (f: string, a: Record<string, unknown>) => { base.chamadas.push({ f, a }); return base.responder(f, a); }),
       from: vi.fn(() => cadeia()),
+      storage: {
+        from: (bucket: string) => ({
+          upload: vi.fn(async (caminho: string, blob: Blob, o?: { contentType?: string; upsert?: boolean }) => {
+            if (base.falhaEnvio) return { data: null, error: { message: base.falhaEnvio } };
+            base.envios.push({ bucket, caminho, tipo: o?.contentType, upsert: o?.upsert, blob });
+            return { data: { path: caminho }, error: null };
+          }),
+          remove: vi.fn(async (caminhos: string[]) => { base.remocoes.push(caminhos); return { data: [], error: null }; }),
+          getPublicUrl: (c: string) => ({ data: { publicUrl: `https://cdn.teste/${bucket}/${c}` } }),
+        }),
+      },
     },
   };
 });
 
+// a conversão (canvas, createImageBitmap) tem testes próprios em fotoOpcao.test.ts: aqui devolve o que cada teste mandar
+vi.mock("./fotoOpcao", async (orig) => ({ ...(await orig<typeof import("./fotoOpcao")>()), prepararFotoOpcao: vi.fn() }));
+
 import { acoes, seed } from "./motor";
 import { CatalogoV1 } from "./CatalogoV1";
 import { GestaoAtributos } from "./GestaoAtributos";
+import { prepararFotoOpcao } from "./fotoOpcao";
 import { reporCustos } from "./v2/custosStore";
 import { reporCatalogo } from "./v2/catalogoStore";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
@@ -53,7 +72,7 @@ const REAL = (p: Partial<FichaProdutoReal> = {}): FichaProdutoReal => ({ org: OR
 const chamadasDe = (f: string) => base.chamadas.filter((c) => c.f === f);
 
 beforeEach(() => {
-  base.chamadas = [];
+  base.chamadas = []; base.envios = []; base.remocoes = []; base.falhaEnvio = null;
   base.responder = (f) => (f === "cat_ler_atributos_gestao" ? { data: lido(), error: null }
     : f === "cat_guardar_opcao" ? { data: { opcao: { id: O_FOSCO, valor: "x", nome: "x", hex: null, ordem: 9 } }, error: null } : { data: { ok: true }, error: null });
 });
@@ -664,5 +683,322 @@ describe("GestaoAtributos: painéis recolhíveis e pesquisa", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fechar todos" }));
     for (const n of ["Medida", "Cor", "Brilho"]) expect(cabecalho(n)).toHaveAttribute("aria-expanded", "false");
     expect(screen.getByRole("button", { name: "Abrir todos" })).toHaveFocus();
+  });
+});
+
+/* ------------------------------------------------------------------ foto na opção */
+describe("GestaoAtributos: foto na opção (a migration ainda não está aplicada: contrato com a base)", () => {
+  const A_MAD = "aaaaaaaa-0000-4000-a000-0000000000f1", A_NOVO = "aaaaaaaa-0000-4000-a000-0000000000f9";
+  const O_CARV = "bbbbbbbb-0000-4000-a000-0000000000c1", O_NOGU = "bbbbbbbb-0000-4000-a000-0000000000c2", O_PINHO = "bbbbbbbb-0000-4000-a000-0000000000c3", O_OUTRA = "bbbbbbbb-0000-4000-a000-0000000000c4";
+  const F1 = `${ORG}/11111111-1111-4111-a111-111111111111.webp`, F2 = `${ORG}/22222222-2222-4222-a222-222222222222.webp`, NOVO = "33333333-3333-4333-a333-333333333333";
+  /** Madeira: atributo de cor COM foto (Carvalho só foto; Nogueira foto e hex; Pinho nada). Cor: atributo de cor SEM foto (o de sempre). */
+  const lidoFoto = (extra: Record<string, unknown>[] = []) => ({
+    atributos: [
+      { ...lido().atributos[1] },
+      { id: A_MAD, codigo: "madeira", nome: "Madeira", tipo: "lista", tem_hex: true, tem_foto: true, ordem: 4, ativo: true, usados: 5, opcoes: [
+        { id: O_CARV, valor: "Carvalho", nome: "Carvalho", hex: null, foto: F1, ordem: 1, ativo: true, usados: 2 },
+        { id: O_NOGU, valor: "Nogueira", nome: "Nogueira", hex: "#5C4033", foto: F2, ordem: 2, ativo: true, usados: 0 },
+        { id: O_PINHO, valor: "Pinho", nome: "Pinho", hex: null, foto: null, ordem: 3, ativo: true, usados: 0 },
+      ] },
+      ...extra,
+    ],
+  });
+  let atual: () => unknown;
+  const ok = (a: Record<string, unknown>) => ({ data: { ok: true, ...a }, error: null });
+  beforeEach(() => {
+    atual = lidoFoto;
+    base.responder = (f) => (f === "cat_ler_atributos_gestao" ? { data: atual(), error: null }
+      : f === "cat_foto_opcao" ? ok({ foto: F1, antiga: null, antiga_orfa: false }) : f === "cat_guardar_opcao" ? { data: { opcao: { id: O_OUTRA, valor: "x", nome: "x", hex: null, ordem: 9 } }, error: null } : ok({}));
+    vi.mocked(prepararFotoOpcao).mockReset();
+    vi.mocked(prepararFotoOpcao).mockResolvedValue({ ok: true, v: { blob: new Blob([new Uint8Array(1234)], { type: "image/webp" }), largura: 1024, altura: 512, bytes: 1234 } });
+    vi.spyOn(crypto, "randomUUID").mockReturnValue(NOVO as `${string}-${string}-${string}-${string}-${string}`);
+    URL.createObjectURL = vi.fn(() => "blob:previa");
+    URL.revokeObjectURL = vi.fn();
+  });
+  afterEach(() => { vi.restoreAllMocks(); });
+
+  const ficheiro = () => new File([new Uint8Array(10)], "pinho.jpg", { type: "image/jpeg" });
+  const escolher = async (opcao: string, f: File = ficheiro()) => {
+    const campo = screen.getByLabelText(`Ficheiro da foto da opção «${opcao}»`) as HTMLInputElement;
+    fireEvent.change(campo, { target: { files: [f] } });
+  };
+  const botaoFoto = (nome: RegExp | string) => screen.getByRole("button", { name: nome });
+
+  it("a foto vence o hex na linha; sem foto vê-se o hex; sem nenhum dos dois, «sem hex»", async () => {
+    await abrir();
+    const mad = sec("Madeira");
+    const carv = li(mad, "Carvalho");
+    expect(carv.querySelector("img")?.getAttribute("src")).toBe(`https://cdn.teste/catalogo-opcoes/${F1}`);
+    expect(carv.querySelector("img")?.getAttribute("alt")).toBe("");
+    expect(within(carv).queryByText("sem hex")).toBeNull();
+    const nogu = li(mad, "Nogueira");
+    expect(nogu.querySelector("img")).not.toBeNull();
+    expect(within(nogu).getByText("#5C4033")).toBeInTheDocument();
+    const pinho = li(mad, "Pinho");
+    expect(pinho.querySelector("img")).toBeNull();
+    expect(within(pinho).getByText("sem hex")).toBeInTheDocument();
+  });
+
+  it("leitura tolerante: sem `tem_foto` nem `foto` (base antiga) não há botões de foto e tudo se vê como antes", async () => {
+    atual = lido;
+    await abrir();
+    expect(screen.queryByRole("button", { name: /foto/i })).toBeNull();
+    expect(screen.queryByLabelText(/Ficheiro da foto/)).toBeNull();
+    expect(li(sec("Cor"), "Preto").querySelector("[data-hex='#000000']")).not.toBeNull();
+  });
+
+  it("só os atributos com foto têm os botões: o de cor sem foto e o sem cor não têm", async () => {
+    await abrir();
+    expect(within(sec("Cor")).queryByRole("button", { name: /foto/i })).toBeNull();
+    expect(within(sec("Madeira")).getAllByRole("button", { name: /foto/i }).length).toBeGreaterThan(0);
+  });
+
+  it("sem products.edit vêem-se as fotos mas não há botões para as mudar", async () => {
+    await abrir(REAL({ podeEditar: false }));
+    expect(li(sec("Madeira"), "Carvalho").querySelector("img")).not.toBeNull();
+    expect(screen.queryByRole("button", { name: /foto/i })).toBeNull();
+  });
+
+  it("os rótulos: «Adicionar foto» na que não tem, «Trocar foto» e «Remover foto» na que tem, com o nome da opção", async () => {
+    await abrir();
+    expect(botaoFoto("Adicionar foto à opção «Pinho»")).toHaveTextContent("Adicionar foto");
+    expect(botaoFoto("Trocar a foto da opção «Carvalho»")).toHaveTextContent("Trocar foto");
+    expect(botaoFoto("Remover a foto da opção «Carvalho»")).toHaveTextContent("Remover foto");
+    expect(screen.queryByRole("button", { name: "Remover a foto da opção «Pinho»" })).toBeNull();
+    expect(screen.getByLabelText("Ficheiro da foto da opção «Pinho»")).toHaveAttribute("type", "file");
+  });
+
+  it("adicionar: escolhe-se o ficheiro, aparece a pré-visualização de 96 px e só ao confirmar carrega (webp, sem sobrepor) e liga à opção", async () => {
+    const anunciar = vi.fn();
+    render(<GestaoAtributos real={REAL()} voltar={vi.fn()} anunciar={anunciar} />);
+    await screen.findByRole("region", { name: "Madeira" });
+    abrirTodos();
+    await escolher("Pinho");
+    const previa = await screen.findByRole("group", { name: "Pré-visualização da foto da opção «Pinho»" });
+    const img = previa.querySelector("img") as HTMLImageElement;
+    expect(img).toHaveAttribute("src", "blob:previa");
+    expect(img.style.width).toBe("96px");
+    expect(base.envios).toHaveLength(0);
+    expect(chamadasDe("cat_foto_opcao")).toHaveLength(0);
+    fireEvent.click(within(previa).getByRole("button", { name: "Guardar foto" }));
+    await waitFor(() => expect(chamadasDe("cat_foto_opcao")).toHaveLength(1));
+    expect(base.envios).toEqual([expect.objectContaining({ bucket: "catalogo-opcoes", caminho: `${ORG}/${NOVO}.webp`, tipo: "image/webp", upsert: false })]);
+    expect(chamadasDe("cat_foto_opcao")[0].a).toEqual({ p_org: ORG, p_opcao: O_PINHO, p_foto: `${ORG}/${NOVO}.webp` });
+    await waitFor(() => expect(anunciar).toHaveBeenCalledWith("Foto de «Pinho» guardada."));
+    await waitFor(() => expect(chamadasDe("cat_ler_atributos_gestao")).toHaveLength(2));
+    await waitFor(() => expect(screen.queryByRole("group", { name: /Pré-visualização/ })).toBeNull());
+    expect(base.remocoes).toEqual([]);
+    expect(botaoFoto("Adicionar foto à opção «Pinho»")).toHaveFocus();
+  });
+
+  it("cancelar a pré-visualização não carrega nada e devolve o foco ao botão", async () => {
+    await abrir();
+    await escolher("Pinho");
+    const previa = await screen.findByRole("group", { name: /Pré-visualização/ });
+    fireEvent.click(within(previa).getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("group", { name: /Pré-visualização/ })).toBeNull();
+    expect(base.envios).toHaveLength(0);
+    expect(chamadasDe("cat_foto_opcao")).toHaveLength(0);
+    expect(URL.revokeObjectURL).toHaveBeenCalledWith("blob:previa");
+    expect(botaoFoto("Adicionar foto à opção «Pinho»")).toHaveFocus();
+  });
+
+  it("uma foto recusada (tipo, tamanho…) mostra a mensagem num aviso e não abre pré-visualização nem carrega", async () => {
+    vi.mocked(prepararFotoOpcao).mockResolvedValue({ ok: false, erro: "A foto tem mais de 5 MB." });
+    await abrir();
+    await escolher("Pinho");
+    expect(await screen.findByText("A foto tem mais de 5 MB.")).toBeInTheDocument();
+    expect(screen.getByText("A foto tem mais de 5 MB.").closest("[role='alert']")).not.toBeNull();
+    expect(screen.queryByRole("group", { name: /Pré-visualização/ })).toBeNull();
+    expect(base.envios).toHaveLength(0);
+  });
+
+  it("o progresso é anunciado numa região viva (a ler a foto, a guardar)", async () => {
+    let acabar: (v: Awaited<ReturnType<typeof prepararFotoOpcao>>) => void = () => undefined;
+    vi.mocked(prepararFotoOpcao).mockReturnValue(new Promise((r) => { acabar = r; }));
+    await abrir();
+    await escolher("Pinho");
+    expect(await screen.findByText("A preparar a foto…")).toBeInTheDocument();
+    expect(screen.getByText("A preparar a foto…").closest("[aria-live], [role='status']")).not.toBeNull();
+    acabar({ ok: true, v: { blob: new Blob([new Uint8Array(10)], { type: "image/webp" }), largura: 10, altura: 10, bytes: 10 } });
+    expect(await screen.findByRole("group", { name: /Pré-visualização/ })).toBeInTheDocument();
+  });
+
+  it("trocar: se a antiga já não é usada por nenhuma opção (antiga_orfa), apaga-a do storage depois de ligar a nova", async () => {
+    base.responder = (f) => (f === "cat_ler_atributos_gestao" ? { data: atual(), error: null } : f === "cat_foto_opcao" ? ok({ foto: `${ORG}/${NOVO}.webp`, antiga: F1, antiga_orfa: true }) : ok({}));
+    await abrir();
+    await escolher("Carvalho");
+    fireEvent.click(within(await screen.findByRole("group", { name: /Pré-visualização/ })).getByRole("button", { name: "Guardar foto" }));
+    await waitFor(() => expect(base.remocoes).toEqual([[F1]]));
+    expect(chamadasDe("cat_foto_opcao")[0].a).toMatchObject({ p_opcao: O_CARV });
+  });
+
+  it("trocar: se outra opção ainda usa a antiga (antiga_orfa falso), NÃO se apaga do storage", async () => {
+    base.responder = (f) => (f === "cat_ler_atributos_gestao" ? { data: atual(), error: null } : f === "cat_foto_opcao" ? ok({ foto: `${ORG}/${NOVO}.webp`, antiga: F1, antiga_orfa: false }) : ok({}));
+    await abrir();
+    await escolher("Carvalho");
+    fireEvent.click(within(await screen.findByRole("group", { name: /Pré-visualização/ })).getByRole("button", { name: "Guardar foto" }));
+    await waitFor(() => expect(chamadasDe("cat_foto_opcao")).toHaveLength(1));
+    await waitFor(() => expect(chamadasDe("cat_ler_atributos_gestao")).toHaveLength(2));
+    expect(base.remocoes).toEqual([]);
+  });
+
+  it("se a base recusa (cat_foto_opcao falha), apaga o ficheiro NOVO do storage e mostra a mensagem da base tal como vem", async () => {
+    base.responder = (f) => (f === "cat_ler_atributos_gestao" ? { data: atual(), error: null } : f === "cat_foto_opcao" ? erro("CT003", "Só as opções de atributos com foto podem ter foto.") : ok({}));
+    await abrir();
+    await escolher("Pinho");
+    fireEvent.click(within(await screen.findByRole("group", { name: /Pré-visualização/ })).getByRole("button", { name: "Guardar foto" }));
+    expect(await screen.findByText("Só as opções de atributos com foto podem ter foto.")).toBeInTheDocument();
+    expect(base.remocoes).toEqual([[`${ORG}/${NOVO}.webp`]]);
+    // a pré-visualização continua, para tentar de novo
+    expect(screen.getByRole("group", { name: /Pré-visualização/ })).toBeInTheDocument();
+  });
+
+  it("se o carregamento para o storage falha, não chama a base e diz que não foi possível", async () => {
+    base.falhaEnvio = "new row violates row-level security policy";
+    await abrir();
+    await escolher("Pinho");
+    fireEvent.click(within(await screen.findByRole("group", { name: /Pré-visualização/ })).getByRole("button", { name: "Guardar foto" }));
+    expect(await screen.findByText(/Não foi possível carregar a foto/)).toBeInTheDocument();
+    expect(chamadasDe("cat_foto_opcao")).toHaveLength(0);
+    expect(base.remocoes).toEqual([]);
+  });
+
+  it("remover: limpa a foto da opção (p_foto null) e apaga a antiga do storage só se ficou órfã", async () => {
+    base.responder = (f) => (f === "cat_ler_atributos_gestao" ? { data: atual(), error: null } : f === "cat_foto_opcao" ? ok({ foto: null, antiga: F1, antiga_orfa: true }) : ok({}));
+    const anunciar = vi.fn();
+    render(<GestaoAtributos real={REAL()} voltar={vi.fn()} anunciar={anunciar} />);
+    await screen.findByRole("region", { name: "Madeira" });
+    abrirTodos();
+    fireEvent.click(botaoFoto("Remover a foto da opção «Carvalho»"));
+    await waitFor(() => expect(chamadasDe("cat_foto_opcao")).toHaveLength(1));
+    expect(chamadasDe("cat_foto_opcao")[0].a).toEqual({ p_org: ORG, p_opcao: O_CARV, p_foto: null });
+    await waitFor(() => expect(base.remocoes).toEqual([[F1]]));
+    await waitFor(() => expect(anunciar).toHaveBeenCalledWith("Foto de «Carvalho» removida."));
+    expect(base.envios).toHaveLength(0);
+  });
+
+  it("remover com a antiga ainda usada por outra opção: não apaga o ficheiro", async () => {
+    base.responder = (f) => (f === "cat_ler_atributos_gestao" ? { data: atual(), error: null } : f === "cat_foto_opcao" ? ok({ foto: null, antiga: F1, antiga_orfa: false }) : ok({}));
+    await abrir();
+    fireEvent.click(botaoFoto("Remover a foto da opção «Carvalho»"));
+    await waitFor(() => expect(chamadasDe("cat_ler_atributos_gestao")).toHaveLength(2));
+    expect(base.remocoes).toEqual([]);
+  });
+
+  it("copiar foto de outra opção do mesmo atributo: reutiliza o caminho, sem carregar nada", async () => {
+    await abrir();
+    const combo = screen.getByRole("combobox", { name: "Copiar foto de outra opção para «Pinho»" });
+    // só as opções DO MESMO atributo que têm foto
+    expect(within(combo).getAllByRole("option").map((o) => o.textContent)).toEqual(["Copiar foto de outra opção…", "Carvalho", "Nogueira"]);
+    fireEvent.change(combo, { target: { value: O_NOGU } });
+    await waitFor(() => expect(chamadasDe("cat_foto_opcao")).toHaveLength(1));
+    expect(chamadasDe("cat_foto_opcao")[0].a).toEqual({ p_org: ORG, p_opcao: O_PINHO, p_foto: F2 });
+    expect(base.envios).toHaveLength(0);
+  });
+
+  it("copiar: a própria opção não aparece na lista, e sem nenhuma outra com foto o campo nem existe", async () => {
+    await abrir();
+    const combo = screen.getByRole("combobox", { name: "Copiar foto de outra opção para «Carvalho»" });
+    expect(within(combo).queryByRole("option", { name: "Carvalho" })).toBeNull();
+    cleanup();
+    atual = () => ({ atributos: lidoFoto().atributos.map((a) => (a.id === A_MAD ? { ...a, opcoes: (a.opcoes as { foto: string | null }[]).map((o) => ({ ...o, foto: null })) } : a)) });
+    await abrir();
+    expect(screen.queryByRole("combobox", { name: /Copiar foto/ })).toBeNull();
+  });
+
+  it("a Cor sem foto continua a exigir o hex ao criar uma opção; no atributo com foto o hex é opcional", async () => {
+    await abrir();
+    fireEvent.click(within(sec("Cor")).getByRole("button", { name: "Nova opção em Cor" }));
+    fireEvent.change(screen.getByLabelText("Nome da opção"), { target: { value: "Verde" } });
+    expect(screen.getByRole("button", { name: "Criar opção" })).toBeDisabled();
+    expect(screen.getByText("A cor é obrigatória.")).toBeInTheDocument();
+    cleanup();
+    await abrir();
+    fireEvent.click(within(sec("Madeira")).getByRole("button", { name: "Nova opção em Madeira" }));
+    fireEvent.change(screen.getByLabelText("Nome da opção"), { target: { value: "Freixo" } });
+    expect(screen.queryByText("A cor é obrigatória.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Criar opção" }));
+    await waitFor(() => expect(chamadasDe("cat_guardar_opcao")).toHaveLength(1));
+    expect(chamadasDe("cat_guardar_opcao")[0].a).toEqual({ p_org: ORG, p_atributo: A_MAD, p_valor: "Freixo", p_hex: null });
+  });
+
+  it("no atributo com foto, editar uma opção sem hex deixa gravar só o nome; limpar um hex existente envia '' (limpa a cor)", async () => {
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Editar Pinho" }));
+    fireEvent.change(screen.getByLabelText("Nome da opção"), { target: { value: "Pinho bravo" } });
+    fireEvent.click(screen.getByRole("button", { name: "Guardar opção" }));
+    await waitFor(() => expect(chamadasDe("cat_editar_opcao")).toHaveLength(1));
+    expect(chamadasDe("cat_editar_opcao")[0].a).toEqual({ p_org: ORG, p_opcao: O_PINHO, p_nome: "Pinho bravo", p_hex: null, p_ativo: null });
+    cleanup();
+    await abrir();
+    fireEvent.click(screen.getByRole("button", { name: "Editar Nogueira" }));
+    fireEvent.change(screen.getByLabelText("Cor em hexadecimal (#RRGGBB)"), { target: { value: "" } });
+    expect(screen.queryByText("A cor é obrigatória.")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Guardar opção" }));
+    await waitFor(() => expect(chamadasDe("cat_editar_opcao")).toHaveLength(2));
+    expect(chamadasDe("cat_editar_opcao")[1].a).toEqual({ p_org: ORG, p_opcao: O_NOGU, p_nome: null, p_hex: "", p_ativo: null });
+  });
+
+  describe("criar o atributo com «Tem foto»", () => {
+    const criar = async (marcarFoto: boolean) => {
+      let criado = false;
+      base.responder = (f) => (f === "cat_ler_atributos_gestao"
+        ? { data: criado ? { atributos: [...lidoFoto().atributos, { id: A_NOVO, codigo: "acabamento", nome: "Acabamento", tipo: "lista", tem_hex: true, tem_foto: false, ordem: 9, ativo: true, usados: 0, opcoes: [] }] } : lidoFoto(), error: null }
+        : f === "cat_guardar_atributo" ? (criado = true, ok({})) : ok({}));
+      await abrir();
+      fireEvent.click(screen.getByRole("button", { name: "Novo atributo" }));
+      fireEvent.change(screen.getByLabelText("Nome do atributo"), { target: { value: "Acabamento" } });
+      fireEvent.click(screen.getByRole("checkbox", { name: /Tem cor/ }));
+      if (marcarFoto) fireEvent.click(screen.getByRole("checkbox", { name: /Tem foto/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Criar atributo" }));
+    };
+    it("«Tem foto» só aparece depois de marcar «Tem cor» (e só em atributos de lista), desligado por omissão", async () => {
+      await abrir();
+      fireEvent.click(screen.getByRole("button", { name: "Novo atributo" }));
+      expect(screen.queryByRole("checkbox", { name: /Tem foto/ })).toBeNull();
+      fireEvent.click(screen.getByRole("checkbox", { name: /Tem cor/ }));
+      expect(screen.getByRole("checkbox", { name: /Tem foto/ })).not.toBeChecked();
+      fireEvent.click(screen.getByRole("radio", { name: "Medida" }));
+      expect(screen.queryByRole("checkbox", { name: /Tem foto/ })).toBeNull();
+    });
+    it("desmarcar «Tem cor» desmarca e esconde «Tem foto» (a foto só existe em atributos de cor)", async () => {
+      await abrir();
+      fireEvent.click(screen.getByRole("button", { name: "Novo atributo" }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /Tem cor/ }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /Tem foto/ }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /Tem cor/ }));
+      expect(screen.queryByRole("checkbox", { name: /Tem foto/ })).toBeNull();
+      fireEvent.change(screen.getByLabelText("Nome do atributo"), { target: { value: "X" } });
+      fireEvent.click(screen.getByRole("button", { name: "Criar atributo" }));
+      await waitFor(() => expect(chamadasDe("cat_guardar_atributo")).toHaveLength(1));
+      expect(chamadasDe("cat_definir_foto_atributo")).toHaveLength(0);
+    });
+    it("ligado: cria o atributo e depois liga o interruptor com o id do atributo criado", async () => {
+      await criar(true);
+      await waitFor(() => expect(chamadasDe("cat_definir_foto_atributo")).toHaveLength(1));
+      expect(chamadasDe("cat_guardar_atributo")[0].a).toEqual({ p_org: ORG, p_atributo: null, p_nome: "Acabamento", p_tipo: "lista", p_tem_hex: true });
+      expect(chamadasDe("cat_definir_foto_atributo")[0].a).toEqual({ p_org: ORG, p_atributo: A_NOVO, p_tem_foto: true });
+    });
+    it("desligado: não chama cat_definir_foto_atributo (os atributos existentes e os novos sem foto não mudam)", async () => {
+      await criar(false);
+      await waitFor(() => expect(chamadasDe("cat_guardar_atributo")).toHaveLength(1));
+      await waitFor(() => expect(chamadasDe("cat_ler_atributos_gestao")).toHaveLength(2));
+      expect(chamadasDe("cat_definir_foto_atributo")).toHaveLength(0);
+    });
+    it("se a base recusa ligar a foto, mostra a mensagem dela e o atributo fica criado", async () => {
+      let criado = false;
+      base.responder = (f) => (f === "cat_ler_atributos_gestao"
+        ? { data: criado ? { atributos: [...lidoFoto().atributos, { id: A_NOVO, codigo: "acabamento", nome: "Acabamento", tipo: "lista", tem_hex: true, ordem: 9, ativo: true, usados: 0, opcoes: [] }] } : lidoFoto(), error: null }
+        : f === "cat_guardar_atributo" ? (criado = true, ok({})) : f === "cat_definir_foto_atributo" ? erro("CT003", "Só os atributos de cor podem ter foto.") : ok({}));
+      await abrir();
+      fireEvent.click(screen.getByRole("button", { name: "Novo atributo" }));
+      fireEvent.change(screen.getByLabelText("Nome do atributo"), { target: { value: "Acabamento" } });
+      fireEvent.click(screen.getByRole("checkbox", { name: /Tem cor/ }));
+      fireEvent.click(screen.getByRole("checkbox", { name: /Tem foto/ }));
+      fireEvent.click(screen.getByRole("button", { name: "Criar atributo" }));
+      expect(await screen.findByText("Só os atributos de cor podem ter foto.")).toBeInTheDocument();
+      expect(screen.getByRole("region", { name: "Acabamento" })).toBeInTheDocument();
+    });
   });
 });

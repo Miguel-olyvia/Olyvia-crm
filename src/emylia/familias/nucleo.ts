@@ -24,10 +24,16 @@ export interface ItemEixos {
   ref: ProdutoRef;
   atributos: Readonly<Record<string, string>>;
   hex?: Readonly<Record<string, readonly string[]>>;
+  /** nome do atributo → caminho da foto da opção (só atributos de cor com foto) */
+  foto?: Readonly<Record<string, string>>;
   intervalos?: readonly string[];
 }
 /** Uma cor (bolinha): `hex` vem do produto (a cor dupla tem dois); sem hex `semHex` (só quando há atributo de cor). `hexAlternativos`: outros hex do mesmo nome noutros produtos. */
-export interface CorCfg { id: string; nome: string; hex: string[]; semHex: boolean; hexAlternativos: string[][] }
+export interface CorCfg {
+  id: string; nome: string; hex: string[]; semHex: boolean; hexAlternativos: string[][];
+  /** a foto da opção (primeira que o dado traga); só existe a chave quando há foto. A foto vence o hex ao desenhar, e uma cor com foto não é «sem hex». */
+  foto?: string;
+}
 /** Uma medida do seletor: o rótulo junta os valores dos atributos de `eixos.medida` («Largura 50 cm · 2 cubas»). */
 export interface MedidaCfg { id: string; rotulo: string; valores: Record<string, string> }
 /** Uma variante = um produto do catálogo: o SKU e o preço são os dele (só leitura). */
@@ -71,9 +77,9 @@ export function refDoProduto(p: ProdutoDoCatalogo, alvo: number = ALVO_PROTO): P
 export function itemDoCatalogo(
   produto: Pick<Produto, "id" | "n" | "marca" | "sku" | "sub" | "custo" | "pvp" | "attrs">, defs: readonly AtributoDef[] | undefined, opcoes: { alvo?: number; categoria?: string } = {},
 ): ItemEixos {
-  const { atributos, hex, intervalos } = atributosDoItem(produto, defs);
+  const { atributos, hex, foto, intervalos } = atributosDoItem(produto, defs);
   const ref = refDoProduto({ ...produto, ...(opcoes.categoria ? { categoria: opcoes.categoria } : {}) }, opcoes.alvo);
-  return { ref, atributos, hex, intervalos };
+  return { ref, atributos, hex, ...(foto ? { foto } : {}), intervalos };
 }
 
 /* ------------------------------------------------------------------ eixos */
@@ -150,7 +156,7 @@ export function sugerirFamilia(refs: readonly ProdutoRef[]): { nome: string; mar
 }
 
 /* ------------------------------------------------------------------ a família a partir dos produtos e dos eixos */
-interface Valido { item: ItemEixos; valores: string[]; cor: string; hex: string[] }
+interface Valido { item: ItemEixos; valores: string[]; cor: string; hex: string[]; foto: string | null }
 interface Separados { validos: Valido[]; excluidos: Excluido[] }
 
 /** Separa os produtos que podem ser variante dos que ficam de fora (repetido por id, sem valor). Uma medida em faixa é uma variante como as outras. */
@@ -166,6 +172,7 @@ function separar(itens: readonly ItemEixos[], eixos: EixosCfg): Separados {
   const validos = unicos.filter((i) => !fora.has(i.ref.id)).map((item): Valido => ({
     item, valores: eixos.medida.map((x) => item.atributos[x].trim()),
     cor: eixos.cor ? item.atributos[eixos.cor].trim() : NOME_COR_OMISSAO, hex: eixos.cor ? [...(item.hex?.[eixos.cor] ?? [])] : [],
+    foto: eixos.cor ? item.foto?.[eixos.cor] ?? null : null,
   }));
   return { validos, excluidos };
 }
@@ -192,10 +199,13 @@ export function familiaPorEixos(nome: string, itens: readonly ItemEixos[], eixos
   for (const v of validos) {
     const mChave = v.valores.map(norm).join(SEP), cChave = norm(v.cor);
     let cor = coresPorChave.get(cChave);
-    if (!cor) { cor = { id: "", nome: v.cor, hex: v.hex, semHex: eixosCopia.cor !== null && v.hex.length === 0, hexAlternativos: [] }; coresPorChave.set(cChave, cor); }
-    else if (v.hex.length) {
-      if (cor.hex.length === 0) { cor.hex = v.hex; cor.semHex = false; }
-      else if (cor.hex.join() !== v.hex.join() && !cor.hexAlternativos.some((h) => h.join() === v.hex.join())) cor.hexAlternativos.push(v.hex);
+    if (!cor) { cor = { id: "", nome: v.cor, hex: v.hex, semHex: eixosCopia.cor !== null && v.hex.length === 0 && !v.foto, hexAlternativos: [], ...(v.foto ? { foto: v.foto } : {}) }; coresPorChave.set(cChave, cor); }
+    else {
+      if (v.foto && !cor.foto) { cor.foto = v.foto; cor.semHex = false; }
+      if (v.hex.length) {
+        if (cor.hex.length === 0) { cor.hex = v.hex; cor.semHex = false; }
+        else if (cor.hex.join() !== v.hex.join() && !cor.hexAlternativos.some((h) => h.join() === v.hex.join())) cor.hexAlternativos.push(v.hex);
+      }
     }
     const chave = `${mChave}\u0002${cChave}`, dono = ocupado.get(chave);
     if (dono !== undefined) {

@@ -46,9 +46,17 @@ export type DimensaoMedida = number | { de: number; ate: number };
 export interface AtributoProduto { atributoId: string; opcaoId?: string; valor?: string; medida?: MedidaAtributo; inativa?: true }
 /** 13/11: uma opção de um atributo de lista (Cor: Preto #000000). `valor` é o texto que a base guarda (nalguns atributos em
  *  MAIÚSCULAS: PIZARRA) e `nome` o que se mostra (Pizarra). `hex` só nos atributos com amostra de cor. */
-export interface OpcaoAtributo { id: string; valor: string; nome: string; hex: string | null; ordem: number }
+export interface OpcaoAtributo {
+  id: string; valor: string; nome: string; hex: string | null; ordem: number;
+  /** A foto da opção (caminho `{org}/{uuid}.webp` no bucket `catalogo-opcoes`); null/ausente: sem foto. Ausente também quando a base ainda não devolve o campo. */
+  foto?: string | null;
+}
 /** 13/11: um atributo da lista global (Medida, Cor, Tonalidade, Tipo de grelha, Textura, Brilho), com as suas opções. */
-export interface AtributoDef { id: string; codigo: string; nome: string; tipo: "lista" | "medida"; temHex: boolean; ordem: number; opcoes: OpcaoAtributo[] }
+export interface AtributoDef {
+  id: string; codigo: string; nome: string; tipo: "lista" | "medida"; temHex: boolean; ordem: number; opcoes: OpcaoAtributo[];
+  /** O interruptor «Tem foto», escolhido ao criar um atributo de cor: as opções podem ter foto (e então o hex é opcional). Ausente = false. */
+  temFoto?: boolean;
+}
 export interface Produto {
   id: string; n: string;
   /** Custo de compra por unidade (€). */

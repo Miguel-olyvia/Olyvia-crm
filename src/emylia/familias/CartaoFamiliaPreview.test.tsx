@@ -1,10 +1,10 @@
 // O cartão de pré-visualização: bolinhas de cor com o hex da opção (nome acessível), seletor de medida, e o SKU e o preço do produto da variante escolhida.
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import type { AtributoProduto } from "../v2/catalogoModelo";
+import type { AtributoDef, AtributoProduto } from "../v2/catalogoModelo";
 import { CartaoFamiliaPreview } from "./CartaoFamiliaPreview";
 import { derivarFamilia, itensDosEscolhidos } from "./derivarFamilia";
-import { A_MED, DEFS, attrs, produto } from "./fixturesFamilias";
+import { A_COR, A_MED, DEFS, attrs, produto } from "./fixturesFamilias";
 
 afterEach(cleanup);
 // 50 Branco, 50 Preto, 60 Branco (não há 60 Preto), 60 Pedra (sem hex)
@@ -177,5 +177,42 @@ describe("CartaoFamiliaPreview", () => {
     expect(screen.getByText("Preto", { selector: "p span" })).toBeInTheDocument();
     fireEvent.blur(cor("Preto"));
     expect(screen.getByText("Branco", { selector: "p span" })).toBeInTheDocument();
+  });
+});
+
+describe("CartaoFamiliaPreview: a foto da opção (foto > hex > nada)", () => {
+  const CAMINHO = "org/11111111-1111-4111-a111-111111111111.webp";
+  const DEFS_FOTO: AtributoDef[] = DEFS.map((d) => (d.id === A_COR ? { ...d, temFoto: true, opcoes: d.opcoes.map((o) => (o.id === "o-branco" ? { ...o, foto: CAMINHO } : o)) } : d));
+  const comFoto = () => derivarFamilia(itensDosEscolhidos(P, LIDOS, DEFS_FOTO, () => "Louças"), null).familia;
+
+  it("o núcleo leva a foto da opção para a cor da família; as cores sem foto não ganham a chave", () => {
+    const f = comFoto();
+    expect(f.cores.find((c) => c.nome === "Branco")?.foto).toBe(CAMINHO);
+    expect(f.cores.find((c) => c.nome === "Preto")).not.toHaveProperty("foto");
+    expect(familia().cores.every((c) => !("foto" in c))).toBe(true);
+  });
+  it("a bolinha com foto mostra a imagem (decorativa); o nome acessível não muda e o hex fica por baixo", () => {
+    render(<CartaoFamiliaPreview familia={comFoto()} />);
+    const bolinha = cor("Branco");
+    const img = bolinha.querySelector("img") as HTMLImageElement;
+    expect(img).not.toBeNull();
+    expect(img.getAttribute("alt")).toBe("");
+    expect(img.getAttribute("src")).toContain(`catalogo-opcoes/${CAMINHO}`);
+    expect(bolinha).toHaveAccessibleName("Branco");
+    expect(cor("Preto").querySelector("img")).toBeNull();
+    expect(cor("Preto")).toHaveStyle({ backgroundColor: "#000000" });
+  });
+  it("se a foto falhar, volta ao hex (a bolinha continua a ser a cor)", () => {
+    render(<CartaoFamiliaPreview familia={comFoto()} />);
+    const bolinha = cor("Branco");
+    fireEvent.error(bolinha.querySelector("img") as HTMLImageElement);
+    expect(bolinha.querySelector("img")).toBeNull();
+    expect(bolinha).toHaveStyle({ backgroundColor: "#F5F5F0" });
+  });
+  it("uma cor só com foto (sem hex) deixa de ser «sem cor definida»", () => {
+    const defs: AtributoDef[] = DEFS.map((d) => (d.id === A_COR ? { ...d, opcoes: d.opcoes.map((o) => (o.id === "o-pedra" ? { ...o, foto: CAMINHO } : o)) } : d));
+    render(<CartaoFamiliaPreview familia={derivarFamilia(itensDosEscolhidos(P, LIDOS, defs, () => "Louças"), null).familia} />);
+    const pedra = screen.getByRole("radio", { name: "Pedra" });
+    expect(pedra.querySelector("img")).not.toBeNull();
   });
 });
