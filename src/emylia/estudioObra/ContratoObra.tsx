@@ -54,6 +54,7 @@ export function ContratoDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             <tr><td colSpan={6} className="px-3 py-2 text-right font-medium">Total sem IVA</td><td className={cn(num, "font-semibold")}>{eur(C.semIva)} €</td></tr>
             <tr className="text-muted-foreground"><td colSpan={6} className="px-3 py-1 text-right">Base a 6%: {eur(C.base6)} € · IVA 6%</td><td className={num}>{eur(C.iva6)} €</td></tr>
             <tr className="text-muted-foreground"><td colSpan={6} className="px-3 py-1 text-right">Base a 23%: {eur(C.base23)} € · IVA 23%</td><td className={num}>{eur(C.iva23)} €</td></tr>
+            {C.base0 > 0.004 && <tr className="text-muted-foreground"><td colSpan={6} className="px-3 py-1 text-right">Base a 0%: {eur(C.base0)} € · IVA autoliquidação</td><td className={num}>0,00 €</td></tr>}
             <tr><td colSpan={6} className="px-3 py-2 text-right font-semibold">Total com IVA</td><td className={cn(num, "text-base font-semibold")}>{eur(C.total)} €</td></tr>
           </tfoot>
         </table>

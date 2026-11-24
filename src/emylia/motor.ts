@@ -214,8 +214,19 @@ export function dataDeDia(k: number): string {
 }
 export const SLOTS = ["qui 15/10 · 10:00", "qui 15/10 · 15:00", "sex 16/10 · 09:30"];
 
-/** 26/10: as taxas de IVA de uma linha (6% a mão de obra, 23% os materiais). */
-export type TaxaIva = 6 | 23;
+/** 26/10: as taxas de IVA de uma linha (6% a mão de obra, 23% os materiais). 24/11 (Rúben, contrato MD 1600, cliente empresa): 0%, a
+ *  autoliquidação (o cliente sujeito passivo liquida o IVA; a proposta diz «IVA autoliquidação»). */
+export type TaxaIva = 0 | 6 | 23;
+/** 24/11: as taxas que se escolhem numa linha, da mais baixa para a mais alta. */
+export const TAXAS_IVA: readonly TaxaIva[] = [0, 6, 23];
+/** 24/11: lida da base (numeric: 0, 6, 23, «6.00»…): a taxa, ou undefined quando não é uma das três. */
+export function taxaIvaDe(v: unknown): TaxaIva | undefined {
+  if (v == null || v === "") return undefined;
+  const n = Number(v);
+  return n === 0 || n === 6 || n === 23 ? n : undefined;
+}
+/** 24/11: a menção legal quando há linhas a 0% (a da proposta real P-2026-1081). */
+export const MENCAO_AUTOLIQUIDACAO = "IVA autoliquidação (artigo 2.º, n.º 1, alínea j) do Código do IVA): o IVA é liquidado pelo cliente.";
 export type LinhaOrc =
   | { t: "svc"; sid: SvcId; q: number; cu: number; pu: number;
     /** 26/10: o custo por unidade escrito à mão nesta linha (o de uma subempreitada: o que o subempreiteiro pediu para esta obra). */
@@ -1057,19 +1068,26 @@ export const IVA_MO = 0.06, IVA_MAT = 0.23;
 /** 26/10: a taxa de IVA de uma linha: a escrita na linha; senão a do serviço do Catálogo (6%, ou 23% nas subempreitadas de materiais);
  *  os materiais, os produtos, o levantamento e a demolição a 23%. */
 export function ivaDaLinha(l: LinhaOrc, S?: Pick<Estado, "svc"> | null): TaxaIva {
-  if (l.iva) return l.iva;
+  if (l.iva != null) return l.iva; // 24/11: o 0% é uma taxa escrita (antes, `if (l.iva)` deitava-o fora)
   if (l.t === "mat") return 23;
   return S?.svc[l.sid]?.iva === 23 ? 23 : 6;
 }
-/** Os totais com IVA do orçamento (a fonte única: documentos, portal, Financeiro): a mão de obra e os materiais, depois do desconto, e o IVA de cada parte. */
-export function totaisIva(d: Negocio, S: Estado) {
-  if (!d.orc) return { mo: 0, mat: 0, ivaMo: 0, ivaMat: 0, base: 0, iva: 0, total: 0 };
-  const k = 1 - (d.orc.desconto || 0) / 100; // o desconto reparte-se pelas duas partes
-  let mo = 0, mat = 0;
-  // 26/10: pela taxa de cada linha («mo» é a parte a 6%, «mat» a parte a 23%)
-  for (const l of d.orc.linhas) { const p = linhaCalc(l, S).preco * k; if (ivaDaLinha(l, S) === 23) mat += p; else mo += p; }
+/** Os totais com IVA de um orçamento ou de uma adenda: a parte a 6% («mo»), a parte a 23% («mat») e, 24/11, a parte a 0% («isento», a
+ *  autoliquidação), o IVA de cada uma, a base (as três) e o total. */
+export interface TotaisIva { mo: number; mat: number; isento: number; ivaMo: number; ivaMat: number; base: number; iva: number; total: number }
+/** 24/11: os totais a partir da base de cada taxa (já com o desconto). */
+export function totaisDasPartes(mo: number, mat: number, isento = 0): TotaisIva {
   const ivaMo = mo * IVA_MO, ivaMat = mat * IVA_MAT;
-  return { mo, mat, ivaMo, ivaMat, base: mo + mat, iva: ivaMo + ivaMat, total: mo + mat + ivaMo + ivaMat };
+  return { mo, mat, isento, ivaMo, ivaMat, base: mo + mat + isento, iva: ivaMo + ivaMat, total: mo + mat + isento + ivaMo + ivaMat };
+}
+/** Os totais com IVA do orçamento (a fonte única: documentos, portal, Financeiro): a mão de obra e os materiais, depois do desconto, e o IVA de cada parte. */
+export function totaisIva(d: Negocio, S: Estado): TotaisIva {
+  if (!d.orc) return totaisDasPartes(0, 0, 0);
+  const k = 1 - (d.orc.desconto || 0) / 100; // o desconto reparte-se pelas partes
+  let mo = 0, mat = 0, isento = 0;
+  // 26/10: pela taxa de cada linha («mo» é a parte a 6%, «mat» a parte a 23%; 24/11: «isento» a parte a 0%)
+  for (const l of d.orc.linhas) { const p = linhaCalc(l, S).preco * k, t = ivaDaLinha(l, S); if (t === 23) mat += p; else if (t === 0) isento += p; else mo += p; }
+  return totaisDasPartes(mo, mat, isento);
 }
 /** O valor da primeira prestação (o sinal), com IVA: o que o Financeiro espera ver entrar (14/10). 20/11 (auditoria F12): pela conta
  *  única das parcelas (planoObra.ts: valoresPrestacoes), a mesma do portal, do Financeiro e do servidor. */
@@ -2933,9 +2951,18 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!exigePerm("orcamento.editar")) return;
       const d = deal(id), o = d.orc, l = o?.linhas[i];
       if (!o || !l || o.enviada) return;
-      if (iva) l.iva = iva; else delete l.iva;
+      if (iva != null) l.iva = iva; else delete l.iva; // 24/11: o 0% também se grava
       o.aprov = null;
       log(d, `IVA da linha mudado para ${ivaDaLinha(l, S)}%`);
+    },
+    /** 24/11 (contrato MD 1600, cliente empresa): todas as linhas com a mesma taxa (0%: a autoliquidação); null volta cada uma à sua. */
+    ivaTodasLinhas(id: number, iva: TaxaIva | null) {
+      if (!exigePerm("orcamento.editar")) return;
+      const d = deal(id), o = d.orc;
+      if (!o || o.enviada || !o.linhas.length) return;
+      for (const l of o.linhas) { if (iva != null) l.iva = iva; else delete l.iva; }
+      o.aprov = null;
+      log(d, iva != null ? `IVA de todas as linhas mudado para ${iva}%` : "IVA das linhas reposto (o de cada serviço e produto)");
     },
     /** A quantidade de uma linha de serviço (no detalhe da linha). */
     qtdLinha(id: number, i: number, q: number) {

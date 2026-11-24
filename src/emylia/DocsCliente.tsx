@@ -40,7 +40,7 @@ const EMPRESA = {
 
 // IVA na proposta: a mão de obra (os serviços) a 6% e os materiais a 23%.
 export { IVA_MAT, IVA_MO } from "./motor";
-import { IVA_MAT, IVA_MO, porZonaDe, totaisIva } from "./motor";
+import { IVA_MAT, IVA_MO, MENCAO_AUTOLIQUIDACAO, porZonaDe, totaisIva, type TotaisIva } from "./motor";
 import type { FaturaReg } from "./v2/financeiro";
 import { PREFIXO_CLIENTE, PREFIXO_PROD, textoProduto } from "./produtosVisita";
 import { FotoObra } from "./fotosDaObra";
@@ -55,7 +55,29 @@ function linhasIva(T: ReturnType<typeof totais>, parte = 1) {
   return [
     { l: "Mão de obra", base: T.mo * parte, taxa: IVA_MO, iva: T.ivaMo * parte },
     { l: "Materiais", base: T.mat * parte, taxa: IVA_MAT, iva: T.ivaMat * parte },
+    // 24/11: a parte a 0% (autoliquidação), com a menção por baixo do quadro
+    { l: "Autoliquidação", base: T.isento * parte, taxa: 0, iva: 0 },
   ].filter((x) => x.base > 0);
+}
+/** 24/11: a menção legal quando há valor a 0% (vai por baixo do total). */
+export function MencaoAutoliquidacao({ T }: { T: Pick<TotaisIva, "isento"> }) {
+  return T.isento > 0.004 ? <p className="mt-2 text-left text-sm text-slate-600">{MENCAO_AUTOLIQUIDACAO}</p> : null;
+}
+/** 24/11: a cláusula do preço por taxa. Sem nada a 0%, o texto de sempre (`soMo`: o das adendas, que só junta os materiais se os houver);
+ *  com uma parte a 0%, só as partes que têm valor e a menção da autoliquidação. */
+export function textoPrecoContrato(T: TotaisIva, soMo = false): string {
+  if (T.isento <= 0.004) {
+    return soMo
+      ? `${eur(T.base)} € sem IVA: ${eur(T.mo)} € de mão de obra, com IVA a 6% (${eur(T.ivaMo)} €)${T.mat > 0 ? `, e ${eur(T.mat)} € de materiais, com IVA a 23% (${eur(T.ivaMat)} €)` : ""}. Total com IVA: ${eur(T.total)} €.`
+      : `${eur(T.base)} € sem IVA: ${eur(T.mo)} € de mão de obra, com IVA a 6% (${eur(T.ivaMo)} €), e ${eur(T.mat)} € de materiais, com IVA a 23% (${eur(T.ivaMat)} €). Total com IVA: ${eur(T.total)} €.`;
+  }
+  const partes = [
+    T.mo > 0.004 ? `${eur(T.mo)} € com IVA a 6% (${eur(T.ivaMo)} €)` : "",
+    T.mat > 0.004 ? `${eur(T.mat)} € com IVA a 23% (${eur(T.ivaMat)} €)` : "",
+    `${eur(T.isento)} € com IVA a 0%`,
+  ].filter(Boolean);
+  const lista = partes.length > 1 ? `${partes.slice(0, -1).join(", ")} e ${partes[partes.length - 1]}` : partes[0];
+  return `${eur(T.base)} € sem IVA: ${lista}. Total com IVA: ${eur(T.total)} €. ${MENCAO_AUTOLIQUIDACAO}`;
 }
 function QuadroIva({ T, parte = 1, rotulo = "Total" }: { T: ReturnType<typeof totais>; parte?: number; rotulo?: string }) {
   const ls = linhasIva(T, parte);
@@ -71,6 +93,7 @@ function QuadroIva({ T, parte = 1, rotulo = "Total" }: { T: ReturnType<typeof to
         </tbody>
       </table>
       <p className="mt-2 flex justify-between border-t border-slate-200 pt-2 text-lg font-semibold"><span>{rotulo}</span><span className="tabular-nums">{eur(T.total * parte)} €</span></p>
+      <MencaoAutoliquidacao T={T} />
     </div>
   );
 }
@@ -464,7 +487,9 @@ export function PropostaDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) 
             <div className="flex justify-between"><span>Materiais, sem IVA</span><span className="tabular-nums">{eur(T.mat)} €</span></div>
             <div className="flex justify-between text-slate-600"><span>IVA a 6% (mão de obra)</span><span className="tabular-nums">{eur(T.ivaMo)} €</span></div>
             <div className="flex justify-between text-slate-600"><span>IVA a 23% (materiais)</span><span className="tabular-nums">{eur(T.ivaMat)} €</span></div>
+            {T.isento > 0.004 && <div className="flex justify-between"><span>Com IVA a 0% (autoliquidação)</span><span className="tabular-nums">{eur(T.isento)} €</span></div>}
             <div className="flex justify-between border-t border-slate-300 pt-2 text-lg font-semibold text-slate-900"><span>Total</span><span className="tabular-nums">{eur(T.total)} €</span></div>
+            <MencaoAutoliquidacao T={T} />
           </div>
         </section>
       </Pagina>
@@ -683,14 +708,14 @@ export function clausulasContrato(d: Negocio, S: Estado, a?: Adenda): { titulo: 
   // 21/10: as cláusulas da adenda: as mesmas, com o que é dela (os trabalhos a mais, o preço por taxa, as parcelas do contrato, os dias a mais)
   const modelo: Record<string, string | string[]> = a ? {
     Objeto: `Os trabalhos a mais da adenda ${a.n} ao contrato ${numeroDoContratoDoNegocio(d)}, em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${a.linhas.map((x) => x.n.toLowerCase()).join(", ")}${a.linhas.some((x) => x.livre && x.mats?.length) ? ", e os materiais indicados na proposta da adenda" : ""}.`,
-    "Preço": `${eur(T.base)} € sem IVA: ${eur(T.mo)} € de mão de obra, com IVA a 6% (${eur(T.ivaMo)} €)${T.mat > 0 ? `, e ${eur(T.mat)} € de materiais, com IVA a 23% (${eur(T.ivaMat)} €)` : ""}. Total com IVA: ${eur(T.total)} €.`,
+    "Preço": textoPrecoContrato(T, true),
     Pagamento: tr.map((t) => `${t.l}: ${Math.round(t.p * 100)}%, ${eur(t.v)} €`),
     Prazo: `Mais ${da} ${da === 1 ? "dia útil" : "dias úteis"}, a juntar ao prazo do contrato ${numeroDoContratoDoNegocio(d)}${im && im.fimDepois > im.fimAntes ? `: fim da obra previsto a ${rotuloDia(im.plano, im.fimDepois - 1)}` : ""}.`,
     Garantia: `${d.f.garantia || "2 anos"} sobre a mão de obra, a contar da data do auto de receção da obra. Os materiais têm a garantia do fabricante.`,
     "Condições gerais": `Mantém-se tudo o resto do contrato ${numeroDoContratoDoNegocio(d)}, incluindo as condições gerais da empresa.`,
   } : {
     Objeto: `Os trabalhos de ${d.servico.toLowerCase()} em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${o.linhas.filter((l) => l.t === "svc").map((l) => (linhaCalc(l, S).s?.n ?? "serviço").toLowerCase()).join(", ")}, e os materiais do modelo escolhido.`,
-    "Preço": `${eur(T.base)} € sem IVA: ${eur(T.mo)} € de mão de obra, com IVA a 6% (${eur(T.ivaMo)} €), e ${eur(T.mat)} € de materiais, com IVA a 23% (${eur(T.ivaMat)} €). Total com IVA: ${eur(T.total)} €.`,
+    "Preço": textoPrecoContrato(T),
     Pagamento: tr.map((t) => `${t.l}${t.quando ? ` (previsto: ${t.quando})` : ""}: ${Math.round(t.p * 100)}%, ${eur(t.v)} €`),
     Prazo: `Início ${d.f.inicio_prev ? `a ${data(d.f.inicio_prev)}` : "por marcar"}, com ${d.f.prazo_exec || "—"} dias úteis de execução: fim previsto a ${fimPrevisto(d.f.inicio_prev, d.f.prazo_exec)}.${d.f.multa === "Sim" ? " O atraso imputável à empresa dá lugar a penalização, nos termos das condições gerais." : ""}`,
     Garantia: `${d.f.garantia || "2 anos"} sobre a mão de obra, a contar da data do auto de receção. Os materiais têm a garantia do fabricante.`,

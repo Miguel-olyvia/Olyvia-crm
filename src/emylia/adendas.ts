@@ -7,7 +7,7 @@
 // o contrato da adenda, gerado pelo comercial (com a revisão das cláusulas pelo Jurídico, se o cliente pedir) → assinada (CMD/SMS) →
 // faturas por parcela (as mesmas parcelas do contrato) → pagamento validado. A 1.ª parcela paga emite a encomenda dos materiais.
 // IVA: a mão de obra (os serviços) a 6% e os materiais (os escolhidos nas linhas livres) a 23%, como no orçamento.
-import { TECS, alertas, bloqueado, custoUnLinha, eur, garantirServico, horaDoPerfil, ivaDaLinha, servicoDoCatalogo, r2, tot, totaisIva, IVA_MAT, IVA_MO,
+import { TECS, alertas, bloqueado, custoUnLinha, eur, garantirServico, horaDoPerfil, ivaDaLinha, servicoDoCatalogo, r2, tot, totaisIva, totaisDasPartes,
   type Alerta, type TaxaIva, type Assinatura, type Estado, type LinhaOrc, type MatTarefa, type Negocio, type Orcamento, type Plano, type Tarefa } from "./motor";
 import { diasDeHoras } from "./ganttOrcamento";
 import { fasesPadrao, type FaseObra } from "./fasesObra";
@@ -86,7 +86,7 @@ export function linhaAdenda(S: Estado, sid: string, q: number): LinhaAdenda | nu
 /** A mesma linha sem mexer no estado (a pré-visualização ao criar): o preço e as horas que o cliente vai receber. */
 export function previsaoLinha(S: Estado, sid: string, q: number): LinhaAdenda | null {
   const s = S.svc[sid] ?? servicoDoCatalogo(sid, S);
-  return s ? { sid, n: s.n, un: s.un, q, pu: r2(s.preco), h: s.h, perfil: s.perfil, ...(s.perfilId ? { perfilId: s.perfilId } : {}), iva: s.iva === 23 ? 23 : 6 } : null;
+  return s ? { sid, n: s.n, un: s.un, q, pu: r2(s.preco), h: s.h, perfil: s.perfil, ...(s.perfilId ? { perfilId: s.perfilId } : {}), iva: s.iva === 23 ? 23 : s.iva === 0 ? 0 : 6 } : null;
 }
 /** 12/11 (Rúben: as medidas e o plano depois do Financeiro; se mudarem o valor, uma adenda): o motivo da adenda do acerto. */
 export const MOTIVO_ACERTO = "Acerto das medidas e do plano da obra";
@@ -104,7 +104,7 @@ export const versaoAdenda = (a: Adenda) => (a.versoes?.length ?? 0) + 1;
 export const emCurso = (a: Adenda) => a.estado === "rascunho" || a.estado === "enviada" || a.estado === "aceite";
 
 /* ------------------------------------------------------------------ as contas (IVA por taxa) */
-export type TotaisIva = ReturnType<typeof totaisIva>;
+export type TotaisIva = ReturnType<typeof totaisIva>; // 24/11: com a parte a 0% (isento)
 /** Os materiais das linhas livres (os escolhidos à mão), com o preço ao cliente. */
 const matsLivres = (L: LinhaAdenda[]) => L.flatMap((x) => (x.livre ? x.mats ?? [] : []));
 /** 21/10: os totais da adenda com o IVA por taxa (o mesmo formato do orçamento, para o QuadroIva), depois do desconto. Como em
@@ -112,15 +112,17 @@ const matsLivres = (L: LinhaAdenda[]) => L.flatMap((x) => (x.livre ? x.mats ?? [
  *  adendas antigas); os materiais das linhas livres a 23%. */
 export function totaisLinhas(L: LinhaAdenda[], desconto = 0): TotaisIva {
   const k = 1 - (desconto || 0) / 100;
-  const a23 = L.reduce((a, x) => a + (x.iva === 23 ? x.q * x.pu : 0), 0), a6 = L.reduce((a, x) => a + (x.iva === 23 ? 0 : x.q * x.pu), 0);
-  const mo = a6 * k, mat = (a23 + matsLivres(L).reduce((a, m) => a + (m.preco ?? 0) * m.q, 0)) * k;
-  const ivaMo = mo * IVA_MO, ivaMat = mat * IVA_MAT;
-  return { mo, mat, ivaMo, ivaMat, base: mo + mat, iva: ivaMo + ivaMat, total: mo + mat + ivaMo + ivaMat };
+  // 24/11: as linhas a 0% (autoliquidação) e os materiais delas à parte, sem IVA
+  const soma = (f: (x: LinhaAdenda) => boolean) => L.reduce((a, x) => a + (f(x) ? x.q * x.pu : 0), 0);
+  const a23 = soma((x) => x.iva === 23), a0 = soma((x) => x.iva === 0), a6 = soma((x) => x.iva !== 23 && x.iva !== 0);
+  const mats = (f: (x: LinhaAdenda) => boolean) => matsLivres(L.filter(f)).reduce((a, m) => a + (m.preco ?? 0) * m.q, 0);
+  return totaisDasPartes(a6 * k, (a23 + mats((x) => x.iva !== 0)) * k, (a0 + mats((x) => x.iva === 0)) * k);
 }
 export const totaisAdenda = (a: Pick<Adenda, "linhas" | "desconto">) => totaisLinhas(a.linhas, a.desconto);
 /** 19/11 (auditoria): o IVA por taxa, numa frase curta («12 000,00 € a 6% + 720,00 € de IVA · 500,00 € a 23% + 115,00 € de IVA»). */
 export const textoIvaPorTaxa = (T: TotaisIva): string =>
-  [T.mo > 0.004 ? `${eur(T.mo)} € a 6% + ${eur(T.ivaMo)} € de IVA` : "", T.mat > 0.004 ? `${eur(T.mat)} € a 23% + ${eur(T.ivaMat)} € de IVA` : ""].filter(Boolean).join(" · ");
+  [T.mo > 0.004 ? `${eur(T.mo)} € a 6% + ${eur(T.ivaMo)} € de IVA` : "", T.mat > 0.004 ? `${eur(T.mat)} € a 23% + ${eur(T.ivaMat)} € de IVA` : "",
+    T.isento > 0.004 ? `${eur(T.isento)} € a 0% (IVA autoliquidação)` : ""].filter(Boolean).join(" · ");
 /** Sem IVA (mão de obra e materiais). */
 export const totalAdenda = (L: LinhaAdenda[], desconto = 0) => r2(totaisLinhas(L, desconto).base);
 /** Com IVA (6% na mão de obra, 23% nos materiais). */

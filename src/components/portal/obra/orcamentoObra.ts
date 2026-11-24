@@ -18,5 +18,5 @@ export function orcamentoDaVista(v: VistaDoPortal | null | undefined, docs: Esta
       const L = linhas.filter((x) => x.fase === f.n);
       return { chave: `f-${f.n}`, titulo: { tipo: "fase", n: f.n }, cor: COR_FASE[f.n] ?? null, linhas: L, subtotal: L.reduce((a, x) => a + x.total, 0) };
     });
-  return { grupos, desconto, mo: T.mo, mat: T.mat, ivaMo: T.ivaMo, ivaMat: T.ivaMat, total: T.total };
+  return { grupos, desconto, mo: T.mo, mat: T.mat, ivaMo: T.ivaMo, ivaMat: T.ivaMat, isento: T.isento, total: T.total };
 }

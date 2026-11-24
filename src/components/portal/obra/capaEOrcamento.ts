@@ -41,5 +41,7 @@ export function capaDaVista(v: VistaDoPortal | null | undefined, obra: PropostaO
 
 export type TituloDoGrupo = { tipo: "fase"; n: FaseObra } | { tipo: "zona"; zona: string };
 export interface GrupoDoOrcamento { chave: string; titulo: TituloDoGrupo; cor: string | null; linhas: LinhaOrcamentoDoc[]; subtotal: number }
-export interface OrcamentoObra { grupos: GrupoDoOrcamento[]; desconto: number; mo: number; mat: number; ivaMo: number; ivaMat: number; total: number }
+export interface OrcamentoObra { grupos: GrupoDoOrcamento[]; desconto: number; mo: number; mat: number; ivaMo: number; ivaMat: number; total: number;
+  /** 24/11: a parte a 0% (autoliquidação). */
+  isento?: number }
 

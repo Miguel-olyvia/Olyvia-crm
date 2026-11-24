@@ -126,7 +126,7 @@ export function servicosParaCliente(d: Negocio, S: Estado): Record<string, Servi
   for (const sid of sidsDoNegocio(d)) {
     const s = S.svc[sid];
     if (!s) continue;
-    r[sid] = { n: s.n, un: s.un, h: s.h, eh: 0, eq: 0, cons: 0, preco: s.preco, perfil: s.perfil, ...(s.perfilId ? { perfilId: s.perfilId } : {}), ...(s.iva ? { iva: s.iva } : {}) };
+    r[sid] = { n: s.n, un: s.un, h: s.h, eh: 0, eq: 0, cons: 0, preco: s.preco, perfil: s.perfil, ...(s.perfilId ? { perfilId: s.perfilId } : {}), ...(s.iva != null ? { iva: s.iva } : {}) };
   }
   return r;
 }

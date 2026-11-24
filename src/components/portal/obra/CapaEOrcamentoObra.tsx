@@ -55,6 +55,8 @@ export function OrcamentoDetalhadoObra({ orc, t }: { orc: OrcamentoObra; t: T })
   const totais: [string, number, boolean][] = [
     [t("pc.docObra.orc.mo"), orc.mo, false], [t("pc.docObra.orc.mat"), orc.mat, false],
     [t("pc.docObra.orc.ivaMo"), orc.ivaMo, true], [t("pc.docObra.orc.ivaMat"), orc.ivaMat, true],
+    // 24/11: a parte a 0% (autoliquidação), só quando a há
+    ...((orc.isento ?? 0) > 0.004 ? [[t("pc.docObra.orc.isento"), orc.isento!, false] as [string, number, boolean]] : []),
   ];
   return (
     <>
@@ -102,6 +104,7 @@ export function OrcamentoDetalhadoObra({ orc, t }: { orc: OrcamentoObra; t: T })
         ))}
         <div className="flex justify-between border-t pt-2 text-base font-semibold"><dt>{t("pc.docObra.orc.total")}</dt><dd className="tabular-nums">{formatCurrency(orc.total)}</dd></div>
       </dl>
+      {(orc.isento ?? 0) > 0.004 && <p className="ml-auto mt-2 w-full max-w-sm text-sm text-muted-foreground">{t("pc.docObra.orc.mencaoAutoliq")}</p>}
     </>
   );
 }

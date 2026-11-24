@@ -133,4 +133,11 @@ export const clienteEnDocObra: Record<string, string> = {
   "pc.docObra.orc.mat": "Materials, excl. VAT",
   "pc.docObra.orc.ivaMo": "VAT at 6% (labour)",
   "pc.docObra.orc.ivaMat": "VAT at 23% (materials)",
+  "pc.docObra.orc.isento": "With VAT at 0% (reverse charge), excl. VAT",
+  "pc.docObra.orc.mencaoAutoliq": "VAT reverse charge (article 2(1)(j) of the Portuguese VAT Code): the VAT is accounted for by the client.",
+  "pc.docObra.ct.parte6": "{v} with VAT at 6% ({iva})",
+  "pc.docObra.ct.parte23": "{v} with VAT at 23% ({iva})",
+  "pc.docObra.ct.parte0": "{v} with VAT at 0%",
+  "pc.docObra.ct.e": " and ",
+  "pc.docObra.ct.precoPartes": "{base} before VAT: {partes}. Total incl. VAT: {total}. {mencao}",
 };

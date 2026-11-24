@@ -3,7 +3,7 @@
 // os ramos pelo id do Catálogo: trocar por uuid é da camada da base (lerNegocios/gravarNegocios). As datas vão em ISO; na volta saem no
 // formato que o motor entende ("dd/mm hh:mm"; "aaaa-mm-dd" nas faturas e no início da obra).
 // As adendas vão também (migration 20261231990000). Fora daqui, por agora: a obra (Fase 3), a demolição e o acesso ao portal (Fase 4).
-import { LINHAS, garantirServico, ivaDaLinha, type Estado, type Evento, type LinhaOrc, type Negocio, type Orcamento, type Papel, type PedidoClausula, type SvcId, type VersaoProposta } from "../motor";
+import { LINHAS, garantirServico, ivaDaLinha, taxaIvaDe, type Estado, type TaxaIva, type Evento, type LinhaOrc, type Negocio, type Orcamento, type Papel, type PedidoClausula, type SvcId, type VersaoProposta } from "../motor";
 import { PREFIXO_PROD, partesDoModelo, textoProduto, type ProdVisita } from "../produtosVisita";
 import type { FaturaReg } from "../v2/financeiro";
 import { prestacoes, type Prestacao } from "../planoObra";
@@ -191,13 +191,13 @@ const linhaAdendaParaLinha = (x: LinhaAdendaEmylia, i: number): LinhaAdendaLinha
   ordem: i, servico: x.livre ? null : x.sid, chave: x.sid, livre: !!x.livre, descricao: x.n, unidade: x.un, quantidade: x.q, preco_un: x.pu, horas_un: x.h,
   perfil: x.perfil, perfil_chave: x.perfilId ?? null, custo_un: x.cu ?? null, mao_obra_un: x.mo ?? null,
   materiais: x.mats ? x.mats.map((m) => ({ nome: m.n, quantidade: m.q, unidade: m.un, preco: m.preco ?? null, fornecedor: m.forn ?? null })) : null,
-  ...(x.iva ? { taxa_iva: x.iva } : {}),
+  ...(x.iva != null ? { taxa_iva: x.iva } : {}), // 24/11: o 0% também vai
 });
 /** 19/11: a taxa de uma linha da adenda lida da base. Primeiro a da base (20270124030000: taxa_iva, 6 ou 23). Só nas linhas antigas
  *  (gravadas antes, sem taxa) se deduz pelo nome: a dos produtos do acerto volta a 23% (a «-p6» é a que fica a 6%); as outras, 6%. */
-export function ivaDaLinhaLida(l: Pick<LinhaAdendaLinha, "taxa_iva" | "livre" | "descricao" | "chave">): { iva?: 6 | 23 } {
-  const taxa = l.taxa_iva == null ? null : Number(l.taxa_iva);
-  if (taxa === 6 || taxa === 23) return { iva: taxa };
+export function ivaDaLinhaLida(l: Pick<LinhaAdendaLinha, "taxa_iva" | "livre" | "descricao" | "chave">): { iva?: TaxaIva } {
+  const taxa = taxaIvaDe(l.taxa_iva); // 24/11: 0, 6 ou 23
+  if (taxa !== undefined) return { iva: taxa };
   // 19/11 (testarh, 1009): sem a taxa na base é uma linha antiga, assinada a 6%: não se adivinha (mudava o total de uma adenda assinada)
   return {};
 }
@@ -432,7 +432,7 @@ const linhaParaProd = (p: LinhaProdutoVisita): ProdVisita => ({
 // do Catálogo do dia em que se gravou (muda-se à mão na linha).
 function linhaDeLinha(l: LinhaOrcamentoLinha): LinhaOrc {
   const zonas = l.zonas ? { zonas: l.zonas.map((z) => ({ z: z.zona, q: z.quantidade, ...(z.valor != null ? { preco: z.valor } : {}) })) } : {};
-  const iva = l.taxa_iva != null ? { iva: l.taxa_iva as 6 | 23 } : {};
+  const taxa = taxaIvaDe(l.taxa_iva), iva = taxa !== undefined ? { iva: taxa } : {}; // 24/11: 0, 6 ou 23 (a base devolve numeric)
   if (l.tipo === "servico") {
     const c = l.custo;
     return {

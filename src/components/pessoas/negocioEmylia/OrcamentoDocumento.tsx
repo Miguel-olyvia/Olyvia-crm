@@ -1,7 +1,7 @@
 // O documento do orçamento completo (cabeçalho do template, cliente, tabela de linhas, subtotais, IVA e total), a partir do orçamento do
 // estado do negócio (d.orc, versão atual). As contas vêm do motor da Emylia (linhaCalc, ivaDaLinha, totaisIva): o que se vê é o que o passo mostra.
 import type { CSSProperties } from "react";
-import { eur, ivaDaLinha, linhaCalc, totaisIva, type LinhaOrc, type Negocio } from "@/emylia/motor";
+import { MENCAO_AUTOLIQUIDACAO, eur, ivaDaLinha, linhaCalc, totaisIva, type LinhaOrc, type Negocio } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
 import { linhaDeMaterial, quantidade } from "@/emylia/propostaConteudo";
 import type { TemplateDeAspeto } from "@/hooks/pessoas/useTemplatesDeDocumento";
@@ -110,9 +110,11 @@ export function OrcamentoDocumento({ d, S, tpl, nome, logoOrg }: { d: Negocio; S
           <dt>Total sem IVA</dt><dd className="text-right">{euros(T.base)}</dd>
           {T.mo > 0 && (<><dt>IVA a 6% (sobre {euros(T.mo)})</dt><dd className="text-right">{euros(T.ivaMo)}</dd></>)}
           {T.mat > 0 && (<><dt>IVA a 23% (sobre {euros(T.mat)})</dt><dd className="text-right">{euros(T.ivaMat)}</dd></>)}
+          {T.isento > 0 && (<><dt>IVA a 0%, autoliquidação (sobre {euros(T.isento)})</dt><dd className="text-right">{euros(0)}</dd></>)}
           <dt className="border-t pt-1 text-base font-semibold" style={{ borderColor: primaria }}>Total com IVA</dt>
           <dd className="break-words border-t pt-1 text-right text-base font-semibold" style={{ borderColor: primaria, fontFamily: titulos }}>{euros(T.total)}</dd>
         </dl>
+        {T.isento > 0 && <p className="text-sm">{MENCAO_AUTOLIQUIDACAO}</p>}
         {tpl?.show_terms !== false && tpl?.terms_conditions && <p className="whitespace-pre-line text-sm"><b>Termos e condições. </b>{tpl.terms_conditions}</p>}
         {tpl?.thank_you_message && <p className="whitespace-pre-line">{tpl.thank_you_message}</p>}
       </div>

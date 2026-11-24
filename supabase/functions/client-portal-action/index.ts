@@ -499,7 +499,9 @@ serve(async (req) => {
                   const qty = Number(line.qt) || Number(line.quantidade) || 1;
                   const totalSemIva = Number(line.total_sem_iva) || 0;
                   const unitPrice = qty > 0 ? totalSemIva / qty : totalSemIva;
-                  const vatRate = Number(line.iva_percent) || Number(line.taxa_iva) || 23;
+                  // 24/11: o IVA a 0% (autoliquidação) é uma taxa (antes, o «||» passava-o a 23%)
+                  const taxaDe = (v: unknown) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
+                  const vatRate = taxaDe(line.iva_percent) ?? taxaDe(line.taxa_iva) ?? 23;
 
                   return {
                     proposal_id: proposal.id,

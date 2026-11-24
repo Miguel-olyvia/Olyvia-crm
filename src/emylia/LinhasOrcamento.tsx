@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CATALOGO } from "./catalogo";
-import { custoUnLinha, eur, ivaDaLinha, linhaCalc, nfmt, pct, r2, type LinhaOrc, type Negocio } from "./motor";
+import { TAXAS_IVA, custoUnLinha, eur, ivaDaLinha, linhaCalc, nfmt, pct, r2, type LinhaOrc, type Negocio } from "./motor";
 import { LinhaLivre } from "./LinhaLivre";
 import { ZonaDaLinha, ZonasDaObra } from "./ZonasDaObra";
 import { numero, type Ctx } from "./pecas";
@@ -311,7 +311,8 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
                   <fieldset className="sm:col-span-2">
                     <legend className="text-sm font-medium">IVA desta linha</legend>
                     <div className="mt-1 flex flex-wrap gap-2">
-                      {([6, 23] as const).map((v) => (
+                      {/* 24/11: e 0% (a autoliquidação, cliente empresa) */}
+                      {TAXAS_IVA.map((v) => (
                         <button key={v} type="button" aria-pressed={ivaDaLinha(l, S) === v} onClick={() => run(() => A.ivaLinha(d.id, i, v))}
                           className={cn("min-h-11 rounded-lg border px-3 text-[15px]", ivaDaLinha(l, S) === v ? "border-primary bg-primary/10 font-medium" : "border-input bg-card hover:bg-muted")}>{v}%</button>
                       ))}
@@ -340,6 +341,19 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
     })}
     </div>
     <LinhaLivre ctx={ctx} d={d} />
+    {/* 24/11 (contrato MD 1600, cliente empresa): o orçamento todo a 0% (autoliquidação) de uma vez; repor volta cada linha à sua taxa */}
+    {!fechado && o.linhas.length > 0 && (() => {
+      const tudo0 = o.linhas.every((l) => ivaDaLinha(l, S) === 0);
+      return (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          <span className="text-muted-foreground">{tudo0 ? "Todas as linhas com IVA a 0% (autoliquidação)." : "Cliente empresa com autoliquidação do IVA?"}</span>
+          <button type="button" onClick={() => run(() => A.ivaTodasLinhas(d.id, tudo0 ? null : 0))}
+            className="inline-flex min-h-11 items-center font-medium text-primary underline-offset-4 hover:underline">
+            {tudo0 ? "Repor o IVA de cada linha" : "Pôr todas as linhas a 0%"}
+          </button>
+        </div>
+      );
+    })()}
     {/* a demolição e entulho: nos orçamentos novos já vem ligada; nos outros liga-se aqui */}
     {!fechado && catalogoLigado() && (
       // um interruptor com o estado à vista (antes era uma ligação que trocava de texto)

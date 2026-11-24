@@ -10,7 +10,9 @@ import { skuLido } from "@/pages/prototipo-estudio/produtosDoProjeto";
 
 export interface LinhaContrato { sku?: string; nome: string; q: number; un: string; pu: number; iva: number; total: number; tipo: "servico" | "produto" | "livre"; cliente?: boolean }
 export interface GrupoContrato { n: number; titulo: string; linhas: LinhaContrato[]; total: number }
-export interface ContratoDaObra { grupos: GrupoContrato[]; desconto: number; base6: number; iva6: number; base23: number; iva23: number; semIva: number; total: number }
+export interface ContratoDaObra { grupos: GrupoContrato[]; desconto: number; base6: number; iva6: number; base23: number; iva23: number;
+  /** 24/11: a base a 0% (autoliquidação). */
+  base0: number; semIva: number; total: number }
 
 /** O produto da visita de uma linha de materiais (pela descrição «Produto · …»). */
 function produtoDaLinha(d: Negocio, l: Extract<LinhaOrc, { t: "mat" }>): ProdVisita | null {
@@ -51,6 +53,6 @@ export function contratoDaObra(d: Negocio, S: Estado): ContratoDaObra | null {
   const T = totaisIva(d, S);
   return {
     grupos: grupos.sort((a, b) => a.pos - b.pos).map((g, j) => ({ n: j + 1, titulo: g.titulo, linhas: g.linhas, total: g.linhas.reduce((s, x) => s + x.total, 0) })),
-    desconto: o.desconto || 0, base6: T.mo, iva6: T.ivaMo, base23: T.mat, iva23: T.ivaMat, semIva: T.base, total: T.total,
+    desconto: o.desconto || 0, base6: T.mo, iva6: T.ivaMo, base23: T.mat, iva23: T.ivaMat, base0: T.isento, semIva: T.base, total: T.total,
   };
 }

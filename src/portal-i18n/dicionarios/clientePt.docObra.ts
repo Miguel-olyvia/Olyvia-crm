@@ -133,4 +133,11 @@ export const clientePtDocObra: Record<string, string> = {
   "pc.docObra.orc.mat": "Materiais, sem IVA",
   "pc.docObra.orc.ivaMo": "IVA a 6% (mão de obra)",
   "pc.docObra.orc.ivaMat": "IVA a 23% (materiais)",
+  "pc.docObra.orc.isento": "Com IVA a 0% (autoliquidação), sem IVA",
+  "pc.docObra.orc.mencaoAutoliq": "IVA autoliquidação (artigo 2.º, n.º 1, alínea j) do Código do IVA): o IVA é liquidado pelo cliente.",
+  "pc.docObra.ct.parte6": "{v} com IVA a 6% ({iva})",
+  "pc.docObra.ct.parte23": "{v} com IVA a 23% ({iva})",
+  "pc.docObra.ct.parte0": "{v} com IVA a 0%",
+  "pc.docObra.ct.e": " e ",
+  "pc.docObra.ct.precoPartes": "{base} sem IVA: {partes}. Total com IVA: {total}. {mencao}",
 };
