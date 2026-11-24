@@ -11,7 +11,7 @@ const MARGENS = { min: 28, alvo: 35 };
 const leve = (): Catalogo => ({ ...catalogo0(), produtos: [] });
 const comProduto = (K: Catalogo, o: Partial<Parameters<typeof criarProdutoCompleto>[1]> = {}) => {
   const r = criarProdutoCompleto(K, { n: "Peça misteriosa X1", custo: 120, un: "un", ...o });
-  if (!r.ok) throw new Error(r.erro);
+  if (r.ok === false) throw new Error(r.erro);
   return { K: r.K, id: r.id };
 };
 

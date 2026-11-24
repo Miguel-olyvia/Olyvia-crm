@@ -57,7 +57,7 @@ export function useAcoesCategorias(real: FichaProdutoReal, g: Gestao, focoCriar:
     if (!r.ok || !modelo) return r;
     const criada = (r.v as { categoria?: { id?: unknown } } | null)?.categoria?.id;
     const m = typeof criada === "string" && criada ? await definirModelo3d(org, "categoria", criada, modelo) : null;
-    return m?.ok ? r : { ok: true, v: { modelo3dErro: m ? m.erro : "a base não devolveu o id da categoria criada." } };
+    return m && m.ok ? r : { ok: true, v: { modelo3dErro: m && m.ok === false ? m.erro : "a base não devolveu o id da categoria criada." } };
   };
   const criar = (pai: CategoriaGestao | null, nome: string, modelo: string | null = null) =>
     void g.correr(() => criarComModelo(pai, nome, modelo), (v) => {

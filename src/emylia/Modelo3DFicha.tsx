@@ -31,7 +31,7 @@ export function Modelo3DFicha({ produto, real, anunciar, ...ver }: Props) {
     if (!real || novo === valor || aGravar) return;
     setAGravar(true); setErro(null);
     const r = await definirModelo3d(real.org, "produto", produto.id, novo);
-    if (!r.ok) { setAGravar(false); setErro(r.erro); return; }
+    if (r.ok === false) { setAGravar(false); setErro(r.erro); return; }
     setAplicado(novo);
     anunciar(novo ? `Modelo 3D de ${produto.n}: ${rotuloDoModelo3D(novo)}.` : `Modelo 3D de ${produto.n}: automático, herda da subcategoria e da categoria.`);
     try { await real.recarregar(); } catch { /* a ficha diz o que gravou; a releitura fica para depois */ }
