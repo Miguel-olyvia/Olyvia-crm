@@ -55,11 +55,13 @@ export function ConfirmarMudanca({ titulo, texto, aGravar, erro, onConfirmar, on
 }
 
 /* ------------------------------------------------------------------ formulário de um nome (e, opcionalmente, de um site) */
-export function FormNome({ rotuloNome, inicial, botao, aGravar, erro, idGuardar, comSite, siteInicial = "", bloqueado, antes, exige, onEnviar, onCancelar }: {
+export function FormNome({ rotuloNome, inicial, botao, aGravar, erro, idGuardar, comSite, siteInicial = "", bloqueado, antes, depois, exige, onEnviar, onCancelar }: {
   rotuloNome: string; inicial: string; botao: string; aGravar: boolean; erro: string | null; idGuardar: string;
   comSite?: boolean; siteInicial?: string; bloqueado?: boolean;
   /** Um campo extra por cima do nome (a categoria, ao criar uma subcategoria) e a razão de ainda não se poder enviar sem ele. */
   antes?: ReactNode; exige?: string | null;
+  /** Um campo extra por baixo do nome (o «Modelo 3D», ao criar uma categoria ou subcategoria). */
+  depois?: ReactNode;
   onEnviar: (nome: string, site: string) => void; onCancelar: () => void;
 }) {
   const [nome, setNome] = useState(inicial), [site, setSite] = useState(siteInicial);
@@ -78,6 +80,7 @@ export function FormNome({ rotuloNome, inicial, botao, aGravar, erro, idGuardar,
         <Campo rot={rotuloNome}>{(id) => <input id={id} value={nome} aria-invalid={!!erro} onChange={(e) => setNome(e.target.value)} readOnly={!!bloqueado} aria-required="true" onKeyDown={tecla} className={cn(CAMPO, "border-foreground/40")} autoFocus={!antes} />}</Campo>
         {comSite && <Campo rot="Site (opcional)" dica="Começa por https://, por exemplo https://marca.pt">{(id) => <input id={id} value={site} inputMode="url" placeholder="https://" autoCapitalize="off" spellCheck={false} onChange={(e) => setSite(e.target.value)} aria-invalid={!!erro} readOnly={!!bloqueado} onKeyDown={tecla} className={cn(CAMPO, "border-foreground/40")} />}</Campo>}
       </div>
+      {depois}
       {erro && <p className="text-[15px] text-red-700 dark:text-red-400" role="alert">{erro}</p>}
       {porque && <p id={dica} className={visivel ? "text-sm text-muted-foreground" : "sr-only"}>{porque}</p>}
       <div className="flex flex-wrap gap-2">

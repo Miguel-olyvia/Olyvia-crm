@@ -92,7 +92,11 @@ export function fotoDosAtributos(attrs: readonly AtributoProduto[] | undefined, 
   return null;
 }
 
-export interface EntradaPrevia { nome: string; sub?: string; no: string | null; arvore: readonly NoCat[]; medida?: MedidaCm | null; cor?: string; /** a foto da opção de cor (URL público) */ textura?: TexturaModelo }
+export interface EntradaPrevia {
+  nome: string; sub?: string; no: string | null; arvore: readonly NoCat[]; medida?: MedidaCm | null; cor?: string; /** a foto da opção de cor (URL público) */ textura?: TexturaModelo;
+  /** O «Modelo 3D» escolhido no próprio produto (o que se está a escolher no formulário ou o gravado); a subcategoria e a categoria vêm da árvore. */
+  modelo3d?: string | null;
+}
 const ID_PREVIA = "previa-produto";
 
 /**
@@ -100,8 +104,8 @@ const ID_PREVIA = "previa-produto";
  * medida dos atributos por cima da do nome (repartida pelo tipo que o classificador deu; o que ela não diz vem do nome ou das omissões do tipo) e a cor do
  * atributo Cor, que o classificador não lê.
  */
-export function modeloParaPrevia({ nome, sub, no, arvore, medida, cor, textura }: EntradaPrevia): ProdutoModelo3D {
-  const p = { id: ID_PREVIA, n: nome.trim(), sub: sub?.trim() || undefined, no };
+export function modeloParaPrevia({ nome, sub, no, arvore, medida, cor, textura, modelo3d }: EntradaPrevia): ProdutoModelo3D {
+  const p = { id: ID_PREVIA, n: nome.trim(), sub: sub?.trim() || undefined, no, ...(modelo3d ? { modelo3d } : {}) };
   let m = modeloDoProduto(p, arvore);
   const medidas = medida ? dimensoesDaMedida(m.tipo, medida, p.n) : null;
   if (medidas) {

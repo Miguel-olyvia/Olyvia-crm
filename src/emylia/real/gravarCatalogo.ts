@@ -9,6 +9,7 @@ import type { Catalogo, No } from "../v2/catalogoModelo";
 import { MEDIDA_PARA_BASE, type CatalogoMontado, type LinhaProduto } from "./catalogoReal";
 import { mesmosAtributos, valoresParaGravar } from "../atributosTexto";
 import { erroAmigavel } from "../fichaProdutoDados";
+import { ehIdDeModelo3D } from "../planta3d/modelos3dEscolha";
 import { resolverCategoria, textoSemGerar } from "../skuDados";
 import type { CategoriaGestao } from "../categoriasMarcasGestao";
 import { RPC_LIGAR_FORNECEDOR, argsLigarFornecedor, type FornecedorPendente } from "../fornecedoresCatalogo";
@@ -170,6 +171,10 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
     if (novo && p.estado && p.estado !== "active")
       out.push({ rpc: "cat_definir_estado_produto", nota: `Produto: ${p.n} (estado)`, tolerante: true, aviso: `Produto «${p.n}» criado; estado por definir`,
         args: { p_org: org, p_produto: { tmp: "prod:" + p.id }, p_status: p.estado } });
+    // 24/11: o «Modelo 3D» escolhido ao criar o produto, depois de ele existir (cat_definir_modelo_3d). Tolerante: o produto fica criado mesmo que a função ainda não exista na base.
+    if (novo && ehIdDeModelo3D(p.modelo3d))
+      out.push({ rpc: "cat_definir_modelo_3d", nota: `Produto: ${p.n} (modelo 3D)`, tolerante: true, aviso: `Produto «${p.n}» criado; modelo 3D por definir`,
+        args: { p_org: org, p_alvo: "produto", p_id: { tmp: "prod:" + p.id }, p_modelo: p.modelo3d } });
     // 16/11 (20270118000000): um produto novo SEM referência escrita ganha uma gerada (categoria + subcategoria + número + atributos), como ÚLTIMO
     // passo (precisa da classificação e dos atributos já gravados). Tolerante: o produto fica criado mesmo que a referência fique por gerar.
     if (novo && !p.sku?.trim())

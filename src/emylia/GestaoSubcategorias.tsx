@@ -8,10 +8,10 @@ import { cn } from "@/lib/utils";
 import { CAMPO, CHIP, NOTA, Campo } from "./pecasForm";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { lerCategoriasGestao, type CategoriaGestao, type SubcategoriaGestao } from "./categoriasMarcasGestao";
-import { Acoes, EditarSigla, Renomear, useAcoesCategorias, type Ctx } from "./categoriasAcoes";
+import { Acoes, EditarModelo3D, EditarSigla, FormNovoRamo, Modelo3DTexto, Renomear, useAcoesCategorias, type Ctx } from "./categoriasAcoes";
 import { SiglaTexto } from "./siglasGestao";
 import { ComboPesquisa, semAcentos, type ItemCombo } from "./ComboPesquisa";
-import { BOTAO_TEXTO, CARTAO, EstadoLeitura, FormNome, Razao, Selo, produtos, protegido, useGestaoLista } from "./gestaoPecas";
+import { BOTAO_TEXTO, CARTAO, EstadoLeitura, Razao, Selo, produtos, protegido, useGestaoLista } from "./gestaoPecas";
 
 type Estado = "todas" | "ativas" | "desativadas";
 const ESTADOS: readonly (readonly [Estado, string])[] = [["todas", "Todas"], ["ativas", "Ativas"], ["desativadas", "Desativadas"]];
@@ -132,9 +132,9 @@ function NovaSubcategoria({ elegiveis, g, aGravar, msg, onFechar }: { elegiveis:
   const exige = escolhida ? null : cat ? "Essa categoria já não está disponível: escolha outra." : "Escolha a categoria.";
   return (
     // o erro da gravação fica visível mesmo que a categoria deixe de ser elegível entretanto
-    <FormNome rotuloNome="Nome da subcategoria" inicial="" botao="Criar subcategoria" aGravar={aGravar} erro={cat ? msg(`nova:${cat.id}`) : null} idGuardar="gc-novo-sub" exige={exige}
+    <FormNovoRamo pai={escolhida} eSub rotuloNome="Nome da subcategoria" botao="Criar subcategoria" aGravar={aGravar} erro={cat ? msg(`nova:${cat.id}`) : null} idGuardar="gc-novo-sub" exige={exige}
       antes={<Campo rot="Categoria">{(id) => <ComboPesquisa id={id} rotulo="Categoria" itens={itens} atual={cat} placeholder="Escolher a categoria" obrigatorio classeCampo={BORDA} registar={focar} onEscolher={(i) => setCat(i.id ? i : null)} />}</Campo>}
-      onEnviar={(nome) => { if (escolhida) g.onCriar(escolhida, nome); }} onCancelar={onFechar} />
+      onEnviar={(nome, modelo) => { if (escolhida) g.onCriar(escolhida, nome, modelo); }} onCancelar={onFechar} />
   );
 }
 
@@ -149,6 +149,7 @@ function LinhaSub({ s, c, g }: { s: SubcategoriaGestao; c: CategoriaGestao; g: C
         {!s.ativo && <Selo>desativada</Selo>}
         {s.global && <Selo>Partilhada</Selo>}
         <SiglaTexto sigla={s.sigla} />
+        <Modelo3DTexto modelo={s.modelo3d} />
         <span className="text-sm text-muted-foreground">Categoria: {c.nome}{!c.ativo && " (desativada)"}</span>
         {s.usados != null && <span className="text-sm text-muted-foreground">{produtos(s.usados)}</span>}
         <Acoes item={s} pai={c} irmas={irmas} g={g} tipo="a subcategoria" />
@@ -157,6 +158,7 @@ function LinhaSub({ s, c, g }: { s: SubcategoriaGestao; c: CategoriaGestao; g: C
       {g.msg(`est:${s.id}`) && <p className="mt-2 text-[15px] text-red-700 dark:text-red-400" role="alert">{g.msg(`est:${s.id}`)}</p>}
       <Renomear item={s} pai={c} g={g} />
       <EditarSigla item={s} pai={c} g={g} />
+      <EditarModelo3D item={s} pai={c} g={g} />
     </li>
   );
 }

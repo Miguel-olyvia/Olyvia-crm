@@ -8,6 +8,7 @@ import type { Custos, LinhaEstrutura, ModoPreco, Parametros, PassoMO, ReceitaV2,
 import type { AtributoDef, AtributoProduto, Catalogo, CategoriaProdutoK, MedidaAtributo, ModeloK, No, Produto, Regra } from "../v2/catalogoModelo";
 import type { EntulhoSvc } from "../entulho";
 import type { FichaTecnico } from "../equipa/tecnicos";
+import { ehIdDeModelo3D } from "../planta3d/modelos3dEscolha";
 
 /* ------------------------------------------------------------------ as linhas, tal como vêm das tabelas */
 export interface LinhaParametros {
@@ -48,9 +49,11 @@ export interface LinhaProduto {
    *  product_categories). Sem a função na base (SQL por colar) não vêm e fica o texto (marca_livre, unidade, catalogo_categoria_id). */
   brand_id?: string | null; marca?: string | null; uom_id?: string | null; uom?: string | null;
   category_id?: string | null; subcategory_id?: string | null;
+  /** 24/11: o «Modelo 3D» escolhido no produto (id; null = herda). A base antiga não manda o campo. */
+  modelo3d?: string | null;
 }
 /** Uma categoria de produto (product_categories). */
-export interface LinhaCategoriaProduto { id: string; name: string; parent_id: string | null; sort_order: number | null; /** 20270117700000: false = desativada; em falta = ativa. */ ativa?: boolean }
+export interface LinhaCategoriaProduto { id: string; name: string; parent_id: string | null; sort_order: number | null; /** 20270117700000: false = desativada; em falta = ativa. */ ativa?: boolean; /** 24/11: o «Modelo 3D» escolhido na categoria ou subcategoria (id; null = herda). A base antiga não manda o campo. */ modelo3d?: string | null }
 /** 13/11 (20270117100000): o que cat_ler_produtos_tabelas manda além dos campos de cada produto. */
 export interface LinhasTabelas {
   categoriasProduto: LinhaCategoriaProduto[];
@@ -157,6 +160,8 @@ export function juntarArvoreProdutos(servicos: readonly No[], cats: readonly Lin
   for (const c of [...cats].sort((a, b) => (n(a.sort_order) - n(b.sort_order)) || a.name.localeCompare(b.name))) noDe(c.id);
   return { extra, noDe, inativos };
 }
+/** O «Modelo 3D» de uma leitura: o id se estiver no formato da base; a chave em falta (migração por aplicar), null ou lixo não deixam rasto. */
+const modelo3dDe = (v: unknown): { modelo3d: string } | Record<string, never> => (ehIdDeModelo3D(v) ? { modelo3d: v } : {});
 const dia = (v: string | null | undefined): string => (v ? String(v).slice(0, 10) : "");
 /** Do mais antigo para o mais recente (o último é o atual). */
 const porData = <T extends { valid_from: string | null }>(L: T[]) => [...L].sort((a, b) => String(a.valid_from ?? "").localeCompare(String(b.valid_from ?? "")));
@@ -229,9 +234,13 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
   const exigeNovo = new Map((T?.exige ?? []).map((e) => [e.service_id, junta!.noDe(e.categoria_produto_id)]));
   const noDoProduto = (p: LinhaProduto): string | null =>
     (junta && (p.subcategory_id || p.category_id) ? junta.noDe(p.subcategory_id || p.category_id) : null) ?? p.catalogo_categoria_id;
+  // 24/11: o «Modelo 3D» de cada categoria e subcategoria de produto, no nó da árvore do Catálogo (o ramo dos serviços com o mesmo nome também o leva)
+  const modeloDoNo = new Map<string, string>();
+  for (const c of T?.categoriasProduto ?? []) { const no = ehIdDeModelo3D(c.modelo3d) ? junta?.noDe(c.id) : null; if (no) modeloDoNo.set(no, c.modelo3d as string); }
+  const comModelo = (x: No): No => (modeloDoNo.has(x.id) ? { ...x, modelo3d: modeloDoNo.get(x.id)! } : x);
   const K: Catalogo = {
     ...base,
-    arvore: [...arvoreSvc.map((x): No => (junta?.inativos.has(x.id) ? { ...x, inativa: true } : x)), ...(junta?.extra ?? [])].sort((a, b) => Number(a.pai != null) - Number(b.pai != null)),
+    arvore: [...arvoreSvc.map((x): No => comModelo(junta?.inativos.has(x.id) ? { ...x, inativa: true } : x)), ...(junta?.extra ?? []).map(comModelo)].sort((a, b) => Number(a.pai != null) - Number(b.pai != null)),
     produtos: [], pacotes: [], classe: {}, exigeProduto: {}, qtdDe: {}, perguntaManter: {}, fasesServico: {}, entulhoServico: {}, icone: {},
     equivalentes: undefined, servicosCriados: [], consumiveisCriados: [],
     ...(defsAtributos ? { atributos: defsAtributos } : {}),
@@ -240,7 +249,7 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
     // 16/11: a árvore dos produtos tal como a base a tem (com os nós da árvore do Catálogo), para os filtros da lista de Produtos
     ...(junta && T ? { categoriasProduto: T.categoriasProduto.flatMap((c): CategoriaProdutoK[] => {
       const id = junta.noDe(c.id);
-      return id ? [{ id, origem: c.id, n: c.name, pai: c.parent_id ? junta.noDe(c.parent_id) : null, ordem: n(c.sort_order), ...(c.ativa === false ? { inativa: true as const } : {}) }] : [];
+      return id ? [{ id, origem: c.id, n: c.name, pai: c.parent_id ? junta.noDe(c.parent_id) : null, ordem: n(c.sort_order), ...(c.ativa === false ? { inativa: true as const } : {}), ...modelo3dDe(c.modelo3d) }] : [];
     }) } : {}),
   };
 
@@ -311,6 +320,7 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
         ...(Array.isArray(p.image_urls) && p.image_urls.length ? { fotos: p.image_urls.filter((u) => typeof u === "string" && u) } : {}),
         ...(attrsDe.has(p.id) ? { attrs: attrsDe.get(p.id) } : {}),
         ...(modeloDe.has(p.id) ? { modeloId: modeloDe.get(p.id)!.id, modelo: modeloDe.get(p.id)!.nome, modeloNumero: modeloDe.get(p.id)!.numero } : {}),
+        ...modelo3dDe(p.modelo3d),
       };
       K.produtos.push(prod);
     } else if (!usados.has(p.id)) {

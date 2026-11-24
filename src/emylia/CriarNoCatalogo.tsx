@@ -23,6 +23,8 @@ import { podeCriarTipo, usePermissoesCatalogo } from "./permissoesCatalogo";
 import { AtributosCriar } from "./AtributosProduto";
 import { PreviaSku } from "./PreviaSku";
 import { Modelo3DProduto } from "./Modelo3DProduto";
+import { CampoModelo3D } from "./CampoModelo3D";
+import { resolverDoNo } from "./planta3d/modelos3dEscolha";
 import { CampoFornecedor, fornecedorParaModelo } from "./CampoFornecedor";
 import { FORNECEDOR_VAZIO, type FornecedorEscolhido } from "./fornecedoresCatalogo";
 import { CampoMarca, CamposRamo, RAMO_VAZIO } from "./ClassificacaoProduto";
@@ -404,6 +406,8 @@ function FormProduto({ S, K, real, onCriado, duplicado, semServico, servicos: se
   const [img, setImg] = useState<IlustracaoKey | null>(null);
   const [verImg, setVerImg] = useState(false);
   const [attrs, setAttrs] = useState<AtributoProduto[]>([]);
+  // 24/11: o «Modelo 3D» escolhido neste produto (null: herda da subcategoria, da categoria ou do classificador)
+  const [modelo3d, setModelo3d] = useState<string | null>(null);
   const idModelo3D = useId();
   const servicos = useMemo(() => {
     if (servicosDados) return [...servicosDados];
@@ -414,7 +418,7 @@ function FormProduto({ S, K, real, onCriado, duplicado, semServico, servicos: se
   }, [S.svc, K, servicosDados]); // eslint-disable-line react-hooks/exhaustive-deps
   const nomeSvc = servico ? servicos.find((x) => x.v === servico)?.t ?? servico : null;
   const nomeModelo = modelo.novo ?? K.modelos?.find((m) => m.id === modelo.id)?.n ?? "";
-  const o = { n: nome, custo: n(custo), un, marca, ...fornecedorParaModelo(forn), no: no || null, sku, pvp: pvp.trim() ? n(pvp) : null, desc, servico, ...(img ? { img } : {}), ...(attrs.length ? { attrs } : {}), ...(real ? { estado } : {}),
+  const o = { n: nome, custo: n(custo), un, marca, ...fornecedorParaModelo(forn), no: no || null, sku, pvp: pvp.trim() ? n(pvp) : null, desc, servico, ...(img ? { img } : {}), ...(attrs.length ? { attrs } : {}), ...(real ? { estado } : {}), ...(real && modelo3d ? { modelo3d } : {}),
     ...(modelo.id ? { modeloId: modelo.id } : {}), ...(modelo.novo ? { modeloNovo: modelo.novo } : {}) };
   const faltas = faltasProduto(K, o);
   const venda = precoVendaProduto(n0(custo), o.pvp, S.cfg.alvo), m = venda > 0 ? (venda - n0(custo)) / venda : 0;
@@ -474,7 +478,8 @@ function FormProduto({ S, K, real, onCriado, duplicado, semServico, servicos: se
           {/* 23/11: o 3D que o catálogo daria ao produto (só para ver): fechado até se pedir; o nome, a subcategoria e a Medida e a Cor dos atributos entram nele */}
           <section aria-labelledby={idModelo3D} className="grid gap-2 border-t border-border pt-4">
             <h3 id={idModelo3D} className="text-[15px] font-semibold">Modelo 3D</h3>
-            <Modelo3DProduto nome={nome} sub={nomeSub} no={no || null} arvore={arvoreCria} attrs={attrs} defs={K.atributos} />
+            {real && <CampoModelo3D valor={modelo3d} heranca={resolverDoNo({ arvore: arvoreCria, no: no || null, soHerdado: true })} onChange={setModelo3d} nivel="produto" />}
+            <Modelo3DProduto nome={nome} sub={nomeSub} no={no || null} arvore={arvoreCria} attrs={attrs} defs={K.atributos} modelo3d={real ? modelo3d : null} />
           </section>
         </Secao>
         <Secao i={2} titulo="Compra e venda">

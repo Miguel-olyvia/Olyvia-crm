@@ -35,7 +35,7 @@ const M1 = "e0000000-0000-4000-a000-000000000001", M2 = "e0000000-0000-4000-a000
 // a árvore do Catálogo usa ids próprios (aqui «c1», «s2»): a pré-visualização resolve a categoria pelo NOME
 const ARVORE: No[] = [{ id: "c1", n: "Casa de banho", pai: null }, { id: "s2", n: "Torneiras", pai: "c1" }];
 const real: FichaProdutoReal = { org: ORG, podeEditar: true, podeMudarPrecos: true, recarregar: vi.fn(async () => {}) };
-const combo = (ctx: HTMLElement, nome: string) => within(ctx).getByRole("combobox", { name: new RegExp(`^${nome}( |$)`) }) as HTMLInputElement;
+const combo = (ctx: HTMLElement, nome: string) => within(ctx).getByRole("combobox", { name: new RegExp(`^${nome}( (?!3D)|$)`) }) as HTMLInputElement; // «Modelo» não é o «Modelo 3D», que também está no formulário
 const escolher = (ctx: HTMLElement, campo: string, opcao: string) => { fireEvent.click(combo(ctx, campo)); fireEvent.click(screen.getByRole("option", { name: opcao })); };
 
 beforeEach(() => {

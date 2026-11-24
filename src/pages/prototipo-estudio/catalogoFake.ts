@@ -53,6 +53,8 @@ export interface Produto {
   ref?: string;
   /** 23/11: o resto do texto onde a pesquisa procura (marca, subcategoria e todos os atributos; `destaque` é só o começo). */
   procura?: string;
+  /** 24/11: o «Modelo 3D» já resolvido (produto > subcategoria > categoria: planta3d/modelos3dEscolha.ts) de um produto do catálogo verdadeiro; manda sobre o genérico do tipo no 3D. */
+  modelo3d?: string;
 }
 
 const P = (id: string, cat: Categoria, n: string, colecao: string, cores: Cor[], preco: number, inst: number, extra: Partial<Produto> = {}): Produto =>

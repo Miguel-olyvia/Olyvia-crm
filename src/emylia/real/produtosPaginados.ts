@@ -23,6 +23,8 @@ export interface LinhaPaginaProduto {
   estado?: string | null;
   /** 22/01 (cat_pesquisar_produtos, 20270122000000): o serviço que o produto traz e quantas unidades do serviço traz uma unidade dele. Só vêm da pesquisa por serviço. */
   servico_id?: string | null; fator_servico?: number | null;
+  /** 24/11: o «Modelo 3D» escolhido no próprio produto (id; null = herda da subcategoria e da categoria). Em falta numa base sem a migração. */
+  modelo3d?: string | null;
 }
 export interface PaginaProdutos { total: number; pagina: number; limite: number; paginas: number; produtos: LinhaPaginaProduto[]; /** o que quem mostra a lista deve dizer (a pesquisa por serviço não existe na base: a lista não está filtrada) */ aviso?: string }
 /** As contagens por id (de product_categories e de product_models) e as do resumo. */

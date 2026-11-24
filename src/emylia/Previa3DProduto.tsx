@@ -47,7 +47,11 @@ export interface Previa3DProdutoProps {
   cor?: string;
   /** A foto da opção de cor (URL público): vira a textura do corpo da peça; se a imagem falhar, fica a cor. */
   textura?: TexturaModelo;
+  /** O «Modelo 3D» escolhido no próprio produto (a subcategoria e a categoria vêm da árvore): manda sobre o classificador. */
+  modelo3d?: string | null;
 }
+/** O aviso de um revestimento escolhido: ainda não tem desenho próprio, cai na caixa com as medidas (a textura vem da foto da cor). */
+const AVISO_REVESTIMENTO = "Os revestimentos ainda não têm desenho próprio: aparece uma caixa com as medidas.";
 
 const BOTAO_ZOOM = "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-input bg-card/95 text-foreground shadow-sm transition-colors hover:bg-muted focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25";
 const MAIS = new Set(["+", "="]), MENOS = new Set(["-", "_"]);
@@ -59,7 +63,7 @@ function textoDeAjuda(foco: boolean, dentro: boolean): string {
 }
 
 /** O 3D: a conta do modelo e da cena, o aviso e o visualizador (lazy). Corre dentro do Falha3D, por isso uma excepção aqui também fica na alternativa. */
-function Corpo({ nome, sub, no, arvore, medida, cor, textura }: Previa3DProdutoProps) {
+function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d }: Previa3DProdutoProps) {
   // o zoom: botões (sempre), pinça (toque), e roda do rato e teclas + e − só com o 3D focado (e a roda só com o rato lá dentro), para a página continuar a rolar
   const comandos = useRef<ComandosVista | null>(null), idAjuda = useId();
   const [foco, setFoco] = useState(false), [dentro, setDentro] = useState(false);
@@ -68,9 +72,11 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura }: Previa3DProdutoP
     if (MAIS.has(e.key)) { e.preventDefault(); comandos.current?.aproximar(); }
     else if (MENOS.has(e.key)) { e.preventDefault(); comandos.current?.afastar(); }
   };
-  const modelo = useMemo(() => modeloParaPrevia({ nome, sub: sub ?? undefined, no, arvore, medida, cor, textura }), [nome, sub, no, arvore, medida, cor, textura]);
+  const modelo = useMemo(() => modeloParaPrevia({ nome, sub: sub ?? undefined, no, arvore, medida, cor, textura, modelo3d }), [nome, sub, no, arvore, medida, cor, textura, modelo3d]);
   const cena = useMemo(() => cenaDoProduto(modelo), [modelo]);
-  const aviso = AVISO[estadoDoModelo(modelo)];
+  // a caixa escolhida à mão não leva o aviso de «sem modelo parecido»; os revestimentos dizem que ainda não têm desenho
+  const escolhido = modelo.escolha?.modelo;
+  const aviso = escolhido?.startsWith("revestimento_") ? AVISO_REVESTIMENTO : escolhido === "caixa" ? undefined : AVISO[estadoDoModelo(modelo)];
   const d = modelo.dimensoes;
   const descricao = `${modelo.nome || "Produto sem nome"}: ${nf(d.larguraCm)} por ${nf(d.profundidadeCm)} por ${nf(d.alturaCm)} cm (largura, profundidade e altura).`;
   return (

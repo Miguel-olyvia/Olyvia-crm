@@ -10,6 +10,7 @@ import type { TipoEspaco } from "./modelo";
 import { modeloHtmlDoProduto } from "./htmlDoCatalogo";
 import { categoriaDoTipo, categoriaPorId, opcoesComOmissao } from "./categoriasGlb";
 import { medidasDeOmissaoNovas } from "./categoriasGlbNovas";
+import { escolhaPorId, resolverDoNo, type ModeloEscolha, type ResolvidoModelo3D } from "./modelos3dEscolha";
 
 export type TipoMockup =
   | "caixa" | "sanita" | "sanita_suspensa" | "bide" | "banheira" | "base_duche" | "lavatorio" | "movel_lavatorio" | "coluna" | "coluna_duche" | "movel"
@@ -24,8 +25,11 @@ export type Montagem = "chao" | "parede";
 export interface ProdutoCat {
   id: string; n: string; sub?: string; no: string | null; marca?: string; fornecedor?: string; custo?: number;
   tipo?: TipoMockup; /** largura, profundidade, altura (cm) */ dim?: [number, number, number]; demo?: boolean;
+  /** O «Modelo 3D» escolhido no próprio produto (modelos3dEscolha.ts); vazio herda da subcategoria e da categoria (`NoCat.modelo3d`). Em falta: a migração ainda não está aplicada. */
+  modelo3d?: string | null;
 }
-export interface NoCat { id: string; n: string; pai: string | null }
+/** `modelo3d`: o «Modelo 3D» escolhido nesta categoria ou subcategoria (a subcategoria é o nó com pai). */
+export interface NoCat { id: string; n: string; pai: string | null; modelo3d?: string | null }
 
 /** O mockup de um produto, em metros. `url`: um GLB opcional (carregado se existir); sem ele, desenha-se a geometria paramétrica. */
 /** O material de uma variante (acabamento): a cor vai em `cor`; aqui o resto. Sem mapa de ambiente, o metal renderiza-se com metalness limitado. */
@@ -57,6 +61,8 @@ export interface ProdutoModelo3D {
   montagem: Montagem; /** altura de omissão ao chão (m), só para peças de parede */ alturaOmissao: number; demo: boolean;
   /** Só as peças de uma família do catálogo (familias.ts): a família, a variante escolhida, o SKU e o preço dessa variante. */
   fam?: { familiaId: string; medidaId: string; acabId: string; sku: string; preco: number };
+  /** O «Modelo 3D» escolhido (no produto, na subcategoria ou na categoria) que mandou nesta peça, e de onde veio. Sem ele, o classificador de sempre decidiu. */
+  escolha?: ResolvidoModelo3D;
 }
 
 /**
@@ -317,13 +323,34 @@ function comMedidasDoGenerico(d: Dimensoes, id: string, o: Readonly<Record<strin
   return v ? { larguraCm: v[0], profundidadeCm: v[1], alturaCm: cm(m[2]), deNome: true } : { larguraCm: cm(m[0]), profundidadeCm: cm(m[1]), alturaCm: cm(m[2]), deNome: false };
 }
 
-/** O produto do catálogo mais o seu mockup 3D (paramétrico, com a dimensão real; `urls`: o GLB de cada produto, quando existir). */
+/** O tipo de mockup de cada modelo exacto do catálogo 3D (o modelo concreto continua a sair do nome e da medida: htmlDoCatalogo.ts). */
+const TIPO_DO_HTML: Readonly<Record<string, TipoMockup>> = { html_lava_loica: "lava_loica", html_placa: "placa", html_torneira_cozinha: "torneira_cozinha", html_tampo: "bancada" };
+/**
+ * O tipo de mockup que o modelo escolhido pede: o automático, se o genérico escolhido o serve (assim as omissões do tipo e da montagem não mudam); senão o
+ * primeiro tipo do genérico; os exactos do catálogo 3D forçam o seu tipo; a caixa e os revestimentos (ainda sem desenho próprio) são a «caixa».
+ */
+function tipoDaEscolha(e: ModeloEscolha, auto: TipoMockup): TipoMockup {
+  if (e.familia === "generico") { const c = categoriaPorId(e.id); return c && !c.tipos.includes(auto) ? c.tipos[0] : auto; }
+  if (e.familia === "html") return auto === "tampo" && e.id === "html_tampo" ? auto : TIPO_DO_HTML[e.id] ?? auto;
+  return "caixa";
+}
+
+/**
+ * O produto do catálogo mais o seu mockup 3D (paramétrico, com a dimensão real; `urls`: o GLB de cada produto, quando existir).
+ * Se o produto, a sua subcategoria ou a sua categoria escolheram um «Modelo 3D» (modelos3dEscolha.ts: produto > subcategoria > categoria), esse manda sobre
+ * o classificador: o id escolhido decide o tipo e o genérico; as medidas, a cor e as opções (que vêm do nome) ficam como sempre. Sem escolha, é o de sempre.
+ */
 export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], urls: Readonly<Record<string, string>> = {}): ProdutoModelo3D {
-  const tipo = tipoMockupDe(p, arvore);
+  const auto = tipoMockupDe(p, arvore);
+  const r = resolverDoNo({ produto: p.modelo3d, arvore, no: p.no });
+  const esc = escolhaPorId(r.modelo);
+  const tipo = esc ? tipoDaEscolha(esc, auto) : auto;
+  // um genérico, a caixa ou um revestimento escolhidos nunca levam o modelo do HTML do nome; só os exactos do catálogo 3D (ou nenhuma escolha) o procuram
+  const comHtml = !esc || esc.familia === "html";
   let d: Dimensoes = p.dim ? { larguraCm: p.dim[0], profundidadeCm: p.dim[1], alturaCm: alturaDeSanitaDeChao(tipo, p.n, p.dim[2]), deNome: true } : extrairDimensoes(p.n, tipo);
   const e = ESPEC[tipo];
   // o modelo do HTML do produto (pelo nome e pela medida): lava-loiça, placa e torneira com o modelo e as medidas do HTML; tampo com a chapa
-  const h = modeloHtmlDoProduto(p.n, tipo);
+  const h = comHtml ? modeloHtmlDoProduto(p.n, tipo) : null;
   let params: ParamsMockup | undefined;
   if (h && h.tipo !== "tampo") {
     d = { larguraCm: h.dim[0], profundidadeCm: h.dim[1], alturaCm: h.dim[2], deNome: true };
@@ -332,13 +359,15 @@ export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], ur
       : h.tipo === "lava_loica" ? { k: "lava_loica", cubas: [], escorredor: false, degrau: false, html }
         : { k: "placa", tipo: "induction", recorte: [0, 0], espessura: 0, acima: 0, queimadores: [], manipulos: [], vidro: false, html };
   } else if (h?.tipo === "tampo") params = { k: "chapa", series: h.series, tone: h.tone };
-  else if (tipo === "torneira_cozinha") {
+  else if (comHtml && tipo === "torneira_cozinha") {
     // uma misturadora que o HTML não tem (Sophie, Bruma): o modelo simplificado com medidas habituais (nunca o de outra torneira)
     const t = { estilo: "monocomando" as const, altura: 400, saida: 250, alcance: 220, base: 50 };
     params = { k: "torneira", estilo: t.estilo, altura: t.altura / 1000, saida: t.saida / 1000, alcance: t.alcance / 1000, base: t.base / 1000 };
     d = { larguraCm: t.base / 10, profundidadeCm: (t.alcance + t.base / 2) / 10, alturaCm: t.altura / 10, deNome: true };
   }
-  const cg = !params || (params.k === "torneira" && !params.html) ? categoriaDoTipo(tipo, p.n, true) : undefined;
+  const semModeloProprio = !params || (params.k === "torneira" && !params.html);
+  // o genérico escolhido (pelo id, não pelo nome); a caixa e os revestimentos não têm genérico; sem escolha (ou com um exacto do HTML sem produto no HTML), o do tipo e do nome
+  const cg = esc?.familia === "generico" ? categoriaPorId(esc.id) : esc && esc.familia !== "html" ? undefined : semModeloProprio ? categoriaDoTipo(tipo, p.n, true) : undefined;
   // os genéricos presos à parede (armário de parede, exaustor, prateleira): a profundidade típica quando o nome só dá largura × altura
   const nomeTemTres = /\d+\s*[x×]\s*\d+\s*[x×]\s*\d+/i.test(p.n);
   if (cg?.parede?.prof && !p.dim && !nomeTemTres) d = { ...d, profundidadeCm: cg.parede.prof * 100 };
@@ -356,6 +385,7 @@ export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], ur
   return {
     produtoId: p.id, nome: p.n, tipo, dimensoes: d, mockup3d, marca: p.marca, fornecedor: p.fornecedor, custo: p.custo, categoria: p.sub || caminhoDe(arvore, p.no) || e.rotulo,
     montagem: cg?.parede || suspenso ? "parede" : e.mont, alturaOmissao: alt, demo: !!p.demo,
+    ...(esc ? { escolha: { modelo: esc.id, origem: r.origem } } : {}),
   };
 }
 

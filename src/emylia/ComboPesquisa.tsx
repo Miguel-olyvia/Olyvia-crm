@@ -5,7 +5,7 @@
 // de tudo) tem o campo de pesquisa no topo (só em listas com mais de 7 opções) e as opções por baixo. O que se escreve vai para a pesquisa.
 // RISCO conhecido: dentro de um Dialog Radix (focus trap) o painel em portal, fora do diálogo, pode perder o foco para o diálogo e deixar de se poder escrever
 // na pesquisa. Hoje nenhum chamador está dentro de um Dialog; quem o puser lá tem de testar o painel ao vivo (foco, Esc e clique fora).
-import { useCallback, useEffect, useId, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
+import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
 import { Check, ChevronDown, Loader2, Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -13,7 +13,11 @@ import { CAMPO, Campo } from "./pecasForm";
 import { ListaFlutuante } from "./listaFlutuante";
 
 /** Um item do dropdown. `inativo`: desativado na base; mostra-se só se for o escolhido, e não se pode escolher de novo. */
-export interface ItemCombo { id: string; nome: string; inativo?: boolean }
+export interface ItemCombo {
+  id: string; nome: string; inativo?: boolean;
+  /** 24/11: a lista agrupada (o «Modelo 3D», com 45 modelos): um cabeçalho (só visual) antes do primeiro item de cada grupo; os itens do mesmo grupo vêm juntos. */
+  grupo?: string;
+}
 
 /** Escreve-se sem acentos nem maiúsculas. */
 export const semAcentos = (t: string) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -202,20 +206,28 @@ export function ComboPesquisa({ rotulo, id, itens, atual, onEscolher, onNova, te
             {lista.length > 0 && (
               <ul id={lid} ref={ul} role="listbox" aria-label={rotulo} tabIndex={comPesquisa ? -1 : 0} aria-activedescendant={comPesquisa ? undefined : ativoId}
                 onKeyDown={noPainel} className="min-h-0 flex-1 overflow-auto outline-none">
-                {lista.map((it, k) => (
-                  <li key={it.k === "item" ? it.i.id : it.k} id={`${lid}-${k}`} role="option" aria-selected={it.k === "item" ? atual?.id === it.i.id : it.k === "limpar" ? !atual : false}
-                    onClick={() => escolher(it)} onMouseEnter={() => setAtivo(k)}
-                    className={cn("flex min-h-11 cursor-pointer items-center gap-2 rounded-lg px-3 text-[15px]", k === ativo && "bg-muted ring-2 ring-inset ring-ring")}>
-                    {it.k === "nova"
-                      ? <><Plus className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />{textoNova}</>
-                      : it.k === "limpar"
-                      ? <span className={cn("min-w-0 flex-1", k === ativo ? "text-foreground" : "text-muted-foreground")}>{semValor}</span>
-                      : <>
-                        <span className="min-w-0 flex-1 break-words">{it.i.nome}</span>
-                        {atual?.id === it.i.id && <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />}
-                      </>}
-                  </li>
-                ))}
+                {lista.map((it, k) => {
+                  const grupo = it.k === "item" ? it.i.grupo : undefined;
+                  const antes = lista[k - 1], novoGrupo = !!grupo && !(antes?.k === "item" && antes.i.grupo === grupo);
+                  return (
+                    <Fragment key={it.k === "item" ? it.i.id : it.k}>
+                      {/* o cabeçalho do grupo é só visual: os leitores de ecrã ouvem as opções, que já dizem o que são */}
+                      {novoGrupo && <li role="presentation" aria-hidden="true" className="px-3 pb-1 pt-3 text-sm font-medium uppercase tracking-wide text-muted-foreground">{grupo}</li>}
+                      <li id={`${lid}-${k}`} role="option" aria-selected={it.k === "item" ? atual?.id === it.i.id : it.k === "limpar" ? !atual : false}
+                        onClick={() => escolher(it)} onMouseEnter={() => setAtivo(k)}
+                        className={cn("flex min-h-11 cursor-pointer items-center gap-2 rounded-lg px-3 text-[15px]", k === ativo && "bg-muted ring-2 ring-inset ring-ring")}>
+                        {it.k === "nova"
+                          ? <><Plus className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />{textoNova}</>
+                          : it.k === "limpar"
+                          ? <span className={cn("min-w-0 flex-1", k === ativo ? "text-foreground" : "text-muted-foreground")}>{semValor}</span>
+                          : <>
+                            <span className="min-w-0 flex-1 break-words">{it.i.nome}</span>
+                            {atual?.id === it.i.id && <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />}
+                          </>}
+                      </li>
+                    </Fragment>
+                  );
+                })}
               </ul>
             )}
           </div>

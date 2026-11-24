@@ -11,6 +11,7 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { useCompanyOpcional } from "@/contexts/CompanyContext";
 import { supabase } from "@/integrations/supabase/client";
 import { lerPesquisaDoEstudio, lerProdutosPagina, SEM_FILTRO_SERVIDOR, type LinhaPaginaProduto } from "@/emylia/real/produtosPaginados";
+import { ehIdDeModelo3D, resolverModelo3D } from "@/emylia/planta3d/modelos3dEscolha";
 import type { ResultadoProcura } from "./pesquisaEstudio";
 import { CATALOGO, CORES, ouvirProdutosReais, produtosReais, usarProdutosReais, versaoProdutosReais, type Categoria, type Cor, type Produto } from "./catalogoFake";
 
@@ -50,8 +51,12 @@ function tamanhoNaPlanta(cat: Categoria, md: number[] | null): { w?: number; h?:
   return {};
 }
 
-/** Uma linha do servidor como Produto do Estúdio. Null se não serve (sem preço de venda, inativo). */
-export function produtoDaLinha(l: LinhaPaginaProduto, cat: Categoria): Produto | null {
+/** 24/11: o «Modelo 3D» de cada categoria e subcategoria (product_categories.id → modelo), lido ao carregar o Estúdio; as linhas do servidor só trazem o ID delas. */
+let modelosCategorias: ReadonlyMap<string, string> = new Map();
+
+/** Uma linha do servidor como Produto do Estúdio. Null se não serve (sem preço de venda, inativo).
+ *  O «Modelo 3D» fica resolvido (produto > subcategoria > categoria) em `modelo3d`; sem escolha em nenhum nível, o produto não leva a chave. */
+export function produtoDaLinha(l: LinhaPaginaProduto, cat: Categoria, modelos: ReadonlyMap<string, string> = modelosCategorias): Produto | null {
   const pvp = l.pvp ?? 0;
   if (!(pvp > 0) || l.ativo === false || (l as { estado?: string }).estado === "draft") return null;
   const texto = `${l.nome} ${l.atributos_resumo ?? ""}`;
@@ -68,6 +73,10 @@ export function produtoDaLinha(l: LinhaPaginaProduto, cat: Categoria): Produto |
     // 23/11: a referência e o resto do texto, para a pesquisa do Estúdio (pelo SKU, pela marca, pela subcategoria, por todos os atributos)
     ...(l.sku?.trim() ? { ref: l.sku.trim() } : {}),
     ...(() => { const t = [l.marca, l.subcategoria, l.atributos_resumo].filter(Boolean).join(" "); return t ? { procura: t } : {}; })(),
+    ...(() => {
+      const m = resolverModelo3D({ produto: l.modelo3d, subcategoria: l.subcategoria_id ? modelos.get(l.subcategoria_id) : null, categoria: l.categoria_id ? modelos.get(l.categoria_id) : null }).modelo;
+      return m ? { modelo3d: m } : {};
+    })(),
   };
 }
 
@@ -87,6 +96,20 @@ async function idsDasSubcategorias(org: string): Promise<Map<string, string>> {
     .from("product_categories").select("id,name").eq("organization_id", org);
   if (error || !data) return new Map();
   return new Map(data.map((c) => [semAcento(c.name), c.id]));
+}
+
+/** 24/11: o «Modelo 3D» escolhido em cada categoria e subcategoria da organização (product_categories.modelo_3d), por id. Leitura À PARTE da dos ids pelo nome:
+ *  se a coluna ainda não existir (a migração do modelo 3D por aplicar) o PostgREST recusa o select, e isso só deixa o Estúdio sem estes modelos (nunca sem produtos).
+ *  Escolha: um select separado e tolerante, em vez de repetir o primeiro sem a coluna, para o que já funciona não depender do que ainda não existe. */
+export async function modelosDasCategorias(org: string): Promise<Map<string, string>> {
+  try {
+    const { data, error } = await (supabase as unknown as { from: (t: string) => { select: (c: string) => { eq: (k: string, v: string) => Promise<{ data: { id: string; modelo_3d: unknown }[] | null; error: unknown }> } } })
+      .from("product_categories").select("id,modelo_3d").eq("organization_id", org);
+    if (error || !data) return new Map();
+    return new Map(data.flatMap((c) => (ehIdDeModelo3D(c.modelo_3d) ? [[c.id, c.modelo_3d] as [string, string]] : [])));
+  } catch {
+    return new Map();
+  }
 }
 
 // ------------------------------------------------------------------ 17/11 (Rúben: «a mão de obra a vir do serviço ligado»)
@@ -206,7 +229,8 @@ export async function procurarNoCatalogoReal(cat: Categoria, q: string, pagina =
 /** Os produtos verdadeiros do Estúdio, de todas as categorias. Devolve logo a 1.ª página de cada subcategoria (e de cada cor) e, por
  *  trás, pré-carrega as páginas seguintes (até PAGINAS_A_MAIS): `aoChegarMais` recebe a lista toda quando chegam. */
 export async function carregarProdutosDoEstudio(org: string, aoChegarMais?: (todos: Produto[]) => void): Promise<Produto[]> {
-  const ids = await idsDasSubcategorias(org);
+  const [ids, modelos] = await Promise.all([idsDasSubcategorias(org), modelosDasCategorias(org)]);
+  modelosCategorias = modelos;
   const pedidos: Pedido[] = [];
   const subsPorCat = new Map<Categoria, string[]>();
   contexto = { org, subs: subsPorCat };

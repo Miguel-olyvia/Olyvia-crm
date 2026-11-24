@@ -5,7 +5,7 @@
 import { cantos, type LadoColuna, type PecaPlanta, type Planta } from "@/emylia/planta";
 import { centroPeca, normalInteriorCm, paredeMaisPertoCm, poligonoDe } from "@/emylia/planta3d/pecas3d";
 import { deLegado, modeloGenerico, type ResLegado } from "@/emylia/planta3d/ligacao";
-import { ESPEC, type ProdutoModelo3D, type TipoMockup } from "@/emylia/planta3d/catalogo3d";
+import { ESPEC, modeloDoProduto as modeloDoCatalogo, type ProdutoModelo3D, type TipoMockup } from "@/emylia/planta3d/catalogo3d";
 import type { PecaProduto, Revestimentos } from "@/emylia/planta3d/modelo";
 import type { Revestimento, Superficie } from "@/emylia/planta3d/revestimentos";
 import { medidasDoTexto, semAcento } from "./pesquisaEstudio";
@@ -57,6 +57,11 @@ export function materialDoProduto(prod: Pick<Produto, "id" | "n" | "hex" | "core
 function modeloDoProduto(tipo: Planta["pecas"][number]["tipo"], prod: Produto, wCm: number, hCm: number): ProdutoModelo3D {
   const g = modeloGenerico(tipo, prod.w ?? wCm, prod.h ?? hCm), e = ESPEC[g.tipo];
   const alto = prod.z1 !== undefined && prod.z0 !== undefined ? (prod.z1 - prod.z0) / 100 : g.mockup3d.altura;
+  // 24/11: o «Modelo 3D» escolhido (já resolvido: produto > subcategoria > categoria) manda sobre o genérico do tipo; um id que o 3D não conhece não conta
+  const m3d = prod.modelo3d ? modeloDoCatalogo({ id: `estudio:${prod.id}`, n: prod.n, no: null, modelo3d: prod.modelo3d, dim: [prod.w ?? wCm, prod.h ?? hCm, alto * 100] }) : null;
+  if (m3d?.escolha) {
+    return { ...m3d, categoria: "Estúdio", alturaOmissao: (prod.z0 ?? 0) / 100 || m3d.alturaOmissao, demo: true, mockup3d: { ...m3d.mockup3d, altura: alto, cor: prod.hex } };
+  }
   return {
     ...g, produtoId: `estudio:${prod.id}`, nome: prod.n, categoria: "Estúdio", montagem: e.mont, alturaOmissao: (prod.z0 ?? 0) / 100 || e.alt, demo: true,
     mockup3d: { ...g.mockup3d, altura: alto, cor: prod.hex },

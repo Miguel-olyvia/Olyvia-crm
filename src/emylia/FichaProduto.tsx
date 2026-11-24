@@ -14,7 +14,7 @@ import { dataPT } from "./v2/custosModelo";
 import { margemEmPalavras } from "./fichaServico";
 import { BarraMargem } from "./CriarNoCatalogo";
 import { StockArmazens } from "./StockArmazens";
-import { Modelo3DProduto } from "./Modelo3DProduto";
+import { Modelo3DFicha } from "./Modelo3DFicha";
 import { AtributosFicha } from "./AtributosProduto";
 import { ClassificacaoFicha } from "./ClassificacaoProduto";
 import { ReferenciaFicha } from "./ReferenciaFicha";
@@ -170,7 +170,8 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
           No fim da ficha: o teste de AtributosProduto fixa «Atributos» entre o Preço e os Fornecedores. */}
       {!cons && (
         <Seccao id="fp-3d" titulo="Modelo 3D">
-          <div className="mt-3"><Modelo3DProduto key={p.id} nome={p.n} sub={p.sub} no={p.no} arvore={arvore ?? SEM_ARVORE} attrs={pe.attrs} defs={atributos} /></div>
+          {/* o seletor «Modelo 3D» (produto > subcategoria > categoria > automático) grava logo; a pré-visualização usa o modelo resolvido */}
+          <Modelo3DFicha key={p.id} produto={p} real={real} anunciar={anunciar} nome={p.n} sub={p.sub} no={p.no} arvore={arvore ?? SEM_ARVORE} attrs={pe.attrs} defs={atributos} />
         </Seccao>
       )}
     </article>
