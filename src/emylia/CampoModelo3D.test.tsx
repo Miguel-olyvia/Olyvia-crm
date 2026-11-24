@@ -32,12 +32,12 @@ describe("CampoModelo3D", () => {
   it("herdado da subcategoria: a omissão diz o modelo e de onde vem, e o texto «Herdado da subcategoria X: Y» aparece", () => {
     render(<CampoModelo3D valor={null} onChange={vi.fn()} heranca={{ modelo: "sanita", origem: "subcategoria", de: "Sanitas" }} />);
     expect(botao()).toHaveTextContent("Automático (herda: Sanita de chão, da subcategoria Sanitas)");
-    expect(screen.getByText("Herdado da subcategoria Sanitas: Sanita de chão")).toBeInTheDocument();
+    expect(screen.getByText("Herdado da subcategoria Sanitas: Sanita de chão.")).toBeInTheDocument();
   });
 
   it("herdado da categoria", () => {
     render(<CampoModelo3D valor={null} onChange={vi.fn()} heranca={{ modelo: "banheira", origem: "categoria", de: "Casa de banho" }} />);
-    expect(screen.getByText("Herdado da categoria Casa de banho: Banheira")).toBeInTheDocument();
+    expect(screen.getByText("Herdado da categoria Casa de banho: Banheira.")).toBeInTheDocument();
   });
 
   it("com um modelo escolhido, o botão mostra-o e a frase diz que é deste nível (sem o texto de herança)", () => {
@@ -103,6 +103,37 @@ describe("CampoModelo3D", () => {
   it("o erro aparece em português com role=alert", () => {
     render(<CampoModelo3D valor={null} onChange={vi.fn()} heranca={AUTO} erro="Não foi possível gravar o modelo 3D." />);
     expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível gravar o modelo 3D.");
+  });
+
+  it("o botão fica ligado (aria-describedby) à frase de herança e, se houver, ao erro", () => {
+    const { rerender } = render(<CampoModelo3D valor={null} onChange={vi.fn()} heranca={AUTO} />);
+    const ids = () => (botao().getAttribute("aria-describedby") ?? "").split(" ").filter(Boolean);
+    expect(ids()).toHaveLength(1);
+    expect(document.getElementById(ids()[0])).toHaveTextContent(/Sem escolha/);
+    rerender(<CampoModelo3D valor={null} onChange={vi.fn()} heranca={AUTO} erro="Não foi possível gravar o modelo 3D." />);
+    expect(ids()).toHaveLength(2);
+    expect(document.getElementById(ids()[1])).toHaveTextContent("Não foi possível gravar o modelo 3D.");
+  });
+
+  it("ocupado (a gravar): aria-disabled em vez de disabled, não abre a lista e mantém o foco", () => {
+    render(<CampoModelo3D valor={null} onChange={vi.fn()} heranca={AUTO} ocupado />);
+    botao().focus();
+    expect(botao()).toHaveAttribute("aria-disabled", "true");
+    expect(botao()).not.toBeDisabled();
+    fireEvent.click(botao());
+    expect(screen.queryByRole("listbox")).toBeNull();
+    fireEvent.keyDown(botao(), { key: "ArrowDown" });
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(botao()).toHaveFocus();
+  });
+
+  it("todas as frases acabam em ponto final", () => {
+    const { rerender } = render(<CampoModelo3D valor={null} onChange={vi.fn()} heranca={AUTO} />);
+    expect(screen.getByText(/^Sem escolha/).textContent).toMatch(/\.$/);
+    rerender(<CampoModelo3D valor={null} onChange={vi.fn()} heranca={{ modelo: "sanita", origem: "subcategoria", de: "Sanitas" }} />);
+    expect(screen.getByText(/^Herdado da/).textContent).toMatch(/\.$/);
+    rerender(<CampoModelo3D valor="bide" onChange={vi.fn()} heranca={AUTO} />);
+    expect(screen.getByText(/^Escolhido/).textContent).toMatch(/\.$/);
   });
 
   it("a frase de estado é uma região viva (aria-live) para o leitor de ecrã", () => {

@@ -35,19 +35,22 @@ const linha = (nome: string, extra: Partial<LinhaPaginaProduto> = {}): LinhaPagi
   subcategoria: "Sanitas", modelo_id: null, modelo: null, modelo_numero: null, unidade: "un", custo: 100, pvp: 199.9, grossista: null,
   distribuidor: null, fornecedor: null, ativo: true, imagem: null, atributos_resumo: null, ...extra,
 });
-afterEach(() => { usarProdutosReais([]); base.categorias = { data: [], error: null }; base.pedidos = []; base.lancar = false; });
+afterEach(() => { vi.restoreAllMocks(); usarProdutosReais([]); base.categorias = { data: [], error: null }; base.pedidos = []; base.lancar = false; });
 
 describe("produtoDaLinha: o modelo 3D resolvido", () => {
   const MAPA = new Map([["cat1", "banheira"], ["sub1", "sanita"]]);
   it("sem modelo em lado nenhum, o produto não leva a chave (igual a hoje)", () => {
     expect("modelo3d" in produtoDaLinha(linha("Peça X"), "sanita", new Map())!).toBe(false);
   });
-  it("herda da subcategoria, depois da categoria", () => {
-    expect(produtoDaLinha(linha("Peça X"), "sanita", MAPA)!.modelo3d).toBe("sanita");
-    expect(produtoDaLinha(linha("Peça X", { subcategoria_id: "outra" }), "sanita", MAPA)!.modelo3d).toBe("banheira");
+  it("herda da subcategoria, depois da categoria, e diz de onde veio", () => {
+    expect(produtoDaLinha(linha("Peça X"), "sanita", MAPA)).toMatchObject({ modelo3d: "sanita", modelo3dOrigem: "subcategoria" });
+    expect(produtoDaLinha(linha("Peça X", { subcategoria_id: "outra" }), "sanita", MAPA)).toMatchObject({ modelo3d: "banheira", modelo3dOrigem: "categoria" });
   });
   it("o do próprio produto manda sobre os dois", () => {
-    expect(produtoDaLinha(linha("Peça X", { modelo3d: "bide" }), "sanita", MAPA)!.modelo3d).toBe("bide");
+    expect(produtoDaLinha(linha("Peça X", { modelo3d: "bide" }), "sanita", MAPA)).toMatchObject({ modelo3d: "bide", modelo3dOrigem: "produto" });
+  });
+  it("um id do produto com formato válido mas que o 3D não conhece passa para o nível de cima", () => {
+    expect(produtoDaLinha(linha("Peça X", { modelo3d: "modelo_novo" }), "sanita", MAPA)).toMatchObject({ modelo3d: "sanita", modelo3dOrigem: "subcategoria" });
   });
   it("um valor fora do formato da base é ignorado", () => {
     expect("modelo3d" in produtoDaLinha(linha("Peça X", { modelo3d: "Com Espaços" }), "sanita", new Map())!).toBe(false);
@@ -61,18 +64,36 @@ describe("modelosDasCategorias: lê product_categories.modelo_3d, tolerante", ()
     expect([...m.entries()]).toEqual([["c1", "banheira"], ["s2", "sanita"]]);
     expect(base.pedidos).toEqual(["product_categories:id,modelo_3d"]);
   });
-  it("a coluna ainda não existe (a migração está por aplicar): o erro não rebenta, fica sem modelos", async () => {
-    base.categorias = { data: null, error: { code: "42703", message: 'column product_categories.modelo_3d does not exist' } };
-    expect((await modelosDasCategorias("org")).size).toBe(0);
+  it("a coluna ainda não existe (a migração está por aplicar): fica sem modelos, em silêncio (42703, PGRST204 ou a mensagem «column … does not exist»)", async () => {
+    const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
+    for (const error of [
+      { code: "42703", message: "column product_categories.modelo_3d does not exist" },
+      { code: "PGRST204", message: "Could not find the 'modelo_3d' column of 'product_categories' in the schema cache" },
+      { message: 'column "modelo_3d" does not exist' },
+    ]) {
+      base.categorias = { data: null, error };
+      expect((await modelosDasCategorias("org")).size).toBe(0);
+    }
+    expect(aviso).not.toHaveBeenCalled();
   });
-  it("uma excepção (sem rede) também fica sem modelos", async () => {
+  it("qualquer outro erro (RLS, rede, tempo) também fica sem modelos, mas NÃO em silêncio: console.warn com o motivo", async () => {
+    const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
+    base.categorias = { data: null, error: { code: "42501", message: "permission denied for table product_categories" } };
+    expect((await modelosDasCategorias("org")).size).toBe(0);
+    expect(aviso).toHaveBeenCalledTimes(1);
+    expect(String(aviso.mock.calls[0].join(" "))).toMatch(/permission denied/);
+  });
+  it("uma excepção (sem rede) fica sem modelos e avisa", async () => {
+    const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
     base.lancar = true;
     expect((await modelosDasCategorias("org")).size).toBe(0);
+    expect(aviso).toHaveBeenCalledTimes(1);
+    expect(String(aviso.mock.calls[0].join(" "))).toMatch(/sem rede/);
   });
 });
 
 describe("o 3D do Estúdio usa o modelo escolhido", () => {
-  const com = (modelo3d?: string): Produto => ({ id: "real-san", cat: "sanita", n: "Peça misteriosa X1", colecao: "", cores: ["branco"], hex: "#ffffff", preco: 100, un: "un", inst: 0, ...(modelo3d ? { modelo3d } : {}) });
+  const com = (modelo3d?: string, modelo3dOrigem?: "produto" | "subcategoria" | "categoria"): Produto => ({ id: "real-san", cat: "sanita", n: "Peça misteriosa X1", colecao: "", cores: ["branco"], hex: "#ffffff", preco: 100, un: "un", inst: 0, ...(modelo3d ? { modelo3d } : {}), ...(modelo3dOrigem ? { modelo3dOrigem } : {}) });
   const modeloDaSanita = (p: Produto) => {
     usarProdutosReais([p]);
     const peca = PROJETO_EXEMPLO.depois.pecas.find((x) => x.tipo === "sanita");
@@ -95,6 +116,10 @@ describe("o 3D do Estúdio usa o modelo escolhido", () => {
     expect(m.mockup3d.cor).toBe("#ffffff");
     expect(m.categoria).toBe("Estúdio");
     expect(m.nome).toBe("Peça misteriosa X1");
+  });
+  it("a origem real (subcategoria, categoria) chega ao modelo; sem ela, «produto»", () => {
+    expect(modeloDaSanita(com("bide", "subcategoria")).escolha).toEqual({ modelo: "bide", origem: "subcategoria" });
+    expect(modeloDaSanita(com("bide", "categoria")).escolha).toEqual({ modelo: "bide", origem: "categoria" });
   });
   it("um id que o 3D não conhece fica como sem escolha", () => {
     expect(modeloDaSanita(com("modelo_inventado")).escolha).toBeUndefined();

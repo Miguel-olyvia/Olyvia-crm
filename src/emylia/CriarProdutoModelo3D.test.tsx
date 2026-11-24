@@ -52,11 +52,11 @@ describe("criar produto: Modelo 3D", () => {
     expect(screen.getByRole("heading", { level: 3, name: "Modelo 3D" })).toBeInTheDocument();
     expect(screen.getByText(/Sem escolha: o 3D usa o classificador/)).toBeInTheDocument();
     escolher(sec, "Categoria", "Casa de banho");
-    expect(screen.getByText("Herdado da categoria Casa de banho: Banheira")).toBeInTheDocument();
+    expect(screen.getByText("Herdado da categoria Casa de banho: Banheira.")).toBeInTheDocument();
     escolher(sec, "Subcategoria", "Sanitas");
-    expect(screen.getByText("Herdado da subcategoria Sanitas: Sanita de chão")).toBeInTheDocument();
+    expect(screen.getByText("Herdado da subcategoria Sanitas: Sanita de chão.")).toBeInTheDocument();
     escolher(sec, "Subcategoria", "Peças soltas");
-    expect(screen.getByText("Herdado da categoria Casa de banho: Banheira")).toBeInTheDocument();
+    expect(screen.getByText("Herdado da categoria Casa de banho: Banheira.")).toBeInTheDocument();
   });
 
   it("o modelo escolhido segue com o produto novo (e a escolha manda sobre o herdado)", () => {

@@ -69,8 +69,12 @@ export const escolhaPorId = (id: string | null | undefined): ModeloEscolha | und
 /** O rótulo em português; um id que a lista não conhece mostra-se pelo próprio id. */
 export const rotuloDoModelo3D = (id: string): string => POR_ID.get(id)?.rotulo ?? id;
 
-/** O valor de uma leitura (produto, categoria): o id se estiver no formato da base, senão null (a chave em falta, vazia ou lixo herda). */
-const limpo = (v: unknown): string | null => (ehIdDeModelo3D(v) ? v : null);
+/**
+ * O valor de um nível que conta para a resolução: o id se estiver no formato da base E a lista o conhecer; senão null (a chave em falta, vazia, lixo ou um id
+ * novo da base que este código ainda não sabe desenhar herdam do nível de cima). Assim um id desconhecido num nível não corta um nível de cima válido.
+ * Os seletores continuam a mostrar o id desconhecido tal como a base o tem («(modelo desconhecido)»): isso lê-se do valor do nível, não daqui.
+ */
+const limpo = (v: unknown): string | null => (ehIdDeModelo3D(v) && POR_ID.has(v) ? v : null);
 
 /** Produto > subcategoria > categoria > automático. Vazio herda do nível de cima. */
 export function resolverModelo3D(n: { produto?: string | null; subcategoria?: string | null; categoria?: string | null }): ResolvidoModelo3D {

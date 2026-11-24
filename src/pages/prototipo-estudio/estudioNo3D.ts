@@ -60,7 +60,7 @@ function modeloDoProduto(tipo: Planta["pecas"][number]["tipo"], prod: Produto, w
   // 24/11: o «Modelo 3D» escolhido (já resolvido: produto > subcategoria > categoria) manda sobre o genérico do tipo; um id que o 3D não conhece não conta
   const m3d = prod.modelo3d ? modeloDoCatalogo({ id: `estudio:${prod.id}`, n: prod.n, no: null, modelo3d: prod.modelo3d, dim: [prod.w ?? wCm, prod.h ?? hCm, alto * 100] }) : null;
   if (m3d?.escolha) {
-    return { ...m3d, categoria: "Estúdio", alturaOmissao: (prod.z0 ?? 0) / 100 || m3d.alturaOmissao, demo: true, mockup3d: { ...m3d.mockup3d, altura: alto, cor: prod.hex } };
+    return { ...m3d, escolha: { modelo: m3d.escolha.modelo, origem: prod.modelo3dOrigem ?? "produto" }, categoria: "Estúdio", alturaOmissao: (prod.z0 ?? 0) / 100 || m3d.alturaOmissao, demo: true, mockup3d: { ...m3d.mockup3d, altura: alto, cor: prod.hex } };
   }
   return {
     ...g, produtoId: `estudio:${prod.id}`, nome: prod.n, categoria: "Estúdio", montagem: e.mont, alturaOmissao: (prod.z0 ?? 0) / 100 || e.alt, demo: true,

@@ -64,13 +64,13 @@ describe("ficha do produto: Modelo 3D", () => {
     ficha();
     expect(screen.getByRole("heading", { level: 2, name: "Modelo 3D" })).toBeInTheDocument();
     expect(seletor()).toHaveTextContent(/Automático/);
-    expect(screen.getByText("Herdado da subcategoria Sanitas: Sanita de chão")).toBeInTheDocument();
+    expect(screen.getByText("Herdado da subcategoria Sanitas: Sanita de chão.")).toBeInTheDocument();
     expect(screen.getByText(/Automático \(herda: Sanita de chão, da subcategoria Sanitas\)/)).toBeInTheDocument();
   });
 
   it("sem subcategoria escolhida, herda da categoria", () => {
     ficha({ ...PROD, no: "s2" });
-    expect(screen.getByText("Herdado da categoria Casa de banho: Banheira")).toBeInTheDocument();
+    expect(screen.getByText("Herdado da categoria Casa de banho: Banheira.")).toBeInTheDocument();
   });
 
   it("o rótulo da secção diz o modelo e a origem", () => {
@@ -127,6 +127,31 @@ describe("ficha do produto: Modelo 3D", () => {
     ficha({ ...PROD, modelo3d: "bide" });
     escolherModelo("Bidé");
     expect(chamadas()).toHaveLength(0);
+  });
+
+  it("enquanto grava, o seletor usa aria-disabled (não disabled): não perde o foco, não abre, e o foco fica depois de falhar", async () => {
+    let largar!: (v: { data: unknown; error: unknown }) => void;
+    base.respostas.cat_definir_modelo_3d = (() => new Promise((r) => { largar = r; })) as never;
+    ficha();
+    escolherModelo("Bidé");
+    await waitFor(() => expect(seletor()).toHaveAttribute("aria-disabled", "true"));
+    expect(seletor()).not.toBeDisabled();
+    expect(seletor()).toHaveFocus();
+    fireEvent.click(seletor());
+    expect(screen.queryByRole("listbox")).toBeNull();
+    expect(chamadas()).toHaveLength(1);
+    largar({ data: null, error: { code: "CT001", message: "Sem permissão para editar o catálogo." } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Sem permissão para editar o catálogo.");
+    expect(seletor()).not.toHaveAttribute("aria-disabled");
+    expect(seletor()).toHaveFocus();
+  });
+
+  it("depois de gravar com sucesso o foco também fica no seletor", async () => {
+    ficha();
+    escolherModelo("Bidé");
+    await waitFor(() => expect(chamadas()).toHaveLength(1));
+    await waitFor(() => expect(seletor()).not.toHaveAttribute("aria-disabled"));
+    expect(seletor()).toHaveFocus();
   });
 
   it("sem permissão de editar: o seletor está desativado e diz porquê", () => {

@@ -18,7 +18,7 @@ const ITENS: readonly ItemCombo[] = GRUPOS_MODELO.flatMap((g) => MODELOS_ESCOLHA
 /** A frase por baixo do seletor: o que foi escolhido aqui, o que se herda (e de onde), ou que nada foi escolhido. */
 function fraseDoModelo3D(valor: string | null, heranca: ResolvidoNo, nivel: NivelModelo3D): string {
   if (valor) return `Escolhido ${ONDE[nivel]}: ${rotuloDoModelo3D(valor)}.`;
-  if (heranca.modelo) return `Herdado da ${heranca.origem === "subcategoria" ? "subcategoria" : "categoria"}${heranca.de ? ` ${heranca.de}` : ""}: ${rotuloDoModelo3D(heranca.modelo)}`;
+  if (heranca.modelo) return `Herdado da ${heranca.origem === "subcategoria" ? "subcategoria" : "categoria"}${heranca.de ? ` ${heranca.de}` : ""}: ${rotuloDoModelo3D(heranca.modelo)}.`;
   return "Sem escolha: o 3D usa o classificador, pelo nome e pela subcategoria.";
 }
 
@@ -29,12 +29,15 @@ interface Props {
   heranca: ResolvidoNo;
   onChange: (valor: string | null) => void;
   nivel?: NivelModelo3D;
+  /** Sem permissão: o botão fica desativado. */
   desativado?: boolean;
+  /** A gravar: o botão fica aria-disabled (focável, não abre) para o foco não se perder. */
+  ocupado?: boolean;
   erro?: string | null;
   className?: string;
 }
 
-export function CampoModelo3D({ valor, heranca, onChange, nivel = "produto", desativado, erro, className }: Props) {
+export function CampoModelo3D({ valor, heranca, onChange, nivel = "produto", desativado, ocupado, erro, className }: Props) {
   const idFrase = useId(), idErro = useId();
   const automatico = rotuloAutomatico(heranca);
   // um id que a base tem e a lista não conhece (a base não tem lista fechada) continua visível e escolhido: nunca se perde em silêncio
@@ -47,7 +50,7 @@ export function CampoModelo3D({ valor, heranca, onChange, nivel = "produto", des
     <div className={cn("grid gap-1.5", className)}>
       <Campo rot="Modelo 3D">
         {(id) => (
-          <ComboPesquisa id={id} rotulo="Modelo 3D" itens={ITENS} atual={atual} semValor={automatico} semValorComoValor desativado={desativado} onEscolher={(i) => onChange(i.id || null)} />
+          <ComboPesquisa id={id} rotulo="Modelo 3D" itens={ITENS} atual={atual} semValor={automatico} semValorComoValor desativado={desativado} ocupado={ocupado} descr={erro ? `${idFrase} ${idErro}` : idFrase} onEscolher={(i) => onChange(i.id || null)} />
         )}
       </Campo>
       <p id={idFrase} aria-live="polite" className={NOTA}>{fraseDoModelo3D(valor, heranca, nivel)}</p>

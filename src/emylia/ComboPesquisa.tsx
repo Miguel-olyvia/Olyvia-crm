@@ -53,13 +53,17 @@ interface Props {
   registar?: (el: HTMLButtonElement | null) => void;
   /** Força o campo de pesquisa ligado (true) ou desligado (false); por omissão aparece com mais de 7 opções. */
   pesquisavel?: boolean;
+  /** 24/11: o campo está a gravar. Ao contrário de `desativado`, o botão fica focável (aria-disabled): não abre nem escolhe, mas o foco não se perde. */
+  ocupado?: boolean;
+  /** 24/11: ids (separados por espaço) do texto que descreve o campo (uma ajuda, um erro): vão para aria-describedby do botão. */
+  descr?: string;
 }
 
 const rotuloDe = (it: Item, semValor?: string, textoNova?: string) => it.k === "item" ? it.i.nome : it.k === "limpar" ? (semValor ?? "") : (textoNova ?? "");
 
 /** Dropdown com pesquisa: botão (combobox select-only, ARIA 1.2) + painel com campo de pesquisa e listbox de options (aria-activedescendant).
  *  Setas, Home, End, Enter, Esc e Tab; sem campo de pesquisa, a primeira letra salta para a opção. */
-export function ComboPesquisa({ rotulo, id, itens, atual, onEscolher, onNova, textoNova = "Nova opção…", semValor, placeholder = "Escolher…", vazio = "Nenhuma opção encontrada", desativado, semValorComoValor, obrigatorio, classeCampo, registar, pesquisavel }: Props) {
+export function ComboPesquisa({ rotulo, id, itens, atual, onEscolher, onNova, textoNova = "Nova opção…", semValor, placeholder = "Escolher…", vazio = "Nenhuma opção encontrada", desativado, semValorComoValor, obrigatorio, classeCampo, registar, pesquisavel, ocupado, descr }: Props) {
   const lid = useId();
   const idValor = `${lid}-valor`;
   const caixa = useRef<HTMLDivElement>(null); // a lista flutuante (portal) acompanha este wrapper
@@ -108,7 +112,7 @@ export function ComboPesquisa({ rotulo, id, itens, atual, onEscolher, onNova, te
   };
   const daEscolhida = lista.findIndex((x) => x.k === "item" && x.i.id === atual?.id);
   const abrir = () => {
-    if (aberto) return;
+    if (aberto || ocupado) return;
     setPesq(pesquisavel ?? escolhiveis.length > OPCOES_PARA_PESQUISAR);
     setAberto(true);
     setAtivo(Math.max(0, daEscolhida));
@@ -184,7 +188,7 @@ export function ComboPesquisa({ rotulo, id, itens, atual, onEscolher, onNova, te
     <div ref={caixa} className="relative">
       <button id={id} ref={botaoRef} type="button" role="combobox" {...(idRotulo ? { "aria-labelledby": `${idRotulo} ${idValor}` } : { "aria-label": rotulo })}
         aria-haspopup="listbox" aria-expanded={aberto} aria-controls={aberto && lista.length > 0 ? lid : undefined}
-        aria-required={obrigatorio ? true : undefined} disabled={desativado} onClick={() => (aberto ? fechar() : abrir())} onKeyDown={noBotao} onBlur={aberto ? aoPerderFoco : undefined}
+        aria-required={obrigatorio ? true : undefined} aria-disabled={ocupado ? true : undefined} aria-describedby={descr || undefined} disabled={desativado} onClick={() => (aberto ? fechar() : abrir())} onKeyDown={noBotao} onBlur={aberto ? aoPerderFoco : undefined}
         className={cn(CAMPO, "flex min-h-11 items-center justify-between gap-2 text-left disabled:cursor-not-allowed disabled:opacity-60", classeCampo)}>
         <span id={idValor} className={cn("min-w-0 flex-1 truncate", !valor && "text-muted-foreground")}>{valor || placeholder}</span>
         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />

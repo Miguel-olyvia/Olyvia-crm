@@ -83,8 +83,13 @@ describe("resolverModelo3D: produto > subcategoria > categoria > automático", (
     expect(resolverModelo3D({ produto: "", subcategoria: "  ", categoria: "banheira" })).toEqual({ modelo: "banheira", origem: "categoria" });
     expect(resolverModelo3D({ produto: "Sem Formato", subcategoria: "", categoria: "" })).toEqual({ modelo: null, origem: "automatico" });
   });
-  it("a precedência não depende de o nível de cima estar na lista: um id novo da base vale", () => {
-    expect(resolverModelo3D({ produto: "modelo_novo", categoria: "banheira" })).toEqual({ modelo: "modelo_novo", origem: "produto" });
+  it("um id com formato válido mas que a lista não conhece (a base não tem lista fechada) não corta os níveis de cima: passa para o seguinte", () => {
+    expect(resolverModelo3D({ produto: "modelo_novo", subcategoria: "bide", categoria: "banheira" })).toEqual({ modelo: "bide", origem: "subcategoria" });
+    expect(resolverModelo3D({ produto: "modelo_novo", subcategoria: "outro_novo", categoria: "banheira" })).toEqual({ modelo: "banheira", origem: "categoria" });
+    expect(resolverModelo3D({ produto: "modelo_novo", subcategoria: "bide" })).toEqual({ modelo: "bide", origem: "subcategoria" });
+  });
+  it("se nenhum nível é conhecido, fica o automático", () => {
+    expect(resolverModelo3D({ produto: "modelo_novo", categoria: "outro_novo" })).toEqual({ modelo: null, origem: "automatico" });
   });
 });
 
@@ -116,6 +121,13 @@ describe("resolverDoNo: de onde vem o modelo herdado", () => {
   it("tolera uma árvore sem a chave modelo3d (a migração ainda não está aplicada)", () => {
     const sem = [{ id: "c", n: "Cat", pai: null }, { id: "s", n: "Sub", pai: "c" }];
     expect(resolverDoNo({ arvore: sem, no: "s" })).toEqual({ modelo: null, origem: "automatico", de: null });
+  });
+  it("um produto desconhecido com uma subcategoria válida: resolve na subcategoria (e `de` diz qual)", () => {
+    expect(resolverDoNo({ produto: "modelo_novo", arvore: ARV, no: "s1" })).toEqual({ modelo: "sanita", origem: "subcategoria", de: "Sanitas" });
+  });
+  it("uma subcategoria desconhecida herda da categoria", () => {
+    const arv = [{ id: "c", n: "Cat", pai: null, modelo3d: "banheira" }, { id: "s", n: "Sub", pai: "c", modelo3d: "modelo_novo" }];
+    expect(resolverDoNo({ arvore: arv, no: "s" })).toEqual({ modelo: "banheira", origem: "categoria", de: "Cat" });
   });
   it("ignora o produto quando se pede só o que se herda (para o «Automático (herda: …)»)", () => {
     expect(resolverDoNo({ produto: "bide", arvore: ARV, no: "s1", soHerdado: true })).toEqual({ modelo: "sanita", origem: "subcategoria", de: "Sanitas" });

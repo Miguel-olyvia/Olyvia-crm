@@ -22,6 +22,12 @@ describe("sem escolha, o comportamento é exactamente o de hoje", () => {
     const arv: NoCat[] = ARVORE.map((x) => ({ ...x, modelo3d: null }));
     for (const base of casos) expect(modeloDoProduto(base, arv)).toEqual(modeloDoProduto(base, ARVORE));
   });
+  it("um id do produto desconhecido não corta uma subcategoria ou categoria válidas: o 3D usa a de cima", () => {
+    const arv: NoCat[] = [{ id: "c1", n: "Casa de banho", pai: null, modelo3d: "banheira" }, { id: "s1", n: "Sanitas", pai: "c1", modelo3d: "bide" }];
+    const m = modeloDoProduto({ id: "p", n: "Peça X", no: "s1", modelo3d: "modelo_novo" }, arv);
+    expect(m.mockup3d.generico?.id).toBe("bide");
+    expect(m.escolha).toEqual({ modelo: "bide", origem: "subcategoria" });
+  });
   it("um id que a lista não conhece (a base não tem lista fechada) é ignorado: fica o automático", () => {
     const base = p("Sanita suspensa Rimless");
     expect(modeloDoProduto({ ...base, modelo3d: "modelo_inventado" }, ARVORE)).toEqual(modeloDoProduto(base, ARVORE));

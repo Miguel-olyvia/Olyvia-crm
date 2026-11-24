@@ -84,7 +84,7 @@ describe("Categorias: Modelo 3D", () => {
   it("editar uma subcategoria: o seletor herda da categoria («Herdado da categoria Casa de banho: Banheira») e grava com o alvo 'categoria'", async () => {
     await abrir();
     fireEvent.click(within(li(sec("Casa de banho"), "Torneiras")).getByRole("button", { name: "Mudar o modelo 3D da subcategoria Torneiras em Casa de banho" }));
-    expect(screen.getByText("Herdado da categoria Casa de banho: Banheira")).toBeInTheDocument();
+    expect(screen.getByText("Herdado da categoria Casa de banho: Banheira.")).toBeInTheDocument();
     escolherModelo("Torneira ou misturadora");
     fireEvent.click(screen.getByRole("button", { name: "Guardar modelo 3D" }));
     await waitFor(() => expect(chamadasDe("cat_definir_modelo_3d")).toHaveLength(1));
@@ -98,6 +98,28 @@ describe("Categorias: Modelo 3D", () => {
     fireEvent.click(screen.getByRole("button", { name: "Guardar modelo 3D" }));
     await waitFor(() => expect(chamadasDe("cat_definir_modelo_3d")).toHaveLength(1));
     expect(chamadasDe("cat_definir_modelo_3d")[0].a.p_modelo).toBeNull();
+  });
+
+  it("enquanto grava, o seletor, o Guardar e o Cancelar usam aria-disabled (não disabled), o foco não se perde e o Cancelar não fecha o painel", async () => {
+    let largar!: (v: { data: unknown; error: unknown }) => void;
+    const orig = base.responder;
+    base.responder = (f, a) => (f === "cat_definir_modelo_3d" ? new Promise((r) => { largar = r; }) : orig(f, a));
+    await abrir();
+    fireEvent.click(within(sec("Cozinha")).getByRole("button", { name: "Mudar o modelo 3D da categoria Cozinha" }));
+    escolherModelo("Frigorífico");
+    const guardar = screen.getByRole("button", { name: "Guardar modelo 3D" });
+    guardar.focus();
+    fireEvent.click(guardar);
+    await waitFor(() => expect(chamadasDe("cat_definir_modelo_3d")).toHaveLength(1));
+    const cancelar = screen.getByRole("button", { name: "Cancelar" });
+    for (const el of [seletor(), guardar, cancelar]) { expect(el).toHaveAttribute("aria-disabled", "true"); expect(el).not.toBeDisabled(); }
+    expect(guardar).toHaveFocus();
+    fireEvent.click(cancelar);
+    expect(screen.getByRole("button", { name: "Guardar modelo 3D" })).toBeInTheDocument();
+    largar({ data: null, error: { code: "CT001", message: "Sem permissão para editar o catálogo." } });
+    expect(await screen.findByRole("alert")).toHaveTextContent("Sem permissão para editar o catálogo.");
+    expect(screen.getByRole("button", { name: "Guardar modelo 3D" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Cancelar" })).not.toHaveAttribute("aria-disabled");
   });
 
   it("o botão de guardar só vale quando o modelo mudou", async () => {
@@ -161,7 +183,7 @@ describe("Categorias: Modelo 3D", () => {
   it("criar subcategoria dentro de uma categoria: herda dela e define o modelo no id novo", async () => {
     await abrir();
     fireEvent.click(screen.getByRole("button", { name: "Nova subcategoria em Casa de banho" }));
-    expect(screen.getByText("Herdado da categoria Casa de banho: Banheira")).toBeInTheDocument();
+    expect(screen.getByText("Herdado da categoria Casa de banho: Banheira.")).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Nome da subcategoria"), { target: { value: "Bidés" } });
     escolherModelo("Bidé");
     fireEvent.click(screen.getByRole("button", { name: "Criar subcategoria" }));
@@ -196,7 +218,7 @@ describe("Subcategorias: Modelo 3D", () => {
   it("editar: herda da categoria e grava com o alvo 'categoria'", async () => {
     await abrir();
     fireEvent.click(within(linha("Torneiras")).getByRole("button", { name: /Mudar o modelo 3D da subcategoria Torneiras/ }));
-    expect(screen.getByText("Herdado da categoria Casa de banho: Banheira")).toBeInTheDocument();
+    expect(screen.getByText("Herdado da categoria Casa de banho: Banheira.")).toBeInTheDocument();
     escolherModelo("Torneira ou misturadora");
     fireEvent.click(screen.getByRole("button", { name: "Guardar modelo 3D" }));
     await waitFor(() => expect(chamadasDe("cat_definir_modelo_3d")).toHaveLength(1));

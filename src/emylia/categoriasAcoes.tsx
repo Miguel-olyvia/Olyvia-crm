@@ -195,11 +195,11 @@ function PainelModelo3D({ item, pai, g }: { item: Item; pai: CategoriaGestao | n
   const porque = g.aGravar ? "A guardar…" : modelo === (item.modelo3d ?? null) ? "Escolha outro modelo para guardar." : null;
   return (
     <div className={cn("mt-3 grid gap-3 rounded-xl border border-border bg-card p-3", ENTRA)}>
-      <CampoModelo3D valor={modelo} heranca={herancaDe(pai)} onChange={setModelo} nivel={pai ? "subcategoria" : "categoria"} desativado={g.aGravar} erro={g.msg(`m3d:${item.id}`)} />
+      <CampoModelo3D valor={modelo} heranca={herancaDe(pai)} onChange={setModelo} nivel={pai ? "subcategoria" : "categoria"} ocupado={g.aGravar} erro={g.msg(`m3d:${item.id}`)} />
       <div className="flex flex-wrap gap-2">
         <Button id={`gm-${item.id}`} className="min-h-11 text-[15px] aria-disabled:cursor-not-allowed aria-disabled:opacity-50" {...protegido(porque, `rz-gm-${item.id}`, () => g.onModelo3d(item, pai, modelo))}>Guardar modelo 3D</Button>
         <Razao id={`rz-gm-${item.id}`}>{porque}</Razao>
-        <Button variant="outline" className="min-h-11 text-[15px]" onClick={() => g.fechar(`m3d-${item.id}`)} disabled={g.aGravar}>Cancelar</Button>
+        <Button variant="outline" className="min-h-11 text-[15px] aria-disabled:cursor-not-allowed aria-disabled:opacity-50" {...protegido(g.aGravar ? "A guardar…" : null, `rz-gm-${item.id}`, () => g.fechar(`m3d-${item.id}`))}>Cancelar</Button>
       </div>
     </div>
   );
@@ -214,7 +214,7 @@ export function FormNovoRamo({ pai, eSub = !!pai, rotuloNome, botao, aGravar, er
   const [modelo, setModelo] = useState<string | null>(null);
   return (
     <FormNome rotuloNome={rotuloNome} inicial="" botao={botao} aGravar={aGravar} erro={erro} idGuardar={idGuardar} antes={antes} exige={exige}
-      depois={<CampoModelo3D valor={modelo} heranca={herancaDe(pai)} onChange={setModelo} nivel={eSub ? "subcategoria" : "categoria"} desativado={aGravar} />}
+      depois={<CampoModelo3D valor={modelo} heranca={herancaDe(pai)} onChange={setModelo} nivel={eSub ? "subcategoria" : "categoria"} ocupado={aGravar} />}
       onEnviar={(nome) => onEnviar(nome, modelo)} onCancelar={onCancelar} />
   );
 }

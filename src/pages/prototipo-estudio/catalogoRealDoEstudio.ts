@@ -74,8 +74,8 @@ export function produtoDaLinha(l: LinhaPaginaProduto, cat: Categoria, modelos: R
     ...(l.sku?.trim() ? { ref: l.sku.trim() } : {}),
     ...(() => { const t = [l.marca, l.subcategoria, l.atributos_resumo].filter(Boolean).join(" "); return t ? { procura: t } : {}; })(),
     ...(() => {
-      const m = resolverModelo3D({ produto: l.modelo3d, subcategoria: l.subcategoria_id ? modelos.get(l.subcategoria_id) : null, categoria: l.categoria_id ? modelos.get(l.categoria_id) : null }).modelo;
-      return m ? { modelo3d: m } : {};
+      const r = resolverModelo3D({ produto: l.modelo3d, subcategoria: l.subcategoria_id ? modelos.get(l.subcategoria_id) : null, categoria: l.categoria_id ? modelos.get(l.categoria_id) : null });
+      return r.modelo && r.origem !== "automatico" ? { modelo3d: r.modelo, modelo3dOrigem: r.origem } : {};
     })(),
   };
 }
@@ -105,12 +105,24 @@ export async function modelosDasCategorias(org: string): Promise<Map<string, str
   try {
     const { data, error } = await (supabase as unknown as { from: (t: string) => { select: (c: string) => { eq: (k: string, v: string) => Promise<{ data: { id: string; modelo_3d: unknown }[] | null; error: unknown }> } } })
       .from("product_categories").select("id,modelo_3d").eq("organization_id", org);
-    if (error || !data) return new Map();
+    if (error) {
+      // só «a coluna ainda não existe» é esperado (a migração está por aplicar); rede, RLS ou tempo esgotado também deixam o Estúdio sem estes modelos, mas avisam
+      if (!colunaEmFalta(error)) console.warn("[estúdio] não foi possível ler o modelo 3D das categorias:", mensagemDe(error));
+      return new Map();
+    }
+    if (!data) return new Map();
     return new Map(data.flatMap((c) => (ehIdDeModelo3D(c.modelo_3d) ? [[c.id, c.modelo_3d] as [string, string]] : [])));
-  } catch {
+  } catch (e) {
+    console.warn("[estúdio] não foi possível ler o modelo 3D das categorias:", mensagemDe(e));
     return new Map();
   }
 }
+/** O erro do PostgREST/Postgres de uma coluna que não existe: 42703 (undefined_column), PGRST204 (coluna fora da cache do esquema) ou a mensagem «column … does not exist». */
+function colunaEmFalta(e: unknown): boolean {
+  const o = (e && typeof e === "object" ? e : {}) as { code?: unknown; message?: unknown };
+  return o.code === "42703" || o.code === "PGRST204" || (typeof o.message === "string" && /column .*does not exist/i.test(o.message));
+}
+const mensagemDe = (e: unknown): string => (e && typeof e === "object" && typeof (e as { message?: unknown }).message === "string" ? (e as { message: string }).message : String(e));
 
 // ------------------------------------------------------------------ 17/11 (Rúben: «a mão de obra a vir do serviço ligado»)
 

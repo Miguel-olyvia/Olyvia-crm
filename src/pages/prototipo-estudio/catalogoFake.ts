@@ -55,6 +55,8 @@ export interface Produto {
   procura?: string;
   /** 24/11: o «Modelo 3D» já resolvido (produto > subcategoria > categoria: planta3d/modelos3dEscolha.ts) de um produto do catálogo verdadeiro; manda sobre o genérico do tipo no 3D. */
   modelo3d?: string;
+  /** 24/11: de onde veio o `modelo3d` (o produto, a subcategoria ou a categoria). Sem ele, conta como «produto». */
+  modelo3dOrigem?: "produto" | "subcategoria" | "categoria";
 }
 
 const P = (id: string, cat: Categoria, n: string, colecao: string, cores: Cor[], preco: number, inst: number, extra: Partial<Produto> = {}): Produto =>

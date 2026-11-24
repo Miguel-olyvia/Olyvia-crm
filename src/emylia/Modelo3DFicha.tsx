@@ -42,7 +42,7 @@ export function Modelo3DFicha({ produto, real, anunciar, ...ver }: Props) {
     <div className="mt-3 grid gap-4">
       {podeGravar && (
         <div className="grid gap-1.5">
-          <CampoModelo3D valor={valor} heranca={heranca} onChange={(v) => void mudar(v)} nivel="produto" desativado={!real!.podeEditar || aGravar} erro={erro} />
+          <CampoModelo3D valor={valor} heranca={heranca} onChange={(v) => void mudar(v)} nivel="produto" desativado={!real!.podeEditar} ocupado={aGravar} erro={erro} />
           {!real!.podeEditar && <p className={cn(NOTA)}>Sem permissão para mudar o modelo 3D (products.edit).</p>}
         </div>
       )}
