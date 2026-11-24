@@ -1,6 +1,13 @@
 -- =============================================================================
 -- Catálogo — COR: preenche o hex (#RRGGBB) de 74 opções de cor da MUDELAR que hoje não têm hex.
 -- Base de RH (uetjghdkwbywbftedtth). SÓ DADOS: um UPDATE a attribute_option_group_values.hex_color.
+--
+-- !!! SÓ PARA A BASE DE RH (uetjghdkwbywbftedtth). NUNCA SE APLICA NA BASE PRINCIPAL (a de produção real da Mudelar,
+-- !!! onde estão clientes reais). Escreve em dados da organização Mudelar; as 74 opções, os ids e os hex foram
+-- !!! lidos e aprovados só na RH. Antes do `db push`, confirmar o projeto ligado (supabase/.temp/project-ref).
+-- !!! Rede de segurança, não substitui a confirmação: se nenhuma das 74 opções (ids) existir na base onde corre, a
+-- !!! migration sai sem escrever; e exige que as 74 existam com o nome esperado, ativas e sem hex, ou falha.
+--
 -- NÃO precisa de código novo (o ecrã já mostra a amostra de cor quando a opção tem hex). Sem DDL, sem DROP, sem
 -- tocar em product_attribute_values, produtos, preços, SKUs nem noutras colunas das opções.
 -- =============================================================================
@@ -18,22 +25,26 @@
 -- O que NÃO muda: os 122 hex que já existem (a migration só escreve onde hex_color é NULL ou vazio, e confere no fim
 -- que os 122 estão iguais); os nomes, siglas, ordem e estado das opções; as 105 sem proposta aprovada.
 --
--- Só toca opções da Mudelar (organização 3242e925-…), ativas, no grupo de um dos três atributos de cor, com hex
--- vazio. O UPDATE leva esse filtro.
+-- Só toca opções da Mudelar (organização 3242e925-…), ativas, num grupo ativo de um dos três atributos de cor (atributo
+-- não apagado), com hex vazio. O UPDATE leva esse filtro. Os 122 hex e o total final contam-se só na Mudelar (uma
+-- opção com hex gravada noutra organização entretanto não faz falhar a migration).
 --
 -- Efeitos laterais lidos no remoto (triggers de attribute_option_group_values):
 --   * update_attribute_option_group_values_updated_at (BEFORE UPDATE): põe updated_at = now() nas 74 linhas.
 --   * trg_audit_attribute_option_group_values (AFTER, fn_audit_attribute_option_group_values): uma linha por opção
---     mudada em entity_audit_log (campo hex_color, antes e depois), com app.audit_source = 'migration:cores_sem_hex_mudelar'.
---     Fica auditado linha a linha de propósito (são só 74 e dá para ver o que mudou em cada uma).
+--     mudada em entity_audit_log (changed_fields = hex_color antes → depois), com
+--     app.audit_source = 'migration:cores_sem_hex_mudelar'. A linha de auditoria guarda o GRUPO da opção
+--     (entity_id = group_id; record_id fica NULL), não a opção: dá o hex antigo e o novo por grupo, mas não
+--     identifica qual das opções do grupo mudou quando várias recebem o mesmo hex. Quem precisar de saber qual
+--     opção mudou lê-o desta migration (a lista de ids está no VALUES) ou de updated_at.
 --   * trg_cat_sigla_opcao é BEFORE INSERT (não reage a UPDATE); os RI_ConstraintTrigger só validam o group_id (não muda).
 --
 -- GUARDA (inerte: RAISE NOTICE e sai sem escrever nada) se: a organização 3242e925-… não existir com o nome
--- 'Mudelar' nesta base; ou nenhuma das 74 opções estiver elegível (já aplicada, ou já preenchidas à mão: não se
--- sobrepõe nada).
--- Falha (RAISE EXCEPTION, nada fica) se: o estado lido não for o esperado (as opções com hex não forem as 122 lidas, só
--- algumas das 74 estiverem elegíveis, uma das 74 não existir, não for da Mudelar, não estiver ativa ou estiver
--- noutro atributo); o nº de linhas atualizadas não for 74; alguma das 122 mudar de valor; alguma das 74 não ficar
+-- 'Mudelar' nesta base; se nenhum dos 74 ids existir nesta base (não é a base de RH); ou nenhuma das 74 opções
+-- estiver elegível (já aplicada, ou já preenchidas à mão: não se sobrepõe nada).
+-- Falha (RAISE EXCEPTION, nada fica) se: o estado lido não for o esperado (as opções da Mudelar com hex não forem as
+-- 122 lidas, só algumas das 74 estiverem elegíveis, uma das 74 não existir, não tiver o nome esperado, não for da
+-- Mudelar, não estiver ativa, o grupo estiver inativo, o atributo apagado ou for de outro atributo); o nº de linhas atualizadas não for 74; alguma das 122 mudar de valor; alguma das 74 não ficar
 -- com o hex proposto; qualquer outra coluna das 74 mudar; ou a transação escrever noutras linhas da tabela.
 --
 -- Idempotente: a segunda execução não encontra nenhuma opção com hex vazio entre as 74 e sai por NOTICE.
@@ -148,23 +159,33 @@ BEGIN
     RAISE EXCEPTION 'cores_sem_hex_mudelar: a lista tem % propostas (esperadas %) e % com hex fora do formato #RRGGBB.', v_n, c_esperado, v_m;
   END IF;
 
-  -- ─── 2. O estado lido: as opções que já têm hex (todas as organizações) ──────────
+  -- ─── 2. O estado lido ──────────────────────────────────────────────────────────
+  -- esta migration é só da base de RH: se nenhum dos 74 ids existe aqui, não é essa base — sai sem escrever
+  SELECT count(*) INTO v_n FROM _cores_hex h JOIN attribute_option_group_values v ON v.id = h.id;
+  IF v_n = 0 THEN
+    RAISE NOTICE 'cores_sem_hex_mudelar: nenhuma das % opções existe nesta base (esta migration é só da base de RH) — nada a fazer.', c_esperado;
+    RETURN;
+  END IF;
+
+  -- as opções da MUDELAR que já têm hex (só desta organização: um hex gravado noutra não conta)
   CREATE TEMP TABLE _cores_ja ON COMMIT DROP AS
   SELECT v.id, v.hex_color AS hex
   FROM attribute_option_group_values v
+  JOIN attribute_option_groups g ON g.id = v.group_id AND g.organization_id = c_org
   WHERE v.hex_color IS NOT NULL AND v.hex_color <> '';
   SELECT count(*) INTO v_n FROM _cores_ja;
 
-  -- as 74: existem, são da Mudelar, ativas, no grupo de um dos atributos de cor e com hex vazio?
+  -- as 74: existem com o nome esperado, são da Mudelar, ativas, num grupo ativo de um atributo de cor não apagado, com hex vazio?
   SELECT count(*) INTO v_m
   FROM _cores_hex h
   JOIN attribute_option_group_values v ON v.id = h.id
-  JOIN attribute_option_groups g ON g.id = v.group_id AND g.organization_id = c_org
-  JOIN product_attributes a ON a.id = g.attribute_id AND a.organization_id = c_org
+  JOIN attribute_option_groups g ON g.id = v.group_id AND g.organization_id = c_org AND g.is_active
+  JOIN product_attributes a ON a.id = g.attribute_id AND a.organization_id = c_org AND a.deleted_at IS NULL
   WHERE v.is_active AND (v.hex_color IS NULL OR v.hex_color = '')
+    AND (lower(v.value_text::text) = lower(h.nome) OR lower(coalesce(v.display_name, '')::text) = lower(h.nome))
     AND a.label IN ('Cor', 'Cor da frente', 'Cor do corpo') AND coalesce(a.has_hex_color, false);
   IF v_m = 0 THEN
-    RAISE NOTICE 'cores_sem_hex_mudelar: nenhuma das % opções está elegível (hex já preenchido) — já aplicada, nada a fazer.', c_esperado;
+    RAISE NOTICE 'cores_sem_hex_mudelar: nenhuma das % opções está elegível (hex já preenchido, ou opção, nome ou grupo diferentes) — nada a fazer.', c_esperado;
     RETURN;
   END IF;
   IF v_m <> c_esperado THEN
@@ -172,9 +193,10 @@ BEGIN
     FROM _cores_hex h
     WHERE NOT EXISTS (
       SELECT 1 FROM attribute_option_group_values v
-      JOIN attribute_option_groups g ON g.id = v.group_id AND g.organization_id = c_org
-      JOIN product_attributes a ON a.id = g.attribute_id AND a.organization_id = c_org
+      JOIN attribute_option_groups g ON g.id = v.group_id AND g.organization_id = c_org AND g.is_active
+      JOIN product_attributes a ON a.id = g.attribute_id AND a.organization_id = c_org AND a.deleted_at IS NULL
       WHERE v.id = h.id AND v.is_active AND (v.hex_color IS NULL OR v.hex_color = '')
+        AND (lower(v.value_text::text) = lower(h.nome) OR lower(coalesce(v.display_name, '')::text) = lower(h.nome))
         AND a.label IN ('Cor', 'Cor da frente', 'Cor do corpo') AND coalesce(a.has_hex_color, false));
     RAISE EXCEPTION 'cores_sem_hex_mudelar: só % das % opções estão elegíveis; as outras mudaram desde a leitura: %. Rever antes de aplicar.',
       v_m, c_esperado, left(v_txt, 1500);
@@ -196,9 +218,10 @@ BEGIN
   -- ─── 3. Gravar (só onde o hex está vazio, só na Mudelar) ─────────────────────────
   UPDATE attribute_option_group_values v
   SET hex_color = h.hex
-  FROM _cores_hex h, attribute_option_groups g
+  FROM _cores_hex h, attribute_option_groups g, product_attributes a
   WHERE v.id = h.id
-    AND g.id = v.group_id AND g.organization_id = c_org
+    AND g.id = v.group_id AND g.organization_id = c_org AND g.is_active
+    AND a.id = g.attribute_id AND a.organization_id = c_org AND a.deleted_at IS NULL
     AND v.is_active
     AND (v.hex_color IS NULL OR v.hex_color = '');
   GET DIAGNOSTICS v_n = ROW_COUNT;
@@ -227,10 +250,12 @@ BEGIN
      OR v.sort_order IS DISTINCT FROM a.sort_order OR v.is_active <> a.is_active;
   IF v_n > 0 THEN RAISE EXCEPTION 'Conferir: % das % opções mudaram noutra coluna além do hex.', v_n, c_esperado; END IF;
 
-  -- total de opções com hex: as 122 + as 74; e nenhuma outra linha da tabela escrita nesta transação
-  SELECT count(*) INTO v_n FROM attribute_option_group_values v WHERE v.hex_color IS NOT NULL AND v.hex_color <> '';
+  -- total de opções da Mudelar com hex: as 122 + as 74; e nenhuma outra linha da tabela escrita nesta transação
+  SELECT count(*) INTO v_n FROM attribute_option_group_values v
+  JOIN attribute_option_groups g ON g.id = v.group_id AND g.organization_id = c_org
+  WHERE v.hex_color IS NOT NULL AND v.hex_color <> '';
   IF v_n <> c_ja + c_esperado THEN
-    RAISE EXCEPTION 'Conferir: % opções com hex no fim (esperadas % + % = %).', v_n, c_ja, c_esperado, c_ja + c_esperado;
+    RAISE EXCEPTION 'Conferir: % opções da Mudelar com hex no fim (esperadas % + % = %).', v_n, c_ja, c_esperado, c_ja + c_esperado;
   END IF;
   SELECT count(*) INTO v_n FROM attribute_option_group_values v
   WHERE v.xmin::text = v_xid AND NOT EXISTS (SELECT 1 FROM _cores_hex h WHERE h.id = v.id);
