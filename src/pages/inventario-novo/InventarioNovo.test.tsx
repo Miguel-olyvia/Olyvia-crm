@@ -202,12 +202,13 @@ describe("o novo Inventário", () => {
     expect(screen.getByTestId("onde")).toHaveTextContent("/inventory/novo/movimentos");
   });
 
-  it("fatia 5: no Hoje, com inventory.edit, o cabeçalho não repete o «Registar movimento» do Hoje clássico", async () => {
+  it("no Hoje o botão principal é sempre o do cabeçalho (o Hoje embebido já não tem cabeçalho próprio)", async () => {
     todayPayload = { ...payload(), purchases: { ...payload().purchases!, pending_approval: 0 } };
     montar();
     await screen.findByText("Hoje clássico (embebido)");
-    expect(cabecalho().queryByRole("button", { name: /Registar movimento/ })).toBeNull();
-    // sem inventory.edit o Hoje clássico não o mostra (PermissionGate): o cabeçalho mantém-no, bloqueado com o motivo
+    fireEvent.click(cabecalho().getByRole("button", { name: /Registar movimento/ }));
+    expect(screen.getByRole("dialog", { name: "Registar movimento" })).toBeInTheDocument();
+    // sem inventory.edit: o cabeçalho mantém-no, bloqueado com o motivo
     cleanup();
     perms = new Set(TODAS.filter((p) => p !== "inventory.edit"));
     montar();

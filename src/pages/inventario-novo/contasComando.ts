@@ -36,6 +36,8 @@ export interface ItemComando {
   /** Destino já traduzido para o separador (/inventory/novo/…). */
   to: string;
   acao: string;
+  /** Realce (o "N expedidas pelo fornecedor" do cartão "Encomendas por receber no armazém" do Hoje clássico). */
+  destaque?: string;
 }
 
 const isNum = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v);
@@ -100,11 +102,7 @@ export function precisaDeTi(
   rececao: InventoryReceivingSummary | null | undefined,
   hasPermission: TemPermissao,
 ): ItemComando[] {
-  const fila: InventoryQueueItem[] = [];
-  const rec = getReceivingQueueItem(rececao, hasPermission);
-  if (rec) fila.push(rec);
-  fila.push(...getInventoryQueueItems(today, hasPermission));
-  return fila
+  return filaDeTrabalho(today, rececao, hasPermission)
     .filter((x) => x.value > 0)
     .map((x, i) => ({ x, i }))
     .sort((a, b) => ORDEM_TOM[a.x.tone] - ORDEM_TOM[b.x.tone] || a.i - b.i)
@@ -116,7 +114,34 @@ export function precisaDeTi(
       valor: x.value,
       to: paraSeparador(x.to),
       acao: "Abrir",
+      ...(x.shipped > 0
+        ? { destaque: x.shipped === 1 ? "1 expedida pelo fornecedor" : `${x.shipped} expedidas pelo fornecedor` }
+        : {}),
     }));
+}
+
+/** A fila de trabalho do Hoje clássico, pela mesma ordem: o cartão da Receção à cabeça e depois os da RPC. */
+function filaDeTrabalho(
+  today: InventoryTodayPayload | null | undefined,
+  rececao: InventoryReceivingSummary | null | undefined,
+  hasPermission: TemPermissao,
+): Array<InventoryQueueItem & { shipped: number }> {
+  const fila: Array<InventoryQueueItem & { shipped: number }> = [];
+  const rec = getReceivingQueueItem(rececao, hasPermission);
+  if (rec) fila.push(rec);
+  fila.push(...getInventoryQueueItems(today, hasPermission).map((x) => ({ ...x, shipped: 0 })));
+  return fila;
+}
+
+/** Os cartões da fila que o Hoje clássico mostra com 0 ("Nada pendente"): ficam no Comando como "Em dia". */
+export function emDia(
+  today: InventoryTodayPayload | null | undefined,
+  rececao: InventoryReceivingSummary | null | undefined,
+  hasPermission: TemPermissao,
+): Array<{ chave: string; titulo: string; to: string }> {
+  return filaDeTrabalho(today, rececao, hasPermission)
+    .filter((x) => x.value === 0)
+    .map((x) => ({ chave: x.key, titulo: x.title, to: paraSeparador(x.to) }));
 }
 
 /* ------------------------------------------------------------------ A seguir */

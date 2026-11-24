@@ -16,13 +16,15 @@
 //   ecrã embebido elimina (AvisosInventario → restaurarInventario.ts: a mesma RPC e a mesma permissão do "Ver eliminados").
 //   O toast escuro é um só, da moldura (o Anular/Refazer do BotoesAnular usa o mesmo).
 // · Fatia 5: separadores com role=tablist/tab/tabpanel, setas ←/→ (Home/End) com roving tabindex; a camada própria
-//   (NaFrenteInventario, sem o .calma) para respeitar o modo escuro; no Hoje, o cabeçalho não repete o «Registar movimento»
-//   que o Hoje clássico já mostra.
+//   (NaFrenteInventario, sem o .calma) para respeitar o modo escuro.
+// · Igual ao artefacto (vault/inventario-redesenho-completo.html): no Hoje, por baixo do Pulso e do Comando, o Hoje clássico
+//   embebido mostra a versão compacta (Fluxo de hoje em 5 cartões + últimos movimentos em cartões), sem cabeçalho próprio
+//   nem a Fila de trabalho (é o «Precisa de ti» do Comando). O botão principal é sempre o do cabeçalho.
 import { Suspense, useEffect, useId, useRef, useState, type KeyboardEvent as KeyboardEventReact, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ArrowLeft, ArrowLeftRight, Check, ChevronDown, ShieldAlert, Sparkles, Truck, PackageCheck, ShoppingCart } from "lucide-react";
+import { ArrowLeft, ArrowLeftRight, ChevronDown, ShieldAlert, Sparkles, Truck, PackageCheck, ShoppingCart } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -99,16 +101,21 @@ function Aba({ chave, on, foco, rotulo, n, onClick, onKeyDown, refAba }: {
         on ? "text-foreground" : "text-muted-foreground hover:text-foreground")}>
       {on && <motion.span layoutId="aba-inventario" aria-hidden="true" className="absolute inset-0 rounded-full bg-card shadow-sm" transition={reduzir ? { duration: 0 } : MOLA} />}
       <span className="relative">{rotulo}</span>
-      {n !== null && <span className="relative rounded-full bg-amber-100 px-1.5 text-xs tabular-nums text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">{n}</span>}
+      {n !== null && <span className="relative rounded-full bg-amber-100 px-[7px] text-[11.5px] leading-5 tabular-nums text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">{n}</span>}
     </button>
   );
 }
 
+/** A pílula de saúde (.pill + .live do artefacto): o ponto a pulsar (parado com prefers-reduced-motion). */
 function PilulaSaude({ tom, texto }: { tom: "bad" | "warn" | "ok"; texto: string }) {
   return (
-    <span role="status" className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-sm font-medium",
-      tom === "ok" ? "bg-success/10 text-success" : tom === "bad" ? "bg-destructive/10 text-destructive" : "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200")}>
-      {tom === "ok" ? <Check className="h-3.5 w-3.5" aria-hidden="true" /> : <AlertTriangle className="h-3.5 w-3.5" aria-hidden="true" />}{texto}
+    <span role="status" className={cn("inline-flex h-[26px] items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-[12.5px] font-semibold",
+      tom === "ok" ? "bg-success/10 text-success" : tom === "bad" ? "bg-destructive/10 text-destructive" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300")}>
+      <span aria-hidden="true" className="relative flex h-2 w-2">
+        <span className="absolute inset-0 animate-ping rounded-full bg-current opacity-60 motion-reduce:animate-none" />
+        <span className="relative h-2 w-2 rounded-full bg-current" />
+      </span>
+      {texto}
     </span>
   );
 }
@@ -289,8 +296,8 @@ export default function InventarioNovo() {
   }, [ativo?.chave]);
   const abaComFoco = ativo?.chave ?? visiveis[0]?.chave ?? null;
 
-  // No Hoje, o Hoje clássico já tem o «Registar movimento» (PermissionGate inventory.edit): o cabeçalho não o repete.
-  const principalRepetido = ativo?.chave === "hoje" && principal.tipo === "movimento" && hasPermission("inventory.edit");
+  // O botão principal é sempre o do cabeçalho (um só, como no artefacto): dentro da moldura o Hoje já não tem cabeçalho
+  // próprio, por isso deixou de haver um «Registar movimento» repetido a esconder.
 
   const carregarPrincipal = () => {
     if (principal.tipo === "movimento") setMovimentoAberto(true);
@@ -309,31 +316,31 @@ export default function InventarioNovo() {
         <header data-moldura-inventario="" className="border-b border-border bg-card/95 backdrop-blur">
           <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
-              <Button type="button" variant="outline" className="min-h-11 shrink-0" onClick={voltar} aria-label="Voltar ao clássico">
+              <Button type="button" variant="ghost" className="min-h-11 shrink-0 rounded-[14px] font-semibold" onClick={voltar} aria-label="Voltar ao clássico">
                 <ArrowLeft className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">Voltar ao clássico</span>
               </Button>
               <div className="min-w-0">
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Inventário</p>
-                <h1 id="inventario-novo-titulo" className="truncate text-xl font-semibold tracking-tight">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary">Inventário</p>
+                <h1 id="inventario-novo-titulo" className="truncate text-xl font-bold leading-tight tracking-[-0.02em]">
                   {activeCompany?.name ?? "Inventário"} · {dataDeHoje()}
                 </h1>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              {!loading && <BotoesAnular orgId={orgId} movimentos={livro.movimentos} recarregar={livro.recarregar} aoMudarStock={aoMudarStock} avisar={setAviso} />}
               {saude && <PilulaSaude tom={saude.tom} texto={saude.texto} />}
+              {!loading && <BotoesAnular orgId={orgId} movimentos={livro.movimentos} recarregar={livro.recarregar} aoMudarStock={aoMudarStock} avisar={setAviso} />}
               {!loading && visiveis.length > 0 && acaoESe && (
                 <Popover open={eSeAberto} onOpenChange={setESeAberto}>
                   <PopoverTrigger asChild>
-                    <Button type="button" variant="outline" className="hidden min-h-11 sm:inline-flex">
+                    <Button type="button" variant="outline" className="hidden min-h-11 rounded-[14px] font-semibold shadow-sm sm:inline-flex">
                       <Sparkles className="mr-1.5 h-4 w-4 text-primary" aria-hidden="true" />E se…?
                     </Button>
                   </PopoverTrigger>
                   <PopoverContent align="end" className="w-[min(30rem,92vw)] rounded-2xl p-2">{eSe(() => setESeAberto(false))}</PopoverContent>
                 </Popover>
               )}
-              {!loading && visiveis.length > 0 && !principalRepetido && (
-                <BlockedButton type="button" className="hidden min-h-11 sm:inline-flex" blockedReason={gatePrincipal.allowed ? null : gatePrincipal.reason} side="bottom" onClick={carregarPrincipal}>
+              {!loading && visiveis.length > 0 && (
+                <BlockedButton type="button" className="hidden min-h-12 rounded-[14px] px-5 text-[15px] font-semibold shadow-[0_6px_18px_-6px_rgba(124,58,237,0.55)] sm:inline-flex" blockedReason={gatePrincipal.allowed ? null : gatePrincipal.reason} side="bottom" onClick={carregarPrincipal}>
                   <IconePrincipal className="mr-1.5 h-4 w-4" aria-hidden="true" />{principal.rotulo}
                 </BlockedButton>
               )}
@@ -356,7 +363,7 @@ export default function InventarioNovo() {
         {/* ---------------------------------------------------------------- os separadores, fixos no topo:
             fora do <main> (que é o que rola), para nenhum "sticky" dos ecrãs embebidos (ex.: o leitor da Receção) os tapar. */}
         <div data-moldura-inventario="" className="shrink-0 border-b border-border/60 bg-background/95 px-4 pb-2 pt-3 backdrop-blur sm:px-6">
-            <div role="tablist" aria-label="Inventário" className="mx-auto flex max-w-[1500px] gap-1 overflow-x-auto rounded-full bg-muted p-1 shadow-sm [scrollbar-width:none]">
+            <div role="tablist" aria-label="Inventário" className="mx-auto flex max-w-[1500px] gap-1 overflow-x-auto rounded-full bg-muted p-[5px] shadow-[0_8px_16px_-12px_rgba(22,19,31,0.25)] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
               {visiveis.map((s) => (
                 <Aba key={s.chave} chave={s.chave} on={ativo?.chave === s.chave} foco={abaComFoco === s.chave} rotulo={s.rotulo} n={counterFor(s.counterKey)}
                   onClick={() => { if (ativo?.chave !== s.chave) navigate(caminhoSeparador(s.chave)); }}
