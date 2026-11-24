@@ -27,6 +27,8 @@ interface ClientOrderRowActionsProps {
    * esta encomenda (organização/âmbito ORG/TEAM/OWNED — rpc_client_orders_can_delete): fica desativada com o motivo.
    */
   remove: { deletable: boolean; busy: boolean; onSelect: () => void; outOfScope?: boolean };
+  /** Só o ⋯ (cartões do novo Inventário): sem os botões diretos "Ver" e "PDF" — ambos continuam no menu. */
+  compact?: boolean;
 }
 
 /**
@@ -52,6 +54,7 @@ export function ClientOrderRowActions({
   onRequestMissing,
   proforma,
   remove,
+  compact,
 }: ClientOrderRowActionsProps) {
   const items: RowActionEntry[] = [
     { label: "Abrir detalhe", icon: Eye, onSelect: onView },
@@ -98,19 +101,23 @@ export function ClientOrderRowActions({
 
   return (
     <div className="inline-flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-      <button type="button" className={BTN} onClick={onView} aria-label={`Ver ${orderLabel}`}>
-        Ver
-      </button>
-      <button
-        type="button"
-        className={cn(BTN)}
-        onClick={onPdf}
-        disabled={pdfBusy}
-        aria-label={`PDF de ${orderLabel}`}
-      >
-        {pdfBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <FileDown className="h-3.5 w-3.5" aria-hidden="true" />}
-        PDF
-      </button>
+      {compact ? null : (
+        <>
+          <button type="button" className={BTN} onClick={onView} aria-label={`Ver ${orderLabel}`}>
+            Ver
+          </button>
+          <button
+            type="button"
+            className={cn(BTN)}
+            onClick={onPdf}
+            disabled={pdfBusy}
+            aria-label={`PDF de ${orderLabel}`}
+          >
+            {pdfBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden="true" /> : <FileDown className="h-3.5 w-3.5" aria-hidden="true" />}
+            PDF
+          </button>
+        </>
+      )}
       <RowActions items={items} menuLabel={`Mais ações para ${orderLabel}`} />
     </div>
   );

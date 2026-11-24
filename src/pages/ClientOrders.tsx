@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, type ReactElement } from "react";
+import { useState, useEffect, useCallback, useRef, useContext, type ReactElement } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -91,6 +91,9 @@ import {
 } from "@/components/client-orders/clientOrderFilters";
 import { useDeletedClientOrders } from "@/components/client-orders/useDeletedClientOrders";
 import { ClientOrderHistorySection } from "@/components/client-orders/ClientOrderHistorySection";
+import { InventarioEmbebido } from "@/components/inventory/ui/embebido";
+import { EcBarra, EcCartoes, type EcVista } from "@/components/client-orders/EcCartoes";
+import { EcEstadoLinha, EcFolhaKv, EcFolhaLinhas } from "@/components/client-orders/EcFolha";
 import { useTranslation } from "@/hooks/useTranslation";
 import { generateProformaPdfBlob, downloadBlob } from "@/utils/generateProformaPdfBlob";
 import { pdf } from '@react-pdf/renderer';
@@ -570,6 +573,9 @@ const ClientOrders = () => {
   const canRequestMissing = requestMissingGate.allowed;
   // Eliminar encomenda (rpc_delete_client_order exige client_orders.delete).
   const canDeleteOrder = hasPermission('client_orders.delete');
+  // Dentro da moldura do novo Inventário: cartões por secção (EcCartoes) ou a tabela clássica; fora dela nada muda.
+  const embebido = useContext(InventarioEmbebido);
+  const [vistaEmbebida, setVistaEmbebida] = useState<EcVista>('cartoes');
 
   // As chaves da secção "Diagnóstico da obra" ainda não existem em
   // src/translations/index.ts (ficheiro fora do âmbito desta alteração).
@@ -2852,6 +2858,21 @@ const ClientOrders = () => {
         ),
       });
     }
+    if (embebido) {
+      // Na moldura: os pares do painel do artefacto (Morada, Armazém, Data, Valor, Proforma, Notas), com os mesmos
+      // valores e lápis. O nº da EC é o título e a origem fica no distintivo do cabeçalho.
+      const item = (l: string) => items.find((i) => i.label === l);
+      const kv = [
+        item('Cliente'),
+        item('Morada'),
+        item('Armazém'),
+        { label: 'Data', value: doc.signature_date ? new Date(doc.signature_date).toLocaleDateString('pt-PT') : '—' },
+        item('Valor'),
+        sale?.proforma_number ? { label: 'Proforma', value: item('Origem')?.value } : null,
+        item('Notas'),
+      ].filter((i): i is ClientOrderInfoItem => !!i);
+      return <EcFolhaKv items={kv} />;
+    }
     return <ClientOrderInfoGrid items={items} />;
   };
 
@@ -3118,6 +3139,108 @@ const ClientOrders = () => {
     return nodes.length > 0 ? <div className="flex flex-wrap items-center justify-end gap-1">{nodes}</div> : null;
   };
 
+  // Notas de anulação na PO ("não vou receber o resto") de uma linha — as mesmas na tabela e nos cartões da moldura.
+  const renderLineExtra = (line: ClientOrderDocumentLine, contractId: string): ReactElement[] => {
+    const extra: ReactElement[] = [];
+    if (line.line_status === 'nao_recebido_anulado') {
+      extra.push(
+        <div key="void" className="text-muted-foreground">{getBaseLineStatusLabel(line)}</div>,
+      );
+    } else {
+      const suffix = getCancelledSuffix(line).replace(/^ · /, '');
+      if (suffix) extra.push(<div key="cancel" className="text-muted-foreground">{suffix}</div>);
+    }
+    if (!hasDocumentCancellations(line) && poCancellationsByLine?.contractId === contractId) {
+      (poCancellationsByLine.byLine[lineKey(line)] || []).forEach((c) => {
+        extra.push(
+          <div key={c.id} className="text-muted-foreground" title={c.notes || undefined}>
+            {formatBaseQty(c.units)} anulado(s){c.poNumber ? ` na ${c.poNumber}` : ''} — {PO_CANCELLATION_REASON_LABELS[c.reason] || c.reason}
+          </div>,
+        );
+      });
+    }
+    return extra;
+  };
+
+  // Ações de uma encomenda da lista (Ver · PDF · ⋯) — as mesmas na tabela e no ⋯ dos cartões da moldura (compact: só o ⋯).
+  const renderOrderRowActions = (order: ClientOrderDocumentRow, compact?: boolean) => {
+    const orderLabel = order.order_number || order.contract_number;
+    const deletable = !!getDeletableOrigin(order.contract_id, order.origin_type);
+    const sale = salesByContract[order.contract_id];
+    return (
+      <ClientOrderRowActions
+        orderLabel={orderLabel}
+        onView={() => openDetail(order.contract_id)}
+        onPdf={() => handleGeneratePdf(order.contract_id, orderLabel)}
+        pdfBusy={pdfGeneratingId === order.contract_id}
+        edit={order.origin_type === 'manual'
+          ? { onSelect: () => openDetailThen(order.contract_id, 'edit') }
+          : null}
+        onRequestMissing={() => openDetailThen(order.contract_id, 'requestMissing')}
+        proforma={sale?.proforma_number
+          ? {
+              number: sale.proforma_number,
+              onSelect: () => handleDownloadProforma(order.contract_id),
+              busy: proformaDownloadingId === order.contract_id,
+            }
+          : null}
+        remove={{
+          deletable,
+          busy: deleting,
+          outOfScope: canDeleteOrder && !canDeleteRow(order.contract_id),
+          onSelect: () => openDeleteOrder(order.contract_id, orderLabel, order.origin_type, order.origin_number),
+        }}
+        compact={compact}
+      />
+    );
+  };
+
+  // Linhas da folha na moldura (cartões .ln do artefacto): os mesmos dados, estado, origem e ações da tabela.
+  const renderEmbeddedDetailLines = (doc: ClientOrderDocumentDetail) => (
+    <EcFolhaLinhas
+      vazio={t('clientOrders.dialog.noLines')}
+      seccoes={groupClientOrderLines(doc.lines, detailPhaseCatalog).map(({ section, rows }) => ({
+        key: section,
+        titulo: CLIENT_ORDER_SECTION_LABELS[section],
+        linhas: rows.map(({ line, phase }) => {
+          const isProductLine = line.item_type !== 'service' && !!line.product_id;
+          const served = asQty(line.qty_served);
+          const reserved = asQty(line.qty_reserved);
+          const extra = renderLineExtra(line, doc.contract_id);
+          return {
+            key: lineKey(line),
+            nome: line.product_name || line.service_name || '—',
+            sku: line.product_sku || line.service_sku || null,
+            para: phase.forServices,
+            fase: phase.fases.length > 0 ? <ClientOrderPhaseBadge fases={phase.fases} /> : null,
+            qtd: formatDiagnosticNumber(asQty(line.quantity)),
+            trancada: !!line.line_locked,
+            servido: isProductLine && (line.qty_served != null || line.qty_reserved != null)
+              ? `servido ${formatBaseQty(served)}${reserved > 0 ? ` · reservado ${formatBaseQty(reserved)}` : ''}`
+              : null,
+            origem: (
+              <ClientOrderLineSource
+                line={line}
+                poState={line.purchase_order_id ? detailPoStates[line.purchase_order_id] ?? null : null}
+                onOpenPo={line.purchase_order_id ? () => openPurchaseOrder(line) : null}
+                extra={extra.length > 0 ? <>{extra}</> : undefined}
+              />
+            ),
+            estado: (
+              <EcEstadoLinha
+                state={clientOrderLineState(line.line_status, canRequestLine(line))}
+                title={getLineStatusLabel(line)}
+                poNumber={line.purchase_order_number}
+                onOpenPo={line.purchase_order_id ? () => openPurchaseOrder(line) : null}
+              />
+            ),
+            acoes: renderLineActions(line),
+          };
+        }),
+      }))}
+    />
+  );
+
   if (companyLoading) {
     return (
       <>
@@ -3145,6 +3268,54 @@ const ClientOrders = () => {
   return (
     <>
       <div className="space-y-4">
+        {embebido ? (
+          <EcBarra
+            pesquisa={searchTerm}
+            onPesquisa={setSearchTerm}
+            rotuloEstado={getOverallStatusLabel}
+            contagens={{
+              total: statusSummary?.total ?? null,
+              byStatus: statusSummary?.byStatus ?? null,
+              truncated: statusSummary?.truncated,
+              ready: readyToShip,
+            }}
+            statusFilter={statusFilter}
+            readyActive={urlReady}
+            onEstado={applyStatusFilter}
+            onProntas={applyReadyFilter}
+            origem={urlOrigin}
+            onOrigem={applyOriginFilter}
+            datas={{
+              de: dateFrom,
+              ate: dateTo,
+              onDe: setDateFrom,
+              onAte: setDateTo,
+              rotuloDe: t('clientOrders.filters.dateFrom'),
+              rotuloAte: t('clientOrders.filters.dateTo'),
+            }}
+            eliminadas={{
+              ver: showDeleted,
+              pode: canSeeDeleted,
+              motivo: 'Sem permissão: requer ver contratos (client_contracts.view)',
+              onVer: setShowDeleted,
+            }}
+            filtrosAtivos={!!(searchTerm || statusFilter !== "all" || dateFrom || dateTo || urlReady || urlOrigin !== "all")}
+            onLimpar={() => {
+              setSearchTerm("");
+              applyStatusFilter("all");
+              applyOriginFilter("all");
+              setDateFrom("");
+              setDateTo("");
+            }}
+            rotuloLimpar={t('clientOrders.filters.clear')}
+            exportar={{ onClick: handleExport, busy: exporting }}
+            onNova={() => setCreateOpen(true)}
+            vista={vistaEmbebida}
+            onVista={setVistaEmbebida}
+          >
+            {vistaEmbebida === 'tabela' ? <ClientOrderProgressLegend /> : null}
+          </EcBarra>
+        ) : (<>
         <InventoryPageHeader
           area="warehouse"
           title="Saídas para clientes"
@@ -3302,6 +3473,7 @@ const ClientOrders = () => {
           />
           <ClientOrderProgressLegend />
         </div>
+        </>)}
 
         {(urlReady || urlOrigin !== 'all') && readyTruncated && (
           <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm" role="status">
@@ -3315,6 +3487,23 @@ const ClientOrders = () => {
           </div>
         )}
 
+        {embebido && vistaEmbebida === 'cartoes' ? (
+          <EcCartoes
+            entradas={listEntries}
+            readiness={readiness}
+            loading={loading}
+            textoCarregar={t('clientOrders.loading')}
+            textoVazio="Sem encomendas com estes filtros"
+            statusFilter={statusFilter}
+            readyActive={urlReady}
+            rotuloEstado={getOverallStatusLabel}
+            origemDe={getListOrigin}
+            origemEliminadaDe={getDeletedOrigin}
+            onAbrir={(order) => openDetail(order.contract_id)}
+            onAbrirEliminada={openDeletedDetail}
+            acoes={(order) => renderOrderRowActions(order, true)}
+          />
+        ) : (
         <div className="overflow-x-auto rounded-lg border bg-card">
           <Table className="min-w-[1000px]">
             <TableHeader>
@@ -3387,8 +3576,6 @@ const ClientOrders = () => {
                   const order = entry.row;
                   const orderLabel = order.order_number || order.contract_number;
                   const origin = getListOrigin(order);
-                  const deletable = !!getDeletableOrigin(order.contract_id, order.origin_type);
-                  const sale = salesByContract[order.contract_id];
                   return (
                     <TableRow
                       key={order.contract_id}
@@ -3431,29 +3618,7 @@ const ClientOrders = () => {
                         </div>
                       </TableCell>
                       <TableCell className="text-right align-top">
-                        <ClientOrderRowActions
-                          orderLabel={orderLabel}
-                          onView={() => openDetail(order.contract_id)}
-                          onPdf={() => handleGeneratePdf(order.contract_id, orderLabel)}
-                          pdfBusy={pdfGeneratingId === order.contract_id}
-                          edit={order.origin_type === 'manual'
-                            ? { onSelect: () => openDetailThen(order.contract_id, 'edit') }
-                            : null}
-                          onRequestMissing={() => openDetailThen(order.contract_id, 'requestMissing')}
-                          proforma={sale?.proforma_number
-                            ? {
-                                number: sale.proforma_number,
-                                onSelect: () => handleDownloadProforma(order.contract_id),
-                                busy: proformaDownloadingId === order.contract_id,
-                              }
-                            : null}
-                          remove={{
-                            deletable,
-                            busy: deleting,
-                            outOfScope: canDeleteOrder && !canDeleteRow(order.contract_id),
-                            onSelect: () => openDeleteOrder(order.contract_id, orderLabel, order.origin_type, order.origin_number),
-                          }}
-                        />
+                        {renderOrderRowActions(order)}
                       </TableCell>
                     </TableRow>
                   );
@@ -3462,6 +3627,7 @@ const ClientOrders = () => {
             </TableBody>
           </Table>
         </div>
+        )}
 
         <div className="flex flex-wrap items-center justify-between gap-2.5 px-0.5 text-[12.5px] text-muted-foreground">
           <span>
@@ -3555,6 +3721,7 @@ const ClientOrders = () => {
 
             <ClientOrderLineStateLegend />
 
+            {embebido ? renderEmbeddedDetailLines(detailData) : (
             <div className="overflow-x-auto rounded-lg border bg-card">
               <Table className="min-w-[900px]">
                 <TableHeader>
@@ -3588,25 +3755,7 @@ const ClientOrders = () => {
                       const isProductLine = line.item_type !== 'service' && !!line.product_id;
                       const served = asQty(line.qty_served);
                       const reserved = asQty(line.qty_reserved);
-                      // Notas de anulação na PO ("não vou receber o resto").
-                      const extra: ReactElement[] = [];
-                      if (line.line_status === 'nao_recebido_anulado') {
-                        extra.push(
-                          <div key="void" className="text-muted-foreground">{getBaseLineStatusLabel(line)}</div>,
-                        );
-                      } else {
-                        const suffix = getCancelledSuffix(line).replace(/^ · /, '');
-                        if (suffix) extra.push(<div key="cancel" className="text-muted-foreground">{suffix}</div>);
-                      }
-                      if (!hasDocumentCancellations(line) && poCancellationsByLine?.contractId === detailData.contract_id) {
-                        (poCancellationsByLine.byLine[lineKey(line)] || []).forEach((c) => {
-                          extra.push(
-                            <div key={c.id} className="text-muted-foreground" title={c.notes || undefined}>
-                              {formatBaseQty(c.units)} anulado(s){c.poNumber ? ` na ${c.poNumber}` : ''} — {PO_CANCELLATION_REASON_LABELS[c.reason] || c.reason}
-                            </div>,
-                          );
-                        });
-                      }
+                      const extra = renderLineExtra(line, detailData.contract_id);
                       return (
                         <TableRow key={lineKey(line)}>
                           <TableCell className="whitespace-nowrap align-top font-mono text-[0.92em]">
@@ -3663,6 +3812,7 @@ const ClientOrders = () => {
                 </TableBody>
               </Table>
             </div>
+            )}
 
             <p className="flex items-start gap-1.5 text-[12.5px] text-muted-foreground">
               <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" />
