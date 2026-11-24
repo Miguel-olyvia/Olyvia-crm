@@ -5,10 +5,10 @@ import { Component, Suspense, lazy, useEffect, useId, useMemo, useRef, useState,
 import { Minus, Plus, RotateCcw } from "lucide-react";
 import type { ComandosVista, RevestimentoVisual } from "./planta3d/Visualizador3D";
 import { cenaDoProduto, estadoDoModelo, modeloParaPrevia, tipoDaPrevia, type EstadoPrevia, type MedidaCm } from "./planta3d/previaProduto3d";
-import { eixosPorOmissao, temCamposParaEixos, textoDasMedidas, trocarEixo, type Eixos } from "./planta3d/eixosMedida";
+import { eixosPorOmissao, notaDaTroca, temCamposParaEixos, textoDasMedidas, trocarEixo, type Eixos } from "./planta3d/eixosMedida";
 import { zonasDoModelo, type ZonaGlb, type ZonasDoProduto } from "./planta3d/zonasGlb";
 import { InterruptorMedidas, PainelMedidas, PainelZonas } from "./Previa3DPaineis";
-import type { NoCat, ProdutoModelo3D } from "./planta3d/catalogo3d";
+import type { NoCat, ProdutoModelo3D, TipoMockup } from "./planta3d/catalogo3d";
 import type { TexturaModelo } from "./planta3d/texturaProduto";
 import { niveisDoNo } from "./planta3d/modelos3dEscolha";
 import { cenaDoRevestimento, planearRevestimento, superficieDaPrevia, type MedidaRevestimento, type SuperficieRev } from "./planta3d/revestimentoPrevia";
@@ -96,8 +96,11 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
   };
   // 24/11 (fase 1): os eixos escolhidos à mão (null: a regra automática do tipo), as cotas, e a zona apontada (rato ou teclado) ou fixa (clique) no painel «Zonas». Nada disto grava.
   const tipo = useMemo(() => tipoDaPrevia({ nome, sub: sub ?? undefined, no, arvore, modelo3d }), [nome, sub, no, arvore, modelo3d]);
-  const [eixosEscolhidos, setEixosEscolhidos] = useState<Eixos | null>(null);
-  useEffect(() => { setEixosEscolhidos(null); }, [tipo]);
+  // a escolha leva o tipo a que se aplica: se o tipo mudar, vale logo a regra automática (sem um desenho com os eixos do tipo antigo, como daria repor num efeito)
+  const [escolha, setEscolha] = useState<{ tipo: TipoMockup; eixos: Eixos; nota: string | null } | null>(null);
+  const eixosEscolhidos = escolha && escolha.tipo === tipo ? escolha.eixos : null;
+  const notaTroca = escolha && escolha.tipo === tipo ? escolha.nota : null;
+  useEffect(() => { setEscolha((e) => (e && e.tipo !== tipo ? null : e)); }, [tipo]); // esquece a escolha de outro tipo (se o tipo voltar, não ressuscita)
   const [cotas, setCotas] = useState(false);
   const [zonaApontada, setZonaApontada] = useState<ZonaGlb | null>(null), [zonaFixa, setZonaFixa] = useState<ZonaGlb | null>(null);
   const modelo = useMemo(() => modeloParaPrevia({ nome, sub: sub ?? undefined, no, arvore, medida, cor, textura, modelo3d, eixos: eixosEscolhidos, zonas }), [nome, sub, no, arvore, medida, cor, textura, modelo3d, eixosEscolhidos, zonas]);
@@ -163,8 +166,8 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
       {/* o equivalente em texto das cotas, para leitores de ecrã: a região viva existe sempre (vazia e escondida com as cotas desligadas) para a mudança se anunciar */}
       <p aria-live="polite" className={cotas && !superficie ? NOTA : "sr-only"}>{cotas && !superficie ? textoDasMedidas(d) : ""}</p>
       {painelMedidas && !superficie && medida && temCamposParaEixos(medida) && (
-        <PainelMedidas medida={medida} eixos={eixosEmVigor} manual={eixosEscolhidos !== null} dimensoes={d}
-          aoEscolher={(eixo, campo) => setEixosEscolhidos(trocarEixo(eixosEmVigor, eixo, campo))} aoRepor={() => setEixosEscolhidos(null)} />
+        <PainelMedidas medida={medida} eixos={eixosEmVigor} manual={eixosEscolhidos !== null} dimensoes={d} nota={notaTroca}
+          aoEscolher={(eixo, campo) => { const depois = trocarEixo(eixosEmVigor, eixo, campo); setEscolha({ tipo, eixos: depois, nota: notaDaTroca(eixosEmVigor, depois, eixo) }); }} aoRepor={() => setEscolha(null)} />
       )}
       {!superficie && zonasDoObjecto.length >= 2 && (
         <PainelZonas zonas={zonasDoObjecto} pintadaPor={zonas?.zonas} fixa={zonaFixa} aoApontar={setZonaApontada} aoFixar={setZonaFixa} />

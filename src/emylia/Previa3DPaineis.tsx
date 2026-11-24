@@ -34,10 +34,12 @@ interface PropsMedidas {
   dimensoes: { larguraCm: number; alturaCm: number; profundidadeCm: number };
   aoEscolher: (eixo: EixoPeca, campo: CampoMedida) => void;
   aoRepor: () => void;
+  /** Se a última escolha trocou dois campos, o aviso («A profundidade passou a usar «comprimento»…»): vai na mesma região viva da frase das medidas. */
+  nota?: string | null;
 }
 
 /** O painel «Medidas»: três seletores («Largura = comprimento (160 cm)»), a regra em vigor e «Repor automático». Escolher um campo já usado troca os dois. Não grava nada. */
-export function PainelMedidas({ medida, eixos, manual, dimensoes, aoEscolher, aoRepor }: PropsMedidas) {
+export function PainelMedidas({ medida, eixos, manual, dimensoes, aoEscolher, aoRepor, nota }: PropsMedidas) {
   const id = useId();
   return (
     <section aria-labelledby={`${id}-t`} className="grid gap-3 rounded-xl border border-border bg-card p-3">
@@ -56,9 +58,11 @@ export function PainelMedidas({ medida, eixos, manual, dimensoes, aoEscolher, ao
       </div>
       <div className="flex flex-wrap items-center gap-3">
         <p className="text-[15px]">{manual ? "Regra: escolhida à mão (só para ver)" : "Regra: automática por tipo"}</p>
-        <button type="button" disabled={!manual} onClick={aoRepor} className={BOTAO}>Repor automático</button>
+        {/* aria-disabled (e não disabled): um botão desactivado perde o foco do teclado ao ser carregado; assim o foco fica onde estava e o clique é só ignorado */}
+        <button type="button" aria-disabled={!manual} onClick={() => { if (manual) aoRepor(); }} className={cn(BOTAO, !manual && "cursor-not-allowed opacity-50 hover:bg-card")}>Repor automático</button>
       </div>
-      <p className={NOTA}>A peça fica com {textoDeCm(dimensoes.larguraCm)} cm de largura, {textoDeCm(dimensoes.alturaCm)} cm de altura e {textoDeCm(dimensoes.profundidadeCm)} cm de profundidade.</p>
+      {/* região viva: escolher num seletor muda a peça e a frase (e, se dois campos trocaram, a nota); sem isto, quem usa leitor de ecrã não sabe o que mudou */}
+      <p aria-live="polite" className={NOTA}>A peça fica com {textoDeCm(dimensoes.larguraCm)} cm de largura, {textoDeCm(dimensoes.alturaCm)} cm de altura e {textoDeCm(dimensoes.profundidadeCm)} cm de profundidade.{nota ? ` ${nota}` : ""}</p>
     </section>
   );
 }

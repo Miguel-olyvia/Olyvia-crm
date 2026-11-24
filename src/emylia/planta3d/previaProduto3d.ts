@@ -4,6 +4,7 @@
 import type { AtributoDef, AtributoProduto, DimensaoMedida } from "../v2/catalogoModelo";
 import { alturaDeSanitaDeChao, modeloDoProduto, sem, temModeloGenerico, temModeloHtml, type NoCat, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
 import { eixosPorOmissao, validarEixos, type Eixos } from "./eixosMedida";
+import { DIRECAO_VISTA } from "./cotasPeca";
 import type { ZonasDoProduto } from "./zonasGlb";
 import type { TexturaModelo } from "./texturaProduto";
 import { espacoVazio, paredesDoContorno, PE_DIREITO_OMISSAO, type Espaco, type PecaProduto } from "./modelo";
@@ -143,7 +144,7 @@ const FOLGA_M = 1, LADO_MIN_M = 1.5, FOLGA_PE_DIREITO_M = 0.3, DIST_MIN_M = 1, D
 /** O zoom: não entra no objecto (um pouco mais do que o raio da caixa da peça, e nunca a menos de 25 cm) e afasta-se, no máximo, 3 vezes a distância de partida. */
 const FOLGA_RAIO = 1.1, ZOOM_MIN_M = 0.25, ZOOM_AFASTAR = 3;
 /** A direcção de onde a câmara olha (a mesma diagonal da vista 3D do visualizador: de frente e de lado, um pouco por cima). */
-const DIRECAO: V3 = [1, 0.6, 1];
+const DIRECAO: V3 = DIRECAO_VISTA;
 
 /**
  * A cena mínima de um produto: uma divisão quadrada (o visualizador precisa de quatro paredes, e as que ficam entre a câmara e a peça escondem-se

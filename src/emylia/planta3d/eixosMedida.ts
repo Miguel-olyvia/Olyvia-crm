@@ -51,6 +51,17 @@ export function trocarEixo(eixos: Eixos, eixo: EixoPeca, campo: CampoMedida): Ei
   return { ...eixos, [eixo]: campo, ...(outro ? { [outro]: antigo } : {}) };
 }
 
+const ARTIGO_CAMPO: Record<CampoMedida, string> = { largura: "a largura", comprimento: "o comprimento", espessura: "a espessura" };
+/**
+ * O aviso (para o ecrã e para leitores de ecrã) de que escolher `eixo` trocou dois eixos: «A profundidade passou a usar «comprimento», porque a espessura já estava em uso.»
+ * `antes` e `depois` são os eixos de antes e de depois de `trocarEixo`; sem troca (nenhum outro eixo mudou): null.
+ */
+export function notaDaTroca(antes: Eixos, depois: Eixos, eixo: EixoPeca): string | null {
+  const outro = EIXOS_PECA.find((e) => e !== eixo && depois[e] !== antes[e]);
+  if (!outro) return null;
+  return `A ${outro} passou a usar «${depois[outro]}», porque ${ARTIGO_CAMPO[depois[eixo]]} já estava em uso.`;
+}
+
 /** A Medida só tem painel de eixos com pelo menos dois dos três campos (2D ou 3D): com um só (1D) não há nada a repartir. */
 export const temCamposParaEixos = (m: ValoresMedida | null | undefined): boolean => !!m && CAMPOS_MEDIDA.filter((c) => m[c] !== undefined).length >= 2;
 

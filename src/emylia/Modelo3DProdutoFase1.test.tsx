@@ -5,20 +5,23 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AtributoDef, AtributoProduto } from "./v2/catalogoModelo";
 
+const dimsVistas = vi.hoisted(() => [] as string[]);
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: { storage: { from: (bucket: string) => ({ getPublicUrl: (caminho: string) => ({ data: { publicUrl: `https://cdn.teste/${bucket}/${caminho}` } }) }) } },
 }));
 vi.mock("./planta3d/Visualizador3D", () => ({
   default: (p: { descricao: string; cotas?: boolean; zonaRealcada?: string | null; modelos: Record<string, { dimensoes: { larguraCm: number; alturaCm: number; profundidadeCm: number }; mockup3d: { zonas?: unknown } }>; espaco: { pecas: { produtoId: string }[] } }) => {
     const m = p.modelos[p.espaco.pecas[0].produtoId];
+    dimsVistas.push(`${m.dimensoes.larguraCm}x${m.dimensoes.alturaCm}x${m.dimensoes.profundidadeCm}`);
     return <div data-testid="canvas3d" role="img" aria-label={p.descricao} data-cotas={String(!!p.cotas)} data-realce={p.zonaRealcada ?? ""}
       data-dim={`${m.dimensoes.larguraCm}x${m.dimensoes.alturaCm}x${m.dimensoes.profundidadeCm}`} data-zonas={m.mockup3d.zonas ? JSON.stringify(m.mockup3d.zonas) : ""} />;
   },
 }));
 
 import { Modelo3DProduto } from "./Modelo3DProduto";
+import { Previa3DProduto } from "./Previa3DProduto";
 
-afterEach(() => { cleanup(); vi.restoreAllMocks(); });
+afterEach(() => { cleanup(); vi.restoreAllMocks(); dimsVistas.length = 0; });
 
 const MEDIDA_DEF: AtributoDef = { id: "a-med", codigo: "medida", nome: "Medida", tipo: "medida", temHex: false, ordem: 1, opcoes: [] };
 const cor = (id: string, nome: string, codigo: string): AtributoDef => ({ id, codigo, nome, tipo: "lista", temHex: true, temFoto: true, ordem: 2, opcoes: [
@@ -63,7 +66,35 @@ describe("painel «Medidas»: escolher os eixos (só ecrã, sem gravar)", () => 
     expect(seletor("Profundidade").value).toBe("espessura");
     expect(screen.getByText("Regra: automática por tipo")).toBeTruthy();
     expect(c.getAttribute("data-dim")).toBe("40x160x25");
-    expect((screen.getByRole("button", { name: "Repor automático" }) as HTMLButtonElement).disabled).toBe(true);
+    // aria-disabled (e não disabled): um botão desactivado perde o foco do teclado ao ser carregado, e o foco tem de ficar onde está
+    const repor = screen.getByRole("button", { name: "Repor automático" }) as HTMLButtonElement;
+    expect(repor.getAttribute("aria-disabled")).toBe("true");
+    expect(repor.disabled).toBe(false);
+  });
+  it("«Repor automático» na regra automática não faz nada (ignora o clique e não perde o foco); depois de escolher à mão, funciona e deixa de estar desactivado", async () => {
+    const c = await abrir([medida3D]);
+    const repor = screen.getByRole("button", { name: "Repor automático" });
+    repor.focus();
+    fireEvent.click(repor);
+    expect(repor).toHaveFocus();
+    expect(c.getAttribute("data-dim")).toBe("40x160x25");
+    expect(screen.getByText("Regra: automática por tipo")).toBeTruthy();
+    fireEvent.change(seletor("Altura"), { target: { value: "espessura" } });
+    expect(c.getAttribute("data-dim")).toBe("40x25x160");
+    expect(repor.getAttribute("aria-disabled")).toBe("false");
+    fireEvent.click(repor);
+    expect(c.getAttribute("data-dim")).toBe("40x160x25");
+  });
+  it("a frase «A peça fica com…» é uma região viva (muda com os seletores e anuncia-se), e uma troca de dois campos leva uma nota nessa mesma região", async () => {
+    await abrir([medida3D]);
+    const frase = screen.getByText(/^A peça fica com 40 cm de largura/);
+    expect(frase.getAttribute("aria-live")).toBe("polite");
+    expect(frase.textContent).not.toContain("já estava em uso");
+    fireEvent.change(seletor("Altura"), { target: { value: "espessura" } });
+    expect(frase.textContent).toContain("A peça fica com 40 cm de largura, 25 cm de altura e 160 cm de profundidade.");
+    expect(frase.textContent).toContain("A profundidade passou a usar «comprimento», porque a espessura já estava em uso.");
+    fireEvent.click(screen.getByRole("button", { name: "Repor automático" }));
+    expect(frase.textContent).not.toContain("já estava em uso");
   });
   it("escolher um campo já usado TROCA os dois: Altura = espessura passa a profundidade a comprimento, e a peça deita-se (40 × 25 × 160) logo", async () => {
     const c = await abrir([medida3D]);
@@ -152,5 +183,23 @@ describe("painel «Zonas»: a frente, o corpo…, com o atributo que pinta cada 
     const c = await abrir([medida3D, { atributoId: "a-corpo", opcaoId: "a-corpo-1" }], [MEDIDA_DEF, COR_CORPO]);
     expect(JSON.parse(c.getAttribute("data-zonas")!).porZona).toBe(false);
     expect(screen.getByRole("button", { name: /Frente — 2 partes/ }).textContent).toContain("Pintada por: Cor do corpo");
+  });
+});
+
+describe("trocar de tipo de produto: os eixos escolhidos à mão não passam para o tipo novo, nem por um desenho", () => {
+  const medida = { largura: 40, comprimento: 160, espessura: 25 };
+  const previa = (nome: string) => <Previa3DProduto nome={nome} sub={null} no={null} arvore={[]} medida={medida} painelMedidas />;
+  it("a coluna com Largura = comprimento (160×40×25) passa a tampo: volta logo à regra do tampo (40×25×160), sem um desenho com os eixos da coluna", async () => {
+    const { rerender } = render(previa("Coluna AXIS"));
+    const c = await screen.findByTestId("canvas3d");
+    expect(c.getAttribute("data-dim")).toBe("40x160x25");
+    fireEvent.change(seletor("Largura"), { target: { value: "comprimento" } });
+    expect(c.getAttribute("data-dim")).toBe("160x40x25");
+    dimsVistas.length = 0;
+    rerender(previa("Tampo carvalho"));
+    expect(dimsVistas.length).toBeGreaterThan(0);
+    expect(dimsVistas).not.toContain("160x40x25");
+    expect(screen.getByTestId("canvas3d").getAttribute("data-dim")).toBe("40x25x160");
+    expect(screen.getByText("Regra: automática por tipo")).toBeTruthy();
   });
 });

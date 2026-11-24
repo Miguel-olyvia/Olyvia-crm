@@ -2,7 +2,7 @@
 // (como o classificador faz com o nome). `eixosPorOmissao` é essa regra de hoje, como dados; `dimensoesDaMedida` aceita eixos escolhidos e, sem eles, dá EXACTAMENTE o que dava.
 import { describe, expect, it } from "vitest";
 import { COMPRIMENTO_NA_ALTURA, ESPEC, type TipoMockup } from "./catalogo3d";
-import { CAMPOS_MEDIDA, eixosPorOmissao, textoDasMedidas, trocarEixo, validarEixos, type Eixos } from "./eixosMedida";
+import { CAMPOS_MEDIDA, eixosPorOmissao, notaDaTroca, textoDasMedidas, trocarEixo, validarEixos, type Eixos } from "./eixosMedida";
 import { dimensoesDaMedida, type MedidaCm, type MedidasParciais } from "./previaProduto3d";
 
 /** A regra de ANTES (cópia do dimensoesDaMedida sem eixos): a referência da regressão. Não importa nada do código novo. */
@@ -137,6 +137,21 @@ describe("dimensoesDaMedida com eixos escolhidos: a peça deita-se e levanta-se"
   it("eixos inválidos são ignorados (valem os de omissão)", () => {
     const lixo = { largura: "largura", altura: "largura", profundidade: "largura" } as unknown as Eixos;
     expect(dimensoesDaMedida("coluna", coluna, undefined, lixo)).toEqual(dimensoesDaMedida("coluna", coluna));
+  });
+});
+
+describe("notaDaTroca: o aviso de que escolher um campo já usado trocou dois eixos", () => {
+  const coluna: Eixos = { largura: "largura", altura: "comprimento", profundidade: "espessura" };
+  it("Altura = espessura: a profundidade ficou com o comprimento, e a nota diz-o", () => {
+    const depois = trocarEixo(coluna, "altura", "espessura");
+    expect(notaDaTroca(coluna, depois, "altura")).toBe("A profundidade passou a usar «comprimento», porque a espessura já estava em uso.");
+  });
+  it("Largura = comprimento: a altura ficou com a largura", () => {
+    const depois = trocarEixo(coluna, "largura", "comprimento");
+    expect(notaDaTroca(coluna, depois, "largura")).toBe("A altura passou a usar «largura», porque o comprimento já estava em uso.");
+  });
+  it("sem troca (o campo escolhido já era o do eixo, ou os eixos não mudaram): sem nota", () => {
+    expect(notaDaTroca(coluna, trocarEixo(coluna, "altura", "comprimento"), "altura")).toBeNull();
   });
 });
 

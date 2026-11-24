@@ -21,9 +21,9 @@ import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco
 import { repeticoes, revestimentoDaSuperficie, type Revestimento } from "./revestimentos";
 import { aplicarTextura, pedirTextura, retirarTextura, type TexturaModelo } from "./texturaProduto";
 import { corDaJunta, type AmostraNoMundo, type PlanoRevestimento } from "./revestimentoPrevia";
-import { textoDeCm } from "./eixosMedida";
+import { cotasDaPeca, noEcra } from "./cotasPeca";
 import type { ZonaGlb, ZonasDoProduto } from "./zonasGlb";
-import { aplicarAparenciaDasZonas, criarMateriaisDeZona } from "./zonasMateriais";
+import { aplicarAparenciaDasZonas, aplicarRealceDasZonas, criarMateriaisDeZona } from "./zonasMateriais";
 import { useTexturasPorUrl } from "./useTexturasPorUrl";
 
 export type Vista3D = "cima" | "3d" | "pessoa";
@@ -396,9 +396,11 @@ function GenericoGlb({ c, tipo, w, d, h, cor, mat, opc, generico }: PropsParam &
   const urls = useMemo(() => (zc.zonas?.porZona ? Object.values(zc.zonas.zonas).flatMap((z) => (z?.textura ? [z.textura.url] : [])) : []), [zc.zonas]);
   const texturas = useTexturasPorUrl(urls, invalidate);
   useEffect(() => {
-    aplicarAparenciaDasZonas(zm.porZona, { corBase: corFinal, zonas: zc.zonas, texturas, unica: tx ? { tex: tx.tex, lado: tx.lado } : null, realce: zc.realce });
+    aplicarAparenciaDasZonas(zm.porZona, { corBase: corFinal, zonas: zc.zonas, texturas, unica: tx ? { tex: tx.tex, lado: tx.lado } : null });
     invalidate();
-  }, [zm, zc.zonas, zc.realce, texturas, tx, corFinal, invalidate]);
+  }, [zm, zc.zonas, texturas, tx, corFinal, invalidate]);
+  // o realce é só brilho: apontar de uma zona a outra não retira nem volta a pôr as fotos (o material não se recompila)
+  useEffect(() => { aplicarRealceDasZonas(zm.porZona, zc.realce); invalidate(); }, [zm, zc.realce, invalidate]);
   useEffect(() => { invalidate(); }, [t, invalidate]);
   useFonte("generico", "GLB genérico");
   return <primitive object={t.grupo} />;
@@ -758,27 +760,34 @@ function Contorno({ w, d, y }: { w: number; d: number; y: number }) {
 }
 
 /**
- * 24/11 (fase 1): as cotas da peça: três linhas de dimensão nas arestas da caixa (largura no topo da frente, profundidade em baixo à direita, altura à esquerda: assim os três rótulos não se sobrepõem na vista de partida), em forma de chaveta (a linha de chamada
- * sai da aresta, corre ao longo dela e volta), com o rótulo «Largura 40 cm» a meio. A caixa vai de -w/2 a w/2, -d/2 a d/2 e 0 a h (m). Os rótulos são só para ver (aria-hidden): a mesma
- * informação está em texto fora do canvas (Previa3DProduto). As linhas ignoram a profundidade (vêem-se através da peça).
+ * 24/11 (fase 1): as cotas da peça: três linhas de dimensão nas arestas da caixa (largura no topo da frente, profundidade em baixo à direita, altura à esquerda ou, numa peça deitada, à
+ * direita: cotasPeca.ts), em forma de chaveta (a linha de chamada sai da aresta, corre ao longo dela e volta), com o rótulo «Largura 40 cm» a meio. A caixa vai de -w/2 a w/2, -d/2 a d/2
+ * e 0 a h (m). Os rótulos são só para ver (aria-hidden): a mesma informação está em texto fora do canvas (Previa3DProduto). As linhas ignoram a profundidade (vêem-se através da peça).
+ * Ao zoom máximo um rótulo pode sair do enquadramento: a cada desenho esconde-se o que fica fora do ecrã (noEcra), em vez de ficar cortado ou colado ao bordo.
  */
 const COR_COTA = "#0b6b63";
 function Cotas({ w, d, h }: { w: number; d: number; h: number }) {
-  const off = Math.min(0.3, Math.max(0.07, Math.max(w, d, h) * 0.1));
-  const xE = -w / 2 - off, xD = w / 2 + off, zF = d / 2 + off;
-  const cotas: { chave: string; rotulo: string; pontos: V3[]; meio: V3 }[] = [
-    { chave: "largura", rotulo: `Largura ${textoDeCm(w * 100)} cm`, pontos: [[-w / 2, h, d / 2], [-w / 2, h, zF], [w / 2, h, zF], [w / 2, h, d / 2]], meio: [0, h, zF] },
-    { chave: "profundidade", rotulo: `Profundidade ${textoDeCm(d * 100)} cm`, pontos: [[w / 2, 0, -d / 2], [xD, 0, -d / 2], [xD, 0, d / 2], [w / 2, 0, d / 2]], meio: [xD, 0, 0] },
-    { chave: "altura", rotulo: `Altura ${textoDeCm(h * 100)} cm`, pontos: [[-w / 2, 0, d / 2], [xE, 0, d / 2], [xE, h, d / 2], [-w / 2, h, d / 2]], meio: [xE, h / 2, d / 2] },
-  ];
+  const cotas = useMemo(() => cotasDaPeca(w, d, h), [w, d, h]);
+  const grupos = useRef<Record<string, THREE.Group | null>>({}), rotulos = useRef<Record<string, HTMLDivElement | null>>({});
+  const mundo = useMemo(() => new THREE.Vector3(), []);
+  useFrame(({ camera }) => {
+    for (const c of cotas) {
+      const g = grupos.current[c.chave], el = rotulos.current[c.chave];
+      if (!g || !el) continue;
+      g.getWorldPosition(mundo).project(camera);
+      el.style.visibility = noEcra(mundo) ? "visible" : "hidden";
+    }
+  });
   return (
     <group>
       {cotas.map((c) => (
         <group key={c.chave}>
           <Line points={c.pontos} color={COR_COTA} lineWidth={1.6} depthTest={false} renderOrder={6} />
-          <Html position={c.meio} center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
-            <div aria-hidden="true" data-cota={c.chave} className="whitespace-nowrap rounded border border-teal-800/40 bg-white/95 px-1.5 py-0.5 text-[12px] font-semibold leading-tight text-teal-900 shadow-sm">{c.rotulo}</div>
-          </Html>
+          <group position={c.meio} ref={(g) => { grupos.current[c.chave] = g; }}>
+            <Html center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
+              <div ref={(el) => { rotulos.current[c.chave] = el; }} aria-hidden="true" data-cota={c.chave} className="whitespace-nowrap rounded border border-teal-800/40 bg-white/95 px-1.5 py-0.5 text-[12px] font-semibold leading-tight text-teal-900 shadow-sm">{c.rotulo}</div>
+            </Html>
+          </group>
         </group>
       ))}
     </group>

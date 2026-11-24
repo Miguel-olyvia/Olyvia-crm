@@ -4,7 +4,7 @@ import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
 import { categoriaPorId } from "./categoriasGlb";
 import { montarGenerico } from "./modelosHtml/glb";
-import { COR_REALCE, aplicarAparenciaDasZonas, criarMateriaisDeZona } from "./zonasMateriais";
+import { COR_REALCE, aplicarAparenciaDasZonas, aplicarRealceDasZonas, criarMateriaisDeZona } from "./zonasMateriais";
 import type { ZonasDoProduto } from "./zonasGlb";
 
 /** Uma cena como a do GLB da categoria: um nó por parte, com o nome e o material (userData.material), todos caixas unitárias. */
@@ -107,10 +107,49 @@ describe("aplicarAparenciaDasZonas: a cor, a foto e o realce de cada zona", () =
   });
   it("o realce acende só a zona pedida (brilho) e apaga-se ao tirar", () => {
     const { m, zm } = montar("movel_lavatorio");
-    aplicarAparenciaDasZonas(zm.porZona, { corBase: "#cccccc", texturas: texs, realce: "frente" });
+    aplicarRealceDasZonas(zm.porZona, "frente");
     expect(mat(m.grupo, "frente_cima").emissive.getHexString()).toBe(COR_REALCE.slice(1));
     expect(mat(m.grupo, "caixa").emissive.getHexString()).toBe("000000");
-    aplicarAparenciaDasZonas(zm.porZona, { corBase: "#cccccc", texturas: texs, realce: null });
+    aplicarRealceDasZonas(zm.porZona, null);
     expect(mat(m.grupo, "frente_cima").emissive.getHexString()).toBe("000000");
+  });
+  it("mudar só o realce mexe só no brilho: não retira nem volta a pôr a foto (o material não se recompila) e a aparência fica como estava", () => {
+    const { m, zm } = montar("movel_lavatorio");
+    aplicarAparenciaDasZonas(zm.porZona, { corBase: "#cccccc", zonas, texturas: texs });
+    const frente = mat(m.grupo, "frente_cima"), corpo = mat(m.grupo, "caixa");
+    const versoes = [frente.version, corpo.version];
+    aplicarRealceDasZonas(zm.porZona, "frente");
+    aplicarRealceDasZonas(zm.porZona, "corpo");
+    aplicarRealceDasZonas(zm.porZona, null);
+    expect([frente.version, corpo.version]).toEqual(versoes);
+    expect(frente.map).toBe(texturaB);
+    expect(corpo.map).toBe(texturaA);
+    expect(frente.color.getHexString()).toBe("ffffff");
+  });
+  it("o realce que já estava aplicado sobrevive a uma nova aparência (a aparência não mexe no brilho)", () => {
+    const { m, zm } = montar("movel_lavatorio");
+    aplicarRealceDasZonas(zm.porZona, "frente");
+    aplicarAparenciaDasZonas(zm.porZona, { corBase: "#cccccc", zonas, texturas: texs });
+    expect(mat(m.grupo, "frente_cima").emissive.getHexString()).toBe(COR_REALCE.slice(1));
+  });
+});
+
+describe("criarMateriaisDeZona: uma parte que o grupo não tem", () => {
+  it("avisa uma vez (console.warn) com o nome da parte, e não volta a avisar na montagem seguinte; as outras zonas continuam a funcionar", () => {
+    const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const c = categoriaPorId("movel_lavatorio")!;
+    const falta = c.partes.find((p) => p.nome === "frente_baixo")!;
+    const montarSem = () => {
+      const m = montarGenerico(cenaDe("movel_lavatorio"), c, { w: 0.8, d: 0.45, h: 0.5, o: {} }, "#cccccc");
+      m.grupo.getObjectByName(falta.nome)?.removeFromParent();
+      return { m, zm: criarMateriaisDeZona(m.grupo, c) };
+    };
+    const a = montarSem();
+    expect(aviso).toHaveBeenCalledTimes(1);
+    expect(String(aviso.mock.calls[0].join(" "))).toContain("frente_baixo");
+    montarSem();
+    expect(aviso).toHaveBeenCalledTimes(1);
+    expect(mat(a.m.grupo, "frente_cima")).toBe(a.zm.porZona.get("frente"));
+    aviso.mockRestore();
   });
 });
