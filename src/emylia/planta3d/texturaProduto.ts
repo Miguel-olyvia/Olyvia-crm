@@ -23,11 +23,13 @@ export function repeticoesPorMetro(ladoCm: number): number {
 }
 
 /** O UV de um ponto do mundo (m) numa face de normal `n`, em repetições da foto: o plano é o da normal dominante. É o que o shader faz (ver `aplicarTextura`). */
-export function uvEmMundo(p: V3, n: V3, repeticoes: number): [number, number] {
+export function uvEmMundo(p: V3, n: V3, repeticoes: number, rodar = false): [number, number] {
   const ax = Math.abs(n[0]), ay = Math.abs(n[1]), az = Math.abs(n[2]);
   const [u, v] = ax > ay && ax > az ? [p[2], p[1]] : ay > az ? [p[0], p[2]] : [p[0], p[1]];
-  return [u * repeticoes, v * repeticoes];
+  return rodar ? [v * repeticoes, u * repeticoes] : [u * repeticoes, v * repeticoes];
 }
+/** 24/11: `rodar` troca os eixos da foto (u ↔ v): o veio vertical da foto corre na horizontal. Só os revestimentos com o lado maior na horizontal o pedem. */
+export interface OpcoesTextura { rodar?: boolean }
 
 /* ------------------------------------------------------------------ o material */
 const CHAVE_PROGRAMA = "textura-no-mundo-v1";
@@ -35,7 +37,8 @@ type Guardado = { cor: THREE.Color; uniform: { value: number } };
 const guardados = new WeakMap<THREE.Material, Guardado>();
 
 /** Põe a foto no material (MeshStandardMaterial) como mapa, mapeada no mundo com `ladoCm` por repetição. A cor passa a branco (e guarda-se a de antes). Idempotente. */
-export function aplicarTextura(mat: THREE.MeshStandardMaterial, textura: THREE.Texture, ladoCm: number): void {
+export function aplicarTextura(mat: THREE.MeshStandardMaterial, textura: THREE.Texture, ladoCm: number, opcoes: OpcoesTextura = {}): void {
+  const rodar = !!opcoes.rodar;
   let g = guardados.get(mat);
   if (!g) { g = { cor: mat.color.clone(), uniform: { value: 0 } }; guardados.set(mat, g); }
   g.uniform.value = repeticoesPorMetro(ladoCm);
@@ -52,11 +55,11 @@ export function aplicarTextura(mat: THREE.MeshStandardMaterial, textura: THREE.T
       // o mesmo que uvEmMundo: o plano da normal dominante, em metros × repetições por metro (o `map` já vem em linear: a textura é sRGB)
       .replace("#include <map_fragment>", `{
   vec3 anTx = abs( vNormalMundoTx );
-  vec2 uvTx = ( anTx.x > anTx.y && anTx.x > anTx.z ) ? vPosMundoTx.zy : ( ( anTx.y > anTx.z ) ? vPosMundoTx.xz : vPosMundoTx.xy );
+  vec2 uvTx = ( anTx.x > anTx.y && anTx.x > anTx.z ) ? vPosMundoTx.zy : ( ( anTx.y > anTx.z ) ? vPosMundoTx.xz : vPosMundoTx.xy );${rodar ? "\n  uvTx = uvTx.yx;" : ""}
   diffuseColor *= texture2D( map, uvTx * uRepTextura );
 }`);
   };
-  mat.customProgramCacheKey = () => CHAVE_PROGRAMA;
+  mat.customProgramCacheKey = () => (rodar ? `${CHAVE_PROGRAMA}-rodada` : CHAVE_PROGRAMA);
   mat.needsUpdate = true;
 }
 

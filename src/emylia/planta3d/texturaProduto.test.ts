@@ -73,6 +73,18 @@ describe("aplicarTextura: a foto fica como mapa do material, com a cor branca po
     m2.onBeforeCompile(s2 as unknown as THREE.WebGLProgramParametersWithUniforms, null as unknown as THREE.WebGLRenderer);
     expect((s2.uniforms.uRepTextura as { value: number }).value).toBeCloseTo(5);
   });
+  it("24/11 `rodar` (revestimentos com o lado maior na horizontal): o veio vertical da foto passa a correr ao longo da peça; outra chave de programa; sem ele, como sempre", () => {
+    const m = nova(), r = nova();
+    aplicarTextura(m, tex(), 40);
+    aplicarTextura(r, tex(), 40, { rodar: true });
+    const s = shaderFalso(), sr = shaderFalso();
+    m.onBeforeCompile(s as unknown as THREE.WebGLProgramParametersWithUniforms, null as unknown as THREE.WebGLRenderer);
+    r.onBeforeCompile(sr as unknown as THREE.WebGLProgramParametersWithUniforms, null as unknown as THREE.WebGLRenderer);
+    expect(s.fragmentShader).not.toContain("uvTx = uvTx.yx");
+    expect(sr.fragmentShader).toContain("uvTx = uvTx.yx");
+    expect(r.customProgramCacheKey()).not.toBe(m.customProgramCacheKey());
+    expect(uvEmMundo([0.4, 0, 0.8], [0, 1, 0], 2.5, true)).toEqual([2, 1]);
+  });
   it("mudar o lado de uma peça já com textura muda a escala do mesmo uniform", () => {
     const m = nova();
     aplicarTextura(m, tex(), 40);

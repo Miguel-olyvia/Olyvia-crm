@@ -19,7 +19,8 @@ import { USAR_GLB, criarMaterialEspelho, lerGlb, montarGenerico, montarModelo, r
 import { BANCADA_OMISSAO, CHAPA_OMISSAO, TOPO_BANCADA_MM, ficheiroDaChapa, mudarChapa, selecaoChapa, type ConfigBancada } from "./bancada";
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
 import { repeticoes, revestimentoDaSuperficie, type Revestimento } from "./revestimentos";
-import { aplicarTextura, pedirTextura, retirarTextura } from "./texturaProduto";
+import { aplicarTextura, pedirTextura, retirarTextura, type TexturaModelo } from "./texturaProduto";
+import { corDaJunta, type AmostraNoMundo, type PlanoRevestimento } from "./revestimentoPrevia";
 
 export type Vista3D = "cima" | "3d" | "pessoa";
 export interface Visualizador3DProps {
@@ -46,7 +47,11 @@ export interface Visualizador3DProps {
   zoomRoda?: boolean;
   /** Entrega os comandos do zoom (aproximar, afastar, repor a vista) a quem tem botões ou teclas fora do canvas; fica a null enquanto não há câmara pronta. */
   comandos?: MutableRefObject<ComandosVista | null>;
+  /** 24/11 (a pré-visualização de um revestimento): uma amostra de peças com juntas, no chão ou na parede (revestimentoPrevia.ts). Sem isto, nada muda. */
+  revestimento?: RevestimentoVisual | null;
 }
+/** A amostra de um revestimento: onde fica e as peças (revestimentoPrevia.ts), a cor lisa das peças e, se houver, a foto da cor (mapeada no mundo, como nas peças). */
+export interface RevestimentoVisual { amostra: AmostraNoMundo; cor: string; textura?: TexturaModelo }
 /** O que se pode pedir à câmara de fora do canvas (botões e teclas): aproximar e afastar respeitam as distâncias mínima e máxima da câmara; repor volta à vista de partida. */
 export interface ComandosVista { aproximar: () => void; afastar: () => void; repor: () => void }
 
@@ -984,6 +989,68 @@ function Superficies({ espaco, teto }: { espaco: Espaco; teto: boolean }) {
   );
 }
 
+/* ------------------------------------------------------------------ a amostra de um revestimento (só a pré-visualização do produto) */
+/** A camada de argamassa por baixo das peças (m): as juntas são o rasgo entre peças até ela. */
+const ARGAMASSA_M = 0.002;
+/**
+ * As peças da amostra numa SÓ geometria (as caixas fundidas, nada de centenas de malhas): no plano da amostra, `x` ao longo da largura e `y` ao longo do fundo (chão, +Z)
+ * ou da altura (parede, +Y); a espessura para cima (chão) ou para fora da parede (+Z). O tom de cada peça vai na cor dos vértices (multiplica a cor ou a foto).
+ */
+function geometriaDasPecas(plano: PlanoRevestimento): THREE.BufferGeometry {
+  const molde = new THREE.BoxGeometry(1, 1, 1);
+  const pos = molde.getAttribute("position"), nor = molde.getAttribute("normal"), idx = molde.getIndex();
+  const nv = pos.count, ni = idx ? idx.count : 0, n = plano.pecas.length, e = plano.espessuraM, chao = plano.superficie === "chao";
+  const P = new Float32Array(n * nv * 3), N = new Float32Array(n * nv * 3), C = new Float32Array(n * nv * 3), I = new Uint32Array(n * ni);
+  plano.pecas.forEach((q, k) => {
+    const s: V3 = chao ? [q.w, e, q.h] : [q.w, q.h, e];
+    const c: V3 = chao ? [q.x + q.w / 2, ARGAMASSA_M + e / 2, q.y + q.h / 2] : [q.x + q.w / 2, q.y + q.h / 2, ARGAMASSA_M + e / 2];
+    for (let i = 0; i < nv; i++) {
+      const o = (k * nv + i) * 3;
+      P[o] = pos.getX(i) * s[0] + c[0]; P[o + 1] = pos.getY(i) * s[1] + c[1]; P[o + 2] = pos.getZ(i) * s[2] + c[2];
+      N[o] = nor.getX(i); N[o + 1] = nor.getY(i); N[o + 2] = nor.getZ(i);
+      C[o] = C[o + 1] = C[o + 2] = q.tom;
+    }
+    for (let i = 0; i < ni; i++) I[k * ni + i] = (idx?.getX(i) ?? 0) + k * nv;
+  });
+  molde.dispose();
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(P, 3));
+  g.setAttribute("normal", new THREE.BufferAttribute(N, 3));
+  g.setAttribute("color", new THREE.BufferAttribute(C, 3));
+  g.setIndex(new THREE.BufferAttribute(I, 1));
+  g.computeBoundingSphere();
+  return g;
+}
+/**
+ * A amostra: a argamassa (uma placa cinzenta, um pouco mais escura do que a peça) e por cima as peças, finas, com a foto da cor mapeada no mundo (`LADO_TEXTURA_CM`
+ * por repetição, como nas peças; rodada quando a peça é mais comprida do que alta, para o veio seguir a peça) ou a cor lisa; se a foto não abrir, fica a cor lisa. Tudo faz e recebe sombra; a geometria, os materiais e a foto largam-se ao desmontar.
+ */
+function AmostraRevestimento({ r }: { r: RevestimentoVisual }) {
+  const { plano, origem } = r.amostra, [w, h] = plano.amostraM, chao = plano.superficie === "chao";
+  const invalidate = useThree((s) => s.invalidate);
+  const geo = useMemo(() => geometriaDasPecas(plano), [plano]);
+  useEffect(() => () => geo.dispose(), [geo]);
+  const matPecas = useMemo(() => new THREE.MeshStandardMaterial({ color: r.cor, roughness: 0.5, vertexColors: true }), [r.cor]);
+  const matJunta = useMemo(() => new THREE.MeshStandardMaterial({ color: corDaJunta(r.cor), roughness: 0.95 }), [r.cor]);
+  useEffect(() => () => { matPecas.dispose(); matJunta.dispose(); }, [matPecas, matJunta]);
+  const url = r.textura?.url, lado = r.textura?.ladoCm ?? 0;
+  // o veio da foto (vertical nas fotos das opções de cor) corre ao longo da peça: com o lado maior na horizontal, a foto roda
+  const rodar = plano.pecaM[0] > plano.pecaM[1];
+  useEffect(() => {
+    if (!url) return;
+    const largar = pedirTextura(url, (t) => { if (t) aplicarTextura(matPecas, t, lado, { rodar }); else retirarTextura(matPecas); invalidate(); });
+    return () => { largar(); retirarTextura(matPecas); invalidate(); };
+  }, [url, lado, rodar, matPecas, invalidate]);
+  useEffect(() => { invalidate(); }, [geo, invalidate]);
+  const base: { p: V3; s: V3 } = chao ? { p: [w / 2, ARGAMASSA_M / 2, h / 2], s: [w, ARGAMASSA_M, h] } : { p: [w / 2, h / 2, ARGAMASSA_M / 2], s: [w, h, ARGAMASSA_M] };
+  return (
+    <group position={origem}>
+      <mesh position={base.p} material={matJunta} receiveShadow><boxGeometry args={base.s} /></mesh>
+      <mesh geometry={geo} material={matPecas} castShadow receiveShadow />
+    </group>
+  );
+}
+
 /* ------------------------------------------------------------------ câmaras */
 function Camaras({ vista, espaco, camara, contido = false }: { vista: Vista3D; espaco: Espaco; camara?: Visualizador3DProps["camara"]; contido?: boolean }) {
   const { size } = useThree();
@@ -1113,7 +1180,7 @@ function ComandosDaVista({ comandos }: { comandos: MutableRefObject<ComandosVist
   return null;
 }
 
-export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover, porFazer, rolarPagina = false, zoomRoda = false, comandos }: Visualizador3DProps) {
+export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover, porFazer, rolarPagina = false, zoomRoda = false, comandos, revestimento }: Visualizador3DProps) {
   const [arrasto, setArrasto] = useState<Arrasto | null>(null);
   const alvo = useRef<AlvoArrasto>({ grupo: null, camera: null, controls: null });
   // com `rolarPagina`, a roda do rato só chega ao OrbitControls quando `zoomRoda`: senão a página rola (o OrbitControls ouve o canvas e dá-lhe preventDefault, por isso
@@ -1141,6 +1208,7 @@ export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas
         <Superficies espaco={espaco} teto={teto && vista !== "cima"} />
         {espaco.paredes.map((p, i) => <ParedeCena key={p.id} parede={p} indice={i} espaco={espaco} />)}
         <SombraDeContacto espaco={espaco} />
+        {revestimento && <AmostraRevestimento r={revestimento} />}
         {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={porFazer?.has(p.id) ? `${p.id}:por-fazer` : p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} fantasma={!!porFazer?.has(p.id)} onSel={onSelecionar} mover={mover} arrasto={arrasto} setArrasto={setArrasto} alvo={alvo} /> : null; })}
         {arrasto?.lugar && <GuiaParede espaco={espaco} x={arrasto.lugar.x} y={arrasto.lugar.y} altura={arrasto.parede ? arrasto.lugar.altura : null} />}
         <PonteCamara alvo={alvo} />

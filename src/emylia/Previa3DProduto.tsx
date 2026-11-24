@@ -3,10 +3,12 @@
 // não abre, a própria conta do modelo), fica um texto com «Tentar outra vez» em vez do formulário partido.
 import { Component, Suspense, lazy, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
-import type { ComandosVista } from "./planta3d/Visualizador3D";
+import type { ComandosVista, RevestimentoVisual } from "./planta3d/Visualizador3D";
 import { cenaDoProduto, estadoDoModelo, modeloParaPrevia, type EstadoPrevia, type MedidaCm } from "./planta3d/previaProduto3d";
-import type { NoCat } from "./planta3d/catalogo3d";
+import type { NoCat, ProdutoModelo3D } from "./planta3d/catalogo3d";
 import type { TexturaModelo } from "./planta3d/texturaProduto";
+import { niveisDoNo } from "./planta3d/modelos3dEscolha";
+import { cenaDoRevestimento, planearRevestimento, superficieDaPrevia, type MedidaRevestimento, type SuperficieRev } from "./planta3d/revestimentoPrevia";
 
 const carregarVisualizador = () => import("./planta3d/Visualizador3D");
 let Visualizador3D = lazy(carregarVisualizador);
@@ -49,9 +51,22 @@ export interface Previa3DProdutoProps {
   textura?: TexturaModelo;
   /** O «Modelo 3D» escolhido no próprio produto (a subcategoria e a categoria vêm da árvore): manda sobre o classificador. */
   modelo3d?: string | null;
+  /** 24/11: a Medida de um revestimento em cm, sem os limites do modelo 3D (a espessura de 3,5 mm de um laminado conta). Sem ela, a `medida` ou a do nome. */
+  medidaRevestimento?: MedidaRevestimento | null;
+  /** 24/11: o atributo «Aplicação» do produto (Pavimento, Parede): manda sobre a subcategoria na vista por omissão de um revestimento automático. */
+  aplicacao?: string | null;
 }
-/** O aviso de um revestimento escolhido: ainda não tem desenho próprio, cai na caixa com as medidas (a textura vem da foto da cor). */
-const AVISO_REVESTIMENTO = "Os revestimentos ainda não têm desenho próprio: aparece uma caixa com as medidas.";
+
+const ROTULO_SUPERFICIE: Record<SuperficieRev, string> = { chao: "No chão", parede: "Na parede" };
+const BOTOES_SUPERFICIE: ReadonlyArray<readonly [SuperficieRev, string]> = [["chao", "Ver no chão"], ["parede", "Ver na parede"]];
+const BOTAO_SUPERFICIE = "inline-flex min-h-11 items-center rounded-md px-3 text-[15px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 aria-pressed:bg-primary aria-pressed:text-primary-foreground hover:bg-muted aria-pressed:hover:bg-primary";
+
+/** Os lados da peça de um revestimento (cm): a medida do revestimento, senão a do modelo 3D (largura e comprimento), senão a do nome; nenhuma: null (vai a 60×60). */
+function ladosDaPeca(mr: MedidaRevestimento | null | undefined, medida: MedidaCm | null | undefined, m: ProdutoModelo3D): [number, number] | null {
+  if (mr) return mr.ladoCm;
+  if (medida?.largura && medida.comprimento) return [medida.largura, medida.comprimento];
+  return m.dimensoes.deNome ? [m.dimensoes.larguraCm, m.dimensoes.profundidadeCm] : null;
+}
 
 const BOTAO_ZOOM = "inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-input bg-card/95 text-foreground shadow-sm transition-colors hover:bg-muted focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25";
 const MAIS = new Set(["+", "="]), MENOS = new Set(["-", "_"]);
@@ -63,7 +78,7 @@ function textoDeAjuda(foco: boolean, dentro: boolean): string {
 }
 
 /** O 3D: a conta do modelo e da cena, o aviso e o visualizador (lazy). Corre dentro do Falha3D, por isso uma excepção aqui também fica na alternativa. */
-function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d }: Previa3DProdutoProps) {
+function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRevestimento, aplicacao }: Previa3DProdutoProps) {
   // o zoom: botões (sempre), pinça (toque), e roda do rato e teclas + e − só com o 3D focado (e a roda só com o rato lá dentro), para a página continuar a rolar
   const comandos = useRef<ComandosVista | null>(null), idAjuda = useId();
   const [foco, setFoco] = useState(false), [dentro, setDentro] = useState(false);
@@ -73,12 +88,30 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d }: Previa
     else if (MENOS.has(e.key)) { e.preventDefault(); comandos.current?.afastar(); }
   };
   const modelo = useMemo(() => modeloParaPrevia({ nome, sub: sub ?? undefined, no, arvore, medida, cor, textura, modelo3d }), [nome, sub, no, arvore, medida, cor, textura, modelo3d]);
-  const cena = useMemo(() => cenaDoProduto(modelo), [modelo]);
-  // a caixa escolhida à mão não leva o aviso de «sem modelo parecido»; os revestimentos dizem que ainda não têm desenho
+  // 24/11: um revestimento (escolhido, ou automático na categoria Revestimentos) mostra-se como superfície: a vista por omissão vem da regra única
+  // (revestimentoPrevia.ts, superficieDaPrevia) e o interruptor muda-a só aqui, sem gravar nada; outro produto fica exactamente como antes
+  const niveis = useMemo(() => niveisDoNo(arvore, no), [arvore, no]);
+  const omissao = superficieDaPrevia({ modelo: modelo.escolha?.modelo ?? null, categoria: niveis.categoria?.nome, subcategoria: niveis.subcategoria?.nome ?? sub, aplicacao });
+  const [escolhida, setEscolhida] = useState<SuperficieRev | null>(null);
+  useEffect(() => { setEscolhida(null); }, [omissao]);
+  const superficie = omissao ? escolhida ?? omissao : null;
+  const lados = ladosDaPeca(medidaRevestimento, medida, modelo);
+  const espessuraCm = medidaRevestimento?.espessuraCm ?? medida?.espessura;
+  const ladosChave = lados?.join("x");
+  const plano = useMemo(() => (superficie ? planearRevestimento({ ladoPecaCm: lados, superficie, espessuraCm }) : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `ladosChave` resume `lados` (um array novo em cada desenho)
+    [superficie, ladosChave, espessuraCm]);
+  const cenaRev = useMemo(() => (plano ? cenaDoRevestimento(plano, modelo.nome) : null), [plano, modelo.nome]);
+  const revestimento = useMemo<RevestimentoVisual | null>(() => (cenaRev ? { amostra: cenaRev.amostra, cor: modelo.mockup3d.cor, ...(textura ? { textura } : {}) } : null), [cenaRev, modelo.mockup3d.cor, textura]);
+  const cena = useMemo(() => (cenaRev ? { espaco: cenaRev.espaco, modelos: {}, camara: cenaRev.camara } : cenaDoProduto(modelo)), [cenaRev, modelo]);
+  // a caixa escolhida à mão não leva o aviso de «sem modelo parecido»; um revestimento só avisa quando a medida falta ou a amostra teve de mudar
   const escolhido = modelo.escolha?.modelo;
-  const aviso = escolhido?.startsWith("revestimento_") ? AVISO_REVESTIMENTO : escolhido === "caixa" ? undefined : AVISO[estadoDoModelo(modelo)];
+  const aviso = plano ? [plano.medidaEmFalta ? "Sem medida: aparecem peças de 60 × 60 cm." : null, plano.aviso].filter(Boolean).join(" ") || undefined
+    : escolhido === "caixa" ? undefined : AVISO[estadoDoModelo(modelo)];
   const d = modelo.dimensoes;
-  const descricao = `${modelo.nome || "Produto sem nome"}: ${nf(d.larguraCm)} por ${nf(d.profundidadeCm)} por ${nf(d.alturaCm)} cm (largura, profundidade e altura).`;
+  const descricao = plano
+    ? `${modelo.nome || "Revestimento sem nome"}: peças de ${nf(plano.pecaRealCm[0])} por ${nf(plano.pecaRealCm[1])} cm, ${superficie === "chao" ? "no chão" : "na parede"}, numa amostra de ${nf(plano.amostraM[0])} por ${nf(plano.amostraM[1])} m.`
+    : `${modelo.nome || "Produto sem nome"}: ${nf(d.larguraCm)} por ${nf(d.profundidadeCm)} por ${nf(d.alturaCm)} cm (largura, profundidade e altura).`;
   return (
     <div className="grid gap-2">
       <div className="relative h-64 overflow-hidden rounded-xl border border-border bg-muted/50 sm:h-80">
@@ -88,9 +121,19 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d }: Previa
           className="h-full outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40">
           <Suspense fallback={<div className="grid h-full place-items-center"><Estado texto="A carregar o 3D…" /></div>}>
             <Visualizador3D espaco={cena.espaco} modelos={cena.modelos} vista="3d" teto={false} etiquetas={false} descricao={descricao}
-              selecionada={null} onSelecionar={SEM_ESCOLHA} camara={cena.camara} rolarPagina zoomRoda={foco && dentro} comandos={comandos} />
+              selecionada={null} onSelecionar={SEM_ESCOLHA} camara={cena.camara} rolarPagina zoomRoda={foco && dentro} comandos={comandos} revestimento={revestimento} />
           </Suspense>
         </div>
+        {superficie && (
+          <>
+            <p className="pointer-events-none absolute left-2 top-2 rounded-md bg-card/95 px-2.5 py-1 text-[15px] font-semibold text-foreground shadow-sm">{ROTULO_SUPERFICIE[superficie]}</p>
+            <div role="group" aria-label="Onde ver o revestimento" className="absolute right-2 top-2 flex gap-1 rounded-lg border border-input bg-card/95 p-1 shadow-sm">
+              {BOTOES_SUPERFICIE.map(([s, rotulo]) => (
+                <button key={s} type="button" aria-pressed={superficie === s} onClick={() => setEscolhida(s)} className={BOTAO_SUPERFICIE}>{rotulo}</button>
+              ))}
+            </div>
+          </>
+        )}
         <div className="absolute bottom-2 right-2 flex gap-1.5">
           <button type="button" aria-label="Afastar" title="Afastar" onClick={() => comandos.current?.afastar()} className={BOTAO_ZOOM}><Minus className="h-5 w-5" aria-hidden="true" /></button>
           <button type="button" aria-label="Aproximar" title="Aproximar" onClick={() => comandos.current?.aproximar()} className={BOTAO_ZOOM}><Plus className="h-5 w-5" aria-hidden="true" /></button>

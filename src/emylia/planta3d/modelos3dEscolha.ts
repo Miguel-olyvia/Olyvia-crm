@@ -13,8 +13,8 @@
 //  - «catálogo 3D» (família «html»): os modelos exactos do HTML (lava-loiça, placa, torneira de cozinha, tampo Coverlam). O modelo concreto continua a ser
 //    escolhido pelo nome e pela medida do produto (htmlDoCatalogo.ts); escolher aqui só diz «este produto é um desses» (o classificador força o tipo);
 //  - especiais: `caixa` (a caixa com as medidas, sem modelo), `revestimento_chao` e `revestimento_parede`.
-//    PENDENTE: os revestimentos chão/parede ainda NÃO têm desenho próprio (a superfície do chão e da parede é a fase seguinte). Até existir, caem na caixa
-//    com as medidas, e a textura vem da foto da cor do produto, como hoje (Modelo3DProduto → texturaProduto.ts).
+//    24/11: na PRÉ-VISUALIZAÇÃO do produto, os revestimentos chão/parede desenham-se como superfície (uma amostra de peças com juntas e a foto da cor:
+//    revestimentoPrevia.ts, onde está também a regra da vista por omissão). Na planta e no classificador continuam a cair na caixa com as medidas.
 import { CATEGORIAS_GLB } from "./categoriasGlb";
 
 export type OrigemModelo3D = "produto" | "subcategoria" | "categoria" | "automatico";
