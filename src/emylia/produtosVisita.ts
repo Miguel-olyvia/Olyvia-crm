@@ -8,7 +8,7 @@
 // Só tipos de motor.ts e do Catálogo: assim o motor pode usar este ficheiro sem ciclos de importação.
 import type { Catalogo, No, Produto, Regra } from "./v2/catalogoModelo";
 import type { LinhaOrc, MedKey, Medidas, SvcId } from "./motor";
-import { nosDeProdutoDoRamo, nosDoObjeto } from "./ramoDosProdutos";
+import { nosDeProdutoDoRamo, nosDoObjeto, ramoDaCategoriaProduto } from "./ramoDosProdutos";
 
 export const PREFIXO_PROD = "Produto · ";
 export const PREFIXO_CLIENTE = "Fornecido pelo cliente · ";
@@ -302,9 +302,20 @@ export function partesDoModelo(mat: MatModelo, prod: ProdVisita[], manter?: Reco
     // 17/11: com as categorias de produto que pertencem a este ramo («Sanitas» e «Bases Duche» são «Louças e torneiras»)
     return raiz ? { raiz: raiz.id, nos: nosDoRamo(arvore, raiz.id) } : null;
   };
+  const Rs = mat.partes.map((pt) => (pt.ramo ? ramo(pt.ramo) : null));
+  // 24/11: cada produto conta numa só parte (o porcelânico é da parede e do chão): a do seu ramo principal, se o modelo a tem; senão, a 1.ª
+  const semAc = (x: string) => x.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+  const parteDe = (p: ProdVisita): number => {
+    const ks = Rs.map((R, k) => (R && p.no && R.nos.has(p.no) ? k : -1)).filter((k) => k >= 0);
+    if (ks.length < 2) return ks[0] ?? -1;
+    const no = arvore!.find((x) => x.id === p.no), prin = no ? ramoDaCategoriaProduto(no.n) : null;
+    const k = prin ? ks.find((i) => { const r = mat.partes![i].ramo; return !!r && semAc(r[0]) === semAc(prin[0]) && semAc(r[1] ?? "") === semAc(prin[1]); }) : undefined;
+    return k ?? ks[0];
+  };
+  const dono = new Map(ativos.map((p) => [p, parteDe(p)] as const));
   return mat.partes.map((pt, k) => {
-    const d = pt.d ?? `parte ${k + 1}`, est = r2(mat.custo * pt.peso), R = pt.ramo ? ramo(pt.ramo) : null;
-    const por = R ? ativos.filter((p) => p.no && R.nos.has(p.no)) : [];
+    const d = pt.d ?? `parte ${k + 1}`, est = r2(mat.custo * pt.peso), R = Rs[k];
+    const por = R ? ativos.filter((p) => dono.get(p) === k) : [];
     const mantida = !!pt.manter?.some((sid) => manter?.[sid] === "sim"), tirada = fora.includes(d);
     const custo = mantida || tirada || (inteiras && por.length > 0) ? 0 : r2(Math.max(0, est - por.reduce((a, p) => a + p.custo * p.q, 0)));
     return { d, est, custo, preco: r2(mat.preco * (custo / mat.custo)), raiz: R?.raiz ?? null, nos: R?.nos ?? null, por, mantida, fora: tirada };

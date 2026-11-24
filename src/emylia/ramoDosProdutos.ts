@@ -29,11 +29,17 @@ const MAPA: [string[], [string, string]][] = [
   [["Armários Inferiores", "Armários superiores", "Armários de Coluna", "Acessórios de Cozinha", "Cozinha Completa - Projetos", "Puxadores"], MOBILIARIO],
   [["Apliques LED"], ["Eletricidade", "Iluminação"]], [["Ventax"], ["Eletricidade", "Ventilação"]],
   [["Cerâmico", "Cerâmico Laminado"], ["Revestimentos", "Parede"]], [["Porcelânico", "SPC"], ["Revestimentos", "Pavimento"]],
+  // 24/11 (contratos reais da Mudelar, MD 1610): o mesmo cerâmico ou porcelânico vai à parede e ao chão (o SPC só ao chão)
+  [["Porcelânico"], ["Revestimentos", "Parede"]], [["Cerâmico", "Cerâmico Laminado"], ["Revestimentos", "Pavimento"]],
 ];
-const RAMO_DA_CATEGORIA = new Map<string, [string, string]>(MAPA.flatMap(([subs, r]) => subs.map((s) => [sem(s), r] as [string, [string, string]])));
+/** Os ramos de cada categoria de produto, pela ordem do mapa (o primeiro é o principal). */
+const RAMOS_DA_CATEGORIA = new Map<string, [string, string][]>();
+for (const [subs, r] of MAPA) for (const s of subs) RAMOS_DA_CATEGORIA.set(sem(s), [...(RAMOS_DA_CATEGORIA.get(sem(s)) ?? []), r]);
 
-/** O ramo do motor (ofício, sub) de uma categoria de produto, pelo nome; null se não está no mapa. */
-export const ramoDaCategoriaProduto = (nome: string): [string, string] | null => RAMO_DA_CATEGORIA.get(sem(nome)) ?? null;
+/** O ramo do motor (ofício, sub) de uma categoria de produto, pelo nome (o principal); null se não está no mapa. */
+export const ramoDaCategoriaProduto = (nome: string): [string, string] | null => RAMOS_DA_CATEGORIA.get(sem(nome))?.[0] ?? null;
+/** 24/11: todos os ramos de uma categoria de produto (o porcelânico é da parede e do chão). */
+export const ramosDaCategoriaProduto = (nome: string): [string, string][] => RAMOS_DA_CATEGORIA.get(sem(nome)) ?? [];
 
 const VAZIAS = new Set(["a", "o", "as", "os", "e", "de", "do", "da", "dos", "das", "com", "em"]);
 /** O que a pergunta pergunta, em palavras: «O cliente mantém o espelho?» → ["espelho"]; sem «mantém…», nada. */
@@ -58,7 +64,6 @@ export function nosDoObjeto(arvore: readonly No[], pergunta: string | null | und
 export function nosDeProdutoDoRamo(arvore: readonly No[], oficio: string, sub?: string): string[] {
   return arvore.filter((x) => {
     if (!x.soProduto) return false;
-    const r = ramoDaCategoriaProduto(x.n);
-    return !!r && sem(r[0]) === sem(oficio) && (!sub || sem(r[1]) === sem(sub));
+    return ramosDaCategoriaProduto(x.n).some((r) => sem(r[0]) === sem(oficio) && (!sub || sem(r[1]) === sem(sub)));
   }).map((x) => x.id);
 }

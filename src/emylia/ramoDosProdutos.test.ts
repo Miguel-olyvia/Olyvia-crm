@@ -12,9 +12,29 @@ const ARVORE: No[] = [
   { id: "ls", n: "Loiças Sanitárias", pai: null, soProduto: true }, { id: "san", n: "Sanitas", pai: "ls", soProduto: true },
   { id: "lav", n: "Lavatórios", pai: "ls", soProduto: true }, { id: "kit", n: "Kit´s para Sanitários", pai: "ls", soProduto: true },
   { id: "db", n: "Duche & Banho", pai: null, soProduto: true }, { id: "bd", n: "Bases Duche", pai: "db", soProduto: true },
-  { id: "cer", n: "Cerâmico", pai: "rev", soProduto: true },
+  { id: "cer", n: "Cerâmico", pai: "rev", soProduto: true }, { id: "pav", n: "Pavimento", pai: "rev" },
+  { id: "por", n: "Porcelânico", pai: "rev", soProduto: true },
   { id: "esp", n: "Espelhos", pai: null, soProduto: true },
 ];
+
+// 24/11 (contrato real MD 1610): o porcelânico Surface Arena (RP0010) vai à parede; a pergunta «mantém o revestimento?» não o achava.
+describe("o cerâmico e o porcelânico na parede e no chão (24/11)", () => {
+  it("o porcelânico é do chão (principal) e também da parede; o cerâmico da parede e também do chão", () => {
+    expect(ramoDaCategoriaProduto("Porcelânico")).toEqual(["Revestimentos", "Pavimento"]);
+    expect(nosDeProdutoDoRamo(ARVORE, "Revestimentos", "Parede").sort()).toEqual(["cer", "por"]);
+    expect(nosDeProdutoDoRamo(ARVORE, "Revestimentos", "Pavimento").sort()).toEqual(["cer", "por"]);
+  });
+  it("na estimativa do modelo, um porcelânico conta só numa parte (a do chão), nunca nas duas", () => {
+    const prod: ProdVisita[] = [{ id: "p1", n: "SURFACE ARENA", un: "m2", custo: 20, q: 10, no: "por" }];
+    const mat = { custo: 1000, preco: 1500, partes: [{ d: "parede", peso: 0.5, ramo: ["Revestimentos", "Parede"] as [string, string] }, { d: "chão", peso: 0.5, ramo: ["Revestimentos", "Pavimento"] as [string, string] }] };
+    const [parede, chao] = partesDoModelo(mat, prod, undefined, [], ARVORE);
+    expect(parede.custo).toBe(500);
+    expect(chao.custo).toBe(300);
+    // sem a parte do chão, conta na da parede
+    const [soParede] = partesDoModelo({ ...mat, partes: [mat.partes[0]] }, prod, undefined, [], ARVORE);
+    expect(soParede.custo).toBe(300);
+  });
+});
 
 describe("o ramo do motor das categorias de produto", () => {
   it("pelo nome, sem acentos nem apóstrofos", () => {
@@ -45,8 +65,8 @@ describe("o ramo do motor das categorias de produto", () => {
   it("a pesquisa no servidor de um ramo dos serviços vai pelas categorias de produto dele (nunca pelo id do ramo, que dava lista vazia)", () => {
     // várias categorias com pais diferentes: uma pesquisa por cada subcategoria (antes, sem filtro: abria com banheiras)
     expect(filtroDoRamo(ARVORE, "lt")).toEqual({ subcategorias: ["san", "lav", "kit", "bd"] });
-    // uma só: essa
-    expect(filtroDoRamo(ARVORE, "par")).toEqual({ subcategoria: "cer" });
+    // 24/11: a parede leva o cerâmico e o porcelânico; aqui são as categorias de produto todas dos «Revestimentos»: a categoria inteira
+    expect(filtroDoRamo(ARVORE, "par")).toEqual({ categoria: "rev" });
     // um nó só de produtos: como antes
     expect(filtroDoRamo(ARVORE, "san")).toEqual({ subcategoria: "san" });
   });
