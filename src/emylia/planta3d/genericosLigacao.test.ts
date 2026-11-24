@@ -174,13 +174,17 @@ describe("opções lidas do nome", () => {
     expect(parte(c, "caixa").colocar(chao)).toEqual({ pos: [0, (0.8 - 0.03) / 2, 0], esc: [0.8, 0.8 - 0.03, 0.45] });
   });
 
-  it("bidé suspenso (opção nova): o pé deixa de chegar ao chão", () => {
+  it("bidé suspenso (opção nova): sem pedestal, e a taça fica a 25 cm ou mais do chão (o desenho completo está em bide3d.test.ts)", () => {
     expect(gen("BIDÉ ELEGANT SUSPENSO CAPPUCINNO", "Bidés")?.o).toEqual({ torneira: true, suspenso: true });
     expect(gen("BIDÉ BOHEMIC BTW BRANCO BRILHO", "Bidés")?.o.suspenso).toBe(false);
     const c = cat("bide"), p = { w: 0.36, d: 0.55, h: 0.4, o: { torneira: true, suspenso: true } };
-    const pe = parte(c, "pe").colocar(p);
-    expect(pe.pos[1] - pe.esc[1] / 2).toBeGreaterThan(0.1);
-    expect(parte(c, "pe").colocar({ ...p, o: { torneira: true, suspenso: false } })).toEqual({ pos: [0, (0.4 - 0.06) / 2, 0.55 * 0.02], esc: [0.36 * 0.6, 0.4 - 0.06, 0.55 * 0.5] });
+    expect(visiveis(c, p)).not.toContain("pe");
+    expect(visiveis(c, p)).toContain("fixacao");
+    const cu = parte(c, "cuvete").colocar(p);
+    expect(cu.pos[1] - cu.esc[1] / 2).toBeGreaterThanOrEqual(0.25);
+    const chao = { ...p, o: { torneira: true, suspenso: false } };
+    expect(visiveis(c, chao)).toContain("pe");
+    expect(visiveis(c, chao)).not.toContain("fixacao");
   });
 
   it("sanita BTW: o depósito só quando o nome o diz; as outras continuam com depósito", () => {

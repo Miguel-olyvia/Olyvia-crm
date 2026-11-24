@@ -47,6 +47,12 @@ const min = Math.min, max = Math.max;
 const ASSENTO = 0.4;
 /** A altura dos pés do móvel de lavatório com pés (m); sem pés, 0. */
 const pesMovel = (p: ParamsGenerico): number => (p.o.apoio === "pes" ? min(0.15, p.h * 0.2) : 0);
+/** O bidé preso à parede (opção `suspenso`). */
+const suspenso = (p: ParamsGenerico): boolean => p.o.suspenso === true;
+/** A meia altura da barriga da taça do bidé (m): mais funda no de chão; rasa no suspenso, para ficar a 25 cm ou mais do chão. */
+const metade = (p: ParamsGenerico): number => (suspenso(p) ? min(0.07, p.h * 0.175) : min(0.125, p.h * 0.31));
+/** A torneira do bidé fica a esta distância (m) da borda de trás: o rebordo largo atrás da bacia. */
+const TORNEIRA_Z = 0.055;
 
 const caixa = (nome: string, mat: MaterialGlb, colocar: ParteGlb["colocar"], ver?: ParteGlb["ver"]): ParteGlb => ({ nome, forma: "caixa", mat, colocar, ...(ver ? { ver } : {}) });
 /** Rodapé recuado dos módulos de chão da cozinha (m). */
@@ -333,14 +339,33 @@ export const CATEGORIAS_GLB: CategoriaGlb[] = [...CATEGORIAS_COZINHA,
       { id: "torneira", rotulo: "Com torneira", tipo: "sim", omissao: true },
       { id: "suspenso", rotulo: "Suspenso (preso à parede)", tipo: "sim", omissao: (_t, n) => /suspens/i.test(n) },
     ],
+    // 24/11: um bidé a sério (e não um cogumelo): taça oval e comprida e baixa, com o aro (o rebordo) à altura do assento e a bacia lá dentro, sobre
+    // um pedestal estreito que alarga para a taça; a torneira (corpo, bica curta, manípulo) no rebordo do fundo e dois botões. O suspenso é a mesma
+    // taça, mais rasa, sem pedestal, a 25 cm ou mais do chão e presa à parede por uma placa. As partes novas constroem-se em tempo de execução
+    // (o GLB do bidé não muda); as quatro de sempre (pe, cuvete, interior, torneira) mantêm o nome e a forma.
     partes: [
-      // suspenso: o pé passa a ser o corpo da louça, encostado à parede, sem chegar ao chão
-      { nome: "pe", forma: "cilindro", mat: "corpo", colocar: ({ w, d, h, o }) => (o.suspenso === true
-        ? { pos: [0, h - min(0.3, h * 0.6) / 2 - 0.04, -d * 0.06], esc: [w * 0.85, min(0.3, h * 0.6), d * 0.8] }
-        : { pos: [0, (h - 0.06) / 2, d * 0.02], esc: [w * 0.6, h - 0.06, d * 0.5] }) },
-      { nome: "cuvete", forma: "elipsoide", mat: "corpo", colocar: ({ w, d, h }) => ({ pos: [0, h - 0.07, d * 0.05], esc: [w, 0.16, d * 0.9] }) },
-      { nome: "interior", forma: "cilindro", mat: "interior", colocar: ({ w, d, h }) => ({ pos: [0, h + 0.008, d * 0.1], esc: [w * 0.75, 0.004, d * 0.6] }) },
-      { nome: "torneira", forma: "cilindro", mat: "metal", ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.05, -d / 2 + 0.07], esc: [0.03, 0.1, 0.03] }) },
+      // o pedestal (só no de chão): o pé estreito em baixo e, em cima, um colo mais largo que se perde por baixo da taça
+      { nome: "pe", forma: "cilindro", mat: "corpo", ver: (p) => !suspenso(p), colocar: ({ w, d, h }) => ({ pos: [0, h * 0.25, -d * 0.08], esc: [w * 0.34, h * 0.5, d * 0.32] }) },
+      { nome: "pe_alto", forma: "elipsoide", mat: "corpo", emRuntime: true, ver: (p) => !suspenso(p), colocar: ({ w, d, h }) => ({ pos: [0, h * 0.45, -d * 0.08], esc: [w * 0.58, h * 0.44, d * 0.5] }) },
+      // a taça: a barriga por baixo (mais funda no de chão, rasa no suspenso) e o aro por cima, fino, oval e mais comprido do que largo
+      { nome: "cuvete", forma: "elipsoide", mat: "corpo", colocar: (p) => { const m = metade(p); return { pos: [0, p.h - 0.005 - m, 0], esc: [p.w * 0.9, m * 2, p.d * 0.93] }; } },
+      { nome: "aro", forma: "cilindro", mat: "corpo", emRuntime: true, colocar: ({ w, d, h }) => { const a = min(0.04, h * 0.12); return { pos: [0, h - a / 2, 0], esc: [w, a, d] }; } },
+      // o colo por baixo do aro: suaviza o degrau entre o aro e a barriga
+      { nome: "aro_baixo", forma: "cilindro", mat: "corpo", emRuntime: true, colocar: ({ w, d, h }) => ({ pos: [0, h - 0.065, 0], esc: [w * 0.92, 0.05, d * 0.93] }) },
+      // a bacia: o fundo mais escuro e a água, mais atrás o rebordo livre para a torneira, e o ralo
+      { nome: "interior", forma: "cilindro", mat: "interior", colocar: ({ w, d, h }) => ({ pos: [0, h + 0.004, d * 0.05], esc: [w * 0.76, 0.004, d * 0.76] }) },
+      { nome: "bacia", forma: "cilindro", mat: "agua", emRuntime: true, colocar: ({ w, d, h }) => ({ pos: [0, h + 0.0065, d * 0.05], esc: [w * 0.56, 0.004, d * 0.58] }) },
+      { nome: "ralo", forma: "cilindro", mat: "metal", emRuntime: true, colocar: ({ d, h }) => ({ pos: [0, h + 0.009, d * 0.12], esc: [0.03, 0.004, 0.03] }) },
+      // dois pequenos botões no rebordo, de cada lado da torneira
+      ...[-1, 1].map((s, i): ParteGlb => ({ nome: `botao_${i + 1}`, forma: "cilindro", mat: "metal", emRuntime: true, colocar: ({ w, d, h }) => ({ pos: [s * w * 0.2, h + 0.007, -d / 2 + TORNEIRA_Z], esc: [0.022, 0.01, 0.022] }) })),
+      // a torneira: roseta, corpo (~7 cm), bica curta para a frente com a ponta a descer, e o manípulo em cima
+      { nome: "roseta", forma: "cilindro", mat: "metal", emRuntime: true, ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.004, -d / 2 + TORNEIRA_Z], esc: [0.05, 0.008, 0.05] }) },
+      { nome: "torneira", forma: "cilindro", mat: "metal", ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.043, -d / 2 + TORNEIRA_Z], esc: [0.034, 0.07, 0.034] }) },
+      { nome: "bica", forma: "cilindro", mat: "metal", emRuntime: true, ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.07, -d / 2 + TORNEIRA_Z + 0.05], esc: [0.018, 0.1, 0.018], rot: [Math.PI / 2, 0, 0] }) },
+      { nome: "bica_ponta", forma: "cilindro", mat: "metal", emRuntime: true, ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.055, -d / 2 + TORNEIRA_Z + 0.096], esc: [0.018, 0.04, 0.018] }) },
+      { nome: "manipulo", forma: "caixa", mat: "metal", emRuntime: true, ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.085, -d / 2 + TORNEIRA_Z + 0.012], esc: [0.014, 0.012, 0.05], rot: [-0.2, 0, 0] }) },
+      // suspenso: a placa de fixação na parede, atrás da taça
+      { nome: "fixacao", forma: "caixa", mat: "branco", emRuntime: true, ver: (p) => suspenso(p), colocar: ({ w, d, h }) => ({ pos: [0, h - 0.075, -d / 2 + 0.006], esc: [w * 0.5, 0.12, 0.012] }) },
     ],
   },
   {
