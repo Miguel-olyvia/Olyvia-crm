@@ -18,7 +18,7 @@ import { IconeServico, iconeDoServico } from "./ilustracoes";
 import { AvatarTec } from "./AcompanhamentoObra";
 import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
 import { usePesquisaProdutos } from "./real/pesquisaProdutos";
-import { consumiveisConhecidos, criarTarefa, criarTarefaInterna, diaMinimo, materiaisDoServico, oficioDe, tempoDoServico } from "./tarefasValidador";
+import { consumiveisConhecidos, criarTarefa, criarTarefaInterna, diaMinimo, materiaisDoServico, oficioDe, tempoDoServico, type NovaTarefa as DadosTarefaNova } from "./tarefasValidador";
 
 const CARTAO = "rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]";
 /** As unidades de área e de comprimento: começam em 5 e andam de 5 em 5. */
@@ -97,7 +97,12 @@ export function EditorMateriais({ mats, mudar }: { mats: MatTarefa[]; mudar: (m:
 
 /* ================================================================== a tarefa nova */
 /** 11/11: `inicial` vem de tocar num dia vazio da linha de um técnico, no Estúdio do plano (começa nesse dia, com essa pessoa). */
-export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; fechar: () => void; inicial?: { dia?: number; tec?: string | null; fase?: number } }) {
+export function NovaTarefa({ ctx, d, fechar, inicial, porque }: {
+  ctx: Ctx; d: Negocio; fechar: () => void; inicial?: { dia?: number; tec?: string | null; fase?: number };
+  /** 25/11 (Rúben: «no fim pede se foi o cliente ou imprevisto, e não deve: eu devia preencher logo direto»): com a obra em curso, o
+   *  «Porquê?» (quem paga) vem no próprio formulário, no lugar do botão de juntar, com o impacto da tarefa como está escolhida. */
+  porque?: (n: DadosTarefaNova) => ReactNode;
+}) {
   const { S, A, run } = ctx;
   const p = d.obra.plano!;
   const [sid, setSid] = useState<SvcId | null>(null);
@@ -127,9 +132,12 @@ export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; 
     const o2 = oficioDe(sv), igual = p.tasks.find((t) => (o2.perfilId ? t.perfilId === o2.perfilId || t.sk === o2.sk : t.sk === o2.sk) && t.fase);
     if (igual?.fase && !inicial?.fase) setFase(igual.fase);
   };
+  const dados: DadosTarefaNova | null = useMemo(() => (sid && previa ? { sid, q, fase, tec: previa.tec, mats: previa.mats, dia } : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sid, q, fase, previa?.tec, JSON.stringify(previa?.mats ?? null), dia]);
   const criar = () => {
-    if (!sid || !previa) return;
-    run(() => A.novaTarefaPlano(d.id, { sid, q, fase, tec: previa.tec, mats: previa.mats, dia }));
+    if (!dados) return;
+    run(() => A.novaTarefaPlano(d.id, dados));
     fechar();
   };
   const tempo = s ? tempoDoServico(s, q) : null;
@@ -229,7 +237,8 @@ export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; 
         )}
       </div>
 
-      {s && (
+      {s && dados && porque && <div className="border-t border-border bg-card p-4 sm:px-5">{porque(dados)}</div>}
+      {s && !porque && (
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card p-4 sm:px-5">
           <p className="flex items-center gap-2 text-[15px] text-muted-foreground">
             <Bell className="h-4 w-4" aria-hidden="true" />{tecN ? `${tecN} recebe o aviso no telemóvel` : "Sem técnico: ninguém é avisado"}

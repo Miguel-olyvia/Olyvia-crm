@@ -3,7 +3,7 @@
 //  · em cima, o estado e UM botão principal (arrancar, validar o que está feito, encerrar, ou registar um imprevisto);
 //  · os números: o progresso, o dia, quando fica pronta (face ao orçamento), as tarefas, os imprevistos e o valor;
 //  · o plano vivo (Gantt): validadas, por validar, em curso (a encher), atrasadas (com os dias a mais), paradas, por começar; a linha do
-//    previsto no orçamento por baixo de cada barra e o «hoje»;
+//    e o «hoje» (25/11: sem as retas cinzentas do previsto no orçamento, a pedido do Rúben);
 //  · «E se…?»: um atraso numa tarefa, «Replanear» ou «Adiantar com a folga» mostram-se primeiro no Gantt (as barras andam), com o impacto
 //    na data de fim e nas outras obras dos mesmos técnicos; aplicar fica nos ajustes da obra e avisa os técnicos (e o cliente, se se quiser);
 //  · os alertas, cada um com o próximo passo; os imprevistos (com fotografias, custo e dias, e o impacto no prazo e no orçamento antes de
@@ -286,7 +286,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   const inicio = inicioDoPlano(p) ?? new Date();
   // 12/11: os números vivos (a previsão vai além do fim do plano: as datas têm de chegar lá)
   const viva = obraViva(d, S);
-  const nDias = Math.max(fim, fimR, p.base ? fimDe(p.base) : 0, viva.prev ? viva.prev.ate : 0) + 3;
+  const nDias = Math.max(fim, fimR, viva.prev ? viva.prev.ate : 0) + 3;
   const dias = diasDaObra(inicio, nDias);
   const PV = porValidar(p);
   const falta = vivo ? faltaParaEncerrar(d, S, db) : [];
@@ -588,7 +588,8 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
                       ligacoes={<LigacoesDaTarefa p={p} ti={painel.ti} dias={dias} mexe={planeia && !acabou} abrir={(j) => setPainel({ k: "tarefa", ti: j })} pedir={pedirLigacao} />} />
                   );
                 })()}
-                {painel.k === "nova" && <div className="p-4"><NovaTarefa key={JSON.stringify(painel.inicial ?? {})} ctx={ctxObra} d={d} inicial={painel.inicial} fechar={() => setPainel((x) => (x?.k === "porque" ? x : null))} /></div>}
+                {painel.k === "nova" && <div className="p-4"><NovaTarefa key={JSON.stringify(painel.inicial ?? {})} ctx={ctxObra} d={d} inicial={painel.inicial} fechar={() => setPainel((x) => (x?.k === "porque" ? x : null))}
+                  porque={p.estado === "em curso" ? (n) => <PorqueAjuste ctx={ctx} d={d} aj={{ k: "nova", n }} embutido fechar={() => setPainel(null)} feito={() => setPainel(null)} imprevisto={abrirImprevisto} /> : undefined} /></div>}
                 {painel.k === "imprevisto" && <NovoImprevisto key={JSON.stringify(painel.inicial ?? {})} ctx={ctx} d={d} ti={painel.ti} inicial={painel.inicial} ocup={ocup} fechar={() => setPainel(null)} mostrar={setFantasma} />}
                 {painel.k === "porque" && (() => {
                   const voltar = () => setPainel(painel.volta != null && p.tasks[painel.volta] ? { k: "tarefa", ti: painel.volta } : null);
@@ -830,7 +831,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
     </>
   );
   const barra = (ti: number, top: number) => {
-    const t = p.tasks[ti], n = R ? R.plano.tasks[ti] : t, v = estadoVivo(t, p), b = p.base?.[ti];
+    const t = p.tasks[ti], n = R ? R.plano.tasks[ti] : t, v = estadoVivo(t, p);
     const atraso = diasDeAtraso(t, p), a = arrasto?.ti === ti ? arrasto : null;
     // 23/11 (revisão: «P…», «T…»): na vista Gantt, o nome vai à direita da barra quando não cabe nela
     const comIcone = critico.has(ti) || ["validada", "feita", "parada", "pausada", "atrasada", "corrigir"].includes(v);
@@ -839,7 +840,6 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
     const fimVisto = n.dia + n.dur + (!R && atraso > 0 ? atraso : 0);
     return (
       <Fragment key={ti}>
-        {b && (b.dia !== t.dia || b.dur !== t.dur) && <div aria-hidden="true" title="Previsto no orçamento" className="absolute h-[3px] rounded-full bg-foreground/30" style={{ left: b.dia * COL + 4, width: Math.max(8, b.dur * COL - 8), top: top + ALTO + 3 }} />}
         {((R && mudou(ti)) || a) && <div aria-hidden="true" className="absolute rounded-lg border-2 border-dashed border-foreground/35" style={{ left: t.dia * COL + 2, width: Math.max(COL - 4, t.dur * COL - 4), top, height: ALTO }} />}
         {!R && atraso > 0 && (
           <div aria-hidden="true" className="absolute flex items-center justify-end rounded-r-lg bg-[repeating-linear-gradient(135deg,hsl(var(--destructive)/0.35)_0_5px,hsl(var(--destructive)/0.15)_5px_10px)] pr-1 text-[11px] font-bold text-destructive"
@@ -972,7 +972,6 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
         </div>
         <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="Legenda">
           {legenda.map(([t, c]) => <li key={t} className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-4 rounded-sm" style={{ background: c }} />{t}</li>)}
-          <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-[3px] w-4 rounded-full bg-foreground/30" />Previsto no orçamento</li>
           <li className="flex items-center gap-1.5"><Route className="h-3.5 w-3.5 text-primary" aria-hidden="true" />Caminho crítico (sem folga)</li>
           <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-3 w-0.5 rounded-full bg-primary/70" />Hoje</li>
           <li className="flex items-center gap-1.5"><span aria-hidden="true" className={cn("h-3", finas ? "w-0.5 bg-amber-500/60" : "w-1.5 bg-[repeating-linear-gradient(135deg,rgb(245_158_11/0.6)_0_2px,transparent_2px_4px)]")} />Feriado</li>
