@@ -10,7 +10,7 @@ import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { EtiquetaEstado } from "./EtiquetaEstado";
-import { estadoDoAtivo } from "./lib/resumoAtivo";
+import { estadoDoAtivo, motivoSemValor } from "./lib/resumoAtivo";
 import type { Ativo, GrupoAtivo } from "./lib/tipos";
 import { valorAtual } from "./lib/valorAtivo";
 
@@ -24,13 +24,14 @@ interface Props {
   mes: string;
   /** Sem `hr.pessoas.retribuicao.view` os nomes não se mostram, mesmo que venham. */
   rhOculto: boolean;
-  aoAbrir: (a: Ativo) => void;
+  aoAbrir: (a: Ativo, origem: HTMLElement) => void;
 }
 
 function Ligacao({ a, rhOculto }: { a: Ativo; rhOculto: boolean }) {
   const { t } = useTranslation();
   let principal: string | null = null;
   let secundario: string | null = null;
+  let rotulo = "ativos.liga.servico";
   let Icone: LucideIcon = Wrench;
   if (a.grupo === "servico") {
     principal = a.catEquipamento?.nome ?? null;
@@ -38,10 +39,13 @@ function Ligacao({ a, rhOculto }: { a: Ativo; rhOculto: boolean }) {
     Icone = MapPin;
     const tipo = a.tipo ? t(`ativos.tipo.estrutura.${a.tipo}`) : null;
     principal = a.localizacao ?? tipo;
+    rotulo = a.localizacao ? "ativos.liga.local" : "ativos.liga.tipo";
     secundario = a.localizacao ? tipo : null;
   } else {
     Icone = UserRound;
-    principal = rhOculto ? t("ativos.pessoa.rhOculto") : (a.atribuicao?.pessoaNome ?? null);
+    rotulo = "ativos.liga.pessoa";
+    // `ligado` sem nome: a pessoa já foi apagada (ou o RH está oculto e a chave diz que está atribuído).
+    principal = rhOculto ? t("ativos.pessoa.rhOculto") : (a.atribuicao?.pessoaNome ?? (a.ligado ? t("ativos.pessoa.ligado") : null));
     secundario = a.tipo ? t(`ativos.tipo.pessoa.${a.tipo}`) : null;
   }
   if (!principal) return <span className="text-sm text-muted-foreground">—</span>;
@@ -49,6 +53,7 @@ function Ligacao({ a, rhOculto }: { a: Ativo; rhOculto: boolean }) {
     <span className="flex min-w-0 items-start gap-2 text-sm">
       <Icone aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
       <span className="flex min-w-0 flex-col">
+        <span className="sr-only">{t(rotulo)}</span>
         <span className="truncate">{principal}</span>
         {secundario && <span className="truncate text-xs text-muted-foreground">{secundario}</span>}
       </span>
@@ -80,7 +85,7 @@ export function ListaAtivos({ grupo, ativos, mes, rhOculto, aoAbrir }: Props) {
               <div className="min-w-0">
                 {/* O botão estica-se sobre o cartão todo: a linha inteira abre o detalhe. */}
                 <button
-                  type="button" aria-label={t("ativos.lista.abrir", { nome: a.nome })} onClick={() => aoAbrir(a)}
+                  type="button" aria-label={t("ativos.lista.abrir", { nome: a.nome })} onClick={(e) => aoAbrir(a, e.currentTarget)}
                   className={cn("min-h-11 max-w-full rounded-sm text-left text-base font-semibold leading-tight after:absolute after:inset-0 after:rounded-lg after:content-[''] focus-visible:outline-none", FOCO)}
                 >
                   <span className="break-words">{a.nome}</span>
@@ -91,10 +96,10 @@ export function ListaAtivos({ grupo, ativos, mes, rhOculto, aoAbrir }: Props) {
               <div className="flex items-baseline justify-between gap-2 md:flex-col md:items-end md:justify-center md:gap-0">
                 <span className="text-xs text-muted-foreground md:sr-only">{t("ativos.col.valorAtual")}</span>
                 <span data-testid="valor-atual" className={cn("font-semibold tabular-nums", atual === null && "text-sm font-medium text-muted-foreground")}>
-                  {atual === null ? t("ativos.vida.semVida") : euros(atual, "—")}
+                  {atual === null ? t(motivoSemValor(a) === "porUso" ? "ativos.vida.semVida" : "ativos.vida.indefinida") : euros(atual, "—")}
                 </span>
               </div>
-              <div><EtiquetaEstado estado={estadoDoAtivo(a, rhOculto)} /></div>
+              <div><EtiquetaEstado estado={estadoDoAtivo(a)} /></div>
             </li>
           );
         })}

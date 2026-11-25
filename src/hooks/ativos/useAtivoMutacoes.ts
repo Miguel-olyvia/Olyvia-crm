@@ -8,7 +8,9 @@
 import { useCallback, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useCompany } from "@/contexts/CompanyContext";
-import { ativosIndisponivel, ativosRecusado, chaveDoErro, codigoAtv } from "@/components/ativos/lib/errosAtivo";
+import {
+  ativosIndisponivel, ativosRecusado, campoDoErro, chaveDoErro, codigoAtv, detalheDaBase, refazListaAposErro, type CampoAtivo,
+} from "@/components/ativos/lib/errosAtivo";
 import type { GrupoAtivo, MotivoDesativacao } from "@/components/ativos/lib/tipos";
 import { hrRpc } from "@/lib/hr/hrDb";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
@@ -20,6 +22,8 @@ export interface ResultadoAtivo {
   ok: boolean;
   id?: string;
   codigo?: string | null;
+  /** O campo do formulário a que o erro se refere (o ATV03 diz qual pelo DETAIL da base); `null` se não é de um campo. */
+  campo?: CampoAtivo | null;
   mensagem?: string;
 }
 
@@ -53,7 +57,9 @@ export function useAtivoMutacoes(): AtivoMutacoes {
         if (error) {
           // Regras (ATVnn), recusas e RPC por aplicar não são defeitos: só o resto vai para o registo.
           if (!codigoAtv(error) && !ativosRecusado(error) && !ativosIndisponivel(error)) captureFlowError(error, "ativos-escrever");
-          return { ok: false, codigo: codigoAtv(error), mensagem: getLocalizedFallback(chaveDoErro(error)) };
+          // O ativo mudou entretanto (ATV14, ATV15, ATV17, ATV18): a lista refaz-se sozinha, e a mensagem pode dizê-lo.
+          if (refazListaAposErro(error)) await queryClient.invalidateQueries({ queryKey: [CHAVE_ATIVOS] });
+          return { ok: false, codigo: codigoAtv(error), campo: campoDoErro(error), mensagem: detalheDaBase(error) ?? getLocalizedFallback(chaveDoErro(error)) };
         }
         await queryClient.invalidateQueries({ queryKey: [CHAVE_ATIVOS] });
         const id = (data as { id?: unknown } | null)?.id;

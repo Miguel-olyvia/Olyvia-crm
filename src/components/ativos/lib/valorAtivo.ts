@@ -37,7 +37,9 @@ function depreciadoAte(a: ParaValor, vida: number, mes: MesIso): number {
   const ultimo = a.desativadoEm ? Math.min(inicio + vida - 1, indiceDoMes(mesDaData(a.desativadoEm))) : inicio + vida - 1;
   const meses = Math.max(0, Math.min(indiceDoMes(mes), ultimo) - inicio + 1);
   const base = Math.max(0, a.valorCompra - a.valorResidual);
-  return meses >= vida ? arredondar(base) : arredondar(quotaMensal(base, vida) * meses);
+  // `min(base, …)`: a quota arredondada ao cêntimo vezes os meses pode passar do valor depreciável (1000 € a 600 meses: 1,67 × 599 =
+  // 1000,33 €), e o valor atual ficava abaixo do residual. O RH tem o mesmo limite de 120 meses por causa disto; aqui chega ao fim exato.
+  return meses >= vida ? arredondar(base) : Math.min(arredondar(base), arredondar(quotaMensal(base, vida) * meses));
 }
 
 /**

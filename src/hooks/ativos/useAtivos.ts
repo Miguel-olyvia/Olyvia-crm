@@ -5,7 +5,7 @@
  * vai para o registo de erros. O ecrã recebe sempre texto traduzido, nunca o código da base. O valor atual NÃO vem daqui:
  * calcula-se no ecrã (`valorAtivo.ts`).
  */
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useCompany } from "@/contexts/CompanyContext";
 import { ativosIndisponivel, ativosRecusado } from "@/components/ativos/lib/errosAtivo";
 import { ativosLidosDaResposta, type AtivosLidos } from "@/components/ativos/lib/tipos";
@@ -29,6 +29,8 @@ export interface AtivosHook {
   dados: AtivosLidos | null;
   /** O texto traduzido de uma recusa ou de uma falha; `null` quando correu bem. */
   mensagem: string | null;
+  /** Está a pedir a lista outra vez (a mudar o filtro, ou a refazer): os dados anteriores continuam à vista. */
+  aAtualizar: boolean;
   /** Sem organização ativa não há nada a ler. */
   semOrganizacao: boolean;
   refazer: () => void;
@@ -43,6 +45,9 @@ export function useAtivos({ incluirDesativados = false, enabled = true }: Opcoes
     queryKey: [CHAVE_ATIVOS, organizationId, incluirDesativados],
     enabled: enabled && organizationId !== null,
     retry: false,
+    // O filtro de estado muda a chave: sem isto os dados passavam a null a cada mudança, o ecrã desmontava e o teclado perdia o foco.
+    // Só dentro da mesma organização: ao trocar de organização nunca se mostra a lista da anterior.
+    placeholderData: (anterior, consultaAnterior) => (consultaAnterior?.queryKey[1] === organizationId ? keepPreviousData(anterior) : undefined),
     queryFn: async (): Promise<Lida> => {
       try {
         const { data, error } = await hrRpc("rpc_ativos_listar", { p_organization_id: organizationId, p_incluir_desativados: incluirDesativados });
@@ -58,12 +63,17 @@ export function useAtivos({ incluirDesativados = false, enabled = true }: Opcoes
   });
 
   const lida = consulta.data;
-  const estado: EstadoLeitura = consulta.error ? "erro" : lida === "indisponivel" ? "indisponivel" : lida === "recusado" ? "recusado" : lida ? "ok" : "a_carregar";
-  const mensagem = estado === "erro" ? getLocalizedFallback("ativos.erroLer") : estado === "recusado" ? getLocalizedFallback("ativos.erro.verSemPermissao") : null;
+  const dados = lida && lida !== "indisponivel" && lida !== "recusado" ? lida : null;
+  // Uma releitura que falha com dados já na mão NÃO tira o ecrã: mantêm-se os dados (estado «ok») e a mensagem diz que falhou.
+  const estado: EstadoLeitura = lida === "indisponivel" ? "indisponivel" : lida === "recusado" ? "recusado" : dados ? "ok" : consulta.error ? "erro" : "a_carregar";
+  const mensagem = estado === "recusado"
+    ? getLocalizedFallback("ativos.erro.verSemPermissao")
+    : consulta.error && estado !== "indisponivel" ? getLocalizedFallback("ativos.erroLer") : null;
   return {
     estado,
-    dados: lida && lida !== "indisponivel" && lida !== "recusado" ? lida : null,
+    dados,
     mensagem,
+    aAtualizar: consulta.isFetching,
     semOrganizacao: organizationId === null,
     refazer: () => { void consulta.refetch(); },
   };

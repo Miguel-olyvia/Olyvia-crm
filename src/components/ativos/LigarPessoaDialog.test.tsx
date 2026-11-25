@@ -13,10 +13,11 @@ vi.mock("@/hooks/usePermissions", () => ({
 
 import { LigarPessoaDialog } from "./LigarPessoaDialog";
 
-const ATIVO = { id: "p2", nome: "Telemóvel 1" } as Ativo;
+const ATIVO = { id: "p2", nome: "Telemóvel 1", tipo: "telemovel" } as Ativo;
 const ATRIBUICOES: AtribuicaoSemAtivo[] = [
   { id: "pe9", pessoaNome: "Rui Costa", tipo: "portatil", descricao: "Portátil velho", valor: 900, entrega: "2025-05-01", estado: "atribuido" },
   { id: "pe8", pessoaNome: "Inês Cardoso", tipo: "telemovel", descricao: "iPhone", valor: 700, entrega: "2025-06-01", estado: "atribuido" },
+  { id: "pe6", pessoaNome: "Joana Reis", tipo: "outro", descricao: "Tablet", valor: 300, entrega: "2025-07-01", estado: "atribuido" },
   { id: "pe7", pessoaNome: "Hugo Teixeira", tipo: "portatil", descricao: "Já devolvido", valor: 500, entrega: "2024-01-01", estado: "devolvido" },
 ];
 const TODAS = ["ativos.edit", "hr.pessoas.retribuicao.edit"];
@@ -51,21 +52,39 @@ describe("LigarPessoaDialog", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
-  it("lista só as atribuições ativas (as devolvidas não)", () => {
-    abrir();
+  const opcoes = () => {
     fireEvent.keyDown(screen.getByRole("combobox", { name: /Atribuição no RH/ }), { key: "Enter" });
-    // Três linhas: o convite «Escolha a atribuição» e as duas ativas.
-    const nomes = screen.getAllByRole("option").map((o) => o.textContent ?? "");
+    return screen.getAllByRole("option").map((o) => o.textContent ?? "");
+  };
+
+  it("lista só as atribuições ativas do mesmo tipo do ativo, ou «outro» em qualquer um dos lados (a base recusa o resto: ATV18)", () => {
+    abrir();
+    // O convite «Escolha a atribuição», o telemóvel (mesmo tipo) e o tablet «outro». Fora: o portátil (outro tipo) e o devolvido.
+    const nomes = opcoes();
     expect(nomes).toHaveLength(3);
     expect(nomes[0]).toBe("Escolha a atribuição");
-    expect(nomes.join("|")).toContain("Rui Costa");
     expect(nomes.join("|")).toContain("Inês Cardoso");
+    expect(nomes.join("|")).toContain("Joana Reis");
+    expect(nomes.join("|")).not.toContain("Rui Costa");
     expect(nomes.join("|")).not.toContain("Hugo Teixeira");
+  });
+
+  it("um ativo do tipo «outro» liga a qualquer atribuição ativa", () => {
+    abrir({ ...ATIVO, tipo: "outro" } as Ativo);
+    const nomes = opcoes().join("|");
+    for (const nome of ["Rui Costa", "Inês Cardoso", "Joana Reis"]) expect(nomes).toContain(nome);
+    expect(nomes).not.toContain("Hugo Teixeira");
+  });
+
+  it("sem atribuições do tipo certo, diz qual é o tipo e não deixa confirmar", () => {
+    abrir({ ...ATIVO, tipo: "viatura" } as Ativo, ATRIBUICOES.filter((a) => a.tipo !== "outro"));
+    expect(screen.getByText("Não há atribuições ativas de «Viatura» no RH por ligar.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Ligar" })).toBeDisabled();
   });
 
   it("sem atribuições por ligar, diz-o e não deixa confirmar", () => {
     abrir(ATIVO, []);
-    expect(screen.getByText("Não há atribuições ativas no RH por ligar.")).toBeInTheDocument();
+    expect(screen.getByText("Não há atribuições ativas de «Telemóvel» no RH por ligar.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Ligar" })).toBeDisabled();
   });
 
@@ -82,13 +101,13 @@ describe("LigarPessoaDialog", () => {
     expect(aoLigar).toHaveBeenCalledWith({ nome: "Telemóvel 1", pessoa: "Inês Cardoso" });
   });
 
-  it("ATV18 aparece traduzido num aviso e o diálogo fica aberto", async () => {
-    m.ligarPessoa.mockResolvedValue({ ok: false, codigo: "ATV18", mensagem: "Esta ligação não é válida: o ativo já está ligado a outra atribuição, ou a atribuição não é elegível." });
+  it("ATV18 aparece num aviso, com o motivo que a base dá, e o diálogo fica aberto", async () => {
+    m.ligarPessoa.mockResolvedValue({ ok: false, codigo: "ATV18", mensagem: "Esta atribuição já foi devolvida: a ligação fica no histórico." });
     abrir();
     fireEvent.keyDown(screen.getByRole("combobox", { name: /Atribuição no RH/ }), { key: "Enter" });
-    fireEvent.click(screen.getByRole("option", { name: /Rui Costa/ }));
+    fireEvent.click(screen.getByRole("option", { name: /Inês Cardoso/ }));
     fireEvent.click(screen.getByRole("button", { name: "Ligar" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Esta ligação não é válida");
+    expect(await screen.findByRole("alert")).toHaveTextContent("Esta atribuição já foi devolvida");
     expect(aoFechar).not.toHaveBeenCalled();
   });
 });

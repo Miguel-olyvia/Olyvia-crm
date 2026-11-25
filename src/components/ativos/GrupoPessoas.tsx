@@ -1,11 +1,11 @@
 /**
  * O separador «Pessoas»: a lista dos ativos do grupo (que chega por `children`, com os seus estados vazios) e, abaixo,
- * «Atribuídos no RH sem ativo registado» com a ligação «Ver em Custos». Sem `hr.pessoas.retribuicao.view` (`rhOculto`) não há
- * nomes nem a secção de baixo: só o aviso «Sem permissão para ver a quem estão atribuídos».
+ * «Atribuídos no RH sem ativo registado» (cartões empilhados, sem tabela: sem scroll horizontal no telemóvel) com a ligação
+ * «Ver em Custos». Sem `hr.pessoas.retribuicao.view` (`rhOculto`) não há nomes nem a secção de baixo: só o aviso «Sem permissão para
+ * ver a quem estão atribuídos».
  */
 import type { ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { dataPt, euros } from "@/components/rh-exemplo/custo/formato";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -20,6 +20,15 @@ interface Props {
   rhOculto: boolean;
   semAtivo: readonly AtribuicaoSemAtivo[] | null;
   children: ReactNode;
+}
+
+function Dado({ rotulo, children }: { rotulo: string; children: ReactNode }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 sm:block">
+      <dt className="text-xs text-muted-foreground">{rotulo}</dt>
+      <dd className="text-sm tabular-nums">{children}</dd>
+    </div>
+  );
 }
 
 export function GrupoPessoas({ rhOculto, semAtivo, children }: Props) {
@@ -42,28 +51,19 @@ export function GrupoPessoas({ rhOculto, semAtivo, children }: Props) {
           {semAtivo.length === 0 ? (
             <p className="text-sm text-muted-foreground">{t("ativos.semAtivo.vazio")}</p>
           ) : (
-            <Table containerClassName="rounded-md border" className="min-w-[36rem]" aria-labelledby="ativos-sem-ativo">
-              <TableHeader>
-                <TableRow>
-                  <TableHead scope="col" className="px-3">{t("ativos.semAtivo.col.pessoa")}</TableHead>
-                  <TableHead scope="col" className="px-3">{t("ativos.semAtivo.col.descricao")}</TableHead>
-                  <TableHead scope="col" className="px-3 text-right">{t("ativos.semAtivo.col.valor")}</TableHead>
-                  <TableHead scope="col" className="px-3">{t("ativos.semAtivo.col.entrega")}</TableHead>
-                  <TableHead scope="col" className="px-3">{t("ativos.semAtivo.col.estado")}</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {semAtivo.map((a) => (
-                  <TableRow key={a.id}>
-                    <TableCell className="px-3 py-2 text-sm font-medium">{a.pessoaNome ?? "—"}</TableCell>
-                    <TableCell className="px-3 py-2 text-sm">{a.descricao ?? "—"}</TableCell>
-                    <TableCell className="px-3 py-2 text-right text-sm tabular-nums">{euros(a.valor, "—")}</TableCell>
-                    <TableCell className="px-3 py-2 text-sm">{a.entrega ? dataPt(a.entrega) : "—"}</TableCell>
-                    <TableCell className="px-3 py-2 text-sm">{a.estado && ESTADOS_CONHECIDOS.includes(a.estado) ? t(`ativos.semAtivo.estado.${a.estado}`) : "—"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+            <ul aria-labelledby="ativos-sem-ativo" className="space-y-2">
+              {semAtivo.map((a) => (
+                <li key={a.id} className="space-y-2 rounded-lg border bg-card p-4">
+                  <p className="font-medium">{a.pessoaNome ?? "—"}</p>
+                  <p className="text-sm text-muted-foreground">{a.descricao ?? "—"}</p>
+                  <dl className="grid gap-2 sm:grid-cols-3">
+                    <Dado rotulo={t("ativos.semAtivo.col.valor")}>{euros(a.valor, "—")}</Dado>
+                    <Dado rotulo={t("ativos.semAtivo.col.entrega")}>{a.entrega ? dataPt(a.entrega) : "—"}</Dado>
+                    <Dado rotulo={t("ativos.semAtivo.col.estado")}>{a.estado && ESTADOS_CONHECIDOS.includes(a.estado) ? t(`ativos.semAtivo.estado.${a.estado}`) : "—"}</Dado>
+                  </dl>
+                </li>
+              ))}
+            </ul>
           )}
         </section>
       )}

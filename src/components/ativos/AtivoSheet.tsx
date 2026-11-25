@@ -16,13 +16,13 @@ import { CamposTocadosProvider, CampoSelect, CampoTexto, type OpcaoSelect } from
 import { useAtivoMutacoes } from "@/hooks/ativos/useAtivoMutacoes";
 import { useAtivosOpcoes } from "@/hooks/ativos/useAtivosOpcoes";
 import { useTranslation } from "@/hooks/useTranslation";
-import { dataMaxima, hojeLocal } from "@/lib/hr/custoBase";
+import { hojeLocal } from "@/lib/hr/custoBase";
 import { cn } from "@/lib/utils";
 import { CampoNumero } from "./CampoNumero";
 import { SeletorEquipamento } from "./SeletorEquipamento";
 import { campoDoCodigo } from "./lib/errosAtivo";
 import { GRUPOS_ATIVO, LIMITES_ATIVO, type Ativo, type GrupoAtivo, type OpcoesAtivo } from "./lib/tipos";
-import { argumentosDoAtivo, tiposDoGrupo, validarAtivo, type CamposAtivo, type ErrosAtivo } from "./lib/validarAtivo";
+import { argumentosDoAtivo, dataMaximaAtivo, numeroTexto, tiposDoGrupo, validarAtivo, type CamposAtivo, type ErrosAtivo } from "./lib/validarAtivo";
 
 export interface AvisoGuardado {
   nome: string;
@@ -36,6 +36,8 @@ interface Props {
   /** O ativo a editar; `null` = registar. */
   ativo: Ativo | null;
   aoFechar: () => void;
+  /** Ao fechar o painel, devolve o foco a quem o abriu (a página guarda a origem). */
+  aoFecharFoco?: (e: Event) => void;
   /** Depois de gravar: o nome e se foi uma edição (a página diz «registado» ou «atualizado»). */
   aoGuardar?: (aviso: AvisoGuardado) => void;
 }
@@ -46,7 +48,8 @@ const VIDA_POR_OMISSAO: Record<GrupoAtivo, string> = { servico: "", estrutura: "
 /** Os campos que vivem na secção recolhida. */
 const AVANCADOS: ReadonlyArray<keyof ErrosAtivo> = ["codigo", "numSerie", "residual", "manutencao", "centroCusto", "localizacao", "notas"];
 
-const euroTexto = (n: number): string => (n === 0 ? "" : String(n));
+/** Um valor em euros como se escreve no campo: «1234,50» (com vírgula e dois decimais), «1200» se for inteiro, vazio se for 0. */
+const euroTexto = (n: number): string => (n === 0 ? "" : numeroTexto(n));
 
 function camposIniciais(grupo: GrupoAtivo, a: Ativo | null): CamposAtivo {
   if (!a) {
@@ -57,7 +60,7 @@ function camposIniciais(grupo: GrupoAtivo, a: Ativo | null): CamposAtivo {
   }
   return {
     grupo: a.grupo, nome: a.nome, tipo: a.tipo ?? "", catEquipamentoId: a.catEquipamentoId ?? "", codigo: a.codigo ?? "", numSerie: a.numSerie ?? "",
-    dataCompra: a.dataCompra, valorCompra: String(a.valorCompra), valorResidual: euroTexto(a.valorResidual), vidaMeses: a.vidaMeses === null ? "" : String(a.vidaMeses),
+    dataCompra: a.dataCompra, valorCompra: numeroTexto(a.valorCompra), valorResidual: euroTexto(a.valorResidual), vidaMeses: a.vidaMeses === null ? "" : String(a.vidaMeses),
     manutencaoAno: euroTexto(a.manutencaoAno), centroCustoId: a.centroCustoId ?? "", localizacao: a.localizacao ?? "", notas: a.notas ?? "",
   };
 }
@@ -129,7 +132,13 @@ function Formulario({ grupo, ativo, opcoes, erroOpcoes, aoFechar, aoGuardar }: F
     listaEquipamentos.unshift({ id: ativo.catEquipamento.id, nome: ativo.catEquipamento.nome, vidaAnos: ativo.catEquipamento.vidaAnos, vidaHoras: ativo.catEquipamento.vidaHoras });
   }
   const opcoesCentro: OpcaoSelect[] = (opcoes?.centrosCusto ?? []).map((c) => ({ value: c.id, label: c.nome }));
-  const vidaAnosDoModelo = escolhido?.vidaAnos ?? ativo?.catEquipamento?.vidaAnos ?? null;
+  // A ajuda da vida de um serviço diz o que acontece se ficar vazia, conforme o que o modelo escolhido tem (anos, só horas, nada).
+  const modelo = escolhido ?? (ativo?.catEquipamento ? { vidaAnos: ativo.catEquipamento.vidaAnos, vidaHoras: ativo.catEquipamento.vidaHoras } : null);
+  const ajudaDaVidaDoModelo = !modelo
+    ? t("ativos.campo.vidaAjudaSemModelo")
+    : modelo.vidaAnos
+      ? t("ativos.campo.vidaAjudaModelo", { n: modelo.vidaAnos })
+      : modelo.vidaHoras ? t("ativos.campo.vidaAjudaSoHoras") : t("ativos.campo.vidaAjudaModeloSemVida");
 
   const mudarGrupo = (novo: GrupoAtivo) => {
     if (novo === g) return;
@@ -161,7 +170,7 @@ function Formulario({ grupo, ativo, opcoes, erroOpcoes, aoFechar, aoGuardar }: F
         aoFechar();
         return;
       }
-      const campo = campoDoCodigo(resultado.codigo);
+      const campo = resultado.campo ?? campoDoCodigo(resultado.codigo);
       if (campo) {
         setErros({ [campo]: resultado.mensagem });
         if (AVANCADOS.includes(campo)) setAvancadoAberto(true);
@@ -204,14 +213,12 @@ function Formulario({ grupo, ativo, opcoes, erroOpcoes, aoFechar, aoGuardar }: F
         <CampoNumero id="ativo-valor" label={t("ativos.campo.valorCompra")} valor={campos.valorCompra} onChange={(v) => mudar({ valorCompra: v })} obrigatorio ajuda={t("ativos.ajuda.valorCompra")} erro={erro("valorCompra")} />
         <CampoTexto
           id="ativo-data" label={t("ativos.campo.dataCompra")} tipo="date" valor={campos.dataCompra} onChange={(v) => mudar({ dataCompra: v })} obrigatorio
-          min={LIMITES_ATIVO.dataMinima} max={dataMaxima()} ajuda={t("ativos.ajuda.data")} erro={erro("data")}
+          min={LIMITES_ATIVO.dataMinima} max={dataMaximaAtivo()} ajuda={t("ativos.ajuda.data")} erro={erro("data")}
         />
         <CampoNumero
           id="ativo-vida" label={t("ativos.campo.vida")} valor={campos.vidaMeses} onChange={(v) => { setVidaTocada(true); mudar({ vidaMeses: v }); }} modo="numeric"
           obrigatorio={g !== "servico"} erro={erro("vida")}
-          ajuda={g === "servico"
-            ? (vidaAnosDoModelo ? t("ativos.campo.vidaAjudaModelo", { n: vidaAnosDoModelo }) : t("ativos.campo.vidaAjudaSemModelo"))
-            : t("ativos.campo.vidaAjudaIntervalo")}
+          ajuda={g === "servico" ? ajudaDaVidaDoModelo : t("ativos.campo.vidaAjudaIntervalo")}
         />
 
         <Collapsible open={avancadoAberto} onOpenChange={setAvancadoAberto} className="rounded-md border">
@@ -243,13 +250,13 @@ function Formulario({ grupo, ativo, opcoes, erroOpcoes, aoFechar, aoGuardar }: F
   );
 }
 
-export function AtivoSheet({ aberto, grupo, ativo, aoFechar, aoGuardar }: Props) {
+export function AtivoSheet({ aberto, grupo, ativo, aoFechar, aoFecharFoco, aoGuardar }: Props) {
   const { t } = useTranslation();
   const { opcoes, erro } = useAtivosOpcoes(aberto);
   const grupoReal = ativo?.grupo ?? grupo;
   return (
     <Sheet open={aberto} onOpenChange={(v) => !v && aoFechar()}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+      <SheetContent className="w-full overflow-y-auto sm:max-w-lg" onCloseAutoFocus={aoFecharFoco}>
         <SheetHeader>
           <SheetTitle>{t(ativo ? "ativos.sheet.tituloEditar" : "ativos.sheet.tituloNovo")}</SheetTitle>
           <SheetDescription>{t(ativo ? "ativos.sheet.ajudaEditar" : "ativos.sheet.ajudaNovo")}</SheetDescription>

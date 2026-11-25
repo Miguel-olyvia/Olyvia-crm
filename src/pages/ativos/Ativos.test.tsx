@@ -20,7 +20,7 @@ const m = vi.hoisted(() => ({
 }));
 vi.mock("@/hooks/useCountries", () => ({ useCountries: () => ({ countries: [], loading: false, error: null }) }));
 vi.mock("@/hooks/ativos/useAtivos", () => ({
-  useAtivos: (o: unknown) => { m.useAtivos(o); return { estado: m.estado, dados: m.dados, mensagem: m.mensagem, semOrganizacao: false, refazer: m.refazer }; },
+  useAtivos: (o: unknown) => { m.useAtivos(o); return { estado: m.estado, dados: m.dados, mensagem: m.mensagem, aAtualizar: false, semOrganizacao: false, refazer: m.refazer }; },
 }));
 vi.mock("@/hooks/ativos/useAtivoMutacoes", () => ({ useAtivoMutacoes: () => m.mut }));
 vi.mock("@/hooks/ativos/useAtivosOpcoes", () => ({
@@ -37,7 +37,7 @@ const BASE: Ativo = {
   id: "x", grupo: "estrutura", tipo: "mobiliario", nome: "Mesa", codigo: null, numSerie: null, catEquipamentoId: null,
   dataCompra: "2026-01-15", valorCompra: 1200, valorResidual: 0, vidaMeses: 12, manutencaoAno: 0, centroCustoId: null,
   localizacao: "Armazém", notas: null, estado: "ativo", desativadoEm: null, desativadoMotivo: null, desativadoNota: null,
-  catEquipamento: null, atribuicao: null,
+  catEquipamento: null, atribuicao: null, ligado: false,
 };
 const ativo = (p: Partial<Ativo>): Ativo => ({ ...BASE, ...p });
 
@@ -51,10 +51,10 @@ const DADOS: AtivosLidos = {
     ativo({ id: "e2", nome: "Cadeira velha", estado: "desativado", desativadoEm: "2026-03-10", desativadoMotivo: "abatido", desativadoNota: "Partiu-se", valorCompra: 100, vidaMeses: 10, localizacao: null }),
   ],
   pessoa: [
-    ativo({ id: "p1", grupo: "pessoa", tipo: "portatil", nome: "Portátil 1", atribuicao: { pessoaEquipamentoId: "pe1", pessoaNome: "Ana Silva", entrega: "2026-02-01" } }),
+    ativo({ id: "p1", grupo: "pessoa", tipo: "portatil", nome: "Portátil 1", ligado: true, atribuicao: { pessoaEquipamentoId: "pe1", pessoaNome: "Ana Silva", entrega: "2026-02-01" } }),
     ativo({ id: "p2", grupo: "pessoa", tipo: "telemovel", nome: "Telemóvel 1" }),
   ],
-  atribuicoesSemAtivo: [{ id: "pe9", pessoaNome: "Rui Costa", tipo: "portatil", descricao: "Portátil velho", valor: 900, entrega: "2025-05-01", estado: "atribuido" }],
+  atribuicoesSemAtivo: [{ id: "pe9", pessoaNome: "Rui Costa", tipo: "telemovel", descricao: "Telemóvel velho", valor: 900, entrega: "2025-05-01", estado: "atribuido" }],
   rhOculto: false,
   centrosCusto: [{ id: "cc1", nome: "Obras" }],
   truncado: false,
@@ -113,7 +113,7 @@ describe("Ativos: separadores e totais", () => {
     expect(norm(within(totais).getByTestId("total-compra").textContent)).toBe("1490,00 €");
     // 600 € / 60 meses = 10 € por mês; de janeiro a junho são 6 quotas: 540 €. O compressor só tem vida em horas: fica fora.
     expect(norm(within(totais).getByTestId("total-atual").textContent)).toBe("540,00 €");
-    expect(totais).toHaveTextContent("1 por uso, sem valor atual");
+    expect(totais).toHaveTextContent("1 sem valor atual (por uso ou sem vida definida no modelo)");
   });
 
   it("os totais mudam com o separador e batem com a soma das linhas", () => {
@@ -122,7 +122,7 @@ describe("Ativos: separadores e totais", () => {
     const totais = screen.getByRole("region", { name: "Totais de Estrutura" });
     expect(within(totais).getByTestId("total-quantidade")).toHaveTextContent("1");
     expect(norm(within(totais).getByTestId("total-atual").textContent)).toBe(norm(within(item("Mesa grande")).getByTestId("valor-atual").textContent));
-    expect(totais).not.toHaveTextContent("por uso");
+    expect(totais).not.toHaveTextContent("sem valor atual");
   });
 
   it("os desativados não entram nos totais, mesmo com o filtro em «Todos»", () => {
@@ -187,7 +187,9 @@ describe("Ativos: a lista (só o que decide)", () => {
     abrirSeparador(/^Pessoas/);
     expect(screen.queryByText("Ana Silva")).not.toBeInTheDocument();
     expect(within(item("Portátil 1")).getByText("Reservado ao RH")).toBeInTheDocument();
-    expect(within(item("Telemóvel 1")).getByTestId("estado-etiqueta")).toHaveTextContent("Em uso");
+    // A chave `ligado` vem da base mesmo sem permissão do RH: dá para dizer que falta a ligação sem dizer a quem.
+    expect(within(item("Telemóvel 1")).getByTestId("estado-etiqueta")).toHaveTextContent("Sem pessoa ligada");
+    expect(within(item("Portátil 1")).getByTestId("estado-etiqueta")).toHaveTextContent("Em uso");
     expect(screen.getByText("Sem permissão para ver a quem estão atribuídos.")).toBeInTheDocument();
     expect(screen.queryByText("Atribuídos no RH sem ativo registado")).not.toBeInTheDocument();
   });
@@ -267,10 +269,40 @@ describe("Ativos: pesquisa, filtro por estado e estados vazios", () => {
     expect(screen.getByText("Quem tem permissão para editar pode registar o primeiro.")).toBeInTheDocument();
   });
 
-  it("lista cortada nos 2000: avisa", () => {
+  it("lista cortada nos 2000: aviso em cada separador, totais marcados como parciais e sem prometer que a pesquisa acha o resto", () => {
     m.dados = { ...DADOS, truncado: true };
     ver();
-    expect(screen.getByText(/primeiros 2000 ativos/)).toBeInTheDocument();
+    const aviso = screen.getByTestId("aviso-truncado");
+    expect(aviso).toHaveTextContent("2000");
+    expect(aviso).not.toHaveTextContent(/pesquisa/i);
+    expect(screen.getByRole("region", { name: "Totais de Serviço" })).toHaveTextContent("Totais parciais");
+    abrirSeparador(/^Estrutura/);
+    expect(screen.getByTestId("aviso-truncado")).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Totais de Estrutura" })).toHaveTextContent("Totais parciais");
+  });
+
+  it("sem corte não há aviso nem «parciais»", () => {
+    ver();
+    expect(screen.queryByTestId("aviso-truncado")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Totais de Serviço" })).not.toHaveTextContent("parciais");
+  });
+
+  it("com «Todos» ou «Desativados» os totais dizem que contam só os ativos em uso", () => {
+    ver();
+    abrirSeparador(/^Estrutura/);
+    expect(screen.getByRole("region", { name: "Totais de Estrutura" })).not.toHaveTextContent("só os ativos em uso");
+    mostrarTodos();
+    expect(screen.getByRole("region", { name: "Totais de Estrutura" })).toHaveTextContent("Os totais contam só os ativos em uso.");
+    fireEvent.change(screen.getByLabelText("Estado"), { target: { value: "desativados" } });
+    expect(screen.getByRole("region", { name: "Totais de Estrutura" })).toHaveTextContent("Os totais contam só os ativos em uso.");
+  });
+
+  it("uma releitura falhada com dados na mão mantém a lista e mostra o aviso (não desmonta o ecrã)", () => {
+    m.mensagem = "Não foi possível carregar os ativos. Tente novamente.";
+    ver();
+    expect(screen.getByRole("alert")).toHaveTextContent("Não foi possível carregar os ativos.");
+    expect(screen.getByText("Berbequim 1")).toBeInTheDocument();
+    expect(screen.getByLabelText("Estado")).toBeInTheDocument();
   });
 });
 
@@ -409,12 +441,27 @@ describe("Ativos: o detalhe (o resto da informação, com números exatos)", () 
     expect(await screen.findByText("Ativo «Cadeira velha» reativado.")).toBeInTheDocument();
   });
 
-  it("um erro da base ao desativar (ATV17) aparece no diálogo, traduzido, e o diálogo fica aberto", async () => {
+  it("a data de desativação não passa de hoje + 7 dias (como a base: ATV16)", async () => {
+    m.permissoes = EDITAR;
+    ver();
+    abrirSeparador(/^Estrutura/);
+    fireEvent.click(within(await abrirDetalhe("Mesa grande")).getByRole("button", { name: "Desativar" }));
+    const dialogo = await screen.findByRole("dialog", { name: "Desativar ativo" });
+    expect((within(dialogo).getByLabelText(/Data de desativação/) as HTMLInputElement).max).toBe("2026-06-22");
+    fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: /Motivo/ }), { key: "Enter" });
+    fireEvent.click(screen.getByRole("option", { name: "Vendido" }));
+    fireEvent.change(within(dialogo).getByLabelText(/Data de desativação/), { target: { value: "2026-06-23" } });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Desativar ativo" }));
+    expect(within(dialogo).getByText("Indique uma data válida, a partir da data de compra.")).toBeInTheDocument();
+    expect(m.mut.desativar).not.toHaveBeenCalled();
+  });
+
+  it("um erro da base ao desativar (ATV16, por exemplo) aparece no diálogo, traduzido, e o diálogo fica aberto", async () => {
     m.permissoes = EDITAR;
     m.mut.desativar.mockResolvedValue({ ok: false, codigo: "ATV17", mensagem: "Este ativo está atribuído a uma pessoa. Devolva-o primeiro no RH." });
     ver();
-    abrirSeparador(/^Pessoas/);
-    fireEvent.click(within(await abrirDetalhe("Portátil 1")).getByRole("button", { name: "Desativar" }));
+    abrirSeparador(/^Estrutura/);
+    fireEvent.click(within(await abrirDetalhe("Mesa grande")).getByRole("button", { name: "Desativar" }));
     const dialogo = await screen.findByRole("dialog", { name: "Desativar ativo" });
     fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: /Motivo/ }), { key: "Enter" });
     fireEvent.click(screen.getByRole("option", { name: "Abatido" }));
@@ -460,11 +507,24 @@ describe("Ativos: criar a partir do topo e ligar a pessoas", () => {
     expect(within(await abrirDetalhe("Telemóvel 1")).queryByRole("button", { name: /Ligar|Desligar/ })).not.toBeInTheDocument();
   });
 
-  it("Desligar chama a RPC com a atribuição e avisa", async () => {
+  it("Desligar pede confirmação (diz de quem) e só então chama a RPC; «Cancelar» não faz nada", async () => {
     m.permissoes = EDITAR_E_LIGAR;
     ver();
     abrirSeparador(/^Pessoas/);
     fireEvent.click(within(await abrirDetalhe("Portátil 1")).getByRole("button", { name: "Desligar" }));
+    const confirmar = await screen.findByRole("alertdialog");
+    expect(confirmar).toHaveTextContent("Desligar «Portátil 1» de Ana Silva?");
+    fireEvent.click(within(confirmar).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
+    expect(m.mut.desligarPessoa).not.toHaveBeenCalled();
+  });
+
+  it("Desligar, confirmado, chama a RPC com a atribuição e avisa", async () => {
+    m.permissoes = EDITAR_E_LIGAR;
+    ver();
+    abrirSeparador(/^Pessoas/);
+    fireEvent.click(within(await abrirDetalhe("Portátil 1")).getByRole("button", { name: "Desligar" }));
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Desligar" }));
     await waitFor(() => expect(m.mut.desligarPessoa).toHaveBeenCalledWith("pe1"));
     expect(await screen.findByText("Ativo «Portátil 1» desligado da pessoa.")).toBeInTheDocument();
   });
@@ -480,5 +540,128 @@ describe("Ativos: criar a partir do topo e ligar a pessoas", () => {
     fireEvent.click(within(dialogo).getByRole("button", { name: "Ligar" }));
     await waitFor(() => expect(m.mut.ligarPessoa).toHaveBeenCalledWith("p2", "pe9"));
     expect(await screen.findByText("Ativo «Telemóvel 1» ligado a Rui Costa.")).toBeInTheDocument();
+  });
+});
+
+describe("Ativos: o que a revisão apanhou", () => {
+  const SEM_VIDA = { id: "c3", nome: "Escada", vidaAnos: null, vidaHoras: null, usoAnoHoras: null };
+
+  it("um ativo atribuído a uma pessoa não oferece Desativar: explica que se devolve primeiro no RH (chave `ligado`, mesmo sem ver o RH)", async () => {
+    m.permissoes = EDITAR_E_LIGAR;
+    ver();
+    abrirSeparador(/^Pessoas/);
+    let d = within(await abrirDetalhe("Portátil 1"));
+    expect(d.queryByRole("button", { name: "Desativar" })).not.toBeInTheDocument();
+    expect(d.getByTestId("detalhe-desativar-bloqueado")).toHaveTextContent("Este ativo está atribuído a uma pessoa. Devolva-o primeiro no RH.");
+    expect(d.getByRole("button", { name: "Editar" })).toBeInTheDocument();
+    cleanup();
+    m.permissoes = EDITAR;
+    m.dados = { ...DADOS, rhOculto: true, atribuicoesSemAtivo: null };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    d = within(await abrirDetalhe("Portátil 1"));
+    expect(d.queryByRole("button", { name: "Desativar" })).not.toBeInTheDocument();
+    expect(d.getByTestId("detalhe-desativar-bloqueado")).toBeInTheDocument();
+    // Um ativo de pessoa sem ligação continua a poder desativar-se.
+    cleanup();
+    ver();
+    abrirSeparador(/^Pessoas/);
+    expect(within(await abrirDetalhe("Telemóvel 1")).getByRole("button", { name: "Desativar" })).toBeInTheDocument();
+  });
+
+  it("pessoa já apagada (ligado, sem nome): «Ligado a uma pessoa», sem Ligar, sem Desligar e sem Desativar", async () => {
+    m.permissoes = EDITAR_E_LIGAR;
+    m.dados = { ...DADOS, pessoa: [ativo({ id: "p5", grupo: "pessoa", tipo: "portatil", nome: "Portátil órfão", ligado: true, atribuicao: null })] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    expect(within(item("Portátil órfão")).getByText("Ligado a uma pessoa")).toBeInTheDocument();
+    expect(within(item("Portátil órfão")).getByTestId("estado-etiqueta")).toHaveTextContent("Em uso");
+    const d = within(await abrirDetalhe("Portátil órfão"));
+    expect(d.getByTestId("detalhe-pessoa")).toHaveTextContent("Ligado a uma pessoa");
+    for (const nome of ["Ligar a pessoa", "Desligar", "Desativar"]) expect(d.queryByRole("button", { name: nome })).not.toBeInTheDocument();
+  });
+
+  it("a frase nunca diz «Perde 0,00 €»: com residual igual à compra diz «Não perde valor.»", async () => {
+    m.dados = { ...DADOS, estrutura: [ativo({ id: "e9", nome: "Terreno", valorCompra: 5000, valorResidual: 5000, vidaMeses: 600 })] };
+    ver();
+    abrirSeparador(/^Estrutura/);
+    const frase = within(await abrirDetalhe("Terreno")).getByTestId("detalhe-frase");
+    expect(frase).toHaveTextContent("Não perde valor.");
+    expect(frase).not.toHaveTextContent("Perde");
+  });
+
+  it("«Por uso» só quando é mesmo por uso: um modelo sem vida diz «Sem vida definida», na lista e no detalhe", async () => {
+    m.dados = { ...DADOS, servico: [ativo({ id: "s7", grupo: "servico", tipo: null, nome: "Escada 1", catEquipamentoId: "c3", vidaMeses: null, catEquipamento: SEM_VIDA })] };
+    ver();
+    expect(within(item("Escada 1")).getByTestId("valor-atual")).toHaveTextContent("Sem vida definida");
+    expect(within(item("Escada 1")).getByTestId("valor-atual")).not.toHaveTextContent("Por uso");
+    expect(screen.getByRole("region", { name: "Totais de Serviço" })).toHaveTextContent("1 sem valor atual");
+    const d = within(await abrirDetalhe("Escada 1"));
+    expect(d.getByTestId("detalhe-frase")).toHaveTextContent("O modelo do catálogo não tem vida útil definida: não se calcula o valor atual.");
+    expect(d.getByTestId("detalhe-vida")).toHaveTextContent("Sem vida definida");
+  });
+
+  it("o detalhe diz a vida restante e quando acaba de depreciar", async () => {
+    ver();
+    const d = within(await abrirDetalhe("Berbequim 1"));
+    expect(d.getByTestId("detalhe-vida-restante")).toHaveTextContent("54 meses (acaba em 12/2030)");
+  });
+
+  it("desativado: o valor tem a legenda «à data da desativação» e não há vida restante", async () => {
+    ver();
+    abrirSeparador(/^Estrutura/);
+    mostrarTodos();
+    const d = within(await abrirDetalhe("Cadeira velha"));
+    expect(d.getByTestId("detalhe-valor-rotulo")).toHaveTextContent("Valor à data da desativação");
+    expect(norm(d.getByTestId("detalhe-valor-atual").textContent)).toBe("70,00 €");
+    expect(d.queryByTestId("detalhe-vida-restante")).not.toBeInTheDocument();
+    cleanup();
+    ver();
+    expect(within(await abrirDetalhe("Berbequim 1")).getByTestId("detalhe-valor-rotulo")).toHaveTextContent("Valor atual");
+  });
+
+  it("a linha de ligação tem rótulo acessível (equipamento, local, pessoa)", () => {
+    ver();
+    expect(within(item("Berbequim 1")).getByText("Equipamento do catálogo:")).toBeInTheDocument();
+    abrirSeparador(/^Estrutura/);
+    expect(within(item("Mesa grande")).getByText("Local:")).toBeInTheDocument();
+    abrirSeparador(/^Pessoas/);
+    expect(within(item("Portátil 1")).getByText("Pessoa:")).toBeInTheDocument();
+  });
+
+  it("«sem ativo registado» são cartões (sem tabela, sem scroll horizontal)", () => {
+    ver();
+    abrirSeparador(/^Pessoas/);
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    const lista = screen.getByRole("list", { name: "Atribuídos no RH sem ativo registado" });
+    expect(within(lista).getByText("Rui Costa")).toBeInTheDocument();
+    expect(within(lista).getByText("Telemóvel velho")).toBeInTheDocument();
+  });
+
+  it("ao fechar o detalhe o foco volta ao ativo que o abriu", async () => {
+    ver();
+    const botao = botaoDe("Berbequim 1");
+    fireEvent.click(botao);
+    fireEvent.keyDown(await screen.findByRole("dialog", { name: "Berbequim 1" }), { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(botao));
+  });
+
+  it("Editar a partir do detalhe: ao fechar o painel o foco volta ao ativo da lista (não se perde)", async () => {
+    m.permissoes = EDITAR;
+    ver();
+    const botao = botaoDe("Berbequim 1");
+    fireEvent.click(botao);
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Berbequim 1" })).getByRole("button", { name: "Editar" }));
+    fireEvent.keyDown(await screen.findByRole("dialog", { name: "Editar ativo" }), { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(botao));
+  });
+
+  it("ao fechar o formulário de registar o foco volta ao botão que o abriu", async () => {
+    m.permissoes = EDITAR;
+    ver();
+    const registar = screen.getByRole("button", { name: "Registar ativo" });
+    fireEvent.click(registar);
+    fireEvent.keyDown(await screen.findByRole("dialog", { name: "Registar ativo" }), { key: "Escape" });
+    await waitFor(() => expect(document.activeElement).toBe(registar));
   });
 });

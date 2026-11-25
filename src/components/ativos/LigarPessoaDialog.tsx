@@ -22,6 +22,8 @@ interface Props {
   /** As atribuições do RH sem ativo (a lista traz também as devolvidas; aqui só contam as `atribuido`). */
   atribuicoes: readonly AtribuicaoSemAtivo[];
   aoFechar: () => void;
+  /** Ao fechar, devolve o foco a quem abriu (a página guarda a origem). */
+  aoFecharFoco?: (e: Event) => void;
   aoLigar?: (aviso: { nome: string; pessoa: string }) => void;
 }
 
@@ -33,7 +35,8 @@ function Formulario({ ativo, atribuicoes, aoFechar, aoLigar }: Omit<Props, "ativ
   const [aviso, setAviso] = useState<string | null>(null);
   const [aGuardar, setAGuardar] = useState(false);
   const ocupado = useRef(false);
-  const ativas = atribuicoes.filter((a) => a.estado === "atribuido");
+  // A base só liga o mesmo tipo (portátil com portátil), salvo se um dos dois for «outro» (ATV18 nos outros casos).
+  const ativas = atribuicoes.filter((a) => a.estado === "atribuido" && (ativo.tipo === "outro" || a.tipo === "outro" || a.tipo === ativo.tipo));
 
   const confirmar = async () => {
     if (ocupado.current) return;
@@ -61,7 +64,7 @@ function Formulario({ ativo, atribuicoes, aoFechar, aoLigar }: Omit<Props, "ativ
   return (
     <form className="space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); void confirmar(); }}>
       {ativas.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("ativos.ligar.semAtribuicoes")}</p>
+        <p className="text-sm text-muted-foreground">{t("ativos.ligar.semAtribuicoes", { tipo: ativo.tipo ? t(`ativos.tipo.pessoa.${ativo.tipo}`) : "" })}</p>
       ) : (
         <CampoSelect
           id="ativo-ligar-atribuicao" label={t("ativos.ligar.atribuicao")} valor={escolhida} onChange={setEscolhida} obrigatorio erro={erro}
@@ -77,13 +80,13 @@ function Formulario({ ativo, atribuicoes, aoFechar, aoLigar }: Omit<Props, "ativ
   );
 }
 
-export function LigarPessoaDialog({ ativo, atribuicoes, aoFechar, aoLigar }: Props) {
+export function LigarPessoaDialog({ ativo, atribuicoes, aoFechar, aoFecharFoco, aoLigar }: Props) {
   const { t } = useTranslation();
   const { hasPermission } = usePermissions();
   const permitido = PERMISSOES_LIGAR.every((p) => hasPermission(p));
   return (
     <Dialog open={ativo !== null && permitido} onOpenChange={(aberto) => !aberto && aoFechar()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" onCloseAutoFocus={aoFecharFoco}>
         <DialogHeader>
           <DialogTitle>{t("ativos.ligar.titulo")}</DialogTitle>
           <DialogDescription>{ativo ? `${ativo.nome}. ${t("ativos.ligar.ajuda")}` : ""}</DialogDescription>
