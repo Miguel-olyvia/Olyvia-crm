@@ -138,6 +138,7 @@ import { ClientContractsTab } from "@/components/clients/detail/ClientContractsT
 import { resolveRootOrgIdLogic } from "@/lib/orgHierarchy";
 import { checkNameDuplicatesBeforeInsert } from "@/lib/leadDuplicateCheck";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
+import { getEntityDisplayName } from "@/lib/entityDisplayName";
 import { SensitiveExportDialog } from "@/components/exports/SensitiveExportDialog";
 import {
   applyLeadVisibilityFilter,
@@ -2757,9 +2758,7 @@ export default function AnewLeads() {
     // LeadLostReasonDialog instead of saving immediately.
     if (newStage.is_rejection) {
       const identity = draggedLead?.entity_id ? getIdentity(draggedLead.entity_id) : null;
-      const leadTitle = (identity?.first_name && identity?.last_name
-        ? `${identity.first_name} ${identity.last_name}`
-        : identity?.display_name) || (draggedLead ? extractSmartField(draggedLead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']) : "") || undefined;
+      const leadTitle = getEntityDisplayName(identity, draggedLead ? extractSmartField(draggedLead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']) : "") || undefined;
       setPendingLostDrop({ leadId, newStage, leadTitle });
       return;
     }
@@ -3102,9 +3101,7 @@ export default function AnewLeads() {
    */
   const leadDisplayValues = (lead: Lead) => {
     const identity = lead.entity_id ? getIdentity(lead.entity_id) : null;
-    const name = identity?.first_name && identity?.last_name
-      ? `${identity.first_name} ${identity.last_name}`
-      : identity?.display_name || extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']);
+    const name = getEntityDisplayName(identity, extractSmartField(lead.field_values, ['name', 'nome', 'full_name', 'nome_completo', 'first_name']));
     return {
       name: name || "",
       phone: extractPhoneFromLead(lead.field_values) || "",
@@ -5115,7 +5112,7 @@ export default function AnewLeads() {
         emailAddr = emailsRes?.data?.[0]?.email || "";
         const ent = entityRes?.data;
         if (ent) {
-          nameStr = ent.display_name || `${ent.first_name || ""} ${ent.last_name || ""}`.trim();
+          nameStr = getEntityDisplayName(ent);
         }
       } catch (e) {
         console.error("[AnewLeads] Failed to load entity email/name for row email action:", e);
@@ -6346,9 +6343,7 @@ export default function AnewLeads() {
               };
 
               const identity = selectedLead.entity_id ? getIdentity(selectedLead.entity_id) : null;
-              const leadName = identity?.first_name && identity?.last_name
-                ? `${identity.first_name} ${identity.last_name}`
-                : identity?.display_name || findLeadFieldValue(LEAD_FIELD_ALIASES.name) || "Lead";
+              const leadName = getEntityDisplayName(identity, findLeadFieldValue(LEAD_FIELD_ALIASES.name) || "Lead");
               const leadEmail = identity?.email || findLeadFieldValue(LEAD_FIELD_ALIASES.email);
               const leadPhone = identity?.phone || findLeadFieldValue(LEAD_FIELD_ALIASES.phone);
               const leadAddress = identity?.address || findLeadFieldValue(LEAD_FIELD_ALIASES.address);
@@ -6929,10 +6924,7 @@ export default function AnewLeads() {
 
                 // O nome da ficha: `display_name` primeiro, com first/last como
                 // recurso para fichas antigas onde o display ficou por preencher.
-                const nomeDaFicha =
-                  identity?.display_name?.trim() ||
-                  [identity?.first_name, identity?.last_name].filter(Boolean).join(' ').trim() ||
-                  null;
+                const nomeDaFicha = getEntityDisplayName(identity) || null;
 
                 const telefoneDaFicha = identity?.phone
                   ? [identity.phone_country_code, identity.phone].filter(Boolean).join(' ')
@@ -7639,7 +7631,7 @@ export default function AnewLeads() {
           open={showScheduleVisitDialog}
           onOpenChange={setShowScheduleVisitDialog}
           lead={selectedLead as any}
-          leadName={selectedLead ? (getIdentity(selectedLead.entity_id)?.display_name || extractLeadContactInfo(selectedLead.field_values).name || "Lead") : ""}
+          leadName={selectedLead ? getEntityDisplayName(getIdentity(selectedLead.entity_id), extractLeadContactInfo(selectedLead.field_values).name || "Lead") : ""}
           companyId={activeCompanyId || null}
           onScheduled={handleLeadDialogUpdate}
         />
@@ -7651,7 +7643,7 @@ export default function AnewLeads() {
             open={showRegisterActivityDialog}
             onOpenChange={setShowRegisterActivityDialog}
             entityId={selectedLead.entity_id}
-            entityName={getIdentity(selectedLead.entity_id)?.display_name || extractLeadContactInfo(selectedLead.field_values).name}
+            entityName={getEntityDisplayName(getIdentity(selectedLead.entity_id), extractLeadContactInfo(selectedLead.field_values).name)}
             organizationId={selectedLead.organization_id}
             onInteractionSaved={async () => {
               const lead = selectedLead;

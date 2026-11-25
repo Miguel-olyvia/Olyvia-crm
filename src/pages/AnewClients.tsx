@@ -104,6 +104,7 @@ interface ClientRecord {
 interface AnewUserNameRow { id: string; name: string | null }
 
 interface SelectedClientRecord extends ClientRecord {
+  display_name?: string;
   first_name?: string;
   last_name?: string;
   email?: string;
@@ -1824,6 +1825,7 @@ const AnewClients = () => {
     const fallbackNameParts = displayName.split(' ');
     setSelectedClient({
       ...client,
+      display_name: displayName,
       first_name: identity?.first_name || fallbackNameParts[0] || '', last_name: identity?.last_name || fallbackNameParts.slice(1).join(' ') || '',
       email: identity?.email || '', phone: identity?.phone || '',
       phone_country_code: identity?.phone_country_code || '+351', vat: identity?.vat || '',

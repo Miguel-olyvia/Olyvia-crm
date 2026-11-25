@@ -6,6 +6,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { type HealthScore } from "@/hooks/useContactHealthScore";
 import { formatPhoneNumber } from "@/constants/countryCodes";
 import { PermissionGate } from "@/components/PermissionGate";
+import { getEntityDisplayName } from "@/lib/entityDisplayName";
 
 interface ClientDetailHeaderProps {
   client: any;
@@ -33,7 +34,7 @@ export function ClientDetailHeader({
   client, healthScore, tags, onCreateDeal, onEmail, onCall, onWhatsApp, onEdit, onClose, onRevertToLead, canRevert,
 }: ClientDetailHeaderProps) {
   const initials = [client.first_name?.[0], client.last_name?.[0]].filter(Boolean).join("").toUpperCase() || "?";
-  const fullName = [client.first_name, client.last_name].filter(Boolean).join(" ") || "—";
+  const fullName = getEntityDisplayName(client, "—");
   const phone = client.phone ? formatPhoneNumber(client.phone, client.phone_country_code) : null;
 
   return (

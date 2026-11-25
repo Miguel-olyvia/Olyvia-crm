@@ -68,6 +68,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Badge } from "@/components/ui/badge";
 import { proposalSchema } from "@/lib/validations";
 import { requestControlledExport } from "@/lib/exports/requestControlledExport";
+import { getEntityDisplayName } from "@/lib/entityDisplayName";
+import { buildEntityNameMap } from "@/lib/proposals/proposalClientName";
 import { PermissionGate } from "@/components/PermissionGate";
 import { usePermissions } from "@/hooks/usePermissions";
 import { usePermissionScope } from "@/hooks/usePermissionScope";
@@ -1089,7 +1091,7 @@ const Proposals = () => {
         setContractStatuses(prev => (append ? { ...prev, ...contractStatusMap } : contractStatusMap));
 
         if (entityResults) {
-          const nameMap: Record<string, string> = {};
+          const nameMap = buildEntityNameMap((entityResults as any)?.data);
           const emailMap: Record<string, string> = {};
           const phoneMap: Record<string, string> = {};
           const lastInteractionMap: Record<string, string> = {};
@@ -1099,7 +1101,6 @@ const Proposals = () => {
           // from its own query.
           ((entityResults as any)?.data || []).forEach((row: any) => {
             if (!row?.entity_id) return;
-            nameMap[row.entity_id] = row.display_name;
             if (row.email) emailMap[row.entity_id] = row.email;
             if (row.phone_number) phoneMap[row.entity_id] = row.phone_number;
             if (row.last_interaction_at) lastInteractionMap[row.entity_id] = row.last_interaction_at;
@@ -1458,7 +1459,7 @@ const Proposals = () => {
             type: contact.entity_type === "client" ? "client" : "lead",
             id: propEntityId,
             entityId: propEntityId,
-            name: contact.display_name,
+            name: getEntityDisplayName(contact),
             email: contact.email ?? undefined,
             phone: contact.phone_number ?? undefined,
           });

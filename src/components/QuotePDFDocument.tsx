@@ -2,6 +2,7 @@ import React from 'react';
 import { Document, Page, Text, View, StyleSheet, Font, Image } from '@react-pdf/renderer';
 import { resolveField, type RenderContext } from '@/utils/documentVariables';
 import { round2 } from '@/utils/quotes/inlineQuoteVatCalculation';
+import { getEntityDisplayName } from '@/lib/entityDisplayName';
 import { getBundleComponents, isBundleLine } from '@/utils/quotes/bundleComponents';
 import { computeQuoteTotals, getLineVatLabel, type AggregatedTotals } from '@/utils/quotes/computeQuoteTotals';
 import { getLineDisplayUnitPrice } from '@/utils/quotes/quoteLinePricing';
@@ -438,11 +439,7 @@ export const QuotePDFDocument = ({ quote, company, client, lines, fees = [], use
     ? [primaryAddress.street, primaryAddress.number, primaryAddress.postal_code, primaryAddress.city]
         .filter(Boolean).join(", ")
     : '';
-  const clientName = client?.company_name
-    || client?.display_name
-    || [client?.first_name, client?.last_name].filter(Boolean).join(' ')
-    || quote?.client_name
-    || '';
+  const clientName = getEntityDisplayName(client, quote?.client_name || '');
 
   // Format company address
   const companyAddress = company?.company_addresses?.find((addr: any) => addr.is_primary) 

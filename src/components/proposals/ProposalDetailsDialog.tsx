@@ -50,6 +50,8 @@ import { round2 } from "@/utils/quotes/inlineQuoteVatCalculation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { canViewQuoteCosts } from "@/lib/canViewQuoteCosts";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { getEntityDisplayName } from "@/lib/entityDisplayName";
+import { mapProposalContactToClient, type ProposalClient } from "@/lib/proposals/proposalClientName";
 import { ChipIdiomaProposta } from "@/components/proposals/ChipIdiomaProposta";
 
 const CALL_RESULT_LABELS: Record<string, string> = {
@@ -176,15 +178,6 @@ const groupVatByRate = (lines: QuoteLine[], discountFactor = 1): [number, number
     .sort((a, b) => a[0] - b[0]);
 };
 
-interface Client {
-  id: string;
-  first_name: string | null;
-  last_name: string | null;
-  company_name: string | null;
-  email: string | null;
-  phone: string | null;
-}
-
 interface ProposalSend {
   id: string;
   recipient_email: string;
@@ -239,7 +232,7 @@ export function ProposalDetailsDialog({
   const [items, setItems] = useState<ProposalItem[]>([]);
   const [quotes, setQuotes] = useState<QuoteItem[]>([]);
   const [lineCostMap, setLineCostMap] = useState<Record<string, LineResolution>>({});
-  const [client, setClient] = useState<Client | null>(null);
+  const [client, setClient] = useState<ProposalClient | null>(null);
   const [sends, setSends] = useState<ProposalSend[]>([]);
   const [extendedData, setExtendedData] = useState<any>(null);
   const [pipelineJourney, setPipelineJourney] = useState<Array<{ label: string; date: string; icon: string; color: string }>>([]);
@@ -349,14 +342,7 @@ export function ProposalDetailsDialog({
         .rpc("resolve_proposal_contact", { _proposal_id: proposal.id })
         .maybeSingle();
       if (contact) {
-        setClient({
-          id: contact.entity_id,
-          first_name: contact.first_name,
-          last_name: contact.last_name,
-          company_name: contact.entity_type === 'organization' ? contact.display_name : null,
-          email: contact.email || null,
-          phone: contact.phone_number || null,
-        });
+        setClient(mapProposalContactToClient(contact));
       } else {
         setClient(null);
       }
@@ -611,7 +597,7 @@ export function ProposalDetailsDialog({
                       <User className="w-4 h-4" />
                       Cliente
                     </div>
-                    <p className="font-semibold">{client.company_name || [client.first_name, client.last_name].filter(Boolean).join(' ') || 'Cliente'}</p>
+                    <p className="font-semibold">{getEntityDisplayName(client, 'Cliente')}</p>
                     {client.email && (
                       <p className="text-sm text-muted-foreground flex items-center gap-2">
                         <Mail className="w-3 h-3" />
@@ -1149,7 +1135,7 @@ export function ProposalDetailsDialog({
       onOpenChange={setShowWhatsAppDialog}
       context={client?.phone ? {
         module: "proposals",
-        recipientName: [client.first_name, client.last_name].filter(Boolean).join(" ") || client.company_name || "Cliente",
+        recipientName: getEntityDisplayName(client, "Cliente"),
         recipientPhone: client.phone,
         proposalTitle: proposal?.title,
         proposalValue: proposal?.value,

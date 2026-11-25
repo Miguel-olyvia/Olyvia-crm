@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { callNifRevealSingle } from "@/lib/nif/callNifReveal";
+import { getEntityDisplayName } from "@/lib/entityDisplayName";
 
 type QuotePdfClientInput = {
   entityId?: string | null;
@@ -145,7 +146,10 @@ async function buildEntityClientForPdf(entityId: string, quoteId?: string | null
     vat = (await callNifRevealSingle(fiscalLink.fiscal_entity_id)) || "";
   }
 
-  const displayName = entity.display_name || [entity.first_name, entity.last_name].filter(Boolean).join(" ");
+  // Nome do cliente pela regra unica (display_name da ficha primeiro). O tipo
+  // so decide se e empresa: os tipos existentes sao `person` e `organization`.
+  const displayName = getEntityDisplayName(entity);
+  const isOrganization = entity.type === "organization";
   // "Morada" do cliente no PDF = morada fiscal (principal): ficam de fora as
   // moradas de entrega e as ligações já fechadas — senão, sem principal, o
   // fallback "primeira da lista" podia apanhar uma morada de entrega.
@@ -164,10 +168,10 @@ async function buildEntityClientForPdf(entityId: string, quoteId?: string | null
 
   return {
     display_name: displayName,
-    first_name: entity.first_name || (entity.type === "company" ? "" : displayName),
+    first_name: entity.first_name || (isOrganization ? "" : displayName),
     last_name: entity.last_name || "",
-    company_name: entity.type === "company" ? displayName : "",
-    client_type: entity.type === "company" ? "company" : "individual",
+    company_name: isOrganization ? displayName : "",
+    client_type: isOrganization ? "company" : "individual",
     email: contactEmail,
     phone: contactPhone,
     phone_country_code: contactCountryCode,

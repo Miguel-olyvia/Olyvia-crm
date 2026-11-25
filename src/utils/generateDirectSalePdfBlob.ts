@@ -13,6 +13,7 @@ import { resolveQuotePdfCommercialUser } from '@/utils/quotePdfCommercialUser';
 import { round2 } from '@/utils/quotes/quoteLinePricing';
 import type { AggregatedTotals, VatRateBucket } from '@/utils/quotes/computeQuoteTotals';
 import type { RenderContext } from '@/utils/documentVariables';
+import { getEntityDisplayName } from '@/lib/entityDisplayName';
 
 // Venda Direta: PDF para o cliente, com o MESMO aspecto do PDF das propostas.
 //
@@ -223,11 +224,7 @@ export async function generateDirectSalePdfBlob(
     }
   }
 
-  const clientDisplayName: string =
-    client?.company_name
-    || client?.display_name
-    || [client?.first_name, client?.last_name].filter(Boolean).join(' ')
-    || '';
+  const clientDisplayName: string = getEntityDisplayName(client);
   const primaryAddress = (client?.client_addresses || []).find((a: any) => a?.is_primary)
     || (client?.client_addresses || [])[0];
 

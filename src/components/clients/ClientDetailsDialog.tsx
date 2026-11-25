@@ -42,6 +42,7 @@ import { differenceInDays } from "date-fns";
 import { calculateClientHealth, type ClientContractInfo, type ClientInteractionInfo } from "@/hooks/useClientEnrichedData";
 import { RequestErasureButton } from "@/components/RequestErasureButton";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { getEntityDisplayName } from "@/lib/entityDisplayName";
 import { ClientDeliveryAddressesSection } from "@/components/clients/ClientDeliveryAddressesSection";
 import { CamposMorada } from "@/components/addresses/CamposMorada";
 import {
@@ -1062,7 +1063,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
   const whatsAppContext: WhatsAppContext | null = client ? {
     module: "clients",
-    recipientName: [client.first_name, client.last_name].filter(Boolean).join(" ") || "Cliente",
+    recipientName: getEntityDisplayName(client, "Cliente"),
     recipientPhone: client.phone || "",
     recipientPhoneCountryCode: (client.phone_country_code || "+351").replace("+", ""),
     clientId: client.id,
@@ -1085,7 +1086,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
   if (!client) return null;
 
-  const fullName = [client.first_name, client.last_name].filter(Boolean).join(" ");
+  const fullName = getEntityDisplayName(client);
 
   return (
     <>

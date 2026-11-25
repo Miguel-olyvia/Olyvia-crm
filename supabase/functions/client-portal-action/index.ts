@@ -603,8 +603,21 @@ serve(async (req) => {
               .select("*, service_fee_types (name, calculation_type, percentage, fixed_amount)")
               .eq("quote_id", quote.id),
           ]);
+          // A ficha do cliente do PDF e resolvida no browser, com a sessao do
+          // cliente (RLS limitada: sem acesso a `deals`). No CRM um orcamento
+          // sem entity_id chega a ficha pelo negocio ou pela proposta; aqui o
+          // browser nao consegue e o bloco CLIENTE saia vazio. Resolve-se aqui,
+          // com a mesma cadeia do assertOwnership (orcamento -> proposta ->
+          // negocio), e o entity_id segue no orcamento. O browser continua a ler
+          // a ficha com a sua propria sessao: so recebe o id de uma ficha que o
+          // proprio documento ja liga.
+          let pdfQuote = quote;
+          if (!quote.entity_id) {
+            const { entityId: resolvedEntityId } = await resolveDocEntity("quote_id", quote.id);
+            if (resolvedEntityId) pdfQuote = { ...quote, entity_id: resolvedEntityId };
+          }
           quotes.push({
-            quote,
+            quote: pdfQuote,
             lines: (lines || []).map((l: any) => stripCosts(l)),
             fees: fees || [],
           });

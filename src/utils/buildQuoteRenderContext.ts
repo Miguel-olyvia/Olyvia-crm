@@ -12,6 +12,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { resolveQuotePdfClient } from "@/utils/quotePdfClient";
 import { resolveQuotePdfCommercialUser } from "@/utils/quotePdfCommercialUser";
+import { getEntityDisplayName } from "@/lib/entityDisplayName";
 import type { RenderContext, ClientCtx, CompanyCtx, CommercialUserCtx } from "@/utils/documentVariables";
 
 interface BuildOptions {
@@ -105,12 +106,7 @@ export async function buildQuoteRenderContext(opts: BuildOptions): Promise<Build
   }
 
   // Display name do cliente: replica a lógica do QuotePDFDocument (linhas 462-466)
-  const clientDisplayName: string =
-    rawClient?.company_name
-    || rawClient?.display_name
-    || [rawClient?.first_name, rawClient?.last_name].filter(Boolean).join(" ")
-    || quoteData?.client_name
-    || "";
+  const clientDisplayName: string = getEntityDisplayName(rawClient, quoteData?.client_name || "");
 
   const clientCtx: ClientCtx = {
     display_name: clientDisplayName,

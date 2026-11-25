@@ -42,6 +42,9 @@ class FakeDb {
   writes: Array<{ table: string; patch: Row }> = [];
   inserts: string[] = [];
   fetchCalls = 0;
+  /** Nome ATUAL da ficha (anew_entities.display_name) lido no momento da assinatura. */
+  entityDisplayName = "Cliente Teste";
+  entityReads = 0;
 
   constructor(contract: Row) {
     this.contract = { id: "c1", entity_id: "e1", organization_id: "org-1", deleted_at: null, ...contract };
@@ -104,7 +107,10 @@ class Q {
       if (db.readError) return { data: null, error: db.readError };
       return { data: { ...db.contract }, error: null };
     }
-    if (table === "anew_entities") return { data: { display_name: "Cliente Teste" }, error: null };
+    if (table === "anew_entities") {
+      db.entityReads += 1;
+      return { data: { display_name: db.entityDisplayName }, error: null };
+    }
     return { data: null, error: null };
   }
 }
@@ -171,6 +177,38 @@ describe("sign_contract no portal", () => {
     expect(db.writes.find((w) => w.table === "client_portal_users")?.patch).toEqual({ portal_status: "signed" });
     expect(db.fetchCalls).toBe(1);
     expect(db.inserts).toEqual(["notifications"]);
+  });
+
+  it("assinado por: o display_name ATUAL da ficha, nao o nome da conta do portal nem uma copia", async () => {
+    const original = USER.user_metadata;
+    (USER as any).user_metadata = { full_name: "Nome Antigo da Conta" };
+    try {
+      const db = new FakeDb({ status: "pending_signature", signed_by_name: "Copia Antiga" });
+      db.entityDisplayName = "Empresa X, Lda";
+      stubFetch(db);
+      const r = await callSign(db);
+      expect(r).toEqual({ status: 200, body: { success: true } });
+      // O nome foi lido da ficha durante esta assinatura...
+      expect(db.entityReads).toBeGreaterThan(0);
+      // ...e e esse o gravado, nao o nome dos metadados da conta nem a copia do contrato.
+      expect(db.contract.signed_by_name).toBe("Empresa X, Lda");
+    } finally {
+      (USER as any).user_metadata = original;
+    }
+  });
+
+  it("assinado por: se a ficha nao tem nome, so entao cai no nome da conta", async () => {
+    const original = USER.user_metadata;
+    (USER as any).user_metadata = { full_name: "Nome da Conta" };
+    try {
+      const db = new FakeDb({ status: "pending_signature" });
+      db.entityDisplayName = "  ";
+      stubFetch(db);
+      await callSign(db);
+      expect(db.contract.signed_by_name).toBe("Nome da Conta");
+    } finally {
+      (USER as any).user_metadata = original;
+    }
   });
 
   it("corrida, UPDATE devolve o erro do gatilho: 409 e nada se dispara", async () => {
