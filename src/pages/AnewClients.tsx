@@ -9,6 +9,7 @@ import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity, v
 import { resolveClientSearch, applyClientSearchTextFilter } from "@/lib/clientSearch";
 import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
+import { CompanyNameWarning } from "@/components/shared/CompanyNameWarning";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -2743,6 +2744,9 @@ const AnewClients = () => {
                         <Label>{t('clients.form.lastName')}</Label>
                         <Input value={formData.last_name} onChange={(e) => setFormData({ ...formData, last_name: e.target.value })} className={fieldErrors.last_name ? "border-destructive" : ""} />
                         {fieldErrors.last_name && <p className="text-xs text-destructive">{fieldErrors.last_name}</p>}
+                      </div>
+                      <div className="sm:col-span-2 empty:hidden">
+                        <CompanyNameWarning first={formData.first_name} last={formData.last_name} fix="type" />
                       </div>
                       <div className="space-y-2">
                         <Label>{t('clients.form.email')}</Label>

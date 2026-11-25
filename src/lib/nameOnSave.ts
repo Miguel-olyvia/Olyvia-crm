@@ -10,7 +10,8 @@
  * Regra: o display_name so e recomposto quando o utilizador alterou os campos
  * de nome em relacao ao que foi carregado. Se nao os alterou, mantem-se.
  */
-import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
+import { normalizeFirstLast } from "@/utils/composeDisplayName";
+import { composeNameForSave } from "@/lib/entityDisplayName";
 
 type NameFieldValue = string | null | undefined;
 
@@ -41,7 +42,7 @@ export interface ClientNameForSave {
  * e o que o utilizador deixou no formulario.
  */
 export function resolveClientNameForSave(
-  current: { display_name?: string | null; first_name?: string | null; last_name?: string | null },
+  current: { display_name?: string | null; first_name?: string | null; last_name?: string | null; company_name?: string | null },
   edited: { first_name?: string | null; last_name?: string | null },
 ): ClientNameForSave {
   const normalized = normalizeFirstLast(edited.first_name, edited.last_name);
@@ -52,6 +53,6 @@ export function resolveClientNameForSave(
   const kept = norm(current.display_name);
   const displayName = !changed && kept
     ? kept
-    : composeDisplayName(normalized.first, normalized.last);
+    : composeNameForSave({ company: current.company_name, first: normalized.first, last: normalized.last });
   return { displayName, first: normalized.first, last: normalized.last };
 }

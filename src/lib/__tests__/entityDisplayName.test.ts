@@ -1,5 +1,21 @@
 import { describe, expect, it } from "vitest";
-import { getEntityDisplayName } from "@/lib/entityDisplayName";
+import { composeNameForSave, getEntityDisplayName } from "@/lib/entityDisplayName";
+
+describe("composeNameForSave (o que os ecras mandam gravar: empresa, senao nome + apelido)", () => {
+  it("empresa preenchida manda e nao se acrescenta nome nem apelido", () => {
+    expect(composeNameForSave({ company: "Empresa Lda", first: "Rui", last: "Costa" })).toBe("Empresa Lda");
+  });
+
+  it("sem empresa: nome + apelido, com a mesma deduplicacao do composeDisplayName", () => {
+    expect(composeNameForSave({ first: "Rui", last: "Costa" })).toBe("Rui Costa");
+    expect(composeNameForSave({ company: "  ", first: "Rui Costa", last: "Costa" })).toBe("Rui Costa");
+    expect(composeNameForSave({ company: null, first: "Rui", last: null })).toBe("Rui");
+  });
+
+  it("tudo vazio da texto vazio", () => {
+    expect(composeNameForSave({})).toBe("");
+  });
+});
 
 describe("getEntityDisplayName", () => {
   it("display_name da ficha manda sobre tudo o resto (empresa preenchida)", () => {

@@ -6,6 +6,8 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { setEntityOwner, notifyOwnerChangeVisits } from "@/lib/leads/entityOwnerSync";
 import { nameFieldsChanged } from "@/lib/nameOnSave";
+import { composeNameForSave } from "@/lib/entityDisplayName";
+import { CompanyNameWarning } from "@/components/shared/CompanyNameWarning";
 import {
   Dialog,
   DialogContent,
@@ -430,7 +432,7 @@ export function AnewLeadEditDialog({
         const firstName = readGeneralField("first_name", updatedFieldValues);
         const lastName = readGeneralField("last_name", updatedFieldValues);
         const companyName = readGeneralField("company_name", updatedFieldValues);
-        const newDisplayName = companyName || [firstName, lastName].filter(Boolean).join(" ") || undefined;
+        const newDisplayName = composeNameForSave({ company: companyName, first: firstName, last: lastName }) || undefined;
 
         // So se mexeu no nome: gravar a lead sem o tocar nao pode recompor (e
         // estragar) o display_name da ficha, que pode ser o nome de uma empresa.
@@ -841,6 +843,11 @@ export function AnewLeadEditDialog({
                   </div>
                 ))}
               </div>
+              <CompanyNameWarning
+                first={readGeneralField("first_name")}
+                last={readGeneralField("last_name")}
+                company={readGeneralField("company_name")}
+              />
             </div>
 
             {/* Dynamic Fields from Campaign/Company */}

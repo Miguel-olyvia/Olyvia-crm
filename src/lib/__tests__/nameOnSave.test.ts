@@ -54,3 +54,26 @@ describe("resolveClientNameForSave", () => {
     expect(out.displayName).toBe("Ana Silva");
   });
 });
+
+describe("resolveClientNameForSave com empresa (nome = empresa, senao nome + apelido)", () => {
+  const comEmpresa = { display_name: "Evolar Lda", first_name: "Rui", last_name: "Costa", company_name: "Evolar Lda" };
+
+  it("editar o apelido de uma ficha com empresa troca o nome pela empresa, nunca por nome + apelido", () => {
+    const out = resolveClientNameForSave(comEmpresa, { first_name: "Rui", last_name: "Silva" });
+    expect(out.displayName).toBe("Evolar Lda");
+    expect(out.last).toBe("Silva");
+  });
+
+  it("gravar sem tocar no nome mantem o display_name carregado", () => {
+    const out = resolveClientNameForSave(comEmpresa, { first_name: "Rui", last_name: "Costa" });
+    expect(out.displayName).toBe("Evolar Lda");
+  });
+
+  it("empresa so de espacos conta como vazia", () => {
+    const out = resolveClientNameForSave(
+      { display_name: "Rui Costa", first_name: "Rui", last_name: "Costa", company_name: "  " },
+      { first_name: "Rui", last_name: "Silva" },
+    );
+    expect(out.displayName).toBe("Rui Silva");
+  });
+});

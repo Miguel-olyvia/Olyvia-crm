@@ -44,6 +44,19 @@ export function composeEntityDisplayName(
   return composeDisplayName(first, last) || null;
 }
 
+/**
+ * O mesmo, para uma PESSOA e sempre com texto: a empresa se existir, senao
+ * nome + apelido, e vazio se nao ha nada. E o que os ecras mandam gravar
+ * (editar nome, apelido ou empresa troca o nome, nunca acrescenta outro).
+ */
+export function composeNameForSave(parts: {
+  company?: string | null;
+  first?: string | null;
+  last?: string | null;
+}): string {
+  return composeEntityDisplayName("person", parts.first, parts.last, parts.company) ?? "";
+}
+
 export function getEntityDisplayName(
   source: EntityNameSource | null | undefined,
   fallback = "",

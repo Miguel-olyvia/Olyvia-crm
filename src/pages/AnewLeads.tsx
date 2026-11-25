@@ -11,6 +11,9 @@ import { humanizeFormFieldKey } from "@/lib/leads/fieldLabels";
 import { isBaseFieldCoveredByCampaignFields, stripCampaignCoveredBaseValues } from "@/lib/leads/campaignFieldCoverage";
 import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
+import { resolveLeadNames } from "@/lib/leadNameFromFields";
+import { refreshEntityIdentity } from "@/lib/refreshEntityIdentity";
+import { CompanyNameWarning } from "@/components/shared/CompanyNameWarning";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { validateLeadFieldValues } from "@/utils/leadFieldValidation";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -2577,6 +2580,16 @@ export default function AnewLeads() {
     });
   }, [queryClient]);
 
+  /**
+   * Garante que a ficha (nome completo, email, telefone) esta na cache de
+   * identidades ANTES de a lead aparecer na lista. Sem isto a linha nova usa o
+   * nome das respostas do formulario e so corrige ao recarregar.
+   */
+  const refreshEntityIdentityNow = useCallback(
+    (entityId: string | null | undefined) => refreshEntityIdentity({ invalidateEntities, resolveEntities }, entityId),
+    [invalidateEntities, resolveEntities],
+  );
+
   const KANBAN_LEADS_LIMIT = 500;
 
   // Load ALL leads matching the current filters (unpaginated, capped) to feed
@@ -3472,7 +3485,10 @@ export default function AnewLeads() {
     try {
       try {
         // --- Extract contact data from field_values using field definitions ---
-        let displayName = '';
+        // Nome da ficha: regra unica (empresa se existir, senao nome + apelido).
+        // A empresa ja nao se junta ao nome da pessoa.
+        const resolvedNames = resolveLeadNames(allFieldDefs as any[], leadValues);
+        let displayName = resolvedNames.displayName;
         let emailValue = '';
         let phoneValue = '';
         let vatValue = '';
@@ -3485,11 +3501,6 @@ export default function AnewLeads() {
           const key = fieldDef.field_key.toLowerCase();
           const fType = fieldDef.field_type;
 
-          // Name detection
-          if (mapping === 'first_name' || mapping === 'last_name' || mapping === 'full_name' ||
-              fType === 'text' && (key.includes('nome') || key.includes('name'))) {
-            displayName = displayName ? `${displayName} ${val}` : String(val);
-          }
           // Email detection
           if (mapping === 'email' || fType === 'email' || key.includes('email')) {
             emailValue = String(val);
@@ -3695,21 +3706,9 @@ export default function AnewLeads() {
         }
 
         if (!entityId) {
-          const firstName = (() => {
-            for (const fd of allFieldDefs) {
-              const m = (fd as any).contact_field_mapping;
-              if (m === 'first_name' && leadValues[fd.field_key]) return String(leadValues[fd.field_key]);
-            }
-            return displayName.trim().split(' ')[0] || null;
-          })();
-          const lastName = (() => {
-            for (const fd of allFieldDefs) {
-              const m = (fd as any).contact_field_mapping;
-              if (m === 'last_name' && leadValues[fd.field_key]) return String(leadValues[fd.field_key]);
-            }
-            const parts = displayName.trim().split(' ');
-            return parts.length > 1 ? parts.slice(1).join(' ') : null;
-          })();
+          // Nome e apelido vem da pessoa, nunca da empresa.
+          const firstName = resolvedNames.firstName;
+          const lastName = resolvedNames.lastName;
 
           const { data: createdEntityId, error: entityError } = await (supabase as any)
             .rpc("create_lead_entity_for_org", {
@@ -4070,6 +4069,10 @@ export default function AnewLeads() {
       setCreateLeadCampaignId("");
       setCreateLeadSourceId("");
       if (newLeadIdForPostCommit) {
+        // A linha nova so mostrava o nome das respostas do formulario («Rui»)
+        // ate recarregar: a ficha da pessoa nao estava na cache de identidades.
+        // Larga-se a entrada antiga (ficha reutilizada ou renomeada) e le-se de novo.
+        await refreshEntityIdentityNow(entityIdForPostCommit);
         acrescentarLeadEmCache({
           id: newLeadIdForPostCommit!,
           organization_id: activeCompanyId!,
@@ -4191,21 +4194,9 @@ export default function AnewLeads() {
           entityId = reuseEntityId;
           // Entidade reutilizada — NUNCA entra em createdIds.
         } else {
-          const firstName = (() => {
-            for (const fd of allFieldDefs) {
-              const m = (fd as any).contact_field_mapping;
-              if (m === 'first_name' && fieldValues[fd.field_key]) return String(fieldValues[fd.field_key]);
-            }
-            return (displayName || '').trim().split(' ')[0] || null;
-          })();
-          const lastName = (() => {
-            for (const fd of allFieldDefs) {
-              const m = (fd as any).contact_field_mapping;
-              if (m === 'last_name' && fieldValues[fd.field_key]) return String(fieldValues[fd.field_key]);
-            }
-            const parts = (displayName || '').trim().split(' ');
-            return parts.length > 1 ? parts.slice(1).join(' ') : null;
-          })();
+          // Nome e apelido vem da pessoa, nunca da empresa (o displayName
+          // pode ser so a empresa, e partir uma firma em nome/apelido estraga-a).
+          const { firstName, lastName } = resolveLeadNames(allFieldDefs as any[], fieldValues);
 
           const { data: newEntityId, error: entityError } = await (supabase as any)
             .rpc("create_lead_entity_for_org", {
@@ -4293,6 +4284,7 @@ export default function AnewLeads() {
       toast({ title: t('leads.toast.createSuccess') });
       setShowCreateLead(false); setNewLeadValues({}); setCreateLeadCampaignId(""); setCreateLeadSourceId("");
       if (newLeadIdForPostCommit) {
+        await refreshEntityIdentityNow(entityIdForPostCommit);
         acrescentarLeadEmCache({
           id: newLeadIdForPostCommit!, organization_id: activeCompanyId!,
           campaign_id: createLeadCampaignId || null, field_values: cleanFieldValuesForPostCommit,
@@ -7468,6 +7460,16 @@ export default function AnewLeads() {
                 </div>
               </div>
             )}
+
+            {/* Aviso (não bloqueia): nome com cara de empresa e Empresa vazia, ou Empresa igual ao nome. */}
+            {(() => {
+              const visibleDefs = [
+                ...createLeadFieldDefs.filter(f => !isBaseFieldCoveredByCampaignFields(f.field_key, extraCampaignFieldDefs)),
+                ...extraCampaignFieldDefs,
+              ];
+              const names = resolveLeadNames(visibleDefs as any[], newLeadValues);
+              return <CompanyNameWarning first={names.firstName} last={names.lastName} company={names.company} />;
+            })()}
 
             {/* ── Assignment ── */}
             <div className="border-t pt-4 mt-2 space-y-3">
