@@ -143,6 +143,12 @@ export function porFixar(t: Tarefa, S?: Estado | null, p?: Plano | null): Micro[
   const inf = propostaMicro(t, p)?.L ?? [];
   const marcas = t.exec?.passos ?? [];
   if (!inf.length) {
+    // 25/11: uma lista posta pela app (do Infraspeak) que esta tarefa já não tem (outra tarefa da obra ficou com essas tarefas): volta à
+    // lista de sempre (os passos do Catálogo ou as instruções)
+    if (t.micro && !t.microMao && !marcas.length && !t.exec && t.micro.length && t.micro.every((m) => m.ref)) {
+      const c = microDoCatalogo(S, t, p);
+      return c.length >= 2 ? c : microDasInstrucoes(t);
+    }
     if (t.micro) return null;
     const r = microtarefasDe(t, S, p);
     return r.origem === "catalogo" && !marcas.length ? r.L : null;

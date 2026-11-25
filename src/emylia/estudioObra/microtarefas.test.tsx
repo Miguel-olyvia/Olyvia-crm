@@ -121,6 +121,9 @@ describe("as tarefas da Mudelar no Infraspeak (25/11)", () => {
     expect(listaMicro(dem, null, p).length).toBeGreaterThan(10);
     expect(microtarefasDe(extra, null, p).origem).toBe('instrucoes');
     expect(microDoInfraspeak(extra, p).length).toBeGreaterThan(10); // a proposta solta continua lá (para a ficha do serviço)
+    // a lista repetida que a app já tinha posto no extra volta às instruções
+    extra.micro = microDoInfraspeak(extra, p);
+    expect(porFixar(extra, null, p)?.every((m) => !m.ref)).toBe(true);
   });
   it("uma lista posta pela app troca-se por inteiro pela proposta certa; mudada à mão, não", () => {
     const { S, d, A, p, livre } = obra();
