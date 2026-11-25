@@ -1,7 +1,7 @@
 // Proposta de 09/10/2026: a página do negócio com menos ruído.
 // Uma coisa de cada vez: o passo atual ocupa o ecrã, os outros ficam numa
 // lista à esquerda. Um só botão primário. Texto a 15–16 px, contraste AA.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { pessoaDeOrigem } from "./PessoasV1";
 import { clienteDeOrigem } from "./ClientesV1";
 import { ArrowLeft, Check, Euro, Layers, Lock, Mail, MapPin, MessageCircle, MoreHorizontal, Pencil, Phone, RotateCcw, Smartphone, Square, TrendingUp, Volume2 } from "lucide-react";
@@ -30,7 +30,7 @@ import { DocumentosSimples } from "./FasesSimples";
 import { ContratoDoc, Partilhar, PropostaDoc } from "./DocsCliente";
 import { NecessidadesCliente } from "./NecessidadesVisita";
 import { VisitasLista } from "./Visitas";
-import { camposMedida, medida, nfmt, nomeLinha, quandoEQuem } from "./motor";
+import { camposMedida, medida, nfmt, nomeLinha } from "./motor";
 import { FASE_COR, IconeFase, type Ctx } from "./pecas";
 import { GuiaPassoCtx } from "./guiaPasso";
 import { TudoDoNegocio } from "./TudoDoNegocio";
@@ -44,6 +44,8 @@ import { SoLeitura } from "./passosSoLeitura";
 import { definirVisita, usePrincipalDaVisita } from "./principalDaVisita";
 // FERRAMENTAS-TESTE (temporário, remover antes da main)
 import { FerramentasTeste } from "./FerramentasTeste";
+import { DocumentosDoNegocio, ResumoNegocio } from "./ResumoNegocio";
+import { disposicaoNegocio } from "./resumoDoNegocio";
 
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
 // nomes curtos para a lista dos passos
@@ -73,6 +75,22 @@ function ContactosCliente({ d }: { d: Negocio }) {
       {morada && <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`} target="_blank" rel="noreferrer" className={LINK_CONTACTO}><MapPin className="h-4 w-4" aria-hidden="true" />{morada}</a>}
     </p>
   );
+}
+
+/** 25/11: a largura que a página do negócio tem (o menu lateral da app conta: não chega o tamanho do ecrã). 0 antes de medir. */
+function useLargura<T extends HTMLElement>() {
+  const ref = useRef<T>(null);
+  const [w, setW] = useState(0);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    setW(el.getBoundingClientRect().width);
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver((es) => { const x = es[0]?.contentRect.width; if (x != null) setW(x); });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return [ref, w] as const;
 }
 
 /** `ajustarPassos` (opcional): muda a lista de passos antes de se desenhar (a página de Negócios liga aqui os templates); sem ele, é como sempre.
@@ -136,8 +154,16 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
   </> : null;
   // 27/10: no orçamento, a página usa a largura do ecrã (as linhas e o plano precisam dela); o cartão do cliente sai da direita
   const largo = ver === null && d.fase === 3 && !!d.orc;
+  // 25/11 (Rúben: «a versão desktop … permite ter muito mais informação»): com largura (≥1360 px de página), o contentor alarga e o resumo
+  // do negócio fica à direita do passo; o caminho da obra e as adendas passam para a coluna do passo. No portátil, como antes, com os
+  // documentos por baixo dos passos; no telemóvel, como antes.
+  const [medir, largura] = useLargura<HTMLDivElement>();
+  const amplo = !largo && disposicaoNegocio(largura) === "amplo";
+  const caminhoNoMeio = amplo && ver === null && !(naChamada && d.fase <= 1);
+  const irFase = (n: number | null) => { setVer(n); window.scrollTo({ top: 0, behavior: suave() }); };
   return (
-    <div className={cn("mx-auto w-full px-4 pb-24 pt-2 sm:px-8 sm:pt-10", largo ? "max-w-[1760px]" : "max-w-6xl")}>
+    <div ref={medir} className="w-full">
+    <div className={cn("mx-auto w-full px-4 pb-24 pt-2 sm:px-8 sm:pt-10", largo ? "max-w-[1760px]" : amplo ? "max-w-[1680px]" : "max-w-6xl")}>
       {/* aberto a partir da ficha de uma pessoa (proposta do V1, 16/10): o voltar leva de volta a ela */}
       <button type="button" onClick={go(() => A.nav(origem ? "pessoas" : cliente ? "clientes" : "negocios"))}
         className="inline-flex min-h-11 items-center gap-2 rounded-lg text-[15px] text-muted-foreground hover:text-foreground">
@@ -258,7 +284,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
       {(d.fase === 3 || d.fase === 2) && <PedidoDoCliente ctx={ctx} d={d} />}
       {/* do contrato à obra (16/10): o pagamento primeiro; com ele, a encomenda no Inventário; depois o plano e o arranque.
           23/10: no Financeiro, o passo de agora (fatura, pagamento) vem primeiro e isto fica a seguir; na Obra fica em cima */}
-      {d.fase >= 5 && caminhoEAdendas}
+      {d.fase >= 5 && !caminhoNoMeio && caminhoEAdendas}
 
       {/* De volta à visita com um orçamento já feito: diz o que fazer e como sair */}
       {d.fase === 2 && d.orc && !d.perdido && (
@@ -298,13 +324,21 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
         ].map((g) => efetivo(ctx.S.campos, g))} /></div>
       )}
 
-      <div className={cn("mt-6 grid items-start gap-6 sm:mt-8 lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-10", !largo && "2xl:grid-cols-[260px_minmax(0,1fr)_240px]")}>
+      <div className={cn("mt-6 grid items-start gap-6 sm:mt-8", amplo ? "lg:grid-cols-[260px_minmax(0,1fr)_360px] lg:gap-8" : "lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-10")}>
         {naChamada && d.fase <= 1 && ver === null
           ? <TudoNaChamada ctx={ctx} d={d} ajustarPassos={ctx.ajustarPassos} />
           : ver === null
-          ? <FaseSimples key={d.id + ":" + d.fase + ":v" + (d.orc ? versaoAtual(d.orc) : 0)} ctx={ctx} d={d} ajustarPassos={ctx.ajustarPassos} soLeitura={ctx.soLeitura} lateral={(passos, ativo, setAtivo, comFim) => (
-            <Lateral d={d} passos={passos} ativo={ativo} setAtivo={setAtivo} comFim={comFim} />
-          )} />
+          ? <FaseSimples key={d.id + ":" + d.fase + ":v" + (d.orc ? versaoAtual(d.orc) : 0)} ctx={ctx} d={d} ajustarPassos={ctx.ajustarPassos} soLeitura={ctx.soLeitura}
+              lateral={(passos, ativo, setAtivo, comFim) => amplo
+                ? <Lateral d={d} passos={passos} ativo={ativo} setAtivo={setAtivo} comFim={comFim} />
+                // no portátil: os documentos por baixo dos passos (antes, o espaço por baixo da lista ficava vazio)
+                : <div className="hidden space-y-4 lg:sticky lg:top-6 lg:block">
+                    <Lateral d={d} passos={passos} ativo={ativo} setAtivo={setAtivo} comFim={comFim} solto />
+                    <DocumentosDoNegocio d={d} className="rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)]" />
+                  </div>}
+              antes={caminhoNoMeio && d.fase >= 5 ? caminhoEAdendas : null}
+              depois={caminhoNoMeio && d.fase === 4 ? caminhoEAdendas : null}
+              direita={amplo ? (passos) => <ResumoNegocio d={d} S={S} passos={passos.map((x) => ({ feito: completo(x), falta: x.falta || 0 }))} ver={ver} irFase={irFase} /> : undefined} />
           : <>
             <div className="hidden lg:block" aria-hidden="true" />
             <section className="min-w-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-2 motion-safe:duration-200" aria-labelledby="fase-lida">
@@ -351,19 +385,11 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
             </section>
           </>}
 
-        {/* 27/10: os dados do cliente já estão no cabeçalho; aqui só o que aconteceu */}
-        <aside className={cn("hidden rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]", !largo && "2xl:block")} aria-labelledby="ultimos">
-          <h2 id="ultimos" className="text-lg font-semibold tracking-tight">Últimos acontecimentos</h2>
-          <ol className="mt-3 space-y-3">
-            {d.hist.slice(0, 5).map((h, i) => (
-              <li key={d.hist.length - i} className="text-[15px] leading-snug">
-                {h.t}<span className="block text-sm text-muted-foreground">{quandoEQuem(h)}</span>
-              </li>
-            ))}
-          </ol>
-        </aside>
+        {/* 25/11: com largura, o resumo do negócio à direita (no passo, vem do FaseSimples, com os passos da fase) */}
+        {amplo && (ver !== null || (naChamada && d.fase <= 1)) && <ResumoNegocio d={d} S={S} ver={ver} irFase={irFase} />}
       </div>
-      {d.fase === 4 && caminhoEAdendas}
+      {d.fase === 4 && !caminhoNoMeio && caminhoEAdendas}
+    </div>
     </div>
   );
 }
@@ -399,10 +425,11 @@ function Ouvir() {
 
 type Lat = (passos: Passo[], ativo: number, setAtivo: (i: number) => void, comFim: boolean) => React.ReactNode;
 
-function Lateral({ d, passos, ativo, setAtivo, comFim }: { d: Negocio; passos: Passo[]; ativo: number; setAtivo: (i: number) => void; comFim: boolean }) {
+/** `solto` (25/11): dentro de um bloco que já é fixo e só se vê no computador (os passos com os documentos por baixo). */
+function Lateral({ d, passos, ativo, setAtivo, comFim, solto }: { d: Negocio; passos: Passo[]; ativo: number; setAtivo: (i: number) => void; comFim: boolean; solto?: boolean }) {
   const reduzir = useReduzir();
   return (
-    <nav aria-label="Passos desta fase" className="hidden rounded-2xl border border-border bg-card p-3 shadow-[var(--shadow-sm)] lg:sticky lg:top-6 lg:block">
+    <nav aria-label="Passos desta fase" className={cn("rounded-2xl border border-border bg-card p-3 shadow-[var(--shadow-sm)]", !solto && "hidden lg:sticky lg:top-6 lg:block")}>
       {passos.length > 0 && (
         <>
           <h2 className="px-3 text-sm font-medium text-muted-foreground">{FASES[d.fase]}</h2>
@@ -454,7 +481,9 @@ function Lateral({ d, passos, ativo, setAtivo, comFim }: { d: Negocio; passos: P
   );
 }
 
-function FaseSimples({ ctx, d, lateral, ajustarPassos, soLeitura }: { ctx: Ctx; d: Negocio; lateral: Lat; ajustarPassos?: (passos: Passo[], d: Negocio) => Passo[]; soLeitura?: boolean }) {
+/** `antes` / `depois` / `direita` (25/11, ecrã largo): o caminho da obra e as adendas por cima ou por baixo do passo, e o resumo à direita. */
+function FaseSimples({ ctx, d, lateral, ajustarPassos, soLeitura, antes: antesDoPasso, depois: depoisDoPasso, direita }: { ctx: Ctx; d: Negocio; lateral: Lat; ajustarPassos?: (passos: Passo[], d: Negocio) => Passo[]; soLeitura?: boolean;
+  antes?: ReactNode; depois?: ReactNode; direita?: (passos: Passo[]) => ReactNode }) {
   const { S } = ctx;
   // 9/11 (Lote 1, B): o passo é do papel atual OU quem entrou tem as permissões que ele pede (passoDe, só com conta real)
   const p = proximo(d, S), meu = passoDe(S.role, p.who, p.act);
@@ -584,6 +613,7 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos, soLeitura }: { ctx: Ctx; 
     <>
       {lateral(passos, ativo, setAtivo, temBotaoFase(ctx, d))}
       <section className="min-w-0" aria-labelledby="passo-titulo">
+        {antesDoPasso && <div className="mb-8 [&>*:first-child]:mt-0">{antesDoPasso}</div>}
         {/* Telemóvel: os passos numa linha (a lista completa fica no computador) */}
         <ol className="mb-4 flex flex-wrap gap-1.5 sm:mb-6 lg:hidden" aria-label="Passos desta fase">
           {passos.map((x, i) => (
@@ -646,7 +676,9 @@ function FaseSimples({ ctx, d, lateral, ajustarPassos, soLeitura }: { ctx: Ctx; 
             </div>}
         </div>
         )}
+        {depoisDoPasso && <div className="mt-10">{depoisDoPasso}</div>}
       </section>
+      {direita?.(passos)}
     </>
   );
 }
