@@ -1,7 +1,7 @@
 /**
  * @vitest-environment node
  */
-// 25/11: a migration C1 «separar Cor de Acabamento» (20270126420000) lida como TEXTO. Confere o que se pode conferir sem a
+// 25/11: a migration C1 «separar Cor de Acabamento» (20270126430000) lida como TEXTO. Confere o que se pode conferir sem a
 // correr: o cabeçalho (código do 3D entra junto, importação do Excel, só base de RH), as 170 opções (144 / 14 / 12, sem as
 // fora do âmbito, com os 23 metais), os ids fixos, que mexe só por UPDATE na própria linha (sem DELETE, sem cópias, sem
 // escrever em products), as guardas com os números do plano e os RAISE com % escapado. Erros de tipo do SQL só se
@@ -11,7 +11,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const pasta = resolve(process.cwd(), "supabase/migrations");
-const caminho = resolve(pasta, "20270126420000_separar_cor_acabamento_mudelar.sql");
+const caminho = resolve(pasta, "20270126430000_separar_cor_acabamento_mudelar.sql");
 const bruto = existsSync(caminho) ? readFileSync(caminho, "utf8") : "";
 /** Sem comentários de linha e com os espaços normalizados. */
 const sql = bruto.split(/\r?\n/).map((l) => l.replace(/--.*$/, "")).join("\n").replace(/\s+/g, " ");
@@ -45,7 +45,7 @@ const IDS_FIXOS = [
   "d5667f24-0b2b-420c-a37f-faea74dd6684", "965103d5-f16d-4e0a-bddc-08f065b7fc13", "a0dca4ad-ff59-4a9b-a03e-ceb28cd52fcb",
 ];
 
-describe("migration 20270126420000_separar_cor_acabamento_mudelar.sql", () => {
+describe("migration 20270126430000_separar_cor_acabamento_mudelar.sql", () => {
   it("existe e usa CRLF, como os outros ficheiros do projeto", () => {
     expect(bruto.length).toBeGreaterThan(0);
     expect(bruto.includes("\r\n")).toBe(true);
@@ -162,6 +162,10 @@ describe("migration 20270126420000_separar_cor_acabamento_mudelar.sql", () => {
 
   it("nenhuma migration de reversão desta na pasta das migrations", () => {
     const ficheiros = readdirSync(pasta).filter((f) => /separar_cor_acabamento/.test(f));
-    expect(ficheiros).toEqual(["20270126420000_separar_cor_acabamento_mudelar.sql"]);
+    expect(ficheiros).toEqual(["20270126430000_separar_cor_acabamento_mudelar.sql"]);
+  });
+
+  it("nenhuma outra migration usa o mesmo carimbo (o db push recusaria a segunda)", () => {
+    expect(readdirSync(pasta).filter((f) => f.startsWith("20270126430000_"))).toHaveLength(1);
   });
 });
