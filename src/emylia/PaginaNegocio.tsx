@@ -804,7 +804,6 @@ export function Orcamento({ S, A, go, run, d, podeVerCatalogo }: Ctx & { d: Nego
   const o = d.orc!, T = tot(d, S), locked = !!o.enviada;
   const pt = partes(d, S), mw = Math.max(0, Math.min(1, T.m / 0.5));
   const mcls = T.m < S.cfg.min / 100 ? "bad" : T.m < S.cfg.alvo / 100 - 0.005 ? "warn" : "ok";
-  const mudou = () => { d.orc!.aprov = null; d.fresh = false; };
   const AL = o.verif && !locked ? alertas(d, S) : [];
   const nX = AL.filter((a) => a.k === "x").length, nW = AL.filter((a) => a.k === "w").length;
   const okLinhas = ["Nenhuma linha abaixo do custo", "Todas as linhas têm custo no Catálogo"].filter((_, i) => !AL.some((a) => (i === 0 ? a.t.startsWith("Preço abaixo") : false)));
@@ -825,7 +824,7 @@ export function Orcamento({ S, A, go, run, d, podeVerCatalogo }: Ctx & { d: Nego
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3 shadow-[var(--shadow-sm)]">
             <label className="flex items-center gap-2 text-sm">Desconto
               <Campo id={`desc-${d.id}`} ariaLabel="Desconto em percentagem" value={nfmt(o.desconto)} readOnly={locked}
-                onCommit={(v) => run(() => { const n = numero(v); o.desconto = isNaN(n) ? 0 : Math.max(0, Math.min(50, n)); mudou(); })} /> %
+                onCommit={(v) => run(() => { const n = numero(v); A.descontoOrc(d.id, isNaN(n) ? 0 : n); })} /> %
             </label>
             <span className="text-sm text-muted-foreground">{nfmt(T.h)} h · custo {eur(T.custo)} €</span>
             <span className="text-base font-semibold tabular-nums">Total sem IVA {eur(T.pf)} € {podeVerCustos() && <span className="ml-1 text-sm font-medium text-muted-foreground">margem {pct(T.m)}</span>}</span>

@@ -1152,7 +1152,14 @@ function oficiosSemCusto(S: Estado, sid: SvcId, s: Servico): string[] {
   return nomes.length ? nomes : [s.perfil];
 }
 export interface Alerta { k: "x" | "w"; t: string; d: string; fix?: boolean; i?: number; sug?: number; aprov?: boolean; go?: Vista; key?: string;
-  /** 12/11: o bloqueio da agenda dos técnicos (o ecrã sugere os dias de início com todos livres) */ agenda?: true }
+  /** 12/11: o bloqueio da agenda dos técnicos (o ecrã sugere os dias de início com todos livres) */ agenda?: true;
+  /** 25/11: porque é uma exceção que a Direção aprova: a margem abaixo do mínimo, o preço abaixo do custo ou uma oferta a 0 € */
+  motivo?: MotivoExcecao;
+  /** 25/11: a linha da exceção (s:<serviço>, m:<descrição>, dem) e o preço por unidade dela, para ver se piorou depois de aprovada */
+  ch?: string; pu?: number }
+/** 25/11: o motivo de uma exceção, como aparece no cartão da Direção. */
+export type MotivoExcecao = "margem" | "custo" | "oferta";
+export const TEXTO_MOTIVO: Record<MotivoExcecao, string> = { margem: "margem abaixo do mínimo", custo: "abaixo do custo", oferta: "oferta a 0 €" };
 export function alertas(d: Negocio, S: Estado): Alerta[] {
   const A: Alerta[] = [], min = S.cfg.min / 100, alvo = S.cfg.alvo / 100, o = d.orc!, vistos = o.avisosVistos || {};
   // 5/11: sem quotes.view_costs o texto não diz os valores do custo nem da margem; as regras e o que bloqueia ficam iguais
@@ -1160,13 +1167,22 @@ export function alertas(d: Negocio, S: Estado): Alerta[] {
   o.linhas.forEach((l, i) => {
     // 27/10: os bloqueios das linhas têm por título só o nome; o ecrã junta-os num cartão "A corrigir", uma linha cada
     // uma linha de materiais com o preço mudado à mão para baixo do custo também bloqueia
-    if (l.t === "mat" && o.precosMan?.[l.d] != null && l.custo > 0 && l.preco < l.custo) A.push({ k: "x", fix: true, t: l.d, d: vc ? `${eur(l.preco)} € · custo ${eur(l.custo)} €` : `${eur(l.preco)} € · abaixo do custo`, i, sug: r2(l.custo / (1 - alvo)), aprov: false });
+    // 25/11 (contratos da Mudelar: ofertas a 0 € e preços da tabela antiga): abaixo do custo é uma exceção que a Direção pode aprovar
+    if (l.t === "mat" && o.precosMan?.[l.d] != null && l.custo > 0 && l.preco < l.custo) {
+      const of = l.preco === 0;
+      A.push({ k: "x", fix: true, t: l.d, d: of ? (vc ? `Oferta a 0 € · custo ${eur(l.custo)} €` : "Oferta a 0 €") : vc ? `${eur(l.preco)} € · custo ${eur(l.custo)} €` : `${eur(l.preco)} € · abaixo do custo`,
+        i, sug: r2(l.custo / (1 - alvo)), aprov: true, motivo: of ? "oferta" : "custo", ch: "m:" + l.d, pu: l.preco });
+    }
     if (l.t !== "svc") return;
     const s = S.svc[l.sid], x = linhaCalc(l, S), m = x.preco > 0 ? (x.preco - x.custo) / x.preco : 0;
     // 22/10: uma linha a 0 € de custo e de preço (subempreitada sem custo) não tem margem: o aviso dela vem a seguir
     if (x.preco === 0 && x.custo === 0) { /* sem margem para avaliar */ }
-    else if (x.preco < x.custo) A.push({ k: "x", fix: true, t: s.n, d: vc ? `${eur(l.pu)} € por ${s.un} · custo ${eur(l.cu)} €` : `${eur(l.pu)} € por ${s.un} · abaixo do custo`, i, sug: r2(l.cu / (1 - alvo)), aprov: false });
-    else if (m < min) A.push({ k: "x", fix: true, t: s.n, d: vc ? `Margem ${pct(m)} · mínimo ${S.cfg.min}%` : "Margem abaixo do mínimo", i, sug: r2(l.cu / (1 - alvo)), aprov: true });
+    else if (x.preco < x.custo) {
+      const of = l.pu === 0;
+      A.push({ k: "x", fix: true, t: s.n, d: of ? (vc ? `Oferta a 0 € · custo ${eur(l.cu)} € por ${s.un}` : "Oferta a 0 €") : vc ? `${eur(l.pu)} € por ${s.un} · custo ${eur(l.cu)} €` : `${eur(l.pu)} € por ${s.un} · abaixo do custo`,
+        i, sug: r2(l.cu / (1 - alvo)), aprov: true, motivo: of ? "oferta" : "custo", ch: "s:" + l.sid, pu: l.pu });
+    }
+    else if (m < min) A.push({ k: "x", fix: true, t: s.n, d: vc ? `Margem ${pct(m)} · mínimo ${S.cfg.min}%` : "Margem abaixo do mínimo", i, sug: r2(l.cu / (1 - alvo)), aprov: true, motivo: "margem", ch: "s:" + l.sid, pu: l.pu });
     // 22/10: um ofício sem €/h (sem técnicos no RH e sem salário) não usa a média dos outros: a mão de obra conta 0 € e não se envia assim
     // 28/10: o aviso nomeia os ofícios da receita sem €/h (num serviço do Catálogo, s.perfil é a categoria: "Revestimentos")
     if (s.semCusto) A.push({ k: "x", t: `Ofício sem custo/hora em ${s.n}`, d: textoSemCustoHora(oficiosSemCusto(S, l.sid, s)), i, aprov: false, go: "catalogo", key: "sc" + l.sid });
@@ -1182,10 +1198,10 @@ export function alertas(d: Negocio, S: Estado): Alerta[] {
   if (oc?.sugestao && !vistos["ensug"]) A.push({ k: "w", t: "Contentor quase vazio", d: oc.sugestao.charAt(0).toUpperCase() + oc.sugestao.slice(1) + ".", key: "ensug" });
   // a demolição: o preço mexido à mão abaixo da margem mínima (da demolição ou, sem ela, a geral)
   const rd = o.demolicao?.r;
-  if (rd?.abaixoMin) A.push({ k: "x", t: rd.preco < rd.custo ? "Preço da demolição abaixo do custo" : "Margem da demolição abaixo do mínimo", d: vc ? `${eur(rd.preco)} € dá ${pct(rd.margem)} de margem, com um mínimo de ${pct(rd.margemMin)}. Reponha o cálculo (${eur(rd.precoCalc)} €) ou peça aprovação.` : `${eur(rd.preco)} € fica abaixo do mínimo. Reponha o cálculo (${eur(rd.precoCalc)} €) ou peça aprovação.`, aprov: rd.preco >= rd.custo });
+  if (rd?.abaixoMin) A.push({ k: "x", t: rd.preco < rd.custo ? "Preço da demolição abaixo do custo" : "Margem da demolição abaixo do mínimo", d: vc ? `${eur(rd.preco)} € dá ${pct(rd.margem)} de margem, com um mínimo de ${pct(rd.margemMin)}. Reponha o cálculo (${eur(rd.precoCalc)} €) ou peça aprovação.` : `${eur(rd.preco)} € fica abaixo do mínimo. Reponha o cálculo (${eur(rd.precoCalc)} €) ou peça aprovação.`, aprov: true, motivo: rd.preco === 0 ? "oferta" : rd.preco < rd.custo ? "custo" : "margem", ch: "dem", pu: rd.preco });
   const T = tot(d, S);
-  if (o.desconto > 0 && T.m < min) A.push({ k: "x", t: vc ? `O desconto de ${nfmt(o.desconto)}% deixa a margem em ${pct(T.m)}` : `O desconto de ${nfmt(o.desconto)}% deixa a margem abaixo do mínimo`, d: `Abaixo do mínimo de ${S.cfg.min}%. Baixe o desconto ou peça aprovação.`, aprov: true });
-  else if (T.m < min && !A.some((a) => a.k === "x")) A.push({ k: "x", t: vc ? `Margem total de ${pct(T.m)}` : "Margem total abaixo do mínimo", d: `Abaixo do mínimo de ${S.cfg.min}%.`, aprov: true });
+  if (o.desconto > 0 && T.m < min) A.push({ k: "x", t: vc ? `O desconto de ${nfmt(o.desconto)}% deixa a margem em ${pct(T.m)}` : `O desconto de ${nfmt(o.desconto)}% deixa a margem abaixo do mínimo`, d: `Abaixo do mínimo de ${S.cfg.min}%. Baixe o desconto ou peça aprovação.`, aprov: true, motivo: "margem" });
+  else if (T.m < min && !A.some((a) => a.k === "x")) A.push({ k: "x", t: vc ? `Margem total de ${pct(T.m)}` : "Margem total abaixo do mínimo", d: `Abaixo do mínimo de ${S.cfg.min}%.`, aprov: true, motivo: "margem" });
   // 12/11 (Rúben: «o comercial não deve conseguir terminar a proposta sem ter os técnicos disponíveis para a obra»): os técnicos de cada
   // ofício livres nos dias da obra; senão bloqueia (a Direção não aprova por cima: muda-se o dia ou o técnico)
   const AG = agendaDaProposta(d, S);
@@ -1206,6 +1222,38 @@ export function bloqueado(d: Negocio, S: Estado): boolean {
   if (!A.length) return false;
   if (d.orc!.aprov === "ok" && A.every((a) => a.aprov)) return false;
   return true;
+}
+/** 25/11: as exceções que a Direção aprova, pelo nome da linha e o motivo (ex.: "Projeto 3D: oferta a 0 €"), para o cartão de aprovação. */
+export function motivosExcecao(d: Negocio, S: Estado): string[] {
+  const out: string[] = [];
+  for (const a of alertas(d, S)) {
+    if (a.k !== "x" || !a.aprov || !a.motivo) continue;
+    const t = a.ch ? `${a.t}: ${TEXTO_MOTIVO[a.motivo]}` : a.t;
+    if (!out.includes(t)) out.push(t);
+  }
+  return out;
+}
+/** 25/11: o texto do cartão «Aprovar a exceção à margem» no Hoje da Direção: as linhas com o motivo (até 3) e a margem total. */
+export function textoPedidoAprovacao(d: Negocio, S: Estado): string {
+  const margem = `${pct(tot(d, S).m)} de margem · mínimo ${S.cfg.min}%`;
+  const linhas = alertas(d, S).filter((a) => a.k === "x" && a.aprov && a.motivo && a.ch).map((a) => `${a.t}: ${TEXTO_MOTIVO[a.motivo!]}`);
+  if (!linhas.length) return margem;
+  return `${linhas.slice(0, 3).join(" · ")}${linhas.length > 3 ? ` e mais ${linhas.length - 3}` : ""} · ${margem}`;
+}
+/** 25/11 (Rúben: «a app deve tratar estes casos sem truques»): o que a Direção aprovou numa exceção. A margem total e, por linha com
+ *  exceção, o preço por unidade. Uma mudança ao orçamento só anula a aprovação se piorar isto (aprovacaoPiorou). */
+export interface FotoAprov { m: number; x: Record<string, number> }
+export function fotoAprov(d: Negocio, S: Estado): FotoAprov {
+  const x: Record<string, number> = {};
+  for (const a of alertas(d, S)) if (a.k === "x" && a.aprov && a.ch) x[a.ch] = Math.min(x[a.ch] ?? Infinity, a.pu ?? 0);
+  return { m: tot(d, S).m, x };
+}
+/** 25/11: piorou se a margem total desceu, se há uma linha com exceção que não estava aprovada ou se o preço de uma aprovada desceu.
+ *  Mudanças que não tocam nestas linhas nem baixam a margem (a zona, o IVA, o prazo, um preço que sobe) mantêm a aprovação. */
+export function aprovacaoPiorou(antes: FotoAprov, depois: FotoAprov): boolean {
+  if (depois.m < antes.m - 1e-9) return true;
+  for (const [k, p] of Object.entries(depois.x)) if (!(k in antes.x) || p < antes.x[k] - 0.005) return true;
+  return false;
 }
 export function calcMats(d: Negocio, S: Estado, jaReservado: boolean): MatObra[] {
   const L = LINHAS[d.linha], m = d.visita.med;
@@ -1694,7 +1742,7 @@ export function minhas(S: Estado, role: Papel) {
   for (const d of aberto(S)) {
     const p = proximo(d, S);
     if (role === "direcao" && d.fase === 3 && d.orc && d.orc.aprov === "pedida")
-      L.push({ d, p: { t: "Aprovar exceção à margem", sub: pct(tot(d, S).m) + " de margem · mínimo " + S.cfg.min + "%" }, dir: true });
+      L.push({ d, p: { t: "Aprovar exceção à margem", sub: textoPedidoAprovacao(d, S) }, dir: true });
     // do contrato à obra: o pagamento primeiro; depois o plano (a encomenda emite-se sozinha com o pagamento), cada um de quem é
     else if (d.fase >= 4 && d.obra.plano && (d.obra.plano.estado === "por aprovar" || d.obra.plano.estado === "aprovado")) {
       // 9/11 (Lote 1, B): o passo do papel OU, com conta real, o de quem tem as permissões que ele pede (passoDe)
@@ -1745,7 +1793,7 @@ function passosDaAdenda(d: Negocio, S: Estado, a: Adenda): Proximo[] {
       if (adendaBloqueada(d, S, a)) {
         if (a.aprov === "pedida") return [{ t: `Aprovar a exceção à margem da adenda ${n}`, sub: `${pct(margemAdenda(d, S, a))} de margem · mínimo ${S.cfg.min}%`, btn: "Aprovar", act: "aprovarAdenda", who: "direcao" }];
         const aprovavel = alertasAdenda(d, S, a).filter((x) => x.k === "x").every((x) => x.aprov);
-        return [{ t: `Resolver os bloqueios da adenda ${n}`, sub: aprovavel ? "Corrigir o preço ou pedir aprovação à Direção." : "Há um preço abaixo do custo: corrija-o (não se aprova).", ...(aprovavel ? { btn: "Pedir aprovação", act: "pedirAprovAdenda" } : {}), who: "comercial" }];
+        return [{ t: `Resolver os bloqueios da adenda ${n}`, sub: aprovavel ? "Corrigir o preço ou pedir aprovação à Direção." : "Há um bloqueio que a Direção não aprova: corrija-o.", ...(aprovavel ? { btn: "Pedir aprovação", act: "pedirAprovAdenda" } : {}), who: "comercial" }];
       }
       return [{ t: v > 1 ? `Enviar a versão ${v} da adenda ${n}` : `Enviar a adenda ${n}`, sub: v > 1 ? `Substitui a v${v - 1}. Vai para o portal do cliente.` : "Vai para o portal do cliente.", btn: "Enviar ao cliente", act: "enviarAdenda", who: "comercial" }];
     case "enviada": {
@@ -3078,6 +3126,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const p = (d.visita.prod ?? []).find((x) => !x.cliente && PREFIXO_PROD + textoProduto(x) === l.d);
       if (p) l.preco = precoProduto(p); else sincronizarEfeitos(d, S);
       o.aprov = null;
+    },
+    /** 25/11: o desconto do orçamento (0 a 50%). Com a exceção aprovada, só a anula se baixar a margem (manterAprovacao). */
+    descontoOrc(id: number, v: number) {
+      const d = deal(id), o = d.orc;
+      if (!o || o.enviada || !Number.isFinite(v)) return;
+      const n = Math.max(0, Math.min(50, Math.round(v * 100) / 100));
+      if (n === o.desconto) return;
+      o.desconto = n; o.aprov = null; d.fresh = false;
     },
     vistoAviso(id: number, key: string) { const d = deal(id); d.orc!.avisosVistos[key] = true; log(d, "Aviso visto: " + key.slice(2), "w"); },
     pedirAprov(id: number) {
@@ -5105,12 +5161,29 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
   // depois de cada ação, a visita de cada negócio acompanha as necessidades
   for (const k of Object.keys(A) as (keyof typeof A)[]) {
     const f = A[k] as (...a: unknown[]) => unknown;
+    const edita = EDICOES_ORCAMENTO.has(k);
     (A as Record<string, unknown>)[k] = (...a: unknown[]) => {
+      // 25/11: com a exceção aprovada, uma edição do orçamento só a anula se a margem ou os preços aprovados piorarem
+      const d0 = edita && typeof a[0] === "number" ? S.deals.find((x) => x.id === a[0]) : undefined;
+      const antes = d0?.orc?.aprov === "ok" ? { o: d0.orc, f: fotoAprov(d0, S) } : null;
       const r = f(...a);
       for (const d of S.deals) sincronizarVisita(d);
+      if (antes && d0) manterAprovacao(d0, S, antes.o, antes.f);
       return r;
     };
   }
   return A;
 }
 export type Acoes = ReturnType<typeof acoes>;
+/** 25/11: as ações que editam o orçamento (antes, todas anulavam a aprovação da Direção). A versão nova, reabrir a visita e a recusa
+ *  da Direção continuam a anulá-la sempre. */
+const EDICOES_ORCAMENTO = new Set<string>(["sugerido", "custoLinha", "precoLinha", "linhaLivre", "tirarLinha", "zonasOrc", "zonasLinha", "ivaLinha",
+  "ivaTodasLinhas", "qtdLinha", "prazoTarefa", "equipaObra", "demolicaoLigar", "demolicaoItem", "demolicaoAjuste", "reporPreco", "recalc", "descontoOrc"]);
+/** 25/11: depois de uma edição, a aprovação da Direção volta se a edição a anulou sem piorar o que foi aprovado (o mesmo orçamento,
+ *  ainda por enviar). Se piorou, fica no histórico porquê. */
+export function manterAprovacao(d: Negocio, S: Estado, o0: Orcamento, antes: FotoAprov): void {
+  const o = d.orc;
+  if (!o || o !== o0 || o.aprov !== null || o.enviada) return;
+  if (aprovacaoPiorou(antes, fotoAprov(d, S))) { log(d, "Aprovação da Direção anulada: a margem ou um preço aprovado baixou", "w"); return; }
+  o.aprov = "ok";
+}
