@@ -20,6 +20,7 @@ import { enviosDe, type Envio } from "./trabalhoObra";
 import type { ResumoEcNeg } from "./inventario/ponteNegocios";
 // 23/11: ao cliente, o nome curto do trabalho («Canalização», não «MO Modelo Remodelação Completa … · canalização»)
 import { nomeCurtoTarefa } from "./estudioObra/planoVivo";
+import { ordemDasTarefas } from "./ordemPlano";
 
 /* ------------------------------------------------------------------ as datas */
 const doisD = (n: number) => String(n).padStart(2, "0");
@@ -146,7 +147,8 @@ export interface MarcoCliente {
 
 const primeiroNome = (n: string) => n.trim().split(/\s+/)[0] || "A equipa";
 /** As tarefas que o cliente vê: as de correção são internas. */
-export const tarefasDoCliente = (p: Plano): Tarefa[] => p.tasks.filter((t) => t.corrige == null);
+/** 25/11: pela ordem da lista do plano (ordemPlano.ts), a que o gestor deu no Estúdio da obra. */
+export const tarefasDoCliente = (p: Plano): Tarefa[] => ordemDasTarefas(p).map((i) => p.tasks[i]).filter((t) => t.corrige == null);
 /** Os registos de uma tarefa que o cliente vê. */
 const enviosDoCliente = (t: Tarefa): Envio[] => enviosDe(t).filter((e) => e.k !== "correcao");
 

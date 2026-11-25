@@ -12,7 +12,7 @@
 import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EnderecoAtivo, escreverParamUrl, usePainelUrl, useParamUrl } from "../usarParamUrl";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, HardHat, Lightbulb, Link2, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Redo2, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, GripVertical, HardHat, Lightbulb, Link2, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Redo2, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { comRelogioReal, eur, nfmt, type AvisoTec, type Negocio, type Plano, type Tarefa } from "../motor";
@@ -56,6 +56,7 @@ import { DocumentosDaObra, ProjetoEm3D } from "./DocumentosObra";
 import { ContratoDaObra } from "./ContratoObra";
 import { BotoesPassos } from "./BotoesPassos";
 import { porFixar } from "../microtarefas";
+import { tarefasDaFase } from "../ordemPlano";
 import { passoEntre, retratoDe, type Passo } from "./passosObra";
 import { LigacoesDaTarefa } from "./LigacoesTarefa";
 import { HistoricoObraPortal, ProgressoObraPortal } from "../ObraNoPortal";
@@ -480,7 +481,9 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
                 vista={vista} setVista={setVista} podeMexer={podeMexer} mover={(ti, m) => mudar(ti, () => ctxObra.A.ajustarTarefa(d.id, ti, m))}
                 nova={podeCriar ? (dia, tec) => setPainel({ k: "nova", inicial: { dia, tec } }) : undefined} obras={obras} deFerias={deFerias} abrirOutra={setOutra}
                 critico={viva.critico} passar={planeia && !acabou ? (ti, tec) => mudar(ti, () => A.trocarTec(d.id, ti, tec)) : undefined}
-                ligar={planeia && !acabou ? (para, de) => pedirLigacao(para, de, true) : undefined} />
+                ligar={planeia && !acabou ? (para, de) => pedirLigacao(para, de, true) : undefined}
+                novaTarefa={podeCriar ? () => setPainel({ k: "nova" }) : undefined}
+                ordenar={planeia && !acabou ? (ti, para) => mudar(ti, () => A.ordemTarefaPlano(d.id, ti, para)) : undefined} />
               {planeia && !acabou && <DiasDoTecnico p={p} pedir={pedirRestricao} />}
 
               <div className="grid gap-6 lg:grid-cols-2">
@@ -669,7 +672,7 @@ function CartaoAlerta({ a, agir, reduzir, soLer }: { a: Alerta; agir: (x: AcaoAl
 // muda os dias, como no Estúdio do plano; na vista por técnico, por baixo das tarefas, onde a pessoa está fora desta obra (outra obra, que
 // abre o Estúdio dela, ou férias) e, num dia vazio, «+» cria uma tarefa para essa pessoa nesse dia.
 type Arrasto = { ti: number; tipo: "mover" | "durar"; dx: number; dy: number };
-function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista, setVista, podeMexer, mover: moverTarefa, nova, obras, deFerias, abrirOutra, critico, passar, ligar }: {
+function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista, setVista, podeMexer, mover: moverTarefa, nova, obras, deFerias, abrirOutra, critico, passar, ligar, novaTarefa, ordenar }: {
   titulo: string; p: Plano; R: Replano | null; dias: Date[]; sel: number | null; abrir: (ti: number) => void; imprevistos: { id: string; dia: number; texto: string }[]; reduzir: boolean;
   vista: "gantt" | "tecnicos"; setVista: (v: "gantt" | "tecnicos") => void; podeMexer: (ti: number) => boolean;
   mover: (ti: number, m: { dia?: number; dur?: number }) => void; nova?: (dia: number, tec: string | null) => void;
@@ -678,8 +681,22 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   critico: Set<number>; passar?: (ti: number, tec: string) => void;
   /** 23/11 (Rúben: «criar dependências com click and drag»): ligar arrastando da ponta de uma barra para outra («para» só começa quando «de» acaba) */
   ligar?: (para: number, de: number) => void;
+  /** 25/11 (Rúben: «permitas criar novas tasks»): abre a «Nova tarefa» (serviço do Catálogo ou tarefa interna) */ novaTarefa?: () => void;
+  /** 25/11 (Rúben: «drag and drop da lista da primeira coluna»): põe a tarefa noutro lugar da lista da fase (as datas não mudam) */
+  ordenar?: (ti: number, para: number) => void;
 }) {
   const vivo = p.estado === "em curso";
+  // 25/11: arrastar uma linha da lista (pelo pegador, com o rato ou o dedo) ou mexê-la com as setas do teclado
+  const [ord, setOrd] = useState<{ ti: number; fase: number; y0: number; dy: number } | null>(null);
+  const ordRef = useRef<typeof ord>(null);
+  const [anuncio, setAnuncio] = useState("");
+  const focarPegador = useRef<number | null>(null);
+  useEffect(() => {
+    const ti = focarPegador.current;
+    if (ti == null) return;
+    focarPegador.current = null;
+    cont.current?.querySelector<HTMLElement>(`[data-pegador="${ti}"]`)?.focus();
+  });
   // 23/11 (Rúben: «não se percebe que serviço é»): na vista por técnico os dias são mais largos e as barras mais altas, com o nome curto
   // 23/11 (revisão: «zoom Dia/Semana»): na vista Gantt, os dias largos (Dia) ou estreitos (Semana, para ver a obra toda)
   const [zoom, setZoom] = useState<"dia" | "semana">("dia");
@@ -716,7 +733,53 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   useLayoutEffect(medir);
   useEffect(() => { window.addEventListener("resize", medir); return () => window.removeEventListener("resize", medir); }, []); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { if (!erroLigar) return; const id = window.setTimeout(() => setErroLigar(""), 5000); return () => window.clearTimeout(id); }, [erroLigar]);
-  const fases = FASES_OBRA.map((f) => ({ ...f, tis: p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => (t.fase ?? 1) === f.n).sort((a, b) => a.t.dia - b.t.dia).map((x) => x.ti) })).filter((f) => f.tis.length);
+  // 25/11: dentro de cada fase, pela ordem da lista (a que o gestor deu ao arrastar; sem ela, pela data): ordemPlano.ts
+  const fases = FASES_OBRA.map((f) => ({ ...f, tis: tarefasDaFase(p, f.n) })).filter((f) => f.tis.length);
+  const ALTO_LINHA = LINHA + 1; // a linha e a borda
+  const podeOrdenar = !!ordenar && !R && vista === "gantt";
+  const lugarAlvo = (o: { ti: number; fase: number; dy: number }) => {
+    const L = fases.find((f) => f.n === o.fase)?.tis ?? [], de = L.indexOf(o.ti);
+    return { de, para: Math.max(0, Math.min(L.length - 1, de + Math.round(o.dy / ALTO_LINHA))), n: L.length };
+  };
+  const pegarOrdem = (e: React.PointerEvent, ti: number) => {
+    e.stopPropagation(); e.preventDefault();
+    try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* sem captura */ }
+    const o = { ti, fase: p.tasks[ti].fase ?? 1, y0: e.clientY, dy: 0 };
+    ordRef.current = o; setOrd(o);
+  };
+  const arrastarOrdem = (e: React.PointerEvent) => {
+    const o = ordRef.current;
+    if (!o) return;
+    e.stopPropagation();
+    const n = { ...o, dy: e.clientY - o.y0 };
+    ordRef.current = n; setOrd(n);
+  };
+  const largarOrdem = (e: React.PointerEvent) => {
+    const o = ordRef.current;
+    ordRef.current = null; setOrd(null);
+    if (!o) return;
+    e.stopPropagation();
+    const { de, para, n } = lugarAlvo({ ...o, dy: e.clientY - o.y0 });
+    if (para !== de) { ordenar?.(o.ti, para); setAnuncio(`${nomeCurtoTarefa(p.tasks[o.ti].nome)}: lugar ${para + 1} de ${n} na fase ${o.fase}.`); }
+  };
+  const teclaOrdem = (e: React.KeyboardEvent, ti: number, de: number, n: number, fase: number) => {
+    const para = e.key === "ArrowUp" ? de - 1 : e.key === "ArrowDown" ? de + 1 : e.key === "Home" ? 0 : e.key === "End" ? n - 1 : null;
+    if (para == null) return;
+    e.preventDefault();
+    if (para < 0 || para >= n || para === de) return;
+    focarPegador.current = ti;
+    ordenar?.(ti, para);
+    setAnuncio(`${nomeCurtoTarefa(p.tasks[ti].nome)}: lugar ${para + 1} de ${n} na fase ${fase}.`);
+  };
+  // enquanto se arrasta, as outras linhas abrem espaço onde a tarefa vai ficar
+  const desvioLinha = (fase: number, k: number, ti: number): number => {
+    if (!ord || ord.fase !== fase) return 0;
+    if (ord.ti === ti) return ord.dy;
+    const { de, para } = lugarAlvo(ord);
+    if (de < para && k > de && k <= para) return -ALTO_LINHA;
+    if (de > para && k >= para && k < de) return ALTO_LINHA;
+    return 0;
+  };
   const mudou = (ti: number) => !!R && (R.plano.tasks[ti].dia !== p.tasks[ti].dia || R.plano.tasks[ti].dur !== p.tasks[ti].dur);
   const legenda: [string, string][] = [["Validada", "hsl(var(--success))"], ["Por validar", "#d97706"], ["Em curso", "#7c5ce0"], ["Atrasada", "hsl(var(--destructive))"], ["Parada", "#64748b"]];
   const pegar = (e: React.PointerEvent, ti: number, tipo: "mover" | "durar") => {
@@ -872,6 +935,9 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
               </button>
             ))}
           </div>
+          {novaTarefa && !R && (
+            <Button type="button" variant="outline" className="min-h-9 rounded-full" onClick={novaTarefa}><Plus className="mr-1 h-4 w-4" aria-hidden="true" />Nova tarefa</Button>
+          )}
           {vista === "gantt" && (
             <div role="group" aria-label="Zoom" className="inline-flex rounded-full border border-input p-0.5 text-sm">
               {([["dia", "Dia"], ["semana", "Semana"]] as const).map(([k, l]) => (
@@ -890,13 +956,14 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
         </ul>
       </div>
       {erroLigar && <p role="alert" className="border-b border-border bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">Não se liga: {erroLigar}</p>}
-      {!R && <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">{vivo ? "As tarefas que ainda não começaram arrastam-se (o dia) e a ponta muda os dias; as outras abrem-se para gerir a execução." : "Arraste uma barra para mudar o dia; a ponta muda os dias."}{nova && vista === "tecnicos" ? " Num dia vazio, «+» cria uma tarefa." : ""}{passar && vista === "tecnicos" ? " Arraste para a linha de outra pessoa para lhe passar a tarefa." : ""}{ligar && vista === "gantt" ? " Para ligar duas tarefas, arraste o círculo da ponta de uma barra até à tarefa que só começa depois." : ""}</p>}
+      {!R && <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">{vivo ? "As tarefas que ainda não começaram arrastam-se (o dia) e a ponta muda os dias; as outras abrem-se para gerir a execução." : "Arraste uma barra para mudar o dia; a ponta muda os dias."}{nova && vista === "tecnicos" ? " Num dia vazio, «+» cria uma tarefa." : ""}{passar && vista === "tecnicos" ? " Arraste para a linha de outra pessoa para lhe passar a tarefa." : ""}{ligar && vista === "gantt" ? " Para ligar duas tarefas, arraste o círculo da ponta de uma barra até à tarefa que só começa depois." : ""}{podeOrdenar ? " Para mudar a ordem da lista, arraste o pegador ⋮⋮ à esquerda do nome (ou use as setas do teclado); as datas não mudam." : ""}</p>}
+      <p aria-live="polite" className="sr-only">{anuncio}</p>
       <div className="overflow-x-auto"
         onPointerMove={(e) => { if (premido.current && Math.hypot(e.clientX - premido.current.x, e.clientY - premido.current.y) > 10) largarPremido(); if (ligarRef.current) moverLigar(e); else arrastar(e); }}
         onPointerUp={(e) => { largarPremido(); if (ligarRef.current) { soltarRolar(); largouEm.current = Date.now(); largarLigar(e); toque.current = null; setArrasto(null); } else largar(e); }}
         onPointerCancel={() => { largarPremido(); soltarRolar(); if (ligarRef.current) setALigar(null); toque.current = null; setArrasto(null); }} onPointerLeave={() => !toque.current && setSob(null)}>
         <div className="relative min-w-max" ref={cont}>
-          {vista === "gantt" && setas()}
+          {vista === "gantt" && !ord && setas()}
           {/* os dias */}
           <div className="sticky top-0 z-10 flex border-b border-border bg-card">
             <div className={cn("sticky left-0 z-20 shrink-0 bg-card px-3 py-2 text-xs font-medium text-muted-foreground sm:px-4", rotulo)}>{vista === "gantt" ? "Tarefa" : "Técnico"}</div>
@@ -927,14 +994,27 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
                 </div>
                 <div style={{ width: dias.length * COL }} />
               </div>
-              {f.tis.map((ti) => {
+              {f.tis.map((ti, k) => {
                 const t = p.tasks[ti], v = estadoVivo(t, p), atraso = diasDeAtraso(t, p);
+                const dy = desvioLinha(f.n, k, ti), aqui = ord?.ti === ti;
                 return (
-                  <div key={ti} className={cn("group flex border-b border-border last:border-b-0", sel === ti && "bg-primary/[0.04]", aLigar?.alvo === ti && "bg-primary/[0.08]")} onPointerEnter={() => setHov(ti)} onPointerLeave={() => setHov((h) => (h === ti ? null : h))}>
-                    <button type="button" onClick={() => abrir(ti)} className={cn("sticky left-0 z-10 flex shrink-0 items-center gap-2 bg-card px-3 py-1.5 text-left hover:bg-muted/60 sm:px-4", rotulo)}>
-                      <span className="hidden sm:block"><AvatarTec id={t.tec} tam="h-7 w-7" /></span>
-                      <span className="min-w-0" title={t.nome}><span className="block truncate text-sm font-medium">{nomeCurtoTarefa(t.nome)}</span>{(v !== "por começar" || atraso > 0) && <span className={cn("block truncate text-xs", v === "atrasada" || v === "corrigir" ? "font-medium text-destructive" : "text-muted-foreground")}>{rotuloVivo(t, p)}{atraso ? ` · +${atraso}` : ""}</span>}</span>
-                    </button>
+                  <div key={ti} className={cn("group flex border-b border-border bg-card last:border-b-0", sel === ti && "bg-primary/[0.04]", aLigar?.alvo === ti && "bg-primary/[0.08]", aqui && "relative z-30 shadow-lg ring-2 ring-primary/40", ord && !aqui && "transition-transform duration-150")}
+                    style={dy ? { transform: `translateY(${dy}px)` } : undefined} onPointerEnter={() => setHov(ti)} onPointerLeave={() => setHov((h) => (h === ti ? null : h))}>
+                    <div className={cn("sticky left-0 z-10 flex shrink-0 items-stretch bg-card", rotulo)}>
+                      {podeOrdenar && (
+                        <button type="button" data-pegador={ti} aria-label={`Mudar a ordem de ${nomeCurtoTarefa(t.nome)}: lugar ${k + 1} de ${f.tis.length} na fase ${f.n}. Setas para cima e para baixo para mudar.`}
+                          title="Arraste para mudar a ordem (ou use as setas do teclado)"
+                          onPointerDown={(e) => pegarOrdem(e, ti)} onPointerMove={arrastarOrdem} onPointerUp={largarOrdem} onPointerCancel={() => { ordRef.current = null; setOrd(null); }}
+                          onKeyDown={(e) => teclaOrdem(e, ti, k, f.tis.length, f.n)}
+                          className={cn("grid w-6 shrink-0 touch-none place-items-center text-muted-foreground/60 hover:bg-muted/60 hover:text-foreground focus-visible:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary sm:w-7", aqui ? "cursor-grabbing" : "cursor-grab")}>
+                          <GripVertical className="h-4 w-4" aria-hidden="true" />
+                        </button>
+                      )}
+                      <button type="button" onClick={() => abrir(ti)} className={cn("flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-3 text-left hover:bg-muted/60 sm:pr-4", podeOrdenar ? "pl-1" : "pl-3 sm:pl-4")}>
+                        <span className="hidden sm:block"><AvatarTec id={t.tec} tam="h-7 w-7" /></span>
+                        <span className="min-w-0" title={t.nome}><span className="block truncate text-sm font-medium">{nomeCurtoTarefa(t.nome)}</span>{(v !== "por começar" || atraso > 0) && <span className={cn("block truncate text-xs", v === "atrasada" || v === "corrigir" ? "font-medium text-destructive" : "text-muted-foreground")}>{rotuloVivo(t, p)}{atraso ? ` · +${atraso}` : ""}</span>}</span>
+                      </button>
+                    </div>
                     <div className="relative" data-linha={ti} style={{ width: dias.length * COL, height: LINHA }}>{fundo()}{barra(ti, 7)}</div>
                   </div>
                 );

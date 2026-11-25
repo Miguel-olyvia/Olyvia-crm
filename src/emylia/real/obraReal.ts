@@ -7,6 +7,7 @@
 import type { Negocio } from "../motor";
 import { datasDoPlano } from "../equipa/regrasAgenda";
 import { FASES_OBRA } from "../fasesObra";
+import { lugarNaLista } from "../ordemPlano";
 
 export type EstadoObraBase = "planeada" | "em_curso" | "suspensa" | "concluida" | "cancelada";
 export type EstadoTarefaBase = "por_fazer" | "em_curso" | "feita" | "validada" | "rejeitada";
@@ -44,16 +45,18 @@ export function paraObra(d: Negocio, hoje: Date = new Date()): ObraBase {
   const p = d.obra.plano;
   const base: ObraBase = { estado: estadoDaObra(d), titulo: d.servico || d.nome, morada: d.local, inicio: null, emylia: d.obra };
   if (!p) return base;
-  const datas = datasDoPlano(p, hoje);
+  const datas = datasDoPlano(p, hoje), lugar = lugarNaLista(p);
   const equipa = p.origem === "orcamento" ? Math.max(1, d.orc?.equipa ?? 1) : 1;
   return {
     ...base,
     inicio: p.origem === "orcamento" ? datas[0] ?? p.inicio ?? null : null,
     fases: FASES_OBRA.map((f) => ({ ordem: f.n, nome: f.nome })),
     tarefas: p.tasks.map((t, i) => {
+      // 25/11: a ordem é a da lista do plano (a que o gestor deu no Estúdio da obra); a chave continua a ser o índice
+      const ordem = lugar.get(i) ?? i;
       const dur = Math.max(1, Math.ceil(t.dur));
       return {
-        chave: `t${i}`, ordem: i, nome: t.nome, fase: t.fase ?? 0, perfil: t.perfilId ?? null,
+        chave: `t${i}`, ordem, nome: t.nome, fase: t.fase ?? 0, perfil: t.perfilId ?? null,
         minutos: Math.max(1, Math.round(t.h * 60)), pessoas: Math.min(20, equipa),
         inicio: datas[t.dia] ?? null, fim: datas[t.dia + dur - 1] ?? datas[t.dia] ?? null,
         estado: (t.exec && ESTADO_TAREFA[t.exec.estado]) || "por_fazer",

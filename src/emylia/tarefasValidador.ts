@@ -127,7 +127,8 @@ export function moverTarefa(p: Plano, ti: number, m: { fase?: number; dia?: numb
   const t = p.tasks[ti];
   if (!t) return;
   guardarBase(p);
-  if (m.fase != null && m.fase !== t.fase) t.fase = m.fase || undefined;
+  // 25/11: noutra fase, vai para o fim da lista dessa fase (o lugar marcado era o da outra)
+  if (m.fase != null && m.fase !== t.fase) { t.fase = m.fase || undefined; delete t.ordem; }
   mudarInicio(p, ti, Math.max(m.dia ?? t.dia, inicioMinimo(p, ti)));
 }
 

@@ -35,6 +35,7 @@ import { comFaturaDaParcela, faltaParaAuto, nomeDaParcela, parcelaDoArranquePorP
 import { diasQuePode, agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, FALTA_EC_AUTOMATICA, ecNoServidor, marcarEcNoServidor, retificacaoAceite, faltaMedirTexto, medicoesDe, supervisorDasMedidas, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { pedirPainelObra } from "./estudioObra/painelPedido";
 import { avisarTecnico, criarTarefa, criarTarefaInterna, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa, type NovaTarefaInterna } from "./tarefasValidador";
+import { moverNaOrdem } from "./ordemPlano";
 import { listaMicro, microtarefasDe, mudarMicro, nomesFeitos, porFixar, type Micro, type MudancaMicro } from "./microtarefas";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
@@ -363,6 +364,7 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 24/11: as microtarefas desta obra (microtarefas.ts), quando o gestor as mudou ou fixou; sem elas, vêm do Catálogo. O técnico marca-as
    *  pelo id (exec.passos). */ micro?: Micro[];
   /** 24/11: uma tarefa interna (sem serviço do Catálogo e sem custo para o cliente): não muda o valor do contrato nem pede adenda */ interna?: true;
+  /** 25/11: o lugar na lista da fase, quando o gestor a arrastou (ordemPlano.ts); sem ele, a ordem é a da data de início */ ordem?: number;
   /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[];
   /** 21/10: parada por um imprevisto (o id, imprevistos.ts) até o cliente decidir */ bloqueio?: string;
   /** 21/10: tarefa de uma adenda (o número): os materiais dela só se encomendam com o pagamento da adenda validado (encomendasAjuste.ts) */ adenda?: string;
@@ -4451,6 +4453,16 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       }
       if (!A.planoMudou(d)) avisar({ msg: "Tarefa interna juntada", sub: `${t.nome} · ${rotuloDia(p, t.dia)} · sem adenda`, kind: "ok" });
       return ti;
+    },
+    /** 25/11 (Rúben: «drag and drop da lista da primeira coluna»): a tarefa passa para o lugar `para` da sua fase (a ordem da lista; as
+     *  datas não mudam). Fica no histórico. */
+    ordemTarefaPlano(id: number, ti: number, para: number): boolean {
+      if (!exigePerm("obra.planear")) return false;
+      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
+      if (!p || !t || p.estado === "concluída") return false;
+      if (!moverNaOrdem(p, ti, para)) return false;
+      log(d, `Plano: ${t.nome} passou para o ${(t.ordem ?? 0) + 1}.º lugar da fase ${t.fase ?? 1}`);
+      return true;
     },
     /** 24/11: o gestor muda as microtarefas de uma tarefa só nesta obra (microtarefas.ts); a ficha do Catálogo não muda. */
     microtarefas(id: number, ti: number, m: MudancaMicro): boolean {
