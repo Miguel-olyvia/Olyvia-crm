@@ -110,7 +110,7 @@ function EditorVersao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           <div className="flex flex-wrap items-center gap-2.5">
             <span className="w-full text-[15px] text-muted-foreground sm:w-40">Desconto</span>
             {[0, 3, 5, 8, 10].map((x) => (
-              <button key={x} type="button" aria-pressed={o.desconto === x} onClick={() => run(() => { o.desconto = x; o.aprov = null; })}
+              <button key={x} type="button" aria-pressed={o.desconto === x} onClick={() => run(() => A.descontoOrc(d.id, x))}
                 className={cn("min-h-10 rounded-full border px-3.5 text-[15px] transition-colors", o.desconto === x ? "border-primary bg-primary text-primary-foreground" : "border-input hover:border-foreground/40")}>{x}%</button>
             ))}
           </div>
@@ -120,7 +120,7 @@ function EditorVersao({ ctx, d }: { ctx: Ctx; d: Negocio }) {
               <button key={x} type="button" onClick={() => run(() => {
                 // o desconto que deixa o total com IVA em (v anterior − x), sobre o preço sem desconto
                 const alvoPf = Math.max(0, (antIva - x) / razao), semDesc = T.preco || 1;
-                o.desconto = Math.max(0, Math.min(30, Math.round((1 - alvoPf / semDesc) * 1000) / 10)); o.aprov = null;
+                A.descontoOrc(d.id, Math.max(0, Math.min(30, Math.round((1 - alvoPf / semDesc) * 1000) / 10)));
               })} className="min-h-10 rounded-full border border-input px-3.5 text-[15px] hover:border-foreground/40">{x} €</button>
             ))}
           </div>

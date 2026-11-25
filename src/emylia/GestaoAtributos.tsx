@@ -1,13 +1,15 @@
 // 13/11: o ecrã de GESTÃO dos atributos do Catálogo (Medida, Cor, Tonalidade, Tipo de grelha, Textura, Brilho): criar e renomear atributos;
 // criar, renomear, mudar a cor, ativar/desativar e ordenar opções. Só com products.edit (sem ela, leitura). Usa as peças do Catálogo
-// (pecasForm, Amostra). Quem decide é a base (cat_* de 20270117600000): aqui só se mostra o que ela devolve e se relê depois de cada gravação.
+// (pecasForm, AmostraOpcao). Quem decide é a base (cat_* de 20270117600000): aqui só se mostra o que ela devolve e se relê depois de cada gravação.
 // A Medida é fixa (1D/2D/3D + números, escreve-se em cada produto): só informação. Os atributos não se desativam.
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ArrowLeft, ChevronDown, ChevronRight, ChevronUp, Loader2, Pencil, Plus, Search, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CAMPO, NOTA, Campo, Chips } from "./pecasForm";
-import { Amostra } from "./AtributosProduto";
+import { AmostraOpcao } from "./AmostraOpcao";
+import { FotoDaOpcao } from "./FotoDaOpcao";
+import { definirFotoAtributo } from "./fotoOpcaoDados";
 import { semAcentos } from "./ComboPesquisa";
 import { normalizarHex } from "./atributosTexto";
 import { guardarSiglaOpcao } from "./skuDados";
@@ -41,18 +43,20 @@ type Pendente = { t: "opcao"; nome: string | null; hex: string | null; opcao: Op
 interface Erro { onde: string; msg: string }
 
 /* ------------------------------------------------------------------ formulário de uma opção (criar e editar) */
-function OpcaoForm({ temHex, inicial, rotulo, criar, bloqueado, erro, idGuardar, onEnviar, onCancelar }: {
-  temHex: boolean; inicial: { nome: string; hex: string | null }; rotulo: string; criar: boolean; bloqueado: boolean; erro: string | null; idGuardar: string;
+/** `temFoto`: o atributo tem foto, e então o hex é opcional (a foto pode ser a única cor). Ao enviar, `hex` é o #RRGGBB, null (sem hex) ou '' (limpar o hex que a opção tinha). */
+function OpcaoForm({ temHex, temFoto, inicial, rotulo, criar, bloqueado, erro, idGuardar, onEnviar, onCancelar }: {
+  temHex: boolean; temFoto: boolean; inicial: { nome: string; hex: string | null; foto?: string | null }; rotulo: string; criar: boolean; bloqueado: boolean; erro: string | null; idGuardar: string;
   onEnviar: (nome: string, hex: string | null) => void; onCancelar: () => void;
 }) {
   const [nome, setNome] = useState(inicial.nome), [hex, setHex] = useState(inicial.hex ?? "");
   const msgHex = useId(), dica = useId();
   const hexOk = temHex ? normalizarHex(hex) : null;
   const hexVazio = hex.trim() === "";
-  // a cor é obrigatória ao criar e quando a opção já a tinha; uma opção sem hex pode continuar sem
-  const hexObrigatorio = temHex && hexVazio && (criar || inicial.hex != null);
+  // a cor é obrigatória ao criar e quando a opção já a tinha; uma opção sem hex pode continuar sem. Num atributo com foto nunca é obrigatória
+  const hexObrigatorio = temHex && !temFoto && hexVazio && (criar || inicial.hex != null);
+  const limpaHex = temFoto && temHex && hexVazio && inicial.hex != null;
   const hexFormato = temHex && !hexVazio && !hexOk;
-  const mudou = criar || nome.trim() !== inicial.nome || (temHex && !hexVazio && (hexOk ?? null) !== (inicial.hex?.toUpperCase() ?? null));
+  const mudou = criar || nome.trim() !== inicial.nome || limpaHex || (temHex && !hexVazio && (hexOk ?? null) !== (inicial.hex?.toUpperCase() ?? null));
   const pode = !!nome.trim() && !hexObrigatorio && !hexFormato && mudou && !bloqueado;
   // a razão de o botão estar desligado, escrita (nunca só «cinzento»)
   const razao = !nome.trim() ? (criar ? null : "Escreva o nome da opção.") : hexObrigatorio ? "A cor é obrigatória." : hexFormato ? null : !mudou ? "Altere o nome ou a cor para guardar." : null;
@@ -61,10 +65,10 @@ function OpcaoForm({ temHex, inicial, rotulo, criar, bloqueado, erro, idGuardar,
       <div className="grid gap-3 sm:grid-cols-2">
         <Campo rot="Nome da opção">{(id) => <input id={id} value={nome} onChange={(e) => setNome(e.target.value)} className={CAMPO} autoFocus />}</Campo>
         {temHex && (
-          <Campo rot="Cor em hexadecimal (#RRGGBB)" dica={criar ? "Obrigatório nas cores. Ex.: #1A2B3C" : undefined}>{(id) => (
+          <Campo rot="Cor em hexadecimal (#RRGGBB)" dica={temFoto ? "Opcional: a foto pode ser a cor. Ex.: #1A2B3C" : criar ? "Obrigatório nas cores. Ex.: #1A2B3C" : undefined}>{(id) => (
             <>
               <span className="flex items-center gap-2">
-                <Amostra hex={hexOk} />
+                <AmostraOpcao foto={inicial.foto} hex={hexOk} nome={nome} />
                 <input id={id} value={hex} onChange={(e) => setHex(e.target.value)} placeholder="#RRGGBB" maxLength={7} autoCapitalize="off" spellCheck={false}
                   aria-invalid={hexFormato} aria-describedby={hexFormato ? msgHex : undefined} className={cn(CAMPO, "tabular-nums")} />
               </span>
@@ -76,7 +80,7 @@ function OpcaoForm({ temHex, inicial, rotulo, criar, bloqueado, erro, idGuardar,
       {erro && <p className="text-[15px] text-red-700 dark:text-red-400" role="alert">{erro}</p>}
       {razao && <p id={dica} className="text-sm text-muted-foreground">{razao}</p>}
       <div className="flex flex-wrap gap-2">
-        <Button id={idGuardar} className="min-h-11 text-[15px]" disabled={!pode} aria-describedby={razao ? dica : undefined} onClick={() => onEnviar(nome.trim(), hexOk)}>{rotulo}</Button>
+        <Button id={idGuardar} className="min-h-11 text-[15px]" disabled={!pode} aria-describedby={razao ? dica : undefined} onClick={() => onEnviar(nome.trim(), limpaHex ? "" : hexOk)}>{rotulo}</Button>
         <Button variant="outline" className="min-h-11 text-[15px]" onClick={onCancelar} disabled={bloqueado}>Cancelar</Button>
       </div>
     </div>
@@ -91,7 +95,7 @@ function Confirmar({ p, aGravar, erro, onConfirmar, onVoltar }: { p: Pendente; a
   const n = p.t === "opcao" ? p.opcao.usados : p.atributo.usados;
   const titulo = p.t === "atributo"
     ? `Mudar o nome de «${p.atributo.nome}» para «${p.nome}»?`
-    : `Mudar ${p.nome && p.hex ? "o nome e a cor" : p.nome ? "o nome" : "a cor"} de «${p.opcao.nome}»?`;
+    : `Mudar ${p.nome && p.hex !== null ? "o nome e a cor" : p.nome ? "o nome" : "a cor"} de «${p.opcao.nome}»?`;
   const texto = p.t === "atributo"
     ? (n == null ? "Este atributo pode estar a ser usado por produtos: o novo nome aparece em todos." : `Este atributo é usado por ${produtos(n)}: o novo nome aparece em todos.`)
     : (n == null ? "Esta opção pode estar a ser usada por produtos: a mudança vai a todos." : `Esta opção é usada por ${produtos(n)}: a mudança altera ${n === 1 ? "esse produto" : `esses ${n} produtos`}.`);
@@ -193,13 +197,28 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
   const abrir = (a: Aberto) => { setAberto(a); setErro(null); setPend(null); };
   const fechar = (focar?: string) => { setAberto(null); setErro(null); setPend(null); if (focar) setFoco(focar); };
 
-  const criarAtributo = (nome: string, tipo: "lista" | "medida", temHex: boolean) => {
+  const criarAtributo = (nome: string, tipo: "lista" | "medida", temHex: boolean, temFoto: boolean) => {
     // os ids de ANTES de gravar; o que a releitura trouxe a mais E tem este nome foi criado por esta ação (não por outro utilizador), e abre-se
     const antes = new Set((listaAtual.current ?? []).map((x) => x.id)), nomeNovo = semAcentos(nome.trim());
+    let novos: string[] = [];
+    const comFoto = tipo === "lista" && temHex && temFoto;
     void correr(() => guardarAtributo(org, { atributo: null, nome, tipo, temHex: tipo === "lista" && temHex }), `Atributo «${nome}» criado.`, "novo", (lida) => {
-      const novos = (lida ?? []).filter((x) => !antes.has(x.id) && semAcentos(x.nome.trim()) === nomeNovo).map((x) => x.id);
+      novos = (lida ?? []).filter((x) => !antes.has(x.id) && semAcentos(x.nome.trim()) === nomeNovo).map((x) => x.id);
       if (novos.length) setAbertos((s) => new Set([...s, ...novos]));
-    }).then((ok) => { if (ok) fechar("novo-atributo"); });
+    }).then(async (ok) => {
+      if (!ok) return;
+      // o formulário fecha sempre (deixá-lo aberto convidava a criar o atributo outra vez, duplicado)
+      fechar("novo-atributo");
+      // não se sabe qual é o atributo criado: o aviso fica na página
+      if (comFoto && novos.length !== 1) { setErro({ onde: "pagina", msg: `O atributo «${nome}» foi criado, mas não foi possível ligar «Tem foto». Confirme na lista abaixo: não o crie outra vez.` }); return; }
+      // o interruptor «Tem foto» liga-se depois de o atributo existir; se a base recusar, o atributo fica criado SEM foto e a mensagem aparece nele
+      if (comFoto) {
+        await correr(async () => {
+          const r = await definirFotoAtributo(org, novos[0], true);
+          return r.ok === false ? { ...r, erro: `O atributo «${nome}» foi criado sem foto: ${r.erro} A foto só se escolhe ao criar o atributo: avise a equipa técnica antes de lhe juntar opções.` } : r;
+        }, `Atributo «${nome}» com foto.`, `atr:${novos[0]}`);
+      }
+    });
   };
   const gravarNomeAtributo = (a: AtributoGestao, nome: string) =>
     correr(() => guardarAtributo(org, { atributo: a.id, nome, tipo: null, temHex: null }), `Atributo «${nome}» guardado.`, `ren:${a.id}`).then((ok) => { if (ok) fechar(`ren-${a.id}`); });
@@ -215,8 +234,9 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
   /** Nome ou cor de uma opção usada por produtos: pede confirmação antes; sem uso (ou sem mudança dessas), grava logo. */
   const pedirGravarOpcao = (o: OpcaoGestao, nome: string, hex: string | null) => {
     const nomeNovo = nome !== o.nome ? nome : null;
-    const hexNovo = hex && hex !== (o.hex?.toUpperCase() ?? null) ? hex : null;
-    if (!nomeNovo && !hexNovo) { fechar(`ed-${o.id}`); return; }
+    // hex "" = limpar a cor que a opção tinha (só num atributo com foto); sem cor antes, "" não muda nada
+    const hexNovo = hex === "" ? (o.hex ? "" : null) : hex && hex !== (o.hex?.toUpperCase() ?? null) ? hex : null;
+    if (!nomeNovo && hexNovo === null) { fechar(`ed-${o.id}`); return; }
     if (o.usados === 0) { void gravarOpcao(o, nomeNovo, hexNovo); return; }
     setErro(null); setPend({ t: "opcao", nome: nomeNovo, hex: hexNovo, opcao: o });
   };
@@ -285,6 +305,7 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
               )}
             </div>
           )}
+          {msg("pagina") && <p className="text-[15px] text-red-700 dark:text-red-400" role="alert">{msg("pagina")}</p>}
           {!lista.length && <p className={NOTA}>Ainda não há atributos.</p>}
           {lista.length > 1 && (
             <div>
@@ -296,7 +317,7 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
           {lista.map((a) => (
             <Atributo key={a.id} a={a} podeEditar={podeEditar} aberta={abertos.has(a.id)} onAlternar={() => alternar(a)} aGravar={aGravar} aberto={aberto} msg={msg} pend={pend}
               abrir={abrir} fechar={fechar} onRenomear={pedirRenomear} onNovaOpcao={criarOpcaoNova} onPedirGravar={pedirGravarOpcao}
-              onConfirmar={confirmar} onVoltarConfirmar={voltarDaConfirmacao} onAtivar={ativar} onMover={mover} onSigla={gravarSigla} />
+              onConfirmar={confirmar} onVoltarConfirmar={voltarDaConfirmacao} onAtivar={ativar} onMover={mover} onSigla={gravarSigla} org={org} correr={correr} onFoco={setFoco} />
           ))}
         </>
       )}
@@ -305,8 +326,8 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
 }
 
 /* ------------------------------------------------------------------ novo atributo */
-function NovoAtributo({ aGravar, erro, onCriar, onCancelar }: { aGravar: boolean; erro: string | null; onCriar: (nome: string, tipo: "lista" | "medida", temHex: boolean) => void; onCancelar: () => void }) {
-  const [nome, setNome] = useState(""), [tipo, setTipo] = useState<"lista" | "medida">("lista"), [temHex, setTemHex] = useState(false);
+function NovoAtributo({ aGravar, erro, onCriar, onCancelar }: { aGravar: boolean; erro: string | null; onCriar: (nome: string, tipo: "lista" | "medida", temHex: boolean, temFoto: boolean) => void; onCancelar: () => void }) {
+  const [nome, setNome] = useState(""), [tipo, setTipo] = useState<"lista" | "medida">("lista"), [temHex, setTemHex] = useState(false), [temFoto, setTemFoto] = useState(false);
   return (
     <div className={cn("grid gap-3 rounded-xl border border-border bg-card p-3", ENTRA)}>
       <Campo rot="Nome do atributo">{(id) => <input id={id} value={nome} onChange={(e) => setNome(e.target.value)} className={CAMPO} autoFocus />}</Campo>
@@ -317,13 +338,23 @@ function NovoAtributo({ aGravar, erro, onCriar, onCancelar }: { aGravar: boolean
       </div>
       {tipo === "lista" && (
         <label className="flex min-h-11 items-center gap-2 text-[15px]">
-          <input type="checkbox" checked={temHex} onChange={(e) => setTemHex(e.target.checked)} className="h-5 w-5 accent-primary" />
+          <input type="checkbox" checked={temHex} onChange={(e) => { setTemHex(e.target.checked); if (!e.target.checked) setTemFoto(false); }} className="h-5 w-5 accent-primary" />
           Tem cor (hexadecimal)
         </label>
       )}
+      {/* a foto só existe em atributos de cor, e escolhe-se agora: depois de criado o atributo não muda */}
+      {tipo === "lista" && temHex && (
+        <div className="grid gap-0.5">
+          <label className="flex min-h-11 items-center gap-2 text-[15px]">
+            <input type="checkbox" checked={temFoto} onChange={(e) => setTemFoto(e.target.checked)} className="h-5 w-5 accent-primary" />
+            Tem foto
+          </label>
+          <span className="pl-7 text-sm text-muted-foreground">Cada opção pode ter uma foto (por exemplo, de uma madeira). Escolhe-se agora: depois de criado o atributo não se muda. O hex passa a ser opcional.</span>
+        </div>
+      )}
       {erro && <p className="text-[15px] text-red-700 dark:text-red-400" role="alert">{erro}</p>}
       <div className="flex flex-wrap gap-2">
-        <Button className="min-h-11 text-[15px]" disabled={!nome.trim() || aGravar} onClick={() => onCriar(nome.trim(), tipo, temHex)}>
+        <Button className="min-h-11 text-[15px]" disabled={!nome.trim() || aGravar} onClick={() => onCriar(nome.trim(), tipo, temHex, temHex && temFoto)}>
           {aGravar && <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />}Criar atributo
         </Button>
         <Button variant="outline" className="min-h-11 text-[15px]" onClick={onCancelar} disabled={aGravar}>Cancelar</Button>
@@ -340,8 +371,9 @@ interface AtributoProps {
   onPedirGravar: (o: OpcaoGestao, nome: string, hex: string | null) => void; onConfirmar: () => void; onVoltarConfirmar: () => void;
   onAtivar: (a: AtributoGestao, o: OpcaoGestao, ativo: boolean) => void; onMover: (a: AtributoGestao, i: number, d: -1 | 1) => void;
   onSigla: (o: OpcaoGestao, sigla: string) => void;
+  org: string; correr: (op: () => Promise<ResG<unknown>>, aviso: string, onde: string) => Promise<boolean>; onFoco: (id: string) => void;
 }
-function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pend, abrir, fechar, onRenomear, onNovaOpcao, onPedirGravar, onConfirmar, onVoltarConfirmar, onAtivar, onMover, onSigla }: AtributoProps) {
+function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pend, abrir, fechar, onRenomear, onNovaOpcao, onPedirGravar, onConfirmar, onVoltarConfirmar, onAtivar, onMover, onSigla, org, correr, onFoco }: AtributoProps) {
   const nomeId = useId(), painel = useId(), razaoId = useId();
   const [nome, setNome] = useState(a.nome);
   const [q, setQ] = useState("");
@@ -432,10 +464,10 @@ function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pen
                       return (
                         <li key={o.id} className="grid gap-2 rounded-xl bg-muted/50 p-2 pl-3">
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-                            {a.temHex && <Amostra hex={o.hex} />}
+                            {a.temHex && <AmostraOpcao foto={o.foto} hex={o.hex} nome={o.nome} />}
                             <span className={cn("min-w-0 break-words text-[15px] font-medium", !o.ativo && "text-foreground/75")}>{o.nome}{!o.ativo && " (desativada)"}</span>
                             <SiglaTexto sigla={o.sigla} />
-                            {a.temHex && <span className="text-sm text-foreground/75 tabular-nums">{o.hex ?? "sem hex"}</span>}
+                            {a.temHex && (o.hex || !o.foto) && <span className="text-sm text-foreground/75 tabular-nums">{o.hex ?? "sem hex"}</span>}
                             {o.usados != null && <span className="text-sm text-foreground/75">{produtos(o.usados)}</span>}
                             {podeEditar && (
                               <span className="ml-auto flex flex-wrap items-center gap-1">
@@ -461,13 +493,16 @@ function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pen
                               </span>
                             )}
                           </div>
+                          {podeEditar && a.temFoto && (
+                            <FotoDaOpcao o={o} outras={a.opcoes} org={org} bloqueado={aGravar} erro={msg(`foto:${o.id}`)} correr={correr} aoAcabar={() => onFoco(`fa-${o.id}`)} />
+                          )}
                           {podeEditar && aberto?.t === "siglaOpcao" && aberto.id === o.id && (
                             <FormSigla rotulo="Sigla da opção" inicial={o.sigla} exigeLetra={false} aGravar={aGravar} erro={msg(`sig:${o.id}`)} idGuardar={`gs-${o.id}`}
                               onEnviar={(s) => onSigla(o, s)} onCancelar={() => fechar(`sig-${o.id}`)} />
                           )}
                           {podeEditar && aberto?.t === "editarOpcao" && aberto.id === o.id && (
                             <>
-                              <OpcaoForm temHex={a.temHex} inicial={{ nome: o.nome, hex: o.hex }} rotulo="Guardar opção" criar={false} bloqueado={aGravar || !!pendOpcao}
+                              <OpcaoForm temHex={a.temHex} temFoto={a.temFoto} inicial={{ nome: o.nome, hex: o.hex, foto: o.foto }} rotulo="Guardar opção" criar={false} bloqueado={aGravar || !!pendOpcao}
                                 erro={pendOpcao ? null : msg(`ed:${o.id}`)} idGuardar={`gu-${o.id}`}
                                 onEnviar={(n, h) => onPedirGravar(o, n, h)} onCancelar={() => fechar(`ed-${o.id}`)} />
                               {pendOpcao && <Confirmar p={pendOpcao} aGravar={aGravar} erro={msg(`ed:${o.id}`)} onConfirmar={onConfirmar} onVoltar={onVoltarConfirmar} />}
@@ -487,7 +522,7 @@ function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pen
                     <Plus className="h-4 w-4" aria-hidden="true" />Nova opção…
                   </button>
                 </div>
-                {aCriar && <OpcaoForm temHex={a.temHex} inicial={{ nome: "", hex: null }} rotulo="Criar opção" criar bloqueado={aGravar} erro={msg(`nova:${a.id}`)} idGuardar={`gc-${a.id}`}
+                {aCriar && <OpcaoForm temHex={a.temHex} temFoto={a.temFoto} inicial={{ nome: "", hex: null }} rotulo="Criar opção" criar bloqueado={aGravar} erro={msg(`nova:${a.id}`)} idGuardar={`gc-${a.id}`}
                   onEnviar={(n, h) => onNovaOpcao(a, n, h)} onCancelar={() => fechar(`nova-${a.id}`)} />}
               </div>
             )}

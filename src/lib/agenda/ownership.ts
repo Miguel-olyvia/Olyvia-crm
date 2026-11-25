@@ -46,6 +46,29 @@ export function matchesAssigneeOwner(row: AgendaItemRow, ownerIds: ReadonlySet<s
 }
 
 /**
+ * 20/11/2026 (permissões ecrã/servidor): o filtro «Só a minha» / «Equipa» dos
+ * Agendamentos. A RLS de `schedule_items` deixa ver os itens criados pelo
+ * utilizador (`created_by`) e os com `user_id` dele; o filtro só olhava para os
+ * assignees e escondia-os. Um item conta se algum dos três caminhos (criador,
+ * dono directo, assignee) estiver em `ownerIds` (ids de anew_users).
+ */
+export function matchesScheduleScope(
+  row: {
+    created_by?: string | null;
+    user_id?: string | null;
+    assignees?: ReadonlyArray<{ resource?: { user_id?: string | null } | null } | null> | null;
+  },
+  ownerIds: ReadonlySet<string>
+): boolean {
+  if (typeof row.created_by === "string" && ownerIds.has(row.created_by)) return true;
+  if (typeof row.user_id === "string" && ownerIds.has(row.user_id)) return true;
+  return (row.assignees ?? []).some((a) => {
+    const id = a?.resource?.user_id;
+    return typeof id === "string" && ownerIds.has(id);
+  });
+}
+
+/**
  * Junta listas preservando a ordem da primeira ocorrência e descartando ids
  * repetidos. Um item atribuído ao próprio pelos dois caminhos aparece nas duas
  * listas e tem de sair uma só vez.

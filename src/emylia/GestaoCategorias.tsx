@@ -8,9 +8,9 @@ import { cn } from "@/lib/utils";
 import { NOTA } from "./pecasForm";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { lerCategoriasGestao, type CategoriaGestao, type SubcategoriaGestao } from "./categoriasMarcasGestao";
-import { Acoes, EditarSigla, Renomear, useAcoesCategorias, type Ctx } from "./categoriasAcoes";
+import { Acoes, EditarModelo3D, EditarSigla, FormNovoRamo, Modelo3DTexto, Renomear, useAcoesCategorias, type Ctx } from "./categoriasAcoes";
 import { SiglaTexto } from "./siglasGestao";
-import { BOTAO_TEXTO, CARTAO, EstadoLeitura, FormNome, Razao, Selo, produtos, protegido, useGestaoLista } from "./gestaoPecas";
+import { BOTAO_TEXTO, CARTAO, EstadoLeitura, Razao, Selo, produtos, protegido, useGestaoLista } from "./gestaoPecas";
 
 type Item = SubcategoriaGestao;
 
@@ -34,7 +34,7 @@ export function GestaoCategorias({ real, anunciar }: { real: FichaProdutoReal; a
                 </button>
               </div>
               {aberto?.t === "nova" && aberto.pai === null && (
-                <FormNome rotuloNome="Nome da categoria" inicial="" botao="Criar categoria" aGravar={g.aGravar} erro={g.msg("novo")} idGuardar="gc-novo" onEnviar={(n) => ctx.onCriar(null, n)} onCancelar={() => fechar("novo-categoria")} />
+                <FormNovoRamo pai={null} rotuloNome="Nome da categoria" botao="Criar categoria" aGravar={g.aGravar} erro={g.msg("novo")} idGuardar="gc-novo" onEnviar={(n, m) => ctx.onCriar(null, n, m)} onCancelar={() => fechar("novo-categoria")} />
               )}
             </div>
           )}
@@ -59,12 +59,14 @@ function Categoria({ c, irmas, g }: { c: CategoriaGestao; irmas: Item[]; g: Ctx 
         {c.global && <Selo>Partilhada</Selo>}
         {!c.ativo && <Selo>desativada</Selo>}
         <SiglaTexto sigla={c.sigla} />
+        <Modelo3DTexto modelo={c.modelo3d} />
         {c.usados != null && <span className={NOTA}>{`Usada em ${produtos(c.usados)}`}</span>}
         <Acoes item={c} pai={null} irmas={irmas} g={g} tipo="a categoria" />
       </div>
       {g.msg(`est:${c.id}`) && <p className="mt-2 text-[15px] text-red-700 dark:text-red-400" role="alert">{g.msg(`est:${c.id}`)}</p>}
       <Renomear item={c} pai={null} g={g} />
       <EditarSigla item={c} pai={null} g={g} />
+      <EditarModelo3D item={c} pai={null} g={g} />
       {edita && !c.ativo && c.subcategorias.length > 0 && <p className={cn(NOTA, "mt-2")}>Ao reativar, as subcategorias reativam-se uma a uma.</p>}
 
       {c.subcategorias.length > 0 ? (
@@ -77,6 +79,7 @@ function Categoria({ c, irmas, g }: { c: CategoriaGestao; irmas: Item[]; g: Ctx 
                   <span className={cn("min-w-0 break-words text-[15px] font-medium", !s.ativo && "text-muted-foreground")}>{s.nome}{!s.ativo && " (desativada)"}</span>
                   {s.global && <Selo>Partilhada</Selo>}
                   <SiglaTexto sigla={s.sigla} />
+                  <Modelo3DTexto modelo={s.modelo3d} />
                   {s.usados != null && <span className="text-sm text-muted-foreground">{produtos(s.usados)}</span>}
                   <Acoes item={s} pai={c} irmas={subsEditaveis} g={g} tipo="a subcategoria" />
                 </div>
@@ -84,6 +87,7 @@ function Categoria({ c, irmas, g }: { c: CategoriaGestao; irmas: Item[]; g: Ctx 
                 {g.msg(`est:${s.id}`) && <p className="mt-2 text-[15px] text-red-700 dark:text-red-400" role="alert">{g.msg(`est:${s.id}`)}</p>}
                 <Renomear item={s} pai={c} g={g} />
                 <EditarSigla item={s} pai={c} g={g} />
+                <EditarModelo3D item={s} pai={c} g={g} />
               </li>
             );
           })}
@@ -100,7 +104,7 @@ function Categoria({ c, irmas, g }: { c: CategoriaGestao; irmas: Item[]; g: Ctx 
             {c.ativo && <Razao id={`rz-novag-${c.id}`}>{g.aGravar ? "A guardar…" : null}</Razao>}
           </div>
           {!c.ativo && <p id={`rz-nova-${c.id}`} className={NOTA}>Reative a categoria para criar subcategorias.</p>}
-          {aCriar && <FormNome rotuloNome="Nome da subcategoria" inicial="" botao="Criar subcategoria" aGravar={g.aGravar} erro={g.msg(`nova:${c.id}`)} idGuardar={`gc-${c.id}`} onEnviar={(n) => g.onCriar(c, n)} onCancelar={() => g.fechar(`nova-${c.id}`)} />}
+          {aCriar && <FormNovoRamo pai={c} rotuloNome="Nome da subcategoria" botao="Criar subcategoria" aGravar={g.aGravar} erro={g.msg(`nova:${c.id}`)} idGuardar={`gc-${c.id}`} onEnviar={(n, m) => g.onCriar(c, n, m)} onCancelar={() => g.fechar(`nova-${c.id}`)} />}
         </div>
       )}
     </article>

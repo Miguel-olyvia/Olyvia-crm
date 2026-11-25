@@ -15,7 +15,7 @@ import { porEncomendarDe } from "../encomendasAjuste";
 import { custosDosMateriais } from "../preparacaoObra";
 import { enviosDe } from "../trabalhoObra";
 import { fimDe } from "../ajustesPlano";
-import { estadoVivo, feitoDe } from "./planoVivo";
+import { antecessoras, estadoVivo, nomeCurtoTarefa, feitoDe } from "./planoVivo";
 
 const r2 = (x: number) => Math.round(x * 100) / 100;
 
@@ -101,7 +101,8 @@ export function caminhoCritico(p: Plano): Set<number> {
   const T = p.tasks, N = T.length, fim = fimDe(T);
   const ef = T.map((t) => t.dia + t.dur);
   const succ: { s: number; lag: number }[][] = T.map(() => []);
-  T.forEach((t, i) => T.forEach((x, j) => { if (j !== i && x.dia < t.dia && x.dia + x.dur <= t.dia + 1) succ[j].push({ s: i, lag: t.dia - (x.dia + x.dur) }); }));
+  // 23/11: as ligações das datas (menos as tiradas) e as postas à mão (planoVivo.ts: antecessoras)
+  T.forEach((t, i) => { const mao = new Set(t.deps ?? []); for (const j of antecessoras(T, i)) succ[j].push({ s: i, lag: mao.has(j) ? Math.max(0, t.dia - (T[j].dia + T[j].dur)) : t.dia - (T[j].dia + T[j].dur) }); });
   const lf = new Array(N).fill(fim);
   const ordem = T.map((_, i) => i).sort((a, b) => T[b].dia - T[a].dia);
   for (const j of ordem) {
@@ -133,12 +134,37 @@ export function hojeNaObra(p: Plano): HojeNaObra {
 }
 
 /* ------------------------------------------------------------------ o diário */
+/** As linhas do anular e refazer do Estúdio da obra (motor.ts: reporPlanoObra). */
+export const LINHA_DE_PASSO = /^(Anulado|Refeito): /;
+/** 23/11 (revisão: «um par anular+refazer que se anula não deve encher o diário»): cada sequência seguida de «Anulado: …» e «Refeito: …»
+ *  fica numa só linha («3 mudanças anuladas e refeitas»). Na leitura: o diário gravado não muda (a base só acrescenta). */
+export function juntarPassos<T extends { t: string; k: string }>(L: T[]): T[] {
+  const out: T[] = [];
+  for (let i = 0; i < L.length; i++) {
+    if (!LINHA_DE_PASSO.test(L[i].t)) { out.push(L[i]); continue; }
+    let j = i;
+    while (j + 1 < L.length && LINHA_DE_PASSO.test(L[j + 1].t)) j++;
+    const run = L.slice(i, j + 1), an = run.filter((e) => e.t.startsWith("Anulado: ")).map((e) => e.t.slice(9)), re = run.filter((e) => e.t.startsWith("Refeito: ")).map((e) => e.t.slice(9));
+    const sobra = [...an];
+    for (const x of re) { const k = sobra.indexOf(x); if (k >= 0) sobra.splice(k, 1); }
+    const pares = an.length - sobra.length, m = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
+    const partes = [
+      ...(pares ? [m(pares, "mudança anulada e refeita", "mudanças anuladas e refeitas")] : []),
+      ...(sobra.length ? [sobra.length === 1 && !pares ? `Anulado: ${sobra[0]}` : m(sobra.length, "anulada", "anuladas")] : []),
+      ...(re.length > pares ? [m(re.length - pares, "refeita", "refeitas")] : []),
+    ];
+    const so1 = sobra.length === 1 && !pares && re.length === pares;
+    out.push({ ...run[run.length - 1], t: so1 ? partes[0] : `No plano: ${partes.join("; ")}${!sobra.length && re.length === pares ? " (ficou igual)" : ""}` });
+    i = j;
+  }
+  return out;
+}
 export interface EntradaFeed { q: string; quem: string; t: string; k: string; fotos: string[]; ordem: number }
 /** O diário da obra, do mais recente para o mais antigo: o diário (registos, validações, imprevistos, ajustes) e, nas obras sem diário
  *  (as de exemplo), os registos das tarefas. */
 export function diarioDaObra(d: Negocio): EntradaFeed[] {
   const p = d.obra.plano;
-  const L: EntradaFeed[] = (d.obra.diario ?? []).map((e, i) => ({ q: e.q, quem: e.quem, t: e.t, k: e.k, fotos: e.fotos ?? [], ordem: i }));
+  const L: EntradaFeed[] = juntarPassos((d.obra.diario ?? []).map((e, i) => ({ q: e.q, quem: e.quem, t: e.t, k: e.k, fotos: e.fotos ?? [], ordem: i })));
   // os registos das tarefas que não estão no diário (pelo texto não se sabe; usa-se a data e a pessoa)
   if (p) for (const t of p.tasks) for (const e of enviosDe(t)) {
     if (L.some((x) => x.q === e.q && x.quem === e.quem)) continue;
@@ -171,7 +197,7 @@ export function antesEDepois(d: Negocio): { antes: string; depois: string } | nu
  *  seguir e quando acaba. `dataDe` dá a data de um índice de dia. */
 export function pontoDaSemana(p: Plano, dataDe: (k: number) => string): string {
   const hoje = p.estado === "em curso" ? p.dia : 0;
-  const nomes = (L: Tarefa[]) => L.map((t) => t.nome.toLowerCase()).join(", ").replace(/, ([^,]*)$/, " e $1");
+  const nomes = (L: Tarefa[]) => [...new Set(L.map((t) => nomeCurtoTarefa(t.nome).toLowerCase()))].join(", ").replace(/, ([^,]*)$/, " e $1");
   const feitas = p.tasks.filter((t) => { const v = estadoVivo(t, p); return (v === "validada" || v === "feita") && enviosDe(t).some((e) => e.dia >= hoje - 4); });
   const decorrer = p.tasks.filter((t) => { const v = estadoVivo(t, p); return v === "em curso" || v === "hoje" || v === "atrasada" || v === "corrigir"; });
   const seguir = p.tasks.filter((t) => t.dia > hoje && t.dia <= hoje + 5 && estadoVivo(t, p) === "por começar");

@@ -22,6 +22,9 @@ import {
 import { podeCriarTipo, usePermissoesCatalogo } from "./permissoesCatalogo";
 import { AtributosCriar } from "./AtributosProduto";
 import { PreviaSku } from "./PreviaSku";
+import { Modelo3DProduto } from "./Modelo3DProduto";
+import { CampoModelo3D } from "./CampoModelo3D";
+import { resolverDoNo } from "./planta3d/modelos3dEscolha";
 import { CampoFornecedor, fornecedorParaModelo } from "./CampoFornecedor";
 import { FORNECEDOR_VAZIO, type FornecedorEscolhido } from "./fornecedoresCatalogo";
 import { CampoMarca, CamposRamo, RAMO_VAZIO } from "./ClassificacaoProduto";
@@ -57,7 +60,7 @@ function Secao({ i, titulo, texto, children }: { i: number; titulo: string; text
   );
 }
 /** Procurar e juntar: escreve-se, aparecem até 8 resultados, Enter ou toque junta. */
-function Procurar({ rot, ph, opcoes, onEscolher }: { rot: string; ph: string; opcoes: { v: string; t: string; sub?: string }[]; onEscolher: (v: string) => void }) {
+export function Procurar({ rot, ph, opcoes, onEscolher }: { rot: string; ph: string; opcoes: { v: string; t: string; sub?: string }[]; onEscolher: (v: string) => void }) {
   const [q, setQ] = useState("");
   const [aberto, setAberto] = useState(false);
   const [ativo, setAtivo] = useState(0);
@@ -375,9 +378,12 @@ function FormServico({ S, C, K, onCriado }: { S: Estado; C: Custos; K: Catalogo;
 /** `duplicado` (17/11): numa página que não tem todos os produtos em memória, pergunta à base se o nome ou a referência já existem (devolve a frase de recusa, ou null).
  *  `semServico`: a página não tem os serviços; sem a secção «O serviço que traz». */
 export interface OpcoesCriarProduto { duplicado?: (o: { n: string; sku: string }) => Promise<string | null>; semServico?: boolean;
+  /** 23/11: os serviços a escolher em «O serviço que traz», quando a página não tem o Catálogo dos serviços (v = o id da base, que se grava em products.servico_id).
+   *  Sem eles, a lista é a do motor (S.svc e o Catálogo todo). */
+  servicos?: readonly { v: string; t: string; sub?: string }[];
   /** O texto do botão enquanto quem chama grava ou relê (desativa-o). */
   ocupado?: string }
-function FormProduto({ S, K, real, onCriado, duplicado, semServico, ocupado }: { S: Estado; K: Catalogo; real?: FichaProdutoReal; onCriado: (id: string, nome: string) => void } & OpcoesCriarProduto) {
+function FormProduto({ S, K, real, onCriado, duplicado, semServico, servicos: servicosDados, ocupado }: { S: Estado; K: Catalogo; real?: FichaProdutoReal; onCriado: (id: string, nome: string) => void } & OpcoesCriarProduto) {
   const [estado, setEstado] = useState<EstadoProduto>("active"), [aVerificar, setAVerificar] = useState(false);
   const [nome, setNome] = useState(""), [marca, setMarca] = useState(""), [sku, setSku] = useState(""), [forn, setForn] = useState<FornecedorEscolhido>(FORNECEDOR_VAZIO);
   const [un, setUn] = useState("un"), [custo, setCusto] = useState(""), [pvp, setPvp] = useState(""), [desc, setDesc] = useState("");
@@ -400,15 +406,19 @@ function FormProduto({ S, K, real, onCriado, duplicado, semServico, ocupado }: {
   const [img, setImg] = useState<IlustracaoKey | null>(null);
   const [verImg, setVerImg] = useState(false);
   const [attrs, setAttrs] = useState<AtributoProduto[]>([]);
+  // 24/11: o «Modelo 3D» escolhido neste produto (null: herda da subcategoria, da categoria ou do classificador)
+  const [modelo3d, setModelo3d] = useState<string | null>(null);
+  const idModelo3D = useId();
   const servicos = useMemo(() => {
+    if (servicosDados) return [...servicosDados];
     const m = new Map<string, { v: string; t: string; sub: string }>();
     for (const [sid, s] of Object.entries(S.svc)) m.set(sid, { v: sid, t: s.n, sub: s.perfil });
     for (const c of CATALOGO_TODO) if (!m.has(c.id)) m.set(c.id, { v: c.id, t: c.n, sub: c.cat });
     return [...m.values()];
-  }, [S.svc, K]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [S.svc, K, servicosDados]); // eslint-disable-line react-hooks/exhaustive-deps
   const nomeSvc = servico ? servicos.find((x) => x.v === servico)?.t ?? servico : null;
   const nomeModelo = modelo.novo ?? K.modelos?.find((m) => m.id === modelo.id)?.n ?? "";
-  const o = { n: nome, custo: n(custo), un, marca, ...fornecedorParaModelo(forn), no: no || null, sku, pvp: pvp.trim() ? n(pvp) : null, desc, servico, ...(img ? { img } : {}), ...(attrs.length ? { attrs } : {}), ...(real ? { estado } : {}),
+  const o = { n: nome, custo: n(custo), un, marca, ...fornecedorParaModelo(forn), no: no || null, sku, pvp: pvp.trim() ? n(pvp) : null, desc, servico, ...(img ? { img } : {}), ...(attrs.length ? { attrs } : {}), ...(real ? { estado } : {}), ...(real && modelo3d ? { modelo3d } : {}),
     ...(modelo.id ? { modeloId: modelo.id } : {}), ...(modelo.novo ? { modeloNovo: modelo.novo } : {}) };
   const faltas = faltasProduto(K, o);
   const venda = precoVendaProduto(n0(custo), o.pvp, S.cfg.alvo), m = venda > 0 ? (venda - n0(custo)) / venda : 0;
@@ -465,6 +475,12 @@ function FormProduto({ S, K, real, onCriado, duplicado, semServico, ocupado }: {
           <AtributosCriar defs={K.atributos} onChange={setAttrs} real={real} />
           {/* 16/11: o SKU que se geraria (cat_prever_sku): só na página real, e só enquanto a referência está vazia */}
           <PreviaSku real={real} categoria={nomeCat} subcategoria={nomeSub} categoriaNova={!!ramo.catNova || !!ramo.subNova} attrs={attrs} defs={K.atributos} manual={!!sku.trim()} modeloId={modelo.id || null} modeloNovo={!!modelo.novo} />
+          {/* 23/11: o 3D que o catálogo daria ao produto (só para ver): fechado até se pedir; o nome, a subcategoria e a Medida e a Cor dos atributos entram nele */}
+          <section aria-labelledby={idModelo3D} className="grid gap-2 border-t border-border pt-4">
+            <h3 id={idModelo3D} className="text-[15px] font-semibold">Modelo 3D</h3>
+            {real && <CampoModelo3D valor={modelo3d} heranca={resolverDoNo({ arvore: arvoreCria, no: no || null, soHerdado: true })} onChange={setModelo3d} nivel="produto" />}
+            <Modelo3DProduto nome={nome} sub={nomeSub} no={no || null} arvore={arvoreCria} attrs={attrs} defs={K.atributos} modelo3d={real ? modelo3d : null} />
+          </section>
         </Secao>
         <Secao i={2} titulo="Compra e venda">
           <div className="grid gap-1.5"><span className="text-[15px] font-medium">Unidade</span><Chips rot="Unidade do produto" opcoes={unidades.map((u) => [u, u] as const)} v={un} set={setUn} /></div>

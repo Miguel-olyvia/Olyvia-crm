@@ -8,18 +8,11 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CAMPO, NOTA, Campo, Chips, Num, Retirar } from "./pecasForm";
 import { ListaFlutuante } from "./listaFlutuante";
+import { AmostraOpcao } from "./AmostraOpcao";
 import { DIMENSOES_1D, dimensaoParaTexto, dimensaoVazia, errosDimensao, lerDimensao, mesmosAtributos, normalizarHex, resumoAtributos, rotuloValor1D, textoMedida, textoValor, type DimensaoTexto } from "./atributosTexto";
 import { criarOpcaoAtributo, gravarAtributos, type FichaProdutoReal } from "./fichaProdutoDados";
 import { mudarCatalogo } from "./v2/catalogoStore";
 import type { AtributoDef, AtributoProduto, DimensaoUnica, MedidaAtributo, OpcaoAtributo, Produto } from "./v2/catalogoModelo";
-
-/** O quadrado da cor. Sem hex: neutro, a tracejado. Nunca está sozinho: o nome e o hex vêm escritos ao lado. */
-export function Amostra({ hex, testId }: { hex: string | null; testId?: string }) {
-  return (
-    <span aria-hidden="true" data-testid={testId} data-hex={hex ?? ""} style={hex ? { backgroundColor: hex } : undefined}
-      className={cn("inline-block h-6 w-6 shrink-0 rounded-md", hex ? "border border-foreground/20" : "border border-dashed border-muted-foreground/60")} />
-  );
-}
 
 /* ------------------------------------------------------------------ o que está escolhido, ainda por validar */
 type Unidade = "cm" | "mm";
@@ -100,7 +93,8 @@ function NovaOpcao({ def, org, nomeInicial = "", aoCriar, fechar }: { def: Atrib
   const msgHex = useId();
   const hexOk = def.temHex ? normalizarHex(hex) : null;
   const hexErrado = def.temHex && hex.trim() !== "" && !hexOk;
-  const pode = !!nome.trim() && (!def.temHex || !!hexOk) && !aGravar;
+  // num atributo com foto o hex é opcional (a foto adiciona-se na gestão dos atributos); escrito, tem de estar bem
+  const pode = !!nome.trim() && (!def.temHex || !!hexOk || (!!def.temFoto && hex.trim() === "")) && !aGravar;
   const criar = async () => {
     setAGravar(true); setErro(null);
     const r = await criarOpcaoAtributo(org, def.id, nome.trim(), hexOk);
@@ -115,10 +109,10 @@ function NovaOpcao({ def, org, nomeInicial = "", aoCriar, fechar }: { def: Atrib
       <div className="grid gap-3 sm:grid-cols-2">
         <Campo rot="Nome da opção">{(id) => <input id={id} value={nome} onChange={(e) => setNome(e.target.value)} className={CAMPO} autoFocus />}</Campo>
         {def.temHex && (
-          <Campo rot="Cor em hexadecimal (#RRGGBB)" dica="Obrigatório nas cores. Ex.: #1A2B3C">{(id) => (
+          <Campo rot="Cor em hexadecimal (#RRGGBB)" dica={def.temFoto ? "Opcional: a foto da opção adiciona-se na gestão dos atributos. Ex.: #1A2B3C" : "Obrigatório nas cores. Ex.: #1A2B3C"}>{(id) => (
             <>
               <span className="flex items-center gap-2">
-                <Amostra hex={hexOk} testId="amostra-nova" />
+                <AmostraOpcao hex={hexOk} nome={nome} testId="amostra-nova" />
                 <input id={id} value={hex} onChange={(e) => setHex(e.target.value)} placeholder="#RRGGBB" maxLength={7} autoCapitalize="off" spellCheck={false}
                   aria-invalid={hexErrado} aria-describedby={hexErrado ? msgHex : undefined} className={cn(CAMPO, "tabular-nums")} />
               </span>
@@ -142,7 +136,7 @@ function NovaOpcao({ def, org, nomeInicial = "", aoCriar, fechar }: { def: Atrib
 /** Escreve-se sem acentos nem maiúsculas. */
 const semAcentos = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 /** A opção escolhida: pode ser uma que a lista já não traz (desativada). */
-interface Escolhida { id: string; nome: string; hex: string | null; inativa: boolean }
+interface Escolhida { id: string; nome: string; hex: string | null; foto?: string | null; inativa: boolean }
 type Item = { k: "opcao"; o: OpcaoAtributo } | { k: "nova" };
 
 /** Dropdown com pesquisa em texto (combobox, padrão ARIA 1.2: input role=combobox, listbox de options, aria-activedescendant). Setas, Home, End,
@@ -191,7 +185,7 @@ function ComboOpcao({ rotulo, atributoId, opcoes, temHex, atual, onEscolher, onN
   };
   return (
     <div ref={caixa} className="relative">
-      {temHex && atual && q === null && <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"><Amostra hex={atual.hex} /></span>}
+      {temHex && atual && q === null && <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2"><AmostraOpcao foto={atual.foto} hex={atual.hex} nome={atual.nome} /></span>}
       <input ref={entradaRef} type="text" role="combobox" aria-label={rotulo} aria-expanded={aberto} aria-controls={aberto ? lid : undefined} aria-autocomplete="list"
         aria-activedescendant={ativoId} autoComplete="off" spellCheck={false} value={valor} placeholder="Escolher ou escrever para procurar"
         onClick={(e) => { if (aberto) fechar(); else abrir(e.currentTarget); }} onFocus={(e) => e.currentTarget.select()} onChange={(e) => { setQ(e.target.value); setAberto(true); setAtivo(0); }} onBlur={fechar} onKeyDown={onKeyDown}
@@ -209,8 +203,8 @@ function ComboOpcao({ rotulo, atributoId, opcoes, temHex, atual, onEscolher, onN
               {i.k === "nova"
                 ? <><Plus className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />Nova opção…</>
                 : <>
-                  {temHex && <Amostra hex={i.o.hex} />}
-                  <span className="min-w-0 flex-1">{i.o.nome || i.o.valor}{temHex && <>{" "}<span className="text-sm text-muted-foreground tabular-nums">{i.o.hex ?? "sem hex"}</span></>}{atual?.id === i.o.id && <>{" "}<span className="sr-only">(escolhida)</span></>}</span>
+                  {temHex && <AmostraOpcao foto={i.o.foto} hex={i.o.hex} nome={i.o.nome || i.o.valor} />}
+                  <span className="min-w-0 flex-1">{i.o.nome || i.o.valor}{temHex && (i.o.hex || !i.o.foto) && <>{" "}<span className="text-sm text-muted-foreground tabular-nums">{i.o.hex ?? "sem hex"}</span></>}{atual?.id === i.o.id && <>{" "}<span className="sr-only">(escolhida)</span></>}</span>
                   {atual?.id === i.o.id && <Check className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />}
                 </>}
             </li>
@@ -247,7 +241,7 @@ export function AtributosEditor({ defs, inicial, onChange, real, vazio }: {
         if (!d) return null;
         // a opção atual: a da lista, ou (desativada) uma que a lista já não traz, que fica escolhida e à vista
         const na = L.opcao ? d.opcoes.find((o) => o.id === L.opcao) : undefined;
-        const atual: Escolhida | null = L.opcao ? { id: L.opcao, nome: na ? na.nome || na.valor : L.texto, hex: na?.hex ?? null, inativa: !na && L.inativa } : null;
+        const atual: Escolhida | null = L.opcao ? { id: L.opcao, nome: na ? na.nome || na.valor : L.texto, hex: na?.hex ?? null, foto: na?.foto ?? null, inativa: !na && L.inativa } : null;
         return (
           <div key={d.id} className="grid gap-2 rounded-xl bg-muted/50 p-3">
             <div className="flex items-center justify-between gap-2">
@@ -328,13 +322,13 @@ export function AtributosFicha({ p, defs, real, anunciar }: { p: Produto; defs: 
       if (!d) return [];
       const o = d.opcoes.find((x) => x.id === a.opcaoId);
       const t = textoValor(d, a) + (a.inativa ? " (desativada)" : "");
-      return t ? [{ d, t, hex: d.temHex ? o?.hex ?? null : undefined }] : [];
+      return t ? [{ d, t, hex: d.temHex ? o?.hex ?? null : undefined, foto: d.temHex ? o?.foto ?? null : null }] : [];
     });
     return L.length ? (
       <ul className="mt-3 grid gap-1.5">
-        {L.map(({ d, t, hex }) => (
+        {L.map(({ d, t, hex, foto }) => (
           <li key={d.id} className="flex items-center gap-2 text-[15px]">
-            {hex !== undefined && <Amostra hex={hex} />}<span>{d.nome}: {t}</span>{hex && <span className="text-sm text-muted-foreground tabular-nums">{hex}</span>}
+            {hex !== undefined && <AmostraOpcao foto={foto} hex={hex} nome={t} />}<span>{d.nome}: {t}</span>{hex && <span className="text-sm text-muted-foreground tabular-nums">{hex}</span>}
           </li>
         ))}
       </ul>

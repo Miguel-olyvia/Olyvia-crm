@@ -160,7 +160,7 @@ describe("o mesmo dado no Hoje do técnico e no Estúdio da obra", () => {
     expect(terminadasDe(p)).toMatch(/· \d+ por validar$/);
     S.role = "operacoes";
     render(<EstudioObra ctx={ctxDe(S)} d={d} fechar={() => {}} />);
-    expect(screen.getByRole("button", { name: /Validar (a tarefa feita|\d+ tarefas feitas)/ })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /Validar (a tarefa feita|\d+ tarefas feitas)/ }).length).toBeGreaterThan(0); // no topo e na barra do polegar
     expect(screen.getAllByText(/terminadas? · \d+ por validar/).length).toBeGreaterThan(0);
   });
 

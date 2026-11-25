@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { useSearchParams, Link, useNavigate } from "react-router-dom";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
@@ -41,6 +41,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { InventarioEmbebido, useAvisosInventario } from "@/components/inventory/ui/embebido";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
 import { Badge } from "@/components/ui/badge";
@@ -72,7 +73,6 @@ import {
   BlockedButton,
   DisabledReason,
   DocumentLink,
-  InventoryPageHeader,
   InventoryStatusBadge,
   clientOrdersLink,
   suppliersLink,
@@ -85,6 +85,8 @@ import { PoKpis, PO_VALUE_PERMISSION } from "@/components/purchase-orders/PoKpis
 import { poVista, PO_VISTA_ANULACOES, PO_VISTA_ENCOMENDAS, PO_VISTA_LINHAS } from "@/components/purchase-orders/poVistas";
 import { PoPortalPill, PoShippedPill, PoStatusBadge, PoStatusPills } from "@/components/purchase-orders/PoStatusPills";
 import { PoRowActions, RECEIVE_LABEL, RECEIVE_NAV_PERMS } from "@/components/purchase-orders/PoRowActions";
+// Dentro da moldura do novo Inventário: barra + chips + cartões (V.enc do artefacto); fora dela nada muda.
+import { PoCabecalho, PoCartoes, PoFiltrosAvancados, PoValorPorReceber, poEtapa, poPagamentoTexto, poPortalLinha, type PoCartao, type PoVistaEmbebida } from "@/components/purchase-orders/PoCartoes";
 // Ficha da PO como no Olyvia 2.0: linha de etapas, passo da Receção, Histórico, cartão do portal e bloqueios.
 import { PoFlowTimeline, PoReceptionNext } from "@/components/purchase-orders/PoFlowTimeline";
 import { PoHistoryTab } from "@/components/purchase-orders/PoHistoryTab";
@@ -528,6 +530,10 @@ const PurchaseOrders = () => {
   const [pendingClientOrderLines, setPendingClientOrderLines] = useState<{ product_id: string; quantity: number }[]>([]);
   const [clientOrderLinesLoading, setClientOrderLinesLoading] = useState(false);
   const { toast } = useToast();
+  const avisos = useAvisosInventario(); // só dentro do novo Inventário; fora é null
+  // Dentro da moldura do novo Inventário: cartões por omissão, com "Tabela" para a lista clássica tal como está.
+  const embebido = useContext(InventarioEmbebido);
+  const [vistaEmbebida, setVistaEmbebida] = useState<PoVistaEmbebida>("cartoes");
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { hasPermission } = usePermissions();
   // 18/11: "Passar para stock" e "Reverter receção" no diálogo da PO recebida — sem as duas
@@ -1410,6 +1416,7 @@ const PurchaseOrders = () => {
       toast({
         title: t('purchaseOrders.toast.deleteSuccess'),
       });
+      avisos?.("eliminado", { tipo: "po", id, rotulo: orders.find((o) => o.id === id)?.order_number ?? null });
 
       loadData();
       return true;
@@ -3009,6 +3016,65 @@ const PurchaseOrders = () => {
   // mesmas condições e permissões. Em "Ver eliminados" a linha não abre (antes
   // também não havia forma de abrir uma eliminada) — só Restaurar.
   // showSupplier=false só é usado dentro do grupo expandido (tabela aninhada).
+  // As ações de uma encomenda (PoRowActions) — as mesmas na linha da tabela e no cartão da moldura.
+  const renderRowActions = (order: PurchaseOrder) => (
+    <PoRowActions
+      order={order}
+      deleted={showDeleted}
+      onOpen={() => handleEdit(order)}
+      onApproveSend={() => {
+        setSendTarget({ id: order.id, order_number: order.order_number, supplierName: order.suppliers?.name ?? null });
+        setSendConfirmOpen(true);
+      }}
+      onReceive={() => receiveOrder(order)}
+      onPdf={() => handleGeneratePDF(order.id)}
+      onCancelRemainder={() => openPoOrderCancelFromList(order)}
+      onRevert={() => openRevertDialog(order)}
+      onEdit={() => handleEdit(order)}
+      onDelete={() => handleDelete(order.id)}
+      onRestore={() => handleRestore(order.id)}
+      revertLabel={t('purchaseOrders.revert.action') || "Reverter receção"}
+      restoreLabel={t('purchaseOrders.restore') || 'Restaurar'}
+    />
+  );
+
+  // Origem do cartão: a mesma resolução e a mesma ligação de renderOrderOrigin (null = Stock).
+  const origemDoCartao = (order: PurchaseOrder): PoCartao["origem"] => {
+    if ((order as any).source_type !== "contract" || !(order as any).source_id) return null;
+    const contractId: string = (order as any).source_id;
+    const info = listOriginByContract[contractId];
+    if (!info) return { rotulo: "—", dica: "", ligacao: null };
+    const label = info.clientName ? `${info.number} · ${info.clientName}` : info.number;
+    const dica = info.originType === "contract"
+      ? `${t('purchaseOrders.origin.contract', { number: info.number }) || `Contrato ${info.number}`}${info.clientName ? ` — ${info.clientName}` : ""}`
+      : label;
+    return { rotulo: label, dica, ligacao: clientOrdersLink({ open: contractId }) };
+  };
+
+  // Cartão da moldura (V.enc do artefacto): os mesmos dados que a linha da tabela mostra.
+  const cartaoDaPo = (order: PurchaseOrder): PoCartao => {
+    const late = isPoLate(order, todayIso);
+    const shipment = activeShipment(order, poShipments);
+    const publication = poPublications.get(order.id);
+    return {
+      id: order.id,
+      numero: order.order_number,
+      fornecedor: order.suppliers?.name || "N/A",
+      automatica: isPoAutoGenerated(order),
+      estado: order.status,
+      rotuloEstado: getStatusLabel(order.status),
+      eliminada: showDeleted,
+      diasAtraso: late && order.expected_delivery ? poDaysLate(order.expected_delivery, todayIso) : null,
+      etapa: poEtapa(order.status, publication?.status ?? null, !!shipment),
+      origem: origemDoCartao(order),
+      dataEncomenda: order.order_date ? formatPoDate(order.order_date) : null,
+      entrega: order.expected_delivery ? formatPoDate(order.expected_delivery) : null,
+      portal: poPortalLinha(publication, shipment),
+      valor: precoPo(formatEur(order.total_value)),
+      pagamento: poPagamentoTexto(order.payment_terms_days, order.payment_due_date ? formatPoDate(order.payment_due_date) : null),
+    };
+  };
+
   const renderOrderRow = (order: PurchaseOrder, showSupplier: boolean) => {
     const late = isPoLate(order, todayIso);
     const canOpen = !showDeleted && canOpenOrderDialog;
@@ -3062,24 +3128,7 @@ const PurchaseOrders = () => {
         </TableCell>
         <TableCell className={`text-right ${stickyActionsClass(!showSupplier)}`}>
           <div className="flex justify-end">
-            <PoRowActions
-              order={order}
-              deleted={showDeleted}
-              onOpen={openOrder}
-              onApproveSend={() => {
-                setSendTarget({ id: order.id, order_number: order.order_number, supplierName: order.suppliers?.name ?? null });
-                setSendConfirmOpen(true);
-              }}
-              onReceive={() => receiveOrder(order)}
-              onPdf={() => handleGeneratePDF(order.id)}
-              onCancelRemainder={() => openPoOrderCancelFromList(order)}
-              onRevert={() => openRevertDialog(order)}
-              onEdit={() => handleEdit(order)}
-              onDelete={() => handleDelete(order.id)}
-              onRestore={() => handleRestore(order.id)}
-              revertLabel={t('purchaseOrders.revert.action') || "Reverter receção"}
-              restoreLabel={t('purchaseOrders.restore') || 'Restaurar'}
-            />
+            {renderRowActions(order)}
           </div>
         </TableCell>
       </TableRow>
@@ -3240,7 +3289,46 @@ const PurchaseOrders = () => {
             de sempre (FAQ, Exportar, Importar, Nova encomenda) com os mesmos
             PermissionGate; "Ver eliminados" passou para o cartão de filtros.
             Os diálogos de importar/encomenda continuam aqui (abrem em portal). */}
-        <InventoryPageHeader
+        {/* Dentro da moldura do novo Inventário (PoCabecalho): sem título (a moldura já o tem) — a barra do artefacto
+            com a pesquisa, "Filtros", estas mesmas ações e o alternador Cartões/Tabela. Fora dela: o cabeçalho de sempre. */}
+        <PoCabecalho
+          embebido={embebido}
+          barra={{
+            pesquisa: searchQuery,
+            aoPesquisar: setSearchQuery,
+            vista: vistaEmbebida,
+            aoMudarVista: setVistaEmbebida,
+            filtrosAtivos:
+              (supplierFilter !== "all" ? 1 : 0) + (dateFrom ? 1 : 0) + (dateTo ? 1 : 0) + (showDeleted ? 1 : 0),
+            filtros: (
+              <PoFiltrosAvancados
+                fornecedores={suppliers}
+                fornecedor={supplierFilter}
+                aoFornecedor={setSupplierFilter}
+                campoData={dateFilterField}
+                aoCampoData={setDateFilterField}
+                de={dateFrom}
+                ate={dateTo}
+                aoDe={setDateFrom}
+                aoAte={setDateTo}
+                verEliminados={showDeleted}
+                aoVerEliminados={setShowDeleted}
+                agrupar={listViewMode === 'grouped'}
+                aoAgrupar={(checked) => changeListViewMode(checked ? 'grouped' : 'all')}
+                temFiltros={hasActiveOrderFilters}
+                limpar={clearOrderFilters}
+                rotulos={{
+                  fornecedor: t('purchaseOrders.filters.supplier'),
+                  campoData: t('purchaseOrders.filters.dateField'),
+                  campoDataEncomenda: t('purchaseOrders.filters.dateFieldOrder'),
+                  campoDataEntrega: t('purchaseOrders.filters.dateFieldDelivery'),
+                  verEliminados: t('purchaseOrders.showDeleted') || 'Ver eliminados',
+                  agrupar: t('purchaseOrders.view.grouped') || 'Agrupar por fornecedor',
+                  limpar: t('purchaseOrders.filters.clear'),
+                }}
+              />
+            ),
+          }}
           area="purchases"
           title="Encomendas a fornecedor"
           description="Rascunhos gerados pelas Encomendas Clientes ou criados à mão, aprovação, portal do fornecedor e receção — numa só lista. Todas as linhas abrem, incluindo recebidas."
@@ -3248,7 +3336,7 @@ const PurchaseOrders = () => {
           <>
             <PageFAQSheet pageKey="operations.purchaseOrders" />
             <PermissionGate permission="purchase_orders.export">
-              <Button variant="outline" onClick={handleExport}>
+              <Button variant={embebido ? "ghost" : "outline"} onClick={handleExport}>
                 <Download className="w-4 h-4 mr-2" />
                 {t('purchaseOrders.export')}
               </Button>
@@ -3256,7 +3344,7 @@ const PurchaseOrders = () => {
             <PermissionGate permission="purchase_orders.import">
               <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
                 <DialogTrigger asChild>
-                  <Button variant="outline">
+                  <Button variant={embebido ? "ghost" : "outline"}>
                     <Upload className="w-4 h-4 mr-2" />
                     {t('purchaseOrders.import')}
                   </Button>
@@ -4128,6 +4216,48 @@ const PurchaseOrders = () => {
           }
         />
 
+        {embebido && vistaEmbebida === "cartoes" ? (
+          // Moldura do novo Inventário, vista Cartões: os KPIs ficam nos chips (Pendente = Por aprovar, Encomendado,
+          // Atrasadas) e na linha "Valor por receber"; os filtros avançados no botão "Filtros" da barra; a nota no «i».
+          <PoCartoes
+            cartoes={filteredOrders.map(cartaoDaPo)}
+            grupos={
+              listViewMode === 'grouped'
+                ? supplierGroups.map((g) => ({ chave: g.key, nome: g.supplierName, cartoes: g.orders.map(cartaoDaPo) }))
+                : null
+            }
+            estado={statusFilterValue}
+            aoFiltrarEstado={setStatusFilterValue}
+            contagens={statusPillCounts}
+            abrir={
+              !showDeleted && canOpenOrderDialog
+                ? (id) => {
+                    const order = filteredOrders.find((o) => o.id === id);
+                    if (order) handleEdit(order);
+                  }
+                : null
+            }
+            acoes={(id) => {
+              const order = filteredOrders.find((o) => o.id === id);
+              return order ? renderRowActions(order) : null;
+            }}
+            valorPorReceber={<PoValorPorReceber organizationId={activeCompany.id} reloadSignal={orders} />}
+            nota={
+              <>
+                “Recebida” nunca se escolhe à mão e “Parcialmente recebida” é calculado pelas receções. Passar a
+                Encomendado exige <span className="font-mono">purchase_orders.approve</span>.
+              </>
+            }
+            temFiltros={hasActiveOrderFilters}
+            limpar={clearOrderFilters}
+            textos={{
+              semResultados: t('purchaseOrders.filters.noResults'),
+              semEncomendas: t('purchaseOrders.noOrders'),
+              limpar: t('purchaseOrders.filters.clear'),
+            }}
+          />
+        ) : (
+        <>
         <PoKpis
           organizationId={activeCompany.id}
           reloadSignal={orders}
@@ -4320,6 +4450,8 @@ const PurchaseOrders = () => {
             </div>
           )}
         </Card>
+        </>
+        )}
       </div>
 
       {/* "Aprovar e enviar" da linha: mesma confirmação/RPC de PoSendToSupplierButton

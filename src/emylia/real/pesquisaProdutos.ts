@@ -8,15 +8,17 @@ import type { No, Produto } from "../v2/catalogoModelo";
 import type { Res } from "../fichaProdutoDados";
 import { SEM_FILTRO_SERVIDOR, lerProdutosPagina, type LinhaPaginaProduto } from "./produtosPaginados";
 import { lerProdutoFicha } from "./produtosLeves";
-import { categoriaCruDoNo, chaveDoServicoLido, noDoProdutoLido, registarProdutoLido } from "./catalogoLeve";
-import { nosDeProdutoDoRamo } from "../ramoDosProdutos";
+import { categoriaCruDoNo, chaveDoServicoLido, idDoServicoLido, noDoProdutoLido, registarProdutoLido } from "./catalogoLeve";
+import { nosDeProdutoDoRamo, nosDoObjeto } from "../ramoDosProdutos";
 
 export const ATRASO_PESQUISA_MS = 300;
 
 /** O que a pesquisa filtra: o texto (nome, marca, referência) e, se quiser, os ids de categoria e subcategoria de product_categories. */
 export interface FiltroPesquisaProdutos { q: string; categoria?: string; subcategoria?: string; /** products.servico_id: só os produtos que trazem este serviço. */ servico?: string;
   /** 17/11: várias subcategorias (um ramo do motor com várias categorias de produto: «Louças e torneiras» = Sanitas, Bases Duche, Lavatórios…): uma pesquisa por cada, juntas. */
-  subcategorias?: readonly string[] }
+  subcategorias?: readonly string[];
+  /** 23/11: várias categorias de topo (as categorias de produto que são o objeto da pergunta de uma troca), juntas com as subcategorias. */
+  categorias?: readonly string[] }
 
 export interface PesquisaProdutos {
   linhas: LinhaPaginaProduto[]; total: number; aCarregar: boolean; erro: string | null; maisPaginas: boolean; maisUma: () => void;
@@ -27,7 +29,8 @@ export interface PesquisaProdutos {
 /** A pesquisa com debounce e páginas de 50. `ativo` false (o painel fechado) não chama a base. */
 export function usePesquisaProdutos(org: string | null, f: FiltroPesquisaProdutos, op: { ativo?: boolean; atrasoMs?: number } = {}): PesquisaProdutos {
   const { ativo = true, atrasoMs = ATRASO_PESQUISA_MS } = op;
-  const categoria = f.categoria ?? "", subcategoria = f.subcategoria ?? "", servico = f.servico ?? "", subs = (f.subcategorias ?? []).join(",");
+  const categoria = f.categoria ?? "", subcategoria = f.subcategoria ?? "", servico = f.servico ?? "";
+  const subs = [...(f.subcategorias ?? []), ...(f.categorias ?? []).map((c) => "c:" + c)].join(",");
   const [qAtraso, setQAtraso] = useState(f.q);
   const VAZIO = { chave: "", linhas: [] as LinhaPaginaProduto[], total: 0, pagina: 0, paginas: 0, aviso: null as string | null };
   const [estado, setEstado] = useState(VAZIO);
@@ -47,7 +50,8 @@ export function usePesquisaProdutos(org: string | null, f: FiltroPesquisaProduto
     setACarregar(true); setErro(null);
     const chave = `${org}|${qAtraso}|${categoria}|${subcategoria}|${servico}|${subs}`;
     const r = subs ? await lerVariasSubcategorias(org, qAtraso, subs.split(","), pagina)
-      : await lerProdutosPagina(org, { ...SEM_FILTRO_SERVIDOR, q: qAtraso, categoria, subcategoria, ...(servico ? { servico } : {}) }, pagina);
+      // 23/11: products.servico_id é o id da base; o motor chama o serviço pela chave («demol»): converte-se (um id, ou sem Catálogo lido, fica como está)
+      : await lerProdutosPagina(org, { ...SEM_FILTRO_SERVIDOR, q: qAtraso, categoria, subcategoria, ...(servico ? { servico: idDoServicoLido(servico) ?? servico } : {}) }, pagina);
     if (eu !== pedido.current) return; // uma pesquisa mais nova já saiu
     setACarregar(false);
     if (!r.ok) { setErro(r.erro); if (!juntar) setEstado(VAZIO); return; }
@@ -68,9 +72,9 @@ export function usePesquisaProdutos(org: string | null, f: FiltroPesquisaProduto
     : { linhas: [], total: 0, aCarregar: aCarregar || (!!org && ativo && !erro), erro, maisPaginas: false, maisUma, aviso: null };
 }
 
-/** 17/11: a mesma página em várias subcategorias, junta (por nome, sem repetidos); falha só se todas falharem. */
+/** 17/11: a mesma página em várias subcategorias, junta (por nome, sem repetidos); falha só se todas falharem. 23/11: «c:<id>» é uma categoria de topo. */
 async function lerVariasSubcategorias(org: string, q: string, subs: readonly string[], pagina: number): ReturnType<typeof lerProdutosPagina> {
-  const rs = await Promise.all(subs.map((subcategoria) => lerProdutosPagina(org, { ...SEM_FILTRO_SERVIDOR, q, subcategoria }, pagina)));
+  const rs = await Promise.all(subs.map((x) => lerProdutosPagina(org, x.startsWith("c:") ? { ...SEM_FILTRO_SERVIDOR, q, categoria: x.slice(2) } : { ...SEM_FILTRO_SERVIDOR, q, subcategoria: x }, pagina)));
   const ok = rs.filter((r): r is Extract<typeof r, { ok: true }> => r.ok);
   if (!ok.length) return rs[0] ?? { ok: false, erro: "Não foi possível ler os produtos." };
   const vistos = new Set<string>(), produtos: LinhaPaginaProduto[] = [];
@@ -94,8 +98,34 @@ export async function escolherProdutoDoServidor(org: string, id: string): Promis
 /** O produto lido, SEM o meter no Catálogo (para quem só precisa dos valores, como o consumível de uma receita). */
 export const lerProdutoEscolhido = (org: string, id: string): Promise<Res<Produto>> => lerProdutoFicha(org, id);
 
-/** Os produtos de um ramo da árvore (o `no` de um serviço que pede produto), pesquisados no servidor: um nó de topo filtra pela categoria, um sub pela subcategoria. Sem nó, sem filtro de ramo. */
-export function filtroDoRamo(arvore: readonly No[], no: string | null): Pick<FiltroPesquisaProdutos, "categoria" | "subcategoria" | "subcategorias"> {
+type FiltroRamo = Pick<FiltroPesquisaProdutos, "categoria" | "subcategoria" | "subcategorias" | "categorias">;
+/**
+ * Os produtos de um ramo da árvore (o `no` de um serviço que pede produto), pesquisados no servidor: um nó de topo filtra pela categoria, um sub pela subcategoria. Sem nó, sem filtro de ramo.
+ * 23/11 (testarh, Mudelar: «Troca» do espelho e da porta dava «Nada com …»): com a pergunta da troca, também as categorias de produto que são o objeto dela
+ * (ramoDosProdutos.nosDoObjeto: «o espelho» → Espelhos, «a porta» → Portas Interiores), quando o filtro do ramo ainda não as tem.
+ */
+export function filtroDoRamo(arvore: readonly No[], no: string | null, pergunta?: string | null): FiltroRamo {
+  const base = filtroSoDoRamo(arvore, no);
+  if (!no || !pergunta) return base;
+  const cru = (id: string) => categoriaCruDoNo(id);
+  const paiCru = (id: string) => { const y = arvore.find((z) => z.id === id); return y?.pai ? cru(y.pai) : null; };
+  const cobre = (id: string): boolean => {
+    if (base.categoria) return cru(id) === base.categoria || paiCru(id) === base.categoria;
+    if (base.subcategoria) return cru(id) === base.subcategoria;
+    if (base.subcategorias || base.categorias) return (base.subcategorias ?? []).includes(cru(id)) || (base.categorias ?? []).some((c) => c === cru(id) || c === paiCru(id));
+    return true; // sem filtro de ramo: já procura em tudo
+  };
+  const novos = nosDoObjeto(arvore, pergunta).filter((id) => !cobre(id));
+  if (!novos.length) return base;
+  const subs = [...(base.subcategorias ?? []), ...(base.subcategoria ? [base.subcategoria] : [])];
+  const cats = [...(base.categorias ?? []), ...(base.categoria ? [base.categoria] : [])];
+  for (const id of novos) {
+    const y = arvore.find((z) => z.id === id)!;
+    if (y.pai) subs.push(cru(id)); else cats.push(cru(id));
+  }
+  return { ...(subs.length ? { subcategorias: [...new Set(subs)] } : {}), ...(cats.length ? { categorias: [...new Set(cats)] } : {}) };
+}
+function filtroSoDoRamo(arvore: readonly No[], no: string | null): FiltroRamo {
   const x = no ? arvore.find((y) => y.id === no) : undefined;
   if (!x) return {};
   // 17/11 (A-Z na Mudelar: «Não há produtos com estes filtros»): um ramo só dos SERVIÇOS («Canalização › Louças e torneiras») não existe em product_categories.
@@ -128,13 +158,18 @@ export function produtoDeLinha(l: LinhaPaginaProduto): Produto {
     ...(l.sku ? { sku: l.sku } : {}), ...(pvp ? { pvp } : {}),
     ...(l.grossista != null ? { grossista: l.grossista } : {}), ...(l.distribuidor != null ? { distribuidor: l.distribuidor } : {}),
     ...(l.imagem ? { fotos: [l.imagem] } : {}),
-    ...(l.servico_id ? { servico: l.servico_id, fatorServico: l.fator_servico ?? 1 } : {}),
+    ...servicoDaLinha(l),
   };
+}
+/** 23/11: o serviço da linha pela chave do motor (a base dá o id; um serviço que o Catálogo lido não tem sai, como em escolherProdutoDoServidor). */
+function servicoDaLinha(l: LinhaPaginaProduto): Pick<Produto, "servico" | "fatorServico"> {
+  const s = l.servico_id ? chaveDoServicoLido(l.servico_id) : undefined;
+  return s ? { servico: s, fatorServico: l.fator_servico ?? 1 } : {};
 }
 
 /** A pesquisa de um ramo, já como Produto[] para os cartões da visita e do orçamento. */
-export function useProdutosDoRamo(org: string | null, arvore: readonly No[], no: string | null, q: string, ativo = true): Omit<PesquisaProdutos, "linhas"> & { produtos: Produto[] } {
-  const { linhas, ...resto } = usePesquisaProdutos(org, { q, ...filtroDoRamo(arvore, no) }, { ativo });
+export function useProdutosDoRamo(org: string | null, arvore: readonly No[], no: string | null, q: string, ativo = true, pergunta?: string | null): Omit<PesquisaProdutos, "linhas"> & { produtos: Produto[] } {
+  const { linhas, ...resto } = usePesquisaProdutos(org, { q, ...filtroDoRamo(arvore, no, pergunta) }, { ativo });
   return { ...resto, produtos: linhas.map(produtoDeLinha) };
 }
 

@@ -47,9 +47,26 @@ describe("acoesDoNegocio: o negócio fechado", () => {
 
   it("sem pessoas.edit nada se oferece; sem os dados da ficha (exemplo) também não", () => {
     expect(acoesDoNegocio(dadosFalsos({ podeEditar: false, podeApagar: true }), ABERTO, { perda: undefined, porNegocio: false }))
-      .toEqual({ fechado: false, podeAgir: false, podeEditar: false, podeApagar: false, podeRestaurar: false });
+      .toEqual({ fechado: false, podeAgir: false, podePerder: false, podeEditar: false, podeApagar: false, podeRestaurar: false });
     expect(acoesDoNegocio(null, ABERTO, { perda: undefined, porNegocio: true }))
-      .toEqual({ fechado: false, podeAgir: false, podeEditar: false, podeApagar: false, podeRestaurar: false });
+      .toEqual({ fechado: false, podeAgir: false, podePerder: false, podeEditar: false, podeApagar: false, podeRestaurar: false });
+  });
+});
+
+// 23/11/2026 (B1): «Perder negócio» e «Anular perda» pedem negocios.perder no servidor; o ecrã só os mostra com ela (DadosNegocio.podePerder).
+describe("acoesDoNegocio: perder e anular a perda (negocios.perder)", () => {
+  const sem = { perda: undefined, porNegocio: false };
+  it("com pessoas.edit e negocios.perder: pode perder", () => {
+    expect(acoesDoNegocio(dadosFalsos({ podePerder: true }), ABERTO, sem).podePerder).toBe(true);
+  });
+  it("com pessoas.edit mas sem negocios.perder: não pode perder nem anular, e o resto fica igual", () => {
+    const a = acoesDoNegocio(dadosFalsos({ podePerder: false }), ABERTO, sem);
+    expect(a).toMatchObject({ podePerder: false, podeAgir: true, podeEditar: true });
+    expect(acoesDoNegocio(dadosFalsos({ podePerder: false }), PERDIDO, { perda: PERDA, porNegocio: false }).podePerder).toBe(false);
+  });
+  it("sem o campo (exemplo, permissões por ler): não restringe mais do que pessoas.edit", () => {
+    expect(acoesDoNegocio(dadosFalsos(), ABERTO, sem).podePerder).toBe(true);
+    expect(acoesDoNegocio(dadosFalsos({ podeEditar: false, podePerder: true }), ABERTO, sem).podePerder).toBe(false);
   });
 });
 

@@ -38,6 +38,7 @@ import {
 import { AvisoSubstitutoNegocio } from "@/components/contracts/AvisoSubstitutoNegocio";
 import { chaveDoErro, codigoDoErro } from "@/hooks/pessoas/errosNeg";
 import { useNegocioDoContrato } from "@/hooks/pessoas/useNegocioDoContrato";
+import { contratosDoFluxoNegocio, idsParaFluxo } from "@/lib/contracts/fluxoNegocio";
 import { PermissionGate } from "@/components/PermissionGate";
 import { useModuleAlerts } from "@/hooks/useModuleAlerts";
 import { ModuleAlertsBanner } from "@/components/ModuleAlertsBanner";
@@ -82,6 +83,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { useNumerosDosNegociosCrm } from "@/hooks/pessoas/useNumerosDosNegociosCrm";
+import { numeroDoContrato } from "@/lib/numeroDocumento";
 
 interface ClientContract {
   id: string;
@@ -415,6 +418,9 @@ const ClientContracts = () => {
   const canEdit = isSystemAdmin || hasPermission("client_contracts.edit");
   const canDelete = isSystemAdmin || hasPermission("client_contracts.delete");
   const canSendSignature = isSystemAdmin || hasPermission("client_contracts.send_signature");
+  // 23/11/2026 (auditoria de permissões, C1): anular pede «Anular contratos (enviados ou assinados) e gerar substituição», como no
+  // servidor (cancel_and_replace_contract / neg_anular_contrato). Antes bastava client_contracts.edit.
+  const canCancel = isSystemAdmin || hasPermission("client_contracts.cancel");
 
   const { data: currentUserId } = useQuery({
     queryKey: ["current-business-user-id"],
@@ -547,6 +553,30 @@ const ClientContracts = () => {
           .in("id", userIds);
         const userMap = new Map((users || []).map((u: any) => [u.id, u.name]));
         data.forEach((c: any) => { c.assigned_to_name = userMap.get(c.assigned_to) || userMap.get(c.created_by) || null; });
+      }
+
+      // 23/11/2026 (auditoria de permissões, B3/C1): os contratos do fluxo do Negócio (Emylia), pela regra do servidor
+      // (fn_neg_documento_do_fluxo_emylia). Neles só o cliente assina e o assinado anula-se no Negócio. Sem leitura: como do CRM.
+      const idsFluxo = idsParaFluxo(data);
+      if (idsFluxo.negocios.length > 0 || idsFluxo.adendas.length > 0 || idsFluxo.quotes.length > 0) {
+        const [{ data: adendas }, { data: quotesFluxo }] = await Promise.all([
+          idsFluxo.adendas.length > 0
+            ? (supabase as any).from("adendas").select("id, negocio_id").in("id", idsFluxo.adendas)
+            : Promise.resolve({ data: [] }),
+          idsFluxo.quotes.length > 0
+            ? (supabase as any).from("quotes").select("id, fluxo_emylia, negocio_id").in("id", idsFluxo.quotes)
+            : Promise.resolve({ data: [] }),
+        ]);
+        const negIds = [...new Set([
+          ...idsFluxo.negocios,
+          ...((adendas || []) as any[]).map((a) => a.negocio_id),
+          ...((quotesFluxo || []) as any[]).map((q) => q.negocio_id),
+        ].filter(Boolean))];
+        const { data: negocios } = negIds.length > 0
+          ? await (supabase as any).from("negocios").select("id, fluxo_emylia").in("id", negIds)
+          : { data: [] };
+        const doFluxo = contratosDoFluxoNegocio(data, { negocios: negocios || [], adendas: adendas || [], quotes: quotesFluxo || [] });
+        data.forEach((c: any) => { c._doFluxoNegocio = doFluxo.has(c.id); });
       }
 
       return data as ClientContract[];
@@ -856,6 +886,13 @@ const ClientContracts = () => {
     return result;
   }, [contracts, statusFilter, searchQuery, onlyMine, currentUserId, dateFrom, dateTo, comercialFilter]);
 
+  // 23/11: nos contratos de um negócio, o número como a Emylia o mostra (CT <ano>/<n.º do negócio>); nos outros, o guardado
+  const numerosDosNegocios = useNumerosDosNegociosCrm(filteredContracts.map((c) => (c as { negocio_id?: string | null }).negocio_id));
+  const numeroDoContratoMostrado = (c: { negocio_id?: string | null; contract_number?: string | null; created_at?: string | null }): string => {
+    const x = c.negocio_id ? numerosDosNegocios.get(c.negocio_id) : undefined;
+    return numeroDoContrato({ numeroNegocio: x?.numero ?? null, criadoEm: c.created_at ?? null, guardado: c.contract_number ?? null });
+  };
+
   // KPIs — calculados NO SERVIDOR (client_contracts_list_metrics).
   //
   // Antes eram somados no browser sobre `filteredContracts`. Isso so estava
@@ -981,6 +1018,7 @@ const ClientContracts = () => {
       contract_not_cancellable: "Este contrato não pode ser anulado no estado atual.",
       contract_already_cancelled: "Este contrato já foi anulado.",
       insufficient_permission: "Não tens permissão para anular este contrato.",
+      contract_in_negocio: "Este contrato é de um negócio: anula-se no Negócio («Anular contrato»), que verifica as encomendas a fornecedor.",
     };
     return knownMessages[message] || "Não foi possível anular o contrato. Tente novamente.";
   };
@@ -1078,7 +1116,7 @@ const ClientContracts = () => {
   });
 
   const handleOpenCancelDialog = (contract: ClientContract) => {
-    if (!(isSystemAdmin || canEdit)) {
+    if (!(canCancel && canEdit)) {
       toast.error(t('clientContracts.accessDenied'));
       return;
     }
@@ -2093,7 +2131,7 @@ const ClientContracts = () => {
                             className="font-mono font-semibold text-primary hover:underline cursor-pointer text-left"
                             onClick={() => handleEdit(contract)}
                           >
-                            {contract.contract_number || "-"}
+                            {numeroDoContratoMostrado(contract) || "-"}
                           </button>
                           {subtitle && <p className="text-[10px] text-muted-foreground mt-0.5 max-w-[140px]">{subtitle}</p>}
                         </div>
@@ -2229,10 +2267,14 @@ const ClientContracts = () => {
                                   {contract.status === "draft" && (
                                     <DropdownMenuItem onClick={() => handleStatusChange(contract.id, "pending_signature")}>📨 Marcar como Enviado</DropdownMenuItem>
                                   )}
-                                  <DropdownMenuItem className="text-green-600 font-medium" onClick={() => { setSigningContractId(contract.id); setIsSignConfirmOpen(true); }}>
-                                    ✅ Marcar como Assinado
-                                    <span className="text-[10px] text-muted-foreground ml-1">⚡ Converte contacto em cliente</span>
-                                  </DropdownMenuItem>
+                                  {/* 23/11/2026 (auditoria, B3): nos contratos do Negócio só o cliente assina (no portal) e o servidor recusa
+                                      sempre; nos do CRM pede client_contracts.edit no âmbito do contrato, como o servidor. */}
+                                  {!contract._doFluxoNegocio && canEdit && canEditContract(contract) && (
+                                    <DropdownMenuItem className="text-green-600 font-medium" onClick={() => { setSigningContractId(contract.id); setIsSignConfirmOpen(true); }}>
+                                      ✅ Marcar como Assinado
+                                      <span className="text-[10px] text-muted-foreground ml-1">⚡ Converte contacto em cliente</span>
+                                    </DropdownMenuItem>
+                                  )}
                                   {canSendSignature && (
                                     <>
                                       <DropdownMenuSeparator />
@@ -2274,7 +2316,7 @@ const ClientContracts = () => {
                                   >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem className="text-muted-foreground">👤 Ver cliente (não criado)</DropdownMenuItem>
                                   <DropdownMenuSeparator />
-                                  {(isSystemAdmin || canEdit) && (
+                                  {canCancel && canEdit && (
                                     <DropdownMenuItem className="text-destructive" onClick={() => handleOpenCancelDialog(contract)}>
                                       🚫 Anular contrato
                                     </DropdownMenuItem>
@@ -2324,7 +2366,8 @@ const ClientContracts = () => {
                                   >📊 Ver orçamentos</DropdownMenuItem>
                                   <DropdownMenuItem onClick={() => verCliente(contract)}>👤 Ver cliente</DropdownMenuItem>
                                   <DropdownMenuSeparator />
-                                  {(isSystemAdmin || canEdit) && (
+                                  {/* 23/11/2026 (auditoria, C1): pede client_contracts.cancel; o assinado de um negócio anula-se no Negócio */}
+                                  {canCancel && canEdit && !contract._doFluxoNegocio && (
                                     <DropdownMenuItem className="text-destructive" onClick={() => handleOpenCancelDialog(contract)}>
                                       🚫 Anular contrato
                                     </DropdownMenuItem>

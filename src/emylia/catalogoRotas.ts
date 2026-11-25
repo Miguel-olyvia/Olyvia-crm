@@ -13,8 +13,9 @@ export interface RotaCatalogo {
   ir: (caminho: string, op?: { substituir?: boolean }) => void;
 }
 
-/** 17/11: só as secções de Serviços que não escolhem produtos da lista toda leem o Catálogo LEVE (cat_ler_catalogo_servicos). Os Produtos e as Ligações precisam da lista toda; sem rota, inteira. */
-export const usaLeituraLeve = (seccao: SeccaoCatalogo | undefined): boolean => !!seccao && seccao !== "produtos" && seccao !== "ligacoes";
+/** 17/11: as secções de Serviços leem o Catálogo LEVE (cat_ler_catalogo_servicos). Os Produtos têm a página própria (paginada); sem rota, inteira.
+ *  23/11: as Ligações também (a leitura inteira, ~29 600 produtos, dava statement timeout): os produtos entram no mapa pelo servidor (real/ligacoesServidor.ts). */
+export const usaLeituraLeve = (seccao: SeccaoCatalogo | undefined): boolean => !!seccao && seccao !== "produtos";
 
 export const CAMINHO_SECCAO: Record<SeccaoCatalogo, string> = {
   servicos: "/catalogo/servicos",

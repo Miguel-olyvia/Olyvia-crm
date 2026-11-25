@@ -267,6 +267,10 @@ export const avisoDaFase = (codigo: string): string => (codigo === "negocios.vis
   ? AVISO_COM_O_COMERCIAL
   : `Sem permissão para mudar este negócio na fase em que está (${codigo}). Pode vê-lo; o que mudar neste ecrã não se grava.`);
 
+/** 20/11 (permissões ecrã/servidor): o aviso do negócio fora do âmbito de pessoas.edit (a leitura devolve pode_gravar = false; o servidor,
+ *  neg_guardar_negocio → fn_neg_no_ambito, recusaria a gravação). */
+export const AVISO_FORA_DO_AMBITO = "Este negócio não é seu: pode vê-lo, mas o que mudar não se grava (pessoas.edit fora do seu âmbito).";
+
 /** O aviso de quem não tem a permissão (a mensagem e a explicação). */
 export const SEM_PERM: Record<PermNeg, { msg: string; sub: string }> = {
   "finance.validate_payment": { msg: "Sem permissão para validar pagamentos", sub: "Só o Financeiro ou a Direção validam pagamentos (finance.validate_payment). Mude de papel em cima." },

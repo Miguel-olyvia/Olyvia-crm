@@ -3,11 +3,11 @@
 //  · Documentos: o que foi para o portal do cliente (documentosObra.ts), quando e em que estado; abrir cada um por cima (o «voltar» fecha,
 //    ?doc=) e reenviar o acesso ao cliente com esse documento (pede confirmação; numa conta real, a permissão do portal);
 //  · 3D: o projeto do Estúdio do projeto em volume (obra3d.ts), só para ver: o que está feito a cores, o que falta transparente.
-import { useEffect, useMemo, useState } from "react";
-import { Box, Check, FileText, Send, X } from "lucide-react";
+import { Component, Suspense, lazy, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { Box, Check, FileText, Pause, Play, Send, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { Negocio } from "../motor";
+import type { Negocio, Plano } from "../motor";
 import type { Ctx } from "../pecas";
 import { NaFrente } from "../NaFrente";
 import { podeNeg } from "../permissoes";
@@ -18,7 +18,24 @@ import { AutoRececaoDoc } from "../AutoRececao";
 import { usePainelUrl } from "../usarParamUrl";
 import { Vista3D } from "@/pages/prototipo-estudio/Vista3D";
 import { documentosEnviados, type DocEnviado, type TomDoc } from "./enviadosAoCliente";
-import { obraEm3D } from "./obra3d";
+import { antesDoArranque } from "./ComandoObra";
+import { comNomesDoContrato, extrasDoContrato, obraEm3D, obraEm3DComModelos, obraEm3DNoDia, pedidosDosExtras, tarefaDaPeca } from "./obra3d";
+import { COR_FASE, FASES_OBRA } from "../fasesObra";
+import { dataCurta } from "../planoObra";
+import { materiaisPorFase } from "../obraOps";
+import { useInventario } from "../inventario/loja";
+import type { Inventario } from "../inventario/tipos";
+import { resumoEcNegocio } from "../inventario/ponteNegocios";
+import { AvatarTec, nomeTec } from "../AcompanhamentoObra";
+import { ICONE_DA_FASE, iconeDaTarefa } from "./CaminhoCritico";
+import { ROTULO_VIVO, estadoVivo, nomeCurtoTarefa } from "./planoVivo";
+import { cenaDe } from "@/pages/prototipo-estudio/cenaDoProjeto";
+import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
+import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
+import { sairam } from "@/pages/prototipo-estudio/necessidadesEstudio";
+import { ouvirProdutosReais, produto, versaoProdutosReais } from "@/pages/prototipo-estudio/catalogoFake";
+import { produtosPedidosDoProjeto, useLerProdutos } from "@/pages/prototipo-estudio/produtosDoProjeto";
+import { PECAS } from "../planta";
 
 const TOM: Record<TomDoc, string> = {
   ok: "bg-success/15 text-success", espera: "bg-warning/15 text-amber-800 dark:text-amber-300", mau: "bg-destructive/10 text-destructive", neutro: "bg-muted text-muted-foreground",
@@ -116,29 +133,270 @@ function DocAberto({ ctx, d, x, fechar }: { ctx: Ctx; d: Negocio; x: DocEnviado;
   );
 }
 
-/* ================================================================== o projeto em 3D */
-export function ProjetoEm3D({ d }: { d: Negocio }) {
-  const O = useMemo(() => obraEm3D(d), [d, d.f.estudio, d.obra.plano]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [qual, setQual] = useState<"obra" | "antes">("obra");
-  if (!O) {
+/* ================================================================== o projeto em 3D e as plantas */
+// 23/11 (Rúben: «o 3D ainda é genérico… quero o 3D real do projeto aprovado e a planta antes e depois»). O 3D com modelos do passo «3D»
+// do Estúdio (os produtos do contrato, o revestimento e o pavimento como materiais), com o feito a cores e o que falta transparente; sem
+// WebGL (ou se o 3D com modelos falhar), o 3D simples de antes. Por baixo, as duas plantas do Estúdio: como está e como vai ficar.
+const Visualizador3D = lazy(() => import("@/emylia/planta3d/Visualizador3D"));
+
+let webgl: boolean | null = null;
+/** Se o browser desenha 3D (WebGL). Pergunta-se uma vez. */
+function temWebGL(): boolean {
+  if (webgl !== null) return webgl;
+  try {
+    const c = document.createElement("canvas");
+    webgl = !!(window.WebGLRenderingContext && (c.getContext("webgl2") || c.getContext("webgl")));
+  } catch { webgl = false; }
+  return webgl;
+}
+
+/** Se o 3D com modelos falhar (um modelo que não abre), fica o 3D simples em vez de partir o ecrã. */
+class Falha3D extends Component<{ alternativa: ReactNode; children: ReactNode }, { erro: boolean }> {
+  state = { erro: false };
+  static getDerivedStateFromError() { return { erro: true }; }
+  componentDidCatch(e: unknown) { console.warn("[obra] o 3D com modelos falhou; fica o simples:", e); }
+  render() { return this.state.erro ? this.props.alternativa : this.props.children; }
+}
+
+/** O nome de um produto na planta: sem o tipo à frente («Base de Duche ZEUS 70x150» → «ZEUS 70x150»), até três palavras. */
+export function nomeCurto(nome: string, tipo: string): string {
+  const n = nome.trim();
+  const sem = n.toLowerCase().startsWith(tipo.toLowerCase()) ? n.slice(tipo.length).trim() : n;
+  return (sem || n).split(/\s+/).slice(0, 3).join(" ");
+}
+
+export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: Date[]; abrirTarefa?: (ti: number) => void }) {
+  // os produtos do projeto e do contrato, lidos pelo id (o Estúdio da obra não carrega o catálogo); redesenha quando chegam
+  // os do contrato entram logo pelo nome (os produtos das Necessidades); a linha do catálogo junta-se quando chega
+  const pr = useMemo(() => projetoDoNegocio(d.f), [d.f.estudio]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pedidos = useMemo(() => (pr ? comNomesDoContrato(d, produtosPedidosDoProjeto(pr, pedidosDosExtras(extrasDoContrato(d)))) : []), [pr, d, d.visita.prod]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLerProdutos(pedidos);
+  const versao = useSyncExternalStore(ouvirProdutosReais, versaoProdutosReais);
+  const O = useMemo(() => obraEm3D(d), [d, d.f.estudio, d.obra.plano, versao]); // eslint-disable-line react-hooks/exhaustive-deps
+  const M = useMemo(() => obraEm3DComModelos(d), [d, d.f.estudio, d.obra.plano, versao]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [qual, setQual] = useState<"obra" | "final" | "antes">("obra");
+  const [vista, setVista] = useState<"3d" | "cima" | "pessoa">("3d");
+  const [sel, setSel] = useState<string | null>(null);
+  // 23/11 (Rúben: «mega next-level»): a régua do tempo. null = hoje (o que está mesmo feito); um número = esse dia, pelo plano
+  const plano = d.obra.plano;
+  const fimPlano = plano ? Math.max(1, ...plano.tasks.map((t) => t.dia + t.dur)) : 1;
+  const hojeK = plano?.estado === "em curso" ? Math.min(plano.dia, fimPlano - 1) : plano?.estado === "concluída" ? fimPlano - 1 : 0;
+  const [diaSel, setDiaSel] = useState<number | null>(null);
+  const noDia = useMemo(() => (diaSel == null ? null : obraEm3DNoDia(d, diaSel)), [d, diaSel, versao]); // eslint-disable-line react-hooks/exhaustive-deps
+  const inv = useInventario();
+  // as peças da planta com trabalho no dia escolhido na régua (a tarefa do ofício de cada uma)
+  const doDia = useMemo(() => {
+    const out = new Set<string>();
+    if (diaSel == null || !plano || !pr) return out;
+    for (const pc of pr.depois.pecas) { const ti = tarefaDaPeca(d, pc.id), t = ti != null ? plano.tasks[ti] : null; if (t && t.dia <= diaSel && diaSel < t.dia + t.dur) out.add(pc.id); }
+    return out;
+  }, [d, diaSel, plano, pr]);
+  if (!O || !M) {
     return <p className="rounded-xl bg-muted/50 px-4 py-3 text-[15px] text-muted-foreground">Este negócio não tem projeto do Estúdio do projeto: o 3D aparece quando a visita é feita no Estúdio.</p>;
   }
   const opcao = (on: boolean) => cn("min-h-11 rounded-full px-4 text-[15px] font-medium transition-colors", on ? "bg-background shadow-sm" : "text-muted-foreground");
+  // 23/11 (revisão): antes do arranque, «A obra hoje» é a divisão como está (o antes), não o depois transparente
+  const aindaNao = !!plano && antesDoArranque(plano) && diaSel == null;
+  const titulo = qual === "obra" && aindaNao ? "A divisão como está, antes da obra" : qual === "obra" ? "A obra em 3D, com o que está feito" : qual === "final" ? "A obra acabada, como vai ficar" : "A divisão antes da obra";
+  const simples = <Vista3D cena={qual === "obra" ? (aindaNao ? O.antes : O.cena) : qual === "final" ? cenaDe(M.projeto.depois, M.projeto, true) : O.antes} titulo={titulo} />;
+  const res = qual === "obra" ? (noDia?.cena ?? (aindaNao ? M.antes : M.hoje)) : qual === "final" ? M.final : M.antes;
+  const porFazer = qual === "obra" && !aindaNao ? (noDia ? noDia.porFazer : M.porFazer) : undefined;
+  const comModelos = res.ok && temWebGL();
+  const p = M.projeto;
   return (
-    <section aria-label="O projeto em 3D" className="space-y-3">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="min-w-0">
-          <h2 className="flex items-center gap-2 text-[15px] font-semibold"><Box className="h-4 w-4 text-primary" aria-hidden="true" />Como a obra vai ficar</h2>
+    <div className="space-y-8">
+      <section aria-label="O projeto em 3D" className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="flex items-center gap-2 text-[15px] font-semibold"><Box className="h-4 w-4 text-primary" aria-hidden="true" />Como a obra vai ficar</h2>
+            <p className="text-sm text-muted-foreground">
+              {qual === "obra" && aindaNao ? <>A obra ainda não começou: <b className="font-medium text-foreground">a divisão como está hoje</b>. Use a régua para a ver a ser feita, dia a dia.</>
+                : qual === "obra" ? <>{noDia ? "O plano neste dia." : "O projeto aprovado."} <b className="font-medium text-foreground">A cores, o que {noDia ? "o plano dá por feito" : "já está feito"}</b>; transparente, o que falta{(noDia ?? M).total ? ` (${(noDia ?? M).feitas} de ${(noDia ?? M).total} peças feitas)` : noDia && !noDia.demolida ? " (ainda antes da demolição)" : ""}. Só para ver.</>
+                : qual === "final" ? "O projeto aprovado, com tudo feito: os produtos do contrato, o revestimento e o pavimento." : "A divisão como estava antes da obra."}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <div role="group" aria-label="O que ver" className="inline-flex rounded-full bg-muted p-1">
+              <button type="button" aria-pressed={qual === "obra"} onClick={() => setQual("obra")} className={opcao(qual === "obra")}>A obra hoje</button>
+              <button type="button" aria-pressed={qual === "final"} onClick={() => setQual("final")} className={opcao(qual === "final")}>Como vai ficar</button>
+              <button type="button" aria-pressed={qual === "antes"} onClick={() => setQual("antes")} className={opcao(qual === "antes")}>Antes</button>
+            </div>
+            {comModelos && (
+              <div role="group" aria-label="A vista" className="inline-flex rounded-full bg-muted p-1">
+                {([["3d", "3D"], ["cima", "De cima"], ["pessoa", "Pessoa"]] as const).map(([v, n]) => (
+                  <button key={v} type="button" aria-pressed={vista === v} onClick={() => setVista(v)} className={opcao(vista === v)}>{n}</button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        {comModelos && res.ok ? (
+          <div className={cn("overflow-hidden rounded-2xl border border-border", qual === "obra" && plano ? "h-[48vh] min-h-[320px]" : "h-[62vh] min-h-[420px]")}>
+            <Falha3D alternativa={simples}>
+              <Suspense fallback={<p className="grid h-full place-items-center text-[15px] text-muted-foreground">A abrir o 3D…</p>}>
+                <Visualizador3D espaco={res.espaco} modelos={res.modelos} vista={vista} teto={false} etiquetas={false} descricao={titulo}
+                  selecionada={sel} onSelecionar={setSel} porFazer={porFazer} />
+              </Suspense>
+            </Falha3D>
+          </div>
+        ) : simples}
+        {comModelos && qual === "obra" && plano && (
+          <ReguaDoTempo plano={plano} dias={dias} fim={fimPlano} hoje={hojeK} dia={diaSel} setDia={(k) => { setDiaSel(k === hojeK ? null : k); setSel(null); }} />
+        )}
+        {comModelos && sel && res.ok && <PecaTocada d={d} pecaId={sel} nome={res.modelos[res.espaco.pecas.find((x) => x.id === sel)?.produtoId ?? ""]?.nome} dias={dias} inv={inv} abrir={abrirTarefa} fechar={() => setSel(null)} />}
+        {comModelos && !sel && <p className="text-sm text-muted-foreground">Arraste para rodar. Toque numa peça para ver quem a instala, quando e o estado do material.</p>}
+      </section>
+
+      <section aria-label="As plantas antes e depois" className="space-y-3">
+        <div>
+          <h2 className="text-[15px] font-semibold">As plantas</h2>
+          <p className="text-sm text-muted-foreground">Como está e como vai ficar, com as medidas das paredes. A tracejado, o que sai.</p>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <PlantaVista planta={p.antes} titulo="Antes: como está" />
+          <PlantaVista planta={p.depois} titulo={diaSel != null ? `Depois: a cores forte, o trabalho de ${dias[diaSel] ? dataCurta(dias[diaSel]) : `dia ${diaSel + 1}`}` : "Depois: como vai ficar"} fantasmas={sairam(p)}
+            cor={(pc) => (doDia.has(pc.id) ? "#7c5ce0" : produto(p.escolhas[pc.id])?.hex)} rotulo={(pc) => { const x = produto(p.escolhas[pc.id]); return x ? `${PECAS[pc.tipo].n} · ${nomeCurto(x.colecao || x.n, PECAS[pc.tipo].n)}` : undefined; }} />
+        </div>
+      </section>
+    </div>
+  );
+}
+
+// 23/11 (Rúben: «não gosto desta barra de progresso»): uma só linha do tempo. As fases da obra como segmentos (o nome, o ícone e a cor
+// delas, as mesmas do Plano e do caminho crítico); até ao dia escolhido, preenchidas; depois, só em contorno. Um só cursor grande (arrasta-se,
+// e as setas do teclado andam um dia), com o dia escrito por cima; a marca de «Hoje»; as segundas-feiras como marcos de data por baixo. As
+// tarefas do dia em cartões, com o técnico e o ícone do trabalho.
+export function ReguaDoTempo({ plano, dias, fim, hoje, dia, setDia }: { plano: Plano; dias: Date[]; fim: number; hoje: number; dia: number | null; setDia: (k: number) => void }) {
+  const k = dia ?? hoje;
+  const [aTocar, setATocar] = useState(false);
+  useEffect(() => {
+    if (!aTocar) return;
+    const id = window.setTimeout(() => { if (k >= fim - 1) setATocar(false); else setDia(k + 1); }, 800);
+    return () => window.clearTimeout(id);
+  }, [aTocar, k, fim]); // eslint-disable-line react-hooks/exhaustive-deps
+  const tocar = () => { if (aTocar) { setATocar(false); return; } if (k >= fim - 1) setDia(0); setATocar(true); };
+  const quando = (x: number) => (dias[x] ? dataCurta(dias[x]) : `dia ${x + 1}`);
+  const curta = (x: number) => quando(x).replace(/^[^,]+, /, "");
+  const pos = (x: number) => `${((x + 0.5) / fim) * 100}%`;
+  // as fases: cada uma do primeiro dia dela até ao início da seguinte (ou ao fim dela, a última)
+  const fases = FASES_OBRA.map((f) => {
+    const ts = plano.tasks.filter((t) => (t.fase ?? 1) === f.n);
+    return ts.length ? { n: f.n, nome: f.curto, ini: Math.min(...ts.map((t) => t.dia)), fimF: Math.max(...ts.map((t) => t.dia + t.dur)) } : null;
+  }).filter((x): x is NonNullable<typeof x> => !!x).sort((a, b) => a.ini - b.ini);
+  const segs = fases.map((f, i) => ({ ...f, ate: i + 1 < fases.length ? Math.max(f.ini + 1, fases[i + 1].ini) : Math.max(f.fimF, f.ini + 1) }));
+  const faseDe = (x: number) => segs.find((s) => x >= s.ini && x < s.ate) ?? null;
+  // as datas por baixo: as segundas, o primeiro e o último dia; duas muito juntas («28 dez», «29 dez») ficam numa só (a última ganha)
+  const perto = Math.max(2, Math.round(fim * 0.09));
+  const marcos = Array.from({ length: fim }, (_, x) => x).filter((x) => x === 0 || x === fim - 1 || dias[x]?.getDay() === 1)
+    .reduce<number[]>((acc, x) => { if (acc.length && x - acc[acc.length - 1] < perto) { if (x === fim - 1 && acc.length > 1) acc[acc.length - 1] = x; return acc; } acc.push(x); return acc; }, []);
+  const ativas = plano.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.dia <= k && k < t.dia + t.dur);
+  const fk = faseDe(k), primeiroDia = segs[0]?.ini ?? 0;
+  return (
+    <section aria-label="A obra dia a dia" className="space-y-4 rounded-2xl border border-border bg-card p-4">
+      {/* o dia escolhido, o reproduzir e voltar a hoje */}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" size="icon" className="h-11 w-11 shrink-0 rounded-full" aria-label={aTocar ? "Parar" : "Ver a obra a andar, dia a dia"} onClick={tocar}>
+          {aTocar ? <Pause className="h-5 w-5" aria-hidden="true" /> : <Play className="ml-0.5 h-5 w-5" aria-hidden="true" />}
+        </Button>
+        <div className="min-w-0 flex-1">
+          <p className="text-base font-semibold leading-tight">{quando(k)}</p>
           <p className="text-sm text-muted-foreground">
-            {qual === "obra" ? <>O projeto aprovado. <b className="font-medium text-foreground">A cores, o que já está feito</b>; transparente, o que falta{O.total ? ` (${O.feitas} de ${O.total} peças feitas)` : ""}. Só para ver.</> : "A divisão como estava antes da obra."}
+            {k < primeiroDia ? "Antes do arranque" : `Dia ${k - primeiroDia + 1} de ${fim - primeiroDia}`}{fk ? <> · <span style={{ color: COR_FASE[fk.n] }} className="font-medium">{fk.nome}</span></> : ""}{dia == null ? " · hoje" : ""}
           </p>
         </div>
-        <div role="group" aria-label="O que ver" className="inline-flex rounded-full bg-muted p-1">
-          <button type="button" aria-pressed={qual === "obra"} onClick={() => setQual("obra")} className={opcao(qual === "obra")}>A obra hoje</button>
-          <button type="button" aria-pressed={qual === "antes"} onClick={() => setQual("antes")} className={opcao(qual === "antes")}>Antes</button>
+        {dia != null && <button type="button" onClick={() => { setATocar(false); setDia(hoje); }} className="min-h-10 shrink-0 rounded-full px-3 text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Voltar a hoje</button>}
+      </div>
+
+      {/* 23/11 (revisão: «segmentos só em contorno e sem nome»): a linha do tempo é feita das fases, cada uma com a cor, o ícone e o nome
+          dentro (o nome some quando não cabe; fica o ícone e a dica). Até ao dia escolhido, a cor cheia; depois, a cor clara. */}
+      <div className="relative pt-7">
+        {/* o dia escolhido, por cima do cursor */}
+        <span aria-hidden="true" className="pointer-events-none absolute top-0 -translate-x-1/2 whitespace-nowrap rounded-full bg-foreground px-2 py-0.5 text-xs font-semibold text-background transition-[left] duration-200" style={{ left: pos(k) }}>{curta(k)}</span>
+        <div className="relative h-9">
+          {segs.map((s) => {
+            const a = (s.ini / fim) * 100, w = ((s.ate - s.ini) / fim) * 100, cor = COR_FASE[s.n], Ic = ICONE_DA_FASE[s.n] ?? Wrench;
+            const cheio = Math.max(0, Math.min(1, (k + 1 - s.ini) / (s.ate - s.ini)));
+            const rotulo = (claro: boolean) => (
+              <span className="flex h-full items-center gap-1.5 overflow-hidden px-2 text-xs font-semibold" style={{ color: claro ? "#fff" : cor }}>
+                <Ic className="h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span className="truncate">{s.nome}</span>
+              </span>
+            );
+            return (
+              <span key={s.n} title={`${s.nome}: ${quando(s.ini)} a ${quando(s.ate - 1)}`} className={cn("absolute inset-y-0 overflow-hidden rounded-lg ring-inset", fk?.n === s.n && "ring-2")}
+                style={{ left: `calc(${a}% + 1px)`, width: `calc(${w}% - 2px)`, background: `color-mix(in srgb, ${cor} 16%, hsl(var(--card)))`, ["--tw-ring-color" as string]: cor }}>
+                {rotulo(false)}
+                {cheio > 0 && (
+                  <span aria-hidden="true" className="absolute inset-y-0 left-0 overflow-hidden transition-[width] duration-200" style={{ width: `${cheio * 100}%`, background: cor }}>
+                    <span className="absolute inset-y-0 left-0" style={{ width: `${100 / cheio}%` }}>{rotulo(true)}</span>
+                  </span>
+                )}
+              </span>
+            );
+          })}
+          {/* hoje */}
+          {hoje >= 0 && <span aria-hidden="true" className="absolute -inset-y-1.5 z-[1] w-0.5 -translate-x-1/2 rounded-full bg-foreground/80" style={{ left: pos(hoje) }} />}
+          {/* o cursor (visual): um pegador alto que não tapa o nome da fase; o controlo é o deslizador transparente por cima */}
+          <span aria-hidden="true" className="pointer-events-none absolute top-1/2 z-[2] h-12 w-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-background shadow-md transition-[left] duration-200" style={{ left: pos(k), background: fk ? COR_FASE[fk.n] : "hsl(var(--foreground))" }} />
+          <input type="range" min={0} max={fim - 1} step={1} value={k} onChange={(e) => { setATocar(false); setDia(Number(e.target.value)); }}
+            aria-label="O dia da obra" aria-valuetext={`${quando(k)}${fk ? `, ${fk.nome}` : ""}`}
+            className="absolute -inset-y-3 left-0 z-[3] w-full cursor-grab opacity-0 active:cursor-grabbing" />
+        </div>
+        {/* os marcos: as segundas-feiras, o primeiro e o último dia (dois muito juntos ficam num só: o fim ganha) */}
+        <div className="relative mt-2 h-5 text-[11px] tabular-nums text-muted-foreground" aria-hidden="true">
+          {marcos.map((x) => <span key={x} className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: pos(x) }}>{curta(x)}</span>)}
         </div>
       </div>
-      <Vista3D cena={qual === "obra" ? O.cena : O.antes} titulo={qual === "obra" ? "A obra em 3D, com o que está feito" : "A divisão antes da obra"} />
+      <p className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-3 w-0.5 rounded-full bg-foreground/70" />Hoje, {curta(hoje)}</span>
+        <span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-5 rounded bg-primary" />Feito até ao dia escolhido</span>
+        <span className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-5 rounded bg-primary/20" />Por fazer</span>
+      </p>
+
+      {/* as tarefas do dia */}
+      <div>
+        <p className="mb-2 text-sm font-semibold">Neste dia</p>
+        {ativas.length ? (
+          <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            {ativas.map(({ t, ti }) => {
+              const T = iconeDaTarefa(t.nome), cor = COR_FASE[t.fase ?? 1];
+              return (
+                <li key={ti} className="flex items-center gap-2.5 rounded-xl border border-border bg-background p-2.5" style={{ borderLeft: `4px solid ${cor}` }} title={t.nome}>
+                  <span aria-hidden="true" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: `color-mix(in srgb, ${cor} 12%, transparent)`, color: cor }}><T className="h-[18px] w-[18px]" /></span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-sm font-medium">{nomeCurtoTarefa(t.nome)}</span>
+                    <span className="block text-xs text-muted-foreground">{t.dur > 1 ? `dia ${k - t.dia + 1} de ${t.dur}` : "um dia"}</span>
+                  </span>
+                  <span className="flex shrink-0 items-center gap-1.5 text-xs"><AvatarTec id={t.tec} tam="h-7 w-7" /><span className="hidden sm:inline">{(nomeTec(t.tec) || "Sem técnico").split(" ")[0]}</span></span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : <p className="rounded-xl bg-muted/50 px-3 py-2 text-sm text-muted-foreground">{k < primeiroDia ? "Ainda antes do arranque: a divisão como está." : "Sem trabalho marcado neste dia."}</p>}
+        {dia != null && <p className="mt-2 text-xs text-muted-foreground">No 3D, a cores o que o plano dá por feito ao fim deste dia.</p>}
+      </div>
+    </section>
+  );
+}
+
+/** 23/11: a peça tocada no 3D: a tarefa que a instala, quem, quando, o estado, e o material. */
+function PecaTocada({ d, pecaId, nome, dias, inv, abrir, fechar }: { d: Negocio; pecaId: string; nome?: string; dias: Date[]; inv: Inventario; abrir?: (ti: number) => void; fechar: () => void }) {
+  const p = d.obra.plano, ti = tarefaDaPeca(d, pecaId), t = ti != null && p ? p.tasks[ti] : null;
+  const quando = (x: number) => (dias[x] ? dataCurta(dias[x]) : `dia ${x + 1}`);
+  const resumo = d.obra.ec?.ref ? resumoEcNegocio(inv, d.obra.ec.ref) : null;
+  const norm = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+  const mat = nome ? materiaisPorFase(d, resumo).flatMap((g) => g.itens).find((m) => norm(m.n) === norm(nome)) : undefined;
+  return (
+    <section aria-label="A peça escolhida" className="flex flex-wrap items-start gap-3 rounded-2xl border border-primary/30 bg-primary/[0.04] p-3">
+      <div className="min-w-0 flex-1 space-y-0.5 text-sm">
+        <p className="font-semibold">{nome ?? "Peça"}</p>
+        {t && p ? <p>Instala: <b className="font-medium">{nomeCurtoTarefa(t.nome)}</b> · {(nomeTec(t.tec) || "sem técnico").split(" ")[0]} · {t.dur > 1 ? `${quando(t.dia)} a ${quando(t.dia + t.dur - 1)}` : quando(t.dia)} · {ROTULO_VIVO[estadoVivo(t, p)].toLowerCase()}</p>
+          : <p className="text-muted-foreground">Sem tarefa própria no plano.</p>}
+        <p className="text-muted-foreground">Material: {mat ? (mat.quando ? `chega a ${mat.quando}` : mat.estado === "reservado" || mat.estado === "recebido" ? "no armazém" : mat.estado) : "não está na encomenda"}</p>
+      </div>
+      <div className="flex gap-2">
+        {t && ti != null && abrir && <Button type="button" size="sm" variant="outline" className="min-h-9 rounded-full" onClick={() => abrir(ti)}>Abrir a tarefa</Button>}
+        <Button type="button" size="sm" variant="ghost" className="min-h-9 rounded-full" aria-label="Fechar" onClick={fechar}><X className="h-4 w-4" /></Button>
+      </div>
     </section>
   );
 }

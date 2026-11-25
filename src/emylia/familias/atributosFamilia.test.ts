@@ -213,3 +213,32 @@ describe("compararMedidas: ordem estável com os formatos reais", () => {
     }
   });
 });
+
+describe("atributosDoItem: a foto da opção (migration por aplicar: tolerante)", () => {
+  const CAMINHO = "org/11111111-1111-4111-a111-111111111111.webp";
+  const comFoto = (opcoes: AtributoDef["opcoes"]): AtributoDef[] => DEFS.map((d) => (d.id === A_COR ? { ...d, temFoto: true, opcoes } : d));
+  const OPCOES = [
+    { id: "o-madeira", valor: "MADEIRA", nome: "Madeira", hex: null, foto: CAMINHO, ordem: 1 },
+    { id: "o-preto", valor: "PRETO", nome: "Preto", hex: "#000000", foto: CAMINHO, ordem: 2 },
+    { id: "o-pedra", valor: "PEDRA", nome: "Pedra", hex: null, foto: null, ordem: 3 },
+  ];
+  it("a foto da opção sai pelo nome do atributo, ao lado do hex (que continua a sair)", () => {
+    const r = atributosDoItem({ attrs: [opc(A_COR, "o-preto")] }, comFoto(OPCOES));
+    expect(r.foto).toEqual({ Cor: CAMINHO });
+    expect(r.hex).toEqual({ Cor: ["#000000"] });
+  });
+  it("uma opção só com foto (sem hex) dá a foto e nenhum aviso", () => {
+    const r = atributosDoItem({ attrs: [opc(A_COR, "o-madeira")] }, comFoto(OPCOES));
+    expect(r.foto).toEqual({ Cor: CAMINHO });
+    expect(r.hex).toEqual({});
+    expect(r.avisos).toEqual([]);
+  });
+  it("sem foto (opção sem foto, base sem as chaves novas): não há chave `foto` no resultado", () => {
+    expect(atributosDoItem({ attrs: [opc(A_COR, "o-pedra")] }, comFoto(OPCOES)).foto).toBeUndefined();
+    expect("foto" in atributosDoItem({ attrs: [opc(A_COR, "o-branco")] }, DEFS)).toBe(false);
+  });
+  it("um atributo sem temHex nunca dá foto, mesmo que a opção traga uma", () => {
+    const defs = DEFS.map((d) => (d.id === A_TON ? { ...d, opcoes: [{ id: "o-claro", valor: "CLARO", nome: "Claro", hex: null, foto: CAMINHO, ordem: 1 }] } : d));
+    expect(atributosDoItem({ attrs: [opc(A_TON, "o-claro")] }, defs).foto).toBeUndefined();
+  });
+});

@@ -9,7 +9,7 @@
 //  · FechoDaObra: o que falta para fechar, a segurança, a vistoria e o auto, e encerrar.
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowUpRight, Camera, Check, CheckCircle2, ChevronRight, Clock, Minus, Package, Pause, Play, Plus, RotateCcw, Scissors, Send, ShieldCheck, TrendingUp, Undo2, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CalendarClock, Camera, Check, CheckCircle2, ChevronRight, Clock, Minus, Package, Pause, Play, Plus, RotateCcw, Scissors, Send, ShieldCheck, TrendingUp, Undo2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, eur, nfmt, type MatTarefa, type Negocio, type Plano, type Tarefa } from "../motor";
@@ -31,10 +31,12 @@ import { ConversaDoClienteNaObra } from "../ObraOperacoes";
 import { EstadoFotos, useFotosAJuntar } from "../fotosDaObra";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { useInventario } from "../inventario/loja";
+import { EscolherTarefa, ICONE_DA_FASE, iconeDaTarefa } from "./CaminhoCritico";
+import { dispersaoDaEquipa } from "./dispersaoEquipa";
 import { resumoEcNegocio } from "../inventario/ponteNegocios";
 import { useReduzir, MOLA } from "../movimento";
 import { podeNeg } from "../permissoes";
-import { ROTULO_VIVO, diasDeAtraso, estadoVivo, type EstadoVivo } from "./planoVivo";
+import { ROTULO_VIVO, diasDeAtraso, estadoVivo, nomeCurtoTarefa, type EstadoVivo } from "./planoVivo";
 
 const primeiro = (n: string) => n.split(" ")[0];
 const dd = (n: number) => `${n} ${Math.abs(n) === 1 ? "dia" : "dias"}`;
@@ -219,54 +221,91 @@ export function ExecucaoTarefa({ ctx, d, ti, simular, simulado, imprevisto }: {
 }
 
 /* ================================================================== a execução, tarefa a tarefa */
-const GRUPOS: { k: string; t: string; v: EstadoVivo[] }[] = [
-  { k: "validar", t: "Por validar", v: ["feita"] },
-  { k: "atraso", t: "Atrasadas", v: ["atrasada"] },
-  { k: "corrigir", t: "A corrigir", v: ["corrigir"] },
-  { k: "hoje", t: "Hoje e em curso", v: ["hoje", "em curso"] },
-  { k: "paradas", t: "Pausadas e paradas", v: ["pausada", "parada"] },
-  { k: "depois", t: "Por começar", v: ["por começar"] },
-  { k: "feitas", t: "Validadas", v: ["validada"] },
+// 23/11 (Rúben, no 1015: «isto também»): os grupos pelo estado (o que pede ação primeiro) e, dentro de cada um, as tarefas pelas fases da
+// obra, como o caminho crítico e os Materiais: o ícone e a cor da fase, o ícone do trabalho, o nome curto, as datas e as horas fáceis de
+// ler. O estado de cada tarefa só aparece quando o grupo junta mais do que um (hoje e em curso, pausadas e paradas) ou há atraso.
+const GRUPOS: { k: string; t: string; v: EstadoVivo[]; ic: typeof Clock; cls: string }[] = [
+  { k: "validar", t: "Por validar", v: ["feita"], ic: Clock, cls: "text-amber-700 dark:text-amber-300" },
+  { k: "atraso", t: "Atrasadas", v: ["atrasada"], ic: AlertTriangle, cls: "text-destructive" },
+  { k: "corrigir", t: "A corrigir", v: ["corrigir"], ic: RotateCcw, cls: "text-amber-700 dark:text-amber-300" },
+  { k: "hoje", t: "Hoje e em curso", v: ["hoje", "em curso"], ic: Play, cls: "text-primary" },
+  { k: "paradas", t: "Pausadas e paradas", v: ["pausada", "parada"], ic: Pause, cls: "text-muted-foreground" },
+  { k: "depois", t: "Por começar", v: ["por começar"], ic: CalendarClock, cls: "text-primary" },
+  { k: "feitas", t: "Validadas", v: ["validada"], ic: CheckCircle2, cls: "text-success" },
 ];
+/** Horas com uma casa decimal. */
+const horas = (h: number) => nfmt(Math.round(h * 10) / 10);
 export function Execucao({ ctx, d, abrir, dias }: { ctx: Ctx; d: Negocio; abrir: (ti: number) => void; dias: Date[] }) {
   const { S, A, run } = ctx;
   const p = d.obra.plano!;
   const planeia = podeNeg(S.role, "obra.planear");
   const quando = (k: number) => (dias[k] ? dataCurta(dias[k]) : `dia ${k + 1}`);
+  const curta = (k: number) => quando(k).replace(/^[^,]+, /, ""); // «30 nov», sem o dia da semana
+  const intervalo = (a: number, b: number) => (a === b ? quando(a) : `${curta(a)} – ${curta(b)}`);
   const [verFeitas, setVerFeitas] = useState(false);
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
       {GRUPOS.map((g) => {
-        const L = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => g.v.includes(estadoVivo(t, p))).sort((a, b) => a.t.dia - b.t.dia);
+        const L = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => g.v.includes(estadoVivo(t, p))).sort((a, b) => a.t.dia - b.t.dia || a.ti - b.ti);
         if (!L.length) return null;
-        const escondido = g.k === "feitas" && !verFeitas;
+        const escondido = g.k === "feitas" && !verFeitas, misto = g.v.length > 1;
+        const fases = FASES_OBRA.map((f) => ({ ...f, L: L.filter(({ t }) => (t.fase ?? 1) === f.n) })).filter((f) => f.L.length);
+        const totH = L.reduce((a, x) => a + x.t.h, 0), feitoH = L.reduce((a, x) => a + (x.t.exec?.horas ?? 0), 0);
+        const G = g.ic;
         return (
-          <section key={g.k} aria-label={g.t} className="space-y-2">
-            <h3 className="flex items-center gap-2 text-sm font-semibold">{g.t} <span className="rounded-full bg-muted px-2 text-xs tabular-nums">{L.length}</span>
+          <section key={g.k} aria-label={g.t} className="space-y-3">
+            <h3 className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm font-semibold">
+              <G className={cn("h-4 w-4", g.cls)} aria-hidden="true" />{g.t}
+              <span className="rounded-full bg-muted px-2 text-xs tabular-nums">{L.length}</span>
+              <span className="text-xs font-normal tabular-nums text-muted-foreground">· {feitoH > 0 ? `${horas(feitoH)} de ${horas(totH)} h` : `${horas(totH)} h`} · {intervalo(L[0].t.dia, Math.max(...L.map((x) => x.t.dia + x.t.dur - 1)))}</span>
               {g.k === "feitas" && <button type="button" onClick={() => setVerFeitas((x) => !x)} className="text-xs font-normal text-primary underline-offset-4 hover:underline">{verFeitas ? "Esconder" : "Mostrar"}</button>}
             </h3>
             {!escondido && (
-              <ul className="overflow-hidden rounded-2xl border border-border bg-card">
-                {L.map(({ t, ti }) => {
-                  const v = estadoVivo(t, p);
-                  const fotos = enviosDe(t).reduce((a, e) => a + (e.fotos?.length ?? 0), 0);
+              <div className="grid gap-3 lg:grid-cols-2">
+                {fases.map((f) => {
+                  const Ic = ICONE_DA_FASE[f.n] ?? Package, cor = COR_FASE[f.n];
                   return (
-                    <li key={ti} className="flex flex-wrap items-center gap-3 border-b border-border px-3 py-2.5 last:border-b-0">
-                      <button type="button" onClick={() => abrir(ti)} className="flex min-w-0 flex-1 items-center gap-3 text-left">
-                        <AvatarTec id={t.tec} />
-                        <span className="min-w-0">
-                          <span className="block truncate text-[15px] font-medium">{t.nome}</span>
-                          <span className="block truncate text-sm text-muted-foreground">{primeiro(nomeTec(t.tec))} · {quando(t.dia)}{t.dur > 1 ? ` a ${quando(t.dia + t.dur - 1)}` : ""} · {nfmt(t.exec?.horas ?? 0)}/{nfmt(t.h)} h{fotos ? ` · ${fotos} ${fotos === 1 ? "foto" : "fotos"}` : ""}</span>
-                        </span>
-                      </button>
-                      <ChipVivo t={t} p={p} />
-                      {planeia && v === "feita" && <Button type="button" size="sm" variant="outline" className="min-h-9 rounded-full" onClick={() => run(() => A.validarTarefa(d.id, ti))}><Check className="mr-1 h-4 w-4" aria-hidden="true" />Validar</Button>}
-                      {planeia && v === "pausada" && <Button type="button" size="sm" variant="outline" className="min-h-9 rounded-full" onClick={() => run(() => A.retomarTarefa(d.id, ti))}><Play className="mr-1 h-4 w-4" aria-hidden="true" />Retomar</Button>}
-                      <button type="button" aria-label={`Abrir ${t.nome}`} onClick={() => abrir(ti)} className="grid h-9 w-9 place-items-center rounded-full text-muted-foreground hover:bg-muted"><ChevronRight className="h-4 w-4" /></button>
-                    </li>
+                    <div key={f.n} role="group" aria-label={`${g.t} · Fase ${f.n} · ${f.curto}`} className="overflow-hidden rounded-2xl border border-border bg-card">
+                      <div className="flex items-center gap-2.5 border-b border-border px-3 py-2.5">
+                        <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-white" style={{ background: cor }}><Ic className="h-4 w-4" /></span>
+                        <div className="min-w-0">
+                          <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: cor }}>Fase {f.n}</p>
+                          <p className="truncate text-sm font-semibold leading-tight">{f.curto}</p>
+                        </div>
+                        <p className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">{f.L.length} {f.L.length === 1 ? "tarefa" : "tarefas"}</p>
+                      </div>
+                      <ul>
+                        {f.L.map(({ t, ti }) => {
+                          const v = estadoVivo(t, p), T = iconeDaTarefa(t.nome), feito = t.exec?.horas ?? 0;
+                          const fotos = enviosDe(t).reduce((a, e) => a + (e.fotos?.length ?? 0), 0);
+                          return (
+                            <li key={ti} className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-2 last:border-b-0">
+                              <button type="button" onClick={() => abrir(ti)} title={t.nome} aria-label={`Abrir ${t.nome}`}
+                                className="group flex min-h-11 min-w-0 flex-1 items-center gap-3 rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                                <span aria-hidden="true" className="grid h-9 w-9 shrink-0 place-items-center rounded-lg" style={{ background: `color-mix(in srgb, ${cor} 12%, transparent)`, color: cor }}><T className="h-[18px] w-[18px]" /></span>
+                                <span className="min-w-0 flex-1">
+                                  <span className="block truncate text-[15px] font-medium">{nomeCurtoTarefa(t.nome)}</span>
+                                  <span className="flex flex-wrap items-center gap-x-1.5 text-sm text-muted-foreground">
+                                    <AvatarTec id={t.tec} tam="h-5 w-5 text-[9px]" /><span>{primeiro(nomeTec(t.tec))}</span>
+                                    <span aria-hidden="true">·</span><span className="tabular-nums">{intervalo(t.dia, t.dia + t.dur - 1)}</span>
+                                    <span aria-hidden="true">·</span><span className="tabular-nums">{feito > 0 ? `${horas(feito)} de ${horas(t.h)} h` : `${horas(t.h)} h`}</span>
+                                    {fotos > 0 && <><span aria-hidden="true">·</span><span>{fotos} {fotos === 1 ? "foto" : "fotos"}</span></>}
+                                  </span>
+                                  {feito > 0 && t.h > 0 && <span aria-hidden="true" className="mt-1 block h-1 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full" style={{ width: `${Math.min(100, (feito / t.h) * 100)}%`, background: cor }} /></span>}
+                                </span>
+                                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground/50 transition-colors group-hover:text-foreground" aria-hidden="true" />
+                              </button>
+                              {(misto || diasDeAtraso(t, p) > 0) && <ChipVivo t={t} p={p} />}
+                              {planeia && v === "feita" && <Button type="button" size="sm" variant="outline" className="min-h-9 rounded-full" onClick={() => run(() => A.validarTarefa(d.id, ti))}><Check className="mr-1 h-4 w-4" aria-hidden="true" />Validar</Button>}
+                              {planeia && v === "pausada" && <Button type="button" size="sm" variant="outline" className="min-h-9 rounded-full" onClick={() => run(() => A.retomarTarefa(d.id, ti))}><Play className="mr-1 h-4 w-4" aria-hidden="true" />Retomar</Button>}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
                   );
                 })}
-              </ul>
+              </div>
             )}
           </section>
         );
@@ -277,7 +316,20 @@ export function Execucao({ ctx, d, abrir, dias }: { ctx: Ctx; d: Negocio; abrir:
 
 /* ================================================================== os materiais */
 const OK_MAT = new Set(["na obra", "na carrinha", "reservado", "recebido"]);
-export function MateriaisDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+/** 23/11 (Rúben: «mega next-level»): a tarefa que precisa de cada material: a que instala o produto (o serviço que ele traz, nos produtos
+ *  do contrato) ou, sem ela, a primeira por validar da fase dele. E se o material vem do contrato ou do modelo de obra. */
+export function quemPrecisa(d: Negocio, fase: number, nome: string): { ti: number | null; contrato: boolean } {
+  const p = d.obra.plano!, norm = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
+  const prod = (d.visita.prod ?? []).find((x) => norm(x.n) === norm(nome));
+  const L = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => estadoVivo(t, p) !== "validada").sort((a, b) => a.t.dia - b.t.dia || a.ti - b.ti);
+  const porSvc = prod?.svc ? L.find(({ t }) => t.svcs.includes(prod.svc!)) : undefined;
+  const daFase = L.find(({ t }) => (t.fase ?? 1) === fase);
+  return { ti: (porSvc ?? daFase)?.ti ?? null, contrato: !!prod };
+}
+const isoDe = (x: Date) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
+const ROTULO_MAT: Record<string, string> = { reservado: "no armazém", recebido: "no armazém", "na obra": "na obra", "na carrinha": "na carrinha" };
+
+export function MateriaisDaObra({ ctx, d, dias = [] }: { ctx: Ctx; d: Negocio; dias?: Date[] }) {
   const { S, A, run } = ctx;
   const db = useInventario();
   const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
@@ -291,6 +343,25 @@ export function MateriaisDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   // o custo do que se pede a mais (ou volta ao armazém): o preço do material, se o tiver; senão o da receita do orçamento
   const custo = (L: { m: MatTarefa; q: number }[]) => L.reduce((a, x) => a + x.q * (x.m.preco ?? custosDosMateriais(d, [{ n: x.m.n, q: x.q }])[0]?.custo ?? 0), 0);
   const cPend = custo(pend), cSobra = custo(sobra);
+  // a tarefa que precisa de cada material, o dia dela e se o material chega tarde
+  const linhaDe = (fase: number, m: (typeof todos)[number]) => {
+    const q = quemPrecisa(d, fase, m.n), tt = q.ti != null ? p.tasks[q.ti] : null, dia = tt ? dias[tt.dia] : undefined;
+    return { ti: q.ti, t: tt, contrato: q.contrato, precisa: dia ? dataCurta(dia) : tt ? `dia ${tt.dia + 1}` : "", tarde: !!(m.chega && dia && m.chega > isoDe(dia)) };
+  };
+  const tarde = G.flatMap((g) => g.itens.filter((m) => linhaDe(g.fase, m).tarde));
+  // as saídas: os materiais agrupados pelo dia e por quem faz a tarefa que precisa deles
+  const saidas = (() => {
+    const M = new Map<string, { dia: number; quando: string; tec: string | null; tarefas: string[]; itens: (typeof todos)[number][]; naObra: boolean; pronto: boolean }>();
+    for (const g of G) for (const m of g.itens) {
+      const x = linhaDe(g.fase, m);
+      if (!x.t) continue;
+      const k = `${x.t.dia}:${x.t.tec ?? ""}`, cur = M.get(k) ?? { dia: x.t.dia, quando: x.precisa, tec: x.t.tec, tarefas: [], itens: [], naObra: true, pronto: true };
+      cur.tarefas.push(nomeCurtoTarefa(x.t.nome)); cur.itens.push(m);
+      cur.naObra &&= m.estado === "na obra"; cur.pronto &&= OK_MAT.has(m.estado);
+      M.set(k, cur);
+    }
+    return [...M.values()].sort((a, b) => a.dia - b.dia);
+  })();
   return (
     <div className="space-y-6">
       <section aria-label="O que chegou e o que falta" className="space-y-3">
@@ -302,22 +373,75 @@ export function MateriaisDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           {d.obra.ec && <Button type="button" variant="outline" className="min-h-10 rounded-full" onClick={() => run(() => A.abrirInv(d.id))}><ArrowUpRight className="mr-1.5 h-4 w-4" aria-hidden="true" />No Inventário</Button>}
         </div>
         {todos.length > 0 && <div className="h-2 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div className="h-full rounded-full bg-success transition-[width] duration-500" style={{ width: `${(ok / todos.length) * 100}%` }} /></div>}
+        {tarde.length > 0 && (
+          <p role="alert" className="flex items-start gap-2 rounded-xl bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />{tarde.length === 1 ? `${tarde[0].n} chega depois de a tarefa que precisa dele começar.` : `${tarde.length} materiais chegam depois de as tarefas que precisam deles começarem.`}
+          </p>
+        )}
+        {/* 23/11: uma lista só (antes, «As entregas» repetia esta): por fase, com o dia em que a tarefa precisa e quando chega */}
         <div className="grid gap-3 lg:grid-cols-2">
-          {G.map((g) => (
-            <div key={g.fase} className="rounded-2xl border border-border bg-card p-3">
-              <p className="mb-1.5 flex items-center gap-2 text-sm font-semibold"><span aria-hidden="true" className="h-2.5 w-2.5 rounded-full" style={{ background: COR_FASE[g.fase] }} />Fase {g.fase} · {FASES_OBRA[g.fase - 1]?.curto}</p>
-              <ul className="space-y-1">
-                {g.itens.map((m, k) => (
-                  <li key={k} className="flex items-center justify-between gap-3 text-sm">
-                    <span className="min-w-0 truncate">{m.n} <span className="text-muted-foreground">· {nfmt(m.q)} {m.un}</span></span>
-                    <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", OK_MAT.has(m.estado) ? "bg-success/15 text-success" : "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200")}>{m.estado}{m.quando ? ` · ${m.quando}` : ""}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+          {G.map((g) => {
+            const Ic = ICONE_DA_FASE[g.fase] ?? Package, cor = COR_FASE[g.fase];
+            return (
+              <div key={g.fase} role="group" aria-label={`Fase ${g.fase} · ${FASES_OBRA[g.fase - 1]?.curto}`} className={cn("overflow-hidden rounded-2xl border border-border bg-card", g.itens.length > 6 && "lg:col-span-2")}>
+                <div className="flex items-center gap-2.5 border-b border-border px-3 py-2.5">
+                  <span aria-hidden="true" className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-white" style={{ background: cor }}><Ic className="h-4 w-4" /></span>
+                  <div className="min-w-0">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: cor }}>Fase {g.fase}</p>
+                    <p className="truncate text-sm font-semibold leading-tight">{FASES_OBRA[g.fase - 1]?.curto}</p>
+                  </div>
+                  <p className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">{g.itens.filter((m) => OK_MAT.has(m.estado)).length} de {g.itens.length} garantidos</p>
+                </div>
+                {/* 23/11 (revisão): uma fase com muitos materiais ocupa a largura toda, em duas colunas (a grelha fica equilibrada) */}
+                <ul className={cn(g.itens.length > 6 && "lg:grid lg:grid-cols-2 lg:gap-x-6")}>
+                  {g.itens.map((m, k) => {
+                    const x = linhaDe(g.fase, m);
+                    return (
+                      <li key={k} className={cn("flex items-center gap-3 border-b border-border px-3 py-2", x.tarde && "bg-destructive/[0.05]")}>
+                        <span className="min-w-0 flex-1">
+                          <span className="block text-sm font-medium">{m.n} <span className="font-normal text-muted-foreground">· {nfmt(m.q)} {m.un}</span>{!x.contrato && <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">modelo de obra</span>}</span>
+                          {x.t && <span className="block text-xs text-muted-foreground">Precisa a {x.precisa} · <button type="button" title={x.t.nome} onClick={() => setTi(x.ti)} className="underline-offset-2 hover:underline">{nomeCurtoTarefa(x.t.nome)}</button></span>}
+                          {x.tarde && <span className="block text-xs font-medium text-destructive">Chega depois de a tarefa começar</span>}
+                        </span>
+                        <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", OK_MAT.has(m.estado) ? "bg-success/15 text-success" : x.tarde ? "bg-destructive/10 text-destructive" : "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200")}>
+                          {OK_MAT.has(m.estado) ? ROTULO_MAT[m.estado] ?? m.estado : m.quando ? `chega a ${m.quando}` : m.estado}
+                        </span>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            );
+          })}
         </div>
       </section>
+
+      {/* 23/11 (revisão: «a saída do armazém para a obra»): no dia de cada tarefa, o que sai do armazém e quem o leva */}
+      {saidas.length > 0 && (
+        <section aria-label="Saídas para a obra" className="space-y-3">
+          <div>
+            <p className="text-sm font-semibold">Saídas para a obra</p>
+            <p className="text-sm text-muted-foreground">O que sai do armazém, em que dia e quem leva: o material de cada tarefa, no dia em que ela começa.</p>
+          </div>
+          <ol className="space-y-2">
+            {saidas.map((x) => (
+              <li key={`${x.dia}:${x.tec ?? ""}`} className="flex flex-wrap items-start gap-3 rounded-2xl border border-border bg-card p-3">
+                <span className="w-24 shrink-0 text-sm font-semibold tabular-nums">{x.quando}</span>
+                <span className="flex min-w-0 flex-1 items-start gap-2">
+                  <AvatarTec id={x.tec} tam="h-7 w-7" />
+                  <span className="min-w-0">
+                    <span className="block text-sm"><b className="font-medium">{primeiro(nomeTec(x.tec)) || "Sem técnico"}</b> leva {x.itens.length} {x.itens.length === 1 ? "material" : "materiais"} · {[...new Set(x.tarefas)].join(", ")}</span>
+                    <span className="block text-xs text-muted-foreground">{x.itens.map((m) => `${m.n} · ${nfmt(m.q)} ${m.un}`).join(" · ")}</span>
+                  </span>
+                </span>
+                <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", x.naObra ? "bg-success/15 text-success" : x.pronto ? "bg-primary/10 text-primary" : "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200")}>
+                  {x.naObra ? "na obra" : x.pronto ? "pronto a sair" : "ainda não está no armazém"}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
 
       {planeia && (
         <section aria-label="Pedir mais ou devolver" className="space-y-3 rounded-2xl border border-border bg-card p-4">
@@ -325,13 +449,15 @@ export function MateriaisDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             <p className="text-sm font-semibold">Pedir mais ou devolver</p>
             <p className="text-sm text-muted-foreground">Escolha a tarefa e mude as quantidades. O que sobe vai ao fornecedor numa encomenda de ajuste; o que desce volta ao armazém no fim da obra.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            {p.tasks.map((x, i) => estadoVivo(x, p) === "validada" ? null : (
-              <button key={i} type="button" aria-pressed={ti === i} onClick={() => setTi(ti === i ? null : i)} className={chip(ti === i)}>{x.nome}</button>
-            ))}
-          </div>
+          {/* 23/11 (Rúben: «lista está feia»): as tarefas pelas fases da obra, com ícones e nomes curtos */}
+          <EscolherTarefa p={p} rotulo="A tarefa" sel={ti} escolher={setTi}
+            tis={p.tasks.map((_, i) => i).filter((i) => estadoVivo(p.tasks[i], p) !== "validada")}
+            detalhe={(i) => { const n = (p.tasks[i].mats ?? materiaisDaTarefa(p.tasks[i], S.svc)).length; return n ? `${n} ${n === 1 ? "material" : "materiais"}` : null; }} />
           {t && ti != null && (
-            <EditorMateriais mats={t.mats ?? materiaisDaTarefa(t, S.svc)} mudar={(m) => run(() => A.matsTarefa(d.id, ti, m))} />
+            <div className="space-y-2 rounded-xl border border-primary/30 bg-primary/[0.03] p-3">
+              <p className="text-sm font-semibold" title={t.nome}>{nomeCurtoTarefa(t.nome)}</p>
+              <EditorMateriais mats={t.mats ?? materiaisDaTarefa(t, S.svc)} mudar={(m) => run(() => A.matsTarefa(d.id, ti, m))} />
+            </div>
           )}
           {(pend.length > 0 || sobra.length > 0) && (
             <div className="space-y-2 rounded-xl bg-muted/50 p-3 text-sm">
@@ -343,6 +469,51 @@ export function MateriaisDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         </section>
       )}
     </div>
+  );
+}
+
+/* ================================================================== 23/11: a dispersão da equipa */
+export function DispersaoDaEquipa({ ctx, d }: { ctx: Ctx; d: Negocio }) {
+  const { S, A, run } = ctx;
+  const p = d.obra.plano!;
+  const planeia = podeNeg(S.role, "obra.planear");
+  const ocup = ocupacaoDosTecnicos(S, d.id);
+  const D = dispersaoDaEquipa(p, ocup);
+  const [feito, setFeito] = useState(false);
+  if (!D) return null;
+  return (
+    <section aria-label="A equipa dispersa" className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50/60 p-4 dark:border-amber-800 dark:bg-amber-950/20">
+      <div className="flex items-start gap-3">
+        <Users className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" aria-hidden="true" />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">{D.pessoas} pessoas para {D.tarefas} tarefas em {D.dias} dias úteis</p>
+          <p className="text-sm text-muted-foreground">Numa obra pequena, cada pessoa a mais é mais uma deslocação e mais uma passagem de mão.{D.passagens.length ? " Juntando tarefas em quem já cá está (do ofício e livre nesses dias):" : " Não há como juntar sem mudar datas: quem é do mesmo ofício não está livre nesses dias, ou cada tarefa pede um ofício diferente. Para juntar, mude o dia de uma tarefa no plano ou escolha outra pessoa na agenda."}</p>
+        </div>
+      </div>
+      {D.passagens.length > 0 && <>
+      <dl className="grid grid-cols-3 gap-2 text-center">
+        {([["Pessoas", D.pessoas, D.depois], ["Idas à obra", D.deslocacoesAntes, D.deslocacoesDepois], ["Fim e horas", "=", "="]] as [string, number | string, number | string][]).map(([l, a, b]) => (
+          <div key={l} className="rounded-xl bg-card p-2 ring-1 ring-border">
+            <dt className="text-xs text-muted-foreground">{l}</dt>
+            <dd className="text-lg font-semibold tabular-nums">{a === b ? "não mudam" : <>{a} <span className="text-muted-foreground">→</span> {b}</>}</dd>
+          </div>
+        ))}
+      </dl>
+      <ul className="space-y-1 text-sm">
+        {D.passagens.map((x) => (
+          <li key={x.ti} className="flex flex-wrap items-center gap-2" title={p.tasks[x.ti].nome}>
+            <span className="font-medium">{nomeCurtoTarefa(p.tasks[x.ti].nome)}</span>
+            <span className="text-muted-foreground">{primeiro(nomeTec(x.de))} → {primeiro(nomeTec(x.para))}</span>
+          </li>
+        ))}
+      </ul>
+      {planeia && (
+        <Button type="button" className="min-h-11 rounded-full" disabled={feito} onClick={() => { run(() => D.passagens.forEach((x) => A.trocarTec(d.id, x.ti, x.para))); setFeito(true); }}>
+          <Check className="mr-1.5 h-4 w-4" aria-hidden="true" />{feito ? "Aplicado" : `Juntar: ${D.passagens.length} ${D.passagens.length === 1 ? "passagem" : "passagens"}`}
+        </Button>
+      )}
+      </>}
+    </section>
   );
 }
 
@@ -383,7 +554,7 @@ export function EquipaDaObra({ ctx, d, dias, abrirOutra, novaPara, abrir }: {
               {planeia && porFazer.length > 0 && <Button type="button" size="sm" variant="ghost" className="min-h-9 rounded-full" onClick={() => setPassar(passar === tec ? null : tec)}><Users className="mr-1 h-4 w-4" aria-hidden="true" />Passar as tarefas</Button>}
             </div>
             <ul className="mt-2 flex flex-wrap gap-1.5">
-              {ts.map(({ t, ti }) => <li key={ti}><button type="button" onClick={() => abrir(ti)} className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-border px-3 text-sm hover:bg-muted"><span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: COR_FASE[t.fase ?? 1] }} />{t.nome}<ChipVivo t={t} p={p} /></button></li>)}
+              {ts.map(({ t, ti }) => <li key={ti}><button type="button" onClick={() => abrir(ti)} className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-border px-3 text-sm hover:bg-muted"><span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: COR_FASE[t.fase ?? 1] }} /><span title={t.nome}>{nomeCurtoTarefa(t.nome)}</span>{estadoVivo(t, p) !== "por começar" && <ChipVivo t={t} p={p} />}</button></li>)}
             </ul>
             <AnimatePresence>
               {passar === tec && (
@@ -417,8 +588,9 @@ export function ClienteDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   return (
     <div className="grid gap-5 lg:grid-cols-2">
       {/* 19/11: a conversa com o cliente e os problemas que ele reporta vivem aqui (a página antiga da obra saiu das Operações) */}
-      <ConversaDoClienteNaObra ctx={ctx} d={d} />
-      <section aria-label="Avisar o cliente" className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <ConversaDoClienteNaObra ctx={ctx} d={d} soLer={!planeia} />
+      {/* 23/11 (permissões): sem negocios.obra.planear não se escreve ao cliente daqui */}
+      {planeia && <section aria-label="Avisar o cliente" className="space-y-3 rounded-2xl border border-border bg-card p-4">
         <p className="text-sm font-semibold">Avisar o cliente</p>
         <p className="text-sm text-muted-foreground">Aparece nas novidades da obra, no portal dele. Para mudar datas, use o plano: o aviso vai com a mudança.</p>
         <div className="flex flex-wrap gap-2">{AVISOS_RAPIDOS.map((x) => <button key={x} type="button" onClick={() => setTexto(x)} className={chip(texto === x)}>{x}</button>)}</div>
@@ -426,7 +598,7 @@ export function ClienteDaObra({ ctx, d }: { ctx: Ctx; d: Negocio }) {
         <div className="flex flex-wrap items-center justify-end gap-2">
           <Button type="button" variant="outline" className="min-h-10 rounded-full" disabled={!planeia || !texto.trim()} onClick={() => { run(() => A.avisarClienteObra(d.id, texto)); setTexto(""); }}><Send className="mr-1.5 h-4 w-4" aria-hidden="true" />Avisar no portal</Button>
         </div>
-      </section>
+      </section>}
       <section aria-label="As adendas" className="space-y-2 rounded-2xl border border-border bg-card p-4">
         <p className="text-sm font-semibold">As adendas: do disparo ao pagamento</p>
         {!ads.length ? <p className="text-sm text-muted-foreground">Sem adendas. Um pedido do cliente ou um imprevisto com custo prepara uma, por disparar.</p> : (
@@ -488,13 +660,20 @@ export function FechoDaObra({ ctx, d, irPara }: { ctx: Ctx; d: Negocio; irPara: 
         </section>
         <section aria-label="A vistoria final" className="space-y-3 rounded-2xl border border-border bg-card p-4">
           <p className="text-sm font-semibold">A vistoria final</p>
-          <label className="grid gap-1 text-sm">Data da vistoria
+          {/* 23/11 (permissões): sem negocios.obra.planear lê-se a vistoria, a satisfação e as notas, sem as mudar */}
+          {planeia ? <label className="grid gap-1 text-sm">Data da vistoria
             <input type="date" value={f.vistoria ?? ""} onChange={(e) => run(() => A.campo(d.id, "vistoria", e.target.value))} className="h-11 rounded-xl border border-input bg-background px-3 text-[15px]" /></label>
+            : <p className="text-sm">Data da vistoria: <span className="text-muted-foreground">{f.vistoria ? f.vistoria.split("-").reverse().join("/") : "por marcar"}</span></p>}
           {/* 17/11: o auto de receção não se marca à mão: gera-se ao encerrar e o cliente assina-o no portal */}
           <p className="text-sm text-muted-foreground">Auto de receção: {d.obra.auto ? `${d.obra.auto.n} · ${d.obra.auto.estado === "assinado" ? `assinado pelo cliente a ${d.obra.auto.assinado ?? d.obra.auto.q}` : "no portal do cliente, por assinar"}` : "gera-se ao encerrar a obra e vai ao portal do cliente para assinar."}</p>
+          {planeia ? <>
           <div className="space-y-1"><p className="text-sm">Satisfação do cliente</p>
             <div className="flex gap-2">{["1", "2", "3", "4", "5"].map((x) => <button key={x} type="button" aria-pressed={f.satisfacao === x} onClick={() => run(() => A.campo(d.id, "satisfacao", x))} className={cn(chip(f.satisfacao === x), "w-11 justify-center px-0")}>{x}</button>)}</div></div>
           <NotasFecho valor={f.notas_fecho ?? ""} gravar={(v) => run(() => A.campo(d.id, "notas_fecho", v))} />
+          </> : <>
+            <p className="text-sm">Satisfação do cliente: <span className="text-muted-foreground">{f.satisfacao ? `${f.satisfacao} de 5` : "por dar"}</span></p>
+            {f.notas_fecho && <p className="text-sm">Remates e notas: <span className="text-muted-foreground">{f.notas_fecho}</span></p>}
+          </>}
         </section>
       </div>
     </div>

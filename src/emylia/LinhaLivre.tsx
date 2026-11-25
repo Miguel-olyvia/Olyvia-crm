@@ -61,7 +61,7 @@ export function LinhaLivre({ ctx, d }: { ctx: Pick<Ctx, "A" | "run">; d: Negocio
       <fieldset className="sm:col-span-4">
         <legend className="text-sm font-medium">IVA</legend>
         <div className="mt-1 flex flex-wrap gap-2">
-          {([[23, "23% · materiais"], [6, "6% · mão de obra ou serviço"]] as const).map(([v, t]) => (
+          {([[23, "23% · materiais"], [6, "6% · mão de obra ou serviço"], [0, "0% · autoliquidação"]] as const).map(([v, t]) => (
             <button key={v} type="button" aria-pressed={iva === v} onClick={() => setIva(v)}
               className={cn("min-h-11 rounded-lg border px-3 text-[15px]", iva === v ? "border-primary bg-primary/10 font-medium" : "border-input bg-card hover:bg-muted")}>{t}</button>
           ))}

@@ -1,7 +1,7 @@
-import { useState, type ReactNode } from "react";
+import { useContext, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowLeftRight, ArrowRight, Truck, Warehouse } from "lucide-react";
+import { ArrowDown, ArrowLeftRight, ArrowRight, Sparkles, Truck, Warehouse } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompany } from "@/contexts/CompanyContext";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -46,6 +46,8 @@ import { todayIsoLocal } from "@/components/purchase-orders/poListUtils";
 import { useMovementDocumentLinks, type MovementDocumentLinks } from "@/hooks/useMovementDocumentLinks";
 import { cn } from "@/lib/utils";
 import { TRIGGER_LABEL, normalizeStockDeductionTrigger } from "@/components/inventory/InventorySettingsCard";
+import { InventarioEmbebido } from "@/components/inventory/ui/embebido";
+import { botaoPrincipal } from "@/pages/inventario-novo/contasComando";
 
 // "Hoje" do Inventário, como o Hoje do 2.0 (HojeInv.tsx): o fluxo em cinco
 // passos (venda assinada → encomenda cliente → Sim/Não: stock ou PO → receção
@@ -55,6 +57,8 @@ import { TRIGGER_LABEL, normalizeStockDeductionTrigger } from "@/components/inve
 // "Encomendas por receber no armazém" e o destino de "Receber no armazém →"
 // vêm das POs da Receção (useReceivablePos). Cabeçalho e últimos movimentos
 // não dependem da RPC.
+// Dentro do novo Inventário (InventarioEmbebido) mostra a versão compacta do artefacto aprovado (FluxoCompacto +
+// MovimentoCartao); fora dele, este ecrã fica exatamente como era.
 
 const formatQty = (value: number) => new Intl.NumberFormat("pt-PT", { maximumFractionDigits: 2 }).format(value);
 const formatEur = (value: number) =>
@@ -374,6 +378,311 @@ function ReceivingQueueCard({ item, onClick }: { item: InventoryQueueItem & { sh
   );
 }
 
+/* ==================================================================================================================
+ * Dentro do novo Inventário (InventarioEmbebido = true): a versão compacta do artefacto aprovado
+ * (vault/inventario-redesenho-completo.html, V.hoje + movCard). Os MESMOS dados, regras de permissão e ligações do
+ * FlowSection e da lista de movimentos de cima; só a apresentação muda. Fora da moldura nada disto é usado.
+ * ================================================================================================================== */
+
+/** O .sect do artefacto: sobretítulo pequeno em maiúsculas, com ações à direita. */
+function Seccao({ id, titulo, acoes }: { id: string; titulo: string; acoes?: ReactNode }) {
+  return (
+    <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-0.5">
+      <h2 id={id} className="text-[12.5px] font-bold uppercase tracking-[0.12em] text-muted-foreground">{titulo}</h2>
+      {acoes ? <div className="flex flex-wrap items-center gap-1">{acoes}</div> : null}
+    </div>
+  );
+}
+
+const SOBRE_TOM = {
+  primary: "text-primary",
+  ok: "text-success",
+  warn: "text-amber-700 dark:text-amber-300",
+} as const;
+
+/**
+ * Um cartão do "Fluxo de hoje" (o .card do artefacto, rounded-[20px]). Com `to`, o sobretítulo é a ligação e cobre o
+ * cartão todo (o cartão inteiro leva à lista); os números lá dentro ficam por cima e continuam a abrir a lista filtrada.
+ */
+function CartaoFluxo({
+  sobre,
+  tom = "primary",
+  to,
+  marca,
+  children,
+}: {
+  sobre: string;
+  tom?: keyof typeof SOBRE_TOM;
+  to?: string;
+  /** Pílula antes do sobretítulo (Sim / Não do garfo). */
+  marca?: ReactNode;
+  children: ReactNode;
+}) {
+  const cls = cn("text-xs font-bold uppercase tracking-[0.16em]", SOBRE_TOM[tom]);
+  return (
+    <article
+      aria-label={sobre}
+      className={cn(
+        "relative flex flex-col gap-2.5 rounded-[20px] border border-border bg-card px-4 py-[15px] shadow-sm",
+        to && "transition-[transform,border-color] duration-150 hover:-translate-y-0.5 hover:border-primary focus-within:border-primary motion-reduce:transition-none motion-reduce:hover:translate-y-0",
+      )}
+    >
+      <h3 className="flex flex-wrap items-center gap-1.5">
+        {marca}
+        {to ? (
+          <Link
+            to={to}
+            className={cn(cls, "rounded-sm after:absolute after:inset-0 after:rounded-[20px] focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-primary")}
+          >
+            {sobre}
+          </Link>
+        ) : (
+          <span className={cls}>{sobre}</span>
+        )}
+      </h3>
+      {children}
+    </article>
+  );
+}
+
+/** Um número do cartão: com destino é um botão (por cima da ligação do cartão), sem destino só o número a negrito. */
+function NumFluxo({
+  rotulo,
+  valor,
+  onClick,
+  className,
+}: {
+  rotulo: string;
+  valor: ReactNode;
+  onClick?: () => void;
+  className?: string;
+}) {
+  const cls = cn("font-bold tabular-nums text-foreground", className);
+  if (!onClick) return <b className={cls}>{valor}</b>;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={`${rotulo}: ${typeof valor === "number" ? formatQty(valor) : valor}`}
+      className={cn(
+        cls,
+        "relative z-10 rounded underline decoration-dotted underline-offset-[3px] hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary",
+      )}
+    >
+      {typeof valor === "number" ? formatQty(valor) : valor}
+    </button>
+  );
+}
+
+const Seta = () => <span aria-hidden="true" className="text-muted-foreground"> → </span>;
+const Ponto = () => <span aria-hidden="true"> · </span>;
+
+/** Junta as partes com " · " (só as que existem). */
+function comPontos(partes: ReactNode[]): ReactNode[] {
+  return partes.filter(Boolean).flatMap((p, i) => (i === 0 ? [p] : [<Ponto key={`p${i}`} />, p]));
+}
+
+/** O "Fluxo de hoje": os 5 cartões do artefacto, com os números, ligações e frases do FlowSection. */
+function FluxoCompacto({ data }: { data: InventoryTodayPayload }) {
+  const navigate = useNavigate();
+  const { hasPermission } = usePermissions();
+  const canEc = hasPermission("client_orders.view");
+  const canPo = hasPermission("purchase_orders.view");
+  const canRec = hasPermission("receiving.view");
+  const canStock = hasPermission("inventory.view");
+  const go = (to: string) => () => navigate(to);
+
+  // As mesmas condições do FlowSection (cada cartão some como a etapa correspondente).
+  const co = data.client_orders;
+  const po = data.purchases;
+  const st = data.stock;
+  const cnt = data.counts;
+  const origin = co?.by_origin ?? null;
+  const trigger = data.settings?.stock_deduction_trigger ?? null;
+  const salesStage = canEc && origin && [origin.contract, origin.direct_sale, origin.manual].some(isNum);
+  const ecStage = canEc && co && [co.open, co.ready_to_ship, co.without_preferred_supplier].some(isNum);
+  const stockBranch = isNum(st?.reserved_units) || (canEc && isNum(co?.ready_to_ship));
+  const poBranch = (canPo && po && [po.pending_approval, po.portal_unseen, po.portal_confirmed, po.late].some(isNum))
+    || (canRec && isNum(po?.open_delivery_notes));
+  const showValue = !!st;
+  const stockStage = isNum(st?.below_reorder_point) || isNum(cnt?.in_progress) || showValue;
+  if (!salesStage && !ecStage && !stockBranch && !poBranch && !stockStage) return null;
+
+  const linha = "text-[13px] leading-relaxed text-muted-foreground";
+  const nota = "text-xs text-muted-foreground";
+
+  return (
+    <section aria-labelledby="inv-flow-hoje">
+      <Seccao id="inv-flow-hoje" titulo="Fluxo de hoje" />
+      <div className="grid gap-2.5 [grid-template-columns:repeat(auto-fit,minmax(260px,1fr))]">
+        {salesStage ? (
+          <CartaoFluxo sobre="1 · Vendas assinadas">
+            <p className={linha}>
+              {comPontos([
+                isNum(origin?.contract) ? <span key="c">Contratos <NumFluxo rotulo="Contratos" valor={origin.contract} onClick={go(clientOrdersLink({ origin: "contract" }))} /></span> : null,
+                isNum(origin?.direct_sale) ? <span key="d">Vendas diretas <NumFluxo rotulo="Vendas diretas" valor={origin.direct_sale} onClick={go(clientOrdersLink({ origin: "direct_sale" }))} /></span> : null,
+                isNum(origin?.manual) ? <span key="m" title="Encomendas manuais">Manuais <NumFluxo rotulo="Encomendas manuais" valor={origin.manual} onClick={go(clientOrdersLink({ origin: "manual" }))} /></span> : null,
+              ])}
+            </p>
+            {trigger ? (
+              <p className={linha}>
+                Baixa de stock por venda: <b className="text-foreground">{TRIGGER_LABEL[normalizeStockDeductionTrigger(trigger)]}</b>
+              </p>
+            ) : null}
+          </CartaoFluxo>
+        ) : null}
+
+        {ecStage ? (
+          <CartaoFluxo sobre="2 · Encomendas Clientes" to={clientOrdersLink()}>
+            <p className={linha}>
+              {comPontos([
+                isNum(co?.open) ? <span key="o">Em aberto <NumFluxo rotulo="Em aberto" valor={co.open} onClick={go(clientOrdersLink())} /></span> : null,
+                isNum(co?.ready_to_ship) ? <span key="r">Prontas a expedir <NumFluxo rotulo="Prontas a expedir" valor={co.ready_to_ship} className="text-success" onClick={go(clientOrdersLink({ ready: true }))} /></span> : null,
+                isNum(co?.without_preferred_supplier) ? (
+                  <span key="s">Sem fornecedor <NumFluxo rotulo="Sem fornecedor" valor={co.without_preferred_supplier} className={co.without_preferred_supplier > 0 ? "text-destructive" : undefined} onClick={go(clientOrdersLink({ status: "sem_fornecedor" }))} /></span>
+                ) : null,
+              ])}
+            </p>
+            <p className={nota}>Cada linha: há stock livre (stock − reservas anteriores)?</p>
+          </CartaoFluxo>
+        ) : null}
+
+        {stockBranch ? (
+          <CartaoFluxo sobre="Há stock → serve do stock" tom="ok" marca={<InventoryStatusBadge tone="ok">Sim</InventoryStatusBadge>}>
+            <p className={linha}>
+              Reserva FIFO{" "}
+              {isNum(st?.reserved_units) ? (
+                <NumFluxo rotulo="Reserva FIFO (un)" valor={`${formatQty(st.reserved_units)} un`} onClick={canStock ? go(stocksLink()) : undefined} />
+              ) : null}
+              <Seta />
+              Saída{" "}
+              {canEc && isNum(co?.ready_to_ship) ? (
+                <NumFluxo rotulo="Saída (EC)" valor={`${formatQty(co.ready_to_ship)} EC`} onClick={go(clientOrdersLink({ ready: true }))} />
+              ) : "(EC)"}
+              <Seta />
+              Encomenda servida
+            </p>
+          </CartaoFluxo>
+        ) : null}
+
+        {poBranch ? (
+          <CartaoFluxo
+            sobre="Falta → encomenda ao fornecedor preferencial"
+            tom="warn"
+            marca={<InventoryStatusBadge tone="warn">Não</InventoryStatusBadge>}
+            to={canPo ? purchaseOrdersLink() : undefined}
+          >
+            <p className={linha}>
+              {canPo && isNum(po?.pending_approval) ? (
+                <>3 PO <NumFluxo rotulo="PO por aprovar" valor={po.pending_approval} onClick={go(purchaseOrdersLink({ status: "pending" }))} /> por aprovar<Seta /></>
+              ) : null}
+              {/* "Por ver" e "confirmou" abrem ambos ?status=portal (o filtro das POs não tem sub-estado). */}
+              {canPo && isNum(po?.portal_unseen) ? (
+                <><span title="Publicada no portal">Portal</span> <NumFluxo rotulo="Publicada no portal, por ver" valor={po.portal_unseen} onClick={go(purchaseOrdersLink({ status: "portal" }))} /> por ver<Seta /></>
+              ) : null}
+              {canPo && isNum(po?.portal_confirmed) ? (
+                <>Fornecedor confirma <NumFluxo rotulo="Fornecedor confirma" valor={po.portal_confirmed} onClick={go(purchaseOrdersLink({ status: "portal" }))} /><Seta /></>
+              ) : null}
+              {canRec && isNum(po?.open_delivery_notes) ? (
+                <>4 Receção <NumFluxo rotulo="Receção, guias abertas" valor={po.open_delivery_notes} onClick={go(receivingLink({ notes: "open" }))} /> {po.open_delivery_notes === 1 ? "guia aberta" : "guias abertas"}<Seta /></>
+              ) : null}
+              Serve a EC
+            </p>
+            {(canPo && isNum(po?.late) && po.late > 0) || canRec ? (
+              <div className="relative z-10 flex flex-wrap items-center gap-2">
+                {canPo && isNum(po?.late) && po.late > 0 ? (
+                  <button
+                    type="button"
+                    onClick={go(purchaseOrdersLink({ status: "late" }))}
+                    className="inline-flex min-h-6 items-center rounded-full bg-destructive/10 px-2.5 text-xs font-semibold text-destructive hover:bg-destructive/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    {po.late} atrasada{po.late === 1 ? "" : "s"}
+                  </button>
+                ) : null}
+                {canRec ? (
+                  <Link
+                    to={receivingLink()}
+                    className="inline-flex min-h-6 items-center gap-1 rounded-full px-1 text-xs font-semibold text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <Truck className="h-3.5 w-3.5" aria-hidden="true" /> Receber
+                  </Link>
+                ) : null}
+              </div>
+            ) : null}
+          </CartaoFluxo>
+        ) : null}
+
+        {stockStage ? (
+          <CartaoFluxo sobre="5 · Stock" to={canStock ? stocksLink() : undefined}>
+            <p className={linha}>
+              {comPontos([
+                isNum(st?.below_reorder_point) ? (
+                  <span key="b" title="Abaixo do ponto de encomenda">Abaixo do ponto <NumFluxo rotulo="Abaixo do ponto de encomenda" valor={st.below_reorder_point} className={st.below_reorder_point > 0 ? "text-amber-700 dark:text-amber-300" : undefined} onClick={go(stocksLink({ status: "low" }))} /></span>
+                ) : null,
+                isNum(cnt?.in_progress) ? <span key="c">Contagens em curso <NumFluxo rotulo="Contagens em curso" valor={cnt.in_progress} onClick={go(stockCountsLink({ status: "em_contagem" }))} /></span> : null,
+                showValue ? (
+                  <span key="v" title="Valor em stock (custo médio)">Valor (custo médio) <NumFluxo rotulo="Valor em stock (custo médio)" valor={isNum(st?.value) ? formatEur(st.value) : "—"} onClick={canStock ? go(stocksLink()) : undefined} /></span>
+                ) : null,
+              ])}
+            </p>
+            <p className={nota}>
+              A receção fecha o ciclo: a parte “para EC” fica reservada e serve a encomenda; a parte “para stock” entra livre e atualiza o custo médio ponderado.
+            </p>
+          </CartaoFluxo>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
+/** A frase do movimento (o movSay do artefacto), só com o que a lista já lê: tipo, quantidade e produto. */
+const FRASE: Record<string, [string, string]> = {
+  entrada: ["Entrou", "Entraram"],
+  estorno_venda: ["Voltou por estorno de venda", "Voltaram por estorno de venda"],
+  transferencia_entrada: ["Chegou por transferência", "Chegaram por transferência"],
+  ajuste_positivo: ["Acertou-se para mais", "Acertaram-se para mais"],
+  saida: ["Saiu", "Saíram"],
+  venda: ["Saiu por venda", "Saíram por venda"],
+  transferencia_saida: ["Saiu por transferência", "Saíram por transferência"],
+  ajuste_negativo: ["Acertou-se para menos", "Acertaram-se para menos"],
+  devolucao_fornecedor: ["Devolveu-se ao fornecedor", "Devolveram-se ao fornecedor"],
+  quebra: ["Partiu-se", "Partiram-se"],
+};
+
+/** Um movimento em cartão (o movCard do artefacto). */
+function MovimentoCartao({
+  m,
+  armazem,
+  links,
+  can,
+}: {
+  m: RecentMovement;
+  armazem: string;
+  links: MovementDocumentLinks;
+  can: DocumentAccess;
+}) {
+  const qty = signedMovementQty(m.movement_type, m.quantity);
+  const abs = Math.abs(qty);
+  const verbo = FRASE[m.movement_type]?.[abs === 1 ? 0 : 1] ?? movementTypeLabel(m.movement_type);
+  return (
+    <li className="flex flex-col gap-2.5 rounded-[20px] border border-border bg-card px-4 py-[15px] shadow-sm">
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-[13px] text-muted-foreground">{formatDateTime(m.created_at)} · {armazem}</span>
+        <span className={cn("whitespace-nowrap text-[1.1rem] font-extrabold tabular-nums", qty > 0 ? "text-success" : "text-foreground")}>
+          {qty > 0 ? "+" : "−"}{formatQty(abs)}
+        </span>
+      </div>
+      <p className="text-sm">
+        {verbo} <b className="tabular-nums">{formatQty(abs)}</b> de {m.products?.name ?? "—"}
+      </p>
+      <p className="font-mono text-[12.5px] text-muted-foreground">
+        {movementTypeLabel(m.movement_type)}
+        {m.document_number ? <> · <MovementDocument m={m} links={links} can={can} /></> : null}
+      </p>
+    </li>
+  );
+}
+
 const InventoryToday = () => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -382,6 +691,8 @@ const InventoryToday = () => {
   const { hasPermission } = usePermissions();
   const { t } = useTranslation();
   const [movementDialogOpen, setMovementDialogOpen] = useState(false);
+  // Dentro do novo Inventário (src/pages/inventario-novo) não se mostra o convite para o abrir.
+  const embebido = useContext(InventarioEmbebido);
 
   const { data: today } = useInventoryToday();
   const queue = getInventoryQueueItems(today, hasPermission);
@@ -466,6 +777,83 @@ const InventoryToday = () => {
 
   const warehouseName = (id: string) => warehouses.find((w) => w.id === id)?.name;
 
+  const movementDialog = (
+    <StockMovementDialog
+      open={movementDialogOpen}
+      onOpenChange={setMovementDialogOpen}
+      organizationId={activeCompany.id}
+      warehouses={warehouses}
+      onSuccess={() => {
+        void recent.refetch();
+        void queryClient.invalidateQueries({ queryKey: inventoryTodayQueryKey(activeCompany.id) });
+        if (canReceivable) void receivable.refetch();
+      }}
+    />
+  );
+
+  if (embebido) {
+    // Dentro da moldura do novo Inventário: sem cabeçalho (a moldura tem o título e o botão principal) e sem a Fila de
+    // trabalho (é o «Precisa de ti» do Comando, com todos os itens). O «Registar movimento» só fica aqui quando o botão
+    // principal da moldura não o é (a mesma conta: botaoPrincipal), para estar sempre à mão sem se repetir.
+    const principalEMovimento =
+      botaoPrincipal(today, canReceivable ? (receivable.data ?? null) : null, todayIsoLocal(), hasPermission).tipo === "movimento";
+    const lk =
+      "inline-flex min-h-8 items-center gap-1 rounded-md px-2 text-sm font-semibold text-primary hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
+    return (
+      <>
+        <div className="space-y-6">
+          {today ? <FluxoCompacto data={today} /> : null}
+
+          <section aria-labelledby="inv-recent">
+            <Seccao
+              id="inv-recent"
+              titulo="Últimos movimentos"
+              acoes={
+                <>
+                  <PermissionGate permission="receiving.view">
+                    <Link to={receiveTo} className={lk}>
+                      <Warehouse className="h-4 w-4" aria-hidden="true" /> Receber no armazém →
+                    </Link>
+                  </PermissionGate>
+                  {!principalEMovimento ? (
+                    <PermissionGate permission="inventory.edit">
+                      <button type="button" className={lk} onClick={() => setMovementDialogOpen(true)}>
+                        <ArrowLeftRight className="h-4 w-4" aria-hidden="true" /> Registar movimento
+                      </button>
+                    </PermissionGate>
+                  ) : null}
+                </>
+              }
+            />
+            {recent.isLoading ? (
+              <p className="text-sm text-muted-foreground">A carregar…</p>
+            ) : recent.error ? (
+              <p className={cn("text-sm", toneText.bad)}>Não foi possível carregar os movimentos.</p>
+            ) : (recent.data ?? []).length === 0 ? (
+              <p className="rounded-2xl border border-dashed border-border p-3 text-sm text-muted-foreground">Sem movimentos.</p>
+            ) : (
+              <ul aria-label="Últimos movimentos" className="grid gap-2.5 [grid-template-columns:repeat(auto-fill,minmax(300px,1fr))]">
+                {(recent.data ?? []).map((m) => (
+                  <MovimentoCartao
+                    key={m.id}
+                    m={m}
+                    armazem={m.warehouses?.name ?? warehouseName(m.warehouse_id) ?? "—"}
+                    links={docLinks}
+                    can={docAccess}
+                  />
+                ))}
+              </ul>
+            )}
+            <Link to={stockMovementsLink()} className={cn(lk, "mt-2 px-0.5")}>
+              Ver livro completo
+            </Link>
+          </section>
+        </div>
+        {movementDialog}
+      </>
+    );
+  }
+
   return (
     <>
       <div className="space-y-8">
@@ -474,6 +862,11 @@ const InventoryToday = () => {
           description={t("inventory.today.description")}
           actions={
             <>
+              {!embebido ? (
+                <Button variant="outline" asChild>
+                  <Link to="/inventory/novo"><Sparkles className="mr-2 h-4 w-4" /> Experimentar o novo Inventário</Link>
+                </Button>
+              ) : null}
               <PermissionGate permission="inventory.edit">
                 <Button variant="outline" onClick={() => setMovementDialogOpen(true)}>
                   <ArrowLeftRight className="mr-2 h-4 w-4" /> Registar movimento

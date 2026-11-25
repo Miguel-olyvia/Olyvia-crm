@@ -41,9 +41,10 @@ describe("Catálogo e custos: a leitura leve", () => {
     expect(rpc).toHaveBeenCalledWith("cat_ler_catalogo_servicos", { p_org: "11111111-1111-4111-a111-111111111111" });
     expect(rpc.mock.calls.map((c) => c[0])).not.toContain("cat_ler_catalogo");
   });
-  it("os Equipamentos, os Consumíveis e os Técnicos também leem o leve; as Ligações e os Produtos, o inteiro", () => {
-    for (const s of ["servicos", "equipamentos", "consumiveis", "tecnicos"] as const) expect(usaLeituraLeve(s)).toBe(true);
-    for (const s of ["produtos", "ligacoes"] as const) expect(usaLeituraLeve(s)).toBe(false);
+  // 23/11: as Ligações passaram ao leve (o inteiro dava statement timeout com ~29 600 produtos); os produtos do mapa vêm do servidor
+  it("os Equipamentos, os Consumíveis, os Técnicos e as Ligações também leem o leve; os Produtos, não", () => {
+    for (const s of ["servicos", "equipamentos", "consumiveis", "tecnicos", "ligacoes"] as const) expect(usaLeituraLeve(s)).toBe(true);
+    expect(usaLeituraLeve("produtos")).toBe(false);
     expect(usaLeituraLeve(undefined)).toBe(false);
   });
   it("sem a função leve na base (PGRST202), a página de Serviços volta a ler o Catálogo inteiro", async () => {

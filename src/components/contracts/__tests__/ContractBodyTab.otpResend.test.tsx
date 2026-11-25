@@ -5,7 +5,11 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 const invoke = vi.fn();
 
 vi.mock("@/integrations/supabase/client", () => ({
-  supabase: { functions: { invoke: (...args: unknown[]) => invoke(...args) } },
+  supabase: {
+    functions: { invoke: (...args: unknown[]) => invoke(...args) },
+    // fn_posso_ligar_assinatura: quem assina aqui tem poderes para assinar (B2, 23/11)
+    rpc: async (fn: string) => ({ data: fn === "fn_posso_ligar_assinatura" ? true : null, error: null }),
+  },
 }));
 vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: vi.fn() }));
@@ -30,7 +34,7 @@ vi.mock("@/components/contracts/contractDocument", () => ({
 import { ContractBodyTab } from "../ContractBodyTab";
 
 const NOTICE = "Aguarde 1 minuto antes de pedir um novo código.";
-const contract = { id: "c1", status: "draft", contract_body_html: "<p>Corpo</p>" };
+const contract = { id: "c1", status: "draft", contract_body_html: "<p>Corpo</p>", organization_id: "org1" };
 
 function renderTab() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -47,7 +51,8 @@ const resendButton = () => screen.getByRole("button", { name: /^Reenviar código
 const smsCalls = () => invoke.mock.calls.filter((c) => c[0] === "sms-otp").length;
 
 async function clickSend() {
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Assinar \(Empresa\)/ })); });
+  const botao = await screen.findByRole("button", { name: /Assinar \(Empresa\)/ });
+  await act(async () => { fireEvent.click(botao); });
   await act(async () => { fireEvent.click(await screen.findByRole("button", { name: /Enviar código SMS/ })); });
 }
 async function clickResend() {

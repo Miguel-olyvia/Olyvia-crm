@@ -5,6 +5,7 @@ import { useId, useState, type KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
 import { estiloDaCor, preco } from "./estilosFamilias";
 import type { CorCfg, FamiliaCfg, MedidaCfg, VarianteCfg } from "./nucleo";
+import { FotoSobreAmostra } from "../AmostraOpcao";
 import { MetadesDaCor } from "./pecasFamilias";
 
 const SETAS: Readonly<Record<string, 1 | -1>> = { ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 };
@@ -45,7 +46,8 @@ function BotaoMedida({ m, ligado, onEscolher }: { m: MedidaCfg; ligado: boolean;
 interface BolinhaProps { c: CorCfg; ligada: boolean; disponivel: boolean; idRazao: string; onEscolher: () => void; onFoco: (id: string | null) => void }
 
 function BolinhaCor({ c, ligada, disponivel, idRazao, onEscolher, onFoco }: BolinhaProps) {
-  const semCor = c.hex.length === 0;
+  // uma cor com foto (e sem hex) não está «sem cor definida»: a foto é a cor
+  const semCor = c.hex.length === 0 && !c.foto;
   return (
     <button type="button" role="radio" aria-checked={ligada} aria-label={semCor ? `${c.nome} (sem cor definida)` : c.nome} aria-disabled={disponivel ? undefined : true}
       aria-describedby={disponivel ? undefined : idRazao} title={disponivel ? c.nome : `${c.nome}: esta cor não existe nesta medida.`} tabIndex={ligada ? 0 : -1}
@@ -53,6 +55,7 @@ function BolinhaCor({ c, ligada, disponivel, idRazao, onEscolher, onFoco }: Boli
       // a borda interior fixa de 2 px a 60 % do texto (3:1) mantém o branco e o preto visíveis nos dois temas; escolhida = borda de 3 px a 100 % e visto
       className={cn(RADIO, "relative h-11 w-11 shrink-0 overflow-hidden p-0", semCor && "border-dashed bg-muted text-xs", ligada ? "border-[3px] border-foreground" : "border-2 border-foreground/60")}>
       <MetadesDaCor hex={c.hex} />
+      <FotoSobreAmostra foto={c.foto} />
       {(ligada || semCor) && <span aria-hidden="true" className={cn("pointer-events-none absolute text-base font-bold leading-none", semCor ? "text-foreground" : "text-white mix-blend-difference")}>{ligada ? "✓" : "?"}</span>}
     </button>
   );
@@ -72,7 +75,7 @@ export function CartaoFamiliaPreview({ familia }: { familia: FamiliaCfg }) {
   const corMostrada = cores.find((c) => c.id === (emFoco ?? atual.corId));
   const comCor = eixos.cor !== null && cores.length > 0, comMedida = eixos.medida.length > 0;
   // nenhuma cor definida (ex.: «Medida» escolhida para as bolinhas): os valores são texto, não cores; com uma só cor definida mantêm-se as bolinhas
-  const valoresEmTexto = cores.every((c) => c.hex.length === 0);
+  const valoresEmTexto = cores.every((c) => c.hex.length === 0 && !c.foto);
   const razao = valoresEmTexto ? "Esta opção não existe nesta medida." : "Esta cor não existe nesta medida.";
   const detalhe = [familia.marca, familia.categoria].filter(Boolean).join(" · ");
   return (

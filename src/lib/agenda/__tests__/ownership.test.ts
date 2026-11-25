@@ -6,6 +6,7 @@ import {
   mergeById,
   selectItemsForOwners,
   resolveOwnerIdsForScope,
+  matchesScheduleScope,
 } from "@/lib/agenda/ownership";
 import type { AgendaItemRow } from "@/lib/agenda/types";
 
@@ -112,5 +113,25 @@ describe("resolveOwnerIdsForScope", () => {
   it("NONE e utilizador por resolver fecham a porta", () => {
     expect(resolveOwnerIdsForScope("NONE", ANA, [])).toEqual([]);
     expect(resolveOwnerIdsForScope("OWNED", null, [])).toEqual([]);
+  });
+});
+
+describe("matchesScheduleScope (20/11: «Só a minha» / «Equipa» como a RLS)", () => {
+  const eu = new Set([ANA]);
+  it("o item atribuído ao próprio conta (como antes)", () => {
+    expect(matchesScheduleScope({ assignees: [{ resource: { user_id: ANA } }] }, eu)).toBe(true);
+  });
+  it("o item criado pelo próprio, sem lhe estar atribuído, também conta", () => {
+    expect(matchesScheduleScope({ created_by: ANA, assignees: [{ resource: { user_id: BRUNO } }] }, eu)).toBe(true);
+  });
+  it("o item com user_id do próprio também conta", () => {
+    expect(matchesScheduleScope({ created_by: BRUNO, user_id: ANA, assignees: [] }, eu)).toBe(true);
+  });
+  it("o de outra pessoa (criado, dono e atribuído a outros) não", () => {
+    expect(matchesScheduleScope({ created_by: BRUNO, user_id: CARLA, assignees: [{ resource: { user_id: CARLA } }, null, { resource: null }] }, eu)).toBe(false);
+    expect(matchesScheduleScope({ created_by: BRUNO }, new Set())).toBe(false);
+  });
+  it("equipa: qualquer id do conjunto", () => {
+    expect(matchesScheduleScope({ created_by: CARLA, assignees: null }, new Set([ANA, CARLA]))).toBe(true);
   });
 });

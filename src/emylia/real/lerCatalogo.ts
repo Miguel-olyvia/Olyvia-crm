@@ -34,7 +34,7 @@ const lista = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 export function juntarTabelas(L: LinhasCatalogo, r: unknown): LinhasCatalogo {
   if (!r || typeof r !== "object" || !Array.isArray((r as Record<string, unknown>).categoriasProduto)) return L;
   const o = r as Record<string, unknown>;
-  type Ref = Pick<LinhaProduto, "id" | "brand_id" | "marca" | "uom_id" | "uom" | "category_id" | "subcategory_id">;
+  type Ref = Pick<LinhaProduto, "id" | "brand_id" | "marca" | "uom_id" | "uom" | "category_id" | "subcategory_id" | "modelo3d">;
   const refs = new Map(lista<Ref>(o.produtos).map((x) => [x.id, x]));
   const tabelas: LinhasTabelas = {
     categoriasProduto: lista(o.categoriasProduto), marcas: lista<string>(o.marcas).filter(Boolean),
@@ -45,7 +45,7 @@ export function juntarTabelas(L: LinhasCatalogo, r: unknown): LinhasCatalogo {
     produtos: L.produtos.map((p) => {
       const x = refs.get(p.id);
       return x ? { ...p, brand_id: x.brand_id ?? null, marca: x.marca ?? null, uom_id: x.uom_id ?? null, uom: x.uom ?? null,
-        category_id: x.category_id ?? null, subcategory_id: x.subcategory_id ?? null } : p;
+        category_id: x.category_id ?? null, subcategory_id: x.subcategory_id ?? null, ...(x.modelo3d !== undefined ? { modelo3d: x.modelo3d } : {}) } : p;
     }),
   };
 }

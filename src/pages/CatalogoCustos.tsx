@@ -48,7 +48,7 @@ export default function CatalogoCustos({ rota }: { rota?: RotaCatalogo } = {}) {
   const queryClient = useQueryClient();
 
   // 17/11: nas páginas de Serviços lê-se o Catálogo LEVE (cat_ler_catalogo_servicos: só os produtos dos consumos, 145 na Mudelar em vez de 29 785; a leitura inteira
-  // dava statement timeout). Os produtos e as Ligações precisam da lista toda: ficam com a leitura inteira. Sem rota (endereço antigo): inteira.
+  // dava statement timeout). Os produtos ficam com a leitura inteira; 23/11: as Ligações passaram à leve (pedem os produtos ao servidor). Sem rota (endereço antigo): inteira.
   const leve = usaLeituraLeve(rota?.seccao);
   // 18/11: Serviços só lê o que é de Serviços: sem atributos nem modelos (são dos Produtos). Mesmas secções que a leitura leve.
   const soServicos = leve;

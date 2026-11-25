@@ -57,6 +57,7 @@ import { TelefoneComRascunho } from "./TelefoneIndicativo";
 import { opcoesDaVisita, sugerirQuemVai } from "./sugestaoVisita";
 import { irParaCampoEmFalta } from "./irParaCampoEmFalta";
 import { SEM_PERM, comPermissoesReais, contactoConcluido, passoDe, permEmFaltaDoPasso, podeNeg, podeVerCustos, soAteAoContacto } from "./permissoes";
+import { SoLeitura } from "./passosSoLeitura";
 import { useModoTeste, useSimularClienteTeste } from "./real/modoTeste";
 // FERRAMENTAS-TESTE (temporário, remover antes da main)
 import { ambienteDeTeste } from "./FerramentasTeste";
@@ -289,9 +290,9 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
               <TextoDaLead ctx={ctx} d={d} k="apelido" rotulo="Apelido" />
             </div>
           ) : <label className={ROT}>Nome<input key={"n" + d.nome} defaultValue={d.nome} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.nome) run(() => { d.nome = x; }); }} /></label>}
-          {/* 2/11: o telefone com o seletor de indicativo do país (um email escrito no contacto continua como estava) */}
-          {d.tel.includes("@") ? <label className={ROT}>Telefone<input key={"t" + d.tel} defaultValue={d.tel} className={INP} onBlur={(e) => { const x = e.target.value.trim(); if (x && x !== d.tel) run(() => { d.tel = x; }); }} /></label>
-            : <div className={cn(ROT, simples && "sm:max-w-sm")}><label htmlFor={`quem-tel-${d.id}`}>Telefone</label><TelefoneComRascunho key={"t" + d.tel} id={`quem-tel-${d.id}`} d={d} run={run} classe={INP} /></div>}
+          {/* 2/11: o telefone com o seletor de indicativo do país. 23/11: sempre: um email que um negócio antigo tenha no contacto não é o
+              telefone (o campo começa vazio e o email passa para o email do negócio ao gravar o telefone, TelefoneComRascunho) */}
+          <div className={cn(ROT, simples && "sm:max-w-sm")}><label htmlFor={`quem-tel-${d.id}`}>Telefone</label><TelefoneComRascunho key={"t" + d.tel} id={`quem-tel-${d.id}`} d={d} run={run} classe={INP} /></div>
           <MoradaDeQuemPede ctx={ctx} d={d} />
           <Campos grupo={gPedido} {...fx} />
         </div>
@@ -405,6 +406,8 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
       ) }));
     }
   } else if (fase === 2) {
+    // 11/11 (20270114320000): sem negocios.visita.preencher (quem só gere as visitas), a Visita fica só de leitura menos as visitas
+    const semPreencher = comPermissoesReais() && !podeNeg(S.role, "visita.preencher");
     const CM = camposMedida(L), GA = gruposArea(S.campos, d.f).map(E);
     const medOk = CM.filter(([k]) => !medidaEmFalta(v.med, k)).length;
     const nMed = CM.length;
@@ -501,22 +504,25 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           feito: !!pr && Object.keys(pr.escolhas).length + (pr.porColocar ?? []).length + (pr.servicos ?? []).length > 0 && medOk === nMed && passoNec.feito === true && temVisitaAtiva(d),
           falta: faltaVisitas + faltaArea + faltaMed + faltaNec || undefined,
           resumo: [pr ? "projeto guardado" : "por abrir", d.f.duracao_obra ? `obra: ${d.f.duracao_obra}` : ""].filter(Boolean),
-          corpo: <div className="space-y-10"><VisitasNoEstudio ctx={ctx} d={d} falta={faltaVisitas} /><EstudioNaVisita ctx={ctx} d={d} /><FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
+          // 20/11 (permissões ecrã/servidor): sem negocios.visita.preencher, só o bloco das visitas fica fora do fieldset desativado (a
+          // assistente comercial marca, remarca e cancela; o resto do Estúdio fica só de leitura, como o servidor, v_so_agenda)
+          corpo: <div className="space-y-10"><VisitasNoEstudio ctx={ctx} d={d} falta={faltaVisitas} /><SoLeitura ativo={semPreencher}><div className="space-y-10"><EstudioNaVisita ctx={ctx} d={d} /><FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
             ...(passoArea ? [{ id: "area", titulo: passoArea.titulo, resumo: passoArea.resumo.join(" · ") || "por preencher", corpo: passoArea.corpo, falta: faltaArea }] : []),
             ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", resumo: resumoMedidas.join(" · ") || "por preencher", corpo: corpoMedidas(false), falta: faltaMed }]),
             { id: "nec", titulo: "Necessidades do cliente", resumo: passoNec.resumo.join(" · ") || "por juntar", corpo: passoNec.corpo, falta: faltaNec },
             ...(ePecas.oculto || !comWC ? [] : [{ id: "pecas", titulo: "Peças da casa de banho", resumo: ((n) => (n ? `${n} ${n === 1 ? "resposta" : "respostas"}` : "por responder"))(ePecas.campos.filter((c) => !!d.f[c.k]?.trim()).length), corpo: <Campos grupo={ePecas} {...fx} /> }]),
-          ]} /></div> },
+          ]} /></div></SoLeitura></div> },
       ];
     }
     // 11/11: a Visita (Exterior, Interior, Estúdio, Fim) é do comercial: sem negocios.visita.preencher (a assistente comercial, que só
     // marca) fica só de leitura, com a permissão em falta; o servidor recusa o mesmo (neg_guardar_negocio, 20270114320000). As visitas da
     // agenda (o passo «visitas», VisitasDoCrm) seguem negocios.visita.gerir.
-    if (comPermissoesReais() && !podeNeg(S.role, "visita.preencher")) {
+    // 20/11: o passo «estudio» já traz o seu fieldset (fora dele, as visitas); aqui só ganha o aviso
+    if (semPreencher) {
       passos = passos.map((p) => (p.id === "visitas" ? p : { ...p, corpo: (
         <div className="space-y-3">
           <p className="text-sm text-muted-foreground">{SEM_PERM["visita.preencher"].sub}</p>
-          <fieldset disabled className="m-0 min-w-0 border-0 p-0">{p.corpo}</fieldset>
+          {p.id === "estudio" ? p.corpo : <SoLeitura ativo>{p.corpo}</SoLeitura>}
         </div>
       ) }));
     }
@@ -798,7 +804,6 @@ export function Orcamento({ S, A, go, run, d, podeVerCatalogo }: Ctx & { d: Nego
   const o = d.orc!, T = tot(d, S), locked = !!o.enviada;
   const pt = partes(d, S), mw = Math.max(0, Math.min(1, T.m / 0.5));
   const mcls = T.m < S.cfg.min / 100 ? "bad" : T.m < S.cfg.alvo / 100 - 0.005 ? "warn" : "ok";
-  const mudou = () => { d.orc!.aprov = null; d.fresh = false; };
   const AL = o.verif && !locked ? alertas(d, S) : [];
   const nX = AL.filter((a) => a.k === "x").length, nW = AL.filter((a) => a.k === "w").length;
   const okLinhas = ["Nenhuma linha abaixo do custo", "Todas as linhas têm custo no Catálogo"].filter((_, i) => !AL.some((a) => (i === 0 ? a.t.startsWith("Preço abaixo") : false)));
@@ -819,7 +824,7 @@ export function Orcamento({ S, A, go, run, d, podeVerCatalogo }: Ctx & { d: Nego
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border bg-card px-4 py-3 shadow-[var(--shadow-sm)]">
             <label className="flex items-center gap-2 text-sm">Desconto
               <Campo id={`desc-${d.id}`} ariaLabel="Desconto em percentagem" value={nfmt(o.desconto)} readOnly={locked}
-                onCommit={(v) => run(() => { const n = numero(v); o.desconto = isNaN(n) ? 0 : Math.max(0, Math.min(50, n)); mudou(); })} /> %
+                onCommit={(v) => run(() => { const n = numero(v); A.descontoOrc(d.id, isNaN(n) ? 0 : n); })} /> %
             </label>
             <span className="text-sm text-muted-foreground">{nfmt(T.h)} h · custo {eur(T.custo)} €</span>
             <span className="text-base font-semibold tabular-nums">Total sem IVA {eur(T.pf)} € {podeVerCustos() && <span className="ml-1 text-sm font-medium text-muted-foreground">margem {pct(T.m)}</span>}</span>

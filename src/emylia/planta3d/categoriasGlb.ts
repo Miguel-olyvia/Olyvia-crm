@@ -7,7 +7,11 @@
 //  - opções: as escolhas da categoria (sanita com ou sem depósito, lavatório com coluna, resguardo de abrir ou de correr…), visíveis e
 //    editáveis no painel da peça; ficam em `opc.gen` da peça.
 // Sem React nem three: o gerador (Node) e o visualizador usam a mesma tabela.
+// Os 7 genéricos novos (categoriasGlbNovas.ts: tampo de WC, lava-loiça, máquina de roupa, termoacumulador, aplique, garrafeira, acessório) entram
+// no fim da tabela; os GLB deles são gerados por scripts/gerar-modelos-glb-novos.mjs (o gerador dos 28 não está neste ramo).
+// Uma parte que o GLB de uma categoria antiga não tem (os pés do móvel de lavatório) constrói-se em tempo de execução (modelosHtml/glb.ts).
 import type { TipoMockup } from "./catalogo3d";
+import { CATEGORIAS_GLB_NOVAS } from "./categoriasGlbNovas";
 
 export type FormaGlb = "caixa" | "caixaR" | "cilindro" | "elipsoide";
 /** Os materiais das partes: `corpo` é o do produto (cor e acabamento); os outros são fixos. */
@@ -16,7 +20,12 @@ export type MaterialGlb = "corpo" | "branco" | "metal" | "vidro" | "espelho" | "
 export type V3 = [number, number, number];
 export interface ParamsGenerico { w: number; d: number; h: number; o: Readonly<Record<string, string | boolean>> }
 export interface Colocacao { pos: V3; esc: V3; rot?: V3 }
-export interface ParteGlb { nome: string; forma: FormaGlb; mat: MaterialGlb; colocar: (p: ParamsGenerico) => Colocacao; ver?: (p: ParamsGenerico) => boolean }
+/** `emRuntime`: parte acrescentada depois de o GLB da categoria ser gerado; o visualizador constrói-a com a forma unitária (as outras, se
+ * faltarem no GLB, continuam a ser erro, e a peça cai no mockup paramétrico de reserva). */
+/** 24/11: a zona do objecto a que uma parte pertence (zonasGlb.ts): o que um atributo de cor pode pintar. */
+export type ZonaGlb = "frente" | "corpo" | "tampo" | "puxadores" | "pes" | "estofo";
+/** `zona`: a zona da parte quando o nome estável não chega (opcional; sem ela, `zonaDaParte` decide pelo nome e pelo material). */
+export interface ParteGlb { nome: string; forma: FormaGlb; mat: MaterialGlb; colocar: (p: ParamsGenerico) => Colocacao; ver?: (p: ParamsGenerico) => boolean; emRuntime?: boolean; zona?: ZonaGlb }
 /** A omissão de uma opção: fixa, ou do tipo e do nome do produto (ex.: «Frigorífico DE ENCASTRE» abre com «de encastrar» ligado). */
 export type OmissaoGlb<T> = T | ((t: TipoMockup, nome: string) => T);
 export type OpcaoGlb =
@@ -27,6 +36,8 @@ export interface CategoriaGlb {
   id: string; rotulo: string; tipos: TipoMockup[]; nome?: RegExp; partes: ParteGlb[]; opcoes: OpcaoGlb[];
   /** Presa à parede e no ar: a altura da base ao chão por omissão (m) e, se o nome não a der, a profundidade (m). */
   parede?: { alt: number; prof?: number };
+  /** Só a escolhe o classificador de um produto do catálogo (pelo nome): as outras peças (antigas, do Estúdio, das famílias) não passam a usá-la. */
+  soComProduto?: boolean;
 }
 
 /** Interruptor único dos genéricos em GLB: `false` volta aos mockups paramétricos de sempre (Visualizador3D, `Parametrico`). */
@@ -37,6 +48,14 @@ const sim = (p: ParamsGenerico, id: string): boolean => p.o[id] !== false;
 const min = Math.min, max = Math.max;
 /** Altura do assento das sanitas e bidés de chão (m). */
 const ASSENTO = 0.4;
+/** A altura dos pés do móvel de lavatório com pés (m); sem pés, 0. */
+const pesMovel = (p: ParamsGenerico): number => (p.o.apoio === "pes" ? min(0.15, p.h * 0.2) : 0);
+/** O bidé preso à parede (opção `suspenso`). */
+const suspenso = (p: ParamsGenerico): boolean => p.o.suspenso === true;
+/** A meia altura da barriga da taça do bidé (m): mais funda no de chão; rasa no suspenso, para ficar a 25 cm ou mais do chão. */
+const metade = (p: ParamsGenerico): number => (suspenso(p) ? min(0.07, p.h * 0.175) : min(0.125, p.h * 0.31));
+/** A torneira do bidé fica a esta distância (m) da borda de trás: o rebordo largo atrás da bacia. */
+const TORNEIRA_Z = 0.055;
 
 const caixa = (nome: string, mat: MaterialGlb, colocar: ParteGlb["colocar"], ver?: ParteGlb["ver"]): ParteGlb => ({ nome, forma: "caixa", mat, colocar, ...(ver ? { ver } : {}) });
 /** Rodapé recuado dos módulos de chão da cozinha (m). */
@@ -49,6 +68,16 @@ const frente = (nome: string, mat: MaterialGlb, f: (p: ParamsGenerico) => [numbe
 /** Um puxador horizontal na frente, à altura y (m). */
 const puxador = (nome: string, f: (p: ParamsGenerico) => [number, number], ver?: ParteGlb["ver"]): ParteGlb =>
   caixa(nome, "metal", (p) => { const [x, y] = f(p); return { pos: [x, y, p.d / 2 + 0.025], esc: [min(0.16, p.w * 0.35), 0.012, 0.014] }; }, ver);
+
+/** Um armário com duas portas e pelo menos o dobro da altura na largura (a coluna AXIS 40 × 160): as portas vão uma por cima da outra, não lado a lado. */
+const portasEmpilhadas = (p: ParamsGenerico): boolean => p.o.duas !== false && p.h >= 2 * p.w;
+/** A folha `i` (0: a esquerda, ou a de baixo se empilhadas; 1: a direita, ou a de cima) de um armário, com a espessura `e` e o centro `dz` à frente da caixa (m). */
+function folhaArmario(p: ParamsGenerico, i: 0 | 1, e: number, dz: number): Colocacao {
+  const { w, d, h } = p, z = d / 2 + dz;
+  if (portasEmpilhadas(p)) return { pos: [0, h / 4 + (i * h) / 2, z], esc: [w - 0.008, h / 2 - 0.008, e] };
+  const n = p.o.duas === false ? 1 : 2;
+  return { pos: [n === 1 ? 0 : (i === 0 ? -w : w) / 4, h / 2, z], esc: [w / n - 0.008, h - 0.01, e] };
+}
 
 /** Um botão redondo virado para a frente (eixo do cilindro em z), no centro (x, y) da face da frente. */
 const botao = (nome: string, f: (p: ParamsGenerico) => [number, number], r = 0.034, ver?: ParteGlb["ver"]): ParteGlb =>
@@ -289,7 +318,8 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
 export const CATEGORIAS_GLB: CategoriaGlb[] = [...CATEGORIAS_COZINHA,
   {
     id: "sanita", rotulo: "Sanita de chão", tipos: ["sanita"],
-    opcoes: [{ id: "deposito", rotulo: "Com depósito", tipo: "sim", omissao: true }],
+    // a sanita BTW (encostada à parede) só leva depósito se o nome o disser; as outras continuam com depósito
+    opcoes: [{ id: "deposito", rotulo: "Com depósito", tipo: "sim", omissao: (_t, n) => !/\bbtw\b|back.?to.?wall/i.test(n) || /dep[óo]sito|cisterna|tanque|mochila/i.test(n) }],
     partes: [
       { nome: "pe", forma: "cilindro", mat: "corpo", colocar: ({ w, d, h }) => { const s = min(ASSENTO, h); return { pos: [0, s / 2 - 0.03, d * 0.06], esc: [w * 0.55, s - 0.06, d * 0.45] }; } },
       { nome: "cuvete", forma: "elipsoide", mat: "corpo", colocar: ({ w, d, h }) => ({ pos: [0, min(ASSENTO, h) - 0.08, d * 0.1], esc: [w, 0.18, d * 0.78] }) },
@@ -318,17 +348,43 @@ export const CATEGORIAS_GLB: CategoriaGlb[] = [...CATEGORIAS_COZINHA,
   },
   {
     id: "bide", rotulo: "Bidé", tipos: ["bide"],
-    opcoes: [{ id: "torneira", rotulo: "Com torneira", tipo: "sim", omissao: true }],
+    opcoes: [
+      { id: "torneira", rotulo: "Com torneira", tipo: "sim", omissao: true },
+      { id: "suspenso", rotulo: "Suspenso (preso à parede)", tipo: "sim", omissao: (_t, n) => /suspens/i.test(n) },
+    ],
+    // 24/11: um bidé a sério (e não um cogumelo): taça oval e comprida e baixa, com o aro (o rebordo) à altura do assento e a bacia lá dentro, sobre
+    // um pedestal estreito que alarga para a taça; a torneira (corpo, bica curta, manípulo) no rebordo do fundo e dois botões. O suspenso é a mesma
+    // taça, mais rasa, sem pedestal, a 25 cm ou mais do chão e presa à parede por uma placa. As partes novas constroem-se em tempo de execução
+    // (o GLB do bidé não muda); as quatro de sempre (pe, cuvete, interior, torneira) mantêm o nome e a forma.
     partes: [
-      { nome: "pe", forma: "cilindro", mat: "corpo", colocar: ({ w, d, h }) => ({ pos: [0, (h - 0.06) / 2, d * 0.02], esc: [w * 0.6, h - 0.06, d * 0.5] }) },
-      { nome: "cuvete", forma: "elipsoide", mat: "corpo", colocar: ({ w, d, h }) => ({ pos: [0, h - 0.07, d * 0.05], esc: [w, 0.16, d * 0.9] }) },
-      { nome: "interior", forma: "cilindro", mat: "interior", colocar: ({ w, d, h }) => ({ pos: [0, h + 0.008, d * 0.1], esc: [w * 0.75, 0.004, d * 0.6] }) },
-      { nome: "torneira", forma: "cilindro", mat: "metal", ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.05, -d / 2 + 0.07], esc: [0.03, 0.1, 0.03] }) },
+      // o pedestal (só no de chão): o pé estreito em baixo e, em cima, um colo mais largo que se perde por baixo da taça
+      { nome: "pe", forma: "cilindro", mat: "corpo", ver: (p) => !suspenso(p), colocar: ({ w, d, h }) => ({ pos: [0, h * 0.25, -d * 0.08], esc: [w * 0.34, h * 0.5, d * 0.32] }) },
+      { nome: "pe_alto", forma: "elipsoide", mat: "corpo", emRuntime: true, ver: (p) => !suspenso(p), colocar: ({ w, d, h }) => ({ pos: [0, h * 0.45, -d * 0.08], esc: [w * 0.58, h * 0.44, d * 0.5] }) },
+      // a taça: a barriga por baixo (mais funda no de chão, rasa no suspenso) e o aro por cima, fino, oval e mais comprido do que largo
+      { nome: "cuvete", forma: "elipsoide", mat: "corpo", colocar: (p) => { const m = metade(p); return { pos: [0, p.h - 0.005 - m, 0], esc: [p.w * 0.9, m * 2, p.d * 0.93] }; } },
+      { nome: "aro", forma: "cilindro", mat: "corpo", emRuntime: true, colocar: ({ w, d, h }) => { const a = min(0.04, h * 0.12); return { pos: [0, h - a / 2, 0], esc: [w, a, d] }; } },
+      // o colo por baixo do aro: suaviza o degrau entre o aro e a barriga
+      { nome: "aro_baixo", forma: "cilindro", mat: "corpo", emRuntime: true, colocar: ({ w, d, h }) => ({ pos: [0, h - 0.065, 0], esc: [w * 0.92, 0.05, d * 0.93] }) },
+      // a bacia: o fundo mais escuro e a água, mais atrás o rebordo livre para a torneira, e o ralo
+      { nome: "interior", forma: "cilindro", mat: "interior", colocar: ({ w, d, h }) => ({ pos: [0, h + 0.004, d * 0.05], esc: [w * 0.76, 0.004, d * 0.76] }) },
+      { nome: "bacia", forma: "cilindro", mat: "agua", emRuntime: true, colocar: ({ w, d, h }) => ({ pos: [0, h + 0.0065, d * 0.05], esc: [w * 0.56, 0.004, d * 0.58] }) },
+      { nome: "ralo", forma: "cilindro", mat: "metal", emRuntime: true, colocar: ({ d, h }) => ({ pos: [0, h + 0.009, d * 0.12], esc: [0.03, 0.004, 0.03] }) },
+      // dois pequenos botões no rebordo, de cada lado da torneira
+      ...[-1, 1].map((s, i): ParteGlb => ({ nome: `botao_${i + 1}`, forma: "cilindro", mat: "metal", emRuntime: true, colocar: ({ w, d, h }) => ({ pos: [s * w * 0.2, h + 0.007, -d / 2 + TORNEIRA_Z], esc: [0.022, 0.01, 0.022] }) })),
+      // a torneira: roseta, corpo (~7 cm), bica curta para a frente com a ponta a descer, e o manípulo em cima
+      { nome: "roseta", forma: "cilindro", mat: "metal", emRuntime: true, ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.004, -d / 2 + TORNEIRA_Z], esc: [0.05, 0.008, 0.05] }) },
+      { nome: "torneira", forma: "cilindro", mat: "metal", ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.043, -d / 2 + TORNEIRA_Z], esc: [0.034, 0.07, 0.034] }) },
+      { nome: "bica", forma: "cilindro", mat: "metal", emRuntime: true, ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.07, -d / 2 + TORNEIRA_Z + 0.05], esc: [0.018, 0.1, 0.018], rot: [Math.PI / 2, 0, 0] }) },
+      { nome: "bica_ponta", forma: "cilindro", mat: "metal", emRuntime: true, ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.055, -d / 2 + TORNEIRA_Z + 0.096], esc: [0.018, 0.04, 0.018] }) },
+      { nome: "manipulo", forma: "caixa", mat: "metal", emRuntime: true, ver: (p) => sim(p, "torneira"), colocar: ({ d, h }) => ({ pos: [0, h + 0.085, -d / 2 + TORNEIRA_Z + 0.012], esc: [0.014, 0.012, 0.05], rot: [-0.2, 0, 0] }) },
+      // suspenso: a placa de fixação na parede, atrás da taça
+      { nome: "fixacao", forma: "caixa", mat: "branco", emRuntime: true, ver: (p) => suspenso(p), colocar: ({ w, d, h }) => ({ pos: [0, h - 0.075, -d / 2 + 0.006], esc: [w * 0.5, 0.12, 0.012] }) },
     ],
   },
   {
     id: "lavatorio", rotulo: "Lavatório", tipos: ["lavatorio", "lavatorio_pousar"],
-    opcoes: [{ id: "coluna", rotulo: "Com coluna", tipo: "sim", omissao: (t) => t === "lavatorio" }],
+    // sem coluna, a menos que o nome fale dela (nenhum lavatório do catálogo fala)
+    opcoes: [{ id: "coluna", rotulo: "Com coluna", tipo: "sim", omissao: (t, n) => t === "lavatorio" && /coluna|pedestal/i.test(n) }],
     partes: [
       { nome: "bacia", forma: "caixaR", mat: "corpo", colocar: ({ w, d, h }) => { const a = min(0.16, h); return { pos: [0, h - a / 2, 0], esc: [w, a, d] }; } },
       { nome: "cuba", forma: "elipsoide", mat: "interior", colocar: ({ w, d, h }) => ({ pos: [0, h - 0.004, d * 0.05], esc: [w * 0.78, 0.01, d * 0.7] }) },
@@ -341,17 +397,29 @@ export const CATEGORIAS_GLB: CategoriaGlb[] = [...CATEGORIAS_COZINHA,
   },
   {
     id: "movel_lavatorio", rotulo: "Móvel de lavatório", tipos: ["movel_lavatorio"],
-    opcoes: [{ id: "gavetas", rotulo: "Frentes", tipo: "lista", valores: [{ id: "gavetas", rotulo: "Duas gavetas" }, { id: "portas", rotulo: "Duas portas" }], omissao: "gavetas" }],
+    opcoes: [
+      { id: "gavetas", rotulo: "Frentes", tipo: "lista", valores: [{ id: "gavetas", rotulo: "Duas gavetas" }, { id: "portas", rotulo: "Duas portas" }], omissao: (_t, n) => (!/\bgav/i.test(n) && /\bportas?\b|\bpuertas?\b/i.test(n) ? "portas" : "gavetas") },
+      {
+        id: "apoio", rotulo: "Montagem", tipo: "lista", valores: [{ id: "chao", rotulo: "Assente no chão" }, { id: "suspenso", rotulo: "Suspenso" }, { id: "pes", rotulo: "Com pés" }],
+        omissao: (_t, n) => (/suspens/i.test(n) ? "suspenso" : /\bp[ée]s\b|\bpatas\b/i.test(n) ? "pes" : "chao"),
+      },
+    ],
+    // com pés, o móvel começa acima deles (y0); sem pés (y0 = 0), cada parte fica exactamente onde estava
     partes: [
-      { nome: "caixa", forma: "caixa", mat: "corpo", colocar: ({ w, d, h }) => ({ pos: [0, (h - 0.03) / 2, 0], esc: [w, h - 0.03, d] }) },
+      { nome: "caixa", forma: "caixa", mat: "corpo", colocar: (p) => { const y0 = pesMovel(p), a = p.h - 0.03 - y0; return { pos: [0, y0 + a / 2, 0], esc: [p.w, a, p.d] }; } },
       { nome: "lavatorio", forma: "caixaR", mat: "branco", colocar: ({ w, d, h }) => ({ pos: [0, h - 0.015, 0.005], esc: [w + 0.01, 0.03, d + 0.01] }) },
       { nome: "cuba", forma: "elipsoide", mat: "interior", colocar: ({ w, d, h }) => ({ pos: [0, h + 0.001, 0.02], esc: [w * 0.7, 0.006, d * 0.6] }) },
-      { nome: "frente_cima", forma: "caixa", mat: "corpo", ver: (p) => p.o.gavetas !== "portas", colocar: ({ w, d, h }) => { const a = (h - 0.03) / 2 - 0.008; return { pos: [0, (h - 0.03) * 0.75, d / 2 + 0.009], esc: [w - 0.01, a, 0.018] }; } },
-      { nome: "frente_baixo", forma: "caixa", mat: "corpo", ver: (p) => p.o.gavetas !== "portas", colocar: ({ w, d, h }) => { const a = (h - 0.03) / 2 - 0.008; return { pos: [0, (h - 0.03) * 0.25, d / 2 + 0.009], esc: [w - 0.01, a, 0.018] }; } },
-      { nome: "porta_esq", forma: "caixa", mat: "corpo", ver: (p) => p.o.gavetas === "portas", colocar: ({ w, d, h }) => ({ pos: [-w / 4, (h - 0.03) / 2, d / 2 + 0.009], esc: [w / 2 - 0.008, h - 0.045, 0.018] }) },
-      { nome: "porta_dir", forma: "caixa", mat: "corpo", ver: (p) => p.o.gavetas === "portas", colocar: ({ w, d, h }) => ({ pos: [w / 4, (h - 0.03) / 2, d / 2 + 0.009], esc: [w / 2 - 0.008, h - 0.045, 0.018] }) },
-      { nome: "puxador_1", forma: "caixa", mat: "metal", colocar: ({ w, d, h, o }) => (o.gavetas === "portas" ? { pos: [-0.03, (h - 0.03) * 0.6, d / 2 + 0.025], esc: [0.012, 0.12, 0.014] } : { pos: [0, (h - 0.03) * 0.9, d / 2 + 0.025], esc: [min(0.2, w * 0.4), 0.012, 0.014] }) },
-      { nome: "puxador_2", forma: "caixa", mat: "metal", colocar: ({ w, d, h, o }) => (o.gavetas === "portas" ? { pos: [0.03, (h - 0.03) * 0.6, d / 2 + 0.025], esc: [0.012, 0.12, 0.014] } : { pos: [0, (h - 0.03) * 0.4, d / 2 + 0.025], esc: [min(0.2, w * 0.4), 0.012, 0.014] }) },
+      { nome: "frente_cima", forma: "caixa", mat: "corpo", ver: (p) => p.o.gavetas !== "portas", colocar: (p) => { const y0 = pesMovel(p), a = p.h - 0.03 - y0; return { pos: [0, y0 + a * 0.75, p.d / 2 + 0.009], esc: [p.w - 0.01, a / 2 - 0.008, 0.018] }; } },
+      { nome: "frente_baixo", forma: "caixa", mat: "corpo", ver: (p) => p.o.gavetas !== "portas", colocar: (p) => { const y0 = pesMovel(p), a = p.h - 0.03 - y0; return { pos: [0, y0 + a * 0.25, p.d / 2 + 0.009], esc: [p.w - 0.01, a / 2 - 0.008, 0.018] }; } },
+      { nome: "porta_esq", forma: "caixa", mat: "corpo", ver: (p) => p.o.gavetas === "portas", colocar: (p) => { const y0 = pesMovel(p), a = p.h - 0.03 - y0; return { pos: [-p.w / 4, y0 + a / 2, p.d / 2 + 0.009], esc: [p.w / 2 - 0.008, p.h - 0.045 - y0, 0.018] }; } },
+      { nome: "porta_dir", forma: "caixa", mat: "corpo", ver: (p) => p.o.gavetas === "portas", colocar: (p) => { const y0 = pesMovel(p), a = p.h - 0.03 - y0; return { pos: [p.w / 4, y0 + a / 2, p.d / 2 + 0.009], esc: [p.w / 2 - 0.008, p.h - 0.045 - y0, 0.018] }; } },
+      { nome: "puxador_1", forma: "caixa", mat: "metal", colocar: (p) => { const y0 = pesMovel(p), a = p.h - 0.03 - y0; return p.o.gavetas === "portas" ? { pos: [-0.03, y0 + a * 0.6, p.d / 2 + 0.025], esc: [0.012, 0.12, 0.014] } : { pos: [0, y0 + a * 0.9, p.d / 2 + 0.025], esc: [min(0.2, p.w * 0.4), 0.012, 0.014] }; } },
+      { nome: "puxador_2", forma: "caixa", mat: "metal", colocar: (p) => { const y0 = pesMovel(p), a = p.h - 0.03 - y0; return p.o.gavetas === "portas" ? { pos: [0.03, y0 + a * 0.6, p.d / 2 + 0.025], esc: [0.012, 0.12, 0.014] } : { pos: [0, y0 + a * 0.4, p.d / 2 + 0.025], esc: [min(0.2, p.w * 0.4), 0.012, 0.014] }; } },
+      // os quatro pés (partes novas: o GLB antigo não as tem e o visualizador constrói-as em tempo de execução)
+      ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], i): ParteGlb => ({
+        nome: `pe_${i + 1}`, forma: "cilindro", mat: "metal", ver: (p) => p.o.apoio === "pes", emRuntime: true,
+        colocar: (p) => { const y0 = pesMovel(p), r = min(0.03, p.w * 0.08); return { pos: [sx * (p.w / 2 - r), y0 / 2, sz * (p.d / 2 - r)], esc: [r, max(0.002, y0), r] }; },
+      })),
     ],
   },
   {
@@ -381,14 +449,18 @@ export const CATEGORIAS_GLB: CategoriaGlb[] = [...CATEGORIAS_COZINHA,
   },
   {
     id: "resguardo", rotulo: "Resguardo de duche", tipos: ["resguardo"],
-    opcoes: [{ id: "abertura", rotulo: "Porta", tipo: "lista", valores: [{ id: "abrir", rotulo: "De abrir" }, { id: "correr", rotulo: "De correr" }], omissao: "correr" }],
+    // a porta pelo nome: «bisagra»/«abatible» é de abrir, «corredera» de correr, «fijo» sem porta é um painel fixo (walk-in); senão, de correr
+    opcoes: [{
+      id: "abertura", rotulo: "Porta", tipo: "lista", valores: [{ id: "abrir", rotulo: "De abrir" }, { id: "correr", rotulo: "De correr" }, { id: "fixo", rotulo: "Fixo (sem porta)" }],
+      omissao: (_t, n) => (/bisagra|abat[ií]vel|abatible|bat(?:e|ie)nte|de abrir/i.test(n) ? "abrir" : /corredera|de correr/i.test(n) ? "correr" : /\bfijo\b|\bfixo\b/i.test(n) && !/porta|puerta/i.test(n) ? "fixo" : "correr"),
+    }],
     partes: [
-      { nome: "vidro_fixo", forma: "caixa", mat: "vidro", colocar: ({ w, h }) => ({ pos: [-w / 4, h / 2, 0], esc: [w / 2, h - 0.02, 0.008] }) },
-      { nome: "vidro_porta", forma: "caixa", mat: "vidro", colocar: ({ w, h, o }) => ({ pos: [w / 4 - (o.abertura === "abrir" ? 0 : 0.02), h / 2, o.abertura === "abrir" ? 0 : 0.02], esc: [w / 2, h - 0.02, 0.008] }) },
+      { nome: "vidro_fixo", forma: "caixa", mat: "vidro", colocar: ({ w, h, o }) => (o.abertura === "fixo" ? { pos: [0, h / 2, 0], esc: [w, h - 0.02, 0.008] } : { pos: [-w / 4, h / 2, 0], esc: [w / 2, h - 0.02, 0.008] }) },
+      { nome: "vidro_porta", forma: "caixa", mat: "vidro", ver: (p) => p.o.abertura !== "fixo", colocar: ({ w, h, o }) => ({ pos: [w / 4 - (o.abertura === "abrir" ? 0 : 0.02), h / 2, o.abertura === "abrir" ? 0 : 0.02], esc: [w / 2, h - 0.02, 0.008] }) },
       { nome: "perfil_base", forma: "caixa", mat: "metal", colocar: ({ w }) => ({ pos: [0, 0.01, 0.01], esc: [w, 0.02, 0.04] }) },
-      { nome: "perfil_topo", forma: "caixa", mat: "metal", ver: (p) => p.o.abertura !== "abrir", colocar: ({ w, h }) => ({ pos: [0, h - 0.01, 0.01], esc: [w, 0.02, 0.04] }) },
+      { nome: "perfil_topo", forma: "caixa", mat: "metal", ver: (p) => p.o.abertura !== "abrir" && p.o.abertura !== "fixo", colocar: ({ w, h }) => ({ pos: [0, h - 0.01, 0.01], esc: [w, 0.02, 0.04] }) },
       { nome: "dobradica", forma: "caixa", mat: "metal", ver: (p) => p.o.abertura === "abrir", colocar: ({ h }) => ({ pos: [0, h * 0.75, 0], esc: [0.03, 0.06, 0.02] }) },
-      { nome: "puxador", forma: "cilindro", mat: "metal", colocar: ({ w, h }) => ({ pos: [w / 2 - 0.08, h * 0.5, 0.03], esc: [0.02, 0.3, 0.02] }) },
+      { nome: "puxador", forma: "cilindro", mat: "metal", ver: (p) => p.o.abertura !== "fixo", colocar: ({ w, h }) => ({ pos: [w / 2 - 0.08, h * 0.5, 0.03], esc: [0.02, 0.3, 0.02] }) },
       // os perfis verticais (à parede e no fim) que seguram o vidro
       caixa("perfil_parede", "metal", ({ w, h }) => ({ pos: [-w / 2 + 0.01, h / 2, 0], esc: [0.02, h, 0.03] })),
       caixa("perfil_fim", "metal", ({ w, h }) => ({ pos: [w / 2 - 0.01, h / 2, 0.01], esc: [0.02, h, 0.03] })),
@@ -410,28 +482,39 @@ export const CATEGORIAS_GLB: CategoriaGlb[] = [...CATEGORIAS_COZINHA,
     ],
     partes: [
       { nome: "caixa", forma: "caixa", mat: "corpo", colocar: ({ w, d, h }) => ({ pos: [0, h / 2, 0], esc: [w, h, d] }) },
-      { nome: "porta_esq", forma: "caixa", mat: "corpo", ver: (p) => p.o.frente !== "espelho", colocar: ({ w, d, h, o }) => { const n = o.duas === false ? 1 : 2; return { pos: [n === 1 ? 0 : -w / 4, h / 2, d / 2 + 0.009], esc: [w / n - 0.008, h - 0.01, 0.018] }; } },
-      { nome: "porta_dir", forma: "caixa", mat: "corpo", ver: (p) => p.o.frente !== "espelho" && p.o.duas !== false, colocar: ({ w, d, h }) => ({ pos: [w / 4, h / 2, d / 2 + 0.009], esc: [w / 2 - 0.008, h - 0.01, 0.018] }) },
-      { nome: "espelho_esq", forma: "caixa", mat: "espelho", ver: (p) => p.o.frente === "espelho", colocar: ({ w, d, h, o }) => { const n = o.duas === false ? 1 : 2; return { pos: [n === 1 ? 0 : -w / 4, h / 2, d / 2 + 0.004], esc: [w / n - 0.008, h - 0.01, 0.006] }; } },
-      { nome: "espelho_dir", forma: "caixa", mat: "espelho", ver: (p) => p.o.frente === "espelho" && p.o.duas !== false, colocar: ({ w, d, h }) => ({ pos: [w / 4, h / 2, d / 2 + 0.004], esc: [w / 2 - 0.008, h - 0.01, 0.006] }) },
-      { nome: "puxador", forma: "caixa", mat: "metal", ver: (p) => p.o.frente !== "espelho", colocar: ({ w, d, h, o }) => ({ pos: [o.duas === false ? w / 2 - 0.04 : -0.03, h / 2, d / 2 + 0.025], esc: [0.012, min(0.14, h * 0.3), 0.014] }) },
+      // 24/11: «_esq» é a de baixo e «_dir» a de cima quando as portas vão empilhadas (coluna alta e estreita, como a AXIS 40 × 160); os nomes são os do GLB
+      { nome: "porta_esq", forma: "caixa", mat: "corpo", ver: (p) => p.o.frente !== "espelho", colocar: (p) => folhaArmario(p, 0, 0.018, 0.009) },
+      { nome: "porta_dir", forma: "caixa", mat: "corpo", ver: (p) => p.o.frente !== "espelho" && p.o.duas !== false, colocar: (p) => folhaArmario(p, 1, 0.018, 0.009) },
+      { nome: "espelho_esq", forma: "caixa", mat: "espelho", ver: (p) => p.o.frente === "espelho", colocar: (p) => folhaArmario(p, 0, 0.006, 0.004) },
+      { nome: "espelho_dir", forma: "caixa", mat: "espelho", ver: (p) => p.o.frente === "espelho" && p.o.duas !== false, colocar: (p) => folhaArmario(p, 1, 0.006, 0.004) },
+      // empilhadas: um puxador horizontal fino entre a porta de baixo e a de cima; lado a lado: vertical, junto ao meio (ou à direita, com uma porta só)
+      { nome: "puxador", forma: "caixa", mat: "metal", ver: (p) => p.o.frente !== "espelho", colocar: (p) => (portasEmpilhadas(p)
+        ? { pos: [0, p.h / 2, p.d / 2 + 0.022], esc: [min(0.16, p.w * 0.6), 0.012, 0.014] }
+        : { pos: [p.o.duas === false ? p.w / 2 - 0.04 : -0.03, p.h / 2, p.d / 2 + 0.025], esc: [0.012, min(0.14, p.h * 0.3), 0.014] }) },
     ],
   },
   {
     id: "toalheiro", rotulo: "Toalheiro ou radiador", tipos: ["toalheiro", "radiador"],
-    opcoes: [{ id: "tipo", rotulo: "Tipo", tipo: "lista", valores: [{ id: "barras", rotulo: "Barras (toalheiro)" }, { id: "painel", rotulo: "Painel (radiador)" }], omissao: (t) => (t === "radiador" ? "painel" : "barras") }],
+    // «Toalheiro … BARRA 45cm»: uma só barra, presa à parede por dois suportes (sem tubos nem válvula)
+    opcoes: [{
+      id: "tipo", rotulo: "Tipo", tipo: "lista", valores: [{ id: "barras", rotulo: "Barras (toalheiro)" }, { id: "painel", rotulo: "Painel (radiador)" }, { id: "barra", rotulo: "Uma barra" }],
+      omissao: (t, n) => (t === "radiador" ? "painel" : /\bbarra\b/i.test(n) ? "barra" : "barras"),
+    }],
     partes: [
-      { nome: "tubo_esq", forma: "cilindro", mat: "corpo", colocar: ({ w, h }) => ({ pos: [-w / 2 + 0.015, h / 2, 0], esc: [0.03, h, 0.03] }) },
-      { nome: "tubo_dir", forma: "cilindro", mat: "corpo", colocar: ({ w, h }) => ({ pos: [w / 2 - 0.015, h / 2, 0], esc: [0.03, h, 0.03] }) },
-      // até 10 barras, espaçadas 12 cm: as que cabem na altura ficam visíveis
+      { nome: "tubo_esq", forma: "cilindro", mat: "corpo", ver: (p) => p.o.tipo !== "barra", colocar: ({ w, h }) => ({ pos: [-w / 2 + 0.015, h / 2, 0], esc: [0.03, h, 0.03] }) },
+      { nome: "tubo_dir", forma: "cilindro", mat: "corpo", ver: (p) => p.o.tipo !== "barra", colocar: ({ w, h }) => ({ pos: [w / 2 - 0.015, h / 2, 0], esc: [0.03, h, 0.03] }) },
+      // até 10 barras, espaçadas 12 cm: as que cabem na altura ficam visíveis; com uma só barra, a primeira fica a meia altura, a toda a largura
       ...Array.from({ length: 10 }, (_, i): ParteGlb => ({
-        nome: `barra_${i + 1}`, forma: "cilindro", mat: "corpo", ver: (p) => p.o.tipo !== "painel" && (i + 1) * 0.12 < p.h,
-        colocar: ({ w }) => ({ pos: [0, (i + 1) * 0.12, 0], esc: [0.02, w - 0.03, 0.02], rot: [0, 0, Math.PI / 2] }),
+        nome: `barra_${i + 1}`, forma: "cilindro", mat: "corpo", ver: (p) => (p.o.tipo === "barra" ? i === 0 : p.o.tipo !== "painel" && (i + 1) * 0.12 < p.h),
+        colocar: ({ w, h, o }) => (o.tipo === "barra" ? { pos: [0, h / 2, 0], esc: [0.02, w, 0.02], rot: [0, 0, Math.PI / 2] } : { pos: [0, (i + 1) * 0.12, 0], esc: [0.02, w - 0.03, 0.02], rot: [0, 0, Math.PI / 2] }),
       })),
       { nome: "painel", forma: "caixaR", mat: "corpo", ver: (p) => p.o.tipo === "painel", colocar: ({ w, d, h }) => ({ pos: [0, h / 2, 0], esc: [w - 0.03, h - 0.04, max(0.02, d * 0.6)] }) },
-      // os suportes à parede (quatro) e a válvula em baixo
-      ...[[-1, 0.15], [1, 0.15], [-1, 0.85], [1, 0.85]].map(([s, k], i): ParteGlb => ({ nome: `suporte_${i + 1}`, forma: "cilindro", mat: "metal", colocar: ({ w, d, h }) => ({ pos: [s * (w / 2 - 0.015), h * k, -max(0.02, d) / 2 - 0.02], esc: [0.022, 0.05, 0.022], rot: [Math.PI / 2, 0, 0] }) })),
-      { nome: "valvula", forma: "cilindro", mat: "metal", colocar: ({ w }) => ({ pos: [-w / 2 + 0.015, -0.03, 0], esc: [0.025, 0.06, 0.025] }) },
+      // os suportes à parede (quatro) e a válvula em baixo; com uma só barra, dois suportes nas pontas, à altura da barra
+      ...[[-1, 0.15], [1, 0.15], [-1, 0.85], [1, 0.85]].map(([s, k], i): ParteGlb => ({
+        nome: `suporte_${i + 1}`, forma: "cilindro", mat: "metal", ver: (p) => p.o.tipo !== "barra" || i < 2,
+        colocar: ({ w, d, h, o }) => ({ pos: [s * (w / 2 - 0.015), o.tipo === "barra" ? h / 2 : h * k, -max(0.02, d) / 2 - 0.02], esc: [0.022, 0.05, 0.022], rot: [Math.PI / 2, 0, 0] }),
+      })),
+      { nome: "valvula", forma: "cilindro", mat: "metal", ver: (p) => p.o.tipo !== "barra", colocar: ({ w }) => ({ pos: [-w / 2 + 0.015, -0.03, 0], esc: [0.025, 0.06, 0.025] }) },
     ],
   },
   {
@@ -459,11 +542,16 @@ export const CATEGORIAS_GLB: CategoriaGlb[] = [...CATEGORIAS_COZINHA,
       { nome: "chuveiro_mao", forma: "cilindro", mat: "corpo", ver: (p) => sim(p, "mao"), colocar: ({ h }) => ({ pos: [0.05, h * 0.55, 0.03], esc: [0.035, 0.22, 0.035] }) },
     ],
   },
+  // os 7 novos no fim: o primeiro que casa ganha, e assim nada do que já casava com os 28 muda
+  ...CATEGORIAS_GLB_NOVAS,
 ];
 
 /** A categoria genérica de um tipo de mockup (ou nenhuma: o tipo fica com o mockup paramétrico de sempre). */
 /** Pelo tipo e, quando a categoria o pede, pelo nome do produto (a primeira que casa: as mais específicas estão primeiro). */
-export const categoriaDoTipo = (t: TipoMockup, nome = ""): CategoriaGlb | undefined => CATEGORIAS_GLB.find((c) => c.tipos.includes(t) && (!c.nome || c.nome.test(nome)));
+/** `deProduto`: quem pergunta é o classificador de um produto do catálogo (modeloDoProduto); só ele pode escolher as categorias `soComProduto`,
+ * que as outras peças só usam pelo id já gravado em `mockup3d.generico` (as do Estúdio, por exemplo, têm nome — «Bancada» — mas não são produtos). */
+export const categoriaDoTipo = (t: TipoMockup, nome = "", deProduto = false): CategoriaGlb | undefined =>
+  CATEGORIAS_GLB.find((c) => c.tipos.includes(t) && (!c.soComProduto || (deProduto && nome.trim() !== "")) && (!c.nome || c.nome.test(nome)));
 export const categoriaPorId = (id: string | undefined): CategoriaGlb | undefined => (id ? CATEGORIAS_GLB.find((c) => c.id === id) : undefined);
 /** As opções da peça com as omissões da categoria preenchidas (as omissões podem vir do nome do produto). */
 export function opcoesComOmissao(c: CategoriaGlb, t: TipoMockup, o: Readonly<Record<string, string | boolean>> = {}, nome = ""): Record<string, string | boolean> {

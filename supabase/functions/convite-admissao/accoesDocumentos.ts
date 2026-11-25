@@ -134,7 +134,7 @@ export interface PedidoSms {
 
 export type ResultadoSms =
   | { enviado: true }
-  | { enviado: false; erroCodigo: "sms_nao_configurado" | "sms_falhou" | "pedido_invalido" };
+  | { enviado: false; erroCodigo: "sms_nao_configurado" | "sms_falhou" | "pedido_invalido" | "sms_bloqueado_teste" };
 
 export interface DepsDocumentos {
   svc: ClienteDocumentos;

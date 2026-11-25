@@ -10,14 +10,19 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useCompanyOpcional } from "@/contexts/CompanyContext";
 import { supabase } from "@/integrations/supabase/client";
-import { lerProdutosPagina, SEM_FILTRO_SERVIDOR, type LinhaPaginaProduto } from "@/emylia/real/produtosPaginados";
+import { lerPesquisaDoEstudio, lerProdutosPagina, SEM_FILTRO_SERVIDOR, type LinhaPaginaProduto } from "@/emylia/real/produtosPaginados";
+import { ehIdDeModelo3D, resolverModelo3D } from "@/emylia/planta3d/modelos3dEscolha";
+import type { ResultadoProcura } from "./pesquisaEstudio";
 import { CATALOGO, CORES, ouvirProdutosReais, produtosReais, usarProdutosReais, versaoProdutosReais, type Categoria, type Cor, type Produto } from "./catalogoFake";
 
+/** 24/11 (contratos reais da Mudelar, MD 1610 e outros): o mesmo cerâmico ou porcelânico (Surface Arena, Marfil 120x60) vai à parede
+ *  e ao chão; a parede só procurava em «Cerâmico» e o chão só em «Porcelânico», e o RP0010 da parede dava «0 resultados». */
+const CERAMICOS = ["Cerâmico", "Cerâmico Laminado", "Porcelânico"];
 /** As subcategorias da Mudelar de cada tipo de peça do Estúdio (pelo nome, sem acentos nem maiúsculas). */
 export const CATEGORIAS_REAIS: Partial<Record<Categoria, string[]>> = {
   base: ["Bases Duche"], banheira: ["Banheiras"], sanita: ["Sanitas"], bide: ["Bidés"], movel: ["Móveis de lavatório"],
   coluna: ["Colunas"], espelho: ["Espelhos"], toalheiro: ["Toalheiros"], coluna_duche: ["Colunas Duche"], resguardo: ["Resguardos de Duche"],
-  torneira: ["Torneira Lavatório", "Torneira Pé Alto"], revestimento: ["Cerâmico", "Cerâmico Laminado"], pavimento: ["Porcelânico", "SPC"],
+  torneira: ["Torneira Lavatório", "Torneira Pé Alto"], revestimento: CERAMICOS, pavimento: [...CERAMICOS, "SPC"],
   lava: ["Cubas compósito", "Cubas inox"], placa: ["Placas"], forno: ["Fornos"], frigorifico: ["Frigoríficos"], maquina: ["Máquinas lavar loiça"],
   exaustor: ["Exaustores"], armario: ["Armários de Coluna"],
 };
@@ -46,8 +51,12 @@ function tamanhoNaPlanta(cat: Categoria, md: number[] | null): { w?: number; h?:
   return {};
 }
 
-/** Uma linha do servidor como Produto do Estúdio. Null se não serve (sem preço de venda, inativo). */
-export function produtoDaLinha(l: LinhaPaginaProduto, cat: Categoria): Produto | null {
+/** 24/11: o «Modelo 3D» de cada categoria e subcategoria (product_categories.id → modelo), lido ao carregar o Estúdio; as linhas do servidor só trazem o ID delas. */
+let modelosCategorias: ReadonlyMap<string, string> = new Map();
+
+/** Uma linha do servidor como Produto do Estúdio. Null se não serve (sem preço de venda, inativo).
+ *  O «Modelo 3D» fica resolvido (produto > subcategoria > categoria) em `modelo3d`; sem escolha em nenhum nível, o produto não leva a chave. */
+export function produtoDaLinha(l: LinhaPaginaProduto, cat: Categoria, modelos: ReadonlyMap<string, string> = modelosCategorias): Produto | null {
   const pvp = l.pvp ?? 0;
   if (!(pvp > 0) || l.ativo === false || (l as { estado?: string }).estado === "draft") return null;
   const texto = `${l.nome} ${l.atributos_resumo ?? ""}`;
@@ -61,6 +70,13 @@ export function produtoDaLinha(l: LinhaPaginaProduto, cat: Categoria): Produto |
     ...tamanhoNaPlanta(cat, medidasDoTexto(l.nome)),
     ...(molde?.z0 !== undefined ? { z0: molde.z0, z1: molde.z1 } : {}),
     ...(l.atributos_resumo ? { destaque: l.atributos_resumo.slice(0, 120) } : {}),
+    // 23/11: a referência e o resto do texto, para a pesquisa do Estúdio (pelo SKU, pela marca, pela subcategoria, por todos os atributos)
+    ...(l.sku?.trim() ? { ref: l.sku.trim() } : {}),
+    ...(() => { const t = [l.marca, l.subcategoria, l.atributos_resumo].filter(Boolean).join(" "); return t ? { procura: t } : {}; })(),
+    ...(() => {
+      const r = resolverModelo3D({ produto: l.modelo3d, subcategoria: l.subcategoria_id ? modelos.get(l.subcategoria_id) : null, categoria: l.categoria_id ? modelos.get(l.categoria_id) : null });
+      return r.modelo && r.origem !== "automatico" ? { modelo3d: r.modelo, modelo3dOrigem: r.origem } : {};
+    })(),
   };
 }
 
@@ -81,6 +97,32 @@ async function idsDasSubcategorias(org: string): Promise<Map<string, string>> {
   if (error || !data) return new Map();
   return new Map(data.map((c) => [semAcento(c.name), c.id]));
 }
+
+/** 24/11: o «Modelo 3D» escolhido em cada categoria e subcategoria da organização (product_categories.modelo_3d), por id. Leitura À PARTE da dos ids pelo nome:
+ *  se a coluna ainda não existir (a migração do modelo 3D por aplicar) o PostgREST recusa o select, e isso só deixa o Estúdio sem estes modelos (nunca sem produtos).
+ *  Escolha: um select separado e tolerante, em vez de repetir o primeiro sem a coluna, para o que já funciona não depender do que ainda não existe. */
+export async function modelosDasCategorias(org: string): Promise<Map<string, string>> {
+  try {
+    const { data, error } = await (supabase as unknown as { from: (t: string) => { select: (c: string) => { eq: (k: string, v: string) => Promise<{ data: { id: string; modelo_3d: unknown }[] | null; error: unknown }> } } })
+      .from("product_categories").select("id,modelo_3d").eq("organization_id", org);
+    if (error) {
+      // só «a coluna ainda não existe» é esperado (a migração está por aplicar); rede, RLS ou tempo esgotado também deixam o Estúdio sem estes modelos, mas avisam
+      if (!colunaEmFalta(error)) console.warn("[estúdio] não foi possível ler o modelo 3D das categorias:", mensagemDe(error));
+      return new Map();
+    }
+    if (!data) return new Map();
+    return new Map(data.flatMap((c) => (ehIdDeModelo3D(c.modelo_3d) ? [[c.id, c.modelo_3d] as [string, string]] : [])));
+  } catch (e) {
+    console.warn("[estúdio] não foi possível ler o modelo 3D das categorias:", mensagemDe(e));
+    return new Map();
+  }
+}
+/** O erro do PostgREST/Postgres de uma coluna que não existe: 42703 (undefined_column), PGRST204 (coluna fora da cache do esquema) ou a mensagem «column … does not exist». */
+function colunaEmFalta(e: unknown): boolean {
+  const o = (e && typeof e === "object" ? e : {}) as { code?: unknown; message?: unknown };
+  return o.code === "42703" || o.code === "PGRST204" || (typeof o.message === "string" && /column .*does not exist/i.test(o.message));
+}
+const mensagemDe = (e: unknown): string => (e && typeof e === "object" && typeof (e as { message?: unknown }).message === "string" ? (e as { message: string }).message : String(e));
 
 // ------------------------------------------------------------------ 17/11 (Rúben: «a mão de obra a vir do serviço ligado»)
 
@@ -129,26 +171,38 @@ export const PAGINAS_A_MAIS = 2;
 
 /** Lê os pedidos (8 de cada vez) e junta aos já vistos os produtos novos, com a mão de obra. Devolve também as subcategorias que têm
  *  mais páginas (para pré-carregar). */
-async function lerPedidos(org: string, pedidos: readonly Pedido[], vistos: Map<string, Produto>): Promise<{ novos: Produto[]; comMais: { p: Pedido; paginas: number }[] }> {
+async function lerPedidos(org: string, pedidos: readonly Pedido[], vistos: Map<string, Produto>): Promise<{ novos: Produto[]; comMais: { p: Pedido; paginas: number }[]; haMais: boolean }> {
   const respostas = await aos(pedidos.map((p) => async () => {
     const r = await lerProdutosPagina(org, { ...SEM_FILTRO_SERVIDOR, subcategoria: p.sub, q: p.q }, p.pagina);
     return { p, linhas: r.ok ? r.v.produtos : [], paginas: r.ok ? r.v.paginas : 1 };
   }), 8);
+  const novos = await juntarLinhas(respostas.map(({ p, linhas }) => ({ cat: p.cat, linhas })), vistos);
+  return {
+    novos,
+    comMais: respostas.filter((r) => !r.p.q && r.paginas > r.p.pagina).map((r) => ({ p: r.p, paginas: r.paginas })),
+    haMais: respostas.some((r) => r.paginas > r.p.pagina),
+  };
+}
+
+const chaveVista = (cat: Categoria, id: string) => `${cat}:${id}`;
+/** Junta aos já vistos os produtos novos destas linhas do servidor (com a mão de obra) e devolve-os. */
+async function juntarLinhas(grupos: readonly { cat: Categoria; linhas: readonly LinhaPaginaProduto[] }[], vistos: Map<string, Produto>): Promise<Produto[]> {
   const novos: Produto[] = [];
-  for (const { p, linhas } of respostas) {
+  for (const { cat, linhas } of grupos) {
     for (const l of linhas) {
-      if (vistos.has(l.id)) continue;
+      // 24/11: pela categoria e pelo id: o mesmo porcelânico entra no revestimento e no pavimento
+      if (vistos.has(chaveVista(cat, l.id))) continue;
       // as colunas de duche: só as colunas (os braços, os pratos e os chuveiros de encastre vão com elas)
-      if (p.cat === "coluna_duche" && !/^\s*coluna/i.test(l.nome)) continue;
-      const x = produtoDaLinha(l, p.cat);
-      if (x) { vistos.set(l.id, x); novos.push(x); }
+      if (cat === "coluna_duche" && !/^\s*coluna/i.test(l.nome)) continue;
+      const x = produtoDaLinha(l, cat);
+      if (x) { vistos.set(chaveVista(cat, l.id), x); novos.push(x); }
     }
   }
   // a mão de obra pelo serviço ligado; se a leitura falhar, ficam os valores de referência
   let comMao = novos;
   try { comMao = await maoDeObraDosServicos(novos); } catch { /* fica a de referência */ }
-  for (const x of comMao) vistos.set(x.id, x);
-  return { novos: comMao, comMais: respostas.filter((r) => !r.p.q && r.paginas > r.p.pagina).map((r) => ({ p: r.p, paginas: r.paginas })) };
+  for (const x of comMao) vistos.set(chaveVista(x.cat, x.id), x);
+  return comMao;
 }
 
 // ------------------------------------------------------------------ 17/11 (Rúben: «no Estúdio permitia fazer pesquisas dos produtos»)
@@ -156,23 +210,39 @@ async function lerPedidos(org: string, pedidos: readonly Pedido[], vistos: Map<s
 /** O que a pesquisa precisa de saber do carregamento: a organização e as subcategorias de cada tipo de peça. */
 let contexto: { org: string; subs: Map<Categoria, string[]> } | null = null;
 
-export { bateComPesquisa } from "./pesquisaEstudio";
+export { bateComPesquisa, grauDaPesquisa, ordenarPorPesquisa } from "./pesquisaEstudio";
+
+/** 23/11: a base ainda não tem cat_estudio_procurar_produtos (20270126050000): a pesquisa lê como antes, subcategoria a subcategoria. */
+let semPesquisaNova = false;
 
 /** Procura no catálogo inteiro da organização, nas subcategorias deste tipo de peça, e junta o que encontrar aos produtos do Estúdio.
- *  Devolve quantos novos chegaram (0 sem sessão ou sem catálogo verdadeiro). Chama-se por pesquisaEstudio.ts (carregado à parte). */
-export async function procurarNoCatalogoReal(cat: Categoria, q: string): Promise<number> {
+ *  `pagina` > 1 traz a página seguinte da mesma pesquisa («Ver mais»). Devolve quantos novos chegaram e se o servidor tem mais
+ *  (nada sem sessão ou sem catálogo verdadeiro). Chama-se por pesquisaEstudio.ts (carregado à parte).
+ *  23/11 (Rúben: «procurar pela referência dá 0 resultados»; «o produto nunca apareceu, nem com o nome quase inteiro»): com a função
+ *  nova, uma só leitura que aceita a referência, procura nos atributos e traz os mais parecidos primeiro; sem ela, a de antes. */
+export async function procurarNoCatalogoReal(cat: Categoria, q: string, pagina = 1): Promise<ResultadoProcura> {
   const c = contexto, subs = c?.subs.get(cat) ?? [];
-  if (!c || !subs.length || semAcento(q).length < 2) return 0;
+  const texto = q.trim();
+  if (!c || !subs.length || semAcento(texto).length < 2) return { novos: 0, haMais: false };
   const vistos = new Map(produtosReais().map((p) => [p.id, p]));
-  const { novos } = await lerPedidos(c.org, subs.map((sub) => ({ cat, sub, q: q.trim(), pagina: 1 })), vistos);
+  let novos: Produto[] = [], haMais = false;
+  const r = semPesquisaNova ? null : await lerPesquisaDoEstudio(c.org, texto, subs, pagina);
+  if (r?.ok && r.v) {
+    novos = await juntarLinhas([{ cat, linhas: r.v.produtos }], vistos);
+    haMais = r.v.paginas > r.v.pagina;
+  } else {
+    if (r?.ok && r.v === null) semPesquisaNova = true;
+    ({ novos, haMais } = await lerPedidos(c.org, subs.map((sub) => ({ cat, sub, q: texto, pagina })), vistos));
+  }
   if (novos.length) usarProdutosReais([...vistos.values()]);
-  return novos.length;
+  return { novos: novos.length, haMais };
 }
 
 /** Os produtos verdadeiros do Estúdio, de todas as categorias. Devolve logo a 1.ª página de cada subcategoria (e de cada cor) e, por
  *  trás, pré-carrega as páginas seguintes (até PAGINAS_A_MAIS): `aoChegarMais` recebe a lista toda quando chegam. */
 export async function carregarProdutosDoEstudio(org: string, aoChegarMais?: (todos: Produto[]) => void): Promise<Produto[]> {
-  const ids = await idsDasSubcategorias(org);
+  const [ids, modelos] = await Promise.all([idsDasSubcategorias(org), modelosDasCategorias(org)]);
+  modelosCategorias = modelos;
   const pedidos: Pedido[] = [];
   const subsPorCat = new Map<Categoria, string[]>();
   contexto = { org, subs: subsPorCat };

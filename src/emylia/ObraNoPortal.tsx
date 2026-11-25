@@ -50,7 +50,8 @@ export function ProgressoObraPortal({ d, hoje }: { d: Negocio; hoje?: Date }) {
   const P = useMemo(() => progressoDaObra(d, hoje), [d, hoje]);
   const M = materiaisDaObra(resumoEcNegocio(inv, d.obra.ec?.ref));
   if (!P) return null;
-  const comecou = P.estado === "em curso" || P.estado === "concluída";
+  // 23/11: para o cliente, a obra começa no primeiro trabalho (não no arranque administrativo)
+  const comecou = P.comecou;
   return (
     <section aria-labelledby="progresso-obra-t" className="rounded-2xl bg-white p-5 shadow-sm">
       <div className="flex items-baseline justify-between gap-3">

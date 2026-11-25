@@ -16,7 +16,8 @@ import { FASES_OBRA } from "./fasesObra";
 import { rotuloDia } from "./preparacaoObra";
 import { fimDe } from "./ajustesPlano";
 import { ROTULO_EXEC, estadoDe, iniciais, nomeCurtoTarefa, type EstadoExec } from "./obraOps";
-import { diaDaTarefa, enviosDe, instrucoesDe, oDia, passosFeitos, registouNoDia, rotuloDiaTarefa, tempoDoDia, type Envio } from "./trabalhoObra";
+import { listaMicro, progressoMicro } from "./microtarefas";
+import { diaDaTarefa, enviosDe, oDia, registouNoDia, rotuloDiaTarefa, tempoDoDia, type Envio } from "./trabalhoObra";
 import { FotoObra } from "./fotosDaObra";
 
 const COR_TEC = ["#7c5ce0", "#0e7490", "#b45309", "#be185d", "#15803d", "#4338ca"];
@@ -174,7 +175,7 @@ export function DiaDaObra({ p, dia, modo, acoes }: { p: Plano; dia: number; modo
       {!L.length ? <p className="text-[15px] text-muted-foreground">Sem trabalho previsto neste dia.</p> : (
         <ul className="space-y-3">
           {L.map(({ ti, t, envios }) => {
-            const ex = p.estado === "concluída" ? "validada" : estadoDe(t), I = instrucoesDe(t), feitos = passosFeitos(t).length;
+            const ex = p.estado === "concluída" ? "validada" : estadoDe(t), I = { passos: listaMicro(t, null, p).map((m) => m.n) }, feitos = progressoMicro(t, null, p).feitas;
             const semRegisto = !cliente && tempo === "passado" && !envios.length && ex !== "validada" && diaDaTarefa(t, dia) != null;
             const fase = t.fase ? FASES_OBRA[t.fase - 1] : null;
             return (
@@ -199,7 +200,7 @@ export function DiaDaObra({ p, dia, modo, acoes }: { p: Plano; dia: number; modo
                       <div className="mt-3 flex items-center gap-2 text-sm text-muted-foreground">
                         <ListChecks className="h-4 w-4 shrink-0" aria-hidden="true" />
                         <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted" aria-hidden="true"><span className="block h-full rounded-full bg-primary motion-safe:transition-[width] duration-500" style={{ width: `${(ex === "validada" ? 1 : feitos / I.passos.length) * 100}%` }} /></span>
-                        <span className="tabular-nums">{ex === "validada" ? I.passos.length : feitos} de {I.passos.length} passos</span>
+                        <span className="tabular-nums">{ex === "validada" ? I.passos.length : feitos} de {I.passos.length} microtarefas</span>
                       </div>
                     )}
                     {t.exec?.estado === "corrigir" && t.exec.motivo && !cliente && <p className="mt-3 rounded-lg bg-destructive/[0.06] px-3 py-2 text-[15px]"><b className="font-medium">Correção pedida:</b> {t.exec.motivo}</p>}

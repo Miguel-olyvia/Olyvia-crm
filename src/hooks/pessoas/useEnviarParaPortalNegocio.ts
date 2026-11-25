@@ -3,7 +3,7 @@
 // Sem essa linha (a proposta/contrato da Emylia ainda só existe no estado do negócio) não há nada para enviar e diz-se; nunca se envia com um id inventado.
 // «Enviada» só aparece quando o portal já tem o documento visível (client_portal_documents), isto é, depois do sucesso; o erro da função aparece
 // no aviso do próprio useClientPortalAccess (destrutivo, visível).
-import { useCallback, useRef } from "react";
+import { useCallback, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useClientPortalAccess } from "@/hooks/useClientPortalAccess";
@@ -20,11 +20,17 @@ interface Linhas { data: unknown; error: { message: string } | null }
 interface Q { select: (c: string) => Q; eq: (c: string, v: unknown) => Q; order: (c: string, o: { ascending: boolean }) => Q; limit: (n: number) => Q; then: PromiseLike<Linhas>["then"] }
 const de = (t: string): Q => (supabase as unknown as { from: (n: string) => Q }).from(t);
 
-export function useEnviarParaPortalNegocio(negocioId: string | null, tipo: DocumentoParaPortal, aoEnviar?: () => void) {
+/** 23/11: corre antes do envio, com o id real; false = não enviar (quem o passa diz porquê). Ex.: gravar o idioma da proposta. */
+export type AntesDeEnviar = (documentoId: string) => Promise<boolean>;
+
+export function useEnviarParaPortalNegocio(negocioId: string | null, tipo: DocumentoParaPortal, aoEnviar?: () => void, antesDeEnviar?: AntesDeEnviar) {
   const qc = useQueryClient();
   // 17/11: quem chama sabe do sucesso (o contrato do negócio passa a «enviado» no motor: senão a gravação seguinte do negócio voltava-o a rascunho)
   const aoEnviarRef = useRef(aoEnviar);
   aoEnviarRef.current = aoEnviar;
+  const antesRef = useRef(antesDeEnviar);
+  antesRef.current = antesDeEnviar;
+  const [aPreparar, setAPreparar] = useState(false);
   const { hasPermission, isSystemAdmin } = usePermissions();
   const tabela = tipo === "proposal" ? "proposals" : "client_contracts";
   const chave = ["pessoas-portal-documento", negocioId, tipo];
@@ -57,11 +63,17 @@ export function useEnviarParaPortalNegocio(negocioId: string | null, tipo: Docum
   const enviar = useCallback((novaPassword = false) => {
     const id = consulta.data?.doc?.id;
     if (!id) return;
-    void generatePortalAccess(tipo, id, novaPassword);
+    const antes = antesRef.current;
+    if (!antes) { void generatePortalAccess(tipo, id, novaPassword); return; }
+    // com um passo antes: só se envia se ele passar (uma rejeição conta como não passar)
+    setAPreparar(true);
+    void antes(id)
+      .then((ok) => { if (ok) void generatePortalAccess(tipo, id, novaPassword); }, () => undefined)
+      .finally(() => setAPreparar(false));
   }, [consulta.data?.doc?.id, generatePortalAccess, tipo]);
   const estado: EstadoPortalDocumento = !consulta.data?.doc ? "sem-documento" : consulta.data.noPortal ? "enviado" : "por-enviar";
   return {
     estado, aLer: consulta.isLoading, erro: consulta.error instanceof Error ? consulta.error.message : null, reler: () => { void consulta.refetch(); },
-    aEnviar: loading, podePermissao, aLerPermissao, enviar,
+    aEnviar: loading || aPreparar, podePermissao, aLerPermissao, enviar,
   };
 }

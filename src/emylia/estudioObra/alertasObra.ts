@@ -2,7 +2,7 @@
 // liga-o à ação): o que está atrasado, o que espera pela validação ou pela decisão do cliente, os técnicos noutra obra, os materiais que
 // ainda não chegaram para a fase que vem, a conversa por ler, o fim que derrapou e a folga para adiantar.
 import { TECS, type Estado, type Negocio, type Plano } from "../motor";
-import { imprevistosDe } from "../imprevistos";
+import { imprevistosDe, pedidoDeAtraso, textoPedidoAtraso } from "../imprevistos";
 import { motivoOcupado, obraQueOcupa, tecnicosDoOficio } from "../preparacaoObra";
 import { materiaisPorFase } from "../obraOps";
 import type { ResumoEcNeg } from "../inventario/ponteNegocios";
@@ -54,7 +54,11 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
     if (v === "corrigir") L.push({ id: `corrigir-${ti}`, nivel: "atencao", ti, t: `${t.nome} está a ser corrigida`, sub: t.exec?.motivo ? `Pedido: ${t.exec.motivo}` : "Voltou ao técnico.", acoes: [{ rot: "Abrir", a: { k: "tarefa", ti } }] });
     // o técnico noutra obra ou de férias nos dias que faltam
     if (vivo && t.tec && v !== "validada" && v !== "feita" && t.dia + t.dur > p.dia) {
-      const resto = { dia: Math.max(t.dia, p.dia), dur: t.dia + t.dur - Math.max(t.dia, p.dia) };
+      // 23/11 (Rúben: «clico no erro de replanear e não permite fazer nada»): com as horas da tarefa. Sem elas contava-se o dia inteiro, e
+      // qualquer hora do técnico noutra obra dava conflito, mesmo quando a tarefa cabia ao lado (até HORAS_DIA): o alerta aparecia e o
+      // replanear (que conta as horas) não tinha nada para mudar.
+      const resto0 = { dia: Math.max(t.dia, p.dia), dur: t.dia + t.dur - Math.max(t.dia, p.dia) };
+      const resto = { ...resto0, ...(t.h > 0 && t.dur > 0 ? { h: (t.h * resto0.dur) / t.dur } : {}) };
       const m = motivoOcupado(t.tec, resto, p, ocup);
       if (m) {
         const onde = m === "noutra obra" ? obraQueOcupa(S, t.tec, resto, p, d.id) : null;
@@ -68,6 +72,8 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
 
   // os imprevistos que esperam pela empresa (a proposta ao cliente, ou decidir depois de ele recusar) e os que esperam pelo cliente
   for (const im of imprevistosDe(d)) {
+    // 23/11: o pedido de atraso do técnico: o gestor aceita (o plano anda) ou recusa
+    if (pedidoDeAtraso(im)) { L.push({ id: `im-${im.id}`, nivel: "critico", t: textoPedidoAtraso(im), sub: "Aceite (o plano anda e o cliente é avisado) ou recuse (o plano fica igual).", acoes: [{ rot: "Decidir", a: { k: "imprevisto", id: im.id } }] }); continue; }
     if (im.estado === "aberto") L.push({ id: `im-${im.id}`, nivel: "critico", t: `Imprevisto: ${im.texto}`, sub: im.grav === "impede" ? "As tarefas afetadas estão paradas. Faça a proposta ao cliente, ou resolva sem custo." : `Atrasou ${dias(im.atraso ?? 1)}. Falta decidir se tem custo para o cliente.`, acoes: [{ rot: "Tratar", a: { k: "imprevisto", id: im.id } }] });
     if (im.estado === "recusado") L.push({ id: `im-${im.id}`, nivel: "critico", t: `O cliente não aceitou: ${im.texto}`, sub: "Decida: seguir sem esse trabalho, fazer outra proposta ou suspender.", acoes: [{ rot: "Decidir", a: { k: "imprevisto", id: im.id } }] });
     // 12/11: a adenda por disparar está no alerta das adendas, em cima

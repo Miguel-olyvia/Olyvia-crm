@@ -4,11 +4,12 @@ import { animate, motion, useReducedMotion } from "framer-motion";
 import { ArrowRight, Check, CircleDot, Search, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { PECAS, areaChaoM2, areaParedesM2, type PecaPlanta } from "@/emylia/planta";
+import { PECAS, areaChaoM2, areaParedesM2, type LadoColuna, type PecaPlanta } from "@/emylia/planta";
+import { ladoDaColuna, ladosParaColuna } from "./estudioNo3D";
 import { ACOMPANHA, CORES, NOME_CATEGORIA, combina, coresPara, produto, produtosDe, type Categoria, type Cor, type Estilo, type Produto } from "./catalogoFake";
 import { alturaFinalCm, escolherProduto, estadoDaPeca, totais, type Projeto } from "./necessidadesEstudio";
 import { Ilustracao } from "./Ilustracao";
-import { EV_PROCURAR, bateComPesquisa, procurarNoCatalogo } from "./pesquisaEstudio";
+import { EV_PROCURAR, bateComPesquisa, ordenarPorPesquisa, procurarNoCatalogo } from "./pesquisaEstudio";
 import { pct } from "./ivaEstudio";
 
 export const eur = (n: number) => n.toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " €";
@@ -134,6 +135,9 @@ export function ListaProdutos({ cat, estilo, escolhido, onEscolher, limite, acao
   // inteiro da empresa (o que não estava carregado junta-se à lista)
   const [q, setQ] = useState("");
   const [aProcurar, setAProcurar] = useState(false);
+  // 23/11 (Rúben: «o servidor devolve no máximo 50»): a página do servidor já lida para esta pesquisa e se há mais («Ver mais do catálogo»)
+  const [servidor, setServidor] = useState<{ q: string; pagina: number; haMais: boolean } | null>(null);
+  const [aLerMais, setALerMais] = useState(false);
   // a Olyvia por voz («procura sanitas glamic») escreve aqui
   useEffect(() => {
     const h = (e: Event) => { const d = (e as CustomEvent<{ cat: Categoria; q: string }>).detail; if (d?.cat === cat) { setQ(d.q); setMais(false); } };
@@ -141,17 +145,33 @@ export function ListaProdutos({ cat, estilo, escolhido, onEscolher, limite, acao
     return () => window.removeEventListener(EV_PROCURAR, h);
   }, [cat]);
   useEffect(() => {
+    setServidor(null);
     if (q.trim().length < 2) { setAProcurar(false); return; }
     let vivo = true;
     const t = setTimeout(() => {
       setAProcurar(true);
-      procurarNoCatalogo(cat, q).catch(() => 0).finally(() => { if (vivo) setAProcurar(false); });
+      procurarNoCatalogo(cat, q)
+        .then((r) => { if (vivo) setServidor({ q, pagina: 1, haMais: r.haMais }); })
+        .catch(() => { /* fica o que já estava carregado */ })
+        .finally(() => { if (vivo) setAProcurar(false); });
     }, 350);
     return () => { vivo = false; clearTimeout(t); };
   }, [q, cat]);
   const procura = q.trim();
-  const completa = procura ? produtosDe(cat, estilo, true).filter((p) => bateComPesquisa(p, procura)) : produtosDe(cat, estilo, todos);
+  // 23/11: numa pesquisa, os mais parecidos primeiro (a referência, o nome igual, o nome mais curto), não pela cor nem pelo preço
+  const completa = procura ? ordenarPorPesquisa(produtosDe(cat, estilo, true).filter((p) => bateComPesquisa(p, procura)), procura) : produtosDe(cat, estilo, todos);
   const lista = limite && !mais ? completa.slice(0, limite) : completa;
+  const haMaisNoServidor = !!procura && servidor?.q === q && servidor.haMais;
+  const verMaisDoCatalogo = () => {
+    if (!servidor || aLerMais) return;
+    const seguinte = servidor.pagina + 1, deQ = servidor.q;
+    setALerMais(true);
+    setMais(true);
+    procurarNoCatalogo(cat, deQ, seguinte)
+      .then((r) => setServidor((s) => (s && s.q === deQ ? { q: deQ, pagina: seguinte, haMais: r.haMais } : s)))
+      .catch(() => { /* fica o que já estava carregado */ })
+      .finally(() => setALerMais(false));
+  };
   const recomendado = produtosDe(cat, estilo)[0]?.id;
   const fora = procura ? 0 : produtosDe(cat, estilo, true).length - produtosDe(cat, estilo).length;
   return (
@@ -163,11 +183,16 @@ export function ListaProdutos({ cat, estilo, escolhido, onEscolher, limite, acao
           className={cn(INP, "pl-9")} />
       </label>
       {procura
-        ? <p className="text-sm text-muted-foreground" aria-live="polite">{aProcurar ? "A procurar no catálogo…" : `${completa.length} ${completa.length === 1 ? "resultado" : "resultados"} para «${procura}», em todas as cores.`}</p>
+        ? <p className="text-sm text-muted-foreground" aria-live="polite">{aProcurar ? "A procurar no catálogo…" : `${completa.length} ${completa.length === 1 ? "resultado" : "resultados"} para «${procura}», em todas as cores${haMaisNoServidor ? ". Há mais no catálogo." : "."}`}</p>
         : <p className="text-sm text-muted-foreground">Filtrado por {coresPara(estilo, cat).map((c) => CORES[c].n.toLowerCase()).join(" e ") || "todas as cores"}.</p>}
       {lista.length === 0 && !aProcurar && <p className="text-sm">{procura ? "Nenhum produto com esse nome." : "Nenhum produto combina com o estilo."}</p>}
       <ul className="space-y-2">{lista.map((prod) => <CartaoProduto key={prod.id} prod={prod} estilo={estilo} escolhido={escolhido === prod.id} recomendado={prod.id === recomendado} acao={acao} onEscolher={() => onEscolher(prod.id)} />)}</ul>
       {limite && completa.length > limite && <button type="button" className="min-h-11 text-sm text-primary underline-offset-4 hover:underline" onClick={() => setMais((x) => !x)}>{mais ? "Ver menos" : `Ver mais ${completa.length - limite}`}</button>}
+      {haMaisNoServidor && (!limite || mais || completa.length <= limite) && (
+        <button type="button" disabled={aLerMais} className="min-h-11 text-sm text-primary underline-offset-4 hover:underline disabled:opacity-60" onClick={verMaisDoCatalogo}>
+          {aLerMais ? "A procurar mais…" : "Ver mais do catálogo"}
+        </button>
+      )}
       {fora > 0 && <button type="button" className="min-h-11 text-sm text-primary underline-offset-4 hover:underline" onClick={() => setTodos((x) => !x)}>{todos ? "Só os que combinam" : `Ver também os outros ${fora}`}</button>}
     </div>
   );
@@ -201,9 +226,30 @@ export function PainelPeca({ p, pc, setP, fechar }: { p: Projeto; pc: PecaPlanta
           <h4 className="text-[15px] font-semibold">{NOME_CATEGORIA[cat]}</h4>
           <ListaProdutos cat={cat} estilo={p.estilo} escolhido={p.acompanha[pc.id]?.[cat]}
             onEscolher={(id) => setP((x) => ({ ...x, acompanha: { ...x.acompanha, [pc.id]: { ...(x.acompanha[pc.id] ?? {}), [cat]: id } } }))} />
+          {cat === "coluna_duche" && <LadoDaColuna p={p} pc={pc} setP={setP} />}
         </div>
       ))}
     </section>
+  );
+}
+
+const NOME_LADO: Record<LadoColuna, string> = { fundo: "Ao fundo", esquerda: "Na parede da esquerda", direita: "Na parede da direita" };
+/** 23/11 (Rúben, negócio 1015): em que parede da base fica a coluna de duche (só os lados encostados a uma parede). */
+function LadoDaColuna({ p, pc, setP }: { p: Projeto; pc: PecaPlanta; setP: React.Dispatch<React.SetStateAction<Projeto>> }) {
+  const atual = p.depois.pecas.find((x) => x.id === pc.id) ?? pc;
+  const lados = ladosParaColuna(atual, p.depois), escolhido = ladoDaColuna(atual, p.depois);
+  if (lados.length < 2) return null;
+  const mudar = (l: LadoColuna) => setP((x) => ({ ...x, depois: { ...x.depois, pecas: x.depois.pecas.map((y) => (y.id === pc.id ? { ...y, coluna: l } : y)) } }));
+  return (
+    <fieldset className="space-y-2">
+      <legend className="text-sm font-medium">Onde fica a coluna</legend>
+      <p className="text-xs text-muted-foreground">Olhando para a base de dentro da casa de banho.</p>
+      <div className="flex flex-wrap gap-2">
+        {lados.map((l) => (
+          <button key={l} type="button" className={chip(escolhido === l)} aria-pressed={escolhido === l} onClick={() => mudar(l)}>{NOME_LADO[l]}</button>
+        ))}
+      </div>
+    </fieldset>
   );
 }
 

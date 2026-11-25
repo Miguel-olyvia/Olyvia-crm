@@ -15,6 +15,11 @@ import { nomeEmpresa } from "./acessosPortal";
 import { totaisAdenda } from "./adendas";
 import { garantiaAte, resumoObra } from "./historiaObra";
 import { RelatorioObra } from "./RelatorioObra";
+import { FotoObra } from "./fotosDaObra";
+import { antesEDepois } from "./estudioObra/previsaoObra";
+import { nomeCurtoTarefa } from "./estudioObra/planoVivo";
+import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
+import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 
 /** O auto de receção: a obra, as datas, os trabalhos por fase, os trabalhos a mais, as observações, a garantia e as assinaturas. */
 export function AutoRececaoDoc({ d }: { d: Negocio }) {
@@ -22,9 +27,10 @@ export function AutoRececaoDoc({ d }: { d: Negocio }) {
   if (!au || !p) return null;
   const assinado = au.estado === "assinado", ate = garantiaAte(d);
   const adendas = (d.adendas ?? []).filter((a) => a.estado === "assinada");
-  const porFase = FASES_OBRA.map((f) => ({ f, ts: [...new Set(p.tasks.filter((t) => t.fase === f.n).map((t) => t.nome))] })).filter((x) => x.ts.length);
-  const semFase = [...new Set(p.tasks.filter((t) => !t.fase).map((t) => t.nome))];
+  const porFase = FASES_OBRA.map((f) => ({ f, ts: [...new Set(p.tasks.filter((t) => t.fase === f.n && t.corrige == null).map((t) => nomeCurtoTarefa(t.nome)))] })).filter((x) => x.ts.length);
+  const semFase = [...new Set(p.tasks.filter((t) => !t.fase && t.corrige == null).map((t) => nomeCurtoTarefa(t.nome)))];
   const empresa: Assinatura = { tipo: "digital", nome: `${RESPONSAVEL_OBRA.n} (${nomeEmpresa()})`, q: au.q, id: `MDL-AR-${d.id}` };
+  const ad = antesEDepois(d), pr = projetoDoNegocio(d.f);
   return (
     <Folha titulo="Auto de receção da obra" numero={au.n} data={assinado ? `assinado ${au.assinado ?? ""}` : "à espera da assinatura"} carimbo={assinado ? "Obra recebida" : undefined}>
       <Cliente d={d} />
@@ -47,6 +53,24 @@ export function AutoRececaoDoc({ d }: { d: Negocio }) {
           {semFase.length > 0 && <li><p>{semFase.join(" · ")}</p></li>}
         </ol>
       </section>
+      {/* 23/11 (Rúben: «mega next-level»): o antes e o depois, em fotografias e na planta do projeto */}
+      {(ad || pr) && (
+        <section aria-label="Antes e depois" className="space-y-3">
+          <h3 className="font-semibold">Antes e depois</h3>
+          {ad && (
+            <div className="grid grid-cols-2 gap-3">
+              <figure className="space-y-1"><FotoObra src={ad.antes} alt="Antes" className="aspect-[4/3] w-full rounded-lg object-cover" /><figcaption className="text-xs text-slate-500">Antes</figcaption></figure>
+              <figure className="space-y-1"><FotoObra src={ad.depois} alt="Depois" className="aspect-[4/3] w-full rounded-lg object-cover" /><figcaption className="text-xs text-slate-500">Depois</figcaption></figure>
+            </div>
+          )}
+          {pr && (
+            <div className="grid grid-cols-2 gap-3">
+              <PlantaVista planta={pr.antes} titulo="A planta antes" />
+              <PlantaVista planta={pr.depois} titulo="A planta final" />
+            </div>
+          )}
+        </section>
+      )}
       {adendas.length > 0 && (
         <section aria-label="Trabalhos a mais">
           <h3 className="font-semibold">Trabalhos a mais</h3>

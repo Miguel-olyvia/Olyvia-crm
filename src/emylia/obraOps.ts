@@ -27,8 +27,10 @@ export interface ExecTarefa {
   feita?: string; validada?: string;
   /** 21/10: os registos do técnico, dia a dia, e as respostas do responsável (trabalhoObra.ts); o cliente vê-os no portal. */
   envios?: Envio[];
-  /** 21/10: os passos das instruções já marcados pelo técnico (índices). */
+  /** 21/10: os passos das instruções já marcados pelo técnico (índices). 24/11: os ids das microtarefas marcadas (microtarefas.ts). */
   passos?: number[];
+  /** 24/11: de onde vinha a lista de microtarefas quando o técnico marcou a primeira (sem lista própria na tarefa): as marcas são dela. */
+  microDe?: "catalogo" | "instrucoes";
   /** 11/11: pausada pelo responsável (o técnico vê-o no Hoje), com o porquê; retomar tira-a. */
   pausa?: { q: string; motivo: string };
   /** 22/10 (fase 3): o €/h do técnico quando as horas foram registadas fora de um envio (mudadas pelo responsável). */
@@ -175,7 +177,8 @@ export function equipamentosDaObra(p: Plano): Equip[] {
 
 /* ------------------------------------------------------------------ os materiais, por fase */
 export type EstadoMat = "na obra" | "na carrinha" | "reservado" | "recebido" | "a chegar" | "encomendado" | "por encomendar" | "em falta";
-export interface Mat { n: string; q: number; un: string; estado: EstadoMat; quando?: string; forn?: string }
+export interface Mat { n: string; q: number; un: string; estado: EstadoMat; quando?: string; forn?: string;
+  /** 23/11: a data prometida pelo fornecedor (ISO), para comparar com o dia da tarefa que precisa do material */ chega?: string }
 /** A fase em que o material entra, só pelo nome. 02/11: mora em fasesObra.ts (a regra única); fica aqui para os imports de sempre. */
 export { faseDoMaterial };
 
@@ -212,8 +215,12 @@ export function faseNaObra(F: FasesDaObra | null, m: { id?: string | null; n: st
  *  02/11: a fase é a da regra única (faseNaObra: o serviço da obra que instala o produto, a receita que o gasta, ou o nome). */
 export function materiaisPorFase(d: Negocio, inv?: ResumoEcNeg | null, lidas?: readonly { id?: string | null; n: string; q: number; un: string; falta: number; ec?: string }[] | null): { fase: number; itens: Mat[] }[] {
   // 09/11: `lidas`: as linhas de obra_materiais_ler (real/materiaisObraReal.ts), para quem não vê as encomendas de cliente; `inv` é o resumo delas
+  // 23/11 (Rúben, no 1015: «Sem materiais na encomenda desta obra», com a EC emitida e as compras recebidas): a encomenda emitida no
+  // servidor chega à obra sem linhas (d.obra.ec.linhas vazio); as linhas são as da encomenda lida da base (`inv`, encomendaReal.ts)
+  const daObra = d.obra.ec?.linhas.length ? d.obra.ec.linhas.map((x) => ({ id: x.id, n: x.n, q: x.q, un: x.un, falta: x.falta })) : null;
+  const daBase = !daObra && inv?.linhas.length ? inv.linhas.map((l) => ({ id: undefined, n: l.n, q: l.q, un: l.un, falta: Math.max(0, l.q - l.pronto - l.saida), ec: l.ec })) : null;
   const linhas: { id?: string | null; n: string; q: number; un: string; falta: number; ec?: string }[] = lidas ? [...lidas]
-    : d.obra.ec?.linhas.map((x) => ({ id: x.id, n: x.n, q: x.q, un: x.un, falta: x.falta })) ?? d.obra.mats?.map((x) => ({ id: undefined, n: x.n, q: x.q, un: x.un, falta: x.falta })) ?? [];
+    : daObra ?? daBase ?? d.obra.mats?.map((x) => ({ id: undefined, n: x.n, q: x.q, un: x.un, falta: x.falta })) ?? [];
   const F = fasesDaObra(servicosDaObra(d));
   const itens: (Mat & { fase: number })[] = linhas.map((x) => {
     let estado: EstadoMat = "reservado", quando: string | undefined, forn: string | undefined;
@@ -225,7 +232,8 @@ export function materiaisPorFase(d: Negocio, inv?: ResumoEcNeg | null, lidas?: r
       estado = li.st === "served" ? "na obra" : li.aBordo ? "na carrinha" : li.st === "ready" || li.st === "recvpo" ? "reservado" : li.aChegar > 0 ? (porAprovar ? "por encomendar" : pr ? "a chegar" : "encomendado") : "em falta";
       quando = estado === "a chegar" && pr ? `${pr.slice(8, 10)}/${pr.slice(5, 7)}` : undefined;
     } else if (x.falta > 0) estado = d.obra.ec?.ref ? "por encomendar" : "em falta";
-    return { n: x.n, q: x.q, un: x.un, estado, quando, forn, fase: faseNaObra(F, x) };
+    const chega = li?.pos.find((p) => p.prometida)?.prometida ?? undefined;
+    return { n: x.n, q: x.q, un: x.un, estado, quando, forn, ...(chega && estado === "a chegar" ? { chega } : {}), fase: faseNaObra(F, x) };
   });
   return [1, 2, 3, 4].map((f) => ({ fase: f, itens: itens.filter((x) => x.fase === f).map(({ fase: _f, ...m }) => m) })).filter((g) => g.itens.length);
 }

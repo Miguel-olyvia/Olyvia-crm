@@ -8,6 +8,7 @@ import { PAPEIS, type Papel } from "../motor";
 import { CODIGO_APROVAR_PO, CODIGO_BASE, PERMS_DIRECAO_EXTRA, PERMS_FASES, PERMS_PAPEL } from "../permissoes";
 import { RESPONSAVEL_OBRA, definirViaturaObra } from "../obraOps";
 import { definirResponsaveisObra } from "../campos";
+import { definirSupervisoresMedidas } from "../supervisoresMedidas";
 
 export interface MeusPapeis {
   /** As vistas da pessoa (lido da base: só o Técnico; depois de comPapeisDasPermissoes: mais as das permissões). */
@@ -133,12 +134,14 @@ export function definirResponsavelObra(g: { nome: string; telefone: string | nul
   if (g === null) { Object.assign(RESPONSAVEL_OBRA, RESPONSAVEL_V1); return; }
   Object.assign(RESPONSAVEL_OBRA, { n: g?.nome?.trim() || "o Gestor de obra", papel: "Gestor de obra", tel: g?.telefone?.trim() ?? "" });
 }
-export interface GestorObra { nome: string; telefone: string | null }
+/** 23/11 (M7): `id` = a pessoa do RH (para «Quem vai medir»); sem ele a pessoa não entra nessa lista. */
+export interface GestorObra { nome: string; telefone: string | null; id?: string }
 /** Os Gestores de obra do RH (neg_gestores_obra). Sem a função ou com erro, nenhum. */
 export async function lerGestoresObra(sb: SupabaseClient, org: string): Promise<GestorObra[]> {
   const { data, error } = await sb.rpc("neg_gestores_obra" as never, { p_org: org } as never);
   if (error || !Array.isArray(data)) return [];
-  return (data as { nome?: string; telefone?: string | null }[]).filter((g) => !!g.nome?.trim()).map((g) => ({ nome: g.nome!.trim(), telefone: g.telefone ?? null }));
+  return (data as { id?: string; nome?: string; telefone?: string | null }[]).filter((g) => !!g.nome?.trim())
+    .map((g) => ({ nome: g.nome!.trim(), telefone: g.telefone ?? null, ...(g.id ? { id: g.id } : {}) }));
 }
 /** O primeiro (o do Hoje do técnico, da obra e do auto). */
 export const lerGestorObra = async (sb: SupabaseClient, org: string): Promise<GestorObra | undefined> => (await lerGestoresObra(sb, org))[0];
@@ -146,6 +149,8 @@ export const lerGestorObra = async (sb: SupabaseClient, org: string): Promise<Ge
 export function aplicarGestoresObra(L: readonly GestorObra[]): void {
   definirResponsavelObra(L[0]);
   definirResponsaveisObra(L.map((g) => g.nome));
+  // 23/11 (M7): quem mede/retifica é o supervisor de obra: os mesmos (perfil com negocios.obra.planear) entram em «Quem vai medir»
+  definirSupervisoresMedidas(L.flatMap((g) => (g.id ? [{ id: g.id, n: g.nome }] : [])));
 }
 
 const DIRECAO_V1 = PERMS_PAPEL.direcao;
@@ -165,5 +170,6 @@ export function reporNomesPapeis(): void {
   escolhiveis = null;
   definirResponsavelObra(null);
   definirResponsaveisObra(null);
+  definirSupervisoresMedidas(null);
   definirViaturaObra(undefined);
 }

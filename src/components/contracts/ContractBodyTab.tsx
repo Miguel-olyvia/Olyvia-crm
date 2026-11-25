@@ -135,6 +135,20 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
   const hasVerifiedTemplateSignatory =
     !!currentTemplate?.signatory_user_id && hasPermission("client_contracts.send_signature");
 
+  // 23/11/2026 (auditoria de permissões, B2): assinar com o próprio SMS pede poderes para assinar contratos (can_sign_contracts),
+  // e o servidor (rpc_contra_assinar_contrato) recusava só DEPOIS de o sms-otp ter enviado o código. O ecrã pergunta antes ao
+  // servidor (fn_posso_ligar_assinatura) e só mostra «Assinar (Empresa)» a quem pode assinar ou tem o signatário da minuta.
+  const orgDaAssinatura: string | null = contract?.organization_id ?? activeCompany?.id ?? null;
+  const { data: podeAssinarProprio = false } = useQuery({
+    queryKey: ["contract-pode-assinar-empresa", orgDaAssinatura],
+    queryFn: async () => {
+      const { data, error } = await (supabase as any).rpc("fn_posso_ligar_assinatura", { p_org: orgDaAssinatura });
+      if (error) { captureFlowError(error, "db-error-leaked-to-ui"); return false; }
+      return data === true;
+    },
+    enabled: !!orgDaAssinatura,
+  });
+
   const { data: templateSignatoryUser } = useQuery({
     queryKey: ["contract-template-signatory-user", currentTemplate?.signatory_user_id],
     queryFn: async () => {
@@ -668,7 +682,7 @@ export function ContractBodyTab({ contract, readOnly }: ContractBodyTabProps) {
         </div>
         <div className="flex items-center gap-2">
           {/* Company sign button */}
-          {bodyHtml && !contract?.company_signature_date && !isEditing && (
+          {bodyHtml && !contract?.company_signature_date && !isEditing && (podeAssinarProprio || hasVerifiedTemplateSignatory) && (
             <Button
               size="sm"
               className="gap-1.5"

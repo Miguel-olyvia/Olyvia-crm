@@ -25,7 +25,10 @@ export interface NegocioLido { id: string; entityId: string; estadoCrm: string; 
   /** 28/10: a encomenda de cliente emitida no servidor (20261231999700, fn_neg_ler_ec): o contrato e quando. Sem ela, ainda não há. */
   ec?: EcBase | null;
   /** 20/11 (20270125020000): a versão das gravações quando se leu (neg_versoes). Sem ela (base sem a função), grava-se como antes. */
-  versao?: number }
+  versao?: number;
+  /** 20/11 (permissões ecrã/servidor): `pode_gravar` da leitura (neg_guardar_negocio aceitaria a gravação: pessoas.edit no âmbito do
+   *  negócio, fn_neg_no_ambito). `false`: o negócio abre só de leitura. Ausente (base sem o campo): como antes. */
+  podeGravar?: boolean }
 export interface EcBase { contract_id: string; order_number: string | null; emitida_em: string | null }
 
 /** O negócio do motor a partir do que se leu: as linhas e, se houver, a obra. */
@@ -110,11 +113,13 @@ export function paraBase(L: LinhasNegocio, ids: IdsServico): LinhasNegocio {
 
 /** O que a base devolve, para um negócio, de volta às linhas com as chaves da Emylia. */
 export function deBase(j: unknown, ids: IdsServico): NegocioLido {
-  const o = j as LinhasNegocio & { negocio: LinhasNegocio["negocio"] & { id: string; entity_id: string; estado_crm: string; fluxo_emylia: boolean; docs_crm?: boolean };
-    ec?: Partial<EcBase> | null };
+  const o = j as LinhasNegocio & { negocio: LinhasNegocio["negocio"] & { id: string; entity_id: string; estado_crm: string; fluxo_emylia: boolean; docs_crm?: boolean; pode_gravar?: boolean };
+    ec?: Partial<EcBase> | null; pode_gravar?: boolean };
   const n = { ...o.negocio } as Record<string, unknown>;
   const id = String(n.id), entityId = String(n.entity_id), estadoCrm = String(n.estado_crm), fluxoEmylia = !!n.fluxo_emylia, docsCrm = n.docs_crm === true;
-  for (const k of ["id", "entity_id", "estado_crm", "fluxo_emylia", "docs_crm"]) delete n[k];
+  // 20/11: pode vir no negócio ou ao lado dele; só um booleano conta (outra coisa, ou ausente: como antes)
+  const pg = typeof n.pode_gravar === "boolean" ? n.pode_gravar : typeof o.pode_gravar === "boolean" ? o.pode_gravar : undefined;
+  for (const k of ["id", "entity_id", "estado_crm", "fluxo_emylia", "docs_crm", "pode_gravar"]) delete n[k];
   const L: LinhasNegocio = {
     negocio: n as unknown as LinhasNegocio["negocio"], respostas: o.respostas ?? [], visitas: o.visitas ?? [], medidas: o.medidas,
     servicos: o.servicos ?? [], produtos: o.produtos ?? null, partes_fora: o.partes_fora ?? null, orcamentos: o.orcamentos ?? [],
@@ -123,7 +128,7 @@ export function deBase(j: unknown, ids: IdsServico): NegocioLido {
     ec: o.ec ?? null,
   };
   const ec: EcBase | null = o.ec?.contract_id ? { contract_id: String(o.ec.contract_id), order_number: o.ec.order_number ?? null, emitida_em: o.ec.emitida_em ?? null } : null;
-  return { id, entityId, estadoCrm, fluxoEmylia, docsCrm, ec, linhas: trocarServicos(L, (s) => (s == null ? null : ids.paraChave.get(s) ?? s)) };
+  return { id, entityId, estadoCrm, fluxoEmylia, docsCrm, ec, ...(pg !== undefined ? { podeGravar: pg } : {}), linhas: trocarServicos(L, (s) => (s == null ? null : ids.paraChave.get(s) ?? s)) };
 }
 
 /** `campos`: os ajustes da organização (S.campos), para traduzir as respostas do formulário para as perguntas da fase. A foto e o conflito()

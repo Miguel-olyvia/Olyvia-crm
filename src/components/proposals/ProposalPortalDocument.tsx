@@ -22,6 +22,7 @@ import { cooldownLabel } from "@/hooks/useCooldown";
 import { OtpCooldownNotice } from "@/components/ui/otp-cooldown-notice";
 import { computeQuoteTotals, computeLineVatAmount, aggregateQuoteTotals } from "@/utils/quotes/computeQuoteTotals";
 import { getLineDisplayUnitPrice } from "@/utils/quotes/quoteLinePricing";
+import { substituirVariaveis, textosComVariaveis, type VariaveisDaProposta } from "@/lib/textoDaProposta";
 
 /**
  * Total c/IVA de uma linha, calculado como o PDF o calcula: num bundle o IVA é
@@ -61,6 +62,21 @@ interface ProposalPortalDocumentProps {
    * a vista do cliente: aparecem depois do orçamento e antes da decisão. Sem eles, o documento fica como sempre.
    */
   documentoObra?: ReactNode;
+  /**
+   * 23/11: o número que se mostra (numeroDaProposta, src/lib/numeroDocumento.ts: «PR 2026/1031» numa proposta de negócio).
+   * Sem ele, o `proposal_number` guardado, como sempre.
+   */
+  numeroMostrado?: string;
+  /**
+   * 23/11: a carta e o resumo da Emylia (CapaDoDocumento), por cima das secções do template. Quem chama só a passa quando o
+   * template não escreve o cabeçalho («o que está escrito no template é o verdadeiro»). Sem ela, o documento fica como sempre.
+   */
+  capaObra?: ReactNode;
+  /**
+   * 23/11: os valores das variáveis dos textos do template ({{condicoes_pagamento}}, {{validade}}, …; src/lib/textoDaProposta.ts).
+   * Sem eles, uma variável conhecida fica vazia; um texto sem variáveis fica exatamente como está.
+   */
+  variaveis?: VariaveisDaProposta | null;
   /**
    * Idiomas do documento, por ordem (omissão: só `idioma`; quando vem, manda sobre `idioma`). O template passa por
    * aplicarVersaoProposta em cada um e o miolo (secções do template) corre uma vez por versão, cada uma com o seu
@@ -207,6 +223,9 @@ export function ProposalPortalDocument({
   statusLabel,
   idioma = "pt",
   documentoObra,
+  numeroMostrado,
+  capaObra,
+  variaveis,
   idiomasDoDocumento,
   modoVersoes = "sequencia",
   idiomaEscolhido,
@@ -259,10 +278,12 @@ export function ProposalPortalDocument({
     () =>
       codigos.map((codigo) => {
         const { idioma: lingua, t } = traduzirEm(codigo);
-        const templateDaVersao = template ? aplicarVersaoProposta(template, codigo) : template;
+        const versao = template ? aplicarVersaoProposta(template, codigo) : template;
+        // 23/11: as variáveis dos textos ({{condicoes_pagamento}}, …); sem variáveis é a MESMA referência
+        const templateDaVersao = versao ? textosComVariaveis(versao, variaveis) : versao;
         return { codigo, lingua, t, template: templateDaVersao, documentSections: seccoesDoDocumento(templateDaVersao) };
       }),
-    [codigos, template],
+    [codigos, template, variaveis],
   );
   // O que fica fora das versões (cartões, faixas, OTP, ações) fala o idioma da primeira (no seletor, a visível).
   const { lingua, t } = versoes[0];
@@ -1011,7 +1032,7 @@ export function ProposalPortalDocument({
         case "client_info":
           return renderClientSection(section);
         case "description":
-          return renderContentBlock(section, "pc.docProposta.secao.descricao", section.settings?.content || proposal.description || "");
+          return renderContentBlock(section, "pc.docProposta.secao.descricao", substituirVariaveis(section.settings?.content || proposal.description || "", variaveis, { html: true }));
         case "notes":
           return renderContentBlock(section, "pc.docProposta.secao.notas", getNotesContent(section));
         case "validity":
@@ -1109,7 +1130,7 @@ export function ProposalPortalDocument({
               {t("pc.docProposta.cartao.titulo", { titulo: proposal.title ?? "" })}
             </CardTitle>
             <p className="text-sm text-muted-foreground mt-1">
-              {t("pc.docProposta.cartao.criada", { numero: String(proposal.proposal_number ?? ""), data: fmtData(proposal.created_at, "numerico") })}
+              {t("pc.docProposta.cartao.criada", { numero: numeroMostrado ?? String(proposal.proposal_number ?? ""), data: fmtData(proposal.created_at, "numerico") })}
             </p>
           </div>
           <Badge variant="outline" className="shrink-0" style={{ borderColor: `${primaryColor}50`, color: primaryColor }}>
@@ -1171,6 +1192,8 @@ export function ProposalPortalDocument({
           })()}
         </CardContent>
       </Card>
+
+      {capaObra}
 
       {versoes.length > 1
         ? versoes.map((versao, indice) => {

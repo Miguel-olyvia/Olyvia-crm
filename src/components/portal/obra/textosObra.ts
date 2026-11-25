@@ -78,6 +78,17 @@ export function textoDaClausula(titulo: string, C: ClausulasDados, t: T, idioma:
         servico: C.servico.toLowerCase(), local: [C.morada, C.localidade].filter(Boolean).join(", "), servicos: C.servicos.map((s) => s.toLowerCase()).join(", "),
       });
     case "Preço":
+      // 24/11: com uma parte a 0% (autoliquidação) ou produtos a 6% (MD 1594), só as partes com valor, pela taxa (e a menção quando há
+      // valor a 0%); senão, o texto de sempre
+      if ((T.isento ?? 0) > 0.004 || (T.prod6 ?? 0) > 0.004) { // motor.ts: partesPorTaxa (aqui sem puxar o motor)
+        const partes = [
+          T.mo > 0.004 ? t("pc.docObra.ct.parte6", { v: formatCurrency(T.mo), iva: formatCurrency(T.ivaMo) }) : "",
+          T.mat > 0.004 ? t("pc.docObra.ct.parte23", { v: formatCurrency(T.mat), iva: formatCurrency(T.ivaMat) }) : "",
+          T.isento > 0.004 ? t("pc.docObra.ct.parte0", { v: formatCurrency(T.isento) }) : "",
+        ].filter(Boolean);
+        const lista = partes.length > 1 ? `${partes.slice(0, -1).join(", ")}${t("pc.docObra.ct.e")}${partes[partes.length - 1]}` : partes[0];
+        return t("pc.docObra.ct.precoPartes", { base: formatCurrency(T.base), partes: lista, total: formatCurrency(T.total), mencao: T.isento > 0.004 ? t("pc.docObra.orc.mencaoAutoliq") : "" }).trim();
+      }
       return t("pc.docObra.ct.preco", {
         base: formatCurrency(T.base), mo: formatCurrency(T.mo), ivaMo: formatCurrency(T.ivaMo), mat: formatCurrency(T.mat), ivaMat: formatCurrency(T.ivaMat), total: formatCurrency(T.total),
       });

@@ -9,6 +9,8 @@ import type { TipoPeca } from "../planta";
 import type { TipoEspaco } from "./modelo";
 import { modeloHtmlDoProduto } from "./htmlDoCatalogo";
 import { categoriaDoTipo, categoriaPorId, opcoesComOmissao } from "./categoriasGlb";
+import { medidasDeOmissaoNovas } from "./categoriasGlbNovas";
+import { escolhaPorId, resolverDoNo, type ModeloEscolha, type ResolvidoModelo3D } from "./modelos3dEscolha";
 
 export type TipoMockup =
   | "caixa" | "sanita" | "sanita_suspensa" | "bide" | "banheira" | "base_duche" | "lavatorio" | "movel_lavatorio" | "coluna" | "coluna_duche" | "movel"
@@ -23,8 +25,11 @@ export type Montagem = "chao" | "parede";
 export interface ProdutoCat {
   id: string; n: string; sub?: string; no: string | null; marca?: string; fornecedor?: string; custo?: number;
   tipo?: TipoMockup; /** largura, profundidade, altura (cm) */ dim?: [number, number, number]; demo?: boolean;
+  /** O «Modelo 3D» escolhido no próprio produto (modelos3dEscolha.ts); vazio herda da subcategoria e da categoria (`NoCat.modelo3d`). Em falta: a migração ainda não está aplicada. */
+  modelo3d?: string | null;
 }
-export interface NoCat { id: string; n: string; pai: string | null }
+/** `modelo3d`: o «Modelo 3D» escolhido nesta categoria ou subcategoria (a subcategoria é o nó com pai). */
+export interface NoCat { id: string; n: string; pai: string | null; modelo3d?: string | null }
 
 /** O mockup de um produto, em metros. `url`: um GLB opcional (carregado se existir); sem ele, desenha-se a geometria paramétrica. */
 /** O material de uma variante (acabamento): a cor vai em `cor`; aqui o resto. Sem mapa de ambiente, o metal renderiza-se com metalness limitado. */
@@ -47,6 +52,10 @@ export interface Mockup3D {
   tipo: TipoMockup; largura: number; profundidade: number; altura: number; cor: string; url?: string; material?: MaterialMockup; params?: ParamsMockup;
   /** o modelo genérico da categoria (categoriasGlb.ts), escolhido pelo tipo e pelo nome, com as omissões das opções que o nome dá */
   generico?: { id: string; o: Record<string, string | boolean> };
+  /** 24/11: a foto da opção de cor (URL público e o lado em cm de cada repetição): o Visualizador3D aplica-a ao corpo da peça. Só a pré-visualização do produto a põe; sem ela, a cor lisa. */
+  textura?: import("./texturaProduto").TexturaModelo;
+  /** 24/11: a aparência de cada zona do objecto (frente, corpo…), dos atributos «Cor da frente», «Cor do corpo»…; só a pré-visualização do produto a põe. Sem ela (ou com `porZona: false`), a foto ou cor única de sempre. */
+  zonas?: import("./zonasGlb").ZonasDoProduto;
 }
 export interface Dimensoes { larguraCm: number; profundidadeCm: number; alturaCm: number; deNome: boolean }
 export interface ProdutoModelo3D {
@@ -54,12 +63,33 @@ export interface ProdutoModelo3D {
   montagem: Montagem; /** altura de omissão ao chão (m), só para peças de parede */ alturaOmissao: number; demo: boolean;
   /** Só as peças de uma família do catálogo (familias.ts): a família, a variante escolhida, o SKU e o preço dessa variante. */
   fam?: { familiaId: string; medidaId: string; acabId: string; sku: string; preco: number };
+  /** O «Modelo 3D» escolhido (no produto, na subcategoria ou na categoria) que mandou nesta peça, e de onde veio. Sem ele, o classificador de sempre decidiu. */
+  escolha?: ResolvidoModelo3D;
+}
+
+/**
+ * A sanita de chão COM depósito: a altura que o produto traz (do nome, da medida dos atributos ou de `dim`) abaixo de 60 cm não é a total mas a do assento
+ * ou da taça (a receita genérica usa-a como altura total: o depósito ficava achatado e, abaixo de 40 cm, a taça encolhia); passa à altura-padrão de 78 cm.
+ */
+export const ALTURA_MIN_SANITA_COM_DEPOSITO_CM = 60;
+export const ALTURA_SANITA_COM_DEPOSITO_CM = 78;
+
+/**
+ * A altura (cm) de uma peça, corrigida para a sanita de chão com depósito (a omissão da opção `deposito` pelo nome: a BTW sem a palavra depósito não conta):
+ * abaixo de 60 cm, 78 cm; de 60 cm para cima, a que vem. Outros tipos (a sanita suspensa incluída) e a BTW sem depósito ficam como vêm. É o único sítio da regra:
+ * o catálogo, a planta (modeloDoProduto, extrairDimensoes) e a pré-visualização do formulário (dimensoesDaMedida) chamam-no.
+ */
+export function alturaDeSanitaDeChao(tipo: TipoMockup, nome: string, alturaCm: number): number {
+  if (tipo !== "sanita" || alturaCm >= ALTURA_MIN_SANITA_COM_DEPOSITO_CM) return alturaCm;
+  const cg = categoriaDoTipo(tipo, nome, true);
+  const comDeposito = !!cg && opcoesComOmissao(cg, tipo, {}, nome).deposito === true;
+  return comDeposito ? ALTURA_SANITA_COM_DEPOSITO_CM : alturaCm;
 }
 
 interface Espec { rotulo: string; mont: Montagem; alt: number; dim: [number, number, number]; cor: string }
 /** Por tipo: o nome, a montagem, a altura ao chão de omissão (m, peças de parede), as dimensões de omissão (cm: largura, profundidade, altura) e a cor. */
 export const ESPEC: Record<TipoMockup, Espec> = {
-  sanita: { rotulo: "Sanita de chão", mont: "chao", alt: 0, dim: [37, 65, 78], cor: "#f7f7f5" },
+  sanita: { rotulo: "Sanita de chão", mont: "chao", alt: 0, dim: [37, 65, ALTURA_SANITA_COM_DEPOSITO_CM], cor: "#f7f7f5" },
   sanita_suspensa: { rotulo: "Sanita suspensa", mont: "parede", alt: 0, dim: [36, 53, 40], cor: "#f7f7f5" },
   bide: { rotulo: "Bidé", mont: "chao", alt: 0, dim: [36, 55, 40], cor: "#f7f7f5" },
   banheira: { rotulo: "Banheira", mont: "chao", alt: 0, dim: [170, 70, 55], cor: "#f4f6f7" },
@@ -157,6 +187,8 @@ const REGRAS: [RegExp, TipoMockup][] = [
   [/torneira|misturadora|chuveiro higien/, "torneira"],
   [/toalheiro/, "toalheiro"],
   [/radiador/, "radiador"],
+  // o cesto «de coluna de duche» é um acessório, não uma coluna (antes da regra da coluna)
+  [/\bcestos?\b/, "acessorio"],
   [/coluna.*duche|duche.*coluna|colunas duche/, "coluna_duche"],
   [/base.*duche|bases duche|prato de duche/, "base_duche"],
   [/pega de seguranca|cabide|porta-rolos|porta rolos|piacaba|nicho|escova|\bbancos?\b|\bkit/, "acessorio"],
@@ -222,7 +254,16 @@ export function dimensoesDoNome(nome: string): number[] | null {
 }
 
 /** Tipos cujo nome, com dois números, diz largura × altura (peças planas ou altas). */
-const LARGURA_ALTURA: TipoMockup[] = ["roupeiro", "espelho", "quadro", "radiador", "toalheiro", "resguardo"];
+export const LARGURA_ALTURA: readonly TipoMockup[] = ["roupeiro", "espelho", "quadro", "radiador", "toalheiro", "resguardo"];
+
+/**
+ * Os tipos cuja Medida 3D (o atributo largura × comprimento × espessura) é largura × ALTURA × PROFUNDIDADE: as peças planas ou altas de LARGURA_ALTURA mais os móveis,
+ * colunas e armários. Lido na base RH (Mudelar, 24/11): nas Colunas (940 produtos) o comprimento vai de 35 a 170 cm e a espessura de 20 a 32; nos Móveis de lavatório
+ * (9496) o comprimento vai de 50 a 81 e a espessura de 36 a 45; ou seja, o comprimento é a altura e a espessura a profundidade (o nome «40x160x25» de uma coluna é
+ * largura × altura × profundidade). Os outros tipos (tampo, bancada, lavabo, bases, banheiras…) ficam com o comprimento na profundidade e a espessura na altura.
+ * Só a Medida dos atributos usa esta lista; a leitura do nome (extrairDimensoes) continua com LARGURA_ALTURA.
+ */
+export const COMPRIMENTO_NA_ALTURA: readonly TipoMockup[] = [...LARGURA_ALTURA, "movel_lavatorio", "coluna", "coluna_duche", "armario_alto", "armario_espelho", "movel"];
 
 /**
  * As dimensões reais de um produto. Do nome, quando as traz; senão a tabela de omissões do tipo.
@@ -236,7 +277,10 @@ export function extrairDimensoes(nome: string, tipo: TipoMockup): Dimensoes {
   const [a, b, c] = v;
   if (tipo === "base_duche" || tipo === "banheira") return { larguraCm: Math.max(a, b), profundidadeCm: Math.min(a, b), alturaCm: c ?? al, deNome: true };
   if (LARGURA_ALTURA.includes(tipo) && c === undefined) return { larguraCm: a, profundidadeCm: pd, alturaCm: b, deNome: true };
-  return { larguraCm: a, profundidadeCm: b, alturaCm: c ?? al, deNome: true };
+  // 24/11: a coluna é sempre mais alta do que funda: com três números («Coluna Suspensa AXIS 40x160x25», largura × altura × profundidade, como a Medida da
+  // Mudelar) o maior dos dois últimos é a altura e o menor a profundidade, seja qual for a ordem; lido como largura × profundidade × altura ficava deitada
+  if (tipo === "coluna" && c !== undefined) return { larguraCm: a, profundidadeCm: Math.min(b, c), alturaCm: Math.max(b, c), deNome: true };
+  return { larguraCm: a, profundidadeCm: b, alturaCm: alturaDeSanitaDeChao(tipo, nome, c ?? al), deNome: true };
 }
 
 /**
@@ -258,17 +302,60 @@ export function temModeloHtml(m: ProdutoModelo3D): boolean {
 export const MOSTRAR_GENERICOS = true;
 /** O produto usa um modelo genérico da sua categoria (não tem o do HTML e o tipo tem categoria). */
 export function temModeloGenerico(m: ProdutoModelo3D): boolean {
-  const pr = m.mockup3d.params;
-  return !(pr && "html" in pr && pr.html) && pr?.k !== "chapa" && pr?.k !== "bancada" && !!(categoriaPorId(m.mockup3d.generico?.id) ?? categoriaDoTipo(m.mockup3d.tipo, m.nome));
+  return !temGeometriaPropria(m.mockup3d.params) && !!(categoriaPorId(m.mockup3d.generico?.id) ?? categoriaDoTipo(m.mockup3d.tipo, m.nome));
+}
+/**
+ * A peça tem geometria própria e nunca usa um genérico: o modelo do HTML, a chapa, a bancada composta, e o tampo e o lava-loiça das famílias
+ * (os dois últimos passaram a ter genérico do tipo, `tampo_wc` e `lava_loica`, que não lhes pode tomar o lugar).
+ */
+export function temGeometriaPropria(pr: ParamsMockup | undefined): boolean {
+  return !!pr && (("html" in pr && !!pr.html) || pr.k === "chapa" || pr.k === "bancada" || pr.k === "tampo" || pr.k === "lava_loica");
 }
 
-/** O produto do catálogo mais o seu mockup 3D (paramétrico, com a dimensão real; `urls`: o GLB de cada produto, quando existir). */
+/** A altura de omissão do resguardo de banheira (cm): o de duche fica com os 195 do tipo. */
+const ALTURA_RESGUARDO_BANHEIRA_CM = 150;
+/** O móvel de lavatório suspenso: o tampo a 85 cm do chão, e nunca a menos de 30 cm. */
+const TOPO_MOVEL_SUSPENSO = 0.85, ALTURA_MIN_SUSPENSO = 0.3;
+/**
+ * As medidas de um produto que usa um genérico novo (categoriasGlbNovas.ts) quando o nome não traz as três: as do genérico (pelo nome e pelas
+ * opções); com duas no nome («140x46»), ficam a largura e a profundidade do nome e a altura do genérico. Com as três no nome, ficam as do nome.
+ */
+function comMedidasDoGenerico(d: Dimensoes, id: string, o: Readonly<Record<string, string | boolean>>, nome: string): Dimensoes {
+  const m = medidasDeOmissaoNovas(id, o, nome);
+  if (!m) return d;
+  const v = dimensoesDoNome(nome), cm = (x: number) => Math.round(x * 1000) / 10;
+  if (v && v.length === 3) return d;
+  return v ? { larguraCm: v[0], profundidadeCm: v[1], alturaCm: cm(m[2]), deNome: true } : { larguraCm: cm(m[0]), profundidadeCm: cm(m[1]), alturaCm: cm(m[2]), deNome: false };
+}
+
+/** O tipo de mockup de cada modelo exacto do catálogo 3D (o modelo concreto continua a sair do nome e da medida: htmlDoCatalogo.ts). */
+const TIPO_DO_HTML: Readonly<Record<string, TipoMockup>> = { html_lava_loica: "lava_loica", html_placa: "placa", html_torneira_cozinha: "torneira_cozinha", html_tampo: "bancada" };
+/**
+ * O tipo de mockup que o modelo escolhido pede: o automático, se o genérico escolhido o serve (assim as omissões do tipo e da montagem não mudam); senão o
+ * primeiro tipo do genérico; os exactos do catálogo 3D forçam o seu tipo; a caixa e os revestimentos (ainda sem desenho próprio) são a «caixa».
+ */
+function tipoDaEscolha(e: ModeloEscolha, auto: TipoMockup): TipoMockup {
+  if (e.familia === "generico") { const c = categoriaPorId(e.id); return c && !c.tipos.includes(auto) ? c.tipos[0] : auto; }
+  if (e.familia === "html") return auto === "tampo" && e.id === "html_tampo" ? auto : TIPO_DO_HTML[e.id] ?? auto;
+  return "caixa";
+}
+
+/**
+ * O produto do catálogo mais o seu mockup 3D (paramétrico, com a dimensão real; `urls`: o GLB de cada produto, quando existir).
+ * Se o produto, a sua subcategoria ou a sua categoria escolheram um «Modelo 3D» (modelos3dEscolha.ts: produto > subcategoria > categoria), esse manda sobre
+ * o classificador: o id escolhido decide o tipo e o genérico; as medidas, a cor e as opções (que vêm do nome) ficam como sempre. Sem escolha, é o de sempre.
+ */
 export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], urls: Readonly<Record<string, string>> = {}): ProdutoModelo3D {
-  const tipo = tipoMockupDe(p, arvore);
-  let d: Dimensoes = p.dim ? { larguraCm: p.dim[0], profundidadeCm: p.dim[1], alturaCm: p.dim[2], deNome: true } : extrairDimensoes(p.n, tipo);
+  const auto = tipoMockupDe(p, arvore);
+  const r = resolverDoNo({ produto: p.modelo3d, arvore, no: p.no });
+  const esc = escolhaPorId(r.modelo);
+  const tipo = esc ? tipoDaEscolha(esc, auto) : auto;
+  // um genérico, a caixa ou um revestimento escolhidos nunca levam o modelo do HTML do nome; só os exactos do catálogo 3D (ou nenhuma escolha) o procuram
+  const comHtml = !esc || esc.familia === "html";
+  let d: Dimensoes = p.dim ? { larguraCm: p.dim[0], profundidadeCm: p.dim[1], alturaCm: alturaDeSanitaDeChao(tipo, p.n, p.dim[2]), deNome: true } : extrairDimensoes(p.n, tipo);
   const e = ESPEC[tipo];
   // o modelo do HTML do produto (pelo nome e pela medida): lava-loiça, placa e torneira com o modelo e as medidas do HTML; tampo com a chapa
-  const h = modeloHtmlDoProduto(p.n, tipo);
+  const h = comHtml ? modeloHtmlDoProduto(p.n, tipo) : null;
   let params: ParamsMockup | undefined;
   if (h && h.tipo !== "tampo") {
     d = { larguraCm: h.dim[0], profundidadeCm: h.dim[1], alturaCm: h.dim[2], deNome: true };
@@ -277,24 +364,33 @@ export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], ur
       : h.tipo === "lava_loica" ? { k: "lava_loica", cubas: [], escorredor: false, degrau: false, html }
         : { k: "placa", tipo: "induction", recorte: [0, 0], espessura: 0, acima: 0, queimadores: [], manipulos: [], vidro: false, html };
   } else if (h?.tipo === "tampo") params = { k: "chapa", series: h.series, tone: h.tone };
-  else if (tipo === "torneira_cozinha") {
+  else if (comHtml && tipo === "torneira_cozinha") {
     // uma misturadora que o HTML não tem (Sophie, Bruma): o modelo simplificado com medidas habituais (nunca o de outra torneira)
     const t = { estilo: "monocomando" as const, altura: 400, saida: 250, alcance: 220, base: 50 };
     params = { k: "torneira", estilo: t.estilo, altura: t.altura / 1000, saida: t.saida / 1000, alcance: t.alcance / 1000, base: t.base / 1000 };
     d = { larguraCm: t.base / 10, profundidadeCm: (t.alcance + t.base / 2) / 10, alturaCm: t.altura / 10, deNome: true };
   }
-  const cg = !params || (params.k === "torneira" && !params.html) ? categoriaDoTipo(tipo, p.n) : undefined;
+  const semModeloProprio = !params || (params.k === "torneira" && !params.html);
+  // o genérico escolhido (pelo id, não pelo nome); a caixa e os revestimentos não têm genérico; sem escolha (ou com um exacto do HTML sem produto no HTML), o do tipo e do nome
+  const cg = esc?.familia === "generico" ? categoriaPorId(esc.id) : esc && esc.familia !== "html" ? undefined : semModeloProprio ? categoriaDoTipo(tipo, p.n, true) : undefined;
   // os genéricos presos à parede (armário de parede, exaustor, prateleira): a profundidade típica quando o nome só dá largura × altura
   const nomeTemTres = /\d+\s*[x×]\s*\d+\s*[x×]\s*\d+/i.test(p.n);
   if (cg?.parede?.prof && !p.dim && !nomeTemTres) d = { ...d, profundidadeCm: cg.parede.prof * 100 };
+  const o = cg ? opcoesComOmissao(cg, tipo, {}, p.n) : undefined;
+  if (cg && o && !p.dim) d = comMedidasDoGenerico(d, cg.id, o, p.n);
+  // o resguardo de banheira é mais baixo do que o de duche, quando o nome não diz a altura
+  if (tipo === "resguardo" && !d.deNome && /banheira|banera/.test(sem(p.n))) d = { ...d, alturaCm: ALTURA_RESGUARDO_BANHEIRA_CM };
   const mockup3d: Mockup3D = { tipo, largura: d.larguraCm / 100, profundidade: d.profundidadeCm / 100, altura: d.alturaCm / 100, cor: e.cor, ...(params ? { params } : {}), ...(urls[p.id] ? { url: urls[p.id] } : {}),
-    ...(cg ? { generico: { id: cg.id, o: opcoesComOmissao(cg, tipo, {}, p.n) } } : {}) };
+    ...(cg && o ? { generico: { id: cg.id, o } } : {}) };
+  // o móvel de lavatório suspenso fica preso à parede, com o tampo a 85 cm do chão
+  const suspenso = cg?.id === "movel_lavatorio" && o?.apoio === "suspenso";
   // a altura ao chão: o lava-loiça fica com o rebordo por baixo do tampo (a 88,8 cm), a placa e a torneira em cima dele (90 cm)
   // e as peças de parede genéricas ficam à altura da categoria (armário de parede 145 cm, exaustor 150, prateleira 150)
-  const alt = h?.tipo === "lava_loica" ? (88.8 - d.alturaCm) / 100 : cg?.parede ? cg.parede.alt : e.alt;
+  const alt = h?.tipo === "lava_loica" ? (88.8 - d.alturaCm) / 100 : suspenso ? Math.max(ALTURA_MIN_SUSPENSO, TOPO_MOVEL_SUSPENSO - d.alturaCm / 100) : cg?.parede ? cg.parede.alt : e.alt;
   return {
     produtoId: p.id, nome: p.n, tipo, dimensoes: d, mockup3d, marca: p.marca, fornecedor: p.fornecedor, custo: p.custo, categoria: p.sub || caminhoDe(arvore, p.no) || e.rotulo,
-    montagem: cg?.parede ? "parede" : e.mont, alturaOmissao: alt, demo: !!p.demo,
+    montagem: cg?.parede || suspenso ? "parede" : e.mont, alturaOmissao: alt, demo: !!p.demo,
+    ...(esc ? { escolha: { modelo: esc.id, origem: r.origem } } : {}),
   };
 }
 

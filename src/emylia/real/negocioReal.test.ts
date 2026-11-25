@@ -23,6 +23,16 @@ const idaEVolta = (d: Negocio) => JSON.parse(JSON.stringify(deLinhas(paraLinhas(
 beforeEach(() => { localStorage.clear(); esquecerInventario(); });
 
 describe("Negócio ↔ linhas das tabelas", () => {
+  it("24/11: o desconto do orçamento vai em fração para a base (0 a 1) e volta em % (2,5 % → 0,025 → 2,5 %)", () => {
+    const S = seed();
+    const d = S.deals.find((x) => x.orc && x.orc.linhas.length) as Negocio;
+    d.orc!.desconto = 2.5;
+    const L = paraLinhas(d, HOJE);
+    const atual = L.orcamentos[L.orcamentos.length - 1];
+    expect(atual.desconto).toBe(0.025);
+    for (const o of L.orcamentos) expect(o.desconto).toBeLessThanOrEqual(1);
+    expect(deLinhas(L).orc!.desconto).toBe(2.5);
+  });
   it("os 11 negócios de exemplo voltam iguais", () => {
     const S = seed();
     expect(S.deals.length).toBeGreaterThan(5);

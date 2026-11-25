@@ -10,6 +10,7 @@
 import { type Estado, type Negocio } from "./motor";
 import { OBRA, efetivo, emFalta } from "./campos";
 import { estadoDe, materiaisPorFase, seguranca } from "./obraOps";
+import { nomeCurtoTarefa } from "./estudioObra/planoVivo";
 import { resumoEcNegocio } from "./inventario/ponteNegocios";
 import { lerInventario } from "./inventario/loja";
 import type { Inventario } from "./inventario/tipos";
@@ -34,7 +35,8 @@ export function pontosEncerrar(d: Negocio, S?: Pick<Estado, "campos"> | null, db
   const adendas = (d.adendas ?? []).filter((a) => a.estado === "rascunho" || a.estado === "enviada" || a.estado === "aceite");
   const seg = seguranca(d).filter((x) => !x.ok);
   const fecho = emFalta([S ? efetivo(S.campos, OBRA[1]) : OBRA[1]], d.f);
-  const nomes = (L: { nome: string }[]) => L.slice(0, 3).map((t) => t.nome).join(", ") + (L.length > 3 ? "…" : "");
+  // 23/11 (revisão no 1015): o nome curto das tarefas («Demolição e remoção», não «MO Modelo Remodelação Completa - … · demolição e remoção»)
+  const nomes = (L: { nome: string }[]) => [...new Set(L.map((t) => nomeCurtoTarefa(t.nome)))].slice(0, 3).join(", ") + (L.length > 3 ? "…" : "");
   return [
     { k: "tarefas", onde: "plano", ok: !porFazer.length, t: "Todas as tarefas feitas",
       sub: porFazer.length ? `${porFazer.length === 1 ? "Falta" : "Faltam"} ${plural(porFazer.length, "tarefa", "tarefas")}: ${nomes(porFazer)}` : `${plural(T.length, "tarefa feita", "tarefas feitas")}` },

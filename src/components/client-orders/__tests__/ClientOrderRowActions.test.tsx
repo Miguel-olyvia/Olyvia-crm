@@ -67,3 +67,45 @@ describe("ClientOrderRowActions · Eliminar", () => {
     expect(within(menu).queryByText(DELETE_OUT_OF_SCOPE_REASON)).toBeNull();
   });
 });
+
+describe("ClientOrderRowActions · compact (cartões do novo Inventário)", () => {
+  const montar = (compact?: boolean) =>
+    render(
+      <ClientOrderRowActions
+        orderLabel="EC-1"
+        onView={() => {}}
+        onPdf={onPdf}
+        pdfBusy={false}
+        edit={null}
+        onRequestMissing={() => {}}
+        proforma={null}
+        remove={{ deletable: false, busy: false, onSelect: () => {} }}
+        compact={compact}
+      />,
+    );
+  const onPdf = vi.fn();
+
+  it("sem compact (tabela): Ver, PDF e o ⋯, como antes", () => {
+    montar();
+    expect(screen.getByRole("button", { name: "Ver EC-1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "PDF de EC-1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mais ações para EC-1" })).toBeInTheDocument();
+  });
+
+  it("com compact: só o ⋯, visível; o PDF e o Abrir detalhe continuam no menu", async () => {
+    perms.codes = new Set();
+    onPdf.mockClear();
+    montar(true);
+    expect(screen.queryByRole("button", { name: "Ver EC-1" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "PDF de EC-1" })).toBeNull();
+    const trigger = screen.getByRole("button", { name: "Mais ações para EC-1" });
+    expect(trigger).toBeVisible();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: /^Abrir detalhe/ })).toBeInTheDocument();
+    const pdf = within(menu).getByRole("menuitem", { name: /^PDF/ });
+    expect(pdf).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(pdf);
+    expect(onPdf).toHaveBeenCalledTimes(1);
+  });
+});

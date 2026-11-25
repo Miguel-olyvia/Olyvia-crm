@@ -2,6 +2,7 @@
 // ou atrasa outras tarefas. Fica registado com o que se encontrou (texto e fotografia), onde, a gravidade e as tarefas afetadas:
 // · «Impede de continuar»: as tarefas afetadas ficam paradas (bloqueio), à espera da decisão do cliente.
 // · «Atrasa»: o plano anda os dias indicados (com as regras dos ajustes ao vivo, trabalhoObra.aplicarAjuste) e o cliente é avisado.
+//   23/11: sem negocios.obra.planear (o técnico) é um PEDIDO ao gestor da obra, que o aceita (o plano anda, o cliente é avisado) ou recusa.
 // O gestor transforma-o em trabalho extra: uma ADENDA ao contrato (adendas.ts) com origem «imprevisto na obra», com os serviços do
 // Catálogo e/ou uma linha livre (horas, preço e materiais). O cliente assina ou recusa no portal; assinada, as tarefas entram no plano
 // (e os materiais numa encomenda de ajuste, encomendasAjuste.ts), as paradas seguem e o Financeiro fatura a adenda à parte.
@@ -16,6 +17,9 @@ export const GRAVIDADES: { k: Gravidade; t: string; sub: string }[] = [
   { k: "impede", t: "Impede de continuar", sub: "As tarefas afetadas param até o cliente decidir" },
   { k: "atrasa", t: "Atrasa", sub: "O plano anda os dias que indicar; o cliente é avisado" },
 ];
+/** 23/11: sem negocios.obra.planear (o técnico no Hoje dele), «Atrasa» é um pedido ao gestor da obra: o plano só muda se ele aceitar. */
+export const ATRASA_PEDIDO = { t: "Pedir para atrasar", sub: "O gestor da obra decide; o plano só muda se ele aceitar" } as const;
+export const gravidadesPara = (planeia: boolean) => (planeia ? GRAVIDADES : GRAVIDADES.map((g) => (g.k === "atrasa" ? { ...g, ...ATRASA_PEDIDO } : g)));
 export type EstadoImprevisto = "aberto" | "proposta" | "aprovado" | "recusado" | "fechado";
 export interface Imprevisto {
   /** IM-<negócio>-<n> */
@@ -26,8 +30,11 @@ export interface Imprevisto {
   grav: Gravidade;
   /** os nomes das tarefas afetadas (os índices mudam quando o plano se reordena) */
   tarefas: string[];
-  /** os dias que o plano andou (só «atrasa») */
+  /** os dias que o plano andou (só «atrasa»); com `pedido`, os dias que o técnico pediu */
   atraso?: number;
+  /** 23/11: o «Atrasa» de quem não planeia a obra (o técnico) é um pedido ao gestor da obra: «pendente» (o plano não mudou), «aceite»
+   *  (o gestor aplicou o atraso e o cliente foi avisado) ou «recusado» (o plano ficou igual; o imprevisto fecha com a decisão). */
+  pedido?: "pendente" | "aceite" | "recusado";
   estado: EstadoImprevisto;
   /** a adenda (proposta ao cliente) que o resolve */
   adenda?: string;
@@ -50,11 +57,19 @@ export type Decisao = (typeof DECISOES)[number]["k"];
 export const imprevistosDe = (d: Negocio): Imprevisto[] => d.obra.imprevistos ?? [];
 /** Os que esperam por alguém da empresa (o gestor): aberto (fazer a proposta) ou recusado (decidir). */
 export const imprevistosPorTratar = (d: Negocio): Imprevisto[] => imprevistosDe(d).filter((i) => i.estado === "aberto" || i.estado === "recusado");
+/** 23/11: os pedidos de atraso que esperam pelo gestor da obra. */
+export const pedidoDeAtraso = (i: Imprevisto): boolean => i.grav === "atrasa" && i.pedido === "pendente" && i.estado === "aberto";
+/** Ex.: «Gustavo pede para atrasar 2 dias: cano de esgoto podre». */
+export const textoPedidoAtraso = (i: Imprevisto): string =>
+  `${i.quem.split(" ")[0]} pede para atrasar ${i.atraso ?? 1} ${i.atraso === 1 ? "dia" : "dias"}: ${i.texto.replace(/\.$/, "")}`;
 export const novoIdImprevisto = (d: Negocio) => `IM-${d.id}-${imprevistosDe(d).length + 1}`;
 
 /** As tarefas que um imprevisto pode afetar: as que ainda não foram validadas (nem as correções). */
 export const tarefasAfetaveis = (p: Plano): number[] =>
   p.tasks.map((t, i) => (estadoDe(t) !== "validada" && t.corrige == null ? i : -1)).filter((i) => i >= 0);
+/** 23/11: as que o técnico pode escolher: só as atribuídas a ele (o servidor recusa um imprevisto em tarefas de outros). */
+export const tarefasAfetaveisDe = (p: Plano, tec: string | null | undefined): number[] =>
+  tec ? tarefasAfetaveis(p).filter((i) => p.tasks[i].tec === tec) : [];
 
 /** As tarefas paradas por um imprevisto. */
 export const paradasPor = (p: Plano | null | undefined, id: string): Tarefa[] => p?.tasks.filter((t) => t.bloqueio === id) ?? [];

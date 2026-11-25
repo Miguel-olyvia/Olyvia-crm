@@ -19,6 +19,9 @@ import { lerCatalogo, mudarCatalogo } from "./v2/catalogoStore";
 import { usePermissoesCatalogo } from "./permissoesCatalogo";
 import { IconeServico, Ilustracao } from "./ilustracoes";
 import { useDesktop } from "./useDesktop";
+import type { Produto } from "./v2/catalogoModelo";
+import type { Res } from "./fichaProdutoDados";
+import type { ServidorLigacoes } from "./real/ligacoesServidor";
 import {
   NOME_TIPO, TIPOS_PROBLEMA, centroInicial, chaveRef, contarProblemas, ligacoesDe, noDe, problemasCatalogo, problemasPorNo, procurarNos,
   type CatalogoLig, type GrupoMapa, type Ligacao, type Mapa, type Problema, type Ref, type Visual,
@@ -314,16 +317,18 @@ function ListaGrupo({ g, onIr, onFechar }: { g: GrupoMapa; onIr: (r: Ref) => voi
 }
 
 /* ------------------------------------------------------------------ os problemas */
-function Problemas({ P, onIr }: { P: Problema[]; onIr: (r: Ref) => void }) {
+function Problemas({ P, onIr, parcial }: { P: Problema[]; onIr: (r: Ref) => void; /** 23/11: Catálogo leve: «Produtos sem serviço» não se conta aqui */ parcial?: boolean }) {
   const n = contarProblemas(P);
   const [mais, setMais] = useState<Record<string, number>>({});
-  const tipos = TIPOS_PROBLEMA.filter((x) => n[x.tipo] > 0);
+  const TIPOS = parcial ? TIPOS_PROBLEMA.filter((x) => x.tipo !== "prod-sem-servico") : TIPOS_PROBLEMA;
+  const tipos = TIPOS.filter((x) => n[x.tipo] > 0);
   return (
     <div className="mt-6" data-testid="problemas">
       <p className="text-[16px]">{P.length ? `${P.length === 1 ? "1 problema" : `${P.length} problemas`} nos dados do Catálogo. Toque num para o ver no mapa.` : "Sem problemas nos dados do Catálogo."}</p>
       <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1" aria-label="Problemas por tipo">
-        {TIPOS_PROBLEMA.map((x) => <li key={x.tipo} className={cn("text-[15px]", n[x.tipo] ? "" : "text-muted-foreground")}><span className="font-semibold tabular-nums">{n[x.tipo]}</span> {x.t.toLowerCase()}</li>)}
+        {TIPOS.map((x) => <li key={x.tipo} className={cn("text-[15px]", n[x.tipo] ? "" : "text-muted-foreground")}><span className="font-semibold tabular-nums">{n[x.tipo]}</span> {x.t.toLowerCase()}</li>)}
       </ul>
+      {parcial && <p className={cn(NOTA, "mt-2")}>Os produtos sem serviço de instalação não se contam aqui (o Catálogo tem demasiados produtos para os ver todos de uma vez): veja-os na ficha de cada produto, em Produtos.</p>}
       {tipos.map((x) => {
         const L = P.filter((p) => p.tipo === x.tipo), ver = mais[x.tipo] ?? 8;
         return (
@@ -350,9 +355,29 @@ function Problemas({ P, onIr }: { P: Problema[]; onIr: (r: Ref) => void }) {
 }
 
 /* ------------------------------------------------------------------ escolher o centro */
-function EscolherCentro({ K, onIr }: { K: CatalogoLig; onIr: (r: Ref) => void }) {
+function EscolherCentro({ K, onIr, procurar, onProduto }: {
+  K: CatalogoLig; onIr: (r: Ref) => void;
+  /** 23/11: com o Catálogo leve os produtos procuram-se também no servidor; escolher um mete-o no mapa (onProduto) antes de o pôr no centro. */
+  procurar?: ServidorLigacoes["procurar"]; onProduto?: (p: Produto) => void;
+}) {
   const [q, setQ] = useState("");
   const L = useMemo(() => procurarNos(K, q, 8), [K, q]);
+  const [doServidor, setDoServidor] = useState<{ q: string; L: Produto[]; erro: string | null } | null>(null);
+  useEffect(() => {
+    const qq = q.trim();
+    if (!procurar || qq.length < 2) { setDoServidor(null); return undefined; }
+    let vivo = true;
+    const t = window.setTimeout(() => {
+      procurar(qq).then(
+        (r) => { if (vivo) setDoServidor({ q: qq, L: r.ok ? r.v.slice(0, 8) : [], erro: r.ok ? null : r.erro }); },
+        (e: unknown) => { if (vivo) setDoServidor({ q: qq, L: [], erro: e instanceof Error && e.message ? e.message : "Não foi possível procurar." }); },
+      );
+    }, 300);
+    return () => { vivo = false; window.clearTimeout(t); };
+  }, [q, procurar]);
+  const jaNaLista = new Set(L.map((x) => chaveRef(x.ref)));
+  const servidor = doServidor && doServidor.q === q.trim() ? doServidor.L.filter((p) => !jaNaLista.has(`prod:${p.id}`)) : [];
+  const aProcurar = !!procurar && q.trim().length >= 2 && (!doServidor || doServidor.q !== q.trim());
   return (
     <div className="relative w-full max-w-md">
       <label className="relative block">
@@ -372,7 +397,17 @@ function EscolherCentro({ K, onIr }: { K: CatalogoLig; onIr: (r: Ref) => void })
               </button>
             </li>
           ))}
-          {!L.length && <li className={cn(NOTA, "px-3 py-3")}>Nada com esse nome.</li>}
+          {servidor.map((p) => (
+            <li key={`srv-${p.id}`}>
+              <button type="button" onClick={() => { onProduto?.(p); onIr({ t: "prod", id: p.id }); setQ(""); }} className="flex min-h-12 w-full items-center gap-3 px-3 py-2 text-left hover:bg-muted/60">
+                <Ilustracao k="generico" className="h-9 w-9" />
+                <span className="min-w-0 flex-1"><span className="block truncate text-[15px]">{p.n}</span><span className={cn(NOTA, "block truncate")}>{[NOME_TIPO.prod, p.marca, p.sku].filter(Boolean).join(" · ")}</span></span>
+              </button>
+            </li>
+          ))}
+          {aProcurar && <li role="status" className={cn(NOTA, "px-3 py-3")}>A procurar nos produtos…</li>}
+          {doServidor?.erro && <li role="alert" className="px-3 py-3 text-[15px] text-destructive">Não foi possível procurar nos produtos: {doServidor.erro}</li>}
+          {!L.length && !servidor.length && !aProcurar && !doServidor?.erro && <li className={cn(NOTA, "px-3 py-3")}>Nada com esse nome.</li>}
         </ul>
       )}
     </div>
@@ -380,7 +415,23 @@ function EscolherCentro({ K, onIr }: { K: CatalogoLig; onIr: (r: Ref) => void })
 }
 
 /* ------------------------------------------------------------------ o separador */
-export function LigacoesCatalogo({ K, onAbrirFicha, S, run }: { K: CatalogoLig; onAbrirFicha: (sid: SvcId) => void; S?: Estado; run?: (fn: () => void) => void }) {
+export function LigacoesCatalogo({ K: K0, onAbrirFicha, S, run, servidor }: {
+  K: CatalogoLig; onAbrirFicha: (sid: SvcId) => void; S?: Estado; run?: (fn: () => void) => void;
+  /** 23/11: o Catálogo em memória é o leve (sem a lista toda dos produtos): os produtos do mapa pedem-se ao servidor (real/ligacoesServidor.ts). */
+  servidor?: ServidorLigacoes;
+}) {
+  // os produtos que o servidor trouxe para o mapa (só para mostrar); os do Catálogo em memória mandam (ligar e desligar ainda por gravar)
+  const [extras, setExtras] = useState<ReadonlyMap<string, Produto>>(() => new Map());
+  const juntarExtras = useCallback((L: readonly Produto[]) => setExtras((m) => {
+    const novos = L.filter((p) => !m.has(p.id));
+    return novos.length ? new Map([...m, ...novos.map((p) => [p.id, p] as const)]) : m;
+  }), []);
+  const K = useMemo<CatalogoLig>(() => {
+    if (!extras.size) return K0;
+    const ja = new Set(K0.produtos.map((p) => p.id));
+    const mais = [...extras.values()].filter((p) => !ja.has(p.id));
+    return mais.length ? { ...K0, produtos: [...K0.produtos, ...mais] } : K0;
+  }, [K0, extras]);
   const desktop = useDesktop();
   const reduzir = !!useReducedMotion();
   const [rasto, setRastoE] = useState<Ref[]>(() => {
@@ -400,7 +451,49 @@ export function LigacoesCatalogo({ K, onAbrirFicha, S, run }: { K: CatalogoLig; 
 
   const centro = rasto[rasto.length - 1] ?? null;
   const mapa = useMemo(() => (centro ? ligacoesDe(centro, K) : null), [centro, K]);
-  const P = useMemo(() => problemasCatalogo(K), [K]);
+
+  // 23/11: com o servidor, os produtos à volta do centro (os que trazem o serviço, os do ramo que ele exige, as alternativas de um produto) leem-se quando ele
+  // muda, uma vez por centro; e os ramos com produtos (para «exige um produto que não existe») leem-se das contagens, uma vez
+  const [aLerServidor, setALerServidor] = useState(false);
+  const [erroServidor, setErroServidor] = useState<string | null>(null);
+  const [nosComProduto, setNosComProduto] = useState<string[] | undefined>(undefined);
+  const lidosServidor = useRef(new Set<string>());
+  const Kref = useRef(K);
+  Kref.current = K;
+  const kCentro = centro ? chaveRef(centro) : "";
+  useEffect(() => {
+    if (!servidor || !centro || lidosServidor.current.has(kCentro)) return undefined;
+    const Kx = Kref.current, pedidos: Promise<Res<Produto[]>>[] = [];
+    if (centro.t === "svc") {
+      pedidos.push(servidor.trazem(centro.id));
+      const ex = Kx.servicos.find((x) => x.id === centro.id)?.exige;
+      if (ex) pedidos.push(servidor.doRamo(Kx.arvore, ex));
+    } else if (centro.t === "prod") {
+      const no = Kx.produtos.find((x) => x.id === centro.id)?.no;
+      if (no) pedidos.push(servidor.doRamo(Kx.arvore, no));
+    }
+    if (!pedidos.length) return undefined;
+    let vivo = true;
+    setALerServidor(true); setErroServidor(null);
+    Promise.all(pedidos).then(
+      (rs) => {
+        if (!vivo) return;
+        setALerServidor(false);
+        const falha = rs.find((r): r is Extract<Res<Produto[]>, { ok: false }> => !r.ok);
+        if (falha) setErroServidor(falha.erro); else lidosServidor.current.add(kCentro);
+        juntarExtras(rs.flatMap((r) => (r.ok ? r.v : [])));
+      },
+      (e: unknown) => { if (vivo) { setALerServidor(false); setErroServidor(e instanceof Error && e.message ? e.message : "Não foi possível ler os produtos."); } },
+    );
+    return () => { vivo = false; setALerServidor(false); };
+  }, [servidor, kCentro]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!servidor) return undefined;
+    let vivo = true;
+    servidor.nosComProduto().then((r) => { if (vivo && r.ok) setNosComProduto(r.v); }, () => undefined);
+    return () => { vivo = false; };
+  }, [servidor]);
+  const P = useMemo(() => problemasCatalogo(K, servidor ? { parcial: true, nosComProduto } : {}), [K, servidor, nosComProduto]);
   const porNo = useMemo(() => problemasPorNo(P), [P]);
 
   const ir = (r: Ref) => {
@@ -422,8 +515,13 @@ export function LigacoesCatalogo({ K, onAbrirFicha, S, run }: { K: CatalogoLig; 
   const [novo, setNovo] = useState<string | null>(null);
   useEffect(() => { if (!desfazer) return; const t = setTimeout(() => setDesfazer(null), 7000); return () => clearTimeout(t); }, [desfazer]);
   useEffect(() => { if (!novo) return; const t = setTimeout(() => setNovo(null), 1600); return () => clearTimeout(t); }, [novo]);
-  const aplicar = (e: Edicao | null, destaque: string | null) => {
+  const aplicar = async (e: Edicao | null, destaque: string | null) => {
     if (!e || !S || !run) return;
+    // 23/11: um produto que só o servidor trouxe lê-se inteiro antes de lhe mexer (entra no Catálogo em memória, registado para o autosave)
+    if (e.prod && servidor && !lerCatalogo().produtos.some((p) => p.id === e.prod)) {
+      const r = await servidor.escolher(e.prod);
+      if (!r.ok) { setErroServidor(`Não foi possível ler o produto para o ligar: ${r.erro}`); return; }
+    }
     const r0 = lerCustos().receitas[e.sid], antesR = r0 ? structuredClone(r0) : undefined;
     const p0 = e.prod ? lerCatalogo().produtos.find((p) => p.id === e.prod) : undefined, antesP = p0 ? structuredClone(p0) : undefined;
     if (e.custos) mudarCustos(e.custos);
@@ -449,9 +547,9 @@ export function LigacoesCatalogo({ K, onAbrirFicha, S, run }: { K: CatalogoLig; 
       v: chaveRef(x.ref), t: x.n, sub: x.det,
       icone: x.vis.k === "ilus" ? <Ilustracao k={x.vis.v} className="h-9 w-9" /> : <IconeServico k={x.vis.v} className="h-5 w-5" />,
     })),
-    onJuntar: (g, v) => { const i = v.indexOf(":"), alvo = { t: v.slice(0, i), id: v.slice(i + 1) } as Ref; aplicar(juntar(centro, g, alvo, K, S), v); },
+    onJuntar: (g, v) => { const i = v.indexOf(":"), alvo = { t: v.slice(0, i), id: v.slice(i + 1) } as Ref; void aplicar(juntar(centro, g, alvo, K, S), v); },
     podeRetirar: (g, l) => podeRetirar(centro, g, l, K),
-    onRetirar: (g, l) => aplicar(retirar(centro, g, l.ref, K, S), null),
+    onRetirar: (g, l) => { void aplicar(retirar(centro, g, l.ref, K, S), null); },
     novo,
   } : undefined;
 
@@ -462,7 +560,7 @@ export function LigacoesCatalogo({ K, onAbrirFicha, S, run }: { K: CatalogoLig; 
     <MotionConfig reducedMotion="user">
       <p className={NOTA}>Escolha um serviço, produto, equipamento, consumível ou técnico: fica no centro, com tudo o que está ligado a ele. Toque num elemento para o pôr no centro; passe o rato numa ligação para ver porquê. Em cada grupo, «Juntar» liga mais um e o × desliga (com «Anular»).</p>
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <EscolherCentro K={K} onIr={ir} />
+        <EscolherCentro K={K} onIr={ir} procurar={servidor?.procurar} onProduto={(p) => juntarExtras([p])} />
         <div role="group" aria-label="Vista" className="flex gap-2">
           <button type="button" aria-pressed={vista === "mapa"} onClick={() => setVista("mapa")} className={CHIP(vista === "mapa")}>Mapa</button>
           <button type="button" aria-pressed={vista === "problemas"} onClick={() => setVista("problemas")} className={CHIP(vista === "problemas")}>
@@ -471,7 +569,12 @@ export function LigacoesCatalogo({ K, onAbrirFicha, S, run }: { K: CatalogoLig; 
         </div>
       </div>
 
-      {vista === "problemas" ? <Problemas P={P} onIr={ir} /> : !mapa ? (
+      {(aLerServidor || erroServidor) && (
+        <p role={erroServidor ? "alert" : "status"} className={cn("mt-3 text-[15px]", erroServidor ? "text-destructive" : "text-muted-foreground")}>
+          {erroServidor ? `Não foi possível ler todos os produtos ligados: ${erroServidor}` : "A ler os produtos ligados…"}
+        </p>
+      )}
+      {vista === "problemas" ? <Problemas P={P} onIr={ir} parcial={!!servidor} /> : !mapa ? (
         <p className={cn(NOTA, "mt-6")}>O Catálogo está vazio.</p>
       ) : (
         <>

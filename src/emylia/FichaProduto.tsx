@@ -14,11 +14,14 @@ import { dataPT } from "./v2/custosModelo";
 import { margemEmPalavras } from "./fichaServico";
 import { BarraMargem } from "./CriarNoCatalogo";
 import { StockArmazens } from "./StockArmazens";
+import { Modelo3DFicha } from "./Modelo3DFicha";
 import { AtributosFicha } from "./AtributosProduto";
 import { ClassificacaoFicha } from "./ClassificacaoProduto";
 import { ReferenciaFicha } from "./ReferenciaFicha";
 import { SkuFicha } from "./SkuProduto";
 import { EstadoFicha } from "./EstadoProduto";
+import { ServicoDoProduto } from "./ServicoDoProduto";
+import type { ServicoEscolha } from "./real/servicosDoProduto";
 import type { CrmCatalogItem, CrmCatalogList, FreeSupplierRow } from "@/components/supplier-portal-crm/types";
 import {
   definirGrossistaDistribuidor, definirPreferido, definirPvp, eUuid, lerNumero, lerPrecoTabela, lerFornecedoresOrg, lerFornecedoresProduto, ligarArtigo, margemProduto, moeda, procurarArtigos, unidadeDaLigacao,
@@ -29,6 +32,9 @@ const CARTAO = "rounded-2xl border border-border bg-card p-4 shadow-[var(--shado
 const NOTA = "text-[15px] text-muted-foreground";
 const ENTRADA_TXT = "h-11 w-full rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
 const LINK = "inline-flex min-h-11 items-center gap-1.5 text-left text-[15px] font-medium text-primary underline-offset-4 hover:underline disabled:opacity-60";
+
+/** Sem árvore (a ficha do protótipo), o 3D classifica só pelo nome e pela subcategoria; a mesma lista vazia sempre, para não refazer o 3D. */
+const SEM_ARVORE: No[] = [];
 
 function Seccao({ id, titulo, children }: { id: string; titulo: string; children: ReactNode }) {
   return (
@@ -50,9 +56,11 @@ type Props = {
   arvore?: No[]; marcas?: string[];
   /** 16/11: os modelos do Catálogo (K.modelos) para o campo «Modelo» da secção «Classificação». Em falta: o campo diz «Ainda não disponível nesta base». */
   modelos?: ModeloK[];
+  /** 23/11: os serviços da organização (página leve de Produtos): com eles, a secção «Serviço que traz» deixa escolher, trocar ou tirar o serviço. Em falta ou vazia: sem a secção. */
+  servicos?: readonly ServicoEscolha[] | null;
 };
 
-export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, real, tipo = "produto", atributos, arvore, marcas, modelos }: Props) {
+export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, real, tipo = "produto", atributos, arvore, marcas, modelos, servicos }: Props) {
   const cons = tipo === "consumivel";
   // 05/11: sem products.view_cost não se mostra o custo de compra (nem a margem, nem o preço dos fornecedores)
   const verCusto = real?.podeVerCusto !== false;
@@ -135,6 +143,13 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
         </Seccao>
       )}
 
+      {/* 23/11: o serviço que o produto traz (cat_definir_servico_produto), só com a lista dos serviços da organização; a chave volta ao que ficou na base depois de gravar */}
+      {!cons && real && eUuid(p.id) && !!servicos?.length && (
+        <Seccao id="fp-servico" titulo="Serviço que traz">
+          <ServicoDoProduto key={`${p.id}:${p.servico ?? ""}:${p.fatorServico ?? 1}`} produto={p} servicos={servicos} real={real} anunciar={anunciar} />
+        </Seccao>
+      )}
+
       {/* 13/11: grava direto (cat_guardar_produto_atributos), como o PVP; a chave inclui os atributos para o bloco voltar ao que ficou na base */}
       {!cons && real && eUuid(p.id) && !!atributos?.length && (
         <Seccao id="fp-atrib" titulo="Atributos">
@@ -150,6 +165,15 @@ export function FichaProduto({ p, min, alvo, voltar, anunciar, nomeServico, onAb
         ? <Fornecedores key={p.id} p={p} real={real} anunciar={anunciar} verCusto={verCusto} />
         : <Seccao id="fp-forn" titulo="Fornecedores"><p className={cn(NOTA, "mt-3")}>{p.fornecedor || "Sem fornecedor indicado."}</p></Seccao>}
       {real && eUuid(p.id) && <StockArmazens key={`stock-${p.id}`} productId={p.id} nome={p.n} real={real} anunciar={anunciar} />}
+
+      {/* 23/11: o 3D que o catálogo dá ao produto (só para ver; não grava nada): fechado até se pedir; a Medida e a Cor dos atributos entram nele.
+          No fim da ficha: o teste de AtributosProduto fixa «Atributos» entre o Preço e os Fornecedores. */}
+      {!cons && (
+        <Seccao id="fp-3d" titulo="Modelo 3D">
+          {/* o seletor «Modelo 3D» (produto > subcategoria > categoria > automático) grava logo; a pré-visualização usa o modelo resolvido */}
+          <Modelo3DFicha key={p.id} produto={p} real={real} anunciar={anunciar} nome={p.n} sub={p.sub} no={p.no} arvore={arvore ?? SEM_ARVORE} attrs={pe.attrs} defs={atributos} />
+        </Seccao>
+      )}
     </article>
   );
 }

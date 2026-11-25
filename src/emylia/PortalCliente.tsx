@@ -30,6 +30,7 @@ import { Conversa } from "./ConversaObra";
 import type { FaturaReg } from "./v2/financeiro";
 import { nomeEmpresa } from "./acessosPortal";
 import { RESPONSAVEL_OBRA } from "./obraOps";
+import { numeroDoContratoDoNegocio } from "@/lib/numeroDocumento";
 import { CHAVE_CLAUSULA, CHAVE_FASE_CURTA, CHAVE_METODO, CHAVE_MOTIVO, rotuloDiaEm } from "./portalClienteIdioma";
 
 /** 2/11: o portal real (/client-portal/negocios/:id). A proposta aceita-se e o contrato assina-se nas páginas reais do portal (com o
@@ -554,9 +555,9 @@ export function PortalCliente({ ctx, d: d0, fechar, previa, outrosPedidos, real,
       ad && real
         ? real.assinarComSms({ titulo: L.t("pc.negocioPag.assinar.adendaTitulo", { n: ad.n }), texto: L.t("pc.negocioPag.assinar.adendaLi", { n: ad.n, id: d.id }), acao: L.t("pc.negocioPag.assinar.adenda"), fim: "adenda_assinar", ref: ad.n, voltar: () => setConfirmar(null) })
         : ad
-        ? <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} telemovel={d.tel} contrato={ad.n} aceito={`Li e aceito a adenda ${ad.n} ao contrato CT 2026/${d.id}.`} acao="Assinar a adenda" voltar="Voltar à adenda"
+        ? <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} telemovel={d.tel} contrato={ad.n} aceito={`Li e aceito a adenda ${ad.n} ao contrato ${numeroDoContratoDoNegocio(d)}.`} acao="Assinar a adenda" voltar="Voltar à adenda"
             onAssinar={(as) => fazer(() => A.assinarAdendaCom(d.id, ad.n, as))} onCancelar={() => setConfirmar(null)} />
-        : <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} telemovel={d.tel} contrato={`CT 2026/${d.id}`}
+        : <AssinaturaContrato nome={d.f.nome_fiscal || d.nome} telemovel={d.tel} contrato={`${numeroDoContratoDoNegocio(d)}`}
             onAssinar={(a) => fazer(() => A.assinarCom(d.id, a))} onCancelar={() => setConfirmar(null)} />
     ) : (
       pedirContrato ? (

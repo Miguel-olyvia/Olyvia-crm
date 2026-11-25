@@ -9,6 +9,7 @@ import { normal } from "../catalogo";
 import { juntarAtributos, juntarModelos, juntarTabelas, linhasDe } from "./lerCatalogo";
 import { montarCatalogo } from "./catalogoReal";
 import { SEM_FILTRO_SERVIDOR, lerProdutosPagina, type LinhaPaginaProduto } from "./produtosPaginados";
+import { ehIdDeModelo3D } from "../planta3d/modelos3dEscolha";
 
 const mensagem = (e: unknown, omissao: string) => (e instanceof Error && e.message ? e.message : omissao);
 const eObjeto = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
@@ -65,6 +66,8 @@ export function produtoDeLeitura(r: unknown): Produto | null {
     ...(m3 != null ? { entulho: { m3, ...(kg != null ? { kg } : {}) } } : {}), ...(fotos.length ? { fotos } : {}),
     ...(modeloId ? { modeloId, modelo: texto(r.modelo), modeloNumero: numero(r.modelo_numero) ?? 0 } : {}),
     ...(typeof r.estado === "string" && ESTADOS.has(r.estado) ? { estado: r.estado as Produto["estado"] } : {}),
+    // 24/11: o «Modelo 3D» escolhido no produto; a chave em falta (migração por aplicar), null ou lixo não deixam rasto
+    ...(ehIdDeModelo3D(r.modelo3d) ? { modelo3d: r.modelo3d } : {}),
   };
 }
 

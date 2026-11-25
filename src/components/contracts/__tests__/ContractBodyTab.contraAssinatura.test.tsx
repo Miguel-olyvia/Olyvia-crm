@@ -9,6 +9,8 @@ const invoke = vi.fn();
 const rpc = vi.fn();
 const updates: unknown[] = [];
 let permissoes: string[] = [];
+// fn_posso_ligar_assinatura (can_sign_contracts): o ecrã pergunta antes de mostrar «Assinar (Empresa)» (B2, 23/11)
+let podeAssinar = true;
 
 const TEMPLATE = { id: "t1", name: "Minuta", body_html: "", doc_settings: null, is_default: true, signatory_user_id: "u-sig" };
 
@@ -72,7 +74,8 @@ function renderTab() {
 }
 
 async function abrirDialogo() {
-  await act(async () => { fireEvent.click(screen.getByRole("button", { name: /Assinar \(Empresa\)/ })); });
+  const botao = await screen.findByRole("button", { name: /Assinar \(Empresa\)/ });
+  await act(async () => { fireEvent.click(botao); });
 }
 
 const companyWrites = () =>
@@ -88,11 +91,13 @@ describe("ContractBodyTab - contra-assinatura no servidor", () => {
     rpc.mockReset();
     updates.length = 0;
     permissoes = [];
+    podeAssinar = true;
     invoke.mockImplementation(async (_fn: string, opts: any) =>
       opts?.body?.action === "verify_otp"
         ? { data: { success: true, verified: true }, error: null }
         : { data: { masked_phone: "9*****123" }, error: null });
-    rpc.mockImplementation(async () => ({ data: {}, error: null }));
+    rpc.mockImplementation(async (fn: string) =>
+      fn === "fn_posso_ligar_assinatura" ? { data: podeAssinar, error: null } : { data: {}, error: null });
   });
 
   it("com OTP verificado chama a RPC em modo 'proprio' e não escreve company_* direto", async () => {
@@ -127,5 +132,22 @@ describe("ContractBodyTab - contra-assinatura no servidor", () => {
       expect(rpc).toHaveBeenCalledWith("rpc_contra_assinar_contrato", { p_contract_id: "c1", p_modo: "signatario_minuta" }));
     expect(invoke).not.toHaveBeenCalled();
     expect(companyWrites()).toHaveLength(0);
+  });
+
+  it("sem poderes para assinar (can_sign_contracts) e sem o signatário da minuta não mostra «Assinar (Empresa)» nem envia SMS", async () => {
+    podeAssinar = false;
+    renderTab();
+    await waitFor(() => expect(rpc).toHaveBeenCalledWith("fn_posso_ligar_assinatura", { p_org: "org1" }));
+    expect(screen.queryByRole("button", { name: /Assinar \(Empresa\)/ })).toBeNull();
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("sem can_sign_contracts mas com client_contracts.send_signature continua a assinar pelo signatário da minuta", async () => {
+    podeAssinar = false;
+    permissoes = ["client_contracts.send_signature"];
+    renderTab();
+    await abrirDialogo();
+    expect(await screen.findByRole("button", { name: /Confirmar assinatura/ })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Enviar código SMS/ })).toBeNull();
   });
 });

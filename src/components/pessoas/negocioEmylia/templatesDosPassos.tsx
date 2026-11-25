@@ -1,8 +1,8 @@
 // Os templates nos passos Orçamento, Proposta e Contrato do Negócio da Emylia (ficha do Pipeline). Não se mexe na Emylia (src/emylia): os passos que ela monta
 // (passosDaFase) são embrulhados aqui, passo a passo, por `comTemplatesNosPassos` (a prop `ajustarPassos` da FaseDaEmylia).
 //  · Orçamento: seletor do template do tipo orçamento (proposal_templates, template_type='quote') e o seu aspeto.
-//  · Proposta:  seletor do template do tipo proposta (template_type='proposal'); a pré-visualização da proposta passa a ter as cores, as fontes, o logo
-//    e os textos do template, com o nome e o logo REAIS da organização; botão «Enviar para o portal do cliente».
+//  · Proposta:  seletor do template do tipo proposta (template_type='proposal'); 23/11: no lugar da folha da Emylia, o documento do template
+//    como o cliente o vê no portal (DocumentoDaPropostaNoPasso), com o nome e o logo REAIS da organização; botão «Enviar para o portal do cliente».
 //  · Contrato:  seletor da minuta (client_contract_templates), as perguntas {{chave}} da minuta e o corpo preenchido; botão de envio ao portal.
 // A escolha guarda-se SÓ pelas RPCs neg_definir_templates_negocio / neg_ler_templates_negocio (useTemplatesDoNegocio).
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
@@ -20,10 +20,15 @@ import { extractPromptTokens, substituteVariables, type ContractVariableData } f
 import { sanitizeRichHtml } from "@/utils/sanitize";
 import { FOCO } from "@/components/negocio-metas/estilos";
 import { cn } from "@/lib/utils";
+import { numeroDaPropostaDoNegocio, numeroDoContratoDoNegocio } from "@/lib/numeroDocumento";
 import { ContratoNoPasso } from "./ContratoNoPasso";
 import { EnviarParaPortal } from "./EnviarParaPortal";
 import { SeletorDeTemplate } from "./SeletorDeTemplate";
 import { OrcamentoPdf } from "./OrcamentoPdf";
+import { DocumentoDaPropostaNoPasso } from "./DocumentoDaPropostaNoPasso";
+import { trocarFolhaDaProposta } from "./trocarFolhaDaProposta";
+import { EscolhaDasVersoes } from "./EscolhaDasVersoes";
+import { useVersoesDaPropostaNoPasso } from "./versoesDaPropostaNoPasso";
 
 export interface ContextoDosTemplates { negocioId: string | null; ctx: Ctx; d: Negocio; podeEditar: boolean }
 
@@ -143,12 +148,22 @@ function TemplateDaProposta({ c, children }: { c: ContextoDosTemplates; children
     "--tpl-primaria": cor(tpl.primary_color), "--tpl-secundaria": cor(tpl.secondary_color), "--tpl-destaque": cor(tpl.accent_color),
     "--tpl-texto": cor(tpl.text_color), "--tpl-fonte": fonte(tpl.font_family), "--tpl-fonte-titulos": fonte(tpl.heading_font_family),
   } as CSSProperties) : {}), [tpl]);
+  // 23/11: as versões de idioma do template (só com versões aparece a escolha; a folha e o envio usam a mesma)
+  const versoes = useVersoesDaPropostaNoPasso(c.negocioId, tpl);
+  // 23/11: no lugar da folha da Emylia (Partilhar + PropostaDoc), o documento do template, o mesmo que o cliente vê no portal
+  const trocado = trocarFolhaDaProposta(children, (
+    <div className="space-y-3">
+      <EscolhaDasVersoes v={versoes} sitio="folha" />
+      <DocumentoDaPropostaNoPasso negocioId={c.negocioId} d={c.d} S={c.ctx.S} tpl={tpl} empresa={{ nome: org.nome, logo: org.logo }}
+        leitura={versoes.leitura} idiomas={versoes.idiomasDaFolha} />
+    </div>
+  ));
   return (
     <div className="space-y-6">
       <section aria-label="Template da proposta" className="space-y-3 rounded-2xl border border-border bg-card p-4">
         <SeletorDeTemplate
           rotulo="Template da proposta" valor={neg.dados.template_proposta_id} opcoes={opcoesDe(lista.data)}
-          ajuda={omissao && !neg.dados.template_proposta_id ?`O da organização por omissão é «${omissao.name}».` : "A pré-visualização da proposta usa as cores, o logótipo e os textos do template escolhido."}
+          ajuda={omissao && !neg.dados.template_proposta_id ?`O da organização por omissão é «${omissao.name}».` : "A proposta em baixo é o documento deste template, como o cliente o vê no portal: os textos do template mandam; onde ele não escreve, entram os dados do negócio."}
           aLer={lista.isLoading} erro={lista.error instanceof Error ? lista.error.message : null} aoTentar={() => { void lista.refetch(); }}
           aoEscolher={(id) => { void neg.guardar({ template_proposta_id: id }); }}
           desativado={!podeEscolher(neg, c)}
@@ -156,12 +171,20 @@ function TemplateDaProposta({ c, children }: { c: ContextoDosTemplates; children
         />
         <AvisosDaGravacao t={neg} />
       </section>
-      {tpl && tpl.show_company_info !== false && logo && (
-        <div className="flex items-center gap-3"><img src={logo} alt={`Logótipo de ${org.nome}`} width={120} height={40} className="h-10 w-auto max-w-[10rem] object-contain" /><span className="text-sm text-muted-foreground">{org.nome}</span></div>
+      {trocado.trocou ? (
+        // 23/11: a folha da Emylia deu lugar ao documento do template (o do portal); as perguntas do passo ficam como estavam
+        <div key={org.chave}>{trocado.corpo}</div>
+      ) : (
+        <>
+          {tpl && tpl.show_company_info !== false && logo && (
+            <div className="flex items-center gap-3"><img src={logo} alt={`Logótipo de ${org.nome}`} width={120} height={40} className="h-10 w-auto max-w-[10rem] object-contain" /><span className="text-sm text-muted-foreground">{org.nome}</span></div>
+          )}
+          <div key={org.chave} className={tpl ? "tpl-proposta" : undefined} style={estilo}>{children}</div>
+          {tpl && <TextosDoTemplate tpl={tpl} />}
+        </>
       )}
-      <div key={org.chave} className={tpl ? "tpl-proposta" : undefined} style={estilo}>{children}</div>
-      {tpl && <TextosDoTemplate tpl={tpl} />}
-      <EnviarParaPortal negocioId={c.negocioId} tipo="proposal" podeEditar={c.podeEditar} />
+      <EnviarParaPortal negocioId={c.negocioId} tipo="proposal" podeEditar={c.podeEditar}
+        antesDeEnviar={versoes.antesDeEnviar} extra={<EscolhaDasVersoes v={versoes} sitio="envio" />} />
     </div>
   );
 }
@@ -174,7 +197,7 @@ export const dataIso = (dmy: string): string => {
   return m ? `${m[3]}-${m[2]}-${m[1]}` : dmy;
 };
 
-type DadosDaProposta = { numero: string; data: string } | null | undefined;
+type DadosDaProposta = { numero: string; data: string; criadaEm?: string | null } | null | undefined;
 
 export function dadosDaMinuta(d: Negocio, c: ContextoDosTemplates, nome: string, valores: Record<string, string>, proposta?: DadosDaProposta): ContractVariableData {
   const T = d.orc ? totaisIva(d, c.ctx.S) : null;
@@ -185,7 +208,9 @@ export function dadosDaMinuta(d: Negocio, c: ContextoDosTemplates, nome: string,
     cliente_email: d.f.email || "", cliente_telefone: d.tel.includes("@") ? "" : d.tel, ...(T ? { contrato_valor: T.total, proposta_valor: T.total } : {}),
     // 17/11 (A-Z na Mudelar: o contrato citava «P-2026-0032, válida 15 dias» e o cliente recebeu a «PR 2026/1005», 30 dias): o número é o da
     // proposta que o cliente recebeu e aceitou (o mesmo do documento e do portal); a data vem da base; a validade, da proposta enviada
-    proposta_numero: `PR 2026/${d.id}${d.orc?.versoes?.length ? ` · v${d.orc.versoes.length + 1}` : ""}`,
+    proposta_numero: numeroDaPropostaDoNegocio(d, proposta?.criadaEm),
+    // 23/11: e o do contrato, o mesmo da folha e do portal («CT <ano>/<n.º do negócio>»; o contrato ainda não existe: o ano é o de hoje)
+    contrato_numero: numeroDoContratoDoNegocio(d),
     ...(proposta?.data ? { proposta_data: dataIso(proposta.data) } : {}),
     ...(d.f.validade ? { proposta_validade: d.f.validade } : {}),
     // 17/11: em ISO, como a da proposta ({{contrato_data_inicio}} formata-se com new Date(): «30/10/2026» dava «NaN de undefined de NaN»)

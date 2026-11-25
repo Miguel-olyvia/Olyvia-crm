@@ -18,6 +18,9 @@ import { fimDe } from "./ajustesPlano";
 import { estadoDe, progresso } from "./obraOps";
 import { enviosDe, type Envio } from "./trabalhoObra";
 import type { ResumoEcNeg } from "./inventario/ponteNegocios";
+// 23/11: ao cliente, o nome curto do trabalho («Canalização», não «MO Modelo Remodelação Completa … · canalização»)
+import { nomeCurtoTarefa } from "./estudioObra/planoVivo";
+import { ordemDasTarefas } from "./ordemPlano";
 
 /* ------------------------------------------------------------------ as datas */
 const doisD = (n: number) => String(n).padStart(2, "0");
@@ -144,11 +147,21 @@ export interface MarcoCliente {
 
 const primeiroNome = (n: string) => n.trim().split(/\s+/)[0] || "A equipa";
 /** As tarefas que o cliente vê: as de correção são internas. */
-export const tarefasDoCliente = (p: Plano): Tarefa[] => p.tasks.filter((t) => t.corrige == null);
+/** 25/11: pela ordem da lista do plano (ordemPlano.ts), a que o gestor deu no Estúdio da obra. */
+export const tarefasDoCliente = (p: Plano): Tarefa[] => ordemDasTarefas(p).map((i) => p.tasks[i]).filter((t) => t.corrige == null);
 /** Os registos de uma tarefa que o cliente vê. */
 const enviosDoCliente = (t: Tarefa): Envio[] => enviosDe(t).filter((e) => e.k !== "correcao");
 
 /** Tudo o que aconteceu na obra (e o que a pôs a andar), do mais recente para o mais antigo. Os que não têm data ficam no fim. */
+/** 23/11 (revisão no 1015: o cliente via «A obra começou» a 23 nov, com o 1.º trabalho a 30 nov): para o cliente, a obra começa no
+ *  primeiro trabalho, não no arranque administrativo. Devolve o dia desse trabalho e se já começou (chegou o dia, ou já há registos). */
+export function comecoParaCliente(p: Plano, hoje = new Date()): { dia: number; comecou: boolean } {
+  const ts = tarefasDoCliente(p), dia = ts.length ? Math.min(...ts.map((t) => t.dia)) : 0;
+  if (p.estado === "concluída") return { dia, comecou: true };
+  if (p.estado !== "em curso") return { dia, comecou: false };
+  return { dia, comecou: diaDeHoje(p, hoje) >= dia || ts.some((t) => !!t.exec) };
+}
+
 export function historicoDaObra(d: Negocio, hoje = new Date()): MarcoCliente[] {
   const p = d.obra.plano, L: { m: MarcoCliente; ordem: number }[] = [];
   let n = 0;
@@ -169,19 +182,21 @@ export function historicoDaObra(d: Negocio, hoje = new Date()): MarcoCliente[] {
   if (o?.contrato === "assinado" && !L.some((x) => x.m.t === "Assinou o contrato")) { const q = dataDoTexto(o.assinatura?.q, hoje); if (q) pôr({ k: "contrato", t: "Assinou o contrato", quando: q }); }
   if (p) {
     // a obra começou sem a linha no histórico (obras antigas): o 1.º dia do plano
-    if ((p.estado === "em curso" || p.estado === "concluída") && !L.some((x) => x.m.k === "inicio")) pôr({ k: "inicio", t: "A obra começou", quando: dataDoDia(p, 0, hoje) });
+    if ((p.estado === "em curso" || p.estado === "concluída") && !L.some((x) => x.m.k === "inicio")) pôr({ k: "inicio", t: "A obra começou", quando: dataDoDia(p, comecoParaCliente(p, hoje).dia, hoje) });
     // os registos dos técnicos, o fim de cada trabalho e a verificação do responsável de obra
     for (const t of tarefasDoCliente(p)) {
       for (const e of enviosDoCliente(t)) {
-        const quando = quandoNoPlano(p, e.dia, e.q, hoje), base = { quando, tarefa: t.nome, fase: t.fase, fotos: e.fotos?.length ? e.fotos : undefined, nota: e.nota?.trim() || undefined };
-        if (e.k === "validada") pôr({ ...base, k: "concluida", t: `${t.nome}: concluído`, sub: "Verificado pelo responsável de obra." });
-        else if (e.k === "feita") pôr({ ...base, k: "acabou", t: `${primeiroNome(e.quem)} acabou ${t.nome.toLowerCase()}`, sub: "Falta a verificação do responsável de obra." });
-        else pôr({ ...base, k: "tecnico", t: `${primeiroNome(e.quem)} esteve na obra`, sub: t.nome });
+        const quando = quandoNoPlano(p, e.dia, e.q, hoje), base = { quando, tarefa: nomeCurtoTarefa(t.nome), fase: t.fase, fotos: e.fotos?.length ? e.fotos : undefined, nota: e.nota?.trim() || undefined };
+        if (e.k === "validada") pôr({ ...base, k: "concluida", t: `${nomeCurtoTarefa(t.nome)}: concluído`, sub: "Verificado pelo responsável de obra." });
+        else if (e.k === "feita") pôr({ ...base, k: "acabou", t: `${primeiroNome(e.quem)} acabou ${nomeCurtoTarefa(t.nome).toLowerCase()}`, sub: "Falta a verificação do responsável de obra." });
+        else pôr({ ...base, k: "tecnico", t: `${primeiroNome(e.quem)} esteve na obra`, sub: nomeCurtoTarefa(t.nome) });
       }
     }
     // os avisos de mudança do plano que a equipa deu ao cliente
     for (const a of d.obra.alteracoes ?? []) if (a.cliente && a.avisoCliente) pôr({ k: "plano", t: a.fimAntes !== a.fimDepois ? "A data de fim da obra mudou" : "Aviso da equipa", sub: a.avisoCliente, quando: quandoNoPlano(p, a.dia, a.q, hoje) });
   }
+  // 23/11: antes do primeiro trabalho, a obra ainda não começou para o cliente (o «Começa …» está no progresso)
+  if (p && !comecoParaCliente(p, hoje).comecou) for (let i = L.length - 1; i >= 0; i--) if (L[i].m.k === "inicio") L.splice(i, 1);
   // do mais recente para o mais antigo; com a mesma data, o que entrou depois primeiro; sem data, no fim
   return L.sort((a, b) => {
     const x = a.m.quando?.getTime(), y = b.m.quando?.getTime();
@@ -222,6 +237,8 @@ export interface ProgressoCliente {
   /** o que está a acontecer agora (a decorrer, ou previsto para hoje) e o que vem a seguir */
   agora: TarefaCliente[]; aSeguir: TarefaCliente[];
   inicio: string; fim: string;
+  /** 23/11: para o cliente, a obra já começou (o primeiro trabalho chegou); antes, «Começa …» */
+  comecou: boolean;
   /** a data de fim que o cliente conhecia antes dos avisos de mudança (só se mudou) */
   fimInicial: string | null;
   /** já passou a data de fim e a obra não está concluída */
@@ -238,7 +255,7 @@ export function progressoDaObra(d: Negocio, hoje = new Date()): ProgressoCliente
     const estado: EstadoCliente = concluida || e === "validada" ? "concluída" : e === "feita" ? "a verificar" : e === "em curso" || e === "corrigir" ? "a decorrer"
       : emCurso && k >= t.dia && k <= fimT ? "hoje" : "por começar";
     const atrasada = emCurso && (estado === "a decorrer" || estado === "por começar") && k > fimT ? rotuloDia(p, fimT) : undefined;
-    return { nome: t.nome, ...(t.fase ? { fase: t.fase } : {}), estado, de: rotuloDia(p, t.dia), ate: rotuloDia(p, fimT), ...(atrasada ? { atrasada } : {}) };
+    return { nome: nomeCurtoTarefa(t.nome), ...(t.fase ? { fase: t.fase } : {}), estado, de: rotuloDia(p, t.dia), ate: rotuloDia(p, fimT), ...(atrasada ? { atrasada } : {}) };
   });
   const ordem = tarefasDoCliente(p);
   const porInicio = (a: TarefaCliente, b: TarefaCliente) => ordem[tarefas.indexOf(a)].dia - ordem[tarefas.indexOf(b)].dia;
@@ -255,7 +272,7 @@ export function progressoDaObra(d: Negocio, hoje = new Date()): ProgressoCliente
     atrasadas: tarefas.filter((t) => t.atrasada),
     agora: tarefas.filter((t) => t.estado === "a decorrer" || t.estado === "a verificar" || t.estado === "hoje").sort(porInicio),
     aSeguir: tarefas.filter((t) => t.estado === "por começar" && !t.atrasada).sort(porInicio).slice(0, 3),
-    inicio: rotuloDia(p, 0), fim,
+    inicio: rotuloDia(p, comecoParaCliente(p, hoje).dia), comecou: comecoParaCliente(p, hoje).comecou, fim,
     fimInicial: fimInicial && fimInicial !== fim ? fimInicial : null,
     fimPassou: emCurso && !concluida && k > ultimo,
   };

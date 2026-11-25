@@ -14,6 +14,9 @@ npx supabase db query --linked -f <caminho>/supabase/tests/permissoes_papeis.sql
 O resultado é o último `SELECT`: uma linha por verificação
 (`papel_conta | verificacao | esperado | obtido | resultado | detalhe`) e uma linha `TOTAL` com o número de FALHAS.
 
+Com `rhq.ps1` (corta ~100 s) não cabe de uma vez: correr por blocos de contas (filtrar `_perm_contas` por `ordem` logo depois de
+o preencher, e o 5b só num dos blocos) e somar os `TOTAL`.
+
 ## Não deixa alterações
 
 - Tudo em `BEGIN … ROLLBACK`; cada ação corre num sub-bloco que acaba sempre em `RAISE` (o que a ação escreveu é desfeito
@@ -27,15 +30,15 @@ O resultado é o último `SELECT`: uma linha por verificação
 
 Todas as associações ativas da organização `b6ffce4f-…` (só a primeira de cliente), mais a conta-sonda
 `1999rubencmail@gmail.com` (super_admin sem ficha RH) com o papel trocado para `system_admin`, `viewer` e
-`teste_rh_so_ponto` (o caso "tem `hr.assiduidade.picar` mas não tem ficha"). Os Papéis no Negócio (armazém, financeiro,
-comercial, operações, técnico) aparecem no rótulo `[neg: …]`.
+`teste_rh_so_ponto` (o caso "tem `hr.assiduidade.picar` mas não tem ficha"). O papel `tecnico` aparece no rótulo `[neg: tecnico]`.
 
 ## Como se calcula o esperado
 
 A partir das tabelas, não das funções testadas:
 - **perfil** — `anew_role_permissions` do papel da associação ativa não-cliente na organização;
-- **papel** — `neg_papeis_permissoes` dos Papéis no Negócio da ficha ligada (`pessoas_papeis_negocio`, + `tecnico` por
-  `fn_rh_pessoa_tecnica`);
+- **papel** — `neg_papeis_permissoes` do papel `tecnico`, o único que conta desde 17/11 (como `fn_neg_papeis`): ficha ligada e
+  `fn_rh_pessoa_tecnica` OU perfil `negocios.obra.tecnico`. Os Papéis no Negócio de `pessoas_papeis_negocio` já não contam, nem
+  no âmbito do 3b (`v_neg_tudo` sem o ramo do «Papel no Negócio explícito»);
 - **admin** — associação ativa ao papel global `system_admin`.
 
 ## O que cobre
@@ -50,7 +53,8 @@ A partir das tabelas, não das funções testadas:
    Se não houver dados, a linha diz "sem dados".
 4. `rpc_hr_picar`: com ficha, exige `hr.assiduidade.picar`; sem ficha, deve recusar com uma mensagem de "sem ficha"
    (`conta_sem_ficha_rh`, 20270110200000).
-5. `purge_business_entity('quote', …)` (Lixo): bloqueia sem `deals.delete` nesta organização ou acima.
+5. `purge_business_entity('quote', …)` (Lixo): bloqueia sem `deals.delete` nesta organização ou acima. Desde 20270126200000 o
+   orçamento vai antes ao Lixo dentro do sub-bloco (fora do Lixo a RPC recusa sempre).
    5b. Simulado: a sonda fica `viewer` aqui e ganha, só dentro do sub-bloco, `super_admin` noutra organização (criada e
    desfeita se só houver uma) → tem de ser bloqueada (antes de 20270110200000 passava).
 6. Custos iguais nas duas vias: quando 3a e 3b leem linhas, dão ambas "com custos" ou ambas "custos a null".
@@ -60,8 +64,42 @@ A partir das tabelas, não das funções testadas:
 Mesmo estilo (`BEGIN … ROLLBACK`, sessão impersonada, esperado calculado das tabelas). Cria os seus dados na transação: o Rafael
 passa a `comercial` (OWNED), fica dono de um negócio/orçamento/proposta/contrato, ganha uma tarefa na obra de outro negócio, e
 lidera uma equipa de teste. Verifica: `neg_ler_negocios`/`obra_ler_negocios` (dono + tarefas; ORG; TEAM; NONE), as guardas de
-`neg_guardar_negocio`/`obra_guardar_negocio`, quem entra só pelo Papel no Negócio e os técnicos (veem tudo, sem guarda de âmbito),
+`neg_guardar_negocio`/`obra_guardar_negocio`, as contas que eram só Papel no Negócio (desde 17/11: sem `pessoas.view` no perfil dá
+CT001, o técnico lê a vista reduzida — só onde tem tarefas; nenhuma tem guarda de âmbito ao gravar) e os técnicos,
 o super_admin, `rpc_save_quote` (permissão + âmbito), o SELECT de `quotes`/`proposals`/`client_contracts` (OWNED = a cadeia do
 negócio comercial e contém o "meu" de cada ecrã; ORG = tudo), o UPDATE com as chaves de `quotes.edit`, NONE em
 `crm_scope_keys`/`get_schedule_item_scope_context`/`get_proposal_edit_scope`, e o âmbito em `soft_delete_business_entity` e
 `cancel_and_replace_contract`. O 3b de `permissoes_papeis.sql` passou a contar com o âmbito (sem negócios no âmbito = "sem linhas").
+
+## `perm_lixo_custos_obra.test.sql` — Lixo, custos dos produtos e criar a obra (20270126200000/210000/220000)
+
+Mesmo estilo (`BEGIN … ROLLBACK`, cada ação num sub-bloco que acaba em `RAISE`). Verifica:
+- C2 `purge_business_entity`: orçamento e contrato assinado VIVOS recusados a todos; no Lixo, passa com `deals.delete` (org_admin,
+  super_admin, system_admin) — incluindo um contrato assinado no Lixo (regra de negócio por decidir, só documentada); com
+  `deals.delete` OWNED só o que é seu (o alheio é recusado).
+- C3 leitura direta: `negocio_produtos` só as linhas dos negócios de `neg_ler_negocios` (e pessoas.view, como antes); `custo_un`
+  recusado (42501) a authenticated em `negocio_produtos`, `quote_versao_produtos` e `adenda_linhas`; as outras colunas legíveis; a RPC
+  continua a dar os custos só com `fn_quote_custos_pode`.
+- C4 `obra_guardar_negocio` a criar a obra do 1003: com o plano «por aprovar» (ou sem estado) passa para comercial/Financeiro/Gestor
+  de obra; «aprovado»/«em curso» só com `negocios.obra.planear` (CT001 para os outros, e a EC não é emitida).
+
+## `permissoes_contratos_portal.test.sql` — lote Contratos/Portal (23/11, 20270126000000–20270126020000)
+
+Mesmo método (`BEGIN … ROLLBACK`, sub-blocos que acabam em `RAISE`, fixtures «LC2311» na Mudelar). Contas: comercial A (dona),
+comercial B, Financeiro, org_admin, super_admin. Verifica: anular (`cancel_and_replace_contract`, `rpc_update_client_contract_status`
+'cancelled') pede `client_contracts.cancel` + o edit/âmbito de sempre, e o contrato assinado de um negócio da Emylia é recusado e
+apontado para o Negócio (`neg_anular_contrato` continua igual); pôr/tirar do portal (`client_portal_documents`) pede a permissão de
+`create-client-portal-access` na organização + o documento no âmbito (`fn_portal_doc_no_ambito`, a mesma que a edge function chama);
+`republish_proposal_snapshot` com âmbito; `rpc_contra_assinar_contrato('signatario_minuta')` com o âmbito de `client_contracts.edit`.
+Correr com `rhq.ps1 -SqlFile` (resultado: json com `falhas`). `permissoes_ambito.sql` H4 passou a calcular o esperado com
+`client_contracts.cancel` do perfil comercial.
+
+## `permissoes_lote_propostas_2311.sql` — recusar a proposta e dar a visita como feita (23/11/2026)
+
+Mesmo estilo (`BEGIN … ROLLBACK`, fixtures na transação, resultado numa exceção `@@RES … RES@@` em base64; correr com `rhq.ps1`).
+- **C5** (20270126105000): `reject_proposal_atomic` só para `service_role`. Funcionários (com e sem token) e `anon` recusados; o portal
+  (`service_role`) recusa com o token certo (fica `rejected`, com o motivo e a data), e não recusa com token errado nem sem token.
+- **A5** (20270126110000): a dona do negócio (comercial, OWNED) dá como feita a visita que a assistente marcou, também atribuída a
+  outro recurso; uma visita no futuro continua recusada (NG009); cancelar continua só de quem gere; outro comercial, a assistente
+  (sem `negocios.visita.preencher`), compras, técnico e supervisor continuam recusados, também pelo invólucro e pela bandeira à mão.
+As contagens/md5 («antes») têm de dar o mesmo em corridas seguidas.

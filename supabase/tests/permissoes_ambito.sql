@@ -17,8 +17,11 @@
 -- Cobre:
 --   A. Rafael comercial (OWNED): neg_ler_negocios / obra_ler_negocios só os dele (+ tarefas); neg_guardar_negocio e
 --      obra_guardar_negocio recusam o alheio e deixam o dele e o da tarefa; linha ORG vê tudo; TEAM vê os da equipa; NONE nada.
---   B. Só Papel no Negócio (Inês financeiro, Marta armazém, Paulo operações): veem os mesmos que o super_admin e não têm guarda de
---      âmbito ao gravar. Técnicos (Sérgio, Diogo): não perdem nenhum negócio onde têm tarefas, nem a obra dele ao gravar.
+--   B. Contas que eram só Papel no Negócio (Inês financeiro, Marta armazém, Paulo operações): desde 17/11 o Papel no Negócio já não
+--      dá permissões, por isso sem pessoas.view no perfil a leitura dá CT001, e quem é técnico (cargo técnico ou perfil
+--      negocios.obra.tecnico, ou negocios.obra.executar no perfil) lê a vista reduzida — só os negócios/obras onde tem tarefas
+--      (Paulo: 0/0); com pessoas.view no perfil, os mesmos que o super_admin. Nenhuma tem guarda de âmbito ao gravar.
+--      Técnicos (Sérgio, Diogo): não perdem nenhum negócio onde têm tarefas, nem a obra dele ao gravar.
 --   C. super_admin (Miguel tester): vê tudo e passa as guardas.
 --   D. rpc_save_quote: sem quotes.edit/quotes.create falha; com permissão grava o dele; orçamento alheio (OWNED) falha.
 --   E. SELECT de quotes / proposals / client_contracts: OWNED = o conjunto esperado (e contém o "meu" de cada ecrã); ORG = tudo.
@@ -33,6 +36,8 @@
 -- ============================================================
 
 BEGIN;
+-- o teste é longo: sem limite de tempo dentro da transação (só esta sessão)
+SET LOCAL statement_timeout = 0;
 
 CREATE TEMP TABLE _amb_rel (
   n           serial,
@@ -110,6 +115,7 @@ DECLARE
   v_ids      text;
   v_pl_meu   jsonb;  -- payloads do rpc_save_quote, lidos como postgres (a sessão do teste pode não ver o orçamento)
   v_pl_alh   jsonb;
+  v_b_pv     boolean; v_b_tec boolean; v_b_n text; v_b_o text;  -- B: pessoas.view no perfil, vista reduzida do técnico, esperados
 BEGIN
   IF to_regprocedure('public.fn_doc_no_ambito(text,uuid,uuid,text[],text[],uuid[],uuid[])') IS NULL THEN
     RAISE EXCEPTION 'ABORTADO: esta base não tem a migration 20270110900000 (fn_doc_no_ambito)';
@@ -140,7 +146,11 @@ BEGIN
   SELECT n.id INTO v_n_meu FROM negocios n WHERE n.organization_id = c_org AND n.deleted_at IS NULL AND n.numero IS NOT NULL
     AND EXISTS (SELECT 1 FROM quotes q WHERE q.negocio_id = n.id AND q.deleted_at IS NULL)
     ORDER BY n.numero LIMIT 1;
+  -- 23/11: um negócio ganho/perdido só muda o comercial pelas funções neg_* (fn_negocios_fechado_so_leitura, NG028); a preparação do
+  -- teste passa pela mesma variável (só nesta transação), senão o teste parava aqui conforme o estado do 1.º negócio
+  PERFORM set_config('app.neg_via_funcao', 'on', true);
   UPDATE negocios SET assigned_to = c_rafael WHERE id = v_n_meu;
+  PERFORM set_config('app.neg_via_funcao', '', true);
 
   SELECT o.negocio_id, o.id, t.id INTO v_n_tar, v_obra, v_tarefa FROM ops_obra o JOIN negocios n ON n.id = o.negocio_id
     JOIN ops_obra_tarefa t ON t.obra_id = o.id
@@ -275,11 +285,31 @@ BEGIN
   DELETE FROM anew_membership_permission_scopes WHERE membership_id = v_memb;
 
   -- ── B. só Papel no Negócio / técnicos: o mesmo que o super_admin ──────────
-  FOR a IN SELECT u.email, u.auth_user_id FROM anew_users u WHERE u.email = ANY (c_papel) ORDER BY u.email LOOP
+  FOR a IN SELECT u.email, u.auth_user_id, u.id FROM anew_users u WHERE u.email = ANY (c_papel) ORDER BY u.email LOOP
+    -- esperado (17/11): com pessoas.view no perfil, todos; sem ele, CT001, salvo o técnico, que lê a vista reduzida (as suas tarefas)
+    v_b_pv := EXISTS (SELECT 1 FROM anew_memberships am JOIN anew_role_permissions p ON p.role_id = am.role_id AND p.permission_code = 'pessoas.view'
+                      WHERE am.user_id = a.id AND am.organization_id = c_org AND am.status = 'active' AND am.role_is_client IS NOT TRUE);
+    v_b_tec := EXISTS (SELECT 1 FROM anew_memberships am JOIN anew_role_permissions p ON p.role_id = am.role_id AND p.permission_code = 'negocios.obra.executar'
+                       WHERE am.user_id = a.id AND am.organization_id = c_org AND am.status = 'active' AND am.role_is_client IS NOT TRUE)
+      OR EXISTS (SELECT 1 FROM pessoas_contas pc JOIN pessoas p ON p.id = pc.pessoa_id AND p.deleted_at IS NULL
+                 WHERE pc.anew_user_id = a.id AND pc.organization_id = c_org AND pc.estado = 'activa' AND pc.revogada_em IS NULL
+                   AND (public.fn_rh_pessoa_tecnica(c_org, p.id) OR public.has_anew_permission_in_org(a.auth_user_id, 'negocios.obra.tecnico', c_org))
+                   AND EXISTS (SELECT 1 FROM neg_papeis_permissoes m WHERE m.papel = 'tecnico' AND m.permission_code = 'negocios.obra.executar'));
+    SELECT count(DISTINCT o.negocio_id)::text, count(DISTINCT o.id)::text INTO v_b_n, v_b_o
+    FROM ops_obra o JOIN negocios n ON n.id = o.negocio_id AND n.deleted_at IS NULL AND n.numero IS NOT NULL
+    JOIN pessoas_contas pc ON pc.anew_user_id = a.id AND pc.organization_id = c_org AND pc.estado = 'activa' AND pc.revogada_em IS NULL
+    WHERE o.organization_id = c_org
+      AND (EXISTS (SELECT 1 FROM ops_obra_tarefa_rh r WHERE r.obra_id = o.id AND r.pessoa_id = pc.pessoa_id)
+           OR EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(o.estado_emylia->'plano'->'tasks') = 'array'
+                                 THEN o.estado_emylia->'plano'->'tasks' ELSE '[]'::jsonb END) t WHERE t->>'tec' = pc.pessoa_id::text));
     v_obt := pg_temp.amb_exec(a.auth_user_id, format('SELECT jsonb_array_length(public.neg_ler_negocios(%L))::text', c_org));
-    PERFORM pg_temp.amb_reg(a.email, 'B1 neg_ler_negocios = todos', v_total::text, v_obt);
+    PERFORM pg_temp.amb_reg(a.email, 'B1 neg_ler_negocios = todos / técnico: os seus / sem pessoas.view: CT001',
+      CASE WHEN v_b_pv THEN v_total::text WHEN v_b_tec THEN v_b_n ELSE 'CT001' END,
+      CASE WHEN v_obt LIKE 'ERRO CT001:%' THEN 'CT001' ELSE v_obt END, left(v_obt, 160));
     v_obt := pg_temp.amb_exec(a.auth_user_id, format('SELECT jsonb_array_length(public.obra_ler_negocios(%L))::text', c_org));
-    PERFORM pg_temp.amb_reg(a.email, 'B2 obra_ler_negocios = todas', v_to::text, v_obt);
+    PERFORM pg_temp.amb_reg(a.email, 'B2 obra_ler_negocios = todas / técnico: as suas / sem pessoas.view: CT001',
+      CASE WHEN v_b_pv THEN v_to::text WHEN v_b_tec THEN v_b_o ELSE 'CT001' END,
+      CASE WHEN v_obt LIKE 'ERRO CT001:%' THEN 'CT001' ELSE v_obt END, left(v_obt, 160));
     v_res := pg_temp.amb_exec(a.auth_user_id, format($q$SELECT 'passou' FROM public.neg_guardar_negocio(%L, %L, '{}'::jsonb)$q$, c_org, v_n_alh));
     PERFORM pg_temp.amb_reg(a.email, 'B3 neg_guardar_negocio: guarda de âmbito', 'não aplica', CASE WHEN v_res ~* c_guarda_neg THEN 'bloqueado pelo âmbito' ELSE 'não aplica' END, left(v_res, 160));
     v_res := pg_temp.amb_exec(a.auth_user_id, format($q$SELECT 'passou' FROM public.obra_guardar_negocio(%L, %L, '{}'::jsonb)$q$, c_org, coalesce(v_n_tar, v_n_alh)));
@@ -392,7 +422,11 @@ BEGIN
   END IF;
   IF v_c_meu IS NOT NULL THEN
     v_res := pg_temp.amb_exec(v_ra, format($q$SELECT public.cancel_and_replace_contract(%L, 'teste', false)::text$q$, v_c_meu));
-    PERFORM pg_temp.amb_reg('Rafael comercial OWNED', 'H4 cancel_and_replace_contract dele', 'passou a guarda', pg_temp.amb_guarda(v_res, 'insufficient_permission'), left(v_res, 160));
+    -- 20270126000000: anular pede também client_contracts.cancel (o perfil comercial pode não a ter): o esperado vem das tabelas
+    PERFORM pg_temp.amb_reg('Rafael comercial OWNED', 'H4 cancel_and_replace_contract dele',
+      CASE WHEN EXISTS (SELECT 1 FROM anew_role_permissions rp WHERE rp.role_id = v_role_com AND rp.permission_code = 'client_contracts.cancel')
+           THEN 'passou a guarda' ELSE 'bloqueado' END,
+      pg_temp.amb_guarda(v_res, 'insufficient_permission'), left(v_res, 160));
   END IF;
   v_res := pg_temp.amb_exec(v_ma, format($q$SELECT public.cancel_and_replace_contract(%L, 'teste', false)::text$q$, coalesce(v_c_alh, v_c_meu)));
   PERFORM pg_temp.amb_reg('Miguel super_admin', 'H5 cancel_and_replace_contract alheio', 'passou a guarda', pg_temp.amb_guarda(v_res, 'insufficient_permission'), left(v_res, 160));

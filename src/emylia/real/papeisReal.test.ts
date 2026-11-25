@@ -12,6 +12,7 @@ import { RESPONSAVEIS_OBRA } from "../campos";
 import { TECNICOS, tecnicosIniciais, usarTecnicos, type FichaTecnico } from "../equipa/tecnicos";
 import { atribuirPorAtribuir, tecnicosDoOficio } from "../preparacaoObra";
 import { CODIGO_BASE } from "../permissoes";
+import { SUPERVISORES_MEDIDAS } from "../supervisoresMedidas";
 import { aplicarGestoresObra, aplicarNomesPapeis, aplicarPermissoesReais, comPapeisDasPermissoes, definirResponsavelObra, papeisDasPermissoes, papeisDoLido, papeisPermitidos, papelDeAbertura, papelInicial, papelMaisEspecifico, reporNomesPapeis, VISTAS_NEGOCIO } from "./papeisReal";
 
 afterEach(() => { reporNomesPapeis(); usarTecnicos(tecnicosIniciais()); });
@@ -173,6 +174,14 @@ describe("30/10: o resto do exemplo sai da Olyvia", () => {
     expect(RESPONSAVEL_OBRA.n).toBe("Paulo Nogueira");
     reporNomesPapeis();
     expect(RESPONSAVEIS_OBRA).toEqual(["Filipe", "Hugo"]);
+  });
+
+  // 23/11/2026 (M7): os gestores de obra lidos (com o id da pessoa) entram em «Quem vai medir»; ao sair, a lista esvazia
+  it("os gestores de obra com id passam a quem pode medir; sem id não entram; reporNomesPapeis esvazia", () => {
+    aplicarGestoresObra([{ nome: "Dário Ihaza", telefone: null, id: "p-dario" }, { nome: "Sem Id", telefone: null }]);
+    expect(SUPERVISORES_MEDIDAS).toEqual([{ id: "p-dario", n: "Dário Ihaza" }]);
+    reporNomesPapeis();
+    expect(SUPERVISORES_MEDIDAS).toEqual([]);
   });
 
   it("sem a carrinha do exemplo na Olyvia; na V1 continua", () => {

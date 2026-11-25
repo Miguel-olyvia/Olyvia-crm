@@ -13,6 +13,8 @@ import { loadProposalPortalData, type ProposalPortalData } from "@/components/pr
 import { generateProposalPdfBlob, downloadBlob } from "@/utils/generateProposalPdfBlob";
 import { useToast } from "@/hooks/use-toast";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
+import { useNumerosDosNegociosCrm } from "@/hooks/pessoas/useNumerosDosNegociosCrm";
+import { numeroDaProposta } from "@/lib/numeroDocumento";
 
 interface ProposalPortalPreviewProps {
   open: boolean;
@@ -24,10 +26,19 @@ export function ProposalPortalPreview({ open, onOpenChange, proposalId }: Propos
   const [loading, setLoading] = useState(true);
   const [portalData, setPortalData] = useState<ProposalPortalData | null>(null);
   const { toast } = useToast();
+  // 23/11: numa proposta de negócio, o número como a Emylia o mostra (PR <ano>/<n.º do negócio>); sem negócio, o guardado
+  const negocioId: string | null = portalData?.proposal?.negocio_id ?? null;
+  const numeros = useNumerosDosNegociosCrm([negocioId]);
+  const doNegocio = negocioId ? numeros.get(negocioId) : undefined;
+  const numeroMostrado = portalData?.proposal
+    ? numeroDaProposta({ numeroNegocio: doNegocio?.numero ?? null, versao: doNegocio?.versao ?? null, criadoEm: portalData.proposal.created_at ?? null, guardado: portalData.proposal.proposal_number ?? null })
+    : undefined;
 
   const handleDownloadPdf = async () => {
     try {
-      const { blob, fileName } = await generateProposalPdfBlob(proposalId);
+      const { blob, fileName } = doNegocio && numeroMostrado
+        ? await generateProposalPdfBlob(proposalId, undefined, null, { numeroMostrado })
+        : await generateProposalPdfBlob(proposalId);
       downloadBlob(blob, fileName);
     } catch (e: any) {
       captureFlowError(e, "proposal-document-export");
@@ -108,6 +119,7 @@ export function ProposalPortalPreview({ open, onOpenChange, proposalId }: Propos
                     company={portalData.company}
                     mode="preview"
                     idiomasDoDocumento={portalData.idiomasDoDocumento}
+                    numeroMostrado={numeroMostrado}
                     statusLabel={statusLabel}
                     canActOnProposal={canActOnProposal}
                     onDownloadPdf={handleDownloadPdf}

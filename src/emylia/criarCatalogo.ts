@@ -14,6 +14,7 @@ import { CATALOGO_TODO, normal, type ItemCatalogo, type LinhaCat } from "./catal
 import { r2, type Estado, type MedKey, type SvcId } from "./motor";
 import type { IconeServicoKey, IlustracaoKey } from "./ilustracoes";
 import type { FornecedorPendente } from "./fornecedoresCatalogo";
+import { ehIdDeModelo3D } from "./planta3d/modelos3dEscolha";
 import { criarProduto, type AtributoProduto, type Catalogo, type ConsumivelCriado } from "./v2/catalogoModelo";
 import {
   HOJE, custoHoraPerfil, custoReceita, margemSobrePreco, mesesEntre, precoReceita,
@@ -143,6 +144,8 @@ export interface NovoProdutoCompleto {
   modeloId?: string; modeloNovo?: string;
   /** 17/11 (20270120900000): o estado do produto novo (Rascunho, Ativo, Descontinuado). Sem ele a base cria-o Ativo. */
   estado?: "draft" | "active" | "discontinued";
+  /** 24/11: o «Modelo 3D» escolhido no produto novo (planta3d/modelos3dEscolha.ts); sem ele herda da subcategoria e da categoria. */
+  modelo3d?: string | null;
 }
 /** O preço de venda do produto: o PVP, ou o custo com a margem-alvo. */
 export const precoVendaProduto = (custo: number, pvp: number | null | undefined, alvo: number) =>
@@ -167,7 +170,7 @@ export function criarProdutoCompleto(K: Catalogo, o: NovoProdutoCompleto, hoje =
     ...p,
     ...(o.sku?.trim() ? { sku: o.sku.trim() } : {}), ...(o.pvp != null && o.pvp > 0 ? { pvp: r2(o.pvp) } : {}),
     ...(o.desc?.trim() ? { desc: o.desc.trim() } : {}), ...(o.servico ? { servico: o.servico } : {}), ...(o.img ? { img: o.img } : {}),
-    ...(o.attrs?.length ? { attrs: o.attrs } : {}), ...(o.estado ? { estado: o.estado } : {}),
+    ...(o.attrs?.length ? { attrs: o.attrs } : {}), ...(o.estado ? { estado: o.estado } : {}), ...(ehIdDeModelo3D(o.modelo3d) ? { modelo3d: o.modelo3d } : {}),
     ...(o.modeloId ? { modeloId: o.modeloId } : o.modeloNovo?.trim() ? { modeloNovo: o.modeloNovo.trim() } : {}),
   });
   return { ok: true, id: r.id, K: { ...r.K, produtos } };

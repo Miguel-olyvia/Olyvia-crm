@@ -18,7 +18,7 @@ import { IconeServico, iconeDoServico } from "./ilustracoes";
 import { AvatarTec } from "./AcompanhamentoObra";
 import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
 import { usePesquisaProdutos } from "./real/pesquisaProdutos";
-import { consumiveisConhecidos, criarTarefa, diaMinimo, materiaisDoServico, oficioDe, tempoDoServico } from "./tarefasValidador";
+import { consumiveisConhecidos, criarTarefa, criarTarefaInterna, diaMinimo, materiaisDoServico, oficioDe, tempoDoServico } from "./tarefasValidador";
 
 const CARTAO = "rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]";
 /** As unidades de área e de comprimento: começam em 5 e andam de 5 em 5. */
@@ -97,16 +97,18 @@ export function EditorMateriais({ mats, mudar }: { mats: MatTarefa[]; mudar: (m:
 
 /* ================================================================== a tarefa nova */
 /** 11/11: `inicial` vem de tocar num dia vazio da linha de um técnico, no Estúdio do plano (começa nesse dia, com essa pessoa). */
-export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; fechar: () => void; inicial?: { dia?: number; tec?: string | null } }) {
+export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; fechar: () => void; inicial?: { dia?: number; tec?: string | null; fase?: number } }) {
   const { S, A, run } = ctx;
   const p = d.obra.plano!;
   const [sid, setSid] = useState<SvcId | null>(null);
   const [procura, setProcura] = useState("");
   const [q, setQ] = useState(1);
-  const [fase, setFase] = useState<number>(() => p.tasks.find((t) => t.fase)?.fase ?? 1);
+  const [fase, setFase] = useState<number>(() => inicial?.fase ?? p.tasks.find((t) => t.fase)?.fase ?? 1);
   const [tec, setTec] = useState<string | null | undefined>(inicial?.tec ?? undefined);
   const [mats, setMats] = useState<MatTarefa[] | null>(null);
   const [delta, setDelta] = useState(0);
+  // 24/11: uma tarefa interna (sem serviço do Catálogo, sem custo para o cliente): o seu próprio formulário
+  const [interna, setInterna] = useState(false);
   const sem = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   const servicos = Object.entries(S.svc).filter(([, s]) => s.h > 0 && (!procura.trim() || sem(s.n + " " + s.perfil).includes(sem(procura.trim()))));
   const s = sid ? S.svc[sid] : null;
@@ -123,7 +125,7 @@ export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; 
     setSid(k); setQ(un1); setMats(null); setTec(inicial?.tec ?? undefined); setDelta(0);
     // a fase sugerida: a de outra tarefa do mesmo ofício, se houver
     const o2 = oficioDe(sv), igual = p.tasks.find((t) => (o2.perfilId ? t.perfilId === o2.perfilId || t.sk === o2.sk : t.sk === o2.sk) && t.fase);
-    if (igual?.fase) setFase(igual.fase);
+    if (igual?.fase && !inicial?.fase) setFase(igual.fase);
   };
   const criar = () => {
     if (!sid || !previa) return;
@@ -134,6 +136,7 @@ export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; 
   // as áreas e os metros andam de 5 em 5; o resto, de 1 em 1
   const passoQ = s && POR_5.test(s.un) ? 5 : 1;
   const tecN = previa?.tec ? TECS.find((x) => x.id === previa.tec)?.n.split(" ")[0] : null;
+  if (interna) return <TarefaInterna ctx={ctx} d={d} fechar={fechar} voltar={() => setInterna(false)} inicial={inicial} />;
 
   return (
     <section aria-label="Nova tarefa" className={cn(CARTAO, "mt-4 overflow-hidden animate-in fade-in-0 slide-in-from-top-2 duration-300")}>
@@ -167,6 +170,12 @@ export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; 
               ))}
             </ul>
             {!servicos.length && <p className="mt-3 text-[15px] text-muted-foreground">Nenhum serviço com esse nome.</p>}
+            {/* 24/11: um trabalho que não é um serviço do Catálogo e não se cobra (uma tarefa interna): não muda o valor nem pede adenda */}
+            <button type="button" onClick={() => setInterna(true)}
+              className="mt-3 flex min-h-12 w-full items-center gap-3 rounded-xl border border-dashed border-input px-3 py-2 text-left transition-colors hover:border-primary">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-muted/70 text-muted-foreground"><Plus className="h-4 w-4" aria-hidden="true" /></span>
+              <span className="min-w-0"><span className="block text-[15px] font-medium">Tarefa interna</span><span className="block text-sm text-muted-foreground">Sem serviço do Catálogo e sem custo para o cliente: não cria adenda</span></span>
+            </button>
           </div>
         ) : (
           <>
@@ -228,6 +237,81 @@ export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; 
           <Button size="lg" onClick={criar}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Juntar à fase {fase}{tecN ? ` e avisar ${tecN}` : ""}</Button>
         </footer>
       )}
+    </section>
+  );
+}
+
+/** 24/11: a tarefa interna: o que é, as horas, a fase, quando começa e quem a faz. Entra já no plano (A.novaTarefaInterna). */
+function TarefaInterna({ ctx, d, fechar, voltar, inicial }: { ctx: Ctx; d: Negocio; fechar: () => void; voltar: () => void; inicial?: { dia?: number; tec?: string | null; fase?: number } }) {
+  const { A, run } = ctx;
+  const p = d.obra.plano!;
+  const [nome, setNome] = useState("");
+  const [h, setH] = useState(4);
+  const [fase, setFase] = useState<number>(() => inicial?.fase ?? p.tasks.find((t) => t.fase)?.fase ?? 1);
+  const [tec, setTec] = useState<string | null>(inicial?.tec ?? null);
+  const [delta, setDelta] = useState(0);
+  const min = diaMinimo(p, fase);
+  const sugerido = criarTarefaInterna(p, { nome: "x", h, fase }).dia;
+  const dia = Math.max(min, (inicial?.dia ?? sugerido) + delta);
+  const dur = Math.max(1, Math.ceil(h / 8 - 1e-9));
+  const tecN = tec ? TECS.find((x) => x.id === tec)?.n.split(" ")[0] : null;
+  const criar = () => {
+    if (!nome.trim()) return;
+    let ok = false;
+    run(() => { ok = A.novaTarefaInterna(d.id, { nome, h, fase, tec, dia }) != null; });
+    if (ok) fechar();
+  };
+  return (
+    <section aria-label="Tarefa interna" className={cn(CARTAO, "mt-4 overflow-hidden animate-in fade-in-0 slide-in-from-top-2 duration-300")}>
+      <header className="flex items-start justify-between gap-3 border-b border-border bg-primary/[0.04] p-4 sm:p-5">
+        <div>
+          <p className="text-lg font-semibold">Tarefa interna</p>
+          <p className="text-[15px] text-muted-foreground">Sem custo para o cliente: não muda o valor do contrato nem cria adenda.</p>
+        </div>
+        <button type="button" onClick={fechar} aria-label="Fechar" className="grid h-11 w-11 shrink-0 place-items-center rounded-lg hover:bg-muted"><X className="h-5 w-5" /></button>
+      </header>
+      <div className="space-y-5 p-4 sm:p-5">
+        <label className="grid gap-1.5 text-[15px]">O que é
+          <input autoFocus value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Limpeza final da obra" maxLength={120}
+            className="h-12 rounded-xl border border-input bg-background px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25" />
+        </label>
+        <Linha rot="Horas de trabalho" sub={dias(dur)}>
+          <Passo rot="Horas" valor={`${nfmt(h)} h`} desMenos={h <= 0.5} menos={() => setH(Math.max(0.5, h - (h > 1 ? 1 : 0.5)))} mais={() => setH(h + (h >= 1 ? 1 : 0.5))} />
+        </Linha>
+        <div>
+          <p className="text-[15px]">Fase</p>
+          <div role="group" aria-label="Fase" className="mt-2 flex flex-wrap gap-2">
+            {FASES_OBRA.map((f) => (
+              <button key={f.n} type="button" aria-pressed={fase === f.n} onClick={() => { setFase(f.n); setDelta(0); }} className={chip(fase === f.n)}>
+                <span className="h-2.5 w-2.5 rounded-full" style={{ background: fase === f.n ? "currentColor" : COR_FASE[f.n] }} aria-hidden="true" />{f.n} · {f.curto}
+              </button>
+            ))}
+          </div>
+        </div>
+        <Linha rot="Começa" sub={p.estado === "em curso" ? "não antes de hoje nem do fim da fase anterior" : "não antes do fim da fase anterior"}>
+          <Passo rot="Dia de início" valor={rotuloDia(p, dia)} desMenos={dia <= min} menos={() => setDelta(dia - 1 - sugerido)} mais={() => setDelta(delta + 1)} />
+        </Linha>
+        <div>
+          <p className="text-[15px]">Quem faz</p>
+          <div role="group" aria-label="Técnico" className="mt-2 flex flex-wrap gap-2">
+            {TECS.map((x) => {
+              const k = diaDeFerias(x, p, dia, dur), on = tec === x.id;
+              return (
+                <button key={x.id} type="button" aria-pressed={on} onClick={() => setTec(x.id)}
+                  className={cn("flex min-h-12 items-center gap-2 rounded-xl border px-3 py-1.5 text-left text-[15px] transition-colors", on ? "border-primary bg-primary/[0.06] ring-1 ring-primary" : "border-input hover:border-foreground/40")}>
+                  <AvatarTec id={x.id} tam="h-8 w-8" />
+                  <span>{x.n}<span className={cn("block text-sm", k == null ? "text-muted-foreground" : "text-warning")}>{k == null ? x.sk : `de férias a ${rotuloDia(p, k)}`}</span></span>
+                </button>
+              );
+            })}
+            <button type="button" aria-pressed={tec === null} onClick={() => setTec(null)} className={cn("min-h-12 rounded-xl border px-3 text-[15px]", tec === null ? "border-primary bg-primary/[0.06]" : "border-input text-muted-foreground hover:border-foreground/40")}>Sem técnico, por agora</button>
+          </div>
+        </div>
+      </div>
+      <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-border bg-card p-4 sm:px-5">
+        <button type="button" onClick={voltar} className="min-h-10 rounded-lg px-3 text-sm font-medium text-primary hover:bg-primary/[0.08]">Escolher um serviço do Catálogo</button>
+        <Button size="lg" onClick={criar} disabled={!nome.trim()}><Plus className="mr-2 h-4 w-4" aria-hidden="true" />Juntar à fase {fase}{tecN ? ` e avisar ${tecN}` : ""}</Button>
+      </footer>
     </section>
   );
 }

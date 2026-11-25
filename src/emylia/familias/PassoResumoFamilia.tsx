@@ -51,7 +51,7 @@ export function PassoResumoFamilia({ familia: f, problemas }: { familia: Familia
                   {f.eixos.cor && (
                     <td className={CEL}>
                       <span className="inline-flex flex-wrap items-center gap-2">
-                        {cor && cor.hex.length > 0 && <AmostraDeCor hex={cor.hex} />}
+                        {cor && (cor.hex.length > 0 || cor.foto) && <AmostraDeCor hex={cor.hex} foto={cor.foto} />}
                         <span className="break-words">{cor?.nome ?? "—"}</span>
                       </span>
                     </td>

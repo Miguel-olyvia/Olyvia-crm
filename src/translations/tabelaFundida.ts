@@ -46,6 +46,7 @@ import { rhExemploCargoSeguroTranslations } from "@/translations/rhExemploCargoS
 import { rhExemploDatasContratosTranslations } from "@/translations/rhExemploDatasContratos";
 import { versoesTemplatesTranslations } from "@/translations/versoesTemplates";
 import { proposalTemplateVersionsTranslations } from "@/translations/proposalTemplateVersions";
+import { proposalTemplateVariaveisTranslations } from "@/translations/proposalTemplateVariaveis";
 import { catalogoFamiliasTranslations } from "@/translations/catalogoFamilias";
 
 // Merge bundle and priceContexts translations
@@ -248,6 +249,11 @@ Object.keys(versoesTemplatesTranslations).forEach((lang) => {
 // Editor de templates de proposta/orçamento com versões por idioma (`proposalTemplateEditor.versions.*`) — mesmo padrão.
 Object.keys(proposalTemplateVersionsTranslations).forEach((lang) => {
   tabelaFundida[lang] = { ...tabelaFundida[lang], ...proposalTemplateVersionsTranslations[lang] };
+});
+
+// 23/11: as variáveis dos textos do template de proposta (`proposalTemplateEditor.variaveis.*`) — mesmo padrão.
+Object.keys(proposalTemplateVariaveisTranslations).forEach((lang) => {
+  tabelaFundida[lang] = { ...tabelaFundida[lang], ...proposalTemplateVariaveisTranslations[lang] };
 });
 
 // Catálogo › Produtos › Famílias gravadas na base (`catFamilias.*`) — módulo próprio, mesmo padrão.

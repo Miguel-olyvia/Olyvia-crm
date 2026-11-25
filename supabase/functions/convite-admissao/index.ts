@@ -46,6 +46,7 @@ import { criarEnviadorCorreio } from "./correio.ts";
 import { criarHandler, type ClienteConvite, type DepsConvite } from "./handler.ts";
 import { comCabecalhoSessao } from "./sessao.ts";
 import { criarEnviadorSms } from "./smsapi.ts";
+import { lerListaEnvios } from "../_shared/enviosPermitidos.ts";
 
 initSentry();
 
@@ -75,6 +76,8 @@ const deps: DepsConvite = {
   enviarSms: criarEnviadorSms({
     token: Deno.env.get("SMSAPI_TOKEN"),
     fetch: (url, init) => fetch(url, init),
+    // 24/11: num ambiente de teste com dados reais, só os telefones de ENVIOS_SO_PARA recebem
+    soPara: lerListaEnvios(Deno.env.get("ENVIOS_SO_PARA")),
   }),
   criarCliente: (url, key, opcoes) =>
     comoCliente(

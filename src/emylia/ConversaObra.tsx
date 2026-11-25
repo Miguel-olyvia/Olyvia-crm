@@ -62,11 +62,13 @@ export function FotosMensagem({ m, fotoDe, tam }: { m: MensagemObra; fotoDe?: (i
  * não se envia outra. Com `anexar`, recebe também as fotografias escolhidas (e a mensagem pode ir só com elas).
  * `acao`: o que se mostra por baixo de uma mensagem (ex.: «Tratar como problema», nas Operações).
  */
-export function Conversa({ msgs, eu, enviar, rapidas = [], vazio, fotoDe, anexar, acao, semEnvio }: {
+export function Conversa({ msgs, eu, enviar, rapidas = [], vazio, fotoDe, anexar, acao, semEnvio, soLer }: {
   msgs: MensagemObra[]; eu: "cliente" | "empresa"; enviar: (t: string, fotos?: File[]) => void | boolean | Promise<boolean | void>; rapidas?: string[]; vazio: string;
   fotoDe?: (id: string) => Promise<string>; anexar?: boolean; acao?: (m: MensagemObra, i: number) => ReactNode;
   /** 9/11 (Lote 1, I): sem permissão para escrever: a caixa de envio fica desligada e diz porquê (este texto). Sem ele, como sempre. */
   semEnvio?: string;
+  /** 23/11 (permissões): só para ler (o Estúdio da obra sem negocios.obra.planear): sem as respostas rápidas nem a caixa de envio. */
+  soLer?: boolean;
 }) {
   const [texto, setTexto] = useState("");
   const [fotos, setFotos] = useState<File[]>([]);
@@ -120,12 +122,12 @@ export function Conversa({ msgs, eu, enviar, rapidas = [], vazio, fotoDe, anexar
         })}
         <div ref={fim} />
       </div>
-      {rapidas.length > 0 && (
+      {!soLer && rapidas.length > 0 && (
         <div className="flex gap-1.5 overflow-x-auto border-t border-border px-3 pt-2.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {rapidas.map((r) => <button key={r} type="button" disabled={aMandar || !!semEnvio} onClick={() => void mandar(r, [])} className="min-h-9 shrink-0 rounded-full border border-input px-3 text-sm hover:border-foreground/40">{r}</button>)}
         </div>
       )}
-      {anexar && fotos.length > 0 && (
+      {!soLer && anexar && fotos.length > 0 && (
         <ul aria-label="Fotografias a enviar" className="flex flex-wrap gap-2 border-t border-border px-3 pt-3">
           {fotos.map((f, k) => (
             <li key={k} className="relative">
@@ -136,7 +138,7 @@ export function Conversa({ msgs, eu, enviar, rapidas = [], vazio, fotoDe, anexar
           ))}
         </ul>
       )}
-      <form className="flex gap-2 p-3" onSubmit={(e) => { e.preventDefault(); void mandar(texto); }}>
+      {!soLer && <form className="flex gap-2 p-3" onSubmit={(e) => { e.preventDefault(); void mandar(texto); }}>
         {anexar && <>
           <input ref={ficheiro} type="file" accept="image/*" multiple className="sr-only" aria-label="Escolher fotografias" onChange={(e) => juntar(e.target.files)} />
           <button type="button" disabled={aMandar || fotos.length >= MAX_FOTOS || !!semEnvio} onClick={() => ficheiro.current?.click()} aria-label={`Juntar fotografias (até ${MAX_FOTOS})`} title="Juntar fotografias"
@@ -145,8 +147,8 @@ export function Conversa({ msgs, eu, enviar, rapidas = [], vazio, fotoDe, anexar
         <input value={texto} onChange={(e) => setTexto(e.target.value)} disabled={!!semEnvio} aria-describedby={semEnvio ? "conversa-sem-envio" : undefined} aria-label="Escrever uma mensagem" placeholder={anexar && fotos.length ? "Explique o que se vê (opcional)" : "Escrever uma mensagem"} maxLength={2000}
           className="h-11 min-w-0 flex-1 rounded-full border border-input bg-background px-4 text-[15px] outline-none focus-visible:ring-2 focus-visible:ring-ring" />
         <button type="submit" disabled={(!texto.trim() && !fotos.length) || aMandar || !!semEnvio} aria-label="Enviar" className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground transition-opacity disabled:opacity-40"><Send className="h-4 w-4" aria-hidden="true" /></button>
-      </form>
-      {semEnvio && <p id="conversa-sem-envio" className="px-4 pb-3 text-sm text-muted-foreground">{semEnvio}</p>}
+      </form>}
+      {!soLer && semEnvio && <p id="conversa-sem-envio" className="px-4 pb-3 text-sm text-muted-foreground">{semEnvio}</p>}
     </div>
   );
 }

@@ -6,6 +6,7 @@ import type { Estado, Negocio } from "../motor";
 import type { DocPortal } from "../acessosPortal";
 import { faturasAdenda, nomeParcela, type Adenda, type FaturaAdenda } from "../adendas";
 import type { FaturaReg } from "../v2/financeiro";
+import { numeroDaPropostaDoNegocio, numeroDoContratoDoNegocio } from "@/lib/numeroDocumento";
 
 export type TomDoc = "ok" | "espera" | "mau" | "neutro";
 export interface DocEnviado {
@@ -27,11 +28,11 @@ export function documentosEnviados(d: Negocio, _S?: Estado): DocEnviado[] {
   if (o?.enviada) {
     const v = (o.versoes?.length ?? 0) + 1;
     const est: [string, TomDoc] = o.recusada ? ["Recusada", "mau"] : o.aceite ? [`Aceite a ${o.aceite}`, "ok"] : o.pedidoCliente ? ["O cliente pediu alterações", "espera"] : ["Por responder", "espera"];
-    L.push({ id: "proposta", k: "proposta", titulo: v > 1 ? `Proposta (versão ${v})` : "Proposta", numero: `PR 2026/${d.id}`, quando: o.enviada, estado: est[0], tom: est[1], reenvio: "proposta" });
+    L.push({ id: "proposta", k: "proposta", titulo: v > 1 ? `Proposta (versão ${v})` : "Proposta", numero: numeroDaPropostaDoNegocio(d), quando: o.enviada, estado: est[0], tom: est[1], reenvio: "proposta" });
   }
   if (o?.contrato) {
     const est: [string, TomDoc] = o.contrato === "assinado" ? [`Assinado${o.assinatura?.q ? ` a ${o.assinatura.q}` : ""}`, "ok"] : o.contratoPedido ? ["Cláusulas no Jurídico", "espera"] : ["Por assinar", "espera"];
-    L.push({ id: "contrato", k: "contrato", titulo: "Contrato de empreitada", numero: `CT 2026/${d.id}`, quando: o.aceite ?? "", estado: est[0], tom: est[1], reenvio: "contrato" });
+    L.push({ id: "contrato", k: "contrato", titulo: "Contrato de empreitada", numero: numeroDoContratoDoNegocio(d), quando: o.aceite ?? "", estado: est[0], tom: est[1], reenvio: "contrato" });
   }
   // as faturas do contrato: as das prestações registadas (V2) ou a única do motor
   const regs = (d.fin.tranches ?? []).filter((x) => !x.daDemo);

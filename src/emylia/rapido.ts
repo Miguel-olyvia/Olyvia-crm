@@ -21,11 +21,18 @@ export const MODELOS_RAPIDOS: ModeloRapido[] = [
 export function mudancasDoModelo(tiles: TileServico[], m: ModeloRapido): SvcId[] {
   return tiles.filter((t) => t.origem === "pacote" && !t.semMedida && t.on !== m.quer(t)).map((t) => t.sid);
 }
-/** O modelo que já está aplicado (o estado do pacote bate com ele), para o mostrar escolhido. */
-export function modeloAtual(tiles: TileServico[]): string | null {
+/**
+ * O modelo que está aplicado, para o mostrar escolhido. 23/11 (testarh, negócio 1015: desmarcar a demolição, a canalização e a montagem de louças
+ * fazia aparecer «Só pavimento e paredes» escolhido sozinho): um modelo parcial só aparece quando se tocou nele (`aplicado`) e o pacote ainda bate
+ * com ele; sem toque, só a «Remodelação completa» (tudo o que as medidas pedem) aparece, porque é o estado de partida.
+ */
+export function modeloAtual(tiles: TileServico[], aplicado: string | null = null): string | null {
   const pac = tiles.filter((t) => t.origem === "pacote" && !t.semMedida);
   if (!pac.length) return null;
-  return MODELOS_RAPIDOS.find((m) => pac.some((t) => m.quer(t)) && mudancasDoModelo(tiles, m).length === 0)?.id ?? null;
+  const bate = (m: ModeloRapido) => pac.some((t) => m.quer(t)) && mudancasDoModelo(tiles, m).length === 0;
+  const escolhido = aplicado ? MODELOS_RAPIDOS.find((m) => m.id === aplicado) : undefined;
+  if (escolhido && bate(escolhido)) return escolhido.id;
+  return bate(MODELOS_RAPIDOS[0]) ? MODELOS_RAPIDOS[0].id : null;
 }
 /**
  * Aplica um modelo: troca o estado dos serviços do pacote que não batem (A.servico liga e desliga). Devolve os que

@@ -127,6 +127,8 @@ import { generateProposalPdfBlob, downloadBlob } from "@/utils/generateProposalP
 import { WhatsAppSendDialog } from "@/components/whatsapp/WhatsAppSendDialog";
 import { type WhatsAppContext } from "@/hooks/useWhatsApp";
 import { getLineSubtotal, markupFromCostAndPrice } from "@/utils/quotes/quoteLinePricing";
+import { useNumerosDosNegociosCrm } from "@/hooks/pessoas/useNumerosDosNegociosCrm";
+import { numeroDaProposta } from "@/lib/numeroDocumento";
 
 interface WorkflowStage {
   id: string;
@@ -2598,6 +2600,12 @@ const Proposals = () => {
   // ha 25 linhas em memoria, e filtrar dentro da pagina daria resultados
   // errados em vez de menos resultados. `proposals` ja vem filtrado e ordenado.
   const filteredProposals = proposals;
+  // 23/11: nas propostas de negócio, o número como a Emylia o mostra (PR <ano>/<n.º do negócio>); nas outras, o guardado
+  const numerosDosNegocios = useNumerosDosNegociosCrm(filteredProposals.map((p) => p.negocio_id));
+  const numeroDaLinha = (p: { negocio_id?: string | null; proposal_number?: string | null; created_at?: string | null }): string => {
+    const x = p.negocio_id ? numerosDosNegocios.get(p.negocio_id) : undefined;
+    return numeroDaProposta({ numeroNegocio: x?.numero ?? null, versao: x?.versao ?? null, criadoEm: p.created_at ?? null, guardado: p.proposal_number ?? null });
+  };
 
   // Cartoes de KPI: mesma forma de antes, mas alimentada pela RPC. Os campos
   // que eram arrays (noResponse5d, noValidity, expired) passam a contagens --
@@ -4079,9 +4087,9 @@ const Proposals = () => {
                                 <div className="flex items-center gap-2">
                                   <div className="w-1 h-8 rounded-full flex-shrink-0" style={{ backgroundColor: stage?.color || 'transparent' }} />
                                   <div>
-                                    {proposal.proposal_number && (
+                                    {numeroDaLinha(proposal) && (
                                       <div className="text-[11px] text-muted-foreground font-mono leading-none mb-0.5">
-                                        {proposal.proposal_number}
+                                        {numeroDaLinha(proposal)}
                                       </div>
                                     )}
                                     <span className="font-medium text-sm">{proposal.title}</span>

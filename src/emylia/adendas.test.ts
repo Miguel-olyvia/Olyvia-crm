@@ -91,13 +91,18 @@ describe("a verificação antes de enviar (as regras do orçamento)", () => {
     A.enviarAdenda(d.id);
     expect(a.estado).toBe("enviada");
   });
-  it("uma linha livre abaixo do custo não se aprova: corrige-se o preço", () => {
+  // 25/11 (Rúben, contratos da Mudelar): abaixo do custo deixou de ser «nunca se aprova»: a Direção pode aprovar a exceção
+  it("uma linha livre abaixo do custo: corrige-se o preço ou a Direção aprova a exceção", () => {
     const { S, A, d } = preparar();
     const n = A.criarAdenda(d.id, [], "Surpresa em obra", { livres: [{ n: "Trocar o cano", h: 8, preco: 100, perfil: "Canalização", mats: [] }] })!;
     A.verificarAdenda(d.id, n);
     const a = d.adendas![0];
     expect(adendaBloqueada(d, S, a)).toBe(true);
-    expect(minhas(S, "comercial").find((x) => x.d === d && x.p.t.startsWith("Resolver os bloqueios"))?.p.act).toBeUndefined();
+    expect(minhas(S, "comercial").find((x) => x.d === d && x.p.t.startsWith("Resolver os bloqueios"))?.p.act).toBe("pedirAprovAdenda");
+    A.pedirAprovAdenda(d.id);
+    S.role = "direcao";
+    A.aprovarAdenda(d.id);
+    expect(adendaBloqueada(d, S, a)).toBe(false);
   });
 });
 

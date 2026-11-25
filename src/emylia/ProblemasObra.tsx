@@ -33,7 +33,8 @@ export interface ConversaDaObra {
 /** A mensagem que o problema trata: a chave, o texto e as fotografias. */
 type Origem = { msg: string; texto: string; fotos: string[] };
 
-export function ProblemasDoCliente({ ctx, d, conversa, abrir, setAbrir }: { ctx: Ctx; d: Negocio; conversa: ConversaDaObra; abrir: string | null; setAbrir: (k: string | null) => void }) {
+/** 23/11 (permissões): `soLer` (o Estúdio da obra sem negocios.obra.planear): os problemas à vista, sem «Enviar a resposta». */
+export function ProblemasDoCliente({ ctx, d, conversa, abrir, setAbrir, soLer }: { ctx: Ctx; d: Negocio; conversa: ConversaDaObra; abrir: string | null; setAbrir: (k: string | null) => void; soLer?: boolean }) {
   const p = d.obra.plano;
   const porTratar = mensagensPorTratar(d, conversa.msgs);
   // a mensagem só com texto que o gestor abriu na conversa («Tratar como problema»)
@@ -47,7 +48,7 @@ export function ProblemasDoCliente({ ctx, d, conversa, abrir, setAbrir }: { ctx:
       <h2 id="obra-problemas-t" className="flex items-center gap-2 text-xl font-semibold tracking-tight"><AlertTriangle className="h-5 w-5 text-destructive" aria-hidden="true" />Problemas reportados pelo cliente</h2>
       <div className="mt-3 space-y-3">
         {novos.map(({ m, chave }) => <PorTratar key={chave} ctx={ctx} d={d} conversa={conversa} m={m} chave={chave} fechar={() => { if (abrir === chave) setAbrir(null); }} />)}
-        {tratados.map((pr) => <CartaoProblema key={pr.id} ctx={ctx} d={d} conversa={conversa} pr={pr} />)}
+        {tratados.map((pr) => <CartaoProblema key={pr.id} ctx={ctx} d={d} conversa={conversa} pr={pr} soLer={soLer} />)}
       </div>
     </section>
   );
@@ -200,7 +201,7 @@ const ESTADO: Record<ProblemaCliente["estado"], [string, string]> = {
   resolvido: ["sem custo, no plano", "bg-success/15"], fechado: ["não se faz", "bg-muted text-muted-foreground"], descartado: ["não é um problema", "bg-muted text-muted-foreground"],
 };
 
-function CartaoProblema({ ctx, d, conversa, pr }: { ctx: Ctx; d: Negocio; conversa: ConversaDaObra; pr: ProblemaCliente }) {
+function CartaoProblema({ ctx, d, conversa, pr, soLer }: { ctx: Ctx; d: Negocio; conversa: ConversaDaObra; pr: ProblemaCliente; soLer?: boolean }) {
   const { S, A, run } = ctx;
   const responder = useResponder(ctx, d, conversa);
   const [motivo, setMotivo] = useState<string>(MOTIVOS_SEM_CUSTO[0]);
@@ -224,7 +225,7 @@ function CartaoProblema({ ctx, d, conversa, pr }: { ctx: Ctx; d: Negocio; conver
         <div className="mt-3 space-y-2 rounded-xl border border-warning/40 bg-warning/[0.06] p-3">
           <p className="text-[15px]">A resposta ao cliente ainda não seguiu:</p>
           <p className="text-sm text-muted-foreground">«{pr.resposta}»</p>
-          <Button variant="outline" className="min-h-11" onClick={() => void responder(pr.id, pr.resposta ?? null)}><MessageCircle className="mr-1.5 h-4 w-4" aria-hidden="true" />Enviar a resposta</Button>
+          {!soLer && <Button variant="outline" className="min-h-11" onClick={() => void responder(pr.id, pr.resposta ?? null)}><MessageCircle className="mr-1.5 h-4 w-4" aria-hidden="true" />Enviar a resposta</Button>}
         </div>
       )}
       {d.obra.plano?.estado === "concluída" && (pr.estado === "aberto" || pr.estado === "recusado") && pode && (

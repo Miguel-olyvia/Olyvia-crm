@@ -9,6 +9,7 @@ import type { Catalogo, No } from "../v2/catalogoModelo";
 import { MEDIDA_PARA_BASE, type CatalogoMontado, type LinhaProduto } from "./catalogoReal";
 import { mesmosAtributos, valoresParaGravar } from "../atributosTexto";
 import { erroAmigavel } from "../fichaProdutoDados";
+import { ehIdDeModelo3D } from "../planta3d/modelos3dEscolha";
 import { resolverCategoria, textoSemGerar } from "../skuDados";
 import type { CategoriaGestao } from "../categoriasMarcasGestao";
 import { RPC_LIGAR_FORNECEDOR, argsLigarFornecedor, type FornecedorPendente } from "../fornecedoresCatalogo";
@@ -141,7 +142,9 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
   const prodBase = porId(base.produtos);
   const prodA = porId(antes.K.produtos), prodD = porId(depois.K.produtos);
   const consA = porId(antes.K.consumiveisCriados ?? []);
-  const svcRef = (sid: string | undefined): string | Tmp | null => (!sid ? null : ids.servico.get(sid) ?? { tmp: "svc:" + sid });
+  // 23/11: um serviço que o Catálogo em memória não tem pela chave mas que já é um id da base (a página leve de Produtos escolhe-o da lista de
+  // serviços da organização) vai pelo id; as chaves do motor e os serviços criados agora («n-…») nunca são UUID.
+  const svcRef = (sid: string | undefined): string | Tmp | null => (!sid ? null : ids.servico.get(sid) ?? (UUID.test(sid) ? sid : { tmp: "svc:" + sid }));
   for (const p of depois.K.produtos) {
     const a = prodA.get(p.id);
     if (a && igual(a, p)) continue;
@@ -168,6 +171,10 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
     if (novo && p.estado && p.estado !== "active")
       out.push({ rpc: "cat_definir_estado_produto", nota: `Produto: ${p.n} (estado)`, tolerante: true, aviso: `Produto «${p.n}» criado; estado por definir`,
         args: { p_org: org, p_produto: { tmp: "prod:" + p.id }, p_status: p.estado } });
+    // 24/11: o «Modelo 3D» escolhido ao criar o produto, depois de ele existir (cat_definir_modelo_3d). Tolerante: o produto fica criado mesmo que a função ainda não exista na base.
+    if (novo && ehIdDeModelo3D(p.modelo3d))
+      out.push({ rpc: "cat_definir_modelo_3d", nota: `Produto: ${p.n} (modelo 3D)`, tolerante: true, aviso: `Produto «${p.n}» criado; modelo 3D por definir`,
+        args: { p_org: org, p_alvo: "produto", p_id: { tmp: "prod:" + p.id }, p_modelo: p.modelo3d } });
     // 16/11 (20270118000000): um produto novo SEM referência escrita ganha uma gerada (categoria + subcategoria + número + atributos), como ÚLTIMO
     // passo (precisa da classificação e dos atributos já gravados). Tolerante: o produto fica criado mesmo que a referência fique por gerar.
     if (novo && !p.sku?.trim())
@@ -267,6 +274,16 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
     out.push({ rpc: "cat_retirar_perfil", nota: `Retirar ${a.n}`, args: { p_org: org, p_id: id } });
   }
   return out;
+}
+
+/** 23/11: criar um produto na página leve de Produtos (CatalogoProdutos) grava SÓ o produto novo (e o que lhe diz respeito: texto, fornecedor, tabelas,
+ *  atributos, modelo, estado, referência). A página não lê os serviços: o «antes» e o «depois» partilham os custos da store (lerCustos), que podem ter
+ *  as receitas de outra página, e sem os ids dos serviços cada receita parecia um serviço NOVO (cat_guardar_servico sem id → «duplicate key
+ *  services_organization_id_sku_key», com o produto já criado). Aqui os dois lados ficam com os mesmos custos e sem receitas nem serviços. */
+export function diferencasProdutoNovo(org: string, antes: Catalogo, depois: Catalogo, C: Custos, margens: { min: number; alvo: number }): Chamada[] {
+  const Cs: Custos = { ...C, receitas: {} };
+  const foto = (K: Catalogo): FotoCatalogo => ({ C: Cs, K, svc: {}, margens });
+  return diferencasCatalogo(org, foto(antes), foto(depois), { ids: { servico: new Map(), perfil: new Map(), tabelas: true }, produtos: [] });
 }
 
 /** Troca os { tmp } pelos ids que a base deu. */

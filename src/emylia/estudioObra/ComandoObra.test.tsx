@@ -37,7 +37,7 @@ describe("o comando da obra", () => {
     montar();
     const pv = screen.getByRole("region", { name: "A previsão viva" });
     expect(within(pv).getByRole("img", { name: /Horas/ })).toBeTruthy();
-    expect(within(pv).getByText("Margem ao vivo")).toBeTruthy();
+    expect(within(pv).getByRole("region", { name: "O custo por fase" })).toBeTruthy(); // 23/11: a margem está só no cabeçalho
     expect(within(pv).getByText("Caminho crítico")).toBeTruthy();
   });
   it("o diário com o antes e depois; o ponto da semana publica no portal", () => {

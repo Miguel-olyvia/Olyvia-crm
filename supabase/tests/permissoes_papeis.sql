@@ -11,8 +11,9 @@
 --
 -- O ESPERADO é derivado das tabelas, não das funções testadas:
 --   perfil  = anew_role_permissions do papel da associação ativa (não-cliente) nesta organização
---   papel   = neg_papeis_permissoes dos Papéis no Negócio da ficha ligada (pessoas_contas ativa, não revogada,
---             pessoa ativa) em pessoas_papeis_negocio, + 'tecnico' se fn_rh_pessoa_tecnica
+--   papel   = neg_papeis_permissoes do papel 'tecnico', o único que conta desde 20270119000000 (como fn_neg_papeis): ficha ligada
+--             (pessoas_contas ativa, não revogada, pessoa ativa) e fn_rh_pessoa_tecnica OU perfil negocios.obra.tecnico. Os Papéis
+--             no Negócio de pessoas_papeis_negocio já não contam (retirados a 17/11).
 --   admin   = associação ativa ao papel global system_admin
 -- O OBTIDO é o que as funções vivas devolvem com a sessão da conta (request.jwt.claims + role authenticated).
 --
@@ -26,13 +27,14 @@
 --      (pessoas.view + quotes.view_costs|quotes.manage — a mesma regra desde 20270110200000)
 --   4. rpc_hr_picar: com ficha → hr.assiduidade.picar; sem ficha → deve recusar com mensagem de "sem ficha"
 --      (conta_sem_ficha_rh, 20270110200000)
---   5. purge_business_entity('quote', …): bloqueia sem deals.delete nesta organização ou acima (quando passa, o
+--   5. purge_business_entity('quote', …): bloqueia sem deals.delete nesta organização ou acima; desde 20270126200000 o orçamento
+--      vai antes ao Lixo dentro do sub-bloco (só se elimina o que lá está) (quando passa, o
 --      apagar é desfeito)
 --   5b. purge_business_entity simulado: a sonda fica viewer aqui e ganha, só dentro do sub-bloco, uma associação
 --      super_admin (com deals.delete) noutra organização fora da cadeia desta → tem de ser bloqueada
 --   6. custos iguais nas duas vias: onde 3a e 3b leem linhas, ambas dão "com custos" ou ambas "custos a null"
 --   3b desde 20270110900000: neg_ler_negocios só devolve os negócios no âmbito de pessoas.view (dono, equipa com TEAM, tarefas na
---      obra; tudo para admin, quem entra pelo papel ou tem um Papel no Negócio explícito, ou com linha ORG). Sem nenhum orçamento
+--      obra; tudo para admin, quem entra pelo papel ou com linha ORG). Sem nenhum orçamento
 --      Emylia nesse âmbito, o esperado é "sem linhas". Esperado calculado das tabelas (v_neg_tudo / v_neg_vis).
 -- ============================================================
 
@@ -101,7 +103,7 @@ DECLARE
   v_role_vw    uuid;      -- 5b: papel viewer desta organização
   v_sonda_auth uuid;
   v_fase       text;
-  v_neg_tudo   boolean;   -- 3b (20270110900000): vê todos os negócios (admin, sem pessoas.view no perfil, ou Papel no Negócio explícito)
+  v_neg_tudo   boolean;   -- 3b (20270110900000): vê todos os negócios (admin, sem pessoas.view no perfil, back-office ou linha ORG)
   v_neg_vis    int;       -- 3b: orçamentos Emylia dos negócios que a conta vê com o âmbito de pessoas.view
 BEGIN
   -- Guardas: objetos que o teste usa têm de existir (base RH com a migration 20270110100000).
@@ -163,9 +165,11 @@ BEGIN
     WHERE pc.anew_user_id = a.user_id AND pc.organization_id = c_org AND pc.estado = 'activa' AND pc.revogada_em IS NULL
       AND p.deleted_at IS NULL AND (p.data_saida IS NULL OR p.data_saida >= current_date)
     ORDER BY pc.ligada_em DESC NULLS LAST LIMIT 1;
-    SELECT coalesce(array_agg(DISTINCT x), '{}') INTO v_papeis FROM (
-      SELECT pp.papel AS x FROM pessoas_papeis_negocio pp WHERE pp.pessoa_id = v_pessoa_neg AND pp.organization_id = c_org
-      UNION SELECT 'tecnico' WHERE v_pessoa_neg IS NOT NULL AND public.fn_rh_pessoa_tecnica(c_org, v_pessoa_neg)) s;
+    -- 20270119000000 (fn_neg_papeis): só o 'tecnico' — cargo técnico de obra no RH ou perfil negocios.obra.tecnico
+    v_papeis := CASE WHEN v_pessoa_neg IS NOT NULL
+                       AND (public.fn_rh_pessoa_tecnica(c_org, v_pessoa_neg)
+                            OR public.has_anew_permission_in_org(a.auth_id, 'negocios.obra.tecnico', c_org))
+                     THEN ARRAY['tecnico'] ELSE '{}'::text[] END;
 
     TRUNCATE _perm_exp;
     INSERT INTO _perm_exp (code, perfil, papel)
@@ -176,8 +180,8 @@ BEGIN
     FROM unnest(c_codes || c_extra) c;
 
     -- 3b (20270110900000): o âmbito de pessoas.view nos Negócios, a partir das tabelas. Vê tudo: admin (system_admin, super_admin
-    -- aqui ou acima), quem não tem pessoas.view no perfil (entra pelo papel), quem tem um Papel no Negócio explícito
-    -- (pessoas_papeis_negocio) que dá pessoas.view, ou uma linha ORG. Senão: os negócios de que é dono (assigned_to/created_by), os da
+    -- aqui ou acima), quem não tem pessoas.view no perfil (entra pelo papel), o back-office do Negócio no perfil, ou uma linha ORG
+    -- (o ramo do Papel no Negócio explícito saiu a 17/11, commit 54652267). Senão: os negócios de que é dono (assigned_to/created_by), os da
     -- equipa que lidera com uma linha TEAM, e aqueles em cuja obra tem tarefas.
     v_neg_tudo := v_sa
       OR EXISTS (WITH RECURSIVE cad(org) AS (SELECT c_org UNION SELECT h.parent_org_id FROM anew_hierarchy h JOIN cad ON h.child_org_id = cad.org)
@@ -185,8 +189,6 @@ BEGIN
                  WHERE am.user_id = a.user_id AND am.status = 'active'
                    AND (r.code = 'system_admin' OR (r.code = 'super_admin' AND am.organization_id IN (SELECT org FROM cad))))
       OR NOT EXISTS (SELECT 1 FROM _perm_exp e WHERE e.code = 'pessoas.view' AND e.perfil)
-      OR EXISTS (SELECT 1 FROM pessoas_papeis_negocio pp JOIN neg_papeis_permissoes m ON m.papel = pp.papel AND m.permission_code = 'pessoas.view'
-                 WHERE pp.pessoa_id = v_pessoa_neg AND pp.organization_id = c_org)
       -- 20270110910000: o back-office do Negócio no perfil também vê todos
       OR EXISTS (SELECT 1 FROM anew_memberships am JOIN anew_role_permissions p ON p.role_id = am.role_id
                  WHERE am.user_id = a.user_id AND am.organization_id = c_org AND am.status = 'active' AND am.role_is_client IS NOT TRUE
@@ -389,6 +391,9 @@ BEGIN
       v_exp := CASE WHEN v_exp_b THEN 'passou a guarda' ELSE 'bloqueado' END;
       v_msg := NULL; v_state := NULL; v_got_b := NULL;
       BEGIN
+        -- 20270126200000: «Eliminar definitivamente» só apaga o que está no Lixo: o orçamento vai ao Lixo (como postgres) dentro do
+        -- sub-bloco, que o RAISE desfaz
+        UPDATE quotes SET deleted_at = now() WHERE id = v_quote;
         PERFORM set_config('request.jwt.claims', v_claims, true);
         PERFORM set_config('request.jwt.claim.sub', a.auth_id::text, true);
         EXECUTE 'SET LOCAL ROLE authenticated';
@@ -440,6 +445,7 @@ BEGIN
       END IF;
       UPDATE anew_memberships SET role_id = v_role_vw WHERE user_id = c_sonda AND organization_id = c_org;
       INSERT INTO anew_memberships (user_id, organization_id, role_id, status) VALUES (c_sonda, v_org2, v_role_dd, 'active');
+      UPDATE quotes SET deleted_at = now() WHERE id = v_quote;  -- 20270126200000: no Lixo, para a recusa ser a da organização
       v_fase := 'purge';
       PERFORM set_config('request.jwt.claims', json_build_object('sub', v_sonda_auth, 'role', 'authenticated')::text, true);
       PERFORM set_config('request.jwt.claim.sub', v_sonda_auth::text, true);

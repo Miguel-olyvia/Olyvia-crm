@@ -26,7 +26,7 @@ describe("Estúdio da obra (11/11)", () => {
     expect(within(alertas).getByRole("button", { name: "Prolongar até hoje" })).toBeTruthy();
     expect(within(alertas).getByRole("group", { name: /Há folga/ })).toBeTruthy();
     // um só botão principal: validar o que está feito
-    expect(screen.getByRole("button", { name: /Validar a tarefa feita/ })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: /Validar a tarefa feita/ }).length).toBeGreaterThan(0); // no topo e na barra do polegar
   });
   it("Replanear: primeiro a pré-visualização, depois aplicar (fica nos ajustes da obra)", () => {
     const { d } = montar();

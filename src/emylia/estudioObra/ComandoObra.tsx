@@ -10,24 +10,36 @@
 //  · Entregas: a linha do tempo dos materiais (chega hoje, amanhã, a dd/mm).
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowUpRight, CalendarCheck, Camera, Check, ChevronLeft, ChevronRight, Euro, Flame, Gauge, HardHat, Inbox, Package, Send, Sparkles, Truck, Zap } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CalendarCheck, Camera, Check, ChevronLeft, ChevronRight, Euro, FileText, HardHat, Inbox, Package, Rocket, Send, Sparkles, Truck, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { TECS, eur, nfmt, type Estado, type Negocio, type Plano } from "../motor";
+import { TECS, eur, linhaCalc, nfmt, type Estado, type Negocio, type Plano } from "../motor";
 import type { Ctx } from "../pecas";
-import { COR_FASE } from "../fasesObra";
+import { COR_FASE, FASES_OBRA } from "../fasesObra";
+import { custoObra } from "../custoObra";
+import { faseDosMateriais } from "../planoObra";
+import { LINHA_DEMOLICAO } from "../entulho";
 import { dataCurta } from "../planoObra";
 import { blocosForaDaObra, obrasDosTecnicos } from "../preparacaoObra";
 import { materiaisPorFase, progresso } from "../obraOps";
 import { porEncomendarDe } from "../encomendasAjuste";
-import { imprevistosDe } from "../imprevistos";
+import { imprevistosDe, pedidoDeAtraso, textoPedidoAtraso } from "../imprevistos";
 import { emCurso, valorContrato } from "../adendas";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
 import { FotoObra } from "../fotosDaObra";
 import { Contagem, MOLA, useReduzir } from "../movimento";
-import { podeNeg } from "../permissoes";
-import { estadoVivo, rotuloVivo } from "./planoVivo";
+import { podeNeg, podeVerCustos } from "../permissoes";
+import { derrapagem, estadoVivo, nomeCurtoTarefa, rotuloVivo } from "./planoVivo";
+import { CaminhoCritico, ICONE_DA_FASE } from "./CaminhoCritico";
+import { AutoRececaoDoc } from "../AutoRececao";
+import { NaFrente } from "../NaFrente";
+import { diasComRegistos, resumoDoDia } from "./resumoDoDia";
+import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
+import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
+import { sairam } from "@/pages/prototipo-estudio/necessidadesEstudio";
+import { lerInventario, useInventario } from "../inventario/loja";
+import { resumoEcNegocio } from "../inventario/ponteNegocios";
 import { antesEDepois, caminhoCritico, diarioDaObra, fotografiasDaObra, hojeNaObra, margemAoVivo, pontoDaSemana, previsao, type MargemViva, type Previsao } from "./previsaoObra";
 
 const primeiro = (n: string) => n.split(" ")[0];
@@ -41,67 +53,177 @@ export interface Ir {
 }
 
 /* ================================================================== o pulso */
-function Mosaico({ rotulo, icone, children, sub, tom, onClick, extra }: { rotulo: string; icone: ReactNode; children: ReactNode; sub?: ReactNode; tom?: "bom" | "mau"; onClick: () => void; extra?: ReactNode }) {
-  const reduzir = useReduzir();
-  return (
-    <motion.button type="button" onClick={onClick} whileHover={reduzir ? undefined : { y: -2 }} whileTap={reduzir ? undefined : { scale: 0.98 }}
-      className="group relative flex min-h-[92px] items-center gap-3 overflow-hidden rounded-2xl border border-border bg-card px-4 py-3 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-      {extra}
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><span aria-hidden="true" className="text-primary">{icone}</span>{rotulo}</span>
-        <span className="mt-0.5 block overflow-hidden whitespace-nowrap text-xl font-semibold tabular-nums">{children}</span>
-        {sub && <span className={cn("block truncate text-xs", tom === "mau" ? "font-medium text-destructive" : tom === "bom" ? "font-medium text-success" : "text-muted-foreground")}>{sub}</span>}
-      </span>
-      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" aria-hidden="true" />
-    </motion.button>
-  );
-}
-function Anel({ valor, cor = "hsl(var(--primary))" }: { valor: number; cor?: string }) {
-  const reduzir = useReduzir(), r = 20, c = 2 * Math.PI * r;
-  return (
-    <svg viewBox="0 0 48 48" className="h-12 w-12 shrink-0 -rotate-90" aria-hidden="true">
-      <circle cx="24" cy="24" r={r} fill="none" stroke="hsl(var(--muted))" strokeWidth="5" />
-      <motion.circle cx="24" cy="24" r={r} fill="none" stroke={cor} strokeWidth="5" strokeLinecap="round" strokeDasharray={c}
-        initial={reduzir ? false : { strokeDashoffset: c }} animate={{ strokeDashoffset: c * (1 - Math.max(0, Math.min(1, valor))) }} transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }} />
-    </svg>
-  );
-}
 /** 19/11 (Rúben: o técnico terminar uma tarefa tem de contar no Estúdio): as terminadas são as validadas e as que o técnico deu por
  *  feitas no Hoje (à espera da validação). */
 export function terminadasDe(p: Plano): string {
   const v = p.tasks.map((t) => estadoVivo(t, p)), pv = v.filter((x) => x === "feita").length, n = v.filter((x) => x === "validada").length + pv;
   return `${n} de ${p.tasks.length} ${p.tasks.length === 1 ? "terminada" : "terminadas"}${pv ? ` · ${pv} por validar` : ""}`;
 }
+/** 23/11 (Rúben: «mega next-level»): o primeiro dia de trabalho do plano e a primeira tarefa (antes do arranque, para a contagem). */
+export function arranqueDe(p: Plano): { dia: number; ti: number } | null {
+  const L = p.tasks.map((t, ti) => ({ t, ti })).sort((a, b) => a.t.dia - b.t.dia || a.ti - b.ti);
+  return L.length ? { dia: L[0].t.dia, ti: L[0].ti } : null;
+}
+/** Ainda nada começou: nenhuma tarefa com registo e o dia de hoje antes da primeira. */
+export function antesDoArranque(p: Plano): boolean {
+  const a = arranqueDe(p);
+  return !!a && p.tasks.every((t) => !t.exec) && (p.estado !== "em curso" || p.dia < a.dia);
+}
+const dd = (n: number) => `${n} ${n === 1 ? "dia útil" : "dias úteis"}`;
+
 export function Pulso({ d, S, dias, prev, margem, precisa, ir }: { d: Negocio; S: Estado; dias: Date[]; prev: Previsao; margem: MargemViva | null; precisa: number; ir: Ir }) {
+  const reduzir = useReduzir();
   const p = d.obra.plano!, quando = quandoDe(dias);
   const ims = imprevistosDe(d), abertos = ims.filter((i) => i.estado !== "fechado" && i.estado !== "aprovado");
   const val = (() => { try { return valorContrato(d, S); } catch { return null; } })();
-  const dif = prev.fimProvavel - prev.fimPlano;
+  // o fim do contrato: o do plano que veio do orçamento (sem a derrapagem); sem ele, o do plano
+  const fimContrato = prev.fimPlano - derrapagem(p), dif = prev.fimProvavel - fimContrato;
+  // 23/11 (permissões): a margem e o valor só para quem vê os custos do orçamento (quotes.view_costs, a mesma regra do servidor)
+  const verCustos = podeVerCustos();
+  const antes = antesDoArranque(p), a = arranqueDe(p), feito = progresso(p);
+  const faltam = a ? Math.max(0, a.dia - (p.estado === "em curso" ? p.dia : 0)) : 0;
+  const ta = a ? p.tasks[a.ti] : null;
+  const desvioPp = margem ? (margem.margemViva - margem.margemOrc) * 100 : 0;
+  const secundario = "inline-flex min-h-10 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-sm transition-colors hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
   return (
-    <section aria-label="O pulso da obra" className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-6">
-      <Mosaico rotulo="Feito" icone={<Gauge className="h-4 w-4" />} onClick={() => ir.aba("execucao")} extra={<Anel valor={progresso(p)} />}
-        sub={terminadasDe(p)}>
-        <Contagem valor={Math.round(progresso(p) * 100)} fmt={(n) => `${Math.round(n)}%`} de={0} />
-      </Mosaico>
-      <Mosaico rotulo="Fim provável" icone={<CalendarCheck className="h-4 w-4" />} onClick={ir.previsao} tom={dif > 0 ? "mau" : dif < 0 ? "bom" : undefined}
-        sub={<>{dif === 0 ? "como o plano" : dif > 0 ? `+${dif} face ao plano` : `${-dif} antes do plano`} · confiança {prev.confianca}</>}>
-        {quando(prev.fimProvavel - 1)}
-      </Mosaico>
-      <Mosaico rotulo="Margem ao vivo" icone={<Euro className="h-4 w-4" />} onClick={ir.previsao} tom={margem ? (margem.margemViva < margem.margemOrc - 0.005 ? "mau" : "bom") : undefined}
-        sub={margem ? `orçamento ${pct(margem.margemOrc)}` : "sem orçamento"}>
-        {margem ? pct(margem.margemViva) : "—"}
-      </Mosaico>
-      <Mosaico rotulo="Precisa de ti" icone={<Inbox className="h-4 w-4" />} onClick={ir.comando} tom={precisa ? "mau" : "bom"} sub={precisa ? "toque para tratar" : "nada à espera"}>
-        <Contagem valor={precisa} fmt={(n) => String(Math.round(n))} de={0} />
-      </Mosaico>
-      <Mosaico rotulo="Imprevistos" icone={<AlertTriangle className="h-4 w-4" />} onClick={() => ir.imprevisto()} tom={abertos.length ? "mau" : undefined}
-        sub={ims.length ? `${ims.length} no total` : "nenhum"}>
-        <Contagem valor={abertos.length} fmt={(n) => String(Math.round(n))} de={0} />
-      </Mosaico>
-      <Mosaico rotulo="Valor da obra" icone={<Euro className="h-4 w-4" />} onClick={() => ir.aba("cliente")} sub={[val?.adendas ? `com ${eur(val.adendas)} € de adendas` : "com IVA", (d.adendas ?? []).filter((a) => a.estado === "rascunho").length ? `${(d.adendas ?? []).filter((a) => a.estado === "rascunho").length} por disparar` : "", (d.adendas ?? []).filter((a) => emCurso(a) && a.estado !== "rascunho").length ? `${(d.adendas ?? []).filter((a) => emCurso(a) && a.estado !== "rascunho").length} à espera do cliente` : ""].filter(Boolean).join(" · ")}>
-        {val ? `${eur(val.total)} €` : "—"}
-      </Mosaico>
+    <section aria-label="O pulso da obra" className="space-y-3">
+      <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr_1fr]">
+        {/* o número herói: a contagem até ao arranque, ou o dia da obra e o feito */}
+        <motion.button type="button" onClick={() => (antes && a ? ir.tarefa(a.ti) : ir.aba("execucao"))} whileTap={reduzir ? undefined : { scale: 0.99 }}
+          aria-label={antes ? `Começa daqui a ${dd(faltam)}: abrir a primeira tarefa` : `Feito: ${Math.round(feito * 100)}%, dia ${p.dia + 1} de ${prev.fimPlano}`}
+          className="relative flex items-center gap-4 overflow-hidden rounded-3xl bg-gradient-to-br from-primary to-[#432791] p-5 text-left text-white shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
+          <div aria-hidden="true" className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
+          {antes ? (
+            <>
+              <span className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl bg-white/15 text-3xl font-bold tabular-nums">{faltam}</span>
+              <span className="min-w-0">
+                <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-white/75">{faltam ? "Começa daqui a" : "Começa hoje"}</span>
+                <span className="block text-2xl font-semibold leading-tight">{faltam ? dd(faltam) : quando(a!.dia)}</span>
+                {ta && <span className="mt-0.5 block text-sm text-white/85">{quando(a!.dia)} · {primeiro(nomeTec(ta.tec))} · {nomeCurtoTarefa(ta.nome)}</span>}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="relative grid h-16 w-16 shrink-0 place-items-center">
+                <svg viewBox="0 0 48 48" className="absolute inset-0 h-16 w-16 -rotate-90" aria-hidden="true">
+                  <circle cx="24" cy="24" r="20" fill="none" stroke="rgba(255,255,255,0.2)" strokeWidth="5" />
+                  <motion.circle cx="24" cy="24" r="20" fill="none" stroke="white" strokeWidth="5" strokeLinecap="round" strokeDasharray={2 * Math.PI * 20}
+                    initial={reduzir ? false : { strokeDashoffset: 2 * Math.PI * 20 }} animate={{ strokeDashoffset: 2 * Math.PI * 20 * (1 - Math.max(0, Math.min(1, feito))) }} transition={{ duration: 0.9 }} />
+                </svg>
+                <span className="text-sm font-bold tabular-nums"><Contagem valor={Math.round(feito * 100)} fmt={(n) => `${Math.round(n)}%`} de={0} /></span>
+              </span>
+              <span className="min-w-0">
+                <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-white/75">{p.estado === "concluída" ? "Obra concluída" : "Feito"}</span>
+                <span className="block text-2xl font-semibold leading-tight">Dia {Math.min(p.dia + 1, prev.fimPlano)} de {prev.fimPlano}</span>
+                <span className="mt-0.5 block text-sm text-white/85">{terminadasDe(p)}</span>
+              </span>
+            </>
+          )}
+        </motion.button>
+        {/* o fim provável contra o do contrato */}
+        <button type="button" onClick={ir.previsao} aria-label={`Fim provável: ${quando(prev.fimProvavel - 1)}`}
+          className="rounded-3xl border border-border bg-card p-4 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><CalendarCheck className="h-4 w-4 text-primary" aria-hidden="true" />Fim provável</span>
+          <span className="mt-1 block text-xl font-semibold tabular-nums">{quando(prev.fimProvavel - 1)}</span>
+          <span className={cn("mt-0.5 block text-sm", dif > 0 ? "font-medium text-destructive" : dif < 0 ? "font-medium text-success" : "text-muted-foreground")}>
+            {dif === 0 ? "No dia do contrato" : dif > 0 ? `${dd(dif)} depois do contrato` : `${dd(-dif)} antes do contrato`}
+          </span>
+          <span className="block text-xs text-muted-foreground">Contrato: {quando(fimContrato - 1)} · confiança {prev.confianca}</span>
+        </button>
+        {/* a margem com o desvio */}
+        {verCustos ? (
+          <button type="button" onClick={ir.previsao} aria-label={`Margem ao vivo: ${margem ? pct(margem.margemViva) : "sem orçamento"}`}
+            className="rounded-3xl border border-border bg-card p-4 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><Euro className="h-4 w-4 text-primary" aria-hidden="true" />Margem ao vivo</span>
+            <span className="mt-1 block text-xl font-semibold tabular-nums">{margem ? pct(margem.margemViva) : "—"}</span>
+            {margem && <span className={cn("mt-0.5 block text-sm", desvioPp < -0.05 ? "font-medium text-destructive" : desvioPp > 0.05 ? "font-medium text-success" : "text-muted-foreground")}>
+              {Math.abs(desvioPp) < 0.05 ? "Igual ao orçamento" : `${desvioPp > 0 ? "+" : "−"}${nfmt(Math.round(Math.abs(desvioPp) * 10) / 10)} pp face ao orçamento`}
+            </span>}
+            {margem && <span className="block text-xs text-muted-foreground">Orçamento: {pct(margem.margemOrc)} · {eur(margem.valor - margem.custoVivo)} € de margem</span>}
+            {/* 23/11 (revisão: «cada coisa num sítio só»): os desvios estão aqui; o Plano já não repete a margem */}
+            {margem && ([["Mão de obra até hoje", -margem.desvioMO], ["O resto, a este ritmo", -margem.projecao], ["Materiais a mais", -margem.materiais], ["Atrasos e erros nossos", -(margem.nossos ?? 0)]] as [string, number][]).filter(([, v]) => Math.abs(v) > 0.5).map(([l, v]) => (
+              <span key={l} className="mt-0.5 flex justify-between gap-2 text-xs"><span>{l}</span><span className={cn("tabular-nums", v < 0 ? "text-destructive" : "text-success")}>{v > 0 ? "+" : ""}{eur(v)} €</span></span>
+            ))}
+          </button>
+        ) : <div className="hidden lg:block" />}
+      </div>
+      {/* o resto, secundário e sem cortes */}
+      <div className="flex flex-wrap gap-2">
+        <button type="button" onClick={() => ir.imprevisto()} className={cn(secundario, abertos.length && "border-amber-300 bg-amber-50 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200")}>
+          <AlertTriangle className="h-4 w-4" aria-hidden="true" />Imprevistos: <b className="font-semibold tabular-nums">{abertos.length ? `${abertos.length} em aberto` : ims.length ? `${ims.length} tratados` : "nenhum"}</b>
+        </button>
+        {verCustos && val && (
+          <button type="button" onClick={() => ir.aba("cliente")} className={secundario}>
+            <Euro className="h-4 w-4" aria-hidden="true" />Valor da obra: <b className="font-semibold tabular-nums">{eur(val.total)} €</b>
+            <span className="text-muted-foreground">{val.adendas ? `com ${eur(val.adendas)} € de adendas` : "com IVA"}</span>
+          </button>
+        )}
+        {(d.adendas ?? []).filter((x) => x.estado === "rascunho").length > 0 && <span className={cn(secundario, "cursor-default")}>{(d.adendas ?? []).filter((x) => x.estado === "rascunho").length} adendas por disparar</span>}
+        {(d.adendas ?? []).filter((x) => emCurso(x) && x.estado !== "rascunho").length > 0 && <span className={cn(secundario, "cursor-default")}>{(d.adendas ?? []).filter((x) => emCurso(x) && x.estado !== "rascunho").length} à espera do cliente</span>}
+      </div>
     </section>
+  );
+}
+/* ================================================================== 23/11: a obra antes do arranque */
+// Rúben («mega next-level»): antes da primeira tarefa, «Na obra hoje» dizia «Ninguém tem trabalho marcado para hoje». Agora: a contagem, a
+// primeira tarefa e a lista do arranque com o estado de cada ponto; o primeiro que falta é o próximo passo (com o toque que o resolve).
+export interface PontoArranque { k: string; t: string; sub: string; ok: boolean; acao?: { rot: string; fn: () => void }; escolhas?: { op: string[]; fn: (v: string) => void } }
+const OPCOES_CHAVES = ["O cliente abre", "Chave entregue", "Código", "Porteiro"];
+export function pontosDoArranque(ctx: Ctx, d: Negocio, ir: Ir, dataInicio: string): PontoArranque[] {
+  const { A, run } = ctx;
+  const p = d.obra.plano!, inv = d.obra.ec?.ref ? resumoEcNegocio(lerInventario(), d.obra.ec.ref) : null;
+  const mats = materiaisPorFase(d, inv).flatMap((g) => g.itens), okM = mats.filter((m) => ["na obra", "na carrinha", "reservado", "recebido"].includes(m.estado)).length;
+  const semTec = p.tasks.filter((t) => !t.tec).length, pessoas = new Set(p.tasks.map((t) => t.tec).filter(Boolean)).size;
+  const condo = (d.f.condominio ?? "").toLowerCase() === "sim", chaves = d.f.chaves ?? "", avisado = d.f.aviso_inicio ?? "";
+  return [
+    { k: "materiais", t: mats.length ? `Materiais: ${okM} de ${mats.length} garantidos` : "Materiais: sem encomenda", sub: okM === mats.length && mats.length ? "Tudo no armazém ou a caminho da obra." : "Veja o que falta e encomende.", ok: !!mats.length && okM === mats.length, acao: { rot: "Ver materiais", fn: () => ir.aba("materiais") } },
+    { k: "equipa", t: semTec ? `Equipa: ${semTec} ${semTec === 1 ? "tarefa sem técnico" : "tarefas sem técnico"}` : `Equipa marcada: ${pessoas} ${pessoas === 1 ? "pessoa" : "pessoas"}`, sub: semTec ? "Escolha quem faz cada tarefa." : "Todas as tarefas têm quem as faça.", ok: !semTec, acao: { rot: "Ver equipa", fn: () => ir.aba("equipa") } },
+    { k: "condominio", t: condo ? "Condomínio avisado" : "Avisar o condomínio", sub: condo ? "O aviso está na entrada do prédio." : "Horário das obras e contacto do responsável, na entrada do prédio.", ok: condo, acao: condo ? undefined : { rot: "Já está avisado", fn: () => run(() => A.campo(d.id, "condominio", "Sim")) } },
+    { k: "cliente", t: avisado ? `Cliente avisado da data · ${avisado}` : "Avisar o cliente da data de início", sub: avisado ? `Sabe que começa a ${dataInicio}.` : `Começa a ${dataInicio}: confirme com o cliente e marque aqui.`, ok: !!avisado, acao: avisado ? undefined : { rot: "Já está avisado", fn: () => run(() => A.campo(d.id, "aviso_inicio", agoraCurto())) } },
+    { k: "chaves", t: chaves ? `Acesso: ${chaves}` : "Acesso à casa e chave", sub: chaves ? "A equipa sabe como entrar." : "Como é que a equipa entra no primeiro dia?", ok: !!chaves, escolhas: chaves ? undefined : { op: OPCOES_CHAVES, fn: (v) => run(() => A.campo(d.id, "chaves", v)) } },
+  ];
+}
+const agoraCurto = () => { const x = new Date(); return `${String(x.getDate()).padStart(2, "0")}/${String(x.getMonth() + 1).padStart(2, "0")}`; };
+
+function Arranque({ ctx, d, dias, ir }: { ctx: Ctx; d: Negocio; dias: Date[]; ir: Ir }) {
+  useInventario(); // redesenha quando a encomenda da base chega (os materiais da lista)
+  const p = d.obra.plano!, quando = quandoDe(dias), a = arranqueDe(p)!;
+  const faltam = Math.max(0, a.dia - (p.estado === "em curso" ? p.dia : 0)), ta = p.tasks[a.ti];
+  const planeia = podeNeg(ctx.S.role, "obra.planear");
+  const L = pontosDoArranque(ctx, d, ir, quando(a.dia)), proximo = L.find((x) => !x.ok), feitos = L.filter((x) => x.ok).length;
+  return (
+    <div className="space-y-3">
+      <p className="flex items-center gap-2 text-sm font-semibold"><Rocket className="h-4 w-4 text-primary" aria-hidden="true" />Arranque · {quando(a.dia)}</p>
+      <button type="button" onClick={() => ir.tarefa(a.ti)} className="flex w-full items-center gap-3 rounded-2xl bg-primary/[0.06] p-2.5 text-left hover:bg-primary/10" title={ta.nome}>
+        <AvatarTec id={ta.tec} tam="h-9 w-9" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-xs text-muted-foreground">{faltam ? `Daqui a ${faltam} ${faltam === 1 ? "dia útil" : "dias úteis"}` : "Hoje"} · primeira tarefa</span>
+          <span className="block truncate text-sm font-medium">{primeiro(nomeTec(ta.tec))} · {nomeCurtoTarefa(ta.nome)}</span>
+        </span>
+      </button>
+      <section aria-label="Lista do arranque" className="space-y-1.5">
+        <p className="text-xs font-medium text-muted-foreground">Pronto a arrancar: {feitos} de {L.length}</p>
+        <ul className="space-y-1">
+          {L.map((x) => (
+            <li key={x.k} className={cn("rounded-xl px-2.5 py-2", x === proximo ? "bg-amber-50 ring-1 ring-amber-300 dark:bg-amber-950/30 dark:ring-amber-700" : "")}>
+              <div className="flex items-start gap-2">
+                <span aria-hidden="true" className={cn("mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full", x.ok ? "bg-success text-white" : "border-2 border-muted-foreground/40")}>{x.ok && <Check className="h-3 w-3" />}</span>
+                <span className="min-w-0 flex-1">
+                  <span className={cn("block text-sm", x.ok ? "text-foreground" : "font-medium")}>{x.t}</span>
+                  {!x.ok && <span className="block text-xs text-muted-foreground">{x === proximo ? `Próximo passo · ${x.sub}` : x.sub}</span>}
+                </span>
+                {planeia && !x.ok && x.acao && <Button type="button" size="sm" variant={x === proximo ? "default" : "outline"} className="min-h-9 shrink-0 rounded-full" onClick={x.acao.fn}>{x.acao.rot}</Button>}
+              </div>
+              {planeia && !x.ok && x.escolhas && (
+                <div className="mt-1.5 flex flex-wrap gap-1.5 pl-7">
+                  {x.escolhas.op.map((o) => <button key={o} type="button" onClick={() => x.escolhas!.fn(o)} className="min-h-9 rounded-full border border-input bg-card px-3 text-sm hover:border-primary/50">{o}</button>)}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
   );
 }
 
@@ -114,6 +236,8 @@ export function precisaDeTi(ctx: Ctx, d: Negocio, ir: Ir): Pedido[] {
   if (!podeNeg(S.role, "obra.planear") || p.estado !== "em curso") return L;
   p.tasks.forEach((t, ti) => { if (estadoVivo(t, p) === "feita") L.push({ k: "v" + ti, t: `Validar ${t.nome.toLowerCase()}`, sub: `${primeiro(nomeTec(t.tec))} deu-a por feita, com ${t.exec?.fotos.length ?? 0} ${t.exec?.fotos.length === 1 ? "fotografia" : "fotografias"}`, rot: "Validar", fn: () => run(() => A.validarTarefa(d.id, ti)), nivel: "atencao" }); });
   for (const im of imprevistosDe(d)) {
+    // 23/11: o pedido de atraso do técnico: aceitar ou recusar no imprevisto
+    if (pedidoDeAtraso(im)) { L.push({ k: "i" + im.id, t: textoPedidoAtraso(im), sub: "Aceite (o plano anda e o cliente é avisado) ou recuse", rot: "Decidir", fn: () => ir.imprevisto(im.id), nivel: "critico" }); continue; }
     if (im.estado === "aberto") L.push({ k: "i" + im.id, t: `Imprevisto: ${im.texto}`, sub: "Falta a proposta ao cliente (ou resolver sem custo)", rot: "Tratar", fn: () => ir.imprevisto(im.id), nivel: "critico" });
     if (im.estado === "recusado") L.push({ k: "i" + im.id, t: `O cliente recusou: ${im.texto}`, sub: "Decida o que fazer", rot: "Decidir", fn: () => ir.imprevisto(im.id), nivel: "critico" });
   }
@@ -137,7 +261,14 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
   const vivo = p.estado === "em curso";
   // o que vem a seguir: as entregas de material e as tarefas de amanhã
   const entregas = materiaisPorFase(d).flatMap((g) => g.itens).filter((m) => m.estado === "a chegar" || m.estado === "encomendado" || m.estado === "por encomendar" || m.estado === "em falta").slice(0, 3);
-  const amanha = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.dia === p.dia + 1);
+  // 23/11 (revisão: «A seguir devia mostrar os próximos dias úteis»): os próximos 3 dias com trabalho a começar (antes do arranque, os do
+  // arranque), cada um com quem e o quê
+  const desde = antesDoArranque(p) ? (arranqueDe(p)?.dia ?? 0) : p.dia + 1;
+  const proximos: { k: number; L: { t: (typeof p.tasks)[number]; ti: number }[] }[] = [];
+  for (let k = desde; k < desde + 60 && proximos.length < 3; k++) {
+    const L = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.dia === k);
+    if (L.length) proximos.push({ k, L });
+  }
   const visiveis = pedidos.filter((x) => !feitos.includes(x.k));
   return (
     <section ref={comandoRef} aria-label="Hoje na obra" className="scroll-mt-4 overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
@@ -145,6 +276,7 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
         <div aria-hidden="true" className="pointer-events-none absolute -left-24 -top-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
         {/* quem está na obra */}
         <div className="relative min-w-0 space-y-3 border-b border-border p-4 lg:border-b-0 lg:border-r">
+          {antesDoArranque(p) && arranqueDe(p) ? <Arranque ctx={ctx} d={d} dias={dias} ir={ir} /> : <>
           <p className="flex items-center gap-2 text-sm font-semibold"><HardHat className="h-4 w-4 text-primary" aria-hidden="true" />{vivo ? `Na obra hoje · ${quando(p.dia)}` : "A obra ainda não arrancou"}</p>
           {vivo && !H.pessoas.length && <p className="text-sm text-muted-foreground">Ninguém tem trabalho marcado para hoje.</p>}
           <ul className="space-y-2">
@@ -171,6 +303,7 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
               {H.atrasadas.map(({ t, ti }) => <button key={"x" + ti} type="button" onClick={() => ir.tarefa(ti)} className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-1 text-destructive"><AlertTriangle className="h-3 w-3" aria-hidden="true" />{t.nome}</button>)}
             </div>
           )}
+          </>}
         </div>
         {/* precisa de ti */}
         <div className="relative min-w-0 space-y-2 border-b border-border p-4 lg:border-b-0 lg:border-r">
@@ -200,12 +333,21 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
                 <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", m.quando ? "bg-primary/10 text-primary" : "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200")}>{m.quando ? `chega a ${m.quando}` : m.estado}</span>
               </li>
             ))}</ul>
-          ) : <p className="text-sm text-muted-foreground">Os materiais estão todos garantidos.</p>}
-          {amanha.length > 0 && (
-            <div className="space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">Amanhã começa</p>
-              {amanha.map(({ t, ti }) => <button key={ti} type="button" onClick={() => ir.tarefa(ti)} className="flex w-full items-center gap-2 rounded-xl px-1 py-0.5 text-left text-sm hover:bg-muted"><AvatarTec id={t.tec} tam="h-6 w-6" /><span className="truncate">{t.nome}</span></button>)}
-            </div>
+          ) : <p className="flex items-center gap-1.5 text-sm text-success"><Check className="h-4 w-4" aria-hidden="true" />Os materiais estão todos garantidos.</p>}
+          {proximos.length > 0 && (
+            <ol className="space-y-2.5">
+              {proximos.map(({ k, L }) => (
+                <li key={k}>
+                  <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">{k === p.dia + 1 && !antesDoArranque(p) ? "Amanhã · " : ""}{quando(k)}</p>
+                  {L.map(({ t, ti }) => (
+                    <button key={ti} type="button" onClick={() => ir.tarefa(ti)} title={t.nome} className="mt-1 flex w-full items-center gap-2 rounded-xl px-1 py-0.5 text-left text-sm hover:bg-muted">
+                      <AvatarTec id={t.tec} tam="h-6 w-6" /><span className="min-w-0 truncate"><b className="font-medium">{primeiro(nomeTec(t.tec))}</b> · {nomeCurtoTarefa(t.nome)}</span>
+                      {t.dur > 1 && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{t.dur} dias</span>}
+                    </button>
+                  ))}
+                </li>
+              ))}
+            </ol>
           )}
         </div>
       </div>
@@ -213,37 +355,143 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
   );
 }
 
+/* ================================================================== 23/11: o custo ao vivo por fase */
+// Revisão de 23/11 («continua a melhorar»): no lugar da margem repetida, o custo de cada fase da obra: a mão de obra prevista contra a real
+// (as horas registadas × o custo da hora de quem as fez, custoObra.ts) e os materiais do orçamento dessa fase. Liga à margem do cabeçalho:
+// o desvio total é o mesmo «Mão de obra até hoje».
+export function custoPorFase(d: Negocio, S: Estado) {
+  const K = custoObra(d, S);
+  const mat = new Map<number, number>();
+  for (const l of d.orc?.linhas ?? []) {
+    if (l.t !== "mat") continue;
+    const f = l.d === LINHA_DEMOLICAO ? 1 : faseDosMateriais(l.d);
+    mat.set(f, (mat.get(f) ?? 0) + (linhaCalc(l, S).custo || 0));
+  }
+  return FASES_OBRA.map((f) => {
+    const mo = K.fases.find((x) => x.fase === f.n), ls = K.linhas.filter((l) => (l.fase ?? 0) === f.n);
+    const comReal = ls.filter((l) => l.real != null);
+    return { n: f.n, nome: f.curto, moPrev: mo?.prev ?? 0, moReal: mo?.real ?? 0, desvio: mo?.desvio ?? 0, hPrev: ls.reduce((a, l) => a + l.hPrev, 0), hReal: comReal.reduce((a, l) => a + (l.hReal ?? 0), 0), registadas: comReal.length, tarefas: ls.length, mat: mat.get(f.n) ?? 0 };
+  }).filter((x) => x.tarefas || x.mat);
+}
+
+function CustoPorFase({ d, S }: { d: Negocio; S?: Estado }) {
+  const reduzir = useReduzir();
+  if (!S || !podeVerCustos() || !d.orc) return <div className="hidden lg:block" />;
+  let L: ReturnType<typeof custoPorFase>;
+  try { L = custoPorFase(d, S); } catch { return <div className="hidden lg:block" />; }
+  const algumReal = L.some((x) => x.registadas > 0), maxPrev = Math.max(1, ...L.map((x) => x.moPrev + x.mat));
+  return (
+    <section aria-label="O custo por fase" className="min-w-0 space-y-3">
+      <div>
+        <p className="text-sm font-semibold">O custo por fase</p>
+        <p className="text-xs text-muted-foreground">{algumReal ? "A mão de obra real (as horas registadas × o custo da hora) contra a prevista, e os materiais do orçamento." : "Ainda sem horas registadas: o orçado de cada fase, mão de obra e materiais."}</p>
+      </div>
+      <ul className="space-y-3">
+        {L.map((x) => {
+          const Ic = ICONE_DA_FASE[x.n] ?? Package, cor = COR_FASE[x.n];
+          const prev = x.moPrev + x.mat, vivo = prev + x.desvio;
+          return (
+            <li key={x.n} className="space-y-1">
+              <div className="flex items-center gap-2 text-sm">
+                <span aria-hidden="true" className="grid h-6 w-6 shrink-0 place-items-center rounded-full text-white" style={{ background: cor }}><Ic className="h-3.5 w-3.5" /></span>
+                <span className="min-w-0 flex-1 font-medium">{x.nome}</span>
+                <span className="tabular-nums">{eur(algumReal ? vivo : prev)} €</span>
+                {algumReal && Math.abs(x.desvio) > 0.5 && <span className={cn("text-xs tabular-nums", x.desvio > 0 ? "text-destructive" : "text-success")}>{x.desvio > 0 ? "+" : ""}{eur(x.desvio)} €</span>}
+              </div>
+              <div className="flex h-2 overflow-hidden rounded-full bg-muted" aria-hidden="true">
+                <motion.div className="h-full" style={{ background: cor }} initial={reduzir ? false : { width: 0 }} animate={{ width: `${(x.moPrev / maxPrev) * 100}%` }} transition={{ duration: 0.6 }} />
+                <motion.div className="h-full opacity-40" style={{ background: cor }} initial={reduzir ? false : { width: 0 }} animate={{ width: `${(x.mat / maxPrev) * 100}%` }} transition={{ duration: 0.6 }} />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Mão de obra {eur(x.moPrev)} € ({nfmt(Math.round(x.hPrev * 10) / 10)} h){x.registadas ? ` · real ${eur(x.moReal)} € em ${nfmt(Math.round(x.hReal * 10) / 10)} h (${x.registadas} de ${x.tarefas} ${x.tarefas === 1 ? "tarefa" : "tarefas"})` : ""} · materiais {eur(x.mat)} €
+              </p>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
+  );
+}
+
 /* ================================================================== a previsão viva */
-export function PrevisaoViva({ d, dias, prev, margem, critico, ir, previsaoRef }: { d: Negocio; dias: Date[]; prev: Previsao; margem: MargemViva | null; critico: Set<number>; ir: Ir; previsaoRef: React.RefObject<HTMLElement> }) {
+// 23/11 (Rúben: «mega next-level»): a curva S das horas (o planeado, o real, hoje e a previsão até ao fim provável, com a margem de datas);
+// antes do arranque, sem nada real, o calendário das fases. A margem num só indicador: a de hoje contra a do orçamento, e só os desvios
+// que existem.
+function CalendarioFases({ p, quando }: { p: Plano; quando: (k: number) => string }) {
+  const fim = Math.max(1, ...p.tasks.map((t) => t.dia + t.dur));
+  const curta = (k: number) => quando(k).replace(/^[^,]+, /, "");
+  const fases = FASES_OBRA.map((f) => {
+    const ts = p.tasks.filter((t) => (t.fase ?? 1) === f.n);
+    return ts.length ? { ...f, ini: Math.min(...ts.map((t) => t.dia)), fim: Math.max(...ts.map((t) => t.dia + t.dur)), n: f.n, nT: ts.length } : null;
+  }).filter((x): x is NonNullable<typeof x> => !!x);
+  return (
+    <div className="min-w-0 space-y-3">
+      <div>
+        <p className="text-sm font-semibold">As fases da obra</p>
+        <p className="text-xs text-muted-foreground">Ainda sem horas registadas: o plano, fase a fase, de {quando(0 + Math.min(...fases.map((f) => f.ini)))} a {quando(fim - 1)}.</p>
+      </div>
+      <ol className="space-y-2.5">
+        {fases.map((f) => {
+          const Ic = ICONE_DA_FASE[f.n] ?? Package, cor = COR_FASE[f.n];
+          return (
+            <li key={f.n} className="grid grid-cols-[11rem_1fr] items-center gap-3 sm:grid-cols-[14rem_1fr]">
+              <span className="flex min-w-0 items-center gap-2 text-sm">
+                <span aria-hidden="true" className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-white" style={{ background: cor }}><Ic className="h-4 w-4" /></span>
+                <span className="min-w-0"><span className="block font-medium leading-tight">{f.curto}</span><span className="block text-xs tabular-nums text-muted-foreground">{f.fim - f.ini === 1 ? quando(f.ini) : `${curta(f.ini)} – ${curta(f.fim - 1)}`}</span></span>
+              </span>
+              <span className="relative block h-3 rounded-full bg-muted" aria-hidden="true">
+                <span className="absolute inset-y-0 rounded-full" style={{ left: `${(f.ini / fim) * 100}%`, width: `${Math.max(2, ((f.fim - f.ini) / fim) * 100)}%`, background: cor }} />
+              </span>
+            </li>
+          );
+        })}
+      </ol>
+    </div>
+  );
+}
+
+export function PrevisaoViva({ d, S, dias, prev, margem: _margem, critico, ir, previsaoRef }: { d: Negocio; S?: Estado; dias: Date[]; prev: Previsao; margem: MargemViva | null; critico: Set<number>; ir: Ir; previsaoRef: React.RefObject<HTMLElement> }) {
   const reduzir = useReduzir();
   const p = d.obra.plano!, quando = quandoDe(dias);
-  const W = 640, H = 180, n = Math.max(2, prev.planeadas.length), max = Math.max(prev.totalH, ...prev.reais, 1);
+  const W = 640, H = 180, n = Math.max(2, prev.planeadas.length, prev.ate), max = Math.max(prev.totalH, ...prev.reais, 1);
   const X = (k: number) => (k / (n - 1)) * W, Y = (h: number) => H - (h / max) * (H - 16) - 4;
   const linha = (L: number[]) => L.map((h, k) => `${k ? "L" : "M"}${X(k).toFixed(1)},${Y(h).toFixed(1)}`).join(" ");
   const hoje = p.estado === "em curso" ? p.dia : -1;
   const [sob, setSob] = useState<number | null>(null);
   const svg = useRef<SVGSVGElement>(null);
-  const crit = [...critico].map((ti) => ({ ti, t: p.tasks[ti] })).sort((a, b) => a.t.dia - b.t.dia);
+  const antes = antesDoArranque(p);
+  // a previsão: do real de hoje ao total no fim provável, com a margem de datas (de … até)
+  const realHoje = prev.reais[prev.reais.length - 1] ?? 0, fimK = Math.min(n - 1, prev.fimProvavel - 1);
   return (
     <section ref={previsaoRef} aria-label="A previsão viva" className="scroll-mt-4 grid grid-cols-1 gap-4 rounded-3xl border border-border bg-card p-4 shadow-sm lg:grid-cols-[1.6fr_1fr] sm:p-5">
+      {antes ? <CalendarioFases p={p} quando={quando} /> : (
       <div className="min-w-0 space-y-2">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
             <p className="text-sm font-semibold">Horas planeadas e reais</p>
             <p className="text-xs text-muted-foreground">Ritmo {prev.ritmo >= 1 ? "a tempo" : "abaixo do plano"}: {Math.round(prev.ritmo * 100)}% · fim provável {quando(prev.fimProvavel - 1)}{prev.ate > prev.de ? ` (entre ${quando(prev.de - 1)} e ${quando(prev.ate - 1)})` : ""}</p>
           </div>
-          <ul className="flex gap-3 text-xs text-muted-foreground"><li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-0.5 w-4 border-t-2 border-dashed border-muted-foreground" />Planeadas</li><li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-1 w-4 rounded bg-primary" />Reais</li></ul>
+          <ul className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+            <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-0.5 w-4 border-t-2 border-dashed border-muted-foreground" />Planeado</li>
+            <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-1 w-4 rounded bg-primary" />Real</li>
+            <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-0.5 w-4 border-t-2 border-dotted border-primary" />Previsão</li>
+          </ul>
         </div>
-        <svg ref={svg} viewBox={`0 0 ${W} ${H}`} className="h-44 w-full touch-none" role="img" aria-label={`Horas: ${nfmt(prev.feitoH)} feitas de ${nfmt(prev.totalH)} previstas`}
+        <svg ref={svg} viewBox={`0 0 ${W} ${H}`} className="h-44 w-full touch-none" role="img" aria-label={`Horas: ${nfmt(prev.feitoH)} feitas de ${nfmt(prev.totalH)} previstas; fim provável ${quando(prev.fimProvavel - 1)}`}
           onPointerMove={(e) => { const r = svg.current!.getBoundingClientRect(); const k = Math.round(((e.clientX - r.left) / r.width) * (n - 1)); setSob(Math.max(0, Math.min(n - 1, k))); }} onPointerLeave={() => setSob(null)}>
           {[0.25, 0.5, 0.75, 1].map((f) => <line key={f} x1={0} x2={W} y1={Y(max * f)} y2={Y(max * f)} stroke="hsl(var(--border))" strokeWidth={1} />)}
-          {hoje >= 0 && <line x1={X(hoje)} x2={X(hoje)} y1={0} y2={H} stroke="hsl(var(--primary))" strokeOpacity={0.35} strokeWidth={2} />}
-          {prev.fimProvavel !== prev.fimPlano && <line x1={X(Math.min(n - 1, prev.fimProvavel - 1))} x2={X(Math.min(n - 1, prev.fimProvavel - 1))} y1={0} y2={H} stroke="hsl(var(--destructive))" strokeDasharray="4 4" strokeWidth={1.5} />}
+          {/* a margem de datas do fim provável */}
+          {prev.ate > prev.de && <rect x={X(Math.max(0, prev.de - 1))} y={0} width={Math.max(2, X(Math.min(n - 1, prev.ate - 1)) - X(Math.max(0, prev.de - 1)))} height={H} fill="hsl(var(--primary))" fillOpacity={0.07} />}
+          {hoje >= 0 && <><line x1={X(hoje)} x2={X(hoje)} y1={0} y2={H} stroke="hsl(var(--primary))" strokeOpacity={0.45} strokeWidth={2} />
+            <text x={Math.min(W - 30, X(hoje) + 4)} y={12} fontSize={11} fill="hsl(var(--primary))">hoje</text></>}
           <motion.path d={linha(prev.planeadas)} fill="none" stroke="hsl(var(--muted-foreground))" strokeWidth={2} strokeDasharray="6 5"
             initial={reduzir ? false : { pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1 }} />
           {prev.reais.length > 1 && <motion.path d={`${linha(prev.reais)} L${X(prev.reais.length - 1)},${H} L0,${H} Z`} fill="hsl(var(--primary))" fillOpacity={0.08} initial={reduzir ? false : { opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.6 }} />}
           {prev.reais.length > 0 && <motion.path d={linha(prev.reais)} fill="none" stroke="hsl(var(--primary))" strokeWidth={3} strokeLinecap="round" strokeLinejoin="round"
             initial={reduzir ? false : { pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 1.1, delay: 0.2 }} />}
+          {/* a previsão: do real de hoje ao total, no fim provável */}
+          {hoje >= 0 && fimK > hoje && <path d={`M${X(hoje).toFixed(1)},${Y(realHoje).toFixed(1)} L${X(fimK).toFixed(1)},${Y(prev.totalH).toFixed(1)}`} fill="none" stroke="hsl(var(--primary))" strokeWidth={2} strokeDasharray="2 4" strokeLinecap="round" />}
+          {hoje >= 0 && fimK > hoje && <circle cx={X(fimK)} cy={Y(prev.totalH)} r={4.5} fill="hsl(var(--card))" stroke="hsl(var(--primary))" strokeWidth={2} />}
           {sob != null && <>
             <line x1={X(sob)} x2={X(sob)} y1={0} y2={H} stroke="hsl(var(--foreground))" strokeOpacity={0.2} />
             <circle cx={X(sob)} cy={Y(prev.planeadas[sob] ?? 0)} r={4} fill="hsl(var(--muted-foreground))" />
@@ -252,39 +500,11 @@ export function PrevisaoViva({ d, dias, prev, margem, critico, ir, previsaoRef }
         </svg>
         <p className="h-5 text-xs tabular-nums text-muted-foreground">{sob != null ? `${quando(sob)}: ${nfmt(prev.planeadas[sob] ?? 0)} h planeadas${prev.reais[sob] != null ? ` · ${nfmt(prev.reais[sob])} h reais` : ""}` : `${nfmt(prev.feitoH)} de ${nfmt(prev.totalH)} h feitas · passe o dedo no gráfico`}</p>
       </div>
-      <div className="min-w-0 space-y-4">
-        {margem && (
-          <div className="space-y-2">
-            <p className="text-sm font-semibold">Margem ao vivo</p>
-            {[
-              { l: "Do orçamento", v: margem.valor - margem.custoOrc, m: margem.margemOrc, base: true },
-              { l: "Mão de obra até hoje", v: -margem.desvioMO },
-              { l: "O resto, a este ritmo", v: -margem.projecao },
-              { l: "Materiais a mais", v: -margem.materiais },
-              ...(margem.nossos ? [{ l: "Atrasos e erros nossos", v: -margem.nossos }] : []),
-              { l: "Ao vivo", v: margem.valor - margem.custoVivo, m: margem.margemViva, base: true },
-            ].filter((x) => x.base || Math.abs(x.v) > 0.5).map((x, k) => {
-              const larg = Math.min(100, (Math.abs(x.v) / Math.max(1, margem.valor - margem.custoOrc)) * 100);
-              return (
-                <div key={k} className="space-y-0.5">
-                  <div className="flex justify-between gap-2 text-sm"><span className={cn(x.base && "font-medium")}>{x.l}</span><span className={cn("tabular-nums", !x.base && (x.v < 0 ? "text-destructive" : "text-success"))}>{x.v > 0 && !x.base ? "+" : ""}{eur(x.v)} €{x.m != null ? ` · ${pct(x.m)}` : ""}</span></div>
-                  <div className="h-2 overflow-hidden rounded-full bg-muted"><motion.div className={cn("h-full rounded-full", x.base ? "bg-primary" : x.v < 0 ? "bg-destructive" : "bg-success")}
-                    initial={reduzir ? false : { width: 0 }} animate={{ width: `${Math.max(2, larg)}%` }} transition={{ duration: 0.7, delay: reduzir ? 0 : 0.08 * k }} /></div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-        <div className="space-y-1.5">
-          <p className="flex items-center gap-1.5 text-sm font-semibold"><Flame className="h-4 w-4 text-destructive" aria-hidden="true" />Caminho crítico</p>
-          <p className="text-xs text-muted-foreground">Se uma destas atrasar, a obra acaba mais tarde.</p>
-          <div className="flex flex-wrap gap-1.5">{crit.length ? crit.map(({ t, ti }) => (
-            <button key={ti} type="button" onClick={() => ir.tarefa(ti)} className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-destructive/30 bg-destructive/[0.05] px-2.5 text-sm hover:bg-destructive/10">
-              <span aria-hidden="true" className="h-2 w-2 rounded-full" style={{ background: COR_FASE[t.fase ?? 1] }} />{t.nome}<span className="text-xs text-muted-foreground">{quando(t.dia)}</span>
-            </button>
-          )) : <span className="text-sm text-muted-foreground">Todas as tarefas por fazer têm folga.</span>}</div>
-        </div>
-      </div>
+      )}
+      {/* 23/11 (revisão: «cada coisa num sítio só»): a margem está no cabeçalho; aqui, o custo por fase */}
+      <CustoPorFase d={d} S={S} />
+      {/* 23/11 (Rúben: «a lista deve ser refeita, muito mais bonita, corrida, com as fases bem identificadas e icons»): a toda a largura */}
+      <CaminhoCritico p={p} critico={critico} quando={quando} abrir={ir.tarefa} />
     </section>
   );
 }
@@ -301,7 +521,8 @@ export function AgendaEquipa({ ctx, d, dias, ir }: { ctx: Ctx; d: Negocio; dias:
   // a semana: começa na segunda da semana de hoje (ou do início)
   const hoje = p.estado === "em curso" ? p.dia : 0;
   const segundaDe = (k: number) => { let j = k; while (j > 0 && dias[j] && dias[j].getDay() !== 1) j--; return j; };
-  const [ini, setIni] = useState(() => segundaDe(hoje));
+  // 23/11 (revisão no 1015): antes do arranque, abre na semana da primeira tarefa (na de hoje a obra ainda não tem nada)
+  const [ini, setIni] = useState(() => segundaDe(antesDoArranque(p) ? arranqueDe(p)?.dia ?? hoje : hoje));
   const semana = Array.from({ length: 5 }, (_, j) => ini + j).filter((k) => k < dias.length);
   const pessoas = [...new Set(p.tasks.map((t) => t.tec).filter((x): x is string => !!x))];
   const [arr, setArr] = useState<number | null>(null); // a tarefa a ser arrastada
@@ -355,7 +576,7 @@ export function AgendaEquipa({ ctx, d, dias, ir }: { ctx: Ctx; d: Negocio; dias:
                         <motion.button key={ti} type="button" layout={!reduzir} draggable={planeia} onDragStart={() => setArr(ti)} onDragEnd={() => { setArr(null); setAlvo(null); }} onClick={() => ir.tarefa(ti)}
                           className={cn("flex w-full items-center gap-1 rounded-lg px-2 py-1 text-left text-xs font-medium text-white shadow-sm", planeia && "cursor-grab active:cursor-grabbing", arr === ti && "opacity-40")}
                           style={{ background: COR_FASE[t.fase ?? 1] }} title={`${t.nome} · ${rotuloVivo(t, p)}`}>
-                          <span className="truncate">{t.nome}</span>
+                          <span className="truncate">{nomeCurtoTarefa(t.nome)}</span>
                         </motion.button>
                       ))}
                       {!b && !aqui.length && <span className="block px-1 text-[11px] text-muted-foreground/70">livre</span>}
@@ -367,18 +588,58 @@ export function AgendaEquipa({ ctx, d, dias, ir }: { ctx: Ctx; d: Negocio; dias:
           })}
         </div>
       </div>
-      {arr != null && <p className="text-xs text-muted-foreground">A largar «{p.tasks[arr]?.nome}»: azul, a pessoa está livre; vermelho, está noutra obra ou de férias.</p>}
+      {arr != null && <p className="text-xs text-muted-foreground">A largar «{nomeCurtoTarefa(p.tasks[arr]?.nome ?? "")}»: azul, a pessoa está livre; vermelho, está noutra obra ou de férias.</p>}
     </section>
   );
 }
 
 /* ================================================================== o diário */
-export function DiarioObra({ d, ir }: { d: Negocio; ir: Ir }) {
+/** 23/11 (Rúben: «mega next-level»): o resumo do dia, montado dos registos dos técnicos (resumoDoDia.ts), com a escolha do dia. */
+function ResumoDoDia({ d, dias }: { d: Negocio; dias: Date[] }) {
+  const p = d.obra.plano!, quando = quandoDe(dias);
+  const L = useMemo(() => diasComRegistos(p), [p, p.tasks]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [k, setK] = useState<number | null>(null);
+  const dia = k ?? L[0] ?? null, R = dia != null ? resumoDoDia(p, dia) : null;
+  return (
+    <section aria-label="O resumo do dia" className="space-y-3 rounded-3xl border border-primary/30 bg-primary/[0.03] p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-sm font-semibold"><Sparkles className="h-4 w-4 text-primary" aria-hidden="true" />O resumo do dia</p>
+        {L.length > 1 && (
+          <div role="group" aria-label="O dia" className="flex flex-wrap gap-1">
+            {L.slice(0, 6).map((x) => <button key={x} type="button" aria-pressed={x === dia} onClick={() => setK(x)} className={cn("min-h-9 rounded-full border px-3 text-xs", x === dia ? "border-primary bg-primary text-primary-foreground" : "border-input bg-card hover:border-foreground/40")}>{quando(x)}</button>)}
+          </div>
+        )}
+      </div>
+      {!R ? <p className="text-sm text-muted-foreground">O resumo aparece no fim do primeiro dia de trabalho: as horas, as notas e as fotografias que os técnicos registam no Hoje.</p> : (
+        <>
+          <p className="text-[15px]"><b className="font-semibold">{quando(R.dia)}.</b> {R.frase}</p>
+          <ul className="space-y-2">
+            {R.linhas.map((x, j) => (
+              <li key={j} className="flex gap-2.5 text-sm">
+                <AvatarTec id={TECS.find((t) => t.n === x.quem)?.id ?? null} tam="h-7 w-7" />
+                <span className="min-w-0 flex-1">
+                  <span className="block">{x.t}</span>
+                  {x.nota && <span className="block text-muted-foreground">«{x.nota}»</span>}
+                  {x.fotos.length > 0 && <span className="mt-1 block"><Miniaturas fotos={x.fotos} tam="h-12 w-16" /></span>}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </section>
+  );
+}
+
+export function DiarioObra({ d, ir, dias = [] }: { d: Negocio; ir: Ir; dias?: Date[] }) {
   const reduzir = useReduzir();
   const F = diarioDaObra(d), ad = antesEDepois(d), fotos = fotografiasDaObra(d.obra.plano);
   const [corte, setCorte] = useState(50);
   const [n, setN] = useState(12);
+  const pr = useMemo(() => projetoDoNegocio(d.f), [d.f.estudio]); // eslint-disable-line react-hooks/exhaustive-deps
   return (
+    <div className="space-y-5">
+    {d.obra.plano && <ResumoDoDia d={d} dias={dias} />}
     <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_1.2fr]">
       <div className="min-w-0 space-y-4">
         {ad ? (
@@ -393,7 +654,17 @@ export function DiarioObra({ d, ir }: { d: Negocio; ir: Ir }) {
             </div>
             <input type="range" min={0} max={100} value={corte} onChange={(e) => setCorte(Number(e.target.value))} aria-label="Comparar o antes e o depois" className="w-full accent-[hsl(var(--primary))]" />
           </section>
-        ) : <p className="rounded-2xl bg-muted/50 px-4 py-3 text-sm text-muted-foreground">O antes e o depois aparece quando houver fotografias dos técnicos.</p>}
+        ) : <p className="rounded-2xl bg-muted/50 px-4 py-3 text-sm text-muted-foreground">O antes e o depois em fotografias aparece quando os técnicos as registarem.</p>}
+        {/* 23/11: o antes e o depois também nas plantas do Estúdio, lado a lado */}
+        {pr && (
+          <section aria-label="As plantas antes e depois" className="space-y-2 rounded-3xl border border-border bg-card p-3">
+            <p className="px-1 text-sm font-semibold">As plantas: antes e depois</p>
+            <div className="grid grid-cols-2 gap-2">
+              <PlantaVista planta={pr.antes} titulo="Antes" />
+              <PlantaVista planta={pr.depois} titulo="Depois" fantasmas={sairam(pr)} />
+            </div>
+          </section>
+        )}
         {fotos.length > 0 && (
           <section aria-label="As fotografias" className="space-y-2 rounded-3xl border border-border bg-card p-3">
             <p className="flex items-center gap-1.5 px-1 text-sm font-semibold"><Camera className="h-4 w-4 text-primary" aria-hidden="true" />{fotos.length} {fotos.length === 1 ? "fotografia" : "fotografias"}</p>
@@ -426,6 +697,7 @@ export function DiarioObra({ d, ir }: { d: Negocio; ir: Ir }) {
         )}
         {F.length > n && <button type="button" onClick={() => setN(n + 12)} className="min-h-10 text-sm font-medium text-primary">Ver mais</button>}
       </section>
+    </div>
     </div>
   );
 }
@@ -464,7 +736,10 @@ export function PontoDaSemana({ ctx, d, dias }: { ctx: Ctx; d: Negocio; dias: Da
 /* ================================================================== as entregas */
 export function Entregas({ d }: { d: Negocio }) {
   const reduzir = useReduzir();
-  const itens = materiaisPorFase(d).flatMap((g) => g.itens.map((m) => ({ ...m, fase: g.fase })));
+  // 23/11: com o estado da encomenda (a da base, numa encomenda emitida no servidor; senão a do Inventário)
+  const db = useInventario();
+  const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
+  const itens = materiaisPorFase(d, inv).flatMap((g) => g.itens.map((m) => ({ ...m, fase: g.fase })));
   const ok = new Set(["na obra", "na carrinha", "reservado", "recebido"]);
   const ordem = [...itens].sort((a, b) => Number(ok.has(a.estado)) - Number(ok.has(b.estado)) || (a.quando ?? "99").localeCompare(b.quando ?? "99"));
   if (!ordem.length) return null;
@@ -487,10 +762,33 @@ export function Entregas({ d }: { d: Negocio }) {
 /* ================================================================== o fecho: as fotografias finais, o auto e a garantia */
 export function FechoVivo({ d, ir }: { d: Negocio; ir: Ir }) {
   const p = d.obra.plano!;
+  // 23/11 (Rúben: «mega next-level»): o auto de receção antes de existir (um rascunho, só para ver; o verdadeiro nasce ao encerrar)
+  const [verAuto, setVerAuto] = useState(false);
+  const rascunho: Negocio = d.obra.auto ? d : { ...d, obra: { ...d.obra, auto: { n: "Rascunho", q: "", estado: "por assinar" } } };
   const ultimas = p.tasks.map((t, ti) => ({ t, ti, f: [...(t.exec?.envios ?? [])].reverse().find((e) => e.fotos?.length)?.fotos?.[0] ?? t.exec?.fotos?.[0] })).filter((x) => x.f);
   const auto = d.obra.auto;
   return (
     <section aria-label="A vistoria e a garantia" className="space-y-3 rounded-2xl border border-border bg-card p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl bg-primary/[0.05] p-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold">O auto de receção</p>
+          <p className="text-xs text-muted-foreground">{d.obra.auto ? `${d.obra.auto.n} · ${d.obra.auto.estado}` : "Nasce ao encerrar a obra e vai ao portal para o cliente assinar. Veja já como fica: os trabalhos por fase, o antes e o depois, a planta final e a garantia."}</p>
+        </div>
+        <Button type="button" variant="outline" className="min-h-10 rounded-full" onClick={() => setVerAuto(true)}><FileText className="mr-1.5 h-4 w-4" aria-hidden="true" />{d.obra.auto ? "Ver o auto" : "Pré-visualizar o auto"}</Button>
+      </div>
+      {verAuto && (
+        <NaFrente>
+          <div className="fixed inset-0 z-[60] flex justify-center bg-black/40 sm:items-center sm:p-6" onClick={() => setVerAuto(false)}>
+            <div role="dialog" aria-modal="true" aria-label="O auto de receção" onClick={(e) => e.stopPropagation()} className="flex h-full w-full max-w-4xl flex-col bg-card shadow-2xl sm:h-auto sm:max-h-[92vh] sm:rounded-2xl">
+              <div className="flex items-center justify-between gap-3 border-b border-border p-4">
+                <p className="font-semibold">{d.obra.auto ? "O auto de receção" : "O auto de receção (pré-visualização)"}</p>
+                <Button type="button" variant="ghost" className="min-h-10" aria-label="Fechar" onClick={() => setVerAuto(false)}><X className="h-4 w-4" /></Button>
+              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto p-4"><AutoRececaoDoc d={rascunho} /></div>
+            </div>
+          </div>
+        </NaFrente>
+      )}
       <p className="text-sm font-semibold">As fotografias da vistoria</p>
       {ultimas.length ? (
         <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-5">

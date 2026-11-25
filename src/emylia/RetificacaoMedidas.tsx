@@ -13,6 +13,7 @@ import type { Ctx } from "./pecas";
 import { AbrirEstudioMedidas } from "./estudioPlano/EstudioMedidas";
 import { planoAprovadoDe, podeRetificar, supervisorDasMedidas } from "./preparacaoObra";
 import { rotuloOficios } from "./equipa/tecnicos";
+import { SUPERVISORES_MEDIDAS } from "./supervisoresMedidas";
 
 export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const CM = camposMedida(LINHAS[d.linha]);
@@ -22,6 +23,11 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   const aberto = podeRetificar(d);
   const sup = supervisorDasMedidas(d);
   const retif = medidasRetificadas(d);
+  // 23/11 (permissões, M7): quem mede/retifica é o supervisor de obra. Primeiro os supervisores e gestores de obra (o perfil com
+  // negocios.obra.planear, neg_gestores_obra), depois os técnicos (como antes). Sem a base (protótipo), só os técnicos.
+  const sups = SUPERVISORES_MEDIDAS;
+  const tecs = TECS.filter((x) => !sups.some((s) => s.id === x.id));
+  const supTecnico = !!sup && TECS.some((x) => x.id === sup.id);
 
   return (
     <div className="space-y-5">
@@ -43,9 +49,22 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           <select value={d.f.supervisor_medidas ?? ""} disabled={!meu} onChange={(e) => { const v = e.target.value; if (v) ctx.run(() => ctx.A.supervisorMedidas(d.id, v)); }}
             className="h-11 rounded-lg border border-input bg-background px-3 text-[15px] font-normal outline-none focus:border-primary focus:ring-2 focus:ring-primary/20 disabled:opacity-70">
             <option value="">Escolher a pessoa</option>
-            {TECS.map((x) => <option key={x.id} value={x.id}>{x.n} · {rotuloOficios(x)}</option>)}
+            {sups.length ? (
+              <>
+                <optgroup label="Supervisores e gestores de obra">
+                  {sups.map((x) => <option key={x.id} value={x.id}>{x.n}</option>)}
+                </optgroup>
+                {tecs.length > 0 && (
+                  <optgroup label="Técnicos de obra">
+                    {tecs.map((x) => <option key={x.id} value={x.id}>{x.n} · {rotuloOficios(x)}</option>)}
+                  </optgroup>
+                )}
+              </>
+            ) : TECS.map((x) => <option key={x.id} value={x.id}>{x.n} · {rotuloOficios(x)}</option>)}
           </select>
-          <span className="text-sm font-normal text-muted-foreground">{sup ? `${sup.n} tem o passo «Medir no local» no Hoje dele.` : "Escolhida a pessoa, ela recebe o aviso e o passo «Medir no local» no Hoje dela."}</span>
+          <span className="text-sm font-normal text-muted-foreground">{sup
+            ? (supTecnico || !sups.some((s) => s.id === sup.id) ? `${sup.n} tem o passo «Medir no local» no Hoje dele.` : `${sup.n} mede no local e aceita as medidas aqui, no Estúdio das medidas.`)
+            : "Escolhida a pessoa, ela recebe o aviso e o passo «Medir no local» no Hoje dela."}</span>
         </label>
       )}
 

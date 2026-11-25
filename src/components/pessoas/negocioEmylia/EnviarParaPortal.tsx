@@ -1,8 +1,9 @@
 // «Enviar para o portal do cliente» na proposta e no contrato do Negócio da Emylia: o mesmo envio das páginas de Propostas e de Contratos
 // (useClientPortalAccess), com o id real da proposta/contrato do negócio. Sem proposta/contrato real diz-se; «Enviada» só depois de o portal ter o documento.
+import type { ReactNode } from "react";
 import { Send } from "lucide-react";
 import { FOCO } from "@/components/negocio-metas/estilos";
-import { useEnviarParaPortalNegocio, type DocumentoParaPortal } from "@/hooks/pessoas/useEnviarParaPortalNegocio";
+import { useEnviarParaPortalNegocio, type AntesDeEnviar, type DocumentoParaPortal } from "@/hooks/pessoas/useEnviarParaPortalNegocio";
 import { cn } from "@/lib/utils";
 
 interface EnviarParaPortalProps {
@@ -12,12 +13,16 @@ interface EnviarParaPortalProps {
   podeEditar: boolean;
   /** 17/11: chamado depois de o portal ter o documento (o contrato do negócio passa a «enviado» no motor). */
   aoEnviar?: () => void;
+  /** 23/11: corre antes do envio (ex.: gravar o idioma da proposta); false = não se envia. */
+  antesDeEnviar?: AntesDeEnviar;
+  /** 23/11: o que se escolhe antes de enviar (ex.: os idiomas a enviar), por cima do botão. */
+  extra?: ReactNode;
 }
 
 const NOME: Record<DocumentoParaPortal, string> = { proposal: "proposta", contract: "contrato" };
 
-export function EnviarParaPortal({ negocioId, tipo, podeEditar, aoEnviar }: EnviarParaPortalProps) {
-  const p = useEnviarParaPortalNegocio(negocioId, tipo, aoEnviar);
+export function EnviarParaPortal({ negocioId, tipo, podeEditar, aoEnviar, antesDeEnviar, extra }: EnviarParaPortalProps) {
+  const p = useEnviarParaPortalNegocio(negocioId, tipo, aoEnviar, antesDeEnviar);
   const nome = NOME[tipo];
   const pode = podeEditar && p.podePermissao;
   return (
@@ -38,6 +43,7 @@ export function EnviarParaPortal({ negocioId, tipo, podeEditar, aoEnviar }: Envi
       {!p.aLer && !p.erro && p.estado === "enviado" && <p role="status" className="text-[15px] font-medium text-foreground">Enviado ao portal do cliente.</p>}
       {!p.aLer && !p.erro && p.estado !== "sem-documento" && (
         <>
+          {extra}
           <button
             type="button" disabled={!pode || p.aEnviar} onClick={() => p.enviar(false)}
             className={cn("inline-flex min-h-11 items-center gap-2 rounded-lg border border-input px-4 text-[15px] font-medium hover:bg-muted disabled:opacity-50", FOCO)}

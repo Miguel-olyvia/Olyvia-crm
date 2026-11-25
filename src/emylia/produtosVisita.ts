@@ -8,7 +8,7 @@
 // Só tipos de motor.ts e do Catálogo: assim o motor pode usar este ficheiro sem ciclos de importação.
 import type { Catalogo, No, Produto, Regra } from "./v2/catalogoModelo";
 import type { LinhaOrc, MedKey, Medidas, SvcId } from "./motor";
-import { nosDeProdutoDoRamo } from "./ramoDosProdutos";
+import { nosDeProdutoDoRamo, nosDoObjeto, ramoDaCategoriaProduto, ramosDaCategoriaProduto } from "./ramoDosProdutos";
 
 export const PREFIXO_PROD = "Produto · ";
 export const PREFIXO_CLIENTE = "Fornecido pelo cliente · ";
@@ -69,6 +69,39 @@ export function nosDoRamo(A: No[], no: string): Set<string> {
   const pai = x.pai ? A.find((y) => y.id === x.pai) : null;
   const [oficio, sub] = pai ? [pai.n, x.n] : [x.n, undefined];
   for (const p of nosDeProdutoDoRamo(A, oficio, sub)) for (const y of nosAbaixo(A, p)) r.add(y);
+  return r;
+}
+/** 23/11: os nós de uma troca: o ramo do serviço (nosDoRamo) e as categorias de produto que são o objeto da pergunta («o espelho» → Espelhos), com os de baixo. */
+export function ramoDaTroca(A: No[], no: string, pergunta?: string | null): Set<string> {
+  const r = nosDoRamo(A, no);
+  for (const p of nosDoObjeto(A, pergunta)) for (const y of nosAbaixo(A, p)) r.add(y);
+  return r;
+}
+/**
+ * 24/11 (contrato real MD 1605 no testarh: «O cliente mantém o pavimento?» → «Mantém» tirou o azulejo da PAREDE). Uma categoria de produto que vale
+ * em dois ramos (o porcelânico e o cerâmico: parede e chão, ramoDosProdutos.ts) entra no ramo das duas trocas. O produto é da outra quando a
+ * instalação que traz é outro serviço (o porcelânico da parede traz a «Instalação de Revestimento», não a do pavimento). Um produto debaixo
+ * do próprio nó da troca é sempre dela; as categorias de um só ramo não mudam.
+ */
+export function produtoDeOutroRamo(A: No[], o: { sid: SvcId; no: string }, p: Pick<ProdVisita, "no" | "svc">): boolean {
+  if (!p.no || !p.svc || p.svc === o.sid || nosAbaixo(A, o.no).has(p.no)) return false;
+  // a categoria do produto (ou uma de cima) que o mapa conhece
+  for (let c = A.find((y) => y.id === p.no); c; c = c.pai ? A.find((y) => y.id === c!.pai) : undefined) {
+    const rs = ramosDaCategoriaProduto(c.n);
+    if (rs.length) return rs.length > 1;
+  }
+  return false;
+}
+/**
+ * 24/11 (contrato real MD 1588 no testarh: «O cliente mantém o lavatório?» → «Mantém» tirou a base de duche, a coluna e a torneira, que estão
+ * no mesmo ramo «Louças e torneiras»). O que o «Mantém» tira: quando a pergunta nomeia o objeto («o lavatório», «a sanita e o bidé») e o Catálogo
+ * tem essa categoria, só os produtos dela; senão, o ramo todo da troca, como antes.
+ */
+export function nosQueOMantemTira(A: No[], no: string, pergunta?: string | null): Set<string> {
+  const objeto = nosDoObjeto(A, pergunta);
+  if (!objeto.length) return ramoDaTroca(A, no, pergunta);
+  const r = new Set<string>();
+  for (const id of objeto) for (const y of nosAbaixo(A, id)) r.add(y);
   return r;
 }
 /** "Canalização › Louças e torneiras". */
@@ -169,9 +202,10 @@ export function obrigacoes(K: Catalogo, sids: SvcId[], v: NecVisita, clienteForn
     const no = ex[sid];
     if (!no || !K.arvore.some((x) => x.id === no)) return [];
     // 26/10: com os ramos equivalentes (parede e pavimento), um produto de qualquer deles cumpre
-    const ramo = new Set([no, ...(K.equivalentes ?? []).filter((g) => g.includes(no)).flat()].flatMap((n) => [...nosDoRamo(K.arvore, n)]));
-    const por = prod.filter((p) => p.no && ramo.has(p.no) && p.q > 0).map((p) => p.n);
     const pergunta = K.perguntaManter?.[sid]?.trim() || null, resp = v.manter?.[sid];
+    // 23/11: com as categorias de produto que são o objeto da pergunta («o espelho» → Espelhos), como o seletor da troca
+    const ramo = new Set([no, ...(K.equivalentes ?? []).filter((g) => g.includes(no)).flat()].flatMap((n) => [...ramoDaTroca(K.arvore, n, pergunta)]));
+    const por = prod.filter((p) => p.no && ramo.has(p.no) && p.q > 0).map((p) => p.n);
     const estado: EstadoObrigacao =
       pergunta && resp === "sim" ? "mantem"
         : por.length ? "produto"
@@ -195,9 +229,10 @@ export function linhasClienteCompra(v: NecVisita, sids: SvcId[], clienteFornece:
   return sids.filter((s) => c[s] && v.manter?.[s] !== "sim").map((s) => ({ t: "mat", d: PREFIXO_CLIENTE + c[s], custo: 0, preco: 0 }));
 }
 
-/** Os produtos que se podem escolher num ramo (sem os consumíveis das receitas, que não são escolha do cliente). */
-export function produtosDoRamo(K: Catalogo, no: string, consumiveis: Set<string>): Produto[] {
-  const ramo = nosDoRamo(K.arvore, no);
+/** Os produtos que se podem escolher num ramo (sem os consumíveis das receitas, que não são escolha do cliente).
+ *  23/11: com a pergunta da troca, também os das categorias de produto que são o objeto dela (ramoDaTroca). */
+export function produtosDoRamo(K: Catalogo, no: string, consumiveis: Set<string>, pergunta?: string | null): Produto[] {
+  const ramo = ramoDaTroca(K.arvore, no, pergunta);
   return K.produtos.filter((p) => p.no && ramo.has(p.no) && !consumiveis.has(p.n));
 }
 
@@ -225,6 +260,11 @@ export function fotografia(p: Produto, q: number, cliente = false, alvo?: number
   const pvp = venda(p, alvo);
   if (pvp != null) v.pvp = pvp;
   return v;
+}
+/** 23/11: um produto do Catálogo a partir da fotografia da visita (para o repor como estava, ex.: o «Desfazer» do «Mantém»). */
+export function produtoDaFotografia(v: ProdVisita): Produto {
+  return { id: v.id, n: v.n, un: v.un, custo: v.custo, marca: "", fornecedor: "", data: "", no: v.no,
+    ...(v.svc ? { servico: v.svc, fatorServico: v.fator ?? 1 } : {}), ...(v.pvp != null ? { pvp: v.pvp } : {}) };
 }
 /** Junta (ou substitui) um produto na lista. */
 export const juntarProduto = (prod: ProdVisita[], v: ProdVisita): ProdVisita[] =>
@@ -289,9 +329,20 @@ export function partesDoModelo(mat: MatModelo, prod: ProdVisita[], manter?: Reco
     // 17/11: com as categorias de produto que pertencem a este ramo («Sanitas» e «Bases Duche» são «Louças e torneiras»)
     return raiz ? { raiz: raiz.id, nos: nosDoRamo(arvore, raiz.id) } : null;
   };
+  const Rs = mat.partes.map((pt) => (pt.ramo ? ramo(pt.ramo) : null));
+  // 24/11: cada produto conta numa só parte (o porcelânico é da parede e do chão): a do seu ramo principal, se o modelo a tem; senão, a 1.ª
+  const semAc = (x: string) => x.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+  const parteDe = (p: ProdVisita): number => {
+    const ks = Rs.map((R, k) => (R && p.no && R.nos.has(p.no) ? k : -1)).filter((k) => k >= 0);
+    if (ks.length < 2) return ks[0] ?? -1;
+    const no = arvore!.find((x) => x.id === p.no), prin = no ? ramoDaCategoriaProduto(no.n) : null;
+    const k = prin ? ks.find((i) => { const r = mat.partes![i].ramo; return !!r && semAc(r[0]) === semAc(prin[0]) && semAc(r[1] ?? "") === semAc(prin[1]); }) : undefined;
+    return k ?? ks[0];
+  };
+  const dono = new Map(ativos.map((p) => [p, parteDe(p)] as const));
   return mat.partes.map((pt, k) => {
-    const d = pt.d ?? `parte ${k + 1}`, est = r2(mat.custo * pt.peso), R = pt.ramo ? ramo(pt.ramo) : null;
-    const por = R ? ativos.filter((p) => p.no && R.nos.has(p.no)) : [];
+    const d = pt.d ?? `parte ${k + 1}`, est = r2(mat.custo * pt.peso), R = Rs[k];
+    const por = R ? ativos.filter((p) => dono.get(p) === k) : [];
     const mantida = !!pt.manter?.some((sid) => manter?.[sid] === "sim"), tirada = fora.includes(d);
     const custo = mantida || tirada || (inteiras && por.length > 0) ? 0 : r2(Math.max(0, est - por.reduce((a, p) => a + p.custo * p.q, 0)));
     return { d, est, custo, preco: r2(mat.preco * (custo / mat.custo)), raiz: R?.raiz ?? null, nos: R?.nos ?? null, por, mantida, fora: tirada };

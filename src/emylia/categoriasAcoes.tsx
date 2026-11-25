@@ -1,19 +1,23 @@
 // 16/11: o que os separadores «Categorias» e «Subcategorias» da gestão do Catálogo partilham: as ações de uma linha (Subir, Descer, Renomear,
 // Desativar/Reativar), o formulário de renomear com a confirmação e a lógica de gravar (criar, renomear, ativar, reordenar). Quem decide é a base
 // (cat_* de 20270117700000): aqui só se grava e relê-se depois de cada ação, também em falha (useGestaoLista.correr).
-import { useState } from "react";
-import { ChevronDown, ChevronUp, Pencil, Tag } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Box, ChevronDown, ChevronUp, Pencil, Tag } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import {
-  estadoCategoria, guardarCategoria, reordenarCategorias, type CategoriaGestao, type SubcategoriaGestao,
+  estadoCategoria, guardarCategoria, reordenarCategorias, type CategoriaGestao, type ResG, type SubcategoriaGestao,
 } from "./categoriasMarcasGestao";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { guardarSigla } from "./skuDados";
 import { FormSigla } from "./siglasGestao";
-import { BOTAO_ICONE, BOTAO_TEXTO, ConfirmarMudanca, FormNome, Razao, produtos, protegido, useGestaoLista } from "./gestaoPecas";
+import { CampoModelo3D } from "./CampoModelo3D";
+import { definirModelo3d } from "./modelo3dDados";
+import { herdadoDe, rotuloDoModelo3D } from "./planta3d/modelos3dEscolha";
+import { BOTAO_ICONE, BOTAO_TEXTO, ConfirmarMudanca, ENTRA, FormNome, Razao, produtos, protegido, useGestaoLista } from "./gestaoPecas";
 
 export type Item = SubcategoriaGestao;
-export type Aberto = { t: "nova"; pai: string | null } | { t: "renomear"; id: string } | { t: "sigla"; id: string };
+export type Aberto = { t: "nova"; pai: string | null } | { t: "renomear"; id: string } | { t: "sigla"; id: string } | { t: "modelo3d"; id: string };
 /** O que espera confirmação: renomear algo que produtos usam (ou de uso desconhecido). */
 export interface Pendente { item: Item; pai: string | null; nome: string }
 type Gestao = ReturnType<typeof useGestaoLista<CategoriaGestao[]>>;
@@ -23,10 +27,13 @@ const nomeTipo = (pai: string | null) => (pai ? "subcategoria" : "categoria");
 export interface Ctx {
   podeEditar: boolean; aGravar: boolean; aberto: Aberto | null; pend: Pendente | null; msg: (onde: string) => string | null;
   abrir: (a: Aberto) => void; fechar: (focar?: string) => void;
-  onCriar: (pai: CategoriaGestao | null, nome: string) => void; onRenomear: (item: Item, pai: string | null, nome: string) => void;
+  /** `modelo`: o «Modelo 3D» escolhido ao criar (null: herda); define-se logo a seguir a criar, com o id que a base deu. */
+  onCriar: (pai: CategoriaGestao | null, nome: string, modelo?: string | null) => void; onRenomear: (item: Item, pai: string | null, nome: string) => void;
   onConfirmar: () => void; onVoltarConfirmar: () => void;
   /** 16/11: muda a sigla (SKU); só vale para os SKU futuros. */
   onSigla: (item: Item, pai: CategoriaGestao | null, sigla: string) => void;
+  /** 24/11: muda o «Modelo 3D» da categoria ou subcategoria (null: volta a herdar). */
+  onModelo3d: (item: Item, pai: CategoriaGestao | null, modelo: string | null) => void;
   onAtivar: (item: Item, pai: CategoriaGestao | null) => void; onMover: (pai: CategoriaGestao | null, irmas: Item[], i: number, d: -1 | 1) => void;
   /** Uma razão para não reordenar (por exemplo, a lista está filtrada); sem ela, a ordem depende só da posição. */
   semOrdem?: string | null;
@@ -43,9 +50,27 @@ export function useAcoesCategorias(real: FichaProdutoReal, g: Gestao, focoCriar:
   const abrir = (a: Aberto) => { setAberto(a); g.setErro(null); setPend(null); };
   const fechar = (focar?: string) => { setAberto(null); g.setErro(null); setPend(null); if (focar) g.setFoco(focar); };
 
-  const criar = (pai: CategoriaGestao | null, nome: string) =>
-    void g.correr(() => guardarCategoria(org, { id: null, pai: pai?.id ?? null, nome }), pai ? `Subcategoria «${nome}» criada em «${pai.nome}».` : `Categoria «${nome}» criada.`, pai ? `nova:${pai.id}` : "novo")
+  /** Cria e, se houve modelo 3D escolhido, define-o com o id que a base devolveu. Se a categoria ficou criada mas o modelo não, conta como criada e o aviso diz o que falhou
+   *  (um formulário a pedir para a criar outra vez só daria «já existe»). */
+  const criarComModelo = async (pai: CategoriaGestao | null, nome: string, modelo: string | null): Promise<ResG<unknown>> => {
+    const r = await guardarCategoria(org, { id: null, pai: pai?.id ?? null, nome });
+    if (!r.ok || !modelo) return r;
+    const criada = (r.v as { categoria?: { id?: unknown } } | null)?.categoria?.id;
+    const m = typeof criada === "string" && criada ? await definirModelo3d(org, "categoria", criada, modelo) : null;
+    return m && m.ok ? r : { ok: true, v: { modelo3dErro: m && m.ok === false ? m.erro : "a base não devolveu o id da categoria criada." } };
+  };
+  const criar = (pai: CategoriaGestao | null, nome: string, modelo: string | null = null) =>
+    void g.correr(() => criarComModelo(pai, nome, modelo), (v) => {
+      const base = pai ? `Subcategoria «${nome}» criada em «${pai.nome}»` : `Categoria «${nome}» criada`;
+      const falha = (v as { modelo3dErro?: unknown } | null)?.modelo3dErro;
+      if (typeof falha === "string") return `${base}, mas o modelo 3D não ficou: ${falha}`;
+      return modelo ? `${base}. Modelo 3D: ${rotuloDoModelo3D(modelo)}.` : `${base}.`;
+    }, pai ? `nova:${pai.id}` : "novo")
       .then((ok) => { if (ok) { extra.aoCriar?.(); fechar(focoCriar(pai)); } });
+  const gravarModelo3d = (item: Item, _pai: CategoriaGestao | null, modelo: string | null) =>
+    void g.correr(() => definirModelo3d(org, "categoria", item.id, modelo),
+      modelo ? `Modelo 3D de «${item.nome}»: ${rotuloDoModelo3D(modelo)}.` : `Modelo 3D de «${item.nome}»: automático, herda do nível de cima.`, `m3d:${item.id}`)
+      .then((ok) => { if (ok) fechar(`m3d-${item.id}`); });
   const gravarNome = (item: Item, pai: string | null, nome: string) =>
     g.correr(() => guardarCategoria(org, { id: item.id, pai, nome }), `${pai ? "Subcategoria" : "Categoria"} «${nome}» guardada.`, `ren:${item.id}`).then((ok) => { if (ok) fechar(`ren-${item.id}`); });
   /** Renomear uma usada por produtos (ou de uso desconhecido) pede confirmação; sem produtos grava logo. */
@@ -73,7 +98,7 @@ export function useAcoesCategorias(real: FichaProdutoReal, g: Gestao, focoCriar:
   };
   const ctx: Ctx = {
     podeEditar, aGravar: g.aGravar, aberto, pend, msg: g.msg, abrir, fechar, onCriar: criar, onRenomear: renomear, onConfirmar: confirmar,
-    onVoltarConfirmar: voltarConfirmar, onSigla: gravarSigla, onAtivar: ativar, onMover: mover,
+    onVoltarConfirmar: voltarConfirmar, onSigla: gravarSigla, onModelo3d: gravarModelo3d, onAtivar: ativar, onMover: mover,
   };
   return { ctx, aberto, abrir, fechar };
 }
@@ -85,6 +110,7 @@ export function Acoes({ item, pai, irmas, g, tipo }: { item: Item; pai: Categori
   const k = irmas.findIndex((x) => x.id === item.id);
   const aRenomear = g.aberto?.t === "renomear" && g.aberto.id === item.id;
   const aSigla = g.aberto?.t === "sigla" && g.aberto.id === item.id;
+  const aModelo = g.aberto?.t === "modelo3d" && g.aberto.id === item.id;
   const bloqueada = !item.ativo && !!pai && !pai.ativo; // uma subcategoria não se reativa com a categoria desativada
   // nada de disabled: o botão perderia o foco enquanto se grava; aria-disabled, razão ligada e clique sem efeito
   const grav = g.aGravar ? "A guardar…" : null;
@@ -109,6 +135,10 @@ export function Acoes({ item, pai, irmas, g, tipo }: { item: Item; pai: Categori
         <Tag className="h-4 w-4" aria-hidden="true" />
       </button>
       <Razao id={`rz-sig-${item.id}`}>{grav}</Razao>
+      <button id={`m3d-${item.id}`} type="button" aria-label={`Mudar o modelo 3D ${pai ? "da subcategoria" : "da categoria"} ${item.nome}${suf}`} aria-expanded={aModelo} className={BOTAO_ICONE} {...protegido(grav, `rz-m3d-${item.id}`, () => g.abrir({ t: "modelo3d", id: item.id }))}>
+        <Box className="h-4 w-4" aria-hidden="true" />
+      </button>
+      <Razao id={`rz-m3d-${item.id}`}>{grav}</Razao>
       <button id={`act-${item.id}`} type="button" aria-label={`${item.ativo ? "Desativar" : "Reativar"} ${item.nome}${suf}`} className={cn(BOTAO_TEXTO, "border-transparent")} {...protegido(rAtivar, `rz-act-${item.id}`, () => g.onAtivar(item, pai))}>
         {item.ativo ? "Desativar" : "Reativar"}
       </button>
@@ -143,5 +173,48 @@ export function EditarSigla({ item, pai, g }: { item: Item; pai: CategoriaGestao
       <FormSigla rotulo={`Sigla da ${nomeTipo(pai?.id ?? null)}`} inicial={item.sigla} exigeLetra aGravar={g.aGravar} erro={g.msg(`sig:${item.id}`)} idGuardar={`gs-${item.id}`}
         onEnviar={(s) => g.onSigla(item, pai, s)} onCancelar={() => g.fechar(`sig-${item.id}`)} />
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ Modelo 3D (24/11) */
+/** O que um nível herda: a subcategoria herda da categoria; a categoria só tem o classificador automático. */
+const herancaDe = (pai: CategoriaGestao | null) => herdadoDe({ categoria: pai ? { nome: pai.nome, modelo: pai.modelo3d } : null });
+
+/** «Modelo 3D: Sanita de chão» ou «Modelo 3D: automático», na linha de uma categoria ou subcategoria. */
+export function Modelo3DTexto({ modelo }: { modelo: string | null | undefined }) {
+  return <span className={cn("rounded-md bg-muted px-2 py-0.5 text-sm", modelo ? "text-foreground/75" : "text-muted-foreground")}>{`Modelo 3D: ${modelo ? rotuloDoModelo3D(modelo) : "automático"}`}</span>;
+}
+
+/** O painel de mudar o «Modelo 3D», por baixo da linha (o mesmo sítio que o de renomear e o da sigla). */
+export function EditarModelo3D({ item, pai, g }: { item: Item; pai: CategoriaGestao | null; g: Ctx }) {
+  if (!g.podeEditar || g.aberto?.t !== "modelo3d" || g.aberto.id !== item.id) return null;
+  return <PainelModelo3D item={item} pai={pai} g={g} />;
+}
+function PainelModelo3D({ item, pai, g }: { item: Item; pai: CategoriaGestao | null; g: Ctx }) {
+  const [modelo, setModelo] = useState<string | null>(item.modelo3d ?? null);
+  const porque = g.aGravar ? "A guardar…" : modelo === (item.modelo3d ?? null) ? "Escolha outro modelo para guardar." : null;
+  return (
+    <div className={cn("mt-3 grid gap-3 rounded-xl border border-border bg-card p-3", ENTRA)}>
+      <CampoModelo3D valor={modelo} heranca={herancaDe(pai)} onChange={setModelo} nivel={pai ? "subcategoria" : "categoria"} ocupado={g.aGravar} erro={g.msg(`m3d:${item.id}`)} />
+      <div className="flex flex-wrap gap-2">
+        <Button id={`gm-${item.id}`} className="min-h-11 text-[15px] aria-disabled:cursor-not-allowed aria-disabled:opacity-50" {...protegido(porque, `rz-gm-${item.id}`, () => g.onModelo3d(item, pai, modelo))}>Guardar modelo 3D</Button>
+        <Razao id={`rz-gm-${item.id}`}>{porque}</Razao>
+        <Button variant="outline" className="min-h-11 text-[15px] aria-disabled:cursor-not-allowed aria-disabled:opacity-50" {...protegido(g.aGravar ? "A guardar…" : null, `rz-gm-${item.id}`, () => g.fechar(`m3d-${item.id}`))}>Cancelar</Button>
+      </div>
+    </div>
+  );
+}
+
+/** O formulário de criar uma categoria (pai null) ou subcategoria com o seletor do «Modelo 3D» por baixo do nome; `antes`: um campo por cima (a categoria, em Subcategorias). */
+export function FormNovoRamo({ pai, eSub = !!pai, rotuloNome, botao, aGravar, erro, idGuardar, antes, exige, onEnviar, onCancelar }: {
+  /** A categoria de que a nova herda (null: uma categoria de topo, ou uma subcategoria cuja categoria ainda não foi escolhida: `eSub`). */
+  pai: CategoriaGestao | null; eSub?: boolean; rotuloNome: string; botao: string; aGravar: boolean; erro: string | null; idGuardar: string; antes?: ReactNode; exige?: string | null;
+  onEnviar: (nome: string, modelo: string | null) => void; onCancelar: () => void;
+}) {
+  const [modelo, setModelo] = useState<string | null>(null);
+  return (
+    <FormNome rotuloNome={rotuloNome} inicial="" botao={botao} aGravar={aGravar} erro={erro} idGuardar={idGuardar} antes={antes} exige={exige}
+      depois={<CampoModelo3D valor={modelo} heranca={herancaDe(pai)} onChange={setModelo} nivel={eSub ? "subcategoria" : "categoria"} ocupado={aGravar} />}
+      onEnviar={(nome) => onEnviar(nome, modelo)} onCancelar={onCancelar} />
   );
 }

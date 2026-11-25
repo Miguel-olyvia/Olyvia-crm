@@ -37,6 +37,9 @@ export interface ContextoDasVisitas {
   podeEditar: boolean;
   /** 12/11: as visitas do CRM já lidas por quem monta os passos (useVisitasDoNegocio): «Marcar a visita» fica feito com uma ativa. Sem elas, como antes. */
   visitasCrm?: readonly VisitaDoNegocio[] | undefined;
+  /** 20/11: chamado depois de a visita ficar gravada no CRM (marcar ou remarcar): /negocios relê o negócio (o responsável e o
+   *  pode_gravar podem ter mudado). Sem ele, como antes. */
+  aposGravarVisita?: () => void;
 }
 
 type Modo = "visitas" | "primeira";
@@ -154,6 +157,7 @@ function Corpo({ c, modo }: { c: ContextoDasVisitas; modo: Modo }) {
       return n;
     }, g.presentes);
     if (modo === "primeira" && d.fase < 2) setAviso(AVISO_SEM_PASSAR);
+    c.aposGravarVisita?.();
   };
   const passarComAMarcada = (v: VisitaDoNegocio): void => {
     setAviso(null);

@@ -49,9 +49,13 @@ const STATUS_LABEL_KEYS: Record<string, string> = {
 
 import { PassosDoNegocio, passoDoNegocio } from "@/components/portal/negocio/PassosDoNegocio";
 import { ConversaDoNegocio } from "@/components/portal/negocio/ConversaDoNegocio";
-import { DocumentoObra } from "@/components/portal/obra/DocumentoObra";
+import { CapaDoDocumento, DocumentoObra } from "@/components/portal/obra/DocumentoObra";
 import { propostaDaVista } from "@/components/portal/obra/dadosObra";
 import { useVistaObra } from "@/components/portal/obra/useVistaObra";
+import { variaveisDaObra } from "@/components/portal/obra/variaveisDaObra";
+import { capaDaVista } from "@/components/portal/obra/capaEOrcamento";
+import { temTextoUtil } from "@/lib/textoDaProposta";
+import { numeroDaProposta, versaoDaProposta } from "@/lib/numeroDocumento";
 
 const ClientPortalProposalDetail = () => {
   const { id } = useParams<{ id: string }>();
@@ -98,6 +102,22 @@ const ClientPortalProposalDetail = () => {
   const obra = useMemo(
     () => propostaDaVista(vistaObra, { docs: { proposta: proposalStatus }, validaAte: proposalValidUntil, comercial: commercialName }),
     [vistaObra, proposalStatus, proposalValidUntil, commercialName],
+  );
+  // 23/11: o número como a Emylia o mostra («PR 2026/<n.º do negócio>», da vista); sem a vista, o guardado. E as variáveis dos textos do template.
+  const proposalCreatedAt: string | null = portalData?.proposal?.created_at ?? null;
+  const proposalNumber: string | null = portalData?.proposal?.proposal_number ?? null;
+  const numeroMostrado = useMemo(
+    () => numeroDaProposta({
+      numeroNegocio: vistaObra?.d?.id ?? null, versao: vistaObra?.d ? versaoDaProposta(vistaObra.d) : null, criadoEm: proposalCreatedAt, guardado: proposalNumber,
+    }),
+    [vistaObra, proposalCreatedAt, proposalNumber],
+  );
+  const variaveis = useMemo(() => variaveisDaObra(obra), [obra]);
+  // 23/11: «o que está escrito no template é o verdadeiro»: sem texto de cabeçalho no template, a carta e o resumo da Emylia
+  const cabecalhoDoTemplate: unknown = portalData?.template?.header_text;
+  const capa = useMemo(
+    () => (temTextoUtil(cabecalhoDoTemplate) ? null : capaDaVista(vistaObra, obra, { proposta: proposalStatus })),
+    [cabecalhoDoTemplate, vistaObra, obra, proposalStatus],
   );
 
   const reloadPortalData = useCallback(async () => {
@@ -496,6 +516,9 @@ const ClientPortalProposalDetail = () => {
           idiomaEscolhido={idiomaEscolhido}
           onIdiomaEscolhidoChange={setIdiomaEscolhido}
           documentoObra={obra ? <DocumentoObra dados={obra} idioma={idiomaDoDocumento} cor={portalData.template?.primary_color || undefined} /> : undefined}
+          capaObra={capa ? <CapaDoDocumento capa={capa} idioma={idiomaDoDocumento} /> : undefined}
+          numeroMostrado={numeroMostrado}
+          variaveis={variaveis}
           statusLabel={statusLabel}
           canActOnProposal={canActOnProposal}
           actionLoading={actionLoading}
@@ -548,7 +571,7 @@ const ClientPortalProposalDetail = () => {
               // Com a vista do negócio, o PDF leva também a obra (os mesmos blocos do ecrã), no idioma do documento. Com
               // várias versões, o PDF leva só a que o cliente está a ver (o PDF com todas continua no CRM).
               const obraNoPdf = obra ? { dados: obra, idioma: idiomaDoDocumento, cor: portalData.template?.primary_color || undefined } : null;
-              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, payload, obraNoPdf, { idiomas: idiomasDoPdf });
+              const { blob, fileName } = await generateProposalPdfBlob(proposal.id, payload, obraNoPdf, { idiomas: idiomasDoPdf, ...(vistaObra?.d ? { numeroMostrado } : {}), ...(obra ? { variaveis } : {}) });
               downloadBlob(blob, fileName);
             } catch (e: unknown) {
               toast({

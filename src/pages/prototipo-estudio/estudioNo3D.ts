@@ -2,11 +2,11 @@
 // (emylia/planta3d): a ponte dele (deLegado) passa a planta para o espaço 3D; aqui cada peça com produto escolhido leva um modelo do tipo
 // dela com a medida e a cor do produto, e o revestimento e o pavimento escolhidos dão o das paredes e do chão (o mais parecido da lista
 // dele). Os modelos detalhados (torneiras, lava-loiças, placas) entram quando os produtos do Estúdio forem os do Catálogo verdadeiro.
-import type { PecaPlanta, Planta } from "@/emylia/planta";
+import { cantos, type LadoColuna, type PecaPlanta, type Planta } from "@/emylia/planta";
 import { centroPeca, normalInteriorCm, paredeMaisPertoCm, poligonoDe } from "@/emylia/planta3d/pecas3d";
 import { deLegado, modeloGenerico, type ResLegado } from "@/emylia/planta3d/ligacao";
-import { ESPEC, type ProdutoModelo3D } from "@/emylia/planta3d/catalogo3d";
-import type { Revestimentos } from "@/emylia/planta3d/modelo";
+import { ESPEC, modeloDoProduto as modeloDoCatalogo, type ProdutoModelo3D, type TipoMockup } from "@/emylia/planta3d/catalogo3d";
+import type { PecaProduto, Revestimentos } from "@/emylia/planta3d/modelo";
 import type { Revestimento, Superficie } from "@/emylia/planta3d/revestimentos";
 import { medidasDoTexto, semAcento } from "./pesquisaEstudio";
 import { produto, type Produto } from "./catalogoFake";
@@ -57,14 +57,151 @@ export function materialDoProduto(prod: Pick<Produto, "id" | "n" | "hex" | "core
 function modeloDoProduto(tipo: Planta["pecas"][number]["tipo"], prod: Produto, wCm: number, hCm: number): ProdutoModelo3D {
   const g = modeloGenerico(tipo, prod.w ?? wCm, prod.h ?? hCm), e = ESPEC[g.tipo];
   const alto = prod.z1 !== undefined && prod.z0 !== undefined ? (prod.z1 - prod.z0) / 100 : g.mockup3d.altura;
+  // 24/11: o «Modelo 3D» escolhido (já resolvido: produto > subcategoria > categoria) manda sobre o genérico do tipo; um id que o 3D não conhece não conta
+  const m3d = prod.modelo3d ? modeloDoCatalogo({ id: `estudio:${prod.id}`, n: prod.n, no: null, modelo3d: prod.modelo3d, dim: [prod.w ?? wCm, prod.h ?? hCm, alto * 100] }) : null;
+  if (m3d?.escolha) {
+    return { ...m3d, escolha: { modelo: m3d.escolha.modelo, origem: prod.modelo3dOrigem ?? "produto" }, categoria: "Estúdio", alturaOmissao: (prod.z0 ?? 0) / 100 || m3d.alturaOmissao, demo: true, mockup3d: { ...m3d.mockup3d, altura: alto, cor: prod.hex } };
+  }
   return {
     ...g, produtoId: `estudio:${prod.id}`, nome: prod.n, categoria: "Estúdio", montagem: e.mont, alturaOmissao: (prod.z0 ?? 0) / 100 || e.alt, demo: true,
     mockup3d: { ...g.mockup3d, altura: alto, cor: prod.hex },
   } as ProdutoModelo3D;
 }
 
-/** O espaço 3D do Estúdio: `depois` com os produtos escolhidos; o antes, como está. */
-export function espacoDoEstudio(p: Projeto, qual: "antes" | "depois"): ResLegado {
+/** 23/11: o que o 3D do depois mostra a mais do que a planta (o Estúdio da obra). */
+export interface Mais3D {
+  /** As paredes e o chão como estavam (o revestimento e o pavimento ainda por fazer). */
+  semRevestimento?: boolean; semPavimento?: boolean;
+  /** Produtos do contrato que a planta não tem como peça: o espelho fica por cima do móvel; a porta e a janela dão a cor às aberturas. */
+  espelho?: Produto; porta?: Produto; janela?: Produto;
+}
+
+/** Os ids das peças a mais que o 3D do depois junta à planta (para marcar o que está feito). */
+export const idResguardo = (base: string) => `${base}-resguardo`;
+export const idColunaDuche = (base: string) => `${base}-coluna-duche`;
+export const ID_ESPELHO_CONTRATO = "contrato-espelho";
+
+/** O espaço 3D do Estúdio: `depois` com os produtos escolhidos (e o que vai com a base: o resguardo e a coluna de duche); o antes, como está. */
+export function espacoDoEstudio(p: Projeto, qual: "antes" | "depois", mais: Mais3D = {}): ResLegado {
+  const base3d = espacoSoDaPlanta(p, qual, mais);
+  if (qual === "antes" || "erro" in base3d || !base3d.ok) return base3d;
+  const pecas = [...base3d.espaco.pecas], modelos = { ...base3d.modelos };
+  const juntar = (pc: PecaProduto, m: ProdutoModelo3D) => { pecas.push(pc); modelos[m.produtoId] = m; };
+  for (const pc of p.depois.pecas) {
+    if (pc.tipo !== "base" && pc.tipo !== "banheira") continue;
+    const ac = p.acompanha[pc.id] ?? {};
+    const resg = pc.tipo === "base" ? produto(ac.resguardo) : undefined, col = produto(ac.coluna_duche);
+    if (resg) { const r = resguardoNo3D(pc, p.depois, resg); juntar(r.pc, r.m); }
+    if (col) { const r = colunaNo3D(pc, p.depois, col); juntar(r.pc, r.m); }
+  }
+  if (mais.espelho && !p.depois.pecas.some((x) => x.tipo === "espelho")) {
+    const movel = p.depois.pecas.find((x) => x.tipo === "movel" || x.tipo === "lava");
+    if (movel) { const r = espelhoNo3D(movel, p.depois, mais.espelho); juntar(r.pc, r.m); }
+  }
+  const corDe = (a: { tipo: string }) => (a.tipo === "porta" ? mais.porta?.hex : a.tipo === "janela" ? mais.janela?.hex : undefined);
+  const aberturas = base3d.espaco.aberturas.map((a) => { const cor = corDe(a); return cor ? { ...a, cor } : a; });
+  return { ...base3d, modelos, espaco: { ...base3d.espaco, pecas, aberturas } };
+}
+
+/** Um modelo do tipo `tipo` com o nome, a medida (cm) e a cor do produto. */
+function modeloDe(tipo: TipoMockup, prod: Produto, larguraCm: number, profundidadeCm: number, alturaCm: number): ProdutoModelo3D {
+  const e = ESPEC[tipo];
+  return {
+    produtoId: `estudio:${prod.id}`, nome: prod.n, tipo, categoria: "Estúdio", montagem: e.mont, alturaOmissao: e.alt, demo: true,
+    dimensoes: { larguraCm, profundidadeCm, alturaCm, deNome: false },
+    mockup3d: { tipo, largura: larguraCm / 100, profundidade: profundidadeCm / 100, altura: alturaCm / 100, cor: tipo === "resguardo" ? e.cor : prod.hex },
+  };
+}
+
+/** Os lados de uma peça da planta (cm): o meio de cada lado, a direção para fora e o comprimento, já com a rotação da peça. */
+function ladosDe(pc: PecaPlanta): { meio: { x: number; y: number }; n: { x: number; y: number }; c: number }[] {
+  const cx = pc.x + pc.w / 2, cy = pc.y + pc.h / 2, a = ((pc.rot ?? 0) * Math.PI) / 180, cos = Math.cos(a), sin = Math.sin(a);
+  const rodar = (x: number, y: number) => ({ x: x * cos - y * sin, y: x * sin + y * cos });
+  return [
+    { o: { x: 0, y: -pc.h / 2 }, n: { x: 0, y: -1 }, c: pc.w }, { o: { x: 0, y: pc.h / 2 }, n: { x: 0, y: 1 }, c: pc.w },
+    { o: { x: -pc.w / 2, y: 0 }, n: { x: -1, y: 0 }, c: pc.h }, { o: { x: pc.w / 2, y: 0 }, n: { x: 1, y: 0 }, c: pc.h },
+  ].map((l) => { const o = rodar(l.o.x, l.o.y); return { meio: { x: cx + o.x, y: cy + o.y }, n: rodar(l.n.x, l.n.y), c: l.c }; });
+}
+/** O lado virado para o meio da divisão (o aberto) e o do lado contrário (o da parede). */
+function ladoAbertoEFundo(pc: PecaPlanta, pl: Planta) {
+  const pts = cantos(pl.paredes, pl.o).slice(0, -1);
+  const m = { x: pts.reduce((s, q) => s + q.x, 0) / (pts.length || 1), y: pts.reduce((s, q) => s + q.y, 0) / (pts.length || 1) };
+  const L = ladosDe(pc).map((l) => ({ ...l, d: Math.hypot(l.meio.x - m.x, l.meio.y - m.y) })).sort((a, b) => a.d - b.d);
+  const aberto = L[0], fundo = L.find((l) => Math.abs(l.n.x + aberto.n.x) < 1e-6 && Math.abs(l.n.y + aberto.n.y) < 1e-6) ?? L[3];
+  return { aberto, fundo };
+}
+/** O ângulo do 3D de uma peça cuja frente olha para `n` (a mesma conta de deLegado: atan2(nx, ny)). */
+const anguloDe = (n: { x: number; y: number }) => Math.round((Math.atan2(n.x, n.y) * 180) / Math.PI);
+
+/** O resguardo: um painel no lado aberto da base, com a largura do nome do produto (a medida até 1,6 m) ou o lado todo. */
+function resguardoNo3D(pc: PecaPlanta, pl: Planta, prod: Produto): { pc: PecaProduto; m: ProdutoModelo3D } {
+  const { aberto } = ladoAbertoEFundo(pc, pl);
+  const md = medidasDoTexto(prod.n) ?? [];
+  const alto = md.find((x) => x >= 180 && x <= 220) ?? ESPEC.resguardo.dim[2];
+  const largo = Math.min(aberto.c, md.find((x) => x >= 30 && x <= 160) ?? aberto.c);
+  // um painel mais curto do que o lado fica encostado à ponta do lado (a outra fica livre para entrar)
+  const t = { x: -aberto.n.y, y: aberto.n.x }, desvio = (aberto.c - largo) / 2;
+  const x = aberto.meio.x - t.x * desvio - aberto.n.x * 1, y = aberto.meio.y - t.y * desvio - aberto.n.y * 1;
+  const m = modeloDe("resguardo", prod, largo, 2, alto);
+  return { m, pc: { id: idResguardo(pc.id), produtoId: m.produtoId, x: x / 100, y: y / 100, rotacao: anguloDe(aberto.n), paredeEncosto: null, largura: largo / 100, profundidade: 0.02, montagem: "chao", altura: 0.03, espelhada: false, nome: prod.n } };
+}
+type Lado = ReturnType<typeof ladosDe>[number];
+/** A distância (cm) do ponto `q` à parede mais perto da planta. */
+function distanciaAParede(q: { x: number; y: number }, pl: Planta): number {
+  const pts = cantos(pl.paredes, pl.o);
+  let d = Infinity;
+  for (let i = 0; i + 1 < pts.length; i++) {
+    const a = pts[i], b = pts[i + 1], dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy;
+    const t = l2 ? Math.max(0, Math.min(1, ((q.x - a.x) * dx + (q.y - a.y) * dy) / l2)) : 0;
+    d = Math.min(d, Math.hypot(q.x - (a.x + t * dx), q.y - (a.y + t * dy)));
+  }
+  return d;
+}
+/** Os lados da base onde a coluna pode ficar: o do fundo e, olhando para a base de dentro da divisão, o da esquerda e o da direita. */
+function ladosParaColunaDe(pc: PecaPlanta, pl: Planta): Partial<Record<LadoColuna, Lado>> {
+  const { aberto, fundo } = ladoAbertoEFundo(pc, pl);
+  // quem olha para a base olha na direção do fundo (v); a esquerda dele é (v.y, −v.x), com o y para baixo como na planta
+  const v = fundo.n, esq = { x: v.y, y: -v.x };
+  const lados = ladosDe(pc).filter((l) => l !== aberto && l !== fundo && Math.abs(l.n.x * v.x + l.n.y * v.y) < 1e-6);
+  const de = (sinal: number) => lados.find((l) => l.n.x * esq.x * sinal + l.n.y * esq.y * sinal > 0.5);
+  return { fundo, esquerda: de(1), direita: de(-1) };
+}
+/** 23/11: os lados da base encostados a uma parede (a coluna de duche só fica onde há parede); o fundo vem sempre. */
+export function ladosParaColuna(pc: PecaPlanta, pl: Planta): LadoColuna[] {
+  const L = ladosParaColunaDe(pc, pl);
+  return (["fundo", "esquerda", "direita"] as const).filter((k) => k === "fundo" || (L[k] && distanciaAParede(L[k]!.meio, pl) <= 6));
+}
+/** O lado da coluna de duche: o escolhido na base (PecaPlanta.coluna), se tiver parede; senão, o fundo. */
+export function ladoDaColuna(pc: PecaPlanta, pl: Planta): LadoColuna {
+  return pc.coluna && ladosParaColuna(pc, pl).includes(pc.coluna) ? pc.coluna : "fundo";
+}
+
+/** A coluna de duche: ao meio do lado da base escolhido (ladoDaColuna; ao fundo, se nada se escolheu), virada para dentro da base. */
+function colunaNo3D(pc: PecaPlanta, pl: Planta, prod: Produto): { pc: PecaProduto; m: ProdutoModelo3D } {
+  const lado = ladosParaColunaDe(pc, pl)[ladoDaColuna(pc, pl)]!;
+  const [w, d, h] = ESPEC.coluna_duche.dim;
+  const m = modeloDe("coluna_duche", prod, w, d, h);
+  const x = lado.meio.x - lado.n.x * (d / 2), y = lado.meio.y - lado.n.y * (d / 2);
+  return { m, pc: { id: idColunaDuche(pc.id), produtoId: m.produtoId, x: x / 100, y: y / 100, rotacao: anguloDe({ x: -lado.n.x, y: -lado.n.y }), paredeEncosto: null, largura: w / 100, profundidade: d / 100, montagem: "parede", altura: ESPEC.coluna_duche.alt, espelhada: false, nome: prod.n } };
+}
+/** O espelho do contrato: na parede do móvel, por cima dele, com a largura do nome (ou a do móvel). */
+function espelhoNo3D(movel: PecaPlanta, pl: Planta, prod: Produto): { pc: PecaProduto; m: ProdutoModelo3D } {
+  const poly = poligonoDe(pl), c = centroPeca(movel);
+  // o fundo do móvel é o lado virado para a parede mais perto (sem planta fechada, o do lado contrário ao meio da divisão)
+  let n = ladoAbertoEFundo(movel, pl).aberto.n;
+  if (poly) { const ni = normalInteriorCm(poly, paredeMaisPertoCm(poly, c).i); n = { x: ni.x, y: ni.y }; }
+  const lados = ladosDe(movel), fundo = lados.reduce((b, l) => (l.n.x * -n.x + l.n.y * -n.y > b.n.x * -n.x + b.n.y * -n.y ? l : b), lados[0]);
+  const md = medidasDoTexto(prod.n) ?? [];
+  const largo = md.length >= 2 ? Math.min(md[0], fundo.c + 40) : (prod.w ?? fundo.c);
+  const alto = md.length >= 2 ? md[1] : ESPEC.espelho.dim[2];
+  const m = modeloDe("espelho", prod, largo, 3, alto);
+  const x = fundo.meio.x + n.x * 1.5, y = fundo.meio.y + n.y * 1.5;
+  const z0 = prod.z0 ?? Math.max(105, 190 - alto);
+  return { m, pc: { id: ID_ESPELHO_CONTRATO, produtoId: m.produtoId, x: x / 100, y: y / 100, rotacao: anguloDe(n), paredeEncosto: null, largura: largo / 100, profundidade: 0.03, montagem: "parede", altura: z0 / 100, espelhada: false, nome: prod.n } };
+}
+
+/** O espaço 3D só com as peças da planta. */
+function espacoSoDaPlanta(p: Projeto, qual: "antes" | "depois", mais: Mais3D): ResLegado {
   const planta = qual === "antes" ? p.antes : p.depois;
   const produtos: Record<string, ProdutoModelo3D> = {};
   const pecas = planta.pecas.map((pc) => {
@@ -78,7 +215,7 @@ export function espacoDoEstudio(p: Projeto, qual: "antes" | "depois"): ResLegado
   const pe = alturaFinalCm(qual === "antes" ? { peDireito: p.alturas.peDireito, tetoFalso: null } : p.alturas) / 100;
   const res = deLegado({ ...planta, pecas: pecas.map((pc) => rodadaNo3D(pc, planta)) }, {
     tipo: p.divisao === "Cozinha" ? "cozinha" : "casa_banho", nome: p.nome ?? "Estúdio", peDireito: pe, produtos,
-    revestimentos: qual === "depois" ? revestimentosDe(p) : undefined,
+    revestimentos: qual === "depois" ? revestimentosDe({ revestimento: mais.semRevestimento ? undefined : p.revestimento, pavimento: mais.semPavimento ? undefined : p.pavimento }) : undefined,
   });
   if ("erro" in res || !res.ok) return res;
   // as peças de parede (o espelho, o toalheiro, o exaustor) ficam na parede, à altura do produto (ou à de sempre), não no chão

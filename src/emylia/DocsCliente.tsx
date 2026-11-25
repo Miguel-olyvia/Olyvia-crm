@@ -26,6 +26,7 @@ import {
   adendasDoContrato, comDataCurta, conteudoPorFase, dataDe, diasDoPlano, fasesDosServicos, fimPrevistoData, inicioDaObra, materiaisDaProposta,
   planeamentoDaObra, prazoDaProposta, prestacoesDaProposta, validadeDaProposta,
 } from "./propostaDados";
+import { numeroDaPropostaDoNegocio, numeroDoContratoDoNegocio } from "@/lib/numeroDocumento";
 
 // 23/10 (2.0): o nome e o NIF são os da organização (com o nome fiscal, se o tiver); o subtítulo e a morada ainda são os do
 // exemplo (a organização ainda não tem morada)
@@ -39,7 +40,7 @@ const EMPRESA = {
 
 // IVA na proposta: a mão de obra (os serviços) a 6% e os materiais a 23%.
 export { IVA_MAT, IVA_MO } from "./motor";
-import { IVA_MAT, IVA_MO, porZonaDe, totaisIva } from "./motor";
+import { IVA_MAT, IVA_MO, MENCAO_AUTOLIQUIDACAO, partesPorTaxa, porZonaDe, totaisIva, type TotaisIva } from "./motor";
 import type { FaturaReg } from "./v2/financeiro";
 import { PREFIXO_CLIENTE, PREFIXO_PROD, textoProduto } from "./produtosVisita";
 import { FotoObra } from "./fotosDaObra";
@@ -52,9 +53,32 @@ export const totais = totaisIva;
 /** As linhas de IVA de um valor (o total ou uma tranche), na proporção do orçamento. */
 function linhasIva(T: ReturnType<typeof totais>, parte = 1) {
   return [
-    { l: "Mão de obra", base: T.mo * parte, taxa: IVA_MO, iva: T.ivaMo * parte },
-    { l: "Materiais", base: T.mat * parte, taxa: IVA_MAT, iva: T.ivaMat * parte },
+    // 24/11 (MD 1594): com produtos a 6% (ou valor a 0%), as partes dizem-se pela taxa
+    { l: partesPorTaxa(T) ? "A 6%" : "Mão de obra", base: T.mo * parte, taxa: IVA_MO, iva: T.ivaMo * parte },
+    { l: partesPorTaxa(T) ? "A 23%" : "Materiais", base: T.mat * parte, taxa: IVA_MAT, iva: T.ivaMat * parte },
+    // 24/11: a parte a 0% (autoliquidação), com a menção por baixo do quadro
+    { l: "Autoliquidação", base: T.isento * parte, taxa: 0, iva: 0 },
   ].filter((x) => x.base > 0);
+}
+/** 24/11: a menção legal quando há valor a 0% (vai por baixo do total). */
+export function MencaoAutoliquidacao({ T }: { T: Pick<TotaisIva, "isento"> }) {
+  return T.isento > 0.004 ? <p className="mt-2 text-left text-sm text-slate-600">{MENCAO_AUTOLIQUIDACAO}</p> : null;
+}
+/** 24/11: a cláusula do preço por taxa. Sem nada a 0% nem produtos a 6%, o texto de sempre (`soMo`: o das adendas, que só junta os
+ *  materiais se os houver); senão, só as partes que têm valor, pela taxa, e a menção da autoliquidação quando há valor a 0%. */
+export function textoPrecoContrato(T: TotaisIva, soMo = false): string {
+  if (!partesPorTaxa(T)) {
+    return soMo
+      ? `${eur(T.base)} € sem IVA: ${eur(T.mo)} € de mão de obra, com IVA a 6% (${eur(T.ivaMo)} €)${T.mat > 0 ? `, e ${eur(T.mat)} € de materiais, com IVA a 23% (${eur(T.ivaMat)} €)` : ""}. Total com IVA: ${eur(T.total)} €.`
+      : `${eur(T.base)} € sem IVA: ${eur(T.mo)} € de mão de obra, com IVA a 6% (${eur(T.ivaMo)} €), e ${eur(T.mat)} € de materiais, com IVA a 23% (${eur(T.ivaMat)} €). Total com IVA: ${eur(T.total)} €.`;
+  }
+  const partes = [
+    T.mo > 0.004 ? `${eur(T.mo)} € com IVA a 6% (${eur(T.ivaMo)} €)` : "",
+    T.mat > 0.004 ? `${eur(T.mat)} € com IVA a 23% (${eur(T.ivaMat)} €)` : "",
+    T.isento > 0.004 ? `${eur(T.isento)} € com IVA a 0%` : "",
+  ].filter(Boolean);
+  const lista = partes.length > 1 ? `${partes.slice(0, -1).join(", ")} e ${partes[partes.length - 1]}` : partes[0];
+  return `${eur(T.base)} € sem IVA: ${lista}. Total com IVA: ${eur(T.total)} €.${T.isento > 0.004 ? ` ${MENCAO_AUTOLIQUIDACAO}` : ""}`;
 }
 function QuadroIva({ T, parte = 1, rotulo = "Total" }: { T: ReturnType<typeof totais>; parte?: number; rotulo?: string }) {
   const ls = linhasIva(T, parte);
@@ -70,6 +94,7 @@ function QuadroIva({ T, parte = 1, rotulo = "Total" }: { T: ReturnType<typeof to
         </tbody>
       </table>
       <p className="mt-2 flex justify-between border-t border-slate-200 pt-2 text-lg font-semibold"><span>{rotulo}</span><span className="tabular-nums">{eur(T.total * parte)} €</span></p>
+      <MencaoAutoliquidacao T={T} />
     </div>
   );
 }
@@ -311,29 +336,23 @@ function Capa({ d, total, numero, tipo, titulo, emitida, validade, essencial, ac
 }
 
 /** A proposta (o documento formal, em páginas A4). 21/10: com `a`, a proposta da adenda (o mesmo documento, com o que é dela). */
-export function PropostaDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) {
-  if (a) return <PropostaAdenda S={S} d={d} a={a} />;
-  const o = d.orc!, L = LINHAS[d.linha], T = totais(d, S), desconto = o.desconto || 0, k = 1 - desconto / 100;
-  const numero = `PR 2026/${d.id}${o.versoes?.length ? ` · v${o.versoes.length + 1}` : ""}`;
-  // a validade, o prazo, as fases e os materiais: propostaDados.ts (o mesmo do documento do portal)
-  const { emitida, ate } = validadeDaProposta(d);
-  const dias = diasDoPlano(d, S);
-  // o prazo que se promete ao cliente: o da proposta (o comercial pode dar folga); sem ele, o do plano
-  const prazo = prazoDaProposta(d, S);
-  const cal = diasDaObra(inicioDaObra(d), dias);
-  const tr = tranches(d, T.total, S);
+/** 23/11: uma linha do «03 Orçamento detalhado» (preços já com o desconto). */
+export interface LinhaOrcamentoDoc { fase: FaseObra; nome: string; q: number; un: string; pu: number; total: number; mat: boolean }
+/** 23/11: o «03 Orçamento detalhado» da proposta, sem React: as linhas por fase (ou por zona da obra, quando há zonas), as fases usadas,
+ *  o desconto e os totais (mão de obra e materiais sem IVA, IVA a 6% e a 23%, total). É o que PropostaDoc desenha e o que o documento
+ *  do template mostra no passo «Proposta» do CRM antes de existir a proposta real (src/components/portal/obra). */
+export function orcamentoDetalhado(d: Negocio, S: Estado) {
+  const o = d.orc!, T = totais(d, S), desconto = o.desconto || 0, k = 1 - desconto / 100;
   // as linhas por fase da obra (os serviços pela fase da tarefa; os materiais pela descrição; a demolição na 1)
   const faseDe = fasesDosServicos(d, S);
   const linhas = o.linhas.map((l) => {
     const x = linhaCalc(l, S), fase: FaseObra = l.t === "mat" ? (l.d === LINHA_DEMOLICAO ? 1 : faseDosMateriais(l.d)) : (faseDe.get(l.sid) ?? 4);
     return l.t === "svc"
-      ? { fase, nome: x.s!.n, q: l.q, un: x.s!.un, pu: (x.preco * k) / (l.q || 1), total: x.preco * k, mat: false }
+      ? { fase, nome: (x.s?.n ?? "Serviço"), q: l.q, un: (x.s?.un ?? ""), pu: (x.preco * k) / (l.q || 1), total: x.preco * k, mat: false }
       : l.livre // 26/10: a linha livre com a quantidade, a unidade e o preço por unidade que se escreveram
         ? { fase, nome: l.d, q: l.livre.q, un: l.livre.un, pu: (x.preco * k) / (l.livre.q || 1), total: x.preco * k, mat: true }
         : { fase, nome: nomeNaTabela(l.d), q: 1, un: "vg", pu: x.preco * k, total: x.preco * k, mat: true };
   });
-  // "O que vamos fazer": por fase, em grupos curtos e sem os prefixos técnicos das linhas (propostaConteudo.ts)
-  const conteudo = conteudoPorFase(d, S, faseDe);
   const fases = FASES_OBRA.filter((f) => linhas.some((x) => x.fase === f.n));
   // 26/10: com zonas da obra, o orçamento detalhado agrupa-se por zona (a quantidade e o valor de cada linha nessa zona)
   // nos produtos, o nome sem a quantidade total ("Tinta … · 222 un") e a unidade do produto: a linha da zona mostra só a parte dela
@@ -349,6 +368,23 @@ export function PropostaDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) 
       return { ...linhas[x.i], ...(p ? { nome: p.n, un: p.un } : {}), q: x.q, pu: (x.valor * k) / (x.q || 1), total: x.valor * k };
     }),
   }));
+  return { T, desconto, linhas: linhas as LinhaOrcamentoDoc[], fases, zonas: zonas as { z: string; total: number; linhas: LinhaOrcamentoDoc[] }[], faseDe };
+}
+
+export function PropostaDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) {
+  if (a) return <PropostaAdenda S={S} d={d} a={a} />;
+  const o = d.orc!, L = LINHAS[d.linha];
+  const { T, desconto, linhas, fases, zonas, faseDe } = orcamentoDetalhado(d, S);
+  const numero = numeroDaPropostaDoNegocio(d);
+  // a validade, o prazo, as fases e os materiais: propostaDados.ts (o mesmo do documento do portal)
+  const { emitida, ate } = validadeDaProposta(d);
+  const dias = diasDoPlano(d, S);
+  // o prazo que se promete ao cliente: o da proposta (o comercial pode dar folga); sem ele, o do plano
+  const prazo = prazoDaProposta(d, S);
+  const cal = diasDaObra(inicioDaObra(d), dias);
+  const tr = tranches(d, T.total, S);
+  // "O que vamos fazer": por fase, em grupos curtos e sem os prefixos técnicos das linhas (propostaConteudo.ts)
+  const conteudo = conteudoPorFase(d, S, faseDe);
   const M = materiaisDaProposta(d, S);
   const comercial = PAPEIS.comercial.nome;
   const total = 4;
@@ -448,11 +484,14 @@ export function PropostaDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) 
           </div>
           <div className="ml-auto w-full max-w-sm space-y-1.5 border-t border-slate-900 pt-3 text-[14px]">
             {desconto > 0 && <div className="flex justify-between text-slate-600"><span>Desconto incluído nos preços</span><span className="tabular-nums">{desconto}%</span></div>}
-            <div className="flex justify-between"><span>Mão de obra, sem IVA</span><span className="tabular-nums">{eur(T.mo)} €</span></div>
-            <div className="flex justify-between"><span>Materiais, sem IVA</span><span className="tabular-nums">{eur(T.mat)} €</span></div>
-            <div className="flex justify-between text-slate-600"><span>IVA a 6% (mão de obra)</span><span className="tabular-nums">{eur(T.ivaMo)} €</span></div>
-            <div className="flex justify-between text-slate-600"><span>IVA a 23% (materiais)</span><span className="tabular-nums">{eur(T.ivaMat)} €</span></div>
+            {/* 24/11 (MD 1594): com produtos a 6% (ou valor a 0%), as partes pela taxa */}
+            <div className="flex justify-between"><span>{partesPorTaxa(T) ? "A 6%, sem IVA" : "Mão de obra, sem IVA"}</span><span className="tabular-nums">{eur(T.mo)} €</span></div>
+            <div className="flex justify-between"><span>{partesPorTaxa(T) ? "A 23%, sem IVA" : "Materiais, sem IVA"}</span><span className="tabular-nums">{eur(T.mat)} €</span></div>
+            <div className="flex justify-between text-slate-600"><span>{partesPorTaxa(T) ? "IVA a 6%" : "IVA a 6% (mão de obra)"}</span><span className="tabular-nums">{eur(T.ivaMo)} €</span></div>
+            <div className="flex justify-between text-slate-600"><span>{partesPorTaxa(T) ? "IVA a 23%" : "IVA a 23% (materiais)"}</span><span className="tabular-nums">{eur(T.ivaMat)} €</span></div>
+            {T.isento > 0.004 && <div className="flex justify-between"><span>Com IVA a 0% (autoliquidação)</span><span className="tabular-nums">{eur(T.isento)} €</span></div>}
             <div className="flex justify-between border-t border-slate-300 pt-2 text-lg font-semibold text-slate-900"><span>Total</span><span className="tabular-nums">{eur(T.total)} €</span></div>
+            <MencaoAutoliquidacao T={T} />
           </div>
         </section>
       </Pagina>
@@ -547,7 +586,7 @@ function PropostaAdenda({ S, d, a: a0 }: { S: Estado; d: Negocio; a: Adenda }) {
   const V = valorContrato(d, S), antes = a0.estado === "assinada" ? V.total - T.total : V.total;
   return (
     <div className="folha doc-paginas space-y-8">
-      <Capa d={d} total={total} numero={numero} tipo="Proposta de trabalhos a mais" titulo={`Adenda ao contrato CT 2026/${d.id}`} emitida={emitida}
+      <Capa d={d} total={total} numero={numero} tipo="Proposta de trabalhos a mais" titulo={`Adenda ao contrato ${numeroDoContratoDoNegocio(d)}`} emitida={emitida}
         validade={`Válida até ${longa(ate)}${a.versoes?.length ? ` · substitui a versão ${a.versoes.length}` : ""}`}
         essencial={[["Total, com IVA", `${eur(T.total)} €`], ["Prazo", `+${dias} ${dias === 1 ? "dia útil" : "dias úteis"}`], ["Início previsto", inicio], ["Garantia", `${d.f.garantia || "2 anos"}`]]}
         aceite={a.aceite}>
@@ -636,7 +675,7 @@ function PropostaAdenda({ S, d, a: a0 }: { S: Estado; d: Negocio; a: Adenda }) {
           </div>
           {(a.desconto ?? 0) > 0 && <p className="text-right text-sm text-slate-600">Desconto incluído nos preços: {nfmt(a.desconto!)}%</p>}
           <QuadroIva T={T} />
-          <p className="rounded-xl bg-slate-50 px-3 py-2 text-slate-700">O valor do contrato CT 2026/{d.id} passa de <span className="tabular-nums">{eur(antes)} €</span> para <b className="tabular-nums">{eur(antes + T.total)} €</b>, com IVA.</p>
+          <p className="rounded-xl bg-slate-50 px-3 py-2 text-slate-700">O valor do contrato {numeroDoContratoDoNegocio(d)} passa de <span className="tabular-nums">{eur(antes)} €</span> para <b className="tabular-nums">{eur(antes + T.total)} €</b>, com IVA.</p>
         </section>
         <section className="space-y-4">
           <Titulo n={5}>Pagamento</Titulo>
@@ -649,7 +688,7 @@ function PropostaAdenda({ S, d, a: a0 }: { S: Estado; d: Negocio; a: Adenda }) {
             <li>Prazo: mais {dias} {dias === 1 ? "dia útil" : "dias úteis"}, a juntar ao prazo do contrato.</li>
             <li>Garantia de {d.f.garantia || "2 anos"} sobre a mão de obra, a contar do auto de receção da obra; os materiais têm a garantia do fabricante.</li>
             <li>Proposta válida até {longa(ate)}. Aceite, segue-se o contrato da adenda, para assinar neste mesmo link.</li>
-            <li>Tudo o resto do contrato CT 2026/{d.id} mantém-se.</li>
+            <li>Tudo o resto do contrato {numeroDoContratoDoNegocio(d)} mantém-se.</li>
           </ul>
         </section>
         <section className="space-y-4">
@@ -670,15 +709,15 @@ export function clausulasContrato(d: Negocio, S: Estado, a?: Adenda): { titulo: 
   const da = a ? diasAdenda(a.linhas) : 0, im = a ? impactoNoPlano(d.obra.plano, a) : null;
   // 21/10: as cláusulas da adenda: as mesmas, com o que é dela (os trabalhos a mais, o preço por taxa, as parcelas do contrato, os dias a mais)
   const modelo: Record<string, string | string[]> = a ? {
-    Objeto: `Os trabalhos a mais da adenda ${a.n} ao contrato CT 2026/${d.id}, em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${a.linhas.map((x) => x.n.toLowerCase()).join(", ")}${a.linhas.some((x) => x.livre && x.mats?.length) ? ", e os materiais indicados na proposta da adenda" : ""}.`,
-    "Preço": `${eur(T.base)} € sem IVA: ${eur(T.mo)} € de mão de obra, com IVA a 6% (${eur(T.ivaMo)} €)${T.mat > 0 ? `, e ${eur(T.mat)} € de materiais, com IVA a 23% (${eur(T.ivaMat)} €)` : ""}. Total com IVA: ${eur(T.total)} €.`,
+    Objeto: `Os trabalhos a mais da adenda ${a.n} ao contrato ${numeroDoContratoDoNegocio(d)}, em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${a.linhas.map((x) => x.n.toLowerCase()).join(", ")}${a.linhas.some((x) => x.livre && x.mats?.length) ? ", e os materiais indicados na proposta da adenda" : ""}.`,
+    "Preço": textoPrecoContrato(T, true),
     Pagamento: tr.map((t) => `${t.l}: ${Math.round(t.p * 100)}%, ${eur(t.v)} €`),
-    Prazo: `Mais ${da} ${da === 1 ? "dia útil" : "dias úteis"}, a juntar ao prazo do contrato CT 2026/${d.id}${im && im.fimDepois > im.fimAntes ? `: fim da obra previsto a ${rotuloDia(im.plano, im.fimDepois - 1)}` : ""}.`,
+    Prazo: `Mais ${da} ${da === 1 ? "dia útil" : "dias úteis"}, a juntar ao prazo do contrato ${numeroDoContratoDoNegocio(d)}${im && im.fimDepois > im.fimAntes ? `: fim da obra previsto a ${rotuloDia(im.plano, im.fimDepois - 1)}` : ""}.`,
     Garantia: `${d.f.garantia || "2 anos"} sobre a mão de obra, a contar da data do auto de receção da obra. Os materiais têm a garantia do fabricante.`,
-    "Condições gerais": `Mantém-se tudo o resto do contrato CT 2026/${d.id}, incluindo as condições gerais da empresa.`,
+    "Condições gerais": `Mantém-se tudo o resto do contrato ${numeroDoContratoDoNegocio(d)}, incluindo as condições gerais da empresa.`,
   } : {
-    Objeto: `Os trabalhos de ${d.servico.toLowerCase()} em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${o.linhas.filter((l) => l.t === "svc").map((l) => linhaCalc(l, S).s!.n.toLowerCase()).join(", ")}, e os materiais do modelo escolhido.`,
-    "Preço": `${eur(T.base)} € sem IVA: ${eur(T.mo)} € de mão de obra, com IVA a 6% (${eur(T.ivaMo)} €), e ${eur(T.mat)} € de materiais, com IVA a 23% (${eur(T.ivaMat)} €). Total com IVA: ${eur(T.total)} €.`,
+    Objeto: `Os trabalhos de ${d.servico.toLowerCase()} em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${o.linhas.filter((l) => l.t === "svc").map((l) => (linhaCalc(l, S).s?.n ?? "serviço").toLowerCase()).join(", ")}, e os materiais do modelo escolhido.`,
+    "Preço": textoPrecoContrato(T),
     Pagamento: tr.map((t) => `${t.l}${t.quando ? ` (previsto: ${t.quando})` : ""}: ${Math.round(t.p * 100)}%, ${eur(t.v)} €`),
     Prazo: `Início ${d.f.inicio_prev ? `a ${data(d.f.inicio_prev)}` : "por marcar"}, com ${d.f.prazo_exec || "—"} dias úteis de execução: fim previsto a ${fimPrevisto(d.f.inicio_prev, d.f.prazo_exec)}.${d.f.multa === "Sim" ? " O atraso imputável à empresa dá lugar a penalização, nos termos das condições gerais." : ""}`,
     Garantia: `${d.f.garantia || "2 anos"} sobre a mão de obra, a contar da data do auto de receção. Os materiais têm a garantia do fabricante.`,
@@ -723,10 +762,10 @@ export function ContratoDoc({ S, d, a, corpo, semAssinaturas = false }: { S: Est
   if (a) return <ContratoAdenda S={S} d={d} a={a} />;
   const o = d.orc!, versao = (o.contratoVersoes?.length ?? 0) + 1, comCorpo = corpo !== undefined;
   return (
-    <Folha titulo={d.f.modelo_contrato || "Contrato de empreitada"} numero={`CT 2026/${d.id}`} data={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : "rascunho"} carimbo={o.contrato === "assinado" ? "Assinado" : undefined}>
+    <Folha titulo={d.f.modelo_contrato || "Contrato de empreitada"} numero={`${numeroDoContratoDoNegocio(d)}`} data={o.contrato === "assinado" ? "assinado" : o.contrato === "enviado" ? "à espera da assinatura" : "rascunho"} carimbo={o.contrato === "assinado" ? "Assinado" : undefined}>
       {comCorpo ? <><Cliente d={d} />{corpo}</> : (
         <p className="text-slate-700">
-          Entre <b>{EMPRESA.nome}</b>{EMPRESA.nif ? `, NIF ${EMPRESA.nif}` : ""}{EMPRESA.morada ? `, com sede em ${EMPRESA.morada}` : ""}, representada por {d.f.representante || "—"}, e <b>{d.f.nome_fiscal || d.nome}</b>{d.f.nif_fat || d.f.nif ? `, NIF ${d.f.nif_fat || d.f.nif}` : ""}, é celebrado este contrato, que segue a proposta PR 2026/{d.id}.
+          Entre <b>{EMPRESA.nome}</b>{EMPRESA.nif ? `, NIF ${EMPRESA.nif}` : ""}{EMPRESA.morada ? `, com sede em ${EMPRESA.morada}` : ""}, representada por {d.f.representante || "—"}, e <b>{d.f.nome_fiscal || d.nome}</b>{d.f.nif_fat || d.f.nif ? `, NIF ${d.f.nif_fat || d.f.nif}` : ""}, é celebrado este contrato, que segue a proposta {numeroDaPropostaDoNegocio(d)}.
         </p>
       )}
       {o.contratoRevisto && <p className="rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600">Versão {versao}, revista pelo Jurídico ({o.contratoRevisto.por}) a {o.contratoRevisto.q}, a pedido do cliente.</p>}
@@ -754,7 +793,7 @@ function ContratoAdenda({ S, d, a }: { S: Estado; d: Negocio; a: Adenda }) {
     <Folha titulo="Adenda ao contrato" numero={a.n} data={quando} carimbo={a.estado === "assinada" ? "Assinada" : undefined}>
       <Cliente d={d} />
       <p className="text-slate-700">
-        Entre <b>{EMPRESA.nome}</b>{EMPRESA.nif ? `, NIF ${EMPRESA.nif}` : ""}, representada por {d.f.representante || "—"}, e <b>{d.f.nome_fiscal || d.nome}</b>{d.f.nif_fat || d.f.nif ? `, NIF ${d.f.nif_fat || d.f.nif}` : ""}, é celebrada esta adenda ao contrato CT 2026/{d.id}, por {a.motivo.toLowerCase()}, que segue a proposta da adenda {a.n}{v > 1 ? ` (versão ${v})` : ""}{a.aceite ? `, aceite a ${a.aceite}` : ""}. O resto do contrato mantém-se.
+        Entre <b>{EMPRESA.nome}</b>{EMPRESA.nif ? `, NIF ${EMPRESA.nif}` : ""}, representada por {d.f.representante || "—"}, e <b>{d.f.nome_fiscal || d.nome}</b>{d.f.nif_fat || d.f.nif ? `, NIF ${d.f.nif_fat || d.f.nif}` : ""}, é celebrada esta adenda ao contrato {numeroDoContratoDoNegocio(d)}, por {a.motivo.toLowerCase()}, que segue a proposta da adenda {a.n}{v > 1 ? ` (versão ${v})` : ""}{a.aceite ? `, aceite a ${a.aceite}` : ""}. O resto do contrato mantém-se.
       </p>
       {/* 21/10: nasceu de um imprevisto na obra: o que a equipa encontrou, onde e a fotografia */}
       {a.origem && (
@@ -776,7 +815,7 @@ function ContratoAdenda({ S, d, a }: { S: Estado; d: Negocio; a: Adenda }) {
       {clausulasContrato(d, S, a).map((c, i) => <Clausula key={i + 1} k={i + 1} titulo={c.titulo} corpo={c.lista ? <ul className="list-disc pl-5">{c.lista.map((x) => <li key={x}>{x}</li>)}</ul> : c.texto} revista={c.revista} />)}
       <QuadroIva T={T} />
       {(a.estado === "aceite" || a.estado === "assinada") && (
-        <p className="rounded-xl bg-slate-50 px-3 py-2 text-slate-700">O valor do contrato CT 2026/{d.id} passa de <span className="tabular-nums">{eur(antes)} €</span> para <b className="tabular-nums">{eur(antes + T.total)} €</b>, com IVA.</p>
+        <p className="rounded-xl bg-slate-50 px-3 py-2 text-slate-700">O valor do contrato {numeroDoContratoDoNegocio(d)} passa de <span className="tabular-nums">{eur(antes)} €</span> para <b className="tabular-nums">{eur(antes + T.total)} €</b>, com IVA.</p>
       )}
       <Assinaturas quandoCliente={false} linhas={[
         ["Pela empresa", EMPRESA.nome + (d.f.representante ? ` · ${d.f.representante}` : ""),
@@ -838,8 +877,8 @@ export function FaturaDoc({ S, d, a, ft: fa, reg, regParcela }: { S: Estado; d: 
   const recibo = reg ? (reg.pagamento ? { n: reg.recibo || "pagamento validado" } : null) : a && fa ? fa.recibo : d.fin.recibo;
   // 10/11 (o fluxo novo de 9/11): a 1.ª fatura emite-se com a proposta aceite, antes do contrato (que se assina depois do plano aprovado)
   const comContrato = d.orc?.contrato === "assinado" || d.orc?.contrato === "enviado";
-  const objeto = a && fa ? `trabalhos a mais, conforme a adenda ${a.n} ao contrato CT 2026/${d.id}`
-    : comContrato ? `${d.servico}, conforme contrato CT 2026/${d.id}` : `${d.servico}, conforme a proposta aceite PR 2026/${d.id}`;
+  const objeto = a && fa ? `trabalhos a mais, conforme a adenda ${a.n} ao contrato ${numeroDoContratoDoNegocio(d)}`
+    : comContrato ? `${d.servico}, conforme contrato ${numeroDoContratoDoNegocio(d)}` : `${d.servico}, conforme a proposta aceite ${numeroDaPropostaDoNegocio(d)}`;
   const parcela = reg ? regParcela || "Prestação" : a && fa ? `${nomeParcela(fa.i)} (${fa.l.toLowerCase()})` : d.f.tranche || "1.ª tranche";
   return (
     <Folha titulo="Fatura" numero={ft ? ft.n : "por emitir"} data={ft ? `emitida ${ft.q}` : "rascunho"} carimbo={recibo ? `Paga · ${recibo.n}` : undefined}>
@@ -881,7 +920,7 @@ export function NotaEncomendaDoc({ d }: { d: Negocio }) {
   return (
     <Folha titulo="Nota de encomenda" numero={ec.n} data={`de ${ec.criada}`} carimbo="Confirmada">
       <Cliente d={d} />
-      <p className="text-slate-700">Os materiais e produtos da obra de {d.servico.toLowerCase()}, conforme o contrato CT 2026/{d.id}. Estão incluídos no preço do contrato: <b>não se pagam à parte</b>.</p>
+      <p className="text-slate-700">Os materiais e produtos da obra de {d.servico.toLowerCase()}, conforme o contrato {numeroDoContratoDoNegocio(d)}. Estão incluídos no preço do contrato: <b>não se pagam à parte</b>.</p>
       <ul className="divide-y divide-slate-200 border-y border-slate-200">
         {todas.map(({ x, ec: n }) => {
           const st = estadoLinha(d, x.n, inv, n);

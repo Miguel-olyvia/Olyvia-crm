@@ -9,6 +9,7 @@ import { TECS, type Negocio, type Plano, type Tarefa } from "./motor";
 import { fimDe, guardarBase, inicioMinimo, mudarDuracao, mudarHoras, mudarInicio } from "./ajustesPlano";
 import { estadoDe } from "./obraOps";
 import { rotuloDia } from "./preparacaoObra";
+import { ordemDasTarefas } from "./ordemPlano";
 
 /* ------------------------------------------------------------------ as instruções */
 export interface Instrucoes {
@@ -159,7 +160,9 @@ export function trabalhoDoTecnico(deals: Negocio[], tec: string, desvio = 0): Tr
     const p = d.obra.plano;
     if (d.perdido || !p || p.estado !== "em curso") continue;
     const dia = p.dia + desvio;
-    p.tasks.forEach((t, ti) => {
+    // 25/11: pela ordem da lista do plano (a que o gestor deu no Estúdio da obra)
+    ordemDasTarefas(p).forEach((ti) => {
+      const t = p.tasks[ti];
       if (t.tec !== tec || diaDaTarefa(t, dia) == null) return;
       // a tarefa que está a ser corrigida sai do Hoje: o técnico trabalha na tarefa de correção
       if (p.tasks.some((x) => x.corrige === ti && estadoDe(x) !== "validada")) return;

@@ -10,15 +10,18 @@ import { FichaProduto } from "./FichaProduto";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { lerProdutoFicha } from "./real/produtosLeves";
 import { marcarCatalogoDesatualizado } from "./v2/catalogoStore";
+import type { ServicoEscolha } from "./real/servicosDoProduto";
 
 interface Props {
   id: string; K: Catalogo; real: FichaProdutoReal; min: number; alvo: number; voltar: () => void; anunciar: (msg: string) => void;
   nomeServico: (sid: SvcId) => string; onAbrirServico: (sid: SvcId) => void;
   /** Relê as referências da página (categorias, marcas, modelos). Sobe o erro se falhar. */
   relerReferencias?: () => Promise<void>;
+  /** 23/11: os serviços da organização, para escolher o serviço que o produto traz (null: ainda a ler ou sem eles). */
+  servicos?: readonly ServicoEscolha[] | null;
 }
 
-export function FichaProdutoLeve({ id, K, real, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, relerReferencias }: Props) {
+export function FichaProdutoLeve({ id, K, real, min, alvo, voltar, anunciar, nomeServico, onAbrirServico, relerReferencias, servicos }: Props) {
   const [p, setP] = useState<Produto | null>(null), [erro, setErro] = useState<string | null>(null), [tentativa, setTentativa] = useState(0);
   useEffect(() => {
     let vivo = true;
@@ -58,6 +61,6 @@ export function FichaProdutoLeve({ id, K, real, min, alvo, voltar, anunciar, nom
   }
   return (
     <FichaProduto key={id} p={p} min={min} alvo={alvo} real={realFicha} atributos={K.atributos} arvore={K.arvore} marcas={K.marcas} modelos={K.modelos}
-      voltar={voltar} anunciar={anunciar} nomeServico={nomeServico} onAbrirServico={onAbrirServico} />
+      voltar={voltar} anunciar={anunciar} nomeServico={nomeServico} onAbrirServico={onAbrirServico} servicos={servicos} />
   );
 }

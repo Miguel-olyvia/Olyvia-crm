@@ -27,10 +27,13 @@ export interface No {
   soProduto?: true;
   /** 13/11 (20270117700000): a categoria de produto está desativada (cat_ler_produtos_tabelas, «ativa»): os dropdowns de produto não a oferecem, exceto a que o produto já tem. Em falta = ativa. */
   inativa?: true;
+  /** 24/11: o «Modelo 3D» escolhido nesta categoria (nó de topo) ou subcategoria (nó com pai): herdado pelos produtos que não escolhem (planta3d/modelos3dEscolha.ts).
+   *  Em falta: sem escolha (ou a base ainda não tem a coluna). */
+  modelo3d?: string;
 }
 /** 16/11: uma categoria (pai null) ou subcategoria de produtos. `id` e `pai` são ids de nós de K.arvore; `ordem` é o sort_order da base. */
 /** `origem`: o id em product_categories (o nó pode ser o do ofício dos serviços com o mesmo nome); é o que a base recebe nos filtros por páginas. */
-export interface CategoriaProdutoK { id: string; n: string; pai: string | null; ordem: number; inativa?: true; origem?: string }
+export interface CategoriaProdutoK { id: string; n: string; pai: string | null; ordem: number; inativa?: true; origem?: string; /** 24/11: o «Modelo 3D» escolhido (como em `No`). */ modelo3d?: string }
 /** 16/11 (20270118300000): um modelo de produto. `sub`: o nó da árvore da subcategoria onde está (o mesmo id que Produto.no e CategoriaProdutoK). */
 export interface ModeloK { id: string; n: string; numero: number; sub: string; ativo: boolean }
 /** 13/11: a medida de um produto (atributo do tipo «medida»): 1D (uma só dimensão), 2D (largura × comprimento) ou 3D (com espessura), em cm ou mm. */
@@ -46,9 +49,17 @@ export type DimensaoMedida = number | { de: number; ate: number };
 export interface AtributoProduto { atributoId: string; opcaoId?: string; valor?: string; medida?: MedidaAtributo; inativa?: true }
 /** 13/11: uma opção de um atributo de lista (Cor: Preto #000000). `valor` é o texto que a base guarda (nalguns atributos em
  *  MAIÚSCULAS: PIZARRA) e `nome` o que se mostra (Pizarra). `hex` só nos atributos com amostra de cor. */
-export interface OpcaoAtributo { id: string; valor: string; nome: string; hex: string | null; ordem: number }
+export interface OpcaoAtributo {
+  id: string; valor: string; nome: string; hex: string | null; ordem: number;
+  /** A foto da opção (caminho `{org}/{uuid}.webp` no bucket `catalogo-opcoes`); null/ausente: sem foto. Ausente também quando a base ainda não devolve o campo. */
+  foto?: string | null;
+}
 /** 13/11: um atributo da lista global (Medida, Cor, Tonalidade, Tipo de grelha, Textura, Brilho), com as suas opções. */
-export interface AtributoDef { id: string; codigo: string; nome: string; tipo: "lista" | "medida"; temHex: boolean; ordem: number; opcoes: OpcaoAtributo[] }
+export interface AtributoDef {
+  id: string; codigo: string; nome: string; tipo: "lista" | "medida"; temHex: boolean; ordem: number; opcoes: OpcaoAtributo[];
+  /** O interruptor «Tem foto», escolhido ao criar um atributo de cor: as opções podem ter foto (e então o hex é opcional). Ausente = false. */
+  temFoto?: boolean;
+}
 export interface Produto {
   id: string; n: string;
   /** Custo de compra por unidade (€). */
@@ -91,6 +102,8 @@ export interface Produto {
   modeloNovo?: string;
   /** 17/11 (20270120900000): o estado (products.status). Só o trazem a ficha lida por cat_ler_produto e o produto NOVO do formulário de criar; sem ele não se sabe (o Catálogo antigo não o lê). */
   estado?: "draft" | "active" | "discontinued";
+  /** 24/11: o «Modelo 3D» escolhido no próprio produto (id em planta3d/modelos3dEscolha.ts); vazio herda da subcategoria e da categoria. Em falta: sem escolha. */
+  modelo3d?: string;
 }
 /** Quantidade de uma linha de pacote: fixa, ou por medida (× fator, com arredondamento para cima). */
 export type Regra = { k: "fixo"; q: number } | { k: "por"; med: MedKey; f: number; arred: boolean };

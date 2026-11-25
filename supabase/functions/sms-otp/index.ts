@@ -11,6 +11,7 @@ const requestSchema = z.object({
 import { getCorsHeaders } from "../_shared/cors.ts";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { resolveSupplierOtpTarget } from "./supplierOtp.ts";
+import { lerListaEnvios, MENSAGEM_BLOQUEIO, telefonePermitido } from "../_shared/enviosPermitidos.ts";
 
 initSentry();
 
@@ -304,6 +305,13 @@ serve(async (req) => {
 
       if ((count || 0) >= 3) {
         return new Response(JSON.stringify({ error: "rate_limit", message: "Demasiados pedidos. Aguarde alguns minutos antes de tentar novamente." }), {
+          status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+
+      // 24/11: num ambiente de teste com dados reais (ENVIOS_SO_PARA), o SMS só sai para os telefones da lista
+      if (!telefonePermitido(phoneNumber, lerListaEnvios(Deno.env.get("ENVIOS_SO_PARA")))) {
+        return new Response(JSON.stringify({ error: "sms_bloqueado_teste", message: MENSAGEM_BLOQUEIO }), {
           status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" },
         });
       }

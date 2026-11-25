@@ -124,3 +124,31 @@ describe("gravar um produto novo com atributos", () => {
     expect(ch.map((c) => c.rpc)).toEqual(["cat_guardar_produto", "cat_guardar_produto_texto"]);
   });
 });
+
+describe("foto na opção (migration por aplicar: a leitura é tolerante)", () => {
+  const CAMINHO = `${ORG}/33333333-3333-4333-a333-333333333333.webp`;
+  const COM_FOTO = {
+    atributos: [
+      { id: A_COR, codigo: "cor", nome: "Cor", tipo: "lista", tem_hex: true, tem_foto: true, ordem: 2,
+        opcoes: [{ id: O_BRANCO, valor: "BRANCO", nome: "Branco", hex: null, foto: CAMINHO, ordem: 2 }, { id: O_PRETO, valor: "PRETO", nome: "Preto", hex: "#000000", foto: null, ordem: 1 }] },
+    ],
+    produtos: [],
+  };
+  it("sem as chaves novas (a base ainda não as devolve): foto null em cada opção e temFoto false, sem rebentar", () => {
+    const cor = montar(juntarAtributos(base(), RESPOSTA)).K.atributos?.find((a) => a.id === A_COR);
+    expect(cor?.temFoto).toBe(false);
+    expect(cor?.opcoes.map((o) => o.foto)).toEqual([null, null]);
+  });
+  it("com as chaves: temFoto e o caminho da foto de cada opção chegam a K.atributos", () => {
+    const cor = montar(juntarAtributos(base(), COM_FOTO)).K.atributos?.[0];
+    expect(cor?.temFoto).toBe(true);
+    expect(cor?.opcoes.map((o) => [o.nome, o.foto])).toEqual([["Preto", null], ["Branco", CAMINHO]]);
+    expect(cor?.opcoes.find((o) => o.nome === "Branco")?.hex).toBeNull();
+  });
+  it("valores esquisitos (foto vazia, número, tem_foto como texto) contam como sem foto", () => {
+    const R = { atributos: [{ ...COM_FOTO.atributos[0], tem_foto: "sim", opcoes: [{ id: O_BRANCO, valor: "B", hex: null, foto: "", ordem: 1 }, { id: O_PRETO, valor: "P", hex: null, foto: 7, ordem: 2 }] }], produtos: [] };
+    const cor = montar(juntarAtributos(base(), R)).K.atributos?.[0];
+    expect(cor?.temFoto).toBe(false);
+    expect(cor?.opcoes.map((o) => o.foto)).toEqual([null, null]);
+  });
+});

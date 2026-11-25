@@ -5,7 +5,7 @@ import { useState } from "react";
 import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { alertas, bloqueado, eur, partes, pct, tot, type Negocio } from "./motor";
+import { TEXTO_MOTIVO, alertas, bloqueado, eur, partes, pct, tot, type Negocio } from "./motor";
 import type { Ctx } from "./pecas";
 import { totais } from "./DocsCliente";
 import { ProdutosOrcamento } from "./ProdutosOrcamento";
@@ -24,9 +24,10 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
   const min = S.cfg.min / 100, alvo = S.cfg.alvo / 100;
   const [verCusto, setVerCusto] = useState(false);
   const [verMais, setVerMais] = useState(false), [verAvisos, setVerAvisos] = useState(false);
-  const mudou = () => { o.aprov = null; };
   const AL = o.verif && !fechado ? alertas(d, S) : [];
-  const bloqueios = AL.filter((a) => a.k === "x"), avisos = AL.filter((a) => a.k === "w");
+  // 25/11: com a exceção aprovada, as linhas aprovadas saem do «A corrigir» e ficam no cartão verde, com o motivo
+  const aprovadas = o.aprov === "ok" ? AL.filter((a) => a.k === "x" && a.aprov) : [];
+  const bloqueios = AL.filter((a) => a.k === "x" && !aprovadas.includes(a)), avisos = AL.filter((a) => a.k === "w");
   const estado = T.m < min ? "bad" : T.m < alvo - 0.005 ? "warn" : "ok";
   const cor = { ok: "text-success", warn: "text-warning", bad: "text-destructive" }[estado];
   const barra = { ok: "bg-success", warn: "bg-warning", bad: "bg-destructive" }[estado];
@@ -140,10 +141,17 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
               </div>
             )}
             {!bloqueios.length && (
-              <p className="flex items-center gap-2 rounded-xl border border-success/30 bg-success/[0.06] p-4 text-[15px] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
-                <CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" />
-                {o.aprov === "ok" ? "Exceção aprovada pela Direção. Pode enviar." : bloqueado(d, S) ? "À espera da Direção." : "Nada a bloquear. Pode enviar a proposta."}
-              </p>
+              <div className="rounded-xl border border-success/30 bg-success/[0.06] p-4 text-[15px] motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
+                <p className="flex items-center gap-2">
+                  <CheckCircle2 className="h-5 w-5 text-success" aria-hidden="true" />
+                  {o.aprov === "ok" ? "Exceção aprovada pela Direção. Pode enviar." : bloqueado(d, S) ? "À espera da Direção." : "Nada a bloquear. Pode enviar a proposta."}
+                </p>
+                {aprovadas.some((a) => a.ch) && (
+                  <ul className="mt-2 space-y-1 pl-7 text-muted-foreground" aria-label="Exceções aprovadas">
+                    {aprovadas.filter((a) => a.ch).map((a, k) => <li key={"ap" + k}>{a.t} · {TEXTO_MOTIVO[a.motivo ?? "margem"]}</li>)}
+                  </ul>
+                )}
+              </div>
             )}
           </div>
         </section>
@@ -171,12 +179,28 @@ export function OrcamentoSimples(ctx: Ctx & { d: Negocio }) {
           <span className="text-[15px] font-medium" id={`desc-${d.id}`}>Desconto</span>
           <div role="group" aria-labelledby={`desc-${d.id}`} className="flex flex-wrap gap-2">
             {DESCONTOS.map((p) => (
-              <button key={p} type="button" disabled={fechado} aria-pressed={o.desconto === p} onClick={() => run(() => { o.desconto = p; mudou(); })}
+              <button key={p} type="button" disabled={fechado} aria-pressed={o.desconto === p} onClick={() => run(() => A.descontoOrc(d.id, p))}
                 className={cn("min-h-11 min-w-14 rounded-lg border px-4 text-[15px] transition-colors disabled:opacity-60",
                   o.desconto === p ? "border-primary bg-primary/10 font-medium text-primary" : "border-input bg-card hover:border-foreground/40")}>
                 {p ? p + "%" : "Sem"}
               </button>
             ))}
+            {/* 24/11 (contratos reais da Mudelar com 2%, 2,5%…): um desconto à medida; grava-se ao sair do campo ou com Enter */}
+            <label className={cn("flex min-h-11 items-center gap-1.5 rounded-lg border px-3 text-[15px]",
+              DESCONTOS.includes(o.desconto) ? "border-input bg-card" : "border-primary bg-primary/10 font-medium text-primary")}>
+              <span>Outro</span>
+              <input key={`${d.id}-${o.desconto}`} type="text" inputMode="decimal" disabled={fechado} aria-label="Outro desconto, em percentagem"
+                defaultValue={DESCONTOS.includes(o.desconto) ? "" : String(o.desconto).replace(".", ",")}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); }}
+                onBlur={(e) => {
+                  const t = e.target.value.trim();
+                  if (!t) return;
+                  const v = Math.round(parseFloat(t.replace(",", ".")) * 100) / 100;
+                  if (Number.isFinite(v) && v >= 0 && v <= 50 && v !== o.desconto) run(() => A.descontoOrc(d.id, v));
+                }}
+                className="w-14 bg-transparent text-right outline-none disabled:opacity-60" />
+              <span aria-hidden="true">%</span>
+            </label>
           </div>
         </div>
         <button type="button" role="switch" aria-checked={o.vendaDireta} disabled={fechado} onClick={() => run(() => A.vendaDireta(d.id, !o.vendaDireta))}

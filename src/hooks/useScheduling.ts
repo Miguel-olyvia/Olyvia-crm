@@ -6,6 +6,7 @@ import { resolveCurrentBusinessUserId } from '@/lib/identity/resolveBusinessUser
 import { withAuditContext } from '@/utils/auditContext';
 import { getFriendlyErrorMessage } from '@/utils/friendlyError';
 import { parseAssigneesUpdateResult, type AssigneesUpdateResult } from '@/lib/scheduling/assigneesUpdateResult';
+import { matchesScheduleScope } from '@/lib/agenda/ownership';
 import type {
   ScheduleBoard,
   ScheduleItem,
@@ -364,17 +365,15 @@ export function useScheduling(companyId?: string) {
       const { data, error } = await query;
       if (error) throw error;
 
-      // Filter by assigned resource's user_id (scope "mine" or "team")
+      // Scope "mine" or "team": the assigned resource's user_id, and also (20/11/2026) the item's created_by / user_id, the
+      // same paths the schedule_items RLS lets the user see (all anew_users ids). Before, items the user created or owned
+      // directly but wasn't assigned to were hidden.
       let items = (data || []) as unknown as ScheduleItem[];
-      if (filters.assigneeIds && filters.assigneeIds.length > 0) {
-        const allowedIds = new Set(filters.assigneeIds);
-        items = items.filter(item =>
-          item.assignees?.some(a => allowedIds.has((a as any).resource?.user_id || ""))
-        );
-      } else if (filters.assigneeId) {
-        items = items.filter(item =>
-          item.assignees?.some(a => (a as any).resource?.user_id === filters.assigneeId)
-        );
+      const allowedIds = filters.assigneeIds && filters.assigneeIds.length > 0
+        ? new Set(filters.assigneeIds)
+        : filters.assigneeId ? new Set([filters.assigneeId]) : null;
+      if (allowedIds) {
+        items = items.filter(item => matchesScheduleScope(item, allowedIds));
       }
 
       // Filter by specific resources if needed

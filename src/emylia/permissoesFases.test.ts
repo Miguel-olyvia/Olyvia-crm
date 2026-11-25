@@ -60,6 +60,9 @@ describe("permDoCampo: a permissão de cada resposta, como fn_neg_marcas_permiss
     ["v1_estado", "v12_quem"].forEach((k) => expect(permDoCampo(k)).toBe("visita.gerir"));
     // 11/11 (20270114320000): o combinado e o diagnóstico são preencher a visita
     ["v1_combinado", "diag_humidade", "div_cozinha_diag_bancada"].forEach((k) => expect(permDoCampo(k)).toBe("visita.preencher"));
+    // 23/11 (20270126250000): a marca da visita feita sozinha pelo motor é preencher; o estado e o resto da agenda continuam gerir
+    ["v1_auto", "v12_auto"].forEach((k) => expect(permDoCampo(k)).toBe("visita.preencher"));
+    ["v1_automatico", "v1_auto_x", "v1_data", "v1_hora", "v1_duracao"].forEach((k) => expect(permDoCampo(k)).toBe("visita.gerir"));
     ["notas", "morada", "pagamento", "nif_fat", "div_cozinha_medida", "visita", "diagnostico"].forEach((k) => expect(permDoCampo(k)).toBeNull());
   });
 });
@@ -255,5 +258,45 @@ describe("a perda em /negocios grava-se na base (neg_perder_negocio / neg_anular
     d.visita.fotos = 2; expect(faseDaPerda(d)).toBe("levantamento");
     d.fase = 3; d.orc = { ...(d.orc ?? {}), enviada: null } as Negocio["orc"]; expect(faseDaPerda(d)).toBe("orcamento");
     d.orc!.enviada = "hoje"; expect(faseDaPerda(d)).toBe("proposta");
+  });
+});
+
+describe("20/11: na Visita sem negocios.visita.preencher só a agenda das visitas muda (neg_guardar_negocio, v_so_agenda)", () => {
+  it("as respostas que não são da agenda (questionário, morada, sugestões) param antes de mudar, com o aviso de visita.preencher", () => {
+    const { S, A, avisos } = montar(["visita.preencher"]);
+    const d = algum(S, (x) => x.fase === 2);
+    expect(d.fase).toBe(2);
+    const antes = { ...d.f };
+    A.campo(d.id, "cfg_pergunta_x", "Sim");
+    A.campo(d.id, "andar", "3");
+    A.moradaDaLead(d.id, { morada: "Rua Nova 1", cp: "1000-001", localidade: "Lisboa", de: "ficha" } as never);
+    A.localizacao(d.id, { morada: "Rua Velha 2", cp: "1000-002", localidade: "Lisboa", concelho: "Lisboa" }, 38.7, -9.1, 10);
+    d.sug = { andar: "2" } as never;
+    A.confirmar(d.id, ["andar"]);
+    expect(d.f).toEqual(antes);
+    expect((d.sug as Record<string, unknown>).andar).toBe("2");
+    expect(recusou(avisos, "visita.preencher")).toBe(true);
+  });
+  it("a agenda (v<n>_ de gerir) muda; com visita.preencher, o resto também; fora da Visita, como antes", () => {
+    const { S, A, avisos } = montar(["visita.preencher"]);
+    const d = algum(S, (x) => x.fase === 2);
+    A.campo(d.id, "v1_hora", "11:00");
+    expect(d.f.v1_hora).toBe("11:00");
+    expect(avisos).toEqual([]);
+    const outro = algum(S, (x) => x.fase === 3);
+    A.campo(outro.id, "obs_proposta_teste", "x");
+    expect(outro.f.obs_proposta_teste).toBe("x");
+    const m = montar([]);
+    const d2 = algum(m.S, (x) => x.fase === 2);
+    m.A.campo(d2.id, "cfg_pergunta_x", "Sim");
+    expect(d2.f.cfg_pergunta_x).toBe("Sim");
+  });
+  it("sem conta real (o protótipo), nada muda", () => {
+    const S = seed();
+    S.role = "comercial";
+    const A = acoes(S, () => {}, (fn) => fn());
+    const d = algum(S, (x) => x.fase === 2);
+    A.campo(d.id, "cfg_pergunta_x", "Sim");
+    expect(d.f.cfg_pergunta_x).toBe("Sim");
   });
 });

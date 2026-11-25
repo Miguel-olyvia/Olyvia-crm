@@ -12,12 +12,14 @@
 -- Cobre:
 --   1. Validar o pagamento sem fatura registada → NE010
 --   2. Fatura registada sem pagamento → sem EC, a fase fica 4
---   3. Fatura e pagamento → EC emitida uma vez (validar outra vez e emitir outra vez não mudam nada), fase 5, recibo RC aaaa/n
+--   3. Fatura e pagamento → fase 5 e recibo RC aaaa/n, ainda sem EC; a EC nasce quando o Gestor de obra aprova o plano
+--      (obra_guardar_negocio, por aprovar → aprovado), uma vez (validar outra vez não muda nada)
 --   4. Recibos seguidos não repetem o número; um recibo do ERP repetido → NE009; uma fatura repetida noutra prestação → NE009
 --   5. JSON com fatura_paga, recibo, ec, faturas novas e fase 5 → ignorado, com aviso
 --   6. Sem permissão → CT001
 --   7. Negócio do CRM → NE005
---   8. Venda direta → contrato de suporte assinado, ligado ao orçamento, com a EC (order_number) e a fase 5 na leitura
+--   8. Venda direta → pagamento e aprovação do plano: contrato de suporte assinado, ligado ao orçamento, com a EC (order_number) e a
+--      fase 5 na leitura
 --   9. Anular com uma PO já encomendada → NE011
 --  10. Anular sem PO → contratos cancelados (os gatilhos de estorno correm), negócio anulado e perdido; segunda vez é idempotente
 -- ============================================================
@@ -43,12 +45,12 @@ BEGIN
   ORDER BY u.created_at NULLS LAST, u.id LIMIT 1;
   IF v_auth IS NULL THEN RAISE EXCEPTION 'FALHOU: sem utilizador com pessoas.edit na organização %', v_base.organization_id; END IF;
 
-  -- as duas permissões novas e a de anular, ao papel desse utilizador nesta organização (só nesta transação)
+  -- as duas permissões novas, a de anular e a de planear a obra (aprovar o plano), ao papel desse utilizador nesta organização (só nesta transação)
   SELECT am.role_id INTO v_role FROM anew_memberships am JOIN anew_users u ON u.id = am.user_id
   WHERE u.auth_user_id = v_auth AND am.organization_id = v_base.organization_id AND am.status = 'active' LIMIT 1;
   PERFORM set_config('request.jwt.claims', '{"role":"service_role"}', true);
   INSERT INTO anew_role_permissions (role_id, permission_code, created_by)
-  SELECT v_role, c, NULL::uuid FROM unnest(ARRAY['negocios.registar_fatura', 'negocios.validar_pagamento', 'client_contracts.cancel']) c
+  SELECT v_role, c, NULL::uuid FROM unnest(ARRAY['negocios.registar_fatura', 'negocios.validar_pagamento', 'client_contracts.cancel', 'negocios.obra.planear']) c
   ON CONFLICT (role_id, permission_code) DO NOTHING;
 
   PERFORM set_config('request.jwt.claims', json_build_object('sub', v_auth, 'role', 'authenticated')::text, true);
@@ -81,6 +83,11 @@ BEGIN
   j := jsonb_set(j, '{orcamentos,0,prestacoes}', jsonb_build_array(jsonb_build_object('ordem', 1, 'rotulo', 'Única', 'pct', 1, 'marco', 'adjudicacao')));
   j := jsonb_set(j, '{contratos}', '[]'::jsonb);
   PERFORM set_config('teste.json_vd', j::text, true);
+  -- a obra (como em obra_arranque_e_auto_com_adendas): uma tarefa, o plano por aprovar
+  PERFORM set_config('teste.obra', jsonb_build_object('estado', 'planeada', 'titulo', 'Obra Teste',
+    'fases', '[{"ordem": 1, "nome": "Fase 1"}]'::jsonb,
+    'tarefas', '[{"chave": "t-teste", "nome": "Tarefa de teste", "fase": 1, "ordem": 1, "minutos": 60, "estado": "por_fazer"}]'::jsonb,
+    'emylia', '{"plano": {"estado": "por aprovar"}}'::jsonb)::text, true);
 END $fx$;
 
 -- ─── 1.ª gravação (como o comercial) ─────────────────────────────────────────
@@ -108,6 +115,9 @@ BEGIN
   IF public.fn_neg_fase_minima('99970000-0000-4000-8000-000000000001') <> 4 OR public.fn_neg_fase_minima('99970000-0000-4000-8000-000000000003') <> 4 THEN
     RAISE EXCEPTION 'FALHOU: contrato assinado e venda direta aceite deviam dar a fase 4';
   END IF;
+  -- a retificação das medidas aceite (sem ela o negócio com contrato não chega à EC)
+  INSERT INTO negocio_respostas (organization_id, negocio_id, campo_chave, divisao, valor, sugerido)
+  VALUES (current_setting('teste.org')::uuid, '99970000-0000-4000-8000-000000000001', 'retif_aceite', '', '2026-11-19', false);
 END $t$;
 
 -- ─── casos como o utilizador do Financeiro ───────────────────────────────────
@@ -139,14 +149,19 @@ BEGIN
   r := public.neg_registar_fatura(o, n_ct, 't1', 'FT TESTE999700/1', jsonb_build_object('atcud', 'ABCD-1', 'estado', 'por pagar'));
   IF (SELECT atcud FROM faturas WHERE organization_id = o AND numero = 'FT TESTE999700/1') IS DISTINCT FROM 'ABCD-1' THEN RAISE EXCEPTION 'FALHOU 2: o ERP não atualizou a fatura'; END IF;
 
-  -- 3. pagamento: a EC nasce, uma vez
+  -- 3. pagamento: fase 5 e recibo, a EC ainda não (nasce com o plano aprovado)
   r := public.neg_validar_pagamento(o, n_ct, 'FT TESTE999700/1', NULL, current_date, 'TRF 1', NULL, 'Banco A');
-  IF NOT (r->'ec'->>'emitida')::boolean OR NOT (r->'ec'->>'nova')::boolean THEN RAISE EXCEPTION 'FALHOU 3: não emitiu a EC: %', r; END IF;
+  IF (r->'ec'->>'emitida')::boolean THEN RAISE EXCEPTION 'FALHOU 3: emitiu a EC no pagamento, antes do plano aprovado: %', r; END IF;
   IF r->>'recibo' !~ ('^RC ' || ano || '/[0-9]+$') THEN RAISE EXCEPTION 'FALHOU 3: recibo com outro formato: %', r->>'recibo'; END IF;
-  SELECT ec_emitida_em INTO v_ec1 FROM client_contracts WHERE negocio_id = n_ct AND versao = 1;
-  IF v_ec1 IS NULL OR (SELECT order_number FROM client_contracts WHERE negocio_id = n_ct AND versao = 1) IS NULL THEN RAISE EXCEPTION 'FALHOU 3: contrato sem EC'; END IF;
+  IF (SELECT ec_emitida_em FROM client_contracts WHERE negocio_id = n_ct AND versao = 1) IS NOT NULL THEN RAISE EXCEPTION 'FALHOU 3: ec_emitida_em escrito antes do plano aprovado'; END IF;
   IF (SELECT fase FROM negocios WHERE id = n_ct) <> 5 OR NOT (SELECT fatura_paga FROM negocios WHERE id = n_ct)
      OR (SELECT recibo_numero FROM negocios WHERE id = n_ct) IS DISTINCT FROM r->>'recibo' THEN RAISE EXCEPTION 'FALHOU 3: o negócio não ficou pago na fase 5'; END IF;
+  -- o plano da obra gravado por aprovar e depois aprovado: a EC nasce, uma vez
+  PERFORM public.obra_guardar_negocio(o, n_ct, current_setting('teste.obra')::jsonb);
+  r2 := public.obra_guardar_negocio(o, n_ct, jsonb_set(current_setting('teste.obra')::jsonb, '{emylia,plano,estado}', '"aprovado"'));
+  IF NOT coalesce((r2->'ec'->>'emitida')::boolean, false) OR NOT coalesce((r2->'ec'->>'nova')::boolean, false) THEN RAISE EXCEPTION 'FALHOU 3: a aprovação do plano não emitiu a EC: %', r2; END IF;
+  SELECT ec_emitida_em INTO v_ec1 FROM client_contracts WHERE negocio_id = n_ct AND versao = 1;
+  IF v_ec1 IS NULL OR (SELECT order_number FROM client_contracts WHERE negocio_id = n_ct AND versao = 1) IS NULL THEN RAISE EXCEPTION 'FALHOU 3: contrato sem EC'; END IF;
   r2 := public.neg_validar_pagamento(o, n_ct, 'FT TESTE999700/1', NULL, current_date, 'TRF 1', NULL, NULL);
   IF NOT (r2->>'ja_validado')::boolean OR r2->>'recibo' IS DISTINCT FROM r->>'recibo' OR (r2->'ec'->>'nova')::boolean THEN RAISE EXCEPTION 'FALHOU 3: a 2.ª validação mudou alguma coisa: %', r2; END IF;
   SELECT ec_emitida_em INTO v_ec2 FROM client_contracts WHERE negocio_id = n_ct AND versao = 1;
@@ -198,9 +213,11 @@ BEGIN
   EXCEPTION WHEN SQLSTATE 'NE005' THEN NULL;
   END;
 
-  -- 8. venda direta: o contrato de suporte com a EC
-  r := public.neg_validar_pagamento(o, n_vd, 'FT TESTE999700/3', NULL, current_date, NULL, NULL, NULL);
-  IF NOT (r->'ec'->>'emitida')::boolean THEN RAISE EXCEPTION 'FALHOU 8: a venda direta não emitiu a EC: %', r; END IF;
+  -- 8. venda direta: pagamento e aprovação do plano; o contrato de suporte com a EC
+  PERFORM public.neg_validar_pagamento(o, n_vd, 'FT TESTE999700/3', NULL, current_date, NULL, NULL, NULL);
+  PERFORM public.obra_guardar_negocio(o, n_vd, current_setting('teste.obra')::jsonb);
+  r := public.obra_guardar_negocio(o, n_vd, jsonb_set(current_setting('teste.obra')::jsonb, '{emylia,plano,estado}', '"aprovado"'));
+  IF NOT coalesce((r->'ec'->>'emitida')::boolean, false) THEN RAISE EXCEPTION 'FALHOU 8: a venda direta não emitiu a EC: %', r; END IF;
   IF NOT EXISTS (SELECT 1 FROM client_contracts c JOIN quotes q ON q.id = c.quote_id
                  WHERE c.id = (r->'ec'->>'contract_id')::uuid AND q.negocio_id = n_vd AND q.venda_direta AND c.status = 'signed'
                    AND c.ec_emitida_em IS NOT NULL AND c.order_number IS NOT NULL AND c.negocio_id IS NULL) THEN

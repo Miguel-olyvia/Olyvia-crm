@@ -46,7 +46,8 @@ export function historiaDaObra(d: Negocio): Marco[] {
     m({ q: t.exec.validada ?? t.exec.feita ?? (p ? rotuloDia(p, t.dia) : ""), t: t.nome, sub: t.exec.nota, fotos: t.exec.fotos.length ? t.exec.fotos : undefined, k: "tarefa" });
   }
   // o que o diário de obra registou para o cliente (ocorrências e marcos; as horas e as validações já estão nas tarefas)
-  for (const e of d.obra.diario ?? []) if (e.k === "ocorrencia" || e.k === "marco") m({ q: e.q, t: e.t, fotos: e.fotos?.length ? e.fotos : undefined, k: "diario" });
+  // 23/11: sem as linhas do anular e refazer do Estúdio (são da gestão do plano, não da obra)
+  for (const e of d.obra.diario ?? []) if ((e.k === "ocorrencia" || e.k === "marco") && !/^(Anulado|Refeito): /.test(e.t)) m({ q: e.q, t: e.t, fotos: e.fotos?.length ? e.fotos : undefined, k: "diario" });
   if (p?.estado === "concluída") m({ q: quando(d, /^Obra concluída/) ?? "", t: "Obra concluída", k: "obra" });
   const au = d.obra.auto;
   if (au?.estado === "assinado") m({ q: au.assinado ?? au.q, t: `Auto de receção ${au.n} assinado`, sub: au.reservas ? `Com observações: ${au.reservas}` : "Está tudo bem", k: "auto" });

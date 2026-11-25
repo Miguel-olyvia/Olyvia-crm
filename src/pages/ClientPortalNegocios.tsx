@@ -13,6 +13,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatCurrency } from "@/lib/utils";
 import { usePortalT } from "@/portal-i18n";
+import { useNumerosDosNegocios } from "@/components/portal/obra/useNumerosDosNegocios";
+import { numeroDaProposta } from "@/lib/numeroDocumento";
 
 interface NegocioDoCliente {
   negocioId: string;
@@ -20,6 +22,8 @@ interface NegocioDoCliente {
   contratoId: string | null;
   titulo: string;
   numero: string | null;
+  /** proposals.created_at: o ano do número mostrado («PR <ano>/<n.º do negócio>»). */
+  criadaEm: string | null;
   valor: number | null;
   passo: PassoPortal;
 }
@@ -54,7 +58,7 @@ async function lerNegocios(org: PortalOrg): Promise<NegocioDoCliente[]> {
     vistos.add(p.negocio_id);
     const contrato = (contratos ?? []).find((c: any) => c.negocio_id === p.negocio_id);
     lista.push({
-      negocioId: p.negocio_id, propostaId: p.id, contratoId: contrato?.id ?? null, titulo: p.title, numero: p.proposal_number ?? null,
+      negocioId: p.negocio_id, propostaId: p.id, contratoId: contrato?.id ?? null, titulo: p.title, numero: p.proposal_number ?? null, criadaEm: p.created_at ?? null,
       valor: p.value ?? null, passo: passoDoNegocio(p.status, contrato?.status),
     });
   }
@@ -84,6 +88,12 @@ const ClientPortalNegocios = () => {
     staleTime: 0,
   });
   const negocios = consulta.data ?? [];
+  // 23/11: o número como a Emylia o mostra (PR <ano>/<n.º do negócio>), pela vista do cliente; sem ela, o guardado
+  const numeros = useNumerosDosNegocios(negocios.map((n) => n.negocioId));
+  const numeroDe = (n: NegocioDoCliente): string | null => {
+    const x = numeros.get(n.negocioId);
+    return numeroDaProposta({ numeroNegocio: x?.numero ?? null, versao: x?.versao ?? null, criadoEm: n.criadaEm, guardado: n.numero }) || null;
+  };
   // As mensagens da equipa por ler, por negócio (o mesmo ritmo da lista): um selo «N novas» em cada negócio.
   const naoLidas = useQuery({
     queryKey: [CHAVE_NAO_LIDAS_PORTAL, activeOrg?.organizationId ?? null],
@@ -128,7 +138,7 @@ const ClientPortalNegocios = () => {
                       <div className="min-w-0">
                         <p className="truncate text-sm font-medium">{n.titulo}</p>
                         <p className="text-xs text-muted-foreground">
-                          {[n.numero, n.valor != null ? formatCurrency(n.valor) : null].filter(Boolean).join(" • ")}
+                          {[numeroDe(n), n.valor != null ? formatCurrency(n.valor) : null].filter(Boolean).join(" • ")}
                         </p>
                       </div>
                       <div className="flex shrink-0 items-center gap-2">

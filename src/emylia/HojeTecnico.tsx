@@ -8,11 +8,12 @@ import { createPortal } from "react-dom";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import {
-  AlertTriangle, ArrowRight, Camera, Check, ChevronDown, Clock, HardHat, ImagePlus, ListChecks, MapPin, MessageSquare, Minus, Package, PackageX, Phone, Plus, Ruler, ShieldCheck, Sparkles, Wrench, X,
+  AlertTriangle, ArrowRight, BellRing, Camera, Check, ChevronDown, Clock, HardHat, ImagePlus, ListChecks, MapPin, MessageSquare, Minus, Package, PackageX, Phone, Plus, Ruler, ShieldCheck, Sparkles, Wrench, X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { LINHAS, TECS, camposMedida, medida, nfmt, type Negocio } from "./motor";
+import { LINHAS, TECS, camposMedida, medida, nfmt, type Negocio, type Plano } from "./motor";
+import { avisosPorVer } from "./tarefasValidador";
 import { rotuloOficios } from "./equipa/tecnicos";
 import { hfmt } from "./horasFmt";
 import type { Ctx } from "./pecas";
@@ -23,10 +24,11 @@ import { podeNeg } from "./permissoes";
 import { AbrirEstudioMedidas } from "./estudioPlano/EstudioMedidas";
 import { RESPONSAVEL_OBRA, equipamentosDaObra, estadoDe, fotoExemplo, materiaisPorFase, nomeCurtoTarefa } from "./obraOps";
 import { useInventario } from "./inventario/loja";
+import { listaMicro, microFeitas } from "./microtarefas";
 import { resumoEcNegocio } from "./inventario/ponteNegocios";
 import { useMateriaisDaObra } from "./real/materiaisObraReal";
 import {
-  aSeguirDoTecnico, diaDaTarefa, enviosDe, horasPorDia, instrucoesDe, passosFeitos, rotuloDiaTarefa, tecnicosComTrabalho, terminadasHoje, trabalhoDoTecnico, type ASeguir,
+  aSeguirDoTecnico, diaDaTarefa, enviosDe, horasPorDia, instrucoesDe, rotuloDiaTarefa, tecnicosComTrabalho, terminadasHoje, trabalhoDoTecnico, type ASeguir,
 } from "./trabalhoObra";
 import { AvatarTec, ChipEstado, EnvioItem, HistoricoTarefa, Miniaturas } from "./AcompanhamentoObra";
 import { EstadoFotos, FotoObra, useFotosAJuntar } from "./fotosDaObra";
@@ -239,8 +241,9 @@ export function HojeTecnico(ctx: Ctx) {
 
 /** Uma tarefa de hoje: tudo o que o técnico precisa, por ordem, com um primário de cada vez. */
 function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
-  const { A, run } = ctx;
-  const p = d.obra.plano!, t = p.tasks[ti], ex = estadoDe(t), I = instrucoesDe(t), feitos = passosFeitos(t);
+  const { S, A, run } = ctx;
+  // 24/11: o passo a passo são as microtarefas da tarefa (as desta obra, ou do Catálogo, ou as instruções): microtarefas.ts
+  const p = d.obra.plano!, t = p.tasks[ti], ex = estadoDe(t), I = instrucoesDe(t), M = listaMicro(t, S, p), feitos = microFeitas(t, M);
   const k = diaDaTarefa(t, p.dia) ?? 1, ultimoDia = k === t.dur;
   const cor = t.fase ? COR_FASE[t.fase] : "#7c5ce0";
   const fase = t.fase ? FASES_OBRA[t.fase - 1] : null;
@@ -255,7 +258,7 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
   const [pedido, setPedido] = useState(false);
   const im = t.bloqueio ? d.obra.imprevistos?.find((x) => x.id === t.bloqueio) : undefined;
   const [mais, setMais] = useState(false);
-  const todos = feitos.length === I.passos.length;
+  const todos = M.length > 0 && feitos.size === M.length;
 
   return (
     <article className={cn(CARTAO, "overflow-hidden")} aria-label={`${t.nome} · ${d.nome}`}>
@@ -266,6 +269,7 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
           <span className="rounded-full bg-white shadow-sm"><ChipEstado e={ex} /></span>
         </div>
         <h2 className="mt-0.5 text-2xl font-semibold tracking-tight" title={t.nome}>{nomeCurtoTarefa(t.nome)}</h2>
+        <Mudou p={p} ti={ti} tec={t.tec} claro />
         <p className="mt-1 text-[15px] text-white/90">{d.nome} · {d.servico}</p>
         <div className="mt-3 flex flex-wrap gap-2">
           <a href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(morada)}`} target="_blank" rel="noreferrer" className="inline-flex min-h-10 items-center gap-1.5 rounded-full bg-white/15 px-3 text-sm hover:bg-white/25"><MapPin className="h-4 w-4" aria-hidden="true" />{morada}</a>
@@ -312,16 +316,16 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
             {/* 2. o passo a passo */}
             <section aria-labelledby={`passos-${ti}`} className="border-t border-border pt-5">
               <div className="flex items-baseline justify-between gap-3">
-                <h3 id={`passos-${ti}`} className="flex items-center gap-2 text-[17px] font-semibold tracking-tight"><Num n={2} ok={todos} />Passo a passo</h3>
-                <span className="text-sm tabular-nums text-muted-foreground">{feitos.length} de {I.passos.length}</span>
+                <h3 id={`passos-${ti}`} className="flex items-center gap-2 text-[17px] font-semibold tracking-tight"><Num n={2} ok={todos} />Microtarefas</h3>
+                <span className="text-sm tabular-nums text-muted-foreground">{feitos.size} de {M.length}</span>
               </div>
-              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div className="h-full rounded-full bg-primary motion-safe:transition-[width] duration-500" style={{ width: `${(feitos.length / I.passos.length) * 100}%` }} /></div>
+              <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div className="h-full rounded-full bg-primary motion-safe:transition-[width] duration-500" style={{ width: `${M.length ? (feitos.size / M.length) * 100 : 0}%` }} /></div>
               <ul className="mt-3 space-y-2">
-                {I.passos.map((x, i) => {
-                  const on = feitos.includes(i);
+                {M.map((m) => {
+                  const on = feitos.has(m.id), x = m.n;
                   return (
-                    <li key={x}>
-                      <button type="button" role="checkbox" aria-checked={on} onClick={() => run(() => A.marcarPasso(d.id, ti, i))}
+                    <li key={m.id}>
+                      <button type="button" role="checkbox" aria-checked={on} onClick={() => run(() => A.marcarPasso(d.id, ti, m.id))}
                         className={cn("flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-2 text-left text-[15px] transition-all active:scale-[0.99]", on ? "border-success/40 bg-success/[0.07]" : "border-input bg-card hover:border-foreground/40")}>
                         <span className={cn("grid h-6 w-6 shrink-0 place-items-center rounded-md border-2 transition-colors", on ? "border-success bg-success text-white" : "border-input")}>{on && <Check className="h-4 w-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200" aria-hidden="true" />}</span>
                         <span className={cn(on && "text-muted-foreground line-through decoration-muted-foreground/50")}>{x}</span>
@@ -489,6 +493,17 @@ function Preparacao({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
 }
 
 /** 21/10: uma tarefa que vem a seguir: quando começa, quem está a trabalhar antes (ao vivo) e, num toque, o que preparar. */
+/** 23/11 (revisão: «no Hoje de cada técnico fica a mudança marcada»): a tarefa que o gestor mudou, com o aviso ainda por ver. */
+function Mudou({ p, ti, tec, claro = false }: { p: Plano; ti: number; tec: string | null | undefined; claro?: boolean }) {
+  const a = tec ? avisosPorVer(p, tec).filter((x) => x.a.ti === ti).at(-1)?.a : undefined;
+  if (!a) return null;
+  return (
+    <p className={cn("mt-1.5 inline-flex max-w-full items-start gap-1.5 rounded-lg px-2 py-1 text-sm font-medium", claro ? "bg-white/90 text-amber-900" : "bg-warning/[0.12] text-amber-900 dark:text-amber-200")}>
+      <BellRing className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden="true" /><span>Mudou: {a.t}</span>
+    </p>
+  );
+}
+
 function TarefaASeguir({ ctx, x, eu }: { ctx: Ctx; x: ASeguir; eu: string }) {
   const { d, t, ti, antes, faltam } = x;
   const p = d.obra.plano!, cor = t.fase ? COR_FASE[t.fase] : "#7c5ce0";
@@ -513,6 +528,7 @@ function TarefaASeguir({ ctx, x, eu }: { ctx: Ctx; x: ASeguir; eu: string }) {
             <div className="min-w-0">
               <p className="text-base font-semibold" title={t.nome}>{nomeCurtoTarefa(t.nome)}</p>
               <p className="text-sm text-muted-foreground">{d.nome} · {d.f.localidade || d.local.split(",").pop()?.trim()}</p>
+              <Mudou p={p} ti={ti} tec={eu} />
             </div>
             <span className="shrink-0 rounded-full bg-primary/[0.08] px-2.5 py-1 text-sm font-medium text-primary first-letter:uppercase">{quando}</span>
           </div>

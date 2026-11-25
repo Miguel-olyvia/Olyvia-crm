@@ -3,7 +3,7 @@
 // os ramos pelo id do Catálogo: trocar por uuid é da camada da base (lerNegocios/gravarNegocios). As datas vão em ISO; na volta saem no
 // formato que o motor entende ("dd/mm hh:mm"; "aaaa-mm-dd" nas faturas e no início da obra).
 // As adendas vão também (migration 20261231990000). Fora daqui, por agora: a obra (Fase 3), a demolição e o acesso ao portal (Fase 4).
-import { LINHAS, garantirServico, ivaDaLinha, type Estado, type Evento, type LinhaOrc, type Negocio, type Orcamento, type Papel, type PedidoClausula, type SvcId, type VersaoProposta } from "../motor";
+import { LINHAS, garantirServico, ivaDaLinha, taxaIvaDe, type Estado, type TaxaIva, type Evento, type LinhaOrc, type Negocio, type Orcamento, type Papel, type PedidoClausula, type SvcId, type VersaoProposta } from "../motor";
 import { PREFIXO_PROD, partesDoModelo, textoProduto, type ProdVisita } from "../produtosVisita";
 import type { FaturaReg } from "../v2/financeiro";
 import { prestacoes, type Prestacao } from "../planoObra";
@@ -184,20 +184,20 @@ function docDeContratos(L: LinhaContrato[]): { cAtual: LinhaContrato | undefined
 
 /* ------------------------------------------------------------------ adendas */
 const r2a = (x: number) => Math.round(x * 100) / 100;
-/** O desconto da adenda é em % na Emylia e em fração na base. */
+/** O desconto é em % na Emylia e em fração na base (quotes.desconto_fracao, 0 a 1): o das adendas e, desde 24/11, o do orçamento. */
 const fracao = (pct: number | undefined) => (pct ? Math.round(pct * 1e4) / 1e6 : 0);
 const percent = (f: number) => Math.round(f * 1e6) / 1e4;
 const linhaAdendaParaLinha = (x: LinhaAdendaEmylia, i: number): LinhaAdendaLinha => ({
   ordem: i, servico: x.livre ? null : x.sid, chave: x.sid, livre: !!x.livre, descricao: x.n, unidade: x.un, quantidade: x.q, preco_un: x.pu, horas_un: x.h,
   perfil: x.perfil, perfil_chave: x.perfilId ?? null, custo_un: x.cu ?? null, mao_obra_un: x.mo ?? null,
   materiais: x.mats ? x.mats.map((m) => ({ nome: m.n, quantidade: m.q, unidade: m.un, preco: m.preco ?? null, fornecedor: m.forn ?? null })) : null,
-  ...(x.iva ? { taxa_iva: x.iva } : {}),
+  ...(x.iva != null ? { taxa_iva: x.iva } : {}), // 24/11: o 0% também vai
 });
 /** 19/11: a taxa de uma linha da adenda lida da base. Primeiro a da base (20270124030000: taxa_iva, 6 ou 23). Só nas linhas antigas
  *  (gravadas antes, sem taxa) se deduz pelo nome: a dos produtos do acerto volta a 23% (a «-p6» é a que fica a 6%); as outras, 6%. */
-export function ivaDaLinhaLida(l: Pick<LinhaAdendaLinha, "taxa_iva" | "livre" | "descricao" | "chave">): { iva?: 6 | 23 } {
-  const taxa = l.taxa_iva == null ? null : Number(l.taxa_iva);
-  if (taxa === 6 || taxa === 23) return { iva: taxa };
+export function ivaDaLinhaLida(l: Pick<LinhaAdendaLinha, "taxa_iva" | "livre" | "descricao" | "chave">): { iva?: TaxaIva } {
+  const taxa = taxaIvaDe(l.taxa_iva); // 24/11: 0, 6 ou 23
+  if (taxa !== undefined) return { iva: taxa };
   // 19/11 (testarh, 1009): sem a taxa na base é uma linha antiga, assinada a 6%: não se adivinha (mudava o total de uma adenda assinada)
   return {};
 }
@@ -343,7 +343,7 @@ export function paraLinhas(d: Negocio, hoje: Date = new Date(), S?: Pick<Estado,
   const orcamentos: LinhaOrcamento[] = [];
   if (o) {
     for (const vs of o.versoes ?? []) orcamentos.push({
-      versao: vs.n, estado: "substituido", modelo: o.modelo, desconto: vs.desconto ?? 0, venda_direta: o.vendaDireta, inicio_obra: null, equipa: null,
+      versao: vs.n, estado: "substituido", modelo: o.modelo, desconto: fracao(vs.desconto), venda_direta: o.vendaDireta, inicio_obra: null, equipa: null,
       verificado: false, aprovacao: null, motivos_versao: vs.motivos, nota_versao: vs.nota ?? null, onde_refeita: vs.onde ?? null, pedido_cliente: null, recusa: null,
       enviado_em: iso(vs.enviada), aceite_em: null, substituido_em: iso(vs.substituida), aceite_antes_em: iso(vs.aceite ?? null),
       preco_final: Math.round(vs.total * 100) / 100, total_com_iva: vs.totalIva != null ? Math.round(vs.totalIva * 100) / 100 : null, prestacoes_por_fases: false, sem_demolicao: false,
@@ -354,7 +354,7 @@ export function paraLinhas(d: Negocio, hoje: Date = new Date(), S?: Pick<Estado,
     orcamentos.push({
       versao: (o.versoes?.length ?? 0) + 1,
       estado: o.recusada ? "recusado" : o.aceite ? "aceite" : o.enviada ? "enviado" : "rascunho",
-      modelo: o.modelo, desconto: o.desconto, venda_direta: o.vendaDireta, inicio_obra: o.inicioObra ?? null, equipa: o.equipa ?? null,
+      modelo: o.modelo, desconto: fracao(o.desconto), venda_direta: o.vendaDireta, inicio_obra: o.inicioObra ?? null, equipa: o.equipa ?? null,
       verificado: o.verif, aprovacao: o.aprov === "ok" ? "aprovada" : o.aprov === "pedida" ? "pedida" : null, motivos_versao: [], nota_versao: null, onde_refeita: null,
       pedido_cliente: o.pedidoCliente ? { motivos: o.pedidoCliente.motivos, nota: o.pedidoCliente.nota ?? null, em: iso(o.pedidoCliente.q) } : null,
       recusa: o.recusada ? { motivos: o.recusada.motivos, nota: o.recusada.nota ?? null, em: iso(o.recusada.q) } : null,
@@ -432,7 +432,7 @@ const linhaParaProd = (p: LinhaProdutoVisita): ProdVisita => ({
 // do Catálogo do dia em que se gravou (muda-se à mão na linha).
 function linhaDeLinha(l: LinhaOrcamentoLinha): LinhaOrc {
   const zonas = l.zonas ? { zonas: l.zonas.map((z) => ({ z: z.zona, q: z.quantidade, ...(z.valor != null ? { preco: z.valor } : {}) })) } : {};
-  const iva = l.taxa_iva != null ? { iva: l.taxa_iva as 6 | 23 } : {};
+  const taxa = taxaIvaDe(l.taxa_iva), iva = taxa !== undefined ? { iva: taxa } : {}; // 24/11: 0, 6 ou 23 (a base devolve numeric)
   if (l.tipo === "servico") {
     const c = l.custo;
     return {
@@ -467,7 +467,7 @@ export function deLinhas(L: LinhasNegocio): Negocio {
     const mats = (atual.linhas ?? []).filter((l) => l.tipo === "material_modelo").sort((x, y) => x.ordem - y.ordem);
     orc = {
       modelo: atual.modelo, linhas: (atual.linhas ?? []).filter((l) => l.tipo !== "material_modelo").sort((x, y) => x.ordem - y.ordem).map(linhaDeLinha),
-      desconto: atual.desconto,
+      desconto: percent(atual.desconto ?? 0),
       ...(mats.length && atual.aceite_em ? { matsModelo: mats.map((l) => ({ n: l.descricao, un: l.unidade ?? "", q: l.quantidade })) } : {}),
       vendaDireta: atual.venda_direta, verif: atual.verificado, aprov: atual.aprovacao === "aprovada" ? "ok" : atual.aprovacao === "pedida" ? "pedida" : null,
       enviada: atual.enviado_em ? deIso(atual.enviado_em) : null, aceite: atual.aceite_em ? deIso(atual.aceite_em) : null,
@@ -488,7 +488,7 @@ export function deLinhas(L: LinhasNegocio): Negocio {
         total: v.preco_final ?? 0, ...(v.total_com_iva != null ? { totalIva: v.total_com_iva } : {}), motivos: v.motivos_versao, ...(v.nota_versao ? { nota: v.nota_versao } : {}),
         onde: v.onde_refeita ?? "orcamento",
         ...(v.produtos?.length ? { prod: v.produtos.sort((x, y) => x.ordem - y.ordem).map(linhaParaProd) } : {}), ...(v.partes_fora?.length ? { semParte: v.partes_fora } : {}),
-        ...(v.linhas ? { linhas: v.linhas.filter((l) => l.tipo !== "material_modelo").sort((x, y) => x.ordem - y.ordem).map(linhaDeLinha) } : {}), desconto: v.desconto,
+        ...(v.linhas ? { linhas: v.linhas.filter((l) => l.tipo !== "material_modelo").sort((x, y) => x.ordem - y.ordem).map(linhaDeLinha) } : {}), desconto: percent(v.desconto ?? 0),
       })) } : {}),
       ...(atual.pedido_cliente ? { pedidoCliente: { motivos: atual.pedido_cliente.motivos, ...(atual.pedido_cliente.nota ? { nota: atual.pedido_cliente.nota } : {}), q: deIso(atual.pedido_cliente.em) } } : {}),
       ...(atual.recusa ? { recusada: { motivos: atual.recusa.motivos, ...(atual.recusa.nota ? { nota: atual.recusa.nota } : {}), q: deIso(atual.recusa.em) } } : {}),

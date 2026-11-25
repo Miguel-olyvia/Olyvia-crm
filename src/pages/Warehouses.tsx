@@ -26,6 +26,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { valorStockPorArmazem } from "@/lib/custosStock";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
+import { useAvisosInventario } from "@/components/inventory/ui/embebido";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -221,6 +222,7 @@ function useWarehouseStockStats(organizationId: string | undefined, withCost: bo
 
 const Warehouses = () => {
   const { toast } = useToast();
+  const avisos = useAvisosInventario(); // só dentro do novo Inventário; fora é null
   const { loading: permissionsLoading, hasModuleAccess, hasPermission } = usePermissions();
   const { activeCompany, isLoading: companyLoading } = useCompany();
   const { t } = useTranslation();
@@ -464,6 +466,7 @@ const Warehouses = () => {
       toast({
         title: t("warehouses.toast.deleteSuccess"),
       });
+      avisos?.("eliminado", { tipo: "armazem", id, rotulo: warehouses.find((w) => w.id === id)?.name ?? null });
 
       refreshAll();
     } catch (error: any) {

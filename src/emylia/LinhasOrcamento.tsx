@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CATALOGO } from "./catalogo";
-import { custoUnLinha, eur, ivaDaLinha, linhaCalc, nfmt, pct, r2, type LinhaOrc, type Negocio } from "./motor";
+import { TAXAS_IVA, custoUnLinha, eur, ivaDaLinha, ivaPadraoDaLinha, linhaCalc, nfmt, pct, r2, type LinhaOrc, type Negocio, type TaxaIva } from "./motor";
 import { LinhaLivre } from "./LinhaLivre";
 import { ZonaDaLinha, ZonasDaObra } from "./ZonasDaObra";
 import { numero, type Ctx } from "./pecas";
@@ -196,15 +196,15 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
         const x = linhaCalc(l, S), m = x.preco > 0 ? (x.preco - x.custo) / x.preco : 0;
         const cor = x.preco <= 0 ? "bg-muted text-muted-foreground" : m < min ? "bg-destructive/10 text-destructive" : m < alvo - 0.005 ? "bg-warning/15 text-warning" : "bg-success/10 text-success";
         const origem = origemLinha(l), O = ORIGEM[origem];
-        const nome = l.t === "svc" ? x.s!.n : l.d.replace(/^(Produto · |Fornecido pelo cliente · |Levantamento · )/, "");
-        const Ic = l.t === "svc" ? iconeOficio(CATALOGO.find((c) => c.id === l.sid)?.cat ?? x.s!.perfil) : O.ic;
+        const nome = l.t === "svc" ? (x.s?.n ?? "Serviço") : l.d.replace(/^(Produto · |Fornecido pelo cliente · |Levantamento · )/, "");
+        const Ic = l.t === "svc" ? iconeOficio(CATALOGO.find((c) => c.id === l.sid)?.cat ?? x.s?.perfil ?? "") : O.ic;
         const dem = origem === "demolicao", veCusto = ver && (!dem || direcao); // o custo da demolição só a Direção o vê
-        const sub = l.t === "svc" ? `${nfmt(l.q)} ${x.s!.un} × ${eur(l.pu)} €` : l.livre ? `${nfmt(l.livre.q)} ${l.livre.un} × ${eur(l.livre.pu)} €` : origem === "modelo" ? "estimativa dos materiais do modelo" : dem && o.demolicao?.r ? resumoDemolicao(o.demolicao.r) : "";
+        const sub = l.t === "svc" ? `${nfmt(l.q)} ${(x.s?.un ?? "")} × ${eur(l.pu)} €` : l.livre ? `${nfmt(l.livre.q)} ${l.livre.un} × ${eur(l.livre.pu)} €` : origem === "modelo" ? "estimativa dos materiais do modelo" : dem && o.demolicao?.r ? resumoDemolicao(o.demolicao.r) : "";
         const ajustado = l.t === "mat" && o.precosMan?.[l.d] != null;
         const zonaTxt = !tabela && fechado && l.zonas?.length ? (l.zonas.length === 1 ? l.zonas[0].z : l.zonas.map((z) => `${z.z} ${nfmt(z.q)}`).join(", ")) : "";
         // 27/10 (Rúben): a caixa dizia o preço por unidade por baixo de um valor que é o total da linha (2 121,00 € abria 106,05).
         // Agora diz o que é: o preço por unidade (com a unidade) nos serviços e nas linhas livres; o valor da linha nas outras.
-        const unEditar = l.t === "svc" ? x.s!.un : l.t === "mat" && l.livre ? l.livre.un : null;
+        const unEditar = l.t === "svc" ? (x.s?.un ?? "") : l.t === "mat" && l.livre ? l.livre.un : null;
         const qEditar = l.t === "svc" ? l.q : l.t === "mat" && l.livre ? l.livre.q : 1;
         const valorEditar = l.t === "svc" ? l.pu : l.t === "mat" && l.livre ? l.livre.pu : l.preco;
         const s = l.t === "svc" ? x.s! : null, novo = s && l.t === "svc" ? custoUnLinha(s, S) : 0, mud = !!s && !fechado && l.t === "svc" && !l.cuMan && Math.abs(novo - l.cu) > 0.004;
@@ -224,7 +224,17 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
                   {ajustado && !(l.t === "mat" && l.livre) && <span className="rounded-full bg-warning/15 px-2 py-0.5 text-xs font-medium text-warning">preço ajustado</span>}
                   {/* 26/10: a taxa de IVA à vista quando não é a de sempre (ou numa linha livre). 19/11: a taxa congelada ao enviar (l.iva) só se
                       mostra quando não é a de sempre */}
-                  {((l.t === "mat" && l.livre) || ivaDaLinha(l, S) !== (l.t === "mat" ? 23 : 6)) && <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">IVA {ivaDaLinha(l, S)}%</span>}
+                  {/* 24/11 (MD 1594): nos materiais e produtos, a taxa escolhe-se aqui (23%, 6% ou 0%); fora do de sempre, fica destacada */}
+                  {l.t === "mat" && !fechado ? (
+                    <label className="inline-flex items-center">
+                      <span className="sr-only">IVA de {nome}</span>
+                      <select value={ivaDaLinha(l, S)} onChange={(e) => { const v = Number(e.target.value) as TaxaIva; run(() => A.ivaLinha(d.id, i, v)); }}
+                        className={cn("h-9 cursor-pointer rounded-full border px-2 text-xs font-medium outline-none focus-visible:ring-2 focus-visible:ring-primary/30",
+                          ivaDaLinha(l, S) !== 23 ? "border-primary/40 bg-primary/10 text-foreground" : "border-input bg-card text-muted-foreground")}>
+                        {TAXAS_IVA.map((v) => <option key={v} value={v}>IVA {v}%{v === 0 ? " · autoliquidação" : ""}</option>)}
+                      </select>
+                    </label>
+                  ) : ((l.t === "mat" && l.livre) || ivaDaLinha(l, S) !== (l.t === "mat" ? 23 : 6)) && <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-foreground">IVA {ivaDaLinha(l, S)}%</span>}
                 </p>
               </div>
               {tabela && zonas.length > 0 && <ZonaDaLinha ctx={ctx} d={d} i={i} nome={nome} compacto />}
@@ -311,7 +321,8 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
                   <fieldset className="sm:col-span-2">
                     <legend className="text-sm font-medium">IVA desta linha</legend>
                     <div className="mt-1 flex flex-wrap gap-2">
-                      {([6, 23] as const).map((v) => (
+                      {/* 24/11: e 0% (a autoliquidação, cliente empresa) */}
+                      {TAXAS_IVA.map((v) => (
                         <button key={v} type="button" aria-pressed={ivaDaLinha(l, S) === v} onClick={() => run(() => A.ivaLinha(d.id, i, v))}
                           className={cn("min-h-11 rounded-lg border px-3 text-[15px]", ivaDaLinha(l, S) === v ? "border-primary bg-primary/10 font-medium" : "border-input bg-card hover:bg-muted")}>{v}%</button>
                       ))}
@@ -340,6 +351,23 @@ export function LinhasOrcamento({ ctx, d, simples }: { ctx: Pick<Ctx, "S" | "A" 
     })}
     </div>
     <LinhaLivre ctx={ctx} d={d} />
+    {/* 24/11: o IVA do orçamento todo de uma vez: a 0% (autoliquidação, cliente empresa: MD 1600) ou a 6% (MD 1594); repor volta cada
+        linha à sua taxa (6% nos serviços, 23% nos materiais e produtos, a do Catálogo nas subempreitadas) */}
+    {!fechado && o.linhas.length > 0 && (() => {
+      const todas = (t: TaxaIva) => o.linhas.every((l) => ivaDaLinha(l, S) === t);
+      const mexido = o.linhas.some((l) => ivaDaLinha(l, S) !== ivaPadraoDaLinha(l, S));
+      const btn = "inline-flex min-h-11 items-center font-medium text-primary underline-offset-4 hover:underline";
+      return (
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
+          <span className="text-muted-foreground">
+            {todas(0) ? "Todas as linhas com IVA a 0% (autoliquidação)." : todas(6) ? "Todas as linhas com IVA a 6%." : "IVA de todas as linhas:"}
+          </span>
+          {!todas(0) && <button type="button" onClick={() => run(() => A.ivaTodasLinhas(d.id, 0))} className={btn}>Pôr todas a 0% (autoliquidação)</button>}
+          {!todas(6) && <button type="button" onClick={() => run(() => A.ivaTodasLinhas(d.id, 6))} className={btn}>Pôr todas a 6%</button>}
+          {mexido && <button type="button" onClick={() => run(() => A.ivaTodasLinhas(d.id, null))} className={btn}>Repor o IVA de cada linha</button>}
+        </div>
+      );
+    })()}
     {/* a demolição e entulho: nos orçamentos novos já vem ligada; nos outros liga-se aqui */}
     {!fechado && catalogoLigado() && (
       // um interruptor com o estado à vista (antes era uma ligação que trocava de texto)
