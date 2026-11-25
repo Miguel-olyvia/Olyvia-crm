@@ -220,3 +220,31 @@ describe("25/11: a configuração manda para QUALQUER atributo (também o de nom
     expect(c.getAttribute("data-zonas")).toBe("");
   });
 });
+
+describe("25/11: uma ligação já gravada a um atributo de lista que não pinta aparece com o nome dele", () => {
+  const A_COR = "aaaaaaaa-0000-4000-a000-000000000041", A_MARCA = "aaaaaaaa-0000-4000-a000-000000000042", A_FANTASMA = "aaaaaaaa-0000-4000-a000-0000000000ff";
+  const DEFS3: AtributoDef[] = [
+    DEFS[0],
+    { id: A_COR, codigo: "cor", nome: "Cor", tipo: "lista", temHex: true, ordem: 2, opcoes: [{ id: `${A_COR}-1`, valor: "Branco", nome: "Branco", hex: "#ffffff", ordem: 1 }] },
+    { id: A_MARCA, codigo: "marca", nome: "Marca", tipo: "lista", temHex: false, ordem: 3, opcoes: [{ id: `${A_MARCA}-1`, valor: "Roca", nome: "Roca", hex: null, ordem: 1 }] },
+  ];
+  const abrir3 = async (lig: { atributo: string; zona: string; aplicar: boolean }[]) => {
+    base.responder = (f) => (f === "cat_ler_config_3d" ? { data: { ...SEM, proprio: { eixos: null, ligacoes: lig, orfas: 0 }, efectiva: { eixos: null, eixos_origem: "automatico", ligacoes: lig, ligacoes_origem: "produto" } }, error: null } : { data: null, error: null });
+    render(<Modelo3DFicha produto={{ id: PID, n: "Coluna AXIS", modelo3d: "movel_lavatorio" }} real={REAL()} anunciar={vi.fn()} nome="Coluna AXIS" sub={null} no={null} arvore={[]} attrs={[ATTRS[0]]} defs={DEFS3} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ver em 3D" }));
+    await screen.findByTestId("canvas3d");
+    await waitFor(() => expect(chamadasDe("cat_ler_config_3d")).toHaveLength(1));
+  };
+  it("a ligação à «Marca» (lista sem cor, foto nem aspeto) mostra «Marca» no seletor, e não «Atributo desconhecido»", async () => {
+    await abrir3([{ atributo: A_MARCA, zona: "tudo", aplicar: false }]);
+    const sel = await screen.findByLabelText("Atributo") as HTMLSelectElement;
+    expect(sel.value).toBe(A_MARCA);
+    expect(within(sel).getByRole("option", { name: "Marca" })).toBeTruthy();
+    expect(within(sel).queryByRole("option", { name: "Atributo desconhecido" })).toBeNull();
+  });
+  it("uma ligação a um atributo que já nem existe continua «Atributo desconhecido»", async () => {
+    await abrir3([{ atributo: A_FANTASMA, zona: "tudo", aplicar: false }]);
+    const sel = await screen.findByLabelText("Atributo") as HTMLSelectElement;
+    expect(within(sel).getByRole("option", { name: "Atributo desconhecido" })).toBeTruthy();
+  });
+});

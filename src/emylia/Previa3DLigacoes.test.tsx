@@ -1,6 +1,7 @@
 // 25/11: o painel «Ligações» do 3D do produto: que atributo pinta que zona, e se «aplica» ou não. Controlado: quem o usa guarda o rascunho (aoMudar) e grava (gravar, herdar).
 // Aqui só o ecrã: linhas com rótulos, acrescentar e remover, validação das repetidas, gravar com mensagem numa região viva, voltar a herdar, só leitura e ligações órfãs.
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Ligacao } from "./config3dDados";
 import { Previa3DLigacoes } from "./Previa3DLigacoes";
@@ -67,7 +68,9 @@ describe("o painel «Ligações»", () => {
   it("sem atributos de lista, não há como ligar: explica-o em vez de oferecer o botão", () => {
     montar({ atributos: [] });
     expect(screen.queryByRole("button", { name: "Acrescentar ligação" })).toBeNull();
-    expect(screen.getByText(/não há atributos/i)).toBeTruthy();
+    // 25/11: «atributos» aqui são os que têm cor, foto ou aspeto (os que o 3D pode ler), e não «de lista»: o texto diz isso
+    expect(screen.getByText(/nenhum atributo deste produto tem cor, foto ou aspeto/i)).toBeTruthy();
+    expect(screen.queryByText(/atributos de lista/i)).toBeNull();
   });
 });
 
@@ -175,10 +178,10 @@ describe("«Atributos que o 3D lê»: todos os atributos com hex, foto ou aspeto
     expect(screen.getByText("Cor da frente", { selector: "strong" }).closest("li")?.textContent).toContain("aplicado por omissão (pinta a frente)");
     expect(screen.getByText("Puxador", { selector: "strong" }).closest("li")?.textContent).toContain("desligado por omissão");
   });
-  it("«Ligar» o Puxador acrescenta uma ligação a uma zona do modelo, «Aplicar: sim»; «Desligar» um nome conhecido acrescenta «Tudo, não»", () => {
+  it("«Ligar» o Puxador acrescenta uma ligação, «Aplicar: sim»; «Desligar» um nome conhecido acrescenta «Tudo, não»", () => {
     const { aoMudar } = montar({ omissoes: OMISSOES, atributos: [...ATRIBUTOS, { id: A_PUXADOR, nome: "Puxador" }] });
     fireEvent.click(screen.getByRole("button", { name: "Ligar Puxador" }));
-    expect(aoMudar).toHaveBeenLastCalledWith([L(A_PUXADOR, "frente")]);
+    expect(aoMudar).toHaveBeenLastCalledWith([L(A_PUXADOR, "tudo")]); // este modelo não tem a zona «Puxadores»: «Tudo»
     fireEvent.click(screen.getByRole("button", { name: "Desligar Cor da frente" }));
     expect(aoMudar).toHaveBeenLastCalledWith([L(A_FRENTE, "tudo", false)]);
   });
@@ -191,5 +194,58 @@ describe("«Atributos que o 3D lê»: todos os atributos com hex, foto ou aspeto
     montar({ omissoes: OMISSOES, podeEditar: false });
     expect(screen.getByText("Puxador", { selector: "strong" }).closest("li")?.textContent).toContain("desligado por omissão");
     expect(screen.queryByRole("button", { name: /^(Ligar|Desligar) / })).toBeNull();
+  });
+});
+
+describe("«Ligar»/«Desligar» mantêm o botão e o foco, e anunciam o resultado", () => {
+  const A_PUXADOR = "aaaaaaaa-0000-4000-a000-000000000004", A_ACAB_CORPO = "aaaaaaaa-0000-4000-a000-000000000005";
+  const ATRS = [...ATRIBUTOS, { id: A_PUXADOR, nome: "Puxador" }, { id: A_ACAB_CORPO, nome: "Acabamento do corpo" }];
+  const OMISSOES = [
+    { id: A_PUXADOR, nome: "Puxador", aplicado: false, onde: "" },
+    { id: A_ACAB_CORPO, nome: "Acabamento do corpo", aplicado: false, onde: "" },
+    { id: A_FRENTE, nome: "Cor da frente", aplicado: false, onde: "" },
+    { id: A_BRILHO, nome: "Brilho", aplicado: false, onde: "" },
+  ];
+  const COM_PUXADORES = ["frente", "corpo", "puxadores"] as const;
+  /** Quem usa o painel: guarda o rascunho (como o ecrã faz) para o painel se redesenhar. */
+  function Guardado({ zonas = ZONAS }: { zonas?: readonly ("frente" | "corpo" | "tampo" | "puxadores")[] }) {
+    const [valor, setValor] = useState<Ligacao[]>([]);
+    return <Previa3DLigacoes valor={valor} alterado origem="automatico" proprio={false} atributos={ATRS} omissoes={OMISSOES} zonas={zonas} orfas={0} ignoradas={0} podeEditar
+      aoMudar={setValor} gravar={async () => null} herdar={async () => null} />;
+  }
+  it("depois de «Ligar», o botão continua lá (agora «Desligar»), com o foco, e uma região viva diz a que zona ficou ligado", () => {
+    render(<Guardado zonas={COM_PUXADORES} />);
+    const botao = screen.getByRole("button", { name: "Ligar Puxador" });
+    botao.focus();
+    fireEvent.click(botao);
+    const depois = screen.getByRole("button", { name: "Desligar Puxador" });
+    expect(document.activeElement).toBe(depois);
+    expect(screen.getByText("Puxador ligado à zona Puxadores").getAttribute("aria-live")).toBe("polite");
+  });
+  it("«Desligar» volta atrás (sem a ligação), mantém o foco e anuncia «desligado»", () => {
+    render(<Guardado zonas={COM_PUXADORES} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ligar Puxador" }));
+    const desligar = screen.getByRole("button", { name: "Desligar Puxador" });
+    desligar.focus();
+    fireEvent.click(desligar);
+    expect(screen.getByRole("button", { name: "Ligar Puxador" })).toBe(desligar);
+    expect(document.activeElement).toBe(desligar);
+    expect(screen.getByText("Puxador desligado").getAttribute("aria-live")).toBe("polite");
+  });
+  it("propõe a zona pelo nome: Puxador → Puxadores (se o modelo a tem), corpo → Corpo, frente → Frente, o resto → Tudo", () => {
+    const { aoMudar } = montar({ omissoes: OMISSOES, atributos: ATRS, zonas: COM_PUXADORES });
+    fireEvent.click(screen.getByRole("button", { name: "Ligar Puxador" }));
+    expect(aoMudar).toHaveBeenLastCalledWith([L(A_PUXADOR, "puxadores")]);
+    fireEvent.click(screen.getByRole("button", { name: "Ligar Acabamento do corpo" }));
+    expect(aoMudar).toHaveBeenLastCalledWith([L(A_ACAB_CORPO, "corpo")]);
+    fireEvent.click(screen.getByRole("button", { name: "Ligar Cor da frente" }));
+    expect(aoMudar).toHaveBeenLastCalledWith([L(A_FRENTE, "frente")]);
+    fireEvent.click(screen.getByRole("button", { name: "Ligar Brilho" }));
+    expect(aoMudar).toHaveBeenLastCalledWith([L(A_BRILHO, "tudo")]);
+  });
+  it("um Puxador num modelo sem a zona «Puxadores» fica em «Tudo» (nunca na primeira zona, a frente)", () => {
+    const { aoMudar } = montar({ omissoes: OMISSOES, atributos: ATRS, zonas: ["frente", "corpo"] });
+    fireEvent.click(screen.getByRole("button", { name: "Ligar Puxador" }));
+    expect(aoMudar).toHaveBeenLastCalledWith([L(A_PUXADOR, "tudo")]);
   });
 });

@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import { erroDasLigacoes, rotuloDaOrigemConfig, type Ligacao, type OrigemConfig, type ZonaLigacao } from "./config3dDados";
 import type { LeituraPorOmissao } from "./planta3d/acabamentoCor3d";
 import type { Eixos } from "./planta3d/eixosMedida";
+import { sem } from "./planta3d/catalogo3d";
 import { ZONAS, rotuloDaZona, type ZonaGlb } from "./planta3d/zonasGlb";
 
 const NOTA = "text-[15px] text-muted-foreground";
@@ -48,6 +49,19 @@ export interface Config3dPrevia {
 }
 
 const rotuloDaZonaLigacao =(z: ZonaLigacao): string => (z === "tudo" ? "Tudo" : rotuloDaZona(z));
+
+/**
+ * A zona que «Ligar» propõe, pelo nome do atributo: puxador/tirador/pega → «Puxadores»; «… do corpo» → Corpo; «… da frente» → Frente; senão «Tudo». Só propõe uma zona que o modelo tem
+ * (as `ofertadas`); sem ela fica «Tudo». Nunca a primeira zona do modelo à sorte (um Puxador na frente pintava as portas).
+ */
+function zonaProposta(nome: string, ofertadas: readonly ZonaLigacao[]): ZonaLigacao {
+  const n = sem(nome);
+  const tem = (z: ZonaLigacao): boolean => ofertadas.includes(z);
+  if (/puxador|tirador|pega/.test(n)) return tem("puxadores") ? "puxadores" : "tudo";
+  if (/\bcorpo\b/.test(n) && tem("corpo")) return "corpo";
+  if (/\bfrente\b/.test(n) && tem("frente")) return "frente";
+  return "tudo";
+}
 const plural = (n: number, um: string, varios: string): string => `${n} ${n === 1 ? um : varios}`;
 
 /** Um interruptor «Aplicar» (sim/não), com o estado também em texto. */
@@ -74,6 +88,8 @@ export function Previa3DLigacoes({ valor, alterado, origem, proprio, atributos, 
   const id = useId();
   const [ocupado, setOcupado] = useState(false);
   const [msg, setMsg] = useState<{ erro: boolean; texto: string } | null>(null);
+  // o que «Ligar» e «Desligar» acabaram de fazer, para a região viva o anunciar (o botão não desaparece, mas o leitor de ecrã não vê a lista mudar)
+  const [anuncio, setAnuncio] = useState("");
   const nomeDe = (a: string) => atributos.find((x) => x.id === a)?.nome ?? DESCONHECIDO;
   // as zonas oferecidas: «Tudo», as do modelo e, para não as perder, as já usadas que o modelo não tem
   const usadas = new Set(valor.map((l) => l.zona));
@@ -109,21 +125,27 @@ export function Previa3DLigacoes({ valor, alterado, origem, proprio, atributos, 
           <h4 className="text-[15px] font-medium">Atributos que o 3D lê</h4>
           <ul className="grid gap-2 text-[15px]">
             {omissoes.map((o) => {
-              const ligado = valor.some((l) => l.atributo === o.id);
-              const zonaInicial = zonasOfertadas.find((z) => z !== "tudo") ?? "tudo";
+              const proprias = valor.filter((l) => l.atributo === o.id);
+              // ligado (aplica) hoje: pelas ligações do atributo, se as há; senão pelo que vale por omissão
+              const ativo = proprias.length ? proprias.some((l) => l.aplicar) : o.aplicado;
+              const alternar = () => {
+                setMsg(null);
+                const resto = valor.filter((l) => l.atributo !== o.id);
+                if (ativo) { aoMudar(o.aplicado ? [...resto, { atributo: o.id, zona: "tudo", aplicar: false }] : resto); setAnuncio(`${o.nome} desligado`); return; }
+                const zona = zonaProposta(o.nome, zonasOfertadas);
+                aoMudar([...resto, { atributo: o.id, zona, aplicar: true }]);
+                setAnuncio(`${o.nome} ligado à zona ${rotuloDaZonaLigacao(zona)}`);
+              };
               return (
                 <li key={o.id} className="flex flex-wrap items-center gap-2">
                   <span><strong className="font-medium">{o.nome}</strong>: {estadoDoAtributo(o, valor)}</span>
-                  {podeEditar && !ligado && !o.aplicado && (
-                    <button type="button" aria-label={`Ligar ${o.nome}`} onClick={() => { setMsg(null); aoMudar([...valor, { atributo: o.id, zona: zonaInicial, aplicar: true }]); }} className={BOTAO}>Ligar</button>
-                  )}
-                  {podeEditar && !ligado && o.aplicado && (
-                    <button type="button" aria-label={`Desligar ${o.nome}`} onClick={() => { setMsg(null); aoMudar([...valor, { atributo: o.id, zona: "tudo", aplicar: false }]); }} className={BOTAO}>Desligar</button>
-                  )}
+                  {/* o MESMO botão muda de rótulo (Ligar ↔ Desligar) em vez de desaparecer: assim o foco do teclado fica nele, e a região viva anuncia o resultado */}
+                  {podeEditar && <button type="button" aria-label={`${ativo ? "Desligar" : "Ligar"} ${o.nome}`} onClick={alternar} className={BOTAO}>{ativo ? "Desligar" : "Ligar"}</button>}
                 </li>
               );
             })}
           </ul>
+          <p aria-live="polite" className="sr-only">{anuncio}</p>
         </div>
       )}
 
@@ -138,7 +160,7 @@ export function Previa3DLigacoes({ valor, alterado, origem, proprio, atributos, 
         </>
       ) : (
         <>
-          {atributos.length === 0 && <p className={NOTA}>Este produto não tem atributos de lista: não há atributos para ligar.</p>}
+          {atributos.length === 0 && <p className={NOTA}>Nenhum atributo deste produto tem cor, foto ou aspeto: não há atributos para ligar ao 3D.</p>}
           <div className="grid gap-3">
             {valor.map((l, i) => {
               const conhecido = atributos.some((a) => a.id === l.atributo);
