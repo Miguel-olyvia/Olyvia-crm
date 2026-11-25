@@ -78,3 +78,4 @@ bun.lockb
 src (2).zip
 test-results/
 playwright-report/
+supabase/functions/agentes-obra/motor.bundle.js
