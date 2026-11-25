@@ -46,9 +46,12 @@ export function criarMateriaisDeZona(grupo: THREE.Object3D, c: CategoriaGlb, lig
   for (const parte of c.partes) {
     const zona = zonaDaParte(parte, c.id);
     const doCorpo = parte.mat === "corpo", doMetal = parte.mat === "metal" && !!zona && !!ligadas?.includes(zona);
-    if (!zona || !(doCorpo || doMetal)) continue;
+    if (!zona) continue;
     const no = noDaParte(grupo, parte.nome);
-    if (!no) { avisarParteEmFalta(c.id, parte.nome); continue; }
+    if (!no) { if (doCorpo || doMetal) avisarParteEmFalta(c.id, parte.nome); continue; }
+    // 25/11: a zona fica marcada em TODAS as malhas da parte (qualquer material: o vidro de uma porta, o metal de um puxador), para o clique no 3D a ler; não muda nada do que se vê
+    no.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.userData.zona = zona; });
+    if (!(doCorpo || doMetal)) continue;
     const mapa = doCorpo ? porZona : fixas;
     no.traverse((o) => {
       const malha = o as THREE.Mesh;

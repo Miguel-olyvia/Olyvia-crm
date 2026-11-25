@@ -9,7 +9,7 @@ import { atributosDeValores, montarCatalogo } from "../real/catalogoReal";
 import { produtoDeLeitura } from "../real/produtosLeves";
 import { sem } from "./catalogo3d";
 import { chaveDeExclusao } from "./aspetoZonas";
-import { leiturasPorOmissao } from "./acabamentoCor3d";
+import { leiturasDoProduto, leiturasPorOmissao } from "./acabamentoCor3d";
 import { corDosAtributos, fotoDosAtributos } from "./previaProduto3d";
 import { ZONAS, aparenciaDaZona, aparenciaUnicaDasZonas, zonasDosAtributos, zonasVisuais, type ZonaGlb } from "./zonasGlb";
 
@@ -348,4 +348,38 @@ describe("leiturasPorOmissao: todos os atributos com hex, foto ou aspeto e o est
     expect(por([COR, PUXADOR]).Puxador.aplicado).toBe(false);
   });
   it("sem definições: lista vazia", () => { expect(leiturasPorOmissao(undefined)).toEqual([]); });
+});
+
+describe("leiturasDoProduto: só os atributos que o PRODUTO tem (com valor escolhido), não todos os do sistema", () => {
+  const SEIS = [COR, AC_COR, COR_CORPO, AC_CORPO, COR_FRENTE, AC_FRENTE];
+  const nomes = (defs: AtributoDef[], a: AtributoProduto[]) => leiturasDoProduto(defs, a).map((l) => l.nome);
+  it("o sistema tem seis atributos de cor e o produto só dois: a lista tem só esses dois", () => {
+    expect(leiturasPorOmissao(SEIS)).toHaveLength(6);
+    expect(nomes(SEIS, [escolha(COR, "branco"), escolha(COR_FRENTE, "oak-c")])).toEqual(["Cor", "Cor da frente"]);
+  });
+  it("o estado por omissão vem dos atributos do SISTEMA: o Puxador, com a «Cor» no sistema, fica desligado, mesmo que o produto só tenha o Puxador", () => {
+    expect(leiturasPorOmissao([COR, PUXADOR]).find((l) => l.nome === "Puxador")?.aplicado).toBe(false);
+    expect(leiturasDoProduto([COR, PUXADOR], [escolha(PUXADOR, "preto-p")])).toEqual([expect.objectContaining({ nome: "Puxador", aplicado: false })]);
+  });
+  it("cada leitura traz a opção escolhida (nome, cor e foto), para a amostra", () => {
+    const l = leiturasDoProduto(SEIS, [escolha(COR_FRENTE, "oak-c"), escolha(COR_CORPO, "white")]);
+    expect(l.find((x) => x.nome === "Cor da frente")?.opcao).toEqual({ nome: "oak-c", hex: null, foto: "org/oak.webp" });
+    expect(l.find((x) => x.nome === "Cor do corpo")?.opcao).toEqual({ nome: "white", hex: "#fcfcfc", foto: null });
+  });
+  it("só se diz se o atributo pinta cor (hex ou foto): o Brilho, só com aspeto, é leitura mas não é cor", () => {
+    const brilho = def("d-bri", "Brilho", "brilho", [op("fosco", null)], { temHex: false, temFoto: false, temAspeto: true });
+    const l = leiturasDoProduto([COR, brilho], [escolha(COR, "branco"), escolha(brilho, "fosco")]);
+    expect(l.map((x) => [x.nome, x.daCor])).toEqual([["Cor", true], ["Brilho", false]]);
+  });
+  it("um atributo sem opção escolhida, ou com uma opção que já não existe, não conta; a Medida, o Lado e o resto também não", () => {
+    const medida: AtributoDef = { id: "d-med", codigo: "medida", nome: "Medida", tipo: "medida", temHex: false, ordem: 1, opcoes: [] };
+    const semOpcao: AtributoProduto = { atributoId: COR.id };
+    const antiga: AtributoProduto = { atributoId: COR_FRENTE.id, opcaoId: "ja-nao-existe" };
+    expect(nomes([medida, COR, COR_FRENTE, LADO], [semOpcao, antiga, { atributoId: medida.id }, escolha(LADO, "esq")])).toEqual([]);
+  });
+  it("sem atributos do produto, ou sem definições: lista vazia", () => {
+    expect(leiturasDoProduto(SEIS, [])).toEqual([]);
+    expect(leiturasDoProduto(SEIS, undefined)).toEqual([]);
+    expect(leiturasDoProduto(undefined, [escolha(COR, "branco")])).toEqual([]);
+  });
 });

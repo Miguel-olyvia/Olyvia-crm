@@ -228,23 +228,30 @@ describe("25/11: uma ligação já gravada a um atributo de lista que não pinta
     { id: A_COR, codigo: "cor", nome: "Cor", tipo: "lista", temHex: true, ordem: 2, opcoes: [{ id: `${A_COR}-1`, valor: "Branco", nome: "Branco", hex: "#ffffff", ordem: 1 }] },
     { id: A_MARCA, codigo: "marca", nome: "Marca", tipo: "lista", temHex: false, ordem: 3, opcoes: [{ id: `${A_MARCA}-1`, valor: "Roca", nome: "Roca", hex: null, ordem: 1 }] },
   ];
-  const abrir3 = async (lig: { atributo: string; zona: string; aplicar: boolean }[]) => {
+  const abrir3 = async (lig: { atributo: string; zona: string; aplicar: boolean }[], attrs: AtributoProduto[] = [ATTRS[0]]) => {
     base.responder = (f) => (f === "cat_ler_config_3d" ? { data: { ...SEM, proprio: { eixos: null, ligacoes: lig, orfas: 0 }, efectiva: { eixos: null, eixos_origem: "automatico", ligacoes: lig, ligacoes_origem: "produto" } }, error: null } : { data: null, error: null });
-    render(<Modelo3DFicha produto={{ id: PID, n: "Coluna AXIS", modelo3d: "movel_lavatorio" }} real={REAL()} anunciar={vi.fn()} nome="Coluna AXIS" sub={null} no={null} arvore={[]} attrs={[ATTRS[0]]} defs={DEFS3} />);
+    render(<Modelo3DFicha produto={{ id: PID, n: "Coluna AXIS", modelo3d: "movel_lavatorio" }} real={REAL()} anunciar={vi.fn()} nome="Coluna AXIS" sub={null} no={null} arvore={[]} attrs={attrs} defs={DEFS3} />);
     fireEvent.click(screen.getByRole("button", { name: "Ver em 3D" }));
     await screen.findByTestId("canvas3d");
     await waitFor(() => expect(chamadasDe("cat_ler_config_3d")).toHaveLength(1));
   };
-  it("a ligação à «Marca» (lista sem cor, foto nem aspeto) mostra «Marca» no seletor, e não «Atributo desconhecido»", async () => {
-    await abrir3([{ atributo: A_MARCA, zona: "tudo", aplicar: false }]);
+  it("a ligação à «Marca» (lista sem cor, foto nem aspeto) que o produto TEM mostra «Marca» no seletor, e não «Atributo desconhecido»", async () => {
+    await abrir3([{ atributo: A_MARCA, zona: "tudo", aplicar: false }], [ATTRS[0], { atributoId: A_MARCA, opcaoId: `${A_MARCA}-1`, valor: "Roca" }]);
     const sel = await screen.findByLabelText("Atributo") as HTMLSelectElement;
     expect(sel.value).toBe(A_MARCA);
     expect(within(sel).getByRole("option", { name: "Marca" })).toBeTruthy();
     expect(within(sel).queryByRole("option", { name: "Atributo desconhecido" })).toBeNull();
   });
+  it("26/11: a ligação à «Marca» num produto que já não a tem aparece com o nome e marcada («o produto já não tem este atributo»), para a poder remover", async () => {
+    await abrir3([{ atributo: A_MARCA, zona: "tudo", aplicar: false }]);
+    const sel = await screen.findByLabelText("Atributo") as HTMLSelectElement;
+    expect(sel.value).toBe(A_MARCA);
+    expect(within(sel).getByRole("option", { name: "Marca (o produto já não tem este atributo)" })).toBeTruthy();
+    expect(within(sel).queryByRole("option", { name: "Atributo desconhecido" })).toBeNull();
+  });
   it("uma ligação a um atributo que já nem existe continua «Atributo desconhecido»", async () => {
     await abrir3([{ atributo: A_FANTASMA, zona: "tudo", aplicar: false }]);
     const sel = await screen.findByLabelText("Atributo") as HTMLSelectElement;
-    expect(within(sel).getByRole("option", { name: "Atributo desconhecido" })).toBeTruthy();
+    expect(within(sel).getByRole("option", { name: "Atributo desconhecido (o produto já não tem este atributo)" })).toBeTruthy();
   });
 });

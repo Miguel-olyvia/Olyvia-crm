@@ -5,7 +5,7 @@ import { useId, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { erroDasLigacoes, rotuloDaOrigemConfig, type Ligacao, type OrigemConfig, type ZonaLigacao } from "./config3dDados";
-import type { LeituraPorOmissao } from "./planta3d/acabamentoCor3d";
+import type { LeituraDoProduto, LeituraPorOmissao } from "./planta3d/acabamentoCor3d";
 import type { Eixos } from "./planta3d/eixosMedida";
 import { sem } from "./planta3d/catalogo3d";
 import { ZONAS, rotuloDaZona, type ZonaGlb } from "./planta3d/zonasGlb";
@@ -15,8 +15,10 @@ const BOTAO = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-
 const SELECT = "min-h-11 w-full rounded-lg border border-input bg-card px-3 text-[15px] text-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25";
 const DESLIGADO = "cursor-not-allowed opacity-50 hover:bg-card";
 const DESCONHECIDO = "Atributo desconhecido";
+const SEM_ESTE = "o produto já não tem este atributo";
 
-export interface AtributoLigavel { id: string; nome: string }
+/** `fora`: o atributo tem uma ligação gravada mas o produto já não o tem (ou já não tem valor escolhido): só serve para a ver e remover, nunca para ligar de novo. */
+export interface AtributoLigavel { id: string; nome: string; fora?: boolean }
 export interface PropsLigacoes {
   /** As ligações em vigor no ecrã (o rascunho, ou as guardadas ou herdadas). */
   valor: readonly Ligacao[];
@@ -26,7 +28,7 @@ export interface PropsLigacoes {
   origem: OrigemConfig; proprio: boolean;
   /** Os atributos de lista do produto que se podem ligar (a Medida não pinta nada). */
   atributos: readonly AtributoLigavel[];
-  /** 25/11: TODOS os atributos com hex, foto ou aspeto e o que o 3D faz com cada um por omissão (sem configuração): aplicado pelo nome, ou desligado. Ausente: a lista não se mostra. */
+  /** 25/11: os atributos QUE O PRODUTO TEM (com valor escolhido) com hex, foto ou aspeto, e o que o 3D faz com cada um por omissão (sem configuração): aplicado pelo nome, ou desligado. Ausente: a lista não se mostra; vazia: diz que o produto não tem nenhum. */
   omissoes?: readonly LeituraPorOmissao[];
   /** As zonas que o modelo tem. */
   zonas: readonly ZonaGlb[];
@@ -46,6 +48,8 @@ export interface Config3dPrevia {
   podeEditar: boolean;
   eixos: { guardados: Eixos | null; origem: OrigemConfig; proprio: boolean; gravar: (e: Eixos | null) => Promise<string | null> };
   ligacoes: Omit<PropsLigacoes, "zonas" | "podeEditar">;
+  /** 25/11: os atributos QUE O PRODUTO TEM (com valor escolhido) que o 3D lê, com a opção escolhida: o que o painel «Zona» oferece em «Pintar com:». Ausente: nenhum. */
+  atributosDoProduto?: readonly LeituraDoProduto[];
 }
 
 const rotuloDaZonaLigacao =(z: ZonaLigacao): string => (z === "tudo" ? "Tudo" : rotuloDaZona(z));
@@ -91,13 +95,16 @@ export function Previa3DLigacoes({ valor, alterado, origem, proprio, atributos, 
   // o que «Ligar» e «Desligar» acabaram de fazer, para a região viva o anunciar (o botão não desaparece, mas o leitor de ecrã não vê a lista mudar)
   const [anuncio, setAnuncio] = useState("");
   const nomeDe = (a: string) => atributos.find((x) => x.id === a)?.nome ?? DESCONHECIDO;
+  const foraDe = (a: string) => atributos.find((x) => x.id === a)?.fora === true;
+  // o que se pode ligar de novo: só os atributos que o produto tem
+  const ligaveis = atributos.filter((a) => !a.fora);
   // as zonas oferecidas: «Tudo», as do modelo e, para não as perder, as já usadas que o modelo não tem
   const usadas = new Set(valor.map((l) => l.zona));
   const zonasOfertadas: ZonaLigacao[] = ["tudo", ...ZONAS.filter((z) => zonas.includes(z) || usadas.has(z))];
   const rotuloOrigem = rotuloDaOrigemConfig(origem);
   const invalida = erroDasLigacoes(valor);
   const livre = (): Ligacao | null => {
-    for (const a of atributos) for (const z of zonasOfertadas) if (!valor.some((l) => l.atributo === a.id && l.zona === z)) return { atributo: a.id, zona: z, aplicar: true };
+    for (const a of ligaveis) for (const z of zonasOfertadas) if (!valor.some((l) => l.atributo === a.id && l.zona === z)) return { atributo: a.id, zona: z, aplicar: true };
     return null;
   };
   const mudar = (i: number, parte: Partial<Ligacao>) => { setMsg(null); aoMudar(valor.map((l, j) => (j === i ? { ...l, ...parte } : l))); };
@@ -120,6 +127,7 @@ export function Previa3DLigacoes({ valor, alterado, origem, proprio, atributos, 
         Uma ligação manda sobre o nome; «Aplicar: não» tira o atributo dessa zona.
       </p>
 
+      {omissoes && omissoes.length === 0 && <p className={NOTA}>Este produto não tem nenhum atributo que pinte o 3D (cor, foto ou aspeto escolhidos): não há nada para ligar.</p>}
       {omissoes && omissoes.length > 0 && (
         <div className="grid gap-1">
           <h4 className="text-[15px] font-medium">Atributos que o 3D lê</h4>
@@ -153,14 +161,14 @@ export function Previa3DLigacoes({ valor, alterado, origem, proprio, atributos, 
         <>
           {valor.length > 0 && (
             <ul className="grid gap-1 text-[15px]">
-              {valor.map((l, i) => <li key={i}>{nomeDe(l.atributo)} → {rotuloDaZonaLigacao(l.zona)}: {l.aplicar ? "aplica" : "não aplica"}</li>)}
+              {valor.map((l, i) => <li key={i}>{nomeDe(l.atributo)} → {rotuloDaZonaLigacao(l.zona)}: {l.aplicar ? "aplica" : "não aplica"}{foraDe(l.atributo) ? ` (${SEM_ESTE})` : ""}</li>)}
             </ul>
           )}
           <p className={NOTA}>Para mudar as ligações precisa da permissão de editar produtos.</p>
         </>
       ) : (
         <>
-          {atributos.length === 0 && <p className={NOTA}>Nenhum atributo deste produto tem cor, foto ou aspeto: não há atributos para ligar ao 3D.</p>}
+          {atributos.length === 0 && !omissoes && <p className={NOTA}>Nenhum atributo deste produto tem cor, foto ou aspeto: não há atributos para ligar ao 3D.</p>}
           <div className="grid gap-3">
             {valor.map((l, i) => {
               const conhecido = atributos.some((a) => a.id === l.atributo);
@@ -170,8 +178,9 @@ export function Previa3DLigacoes({ valor, alterado, origem, proprio, atributos, 
                     <label htmlFor={`${id}-a${i}`} className="text-[15px] font-medium">Atributo</label>
                     <select id={`${id}-a${i}`} value={l.atributo} onChange={(e) => mudar(i, { atributo: e.target.value })} className={SELECT}>
                       {!conhecido && <option value={l.atributo}>{DESCONHECIDO}</option>}
-                      {atributos.map((a) => <option key={a.id} value={a.id}>{a.nome}</option>)}
+                      {atributos.filter((a) => !a.fora || a.id === l.atributo).map((a) => <option key={a.id} value={a.id}>{a.fora ? `${a.nome} (${SEM_ESTE})` : a.nome}</option>)}
                     </select>
+                    {foraDe(l.atributo) && <p className={NOTA}>O produto já não tem este atributo: remova a ligação.</p>}
                   </div>
                   <div className="grid gap-1">
                     <label htmlFor={`${id}-z${i}`} className="text-[15px] font-medium">Zona</label>
@@ -188,7 +197,7 @@ export function Previa3DLigacoes({ valor, alterado, origem, proprio, atributos, 
             })}
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            {atributos.length > 0 && (
+            {ligaveis.length > 0 && (
               <button type="button" aria-disabled={!livre()} onClick={() => { const nova = livre(); if (nova) { setMsg(null); aoMudar([...valor, nova]); } }} className={cn(BOTAO, !livre() && DESLIGADO)}>
                 <Plus className="h-4 w-4" aria-hidden="true" />Acrescentar ligação
               </button>

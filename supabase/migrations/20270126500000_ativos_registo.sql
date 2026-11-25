@@ -59,10 +59,20 @@
 --     para não oferecer desativar quem está atribuído).
 --  d) Alterar aceita manter um equipamento do catálogo entretanto apagado, ou um centro
 --     de custo entretanto inactivo, se já era o do ativo (senão não se podia editar).
---  e) Datas (compra e desativação) aceites entre 2000-01-01 e hoje + 10 anos, como no RH;
+--  e) Datas (compra e desativação) aceites entre 2000-01-01 e hoje + 7 dias (revisão);
 --     a tabela guarda entre 2000-01-01 e 2100-01-01.
 --  f) Desligar só numa atribuição ainda 'atribuido'; nas devolvidas a ligação fica como
 --     histórico.
+--  g) Ligar exige que o tipo do ativo seja o da atribuição do RH, ou que um deles seja
+--     'outro' (ATV18, revisão).
+--
+-- A TER EM CONTA DEPOIS DE APLICAR
+--  * «Só os 2 papéis globais têm ativos.*» vale À HORA DE APLICAR (o conferir C5). Depois,
+--    quem tiver as permissões pode acrescentar ativos.view/ativos.edit a um papel de
+--    organização pelo editor de papéis; isso é o funcionamento normal, não uma fuga.
+--  * ativo_eventos.pessoa_equipamento_id tem FK ON DELETE RESTRICT para pessoas_equipamentos:
+--    depois de uma atribuição ser ligada a um ativo, um DELETE físico dessa atribuição no RH
+--    (hoje não existe: o RH só devolve) falharia. Quem um dia o introduzir tem de tratar isto.
 --
 -- COMO SE REVERTE: sem ficheiro de reversão nesta pasta, de propósito. O texto está fora
 -- do repositório (jobs/bbc4f3a6/tmp/ativos/reverter.sql) e só serve enquanto não houver
@@ -213,9 +223,10 @@ CREATE TABLE public.ativo (
     FOREIGN KEY (updated_by) REFERENCES public.anew_users (id) ON DELETE SET NULL,
 
   CONSTRAINT ativo_grupo_valido CHECK (grupo IN ('pessoa', 'servico', 'estrutura')),
+  -- tipo IS NOT NULL explícito: sem ele, tipo NULL daria NULL e o CHECK deixava passar.
   CONSTRAINT ativo_tipo_coerente CHECK (
-    (grupo = 'pessoa' AND tipo IN ('telemovel', 'portatil', 'viatura', 'fardamento', 'ferramentas', 'outro'))
-    OR (grupo = 'estrutura' AND tipo IN ('instalacoes', 'mobiliario', 'eletronica', 'outro'))
+    (grupo = 'pessoa' AND tipo IS NOT NULL AND tipo IN ('telemovel', 'portatil', 'viatura', 'fardamento', 'ferramentas', 'outro'))
+    OR (grupo = 'estrutura' AND tipo IS NOT NULL AND tipo IN ('instalacoes', 'mobiliario', 'eletronica', 'outro'))
     OR (grupo = 'servico' AND tipo IS NULL)),
   CONSTRAINT ativo_equipamento_coerente CHECK ((grupo = 'servico') = (cat_equipamento_id IS NOT NULL)),
   CONSTRAINT ativo_nome CHECK (nome = btrim(nome) AND length(nome) BETWEEN 1 AND 120 AND nome !~ '[[:cntrl:]]'),
@@ -464,7 +475,7 @@ BEGIN
   END IF;
 
   IF p_data_compra IS NULL OR NOT isfinite(p_data_compra) OR p_data_compra < DATE '2000-01-01'
-     OR p_data_compra > (current_date + interval '10 years')::date THEN
+     OR p_data_compra > current_date + 7 THEN
     RAISE EXCEPTION 'ATV07' USING ERRCODE = 'P0001', DETAIL = 'A data de compra é inválida.';
   END IF;
   v.data_compra := p_data_compra;
@@ -840,7 +851,7 @@ BEGIN
     RAISE EXCEPTION 'ATV15' USING ERRCODE = 'P0001', DETAIL = 'Este ativo já está desativado.';
   END IF;
   IF p_data IS NULL OR NOT isfinite(p_data) OR p_data < v_atual.data_compra
-     OR p_data > (current_date + interval '10 years')::date
+     OR p_data > current_date + 7
      OR v_motivo IS NULL OR v_motivo NOT IN ('abatido', 'vendido', 'perdido', 'outro')
      OR (v_nota IS NOT NULL AND length(v_nota) > 500) THEN
     RAISE EXCEPTION 'ATV16' USING ERRCODE = 'P0001',
@@ -926,6 +937,10 @@ BEGIN
   END IF;
   IF v_pe.estado <> 'atribuido' THEN
     RAISE EXCEPTION 'ATV18' USING ERRCODE = 'P0001', DETAIL = 'Esta atribuição já foi devolvida.';
+  END IF;
+  -- O tipo tem de bater (portátil com portátil), salvo se um dos dois for 'outro'.
+  IF v_a.tipo IS DISTINCT FROM v_pe.tipo AND v_a.tipo <> 'outro' AND v_pe.tipo <> 'outro' THEN
+    RAISE EXCEPTION 'ATV18' USING ERRCODE = 'P0001', DETAIL = 'O tipo do ativo não corresponde ao tipo do equipamento atribuído no RH.';
   END IF;
   IF v_pe.ativo_id = p_ativo_id THEN
     RETURN jsonb_build_object('ativo_id', p_ativo_id, 'pessoa_equipamento_id', v_pe.id, 'alterado', false);
@@ -1120,8 +1135,9 @@ BEGIN
     'public.ativos_json(public.ativo)',
     'public.ativos_evento(uuid, uuid, text, uuid, uuid, text[])',
     'public.ativo_eventos_imutavel()'] LOOP
-    IF has_function_privilege('authenticated', v_f, 'EXECUTE') OR has_function_privilege('anon', v_f, 'EXECUTE') THEN
-      RAISE EXCEPTION 'C4: a função interna % ficou executável por anon ou authenticated.', v_f;
+    IF has_function_privilege('authenticated', v_f, 'EXECUTE') OR has_function_privilege('anon', v_f, 'EXECUTE')
+       OR has_function_privilege('service_role', v_f, 'EXECUTE') THEN
+      RAISE EXCEPTION 'C4: a função interna % ficou executável por anon, authenticated ou service_role.', v_f;
     END IF;
   END LOOP;
 

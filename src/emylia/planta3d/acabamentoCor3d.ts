@@ -93,3 +93,25 @@ export function leiturasPorOmissao(defs: readonly AtributoDef[] | undefined): Le
     return { id: d.id, nome: d.nome, aplicado: false, onde: "" };
   });
 }
+
+/** A opção que o produto escolheu num atributo, para a amostra (foto > cor) e o nome. */
+export interface OpcaoDaLeitura { nome: string; hex: string | null; foto: string | null }
+/** Uma leitura de um atributo QUE O PRODUTO TEM: com a opção escolhida e se o atributo dá cor ou foto (`daCor`; o «Brilho», só com aspeto, lê-se mas não é cor). */
+export interface LeituraDoProduto extends LeituraPorOmissao { opcao: OpcaoDaLeitura; daCor: boolean }
+
+/**
+ * 25/11: só os atributos que o PRODUTO tem, isto é, com uma opção escolhida (que ainda existe no atributo), e que o 3D lê (hex, foto ou aspeto). O estado por omissão de cada um (`aplicado`)
+ * vem do conjunto de TODOS os atributos do sistema (leiturasPorOmissao), porque é assim que o 3D decide («o único atributo de cor» conta os do sistema): filtrar só depois. Pela ordem das definições.
+ */
+export function leiturasDoProduto(defs: readonly AtributoDef[] | undefined, attrs: readonly AtributoProduto[] | undefined): LeituraDoProduto[] {
+  if (!defs?.length || !attrs?.length) return [];
+  const porId = new Map(defs.map((d) => [d.id, d]));
+  const lidos: LeituraDoProduto[] = [];
+  for (const l of leiturasPorOmissao(defs)) {
+    const d = porId.get(l.id);
+    const e = d ? opcaoEscolhida(d, attrs)?.opcao : undefined;
+    if (!d || !e) continue;
+    lidos.push({ ...l, opcao: { nome: e.nome, hex: hexValido(e.hex) ? e.hex : null, foto: e.foto || null }, daCor: d.temHex === true || d.temFoto === true });
+  }
+  return lidos;
+}

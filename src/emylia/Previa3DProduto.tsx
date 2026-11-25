@@ -6,9 +6,11 @@ import { Minus, Plus, RotateCcw } from "lucide-react";
 import type { ComandosVista, RevestimentoVisual } from "./planta3d/Visualizador3D";
 import { cenaDoProduto, estadoDoModelo, modeloParaPrevia, tipoDaPrevia, type EstadoPrevia, type MedidaCm } from "./planta3d/previaProduto3d";
 import { eixosPorOmissao, notaDaTroca, temCamposParaEixos, textoDasMedidas, trocarEixo, type Eixos } from "./planta3d/eixosMedida";
-import { zonasDoModelo, type ZonaGlb, type ZonasDoProduto } from "./planta3d/zonasGlb";
+import { zonasDoModelo, rotuloDaZona, ZONAS, type ZonaGlb, type ZonasDoProduto } from "./planta3d/zonasGlb";
+import type { LeituraDoProduto } from "./planta3d/acabamentoCor3d";
 import { InterruptorMedidas, PainelMedidas, PainelZonas } from "./Previa3DPaineis";
 import { Previa3DLigacoes, type Config3dPrevia } from "./Previa3DLigacoes";
+import { PainelEscolherZona } from "./Previa3DEscolherZona";
 import type { NoCat, ProdutoModelo3D, TipoMockup } from "./planta3d/catalogo3d";
 import type { TexturaModelo } from "./planta3d/texturaProduto";
 import { niveisDoNo } from "./planta3d/modelos3dEscolha";
@@ -111,10 +113,22 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
   useEffect(() => { setEscolha((e) => (e && e.tipo !== tipo ? null : e)); }, [tipo]); // esquece a escolha de outro tipo (se o tipo voltar, não ressuscita)
   const [cotas, setCotas] = useState(false);
   const [zonaApontada, setZonaApontada] = useState<ZonaGlb | null>(null), [zonaFixa, setZonaFixa] = useState<ZonaGlb | null>(null);
+  // 25/11: a zona debaixo do rato no próprio 3D (escolher a zona clicando numa parte da peça); a escolha é a mesma `zonaFixa` do painel «Zonas»
+  const [zonaSobRato, setZonaSobRato] = useState<ZonaGlb | null>(null);
   const modelo = useMemo(() => modeloParaPrevia({ nome, sub: sub ?? undefined, no, arvore, medida, cor, textura, modelo3d, eixos: eixosEscolhidos, zonas }), [nome, sub, no, arvore, medida, cor, textura, modelo3d, eixosEscolhidos, zonas]);
   const eixosEmVigor = eixosEscolhidos ?? eixosPorOmissao(tipo, medida);
   const zonasDoObjecto = useMemo(() => zonasDoModelo(modelo), [modelo]);
   useEffect(() => { if (zonaFixa && !zonasDoObjecto.some((z) => z.zona === zonaFixa)) setZonaFixa(null); }, [zonaFixa, zonasDoObjecto]);
+  useEffect(() => { if (zonaSobRato && !zonasDoObjecto.some((z) => z.zona === zonaSobRato)) setZonaSobRato(null); }, [zonaSobRato, zonasDoObjecto]);
+  // 25/11: clicar numa parte da peça escolhe a zona (só com 2 ou mais zonas: o painel «Zonas» é a alternativa de teclado e de leitor de ecrã, e só existe então)
+  const zonasEscolheveis = useMemo(() => new Set<ZonaGlb>(zonasDoObjecto.map((z) => z.zona)), [zonasDoObjecto]);
+  const escolherNo3d = zonasDoObjecto.length >= 2;
+  // os atributos do produto (com valor escolhido) que o 3D lê, e as zonas que cada um pinta hoje (só as do modelo): o que se preserva ao ligar um atributo a outra zona
+  const atributosDoProduto: readonly LeituraDoProduto[] = config3d?.atributosDoProduto ?? [];
+  const pintaHoje = (atributo: string): ZonaGlb[] => {
+    const nome = atributosDoProduto.find((a) => a.id === atributo)?.nome;
+    return nome ? ZONAS.filter((z) => zonasEscolheveis.has(z) && zonas?.zonas[z]?.atributo === nome) : [];
+  };
   // 24/11: um revestimento (escolhido, ou automático na categoria Revestimentos) mostra-se como superfície: a vista por omissão vem da regra única
   // (revestimentoPrevia.ts, superficieDaPrevia) e o interruptor muda-a só aqui, sem gravar nada; outro produto fica exactamente como antes
   const niveis = useMemo(() => niveisDoNo(arvore, no), [arvore, no]);
@@ -149,10 +163,17 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
           <Suspense fallback={<div className="grid h-full place-items-center"><Estado texto="A carregar o 3D…" /></div>}>
             <Visualizador3D espaco={cena.espaco} modelos={cena.modelos} vista="3d" teto={false} etiquetas={false} descricao={descricao}
               selecionada={null} onSelecionar={SEM_ESCOLHA} camara={cena.camara} rolarPagina zoomRoda={foco && dentro} comandos={comandos} revestimento={revestimento}
-              cotas={cotas && !superficie} zonaRealcada={zonaApontada ?? zonaFixa} />
+              cotas={cotas && !superficie} zonaRealcada={zonaApontada ?? zonaSobRato ?? zonaFixa}
+              aoClicarZona={escolherNo3d && !superficie ? setZonaFixa : undefined} aoPassarZona={escolherNo3d && !superficie ? setZonaSobRato : undefined} zonasEscolheveis={zonasEscolheveis} />
           </Suspense>
         </div>
         {!superficie && <InterruptorMedidas ligado={cotas} aoMudar={setCotas} className="absolute left-2 top-2" />}
+        {/* o nome da zona debaixo do rato e o atributo que a pinta (decorativo: o painel «Zonas» e o painel da zona dizem o mesmo em texto) */}
+        {escolherNo3d && !superficie && zonaSobRato && (
+          <p data-testid="etiqueta-zona" aria-hidden="true" className="pointer-events-none absolute bottom-2 left-2 max-w-[60%] rounded-md bg-card/95 px-2.5 py-1 text-[15px] font-medium text-foreground shadow-sm">
+            {rotuloDaZona(zonaSobRato)} · {zonas?.zonas[zonaSobRato]?.atributo || "sem atributo de cor"}
+          </p>
+        )}
         {superficie && (
           <>
             <p className="pointer-events-none absolute left-2 top-2 rounded-md bg-card/95 px-2.5 py-1 text-[15px] font-semibold text-foreground shadow-sm">{ROTULO_SUPERFICIE[superficie]}</p>
@@ -171,6 +192,17 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
       </div>
       <p id={idAjuda} className={NOTA}>{textoDeAjuda(foco, dentro)}</p>
       {aviso && <Estado texto={aviso} />}
+      {escolherNo3d && !superficie && (
+        <>
+          <p className={NOTA}>Clique numa parte da peça para escolher a zona e dizer que atributo a pinta; ou use os botões das zonas, mais abaixo.</p>
+          {/* a região viva existe sempre (vazia): o que muda é o texto, e assim a escolha anuncia-se a quem usa leitor de ecrã */}
+          <p aria-live="polite" className="sr-only">{zonaFixa ? `Zona ${rotuloDaZona(zonaFixa)} seleccionada` : ""}</p>
+          {zonaFixa && (
+            <PainelEscolherZona zona={zonaFixa} pintadaPor={zonas?.zonas[zonaFixa]} atributos={atributosDoProduto.filter((a) => a.daCor)} pintaHoje={pintaHoje} aoFechar={() => setZonaFixa(null)}
+              ligacoes={config3d ? { valor: config3d.ligacoes.valor, alterado: config3d.ligacoes.alterado, podeEditar: config3d.podeEditar, aoMudar: config3d.ligacoes.aoMudar, gravar: config3d.ligacoes.gravar } : undefined} />
+          )}
+        </>
+      )}
       {/* o equivalente em texto das cotas, para leitores de ecrã: a região viva existe sempre (vazia e escondida com as cotas desligadas) para a mudança se anunciar */}
       <p aria-live="polite" className={cotas && !superficie ? NOTA : "sr-only"}>{cotas && !superficie ? textoDasMedidas(d) : ""}</p>
       {painelMedidas && !superficie && medida && temCamposParaEixos(medida) && (
