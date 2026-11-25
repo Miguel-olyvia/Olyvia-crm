@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useContext, useRef } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -31,6 +31,9 @@ import {
 } from "@/components/inventory/ui";
 import { CATALOGO_CUSTOS_PATH, countInitialLines } from "@/components/inventory/counts/initialCountPreview";
 import { StockCountsTable, STALLED_AFTER_DAYS, stalledDays, type StockCountRow } from "@/components/inventory/counts/StockCountsTable";
+import { InventarioEmbebido } from "@/components/inventory/ui/embebido";
+import { ContagensBarra, ContagensCartoes } from "@/components/inventory/cartoes/ContagensCartoes";
+import type { ModoVista } from "@/components/inventory/cartoes/pecas";
 
 // Título e descrição palavra por palavra de TITULOS.cont (menuInv.ts do protótipo).
 const PAGE_TITLE = "Contagens";
@@ -189,6 +192,11 @@ const StockCounts = () => {
 
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailCountId, setDetailCountId] = useState<string | null>(null);
+
+  // Dentro do novo Inventário: cartões do artefacto (ou a tabela clássica, no alternador); fora, sempre o ecrã clássico.
+  const embebido = useContext(InventarioEmbebido);
+  const [modoEmbebido, setModoEmbebido] = useState<ModoVista>("cartoes");
+  const cartoesEmbebidos = embebido && modoEmbebido === "cartoes";
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), 300);
@@ -609,7 +617,7 @@ const StockCounts = () => {
     return (
       <>
         <div className="space-y-4">
-          <InventoryPageHeader title={PAGE_TITLE} description={PAGE_DESCRIPTION} area="warehouse" />
+          {embebido ? null : <InventoryPageHeader title={PAGE_TITLE} description={PAGE_DESCRIPTION} area="warehouse" />}
           <NoOrganizationState inline />
         </div>
       </>
@@ -619,6 +627,39 @@ const StockCounts = () => {
   return (
     <>
       <div className="space-y-4">
+        {embebido ? (
+          <ContagensBarra
+            estados={statusPillOptions.map((o) => ({ value: o.value, label: o.label, count: o.count ?? null, pressed: !!o.pressed }))}
+            aoEstado={setStatusFilter}
+            paradas={stalledFilter ? { rotulo: `Paradas há mais de ${STALLED_AFTER_DAYS} dias`, aoRemover: () => updateParams({ stalled: false }) } : null}
+            pesquisa={searchTerm}
+            aoPesquisar={setSearchTerm}
+            rotuloPesquisa={t('stockCounts.searchPlaceholder')}
+            armazem={warehouseFilter}
+            aoArmazem={setWarehouseFilter}
+            armazens={warehouses}
+            rotuloTodosArmazens={t('stockCounts.filterWarehouseAll')}
+            categoria={categoryFilter}
+            aoCategoria={setCategoryFilter}
+            categorias={categories}
+            rotuloTodasCategorias={t('stockCounts.allCategories')}
+            temFiltros={hasExtraFilters || urlParams.status !== "all" || stalledFilter}
+            aoLimpar={() => {
+              setSearchTerm("");
+              setWarehouseFilter("all");
+              setCategoryFilter("all");
+              updateParams({ status: "all", stalled: false });
+            }}
+            rotuloLimpar={t('stockCounts.clearFilters')}
+            modo={modoEmbebido}
+            aoMudarModo={setModoEmbebido}
+            novaContagem={{
+              permitido: createPermission.allowed,
+              motivo: createPermission.reason,
+              aoClicar: () => { resetCreateForm(); setCreateOpen(true); },
+            }}
+          />
+        ) : (
         <InventoryPageHeader
           title={PAGE_TITLE}
           description={PAGE_DESCRIPTION}
@@ -639,14 +680,17 @@ const StockCounts = () => {
             )
           }
         />
+        )}
 
+        {cartoesEmbebidos ? null : (
         <FilterPills
           ariaLabel="Estado das contagens"
           value={urlParams.status}
           onChange={setStatusFilter}
           options={statusPillOptions}
         />
-        {stalledFilter ? (
+        )}
+        {!cartoesEmbebidos && stalledFilter ? (
           <FilterPills
             ariaLabel="Contagens paradas"
             value="stalled"
@@ -662,6 +706,7 @@ const StockCounts = () => {
           />
         ) : null}
 
+        {cartoesEmbebidos ? null : (
         <div className="flex flex-wrap gap-3 items-center">
           <Input
             placeholder={t('stockCounts.searchPlaceholder')}
@@ -707,7 +752,17 @@ const StockCounts = () => {
             </Button>
           )}
         </div>
+        )}
 
+        {cartoesEmbebidos ? (
+          <ContagensCartoes
+            linhas={counts}
+            carregando={loading}
+            rotuloTodasCategorias="Todas"
+            rotuloNaoContadasComStock={(count) => t('stockCounts.uncountedWithStockBadge', { count })}
+            abrir={openDetail}
+          />
+        ) : (
         <StockCountsTable
           rows={counts}
           loading={loading}
@@ -715,6 +770,7 @@ const StockCounts = () => {
           uncountedWithStockLabel={(count) => t('stockCounts.uncountedWithStockBadge', { count })}
           onOpen={openDetail}
         />
+        )}
 
         <div ref={loadMoreRef} className="py-4 flex justify-center">
           {loadingMore && (
