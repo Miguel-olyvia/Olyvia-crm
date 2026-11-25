@@ -7,10 +7,11 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { nfmt, type Negocio } from "../motor";
 import type { Ctx } from "../pecas";
-import { microFeitas, microtarefasDe, type MudancaMicro } from "../microtarefas";
+import { detalheMicro, microFeitas, microtarefasDe, type MudancaMicro } from "../microtarefas";
 
 const ORIGEM = {
   obra: "Lista desta obra. A ficha do serviço no Catálogo não muda.",
+  infraspeak: "Vêm das tarefas da Mudelar no Infraspeak. Mudar aqui só muda esta obra.",
   catalogo: "Vêm da ficha do serviço no Catálogo. Mudar aqui só muda esta obra.",
   instrucoes: "Vêm das instruções do trabalho. Mudar aqui só muda esta obra.",
 } as const;
@@ -45,9 +46,10 @@ export function MicrotarefasTarefa({ ctx, d, ti, mexe, cor }: { ctx: Ctx; d: Neg
       )}
       <ol className="space-y-1">
         {L.map((m, k) => {
-          const on = feitas.has(m.id), editar = aEditar?.id === m.id;
+          const on = feitas.has(m.id), editar = aEditar?.id === m.id, D = detalheMicro(m);
           return (
-            <li key={m.id} className={cn("flex min-h-11 items-center gap-2 rounded-lg px-2 py-1", on ? "bg-success/[0.07]" : "bg-muted/50")}>
+            <li key={m.id} className={cn("rounded-lg px-2 py-1", on ? "bg-success/[0.07]" : "bg-muted/50")}>
+            <div className="flex min-h-11 items-center gap-2">
               <span aria-hidden="true" className={cn("grid h-5 w-5 shrink-0 place-items-center rounded-md border-2", on ? "border-success bg-success text-white" : "border-input bg-card")}>{on && <Check className="h-3.5 w-3.5" />}</span>
               <span className="sr-only">{on ? "Feita pelo técnico:" : "Por fazer:"}</span>
               {editar ? (
@@ -67,6 +69,14 @@ export function MicrotarefasTarefa({ ctx, d, ti, mexe, cor }: { ctx: Ctx; d: Neg
                   <button type="button" className={cn(iconeBtn, "hover:text-destructive")} aria-label={`Tirar «${m.n}»`} onClick={() => mudar({ k: "tirar", id: m.id })}><X className="h-4 w-4" /></button>
                 </span>
               )}
+            </div>
+            {/* 25/11: a checklist da tarefa no Infraspeak e quem a faz */}
+            {D.det.length > 0 && !editar && (
+              <details className="pb-1 pl-7 text-xs text-muted-foreground">
+                <summary className="cursor-pointer select-none py-0.5">{D.det.length} {D.det.length === 1 ? "ponto" : "pontos"}{D.quem ? ` · ${D.quem}` : ""}</summary>
+                <ul className="mt-1 list-disc space-y-0.5 pl-4">{D.det.map((x, j) => <li key={j}>{x}</li>)}</ul>
+              </details>
+            )}
             </li>
           );
         })}

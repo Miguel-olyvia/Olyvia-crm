@@ -13,11 +13,22 @@
 import { r2, type Estado, type Plano, type Tarefa } from "./motor";
 import { custosDe, receitaDe } from "./v2/custosModelo";
 import { instrucoesDe } from "./trabalhoObra";
+import { tarefaMudelar, tarefasMudelarDe } from "./microtarefasMudelar";
 
-/** Uma microtarefa: o id (estável), o texto e as horas previstas (as do Catálogo; as juntadas à mão não têm). */
-export interface Micro { id: number; n: string; h?: number }
+/** Uma microtarefa: o id (estável), o texto e as horas previstas (as do Catálogo; as juntadas à mão não têm). 25/11: `ref`, a tarefa da
+ *  Mudelar no Infraspeak de onde veio (a checklist e quem faz lêem-se dela: dados/infraspeakMudelar.ts; não se gravam com o plano). */
+export interface Micro { id: number; n: string; h?: number; ref?: string }
 /** De onde vem a lista que se mostra. */
-export type OrigemMicro = "obra" | "catalogo" | "instrucoes";
+export type OrigemMicro = "obra" | "infraspeak" | "catalogo" | "instrucoes";
+
+/** 25/11: as tarefas reais da Mudelar no Infraspeak para esta tarefa do plano (microtarefasMudelar.ts). */
+export const microDoInfraspeak = (t: Tarefa, p?: Plano | null): Micro[] =>
+  tarefasMudelarDe(t, p).map((x, id) => ({ id, n: x.n, ...(x.h ? { h: x.h } : {}), ref: x.ref }));
+/** A checklist e quem faz, de uma microtarefa que veio do Infraspeak. */
+export function detalheMicro(m: Micro): { quem?: string; det: string[] } {
+  const x = tarefaMudelar(m.ref);
+  return x ? { quem: x.quem, det: x.det } : { det: [] };
+}
 
 /** Os passos da mão de obra do serviço da tarefa no Catálogo, com as horas repartidas pelas horas da tarefa. [] sem Catálogo. */
 export function microDoCatalogo(S: Estado | null | undefined, t: Tarefa, p?: Plano | null): Micro[] {
@@ -50,24 +61,53 @@ export const microDasInstrucoes = (t: Tarefa): Micro[] => instrucoesDe(t).passos
  *  1. a desta obra (o gestor mudou-a, ou fixou-a ao abrir o Estúdio);
  *  2. a que o técnico estava a ver quando marcou a primeira (exec.microDe): as marcas são dessa lista;
  *  3. com marcas antigas (de antes de 24/11, sem exec.microDe): as instruções, onde foram marcadas;
- *  4. os passos do Catálogo (dois ou mais);
- *  5. as instruções pelo nome da tarefa.
+ *  4. 25/11: as tarefas da Mudelar no Infraspeak para este trabalho;
+ *  5. os passos do Catálogo (dois ou mais);
+ *  6. as instruções pelo nome da tarefa.
  * Uma tarefa de correção tem sempre as instruções do pedido.
  */
 export function microtarefasDe(t: Tarefa, S?: Estado | null, p?: Plano | null): { L: Micro[]; origem: OrigemMicro } {
   if (t.micro) return { L: t.micro.map((m) => ({ ...m })), origem: "obra" };
   const instrucoes = { L: microDasInstrucoes(t), origem: "instrucoes" as const };
   if (t.corrige != null || t.exec?.microDe === "instrucoes") return instrucoes;
-  if (t.exec?.passos?.length && t.exec.microDe !== "catalogo") return instrucoes;
+  if (t.exec?.passos?.length && !t.exec.microDe) return instrucoes;
+  const inf = t.exec?.microDe === "catalogo" ? [] : microDoInfraspeak(t, p);
+  if (inf.length) return { L: inf, origem: "infraspeak" };
   // uma lista de verificação de um item só («Execução») não ajuda o técnico: aí ficam as instruções
   const c = microDoCatalogo(S, t, p);
   return c.length >= 2 ? { L: c, origem: "catalogo" } : instrucoes;
 }
-/** A tarefa ainda não tem lista própria e a que se mostra vem do Catálogo: fixa-se (o técnico pode não ler o Catálogo). */
+/** A lista a gravar na tarefa ao abrir o Estúdio (ou null se não muda):
+ *  · sem lista própria e sem marcas: a que se mostra, se vem do Infraspeak ou do Catálogo (o técnico pode não ler o Catálogo);
+ *  · 25/11 (Rúben: «refaz todos os serviços, faz overwrite sem comprometer o que já existe nos planos de obras: apenas alterar nomes e
+ *    adicionar novos»): com as tarefas do Infraspeak para este trabalho, a lista que já existe (a da obra, ou aquela em que o técnico
+ *    marcou) passa a elas pela ordem: cada microtarefa fica com o seu id e muda só o nome (e as horas); as que o técnico já marcou ficam
+ *    como estão; as do Infraspeak que sobram juntam-se no fim, com ids novos; nada se apaga. Só uma vez (depois já têm a referência). */
 export function porFixar(t: Tarefa, S?: Estado | null, p?: Plano | null): Micro[] | null {
-  if (t.micro || t.exec?.estado === "validada") return null;
-  const r = microtarefasDe(t, S, p);
-  return r.origem === "catalogo" ? r.L : null;
+  if (t.exec?.estado === "validada" || t.corrige != null) return null;
+  const inf = microDoInfraspeak(t, p);
+  const marcas = t.exec?.passos ?? [];
+  if (!inf.length) {
+    if (t.micro) return null;
+    const r = microtarefasDe(t, S, p);
+    return r.origem === "catalogo" && !marcas.length ? r.L : null;
+  }
+  // a lista que existe: a da obra; sem ela, aquela em que o técnico marcou (se marcou)
+  const base = t.micro ? t.micro.map((m) => ({ ...m })) : marcas.length ? microtarefasDe(t, S, p).L : [];
+  if (!base.length) return inf;
+  const jaTem = new Set(base.map((m) => m.ref).filter(Boolean));
+  if (inf.every((x) => jaTem.has(x.ref))) return null;
+  const feitas = microFeitas(t, base);
+  let livre = Math.max(-1, ...base.map((m) => m.id), ...marcas) + 1;
+  const usadas = new Set<string>();
+  const L = base.map((m, k) => {
+    const x = inf[k];
+    if (!x || feitas.has(m.id) || (m.ref && jaTem.has(m.ref))) return m;
+    usadas.add(x.ref!);
+    return { id: m.id, n: x.n, ...(x.h ? { h: x.h } : {}), ref: x.ref };
+  });
+  for (const x of inf) if (!usadas.has(x.ref!) && !jaTem.has(x.ref)) L.push({ ...x, id: livre++ });
+  return L;
 }
 export const listaMicro = (t: Tarefa, S?: Estado | null, p?: Plano | null): Micro[] => microtarefasDe(t, S, p).L;
 

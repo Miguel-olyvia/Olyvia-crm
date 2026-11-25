@@ -4499,6 +4499,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const d = deal(id), p = d.obra.plano;
       if (!p || p.estado === "concluída") return 0;
       let n = 0;
+      // 25/11: as tarefas da Mudelar no Infraspeak entram aqui: as listas que já existem só mudam os nomes e juntam as novas (porFixar)
       for (const t of p.tasks) {
         const L: Micro[] | null = porFixar(t, S, p);
         if (L?.length) { t.micro = L; n++; }

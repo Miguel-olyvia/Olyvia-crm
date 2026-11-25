@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { acoes, type Tarefa } from "../motor";
 import type { Ctx } from "../pecas";
-import { listaMicro, microDoCatalogo, microFeitas, microtarefasDe, mudarMicro, porFixar, progressoMicro } from "../microtarefas";
+import { detalheMicro, listaMicro, microDoCatalogo, microDoInfraspeak, microFeitas, microtarefasDe, mudarMicro, porFixar, progressoMicro } from "../microtarefas";
 import { obraDeExemplo } from "./exemploObra";
 import { custosDe, receitaDe } from "../v2/custosModelo";
 import { MicrotarefasTarefa } from "./MicrotarefasTarefa";
@@ -26,6 +26,8 @@ function obra() {
     { id: "b", n: "Assentar o pavimento", perfil: "ladrilhador", h: 0.5 },
     { id: "c", n: "Betumar as juntas", perfil: "ladrilhador", h: 0.15 },
   ] };
+  // um nome que não casa com as tarefas da Mudelar no Infraspeak (essas vêm antes do Catálogo: testes em baixo)
+  p.tasks[livre].nome = "Trabalho especial"; p.tasks[livre].sk = "Equipa";
   return { S, d, A, p, ix, avisos, livre };
 }
 
@@ -40,7 +42,7 @@ describe("a lista de microtarefas", () => {
     expect(Math.abs(soma - t.h)).toBeLessThan(0.05 * r.L.length + 0.01);
   });
   it("sem Catálogo, as instruções pelo nome; com marcas antigas (sem microDe), também", () => {
-    const t: Tarefa = { nome: "Canalização", svcs: [], dia: 0, dur: 1, sk: "Canalizador", h: 8, tec: null };
+    const t: Tarefa = { nome: "Montar o andaime", svcs: [], dia: 0, dur: 1, sk: "Equipa", h: 8, tec: null };
     expect(microtarefasDe(t, null).origem).toBe("instrucoes");
     const { S, p, livre } = obra();
     const u = p.tasks[livre];
@@ -70,6 +72,55 @@ describe("a lista de microtarefas", () => {
     const u = p.tasks.find((x, i) => i !== livre && !x.micro)!;
     expect(mudarMicro(u, { k: "juntar", n: "   " }, S, p)).toBeNull();
     expect(u.micro).toBeUndefined();
+  });
+});
+
+describe("as tarefas da Mudelar no Infraspeak (25/11)", () => {
+  const tarefa = (nome: string, sk = "Equipa", fase = 2): Tarefa => ({ nome, svcs: [], dia: 0, dur: 1, sk, h: 8, tec: null, fase });
+  it("a canalização de uma casa de banho: as tarefas do Infraspeak, com as horas, quem faz e a checklist", () => {
+    const t = tarefa("MO Modelo Remodelação Completa - Casa de Banho · canalização");
+    const r = microtarefasDe(t, null, { tasks: [t] } as never);
+    expect(r.origem).toBe("infraspeak");
+    expect(r.L.map((m) => m.n)).toEqual(["Levantamento e marcação", "Remoção das instalações existentes", "Execução de rasgos e aberturas",
+      "Instalação das novas tubagens", "Ensaios e verificação", "Fecho dos rasgos e limpeza final"]);
+    expect(r.L.map((m) => m.id)).toEqual([0, 1, 2, 3, 4, 5]);
+    expect(r.L[0].h).toBe(1.5);
+    const D = detalheMicro(r.L[0]);
+    expect(D.quem).toBe("Empreiteiro Geral");
+    expect(D.det.length).toBeGreaterThan(1);
+    expect(D.det.every((x) => !/^\d/.test(x))).toBe(true); // sem os códigos do Infraspeak
+  });
+  it("louças, eletricidade final, cozinha e o que não casa", () => {
+    const base = tarefa("Base de Duche", "Canalizador", 4);
+    expect(listaMicro(base, null, { tasks: [base] } as never).map((m) => m.n)).toContain("Montagem da base de duche ou banheira");
+    const luz = tarefa("Aplique", "Eletricista", 4);
+    expect(listaMicro(luz, null, { tasks: [luz] } as never).map((m) => m.n)).toContain("Ligação de luminárias");
+    const gas = tarefa("Instalação de gás", "Técnico Gás", 2), banc = tarefa("Montagem da bancada", "Carpinteiro", 4);
+    expect(listaMicro(gas, null, { tasks: [gas, banc] } as never).map((m) => m.n)).toContain("Instalação dos pontos de consumo");
+    expect(microtarefasDe(tarefa("Montar o andaime"), null).origem).toBe("instrucoes");
+  });
+  it("ao abrir o Estúdio, as listas que existem passam às do Infraspeak: os ids ficam, muda o nome, juntam-se as novas, as marcadas ficam", () => {
+    const { S, d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.micro = [{ id: 0, n: "Preparar" }, { id: 1, n: "Assentar" }, { id: 7, n: "Juntada pelo gestor" }];
+    t.exec = { estado: "em curso", horas: 1, fotos: [], passos: [1] };
+    t.nome = "Revestimento de parede"; // agora casa com o Infraspeak
+    const inf = microDoInfraspeak(t, p);
+    expect(inf.length).toBeGreaterThan(3);
+    A.fixarMicrotarefas(d.id);
+    const L = t.micro!;
+    expect(L.slice(0, 3).map((m) => m.id)).toEqual([0, 1, 7]);
+    expect(L[0]).toMatchObject({ n: inf[0].n, ref: inf[0].ref });
+    expect(L[1]).toEqual({ id: 1, n: "Assentar" }); // o técnico já a marcou: fica
+    expect(L[2]).toMatchObject({ id: 7, n: inf[2].n });
+    expect(L.length).toBe(inf.length + 1); // a 2.ª do Infraspeak junta-se no fim; nada se apaga
+    expect(L.slice(3).map((m) => m.id)).toEqual(L.slice(3).map((_, k) => 8 + k));
+    expect([...microFeitas(t, L)]).toEqual([1]);
+    // só uma vez
+    const antes = JSON.stringify(L);
+    A.fixarMicrotarefas(d.id);
+    expect(JSON.stringify(t.micro)).toBe(antes);
+    expect(porFixar(t, S, p)).toBeNull();
   });
 });
 

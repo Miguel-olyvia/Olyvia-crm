@@ -209,7 +209,10 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
     const pp = d.obra.plano;
     if (!pp || pp.estado === "concluída" || !podeNeg(S.role, "obra.planear")) return;
     const falta = pp.tasks.some((t) => !!porFixar(t, S, pp)?.length);
-    if (falta) ctx0.run(() => { ctx0.A.fixarMicrotarefas(d.id); });
+    if (!falta) return;
+    // a seguir ao desenho (não durante a montagem do ecrã)
+    const id = window.setTimeout(() => ctx0.run(() => { ctx0.A.fixarMicrotarefas(d.id); }), 0);
+    return () => window.clearTimeout(id);
   }, [S.svc, d.id, d.obra.plano?.tasks.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
   // 12/11: o separador e o painel no endereço (o «voltar» do browser fecha o painel ou volta ao separador anterior; recarregar volta aqui)

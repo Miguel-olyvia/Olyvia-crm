@@ -24,7 +24,7 @@ import { podeNeg } from "./permissoes";
 import { AbrirEstudioMedidas } from "./estudioPlano/EstudioMedidas";
 import { RESPONSAVEL_OBRA, equipamentosDaObra, estadoDe, fotoExemplo, materiaisPorFase, nomeCurtoTarefa } from "./obraOps";
 import { useInventario } from "./inventario/loja";
-import { listaMicro, microFeitas } from "./microtarefas";
+import { detalheMicro, listaMicro, microFeitas } from "./microtarefas";
 import { resumoEcNegocio } from "./inventario/ponteNegocios";
 import { useMateriaisDaObra } from "./real/materiaisObraReal";
 import {
@@ -322,7 +322,7 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
               <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div className="h-full rounded-full bg-primary motion-safe:transition-[width] duration-500" style={{ width: `${M.length ? (feitos.size / M.length) * 100 : 0}%` }} /></div>
               <ul className="mt-3 space-y-2">
                 {M.map((m) => {
-                  const on = feitos.has(m.id), x = m.n;
+                  const on = feitos.has(m.id), x = m.n, D = detalheMicro(m);
                   return (
                     <li key={m.id}>
                       <button type="button" role="checkbox" aria-checked={on} onClick={() => run(() => A.marcarPasso(d.id, ti, m.id))}
@@ -330,6 +330,13 @@ function TarefaDeHoje({ ctx, d, ti }: { ctx: Ctx; d: Negocio; ti: number }) {
                         <span className={cn("grid h-6 w-6 shrink-0 place-items-center rounded-md border-2 transition-colors", on ? "border-success bg-success text-white" : "border-input")}>{on && <Check className="h-4 w-4 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200" aria-hidden="true" />}</span>
                         <span className={cn(on && "text-muted-foreground line-through decoration-muted-foreground/50")}>{x}</span>
                       </button>
+                      {/* 25/11: a checklist da tarefa da Mudelar no Infraspeak */}
+                      {D.det.length > 0 && (
+                        <details className="mt-1 pl-12 text-sm text-muted-foreground">
+                          <summary className="min-h-9 cursor-pointer select-none py-1">Ver os {D.det.length} {D.det.length === 1 ? "ponto" : "pontos"}</summary>
+                          <ul className="list-disc space-y-1 pl-4 pb-1">{D.det.map((y, j2) => <li key={j2}>{y}</li>)}</ul>
+                        </details>
+                      )}
                     </li>
                   );
                 })}
