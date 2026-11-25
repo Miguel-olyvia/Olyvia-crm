@@ -3,15 +3,13 @@
  *
  * O cabecalho mostra o `display_name` da ficha (que pode ser o nome de uma
  * EMPRESA, ver getEntityDisplayName) e o formulario de edicao mostra
- * nome/apelido. Se a gravacao recompusesse SEMPRE o display_name a partir de
- * nome + apelido, gravar uma ficha sem tocar no nome trocava "Empresa X, Lda"
- * por "Empresa X, Lda" partido em dois campos -- ou pior, por outro texto.
+ * nome/apelido. Gravar sem tocar no nome nao o pode estragar.
  *
- * Regra: o display_name so e recomposto quando o utilizador alterou os campos
- * de nome em relacao ao que foi carregado. Se nao os alterou, mantem-se.
+ * Regra: se o utilizador alterou nome ou apelido, o display_name passa a ser
+ * nome + apelido (troca sempre o antigo, mesmo o de uma empresa). Se nao os
+ * alterou, mantem-se EM BRUTO como esta na ficha.
  */
-import { normalizeFirstLast } from "@/utils/composeDisplayName";
-import { composeNameForSave } from "@/lib/entityDisplayName";
+import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
 
 type NameFieldValue = string | null | undefined;
 
@@ -42,7 +40,7 @@ export interface ClientNameForSave {
  * e o que o utilizador deixou no formulario.
  */
 export function resolveClientNameForSave(
-  current: { display_name?: string | null; first_name?: string | null; last_name?: string | null; company_name?: string | null },
+  current: { display_name?: string | null; first_name?: string | null; last_name?: string | null },
   edited: { first_name?: string | null; last_name?: string | null },
 ): ClientNameForSave {
   const normalized = normalizeFirstLast(edited.first_name, edited.last_name);
@@ -56,6 +54,26 @@ export function resolveClientNameForSave(
   const kept = stored.trim() ? stored : "";
   const displayName = !changed && kept
     ? kept
-    : composeNameForSave({ company: current.company_name, first: normalized.first, last: normalized.last });
+    : composeDisplayName(normalized.first, normalized.last);
+  return { displayName, first: normalized.first, last: normalized.last };
+}
+
+/**
+ * Editar uma lead: se o nome ou o apelido mudaram, o nome da ficha TROCA para
+ * nome + apelido (nunca fica o antigo ao lado do novo). O campo «empresa» da
+ * lead e so um campo da lead e nao decide o nome. Devolve null quando nao ha
+ * nada a gravar (nome intocado, ou apagado por completo).
+ */
+export function resolveLeadEditNameForSave(
+  original: { first?: string | null; last?: string | null },
+  edited: { first?: string | null; last?: string | null },
+): ClientNameForSave | null {
+  if (!nameFieldsChanged(
+    { first: original.first, last: original.last },
+    { first: edited.first, last: edited.last },
+  )) return null;
+  const normalized = normalizeFirstLast(edited.first, edited.last);
+  const displayName = composeDisplayName(normalized.first, normalized.last);
+  if (!displayName) return null;
   return { displayName, first: normalized.first, last: normalized.last };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nameFieldsChanged, resolveClientNameForSave } from "@/lib/nameOnSave";
+import { nameFieldsChanged, resolveClientNameForSave, resolveLeadEditNameForSave } from "@/lib/nameOnSave";
 
 describe("nameFieldsChanged", () => {
   it("campos iguais (mesmo com espacos a mais ou null vs vazio) nao contam como alteracao", () => {
@@ -55,43 +55,59 @@ describe("resolveClientNameForSave", () => {
   });
 });
 
-describe("resolveClientNameForSave com empresa (nome = empresa, senao nome + apelido)", () => {
-  const comEmpresa = { display_name: "Evolar Lda", first_name: "Rui", last_name: "Costa", company_name: "Evolar Lda" };
+describe("resolveClientNameForSave: o nome editado troca sempre o antigo (nome + apelido)", () => {
+  const evolar = { display_name: "EVOLAR LDA", first_name: "Rui", last_name: "Silva" };
 
-  it("editar o apelido de uma ficha com empresa troca o nome pela empresa, nunca por nome + apelido", () => {
-    const out = resolveClientNameForSave(comEmpresa, { first_name: "Rui", last_name: "Silva" });
-    expect(out.displayName).toBe("Evolar Lda");
-    expect(out.last).toBe("Silva");
+  it("editar o apelido de uma ficha cujo display_name era EVOLAR LDA da Rui Costa, nunca a empresa antiga", () => {
+    const out = resolveClientNameForSave(evolar, { first_name: "Rui", last_name: "Costa" });
+    expect(out.displayName).toBe("Rui Costa");
+    expect(out.first).toBe("Rui");
+    expect(out.last).toBe("Costa");
+  });
+
+  it("editar so o nome tambem troca", () => {
+    expect(resolveClientNameForSave(evolar, { first_name: "Rita", last_name: "Silva" }).displayName).toBe("Rita Silva");
   });
 
   it("gravar sem tocar no nome mantem o display_name carregado", () => {
-    const out = resolveClientNameForSave(comEmpresa, { first_name: "Rui", last_name: "Costa" });
-    expect(out.displayName).toBe("Evolar Lda");
+    expect(resolveClientNameForSave(evolar, { first_name: "Rui", last_name: "Silva" }).displayName).toBe("EVOLAR LDA");
   });
 
   it("nome intocado: o display_name guardado mantem-se EM BRUTO (espacos duplos, NBSP, espacos nas pontas)", () => {
-    for (const bruto of ["EVOLAR  LDA ", "EVOLAR LDA", " Evolar Lda"]) {
+    for (const bruto of ["EVOLAR  LDA ", "EVOLAR\u00A0LDA", " Evolar Lda"]) {
       const out = resolveClientNameForSave(
-        { display_name: bruto, first_name: "Rui", last_name: "Silva", company_name: "Evolar Lda" },
+        { display_name: bruto, first_name: "Rui", last_name: "Silva" },
         { first_name: " Rui", last_name: "Silva  " },
       );
       expect(out.displayName).toBe(bruto);
     }
   });
 
-  it("nome alterado numa ficha com display_name em bruto: compoe (a empresa, normalizada)", () => {
+  it("nome alterado: compoe normalizado, mesmo com display_name em bruto", () => {
     const out = resolveClientNameForSave(
-      { display_name: "EVOLAR  LDA ", first_name: "Rui", last_name: "Silva", company_name: "EVOLAR  LDA " },
-      { first_name: "Rui", last_name: "Costa" },
+      { display_name: "EVOLAR  LDA ", first_name: "Rui", last_name: "Silva" },
+      { first_name: "Rui  ", last_name: " Costa" },
     );
-    expect(out.displayName).toBe("EVOLAR LDA");
+    expect(out.displayName).toBe("Rui Costa");
+  });
+});
+
+describe("resolveLeadEditNameForSave (editar a lead: nome + apelido, a empresa nao decide)", () => {
+  it("apelido alterado: o nome da ficha troca para nome + apelido", () => {
+    expect(resolveLeadEditNameForSave({ first: "Rui", last: "Silva" }, { first: "Rui", last: "Costa" }))
+      .toEqual({ displayName: "Rui Costa", first: "Rui", last: "Costa" });
   });
 
-  it("empresa so de espacos conta como vazia", () => {
-    const out = resolveClientNameForSave(
-      { display_name: "Rui Costa", first_name: "Rui", last_name: "Costa", company_name: "  " },
-      { first_name: "Rui", last_name: "Silva" },
-    );
-    expect(out.displayName).toBe("Rui Silva");
+  it("nome e apelido intocados (so mudou outro campo, por exemplo a empresa): nao envia nome", () => {
+    expect(resolveLeadEditNameForSave({ first: "Rui", last: "Silva" }, { first: " Rui", last: "Silva " })).toBeNull();
+  });
+
+  it("nome apagado: nao envia nome vazio", () => {
+    expect(resolveLeadEditNameForSave({ first: "Rui", last: "Silva" }, { first: "", last: "" })).toBeNull();
+  });
+
+  it("so o nome, sem apelido", () => {
+    expect(resolveLeadEditNameForSave({ first: "Rui", last: "Silva" }, { first: "Rui", last: "" }))
+      .toEqual({ displayName: "Rui", first: "Rui", last: null });
   });
 });

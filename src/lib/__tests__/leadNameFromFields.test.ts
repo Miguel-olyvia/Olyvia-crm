@@ -7,28 +7,21 @@ const defs = [
   { field_key: "company_name", field_type: "text", contact_field_mapping: "company_name" },
 ];
 
-describe("resolveLeadNames (nome da ficha na criacao da lead)", () => {
-  it("com empresa: o nome da ficha e so a empresa, e o nome/apelido ficam para a pessoa", () => {
+describe("resolveLeadNames (nome da ficha na criacao da lead: nome + apelido)", () => {
+  it("a empresa nao entra no nome: sai 'Rui Costa', nunca 'Rui Costa Empresa Lda'", () => {
     const r = resolveLeadNames(defs, { first_name: "Rui", last_name: "Costa", company_name: "Empresa Lda" });
-    expect(r.displayName).toBe("Empresa Lda");
+    expect(r.displayName).toBe("Rui Costa");
     expect(r.firstName).toBe("Rui");
     expect(r.lastName).toBe("Costa");
-    expect(r.company).toBe("Empresa Lda");
   });
 
   it("sem empresa: nome + apelido", () => {
-    const r = resolveLeadNames(defs, { first_name: "Rui", last_name: "Costa" });
-    expect(r.displayName).toBe("Rui Costa");
-    expect(r.company).toBe("");
+    expect(resolveLeadNames(defs, { first_name: "Rui", last_name: "Costa" }).displayName).toBe("Rui Costa");
   });
 
-  it("empresa de espacos conta como vazia", () => {
-    expect(resolveLeadNames(defs, { first_name: "Rui", last_name: "Costa", company_name: "   " }).displayName).toBe("Rui Costa");
-  });
-
-  it("so empresa: o nome e a empresa e nao se inventa nome nem apelido", () => {
+  it("so empresa e sem nome: o nome fica vazio (o chamador escolhe o recurso)", () => {
     const r = resolveLeadNames(defs, { company_name: "Empresa Lda" });
-    expect(r.displayName).toBe("Empresa Lda");
+    expect(r.displayName).toBe("");
     expect(r.firstName).toBeNull();
     expect(r.lastName).toBeNull();
   });
@@ -43,8 +36,7 @@ describe("resolveLeadNames (nome da ficha na criacao da lead)", () => {
         ],
         { nome: "Rui", apelido_nome: "Costa", [key]: "Empresa Lda" },
       );
-      expect(r.displayName, key).toBe("Empresa Lda");
-      expect(r.person, key).toBe("Rui Costa");
+      expect(r.displayName, key).toBe("Rui Costa");
     }
   });
 
@@ -66,8 +58,7 @@ describe("resolveLeadNames (nome da ficha na criacao da lead)", () => {
   });
 
   it("nome e apelido repetidos nao duplicam o nome", () => {
-    const r = resolveLeadNames(defs, { first_name: "Rui Costa", last_name: "Costa" });
-    expect(r.displayName).toBe("Rui Costa");
+    expect(resolveLeadNames(defs, { first_name: "Rui Costa", last_name: "Costa" }).displayName).toBe("Rui Costa");
   });
 
   it("campos que nao sao de nome (email, observacoes) nao entram", () => {
@@ -78,7 +69,7 @@ describe("resolveLeadNames (nome da ficha na criacao da lead)", () => {
     expect(r.displayName).toBe("Rui");
   });
 
-  it("sem nada: displayName vazio (o chamador escolhe o recurso)", () => {
+  it("sem nada: displayName vazio", () => {
     const r = resolveLeadNames(defs, {});
     expect(r.displayName).toBe("");
     expect(r.firstName).toBeNull();

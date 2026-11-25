@@ -14,9 +14,7 @@ import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { withAuditContext } from "@/utils/auditContext";
-import { nameFieldsChanged, resolveClientNameForSave } from "@/lib/nameOnSave";
-import { fetchEntityCompanyName, type EntityCompanyResult } from "@/lib/clients/fetchEntityCompanyName";
-import { CompanyNameWarning } from "@/components/shared/CompanyNameWarning";
+import { resolveClientNameForSave } from "@/lib/nameOnSave";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -206,9 +204,6 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     vat: "", position: "", status: "", notes: "", organization_id: "",
     assigned_to: "" as string | null,
   });
-  // null = ainda por ler. `status: "no-column"` = migration por aplicar (empresa desconhecida, como antes).
-  const [entityCompany, setEntityCompany] = useState<EntityCompanyResult | null>(null);
-  const clientCompany = entityCompany?.company ?? "";
   // Morada principal: mesmos campos e validação que as moradas de entrega
   // (CamposMorada + validarMorada). Vazia = cliente sem morada (válido).
   const [moradaPrincipal, setMoradaPrincipal] = useState<MoradaCampos>(MORADA_VAZIA);
@@ -309,17 +304,8 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       }
     };
 
-    // A empresa da ficha le-se aparte e de forma tolerante: a coluna so existe
-    // depois da migration do nome unico (ver fetchEntityCompanyName).
-    setEntityCompany(null);
-    const fetchCompany = async () => {
-      const result = await fetchEntityCompanyName(supabase, client.entity_id);
-      if (result.status === "error") captureFlowError(result.error, "db-error-leaked-to-ui");
-      if (!isCancelled) setEntityCompany(result);
-    };
-
-    // Fire all in parallel
-    Promise.all([fetchEntityType(), fetchOrgUsers(), fetchCompany()]);
+    // Fire both in parallel
+    Promise.all([fetchEntityType(), fetchOrgUsers()]);
 
     setSelectedNewListIds(new Set());
     setShowAddListForm(false);
@@ -816,21 +802,10 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
       if (entityId) {
         await withAuditContext(supabase, businessUserId, async () => {
-          // O display_name so e recomposto se o utilizador mexeu no nome/apelido:
-          // sem isso, gravar uma ficha cujo nome e de empresa estragava-o.
-          // Mexer no nome sem saber se a ficha tem empresa perderia a empresa:
-          // nesse caso nao se grava e pede-se para tentar de novo.
-          const companyUnknown = !entityCompany || entityCompany.status === "error";
-          if (companyUnknown && nameFieldsChanged(
-            { first: client.first_name, last: client.last_name },
-            { first: editFormData.first_name, last: editFormData.last_name },
-          )) {
-            throw new Error("Não foi possível confirmar a empresa desta ficha. Feche e volte a abrir o cliente e tente de novo.");
-          }
-          const { displayName, first: normFirst, last: normLast } = resolveClientNameForSave(
-            { ...client, company_name: entityCompany?.company ?? null },
-            editFormData,
-          );
+          // Se o utilizador mexeu no nome/apelido, o display_name TROCA para
+          // nome + apelido (mesmo numa ficha cujo nome era o de uma empresa);
+          // se nao mexeu, mantem-se em bruto, como esta na ficha.
+          const { displayName, first: normFirst, last: normLast } = resolveClientNameForSave(client, editFormData);
           const normalized = { first: normFirst, last: normLast };
           const nif = editFormData.vat || null;
           const { error: rpcError } = await callNifWriteProxy("rpc_update_client", {
@@ -1372,20 +1347,6 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                     <div className="space-y-2"><Label>{entityType === "organization" ? "Nome da Empresa *" : "Nome *"}</Label><Input value={editFormData.first_name} onChange={e => setEditFormData({ ...editFormData, first_name: e.target.value })} required aria-invalid={!!editFormErrors.first_name} />{editFormErrors.first_name && <p className="text-xs text-destructive">{editFormErrors.first_name}</p>}</div>
                     {entityType !== "organization" && (
                     <div className="space-y-2"><Label>Apelido *</Label><Input value={editFormData.last_name} onChange={e => setEditFormData({ ...editFormData, last_name: e.target.value })} required aria-invalid={!!editFormErrors.last_name} />{editFormErrors.last_name && <p className="text-xs text-destructive">{editFormErrors.last_name}</p>}</div>
-                    )}
-                    {/* Empresa: o nome do cliente é a empresa se existir. Só leitura porque o
-                        rpc_update_client ainda não aceita a empresa (ver o relatório); altera-se na lead. */}
-                    {(entityType === "person" || clientCompany) && (
-                      <div className="space-y-2 col-span-2">
-                        <Label htmlFor="client-edit-company">Empresa</Label>
-                        <Input id="client-edit-company" value={clientCompany} readOnly aria-readonly="true" aria-describedby="client-edit-company-hint" placeholder="Sem empresa" className="bg-muted/50" />
-                        <p id="client-edit-company-hint" className="text-xs text-muted-foreground">Quando existe, é o nome que aparece nas propostas e PDFs. Por agora altera-se na ficha da lead.</p>
-                      </div>
-                    )}
-                    {entityType === "person" && (
-                      <div className="col-span-2 empty:hidden">
-                        <CompanyNameWarning first={editFormData.first_name} last={editFormData.last_name} company={clientCompany} fix="type" />
-                      </div>
                     )}
                     <div className="space-y-2"><Label>Email</Label><Input type="email" value={editFormData.email} onChange={e => setEditFormData({ ...editFormData, email: e.target.value })} aria-invalid={!!editFormErrors.email} />{editFormErrors.email && <p className="text-xs text-destructive">{editFormErrors.email}</p>}</div>
                     <div className="space-y-2"><PhoneInput label="Telefone" phoneValue={editFormData.phone} countryCodeValue={editFormData.phone_country_code} onPhoneChange={v => setEditFormData({ ...editFormData, phone: v })} onCountryCodeChange={v => setEditFormData({ ...editFormData, phone_country_code: v })} />{editFormErrors.phone && <p className="text-xs text-destructive">{editFormErrors.phone}</p>}</div>

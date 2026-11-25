@@ -13,7 +13,6 @@ import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
 import { resolveLeadNames } from "@/lib/leadNameFromFields";
 import { refreshEntityIdentity } from "@/lib/refreshEntityIdentity";
-import { CompanyNameWarning } from "@/components/shared/CompanyNameWarning";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { validateLeadFieldValues } from "@/utils/leadFieldValidation";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -3485,8 +3484,7 @@ export default function AnewLeads() {
     try {
       try {
         // --- Extract contact data from field_values using field definitions ---
-        // Nome da ficha: regra unica (empresa se existir, senao nome + apelido).
-        // A empresa ja nao se junta ao nome da pessoa.
+        // Nome da ficha: nome + apelido. O campo da empresa nao entra no nome.
         const resolvedNames = resolveLeadNames(allFieldDefs as any[], leadValues);
         let displayName = resolvedNames.displayName;
         let emailValue = '';
@@ -7460,16 +7458,6 @@ export default function AnewLeads() {
                 </div>
               </div>
             )}
-
-            {/* Aviso (não bloqueia): nome com cara de empresa e Empresa vazia, ou Empresa igual ao nome. */}
-            {(() => {
-              const visibleDefs = [
-                ...createLeadFieldDefs.filter(f => !isBaseFieldCoveredByCampaignFields(f.field_key, extraCampaignFieldDefs)),
-                ...extraCampaignFieldDefs,
-              ];
-              const names = resolveLeadNames(visibleDefs as any[], newLeadValues);
-              return <CompanyNameWarning first={names.firstName} last={names.lastName} company={names.company} />;
-            })()}
 
             {/* ── Assignment ── */}
             <div className="border-t pt-4 mt-2 space-y-3">

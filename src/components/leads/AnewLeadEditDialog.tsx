@@ -5,9 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { setEntityOwner, notifyOwnerChangeVisits } from "@/lib/leads/entityOwnerSync";
-import { nameFieldsChanged } from "@/lib/nameOnSave";
-import { composeNameForSave } from "@/lib/entityDisplayName";
-import { CompanyNameWarning } from "@/components/shared/CompanyNameWarning";
+import { resolveLeadEditNameForSave } from "@/lib/nameOnSave";
 import {
   Dialog,
   DialogContent,
@@ -431,23 +429,20 @@ export function AnewLeadEditDialog({
       if (lead.entity_id) {
         const firstName = readGeneralField("first_name", updatedFieldValues);
         const lastName = readGeneralField("last_name", updatedFieldValues);
-        const companyName = readGeneralField("company_name", updatedFieldValues);
-        const newDisplayName = composeNameForSave({ company: companyName, first: firstName, last: lastName }) || undefined;
-
-        // So se mexeu no nome: gravar a lead sem o tocar nao pode recompor (e
-        // estragar) o display_name da ficha, que pode ser o nome de uma empresa.
+        // So se mexeu no nome ou no apelido: gravar a lead sem os tocar nao pode
+        // recompor o display_name da ficha. Mexendo, o nome TROCA para nome +
+        // apelido. O campo «empresa» da lead nao decide o nome da ficha.
         const originalValues = lead.field_values || {};
-        const nameTouched = nameFieldsChanged(
+        const nameUpdate = resolveLeadEditNameForSave(
           {
             first: readGeneralField("first_name", originalValues),
             last: readGeneralField("last_name", originalValues),
-            company: readGeneralField("company_name", originalValues),
           },
-          { first: firstName, last: lastName, company: companyName },
+          { first: firstName, last: lastName },
         );
 
-        if (newDisplayName && nameTouched) {
-          displayName = newDisplayName.trim();
+        if (nameUpdate) {
+          displayName = nameUpdate.displayName;
           if (firstName) entityFirstName = firstName;
           if (lastName) entityLastName = lastName;
         }
@@ -843,11 +838,6 @@ export function AnewLeadEditDialog({
                   </div>
                 ))}
               </div>
-              <CompanyNameWarning
-                first={readGeneralField("first_name")}
-                last={readGeneralField("last_name")}
-                company={readGeneralField("company_name")}
-              />
             </div>
 
             {/* Dynamic Fields from Campaign/Company */}
