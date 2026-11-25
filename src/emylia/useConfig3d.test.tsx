@@ -24,10 +24,11 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 import { useConfig3d } from "./useConfig3d";
+import type { Eixos } from "./planta3d/eixosMedida";
 
 const ORG = "b6ffce4f-f630-4933-833a-008649757a33", PID = "11111111-2222-4333-8444-555555555555";
 const A1 = "aaaaaaaa-0000-4000-a000-000000000001";
-const EIXOS = { largura: "comprimento", altura: "largura", profundidade: "espessura" };
+const EIXOS: Eixos = { largura: "comprimento", altura: "largura", profundidade: "espessura" };
 const LIG = [{ atributo: A1, zona: "frente", aplicar: true }];
 const definidas = () => base.chamadas.filter((c) => c.f === "cat_definir_config_3d").map((c) => c.a);
 

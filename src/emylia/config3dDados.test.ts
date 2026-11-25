@@ -12,11 +12,12 @@ vi.mock("@/integrations/supabase/client", () => ({
 
 import { definirConfig3d, lerConfig3d, ligacoesDaConfig, type Ligacao } from "./config3dDados";
 import { chaveDeExclusao } from "./planta3d/aspetoZonas";
+import type { Eixos } from "./planta3d/eixosMedida";
 
 const ORG = "b6ffce4f-f630-4933-833a-008649757a33";
 const PROD = "11111111-2222-4333-8444-555555555555";
 const A1 = "aaaaaaaa-0000-4000-a000-000000000001", A2 = "aaaaaaaa-0000-4000-a000-000000000002";
-const EIXOS = { largura: "largura", altura: "comprimento", profundidade: "espessura" };
+const EIXOS: Eixos = { largura: "largura", altura: "comprimento", profundidade: "espessura" };
 
 beforeEach(() => { base.chamadas = []; base.responder = () => ({ data: null, error: null }); });
 
