@@ -140,27 +140,8 @@ const ouvintes = new Set<() => void>();
 /** Os resumos da base, pela referência do negócio na Emylia (refNegocio: "CT 2026/<n>"). null: volta ao Inventário do browser. */
 export function definirEncomendasReais(m: Map<string, ResumoEcNeg> | null): void {
   reais = m ?? new Map();
-  estadoReais = m ? "lidas" : "fora";
   for (const f of ouvintes) f();
 }
-/** 25/11 (Rúben, no 1048: «Sem materiais na encomenda desta obra» com 38 na encomenda): os negócios abrem antes de as encomendas da base
- *  chegarem (com a base lenta, segundos). Enquanto se leem, os ecrãs dizem «A ler a encomenda...» e não que não há materiais.
- *  «fora»: sem leitura da base (o protótipo); «a ler»: a primeira leitura ainda não chegou; «lidas»: chegou (as releituras mantêm-nas). */
-let estadoReais: "fora" | "a ler" | "lidas" = "fora";
-export const estadoEncomendasReais = () => estadoReais;
-export function marcarEncomendasALer(): void {
-  if (estadoReais === "lidas") return;
-  estadoReais = "a ler";
-  for (const f of ouvintes) f();
-}
-/** A leitura falhou: deixa de dizer «A ler» (fica como sem leitura). */
-export function leituraEncomendasFalhou(): void {
-  if (estadoReais !== "a ler") return;
-  estadoReais = "fora";
-  for (const f of ouvintes) f();
-}
-/** Os materiais da obra ainda não se sabem: a encomenda da base está a ser lida e esta obra ainda não tem nada. */
-export const materiaisALer = (nMateriais: number): boolean => nMateriais === 0 && estadoReais === "a ler";
 export const encomendaReal = (ref: string | null | undefined): ResumoEcNeg | undefined => (ref ? reais.get(ref) : undefined);
 export const subscreverEncomendasReais = (f: () => void): (() => void) => { ouvintes.add(f); return () => { ouvintes.delete(f); }; };
 
