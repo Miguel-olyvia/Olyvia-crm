@@ -3,7 +3,9 @@
 //  · Documentos: o que foi para o portal do cliente (documentosObra.ts), quando e em que estado; abrir cada um por cima (o «voltar» fecha,
 //    ?doc=) e reenviar o acesso ao cliente com esse documento (pede confirmação; numa conta real, a permissão do portal);
 //  · 3D: o projeto do Estúdio do projeto em volume (obra3d.ts), só para ver: o que está feito a cores, o que falta transparente.
-import { Component, Suspense, lazy, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Visualizador3DSeguro } from "@/emylia/planta3d/Visualizador3DSeguro";
+import { temWebGL } from "@/emylia/planta3d/carregarVisualizador3D";
 import { Box, Check, FileText, Pause, Play, Send, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -137,27 +139,6 @@ function DocAberto({ ctx, d, x, fechar }: { ctx: Ctx; d: Negocio; x: DocEnviado;
 // 23/11 (Rúben: «o 3D ainda é genérico… quero o 3D real do projeto aprovado e a planta antes e depois»). O 3D com modelos do passo «3D»
 // do Estúdio (os produtos do contrato, o revestimento e o pavimento como materiais), com o feito a cores e o que falta transparente; sem
 // WebGL (ou se o 3D com modelos falhar), o 3D simples de antes. Por baixo, as duas plantas do Estúdio: como está e como vai ficar.
-const Visualizador3D = lazy(() => import("@/emylia/planta3d/Visualizador3D"));
-
-let webgl: boolean | null = null;
-/** Se o browser desenha 3D (WebGL). Pergunta-se uma vez. */
-function temWebGL(): boolean {
-  if (webgl !== null) return webgl;
-  try {
-    const c = document.createElement("canvas");
-    webgl = !!(window.WebGLRenderingContext && (c.getContext("webgl2") || c.getContext("webgl")));
-  } catch { webgl = false; }
-  return webgl;
-}
-
-/** Se o 3D com modelos falhar (um modelo que não abre), fica o 3D simples em vez de partir o ecrã. */
-class Falha3D extends Component<{ alternativa: ReactNode; children: ReactNode }, { erro: boolean }> {
-  state = { erro: false };
-  static getDerivedStateFromError() { return { erro: true }; }
-  componentDidCatch(e: unknown) { console.warn("[obra] o 3D com modelos falhou; fica o simples:", e); }
-  render() { return this.state.erro ? this.props.alternativa : this.props.children; }
-}
-
 /** O nome de um produto na planta: sem o tipo à frente («Base de Duche ZEUS 70x150» → «ZEUS 70x150»), até três palavras. */
 export function nomeCurto(nome: string, tipo: string): string {
   const n = nome.trim();
@@ -232,12 +213,9 @@ export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: 
         </div>
         {comModelos && res.ok ? (
           <div className={cn("overflow-hidden rounded-2xl border border-border", qual === "obra" && plano ? "h-[48vh] min-h-[320px]" : "h-[62vh] min-h-[420px]")}>
-            <Falha3D alternativa={simples}>
-              <Suspense fallback={<p className="grid h-full place-items-center text-[15px] text-muted-foreground">A abrir o 3D…</p>}>
-                <Visualizador3D espaco={res.espaco} modelos={res.modelos} vista={vista} teto={false} etiquetas={false} descricao={titulo}
-                  selecionada={sel} onSelecionar={setSel} porFazer={porFazer} />
-              </Suspense>
-            </Falha3D>
+            {/* 25/11: o visualizador com o 3D simples de reserva, que diz porquê e volta a tentar (Visualizador3DSeguro) */}
+            <Visualizador3DSeguro alternativa={simples} refazer={`${qual}|${vista}|${diaSel ?? ""}`} espaco={res.espaco} modelos={res.modelos} vista={vista}
+              teto={false} etiquetas={false} descricao={titulo} selecionada={sel} onSelecionar={setSel} porFazer={porFazer} />
           </div>
         ) : simples}
         {comModelos && qual === "obra" && plano && (

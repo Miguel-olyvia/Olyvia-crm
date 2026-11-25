@@ -1,7 +1,8 @@
 // Protótipo (visualizador 3D): o painel «Ver em 3D» por baixo da planta. Converte o desenho (planta.ts) para o modelo genérico, escolhe a vista,
 // os revestimentos e o tecto, mostra a lista em texto (paredes e peças com medidas) e, no telemóvel, abre em ecrã inteiro. O three só se carrega
 // (React.lazy) quando este painel abre.
-import { Suspense, lazy, useMemo, useState, type ReactNode } from "react";
+import { Suspense, useMemo, useState, type ReactNode } from "react";
+import { novoVisualizador3D } from "./carregarVisualizador3D";
 import { Maximize2, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -13,7 +14,8 @@ import { areaPavimento, areaParedes, descreverEspaco, type TipoEspaco } from "./
 import { REVESTIMENTOS, type Superficie } from "./revestimentos";
 import type { Mover3D, Vista3D } from "./Visualizador3D";
 
-const Visualizador3D = lazy(() => import("./Visualizador3D"));
+// 25/11: pelo carregador comum (tenta outra vez uma falha de rede; carregarVisualizador3D.ts)
+const Visualizador3D = novoVisualizador3D();
 const SEL = "h-11 min-w-0 rounded-lg border border-input bg-card px-3 text-[15px] outline-none focus-visible:border-primary focus-visible:ring-2 focus-visible:ring-primary/25";
 const VISTAS: { v: Vista3D; n: string }[] = [{ v: "cima", n: "Vista de cima" }, { v: "3d", n: "Vista 3D" }, { v: "pessoa", n: "Primeira pessoa" }];
 const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });

@@ -10,6 +10,7 @@
 //    registar; com custo, a adenda vai logo ao cliente); a atividade (os ajustes ao plano).
 // A lógica está em planoVivo.ts e alertasObra.ts; as mudanças vão pelas ações do motor (A.replanearObra, A.registarImprevisto…).
 import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { preCarregarVisualizador3D } from "@/emylia/planta3d/carregarVisualizador3D";
 import { EnderecoAtivo, escreverParamUrl, usePainelUrl, useParamUrl } from "../usarParamUrl";
 import { COLUNA_MAX, COLUNA_MIN, useLarguraColuna } from "./larguraColuna";
 import { AnimatePresence, motion } from "framer-motion";
@@ -138,6 +139,9 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   // quantas vezes se anulou ou refez: o painel aberto volta a ler a tarefa (uma nota anulada não fica na caixa de texto)
   const reposicoes = useRef(0);
   const [notaPasso, setNotaPasso] = useState<{ t: string; mau: boolean; n: number } | null>(null);
+  // 25/11 (Rúben: «o 3D às vezes só caixas»): o código do 3D pede-se logo que a obra abre, não só ao abrir o separador 3D (com um deploy
+  // pelo meio, o ficheiro já não estava no servidor e o 3D caía nas caixas); fica em memória para o resto da sessão
+  useEffect(() => { preCarregarVisualizador3D(); }, []);
   const quandoP = (k: number) => (diasRef.current[k] ? dataCurta(diasRef.current[k]) : `dia ${k + 1}`);
   // 23/11 (revisão: «Avisar os técnicos afetados»): as tarefas mudadas aqui (dias ou técnico) e o plano do último aviso; os avisos que o
   // motor daria logo ficam à espera do toque do gestor (avisosTecnicos.ts)

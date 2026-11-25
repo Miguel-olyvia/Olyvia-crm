@@ -8,7 +8,8 @@
 // «Mostrar ao cliente» abre a apresentação (tablet): o projeto mostra-se e não se envia (é propriedade da empresa); o projeto só vai para o
 // portal depois de a proposta ser aceite. 20/11: o projeto guarda-se neste browser, numa chave por negócio, e no próprio negócio
 // (f.estudio) de poucos em poucos segundos e ao sair, pela ligação que a Visita deixa ao abrir o Estúdio (projetoGuardado.ts).
-import { useEffect, useMemo, useState, useRef, Component, Suspense, lazy, type ReactNode } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
+import { Visualizador3DSeguro } from "@/emylia/planta3d/Visualizador3DSeguro";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, HardHat, Lock, Monitor, Paintbrush, RotateCcw, Send, Sparkles, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,7 +35,6 @@ import type { Cena } from "./geometria3d";
 
 import { totalDaCozinha } from "./cozinha/modelo";
 import { mudarODepois, seguirOAntes } from "./posicoesDepois";
-const Visualizador3D = lazy(() => import("@/emylia/planta3d/Visualizador3D"));
 import { devolverAoNegocio } from "./daVisita";
 import { GRAVAR_NO_NEGOCIO_MS, chaveDoEstudio, gravarNoNegocio, guardarProjetoLocal, lembrarNegocioAberto, negocioDoEndereco, projetoInicial } from "./projetoGuardado";
 import { pedeDesfazer, vozNoEstudio } from "./estudioPorVoz";
@@ -384,24 +384,13 @@ function AntesDepois3D({ p, escuro = false, sozinha = false }: { p: Projeto; esc
         <p className={cn("rounded-2xl border border-dashed p-6 text-center text-[15px]", escuro ? "border-white/20 text-white/70" : "border-border text-muted-foreground")}>{res && "erro" in res ? res.erro : ""}</p>
       ) : (
         <div className={cn("h-[62vh] min-h-[420px] overflow-hidden rounded-2xl border", escuro ? "border-white/10" : "border-border")}>
-          <Falha3D alternativa={simples}>
-            <Suspense fallback={<p className="grid h-full place-items-center text-[15px] text-muted-foreground">A abrir o 3D…</p>}>
-              <Visualizador3D espaco={res.espaco} modelos={res.modelos} vista={vista} teto={false} etiquetas={false}
-                descricao={qual === "antes" ? "Como está hoje" : "Como vai ficar"} selecionada={sel} onSelecionar={setSel} />
-            </Suspense>
-          </Falha3D>
+          {/* 25/11: com o 3D simples de reserva, que diz porquê e volta a tentar (Visualizador3DSeguro) */}
+          <Visualizador3DSeguro alternativa={simples} refazer={`${qual}|${vista}`} espaco={res.espaco} modelos={res.modelos} vista={vista} teto={false} etiquetas={false}
+            descricao={qual === "antes" ? "Como está hoje" : "Como vai ficar"} selecionada={sel} onSelecionar={setSel} />
         </div>
       )}
     </div>
   );
-}
-
-/** Se o 3D com modelos falhar (sem WebGL, um modelo que não abre), mostra o 3D simples em vez de partir a página. */
-class Falha3D extends Component<{ alternativa: ReactNode; children: ReactNode }, { erro: boolean }> {
-  state = { erro: false };
-  static getDerivedStateFromError() { return { erro: true }; }
-  componentDidCatch(e: unknown) { console.warn("[estudio] o 3D com modelos falhou; fica o simples:", e); }
-  render() { return this.state.erro ? this.props.alternativa : this.props.children; }
 }
 
 function Escolhidos({ p, escuro = false }: { p: Projeto; escuro?: boolean }) {

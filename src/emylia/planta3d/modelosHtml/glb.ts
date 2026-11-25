@@ -24,7 +24,10 @@ export const urlDoModeloHtml = (familia: FamiliaGlb, modelo: string): string => 
 export const LIBERTAR_APOS_MS = 30_000;
 
 /* ------------------------------------------------------------------ cache por URL, com contagem de peças */
-interface Entrada { promessa: Promise<void>; cena?: THREE.Group; erro?: unknown; pecas: number; temporizador?: ReturnType<typeof setTimeout> }
+interface Entrada { promessa: Promise<void>; cena?: THREE.Group; erro?: unknown; falhouEm?: number; pecas: number; temporizador?: ReturnType<typeof setTimeout> }
+/** 25/11: um GLB que falhou (rede, servidor) volta a pedir-se passado este tempo (ms), na próxima peça que o monte. Antes a falha ficava na
+ *  cache para sempre (nenhuma peça chega a reter um GLB que falha, por isso nada a soltava): a peça ficava no modelo de reserva até recarregar. */
+export const TENTAR_GLB_APOS_MS = 5_000;
 const cache = new Map<string, Entrada>();
 let carregador: GLTFLoader | null = null;
 const obterCarregador = (): GLTFLoader => {
@@ -33,9 +36,11 @@ const obterCarregador = (): GLTFLoader => {
 };
 function entradaDe(url: string): Entrada {
   const tida = cache.get(url);
-  if (tida) return tida;
+  // a falha não fica para sempre: passado um bocado, a próxima peça volta a pedir o ficheiro (não logo: o React volta a desenhar a peça que
+  // falhou uma vez antes de pôr a reserva, e um pedido novo a cada desenho seria um ciclo)
+  if (tida && !(tida.erro !== undefined && Date.now() - (tida.falhouEm ?? 0) >= TENTAR_GLB_APOS_MS)) return tida;
   const nova: Entrada = { pecas: 0, promessa: Promise.resolve() };
-  nova.promessa = obterCarregador().loadAsync(url).then((g) => { nova.cena = g.scene; }, (e: unknown) => { nova.erro = e; });
+  nova.promessa = obterCarregador().loadAsync(url).then((g) => { nova.cena = g.scene; }, (e: unknown) => { nova.erro = e ?? new Error(`GLB ${url}`); nova.falhouEm = Date.now(); });
   cache.set(url, nova);
   return nova;
 }
