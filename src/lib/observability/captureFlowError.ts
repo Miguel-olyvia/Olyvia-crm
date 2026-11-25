@@ -76,6 +76,9 @@ export type BusinessFlow =
   // (rpc_inventory_today). On failure every counter hides itself, so a
   // timeout/permission error would otherwise look like "nothing pending".
   | "inventory-today-load"
+  // Suggested stock transfers for client orders (rpc_ec_transfer_suggestions).
+  // On failure the section hides itself, which would look like "nothing to move".
+  | "ec-transfer-suggestions-load"
   // Global search box in the top header (rpc_inventory_global_search). The box
   // shows an error line; this tells real failures (timeout, privileges) apart
   // from "no results".

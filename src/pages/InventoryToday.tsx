@@ -11,6 +11,8 @@ import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { PermissionGate } from "@/components/PermissionGate";
 import { Button } from "@/components/ui/button";
 import StockMovementDialog from "@/components/inventory/StockMovementDialog";
+import { EcTransferSuggestions } from "@/components/inventory/EcTransferSuggestions";
+import { ecTransferSuggestionsQueryKey } from "@/hooks/useEcTransferSuggestions";
 import {
   DocumentLink,
   InventoryPageHeader,
@@ -787,9 +789,20 @@ const InventoryToday = () => {
       onSuccess={() => {
         void recent.refetch();
         void queryClient.invalidateQueries({ queryKey: inventoryTodayQueryKey(activeCompany.id) });
+        void queryClient.invalidateQueries({ queryKey: ecTransferSuggestionsQueryKey(activeCompany.id) });
         if (canReceivable) void receivable.refetch();
       }}
     />
+  );
+
+  // Depois de uma transferência sugerida: o mesmo que depois de um movimento (as sugestões já são invalidadas lá).
+  const afterSuggestedTransfer = () => {
+    void recent.refetch();
+    void queryClient.invalidateQueries({ queryKey: inventoryTodayQueryKey(activeCompany.id) });
+    if (canReceivable) void receivable.refetch();
+  };
+  const transferSuggestions = (
+    <EcTransferSuggestions organizationId={activeCompany.id} warehouses={warehouses} onTransferred={afterSuggestedTransfer} />
   );
 
   if (embebido) {
@@ -804,6 +817,8 @@ const InventoryToday = () => {
       <>
         <div className="space-y-6">
           {today ? <FluxoCompacto data={today} /> : null}
+
+          {transferSuggestions}
 
           <section aria-labelledby="inv-recent">
             <Seccao
@@ -885,6 +900,8 @@ const InventoryToday = () => {
 
         {today ? <FlowSection data={today} /> : null}
 
+        {transferSuggestions}
+
         {receivingItem || queue.length > 0 ? (
           <section aria-labelledby="inv-queue" className="space-y-3">
             <h2 id="inv-queue" className="text-base font-semibold">Fila de trabalho</h2>
@@ -948,6 +965,7 @@ const InventoryToday = () => {
         onSuccess={() => {
           void recent.refetch();
           void queryClient.invalidateQueries({ queryKey: inventoryTodayQueryKey(activeCompany.id) });
+          void queryClient.invalidateQueries({ queryKey: ecTransferSuggestionsQueryKey(activeCompany.id) });
           if (canReceivable) void receivable.refetch();
         }}
       />

@@ -136,6 +136,12 @@ interface StockMovementDialogProps {
   // Tipo inicial (por omissão "entrada") — ex. "ajuste" quando aberto a partir
   // da edição de stock, onde a quantidade deixou de ser editável.
   defaultMovementType?: MovementType;
+  // Transferência sugerida (EC): destino, quantidade e notas pré-preenchidos —
+  // continuam editáveis e o utilizador confirma. Sem estes props o diálogo
+  // comporta-se exatamente como antes.
+  defaultToWarehouseId?: string;
+  defaultQuantity?: number | string;
+  defaultNotes?: string;
   onSuccess: () => void;
 }
 
@@ -156,7 +162,8 @@ const fetchAllRows = async (buildQuery: () => any): Promise<{ data: any[] | null
 };
 
 export default function StockMovementDialog({
-  open, onOpenChange, organizationId, warehouses, defaultProductId, defaultWarehouseId, defaultMovementType, onSuccess,
+  open, onOpenChange, organizationId, warehouses, defaultProductId, defaultWarehouseId, defaultMovementType,
+  defaultToWarehouseId, defaultQuantity, defaultNotes, onSuccess,
 }: StockMovementDialogProps) {
   const { toast } = useToast();
   const { t } = useTranslation();
@@ -258,14 +265,14 @@ export default function StockMovementDialog({
     setStep(defaultMovementType ? 2 : 1);
     setMovementType(defaultMovementType || "entrada");
     setWarehouseId(defaultWarehouseId || "");
-    setToWarehouseId("");
+    setToWarehouseId(defaultToWarehouseId || "");
     setDirection("positivo");
     setReasonChoice("");
     setReasonDetail("");
     setReasonError(false);
     setResult(null);
     setCounterparty("");
-    setNotes("");
+    setNotes(defaultNotes || "");
     setClientOrderId("");
     setSelectedClientOrder(null);
     setClientOrderPickerOpen(false);
@@ -274,8 +281,12 @@ export default function StockMovementDialog({
     setClientOrderReservedByProduct({});
     setReservations({});
     setOrgStockByProduct({});
-    setLines([makeEmptyLine(defaultProductId)]);
-  }, [open, defaultProductId, defaultWarehouseId, defaultMovementType]);
+    const firstLine = makeEmptyLine(defaultProductId);
+    if (defaultQuantity !== undefined && defaultQuantity !== null && String(defaultQuantity) !== "") {
+      firstLine.quantity = String(defaultQuantity);
+    }
+    setLines([firstLine]);
+  }, [open, defaultProductId, defaultWarehouseId, defaultMovementType, defaultToWarehouseId, defaultQuantity, defaultNotes]);
 
   // Troca de organização ativa: o catálogo em memória é de outra organização.
   useEffect(() => {

@@ -94,6 +94,7 @@ import { ClientOrderHistorySection } from "@/components/client-orders/ClientOrde
 import { InventarioEmbebido } from "@/components/inventory/ui/embebido";
 import { EcBarra, EcCartoes, type EcVista } from "@/components/client-orders/EcCartoes";
 import { EcEstadoLinha, EcFolhaKv, EcFolhaLinhas } from "@/components/client-orders/EcFolha";
+import { EcTransferSuggestions } from "@/components/inventory/EcTransferSuggestions";
 import { useTranslation } from "@/hooks/useTranslation";
 import { generateProformaPdfBlob, downloadBlob } from "@/utils/generateProformaPdfBlob";
 import { pdf } from '@react-pdf/renderer';
@@ -3713,6 +3714,24 @@ const ClientOrders = () => {
               <div className="rounded-lg border border-warning/40 bg-warning/10 px-3 py-2 text-sm" role="status">
                 {detailData.stock_deduction_warning}
               </div>
+            ) : null}
+
+            {/* Transferências sugeridas desta EC (stock reservado longe da obra). Só aviso: o botão abre o diálogo de
+                transferência preenchido; depois de transferir relê-se o documento e a lista, como nas outras ações. */}
+            {activeCompany?.id ? (
+              <EcTransferSuggestions
+                organizationId={activeCompany.id}
+                contractId={detailData.contract_id}
+                onTransferred={() => {
+                  const contractId = detailData.contract_id;
+                  void fetchDetail(contractId)
+                    .then((refreshed) => {
+                      setDetailData((current) => (current?.contract_id === contractId ? refreshed : current));
+                    })
+                    .catch(() => undefined);
+                  loadOrders(0, true);
+                }}
+              />
             ) : null}
 
             {/* Diagnóstico da obra — só leitura, colapsável. Nada quando a

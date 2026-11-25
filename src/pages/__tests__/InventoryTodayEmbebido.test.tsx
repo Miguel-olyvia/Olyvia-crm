@@ -170,3 +170,39 @@ describe("Hoje do Inventário dentro do novo Inventário (artefacto)", () => {
     expect(screen.queryByRole("button", { name: /Registar movimento/ })).toBeNull();
   });
 });
+
+describe("Hoje (novo Inventário): Transferências sugeridas das EC", () => {
+  const sugestao = {
+    contract_id: "c1", order_number: "EC-2026-0025", client_name: "Ana Silva",
+    product_id: "p1", product_name: "Torneira", product_sku: "TOR-1",
+    from_warehouse_id: "w1", from_warehouse_name: "Porto", to_warehouse_id: "w2", to_warehouse_name: "Lisboa",
+    qty: 3, distance_km: 8,
+  };
+  let rpc: ReturnType<typeof vi.fn>;
+  beforeEach(async () => {
+    perms = new Set(ALL);
+    todayPayload = payload();
+    receivable = [];
+    linhas.porTabela = { stock_movements: movimentos, warehouses: [{ id: "w2", name: "Pombal" }] };
+    rpc = (await import("@/integrations/supabase/client")).supabase.rpc as unknown as ReturnType<typeof vi.fn>;
+    rpc.mockReset();
+  });
+
+  it("com sugestões mostra a secção, agrupada por EC, com «Transferir»", async () => {
+    rpc.mockImplementation((nome: string) =>
+      Promise.resolve(nome === "rpc_ec_transfer_suggestions" ? { data: [sugestao], error: null, status: 200 } : { data: null, error: null }),
+    );
+    renderEmbebido();
+    const sec = await screen.findByRole("region", { name: "Transferências sugeridas" });
+    expect(within(sec).getByRole("listitem", { name: "EC-2026-0025 · Ana Silva" })).toBeInTheDocument();
+    expect(within(sec).getByRole("button", { name: "Transferir 3 de Torneira de Porto para Lisboa" })).toBeInTheDocument();
+  });
+
+  it("sem sugestões a secção não aparece", async () => {
+    rpc.mockResolvedValue({ data: [], error: null, status: 200 });
+    renderEmbebido();
+    await screen.findByText(/Tijoleira/);
+    expect(rpc).toHaveBeenCalledWith("rpc_ec_transfer_suggestions", { p_organization_id: "org-1" });
+    expect(screen.queryByRole("region", { name: "Transferências sugeridas" })).toBeNull();
+  });
+});
