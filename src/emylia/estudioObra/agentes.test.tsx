@@ -124,3 +124,31 @@ describe("a fita dos agentes no Estúdio", () => {
     }
   });
 });
+
+describe("etapa 2: os avisos automáticos", () => {
+  it("o Cliente propõe o rascunho quando o fim do plano mudou e o cliente ainda conta com o antigo; depois de enviar, sai", () => {
+    const { S, d } = obraDeExemplo();
+    const p = d.obra.plano!;
+    const A = acoes(S, () => {}, (fn) => fn());
+    A.role("operacoes");
+    // o plano aprovado (a base) acabava antes: a última tarefa passa 3 dias para a frente
+    p.base = p.tasks.map((t) => ({ dia: t.dia, dur: t.dur, h: t.h, tec: t.tec }));
+    const ult = p.tasks.reduce((a, t, i) => (t.dia + t.dur > p.tasks[a].dia + p.tasks[a].dur ? i : a), 0);
+    p.tasks[ult].dia += 3;
+    d.obra.alteracoes = (d.obra.alteracoes ?? []).filter((a) => !a.cliente);
+    const x = propostasDosAgentes(d, S, ocupacaoDosTecnicos(S, d.id)).find((y) => y.id.startsWith("cliente-fim-"))!;
+    expect(x.agente).toBe("cliente");
+    const enviar = x.acoes[0].a;
+    expect(enviar.k).toBe("avisarCliente");
+    if (enviar.k === "avisarCliente") A.avisarClienteObra(d.id, enviar.texto);
+    expect(propostasDosAgentes(d, S, ocupacaoDosTecnicos(S, d.id)).some((y) => y.id.startsWith("cliente-fim-"))).toBe(false);
+  });
+  it("o registo de um aviso fica em «Desde a última visita», sem desfazer", () => {
+    const { S, d } = obraDeExemplo();
+    const A = acoes(S, () => {}, (fn) => fn());
+    A.role("operacoes");
+    A.agentesObra(d.id, { k: "registo", agente: "equipa", auto: true, texto: "Avisou o Luís das mudanças no plano" });
+    const f = d.obra.agentes!.feitos![0];
+    expect(f).toMatchObject({ agente: "equipa", auto: true, quem: "Olyvia", antes: [] });
+  });
+});

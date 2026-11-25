@@ -20,7 +20,7 @@ import { custoObra } from "../custoObra";
 import { faseDosMateriais } from "../planoObra";
 import { LINHA_DEMOLICAO } from "../entulho";
 import { dataCurta } from "../planoObra";
-import { blocosForaDaObra, obrasDosTecnicos, rotuloDia } from "../preparacaoObra";
+import { blocosForaDaObra, obrasDosTecnicos } from "../preparacaoObra";
 import { materiaisPorFase, progresso } from "../obraOps";
 import { porEncomendarDe } from "../encomendasAjuste";
 import { imprevistosDe, pedidoDeAtraso, textoPedidoAtraso } from "../imprevistos";
@@ -30,7 +30,7 @@ import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
 import { FotoObra } from "../fotosDaObra";
 import { Contagem, MOLA, useReduzir } from "../movimento";
 import { podeNeg, podeVerCustos } from "../permissoes";
-import { derrapagem, diasSemNinguem, estadoVivo, fimFeito, nomeCurtoTarefa, nomeNoPlano, rotuloVivo } from "./planoVivo";
+import { derrapagem, estadoVivo, fimFeito, nomeCurtoTarefa, nomeNoPlano, rotuloVivo } from "./planoVivo";
 import { CaminhoCritico, ICONE_DA_FASE } from "./CaminhoCritico";
 import { AutoRececaoDoc } from "../AutoRececao";
 import { NaFrente } from "../NaFrente";
@@ -261,14 +261,7 @@ export function precisaDeTi(ctx: Ctx, d: Negocio, ir: Ir): Pedido[] {
   if (pend.length) L.push({ k: "mat", t: `${pend.length} ${pend.length === 1 ? "material por encomendar" : "materiais por encomendar"}`, sub: pend.slice(0, 3).map((x) => x.m.n).join(", "), rot: "Encomendar", fn: () => run(() => A.encomendarMateriais(d.id)), nivel: "atencao" });
   const pausadas = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => estadoVivo(t, p) === "pausada");
   for (const { t, ti } of pausadas) L.push({ k: "p" + ti, t: `${nomeNoPlano(p, t)} está pausada`, sub: t.exec?.pausa?.motivo, rot: "Retomar", fn: () => run(() => A.retomarTarefa(d.id, ti)), nivel: "atencao" });
-  // 25/11 (revisão, 1048: a demolição acabou no dia 1 e ninguém volta à obra até 7 dez): um buraco nos próximos dias pede uma decisão
-  const g = diasSemNinguem(p).find((x) => x.ini <= p.dia + 5);
-  if (g && g.seguinte != null) {
-    const n = g.fim - g.ini + 1, seg = p.tasks[g.seguinte], dia = (k: number) => rotuloDia(p, k);
-    L.push({ k: "parada", t: `A obra fica sem ninguém ${n} ${n === 1 ? "dia útil" : "dias úteis"}`, sub: `De ${dia(g.ini)} a ${dia(g.fim)}. A seguir: ${nomeNoPlano(p, seg)}, a ${dia(seg.dia)}`,
-      // 25/11: antecipa de uma vez as tarefas seguintes; se os técnicos não deixarem, abre a seguinte para a gerir à mão
-      rot: "Antecipar", fn: () => { let r = 0; run(() => { r = A.fecharBuraco(d.id, g.ini, g.fim); }); if (!r) ir.tarefa(g.seguinte!); }, nivel: "atencao" });
-  }
+  // 25/11 (agentes, etapa 2): os dias sem ninguém estão na fita dos agentes (o resumo deles entra aqui pelo Estúdio)
   return L.sort((a, b) => (a.nivel === b.nivel ? 0 : a.nivel === "critico" ? -1 : 1));
 }
 

@@ -11,6 +11,7 @@ import { estadoVivo, nomeNoPlano } from "./planoVivo";
 import { custoDaHora } from "./quemPaga";
 import { rotuloDia } from "../preparacaoObra";
 import { ROTULO_ALTERACAO } from "../historicoPlano";
+import { fimDe } from "../ajustesPlano";
 
 export type AgenteId = "plano" | "equipa" | "materiais" | "cliente" | "margem" | "aprendizagem";
 export type Degrau = 0 | 1 | 2 | 3;
@@ -107,6 +108,18 @@ export function propostasDosAgentes(d: Negocio, S: Pick<Estado, "deals"> & Parti
       const jaAvisado = (d.obra.alteracoes ?? []).some((a) => a.avisoCliente === texto);
       if (!jaAvisado) out.push({ id: `cliente-amanha-${amanha}`, agente: "cliente", nivel: "oportunidade", titulo: "Rascunho para o cliente: a equipa vem no próximo dia útil", sub: `«${texto}»`,
         acoes: [{ rot: "Enviar ao portal", a: { k: "avisarCliente", texto } }] });
+    }
+  }
+
+  // 2b) Cliente (etapa 2): o fim da obra mudou e o cliente ainda sabe a data antiga (a do último aviso, ou a do plano aprovado)
+  if (vivo) {
+    const fimAgora = rotuloDia(p, fimDe(p.tasks) - 1);
+    const avisado = (d.obra.alteracoes ?? []).find((a) => a.cliente)?.fimDepois;
+    const sabe = avisado ?? (p.base?.length ? rotuloDia(p, fimDe(p.base) - 1) : null);
+    if (sabe && sabe !== fimAgora) {
+      const texto = `A data prevista para acabar a obra passou para ${fimAgora}.`;
+      out.push({ id: `cliente-fim-${fimAgora}`, agente: "cliente", nivel: "atencao", titulo: `O cliente ainda conta com o fim a ${sabe}`,
+        sub: `O plano acaba agora a ${fimAgora}. Rascunho para o portal: «${texto}»`, acoes: [{ rot: "Enviar ao portal", a: { k: "avisarCliente", texto } }] });
     }
   }
 

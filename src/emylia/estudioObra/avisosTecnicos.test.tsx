@@ -63,3 +63,34 @@ describe("avisar os técnicos afetados", () => {
     expect(x.d.hist[0].t).toMatch(/^Plano: técnicos avisados/);
   });
 });
+
+// 25/11 (agentes, etapa 2): com o Agente da Equipa no degrau 2 (o de origem), o aviso sai sozinho 2 minutos depois da última mudança
+describe("o Agente da Equipa avisa sozinho", () => {
+  it("o cartão diz a que horas sai; passados 2 minutos, os técnicos ficam avisados e a fita regista-o", async () => {
+    const { vi } = await import("vitest");
+    const { act } = await import("@testing-library/react");
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const x = obraDeExemplo(), p = x.d.obra.plano!, A = acoes(x.S, () => {}, (fn) => fn());
+      A.role("operacoes");
+      const mont = p.tasks.findIndex((t) => t.nome === "Montagem de móveis"), rev = p.tasks.findIndex((t) => t.nome === "Revestimento de parede");
+      p.tasks[mont].dia = p.tasks[rev].dia + 1;
+      const ctx = { S: x.S, A, run: (fn: () => void) => fn(), go: (fn: () => void) => () => fn(), q: "" } as unknown as Ctx;
+      const tec = p.tasks[mont].tec!;
+      render(<EstudioObra ctx={ctx} d={x.d} fechar={() => {}} />);
+      fireEvent.click(screen.getAllByRole("button", { name: /^Montagem de móveis:/ })[0]);
+      const sec = screen.getByRole("region", { name: "As ligações da tarefa" });
+      fireEvent.click(within(sec).getByRole("button", { name: /Depende de…/ }));
+      fireEvent.click(within(within(sec).getByRole("group", { name: "Depende de" })).getByTitle(p.tasks[rev].nome));
+      const previa = screen.getByRole("region", { name: "Antes de aplicar" });
+      const aviso = within(previa).queryByRole("checkbox", { name: /Avisar o cliente/ }) as HTMLInputElement | null;
+      if (aviso?.checked) fireEvent.click(aviso);
+      fireEvent.click(within(previa).getByRole("button", { name: /Ligar e aplicar/ }));
+      const card = screen.getByRole("region", { name: "Avisar os técnicos afetados" });
+      expect(within(card).getByText(/O Agente da Equipa avisa sozinho às/)).toBeTruthy();
+      await act(async () => { vi.advanceTimersByTime(121000); });
+      expect((p.avisos ?? []).some((a) => a.tec === tec && a.ti === mont)).toBe(true);
+      expect(x.d.obra.agentes?.feitos?.[0]).toMatchObject({ agente: "equipa", auto: true });
+    } finally { vi.useRealTimers(); }
+  });
+});

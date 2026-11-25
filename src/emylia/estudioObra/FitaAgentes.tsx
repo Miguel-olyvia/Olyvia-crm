@@ -155,7 +155,7 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
                 <motion.li key={f.id} layout={!reduzir} className="flex flex-wrap items-center gap-2 text-sm">
                   <Avatar id={f.agente} tam="h-6 w-6" />
                   <span className="min-w-0 flex-1">{f.texto} <span className="text-xs text-muted-foreground">· {f.auto ? "sozinho" : `aceite por ${f.quem || "si"}`} · {quandoFeito(f.q)}</span></span>
-                  {planeia && <Button type="button" size="sm" variant="ghost" className="min-h-8 rounded-full" onClick={() => desfazer(f)}><Undo2 className="mr-1 h-3.5 w-3.5" aria-hidden="true" />Desfazer</Button>}
+                  {planeia && f.antes.length > 0 && <Button type="button" size="sm" variant="ghost" className="min-h-8 rounded-full" onClick={() => desfazer(f)}><Undo2 className="mr-1 h-3.5 w-3.5" aria-hidden="true" />Desfazer</Button>}
                 </motion.li>
               ))}
             </ul>

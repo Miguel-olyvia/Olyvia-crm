@@ -10,7 +10,8 @@ import { AvatarTec, nomeTec } from "../AcompanhamentoObra";
 import { useReduzir } from "../movimento";
 import { porTecnico, type AvisoPorDar } from "./avisosTecnicos";
 
-export function AvisarTecnicos({ L, avisar, agoraNao }: { L: AvisoPorDar[]; avisar: (escolhidos: AvisoPorDar[]) => void; agoraNao: () => void }) {
+export function AvisarTecnicos({ L, avisar, agoraNao, sozinhoEm }: { L: AvisoPorDar[]; avisar: (escolhidos: AvisoPorDar[]) => void; agoraNao: () => void;
+  /** 25/11 (agentes, etapa 2): com o Agente da Equipa no degrau 2 ou 3, a hora a que o aviso sai sozinho (ou ao sair do Estúdio) */ sozinhoEm?: Date | null }) {
   const reduzir = useReduzir();
   const grupos = porTecnico(L);
   const [fora, setFora] = useState<Set<string>>(new Set());
@@ -47,7 +48,8 @@ export function AvisarTecnicos({ L, avisar, agoraNao }: { L: AvisoPorDar[]; avis
           );
         })}
       </ul>
-      <div className="mt-3 flex flex-wrap justify-end gap-2">
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2">
+        {sozinhoEm && <p className="mr-auto flex items-center gap-1.5 text-sm text-muted-foreground"><span aria-hidden="true" className="h-2 w-2 rounded-full bg-[#3aa7e8]" />O Agente da Equipa avisa sozinho às {String(sozinhoEm.getHours()).padStart(2, "0")}:{String(sozinhoEm.getMinutes()).padStart(2, "0")}, ou ao sair do Estúdio.</p>}
         <Button type="button" variant="ghost" className="min-h-11 rounded-full" onClick={agoraNao}>Não avisar</Button>
         <Button type="button" className="min-h-11 rounded-full" disabled={!escolhidos.length} onClick={() => avisar(escolhidos)}>
           <Send className="mr-1.5 h-4 w-4" aria-hidden="true" />{nEsc === 1 ? `Avisar ${(nomeTec(escolhidos[0].tec) || "o técnico").split(" ")[0]}` : `Avisar os ${nEsc} técnicos`}

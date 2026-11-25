@@ -16,7 +16,7 @@ import { COLUNA_MAX, COLUNA_MIN, useLarguraColuna } from "./larguraColuna";
 import { BarraRolar } from "./BarraRolar";
 import { exportarExcelPlano, exportarPdfPlano } from "./exportarPlano";
 import { FitaAgentes, useRastoAgente } from "./FitaAgentes";
-import { propostasDosAgentes, type Proposta } from "./agentes";
+import { degrauDe, modoDa, propostasDosAgentes, type Proposta } from "./agentes";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, ArrowLeft, Box, FileDown, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, GripVertical, HardHat, Lightbulb, Link2, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Redo2, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -55,7 +55,7 @@ import { tomarPainelObra } from "./painelPedido";
 import { AdendasDaObra } from "./AdendasObra";
 import { AvisarTecnicos } from "./AvisarTecnicos";
 import { DiasDoTecnico } from "./DiasDoTecnico";
-import { avisosPorDar, comTecnicos, marcasDe, segurarAvisos, type MarcaTarefa } from "./avisosTecnicos";
+import { avisosPorDar, comTecnicos, marcasDe, segurarAvisos, type AvisoPorDar, type MarcaTarefa } from "./avisosTecnicos";
 import { definirQuemAssina } from "./quemAssina";
 import { useNomeParaMarcaDagua } from "@/hooks/useNomeParaMarcaDagua";
 import { modoReal } from "../acessosPortal";
@@ -274,6 +274,35 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
     return () => window.removeEventListener("keydown", tecla);
   }, [painel, previa, outra, fechar]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // 25/11 (agentes, etapa 2): com o Agente da Equipa no degrau 2, o aviso aos técnicos sai sozinho 2 minutos depois da última mudança (o
+  // gestor ainda pode avisar já ou dizer «Não avisar»), ou ao sair do Estúdio; no degrau 3, uns segundos depois (para juntar mudanças seguidas)
+  const pAv = d.obra.plano, planeiaAv = podeNeg(S.role, "obra.planear");
+  const degrauEquipa = degrauDe(d.obra.agentes, "equipa");
+  const porAvisarAv = pAv && comTecnicos(pAv) && baseAv.current ? avisosPorDar(pAv, baseAv.current, quandoP).filter((x) => tocadas.current.has(x.ti)) : [];
+  const chaveAvisos = porAvisarAv.map((x) => `${x.tec}|${x.ti}|${x.t}`).join("¦");
+  const [sozinhoEm, setSozinhoEm] = useState<Date | null>(null);
+  const avisarAgora = (L: AvisoPorDar[], auto: boolean) => {
+    if (!L.length) return;
+    run(() => {
+      const n = A.avisarTecnicos(d.id, L);
+      if (n) A.agentesObra(d.id, { k: "registo", agente: "equipa", auto, texto: `Avisou ${[...new Set(L.map((x) => (TECS.find((y) => y.id === x.tec)?.n ?? x.tec).split(" ")[0]))].join(", ")} das mudanças no plano` });
+    });
+    const pa = d.obra.plano;
+    if (pa && baseAv.current) for (const x of L) baseAv.current[x.ti] = { dia: pa.tasks[x.ti].dia, dur: pa.tasks[x.ti].dur, tec: pa.tasks[x.ti].tec ?? null };
+    setSozinhoEm(null);
+    setVerPassos((v) => v + 1);
+  };
+  const pendentes = useRef<{ L: AvisoPorDar[]; enviar: (L: AvisoPorDar[], auto: boolean) => void }>({ L: [], enviar: avisarAgora });
+  pendentes.current = { L: planeiaAv && degrauEquipa >= 2 ? porAvisarAv : [], enviar: avisarAgora };
+  useEffect(() => {
+    if (!chaveAvisos || !planeiaAv || degrauEquipa < 2) { setSozinhoEm(null); return; }
+    const ms = degrauEquipa === 3 ? 5000 : 120000;
+    setSozinhoEm(new Date(Date.now() + ms));
+    const t = window.setTimeout(() => pendentes.current.enviar(pendentes.current.L, true), ms);
+    return () => window.clearTimeout(t);
+  }, [chaveAvisos, degrauEquipa, planeiaAv]);
+  // ao sair do Estúdio, o que estava para sair sozinho sai já
+  useEffect(() => () => { try { const x = pendentes.current; if (x.L.length) x.enviar(x.L, true); } catch { /* o ecrã já fechou */ } }, []);
   if (!p) return null;
   // as outras obras (para os técnicos noutra obra): lê-se a cada desenho, porque o estado muda no sítio
   const ocup = ocupacaoDosTecnicos(S, d.id);
@@ -391,6 +420,12 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
     previsao: () => { setAba("plano"); rolar(previsaoRef); }, comando: () => rolar(comandoRef),
   };
   const pedidos = precisaDeTi(ctx, d, ir);
+  // 25/11 (agentes, etapa 2): o que os agentes pedem entra no «Precisa de ti» numa linha só, que leva à fita
+  {
+    const pedem = planeia ? propostas.filter((x) => modoDa(x, d.obra.agentes) === "pede") : [];
+    if (pedem.length) pedidos.push({ k: "agentes", t: `Os agentes pedem ${pedem.length} ${pedem.length === 1 ? "decisão" : "decisões"}`, sub: pedem.slice(0, 2).map((x) => x.titulo).join(" · "),
+      rot: "Ver", fn: () => document.querySelector('[aria-label="Os agentes da obra"]')?.scrollIntoView({ behavior: reduzir ? "auto" : "smooth", block: "start" }), nivel: pedem.some((x) => x.nivel === "critico") ? "critico" : "atencao" });
+  }
   // o botão principal: um só, pelo momento da obra
   // 20/11 (Rúben): no 50-25-25, a parcela do arranque está no Financeiro desde o contrato assinado; a obra arranca com ela paga
   const parcelaArranque = p.estado === "aprovado" ? parcelaDoArranquePorPagar(S, d) : null;
@@ -468,7 +503,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
               {/* ------------------------------------------------------------ 23/11: avisar os técnicos a quem a obra mudou (só com o toque do gestor) */}
               {planeia && !previa && porAvisar.length > 0 && (
                 <AvisarTecnicos key={porAvisar.map((x) => x.tec + x.t).join("|")} L={porAvisar}
-                  avisar={(L) => { run(() => A.avisarTecnicos(d.id, L)); const pa = d.obra.plano; if (pa && baseAv.current) for (const x of L) baseAv.current[x.ti] = { dia: pa.tasks[x.ti].dia, dur: pa.tasks[x.ti].dur, tec: pa.tasks[x.ti].tec ?? null }; setVerPassos((v) => v + 1); }}
+                  sozinhoEm={sozinhoEm} avisar={(L) => avisarAgora(L, false)}
                   agoraNao={() => { if (d.obra.plano) baseAv.current = marcasDe(d.obra.plano); tocadas.current.clear(); setVerPassos((v) => v + 1); }} />
               )}
 

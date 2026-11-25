@@ -10,7 +10,8 @@ import { cn } from "@/lib/utils";
 import { TECS, aberto, conflitos, type Negocio } from "./motor";
 import { COR_FASE } from "./planoObra";
 import { FASES_OBRA } from "./fasesObra";
-import { faltaParaArrancar, rotuloDia } from "./preparacaoObra";
+import { faltaParaArrancar, ocupacaoDosTecnicos, rotuloDia } from "./preparacaoObra";
+import { modoDa, propostasDosAgentes } from "./estudioObra/agentes";
 import { fimDe } from "./ajustesPlano";
 import { equipaDaObra, estadoDe, iniciais, porValidar, progresso } from "./obraOps";
 import type { Ctx } from "./pecas";
@@ -74,7 +75,14 @@ export function ListaObras(ctx: Ctx) {
                 : p.estado === "aprovado" ? (Fa.length ? [`Para arrancar falta ${Fa.join(", ")}`, false] : [`Arrancar a obra · ${rotuloDia(p, 0)}`, true])
                 : p.estado === "em curso" ? [pv ? `Validar ${pv === 1 ? "1 tarefa" : `${pv} tarefas`}` : `Dia ${p.dia + 1} de ${fim} · acaba a ${rotuloDia(p, fim - 1)}`, !!pv]
                 : [o.obra.auto?.estado === "assinado" ? "Recebida pelo cliente" : o.obra.auto ? "Auto de receção por assinar" : `Acabou a ${rotuloDia(p, fim - 1)}`, false];
+              // 25/11 (agentes, etapa 2): o que os agentes desta obra pedem, sem abrir o Estúdio
+              let pedem = 0, comPrazo = 0;
+              try {
+                for (const x of propostasDosAgentes(o, S, ocupacaoDosTecnicos(S, o.id), r)) { const m = modoDa(x, o.obra.agentes); if (m === "pede") pedem++; else if (m === "prazo") comPrazo++; }
+              } catch { /* sem agentes nesta obra */ }
               const alertas: [ReactNode, string][] = [
+                ...(pedem ? [[<span key="ag" aria-hidden="true" className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-50 motion-reduce:hidden" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary" /></span>, `os agentes pedem ${pedem} ${pedem === 1 ? "decisão" : "decisões"}`] as [ReactNode, string]] : []),
+                ...(comPrazo ? [[<span key="ap" aria-hidden="true" className="inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" />, `${comPrazo} ${comPrazo === 1 ? "aplica-se sozinha" : "aplicam-se sozinhas"} se ninguém recusar`] as [ReactNode, string]] : []),
                 ...(nc ? [[<AlertTriangle key="c" className="h-4 w-4 text-warning" aria-hidden="true" />, `${nc} conflito de férias`] as [ReactNode, string]] : []),
                 ...(faltaMat && p.estado !== "concluída" ? [[<Truck key="m" className="h-4 w-4 text-warning" aria-hidden="true" />, prev ? `material previsto a ${prev.slice(8, 10)}/${prev.slice(5, 7)}` : "material por chegar"] as [ReactNode, string]] : []),
                 ...(corr ? [[<FileWarning key="r" className="h-4 w-4 text-destructive" aria-hidden="true" />, `${corr} a corrigir`] as [ReactNode, string]] : []),

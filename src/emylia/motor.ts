@@ -4719,7 +4719,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
      *  conta daí); «aplicar» faz a proposta (sozinha ou aceite pelo gestor) e guarda as tarefas como estavam, para «desfazer» mesmo depois de
      *  recarregar a página. */
     agentesObra(id: number, op: { k: "degrau"; agente: AgenteId; n: Degrau; texto: string } | { k: "vistos"; ids: string[] } | { k: "recusar"; pid: string; texto: string }
-      | { k: "aplicar"; pid: string; agente: AgenteId; nomeAgente: string; texto: string; acao: AcaoAuto; auto: boolean } | { k: "desfazer"; fid: string }): boolean {
+      | { k: "aplicar"; pid: string; agente: AgenteId; nomeAgente: string; texto: string; acao: AcaoAuto; auto: boolean } | { k: "desfazer"; fid: string }
+      | { k: "registo"; agente: AgenteId; texto: string; auto: boolean }): boolean {
       const d = deal(id), p = d.obra.plano;
       if (!p) return false;
       const e = (d.obra.agentes ??= {}), agoraIso = new Date().toISOString();
@@ -4733,6 +4734,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!exigePerm("obra.planear")) return false;
       const quem = lerQuemAssina() || PAPEIS[S.role]?.nome || "";
       if (op.k === "degrau") { (e.degraus ??= {})[op.agente] = op.n; log(d, `Agentes: ${op.texto}`); return true; }
+      // 25/11 (etapa 2): o que um agente fez sem mexer no plano (os avisos): fica em «Desde a última visita», sem desfazer
+      if (op.k === "registo") {
+        const L = (e.feitos ??= []);
+        L.unshift({ id: `f${Date.now().toString(36)}${L.length}`, q: agoraIso, agente: op.agente, texto: op.texto, auto: op.auto, quem: op.auto ? "Olyvia" : quem, antes: [] });
+        if (L.length > 200) L.length = 200;
+        return true;
+      }
       if (op.k === "recusar") { (e.recusadas ??= {})[op.pid] = agoraIso; log(d, `Agentes: recusada · ${op.texto}`); return true; }
       if (op.k === "desfazer") {
         const f = (e.feitos ?? []).find((x) => x.id === op.fid);
