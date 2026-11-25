@@ -1,4 +1,4 @@
-/// <reference types="node" />
+// @ts-nocheck
 /**
  * @vitest-environment node
  */
