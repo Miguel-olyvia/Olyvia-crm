@@ -249,3 +249,41 @@ describe("«Ligar»/«Desligar» mantêm o botão e o foco, e anunciam o resulta
     expect(aoMudar).toHaveBeenLastCalledWith([L(A_PUXADOR, "tudo")]);
   });
 });
+
+describe("só os atributos do produto, e as ligações a atributos que o produto já não tem", () => {
+  const A_PUXADOR = "aaaaaaaa-0000-4000-a000-000000000004";
+  const FORA = { id: A_PUXADOR, nome: "Puxador", fora: true };
+  it("sem nenhum atributo do produto que pinte (lista vazia), o painel di-lo em texto simples e não mostra a lista nem «Ligar»", () => {
+    montar({ omissoes: [], atributos: [] });
+    expect(screen.getByText(/este produto não tem nenhum atributo que pinte o 3D/i)).toBeTruthy();
+    expect(screen.queryByRole("heading", { name: "Atributos que o 3D lê" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Acrescentar ligação" })).toBeNull();
+  });
+  it("com atributos do produto, essa frase não aparece", () => {
+    montar({ omissoes: [{ id: A_FRENTE, nome: "Cor da frente", aplicado: true, onde: "pinta a frente" }] });
+    expect(screen.queryByText(/este produto não tem nenhum atributo que pinte o 3D/i)).toBeNull();
+  });
+  it("uma ligação gravada a um atributo que o produto já não tem continua a aparecer, marcada, e pode-se remover", () => {
+    const { aoMudar } = montar({ valor: [L(A_PUXADOR, "tampo"), L(A_FRENTE, "frente")], atributos: [{ id: A_FRENTE, nome: "Cor da frente" }, FORA], omissoes: [] });
+    const linha = screen.getByRole("group", { name: "Ligação 1" });
+    expect(within(linha).getByText(/o produto já não tem este atributo: remova a ligação/i)).toBeTruthy();
+    expect(within(linha).getByRole("option", { name: /Puxador.*o produto já não tem este atributo/i })).toBeTruthy();
+    expect(within(screen.getByRole("group", { name: "Ligação 2" })).queryByText(/já não tem este atributo/i)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remover a ligação 1" }));
+    expect(aoMudar).toHaveBeenLastCalledWith([L(A_FRENTE, "frente")]);
+  });
+  it("o atributo que o produto já não tem não se oferece nas outras linhas nem em «Acrescentar ligação»", () => {
+    const { aoMudar } = montar({
+      valor: [L(A_FRENTE, "tudo"), L(A_FRENTE, "frente"), L(A_FRENTE, "tampo"), L(A_PUXADOR, "tampo")], atributos: [{ id: A_FRENTE, nome: "Cor da frente" }, FORA], zonas: ["frente", "tampo"], omissoes: [],
+    });
+    const primeira = screen.getAllByLabelText("Atributo")[0] as HTMLSelectElement;
+    expect(within(primeira).queryByRole("option", { name: /Puxador/ })).toBeNull();
+    // a «Cor da frente» já está em todas as zonas: só o Puxador (que o produto já não tem) estaria livre, e esse não se oferece
+    fireEvent.click(screen.getByRole("button", { name: "Acrescentar ligação" }));
+    expect(aoMudar).not.toHaveBeenCalled();
+  });
+  it("só leitura: a ligação a um atributo que o produto já não tem lê-se marcada", () => {
+    montar({ valor: [L(A_PUXADOR, "tampo")], atributos: [FORA], podeEditar: false, omissoes: [] });
+    expect(screen.getByText(/Puxador → Tampo.*o produto já não tem este atributo/i)).toBeTruthy();
+  });
+});

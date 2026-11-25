@@ -13,7 +13,7 @@ import { corDosAtributos, fotoDosAtributos, medidaDosAtributos } from "./planta3
 import { LADO_TEXTURA_CM } from "./planta3d/texturaProduto";
 import { ZONAS, aparenciaUnicaDasZonas, zonasDosAtributos, zonasVisuais } from "./planta3d/zonasGlb";
 import { chaveDeExclusao } from "./planta3d/aspetoZonas";
-import { leiturasPorOmissao } from "./planta3d/acabamentoCor3d";
+import { leiturasDoProduto } from "./planta3d/acabamentoCor3d";
 import type { NoCat } from "./planta3d/catalogo3d";
 import { resolverDoNo, textoDaOrigem } from "./planta3d/modelos3dEscolha";
 import { aplicacaoDosAtributos, medidaDoRevestimento } from "./planta3d/revestimentoPrevia";
@@ -66,15 +66,19 @@ function Aberto({ nome, sub, no, arvore, attrs, defs, modelo3d, alvoConfig3d }: 
   // 24/11 (fase 1): a aparência de cada zona pelo nome do atributo («Cor da frente» → frente, «Cor do corpo» → corpo, «Cor» → o resto); sem estes atributos, nada muda
   // 25/11: as ligações explícitas (guardadas, ou o rascunho) mandam sobre os nomes; sem configuração, `ligadas` está vazio e o resultado é o de sempre
   const zonas = useMemo(() => (zonasAtributos ? zonasVisuais(zonasAtributos, urlDaFotoOpcao) : undefined), [zonasAtributos]);
-  // 25/11: TODOS os atributos com hex, foto ou aspeto, e o que o 3D faz com cada um por omissão (os nomes conhecidos aplicam-se; os outros, Puxador…, ficam desligados até se ligarem)
-  const omissoes = useMemo(() => leiturasPorOmissao(defs), [defs]);
-  // os atributos que o editor oferece: os que o 3D lê e, para não os mostrar como «desconhecido», os que já têm uma ligação gravada (ou no rascunho) mesmo sem cor, foto nem aspeto
+  // 25/11: SÓ os atributos que o produto tem (com valor escolhido) e que o 3D lê (hex, foto ou aspeto), e o que o 3D faz com cada um por omissão (os nomes conhecidos aplicam-se; os outros,
+  // Puxador…, ficam desligados até se ligarem). Os atributos do sistema que o produto não tem não aparecem. O estado por omissão conta com todos os do sistema (leiturasDoProduto).
+  const omissoes = useMemo(() => leiturasDoProduto(defs, attrsEspera), [defs, attrsEspera]);
+  // os atributos que o editor oferece: os do produto e, para os poderem ver e remover, os que já têm uma ligação gravada (ou no rascunho) mas que o produto já não tem (`fora`)
   const atributos = useMemo(() => {
     const lidos = omissoes.map((o) => ({ id: o.id, nome: o.nome }));
-    const ligados = new Set(ligacoesEmVigor.map((l) => l.atributo));
-    const extra = (defs ?? []).filter((d) => ligados.has(d.id) && !lidos.some((x) => x.id === d.id)).map((d) => ({ id: d.id, nome: d.nome }));
-    return [...lidos, ...extra];
-  }, [omissoes, defs, ligacoesEmVigor]);
+    const ligados = [...new Set(ligacoesEmVigor.map((l) => l.atributo))];
+    // um atributo ligado que o produto tem mas que o 3D não lê (sem cor, foto nem aspeto) mostra-se normal; o que o produto já não tem, marcado
+    const outros = ligados.filter((id) => !lidos.some((x) => x.id === id)).map((id) => ({
+      id, nome: (defs ?? []).find((d) => d.id === id)?.nome ?? "Atributo desconhecido", ...((attrsEspera ?? []).some((a) => a.atributoId === id && a.opcaoId) ? {} : { fora: true }),
+    }));
+    return [...lidos, ...outros];
+  }, [omissoes, defs, ligacoesEmVigor, attrsEspera]);
   const config3d = useMemo<Config3dPrevia | undefined>(() => {
     const c = cfg.config;
     if (!c || !alvoConfig3d) return undefined;
@@ -82,6 +86,7 @@ function Aberto({ nome, sub, no, arvore, attrs, defs, modelo3d, alvoConfig3d }: 
     return {
       podeEditar: alvoConfig3d.podeEditar,
       eixos: { guardados: e.eixos, origem: e.eixosOrigem, proprio: !!c.proprio?.eixos, gravar: cfg.gravarEixos },
+      atributosDoProduto: omissoes,
       ligacoes: {
         valor: ligacoesEmVigor, alterado: rascunho !== null && !mesmasLigacoes(rascunho, guardadas ?? SEM_LIGACOES), origem: e.ligacoesOrigem, proprio: c.proprio?.ligacoes != null,
         atributos, omissoes,

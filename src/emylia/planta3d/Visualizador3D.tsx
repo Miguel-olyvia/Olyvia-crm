@@ -23,6 +23,7 @@ import { aplicarTextura, pedirTextura, retirarTextura, type TexturaModelo } from
 import { corDaJunta, type AmostraNoMundo, type PlanoRevestimento } from "./revestimentoPrevia";
 import { cotasDaPeca, noEcra } from "./cotasPeca";
 import type { ZonaGlb, ZonasDoProduto } from "./zonasGlb";
+import { foiClique, zonaDaPrimeiraIntersecao, type ObjetoDoCanvas } from "./zonaDoClique";
 import { aplicarAparenciaDasZonas, aplicarRealceDasZonas, criarMateriaisDeZona } from "./zonasMateriais";
 import { useTexturasPorUrl } from "./useTexturasPorUrl";
 import { criarAmbienteMetal, type AmbienteMetal } from "./ambienteMetal";
@@ -58,7 +59,16 @@ export interface Visualizador3DProps {
   cotas?: boolean;
   /** 24/11 (fase 1): a zona do objecto a realçar (brilho), a que o utilizador aponta no painel «Zonas». Sem isto, nada se realça. */
   zonaRealcada?: ZonaGlb | null;
+  /**
+   * 25/11 (escolher a zona no 3D, só a pré-visualização do produto): clicar numa parte da peça chama `aoClicarZona` com a zona dela (só conta se o ponteiro quase não se moveu: arrastar roda a câmara),
+   * e clicar no fundo chama-o com null; `aoPassarZona` diz a zona debaixo do rato (null ao sair). Só valem as `zonasEscolheveis`. Sem `aoClicarZona` nem `aoPassarZona`, nada muda.
+   */
+  aoClicarZona?: (z: ZonaGlb | null) => void;
+  aoPassarZona?: (z: ZonaGlb | null) => void;
+  zonasEscolheveis?: ReadonlySet<ZonaGlb>;
 }
+/** Os ganchos de escolher a zona no 3D, entregues à peça. */
+interface EscolhaDeZona { clicar?: (z: ZonaGlb | null) => void; passar?: (z: ZonaGlb | null) => void; validas?: ReadonlySet<ZonaGlb> }
 /** A amostra de um revestimento: onde fica e as peças (revestimentoPrevia.ts), a cor lisa das peças e, se houver, a foto da cor (mapeada no mundo, como nas peças). */
 export interface RevestimentoVisual { amostra: AmostraNoMundo; cor: string; textura?: TexturaModelo }
 /** O que se pode pedir à câmara de fora do canvas (botões e teclas): aproximar e afastar respeitam as distâncias mínima e máxima da câmara; repor volta à vista de partida. */
@@ -902,8 +912,8 @@ function tornarFantasma(m: THREE.Mesh): void {
   m.userData.fantasma = true;
 }
 
-interface PropsPeca { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; fantasma?: boolean; onSel: (id: string) => void; mover?: Mover3D; arrasto: Arrasto | null; setArrasto: (a: Arrasto | null) => void; alvo: { current: AlvoArrasto }; cotas?: boolean; realce?: ZonaGlb | null }
-function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel, mover, arrasto, setArrasto, alvo, cotas = false, realce = null }: PropsPeca) {
+interface PropsPeca { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; fantasma?: boolean; onSel: (id: string) => void; mover?: Mover3D; arrasto: Arrasto | null; setArrasto: (a: Arrasto | null) => void; alvo: { current: AlvoArrasto }; cotas?: boolean; realce?: ZonaGlb | null; escolha?: EscolhaDeZona }
+function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel, mover, arrasto, setArrasto, alvo, cotas = false, realce = null, escolha }: PropsPeca) {
   const grupoRef = useRef<THREE.Group>(null);
   useEffect(() => {
     if (!selecionada || !mover) return;
@@ -916,6 +926,18 @@ function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel,
   const p = lugar ? { ...original, x: lugar.x, y: lugar.y, rotacao: lugar.rot, altura: lugar.altura } : original;
   const controls = useThree((s) => s.controls) as { enabled: boolean } | null;
   const invalidate = useThree((s) => s.invalidate);
+  const domElement = useThree((s) => s.gl.domElement);
+  // 25/11: escolher a zona no 3D. O clique só conta se o ponteiro quase não se moveu (`delta`, em píxeis, entre premir e largar): arrastar é rodar a câmara. A zona é a da primeira malha visível debaixo do ponteiro.
+  const zonaSob = useRef<ZonaGlb | null>(null);
+  const zonaDe = (e: ThreeEvent<PointerEvent | MouseEvent>): ZonaGlb | null => zonaDaPrimeiraIntersecao(e.intersections as unknown as ReadonlyArray<{ object: ObjetoDoCanvas }>, escolha?.validas);
+  const eventosDeZona = escolha?.clicar || escolha?.passar ? {
+    onPointerMove: (e: ThreeEvent<PointerEvent>) => {
+      const z = zonaDe(e);
+      if (z === zonaSob.current) return;
+      zonaSob.current = z; domElement.style.cursor = z ? "pointer" : ""; escolha?.passar?.(z);
+    },
+    onPointerOut: () => { if (zonaSob.current === null) return; zonaSob.current = null; domElement.style.cursor = ""; escolha?.passar?.(null); },
+  } : {};
   const largar = (confirmar: boolean) => {
     if (!arrasto) return;
     if (controls) controls.enabled = true;
@@ -966,7 +988,7 @@ function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel,
   const avisar = useCallback((chave: string, fonte: string) => setFontes((f) => (f[chave] === fonte ? f : { ...f, [chave]: fonte })), []);
   const fonte = [...new Set(Object.values(fontes))].join(" + ");
   return (
-    <group ref={grupoRef} position={[p.x, base, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]} onClick={(e) => { e.stopPropagation(); onSel(p.id); }} {...eventos}>
+    <group ref={grupoRef} position={[p.x, base, p.y]} rotation={[0, (p.rotacao * Math.PI) / 180, 0]} onClick={(e) => { e.stopPropagation(); if (escolha?.clicar && foiClique(e.delta)) { const z = zonaDe(e); if (z) escolha.clicar(z); } onSel(p.id); }} {...eventosDeZona} {...eventos}>
       <group ref={corpo} scale={[p.espelhada ? -1 : 1, 1, 1]}>
         <TexturaCtx.Provider value={texturaDaPeca}>
           <ZonasCtx.Provider value={zonasDaPeca}>
@@ -1247,9 +1269,10 @@ function ComandosDaVista({ comandos }: { comandos: MutableRefObject<ComandosVist
   return null;
 }
 
-export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover, porFazer, rolarPagina = false, zoomRoda = false, comandos, revestimento, cotas = false, zonaRealcada = null }: Visualizador3DProps) {
+export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas, descricao, selecionada, onSelecionar, camara, mover, porFazer, rolarPagina = false, zoomRoda = false, comandos, revestimento, cotas = false, zonaRealcada = null, aoClicarZona, aoPassarZona, zonasEscolheveis }: Visualizador3DProps) {
   const [arrasto, setArrasto] = useState<Arrasto | null>(null);
   const alvo = useRef<AlvoArrasto>({ grupo: null, camera: null, controls: null });
+  const escolhaDeZona = useMemo<EscolhaDeZona | undefined>(() => (aoClicarZona || aoPassarZona ? { clicar: aoClicarZona, passar: aoPassarZona, validas: zonasEscolheveis } : undefined), [aoClicarZona, aoPassarZona, zonasEscolheveis]);
   // com `rolarPagina`, a roda do rato só chega ao OrbitControls quando `zoomRoda`: senão a página rola (o OrbitControls ouve o canvas e dá-lhe preventDefault, por isso
   // corta-se antes, na captura, e o navegador faz o que faria sem o 3D)
   const raiz = useRef<HTMLDivElement>(null), rodaLigada = useRef(zoomRoda);
@@ -1265,7 +1288,7 @@ export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas
     <div ref={raiz} role="img" aria-label={descricao} className={rolarPagina ? "h-full w-full touch-pan-y" : "h-full w-full touch-none"} onPointerDownCapture={(e) => { if (mover) travarCamaraSeNaPeca(e, alvo.current); }}
       onPointerUpCapture={() => { if (!arrasto && alvo.current.controls) alvo.current.controls.enabled = true; }}>
       {/* como o HTML: ACES com exposição 1,08, sombras suaves (PCF), ambiente de estúdio e fundo claro neutro */}
-      <Canvas frameloop="demand" dpr={[1, 1.5]} shadows="soft" gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.08, preserveDrawingBuffer: true }} onPointerMissed={() => onSelecionar(null)}>
+      <Canvas frameloop="demand" dpr={[1, 1.5]} shadows="soft" gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.08, preserveDrawingBuffer: true }} onPointerMissed={() => { onSelecionar(null); aoClicarZona?.(null); }}>
         <color attach="background" args={["#ecebe7"]} />
         <EstudioAmbiente />
         <LuzEstudio espaco={espaco} />
@@ -1277,7 +1300,7 @@ export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas
         <SombraDeContacto espaco={espaco} />
         {revestimento && <AmostraRevestimento r={revestimento} />}
         <AmbienteMetalDosMetais>
-          {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={porFazer?.has(p.id) ? `${p.id}:por-fazer` : p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} fantasma={!!porFazer?.has(p.id)} onSel={onSelecionar} mover={mover} arrasto={arrasto} setArrasto={setArrasto} alvo={alvo} cotas={cotas} realce={zonaRealcada} /> : null; })}
+          {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={porFazer?.has(p.id) ? `${p.id}:por-fazer` : p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} fantasma={!!porFazer?.has(p.id)} onSel={onSelecionar} mover={mover} arrasto={arrasto} setArrasto={setArrasto} alvo={alvo} cotas={cotas} realce={zonaRealcada} escolha={escolhaDeZona} /> : null; })}
         </AmbienteMetalDosMetais>
         {arrasto?.lugar && <GuiaParede espaco={espaco} x={arrasto.lugar.x} y={arrasto.lugar.y} altura={arrasto.parede ? arrasto.lugar.altura : null} />}
         <PonteCamara alvo={alvo} />
