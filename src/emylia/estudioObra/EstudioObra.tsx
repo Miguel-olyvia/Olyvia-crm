@@ -15,6 +15,8 @@ import { EnderecoAtivo, escreverParamUrl, usePainelUrl, useParamUrl } from "../u
 import { COLUNA_MAX, COLUNA_MIN, useLarguraColuna } from "./larguraColuna";
 import { BarraRolar } from "./BarraRolar";
 import { exportarExcelPlano, exportarPdfPlano } from "./exportarPlano";
+import { FitaAgentes, useRastoAgente } from "./FitaAgentes";
+import { propostasDosAgentes, type Proposta } from "./agentes";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, ArrowLeft, Box, FileDown, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, GripVertical, HardHat, Lightbulb, Link2, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Redo2, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -280,6 +282,9 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
     : fantasma && painel?.k === "imprevisto" ? replanoDe(p, fantasma) : null;
   const fora: ConflitoFora[] = R ? conflitosNovos(S, d, R.plano) : [];
   const alertas = alertasDaObra(d, S, ocup, inv);
+  // 25/11 (plano «Obra Viva», etapa 1): o que os seis agentes veem nesta obra
+  let propostas: Proposta[] = [];
+  try { propostas = propostasDosAgentes(d, S, ocup, inv); } catch (e) { console.warn("agentes", e); }
   const vivo = p.estado === "em curso", acabou = p.estado === "concluída";
   const planeia = podeNeg(S.role, "obra.planear");
   const fim = Math.max(1, fimDe(p.tasks)), der = derrapagem(p);
@@ -368,6 +373,8 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
       case "replanear": setPainel(null); setPrevia({ titulo: "Replanear a obra", k: "replanear", adiantar: true }); break;
       case "adiantar": setPainel(null); setPrevia({ titulo: "Adiantar com a folga", k: "replanear", adiantar: true }); break;
       // 25/11: antecipar de uma vez o que vem depois de um buraco; se não der (técnicos noutra obra), abre a tarefa seguinte
+      // 25/11 (agentes): o rascunho do Agente do Cliente só sai quando o gestor carrega
+      case "avisarCliente": fazer(() => A.avisarClienteObra(d.id, a.texto)); break;
       case "fecharBuraco": { let r = 0; fazer(() => { r = A.fecharBuraco(d.id, a.ini, a.fim); }); if (!r && a.ti != null) setPainel({ k: "tarefa", ti: a.ti }); break; }
       case "conversa": setAba("cliente"); break;
       case "aceitarFim": fazer(() => A.aceitarFimObra(d.id, a.dias)); break;
@@ -451,6 +458,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
               {(vivo || acabou) && <AdendasDaObra ctx={ctx} d={d} />}
               {viva.prev && <Pulso d={d} S={S} dias={dias} prev={viva.prev} margem={viva.margem} precisa={pedidos.length} ir={ir} />}
               {(vivo || p.estado === "aprovado") && <ComandoHoje ctx={ctx} d={d} dias={dias} pedidos={pedidos} ir={ir} comandoRef={comandoRef} />}
+              {(vivo || p.estado === "aprovado") && <FitaAgentes ctx={ctx} d={d} propostas={propostas} agir={agir} />}
 
               {/* ------------------------------------------------------------ «E se…?»: a pré-visualização, antes de aplicar */}
               <AnimatePresence>
@@ -724,6 +732,8 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   exportar?: { pdf: () => Promise<unknown>; excel: () => Promise<unknown> };
 }) {
   const vivo = p.estado === "em curso";
+  // 25/11 (agentes): de onde as tarefas saíram na última mudança de um agente (o rasto fica uns segundos)
+  const rastoAgente = useRastoAgente();
   // 25/11: arrastar uma linha da lista (pelo pegador, com o rato ou o dedo) ou mexê-la com as setas do teclado
   const [ord, setOrd] = useState<{ ti: number; fase: number; y0: number; dy: number } | null>(null);
   const ordRef = useRef<typeof ord>(null);
@@ -875,6 +885,10 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
         {!R && atraso > 0 && (
           <div aria-hidden="true" className="absolute flex items-center justify-end rounded-r-lg bg-[repeating-linear-gradient(135deg,hsl(var(--destructive)/0.35)_0_5px,hsl(var(--destructive)/0.15)_5px_10px)] pr-1 text-[11px] font-bold text-destructive"
             style={{ left: (t.dia + t.dur) * COL - 2, width: atraso * COL, top, height: ALTO }}>+{atraso}</div>
+        )}
+        {!R && rastoAgente?.has(ti) && rastoAgente.get(ti) !== n.dia && (
+          <motion.div aria-hidden="true" initial={{ opacity: 0.9 }} animate={{ opacity: 0 }} transition={{ duration: 6 }}
+            className="pointer-events-none absolute z-[1] rounded-lg border-2 border-dashed border-primary/60 bg-primary/5" style={{ left: rastoAgente.get(ti)! * COL + 2, width: Math.max(8, n.dur * COL - 4), top, height: ALTO }} />
         )}
         {!cabe && <span aria-hidden="true" className="pointer-events-none absolute z-[2] whitespace-nowrap text-xs font-medium text-foreground/80" style={{ left: fimVisto * COL + (ligar && !R ? 22 : 6), top: top + ALTO / 2 - 8 }}>{nomeNoPlano(p, t)}</span>}
         <Barra semTexto={!cabe} t={t} n={n} v={v} p={p} sel={sel === ti || aLigar?.alvo === ti} mudou={mudou(ti)} abrir={() => { if (Date.now() - largouEm.current > 350) abrir(ti); }} reduzir={reduzir} top={top} critica={critico.has(ti)} col={COL} alto={ALTO} largo={vista === "tecnicos"}

@@ -116,5 +116,6 @@ const ACOES: Record<string, string> = {
   dividirTarefa: "Dividiu uma tarefa", corrigirHoras: "Corrigiu as horas", ajustarHorasPelasMicro: "Ajustou as horas pelas microtarefas",
   arrancar: "Arrancou a obra", reporPlano: "Repôs o plano", reporPlanoObra: "Repôs o plano", reporTarefasPlano: "Repôs as tarefas",
   mudarAdendaDaObra: "Mudou a adenda", resolverConflitos: "Resolveu conflitos",
+  agentesObra: "Um agente da Olyvia mudou o plano", fecharBuraco: "Antecipou as tarefas depois de dias sem ninguém",
 };
 export const rotuloAcao = (acao: string) => ACOES[acao] ?? `Mudou o plano (${acao})`;

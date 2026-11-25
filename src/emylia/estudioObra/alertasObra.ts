@@ -20,6 +20,7 @@ export type AcaoAlerta =
   | { k: "replanear" }
   | { k: "adiantar" }
   | { k: "fecharBuraco"; ini: number; fim: number; ti: number | null }
+  | { k: "avisarCliente"; texto: string }
   | { k: "conversa" }
   | { k: "aceitarFim"; dias: number }
   | { k: "materiais" };

@@ -11,6 +11,7 @@ import { comLigacao, comRestricao, conflitosNovos, estadoVivo as estadoVivoTaref
 import { porNaTarefa, type RetratoPlano } from "./estudioObra/passosObra";
 import { lerQuemAssina } from "./estudioObra/quemAssina";
 import { fotoPlano, guardarAlteracao, mudancasEntre, type Alteracao as AlteracaoPlano, type FotoPlano } from "./historicoPlano";
+import type { AcaoAuto, AgenteId, Degrau, EstadoAgentes } from "./estudioObra/agentes";
 import { MOTIVO_QUEM_PAGA, aplicarNoPlano, custoDaHora, guardarAjuste, impactoAjuste, type AjusteAdenda, type AjusteObra, type ImpactoAjuste } from "./estudioObra/quemPaga";
 import { aplicarAjuste, aplicarCorrecao, instrucoesDe, preverAjuste, textoAvisoCliente, type Alteracao, type AjusteVivo, type Envio } from "./trabalhoObra";
 import { itemCatalogo, normal as normalUn } from "./catalogo";
@@ -484,6 +485,8 @@ export interface Negocio {
     aprendizagem?: RegistoPlano[];
     /** 25/11 (Rúben: «qualquer alteração deve ir para um histórico… o sistema tem de aprender»): cada mudança ao plano, por ação (historicoPlano.ts) */
     mudancasPlano?: AlteracaoPlano[];
+    /** 25/11 (plano «Obra Viva», etapa 1): os agentes desta obra (degraus, propostas vistas e recusadas, o que aplicaram) (estudioObra/agentes.ts) */
+    agentes?: EstadoAgentes;
     /** O previsto e o real por fase, congelados no fim da obra: atualizar depois a receita no Catálogo não muda o histórico (planoObra.ts). */
     realFases?: ObraReal | null;
     /** 15/10: o auto de receção (por assinar → assinado) */
@@ -4712,6 +4715,52 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /** 25/11 (revisão do Estúdio da obra, 1048: a obra fica sem ninguém de 25 nov a 4 dez): antecipa de uma vez as tarefas por começar
      *  que vêm depois do buraco, todas o mesmo número de dias (a ordem e as ligações ficam), o mais que der sem pôr um técnico em duas
      *  obras ao mesmo tempo nem nas férias. Devolve os dias antecipados (0 se não deu, com o porquê). */
+    /** 25/11 (plano «Obra Viva», etapa 1): o estado dos agentes da obra. «vistos» guarda quando cada proposta apareceu (o prazo do degrau 2
+     *  conta daí); «aplicar» faz a proposta (sozinha ou aceite pelo gestor) e guarda as tarefas como estavam, para «desfazer» mesmo depois de
+     *  recarregar a página. */
+    agentesObra(id: number, op: { k: "degrau"; agente: AgenteId; n: Degrau; texto: string } | { k: "vistos"; ids: string[] } | { k: "recusar"; pid: string; texto: string }
+      | { k: "aplicar"; pid: string; agente: AgenteId; nomeAgente: string; texto: string; acao: AcaoAuto; auto: boolean } | { k: "desfazer"; fid: string }): boolean {
+      const d = deal(id), p = d.obra.plano;
+      if (!p) return false;
+      const e = (d.obra.agentes ??= {}), agoraIso = new Date().toISOString();
+      if (op.k === "vistos") {
+        const v = (e.vistos ??= {}), ativos = new Set(op.ids);
+        let mudou = false;
+        for (const x of op.ids) if (!v[x]) { v[x] = agoraIso; mudou = true; }
+        for (const x of Object.keys(v)) if (!ativos.has(x)) { delete v[x]; mudou = true; }
+        return mudou;
+      }
+      if (!exigePerm("obra.planear")) return false;
+      const quem = lerQuemAssina() || PAPEIS[S.role]?.nome || "";
+      if (op.k === "degrau") { (e.degraus ??= {})[op.agente] = op.n; log(d, `Agentes: ${op.texto}`); return true; }
+      if (op.k === "recusar") { (e.recusadas ??= {})[op.pid] = agoraIso; log(d, `Agentes: recusada · ${op.texto}`); return true; }
+      if (op.k === "desfazer") {
+        const f = (e.feitos ?? []).find((x) => x.id === op.fid);
+        if (!f || f.desfeito) return false;
+        for (const a of f.antes) {
+          const t = p.tasks[a.ti];
+          if (!t) continue;
+          t.dia = a.dia; t.tec = a.tec;
+          if (a.antecipada) t.antecipada = true; else delete t.antecipada;
+        }
+        f.desfeito = agoraIso;
+        log(d, `Agentes: desfeito · ${f.texto}`);
+        avisar({ msg: "Desfeito", sub: f.texto, kind: "ok" });
+        return true;
+      }
+      // aplicar
+      const antes = p.tasks.map((t, ti) => ({ ti, dia: t.dia, tec: t.tec, ...(t.antecipada ? { antecipada: true as const } : {}) }));
+      if (op.acao.k === "fecharBuraco") A.fecharBuraco(id, op.acao.ini, op.acao.fim);
+      else A.trocarTec(id, op.acao.ti, op.acao.tec);
+      const mudadas = antes.filter((a) => p.tasks[a.ti] && (p.tasks[a.ti].dia !== a.dia || p.tasks[a.ti].tec !== a.tec));
+      if (!mudadas.length) return false;
+      const L = (e.feitos ??= []);
+      L.unshift({ id: `f${Date.now().toString(36)}${L.length}`, q: agoraIso, agente: op.agente, texto: op.texto, auto: op.auto, quem: op.auto ? "Olyvia" : quem, antes: mudadas });
+      if (L.length > 200) L.length = 200;
+      (e.recusadas ??= {}); delete e.recusadas[op.pid];
+      log(d, `${op.auto ? `Agente ${op.nomeAgente} (sozinho)` : `Agente ${op.nomeAgente}, aceite`}: ${op.texto}`);
+      return true;
+    },
     fecharBuraco(id: number, ini: number, fim: number): number {
       if (!exigePerm("obra.planear")) return 0;
       const d = deal(id), p = d.obra.plano;
