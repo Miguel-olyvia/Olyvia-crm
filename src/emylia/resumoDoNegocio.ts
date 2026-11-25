@@ -6,10 +6,12 @@ import { FASES, type Evento, type Negocio } from "./motor";
 /** Como se dispõe a página do negócio, pela largura que tem (não pela do ecrã: o menu lateral da app come 200 a 300 px).
  *  - "normal": como sempre (telemóvel numa coluna; no computador, os passos à esquerda e o passo ao meio).
  *  - "amplo": os passos, o passo e, à direita, o resumo do negócio; o contentor alarga até 1680 px. */
-export type Disposicao = "normal" | "amplo";
+/**  - "muitoAmplo" (≥1900 px, ex.: um ecrã de 2560): o histórico sai do resumo para uma quarta coluna; o contentor vai até 1960 px. */
+export type Disposicao = "normal" | "amplo" | "muitoAmplo";
 export const LARGURA_AMPLO = 1360;
+export const LARGURA_MUITO_AMPLO = 1900;
 export function disposicaoNegocio(largura: number): Disposicao {
-  return largura >= LARGURA_AMPLO ? "amplo" : "normal";
+  return largura >= LARGURA_MUITO_AMPLO ? "muitoAmplo" : largura >= LARGURA_AMPLO ? "amplo" : "normal";
 }
 
 /** Uma data para ler: ISO (2026-11-24T09:08) passa a 24/11; o resto (já «24/11 09:08») fica como está, sem a hora. */

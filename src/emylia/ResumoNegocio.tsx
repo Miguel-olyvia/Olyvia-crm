@@ -36,28 +36,54 @@ export function DocumentosDoNegocio({ d, className }: { d: Negocio; className?: 
   );
 }
 
-export function ResumoNegocio({ d, S, passos, ver, irFase }: {
+/** O histórico do negócio, o mais recente primeiro: os primeiros `inicio` e «Ver os N acontecimentos». `cartao`: numa coluna própria. */
+export function HistoricoNegocio({ d, inicio = HIST_INICIO, cartao }: { d: Negocio; inicio?: number; cartao?: boolean }) {
+  const [todo, setTodo] = useState(false);
+  if (!d.hist.length) return null;
+  const hist = todo ? d.hist : d.hist.slice(0, inicio);
+  const corpo = (
+    <section aria-labelledby={`hist-${d.id}`}>
+      <h3 id={`hist-${d.id}`} className={TITULO}>Histórico</h3>
+      <ol className="mt-2 space-y-3">
+        {hist.map((h, i) => (
+          <li key={d.hist.length - i} className="text-[15px] leading-snug">
+            {h.t}<span className="block text-sm text-muted-foreground">{quandoEQuem(h)}</span>
+          </li>
+        ))}
+      </ol>
+      {d.hist.length > inicio && (
+        <button type="button" onClick={() => setTodo(!todo)} aria-expanded={todo}
+          className="mt-3 inline-flex min-h-10 items-center text-[15px] font-medium text-primary underline-offset-4 hover:underline">
+          {todo ? "Ver menos" : `Ver os ${d.hist.length} acontecimentos`}
+        </button>
+      )}
+    </section>
+  );
+  return cartao ? <aside aria-label="Histórico do negócio" className="rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]">{corpo}</aside> : corpo;
+}
+
+export function ResumoNegocio({ d, S, passos, ver, irFase, semHistorico }: {
   d: Negocio; S: Estado;
   /** os passos da fase aberta (feitos e respostas em falta); sem eles, a fase de agora só diz «agora» */
   passos?: { feito: boolean; falta: number }[];
   /** a fase feita aberta só para ler (null: a de agora) */
   ver: number | null;
   irFase: (i: number | null) => void;
+  /** num ecrã muito largo, o histórico vai para uma coluna própria (HistoricoNegocio) */
+  semHistorico?: boolean;
 }) {
-  const [todo, setTodo] = useState(false);
   const p = proximo(d, S);
   const quem = p.who === "cliente" ? "o cliente" : p.who ? PAPEIS[p.who].n : null;
   const T = d.orc ? tot(d, S) : null;
   const iva = d.orc ? totaisIva(d, S) : null;
   const fases = fasesDoNegocio(d, passos);
-  const hist = todo ? d.hist : d.hist.slice(0, HIST_INICIO);
   return (
     <aside aria-label="Resumo do negócio" className="space-y-6 rounded-2xl border border-border bg-card p-5 shadow-[var(--shadow-sm)]">
       <section aria-labelledby={`seguir-${d.id}`}>
         <h3 id={`seguir-${d.id}`} className={TITULO}>A seguir</h3>
         <p className="mt-2 text-[15px] font-medium leading-snug text-foreground">{p.done ? "Negócio fechado" : p.t}</p>
         {p.sub && <p className="mt-1 text-sm leading-snug text-muted-foreground">{p.sub}</p>}
-        {quem && !p.done && <p className="mt-1 text-sm text-muted-foreground">Com {quem}</p>}
+        {quem && !p.done && <p className="mt-1 text-sm text-muted-foreground">É de {quem}</p>}
       </section>
 
       {T && iva && (
@@ -104,24 +130,7 @@ export function ResumoNegocio({ d, S, passos, ver, irFase }: {
         </ol>
       </section>
 
-      {d.hist.length > 0 && (
-        <section aria-labelledby={`hist-${d.id}`}>
-          <h3 id={`hist-${d.id}`} className={TITULO}>Histórico</h3>
-          <ol className="mt-2 space-y-3">
-            {hist.map((h, i) => (
-              <li key={d.hist.length - i} className="text-[15px] leading-snug">
-                {h.t}<span className="block text-sm text-muted-foreground">{quandoEQuem(h)}</span>
-              </li>
-            ))}
-          </ol>
-          {d.hist.length > HIST_INICIO && (
-            <button type="button" onClick={() => setTodo(!todo)} aria-expanded={todo}
-              className="mt-3 inline-flex min-h-10 items-center text-[15px] font-medium text-primary underline-offset-4 hover:underline">
-              {todo ? "Ver menos" : `Ver os ${d.hist.length} acontecimentos`}
-            </button>
-          )}
-        </section>
-      )}
+      {!semHistorico && <HistoricoNegocio d={d} />}
     </aside>
   );
 }

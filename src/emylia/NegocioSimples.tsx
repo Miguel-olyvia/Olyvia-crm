@@ -44,7 +44,7 @@ import { SoLeitura } from "./passosSoLeitura";
 import { definirVisita, usePrincipalDaVisita } from "./principalDaVisita";
 // FERRAMENTAS-TESTE (temporário, remover antes da main)
 import { FerramentasTeste } from "./FerramentasTeste";
-import { DocumentosDoNegocio, ResumoNegocio } from "./ResumoNegocio";
+import { DocumentosDoNegocio, HistoricoNegocio, ResumoNegocio } from "./ResumoNegocio";
 import { disposicaoNegocio } from "./resumoDoNegocio";
 
 const GRUPOS_FASE: Grupo[][] = [LEAD, CONTACTO, [EXTERIOR, INTERIOR, AREA, ESCOLHAS], PROPOSTA, FINANCEIRO, OBRA];
@@ -158,12 +158,18 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
   // do negócio fica à direita do passo; o caminho da obra e as adendas passam para a coluna do passo. No portátil, como antes, com os
   // documentos por baixo dos passos; no telemóvel, como antes.
   const [medir, largura] = useLargura<HTMLDivElement>();
-  const amplo = !largo && disposicaoNegocio(largura) === "amplo";
+  const disp = largo ? "normal" : disposicaoNegocio(largura);
+  const amplo = disp !== "normal", muitoAmplo = disp === "muitoAmplo";
+  // à direita: o resumo e, num ecrã muito largo, o histórico numa coluna sua
+  const aDireita = (passos?: Passo[]) => <>
+    <ResumoNegocio d={d} S={S} passos={passos?.map((x) => ({ feito: completo(x), falta: x.falta || 0 }))} ver={ver} irFase={irFase} semHistorico={muitoAmplo} />
+    {muitoAmplo && <HistoricoNegocio d={d} inicio={20} cartao />}
+  </>;
   const caminhoNoMeio = amplo && ver === null && !(naChamada && d.fase <= 1);
   const irFase = (n: number | null) => { setVer(n); window.scrollTo({ top: 0, behavior: suave() }); };
   return (
     <div ref={medir} className="w-full">
-    <div className={cn("mx-auto w-full px-4 pb-24 pt-2 sm:px-8 sm:pt-10", largo ? "max-w-[1760px]" : amplo ? "max-w-[1680px]" : "max-w-6xl")}>
+    <div className={cn("mx-auto w-full px-4 pb-24 pt-2 sm:px-8 sm:pt-10", largo ? "max-w-[1760px]" : muitoAmplo ? "max-w-[1960px]" : amplo ? "max-w-[1680px]" : "max-w-6xl")}>
       {/* aberto a partir da ficha de uma pessoa (proposta do V1, 16/10): o voltar leva de volta a ela */}
       <button type="button" onClick={go(() => A.nav(origem ? "pessoas" : cliente ? "clientes" : "negocios"))}
         className="inline-flex min-h-11 items-center gap-2 rounded-lg text-[15px] text-muted-foreground hover:text-foreground">
@@ -324,7 +330,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
         ].map((g) => efetivo(ctx.S.campos, g))} /></div>
       )}
 
-      <div className={cn("mt-6 grid items-start gap-6 sm:mt-8", amplo ? "lg:grid-cols-[260px_minmax(0,1fr)_360px] lg:gap-8" : "lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-10")}>
+      <div className={cn("mt-6 grid items-start gap-6 sm:mt-8", muitoAmplo ? "lg:grid-cols-[260px_minmax(0,1fr)_340px_320px] lg:gap-8" : amplo ? "lg:grid-cols-[260px_minmax(0,1fr)_360px] lg:gap-8" : "lg:grid-cols-[260px_minmax(0,1fr)] lg:gap-10")}>
         {naChamada && d.fase <= 1 && ver === null
           ? <TudoNaChamada ctx={ctx} d={d} ajustarPassos={ctx.ajustarPassos} />
           : ver === null
@@ -338,7 +344,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
                   </div>}
               antes={caminhoNoMeio && d.fase >= 5 ? caminhoEAdendas : null}
               depois={caminhoNoMeio && d.fase === 4 ? caminhoEAdendas : null}
-              direita={amplo ? (passos) => <ResumoNegocio d={d} S={S} passos={passos.map((x) => ({ feito: completo(x), falta: x.falta || 0 }))} ver={ver} irFase={irFase} /> : undefined} />
+              direita={amplo ? aDireita : undefined} />
           : <>
             <div className="hidden lg:block" aria-hidden="true" />
             <section className="min-w-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-2 motion-safe:duration-200" aria-labelledby="fase-lida">
@@ -386,7 +392,7 @@ export function NegocioSimples(ctx: Ctx & { ajustarPassos?: (passos: Passo[], d:
           </>}
 
         {/* 25/11: com largura, o resumo do negócio à direita (no passo, vem do FaseSimples, com os passos da fase) */}
-        {amplo && (ver !== null || (naChamada && d.fase <= 1)) && <ResumoNegocio d={d} S={S} ver={ver} irFase={irFase} />}
+        {amplo && (ver !== null || (naChamada && d.fase <= 1)) && aDireita()}
       </div>
       {d.fase === 4 && !caminhoNoMeio && caminhoEAdendas}
     </div>

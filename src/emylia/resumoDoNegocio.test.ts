@@ -17,7 +17,9 @@ describe("disposição pela largura da página", () => {
     expect(disposicaoNegocio(1280)).toBe("normal");
     expect(disposicaoNegocio(1359)).toBe("normal");
     expect(disposicaoNegocio(1360)).toBe("amplo");
-    expect(disposicaoNegocio(2240)).toBe("amplo");
+    expect(disposicaoNegocio(1899)).toBe("amplo");
+    expect(disposicaoNegocio(1900)).toBe("muitoAmplo");
+    expect(disposicaoNegocio(2240)).toBe("muitoAmplo");
   });
 });
 
