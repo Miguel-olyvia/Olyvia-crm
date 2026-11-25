@@ -11,6 +11,7 @@ import { detalheMicro, microFeitas, microtarefasDe, type MudancaMicro } from "..
 
 const ORIGEM = {
   obra: "Lista desta obra. A ficha do serviço no Catálogo não muda.",
+  servico: "Vêm da ficha do serviço no Catálogo. Mudar aqui só muda esta obra.",
   infraspeak: "Vêm das tarefas da Mudelar no Infraspeak. Mudar aqui só muda esta obra.",
   catalogo: "Vêm da ficha do serviço no Catálogo. Mudar aqui só muda esta obra.",
   instrucoes: "Vêm das instruções do trabalho. Mudar aqui só muda esta obra.",

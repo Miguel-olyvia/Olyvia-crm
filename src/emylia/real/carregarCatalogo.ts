@@ -14,6 +14,7 @@ import { lerCatalogo, linhasDe } from "./lerCatalogo";
 import { fotografar, type FotoCatalogo } from "./gravarCatalogo";
 import { aplicarLinhasModelo, lerLinhasModelo } from "./linhasModelo";
 import { definirArvoreProdutos, definirCatalogoLido, definirServicosLidos } from "./catalogoLeve";
+import { lerMicrotarefasServicos } from "./microtarefasServico";
 
 export interface CatalogoCarregado {
   org: string; M: CatalogoMontado; produtos: LinhaProduto[]; foto: FotoCatalogo;
@@ -68,6 +69,8 @@ export async function carregarCatalogo(sb: SupabaseClient, org: string, S: Estad
   definirCatalogoLido(org, !!opcoes.leve && !erro);
   definirArvoreProdutos(M.K.arvore, L.tabelas?.categoriasProduto);
   definirServicosLidos(M.ids.servico);
+  // 25/11: as microtarefas dos serviços (SQL 19); não atrasa o Catálogo e falha calada sem a migration
+  void lerMicrotarefasServicos(sb, org);
   const c = aplicarCatalogo(org, M, L.produtos, S);
   return erro ? { ...c, erro } : c;
 }

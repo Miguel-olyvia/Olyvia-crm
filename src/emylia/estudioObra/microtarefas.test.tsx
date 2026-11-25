@@ -1,6 +1,9 @@
 // 24/11 (Rúben: «cada tarefa do plano pode e deve ter microtarefas»; «no Estúdio da obra juntar e tirar tarefas, com os serviços novos a
 // gerar adenda»). As microtarefas (microtarefas.ts), as ações do motor, o painel e o tirar / juntar tarefas.
 import { afterEach, describe, expect, it } from "vitest";
+import { definirMicrotarefasServicos } from "../real/microtarefasServico";
+import { propostaDoServico } from "../MicrotarefasServico";
+import { obrasPorAtualizar } from "./AtualizarMicrotarefas";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { acoes, type Tarefa } from "../motor";
 import type { Ctx } from "../pecas";
@@ -121,6 +124,41 @@ describe("as tarefas da Mudelar no Infraspeak (25/11)", () => {
     A.fixarMicrotarefas(d.id);
     expect(JSON.stringify(t.micro)).toBe(antes);
     expect(porFixar(t, S, p)).toBeNull();
+  });
+});
+
+describe("as microtarefas da ficha do serviço (25/11)", () => {
+  afterEach(() => definirMicrotarefasServicos(null));
+  it("a lista da ficha do serviço vem antes do Infraspeak; a checklist do Infraspeak não se repete na tarefa", () => {
+    const { S, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "Revestimento de parede";
+    expect(microtarefasDe(t, S, p).origem).toBe("infraspeak");
+    const inf = microDoInfraspeak(t, p);
+    const ref = inf[0].ref!, det = detalheMicro(inf[0]).det;
+    definirMicrotarefasServicos({ [t.svcs[0]]: [{ nome: "Preparar a parede", horas: 1, checklist: det, ref }, { nome: "Fotografar", checklist: ["Antes e depois"], quem: "Supervisor" }] });
+    const r = microtarefasDe(t, S, p);
+    expect(r.origem).toBe("servico");
+    expect(r.L).toEqual([{ id: 0, n: "Preparar a parede", h: 1, ref }, { id: 1, n: "Fotografar", det: ["Antes e depois"], quem: "Supervisor" }]);
+    expect(detalheMicro(r.L[0]).det).toEqual(det);
+    expect(detalheMicro(r.L[1])).toEqual({ quem: "Supervisor", det: ["Antes e depois"] });
+  });
+  it("as obras que existem: «Atualizar» muda os nomes, junta as novas, fica no histórico e só uma vez", () => {
+    const { S, d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.micro = [{ id: 0, n: "Velha" }];
+    definirMicrotarefasServicos({ [t.svcs[0]]: [{ nome: "Nova A", checklist: [] }, { nome: "Nova B", checklist: [] }] });
+    expect(obrasPorAtualizar(S, [d])[0].n).toBeGreaterThanOrEqual(1);
+    expect(A.fixarMicrotarefas(d.id, true)).toBeGreaterThan(0);
+    expect(t.micro.map((m) => [m.id, m.n])).toEqual([[0, "Nova A"], [1, "Nova B"]]);
+    expect(d.hist[0].t).toMatch(/^Plano: microtarefas atualizadas em \d+ tarefas?/);
+    expect(obrasPorAtualizar(S, [d])).toEqual([]); // só uma vez
+  });
+  it("a proposta para um serviço vem do Infraspeak (nome, ofício e fase)", () => {
+    const L = propostaDoServico("x", "Montagem de louças sanitárias", "Canalizador", 4);
+    expect(L.map((m) => m.nome)).toContain("Montagem da sanita");
+    expect(L[0].checklist.length).toBeGreaterThan(0);
+    expect(propostaDoServico("y", "Montar o andaime", "Equipa")).toEqual([]);
   });
 });
 

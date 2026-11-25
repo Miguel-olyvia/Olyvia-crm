@@ -4495,7 +4495,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** 24/11: ao abrir o Estúdio da obra, as tarefas sem lista própria ficam com a do Catálogo (a mesma que se mostra): assim o técnico,
      *  que pode não ler o Catálogo, vê a mesma lista que o gestor. Só as que ainda não têm marcas. Devolve quantas fixou. */
-    fixarMicrotarefas(id: number): number {
+    fixarMicrotarefas(id: number, registar = false): number {
       if (!podeNeg(S.role, "obra.planear")) return 0;
       const d = deal(id), p = d.obra.plano;
       if (!p || p.estado === "concluída") return 0;
@@ -4505,6 +4505,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         const L: Micro[] | null = porFixar(t, S, p);
         if (L?.length) { t.micro = L; n++; }
       }
+      // 25/11: pela «Atualizar as microtarefas das obras» (nas Operações), fica no histórico da obra
+      if (registar && n) log(d, `Plano: microtarefas atualizadas em ${n} ${n === 1 ? "tarefa" : "tarefas"} (as do Catálogo; só nomes mudados e tarefas novas)`);
       return n;
     },
     /** Os materiais de uma tarefa (a lista inteira, já mudada). */
