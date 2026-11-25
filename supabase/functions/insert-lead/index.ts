@@ -1,7 +1,6 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.80.0';
 import { z } from "npm:zod";
 import { composeDisplayName, normalizeFirstLast } from '../_shared/composeDisplayName.ts';
-import { leadCompanyFromFieldValues, newLeadEntityDisplayName } from '../_shared/leadCompany.ts';
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 
@@ -414,12 +413,7 @@ Deno.serve(async (req) => {
     }
 
     if (!entityId) {
-      // Ficha NOVA: a empresa se a lead a traz, senao nome + apelido (regra do ecra).
-      const displayName = newLeadEntityDisplayName({
-        company: leadCompanyFromFieldValues(fieldValues),
-        first: leadFirstName,
-        last: leadLastName,
-      }) || 'Lead';
+      const displayName = composeDisplayName(leadFirstName, leadLastName) || 'Lead';
       const emailsPayload: Array<Record<string, unknown>> = [];
       if (leadEmail) {
         emailsPayload.push({

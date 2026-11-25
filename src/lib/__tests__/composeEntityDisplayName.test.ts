@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { composeEntityDisplayName } from "@/lib/entityDisplayName";
 
-// Espelho em TS de public.fn_entity_display_name
-// (supabase/migrations/20261229910000_nome_unico_da_ficha.sql). Os casos sao os
-// mesmos do bloco CONFERIR da migration: se um mudar, o outro tem de mudar.
+// Regra do ECRA (src/lib/entityDisplayName.ts), que ainda aceita a empresa.
+// Ja NAO e o espelho da base: o de public.fn_entity_display_name (sem empresa)
+// e entityDisplayNameRule em src/lib/entityNameSync.ts.
 describe("composeEntityDisplayName (regra unica do nome da ficha)", () => {
   it.each([
     ["empresa ganha a nome + apelido", "person", "Rui", "Silva", "EVOLAR MOVEIS LDA", "EVOLAR MOVEIS LDA"],
