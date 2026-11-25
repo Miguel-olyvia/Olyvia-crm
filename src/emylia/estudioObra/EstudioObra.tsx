@@ -13,6 +13,7 @@ import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useS
 import { preCarregarVisualizador3D } from "@/emylia/planta3d/carregarVisualizador3D";
 import { EnderecoAtivo, escreverParamUrl, usePainelUrl, useParamUrl } from "../usarParamUrl";
 import { COLUNA_MAX, COLUNA_MIN, useLarguraColuna } from "./larguraColuna";
+import { BarraRolar } from "./BarraRolar";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, GripVertical, HardHat, Lightbulb, Link2, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Redo2, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -724,6 +725,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   const largouEm = useRef(0); // o clique logo a seguir a um arrasto não abre a tarefa
   // 23/11: as ligações (setas) e ligar arrastando. As setas saem das posições das linhas (data-linha) e das datas das barras.
   const cont = useRef<HTMLDivElement>(null);
+  const rolarRef = useRef<HTMLDivElement>(null);
   const [geo, setGeo] = useState<Record<number, { left: number; top: number }>>({});
   const [hov, setHov] = useState<number | null>(null);
   const [aLigar, setALigarEstado] = useState<{ de: number; x: number; y: number; alvo: number | null } | null>(null);
@@ -980,7 +982,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
       {erroLigar && <p role="alert" className="border-b border-border bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">Não se liga: {erroLigar}</p>}
       {!R && <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">{vivo ? "As tarefas que ainda não começaram arrastam-se (o dia) e a ponta muda os dias; as outras abrem-se para gerir a execução." : "Arraste uma barra para mudar o dia; a ponta muda os dias."}{nova && vista === "tecnicos" ? " Num dia vazio, «+» cria uma tarefa." : ""}{passar && vista === "tecnicos" ? " Arraste para a linha de outra pessoa para lhe passar a tarefa." : ""}{ligar && vista === "gantt" ? " Para ligar duas tarefas, arraste o círculo da ponta de uma barra até à tarefa que só começa depois." : ""}{podeOrdenar ? " Para mudar a ordem da lista, arraste o pegador ⋮⋮ à esquerda do nome (ou use as setas do teclado); as datas não mudam." : ""} Para ver os nomes inteiros, arraste a linha à direita de «{nomeCol}».</p>}
       <p aria-live="polite" className="sr-only">{anuncio}</p>
-      <div className="overflow-x-auto"
+      <div ref={rolarRef} className="overflow-x-auto"
         onPointerMove={(e) => { if (premido.current && Math.hypot(e.clientX - premido.current.x, e.clientY - premido.current.y) > 10) largarPremido(); if (ligarRef.current) moverLigar(e); else arrastar(e); }}
         onPointerUp={(e) => { largarPremido(); if (ligarRef.current) { soltarRolar(); largouEm.current = Date.now(); largarLigar(e); toque.current = null; setArrasto(null); } else largar(e); }}
         onPointerCancel={() => { largarPremido(); soltarRolar(); if (ligarRef.current) setALigar(null); toque.current = null; setArrasto(null); }} onPointerLeave={() => !toque.current && setSob(null)}>
@@ -1135,6 +1137,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
           })}
         </div>
       </div>
+      <BarraRolar alvo={rolarRef} rotulo={vista === "gantt" ? "Rolar o plano pelos dias" : "Rolar a agenda dos técnicos pelos dias"} passo={COL * 5} />
     </section>
   );
 }
