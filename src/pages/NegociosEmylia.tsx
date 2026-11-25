@@ -5,6 +5,7 @@
 // O papel ("A ver como") escolhe-se no topo até os papéis da Emylia estarem ligados aos utilizadores do CRM.
 // 28/10 (Fase 3): o Hoje de cada papel (o do técnico é o HojeTecnico) e as Obras (OperacoesSimples: a lista e a página da obra) abrem
 // aqui, com o mesmo Estado: o que se faz na obra grava-se pela obra_guardar_negocio, como o resto. O Inventário ainda não.
+import { VigiaAgentes } from "@/emylia/estudioObra/VigiaAgentes";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { EnderecoAtivo } from "@/lib/paramUrl";
@@ -1041,6 +1042,8 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
     {/* 12/11: o passo, a fase que se lê e os Estúdios abertos também vão para o endereço (?passo=, ?fase=, ?estudio=) */}
     <EnderecoAtivo.Provider value={enderecoNoUrl ? "pesquisa" : false}>
     <div className="pn calma pg-root min-h-full bg-background">
+      {/* 25/11 (plano «Obra Viva», etapa 3a): os agentes vigiam todas as obras enquanto a Olyvia está aberta (não desenha nada) */}
+      {pronto && !verTecnicos && <VigiaAgentes ctx={ctx} />}
       {/* 9/11 (Rúben, telemóvel): o papel e o estado da gravação numa linha; as vistas numa fila que desliza na sua própria largura
           (antes alargavam a página toda para 563 px e o ecrã fugia para o lado ao arrastar) */}
       {!verTecnicos && <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 pt-3 text-[15px] sm:justify-between sm:gap-3">

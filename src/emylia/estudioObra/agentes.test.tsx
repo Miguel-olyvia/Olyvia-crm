@@ -152,3 +152,31 @@ describe("etapa 2: os avisos automáticos", () => {
     expect(f).toMatchObject({ agente: "equipa", auto: true, quem: "Olyvia", antes: [] });
   });
 });
+
+describe("etapa 3a: os agentes vigiam todas as obras", () => {
+  it("uma volta marca as propostas novas como vistas e aplica a que já passou do prazo", async () => {
+    const { voltaDosAgentes } = await import("./VigiaAgentes");
+    const { S, d } = comBuraco();
+    const A = acoes(S, () => {}, (fn) => fn());
+    A.role("operacoes");
+    const ctx = { S, A, run: (fn: () => void) => fn() };
+    expect(voltaDosAgentes(ctx)).toBe(0); // vê pela primeira vez: o prazo começa agora
+    expect(Object.keys(d.obra.agentes?.vistos ?? {}).length).toBeGreaterThan(0);
+    const auto = propostasDosAgentes(d, S, ocupacaoDosTecnicos(S, d.id)).filter((x) => x.auto);
+    if (auto.length) {
+      // passado o prazo (vista ontem), aplica-se sozinha
+      const ontem = new Date(Date.now() - 2 * 86400000).toISOString();
+      for (const x of auto) d.obra.agentes!.vistos![x.id] = ontem;
+      expect(voltaDosAgentes(ctx)).toBeGreaterThan(0);
+      expect(d.obra.agentes!.feitos![0].auto).toBe(true);
+    }
+  });
+  it("sem a permissão de planear a obra, não corre", async () => {
+    const { voltaDosAgentes } = await import("./VigiaAgentes");
+    const { S, d } = comBuraco();
+    const A = acoes(S, () => {}, (fn) => fn());
+    A.role("tecnico");
+    expect(voltaDosAgentes({ S, A, run: (fn: () => void) => fn() })).toBe(0);
+    expect(d.obra.agentes?.vistos).toBeUndefined();
+  });
+});
