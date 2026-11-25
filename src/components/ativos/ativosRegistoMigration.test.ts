@@ -93,6 +93,9 @@ describe(`migration ${nome}`, () => {
     expect(sql).toContain(
       "CREATE UNIQUE INDEX pessoas_equipamentos_ativo_atribuido_key ON public.pessoas_equipamentos (ativo_id) WHERE ativo_id IS NOT NULL AND estado = 'atribuido';",
     );
+    // revisão: tipo NULL em pessoa/estrutura não pode passar o CHECK (NULL num CHECK deixa passar)
+    expect(sql).toContain("(grupo = 'pessoa' AND tipo IS NOT NULL AND tipo IN (");
+    expect(sql).toContain("(grupo = 'estrutura' AND tipo IS NOT NULL AND tipo IN (");
     expect(sql).toContain("vida_meses BETWEEN 1 AND 600");
     expect(sql).toContain("valor_residual >= 0 AND valor_residual <= valor_compra");
     expect(sql).toContain("ALTER TABLE public.pessoas_equipamentos ADD COLUMN ativo_id uuid;");
@@ -141,6 +144,12 @@ describe(`migration ${nome}`, () => {
     for (const fn of ["rpc_ativo_ligar_pessoa", "rpc_ativo_desligar_pessoa"]) {
       expect(corpo(fn)).toContain("public.ativos_exigir(p_organization_id, 'hr.pessoas.retribuicao.edit')");
     }
+    // revisão: ligar exige o mesmo tipo, salvo 'outro', antes de escrever
+    const ligar = corpo("rpc_ativo_ligar_pessoa");
+    const tipo = ligar.indexOf("IF v_a.tipo IS DISTINCT FROM v_pe.tipo AND v_a.tipo <> 'outro' AND v_pe.tipo <> 'outro' THEN");
+    expect(tipo).toBeGreaterThan(0);
+    expect(ligar.indexOf("UPDATE public.pessoas_equipamentos")).toBeGreaterThan(tipo);
+    expect(ligar).toContain("O tipo do ativo não corresponde ao tipo do equipamento atribuído no RH.");
     // o nome de quem tem o equipamento só com a permissão de leitura do RH
     expect(corpo("rpc_ativos_listar")).toContain("'hr.pessoas.retribuicao.view'");
     expect(corpo("rpc_ativos_listar")).toMatch(/'atribuicao', CASE WHEN v_rh AND/);
@@ -178,6 +187,17 @@ describe(`migration ${nome}`, () => {
     for (const g of ["G1", "G2", "G3", "G4", "G5", "G6", "G7", "G8", "G9"]) expect(sql).toContain(`RAISE EXCEPTION '${g}:`);
     for (const c of ["C1", "C2", "C3", "C4", "C5", "C6"]) expect(sql).toContain(`RAISE EXCEPTION '${c}:`);
     expect(sql).toContain("c.contype::text = 'u'");
+    // revisão: C4 confere que service_role também não executa as internas
+    expect(sql).toContain("OR has_function_privilege('service_role', v_f, 'EXECUTE') THEN");
+    // revisão: datas de compra e de desativação até hoje + 7 dias (nunca + 10 anos)
+    expect(corpo("ativos_validar")).toContain("OR p_data_compra > current_date + 7 THEN");
+    expect(corpo("rpc_ativo_desativar")).toContain("OR p_data > current_date + 7");
+    expect(sql).not.toMatch(/interval '10 years'/);
+    // revisão: o cabeçalho documenta o que vale depois de aplicar
+    expect(bruto).toContain("vale À HORA DE APLICAR");
+    expect(bruto).toContain("FK ON DELETE RESTRICT para pessoas_equipamentos");
+    // não se mexe em ops_centro_custo (outro módulo): FK simples + verificação na RPC
+    expect(sql).not.toMatch(/ALTER TABLE public\.ops_centro_custo/);
     expect(sql).not.toMatch(/CREATE (UNIQUE )?(TABLE|INDEX|POLICY) IF NOT EXISTS|ADD COLUMN IF NOT EXISTS|CREATE OR REPLACE FUNCTION/);
     expect(sql).not.toMatch(/to_jsonb\((a|r|v|v_a|v_atual|s\.r)\)/);
   });
