@@ -2,7 +2,7 @@
 // separadores antigos, com as ligações a ficarem cá dentro), o botão principal e o Esc.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, Link, useLocation } from "react-router-dom";
+import { BrowserRouter, MemoryRouter, Route, Routes, Link, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useContext } from "react";
 import type { InventoryTodayPayload } from "@/hooks/useInventoryToday";
@@ -91,8 +91,15 @@ vi.mock("@/pages/Warehouses", async () => {
   };
 });
 vi.mock("@/pages/ClientOrders", () => ({ default: () => <p>Saídas clássico</p> }));
+// O interruptor do novo Inventário (VITE_INVENTARIO_CLASSICO), lido a cada render: um getter controlado por teste.
+const interruptor = vi.hoisted(() => ({ ativo: true }));
+vi.mock("./separadores", async (orig) => {
+  const m = await orig<typeof import("./separadores")>();
+  return { ...m, get INVENTARIO_NOVO_ATIVO() { return interruptor.ativo; } };
+});
 
-import InventarioNovo, { escDeveSair } from "./InventarioNovo";
+import InventarioNovo, { escDeveSair, indiceHistorico, passosParaSair } from "./InventarioNovo";
+import { RedirecionarParaSeparador } from "./RedirecionarParaSeparador";
 
 afterEach(cleanup);
 
@@ -132,7 +139,7 @@ function montar(em = "/inventory/novo/hoje") {
 describe("o novo Inventário", () => {
   beforeEach(() => {
     perms = new Set(TODAS); todayPayload = payload(); receivable = [];
-    linhas.porTabela = {}; rpc.fn = null; movimento.reduzir = false;
+    linhas.porTabela = {}; rpc.fn = null; movimento.reduzir = false; interruptor.ativo = true;
   });
 
   it("os separadores seguem as permissões das rotas clássicas: sem permissão, o separador não aparece", async () => {
@@ -299,7 +306,8 @@ describe("o novo Inventário", () => {
     expect(screen.getByTestId("onde")).toHaveTextContent("/inventory/novo/hoje");
   });
 
-  it("Esc sem diálogo aberto volta ao clássico; «Voltar ao clássico» também", async () => {
+  it("interruptor desligado: Esc sem diálogo aberto volta ao clássico; «Voltar ao clássico» também (como antes)", async () => {
+    interruptor.ativo = false;
     const { unmount } = montar();
     await screen.findByText("Hoje clássico (embebido)");
     act(() => { fireEvent.keyDown(window, { key: "Escape" }); });
@@ -307,8 +315,89 @@ describe("o novo Inventário", () => {
     unmount();
     montar();
     await screen.findByText("Hoje clássico (embebido)");
+    expect(screen.queryByRole("button", { name: "Voltar" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Voltar ao clássico" }));
     expect(screen.getByTestId("onde")).toHaveTextContent(/^\/inventory$/);
+  });
+
+  it("interruptor ligado: «Voltar» (texto e aria-label) e Esc, sem histórico na app, vão para /home e nunca para /inventory", async () => {
+    window.history.replaceState(null, "");
+    const { unmount } = montar();
+    await screen.findByText("Hoje clássico (embebido)");
+    expect(screen.queryByRole("button", { name: "Voltar ao clássico" })).toBeNull();
+    expect(screen.queryByText("Voltar ao clássico")).toBeNull();
+    const botao = screen.getByRole("button", { name: "Voltar" });
+    expect(botao).toHaveTextContent("Voltar");
+    act(() => { fireEvent.keyDown(window, { key: "Escape" }); });
+    expect(screen.getByTestId("onde")).toHaveTextContent(/^\/home$/);
+    unmount();
+    montar();
+    await screen.findByText("Hoje clássico (embebido)");
+    fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
+    expect(screen.getByTestId("onde")).toHaveTextContent(/^\/home$/);
+  });
+
+  describe("interruptor ligado: «Voltar» com histórico na app (BrowserRouter, history.state.idx)", () => {
+    function Ir() {
+      const navigate = useNavigate();
+      return <button type="button" onClick={() => navigate("/purchase-orders?status=late#x")}>ir às encomendas</button>;
+    }
+    function montarNoBrowser() {
+      window.history.replaceState(null, "", "/pessoas");
+      const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      return render(
+        <QueryClientProvider client={qc}>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/inventory/novo/:aba?" element={<InventarioNovo />} />
+              <Route path="/purchase-orders" element={<RedirecionarParaSeparador />} />
+              <Route path="/inventory" element={<RedirecionarParaSeparador />} />
+              <Route path="/pessoas" element={<Ir />} />
+              <Route path="*" element={<p>outra página</p>} />
+            </Routes>
+            <Onde />
+          </BrowserRouter>
+        </QueryClientProvider>,
+      );
+    }
+    afterEach(() => { window.history.replaceState(null, "", "/"); });
+
+    const ondeCompleto = () => window.location.pathname + window.location.search + window.location.hash;
+
+    it("a rota clássica leva ao separador (substitui a entrada) e «Voltar» sai para a página de antes, saltando os separadores abertos", async () => {
+      montarNoBrowser();
+      fireEvent.click(screen.getByRole("button", { name: "ir às encomendas" }));
+      expect(await screen.findByText("Encomendas a fornecedor", undefined, { timeout: 8000 })).toBeInTheDocument();
+      expect(ondeCompleto()).toBe("/inventory/novo/encomendas?status=late#x");
+      expect(indiceHistorico()).toBe(1);
+      // dois separadores abertos depois: o histórico cresce
+      fireEvent.click(screen.getByRole("tab", { name: /^Fornecedores/ }));
+      fireEvent.click(screen.getByRole("tab", { name: /^Hoje/ }));
+      expect(indiceHistorico()).toBe(3);
+      fireEvent.click(screen.getByRole("button", { name: "Voltar" }));
+      await vi.waitFor(() => expect(screen.getByTestId("onde")).toHaveTextContent(/^\/pessoas$/));
+      expect(screen.getByRole("button", { name: "ir às encomendas" })).toBeInTheDocument();
+    });
+
+    it("Esc faz o mesmo que «Voltar»", async () => {
+      montarNoBrowser();
+      fireEvent.click(screen.getByRole("button", { name: "ir às encomendas" }));
+      await screen.findByText("Encomendas a fornecedor", undefined, { timeout: 8000 });
+      act(() => { fireEvent.keyDown(window, { key: "Escape" }); });
+      await vi.waitFor(() => expect(screen.getByTestId("onde")).toHaveTextContent(/^\/pessoas$/));
+    });
+  });
+
+  it("passosParaSair: sem histórico na app → null (vai para /); senão recua até antes da moldura", () => {
+    expect(passosParaSair(null, null)).toBeNull();
+    expect(passosParaSair(0, 3)).toBeNull();
+    expect(passosParaSair(1, 1)).toBe(1);
+    expect(passosParaSair(2, 5)).toBe(4);
+    expect(passosParaSair(4, 2)).toBe(1);
+    expect(passosParaSair(3, null)).toBe(1);
+    expect(indiceHistorico({ idx: 2 })).toBe(2);
+    expect(indiceHistorico({ usr: null })).toBeNull();
+    expect(indiceHistorico(null)).toBeNull();
   });
 
   describe("fatia 4: a festa", () => {

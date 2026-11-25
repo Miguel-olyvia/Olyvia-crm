@@ -48,6 +48,7 @@ import { cn } from "@/lib/utils";
 import { TRIGGER_LABEL, normalizeStockDeductionTrigger } from "@/components/inventory/InventorySettingsCard";
 import { InventarioEmbebido } from "@/components/inventory/ui/embebido";
 import { botaoPrincipal } from "@/pages/inventario-novo/contasComando";
+import { INVENTARIO_NOVO_ATIVO } from "@/pages/inventario-novo/separadores";
 
 // "Hoje" do Inventário, como o Hoje do 2.0 (HojeInv.tsx): o fluxo em cinco
 // passos (venda assinada → encomenda cliente → Sim/Não: stock ou PO → receção
@@ -862,7 +863,8 @@ const InventoryToday = () => {
           description={t("inventory.today.description")}
           actions={
             <>
-              {!embebido ? (
+              {/* Com o novo Inventário ligado as rotas clássicas já levam lá: o convite deixa de fazer sentido. */}
+              {!embebido && !INVENTARIO_NOVO_ATIVO ? (
                 <Button variant="outline" asChild>
                   <Link to="/inventory/novo"><Sparkles className="mr-2 h-4 w-4" /> Experimentar o novo Inventário</Link>
                 </Button>
