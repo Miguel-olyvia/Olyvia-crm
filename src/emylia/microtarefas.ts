@@ -245,6 +245,18 @@ export function ajustePorFazer(t: Tarefa, S?: Estado | null, p?: Plano | null, h
   if (somada > espera && h === t.h && t.dur === diasDe(h) + somada) dur = diasDe(h) + espera;
   return h !== t.h || dur !== t.dur ? { h, dur } : null;
 }
+/** 25/11 (Rúben: «a empresa absorve»): as horas acima do orçamento que vêm da regra das microtarefas (as horas da tarefa são as que as
+ *  microtarefas pedem). null: não se sabe (sem base alinhada, ou as horas não vêm da regra); 0: nenhuma. */
+export function horasDaEmpresa(t: Tarefa, S?: Estado | null, p?: Plano | null): number | null {
+  if (!p?.base || p.base.length !== p.tasks.length) return null;
+  const baseH = p.base[p.tasks.indexOf(t)]?.h;
+  if (baseH == null) return null;
+  if (t.h <= baseH + 0.001) return t.hNossa ? 0 : null;
+  const soma = horasDasMicro(t, S, p);
+  if (soma == null) return null;
+  const cima = Math.max(0.5, Math.ceil(soma * 2 - 1e-9) / 2);
+  return Math.abs(t.h - cima) < 0.01 ? r2(t.h - baseH) : null;
+}
 /** Há alguma coisa a ajustar nesta tarefa (para os contadores). */
 export const horasPorSubir = (t: Tarefa, S?: Estado | null, p?: Plano | null): number | null => ajustePorFazer(t, S, p)?.h ?? null;
 

@@ -37,7 +37,7 @@ import { pedirPainelObra } from "./estudioObra/painelPedido";
 import { avisarTecnico, criarTarefa, criarTarefaInterna, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa, type NovaTarefaInterna } from "./tarefasValidador";
 import { moverNaOrdem } from "./ordemPlano";
 import { registoDoPlano, resumoDiferencas, retratoTarefas, type RegistoPlano, type TarefaRetrato } from "./planoAntesDepois";
-import { ajustePorFazer, horasDasMicro, listaMicro, microtarefasDe, mudarMicro, nomesFeitos, porFixar, type Micro, type MudancaMicro } from "./microtarefas";
+import { ajustePorFazer, horasDaEmpresa, horasDasMicro, listaMicro, microtarefasDe, mudarMicro, nomesFeitos, porFixar, type Micro, type MudancaMicro } from "./microtarefas";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { CHAVE_CONTACTO_CONCLUIDO, CODIGO_GRAVAR_NEGOCIO, SEM_PERM, comPermissoesReais, contactoConcluido, passoDe, pelaPermissao, podeNeg, soAteAoContacto, temCodigoReal, type PermNeg } from "./permissoes";
@@ -367,6 +367,8 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 25/11: o gestor mudou a lista à mão (A.microtarefas): não volta a ser trocada pela proposta */ microMao?: true;
   /** 24/11: uma tarefa interna (sem serviço do Catálogo e sem custo para o cliente): não muda o valor do contrato nem pede adenda */ interna?: true;
   /** 25/11: o lugar na lista da fase, quando o gestor a arrastou (ordemPlano.ts); sem ele, a ordem é a da data de início */ ordem?: number;
+  /** 25/11 (Rúben: «a empresa absorve»): as horas que a regra das microtarefas juntou acima do orçamento. Não mudam o valor para o cliente
+   *  (impactoDoPlano não as conta); o custo fica na margem. */ hNossa?: number;
   /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[];
   /** 21/10: parada por um imprevisto (o id, imprevistos.ts) até o cliente decidir */ bloqueio?: string;
   /** 21/10: tarefa de uma adenda (o número): os materiais dela só se encomendam com o pagamento da adenda validado (encomendasAjuste.ts) */ adenda?: string;
@@ -1591,10 +1593,12 @@ export function difDoAcerto(d: Negocio, S: Estado): number {
 export function impactoDoPlano(d: Negocio, S: Estado): { horas: number; valor: number; semValor: boolean } {
   const p = d.obra.plano;
   if (!p?.base) return { horas: 0, valor: 0, semValor: false };
-  if (p.base.length > p.tasks.length) return { horas: r2(p.tasks.reduce((a, t) => a + t.h, 0) - p.base.reduce((a, t) => a + t.h, 0)), valor: 0, semValor: true };
+  if (p.base.length > p.tasks.length) return { horas: r2(p.tasks.reduce((a, t) => a + t.h - (t.hNossa ?? 0), 0) - p.base.reduce((a, t) => a + t.h, 0)), valor: 0, semValor: true };
   let h = 0, v = 0;
   p.tasks.forEach((t, i) => {
-    const dh = t.h - (p.base![i]?.h ?? 0);
+    // 25/11: as horas que a regra das microtarefas juntou são da empresa (não vão ao cliente)
+    const baseH = p.base![i]?.h ?? 0, nossas = Math.min(t.hNossa ?? 0, Math.max(0, t.h - baseH));
+    const dh = t.h - nossas - baseH;
     if (Math.abs(dh) < 0.001) return;
     h += dh;
     const s = S.svc[t.svcs[0]];
@@ -4561,9 +4565,20 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         protegerComecadas(p, sitio);
         if (t.h !== antes.h || t.dur !== antes.dur) {
           n++;
+          const hn = horasDaEmpresa(t, S, p);
+          if (hn != null) { if (hn > 0) t.hNossa = hn; else delete t.hNossa; }
           const soma = horasDasMicro(t, S, p);
           log(d, `Plano: ${t.nome} · ${nfmt(antes.h)} → ${nfmt(t.h)} h, ${antes.dur} → ${t.dur} ${t.dur === 1 ? "dia" : "dias"} (microtarefas: ${nfmt(soma ?? 0)} h de trabalho${t.dur > Math.ceil(t.h / 8) ? " e dias de espera" : ""})`);
         }
+      });
+      // 25/11: as tarefas que a regra já tinha subido (antes de haver hNossa) ficam com as horas a mais marcadas como da empresa
+      p.tasks.forEach((t) => {
+        if (t.exec) return;
+        const hn = horasDaEmpresa(t, S, p);
+        if (hn == null || hn === (t.hNossa ?? 0)) return;
+        if (hn > 0) t.hNossa = hn; else delete t.hNossa;
+        n++;
+        log(d, `Plano: ${t.nome} · ${nfmt(hn)} h pela regra das microtarefas ficam por conta da empresa (não mudam o valor para o cliente)`);
       });
       if (n) {
         const fim = Math.max(...p.tasks.map((x) => x.dia + x.dur)) - 1;

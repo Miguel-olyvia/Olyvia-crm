@@ -6,7 +6,7 @@ import { propostaDoServico } from "../MicrotarefasServico";
 import { obrasPorAtualizar } from "./AtualizarMicrotarefas";
 import { temposDoInfraspeak } from "./TemposInfraspeak";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { acoes, reporArredondamentos, type Tarefa } from "../motor";
+import { acoes, impactoDoPlano, reporArredondamentos, type Tarefa } from "../motor";
 import type { Ctx } from "../pecas";
 import { esperaDasMicro, horasDasMicro, horasPorSubir } from "../microtarefas";
 import { detalheMicro, listaMicro, microDoCatalogo, microDoInfraspeak, microFeitas, microtarefasDe, mudarMicro, porFixar, progressoMicro } from "../microtarefas";
@@ -292,6 +292,27 @@ describe("sem arredondamentos (25/11)", () => {
     expect(t.h).toBe(4.66);
     expect(t.dur).toBe(2);
     expect(reporArredondamentos(d, p, true)).toBe(0);
+  });
+});
+
+describe("a empresa absorve as horas da regra (25/11)", () => {
+  it("as horas que a regra junta não mudam o valor do orçamento; as que o gestor junta à mão, sim", () => {
+    const { S, d, A, p, livre } = obra();
+    p.estado = "por aprovar";
+    const t = p.tasks[livre];
+    t.nome = "Teto falso em pladur"; delete t.bloqueio; t.h = 2; p.base![livre].h = 2;
+    const antes = impactoDoPlano(d, S);
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBeGreaterThan(8);
+    expect(t.hNossa).toBe(t.h - 2);
+    const depois = impactoDoPlano(d, S);
+    expect(depois.horas).toBe(antes.horas);
+    expect(depois.valor).toBe(antes.valor);
+    // marcar as que a regra subiu antes (sem hNossa)
+    delete t.hNossa;
+    expect(A.ajustarHorasPelasMicro(d.id)).toBe(1);
+    expect(t.hNossa).toBe(t.h - 2);
+    expect(d.hist[1].t).toContain("ficam por conta da empresa");
   });
 });
 
