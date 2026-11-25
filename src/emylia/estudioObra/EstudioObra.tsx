@@ -69,6 +69,8 @@ const MES = ["jan", "fev", "mar", "abr", "mai", "jun", "jul", "ago", "set", "out
 const COL_GANTT = 38; // px por dia útil
 const COL_TEC = 84; // 23/11: na vista por técnico, para o nome do serviço caber
 const LINHA = 46;
+/** 25/11: a altura da sub-faixa das outras obras (e férias) de cada técnico, na vista por técnico */
+const ALT_FORA = 34;
 const primeiro = (n: string) => n.split(" ")[0];
 const dd = (n: number) => `${n} ${Math.abs(n) === 1 ? "dia útil" : "dias úteis"}`;
 
@@ -813,12 +815,17 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
     if (t.tipo === "mover") moverTarefa(t.ti, { dia: Math.max(vivo ? p.dia : 0, x.dia + passos) });
     else moverTarefa(t.ti, { dur: Math.max(1, x.dur + passos) });
   };
+  // 25/11 (Rúben: «é difícil de perceber onde corta para o técnico de baixo»): na vista por técnico, as riscas dos fins de semana e dos
+  // feriados são linhas finas e a de hoje fica por baixo das barras, para não cortarem as barras nem os blocos de cada técnico
+  const finas = vista === "tecnicos";
   const fundo = () => (
     <>
-      {saltos.map((x) => x && <div key={"s" + x.k} aria-hidden="true" title={x.texto} className={cn("absolute inset-y-0 w-1.5 -translate-x-1/2", x.feriado ? "bg-[repeating-linear-gradient(135deg,rgb(245_158_11/0.45)_0_3px,transparent_3px_6px)]" : "bg-[repeating-linear-gradient(135deg,hsl(var(--foreground)/0.14)_0_3px,transparent_3px_6px)]")} style={{ left: x.k * COL }} />)}
+      {saltos.map((x) => x && <div key={"s" + x.k} aria-hidden="true" title={x.texto} className={cn("absolute inset-y-0 -translate-x-1/2",
+        finas ? (x.feriado ? "w-0.5 bg-amber-500/50" : "w-px bg-foreground/15")
+          : cn("w-1.5", x.feriado ? "bg-[repeating-linear-gradient(135deg,rgb(245_158_11/0.45)_0_3px,transparent_3px_6px)]" : "bg-[repeating-linear-gradient(135deg,hsl(var(--foreground)/0.14)_0_3px,transparent_3px_6px)]"))} style={{ left: x.k * COL }} />)}
       {vivo && <div aria-hidden="true" className="absolute inset-y-0 bg-primary/[0.07]" style={{ left: p.dia * COL, width: COL }} />}
       {/* 23/11: a linha de hoje atravessa o gráfico */}
-      {vivo && <div aria-hidden="true" className="absolute inset-y-0 z-[1] w-0.5 -translate-x-1/2 bg-primary/70" style={{ left: p.dia * COL + COL / 2 }} />}
+      {vivo && <div aria-hidden="true" className={cn("absolute inset-y-0 w-0.5 -translate-x-1/2 bg-primary/70", !finas && "z-[1]")} style={{ left: p.dia * COL + COL / 2 }} />}
     </>
   );
   const barra = (ti: number, top: number) => {
@@ -958,7 +965,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
           <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-[3px] w-4 rounded-full bg-foreground/30" />Previsto no orçamento</li>
           <li className="flex items-center gap-1.5"><Route className="h-3.5 w-3.5 text-primary" aria-hidden="true" />Caminho crítico (sem folga)</li>
           <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-3 w-0.5 rounded-full bg-primary/70" />Hoje</li>
-          <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-3 w-1.5 bg-[repeating-linear-gradient(135deg,rgb(245_158_11/0.6)_0_2px,transparent_2px_4px)]" />Feriado</li>
+          <li className="flex items-center gap-1.5"><span aria-hidden="true" className={cn("h-3", finas ? "w-0.5 bg-amber-500/60" : "w-1.5 bg-[repeating-linear-gradient(135deg,rgb(245_158_11/0.6)_0_2px,transparent_2px_4px)]")} />Feriado</li>
           {vista === "gantt" && <li className="flex items-center gap-1.5"><svg aria-hidden="true" width="18" height="8"><path d="M0,4 H14" stroke="currentColor" strokeWidth="1.5" /><path d="M12,1 L17,4 L12,7 z" fill="currentColor" /></svg>Ligação (tracejada: pelas datas)</li>}
         </ul>
       </div>
@@ -1043,24 +1050,34 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
               <div style={{ width: dias.length * COL }} />
             </div>
           )}
-          {vista === "tecnicos" && linhas.map((tec) => {
+          {/* 25/11 (Rúben: «é difícil de perceber onde corta para o técnico de baixo»): cada técnico é um bloco com fundo alternado;
+              em cima as tarefas desta obra, em baixo, numa sub-faixa com rótulo, as outras obras e as férias dele */}
+          {vista === "tecnicos" && linhas.map((tec, i) => {
             const ts = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.tec === tec).sort((a, b) => a.t.dia - b.t.dia);
             const faixas: number[] = [];
             const faixa = ts.map(({ t }) => { let f = 0; while (faixas[f] !== undefined && faixas[f] > t.dia) f++; faixas[f] = t.dia + t.dur; return f; });
             const fora = tec ? blocosForaDaObra(tec, dias, obras, deFerias) : [];
-            const altura = Math.max(1, faixas.length) * FAIXA + 12 + (fora.length ? 28 : 0);
+            const altObra = Math.max(1, faixas.length) * FAIXA + 10, altFora = fora.length ? ALT_FORA : 0;
+            const temObra = fora.some((b) => b.tipo === "obra"), temFerias = fora.some((b) => b.tipo !== "obra");
+            const rotFora = temObra && temFerias ? "Outras obras e férias" : temObra ? "Outras obras" : "Férias";
+            // opaco, para a coluna dos nomes (fixa) tapar o que passa por baixo ao rolar
+            const bg = i % 2 ? "color-mix(in srgb, hsl(var(--muted)) 60%, hsl(var(--card)))" : "hsl(var(--card))";
             const k = sob && sob.tec === tec ? sob.k : null;
             const ocupado = (kk: number) => ts.some(({ t }) => kk >= t.dia && kk < t.dia + t.dur) || fora.some((b) => kk >= b.ini && kk < b.fim);
             const livre = k != null && !ocupado(k) && (!vivo || k >= p.dia);
             return (
-              <div key={tec ?? "sem"} className="flex border-b border-border last:border-b-0">
-                <div className={cn("sticky left-0 z-10 flex shrink-0 items-center gap-2 bg-card px-3 py-2 sm:px-4", rotulo)}>
-                  <span className="hidden sm:block"><AvatarTec id={tec} tam="h-8 w-8" /></span>
-                  <span className="min-w-0"><span className="block truncate text-sm font-medium">{nomeTec(tec)}</span><span className="block truncate text-xs text-muted-foreground">{tec ? `${TECS.find((x) => x.id === tec)?.sk ?? ""} · ${ts.length} ${ts.length === 1 ? "tarefa" : "tarefas"}` : "falta escolher"}</span></span>
+              <div key={tec ?? "sem"} role="group" aria-label={nomeTec(tec)} data-tec={tec ?? undefined} className="flex border-b border-border last:border-b-0" style={{ background: bg }}>
+                <div className={cn("sticky left-0 z-10 flex shrink-0 flex-col border-r border-border", rotulo)} style={{ background: bg }}>
+                  <div className="flex items-center gap-2 px-3 sm:px-4" style={{ height: altObra }}>
+                    <span className="hidden sm:block"><AvatarTec id={tec} tam="h-8 w-8" /></span>
+                    <span className="min-w-0"><span className="block truncate text-sm font-semibold">{nomeTec(tec)}</span><span className="block truncate text-xs text-muted-foreground">{tec ? [TECS.find((x) => x.id === tec)?.sk, `${ts.length} ${ts.length === 1 ? "tarefa" : "tarefas"} nesta obra`].filter(Boolean).join(" · ") : "falta escolher"}</span></span>
+                  </div>
+                  {altFora > 0 && <div className="flex items-center border-t border-dashed border-border px-3 text-xs text-muted-foreground sm:px-4" style={{ height: altFora }}>{rotFora}</div>}
                 </div>
-                <div className="relative" style={{ width: dias.length * COL, height: altura }} data-tec={tec ?? undefined}
+                <div className="relative" style={{ width: dias.length * COL, height: altObra + altFora }}
                   onPointerMove={(e) => { if (toque.current) return; const r = e.currentTarget.getBoundingClientRect(); const kk = Math.floor((e.clientX - r.left) / COL); if (kk !== sob?.k || tec !== sob?.tec) setSob(kk >= 0 && kk < dias.length ? { k: kk, tec } : null); }}>
                   {fundo()}
+                  {altFora > 0 && <div aria-hidden="true" className="absolute inset-x-0 border-t border-dashed border-border" style={{ top: altObra }} />}
                   {nova && livre && !arrasto && !R && (
                     <button type="button" aria-label={`Nova tarefa para ${nomeTec(tec)} a ${dataCurta(dias[k!])}`} onClick={() => nova(k!, tec)}
                       className="absolute top-1.5 grid place-items-center rounded-lg border-2 border-dashed border-primary/40 text-primary hover:bg-primary/[0.06]" style={{ left: k! * COL + 2, width: COL - 4, height: ALTO }}>
@@ -1071,15 +1088,15 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
                   {fora.map((b) => {
                     const largura = (b.fim - b.ini) * COL - 4, txt = b.tipo === "ferias" ? "Férias" : `${b.obra!.nome}${b.obra!.servico ? ` · ${b.obra!.servico}` : ""}`;
                     const quando = `${dataCurta(dias[b.ini])}${b.fim - b.ini > 1 ? ` a ${dataCurta(dias[b.fim - 1])}` : ""}`;
-                    const st = { left: b.ini * COL + 2, width: largura, bottom: 4 };
-                    const cls = "absolute flex h-6 items-center gap-1 overflow-hidden whitespace-nowrap rounded-lg px-2 text-[11px] font-medium";
+                    const st = { left: b.ini * COL + 2, width: largura, top: altObra + (ALT_FORA - 24) / 2 };
+                    const cls = "absolute flex h-6 items-center gap-1 overflow-hidden whitespace-nowrap rounded-md px-2 text-[11px] font-medium";
                     return b.tipo === "obra" ? (
                       <button key={`o${b.ini}`} type="button" onClick={() => abrirOutra(b.obra!)} title={`Noutra obra: ${txt} (${quando}). Abrir o Estúdio dela`}
-                        aria-label={`${nomeTec(tec)} está noutra obra, ${txt}, ${quando}. Abrir o Estúdio dela`} className={cn(cls, "bg-muted-foreground/20 text-foreground/80 hover:bg-muted-foreground/30")} style={st}>
+                        aria-label={`${nomeTec(tec)} está noutra obra, ${txt}, ${quando}. Abrir o Estúdio dela`} className={cn(cls, "border border-border bg-card text-foreground/80 hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary")} style={st}>
                         <ArrowUpRight className="h-3 w-3 shrink-0" aria-hidden="true" /><span className="truncate">{largura > 50 ? txt : ""}</span>
                       </button>
                     ) : (
-                      <span key={`f${b.ini}`} role="img" aria-label={`${nomeTec(tec)} de férias, ${quando}`} title={`Férias (${quando})`} className={cn(cls, "bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-100")} style={st}>
+                      <span key={`f${b.ini}`} role="img" aria-label={`${nomeTec(tec)} de férias, ${quando}`} title={`Férias (${quando})`} className={cn(cls, "bg-amber-100 text-amber-900 dark:bg-amber-950 dark:text-amber-100")} style={st}>
                         <span className="truncate">{largura > 40 ? "Férias" : ""}</span>
                       </span>
                     );
