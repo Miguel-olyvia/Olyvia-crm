@@ -10,14 +10,16 @@ import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { CampoSelect, CampoTexto } from "@/components/rh-exemplo/form/Campos";
 import { useAtivoMutacoes } from "@/hooks/ativos/useAtivoMutacoes";
 import { useTranslation } from "@/hooks/useTranslation";
-import { dataMaxima, hojeLocal } from "@/lib/hr/custoBase";
+import { hojeLocal } from "@/lib/hr/custoBase";
 import { cn } from "@/lib/utils";
 import { LIMITES_ATIVO, MOTIVOS_DESATIVACAO, type Ativo } from "./lib/tipos";
-import { dataValida } from "./lib/validarAtivo";
+import { dataMaximaAtivo, dataValida } from "./lib/validarAtivo";
 
 interface Props {
   ativo: Ativo | null;
   aoFechar: () => void;
+  /** Ao fechar, devolve o foco a quem abriu (a página guarda a origem). */
+  aoFecharFoco?: (e: Event) => void;
   /** Depois de desativar: o nome do ativo (a página avisa). */
   aoDesativar?: (aviso: { nome: string }) => void;
 }
@@ -59,7 +61,7 @@ function Formulario({ ativo, aoFechar, aoDesativar }: { ativo: Ativo; aoFechar: 
 
   return (
     <form className="space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); void confirmar(); }}>
-      <CampoTexto id="ativo-des-data" label={t("ativos.desativar.data")} tipo="date" valor={data} onChange={setData} obrigatorio min={ativo.dataCompra} max={dataMaxima()} erro={erroData} />
+      <CampoTexto id="ativo-des-data" label={t("ativos.desativar.data")} tipo="date" valor={data} onChange={setData} obrigatorio min={ativo.dataCompra} max={dataMaximaAtivo()} erro={erroData} />
       <CampoSelect
         id="ativo-des-motivo" label={t("ativos.desativar.motivo")} valor={motivo} onChange={setMotivo} obrigatorio erro={erroMotivo}
         vazioLabel={t("ativos.desativar.motivoEscolher")} opcoes={MOTIVOS_DESATIVACAO.map((x) => ({ value: x, label: t(`ativos.desativar.motivo.${x}`) }))}
@@ -74,11 +76,11 @@ function Formulario({ ativo, aoFechar, aoDesativar }: { ativo: Ativo; aoFechar: 
   );
 }
 
-export function DesativarAtivoDialog({ ativo, aoFechar, aoDesativar }: Props) {
+export function DesativarAtivoDialog({ ativo, aoFechar, aoFecharFoco, aoDesativar }: Props) {
   const { t } = useTranslation();
   return (
     <Dialog open={ativo !== null} onOpenChange={(aberto) => !aberto && aoFechar()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md" onCloseAutoFocus={aoFecharFoco}>
         <DialogHeader>
           <DialogTitle>{t("ativos.desativar.titulo")}</DialogTitle>
           <DialogDescription>{ativo ? `${ativo.nome}. ${t("ativos.desativar.ajuda")}` : ""}</DialogDescription>

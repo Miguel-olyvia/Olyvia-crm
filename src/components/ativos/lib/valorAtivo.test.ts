@@ -8,7 +8,7 @@ const BASE: Ativo = {
   id: "a1", grupo: "estrutura", tipo: "mobiliario", nome: "Mesa", codigo: null, numSerie: null, catEquipamentoId: null,
   dataCompra: "2026-01-15", valorCompra: 1200, valorResidual: 0, vidaMeses: 12, manutencaoAno: 0, centroCustoId: null,
   localizacao: null, notas: null, estado: "ativo", desativadoEm: null, desativadoMotivo: null, desativadoNota: null,
-  catEquipamento: null, atribuicao: null,
+  catEquipamento: null, atribuicao: null, ligado: false,
 };
 const com = (p: Partial<Ativo>): Ativo => ({ ...BASE, ...p });
 const CAT = (p: Partial<CatEquipamentoLigado> = {}): CatEquipamentoLigado => ({ id: "c1", nome: "Berbequim", vidaAnos: 5, vidaHoras: null, usoAnoHoras: null, ...p });
@@ -47,6 +47,22 @@ describe("valorAtivo: depreciação linear", () => {
     expect(valorAtual(a, "2036-01")).toBe(60000 - 100 * 121);
     expect(valorAtual(a, "2076-01")).toBe(0);
     expect(valorAtual(a, "2090-01")).toBe(0);
+  });
+
+  it("nunca desce abaixo do residual nem passa da compra, em nenhuma vida nem mês (1000 € a 600 meses dava -0,33 €)", () => {
+    for (const [compra, residual, vida] of [[1000, 0, 600], [100, 0, 240], [1000, 150, 600], [999.99, 0, 599], [0.1, 0, 300], [5000, 5000, 600]] as const) {
+      const a = com({ valorCompra: compra, valorResidual: residual, vidaMeses: vida });
+      let anterior = compra;
+      for (let n = -2; n <= vida + 3; n += 1) {
+        const mes = `${2026 + Math.floor((n + 0) / 12)}-${String(((n % 12) + 12) % 12 + 1).padStart(2, "0")}`;
+        const v = valorAtual(a, mes)!;
+        expect(v, `${compra} € a ${vida} meses, mês ${n}: ${v}`).toBeGreaterThanOrEqual(residual);
+        expect(v).toBeLessThanOrEqual(compra);
+        expect(v, "só desce").toBeLessThanOrEqual(anterior);
+        anterior = v;
+      }
+      expect(valorAtual(a, "2099-12")).toBe(residual);
+    }
   });
 
   it("bate com o RH (comoConta) em todas as vidas até 120 meses, mês a mês", () => {

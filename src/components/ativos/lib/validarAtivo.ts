@@ -2,7 +2,7 @@
  * A validação do formulário de um ativo, antes de ir à base: as mesmas regras que a base aplica (e o mesmo campo a que cada erro
  * se refere), para mostrar o erro junto do campo. Puro: recebe o texto dos campos e devolve os erros por campo (chave do texto).
  */
-import { dataMaxima } from "@/lib/hr/custoBase";
+import { hojeLocal } from "@/lib/hr/custoBase";
 import { LIMITES_ATIVO, TIPOS_ATIVO_ESTRUTURA, TIPOS_ATIVO_PESSOA, type GrupoAtivo } from "./tipos";
 import type { CampoAtivo } from "./errosAtivo";
 
@@ -23,21 +23,34 @@ export interface CamposAtivo {
   notas: string;
 }
 
-export type ErrosAtivo = Partial<Record<CampoAtivo | "numSerie" | "localizacao" | "notas", string>>;
+export type ErrosAtivo = Partial<Record<CampoAtivo, string>>;
 
-/** «1 234,50» ou «1234.5» -> número; vazio -> `null`; ilegível -> `NaN`. */
+/**
+ * «1.234,50», «1234,50», «1 234,50» ou «1234.5» -> número; vazio -> `null`; ilegível -> `NaN`. O ponto só é separador de milhares
+ * quando vem em grupos de três algarismos («1.234», «1.234.567,89»); «0.125» e «1234.5» são decimais.
+ */
 export function numeroDoCampo(texto: string): number | null {
-  const limpo = texto.trim().replace(/\s/g, "").replace(",", ".");
-  if (limpo === "") return null;
+  const semEspacos = texto.replace(/\p{Zs}/gu, "").trim();
+  if (semEspacos === "") return null;
+  const comMilhares = /^[1-9]\d{0,2}(\.\d{3})+(,\d+)?$/.test(semEspacos);
+  const limpo = comMilhares ? semEspacos.replace(/\./g, "").replace(",", ".") : semEspacos.replace(",", ".");
   return /^-?\d+(\.\d+)?$/.test(limpo) ? Number(limpo) : Number.NaN;
 }
+
+/** Um valor como se escreve no campo: «1234,50» (vírgula e dois decimais), «1200» se for inteiro. */
+export const numeroTexto = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(2).replace(".", ","));
 
 const DATA = /^\d{4}-\d{2}-\d{2}$/;
 const aoCentimo = (n: number): number => Math.round((n + Number.EPSILON) * 100) / 100;
 
-/** Uma data real, de 2000-01-01 a hoje + 10 anos (a faixa que a base aceita). */
+/** O último dia aceite para a data de compra e a de desativação: hoje + 7 dias (a base recusa mais com ATV07 e ATV16). */
+export function dataMaximaAtivo(hoje: Date = new Date()): string {
+  return hojeLocal(new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate() + 7));
+}
+
+/** Uma data real, de 2000-01-01 a hoje + 7 dias (a faixa que a base aceita). */
 export const dataValida = (d: string): boolean => {
-  if (!DATA.test(d) || d < LIMITES_ATIVO.dataMinima || d > dataMaxima()) return false;
+  if (!DATA.test(d) || d < LIMITES_ATIVO.dataMinima || d > dataMaximaAtivo()) return false;
   const [a, m, dia] = d.split("-").map(Number);
   const data = new Date(Date.UTC(a, m - 1, dia));
   return data.getUTCFullYear() === a && data.getUTCMonth() === m - 1 && data.getUTCDate() === dia;

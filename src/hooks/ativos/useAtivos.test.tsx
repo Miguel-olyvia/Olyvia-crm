@@ -21,14 +21,14 @@ const envolver = ({ children }: { children: ReactNode }) => <QueryClientProvider
 const ATIVO = {
   id: "a1", grupo: "estrutura", tipo: "mobiliario", nome: "Mesa", codigo: null, num_serie: null, cat_equipamento_id: null, data_compra: "2026-01-15",
   valor_compra: 1200, valor_residual: 0, vida_meses: 12, manutencao_ano: 0, centro_custo_id: null, localizacao: "Armazém", notas: null, estado: "ativo",
-  desativado_em: null, desativado_motivo: null, desativado_nota: null,
+  desativado_em: null, desativado_motivo: null, desativado_nota: null, ligado: false,
 };
 const LISTA = {
   servico: [{ ...ATIVO, id: "s1", grupo: "servico", tipo: null, nome: "Berbequim 1", cat_equipamento_id: "c1", vida_meses: null, cat_equipamento: { id: "c1", nome: "Berbequim", vida_anos: 5, vida_horas: null, uso_ano_horas: null } }],
   estrutura: [ATIVO],
   pessoa: {
     ativos: [
-      { ...ATIVO, id: "p1", grupo: "pessoa", tipo: "portatil", nome: "Portátil 1", atribuicao: { pessoa_equipamento_id: "pe1", pessoa_nome: "Ana Silva", entrega: "2026-02-01" } },
+      { ...ATIVO, id: "p1", grupo: "pessoa", tipo: "portatil", nome: "Portátil 1", ligado: true, atribuicao: { pessoa_equipamento_id: "pe1", pessoa_nome: "Ana Silva", entrega: "2026-02-01" } },
       { ...ATIVO, id: "p2", grupo: "pessoa", tipo: "telemovel", nome: "Telemóvel 1", atribuicao: null },
     ],
     atribuicoes_sem_ativo: [{ id: "pe9", pessoa_nome: "Rui Costa", tipo: "portatil", descricao: "Portátil velho", valor: 900, entrega: "2025-05-01", estado: "atribuido" }],
@@ -70,6 +70,42 @@ describe("useAtivos: ler", () => {
     rerender({ inc: true });
     await waitFor(() => expect(m.rpc).toHaveBeenCalledWith("rpc_ativos_listar", { p_organization_id: "org-1", p_incluir_desativados: true }));
     expect(m.rpc).toHaveBeenCalledTimes(2);
+  });
+
+  it("lê a chave `ligado` (vem mesmo sem permissão do RH); ausente conta como não ligado", async () => {
+    m.rpc.mockResolvedValue({ data: LISTA, error: null });
+    const { result } = renderHook(() => useAtivos({}), { wrapper: envolver });
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    expect(result.current.dados!.pessoa.map((a) => a.ligado)).toEqual([true, false]);
+    expect(result.current.dados!.estrutura[0].ligado).toBe(false);
+  });
+
+  it("mudar o filtro (a chave) NÃO deita fora a lista: mantém os dados anteriores enquanto pede os novos", async () => {
+    let resolver: (v: unknown) => void = () => {};
+    m.rpc.mockResolvedValueOnce({ data: LISTA, error: null });
+    const { result, rerender } = renderHook(({ inc }: { inc: boolean }) => useAtivos({ incluirDesativados: inc }), { wrapper: envolver, initialProps: { inc: false } });
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    m.rpc.mockReturnValueOnce(new Promise((r) => { resolver = r; }));
+    rerender({ inc: true });
+    await waitFor(() => expect(m.rpc).toHaveBeenCalledTimes(2));
+    expect(result.current.estado).toBe("ok");
+    expect(result.current.dados).not.toBeNull();
+    expect(result.current.dados!.estrutura).toHaveLength(1);
+    expect(result.current.aAtualizar).toBe(true);
+    resolver({ data: { ...LISTA, estrutura: [] }, error: null });
+    await waitFor(() => expect(result.current.aAtualizar).toBe(false));
+    expect(result.current.dados!.estrutura).toHaveLength(0);
+  });
+
+  it("uma releitura que falha com dados já na mão mantém os dados e traz a mensagem (não desmonta o ecrã)", async () => {
+    m.rpc.mockResolvedValueOnce({ data: LISTA, error: null });
+    const { result } = renderHook(() => useAtivos({}), { wrapper: envolver });
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    m.rpc.mockResolvedValueOnce({ data: null, error: { code: "XX000", message: "boom" } });
+    await act(async () => { result.current.refazer(); });
+    await waitFor(() => expect(result.current.mensagem).toBe("T:ativos.erroLer"));
+    expect(result.current.estado).toBe("ok");
+    expect(result.current.dados).not.toBeNull();
   });
 
   it("rh_oculto: sem atribuições nem nomes (a base manda null) e o ecrã sabe porquê", async () => {
@@ -171,8 +207,59 @@ describe("useAtivoMutacoes", () => {
     const { result } = renderHook(() => useAtivoMutacoes(), { wrapper: envolver });
     let r: unknown;
     await act(async () => { r = await result.current.criar("servico", CAMPOS); });
-    expect(r).toEqual({ ok: false, codigo, mensagem: texto });
+    expect(r).toMatchObject({ ok: false, codigo, mensagem: texto });
     expect(m.captura).not.toHaveBeenCalled();
+  });
+
+  it("ATV18, ATV16 e ATV03 mostram o DETAIL pt-PT da base (diz porquê); os outros códigos, o texto do ecrã", async () => {
+    const { result } = renderHook(() => useAtivoMutacoes(), { wrapper: envolver });
+    const chamar = async (message: string, details: string) => {
+      m.rpc.mockResolvedValue({ data: null, error: { code: "P0001", message, details } });
+      let r: unknown;
+      await act(async () => { r = await result.current.ligarPessoa("a1", "pe1"); });
+      return r;
+    };
+    expect(await chamar("ATV18", "Esta atribuição já foi devolvida.")).toMatchObject({ codigo: "ATV18", mensagem: "Esta atribuição já foi devolvida." });
+    expect(await chamar("ATV16", "Indique a data e o motivo da desativação.")).toMatchObject({ mensagem: "Indique a data e o motivo da desativação." });
+    expect(await chamar("ATV12", "Já existe um ativo com este código.")).toMatchObject({ mensagem: "T:ativos.erro.ATV12" });
+    expect(await chamar("ATV18", "")).toMatchObject({ mensagem: "T:ativos.erro.ATV18" });
+  });
+
+  it("ATV03 diz o campo pelo DETAIL (código, série, localização, notas; senão o nome)", async () => {
+    const { result } = renderHook(() => useAtivoMutacoes(), { wrapper: envolver });
+    const chamar = async (details: string) => {
+      m.rpc.mockResolvedValue({ data: null, error: { code: "P0001", message: "ATV03", details } });
+      let r: unknown;
+      await act(async () => { r = await result.current.criar("servico", CAMPOS); });
+      return r;
+    };
+    expect(await chamar("O código tem no máximo 40 caracteres.")).toMatchObject({ campo: "codigo", mensagem: "O código tem no máximo 40 caracteres." });
+    expect(await chamar("O número de série tem no máximo 80 caracteres.")).toMatchObject({ campo: "numSerie" });
+    expect(await chamar("A localização tem no máximo 120 caracteres.")).toMatchObject({ campo: "localizacao" });
+    expect(await chamar("As notas têm no máximo 1000 caracteres.")).toMatchObject({ campo: "notas" });
+    expect(await chamar("O nome é obrigatório e tem no máximo 120 caracteres.")).toMatchObject({ campo: "nome" });
+  });
+
+  it.each(["ATV14", "ATV15", "ATV17", "ATV18"])("%s (a lista mudou entretanto): a lista refaz-se sozinha", async (codigo) => {
+    m.rpc.mockImplementation(async (fn: string) => (fn === "rpc_ativos_listar" ? { data: LISTA, error: null } : { data: null, error: { code: "P0001", message: codigo } }));
+    const qc = cliente();
+    const w = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+    const lista = renderHook(() => useAtivos({}), { wrapper: w });
+    await waitFor(() => expect(lista.result.current.estado).toBe("ok"));
+    const mut = renderHook(() => useAtivoMutacoes(), { wrapper: w });
+    await act(async () => { await mut.result.current.reativar("a1"); });
+    await waitFor(() => expect(m.rpc.mock.calls.filter((c) => c[0] === "rpc_ativos_listar")).toHaveLength(2));
+  });
+
+  it("um erro de regra que não é de concorrência (ATV12) não refaz a lista", async () => {
+    m.rpc.mockImplementation(async (fn: string) => (fn === "rpc_ativos_listar" ? { data: LISTA, error: null } : { data: null, error: { code: "P0001", message: "ATV12" } }));
+    const qc = cliente();
+    const w = ({ children }: { children: ReactNode }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>;
+    const lista = renderHook(() => useAtivos({}), { wrapper: w });
+    await waitFor(() => expect(lista.result.current.estado).toBe("ok"));
+    const mut = renderHook(() => useAtivoMutacoes(), { wrapper: w });
+    await act(async () => { await mut.result.current.criar("estrutura", CAMPOS); });
+    expect(m.rpc.mock.calls.filter((c) => c[0] === "rpc_ativos_listar")).toHaveLength(1);
   });
 
   it("42501 é «sem permissão»; PGRST202 é «indisponível»; o resto é genérico e vai para o registo", async () => {

@@ -17,8 +17,8 @@ export type MotivoDesativacao = (typeof MOTIVOS_DESATIVACAO)[number];
 export type EstadoAtivo = "ativo" | "desativado";
 
 /**
- * Limites da base. A data vai de 2000-01-01 a hoje + 10 anos (`dataMaxima()` de `custoBase.ts`, o mesmo teto do RH e da
- * migration), e os euros chegam a 9 999 999 999,99.
+ * Limites da base. A data (de compra e de desativação) vai de 2000-01-01 a hoje + 7 dias (ATV07 e ATV16; ver `dataMaximaAtivo()` em
+ * `validarAtivo.ts`), e os euros chegam a 9 999 999 999,99.
  */
 export const LIMITES_ATIVO = {
   valorMaximo: 9999999999.99,
@@ -70,8 +70,13 @@ export interface Ativo {
   desativadoNota: string | null;
   /** Só nos de serviço. */
   catEquipamento: CatEquipamentoLigado | null;
-  /** Só nos de pessoa, e só com `hr.pessoas.retribuicao.view`; sem ela, `null`. */
+  /** Só nos de pessoa, e só com `hr.pessoas.retribuicao.view`; sem ela, `null`. Também `null` se a pessoa já foi apagada. */
   atribuicao: AtribuicaoDoAtivo | null;
+  /**
+   * Está atribuído a uma pessoa (chave `ligado` da base). Vem sempre, mesmo sem `hr.pessoas.retribuicao.view`: não diz a quem, só
+   * que está atribuído. É o que decide «Sem pessoa ligada» e se se pode desativar; `atribuicao` pode ser `null` com `ligado` verdadeiro.
+   */
+  ligado: boolean;
 }
 
 /** Uma atribuição do RH ainda sem ativo registado (só vem com `hr.pessoas.retribuicao.view`). */
@@ -169,6 +174,7 @@ export function ativoDaLinha(l: Linha): Ativo | null {
     desativadoNota: texto(l.desativado_nota),
     catEquipamento: catDaLinha(l.cat_equipamento),
     atribuicao: atribuicaoDaLinha(l.atribuicao),
+    ligado: l.ligado === true,
   };
 }
 

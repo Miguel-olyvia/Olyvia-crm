@@ -34,7 +34,7 @@ const EXISTENTE: Ativo = {
   id: "a1", grupo: "estrutura", tipo: "mobiliario", nome: "Mesa grande", codigo: "M-01", numSerie: null, catEquipamentoId: null,
   dataCompra: "2026-01-15", valorCompra: 1200, valorResidual: 200, vidaMeses: 60, manutencaoAno: 0, centroCustoId: null,
   localizacao: "Armazém", notas: null, estado: "ativo", desativadoEm: null, desativadoMotivo: null, desativadoNota: null,
-  catEquipamento: null, atribuicao: null,
+  catEquipamento: null, atribuicao: null, ligado: false,
 };
 
 const aoFechar = vi.fn();
@@ -156,6 +156,17 @@ describe("AtivoSheet: o passo guiado do equipamento do catálogo (Serviço)", ()
     expect(campo(/^Nome/).value).toBe("Berbequim");
   });
 
+  it("a ajuda da vida diz a verdade quando o modelo só tem vida em horas ou não tem vida nenhuma", () => {
+    abrir("servico");
+    fireEvent.click(screen.getByRole("radio", { name: /Compressor/ }));
+    expect(screen.getByText("Vazio: o modelo só tem vida em horas, por isso não deprecia no tempo. Indique os meses para ver o valor atual.")).toBeInTheDocument();
+    cleanup();
+    m.opcoes = { ...OPCOES, equipamentos: [{ id: "c4", nome: "Escada", vidaAnos: null, vidaHoras: null }] };
+    abrir("servico");
+    fireEvent.click(screen.getByRole("radio", { name: /Escada/ }));
+    expect(screen.getByText("O modelo não tem vida definida. Indique a vida em meses para ver o valor atual.")).toBeInTheDocument();
+  });
+
   it("escolher o equipamento não apaga um nome já escrito", () => {
     abrir("servico");
     escrever(/^Nome/, "Berbequim nº 2");
@@ -225,6 +236,30 @@ describe("AtivoSheet: validações no ecrã (nada vai à base)", () => {
       escrever(/Vida útil/, vida);
       guardar();
       await waitFor(() => expect(m.criar).toHaveBeenCalledTimes(1));
+      unmount();
+    }
+  });
+
+  it("a data de compra vai até hoje + 7 dias (como a base): o campo diz o máximo e uma data a mais fica bloqueada", () => {
+    abrir("estrutura");
+    expect(campo(/Data de compra/).max).toBe("2026-06-22");
+    preencher();
+    escrever(/Data de compra/, "2026-06-23");
+    guardar();
+    expect(screen.getByText("Indique uma data de compra válida.")).toBeInTheDocument();
+    expect(m.criar).not.toHaveBeenCalled();
+  });
+
+  it("o valor aceita «1.234,50», «1234,50» e «1 234,50»", async () => {
+    for (const texto of ["1.234,50", "1234,50", "1 234,50"]) {
+      m.criar.mockClear();
+      const { unmount } = abrir("estrutura");
+      escrever(/^Nome/, "Mesa");
+      escolher(/^Tipo/, "Mobiliário");
+      escrever(/Valor de compra/, texto);
+      guardar();
+      await waitFor(() => expect(m.criar).toHaveBeenCalledTimes(1));
+      expect(m.criar).toHaveBeenCalledWith("estrutura", expect.objectContaining({ p_valor_compra: 1234.5 }));
       unmount();
     }
   });
@@ -319,6 +354,13 @@ describe("AtivoSheet: o que se envia à base", () => {
     expect(aoGuardar).toHaveBeenCalledWith({ nome: "Mesa grande nova", edicao: true });
   });
 
+  it("editar mostra os valores com vírgula e dois decimais (1234,50 e não 1234.5)", () => {
+    abrir("estrutura", { ...EXISTENTE, valorCompra: 1234.5, valorResidual: 99.9, manutencaoAno: 12 });
+    expect(campo(/Valor de compra/).value).toBe("1234,50");
+    expect(campo(/Valor residual/).value).toBe("99,90");
+    expect(campo(/Manutenção por ano/).value).toBe("12");
+  });
+
   it("um duplo clique em Guardar envia uma só vez", async () => {
     let resolver: (v: unknown) => void = () => {};
     m.criar.mockReturnValue(new Promise((r) => { resolver = r; }));
@@ -364,6 +406,17 @@ describe("AtivoSheet: os erros da base, traduzidos", () => {
     guardar();
     await waitFor(() => expect(screen.getAllByText(texto).length).toBeGreaterThan(0));
     expect(campo(/Procurar equipamento/)).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("ATV03 sobre as notas (campo dito pelo DETAIL da base): abre a secção recolhida e marca o campo certo", async () => {
+    const texto = "As notas têm no máximo 1000 caracteres.";
+    m.criar.mockResolvedValue({ ok: false, codigo: "ATV03", campo: "notas", mensagem: texto });
+    abrir("estrutura");
+    preencherEstrutura();
+    guardar();
+    await waitFor(() => expect(screen.getAllByText(texto).length).toBeGreaterThan(0));
+    expect(campo(/Notas/)).toHaveAttribute("aria-invalid", "true");
+    expect(campo(/^Nome/)).not.toHaveAttribute("aria-invalid");
   });
 
   it("um erro sem campo (ATV17, 42501) mostra-se num aviso role=alert e o painel fica aberto", async () => {

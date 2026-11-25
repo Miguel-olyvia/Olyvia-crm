@@ -6,12 +6,13 @@
  * `ativos.edit`; ligar a uma pessoa pede também `hr.pessoas.retribuicao.edit`. Os custos por pessoa continuam no RH e nada daqui
  * entra em preços ou orçamentos. Cliente tolerante: sem o registo na base (migration por aplicar) ou sem acesso, o ecrã diz-o.
  */
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Plus, Search, TriangleAlert } from "lucide-react";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { AtivoDetalhe } from "@/components/ativos/AtivoDetalhe";
 import { AtivoSheet, type AvisoGuardado } from "@/components/ativos/AtivoSheet";
 import { DesativarAtivoDialog } from "@/components/ativos/DesativarAtivoDialog";
+import { DesligarPessoaDialog } from "@/components/ativos/DesligarPessoaDialog";
 import { GrupoPessoas } from "@/components/ativos/GrupoPessoas";
 import { LigarPessoaDialog } from "@/components/ativos/LigarPessoaDialog";
 import { ListaAtivos } from "@/components/ativos/ListaAtivos";
@@ -65,6 +66,9 @@ export default function Ativos() {
   const [detalheId, setDetalheId] = useState<string | null>(null);
   const [aDesativar, setADesativar] = useState<Ativo | null>(null);
   const [aLigar, setALigar] = useState<Ativo | null>(null);
+  const [aDesligar, setADesligar] = useState<Ativo | null>(null);
+  // Quem abriu a folha ou o diálogo (o ativo da lista, ou o botão «Registar ativo»): ao fechar, o foco volta lá.
+  const origem = useRef<HTMLElement | null>(null);
 
   // «Todos» e «Desativados» pedem também os desativados à base; «Desativados» filtra-se depois no ecrã.
   const leitura = useAtivos({ incluirDesativados: estado !== "ativos", enabled: podeVer && !permissoesACarregar });
@@ -86,9 +90,22 @@ export default function Ativos() {
   const registar = (mensagem: string) => { setAviso(mensagem); setErroAcao(null); };
 
   const aoGuardar = ({ nome, edicao }: AvisoGuardado) => registar(t(edicao ? "ativos.aviso.guardado" : "ativos.aviso.criado", { nome }));
+  // A origem só se guarda ao abrir a partir da lista ou dos botões «Registar»; ao passar do detalhe para um painel ou diálogo mantém-se.
+  const lembrar = (el: HTMLElement) => { origem.current = el; };
+  const registarAtivo = (g: GrupoAtivo, el: HTMLElement) => { lembrar(el); setPainel({ grupo: g, ativo: null }); };
+  // Só devolve o foco quando já não há outra folha ou diálogo aberto (senão roubava o foco ao que acabou de abrir).
+  const devolverFoco = (ev: Event) => {
+    if (document.querySelector('[role="dialog"][data-state="open"], [role="alertdialog"][data-state="open"]')) return;
+    const alvo = origem.current;
+    if (alvo?.isConnected) {
+      ev.preventDefault();
+      alvo.focus();
+    }
+  };
   const editar = (a: Ativo) => { setDetalheId(null); setPainel({ grupo: a.grupo, ativo: a }); };
   const desativar = (a: Ativo) => { setDetalheId(null); setADesativar(a); };
   const ligar = (a: Ativo) => { setDetalheId(null); setALigar(a); };
+  const pedirDesligar = (a: Ativo) => { setDetalheId(null); setADesligar(a); };
   const reativar = async (a: Ativo) => {
     const r = await mutacoes.reativar(a.id);
     setDetalheId(null);
@@ -96,9 +113,9 @@ export default function Ativos() {
     else setErroAcao(r.mensagem ?? "");
   };
   const desligar = async (a: Ativo) => {
+    setADesligar(null);
     if (!a.atribuicao) return;
     const r = await mutacoes.desligarPessoa(a.atribuicao.pessoaEquipamentoId);
-    setDetalheId(null);
     if (r.ok) registar(t("ativos.aviso.desligado", { nome: a.nome }));
     else setErroAcao(r.mensagem ?? "");
   };
@@ -114,7 +131,7 @@ export default function Ativos() {
         </div>
         {podeEditar
           ? (
-            <Button type="button" onClick={() => setPainel({ grupo: g, ativo: null })} className={cn("min-h-11 gap-2", FOCO)}>
+            <Button type="button" onClick={(e) => registarAtivo(g, e.currentTarget)} className={cn("min-h-11 gap-2", FOCO)}>
               <Plus className="h-4 w-4" aria-hidden="true" />{t("ativos.novo")}
             </Button>
           )
@@ -127,7 +144,7 @@ export default function Ativos() {
     const filtrado = filtrarAtivos(dadosDoGrupo, estado, texto, rhOculto);
     return filtrado.length === 0
       ? <p className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">{t("ativos.vazio.pesquisa")}</p>
-      : <ListaAtivos grupo={g} ativos={filtrado} mes={mes} rhOculto={rhOculto} aoAbrir={(a) => setDetalheId(a.id)} />;
+      : <ListaAtivos grupo={g} ativos={filtrado} mes={mes} rhOculto={rhOculto} aoAbrir={(a, el) => { lembrar(el); setDetalheId(a.id); }} />;
   };
 
   const resumo = (dadosDoGrupo: readonly Ativo[]): string =>
@@ -136,7 +153,7 @@ export default function Ativos() {
 
   const painelDoGrupo = (g: GrupoAtivo, d: AtivosLidos): JSX.Element => (
     <div className="space-y-4">
-      {d[g].some((a) => a.estado === "ativo") && <TotaisGrupo grupo={g} totais={totaisAtivos(d[g], mes)} />}
+      {d[g].some((a) => a.estado === "ativo") && <TotaisGrupo grupo={g} totais={totaisAtivos(d[g], mes)} parcial={d.truncado} soEmUso={estado !== "ativos"} />}
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-56 flex-1 space-y-1.5">
           <Label htmlFor="ativos-procurar">{t("ativos.filtro.procurar")}</Label>
@@ -159,7 +176,8 @@ export default function Ativos() {
       </div>
       <p role="status" aria-live="polite" data-testid="ativos-resumo" className="min-h-5 text-sm tabular-nums text-muted-foreground">{aviso ?? resumo(d[g])}</p>
       {erroAcao && <p role="alert" className="text-sm font-medium text-destructive">{erroAcao}</p>}
-      {d.truncado && <p className="text-sm text-amber-800 dark:text-amber-300">{t("ativos.truncado")}</p>}
+      {/* A base devolve no máximo 2000 ativos no total (por ordem de nome): não se sabe de que grupo ficaram de fora, por isso o aviso vale para todos. */}
+      {d.truncado && <p data-testid="aviso-truncado" className="text-sm text-amber-800 dark:text-amber-300">{t("ativos.truncado")}</p>}
       {g === "pessoa"
         ? <GrupoPessoas rhOculto={rhOculto} semAtivo={d.atribuicoesSemAtivo}>{lista(g, d[g])}</GrupoPessoas>
         : lista(g, d[g])}
@@ -174,7 +192,7 @@ export default function Ativos() {
           <p className="max-w-3xl text-muted-foreground">{t("ativos.sub")}</p>
         </div>
         {podeEditar && leitura.estado === "ok" && (
-          <Button type="button" onClick={() => setPainel({ grupo, ativo: null })} className={cn("min-h-11 gap-2", FOCO)}>
+          <Button type="button" onClick={(e) => registarAtivo(grupo, e.currentTarget)} className={cn("min-h-11 gap-2", FOCO)}>
             <Plus className="h-4 w-4" aria-hidden="true" />{t("ativos.novo")}
           </Button>
         )}
@@ -203,8 +221,17 @@ export default function Ativos() {
         </div>
       )}
 
+      {/* Uma releitura que falha com dados na mão não tira o ecrã: a lista fica e este aviso diz que falhou. */}
+      {leitura.estado === "ok" && leitura.mensagem && (
+        <div role="alert" className="flex flex-wrap items-center gap-3 rounded-lg border border-destructive/40 p-3 text-sm text-destructive">
+          <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden="true" />
+          <span>{leitura.mensagem}</span>
+          <Button type="button" variant="outline" onClick={leitura.refazer} className={cn("min-h-11", FOCO)}>{t("ativos.tentarDeNovo")}</Button>
+        </div>
+      )}
+
       {leitura.estado === "ok" && dados && !naoPodeVer && (
-        <Tabs value={grupo} onValueChange={mudarGrupo} className="space-y-4">
+        <Tabs value={grupo} onValueChange={mudarGrupo} className="space-y-4" aria-busy={leitura.aAtualizar}>
           <TabsList className={LISTA_ABAS} aria-label={t("ativos.separadores")}>
             {GRUPOS_ATIVO.map((g) => (
               <TabsTrigger key={g} value={g} className={ABA}>
@@ -223,16 +250,18 @@ export default function Ativos() {
 
       <AtivoDetalhe
         ativo={detalhe} mes={mes} centrosCusto={dados?.centrosCusto ?? []} rhOculto={rhOculto} podeEditar={podeEditar} podeLigar={podeLigar}
-        aoFechar={() => setDetalheId(null)} aoEditar={editar} aoDesativar={desativar} aoReativar={(a) => void reativar(a)} aoLigar={ligar} aoDesligar={(a) => void desligar(a)}
+        aoFechar={() => setDetalheId(null)} aoFecharFoco={devolverFoco} aoEditar={editar} aoDesativar={desativar} aoReativar={(a) => void reativar(a)} aoLigar={ligar} aoDesligar={pedirDesligar}
       />
-      <AtivoSheet aberto={painel !== null} grupo={painel?.grupo ?? grupo} ativo={painel?.ativo ?? null} aoFechar={() => setPainel(null)} aoGuardar={aoGuardar} />
+      <AtivoSheet aberto={painel !== null} grupo={painel?.grupo ?? grupo} ativo={painel?.ativo ?? null} aoFechar={() => setPainel(null)} aoFecharFoco={devolverFoco} aoGuardar={aoGuardar} />
       <DesativarAtivoDialog
-        ativo={aDesativar} aoFechar={() => setADesativar(null)} aoDesativar={({ nome }) => registar(t("ativos.aviso.desativado", { nome }))}
+        ativo={aDesativar} aoFechar={() => setADesativar(null)} aoFecharFoco={devolverFoco}
+        aoDesativar={({ nome }) => registar(t("ativos.aviso.desativado", { nome }))}
       />
       <LigarPessoaDialog
-        ativo={aLigar} atribuicoes={dados?.atribuicoesSemAtivo ?? []} aoFechar={() => setALigar(null)}
+        ativo={aLigar} atribuicoes={dados?.atribuicoesSemAtivo ?? []} aoFechar={() => setALigar(null)} aoFecharFoco={devolverFoco}
         aoLigar={({ nome, pessoa }) => registar(t("ativos.aviso.ligado", { nome, pessoa }))}
       />
+      <DesligarPessoaDialog ativo={aDesligar} aoFechar={() => setADesligar(null)} aoFecharFoco={devolverFoco} aoConfirmar={(a) => void desligar(a)} />
     </div>
   );
 }
