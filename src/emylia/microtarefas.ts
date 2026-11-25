@@ -14,20 +14,84 @@ import { r2, type Estado, type Plano, type Tarefa } from "./motor";
 import { custosDe, receitaDe } from "./v2/custosModelo";
 import { instrucoesDe } from "./trabalhoObra";
 import { tarefaMudelar, tarefasMudelarDe } from "./microtarefasMudelar";
+import { microtarefasDoServico } from "./real/microtarefasServico";
 
 /** Uma microtarefa: o id (estável), o texto e as horas previstas (as do Catálogo; as juntadas à mão não têm). 25/11: `ref`, a tarefa da
  *  Mudelar no Infraspeak de onde veio (a checklist e quem faz lêem-se dela: dados/infraspeakMudelar.ts; não se gravam com o plano). */
-export interface Micro { id: number; n: string; h?: number; ref?: string }
+export interface Micro { id: number; n: string; h?: number; ref?: string;
+  /** 25/11 (Rúben: os «1 dia» do Infraspeak «são espera»): dias de espera (secagem, cura): contam nos dias da tarefa, não nas horas */ dias?: number;
+  /** 25/11: a checklist e quem faz, quando vêm da ficha do serviço e não são as da tarefa do Infraspeak (`ref`) */ det?: string[]; quem?: string }
 /** De onde vem a lista que se mostra. */
-export type OrigemMicro = "obra" | "infraspeak" | "catalogo" | "instrucoes";
+export type OrigemMicro = "obra" | "servico" | "infraspeak" | "catalogo" | "instrucoes";
 
 /** 25/11: as tarefas reais da Mudelar no Infraspeak para esta tarefa do plano (microtarefasMudelar.ts). */
 export const microDoInfraspeak = (t: Tarefa, p?: Plano | null): Micro[] =>
-  tarefasMudelarDe(t, p).map((x, id) => ({ id, n: x.n, ...(x.h ? { h: x.h } : {}), ref: x.ref }));
-/** A checklist e quem faz, de uma microtarefa que veio do Infraspeak. */
+  tarefasMudelarDe(t, p).map((x, id) => ({ id, n: x.n, ...(x.h ? { h: x.h } : {}), ...(x.dias ? { dias: x.dias } : {}), ref: x.ref }));
+/** 25/11: uma microtarefa do Infraspeak que é espera («1 day»), gravada antes como 8 h por dia: passa a dias de espera (sem horas). */
+export function comEspera(m: Micro): Micro {
+  const x = tarefaMudelar(m.ref);
+  if (!x?.dias || m.dias != null) return m;
+  if (m.h != null && Math.abs(m.h - 8 * x.dias) > 0.01) return m;
+  const { h: _h, ...resto } = m;
+  return { ...resto, dias: x.dias };
+}
+/** A checklist e quem faz de uma microtarefa: os da ficha do serviço, senão os da tarefa do Infraspeak de onde veio. */
 export function detalheMicro(m: Micro): { quem?: string; det: string[] } {
   const x = tarefaMudelar(m.ref);
-  return x ? { quem: x.quem, det: x.det } : { det: [] };
+  return { ...(m.quem ?? x?.quem ? { quem: m.quem ?? x?.quem } : {}), det: m.det ?? x?.det ?? [] };
+}
+
+/** Uma parte de um «MO Modelo» (várias tarefas do mesmo serviço, uma por ofício): a lista do serviço seria a da obra toda. */
+const ehParte = (t: Tarefa, p?: Pick<Plano, "tasks"> | null): boolean => !!t.svcs[0] && !!p && p.tasks.filter((x) => x.svcs[0] === t.svcs[0]).length > 1;
+
+/** 25/11: as microtarefas da ficha do serviço no Catálogo da organização (real/microtarefasServico.ts). A checklist e quem faz só se
+ *  guardam na microtarefa quando diferem das da tarefa do Infraspeak de onde vieram. */
+export function microDoServico(t: Tarefa, p?: Plano | null): Micro[] {
+  if (ehParte(t, p)) return [];
+  const L = microtarefasDoServico(t.svcs[0]);
+  if (!L) return [];
+  return L.map((x, id) => {
+    const r = tarefaMudelar(x.ref), igual = !!r && r.det.length === x.checklist.length && r.det.every((d, k) => d === x.checklist[k]);
+    return { id, n: x.nome, ...(x.horas != null ? { h: x.horas } : {}), ...(x.ref ? { ref: x.ref } : {}),
+      ...(!igual && x.checklist.length ? { det: x.checklist } : {}), ...(x.quem && x.quem !== r?.quem ? { quem: x.quem } : {}) };
+  });
+}
+/** A proposta para uma tarefa: a lista da ficha do serviço; sem ela, as tarefas da Mudelar no Infraspeak para este trabalho. */
+function propostaSo(t: Tarefa, p?: Plano | null): { L: Micro[]; origem: "servico" | "infraspeak" } | null {
+  const s = microDoServico(t, p);
+  if (s.length) return { L: s, origem: "servico" };
+  const i = microDoInfraspeak(t, p);
+  return i.length ? { L: i, origem: "infraspeak" } : null;
+}
+/** 25/11 (obra 1048: «Demolição e remoção» e o extra «Demolição de parede» com as mesmas 21 tarefas): numa obra, cada tarefa do Infraspeak
+ *  (ref) fica numa só tarefa do plano: na que tem mais horas (empate: a primeira). As outras não a repetem; uma lista que fica vazia
+ *  deixa a tarefa com o Catálogo ou as instruções. */
+function donoDasRefs(p: Plano): Map<string, Tarefa> {
+  const dono = new Map<string, Tarefa>();
+  for (const x of p.tasks) {
+    for (const m of propostaSo(x, p)?.L ?? []) {
+      if (!m.ref) continue;
+      const atual = dono.get(m.ref);
+      if (!atual || x.h > atual.h) dono.set(m.ref, x);
+    }
+  }
+  return dono;
+}
+const cacheDono = new WeakMap<Plano, { chave: string; dono: Map<string, Tarefa> }>();
+function donoDe(p: Plano): Map<string, Tarefa> {
+  const chave = p.tasks.map((x) => `${x.nome}|${x.svcs[0] ?? ""}|${x.h}|${x.fase ?? ""}`).join("~");
+  const c = cacheDono.get(p);
+  if (c && c.chave === chave) return c.dono;
+  const dono = donoDasRefs(p);
+  cacheDono.set(p, { chave, dono });
+  return dono;
+}
+export function propostaMicro(t: Tarefa, p?: Plano | null): { L: Micro[]; origem: "servico" | "infraspeak" } | null {
+  const r = propostaSo(t, p);
+  if (!r || !p || !p.tasks.includes(t)) return r;
+  const dono = donoDe(p);
+  const L = r.L.filter((m) => !m.ref || dono.get(m.ref) === t).map((m, id) => ({ ...m, id }));
+  return L.length ? { L, origem: r.origem } : null;
 }
 
 /** Os passos da mão de obra do serviço da tarefa no Catálogo, com as horas repartidas pelas horas da tarefa. [] sem Catálogo. */
@@ -61,18 +125,22 @@ export const microDasInstrucoes = (t: Tarefa): Micro[] => instrucoesDe(t).passos
  *  1. a desta obra (o gestor mudou-a, ou fixou-a ao abrir o Estúdio);
  *  2. a que o técnico estava a ver quando marcou a primeira (exec.microDe): as marcas são dessa lista;
  *  3. com marcas antigas (de antes de 24/11, sem exec.microDe): as instruções, onde foram marcadas;
- *  4. 25/11: as tarefas da Mudelar no Infraspeak para este trabalho;
+ *  4. 25/11: a lista da ficha do serviço no Catálogo; sem ela, as tarefas da Mudelar no Infraspeak para este trabalho;
  *  5. os passos do Catálogo (dois ou mais);
  *  6. as instruções pelo nome da tarefa.
  * Uma tarefa de correção tem sempre as instruções do pedido.
  */
 export function microtarefasDe(t: Tarefa, S?: Estado | null, p?: Plano | null): { L: Micro[]; origem: OrigemMicro } {
+  const r = microtarefasCru(t, S, p);
+  return { ...r, L: r.L.map(comEspera) };
+}
+function microtarefasCru(t: Tarefa, S?: Estado | null, p?: Plano | null): { L: Micro[]; origem: OrigemMicro } {
   if (t.micro) return { L: t.micro.map((m) => ({ ...m })), origem: "obra" };
   const instrucoes = { L: microDasInstrucoes(t), origem: "instrucoes" as const };
   if (t.corrige != null || t.exec?.microDe === "instrucoes") return instrucoes;
   if (t.exec?.passos?.length && !t.exec.microDe) return instrucoes;
-  const inf = t.exec?.microDe === "catalogo" ? [] : microDoInfraspeak(t, p);
-  if (inf.length) return { L: inf, origem: "infraspeak" };
+  const prop = t.exec?.microDe === "catalogo" ? null : propostaMicro(t, p);
+  if (prop) return prop;
   // uma lista de verificação de um item só («Execução») não ajuda o técnico: aí ficam as instruções
   const c = microDoCatalogo(S, t, p);
   return c.length >= 2 ? { L: c, origem: "catalogo" } : instrucoes;
@@ -85,31 +153,113 @@ export function microtarefasDe(t: Tarefa, S?: Estado | null, p?: Plano | null): 
  *    como estão; as do Infraspeak que sobram juntam-se no fim, com ids novos; nada se apaga. Só uma vez (depois já têm a referência). */
 export function porFixar(t: Tarefa, S?: Estado | null, p?: Plano | null): Micro[] | null {
   if (t.exec?.estado === "validada" || t.corrige != null) return null;
-  const inf = microDoInfraspeak(t, p);
+  const inf = propostaMicro(t, p)?.L ?? [];
   const marcas = t.exec?.passos ?? [];
   if (!inf.length) {
+    // 25/11: uma lista posta pela app (do Infraspeak) que esta tarefa já não tem (outra tarefa da obra ficou com essas tarefas): volta à
+    // lista de sempre (os passos do Catálogo ou as instruções)
+    if (t.micro && !t.microMao && !marcas.length && !t.exec && t.micro.length && t.micro.every((m) => m.ref)) {
+      const c = microDoCatalogo(S, t, p);
+      return c.length >= 2 ? c : microDasInstrucoes(t);
+    }
     if (t.micro) return null;
     const r = microtarefasDe(t, S, p);
     return r.origem === "catalogo" && !marcas.length ? r.L : null;
   }
+  // 25/11 (obra 1048): uma lista posta pela app (nem mudada à mão, nem marcada pelo técnico) troca-se pela proposta certa, por inteiro
+  const chaveP = (m: Micro) => m.ref ?? 'n:' + m.n;
+  if (t.micro && !t.microMao && !marcas.length && !t.exec) {
+    const iguais = t.micro.length === inf.length && t.micro.every((m, k) => chaveP(m) === chaveP(inf[k]) && m.n === inf[k].n);
+    return iguais ? null : inf;
+  }
   // a lista que existe: a da obra; sem ela, aquela em que o técnico marcou (se marcou)
   const base = t.micro ? t.micro.map((m) => ({ ...m })) : marcas.length ? microtarefasDe(t, S, p).L : [];
   if (!base.length) return inf;
-  const jaTem = new Set(base.map((m) => m.ref).filter(Boolean));
-  if (inf.every((x) => jaTem.has(x.ref))) return null;
+  // cada microtarefa da proposta pela sua chave (a tarefa do Infraspeak; sem ela, o nome)
+  const chave = (m: Micro) => m.ref ?? "n:" + m.n;
+  const jaTem = new Set(base.map(chave));
+  if (inf.every((x) => jaTem.has(chave(x)))) return null;
   const feitas = microFeitas(t, base);
   let livre = Math.max(-1, ...base.map((m) => m.id), ...marcas) + 1;
   const usadas = new Set<string>();
   const L = base.map((m, k) => {
     const x = inf[k];
-    if (!x || feitas.has(m.id) || (m.ref && jaTem.has(m.ref))) return m;
-    usadas.add(x.ref!);
-    return { id: m.id, n: x.n, ...(x.h ? { h: x.h } : {}), ref: x.ref };
+    if (!x || feitas.has(m.id) || (m.ref && jaTem.has(m.ref)) || jaTem.has(chave(x))) return m;
+    usadas.add(chave(x));
+    const { id: _id, ...resto } = x;
+    return { ...resto, id: m.id };
   });
-  for (const x of inf) if (!usadas.has(x.ref!) && !jaTem.has(x.ref)) L.push({ ...x, id: livre++ });
+  for (const x of inf) if (!usadas.has(chave(x)) && !jaTem.has(chave(x))) L.push({ ...x, id: livre++ });
   return L;
 }
 export const listaMicro = (t: Tarefa, S?: Estado | null, p?: Plano | null): Micro[] => microtarefasDe(t, S, p).L;
+
+/** 25/11 (Rúben: «30 microtarefas que somam mais de 20 h e o plano diz 2 dias: está errado; cria uma regra que ajusta o plano»). As horas
+ *  que as microtarefas da tarefa somam (as do Infraspeak ou da ficha do serviço); null sem horas nelas ou com as instruções gerais.
+ *  A regra (motor: ajustarHorasPelasMicro): uma tarefa nunca tem menos horas no plano do que esta soma. */
+export function horasDasMicro(t: Tarefa, S?: Estado | null, p?: Plano | null): number | null {
+  const r = microtarefasDe(t, S, p);
+  if (r.origem === "instrucoes" || r.origem === "catalogo") return null;
+  const h = r.L.reduce((a, m) => a + (m.h ?? 0), 0);
+  return h > 0 ? r2(h) : null;
+}
+/** Os dias de espera das microtarefas (secagens e curas: os «1 day» do Infraspeak). 25/11 (Rúben: «só a maior»): as esperas de uma
+ *  tarefa correm ao mesmo tempo (as paredes e o chão secam juntos): conta a maior, não a soma. */
+export function esperaDasMicro(t: Tarefa, S?: Estado | null, p?: Plano | null): number {
+  const r = microtarefasDe(t, S, p);
+  if (r.origem === "instrucoes" || r.origem === "catalogo") return 0;
+  return r.L.reduce((a, m) => Math.max(a, m.dias ?? 0), 0);
+}
+/** A soma das esperas (como a regra as contava antes de 25/11, para corrigir os dias que ficaram a mais). */
+function esperaSomada(t: Tarefa, S?: Estado | null, p?: Plano | null): number {
+  const r = microtarefasDe(t, S, p);
+  if (r.origem === "instrucoes" || r.origem === "catalogo") return 0;
+  return r.L.reduce((a, m) => a + (m.dias ?? 0), 0);
+}
+const meia = (h: number) => Math.max(0.5, Math.round(h * 2) / 2);
+const diasDe = (h: number) => Math.max(1, Math.ceil(h / 8 - 1e-9));
+/**
+ * O ajuste que a regra pede a uma tarefa por começar (ou null):
+ *  · as horas nunca abaixo das que as microtarefas somam (só trabalho);
+ *  · os dias nunca abaixo dos dias desse trabalho mais os dias de espera;
+ *  · 25/11 (Rúben: «são espera»): horas que a regra subiu antes contando a espera como 8 h por dia voltam ao trabalho real (sem descer
+ *    abaixo das horas do orçamento, `hOrc`).
+ */
+export function ajustePorFazer(t: Tarefa, S?: Estado | null, p?: Plano | null, hOrc?: number): { h: number; dur: number } | null {
+  if (t.exec || t.corrige != null) return null;
+  // as horas do orçamento (a base do plano), quando a base está alinhada com as tarefas: o motor e os contadores contam igual
+  if (hOrc == null && p?.base && p.base.length === p.tasks.length) hOrc = p.base[p.tasks.indexOf(t)]?.h;
+  const soma = horasDasMicro(t, S, p), espera = esperaDasMicro(t, S, p);
+  if (soma == null && !espera) return null;
+  // 25/11: só se mexe quando as microtarefas pedem mais horas (arredonda para cima, à meia hora) ou na correção da espera; nunca só por
+  // arredondar (antes, 4,66 h passavam a 4,5 h e a tarefa perdia um dia)
+  const cima = (x: number) => Math.max(0.5, Math.ceil(x * 2 - 1e-9) / 2);
+  let h = t.h;
+  // a correção: as horas que a regra antiga subiu com as esperas a 8 h (somadas) voltam ao orçamento, ou ao trabalho se for mais
+  const somada = esperaSomada(t, S, p);
+  if (somada && soma != null && Math.abs(t.h - meia(soma + 8 * somada)) < 0.51 && t.h > soma + 0.25) h = hOrc != null && hOrc >= soma ? hOrc : cima(soma);
+  if (soma != null && soma > h + 0.25) h = cima(soma);
+  // a subir (ou igual), os dias nunca encolhem; a corrigir para baixo (a espera contada como horas), os dias são o trabalho mais a espera
+  // sem horas novas nem espera, os dias ficam (uma tarefa com mais pessoas tem menos dias do que horas ÷ 8)
+  let dur = h < t.h ? diasDe(h) + espera : h > t.h || espera ? Math.max(diasDe(h) + espera, t.dur) : t.dur;
+  // 25/11: dias que a regra pôs com as esperas somadas descem para a maior espera
+  if (somada > espera && h === t.h && t.dur === diasDe(h) + somada) dur = diasDe(h) + espera;
+  return h !== t.h || dur !== t.dur ? { h, dur } : null;
+}
+/** 25/11 (Rúben: «a empresa absorve»): as horas acima do orçamento que vêm da regra das microtarefas (as horas da tarefa são as que as
+ *  microtarefas pedem). null: não se sabe (sem base alinhada, ou as horas não vêm da regra); 0: nenhuma. */
+export function horasDaEmpresa(t: Tarefa, S?: Estado | null, p?: Plano | null): number | null {
+  if (!p?.base || p.base.length !== p.tasks.length) return null;
+  const baseH = p.base[p.tasks.indexOf(t)]?.h;
+  if (baseH == null) return null;
+  if (t.h <= baseH + 0.001) return t.hNossa ? 0 : null;
+  const soma = horasDasMicro(t, S, p);
+  if (soma == null) return null;
+  const cima = Math.max(0.5, Math.ceil(soma * 2 - 1e-9) / 2);
+  return Math.abs(t.h - cima) < 0.01 ? r2(t.h - baseH) : null;
+}
+/** Há alguma coisa a ajustar nesta tarefa (para os contadores). */
+export const horasPorSubir = (t: Tarefa, S?: Estado | null, p?: Plano | null): number | null => ajustePorFazer(t, S, p)?.h ?? null;
 
 /** As microtarefas marcadas pelo técnico (os ids), só as que ainda estão na lista. */
 export function microFeitas(t: Tarefa, L: Micro[]): Set<number> {

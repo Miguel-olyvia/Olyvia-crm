@@ -11,6 +11,7 @@ import { detalheMicro, microFeitas, microtarefasDe, type MudancaMicro } from "..
 
 const ORIGEM = {
   obra: "Lista desta obra. A ficha do serviço no Catálogo não muda.",
+  servico: "Vêm da ficha do serviço no Catálogo. Mudar aqui só muda esta obra.",
   infraspeak: "Vêm das tarefas da Mudelar no Infraspeak. Mudar aqui só muda esta obra.",
   catalogo: "Vêm da ficha do serviço no Catálogo. Mudar aqui só muda esta obra.",
   instrucoes: "Vêm das instruções do trabalho. Mudar aqui só muda esta obra.",
@@ -62,6 +63,7 @@ export function MicrotarefasTarefa({ ctx, d, ti, mexe, cor }: { ctx: Ctx; d: Neg
                 <span className={cn("min-w-0 flex-1 text-sm", on && "text-muted-foreground")}>{k + 1}. {m.n}</span>
               )}
               {m.h != null && !editar && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{nfmt(m.h)} h</span>}
+              {m.dias != null && !editar && <span className="shrink-0 text-xs tabular-nums text-muted-foreground" title="Espera (secagem): conta nos dias, não nas horas">{m.dias} {m.dias === 1 ? "dia" : "dias"} de espera</span>}
               {mexe && !editar && (
                 <span className="flex shrink-0 items-center">
                   <button type="button" className={iconeBtn} disabled={k === 0} aria-label={`Subir «${m.n}»`} onClick={() => mudar({ k: "mover", id: m.id, para: k - 1 })}><ArrowUp className="h-4 w-4" /></button>

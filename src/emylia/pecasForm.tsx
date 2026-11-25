@@ -38,9 +38,9 @@ export function Num({ id, v, set, suf, rot, ph = "0", invalido, descr }: { id?: 
     </span>
   );
 }
-export function Chips<T extends string | null>({ rot, opcoes, v, set }: { rot: string; opcoes: readonly (readonly [T, string])[]; v: T; set: (v: T) => void }) {
+export function Chips<T extends string | null>({ rot, opcoes, v, set, descrito }: { rot: string; opcoes: readonly (readonly [T, string])[]; v: T; set: (v: T) => void; /** o id da nota que explica a escolha (aria-describedby) */ descrito?: string }) {
   return (
-    <div role="radiogroup" aria-label={rot} className="flex flex-wrap gap-2">
+    <div role="radiogroup" aria-label={rot} aria-describedby={descrito} className="flex flex-wrap gap-2">
       {opcoes.map(([k, t]) => (
         <button key={String(k)} type="button" role="radio" aria-checked={v === k} onClick={() => set(k)} className={CHIP(v === k)}>
           {v === k && <Check className="h-4 w-4 text-primary" aria-hidden="true" />}{t}

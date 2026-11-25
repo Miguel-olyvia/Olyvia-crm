@@ -35,6 +35,7 @@ import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
 import { escolherProdutoDoServidor, produtoDeLinha, usePesquisaProdutos } from "./real/pesquisaProdutos";
 import { normal } from "./catalogo";
 import { FASES_OBRA, fasesDoServico, fasesPadrao, type FaseObra } from "./fasesObra";
+import { MicrotarefasServico } from "./MicrotarefasServico";
 
 const CARTAO = "rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)] sm:p-6";
 const ROT = "text-[15px] font-medium";
@@ -338,6 +339,9 @@ function Ficha({ S, C, run, sid, voltar, anunciar, verLigacoes }: PropsFicha) {
           <Juntar t="Juntar passo" />
         </button>
       </Seccao>
+
+      {/* 25/11: as microtarefas do serviço (o que o técnico marca na obra) */}
+      <MicrotarefasServico sid={sid} nome={nome} oficio={oficio} fase={fases[0]} pode={pode} />
 
       {/* ---------------------------------------------------------- equipamentos */}
       <Seccao id="eq-t" titulo="Equipamentos" total={`${eur(c.eq)} €/${un}`}>

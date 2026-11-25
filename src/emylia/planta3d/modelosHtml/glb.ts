@@ -13,6 +13,7 @@ import { KERAN_SPECS } from "./specs";
 import { V, nomearMateriais } from "./util";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import type { CategoriaGlb, FormaGlb, MaterialGlb, ParamsGenerico } from "../categoriasGlb";
+import { noDaParte } from "../noDaParte";
 
 /** O interruptor único: `false` volta aos construtores procedurais em todo o lado (peças soltas e bancada). */
 export const USAR_GLB = true;
@@ -158,7 +159,7 @@ function parteConstruida(parte: CategoriaGlb["partes"][number], mats: Readonly<R
 export function montarGenerico(cena: THREE.Object3D, c: CategoriaGlb, p: ParamsGenerico, cor: string, acab?: { metalness: number; roughness: number }): ModeloMontado {
   const mats = materiaisGenericos(cor, acab), grupo = vestir(cena, mats);
   for (const parte of c.partes) {
-    let no = grupo.getObjectByName(parte.nome);
+    let no = noDaParte(grupo, parte.nome);
     if (!no && parte.emRuntime) { no = parteConstruida(parte, mats); grupo.add(no); }
     if (!no) throw new Error(`O GLB genérico «${c.id}» não tem a parte «${parte.nome}»`);
     const k = parte.colocar(p);

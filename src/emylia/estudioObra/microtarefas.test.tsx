@@ -1,9 +1,14 @@
 // 24/11 (Rúben: «cada tarefa do plano pode e deve ter microtarefas»; «no Estúdio da obra juntar e tirar tarefas, com os serviços novos a
 // gerar adenda»). As microtarefas (microtarefas.ts), as ações do motor, o painel e o tirar / juntar tarefas.
 import { afterEach, describe, expect, it } from "vitest";
+import { definirMicrotarefasServicos } from "../real/microtarefasServico";
+import { propostaDoServico } from "../MicrotarefasServico";
+import { obrasPorAtualizar } from "./AtualizarMicrotarefas";
+import { temposDoInfraspeak } from "./TemposInfraspeak";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { acoes, type Tarefa } from "../motor";
+import { acoes, impactoDoPlano, reporArredondamentos, type Tarefa } from "../motor";
 import type { Ctx } from "../pecas";
+import { esperaDasMicro, horasDasMicro, horasPorSubir } from "../microtarefas";
 import { detalheMicro, listaMicro, microDoCatalogo, microDoInfraspeak, microFeitas, microtarefasDe, mudarMicro, porFixar, progressoMicro } from "../microtarefas";
 import { obraDeExemplo } from "./exemploObra";
 import { custosDe, receitaDe } from "../v2/custosModelo";
@@ -99,12 +104,46 @@ describe("as tarefas da Mudelar no Infraspeak (25/11)", () => {
     expect(listaMicro(gas, null, { tasks: [gas, banc] } as never).map((m) => m.n)).toContain("Instalação dos pontos de consumo");
     expect(microtarefasDe(tarefa("Montar o andaime"), null).origem).toBe("instrucoes");
   });
+  it("obra com cozinha e casa de banho (1048): cada tarefa vai ao seu tipo de obra; o que não existe nesse tipo não traz nada", () => {
+    const T = (nome: string, fase: number): Tarefa => ({ nome, svcs: [], dia: 0, dur: 1, sk: 'Equipa', h: 8, tec: null, fase });
+    const plano = { tasks: [T('Lava Loiça', 4), T('Lavatório Cerâmica', 4), T('Bancada de Cozinha até 1/2 Chapa', 4), T('Mão de Obra - Pintura e Estuque Paredes', 3), T('Montagem de louças', 4)] } as never;
+    const nomes = (t: Tarefa, p = plano) => listaMicro(t, null, p).map((m) => m.n);
+    expect(nomes(T('Lava Loiça', 4))).toContain('Ligações de água');
+    expect(nomes(T('Lava Loiça', 4)).length).toBeLessThan(10);
+    expect(nomes(T('Lavatório Cerâmica', 4))).toContain('Montagem do lavatório');
+    expect(nomes(T('Mão de Obra - Pintura e Estuque Paredes', 3))).toContain('Pintura de tetos e paredes superiores');
+    const soCozinha = { tasks: [T('Bancada de Cozinha', 4), T('Montagem de louças', 4)] } as never;
+    expect(microtarefasDe(T('Montagem de louças', 4), null, soCozinha).origem).toBe('instrucoes'); // louças não existem na cozinha
+  });
+  it("numa obra, cada tarefa do Infraspeak fica numa só tarefa do plano (a com mais horas): o extra não repete a demolição", () => {
+    const T = (nome: string, h: number): Tarefa => ({ nome, svcs: [], dia: 0, dur: 1, sk: 'Servente', h, tec: null, fase: 1 });
+    const dem = T('Demolição e remoção', 15.65), extra = T('Mão de Obra Demolição de parede', 0.24);
+    const p = { tasks: [extra, dem], estado: 'aprovado', dia: 0 } as never;
+    expect(listaMicro(dem, null, p).length).toBeGreaterThan(10);
+    expect(microtarefasDe(extra, null, p).origem).toBe('instrucoes');
+    expect(microDoInfraspeak(extra, p).length).toBeGreaterThan(10); // a proposta solta continua lá (para a ficha do serviço)
+    // a lista repetida que a app já tinha posto no extra volta às instruções
+    extra.micro = microDoInfraspeak(extra, p);
+    expect(porFixar(extra, null, p)?.every((m) => !m.ref)).toBe(true);
+  });
+  it("uma lista posta pela app troca-se por inteiro pela proposta certa; mudada à mão, não", () => {
+    const { S, d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = 'Teto falso em pladur';
+    t.micro = [{ id: 0, n: 'Errada', ref: 'cozinha.4.0' }, { id: 1, n: 'Outra errada', ref: 'cozinha.4.1' }];
+    A.fixarMicrotarefas(d.id);
+    expect(t.micro.map((m) => m.ref)).toEqual(microDoInfraspeak(t, p).map((m) => m.ref));
+    A.microtarefas(d.id, livre, { k: 'juntar', n: 'Minha' });
+    expect(t.microMao).toBe(true);
+    t.micro = [{ id: 0, n: 'Errada', ref: 'cozinha.4.0' }];
+    expect(porFixar(t, S, p)?.some((m) => m.n === 'Errada')).toBe(true); // mudada à mão: só junta, não troca
+  });
   it("ao abrir o Estúdio, as listas que existem passam às do Infraspeak: os ids ficam, muda o nome, juntam-se as novas, as marcadas ficam", () => {
     const { S, d, A, p, livre } = obra();
     const t = p.tasks[livre];
     t.micro = [{ id: 0, n: "Preparar" }, { id: 1, n: "Assentar" }, { id: 7, n: "Juntada pelo gestor" }];
     t.exec = { estado: "em curso", horas: 1, fotos: [], passos: [1] };
-    t.nome = "Revestimento de parede"; // agora casa com o Infraspeak
+    t.nome = "Teto falso em pladur"; // agora casa com o Infraspeak
     const inf = microDoInfraspeak(t, p);
     expect(inf.length).toBeGreaterThan(3);
     A.fixarMicrotarefas(d.id);
@@ -121,6 +160,195 @@ describe("as tarefas da Mudelar no Infraspeak (25/11)", () => {
     A.fixarMicrotarefas(d.id);
     expect(JSON.stringify(t.micro)).toBe(antes);
     expect(porFixar(t, S, p)).toBeNull();
+  });
+});
+
+describe("as microtarefas da ficha do serviço (25/11)", () => {
+  afterEach(() => definirMicrotarefasServicos(null));
+  it("a lista da ficha do serviço vem antes do Infraspeak; a checklist do Infraspeak não se repete na tarefa", () => {
+    const { S, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "Teto falso em pladur";
+    expect(microtarefasDe(t, S, p).origem).toBe("infraspeak");
+    const inf = microDoInfraspeak(t, p);
+    const ref = inf[0].ref!, det = detalheMicro(inf[0]).det;
+    definirMicrotarefasServicos({ [t.svcs[0]]: [{ nome: "Preparar a parede", horas: 1, checklist: det, ref }, { nome: "Fotografar", checklist: ["Antes e depois"], quem: "Supervisor" }] });
+    const r = microtarefasDe(t, S, p);
+    expect(r.origem).toBe("servico");
+    expect(r.L).toEqual([{ id: 0, n: "Preparar a parede", h: 1, ref }, { id: 1, n: "Fotografar", det: ["Antes e depois"], quem: "Supervisor" }]);
+    expect(detalheMicro(r.L[0]).det).toEqual(det);
+    expect(detalheMicro(r.L[1])).toEqual({ quem: "Supervisor", det: ["Antes e depois"] });
+  });
+  it("as obras que existem: «Atualizar» muda os nomes, junta as novas, fica no histórico e só uma vez", () => {
+    const { S, d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.micro = [{ id: 0, n: "Velha" }];
+    definirMicrotarefasServicos({ [t.svcs[0]]: [{ nome: "Nova A", checklist: [] }, { nome: "Nova B", checklist: [] }] });
+    expect(obrasPorAtualizar(S, [d])[0].n).toBeGreaterThanOrEqual(1);
+    expect(A.fixarMicrotarefas(d.id, true)).toBeGreaterThan(0);
+    expect(t.micro.map((m) => [m.id, m.n])).toEqual([[0, "Nova A"], [1, "Nova B"]]);
+    expect(d.hist[0].t).toMatch(/^Plano: microtarefas atualizadas em \d+ tarefas?/);
+    expect(obrasPorAtualizar(S, [d])).toEqual([]); // só uma vez
+  });
+  it("a proposta para um serviço vem do Infraspeak (nome, ofício e fase)", () => {
+    const L = propostaDoServico("x", "Montagem de louças sanitárias", "Canalizador", 4);
+    expect(L.map((m) => m.nome)).toContain("Montagem da sanita");
+    expect(L[0].checklist.length).toBeGreaterThan(0);
+    expect(propostaDoServico("y", "Montar o andaime", "Equipa")).toEqual([]);
+  });
+});
+
+describe("a regra das horas pelas microtarefas (25/11)", () => {
+  it("uma tarefa por começar sobe às horas que as microtarefas somam (os dias e as seguintes andam); começada não; menos horas não desce", () => {
+    const { S, d, A, p, livre, ix } = obra();
+    const t = p.tasks[livre];
+    t.nome = "Teto falso em pladur"; t.h = 4; delete t.bloqueio;
+    const soma = horasDasMicro(t, S, p)!;
+    expect(soma).toBeGreaterThan(8);
+    const durAntes = t.dur, depois = p.tasks.filter((x, i) => i !== livre && x.dia >= t.dia + t.dur && !x.exec).map((x) => x.dia);
+    expect(A.ajustarHorasPelasMicro(d.id)).toBeGreaterThanOrEqual(1);
+    expect(t.h).toBe(Math.round(soma * 2) / 2);
+    expect(t.dur).toBeGreaterThan(durAntes);
+    expect(p.tasks.filter((x, i) => i !== livre && !x.exec && depois.length).length).toBeGreaterThanOrEqual(0);
+    expect(d.hist.some((e) => e.t.includes("(microtarefas: "))).toBe(true);
+    // já não há nada por subir; uma começada não mexe
+    expect(horasPorSubir(t, S, p)).toBeNull();
+    const rev = p.tasks[ix("Revestimento de parede")];
+    expect(horasPorSubir(rev, S, p)).toBeNull();
+    // mais horas do que as microtarefas: fica
+    t.h = Math.round((soma + 10) * 2) / 2;
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBe(Math.round((soma + 10) * 2) / 2); // as horas não descem
+  });
+});
+
+describe("a espera (os «1 dia» do Infraspeak) conta nos dias e não nas horas (25/11)", () => {
+  it("a espera tem dias e não horas; a tarefa fica com o trabalho em horas e os dias do trabalho mais a espera", () => {
+    const { S, d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "Teto falso em pladur"; t.h = 4; t.dur = 1; delete t.bloqueio;
+    const L = listaMicro(t, S, p), espera = esperaDasMicro(t, S, p);
+    expect(espera).toBe(1);
+    expect(L.find((m) => /tetos falsos/.test(m.n))).toMatchObject({ dias: 1 });
+    expect(L.find((m) => /tetos falsos/.test(m.n))?.h).toBeUndefined();
+    A.ajustarHorasPelasMicro(d.id);
+    const soma = horasDasMicro(t, S, p)!;
+    expect(t.h).toBe(Math.round(soma * 2) / 2);
+    expect(t.dur).toBe(Math.ceil(t.h / 8 - 1e-9) + espera);
+  });
+  it("horas que a regra subiu antes com a espera a 8 h voltam ao trabalho real (sem descer abaixo do orçamento); a lista antiga com 8 h lê-se como espera", () => {
+    const { S, d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "Teto falso em pladur"; delete t.bloqueio;
+    const soma = horasDasMicro(t, S, p)!;
+    // a lista gravada antes (o «1 day» como 8 h) e as horas subidas com ela
+    t.micro = microDoInfraspeak(t, p).map((m) => (m.dias ? { id: m.id, n: m.n, h: 8 * m.dias, ref: m.ref } : m));
+    expect(esperaDasMicro(t, S, p)).toBe(1);
+    t.h = Math.round((soma + 8) * 2) / 2; t.dur = Math.ceil(t.h / 8);
+    p.base![livre].h = 2;
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBe(Math.round(soma * 2) / 2);
+    expect(t.dur).toBe(Math.ceil(t.h / 8 - 1e-9) + 1);
+  });
+});
+
+describe("só a maior espera conta (25/11)", () => {
+  it("três esperas de 2 dias contam 2 dias; os dias postos com a soma (6) descem", () => {
+    const { S, d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "MO Modelo Remodelação Completa - Cozinha · regularização e rebocos"; delete t.bloqueio;
+    expect(listaMicro(t, S, p).filter((m) => m.dias === 2).length).toBe(3);
+    expect(esperaDasMicro(t, S, p)).toBe(2);
+    t.h = 4; t.dur = 1 + 6; // como a regra o deixou com as esperas somadas
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBe(4);
+    expect(t.dur).toBe(1 + 2);
+    expect(A.ajustarHorasPelasMicro(d.id)).toBe(0); // já está
+  });
+});
+
+describe("sem arredondamentos (25/11)", () => {
+  it("horas que já chegam não mudam só por não serem meias horas; a subir, arredonda para cima", () => {
+    const { S, d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "Teto falso em pladur"; delete t.bloqueio;
+    const soma = horasDasMicro(t, S, p)!;
+    t.h = soma + 0.16; const dur = t.dur = 9;
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBe(soma + 0.16);
+    expect(t.dur).toBe(dur);
+    t.h = soma - 3;
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBeGreaterThanOrEqual(soma);
+    expect(t.h * 2).toBe(Math.round(t.h * 2));
+  });
+  it("repõe pelo histórico as tarefas que a regra só tinha arredondado (uma vez)", () => {
+    const { d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "Instalação Janela PVC Oscilobatente"; delete t.bloqueio; t.h = 4.5; t.dur = 1;
+    d.hist.unshift({ t: "Plano: Instalação Janela PVC Oscilobatente · 4,66 → 4,5 h, 2 → 1 dia (microtarefas: 4,66 h de trabalho)", q: "agora", k: "a" });
+    expect(reporArredondamentos(d, p, true)).toBe(1);
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBe(4.66);
+    expect(t.dur).toBe(2);
+    expect(reporArredondamentos(d, p, true)).toBe(0);
+  });
+});
+
+describe("restos da regra antiga (25/11)", () => {
+  it("regularização subida com 3 esperas somadas (28 h) volta às horas do orçamento; dias = trabalho + a maior espera", () => {
+    const { S, d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "MO Modelo Remodelação Completa - Casa de Banho Comum · regularização e rebocos"; delete t.bloqueio;
+    const soma = horasDasMicro(t, S, p)!;
+    expect(listaMicro(t, S, p).filter((m) => m.dias === 1).length).toBe(3);
+    t.h = Math.round((soma + 24) * 2) / 2; t.dur = 4; p.base![livre].h = 10.44;
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBe(10.44);
+    expect(t.dur).toBe(2 + 1);
+  });
+  it("um arredondamento para cima (18,78 → 19) também se repõe", () => {
+    const { d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "Canalização X"; delete t.bloqueio; t.h = 19; t.dur = 3;
+    d.hist.unshift({ t: "Plano: Canalização X · 18,78 → 19 h, 3 → 3 dias (microtarefas: 13 h de trabalho)", q: "agora", k: "a" });
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBe(18.78);
+  });
+});
+
+describe("a empresa absorve as horas da regra (25/11)", () => {
+  it("as horas que a regra junta não mudam o valor do orçamento; as que o gestor junta à mão, sim", () => {
+    const { S, d, A, p, livre } = obra();
+    p.estado = "por aprovar";
+    const t = p.tasks[livre];
+    t.nome = "Teto falso em pladur"; delete t.bloqueio; t.h = 2; p.base![livre].h = 2;
+    const antes = impactoDoPlano(d, S);
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBeGreaterThan(8);
+    expect(t.hNossa).toBe(t.h - 2);
+    const depois = impactoDoPlano(d, S);
+    expect(depois.horas).toBe(antes.horas);
+    expect(depois.valor).toBe(antes.valor);
+    // marcar as que a regra subiu antes (sem hNossa)
+    delete t.hNossa;
+    expect(A.ajustarHorasPelasMicro(d.id)).toBe(1);
+    expect(t.hNossa).toBe(t.h - 2);
+    expect(d.hist[1].t).toContain("ficam por conta da empresa");
+  });
+});
+
+describe("os tempos pelo Infraspeak (25/11)", () => {
+  it("cada tarefa com as horas das microtarefas; usar muda as horas da tarefa", () => {
+    const { S, d, A, p, livre } = obra();
+    p.estado = "aprovado";
+    const t = p.tasks[livre];
+    t.nome = "Teto falso em pladur";
+    const x = temposDoInfraspeak(d, S).find((y) => y.ti === livre)!;
+    expect(x.infraspeak).toBe(microDoInfraspeak(t, p).reduce((a, m) => a + (m.h ?? 0), 0));
+    expect(x.plano).toBe(t.h);
+    A.ajustarTarefa(d.id, livre, { h: x.infraspeak });
+    expect(t.h).toBe(x.infraspeak);
   });
 });
 

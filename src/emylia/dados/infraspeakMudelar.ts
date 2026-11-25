@@ -3,7 +3,9 @@
 // 802 Remodelação Casa de Banho, por fase (0 Retificação de medidas … 4 Montagem final, 5 Entrega). Cada tarefa tem o grupo (o 2.º número
 // do código do Infraspeak), o nome, as horas previstas, quem faz e a checklist. A cópia completa está em
 // Downloads «Infraspeak Mudelar tarefas 2026-11-25.json». Gerado; não editar à mão (microtarefasMudelar.ts usa-o).
-export interface TarefaMudelar { g: number; n: string; h?: number; quem: string; det: string[] }
+export interface TarefaMudelar { g: number; n: string; h?: number;
+  /** 25/11 (Rúben: «são espera»): o tempo que o Infraspeak dá em dias («1 day»): espera (secagem, cura), conta nos dias e não nas horas */ dias?: number;
+  quem: string; det: string[] }
 export interface FaseMudelar { obra: "cozinha" | "wc"; fase: number; nome: string; tarefas: TarefaMudelar[] }
 export const FASES_MUDELAR: FaseMudelar[] = [
  {
@@ -169,7 +171,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
    {
     "g": 3,
     "n": "Remoção de revestimentos de parede",
-    "h": 8,
+    "dias": 1,
     "quem": "Empreiteiro Geral",
     "det": [
      "Desmontagem de elementos de acabamento (espelhos, prateleiras, tomadas, acessórios).",
@@ -182,7 +184,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
    {
     "g": 3,
     "n": "Remoção de pavimentos",
-    "h": 8,
+    "dias": 1,
     "quem": "Empreiteiro Geral",
     "det": [
      "Levantamento do rodapé com ferramenta de ponta fina.",
@@ -195,7 +197,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
    {
     "g": 3,
     "n": "Gestão de entulho e limpeza",
-    "h": 8,
+    "dias": 1,
     "quem": "Empreiteiro Geral",
     "det": [
      "Recolha imediata do entulho com pás e sacos resistentes.",
@@ -757,7 +759,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
    {
     "g": 1,
     "n": "Regularização das paredes",
-    "h": 16,
+    "dias": 2,
     "quem": "Empreiteiro Geral",
     "det": [
      "Aplicação de reboco de regularização com argamassa tradicional (cimento/areia 1:3 a 1:4) ou massa pré-doseada industrial conforme especificação.",
@@ -770,7 +772,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
    {
     "g": 1,
     "n": "Regularização dos pavimentos",
-    "h": 16,
+    "dias": 2,
     "quem": "Empreiteiro Geral",
     "det": [
      "Limpeza e remoção de poeiras, resíduos soltos e desníveis.",
@@ -783,7 +785,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
    {
     "g": 1,
     "n": "Impermeabilização das paredes e pavimentos",
-    "h": 16,
+    "dias": 2,
     "quem": "Empreiteiro Geral",
     "det": [
      "Aplicação de sistema impermeabilizante bicomponente (cimento + resina) ou membrana líquida acrílica, conforme especificação técnica do fabricante.",
@@ -900,7 +902,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
    {
     "g": 3,
     "n": "Instalação de tetos falsos (gesso cartonado ou PVC)",
-    "h": 8,
+    "dias": 1,
     "quem": "Empreiteiro Geral",
     "det": [
      "Marcação e traçado de níveis: Utilizar nível laser ou mangueira de água para definir o plano do teto falso.; Marcar a altura de instalação (normalmente 5 a 15 cm abaixo da laje, consoante a necessidade técnica).",
@@ -913,7 +915,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
    {
     "g": 3,
     "n": "Pintura de tetos e paredes superiores",
-    "h": 8,
+    "dias": 1,
     "quem": "Empreiteiro Geral",
     "det": [
      "Aplicar primário selante acrílico sobre as superfícies de gesso cartonado e rebocos secos.",
@@ -1811,7 +1813,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
    {
     "g": 1,
     "n": "Regularização das paredes",
-    "h": 8,
+    "dias": 1,
     "quem": "Empreiteiro Geral",
     "det": [
      "Aplicação de reboco de regularização com argamassa tradicional (cimento/areia 1:3 a 1:4) ou massa pré-doseada industrial conforme especificação.",
@@ -1824,7 +1826,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
    {
     "g": 1,
     "n": "Regularização dos pavimentos",
-    "h": 8,
+    "dias": 1,
     "quem": "Empreiteiro Geral",
     "det": [
      "Limpeza e remoção de poeiras, resíduos soltos e desníveis.",
@@ -1837,7 +1839,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
    {
     "g": 1,
     "n": "Impermeabilização das paredes e pavimentos",
-    "h": 8,
+    "dias": 1,
     "quem": "Empreiteiro Geral",
     "det": [
      "Aplicação de sistema impermeabilizante bicomponente (cimento + resina) ou membrana líquida acrílica, conforme especificação técnica do fabricante.",
@@ -1954,7 +1956,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
    {
     "g": 3,
     "n": "Instalação de tetos falsos (gesso cartonado ou PVC)",
-    "h": 8,
+    "dias": 1,
     "quem": "Empreiteiro Geral",
     "det": [
      "Marcação e traçado de níveis: Utilizar nível laser ou mangueira de água para definir o plano do teto falso.; Marcar a altura de instalação (normalmente 5 a 15 cm abaixo da laje, consoante a necessidade técnica).",

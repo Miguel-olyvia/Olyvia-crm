@@ -53,12 +53,21 @@ export interface OpcaoAtributo {
   id: string; valor: string; nome: string; hex: string | null; ordem: number;
   /** A foto da opção (caminho `{org}/{uuid}.webp` no bucket `catalogo-opcoes`); null/ausente: sem foto. Ausente também quando a base ainda não devolve o campo. */
   foto?: string | null;
+  /** 25/11 («Tem aspeto» no atributo): a opção é de metal e a superfície por omissão dela. Só vêm com o atributo em `temAspeto`; ausentes enquanto a base não devolver os campos. */
+  metal?: boolean; superficie?: Superficie | null;
 }
+/** 25/11: o acabamento de uma superfície; polida, acetinada e mate. Sem valor (null) = a opção não diz. */
+export type Superficie = "polida" | "acetinada" | "mate";
+export const SUPERFICIES: readonly Superficie[] = ["polida", "acetinada", "mate"];
+/** O valor de uma leitura da base: a superfície se for uma das três, senão null. */
+export const superficieDeLeitura = (v: unknown): Superficie | null => ((SUPERFICIES as readonly unknown[]).includes(v) ? (v as Superficie) : null);
 /** 13/11: um atributo da lista global (Medida, Cor, Tonalidade, Tipo de grelha, Textura, Brilho), com as suas opções. */
 export interface AtributoDef {
   id: string; codigo: string; nome: string; tipo: "lista" | "medida"; temHex: boolean; ordem: number; opcoes: OpcaoAtributo[];
   /** O interruptor «Tem foto», escolhido ao criar um atributo de cor: as opções podem ter foto (e então o hex é opcional). Ausente = false. */
   temFoto?: boolean;
+  /** 25/11: o interruptor «Tem aspeto»: as opções dizem se são de metal e a superfície por omissão (polida, acetinada, mate). Ausente = false. */
+  temAspeto?: boolean;
 }
 export interface Produto {
   id: string; n: string;

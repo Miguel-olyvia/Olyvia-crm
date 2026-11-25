@@ -13,6 +13,9 @@ import { SidebarExpandProvider } from "@/contexts/SidebarContext";
 import { FornecedorFonteDenunciasReal } from "@/components/canal-denuncias/hooks/FonteDenunciasReal";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+// O interruptor do novo Inventário (VITE_INVENTARIO_CLASSICO=1 desliga-o): ligado, as 9 rotas clássicas levam ao separador.
+import { INVENTARIO_NOVO_ATIVO } from "./pages/inventario-novo/separadores";
+import { RedirecionarParaSeparador } from "./pages/inventario-novo/RedirecionarParaSeparador";
 import { PessoasRota } from "@/components/pessoas-lista/PessoasRota";
 import { RedirectPreservandoPesquisa } from "@/components/pessoas-lista/RedirectPreservandoPesquisa";
 import { ClientRouteGuard, CrmRouteGuard, SupplierRouteGuard } from "@/components/ClientRouteGuard";
@@ -369,12 +372,12 @@ const App = () => (
                       <Route path="/units-of-measure" element={<Navigate to="/catalogo-custos" replace />} />
                       <Route path="/bundles" element={<Navigate to="/catalogo-custos" replace />} />
                       {/* Inventário › Hoje e Movimentos (livro stock_movements): mesma permissão de leitura que a RLS exige (inventory.view). */}
-                      <Route path="/inventory" element={<ProtectedRoute permission="inventory.view"><InventoryToday /></ProtectedRoute>} />
+                      <Route path="/inventory" element={INVENTARIO_NOVO_ATIVO ? <RedirecionarParaSeparador /> : <ProtectedRoute permission="inventory.view"><InventoryToday /></ProtectedRoute>} />
                       {/* O novo Inventário (moldura do Estúdio com os 9 ecrãs clássicos embebidos): a permissão OR do item Inventário no menu (menuConfig.ts). */}
                       <Route path="/inventory/novo/:aba?" element={<ProtectedRoute permissions={["inventory.view", "purchase_orders.view", "suppliers.view", "client_orders.view", "receiving.view", "warehouses.view"]}><InventarioNovo /></ProtectedRoute>} />
-                      <Route path="/stock-movements" element={<ProtectedRoute permission="inventory.view"><StockMovements /></ProtectedRoute>} />
-                      <Route path="/stocks" element={<ProtectedRoute permission="inventory.view"><Stocks /></ProtectedRoute>} />
-                      <Route path="/warehouses" element={<ProtectedRoute permission="warehouses.view"><Warehouses /></ProtectedRoute>} />
+                      <Route path="/stock-movements" element={INVENTARIO_NOVO_ATIVO ? <RedirecionarParaSeparador /> : <ProtectedRoute permission="inventory.view"><StockMovements /></ProtectedRoute>} />
+                      <Route path="/stocks" element={INVENTARIO_NOVO_ATIVO ? <RedirecionarParaSeparador /> : <ProtectedRoute permission="inventory.view"><Stocks /></ProtectedRoute>} />
+                      <Route path="/warehouses" element={INVENTARIO_NOVO_ATIVO ? <RedirecionarParaSeparador /> : <ProtectedRoute permission="warehouses.view"><Warehouses /></ProtectedRoute>} />
                       {/* Frota de exemplo (dados em memória/localStorage, sem tabelas): ainda não há permissões fleet.*, por isso usa as do
                           Inventário — inventory.view para ver (as carrinhas são armazéns móveis) e inventory.edit, dentro do ecrã, para registar. */}
                       <Route path="/frota" element={<Navigate to="/frota/hoje" replace />} />
@@ -389,14 +392,14 @@ const App = () => (
                       <Route path="/frota/relatorios" element={<ProtectedRoute permissions={["fleet.view", "fleet.self"]}><Frota key="relatorios" ecra="relatorios" /></ProtectedRoute>} />
                       <Route path="/frota/atividade" element={<ProtectedRoute permissions={["fleet.view", "fleet.self"]}><Frota key="atividade" ecra="atividade" /></ProtectedRoute>} />
                       <Route path="/frota/ligacoes" element={<ProtectedRoute permissions={["fleet.view", "fleet.self"]}><Frota key="ligacoes" ecra="ligacoes" /></ProtectedRoute>} />
-                      <Route path="/purchase-orders" element={<ProtectedRoute permission="purchase_orders.view"><PurchaseOrders /></ProtectedRoute>} />
+                      <Route path="/purchase-orders" element={INVENTARIO_NOVO_ATIVO ? <RedirecionarParaSeparador /> : <ProtectedRoute permission="purchase_orders.view"><PurchaseOrders /></ProtectedRoute>} />
                       {/* Receção por código (Fase 2): permissão própria receiving.view (categoria 'receiving'). O servidor exige ainda purchase_orders.view OU .receive para consultar (rpc_receiving_lookup) e receiving.receive + purchase_orders.receive + inventory.edit para receber (can_receive / rpc_receive_by_code); sem isso o ecrã fica em modo consulta. */}
-                      <Route path="/receiving" element={<ProtectedRoute permission="receiving.view"><Receiving /></ProtectedRoute>} />
+                      <Route path="/receiving" element={INVENTARIO_NOVO_ATIVO ? <RedirecionarParaSeparador /> : <ProtectedRoute permission="receiving.view"><Receiving /></ProtectedRoute>} />
                       {/* Permissão própria client_orders.view — o armazém vê as encomendas sem precisar de ver contratos. Mesma verificação dos RPCs (rpc_list_client_order_documents/rpc_get_client_order_document). */}
-                      <Route path="/client-orders" element={<ProtectedRoute permission="client_orders.view"><ClientOrders /></ProtectedRoute>} />
+                      <Route path="/client-orders" element={INVENTARIO_NOVO_ATIVO ? <RedirecionarParaSeparador /> : <ProtectedRoute permission="client_orders.view"><ClientOrders /></ProtectedRoute>} />
                       {/* Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/inventory.edit controlam ações DENTRO da página (contar/resolver/finalizar), não o acesso à rota. */}
-                      <Route path="/stock-counts" element={<ProtectedRoute permission="inventory.view"><StockCounts /></ProtectedRoute>} />
-                      <Route path="/suppliers" element={<ProtectedRoute permission="suppliers.view"><Suppliers /></ProtectedRoute>} />
+                      <Route path="/stock-counts" element={INVENTARIO_NOVO_ATIVO ? <RedirecionarParaSeparador /> : <ProtectedRoute permission="inventory.view"><StockCounts /></ProtectedRoute>} />
+                      <Route path="/suppliers" element={INVENTARIO_NOVO_ATIVO ? <RedirecionarParaSeparador /> : <ProtectedRoute permission="suppliers.view"><Suppliers /></ProtectedRoute>} />
                       <Route path="/services" element={<Navigate to="/catalogo-custos" replace />} />
                       {/* 17/11: o Catálogo tem páginas (menu lateral). /catalogo-custos só encaminha (?sec=, ?servico=, ?produto=, ?consumivel=, ?criar=, ?atributos=). */}
                       <Route path="/catalogo-custos" element={<RedirectCatalogo />} />

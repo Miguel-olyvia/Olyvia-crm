@@ -1,8 +1,9 @@
 // 24/11 (fase 1, só ecrã): os painéis que acompanham a pré-visualização 3D de um produto. «Medidas»: que campo da Medida é a largura, a altura e a profundidade (pré-visualização imediata,
-// SEM gravar: a gravação por produto, subcategoria e categoria vem na próxima fase). «Zonas»: as partes do objecto (frente, corpo…) com o atributo que pinta cada uma, e o realce da zona
+// SEM gravar; desde 25/11, com `gravacao` (a configuração 3D da base), «Guardar neste produto» e «Voltar a herdar»: a subcategoria e a categoria vêm depois). «Zonas»: as partes do objecto (frente, corpo…) com o atributo que pinta cada uma, e o realce da zona
 // apontada (rato ou teclado) no 3D. O interruptor «Mostrar medidas» liga as cotas. Sem three: só o ecrã.
-import { useId } from "react";
+import { useId, useState } from "react";
 import { cn } from "@/lib/utils";
+import type { OrigemConfig } from "./config3dDados";
 import { CAMPOS_MEDIDA, EIXOS_PECA, textoDeCm, type CampoMedida, type Eixos, type EixoPeca, type ValoresMedida } from "./planta3d/eixosMedida";
 import { rotuloDaZona, type ZonaGlb, type ZonasDoProduto } from "./planta3d/zonasGlb";
 
@@ -36,15 +37,41 @@ interface PropsMedidas {
   aoRepor: () => void;
   /** Se a última escolha trocou dois campos, o aviso («A profundidade passou a usar «comprimento»…»): vai na mesma região viva da frase das medidas. */
   nota?: string | null;
+  /**
+   * 25/11: a gravação dos eixos (por produto; só existe quando a base devolveu a configuração 3D). Sem ela o painel é só para ver, como na fase 1.
+   * `origemGuardada`: de onde vêm os eixos guardados (null: nenhum, vale a regra do tipo); `proprio`: são deste produto (só então se pode voltar a herdar).
+   * `aoGuardar` e `aoHerdar` devolvem o erro em texto, ou null se correu bem.
+   */
+  gravacao?: { podeEditar: boolean; origemGuardada: OrigemConfig | null; proprio: boolean; aoGuardar: () => Promise<string | null>; aoHerdar: () => Promise<string | null> };
 }
 
-/** O painel «Medidas»: três seletores («Largura = comprimento (160 cm)»), a regra em vigor e «Repor automático». Escolher um campo já usado troca os dois. Não grava nada. */
-export function PainelMedidas({ medida, eixos, manual, dimensoes, aoEscolher, aoRepor, nota }: PropsMedidas) {
+/** De onde vêm os eixos guardados, em texto («guardada neste produto»). */
+const ORIGEM_EIXOS: Record<OrigemConfig, string> = { produto: "guardada neste produto", subcategoria: "herdada da subcategoria", categoria: "herdada da categoria", automatico: "automática por tipo" };
+
+/**
+ * O painel «Medidas»: três seletores («Largura = comprimento (160 cm)»), a regra em vigor e «Repor automático». Escolher um campo já usado troca os dois.
+ * Sem `gravacao` não grava nada (só para ver); com ela, «Guardar neste produto» e «Voltar a herdar» (por produto), e «Repor» volta aos guardados.
+ */
+export function PainelMedidas({ medida, eixos, manual, dimensoes, aoEscolher, aoRepor, nota, gravacao }: PropsMedidas) {
   const id = useId();
+  const [ocupado, setOcupado] = useState(false);
+  const [msg, setMsg] = useState<{ erro: boolean; texto: string } | null>(null);
+  const correr = async (fazer: () => Promise<string | null>, ok: string) => {
+    if (ocupado) return;
+    setOcupado(true); setMsg(null);
+    try { const erro = await fazer(); setMsg(erro ? { erro: true, texto: erro } : { erro: false, texto: ok }); } finally { setOcupado(false); }
+  };
+  const guardados = gravacao?.origemGuardada && gravacao.origemGuardada !== "automatico" ? gravacao.origemGuardada : null;
+  const regra = manual ? (gravacao ? "Regra: escolhida à mão, por guardar" : "Regra: escolhida à mão (só para ver)") : guardados ? `Regra: ${ORIGEM_EIXOS[guardados]}` : "Regra: automática por tipo";
+  const podeGuardar = manual && !ocupado, podeHerdar = !!gravacao?.proprio && !ocupado;
   return (
     <section aria-labelledby={`${id}-t`} className="grid gap-3 rounded-xl border border-border bg-card p-3">
       <h3 id={`${id}-t`} className="text-[15px] font-semibold">Medidas</h3>
-      <p className={NOTA}>Escolha que campo da Medida é a largura, a altura e a profundidade da peça: a peça muda logo. É só para ver; a gravação vem na próxima fase.</p>
+      <p className={NOTA}>
+        {!gravacao ? "Escolha que campo da Medida é a largura, a altura e a profundidade da peça: a peça muda logo. É só para ver; a gravação vem na próxima fase."
+          : gravacao.podeEditar ? "Escolha que campo da Medida é a largura, a altura e a profundidade da peça: a peça muda logo. Para a escolha ficar, guarde-a neste produto."
+            : "Escolha que campo da Medida é a largura, a altura e a profundidade da peça: a peça muda logo, só para ver. Guardar a escolha precisa da permissão de editar produtos."}
+      </p>
       <div className="grid gap-3 sm:grid-cols-3">
         {EIXOS_PECA.map((eixo) => (
           <div key={eixo} className="grid gap-1">
@@ -57,10 +84,18 @@ export function PainelMedidas({ medida, eixos, manual, dimensoes, aoEscolher, ao
         ))}
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <p className="text-[15px]">{manual ? "Regra: escolhida à mão (só para ver)" : "Regra: automática por tipo"}</p>
+        <p className="text-[15px]">{regra}</p>
         {/* aria-disabled (e não disabled): um botão desactivado perde o foco do teclado ao ser carregado; assim o foco fica onde estava e o clique é só ignorado */}
-        <button type="button" aria-disabled={!manual} onClick={() => { if (manual) aoRepor(); }} className={cn(BOTAO, !manual && "cursor-not-allowed opacity-50 hover:bg-card")}>Repor automático</button>
+        <button type="button" aria-disabled={!manual} onClick={() => { if (manual) aoRepor(); }} className={cn(BOTAO, !manual && "cursor-not-allowed opacity-50 hover:bg-card")}>{guardados ? "Repor os guardados" : "Repor automático"}</button>
+        {gravacao?.podeEditar && (
+          <>
+            <button type="button" aria-disabled={!podeGuardar} onClick={() => { if (podeGuardar) void correr(gravacao.aoGuardar, "Eixos guardados neste produto."); }} className={cn(BOTAO, !podeGuardar && "cursor-not-allowed opacity-50 hover:bg-card")}>Guardar neste produto</button>
+            <button type="button" aria-disabled={!podeHerdar} onClick={() => { if (podeHerdar) void correr(gravacao.aoHerdar, "Os eixos voltaram a ser herdados."); }} className={cn(BOTAO, !podeHerdar && "cursor-not-allowed opacity-50 hover:bg-card")}>Voltar a herdar os eixos</button>
+          </>
+        )}
       </div>
+      {gravacao && <p aria-live="polite" className={NOTA}>{msg && !msg.erro ? msg.texto : ""}</p>}
+      {msg?.erro && <p role="alert" className="text-[15px] text-red-700 dark:text-red-400">{msg.texto}</p>}
       {/* região viva: escolher num seletor muda a peça e a frase (e, se dois campos trocaram, a nota); sem isto, quem usa leitor de ecrã não sabe o que mudou */}
       <p aria-live="polite" className={NOTA}>A peça fica com {textoDeCm(dimensoes.larguraCm)} cm de largura, {textoDeCm(dimensoes.alturaCm)} cm de altura e {textoDeCm(dimensoes.profundidadeCm)} cm de profundidade.{nota ? ` ${nota}` : ""}</p>
     </section>
@@ -89,14 +124,14 @@ export function PainelZonas({ zonas, pintadaPor, fixa, aoApontar, aoFixar }: Pro
       <p className={NOTA}>Aponte uma zona (rato ou Tab) para a ver realçada no 3D; clique para a manter realçada.</p>
       <ul className="grid gap-2 sm:grid-cols-2">
         {zonas.map(({ zona, partes }) => {
-          const atributo = pintadaPor?.[zona]?.atributo;
+          const atributo = pintadaPor?.[zona]?.atributo, acabamento = pintadaPor?.[zona]?.acabamento;
           return (
             <li key={zona}>
               <button type="button" aria-pressed={fixa === zona} onClick={() => aoFixar(fixa === zona ? null : zona)}
                 onMouseEnter={() => aoApontar(zona)} onMouseLeave={() => aoApontar(null)} onFocus={() => aoApontar(zona)} onBlur={() => aoApontar(null)}
                 className={cn(BOTAO, "w-full flex-col items-start gap-0.5 py-2 text-left aria-pressed:border-primary aria-pressed:bg-muted")}>
                 <span className="font-semibold">{rotuloDaZona(zona)} — {partes} {partes === 1 ? "parte" : "partes"}</span>{" "}
-                <span className="text-[14px] font-normal text-muted-foreground">{atributo ? `Pintada por: ${atributo}` : "Sem atributo de cor"}</span>
+                <span className="text-[14px] font-normal text-muted-foreground">{atributo ? `Pintada por: ${atributo}` : "Sem atributo de cor"}{acabamento ? ` · Superfície: ${acabamento}` : ""}</span>
               </button>
             </li>
           );

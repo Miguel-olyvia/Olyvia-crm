@@ -37,7 +37,7 @@ import { pedirPainelObra } from "./estudioObra/painelPedido";
 import { avisarTecnico, criarTarefa, criarTarefaInterna, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa, type NovaTarefaInterna } from "./tarefasValidador";
 import { moverNaOrdem } from "./ordemPlano";
 import { registoDoPlano, resumoDiferencas, retratoTarefas, type RegistoPlano, type TarefaRetrato } from "./planoAntesDepois";
-import { listaMicro, microtarefasDe, mudarMicro, nomesFeitos, porFixar, type Micro, type MudancaMicro } from "./microtarefas";
+import { ajustePorFazer, horasDaEmpresa, horasDasMicro, listaMicro, microtarefasDe, mudarMicro, nomesFeitos, porFixar, type Micro, type MudancaMicro } from "./microtarefas";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { CHAVE_CONTACTO_CONCLUIDO, CODIGO_GRAVAR_NEGOCIO, SEM_PERM, comPermissoesReais, contactoConcluido, passoDe, pelaPermissao, podeNeg, soAteAoContacto, temCodigoReal, type PermNeg } from "./permissoes";
@@ -364,8 +364,11 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 21/10: juntada pelo validador do plano (tarefasValidador.ts): a quantidade do serviço e os materiais escolhidos */ nova?: true; q?: number; mats?: MatTarefa[];
   /** 24/11: as microtarefas desta obra (microtarefas.ts), quando o gestor as mudou ou fixou; sem elas, vêm do Catálogo. O técnico marca-as
    *  pelo id (exec.passos). */ micro?: Micro[];
+  /** 25/11: o gestor mudou a lista à mão (A.microtarefas): não volta a ser trocada pela proposta */ microMao?: true;
   /** 24/11: uma tarefa interna (sem serviço do Catálogo e sem custo para o cliente): não muda o valor do contrato nem pede adenda */ interna?: true;
   /** 25/11: o lugar na lista da fase, quando o gestor a arrastou (ordemPlano.ts); sem ele, a ordem é a da data de início */ ordem?: number;
+  /** 25/11 (Rúben: «a empresa absorve»): as horas que a regra das microtarefas juntou acima do orçamento. Não mudam o valor para o cliente
+   *  (impactoDoPlano não as conta); o custo fica na margem. */ hNossa?: number;
   /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[];
   /** 21/10: parada por um imprevisto (o id, imprevistos.ts) até o cliente decidir */ bloqueio?: string;
   /** 21/10: tarefa de uma adenda (o número): os materiais dela só se encomendam com o pagamento da adenda validado (encomendasAjuste.ts) */ adenda?: string;
@@ -1590,10 +1593,12 @@ export function difDoAcerto(d: Negocio, S: Estado): number {
 export function impactoDoPlano(d: Negocio, S: Estado): { horas: number; valor: number; semValor: boolean } {
   const p = d.obra.plano;
   if (!p?.base) return { horas: 0, valor: 0, semValor: false };
-  if (p.base.length > p.tasks.length) return { horas: r2(p.tasks.reduce((a, t) => a + t.h, 0) - p.base.reduce((a, t) => a + t.h, 0)), valor: 0, semValor: true };
+  if (p.base.length > p.tasks.length) return { horas: r2(p.tasks.reduce((a, t) => a + t.h - (t.hNossa ?? 0), 0) - p.base.reduce((a, t) => a + t.h, 0)), valor: 0, semValor: true };
   let h = 0, v = 0;
   p.tasks.forEach((t, i) => {
-    const dh = t.h - (p.base![i]?.h ?? 0);
+    // 25/11: as horas que a regra das microtarefas juntou são da empresa (não vão ao cliente)
+    const baseH = p.base![i]?.h ?? 0, nossas = Math.min(t.hNossa ?? 0, Math.max(0, t.h - baseH));
+    const dh = t.h - nossas - baseH;
     if (Math.abs(dh) < 0.001) return;
     h += dh;
     const s = S.svc[t.svcs[0]];
@@ -2091,6 +2096,33 @@ export function porqueNaoMexe(p: Plano, ti: number): string | null {
 }
 /** Com a obra em curso: as tarefas que já começaram voltam ao sítio onde estavam (uma mudança noutra pode tê-las empurrado); as outras ficam
  *  onde a mudança as pôs (a mexida já não começa antes de hoje). */
+/** 25/11: a regra das microtarefas arredondou, por engano, horas que não precisavam de mudar («Plano: X · 4,66 → 4,5 h, 2 → 1 dia
+ *  (microtarefas: …)»). Repõe as horas e os dias de antes nas tarefas por começar que ainda estão assim; fica no histórico e não se repete. */
+export function reporArredondamentos(d: Negocio, p: Plano, simular = false): number {
+  const num = (s: string) => Number(s.replace(/\./g, "").replace(",", "."));
+  const re = /^Plano: (.+) · ([\d.,]+) → ([\d.,]+) h, (\d+) → (\d+) dias? \(microtarefas: /;
+  const feitos = new Set(d.hist.filter((e) => e.t.startsWith("Plano: horas repostas · ")).map((e) => e.t.slice("Plano: horas repostas · ".length).split(" (")[0]));
+  let n = 0;
+  for (const e of [...d.hist].reverse()) {
+    const m = re.exec(e.t);
+    if (!m) continue;
+    const [, nome, a, b, x] = m, A = num(a), Bh = num(b), X = Number(x);
+    // só arredondada (para baixo ou para cima, até um quarto de hora): uma subida pela regra é sempre maior
+    if (!(Bh !== A && Math.abs(A - Bh) <= 0.25 + 1e-9 && Math.abs(Bh - Math.round(A * 2) / 2) < 1e-9) || feitos.has(nome)) continue;
+    const ti = p.tasks.findIndex((t) => t.nome === nome);
+    const t = p.tasks[ti];
+    if (!t || t.exec || Math.abs(t.h - Bh) > 1e-9 || p.tasks.filter((y) => y.nome === nome).length > 1) continue;
+    if (simular) { feitos.add(nome); n++; continue; }
+    const sitio = p.tasks.map((y) => ({ dia: y.dia, dur: y.dur }));
+    if (t.dur !== X) mudarDuracao(p, ti, X);
+    t.h = A;
+    protegerComecadas(p, sitio);
+    feitos.add(nome);
+    log(d, `Plano: horas repostas · ${nome} (${nfmt(A)} h, ${X} ${X === 1 ? "dia" : "dias"}): a regra das microtarefas tinha-as só arredondado`);
+    n++;
+  }
+  return n;
+}
 function protegerComecadas(p: Plano, antes: { dia: number; dur: number }[]): void {
   if (p.estado !== "em curso") return;
   p.tasks.forEach((t, i) => {
@@ -4490,12 +4522,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!p || !t || p.estado === "concluída" || t.exec?.estado === "validada") return false;
       const texto = mudarMicro(t, m, S, p);
       if (!texto) return false;
+      t.microMao = true;
       log(d, `Plano: microtarefas de ${t.nome} · ${texto}`);
       return true;
     },
     /** 24/11: ao abrir o Estúdio da obra, as tarefas sem lista própria ficam com a do Catálogo (a mesma que se mostra): assim o técnico,
      *  que pode não ler o Catálogo, vê a mesma lista que o gestor. Só as que ainda não têm marcas. Devolve quantas fixou. */
-    fixarMicrotarefas(id: number): number {
+    fixarMicrotarefas(id: number, registar = false): number {
       if (!podeNeg(S.role, "obra.planear")) return 0;
       const d = deal(id), p = d.obra.plano;
       if (!p || p.estado === "concluída") return 0;
@@ -4504,6 +4537,53 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       for (const t of p.tasks) {
         const L: Micro[] | null = porFixar(t, S, p);
         if (L?.length) { t.micro = L; n++; }
+      }
+      // 25/11: pela «Atualizar as microtarefas das obras» (nas Operações), fica no histórico da obra
+      if (registar && n) log(d, `Plano: microtarefas atualizadas em ${n} ${n === 1 ? "tarefa" : "tarefas"} (as do Catálogo; só nomes mudados e tarefas novas)`);
+      return n;
+    },
+    /** 25/11 (Rúben: «cria uma regra que ajusta automaticamente o plano»): uma tarefa nunca tem menos horas do que as suas microtarefas
+     *  somam. As que ainda não começaram sobem às horas das microtarefas (os dias e as datas seguintes andam, mudarHoras); as começadas
+     *  não mexem. Corre ao abrir o Estúdio (da obra e do plano) e no «Atualizar as microtarefas das obras». Fica no histórico. Não pede
+     *  «Porquê?»: é a correção do plano pela lista de trabalho, não um pedido nem um atraso. Devolve quantas tarefas mudaram. */
+    ajustarHorasPelasMicro(id: number): number {
+      if (!podeNeg(S.role, "obra.planear")) return 0;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado === "concluída") return 0;
+      let n = 0;
+      // as horas do orçamento (a base), quando a base ainda está alinhada com as tarefas
+      const base = p.base && p.base.length === p.tasks.length ? p.base : null;
+      // 25/11: repõe as tarefas que a regra só tinha arredondado (ex.: 4,66 → 4,5 h, 2 → 1 dia), pelo histórico, uma vez
+      n += reporArredondamentos(d, p);
+      p.tasks.forEach((t, ti) => {
+        if (p.estado === "em curso" && porqueNaoMexe(p, ti)) return;
+        const a = ajustePorFazer(t, S, p, base?.[ti]?.h);
+        if (!a) return;
+        const antes = { h: t.h, dur: t.dur }, sitio = p.tasks.map((x) => ({ dia: x.dia, dur: x.dur }));
+        if (a.h !== t.h) mudarHoras(p, ti, a.h);
+        // os dias de espera: mudarDuracao põe as horas a dias × 8; as horas ficam as do trabalho
+        if (t.dur !== a.dur) { mudarDuracao(p, ti, a.dur); t.h = a.h; }
+        protegerComecadas(p, sitio);
+        if (t.h !== antes.h || t.dur !== antes.dur) {
+          n++;
+          const hn = horasDaEmpresa(t, S, p);
+          if (hn != null) { if (hn > 0) t.hNossa = hn; else delete t.hNossa; }
+          const soma = horasDasMicro(t, S, p);
+          log(d, `Plano: ${t.nome} · ${nfmt(antes.h)} → ${nfmt(t.h)} h, ${antes.dur} → ${t.dur} ${t.dur === 1 ? "dia" : "dias"} (microtarefas: ${nfmt(soma ?? 0)} h de trabalho${t.dur > Math.ceil(t.h / 8) ? " e dias de espera" : ""})`);
+        }
+      });
+      // 25/11: as tarefas que a regra já tinha subido (antes de haver hNossa) ficam com as horas a mais marcadas como da empresa
+      p.tasks.forEach((t) => {
+        if (t.exec) return;
+        const hn = horasDaEmpresa(t, S, p);
+        if (hn == null || hn === (t.hNossa ?? 0)) return;
+        if (hn > 0) t.hNossa = hn; else delete t.hNossa;
+        n++;
+        log(d, `Plano: ${t.nome} · ${nfmt(hn)} h pela regra das microtarefas ficam por conta da empresa (não mudam o valor para o cliente)`);
+      });
+      if (n) {
+        const fim = Math.max(...p.tasks.map((x) => x.dia + x.dur)) - 1;
+        log(d, `Plano: ${n} ${n === 1 ? "tarefa ajustada" : "tarefas ajustadas"} às horas das microtarefas · a obra acaba a ${rotuloDia(p, fim)}`);
       }
       return n;
     },

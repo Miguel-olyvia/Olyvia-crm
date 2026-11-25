@@ -8,6 +8,7 @@ import { cenaDoProduto, estadoDoModelo, modeloParaPrevia, tipoDaPrevia, type Est
 import { eixosPorOmissao, notaDaTroca, temCamposParaEixos, textoDasMedidas, trocarEixo, type Eixos } from "./planta3d/eixosMedida";
 import { zonasDoModelo, type ZonaGlb, type ZonasDoProduto } from "./planta3d/zonasGlb";
 import { InterruptorMedidas, PainelMedidas, PainelZonas } from "./Previa3DPaineis";
+import { Previa3DLigacoes, type Config3dPrevia } from "./Previa3DLigacoes";
 import type { NoCat, ProdutoModelo3D, TipoMockup } from "./planta3d/catalogo3d";
 import type { TexturaModelo } from "./planta3d/texturaProduto";
 import { niveisDoNo } from "./planta3d/modelos3dEscolha";
@@ -62,6 +63,11 @@ export interface Previa3DProdutoProps {
   zonas?: ZonasDoProduto;
   /** 24/11 (fase 1): mostra o painel «Medidas» (escolher os eixos da Medida, só para ver). Só a secção «Modelo 3D» do produto o liga. */
   painelMedidas?: boolean;
+  /**
+   * 25/11: a configuração 3D (eixos e ligações) que a base devolveu para este produto: os eixos guardados (ou herdados) mandam sobre a regra do tipo, o painel «Medidas» passa a gravar
+   * e aparece o painel «Ligações». Sem ela (a função da base ainda não existe, ou o formulário de criar) tudo fica como na fase 1: só para ver.
+   */
+  config3d?: Config3dPrevia;
 }
 
 const ROTULO_SUPERFICIE: Record<SuperficieRev, string> = { chao: "No chão", parede: "Na parede" };
@@ -85,7 +91,7 @@ function textoDeAjuda(foco: boolean, dentro: boolean): string {
 }
 
 /** O 3D: a conta do modelo e da cena, o aviso e o visualizador (lazy). Corre dentro do Falha3D, por isso uma excepção aqui também fica na alternativa. */
-function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRevestimento, aplicacao, zonas, painelMedidas = false }: Previa3DProdutoProps) {
+function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRevestimento, aplicacao, zonas, painelMedidas = false, config3d }: Previa3DProdutoProps) {
   // o zoom: botões (sempre), pinça (toque), e roda do rato e teclas + e − só com o 3D focado (e a roda só com o rato lá dentro), para a página continuar a rolar
   const comandos = useRef<ComandosVista | null>(null), idAjuda = useId();
   const [foco, setFoco] = useState(false), [dentro, setDentro] = useState(false);
@@ -98,8 +104,10 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
   const tipo = useMemo(() => tipoDaPrevia({ nome, sub: sub ?? undefined, no, arvore, modelo3d }), [nome, sub, no, arvore, modelo3d]);
   // a escolha leva o tipo a que se aplica: se o tipo mudar, vale logo a regra automática (sem um desenho com os eixos do tipo antigo, como daria repor num efeito)
   const [escolha, setEscolha] = useState<{ tipo: TipoMockup; eixos: Eixos; nota: string | null } | null>(null);
-  const eixosEscolhidos = escolha && escolha.tipo === tipo ? escolha.eixos : null;
-  const notaTroca = escolha && escolha.tipo === tipo ? escolha.nota : null;
+  const aMao = escolha && escolha.tipo === tipo ? escolha : null;
+  // 25/11: sem escolha à mão valem os eixos guardados (ou herdados) do produto, se os há; senão a regra do tipo
+  const eixosEscolhidos = aMao ? aMao.eixos : config3d?.eixos.guardados ?? null;
+  const notaTroca = aMao ? aMao.nota : null;
   useEffect(() => { setEscolha((e) => (e && e.tipo !== tipo ? null : e)); }, [tipo]); // esquece a escolha de outro tipo (se o tipo voltar, não ressuscita)
   const [cotas, setCotas] = useState(false);
   const [zonaApontada, setZonaApontada] = useState<ZonaGlb | null>(null), [zonaFixa, setZonaFixa] = useState<ZonaGlb | null>(null);
@@ -166,11 +174,20 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
       {/* o equivalente em texto das cotas, para leitores de ecrã: a região viva existe sempre (vazia e escondida com as cotas desligadas) para a mudança se anunciar */}
       <p aria-live="polite" className={cotas && !superficie ? NOTA : "sr-only"}>{cotas && !superficie ? textoDasMedidas(d) : ""}</p>
       {painelMedidas && !superficie && medida && temCamposParaEixos(medida) && (
-        <PainelMedidas medida={medida} eixos={eixosEmVigor} manual={eixosEscolhidos !== null} dimensoes={d} nota={notaTroca}
-          aoEscolher={(eixo, campo) => { const depois = trocarEixo(eixosEmVigor, eixo, campo); setEscolha({ tipo, eixos: depois, nota: notaDaTroca(eixosEmVigor, depois, eixo) }); }} aoRepor={() => setEscolha(null)} />
+        <PainelMedidas medida={medida} eixos={eixosEmVigor} manual={aMao !== null} dimensoes={d} nota={notaTroca}
+          aoEscolher={(eixo, campo) => { const depois = trocarEixo(eixosEmVigor, eixo, campo); setEscolha({ tipo, eixos: depois, nota: notaDaTroca(eixosEmVigor, depois, eixo) }); }} aoRepor={() => setEscolha(null)}
+          gravacao={config3d ? {
+            podeEditar: config3d.podeEditar, origemGuardada: config3d.eixos.guardados ? config3d.eixos.origem : null, proprio: config3d.eixos.proprio,
+            // depois de gravar, a escolha à mão acaba: valem os eixos que a base acabou de guardar (quem grava relê a configuração antes de responder)
+            aoGuardar: async () => { const erro = await config3d.eixos.gravar(eixosEmVigor); if (!erro) setEscolha(null); return erro; },
+            aoHerdar: async () => { const erro = await config3d.eixos.gravar(null); if (!erro) setEscolha(null); return erro; },
+          } : undefined} />
       )}
       {!superficie && zonasDoObjecto.length >= 2 && (
         <PainelZonas zonas={zonasDoObjecto} pintadaPor={zonas?.zonas} fixa={zonaFixa} aoApontar={setZonaApontada} aoFixar={setZonaFixa} />
+      )}
+      {painelMedidas && config3d && !superficie && zonasDoObjecto.length >= 1 && (
+        <Previa3DLigacoes {...config3d.ligacoes} zonas={zonasDoObjecto.map((z) => z.zona)} podeEditar={config3d.podeEditar} />
       )}
     </div>
   );

@@ -50,6 +50,11 @@ import {
   HardHat,
 } from "lucide-react";
 import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
+import { BASE_NOVO, INVENTARIO_NOVO_ATIVO } from "@/pages/inventario-novo/separadores";
+import { paraSeparador } from "@/pages/inventario-novo/navegadorInventario";
+
+/** O destino de um item do Inventário: com o novo Inventário ligado, o separador (/inventory/novo/<aba>); senão a rota clássica. */
+const inv = (classico: string): string => (INVENTARIO_NOVO_ATIVO ? paraSeparador(classico) : classico);
 
 export interface MenuItem {
   to: string;
@@ -90,6 +95,12 @@ export interface MenuSection {
   permissions: string[];
   items: MenuItem[];
   subSections?: MenuSubSection[];
+  /**
+   * Destino aberto logo ao clicar no ícone do rail, sem o painel lateral (o destino já tem as entradas lá dentro, ex.
+   * os separadores do novo Inventário). Os `items`/`subSections` continuam a decidir se a secção é visível
+   * (canViewSection) e servem quando o campo está vazio.
+   */
+  abreDireto?: string;
 }
 
 export interface TopLevelItem {
@@ -251,13 +262,17 @@ export const menuSections: MenuSection[] = [
     id: "inventory",
     icon: ShoppingCart,
     labelKey: "sidebar.inventory",
+    // "/inventory" também cobre o novo Inventário (/inventory/novo/<aba>), para onde apontam os itens com ele ligado.
     paths: ["/inventory", "/purchase-orders", "/suppliers", "/stocks", "/stock-movements", "/client-orders", "/receiving", "/stock-counts", "/warehouses"],
     // Fallback só usado se nenhum item for visível (canViewSection olha
     // primeiro para os itens) — as mesmas permissões das rotas.
     permissions: ["inventory.view", "purchase_orders.view", "suppliers.view", "client_orders.view", "receiving.view", "warehouses.view"],
+    // Novo Inventário ligado: o ícone abre /inventory/novo num clique (os 9 separadores vivem lá dentro), sem o painel.
+    // Desligado (VITE_INVENTARIO_CLASSICO=1): o painel com a lista, como antes.
+    abreDireto: INVENTARIO_NOVO_ATIVO ? BASE_NOVO : undefined,
     items: [
       // "Hoje" do Inventário: fila de trabalho e fluxo (rpc_inventory_today).
-      { to: "/inventory", icon: Sun, labelKey: "sidebar.inventoryToday", permission: "inventory.view", counterKey: "today" },
+      { to: inv("/inventory"), icon: Sun, labelKey: "sidebar.inventoryToday", permission: "inventory.view", counterKey: "today" },
     ],
     // Cada item tem a permissão da sua rota (App.tsx): sem isto a secção
     // aparecia a todos e o clique dava "Acesso negado".
@@ -267,8 +282,8 @@ export const menuSections: MenuSection[] = [
         labelKey: "sidebar.inventoryPurchases",
         defaultExpanded: true,
         items: [
-          { to: "/purchase-orders", icon: ShoppingCart, labelKey: "sidebar.inventoryPurchaseOrders", permission: "purchase_orders.view", counterKey: "purchaseOrders" },
-          { to: "/suppliers", icon: Truck, labelKey: "sidebar.suppliers", permission: "suppliers.view", counterKey: "suppliers" },
+          { to: inv("/purchase-orders"), icon: ShoppingCart, labelKey: "sidebar.inventoryPurchaseOrders", permission: "purchase_orders.view", counterKey: "purchaseOrders" },
+          { to: inv("/suppliers"), icon: Truck, labelKey: "sidebar.suppliers", permission: "suppliers.view", counterKey: "suppliers" },
         ],
       },
       {
@@ -276,18 +291,18 @@ export const menuSections: MenuSection[] = [
         labelKey: "sidebar.inventoryWarehouse",
         defaultExpanded: true,
         items: [
-          { to: "/stocks", icon: BarChart3, labelKey: "sidebar.inventoryStocks", permission: "inventory.view", counterKey: "stocks" },
-          { to: "/stock-movements", icon: ArrowLeftRight, labelKey: "sidebar.stockMovements", permission: "inventory.view" },
+          { to: inv("/stocks"), icon: BarChart3, labelKey: "sidebar.inventoryStocks", permission: "inventory.view", counterKey: "stocks" },
+          { to: inv("/stock-movements"), icon: ArrowLeftRight, labelKey: "sidebar.stockMovements", permission: "inventory.view" },
           // Permissão própria (client_orders.view): quem trabalha no armazém vê as
           // encomendas de cliente sem precisar de acesso aos contratos. Os RPCs das
           // encomendas verificam a mesma permissão.
-          { to: "/client-orders", icon: ClipboardCheck, labelKey: "sidebar.inventoryClientOrders", permission: "client_orders.view", counterKey: "clientOrders" },
+          { to: inv("/client-orders"), icon: ClipboardCheck, labelKey: "sidebar.inventoryClientOrders", permission: "client_orders.view", counterKey: "clientOrders" },
           // Receção por código: mesma regra da rota (permissão própria receiving.view).
-          { to: "/receiving", icon: ScanBarcode, labelKey: "sidebar.inventoryReceiving", permission: "receiving.view", counterKey: "receiving" },
+          { to: inv("/receiving"), icon: ScanBarcode, labelKey: "sidebar.inventoryReceiving", permission: "receiving.view", counterKey: "receiving" },
           // Fase 5.4: acesso ao ecrã só exige inventory.view — inventory.count/
           // inventory.edit controlam ações dentro da página, não a visibilidade do menu.
-          { to: "/stock-counts", icon: ListChecks, labelKey: "sidebar.inventoryStockCounts", permission: "inventory.view", counterKey: "stockCounts" },
-          { to: "/warehouses", icon: Warehouse, labelKey: "sidebar.warehouses", permission: "warehouses.view" },
+          { to: inv("/stock-counts"), icon: ListChecks, labelKey: "sidebar.inventoryStockCounts", permission: "inventory.view", counterKey: "stockCounts" },
+          { to: inv("/warehouses"), icon: Warehouse, labelKey: "sidebar.warehouses", permission: "warehouses.view" },
         ],
       },
     ],

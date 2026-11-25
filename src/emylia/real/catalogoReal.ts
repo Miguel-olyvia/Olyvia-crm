@@ -5,7 +5,7 @@
 import type { MedKey, Servico, SvcId } from "../motor";
 import type { ItemCatalogo, LinhaCat } from "../catalogo";
 import type { Custos, LinhaEstrutura, ModoPreco, Parametros, PassoMO, ReceitaV2, UsoCons, UsoEquip } from "../v2/custosModelo";
-import type { AtributoDef, AtributoProduto, Catalogo, CategoriaProdutoK, MedidaAtributo, ModeloK, No, Produto, Regra } from "../v2/catalogoModelo";
+import { superficieDeLeitura, type AtributoDef, type AtributoProduto, type Catalogo, type CategoriaProdutoK, type MedidaAtributo, type ModeloK, type No, type Produto, type Regra } from "../v2/catalogoModelo";
 import type { EntulhoSvc } from "../entulho";
 import type { FichaTecnico } from "../equipa/tecnicos";
 import { ehIdDeModelo3D } from "../planta3d/modelos3dEscolha";
@@ -67,7 +67,9 @@ export interface LinhaAtributo {
   id: string; codigo: string; nome: string; tipo: "lista" | "medida"; tem_hex: boolean; ordem: number;
   /** Foto na opção: `tem_foto` e `foto` ficam ausentes enquanto a migration respetiva não estiver aplicada na base. */
   tem_foto?: boolean;
-  opcoes: { id: string; valor: string; nome?: string | null; hex: string | null; ordem: number; foto?: string | null }[];
+  /** «Tem aspeto» (25/11): ausente enquanto a migration do aspeto não estiver aplicada; `metal` e `superficie` das opções idem (e só vêm com o atributo em `tem_aspeto`). */
+  tem_aspeto?: boolean;
+  opcoes: { id: string; valor: string; nome?: string | null; hex: string | null; ordem: number; foto?: string | null; metal?: boolean | null; superficie?: string | null }[];
 }
 /** `ativa`: false se a opção foi desativada (o id continua a vir; `opcoes` da lista só traz as ativas). */
 export interface LinhaValorAtributo { atributo: string; opcao: string | null; valor: string | null; medida: MedidaAtributo | null; ativa?: boolean }
@@ -207,9 +209,10 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
   for (const x of L.modelos?.produtos ?? []) { const m = modeloPorId.get(x.model_id); if (m) modeloDe.set(x.id, m); }
   const defsAtributos: AtributoDef[] | undefined = L.atributos
     ? [...L.atributos.defs].filter((d) => d?.id).sort((a, b) => n(a.ordem) - n(b.ordem)).map((d) => ({
-      id: d.id, codigo: d.codigo, nome: d.nome, tipo: d.tipo, temHex: !!d.tem_hex, temFoto: d.tem_foto === true, ordem: n(d.ordem),
+      id: d.id, codigo: d.codigo, nome: d.nome, tipo: d.tipo, temHex: !!d.tem_hex, temFoto: d.tem_foto === true, ...(d.tem_aspeto === true ? { temAspeto: true } : {}), ordem: n(d.ordem),
       opcoes: [...(d.opcoes ?? [])].sort((a, b) => n(a.ordem) - n(b.ordem)).map((o) => ({
         id: o.id, valor: o.valor, nome: o.nome || o.valor, hex: o.hex ?? null, foto: typeof o.foto === "string" && o.foto ? o.foto : null, ordem: n(o.ordem),
+        ...(d.tem_aspeto === true ? { metal: o.metal === true, superficie: superficieDeLeitura(o.superficie) } : {}),
       })),
     }))
     : undefined;

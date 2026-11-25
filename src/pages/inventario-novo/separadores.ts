@@ -70,5 +70,13 @@ export const PERMISSOES_INVENTARIO = [
   "warehouses.view",
 ];
 
+/**
+ * O interruptor do novo Inventário. Ligado (por omissão): as 9 rotas clássicas redirecionam para o separador
+ * (App.tsx, RedirecionarParaSeparador), o menu aponta para os separadores, o Hoje clássico não mostra «Experimentar o
+ * novo Inventário» e a moldura tem «Voltar» (página anterior ou /) em vez de «Voltar ao clássico».
+ * Para voltar ao clássico sem tocar no código: VITE_INVENTARIO_CLASSICO=1 no build.
+ */
+export const INVENTARIO_NOVO_ATIVO: boolean = import.meta.env.VITE_INVENTARIO_CLASSICO !== "1";
+
 export const BASE_NOVO = "/inventory/novo";
 export const caminhoSeparador = (chave: ChaveSeparador): string => `${BASE_NOVO}/${chave}`;

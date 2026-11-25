@@ -139,9 +139,20 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
     return melhorId;
   }, [location.pathname, visibleSections]);
 
+  // Contador do «Hoje» do Inventário na bolinha do ícone, quando o ícone abre logo o novo Inventário (sem painel, as
+  // pílulas dos itens não se veem). O mesmo número do separador Hoje; só pedido com essa secção visível.
+  const inventarioDireto = visibleSections.some((s) => s.id === "inventory" && !!s.abreDireto);
+  const contadorInventario = useInventoryCounters(inventarioDireto);
+
   // Auto-open section based on route (only if not manually closed)
   useEffect(() => {
-    if (activeSectionId && !isManuallyClosedRef.current) {
+    const ativa = visibleSections.find((s) => s.id === activeSectionId);
+    if (ativa?.abreDireto) {
+      // Secção que abre direto (ex. novo Inventário): o painel nunca abre sozinho; fecha o de outra secção, sem o
+      // marcar como fechado à mão (a secção seguinte volta a abrir pela rota).
+      setOpenSectionId(null);
+      isManuallyClosedRef.current = false;
+    } else if (activeSectionId && !isManuallyClosedRef.current) {
       setOpenSectionId(activeSectionId);
     } else if (!activeSectionId) {
       // Reset manual close flag when leaving all sections
@@ -150,7 +161,8 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
     }
   }, [activeSectionId]);
 
-  const openSection = visibleSections.find((s) => s.id === openSectionId);
+  // Uma secção com `abreDireto` nunca mostra o painel.
+  const openSection = visibleSections.find((s) => s.id === openSectionId && !s.abreDireto);
 
   // ─────────────────────────────────────────────────────────────
   // Handlers
@@ -170,6 +182,13 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
   };
 
   const handleSectionClick = (section: MenuSection) => {
+    if (section.abreDireto) {
+      // Abre logo o destino (ex. /inventory/novo, com os separadores lá dentro): fecha qualquer painel aberto.
+      setOpenSectionId(null);
+      isManuallyClosedRef.current = false;
+      navigate(section.abreDireto);
+      return;
+    }
     if (openSectionId === section.id) {
       closeSubmenu();
     } else {
@@ -263,13 +282,20 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
                 // duas seccoes bateriam certo ao mesmo tempo e acendiam os
                 // dois icones.
                 const isActive = activeSectionId === section.id;
-                const isOpen = openSectionId === section.id;
+                const isOpen = openSectionId === section.id && !section.abreDireto;
+                // Bolinha: o «Hoje» do Inventário substitui o contador de alertas da secção quando o ícone abre direto.
+                const contadorHoje = section.abreDireto && section.id === "inventory" ? contadorInventario("today") : null;
+                const bolinha = section.abreDireto && section.id === "inventory"
+                  ? contadorHoje
+                  : sectionCounts[section.id as keyof typeof sectionCounts];
+                const rotulo = t(section.labelKey);
                 return (
                   <Tooltip key={section.id}>
                     <TooltipTrigger asChild>
                       <button
                         type="button"
                         onClick={() => handleSectionClick(section)}
+                        aria-label={section.abreDireto ? (contadorHoje ? `${rotulo}, ${contadorHoje} para tratar hoje` : rotulo) : undefined}
                         className={cn(
                           "flex items-center justify-center w-full p-3 rounded-xl transition-all duration-200 relative",
                           "text-sidebar-foreground/80 hover:text-sidebar-foreground",
@@ -278,11 +304,7 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
                         )}
                       >
                         <Icon className="w-5 h-5" />
-                        {sectionCounts[section.id as keyof typeof sectionCounts] > 0 && (
-                          <span className="absolute -top-1 -right-1 w-4 h-4 bg-destructive rounded-full text-[9px] text-destructive-foreground flex items-center justify-center font-bold">
-                            {sectionCounts[section.id as keyof typeof sectionCounts]}
-                          </span>
-                        )}
+                        <BolinhaRail valor={bolinha} />
                       </button>
                     </TooltipTrigger>
                     <TooltipContent 
@@ -290,7 +312,7 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
                       sideOffset={12}
                       className="bg-primary text-primary-foreground font-medium px-3 py-2 text-sm shadow-lg border-0"
                     >
-                      {t(section.labelKey)}
+                      {rotulo}
                     </TooltipContent>
                   </Tooltip>
                 );
@@ -315,6 +337,19 @@ export const AppSidebar = memo(function AppSidebar({ userName, userRole }: AppSi
     </>
   );
 });
+
+/** A bolinha de contador no canto de um ícone do rail (nada com 0/null). */
+function BolinhaRail({ valor }: { valor: number | null | undefined }) {
+  if (!valor || valor <= 0) return null;
+  return (
+    <span
+      data-testid="bolinha-rail"
+      className="absolute -top-1 -right-1 w-4 h-4 bg-destructive rounded-full text-[9px] text-destructive-foreground flex items-center justify-center font-bold"
+    >
+      {valor}
+    </span>
+  );
+}
 
 // ─────────────────────────────────────────────────────────────
 // Flyout Panel Component

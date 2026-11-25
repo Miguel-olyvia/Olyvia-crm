@@ -5,7 +5,9 @@
 //
 // · Só o separador ativo fica montado (o lazy do ecrã clássico, o mesmo chunk de App.tsx).
 // · Um separador sem a permissão da rota clássica não aparece; pedido no endereço, mostra "Sem acesso" (como a rota).
-// · As ligações dos ecrãs embebidos ficam cá dentro (NavegadorDoInventario); "Voltar ao clássico" e Esc saem para /inventory.
+// · As ligações dos ecrãs embebidos ficam cá dentro (NavegadorDoInventario). Com o interruptor ligado (INVENTARIO_NOVO_ATIVO),
+//   "Voltar" e Esc voltam à página anterior da app (ou ao início da app, /home), nunca a /inventory (que redireciona para cá); desligado,
+//   "Voltar ao clássico" e Esc saem para /inventory.
 // · Esc com uma folha ou diálogo aberto ([role=dialog][data-state=open]) não faz nada: fecha-se a folha primeiro.
 // · Fatia 2: o painel do produto à direita (Existências → "Ver produto", ?painel=produto:<id>) e, no telemóvel, a barra do
 //   polegar em baixo (BarraPolegar) com o botão principal, que no cabeçalho só aparece a partir de `sm`.
@@ -55,7 +57,7 @@ import { usePainelProduto } from "./painelUrl";
 import { ESeInventario, type AcaoESe } from "./ESeInventario";
 import { BotoesAnular } from "./BotoesAnular";
 import { MARGEM_RELOGIO_MS, useLivroDaSessao } from "./useLivroDaSessao";
-import { caminhoSeparador, eChaveSeparador, separadorDe, separadoresVisiveis, type ChaveSeparador } from "./separadores";
+import { INVENTARIO_NOVO_ATIVO, caminhoSeparador, eChaveSeparador, separadorDe, separadoresVisiveis, type ChaveSeparador } from "./separadores";
 import { NaFrenteInventario } from "./NaFrenteInventario";
 import { FestaInventario, useFestaDoLivro } from "./FestaInventario";
 import { ToastEscuro, type AvisoEscuro } from "./ToastEscuro";
@@ -63,6 +65,23 @@ import { RESTAURAR, restaurar, textoEliminado, textoRestaurado } from "./restaur
 import type { ClienteRpc } from "./anularInventario";
 
 const CLASSICO = "/inventory";
+/** O início da app depois do login (Auth.tsx navega para /home); "/" é a página pública de marketing. */
+const INICIO_APP = "/home";
+/** O índice da entrada atual no histórico da app: o BrowserRouter (react-router 6) guarda-o em history.state.idx. */
+export function indiceHistorico(estado: unknown = typeof window !== "undefined" ? window.history.state : null): number | null {
+  const idx = (estado as { idx?: unknown } | null)?.idx;
+  return typeof idx === "number" ? idx : null;
+}
+
+/**
+ * Quantos passos recuar para sair da moldura para a página onde se estava antes de entrar: os separadores empilham
+ * entradas no histórico, por isso não chega um passo. `entrada` = o índice com que a moldura abriu; null = sem histórico
+ * dentro da app (abriu-se o endereço direto) → vai-se para INICIO_APP (/home; "/" é a página pública).
+ */
+export function passosParaSair(entrada: number | null, atual: number | null): number | null {
+  if (entrada === null || entrada <= 0) return null;
+  return Math.max(1, (atual ?? entrada) - entrada + 1);
+}
 /** O único painel dos separadores (só o ativo está montado). */
 const ID_PAINEL = "inventario-novo-painel";
 const idAba = (chave: ChaveSeparador) => `inventario-novo-aba-${chave}`;
@@ -169,12 +188,23 @@ export default function InventarioNovo() {
   // Trocar de separador começa no topo.
   useEffect(() => { mainRef.current?.scrollTo?.({ top: 0 }); }, [pedido]);
 
-  const voltar = () => navigate(CLASSICO);
+  // Com o novo ligado, /inventory volta a abrir a moldura: sai-se para a página anterior da app ou, sem ela, para o início (/home).
+  /** O texto (e aria-label) do botão de sair da moldura. */
+  const rotuloVoltar = INVENTARIO_NOVO_ATIVO ? "Voltar" : "Voltar ao clássico";
+  const [entradaHistorico] = useState(() => indiceHistorico());
+  const voltar = () => {
+    if (!INVENTARIO_NOVO_ATIVO) { navigate(CLASSICO); return; }
+    const passos = passosParaSair(entradaHistorico, indiceHistorico());
+    if (passos) navigate(-passos);
+    else navigate(INICIO_APP);
+  };
+  const voltarRef = useRef(voltar);
+  voltarRef.current = voltar;
   useEffect(() => {
-    const tecla = (e: KeyboardEvent) => { if (escDeveSair(e)) navigate(CLASSICO); };
+    const tecla = (e: KeyboardEvent) => { if (escDeveSair(e)) voltarRef.current(); };
     window.addEventListener("keydown", tecla);
     return () => window.removeEventListener("keydown", tecla);
-  }, [navigate]);
+  }, []);
 
   // O botão principal: as POs da Receção (a mesma query e a mesma regra do Hoje clássico).
   const canReceivable = hasPermission("purchase_orders.view") && hasPermission("receiving.view");
@@ -316,8 +346,8 @@ export default function InventarioNovo() {
         <header data-moldura-inventario="" className="border-b border-border bg-card/95 backdrop-blur">
           <div className="mx-auto flex max-w-[1500px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
-              <Button type="button" variant="ghost" className="min-h-11 shrink-0 rounded-[14px] font-semibold" onClick={voltar} aria-label="Voltar ao clássico">
-                <ArrowLeft className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">Voltar ao clássico</span>
+              <Button type="button" variant="ghost" className="min-h-11 shrink-0 rounded-[14px] font-semibold" onClick={voltar} aria-label={rotuloVoltar}>
+                <ArrowLeft className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">{rotuloVoltar}</span>
               </Button>
               <div className="min-w-0">
                 <p className="text-xs font-bold uppercase tracking-[0.16em] text-primary">Inventário</p>

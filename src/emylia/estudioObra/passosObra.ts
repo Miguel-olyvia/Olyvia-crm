@@ -8,7 +8,7 @@ import { imprevistosDe } from "../imprevistos";
 import { nomeCurtoTarefa } from "./planoVivo";
 
 /** Os campos de planeamento de uma tarefa (o que se anula). A execução (os registos do técnico, a validação) nunca se toca. */
-const CAMPOS = ["nome", "dia", "dur", "h", "tec", "deps", "semDeps", "nota", "mats", "fase", "sk", "perfilId", "svcs", "nova", "q", "micro", "interna", "ordem"] as const;
+const CAMPOS = ["nome", "dia", "dur", "h", "tec", "deps", "semDeps", "nota", "mats", "fase", "sk", "perfilId", "svcs", "nova", "q", "micro", "microMao", "interna", "ordem", "hNossa"] as const;
 export type TarefaPlano = Partial<Pick<Tarefa, (typeof CAMPOS)[number]>>;
 export interface RetratoPlano { tasks: TarefaPlano[]; estado: string; /** 23/11: os dias em que cada técnico pode vir */ restricoes?: { tec: string; dias: number[] }[] }
 export interface Retrato { plano: RetratoPlano; fora: Record<string, string>; hist: number }

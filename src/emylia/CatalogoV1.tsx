@@ -18,6 +18,8 @@ import { cn } from "@/lib/utils";
 import { eur, nfmt, pct, type SvcId } from "./motor";
 import type { Ctx } from "./pecas";
 import { aplicarTodos, dataPT, listaCatalogoCompleta, origemHora, pesquisar, type Custos, type ItemLista } from "./v2/custosModelo";
+import { fasesDoServico } from "./fasesObra";
+import { LigarMicrotarefas } from "./MicrotarefasServico";
 import { lerCustos, mudarCustos, useCustos } from "./v2/custosStore";
 import { caminho, noDoServico, oficios, type Catalogo } from "./v2/catalogoModelo";
 import { useCatalogo } from "./v2/catalogoStore";
@@ -137,9 +139,14 @@ function Servicos({ S, itens, K, onAbrir, min, alvo }: { S: Ctx["S"]; itens: (It
   const total = grupos.reduce((a, g) => a + g.itens.length, 0);
   const nDesat = grupos.reduce((a, g) => a + g.itens.filter((i) => i.alertas.some((x) => x.id === "desatualizado")).length, 0);
   const escolherFiltro = (f: FiltroV1 | null) => { setFiltro(f); setMais({}); };
+  const podeServicos = usePermissoesCatalogo().servicos;
   return (
     <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[13rem_minmax(0,1fr)_20rem]">
       <div className="min-w-0 xl:col-start-2 xl:row-start-1">
+        {/* 25/11: as microtarefas das tarefas reais da Mudelar no Infraspeak, ligadas aos serviços de uma vez */}
+        <LigarMicrotarefas pode={podeServicos} itens={comOficio.map((i) => ({ sid: i.sid, n: i.n, oficio: i.oficio, un: i.un }))}
+          horas={(sid) => (comOficio.find((x) => x.sid === sid)?.rec.mo ?? []).reduce((a, m) => a + m.h, 0)}
+          fase={(sid, n, o) => fasesDoServico(K, sid as SvcId, n, o)[0]} />
         <div className="flex flex-wrap items-center gap-3">
           <Procurar v={q} onChange={(v) => { setQ(v); setMais({}); }} rotulo="Procurar serviço" ph="Procurar serviço ou ofício" />
           <label className="flex items-center gap-2 text-[15px]"><span className="text-muted-foreground">Ordenar</span>
