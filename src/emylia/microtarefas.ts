@@ -227,7 +227,8 @@ export function ajustePorFazer(t: Tarefa, S?: Estado | null, p?: Plano | null, h
   if (soma != null && soma > h + 0.25) h = soma;
   h = meia(h);
   // a subir (ou igual), os dias nunca encolhem; a corrigir para baixo (a espera contada como horas), os dias são o trabalho mais a espera
-  const dur = h < t.h ? diasDe(h) + espera : Math.max(diasDe(h) + espera, t.dur);
+  // sem horas novas nem espera, os dias ficam (uma tarefa com mais pessoas tem menos dias do que horas ÷ 8)
+  const dur = h < t.h ? diasDe(h) + espera : h > t.h || espera ? Math.max(diasDe(h) + espera, t.dur) : t.dur;
   return h !== t.h || dur > t.dur ? { h, dur } : null;
 }
 /** Há alguma coisa a ajustar nesta tarefa (para os contadores). */
