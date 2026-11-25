@@ -141,6 +141,9 @@ export interface PorReceberListProps {
   /** PO com o painel aberto (destaque). */
   activeId?: string | null;
   onRetry?: () => void;
+  /** "Agrupar: Fornecedor" controlado por fora (ex.: a moldura, que o guarda entre vistas). Sem isto, estado interno. */
+  agrupar?: boolean;
+  aoMudarAgrupar?: (v: boolean) => void;
 }
 
 export function PorReceberList({
@@ -156,8 +159,15 @@ export function PorReceberList({
   onOpenPo,
   activeId,
   onRetry,
+  agrupar: agruparProp,
+  aoMudarAgrupar,
 }: PorReceberListProps) {
-  const [agrupar, setAgrupar] = useState<AgruparRec>("nao");
+  const [agruparInterno, setAgruparInterno] = useState<AgruparRec>("nao");
+  const agrupar: AgruparRec = agruparProp === undefined ? agruparInterno : agruparProp ? "forn" : "nao";
+  const setAgrupar = (v: AgruparRec) => {
+    if (agruparProp === undefined) setAgruparInterno(v);
+    aoMudarAgrupar?.(v === "forn");
+  };
   const [filtrosAbertos, setFiltrosAbertos] = useState(() => !!(f.sup || f.cli || f.q));
   const lista = porReceber(pos, f, today);
   const n = contagensRec(pos, f, today);
