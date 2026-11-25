@@ -36,6 +36,7 @@ import { diasQuePode, agendaDaProposta, planoComAgendaDeHoje, textoAgenda, falta
 import { pedirPainelObra } from "./estudioObra/painelPedido";
 import { avisarTecnico, criarTarefa, criarTarefaInterna, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa, type NovaTarefaInterna } from "./tarefasValidador";
 import { moverNaOrdem } from "./ordemPlano";
+import { registoDoPlano, resumoDiferencas, retratoTarefas, type RegistoPlano, type TarefaRetrato } from "./planoAntesDepois";
 import { listaMicro, microtarefasDe, mudarMicro, nomesFeitos, porFixar, type Micro, type MudancaMicro } from "./microtarefas";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
@@ -391,6 +392,9 @@ export interface Plano {
   /** 23/11 (revisão: «o Elvis só pode na quinta»): os dias da semana (1 = segunda … 5 = sexta) em que um técnico pode vir a esta obra.
    *  O replaneamento e a escolha de técnicos contam com eles (preparacaoObra.ts: motivoOcupado). */
   restricoes?: { tec: string; dias: number[] }[];
+  /** 25/11 (Rúben: «registar o histórico do antes e depois para aprendermos»): o plano como o motor o gerou do orçamento, antes de
+   *  qualquer mudança do gestor (planoAntesDepois.ts). Ao aprovar, compara-se com o validado. */
+  gerado?: TarefaRetrato[];
 }
 export interface AvisoTec { tec: string; ti: number; t: string; q: string; lido?: string }
 export interface MatObra { n: string; un: string; k: StockKey; q: number; res: number; falta: number }
@@ -471,6 +475,8 @@ export interface Negocio {
     ecsAjuste?: EcAjuste[];
     /** 21/10: os imprevistos a meio da obra (imprevistos.ts): o que se encontrou, a gravidade, as tarefas afetadas e a proposta ao cliente */
     imprevistos?: Imprevisto[];
+    /** 25/11: o antes e depois de cada validação do plano (o gerado pelo motor e o aprovado pelo gestor de obra), para aprender (planoAntesDepois.ts) */
+    aprendizagem?: RegistoPlano[];
     /** O previsto e o real por fase, congelados no fim da obra: atualizar depois a receita no Catálogo não muda o histórico (planoObra.ts). */
     realFases?: ObraReal | null;
     /** 15/10: o auto de receção (por assinar → assinado) */
@@ -1856,10 +1862,22 @@ export function visitaPassadaPeloServidor(d: Negocio, vaga: string): void {
   if (!d.hist.slice(0, 3).some((h) => h.t === t)) log(d, t);
   if (d.fase < 2) { d.fase = 2; d.valida = null; preencher(d, 2); }
 }
+/** 25/11: guarda o antes e depois do plano (o gerado pelo motor e o de agora) no negócio e no histórico. */
+function registarAntesDepois(d: Negocio, motivo: RegistoPlano["motivo"], quem: string) {
+  const p = d.obra.plano;
+  if (!p) return;
+  const nome = (id: string | null) => TECS.find((x) => x.id === id)?.n ?? "por atribuir";
+  const r = registoDoPlano(p, motivo, agora(), quem, nome);
+  if (!r) return;
+  (d.obra.aprendizagem ??= []).push(r);
+  log(d, `Plano ${motivo === "aprovado" ? "validado" : "recomeçado"}: ${resumoDiferencas(r.diferencas)} face ao gerado pelo motor`);
+}
 /** Do contrato à obra (preparacaoObra.ts): o plano do orçamento, por aprovar. A encomenda de cliente só nasce com o pagamento validado. */
 export function prepararPlanoDe(d: Negocio, S: Estado) {
   // 10/11: o plano nasce já sem conflitos de agenda (o que se adiou fica no histórico)
   const { plano, adiadas } = planoNovoDaObra(d, S);
+  // 25/11: o plano tal como o motor o gerou fica guardado, para o comparar com o que o gestor de obra aprovar (planoAntesDepois.ts)
+  plano.gerado = retratoTarefas(plano);
   d.obra.plano = plano;
   if (adiadas.length) logAdiadas(d, adiadas);
 }
@@ -4552,6 +4570,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       juntarAcertosPendentes(d);
       if (conflitos(d.obra.plano!).length) { avisar({ msg: "Há um conflito por resolver", sub: "Troque o técnico ou adie a fase", kind: "bad" }); return; }
       d.obra.plano!.estado = "aprovado"; log(d, "Plano aprovado pelas Operações");
+      // 25/11 (Rúben: «um gestor de obra a validar realmente este plano, e registar o antes e depois para aprendermos»)
+      registarAntesDepois(d, "aprovado", lerQuemAssina() || PAPEIS[S.role].nome);
       // o início do plano passa para a preparação da obra (não se escreve duas vezes)
       const p = d.obra.plano!;
       if (p.origem === "orcamento" && !d.f.inicio) { const i = inicioDoPlano(p); if (i) d.f.inicio = isoDia(i); } avisar({ msg: "Plano aprovado", sub: "Os técnicos recebem as tarefas na app", kind: "ok" });
@@ -4577,6 +4597,28 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 23/10: com o relógio real, a obra começa hoje (o plano mantém a ordem e a duração das tarefas)
       if (relogioReal && d.obra.plano!.origem === "orcamento") arrancarHoje(d.obra.plano!);
       d.obra.plano!.estado = "em curso"; log(d, "Obra arrancou"); avisar({ msg: "Obra em curso", sub: "Os técnicos registam as horas na app", kind: "ok" });
+    },
+    /** 25/11 (Rúben, testarh: «reset à obra para voltar a ter o plano original, para testarmos criar tasks e validar tudo»). Só nas
+     *  Ferramentas de teste. O plano volta a ser o que o motor gera do orçamento, por aprovar, sem os registos dos técnicos nem os ajustes;
+     *  o que se tinha mudado fica guardado no antes e depois («recomeçado»). A encomenda de cliente e os pagamentos ficam. */
+    recomecarPlano(id: number): boolean {
+      if (!exigePerm("obra.planear")) return false;
+      const d = deal(id), p = d.obra.plano;
+      if (!d || !p || !d.orc || p.estado === "concluída") return false;
+      const quem = lerQuemAssina() || PAPEIS[S.role].nome;
+      registarAntesDepois(d, "recomeçado", quem);
+      // o início do orçamento; se já passou, o do plano; se também já passou, hoje
+      const hoje = hojeISO(), orc0 = d.orc.inicioObra;
+      const inicio = [orc0, p.inicio].find((x): x is string => !!x && x >= hoje) ?? hoje;
+      d.orc.inicioObra = inicio;
+      try { prepararPlanoDe(d, S); } finally { d.orc.inicioObra = orc0; }
+      d.obra.alteracoes = [];
+      if (d.f) delete d.f.inicio;
+      const n = d.obra.plano?.tasks.length ?? 0;
+      log(d, `Plano recomeçado do orçamento (teste) · ${n} tarefas · por aprovar`);
+      (d.obra.diario ??= []).push({ q: agora(), quem, t: "Plano recomeçado do orçamento (teste)", k: "marco" });
+      avisar({ msg: "Plano recomeçado", sub: `${n} tarefas, como o motor as gerou do orçamento. Falta o gestor de obra aprovar.`, kind: "ok" });
+      return true;
     },
     /** 17/11 (A-Z na Mudelar: a obra arrancou antes do plano e as tarefas ficaram nas datas antigas): as tarefas por fazer passam a começar
      *  hoje, pela mesma ordem e duração (as já começadas ficam). As Operações veem os conflitos com outras obras como sempre. */

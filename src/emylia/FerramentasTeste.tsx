@@ -21,6 +21,9 @@
 //     como os técnicos». O ecrã do técnico só mostra as tarefas do dia; aqui faz-se a tarefa pelas MESMAS ações do ecrã dele (começar, os
 //     passos, as horas previstas, uma fotografia de exemplo, «Correu como previsto.», enviar e terminar). A validação continua do responsável
 //     (nas Operações), e o fim da obra também.
+//  5. 25/11 (Rúben: «reset à obra para voltar a ter o plano original, para testarmos criar tasks e validar tudo»): «Recomeçar o plano do
+//     orçamento» (motor.recomecarPlano), com confirmação. O plano volta ao que o motor gera, por aprovar; o que estava mudado fica no
+//     antes e depois (planoAntesDepois.ts).
 import { useState } from "react";
 import { FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -91,6 +94,7 @@ export function fazerTarefaComoTecnico(A: Ctx["A"], d: Negocio, ti: number, S?: 
 export function FerramentasTeste({ ctx, d, ambiente = ambienteAqui }: { ctx: Ctx; d: Negocio; /** para os testes */ ambiente?: () => boolean }) {
   const teste = useModoTeste();
   const [aFazer, setAFazer] = useState<string | null>(null);
+  const [recomecar, setRecomecar] = useState(false);
   if (!teste || !modoReal() || !ambiente()) return null;
   const o = d.orc;
   const podeAceitar = !d.perdido && !d.anulado && !!o?.enviada && !o.aceite;
@@ -118,6 +122,8 @@ export function FerramentasTeste({ ctx, d, ambiente = ambienteAqui }: { ctx: Ctx
       if (!todas) break;
     }
   });
+  const plano = d.obra.plano, podeRecomecar = !!plano && !!o && plano.estado !== "concluída";
+  const fazerRecomecar = () => { setRecomecar(false); ctx.run(() => { ctx.A.recomecarPlano(d.id); }); };
   const botaoAvancar = P.tipo === "cliente" ? (P.acao === "aceitar" ? "Aceitar a proposta como o cliente" : "Assinar o contrato como o cliente")
     : P.tipo === "acao" ? `Avançar: ${P.btn}`
     : P.tipo === "ecra" && P.navega ? `Ir para o passo: ${P.btn ?? P.t}`
@@ -155,12 +161,29 @@ export function FerramentasTeste({ ctx, d, ambiente = ambienteAqui }: { ctx: Ctx
             </Button>
           </>
         )}
+        {podeRecomecar && !recomecar && (
+          <Button type="button" variant="outline" className="border-amber-600 bg-white text-amber-900 hover:bg-amber-50" disabled={!!aFazer} onClick={() => setRecomecar(true)}>
+            Recomeçar o plano do orçamento
+          </Button>
+        )}
         {botaoAvancar && (
           <Button type="button" className="bg-amber-600 text-white hover:bg-amber-700" disabled={!!aFazer} onClick={avancar}>
             {botaoAvancar}
           </Button>
         )}
       </div>
+      {recomecar && (
+        <div role="alertdialog" aria-labelledby="recomecar-t" className="space-y-2 rounded-xl border border-amber-600 bg-white p-3 text-amber-950">
+          <p id="recomecar-t" className="text-[15px]">
+            <b>Recomeçar o plano?</b> O plano volta a ser o que o motor gera do orçamento ({plano?.tasks.length ?? 0} tarefas agora), por aprovar.
+            Saem as mudanças, as tarefas juntadas e os registos dos técnicos. O que estava mudado fica guardado no antes e depois. A encomenda e os pagamentos ficam.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" className="bg-amber-600 text-white hover:bg-amber-700" onClick={fazerRecomecar}>Sim, recomeçar</Button>
+            <Button type="button" variant="outline" onClick={() => setRecomecar(false)}>Cancelar</Button>
+          </div>
+        </div>
+      )}
       <p className="text-xs">
         {porQueAceitar && <>Aceitar: {porQueAceitar} </>}{porQueAssinar && <>Assinar: {porQueAssinar} </>}
         Aceitar e assinar usam o caminho do portal, sem código por SMS, email nem SMS; o avançar faz a mesma ação do botão do passo.

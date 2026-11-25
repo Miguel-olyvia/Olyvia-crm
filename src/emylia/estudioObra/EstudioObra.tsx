@@ -33,6 +33,7 @@ import { resumoEcNegocio } from "../inventario/ponteNegocios";
 import { ImprevistosNaObra } from "../ImprevistosObra";
 import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
 import { EstadoFotos, useFotosAJuntar } from "../fotosDaObra";
+import { AntesDepoisPlano } from "./AntesDepoisPlano";
 import { Contagem, MOLA, useReduzir } from "../movimento";
 import { EstudioPlano, PainelTarefa } from "../estudioPlano/EstudioPlano";
 import { NovaTarefa } from "../PlanoInterativo";
@@ -532,6 +533,8 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
                   </ol>
                 </section>
               )}
+              {/* 25/11: o plano gerado e o validado (os registos de cada validação, para aprender) */}
+              <AntesDepoisPlano d={d} />
                   </>}
                   {aba === "execucao" && <Execucao ctx={ctx} d={d} dias={dias} abrir={(ti) => setPainel({ k: "tarefa", ti })} />}
                   {aba === "diario" && <DiarioObra d={d} ir={ir} dias={dias} />}

@@ -37,6 +37,7 @@ import { ImpactoNoOrcamento, linhasDoImpacto, textoEur, type LinhaImpacto } from
 import { materiaisDaTarefa, podeTirar } from "../tarefasValidador";
 import { diferencas } from "../ajustesPlano";
 import { MicrotarefasTarefa } from "../estudioObra/MicrotarefasTarefa";
+import { AntesDepoisPlano } from "../estudioObra/AntesDepoisPlano";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { Brilho, Contagem, MOLA, VistoDesenho, useReduzir } from "../movimento";
 
@@ -597,6 +598,8 @@ export function EstudioPlano({ ctx, d, fechar, voltar = "Voltar ao negócio" }: 
                   })}
                 </AnimatePresence>
               </section>
+              {/* 25/11: o que o gestor mudou ao plano gerado (ao vivo) e os registos de cada validação */}
+              <AntesDepoisPlano d={d} />
             </div>
           </main>
 
