@@ -41,9 +41,13 @@ export function previsao(p: Plano): Previsao {
   const plan = hoje >= 0 ? planeadoAte(p, hoje) : 0;
   const ritmo = hoje < 0 || plan < 0.5 ? 1 : Math.max(0.35, Math.min(1.8, feitoH / plan));
   const resto = Math.max(0, fimPlano - (hoje + 1));
-  const fimProvavel = p.estado === "concluída" ? fimPlano : hoje < 0 ? fimPlano : hoje + 1 + Math.ceil(resto / ritmo - 1e-9);
   const f = feitoH / totalH;
   const confianca: Previsao["confianca"] = f >= 0.6 ? "alta" : f >= 0.25 ? "média" : "baixa";
+  // 25/11 (revisão do Estúdio da obra, 1048 no dia 1: duas tarefas feitas davam «ritmo 180%» e o fim a 10 fev, com o plano a 8 abr):
+  // ir adiantado no início não encurta a obra (as tarefas seguintes estão presas às agendas e às datas); só com um quarto do trabalho
+  // feito o ritmo adiantado puxa o fim. Atrasado conta sempre: é o risco que o gestor tem de ver.
+  const ritmoFim = ritmo > 1 && confianca === "baixa" ? 1 : ritmo;
+  const fimProvavel = p.estado === "concluída" ? fimPlano : hoje < 0 ? fimPlano : hoje + 1 + Math.ceil(resto / ritmoFim - 1e-9);
   const folga = Math.ceil(Math.max(0, fimProvavel - (hoje + 1)) * (1 - f) * (confianca === "baixa" ? 0.35 : confianca === "média" ? 0.2 : 0.1));
   // as horas reais acumuladas: os registos de cada dia; o que não tem registo conta no último dia com trabalho (ou hoje)
   const porDia = new Array(Math.max(fimPlano, fimProvavel)).fill(0);
@@ -85,7 +89,9 @@ export function margemAoVivo(d: Negocio, S: Estado): MargemViva | null {
   const prevFeitas = feitas.reduce((a, l) => a + l.prev, 0), desvioMO = r2(feitas.reduce((a, l) => a + (l.desvio ?? 0), 0));
   const ritmo = prevFeitas > 0 ? desvioMO / prevFeitas : 0;
   const prevResto = K.linhas.filter((l) => !acabada(l.ti)).reduce((a, l) => a + l.prev, 0);
-  const projecao = r2(prevResto * ritmo);
+  // 25/11 (revisão, 1048 no dia 1: duas tarefas davam «o resto, a este ritmo, +6.492 €» e a margem a 56%): o resto só se projeta ao
+  // mesmo ritmo com pelo menos um quinto da mão de obra já feita; antes disso, conta só o que já se sabe
+  const projecao = prevFeitas >= 0.2 * (prevFeitas + prevResto) ? r2(prevResto * ritmo) : 0;
   const pend = porEncomendarDe(d);
   const materiais = r2(pend.reduce((a, x) => a + x.q * (x.m.preco ?? custosDosMateriais(d, [{ n: x.m.n, q: x.q }])[0]?.custo ?? 0), 0));
   const custoOrc = r2(T.custo);

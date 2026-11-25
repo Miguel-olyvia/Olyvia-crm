@@ -7,7 +7,7 @@ import { motivoOcupado, obraQueOcupa, tecnicosDoOficio } from "../preparacaoObra
 import { materiaisPorFase } from "../obraOps";
 import type { ResumoEcNeg } from "../inventario/ponteNegocios";
 import { dataCurta } from "../planoObra";
-import { comecada, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, replanear } from "./planoVivo";
+import { comecada, dataDoDia, derrapagem, diasDeAtraso, diasSemNinguem, estadoVivo, replanear } from "./planoVivo";
 
 export type Nivel = "critico" | "atencao" | "oportunidade";
 export type AcaoAlerta =
@@ -114,6 +114,13 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
       L.push({ id: "folga", nivel: "oportunidade", t: ganho > 0 ? `Há folga: a obra pode acabar ${dias(ganho)} mais cedo` : `Há folga: ${adiantadas.length} ${adiantadas.length === 1 ? "tarefa pode" : "tarefas podem"} começar mais cedo`,
         sub: `${adiantadas.slice(0, 3).map((m) => `${m.nome} a ${quando(p, m.para.dia)}`).join(", ")}${adiantadas.length > 3 ? "…" : ""}.`, acoes: [{ rot: "Ver e adiantar", a: { k: "adiantar" } }] });
     }
+  }
+  // 25/11 (revisão): os dias em que a obra fica sem ninguém (uma tarefa que acabou mais cedo deixa um buraco até à seguinte)
+  for (const g of diasSemNinguem(p)) {
+    const n = g.fim - g.ini + 1, seg = g.seguinte != null ? p.tasks[g.seguinte] : null;
+    L.push({ id: `parada-${g.ini}`, nivel: "oportunidade", t: `A obra fica sem ninguém ${dias(n)}: ${quando(p, g.ini)} a ${quando(p, g.fim)}`,
+      sub: seg ? `A seguir, ${seg.nome} a ${quando(p, seg.dia)}. Pode antecipá-la ou outra tarefa para esses dias.` : "Pode antecipar uma tarefa para esses dias.",
+      acoes: [...(seg && g.seguinte != null ? [{ rot: "Ver a tarefa", a: { k: "tarefa" as const, ti: g.seguinte } }] : []), { rot: "Replanear", a: { k: "replanear" as const } }], ...(g.seguinte != null ? { ti: g.seguinte } : {}) });
   }
   const peso: Record<Nivel, number> = { critico: 0, atencao: 1, oportunidade: 2 };
   return L.sort((a, b) => peso[a.nivel] - peso[b.nivel]);

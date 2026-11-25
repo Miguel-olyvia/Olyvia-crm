@@ -226,6 +226,47 @@ export function nomeCurtoTarefa(nome: string): string {
   return n.charAt(0).toLocaleUpperCase("pt-PT") + n.slice(1);
 }
 
+/** 25/11 (revisão do Estúdio da obra, 1048: casa de banho e cozinha): a divisão de uma tarefa dos modelos de obra («MO Modelo Remodelação
+ *  Completa - Cozinha · eletricidade» → «Cozinha»); null nas outras. */
+export function divisaoDaTarefa(nome: string): string | null {
+  const m = /\s-\s([^·]+?)\s·\s/.exec(nome.replace(/\s+/g, " "));
+  return m ? m[1].trim() : null;
+}
+/** O nome curto com a divisão quando o plano tem mais do que uma (as duas «Demolição e remoção» da 1048 eram iguais no ecrã):
+ *  «Demolição e remoção · cozinha». Com uma divisão só, fica o nome curto. */
+export function nomeNoPlano(p: Pick<Plano, "tasks">, t: Pick<Tarefa, "nome">): string {
+  const c = nomeCurtoTarefa(t.nome), d = divisaoDaTarefa(t.nome);
+  if (!d) return c;
+  const divs = new Set<string>();
+  for (const x of p.tasks) { const y = divisaoDaTarefa(x.nome); if (y) divs.add(y.toLocaleLowerCase("pt-PT")); if (divs.size > 1) break; }
+  return divs.size > 1 ? `${c} · ${d.toLocaleLowerCase("pt-PT")}` : c;
+}
+
+/** 25/11 (revisão do Estúdio da obra, 1048: a demolição acabou no dia 1 e a seguinte só começa a 7 dez): os períodos, de hoje ao fim do
+ *  plano, em que nenhuma tarefa por acabar tem dias marcados (a obra fica sem ninguém). Só os de `min` dias úteis ou mais; com a tarefa
+ *  que vem a seguir. As feitas e as validadas não ocupam os dias que sobraram. */
+export function diasSemNinguem(p: Plano, min = 2): { ini: number; fim: number; seguinte: number | null }[] {
+  if (p.estado !== "em curso" && p.estado !== "aprovado") return [];
+  const hoje = p.estado === "em curso" ? p.dia : 0;
+  const porFazer = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => { const v = estadoVivo(t, p); return v !== "feita" && v !== "validada"; });
+  if (!porFazer.length) return [];
+  const fim = Math.max(...porFazer.map(({ t }) => t.dia + t.dur));
+  const ocupado = new Array(Math.max(0, fim)).fill(false);
+  for (const { t } of porFazer) for (let k = Math.max(0, t.dia); k < t.dia + t.dur && k < fim; k++) ocupado[k] = true;
+  const out: { ini: number; fim: number; seguinte: number | null }[] = [];
+  let k = hoje;
+  while (k < fim) {
+    if (ocupado[k]) { k++; continue; }
+    const ini = k;
+    while (k < fim && !ocupado[k]) k++;
+    if (k - ini >= min) {
+      const prox = porFazer.filter(({ t }) => t.dia >= k).sort((a, b) => a.t.dia - b.t.dia)[0];
+      out.push({ ini, fim: k - 1, seguinte: prox ? prox.ti : null });
+    }
+  }
+  return out;
+}
+
 /* ------------------------------------------------------------------ 23/11: as dependências entre tarefas */
 // Rúben: «falta permitir criar dependências com click and drag, e nos detalhes laterais também, e ter isso visual». O plano já ligava as
 // tarefas pelas datas (a regra de sempre do replanear e do caminho crítico: uma tarefa espera pelas que começam antes dela e acabam até ao

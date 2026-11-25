@@ -45,7 +45,7 @@ import { porqueNaoMexe, TECS } from "../motor";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { DispersaoDaEquipa, Aba, ClienteDaObra, EquipaDaObra, Execucao, ExecucaoTarefa, FechoDaObra, MateriaisDaObra } from "./PaineisObra";
 import { AgendaEquipa, ComandoHoje, DiarioObra, FechoVivo, PontoDaSemana, PrevisaoViva, Pulso, precisaDeTi, obraViva, type Ir } from "./ComandoObra";
-import { ROTULO_VIVO, comLigacao, comRestricao, naoCabem, conflitosNovos, ligacoesDoPlano, nomeCurtoTarefa, porqueNaoLigar, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
+import { ROTULO_VIVO, comLigacao, comRestricao, naoCabem, conflitosNovos, ligacoesDoPlano, nomeCurtoTarefa, nomeNoPlano, porqueNaoLigar, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
 import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
 import { custoDosNossos, pedePorque, type AjusteObra } from "./quemPaga";
 import { PorqueAjuste, type ImprevistoInicial } from "./PorqueAjuste";
@@ -861,7 +861,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
     const atraso = diasDeAtraso(t, p), a = arrasto?.ti === ti ? arrasto : null;
     // 23/11 (revisão: «P…», «T…»): na vista Gantt, o nome vai à direita da barra quando não cabe nela
     const comIcone = critico.has(ti) || ["validada", "feita", "parada", "pausada", "atrasada", "corrigir"].includes(v);
-    const cabe = vista !== "gantt" || nomeCurtoTarefa(t.nome).length * 6.9 + 18 + (comIcone ? 18 : 0) <= n.dur * COL - 4;
+    const cabe = vista !== "gantt" || nomeNoPlano(p, t).length * 6.9 + 18 + (comIcone ? 18 : 0) <= n.dur * COL - 4;
     // o nome à direita fica depois do atraso desenhado (+N), quando há
     const fimVisto = n.dia + n.dur + (!R && atraso > 0 ? atraso : 0);
     return (
@@ -871,12 +871,12 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
           <div aria-hidden="true" className="absolute flex items-center justify-end rounded-r-lg bg-[repeating-linear-gradient(135deg,hsl(var(--destructive)/0.35)_0_5px,hsl(var(--destructive)/0.15)_5px_10px)] pr-1 text-[11px] font-bold text-destructive"
             style={{ left: (t.dia + t.dur) * COL - 2, width: atraso * COL, top, height: ALTO }}>+{atraso}</div>
         )}
-        {!cabe && <span aria-hidden="true" className="pointer-events-none absolute z-[2] whitespace-nowrap text-xs font-medium text-foreground/80" style={{ left: fimVisto * COL + (ligar && !R ? 22 : 6), top: top + ALTO / 2 - 8 }}>{nomeCurtoTarefa(t.nome)}</span>}
+        {!cabe && <span aria-hidden="true" className="pointer-events-none absolute z-[2] whitespace-nowrap text-xs font-medium text-foreground/80" style={{ left: fimVisto * COL + (ligar && !R ? 22 : 6), top: top + ALTO / 2 - 8 }}>{nomeNoPlano(p, t)}</span>}
         <Barra semTexto={!cabe} t={t} n={n} v={v} p={p} sel={sel === ti || aLigar?.alvo === ti} mudou={mudou(ti)} abrir={() => { if (Date.now() - largouEm.current > 350) abrir(ti); }} reduzir={reduzir} top={top} critica={critico.has(ti)} col={COL} alto={ALTO} largo={vista === "tecnicos"}
           arrasto={a} mexe={!R && podeMexer(ti)} pegar={(e, tipo) => pegar(e, ti, tipo)} premir={ligar && !R && vista === "gantt" ? (e) => premir(e, ti) : undefined} />
         {/* 23/11: o pegador para ligar (aparece ao passar o rato na linha, ou com a tarefa escolhida) */}
         {ligar && !R && vista === "gantt" && (
-          <span role="button" tabIndex={-1} aria-label={`Ligar ${nomeCurtoTarefa(t.nome)} a outra tarefa (arraste até à tarefa que só começa depois)`} title="Arraste até à tarefa que só começa quando esta acabar"
+          <span role="button" tabIndex={-1} aria-label={`Ligar ${nomeNoPlano(p, t)} a outra tarefa (arraste até à tarefa que só começa depois)`} title="Arraste até à tarefa que só começa quando esta acabar"
             onPointerDown={(e) => comecarLigar(e, ti)} onPointerMove={moverLigar} onPointerUp={largarLigar} onPointerCancel={() => setALigar(null)}
             className={cn("absolute z-10 grid h-5 w-5 cursor-crosshair place-items-center rounded-full border-2 border-primary bg-card text-primary shadow-sm transition-opacity touch-none",
               sel === ti || aLigar?.de === ti ? "opacity-100" : "opacity-0 group-hover:opacity-100 focus:opacity-100")}
@@ -1078,7 +1078,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
                     style={dy ? { transform: `translateY(${dy}px)` } : undefined} onPointerEnter={() => setHov(ti)} onPointerLeave={() => setHov((h) => (h === ti ? null : h))}>
                     <div className={cn("sticky left-0 z-10 flex shrink-0 items-stretch bg-card", rotulo)} style={largura}>
                       {podeOrdenar && (
-                        <button type="button" data-pegador={ti} aria-label={`Mudar a ordem de ${nomeCurtoTarefa(t.nome)}: lugar ${k + 1} de ${f.tis.length} na fase ${f.n}. Setas para cima e para baixo para mudar.`}
+                        <button type="button" data-pegador={ti} aria-label={`Mudar a ordem de ${nomeNoPlano(p, t)}: lugar ${k + 1} de ${f.tis.length} na fase ${f.n}. Setas para cima e para baixo para mudar.`}
                           title="Arraste para mudar a ordem (ou use as setas do teclado)"
                           onPointerDown={(e) => pegarOrdem(e, ti)} onPointerMove={arrastarOrdem} onPointerUp={largarOrdem} onPointerCancel={() => { ordRef.current = null; setOrd(null); }}
                           onKeyDown={(e) => teclaOrdem(e, ti, k, f.tis.length, f.n)}
@@ -1088,7 +1088,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
                       )}
                       <button type="button" onClick={() => abrir(ti)} className={cn("flex min-w-0 flex-1 items-center gap-2 py-1.5 pr-3 text-left hover:bg-muted/60 sm:pr-4", podeOrdenar ? "pl-1" : "pl-3 sm:pl-4")}>
                         <span className="hidden sm:block"><AvatarTec id={t.tec} tam="h-7 w-7" /></span>
-                        <span className="min-w-0" title={t.nome}><span className="block truncate text-sm font-medium">{nomeCurtoTarefa(t.nome)}</span>{(v !== "por começar" || atraso > 0) && <span className={cn("block truncate text-xs", v === "atrasada" || v === "corrigir" ? "font-medium text-destructive" : "text-muted-foreground")}>{rotuloVivo(t, p)}{atraso ? ` · +${atraso}` : ""}</span>}</span>
+                        <span className="min-w-0" title={t.nome}><span className="block truncate text-sm font-medium">{nomeNoPlano(p, t)}</span>{(v !== "por começar" || atraso > 0) && <span className={cn("block truncate text-xs", v === "atrasada" || v === "corrigir" ? "font-medium text-destructive" : "text-muted-foreground")}>{rotuloVivo(t, p)}{atraso ? ` · +${atraso}` : ""}</span>}</span>
                       </button>
                     </div>
                     <div className="relative" data-linha={ti} style={{ width: dias.length * COL, height: LINHA }}>{fundo()}{barra(ti, 7)}</div>
@@ -1200,7 +1200,7 @@ ${ROTULO_VIVO[v]} · ${n.dur} ${n.dur === 1 ? "dia" : "dias"}${dataIni ? ` a par
       {I && <I className="relative h-3.5 w-3.5 shrink-0" aria-hidden="true" />}
       {/* na vista por técnico, uma barra de um dia é só para o nome (o caminho crítico fica na dica e no rótulo) */}
       {critica && !I && !(largo && n.dur < 2) && <Route className="relative h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden="true" />}
-      {!semTexto && <span lang="pt-PT" className={cn("relative drop-shadow-sm", largo ? "line-clamp-2 whitespace-normal hyphens-auto text-[11px] leading-tight" : "truncate")}>{nomeCurtoTarefa(t.nome)}</span>}
+      {!semTexto && <span lang="pt-PT" className={cn("relative drop-shadow-sm", largo ? "line-clamp-2 whitespace-normal hyphens-auto text-[11px] leading-tight" : "truncate")}>{nomeNoPlano(p, t)}</span>}
       {arrasto && passos !== 0 && <span className="relative ml-auto shrink-0 rounded bg-black/25 px-1 text-[10px] tabular-nums">{passos > 0 ? "+" : ""}{passos}</span>}
       {mexe && <span onPointerDown={(e) => pegar(e, "durar")} aria-hidden="true" className="absolute inset-y-0 right-0 w-3 cursor-ew-resize bg-white/0 hover:bg-white/30" />}
     </motion.button>
@@ -1298,7 +1298,7 @@ function PreviaPlano({ ctx, d, previa, setPrevia, R, fora, dias, abrirOutra, ocu
               const t = p0.tasks[ti];
               return (
                 <li key={ti} className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <span><b className="font-medium" title={t.nome}>{nomeCurtoTarefa(t.nome)}</b> ({t.dur} {t.dur === 1 ? "dia" : "dias"} seguidos)</span>
+                  <span><b className="font-medium" title={t.nome}>{nomeNoPlano(d.obra.plano!, t)}</b> ({t.dur} {t.dur === 1 ? "dia" : "dias"} seguidos)</span>
                   {tecnicosDoOficio(t).filter((x) => x.id !== previa.tec && motivoOcupado(x.id, { dia: R.plano.tasks[ti].dia, dur: t.dur, h: t.h }, R.plano, ocup) == null).slice(0, 2).map((x) => (
                     <button key={x.id} type="button" onClick={() => run(() => A.trocarTec(d.id, ti, x.id))}
                       className="inline-flex min-h-8 items-center gap-1 rounded-full border border-primary/40 bg-card px-2.5 text-sm font-medium text-primary hover:bg-primary/[0.06]">

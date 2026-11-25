@@ -20,7 +20,7 @@ import { custoObra } from "../custoObra";
 import { faseDosMateriais } from "../planoObra";
 import { LINHA_DEMOLICAO } from "../entulho";
 import { dataCurta } from "../planoObra";
-import { blocosForaDaObra, obrasDosTecnicos } from "../preparacaoObra";
+import { blocosForaDaObra, obrasDosTecnicos, rotuloDia } from "../preparacaoObra";
 import { materiaisPorFase, progresso } from "../obraOps";
 import { porEncomendarDe } from "../encomendasAjuste";
 import { imprevistosDe, pedidoDeAtraso, textoPedidoAtraso } from "../imprevistos";
@@ -30,7 +30,7 @@ import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
 import { FotoObra } from "../fotosDaObra";
 import { Contagem, MOLA, useReduzir } from "../movimento";
 import { podeNeg, podeVerCustos } from "../permissoes";
-import { derrapagem, estadoVivo, nomeCurtoTarefa, rotuloVivo } from "./planoVivo";
+import { derrapagem, diasSemNinguem, estadoVivo, nomeCurtoTarefa, nomeNoPlano, rotuloVivo } from "./planoVivo";
 import { CaminhoCritico, ICONE_DA_FASE } from "./CaminhoCritico";
 import { AutoRececaoDoc } from "../AutoRececao";
 import { NaFrente } from "../NaFrente";
@@ -101,7 +101,7 @@ export function Pulso({ d, S, dias, prev, margem, precisa, ir }: { d: Negocio; S
               <span className="min-w-0">
                 <span className="block text-xs font-semibold uppercase tracking-[0.14em] text-white/75">{faltam ? "Começa daqui a" : "Começa hoje"}</span>
                 <span className="block text-2xl font-semibold leading-tight">{faltam ? dd(faltam) : quando(a!.dia)}</span>
-                {ta && <span className="mt-0.5 block text-sm text-white/85">{quando(a!.dia)} · {primeiro(nomeTec(ta.tec))} · {nomeCurtoTarefa(ta.nome)}</span>}
+                {ta && <span className="mt-0.5 block text-sm text-white/85">{quando(a!.dia)} · {primeiro(nomeTec(ta.tec))} · {nomeNoPlano(p, ta)}</span>}
               </span>
             </>
           ) : (
@@ -200,7 +200,7 @@ function Arranque({ ctx, d, dias, ir }: { ctx: Ctx; d: Negocio; dias: Date[]; ir
         <AvatarTec id={ta.tec} tam="h-9 w-9" />
         <span className="min-w-0 flex-1">
           <span className="block text-xs text-muted-foreground">{faltam ? `Daqui a ${faltam} ${faltam === 1 ? "dia útil" : "dias úteis"}` : "Hoje"} · primeira tarefa</span>
-          <span className="block truncate text-sm font-medium">{primeiro(nomeTec(ta.tec))} · {nomeCurtoTarefa(ta.nome)}</span>
+          <span className="block truncate text-sm font-medium">{primeiro(nomeTec(ta.tec))} · {nomeNoPlano(p, ta)}</span>
         </span>
       </button>
       <section aria-label="Lista do arranque" className="space-y-1.5">
@@ -253,6 +253,13 @@ export function precisaDeTi(ctx: Ctx, d: Negocio, ir: Ir): Pedido[] {
   if (pend.length) L.push({ k: "mat", t: `${pend.length} ${pend.length === 1 ? "material por encomendar" : "materiais por encomendar"}`, sub: pend.slice(0, 3).map((x) => x.m.n).join(", "), rot: "Encomendar", fn: () => run(() => A.encomendarMateriais(d.id)), nivel: "atencao" });
   const pausadas = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => estadoVivo(t, p) === "pausada");
   for (const { t, ti } of pausadas) L.push({ k: "p" + ti, t: `${t.nome} está pausada`, sub: t.exec?.pausa?.motivo, rot: "Retomar", fn: () => run(() => A.retomarTarefa(d.id, ti)), nivel: "atencao" });
+  // 25/11 (revisão, 1048: a demolição acabou no dia 1 e ninguém volta à obra até 7 dez): um buraco nos próximos dias pede uma decisão
+  const g = diasSemNinguem(p).find((x) => x.ini <= p.dia + 5);
+  if (g && g.seguinte != null) {
+    const n = g.fim - g.ini + 1, seg = p.tasks[g.seguinte], dia = (k: number) => rotuloDia(p, k);
+    L.push({ k: "parada", t: `A obra fica sem ninguém ${n} ${n === 1 ? "dia útil" : "dias úteis"}`, sub: `De ${dia(g.ini)} a ${dia(g.fim)}. A seguir: ${nomeNoPlano(p, seg)}, a ${dia(seg.dia)}`,
+      rot: "Antecipar", fn: () => ir.tarefa(g.seguinte!), nivel: "atencao" });
+  }
   return L.sort((a, b) => (a.nivel === b.nivel ? 0 : a.nivel === "critico" ? -1 : 1));
 }
 
@@ -345,7 +352,7 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
                   <p className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">{k === p.dia + 1 && !antesDoArranque(p) ? "Amanhã · " : ""}{quando(k)}</p>
                   {L.map(({ t, ti }) => (
                     <button key={ti} type="button" onClick={() => ir.tarefa(ti)} title={t.nome} className="mt-1 flex w-full items-center gap-2 rounded-xl px-1 py-0.5 text-left text-sm hover:bg-muted">
-                      <AvatarTec id={t.tec} tam="h-6 w-6" /><span className="min-w-0 truncate"><b className="font-medium">{primeiro(nomeTec(t.tec))}</b> · {nomeCurtoTarefa(t.nome)}</span>
+                      <AvatarTec id={t.tec} tam="h-6 w-6" /><span className="min-w-0 truncate"><b className="font-medium">{primeiro(nomeTec(t.tec))}</b> · {nomeNoPlano(p, t)}</span>
                       {t.dur > 1 && <span className="ml-auto shrink-0 text-xs text-muted-foreground">{t.dur} dias</span>}
                     </button>
                   ))}
@@ -580,7 +587,7 @@ export function AgendaEquipa({ ctx, d, dias, ir }: { ctx: Ctx; d: Negocio; dias:
                         <motion.button key={ti} type="button" layout={!reduzir} draggable={planeia} onDragStart={() => setArr(ti)} onDragEnd={() => { setArr(null); setAlvo(null); }} onClick={() => ir.tarefa(ti)}
                           className={cn("flex w-full items-center gap-1 rounded-lg px-2 py-1 text-left text-xs font-medium text-white shadow-sm", planeia && "cursor-grab active:cursor-grabbing", arr === ti && "opacity-40")}
                           style={{ background: COR_FASE[t.fase ?? 1] }} title={`${t.nome} · ${rotuloVivo(t, p)}`}>
-                          <span className="truncate">{nomeCurtoTarefa(t.nome)}</span>
+                          <span className="truncate">{nomeNoPlano(p, t)}</span>
                         </motion.button>
                       ))}
                       {!b && !aqui.length && <span className="block px-1 text-[11px] text-muted-foreground/70">livre</span>}

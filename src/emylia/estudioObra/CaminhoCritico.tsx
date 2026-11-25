@@ -6,7 +6,7 @@ import { AppWindow, Armchair, Bath, BrickWall, Check, DoorOpen, Droplets, Grid3x
 import { cn } from "@/lib/utils";
 import { COR_FASE, FASES_OBRA, type FaseObra } from "../fasesObra";
 import type { Plano, Tarefa } from "../motor";
-import { estadoVivo, nomeCurtoTarefa } from "./planoVivo";
+import { estadoVivo, nomeCurtoTarefa, nomeNoPlano } from "./planoVivo";
 
 /** O ícone de cada fase da obra (o mesmo da proposta). */
 export const ICONE_DA_FASE: Record<number, LucideIcon> = { 1: Hammer, 2: Plug, 3: Grid3x3, 4: Armchair };
@@ -78,7 +78,7 @@ export function CaminhoCritico({ p, critico, quando, abrir }: { p: Plano; critic
                           <span aria-hidden="true" className="grid h-7 w-7 shrink-0 place-items-center rounded-md" style={{ background: `color-mix(in srgb, ${cor} 12%, transparent)`, color: cor }}>
                             {feita ? <Check className="h-4 w-4" /> : <T className="h-4 w-4" />}
                           </span>
-                          <span className={cn("min-w-0 flex-1 truncate text-sm", feita && "text-muted-foreground line-through")}>{nomeCurtoTarefa(t.nome)}</span>
+                          <span className={cn("min-w-0 flex-1 truncate text-sm", feita && "text-muted-foreground line-through")}>{nomeNoPlano(p, t)}</span>
                           <span className="shrink-0 text-xs tabular-nums text-muted-foreground group-hover:text-foreground">{quando(t.dia)}</span>
                         </button>
                       </li>
@@ -127,7 +127,7 @@ export function EscolherTarefa({ p, tis, sel, escolher, rotulo, detalhe, compact
                       <span aria-hidden="true" className="grid h-7 w-7 shrink-0 place-items-center rounded-md" style={on ? { background: cor, color: "white" } : { background: `color-mix(in srgb, ${cor} 12%, transparent)`, color: cor }}>
                         <T className="h-4 w-4" />
                       </span>
-                      <span className={cn("min-w-0 flex-1 truncate text-sm", on && "font-medium")}>{nomeCurtoTarefa(t.nome)}</span>
+                      <span className={cn("min-w-0 flex-1 truncate text-sm", on && "font-medium")}>{nomeNoPlano(p, t)}</span>
                       {x && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{x}</span>}
                     </button>
                   </li>
