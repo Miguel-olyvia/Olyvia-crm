@@ -89,14 +89,37 @@ export function juntarTarefa(p: Plano, t: Tarefa): number {
   return p.tasks.length - 1;
 }
 
-/** Só as tarefas juntadas pelo validador se tiram (as do orçamento ficam na base). */
-export const podeTirar = (p: Plano, ti: number): boolean => !!p.tasks[ti]?.nova && ti >= (p.base?.length ?? 0);
+/** 24/11 (Rúben: «no Estúdio da obra poder juntar e tirar tarefas»): tira-se qualquer tarefa sem trabalho do técnico (nem começada, nem
+ *  marcada); a do orçamento fica na base («Repor o plano do orçamento»). Antes só as juntadas pelo validador: o botão aparecia nas do
+ *  contrato e não fazia nada. */
+export const podeTirar = (p: Plano, ti: number): boolean => { const t = p.tasks[ti]; return !!t && !t.exec; };
+/** Os índices de tarefas guardados no plano (as dependências, as correções, os avisos) andam com a tarefa tirada. */
+const semIndice = (L: number[] | undefined, ti: number): number[] | undefined => L?.filter((j) => j !== ti).map((j) => (j > ti ? j - 1 : j));
 export function tirarTarefa(p: Plano, ti: number): boolean {
   if (!podeTirar(p, ti)) return false;
+  guardarBase(p);
   p.tasks.splice(ti, 1);
+  for (const t of p.tasks) {
+    if (t.deps) { const L = semIndice(t.deps, ti)!; if (L.length) t.deps = L; else delete t.deps; }
+    if (t.semDeps) { const L = semIndice(t.semDeps, ti)!; if (L.length) t.semDeps = L; else delete t.semDeps; }
+    if (t.corrige != null) { if (t.corrige === ti) delete t.corrige; else if (t.corrige > ti) t.corrige--; }
+  }
   // os avisos dessa tarefa deixam de apontar para ela; os das seguintes andam um para trás
   p.avisos = p.avisos?.map((a) => (a.ti === ti ? { ...a, ti: -1 } : a.ti > ti ? { ...a, ti: a.ti - 1 } : a));
   return true;
+}
+
+/** 24/11: uma tarefa interna (sem serviço do Catálogo): o nome, as horas, a fase e quem a faz. Não tem custo para o cliente. */
+export interface NovaTarefaInterna { nome: string; h: number; fase: number; tec?: string | null; dia?: number }
+export function criarTarefaInterna(p: Plano, n: NovaTarefaInterna): Tarefa {
+  const h = r2(Math.max(0.5, n.h)), dur = Math.max(1, Math.ceil(h / HORAS_DIA - 1e-9));
+  const tec = n.tec ? TECS.find((x) => x.id === n.tec) : undefined;
+  const t: Tarefa = { nome: n.nome.replace(/\s+/g, " ").trim().slice(0, 120), svcs: [], dia: 0, dur, sk: tec?.sk ?? "Equipa", h, tec: tec?.id ?? null,
+    fase: n.fase || undefined, nova: true, interna: true, mats: [], ...(tec?.perfilId ? { perfilId: tec.perfilId } : {}) };
+  const naFase = p.tasks.filter((x) => (x.fase ?? 0) === (n.fase ?? 0));
+  const min = diaMinimo(p, n.fase);
+  t.dia = Math.max(min, n.dia ?? (naFase.length ? Math.min(...naFase.map((x) => x.dia)) : min));
+  return t;
 }
 
 /** Muda a tarefa de fase (e, se vier, de dia): não começa antes do fim da fase anterior; as fases seguintes empurram-se. */

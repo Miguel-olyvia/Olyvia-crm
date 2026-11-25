@@ -29,7 +29,9 @@ export function PorqueAjuste({ ctx, d, aj, fechar, feito, imprevisto, embutido }
 }) {
   const { S, A, run } = ctx;
   const p = d.obra.plano!;
-  const [escolha, setEscolha] = useState<QuemPaga | null>(null);
+  // 24/11: um serviço do Catálogo que não está no contrato muda o valor: vem com «O cliente pediu» (a adenda) já escolhido
+  const foraDoContrato = aj.k === "nova" && !(d.orc?.linhas ?? []).some((l) => l.t === "svc" && l.sid === aj.n.sid);
+  const [escolha, setEscolha] = useState<QuemPaga | null>(foraDoContrato ? "cliente" : null);
   const [horasE, setHorasE] = useState<number | null>(null);
   const [preco, setPreco] = useState<number | null>(null);
   const [nota, setNota] = useState("");
@@ -91,6 +93,7 @@ export function PorqueAjuste({ ctx, d, aj, fechar, feito, imprevisto, embutido }
         </p>
       </div>
 
+      {foraDoContrato && <p className="rounded-xl bg-primary/[0.06] px-3 py-2 text-sm">Este serviço não está no contrato: muda o valor da obra. Se foi o cliente a pedir, vai numa adenda.</p>}
       <div role="radiogroup" aria-label="Quem paga" className="grid gap-2">
         {PORQUE.map((o) => {
           const Ic = ICONE[o.k], on = escolha === o.k;

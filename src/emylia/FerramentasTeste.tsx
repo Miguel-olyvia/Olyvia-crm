@@ -28,7 +28,7 @@ import { proximo, type Estado, type Negocio } from "./motor";
 import { RES_INTERESSADO } from "./campos";
 import { fotoExemplo } from "./obraOps";
 import { COR_FASE } from "./planoObra";
-import { instrucoesDe } from "./trabalhoObra";
+import { listaMicro } from "./microtarefas";
 import { fazer, type Ctx } from "./pecas";
 import { modoReal } from "./acessosPortal";
 import { useModoTeste } from "./real/modoTeste";
@@ -76,12 +76,13 @@ export const tarefasPorFazer = (d: Negocio): number =>
   d.obra.plano?.estado === "em curso" ? d.obra.plano.tasks.filter((t) => !t.bloqueio && t.exec?.estado !== "feita" && t.exec?.estado !== "validada").length : 0;
 
 /** Faz a tarefa `ti` como o técnico dela: as mesmas ações do Hoje do técnico (dentro de um ctx.run). */
-export function fazerTarefaComoTecnico(A: Ctx["A"], d: Negocio, ti: number): void {
+export function fazerTarefaComoTecnico(A: Ctx["A"], d: Negocio, ti: number, S?: Ctx["S"]): void {
   const t = d.obra.plano?.tasks[ti];
   if (!t) return;
   A.comecarTarefa(d.id, ti);
+  // 24/11: as microtarefas da tarefa (pelo id), as mesmas que o técnico vê no Hoje
   const ja = new Set(t.exec?.passos ?? []);
-  instrucoesDe(t).passos.forEach((_, k) => { if (!ja.has(k)) A.marcarPasso(d.id, ti, k); });
+  listaMicro(t, S, d.obra.plano).forEach((m) => { if (!ja.has(m.id)) A.marcarPasso(d.id, ti, m.id); });
   const horas = t.h > 0 ? t.h : 1;
   A.enviarRegisto(d.id, ti, { horas, fotos: [fotoExemplo(t.nome, t.fase ? COR_FASE[t.fase] : undefined, 0)], nota: "Correu como previsto. (teste)", feita: true });
 }
@@ -113,7 +114,7 @@ export function FerramentasTeste({ ctx, d, ambiente = ambienteAqui }: { ctx: Ctx
     const atual = () => ctx.S.deals.find((x) => x.id === d.id) ?? d;
     let antes = -1;
     for (let i = 0, ti = tarefaSeguinte(atual()); ti >= 0 && ti !== antes && i < 200; i++, antes = ti, ti = tarefaSeguinte(atual())) {
-      fazerTarefaComoTecnico(ctx.A, atual(), ti);
+      fazerTarefaComoTecnico(ctx.A, atual(), ti, ctx.S);
       if (!todas) break;
     }
   });

@@ -34,7 +34,8 @@ import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, impre
 import { comFaturaDaParcela, faltaParaAuto, nomeDaParcela, parcelaDoArranquePorPagar, parcelasDoContrato } from "./parcelas";
 import { diasQuePode, agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, FALTA_EC_AUTOMATICA, ecNoServidor, marcarEcNoServidor, retificacaoAceite, faltaMedirTexto, medicoesDe, supervisorDasMedidas, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { pedirPainelObra } from "./estudioObra/painelPedido";
-import { avisarTecnico, criarTarefa, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa } from "./tarefasValidador";
+import { avisarTecnico, criarTarefa, criarTarefaInterna, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa, type NovaTarefaInterna } from "./tarefasValidador";
+import { listaMicro, microtarefasDe, mudarMicro, nomesFeitos, porFixar, type Micro, type MudancaMicro } from "./microtarefas";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { CHAVE_CONTACTO_CONCLUIDO, CODIGO_GRAVAR_NEGOCIO, SEM_PERM, comPermissoesReais, contactoConcluido, passoDe, pelaPermissao, podeNeg, soAteAoContacto, temCodigoReal, type PermNeg } from "./permissoes";
@@ -359,6 +360,9 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 23/11 (Rúben: «criar dependências com click and drag»): as tarefas (índices) de que esta depende à mão (só começa quando acabam), e
    *  as que o plano ligava pelas datas e se tiraram à mão (estudioObra/planoVivo.ts: dependenciasDe). */ deps?: number[]; semDeps?: number[];
   /** 21/10: juntada pelo validador do plano (tarefasValidador.ts): a quantidade do serviço e os materiais escolhidos */ nova?: true; q?: number; mats?: MatTarefa[];
+  /** 24/11: as microtarefas desta obra (microtarefas.ts), quando o gestor as mudou ou fixou; sem elas, vêm do Catálogo. O técnico marca-as
+   *  pelo id (exec.passos). */ micro?: Micro[];
+  /** 24/11: uma tarefa interna (sem serviço do Catálogo e sem custo para o cliente): não muda o valor do contrato nem pede adenda */ interna?: true;
   /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[];
   /** 21/10: parada por um imprevisto (o id, imprevistos.ts) até o cliente decidir */ bloqueio?: string;
   /** 21/10: tarefa de uma adenda (o número): os materiais dela só se encomendam com o pagamento da adenda validado (encomendasAjuste.ts) */ adenda?: string;
@@ -4028,13 +4032,15 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (custo) derivarServicos(S);
       if (feito.length) avisar({ msg: `Ficha de ${t.n} atualizada`, sub: feito.join(" · "), kind: "ok" });
     },
-    /** O técnico marca (ou desmarca) um passo das instruções; a tarefa começa com o primeiro. */
+    /** O técnico marca (ou desmarca) uma microtarefa (pelo id: microtarefas.ts); a tarefa começa com a primeira. */
     marcarPasso(id: number, ti: number, k: number) {
       if (!exigeExecucao()) return;
       const d = deal(id), t = d.obra.plano?.tasks[ti];
       if (!t || d.obra.plano!.estado !== "em curso") return;
       const e = t.exec ?? { estado: "em curso", horas: 0, fotos: [] };
       if (e.estado === "validada" || e.estado === "feita") return;
+      // 24/11: sem lista própria na tarefa, fica dito de onde vinha a lista que o técnico marcou (as marcas são ids dessa lista)
+      if (!t.micro && !e.microDe && !e.passos?.length) { const o = microtarefasDe(t, S, d.obra.plano).origem; if (o !== "obra") e.microDe = o; }
       const L = new Set(e.passos ?? []);
       if (L.has(k)) L.delete(k); else L.add(k);
       e.passos = [...L].sort((a, b) => a - b); t.exec = e;
@@ -4052,8 +4058,9 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!m.fotos.length) F.push("uma fotografia");
       if (!nota) F.push("o que fez hoje");
       if (F.length) { avisar({ msg: "Ainda não dá para enviar", sub: "Falta " + F.join(", ").replace(/, ([^,]*)$/, " e $1"), kind: "bad" }); return; }
-      const quem = TECS.find((x) => x.id === t.tec)?.n ?? "Técnico", I = instrucoesDe(t);
-      const feitos = (e.passos ?? []).map((k) => I.passos[k]).filter(Boolean);
+      // 24/11: as microtarefas marcadas (pelo id; a lista é a desta obra, ou a do Catálogo, ou as instruções)
+      const quem = TECS.find((x) => x.id === t.tec)?.n ?? "Técnico";
+      const feitos = nomesFeitos({ ...t, exec: e }, listaMicro(t, S, p));
       const ja = new Set((e.envios ?? []).flatMap((x) => x.passos ?? []));
       e.horas = Math.round((e.horas + horas) * 2) / 2;
       e.fotos = [...e.fotos, ...m.fotos]; // 20/11 (auditoria, Lote 3): todas (antes só as 6 últimas, calado)
@@ -4416,14 +4423,57 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
       if (!p || !t || p.estado === "concluída") return;
       if (p.estado === "em curso" && porqueNaoMexe(p, ti)) { avisar({ msg: "Esta tarefa já começou", sub: "Já tem trabalho: não se tira do plano.", kind: "bad" }); return; }
-      if (!tirarTarefa(p, ti)) return;
+      if (!tirarTarefa(p, ti)) { avisar({ msg: "Esta tarefa não se tira", sub: "Já tem trabalho registado pelo técnico.", kind: "bad" }); return; }
       if (t.tec) avisarTecnico(p, -1, `${t.nome} saiu do plano`, agora(), t.tec);
-      log(d, `Plano: tarefa ${t.nome} tirada`);
+      // 24/11: fica no histórico e no diário (quem tirou e se era do contrato)
+      const quemT = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome;
+      log(d, `Plano: tarefa ${t.nome} tirada${t.nova ? "" : " (era do contrato; o valor do contrato não muda)"}`);
+      if (p.estado === "em curso" || p.estado === "aprovado") (d.obra.diario ??= []).push({ q: agora(), quem: quemT, t: `Tarefa tirada do plano: ${t.nome}`, k: "marco" });
       // 21/10: a encomenda de ajuste que só servia esta tarefa anula-se (se ainda nada saiu para a obra)
       const an = anularAjustesDaTarefa(d, t, agora());
       if (an.anuladas.length) log(d, `Encomenda de ajuste ${an.anuladas.join(", ")} anulada no Inventário: a tarefa saiu do plano`, "w");
       if (an.ficam.length) log(d, `${an.ficam.join(", ")} fica: já saíram materiais para a obra (o que sobrar volta ao armazém)`, "w");
       if (!A.planoMudou(d)) avisar({ msg: "Tarefa tirada do plano", sub: t.nome, kind: "ok" });
+    },
+    /** 24/11: uma tarefa interna (sem serviço do Catálogo, sem custo para o cliente): entra já no plano, sem «Porquê?» nem adenda. */
+    novaTarefaInterna(id: number, n: NovaTarefaInterna): number | null {
+      if (!exigePerm("obra.planear")) return null;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado === "concluída" || !n.nome.trim() || !(n.h > 0)) return null;
+      const t = criarTarefaInterna(p, n), ti = juntarTarefa(p, t);
+      if (p.estado === "em curso" && t.dia < p.dia) mudarInicio(p, ti, p.dia);
+      avisarTecnico(p, ti, `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(p, t.dia)}`, agora());
+      const tec = TECS.find((x) => x.id === t.tec);
+      log(d, `Plano: tarefa interna nova · ${t.nome} (fase ${t.fase ?? "—"}, ${nfmt(t.h)} h${tec ? ", " + tec.n : ""}; sem custo para o cliente)`);
+      if (p.estado === "em curso") {
+        const quem = PAPEIS[S.role].nome === "Filipe" ? "Filipe Rocha" : PAPEIS[S.role].nome;
+        (d.obra.diario ??= []).push({ q: agora(), quem, t: `Tarefa interna juntada ao plano: ${t.nome} (sem custo para o cliente)`, k: "marco" });
+      }
+      if (!A.planoMudou(d)) avisar({ msg: "Tarefa interna juntada", sub: `${t.nome} · ${rotuloDia(p, t.dia)} · sem adenda`, kind: "ok" });
+      return ti;
+    },
+    /** 24/11: o gestor muda as microtarefas de uma tarefa só nesta obra (microtarefas.ts); a ficha do Catálogo não muda. */
+    microtarefas(id: number, ti: number, m: MudancaMicro): boolean {
+      if (!exigePerm("obra.planear")) return false;
+      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
+      if (!p || !t || p.estado === "concluída" || t.exec?.estado === "validada") return false;
+      const texto = mudarMicro(t, m, S, p);
+      if (!texto) return false;
+      log(d, `Plano: microtarefas de ${t.nome} · ${texto}`);
+      return true;
+    },
+    /** 24/11: ao abrir o Estúdio da obra, as tarefas sem lista própria ficam com a do Catálogo (a mesma que se mostra): assim o técnico,
+     *  que pode não ler o Catálogo, vê a mesma lista que o gestor. Só as que ainda não têm marcas. Devolve quantas fixou. */
+    fixarMicrotarefas(id: number): number {
+      if (!podeNeg(S.role, "obra.planear")) return 0;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado === "concluída") return 0;
+      let n = 0;
+      for (const t of p.tasks) {
+        const L: Micro[] | null = porFixar(t, S, p);
+        if (L?.length) { t.micro = L; n++; }
+      }
+      return n;
     },
     /** Os materiais de uma tarefa (a lista inteira, já mudada). */
     matsTarefa(id: number, ti: number, mats: MatTarefa[]) {

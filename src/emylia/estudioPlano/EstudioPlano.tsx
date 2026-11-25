@@ -18,7 +18,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { flushSync } from "react-dom";
 import { createRoot } from "react-dom/client";
 import {
-  AlertTriangle, ArrowLeft, ArrowRight, ArrowUpRight, CalendarDays, CalendarRange, Check, ChevronLeft, ChevronRight, Equal, FolderOpen, Hammer,
+  AlertTriangle, ArrowLeft, ArrowRight, ArrowUpRight, CalendarDays, CalendarRange, Check, ChevronLeft, ChevronRight, Equal, FolderOpen,
   Lightbulb, Minus, Package, Plus, RotateCcw, Ruler, Sparkles, Trash2, TrendingDown, TrendingUp, Users, X, ZoomIn, ZoomOut,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,9 +34,9 @@ import { pelaPermissao, podeNeg } from "../permissoes";
 import { InfoDoNegocio } from "./InfoDoNegocio";
 import { EscolherQuem } from "./EscolherQuem";
 import { ImpactoNoOrcamento, linhasDoImpacto, textoEur, type LinhaImpacto } from "./ImpactoNoOrcamento";
-import { materiaisDaTarefa } from "../tarefasValidador";
+import { materiaisDaTarefa, podeTirar } from "../tarefasValidador";
 import { diferencas } from "../ajustesPlano";
-import { passosDaTarefa } from "../planoDaVisita";
+import { MicrotarefasTarefa } from "../estudioObra/MicrotarefasTarefa";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { Brilho, Contagem, MOLA, VistoDesenho, useReduzir } from "../movimento";
 
@@ -789,10 +789,6 @@ export function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, ond
   const p = d.obra.plano!, t = p.tasks[ti];
   const [nota, setNota] = useState(t.nota ?? "");
   const [tirar, setTirar] = useState(false);
-  const sid = t.svcs[0], s = sid ? S.svc[sid] : undefined;
-  const q = s && s.h > 0 ? t.h / s.h : 0;
-  const passos = sid ? passosDaTarefa(S, sid, q, t.sk, false) : [];
-  const hPassos = Math.max(0.01, ...passos.map((x) => x.h));
   const mats = materiaisDaTarefa(t, S.svc);
   const outras = p.tasks.filter((_, i) => i !== ti);
   const quem = TECS.map((x) => ({ x, doOficio: tecnicosDoOficio(t).some((y) => y.id === x.id), m: motivoOcupado(x.id, t, p, ocup, outras) }))
@@ -806,7 +802,7 @@ export function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, ond
     ...(onde ? [{ k: "outra", t: `Abrir a obra ${onde.nome}`, sub: `Onde ${primeiro(nomeTec(t.tec))} está nestes dias`, icone: <ArrowUpRight className="h-4 w-4" />, fn: () => abrirOutra(onde) }] : []),
     ...(podeAgir && !acabada ? livres.map((y) => ({ k: "p" + y.x.id, t: `Passar para ${y.x.n}`, sub: `${y.x.sk} · livre nestes dias`, icone: <Lightbulb className="h-4 w-4" />, fn: () => mudar(ti, () => A.trocarTec(d.id, ti, y.x.id)) })) : []),
     ...(podeAgir && !acabada && t.tec && motivo && motivo !== "noutra tarefa desta obra" ? [{ k: "adiar", t: "Adiar até estar livre", sub: "Esta tarefa e as seguintes andam os dias que for preciso", icone: <CalendarDays className="h-4 w-4" />, fn: () => mudar(ti, () => A.adiar(d.id, ti)) }] : []),
-    ...(podeAgir && editavel && !acabada ? [{ k: "tirar", t: "Tirar do plano", sub: "O técnico é avisado", icone: <Trash2 className="h-4 w-4" />, fn: () => setTirar(true), perigo: true }] : []),
+    ...(podeAgir && editavel && !acabada && podeTirar(p, ti) ? [{ k: "tirar", t: "Tirar do plano", sub: "O técnico é avisado", icone: <Trash2 className="h-4 w-4" />, fn: () => setTirar(true), perigo: true }] : []),
   ];
   // a semana à volta da tarefa: tocar num dia muda o início
   const de = Math.max(0, t.dia - 2), ate = Math.min(dias.length, t.dia + t.dur + 3);
@@ -896,20 +892,8 @@ export function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, ond
           </div>
         )}
 
-        {passos.length > 0 && (
-          <div className="space-y-1.5">
-            <p className="flex items-center gap-1.5 text-sm font-medium"><Hammer className="h-4 w-4 text-primary" aria-hidden="true" />O que se faz</p>
-            <ol className="space-y-1 text-sm">
-              {passos.map((x, k) => (
-                <li key={k} className="relative overflow-hidden rounded-lg bg-muted/50 px-3 py-1.5">
-                  <motion.span aria-hidden="true" className="absolute inset-y-0 left-0 origin-left" style={{ background: `${cor}1f`, width: `${(x.h / hPassos) * 100}%` }}
-                    initial={reduzir ? false : { scaleX: 0 }} animate={{ scaleX: 1 }} transition={{ duration: 0.5, delay: 0.04 * k }} />
-                  <span className="relative flex justify-between gap-3"><span>{k + 1}. {x.n}</span><span className="shrink-0 tabular-nums text-muted-foreground">{nfmt(x.h)} h</span></span>
-                </li>
-              ))}
-            </ol>
-          </div>
-        )}
+        {/* 24/11: «O que se faz» passou a microtarefas (os passos do Catálogo), que o gestor muda só nesta obra e o técnico marca */}
+        <MicrotarefasTarefa ctx={ctx} d={d} ti={ti} mexe={podeAgir && !acabada} cor={cor} />
         {mats.length > 0 && (
           <div className="space-y-1.5">
             <p className="flex items-center gap-1.5 text-sm font-medium"><Package className="h-4 w-4 text-primary" aria-hidden="true" />Materiais</p>
@@ -926,7 +910,7 @@ export function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, ond
           {tirar && (
             <motion.div initial={reduzir ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }}
               className="flex flex-wrap items-center gap-2 rounded-xl border border-destructive/40 bg-destructive/5 p-3 text-sm">
-              <span className="min-w-0 flex-1">Tirar «{t.nome}» do plano? O técnico é avisado.</span>
+              <span className="min-w-0 flex-1">Tirar «{t.nome}» do plano? O técnico é avisado e fica no histórico.{!t.nova && " É do contrato: o valor do contrato não muda."}</span>
               <Button type="button" variant="destructive" className="min-h-10" onClick={() => { fazer(() => A.tirarTarefaPlano(d.id, ti)); fechar(); }}>Tirar</Button>
               <Button type="button" variant="outline" className="min-h-10" onClick={() => setTirar(false)}>Cancelar</Button>
             </motion.div>

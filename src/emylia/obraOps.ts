@@ -27,8 +27,10 @@ export interface ExecTarefa {
   feita?: string; validada?: string;
   /** 21/10: os registos do técnico, dia a dia, e as respostas do responsável (trabalhoObra.ts); o cliente vê-os no portal. */
   envios?: Envio[];
-  /** 21/10: os passos das instruções já marcados pelo técnico (índices). */
+  /** 21/10: os passos das instruções já marcados pelo técnico (índices). 24/11: os ids das microtarefas marcadas (microtarefas.ts). */
   passos?: number[];
+  /** 24/11: de onde vinha a lista de microtarefas quando o técnico marcou a primeira (sem lista própria na tarefa): as marcas são dela. */
+  microDe?: "catalogo" | "instrucoes";
   /** 11/11: pausada pelo responsável (o técnico vê-o no Hoje), com o porquê; retomar tira-a. */
   pausa?: { q: string; motivo: string };
   /** 22/10 (fase 3): o €/h do técnico quando as horas foram registadas fora de um envio (mudadas pelo responsável). */
