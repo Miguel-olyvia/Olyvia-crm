@@ -579,6 +579,52 @@ serve(async (req) => {
           }
         }
 
+        // Ficha do cliente de um orcamento SEM entity_id, pela MESMA ordem do CRM
+        // (src/utils/quotePdfClient.ts resolveQuotePdfEntityId), para o bloco
+        // CLIENTE do PDF do portal sair igual ao do CRM:
+        //   negocio do orcamento (entity_id, lead, contacto, cliente) ->
+        //   proposta (entity_id, negocio, cliente) ->
+        //   lead / contacto / cliente do proprio orcamento.
+        // A proposta ja foi validada por assertOwnership acima; o orcamento e
+        // dela. Serve so para escolher o id: o browser le a ficha com a sua sessao.
+        const { data: proposalChainRow } = await supabase
+          .from("proposals")
+          .select("entity_id, client_id, deal_id")
+          .eq("id", proposal_id)
+          .maybeSingle();
+        const proposalChain: any = proposalChainRow || {};
+        const linkedEntityId = async (table: string, id?: string | null): Promise<string | null> => {
+          if (!id) return null;
+          const { data } = await supabase.from(table).select("entity_id").eq("id", id).maybeSingle();
+          return (data as any)?.entity_id || null;
+        };
+        const dealEntityId = async (dealId?: string | null): Promise<string | null> => {
+          if (!dealId) return null;
+          const { data: deal } = await supabase
+            .from("deals")
+            .select("entity_id, lead_id, contact_id, client_id")
+            .eq("id", dealId)
+            .maybeSingle();
+          const d: any = deal || {};
+          return d.entity_id
+            || (await linkedEntityId("anew_leads", d.lead_id))
+            || (await linkedEntityId("anew_contacts", d.contact_id))
+            || (await linkedEntityId("anew_clients", d.client_id))
+            || null;
+        };
+        const resolvePdfEntityLikeCrm = async (q: any, proposalRow: any): Promise<string | null> => {
+          return (
+            (await dealEntityId(q.deal_id))
+            || proposalRow.entity_id
+            || (await dealEntityId(proposalRow.deal_id))
+            || (await linkedEntityId("anew_clients", proposalRow.client_id))
+            || (await linkedEntityId("anew_leads", q.lead_id))
+            || (await linkedEntityId("anew_contacts", q.contact_id))
+            || (await linkedEntityId("anew_clients", q.client_id || q.cliente_id))
+            || null
+          );
+        };
+
         // SENSITIVE_LINE_COLUMNS/stripCosts vivem agora no escopo do serve()
         // (acima do switch) — mesmo corpo, mesma lista de colunas.
         const quotes: any[] = [];
@@ -613,7 +659,7 @@ serve(async (req) => {
           // proprio documento ja liga.
           let pdfQuote = quote;
           if (!quote.entity_id) {
-            const { entityId: resolvedEntityId } = await resolveDocEntity("quote_id", quote.id);
+            const resolvedEntityId = await resolvePdfEntityLikeCrm(quote, proposalChain);
             if (resolvedEntityId) pdfQuote = { ...quote, entity_id: resolvedEntityId };
           }
           quotes.push({

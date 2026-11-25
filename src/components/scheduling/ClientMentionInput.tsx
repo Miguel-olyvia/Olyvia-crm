@@ -7,6 +7,7 @@ import { X, Building2, User, Loader2 } from 'lucide-react';
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { supabase } from '@/integrations/supabase/client';
 import { searchEntityIds } from '@/lib/clientSearch';
+import { isOrganizationEntity } from '@/lib/entityType';
 import { useTranslation } from '@/hooks/useTranslation';
 
 interface Client {
@@ -191,7 +192,7 @@ export function ClientMentionInput({
     return (
       <div className="flex items-center gap-2 p-2 border rounded-md bg-background">
         <Badge variant="secondary" className="flex items-center gap-2 py-1.5 px-3">
-          {selectedClient.entity_type === 'company' ? (
+          {isOrganizationEntity(selectedClient.entity_type) ? (
             <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
           ) : (
             <User className="h-3.5 w-3.5 text-muted-foreground" />
@@ -268,7 +269,7 @@ export function ClientMentionInput({
                     onSelect={() => handleClientSelect(client.id)}
                     className="flex items-center gap-2 cursor-pointer"
                   >
-                    {client.entity_type === 'company' ? (
+                    {isOrganizationEntity(client.entity_type) ? (
                       <Building2 className="h-4 w-4 text-muted-foreground" />
                     ) : (
                       <User className="h-4 w-4 text-muted-foreground" />

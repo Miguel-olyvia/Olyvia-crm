@@ -7,6 +7,7 @@ import { X, Building2, User } from 'lucide-react';
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import { supabase } from '@/integrations/supabase/client';
 import { searchEntityIds } from '@/lib/clientSearch';
+import { isOrganizationEntity } from '@/lib/entityType';
 import { useTranslation } from '@/hooks/useTranslation';
 
 interface LeadOption {
@@ -193,7 +194,7 @@ export function LeadMentionInput({
     return (
       <div className="flex items-center gap-2 p-2 border rounded-md bg-background">
         <Badge variant="secondary" className="flex items-center gap-2 py-1.5 px-3">
-          {selectedLead.entity_type === 'company' ? (
+          {isOrganizationEntity(selectedLead.entity_type) ? (
             <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
           ) : (
             <User className="h-3.5 w-3.5 text-muted-foreground" />
@@ -270,7 +271,7 @@ export function LeadMentionInput({
                     onSelect={() => handleLeadSelect(lead.id)}
                     className="flex items-center gap-2 cursor-pointer"
                   >
-                    {lead.entity_type === 'company' ? (
+                    {isOrganizationEntity(lead.entity_type) ? (
                       <Building2 className="h-4 w-4 text-muted-foreground" />
                     ) : (
                       <User className="h-4 w-4 text-muted-foreground" />

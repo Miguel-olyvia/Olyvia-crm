@@ -108,6 +108,7 @@ import { CSS } from "@dnd-kit/utilities";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { PlanLimitWarning } from "@/components/billing/PlanLimitWarning";
+import { isOrganizationEntity } from "@/lib/entityType";
 
 // Sortable row wrapper for quote items
 function SortableQuoteRow({ id, children }: { id: string; children: (args: { setNodeRef: (el: HTMLElement | null) => void; style: React.CSSProperties; attributes: any; listeners: any; isDragging: boolean }) => React.ReactNode }) {
@@ -1466,7 +1467,7 @@ export function QuoteBuilder({ quoteId, onClose, initialProposalId = null, initi
           id: c.id,
           first_name: entity?.first_name || entity?.display_name?.split(" ")[0] || "",
           last_name: entity?.last_name || "",
-          company_name: entity?.type === "company" ? entity?.display_name : null,
+          company_name: isOrganizationEntity(entity?.type) ? entity?.display_name : null,
           client_type: c.client_type === "company" ? "company" as const : "person" as const,
         };
       });

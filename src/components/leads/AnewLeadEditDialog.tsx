@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useTranslation } from "@/hooks/useTranslation";
 import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { setEntityOwner, notifyOwnerChangeVisits } from "@/lib/leads/entityOwnerSync";
+import { nameFieldsChanged } from "@/lib/nameOnSave";
 import {
   Dialog,
   DialogContent,
@@ -431,7 +432,19 @@ export function AnewLeadEditDialog({
         const companyName = readGeneralField("company_name", updatedFieldValues);
         const newDisplayName = companyName || [firstName, lastName].filter(Boolean).join(" ") || undefined;
 
-        if (newDisplayName) {
+        // So se mexeu no nome: gravar a lead sem o tocar nao pode recompor (e
+        // estragar) o display_name da ficha, que pode ser o nome de uma empresa.
+        const originalValues = lead.field_values || {};
+        const nameTouched = nameFieldsChanged(
+          {
+            first: readGeneralField("first_name", originalValues),
+            last: readGeneralField("last_name", originalValues),
+            company: readGeneralField("company_name", originalValues),
+          },
+          { first: firstName, last: lastName, company: companyName },
+        );
+
+        if (newDisplayName && nameTouched) {
           displayName = newDisplayName.trim();
           if (firstName) entityFirstName = firstName;
           if (lastName) entityLastName = lastName;

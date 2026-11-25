@@ -157,6 +157,7 @@ import {
 // Lead e FieldDefinition vivem em @/types/leads. Leia o cabecalho desse
 // ficheiro antes de lhes tocar: ambos terminam em `[key: string]: any`.
 import type { Lead, FieldDefinition } from "@/types/leads";
+import { clientTypeForEntity, isOrganizationEntity } from "@/lib/entityType";
 
 interface ContactResultConfig {
   id: string;
@@ -3297,8 +3298,7 @@ export default function AnewLeads() {
     // O tipo vem da entidade -- `anew_entities.type` -- e nao de haver ou nao um
     // campo chamado "empresa" no formulario.
     const entityIdentity = lead.entity_id ? getIdentity(lead.entity_id) : null;
-    const clientType: "company" | "person" =
-      entityIdentity?.type === 'company' ? 'company' : 'person';
+    const clientType: "company" | "person" = clientTypeForEntity(entityIdentity?.type);
     const companyName = clientType === 'company'
       ? (entityIdentity?.display_name || null)
       : null;
@@ -6935,7 +6935,7 @@ export default function AnewLeads() {
                     .filter(Boolean)
                     .join(', ') || null;
 
-                const isEmpresa = identity?.type === 'company';
+                const isEmpresa = isOrganizationEntity(identity?.type);
 
                 const InfoRow = ({ icon: Icon, label, value, emptyLabel }: { icon: any; label: string; value: string | null; emptyLabel: string }) => (
                   <div className="flex items-center gap-3">

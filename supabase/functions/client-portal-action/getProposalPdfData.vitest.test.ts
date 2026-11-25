@@ -109,3 +109,66 @@ describe("get_proposal_pdf_data: entity_id do cliente no orcamento", () => {
     expect(r.body.quotes[0].quote.entity_id).toBeNull();
   });
 });
+
+describe("get_proposal_pdf_data: a mesma ficha que o CRM escolheria (negocio, depois proposta)", () => {
+  // CRM: quotePdfClient.resolveQuotePdfEntityId -> entity_id do orcamento; negocio do
+  // orcamento (entity_id, lead, contacto, cliente); proposta (entity_id, negocio, cliente);
+  // por fim lead/contacto/cliente do proprio orcamento.
+  const proposta = (extra: Row = {}) => ({ id: "p1", entity_id: "e-proposta", organization_id: "org-1", deal_id: null, client_id: null, ...extra });
+  const orcamento = (extra: Row = {}) => ({ id: "q1", proposal_id: "p1", entity_id: null, deal_id: "d1", organization_id: "org-1", ...extra });
+
+  it("orcamento sem entity_id, negocio e proposta com fichas diferentes: a do negocio (como no CRM)", async () => {
+    state.db = new FakeDb({
+      proposals: [proposta()],
+      quotes: [orcamento()],
+      deals: [{ id: "d1", entity_id: "e-negocio", lead_id: null, contact_id: null, client_id: null }],
+    });
+    const r = await callPdfData();
+    expect(r.body.quotes[0].quote.entity_id).toBe("e-negocio");
+  });
+
+  it("negocio sem ficha propria mas com lead: a ficha da lead, antes da proposta (como no CRM)", async () => {
+    state.db = new FakeDb({
+      proposals: [proposta()],
+      quotes: [orcamento()],
+      deals: [{ id: "d1", entity_id: null, lead_id: "l1", contact_id: null, client_id: null }],
+      anew_leads: [{ id: "l1", entity_id: "e-lead" }],
+    });
+    const r = await callPdfData();
+    expect(r.body.quotes[0].quote.entity_id).toBe("e-lead");
+  });
+
+  it("sem negocio: a ficha da proposta", async () => {
+    state.db = new FakeDb({
+      proposals: [proposta()],
+      quotes: [orcamento({ deal_id: null })],
+    });
+    const r = await callPdfData();
+    expect(r.body.quotes[0].quote.entity_id).toBe("e-proposta");
+  });
+
+  it("proposta sem entity_id: o negocio da proposta, depois o cliente da proposta", async () => {
+    state.db = new FakeDb({
+      proposals: [proposta({ entity_id: null, deal_id: "d2" })],
+      quotes: [orcamento({ deal_id: null })],
+      deals: [{ id: "d2", entity_id: "e-negocio-proposta" }],
+    });
+    expect((await callPdfData()).body.quotes[0].quote.entity_id).toBe("e-negocio-proposta");
+
+    state.db = new FakeDb({
+      proposals: [proposta({ entity_id: null, client_id: "c1" })],
+      quotes: [orcamento({ deal_id: null })],
+      anew_clients: [{ id: "c1", entity_id: "e-cliente" }],
+    });
+    expect((await callPdfData()).body.quotes[0].quote.entity_id).toBe("e-cliente");
+  });
+
+  it("so o orcamento aponta para uma lead: a ficha da lead do orcamento (ultimo recurso do CRM)", async () => {
+    state.db = new FakeDb({
+      proposals: [proposta({ entity_id: null })],
+      quotes: [orcamento({ deal_id: null, lead_id: "l9" })],
+      anew_leads: [{ id: "l9", entity_id: "e-lead-orcamento" }],
+    });
+    expect((await callPdfData()).body.quotes[0].quote.entity_id).toBe("e-lead-orcamento");
+  });
+});

@@ -14,7 +14,7 @@ import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { withAuditContext } from "@/utils/auditContext";
-import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
+import { resolveClientNameForSave } from "@/lib/nameOnSave";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -802,8 +802,10 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
       if (entityId) {
         await withAuditContext(supabase, businessUserId, async () => {
-          const normalized = normalizeFirstLast(editFormData.first_name, editFormData.last_name);
-          const displayName = composeDisplayName(normalized.first, normalized.last);
+          // O display_name so e recomposto se o utilizador mexeu no nome/apelido:
+          // sem isso, gravar uma ficha cujo nome e de empresa estragava-o.
+          const { displayName, first: normFirst, last: normLast } = resolveClientNameForSave(client, editFormData);
+          const normalized = { first: normFirst, last: normLast };
           const nif = editFormData.vat || null;
           const { error: rpcError } = await callNifWriteProxy("rpc_update_client", {
             p_client_id: client.id,
