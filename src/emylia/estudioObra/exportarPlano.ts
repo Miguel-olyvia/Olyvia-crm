@@ -16,11 +16,11 @@ import { listaMicro } from "../microtarefas";
 import { fimDe } from "../ajustesPlano";
 import type { ResumoEcNeg } from "../inventario/ponteNegocios";
 import { ROTULO_ALTERACAO, rotuloAcao } from "../historicoPlano";
-import { ROTULO_VIVO, estadoVivo, ligacoesDaTarefa, rotuloVivo, type EstadoVivo } from "./planoVivo";
+import { ROTULO_VIVO, estadoVivo, ligacoesDaTarefa, nomeCurtoTarefa, rotuloVivo, type EstadoVivo } from "./planoVivo";
 
 export interface MicroLinha { ref: string; n: string; h: number; dias: number; feita: boolean }
 export interface TarefaLinha {
-  ref: string; fase: number; faseNome: string; nome: string; tec: string; oficio: string; ini: Date | null; fim: Date | null; dia: number; dur: number;
+  ref: string; fase: number; faseNome: string; nome: string; /** o nome como o Gantt o mostra */ curto: string; tec: string; oficio: string; ini: Date | null; fim: Date | null; dia: number; dur: number;
   h: number; hReg: number; v: EstadoVivo; estado: string; depende: string; nota: string; micro: MicroLinha[];
 }
 export interface MaterialLinha {
@@ -62,7 +62,8 @@ export function linhasDoPlano(d: Negocio, S?: Estado | null, ec?: ResumoEcNeg | 
       let depende = "";
       try { depende = ligacoesDaTarefa(p.tasks, ti).depende.map((l) => `T${l.de + 1} ${p.tasks[l.de].nome}${l.mao ? "" : " (pelas datas)"}`).join("; "); } catch { /* sem ligações */ }
       return {
-        ref, fase: f.n, faseNome: f.curto, nome: t.nome, tec: nomeTec(t.tec), oficio: TECS.find((x) => x.id === t.tec)?.sk ?? t.sk ?? "",
+        ref, fase: f.n, faseNome: f.curto, nome: t.nome, curto: nomeCurtoTarefa(t.nome), tec: nomeTec(t.tec),
+        oficio: (S?.svc as Record<string, { perfil?: string }> | undefined)?.[String(t.svcs?.[0] ?? "")]?.perfil ?? t.sk ?? "",
         ini: dias[t.dia] ?? null, fim: dias[t.dia + t.dur - 1] ?? null, dia: t.dia, dur: t.dur, h: r2(t.h ?? 0), hReg: r2(t.exec?.horas ?? 0),
         v, estado: rotuloVivo(t, p), depende, nota: t.nota ?? "", micro,
       };
@@ -86,6 +87,7 @@ export function linhasDoPlano(d: Negocio, S?: Estado | null, ec?: ResumoEcNeg | 
     if (l.t !== "svc") return [];
     const sv = (S?.svc as Record<string, { n: string; un: string; h: number }> | undefined)?.[String(l.sid)];
     const q = Number(l.q) || 0;
+    if (q <= 0) return []; // as linhas do modelo que ficaram a zero não são do contrato
     return [{ n: sv?.n ?? String(l.sid), q, un: sv?.un ?? "", h: r2((sv?.h ?? 0) * q) }];
   });
   return { titulo: `Plano da obra ${d.id}`, nome: d.nome, id: d.id, estadoPlano: p.estado, hoje: p.dia, dias, nDias, fases, ec: encomenda, hist, alteracoes, orcado };
@@ -286,10 +288,11 @@ export async function gerarPdfPlano(P: PlanoExportado, agora = new Date()): Prom
     pag.drawText(textoPdf("Técnico"), { x: C.tec, y: yTop - 16, size: 8, font: negrito, color: cinza });
     pag.drawText("Estado", { x: C.estado, y: yTop - 16, size: 8, font: negrito, color: cinza });
     pag.drawText("Datas", { x: C.datas, y: yTop - 16, size: 8, font: negrito, color: cinza });
-    let ultimo = -Infinity, mesAnt = -1;
+    let ultimo = -Infinity, mesAnt = -1, ultimoMes = -Infinity;
     P.dias.slice(0, P.nDias).forEach((x, k) => {
       const xx = X0 + k * col;
-      if (x.getMonth() !== mesAnt) { pag.drawText(textoPdf(`${MES[x.getMonth()]} ${x.getFullYear()}`), { x: xx + 1, y: yTop - 8, size: 7, font: negrito, color: tinta }); mesAnt = x.getMonth(); }
+      // o mês só se escreve com espaço desde o anterior (no início, um mês de poucos dias empurra o seguinte)
+      if (x.getMonth() !== mesAnt && xx - ultimoMes >= 44) { ultimoMes = xx; pag.drawText(textoPdf(`${MES[x.getMonth()]} ${x.getFullYear()}`), { x: xx + 1, y: yTop - 8, size: 7, font: negrito, color: tinta }); mesAnt = x.getMonth(); }
       if ((x.getDay() === 1 || k === 0) && xx - ultimo >= 18) { pag.drawText(String(x.getDate()), { x: xx + 1, y: yTop - 18, size: 7, font: fonte, color: cinza }); ultimo = xx; }
     });
     y -= CAB_EIXO;
@@ -341,7 +344,7 @@ export async function gerarPdfPlano(P: PlanoExportado, agora = new Date()): Prom
     for (const t of f.tarefas) {
       if (y - LIN < FUNDO) novaPaginaGantt();
       const yb = y - LIN;
-      pag.drawText(corta(`${t.ref}  ${t.nome}`, fonte, 8, C.tec - C.tarefa - 6), { x: C.tarefa + 2, y: yb + 4.5, size: 8, font: fonte, color: tinta });
+      pag.drawText(corta(`${t.ref}  ${t.curto}`, fonte, 8, C.tec - C.tarefa - 6), { x: C.tarefa + 2, y: yb + 4.5, size: 8, font: fonte, color: tinta });
       pag.drawText(corta(t.tec, fonte, 7.5, C.estado - C.tec - 4), { x: C.tec, y: yb + 4.5, size: 7.5, font: fonte, color: cinza });
       pag.drawText(corta(t.estado, negrito, 7.5, C.datas - C.estado - 4), { x: C.estado, y: yb + 4.5, size: 7.5, font: negrito, color: t.v === "por começar" ? cinza : rgb(...COR_PDF[t.v]) });
       pag.drawText(corta(`${dataCurta(t.ini)} - ${dataCurta(t.fim)}`, fonte, 7.5, X0 - C.datas - 4), { x: C.datas, y: yb + 4.5, size: 7.5, font: fonte, color: cinza });
