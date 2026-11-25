@@ -11,6 +11,7 @@
 // A lógica está em planoVivo.ts e alertasObra.ts; as mudanças vão pelas ações do motor (A.replanearObra, A.registarImprevisto…).
 import { Fragment, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EnderecoAtivo, escreverParamUrl, usePainelUrl, useParamUrl } from "../usarParamUrl";
+import { COLUNA_MAX, COLUNA_MIN, useLarguraColuna } from "./larguraColuna";
 import { AnimatePresence, motion } from "framer-motion";
 import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, GripVertical, HardHat, Lightbulb, Link2, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Redo2, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -928,7 +929,16 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   };
   const pessoas = [...new Set(p.tasks.map((t) => t.tec).filter((x): x is string => !!x))];
   const linhas: (string | null)[] = [...pessoas, ...(p.tasks.some((t) => !t.tec) ? [null] : [])];
-  const rotulo = "w-32 sm:w-56";
+  // 25/11: a 1.ª coluna alarga-se com o pegador do cabeçalho (fica guardada neste browser, por vista); duplo clique repõe
+  const [largCol, setLargCol] = useLarguraColuna(vista);
+  const rotulo = largCol == null ? "w-32 sm:w-56" : "";
+  const largura = largCol == null ? undefined : { width: largCol };
+  const cabCol = useRef<HTMLDivElement>(null);
+  const puxar = useRef<{ x: number; w: number } | null>(null);
+  const [aPuxar, setAPuxar] = useState(false);
+  const largAgora = () => cabCol.current?.offsetWidth ?? COLUNA_MIN;
+  const largarPuxar = (e: React.PointerEvent) => { e.stopPropagation(); puxar.current = null; setAPuxar(false); };
+  const nomeCol = vista === "gantt" ? "Tarefa" : "Técnico";
   return (
     <section aria-label="O plano vivo" className="rounded-2xl border border-border bg-card">
       <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-3">
@@ -964,7 +974,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
         </ul>
       </div>
       {erroLigar && <p role="alert" className="border-b border-border bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">Não se liga: {erroLigar}</p>}
-      {!R && <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">{vivo ? "As tarefas que ainda não começaram arrastam-se (o dia) e a ponta muda os dias; as outras abrem-se para gerir a execução." : "Arraste uma barra para mudar o dia; a ponta muda os dias."}{nova && vista === "tecnicos" ? " Num dia vazio, «+» cria uma tarefa." : ""}{passar && vista === "tecnicos" ? " Arraste para a linha de outra pessoa para lhe passar a tarefa." : ""}{ligar && vista === "gantt" ? " Para ligar duas tarefas, arraste o círculo da ponta de uma barra até à tarefa que só começa depois." : ""}{podeOrdenar ? " Para mudar a ordem da lista, arraste o pegador ⋮⋮ à esquerda do nome (ou use as setas do teclado); as datas não mudam." : ""}</p>}
+      {!R && <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">{vivo ? "As tarefas que ainda não começaram arrastam-se (o dia) e a ponta muda os dias; as outras abrem-se para gerir a execução." : "Arraste uma barra para mudar o dia; a ponta muda os dias."}{nova && vista === "tecnicos" ? " Num dia vazio, «+» cria uma tarefa." : ""}{passar && vista === "tecnicos" ? " Arraste para a linha de outra pessoa para lhe passar a tarefa." : ""}{ligar && vista === "gantt" ? " Para ligar duas tarefas, arraste o círculo da ponta de uma barra até à tarefa que só começa depois." : ""}{podeOrdenar ? " Para mudar a ordem da lista, arraste o pegador ⋮⋮ à esquerda do nome (ou use as setas do teclado); as datas não mudam." : ""} Para ver os nomes inteiros, arraste a linha à direita de «{nomeCol}».</p>}
       <p aria-live="polite" className="sr-only">{anuncio}</p>
       <div className="overflow-x-auto"
         onPointerMove={(e) => { if (premido.current && Math.hypot(e.clientX - premido.current.x, e.clientY - premido.current.y) > 10) largarPremido(); if (ligarRef.current) moverLigar(e); else arrastar(e); }}
@@ -974,7 +984,27 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
           {vista === "gantt" && !ord && setas()}
           {/* os dias */}
           <div className="sticky top-0 z-10 flex border-b border-border bg-card">
-            <div className={cn("sticky left-0 z-20 shrink-0 bg-card px-3 py-2 text-xs font-medium text-muted-foreground sm:px-4", rotulo)}>{vista === "gantt" ? "Tarefa" : "Técnico"}</div>
+            <div ref={cabCol} className={cn("sticky left-0 z-20 shrink-0 bg-card px-3 py-2 text-xs font-medium text-muted-foreground sm:px-4", rotulo)} style={largura}>
+              {nomeCol}
+              <div role="separator" aria-orientation="vertical" tabIndex={0} aria-label={`Largura da coluna ${nomeCol}`} aria-valuemin={COLUNA_MIN} aria-valuemax={COLUNA_MAX} aria-valuenow={largCol ?? undefined}
+                title="Arraste para alargar ou estreitar a coluna. Duplo clique repõe."
+                className="group/col absolute -right-2 top-0 z-30 flex h-full w-4 cursor-col-resize touch-none justify-center outline-none"
+                onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch { /* sem captura: segue o rato na mesma */ } puxar.current = { x: e.clientX, w: largAgora() }; setAPuxar(true); }}
+                onPointerMove={(e) => { e.stopPropagation(); if (puxar.current) setLargCol(puxar.current.w + e.clientX - puxar.current.x); }}
+                onPointerUp={largarPuxar} onPointerCancel={largarPuxar}
+                onDoubleClick={() => setLargCol(null)}
+                onKeyDown={(e) => {
+                  const passo = e.shiftKey ? 64 : 24;
+                  if (e.key === "ArrowRight") setLargCol(largAgora() + passo);
+                  else if (e.key === "ArrowLeft") setLargCol(largAgora() - passo);
+                  else if (e.key === "Home") setLargCol(COLUNA_MIN);
+                  else if (e.key === "End") setLargCol(COLUNA_MAX);
+                  else return;
+                  e.preventDefault();
+                }}>
+                <span aria-hidden="true" className={cn("my-1.5 w-1 rounded-full transition-colors", aPuxar ? "bg-primary" : "bg-border group-hover/col:bg-primary/60 group-focus-visible/col:bg-primary")} />
+              </div>
+            </div>
             {dias.map((x, k) => {
               const im = imprevistos.filter((i) => i.dia === k);
               const hoje = vivo && k === p.dia;
@@ -997,7 +1027,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
           {vista === "gantt" && fases.map((f) => (
             <div key={f.n} role="rowgroup" aria-label={`Fase ${f.n} · ${f.curto}`}>
               <div className="flex border-b border-border bg-muted/40">
-                <div className={cn("sticky left-0 z-10 flex shrink-0 items-center gap-2 bg-muted/40 px-3 py-1.5 text-xs font-semibold sm:px-4", rotulo)}>
+                <div className={cn("sticky left-0 z-10 flex shrink-0 items-center gap-2 bg-muted/40 px-3 py-1.5 text-xs font-semibold sm:px-4", rotulo)} style={largura}>
                   <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: COR_FASE[f.n] }} /><span className="min-w-0 flex-1 truncate">{f.n} · {f.curto}</span>
                   {novaTarefa && !R && (
                     <button type="button" onClick={() => novaTarefa(f.n)} aria-label={`Nova tarefa na fase ${f.n} · ${f.curto}`} title={`Nova tarefa na fase ${f.n}`}
@@ -1014,7 +1044,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
                 return (
                   <div key={ti} className={cn("group flex border-b border-border bg-card last:border-b-0", sel === ti && "bg-primary/[0.04]", aLigar?.alvo === ti && "bg-primary/[0.08]", aqui && "relative z-30 shadow-lg ring-2 ring-primary/40", ord && !aqui && "transition-transform duration-150")}
                     style={dy ? { transform: `translateY(${dy}px)` } : undefined} onPointerEnter={() => setHov(ti)} onPointerLeave={() => setHov((h) => (h === ti ? null : h))}>
-                    <div className={cn("sticky left-0 z-10 flex shrink-0 items-stretch bg-card", rotulo)}>
+                    <div className={cn("sticky left-0 z-10 flex shrink-0 items-stretch bg-card", rotulo)} style={largura}>
                       {podeOrdenar && (
                         <button type="button" data-pegador={ti} aria-label={`Mudar a ordem de ${nomeCurtoTarefa(t.nome)}: lugar ${k + 1} de ${f.tis.length} na fase ${f.n}. Setas para cima e para baixo para mudar.`}
                           title="Arraste para mudar a ordem (ou use as setas do teclado)"
@@ -1038,7 +1068,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
           {/* 25/11 (Rúben: «falta o "+" nas tasks primeira coluna»): no fim da lista, juntar uma tarefa */}
           {vista === "gantt" && novaTarefa && !R && (
             <div className="flex border-t border-border">
-              <button type="button" onClick={() => novaTarefa()} className={cn("sticky left-0 z-10 flex min-h-11 shrink-0 items-center gap-2 bg-card px-3 text-left text-sm font-medium text-primary hover:bg-primary/[0.06] sm:px-4", rotulo)}>
+              <button type="button" onClick={() => novaTarefa()} className={cn("sticky left-0 z-10 flex min-h-11 shrink-0 items-center gap-2 bg-card px-3 text-left text-sm font-medium text-primary hover:bg-primary/[0.06] sm:px-4", rotulo)} style={largura}>
                 <Plus className="h-4 w-4" aria-hidden="true" />Nova tarefa
               </button>
               <div style={{ width: dias.length * COL }} />
@@ -1061,7 +1091,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
             const livre = k != null && !ocupado(k) && (!vivo || k >= p.dia);
             return (
               <div key={tec ?? "sem"} role="group" aria-label={nomeTec(tec)} data-tec={tec ?? undefined} className="flex border-b border-border last:border-b-0" style={{ background: bg }}>
-                <div className={cn("sticky left-0 z-10 flex shrink-0 flex-col border-r border-border", rotulo)} style={{ background: bg }}>
+                <div className={cn("sticky left-0 z-10 flex shrink-0 flex-col border-r border-border", rotulo)} style={{ background: bg, ...largura }}>
                   <div className="flex items-center gap-2 px-3 sm:px-4" style={{ height: altObra }}>
                     <span className="hidden sm:block"><AvatarTec id={tec} tam="h-8 w-8" /></span>
                     <span className="min-w-0"><span className="block truncate text-sm font-semibold">{nomeTec(tec)}</span><span className="block truncate text-xs text-muted-foreground">{tec ? [TECS.find((x) => x.id === tec)?.sk, `${ts.length} ${ts.length === 1 ? "tarefa" : "tarefas"} nesta obra`].filter(Boolean).join(" · ") : "falta escolher"}</span></span>
