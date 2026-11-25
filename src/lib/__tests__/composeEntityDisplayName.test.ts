@@ -9,6 +9,7 @@ describe("composeEntityDisplayName (regra unica do nome da ficha)", () => {
     ["empresa ganha a nome + apelido", "person", "Rui", "Silva", "EVOLAR MOVEIS LDA", "EVOLAR MOVEIS LDA"],
     ["empresa com espacos e limpa", "person", "Rui", "Silva", "  EVOLAR   MOVEIS ", "EVOLAR MOVEIS"],
     ["empresa so de espacos conta como vazia", "person", "  Rui ", " Silva  ", "   ", "Rui Silva"],
+    ["NBSP conta como espaco", "person", "Rui\u00a0\u00a0Pedro", "Silva", null, "Rui Pedro Silva"],
     ["nome e apelido repetidos", "person", "Rui Silva", "Rui Silva", null, "Rui Silva"],
     ["apelido ja comeca pelo nome", "person", "Rui", "Rui Silva", null, "Rui Silva"],
     ["nome ja acaba no apelido", "person", "Rui Silva", "silva", null, "Rui Silva"],
