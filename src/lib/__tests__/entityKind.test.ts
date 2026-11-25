@@ -4,7 +4,9 @@ import {
   initialKindState,
   isMissingFunctionError,
   leadNameArgsAfterKindStep,
+  personNamesFromEntity,
   planNameSave,
+  resolveInitialPersonNames,
   runKindStep,
   saveKindThenRest,
   setEntityKind,
@@ -279,5 +281,48 @@ describe("leadNameArgsAfterKindStep (o nome que vai para rpc_update_lead)", () =
   it("RPC do tipo em falta: caminho de recurso com o nome pelo tipo escolhido", () => {
     expect(leadNameArgsAfterKindStep({ status: "missing" }, plan))
       .toEqual({ displayName: "EVOLAR MOVEIS LDA", first: "Rui", last: "Silva" });
+  });
+});
+
+describe("nome inicial do formulario de edicao: vem da ficha quando a lead/cliente nao o tem", () => {
+  it("personNamesFromEntity: nome e apelido da ficha", () => {
+    expect(personNamesFromEntity({ display_name: "ZZ-TESTE-NOME Rui Neves", first_name: "ZZ-TESTE-NOME Rui", last_name: "Neves" }))
+      .toEqual({ first: "ZZ-TESTE-NOME Rui", last: "Neves" });
+  });
+
+  it("personNamesFromEntity: ficha so com display_name nunca fica vazia (o nome inteiro vai para Nome)", () => {
+    expect(personNamesFromEntity({ display_name: "Evolar  Lda ", first_name: null, last_name: null }))
+      .toEqual({ first: "Evolar Lda", last: "" });
+  });
+
+  it("personNamesFromEntity: ficha sem nada fica vazia", () => {
+    expect(personNamesFromEntity({ display_name: null, first_name: "", last_name: null })).toEqual({ first: "", last: "" });
+  });
+
+  it("resolveInitialPersonNames: field_values manda quando tem nome ou apelido", () => {
+    expect(resolveInitialPersonNames({ first: "Rui", last: "" }, { first: "Outro", last: "Neves" })).toEqual({ first: "Rui", last: "" });
+    expect(resolveInitialPersonNames({ first: "", last: "Costa" }, { first: "Outro", last: "Neves" })).toEqual({ first: "", last: "Costa" });
+  });
+
+  it("resolveInitialPersonNames: sem nome em field_values, a ficha (o par, nao campo a campo)", () => {
+    expect(resolveInitialPersonNames({ first: "", last: "" }, { first: "ZZ-TESTE-NOME Rui", last: "Neves" }))
+      .toEqual({ first: "ZZ-TESTE-NOME Rui", last: "Neves" });
+    expect(resolveInitialPersonNames({ first: " ", last: "" }, { first: "Evolar Lda", last: "" })).toEqual({ first: "Evolar Lda", last: "" });
+  });
+
+  it("gravar sem alterar nada nao envia nome: original e editado sao o mesmo nome da ficha", () => {
+    const names = resolveInitialPersonNames({ first: "", last: "" }, { first: "ZZ-TESTE-NOME Rui", last: "Neves" });
+    const state = { kind: "person" as const, first: names.first, last: names.last, company: "" };
+    expect(planNameSave(state, { ...state }, "person")).toBeNull();
+  });
+
+  it("ficha organizacao: continua Empresa e o nome da empresa e o nome da ficha", () => {
+    const s = initialKindState({ type: "organization", display_name: "Evolar Lda", first_name: null, last_name: null });
+    expect(s).toMatchObject({ kind: "organization", company: "Evolar Lda" });
+  });
+
+  it("ficha pessoa so com display_name: o nome da empresa (modo Empresa) e o display_name", () => {
+    const s = initialKindState({ type: "person", display_name: "Evolar Lda", first_name: null, last_name: null });
+    expect(s).toMatchObject({ kind: "person", company: "Evolar Lda" });
   });
 });

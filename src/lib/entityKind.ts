@@ -41,6 +41,33 @@ export function initialKindState(
   return { kind, first, last, company };
 }
 
+export interface PersonNames {
+  first: string;
+  last: string;
+}
+
+/**
+ * Nome e apelido que a FICHA mostra. Ficha so com display_name (sem nome nem apelido, como as
+ * criadas por scripts ou importacoes): o nome inteiro vai para «Nome», para nunca abrir vazio.
+ */
+export function personNamesFromEntity(
+  entity: { display_name?: string | null; first_name?: string | null; last_name?: string | null },
+): PersonNames {
+  const first = collapse(entity.first_name);
+  const last = collapse(entity.last_name);
+  if (!first && !last) return { first: collapse(entity.display_name), last: "" };
+  return { first, last };
+}
+
+/**
+ * Valor inicial de Nome e Apelido ao abrir a edicao: o que a lead/cliente ja tem (field_values)
+ * se tiver nome ou apelido; senao o da ficha (o par, nunca um campo de cada origem).
+ */
+export function resolveInitialPersonNames(current: PersonNames, entity: PersonNames): PersonNames {
+  if (collapse(current.first) || collapse(current.last)) return current;
+  return entity;
+}
+
 export interface NameSavePlan {
   rpcArgs: {
     p_type: EntityKind;

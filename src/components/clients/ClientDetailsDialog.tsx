@@ -20,7 +20,9 @@ import { fetchEntityCompanyName } from "@/lib/clients/fetchEntityCompanyName";
 import {
   clientNameArgsAfterKindStep,
   initialKindState,
+  personNamesFromEntity,
   planNameSave,
+  resolveInitialPersonNames,
   saveKindThenRest,
   type EntityKind,
   type KindFormState,
@@ -285,21 +287,38 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     // C15: isCancelled guard on all setState calls
     const fetchEntityType = async () => {
       if (!client.entity_id) return;
-      const { data, error } = await supabase.from("anew_entities").select("type").eq("id", client.entity_id).maybeSingle();
+      const { data, error } = await supabase.from("anew_entities").select("type, display_name, first_name, last_name").eq("id", client.entity_id).maybeSingle();
       if (error) { console.error("Error fetching entity type:", error); captureFlowError(error, "db-error-leaked-to-ui"); }
       // A empresa le-se aparte e tolera a coluna ainda nao existir (ver fetchEntityCompanyName).
       const companyRead = await fetchEntityCompanyName(supabase, client.entity_id);
       if (companyRead.status === "error") captureFlowError(companyRead.error, "db-error-leaked-to-ui");
       if (isCancelled) return;
       const type = data?.type || "person";
-      const initial = initialKindState(
-        { type, display_name: client.display_name, first_name: client.first_name, last_name: client.last_name },
-        companyRead.company,
-      );
+      // Cliente sem nome proprio (ficha criada por script/importacao): Nome e Apelido vem da ficha,
+      // para nao abrirem vazios nem se gravar um nome vazio.
+      const entityNames = personNamesFromEntity({
+        display_name: data?.display_name ?? client.display_name,
+        first_name: data?.first_name ?? client.first_name,
+        last_name: data?.last_name ?? client.last_name,
+      });
+      const names = resolveInitialPersonNames({ first: client.first_name ?? "", last: client.last_name ?? "" }, entityNames);
+      const initial = {
+        ...initialKindState(
+          { type, display_name: data?.display_name ?? client.display_name, first_name: data?.first_name ?? client.first_name, last_name: data?.last_name ?? client.last_name },
+          companyRead.company,
+        ),
+        first: names.first.replace(/\s+/g, " ").trim(),
+        last: names.last.replace(/\s+/g, " ").trim(),
+      };
       setEntityType(type);
       setKindInitial(initial);
       setKind(initial.kind);
-      setEditFormData(prev => ({ ...prev, company_name: initial.company }));
+      setEditFormData(prev => ({
+        ...prev,
+        company_name: initial.company,
+        // So preenche se o formulario ainda nao tem nome (nao pisa o que a pessoa ja escreveu).
+        ...(!prev.first_name.trim() && !prev.last_name.trim() ? { first_name: names.first, last_name: names.last } : {}),
+      }));
     };
 
     const fetchOrgUsers = async () => {

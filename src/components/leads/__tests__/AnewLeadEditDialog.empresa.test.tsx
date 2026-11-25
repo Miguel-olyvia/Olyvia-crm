@@ -177,3 +177,52 @@ describe("AnewLeadEditDialog: gravar", () => {
     expect(updateLeadArgs().p_display_name).toBe("EVOLAR LDA");
   });
 });
+
+describe("AnewLeadEditDialog: o nome vem da ficha quando field_values nao o tem", () => {
+  const scripted = { type: "person", display_name: "ZZ-TESTE-NOME Rui Neves", first_name: "ZZ-TESTE-NOME Rui", last_name: "Neves", company_name: null };
+
+  it("lead sem nome em field_values e ficha com nome e apelido: Nome e Apelido nao abrem vazios", async () => {
+    await open({ vat: "123456789" }, scripted);
+    await waitFor(() => expect(screen.getByDisplayValue("ZZ-TESTE-NOME Rui")).toBeInTheDocument());
+    expect(screen.getByDisplayValue("Neves")).toBeInTheDocument();
+  });
+
+  it("gravar sem alterar nada nao envia nome nem chama a RPC do tipo", async () => {
+    await open({ vat: "123456789" }, scripted);
+    await waitFor(() => expect(screen.getByDisplayValue("Neves")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: /guardar alterações/i }));
+    await waitFor(() => expect(calls).toContain("rpc_update_lead"));
+    expect(calls).not.toContain("rpc_set_entity_kind");
+    expect(updateLeadArgs().p_display_name).toBeNull();
+    expect(updateLeadArgs().p_first_name).toBeNull();
+    expect(updateLeadArgs().p_last_name).toBeNull();
+  });
+
+  it("editar so o apelido grava o nome da ficha com o apelido novo (nao fica vazio nem recomposto)", async () => {
+    await open({ vat: "123456789" }, scripted);
+    await waitFor(() => expect(screen.getByDisplayValue("Neves")).toBeInTheDocument());
+    kindResult = { data: { display_name: "ZZ-TESTE-NOME Rui Costa", type: "person", first_name: "ZZ-TESTE-NOME Rui", last_name: "Costa" }, error: null };
+    fireEvent.change(screen.getByDisplayValue("Neves"), { target: { value: "Costa" } });
+    fireEvent.click(screen.getByRole("button", { name: /guardar alterações/i }));
+    await waitFor(() => expect(calls).toContain("rpc_update_lead"));
+    expect(rpc.mock.calls[0][0]).toBe("rpc_set_entity_kind");
+    expect(rpc.mock.calls[0][1]).toMatchObject({ p_type: "person", p_first_name: "ZZ-TESTE-NOME Rui", p_last_name: "Costa" });
+  });
+
+  it("ficha organizacao sem nome em field_values: abre em Empresa com o nome da ficha", async () => {
+    entityRow = { type: "organization", display_name: "Evolar Lda", first_name: null, last_name: null, company_name: "Evolar Lda" };
+    render(
+      <AnewLeadEditDialog open onOpenChange={vi.fn()} lead={baseLead({}) as never}
+        companyId="org-1" companyUsers={[]} onLeadUpdated={vi.fn()} userId="user-1" />,
+    );
+    await waitFor(() => expect(screen.getByRole("radio", { name: /empresa/i })).toBeChecked());
+    expect(screen.getByRole("textbox", { name: /nome da empresa/i })).toHaveValue("Evolar Lda");
+  });
+
+  it("ficha pessoa so com display_name: Nome mostra-o e, em Empresa, e o Nome da empresa", async () => {
+    await open({}, { type: "person", display_name: "Evolar Lda", first_name: null, last_name: null, company_name: null });
+    await waitFor(() => expect(screen.getByDisplayValue("Evolar Lda")).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("radio", { name: /empresa/i }));
+    expect(screen.getByRole("textbox", { name: /nome da empresa/i })).toHaveValue("Evolar Lda");
+  });
+});

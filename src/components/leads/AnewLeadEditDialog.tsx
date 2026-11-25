@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
@@ -10,11 +10,14 @@ import { fetchEntityCompanyName } from "@/lib/clients/fetchEntityCompanyName";
 import {
   initialKindState,
   leadNameArgsAfterKindStep,
+  personNamesFromEntity,
   planNameSave,
+  resolveInitialPersonNames,
   saveKindThenRest,
   type EntityKind,
   type KindFormState,
   type KindStepOutcome,
+  type PersonNames,
 } from "@/lib/entityKind";
 import {
   Dialog,
@@ -219,7 +222,9 @@ export function AnewLeadEditDialog({
   // que a lead ja tinha). Em modo Pessoa nao ha campo de empresa e o valor de field_values
   // nao se toca.
   const [kind, setKind] = useState<EntityKind>("person");
-  const [entityInfo, setEntityInfo] = useState<{ type: string; state: KindFormState } | null>(null);
+  // `names` = nome e apelido da ficha, para quando a lead nao os tem em field_values.
+  const [entityInfo, setEntityInfo] = useState<{ type: string; state: KindFormState; names: PersonNames } | null>(null);
+  const nameSeedPending = useRef(false);
   const [kindCompany, setKindCompany] = useState<string | null>(null);
 
   // Load field definitions and populate form when dialog opens
@@ -288,9 +293,23 @@ export function AnewLeadEditDialog({
     }
     const companyRead = await fetchEntityCompanyName(supabase, lead.entity_id);
     const initial = initialKindState(data, companyRead.company);
-    setEntityInfo({ type: data.type || "person", state: initial });
+    const names = personNamesFromEntity(data);
+    setEntityInfo({ type: data.type || "person", state: { ...initial, first: names.first, last: names.last }, names });
     setKind(initial.kind);
+    nameSeedPending.current = true;
   };
+
+  // Lead sem nome em field_values (criada por script, Edge Function, importacao): Nome e Apelido
+  // vem da ficha, para nao abrirem vazios nem se gravar um nome vazio. Corre uma vez, depois de o
+  // formulario (e o mapeamento das chaves) estar carregado e so se a pessoa ainda nao escreveu nada.
+  useEffect(() => {
+    if (!nameSeedPending.current || !entityInfo || loading) return;
+    nameSeedPending.current = false;
+    const current = { first: readGeneralField("first_name"), last: readGeneralField("last_name") };
+    const seeded = resolveInitialPersonNames(current, entityInfo.names);
+    if (seeded.first !== current.first) handleGeneralFieldChange("first_name", seeded.first);
+    if (seeded.last !== current.last) handleGeneralFieldChange("last_name", seeded.last);
+  }, [entityInfo, loading]);
 
   const generalKeyToFormKey = useMemo(() => buildGeneralKeyToFormKey(fieldDefs), [fieldDefs]);
 
@@ -301,7 +320,9 @@ export function AnewLeadEditDialog({
   // Empresa); senao a empresa que a lead ja tinha em field_values.
   const companyValue = (
     kindCompany
-    ?? (entityInfo?.state.kind === "organization" ? entityInfo.state.company : readGeneralField("company_name"))
+    ?? (entityInfo?.state.kind === "organization"
+      ? entityInfo.state.company
+      : readGeneralField("company_name") || entityInfo?.state.company || "")
   ).replace(/\s+/g, " ").trim();
 
   const handleFieldChange = (key: string, value: any) => {
@@ -491,13 +512,14 @@ export function AnewLeadEditDialog({
       if (lead.entity_id) {
         const originalValues = lead.field_values || {};
         const base: KindFormState = entityInfo?.state ?? { kind: "person", first: "", last: "", company: "" };
-        // Nome e apelido de partida: os do formulario ao abrir (field_values), como sempre.
+        // Nome e apelido de partida: os do formulario ao abrir (field_values; se a lead nao os tinha,
+        // os da ficha, como o formulario os mostrou).
+        const originalNames = resolveInitialPersonNames(
+          { first: readGeneralField("first_name", originalValues), last: readGeneralField("last_name", originalValues) },
+          entityInfo?.names ?? { first: "", last: "" },
+        );
         namePlan = planNameSave(
-          {
-            ...base,
-            first: readGeneralField("first_name", originalValues),
-            last: readGeneralField("last_name", originalValues),
-          },
+          { ...base, first: originalNames.first, last: originalNames.last },
           {
             kind,
             first: readGeneralField("first_name", updatedFieldValues),
