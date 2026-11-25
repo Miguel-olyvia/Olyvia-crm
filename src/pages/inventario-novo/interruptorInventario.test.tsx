@@ -1,6 +1,7 @@
 // O novo Inventário substitui as rotas clássicas (interruptor INVENTARIO_NOVO_ATIVO; VITE_INVENTARIO_CLASSICO=1 desliga-o):
 // · as 9 rotas clássicas levam ao separador certo, com o mesmo ?search e #hash (RedirecionarParaSeparador em App.tsx);
 // · o menu lateral aponta para os separadores (mesmos rótulos, ícones, permissões e contadores) e a secção/item ficam ativos;
+// · o ícone do Inventário no rail abre logo /inventory/novo (abreDireto), sem o painel;
 // · o Hoje clássico deixa de mostrar «Experimentar o novo Inventário»;
 // · com o interruptor desligado fica tudo como antes.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -153,6 +154,8 @@ describe("o menu lateral do Inventário", () => {
     ligado.itens.forEach((i, n) => expect(i.icon, i.to).toBe(desligado.itens[n].icon));
     expect(ligado.secao.permissions).toEqual(desligado.secao.permissions);
     expect(ligado.secao.subSections?.map((x) => x.key)).toEqual(["inventory-purchases", "inventory-warehouse"]);
+    // O ícone do rail abre logo o novo Inventário, sem o painel (os itens ficam para a visibilidade da secção).
+    expect(ligado.secao.abreDireto).toBe("/inventory/novo");
   });
 
   it("interruptor ligado: a secção é reconhecida em /inventory/novo/* e só o item do separador aberto fica ativo", async () => {
@@ -171,6 +174,8 @@ describe("o menu lateral do Inventário", () => {
     expect(itens.map((i) => [i.to, i.labelKey, i.permission, i.counterKey])).toEqual(ANTES.map((x) => [...x]));
     expect(secao.paths).toEqual(["/inventory", "/purchase-orders", "/suppliers", "/stocks", "/stock-movements", "/client-orders", "/receiving", "/stock-counts", "/warehouses"]);
     expect(Object.values(INVENTORY_PATHS).every((p) => itens.some((i) => i.to === p))).toBe(true);
+    // Sem abreDireto: o ícone abre o painel com a lista.
+    expect(secao.abreDireto).toBeUndefined();
   });
 });
 

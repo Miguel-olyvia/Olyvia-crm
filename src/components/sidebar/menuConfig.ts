@@ -50,7 +50,7 @@ import {
   HardHat,
 } from "lucide-react";
 import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
-import { INVENTARIO_NOVO_ATIVO } from "@/pages/inventario-novo/separadores";
+import { BASE_NOVO, INVENTARIO_NOVO_ATIVO } from "@/pages/inventario-novo/separadores";
 import { paraSeparador } from "@/pages/inventario-novo/navegadorInventario";
 
 /** O destino de um item do Inventário: com o novo Inventário ligado, o separador (/inventory/novo/<aba>); senão a rota clássica. */
@@ -95,6 +95,12 @@ export interface MenuSection {
   permissions: string[];
   items: MenuItem[];
   subSections?: MenuSubSection[];
+  /**
+   * Destino aberto logo ao clicar no ícone do rail, sem o painel lateral (o destino já tem as entradas lá dentro, ex.
+   * os separadores do novo Inventário). Os `items`/`subSections` continuam a decidir se a secção é visível
+   * (canViewSection) e servem quando o campo está vazio.
+   */
+  abreDireto?: string;
 }
 
 export interface TopLevelItem {
@@ -261,6 +267,9 @@ export const menuSections: MenuSection[] = [
     // Fallback só usado se nenhum item for visível (canViewSection olha
     // primeiro para os itens) — as mesmas permissões das rotas.
     permissions: ["inventory.view", "purchase_orders.view", "suppliers.view", "client_orders.view", "receiving.view", "warehouses.view"],
+    // Novo Inventário ligado: o ícone abre /inventory/novo num clique (os 9 separadores vivem lá dentro), sem o painel.
+    // Desligado (VITE_INVENTARIO_CLASSICO=1): o painel com a lista, como antes.
+    abreDireto: INVENTARIO_NOVO_ATIVO ? BASE_NOVO : undefined,
     items: [
       // "Hoje" do Inventário: fila de trabalho e fluxo (rpc_inventory_today).
       { to: inv("/inventory"), icon: Sun, labelKey: "sidebar.inventoryToday", permission: "inventory.view", counterKey: "today" },
