@@ -772,15 +772,22 @@ const DirectSales = () => {
                       {formatCurrency(sale.total ?? 0)}
                     </TableCell>
                     <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={cn(
-                          "border-transparent",
-                          INVOICE_BADGE_CLASS[sale.invoice_status || "pendente"] || "",
-                        )}
-                      >
-                        {t(`directSales.invoiceStatus.${sale.invoice_status || "pendente"}`)}
-                      </Badge>
+                      {/* Venda cancelada sem fatura emitida: não há nada a
+                          faturar, por isso não pode aparecer "Pendente". Se a
+                          fatura já tinha sido emitida, continua a mostrar-se. */}
+                      {sale.status === "cancelada" && sale.invoice_status !== "emitida" ? (
+                        <span className="text-muted-foreground">—</span>
+                      ) : (
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "border-transparent",
+                            INVOICE_BADGE_CLASS[sale.invoice_status || "pendente"] || "",
+                          )}
+                        >
+                          {t(`directSales.invoiceStatus.${sale.invoice_status || "pendente"}`)}
+                        </Badge>
+                      )}
                     </TableCell>
                     <TableCell>{formatDate(sale.created_at)}</TableCell>
                     <TableCell className="text-right">
