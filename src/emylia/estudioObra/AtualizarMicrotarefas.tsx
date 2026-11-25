@@ -50,7 +50,7 @@ export function AtualizarMicrotarefas({ ctx, obras }: { ctx: Ctx; obras: Negocio
       <div className="min-w-0">
         <p className="flex items-center gap-2 text-[17px] font-semibold"><ListChecks className="h-5 w-5 text-primary" aria-hidden="true" />Microtarefas das obras</p>
         <p role="status" className="text-[15px] text-muted-foreground">
-          {L.length ? `${L.length} ${L.length === 1 ? "obra" : "obras"} e ${tarefas} ${tarefas === 1 ? "tarefa podem" : "tarefas podem"} passar às microtarefas do Catálogo (e às horas que elas somam). O que o técnico marcou fica.`
+          {L.length ? `${L.length} ${L.length === 1 ? "obra" : "obras"} e ${tarefas} ${tarefas === 1 ? "tarefa podem" : "tarefas podem"} passar às microtarefas do Catálogo (e às horas que elas somam). O que o técnico marcou fica. Obras: ${L.map((x) => `${x.d.nome} (${x.n})`).join(", ")}.`
             : `Feito: ${feito!.tarefas} ${feito!.tarefas === 1 ? "tarefa atualizada" : "tarefas atualizadas"} em ${feito!.obras} ${feito!.obras === 1 ? "obra" : "obras"}. Fica no histórico de cada uma.`}
         </p>
       </div>
