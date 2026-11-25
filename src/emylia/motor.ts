@@ -2107,7 +2107,8 @@ export function reporArredondamentos(d: Negocio, p: Plano, simular = false): num
     const m = re.exec(e.t);
     if (!m) continue;
     const [, nome, a, b, x] = m, A = num(a), Bh = num(b), X = Number(x);
-    if (!(Bh < A && A - Bh < 0.5 && Math.abs(Bh - Math.round(A * 2) / 2) < 1e-9) || feitos.has(nome)) continue;
+    // só arredondada (para baixo ou para cima, até um quarto de hora): uma subida pela regra é sempre maior
+    if (!(Bh !== A && Math.abs(A - Bh) <= 0.25 + 1e-9 && Math.abs(Bh - Math.round(A * 2) / 2) < 1e-9) || feitos.has(nome)) continue;
     const ti = p.tasks.findIndex((t) => t.nome === nome);
     const t = p.tasks[ti];
     if (!t || t.exec || Math.abs(t.h - Bh) > 1e-9 || p.tasks.filter((y) => y.nome === nome).length > 1) continue;

@@ -295,6 +295,28 @@ describe("sem arredondamentos (25/11)", () => {
   });
 });
 
+describe("restos da regra antiga (25/11)", () => {
+  it("regularização subida com 3 esperas somadas (28 h) volta às horas do orçamento; dias = trabalho + a maior espera", () => {
+    const { S, d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "MO Modelo Remodelação Completa - Casa de Banho Comum · regularização e rebocos"; delete t.bloqueio;
+    const soma = horasDasMicro(t, S, p)!;
+    expect(listaMicro(t, S, p).filter((m) => m.dias === 1).length).toBe(3);
+    t.h = Math.round((soma + 24) * 2) / 2; t.dur = 4; p.base![livre].h = 10.44;
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBe(10.44);
+    expect(t.dur).toBe(2 + 1);
+  });
+  it("um arredondamento para cima (18,78 → 19) também se repõe", () => {
+    const { d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "Canalização X"; delete t.bloqueio; t.h = 19; t.dur = 3;
+    d.hist.unshift({ t: "Plano: Canalização X · 18,78 → 19 h, 3 → 3 dias (microtarefas: 13 h de trabalho)", q: "agora", k: "a" });
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBe(18.78);
+  });
+});
+
 describe("a empresa absorve as horas da regra (25/11)", () => {
   it("as horas que a regra junta não mudam o valor do orçamento; as que o gestor junta à mão, sim", () => {
     const { S, d, A, p, livre } = obra();

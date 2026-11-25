@@ -235,13 +235,14 @@ export function ajustePorFazer(t: Tarefa, S?: Estado | null, p?: Plano | null, h
   // arredondar (antes, 4,66 h passavam a 4,5 h e a tarefa perdia um dia)
   const cima = (x: number) => Math.max(0.5, Math.ceil(x * 2 - 1e-9) / 2);
   let h = t.h;
-  if (espera && soma != null && Math.abs(t.h - meia(soma + 8 * espera)) < 0.51 && t.h > soma + 0.25) h = cima(Math.max(soma, hOrc ?? soma));
+  // a correção: as horas que a regra antiga subiu com as esperas a 8 h (somadas) voltam ao orçamento, ou ao trabalho se for mais
+  const somada = esperaSomada(t, S, p);
+  if (somada && soma != null && Math.abs(t.h - meia(soma + 8 * somada)) < 0.51 && t.h > soma + 0.25) h = hOrc != null && hOrc >= soma ? hOrc : cima(soma);
   if (soma != null && soma > h + 0.25) h = cima(soma);
   // a subir (ou igual), os dias nunca encolhem; a corrigir para baixo (a espera contada como horas), os dias são o trabalho mais a espera
   // sem horas novas nem espera, os dias ficam (uma tarefa com mais pessoas tem menos dias do que horas ÷ 8)
   let dur = h < t.h ? diasDe(h) + espera : h > t.h || espera ? Math.max(diasDe(h) + espera, t.dur) : t.dur;
   // 25/11: dias que a regra pôs com as esperas somadas descem para a maior espera
-  const somada = esperaSomada(t, S, p);
   if (somada > espera && h === t.h && t.dur === diasDe(h) + somada) dur = diasDe(h) + espera;
   return h !== t.h || dur !== t.dur ? { h, dur } : null;
 }
