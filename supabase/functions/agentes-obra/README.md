@@ -25,35 +25,38 @@ pg_cron (15 em 15 min)
 O motor é o da app, empacotado para o servidor. O código está em `src/emylia/estudioObra/agentesServidor.ts`,
 `VigiaAgentes.tsx`, `agentes.ts`, e nesta pasta (`index.ts`, `entrada.ts`, `clienteServidor.ts`).
 
-## O que tens de fazer
+## O que é preciso
 
 | # | Passo | Onde |
 |---|---|---|
-| 1 | Criar a conta robô «Olyvia (agentes)» | Abaixo |
-| 2 | Colar a migration `20270127000000_agentes_obra_servidor.sql` | Supabase › SQL Editor |
-| 3 | Pôr os segredos da função | Abaixo, no terminal |
-| 4 | Empacotar e publicar a função | Abaixo, no terminal, em `D:\Olyvia\wt-olyvia-voz` |
-| 5 | Confirmar que corre | Abaixo |
+| 1 | Colar a migration `20270127000000_agentes_obra_servidor.sql` | Supabase › SQL Editor |
+| 2 | Empacotar e publicar a função (sem verificação de JWT) | Abaixo |
+| 3 | Pôr os segredos da função | Supabase › Edge Functions › Secrets |
+| 4 | Confirmar que corre | Abaixo |
 
-### 1. A conta robô
+### A conta robô, sem palavra-passe
 
-1. Cria um utilizador com um email teu, por exemplo `agentes@…`, e uma palavra-passe forte. Pode ser pelo Supabase, em Authentication › Users › Add user.
-2. Na Olyvia, dá-lhe acesso à organização (a Mudelar) com o **papel das Operações**, como a um colega. Tem de poder planear a obra (`negocios.obra.planear`) e ler o Catálogo e os negócios.
+Ninguém cria a conta à mão nem escolhe uma palavra-passe. Na primeira volta, a função (`contaRobo.ts`):
 
-A conta robô só faz o que o papel das Operações deixa. Para a parar, basta tirar-lhe o acesso.
+1. cria a conta `AGENTES_EMAIL` (por omissão `agentes.olyvia@example.com`) sem palavra-passe, já confirmada, sem enviar email;
+2. dá-lhe o papel `AGENTES_PAPEL` em cada organização de `AGENTES_ORGS`, pela mesma função da app
+   (`rpc_finalize_user_profile_full`), em nome de `AGENTES_ATOR` (o id em `anew_users` de quem pode criar utilizadores).
 
-### 3. Os segredos da função
+Em cada volta, a sessão gera-se ali mesmo com a chave de serviço (um link de entrada de uso único que nunca sai da função).
+A conta só faz o que o papel deixa. Para a parar, tira-se-lhe o acesso na Olyvia, ou pára-se o agendamento (abaixo).
 
-O id da organização tira-se no SQL Editor:
+### Os segredos da função
+
+| Segredo | O quê |
+|---|---|
+| `AGENTES_ORGS` | o id da organização (vários, separados por vírgulas) |
+| `AGENTES_PAPEL` | o id do papel da conta robô (o «Supervisor de obra»: planear a obra, ler o Catálogo e os negócios) |
+| `AGENTES_ATOR` | o id em `anew_users` de quem autoriza a conta (um administrador) |
+| `AGENTES_EMAIL` | opcional; por omissão `agentes.olyvia@example.com` |
 
 ```sql
-SELECT id, name FROM public.organizations ORDER BY name;
-```
-
-Depois, no terminal (escreves tu o email e a palavra-passe):
-
-```
-npx supabase secrets set AGENTES_EMAIL=<email da conta robô> AGENTES_PALAVRA_PASSE=<palavra-passe> AGENTES_ORGS=<id da organização> --project-ref <projeto>
+SELECT id, name FROM public.anew_organizations ORDER BY name;
+SELECT id, name, code FROM public.anew_roles WHERE code = 'supervisor_de_obra';
 ```
 
 O endereço das funções no Vault (`erp_funcoes_url`) já existe, porque a verificação do Eticadata usa o mesmo. Se faltar:
@@ -62,7 +65,7 @@ O endereço das funções no Vault (`erp_funcoes_url`) já existe, porque a veri
 SELECT vault.create_secret('https://<projeto>.supabase.co/functions/v1/', 'erp_funcoes_url', 'Onde o pg_cron chama as funções');
 ```
 
-### 4. Empacotar e publicar
+### Empacotar e publicar
 
 ```
 npm run build:agentes-obra
@@ -72,9 +75,11 @@ npm run build:agentes-obra
 npx supabase functions deploy agentes-obra --no-verify-jwt --project-ref <projeto>
 ```
 
+Sem o CLI, publica-se pelo painel (Edge Functions › Deploy a new function) com `index.ts`, `contaRobo.ts` e `motor.bundle.js`, e a verificação de JWT desligada.
+
 O `motor.bundle.js` não vai para o git. Gera-se sempre antes de publicar, para levar o motor de agora.
 
-### 5. Confirmar que corre
+### Confirmar que corre
 
 ```sql
 -- correr uma volta já, sem esperar pelos 15 minutos
