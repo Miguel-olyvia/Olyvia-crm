@@ -69,7 +69,7 @@ export function AntesDepoisPlano({ d, aoVivo = true }: { d: Negocio; aoVivo?: bo
       </div>
       {vivo && (
         <div className="space-y-2">
-          <p className="text-[15px]"><b>Até agora:</b> {resumoDiferencas(vivo)}.</p>
+          <p className="text-[15px]"><b>Até agora:</b> {vivo.length ? resumoDiferencas(vivo) : "ainda sem mudanças ao plano gerado"}.</p>
           {vivo.length > 0 && <Tabela l={vivo} />}
         </div>
       )}
