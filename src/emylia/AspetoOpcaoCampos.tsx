@@ -20,7 +20,7 @@ export function AspetoOpcaoCampos({ metal, superficie, onMetal, onSuperficie, de
       </label>
       <div className="grid gap-1.5">
         <span className="text-[15px]" aria-hidden="true">Superfície por omissão</span>
-        <Chips<Superficie | null> rot="Superfície por omissão" opcoes={SUPERFICIES} v={superficie} set={onSuperficie} />
+        <Chips<Superficie | null> rot="Superfície por omissão" opcoes={SUPERFICIES} v={superficie} set={onSuperficie} descrito={dica} />
         <span id={dica} className={NOTA}>É a superfície que esta opção dá à parte do produto que pinta. Se o produto tiver «Brilho» ou «Tonalidade» escolhido, esse vale mais.</span>
       </div>
     </fieldset>

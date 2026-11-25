@@ -505,7 +505,8 @@ function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pen
             {podeEditar && a.aspetoDisponivel && (
               <div className="mt-3 grid gap-0.5">
                 <label className="flex min-h-11 items-center gap-2 text-[15px]">
-                  <input type="checkbox" checked={a.temAspeto} disabled={aGravar} onChange={(e) => onAspeto(a, e.target.checked)} className="h-5 w-5 accent-primary" />
+                  {/* aria-disabled (e não disabled): um controlo desactivado perde o foco do teclado ao gravar; assim o foco fica e o clique é só ignorado */}
+                  <input type="checkbox" checked={a.temAspeto} aria-disabled={aGravar} onChange={(e) => { if (!aGravar) onAspeto(a, e.target.checked); }} className="h-5 w-5 accent-primary" />
                   Tem aspeto (metal e superfície)
                 </label>
                 <span className="pl-7 text-sm text-muted-foreground">Cada opção diz se é de metal e a superfície por omissão (polida, acetinada, mate). Desligar não apaga o que já está escrito.</span>

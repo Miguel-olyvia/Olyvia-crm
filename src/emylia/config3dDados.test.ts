@@ -84,6 +84,23 @@ describe("lerConfig3d", () => {
   });
 });
 
+describe("ligações com zona que o ecrã não conhece", () => {
+  const DADOS = { proprio: { eixos: null, ligacoes: [{ atributo: A1, zona: "frente", aplicar: true }, { atributo: A2, zona: "portinhola", aplicar: false }, { atributo: "não-é-uuid", zona: "corpo", aplicar: true }], orfas: 0 }, efectiva: { eixos: null, eixos_origem: "automatico", ligacoes: null, ligacoes_origem: "automatico" } };
+  it("o leitor mostra só as conhecidas, mas guarda em ligacoesBase as que a base aceita (a desconhecida fica, a malformada sai)", async () => {
+    base.responder = () => ({ data: DADOS, error: null });
+    const r = await lerConfig3d(ORG, "produto", PROD);
+    expect(r.ok && r.v.proprio?.ligacoes).toEqual([{ atributo: A1, zona: "frente", aplicar: true }]);
+    expect(r.ok && r.v.proprio?.ligacoesBase).toEqual([{ atributo: A1, zona: "frente", aplicar: true }, { atributo: A2, zona: "portinhola", aplicar: false }]);
+  });
+  it("definirConfig3d com `reenviar` e sem `ligacoes` manda as ligações da base tal e qual; com `ligacoes` valem estas", async () => {
+    const guardadas = [{ atributo: A2, zona: "portinhola", aplicar: false }];
+    await definirConfig3d(ORG, "produto", PROD, { eixos: EIXOS, reenviar: guardadas });
+    await definirConfig3d(ORG, "produto", PROD, { eixos: EIXOS, ligacoes: [{ atributo: A1, zona: "frente", aplicar: true }], reenviar: guardadas });
+    await definirConfig3d(ORG, "produto", PROD, { eixos: null });
+    expect(base.chamadas.map((c) => c.a.p_ligacoes)).toEqual([guardadas, [{ atributo: A1, zona: "frente", aplicar: true }], null]);
+  });
+});
+
 describe("definirConfig3d", () => {
   it("chama cat_definir_config_3d com os nomes exactos dos argumentos", async () => {
     const lig: Ligacao[] = [{ atributo: A1, zona: "frente", aplicar: true }];

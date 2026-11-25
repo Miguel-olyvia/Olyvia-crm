@@ -91,6 +91,10 @@ export function Previa3DLigacoes({ valor, alterado, origem, proprio, atributos, 
     try { const erro = await fazer(); setMsg(erro ? { erro: true, texto: erro } : { erro: false, texto: ok }); } finally { setOcupado(false); }
   };
   const podeGuardar = alterado && !invalida && !ocupado;
+  // porque é que «Guardar ligações» está desactivado: o aviso da ligação inválida, ou uma nota curta (sem alterações, a guardar)
+  const idInvalida = `${id}-invalida`, idRazao = `${id}-razao`;
+  const razaoGuardar = invalida ? null : ocupado ? "A guardar…" : !alterado ? "Sem alterações para guardar." : null;
+  const descreveGuardar = podeGuardar ? undefined : invalida ? idInvalida : idRazao;
 
   return (
     <section aria-labelledby={`${id}-t`} className="grid gap-3 rounded-xl border border-border bg-card p-3">
@@ -168,10 +172,11 @@ export function Previa3DLigacoes({ valor, alterado, origem, proprio, atributos, 
               </button>
             )}
             {/* aria-disabled (e não disabled): um botão desactivado perde o foco do teclado ao ser carregado; assim o foco fica e o clique é só ignorado */}
-            <button type="button" aria-disabled={!podeGuardar} onClick={() => { if (podeGuardar) void correr(gravar, "Ligações guardadas."); }} className={cn(BOTAO, !podeGuardar && DESLIGADO)}>Guardar ligações</button>
+            <button type="button" aria-disabled={!podeGuardar} aria-describedby={descreveGuardar} onClick={() => { if (podeGuardar) void correr(gravar, "Ligações guardadas."); }} className={cn(BOTAO, !podeGuardar && DESLIGADO)}>Guardar ligações</button>
             <button type="button" aria-disabled={!proprio || ocupado} onClick={() => { if (proprio && !ocupado) void correr(herdar, "As ligações voltaram a ser herdadas."); }} className={cn(BOTAO, (!proprio || ocupado) && DESLIGADO)}>Voltar a herdar as ligações</button>
           </div>
-          {invalida && <p role="status" className="text-[15px] text-red-700 dark:text-red-400">{invalida}</p>}
+          {invalida && <p id={idInvalida} role="alert" className="text-[15px] text-red-700 dark:text-red-400">{invalida}</p>}
+          {razaoGuardar && <p id={idRazao} className={NOTA}>{razaoGuardar}</p>}
         </>
       )}
 

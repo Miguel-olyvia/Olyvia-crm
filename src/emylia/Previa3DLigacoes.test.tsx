@@ -100,6 +100,25 @@ describe("guardar e voltar a herdar", () => {
     fireEvent.click(b);
     expect(gravar).not.toHaveBeenCalled();
   });
+  it("o aviso de ligação repetida é um alerta (não uma região de estado) e «Guardar ligações» desactivado aponta para ele", () => {
+    montar({ valor: [L(A_FRENTE, "frente"), L(A_FRENTE, "frente", false)], alterado: true });
+    const aviso = screen.getByText(/repetida/i);
+    expect(aviso.getAttribute("role")).toBe("alert");
+    expect(screen.getByRole("button", { name: "Guardar ligações" }).getAttribute("aria-describedby")).toBe(aviso.id);
+  });
+  it("sem alterações, «Guardar ligações» desactivado diz porquê (aria-describedby para um texto)", () => {
+    montar({ valor: [L(A_FRENTE, "frente")], alterado: false });
+    const b = screen.getByRole("button", { name: "Guardar ligações" });
+    const razao = document.getElementById(b.getAttribute("aria-describedby") ?? "");
+    expect(razao?.textContent).toBe("Sem alterações para guardar.");
+  });
+  it("com alterações válidas, «Guardar ligações» activo não aponta para nenhuma razão", () => {
+    montar({ valor: [L(A_FRENTE, "frente")], alterado: true });
+    const b = screen.getByRole("button", { name: "Guardar ligações" });
+    expect(b.getAttribute("aria-disabled")).toBe("false");
+    expect(b.hasAttribute("aria-describedby")).toBe(false);
+    expect(screen.queryByText("Sem alterações para guardar.")).toBeNull();
+  });
   it("«Voltar a herdar» só actua quando este produto tem ligações próprias", async () => {
     const sem = montar({ valor: [L(A_FRENTE, "frente")], origem: "categoria", proprio: false });
     const b = screen.getByRole("button", { name: "Voltar a herdar as ligações" });

@@ -23,7 +23,13 @@ export function rotuloDaOrigemConfig(o: OrigemConfig): string | null {
 export const MAX_LIGACOES = 60;
 
 /** `orfas`: ligações da base a atributos que já não existem (a base filtra-as e conta). `ignoradas`: as que este ecrã largou por inválidas. */
-export interface NivelConfig { eixos: Eixos | null; ligacoes: Ligacao[] | null; orfas: number; ignoradas: number }
+export interface NivelConfig {
+  eixos: Eixos | null; ligacoes: Ligacao[] | null; orfas: number; ignoradas: number;
+  /** As ligações como a base as tem (inclui zonas que este ecrã não desenha): servem para as REENVIAR ao gravar só os eixos, sem as perder. Mostra-se e aplica-se `ligacoes`. */
+  ligacoesBase: LigacaoBase[] | null;
+}
+/** Uma ligação como a base a aceita: a zona é qualquer `^[a-z_]{1,20}$` (o ecrã só conhece as de ZONAS). */
+export interface LigacaoBase { atributo: string; zona: string; aplicar: boolean }
 export interface NivelComNome extends NivelConfig { id: string; nome: string }
 export interface Config3d {
   /** A configuração gravada neste alvo (null: nenhuma, herda tudo). */
@@ -55,11 +61,17 @@ function ligacoesDe(x: unknown): { lista: Ligacao[] | null; ignoradas: number } 
   const lista = x.map(ligacaoDe).filter((l): l is Ligacao => l !== null);
   return { lista, ignoradas: x.length - lista.length };
 }
+/** Uma ligação no formato que a base guarda (atributo uuid, zona `^[a-z_]{1,20}$`, aplicar booleano), mesmo que o ecrã não conheça a zona; senão null. */
+const ligacaoBaseDe = (x: unknown): LigacaoBase | null => {
+  const o = objeto(x);
+  return o && typeof o.atributo === "string" && eUuid(o.atributo) && typeof o.zona === "string" && /^[a-z_]{1,20}$/.test(o.zona) && typeof o.aplicar === "boolean" ? { atributo: o.atributo, zona: o.zona, aplicar: o.aplicar } : null;
+};
 function nivelDe(x: unknown): NivelConfig | null {
   const o = objeto(x);
   if (!o) return null;
   const { lista, ignoradas } = ligacoesDe(o.ligacoes);
-  return { eixos: validarEixos(o.eixos), ligacoes: lista, orfas: numero(o.orfas), ignoradas };
+  const base = Array.isArray(o.ligacoes) ? o.ligacoes.map(ligacaoBaseDe).filter((l): l is LigacaoBase => l !== null) : null;
+  return { eixos: validarEixos(o.eixos), ligacoes: lista, orfas: numero(o.orfas), ignoradas, ligacoesBase: base };
 }
 function nivelComNomeDe(x: unknown): NivelComNome | null {
   const n = nivelDe(x), o = objeto(x);
@@ -109,13 +121,15 @@ export function erroDasLigacoes(lista: readonly Ligacao[]): string | null {
 }
 
 /** Grava a configuração do alvo: os eixos e as ligações (os DOIS como estado final; null herda). null e null apaga a configuração. Valida o formato antes de ir à base. */
-export async function definirConfig3d(org: string, alvo: AlvoConfig3d, id: string, o: { eixos: Eixos | null; ligacoes: readonly Ligacao[] | null }): Promise<ResConfig<ResultadoConfig3d>> {
+export async function definirConfig3d(org: string, alvo: AlvoConfig3d, id: string, o: { eixos: Eixos | null; ligacoes?: readonly Ligacao[] | null; reenviar?: readonly LigacaoBase[] | null }): Promise<ResConfig<ResultadoConfig3d>> {
   const eixos = o.eixos === null ? null : validarEixos(o.eixos);
   if (o.eixos !== null && !eixos) return { ok: false, erro: "Os eixos escolhidos não são válidos: cada campo da Medida só pode servir um eixo." };
+  // sem `ligacoes` (só se gravam os eixos), reenvia-se `reenviar`: as ligações como a base as tem, com as zonas que este ecrã não conhece, que a base já validou
+  const lista = o.ligacoes !== undefined ? o.ligacoes : o.reenviar ?? null;
   const aviso = o.ligacoes ? erroDasLigacoes(o.ligacoes) : null;
   if (aviso) return { ok: false, erro: aviso };
   try {
-    const { data, error } = await rpcLivre("cat_definir_config_3d", { p_org: org, p_alvo: alvo, p_id: id, p_eixos: eixos, p_ligacoes: o.ligacoes ? [...o.ligacoes] : null });
+    const { data, error } = await rpcLivre("cat_definir_config_3d", { p_org: org, p_alvo: alvo, p_id: id, p_eixos: eixos, p_ligacoes: lista ? [...lista] : null });
     if (error) return falhaDe(error, FRASE_GRAVAR);
     const r = objeto(data);
     if (!r) return { ok: false, erro: FRASE_GRAVAR };

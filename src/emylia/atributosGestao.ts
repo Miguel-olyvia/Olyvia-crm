@@ -52,6 +52,8 @@ function atributoDe(a: Bruto): AtributoGestao {
 /** Erros da base que chegam em bruto (nome de constraint) e têm uma frase em português. 23514 + product_attributes_has_photo_check: tirar a cor a um atributo que tem fotos. */
 function traduzirErro(e: { code?: string; message?: string } | null | undefined): string | null {
   if (e?.code === "23514" && /product_attributes_has_photo_check/.test(e.message ?? "")) return "Este atributo tem fotos nas opções: remova as fotos antes de tirar a cor.";
+  // 25/11: «Tem aspeto» ligado numa medida (CHECK: não tem aspeto e é medida)
+  if (e?.code === "23514" && /product_attributes_has_aspect_check/.test(e.message ?? "")) return "Uma medida não pode ter aspeto: só os atributos de lista o têm.";
   return null;
 }
 

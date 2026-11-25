@@ -96,6 +96,31 @@ describe("o interruptor «Tem aspeto» de um atributo", () => {
     fireEvent.click(within(sec("Brilho")).getByRole("checkbox", { name: /Tem aspeto/ }));
     expect(await screen.findByText("Uma medida não tem aspeto.")).toBeInTheDocument();
   });
+  it("a recusa em bruto da base (23514 do CHECK has_aspect: uma medida não tem aspeto) vem em português, sem o nome da constraint", async () => {
+    base.responder = (f) => (f === "cat_ler_atributos_gestao" ? { data: lido(), error: null }
+      : { data: null, error: { code: "23514", message: "new row for relation \"product_attributes\" violates check constraint \"product_attributes_has_aspect_check\"" } });
+    await abrir();
+    fireEvent.click(within(sec("Brilho")).getByRole("checkbox", { name: /Tem aspeto/ }));
+    expect(await screen.findByText("Uma medida não pode ter aspeto: só os atributos de lista o têm.")).toBeInTheDocument();
+    expect(screen.queryByText(/product_attributes_has_aspect_check/)).toBeNull();
+  });
+  it("enquanto grava, o interruptor continua no teclado (aria-disabled, não disabled) e um segundo clique é ignorado", async () => {
+    let acabar: (r: { data: unknown; error: unknown }) => void = () => undefined;
+    base.responder = (f) => (f === "cat_ler_atributos_gestao" ? { data: lido(), error: null }
+      : f === "cat_definir_aspeto_atributo" ? new Promise((r) => { acabar = r; }) as never : { data: { ok: true }, error: null });
+    await abrir();
+    const caixa = within(sec("Brilho")).getByRole("checkbox", { name: /Tem aspeto/ });
+    caixa.focus();
+    fireEvent.click(caixa);
+    await waitFor(() => expect(chamadasDe("cat_definir_aspeto_atributo")).toHaveLength(1));
+    await waitFor(() => expect(caixa).toHaveAttribute("aria-disabled", "true"));
+    expect(caixa).not.toBeDisabled();
+    expect(document.activeElement).toBe(caixa);
+    fireEvent.click(caixa);
+    expect(chamadasDe("cat_definir_aspeto_atributo")).toHaveLength(1);
+    acabar({ data: { atributo: { id: A_BRI, tem_aspeto: true } }, error: null });
+    await waitFor(() => expect(caixa).not.toHaveAttribute("aria-disabled", "true"));
+  });
   it("sem products.edit não há interruptor", async () => {
     await abrir(REAL({ podeEditar: false }));
     expect(screen.queryByRole("checkbox", { name: /Tem aspeto/ })).toBeNull();
@@ -107,6 +132,16 @@ describe("o interruptor «Tem aspeto» de um atributo", () => {
     editar("Preto");
     expect(screen.queryByRole("checkbox", { name: /É metal/ })).toBeNull();
     expect(screen.queryByText(/Metal ·/)).toBeNull();
+  });
+});
+
+describe("a nota do aspeto de uma opção", () => {
+  it("a nota «É a superfície que esta opção dá…» está ligada à escolha da superfície (aria-describedby)", async () => {
+    await abrir();
+    editar("Preto");
+    const nota = screen.getByText(/É a superfície que esta opção dá/);
+    expect(nota.id).toBeTruthy();
+    expect(screen.getByRole("radiogroup", { name: "Superfície por omissão" }).getAttribute("aria-describedby")).toContain(nota.id);
   });
 });
 
