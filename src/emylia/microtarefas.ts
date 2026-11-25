@@ -117,6 +117,12 @@ export function porFixar(t: Tarefa, S?: Estado | null, p?: Plano | null): Micro[
     const r = microtarefasDe(t, S, p);
     return r.origem === "catalogo" && !marcas.length ? r.L : null;
   }
+  // 25/11 (obra 1048): uma lista posta pela app (nem mudada à mão, nem marcada pelo técnico) troca-se pela proposta certa, por inteiro
+  const chaveP = (m: Micro) => m.ref ?? 'n:' + m.n;
+  if (t.micro && !t.microMao && !marcas.length && !t.exec) {
+    const iguais = t.micro.length === inf.length && t.micro.every((m, k) => chaveP(m) === chaveP(inf[k]) && m.n === inf[k].n);
+    return iguais ? null : inf;
+  }
   // a lista que existe: a da obra; sem ela, aquela em que o técnico marcou (se marcou)
   const base = t.micro ? t.micro.map((m) => ({ ...m })) : marcas.length ? microtarefasDe(t, S, p).L : [];
   if (!base.length) return inf;

@@ -7,7 +7,7 @@ import { ArrowDown, ArrowUp, Check, ListChecks, Plus, Sparkles, X } from "lucide
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { nfmt, type Tarefa } from "./motor";
-import { tarefasMudelarDe } from "./microtarefasMudelar";
+import { tarefaMudelar, tarefasMudelarDe } from "./microtarefasMudelar";
 import { gravarMicrotarefasServico, microtarefasDoServico, ouvirMicrotarefasServicos, versaoMicrotarefasServicos, type MicroServico } from "./real/microtarefasServico";
 
 /** As tarefas do Infraspeak que se propõem a um serviço (pelo nome, pelo ofício e pela primeira fase dele). */
@@ -121,7 +121,13 @@ export function LigarMicrotarefas({ itens, horas, fase, pode }: {
   const [fora, setFora] = useState<Set<string>>(new Set());
   const [estado, setEstado] = useState<{ feitos: number; total: number; erro?: string } | null>(null);
   const L = itens.filter((i) => !/^mo modelo/i.test(i.n.trim()))
-    .map((i) => ({ ...i, prop: propostaDoServico(i.sid, i.n, i.oficio, fase(i.sid, i.n, i.oficio)), tem: (microtarefasDoServico(i.sid)?.length ?? 0) > 0 }))
+    .map((i) => {
+      const prop = propostaDoServico(i.sid, i.n, i.oficio, fase(i.sid, i.n, i.oficio)), atual = microtarefasDoServico(i.sid);
+      // 25/11: «tem» = tem uma lista feita à mão, ou igual à proposta; uma lista posta pela app que já não bate com a proposta corrigida volta a ligar-se
+      const auto = !!atual && atual.every((m) => !!m.ref && tarefaMudelar(m.ref)?.n === m.nome);
+      const igual = !!atual && atual.length === prop.length && atual.every((m, k) => m.ref === prop[k].ref && m.nome === prop[k].nome);
+      return { ...i, prop, tem: !!atual?.length && (igual || !auto), refazer: !!atual?.length && auto && !igual };
+    })
     .filter((i) => i.prop.length > 0);
   const porLigar = L.filter((i) => !i.tem);
   if (!pode || !L.length) return null;
@@ -140,7 +146,7 @@ export function LigarMicrotarefas({ itens, horas, fase, pode }: {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0">
           <h2 id="ligar-micro" className="flex items-center gap-2 text-[17px] font-semibold"><ListChecks className="h-5 w-5 text-primary" aria-hidden="true" />Microtarefas do Infraspeak</h2>
-          <p className="text-[15px] text-muted-foreground">{porLigar.length ? `${porLigar.length} ${porLigar.length === 1 ? "serviço pode ficar" : "serviços podem ficar"} com as tarefas reais da Mudelar.` : "Todos os serviços com tarefas no Infraspeak já têm microtarefas."} {L.length - porLigar.length > 0 && `${L.length - porLigar.length} já têm.`}</p>
+          <p className="text-[15px] text-muted-foreground">{porLigar.length ? `${porLigar.length} ${porLigar.length === 1 ? "serviço pode ficar" : "serviços podem ficar"} com as tarefas reais da Mudelar${porLigar.some((i) => i.refazer) ? ` (${porLigar.filter((i) => i.refazer).length} a corrigir)` : ""}.` : "Todos os serviços com tarefas no Infraspeak já têm microtarefas."} {L.length - porLigar.length > 0 && `${L.length - porLigar.length} já têm.`}</p>
         </div>
         <Button type="button" variant="outline" className="min-h-10" onClick={() => setAberto(!aberto)} aria-expanded={aberto}>{aberto ? "Fechar" : "Rever e ligar"}</Button>
       </div>
@@ -160,7 +166,7 @@ export function LigarMicrotarefas({ itens, horas, fase, pode }: {
                       <td className="px-3 py-2">{i.tem ? <span className="text-sm text-success">Já tem</span> : (
                         <input type="checkbox" aria-label={`Ligar ${i.n}`} checked={!fora.has(i.sid)} onChange={(e) => setFora((s) => { const n = new Set(s); if (e.target.checked) n.delete(i.sid); else n.add(i.sid); return n; })} className="h-5 w-5 accent-[hsl(var(--primary))]" />
                       )}</td>
-                      <td className="px-3 py-2"><span className="font-medium">{i.n}</span><span className="block text-sm text-muted-foreground">{i.oficio}</span></td>
+                      <td className="px-3 py-2"><span className="font-medium">{i.n}</span>{i.refazer && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-100">a corrigir</span>}<span className="block text-sm text-muted-foreground">{i.oficio}</span></td>
                       <td className="px-3 py-2"><details><summary className="cursor-pointer">{i.prop.length} tarefas</summary><ol className="mt-1 list-decimal pl-5 text-sm text-muted-foreground">{i.prop.map((m, k) => <li key={k}>{m.nome}</li>)}</ol></details></td>
                       <td className="px-3 py-2 text-right tabular-nums">{nfmt(h)} h <span className="block text-xs text-muted-foreground">por obra</span></td>
                       <td className="px-3 py-2 text-right tabular-nums">{nfmt(horas(i.sid))} h <span className="block text-xs text-muted-foreground">por {i.un ?? "un"}</span></td>

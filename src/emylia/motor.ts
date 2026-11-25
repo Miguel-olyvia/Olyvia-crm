@@ -364,6 +364,7 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 21/10: juntada pelo validador do plano (tarefasValidador.ts): a quantidade do serviço e os materiais escolhidos */ nova?: true; q?: number; mats?: MatTarefa[];
   /** 24/11: as microtarefas desta obra (microtarefas.ts), quando o gestor as mudou ou fixou; sem elas, vêm do Catálogo. O técnico marca-as
    *  pelo id (exec.passos). */ micro?: Micro[];
+  /** 25/11: o gestor mudou a lista à mão (A.microtarefas): não volta a ser trocada pela proposta */ microMao?: true;
   /** 24/11: uma tarefa interna (sem serviço do Catálogo e sem custo para o cliente): não muda o valor do contrato nem pede adenda */ interna?: true;
   /** 25/11: o lugar na lista da fase, quando o gestor a arrastou (ordemPlano.ts); sem ele, a ordem é a da data de início */ ordem?: number;
   /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[];
@@ -4490,6 +4491,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!p || !t || p.estado === "concluída" || t.exec?.estado === "validada") return false;
       const texto = mudarMicro(t, m, S, p);
       if (!texto) return false;
+      t.microMao = true;
       log(d, `Plano: microtarefas de ${t.nome} · ${texto}`);
       return true;
     },

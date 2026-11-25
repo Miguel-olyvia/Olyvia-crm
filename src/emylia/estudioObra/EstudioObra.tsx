@@ -58,6 +58,7 @@ import { ContratoDaObra } from "./ContratoObra";
 import { BotoesPassos } from "./BotoesPassos";
 import { porFixar } from "../microtarefas";
 import { tarefasDaFase } from "../ordemPlano";
+import { TemposInfraspeak } from "./TemposInfraspeak";
 import { passoEntre, retratoDe, type Passo } from "./passosObra";
 import { LigacoesDaTarefa } from "./LigacoesTarefa";
 import { HistoricoObraPortal, ProgressoObraPortal } from "../ObraNoPortal";
@@ -491,6 +492,8 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
                 novaTarefa={podeCriar ? (fase) => setPainel({ k: "nova", ...(fase ? { inicial: { fase } } : {}) }) : undefined}
                 ordenar={planeia && !acabou ? (ti, para) => mudar(ti, () => A.ordemTarefaPlano(d.id, ti, para)) : undefined} />
               {planeia && !acabou && <DiasDoTecnico p={p} pedir={pedirRestricao} />}
+              {/* 25/11: as horas de cada tarefa pelas microtarefas do Infraspeak */}
+              {planeia && !acabou && !previa && <TemposInfraspeak ctx={ctxObra} d={d} podeMexer={podeMexer} mudar={mudar} />}
 
               <div className="grid gap-6 lg:grid-cols-2">
                 {/* ------------------------------------------------------------ os alertas */}
