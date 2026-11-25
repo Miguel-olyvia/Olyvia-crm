@@ -1,7 +1,8 @@
 /**
- * Espelho em TS do que a BASE faz ao nome da ficha (migration
- * 20261229910000_nome_unico_da_ficha). Nao e usado pelos ecras para gravar:
- * serve para fixar, em testes, a regra das funcoes, do gatilho e da RPC.
+ * Espelho em TS do que a BASE faz ao nome da ficha (migrations
+ * 20261229910000_nome_unico_da_ficha: funcoes e RPC; e
+ * 20261229920000_nome_unico_da_ficha_gatilhos: o gatilho). Nao e usado pelos
+ * ecras para gravar: serve para fixar, em testes, a regra das duas partes.
  *
  * Regra do dono: a ficha e PESSOA (nome = nome + apelido) ou EMPRESA (nome =
  * nome da empresa). O nome e um so (display_name); editar troca-o. Um
@@ -58,7 +59,8 @@ export function displayNameOnUpdate(oldRow: EntityNameRow, newRow: EntityNameRow
   if (!isValueChange(oldRow, newRow)) return newRow.display_name; // (c) preencher nao renomeia
   if (!isEntityNameInSync(oldRow)) return newRow.display_name; // (d) fora de sincronia
   const next = composeEntityName(newRow);
-  return next !== null && next !== normalizeName(oldRow.display_name) ? next : newRow.display_name; // (e)
+  const changed = next !== null && next.toLowerCase() !== normalizeName(oldRow.display_name).toLowerCase();
+  return changed ? next : newRow.display_name; // (e) sem contar maiusculas
 }
 
 /** (c) Mudou o valor de um campo que ja tinha valor (nao um preenchimento). */

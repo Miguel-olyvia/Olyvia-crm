@@ -92,6 +92,31 @@ describe("gatilho da ficha", () => {
     expect(displayNameOnUpdate(renamed, { ...renamed })).toBe("Rui Costa");
   });
 
+  it("so a capitalizacao muda ('Rui Silva' -> 'rui silva'): NAO renomeia", () => {
+    const old = person();
+    expect(displayNameOnUpdate(old, { ...old, first_name: "rui", last_name: "silva" })).toBe("Rui Silva");
+    const org = company();
+    expect(displayNameOnUpdate(org, { ...org, company_name: "evolar lda" })).toBe("EVOLAR LDA");
+  });
+
+  it("os mesmos casos do bloco CONFERIR da parte 2 (tabela temporaria)", () => {
+    const run = (row: EntityNameRow, change: Partial<EntityNameRow>) => {
+      const inserted = { ...row, display_name: displayNameOnInsert(row) };
+      return displayNameOnUpdate(inserted, { ...inserted, ...change });
+    };
+    expect([
+      run(person({ display_name: "  " }), { last_name: "Costa" }),
+      run(person({ display_name: "Sr. Rui" }), {}),
+      run(person({ display_name: "Rui", last_name: null }), { last_name: "Silva" }),
+      run(person({ company_name: "EVOLAR LDA" }), { type: "organization" }),
+      run(company(), { company_name: "NOVA LDA" }),
+      run(person({ display_name: "EVOLAR LDA" }), { last_name: "Costa" }),
+      run(company({ display_name: "Mudar Lda", first_name: null, last_name: null, company_name: null }), { company_name: "Outra" }),
+      run(person(), { first_name: "rui", last_name: "silva" }),
+      run(person(), { last_name: "Lopes", display_name: "Sr. Rui" }),
+    ]).toEqual(["Rui Costa", "Sr. Rui", "Rui", "Rui Silva", "NOVA LDA", "EVOLAR LDA", "Mudar Lda", "Rui Silva", "Sr. Rui"]);
+  });
+
   it("empresa sem company_name que recebe uma (preenchimento): NAO muda", () => {
     const old = company({ display_name: "EVOLAR LDA", company_name: null });
     expect(displayNameOnUpdate(old, { ...old, company_name: "OUTRA LDA" })).toBe("EVOLAR LDA");

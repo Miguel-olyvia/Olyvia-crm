@@ -2,14 +2,14 @@
 /**
  * @vitest-environment node
  */
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// Rede contra regressoes de FORMA da migration do nome unico da ficha. Nao e
-// prova de comportamento: a base local esta proibida e a migration esta por
-// aplicar. O comportamento esta espelhado em src/lib/__tests__/entityNameSync.test.ts;
-// a prova real sao as provas na nike.
+// Rede contra regressoes de FORMA da PARTE 1 do nome unico da ficha (coluna,
+// funcoes e RPC; sem gatilhos). Nao e prova de comportamento: a base local esta
+// proibida e a migration esta por aplicar. O comportamento esta espelhado em
+// src/lib/__tests__/entityNameSync.test.ts; a parte 2 tem o seu proprio teste.
 
 const migrations = resolve(process.cwd(), "supabase/migrations");
 const raw = readFileSync(resolve(migrations, "20261229910000_nome_unico_da_ficha.sql"), "utf8");
@@ -36,9 +36,10 @@ const bodyOf = (fn: string) => {
   return sql.slice(start, sql.indexOf(`${tag};`, open + tag.length));
 };
 
-describe("migration 20261229910000_nome_unico_da_ficha", () => {
-  it("e a unica do nome unico", () => {
-    expect(existsSync(resolve(migrations, "20261229920000_nome_unico_da_ficha_gatilhos.sql"))).toBe(false);
+describe("migration 20261229910000_nome_unico_da_ficha (parte 1)", () => {
+  it("nao cria nem altera gatilhos (sao da parte 2)", () => {
+    expect(sql).not.toMatch(/create trigger|drop trigger|returns trigger/);
+    expect(sql).not.toContain("fn_anew_entities_display_name_trigger");
   });
 
   it("coluna opcional, sem preenchimento de dados e sem LOCK TABLE", () => {
@@ -60,30 +61,6 @@ describe("migration 20261229910000_nome_unico_da_ficha", () => {
     at(sql, "select coalesce(public.fn_entity_compose_name(p_type, p_first, p_last, p_company), p_display_name);");
   });
 
-  it("gatilho antes do search_text, em first/last/empresa/tipo", () => {
-    at(sql, "before insert or update of first_name, last_name, company_name, type on public.anew_entities");
-    expect("trg_anew_entities_0_display_name" < "trg_anew_entities_search_text").toBe(true);
-  });
-
-  it("gatilho: INSERT so preenche vazio; UPDATE respeita o explicito e so recompoe em sincronia (estrita)", () => {
-    const body = bodyOf("fn_anew_entities_display_name_trigger");
-    const explicit = at(body, "if new.display_name is distinct from old.display_name then return new;");
-    const inSync = at(body, "v_old_comp := public.fn_entity_compose_name(old.type, old.first_name, old.last_name, old.company_name);");
-    const guard = at(body, "if v_old_comp is null or v_old_comp <> v_old_norm then return new;");
-    expect(explicit).toBeLessThan(inSync);
-    expect(inSync).toBeLessThan(guard);
-  });
-
-  it("gatilho: mudar o tipo nao recompoe e preencher o que faltava nao renomeia", () => {
-    const body = bodyOf("fn_anew_entities_display_name_trigger");
-    const type = at(body, "if new.type is distinct from old.type then return new;");
-    const fill = at(body, "if old.type = 'person' then if btrim(regexp_replace(coalesce(old.first_name, ''), '[\\s\\u00a0]+', ' ', 'g'), ' ') = '' or btrim(regexp_replace(coalesce(old.last_name, ''), '[\\s\\u00a0]+', ' ', 'g'), ' ') = ''");
-    at(body, "elsif old.type = 'organization' then if btrim(regexp_replace(coalesce(old.company_name, ''), '[\\s\\u00a0]+', ' ', 'g'), ' ') = ''");
-    const inSync = at(body, "v_old_comp := public.fn_entity_compose_name(");
-    expect(type).toBeLessThan(fill);
-    expect(fill).toBeLessThan(inSync);
-  });
-
   it("partilhada: so recusa utilizadores INTERNOS; o cliente com acesso ao portal (client_portal_users da mesma ficha) nao conta", () => {
     const body = bodyOf("fn_entity_shared_outside_root");
     at(body, "where u.entity_id = p_entity_id and not exists (select 1 from public.client_portal_users cpu where cpu.auth_user_id = u.auth_user_id and cpu.entity_id = p_entity_id))");
@@ -97,10 +74,9 @@ describe("migration 20261229910000_nome_unico_da_ficha", () => {
     at(body, "v_first := coalesce(v_first, v_before.first_name); v_last := coalesce(v_last, v_before.last_name);");
   });
 
-  it("os gatilhos do search_text escutam tambem company_name e type, com as mesmas funcoes", () => {
-    at(sql, "before insert or update of display_name, first_name, last_name, company_name, type on public.anew_entities for each row execute function public.anew_entities_search_text_trigger();");
-    at(sql, "after update of display_name, first_name, last_name, company_name, type on public.anew_entities for each row execute function public.anew_entities_sync_leads_search_text_trigger();");
-    at(sql, "after update of display_name, first_name, last_name, company_name, type on public.anew_entities for each row execute function public.anew_entities_sync_clients_search_text_trigger();");
+  it("RPC: a recusa de permissao fala do tipo, nao de contactos", () => {
+    const body = bodyOf("rpc_set_entity_kind");
+    at(body, "begin perform public.fn_assert_can_edit_entity_contacts(p_entity_id); exception when insufficient_privilege then if sqlerrm like '%contactos%' then raise exception 'sem permissão para mudar o tipo ou o nome desta ficha' using errcode = 'insufficient_privilege'; end if; raise; end;");
   });
 
   it("RPC nova: assinatura, validacoes, permissoes como rpc_set_entity_primary_email, nome explicito", () => {
@@ -123,10 +99,14 @@ describe("migration 20261229910000_nome_unico_da_ficha", () => {
       "fn_entity_compose_name(text, text, text, text)",
       "fn_entity_display_name(text, text, text, text, text)",
       "fn_entity_shared_outside_root(uuid)",
-      "fn_anew_entities_display_name_trigger()",
     ]) {
       at(sql, `revoke all on function public.${fn} from public, anon, authenticated`);
     }
+  });
+
+  it("conferir: confere as quatro funcoes e que o gatilho da parte 2 ainda nao existe", () => {
+    at(sql, "'fn_entity_compose_name/4/false,fn_entity_display_name/5/false,fn_entity_shared_outside_root/1/false,rpc_set_entity_kind/5/true'");
+    at(sql, "t.tgname::text = 'trg_anew_entities_0_display_name'");
   });
 
   it("nao recria nenhuma RPC existente", () => {

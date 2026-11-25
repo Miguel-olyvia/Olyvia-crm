@@ -1,46 +1,27 @@
 -- =============================================================================
--- Nome unico da ficha (anew_entities.display_name), base PRINCIPAL.
+-- Nome unico da ficha, PARTE 1 de 2 (base PRINCIPAL): coluna, funcoes e RPC.
 --
 -- Regra do dono: ao editar uma lead ou um cliente escolhe-se se a ficha e
 -- PESSOA ou EMPRESA. Empresa -> o nome da ficha e o nome da empresa; Pessoa ->
 -- nome + apelido. O nome e um so (display_name) e editar troca-o em todo o lado.
 --
+-- Esta parte NAO cria nem altera gatilhos: so acrescenta coisas que nada chama
+-- sozinho, e e inofensiva aplicada sem a parte 2. O ecra (src/lib/entityKind.ts)
+-- funciona so com ela: chama rpc_set_entity_kind, que escreve tipo e nome
+-- EXPLICITAMENTE; o display_name muda e os gatilhos do search_text que ja
+-- existem (escutam display_name) acompanham. Os gatilhos ficam na parte 2
+-- (20261229920000_nome_unico_da_ficha_gatilhos).
+--
 -- O que faz:
 --   1. coluna anew_entities.company_name (opcional, sem default, SEM
 --      preenchimento: as fichas existentes ficam com NULL e nenhum nome muda);
---   2. funcoes puras:
+--   2. funcoes (revogadas a anon e authenticated):
 --        fn_entity_compose_name(tipo, nome, apelido, empresa): a composicao
---          ESTRITA (NULL se nao ha com que compor) -- e com ela que se decide
---          se uma ficha esta «em sincronia»;
+--          ESTRITA (NULL se nao ha com que compor);
 --        fn_entity_display_name(tipo, nome, apelido, empresa, nome_actual):
---          a regra com recurso ao nome actual (organization -> empresa;
---          person -> nome + apelido; senao o nome actual);
---   3. gatilho BEFORE trg_anew_entities_0_display_name (o «0» corre antes de
---      trg_anew_entities_search_text, por ordem alfabetica):
---        INSERT: so preenche o display_name quando vem vazio;
---        UPDATE (OF first_name, last_name, company_name, type): recompoe SO se
---          (a) o UPDATE nao mudou o proprio display_name, E
---          (b) o tipo NAO mudou (mudar de tipo e so pela RPC, que escreve o
---              nome explicitamente), E
---          (c) MUDOU O VALOR de um campo que ja tinha valor: Pessoa -> o nome
---              E o apelido antigos estavam ambos preenchidos e um deles mudou;
---              Empresa -> a empresa antiga estava preenchida e mudou.
---              PREENCHER o que faltava (ficha «Rui» que recebe o apelido
---              «Silva» de uma lead nova ou do update-lead) NAO renomeia:
---              nenhum nome muda sem o utilizador o editar, E
---          (d) a ficha estava em sincronia: o display_name antigo, normalizado,
---              era a composicao ESTRITA antiga, E
---          (e) a composicao nova e diferente e nao vazia.
---        Fichas fora de sincronia (empresa gravada como pessoa, importadas,
---        editadas a mao) nunca se tocam. Um display_name explicito e respeitado.
---   4. os tres gatilhos que mantem o search_text (da ficha, das leads e dos
---      clientes) passam a escutar tambem company_name e type: um UPDATE so da
---      empresa ou do tipo pode agora mudar o nome, e o search_text tem de o
---      acompanhar. Mesmas funcoes (20261113150000, 20261111130000,
---      20261113100000, as versoes mais recentes); so a lista de colunas muda.
---      O search_text continua a ser feito so de display_name/first/last (as
---      funcoes nao leem company_name): nada se alarga.
---   5. RPC NOVA rpc_set_entity_kind: escolher Pessoa/Empresa no ecra.
+--          a composicao ou, sem ela, o nome actual;
+--        fn_entity_shared_outside_root(ficha): as fichas que a RPC recusa;
+--   3. RPC NOVA rpc_set_entity_kind: escolher Pessoa/Empresa no ecra.
 --      Nenhuma RPC existente e alterada.
 --      DIFERENCA para neg_guardar_identidade_pessoa (base de RH, fluxo do
 --      negocio): essa, ao passar a ficha a organizacao, deixa first_name e
@@ -51,10 +32,9 @@
 --      nome e apelido ate 100, sem caracteres de controlo.
 --
 -- SUPOSICAO (so migrations lidas, nao o catalogo do remoto): a coluna, as
--- funcoes, o gatilho e a RPC nao existem la; os tres gatilhos do search_text
--- estao como nas migrations citadas; o db push corre o ficheiro numa
--- transaccao (o SET LOCAL depende disso).
--- Reversao: fora da pasta das migrations.
+-- funcoes e a RPC nao existem la; o db push corre o ficheiro numa transaccao
+-- (o SET LOCAL depende disso).
+-- Reversao: fora da pasta das migrations (reverter a parte 2 primeiro).
 -- =============================================================================
 
 SET LOCAL lock_timeout = '3s';
@@ -169,100 +149,7 @@ COMMENT ON FUNCTION public.fn_entity_shared_outside_root(uuid) IS
 REVOKE ALL ON FUNCTION public.fn_entity_shared_outside_root(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.fn_entity_shared_outside_root(uuid) TO service_role;
 
--- 3. Gatilho da ficha ---------------------------------------------------------------------
--- SECURITY DEFINER so para chamar as funcoes puras (revogadas a anon e
--- authenticated); nao le nem escreve nenhuma tabela, so mexe no NEW.
-CREATE FUNCTION public.fn_anew_entities_display_name_trigger()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = ''
-AS $$
-DECLARE
-  v_old_norm text;
-  v_old_comp text;
-  v_new_comp text;
-BEGIN
-  IF TG_OP = 'INSERT' THEN
-    IF btrim(regexp_replace(coalesce(NEW.display_name, ''), '[\s\u00a0]+', ' ', 'g'), ' ') = '' THEN
-      NEW.display_name := public.fn_entity_display_name(
-        NEW.type, NEW.first_name, NEW.last_name, NEW.company_name, NEW.display_name);
-    END IF;
-    RETURN NEW;
-  END IF;
-
-  -- (a) display_name explicito no UPDATE: respeitado.
-  IF NEW.display_name IS DISTINCT FROM OLD.display_name THEN
-    RETURN NEW;
-  END IF;
-
-  -- (b) mudar de tipo nao recompoe (e pela RPC, com nome explicito).
-  IF NEW.type IS DISTINCT FROM OLD.type THEN
-    RETURN NEW;
-  END IF;
-
-  -- (c) so a MUDANCA de um valor que ja existia recompoe; preencher o que
-  --     faltava nao renomeia.
-  IF OLD.type = 'person' THEN
-    IF btrim(regexp_replace(coalesce(OLD.first_name, ''), '[\s\u00a0]+', ' ', 'g'), ' ') = ''
-       OR btrim(regexp_replace(coalesce(OLD.last_name, ''), '[\s\u00a0]+', ' ', 'g'), ' ') = ''
-       OR (NEW.first_name IS NOT DISTINCT FROM OLD.first_name
-           AND NEW.last_name IS NOT DISTINCT FROM OLD.last_name) THEN
-      RETURN NEW;
-    END IF;
-  ELSIF OLD.type = 'organization' THEN
-    IF btrim(regexp_replace(coalesce(OLD.company_name, ''), '[\s\u00a0]+', ' ', 'g'), ' ') = ''
-       OR NEW.company_name IS NOT DISTINCT FROM OLD.company_name THEN
-      RETURN NEW;
-    END IF;
-  ELSE
-    RETURN NEW;
-  END IF;
-
-  -- (d) a ficha estava em sincronia (composicao estrita)?
-  v_old_norm := btrim(regexp_replace(coalesce(OLD.display_name, ''), '[\s\u00a0]+', ' ', 'g'), ' ');
-  v_old_comp := public.fn_entity_compose_name(OLD.type, OLD.first_name, OLD.last_name, OLD.company_name);
-  IF v_old_comp IS NULL OR v_old_comp <> v_old_norm THEN
-    RETURN NEW;
-  END IF;
-
-  -- (e) a composicao nova difere?
-  v_new_comp := public.fn_entity_compose_name(NEW.type, NEW.first_name, NEW.last_name, NEW.company_name);
-  IF v_new_comp IS NOT NULL AND v_new_comp <> v_old_norm THEN
-    NEW.display_name := v_new_comp;
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.fn_anew_entities_display_name_trigger() FROM PUBLIC, anon, authenticated;
-GRANT EXECUTE ON FUNCTION public.fn_anew_entities_display_name_trigger() TO service_role;
-
-CREATE TRIGGER trg_anew_entities_0_display_name
-  BEFORE INSERT OR UPDATE OF first_name, last_name, company_name, type
-  ON public.anew_entities
-  FOR EACH ROW EXECUTE FUNCTION public.fn_anew_entities_display_name_trigger();
-
--- 4. Os gatilhos do search_text escutam tambem company_name e type -------------------------
--- Mesmas funcoes; so a lista de colunas. As funcoes de sincronizacao comparam
--- display_name/first_name/last_name com o OLD, por isso um UPDATE da empresa
--- que nao mude o nome continua a nao fazer nada.
-DROP TRIGGER IF EXISTS trg_anew_entities_search_text ON public.anew_entities;
-CREATE TRIGGER trg_anew_entities_search_text
-  BEFORE INSERT OR UPDATE OF display_name, first_name, last_name, company_name, type ON public.anew_entities
-  FOR EACH ROW EXECUTE FUNCTION public.anew_entities_search_text_trigger();
-
-DROP TRIGGER IF EXISTS trg_anew_entities_sync_leads_search_text ON public.anew_entities;
-CREATE TRIGGER trg_anew_entities_sync_leads_search_text
-  AFTER UPDATE OF display_name, first_name, last_name, company_name, type ON public.anew_entities
-  FOR EACH ROW EXECUTE FUNCTION public.anew_entities_sync_leads_search_text_trigger();
-
-DROP TRIGGER IF EXISTS trg_anew_entities_sync_clients_search_text ON public.anew_entities;
-CREATE TRIGGER trg_anew_entities_sync_clients_search_text
-  AFTER UPDATE OF display_name, first_name, last_name, company_name, type ON public.anew_entities
-  FOR EACH ROW EXECUTE FUNCTION public.anew_entities_sync_clients_search_text_trigger();
-
--- 5. RPC: escolher Pessoa ou Empresa ----------------------------------------------------------
+-- 3. RPC: escolher Pessoa ou Empresa ----------------------------------------------------------
 -- Permissoes e isolamento: os de rpc_set_entity_primary_email (20261229500000),
 -- via fn_assert_can_edit_entity_contacts -- quem pode editar a lead/cliente
 -- desta ficha (leads.edit / clients.edit, no ambito) e a ficha no ambito do
@@ -274,7 +161,10 @@ CREATE TRIGGER trg_anew_entities_sync_clients_search_text
 -- contacto e ha ecras que os leem), ou passam aos do pedido se vierem
 -- preenchidos. Pessoa: nome/apelido do pedido (obrigatorio pelo menos um);
 -- company_name fica (permite voltar a Empresa), ou passa a do pedido.
--- display_name e escrito EXPLICITAMENTE (o gatilho respeita-o).
+-- display_name e escrito EXPLICITAMENTE (o gatilho da parte 2 respeita-o, e
+-- sem a parte 2 nada mais o toca).
+-- A recusa de permissao de fn_assert_can_edit_entity_contacts fala de
+-- «contactos»; aqui troca-se por um texto proprio do tipo.
 CREATE FUNCTION public.rpc_set_entity_kind(
   p_entity_id uuid,
   p_type text,
@@ -317,7 +207,15 @@ BEGIN
     RAISE EXCEPTION 'Nome obrigatório' USING ERRCODE = 'invalid_parameter_value';
   END IF;
 
-  PERFORM public.fn_assert_can_edit_entity_contacts(p_entity_id);
+  BEGIN
+    PERFORM public.fn_assert_can_edit_entity_contacts(p_entity_id);
+  EXCEPTION WHEN insufficient_privilege THEN
+    IF SQLERRM LIKE '%contactos%' THEN
+      RAISE EXCEPTION 'Sem permissão para mudar o tipo ou o nome desta ficha'
+        USING ERRCODE = 'insufficient_privilege';
+    END IF;
+    RAISE;
+  END;
 
   v_actor := public.current_business_user_id();
   IF v_actor IS NULL THEN
@@ -411,7 +309,7 @@ COMMENT ON FUNCTION public.rpc_set_entity_kind(uuid, text, text, text, text) IS
 REVOKE ALL ON FUNCTION public.rpc_set_entity_kind(uuid, text, text, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.rpc_set_entity_kind(uuid, text, text, text, text) TO authenticated;
 
--- 6. Conferir ---------------------------------------------------------------------------------
+-- 4. Conferir ---------------------------------------------------------------------------------
 DO $$
 DECLARE
   v_txt text;
@@ -424,17 +322,11 @@ BEGIN
     RAISE EXCEPTION 'CONFERIR: anew_entities.company_name em falta, obrigatoria ou com default';
   END IF;
 
-  -- O gatilho do nome corre antes do do search_text (BEFORE, ordem alfabetica)
-  SELECT string_agg(t.tgname::text, ',' ORDER BY t.tgname::text COLLATE "C") INTO v_txt
-    FROM pg_trigger t
-    JOIN pg_class c ON c.oid = t.tgrelid
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-   WHERE n.nspname::text = 'public' AND c.relname::text = 'anew_entities'
-     AND NOT t.tgisinternal
-     AND t.tgname::text IN ('trg_anew_entities_0_display_name', 'trg_anew_entities_search_text',
-                            'trg_anew_entities_sync_leads_search_text', 'trg_anew_entities_sync_clients_search_text');
-  IF v_txt IS DISTINCT FROM 'trg_anew_entities_0_display_name,trg_anew_entities_search_text,trg_anew_entities_sync_clients_search_text,trg_anew_entities_sync_leads_search_text' THEN
-    RAISE EXCEPTION 'CONFERIR: gatilhos da ficha em falta ou fora de ordem: %', coalesce(v_txt, '(nenhum)');
+  -- Esta parte nao cria gatilhos
+  IF EXISTS (SELECT 1 FROM pg_trigger t JOIN pg_class c ON c.oid = t.tgrelid
+              WHERE c.relname::text = 'anew_entities'
+                AND t.tgname::text = 'trg_anew_entities_0_display_name') THEN
+    RAISE EXCEPTION 'CONFERIR: o gatilho do nome e da parte 2 e ja existe';
   END IF;
 
   -- Uma so versao de cada funcao nova, com search_path fixo
@@ -443,10 +335,10 @@ BEGIN
     FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
    WHERE n.nspname::text = 'public'
      AND p.proname::text IN ('fn_entity_compose_name', 'fn_entity_display_name', 'fn_entity_shared_outside_root',
-                             'fn_anew_entities_display_name_trigger', 'rpc_set_entity_kind')
+                             'rpc_set_entity_kind')
      AND p.proconfig IS NOT NULL
      AND EXISTS (SELECT 1 FROM unnest(p.proconfig) AS cfg WHERE cfg LIKE 'search\_path=%');
-  IF v_txt IS DISTINCT FROM 'fn_anew_entities_display_name_trigger/0/true,fn_entity_compose_name/4/false,fn_entity_display_name/5/false,fn_entity_shared_outside_root/1/false,rpc_set_entity_kind/5/true' THEN
+  IF v_txt IS DISTINCT FROM 'fn_entity_compose_name/4/false,fn_entity_display_name/5/false,fn_entity_shared_outside_root/1/false,rpc_set_entity_kind/5/true' THEN
     RAISE EXCEPTION 'CONFERIR: funcoes em falta, duplicadas ou sem search_path: %', coalesce(v_txt, '(nenhuma)');
   END IF;
 
