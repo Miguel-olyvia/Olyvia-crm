@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
 }));
 vi.mock("@/emylia/gravador", () => ({
   useGravacao: () => m.g, usePainelAberto: () => false, iniciarGravacao: m.iniciar, pausarGravacao: m.pausar, useNivelMicrofone: () => m.g.nivel ?? 0,
+  useTerminarPedido: () => null, pedirTerminarGravacao: vi.fn(), descartarGravacao: vi.fn(),
 }));
 vi.mock("@/emylia/urlNegocio", () => ({ irPara: vi.fn() }));
 

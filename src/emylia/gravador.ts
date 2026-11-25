@@ -567,6 +567,8 @@ export async function iniciarGravacao(a: Abrir, continuar = false): Promise<void
     throw new Error(`Já está a gravar outro negócio (${g.nome}). Termine essa gravação primeiro.`);
   }
   const mesma = continuar && g.negocio === a.negocio;
+  // 25/11: voltou a gravar: um «Terminar» pedido antes já não vale (senão o negócio terminava esta gravação nova)
+  if (terminarPedido !== null) { terminarPedido = null; quemOuvePedido.forEach((f) => f()); }
   pedaco = []; cortadoEm = null;
   // 20/11 (auditoria): ao continuar a mesma gravação, as falas que esperavam por «Tentar outra vez» ficam e vão já (antes perdiam-se sem aviso)
   if (!mesma) { porRepetir = []; blocosPorRepetir = []; revistos = []; falasVad = []; }
@@ -733,8 +735,21 @@ export function descartarGravacao() {
   pararBatimento(); pararVigia();
   if (donoAtual === ID_SEPARADOR) { try { localStorage.removeItem(CHAVE_BATIMENTO); } catch { /* */ } }
   g = { ...VAZIA }; donoAtual = null; guardadoDono = null; guardadoEstado = "parado";
+  terminarPedido = null; quemOuvePedido.forEach((f) => f());
   try { localStorage.removeItem(CHAVE); } catch { /* */ }
   quemOuve.forEach((f) => f());
+}
+
+/** 25/11 (Rúben: «isto está bloqueado e não para»): uma gravação parada só acabava no painel do negócio; quando ele não abria, o
+ *  indicador ficava para sempre. O «Terminar» do indicador pede ao negócio (useFecharGravacao) que guarde as falas e a apague. */
+let terminarPedido: number | null = null;
+const quemOuvePedido = new Set<() => void>();
+export function pedirTerminarGravacao(negocio: number | null) {
+  terminarPedido = negocio; quemOuvePedido.forEach((f) => f());
+}
+export const terminarPedidoPara = () => terminarPedido;
+export function useTerminarPedido(): number | null {
+  return useSyncExternalStore((f) => { quemOuvePedido.add(f); return () => { quemOuvePedido.delete(f); }; }, () => terminarPedido, () => null);
 }
 
 /** Quantos painéis da gravação estão à vista (o indicador só aparece quando nenhum está). */
