@@ -18,7 +18,7 @@ export const ROTULOS_CATEGORIA: Record<string, string> = {
   operations: "Operação", catalog_items: "Itens de Catálogo", service_catalog: "Catálogo de Serviços",
   pessoas: "Pessoas", negocios: "Etapas do Negócio", fleet: "Frota", security: "Auditoria de Exportações",
   api_keys: "API Keys", technical_settings: "Configurações Técnicas", trash: "Lixo", portal: "Portal de Clientes",
-  platform: "Plataforma",
+  platform: "Plataforma", assets: "Ativos",
 };
 
 interface DefinicaoGrupo {
@@ -55,6 +55,8 @@ export const GRUPOS_MENU: DefinicaoGrupo[] = [
       { rotulo: "Serviços", categorias: ["services", "service_catalog", "service_categories", "service_subcategories", "service_fees"] },
     ],
   },
+  // Ativos (/ativos): ativos.view e ativos.edit, na categoria assets (as assets.* antigas estão escondidas e não chegam ao editor).
+  { rotulo: "Ativos", categorias: ["assets"] },
   { rotulo: "Organizações", categorias: ["organizations", "org_chart", "flow_builder"] },
   // /pessoas e /negocios: um subgrupo por fase do negócio, pela ordem das 6 fases do ecrã (Por contactar, Contacto, Visita, Negócio,
   // Financeiro, Obra), pelas categorias virtuais de categoriaNegocio() (pessoas.*, negocios.*, e quotes.view_costs / client_contracts.cancel,

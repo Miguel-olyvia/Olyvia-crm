@@ -71,6 +71,7 @@ const CatalogoRota = lazy(() => import("./pages/CatalogoRota"));
 const CatalogoGestao = lazy(() => import("./pages/CatalogoGestao"));
 const CatalogoFamilias = lazy(() => import("./pages/CatalogoFamilias"));
 const CatalogoProdutos = lazy(() => import("./pages/CatalogoProdutos"));
+const Ativos = lazy(() => import("./pages/ativos/Ativos"));
 const NegociosEmylia = lazy(() => import("./pages/NegociosEmylia"));
 
 const TeamHub = lazy(() => import("./pages/TeamHub"));
@@ -419,6 +420,8 @@ const App = () => (
                       <Route path="/catalogo/servicos/tecnicos" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="tecnicos" /></ProtectedRoute>} />
                       <Route path="/catalogo/servicos/:sid" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="servicos" /></ProtectedRoute>} />
                       <Route path="/catalogo/servicos/ligacoes" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="ligacoes" /></ProtectedRoute>} />
+                      {/* Ativos (fase 1: o registo): ativos.view, permissão própria dos super admins (a família antiga assets.* fica escondida). */}
+                      <Route path="/ativos" element={<ProtectedRoute permission="ativos.view"><Ativos /></ProtectedRoute>} />
                       {/* o endereço da primeira versão (as Ligações eram uma página própria) */}
                       <Route path="/catalogo/ligacoes" element={<Navigate to="/catalogo/servicos/ligacoes" replace />} />
                       <Route path="/service-categories" element={<Navigate to="/catalogo-custos" replace />} />

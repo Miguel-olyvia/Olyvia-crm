@@ -48,6 +48,7 @@ import { versoesTemplatesTranslations } from "@/translations/versoesTemplates";
 import { proposalTemplateVersionsTranslations } from "@/translations/proposalTemplateVersions";
 import { proposalTemplateVariaveisTranslations } from "@/translations/proposalTemplateVariaveis";
 import { catalogoFamiliasTranslations } from "@/translations/catalogoFamilias";
+import { ativosTranslations } from "@/translations/ativos";
 
 // Merge bundle and priceContexts translations
 export const tabelaFundida: Record<string, Record<string, string>> = { ...translations } as any;
@@ -259,4 +260,9 @@ Object.keys(proposalTemplateVariaveisTranslations).forEach((lang) => {
 // Catálogo › Produtos › Famílias gravadas na base (`catFamilias.*`) — módulo próprio, mesmo padrão.
 Object.keys(catalogoFamiliasTranslations).forEach((lang) => {
   tabelaFundida[lang] = { ...tabelaFundida[lang], ...catalogoFamiliasTranslations[lang as keyof typeof catalogoFamiliasTranslations] };
+});
+
+// Ativos (/ativos, fase 1: o registo) — módulo próprio, mesmo padrão (só pt e en; as outras línguas caem para en).
+Object.keys(ativosTranslations).forEach((lang) => {
+  tabelaFundida[lang] = { ...tabelaFundida[lang], ...ativosTranslations[lang as keyof typeof ativosTranslations] };
 });

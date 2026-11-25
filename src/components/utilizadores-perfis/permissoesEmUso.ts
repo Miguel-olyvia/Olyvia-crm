@@ -68,6 +68,12 @@ export const PERMISSOES_EM_USO: Readonly<Record<string, readonly string[]>> = {
   api_keys: [
     "api_keys.view",
   ],
+  // Ativos (fase 1, /ativos): ativos.view abre o ecrã e lê o registo; ativos.edit cria, altera, desativa e liga a pessoas. Códigos NOVOS,
+  // na categoria assets mas sem relação com a família antiga assets.* (que continua escondida, ver PERMISSOES_ESCONDIDAS.assets, e está
+  // dada a papéis normais do Grupo BMLar): só os papéis globais super_admin e system_admin as recebem, na migration do registo.
+  assets: [
+    "ativos.edit", "ativos.view",
+  ],
   // 06/11: client_contracts.export volta (o botão Exportar de /client-contracts, que a ficha do /pessoas abre).
   client_contracts: [
     "client_contracts.cancel", "client_contracts.create", "client_contracts.delete", "client_contracts.edit", "client_contracts.export",

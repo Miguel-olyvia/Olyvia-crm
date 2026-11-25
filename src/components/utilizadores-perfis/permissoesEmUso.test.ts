@@ -116,7 +116,7 @@ describe("permissões em uso: a lista", () => {
   it("os grupos seguem a ordem do menu, com Negócios e Frota", () => {
     const rotulos = agruparPorMenu(emUso).map((g) => g.rotulo);
     expect(rotulos).toEqual([
-      "Dashboard", "Agendamentos", "Catálogo e custos", "Organizações", "Negócios", "Documentos do negócio", "Marketing",
+      "Dashboard", "Agendamentos", "Catálogo e custos", "Ativos", "Organizações", "Negócios", "Documentos do negócio", "Marketing",
       "Inventário", "Frota", "Recursos Humanos", "Utilizadores", "Definições", "Plataforma",
     ]);
     const negocios = agruparPorMenu(emUso).find((g) => g.rotulo === "Negócios");

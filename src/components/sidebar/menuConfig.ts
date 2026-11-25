@@ -48,6 +48,7 @@ import {
   History as HistoryIcon,
   Eye,
   HardHat,
+  Boxes,
 } from "lucide-react";
 import type { InventoryCounterKey } from "@/hooks/useInventoryToday";
 import { BASE_NOVO, INVENTARIO_NOVO_ATIVO } from "@/pages/inventario-novo/separadores";
@@ -230,6 +231,20 @@ export const menuSections: MenuSection[] = [
     items: [
       { to: "/catalogo/produtos", icon: Package, labelKey: "sidebar.catalogoProdutos", permission: "services.view" },
       { to: "/catalogo/servicos", icon: Wrench, labelKey: "sidebar.catalogoServicos", permission: "services.view" },
+    ],
+  },
+  {
+    // Ativos (fase 1: o registo do que a empresa comprou). Permissão própria, ativos.view (só dos super admins, até darem a outros
+    // papéis): quem não a tem não vê o ícone, e sem o registo na base (migration por aplicar) nenhum papel a tem, por isso não aparece.
+    // Uma só página com separadores lá dentro: o ícone abre-a direto, sem painel.
+    id: "ativos",
+    icon: Boxes,
+    labelKey: "sidebar.ativos",
+    paths: ["/ativos"],
+    permissions: ["ativos.view"],
+    abreDireto: "/ativos",
+    items: [
+      { to: "/ativos", icon: Boxes, labelKey: "sidebar.ativos", permission: "ativos.view" },
     ],
   },
   {

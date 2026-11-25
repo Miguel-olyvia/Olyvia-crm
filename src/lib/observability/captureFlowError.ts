@@ -252,7 +252,10 @@ export type BusinessFlow =
   | "hr-hora-extra-decidir"
   | "hr-hora-extra-registar"
   // Funções neg_* da página Pessoas: só os erros inesperados (os códigos NG são esperados).
-  | "pessoas-neg";
+  | "pessoas-neg"
+  // O registo de ativos (/ativos): ler a lista e as opções, e escrever (criar, alterar, desativar, ligar a uma pessoa).
+  | "ativos-listar"
+  | "ativos-escrever";
 
 /**
  * A Supabase/PostgREST error: a plain object carrying a `message` (and usually
