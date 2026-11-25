@@ -227,6 +227,8 @@ const diasDe = (h: number) => Math.max(1, Math.ceil(h / 8 - 1e-9));
  */
 export function ajustePorFazer(t: Tarefa, S?: Estado | null, p?: Plano | null, hOrc?: number): { h: number; dur: number } | null {
   if (t.exec || t.corrige != null) return null;
+  // as horas do orçamento (a base do plano), quando a base está alinhada com as tarefas: o motor e os contadores contam igual
+  if (hOrc == null && p?.base && p.base.length === p.tasks.length) hOrc = p.base[p.tasks.indexOf(t)]?.h;
   const soma = horasDasMicro(t, S, p), espera = esperaDasMicro(t, S, p);
   if (soma == null && !espera) return null;
   let h = t.h;
