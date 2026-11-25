@@ -190,7 +190,9 @@ describe("20270126410000 — configuração 3D", () => {
   });
 
   it("fn_cat_config_3d_forma: sem EXECUTE a authenticated (só service_role; a escrita corre como dono) e o conferir exige-o", () => {
-    const revoke = sql.indexOf("REVOKE ALL ON FUNCTION public.fn_cat_config_3d_forma(jsonb,jsonb) FROM PUBLIC, anon;");
+    // o default ACL da base dá EXECUTE a authenticated: tem de ir no REVOKE (não basta não o dar)
+    const revoke = sql.indexOf("REVOKE ALL ON FUNCTION public.fn_cat_config_3d_forma(jsonb,jsonb) FROM PUBLIC, anon, authenticated;");
+    expect(revoke).toBeGreaterThan(-1);
     const grant = sql.indexOf("GRANT EXECUTE ON FUNCTION public.fn_cat_config_3d_forma(jsonb,jsonb) TO service_role;");
     expect(revoke).toBeGreaterThan(sql.indexOf("CREATE OR REPLACE FUNCTION public.fn_cat_config_3d_forma("));
     expect(grant).toBeGreaterThan(revoke);
@@ -204,7 +206,7 @@ describe("20270126410000 — configuração 3D", () => {
   it.each([
     ["cat_definir_config_3d", "uuid,text,uuid,jsonb,jsonb"],
     ["cat_ler_config_3d", "uuid,text,uuid"],
-  ])("%s: REVOKE de PUBLIC/anon depois do CREATE e antes do GRANT", (f, args) => {
+  ])("%s: REVOKE de PUBLIC/anon (o default ACL dá EXECUTE a anon) depois do CREATE e antes do GRANT", (f, args) => {
     const revoke = sql.indexOf(`REVOKE ALL ON FUNCTION public.${f}(${args}) FROM PUBLIC, anon;`);
     const grant = sql.indexOf(`GRANT EXECUTE ON FUNCTION public.${f}(${args}) TO authenticated, service_role;`);
     expect(revoke).toBeGreaterThan(sql.indexOf(`CREATE OR REPLACE FUNCTION public.${f}(`));

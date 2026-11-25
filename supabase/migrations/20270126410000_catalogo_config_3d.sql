@@ -128,9 +128,11 @@ AS $function$
     END
 $function$;
 
-REVOKE ALL ON FUNCTION public.fn_cat_config_3d_forma(jsonb,jsonb) FROM PUBLIC, anon;
 -- sem EXECUTE a authenticated: ninguém com essa role escreve na tabela directamente (não tem INSERT/UPDATE), e o
--- CHECK corre dentro de cat_definir_config_3d, que é SECURITY DEFINER e por isso chama-a como dono
+-- CHECK corre dentro de cat_definir_config_3d, que é SECURITY DEFINER e por isso chama-a como dono.
+-- authenticated vai no REVOKE porque o default ACL desta base (funções criadas por postgres em public) dá EXECUTE
+-- a anon, authenticated e service_role: tirar só o GRANT não chega.
+REVOKE ALL ON FUNCTION public.fn_cat_config_3d_forma(jsonb,jsonb) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.fn_cat_config_3d_forma(jsonb,jsonb) TO service_role;
 COMMENT ON FUNCTION public.fn_cat_config_3d_forma(jsonb,jsonb) IS
   'Forma do JSON da configuração 3D (eixos e ligações). Pura; usada no CHECK de cat_config_3d e em cat_definir_config_3d.';
