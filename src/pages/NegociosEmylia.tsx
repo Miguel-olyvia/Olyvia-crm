@@ -45,7 +45,7 @@ import { definirGuardarCliente } from "@/emylia/EditarCliente";
 import { linkEntityEmail, linkEntityPhone } from "@/utils/entityContactSync";
 import { gravarMoradaPrincipal } from "@/emylia/real/gravarMoradaDaEntidade";
 import { definirMoradaDaEntidade } from "@/emylia/MoradaDeQuemPede";
-import { definirEncomendasReais, lerEncomendasReais } from "@/emylia/real/encomendaReal";
+import { definirEncomendasReais, leituraEncomendasFalhou, lerEncomendasReais, marcarEncomendasALer } from "@/emylia/real/encomendaReal";
 import { refNegocio } from "@/emylia/inventario/ponteNegocios";
 import { lerFaturaErp } from "@/emylia/erpEticadata";
 import { AVISO_FORA_DO_AMBITO, avisoDaFase, codigosDaFase, definirVerCustos, faltaDaFase, podeNeg } from "@/emylia/permissoes";
@@ -723,12 +723,14 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
       if (op && S.deals.some((x) => x.id === op && x.obra.plano)) { S.view = "operacoes"; S.op = op; S.deal = null; }
       const np = negocioPedido.current;
       if (np && S.deals.some((x) => x.id === np)) { S.view = "negocio"; S.deal = np; S.op = null; }
+      // 25/11: os ecrãs abrem já; até as encomendas chegarem dizem «A ler a encomenda...» (não «sem materiais»)
+      marcarEncomendasALer();
       setPronto(true);
       // 9/11: o Estúdio (no mesmo separador) lê daqui o Catálogo, os técnicos e as obras marcadas, para o plano da obra da visita
       definirEstadoVivo(S, org);
       preencherDaFicha();
       // 2/11: a vista do cliente grava-se depois de as encomendas carregarem (leva o estado dos materiais) e só depois os avisos
-      void carregarEncomendas(lidos).catch(() => undefined).then(() => publicarVistasCliente()).then(avisarClientes);
+      void carregarEncomendas(lidos).catch(() => { leituraEncomendasFalhou(); }).then(() => publicarVistasCliente()).then(avisarClientes);
       if (recebidas) avisar({ msg: "Obra recebida pelo cliente", sub: `${recebidas} ${recebidas === 1 ? "auto de receção foi assinado" : "autos de receção foram assinados"} no portal.`, kind: "ok" });
       if (atribuidas) avisar({ msg: "Técnicos atribuídos", sub: `${atribuidas} ${atribuidas === 1 ? "tarefa ficou" : "tarefas ficaram"} com um técnico do RH.`, kind: "ok" });
       if (atribuidas || recebidas || respostasAplicadas.current.length) void gravar();

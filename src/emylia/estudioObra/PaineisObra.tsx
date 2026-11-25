@@ -18,6 +18,7 @@ import { COR_FASE, FASES_OBRA } from "../fasesObra";
 import { dataCurta } from "../planoObra";
 import { blocosForaDaObra, motivoOcupado, obrasDosTecnicos, ocupacaoDosTecnicos, tecnicosDoOficio } from "../preparacaoObra";
 import { materiaisPorFase, seguranca } from "../obraOps";
+import { materiaisALer } from "../real/encomendaReal";
 import { enviosDe, TEMPOS_CORRECAO } from "../trabalhoObra";
 import { pontosEncerrar } from "../encerrarObra";
 import { emCurso } from "../adendas";
@@ -368,7 +369,7 @@ export function MateriaisDaObra({ ctx, d, dias = [] }: { ctx: Ctx; d: Negocio; d
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
             <p className="text-sm font-semibold">O que chegou e o que falta</p>
-            <p className="text-sm text-muted-foreground">{todos.length ? `${ok} de ${todos.length} garantidos` : "Sem materiais na encomenda desta obra."}</p>
+            <p className="text-sm text-muted-foreground">{todos.length ? `${ok} de ${todos.length} garantidos` : materiaisALer(0) ? "A ler a encomenda desta obra..." : "Sem materiais na encomenda desta obra."}</p>
           </div>
           {d.obra.ec && <Button type="button" variant="outline" className="min-h-10 rounded-full" onClick={() => run(() => A.abrirInv(d.id))}><ArrowUpRight className="mr-1.5 h-4 w-4" aria-hidden="true" />No Inventário</Button>}
         </div>

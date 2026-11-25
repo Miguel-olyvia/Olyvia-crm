@@ -22,6 +22,7 @@ import { LINHA_DEMOLICAO } from "../entulho";
 import { dataCurta } from "../planoObra";
 import { blocosForaDaObra, obrasDosTecnicos } from "../preparacaoObra";
 import { materiaisPorFase, progresso } from "../obraOps";
+import { materiaisALer } from "../real/encomendaReal";
 import { porEncomendarDe } from "../encomendasAjuste";
 import { imprevistosDe, pedidoDeAtraso, textoPedidoAtraso } from "../imprevistos";
 import { emCurso, valorContrato } from "../adendas";
@@ -176,7 +177,7 @@ export function pontosDoArranque(ctx: Ctx, d: Negocio, ir: Ir, dataInicio: strin
   const semTec = p.tasks.filter((t) => !t.tec).length, pessoas = new Set(p.tasks.map((t) => t.tec).filter(Boolean)).size;
   const condo = (d.f.condominio ?? "").toLowerCase() === "sim", chaves = d.f.chaves ?? "", avisado = d.f.aviso_inicio ?? "";
   return [
-    { k: "materiais", t: mats.length ? `Materiais: ${okM} de ${mats.length} garantidos` : "Materiais: sem encomenda", sub: okM === mats.length && mats.length ? "Tudo no armazém ou a caminho da obra." : "Veja o que falta e encomende.", ok: !!mats.length && okM === mats.length, acao: { rot: "Ver materiais", fn: () => ir.aba("materiais") } },
+    { k: "materiais", t: mats.length ? `Materiais: ${okM} de ${mats.length} garantidos` : materiaisALer(0) ? "Materiais: a ler a encomenda..." : "Materiais: sem encomenda", sub: okM === mats.length && mats.length ? "Tudo no armazém ou a caminho da obra." : materiaisALer(mats.length) ? "A encomenda está a chegar da base." : "Veja o que falta e encomende.", ok: !!mats.length && okM === mats.length, acao: { rot: "Ver materiais", fn: () => ir.aba("materiais") } },
     { k: "equipa", t: semTec ? `Equipa: ${semTec} ${semTec === 1 ? "tarefa sem técnico" : "tarefas sem técnico"}` : `Equipa marcada: ${pessoas} ${pessoas === 1 ? "pessoa" : "pessoas"}`, sub: semTec ? "Escolha quem faz cada tarefa." : "Todas as tarefas têm quem as faça.", ok: !semTec, acao: { rot: "Ver equipa", fn: () => ir.aba("equipa") } },
     { k: "condominio", t: condo ? "Condomínio avisado" : "Avisar o condomínio", sub: condo ? "O aviso está na entrada do prédio." : "Horário das obras e contacto do responsável, na entrada do prédio.", ok: condo, acao: condo ? undefined : { rot: "Já está avisado", fn: () => run(() => A.campo(d.id, "condominio", "Sim")) } },
     { k: "cliente", t: avisado ? `Cliente avisado da data · ${avisado}` : "Avisar o cliente da data de início", sub: avisado ? `Sabe que começa a ${dataInicio}.` : `Começa a ${dataInicio}: confirme com o cliente e marque aqui.`, ok: !!avisado, acao: avisado ? undefined : { rot: "Já está avisado", fn: () => run(() => A.campo(d.id, "aviso_inicio", agoraCurto())) } },
@@ -260,7 +261,9 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
   const [feitos, setFeitos] = useState<string[]>([]);
   const vivo = p.estado === "em curso";
   // o que vem a seguir: as entregas de material e as tarefas de amanhã
-  const entregas = materiaisPorFase(d).flatMap((g) => g.itens).filter((m) => m.estado === "a chegar" || m.estado === "encomendado" || m.estado === "por encomendar" || m.estado === "em falta").slice(0, 3);
+  // 25/11: com a encomenda de cliente da base (antes só o exemplo: dizia «todos garantidos» com 29 de 38 no arranque)
+  const matsObra = materiaisPorFase(d, d.obra.ec?.ref ? resumoEcNegocio(lerInventario(), d.obra.ec.ref) : null).flatMap((g) => g.itens);
+  const entregas = matsObra.filter((m) => m.estado === "a chegar" || m.estado === "encomendado" || m.estado === "por encomendar" || m.estado === "em falta").slice(0, 3);
   // 23/11 (revisão: «A seguir devia mostrar os próximos dias úteis»): os próximos 3 dias com trabalho a começar (antes do arranque, os do
   // arranque), cada um com quem e o quê
   const desde = antesDoArranque(p) ? (arranqueDe(p)?.dia ?? 0) : p.dia + 1;
@@ -333,7 +336,8 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
                 <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", m.quando ? "bg-primary/10 text-primary" : "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200")}>{m.quando ? `chega a ${m.quando}` : m.estado}</span>
               </li>
             ))}</ul>
-          ) : <p className="flex items-center gap-1.5 text-sm text-success"><Check className="h-4 w-4" aria-hidden="true" />Os materiais estão todos garantidos.</p>}
+          ) : materiaisALer(matsObra.length) ? <p className="text-sm text-muted-foreground">A ler a encomenda...</p>
+            : <p className="flex items-center gap-1.5 text-sm text-success"><Check className="h-4 w-4" aria-hidden="true" />Os materiais estão todos garantidos.</p>}
           {proximos.length > 0 && (
             <ol className="space-y-2.5">
               {proximos.map(({ k, L }) => (
