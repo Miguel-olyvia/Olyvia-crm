@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeftRight, Download, Lock, Search, X } from "lucide-react";
@@ -46,6 +46,9 @@ import { escapePostgrestOrTerm } from "@/lib/clientSearch";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { juntarCustosMovimentos } from "@/lib/custosStock";
 import { cn } from "@/lib/utils";
+import { InventarioEmbebido } from "@/components/inventory/ui/embebido";
+import { MovimentosAvisos, MovimentosBarra, MovimentosCartoes } from "@/components/inventory/cartoes/MovimentosCartoes";
+import type { ModoVista } from "@/components/inventory/cartoes/pecas";
 
 // Movimentos: o livro completo de stock_movements da organização ativa.
 // O livro é imutável (RLS RESTRICTIVE bloqueia UPDATE/DELETE): este ecrã é só
@@ -135,6 +138,10 @@ const StockMovements = () => {
   const [toDate, setToDate] = useState("");
   const [movementDialogOpen, setMovementDialogOpen] = useState(false);
   const [exporting, setExporting] = useState(false);
+  // Dentro do novo Inventário: cartões do artefacto (ou a tabela clássica, no alternador); fora, sempre o ecrã clássico.
+  const embebido = useContext(InventarioEmbebido);
+  const [modoEmbebido, setModoEmbebido] = useState<ModoVista>("cartoes");
+  const cartoesEmbebidos = embebido && modoEmbebido === "cartoes";
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 300);
@@ -523,7 +530,7 @@ const StockMovements = () => {
   if (!activeCompany) {
     return (
       <div className="space-y-6 p-6">
-        <InventoryPageHeader title={t("sidebar.stockMovements")} area="warehouse" />
+        {embebido ? null : <InventoryPageHeader title={t("sidebar.stockMovements")} area="warehouse" />}
         <NoOrganizationState inline />
       </div>
     );
@@ -535,6 +542,30 @@ const StockMovements = () => {
   return (
     <>
       <div className="space-y-6">
+        {embebido ? (
+          <MovimentosBarra
+            pesquisa={searchTerm}
+            aoPesquisar={setSearchTerm}
+            tipo={typeFilter}
+            aoTipo={setTypeFilter}
+            armazem={warehouseFilter}
+            aoArmazem={setWarehouseFilter}
+            armazens={warehouses}
+            documento={docFilter}
+            aoDocumento={setDocFilter}
+            de={fromDate}
+            aoDe={setFromDate}
+            ate={toDate}
+            aoAte={setToDate}
+            temFiltros={hasActiveFilters}
+            aoLimpar={clearFilters}
+            modo={modoEmbebido}
+            aoMudarModo={setModoEmbebido}
+            aoExportar={handleExport}
+            exportando={exporting}
+            aoRegistar={() => setMovementDialogOpen(true)}
+          />
+        ) : (
         <InventoryPageHeader
           area="warehouse"
           title={t("sidebar.stockMovements")}
@@ -554,7 +585,15 @@ const StockMovements = () => {
             </>
           }
         />
+        )}
 
+        {cartoesEmbebidos ? (
+          <MovimentosAvisos
+            produto={productId ? (urlProduct ? `${urlProduct.name}${urlProduct.sku ? ` (${urlProduct.sku})` : ""}` : "Produto selecionado") : null}
+            aoRemoverProduto={() => setProductId("")}
+            truncadoEm={productSearch.data?.truncated ? PRODUCT_SEARCH_LIMIT : null}
+          />
+        ) : (
         <div className="space-y-3 rounded-lg border bg-card p-4">
           <div className="flex flex-wrap items-end gap-3">
             <div className="relative w-full max-w-xs">
@@ -643,6 +682,7 @@ const StockMovements = () => {
             </span>
           </p>
         </div>
+        )}
 
         {searchFailed ? (
           <div role="alert">
@@ -663,6 +703,28 @@ const StockMovements = () => {
           >
             {hasActiveFilters ? <Button variant="outline" size="sm" onClick={clearFilters}>Limpar filtros</Button> : null}
           </InventoryEmptyState>
+        ) : cartoesEmbebidos ? (
+          <MovimentosCartoes
+            linhas={rows}
+            carregando={loading}
+            armazemDe={(m) => m.warehouses?.name ?? warehouseNameById[m.warehouse_id] ?? "—"}
+            formatQty={formatQty}
+            formatDataHora={formatDateTime}
+            documento={renderDocument}
+            formatCusto={canViewCost ? formatEur : null}
+            rodape={
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 px-1 text-sm text-muted-foreground">
+                <span role="status">
+                  A mostrar {rows.length}{total !== null ? ` de ${total}` : ""} movimento{(total ?? rows.length) === 1 ? "" : "s"}
+                </span>
+                {movements.hasNextPage ? (
+                  <Button variant="outline" size="sm" onClick={() => movements.fetchNextPage()} disabled={movements.isFetchingNextPage}>
+                    {movements.isFetchingNextPage ? "A carregar…" : "Carregar mais"}
+                  </Button>
+                ) : null}
+              </div>
+            }
+          />
         ) : (
           <div className="rounded-lg border">
             <Table>
