@@ -6,6 +6,7 @@
 // · Mais dias do que o orçamento conta = mais horas de equipa (o custo sobe; o preço ao cliente não muda), como no orçamento.
 import { HORAS_DIA } from "./ganttOrcamento";
 import type { Plano, Tarefa } from "./motor";
+import { retratoTarefas } from "./planoAntesDepois";
 
 export interface BaseTarefa { dia: number; dur: number; h: number; tec: string | null }
 
@@ -15,7 +16,11 @@ export const fimDe = (tasks: { dia: number; dur: number }[]): number => tasks.re
 /** Guarda o plano do orçamento, uma vez, antes do primeiro ajuste. */
 export function guardarBase(p: Plano): void {
   // 21/10: só uma vez; as tarefas de correção juntam-se depois, no fim (a base fica com as do orçamento)
-  if (!p.base) p.base = p.tasks.map((t) => ({ dia: t.dia, dur: t.dur, h: t.h, tec: t.tec }));
+  if (p.base) return;
+  // 25/11: os planos gerados antes do retrato (Plano.gerado) ganham-no aqui, antes da primeira mudança (o antes e depois); um plano já
+  // mexido (com base) fica com a base, que é o que se sabe do gerado (planoAntesDepois.ts: geradoDe)
+  if (!p.gerado) p.gerado = retratoTarefas(p);
+  p.base = p.tasks.map((t) => ({ dia: t.dia, dur: t.dur, h: t.h, tec: t.tec }));
 }
 
 /** O primeiro dia em que uma tarefa da fase `f` pode começar: o último dia das fases anteriores (a passagem pode ser a meio do dia). */

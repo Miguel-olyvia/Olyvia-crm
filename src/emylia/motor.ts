@@ -4478,6 +4478,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!exigePerm("obra.planear")) return false;
       const d = deal(id), p = d.obra.plano, t = p?.tasks[ti];
       if (!p || !t || p.estado === "concluída") return false;
+      guardarBase(p); // 25/11: o retrato do plano gerado, antes da primeira mudança (o antes e depois)
       if (!moverNaOrdem(p, ti, para)) return false;
       log(d, `Plano: ${t.nome} passou para o ${(t.ordem ?? 0) + 1}.º lugar da fase ${t.fase ?? 1}`);
       return true;

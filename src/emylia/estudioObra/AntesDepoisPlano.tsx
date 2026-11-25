@@ -58,7 +58,8 @@ function Registo({ r, aberto: a0 = false }: { r: RegistoPlano; aberto?: boolean 
 export function AntesDepoisPlano({ d, aoVivo = true }: { d: Negocio; aoVivo?: boolean }) {
   const p = d.obra.plano, regs = d.obra.aprendizagem ?? [];
   const gerado = p ? geradoDe(p) : null;
-  const vivo = aoVivo && p?.estado === "por aprovar" && gerado ? diferencasPlano(gerado, retratoTarefas(p), nomeTec) : null;
+  // 25/11: também com a obra aprovada ou em curso (o supervisor valida o plano já na gestão da obra)
+  const vivo = aoVivo && p && p.estado !== "concluída" && gerado ? diferencasPlano(gerado, retratoTarefas(p), nomeTec) : null;
   if (!vivo && !regs.length) return null;
   return (
     <section aria-labelledby="antes-depois-t" className="space-y-3 rounded-3xl border border-border bg-card p-4 sm:p-5">
