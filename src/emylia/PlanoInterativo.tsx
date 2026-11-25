@@ -18,7 +18,7 @@ import { IconeServico, iconeDoServico } from "./ilustracoes";
 import { AvatarTec } from "./AcompanhamentoObra";
 import { catalogoParcial, orgDoCatalogoLido } from "./real/catalogoLeve";
 import { usePesquisaProdutos } from "./real/pesquisaProdutos";
-import { consumiveisConhecidos, criarTarefa, criarTarefaInterna, diaMinimo, materiaisDoServico, oficioDe, tempoDoServico, type NovaTarefa as DadosTarefaNova } from "./tarefasValidador";
+import { consumiveisConhecidos, criarTarefa, criarTarefaInterna, diaMinimo, diaMinimoAntecipado, materiaisDoServico, oficioDe, tempoDoServico, type NovaTarefa as DadosTarefaNova } from "./tarefasValidador";
 
 const CARTAO = "rounded-2xl border border-border bg-card shadow-[var(--shadow-sm)]";
 /** As unidades de área e de comprimento: começam em 5 e andam de 5 em 5. */
@@ -119,7 +119,8 @@ export function NovaTarefa({ ctx, d, fechar, inicial, porque }: {
   const s = sid ? S.svc[sid] : null;
 
   // a pré-visualização da tarefa como fica (o início sugerido, o técnico livre), sem mexer no plano
-  const min = diaMinimo(p, fase);
+  // 25/11 (Rúben: «permitir antecipar»): pode começar antes do fim da fase anterior (fica antecipada); nunca antes de hoje
+  const minFase = diaMinimo(p, fase), min = diaMinimoAntecipado(p);
   const sugerido = s && sid ? criarTarefa(p, s, { sid, q, fase }).dia : 0;
   const dia = Math.max(min, (inicial?.dia ?? sugerido) + delta);
   const previa = s && sid ? criarTarefa(p, s, { sid, q, fase, tec, mats: mats ?? undefined, dia }) : null;
@@ -208,7 +209,7 @@ export function NovaTarefa({ ctx, d, fechar, inicial, porque }: {
               </div>
             </div>
 
-            <Linha rot="Começa" sub={p.estado === "em curso" ? "não antes de hoje nem do fim da fase anterior" : "não antes do fim da fase anterior"}>
+            <Linha rot="Começa" sub={dia < minFase ? "antecipada: antes do fim da fase anterior" : p.estado === "em curso" ? "não antes de hoje; pode antecipar-se à fase anterior" : "pode antecipar-se à fase anterior"}>
               <Passo rot="Dia de início" valor={rotuloDia(p, dia)} desMenos={dia <= min} menos={() => setDelta(dia - 1 - sugerido)} mais={() => setDelta(delta + 1)} />
             </Linha>
 
@@ -259,7 +260,8 @@ function TarefaInterna({ ctx, d, fechar, voltar, inicial }: { ctx: Ctx; d: Negoc
   const [fase, setFase] = useState<number>(() => inicial?.fase ?? p.tasks.find((t) => t.fase)?.fase ?? 1);
   const [tec, setTec] = useState<string | null>(inicial?.tec ?? null);
   const [delta, setDelta] = useState(0);
-  const min = diaMinimo(p, fase);
+  // 25/11 (Rúben: «permitir antecipar»): pode começar antes do fim da fase anterior (fica antecipada); nunca antes de hoje
+  const minFase = diaMinimo(p, fase), min = diaMinimoAntecipado(p);
   const sugerido = criarTarefaInterna(p, { nome: "x", h, fase }).dia;
   const dia = Math.max(min, (inicial?.dia ?? sugerido) + delta);
   const dur = Math.max(1, Math.ceil(h / 8 - 1e-9));
@@ -297,7 +299,7 @@ function TarefaInterna({ ctx, d, fechar, voltar, inicial }: { ctx: Ctx; d: Negoc
             ))}
           </div>
         </div>
-        <Linha rot="Começa" sub={p.estado === "em curso" ? "não antes de hoje nem do fim da fase anterior" : "não antes do fim da fase anterior"}>
+        <Linha rot="Começa" sub={dia < minFase ? "antecipada: antes do fim da fase anterior" : p.estado === "em curso" ? "não antes de hoje; pode antecipar-se à fase anterior" : "pode antecipar-se à fase anterior"}>
           <Passo rot="Dia de início" valor={rotuloDia(p, dia)} desMenos={dia <= min} menos={() => setDelta(dia - 1 - sugerido)} mais={() => setDelta(delta + 1)} />
         </Linha>
         <div>

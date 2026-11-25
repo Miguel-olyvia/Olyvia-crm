@@ -5,7 +5,7 @@
 import type { DadosLead } from "./real/dadosDaLead";
 import type { FaturaReg } from "./v2/financeiro";
 import { erroZonasLinha, limparZonas, porZona, type GrupoZona, type ZonaLinha } from "./zonasOrcamento";
-import { diferencas, fimDe, guardarBase, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
+import { anteciparInicio, diferencas, fimDe, guardarBase, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
 import { NOME_SEGURANCA, faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
 import { comLigacao, comRestricao, nomeCurtoTarefa, porqueNaoLigar, replanear, simularAtraso } from "./estudioObra/planoVivo";
 import { porNaTarefa, type RetratoPlano } from "./estudioObra/passosObra";
@@ -368,6 +368,7 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 25/11: o gestor mudou a lista à mão (A.microtarefas): não volta a ser trocada pela proposta */ microMao?: true;
   /** 24/11: uma tarefa interna (sem serviço do Catálogo e sem custo para o cliente): não muda o valor do contrato nem pede adenda */ interna?: true;
   /** 25/11: o lugar na lista da fase, quando o gestor a arrastou (ordemPlano.ts); sem ele, a ordem é a da data de início */ ordem?: number;
+  /** 25/11 (Rúben: «permitir antecipar»): o gestor pô-la antes do fim da fase anterior; as fases não a empurram (ajustesPlano.ts) */ antecipada?: true;
   /** 25/11 (Rúben: «a empresa absorve»): as horas que a regra das microtarefas juntou acima do orçamento. Não mudam o valor para o cliente
    *  (impactoDoPlano não as conta); o custo fica na margem. */ hNossa?: number;
   /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[];
@@ -3868,7 +3869,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (!travada) {
         if (m.dur != null) mudarDuracao(p, ti, m.dur);
         if (m.h != null) mudarHoras(p, ti, m.h);
-        if (m.dia != null) mudarInicio(p, ti, p.estado === "em curso" ? Math.max(p.dia, m.dia) : m.dia);
+        // 25/11 (Rúben: «permitir antecipar»): o dia que o gestor escolhe vale, mesmo antes do fim da fase anterior (não antes de hoje)
+        if (m.dia != null) anteciparInicio(p, ti, p.estado === "em curso" ? Math.max(p.dia, m.dia) : m.dia);
         protegerComecadas(p, sitio);
       }
       if (m.nota != null) { const n = m.nota.trim(); if ((t.nota ?? "") !== n) { t.nota = n || undefined; log(d, `Plano: nota em ${t.nome}${n ? ": " + n : " apagada"}`); } }

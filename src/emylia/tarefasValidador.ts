@@ -3,7 +3,7 @@
 // as tarefas que ele próprio juntou. As do orçamento não se tiram (a base guarda-as para "Repor o plano do orçamento").
 // Funções puras sobre o Plano; o motor chama-as (A.novaTarefaPlano, A.moverTarefaPlano, A.tirarTarefaPlano, A.matsTarefa).
 import { HORAS_DIA } from "./ganttOrcamento";
-import { encadearFases, fimDe, guardarBase, inicioMinimo, mudarInicio } from "./ajustesPlano";
+import { anteciparInicio, encadearFases, fimDe, guardarBase, inicioMinimo, mudarInicio } from "./ajustesPlano";
 import { RECEITAS } from "./receitas";
 import { TECS, diaDeFerias, type AvisoTec, type MatTarefa, type Plano, type Servico, type SvcId, type Tarefa } from "./motor";
 import { skDaTarefa, tecnicoDoOficio } from "./preparacaoObra";
@@ -66,6 +66,15 @@ export function diaMinimo(p: Plano, fase: number): number {
   return Math.max(hoje, fase ? Math.max(0, fimDe(p.tasks.filter((x) => (x.fase ?? 0) > 0 && (x.fase ?? 0) < fase)) - 1) : 0);
 }
 
+/** 25/11 (Rúben: «permitir antecipar»): o primeiro dia que o gestor pode escolher à mão: hoje (com a obra em curso) ou o primeiro. */
+export const diaMinimoAntecipado = (p: Plano): number => (p.estado === "em curso" ? p.dia : 0);
+/** Com o dia escolhido antes do fim da fase anterior, a tarefa nova fica nesse dia, marcada como antecipada (as fases não a empurram). */
+function antecipar(p: Plano, t: Tarefa, dia: number | undefined, min: number) {
+  if (dia == null || dia >= min) return;
+  t.dia = Math.max(diaMinimoAntecipado(p), Math.round(dia));
+  if (t.dia < min) t.antecipada = true;
+}
+
 export interface NovaTarefa { sid: SvcId; q: number; fase: number; tec?: string | null; mats?: MatTarefa[]; dia?: number }
 
 /** A tarefa nova, pronta a juntar: começa no primeiro dia possível da fase (ou no dia pedido), com o técnico livre do ofício. */
@@ -77,6 +86,7 @@ export function criarTarefa(p: Plano, s: Servico, n: NovaTarefa): Tarefa {
   const naFase = p.tasks.filter((x) => (x.fase ?? 0) === (n.fase ?? 0));
   const min = diaMinimo(p, n.fase);
   t.dia = Math.max(min, n.dia ?? (naFase.length ? Math.min(...naFase.map((x) => x.dia)) : min));
+  antecipar(p, t, n.dia, min);
   t.tec = n.tec !== undefined ? n.tec : tecnicoLivre(p, sk, t.dia, dur, of.perfilId);
   return t;
 }
@@ -119,6 +129,7 @@ export function criarTarefaInterna(p: Plano, n: NovaTarefaInterna): Tarefa {
   const naFase = p.tasks.filter((x) => (x.fase ?? 0) === (n.fase ?? 0));
   const min = diaMinimo(p, n.fase);
   t.dia = Math.max(min, n.dia ?? (naFase.length ? Math.min(...naFase.map((x) => x.dia)) : min));
+  antecipar(p, t, n.dia, min);
   return t;
 }
 
@@ -129,7 +140,9 @@ export function moverTarefa(p: Plano, ti: number, m: { fase?: number; dia?: numb
   guardarBase(p);
   // 25/11: noutra fase, vai para o fim da lista dessa fase (o lugar marcado era o da outra)
   if (m.fase != null && m.fase !== t.fase) { t.fase = m.fase || undefined; delete t.ordem; }
-  mudarInicio(p, ti, Math.max(m.dia ?? t.dia, inicioMinimo(p, ti)));
+  // 25/11 (Rúben: «permitir antecipar»): com o dia escolhido, vale esse dia (mesmo antes do fim da fase anterior); só a fase, vai para o seu início
+  if (m.dia != null) anteciparInicio(p, ti, m.dia);
+  else { delete t.antecipada; mudarInicio(p, ti, Math.max(t.dia, inicioMinimo(p, ti))); }
 }
 
 /* ------------------------------------------------------------------ os avisos aos técnicos */

@@ -16,12 +16,16 @@ describe("o validador junta tarefas ao plano", () => {
     expect(t.mats!.map((m) => m.n)).toEqual(["Cimento-cola C2TE", "Argamassa de juntas"]);
     expect(t.mats![0].q).toBe(80);
   });
-  it("não começa antes do fim da fase anterior; com a obra em curso, nunca antes de hoje", () => {
+  // 25/11 (Rúben: «permitir antecipar»): sem dia, começa depois da fase anterior; com o dia escolhido antes disso, fica antecipada.
+  // Com a obra em curso, nunca antes de hoje.
+  it("sugere o fim da fase anterior; o dia escolhido antes disso fica antecipado; com a obra em curso, nunca antes de hoje", () => {
     const p = plano();
     expect(diaMinimo(p, 3)).toBe(1);
-    expect(criarTarefa(p, revest, { sid: "revest", q: 1, fase: 3, dia: 0 }).dia).toBe(1);
+    expect(criarTarefa(p, revest, { sid: "revest", q: 1, fase: 3 }).dia).toBe(1);
+    expect(criarTarefa(p, revest, { sid: "revest", q: 1, fase: 3, dia: 0 })).toMatchObject({ dia: 0, antecipada: true });
     p.estado = "em curso"; p.dia = 2;
     expect(criarTarefa(p, revest, { sid: "revest", q: 1, fase: 3 }).dia).toBe(2);
+    expect(criarTarefa(p, revest, { sid: "revest", q: 1, fase: 3, dia: 0 }).dia).toBe(2);
   });
   // 24/11 (Rúben: «no Estúdio da obra poder juntar e tirar tarefas»): tira-se qualquer tarefa sem trabalho do técnico, também as do
   // orçamento (a base guarda-as); uma com trabalho registado não se tira
@@ -38,10 +42,13 @@ describe("o validador junta tarefas ao plano", () => {
     expect(p.tasks).toHaveLength(2);
     expect(p.base).toHaveLength(3); // a base do orçamento fica
   });
-  it("mudar de fase respeita o início mínimo da fase nova", () => {
+  it("mudar de fase sem dia vai para o início mínimo da fase nova; com o dia escolhido antes dele, fica antecipada", () => {
     const p = plano();
-    moverTarefa(p, 0, { fase: 3, dia: 0 });
+    moverTarefa(p, 0, { fase: 3 });
     expect(p.tasks[0]).toMatchObject({ fase: 3, dia: 1 });
+    const q = plano();
+    moverTarefa(q, 0, { fase: 3, dia: 0 });
+    expect(q.tasks[0]).toMatchObject({ fase: 3, dia: 0, antecipada: true });
   });
   it("os materiais de unidades inteiras arredondam para cima", () => {
     expect(materiaisDoServico("demol", 3).find((m) => m.n === "Sacos de entulho")!.q).toBe(2);

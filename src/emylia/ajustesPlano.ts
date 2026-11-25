@@ -35,7 +35,7 @@ export function encadearFases(p: Plano): void {
   const fases = [...new Set(p.tasks.map((t) => t.fase ?? 0).filter((f) => f > 0))].sort((a, b) => a - b);
   for (const f of fases) {
     const min = minimoDaFase(p, f);
-    for (const t of p.tasks) if (t.fase === f && t.dia < min) t.dia = min;
+    for (const t of p.tasks) if (t.fase === f && t.dia < min && !t.antecipada) t.dia = min;
   }
 }
 
@@ -77,7 +77,22 @@ export function mudarInicio(p: Plano, ti: number, dia: number): void {
   const t = p.tasks[ti];
   if (!t) return;
   guardarBase(p);
-  t.dia = Math.max(inicioMinimo(p, ti), Math.max(0, Math.round(dia)));
+  // uma tarefa que o gestor antecipou fica onde ele a pôs (não volta para depois da fase anterior)
+  t.dia = t.antecipada ? Math.max(0, Math.round(dia)) : Math.max(inicioMinimo(p, ti), Math.max(0, Math.round(dia)));
+  encadearFases(p);
+}
+
+/** 25/11 (Rúben: «permitir antecipar»): o gestor põe a tarefa num dia antes do fim da fase anterior (na 1048, a cozinha não tem de
+ *  esperar pelos revestimentos da casa de banho). Fica marcada (`antecipada`) e o encadear das fases deixa de a empurrar; posta outra
+ *  vez depois do fim da fase anterior, perde a marca. */
+export function anteciparInicio(p: Plano, ti: number, dia: number): void {
+  const t = p.tasks[ti];
+  if (!t) return;
+  guardarBase(p);
+  const d = Math.max(0, Math.round(dia));
+  if (d < inicioMinimo(p, ti)) t.antecipada = true;
+  else delete t.antecipada;
+  t.dia = d;
   encadearFases(p);
 }
 

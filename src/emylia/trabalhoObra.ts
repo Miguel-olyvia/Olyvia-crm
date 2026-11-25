@@ -6,7 +6,7 @@
 // · Os ajustes ao plano com a obra em curso: o que se pode mexer (só o que ainda não foi validado e não ficou para trás),
 //   a pré-visualização do efeito (sem mexer no plano) e o texto do aviso ao cliente.
 import { TECS, type Negocio, type Plano, type Tarefa } from "./motor";
-import { fimDe, guardarBase, inicioMinimo, mudarDuracao, mudarHoras, mudarInicio } from "./ajustesPlano";
+import { anteciparInicio, fimDe, guardarBase, inicioMinimo, mudarDuracao, mudarHoras, mudarInicio } from "./ajustesPlano";
 import { estadoDe } from "./obraOps";
 import { rotuloDia } from "./preparacaoObra";
 import { ordemDasTarefas } from "./ordemPlano";
@@ -268,7 +268,8 @@ export function aplicarAjuste(p: Plano, ti: number, m: AjusteVivo): void {
   if (m.dur != null && P.dur) mudarDuracao(p, ti, Math.max(duracaoMinima(p, ti), m.dur));
   // em horas: não acaba antes de hoje (as horas chegam pelo menos ao dia de hoje)
   if (m.h != null && P.dur) mudarHoras(p, ti, Math.max((duracaoMinima(p, ti) - 1) * 8 + 0.5, m.h));
-  if (m.dia != null && P.inicio) mudarInicio(p, ti, Math.max(inicioMinimoVivo(p, ti), m.dia));
+  // 25/11 (Rúben: «permitir antecipar»): pode ir para antes do fim da fase anterior, nunca para antes de hoje
+  if (m.dia != null && P.inicio) anteciparInicio(p, ti, Math.max(p.dia, m.dia));
   if (m.tec && P.tec) p.tasks[ti].tec = m.tec;
   // o que já passou não muda: as tarefas validadas ficam onde estavam
 }
