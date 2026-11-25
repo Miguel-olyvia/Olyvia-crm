@@ -113,9 +113,9 @@ export function tirarTarefa(p: Plano, ti: number): boolean {
 export interface NovaTarefaInterna { nome: string; h: number; fase: number; tec?: string | null; dia?: number }
 export function criarTarefaInterna(p: Plano, n: NovaTarefaInterna): Tarefa {
   const h = r2(Math.max(0.5, n.h)), dur = Math.max(1, Math.ceil(h / HORAS_DIA - 1e-9));
-  const tec = n.tec ? TECS.find((x) => x.id === n.tec) : undefined;
+  const tec = n.tec ? TECS.find((x) => x.id === n.tec) : undefined, perfilDoTec = (tec as { perfilId?: string } | undefined)?.perfilId;
   const t: Tarefa = { nome: n.nome.replace(/\s+/g, " ").trim().slice(0, 120), svcs: [], dia: 0, dur, sk: tec?.sk ?? "Equipa", h, tec: tec?.id ?? null,
-    fase: n.fase || undefined, nova: true, interna: true, mats: [], ...(tec?.perfilId ? { perfilId: tec.perfilId } : {}) };
+    fase: n.fase || undefined, nova: true, interna: true, mats: [], ...(perfilDoTec ? { perfilId: perfilDoTec } : {}) };
   const naFase = p.tasks.filter((x) => (x.fase ?? 0) === (n.fase ?? 0));
   const min = diaMinimo(p, n.fase);
   t.dia = Math.max(min, n.dia ?? (naFase.length ? Math.min(...naFase.map((x) => x.dia)) : min));
