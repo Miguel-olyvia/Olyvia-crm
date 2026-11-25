@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import type { AtributoDef, AtributoProduto, OpcaoAtributo } from "../v2/catalogoModelo";
 import { ligacoesDaConfig } from "../config3dDados";
-import { chaveDeExclusao } from "./aspetoZonas";
+import { ROUGHNESS_METAL_POR_SUPERFICIE, chaveDeExclusao } from "./aspetoZonas";
 import { ZONAS, aparenciaDaZona, zonasDosAtributos, zonasVisuais } from "./zonasGlb";
 
 const op = (id: string, extra: Partial<OpcaoAtributo> = {}): OpcaoAtributo => ({ id, valor: id, nome: id, hex: null, foto: null, ordem: 1, ...extra });
@@ -83,7 +83,7 @@ describe("o aspeto entra em cada zona", () => {
   it("zonasVisuais leva o `material` (rugosidade e metal) e o `acabamento` para o 3D; sem aspeto não há `material`", () => {
     const r = zonasDosAtributos([esc(COR_CORPO, "inox"), esc(BRILHO, "polido")], [COR_CORPO, BRILHO])!;
     const v = zonasVisuais(r, () => null);
-    expect(v.zonas.corpo).toMatchObject({ cor: "#cccccc", material: { roughness: 0.15, metalness: 1 }, acabamento: "Brilho" });
+    expect(v.zonas.corpo).toMatchObject({ cor: "#cccccc", material: { roughness: ROUGHNESS_METAL_POR_SUPERFICIE.polida, metalness: 1 }, acabamento: "Brilho" });
     const limpo = zonasVisuais(zonasDosAtributos([esc(COR_CORPO, "preto")], [COR_CORPO])!, () => null);
     expect(limpo.zonas.corpo).not.toHaveProperty("material");
   });

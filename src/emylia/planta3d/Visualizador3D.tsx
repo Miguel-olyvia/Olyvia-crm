@@ -25,6 +25,7 @@ import { cotasDaPeca, noEcra } from "./cotasPeca";
 import type { ZonaGlb, ZonasDoProduto } from "./zonasGlb";
 import { aplicarAparenciaDasZonas, aplicarRealceDasZonas, criarMateriaisDeZona } from "./zonasMateriais";
 import { useTexturasPorUrl } from "./useTexturasPorUrl";
+import { criarAmbienteMetal, type AmbienteMetal } from "./ambienteMetal";
 
 export type Vista3D = "cima" | "3d" | "pessoa";
 export interface Visualizador3DProps {
@@ -144,6 +145,14 @@ const TexturaCtx = createContext<TexturaDaPeca | null>(null);
 /** 24/11 (fase 1): a aparência de cada zona da peça e a zona realçada. Passa por contexto DENTRO do canvas (a Peca fornece-o); sem fornecedor, nada de zonas: como sempre. */
 interface ZonasDaPeca { zonas?: ZonasDoProduto; realce?: ZonaGlb | null }
 const ZonasCtx = createContext<ZonasDaPeca>({});
+/** 25/11: pede o mapa de ambiente com contraste dos metais (ambienteMetal.ts); só se constrói na primeira vez que alguma zona de metal o pede (sem metal nunca se cria). Sem fornecedor: nenhum. */
+const AmbienteMetalCtx = createContext<(() => THREE.Texture | null) | null>(null);
+function AmbienteMetalDosMetais({ children }: { children: ReactNode }) {
+  const gl = useThree((s) => s.gl), feito = useRef<AmbienteMetal | null>(null);
+  const pedir = useCallback(() => { if (!feito.current) feito.current = criarAmbienteMetal(gl); return feito.current.texture; }, [gl]);
+  useEffect(() => () => { feito.current?.dispose(); feito.current = null; }, [gl]);
+  return <AmbienteMetalCtx.Provider value={pedir}>{children}</AmbienteMetalCtx.Provider>;
+}
 /** A textura do modelo (por URL, com cache): null enquanto carrega, se o modelo não a tem, ou se a imagem falhar (fica a cor lisa). Liberta-se ao desmontar a peça. */
 function useTexturaDoModelo(textura: Mockup3D["textura"], cor: string): TexturaDaPeca | null {
   const invalidate = useThree((s) => s.invalidate);
@@ -386,7 +395,7 @@ function GenericoGlb({ c, tipo, w, d, h, cor, mat, opc, generico }: PropsParam &
   const metal = mat?.metalness, rugos = mat?.roughness;
   // 25/11: as zonas com ligação explícita (aplicar: sim) a um atributo: nelas as partes de metal (os puxadores) também se pintam. Mudam raramente: a montagem refaz-se, para as cópias
   // dos materiais partirem sempre do modelo limpo (nunca de uma cópia já pintada)
-  const tx = useContext(TexturaCtx), zc = useContext(ZonasCtx);
+  const tx = useContext(TexturaCtx), zc = useContext(ZonasCtx), ambienteMetal = useContext(AmbienteMetalCtx);
   const chaveLigadas = zc.zonas?.ligadas?.join(",") ?? "";
   const t = useMemo(() => montarGenerico(cena, c, { w, d, h, o: JSON.parse(chave) as Record<string, string | boolean> }, corFinal, metal === undefined ? undefined : { metalness: metal, roughness: rugos ?? 0.4 }), // eslint-disable-next-line react-hooks/exhaustive-deps -- `chaveLigadas` só força a remontagem
     [cena, c, w, d, h, chave, corFinal, metal, rugos, chaveLigadas]);
@@ -400,9 +409,9 @@ function GenericoGlb({ c, tipo, w, d, h, cor, mat, opc, generico }: PropsParam &
   const urls = useMemo(() => (zc.zonas?.porZona ? Object.values(zc.zonas.zonas).flatMap((z) => (z?.textura ? [z.textura.url] : [])) : []), [zc.zonas]);
   const texturas = useTexturasPorUrl(urls, invalidate);
   useEffect(() => {
-    aplicarAparenciaDasZonas(zm.porZona, { corBase: corFinal, zonas: zc.zonas, texturas, unica: tx ? { tex: tx.tex, lado: tx.lado } : null, fixas: zm.fixas });
+    aplicarAparenciaDasZonas(zm.porZona, { corBase: corFinal, zonas: zc.zonas, texturas, unica: tx ? { tex: tx.tex, lado: tx.lado } : null, fixas: zm.fixas, ambienteMetal: ambienteMetal ?? undefined });
     invalidate();
-  }, [zm, zc.zonas, texturas, tx, corFinal, invalidate]);
+  }, [zm, zc.zonas, texturas, tx, corFinal, ambienteMetal, invalidate]);
   // o realce é só brilho: apontar de uma zona a outra não retira nem volta a pôr as fotos (o material não se recompila)
   useEffect(() => { aplicarRealceDasZonas(zm.porZona, zc.realce); invalidate(); }, [zm, zc.realce, invalidate]);
   useEffect(() => { invalidate(); }, [t, invalidate]);
@@ -1267,7 +1276,9 @@ export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas
         {espaco.paredes.map((p, i) => <ParedeCena key={p.id} parede={p} indice={i} espaco={espaco} />)}
         <SombraDeContacto espaco={espaco} />
         {revestimento && <AmostraRevestimento r={revestimento} />}
-        {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={porFazer?.has(p.id) ? `${p.id}:por-fazer` : p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} fantasma={!!porFazer?.has(p.id)} onSel={onSelecionar} mover={mover} arrasto={arrasto} setArrasto={setArrasto} alvo={alvo} cotas={cotas} realce={zonaRealcada} /> : null; })}
+        <AmbienteMetalDosMetais>
+          {espaco.pecas.map((p) => { const m = modelos[p.produtoId]; return m ? <Peca key={porFazer?.has(p.id) ? `${p.id}:por-fazer` : p.id} p={p} m={m} etiquetas={etiquetas} selecionada={selecionada === p.id} fantasma={!!porFazer?.has(p.id)} onSel={onSelecionar} mover={mover} arrasto={arrasto} setArrasto={setArrasto} alvo={alvo} cotas={cotas} realce={zonaRealcada} /> : null; })}
+        </AmbienteMetalDosMetais>
         {arrasto?.lugar && <GuiaParede espaco={espaco} x={arrasto.lugar.x} y={arrasto.lugar.y} altura={arrasto.parede ? arrasto.lugar.altura : null} />}
         <PonteCamara alvo={alvo} />
       </Canvas>

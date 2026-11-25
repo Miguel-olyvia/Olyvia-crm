@@ -11,6 +11,11 @@ export const ROUGHNESS: Readonly<Record<Superficie, number>> = { polida: 0.15, a
 /** A rugosidade de um metal sem superfície escolhida, e o `metalness` de um metal. */
 export const ROUGHNESS_METAL = 0.3;
 export const METALNESS_METAL = 1;
+/**
+ * 25/11: a rugosidade de um METAL por superfície. Um metal só se lê como tal com reflexos, e a rugosidade decide se o reflexo é um espelho ou uma mancha: polida (cromo, espelho),
+ * acetinada (cobre, ouro escovado ao toque) e mate (escovado). Mais estreita e mais baixa do que a dos não metais (`ROUGHNESS`), que ficam como estavam.
+ */
+export const ROUGHNESS_METAL_POR_SUPERFICIE: Readonly<Record<Superficie, number>> = { polida: 0.14, acetinada: 0.34, mate: 0.55 };
 
 /** O que se aplica ao material de uma zona. `metalness` ausente: não se mexe (um não metal só muda a rugosidade). */
 export interface MaterialZona { roughness: number; metalness?: number }
@@ -19,7 +24,7 @@ export interface AspetoDaZona { metal: boolean; superficie: Superficie | null }
 
 /** O material que a superfície e o metal dão, ou null se não há nada a aplicar (o material fica o do modelo). */
 export function materialDaSuperficie(superficie: Superficie | null, metal: boolean): MaterialZona | null {
-  if (metal) return { roughness: superficie ? ROUGHNESS[superficie] : ROUGHNESS_METAL, metalness: METALNESS_METAL };
+  if (metal) return { roughness: superficie ? ROUGHNESS_METAL_POR_SUPERFICIE[superficie] : ROUGHNESS_METAL, metalness: METALNESS_METAL };
   return superficie ? { roughness: ROUGHNESS[superficie] } : null;
 }
 

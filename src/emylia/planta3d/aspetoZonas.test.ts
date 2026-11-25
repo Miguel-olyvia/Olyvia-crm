@@ -2,7 +2,7 @@
 // explícita manda sobre o nome e limita-o às zonas a que está ligado), da superfície por omissão da opção que pinta a zona, ou do modelo (null). O metal vem da opção que pinta a zona.
 import { describe, expect, it } from "vitest";
 import type { AtributoDef, AtributoProduto, OpcaoAtributo } from "../v2/catalogoModelo";
-import { ROUGHNESS, ROUGHNESS_METAL, ehAtributoDeSuperficie, chaveDeExclusao, materialDaSuperficie, superficieDaZona } from "./aspetoZonas";
+import { ROUGHNESS, ROUGHNESS_METAL, ROUGHNESS_METAL_POR_SUPERFICIE, ehAtributoDeSuperficie, chaveDeExclusao, materialDaSuperficie, superficieDaZona } from "./aspetoZonas";
 
 const op = (id: string, extra: Partial<OpcaoAtributo> = {}): OpcaoAtributo => ({ id, valor: id, nome: id, hex: null, ordem: 1, ...extra });
 const def = (id: string, nome: string, opcoes: OpcaoAtributo[], extra: Partial<AtributoDef> = {}): AtributoDef => ({ id, codigo: nome.toLowerCase().replace(/ /g, "_"), nome, tipo: "lista", temHex: false, ordem: 1, opcoes, ...extra });
@@ -20,8 +20,21 @@ describe("materialDaSuperficie: o que a superfície faz ao material (constantes 
     expect(ROUGHNESS.acetinada).toBeLessThan(ROUGHNESS.mate);
   });
   it("metal: metalness 1, com a rugosidade da superfície ou a do metal sem superfície", () => {
-    expect(materialDaSuperficie("polida", true)).toEqual({ roughness: ROUGHNESS.polida, metalness: 1 });
+    expect(materialDaSuperficie("polida", true)).toEqual({ roughness: ROUGHNESS_METAL_POR_SUPERFICIE.polida, metalness: 1 });
+    expect(materialDaSuperficie("acetinada", true)).toEqual({ roughness: ROUGHNESS_METAL_POR_SUPERFICIE.acetinada, metalness: 1 });
+    expect(materialDaSuperficie("mate", true)).toEqual({ roughness: ROUGHNESS_METAL_POR_SUPERFICIE.mate, metalness: 1 });
     expect(materialDaSuperficie(null, true)).toEqual({ roughness: ROUGHNESS_METAL, metalness: 1 });
+  });
+  it("a rugosidade do metal nota-se: polida 0,12-0,18, acetinada 0,30-0,38, mate 0,50-0,60, por esta ordem", () => {
+    const r = ROUGHNESS_METAL_POR_SUPERFICIE;
+    expect(r.polida).toBeGreaterThanOrEqual(0.12); expect(r.polida).toBeLessThanOrEqual(0.18);
+    expect(r.acetinada).toBeGreaterThanOrEqual(0.3); expect(r.acetinada).toBeLessThanOrEqual(0.38);
+    expect(r.mate).toBeGreaterThanOrEqual(0.5); expect(r.mate).toBeLessThanOrEqual(0.6);
+  });
+  it("REGRESSÃO: a rugosidade dos não metais não mudou (0,15, 0,4 e 0,8)", () => {
+    expect(ROUGHNESS).toEqual({ polida: 0.15, acetinada: 0.4, mate: 0.8 });
+    expect(materialDaSuperficie("polida", false)).toEqual({ roughness: 0.15 });
+    expect(materialDaSuperficie("mate", false)).toEqual({ roughness: 0.8 });
   });
   it("sem superfície e sem metal: nada a aplicar (null)", () => { expect(materialDaSuperficie(null, false)).toBeNull(); });
 });
