@@ -102,7 +102,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
      "Inspeção visual do estado dos móveis e equipamentos existentes.",
      "Registo fotográfico da disposição original (útil para reinstalações ou comparações futuras).",
      "Identificação de elementos a reutilizar, armazenar ou descartar.",
-     "Desligamento prévio das redes:; Água fria/quente e esgotos;; Energia elétrica (desligar quadro parcial, tomadas e cabos diretos);; Gás, se aplicável (com fecho de válvula principal)."
+     "Desligamento prévio das redes: Água fria/quente e esgotos;; Energia elétrica (desligar quadro parcial, tomadas e cabos diretos);; Gás, se aplicável (com fecho de válvula principal)."
     ]
    },
    {
@@ -285,7 +285,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 4.0,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Executar levantamento prévio da estrutura existente, identificando se as paredes são:; Divisórias não estruturais (tijolo furado, bloco cerâmico ou pladur);; Paredes estruturais ou de suporte (nunca demolir sem parecer técnico).",
+     "Executar levantamento prévio da estrutura existente, identificando se as paredes são: Divisórias não estruturais (tijolo furado, bloco cerâmico ou pladur);; Paredes estruturais ou de suporte (nunca demolir sem parecer técnico).",
      "Iniciar a demolição de cima para baixo, removendo primeiro os revestimentos (azulejos, rebocos, argamassas).",
      "Utilizar martelo pneumático leve (3–5 kg) ou marreta e talhadeira manual, conforme o tipo de material.",
      "Trabalhar em painéis verticais de pequena dimensão (1 m²) para evitar colapsos descontrolados.",
@@ -328,7 +328,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 2.0,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Segregar os resíduos em conformidade com as normas de Gestão de Resíduos de Construção e Demolição (RCD):; Cerâmicos e argamassas;; Metais;; Materiais plásticos;; Madeira e gesso.",
+     "Segregar os resíduos em conformidade com as normas de Gestão de Resíduos de Construção e Demolição (RCD): Cerâmicos e argamassas;; Metais;; Materiais plásticos;; Madeira e gesso.",
      "Transportar o entulho para contentor autorizado e assegurar o destino final conforme legislação ambiental.",
      "Efetuar limpeza completa da área, incluindo varredura, aspiração e lavagem leve se necessário.",
      "Tamponar todas as tubagens expostas com rolhas provisórias ou fita adesiva.",
@@ -396,7 +396,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "quem": "Empreiteiro Geral",
     "det": [
      "Consulta da lista de materiais aprovados no projeto e verificação das quantidades necessárias para a fase da obra.",
-     "Emissão da requisição interna de materiais, com identificação de:; Tipo de material, referência e unidade de medida;; Quantidade necessária;; Local e data de utilização;; Responsável pela requisição.",
+     "Emissão da requisição interna de materiais, com identificação de: Tipo de material, referência e unidade de medida;; Quantidade necessária;; Local e data de utilização;; Responsável pela requisição.",
      "Coordenação com o encarregado de armazém para agendamento do levantamento, garantindo disponibilidade e organização do stock.",
      "Preparação de meios de transporte e acondicionamento adequados (paletes, caixas, cintas, coberturas)."
     ]
@@ -409,7 +409,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "det": [
      "Identificação dos materiais com base nas fichas técnicas e códigos internos (ex.: azulejo modelo X, tubo PEX Ø16, cimento cola tipo C2).",
      "Verificação da quantidade física (contagem, pesagem ou medição) e conformidade do lote com a nota de requisição.",
-     "Inspeção visual da qualidade e integridade dos materiais:; Verificar ausência de danos (rachas, deformações, humidade, ferrugem, etc.);; Confirmar prazos de validade (em colas, tintas, argamassas, selantes).",
+     "Inspeção visual da qualidade e integridade dos materiais: Verificar ausência de danos (rachas, deformações, humidade, ferrugem, etc.);; Confirmar prazos de validade (em colas, tintas, argamassas, selantes).",
      "Caso seja necessário, emissão de nota de não conformidade para materiais danificados ou incorretos.",
      "Registo de saída de materiais em guia de remessa interna ou nota de transferência de stock."
     ]
@@ -420,7 +420,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.5,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Planeamento do transporte segundo o tipo de material:; Materiais pesados ou volumosos: utilização de empilhadores, gruas, paleteiras.; Materiais frágeis: transporte protegido com mantas, espumas e paletes estáveis.",
+     "Planeamento do transporte segundo o tipo de material: Materiais pesados ou volumosos: utilização de empilhadores, gruas, paleteiras.; Materiais frágeis: transporte protegido com mantas, espumas e paletes estáveis.",
      "Acondicionamento e amarração segura da carga (cintas, fitas ou redes de proteção).",
      "Emissão e acompanhamento da guia de transporte ou guia de remessa até à obra.",
      "Registo do condutor, matrícula e hora de saída.",
@@ -433,7 +433,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 0.17,
     "quem": "Parceiro",
     "det": [
-     "Verificação dos materiais à chegada ao estaleiro:; Conferência das quantidades e integridade física.; Confirmação com guia de remessa e assinatura de receção.",
+     "Verificação dos materiais à chegada ao estaleiro: Conferência das quantidades e integridade física.; Confirmação com guia de remessa e assinatura de receção.",
      "Acondicionamento no local de armazenamento temporário em obra, protegido da intempérie e humidade.",
      "Organização dos materiais por tipo e prioridade de utilização (ex.: canalizações, revestimentos, colas, tintas).",
      "Atualização do mapa de controlo de materiais em obra (entradas e saídas)."
@@ -463,7 +463,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.5,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Registo Fotográfico e Levantamento das linhas de abastecimento e drenagem existentes, identificando:; Localização e diâmetro das tubagens antigas;; Pontos de entrada/saída;; Alturas e declives dos ramais;; Possíveis interferências com outras redes (elétrica, gás, ventilação).",
+     "Registo Fotográfico e Levantamento das linhas de abastecimento e drenagem existentes, identificando: Localização e diâmetro das tubagens antigas;; Pontos de entrada/saída;; Alturas e declives dos ramais;; Possíveis interferências com outras redes (elétrica, gás, ventilação).",
      "Definição das novas rotas de canalização com base no projeto de especialidades e no layout final (lava-louça, máquina de lavar, etc.).",
      "Marcação em parede, pavimento ou teto com giz, fita ou laser para posterior rasgo."
     ]
@@ -497,8 +497,8 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 3.0,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Abastecimento de água fria e quente:; Instalação de tubagens em PEX, multicamada ou PPR com diâmetros adequados (mín. Ø16 para lavatórios e Ø20 para duches ou lavatórios duplos).; Fixação com abraçadeiras plásticas ou metálicas, respeitando espaçamentos máximos de 50–60 cm.; Interposição de mangas isolantes para evitar condensação e ruído.; Colocação de válvulas de seccionamento em pontos estratégicos (entrada, lavatório, máquina, base de duche).",
-     "Rede de esgotos e ventilação:; Utilização de tubagem em PVC ou PP de parede lisa (mín. Ø40 mm para lavatórios, Ø50 mm para duches e máquinas, Ø110 mm para sanitas).; Execução dos ramais com declive mínimo de 2% para garantir o escoamento.; União com manguitos e juntas elásticas devidamente lubrificadas.; Instalação de joelhos, sifões e ventiladores secundários, conforme necessidade."
+     "Abastecimento de água fria e quente: Instalação de tubagens em PEX, multicamada ou PPR com diâmetros adequados (mín. Ø16 para lavatórios e Ø20 para duches ou lavatórios duplos).; Fixação com abraçadeiras plásticas ou metálicas, respeitando espaçamentos máximos de 50–60 cm.; Interposição de mangas isolantes para evitar condensação e ruído.; Colocação de válvulas de seccionamento em pontos estratégicos (entrada, lavatório, máquina, base de duche).",
+     "Rede de esgotos e ventilação: Utilização de tubagem em PVC ou PP de parede lisa (mín. Ø40 mm para lavatórios, Ø50 mm para duches e máquinas, Ø110 mm para sanitas).; Execução dos ramais com declive mínimo de 2% para garantir o escoamento.; União com manguitos e juntas elásticas devidamente lubrificadas.; Instalação de joelhos, sifões e ventiladores secundários, conforme necessidade."
     ]
    },
    {
@@ -507,8 +507,8 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.0,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Ensaio de estanquidade da rede de água:; Pressurização a 6 bar durante 30 minutos, sem perdas.; Verificação de todas as uniões e conexões.",
-     "Teste de escoamento na rede de esgotos:; Enchimento parcial de ramais e verificação visual de fugas.; Confirmar a ausência de ruídos e refluxos.",
+     "Ensaio de estanquidade da rede de água: Pressurização a 6 bar durante 30 minutos, sem perdas.; Verificação de todas as uniões e conexões.",
+     "Teste de escoamento na rede de esgotos: Enchimento parcial de ramais e verificação visual de fugas.; Confirmar a ausência de ruídos e refluxos.",
      "Registo de resultados e aprovação pelo técnico responsável."
     ]
    },
@@ -529,8 +529,8 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.0,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Análise do projeto elétrico e do layout da cozinha, identificando:; Localização de tomadas, interruptores, pontos de luz e saídas técnicas.; Potência total prevista e circuitos dedicados (forno, placa, exaustor, máquina de lavar, frigorífico, micro-ondas, termoacumulador, etc.).; Tipo de conduta (embutida ou aparente) e altura de instalação conforme normas (ex.: tomadas 1,10 m acima do piso, interruptores a 1,20 m).",
-     "Verificação do quadro elétrico existente — avaliar se há necessidade de:; Novos disjuntores;; Diferenciais (ID);; Aumento de potência contratada;; Reforço de cablagem principal.",
+     "Análise do projeto elétrico e do layout da cozinha, identificando: Localização de tomadas, interruptores, pontos de luz e saídas técnicas.; Potência total prevista e circuitos dedicados (forno, placa, exaustor, máquina de lavar, frigorífico, micro-ondas, termoacumulador, etc.).; Tipo de conduta (embutida ou aparente) e altura de instalação conforme normas (ex.: tomadas 1,10 m acima do piso, interruptores a 1,20 m).",
+     "Verificação do quadro elétrico existente — avaliar se há necessidade de: Novos disjuntores;; Diferenciais (ID);; Aumento de potência contratada;; Reforço de cablagem principal.",
      "Marcação no local, conforme traçado aprovado."
     ]
    },
@@ -552,7 +552,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 2.0,
     "quem": "Eletricista",
     "det": [
-     "Introdução dos condutores elétricos (tipo H07V-U ou H07V-R) nos tubos, respeitando a codificação de cores:; Azul – Neutro (N); Castanho / Preto / Cinzento – Fase (L); Verde/Amarelo – Terra (PE)",
+     "Introdução dos condutores elétricos (tipo H07V-U ou H07V-R) nos tubos, respeitando a codificação de cores: Azul – Neutro (N); Castanho / Preto / Cinzento – Fase (L); Verde/Amarelo – Terra (PE)",
      "Dimensionamento das secções dos cabos conforme o circuito: Circuito Secção do Condutor Proteção Iluminação 1,5 mm² Disjuntor 10 A Tomadas gerais 2,5 mm² Disjuntor 16 A Forno / Placa 4,0 mm² (ou 6,0 mm² se necessário) Disjuntor 20–25 A Máquina lavar / Termoacumulador 2,5 mm² Disjuntor 16 A",
      "Instalação dos condutores de terra interligando todas as tomadas metálicas e aparelhos."
     ]
@@ -630,7 +630,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
      "Colocação de tubagem em cobre rígido (EN 1057), aço galvanizado ou PE (exterior), conforme o tipo de rede e local de instalação.",
      "Fixação mecânica das tubagens com abraçadeiras metálicas a cada 1,5 m no mínimo.",
      "Execução de soldaduras capilares (para cobre) ou roscas com vedante apropriado (para aço).",
-     "Montagem de:; Válvulas de corte em cada ponto de consumo.; Reguladores de pressão, se aplicável.; Uniões desmontáveis em locais de fácil acesso.",
+     "Montagem de: Válvulas de corte em cada ponto de consumo.; Reguladores de pressão, se aplicável.; Uniões desmontáveis em locais de fácil acesso.",
      "Execução de atravessamentos de paredes com tubos de proteção (buchas metálicas ou mangas isolantes).",
      "Garantir distância mínima de 30 cm entre tubagens de gás e condutas elétricas."
     ]
@@ -654,7 +654,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.0,
     "quem": "Técnico Gás",
     "det": [
-     "Ensaio de estanquidade da rede:; Pressurização com ar seco ou gás inerte (ex.: azoto) a 150 mbar durante 10 minutos, sem variação de pressão.; Inspeção de todas as uniões com água saponada ou detetor de fugas eletrônico.",
+     "Ensaio de estanquidade da rede: Pressurização com ar seco ou gás inerte (ex.: azoto) a 150 mbar durante 10 minutos, sem variação de pressão.; Inspeção de todas as uniões com água saponada ou detetor de fugas eletrônico.",
      "Verificação funcional dos equipamentos: acendimento, chama estável e correta evacuação de gases.",
      "Medição de monóxido de carbono (CO) nos produtos de combustão, garantindo níveis inferiores a 100 ppm.",
      "Emissão de certificado de ensaio e conformidade pela entidade instaladora credenciada."
@@ -701,7 +701,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.0,
     "quem": "Canalizador",
     "det": [
-     "Verificar se o sistema está livre de fugas, obstruções e refluxos.; Procedimento:; Selar todas as saídas (sanitas, ralos, sifões) com tampas apropriadas.; Encher os ramais com água até ao ponto mais alto ou utilizar teste de pressão de ar a 50 mbar.; Manter durante 15 minutos e observar eventuais descidas de nível.; Verificar visualmente todas as uniões e caixas de visita.; Resultado esperado: Ausência de fugas ou variação de pressão; escoamento livre."
+     "Verificar se o sistema está livre de fugas, obstruções e refluxos.; Procedimento: Selar todas as saídas (sanitas, ralos, sifões) com tampas apropriadas.; Encher os ramais com água até ao ponto mais alto ou utilizar teste de pressão de ar a 50 mbar.; Manter durante 15 minutos e observar eventuais descidas de nível.; Verificar visualmente todas as uniões e caixas de visita.; Resultado esperado: Ausência de fugas ou variação de pressão; escoamento livre."
     ]
    },
    {
@@ -710,7 +710,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.0,
     "quem": "Técnico Gás",
     "det": [
-     "Objetivo: Garantir a estanqueidade total e segurança da rede antes da ligação ao contador.; Procedimento:; Teste efetuado com ar seco ou azoto (nunca com gás combustível).; Aplicar pressão de 150 mbar durante 10 minutos, sem variação.; Confirmar todas as uniões com água saponada ou detetor eletrónico de fugas.; Após ensaio, purgar o ar e proceder à ligação final.; Resultado esperado: Nenhuma perda de pressão nem presença de bolhas.; Observação: Ensaios obrigatoriamente executados por técnico credenciado ITG e registados em certificado de conformidade."
+     "Objetivo: Garantir a estanqueidade total e segurança da rede antes da ligação ao contador.; Procedimento: Teste efetuado com ar seco ou azoto (nunca com gás combustível).; Aplicar pressão de 150 mbar durante 10 minutos, sem variação.; Confirmar todas as uniões com água saponada ou detetor eletrónico de fugas.; Após ensaio, purgar o ar e proceder à ligação final.; Resultado esperado: Nenhuma perda de pressão nem presença de bolhas.; Observação: Ensaios obrigatoriamente executados por técnico credenciado ITG e registados em certificado de conformidade."
     ]
    },
    {
@@ -719,7 +719,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.0,
     "quem": "Eletricista",
     "det": [
-     "Comprovar a continuidade, isolamento e segurança dos circuitos elétricos.; Procedimento:; Verificar a continuidade dos condutores (fase, neutro, terra).; Medir resistência de isolamento (mínimo 1 MΩ entre condutores).; Testar funcionamento dos diferenciais (ID) — tempo de disparo ≤ 0,3 s.; Medir resistência da terra (máx. 50 Ω).; Confirmar polaridade correta nas tomadas e presença de tensão nominal (230 V).; Ensaiar o funcionamento de iluminação e equipamentos.; Resultado esperado: Todos os valores dentro dos limites regulamentares e funcionamento normal."
+     "Comprovar a continuidade, isolamento e segurança dos circuitos elétricos.; Procedimento: Verificar a continuidade dos condutores (fase, neutro, terra).; Medir resistência de isolamento (mínimo 1 MΩ entre condutores).; Testar funcionamento dos diferenciais (ID) — tempo de disparo ≤ 0,3 s.; Medir resistência da terra (máx. 50 Ω).; Confirmar polaridade correta nas tomadas e presença de tensão nominal (230 V).; Ensaiar o funcionamento de iluminação e equipamentos.; Resultado esperado: Todos os valores dentro dos limites regulamentares e funcionamento normal."
     ]
    },
    {
@@ -731,7 +731,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
      "Compilação dos resultados dos ensaios em fichas próprias.",
      "Registo de pressões iniciais e finais, valores medidos e observações.",
      "Emissão de relatórios de ensaio e certificados de conformidade, assinados pelo técnico responsável.",
-     "Em caso de não conformidades:; Identificação da origem do problema;; Correção da falha;; Repetição do teste até aprovação final."
+     "Em caso de não conformidades: Identificação da origem do problema;; Correção da falha;; Repetição do teste até aprovação final."
     ]
    }
   ]
@@ -788,7 +788,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "det": [
      "Aplicação de sistema impermeabilizante bicomponente (cimento + resina) ou membrana líquida acrílica, conforme especificação técnica do fabricante.",
      "Aplicar com trincha ou rolo, em duas a três demãos cruzadas, respeitando o tempo de secagem entre camadas (geralmente 4–6h).",
-     "Reforço com tela ou malha de fibra de vidro nas zonas críticas:; Cantos parede/pavimento;; Perímetros de ralos e drenos",
+     "Reforço com tela ou malha de fibra de vidro nas zonas críticas: Cantos parede/pavimento;; Perímetros de ralos e drenos",
      "Subida mínima de 20 cm nas paredes e até 1,80 m nas zonas de duche ou banheira.",
      "Teste final de estanqueidade (enchimento do pavimento com 2–3 cm de água por 24h) antes de revestir."
     ]
@@ -824,7 +824,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 0.5,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Escolher o tipo de revestimento conforme o projeto:; Azulejos cerâmicos ou porcelânicos;; Mosaicos hidráulicos ou vinílicos;; Pedra natural (mármore, granito);; Pastilhas de vidro ou cerâmica.",
+     "Escolher o tipo de revestimento conforme o projeto: Azulejos cerâmicos ou porcelânicos;; Mosaicos hidráulicos ou vinílicos;; Pedra natural (mármore, granito);; Pastilhas de vidro ou cerâmica.",
      "Verificar dimensões, tonalidades e calibre dos lotes para evitar diferenças visuais.",
      "Preparar a argamassa colante adequada ao tipo de material e suporte (C1, C2, S1, S2 conforme EN 12004).",
      "Misturar o produto mecanicamente até obter uma pasta homogénea, respeitando as proporções e tempos de maturação."
@@ -903,10 +903,10 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 8,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Marcação e traçado de níveis:; Utilizar nível laser ou mangueira de água para definir o plano do teto falso.; Marcar a altura de instalação (normalmente 5 a 15 cm abaixo da laje, consoante a necessidade técnica).",
-     "Montagem da estrutura metálica (perfilado galvanizado):; Fixar o perfil perimetral (UD) ao contorno das paredes com buchas e parafusos.; Instalar perfis principais (CD) suspensos por pendurais ajustáveis, espaçados entre 40–50 cm.; Garantir a planicidade do conjunto e travamento com perfis secundários.",
-     "Aplicação das placas de gesso cartonado (Pladur® ou equivalente):; Aparafusar as placas aos perfis CD com parafusos autorroscantes, afastados no máximo 17 cm entre si.; Dispor as juntas desencontradas entre fiadas para maior resistência.; Deixar aberturas previstas para luminárias, exaustores e acessos técnicos.",
-     "Tratamento de juntas e acabamentos:; Aplicar massa de juntas e fita de papel microperfurada sobre as uniões das placas.; Lixar e aplicar segunda demão de massa até obter uma superfície uniforme e pronta para pintura.",
+     "Marcação e traçado de níveis: Utilizar nível laser ou mangueira de água para definir o plano do teto falso.; Marcar a altura de instalação (normalmente 5 a 15 cm abaixo da laje, consoante a necessidade técnica).",
+     "Montagem da estrutura metálica (perfilado galvanizado): Fixar o perfil perimetral (UD) ao contorno das paredes com buchas e parafusos.; Instalar perfis principais (CD) suspensos por pendurais ajustáveis, espaçados entre 40–50 cm.; Garantir a planicidade do conjunto e travamento com perfis secundários.",
+     "Aplicação das placas de gesso cartonado (Pladur® ou equivalente): Aparafusar as placas aos perfis CD com parafusos autorroscantes, afastados no máximo 17 cm entre si.; Dispor as juntas desencontradas entre fiadas para maior resistência.; Deixar aberturas previstas para luminárias, exaustores e acessos técnicos.",
+     "Tratamento de juntas e acabamentos: Aplicar massa de juntas e fita de papel microperfurada sobre as uniões das placas.; Lixar e aplicar segunda demão de massa até obter uma superfície uniforme e pronta para pintura.",
      "Limpeza e inspeção final antes da pintura, garantindo ausência de poeiras ou resíduos."
     ]
    },
@@ -1121,7 +1121,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "quem": "Empreiteiro Geral",
     "det": [
      "Confirmar que as redes de água, gás e eletricidade foram devidamente testadas e aprovadas na Fase 2 (Testes de Estanqueidade e Funcionamento).",
-     "Verificar pressões de serviço e tensão elétrica:; Água fria: 3–4 bar;; Água quente: 2,5–3 bar;; Gás: 21 mbar (GN) ou 37 mbar (GLP);; Eletricidade: 230 V (monofásico) / 400 V (trifásico).",
+     "Verificar pressões de serviço e tensão elétrica: Água fria: 3–4 bar;; Água quente: 2,5–3 bar;; Gás: 21 mbar (GN) ou 37 mbar (GLP);; Eletricidade: 230 V (monofásico) / 400 V (trifásico).",
      "Confirmar a localização e acessibilidade das válvulas de corte, quadros elétricos e tomadas.",
      "Preparar ferramentas e materiais apropriados (mangueiras, cabos, conectores, fitas de vedação, selantes, etc.)."
     ]
@@ -1165,7 +1165,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "det": [
      "Equipamentos a ligar: forno, placa elétrica, exaustor, frigorífico, micro-ondas, máquina de lavar loiça, máquina de lavar roupa, termoacumulador.",
      "Desligar o disjuntor principal antes de qualquer manipulação.",
-     "Ligar os cabos à tomada ou borne de derivação correspondente, respeitando polaridade:; Fase (L): castanho/preto/cinzento;; Neutro (N): azul;; Terra (PE): verde/amarelo.",
+     "Ligar os cabos à tomada ou borne de derivação correspondente, respeitando polaridade: Fase (L): castanho/preto/cinzento;; Neutro (N): azul;; Terra (PE): verde/amarelo.",
      "Verificar a secção mínima dos condutores (2,5 mm² para tomadas, 4–6 mm² para circuitos de potência).",
      "Instalar fichas, disjuntores e diferenciais adequados a cada circuito.",
      "Fixar cabos e fichas de forma a evitar tensões mecânicas e contacto com fontes de calor.",
@@ -1193,7 +1193,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "quem": "Empreiteiro Geral",
     "det": [
      "Aplicar silicone neutro, acrílico ou poliuretano em todas as juntas de dilatação, ligações entre materiais e uniões entre planos (parede/pavimento, bancada/parede, louça/revestimento, rodapé/piso).",
-     "Escolher o tipo de selante conforme o local de aplicação:; Silicone neutro: zonas húmidas (cozinhas, casas de banho, lavandarias);; Selante acrílico: juntas de acabamento ou pintura;; Poliuretano (PU): juntas elásticas expostas a movimento ou vibração.",
+     "Escolher o tipo de selante conforme o local de aplicação: Silicone neutro: zonas húmidas (cozinhas, casas de banho, lavandarias);; Selante acrílico: juntas de acabamento ou pintura;; Poliuretano (PU): juntas elásticas expostas a movimento ou vibração.",
      "Assegurar que as superfícies estão limpas, secas e livres de poeiras e gorduras.",
      "Aplicar fita de acabamento para delimitar a junta, garantindo linhas retas e limpas.",
      "Extrudir o selante com pistola aplicadora e alisar com espátula de silicone ou dedo umedecido.",
@@ -1222,7 +1222,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "quem": "Tecnico de Limpeza",
     "det": [
      "Limpeza grossa: remoção de poeiras, entulhos finos, restos de silicone, cola ou argamassa.; Varredura e aspiração de todas as superfícies.; Retirada de películas protetoras de móveis, bancadas e janelas.",
-     "Limpeza fina: higienização completa dos espaços e acabamentos:; Lavagem de revestimentos cerâmicos com detergente neutro.; Limpeza de bancadas, móveis, vidros, metais e acessórios com produtos específicos.; Polimento de torneiras, puxadores e superfícies em inox.; Limpeza de vidros com limpa-vidros e panos de microfibra.; Desinfeção de louças sanitárias e superfícies de contacto.",
+     "Limpeza fina: higienização completa dos espaços e acabamentos: Lavagem de revestimentos cerâmicos com detergente neutro.; Limpeza de bancadas, móveis, vidros, metais e acessórios com produtos específicos.; Polimento de torneiras, puxadores e superfícies em inox.; Limpeza de vidros com limpa-vidros e panos de microfibra.; Desinfeção de louças sanitárias e superfícies de contacto.",
      "Verificação de ausência de resíduos, manchas e marcas de dedos.",
      "Ventilação dos espaços para eliminar odores e humidade."
     ]
@@ -1233,7 +1233,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 2.0,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Revisão detalhada de todas as zonas de intervenção:; Verificar juntas, selagens e acabamentos visuais.; Testar funcionamento de portas, janelas, torneiras, tomadas e luminárias.; Confirmar que não existem fugas de água, gás ou cabos expostos.",
+     "Revisão detalhada de todas as zonas de intervenção: Verificar juntas, selagens e acabamentos visuais.; Testar funcionamento de portas, janelas, torneiras, tomadas e luminárias.; Confirmar que não existem fugas de água, gás ou cabos expostos.",
      "Realizar checklist de verificação final de obra, assinado pelo encarregado ou técnico responsável.",
      "Executar retoques adicionais, se necessário.",
      "Entregar o espaço limpo, seco e totalmente operacional."
@@ -1348,7 +1348,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "quem": "Empreiteiro Geral",
     "det": [
      "Corte e desligamento das ligações hidráulicas (flexíveis, torneiras, sifões, válvulas) e de esgoto.",
-     "Desaparafusar e remover:; Sanita (com desconexão da saída e vedação temporária do tubo de esgoto);; Lavatório e respetivo móvel ou coluna;; Bidé e respetivas ligações;; Base de duche ou banheira (incluindo sifão e ligação de esgoto).",
+     "Desaparafusar e remover: Sanita (com desconexão da saída e vedação temporária do tubo de esgoto);; Lavatório e respetivo móvel ou coluna;; Bidé e respetivas ligações;; Base de duche ou banheira (incluindo sifão e ligação de esgoto).",
      "Proteger as saídas de esgoto com tampões ou fita adesiva para evitar odores e entrada de resíduos.",
      "Transportar as peças cuidadosamente, evitando impactos e quebras.",
      "Armazenar ou descartar conforme instruções do dono da obra (reutilização, substituição ou reciclagem)."
@@ -1411,7 +1411,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 4.0,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Executar levantamento prévio da estrutura existente, identificando se as paredes são:; Divisórias não estruturais (tijolo furado, bloco cerâmico ou pladur);; Paredes estruturais ou de suporte (nunca demolir sem parecer técnico).",
+     "Executar levantamento prévio da estrutura existente, identificando se as paredes são: Divisórias não estruturais (tijolo furado, bloco cerâmico ou pladur);; Paredes estruturais ou de suporte (nunca demolir sem parecer técnico).",
      "Iniciar a demolição de cima para baixo, removendo primeiro os revestimentos (azulejos, rebocos, argamassas).",
      "Utilizar martelo pneumático leve (3–5 kg) ou marreta e talhadeira manual, conforme o tipo de material.",
      "Trabalhar em painéis verticais de pequena dimensão (1 m²) para evitar colapsos descontrolados.",
@@ -1454,7 +1454,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 2.0,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Segregar os resíduos em conformidade com as normas de Gestão de Resíduos de Construção e Demolição (RCD):; Cerâmicos e argamassas;; Metais;; Materiais plásticos;; Madeira e gesso.",
+     "Segregar os resíduos em conformidade com as normas de Gestão de Resíduos de Construção e Demolição (RCD): Cerâmicos e argamassas;; Metais;; Materiais plásticos;; Madeira e gesso.",
      "Transportar o entulho para contentor autorizado e assegurar o destino final conforme legislação ambiental.",
      "Efetuar limpeza completa da área, incluindo varredura, aspiração e lavagem leve se necessário.",
      "Tamponar todas as tubagens expostas com rolhas provisórias ou fita adesiva.",
@@ -1468,7 +1468,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "quem": "Empreiteiro Geral",
     "det": [
      "Identificação dos tipos de resíduos produzidos (ex.: cerâmica, argamassa, madeira, metal, plástico, vidro, restos de tubagem, etc.).",
-     "Separação por categoria para facilitar reciclagem e destino final:; RCD Inertes (tijolo, betão, cerâmica).; Resíduos metálicos (canalizações, ferragens).; Resíduos mistos ou indiferenciados.; Resíduos perigosos (tintas, colas, solventes) — acondicionados separadamente.; Colocação do entulho em sacos resistentes (ex. big bags, sacos de ráfia ou polietileno reforçado)."
+     "Separação por categoria para facilitar reciclagem e destino final: RCD Inertes (tijolo, betão, cerâmica).; Resíduos metálicos (canalizações, ferragens).; Resíduos mistos ou indiferenciados.; Resíduos perigosos (tintas, colas, solventes) — acondicionados separadamente.; Colocação do entulho em sacos resistentes (ex. big bags, sacos de ráfia ou polietileno reforçado)."
     ]
    },
    {
@@ -1525,7 +1525,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "quem": "Empreiteiro Geral",
     "det": [
      "Consulta da lista de materiais aprovados no projeto e verificação das quantidades necessárias para a fase da obra.",
-     "Emissão da requisição interna de materiais, com identificação de:; Tipo de material, referência e unidade de medida;; Quantidade necessária;; Local e data de utilização;; Responsável pela requisição.",
+     "Emissão da requisição interna de materiais, com identificação de: Tipo de material, referência e unidade de medida;; Quantidade necessária;; Local e data de utilização;; Responsável pela requisição.",
      "Coordenação com o encarregado de armazém para agendamento do levantamento, garantindo disponibilidade e organização do stock.",
      "Preparação de meios de transporte e acondicionamento adequados (paletes, caixas, cintas, coberturas)."
     ]
@@ -1538,7 +1538,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "det": [
      "Identificação dos materiais com base nas fichas técnicas e códigos internos (ex.: azulejo modelo X, tubo PEX Ø16, cimento cola tipo C2).",
      "Verificação da quantidade física (contagem, pesagem ou medição) e conformidade do lote com a nota de requisição.",
-     "Inspeção visual da qualidade e integridade dos materiais:; Verificar ausência de danos (rachas, deformações, humidade, ferrugem, etc.);; Confirmar prazos de validade (em colas, tintas, argamassas, selantes).",
+     "Inspeção visual da qualidade e integridade dos materiais: Verificar ausência de danos (rachas, deformações, humidade, ferrugem, etc.);; Confirmar prazos de validade (em colas, tintas, argamassas, selantes).",
      "Caso seja necessário, emissão de nota de não conformidade para materiais danificados ou incorretos.",
      "Registo de saída de materiais em guia de remessa interna ou nota de transferência de stock."
     ]
@@ -1549,7 +1549,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.5,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Planeamento do transporte segundo o tipo de material:; Materiais pesados ou volumosos: utilização de empilhadores, gruas, paleteiras.; Materiais frágeis: transporte protegido com mantas, espumas e paletes estáveis.",
+     "Planeamento do transporte segundo o tipo de material: Materiais pesados ou volumosos: utilização de empilhadores, gruas, paleteiras.; Materiais frágeis: transporte protegido com mantas, espumas e paletes estáveis.",
      "Acondicionamento e amarração segura da carga (cintas, fitas ou redes de proteção).",
      "Emissão e acompanhamento da guia de transporte ou guia de remessa até à obra.",
      "Registo do condutor, matrícula e hora de saída.",
@@ -1562,7 +1562,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 0.17,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Verificação dos materiais à chegada ao estaleiro:; Conferência das quantidades e integridade física.; Confirmação com guia de remessa e assinatura de receção.",
+     "Verificação dos materiais à chegada ao estaleiro: Conferência das quantidades e integridade física.; Confirmação com guia de remessa e assinatura de receção.",
      "Acondicionamento no local de armazenamento temporário em obra, protegido da intempérie e humidade.",
      "Organização dos materiais por tipo e prioridade de utilização (ex.: canalizações, revestimentos, colas, tintas).",
      "Atualização do mapa de controlo de materiais em obra (entradas e saídas)."
@@ -1592,7 +1592,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.5,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Levantamento das linhas de abastecimento e drenagem existentes, identificando:; Localização e diâmetro das tubagens antigas;; Pontos de entrada/saída;; Alturas e declives dos ramais;; Possíveis interferências com outras redes (elétrica, gás, ventilação).",
+     "Levantamento das linhas de abastecimento e drenagem existentes, identificando: Localização e diâmetro das tubagens antigas;; Pontos de entrada/saída;; Alturas e declives dos ramais;; Possíveis interferências com outras redes (elétrica, gás, ventilação).",
      "Definição das novas rotas de canalização com base no projeto de especialidades e no layout final (sanita, base de duche, etc.).",
      "Marcação em parede, pavimento ou teto com giz, fita ou laser para posterior rasgo."
     ]
@@ -1626,8 +1626,8 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 2.5,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Abastecimento de água fria e quente:; Instalação de tubagens em PEX, multicamada ou PPR com diâmetros adequados (mín. Ø16 para lavatórios e Ø20 para duches ou lavatórios duplos).; Fixação com abraçadeiras plásticas ou metálicas, respeitando espaçamentos máximos de 50–60 cm.; Interposição de mangas isolantes para evitar condensação e ruído.; Colocação de válvulas de seccionamento em pontos estratégicos (entrada, lavatório, máquina, base de duche).",
-     "Rede de esgotos e ventilação:; Utilização de tubagem em PVC ou PP de parede lisa (mín. Ø40 mm para lavatórios, Ø50 mm para duches e máquinas, Ø110 mm para sanitas).; Execução dos ramais com declive mínimo de 2% para garantir o escoamento.; União com manguitos e juntas elásticas devidamente lubrificadas.; Instalação de joelhos, sifões e ventiladores secundários, conforme necessidade."
+     "Abastecimento de água fria e quente: Instalação de tubagens em PEX, multicamada ou PPR com diâmetros adequados (mín. Ø16 para lavatórios e Ø20 para duches ou lavatórios duplos).; Fixação com abraçadeiras plásticas ou metálicas, respeitando espaçamentos máximos de 50–60 cm.; Interposição de mangas isolantes para evitar condensação e ruído.; Colocação de válvulas de seccionamento em pontos estratégicos (entrada, lavatório, máquina, base de duche).",
+     "Rede de esgotos e ventilação: Utilização de tubagem em PVC ou PP de parede lisa (mín. Ø40 mm para lavatórios, Ø50 mm para duches e máquinas, Ø110 mm para sanitas).; Execução dos ramais com declive mínimo de 2% para garantir o escoamento.; União com manguitos e juntas elásticas devidamente lubrificadas.; Instalação de joelhos, sifões e ventiladores secundários, conforme necessidade."
     ]
    },
    {
@@ -1636,8 +1636,8 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.0,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Ensaio de estanquidade da rede de água:; Pressurização a 6 bar durante 30 minutos, sem perdas.; Verificação de todas as uniões e conexões.",
-     "Teste de escoamento na rede de esgotos:; Enchimento parcial de ramais e verificação visual de fugas.; Confirmar a ausência de ruídos e refluxos.",
+     "Ensaio de estanquidade da rede de água: Pressurização a 6 bar durante 30 minutos, sem perdas.; Verificação de todas as uniões e conexões.",
+     "Teste de escoamento na rede de esgotos: Enchimento parcial de ramais e verificação visual de fugas.; Confirmar a ausência de ruídos e refluxos.",
      "Registo de resultados e aprovação pelo técnico responsável."
     ]
    },
@@ -1658,8 +1658,8 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.0,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Análise do projeto elétrico e do layout da casa de banho, identificando:; Localização de tomadas, interruptores, pontos de luz e saídas técnicas.; Tipo de conduta (embutida ou aparente) e altura de instalação conforme normas (ex.: tomadas 1,10 m acima do piso, interruptores a 1,20 m).",
-     "Verificação do quadro elétrico existente — avaliar se há necessidade de:; Novos disjuntores;; Diferenciais (ID);; Aumento de potência contratada;; Reforço de cablagem principal.",
+     "Análise do projeto elétrico e do layout da casa de banho, identificando: Localização de tomadas, interruptores, pontos de luz e saídas técnicas.; Tipo de conduta (embutida ou aparente) e altura de instalação conforme normas (ex.: tomadas 1,10 m acima do piso, interruptores a 1,20 m).",
+     "Verificação do quadro elétrico existente — avaliar se há necessidade de: Novos disjuntores;; Diferenciais (ID);; Aumento de potência contratada;; Reforço de cablagem principal.",
      "Marcação no local, conforme traçado aprovado."
     ]
    },
@@ -1681,7 +1681,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 2.0,
     "quem": "Eletricista",
     "det": [
-     "Introdução dos condutores elétricos (tipo H07V-U ou H07V-R) nos tubos, respeitando a codificação de cores:; Azul – Neutro (N); Castanho / Preto / Cinzento – Fase (L); Verde/Amarelo – Terra (PE)",
+     "Introdução dos condutores elétricos (tipo H07V-U ou H07V-R) nos tubos, respeitando a codificação de cores: Azul – Neutro (N); Castanho / Preto / Cinzento – Fase (L); Verde/Amarelo – Terra (PE)",
      "Dimensionamento das secções dos cabos conforme o circuito: Circuito Secção do Condutor Proteção Iluminação 1,5 mm² Disjuntor 10 A Tomadas gerais 2,5 mm² Disjuntor 16 A",
      "Instalação dos condutores de terra interligando todas as tomadas metálicas e aparelhos."
     ]
@@ -1732,7 +1732,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "det": [
      "Confirmar a posição exata e modelo do equipamento (toalheiro, radiador, convetor, etc.), de acordo com o layout do projeto.",
      "Verificar altura de instalação recomendada (geralmente 90–120 cm do piso acabado) e distâncias mínimas a outros elementos (sanita, lavatório, base de duche).",
-     "Determinar o tipo de ligação necessária:; Elétrica – toalheiro elétrico ou convetor;; Hidráulica – radiador ligado à rede de aquecimento central;; Híbrida – elétrica + circuito de água quente.",
+     "Determinar o tipo de ligação necessária: Elétrica – toalheiro elétrico ou convetor;; Hidráulica – radiador ligado à rede de aquecimento central;; Híbrida – elétrica + circuito de água quente.",
      "Marcar no local os pontos de alimentação e fixação com base em medidas do fabricante."
     ]
    },
@@ -1772,7 +1772,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.0,
     "quem": "Auditor",
     "det": [
-     "Combinar as duas redes:; Alimentação elétrica embutida com tubo separado da instalação hidráulica;; Tubos de ida e retorno em multicamada ou PEX;; Caixa técnica de junção e válvulas de corte embutidas no revestimento.",
+     "Combinar as duas redes: Alimentação elétrica embutida com tubo separado da instalação hidráulica;; Tubos de ida e retorno em multicamada ou PEX;; Caixa técnica de junção e válvulas de corte embutidas no revestimento.",
      "Deixar o ponto de energia e as tubagens na mesma vertical, para compatibilidade com o equipamento híbrido."
     ]
    },
@@ -1782,7 +1782,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.0,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Antes de fechar os roços:; Verificar continuidade e isolamento elétrico do circuito com multímetro;; Testar estanquidade das tubagens hidráulicas sob pressão (6 bar durante 30 minutos).",
+     "Antes de fechar os roços: Verificar continuidade e isolamento elétrico do circuito com multímetro;; Testar estanquidade das tubagens hidráulicas sob pressão (6 bar durante 30 minutos).",
      "Conferir o alinhamento e posicionamento dos pontos de fixação e ligações.",
      "Fotografar e registar a posição exata das infraestruturas embutidas para futura referência.",
      "Após aprovação técnica, proceder ao fecho das roças com argamassa e reboco fino."
@@ -1842,7 +1842,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "det": [
      "Aplicação de sistema impermeabilizante bicomponente (cimento + resina) ou membrana líquida acrílica, conforme especificação técnica do fabricante.",
      "Aplicar com trincha ou rolo, em duas a três demãos cruzadas, respeitando o tempo de secagem entre camadas (geralmente 4–6h).",
-     "Reforço com tela ou malha de fibra de vidro nas zonas críticas:; Cantos parede/pavimento;; Perímetros de ralos e drenos;; Junções com tubagens e bases de duche.",
+     "Reforço com tela ou malha de fibra de vidro nas zonas críticas: Cantos parede/pavimento;; Perímetros de ralos e drenos;; Junções com tubagens e bases de duche.",
      "Subida mínima de 20 cm nas paredes e até 1,80 m nas zonas de duche ou banheira.",
      "Teste final de estanqueidade (enchimento do pavimento com 2–3 cm de água por 24h) antes de revestir."
     ]
@@ -1878,7 +1878,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 0.5,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Escolher o tipo de revestimento conforme o projeto:; Azulejos cerâmicos ou porcelânicos;; Mosaicos hidráulicos ou vinílicos;; Pedra natural (mármore, granito);; Pastilhas de vidro ou cerâmica.",
+     "Escolher o tipo de revestimento conforme o projeto: Azulejos cerâmicos ou porcelânicos;; Mosaicos hidráulicos ou vinílicos;; Pedra natural (mármore, granito);; Pastilhas de vidro ou cerâmica.",
      "Verificar dimensões, tonalidades e calibre dos lotes para evitar diferenças visuais.",
      "Preparar a argamassa colante adequada ao tipo de material e suporte (C1, C2, S1, S2 conforme EN 12004).",
      "Misturar o produto mecanicamente até obter uma pasta homogénea, respeitando as proporções e tempos de maturação."
@@ -1957,10 +1957,10 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 8,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Marcação e traçado de níveis:; Utilizar nível laser ou mangueira de água para definir o plano do teto falso.; Marcar a altura de instalação (normalmente 5 a 15 cm abaixo da laje, consoante a necessidade técnica).",
-     "Montagem da estrutura metálica (perfilado galvanizado):; Fixar o perfil perimetral (UD) ao contorno das paredes com buchas e parafusos.; Instalar perfis principais (CD) suspensos por pendurais ajustáveis, espaçados entre 40–50 cm.; Garantir a planicidade do conjunto e travamento com perfis secundários.",
-     "Aplicação das placas de gesso cartonado (Pladur® ou equivalente):; Aparafusar as placas aos perfis CD com parafusos autorroscantes, afastados no máximo 17 cm entre si.; Dispor as juntas desencontradas entre fiadas para maior resistência.; Deixar aberturas previstas para luminárias, exaustores e acessos técnicos.",
-     "Tratamento de juntas e acabamentos:; Aplicar massa de juntas e fita de papel microperfurada sobre as uniões das placas.; Lixar e aplicar segunda demão de massa até obter uma superfície uniforme e pronta para pintura.",
+     "Marcação e traçado de níveis: Utilizar nível laser ou mangueira de água para definir o plano do teto falso.; Marcar a altura de instalação (normalmente 5 a 15 cm abaixo da laje, consoante a necessidade técnica).",
+     "Montagem da estrutura metálica (perfilado galvanizado): Fixar o perfil perimetral (UD) ao contorno das paredes com buchas e parafusos.; Instalar perfis principais (CD) suspensos por pendurais ajustáveis, espaçados entre 40–50 cm.; Garantir a planicidade do conjunto e travamento com perfis secundários.",
+     "Aplicação das placas de gesso cartonado (Pladur® ou equivalente): Aparafusar as placas aos perfis CD com parafusos autorroscantes, afastados no máximo 17 cm entre si.; Dispor as juntas desencontradas entre fiadas para maior resistência.; Deixar aberturas previstas para luminárias, exaustores e acessos técnicos.",
+     "Tratamento de juntas e acabamentos: Aplicar massa de juntas e fita de papel microperfurada sobre as uniões das placas.; Lixar e aplicar segunda demão de massa até obter uma superfície uniforme e pronta para pintura.",
      "Limpeza e inspeção final antes da pintura, garantindo ausência de poeiras ou resíduos."
     ]
    },
@@ -2032,7 +2032,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "quem": "Empreiteiro Geral",
     "det": [
      "Confirmar que as infraestruturas de água e esgoto estão testadas e limpas.",
-     "Conferir posições, alturas e diâmetros das ligações:; Esgotos: Ø110 mm (sanita), Ø40–50 mm (lavatório e bidé).; Água fria/quente: Ø16–20 mm, com válvulas de corte visíveis.",
+     "Conferir posições, alturas e diâmetros das ligações: Esgotos: Ø110 mm (sanita), Ø40–50 mm (lavatório e bidé).; Água fria/quente: Ø16–20 mm, com válvulas de corte visíveis.",
      "Verificar nível e planeza do pavimento e paredes onde serão fixadas as louças.",
      "Reunir o material completo de fixação e vedação (buchas, parafusos, anilhas, juntas, silicone).",
      "Proteger o piso com manta ou cartão para evitar riscos durante a montagem."
@@ -2120,8 +2120,8 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 0.75,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Torneira de lavatório / bidé:; Montar o corpo e vedantes conforme as instruções do fabricante.; Ligar flexíveis de água fria e quente às válvulas de corte.; Fixar o conjunto firmemente sem excessos de aperto.; Testar o funcionamento e estanqueidade.",
-     "Coluna de duche / banheira:; Fixar as bases excêntricas à parede, alinhadas e niveladas.; Instalar o misturador e apertar com chaves adequadas, protegendo o acabamento cromado.; Ligar o chuveiro, mangueira e suporte.; Testar caudal, temperatura e pressão."
+     "Torneira de lavatório / bidé: Montar o corpo e vedantes conforme as instruções do fabricante.; Ligar flexíveis de água fria e quente às válvulas de corte.; Fixar o conjunto firmemente sem excessos de aperto.; Testar o funcionamento e estanqueidade.",
+     "Coluna de duche / banheira: Fixar as bases excêntricas à parede, alinhadas e niveladas.; Instalar o misturador e apertar com chaves adequadas, protegendo o acabamento cromado.; Ligar o chuveiro, mangueira e suporte.; Testar caudal, temperatura e pressão."
     ]
    },
    {
@@ -2130,7 +2130,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 0.67,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Marcar a posição conforme o layout ergonómico:; Porta-toalhas: 90–120 cm do piso;; Porta-rolo: 65–70 cm do piso e 20–30 cm da sanita;; Suporte de copo, saboneteira e gancho em zonas acessíveis.",
+     "Marcar a posição conforme o layout ergonómico: Porta-toalhas: 90–120 cm do piso;; Porta-rolo: 65–70 cm do piso e 20–30 cm da sanita;; Suporte de copo, saboneteira e gancho em zonas acessíveis.",
      "Utilizar buchas de nylon e parafusos inoxidáveis, com nivelamento preciso.",
      "Evitar perfurações sobre tubagens — usar detetor de metais.",
      "Fixar firmemente, garantindo estabilidade e alinhamento visual."
@@ -2182,9 +2182,9 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "det": [
      "Confirmar que a instalação elétrica está finalizada e testada na Fase 2, com circuitos devidamente identificados e disjuntores instalados.",
      "Cortar a alimentação geral (disjuntor principal) antes de iniciar qualquer ligação.",
-     "Verificar o tipo de equipamento a instalar e os respetivos requisitos elétricos:; Luminárias de teto embutidas ou de superfície;; Espelhos com luz integrada;; Ventax (exaustor ou ventilador elétrico);; Tomadas e interruptores adicionais.",
-     "Conferir que os cabos de alimentação (fase, neutro e terra) estão corretamente dimensionados e identificados por cor:; Fase (L): castanho, preto ou cinzento;; Neutro (N): azul;; Terra (PE): verde/amarelo.",
-     "Certificar-se de que o grau de proteção (IP) dos equipamentos é adequado à zona da casa de banho:; IP44 ou superior em zonas húmidas (duche, lavatório);; IP20–IP40 em zonas secas."
+     "Verificar o tipo de equipamento a instalar e os respetivos requisitos elétricos: Luminárias de teto embutidas ou de superfície;; Espelhos com luz integrada;; Ventax (exaustor ou ventilador elétrico);; Tomadas e interruptores adicionais.",
+     "Conferir que os cabos de alimentação (fase, neutro e terra) estão corretamente dimensionados e identificados por cor: Fase (L): castanho, preto ou cinzento;; Neutro (N): azul;; Terra (PE): verde/amarelo.",
+     "Certificar-se de que o grau de proteção (IP) dos equipamentos é adequado à zona da casa de banho: IP44 ou superior em zonas húmidas (duche, lavatório);; IP20–IP40 em zonas secas."
     ]
    },
    {
@@ -2196,7 +2196,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
      "Confirmar o posicionamento exato das luminárias segundo o projeto (teto, parede, embutido ou de superfície).",
      "Verificar a compatibilidade entre o tipo de luminária e a alimentação disponível (230 V AC ou 12/24 V DC, conforme o caso).",
      "Fixar a base ou calha de suporte com buchas e parafusos adequados ao tipo de suporte (reboco, gesso cartonado ou betão).",
-     "Conectar os condutores ao borne da luminária:; L (fase) → castanho/preto;; N (neutro) → azul;; PE (terra) → verde/amarelo.",
+     "Conectar os condutores ao borne da luminária: L (fase) → castanho/preto;; N (neutro) → azul;; PE (terra) → verde/amarelo.",
      "Garantir que as ligações são feitas com fichas rápidas ou bornes isolados e sem fios expostos.",
      "Fixar o difusor e testar o funcionamento do interruptor correspondente.",
      "Verificar nível de iluminação e ausência de cintilação."
@@ -2211,8 +2211,8 @@ export const FASES_MUDELAR: FaseMudelar[] = [
      "Verificar o local e dimensão da saída de ar, assegurando ligação à conduta de exaustão.",
      "Confirmar a tensão de alimentação (230 V) e a existência de circuito protegido (disjuntor 10 A + diferencial 30 mA).",
      "Montar o corpo do equipamento com buchas adequadas e vedar o perímetro com silicone neutro (em zonas húmidas).",
-     "Efetuar a ligação elétrica:; L (fase) → castanho/preto;; N (neutro) → azul;; PE (terra) → verde/amarelo.",
-     "Se o exaustor for automático (com sensor de humidade ou temporizador):; Ligar o fio de comando (geralmente branco) ao circuito de iluminação, para que funcione em simultâneo com o interruptor.",
+     "Efetuar a ligação elétrica: L (fase) → castanho/preto;; N (neutro) → azul;; PE (terra) → verde/amarelo.",
+     "Se o exaustor for automático (com sensor de humidade ou temporizador): Ligar o fio de comando (geralmente branco) ao circuito de iluminação, para que funcione em simultâneo com o interruptor.",
      "Testar o funcionamento e ruído do motor, bem como o tempo de desligamento retardado (se aplicável).",
      "Confirmar que a exaustão é eficiente e sem retorno de ar."
     ]
@@ -2224,7 +2224,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "quem": "Empreiteiro Geral",
     "det": [
      "Instalar mecanismos de aparelhagem (tomadas e interruptores) com espelhos e placas frontais.",
-     "Respeitar as zonas de proteção da casa de banho (Norma IEC 60364-7-701):; Zona 0: interior da banheira/duche — proibida instalação de aparelhos elétricos;; Zona 1: até 2,25 m acima do duche — só equipamentos IPX5 (Ventax);; Zona 2: até 0,6 m do limite da banheira — IPX4;; Zona 3: restantes áreas — equipamentos normais (IP20+).",
+     "Respeitar as zonas de proteção da casa de banho (Norma IEC 60364-7-701): Zona 0: interior da banheira/duche — proibida instalação de aparelhos elétricos;; Zona 1: até 2,25 m acima do duche — só equipamentos IPX5 (Ventax);; Zona 2: até 0,6 m do limite da banheira — IPX4;; Zona 3: restantes áreas — equipamentos normais (IP20+).",
      "Fixar as caixas com parafusos inoxidáveis e verificar alinhamento e estabilidade.",
      "Testar o funcionamento de cada circuito (luzes, ventax, espelho, tomadas)."
     ]
@@ -2236,7 +2236,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "quem": "Empreiteiro Geral",
     "det": [
      "Ligar o disjuntor principal e testar todos os circuitos individualmente.",
-     "Confirmar:; Tensão nominal (230 V);; Funcionamento de luminárias e ventiladores;; Ausência de aquecimento excessivo ou ruídos;; Funcionamento dos diferenciais (ID) e proteção à terra.",
+     "Confirmar: Tensão nominal (230 V);; Funcionamento de luminárias e ventiladores;; Ausência de aquecimento excessivo ou ruídos;; Funcionamento dos diferenciais (ID) e proteção à terra.",
      "Testar o nível de iluminação e a ventilação adequada da casa de banho.",
      "Etiquetar circuitos no quadro elétrico, se aplicável.",
      "Executar verificação visual e funcional com o responsável técnico."
@@ -2249,7 +2249,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "quem": "Empreiteiro Geral",
     "det": [
      "Aplicar silicone neutro, acrílico ou poliuretano em todas as juntas de dilatação, ligações entre materiais e uniões entre planos (parede/pavimento, bancada/parede, louça/revestimento, rodapé/piso).",
-     "Escolher o tipo de selante conforme o local de aplicação:; Silicone neutro: zonas húmidas (cozinhas, casas de banho, lavandarias);; Selante acrílico: juntas de acabamento ou pintura;; Poliuretano (PU): juntas elásticas expostas a movimento ou vibração.",
+     "Escolher o tipo de selante conforme o local de aplicação: Silicone neutro: zonas húmidas (cozinhas, casas de banho, lavandarias);; Selante acrílico: juntas de acabamento ou pintura;; Poliuretano (PU): juntas elásticas expostas a movimento ou vibração.",
      "Assegurar que as superfícies estão limpas, secas e livres de poeiras e gorduras.",
      "Aplicar fita de acabamento para delimitar a junta, garantindo linhas retas e limpas.",
      "Extrudir o selante com pistola aplicadora e alisar com espátula de silicone ou dedo umedecido.",
@@ -2278,7 +2278,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "quem": "Tecnico de Limpeza",
     "det": [
      "Limpeza grossa: remoção de poeiras, entulhos finos, restos de silicone, cola ou argamassa.; Varredura e aspiração de todas as superfícies.; Retirada de películas protetoras de móveis, bancadas e janelas",
-     "Limpeza fina: higienização completa dos espaços e acabamentos:; Lavagem de revestimentos cerâmicos com detergente neutro.; Limpeza de bancadas, móveis, vidros, metais e acessórios com produtos específicos.; Polimento de torneiras, puxadores e superfícies em inox.; Limpeza de vidros com limpa-vidros e panos de microfibra.; Desinfeção de louças sanitárias e superfícies de contacto.",
+     "Limpeza fina: higienização completa dos espaços e acabamentos: Lavagem de revestimentos cerâmicos com detergente neutro.; Limpeza de bancadas, móveis, vidros, metais e acessórios com produtos específicos.; Polimento de torneiras, puxadores e superfícies em inox.; Limpeza de vidros com limpa-vidros e panos de microfibra.; Desinfeção de louças sanitárias e superfícies de contacto.",
      "Verificação de ausência de resíduos, manchas e marcas de dedos.",
      "Ventilação dos espaços para eliminar odores e humidade."
     ]
@@ -2289,7 +2289,7 @@ export const FASES_MUDELAR: FaseMudelar[] = [
     "h": 1.0,
     "quem": "Empreiteiro Geral",
     "det": [
-     "Revisão detalhada de todas as zonas de intervenção:; Verificar juntas, selagens e acabamentos visuais.; Testar funcionamento de portas, janelas, torneiras, tomadas e luminárias.; Confirmar que não existem fugas de água, gás ou cabos expostos.",
+     "Revisão detalhada de todas as zonas de intervenção: Verificar juntas, selagens e acabamentos visuais.; Testar funcionamento de portas, janelas, torneiras, tomadas e luminárias.; Confirmar que não existem fugas de água, gás ou cabos expostos.",
      "Realizar checklist de verificação final de obra, assinado pelo encarregado ou técnico responsável.",
      "Executar retoques adicionais, se necessário.",
      "Entregar o espaço limpo, seco e totalmente operacional."
