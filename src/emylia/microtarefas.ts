@@ -203,8 +203,15 @@ export function horasDasMicro(t: Tarefa, S?: Estado | null, p?: Plano | null): n
   const h = r.L.reduce((a, m) => a + (m.h ?? 0), 0);
   return h > 0 ? r2(h) : null;
 }
-/** Os dias de espera das microtarefas (secagens e curas: os «1 day» do Infraspeak). */
+/** Os dias de espera das microtarefas (secagens e curas: os «1 day» do Infraspeak). 25/11 (Rúben: «só a maior»): as esperas de uma
+ *  tarefa correm ao mesmo tempo (as paredes e o chão secam juntos): conta a maior, não a soma. */
 export function esperaDasMicro(t: Tarefa, S?: Estado | null, p?: Plano | null): number {
+  const r = microtarefasDe(t, S, p);
+  if (r.origem === "instrucoes" || r.origem === "catalogo") return 0;
+  return r.L.reduce((a, m) => Math.max(a, m.dias ?? 0), 0);
+}
+/** A soma das esperas (como a regra as contava antes de 25/11, para corrigir os dias que ficaram a mais). */
+function esperaSomada(t: Tarefa, S?: Estado | null, p?: Plano | null): number {
   const r = microtarefasDe(t, S, p);
   if (r.origem === "instrucoes" || r.origem === "catalogo") return 0;
   return r.L.reduce((a, m) => a + (m.dias ?? 0), 0);
@@ -228,8 +235,11 @@ export function ajustePorFazer(t: Tarefa, S?: Estado | null, p?: Plano | null, h
   h = meia(h);
   // a subir (ou igual), os dias nunca encolhem; a corrigir para baixo (a espera contada como horas), os dias são o trabalho mais a espera
   // sem horas novas nem espera, os dias ficam (uma tarefa com mais pessoas tem menos dias do que horas ÷ 8)
-  const dur = h < t.h ? diasDe(h) + espera : h > t.h || espera ? Math.max(diasDe(h) + espera, t.dur) : t.dur;
-  return h !== t.h || dur > t.dur ? { h, dur } : null;
+  let dur = h < t.h ? diasDe(h) + espera : h > t.h || espera ? Math.max(diasDe(h) + espera, t.dur) : t.dur;
+  // 25/11: dias que a regra pôs com as esperas somadas descem para a maior espera
+  const somada = esperaSomada(t, S, p);
+  if (somada > espera && h === t.h && t.dur === diasDe(h) + somada) dur = diasDe(h) + espera;
+  return h !== t.h || dur !== t.dur ? { h, dur } : null;
 }
 /** Há alguma coisa a ajustar nesta tarefa (para os contadores). */
 export const horasPorSubir = (t: Tarefa, S?: Estado | null, p?: Plano | null): number | null => ajustePorFazer(t, S, p)?.h ?? null;

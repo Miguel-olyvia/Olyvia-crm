@@ -252,6 +252,21 @@ describe("a espera (os «1 dia» do Infraspeak) conta nos dias e não nas horas 
   });
 });
 
+describe("só a maior espera conta (25/11)", () => {
+  it("três esperas de 2 dias contam 2 dias; os dias postos com a soma (6) descem", () => {
+    const { S, d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "MO Modelo Remodelação Completa - Cozinha · regularização e rebocos"; delete t.bloqueio;
+    expect(listaMicro(t, S, p).filter((m) => m.dias === 2).length).toBe(3);
+    expect(esperaDasMicro(t, S, p)).toBe(2);
+    t.h = 4; t.dur = 1 + 6; // como a regra o deixou com as esperas somadas
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBe(4);
+    expect(t.dur).toBe(1 + 2);
+    expect(A.ajustarHorasPelasMicro(d.id)).toBe(0); // já está
+  });
+});
+
 describe("os tempos pelo Infraspeak (25/11)", () => {
   it("cada tarefa com as horas das microtarefas; usar muda as horas da tarefa", () => {
     const { S, d, A, p, livre } = obra();
