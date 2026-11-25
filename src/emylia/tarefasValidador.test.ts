@@ -23,14 +23,20 @@ describe("o validador junta tarefas ao plano", () => {
     p.estado = "em curso"; p.dia = 2;
     expect(criarTarefa(p, revest, { sid: "revest", q: 1, fase: 3 }).dia).toBe(2);
   });
-  it("juntar guarda a base do orçamento; só as tarefas novas se tiram", () => {
+  // 24/11 (Rúben: «no Estúdio da obra poder juntar e tirar tarefas»): tira-se qualquer tarefa sem trabalho do técnico, também as do
+  // orçamento (a base guarda-as); uma com trabalho registado não se tira
+  it("juntar guarda a base do orçamento; tira-se qualquer tarefa sem trabalho do técnico", () => {
     const p = plano();
     const ti = juntarTarefa(p, criarTarefa(p, pint, { sid: "pint", q: 10, fase: 4 }));
     expect(p.base).toHaveLength(3);
+    p.tasks[0].exec = { estado: "em curso", horas: 1, fotos: [] };
     expect(podeTirar(p, 0)).toBe(false);
     expect(tirarTarefa(p, 0)).toBe(false);
     expect(tirarTarefa(p, ti)).toBe(true);
     expect(p.tasks).toHaveLength(3);
+    expect(tirarTarefa(p, 1)).toBe(true); // a do orçamento, sem trabalho
+    expect(p.tasks).toHaveLength(2);
+    expect(p.base).toHaveLength(3); // a base do orçamento fica
   });
   it("mudar de fase respeita o início mínimo da fase nova", () => {
     const p = plano();
