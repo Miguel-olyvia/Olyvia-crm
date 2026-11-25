@@ -943,7 +943,8 @@ export function NotaEncomendaDoc({ d }: { d: Negocio }) {
 }
 
 /* ------------------------------------------------------------------ partilhar */
-function imprimir(el: HTMLElement | null, titulo: string) {
+/** 25/11: também para o «PDF» do Tudo do negócio (abre a folha e pede a impressão, onde se escolhe «Guardar como PDF»). */
+export function imprimir(el: HTMLElement | null, titulo: string) {
   if (!el) return;
   const w = window.open("", "_blank");
   if (!w) return;

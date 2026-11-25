@@ -62,3 +62,17 @@ export function documentosEnviados(d: Negocio, _S?: Estado): DocEnviado[] {
 
 /** Os que esperam pelo cliente (para o número no separador). */
 export const porResponder = (L: DocEnviado[]) => L.filter((x) => x.tom === "espera").length;
+
+/** 25/11 (Rúben, no «Ver tudo do negócio»: «aqui devias colocar o link para o orçamento em PDF, proposta em PDF, contrato, etc.»): todos
+ *  os documentos do negócio, os enviados e o orçamento ainda por enviar, cada um com a fase onde se lê (3 Negócio, 4 Financeiro, 5 Obra). */
+export interface DocDoNegocio extends DocEnviado { fase: number }
+export function documentosDoNegocio(d: Negocio, S?: Estado): DocDoNegocio[] {
+  const L: DocDoNegocio[] = [];
+  const o = d.orc;
+  if (o && !o.enviada && !o.vendaDireta) L.push({ id: "orcamento", k: "proposta", titulo: "Orçamento", numero: numeroDaPropostaDoNegocio(d), quando: "", estado: "Ainda não enviado", tom: "neutro", reenvio: "proposta", fase: 3 });
+  for (const x of documentosEnviados(d, S)) {
+    const fase = x.k === "proposta" || x.k === "contrato" ? 3 : x.k === "fatura" || x.k === "faturaTranche" ? 4 : 5;
+    L.push({ ...x, fase });
+  }
+  return L;
+}

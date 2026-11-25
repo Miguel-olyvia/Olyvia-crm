@@ -19,6 +19,24 @@ const montar = (escolher: (d: Negocio) => boolean) => {
   return { d, irPara };
 };
 
+describe("os documentos de cada fase (25/11)", () => {
+  it("na fase Negócio, o orçamento (ou a proposta enviada) com «Ver» e «PDF»; «Ver» abre a folha por cima", () => {
+    montar((x) => x.fase === 3 && !!x.orc);
+    const neg = screen.getByRole("region", { name: "Negócio" });
+    expect(within(neg).getByText("Documentos")).toBeTruthy();
+    const ver = within(neg).getAllByRole("button", { name: /^Ver (Orçamento|Proposta)/ })[0];
+    expect(within(neg).getAllByRole("button", { name: /em PDF$/ }).length).toBeGreaterThan(0);
+    fireEvent.click(ver);
+    expect(screen.getByRole("dialog", { name: /^(Orçamento|Proposta)/ })).toBeTruthy();
+  });
+  it("numa obra em curso, a proposta enviada fica na fase Negócio, com o PDF", () => {
+    montar((x) => x.fase === 5 && !!x.orc?.enviada);
+    const neg = screen.getByRole("region", { name: "Negócio" });
+    fireEvent.click(within(neg).getByRole("button", { name: /Negócio/, expanded: false }));
+    expect(within(neg).queryAllByRole("button", { name: /em PDF$/ }).some((b) => /Proposta/.test(b.getAttribute("aria-label") ?? ""))).toBe(true);
+  });
+});
+
 describe("Tudo do negócio (11/11)", () => {
   it("as seis fases; a atual aberta e marcada; as futuras sem «Ir a esta fase»", () => {
     const { d } = montar((x) => x.fase === 3 && !!x.orc);

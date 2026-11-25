@@ -3,7 +3,7 @@
 //  · Documentos: o que foi para o portal do cliente (documentosObra.ts), quando e em que estado; abrir cada um por cima (o «voltar» fecha,
 //    ?doc=) e reenviar o acesso ao cliente com esse documento (pede confirmação; numa conta real, a permissão do portal);
 //  · 3D: o projeto do Estúdio do projeto em volume (obra3d.ts), só para ver: o que está feito a cores, o que falta transparente.
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Visualizador3DSeguro } from "@/emylia/planta3d/Visualizador3DSeguro";
 import { temWebGL } from "@/emylia/planta3d/carregarVisualizador3D";
 import { Box, Check, FileText, Pause, Play, Send, Wrench, X } from "lucide-react";
@@ -15,7 +15,7 @@ import { NaFrente } from "../NaFrente";
 import { podeNeg } from "../permissoes";
 import { modoReal, emailDaFicha } from "../acessosPortal";
 import { usePodeAcessoPortal } from "../AcessoPortalNegocio";
-import { ContratoDoc, FaturaDoc, Partilhar, PropostaDoc } from "../DocsCliente";
+import { ContratoDoc, FaturaDoc, Partilhar, PropostaDoc, imprimir } from "../DocsCliente";
 import { AutoRececaoDoc } from "../AutoRececao";
 import { usePainelUrl } from "../usarParamUrl";
 import { Vista3D } from "@/pages/prototipo-estudio/Vista3D";
@@ -99,8 +99,15 @@ function Reenviar({ ctx, d, x, pode, porque, fechar }: { ctx: Ctx; d: Negocio; x
 }
 
 /** O documento por cima do Estúdio (no telemóvel, em ecrã inteiro). Esc fecha só o documento. */
-function DocAberto({ ctx, d, x, fechar }: { ctx: Ctx; d: Negocio; x: DocEnviado; fechar: () => void }) {
+export function DocAberto({ ctx, d, x, fechar, imprimirLogo = false }: { ctx: Ctx; d: Negocio; x: DocEnviado; fechar: () => void;
+  /** 25/11 (Tudo do negócio, «PDF»): pede logo a impressão da folha (no diálogo, «Guardar como PDF») */ imprimirLogo?: boolean }) {
   const S = ctx.S;
+  const caixa = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!imprimirLogo) return;
+    const id = window.setTimeout(() => imprimir(caixa.current?.querySelector(".folha") as HTMLElement | null, `${x.titulo} ${x.numero}`), 350);
+    return () => window.clearTimeout(id);
+  }, [imprimirLogo]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const tecla = (e: KeyboardEvent) => { if (e.key === "Escape") { e.preventDefault(); fechar(); } };
     window.addEventListener("keydown", tecla, true);
@@ -114,7 +121,7 @@ function DocAberto({ ctx, d, x, fechar }: { ctx: Ctx; d: Negocio; x: DocEnviado;
   return (
     <NaFrente>
     <div className="fixed inset-0 z-[60] flex justify-center bg-black/40 sm:items-center sm:p-6" onClick={fechar}>
-      <div role="dialog" aria-modal="true" aria-label={`${x.titulo} ${x.numero}`} onClick={(e) => e.stopPropagation()}
+      <div ref={caixa} role="dialog" aria-modal="true" aria-label={`${x.titulo} ${x.numero}`} onClick={(e) => e.stopPropagation()}
         className="flex h-full w-full max-w-4xl flex-col bg-card shadow-2xl sm:h-auto sm:max-h-[92vh] sm:rounded-2xl">
         <div className="flex items-start justify-between gap-3 border-b border-border p-4">
           <div className="min-w-0">

@@ -6,7 +6,7 @@
 // Pesquisa no topo (procura em todos os campos e no histórico) e saltos de fase em fase. Só se lê: cada fase tem «Ir a esta fase».
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { ArrowLeft, ArrowRight, Camera, ChevronDown, Clock, FileSignature, FileText, Hammer, MessageSquare, Receipt, Ruler, Search, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, Camera, ChevronDown, Clock, Download, Eye, FileSignature, FileText, Files, Hammer, MessageSquare, Receipt, Ruler, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CONTACTO, DECISAO, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PECAS_WC, PROPOSTA, efetivo, gruposArea, visivel, type Grupo } from "./campos";
@@ -22,9 +22,12 @@ import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
 import { dataCurta, diasDaObra } from "./planoObra";
 import { inicioDoPlano } from "./preparacaoObra";
 import { useReduzir, MOLA } from "./movimento";
+import { documentosDoNegocio, type DocDoNegocio } from "./estudioObra/enviadosAoCliente";
+import { DocAberto } from "./estudioObra/DocumentosObra";
 
 interface Item { l: string; v: string }
-interface Bloco { id: string; titulo: string; icone: ReactNode; itens: Item[]; extra?: ReactNode; resumo?: string; largo?: boolean }
+interface Bloco { id: string; titulo: string; icone: ReactNode; itens: Item[]; extra?: ReactNode; resumo?: string; largo?: boolean;
+  /** 25/11: os documentos desta fase (ver na plataforma e PDF) */ docs?: DocDoNegocio[] }
 
 // sem acentos e em minúsculas, letra a letra (o mesmo comprimento: o realce corta o texto original nos mesmos sítios)
 const sem = (s: string) => s.split("").map((c) => c.normalize("NFD")[0] ?? c).join("").toLowerCase();
@@ -51,8 +54,15 @@ export function historicoPorFase(hist: readonly Evento[]): Evento[][] {
   return out.map((l) => l.reverse()); // o mais recente primeiro, como no resto da app
 }
 
-/** O que cada fase tem para ler. */
+/** O que cada fase tem para ler: primeiro os documentos dela (25/11), depois o resto. */
 function blocosDaFase(ctx: Ctx, d: Negocio, n: number): Bloco[] {
+  let docs: DocDoNegocio[] = [];
+  try { docs = documentosDoNegocio(d, ctx.S).filter((x) => x.fase === n); } catch { /* sem documentos */ }
+  const resto = blocosSemDocs(ctx, d, n);
+  return docs.length ? [{ id: "docs", titulo: "Documentos", icone: <Files className="h-4 w-4" />, itens: [], largo: true, docs,
+    resumo: `${docs.length} ${docs.length === 1 ? "documento" : "documentos"} · ver aqui ou guardar em PDF` }, ...resto] : resto;
+}
+function blocosSemDocs(ctx: Ctx, d: Negocio, n: number): Bloco[] {
   const { S } = ctx;
   const f = d.f ?? {};
   const E = (g: Grupo) => efetivo(S.campos, g);
@@ -134,6 +144,39 @@ function blocosDaFase(ctx: Ctx, d: Negocio, n: number): Bloco[] {
     }
   }
   return [];
+}
+
+const TOM_DOC: Record<DocDoNegocio["tom"], string> = {
+  ok: "bg-success/15 text-success", espera: "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200", mau: "bg-destructive/10 text-destructive", neutro: "bg-muted text-muted-foreground",
+};
+/** 25/11 (Rúben: «link para o orçamento em PDF, proposta em PDF, contrato, etc.», «e também dentro da plataforma, tudo bonito»): cada
+ *  documento abre por cima, como o cliente o vê (com partilhar e imprimir), ou vai logo para PDF (a impressão, «Guardar como PDF»). */
+function ListaDocs({ ctx, d, docs, q }: { ctx: Ctx; d: Negocio; docs: DocDoNegocio[]; q: string }) {
+  const [aberto, setAberto] = useState<{ x: DocDoNegocio; pdf: boolean } | null>(null);
+  return (
+    <>
+      <ul className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+        {docs.map((x) => (
+          <li key={x.id} className="flex min-w-0 flex-col gap-2 rounded-xl border border-border bg-card p-3 transition-shadow hover:shadow-sm">
+            <button type="button" onClick={() => setAberto({ x, pdf: false })} className="flex min-w-0 items-start gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              aria-label={`Ver ${x.titulo} ${x.numero}: ${x.estado}`}>
+              <span aria-hidden="true" className="grid h-10 w-10 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary">{x.k.startsWith("contrato") || x.k === "auto" ? <FileSignature className="h-5 w-5" /> : x.k.startsWith("fatura") ? <Receipt className="h-5 w-5" /> : <FileText className="h-5 w-5" />}</span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[15px] font-medium"><Realce t={x.titulo} q={q} /></span>
+                <span className="block truncate text-xs text-muted-foreground">{x.numero}{x.quando ? ` · ${x.quando}` : ""}</span>
+                <span className={cn("mt-1 inline-block rounded-full px-2 py-0.5 text-xs font-medium", TOM_DOC[x.tom])}>{x.estado}</span>
+              </span>
+            </button>
+            <span className="flex gap-1.5">
+              <Button type="button" size="sm" variant="outline" className="min-h-9 flex-1 rounded-full" onClick={() => setAberto({ x, pdf: false })}><Eye className="mr-1.5 h-4 w-4" aria-hidden="true" />Ver</Button>
+              <Button type="button" size="sm" variant="outline" className="min-h-9 flex-1 rounded-full" onClick={() => setAberto({ x, pdf: true })} aria-label={`${x.titulo} ${x.numero} em PDF`}><Download className="mr-1.5 h-4 w-4" aria-hidden="true" />PDF</Button>
+            </span>
+          </li>
+        ))}
+      </ul>
+      {aberto && <DocAberto ctx={ctx} d={d} x={aberto.x} imprimirLogo={aberto.pdf} fechar={() => setAberto(null)} />}
+    </>
+  );
 }
 
 /** O texto com o que se procura em realce. */
@@ -281,7 +324,7 @@ export function TudoDoNegocio({ ctx, d, fechar, irPara }: { ctx: Ctx; d: Negocio
                             </span>
                           </span>
                           <span className="block text-sm text-muted-foreground">
-                            {st === "futura" ? "O negócio ainda não chegou aqui." : `${nCampos} ${nCampos === 1 ? "resposta" : "respostas"}${F.blocos.some((b) => b.extra) ? " · " + F.blocos.filter((b) => b.extra).map((b) => b.titulo.toLowerCase()).join(", ") : ""}${F.hist.length ? ` · ${F.hist.length} no histórico` : ""}`}
+                            {st === "futura" ? "O negócio ainda não chegou aqui." : `${((nd) => nd ? `${nd} ${nd === 1 ? "documento" : "documentos"} · ` : "")(F.blocos.find((b) => b.docs)?.docs?.length ?? 0)}${nCampos} ${nCampos === 1 ? "resposta" : "respostas"}${F.blocos.some((b) => b.extra) ? " · " + F.blocos.filter((b) => b.extra).map((b) => b.titulo.toLowerCase()).join(", ") : ""}${F.hist.length ? ` · ${F.hist.length} no histórico` : ""}`}
                           </span>
                         </span>
                         <ChevronDown aria-hidden="true" className={cn("h-5 w-5 shrink-0 text-muted-foreground transition-transform motion-reduce:transition-none", on && "rotate-180")} />
@@ -323,7 +366,8 @@ export function TudoDoNegocio({ ctx, d, fechar, irPara }: { ctx: Ctx; d: Negocio
                                         <div className="mt-2">{b.extra}</div>
                                       </details>
                                     )}
-                                    {!b.itens.length && !b.extra && <p className="mt-2 text-sm text-muted-foreground">Nada preenchido.</p>}
+                                    {b.docs && <ListaDocs ctx={ctx} d={d} docs={b.docs} q={procura} />}
+                                    {!b.itens.length && !b.extra && !b.docs && <p className="mt-2 text-sm text-muted-foreground">Nada preenchido.</p>}
                                   </motion.div>
                                 ))}
                               </div>
