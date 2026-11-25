@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveLeadNames } from "@/lib/leadNameFromFields";
+import { isLeadCompanyField, isLeadPersonNameField, resolveLeadNames } from "@/lib/leadNameFromFields";
 
 const defs = [
   { field_key: "first_name", field_type: "text", contact_field_mapping: "first_name" },
@@ -74,5 +74,32 @@ describe("resolveLeadNames (nome da ficha na criacao da lead: nome + apelido)", 
     expect(r.displayName).toBe("");
     expect(r.firstName).toBeNull();
     expect(r.lastName).toBeNull();
+  });
+});
+
+describe("resolveLeadNames com o tipo escolhido (Pessoa | Empresa)", () => {
+  it("Empresa: o nome da ficha e so o nome da empresa, sem nome nem apelido", () => {
+    const r = resolveLeadNames(defs, { first_name: "Rui", last_name: "Costa", company_name: "EVOLAR  MOVEIS LDA " }, "organization");
+    expect(r.displayName).toBe("EVOLAR MOVEIS LDA");
+    expect(r.company).toBe("EVOLAR MOVEIS LDA");
+    expect(r.firstName).toBeNull();
+    expect(r.lastName).toBeNull();
+  });
+
+  it("Empresa sem nome de empresa: nome vazio (o ecra nao deixa gravar)", () => {
+    expect(resolveLeadNames(defs, { first_name: "Rui" }, "organization").displayName).toBe("");
+  });
+
+  it("Pessoa (por omissao): nome + apelido, e a empresa vem so informativa", () => {
+    const r = resolveLeadNames(defs, { first_name: "Rui", last_name: "Costa", company_name: "Evolar" });
+    expect(r.displayName).toBe("Rui Costa");
+    expect(r.company).toBe("Evolar");
+  });
+
+  it("os campos de nome e de empresa distinguem-se", () => {
+    expect(isLeadPersonNameField(defs[0])).toBe(true);
+    expect(isLeadCompanyField(defs[2])).toBe(true);
+    expect(isLeadPersonNameField(defs[2])).toBe(false);
+    expect(isLeadCompanyField({ field_key: "email", field_type: "email" })).toBe(false);
   });
 });

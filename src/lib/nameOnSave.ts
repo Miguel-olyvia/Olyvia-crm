@@ -57,23 +57,3 @@ export function resolveClientNameForSave(
     : composeDisplayName(normalized.first, normalized.last);
   return { displayName, first: normalized.first, last: normalized.last };
 }
-
-/**
- * Editar uma lead: se o nome ou o apelido mudaram, o nome da ficha TROCA para
- * nome + apelido (nunca fica o antigo ao lado do novo). O campo «empresa» da
- * lead e so um campo da lead e nao decide o nome. Devolve null quando nao ha
- * nada a gravar (nome intocado, ou apagado por completo).
- */
-export function resolveLeadEditNameForSave(
-  original: { first?: string | null; last?: string | null },
-  edited: { first?: string | null; last?: string | null },
-): ClientNameForSave | null {
-  if (!nameFieldsChanged(
-    { first: original.first, last: original.last },
-    { first: edited.first, last: edited.last },
-  )) return null;
-  const normalized = normalizeFirstLast(edited.first, edited.last);
-  const displayName = composeDisplayName(normalized.first, normalized.last);
-  if (!displayName) return null;
-  return { displayName, first: normalized.first, last: normalized.last };
-}

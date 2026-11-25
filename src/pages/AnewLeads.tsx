@@ -11,7 +11,9 @@ import { humanizeFormFieldKey } from "@/lib/leads/fieldLabels";
 import { isBaseFieldCoveredByCampaignFields, stripCampaignCoveredBaseValues } from "@/lib/leads/campaignFieldCoverage";
 import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
-import { resolveLeadNames } from "@/lib/leadNameFromFields";
+import { isLeadCompanyField, isLeadPersonNameField, resolveLeadNames } from "@/lib/leadNameFromFields";
+import { EntityKindSelector } from "@/components/shared/EntityKindSelector";
+import { planNameSave, setEntityKind, type EntityKind } from "@/lib/entityKind";
 import { refreshEntityIdentity } from "@/lib/refreshEntityIdentity";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { validateLeadFieldValues } from "@/utils/leadFieldValidation";
@@ -724,13 +726,16 @@ export default function AnewLeads() {
   const [createLeadFieldDefs, setCreateLeadFieldDefs] = useState<FieldDefinition[]>([]);
   const [extraCampaignFieldDefs, setExtraCampaignFieldDefs] = useState<FieldDefinition[]>([]);
   const [newLeadValues, setNewLeadValues] = useState<Record<string, any>>({});
+  // Pessoa | Empresa ao criar a lead: Empresa = um so campo «Nome da empresa», que e o nome da ficha.
+  const [createKind, setCreateKind] = useState<EntityKind>("person");
+  useEffect(() => { if (!showCreateLead) setCreateKind("person"); }, [showCreateLead]);
   const [creatingLead, setCreatingLead] = useState(false);
   const [createLeadSourceId, setCreateLeadSourceId] = useState<string>("");
 
   // Duplicate detection state
   const [duplicateDialogOpen, setDuplicateDialogOpen] = useState(false);
   const [duplicateMatches, setDuplicateMatches] = useState<import("@/components/shared/DuplicateEntityDialog").DuplicateMatch[]>([]);
-  const [pendingLeadData, setPendingLeadData] = useState<{ entityId: string; fieldValues: Record<string, any>; assignedTo: string | null; resolvedRootOrgId: string | null; createdBy: string; displayName: string; emailValue: string; phoneValue: string; allFieldDefs: any[] } | null>(null);
+  const [pendingLeadData, setPendingLeadData] = useState<{ entityId: string; fieldValues: Record<string, any>; assignedTo: string | null; resolvedRootOrgId: string | null; createdBy: string; displayName: string; emailValue: string; phoneValue: string; allFieldDefs: any[]; kind?: EntityKind } | null>(null);
   const [activeTab, setActiveTab] = useState<"dashboard" | "list">("list");
   // Kanban is now a view toggle inside the "list" tab's toolbar, not its own
   // top-level tab — see the segmented Lista/Kanban toggle above the leads table.
@@ -3391,6 +3396,23 @@ export default function AnewLeads() {
     navigate(`/deals?create_from_lead=${lead.id}`);
   }, [navigate]);
 
+  // Ficha nova de Empresa: o RPC de criacao so grava o nome, por isso o tipo fixa-se logo a seguir
+  // (rpc_set_entity_kind). Se a base ainda nao a tem, a ficha fica com o nome certo e tipo pessoa.
+  const markNewEntityAsOrganization = async (entityId: string, company: string) => {
+    const plan = planNameSave(
+      { kind: "person", first: "", last: "", company: "" },
+      { kind: "organization", first: "", last: "", company },
+      "person",
+    );
+    if (!plan) return;
+    try {
+      await setEntityKind(supabase as any, entityId, plan);
+    } catch (e) {
+      captureFlowError(e, "lead-lifecycle");
+      toast({ title: "Lead criada, mas o tipo Empresa não ficou registado", description: await getFriendlyErrorMessage(e), variant: "destructive" });
+    }
+  };
+
   const handleCreateLead = async () => {
     if (!activeCompanyId) {
       toast({ title: t('leads.toast.createError'), description: 'Sem organização ativa', variant: "destructive" });
@@ -3402,17 +3424,30 @@ export default function AnewLeads() {
     const visibleBaseFieldDefs = createLeadFieldDefs.filter(
       baseField => !isBaseFieldCoveredByCampaignFields(baseField.field_key, extraCampaignFieldDefs)
     );
-    const allFieldDefs = [...visibleBaseFieldDefs, ...extraCampaignFieldDefs];
+    const baseAndExtraDefs = [...visibleBaseFieldDefs, ...extraCampaignFieldDefs];
+    // Empresa precisa sempre de um campo onde viva o nome da empresa.
+    const allFieldDefs = createKind === "organization" && !baseAndExtraDefs.some(isLeadCompanyField)
+      ? [...baseAndExtraDefs, { field_key: "company_name", field_type: "text", contact_field_mapping: "company_name" } as any]
+      : baseAndExtraDefs;
     // Descarta os valores dos campos base que a campanha já cobre. O diálogo
     // esconde-os quando a campanha é escolhida, mas o que a pessoa (ou o
     // preenchimento automático do browser) escreveu ANTES dessa escolha ficava
     // em memória e era gravado na mesma — foi assim que uma lead ficou com o
     // email/telefone de outra cliente ao lado do po_email/po_telefone certos.
     // A partir daqui trabalha-se só com leadValues, nunca com newLeadValues.
-    const leadValues = stripCampaignCoveredBaseValues(newLeadValues, createLeadFieldDefs, extraCampaignFieldDefs);
+    const leadValuesAll = stripCampaignCoveredBaseValues(newLeadValues, createLeadFieldDefs, extraCampaignFieldDefs);
+    // Empresa: nome e apelido estao escondidos e nao se gravam (nunca ficam o nome da empresa e o de uma pessoa).
+    const leadValues = createKind === "organization"
+      ? Object.fromEntries(Object.entries(leadValuesAll).filter(([key]) => !allFieldDefs.some((d: any) => d.field_key === key && isLeadPersonNameField(d))))
+      : leadValuesAll;
+    if (createKind === "organization" && !resolveLeadNames(allFieldDefs as any[], leadValues, "organization").company) {
+      toast({ title: t('leads.toast.missingRequiredFields'), description: "Indique o nome da empresa", variant: "destructive" });
+      return;
+    }
     // "Required" means valid, not merely non-empty: a lone "-" used to satisfy
     // every required text field, producing leads with po_codigo_postal = "-".
-    const fieldErrors = validateLeadFieldValues(allFieldDefs as any, leadValues);
+    const defsToValidate = createKind === "organization" ? allFieldDefs.filter((d: any) => !isLeadPersonNameField(d)) : allFieldDefs;
+    const fieldErrors = validateLeadFieldValues(defsToValidate as any, leadValues);
 
     if (fieldErrors.length > 0) {
       toast({
@@ -3479,13 +3514,15 @@ export default function AnewLeads() {
     let selectedLeadSourceNameForPostCommit = "manual";
     let coherenceWarningForPostCommit: { storedName: string | null; storedEmail: string | null; storedPhone: string | null; matched: string[] } | null = null;
     let entityRenamePayloadForPostCommit: Record<string, any> | null = null;
+    let companyForPostCommit = "";
     let entityReusedForPostCommit = false;
 
     try {
       try {
         // --- Extract contact data from field_values using field definitions ---
         // Nome da ficha: nome + apelido. O campo da empresa nao entra no nome.
-        const resolvedNames = resolveLeadNames(allFieldDefs as any[], leadValues);
+        const resolvedNames = resolveLeadNames(allFieldDefs as any[], leadValues, createKind);
+        companyForPostCommit = resolvedNames.company;
         let displayName = resolvedNames.displayName;
         let emailValue = '';
         let phoneValue = '';
@@ -3697,6 +3734,7 @@ export default function AnewLeads() {
               emailValue,
               phoneValue,
               allFieldDefs,
+              kind: createKind,
             });
             setDuplicateDialogOpen(true);
             return; // No writes — no cleanup
@@ -3918,6 +3956,7 @@ export default function AnewLeads() {
             emailValue,
             phoneValue,
             allFieldDefs,
+            kind: createKind,
           });
           setDuplicateDialogOpen(true);
           return;
@@ -4012,6 +4051,10 @@ export default function AnewLeads() {
           title: t('leads.toast.addressSyncFailed'),
           description,
         });
+      }
+
+      if (createKind === "organization" && entityCreatedHere && companyForPostCommit) {
+        await markNewEntityAsOrganization(entityIdForPostCommit, companyForPostCommit);
       }
 
       if (entityRenamePayloadForPostCommit && entityReusedForPostCommit) {
@@ -4146,6 +4189,8 @@ export default function AnewLeads() {
       fieldValues, assignedTo, resolvedRootOrgId, createdBy,
       displayName, emailValue, phoneValue, allFieldDefs,
     } = pendingLeadData;
+    const anywayKind: EntityKind = pendingLeadData.kind ?? "person";
+    const anywayNames = resolveLeadNames(allFieldDefs as any[], fieldValues, anywayKind);
 
     // Cleanup tracking
     type CompensableTable = "anew_leads" | "anew_entities" | "anew_entity_emails" | "anew_entity_phones";
@@ -4194,7 +4239,7 @@ export default function AnewLeads() {
         } else {
           // Nome e apelido vem da pessoa, nunca da empresa (o displayName
           // pode ser so a empresa, e partir uma firma em nome/apelido estraga-a).
-          const { firstName, lastName } = resolveLeadNames(allFieldDefs as any[], fieldValues);
+          const { firstName, lastName } = anywayNames;
 
           const { data: newEntityId, error: entityError } = await (supabase as any)
             .rpc("create_lead_entity_for_org", {
@@ -4277,6 +4322,10 @@ export default function AnewLeads() {
         captureFlowError(e, "lead-lifecycle");
         const description = await getFriendlyErrorMessage(e);
         toast({ title: t('leads.toast.addressSyncFailed'), description });
+      }
+
+      if (anywayKind === "organization" && entityCreatedHere && anywayNames.company) {
+        await markNewEntityAsOrganization(entityIdForPostCommit, anywayNames.company);
       }
 
       toast({ title: t('leads.toast.createSuccess') });
@@ -7418,13 +7467,30 @@ export default function AnewLeads() {
               </h3>
               <p className="text-xs text-muted-foreground">{t('leads.baseFormDesc') || 'Informação essencial da lead'}</p>
             </div>
+            <EntityKindSelector value={createKind} onChange={setCreateKind} />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {createKind === "organization" && (() => {
+                const companyKey = [...createLeadFieldDefs, ...extraCampaignFieldDefs].find(isLeadCompanyField)?.field_key ?? "company_name";
+                return (
+                  <div className="space-y-2 md:col-span-2">
+                    <Label htmlFor="create-lead-company-name">Nome da empresa *</Label>
+                    <Input
+                      id="create-lead-company-name"
+                      value={newLeadValues[companyKey] ?? ""}
+                      onChange={(e) => setNewLeadValues({ ...newLeadValues, [companyKey]: e.target.value })}
+                      aria-required="true"
+                    />
+                  </div>
+                );
+              })()}
               {createLeadFieldDefs
                 // Esconde os campos base que a campanha/formulário já recolhe.
                 // Mesma regra usada em handleCreateLead ao montar field_values:
                 // esconder sem descartar deixava passar o valor escrito antes de
                 // a campanha ser escolhida.
                 .filter(baseField => !isBaseFieldCoveredByCampaignFields(baseField.field_key, extraCampaignFieldDefs))
+                // Empresa: o nome e o da empresa, por isso nome, apelido e o campo «empresa» saem daqui.
+                .filter(f => createKind !== "organization" || (!isLeadPersonNameField(f) && !isLeadCompanyField(f)))
                 .map(field => (
                 <div key={field.id} className={field.field_type === 'textarea' || field.field_type === 'composite_address' ? 'md:col-span-2' : ''}>
                   <DynamicFormField
@@ -7445,7 +7511,7 @@ export default function AnewLeads() {
                   {t('leads.additionalCampaignFields') || 'Campos adicionais da campanha'}
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {extraCampaignFieldDefs.map(field => (
+                  {extraCampaignFieldDefs.filter(f => createKind !== "organization" || (!isLeadPersonNameField(f) && !isLeadCompanyField(f))).map(field => (
                     <div key={field.id} className={field.field_type === 'textarea' || field.field_type === 'composite_address' ? 'md:col-span-2' : ''}>
                       <DynamicFormField
                         field={field}

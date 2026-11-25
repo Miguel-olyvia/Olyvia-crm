@@ -15,6 +15,9 @@ import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUser
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { withAuditContext } from "@/utils/auditContext";
 import { resolveClientNameForSave } from "@/lib/nameOnSave";
+import { EntityKindSelector } from "@/components/shared/EntityKindSelector";
+import { fetchEntityCompanyName } from "@/lib/clients/fetchEntityCompanyName";
+import { initialKindState, planNameSave, setEntityKind, type EntityKind, type KindFormState } from "@/lib/entityKind";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -193,6 +196,10 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
   const [showWhatsAppDialog, setShowWhatsAppDialog] = useState(false);
   const [activeTab, setActiveTab] = useState("summary");
   const [entityType, setEntityType] = useState<string>("person");
+  // Pessoa | Empresa escolhido no formulario, e o estado com que a ficha abriu
+  // (para saber se o nome/tipo mudou e so entao chamar rpc_set_entity_kind).
+  const [kind, setKind] = useState<EntityKind>("person");
+  const [kindInitial, setKindInitial] = useState<KindFormState | null>(null);
   const [revertDialogOpen, setRevertDialogOpen] = useState(false);
   const [reverting, setReverting] = useState(false);
   const [canRevert, setCanRevert] = useState(false);
@@ -200,7 +207,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
   const { revertClientToLead, getClientRevertPreview } = useConversionRevert();
 
   const [editFormData, setEditFormData] = useState({
-    first_name: "", last_name: "", email: "", phone: "", phone_country_code: "+351",
+    first_name: "", last_name: "", company_name: "", email: "", phone: "", phone_country_code: "+351",
     vat: "", position: "", status: "", notes: "", organization_id: "",
     assigned_to: "" as string | null,
   });
@@ -252,7 +259,7 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       setRevertPreviousStatus(preview.previousStatus);
     });
     setEditFormData({
-      first_name: client.first_name || "", last_name: client.last_name || "",
+      first_name: client.first_name || "", last_name: client.last_name || "", company_name: "",
       email: client.email || "", phone: client.phone || "", phone_country_code: client.phone_country_code || "+351",
       vat: client.vat || "", position: client.position || "", status: client.status || "active",
       notes: client.notes || "", organization_id: client.organization_id || "",
@@ -272,7 +279,19 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       if (!client.entity_id) return;
       const { data, error } = await supabase.from("anew_entities").select("type").eq("id", client.entity_id).maybeSingle();
       if (error) { console.error("Error fetching entity type:", error); captureFlowError(error, "db-error-leaked-to-ui"); }
-      if (!isCancelled) setEntityType(data?.type || "person");
+      // A empresa le-se aparte e tolera a coluna ainda nao existir (ver fetchEntityCompanyName).
+      const companyRead = await fetchEntityCompanyName(supabase, client.entity_id);
+      if (companyRead.status === "error") captureFlowError(companyRead.error, "db-error-leaked-to-ui");
+      if (isCancelled) return;
+      const type = data?.type || "person";
+      const initial = initialKindState(
+        { type, display_name: client.display_name, first_name: client.first_name, last_name: client.last_name },
+        companyRead.company,
+      );
+      setEntityType(type);
+      setKindInitial(initial);
+      setKind(initial.kind);
+      setEditFormData(prev => ({ ...prev, company_name: initial.company }));
     };
 
     const fetchOrgUsers = async () => {
@@ -756,8 +775,10 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
 
   const handleUpdateClient = async (e: React.FormEvent) => {
     e.preventDefault();
-    const schema = entityType === "organization" ? contactCompanySchema : contactSchema;
-    const validation = schema.safeParse(editFormData);
+    const isOrg = kind === "organization";
+    const schema = isOrg ? contactCompanySchema : contactSchema;
+    // Empresa: o «Nome da empresa» ocupa o lugar do nome (obrigatorio) e nao ha apelido.
+    const validation = schema.safeParse(isOrg ? { ...editFormData, first_name: editFormData.company_name, last_name: "" } : editFormData);
     // Morada principal: as mesmas regras da morada de entrega (e da base) —
     // rua, código postal 0000-000 e localidade obrigatórios assim que algum
     // campo está preenchido. Antes, uma morada incompleta era descartada em
@@ -782,6 +803,13 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     }
     const morada = normalizarMorada(moradaPrincipal);
     const temMorada = !!(morada.street || morada.postal_code);
+    const namePlan = kindInitial
+      ? planNameSave(
+          kindInitial,
+          { kind, first: editFormData.first_name, last: editFormData.last_name, company: editFormData.company_name },
+          entityType,
+        )
+      : null;
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error("Not authenticated");
@@ -805,7 +833,12 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
           // Se o utilizador mexeu no nome/apelido, o display_name TROCA para
           // nome + apelido (mesmo numa ficha cujo nome era o de uma empresa);
           // se nao mexeu, mantem-se em bruto, como esta na ficha.
-          const { displayName, first: normFirst, last: normLast } = resolveClientNameForSave(client, editFormData);
+          const resolved = resolveClientNameForSave(client, editFormData);
+          // Mudou o tipo ou o nome: o nome pelo tipo escolhido (caminho de recurso, se a RPC
+          // rpc_set_entity_kind ainda nao existir); senao fica o display_name em bruto.
+          const displayName = namePlan ? namePlan.fallback.displayName : resolved.displayName;
+          const normFirst = namePlan ? namePlan.fallback.first : resolved.first;
+          const normLast = namePlan ? namePlan.fallback.last : resolved.last;
           const normalized = { first: normFirst, last: normLast };
           const nif = editFormData.vat || null;
           const { error: rpcError } = await callNifWriteProxy("rpc_update_client", {
@@ -828,12 +861,22 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
             p_address_city: morada.city || null,
             p_address_postal_code: morada.postal_code || null,
             p_address_number: morada.number || null,
-            p_entity_type: entityType,
+            p_entity_type: entityType, // o tipo so o muda rpc_set_entity_kind
             p_address_floor: temMorada ? morada.floor : null,
             p_address_unit: temMorada ? morada.unit : null,
           } satisfies RpcUpdateClientArgs, nif);
           if (rpcError) throw rpcError;
         });
+        if (namePlan) {
+          // A base decide o nome final e o tipo. Enquanto a RPC nao existir, fica o que o
+          // caminho anterior gravou (nome pelo tipo escolhido, tipo da ficha inalterado).
+          const kindResult = await withAuditContext(supabase, businessUserId, () =>
+            setEntityKind(supabase as any, entityId, namePlan),
+          );
+          if (kindResult.status === "missing") {
+            toast({ title: "Nome gravado", description: "A troca de tipo (Pessoa/Empresa) só fica completa quando a base for atualizada." });
+          }
+        }
       }
 
       toast({ title: "Cliente actualizado" });
@@ -1336,17 +1379,16 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
                 <form onSubmit={handleUpdateClient} className="space-y-4">
                   <div className="space-y-2">
                     <Label>Tipo</Label>
-                    <Tabs value={entityType} onValueChange={(v) => { setEntityType(v); if (v === "organization") setEditFormData(prev => ({ ...prev, last_name: "" })); }}>
-                      <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="person"><User className="w-4 h-4 mr-2" />Pessoa</TabsTrigger>
-                        <TabsTrigger value="organization"><Building2 className="w-4 h-4 mr-2" />Empresa</TabsTrigger>
-                      </TabsList>
-                    </Tabs>
+                    <EntityKindSelector value={kind} onChange={setKind} />
                   </div>
                   <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-2"><Label>{entityType === "organization" ? "Nome da Empresa *" : "Nome *"}</Label><Input value={editFormData.first_name} onChange={e => setEditFormData({ ...editFormData, first_name: e.target.value })} required aria-invalid={!!editFormErrors.first_name} />{editFormErrors.first_name && <p className="text-xs text-destructive">{editFormErrors.first_name}</p>}</div>
-                    {entityType !== "organization" && (
+                    {kind === "organization" ? (
+                    <div className="space-y-2 col-span-2"><Label htmlFor="client-edit-company-name">Nome da empresa *</Label><Input id="client-edit-company-name" value={editFormData.company_name} onChange={e => setEditFormData({ ...editFormData, company_name: e.target.value })} required aria-invalid={!!editFormErrors.first_name} />{editFormErrors.first_name && <p className="text-xs text-destructive">{editFormErrors.first_name}</p>}</div>
+                    ) : (
+                    <>
+                    <div className="space-y-2"><Label>Nome *</Label><Input value={editFormData.first_name} onChange={e => setEditFormData({ ...editFormData, first_name: e.target.value })} required aria-invalid={!!editFormErrors.first_name} />{editFormErrors.first_name && <p className="text-xs text-destructive">{editFormErrors.first_name}</p>}</div>
                     <div className="space-y-2"><Label>Apelido *</Label><Input value={editFormData.last_name} onChange={e => setEditFormData({ ...editFormData, last_name: e.target.value })} required aria-invalid={!!editFormErrors.last_name} />{editFormErrors.last_name && <p className="text-xs text-destructive">{editFormErrors.last_name}</p>}</div>
+                    </>
                     )}
                     <div className="space-y-2"><Label>Email</Label><Input type="email" value={editFormData.email} onChange={e => setEditFormData({ ...editFormData, email: e.target.value })} aria-invalid={!!editFormErrors.email} />{editFormErrors.email && <p className="text-xs text-destructive">{editFormErrors.email}</p>}</div>
                     <div className="space-y-2"><PhoneInput label="Telefone" phoneValue={editFormData.phone} countryCodeValue={editFormData.phone_country_code} onPhoneChange={v => setEditFormData({ ...editFormData, phone: v })} onCountryCodeChange={v => setEditFormData({ ...editFormData, phone_country_code: v })} />{editFormErrors.phone && <p className="text-xs text-destructive">{editFormErrors.phone}</p>}</div>

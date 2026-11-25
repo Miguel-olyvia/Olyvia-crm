@@ -9,6 +9,7 @@ import { useEntityIdentity, createEntityWithIdentity, resolveEntityByIdentity, v
 import { resolveClientSearch, applyClientSearchTextFilter } from "@/lib/clientSearch";
 import { INACTIVE_CLIENT_STATUSES } from "@/lib/clientStatus";
 import { composeDisplayName, normalizeFirstLast } from "@/utils/composeDisplayName";
+import { EntityKindSelector } from "@/components/shared/EntityKindSelector";
 import Layout from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -2722,12 +2723,10 @@ const AnewClients = () => {
               <div className="space-y-6 max-h-[calc(100vh-300px)] overflow-y-auto pr-2">
                 <div>
                   <h3 className="text-sm font-semibold mb-3">{t('clients.allTypes')}</h3>
-                  <Tabs value={clientType} onValueChange={(v) => setClientType(v as "person" | "company")}>
-                    <TabsList className="grid w-full grid-cols-2">
-                      <TabsTrigger value="person"><User className="w-4 h-4 mr-2" />{t('clients.type.person')}</TabsTrigger>
-                      <TabsTrigger value="company"><Building2 className="w-4 h-4 mr-2" />{t('clients.type.company')}</TabsTrigger>
-                    </TabsList>
-                  </Tabs>
+                  <EntityKindSelector
+                    value={clientType === "person" ? "person" : "organization"}
+                    onChange={(kind) => setClientType(kind === "person" ? "person" : "company")}
+                  />
                 </div>
                 <Separator />
                 <div>

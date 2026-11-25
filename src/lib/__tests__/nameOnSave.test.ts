@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { nameFieldsChanged, resolveClientNameForSave, resolveLeadEditNameForSave } from "@/lib/nameOnSave";
+import { nameFieldsChanged, resolveClientNameForSave } from "@/lib/nameOnSave";
 
 describe("nameFieldsChanged", () => {
   it("campos iguais (mesmo com espacos a mais ou null vs vazio) nao contam como alteracao", () => {
@@ -89,25 +89,5 @@ describe("resolveClientNameForSave: o nome editado troca sempre o antigo (nome +
       { first_name: "Rui  ", last_name: " Costa" },
     );
     expect(out.displayName).toBe("Rui Costa");
-  });
-});
-
-describe("resolveLeadEditNameForSave (editar a lead: nome + apelido, a empresa nao decide)", () => {
-  it("apelido alterado: o nome da ficha troca para nome + apelido", () => {
-    expect(resolveLeadEditNameForSave({ first: "Rui", last: "Silva" }, { first: "Rui", last: "Costa" }))
-      .toEqual({ displayName: "Rui Costa", first: "Rui", last: "Costa" });
-  });
-
-  it("nome e apelido intocados (so mudou outro campo, por exemplo a empresa): nao envia nome", () => {
-    expect(resolveLeadEditNameForSave({ first: "Rui", last: "Silva" }, { first: " Rui", last: "Silva " })).toBeNull();
-  });
-
-  it("nome apagado: nao envia nome vazio", () => {
-    expect(resolveLeadEditNameForSave({ first: "Rui", last: "Silva" }, { first: "", last: "" })).toBeNull();
-  });
-
-  it("so o nome, sem apelido", () => {
-    expect(resolveLeadEditNameForSave({ first: "Rui", last: "Silva" }, { first: "Rui", last: "" }))
-      .toEqual({ displayName: "Rui", first: "Rui", last: null });
   });
 });
