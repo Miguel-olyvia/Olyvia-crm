@@ -74,7 +74,7 @@ export function TemposInfraspeak({ ctx, d, podeMexer, mudar }: { ctx: Ctx; d: Ne
               })}
             </tbody>
           </table>
-          <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">As horas do Infraspeak são as previstas para uma obra-tipo da Mudelar; as do plano vêm do orçamento (as horas do serviço × a quantidade). Usar muda os dias da tarefa e as datas das que vêm a seguir.{vivo ? " Com a obra em curso, mais horas pedem «Porquê?»." : ""}</p>
+          <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">Regra: uma tarefa nunca tem menos horas do que as microtarefas somam (sobe sozinha nas que não começaram). As horas do Infraspeak são as previstas para uma obra-tipo da Mudelar; as do plano vêm do orçamento (as horas do serviço × a quantidade). Usar muda os dias da tarefa e as datas das que vêm a seguir.{vivo ? " Com a obra em curso, mais horas pedem «Porquê?»." : ""}</p>
         </div>
       )}
     </section>

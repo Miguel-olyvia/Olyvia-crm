@@ -181,6 +181,22 @@ export function porFixar(t: Tarefa, S?: Estado | null, p?: Plano | null): Micro[
 }
 export const listaMicro = (t: Tarefa, S?: Estado | null, p?: Plano | null): Micro[] => microtarefasDe(t, S, p).L;
 
+/** 25/11 (Rúben: «30 microtarefas que somam mais de 20 h e o plano diz 2 dias: está errado; cria uma regra que ajusta o plano»). As horas
+ *  que as microtarefas da tarefa somam (as do Infraspeak ou da ficha do serviço); null sem horas nelas ou com as instruções gerais.
+ *  A regra (motor: ajustarHorasPelasMicro): uma tarefa nunca tem menos horas no plano do que esta soma. */
+export function horasDasMicro(t: Tarefa, S?: Estado | null, p?: Plano | null): number | null {
+  const r = microtarefasDe(t, S, p);
+  if (r.origem === "instrucoes" || r.origem === "catalogo") return null;
+  const h = r.L.reduce((a, m) => a + (m.h ?? 0), 0);
+  return h > 0 ? r2(h) : null;
+}
+/** A tarefa tem menos horas do que as microtarefas somam (e ainda se pode mexer: não começou). */
+export function horasPorSubir(t: Tarefa, S?: Estado | null, p?: Plano | null): number | null {
+  if (t.exec || t.corrige != null) return null;
+  const h = horasDasMicro(t, S, p);
+  return h != null && h > t.h + 0.25 ? h : null;
+}
+
 /** As microtarefas marcadas pelo técnico (os ids), só as que ainda estão na lista. */
 export function microFeitas(t: Tarefa, L: Micro[]): Set<number> {
   const ids = new Set(L.map((m) => m.id));

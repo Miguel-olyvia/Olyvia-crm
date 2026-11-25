@@ -8,6 +8,7 @@ import { temposDoInfraspeak } from "./TemposInfraspeak";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { acoes, type Tarefa } from "../motor";
 import type { Ctx } from "../pecas";
+import { horasDasMicro, horasPorSubir } from "../microtarefas";
 import { detalheMicro, listaMicro, microDoCatalogo, microDoInfraspeak, microFeitas, microtarefasDe, mudarMicro, porFixar, progressoMicro } from "../microtarefas";
 import { obraDeExemplo } from "./exemploObra";
 import { custosDe, receitaDe } from "../v2/custosModelo";
@@ -194,6 +195,29 @@ describe("as microtarefas da ficha do serviço (25/11)", () => {
     expect(L.map((m) => m.nome)).toContain("Montagem da sanita");
     expect(L[0].checklist.length).toBeGreaterThan(0);
     expect(propostaDoServico("y", "Montar o andaime", "Equipa")).toEqual([]);
+  });
+});
+
+describe("a regra das horas pelas microtarefas (25/11)", () => {
+  it("uma tarefa por começar sobe às horas que as microtarefas somam (os dias e as seguintes andam); começada não; menos horas não desce", () => {
+    const { S, d, A, p, livre, ix } = obra();
+    const t = p.tasks[livre];
+    t.nome = "Teto falso em pladur"; t.h = 4; delete t.bloqueio;
+    const soma = horasDasMicro(t, S, p)!;
+    expect(soma).toBeGreaterThan(8);
+    const durAntes = t.dur, depois = p.tasks.filter((x, i) => i !== livre && x.dia >= t.dia + t.dur && !x.exec).map((x) => x.dia);
+    expect(A.ajustarHorasPelasMicro(d.id)).toBeGreaterThanOrEqual(1);
+    expect(t.h).toBe(Math.round(soma * 2) / 2);
+    expect(t.dur).toBeGreaterThan(durAntes);
+    expect(p.tasks.filter((x, i) => i !== livre && !x.exec && depois.length).length).toBeGreaterThanOrEqual(0);
+    expect(d.hist.some((e) => e.t.includes("as microtarefas somam"))).toBe(true);
+    // já não há nada por subir; uma começada não mexe
+    expect(horasPorSubir(t, S, p)).toBeNull();
+    const rev = p.tasks[ix("Revestimento de parede")];
+    expect(horasPorSubir(rev, S, p)).toBeNull();
+    // mais horas do que as microtarefas: fica
+    t.h = soma + 10;
+    expect(A.ajustarHorasPelasMicro(d.id)).toBe(0);
   });
 });
 

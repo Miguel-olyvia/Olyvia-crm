@@ -37,7 +37,7 @@ import { pedirPainelObra } from "./estudioObra/painelPedido";
 import { avisarTecnico, criarTarefa, criarTarefaInterna, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa, type NovaTarefaInterna } from "./tarefasValidador";
 import { moverNaOrdem } from "./ordemPlano";
 import { registoDoPlano, resumoDiferencas, retratoTarefas, type RegistoPlano, type TarefaRetrato } from "./planoAntesDepois";
-import { listaMicro, microtarefasDe, mudarMicro, nomesFeitos, porFixar, type Micro, type MudancaMicro } from "./microtarefas";
+import { horasPorSubir, listaMicro, microtarefasDe, mudarMicro, nomesFeitos, porFixar, type Micro, type MudancaMicro } from "./microtarefas";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { CHAVE_CONTACTO_CONCLUIDO, CODIGO_GRAVAR_NEGOCIO, SEM_PERM, comPermissoesReais, contactoConcluido, passoDe, pelaPermissao, podeNeg, soAteAoContacto, temCodigoReal, type PermNeg } from "./permissoes";
@@ -4509,6 +4509,30 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       }
       // 25/11: pela «Atualizar as microtarefas das obras» (nas Operações), fica no histórico da obra
       if (registar && n) log(d, `Plano: microtarefas atualizadas em ${n} ${n === 1 ? "tarefa" : "tarefas"} (as do Catálogo; só nomes mudados e tarefas novas)`);
+      return n;
+    },
+    /** 25/11 (Rúben: «cria uma regra que ajusta automaticamente o plano»): uma tarefa nunca tem menos horas do que as suas microtarefas
+     *  somam. As que ainda não começaram sobem às horas das microtarefas (os dias e as datas seguintes andam, mudarHoras); as começadas
+     *  não mexem. Corre ao abrir o Estúdio (da obra e do plano) e no «Atualizar as microtarefas das obras». Fica no histórico. Não pede
+     *  «Porquê?»: é a correção do plano pela lista de trabalho, não um pedido nem um atraso. Devolve quantas tarefas mudaram. */
+    ajustarHorasPelasMicro(id: number): number {
+      if (!podeNeg(S.role, "obra.planear")) return 0;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado === "concluída") return 0;
+      let n = 0;
+      p.tasks.forEach((t, ti) => {
+        if (p.estado === "em curso" && porqueNaoMexe(p, ti)) return;
+        const h = horasPorSubir(t, S, p);
+        if (h == null) return;
+        const antes = t.h, sitio = p.tasks.map((x) => ({ dia: x.dia, dur: x.dur }));
+        mudarHoras(p, ti, h);
+        protegerComecadas(p, sitio);
+        if (t.h !== antes) { n++; log(d, `Plano: ${t.nome} · ${nfmt(antes)} → ${nfmt(t.h)} h (as microtarefas somam ${nfmt(h)} h)`); }
+      });
+      if (n) {
+        const fim = Math.max(...p.tasks.map((x) => x.dia + x.dur)) - 1;
+        log(d, `Plano: ${n} ${n === 1 ? "tarefa ajustada" : "tarefas ajustadas"} às horas das microtarefas · a obra acaba a ${rotuloDia(p, fim)}`);
+      }
       return n;
     },
     /** Os materiais de uma tarefa (a lista inteira, já mudada). */

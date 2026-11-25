@@ -37,6 +37,7 @@ import { ImpactoNoOrcamento, linhasDoImpacto, textoEur, type LinhaImpacto } from
 import { materiaisDaTarefa, podeTirar } from "../tarefasValidador";
 import { diferencas } from "../ajustesPlano";
 import { MicrotarefasTarefa } from "../estudioObra/MicrotarefasTarefa";
+import { useMicrotarefasAutomaticas } from "../estudioObra/AtualizarMicrotarefas";
 import { AntesDepoisPlano } from "../estudioObra/AntesDepoisPlano";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { Brilho, Contagem, MOLA, VistoDesenho, useReduzir } from "../movimento";
@@ -55,6 +56,8 @@ type Arrasto = { ti: number; tipo: "mover" | "durar"; dx: number; x: number; y: 
 
 export function EstudioPlano({ ctx, d, fechar, voltar = "Voltar ao negócio" }: { ctx: Ctx; d: Negocio; fechar: () => void; voltar?: string }) {
   const { S, A, run } = ctx;
+  // 25/11: as microtarefas e as horas que elas somam (uma tarefa nunca tem menos horas do que as suas microtarefas)
+  useMicrotarefasAutomaticas(ctx, d);
   const reduzir = useReduzir();
   const p = d.obra.plano;
   // o painel da direita: a tarefa aberta, a tarefa nova (com o dia e a pessoa, se veio do «+») ou «A obra» (o que se sabe da visita)

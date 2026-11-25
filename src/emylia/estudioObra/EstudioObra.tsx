@@ -56,9 +56,9 @@ import { modoReal } from "../acessosPortal";
 import { DocumentosDaObra, ProjetoEm3D } from "./DocumentosObra";
 import { ContratoDaObra } from "./ContratoObra";
 import { BotoesPassos } from "./BotoesPassos";
-import { porFixar } from "../microtarefas";
 import { tarefasDaFase } from "../ordemPlano";
 import { TemposInfraspeak } from "./TemposInfraspeak";
+import { useMicrotarefasAutomaticas } from "./AtualizarMicrotarefas";
 import { passoEntre, retratoDe, type Passo } from "./passosObra";
 import { LigacoesDaTarefa } from "./LigacoesTarefa";
 import { HistoricoObraPortal, ProgressoObraPortal } from "../ObraNoPortal";
@@ -206,17 +206,8 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   const reduzir = useReduzir();
   const p = d.obra.plano;
   const db = useInventario();
-  // 24/11 (microtarefas): ao abrir (e quando o Catálogo chega), as tarefas sem lista própria ficam com a do Catálogo, a mesma que se mostra.
-  // Assim o técnico, que pode não ler o Catálogo, vê no Hoje a mesma lista. Não entra nos passos (anular / refazer): não é uma mudança.
-  useEffect(() => {
-    const pp = d.obra.plano;
-    if (!pp || pp.estado === "concluída" || !podeNeg(S.role, "obra.planear")) return;
-    const falta = pp.tasks.some((t) => !!porFixar(t, S, pp)?.length);
-    if (!falta) return;
-    // a seguir ao desenho (não durante a montagem do ecrã)
-    const id = window.setTimeout(() => ctx0.run(() => { ctx0.A.fixarMicrotarefas(d.id); }), 0);
-    return () => window.clearTimeout(id);
-  }, [S.svc, d.id, d.obra.plano?.tasks.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // 24/11 (microtarefas) e 25/11 (as horas pelas microtarefas): ao abrir e quando o Catálogo chega (AtualizarMicrotarefas.tsx)
+  useMicrotarefasAutomaticas(ctx0, d);
   const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
   // 12/11: o separador e o painel no endereço (o «voltar» do browser fecha o painel ou volta ao separador anterior; recarregar volta aqui)
   const ativo = useContext(EnderecoAtivo);
