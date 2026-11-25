@@ -11,6 +11,8 @@
  * Antes cada ecra escolhia a sua regra (alguns so usavam o display_name quando
  * a ficha era 'organization') e a mesma proposta aparecia com dois nomes.
  */
+import { composeDisplayName } from "@/utils/composeDisplayName";
+
 export interface EntityNameSource {
   display_name?: string | null;
   company_name?: string | null;
@@ -19,6 +21,28 @@ export interface EntityNameSource {
 }
 
 const clean = (value: unknown): string => (typeof value === "string" ? value.trim() : "");
+
+const collapse = (value: string | null | undefined): string =>
+  (value || "").replace(/\s+/g, " ").trim();
+
+/**
+ * Nome que a BASE grava na ficha. Espelho exacto de
+ * public.fn_entity_display_name (migration 20261229910000_nome_unico_da_ficha):
+ * empresa se houver; senao, numa pessoa, nome + apelido (composeDisplayName);
+ * senao null, que quer dizer «fica o display_name que la esta» (organizacao
+ * sem empresa, ou pessoa sem nome nem apelido).
+ */
+export function composeEntityDisplayName(
+  type: string | null | undefined,
+  first: string | null | undefined,
+  last: string | null | undefined,
+  company: string | null | undefined,
+): string | null {
+  const c = collapse(company);
+  if (c) return c;
+  if (type !== "person") return null;
+  return composeDisplayName(first, last) || null;
+}
 
 export function getEntityDisplayName(
   source: EntityNameSource | null | undefined,
