@@ -50,7 +50,10 @@ export function resolveClientNameForSave(
     { first: current.first_name, last: current.last_name },
     { first: edited.first_name, last: edited.last_name },
   );
-  const kept = norm(current.display_name);
+  // Em BRUTO, tal como esta na ficha: gravar sem tocar no nome nao pode mudar
+  // o valor guardado (nem espacos duplos ou NBSP). So se normaliza ao compor.
+  const stored = typeof current.display_name === "string" ? current.display_name : "";
+  const kept = stored.trim() ? stored : "";
   const displayName = !changed && kept
     ? kept
     : composeNameForSave({ company: current.company_name, first: normalized.first, last: normalized.last });

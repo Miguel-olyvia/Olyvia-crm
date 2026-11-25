@@ -14,7 +14,8 @@ import { callNifWriteProxy } from "@/lib/nif/callNifWriteProxy";
 import { resolveCurrentBusinessUserId } from "@/lib/identity/resolveBusinessUserId";
 import { resolveSendProposalAlerts } from "@/lib/notifications/resolveSendProposalAlerts";
 import { withAuditContext } from "@/utils/auditContext";
-import { resolveClientNameForSave } from "@/lib/nameOnSave";
+import { nameFieldsChanged, resolveClientNameForSave } from "@/lib/nameOnSave";
+import { fetchEntityCompanyName, type EntityCompanyResult } from "@/lib/clients/fetchEntityCompanyName";
 import { CompanyNameWarning } from "@/components/shared/CompanyNameWarning";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -205,7 +206,9 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
     vat: "", position: "", status: "", notes: "", organization_id: "",
     assigned_to: "" as string | null,
   });
-  const clientCompany = typeof client?.company_name === "string" ? client.company_name.trim() : "";
+  // null = ainda por ler. `status: "no-column"` = migration por aplicar (empresa desconhecida, como antes).
+  const [entityCompany, setEntityCompany] = useState<EntityCompanyResult | null>(null);
+  const clientCompany = entityCompany?.company ?? "";
   // Morada principal: mesmos campos e validação que as moradas de entrega
   // (CamposMorada + validarMorada). Vazia = cliente sem morada (válido).
   const [moradaPrincipal, setMoradaPrincipal] = useState<MoradaCampos>(MORADA_VAZIA);
@@ -306,8 +309,17 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
       }
     };
 
-    // Fire both in parallel
-    Promise.all([fetchEntityType(), fetchOrgUsers()]);
+    // A empresa da ficha le-se aparte e de forma tolerante: a coluna so existe
+    // depois da migration do nome unico (ver fetchEntityCompanyName).
+    setEntityCompany(null);
+    const fetchCompany = async () => {
+      const result = await fetchEntityCompanyName(supabase, client.entity_id);
+      if (result.status === "error") captureFlowError(result.error, "db-error-leaked-to-ui");
+      if (!isCancelled) setEntityCompany(result);
+    };
+
+    // Fire all in parallel
+    Promise.all([fetchEntityType(), fetchOrgUsers(), fetchCompany()]);
 
     setSelectedNewListIds(new Set());
     setShowAddListForm(false);
@@ -806,7 +818,19 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         await withAuditContext(supabase, businessUserId, async () => {
           // O display_name so e recomposto se o utilizador mexeu no nome/apelido:
           // sem isso, gravar uma ficha cujo nome e de empresa estragava-o.
-          const { displayName, first: normFirst, last: normLast } = resolveClientNameForSave(client, editFormData);
+          // Mexer no nome sem saber se a ficha tem empresa perderia a empresa:
+          // nesse caso nao se grava e pede-se para tentar de novo.
+          const companyUnknown = !entityCompany || entityCompany.status === "error";
+          if (companyUnknown && nameFieldsChanged(
+            { first: client.first_name, last: client.last_name },
+            { first: editFormData.first_name, last: editFormData.last_name },
+          )) {
+            throw new Error("Não foi possível confirmar a empresa desta ficha. Feche e volte a abrir o cliente e tente de novo.");
+          }
+          const { displayName, first: normFirst, last: normLast } = resolveClientNameForSave(
+            { ...client, company_name: entityCompany?.company ?? null },
+            editFormData,
+          );
           const normalized = { first: normFirst, last: normLast };
           const nif = editFormData.vat || null;
           const { error: rpcError } = await callNifWriteProxy("rpc_update_client", {

@@ -69,6 +69,24 @@ describe("resolveClientNameForSave com empresa (nome = empresa, senao nome + ape
     expect(out.displayName).toBe("Evolar Lda");
   });
 
+  it("nome intocado: o display_name guardado mantem-se EM BRUTO (espacos duplos, NBSP, espacos nas pontas)", () => {
+    for (const bruto of ["EVOLAR  LDA ", "EVOLAR LDA", " Evolar Lda"]) {
+      const out = resolveClientNameForSave(
+        { display_name: bruto, first_name: "Rui", last_name: "Silva", company_name: "Evolar Lda" },
+        { first_name: " Rui", last_name: "Silva  " },
+      );
+      expect(out.displayName).toBe(bruto);
+    }
+  });
+
+  it("nome alterado numa ficha com display_name em bruto: compoe (a empresa, normalizada)", () => {
+    const out = resolveClientNameForSave(
+      { display_name: "EVOLAR  LDA ", first_name: "Rui", last_name: "Silva", company_name: "EVOLAR  LDA " },
+      { first_name: "Rui", last_name: "Costa" },
+    );
+    expect(out.displayName).toBe("EVOLAR LDA");
+  });
+
   it("empresa so de espacos conta como vazia", () => {
     const out = resolveClientNameForSave(
       { display_name: "Rui Costa", first_name: "Rui", last_name: "Costa", company_name: "  " },
