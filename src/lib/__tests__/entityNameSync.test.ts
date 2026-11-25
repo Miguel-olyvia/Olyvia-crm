@@ -68,6 +68,40 @@ describe("gatilho da ficha", () => {
     expect(displayNameOnUpdate(old, { ...old, last_name: "Costa" })).toBe("Rui Costa");
   });
 
+  it("'Rui' sem apelido, e uma lead nova ou o update-lead preenche o apelido 'Silva': NAO muda", () => {
+    const old = person({ display_name: "Rui", last_name: null });
+    expect(displayNameOnUpdate(old, { ...old, last_name: "Silva" })).toBe("Rui");
+    const blank = person({ display_name: "Rui", last_name: "  " });
+    expect(displayNameOnUpdate(blank, { ...blank, last_name: "Silva" })).toBe("Rui");
+  });
+
+  it("'Silva' so com apelido, e preenche-se o nome: NAO muda", () => {
+    const old = person({ display_name: "Silva", first_name: null });
+    expect(displayNameOnUpdate(old, { ...old, first_name: "Rui" })).toBe("Silva");
+  });
+
+  it("nome e apelido vazios, e preenchem-se ambos: NAO muda", () => {
+    const old = person({ display_name: "Rui Silva", first_name: null, last_name: "" });
+    expect(displayNameOnUpdate(old, { ...old, first_name: "Ana", last_name: "Costa" })).toBe("Rui Silva");
+  });
+
+  it("'Rui Silva' -> 'Rui Costa' e depois mantem-se (gravar de novo sem mudar nada)", () => {
+    const old = person();
+    const renamed = { ...old, last_name: "Costa", display_name: displayNameOnUpdate(old, { ...old, last_name: "Costa" }) };
+    expect(renamed.display_name).toBe("Rui Costa");
+    expect(displayNameOnUpdate(renamed, { ...renamed })).toBe("Rui Costa");
+  });
+
+  it("empresa sem company_name que recebe uma (preenchimento): NAO muda", () => {
+    const old = company({ display_name: "EVOLAR LDA", company_name: null });
+    expect(displayNameOnUpdate(old, { ...old, company_name: "OUTRA LDA" })).toBe("EVOLAR LDA");
+  });
+
+  it("mudar o tipo por UPDATE directo nao recompoe (so a RPC muda o tipo)", () => {
+    const old = person({ company_name: "EVOLAR LDA" });
+    expect(displayNameOnUpdate(old, { ...old, type: "organization" })).toBe("Rui Silva");
+  });
+
   it("(f) display_name explicito: respeitado", () => {
     const old = person();
     expect(displayNameOnUpdate(old, { ...old, last_name: "Costa", display_name: "Sr. Rui" })).toBe("Sr. Rui");
@@ -119,6 +153,22 @@ describe("rpc_set_entity_kind (decisao)", () => {
     expect(setEntityKind(person(), { type: "company", company_name: "X" })).toEqual({ ok: false, error: "tipo_invalido" });
     expect(setEntityKind(person(), { type: "organization", company_name: "  " })).toEqual({ ok: false, error: "empresa_obrigatoria" });
     expect(setEntityKind(company(), { type: "person", first_name: "", last_name: null })).toEqual({ ok: false, error: "nome_obrigatorio" });
+  });
+
+  it("Empresa: nome e apelido existentes ficam (nao passam a NULL)", () => {
+    const result = setEntityKind(person(), { type: "organization", company_name: "EVOLAR LDA", first_name: null, last_name: "" });
+    expect(result.ok && [result.row.first_name, result.row.last_name]).toEqual(["Rui", "Silva"]);
+  });
+
+  it("limites e caracteres de controlo: empresa ate 200, nome e apelido ate 100", () => {
+    expect(setEntityKind(person(), { type: "organization", company_name: "A".repeat(200) }).ok).toBe(true);
+    expect(setEntityKind(person(), { type: "organization", company_name: "A".repeat(201) })).toEqual({ ok: false, error: "valor_invalido" });
+    expect(setEntityKind(person(), { type: "person", first_name: "R".repeat(101) })).toEqual({ ok: false, error: "valor_invalido" });
+    expect(setEntityKind(person(), { type: "person", first_name: "Rui", last_name: "S".repeat(101) })).toEqual({ ok: false, error: "valor_invalido" });
+    expect(setEntityKind(person(), { type: "organization", company_name: "EVOLAR\u0000LDA" })).toEqual({ ok: false, error: "valor_invalido" });
+    expect(setEntityKind(person(), { type: "person", first_name: "Rui\u007f" })).toEqual({ ok: false, error: "valor_invalido" });
+    // tabulacoes e quebras de linha sao espaco: juntam-se antes de validar
+    expect(setEntityKind(person(), { type: "person", first_name: "Rui\tPedro", last_name: "Silva" })).toMatchObject({ ok: true, row: { display_name: "Rui Pedro Silva" } });
   });
 
   it("o resultado da RPC fica em sincronia (o gatilho volta a acompanhar edicoes)", () => {

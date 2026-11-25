@@ -20,10 +20,17 @@
 --        INSERT: so preenche o display_name quando vem vazio;
 --        UPDATE (OF first_name, last_name, company_name, type): recompoe SO se
 --          (a) o UPDATE nao mudou o proprio display_name, E
---          (b) mudou nome, apelido, empresa ou tipo, E
---          (c) a ficha estava em sincronia: o display_name antigo, normalizado,
---              era a composicao ESTRITA antiga pelo tipo antigo, E
---          (d) a composicao nova (pelo tipo novo) e diferente e nao vazia.
+--          (b) o tipo NAO mudou (mudar de tipo e so pela RPC, que escreve o
+--              nome explicitamente), E
+--          (c) MUDOU O VALOR de um campo que ja tinha valor: Pessoa -> o nome
+--              E o apelido antigos estavam ambos preenchidos e um deles mudou;
+--              Empresa -> a empresa antiga estava preenchida e mudou.
+--              PREENCHER o que faltava (ficha «Rui» que recebe o apelido
+--              «Silva» de uma lead nova ou do update-lead) NAO renomeia:
+--              nenhum nome muda sem o utilizador o editar, E
+--          (d) a ficha estava em sincronia: o display_name antigo, normalizado,
+--              era a composicao ESTRITA antiga, E
+--          (e) a composicao nova e diferente e nao vazia.
 --        Fichas fora de sincronia (empresa gravada como pessoa, importadas,
 --        editadas a mao) nunca se tocam. Um display_name explicito e respeitado.
 --   4. os tres gatilhos que mantem o search_text (da ficha, das leads e dos
@@ -31,8 +38,17 @@
 --      empresa ou do tipo pode agora mudar o nome, e o search_text tem de o
 --      acompanhar. Mesmas funcoes (20261113150000, 20261111130000,
 --      20261113100000, as versoes mais recentes); so a lista de colunas muda.
+--      O search_text continua a ser feito so de display_name/first/last (as
+--      funcoes nao leem company_name): nada se alarga.
 --   5. RPC NOVA rpc_set_entity_kind: escolher Pessoa/Empresa no ecra.
 --      Nenhuma RPC existente e alterada.
+--      DIFERENCA para neg_guardar_identidade_pessoa (base de RH, fluxo do
+--      negocio): essa, ao passar a ficha a organizacao, deixa first_name e
+--      last_name a NULL. Esta MANTEM-NOS como estao (sao a pessoa de contacto,
+--      que ecras de leads/clientes leem, e permitem voltar a Pessoa sem os
+--      reescrever); so os substitui se o pedido trouxer valores.
+--      Limites como neg_guardar_identidade_pessoa: empresa ate 200 caracteres,
+--      nome e apelido ate 100, sem caracteres de controlo.
 --
 -- SUPOSICAO (so migrations lidas, nao o catalogo do remoto): a coluna, as
 -- funcoes, o gatilho e a RPC nao existem la; os tres gatilhos do search_text
@@ -108,15 +124,28 @@ GRANT EXECUTE ON FUNCTION public.fn_entity_compose_name(text, text, text, text) 
 REVOKE ALL ON FUNCTION public.fn_entity_display_name(text, text, text, text, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.fn_entity_display_name(text, text, text, text, text) TO service_role;
 
--- Ficha de um utilizador, de uma organizacao da plataforma, ou presente em mais
--- do que uma organizacao-raiz (leads, clientes, contactos, ligacoes, papeis).
+-- Fichas que esta RPC NAO pode mudar de tipo/nome:
+--   (1) ficha de um UTILIZADOR INTERNO: ha um anew_users com entity_id = ficha
+--       e essa conta NAO e a conta de portal desta mesma ficha. Desde
+--       20261117010000 dar acesso ao portal liga anew_users.entity_id a ficha
+--       do CLIENTE (e client_portal_users guarda a mesma conta, auth_user_id,
+--       e a mesma ficha, entity_id). Uma conta com linha em client_portal_users
+--       para ESTA ficha e um cliente de portal, nao um utilizador interno, e
+--       a ficha continua editavel (como era pelo rpc_update_client);
+--   (2) ficha de uma organizacao da plataforma (anew_organizations.entity_id);
+--   (3) ficha presente em mais do que uma organizacao-raiz (leads, clientes,
+--       contactos, ligacoes, papeis).
 CREATE FUNCTION public.fn_entity_shared_outside_root(p_entity_id uuid)
 RETURNS boolean
 LANGUAGE sql
 STABLE
 SET search_path = ''
 AS $$
-  SELECT EXISTS (SELECT 1 FROM public.anew_users u WHERE u.entity_id = p_entity_id)
+  SELECT EXISTS (SELECT 1 FROM public.anew_users u
+                  WHERE u.entity_id = p_entity_id
+                    AND NOT EXISTS (SELECT 1 FROM public.client_portal_users cpu
+                                     WHERE cpu.auth_user_id = u.auth_user_id
+                                       AND cpu.entity_id = p_entity_id))
       OR EXISTS (SELECT 1 FROM public.anew_organizations o WHERE o.entity_id = p_entity_id)
       OR (SELECT count(DISTINCT r.root_id)
             FROM (
@@ -135,7 +164,7 @@ AS $$
 $$;
 
 COMMENT ON FUNCTION public.fn_entity_shared_outside_root(uuid) IS
-  'true se a ficha e de um utilizador/organizacao da plataforma ou aparece em mais do que uma organizacao-raiz.';
+  'true se a ficha e de um utilizador INTERNO (anew_users sem ser a conta de portal desta ficha em client_portal_users), de uma organizacao da plataforma, ou aparece em mais do que uma organizacao-raiz. Clientes com acesso ao portal NAO contam.';
 
 REVOKE ALL ON FUNCTION public.fn_entity_shared_outside_root(uuid) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.fn_entity_shared_outside_root(uuid) TO service_role;
@@ -167,22 +196,37 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  -- (b) nada do que compoe o nome mudou.
-  IF NEW.first_name   IS NOT DISTINCT FROM OLD.first_name
-     AND NEW.last_name    IS NOT DISTINCT FROM OLD.last_name
-     AND NEW.company_name IS NOT DISTINCT FROM OLD.company_name
-     AND NEW.type         IS NOT DISTINCT FROM OLD.type THEN
+  -- (b) mudar de tipo nao recompoe (e pela RPC, com nome explicito).
+  IF NEW.type IS DISTINCT FROM OLD.type THEN
     RETURN NEW;
   END IF;
 
-  -- (c) a ficha estava em sincronia (composicao estrita, pelo tipo antigo)?
+  -- (c) so a MUDANCA de um valor que ja existia recompoe; preencher o que
+  --     faltava nao renomeia.
+  IF OLD.type = 'person' THEN
+    IF btrim(regexp_replace(coalesce(OLD.first_name, ''), '[\s\u00a0]+', ' ', 'g'), ' ') = ''
+       OR btrim(regexp_replace(coalesce(OLD.last_name, ''), '[\s\u00a0]+', ' ', 'g'), ' ') = ''
+       OR (NEW.first_name IS NOT DISTINCT FROM OLD.first_name
+           AND NEW.last_name IS NOT DISTINCT FROM OLD.last_name) THEN
+      RETURN NEW;
+    END IF;
+  ELSIF OLD.type = 'organization' THEN
+    IF btrim(regexp_replace(coalesce(OLD.company_name, ''), '[\s\u00a0]+', ' ', 'g'), ' ') = ''
+       OR NEW.company_name IS NOT DISTINCT FROM OLD.company_name THEN
+      RETURN NEW;
+    END IF;
+  ELSE
+    RETURN NEW;
+  END IF;
+
+  -- (d) a ficha estava em sincronia (composicao estrita)?
   v_old_norm := btrim(regexp_replace(coalesce(OLD.display_name, ''), '[\s\u00a0]+', ' ', 'g'), ' ');
   v_old_comp := public.fn_entity_compose_name(OLD.type, OLD.first_name, OLD.last_name, OLD.company_name);
   IF v_old_comp IS NULL OR v_old_comp <> v_old_norm THEN
     RETURN NEW;
   END IF;
 
-  -- (d) a composicao nova difere?
+  -- (e) a composicao nova difere?
   v_new_comp := public.fn_entity_compose_name(NEW.type, NEW.first_name, NEW.last_name, NEW.company_name);
   IF v_new_comp IS NOT NULL AND v_new_comp <> v_old_norm THEN
     NEW.display_name := v_new_comp;
@@ -222,8 +266,10 @@ CREATE TRIGGER trg_anew_entities_sync_clients_search_text
 -- Permissoes e isolamento: os de rpc_set_entity_primary_email (20261229500000),
 -- via fn_assert_can_edit_entity_contacts -- quem pode editar a lead/cliente
 -- desta ficha (leads.edit / clients.edit, no ambito) e a ficha no ambito do
--- utilizador; mais a recusa de fichas de utilizadores, de organizacoes da
--- plataforma ou partilhadas com outra organizacao-raiz.
+-- utilizador; mais a recusa de fichas de utilizadores INTERNOS, de organizacoes
+-- da plataforma ou partilhadas com outra organizacao-raiz (ver
+-- fn_entity_shared_outside_root; clientes com acesso ao portal continuam
+-- editaveis).
 -- Empresa: o nome e a empresa; nome/apelido ficam como estao (sao a pessoa de
 -- contacto e ha ecras que os leem), ou passam aos do pedido se vierem
 -- preenchidos. Pessoa: nome/apelido do pedido (obrigatorio pelo menos um);
@@ -256,6 +302,14 @@ BEGIN
   IF p_type IS NULL OR p_type NOT IN ('person', 'organization') THEN
     RAISE EXCEPTION 'Tipo de ficha inválido (person ou organization)' USING ERRCODE = 'invalid_parameter_value';
   END IF;
+  -- Como neg_guardar_identidade_pessoa: depois de juntar o espaco, ate 200
+  -- (empresa) / 100 (nome, apelido) caracteres e sem caracteres de controlo.
+  IF char_length(v_company) > 200 OR v_company ~ '[[:cntrl:]]'
+     OR char_length(v_first) > 100 OR v_first ~ '[[:cntrl:]]'
+     OR char_length(v_last) > 100 OR v_last ~ '[[:cntrl:]]' THEN
+    RAISE EXCEPTION 'Valor inválido: nome da empresa (até 200 caracteres) ou nome e apelido (até 100), sem caracteres de controlo'
+      USING ERRCODE = 'invalid_parameter_value';
+  END IF;
   IF p_type = 'organization' AND v_company IS NULL THEN
     RAISE EXCEPTION 'Nome da empresa obrigatório' USING ERRCODE = 'invalid_parameter_value';
   END IF;
@@ -276,7 +330,7 @@ BEGIN
   END IF;
 
   IF public.fn_entity_shared_outside_root(p_entity_id) THEN
-    RAISE EXCEPTION 'Esta ficha é partilhada com outra organização ou é de um utilizador; não pode mudar de tipo aqui'
+    RAISE EXCEPTION 'Esta ficha é partilhada com outra organização ou é de um utilizador interno; não pode mudar de tipo aqui'
       USING ERRCODE = 'insufficient_privilege';
   END IF;
 

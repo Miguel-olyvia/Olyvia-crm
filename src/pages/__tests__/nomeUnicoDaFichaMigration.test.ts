@@ -1,3 +1,4 @@
+/// <reference types="node" />
 /**
  * @vitest-environment node
  */
@@ -71,6 +72,29 @@ describe("migration 20261229910000_nome_unico_da_ficha", () => {
     const guard = at(body, "if v_old_comp is null or v_old_comp <> v_old_norm then return new;");
     expect(explicit).toBeLessThan(inSync);
     expect(inSync).toBeLessThan(guard);
+  });
+
+  it("gatilho: mudar o tipo nao recompoe e preencher o que faltava nao renomeia", () => {
+    const body = bodyOf("fn_anew_entities_display_name_trigger");
+    const type = at(body, "if new.type is distinct from old.type then return new;");
+    const fill = at(body, "if old.type = 'person' then if btrim(regexp_replace(coalesce(old.first_name, ''), '[\\s\\u00a0]+', ' ', 'g'), ' ') = '' or btrim(regexp_replace(coalesce(old.last_name, ''), '[\\s\\u00a0]+', ' ', 'g'), ' ') = ''");
+    at(body, "elsif old.type = 'organization' then if btrim(regexp_replace(coalesce(old.company_name, ''), '[\\s\\u00a0]+', ' ', 'g'), ' ') = ''");
+    const inSync = at(body, "v_old_comp := public.fn_entity_compose_name(");
+    expect(type).toBeLessThan(fill);
+    expect(fill).toBeLessThan(inSync);
+  });
+
+  it("partilhada: so recusa utilizadores INTERNOS; o cliente com acesso ao portal (client_portal_users da mesma ficha) nao conta", () => {
+    const body = bodyOf("fn_entity_shared_outside_root");
+    at(body, "where u.entity_id = p_entity_id and not exists (select 1 from public.client_portal_users cpu where cpu.auth_user_id = u.auth_user_id and cpu.entity_id = p_entity_id))");
+    at(body, "or exists (select 1 from public.anew_organizations o where o.entity_id = p_entity_id)");
+  });
+
+  it("RPC: limites de comprimento e caracteres de controlo antes das permissoes", () => {
+    const body = bodyOf("rpc_set_entity_kind");
+    const limits = at(body, "if char_length(v_company) > 200 or v_company ~ '[[:cntrl:]]' or char_length(v_first) > 100 or v_first ~ '[[:cntrl:]]' or char_length(v_last) > 100 or v_last ~ '[[:cntrl:]]' then");
+    expect(limits).toBeLessThan(at(body, "perform public.fn_assert_can_edit_entity_contacts(p_entity_id);"));
+    at(body, "v_first := coalesce(v_first, v_before.first_name); v_last := coalesce(v_last, v_before.last_name);");
   });
 
   it("os gatilhos do search_text escutam tambem company_name e type, com as mesmas funcoes", () => {

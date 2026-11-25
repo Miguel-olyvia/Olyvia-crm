@@ -54,12 +54,31 @@ export function displayNameOnInsert(row: EntityNameRow): string | null {
 /** Gatilho, UPDATE: o display_name que fica gravado. */
 export function displayNameOnUpdate(oldRow: EntityNameRow, newRow: EntityNameRow): string | null {
   if (newRow.display_name !== oldRow.display_name) return newRow.display_name; // (a) explicito
-  const composing = ["first_name", "last_name", "company_name", "type"] as const;
-  if (composing.every((key) => newRow[key] === oldRow[key])) return newRow.display_name; // (b)
-  if (!isEntityNameInSync(oldRow)) return newRow.display_name; // (c) fora de sincronia
+  if (newRow.type !== oldRow.type) return newRow.display_name; // (b) tipo so pela RPC
+  if (!isValueChange(oldRow, newRow)) return newRow.display_name; // (c) preencher nao renomeia
+  if (!isEntityNameInSync(oldRow)) return newRow.display_name; // (d) fora de sincronia
   const next = composeEntityName(newRow);
-  return next !== null && next !== normalizeName(oldRow.display_name) ? next : newRow.display_name; // (d)
+  return next !== null && next !== normalizeName(oldRow.display_name) ? next : newRow.display_name; // (e)
 }
+
+/** (c) Mudou o valor de um campo que ja tinha valor (nao um preenchimento). */
+function isValueChange(oldRow: EntityNameRow, newRow: EntityNameRow): boolean {
+  if (oldRow.type === "person") {
+    if (!normalizeName(oldRow.first_name) || !normalizeName(oldRow.last_name)) return false;
+    return newRow.first_name !== oldRow.first_name || newRow.last_name !== oldRow.last_name;
+  }
+  if (oldRow.type === "organization") {
+    if (!normalizeName(oldRow.company_name)) return false;
+    return newRow.company_name !== oldRow.company_name;
+  }
+  return false;
+}
+
+/** Limites como neg_guardar_identidade_pessoa. */
+export const COMPANY_NAME_MAX = 200;
+export const PERSON_NAME_PART_MAX = 100;
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARS = /[\u0000-\u001f\u007f-\u009f]/;
 
 export interface SetEntityKindRequest {
   type: string;
@@ -70,7 +89,11 @@ export interface SetEntityKindRequest {
 
 export type SetEntityKindResult =
   | { ok: true; row: EntityNameRow }
-  | { ok: false; error: "tipo_invalido" | "empresa_obrigatoria" | "nome_obrigatorio" };
+  | { ok: false; error: "tipo_invalido" | "valor_invalido" | "empresa_obrigatoria" | "nome_obrigatorio" };
+
+function isInvalidPart(value: string | null, max: number): boolean {
+  return value !== null && (value.length > max || CONTROL_CHARS.test(value));
+}
 
 /** Espelho da decisao de rpc_set_entity_kind (sem permissoes nem auditoria). */
 export function setEntityKind(before: EntityNameRow, request: SetEntityKindRequest): SetEntityKindResult {
@@ -78,6 +101,13 @@ export function setEntityKind(before: EntityNameRow, request: SetEntityKindReque
   let first = normalizeName(request.first_name) || null;
   let last = normalizeName(request.last_name) || null;
   let company = normalizeName(request.company_name) || null;
+  if (
+    isInvalidPart(company, COMPANY_NAME_MAX) ||
+    isInvalidPart(first, PERSON_NAME_PART_MAX) ||
+    isInvalidPart(last, PERSON_NAME_PART_MAX)
+  ) {
+    return { ok: false, error: "valor_invalido" };
+  }
   if (request.type === "organization" && !company) return { ok: false, error: "empresa_obrigatoria" };
   if (request.type === "person" && !first && !last) return { ok: false, error: "nome_obrigatorio" };
 
