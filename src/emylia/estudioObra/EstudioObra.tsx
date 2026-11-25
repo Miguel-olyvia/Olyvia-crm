@@ -14,8 +14,9 @@ import { preCarregarVisualizador3D } from "@/emylia/planta3d/carregarVisualizado
 import { EnderecoAtivo, escreverParamUrl, usePainelUrl, useParamUrl } from "../usarParamUrl";
 import { COLUNA_MAX, COLUNA_MIN, useLarguraColuna } from "./larguraColuna";
 import { BarraRolar } from "./BarraRolar";
+import { exportarExcelPlano, exportarPdfPlano } from "./exportarPlano";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, Box, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, GripVertical, HardHat, Lightbulb, Link2, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Redo2, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Box, FileDown, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, GripVertical, HardHat, Lightbulb, Link2, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Redo2, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { comRelogioReal, eur, nfmt, type AvisoTec, type Negocio, type Plano, type Tarefa } from "../motor";
@@ -487,7 +488,8 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
                 critico={viva.critico} passar={planeia && !acabou ? (ti, tec) => mudar(ti, () => A.trocarTec(d.id, ti, tec)) : undefined}
                 ligar={planeia && !acabou ? (para, de) => pedirLigacao(para, de, true) : undefined}
                 novaTarefa={podeCriar ? (fase) => setPainel({ k: "nova", ...(fase ? { inicial: { fase } } : {}) }) : undefined}
-                ordenar={planeia && !acabou ? (ti, para) => mudar(ti, () => A.ordemTarefaPlano(d.id, ti, para)) : undefined} />
+                ordenar={planeia && !acabou ? (ti, para) => mudar(ti, () => A.ordemTarefaPlano(d.id, ti, para)) : undefined}
+                exportar={{ pdf: () => exportarPdfPlano(d, S, inv), excel: () => exportarExcelPlano(d, S, inv) }} />
               {planeia && !acabou && <DiasDoTecnico p={p} pedir={pedirRestricao} />}
               {/* 25/11: as horas de cada tarefa pelas microtarefas do Infraspeak */}
               {planeia && !acabou && !previa && <TemposInfraspeak ctx={ctxObra} d={d} podeMexer={podeMexer} mudar={mudar} />}
@@ -680,8 +682,30 @@ function CartaoAlerta({ a, agir, reduzir, soLer }: { a: Alerta; agir: (x: AcaoAl
 // 11/11 (Rúben: «gerir tudo por completo, mais ainda do que na aprovação»): as tarefas que ainda não começaram arrastam-se (o dia) e a ponta
 // muda os dias, como no Estúdio do plano; na vista por técnico, por baixo das tarefas, onde a pessoa está fora desta obra (outra obra, que
 // abre o Estúdio dela, ou férias) e, num dia vazio, «+» cria uma tarefa para essa pessoa nesse dia.
+/** 25/11: os botões de exportar o plano (PDF horizontal e Excel). A biblioteca só se carrega ao clicar. */
+function Exportar({ exportar }: { exportar: { pdf: () => Promise<unknown>; excel: () => Promise<unknown> } }) {
+  const [aFazer, setAFazer] = useState<"pdf" | "excel" | null>(null);
+  const [erro, setErro] = useState("");
+  const ir = async (k: "pdf" | "excel") => {
+    setAFazer(k); setErro("");
+    try { await exportar[k](); } catch (e) { console.warn("exportar o plano", e); setErro(k === "pdf" ? "O PDF não se gerou. Tente de novo." : "O Excel não se gerou. Tente de novo."); }
+    finally { setAFazer(null); }
+  };
+  return (
+    <div role="group" aria-label="Exportar o plano" className="inline-flex items-center gap-1">
+      {([["pdf", "PDF"], ["excel", "Excel"]] as const).map(([k, l]) => (
+        <button key={k} type="button" onClick={() => ir(k)} disabled={!!aFazer} aria-label={k === "pdf" ? "Exportar o plano para PDF (horizontal)" : "Exportar o plano para Excel (fase, tarefa, microtarefa e tempo)"}
+          className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-input px-3 text-sm font-medium text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground disabled:opacity-60">
+          <FileDown className="h-4 w-4" aria-hidden="true" />{aFazer === k ? "A gerar…" : l}
+        </button>
+      ))}
+      {erro && <span role="alert" className="text-sm text-destructive">{erro}</span>}
+    </div>
+  );
+}
+
 type Arrasto = { ti: number; tipo: "mover" | "durar"; dx: number; dy: number };
-function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista, setVista, podeMexer, mover: moverTarefa, nova, obras, deFerias, abrirOutra, critico, passar, ligar, novaTarefa, ordenar }: {
+function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista, setVista, podeMexer, mover: moverTarefa, nova, obras, deFerias, abrirOutra, critico, passar, ligar, novaTarefa, ordenar, exportar }: {
   titulo: string; p: Plano; R: Replano | null; dias: Date[]; sel: number | null; abrir: (ti: number) => void; imprevistos: { id: string; dia: number; texto: string }[]; reduzir: boolean;
   vista: "gantt" | "tecnicos"; setVista: (v: "gantt" | "tecnicos") => void; podeMexer: (ti: number) => boolean;
   mover: (ti: number, m: { dia?: number; dur?: number }) => void; nova?: (dia: number, tec: string | null) => void;
@@ -694,6 +718,8 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
    *  tarefa interna), na fase pedida pelo «+» dessa fase */ novaTarefa?: (fase?: number) => void;
   /** 25/11 (Rúben: «drag and drop da lista da primeira coluna»): põe a tarefa noutro lugar da lista da fase (as datas não mudam) */
   ordenar?: (ti: number, para: number) => void;
+  /** 25/11 (Rúben: «exportar o plano todo e o estado para PDF horizontal»; «e exportar para Excel: fase, tarefa, micro e tempo») */
+  exportar?: { pdf: () => Promise<unknown>; excel: () => Promise<unknown> };
 }) {
   const vivo = p.estado === "em curso";
   // 25/11: arrastar uma linha da lista (pelo pegador, com o rato ou o dedo) ou mexê-la com as setas do teclado
@@ -969,6 +995,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
               ))}
             </div>
           )}
+          {exportar && !R && <Exportar exportar={exportar} />}
         </div>
         <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="Legenda">
           {legenda.map(([t, c]) => <li key={t} className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-4 rounded-sm" style={{ background: c }} />{t}</li>)}
