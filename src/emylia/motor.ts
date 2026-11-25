@@ -10,6 +10,7 @@ import { NOME_SEGURANCA, faltaParaFeita, fotoExemplo, type EntradaDiario, type E
 import { comLigacao, comRestricao, nomeCurtoTarefa, porqueNaoLigar, replanear, simularAtraso } from "./estudioObra/planoVivo";
 import { porNaTarefa, type RetratoPlano } from "./estudioObra/passosObra";
 import { lerQuemAssina } from "./estudioObra/quemAssina";
+import { fotoPlano, guardarAlteracao, mudancasEntre, type Alteracao as AlteracaoPlano, type FotoPlano } from "./historicoPlano";
 import { MOTIVO_QUEM_PAGA, aplicarNoPlano, custoDaHora, guardarAjuste, impactoAjuste, type AjusteAdenda, type AjusteObra, type ImpactoAjuste } from "./estudioObra/quemPaga";
 import { aplicarAjuste, aplicarCorrecao, instrucoesDe, preverAjuste, textoAvisoCliente, type Alteracao, type AjusteVivo, type Envio } from "./trabalhoObra";
 import { itemCatalogo, normal as normalUn } from "./catalogo";
@@ -480,6 +481,8 @@ export interface Negocio {
     imprevistos?: Imprevisto[];
     /** 25/11: o antes e depois de cada validação do plano (o gerado pelo motor e o aprovado pelo gestor de obra), para aprender (planoAntesDepois.ts) */
     aprendizagem?: RegistoPlano[];
+    /** 25/11 (Rúben: «qualquer alteração deve ir para um histórico… o sistema tem de aprender»): cada mudança ao plano, por ação (historicoPlano.ts) */
+    mudancasPlano?: AlteracaoPlano[];
     /** O previsto e o real por fase, congelados no fim da obra: atualizar depois a receita no Catálogo não muda o histórico (planoObra.ts). */
     realFases?: ObraReal | null;
     /** 15/10: o auto de receção (por assinar → assinado) */
@@ -5344,6 +5347,21 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       d.orc!.aprov = null; avisar({ msg: "Custo atualizado com o Catálogo", kind: "ok" });
     },
   };
+  // 25/11 (Rúben: «qualquer alteração deve ir para um histórico, o sistema tem de aprender»): cada ação que muda um plano de obra fica em
+  // obra.mudancasPlano (historicoPlano.ts). Só a ação de fora conta (uma ação que chama outra fica uma entrada só, com o nome da de fora).
+  let fundo = 0;
+  const nomeTecH = (id: string | null) => TECS.find((x) => x.id === id)?.n ?? "por atribuir";
+  const fotosPlanos = () => { const m = new Map<number, FotoPlano>(); for (const d of S.deals) if (d.obra?.plano) m.set(d.id, fotoPlano(d.obra.plano)); return m; };
+  const registarAlteracoes = (acao: string, antes: Map<number, FotoPlano>) => {
+    for (const d of S.deals) {
+      const p = d.obra?.plano, a = antes.get(d.id);
+      if (!p || !a) continue; // um plano novo (gerado agora) é o ponto de partida, não uma alteração
+      const b = fotoPlano(p);
+      if (a.json === b.json) continue;
+      const mudancas = mudancasEntre(a, b, nomeTecH, p, S);
+      if (mudancas.length) guardarAlteracao(d.obra, { q: new Date().toISOString(), quem: lerQuemAssina() || PAPEIS[S.role]?.nome || "", acao, estado: a.estado, dia: a.dia, mudancas });
+    }
+  };
   // depois de cada ação, a visita de cada negócio acompanha as necessidades
   for (const k of Object.keys(A) as (keyof typeof A)[]) {
     const f = A[k] as (...a: unknown[]) => unknown;
@@ -5352,9 +5370,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 25/11: com a exceção aprovada, uma edição do orçamento só a anula se a margem ou os preços aprovados piorarem
       const d0 = edita && typeof a[0] === "number" ? S.deals.find((x) => x.id === a[0]) : undefined;
       const antes = d0?.orc?.aprov === "ok" ? { o: d0.orc, f: fotoAprov(d0, S) } : null;
-      const r = f(...a);
+      const planos = fundo === 0 ? fotosPlanos() : null;
+      fundo++;
+      let r: unknown;
+      try { r = f(...a); } finally { fundo--; }
       for (const d of S.deals) sincronizarVisita(d);
       if (antes && d0) manterAprovacao(d0, S, antes.o, antes.f);
+      if (planos) { try { registarAlteracoes(String(k), planos); } catch (e) { console.warn("historico do plano", e); } }
       return r;
     };
   }
