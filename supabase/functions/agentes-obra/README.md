@@ -2,6 +2,10 @@
 
 Estado a 25 de novembro de 2026. É a etapa 3b do plano «Obra Viva».
 
+**No ar na testarh (uetjgh) desde 25 de novembro, 21h32**: migration aplicada, função publicada pelo painel, segredos postos,
+conta `Olyvia (agentes)` criada com o papel «Supervisor de obra» na Mudelar. A obra OB-1048 tem os agentes do Plano e da Equipa
+em «pede» (o plano está em validação).
+
 Os agentes já vigiam as obras quando alguém das Operações tem a Olyvia aberta (etapa 3a).
 Com isto, **vigiam também com a Olyvia fechada**, de 15 em 15 minutos.
 
@@ -51,7 +55,7 @@ A conta só faz o que o papel deixa. Para a parar, tira-se-lhe o acesso na Olyvi
 |---|---|
 | `AGENTES_ORGS` | o id da organização (vários, separados por vírgulas) |
 | `AGENTES_PAPEL` | o id do papel da conta robô (o «Supervisor de obra»: planear a obra, ler o Catálogo e os negócios) |
-| `AGENTES_ATOR` | o id em `anew_users` de quem autoriza a conta (um administrador) |
+| `AGENTES_ATOR` | o id em `anew_users` de quem autoriza a conta: tem de criar utilizadores **e ver a organização** (um administrador dela) |
 | `AGENTES_EMAIL` | opcional; por omissão `agentes.olyvia@example.com` |
 
 ```sql

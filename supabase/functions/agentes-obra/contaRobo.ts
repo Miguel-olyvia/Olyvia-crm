@@ -9,15 +9,12 @@ type Cliente = any;
 
 export interface ConfigRobo { email: string; nome: string; orgs: string[]; papel: string; ator: string | null }
 
+// Sem listUsers (na uetjgh dá «Database error finding users» por causa de contas antigas): um link de entrada só se gera para uma
+// conta que existe, e traz o id dela. Não envia email.
 async function procurarPorEmail(admin: Cliente, email: string): Promise<{ id: string } | null> {
-  for (let page = 1; page <= 20; page++) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
-    if (error) throw new Error(`listUsers: ${error.message}`);
-    const u = (data?.users ?? []).find((x: { email?: string }) => (x.email ?? "").toLowerCase() === email.toLowerCase());
-    if (u) return { id: u.id };
-    if ((data?.users ?? []).length < 200) return null;
-  }
-  return null;
+  const { data, error } = await admin.auth.admin.generateLink({ type: "magiclink", email });
+  if (error || !data?.user?.id) return null;
+  return { id: data.user.id };
 }
 
 /** Garante a conta robô com perfil e o papel em cada organização. Devolve o que fez (para o resumo). */
