@@ -189,8 +189,19 @@ describe("20270126410000 — configuração 3D", () => {
     expect(c).toContain("'^[a-z_]{1,20}$'");
   });
 
+  it("fn_cat_config_3d_forma: sem EXECUTE a authenticated (só service_role; a escrita corre como dono) e o conferir exige-o", () => {
+    const revoke = sql.indexOf("REVOKE ALL ON FUNCTION public.fn_cat_config_3d_forma(jsonb,jsonb) FROM PUBLIC, anon;");
+    const grant = sql.indexOf("GRANT EXECUTE ON FUNCTION public.fn_cat_config_3d_forma(jsonb,jsonb) TO service_role;");
+    expect(revoke).toBeGreaterThan(sql.indexOf("CREATE OR REPLACE FUNCTION public.fn_cat_config_3d_forma("));
+    expect(grant).toBeGreaterThan(revoke);
+    expect(sql).not.toMatch(/GRANT [^;]*fn_cat_config_3d_forma[^;]*\bauthenticated\b/);
+    expect(sql).toContain("OR has_function_privilege('authenticated', v_oid, 'EXECUTE') OR NOT has_function_privilege('service_role', v_oid, 'EXECUTE')");
+    // quem escreve é a função SECURITY DEFINER, que chama a de forma como dono
+    expect(corpo(sql, "cat_definir_config_3d")).toContain("public.fn_cat_config_3d_forma(v_eixos, v_lig)");
+    expect(corpo(sql, "cat_definir_config_3d")).toMatch(/SECURITY DEFINER/);
+  });
+
   it.each([
-    ["fn_cat_config_3d_forma", "jsonb,jsonb"],
     ["cat_definir_config_3d", "uuid,text,uuid,jsonb,jsonb"],
     ["cat_ler_config_3d", "uuid,text,uuid"],
   ])("%s: REVOKE de PUBLIC/anon depois do CREATE e antes do GRANT", (f, args) => {
@@ -231,6 +242,21 @@ describe("20270126410000 — configuração 3D", () => {
     expect(l).toContain("'orfas', v_pr_orfas");
     for (const o of ["'subcategoria'", "'categoria'", "'automatico'", "'produto'"]) expect(l).toContain(o);
     expect(l).not.toMatch(/\bpg_(class|proc|catalog|namespace)\b/);
+  });
+
+  it("cat_ler_config_3d: ligações todas órfãs = NULL (herda); só '[]' gravado pára a herança, nos três níveis", () => {
+    const l = corpo(sql, "cat_ler_config_3d");
+    const regra = "CASE WHEN count(*) = 0 THEN '[]'::jsonb ELSE jsonb_agg(e.x ORDER BY e.i) FILTER (WHERE pa.id IS NOT NULL) END";
+    expect(l.split(regra).length - 1).toBe(3);
+    // a forma antiga (coalesce para '[]') transformava "todas órfãs" em lista vazia e parava a herança
+    expect(l).not.toContain("FILTER (WHERE pa.id IS NOT NULL), '[]'::jsonb)");
+    expect(l).toContain("(count(*) FILTER (WHERE pa.id IS NULL))::integer");
+  });
+
+  it("cat_ler_config_3d: o nome da subcategoria e da categoria só da organização e não apagadas", () => {
+    const l = corpo(sql, "cat_ler_config_3d");
+    expect(l).toContain("WHERE s.id = v_sub_id AND s.organization_id = p_org AND s.deleted_at IS NULL");
+    expect(l).toContain("WHERE c0.id = v_cat_id AND c0.organization_id = p_org AND c0.deleted_at IS NULL");
   });
 
   it("só o cat_definir_config_3d escreve na tabela", () => {

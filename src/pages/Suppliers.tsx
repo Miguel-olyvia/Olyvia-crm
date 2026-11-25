@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useContext, useEffect, useState, useRef, useCallback } from "react";
 import { z } from "zod";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -17,7 +17,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { useAvisosInventario } from "@/components/inventory/ui/embebido";
+import { InventarioEmbebido, useAvisosInventario } from "@/components/inventory/ui/embebido";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -58,6 +58,18 @@ import {
   useSupplierContractsList,
 } from "@/components/suppliers/contract/useSupplierContracts";
 import { contractRef } from "@/lib/supplierContracts/tipos";
+import {
+  FornAviso,
+  FornBarra,
+  FornChips,
+  FornFiltros,
+  FornGrelha,
+  FornSelecionarTodos,
+  useTotalSemCaixas,
+  type FornCaixa,
+  type FornCartao,
+  type FornVista,
+} from "@/components/suppliers/cartoes/FornCartoes";
 
 const SUPPLIER_FORM_ID = "supplier-sheet-form";
 
@@ -123,6 +135,9 @@ const Suppliers = () => {
   const handledDeepLinkRef = useRef<string | null>(null);
   const { toast } = useToast();
   const avisos = useAvisosInventario(); // só dentro do novo Inventário; fora é null
+  // Dentro da moldura do novo Inventário: barra, chips e cartões (V.forn do artefacto), com "Tabela" para a vista clássica.
+  const embebido = useContext(InventarioEmbebido);
+  const [vistaEmbebida, setVistaEmbebida] = useState<FornVista>("cartoes");
   const { activeCompany, userType, companies, isLoading: companyLoading } = useCompany();
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -466,7 +481,8 @@ const Suppliers = () => {
     observer.observe(loadMoreRef.current);
 
     return () => observer.disconnect();
-  }, [suppliers.length, hasMore, loadingMore, loading, loadSuppliers]);
+  // vistaEmbebida: no novo Inventário, mudar Cartões/Tabela troca o elemento observado (fora da moldura nunca muda).
+  }, [suppliers.length, hasMore, loadingMore, loading, loadSuppliers, vistaEmbebida]);
 
   const handleEdit = async (supplier: Supplier) => {
     setEditingId(supplier.id);
@@ -1045,6 +1061,13 @@ const Suppliers = () => {
     suppliers.filter((s) => s.organization_id === statsOrgId).map((s) => s.id),
   );
   const rowStats = rowStatsQuery.data ?? null;
+  // Chip "Todos" (só na moldura): o total da lista sem caixas, com a pesquisa/estado/empresa de agora.
+  const totalSemCaixas = useTotalSemCaixas(
+    totalCount,
+    loading,
+    restrictKey === "" && !showDeleted,
+    `${searchQuery}|${statusFilter}|${companyFilter ?? ""}`,
+  );
   // A ficha abre com suppliers.view (a base lê o fornecedor, o portal e o contrato por .view/.portal_manage/.contract_manage, nunca
   // por .edit); suppliers.edit só decide se o separador Dados se pode alterar.
   const canOpenSupplier = hasPermission("suppliers.view");
@@ -1168,18 +1191,50 @@ const Suppliers = () => {
     !!editingId && (editingPortalState === "active" || editingPortalState === "awaiting" || editingPortalState === "suspended");
   const priceGateReason = "Sem permissão: requer suppliers.view_pricing ou products.view_cost. Peça acesso a um administrador.";
 
-  return (
-    <>
-      <div className="space-y-4">
-        <InventoryPageHeader
-          area="purchases"
-          title={PAGE_TITLE}
-          description={PAGE_DESCRIPTION}
-          actions={
+  // Moldura do novo Inventário, vista Cartões: os mesmos dados de cada linha da tabela (mesmas fontes e regras).
+  const cartaoDe = (supplier: Supplier): FornCartao => {
+    const inStatsOrg = supplier.organization_id === statsOrgId;
+    return {
+      id: supplier.id,
+      nome: supplier.name,
+      codigo: supplier.code ?? null,
+      cidade: supplier.city ?? null,
+      empresa:
+        !companyFilter || companyFilter === "all"
+          ? (supplier as Supplier & { anew_organizations?: { name?: string } | null }).anew_organizations?.name ?? null
+          : null,
+      contacto: supplier.contact_person ?? null,
+      email: supplier.email ?? null,
+      telefone: supplier.phone ?? null,
+      ativo: !!supplier.is_active,
+      eliminado: !!supplier.deleted_at,
+      precos: inStatsOrg && orgStats?.pricesPending ? orgStats.pricesPending.get(supplier.id) ?? 0 : null,
+      slaPct: inStatsOrg && rowStats?.slaPct ? rowStats.slaPct.get(supplier.id) : null,
+      prazoDias: supplier.delivery_sla_days ?? null,
+      portal: inStatsOrg && orgStats ? orgStats.portal.get(supplier.id) ?? "none" : null,
+      contrato: inStatsOrg && contractStatuses ? contractStatuses.get(supplier.id) ?? null : undefined,
+      posAbertas: inStatsOrg && rowStats?.openPos ? rowStats.openPos.get(supplier.id) ?? 0 : null,
+    };
+  };
+  const alternarCaixa = (caixa: FornCaixa, valor: boolean) => {
+    setSelectedIds(new Set());
+    if (caixa === "eliminados") {
+      setShowDeleted(valor);
+      return;
+    }
+    dropUrlFilter();
+    if (caixa === "aEspera") setAwaitingOnly(valor);
+    else if (caixa === "catalogo") setCatalogOnly(valor);
+    else setPricesOnly(valor);
+  };
+
+  // As ações do cabeçalho: as mesmas (e os mesmos PermissionGate) dentro e fora da moldura; dentro, Exportar/Importar
+  // são "ghost" e "Novo fornecedor" fica "+ Novo", como a barra do artefacto.
+  const headerActions = (
             <>
               <PageFAQSheet pageKey="operations.suppliers" />
               <PermissionGate permission="suppliers.export">
-                <Button variant="outline" onClick={handleExport} className="gap-2">
+                <Button variant={embebido ? "ghost" : "outline"} onClick={handleExport} className="gap-2">
                   <Download className="h-4 w-4" />
                   Exportar
                 </Button>
@@ -1187,7 +1242,7 @@ const Suppliers = () => {
               <PermissionGate permission="suppliers.import">
                 <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
                   <DialogTrigger asChild>
-                    <Button variant="outline" className="gap-2">
+                    <Button variant={embebido ? "ghost" : "outline"} className="gap-2">
                       <Upload className="h-4 w-4" />
                       Importar
                     </Button>
@@ -1210,17 +1265,73 @@ const Suppliers = () => {
                 </Dialog>
               </PermissionGate>
               <PermissionGate permission="suppliers.create">
-                <Button onClick={() => setNewDialogOpen(true)} className="gap-2">
+                <Button onClick={() => setNewDialogOpen(true)} className="gap-2" aria-label={embebido ? "Novo fornecedor" : undefined}>
                   <Plus className="h-4 w-4" />
-                  Novo fornecedor
+                  {embebido ? "Novo" : "Novo fornecedor"}
                 </Button>
               </PermissionGate>
             </>
-          }
+  );
+
+  return (
+    <>
+      <div className="space-y-4">
+        {embebido ? (
+          // Dentro da moldura: sem título (a moldura já o tem) — a barra do artefacto com as mesmas ações.
+          <FornBarra
+            pesquisa={searchQuery}
+            aoPesquisar={(v) => {
+              dropUrlFilter();
+              setSearchQuery(v);
+            }}
+            vista={vistaEmbebida}
+            aoMudarVista={setVistaEmbebida}
+            filtrosAtivos={(statusFilter !== "all" ? 1 : 0) + (companyFilter && companyFilter !== "all" ? 1 : 0)}
+            filtros={
+              <FornFiltros
+                estado={statusFilter}
+                aoEstado={(v) => {
+                  dropUrlFilter();
+                  setStatusFilter(v);
+                }}
+                empresa={companyFilter || "all"}
+                aoEmpresa={(value) => {
+                  dropUrlFilter();
+                  setSelectedIds(new Set());
+                  setCompanyFilter(value);
+                }}
+                empresas={filterOrganizations}
+                temFiltros={!!hasActiveFilters}
+                limpar={clearFilters}
+                rotuloLimpar={t("common.clearFilters")}
+              />
+            }
+            acoes={headerActions}
+          />
+        ) : (
+        <InventoryPageHeader
+          area="purchases"
+          title={PAGE_TITLE}
+          description={PAGE_DESCRIPTION}
+          actions={headerActions}
         />
+        )}
+
+        {/* Dentro da moldura: o aviso azul do artefacto (.note.blue), com os mesmos dados e ações. */}
+        {embebido && (
+          <FornAviso
+            aEspera={awaitingList}
+            abrir={canOpenSupplier ? (id) => openSupplierVia(id, { tab: "portal" }) : null}
+            filtrar={() => {
+              dropUrlFilter();
+              setSelectedIds(new Set());
+              setAwaitingOnly(true);
+            }}
+          />
+        )}
 
         {/* Aviso: convidados que ainda não preencheram a ficha no portal */}
-        {awaitingList.length > 0 && (
+        {!embebido && awaitingList.length > 0 && (
           <div
             role="status"
             className="flex items-start gap-2.5 rounded-lg border border-info/30 bg-info/10 px-3.5 py-3 text-sm text-sky-900 dark:text-info"
@@ -1260,7 +1371,8 @@ const Suppliers = () => {
           </div>
         )}
 
-        {/* Filtros */}
+        {/* Filtros (dentro da moldura só na vista Tabela; nos Cartões estão na barra e nos chips) */}
+        {(!embebido || vistaEmbebida === "tabela") && (
         <Card>
           <CardContent className="p-4">
             <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
@@ -1375,8 +1487,109 @@ const Suppliers = () => {
             </div>
           </CardContent>
         </Card>
+        )}
 
-        {/* Tabela */}
+        {embebido && vistaEmbebida === "cartoes" ? (
+          // Moldura do novo Inventário, vista Cartões: chips (= as caixas), ações em massa, cartões, o mesmo scroll infinito.
+          <div className="space-y-3">
+            <FornChips
+              ativos={{ aEspera: awaitingOnly, catalogo: catalogOnly, precos: pricesOnly, eliminados: showDeleted }}
+              contagens={{
+                todos: totalSemCaixas,
+                aEspera: orgStats ? orgStats.awaiting.length : null,
+                catalogo: orgStats?.catalogUnlinked ? [...orgStats.catalogUnlinked.values()].filter((n) => n > 0).length : null,
+                precos: orgStats?.pricesPending ? [...orgStats.pricesPending.values()].filter((n) => n > 0).length : null,
+              }}
+              bloqueioPrecos={canPricing ? null : priceGateReason}
+              aoTodos={() => {
+                dropUrlFilter();
+                setSelectedIds(new Set());
+                setAwaitingOnly(false);
+                setCatalogOnly(false);
+                setPricesOnly(false);
+                setShowDeleted(false);
+              }}
+              aoAlternar={alternarCaixa}
+            />
+
+            {/* Ações em massa — não aparecem na lista de eliminados */}
+            {!showDeleted && (
+              <BulkActionsBar
+                selectedCount={selectedIds.size}
+                onStatusClick={() => setBulkStatusDialogOpen(true)}
+                onDeleteClick={() => setBulkDeleteDialogOpen(true)}
+                onOrgClick={() => setBulkCompanyDialogOpen(true)}
+                onClearSelection={() => setSelectedIds(new Set())}
+                showOrgAction={true}
+                statusPermission="suppliers.edit"
+                deletePermission="suppliers.delete"
+              />
+            )}
+
+            {loading ? (
+              <div className="flex justify-center py-8">
+                <OlyviaLoader size={32} />
+              </div>
+            ) : suppliers.length === 0 ? (
+              <InventoryEmptyState title="Sem fornecedores" description="Ajuste os filtros.">
+                {hasActiveFilters ? (
+                  <Button variant="outline" size="sm" onClick={clearFilters}>
+                    Limpar filtros
+                  </Button>
+                ) : null}
+              </InventoryEmptyState>
+            ) : (
+              <>
+                <FornSelecionarTodos total={suppliers.length} selecionados={selectedIds.size} aoAlternar={toggleSelectAll} />
+                <FornGrelha
+                  cartoes={suppliers.map(cartaoDe)}
+                  abrir={(c) => {
+                    const supplier = suppliers.find((s) => s.id === c.id);
+                    return supplier && !c.eliminado && canOpenSupplier ? () => void handleEdit(supplier) : null;
+                  }}
+                  abrirPrecos={canOpenSupplier ? (id) => openSupplierVia(id, { tab: "portal", prices: "pending" }) : null}
+                  abrirContrato={canOpenSupplier ? (id) => openSupplierVia(id, { tab: "contrato" }) : null}
+                  acoes={(id) => {
+                    const supplier = suppliers.find((s) => s.id === id);
+                    if (!supplier) return null;
+                    return supplier.deleted_at ? (
+                      <RowActions
+                        primary={{
+                          label: t("suppliers.restore") || "Restaurar",
+                          icon: Undo2,
+                          onClick: () => void handleRestore(supplier),
+                          permission: "suppliers.delete",
+                        }}
+                      />
+                    ) : (
+                      <RowActions items={rowMenu(supplier)} menuLabel={`Mais ações para ${supplier.name}`} />
+                    );
+                  }}
+                  selecionados={selectedIds}
+                  aoSelecionar={toggleSelectOne}
+                />
+              </>
+            )}
+
+            {/* Infinite Scroll Sentinel */}
+            {suppliers.length > 0 && (
+              <div ref={loadMoreRef} className="flex justify-center py-4">
+                {loadingMore && (
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <OlyviaLoader size={20} inline />
+                    <span className="text-sm">{t('common.loadingMore')}</span>
+                  </div>
+                )}
+              </div>
+            )}
+            {!loading && (
+              <p className="px-1 text-xs text-muted-foreground">
+                {t('suppliers.showingCount').replace("{current}", String(suppliers.length)).replace("{total}", String(totalCount))}
+              </p>
+            )}
+          </div>
+        ) : (
+        /* Tabela */
         <Card>
           <CardContent className="p-4">
             {/* Ações em massa — não aparecem na lista de eliminados */}
@@ -1577,6 +1790,7 @@ const Suppliers = () => {
             )}
           </CardContent>
         </Card>
+        )}
 
         {/* Ficha do fornecedor: folha lateral (FornecedorFolha do protótipo) */}
         <SupplierSheet

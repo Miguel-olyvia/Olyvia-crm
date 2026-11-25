@@ -9,7 +9,7 @@
 // item_suppliers + SupplierPortalCatalogSection; Preços = SupplierPriceChangesSection;
 // Contrato = SupplierContractTab (contrato de fornecedor, rpc_supplier_contract*).
 // Um fornecedor novo abre a mesma folha só com Dados.
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useContext, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Clock, Loader2, RefreshCw, X } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
@@ -31,6 +31,8 @@ import { SupplierContractTab } from "./contract/SupplierContractTab";
 import { SupplierContractBadge } from "./contract/SupplierContractBadge";
 import { useSupplierContractOrgStatuses } from "./contract/useSupplierContracts";
 import { supplierItemsKey, supplierPortalInviteKey, useSupplierItems, useSupplierPortalInvite } from "./useSupplierSheetData";
+import { InventarioEmbebido } from "@/components/inventory/ui/embebido";
+import { FornFichaPilulas, FornFichaSubtitulo, PTABS_LISTA, RESUMO_EMBEBIDO, ptabsBotao } from "./cartoes/FornFicha";
 
 type Supplier = Database["public"]["Tables"]["suppliers"]["Row"];
 
@@ -105,6 +107,8 @@ export function SupplierSheet({
   fallbackOrganizationId,
 }: SupplierSheetProps) {
   const isNew = !supplier;
+  // Dentro da moldura do novo Inventário: só o aspeto do painel do artefacto (cartoes/FornFicha); conteúdo e gates iguais.
+  const embebido = useContext(InventarioEmbebido);
   const supplierId = supplier?.id ?? null;
   const orgId = supplier?.organization_id ?? null;
   const { toast } = useToast();
@@ -189,8 +193,8 @@ export function SupplierSheet({
     : [
         { id: "resumo", label: "Resumo" },
         { id: "dados", label: "Dados" },
-        { id: "artigos", label: "Artigos e preços", count: itemsCount },
-        { id: "precos", label: "Preços por aprovar", count: pricesPending },
+        { id: "artigos", label: embebido ? "Artigos" : "Artigos e preços", count: itemsCount },
+        { id: "precos", label: embebido ? "Preços" : "Preços por aprovar", count: pricesPending },
         { id: "portal", label: "Portal" },
         { id: "contrato", label: "Contrato" },
       ];
@@ -278,8 +282,16 @@ export function SupplierSheet({
         <div className="border-b bg-card px-4 pt-4 sm:px-5">
           <div className="flex items-start justify-between gap-3">
             <div className="min-w-0">
-              <SheetDescription className="mb-0.5 text-[12.5px] text-muted-foreground">Compras › Fornecedor</SheetDescription>
+              <SheetDescription className="mb-0.5 text-[12.5px] text-muted-foreground">
+                {embebido ? "Fornecedor" : "Compras › Fornecedor"}
+              </SheetDescription>
               <SheetTitle className="truncate text-xl font-bold leading-tight">{title}</SheetTitle>
+              {embebido && supplier ? (
+                <>
+                  <FornFichaSubtitulo supplier={supplier} />
+                  <FornFichaPilulas supplier={supplier} portal={portalState} contrato={contractState} />
+                </>
+              ) : (
               <div className="mt-2 flex flex-wrap gap-1.5">
                 {supplier ? (
                   <>
@@ -299,6 +311,7 @@ export function SupplierSheet({
                   <InventoryStatusBadge tone="warn">Rascunho · nada gravado</InventoryStatusBadge>
                 )}
               </div>
+              )}
             </div>
             <Button type="button" variant="ghost" size="icon" onClick={onClose} aria-label="Fechar">
               <X className="h-4 w-4" aria-hidden="true" />
@@ -339,7 +352,7 @@ export function SupplierSheet({
             </div>
           )}
 
-          <div role="tablist" aria-label="Partes da ficha" className="mt-3 flex gap-0.5 overflow-x-auto">
+          <div role="tablist" aria-label="Partes da ficha" className={embebido ? PTABS_LISTA : "mt-3 flex gap-0.5 overflow-x-auto"}>
             {tabs.map((t, i) => {
               const on = current === t.id;
               return (
@@ -353,14 +366,18 @@ export function SupplierSheet({
                   tabIndex={on ? 0 : -1}
                   onClick={() => onTabChange(t.id)}
                   onKeyDown={(e) => onTabKey(e, i)}
-                  className={cn(
+                  className={
+                    embebido
+                      ? ptabsBotao(on)
+                      : cn(
                     "-mb-px inline-flex min-h-10 items-center gap-1.5 whitespace-nowrap border-b-2 px-3.5 py-2.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                     on ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground",
-                  )}
+                  )
+                  }
                 >
                   {t.label}
                   {t.count ? (
-                    <span className="inline-grid h-5 min-w-5 place-items-center rounded-full bg-muted px-1.5 text-[11px] font-semibold text-foreground">
+                    <span className="inline-grid h-5 min-w-5 place-items-center rounded-full bg-background px-1.5 text-[11px] font-semibold text-foreground">
                       {t.count}
                     </span>
                   ) : null}
@@ -375,7 +392,7 @@ export function SupplierSheet({
           id="sup-tabpanel"
           role="tabpanel"
           aria-labelledby={`sup-tab-${current}`}
-          className="min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5"
+          className={cn("min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-5", embebido && current === "resumo" && RESUMO_EMBEBIDO)}
         >
           {body}
         </div>

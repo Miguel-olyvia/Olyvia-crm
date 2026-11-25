@@ -136,13 +136,19 @@ export function textoPedido(r: ResultadoPedido): { msg: string; sub: string; kin
 
 /* ------------------------------------------------------------------ os resumos reais (pela referência do negócio) */
 let reais = new Map<string, ResumoEcNeg>();
+/** 25/11: já se leram as encomendas da base (antes disso, a obra não diz «sem materiais»: diz que está a ler) */
+let lidas = false;
 const ouvintes = new Set<() => void>();
 /** Os resumos da base, pela referência do negócio na Emylia (refNegocio: "CT 2026/<n>"). null: volta ao Inventário do browser. */
 export function definirEncomendasReais(m: Map<string, ResumoEcNeg> | null): void {
   reais = m ?? new Map();
+  lidas = m !== null;
   for (const f of ouvintes) f();
 }
 export const encomendaReal = (ref: string | null | undefined): ResumoEcNeg | undefined => (ref ? reais.get(ref) : undefined);
+/** 25/11 (1048: «Materiais: sem encomenda» durante uns segundos, com 38 materiais na encomenda): a encomenda de cliente desta obra ainda
+ *  está a ser lida da base (conta real, encomenda emitida, leitura por chegar). */
+export const encomendaPorLer = (ref: string | null | undefined, real: boolean): boolean => real && !!ref && !lidas;
 export const subscreverEncomendasReais = (f: () => void): (() => void) => { ouvintes.add(f); return () => { ouvintes.delete(f); }; };
 
 type Consulta = { eq: (c: string, v: string) => Consulta; is: (c: string, v: null) => Promise<{ data: Record<string, unknown>[] | null; error: { message: string } | null }> };

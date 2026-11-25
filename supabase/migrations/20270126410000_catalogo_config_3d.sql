@@ -129,7 +129,9 @@ AS $function$
 $function$;
 
 REVOKE ALL ON FUNCTION public.fn_cat_config_3d_forma(jsonb,jsonb) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.fn_cat_config_3d_forma(jsonb,jsonb) TO authenticated, service_role;
+-- sem EXECUTE a authenticated: ninguém com essa role escreve na tabela directamente (não tem INSERT/UPDATE), e o
+-- CHECK corre dentro de cat_definir_config_3d, que é SECURITY DEFINER e por isso chama-a como dono
+GRANT EXECUTE ON FUNCTION public.fn_cat_config_3d_forma(jsonb,jsonb) TO service_role;
 COMMENT ON FUNCTION public.fn_cat_config_3d_forma(jsonb,jsonb) IS
   'Forma do JSON da configuração 3D (eixos e ligações). Pura; usada no CHECK de cat_config_3d e em cat_definir_config_3d.';
 
@@ -407,9 +409,11 @@ BEGIN
     v_pr_tem := FOUND;
   END IF;
 
-  -- ligações do próprio: só as de atributos vivos da organização; as que caem contam em 'orfas'
+  -- ligações do próprio: só as de atributos vivos da organização; as que caem contam em 'orfas'.
+  -- Só '[]' gravado pára a herança: se havia ligações e caíram TODAS (órfãs), fica NULL e herda de cima.
   IF v_raw IS NOT NULL THEN
-    SELECT coalesce(jsonb_agg(e.x ORDER BY e.i) FILTER (WHERE pa.id IS NOT NULL), '[]'::jsonb),
+    SELECT CASE WHEN count(*) = 0 THEN '[]'::jsonb
+                ELSE jsonb_agg(e.x ORDER BY e.i) FILTER (WHERE pa.id IS NOT NULL) END,
            (count(*) FILTER (WHERE pa.id IS NULL))::integer
     INTO v_pr_lig, v_pr_orfas
     FROM jsonb_array_elements(v_raw) WITH ORDINALITY AS e(x, i)
@@ -418,12 +422,15 @@ BEGIN
   END IF;
 
   IF v_sub_id IS NOT NULL THEN
-    SELECT s.name INTO v_sub_nome FROM product_categories s WHERE s.id = v_sub_id;
+    SELECT s.name INTO v_sub_nome FROM product_categories s
+    WHERE s.id = v_sub_id AND s.organization_id = p_org AND s.deleted_at IS NULL;
     v_raw := NULL;
     SELECT c.eixos, c.ligacoes INTO v_sub_eixos, v_raw FROM cat_config_3d c
     WHERE c.categoria_id = v_sub_id AND c.organization_id = p_org;
     IF v_raw IS NOT NULL THEN
-      SELECT coalesce(jsonb_agg(e.x ORDER BY e.i) FILTER (WHERE pa.id IS NOT NULL), '[]'::jsonb) INTO v_sub_lig
+      -- a mesma regra do próprio: todas órfãs = NULL (herda), só '[]' gravado pára
+      SELECT CASE WHEN count(*) = 0 THEN '[]'::jsonb
+                  ELSE jsonb_agg(e.x ORDER BY e.i) FILTER (WHERE pa.id IS NOT NULL) END INTO v_sub_lig
       FROM jsonb_array_elements(v_raw) WITH ORDINALITY AS e(x, i)
       LEFT JOIN product_attributes pa
         ON pa.id = (e.x ->> 'atributo')::uuid AND pa.organization_id = p_org AND pa.deleted_at IS NULL AND NOT pa.is_measurement;
@@ -431,12 +438,14 @@ BEGIN
   END IF;
 
   IF v_cat_id IS NOT NULL THEN
-    SELECT c0.name INTO v_cat_nome FROM product_categories c0 WHERE c0.id = v_cat_id;
+    SELECT c0.name INTO v_cat_nome FROM product_categories c0
+    WHERE c0.id = v_cat_id AND c0.organization_id = p_org AND c0.deleted_at IS NULL;
     v_raw := NULL;
     SELECT c.eixos, c.ligacoes INTO v_cat_eixos, v_raw FROM cat_config_3d c
     WHERE c.categoria_id = v_cat_id AND c.organization_id = p_org;
     IF v_raw IS NOT NULL THEN
-      SELECT coalesce(jsonb_agg(e.x ORDER BY e.i) FILTER (WHERE pa.id IS NOT NULL), '[]'::jsonb) INTO v_cat_lig
+      SELECT CASE WHEN count(*) = 0 THEN '[]'::jsonb
+                  ELSE jsonb_agg(e.x ORDER BY e.i) FILTER (WHERE pa.id IS NOT NULL) END INTO v_cat_lig
       FROM jsonb_array_elements(v_raw) WITH ORDINALITY AS e(x, i)
       LEFT JOIN product_attributes pa
         ON pa.id = (e.x ->> 'atributo')::uuid AND pa.organization_id = p_org AND pa.deleted_at IS NULL AND NOT pa.is_measurement;
@@ -593,7 +602,9 @@ BEGIN
     RAISE EXCEPTION 'Conferir: fn_cat_config_3d_forma não ficou IMMUTABLE, sem SECURITY DEFINER e com search_path pg_catalog.';
   END IF;
   IF has_function_privilege('anon', v_oid, 'EXECUTE')
-     OR NOT has_function_privilege('authenticated', v_oid, 'EXECUTE')
+     OR has_function_privilege('authenticated', v_oid, 'EXECUTE')
+     OR NOT has_function_privilege('service_role', v_oid, 'EXECUTE')
+     OR NOT has_function_privilege((SELECT p.proowner FROM pg_proc p WHERE p.oid = v_oid), v_oid, 'EXECUTE')
      OR EXISTS (SELECT 1 FROM pg_proc p, aclexplode(p.proacl) x WHERE p.oid = v_oid AND x.grantee = 0) THEN
     RAISE EXCEPTION 'Conferir: os privilégios de fn_cat_config_3d_forma divergem.';
   END IF;

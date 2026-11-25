@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useContext } from "react";
 import { OlyviaLoader } from "@/components/ui/olyvia-loader";
 import Layout from "@/components/Layout";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
@@ -26,7 +26,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { valorStockPorArmazem } from "@/lib/custosStock";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
-import { useAvisosInventario } from "@/components/inventory/ui/embebido";
+import { InventarioEmbebido, useAvisosInventario } from "@/components/inventory/ui/embebido";
+import { ArmazensBarra, ArmazensCartoes } from "@/components/inventory/cartoes/ArmazensCartoes";
+import type { ModoVista } from "@/components/inventory/cartoes/pecas";
 import { usePermissions } from "@/hooks/usePermissions";
 import { useCompany } from "@/contexts/CompanyContext";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -258,6 +260,9 @@ const Warehouses = () => {
   const [historyWarehouse, setHistoryWarehouse] = useState<{ id: string; name: string } | null>(null);
   const [historyRows, setHistoryRows] = useState<WarehouseMovementRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  // Dentro do novo Inventário: cartões do artefacto (ou a grelha clássica, em "Detalhe"); fora, sempre o ecrã clássico.
+  const embebido = useContext(InventarioEmbebido);
+  const [modoEmbebido, setModoEmbebido] = useState<ModoVista>("cartoes");
 
   useEffect(() => {
     if (activeCompany?.id) {
@@ -598,7 +603,7 @@ const Warehouses = () => {
     return (
       <>
         <div className="space-y-6 p-6">
-          <InventoryPageHeader area="warehouse" title={PAGE_TITLE} description={PAGE_DESCRIPTION} />
+          {embebido ? null : <InventoryPageHeader area="warehouse" title={PAGE_TITLE} description={PAGE_DESCRIPTION} />}
           <NoOrganizationState inline />
         </div>
       </>
@@ -609,7 +614,7 @@ const Warehouses = () => {
     return (
       <>
         <div className="space-y-6">
-          <InventoryPageHeader area="warehouse" title={PAGE_TITLE} description={PAGE_DESCRIPTION} />
+          {embebido ? null : <InventoryPageHeader area="warehouse" title={PAGE_TITLE} description={PAGE_DESCRIPTION} />}
           <div className="text-center py-8">{t("common.loading")}</div>
         </div>
       </>
@@ -638,37 +643,9 @@ const Warehouses = () => {
     );
   }
 
-  return (
-    <>
-      <div className="space-y-6">
-        <InventoryPageHeader
-          area="warehouse"
-          title={PAGE_TITLE}
-          description={PAGE_DESCRIPTION}
-          actions={
-          <>
-            <Button
-              variant={showDeleted ? "default" : "outline"}
-              aria-pressed={showDeleted}
-              onClick={() => setShowDeleted((prev) => !prev)}
-            >
-              <Trash2 className="w-4 h-4 mr-2" />
-              {showDeleted ? (t("warehouses.hideDeleted") || "Ocultar eliminados") : (t("warehouses.showDeleted") || "Ver eliminados")}
-            </Button>
-            <PermissionGate permission="warehouses.export">
-              <Button variant="outline" onClick={handleExport}>
-                <Download className="w-4 h-4 mr-2" />
-                {t("warehouses.actions.export")}
-              </Button>
-            </PermissionGate>
-            <PermissionGate permission="warehouses.import">
-              <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
-                <DialogTrigger asChild>
-                  <Button variant="outline">
-                    <Upload className="w-4 h-4 mr-2" />
-                    {t("warehouses.actions.import")}
-                  </Button>
-                </DialogTrigger>
+  // O diálogo de importar e o do armazém (criar/editar): os mesmos no cabeçalho clássico e, dentro do novo Inventário,
+  // abertos pela barra dos cartões.
+  const conteudoImportar = (
                 <DialogContent>
                   <DialogHeader>
                     <DialogTitle>{t("warehouses.import.title")}</DialogTitle>
@@ -688,19 +665,8 @@ const Warehouses = () => {
                     </p>
                   </div>
                 </DialogContent>
-              </Dialog>
-            </PermissionGate>
-            <PermissionGate permission="warehouses.create">
-              <Button
-                onClick={() => {
-                  resetForm();
-                  setDialogOpen(true);
-                }}
-              >
-                <Plus className="w-4 h-4 mr-2" />
-                {t("warehouses.addWarehouse")}
-              </Button>
-            </PermissionGate>
+  );
+  const dialogoArmazem = (
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
             <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
               <DialogHeader>
@@ -926,10 +892,116 @@ const Warehouses = () => {
               </form>
             </DialogContent>
           </Dialog>
+  );
+
+  return (
+    <>
+      <div className="space-y-6">
+        {embebido ? (
+          <>
+            <ArmazensBarra
+              verEliminados={showDeleted}
+              aoVerEliminados={() => setShowDeleted((prev) => !prev)}
+              rotuloVerEliminados={showDeleted ? (t("warehouses.hideDeleted") || "Ocultar eliminados") : (t("warehouses.showDeleted") || "Ver eliminados")}
+              aoExportar={handleExport}
+              rotuloExportar={t("warehouses.actions.export")}
+              aoImportar={() => setImportDialogOpen(true)}
+              rotuloImportar={t("warehouses.actions.import")}
+              aoNovo={() => {
+                resetForm();
+                setDialogOpen(true);
+              }}
+              rotuloNovo={t("warehouses.addWarehouse")}
+              modo={modoEmbebido}
+              aoMudarModo={setModoEmbebido}
+            />
+            <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+              {conteudoImportar}
+            </Dialog>
+            {dialogoArmazem}
+          </>
+        ) : (
+        <InventoryPageHeader
+          area="warehouse"
+          title={PAGE_TITLE}
+          description={PAGE_DESCRIPTION}
+          actions={
+          <>
+            <Button
+              variant={showDeleted ? "default" : "outline"}
+              aria-pressed={showDeleted}
+              onClick={() => setShowDeleted((prev) => !prev)}
+            >
+              <Trash2 className="w-4 h-4 mr-2" />
+              {showDeleted ? (t("warehouses.hideDeleted") || "Ocultar eliminados") : (t("warehouses.showDeleted") || "Ver eliminados")}
+            </Button>
+            <PermissionGate permission="warehouses.export">
+              <Button variant="outline" onClick={handleExport}>
+                <Download className="w-4 h-4 mr-2" />
+                {t("warehouses.actions.export")}
+              </Button>
+            </PermissionGate>
+            <PermissionGate permission="warehouses.import">
+              <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+                <DialogTrigger asChild>
+                  <Button variant="outline">
+                    <Upload className="w-4 h-4 mr-2" />
+                    {t("warehouses.actions.import")}
+                  </Button>
+                </DialogTrigger>
+                {conteudoImportar}
+              </Dialog>
+            </PermissionGate>
+            <PermissionGate permission="warehouses.create">
+              <Button
+                onClick={() => {
+                  resetForm();
+                  setDialogOpen(true);
+                }}
+              >
+                <Plus className="w-4 h-4 mr-2" />
+                {t("warehouses.addWarehouse")}
+              </Button>
+            </PermissionGate>
+            {dialogoArmazem}
           </>
           }
         />
+        )}
 
+        {embebido && modoEmbebido === "cartoes" ? (
+          <>
+            <ArmazensCartoes
+              armazens={warehouses}
+              estatisticas={(w) => (statsQuery.isSuccess ? (statsQuery.data?.[w.id] ?? EMPTY_STATS) : null)}
+              verCusto={canViewCost}
+              formatEur={formatEur}
+              armazemPorDefeito={defaultWarehouseId}
+              eCarrinha={(w) => !!(w as { is_vehicle?: boolean }).is_vehicle}
+              editar={editGate}
+              aGravar={togglingId}
+              aoAtivo={(w, next) => (next ? handleToggleFlag(w as WarehouseData, "is_active", true) : setDeactivateTarget(w as WarehouseData))}
+              aoServir={(w, next) => (next ? handleToggleFlag(w as WarehouseData, "serves_customers", true) : setStopServingTarget(w as WarehouseData))}
+              aoEditar={(w) => openEditDialog(w as WarehouseData)}
+              aoHistorico={(w) => {
+                setHistoryWarehouse({ id: w.id, name: w.name });
+                setHistoryDialogOpen(true);
+                loadWarehouseHistory(w.id);
+              }}
+              aoMovimento={(w) => {
+                setMovementWarehouseId(w.id);
+                setMovementDialogOpen(true);
+              }}
+              aoEliminar={(w) => setDeleteTarget(w as WarehouseData)}
+              aoRestaurar={(w) => handleRestore(w.id)}
+              rotulos={{ ativo: t("warehouses.form.active"), restaurar: t("warehouses.restore") || "Restaurar" }}
+              verEliminados={showDeleted}
+              semArmazens={t("warehouses.noWarehouses")}
+            />
+            <InventorySettingsCard organizationId={activeCompany.id} />
+          </>
+        ) : (
+        <>
         <InventorySettingsCard organizationId={activeCompany.id} />
 
         {warehouses.length === 0 ? (
@@ -1129,6 +1201,8 @@ const Warehouses = () => {
               );
             })}
           </div>
+        )}
+        </>
         )}
       </div>
 

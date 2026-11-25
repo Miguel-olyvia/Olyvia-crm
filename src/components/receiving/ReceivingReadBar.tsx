@@ -102,7 +102,7 @@ export const ReceivingReadBar = forwardRef<ReceivingReadBarHandle, ReceivingRead
       <label htmlFor="rec-ler" className="text-sm font-medium">
         Ler ou escrever: nº PO, guia, fornecedor, EAN/SKU
       </label>
-      <div className="flex items-stretch gap-2">
+      <div className="flex items-stretch gap-2" data-rececao-leitor="">
         <Input
           id="rec-ler"
           value={value}

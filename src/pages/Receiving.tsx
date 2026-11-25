@@ -36,7 +36,7 @@
 // enviada (o servidor recusa o mesmo request_id com outra guia). Trocar de
 // guia segue a regra do armazém/fornecedor (só com o cesto vazio). Avisos
 // "não consta da guia" / "acima do anunciado" exigem confirmação na entrada.
-import { Suspense, lazy, useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useContext, useEffect, useRef, useState } from "react";
 import type { FormEvent, KeyboardEvent, MouseEvent as ReactMouseEvent, ReactNode } from "react";
 import { flushSync } from "react-dom";
 import { Link, useSearchParams } from "react-router-dom";
@@ -103,7 +103,9 @@ import {
   useReceivingReceipts,
 } from "@/components/receiving/useReceivablePos";
 import { ReceivingReadBar, type ReceivingReadBarHandle } from "@/components/receiving/ReceivingReadBar";
-import { PorReceberList } from "@/components/receiving/PorReceberList";
+import { PorReceberList, type PorReceberListProps } from "@/components/receiving/PorReceberList";
+import { InventarioEmbebido } from "@/components/inventory/ui/embebido";
+import { PorReceberCartoes, RececaoBarra, RececaoScanbox } from "@/components/receiving/cartoes/RececaoCartoes";
 import { RecebidasList } from "@/components/receiving/RecebidasList";
 import { PoReceivePanel } from "@/components/receiving/PoReceivePanel";
 import type { PoRunPhase, PoRunView } from "@/components/receiving/poRun";
@@ -1485,6 +1487,8 @@ export default function Receiving() {
   const canSeeNotesPanel = permissionGate(["purchase_orders.view", "purchase_orders.receive"]).allowed;
   const newNoteGate = permissionGate("receiving.manage_delivery_notes");
   const poListGate = permissionGate("purchase_orders.view");
+  // Dentro da moldura do novo Inventário: sem o cabeçalho clássico e a vista lista em cartões (só apresentação).
+  const embebido = useContext(InventarioEmbebido);
   const queryClient = useQueryClient();
   const [searchParams, setSearchParams] = useSearchParams();
   const {
@@ -4476,6 +4480,36 @@ export default function Receiving() {
   const nPorReceber = receivablePos.filter(poRecebivel).length;
   const nRecebidas = (receiptsQuery.data ?? []).filter((x) => !x.reverted).length;
   const nGuias = openNotesQuery.data ?? 0;
+  const porReceberProps: PorReceberListProps = {
+    pos: receivablePos,
+    loading: permissionsLoading || (poListGate.allowed && receivableQuery.isLoading),
+    error: receivableQuery.error ? ((receivableQuery.error as { message?: string }).message ?? "Erro inesperado.") : null,
+    noPermission: !permissionsLoading && !poListGate.allowed,
+    today,
+    f: listFilters,
+    setF: setListFilters,
+    canReceive: receiveGate.allowed,
+    receiveReason: receiveGate.reason,
+    onOpenPo: (id) => openPoPanel(id, { noteId: readNoteId ?? undefined }),
+    activeId: poParam,
+    onRetry: () => void receivableQuery.refetch(),
+  };
+  const readBar = (
+    <ReceivingReadBar
+      ref={readBarRef}
+      pos={receivablePos}
+      resolve={resolveRead}
+      onOpenPo={openPoPanel}
+      onFilter={(f, noteId) => {
+        setReadNoteId(noteId ?? null);
+        setListFilters({ ...FILTROS_REC, ...f });
+        setUrlParams({ tab: tabUrl("receber"), po: null });
+      }}
+      onArticleMode={() => switchView("leitor")}
+      camera={CameraScanner}
+      disabled={!orgId}
+    />
+  );
   const listView = listOn ? (
     <div className="space-y-4">
       {recoveryCard}
@@ -4492,20 +4526,24 @@ export default function Receiving() {
           {uncertainCount > 0 ? ` — ${uncertainCount} sem resposta do servidor (use "Tentar de novo").` : "."}
         </Notice>
       )}
-      <ReceivingReadBar
-        ref={readBarRef}
-        pos={receivablePos}
-        resolve={resolveRead}
-        onOpenPo={openPoPanel}
-        onFilter={(f, noteId) => {
-          setReadNoteId(noteId ?? null);
-          setListFilters({ ...FILTROS_REC, ...f });
-          setUrlParams({ tab: tabUrl("receber"), po: null });
-        }}
-        onArticleMode={() => switchView("leitor")}
-        camera={CameraScanner}
-        disabled={!orgId}
-      />
+      {embebido ? <RececaoScanbox>{readBar}</RececaoScanbox> : readBar}
+      {embebido ? (
+        <RececaoBarra
+          novaGuia={{ motivo: newNoteGate.allowed ? null : (newNoteGate.reason ?? "Sem permissão"), abrir: openNewNote }}
+          receberEncomenda={{
+            ligacao: purchaseOrdersLink({ status: "ordered" }),
+            motivo: poListGate.allowed ? null : (poListGate.reason ?? "Sem permissão"),
+          }}
+          aoLerArtigo={() => switchView("leitor")}
+          pesquisa={listFilters.q}
+          aoPesquisar={(q) => {
+            setListFilters((f) => ({ ...f, q }));
+            if (listTab !== "receber") setUrlParam("tab", tabUrl("receber"));
+          }}
+          podeVerGuias={canSeeNotesPanel}
+          aoVerDivergentes={() => setUrlParams({ tab: tabUrl("guias"), notes: "divergent" })}
+        />
+      ) : null}
       <Tabs value={listTab} onValueChange={(v) => setUrlParam("tab", tabUrl(v as "receber" | "recebidas" | "guias"))}>
         <TabsList aria-label="Receção">
           <TabsTrigger value="receber">Por receber{poListGate.allowed && !receivableQuery.isLoading ? ` (${nPorReceber})` : ""}</TabsTrigger>
@@ -4513,20 +4551,11 @@ export default function Receiving() {
           <TabsTrigger value="guias">Guias{nGuias ? ` (${nGuias} ${nGuias === 1 ? "aberta" : "abertas"})` : ""}</TabsTrigger>
         </TabsList>
         <TabsContent value="receber" className="mt-3">
-          <PorReceberList
-            pos={receivablePos}
-            loading={permissionsLoading || (poListGate.allowed && receivableQuery.isLoading)}
-            error={receivableQuery.error ? ((receivableQuery.error as { message?: string }).message ?? "Erro inesperado.") : null}
-            noPermission={!permissionsLoading && !poListGate.allowed}
-            today={today}
-            f={listFilters}
-            setF={setListFilters}
-            canReceive={receiveGate.allowed}
-            receiveReason={receiveGate.reason}
-            onOpenPo={(id) => openPoPanel(id, { noteId: readNoteId ?? undefined })}
-            activeId={poParam}
-            onRetry={() => void receivableQuery.refetch()}
-          />
+          {embebido ? (
+            <PorReceberCartoes {...porReceberProps} tabela={<PorReceberList {...porReceberProps} />} />
+          ) : (
+            <PorReceberList {...porReceberProps} />
+          )}
         </TabsContent>
         <TabsContent value="recebidas" className="mt-3">
           <RecebidasList
@@ -4561,7 +4590,8 @@ export default function Receiving() {
 
   return (
     <div className={cn("mx-auto w-full space-y-4", framed ? "max-w-[1400px]" : "max-w-6xl")}>
-      {pageHeader}
+      {/* Na moldura o cabeçalho clássico sai; no leitor ficam as mesmas ações (voltar à lista, Nova guia, Receber numa encomenda). */}
+      {embebido ? (listOn ? null : <div className="flex flex-wrap items-center gap-2">{pageActions}</div>) : pageHeader}
 
       {listView}
 
