@@ -1,12 +1,12 @@
 // 25/11: o painel «Zona: Frente» da pré-visualização 3D: a zona escolhida (clicando numa parte da peça, ou pelo botão da zona no painel «Zonas», que é a via de teclado e de leitor de ecrã),
 // o atributo que a pinta HOJE (por omissão ou por ligação) e «Pintar com: …»: um dos atributos do produto, «Pelo nome (como por omissão)» ou «Nenhum». Escolher actualiza o RASCUNHO das
 // ligações (o 3D acompanha logo, como no painel «Ligações») e «Guardar neste produto» grava-as. Sem configuração 3D (`ligacoes` ausente) só mostra o que pinta a zona. Sem three: só o ecrã.
-import { useId, useState } from "react";
+import { useEffect, useId, useRef, useState, type KeyboardEvent } from "react";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { AmostraOpcao } from "./AmostraOpcao";
 import { erroDasLigacoes, type Ligacao } from "./config3dDados";
-import { aplicarEscolhaNaZona, escolhaAtualDaZona, type EscolhaDaZona } from "./escolherZona";
+import { aplicarEscolhaNaZona, escolhaAtualDaZona, type ContextoEscolha, type EscolhaDaZona } from "./escolherZona";
 import type { LeituraDoProduto } from "./planta3d/acabamentoCor3d";
 import { rotuloDaZona, type ZonaGlb, type ZonaVisual } from "./planta3d/zonasGlb";
 
@@ -43,11 +43,19 @@ export interface PropsEscolherZona {
   ligacoes?: LigacoesEditaveis;
   /** As zonas que um atributo pinta hoje: para ligá-lo a outra zona sem tirar o que ele já pinta. */
   pintaHoje: (atributo: string) => readonly ZonaGlb[];
+  /** Os atributos que pintam uma zona só pelo nome (ver escolherZona.ts): a ligação escolhida manda sobre eles. */
+  pelaNome?: ContextoEscolha["pelaNome"];
+  /** A zona foi escolhida clicando no 3D: o foco passa ao título do painel (quem a escolhe pelo botão do painel «Zonas» fica onde estava). */
+  focarAoAbrir?: boolean;
+  /** Fecha (botão X ou Escape): quem abriu devolve o foco ao sítio de onde veio. */
   aoFechar: () => void;
 }
 
-export function PainelEscolherZona({ zona, pintadaPor, atributos, ligacoes, pintaHoje, aoFechar }: PropsEscolherZona) {
+// O estado do painel (mensagem, anúncio, escolha em curso) é DESTA zona: quem o usa leva `key={zona}` para ele não passar à zona seguinte.
+export function PainelEscolherZona({ zona, pintadaPor, atributos, ligacoes, pintaHoje, pelaNome, focarAoAbrir = false, aoFechar }: PropsEscolherZona) {
   const id = useId();
+  const titulo = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { if (focarAoAbrir) titulo.current?.focus(); }, [focarAoAbrir]);
   const [ocupado, setOcupado] = useState(false);
   const [msg, setMsg] = useState<{ erro: boolean; texto: string } | null>(null);
   const [anuncio, setAnuncio] = useState("");
@@ -62,9 +70,14 @@ export function PainelEscolherZona({ zona, pintadaPor, atributos, ligacoes, pint
   const escolher = (e: EscolhaDaZona, depois: string) => {
     if (!ligacoes) return;
     setMsg(null);
-    ligacoes.aoMudar(aplicarEscolhaNaZona(ligacoes.valor, zona, e, { atributosDaCor: ids, pintaHoje }));
+    const nova = aplicarEscolhaNaZona(ligacoes.valor, zona, e, { atributosDaCor: ids, pintaHoje, pelaNome });
+    if (JSON.stringify(nova) === JSON.stringify(ligacoes.valor)) return; // nada mudou (ex.: «Nenhum» sem atributos de cor): não se anuncia
+    ligacoes.aoMudar(nova);
     setAnuncio(`${rotulo}: ${depois}`);
   };
+  const aoTeclar = (e: KeyboardEvent<HTMLElement>) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); aoFechar(); } };
+  // a ligação gravada é a um atributo que o produto já não tem: o rádio dele não existe, e sem este nenhum ficava marcado
+  const foraDoProduto = atual?.tipo === "atributo" && !ids.includes(atual.id);
   const guardar = async () => {
     if (!ligacoes || !podeGuardar) return;
     setOcupado(true); setMsg(null);
@@ -73,9 +86,9 @@ export function PainelEscolherZona({ zona, pintadaPor, atributos, ligacoes, pint
   const marcado = (e: EscolhaDaZona): boolean => !!atual && atual.tipo === e.tipo && (e.tipo !== "atributo" || (atual.tipo === "atributo" && atual.id === e.id));
 
   return (
-    <section aria-labelledby={`${id}-t`} className="grid gap-3 rounded-xl border border-primary/50 bg-card p-3">
+    <section aria-labelledby={`${id}-t`} onKeyDown={aoTeclar} className="grid gap-3 rounded-xl border border-primary/50 bg-card p-3">
       <div className="flex items-start justify-between gap-2">
-        <h3 id={`${id}-t`} className="text-[15px] font-semibold">Zona: {rotulo}</h3>
+        <h3 id={`${id}-t`} ref={titulo} tabIndex={-1} className="text-[15px] font-semibold focus:outline-none">Zona: {rotulo}</h3>
         <button type="button" onClick={aoFechar} aria-label={`Deixar de escolher a zona ${rotulo}`} title="Fechar" className={cn(BOTAO, "min-w-11 px-0")}><X className="h-4 w-4" aria-hidden="true" /></button>
       </div>
       <p className="text-[15px]">
@@ -92,6 +105,12 @@ export function PainelEscolherZona({ zona, pintadaPor, atributos, ligacoes, pint
             <input type="radio" name={`${id}-r`} checked={marcado({ tipo: "nome" })} onChange={() => escolher({ tipo: "nome" }, "pelo nome")} className="h-5 w-5 shrink-0 accent-primary" />
             <span>Pelo nome (como por omissão)</span>
           </label>
+          {foraDoProduto && (
+            <label className={OPCAO}>
+              <input type="radio" name={`${id}-r`} checked readOnly className="h-5 w-5 shrink-0 accent-primary" />
+              <span>Ligação a um atributo que o produto já não tem</span>
+            </label>
+          )}
           {atributos.map((a) => (
             <label key={a.id} className={OPCAO}>
               <input type="radio" name={`${id}-r`} checked={marcado({ tipo: "atributo", id: a.id })} onChange={() => escolher({ tipo: "atributo", id: a.id }, a.nome)} className="h-5 w-5 shrink-0 accent-primary" />

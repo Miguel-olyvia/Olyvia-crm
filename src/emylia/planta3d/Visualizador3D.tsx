@@ -23,7 +23,7 @@ import { aplicarTextura, pedirTextura, retirarTextura, type TexturaModelo } from
 import { corDaJunta, type AmostraNoMundo, type PlanoRevestimento } from "./revestimentoPrevia";
 import { cotasDaPeca, noEcra } from "./cotasPeca";
 import type { ZonaGlb, ZonasDoProduto } from "./zonasGlb";
-import { foiClique, zonaDaPrimeiraIntersecao, type ObjetoDoCanvas } from "./zonaDoClique";
+import { criarPortaDoHover, foiClique, zonaDaPrimeiraIntersecao, type ObjetoDoCanvas } from "./zonaDoClique";
 import { aplicarAparenciaDasZonas, aplicarRealceDasZonas, criarMateriaisDeZona } from "./zonasMateriais";
 import { useTexturasPorUrl } from "./useTexturasPorUrl";
 import { criarAmbienteMetal, type AmbienteMetal } from "./ambienteMetal";
@@ -770,6 +770,9 @@ function ModeloGLB({ url, w, d, h }: { url: string; w: number; d: number; h: num
 }
 
 /** O contorno da peça escolhida: uma moldura fina e rasa, 2 cm à volta da pegada, junto à base (não atravessa a peça nem a bancada). */
+/** Os objectos auxiliares (cotas, contorno da selecção) não se apontam nem se clicam: raycast nulo, e a marca para o filtro do clique (zonaDoClique.ehAuxiliar). */
+const SEM_RAIO = () => undefined;
+const AUXILIAR = { auxiliar: true };
 function Contorno({ w, d, y }: { w: number; d: number; y: number }) {
   const geo = useMemo(() => {
     const f = 0.02, l = 0.012, s = new THREE.Shape(), b = new THREE.Path();
@@ -779,7 +782,7 @@ function Contorno({ w, d, y }: { w: number; d: number; y: number }) {
     return new THREE.ShapeGeometry(s);
   }, [w, d]);
   useEffect(() => () => geo.dispose(), [geo]);
-  return <mesh geometry={geo} position={[0, y + 0.004, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={2}><meshBasicMaterial color="#7c3aed" transparent opacity={0.55} depthWrite={false} side={THREE.DoubleSide} /></mesh>;
+  return <mesh geometry={geo} position={[0, y + 0.004, 0]} rotation={[-Math.PI / 2, 0, 0]} renderOrder={2} raycast={SEM_RAIO} userData={AUXILIAR}><meshBasicMaterial color="#7c3aed" transparent opacity={0.55} depthWrite={false} side={THREE.DoubleSide} /></mesh>;
 }
 
 /**
@@ -805,7 +808,7 @@ function Cotas({ w, d, h }: { w: number; d: number; h: number }) {
     <group>
       {cotas.map((c) => (
         <group key={c.chave}>
-          <Line points={c.pontos} color={COR_COTA} lineWidth={1.6} depthTest={false} renderOrder={6} />
+          <Line points={c.pontos} color={COR_COTA} lineWidth={1.6} depthTest={false} renderOrder={6} raycast={SEM_RAIO} userData={AUXILIAR} />
           <group position={c.meio} ref={(g) => { grupos.current[c.chave] = g; }}>
             <Html center zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
               <div ref={(el) => { rotulos.current[c.chave] = el; }} aria-hidden="true" data-cota={c.chave} className="whitespace-nowrap rounded border border-teal-800/40 bg-white/95 px-1.5 py-0.5 text-[12px] font-semibold leading-tight text-teal-900 shadow-sm">{c.rotulo}</div>
@@ -930,14 +933,26 @@ function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel,
   // 25/11: escolher a zona no 3D. O clique só conta se o ponteiro quase não se moveu (`delta`, em píxeis, entre premir e largar): arrastar é rodar a câmara. A zona é a da primeira malha visível debaixo do ponteiro.
   const zonaSob = useRef<ZonaGlb | null>(null);
   const zonaDe = (e: ThreeEvent<PointerEvent | MouseEvent>): ZonaGlb | null => zonaDaPrimeiraIntersecao(e.intersections as unknown as ReadonlyArray<{ object: ObjetoDoCanvas }>, escolha?.validas);
+  // o hover: sem botão premido (arrastar é rodar a câmara) e no máximo uma vez por INTERVALO_HOVER_MS, em vez de a cada movimento do rato
+  const portaHover = useMemo(() => criarPortaDoHover(), []);
+  const limparHover = () => { if (zonaSob.current === null) return; zonaSob.current = null; domElement.style.cursor = ""; escolha?.passar?.(null); };
   const eventosDeZona = escolha?.clicar || escolha?.passar ? {
     onPointerMove: (e: ThreeEvent<PointerEvent>) => {
+      if (e.buttons !== 0) { limparHover(); return; }
+      if (!portaHover(e.buttons, performance.now())) return;
       const z = zonaDe(e);
       if (z === zonaSob.current) return;
       zonaSob.current = z; domElement.style.cursor = z ? "pointer" : ""; escolha?.passar?.(z);
     },
-    onPointerOut: () => { if (zonaSob.current === null) return; zonaSob.current = null; domElement.style.cursor = ""; escolha?.passar?.(null); },
+    onPointerOut: limparHover,
   } : {};
+  // se a peça sai (ou o produto muda) com o rato por cima, o estado do hover e o cursor não ficam presos: limpa-se ao desmontar e na troca de produto
+  const escolhaAtual = useRef(escolha);
+  useEffect(() => { escolhaAtual.current = escolha; });
+  useEffect(() => () => {
+    if (zonaSob.current === null) return;
+    zonaSob.current = null; domElement.style.cursor = ""; escolhaAtual.current?.passar?.(null);
+  }, [domElement, m.nome, original.produtoId]);
   const largar = (confirmar: boolean) => {
     if (!arrasto) return;
     if (controls) controls.enabled = true;

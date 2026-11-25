@@ -22,7 +22,7 @@ const ORDEM_PAPEL: Readonly<Record<PapelCor, number>> = { corpo: 0, frente: 1, g
 export const ordemUnica = (c: ClasseCor): number => ORDEM_PAPEL[c.papel] * 10 + c.nivel;
 
 /** A classe de um atributo pelo nome (ou pelo código dos atributos novos); sem nenhum destes nomes: null. Os três nomes de sempre são avaliados primeiro, tal como antes. */
-function classeDoNome(d: AtributoDef): ClasseCor | null {
+function classeDoNome(d: Pick<AtributoDef, "nome" | "codigo">): ClasseCor | null {
   const n = sem(d.nome).trim(), c = d.codigo.toLowerCase();
   if (n === "cor do corpo") return { papel: "corpo", nivel: 3 };
   if (n === "cor da frente") return { papel: "frente", nivel: 3 };
@@ -34,6 +34,9 @@ function classeDoNome(d: AtributoDef): ClasseCor | null {
   if (n === "acabamento" || c === "acabamento") return { papel: "geral", nivel: 2 };
   return null;
 }
+
+/** A classe que o NOME dá a um atributo (o papel: a zona que pinta pelo nome; o nível), ou null. Para quem só tem o nome (o painel «Zona» do 3D). */
+export const classeDoNomeDe = (nome: string, codigo = ""): ClasseCor | null => classeDoNome({ nome, codigo });
 
 /** A classe de cada atributo (por id). O «Acabamento» original só entra com um atributo novo (acabamento do corpo/frente/cor ou «Decor») presente. */
 export function classesDosAtributos(defs: readonly AtributoDef[]): Map<string, ClasseCor> {
