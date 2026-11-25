@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import { ListChecks, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { Negocio } from "../motor";
+import { reporArredondamentos, type Negocio } from "../motor";
 import type { Ctx } from "../pecas";
 import { horasPorSubir, porFixar } from "../microtarefas";
 import { podeNeg } from "../permissoes";
@@ -14,7 +14,7 @@ export function obrasPorAtualizar(S: Ctx["S"], obras: Negocio[]): { d: Negocio; 
   return obras.flatMap((d) => {
     const p = d.obra.plano;
     if (!p || p.estado === "concluída") return [];
-    const n = p.tasks.filter((t) => !!porFixar(t, S, p)?.length || horasPorSubir(t, S, p) != null).length;
+    const n = p.tasks.filter((t) => !!porFixar(t, S, p)?.length || horasPorSubir(t, S, p) != null).length + reporArredondamentos(d, p, true);
     return n ? [{ d, n }] : [];
   });
 }
@@ -26,7 +26,7 @@ export function useMicrotarefasAutomaticas(ctx: Ctx, d: Negocio): void {
   useEffect(() => {
     const pp = d.obra.plano;
     if (!pp || pp.estado === "concluída" || !podeNeg(S.role, "obra.planear")) return;
-    const falta = pp.tasks.some((t) => !!porFixar(t, S, pp)?.length || horasPorSubir(t, S, pp) != null);
+    const falta = pp.tasks.some((t) => !!porFixar(t, S, pp)?.length || horasPorSubir(t, S, pp) != null) || reporArredondamentos(d, pp, true) > 0;
     if (!falta) return;
     const id = window.setTimeout(() => ctx.run(() => { ctx.A.fixarMicrotarefas(d.id); ctx.A.ajustarHorasPelasMicro(d.id); }), 0);
     return () => window.clearTimeout(id);

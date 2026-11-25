@@ -6,7 +6,7 @@ import { propostaDoServico } from "../MicrotarefasServico";
 import { obrasPorAtualizar } from "./AtualizarMicrotarefas";
 import { temposDoInfraspeak } from "./TemposInfraspeak";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { acoes, type Tarefa } from "../motor";
+import { acoes, reporArredondamentos, type Tarefa } from "../motor";
 import type { Ctx } from "../pecas";
 import { esperaDasMicro, horasDasMicro, horasPorSubir } from "../microtarefas";
 import { detalheMicro, listaMicro, microDoCatalogo, microDoInfraspeak, microFeitas, microtarefasDe, mudarMicro, porFixar, progressoMicro } from "../microtarefas";
@@ -264,6 +264,34 @@ describe("só a maior espera conta (25/11)", () => {
     expect(t.h).toBe(4);
     expect(t.dur).toBe(1 + 2);
     expect(A.ajustarHorasPelasMicro(d.id)).toBe(0); // já está
+  });
+});
+
+describe("sem arredondamentos (25/11)", () => {
+  it("horas que já chegam não mudam só por não serem meias horas; a subir, arredonda para cima", () => {
+    const { S, d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "Teto falso em pladur"; delete t.bloqueio;
+    const soma = horasDasMicro(t, S, p)!;
+    t.h = soma + 0.16; const dur = t.dur = 9;
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBe(soma + 0.16);
+    expect(t.dur).toBe(dur);
+    t.h = soma - 3;
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBeGreaterThanOrEqual(soma);
+    expect(t.h * 2).toBe(Math.round(t.h * 2));
+  });
+  it("repõe pelo histórico as tarefas que a regra só tinha arredondado (uma vez)", () => {
+    const { d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "Instalação Janela PVC Oscilobatente"; delete t.bloqueio; t.h = 4.5; t.dur = 1;
+    d.hist.unshift({ t: "Plano: Instalação Janela PVC Oscilobatente · 4,66 → 4,5 h, 2 → 1 dia (microtarefas: 4,66 h de trabalho)", q: "agora", k: "a" });
+    expect(reporArredondamentos(d, p, true)).toBe(1);
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBe(4.66);
+    expect(t.dur).toBe(2);
+    expect(reporArredondamentos(d, p, true)).toBe(0);
   });
 });
 

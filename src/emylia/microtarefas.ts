@@ -231,10 +231,12 @@ export function ajustePorFazer(t: Tarefa, S?: Estado | null, p?: Plano | null, h
   if (hOrc == null && p?.base && p.base.length === p.tasks.length) hOrc = p.base[p.tasks.indexOf(t)]?.h;
   const soma = horasDasMicro(t, S, p), espera = esperaDasMicro(t, S, p);
   if (soma == null && !espera) return null;
+  // 25/11: só se mexe quando as microtarefas pedem mais horas (arredonda para cima, à meia hora) ou na correção da espera; nunca só por
+  // arredondar (antes, 4,66 h passavam a 4,5 h e a tarefa perdia um dia)
+  const cima = (x: number) => Math.max(0.5, Math.ceil(x * 2 - 1e-9) / 2);
   let h = t.h;
-  if (espera && soma != null && Math.abs(t.h - meia(soma + 8 * espera)) < 0.51 && t.h > soma) h = Math.max(soma, hOrc ?? soma);
-  if (soma != null && soma > h + 0.25) h = soma;
-  h = meia(h);
+  if (espera && soma != null && Math.abs(t.h - meia(soma + 8 * espera)) < 0.51 && t.h > soma + 0.25) h = cima(Math.max(soma, hOrc ?? soma));
+  if (soma != null && soma > h + 0.25) h = cima(soma);
   // a subir (ou igual), os dias nunca encolhem; a corrigir para baixo (a espera contada como horas), os dias são o trabalho mais a espera
   // sem horas novas nem espera, os dias ficam (uma tarefa com mais pessoas tem menos dias do que horas ÷ 8)
   let dur = h < t.h ? diasDe(h) + espera : h > t.h || espera ? Math.max(diasDe(h) + espera, t.dur) : t.dur;

@@ -2092,6 +2092,32 @@ export function porqueNaoMexe(p: Plano, ti: number): string | null {
 }
 /** Com a obra em curso: as tarefas que já começaram voltam ao sítio onde estavam (uma mudança noutra pode tê-las empurrado); as outras ficam
  *  onde a mudança as pôs (a mexida já não começa antes de hoje). */
+/** 25/11: a regra das microtarefas arredondou, por engano, horas que não precisavam de mudar («Plano: X · 4,66 → 4,5 h, 2 → 1 dia
+ *  (microtarefas: …)»). Repõe as horas e os dias de antes nas tarefas por começar que ainda estão assim; fica no histórico e não se repete. */
+export function reporArredondamentos(d: Negocio, p: Plano, simular = false): number {
+  const num = (s: string) => Number(s.replace(/\./g, "").replace(",", "."));
+  const re = /^Plano: (.+) · ([\d.,]+) → ([\d.,]+) h, (\d+) → (\d+) dias? \(microtarefas: /;
+  const feitos = new Set(d.hist.filter((e) => e.t.startsWith("Plano: horas repostas · ")).map((e) => e.t.slice("Plano: horas repostas · ".length).split(" (")[0]));
+  let n = 0;
+  for (const e of [...d.hist].reverse()) {
+    const m = re.exec(e.t);
+    if (!m) continue;
+    const [, nome, a, b, x] = m, A = num(a), Bh = num(b), X = Number(x);
+    if (!(Bh < A && A - Bh < 0.5 && Math.abs(Bh - Math.round(A * 2) / 2) < 1e-9) || feitos.has(nome)) continue;
+    const ti = p.tasks.findIndex((t) => t.nome === nome);
+    const t = p.tasks[ti];
+    if (!t || t.exec || Math.abs(t.h - Bh) > 1e-9 || p.tasks.filter((y) => y.nome === nome).length > 1) continue;
+    if (simular) { feitos.add(nome); n++; continue; }
+    const sitio = p.tasks.map((y) => ({ dia: y.dia, dur: y.dur }));
+    if (t.dur !== X) mudarDuracao(p, ti, X);
+    t.h = A;
+    protegerComecadas(p, sitio);
+    feitos.add(nome);
+    log(d, `Plano: horas repostas · ${nome} (${nfmt(A)} h, ${X} ${X === 1 ? "dia" : "dias"}): a regra das microtarefas tinha-as só arredondado`);
+    n++;
+  }
+  return n;
+}
 function protegerComecadas(p: Plano, antes: { dia: number; dur: number }[]): void {
   if (p.estado !== "em curso") return;
   p.tasks.forEach((t, i) => {
@@ -4522,6 +4548,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       let n = 0;
       // as horas do orçamento (a base), quando a base ainda está alinhada com as tarefas
       const base = p.base && p.base.length === p.tasks.length ? p.base : null;
+      // 25/11: repõe as tarefas que a regra só tinha arredondado (ex.: 4,66 → 4,5 h, 2 → 1 dia), pelo histórico, uma vez
+      n += reporArredondamentos(d, p);
       p.tasks.forEach((t, ti) => {
         if (p.estado === "em curso" && porqueNaoMexe(p, ti)) return;
         const a = ajustePorFazer(t, S, p, base?.[ti]?.h);
