@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronsUpDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -12,7 +12,8 @@ export interface ProductOption {
   barcode: string | null;
 }
 
-const MAX_RESULTS = 50;
+/** Quantos produtos mostrar de cada vez; o scroll até ao fim mostra mais. */
+export const PAGE_SIZE = 50;
 
 const productText = (p: ProductOption) => [p.name, p.sku, p.barcode].filter(Boolean).join(" ").toLowerCase();
 
@@ -35,7 +36,8 @@ interface ProductPickerProps {
 
 /**
  * Campo "Produto" do protótipo ("Pesquisar nome, SKU ou EAN") sobre o catálogo
- * `products` da organização ativa. Filtra no cliente e mostra no máximo 50.
+ * `products` da organização ativa. Filtra no cliente e mostra 50 de cada vez;
+ * ao chegar ao fim da lista (scroll) mostra mais 50.
  * Popover `modal`: dentro de um Dialog, sem isto o focus trap rouba o foco.
  */
 export function ProductPicker({
@@ -43,6 +45,8 @@ export function ProductPicker({
 }: ProductPickerProps) {
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const [visible, setVisible] = useState(PAGE_SIZE);
+  const listRef = useRef<HTMLDivElement>(null);
   const selected = products.find((p) => p.id === value);
   const isLoading = loading ?? products.length === 0;
   // Valor escolhido mas fora da lista: nunca mostrar o placeholder, que fazia
@@ -53,19 +57,33 @@ export function ProductPicker({
       ? fallbackLabel || (isLoading ? "A carregar…" : "Produto inativo ou indisponível")
       : "Pesquisar nome, SKU ou EAN";
 
-  const results = useMemo(() => {
+  const hasSearch = search.trim().length > 0;
+  const matches = useMemo(() => {
     const terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
-    const matches = terms.length === 0
+    return terms.length === 0
       ? products
       : products.filter((p) => {
         const text = productText(p);
         return terms.every((t) => text.includes(t));
       });
-    return matches.slice(0, MAX_RESULTS);
   }, [products, search]);
+  const results = useMemo(() => matches.slice(0, visible), [matches, visible]);
+
+  // Pesquisa nova: volta ao topo e aos primeiros 50.
+  useEffect(() => {
+    setVisible(PAGE_SIZE);
+    if (listRef.current) listRef.current.scrollTop = 0;
+  }, [search]);
+
+  const showMoreIfAtEnd = (el: HTMLDivElement) => {
+    if (visible >= matches.length) return;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 48) {
+      setVisible((v) => Math.min(v + PAGE_SIZE, matches.length));
+    }
+  };
 
   return (
-    <Popover modal open={open} onOpenChange={(next) => { setOpen(next); if (!next) setSearch(""); }}>
+    <Popover modal open={open} onOpenChange={(next) => { setOpen(next); if (!next) { setSearch(""); setVisible(PAGE_SIZE); } }}>
       <PopoverTrigger asChild>
         <Button
           id={id}
@@ -86,7 +104,12 @@ export function ProductPicker({
       <PopoverContent className="w-[var(--radix-popover-trigger-width)] min-w-[22rem] p-0" align="start">
         <Command shouldFilter={false}>
           <CommandInput placeholder="Nome, SKU ou EAN…" value={search} onValueChange={setSearch} />
-          <CommandList className="max-h-72 overflow-y-auto" onWheel={(e) => e.stopPropagation()}>
+          <CommandList
+            ref={listRef}
+            className="max-h-72 overflow-y-auto"
+            onWheel={(e) => e.stopPropagation()}
+            onScroll={(e) => showMoreIfAtEnd(e.currentTarget)}
+          >
             <CommandGroup>
               {results.map((p) => (
                 <CommandItem
@@ -103,6 +126,14 @@ export function ProductPicker({
             {results.length === 0 ? (
               <p className="py-3 text-center text-sm text-muted-foreground">
                 {isLoading ? "A carregar produtos…" : "Nenhum produto encontrado."}
+              </p>
+            ) : null}
+            {results.length > 0 ? (
+              <p className="sticky bottom-0 border-t bg-popover px-3 py-1.5 text-xs text-muted-foreground" aria-live="polite">
+                {hasSearch
+                  ? `A mostrar ${results.length} de ${matches.length} resultado${matches.length === 1 ? "" : "s"}`
+                  : `A mostrar ${results.length} de ${matches.length} — escreva para filtrar`}
+                {results.length < matches.length ? " · desça para ver mais" : ""}
               </p>
             ) : null}
           </CommandList>
