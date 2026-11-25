@@ -19,6 +19,7 @@ export type AcaoAlerta =
   | { k: "outra"; obra: Negocio }
   | { k: "replanear" }
   | { k: "adiantar" }
+  | { k: "fecharBuraco"; ini: number; fim: number; ti: number | null }
   | { k: "conversa" }
   | { k: "aceitarFim"; dias: number }
   | { k: "materiais" };
@@ -119,8 +120,8 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
   for (const g of diasSemNinguem(p)) {
     const n = g.fim - g.ini + 1, seg = g.seguinte != null ? p.tasks[g.seguinte] : null;
     L.push({ id: `parada-${g.ini}`, nivel: "oportunidade", t: `A obra fica sem ninguém ${dias(n)}: ${quando(p, g.ini)} a ${quando(p, g.fim)}`,
-      sub: seg ? `A seguir, ${seg.nome} a ${quando(p, seg.dia)}. Pode antecipá-la ou outra tarefa para esses dias.` : "Pode antecipar uma tarefa para esses dias.",
-      acoes: [...(seg && g.seguinte != null ? [{ rot: "Ver a tarefa", a: { k: "tarefa" as const, ti: g.seguinte } }] : []), { rot: "Replanear", a: { k: "replanear" as const } }], ...(g.seguinte != null ? { ti: g.seguinte } : {}) });
+      sub: seg ? `A seguir, ${seg.nome} a ${quando(p, seg.dia)}. «Antecipar o resto» puxa as tarefas seguintes o mais que os técnicos deixarem.` : "Pode antecipar uma tarefa para esses dias.",
+      acoes: [{ rot: "Antecipar o resto", a: { k: "fecharBuraco" as const, ini: g.ini, fim: g.fim, ti: g.seguinte } }, ...(seg && g.seguinte != null ? [{ rot: "Ver a tarefa", a: { k: "tarefa" as const, ti: g.seguinte } }] : [])], ...(g.seguinte != null ? { ti: g.seguinte } : {}) });
   }
   const peso: Record<Nivel, number> = { critico: 0, atencao: 1, oportunidade: 2 };
   return L.sort((a, b) => peso[a.nivel] - peso[b.nivel]);

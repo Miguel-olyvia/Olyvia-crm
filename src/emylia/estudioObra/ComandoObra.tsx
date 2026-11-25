@@ -30,7 +30,7 @@ import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
 import { FotoObra } from "../fotosDaObra";
 import { Contagem, MOLA, useReduzir } from "../movimento";
 import { podeNeg, podeVerCustos } from "../permissoes";
-import { derrapagem, diasSemNinguem, estadoVivo, nomeCurtoTarefa, nomeNoPlano, rotuloVivo } from "./planoVivo";
+import { derrapagem, diasSemNinguem, estadoVivo, fimFeito, nomeCurtoTarefa, nomeNoPlano, rotuloVivo } from "./planoVivo";
 import { CaminhoCritico, ICONE_DA_FASE } from "./CaminhoCritico";
 import { AutoRececaoDoc } from "../AutoRececao";
 import { NaFrente } from "../NaFrente";
@@ -229,6 +229,14 @@ function Arranque({ ctx, d, dias, ir }: { ctx: Ctx; d: Negocio; dias: Date[]; ir
   );
 }
 
+/** 25/11 (revisão, 1048 no dia 1: «Ritmo a tempo: 180%» ao lado do fim do plano): o ritmo dito como se lê, sem contradizer o fim. */
+export function textoRitmo(ritmo: number, confianca: "baixa" | "média" | "alta"): string {
+  const pc = `${Math.round(ritmo * 100)}%`;
+  if (ritmo < 0.95) return `Abaixo do plano: ${pc} do previsto até hoje`;
+  if (ritmo <= 1.05) return "No ritmo do plano";
+  return confianca === "baixa" ? "Adiantado, mas ainda com pouco feito para mudar o fim" : `Adiantado: ${pc} do previsto até hoje`;
+}
+
 /* ================================================================== o comando de hoje */
 export interface Pedido { k: string; t: string; sub?: string; rot: string; fn: () => void; nivel: "critico" | "atencao" }
 /** O que precisa do gestor, com o toque que resolve cada coisa. */
@@ -236,7 +244,7 @@ export function precisaDeTi(ctx: Ctx, d: Negocio, ir: Ir): Pedido[] {
   const { S, A, run } = ctx;
   const p = d.obra.plano!, L: Pedido[] = [];
   if (!podeNeg(S.role, "obra.planear") || p.estado !== "em curso") return L;
-  p.tasks.forEach((t, ti) => { if (estadoVivo(t, p) === "feita") L.push({ k: "v" + ti, t: `Validar ${t.nome.toLowerCase()}`, sub: `${primeiro(nomeTec(t.tec))} deu-a por feita, com ${t.exec?.fotos.length ?? 0} ${t.exec?.fotos.length === 1 ? "fotografia" : "fotografias"}`, rot: "Validar", fn: () => run(() => A.validarTarefa(d.id, ti)), nivel: "atencao" }); });
+  p.tasks.forEach((t, ti) => { if (estadoVivo(t, p) === "feita") L.push({ k: "v" + ti, t: `Validar ${nomeNoPlano(p, t).toLowerCase()}`, sub: `${primeiro(nomeTec(t.tec))} deu-a por feita, com ${t.exec?.fotos.length ?? 0} ${t.exec?.fotos.length === 1 ? "fotografia" : "fotografias"}`, rot: "Validar", fn: () => run(() => A.validarTarefa(d.id, ti)), nivel: "atencao" }); });
   for (const im of imprevistosDe(d)) {
     // 23/11: o pedido de atraso do técnico: aceitar ou recusar no imprevisto
     if (pedidoDeAtraso(im)) { L.push({ k: "i" + im.id, t: textoPedidoAtraso(im), sub: "Aceite (o plano anda e o cliente é avisado) ou recuse", rot: "Decidir", fn: () => ir.imprevisto(im.id), nivel: "critico" }); continue; }
@@ -244,21 +252,22 @@ export function precisaDeTi(ctx: Ctx, d: Negocio, ir: Ir): Pedido[] {
     if (im.estado === "recusado") L.push({ k: "i" + im.id, t: `O cliente recusou: ${im.texto}`, sub: "Decida o que fazer", rot: "Decidir", fn: () => ir.imprevisto(im.id), nivel: "critico" });
   }
   const atr = p.tasks.filter((t) => estadoVivo(t, p) === "atrasada");
-  if (atr.length) L.push({ k: "atr", t: `${atr.length} ${atr.length === 1 ? "tarefa atrasada" : "tarefas atrasadas"}`, sub: atr.map((t) => t.nome).join(", "), rot: "Pôr em dia", fn: ir.replanear, nivel: "critico" });
+  if (atr.length) L.push({ k: "atr", t: `${atr.length} ${atr.length === 1 ? "tarefa atrasada" : "tarefas atrasadas"}`, sub: atr.map((t) => nomeNoPlano(p, t)).join(", "), rot: "Pôr em dia", fn: ir.replanear, nivel: "critico" });
   // devia ter começado e ainda não tem nada do técnico
-  p.tasks.forEach((t, ti) => { if (estadoVivo(t, p) === "hoje" && t.dia < p.dia && !t.exec) L.push({ k: "c" + ti, t: `${t.nome} ainda não começou`, sub: `Era para ${t.dia === p.dia - 1 ? "ontem" : "dias atrás"} · ${primeiro(nomeTec(t.tec))}`, rot: "Ver", fn: () => ir.tarefa(ti), nivel: "atencao" }); });
+  p.tasks.forEach((t, ti) => { if (estadoVivo(t, p) === "hoje" && t.dia < p.dia && !t.exec) L.push({ k: "c" + ti, t: `${nomeNoPlano(p, t)} ainda não começou`, sub: `Era para ${t.dia === p.dia - 1 ? "ontem" : "dias atrás"} · ${primeiro(nomeTec(t.tec))}`, rot: "Ver", fn: () => ir.tarefa(ti), nivel: "atencao" }); });
   const porLer = (d.obra.chat ?? []).filter((m) => m.de === "cliente" && !m.lida).length;
   if (porLer) L.push({ k: "chat", t: `${porLer} ${porLer === 1 ? "mensagem do cliente" : "mensagens do cliente"}`, sub: (d.obra.chat ?? []).filter((m) => m.de === "cliente" && !m.lida).slice(-1)[0]?.t, rot: "Responder", fn: () => ir.aba("cliente"), nivel: "atencao" });
   const pend = porEncomendarDe(d);
   if (pend.length) L.push({ k: "mat", t: `${pend.length} ${pend.length === 1 ? "material por encomendar" : "materiais por encomendar"}`, sub: pend.slice(0, 3).map((x) => x.m.n).join(", "), rot: "Encomendar", fn: () => run(() => A.encomendarMateriais(d.id)), nivel: "atencao" });
   const pausadas = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => estadoVivo(t, p) === "pausada");
-  for (const { t, ti } of pausadas) L.push({ k: "p" + ti, t: `${t.nome} está pausada`, sub: t.exec?.pausa?.motivo, rot: "Retomar", fn: () => run(() => A.retomarTarefa(d.id, ti)), nivel: "atencao" });
+  for (const { t, ti } of pausadas) L.push({ k: "p" + ti, t: `${nomeNoPlano(p, t)} está pausada`, sub: t.exec?.pausa?.motivo, rot: "Retomar", fn: () => run(() => A.retomarTarefa(d.id, ti)), nivel: "atencao" });
   // 25/11 (revisão, 1048: a demolição acabou no dia 1 e ninguém volta à obra até 7 dez): um buraco nos próximos dias pede uma decisão
   const g = diasSemNinguem(p).find((x) => x.ini <= p.dia + 5);
   if (g && g.seguinte != null) {
     const n = g.fim - g.ini + 1, seg = p.tasks[g.seguinte], dia = (k: number) => rotuloDia(p, k);
     L.push({ k: "parada", t: `A obra fica sem ninguém ${n} ${n === 1 ? "dia útil" : "dias úteis"}`, sub: `De ${dia(g.ini)} a ${dia(g.fim)}. A seguir: ${nomeNoPlano(p, seg)}, a ${dia(seg.dia)}`,
-      rot: "Antecipar", fn: () => ir.tarefa(g.seguinte!), nivel: "atencao" });
+      // 25/11: antecipa de uma vez as tarefas seguintes; se os técnicos não deixarem, abre a seguinte para a gerir à mão
+      rot: "Antecipar", fn: () => { let r = 0; run(() => { r = A.fecharBuraco(d.id, g.ini, g.fim); }); if (!r) ir.tarefa(g.seguinte!); }, nivel: "atencao" });
   }
   return L.sort((a, b) => (a.nivel === b.nivel ? 0 : a.nivel === "critico" ? -1 : 1));
 }
@@ -301,7 +310,7 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
                   <span className="block text-sm font-medium">{nomeTec(tec)}</span>
                   {tarefas.map(({ t, ti }) => (
                     <button key={ti} type="button" onClick={() => ir.tarefa(ti)} className="mt-0.5 flex w-full items-center gap-2 text-left text-sm text-muted-foreground hover:text-foreground">
-                      <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full" style={{ background: COR_FASE[t.fase ?? 1] }} /><span className="truncate">{t.nome}</span><span className="ml-auto shrink-0 text-xs">{rotuloVivo(t, p)}</span>
+                      <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full" style={{ background: COR_FASE[t.fase ?? 1] }} /><span className="truncate" title={t.nome}>{nomeNoPlano(p, t)}</span><span className="ml-auto shrink-0 text-xs">{rotuloVivo(t, p)}</span>
                     </button>
                   ))}
                 </span>
@@ -310,8 +319,8 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
           </ul>
           {(H.acabaram.length > 0 || H.atrasadas.length > 0) && (
             <div className="flex flex-wrap gap-1.5 text-xs">
-              {H.acabaram.map(({ t, ti }) => <button key={"a" + ti} type="button" onClick={() => ir.tarefa(ti)} className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-1 text-success"><Check className="h-3 w-3" aria-hidden="true" />{t.nome}</button>)}
-              {H.atrasadas.map(({ t, ti }) => <button key={"x" + ti} type="button" onClick={() => ir.tarefa(ti)} className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-1 text-destructive"><AlertTriangle className="h-3 w-3" aria-hidden="true" />{t.nome}</button>)}
+              {H.acabaram.map(({ t, ti }) => <button key={"a" + ti} type="button" onClick={() => ir.tarefa(ti)} className="inline-flex items-center gap-1 rounded-full bg-success/10 px-2 py-1 text-success"><Check className="h-3 w-3" aria-hidden="true" /><span title={t.nome}>{nomeNoPlano(p, t)}</span></button>)}
+              {H.atrasadas.map(({ t, ti }) => <button key={"x" + ti} type="button" onClick={() => ir.tarefa(ti)} className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-1 text-destructive"><AlertTriangle className="h-3 w-3" aria-hidden="true" /><span title={t.nome}>{nomeNoPlano(p, t)}</span></button>)}
             </div>
           )}
           </>}
@@ -480,7 +489,7 @@ export function PrevisaoViva({ d, S, dias, prev, margem: _margem, critico, ir, p
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
             <p className="text-sm font-semibold">Horas planeadas e reais</p>
-            <p className="text-xs text-muted-foreground">Ritmo {prev.ritmo >= 1 ? "a tempo" : "abaixo do plano"}: {Math.round(prev.ritmo * 100)}% · fim provável {quando(prev.fimProvavel - 1)}{prev.ate > prev.de ? ` (entre ${quando(prev.de - 1)} e ${quando(prev.ate - 1)})` : ""}</p>
+            <p className="text-xs text-muted-foreground">{textoRitmo(prev.ritmo, prev.confianca)} · fim provável {quando(prev.fimProvavel - 1)}{prev.ate > prev.de ? ` (entre ${quando(prev.de - 1)} e ${quando(prev.ate - 1)})` : ""}</p>
           </div>
           <ul className="flex flex-wrap gap-3 text-xs text-muted-foreground">
             <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-0.5 w-4 border-t-2 border-dashed border-muted-foreground" />Planeado</li>
@@ -572,7 +581,8 @@ export function AgendaEquipa({ ctx, d, dias, ir }: { ctx: Ctx; d: Negocio; dias:
               <div key={tec} className="grid grid-cols-[150px_repeat(5,1fr)] border-b border-border last:border-b-0">
                 <div className="flex items-center gap-2 px-3 py-2"><AvatarTec id={tec} tam="h-8 w-8" /><span className="min-w-0"><span className="block truncate text-sm font-medium">{primeiro(nomeTec(tec))}</span><span className="block truncate text-xs text-muted-foreground">{TECS.find((x) => x.id === tec)?.sk}</span></span></div>
                 {semana.map((k, j) => {
-                  const aqui = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.tec === tec && k >= t.dia && k < t.dia + t.dur);
+                  // 25/11 (revisão, 1048): a acabada só ocupa até ao dia em que acabou (os dias que sobraram ficam livres)
+                  const aqui = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => { const v = estadoVivo(t, p), fim = v === "validada" || v === "feita" ? Math.min(t.dia + t.dur, Math.max(t.dia + 1, fimFeito(t))) : t.dia + t.dur; return t.tec === tec && k >= t.dia && k < fim; });
                   const b = fora.find((x) => j >= x.ini && j < x.fim);
                   const chave = `${tec}:${k}`;
                   const ocupadoFora = !!b;

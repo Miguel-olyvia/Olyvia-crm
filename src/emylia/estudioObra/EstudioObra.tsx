@@ -45,7 +45,7 @@ import { porqueNaoMexe, TECS } from "../motor";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { DispersaoDaEquipa, Aba, ClienteDaObra, EquipaDaObra, Execucao, ExecucaoTarefa, FechoDaObra, MateriaisDaObra } from "./PaineisObra";
 import { AgendaEquipa, ComandoHoje, DiarioObra, FechoVivo, PontoDaSemana, PrevisaoViva, Pulso, precisaDeTi, obraViva, type Ir } from "./ComandoObra";
-import { ROTULO_VIVO, comLigacao, comRestricao, naoCabem, conflitosNovos, ligacoesDoPlano, nomeCurtoTarefa, nomeNoPlano, porqueNaoLigar, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
+import { ROTULO_VIVO, fimFeito, comLigacao, comRestricao, naoCabem, conflitosNovos, ligacoesDoPlano, nomeCurtoTarefa, nomeNoPlano, porqueNaoLigar, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
 import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
 import { custoDosNossos, pedePorque, type AjusteObra } from "./quemPaga";
 import { PorqueAjuste, type ImprevistoInicial } from "./PorqueAjuste";
@@ -367,6 +367,8 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
       case "outra": setOutra(a.obra); break;
       case "replanear": setPainel(null); setPrevia({ titulo: "Replanear a obra", k: "replanear", adiantar: true }); break;
       case "adiantar": setPainel(null); setPrevia({ titulo: "Adiantar com a folga", k: "replanear", adiantar: true }); break;
+      // 25/11: antecipar de uma vez o que vem depois de um buraco; se não der (técnicos noutra obra), abre a tarefa seguinte
+      case "fecharBuraco": { let r = 0; fazer(() => { r = A.fecharBuraco(d.id, a.ini, a.fim); }); if (!r && a.ti != null) setPainel({ k: "tarefa", ti: a.ti }); break; }
       case "conversa": setAba("cliente"); break;
       case "aceitarFim": fazer(() => A.aceitarFimObra(d.id, a.dias)); break;
       case "materiais": setAba("materiais"); break;
@@ -857,7 +859,10 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
     </>
   );
   const barra = (ti: number, top: number) => {
-    const t = p.tasks[ti], n = R ? R.plano.tasks[ti] : t, v = estadoVivo(t, p);
+    const t = p.tasks[ti], v = estadoVivo(t, p);
+    // 25/11 (revisão, 1048: a demolição validada no dia 1 ainda ocupava até 30 nov): a acabada fica até ao dia em que acabou de facto
+    const n0 = R ? R.plano.tasks[ti] : t, acabou = !R && (v === "validada" || v === "feita");
+    const n = acabou ? { ...n0, dur: Math.max(1, Math.min(n0.dur, fimFeito(t) - n0.dia)) } : n0;
     const atraso = diasDeAtraso(t, p), a = arrasto?.ti === ti ? arrasto : null;
     // 23/11 (revisão: «P…», «T…»): na vista Gantt, o nome vai à direita da barra quando não cabe nela
     const comIcone = critico.has(ti) || ["validada", "feita", "parada", "pausada", "atrasada", "corrigir"].includes(v);

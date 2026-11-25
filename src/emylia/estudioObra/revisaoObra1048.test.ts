@@ -50,3 +50,36 @@ describe("os dias sem ninguém na obra", () => {
     expect(diasSemNinguem(p)).toEqual([]);
   });
 });
+
+describe("antecipar de uma vez o que vem depois de um buraco", () => {
+  it("puxa as tarefas por começar o número de dias do buraco e fecha-o", async () => {
+    const { acoes } = await import("../motor");
+    const { obraDeExemplo } = await import("./exemploObra");
+    const { S, d } = obraDeExemplo();
+    const p = d.obra.plano!;
+    // um buraco de 4 dias: as tarefas por começar passam 4 dias para a frente
+    const depois = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => !t.exec && t.dia > p.dia);
+    for (const { t } of depois) t.dia += 4;
+    const g = diasSemNinguem(p).find((x) => x.seguinte != null)!;
+    expect(g).toBeTruthy();
+    const antes = depois.map(({ t }) => t.dia);
+    const avisos: string[] = [];
+    const A = acoes(S, (a) => avisos.push(`${a.msg}: ${a.sub ?? ""}`), (fn) => fn());
+    A.role("operacoes");
+    const r = A.fecharBuraco(d.id, g.ini, g.fim);
+    if (r > 0) {
+      expect(depois.map(({ t }) => t.dia)).toEqual(antes.map((x) => Math.max(p.dia, x - r)));
+      expect(avisos.at(-1)).toMatch(/^Plano antecipado/);
+    } else expect(avisos.at(-1)).toMatch(/^Não dá para antecipar/);
+  });
+});
+
+describe("o texto do ritmo", () => {
+  it("não diz «a tempo: 180%» quando o fim fica o do plano", async () => {
+    const { textoRitmo } = await import("./ComandoObra");
+    expect(textoRitmo(1.8, "baixa")).toBe("Adiantado, mas ainda com pouco feito para mudar o fim");
+    expect(textoRitmo(1.3, "média")).toBe("Adiantado: 130% do previsto até hoje");
+    expect(textoRitmo(1, "baixa")).toBe("No ritmo do plano");
+    expect(textoRitmo(0.7, "alta")).toBe("Abaixo do plano: 70% do previsto até hoje");
+  });
+});

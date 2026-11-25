@@ -1,6 +1,7 @@
 // 23/11 (Rúben: «onde diz caminho crítico, a lista deve ser refeita, muito mais bonita, corrida, com as fases bem identificadas e
 // icons»). O caminho crítico como uma linha do tempo pelas fases da obra: cada fase com o seu ícone e a sua cor, por ordem, e por baixo
 // as tarefas sem folga, com o ícone do ofício, o nome curto e a data alinhada. Não é um erro: nada de vermelho.
+import { useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import { AppWindow, Armchair, Bath, BrickWall, Check, DoorOpen, Droplets, Grid3x3, Hammer, Lightbulb, PaintRoller, Plug, Route, ShowerHead, Sparkles, Square, Toilet, Wrench, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -39,9 +40,15 @@ export function caminhoPorFase(p: Plano, critico: ReadonlySet<number>): FaseCrit
   return FASES_OBRA.map((f) => ({ n: f.n, nome: f.curto, tarefas: crit.filter((x) => ((x.t.fase ?? 1) as FaseObra) === f.n) })).filter((f) => f.tarefas.length);
 }
 
+/** As tarefas de cada fase que se mostram sem abrir a lista toda. */
+const POR_FASE = 5;
+
 export function CaminhoCritico({ p, critico, quando, abrir }: { p: Plano; critico: ReadonlySet<number>; quando: (k: number) => string; abrir: (ti: number) => void }) {
   const fases = caminhoPorFase(p, critico);
   const curta = (k: number) => quando(k).replace(/^\w+, /, ""); // «30 nov» (sem o dia da semana)
+  // 25/11 (revisão, 1048: 31 tarefas de seguida): as próximas de cada fase; o resto com «Ver todas»
+  const [todas, setTodas] = useState(false);
+  const total = fases.reduce((s, f) => s + f.tarefas.length, 0), escondidas = fases.reduce((s, f) => s + Math.max(0, f.tarefas.length - POR_FASE), 0);
   return (
     <section aria-label="Caminho crítico" className="space-y-3 border-t border-border pt-4 lg:col-span-2">
       <div className="flex flex-wrap items-end justify-between gap-2">
@@ -69,7 +76,7 @@ export function CaminhoCritico({ p, critico, quando, abrir }: { p: Plano; critic
                 </div>
                 {/* as tarefas: a linha da fase corre por baixo do ícone */}
                 <ul className="ml-[17px] mt-2 space-y-0.5 border-l-2 pl-3" style={{ borderColor: `color-mix(in srgb, ${cor} 35%, transparent)` }}>
-                  {f.tarefas.map(({ ti, t }) => {
+                  {(todas ? f.tarefas : f.tarefas.slice(0, POR_FASE)).map(({ ti, t }) => {
                     const T = iconeDaTarefa(t.nome), v = estadoVivo(t, p), feita = v === "feita" || v === "validada";
                     return (
                       <li key={ti}>
@@ -84,11 +91,17 @@ export function CaminhoCritico({ p, critico, quando, abrir }: { p: Plano; critic
                       </li>
                     );
                   })}
+                  {!todas && f.tarefas.length > POR_FASE && <li className="px-1.5 py-1 text-xs text-muted-foreground">+ {f.tarefas.length - POR_FASE} nesta fase</li>}
                 </ul>
               </li>
             );
           })}
         </ol>
+      )}
+      {escondidas > 0 && (
+        <button type="button" aria-expanded={todas} onClick={() => setTodas((x) => !x)} className="min-h-9 rounded-full px-3 text-sm font-medium text-primary hover:bg-primary/10">
+          {todas ? "Mostrar só as próximas" : `Ver as ${total} tarefas`}
+        </button>
       )}
     </section>
   );

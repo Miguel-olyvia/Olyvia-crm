@@ -5,9 +5,9 @@
 import type { DadosLead } from "./real/dadosDaLead";
 import type { FaturaReg } from "./v2/financeiro";
 import { erroZonasLinha, limparZonas, porZona, type GrupoZona, type ZonaLinha } from "./zonasOrcamento";
-import { anteciparInicio, diferencas, fimDe, guardarBase, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
+import { anteciparInicio, diferencas, fimDe, guardarBase, inicioMinimo, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
 import { NOME_SEGURANCA, faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
-import { comLigacao, comRestricao, nomeCurtoTarefa, porqueNaoLigar, replanear, simularAtraso } from "./estudioObra/planoVivo";
+import { comLigacao, comRestricao, conflitosNovos, estadoVivo as estadoVivoTarefa, nomeCurtoTarefa, porqueNaoLigar, replanear, simularAtraso } from "./estudioObra/planoVivo";
 import { porNaTarefa, type RetratoPlano } from "./estudioObra/passosObra";
 import { lerQuemAssina } from "./estudioObra/quemAssina";
 import { fotoPlano, guardarAlteracao, mudancasEntre, type Alteracao as AlteracaoPlano, type FotoPlano } from "./historicoPlano";
@@ -4709,6 +4709,35 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     },
     /** 17/11 (A-Z na Mudelar: a obra arrancou antes do plano e as tarefas ficaram nas datas antigas): as tarefas por fazer passam a começar
      *  hoje, pela mesma ordem e duração (as já começadas ficam). As Operações veem os conflitos com outras obras como sempre. */
+    /** 25/11 (revisão do Estúdio da obra, 1048: a obra fica sem ninguém de 25 nov a 4 dez): antecipa de uma vez as tarefas por começar
+     *  que vêm depois do buraco, todas o mesmo número de dias (a ordem e as ligações ficam), o mais que der sem pôr um técnico em duas
+     *  obras ao mesmo tempo nem nas férias. Devolve os dias antecipados (0 se não deu, com o porquê). */
+    fecharBuraco(id: number, ini: number, fim: number): number {
+      if (!exigePerm("obra.planear")) return 0;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || (p.estado !== "em curso" && p.estado !== "aprovado")) return 0;
+      const hoje = p.estado === "em curso" ? p.dia : 0;
+      const alvo = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => { const v = estadoVivoTarefa(t, p); return v !== "feita" && v !== "validada" && !t.exec && t.dia > fim; }).map((x) => x.ti);
+      const n = fim - ini + 1;
+      if (!alvo.length || n < 1) return 0;
+      const ferias0 = conflitos(p).length;
+      let porque = "";
+      for (let s = n; s >= 1; s--) {
+        const copia: Plano = { ...p, tasks: p.tasks.map((t) => ({ ...t })) };
+        for (const ti of alvo) copia.tasks[ti].dia = Math.max(hoje, copia.tasks[ti].dia - s);
+        const fora = conflitosNovos(S, d, copia);
+        if (fora.length) { if (!porque) porque = `${TECS.find((x) => x.id === fora[0].tec)?.n.split(" ")[0] ?? "Um técnico"} está noutra obra (${fora[0].obra.nome}) nesses dias`; continue; }
+        if (conflitos(copia).length > ferias0) { if (!porque) porque = "Um técnico está de férias nesses dias"; continue; }
+        guardarBase(p);
+        for (const ti of alvo) { const t = p.tasks[ti]; t.dia = Math.max(hoje, t.dia - s); if (t.dia < inicioMinimo(p, ti)) t.antecipada = true; }
+        const txt = `${alvo.length} ${alvo.length === 1 ? "tarefa começa" : "tarefas começam"} ${s} ${s === 1 ? "dia útil" : "dias úteis"} mais cedo`;
+        log(d, `Plano antecipado para a obra não ficar parada: ${txt}`);
+        avisar({ msg: "Plano antecipado", sub: `${txt}${s < n ? ` (os ${n} dias não deram: ${porque})` : ""}`, kind: "ok" });
+        return s;
+      }
+      avisar({ msg: "Não dá para antecipar", sub: `${porque || "Os técnicos das tarefas seguintes não estão livres"}. Pode passar uma tarefa a outro técnico e antecipar só essa.`, kind: "bad" });
+      return 0;
+    },
     adiantarPlano(id: number) {
       if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano;
