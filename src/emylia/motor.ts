@@ -37,7 +37,7 @@ import { pedirPainelObra } from "./estudioObra/painelPedido";
 import { avisarTecnico, criarTarefa, criarTarefaInterna, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa, type NovaTarefaInterna } from "./tarefasValidador";
 import { moverNaOrdem } from "./ordemPlano";
 import { registoDoPlano, resumoDiferencas, retratoTarefas, type RegistoPlano, type TarefaRetrato } from "./planoAntesDepois";
-import { horasPorSubir, listaMicro, microtarefasDe, mudarMicro, nomesFeitos, porFixar, type Micro, type MudancaMicro } from "./microtarefas";
+import { ajustePorFazer, horasDasMicro, listaMicro, microtarefasDe, mudarMicro, nomesFeitos, porFixar, type Micro, type MudancaMicro } from "./microtarefas";
 import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { CHAVE_CONTACTO_CONCLUIDO, CODIGO_GRAVAR_NEGOCIO, SEM_PERM, comPermissoesReais, contactoConcluido, passoDe, pelaPermissao, podeNeg, soAteAoContacto, temCodigoReal, type PermNeg } from "./permissoes";
@@ -4520,14 +4520,22 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const d = deal(id), p = d.obra.plano;
       if (!p || p.estado === "concluída") return 0;
       let n = 0;
+      // as horas do orçamento (a base), quando a base ainda está alinhada com as tarefas
+      const base = p.base && p.base.length === p.tasks.length ? p.base : null;
       p.tasks.forEach((t, ti) => {
         if (p.estado === "em curso" && porqueNaoMexe(p, ti)) return;
-        const h = horasPorSubir(t, S, p);
-        if (h == null) return;
-        const antes = t.h, sitio = p.tasks.map((x) => ({ dia: x.dia, dur: x.dur }));
-        mudarHoras(p, ti, h);
+        const a = ajustePorFazer(t, S, p, base?.[ti]?.h);
+        if (!a) return;
+        const antes = { h: t.h, dur: t.dur }, sitio = p.tasks.map((x) => ({ dia: x.dia, dur: x.dur }));
+        if (a.h !== t.h) mudarHoras(p, ti, a.h);
+        // os dias de espera: mudarDuracao põe as horas a dias × 8; as horas ficam as do trabalho
+        if (t.dur !== a.dur) { mudarDuracao(p, ti, a.dur); t.h = a.h; }
         protegerComecadas(p, sitio);
-        if (t.h !== antes) { n++; log(d, `Plano: ${t.nome} · ${nfmt(antes)} → ${nfmt(t.h)} h (as microtarefas somam ${nfmt(h)} h)`); }
+        if (t.h !== antes.h || t.dur !== antes.dur) {
+          n++;
+          const soma = horasDasMicro(t, S, p);
+          log(d, `Plano: ${t.nome} · ${nfmt(antes.h)} → ${nfmt(t.h)} h, ${antes.dur} → ${t.dur} ${t.dur === 1 ? "dia" : "dias"} (microtarefas: ${nfmt(soma ?? 0)} h de trabalho${t.dur > Math.ceil(t.h / 8) ? " e dias de espera" : ""})`);
+        }
       });
       if (n) {
         const fim = Math.max(...p.tasks.map((x) => x.dia + x.dur)) - 1;

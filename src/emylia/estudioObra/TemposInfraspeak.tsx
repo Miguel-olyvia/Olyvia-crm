@@ -8,12 +8,12 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { nfmt, r2, type Negocio } from "../motor";
 import type { Ctx } from "../pecas";
-import { microtarefasDe } from "../microtarefas";
+import { esperaDasMicro, microtarefasDe } from "../microtarefas";
 import { FASES_OBRA } from "../fasesObra";
 import { nomeCurtoTarefa } from "./planoVivo";
 import { ordemDasTarefas } from "../ordemPlano";
 
-export interface TempoTarefa { ti: number; plano: number; infraspeak: number; n: number }
+export interface TempoTarefa { ti: number; plano: number; infraspeak: number; n: number; /** dias de espera */ espera: number }
 
 /** As tarefas cujas microtarefas trazem horas (todas), com a soma; pela ordem da lista. */
 export function temposDoInfraspeak(d: Negocio, S: Ctx["S"]): TempoTarefa[] {
@@ -21,8 +21,8 @@ export function temposDoInfraspeak(d: Negocio, S: Ctx["S"]): TempoTarefa[] {
   if (!p) return [];
   return ordemDasTarefas(p).flatMap((ti) => {
     const t = p.tasks[ti], r = microtarefasDe(t, S, p);
-    if (r.origem === "instrucoes" || r.origem === "catalogo" || !r.L.length || r.L.some((m) => m.h == null)) return [];
-    return [{ ti, plano: t.h, infraspeak: r2(r.L.reduce((a, m) => a + (m.h ?? 0), 0)), n: r.L.length }];
+    if (r.origem === "instrucoes" || r.origem === "catalogo" || !r.L.length || r.L.some((m) => m.h == null && m.dias == null)) return [];
+    return [{ ti, plano: t.h, infraspeak: r2(r.L.reduce((a, m) => a + (m.h ?? 0), 0)), n: r.L.length, espera: esperaDasMicro(t, S, p) }];
   });
 }
 const difere = (x: TempoTarefa) => Math.abs(x.infraspeak - x.plano) >= 0.25;
@@ -64,7 +64,7 @@ export function TemposInfraspeak({ ctx, d, podeMexer, mudar }: { ctx: Ctx; d: Ne
                   <tr key={x.ti} className="border-b border-border last:border-b-0">
                     <td className="px-3 py-2"><span className="font-medium" title={t.nome}>{nomeCurtoTarefa(t.nome)}</span><span className="block text-xs text-muted-foreground">Fase {t.fase ?? 1} · {FASES_OBRA[(t.fase ?? 1) - 1]?.curto} · {x.n} microtarefas</span></td>
                     <td className="px-3 py-2 text-right tabular-nums">{nfmt(x.plano)} h</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{nfmt(x.infraspeak)} h</td>
+                    <td className="px-3 py-2 text-right tabular-nums">{nfmt(x.infraspeak)} h{x.espera > 0 && <span className="block text-xs text-muted-foreground">+ {x.espera} {x.espera === 1 ? "dia" : "dias"} de espera</span>}</td>
                     <td className={cn("px-3 py-2 text-right tabular-nums", difere(x) ? (dif > 0 ? "text-amber-800 dark:text-amber-300" : "text-primary") : "text-muted-foreground")}>{difere(x) ? `${dif > 0 ? "+" : "−"}${nfmt(Math.abs(dif))} h` : "igual"}</td>
                     <td className="px-3 py-2 text-right">{difere(x) && mexe && (
                       <Button type="button" variant="ghost" size="sm" className="min-h-9" onClick={() => mudar(x.ti, () => ctx.A.ajustarTarefa(d.id, x.ti, { h: x.infraspeak }))}>Usar {nfmt(x.infraspeak)} h</Button>
@@ -74,7 +74,7 @@ export function TemposInfraspeak({ ctx, d, podeMexer, mudar }: { ctx: Ctx; d: Ne
               })}
             </tbody>
           </table>
-          <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">Regra: uma tarefa nunca tem menos horas do que as microtarefas somam (sobe sozinha nas que não começaram). As horas do Infraspeak são as previstas para uma obra-tipo da Mudelar; as do plano vêm do orçamento (as horas do serviço × a quantidade). Usar muda os dias da tarefa e as datas das que vêm a seguir.{vivo ? " Com a obra em curso, mais horas pedem «Porquê?»." : ""}</p>
+          <p className="border-t border-border px-3 py-2 text-xs text-muted-foreground">Regra: uma tarefa nunca tem menos horas do que as microtarefas somam, nem menos dias do que esse trabalho mais os dias de espera (secagens); sobe sozinha nas que não começaram. As horas do Infraspeak são as previstas para uma obra-tipo da Mudelar; as do plano vêm do orçamento (as horas do serviço × a quantidade). Usar muda os dias da tarefa e as datas das que vêm a seguir.{vivo ? " Com a obra em curso, mais horas pedem «Porquê?»." : ""}</p>
         </div>
       )}
     </section>

@@ -8,7 +8,7 @@ import { temposDoInfraspeak } from "./TemposInfraspeak";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { acoes, type Tarefa } from "../motor";
 import type { Ctx } from "../pecas";
-import { horasDasMicro, horasPorSubir } from "../microtarefas";
+import { esperaDasMicro, horasDasMicro, horasPorSubir } from "../microtarefas";
 import { detalheMicro, listaMicro, microDoCatalogo, microDoInfraspeak, microFeitas, microtarefasDe, mudarMicro, porFixar, progressoMicro } from "../microtarefas";
 import { obraDeExemplo } from "./exemploObra";
 import { custosDe, receitaDe } from "../v2/custosModelo";
@@ -210,14 +210,45 @@ describe("a regra das horas pelas microtarefas (25/11)", () => {
     expect(t.h).toBe(Math.round(soma * 2) / 2);
     expect(t.dur).toBeGreaterThan(durAntes);
     expect(p.tasks.filter((x, i) => i !== livre && !x.exec && depois.length).length).toBeGreaterThanOrEqual(0);
-    expect(d.hist.some((e) => e.t.includes("as microtarefas somam"))).toBe(true);
+    expect(d.hist.some((e) => e.t.includes("(microtarefas: "))).toBe(true);
     // já não há nada por subir; uma começada não mexe
     expect(horasPorSubir(t, S, p)).toBeNull();
     const rev = p.tasks[ix("Revestimento de parede")];
     expect(horasPorSubir(rev, S, p)).toBeNull();
     // mais horas do que as microtarefas: fica
-    t.h = soma + 10;
-    expect(A.ajustarHorasPelasMicro(d.id)).toBe(0);
+    t.h = Math.round((soma + 10) * 2) / 2;
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBe(Math.round((soma + 10) * 2) / 2); // as horas não descem
+  });
+});
+
+describe("a espera (os «1 dia» do Infraspeak) conta nos dias e não nas horas (25/11)", () => {
+  it("a espera tem dias e não horas; a tarefa fica com o trabalho em horas e os dias do trabalho mais a espera", () => {
+    const { S, d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "Teto falso em pladur"; t.h = 4; t.dur = 1; delete t.bloqueio;
+    const L = listaMicro(t, S, p), espera = esperaDasMicro(t, S, p);
+    expect(espera).toBe(1);
+    expect(L.find((m) => /tetos falsos/.test(m.n))).toMatchObject({ dias: 1 });
+    expect(L.find((m) => /tetos falsos/.test(m.n))?.h).toBeUndefined();
+    A.ajustarHorasPelasMicro(d.id);
+    const soma = horasDasMicro(t, S, p)!;
+    expect(t.h).toBe(Math.round(soma * 2) / 2);
+    expect(t.dur).toBe(Math.ceil(t.h / 8 - 1e-9) + espera);
+  });
+  it("horas que a regra subiu antes com a espera a 8 h voltam ao trabalho real (sem descer abaixo do orçamento); a lista antiga com 8 h lê-se como espera", () => {
+    const { S, d, A, p, livre } = obra();
+    const t = p.tasks[livre];
+    t.nome = "Teto falso em pladur"; delete t.bloqueio;
+    const soma = horasDasMicro(t, S, p)!;
+    // a lista gravada antes (o «1 day» como 8 h) e as horas subidas com ela
+    t.micro = microDoInfraspeak(t, p).map((m) => (m.dias ? { id: m.id, n: m.n, h: 8 * m.dias, ref: m.ref } : m));
+    expect(esperaDasMicro(t, S, p)).toBe(1);
+    t.h = Math.round((soma + 8) * 2) / 2; t.dur = Math.ceil(t.h / 8);
+    p.base![livre].h = 2;
+    A.ajustarHorasPelasMicro(d.id);
+    expect(t.h).toBe(Math.round(soma * 2) / 2);
+    expect(t.dur).toBe(Math.ceil(t.h / 8 - 1e-9) + 1);
   });
 });
 

@@ -19,13 +19,22 @@ import { microtarefasDoServico } from "./real/microtarefasServico";
 /** Uma microtarefa: o id (estável), o texto e as horas previstas (as do Catálogo; as juntadas à mão não têm). 25/11: `ref`, a tarefa da
  *  Mudelar no Infraspeak de onde veio (a checklist e quem faz lêem-se dela: dados/infraspeakMudelar.ts; não se gravam com o plano). */
 export interface Micro { id: number; n: string; h?: number; ref?: string;
+  /** 25/11 (Rúben: os «1 dia» do Infraspeak «são espera»): dias de espera (secagem, cura): contam nos dias da tarefa, não nas horas */ dias?: number;
   /** 25/11: a checklist e quem faz, quando vêm da ficha do serviço e não são as da tarefa do Infraspeak (`ref`) */ det?: string[]; quem?: string }
 /** De onde vem a lista que se mostra. */
 export type OrigemMicro = "obra" | "servico" | "infraspeak" | "catalogo" | "instrucoes";
 
 /** 25/11: as tarefas reais da Mudelar no Infraspeak para esta tarefa do plano (microtarefasMudelar.ts). */
 export const microDoInfraspeak = (t: Tarefa, p?: Plano | null): Micro[] =>
-  tarefasMudelarDe(t, p).map((x, id) => ({ id, n: x.n, ...(x.h ? { h: x.h } : {}), ref: x.ref }));
+  tarefasMudelarDe(t, p).map((x, id) => ({ id, n: x.n, ...(x.h ? { h: x.h } : {}), ...(x.dias ? { dias: x.dias } : {}), ref: x.ref }));
+/** 25/11: uma microtarefa do Infraspeak que é espera («1 day»), gravada antes como 8 h por dia: passa a dias de espera (sem horas). */
+export function comEspera(m: Micro): Micro {
+  const x = tarefaMudelar(m.ref);
+  if (!x?.dias || m.dias != null) return m;
+  if (m.h != null && Math.abs(m.h - 8 * x.dias) > 0.01) return m;
+  const { h: _h, ...resto } = m;
+  return { ...resto, dias: x.dias };
+}
 /** A checklist e quem faz de uma microtarefa: os da ficha do serviço, senão os da tarefa do Infraspeak de onde veio. */
 export function detalheMicro(m: Micro): { quem?: string; det: string[] } {
   const x = tarefaMudelar(m.ref);
@@ -122,6 +131,10 @@ export const microDasInstrucoes = (t: Tarefa): Micro[] => instrucoesDe(t).passos
  * Uma tarefa de correção tem sempre as instruções do pedido.
  */
 export function microtarefasDe(t: Tarefa, S?: Estado | null, p?: Plano | null): { L: Micro[]; origem: OrigemMicro } {
+  const r = microtarefasCru(t, S, p);
+  return { ...r, L: r.L.map(comEspera) };
+}
+function microtarefasCru(t: Tarefa, S?: Estado | null, p?: Plano | null): { L: Micro[]; origem: OrigemMicro } {
   if (t.micro) return { L: t.micro.map((m) => ({ ...m })), origem: "obra" };
   const instrucoes = { L: microDasInstrucoes(t), origem: "instrucoes" as const };
   if (t.corrige != null || t.exec?.microDe === "instrucoes") return instrucoes;
@@ -190,12 +203,35 @@ export function horasDasMicro(t: Tarefa, S?: Estado | null, p?: Plano | null): n
   const h = r.L.reduce((a, m) => a + (m.h ?? 0), 0);
   return h > 0 ? r2(h) : null;
 }
-/** A tarefa tem menos horas do que as microtarefas somam (e ainda se pode mexer: não começou). */
-export function horasPorSubir(t: Tarefa, S?: Estado | null, p?: Plano | null): number | null {
-  if (t.exec || t.corrige != null) return null;
-  const h = horasDasMicro(t, S, p);
-  return h != null && h > t.h + 0.25 ? h : null;
+/** Os dias de espera das microtarefas (secagens e curas: os «1 day» do Infraspeak). */
+export function esperaDasMicro(t: Tarefa, S?: Estado | null, p?: Plano | null): number {
+  const r = microtarefasDe(t, S, p);
+  if (r.origem === "instrucoes" || r.origem === "catalogo") return 0;
+  return r.L.reduce((a, m) => a + (m.dias ?? 0), 0);
 }
+const meia = (h: number) => Math.max(0.5, Math.round(h * 2) / 2);
+const diasDe = (h: number) => Math.max(1, Math.ceil(h / 8 - 1e-9));
+/**
+ * O ajuste que a regra pede a uma tarefa por começar (ou null):
+ *  · as horas nunca abaixo das que as microtarefas somam (só trabalho);
+ *  · os dias nunca abaixo dos dias desse trabalho mais os dias de espera;
+ *  · 25/11 (Rúben: «são espera»): horas que a regra subiu antes contando a espera como 8 h por dia voltam ao trabalho real (sem descer
+ *    abaixo das horas do orçamento, `hOrc`).
+ */
+export function ajustePorFazer(t: Tarefa, S?: Estado | null, p?: Plano | null, hOrc?: number): { h: number; dur: number } | null {
+  if (t.exec || t.corrige != null) return null;
+  const soma = horasDasMicro(t, S, p), espera = esperaDasMicro(t, S, p);
+  if (soma == null && !espera) return null;
+  let h = t.h;
+  if (espera && soma != null && Math.abs(t.h - meia(soma + 8 * espera)) < 0.51 && t.h > soma) h = Math.max(soma, hOrc ?? soma);
+  if (soma != null && soma > h + 0.25) h = soma;
+  h = meia(h);
+  // a subir (ou igual), os dias nunca encolhem; a corrigir para baixo (a espera contada como horas), os dias são o trabalho mais a espera
+  const dur = h < t.h ? diasDe(h) + espera : Math.max(diasDe(h) + espera, t.dur);
+  return h !== t.h || dur > t.dur ? { h, dur } : null;
+}
+/** Há alguma coisa a ajustar nesta tarefa (para os contadores). */
+export const horasPorSubir = (t: Tarefa, S?: Estado | null, p?: Plano | null): number | null => ajustePorFazer(t, S, p)?.h ?? null;
 
 /** As microtarefas marcadas pelo técnico (os ids), só as que ainda estão na lista. */
 export function microFeitas(t: Tarefa, L: Micro[]): Set<number> {

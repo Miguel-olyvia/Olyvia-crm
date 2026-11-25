@@ -63,6 +63,7 @@ export function MicrotarefasTarefa({ ctx, d, ti, mexe, cor }: { ctx: Ctx; d: Neg
                 <span className={cn("min-w-0 flex-1 text-sm", on && "text-muted-foreground")}>{k + 1}. {m.n}</span>
               )}
               {m.h != null && !editar && <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{nfmt(m.h)} h</span>}
+              {m.dias != null && !editar && <span className="shrink-0 text-xs tabular-nums text-muted-foreground" title="Espera (secagem): conta nos dias, não nas horas">{m.dias} {m.dias === 1 ? "dia" : "dias"} de espera</span>}
               {mexe && !editar && (
                 <span className="flex shrink-0 items-center">
                   <button type="button" className={iconeBtn} disabled={k === 0} aria-label={`Subir «${m.n}»`} onClick={() => mudar({ k: "mover", id: m.id, para: k - 1 })}><ArrowUp className="h-4 w-4" /></button>
