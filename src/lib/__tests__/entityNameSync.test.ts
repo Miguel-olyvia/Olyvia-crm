@@ -102,6 +102,52 @@ describe("gatilho da lead (so regista a empresa)", () => {
   });
 });
 
+describe("gatilho da lead: lead que ja existia (formulario em varios passos)", () => {
+  it("passo 2 traz OUTRA numa lead criada sem empresa: NAO troca a empresa do cliente", () => {
+    expect(
+      companyNameFromLead({
+        entity: { display_name: "EVOLAR LDA", company_name: "EVOLAR LDA" },
+        leadCompany: "OUTRA",
+        oldLeadCompany: null,
+        sharedOutsideRoot: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("empresa por registar na ficha: regista", () => {
+    expect(
+      companyNameFromLead({
+        entity: { display_name: "Rui Silva", company_name: null },
+        leadCompany: "OUTRA",
+        oldLeadCompany: null,
+        sharedOutsideRoot: false,
+      }),
+    ).toBe("OUTRA");
+  });
+
+  it("a empresa da ficha veio desta lead: a correccao e registada", () => {
+    expect(
+      companyNameFromLead({
+        entity: { display_name: "EVOLAR LDA", company_name: "EVOLAR LDA" },
+        leadCompany: "EVOLAR MOVEIS LDA",
+        oldLeadCompany: " EVOLAR  LDA",
+        sharedOutsideRoot: false,
+      }),
+    ).toBe("EVOLAR MOVEIS LDA");
+  });
+
+  it("a empresa da ficha veio de outro lado: NAO troca", () => {
+    expect(
+      companyNameFromLead({
+        entity: { display_name: "EVOLAR LDA", company_name: "EVOLAR LDA" },
+        leadCompany: "NOVA",
+        oldLeadCompany: "ANTIGA",
+        sharedOutsideRoot: false,
+      }),
+    ).toBeNull();
+  });
+});
+
 describe("(f) preenchimento da migration", () => {
   it("so onde o display_name ja e exactamente a empresa", () => {
     expect(companyNameToBackfill({ display_name: "EVOLAR LDA", company_name: null }, ["EVOLAR LDA", null], false)).toBe("EVOLAR LDA");

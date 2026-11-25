@@ -3,6 +3,7 @@ import { z } from "npm:zod";
 import { initSentry, captureError } from "../_shared/sentry.ts";
 import { checkRateLimit, getClientIp, rateLimitResponse, recordRateLimitAttempt } from "../_shared/rateLimit.ts";
 import { findLocalEntityForOrg } from "../_shared/entityScopedLookup.ts";
+import { leadCompanyFromFieldValues, newLeadEntityDisplayName } from '../_shared/leadCompany.ts';
 import {
   loadFormEmailConfig,
   loadTemplate,
@@ -676,7 +677,12 @@ Deno.serve(async (req: Request) => {
     }
 
     if (!entityId) {
-      const displayName = [leadFirstName, leadLastName].filter(Boolean).join(' ') || 'Lead';
+      // Ficha NOVA: a empresa se a lead a traz, senao nome + apelido (regra do ecra).
+      const displayName = newLeadEntityDisplayName({
+        company: leadCompanyFromFieldValues(mergedFieldValues),
+        first: leadFirstName,
+        last: leadLastName,
+      }) || 'Lead';
       const entityInsert: Record<string, any> = {
         display_name: displayName,
         type: 'person',

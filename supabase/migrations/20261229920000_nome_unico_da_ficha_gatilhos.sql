@@ -43,7 +43,10 @@
 --    dispara.
 --      INSERT da lead (ou mudanca de ficha): so preenche quando company_name da
 --        ficha e NULL e o display_name ja e exactamente essa empresa;
---      UPDATE da lead com a empresa a mudar para um valor nao vazio: regista-a;
+--      UPDATE da lead com a empresa a mudar para um valor nao vazio: regista-a
+--        SO se a ficha ainda nao tem empresa, ou se a que tem e a empresa
+--        ANTIGA desta lead (OLD.field_values) -- um passo 2 de um formulario
+--        publico nunca troca a empresa ja registada de um cliente;
 --      um valor vazio nunca apaga; fichas partilhadas com outra raiz: nada.
 --    Um visitante do formulario publico nao consegue renomear a ficha de um
 --    cliente: o display_name nunca e escrito a partir da lead.
@@ -261,6 +264,13 @@ BEGIN
 
   -- Lead nova (ou ficha trocada): so preenche o que ja e verdade no nome.
   IF v_is_new AND (v_cur_comp IS NOT NULL OR v_cur_name IS DISTINCT FROM v_company) THEN
+    RETURN NULL;
+  END IF;
+
+  -- Lead que ja existia: so escreve sobre uma empresa por registar, ou sobre
+  -- a empresa que veio DESTA lead (a antiga). Nunca sobrescreve a empresa de
+  -- um cliente com o que outro passo/formulario trouxe.
+  IF NOT v_is_new AND v_cur_comp IS NOT NULL AND v_cur_comp IS DISTINCT FROM v_old_lead THEN
     RETURN NULL;
   END IF;
 

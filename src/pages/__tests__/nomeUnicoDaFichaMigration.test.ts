@@ -21,7 +21,7 @@ function toSql(raw: string) {
     .filter((line) => !line.trim().startsWith("--"))
     .join("\n")
     .toLowerCase()
-    .replaceAll('"', "")
+    .replace(/"/g, "")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -116,6 +116,13 @@ describe("M2 20261229920000: preenchimento e gatilhos", () => {
     expect(body).not.toContain("display_name =");
     expect(body).not.toContain("display_name :=");
     at(body, "fn_entity_shared_outside_root(new.entity_id, new.root_organization_id)");
+  });
+
+  it("gatilho da lead: numa lead existente so escreve sobre NULL ou sobre a empresa antiga desta lead", () => {
+    const body = bodyOf(m2, "fn_anew_leads_sync_entity_company");
+    const guard = at(body, "if not v_is_new and v_cur_comp is not null and v_cur_comp is distinct from v_old_lead then return null;");
+    expect(guard).toBeLessThan(at(body, "update public.anew_entities set company_name"));
+    at(body, "if v_company is null then return null;");
   });
 
   it("a guarda entre raizes cobre utilizadores, organizacoes, leads, clientes, contactos, ligacoes e papeis", () => {

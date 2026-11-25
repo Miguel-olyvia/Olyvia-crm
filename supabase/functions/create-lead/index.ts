@@ -34,6 +34,7 @@ const requestSchema = z.object({
 import { runMarketingAttribution } from '../_shared/marketingAttribution.ts';
 import { sendLeadConfirmationEmail, queueSchedulingInviteRecovery } from '../_shared/formEmails.ts';
 import { composeDisplayName, normalizeFirstLast } from '../_shared/composeDisplayName.ts';
+import { leadCompanyFromFieldValues, newLeadEntityDisplayName } from '../_shared/leadCompany.ts';
 import { pickExistingAddress } from '../_shared/addressLookup.ts';
 import { persistEntityAddress } from '../_shared/addressPersist.ts';
 import {
@@ -1130,7 +1131,12 @@ Deno.serve(async (req) => {
       // the RPC rolls back the entire transaction (no orphan entities/contacts/
       // roles). Address is only included when both street and postal_code are
       // present — never with 'N/A' / '0000-000' placeholders.
-      const displayName = composeDisplayName(leadFirstName, leadLastName) || 'Lead';
+      // Ficha NOVA: a empresa se a lead a traz, senao nome + apelido (regra do ecra).
+      const displayName = newLeadEntityDisplayName({
+        company: leadCompanyFromFieldValues(field_values, contactMappingToKey['company_name']),
+        first: leadFirstName,
+        last: leadLastName,
+      }) || 'Lead';
 
       const emailsPayload: Array<Record<string, unknown>> = [];
       if (leadEmail) {

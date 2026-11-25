@@ -63,9 +63,14 @@ export function companyNameFromLead(params: {
   const company = normalizeName(params.leadCompany) || null;
   if (company === null) return null; // vazio nunca apaga
   const isNew = params.oldLeadCompany === undefined;
-  if (!isNew && (normalizeName(params.oldLeadCompany) || null) === company) return null;
+  const oldCompany = isNew ? null : normalizeName(params.oldLeadCompany) || null;
+  if (!isNew && oldCompany === company) return null;
   if (params.entity.company_name === company) return null;
   if (isNew && (params.entity.company_name !== null || params.entity.display_name !== company)) {
+    return null;
+  }
+  // Lead que ja existia: so sobre empresa por registar ou sobre a antiga desta lead.
+  if (!isNew && params.entity.company_name !== null && params.entity.company_name !== oldCompany) {
     return null;
   }
   if (params.sharedOutsideRoot) return null;
