@@ -76,7 +76,7 @@ type Previa = { titulo: string; k: "replanear"; adiantar: boolean } | { titulo: 
   | { titulo: string; k: "ligar"; para: number; de: number; ligar: boolean }
   /** 23/11 (revisão: «o Elvis só pode na quinta»): o técnico só pode nos dias da semana dados (null: tirar) */
   | { titulo: string; k: "restricao"; tec: string; dias: number[] | null };
-type Painel = { k: "tarefa"; ti: number } | { k: "imprevisto"; ti?: number; inicial?: ImprevistoInicial } | { k: "nova"; inicial?: { dia?: number; tec?: string | null } }
+type Painel = { k: "tarefa"; ti: number } | { k: "imprevisto"; ti?: number; inicial?: ImprevistoInicial } | { k: "nova"; inicial?: { dia?: number; tec?: string | null; fase?: number } }
   /** 12/11 (quem paga): o «Porquê?» de uma mudança com a obra em curso (volta: a tarefa aberta antes) */
   | { k: "porque"; aj: AjusteObra; volta?: number } | null;
 type AbaObra = "plano" | "execucao" | "diario" | "materiais" | "equipa" | "cliente" | "contrato" | "documentos" | "3d" | "fecho";
@@ -482,7 +482,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
                 nova={podeCriar ? (dia, tec) => setPainel({ k: "nova", inicial: { dia, tec } }) : undefined} obras={obras} deFerias={deFerias} abrirOutra={setOutra}
                 critico={viva.critico} passar={planeia && !acabou ? (ti, tec) => mudar(ti, () => A.trocarTec(d.id, ti, tec)) : undefined}
                 ligar={planeia && !acabou ? (para, de) => pedirLigacao(para, de, true) : undefined}
-                novaTarefa={podeCriar ? () => setPainel({ k: "nova" }) : undefined}
+                novaTarefa={podeCriar ? (fase) => setPainel({ k: "nova", ...(fase ? { inicial: { fase } } : {}) }) : undefined}
                 ordenar={planeia && !acabou ? (ti, para) => mudar(ti, () => A.ordemTarefaPlano(d.id, ti, para)) : undefined} />
               {planeia && !acabou && <DiasDoTecnico p={p} pedir={pedirRestricao} />}
 
@@ -681,7 +681,8 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   critico: Set<number>; passar?: (ti: number, tec: string) => void;
   /** 23/11 (Rúben: «criar dependências com click and drag»): ligar arrastando da ponta de uma barra para outra («para» só começa quando «de» acaba) */
   ligar?: (para: number, de: number) => void;
-  /** 25/11 (Rúben: «permitas criar novas tasks»): abre a «Nova tarefa» (serviço do Catálogo ou tarefa interna) */ novaTarefa?: () => void;
+  /** 25/11 (Rúben: «permitas criar novas tasks»; «falta o "+" nas tasks primeira coluna»): abre a «Nova tarefa» (serviço do Catálogo ou
+   *  tarefa interna), na fase pedida pelo «+» dessa fase */ novaTarefa?: (fase?: number) => void;
   /** 25/11 (Rúben: «drag and drop da lista da primeira coluna»): põe a tarefa noutro lugar da lista da fase (as datas não mudam) */
   ordenar?: (ti: number, para: number) => void;
 }) {
@@ -936,7 +937,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
             ))}
           </div>
           {novaTarefa && !R && (
-            <Button type="button" variant="outline" className="min-h-9 rounded-full" onClick={novaTarefa}><Plus className="mr-1 h-4 w-4" aria-hidden="true" />Nova tarefa</Button>
+            <Button type="button" variant="outline" className="min-h-9 rounded-full" onClick={() => novaTarefa()}><Plus className="mr-1 h-4 w-4" aria-hidden="true" />Nova tarefa</Button>
           )}
           {vista === "gantt" && (
             <div role="group" aria-label="Zoom" className="inline-flex rounded-full border border-input p-0.5 text-sm">
@@ -990,7 +991,13 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
             <div key={f.n} role="rowgroup" aria-label={`Fase ${f.n} · ${f.curto}`}>
               <div className="flex border-b border-border bg-muted/40">
                 <div className={cn("sticky left-0 z-10 flex shrink-0 items-center gap-2 bg-muted/40 px-3 py-1.5 text-xs font-semibold sm:px-4", rotulo)}>
-                  <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: COR_FASE[f.n] }} /><span className="truncate">{f.n} · {f.curto}</span>
+                  <span aria-hidden="true" className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: COR_FASE[f.n] }} /><span className="min-w-0 flex-1 truncate">{f.n} · {f.curto}</span>
+                  {novaTarefa && !R && (
+                    <button type="button" onClick={() => novaTarefa(f.n)} aria-label={`Nova tarefa na fase ${f.n} · ${f.curto}`} title={`Nova tarefa na fase ${f.n}`}
+                      className="-my-1 grid h-7 w-7 shrink-0 place-items-center rounded-full text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
+                      <Plus className="h-4 w-4" aria-hidden="true" />
+                    </button>
+                  )}
                 </div>
                 <div style={{ width: dias.length * COL }} />
               </div>
@@ -1021,6 +1028,15 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
               })}
             </div>
           ))}
+          {/* 25/11 (Rúben: «falta o "+" nas tasks primeira coluna»): no fim da lista, juntar uma tarefa */}
+          {vista === "gantt" && novaTarefa && !R && (
+            <div className="flex border-t border-border">
+              <button type="button" onClick={() => novaTarefa()} className={cn("sticky left-0 z-10 flex min-h-11 shrink-0 items-center gap-2 bg-card px-3 text-left text-sm font-medium text-primary hover:bg-primary/[0.06] sm:px-4", rotulo)}>
+                <Plus className="h-4 w-4" aria-hidden="true" />Nova tarefa
+              </button>
+              <div style={{ width: dias.length * COL }} />
+            </div>
+          )}
           {vista === "tecnicos" && linhas.map((tec) => {
             const ts = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.tec === tec).sort((a, b) => a.t.dia - b.t.dia);
             const faixas: number[] = [];

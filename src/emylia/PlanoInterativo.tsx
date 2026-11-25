@@ -97,13 +97,13 @@ export function EditorMateriais({ mats, mudar }: { mats: MatTarefa[]; mudar: (m:
 
 /* ================================================================== a tarefa nova */
 /** 11/11: `inicial` vem de tocar num dia vazio da linha de um técnico, no Estúdio do plano (começa nesse dia, com essa pessoa). */
-export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; fechar: () => void; inicial?: { dia?: number; tec?: string | null } }) {
+export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; fechar: () => void; inicial?: { dia?: number; tec?: string | null; fase?: number } }) {
   const { S, A, run } = ctx;
   const p = d.obra.plano!;
   const [sid, setSid] = useState<SvcId | null>(null);
   const [procura, setProcura] = useState("");
   const [q, setQ] = useState(1);
-  const [fase, setFase] = useState<number>(() => p.tasks.find((t) => t.fase)?.fase ?? 1);
+  const [fase, setFase] = useState<number>(() => inicial?.fase ?? p.tasks.find((t) => t.fase)?.fase ?? 1);
   const [tec, setTec] = useState<string | null | undefined>(inicial?.tec ?? undefined);
   const [mats, setMats] = useState<MatTarefa[] | null>(null);
   const [delta, setDelta] = useState(0);
@@ -125,7 +125,7 @@ export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; 
     setSid(k); setQ(un1); setMats(null); setTec(inicial?.tec ?? undefined); setDelta(0);
     // a fase sugerida: a de outra tarefa do mesmo ofício, se houver
     const o2 = oficioDe(sv), igual = p.tasks.find((t) => (o2.perfilId ? t.perfilId === o2.perfilId || t.sk === o2.sk : t.sk === o2.sk) && t.fase);
-    if (igual?.fase) setFase(igual.fase);
+    if (igual?.fase && !inicial?.fase) setFase(igual.fase);
   };
   const criar = () => {
     if (!sid || !previa) return;
@@ -242,12 +242,12 @@ export function NovaTarefa({ ctx, d, fechar, inicial }: { ctx: Ctx; d: Negocio; 
 }
 
 /** 24/11: a tarefa interna: o que é, as horas, a fase, quando começa e quem a faz. Entra já no plano (A.novaTarefaInterna). */
-function TarefaInterna({ ctx, d, fechar, voltar, inicial }: { ctx: Ctx; d: Negocio; fechar: () => void; voltar: () => void; inicial?: { dia?: number; tec?: string | null } }) {
+function TarefaInterna({ ctx, d, fechar, voltar, inicial }: { ctx: Ctx; d: Negocio; fechar: () => void; voltar: () => void; inicial?: { dia?: number; tec?: string | null; fase?: number } }) {
   const { A, run } = ctx;
   const p = d.obra.plano!;
   const [nome, setNome] = useState("");
   const [h, setH] = useState(4);
-  const [fase, setFase] = useState<number>(() => p.tasks.find((t) => t.fase)?.fase ?? 1);
+  const [fase, setFase] = useState<number>(() => inicial?.fase ?? p.tasks.find((t) => t.fase)?.fase ?? 1);
   const [tec, setTec] = useState<string | null>(inicial?.tec ?? null);
   const [delta, setDelta] = useState(0);
   const min = diaMinimo(p, fase);

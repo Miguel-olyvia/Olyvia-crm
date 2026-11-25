@@ -76,11 +76,21 @@ describe("o Gantt do Estúdio da obra", () => {
   it("«Nova tarefa» no Gantt abre o painel, com o serviço do Catálogo e a tarefa interna", () => {
     montar();
     const gantt = screen.getByRole("region", { name: "O plano vivo" });
-    fireEvent.click(within(gantt).getByRole("button", { name: "Nova tarefa" }));
+    fireEvent.click(within(gantt).getAllByRole("button", { name: "Nova tarefa" })[0]);
     const painel = screen.getByRole("complementary", { name: "Nova tarefa" });
     expect(within(painel).getByRole("list", { name: "Serviços" })).toBeTruthy();
     fireEvent.click(within(painel).getByRole("button", { name: /Tarefa interna/ }));
     expect(within(painel).getByText(/não muda o valor do contrato nem cria adenda/)).toBeTruthy();
+  });
+  it("o «+» de cada fase na primeira coluna abre a tarefa nova nessa fase; e há «Nova tarefa» no fim da lista", () => {
+    const { p } = montar();
+    const gantt = screen.getByRole("region", { name: "O plano vivo" });
+    const fase = Math.max(...p.tasks.map((t) => t.fase ?? 1));
+    fireEvent.click(within(gantt).getByRole("button", { name: new RegExp(`^Nova tarefa na fase ${fase} `) }));
+    const painel = screen.getByRole("complementary", { name: "Nova tarefa" });
+    fireEvent.click(within(painel).getByRole("button", { name: /Tarefa interna/ }));
+    expect(within(painel).getByRole("button", { name: new RegExp(`^${fase} · `), pressed: true })).toBeTruthy();
+    expect(within(gantt).getAllByRole("button", { name: "Nova tarefa" }).length).toBe(2); // no cabeçalho e no fim da lista
   });
   it("o pegador muda a ordem com as setas do teclado (e diz o lugar novo)", () => {
     const { d, p } = montar((q) => { q.tasks.push({ ...q.tasks[4], nome: "Outra da fase", exec: undefined }); });
