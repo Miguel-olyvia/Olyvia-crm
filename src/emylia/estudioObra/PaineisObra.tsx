@@ -34,6 +34,8 @@ import { useInventario } from "../inventario/loja";
 import { EscolherTarefa, ICONE_DA_FASE, iconeDaTarefa } from "./CaminhoCritico";
 import { dispersaoDaEquipa } from "./dispersaoEquipa";
 import { resumoEcNegocio } from "../inventario/ponteNegocios";
+import { encomendaPorLer } from "../real/encomendaReal";
+import { modoReal } from "../acessosPortal";
 import { useReduzir, MOLA } from "../movimento";
 import { podeNeg } from "../permissoes";
 import { ROTULO_VIVO, diasDeAtraso, estadoVivo, nomeCurtoTarefa, type EstadoVivo } from "./planoVivo";
@@ -368,7 +370,7 @@ export function MateriaisDaObra({ ctx, d, dias = [] }: { ctx: Ctx; d: Negocio; d
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
             <p className="text-sm font-semibold">O que chegou e o que falta</p>
-            <p className="text-sm text-muted-foreground">{todos.length ? `${ok} de ${todos.length} garantidos` : "Sem materiais na encomenda desta obra."}</p>
+            <p className="text-sm text-muted-foreground">{todos.length ? `${ok} de ${todos.length} garantidos` : encomendaPorLer(d.obra.ec?.ref, modoReal()) ? "A ler a encomenda desta obra…" : "Sem materiais na encomenda desta obra."}</p>
           </div>
           {d.obra.ec && <Button type="button" variant="outline" className="min-h-10 rounded-full" onClick={() => run(() => A.abrirInv(d.id))}><ArrowUpRight className="mr-1.5 h-4 w-4" aria-hidden="true" />No Inventário</Button>}
         </div>
