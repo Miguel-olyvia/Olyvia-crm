@@ -7,7 +7,15 @@ import { getFriendlyErrorMessage } from "@/utils/friendlyError";
 import { setEntityOwner, notifyOwnerChangeVisits } from "@/lib/leads/entityOwnerSync";
 import { EntityKindSelector } from "@/components/shared/EntityKindSelector";
 import { fetchEntityCompanyName } from "@/lib/clients/fetchEntityCompanyName";
-import { initialKindState, planNameSave, setEntityKind, type EntityKind, type KindFormState } from "@/lib/entityKind";
+import {
+  initialKindState,
+  leadNameArgsAfterKindStep,
+  planNameSave,
+  saveKindThenRest,
+  type EntityKind,
+  type KindFormState,
+  type KindStepOutcome,
+} from "@/lib/entityKind";
 import {
   Dialog,
   DialogContent,
@@ -205,11 +213,14 @@ export function AnewLeadEditDialog({
   const [loading, setLoading] = useState(true);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   // Pessoa | Empresa. `entityInfo` e a ficha como estava ao abrir (tipo e nome da
-  // empresa); o «Nome da empresa» escrito fica em `kindCompany` e nao se perde ao
-  // trocar o seletor.
+  // empresa). O nome da empresa SO se escreve em modo Empresa («Nome da empresa», que e
+  // o nome da ficha); escrito, fica em `kindCompany` e nao se perde ao trocar o
+  // seletor. `null` = ainda nao escrito (vale o nome da ficha, se e Empresa, ou a empresa
+  // que a lead ja tinha). Em modo Pessoa nao ha campo de empresa e o valor de field_values
+  // nao se toca.
   const [kind, setKind] = useState<EntityKind>("person");
   const [entityInfo, setEntityInfo] = useState<{ type: string; state: KindFormState } | null>(null);
-  const [kindCompany, setKindCompany] = useState("");
+  const [kindCompany, setKindCompany] = useState<string | null>(null);
 
   // Load field definitions and populate form when dialog opens
   useEffect(() => {
@@ -255,16 +266,16 @@ export function AnewLeadEditDialog({
     setQualificationType(lead.qualification_type ?? null);
     setLostReason(lead.lost_reason || "");
     setFieldErrors({});
-    void loadEntityKind(values);
+    void loadEntityKind();
   };
 
   // Tipo da ficha (Pessoa/Empresa) e nome da empresa actual, para pre-seleccionar o
   // seletor e pre-preencher «Nome da empresa». A empresa le-se aparte e tolera a
   // coluna ainda nao existir (ver fetchEntityCompanyName).
-  const loadEntityKind = async (values: Record<string, any>) => {
+  const loadEntityKind = async () => {
     setEntityInfo(null);
     setKind("person");
-    setKindCompany("");
+    setKindCompany(null);
     if (!lead?.entity_id) return;
     const { data, error } = await supabase
       .from("anew_entities")
@@ -279,14 +290,19 @@ export function AnewLeadEditDialog({
     const initial = initialKindState(data, companyRead.company);
     setEntityInfo({ type: data.type || "person", state: initial });
     setKind(initial.kind);
-    // Sem nome de empresa na ficha, aproveita o campo «Empresa» da propria lead.
-    setKindCompany(initial.company || String(values.company_name ?? "").trim());
   };
 
   const generalKeyToFormKey = useMemo(() => buildGeneralKeyToFormKey(fieldDefs), [fieldDefs]);
 
   const readGeneralField = (key: string, values: Record<string, any> = fieldValues) =>
     getGeneralFieldValue(values, key, generalKeyToFormKey);
+
+  // Uma so fonte para «Nome da empresa»: o que se escreveu; senao o nome da ficha (se ja e
+  // Empresa); senao a empresa que a lead ja tinha em field_values.
+  const companyValue = (
+    kindCompany
+    ?? (entityInfo?.state.kind === "organization" ? entityInfo.state.company : readGeneralField("company_name"))
+  ).replace(/\s+/g, " ").trim();
 
   const handleFieldChange = (key: string, value: any) => {
     setFieldValues(prev => ({ ...prev, [key]: value }));
@@ -323,7 +339,8 @@ export function AnewLeadEditDialog({
       last_name: readGeneralField("last_name"),
       email: readGeneralField("email"),
       phone: readGeneralField("phone"),
-      company_name: readGeneralField("company_name"),
+      // Em modo Pessoa nao ha campo de empresa: o valor guardado nao se valida nem se toca.
+      company_name: kind === "organization" ? companyValue : "",
       address: readGeneralField("address"),
       postal_code: readGeneralField("postal_code"),
       city: readGeneralField("city"),
@@ -345,7 +362,7 @@ export function AnewLeadEditDialog({
       if (issue) nextErrors.notes = issue.message;
     }
 
-    if (kind === "organization" && !kindCompany.trim()) {
+    if (kind === "organization" && !companyValue) {
       nextErrors.company_name = "Indique o nome da empresa";
     }
 
@@ -411,8 +428,7 @@ export function AnewLeadEditDialog({
       };
 
       // Empresa: o campo «empresa» da lead acompanha o nome da empresa (nas duas chaves).
-      if (kind === "organization" && kindCompany.trim()) {
-        const companyValue = kindCompany.replace(/\s+/g, " ").trim();
+      if (kind === "organization" && companyValue) {
         updatedFieldValues.company_name = companyValue;
         const mappedCompanyKey = generalKeyToFormKey.company_name;
         if (mappedCompanyKey) updatedFieldValues[mappedCompanyKey] = companyValue;
@@ -429,6 +445,8 @@ export function AnewLeadEditDialog({
       // campanha, para as duas nunca divergirem. NAO toca em form_submissions
       // (a submissao original vive noutra tabela e mantem-se).
       for (const generalKey of GENERAL_FIELD_KEYS) {
+        // Em modo Pessoa a empresa que a lead ja tinha fica exactamente como esta.
+        if (generalKey === "company_name" && kind !== "organization") continue;
         const rawCanonical = readGeneralField(generalKey, updatedFieldValues);
         if (rawCanonical === "" || rawCanonical === null || rawCanonical === undefined) continue;
         // Telefones antigos com "00" (ex.: "0045 41736520") passam a "+45...",
@@ -467,11 +485,8 @@ export function AnewLeadEditDialog({
         }
       }
 
-      // Derive the same entity display-name fields the FE used to write
-      // directly to anew_entities; the RPC now performs that update too.
-      let displayName: string | undefined;
-      let entityFirstName: string | undefined;
-      let entityLastName: string | undefined;
+      // O tipo e o nome da ficha gravam-se PRIMEIRO (rpc_set_entity_kind), antes de rpc_update_lead
+      // e das sincronizacoes (NIF, morada, email, telefone): ver saveKindThenRest.
       let namePlan: ReturnType<typeof planNameSave> = null;
       if (lead.entity_id) {
         const originalValues = lead.field_values || {};
@@ -487,16 +502,10 @@ export function AnewLeadEditDialog({
             kind,
             first: readGeneralField("first_name", updatedFieldValues),
             last: readGeneralField("last_name", updatedFieldValues),
-            company: kindCompany,
+            company: companyValue,
           },
           entityInfo?.type ?? "person",
         );
-        if (namePlan) {
-          // Caminho de recurso (rpc_set_entity_kind ainda nao existe): nome pelo tipo escolhido.
-          displayName = namePlan.fallback.displayName;
-          entityFirstName = namePlan.fallback.first ?? undefined;
-          entityLastName = namePlan.fallback.last ?? undefined;
-        }
       }
 
       // One NIF per entity, per organization — the same rule already enforced
@@ -559,6 +568,14 @@ export function AnewLeadEditDialog({
         }
       }
 
+      const saved = await saveKindThenRest({
+        client: supabase as any,
+        entityId: lead.entity_id ?? "",
+        plan: namePlan,
+        wrap: (fn) => withAuditContext(supabase, userId, fn),
+        saveRest: async (outcome) => {
+      // So no caminho de recurso (RPC do tipo em falta) e que a lead leva o nome.
+      const nameArgs = leadNameArgsAfterKindStep(outcome, namePlan);
       await withAuditContext(supabase, userId, async () => {
         // p_lost_reason is cast via `as any`: it's added by migration
         // 20261112200000_rpc_update_lead_add_lost_reason.sql, not yet
@@ -576,9 +593,9 @@ export function AnewLeadEditDialog({
           p_assigned_to: assignedTo,
           p_status_changed: statusChanged,
           p_workflow_stage_id: statusChanged ? workflowStageId : null,
-          p_display_name: displayName ?? null,
-          p_first_name: entityFirstName ?? null,
-          p_last_name: entityLastName ?? null,
+          p_display_name: nameArgs.displayName ?? null,
+          p_first_name: nameArgs.first ?? null,
+          p_last_name: nameArgs.last ?? null,
           ...(qualificationChanged
             ? { p_qualification_type: qualificationType, p_qualification_changed: true }
             : {}),
@@ -588,15 +605,23 @@ export function AnewLeadEditDialog({
         if (error) throw error;
       });
 
-      // Mudou o tipo ou o nome: a base fixa o tipo e o nome final (troca o antigo em todo o
-      // lado). Se a RPC ainda nao existe, ficou o que o caminho anterior gravou.
-      if (namePlan && lead.entity_id) {
-        const entityId = lead.entity_id;
-        const plan = namePlan;
-        const kindResult = await withAuditContext(supabase, userId, () => setEntityKind(supabase as any, entityId, plan));
-        if (kindResult.status === "ok") displayName = kindResult.displayName;
-        else toast({ title: "Nome gravado", description: "A troca de tipo (Pessoa/Empresa) só fica completa quando a base for atualizada." });
+        },
+      });
+      const kindOutcome: KindStepOutcome = saved.outcome;
+      if (kindOutcome.status === "missing") {
+        toast({ title: "Nome guardado", description: "A troca de tipo (Pessoa/Empresa) fica completa quando a base de dados for atualizada." });
+      } else if (kindOutcome.status === "failed") {
+        // O resto da lead ficou guardado (e continua a sincronizar abaixo); o tipo e o nome nao.
+        console.error("Error saving entity kind:", kindOutcome.error);
+        toast({
+          title: "Lead guardada, mas o tipo e o nome da ficha não foram alterados",
+          description: await getFriendlyErrorMessage(kindOutcome.error),
+          variant: "destructive",
+        });
       }
+      const fiscalName = kindOutcome.status === "ok"
+        ? kindOutcome.displayName
+        : kindOutcome.status === "missing" ? namePlan?.fallback.displayName ?? null : null;
 
       // Link the lead's NIF (if any) to the shared, encrypted fiscal-entities
       // system — same resolve/link mechanism already used for organizations
@@ -607,7 +632,7 @@ export function AnewLeadEditDialog({
         const vatValue = vatToSave;
         if (vatValue) {
           try {
-            await linkEntityFiscalEntity(lead.entity_id, vatValue, displayName ?? null, "PT", userId);
+            await linkEntityFiscalEntity(lead.entity_id, vatValue, fiscalName, "PT", userId);
           } catch (fiscalError) {
             console.error("Error linking lead's fiscal entity:", fiscalError);
             const description = await getFriendlyErrorMessage(fiscalError);
@@ -716,7 +741,7 @@ export function AnewLeadEditDialog({
         }
       }
 
-      if (!workflowFailed) {
+      if (!workflowFailed && kindOutcome.status !== "failed") {
         toast({
           title: "Lead atualizada",
           description: "Os dados da lead foram guardados com sucesso.",
@@ -741,7 +766,8 @@ export function AnewLeadEditDialog({
         workflowStageId,
         fieldValues: updatedFieldValues,
       });
-      onOpenChange(false);
+      // Tipo/nome recusado: o ecrã fica aberto para se poder tentar de novo.
+      if (kindOutcome.status !== "failed") onOpenChange(false);
     } catch (error) {
       console.error("Error saving lead:", error);
       toast({
@@ -881,7 +907,7 @@ export function AnewLeadEditDialog({
                     <Label htmlFor="lead-edit-company-name">Nome da empresa *</Label>
                     <Input
                       id="lead-edit-company-name"
-                      value={kindCompany}
+                      value={kindCompany ?? companyValue}
                       onChange={(e) => {
                         setKindCompany(e.target.value);
                         if (fieldErrors.company_name) setFieldErrors(prev => { const next = { ...prev }; delete next.company_name; return next; });
@@ -892,7 +918,7 @@ export function AnewLeadEditDialog({
                     {fieldErrors.company_name && <p className="text-xs text-destructive">{fieldErrors.company_name}</p>}
                   </div>
                 )}
-                {GENERAL_FIELDS.filter((field) => kind !== "organization" || !["first_name", "last_name", "company_name"].includes(field.key)).map((field) => (
+                {GENERAL_FIELDS.filter((field) => field.key !== "company_name" && (kind !== "organization" || !["first_name", "last_name"].includes(field.key))).map((field) => (
                   <div key={field.key} className="space-y-2">
                     {field.key === "phone" ? (
                       <LeadPhoneField

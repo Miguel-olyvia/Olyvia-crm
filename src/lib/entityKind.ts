@@ -103,7 +103,11 @@ interface RpcClient {
   rpc: (fn: string, args: Record<string, unknown>) => PromiseLike<{ data: unknown; error: unknown }>;
 }
 
-export type SetEntityKindResult = { status: "ok"; displayName: string } | { status: "missing" };
+export type SetEntityKindResult =
+  | { status: "ok"; displayName: string; type: EntityKind; firstName: string | null; lastName: string | null }
+  | { status: "missing" };
+
+const asText = (v: unknown): string | null => (typeof v === "string" && v.trim() !== "" ? v : null);
 
 /** Chama rpc_set_entity_kind. «missing» quando a base ainda nao a tem; outro erro propaga. */
 export async function setEntityKind(
@@ -117,6 +121,109 @@ export async function setEntityKind(
     throw error;
   }
   const d = (data ?? {}) as Record<string, unknown>;
-  const returned = [d.display_name, d.name, d.nome].find((v): v is string => typeof v === "string" && v.trim() !== "");
-  return { status: "ok", displayName: returned ?? plan.displayName };
+  const returned = [d.display_name, d.name, d.nome].map(asText).find((v): v is string => v !== null);
+  return {
+    status: "ok",
+    displayName: returned ?? plan.displayName,
+    type: d.type === "organization" || d.type === "person" ? d.type : plan.rpcArgs.p_type,
+    // A base devolve a ficha final; sem esses campos na resposta, vale o que se enviou.
+    firstName: "first_name" in d ? asText(d.first_name) : plan.rpcArgs.p_first_name,
+    lastName: "last_name" in d ? asText(d.last_name) : plan.rpcArgs.p_last_name,
+  };
+}
+
+/**
+ * Resultado da PRIMEIRA gravacao do ecra (o tipo e o nome):
+ *  none    nada do nome/tipo mudou, nao se chamou a base;
+ *  ok      a base gravou o tipo e o nome (e devolveu a ficha final);
+ *  missing a base ainda nao tem a funcao (codigo publicado antes da migration);
+ *  failed  a base recusou (sem permissao, ficha partilhada...): o nome NAO mudou.
+ */
+export type KindStepOutcome =
+  | { status: "none" }
+  | Extract<SetEntityKindResult, { status: "ok" }>
+  | { status: "missing" }
+  | { status: "failed"; error: unknown };
+
+type AuditWrap = <T>(fn: () => Promise<T>) => Promise<T>;
+
+export async function runKindStep(
+  client: RpcClient,
+  entityId: string,
+  plan: NameSavePlan | null,
+  wrap: AuditWrap = (fn) => fn(),
+): Promise<KindStepOutcome> {
+  if (!plan) return { status: "none" };
+  try {
+    return await wrap(() => setEntityKind(client, entityId, plan));
+  } catch (error) {
+    return { status: "failed", error };
+  }
+}
+
+/**
+ * A ordem das gravacoes: PRIMEIRO o tipo e o nome (rpc_set_entity_kind), DEPOIS o
+ * resto (contactos, NIF, morada...). Assim nunca fica o nome mudado e o tipo nao;
+ * se o tipo for recusado o resto corre na mesma, sem o nome. Se o resto falhar, o
+ * erro sobe, mas o tipo e o nome ja ficaram certos.
+ */
+export async function saveKindThenRest<T>(args: {
+  client: RpcClient;
+  entityId: string;
+  plan: NameSavePlan | null;
+  wrap?: AuditWrap;
+  saveRest: (outcome: KindStepOutcome) => Promise<T>;
+}): Promise<{ outcome: KindStepOutcome; rest: T }> {
+  const outcome = await runKindStep(args.client, args.entityId, args.plan, args.wrap);
+  const rest = await args.saveRest(outcome);
+  return { outcome, rest };
+}
+
+export interface ClientNameArgs {
+  displayName: string;
+  first: string | null;
+  last: string | null;
+  entityType: string;
+}
+
+/**
+ * O nome e o tipo que a segunda gravacao do cliente (rpc_update_client) leva, conforme o
+ * resultado da primeira. Tipo gravado: reenvia o que a base devolveu, nunca o nome de
+ * recurso. RPC em falta: nome pelo tipo escolhido e p_entity_type novo (o codigo pode sair
+ * antes da base). Tipo recusado: o nome fica como estava.
+ */
+export function clientNameArgsAfterKindStep(
+  outcome: KindStepOutcome,
+  plan: NameSavePlan | null,
+  resolved: { displayName: string; first: string | null; last: string | null },
+  original: { type: string; displayName: string; first: string | null; last: string | null },
+): ClientNameArgs {
+  switch (outcome.status) {
+    case "ok":
+      return { displayName: outcome.displayName, first: outcome.firstName, last: outcome.lastName, entityType: outcome.type };
+    case "missing":
+      return plan
+        ? { displayName: plan.fallback.displayName, first: plan.fallback.first, last: plan.fallback.last, entityType: plan.rpcArgs.p_type }
+        : { ...resolved, entityType: original.type };
+    case "failed":
+      return { displayName: original.displayName, first: original.first, last: original.last, entityType: original.type };
+    default:
+      return { ...resolved, entityType: original.type };
+  }
+}
+
+export interface LeadNameArgs {
+  displayName?: string;
+  first?: string;
+  last?: string;
+}
+
+/** O nome que rpc_update_lead leva: so no caminho de recurso (RPC do tipo em falta). */
+export function leadNameArgsAfterKindStep(outcome: KindStepOutcome, plan: NameSavePlan | null): LeadNameArgs {
+  if (outcome.status !== "missing" || !plan) return {};
+  return {
+    displayName: plan.fallback.displayName,
+    ...(plan.fallback.first ? { first: plan.fallback.first } : {}),
+    ...(plan.fallback.last ? { last: plan.fallback.last } : {}),
+  };
 }

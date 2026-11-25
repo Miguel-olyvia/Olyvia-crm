@@ -1,8 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  clientNameArgsAfterKindStep,
   initialKindState,
   isMissingFunctionError,
+  leadNameArgsAfterKindStep,
   planNameSave,
+  runKindStep,
+  saveKindThenRest,
   setEntityKind,
   type KindFormState,
 } from "@/lib/entityKind";
@@ -117,7 +121,10 @@ describe("setEntityKind (cliente tolerante a RPC por aplicar)", () => {
   )!;
 
   it("chama rpc_set_entity_kind com os argumentos e devolve o nome final que a base devolve", async () => {
-    const rpc = vi.fn().mockResolvedValue({ data: { display_name: "EVOLAR MOVEIS LDA" }, error: null });
+    const rpc = vi.fn().mockResolvedValue({
+      data: { display_name: "EVOLAR MOVEIS LDA", type: "organization", first_name: "Rui", last_name: "Silva" },
+      error: null,
+    });
     const r = await setEntityKind({ rpc }, "ent-1", plan);
     expect(rpc).toHaveBeenCalledWith("rpc_set_entity_kind", {
       p_entity_id: "ent-1",
@@ -126,12 +133,14 @@ describe("setEntityKind (cliente tolerante a RPC por aplicar)", () => {
       p_last_name: null,
       p_company_name: "EVOLAR MOVEIS LDA",
     });
-    expect(r).toEqual({ status: "ok", displayName: "EVOLAR MOVEIS LDA" });
+    expect(r).toEqual({ status: "ok", displayName: "EVOLAR MOVEIS LDA", type: "organization", firstName: "Rui", lastName: "Silva" });
   });
 
   it("se a resposta nao traz o nome, usa o nome planeado", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: {}, error: null });
-    expect(await setEntityKind({ rpc }, "ent-1", plan)).toEqual({ status: "ok", displayName: "EVOLAR MOVEIS LDA" });
+    expect(await setEntityKind({ rpc }, "ent-1", plan)).toEqual({
+      status: "ok", displayName: "EVOLAR MOVEIS LDA", type: "organization", firstName: null, lastName: null,
+    });
   });
 
   it("funcao em falta (PGRST202): devolve 'missing' em vez de rebentar", async () => {
@@ -142,5 +151,133 @@ describe("setEntityKind (cliente tolerante a RPC por aplicar)", () => {
   it("outro erro (permissao): propaga, para nao fingir que gravou", async () => {
     const rpc = vi.fn().mockResolvedValue({ data: null, error: { code: "42501", message: "permission denied" } });
     await expect(setEntityKind({ rpc }, "ent-1", plan)).rejects.toMatchObject({ code: "42501" });
+  });
+});
+
+const okOutcome = { status: "ok", displayName: "EVOLAR MOVEIS LDA", type: "organization", firstName: "Rui", lastName: "Silva" } as const;
+
+describe("runKindStep (primeira gravacao: o tipo e o nome)", () => {
+  const plan = planNameSave(
+    initialKindState(evolarPerson),
+    { ...initialKindState(evolarPerson), kind: "organization", company: "EVOLAR MOVEIS LDA" },
+    "person",
+  )!;
+
+  it("sem alteracoes (plano nulo): nao chama a base", async () => {
+    const rpc = vi.fn();
+    expect(await runKindStep({ rpc }, "ent-1", null)).toEqual({ status: "none" });
+    expect(rpc).not.toHaveBeenCalled();
+  });
+
+  it("falha que nao e 'funcao em falta': devolve 'failed' com o erro, nao rebenta", async () => {
+    const error = { code: "42501", message: "permission denied" };
+    const rpc = vi.fn().mockResolvedValue({ data: null, error });
+    expect(await runKindStep({ rpc }, "ent-1", plan)).toEqual({ status: "failed", error });
+  });
+
+  it("funcao em falta: 'missing'", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { code: "PGRST202", message: "x" } });
+    expect(await runKindStep({ rpc }, "ent-1", plan)).toEqual({ status: "missing" });
+  });
+
+  it("corre dentro do envolvente de auditoria que o ecra passa", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: { display_name: "X" }, error: null });
+    let wrapped = 0;
+    const wrap = async <T,>(fn: () => Promise<T>): Promise<T> => { wrapped += 1; return fn(); };
+    await runKindStep({ rpc }, "ent-1", plan, wrap);
+    expect(wrapped).toBe(1);
+  });
+});
+
+describe("saveKindThenRest (ordem: primeiro o tipo, depois o resto)", () => {
+  const plan = planNameSave(
+    initialKindState(evolarPerson),
+    { ...initialKindState(evolarPerson), kind: "organization", company: "EVOLAR MOVEIS LDA" },
+    "person",
+  )!;
+
+  it("chama a RPC do tipo ANTES das outras gravacoes", async () => {
+    const calls: string[] = [];
+    const rpc = vi.fn().mockImplementation(async () => { calls.push("tipo"); return { data: { display_name: "EVOLAR MOVEIS LDA" }, error: null }; });
+    const saveRest = vi.fn().mockImplementation(async () => { calls.push("resto"); return "feito"; });
+    const r = await saveKindThenRest({ client: { rpc }, entityId: "ent-1", plan, saveRest });
+    expect(calls).toEqual(["tipo", "resto"]);
+    expect(saveRest).toHaveBeenCalledWith(expect.objectContaining({ status: "ok", displayName: "EVOLAR MOVEIS LDA" }));
+    expect(r.rest).toBe("feito");
+  });
+
+  it("o tipo falha (sem permissao): o resto corre na mesma, com o resultado 'failed'", async () => {
+    const error = { code: "42501", message: "permission denied" };
+    const rpc = vi.fn().mockResolvedValue({ data: null, error });
+    const saveRest = vi.fn().mockResolvedValue("feito");
+    const r = await saveKindThenRest({ client: { rpc }, entityId: "ent-1", plan, saveRest });
+    expect(saveRest).toHaveBeenCalledTimes(1);
+    expect(saveRest).toHaveBeenCalledWith({ status: "failed", error });
+    expect(r.outcome.status).toBe("failed");
+    expect(r.rest).toBe("feito");
+  });
+
+  it("o resto falha DEPOIS de o tipo ter gravado: o erro sobe, mas o tipo ja ficou certo (nunca 'nome mudou e tipo nao')", async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: { display_name: "EVOLAR MOVEIS LDA" }, error: null });
+    const saveRest = vi.fn().mockRejectedValue(new Error("rpc_update_client recusou"));
+    await expect(saveKindThenRest({ client: { rpc }, entityId: "ent-1", plan, saveRest })).rejects.toThrow("recusou");
+    expect(rpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("sem alteracao do nome/tipo: so corre o resto", async () => {
+    const rpc = vi.fn();
+    const saveRest = vi.fn().mockResolvedValue(1);
+    await saveKindThenRest({ client: { rpc }, entityId: "ent-1", plan: null, saveRest });
+    expect(rpc).not.toHaveBeenCalled();
+    expect(saveRest).toHaveBeenCalledWith({ status: "none" });
+  });
+});
+
+describe("clientNameArgsAfterKindStep (o nome que vai para rpc_update_client)", () => {
+  const plan = planNameSave(
+    initialKindState(evolarPerson),
+    { ...initialKindState(evolarPerson), kind: "organization", company: "EVOLAR MOVEIS LDA" },
+    "person",
+  )!;
+  const resolved = { displayName: "EVOLAR LDA", first: "Rui", last: "Silva" };
+  const original = { type: "person", displayName: "EVOLAR LDA", first: "Rui", last: "Silva" };
+
+  it("tipo gravado: reenvia o que a base devolveu (nao o nome de recurso) e o tipo novo", () => {
+    expect(clientNameArgsAfterKindStep(okOutcome, plan, resolved, original))
+      .toEqual({ displayName: "EVOLAR MOVEIS LDA", first: "Rui", last: "Silva", entityType: "organization" });
+  });
+
+  it("RPC do tipo em falta (base antiga): nome pelo tipo escolhido E p_entity_type novo, para o codigo poder sair antes da base", () => {
+    expect(clientNameArgsAfterKindStep({ status: "missing" }, plan, resolved, original))
+      .toEqual({ displayName: "EVOLAR MOVEIS LDA", first: "Rui", last: "Silva", entityType: "organization" });
+  });
+
+  it("a RPC do tipo falhou: o nome fica como estava na ficha (nao se grava meio nome)", () => {
+    expect(clientNameArgsAfterKindStep({ status: "failed", error: new Error("x") }, plan, resolved, { ...original, displayName: "NOME ANTIGO" }))
+      .toEqual({ displayName: "NOME ANTIGO", first: "Rui", last: "Silva", entityType: "person" });
+  });
+
+  it("nada mudou: mantem o nome em bruto e o tipo", () => {
+    expect(clientNameArgsAfterKindStep({ status: "none" }, null, resolved, original))
+      .toEqual({ displayName: "EVOLAR LDA", first: "Rui", last: "Silva", entityType: "person" });
+  });
+});
+
+describe("leadNameArgsAfterKindStep (o nome que vai para rpc_update_lead)", () => {
+  const plan = planNameSave(
+    initialKindState(evolarPerson),
+    { ...initialKindState(evolarPerson), kind: "organization", company: "EVOLAR MOVEIS LDA" },
+    "person",
+  )!;
+
+  it("tipo gravado, nada mudou ou falhou: nao envia nome (a lead nao mexe no nome da ficha)", () => {
+    expect(leadNameArgsAfterKindStep(okOutcome, plan)).toEqual({});
+    expect(leadNameArgsAfterKindStep({ status: "none" }, null)).toEqual({});
+    expect(leadNameArgsAfterKindStep({ status: "failed", error: new Error("x") }, plan)).toEqual({});
+  });
+
+  it("RPC do tipo em falta: caminho de recurso com o nome pelo tipo escolhido", () => {
+    expect(leadNameArgsAfterKindStep({ status: "missing" }, plan))
+      .toEqual({ displayName: "EVOLAR MOVEIS LDA", first: "Rui", last: "Silva" });
   });
 });

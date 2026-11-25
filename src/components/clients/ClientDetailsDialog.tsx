@@ -17,7 +17,15 @@ import { withAuditContext } from "@/utils/auditContext";
 import { resolveClientNameForSave } from "@/lib/nameOnSave";
 import { EntityKindSelector } from "@/components/shared/EntityKindSelector";
 import { fetchEntityCompanyName } from "@/lib/clients/fetchEntityCompanyName";
-import { initialKindState, planNameSave, setEntityKind, type EntityKind, type KindFormState } from "@/lib/entityKind";
+import {
+  clientNameArgsAfterKindStep,
+  initialKindState,
+  planNameSave,
+  saveKindThenRest,
+  type EntityKind,
+  type KindFormState,
+  type KindStepOutcome,
+} from "@/lib/entityKind";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -828,63 +836,82 @@ export const ClientDetailsDialog = ({ client, open, onOpenChange, onClientUpdate
         ownerAffectedVisitIds = ownerResult.affectedVisitIds;
       }
 
+      let kindOutcome: KindStepOutcome = { status: "none" };
       if (entityId) {
-        await withAuditContext(supabase, businessUserId, async () => {
-          // Se o utilizador mexeu no nome/apelido, o display_name TROCA para
-          // nome + apelido (mesmo numa ficha cujo nome era o de uma empresa);
-          // se nao mexeu, mantem-se em bruto, como esta na ficha.
-          const resolved = resolveClientNameForSave(client, editFormData);
-          // Mudou o tipo ou o nome: o nome pelo tipo escolhido (caminho de recurso, se a RPC
-          // rpc_set_entity_kind ainda nao existir); senao fica o display_name em bruto.
-          const displayName = namePlan ? namePlan.fallback.displayName : resolved.displayName;
-          const normFirst = namePlan ? namePlan.fallback.first : resolved.first;
-          const normLast = namePlan ? namePlan.fallback.last : resolved.last;
-          const normalized = { first: normFirst, last: normLast };
-          const nif = editFormData.vat || null;
-          const { error: rpcError } = await callNifWriteProxy("rpc_update_client", {
-            p_client_id: client.id,
-            p_entity_id: entityId,
-            p_display_name: displayName,
-            p_norm_first: normalized.first,
-            p_norm_last: normalized.last,
-            p_email: editFormData.email || null,
-            p_phone: editFormData.phone || null,
-            p_phone_country: editFormData.phone_country_code || null,
-            p_vat: editFormData.vat || null,
-            p_status: editFormData.status,
-            p_notes: editFormData.notes || null,
-            p_assigned_to: editFormData.assigned_to || null,
-            // Morada principal já validada e normalizada (código postal
-            // 0000-000). Sem morada → tudo a null e a RPC não toca na morada.
-            // Andar/fração: '' apaga o valor gravado, null mantém-no.
-            p_address_street: morada.street || null,
-            p_address_city: morada.city || null,
-            p_address_postal_code: morada.postal_code || null,
-            p_address_number: morada.number || null,
-            p_entity_type: entityType, // o tipo so o muda rpc_set_entity_kind
-            p_address_floor: temMorada ? morada.floor : null,
-            p_address_unit: temMorada ? morada.unit : null,
-          } satisfies RpcUpdateClientArgs, nif);
-          if (rpcError) throw rpcError;
+        // Ordem: PRIMEIRO o tipo e o nome (rpc_set_entity_kind), DEPOIS o resto. Assim nunca
+        // fica o nome mudado e o tipo nao; se o tipo for recusado, o resto grava-se na mesma,
+        // sem tocar no nome.
+        const saved = await saveKindThenRest({
+          client: supabase as any,
+          entityId,
+          plan: namePlan,
+          wrap: (fn) => withAuditContext(supabase, businessUserId, fn),
+          saveRest: async (outcome) => {
+            await withAuditContext(supabase, businessUserId, async () => {
+              // Se o utilizador mexeu no nome/apelido, o display_name TROCA para nome + apelido;
+              // se nao mexeu, mantem-se em bruto, como esta na ficha.
+              const resolved = resolveClientNameForSave(client, editFormData);
+              const nameArgs = clientNameArgsAfterKindStep(outcome, namePlan, resolved, {
+                type: entityType,
+                displayName: client.display_name ?? resolved.displayName,
+                first: client.first_name ?? null,
+                last: client.last_name ?? null,
+              });
+              const nif = editFormData.vat || null;
+              const { error: rpcError } = await callNifWriteProxy("rpc_update_client", {
+                p_client_id: client.id,
+                p_entity_id: entityId,
+                p_display_name: nameArgs.displayName,
+                p_norm_first: nameArgs.first,
+                p_norm_last: nameArgs.last,
+                p_email: editFormData.email || null,
+                p_phone: editFormData.phone || null,
+                p_phone_country: editFormData.phone_country_code || null,
+                p_vat: editFormData.vat || null,
+                p_status: editFormData.status,
+                p_notes: editFormData.notes || null,
+                p_assigned_to: editFormData.assigned_to || null,
+                // Morada principal já validada e normalizada (código postal
+                // 0000-000). Sem morada → tudo a null e a RPC não toca na morada.
+                // Andar/fração: '' apaga o valor gravado, null mantém-no.
+                p_address_street: morada.street || null,
+                p_address_city: morada.city || null,
+                p_address_postal_code: morada.postal_code || null,
+                p_address_number: morada.number || null,
+                // Tipo gravado: o que a base devolveu. Base ainda sem rpc_set_entity_kind: o tipo
+                // escolhido segue aqui, para o código poder sair antes da migration.
+                p_entity_type: nameArgs.entityType,
+                p_address_floor: temMorada ? morada.floor : null,
+                p_address_unit: temMorada ? morada.unit : null,
+              } satisfies RpcUpdateClientArgs, nif);
+              if (rpcError) throw rpcError;
+            });
+          },
         });
-        if (namePlan) {
-          // A base decide o nome final e o tipo. Enquanto a RPC nao existir, fica o que o
-          // caminho anterior gravou (nome pelo tipo escolhido, tipo da ficha inalterado).
-          const kindResult = await withAuditContext(supabase, businessUserId, () =>
-            setEntityKind(supabase as any, entityId, namePlan),
-          );
-          if (kindResult.status === "missing") {
-            toast({ title: "Nome gravado", description: "A troca de tipo (Pessoa/Empresa) só fica completa quando a base for atualizada." });
-          }
-        }
+        kindOutcome = saved.outcome;
       }
 
-      toast({ title: "Cliente actualizado" });
+      if (kindOutcome.status === "missing") {
+        toast({ title: "Nome guardado", description: "A troca de tipo (Pessoa/Empresa) fica completa quando a base de dados for atualizada." });
+      }
       if (ownerAffectedVisitIds.length > 0) {
         void notifyOwnerChangeVisits(client.organization_id, ownerAffectedVisitIds).then((notified) => {
           if (notified > 0) toast({ title: t("scheduling.notify.clientNotified") });
         });
       }
+      if (kindOutcome.status === "failed") {
+        // O resto ficou guardado; o tipo/nome nao. O ecrã fica aberto para se poder tentar de novo.
+        captureFlowError(kindOutcome.error, "client-lifecycle");
+        toast({
+          title: "Dados guardados, mas o tipo e o nome não foram alterados",
+          description: await getFriendlyErrorMessage(kindOutcome.error, (kindOutcome.error as { message?: string })?.message),
+          variant: "destructive",
+        });
+        onClientUpdated?.();
+        return;
+      }
+
+      toast({ title: "Cliente atualizado" });
       onOpenChange(false);
       onClientUpdated?.();
     } catch (error: any) {

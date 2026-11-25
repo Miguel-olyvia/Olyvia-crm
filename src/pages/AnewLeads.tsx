@@ -13,7 +13,7 @@ import { syncEntityPrimaryAddressFromLead } from "@/utils/addressSanitization";
 import { extractLeadContactInfo } from "@/utils/leadContactInfo";
 import { isLeadCompanyField, isLeadPersonNameField, resolveLeadNames } from "@/lib/leadNameFromFields";
 import { EntityKindSelector } from "@/components/shared/EntityKindSelector";
-import { planNameSave, setEntityKind, type EntityKind } from "@/lib/entityKind";
+import { planNameSave, runKindStep, type EntityKind } from "@/lib/entityKind";
 import { refreshEntityIdentity } from "@/lib/refreshEntityIdentity";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { validateLeadFieldValues } from "@/utils/leadFieldValidation";
@@ -3396,20 +3396,32 @@ export default function AnewLeads() {
     navigate(`/deals?create_from_lead=${lead.id}`);
   }, [navigate]);
 
-  // Ficha nova de Empresa: o RPC de criacao so grava o nome, por isso o tipo fixa-se logo a seguir
-  // (rpc_set_entity_kind). Se a base ainda nao a tem, a ficha fica com o nome certo e tipo pessoa.
+  // Ficha nova de Empresa: o RPC de criacao so grava o nome (o da empresa), por isso o tipo fixa-se
+  // logo a seguir (rpc_set_entity_kind). Essa RPC exige permissao de edicao sobre a ficha: quem so
+  // cria, ou atribui a lead a outro comercial, fica com a ficha com o nome certo mas tipo Pessoa.
+  // Isso nao e um erro da criacao: avisa-se com clareza, sem toast de erro.
   const markNewEntityAsOrganization = async (entityId: string, company: string) => {
     const plan = planNameSave(
       { kind: "person", first: "", last: "", company: "" },
       { kind: "organization", first: "", last: "", company },
       "person",
     );
-    if (!plan) return;
-    try {
-      await setEntityKind(supabase as any, entityId, plan);
-    } catch (e) {
-      captureFlowError(e, "lead-lifecycle");
-      toast({ title: "Lead criada, mas o tipo Empresa não ficou registado", description: await getFriendlyErrorMessage(e), variant: "destructive" });
+    const outcome = await runKindStep(supabase as any, entityId, plan);
+    if (outcome.status === "missing") {
+      toast({
+        title: "Lead criada com o nome da empresa",
+        description: "O tipo Empresa fica registado quando a base de dados for atualizada.",
+      });
+    } else if (outcome.status === "failed") {
+      const err = outcome.error as { code?: string; message?: string } | null;
+      const semPermissao = err?.code === "42501" || /permiss|privileg/i.test(err?.message ?? "");
+      if (!semPermissao) captureFlowError(outcome.error, "lead-lifecycle");
+      toast({
+        title: "Lead criada com o nome da empresa",
+        description: semPermissao
+          ? "A ficha ficou com o nome da empresa, mas como Pessoa: registar o tipo Empresa exige permissão de edição. Quem a tiver pode escolher Empresa ao editar a lead."
+          : "A ficha ficou com o nome da empresa, mas o tipo Empresa não ficou registado. Abra a lead, escolha Empresa e guarde para o corrigir.",
+      });
     }
   };
 
@@ -3437,16 +3449,19 @@ export default function AnewLeads() {
     // A partir daqui trabalha-se só com leadValues, nunca com newLeadValues.
     const leadValuesAll = stripCampaignCoveredBaseValues(newLeadValues, createLeadFieldDefs, extraCampaignFieldDefs);
     // Empresa: nome e apelido estao escondidos e nao se gravam (nunca ficam o nome da empresa e o de uma pessoa).
-    const leadValues = createKind === "organization"
-      ? Object.fromEntries(Object.entries(leadValuesAll).filter(([key]) => !allFieldDefs.some((d: any) => d.field_key === key && isLeadPersonNameField(d))))
-      : leadValuesAll;
+    // Empresa: nome e apelido nao se gravam. Pessoa: nao ha campo de empresa (o nome da empresa so se
+    // escreve escolhendo Empresa), por isso tambem nao se grava nenhum valor de empresa.
+    const hiddenForKind = (d: any) => (createKind === "organization" ? isLeadPersonNameField(d) : isLeadCompanyField(d));
+    const leadValues = Object.fromEntries(
+      Object.entries(leadValuesAll).filter(([key]) => !allFieldDefs.some((d: any) => d.field_key === key && hiddenForKind(d))),
+    );
     if (createKind === "organization" && !resolveLeadNames(allFieldDefs as any[], leadValues, "organization").company) {
       toast({ title: t('leads.toast.missingRequiredFields'), description: "Indique o nome da empresa", variant: "destructive" });
       return;
     }
     // "Required" means valid, not merely non-empty: a lone "-" used to satisfy
     // every required text field, producing leads with po_codigo_postal = "-".
-    const defsToValidate = createKind === "organization" ? allFieldDefs.filter((d: any) => !isLeadPersonNameField(d)) : allFieldDefs;
+    const defsToValidate = allFieldDefs.filter((d: any) => !hiddenForKind(d));
     const fieldErrors = validateLeadFieldValues(defsToValidate as any, leadValues);
 
     if (fieldErrors.length > 0) {
@@ -7489,8 +7504,9 @@ export default function AnewLeads() {
                 // esconder sem descartar deixava passar o valor escrito antes de
                 // a campanha ser escolhida.
                 .filter(baseField => !isBaseFieldCoveredByCampaignFields(baseField.field_key, extraCampaignFieldDefs))
-                // Empresa: o nome e o da empresa, por isso nome, apelido e o campo «empresa» saem daqui.
-                .filter(f => createKind !== "organization" || (!isLeadPersonNameField(f) && !isLeadCompanyField(f)))
+                // O campo de empresa nunca aparece aqui (em Empresa ha o «Nome da empresa» acima; em Pessoa
+                // nao ha empresa) e, em Empresa, nome e apelido tambem saem.
+                .filter(f => !isLeadCompanyField(f) && (createKind !== "organization" || !isLeadPersonNameField(f)))
                 .map(field => (
                 <div key={field.id} className={field.field_type === 'textarea' || field.field_type === 'composite_address' ? 'md:col-span-2' : ''}>
                   <DynamicFormField
@@ -7511,7 +7527,7 @@ export default function AnewLeads() {
                   {t('leads.additionalCampaignFields') || 'Campos adicionais da campanha'}
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {extraCampaignFieldDefs.filter(f => createKind !== "organization" || (!isLeadPersonNameField(f) && !isLeadCompanyField(f))).map(field => (
+                  {extraCampaignFieldDefs.filter(f => !isLeadCompanyField(f) && (createKind !== "organization" || !isLeadPersonNameField(f))).map(field => (
                     <div key={field.id} className={field.field_type === 'textarea' || field.field_type === 'composite_address' ? 'md:col-span-2' : ''}>
                       <DynamicFormField
                         field={field}
