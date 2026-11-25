@@ -353,7 +353,10 @@ export function orcamentoDetalhado(d: Negocio, S: Estado) {
         ? { fase, nome: l.d, q: l.livre.q, un: l.livre.un, pu: (x.preco * k) / (l.livre.q || 1), total: x.preco * k, mat: true }
         : { fase, nome: nomeNaTabela(l.d), q: 1, un: "vg", pu: x.preco * k, total: x.preco * k, mat: true };
   });
-  const fases = FASES_OBRA.filter((f) => linhas.some((x) => x.fase === f.n));
+  // 25/11 (revisão dos documentos, 1048: «Demolição e entulho · 0 m²», «Canalização · 0 pontos»): os serviços do modelo que ficaram a zero
+  // não são do contrato e não aparecem (o índice das linhas mantém-se para as zonas, que leem `todas`)
+  const todas = linhas, visiveis = linhas.filter((x, i) => !(o.linhas[i].t === "svc" && !(Number(o.linhas[i].q) > 0)));
+  const fases = FASES_OBRA.filter((f) => visiveis.some((x) => x.fase === f.n));
   // 26/10: com zonas da obra, o orçamento detalhado agrupa-se por zona (a quantidade e o valor de cada linha nessa zona)
   // nos produtos, o nome sem a quantidade total ("Tinta … · 222 un") e a unidade do produto: a linha da zona mostra só a parte dela
   const prodDe = (i: number) => {
@@ -365,10 +368,10 @@ export function orcamentoDetalhado(d: Negocio, S: Estado) {
     z: g.z, total: g.total * k,
     linhas: g.linhas.map((x) => {
       const p = prodDe(x.i);
-      return { ...linhas[x.i], ...(p ? { nome: p.n, un: p.un } : {}), q: x.q, pu: (x.valor * k) / (x.q || 1), total: x.valor * k };
+      return { ...todas[x.i], ...(p ? { nome: p.n, un: p.un } : {}), q: x.q, pu: (x.valor * k) / (x.q || 1), total: x.valor * k };
     }),
   }));
-  return { T, desconto, linhas: linhas as LinhaOrcamentoDoc[], fases, zonas: zonas as { z: string; total: number; linhas: LinhaOrcamentoDoc[] }[], faseDe };
+  return { T, desconto, linhas: visiveis as LinhaOrcamentoDoc[], fases, zonas: zonas as { z: string; total: number; linhas: LinhaOrcamentoDoc[] }[], faseDe };
 }
 
 export function PropostaDoc({ S, d, a }: { S: Estado; d: Negocio; a?: Adenda }) {
@@ -591,7 +594,7 @@ function PropostaAdenda({ S, d, a: a0 }: { S: Estado; d: Negocio; a: Adenda }) {
         essencial={[["Total, com IVA", `${eur(T.total)} €`], ["Prazo", `+${dias} ${dias === 1 ? "dia útil" : "dias úteis"}`], ["Início previsto", inicio], ["Garantia", `${d.f.garantia || "2 anos"}`]]}
         aceite={a.aceite}>
         <p>Olá, {d.nome.split(" ")[0]},</p>
-        <p>Esta é a proposta dos trabalhos a mais na sua obra ({a.motivo.toLowerCase()}): {a.linhas.map((x) => x.n.toLowerCase()).join(", ")}. O resto do contrato mantém-se.</p>
+        <p>Esta é a proposta dos trabalhos a mais na sua obra ({a.motivo.toLowerCase()}): {a.linhas.map((x) => x.n).join(", ")}. O resto do contrato mantém-se.</p>
         {a.origem && <p className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-slate-800"><b className="font-medium">{origemAdenda(a.origem)}:</b> {a.origem.texto}</p>}
         <p>Nas páginas seguintes está o que vamos fazer, os materiais, o que muda no plano da obra, o preço e as condições. Se quiser mudar alguma coisa, diga-nos: fazemos uma nova versão.</p>
         <p className="pt-2">Com os melhores cumprimentos,<br /><span className="font-semibold text-slate-900">{comercial}</span>, {EMPRESA.nome}</p>
@@ -709,14 +712,14 @@ export function clausulasContrato(d: Negocio, S: Estado, a?: Adenda): { titulo: 
   const da = a ? diasAdenda(a.linhas) : 0, im = a ? impactoNoPlano(d.obra.plano, a) : null;
   // 21/10: as cláusulas da adenda: as mesmas, com o que é dela (os trabalhos a mais, o preço por taxa, as parcelas do contrato, os dias a mais)
   const modelo: Record<string, string | string[]> = a ? {
-    Objeto: `Os trabalhos a mais da adenda ${a.n} ao contrato ${numeroDoContratoDoNegocio(d)}, em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${a.linhas.map((x) => x.n.toLowerCase()).join(", ")}${a.linhas.some((x) => x.livre && x.mats?.length) ? ", e os materiais indicados na proposta da adenda" : ""}.`,
+    Objeto: `Os trabalhos a mais da adenda ${a.n} ao contrato ${numeroDoContratoDoNegocio(d)}, em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${a.linhas.map((x) => x.n).join(", ")}${a.linhas.some((x) => x.livre && x.mats?.length) ? ", e os materiais indicados na proposta da adenda" : ""}.`,
     "Preço": textoPrecoContrato(T, true),
     Pagamento: tr.map((t) => `${t.l}: ${Math.round(t.p * 100)}%, ${eur(t.v)} €`),
     Prazo: `Mais ${da} ${da === 1 ? "dia útil" : "dias úteis"}, a juntar ao prazo do contrato ${numeroDoContratoDoNegocio(d)}${im && im.fimDepois > im.fimAntes ? `: fim da obra previsto a ${rotuloDia(im.plano, im.fimDepois - 1)}` : ""}.`,
     Garantia: `${d.f.garantia || "2 anos"} sobre a mão de obra, a contar da data do auto de receção da obra. Os materiais têm a garantia do fabricante.`,
     "Condições gerais": `Mantém-se tudo o resto do contrato ${numeroDoContratoDoNegocio(d)}, incluindo as condições gerais da empresa.`,
   } : {
-    Objeto: `Os trabalhos de ${d.servico.toLowerCase()} em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${o.linhas.filter((l) => l.t === "svc").map((l) => (linhaCalc(l, S).s?.n ?? "serviço").toLowerCase()).join(", ")}, e os materiais do modelo escolhido.`,
+    Objeto: `Os trabalhos de ${d.servico.toLowerCase()} em ${d.f.morada || d.local}${d.f.localidade ? `, ${d.f.localidade}` : ""}: ${o.linhas.filter((l) => l.t === "svc" && Number(l.q) > 0).map((l) => linhaCalc(l, S).s?.n ?? "serviço").join(", ")}, e os materiais do modelo escolhido.`,
     "Preço": textoPrecoContrato(T),
     Pagamento: tr.map((t) => `${t.l}${t.quando ? ` (previsto: ${t.quando})` : ""}: ${Math.round(t.p * 100)}%, ${eur(t.v)} €`),
     Prazo: `Início ${d.f.inicio_prev ? `a ${data(d.f.inicio_prev)}` : "por marcar"}, com ${d.f.prazo_exec || "—"} dias úteis de execução: fim previsto a ${fimPrevisto(d.f.inicio_prev, d.f.prazo_exec)}.${d.f.multa === "Sim" ? " O atraso imputável à empresa dá lugar a penalização, nos termos das condições gerais." : ""}`,
@@ -943,13 +946,27 @@ export function NotaEncomendaDoc({ d }: { d: Negocio }) {
 }
 
 /* ------------------------------------------------------------------ partilhar */
+/** 25/11 (Rúben: «garante que os documentos seguem a formatação correta»): a folha impressa em A4, em branco (sem o fundo cinzento do
+ *  ecrã), cada página da proposta numa folha (antes, uma página do ecrã era mais alta do que o A4 e o carimbo e o rodapé caíam numa folha
+ *  quase vazia: 16 folhas para 4 páginas) e as cores dos cabeçalhos e carimbos como no ecrã. */
+export const CSS_IMPRESSAO = [
+  "@page{size:A4;margin:10mm}",
+  "html,body,body.calma{background:#fff!important;margin:0;padding:0}",
+  "*{-webkit-print-color-adjust:exact;print-color-adjust:exact}",
+  ".folha{box-shadow:none!important;border:0!important;border-radius:0!important;background:#fff!important;max-width:none!important;margin:0!important}",
+  ".doc-paginas{display:block;zoom:.86}",
+  ".doc-paginas>*+*{margin-top:0!important}",
+  ".pagina{box-shadow:none!important;min-height:auto!important;max-width:none!important;break-after:page;page-break-after:always}",
+  ".pagina:last-child{break-after:auto;page-break-after:auto}",
+  "tr,li,h2,h3{break-inside:avoid;page-break-inside:avoid}",
+].join("");
 /** 25/11: também para o «PDF» do Tudo do negócio (abre a folha e pede a impressão, onde se escolhe «Guardar como PDF»). */
 export function imprimir(el: HTMLElement | null, titulo: string) {
   if (!el) return;
   const w = window.open("", "_blank");
   if (!w) return;
   const estilos = [...document.querySelectorAll('link[rel="stylesheet"], style')].map((n) => n.outerHTML).join("");
-  w.document.write(`<!doctype html><html lang="pt"><head><meta charset="utf-8"><title>${titulo}</title>${estilos}<style>body{background:#fff;margin:0;padding:24px}.folha{box-shadow:none!important;border:0!important}.pagina{box-shadow:none!important;min-height:auto!important;break-after:page}.doc-paginas{display:block}</style></head><body class="calma">${el.outerHTML}</body></html>`);
+  w.document.write(`<!doctype html><html lang="pt"><head><meta charset="utf-8"><title>${titulo}</title>${estilos}<style>${CSS_IMPRESSAO}</style></head><body class="calma">${el.outerHTML}</body></html>`);
   w.document.close();
   setTimeout(() => { w.focus(); w.print(); }, 600);
 }

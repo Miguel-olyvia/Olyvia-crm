@@ -155,7 +155,7 @@ function ListaDocs({ ctx, d, docs, q }: { ctx: Ctx; d: Negocio; docs: DocDoNegoc
   const [aberto, setAberto] = useState<{ x: DocDoNegocio; pdf: boolean } | null>(null);
   return (
     <>
-      <ul className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+      <ul className="mt-3 grid gap-2 sm:grid-cols-2">
         {docs.map((x) => (
           <li key={x.id} className="flex min-w-0 flex-col gap-2 rounded-xl border border-border bg-card p-3 transition-shadow hover:shadow-sm">
             <button type="button" onClick={() => setAberto({ x, pdf: false })} className="flex min-w-0 items-start gap-3 rounded-lg text-left outline-none focus-visible:ring-2 focus-visible:ring-primary"

@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import type { Negocio, Plano } from "../motor";
 import type { Ctx } from "../pecas";
 import { NaFrente } from "../NaFrente";
+import { rotuloDaTranche } from "../parcelas";
 import { podeNeg } from "../permissoes";
 import { modoReal, emailDaFicha } from "../acessosPortal";
 import { usePodeAcessoPortal } from "../AcessoPortalNegocio";
@@ -114,7 +115,7 @@ export function DocAberto({ ctx, d, x, fechar, imprimirLogo = false }: { ctx: Ct
     return () => window.removeEventListener("keydown", tecla, true);
   }, [fechar]);
   const doc = x.k === "proposta" ? <PropostaDoc S={S} d={d} /> : x.k === "contrato" ? <ContratoDoc S={S} d={d} />
-    : x.k === "fatura" ? <FaturaDoc S={S} d={d} /> : x.k === "faturaTranche" ? <FaturaDoc S={S} d={d} reg={x.reg} regParcela={x.reg?.tranche} />
+    : x.k === "fatura" ? <FaturaDoc S={S} d={d} /> : x.k === "faturaTranche" ? <FaturaDoc S={S} d={d} reg={x.reg} regParcela={x.reg ? rotuloDaTranche(S, d, x.reg.tranche) : undefined} />
     : x.k === "propostaAdenda" ? <PropostaDoc S={S} d={d} a={x.a} /> : x.k === "contratoAdenda" ? <ContratoDoc S={S} d={d} a={x.a} />
     : x.k === "faturaAdenda" ? <FaturaDoc S={S} d={d} a={x.a} ft={x.ft} /> : <AutoRececaoDoc d={d} />;
   const tipo = x.k === "proposta" ? "proposta" : x.k === "contrato" || x.k === "contratoAdenda" ? "contrato" : x.k === "propostaAdenda" ? "adenda" : x.k === "auto" ? null : "fatura";

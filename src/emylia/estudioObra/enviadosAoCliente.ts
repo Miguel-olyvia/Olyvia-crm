@@ -7,6 +7,7 @@ import type { DocPortal } from "../acessosPortal";
 import { faturasAdenda, nomeParcela, type Adenda, type FaturaAdenda } from "../adendas";
 import type { FaturaReg } from "../v2/financeiro";
 import { numeroDaPropostaDoNegocio, numeroDoContratoDoNegocio } from "@/lib/numeroDocumento";
+import { rotuloDaTranche } from "../parcelas";
 
 export type TomDoc = "ok" | "espera" | "mau" | "neutro";
 export interface DocEnviado {
@@ -37,7 +38,7 @@ export function documentosEnviados(d: Negocio, _S?: Estado): DocEnviado[] {
   // as faturas do contrato: as das prestações registadas (V2) ou a única do motor
   const regs = (d.fin.tranches ?? []).filter((x) => !x.daDemo);
   if (regs.length) {
-    for (const r of regs) L.push({ id: `ft-${r.id}`, k: "faturaTranche", titulo: `Fatura · ${r.tranche}`, numero: r.numero, quando: r.data.split("-").reverse().join("/"),
+    for (const r of regs) L.push({ id: `ft-${r.id}`, k: "faturaTranche", titulo: `Fatura · ${rotuloDaTranche(_S, d, r.tranche)}`, numero: r.numero, quando: r.data.split("-").reverse().join("/"),
       estado: r.pagamento ? `Paga${r.recibo ? ` (${r.recibo})` : ""}` : "Por pagar", tom: r.pagamento ? "ok" : "espera", reenvio: "fatura", reg: r });
   } else if (d.fin.fatura) {
     L.push({ id: "fatura", k: "fatura", titulo: "Fatura", numero: d.fin.fatura.n, quando: d.fin.fatura.q, estado: d.fin.recibo ? `Paga (${d.fin.recibo.n})` : "Por pagar", tom: d.fin.recibo ? "ok" : "espera", reenvio: "fatura" });

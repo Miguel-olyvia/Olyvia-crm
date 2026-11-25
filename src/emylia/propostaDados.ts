@@ -43,7 +43,8 @@ export function fasesDosServicos(d: Negocio, S: Estado): Map<string, FaseObra> {
 /** "O que vamos fazer": as linhas do orçamento por fase da obra, em grupos curtos (os serviços pela fase da tarefa; os materiais pela
  *  descrição; a demolição na 1). */
 export function conteudoPorFase(d: Negocio, S: Estado, faseDe = fasesDosServicos(d, S)): FaseProposta[] {
-  return porFase((d.orc?.linhas ?? []).map((l) => {
+  // 25/11: os serviços do modelo que ficaram a zero não são do contrato (não aparecem «Canalização · 0 pontos»)
+  return porFase((d.orc?.linhas ?? []).filter((l) => l.t !== "svc" || Number(l.q) > 0).map((l) => {
     if (l.t === "svc") { const x = linhaCalc(l, S); return { fase: faseDe.get(l.sid) ?? 4, t: "svc" as const, nome: (x.s?.n ?? "Serviço"), q: l.q, un: (x.s?.un ?? "") }; }
     return { fase: l.d === LINHA_DEMOLICAO ? 1 : faseDosMateriais(l.d), t: "mat" as const, d: l.d };
   }));

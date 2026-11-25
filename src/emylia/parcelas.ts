@@ -154,3 +154,14 @@ export function comFaturaDaParcela(S: Estado, d: Negocio, x: Parcela, numero: st
   const fs = faturasDe(S, d).map((f) => { if (!f.daDemo) return f; const { daDemo: _, ...r } = f; return { ...r, id: f.id.replace(/^demo-/, "f-") }; });
   return [...fs, { id: `f${fs.length + 1}-${x.id}`, numero: numero.trim(), data: hoje, valor: x.v, tranche: x.id }];
 }
+
+/** 25/11 (revisão dos documentos, 1048: a fatura dizia «t1: 50%»): o nome de uma prestação pela chave («t1», «t2», «unica»), para os
+ *  documentos e as listas: «1.ª parcela», «Parcela do arranque», «Parcela final». Sem o contrato à mão, «1.ª prestação». */
+export function rotuloDaTranche(S: Estado | undefined | null, d: Negocio, id: string): string {
+  try {
+    const x = S ? parcelasDoContrato(S, d).find((p) => p.id === id) : undefined;
+    if (x) return x.momento === "inicio" ? "1.ª parcela" : x.momento === "arranque" ? "Parcela do arranque" : x.momento === "fim" ? "Parcela final" : `Parcela «${x.l}»`;
+  } catch { /* sem as prestações: pela chave */ }
+  const m = /^t(\d+)$/.exec(id);
+  return m ? `${m[1]}.ª prestação` : id === "unica" ? "Pagamento único" : id;
+}
