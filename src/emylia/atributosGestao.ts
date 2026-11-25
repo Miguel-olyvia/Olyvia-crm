@@ -3,6 +3,7 @@
 // Mesmo padrão de fichaProdutoDados: Res<T>, erroAmigavel (função ainda não existe → «Ainda não disponível nesta base»; os erros
 // CT001–CT004 trazem a mensagem em português da base e mostram-se tal e qual).
 import { erroAmigavel, rpcLivre } from "./fichaProdutoDados";
+import { superficieDeLeitura, type Superficie } from "./v2/catalogoModelo";
 
 /** Como Res, mas a falha pode trazer o código da base (CT001 = sem permissão). */
 export type ResG<T> = { ok: true; v: T } | { ok: false; erro: string; codigo?: string };
@@ -12,11 +13,17 @@ export interface OpcaoGestao {
   id: string; valor: string; nome: string; hex: string | null; ordem: number; ativo: boolean; usados: number | null; sigla: string | null;
   /** A foto (caminho `{org}/{uuid}.webp` no bucket `catalogo-opcoes`); null = sem foto, e também enquanto a base não devolver o campo. */
   foto: string | null;
+  /** 25/11: se a opção é de metal e a superfície por omissão dela. Só vêm com o atributo em `temAspeto`; senão false e null. */
+  metal: boolean; superficie: Superficie | null;
 }
 export interface AtributoGestao {
   id: string; codigo: string; nome: string; tipo: "lista" | "medida"; temHex: boolean; ordem: number; ativo: boolean;
   /** O interruptor «Tem foto» (escolhido ao criar o atributo de cor); false enquanto a base não devolver o campo. */
   temFoto: boolean;
+  /** 25/11: o interruptor «Tem aspeto» (muda-se a qualquer momento); false enquanto a base não devolver o campo. */
+  temAspeto: boolean;
+  /** A base devolveu o campo `tem_aspeto` (a migration do aspeto está aplicada): sem isto o ecrã esconde tudo o que é do aspeto. */
+  aspetoDisponivel: boolean;
   usados: number | null; opcoes: OpcaoGestao[];
   /** 20270118000000: a posição no SKU (1…n; null = ainda sem) e se o atributo entra no SKU. */
   skuOrdem: number | null; skuEntra: boolean;
@@ -30,11 +37,12 @@ function opcaoDe(o: Bruto): OpcaoGestao {
   return {
     id: texto(o.id), valor: texto(o.valor), nome: texto(o.nome) || texto(o.valor), hex: texto(o.hex) || null,
     ordem: contagem(o.ordem) ?? 0, ativo: o.ativo !== false, usados: contagem(o.usados), sigla: texto(o.sigla).trim() || null, foto: texto(o.foto) || null,
+    metal: o.metal === true, superficie: superficieDeLeitura(o.superficie),
   };
 }
 function atributoDe(a: Bruto): AtributoGestao {
   return {
-    id: texto(a.id), codigo: texto(a.codigo), nome: texto(a.nome), tipo: a.tipo === "medida" ? "medida" : "lista", temHex: a.tem_hex === true, temFoto: a.tem_foto === true,
+    id: texto(a.id), codigo: texto(a.codigo), nome: texto(a.nome), tipo: a.tipo === "medida" ? "medida" : "lista", temHex: a.tem_hex === true, temFoto: a.tem_foto === true, temAspeto: a.tem_aspeto === true, aspetoDisponivel: typeof a.tem_aspeto === "boolean",
     ordem: contagem(a.ordem) ?? 0, ativo: a.ativo !== false, usados: contagem(a.usados),
     opcoes: Array.isArray(a.opcoes) ? (a.opcoes as Bruto[]).map(opcaoDe) : [],
     skuOrdem: contagem(a.sku_ordem), skuEntra: a.sku_entra !== false,

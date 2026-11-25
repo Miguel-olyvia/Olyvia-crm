@@ -384,19 +384,23 @@ function GenericoGlb({ c, tipo, w, d, h, cor, mat, opc, generico }: PropsParam &
   const cena = lerGlb(url);
   const gen = opc?.gen, corFinal = typeof gen?.cor === "string" ? gen.cor : cor, chave = JSON.stringify(opcoesComOmissao(c, tipo, { ...generico?.o, ...gen }));
   const metal = mat?.metalness, rugos = mat?.roughness;
-  const t = useMemo(() => montarGenerico(cena, c, { w, d, h, o: JSON.parse(chave) as Record<string, string | boolean> }, corFinal, metal === undefined ? undefined : { metalness: metal, roughness: rugos ?? 0.4 }), [cena, c, w, d, h, chave, corFinal, metal, rugos]);
+  // 25/11: as zonas com ligação explícita (aplicar: sim) a um atributo: nelas as partes de metal (os puxadores) também se pintam. Mudam raramente: a montagem refaz-se, para as cópias
+  // dos materiais partirem sempre do modelo limpo (nunca de uma cópia já pintada)
+  const tx = useContext(TexturaCtx), zc = useContext(ZonasCtx);
+  const chaveLigadas = zc.zonas?.ligadas?.join(",") ?? "";
+  const t = useMemo(() => montarGenerico(cena, c, { w, d, h, o: JSON.parse(chave) as Record<string, string | boolean> }, corFinal, metal === undefined ? undefined : { metalness: metal, roughness: rugos ?? 0.4 }), // eslint-disable-next-line react-hooks/exhaustive-deps -- `chaveLigadas` só força a remontagem
+    [cena, c, w, d, h, chave, corFinal, metal, rugos, chaveLigadas]);
   useEffect(() => () => t.libertar(), [t]);
   const invalidate = useThree((s) => s.invalidate);
   // 24/11: a foto da opção de cor vai para o material `corpo` (o que leva a cor do produto); os outros (metal, vidro, puxadores) ficam como são.
   // Fase 1: o `corpo` passa a ser UM material por zona (frente, corpo, tampo, pés, estofo: zonasMateriais.ts), cada um com a sua foto ou cor (`zonas`, só a pré-visualização do produto
   // as põe) e o realce da zona apontada no painel «Zonas». Sem `zonas` (ou com todas iguais) a foto única (corpo > frente > cor) vai para todas as zonas: o que se via antes.
-  const tx = useContext(TexturaCtx), zc = useContext(ZonasCtx);
-  const zm = useMemo(() => criarMateriaisDeZona(t.grupo, c), [t, c]);
+  const zm = useMemo(() => criarMateriaisDeZona(t.grupo, c, chaveLigadas ? (chaveLigadas.split(",") as ZonaGlb[]) : undefined), [t, c, chaveLigadas]);
   useEffect(() => () => zm.libertar(), [zm]);
   const urls = useMemo(() => (zc.zonas?.porZona ? Object.values(zc.zonas.zonas).flatMap((z) => (z?.textura ? [z.textura.url] : [])) : []), [zc.zonas]);
   const texturas = useTexturasPorUrl(urls, invalidate);
   useEffect(() => {
-    aplicarAparenciaDasZonas(zm.porZona, { corBase: corFinal, zonas: zc.zonas, texturas, unica: tx ? { tex: tx.tex, lado: tx.lado } : null });
+    aplicarAparenciaDasZonas(zm.porZona, { corBase: corFinal, zonas: zc.zonas, texturas, unica: tx ? { tex: tx.tex, lado: tx.lado } : null, fixas: zm.fixas });
     invalidate();
   }, [zm, zc.zonas, texturas, tx, corFinal, invalidate]);
   // o realce é só brilho: apontar de uma zona a outra não retira nem volta a pôr as fotos (o material não se recompila)

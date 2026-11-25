@@ -2,10 +2,12 @@
 // estável (ou pela `zona` explícita da parte), e o material `corpo` passa a ser UM por zona (zonasMateriais.ts), para cada zona levar a sua foto ou cor. Que atributo pinta que zona sai,
 // por omissão, do NOME do atributo: «Cor da frente» pinta a frente, «Cor do corpo» o corpo, «Cor» (ou o único atributo de cor) todas as zonas sem atributo próprio. Sem nenhum destes
 // atributos nada muda: o comportamento é o de hoje (fotoDosAtributos no material `corpo` inteiro).
-// GANCHO PARA A FASE 2: a ligação explícita atributo → zona (gravada por produto, subcategoria e categoria) entra em `aparenciaDaZona` como `ligacoes`; os nomes passam a ser só a omissão.
+// 25/11 (fase 2): a ligação explícita atributo → zona (gravada por produto; config3dDados.ts) entra em `aparenciaDaZona` como `ligacoes` (e `excluidos`, o «aplicar: não»); os nomes são só a omissão.
+// O aspeto (metal e superfície, aspetoZonas.ts) das opções com «Tem aspeto» entra em cada zona: sem nenhum «Tem aspeto» ligado e sem configuração, nada disto actua e o resultado é o de hoje.
 // A planta 3D e as peças já gravadas NÃO usam nada disto: só a pré-visualização do produto passa `mockup3d.zonas`.
 // Sem React nem three (só a constante do lado da textura).
-import type { AtributoDef, AtributoProduto } from "../v2/catalogoModelo";
+import type { AtributoDef, AtributoProduto, Superficie } from "../v2/catalogoModelo";
+import { chaveDeExclusao, materialDaSuperficie, superficieDaZona, type MaterialZona } from "./aspetoZonas";
 import { sem, temGeometriaPropria, type ProdutoModelo3D } from "./catalogo3d";
 import { USAR_GLB_GENERICOS, categoriaDoTipo, categoriaPorId, opcoesComOmissao, type ParteGlb, type ZonaGlb } from "./categoriasGlb";
 import { LADO_TEXTURA_CM, type TexturaModelo } from "./texturaProduto";
@@ -59,9 +61,13 @@ export function zonasDoModelo(m: ProdutoModelo3D): { zona: ZonaGlb; partes: numb
 }
 
 /* ------------------------------------------------------------------ o atributo que pinta cada zona */
-/** O que uma zona leva da opção escolhida: o nome do atributo (para o painel), a foto (caminho no storage) e o hex, se os há. */
-export interface AparenciaZona { atributo: string; foto: string | null; hex: string | null }
-/** GANCHO da fase 2: a ligação explícita (id do atributo → zonas que pinta). Um atributo ligado só pinta as zonas a que está ligado; os nomes deixam de contar para ele. */
+/**
+ * O que uma zona leva da opção escolhida: o nome do atributo (para o painel), a foto (caminho no storage) e o hex, se os há.
+ * 25/11: `metal` e `superficie` (só presentes quando valem alguma coisa, e só com «Tem aspeto» no atributo) e `acabamento`, o nome do «Brilho» que decidiu a superfície.
+ * Uma zona só com aspeto (sem atributo de cor) leva `atributo: ""`, foto e hex a null.
+ */
+export interface AparenciaZona { atributo: string; foto: string | null; hex: string | null; metal?: true; superficie?: Superficie; acabamento?: string }
+/** A ligação explícita (id do atributo → zonas que pinta; gravada por produto, subcategoria ou categoria). Um atributo ligado só pinta as zonas a que está ligado; os nomes deixam de contar para ele. */
 export type LigacoesDeZonas = Readonly<Record<string, readonly ZonaGlb[]>>;
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
@@ -78,16 +84,20 @@ function papelDe(d: AtributoDef): Papel {
  * Só conta o atributo com opção escolhida; a opção escolhida sem foto NÃO vai buscar a foto de outro atributo (seria a de outra parte).
  */
 export function aparenciaDaZona(
-  zona: ZonaGlb, attrs: readonly AtributoProduto[] | undefined, defs: readonly AtributoDef[] | undefined, ligacoes?: LigacoesDeZonas,
+  zona: ZonaGlb, attrs: readonly AtributoProduto[] | undefined, defs: readonly AtributoDef[] | undefined, ligacoes?: LigacoesDeZonas, excluidos?: ReadonlySet<string>,
 ): AparenciaZona | null {
   if (!attrs?.length || !defs?.length) return null;
-  const cores = defs.filter((d) => d.temHex || d.temFoto);
+  // 25/11: um atributo com «aplicar: não» nesta zona (excluidos) deixa de a pintar, mesmo pelo nome
+  const cores = defs.filter((d) => (d.temHex || d.temFoto) && !excluidos?.has(chaveDeExclusao(d.id, zona)));
   const ligada = (d: AtributoDef): boolean => !!ligacoes?.[d.id]?.length;
   const escolhida = (d: AtributoDef): AparenciaZona | null => {
     const a = attrs.find((x) => x.atributoId === d.id && x.opcaoId);
     if (!a) return null;
     const o = d.opcoes.find((x) => x.id === a.opcaoId);
-    return { atributo: d.nome, foto: o?.foto || null, hex: o?.hex && HEX.test(o.hex) ? o.hex : null };
+    return {
+      atributo: d.nome, foto: o?.foto || null, hex: o?.hex && HEX.test(o.hex) ? o.hex : null,
+      ...(d.temAspeto && o?.metal ? { metal: true as const } : {}), ...(d.temAspeto && o?.superficie ? { superficie: o.superficie } : {}),
+    };
   };
   const primeira = (ds: readonly AtributoDef[]): AparenciaZona | null => { for (const d of ds) { const r = escolhida(d); if (r) return r; } return null; };
   const livres = cores.filter((d) => !ligada(d));
@@ -98,19 +108,36 @@ export function aparenciaDaZona(
 }
 
 /** A aparência de cada zona que leva alguma, e se as zonas DIFEREM (`porZona`): com todas iguais o 3D segue o caminho de hoje (a foto ou cor única no material `corpo`). */
-export interface ZonasDosAtributos { porZona: boolean; zonas: Partial<Record<ZonaGlb, AparenciaZona>> }
-/** As aparências de todas as zonas a partir dos atributos do produto; nenhuma zona com cor escolhida: undefined (o modelo fica como está). */
-export function zonasDosAtributos(attrs: readonly AtributoProduto[] | undefined, defs: readonly AtributoDef[] | undefined, ligacoes?: LigacoesDeZonas): ZonasDosAtributos | undefined {
+export interface ZonasDosAtributos { porZona: boolean; zonas: Partial<Record<ZonaGlb, AparenciaZona>>; /** as zonas ligadas explicitamente (aplicar: sim) a algum atributo; ausente sem ligações */ ligadas?: ZonaGlb[] }
+/**
+ * As aparências de todas as zonas a partir dos atributos do produto; nenhuma zona com cor nem aspeto escolhidos: undefined (o modelo fica como está).
+ * 25/11: `ligacoes` e `excluidos` (config3dDados.ligacoesDaConfig) e o aspeto: uma zona sem cor mas com superfície (o «Brilho» sozinho) também leva entrada.
+ */
+export function zonasDosAtributos(
+  attrs: readonly AtributoProduto[] | undefined, defs: readonly AtributoDef[] | undefined, ligacoes?: LigacoesDeZonas, excluidos?: ReadonlySet<string>,
+): ZonasDosAtributos | undefined {
   const zonas: Partial<Record<ZonaGlb, AparenciaZona>> = {};
-  for (const z of ZONAS) { const a = aparenciaDaZona(z, attrs, defs, ligacoes); if (a) zonas[z] = a; }
+  for (const z of ZONAS) {
+    const cor = aparenciaDaZona(z, attrs, defs, ligacoes, excluidos);
+    const asp = superficieDaZona({ zona: z, attrs, defs, ligacoes, excluidos, daOpcaoDaCor: cor ? { metal: cor.metal === true, superficie: cor.superficie ?? null } : null });
+    if (!cor && !asp.metal && !asp.superficie) continue;
+    zonas[z] = {
+      ...(cor ?? { atributo: "", foto: null, hex: null }), ...(asp.metal ? { metal: true as const } : {}),
+      ...(asp.superficie ? { superficie: asp.superficie } : {}), ...(asp.atributo ? { acabamento: asp.atributo } : {}),
+    };
+  }
   if (!Object.keys(zonas).length) return undefined;
-  const chave = (a: AparenciaZona | undefined): string => (a ? `${a.foto ?? ""}|${a.hex ?? ""}` : "");
-  return { porZona: new Set(ZONAS.map((z) => chave(zonas[z]))).size > 1, zonas };
+  const chave = (a: AparenciaZona | undefined): string => (a ? `${a.foto ?? ""}|${a.hex ?? ""}${a.metal || a.superficie ? `|${a.metal ? "metal" : ""}|${a.superficie ?? ""}` : ""}` : "");
+  const ligadas = ZONAS.filter((z) => Object.values(ligacoes ?? {}).some((zs) => zs.includes(z)));
+  return { porZona: new Set(ZONAS.map((z) => chave(zonas[z]))).size > 1, zonas, ...(ligadas.length ? { ligadas } : {}) };
 }
 
-/** O que o 3D aplica a uma zona: a cor lisa (hex) e/ou a foto (URL público, lado de cada repetição) e o atributo que a pinta (para o painel «Zonas»). */
-export interface ZonaVisual { atributo: string; cor?: string; textura?: TexturaModelo }
-export interface ZonasDoProduto { porZona: boolean; zonas: Partial<Record<ZonaGlb, ZonaVisual>> }
+/**
+ * O que o 3D aplica a uma zona: a cor lisa (hex) e/ou a foto (URL público, lado de cada repetição) e o atributo que a pinta (para o painel «Zonas»).
+ * 25/11: `material` (rugosidade e metal, de aspetoZonas) e `acabamento` (o nome do «Brilho»), só quando há aspeto.
+ */
+export interface ZonaVisual { atributo: string; cor?: string; textura?: TexturaModelo; material?: MaterialZona; acabamento?: string }
+export interface ZonasDoProduto { porZona: boolean; zonas: Partial<Record<ZonaGlb, ZonaVisual>>; /** as zonas ligadas explicitamente: só nelas as partes de material fixo (puxadores de metal) também se pintam */ ligadas?: ZonaGlb[] }
 /** Passa o caminho da foto de cada zona a URL público (`urlDaFoto`: null se o storage falhar: fica a cor lisa dessa zona). */
 export function zonasVisuais(z: ZonasDosAtributos, urlDaFoto: (caminho: string) => string | null): ZonasDoProduto {
   const zonas: Partial<Record<ZonaGlb, ZonaVisual>> = {};
@@ -118,7 +145,11 @@ export function zonasVisuais(z: ZonasDosAtributos, urlDaFoto: (caminho: string) 
     const a = z.zonas[zona];
     if (!a) continue;
     const url = a.foto ? urlDaFoto(a.foto) : null;
-    zonas[zona] = { atributo: a.atributo, ...(a.hex ? { cor: a.hex } : {}), ...(url ? { textura: { url, ladoCm: LADO_TEXTURA_CM } } : {}) };
+    const material = materialDaSuperficie(a.superficie ?? null, a.metal === true);
+    zonas[zona] = {
+      atributo: a.atributo, ...(a.hex ? { cor: a.hex } : {}), ...(url ? { textura: { url, ladoCm: LADO_TEXTURA_CM } } : {}),
+      ...(material ? { material } : {}), ...(a.acabamento ? { acabamento: a.acabamento } : {}),
+    };
   }
-  return { porZona: z.porZona, zonas };
+  return { porZona: z.porZona, zonas, ...(z.ligadas ? { ligadas: z.ligadas } : {}) };
 }

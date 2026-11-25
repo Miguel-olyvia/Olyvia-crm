@@ -46,7 +46,8 @@ export function Modelo3DFicha({ produto, real, anunciar, ...ver }: Props) {
           {!real!.podeEditar && <p className={cn(NOTA)}>Sem permissão para mudar o modelo 3D (products.edit).</p>}
         </div>
       )}
-      <Modelo3DProduto {...ver} modelo3d={valor} />
+      {/* 25/11: a configuração 3D (eixos e ligações) só existe para um produto da base; lê-se ao abrir o 3D e grava com products.edit (a base decide: aqui só se esconde o que ela não dá) */}
+      <Modelo3DProduto {...ver} modelo3d={valor} alvoConfig3d={podeGravar ? { org: real!.org, produtoId: produto.id, podeEditar: real!.podeEditar } : undefined} />
     </div>
   );
 }

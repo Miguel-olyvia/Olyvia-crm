@@ -10,6 +10,9 @@ import { CAMPO, NOTA, Campo, Chips } from "./pecasForm";
 import { AmostraOpcao } from "./AmostraOpcao";
 import { FotoDaOpcao } from "./FotoDaOpcao";
 import { definirFotoAtributo } from "./fotoOpcaoDados";
+import { definirAspetoAtributo, definirAspetoOpcao, resumoDoAspeto } from "./aspetoOpcaoDados";
+import { AspetoOpcaoCampos } from "./AspetoOpcaoCampos";
+import type { Superficie } from "./v2/catalogoModelo";
 import { semAcentos } from "./ComboPesquisa";
 import { normalizarHex } from "./atributosTexto";
 import { guardarSiglaOpcao } from "./skuDados";
@@ -38,17 +41,23 @@ type Aberto =
   | { t: "editarOpcao"; id: string }
   | { t: "siglaOpcao"; id: string };
 /** O que espera confirmação: mudar o nome/cor de uma opção, ou o nome de um atributo, quando há produtos (ou não se sabe) a usá-lo. */
-type Pendente = { t: "opcao"; nome: string | null; hex: string | null; opcao: OpcaoGestao } | { t: "atributo"; atributo: AtributoGestao; nome: string };
+type Pendente = { t: "opcao"; nome: string | null; hex: string | null; aspeto: AspetoOpcao | null; opcao: OpcaoGestao } | { t: "atributo"; atributo: AtributoGestao; nome: string };
+/** 25/11: o aspeto de uma opção (atributo com «Tem aspeto»): metal e superfície por omissão. */
+interface AspetoOpcao { metal: boolean; superficie: Superficie | null }
 /** O erro fica no sítio onde a ação foi feita: "novo", "ren:<atributo>", "nova:<atributo>", "ed:<opção>" ou "atr:<atributo>" (ativar, ordenar). */
 interface Erro { onde: string; msg: string }
 
 /* ------------------------------------------------------------------ formulário de uma opção (criar e editar) */
 /** `temFoto`: o atributo tem foto, e então o hex é opcional (a foto pode ser a única cor). Ao enviar, `hex` é o #RRGGBB, null (sem hex) ou '' (limpar o hex que a opção tinha). */
-function OpcaoForm({ temHex, temFoto, inicial, rotulo, criar, bloqueado, erro, idGuardar, onEnviar, onCancelar }: {
-  temHex: boolean; temFoto: boolean; inicial: { nome: string; hex: string | null; foto?: string | null }; rotulo: string; criar: boolean; bloqueado: boolean; erro: string | null; idGuardar: string;
-  onEnviar: (nome: string, hex: string | null) => void; onCancelar: () => void;
+function OpcaoForm({ temHex, temFoto, temAspeto, inicial, rotulo, criar, bloqueado, erro, idGuardar, onEnviar, onCancelar }: {
+  temHex: boolean; temFoto: boolean; /** 25/11: o atributo tem «Tem aspeto»: aparecem «É metal» e a superfície por omissão */ temAspeto: boolean;
+  inicial: { nome: string; hex: string | null; foto?: string | null; metal?: boolean; superficie?: Superficie | null }; rotulo: string; criar: boolean; bloqueado: boolean; erro: string | null; idGuardar: string;
+  /** `aspeto`: o metal e a superfície, só se o atributo tem aspeto E eles mudaram; senão null. */
+  onEnviar: (nome: string, hex: string | null, aspeto: AspetoOpcao | null) => void; onCancelar: () => void;
 }) {
   const [nome, setNome] = useState(inicial.nome), [hex, setHex] = useState(inicial.hex ?? "");
+  const [metal, setMetal] = useState(inicial.metal === true), [superficie, setSuperficie] = useState<Superficie | null>(inicial.superficie ?? null);
+  const aspetoMudou = temAspeto && (metal !== (inicial.metal === true) || superficie !== (inicial.superficie ?? null));
   const msgHex = useId(), dica = useId();
   const hexOk = temHex ? normalizarHex(hex) : null;
   const hexVazio = hex.trim() === "";
@@ -56,10 +65,10 @@ function OpcaoForm({ temHex, temFoto, inicial, rotulo, criar, bloqueado, erro, i
   const hexObrigatorio = temHex && !temFoto && hexVazio && (criar || inicial.hex != null);
   const limpaHex = temFoto && temHex && hexVazio && inicial.hex != null;
   const hexFormato = temHex && !hexVazio && !hexOk;
-  const mudou = criar || nome.trim() !== inicial.nome || limpaHex || (temHex && !hexVazio && (hexOk ?? null) !== (inicial.hex?.toUpperCase() ?? null));
+  const mudou = criar || nome.trim() !== inicial.nome || limpaHex || (temHex && !hexVazio && (hexOk ?? null) !== (inicial.hex?.toUpperCase() ?? null)) || aspetoMudou;
   const pode = !!nome.trim() && !hexObrigatorio && !hexFormato && mudou && !bloqueado;
   // a razão de o botão estar desligado, escrita (nunca só «cinzento»)
-  const razao = !nome.trim() ? (criar ? null : "Escreva o nome da opção.") : hexObrigatorio ? "A cor é obrigatória." : hexFormato ? null : !mudou ? "Altere o nome ou a cor para guardar." : null;
+  const razao = !nome.trim() ? (criar ? null : "Escreva o nome da opção.") : hexObrigatorio ? "A cor é obrigatória." : hexFormato ? null : !mudou ? (temAspeto ? "Altere o nome, a cor ou o aspeto para guardar." : "Altere o nome ou a cor para guardar.") : null;
   return (
     <div className={cn("grid gap-3 rounded-xl border border-border bg-card p-3", ENTRA)}>
       <div className="grid gap-3 sm:grid-cols-2">
@@ -77,10 +86,11 @@ function OpcaoForm({ temHex, temFoto, inicial, rotulo, criar, bloqueado, erro, i
           )}</Campo>
         )}
       </div>
+      {temAspeto && <AspetoOpcaoCampos metal={metal} superficie={superficie} onMetal={setMetal} onSuperficie={setSuperficie} desativado={bloqueado} />}
       {erro && <p className="text-[15px] text-red-700 dark:text-red-400" role="alert">{erro}</p>}
       {razao && <p id={dica} className="text-sm text-muted-foreground">{razao}</p>}
       <div className="flex flex-wrap gap-2">
-        <Button id={idGuardar} className="min-h-11 text-[15px]" disabled={!pode} aria-describedby={razao ? dica : undefined} onClick={() => onEnviar(nome.trim(), limpaHex ? "" : hexOk)}>{rotulo}</Button>
+        <Button id={idGuardar} className="min-h-11 text-[15px]" disabled={!pode} aria-describedby={razao ? dica : undefined} onClick={() => onEnviar(nome.trim(), limpaHex ? "" : hexOk, aspetoMudou ? { metal, superficie } : null)}>{rotulo}</Button>
         <Button variant="outline" className="min-h-11 text-[15px]" onClick={onCancelar} disabled={bloqueado}>Cancelar</Button>
       </div>
     </div>
@@ -197,11 +207,11 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
   const abrir = (a: Aberto) => { setAberto(a); setErro(null); setPend(null); };
   const fechar = (focar?: string) => { setAberto(null); setErro(null); setPend(null); if (focar) setFoco(focar); };
 
-  const criarAtributo = (nome: string, tipo: "lista" | "medida", temHex: boolean, temFoto: boolean) => {
+  const criarAtributo = (nome: string, tipo: "lista" | "medida", temHex: boolean, temFoto: boolean, temAspeto: boolean) => {
     // os ids de ANTES de gravar; o que a releitura trouxe a mais E tem este nome foi criado por esta ação (não por outro utilizador), e abre-se
     const antes = new Set((listaAtual.current ?? []).map((x) => x.id)), nomeNovo = semAcentos(nome.trim());
     let novos: string[] = [];
-    const comFoto = tipo === "lista" && temHex && temFoto;
+    const comFoto = tipo === "lista" && temHex && temFoto, comAspeto = tipo === "lista" && temAspeto;
     void correr(() => guardarAtributo(org, { atributo: null, nome, tipo, temHex: tipo === "lista" && temHex }), `Atributo «${nome}» criado.`, "novo", (lida) => {
       novos = (lida ?? []).filter((x) => !antes.has(x.id) && semAcentos(x.nome.trim()) === nomeNovo).map((x) => x.id);
       if (novos.length) setAbertos((s) => new Set([...s, ...novos]));
@@ -210,7 +220,10 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
       // o formulário fecha sempre (deixá-lo aberto convidava a criar o atributo outra vez, duplicado)
       fechar("novo-atributo");
       // não se sabe qual é o atributo criado: o aviso fica na página
-      if (comFoto && novos.length !== 1) { setErro({ onde: "pagina", msg: `O atributo «${nome}» foi criado, mas não foi possível ligar «Tem foto». Confirme na lista abaixo: não o crie outra vez.` }); return; }
+      if ((comFoto || comAspeto) && novos.length !== 1) {
+        const ligar = comFoto && comAspeto ? "«Tem foto» e «Tem aspeto»" : comFoto ? "«Tem foto»" : "«Tem aspeto»";
+        setErro({ onde: "pagina", msg: `O atributo «${nome}» foi criado, mas não foi possível ligar ${ligar}. Confirme na lista abaixo: não o crie outra vez.` }); return;
+      }
       // o interruptor «Tem foto» liga-se depois de o atributo existir; se a base recusar, o atributo fica criado SEM foto e a mensagem aparece nele
       if (comFoto) {
         await correr(async () => {
@@ -218,8 +231,18 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
           return r.ok === false ? { ...r, erro: `O atributo «${nome}» foi criado sem foto: ${r.erro} A foto só se escolhe ao criar o atributo: avise a equipa técnica antes de lhe juntar opções.` } : r;
         }, `Atributo «${nome}» com foto.`, `atr:${novos[0]}`);
       }
+      // 25/11: o interruptor «Tem aspeto» também se liga depois de o atributo existir; ao contrário da foto, pode ligar-se depois a qualquer momento
+      if (comAspeto) {
+        await correr(async () => {
+          const r = await definirAspetoAtributo(org, novos[0], true);
+          return r.ok === false ? { ...r, erro: `O atributo «${nome}» foi criado sem aspeto: ${r.erro} Ligue «Tem aspeto» no próprio atributo.` } : r;
+        }, `Atributo «${nome}» com aspeto.`, `atr:${novos[0]}`);
+      }
     });
   };
+  /** O interruptor «Tem aspeto» de um atributo existente (muda-se a qualquer momento; desligar não apaga o aspeto das opções). */
+  const mudarAspeto = (a: AtributoGestao, tem: boolean) =>
+    void correr(() => definirAspetoAtributo(org, a.id, tem), `«${a.nome}»: aspeto ${tem ? "ligado" : "desligado"}.`, `atr:${a.id}`);
   const gravarNomeAtributo = (a: AtributoGestao, nome: string) =>
     correr(() => guardarAtributo(org, { atributo: a.id, nome, tipo: null, temHex: null }), `Atributo «${nome}» guardado.`, `ren:${a.id}`).then((ok) => { if (ok) fechar(`ren-${a.id}`); });
   /** Renomear um atributo usado por produtos (ou de uso desconhecido) pede confirmação; sem produtos, grava logo. */
@@ -227,25 +250,44 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
     if (a.usados === 0) { void gravarNomeAtributo(a, nome); return; }
     setErro(null); setPend({ t: "atributo", atributo: a, nome });
   };
-  const criarOpcaoNova = (a: AtributoGestao, nome: string, hex: string | null) =>
-    void correr(() => criarOpcaoAtributo(org, a.id, nome, a.temHex ? hex : null), `Opção «${nome}» criada.`, `nova:${a.id}`).then((ok) => { if (ok) fechar(`nova-${a.id}`); });
-  const gravarOpcao = (o: OpcaoGestao, nome: string | null, hex: string | null) =>
-    correr(() => editarOpcao(org, o.id, { nome, hex, ativo: null }), `Opção «${nome ?? o.nome}» guardada.`, `ed:${o.id}`).then((ok) => { if (ok) fechar(`ed-${o.id}`); });
-  /** Nome ou cor de uma opção usada por produtos: pede confirmação antes; sem uso (ou sem mudança dessas), grava logo. */
-  const pedirGravarOpcao = (o: OpcaoGestao, nome: string, hex: string | null) => {
+  /** Cria a opção e, só se o aspeto mudou, grava-o a seguir na opção nova (a base separa as duas gravações). Se a segunda falhar, a opção fica criada e o formulário fecha com o aviso. */
+  const criarOpcaoNova = (a: AtributoGestao, nome: string, hex: string | null, aspeto: AspetoOpcao | null) => {
+    let parcial: string | null = null;
+    void correr(async () => {
+      const r = await criarOpcaoAtributo(org, a.id, nome, a.temHex ? hex : null);
+      if (r.ok === false || !aspeto) return r;
+      const s = await definirAspetoOpcao(org, r.v.id, aspeto);
+      if (s.ok === false) { parcial = `Opção «${nome}» criada sem o aspeto: ${s.erro}`; return { ok: false as const, erro: parcial }; }
+      return r;
+    }, `Opção «${nome}» criada.`, `nova:${a.id}`).then((ok) => {
+      if (ok) { fechar(`nova-${a.id}`); return; }
+      if (parcial) { fechar(`nova-${a.id}`); setErro({ onde: `atr:${a.id}`, msg: parcial }); }
+    });
+  };
+  /** Grava a opção (nome e cor, se mudaram) e DEPOIS o aspeto (só se mudou). Só o aspeto mudou: não se chama cat_editar_opcao. Se o aspeto falhar, a opção já ficou guardada e a mensagem di-lo. */
+  const gravarOpcao = (o: OpcaoGestao, nome: string | null, hex: string | null, aspeto: AspetoOpcao | null) => {
+    const mudaOpcao = nome !== null || hex !== null || !aspeto;
+    return correr(async () => {
+      if (mudaOpcao) { const r = await editarOpcao(org, o.id, { nome, hex, ativo: null }); if (r.ok === false || !aspeto) return r; }
+      const s = await definirAspetoOpcao(org, o.id, aspeto!);
+      return s.ok === false && mudaOpcao ? { ...s, erro: `Opção guardada sem o aspeto: ${s.erro}` } : s;
+    }, `Opção «${nome ?? o.nome}» guardada.`, `ed:${o.id}`).then((ok) => { if (ok) fechar(`ed-${o.id}`); });
+  };
+  /** Nome ou cor de uma opção usada por produtos: pede confirmação antes; sem uso (ou sem mudança dessas), grava logo. Só o aspeto mudou: grava logo, sem confirmação. */
+  const pedirGravarOpcao = (o: OpcaoGestao, nome: string, hex: string | null, aspeto: AspetoOpcao | null) => {
     const nomeNovo = nome !== o.nome ? nome : null;
     // hex "" = limpar a cor que a opção tinha (só num atributo com foto); sem cor antes, "" não muda nada
     const hexNovo = hex === "" ? (o.hex ? "" : null) : hex && hex !== (o.hex?.toUpperCase() ?? null) ? hex : null;
-    if (!nomeNovo && hexNovo === null) { fechar(`ed-${o.id}`); return; }
-    if (o.usados === 0) { void gravarOpcao(o, nomeNovo, hexNovo); return; }
-    setErro(null); setPend({ t: "opcao", nome: nomeNovo, hex: hexNovo, opcao: o });
+    if (!nomeNovo && hexNovo === null) { if (aspeto) void gravarOpcao(o, null, null, aspeto); else fechar(`ed-${o.id}`); return; }
+    if (o.usados === 0) { void gravarOpcao(o, nomeNovo, hexNovo, aspeto); return; }
+    setErro(null); setPend({ t: "opcao", nome: nomeNovo, hex: hexNovo, aspeto, opcao: o });
   };
   /** 16/11: a sigla de uma opção (SKU); só vale para os SKU futuros. */
   const gravarSigla = (o: OpcaoGestao, sigla: string) =>
     void correr(() => guardarSiglaOpcao(org, o.id, sigla), `Sigla de «${o.nome}» guardada: ${sigla}.`, `sig:${o.id}`).then((ok) => { if (ok) fechar(`sig-${o.id}`); });
   const confirmar = () => {
     if (!pend) return;
-    if (pend.t === "atributo") void gravarNomeAtributo(pend.atributo, pend.nome); else void gravarOpcao(pend.opcao, pend.nome, pend.hex);
+    if (pend.t === "atributo") void gravarNomeAtributo(pend.atributo, pend.nome); else void gravarOpcao(pend.opcao, pend.nome, pend.hex, pend.aspeto);
   };
   const voltarDaConfirmacao = () => {
     if (!pend) return;
@@ -301,7 +343,7 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
                 </button>
               </div>
               {aberto?.t === "novoAtributo" && (
-                <NovoAtributo aGravar={aGravar} erro={msg("novo")} onCriar={criarAtributo} onCancelar={() => fechar("novo-atributo")} />
+                <NovoAtributo aGravar={aGravar} erro={msg("novo")} aspetoDisponivel={lista.some((x) => x.aspetoDisponivel)} onCriar={criarAtributo} onCancelar={() => fechar("novo-atributo")} />
               )}
             </div>
           )}
@@ -317,7 +359,7 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
           {lista.map((a) => (
             <Atributo key={a.id} a={a} podeEditar={podeEditar} aberta={abertos.has(a.id)} onAlternar={() => alternar(a)} aGravar={aGravar} aberto={aberto} msg={msg} pend={pend}
               abrir={abrir} fechar={fechar} onRenomear={pedirRenomear} onNovaOpcao={criarOpcaoNova} onPedirGravar={pedirGravarOpcao}
-              onConfirmar={confirmar} onVoltarConfirmar={voltarDaConfirmacao} onAtivar={ativar} onMover={mover} onSigla={gravarSigla} org={org} correr={correr} onFoco={setFoco} />
+              onConfirmar={confirmar} onVoltarConfirmar={voltarDaConfirmacao} onAtivar={ativar} onMover={mover} onSigla={gravarSigla} onAspeto={mudarAspeto} org={org} correr={correr} onFoco={setFoco} />
           ))}
         </>
       )}
@@ -326,10 +368,13 @@ export function GestaoAtributos({ real, voltar, anunciar, embutido = false }: { 
 }
 
 /* ------------------------------------------------------------------ novo atributo */
-function NovoAtributo({ aGravar, erro, onCriar, onCancelar }: { aGravar: boolean; erro: string | null; onCriar: (nome: string, tipo: "lista" | "medida", temHex: boolean, temFoto: boolean) => void; onCancelar: () => void }) {
-  const [nome, setNome] = useState(""), [tipo, setTipo] = useState<"lista" | "medida">("lista"), [temHex, setTemHex] = useState(false), [temFoto, setTemFoto] = useState(false);
+function NovoAtributo({ aGravar, erro, aspetoDisponivel, onCriar, onCancelar }: {
+  aGravar: boolean; erro: string | null; /** a base devolve «Tem aspeto» (migration aplicada): só então a caixa aparece */ aspetoDisponivel: boolean;
+  onCriar: (nome: string, tipo: "lista" | "medida", temHex: boolean, temFoto: boolean, temAspeto: boolean) => void; onCancelar: () => void;
+}) {
+  const [nome, setNome] = useState(""), [tipo, setTipo] = useState<"lista" | "medida">("lista"), [temHex, setTemHex] = useState(false), [temFoto, setTemFoto] = useState(false), [temAspeto, setTemAspeto] = useState(false);
   return (
-    <div className={cn("grid gap-3 rounded-xl border border-border bg-card p-3", ENTRA)}>
+    <div role="group" aria-label="Novo atributo" className={cn("grid gap-3 rounded-xl border border-border bg-card p-3", ENTRA)}>
       <Campo rot="Nome do atributo">{(id) => <input id={id} value={nome} onChange={(e) => setNome(e.target.value)} className={CAMPO} autoFocus />}</Campo>
       <div className="grid gap-1.5">
         <span className="text-[15px] font-medium">Tipo</span>
@@ -352,9 +397,19 @@ function NovoAtributo({ aGravar, erro, onCriar, onCancelar }: { aGravar: boolean
           <span className="pl-7 text-sm text-muted-foreground">Cada opção pode ter uma foto (por exemplo, de uma madeira). Escolhe-se agora: depois de criado o atributo não se muda. O hex passa a ser opcional.</span>
         </div>
       )}
+      {/* 25/11: ao contrário da foto, o aspeto liga-se e desliga-se depois a qualquer momento; aqui é só um atalho para o ligar logo */}
+      {tipo === "lista" && aspetoDisponivel && (
+        <div className="grid gap-0.5">
+          <label className="flex min-h-11 items-center gap-2 text-[15px]">
+            <input type="checkbox" checked={temAspeto} onChange={(e) => setTemAspeto(e.target.checked)} className="h-5 w-5 accent-primary" />
+            Tem aspeto (metal e superfície)
+          </label>
+          <span className="pl-7 text-sm text-muted-foreground">Cada opção diz se é de metal e a superfície por omissão (polida, acetinada, mate). Pode ligar e desligar depois, no próprio atributo.</span>
+        </div>
+      )}
       {erro && <p className="text-[15px] text-red-700 dark:text-red-400" role="alert">{erro}</p>}
       <div className="flex flex-wrap gap-2">
-        <Button className="min-h-11 text-[15px]" disabled={!nome.trim() || aGravar} onClick={() => onCriar(nome.trim(), tipo, temHex, temHex && temFoto)}>
+        <Button className="min-h-11 text-[15px]" disabled={!nome.trim() || aGravar} onClick={() => onCriar(nome.trim(), tipo, temHex, temHex && temFoto, tipo === "lista" && aspetoDisponivel && temAspeto)}>
           {aGravar && <Loader2 className="mr-1 h-4 w-4 animate-spin" aria-hidden="true" />}Criar atributo
         </Button>
         <Button variant="outline" className="min-h-11 text-[15px]" onClick={onCancelar} disabled={aGravar}>Cancelar</Button>
@@ -367,13 +422,14 @@ function NovoAtributo({ aGravar, erro, onCriar, onCancelar }: { aGravar: boolean
 interface AtributoProps {
   a: AtributoGestao; podeEditar: boolean; aberta: boolean; onAlternar: () => void; aGravar: boolean; aberto: Aberto | null; msg: (onde: string) => string | null; pend: Pendente | null;
   abrir: (a: Aberto) => void; fechar: (focar?: string) => void;
-  onRenomear: (a: AtributoGestao, nome: string) => void; onNovaOpcao: (a: AtributoGestao, nome: string, hex: string | null) => void;
-  onPedirGravar: (o: OpcaoGestao, nome: string, hex: string | null) => void; onConfirmar: () => void; onVoltarConfirmar: () => void;
+  onRenomear: (a: AtributoGestao, nome: string) => void; onNovaOpcao: (a: AtributoGestao, nome: string, hex: string | null, aspeto: AspetoOpcao | null) => void;
+  onAspeto: (a: AtributoGestao, tem: boolean) => void;
+  onPedirGravar: (o: OpcaoGestao, nome: string, hex: string | null, aspeto: AspetoOpcao | null) => void; onConfirmar: () => void; onVoltarConfirmar: () => void;
   onAtivar: (a: AtributoGestao, o: OpcaoGestao, ativo: boolean) => void; onMover: (a: AtributoGestao, i: number, d: -1 | 1) => void;
   onSigla: (o: OpcaoGestao, sigla: string) => void;
   org: string; correr: (op: () => Promise<ResG<unknown>>, aviso: string, onde: string) => Promise<boolean>; onFoco: (id: string) => void;
 }
-function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pend, abrir, fechar, onRenomear, onNovaOpcao, onPedirGravar, onConfirmar, onVoltarConfirmar, onAtivar, onMover, onSigla, org, correr, onFoco }: AtributoProps) {
+function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pend, abrir, fechar, onRenomear, onNovaOpcao, onPedirGravar, onConfirmar, onVoltarConfirmar, onAtivar, onMover, onSigla, onAspeto, org, correr, onFoco }: AtributoProps) {
   const nomeId = useId(), painel = useId(), razaoId = useId();
   const [nome, setNome] = useState(a.nome);
   const [q, setQ] = useState("");
@@ -445,6 +501,16 @@ function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pen
           <p className={cn(NOTA, "mt-3")}>Medida fixa: 1D, 2D ou 3D, em cm ou mm. Em 1D escolhe-se uma dimensão (largura, altura, comprimento ou espessura) e o seu valor; em 2D a largura e o comprimento; em 3D também a espessura. Escreve-se em cada produto; não tem lista de opções nem cor.</p>
         ) : (
           <>
+            {/* 25/11: «Tem aspeto» (só se a base já o devolve, e só com products.edit): muda-se a qualquer momento; desligar não apaga o que as opções já têm */}
+            {podeEditar && a.aspetoDisponivel && (
+              <div className="mt-3 grid gap-0.5">
+                <label className="flex min-h-11 items-center gap-2 text-[15px]">
+                  <input type="checkbox" checked={a.temAspeto} disabled={aGravar} onChange={(e) => onAspeto(a, e.target.checked)} className="h-5 w-5 accent-primary" />
+                  Tem aspeto (metal e superfície)
+                </label>
+                <span className="pl-7 text-sm text-muted-foreground">Cada opção diz se é de metal e a superfície por omissão (polida, acetinada, mate). Desligar não apaga o que já está escrito.</span>
+              </div>
+            )}
             {a.opcoes.length > 0 ? (
               <div className="mt-3 grid gap-3">
                 <div className="relative">
@@ -467,6 +533,7 @@ function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pen
                             {a.temHex && <AmostraOpcao foto={o.foto} hex={o.hex} nome={o.nome} />}
                             <span className={cn("min-w-0 break-words text-[15px] font-medium", !o.ativo && "text-foreground/75")}>{o.nome}{!o.ativo && " (desativada)"}</span>
                             <SiglaTexto sigla={o.sigla} />
+                            {a.temAspeto && resumoDoAspeto(o.metal, o.superficie) && <span className="text-sm text-foreground/75">{resumoDoAspeto(o.metal, o.superficie)}</span>}
                             {a.temHex && (o.hex || !o.foto) && <span className="text-sm text-foreground/75 tabular-nums">{o.hex ?? "sem hex"}</span>}
                             {o.usados != null && <span className="text-sm text-foreground/75">{produtos(o.usados)}</span>}
                             {podeEditar && (
@@ -502,9 +569,9 @@ function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pen
                           )}
                           {podeEditar && aberto?.t === "editarOpcao" && aberto.id === o.id && (
                             <>
-                              <OpcaoForm temHex={a.temHex} temFoto={a.temFoto} inicial={{ nome: o.nome, hex: o.hex, foto: o.foto }} rotulo="Guardar opção" criar={false} bloqueado={aGravar || !!pendOpcao}
+                              <OpcaoForm temHex={a.temHex} temFoto={a.temFoto} temAspeto={a.temAspeto} inicial={{ nome: o.nome, hex: o.hex, foto: o.foto, metal: o.metal, superficie: o.superficie }} rotulo="Guardar opção" criar={false} bloqueado={aGravar || !!pendOpcao}
                                 erro={pendOpcao ? null : msg(`ed:${o.id}`)} idGuardar={`gu-${o.id}`}
-                                onEnviar={(n, h) => onPedirGravar(o, n, h)} onCancelar={() => fechar(`ed-${o.id}`)} />
+                                onEnviar={(n, h, asp) => onPedirGravar(o, n, h, asp)} onCancelar={() => fechar(`ed-${o.id}`)} />
                               {pendOpcao && <Confirmar p={pendOpcao} aGravar={aGravar} erro={msg(`ed:${o.id}`)} onConfirmar={onConfirmar} onVoltar={onVoltarConfirmar} />}
                             </>
                           )}
@@ -522,8 +589,8 @@ function Atributo({ a, podeEditar, aberta, onAlternar, aGravar, aberto, msg, pen
                     <Plus className="h-4 w-4" aria-hidden="true" />Nova opção…
                   </button>
                 </div>
-                {aCriar && <OpcaoForm temHex={a.temHex} temFoto={a.temFoto} inicial={{ nome: "", hex: null }} rotulo="Criar opção" criar bloqueado={aGravar} erro={msg(`nova:${a.id}`)} idGuardar={`gc-${a.id}`}
-                  onEnviar={(n, h) => onNovaOpcao(a, n, h)} onCancelar={() => fechar(`nova-${a.id}`)} />}
+                {aCriar && <OpcaoForm temHex={a.temHex} temFoto={a.temFoto} temAspeto={a.temAspeto} inicial={{ nome: "", hex: null }} rotulo="Criar opção" criar bloqueado={aGravar} erro={msg(`nova:${a.id}`)} idGuardar={`gc-${a.id}`}
+                  onEnviar={(n, h, asp) => onNovaOpcao(a, n, h, asp)} onCancelar={() => fechar(`nova-${a.id}`)} />}
               </div>
             )}
           </>

@@ -152,3 +152,31 @@ describe("foto na opção (migration por aplicar: a leitura é tolerante)", () =
     expect(cor?.opcoes.map((o) => o.foto)).toEqual([null, null]);
   });
 });
+
+describe("«Tem aspeto» no atributo (migration por aplicar: a leitura é tolerante)", () => {
+  const COM_ASPETO = {
+    atributos: [
+      { id: A_COR, codigo: "cor", nome: "Cor", tipo: "lista", tem_hex: true, tem_aspeto: true, ordem: 2,
+        opcoes: [{ id: O_BRANCO, valor: "BRANCO", nome: "Branco", hex: "#FFFFFF", metal: false, superficie: null, ordem: 2 }, { id: O_PRETO, valor: "PRETO", nome: "Preto", hex: "#000000", metal: true, superficie: "acetinada", ordem: 1 }] },
+    ],
+    produtos: [],
+  };
+  it("sem as chaves novas: nada de temAspeto, metal nem superficie nas definições (as opções ficam exactamente como hoje)", () => {
+    const cor = montar(juntarAtributos(base(), RESPOSTA)).K.atributos?.find((a) => a.id === A_COR);
+    expect(cor).not.toHaveProperty("temAspeto");
+    for (const o of cor?.opcoes ?? []) { expect(o).not.toHaveProperty("metal"); expect(o).not.toHaveProperty("superficie"); }
+  });
+  it("com as chaves: temAspeto, e o metal e a superfície de cada opção chegam a K.atributos", () => {
+    const cor = montar(juntarAtributos(base(), COM_ASPETO)).K.atributos?.[0];
+    expect(cor?.temAspeto).toBe(true);
+    expect(cor?.opcoes.map((o) => [o.nome, o.metal, o.superficie])).toEqual([["Preto", true, "acetinada"], ["Branco", false, null]]);
+  });
+  it("valores esquisitos: uma superfície que não é uma das três conta como nenhuma, e metal que não é booleano como false", () => {
+    const R = { atributos: [{ ...COM_ASPETO.atributos[0], opcoes: [{ id: O_BRANCO, valor: "B", hex: null, metal: "sim", superficie: "brilhante", ordem: 1 }] }], produtos: [] };
+    expect(montar(juntarAtributos(base(), R)).K.atributos?.[0].opcoes.map((o) => [o.metal, o.superficie])).toEqual([[false, null]]);
+  });
+  it("tem_aspeto como texto conta como desligado: nada chega", () => {
+    const R = { atributos: [{ ...COM_ASPETO.atributos[0], tem_aspeto: "sim" }], produtos: [] };
+    expect(montar(juntarAtributos(base(), R)).K.atributos?.[0]).not.toHaveProperty("temAspeto");
+  });
+});

@@ -5,6 +5,9 @@ import { Box } from "lucide-react";
 import { useDebounce } from "@/hooks/useDebounce";
 import { cn } from "@/lib/utils";
 import { Previa3DProduto } from "./Previa3DProduto";
+import type { Config3dPrevia } from "./Previa3DLigacoes";
+import { ligacoesDaConfig, type Ligacao } from "./config3dDados";
+import { useConfig3d, type AlvoConfig3d } from "./useConfig3d";
 import { urlDaFotoOpcao } from "./fotoOpcaoUrl";
 import { corDosAtributos, fotoDosAtributos, medidaDosAtributos } from "./planta3d/previaProduto3d";
 import { LADO_TEXTURA_CM } from "./planta3d/texturaProduto";
@@ -23,10 +26,24 @@ export interface Modelo3DProdutoProps {
   attrs?: readonly AtributoProduto[]; defs?: readonly AtributoDef[];
   /** O «Modelo 3D» escolhido no próprio produto (a subcategoria e a categoria vêm da árvore): manda sobre o classificador. */
   modelo3d?: string | null;
+  /**
+   * 25/11: o produto cuja configuração 3D (eixos da Medida e ligações atributo → zona) se lê, ao abrir o 3D, e se grava. Só a ficha de um produto da base o passa; sem ele (o formulário
+   * de criar, o protótipo) a secção é só para ver, como era.
+   */
+  alvoConfig3d?: AlvoConfig3d;
 }
 
+const mesmasLigacoes = (a: readonly Ligacao[], b: readonly Ligacao[]): boolean => JSON.stringify(a) === JSON.stringify(b);
+const SEM_LIGACOES: readonly Ligacao[] = [];
+
 /** O 3D aberto: nasce com o que há agora e, ao escrever o nome ou as medidas, espera um instante antes de se redesenhar. Só existe enquanto está aberto. */
-function Aberto({ nome, sub, no, arvore, attrs, defs, modelo3d }: Modelo3DProdutoProps) {
+function Aberto({ nome, sub, no, arvore, attrs, defs, modelo3d, alvoConfig3d }: Modelo3DProdutoProps) {
+  // 25/11: a configuração 3D lê-se aqui, quando o 3D abre (uma vez), e não antes; o rascunho das ligações vive aqui para o 3D o mostrar logo, sem gravar
+  const cfg = useConfig3d(alvoConfig3d);
+  const [rascunho, setRascunho] = useState<readonly Ligacao[] | null>(null);
+  const guardadas = cfg.config?.efectiva.ligacoes ?? null;
+  const ligacoesEmVigor = rascunho ?? guardadas ?? SEM_LIGACOES;
+  const ligadas = useMemo(() => ligacoesDaConfig(ligacoesEmVigor), [ligacoesEmVigor]);
   const nomeEspera = useDebounce(nome, ESPERA_MS);
   const attrsEspera = useDebounce(attrs, ESPERA_MS);
   const medida = useMemo(() => medidaDosAtributos(attrsEspera), [attrsEspera]);
@@ -38,8 +55,32 @@ function Aberto({ nome, sub, no, arvore, attrs, defs, modelo3d }: Modelo3DProdut
   const medidaRevestimento = useMemo(() => medidaDoRevestimento(attrsEspera), [attrsEspera]);
   const aplicacao = useMemo(() => aplicacaoDosAtributos(attrsEspera, defs), [attrsEspera, defs]);
   // 24/11 (fase 1): a aparência de cada zona pelo nome do atributo («Cor da frente» → frente, «Cor do corpo» → corpo, «Cor» → o resto); sem estes atributos, nada muda
-  const zonas = useMemo(() => { const z = zonasDosAtributos(attrsEspera, defs); return z ? zonasVisuais(z, urlDaFotoOpcao) : undefined; }, [attrsEspera, defs]);
-  return <Previa3DProduto nome={nomeEspera} sub={sub} no={no} arvore={arvore} medida={medida} cor={cor} textura={textura} modelo3d={modelo3d} medidaRevestimento={medidaRevestimento} aplicacao={aplicacao} zonas={zonas} painelMedidas />;
+  // 25/11: as ligações explícitas (guardadas, ou o rascunho) mandam sobre os nomes; sem configuração, `ligadas` está vazio e o resultado é o de sempre
+  const zonas = useMemo(() => { const z = zonasDosAtributos(attrsEspera, defs, ligadas.ligacoes, ligadas.excluidos); return z ? zonasVisuais(z, urlDaFotoOpcao) : undefined; }, [attrsEspera, defs, ligadas]);
+  const config3d = useMemo<Config3dPrevia | undefined>(() => {
+    const c = cfg.config;
+    if (!c || !alvoConfig3d) return undefined;
+    const e = c.efectiva;
+    return {
+      podeEditar: alvoConfig3d.podeEditar,
+      eixos: { guardados: e.eixos, origem: e.eixosOrigem, proprio: !!c.proprio?.eixos, gravar: cfg.gravarEixos },
+      ligacoes: {
+        valor: ligacoesEmVigor, alterado: rascunho !== null && !mesmasLigacoes(rascunho, guardadas ?? SEM_LIGACOES), origem: e.ligacoesOrigem, proprio: c.proprio?.ligacoes != null,
+        atributos: (defs ?? []).filter((d) => d.tipo === "lista").map((d) => ({ id: d.id, nome: d.nome })),
+        orfas: c.proprio?.orfas ?? 0, ignoradas: c.proprio?.ignoradas ?? 0,
+        aoMudar: (l) => setRascunho(l),
+        // depois de gravar, o rascunho acaba: valem as ligações que a base acabou de guardar (o gancho relê a configuração antes de responder)
+        gravar: async () => { const erro = await cfg.gravarLigacoes(ligacoesEmVigor); if (!erro) setRascunho(null); return erro; },
+        herdar: async () => { const erro = await cfg.gravarLigacoes(null); if (!erro) setRascunho(null); return erro; },
+      },
+    };
+  }, [cfg, alvoConfig3d, defs, ligacoesEmVigor, rascunho, guardadas]);
+  return (
+    <>
+      {cfg.erro && <p role="status" className="mb-2 text-[15px] text-muted-foreground">{cfg.erro} O 3D usa a regra automática.</p>}
+      <Previa3DProduto nome={nomeEspera} sub={sub} no={no} arvore={arvore} medida={medida} cor={cor} textura={textura} modelo3d={modelo3d} medidaRevestimento={medidaRevestimento} aplicacao={aplicacao} zonas={zonas} painelMedidas config3d={config3d} />
+    </>
+  );
 }
 
 export function Modelo3DProduto(props: Modelo3DProdutoProps) {
@@ -49,7 +90,9 @@ export function Modelo3DProduto(props: Modelo3DProdutoProps) {
   const origem = resolverDoNo({ produto: props.modelo3d, arvore: props.arvore, no: props.no });
   return (
     <div className="grid gap-3">
-      <p className="text-[15px] text-muted-foreground">Só para ver: o 3D que o catálogo daria a este produto, pelo modelo escolhido, pelo nome, pela subcategoria e pelas medidas. Não grava nada.</p>
+      {props.alvoConfig3d
+        ? <p className="text-[15px] text-muted-foreground">O 3D que o catálogo daria a este produto, pelo modelo escolhido, pelo nome, pela subcategoria e pelas medidas. Os eixos da Medida e as ligações dos atributos às zonas podem guardar-se neste produto, abrindo o 3D.</p>
+        : <p className="text-[15px] text-muted-foreground">Só para ver: o 3D que o catálogo daria a este produto, pelo modelo escolhido, pelo nome, pela subcategoria e pelas medidas. Não grava nada.</p>}
       <p data-testid="modelo3d-origem" className="text-[15px]">Modelo: <span className="font-medium">{textoDaOrigem(origem)}</span></p>
       {/* o rótulo fica sempre «Ver em 3D» e quem diz se está aberto é o aria-expanded (o fundo também muda): um rótulo que muda E um aria-expanded diziam a mesma coisa duas vezes */}
       <button type="button" aria-expanded={aberto} aria-controls={idPainel} onClick={() => setAberto((v) => !v)}
