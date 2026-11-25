@@ -48,11 +48,41 @@ export function microDoServico(t: Tarefa, p?: Plano | null): Micro[] {
   });
 }
 /** A proposta para uma tarefa: a lista da ficha do serviço; sem ela, as tarefas da Mudelar no Infraspeak para este trabalho. */
-export function propostaMicro(t: Tarefa, p?: Plano | null): { L: Micro[]; origem: "servico" | "infraspeak" } | null {
+function propostaSo(t: Tarefa, p?: Plano | null): { L: Micro[]; origem: "servico" | "infraspeak" } | null {
   const s = microDoServico(t, p);
   if (s.length) return { L: s, origem: "servico" };
   const i = microDoInfraspeak(t, p);
   return i.length ? { L: i, origem: "infraspeak" } : null;
+}
+/** 25/11 (obra 1048: «Demolição e remoção» e o extra «Demolição de parede» com as mesmas 21 tarefas): numa obra, cada tarefa do Infraspeak
+ *  (ref) fica numa só tarefa do plano: na que tem mais horas (empate: a primeira). As outras não a repetem; uma lista que fica vazia
+ *  deixa a tarefa com o Catálogo ou as instruções. */
+function donoDasRefs(p: Plano): Map<string, Tarefa> {
+  const dono = new Map<string, Tarefa>();
+  for (const x of p.tasks) {
+    for (const m of propostaSo(x, p)?.L ?? []) {
+      if (!m.ref) continue;
+      const atual = dono.get(m.ref);
+      if (!atual || x.h > atual.h) dono.set(m.ref, x);
+    }
+  }
+  return dono;
+}
+const cacheDono = new WeakMap<Plano, { chave: string; dono: Map<string, Tarefa> }>();
+function donoDe(p: Plano): Map<string, Tarefa> {
+  const chave = p.tasks.map((x) => `${x.nome}|${x.svcs[0] ?? ""}|${x.h}|${x.fase ?? ""}`).join("~");
+  const c = cacheDono.get(p);
+  if (c && c.chave === chave) return c.dono;
+  const dono = donoDasRefs(p);
+  cacheDono.set(p, { chave, dono });
+  return dono;
+}
+export function propostaMicro(t: Tarefa, p?: Plano | null): { L: Micro[]; origem: "servico" | "infraspeak" } | null {
+  const r = propostaSo(t, p);
+  if (!r || !p || !p.tasks.includes(t)) return r;
+  const dono = donoDe(p);
+  const L = r.L.filter((m) => !m.ref || dono.get(m.ref) === t).map((m, id) => ({ ...m, id }));
+  return L.length ? { L, origem: r.origem } : null;
 }
 
 /** Os passos da mão de obra do serviço da tarefa no Catálogo, com as horas repartidas pelas horas da tarefa. [] sem Catálogo. */

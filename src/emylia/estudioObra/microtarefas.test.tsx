@@ -114,10 +114,18 @@ describe("as tarefas da Mudelar no Infraspeak (25/11)", () => {
     const soCozinha = { tasks: [T('Bancada de Cozinha', 4), T('Montagem de louças', 4)] } as never;
     expect(microtarefasDe(T('Montagem de louças', 4), null, soCozinha).origem).toBe('instrucoes'); // louças não existem na cozinha
   });
+  it("numa obra, cada tarefa do Infraspeak fica numa só tarefa do plano (a com mais horas): o extra não repete a demolição", () => {
+    const T = (nome: string, h: number): Tarefa => ({ nome, svcs: [], dia: 0, dur: 1, sk: 'Servente', h, tec: null, fase: 1 });
+    const dem = T('Demolição e remoção', 15.65), extra = T('Mão de Obra Demolição de parede', 0.24);
+    const p = { tasks: [extra, dem], estado: 'aprovado', dia: 0 } as never;
+    expect(listaMicro(dem, null, p).length).toBeGreaterThan(10);
+    expect(microtarefasDe(extra, null, p).origem).toBe('instrucoes');
+    expect(microDoInfraspeak(extra, p).length).toBeGreaterThan(10); // a proposta solta continua lá (para a ficha do serviço)
+  });
   it("uma lista posta pela app troca-se por inteiro pela proposta certa; mudada à mão, não", () => {
     const { S, d, A, p, livre } = obra();
     const t = p.tasks[livre];
-    t.nome = 'Revestimento de parede';
+    t.nome = 'Teto falso em pladur';
     t.micro = [{ id: 0, n: 'Errada', ref: 'cozinha.4.0' }, { id: 1, n: 'Outra errada', ref: 'cozinha.4.1' }];
     A.fixarMicrotarefas(d.id);
     expect(t.micro.map((m) => m.ref)).toEqual(microDoInfraspeak(t, p).map((m) => m.ref));
@@ -131,7 +139,7 @@ describe("as tarefas da Mudelar no Infraspeak (25/11)", () => {
     const t = p.tasks[livre];
     t.micro = [{ id: 0, n: "Preparar" }, { id: 1, n: "Assentar" }, { id: 7, n: "Juntada pelo gestor" }];
     t.exec = { estado: "em curso", horas: 1, fotos: [], passos: [1] };
-    t.nome = "Revestimento de parede"; // agora casa com o Infraspeak
+    t.nome = "Teto falso em pladur"; // agora casa com o Infraspeak
     const inf = microDoInfraspeak(t, p);
     expect(inf.length).toBeGreaterThan(3);
     A.fixarMicrotarefas(d.id);
@@ -156,7 +164,7 @@ describe("as microtarefas da ficha do serviço (25/11)", () => {
   it("a lista da ficha do serviço vem antes do Infraspeak; a checklist do Infraspeak não se repete na tarefa", () => {
     const { S, p, livre } = obra();
     const t = p.tasks[livre];
-    t.nome = "Revestimento de parede";
+    t.nome = "Teto falso em pladur";
     expect(microtarefasDe(t, S, p).origem).toBe("infraspeak");
     const inf = microDoInfraspeak(t, p);
     const ref = inf[0].ref!, det = detalheMicro(inf[0]).det;
@@ -191,7 +199,7 @@ describe("os tempos pelo Infraspeak (25/11)", () => {
     const { S, d, A, p, livre } = obra();
     p.estado = "aprovado";
     const t = p.tasks[livre];
-    t.nome = "Revestimento de parede";
+    t.nome = "Teto falso em pladur";
     const x = temposDoInfraspeak(d, S).find((y) => y.ti === livre)!;
     expect(x.infraspeak).toBe(microDoInfraspeak(t, p).reduce((a, m) => a + (m.h ?? 0), 0));
     expect(x.plano).toBe(t.h);

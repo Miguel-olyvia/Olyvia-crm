@@ -1,9 +1,9 @@
 // 25/11 (Rúben: «garantir que os tempos, os serviços e as microtarefas das obras estejam perfeitos a partir dos dados do Infraspeak»).
 // No Plano do Estúdio da obra: por tarefa, as horas do plano e as que as microtarefas somam (as horas previstas das tarefas reais da Mudelar
-// no Infraspeak, ou as da ficha do serviço). O gestor usa as do Infraspeak numa tarefa ou em todas as que diferem (A.ajustarTarefa: as
-// datas seguem). Só nas tarefas que ainda se mexem; com a obra em curso, mais horas pedem «Porquê?» (quem paga), como sempre.
+// no Infraspeak, ou as da ficha do serviço). O gestor usa as do Infraspeak tarefa a tarefa (A.ajustarTarefa: as datas seguem). Sem «usar
+// em todas»: as horas do Infraspeak são de uma obra-tipo e não crescem com a quantidade; decide-se uma a uma. Só nas tarefas que ainda se mexem; com a obra em curso, mais horas pedem «Porquê?» (quem paga), como sempre.
 import { useState } from "react";
-import { Clock, Check } from "lucide-react";
+import { Clock } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { nfmt, r2, type Negocio } from "../motor";
@@ -28,7 +28,7 @@ export function temposDoInfraspeak(d: Negocio, S: Ctx["S"]): TempoTarefa[] {
 const difere = (x: TempoTarefa) => Math.abs(x.infraspeak - x.plano) >= 0.25;
 
 export function TemposInfraspeak({ ctx, d, podeMexer, mudar }: { ctx: Ctx; d: Negocio; podeMexer: (ti: number) => boolean; mudar: (ti: number, fn: () => void) => void }) {
-  const { S, A } = ctx;
+  const { S } = ctx;
   const [aberto, setAberto] = useState(false);
   const p = d.obra.plano!;
   const L = temposDoInfraspeak(d, S);
@@ -36,7 +36,6 @@ export function TemposInfraspeak({ ctx, d, podeMexer, mudar }: { ctx: Ctx; d: Ne
   const vivo = p.estado === "em curso";
   const porUsar = L.filter((x) => difere(x) && podeMexer(x.ti));
   const tPlano = r2(L.reduce((a, x) => a + x.plano, 0)), tInf = r2(L.reduce((a, x) => a + x.infraspeak, 0));
-  const usarTodas = () => mudar(porUsar[0].ti, () => { for (const x of porUsar) A.ajustarTarefa(d.id, x.ti, { h: x.infraspeak }); });
   return (
     <section aria-labelledby="tempos-inf" className="rounded-2xl border border-border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -49,7 +48,6 @@ export function TemposInfraspeak({ ctx, d, podeMexer, mudar }: { ctx: Ctx; d: Ne
         </div>
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="ghost" className="min-h-10" aria-expanded={aberto} onClick={() => setAberto(!aberto)}>{aberto ? "Esconder" : "Ver tarefa a tarefa"}</Button>
-          {porUsar.length > 0 && !vivo && <Button type="button" variant="outline" className="min-h-10" onClick={usarTodas}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />Usar as horas do Infraspeak ({porUsar.length})</Button>}
         </div>
       </div>
       {aberto && (
