@@ -8,7 +8,8 @@
 // Sem React nem three (só a constante do lado da textura).
 import type { AtributoDef, AtributoProduto, Superficie } from "../v2/catalogoModelo";
 import { chaveDeExclusao, materialDaSuperficie, superficieDaZona, type MaterialZona } from "./aspetoZonas";
-import { sem, temGeometriaPropria, type ProdutoModelo3D } from "./catalogo3d";
+import { classesDosAtributos, daAspeto, ehAcabamento, hexValido, opcaoEscolhida } from "./acabamentoCor3d";
+import { temGeometriaPropria, type ProdutoModelo3D } from "./catalogo3d";
 import { USAR_GLB_GENERICOS, categoriaDoTipo, categoriaPorId, opcoesComOmissao, type ParteGlb, type ZonaGlb } from "./categoriasGlb";
 import { LADO_TEXTURA_CM, type TexturaModelo } from "./texturaProduto";
 
@@ -70,41 +71,47 @@ export interface AparenciaZona { atributo: string; foto: string | null; hex: str
 /** A ligação explícita (id do atributo → zonas que pinta; gravada por produto, subcategoria ou categoria). Um atributo ligado só pinta as zonas a que está ligado; os nomes deixam de contar para ele. */
 export type LigacoesDeZonas = Readonly<Record<string, readonly ZonaGlb[]>>;
 
-const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
-type Papel = "corpo" | "frente" | "geral" | null;
-/** O papel de um atributo de cor pelo nome: «Cor do corpo», «Cor da frente», «Cor» (ou o código `cor`); outro nome: nenhum. */
-function papelDe(d: AtributoDef): Papel {
-  const n = sem(d.nome).trim();
-  return n === "cor do corpo" ? "corpo" : n === "cor da frente" ? "frente" : n === "cor" || d.codigo.toLowerCase() === "cor" ? "geral" : null;
-}
-
 /**
  * O que a `zona` leva, ou null (fica a cor lisa do modelo). Por esta ordem: 1) o atributo próprio da zona («Cor da frente» → frente, «Cor do corpo» → corpo, ou o ligado a ela em `ligacoes`);
  * 2) «Cor»; 3) «Cor do corpo», que é a base de tudo o que não tem atributo próprio (é a prioridade de hoje: corpo antes de frente); 4) o único atributo de cor, seja qual for o nome.
  * Só conta o atributo com opção escolhida; a opção escolhida sem foto NÃO vai buscar a foto de outro atributo (seria a de outra parte).
+ * 25/11 (separação Cor/Acabamento, acabamentoCor3d.ts): em cada passo o acabamento vem antes da cor («Acabamento da frente» antes de «Cor da frente», «Acabamento do corpo» antes de «Cor do corpo»,
+ * «Acabamento da cor»/«Decor» antes de «Cor»); um acabamento só conta se a opção der aspeto (foto, hex, metal), e uma ligação explícita ganha sempre ao acabamento pelo nome.
  */
 export function aparenciaDaZona(
   zona: ZonaGlb, attrs: readonly AtributoProduto[] | undefined, defs: readonly AtributoDef[] | undefined, ligacoes?: LigacoesDeZonas, excluidos?: ReadonlySet<string>,
 ): AparenciaZona | null {
   if (!attrs?.length || !defs?.length) return null;
   // 25/11: um atributo com «aplicar: não» nesta zona (excluidos) deixa de a pintar, mesmo pelo nome
+  const classes = classesDosAtributos(defs);
   const cores = defs.filter((d) => (d.temHex || d.temFoto) && !excluidos?.has(chaveDeExclusao(d.id, zona)));
   const ligada = (d: AtributoDef): boolean => !!ligacoes?.[d.id]?.length;
+  const papelDe = (d: AtributoDef) => classes.get(d.id)?.papel ?? null;
+  const nivelDe = (d: AtributoDef) => classes.get(d.id)?.nivel ?? 3;
+  const porNivel = (ds: readonly AtributoDef[]): AtributoDef[] => [...ds].sort((a, b) => nivelDe(a) - nivelDe(b));
   const escolhida = (d: AtributoDef): AparenciaZona | null => {
-    const a = attrs.find((x) => x.atributoId === d.id && x.opcaoId);
-    if (!a) return null;
-    const o = d.opcoes.find((x) => x.id === a.opcaoId);
+    const e = opcaoEscolhida(d, attrs);
+    if (!e) return null;
+    const o = e.opcao;
+    if (!ligada(d) && ehAcabamento(classes.get(d.id)) && !daAspeto(d, o)) return null; // «Halifax» sem foto nem hex não tapa a cor
     return {
-      atributo: d.nome, foto: o?.foto || null, hex: o?.hex && HEX.test(o.hex) ? o.hex : null,
+      atributo: d.nome, foto: o?.foto || null, hex: hexValido(o?.hex) ? o.hex : null,
       ...(d.temAspeto && o?.metal ? { metal: true as const } : {}), ...(d.temAspeto && o?.superficie ? { superficie: o.superficie } : {}),
     };
   };
-  const primeira = (ds: readonly AtributoDef[]): AparenciaZona | null => { for (const d of ds) { const r = escolhida(d); if (r) return r; } return null; };
+  const achar = (ds: readonly AtributoDef[]): { d: AtributoDef; r: AparenciaZona } | null => { for (const d of ds) { const r = escolhida(d); if (r) return { d, r }; } return null; };
+  const primeira = (ds: readonly AtributoDef[]): AparenciaZona | null => achar(ds)?.r ?? null;
   const livres = cores.filter((d) => !ligada(d));
-  return primeira(cores.filter((d) => (ligada(d) ? ligacoes![d.id].includes(zona) : papelDe(d) === zona)))
-    ?? primeira(livres.filter((d) => papelDe(d) === "geral"))
-    ?? primeira(livres.filter((d) => papelDe(d) === "corpo"))
-    ?? (cores.length === 1 ? primeira(livres) : null);
+  const proprios = cores.filter((d) => (ligada(d) ? ligacoes![d.id].includes(zona) : papelDe(d) === zona));
+  // o que já havia (as ligações explícitas e as cores lisas do corpo e da frente, pela ordem das definições) e, antes dele, o acabamento da zona pelo nome; uma ligação explícita ganha a ambos
+  const antigo = achar(proprios.filter((d) => ligada(d) || !ehAcabamento(classes.get(d.id))));
+  const acabamento = achar(porNivel(proprios.filter((d) => !ligada(d) && ehAcabamento(classes.get(d.id)))));
+  const proprio = antigo && ligada(antigo.d) ? antigo : acabamento ?? antigo;
+  return proprio?.r
+    ?? primeira(porNivel(livres.filter((d) => papelDe(d) === "geral")))
+    ?? primeira(porNivel(livres.filter((d) => papelDe(d) === "corpo")))
+    // «o único atributo de cor» conta os atributos de cor do produto ANTES das exclusões: desligar a «Cor» não faz de outro atributo (o Puxador…) o único, que passaria a pintar tudo
+    ?? (defs.filter((d) => d.temHex || d.temFoto).length === 1 ? primeira(livres) : null);
 }
 
 /** A aparência de cada zona que leva alguma, e se as zonas DIFEREM (`porZona`): com todas iguais o 3D segue o caminho de hoje (a foto ou cor única no material `corpo`). */
@@ -130,6 +137,17 @@ export function zonasDosAtributos(
   const chave = (a: AparenciaZona | undefined): string => (a ? `${a.foto ?? ""}|${a.hex ?? ""}${a.metal || a.superficie ? `|${a.metal ? "metal" : ""}|${a.superficie ?? ""}` : ""}` : "");
   const ligadas = ZONAS.filter((z) => Object.values(ligacoes ?? {}).some((zs) => zs.includes(z)));
   return { porZona: new Set(ZONAS.map((z) => chave(zonas[z]))).size > 1, zonas, ...(ligadas.length ? { ligadas } : {}) };
+}
+
+/**
+ * 25/11: a foto e a cor ÚNICAS de um produto COM configuração 3D (ligações ou exclusões): as das zonas, que são todas iguais quando `porZona` é falso (senão cada zona leva a sua e não há única).
+ * Sem configuração a única continua a vir dos nomes (fotoDosAtributos e corDosAtributos). Assim um atributo com outro nome ligado a «Tudo» (ou um nome conhecido com «aplicar: não») vale
+ * também quando as zonas coincidem, que é o caminho em que o 3D usa só a foto ou cor única.
+ */
+export function aparenciaUnicaDasZonas(z: ZonasDosAtributos | undefined): { foto: string | null; hex: string | null } | null {
+  if (!z || z.porZona) return null;
+  const a = ZONAS.map((zona) => z.zonas[zona]).find((x) => !!x);
+  return a ? { foto: a.foto, hex: a.hex } : null;
 }
 
 /**

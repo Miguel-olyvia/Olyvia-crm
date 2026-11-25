@@ -2,7 +2,8 @@
 // as medidas e a cor que vêm dos atributos do produto, o modelo do catálogo 3D com essas medidas, o estado do modelo (o que se vai ver)
 // e a cena mínima: uma divisão pequena com a peça ao centro e a câmara a apontar-lhe.
 import type { AtributoDef, AtributoProduto, DimensaoMedida } from "../v2/catalogoModelo";
-import { alturaDeSanitaDeChao, modeloDoProduto, sem, temModeloGenerico, temModeloHtml, type NoCat, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
+import { classesDosAtributos, daAspeto, ehAcabamento, hexDoAcabamentoGeral, opcaoEscolhida, ordemUnica } from "./acabamentoCor3d";
+import { alturaDeSanitaDeChao, modeloDoProduto, temModeloGenerico, temModeloHtml, type NoCat, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
 import { eixosPorOmissao, validarEixos, type Eixos } from "./eixosMedida";
 import { DIRECAO_VISTA } from "./cotasPeca";
 import type { ZonasDoProduto } from "./zonasGlb";
@@ -67,8 +68,13 @@ export function dimensoesDaMedida(tipo: TipoMockup, m: MedidaCm, nome?: string, 
 }
 
 const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i;
-/** A cor (hex) da opção escolhida no atributo «cor»; sem atributo, sem definição, sem amostra ou com um hex inválido: undefined. */
+/**
+ * A cor (hex) da opção escolhida no atributo «cor»; sem atributo, sem definição, sem amostra ou com um hex inválido: undefined.
+ * 25/11: com a separação Cor/Acabamento, o hex do «Acabamento da cor» (o metal da torneira: Cobre, Ouro, Inox…; a «Decor») manda sobre o da «Cor»; sem ele, é o de sempre.
+ */
 export function corDosAtributos(attrs: readonly AtributoProduto[] | undefined, defs: readonly AtributoDef[] | undefined): string | undefined {
+  const doAcabamento = hexDoAcabamentoGeral(attrs, defs);
+  if (doAcabamento) return doAcabamento;
   const def = defs?.find((d) => d.codigo.toLowerCase() === "cor");
   const escolhido = def && attrs?.find((a) => a.atributoId === def.id && a.opcaoId);
   const hex = escolhido ? def.opcoes.find((o) => o.id === escolhido.opcaoId)?.hex : null;
@@ -79,15 +85,19 @@ export function corDosAtributos(attrs: readonly AtributoProduto[] | undefined, d
  * O caminho da foto (`{org}/{uuid}.webp`) da opção de cor escolhida, para a textura do 3D: o atributo de cor com opção escolhida e a prioridade mais alta manda
  * («Cor do corpo», depois «Cor da frente», depois «Cor»; sem nenhum destes nomes, o único atributo de cor). Se a opção dele não tem foto, não há textura (não se vai
  * buscar a foto de outro atributo: seria a de outra parte do produto). Atributo de cor: o que tem hex ou foto. Sem foto, sem atributos ou sem escolha: null.
+ * 25/11: dentro de cada um destes nomes o acabamento vem antes da cor («Acabamento do corpo» antes de «Cor do corpo», «Acabamento da frente» antes de «Cor da frente», «Acabamento da cor»,
+ * «Decor» e o «Acabamento» original antes de «Cor»); um acabamento cuja opção não tem foto, hex nem aspeto não conta (acabamentoCor3d.ts).
  */
 export function fotoDosAtributos(attrs: readonly AtributoProduto[] | undefined, defs: readonly AtributoDef[] | undefined): string | null {
   if (!attrs?.length || !defs?.length) return null;
+  const classes = classesDosAtributos(defs);
   const cores = defs.filter((d) => d.temHex || d.temFoto);
-  const prioridade = (d: AtributoDef): number => { const n = sem(d.nome).trim(); return n === "cor do corpo" ? 0 : n === "cor da frente" ? 1 : n === "cor" || d.codigo.toLowerCase() === "cor" ? 2 : -1; };
-  const nomeadas = cores.map((d) => ({ d, p: prioridade(d) })).filter((x) => x.p >= 0).sort((a, b) => a.p - b.p).map((x) => x.d);
+  const nomeadas = cores.filter((d) => classes.has(d.id)).sort((a, b) => ordemUnica(classes.get(a.id)!) - ordemUnica(classes.get(b.id)!));
   for (const def of nomeadas.length ? nomeadas : cores.length === 1 ? cores : []) {
-    const escolhido = attrs.find((a) => a.atributoId === def.id && a.opcaoId);
-    if (escolhido) return def.opcoes.find((o) => o.id === escolhido.opcaoId)?.foto || null;
+    const escolhido = opcaoEscolhida(def, attrs);
+    if (!escolhido) continue;
+    if (ehAcabamento(classes.get(def.id)) && !daAspeto(def, escolhido.opcao)) continue;
+    return escolhido.opcao?.foto || null;
   }
   return null;
 }

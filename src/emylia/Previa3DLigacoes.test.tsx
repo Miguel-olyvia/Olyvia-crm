@@ -139,3 +139,38 @@ describe("só leitura e avisos", () => {
     expect(within(screen.getByLabelText("Atributo")).getByRole("option", { name: "Atributo desconhecido" })).toBeTruthy();
   });
 });
+
+describe("«Atributos que o 3D lê»: todos os atributos com hex, foto ou aspeto, com o estado por omissão", () => {
+  const A_PUXADOR = "aaaaaaaa-0000-4000-a000-000000000004";
+  const OMISSOES = [
+    { id: A_FRENTE, nome: "Cor da frente", aplicado: true, onde: "pinta a frente" },
+    { id: A_PUXADOR, nome: "Puxador", aplicado: false, onde: "" },
+  ];
+  it("sem `omissoes` a lista não aparece (o painel é o de antes)", () => {
+    montar();
+    expect(screen.queryByRole("heading", { name: "Atributos que o 3D lê" })).toBeNull();
+  });
+  it("mostra cada atributo, também o de nome desconhecido, com «aplicado por omissão» ou «desligado por omissão»", () => {
+    montar({ omissoes: OMISSOES });
+    expect(screen.getByRole("heading", { name: "Atributos que o 3D lê" })).toBeTruthy();
+    expect(screen.getByText("Cor da frente", { selector: "strong" }).closest("li")?.textContent).toContain("aplicado por omissão (pinta a frente)");
+    expect(screen.getByText("Puxador", { selector: "strong" }).closest("li")?.textContent).toContain("desligado por omissão");
+  });
+  it("«Ligar» o Puxador acrescenta uma ligação a uma zona do modelo, «Aplicar: sim»; «Desligar» um nome conhecido acrescenta «Tudo, não»", () => {
+    const { aoMudar } = montar({ omissoes: OMISSOES, atributos: [...ATRIBUTOS, { id: A_PUXADOR, nome: "Puxador" }] });
+    fireEvent.click(screen.getByRole("button", { name: "Ligar Puxador" }));
+    expect(aoMudar).toHaveBeenLastCalledWith([L(A_PUXADOR, "frente")]);
+    fireEvent.click(screen.getByRole("button", { name: "Desligar Cor da frente" }));
+    expect(aoMudar).toHaveBeenLastCalledWith([L(A_FRENTE, "tudo", false)]);
+  });
+  it("com uma ligação, o estado mostra a ligação em vez da omissão e já não oferece «Ligar»", () => {
+    montar({ omissoes: OMISSOES, valor: [L(A_PUXADOR, "tampo")], atributos: [...ATRIBUTOS, { id: A_PUXADOR, nome: "Puxador" }] });
+    expect(screen.getByText("Puxador", { selector: "strong" }).closest("li")?.textContent).toContain("ligado: Tampo sim");
+    expect(screen.queryByRole("button", { name: "Ligar Puxador" })).toBeNull();
+  });
+  it("só leitura: o estado vê-se, sem botões de ligar nem desligar", () => {
+    montar({ omissoes: OMISSOES, podeEditar: false });
+    expect(screen.getByText("Puxador", { selector: "strong" }).closest("li")?.textContent).toContain("desligado por omissão");
+    expect(screen.queryByRole("button", { name: /^(Ligar|Desligar) / })).toBeNull();
+  });
+});

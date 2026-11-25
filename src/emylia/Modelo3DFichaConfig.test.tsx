@@ -16,9 +16,9 @@ vi.mock("@/integrations/supabase/client", () => ({
   },
 }));
 vi.mock("./planta3d/Visualizador3D", () => ({
-  default: (p: { descricao: string; modelos: Record<string, { dimensoes: { larguraCm: number; alturaCm: number; profundidadeCm: number }; mockup3d: { zonas?: unknown } }>; espaco: { pecas: { produtoId: string }[] } }) => {
+  default: (p: { descricao: string; modelos: Record<string, { dimensoes: { larguraCm: number; alturaCm: number; profundidadeCm: number }; mockup3d: { zonas?: unknown; cor?: string } }>; espaco: { pecas: { produtoId: string }[] } }) => {
     const m = p.modelos[p.espaco.pecas[0].produtoId];
-    return <div data-testid="canvas3d" role="img" aria-label={p.descricao} data-dim={`${m.dimensoes.larguraCm}x${m.dimensoes.alturaCm}x${m.dimensoes.profundidadeCm}`} data-zonas={m.mockup3d.zonas ? JSON.stringify(m.mockup3d.zonas) : ""} />;
+    return <div data-testid="canvas3d" role="img" aria-label={p.descricao} data-dim={`${m.dimensoes.larguraCm}x${m.dimensoes.alturaCm}x${m.dimensoes.profundidadeCm}`} data-cor={m.mockup3d.cor ?? ""} data-zonas={m.mockup3d.zonas ? JSON.stringify(m.mockup3d.zonas) : ""} />;
   },
 }));
 
@@ -178,5 +178,45 @@ describe("as ligações atributo → zona", () => {
     base.responder = (f) => (f === "cat_ler_config_3d" ? { data: { ...SEM, proprio: { eixos: null, ligacoes: lig, orfas: 0 }, efectiva: { eixos: null, eixos_origem: "automatico", ligacoes: lig, ligacoes_origem: "produto" } }, error: null } : { data: null, error: null });
     const c = await abrir({ modelo: "movel_lavatorio", attrs: ATTRS });
     await waitFor(() => expect(zonasDe(c).zonas.frente?.atributo).toBe("Cor do corpo"));
+  });
+});
+
+describe("25/11: a configuração manda para QUALQUER atributo (também o de nome desconhecido) e os nomes conhecidos podem desligar-se", () => {
+  const A_COR = "aaaaaaaa-0000-4000-a000-000000000021", A_PUX = "aaaaaaaa-0000-4000-a000-000000000022";
+  const hex = (id: string, nome: string, codigo: string, h: string): AtributoDef => ({ id, codigo, nome, tipo: "lista", temHex: true, ordem: 2, opcoes: [{ id: `${id}-1`, valor: nome, nome, hex: h, ordem: 1 }] });
+  const DEFS2: AtributoDef[] = [DEFS[0], hex(A_COR, "Cor", "cor", "#ffffff"), hex(A_PUX, "Puxador", "puxador", "#111111")];
+  const ATTRS2: AtributoProduto[] = [ATTRS[0], { atributoId: A_COR, opcaoId: `${A_COR}-1`, valor: "Cor" }, { atributoId: A_PUX, opcaoId: `${A_PUX}-1`, valor: "Puxador" }];
+  const com = (lig: { atributo: string; zona: string; aplicar: boolean }[]) => ({ ...SEM, proprio: { eixos: null, ligacoes: lig, orfas: 0 }, efectiva: { eixos: null, eixos_origem: "automatico", ligacoes: lig, ligacoes_origem: "produto" } });
+  const abrir2 = async () => {
+    render(<Modelo3DFicha produto={{ id: PID, n: "Coluna AXIS", modelo3d: "movel_lavatorio" }} real={REAL()} anunciar={vi.fn()} nome="Coluna AXIS" sub={null} no={null} arvore={[]} attrs={ATTRS2} defs={DEFS2} />);
+    fireEvent.click(screen.getByRole("button", { name: "Ver em 3D" }));
+    const c = await screen.findByTestId("canvas3d");
+    await waitFor(() => expect(chamadasDe("cat_ler_config_3d")).toHaveLength(1));
+    return c;
+  };
+  it("sem configuração o Puxador (nome desconhecido) não pinta: a cor única é a da «Cor»; o painel mostra-o desligado por omissão", async () => {
+    const c = await abrir2();
+    await waitFor(() => expect(c.getAttribute("data-cor")).toBe("#ffffff"));
+    expect(screen.getByText("Puxador", { selector: "strong" }).closest("li")?.textContent).toContain("desligado por omissão");
+    expect(screen.getByText("Cor", { selector: "strong" }).closest("li")?.textContent).toContain("aplicado por omissão");
+  });
+  it("com o Puxador ligado a «Tudo», pinta tudo: a cor única passa a ser a dele", async () => {
+    base.responder = (f) => (f === "cat_ler_config_3d" ? { data: com([{ atributo: A_PUX, zona: "tudo", aplicar: true }]), error: null } : { data: null, error: null });
+    const c = await abrir2();
+    await waitFor(() => expect(c.getAttribute("data-cor")).toBe("#111111"));
+  });
+  it("com o Puxador ligado só ao tampo, as zonas diferem e o Puxador pinta o tampo", async () => {
+    base.responder = (f) => (f === "cat_ler_config_3d" ? { data: com([{ atributo: A_PUX, zona: "tampo", aplicar: true }]), error: null } : { data: null, error: null });
+    const c = await abrir2();
+    await waitFor(() => expect(JSON.parse(c.getAttribute("data-zonas") || "{}").zonas?.tampo?.cor).toBe("#111111"));
+    expect(JSON.parse(c.getAttribute("data-zonas")!).zonas.corpo.cor).toBe("#ffffff");
+  });
+  it("a «Cor» desligada («Tudo», aplicar não): o nome conhecido deixa de pintar (nem zonas nem cor única)", async () => {
+    base.responder = (f) => (f === "cat_ler_config_3d" ? { data: com([{ atributo: A_COR, zona: "tudo", aplicar: false }]), error: null } : { data: null, error: null });
+    const c = await abrir2();
+    // fica a cor do próprio modelo (nem a «Cor» branca nem o Puxador, que não é «o único atributo de cor» só por a «Cor» estar desligada)
+    await waitFor(() => expect(c.getAttribute("data-cor")).not.toBe("#ffffff"));
+    expect(c.getAttribute("data-cor")).not.toBe("#111111");
+    expect(c.getAttribute("data-zonas")).toBe("");
   });
 });

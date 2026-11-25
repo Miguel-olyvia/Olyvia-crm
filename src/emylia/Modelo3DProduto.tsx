@@ -11,7 +11,8 @@ import { useConfig3d, type AlvoConfig3d } from "./useConfig3d";
 import { urlDaFotoOpcao } from "./fotoOpcaoUrl";
 import { corDosAtributos, fotoDosAtributos, medidaDosAtributos } from "./planta3d/previaProduto3d";
 import { LADO_TEXTURA_CM } from "./planta3d/texturaProduto";
-import { zonasDosAtributos, zonasVisuais } from "./planta3d/zonasGlb";
+import { aparenciaUnicaDasZonas, zonasDosAtributos, zonasVisuais } from "./planta3d/zonasGlb";
+import { leiturasPorOmissao } from "./planta3d/acabamentoCor3d";
 import type { NoCat } from "./planta3d/catalogo3d";
 import { resolverDoNo, textoDaOrigem } from "./planta3d/modelos3dEscolha";
 import { aplicacaoDosAtributos, medidaDoRevestimento } from "./planta3d/revestimentoPrevia";
@@ -47,16 +48,22 @@ function Aberto({ nome, sub, no, arvore, attrs, defs, modelo3d, alvoConfig3d }: 
   const nomeEspera = useDebounce(nome, ESPERA_MS);
   const attrsEspera = useDebounce(attrs, ESPERA_MS);
   const medida = useMemo(() => medidaDosAtributos(attrsEspera), [attrsEspera]);
-  const cor = useMemo(() => corDosAtributos(attrsEspera, defs), [attrsEspera, defs]);
+  // 25/11: COM configuração (ligações ou exclusões) manda a configuração, para qualquer atributo: a foto e a cor únicas saem das zonas (aparenciaUnicaDasZonas); SEM ela, valem os nomes, como sempre
+  const comConfig = Object.keys(ligadas.ligacoes).length > 0 || ligadas.excluidos.size > 0;
+  const zonasAtributos = useMemo(() => zonasDosAtributos(attrsEspera, defs, ligadas.ligacoes, ligadas.excluidos), [attrsEspera, defs, ligadas]);
+  const unica = useMemo(() => (comConfig ? aparenciaUnicaDasZonas(zonasAtributos) : null), [comConfig, zonasAtributos]);
+  const cor = useMemo(() => (comConfig ? unica?.hex ?? undefined : corDosAtributos(attrsEspera, defs)), [comConfig, unica, attrsEspera, defs]);
   // a foto da opção de cor escolhida (corpo > frente > cor) passa a textura do 3D; sem foto (ou sem URL do storage), a cor lisa de sempre
-  const caminhoFoto = useMemo(() => fotoDosAtributos(attrsEspera, defs), [attrsEspera, defs]);
+  const caminhoFoto = useMemo(() => (comConfig ? unica?.foto ?? null : fotoDosAtributos(attrsEspera, defs)), [comConfig, unica, attrsEspera, defs]);
   const textura = useMemo(() => { const url = caminhoFoto ? urlDaFotoOpcao(caminhoFoto) : null; return url ? { url, ladoCm: LADO_TEXTURA_CM } : undefined; }, [caminhoFoto]);
   // 24/11: um revestimento lê a Medida sem os limites do modelo 3D (a espessura em mm de um laminado) e o atributo «Aplicação» (chão ou parede por omissão)
   const medidaRevestimento = useMemo(() => medidaDoRevestimento(attrsEspera), [attrsEspera]);
   const aplicacao = useMemo(() => aplicacaoDosAtributos(attrsEspera, defs), [attrsEspera, defs]);
   // 24/11 (fase 1): a aparência de cada zona pelo nome do atributo («Cor da frente» → frente, «Cor do corpo» → corpo, «Cor» → o resto); sem estes atributos, nada muda
   // 25/11: as ligações explícitas (guardadas, ou o rascunho) mandam sobre os nomes; sem configuração, `ligadas` está vazio e o resultado é o de sempre
-  const zonas = useMemo(() => { const z = zonasDosAtributos(attrsEspera, defs, ligadas.ligacoes, ligadas.excluidos); return z ? zonasVisuais(z, urlDaFotoOpcao) : undefined; }, [attrsEspera, defs, ligadas]);
+  const zonas = useMemo(() => (zonasAtributos ? zonasVisuais(zonasAtributos, urlDaFotoOpcao) : undefined), [zonasAtributos]);
+  // 25/11: TODOS os atributos com hex, foto ou aspeto, e o que o 3D faz com cada um por omissão (os nomes conhecidos aplicam-se; os outros, Puxador…, ficam desligados até se ligarem)
+  const omissoes = useMemo(() => leiturasPorOmissao(defs), [defs]);
   const config3d = useMemo<Config3dPrevia | undefined>(() => {
     const c = cfg.config;
     if (!c || !alvoConfig3d) return undefined;
@@ -66,7 +73,7 @@ function Aberto({ nome, sub, no, arvore, attrs, defs, modelo3d, alvoConfig3d }: 
       eixos: { guardados: e.eixos, origem: e.eixosOrigem, proprio: !!c.proprio?.eixos, gravar: cfg.gravarEixos },
       ligacoes: {
         valor: ligacoesEmVigor, alterado: rascunho !== null && !mesmasLigacoes(rascunho, guardadas ?? SEM_LIGACOES), origem: e.ligacoesOrigem, proprio: c.proprio?.ligacoes != null,
-        atributos: (defs ?? []).filter((d) => d.tipo === "lista").map((d) => ({ id: d.id, nome: d.nome })),
+        atributos: omissoes.map((o) => ({ id: o.id, nome: o.nome })), omissoes,
         orfas: c.proprio?.orfas ?? 0, ignoradas: c.proprio?.ignoradas ?? 0,
         aoMudar: (l) => setRascunho(l),
         // depois de gravar, o rascunho acaba: valem as ligações que a base acabou de guardar (o gancho relê a configuração antes de responder)
@@ -74,7 +81,7 @@ function Aberto({ nome, sub, no, arvore, attrs, defs, modelo3d, alvoConfig3d }: 
         herdar: async () => { const erro = await cfg.gravarLigacoes(null); if (!erro) setRascunho(null); return erro; },
       },
     };
-  }, [cfg, alvoConfig3d, defs, ligacoesEmVigor, rascunho, guardadas]);
+  }, [cfg, alvoConfig3d, omissoes, ligacoesEmVigor, rascunho, guardadas]);
   return (
     <>
       {cfg.erro && <p role="status" className="mb-2 text-[15px] text-muted-foreground">{cfg.erro} O 3D usa a regra automática.</p>}

@@ -5,6 +5,7 @@ import { useId, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { erroDasLigacoes, rotuloDaOrigemConfig, type Ligacao, type OrigemConfig, type ZonaLigacao } from "./config3dDados";
+import type { LeituraPorOmissao } from "./planta3d/acabamentoCor3d";
 import type { Eixos } from "./planta3d/eixosMedida";
 import { ZONAS, rotuloDaZona, type ZonaGlb } from "./planta3d/zonasGlb";
 
@@ -24,6 +25,8 @@ export interface PropsLigacoes {
   origem: OrigemConfig; proprio: boolean;
   /** Os atributos de lista do produto que se podem ligar (a Medida não pinta nada). */
   atributos: readonly AtributoLigavel[];
+  /** 25/11: TODOS os atributos com hex, foto ou aspeto e o que o 3D faz com cada um por omissão (sem configuração): aplicado pelo nome, ou desligado. Ausente: a lista não se mostra. */
+  omissoes?: readonly LeituraPorOmissao[];
   /** As zonas que o modelo tem. */
   zonas: readonly ZonaGlb[];
   /** Ligações da base a atributos que já não existem, e ligações inválidas que o leitor largou. */
@@ -60,7 +63,14 @@ function Aplicar({ ligado, aoMudar }: { ligado: boolean; aoMudar: (v: boolean) =
   );
 }
 
-export function Previa3DLigacoes({ valor, alterado, origem, proprio, atributos, zonas, orfas, ignoradas, podeEditar, aoMudar, gravar, herdar }: PropsLigacoes) {
+/** O estado de um atributo no painel: o das ligações guardadas ou do rascunho, se as há; senão o que vale por omissão. */
+function estadoDoAtributo(o: LeituraPorOmissao, valor: readonly Ligacao[]): string {
+  const ls = valor.filter((l) => l.atributo === o.id);
+  if (ls.length) return `ligado: ${ls.map((l) => `${rotuloDaZonaLigacao(l.zona)} ${l.aplicar ? "sim" : "não"}`).join(", ")}`;
+  return o.aplicado ? `aplicado por omissão (${o.onde})` : "desligado por omissão";
+}
+
+export function Previa3DLigacoes({ valor, alterado, origem, proprio, atributos, omissoes, zonas, orfas, ignoradas, podeEditar, aoMudar, gravar, herdar }: PropsLigacoes) {
   const id = useId();
   const [ocupado, setOcupado] = useState(false);
   const [msg, setMsg] = useState<{ erro: boolean; texto: string } | null>(null);
@@ -89,6 +99,29 @@ export function Previa3DLigacoes({ valor, alterado, origem, proprio, atributos, 
         {rotuloOrigem ? `Ligações ${rotuloOrigem}. ` : "Sem ligações guardadas: cada zona é pintada pelo nome do atributo («Cor da frente» pinta a frente, «Cor do corpo» o corpo, «Cor» o resto). "}
         Uma ligação manda sobre o nome; «Aplicar: não» tira o atributo dessa zona.
       </p>
+
+      {omissoes && omissoes.length > 0 && (
+        <div className="grid gap-1">
+          <h4 className="text-[15px] font-medium">Atributos que o 3D lê</h4>
+          <ul className="grid gap-2 text-[15px]">
+            {omissoes.map((o) => {
+              const ligado = valor.some((l) => l.atributo === o.id);
+              const zonaInicial = zonasOfertadas.find((z) => z !== "tudo") ?? "tudo";
+              return (
+                <li key={o.id} className="flex flex-wrap items-center gap-2">
+                  <span><strong className="font-medium">{o.nome}</strong>: {estadoDoAtributo(o, valor)}</span>
+                  {podeEditar && !ligado && !o.aplicado && (
+                    <button type="button" aria-label={`Ligar ${o.nome}`} onClick={() => { setMsg(null); aoMudar([...valor, { atributo: o.id, zona: zonaInicial, aplicar: true }]); }} className={BOTAO}>Ligar</button>
+                  )}
+                  {podeEditar && !ligado && o.aplicado && (
+                    <button type="button" aria-label={`Desligar ${o.nome}`} onClick={() => { setMsg(null); aoMudar([...valor, { atributo: o.id, zona: "tudo", aplicar: false }]); }} className={BOTAO}>Desligar</button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
 
       {!podeEditar ? (
         <>
