@@ -128,7 +128,7 @@ export function LigarMicrotarefas({ itens, horas, fase, pode }: {
       const igual = !!atual && atual.length === prop.length && atual.every((m, k) => m.ref === prop[k].ref && m.nome === prop[k].nome);
       return { ...i, prop, tem: !!atual?.length && (igual || !auto), refazer: !!atual?.length && auto && !igual };
     })
-    .filter((i) => i.prop.length > 0);
+    .filter((i) => i.prop.length > 0 || i.refazer); // 25/11: uma lista automática que a proposta corrigida já não tem também se corrige (fica vazia)
   const porLigar = L.filter((i) => !i.tem);
   if (!pode || !L.length) return null;
   const escolhidos = porLigar.filter((i) => !fora.has(i.sid));
@@ -167,7 +167,7 @@ export function LigarMicrotarefas({ itens, horas, fase, pode }: {
                         <input type="checkbox" aria-label={`Ligar ${i.n}`} checked={!fora.has(i.sid)} onChange={(e) => setFora((s) => { const n = new Set(s); if (e.target.checked) n.delete(i.sid); else n.add(i.sid); return n; })} className="h-5 w-5 accent-[hsl(var(--primary))]" />
                       )}</td>
                       <td className="px-3 py-2"><span className="font-medium">{i.n}</span>{i.refazer && <span className="ml-2 rounded-full bg-amber-100 px-2 py-0.5 text-xs text-amber-900 dark:bg-amber-900/40 dark:text-amber-100">a corrigir</span>}<span className="block text-sm text-muted-foreground">{i.oficio}</span></td>
-                      <td className="px-3 py-2"><details><summary className="cursor-pointer">{i.prop.length} tarefas</summary><ol className="mt-1 list-decimal pl-5 text-sm text-muted-foreground">{i.prop.map((m, k) => <li key={k}>{m.nome}</li>)}</ol></details></td>
+                      <td className="px-3 py-2"><details><summary className="cursor-pointer">{i.prop.length ? `${i.prop.length} tarefas` : "nenhuma (limpa a lista)"}</summary><ol className="mt-1 list-decimal pl-5 text-sm text-muted-foreground">{i.prop.map((m, k) => <li key={k}>{m.nome}</li>)}</ol></details></td>
                       <td className="px-3 py-2 text-right tabular-nums">{nfmt(h)} h <span className="block text-xs text-muted-foreground">por obra</span></td>
                       <td className="px-3 py-2 text-right tabular-nums">{nfmt(horas(i.sid))} h <span className="block text-xs text-muted-foreground">por {i.un ?? "un"}</span></td>
                     </tr>
