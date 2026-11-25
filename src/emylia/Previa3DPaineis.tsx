@@ -127,7 +127,7 @@ export function PainelZonas({ zonas, pintadaPor, fixa, aoApontar, aoFixar }: Pro
           const atributo = pintadaPor?.[zona]?.atributo, acabamento = pintadaPor?.[zona]?.acabamento;
           return (
             <li key={zona}>
-              <button type="button" aria-pressed={fixa === zona} onClick={() => aoFixar(fixa === zona ? null : zona)}
+              <button type="button" data-zona-botao={zona} aria-pressed={fixa === zona} onClick={() => aoFixar(fixa === zona ? null : zona)}
                 onMouseEnter={() => aoApontar(zona)} onMouseLeave={() => aoApontar(null)} onFocus={() => aoApontar(zona)} onBlur={() => aoApontar(null)}
                 className={cn(BOTAO, "w-full flex-col items-start gap-0.5 py-2 text-left aria-pressed:border-primary aria-pressed:bg-muted")}>
                 <span className="font-semibold">{rotuloDaZona(zona)} — {partes} {partes === 1 ? "parte" : "partes"}</span>{" "}

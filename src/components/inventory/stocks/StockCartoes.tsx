@@ -148,6 +148,8 @@ interface StockBarraEmbebidaProps {
   /* Linha de resumo (null = sem o valor, ex.: sem permissão de custos) */
   valorEmStock: string | null;
   unidadesReservadas: string | null;
+  /** O resumo é da organização inteira (rpc_inventory_today); com filtro de armazém diz-se «todos os armazéns». */
+  resumoDeTodosArmazens?: boolean;
   /* Cartões / Tabela */
   modo: ModoExistencias;
   aoMudarModo: (m: ModoExistencias) => void;
@@ -168,13 +170,13 @@ export function StockBarraEmbebida(p: StockBarraEmbebidaProps) {
   const resumo = [
     p.valorEmStock != null ? (
       <span key="v">
-        Valor em stock{" "}
+        Valor em stock{p.resumoDeTodosArmazens ? " (todos os armazéns)" : ""}{" "}
         <span className="tabular-nums normal-case tracking-normal text-foreground">{p.valorEmStock}</span>
       </span>
     ) : null,
     p.unidadesReservadas != null ? (
       <span key="r">
-        <span className="tabular-nums tracking-normal text-foreground">{p.unidadesReservadas}</span> unidades reservadas para ECs
+        <span className="tabular-nums tracking-normal text-foreground">{p.unidadesReservadas}</span> unidades reservadas para ECs{p.resumoDeTodosArmazens ? " (todos os armazéns)" : ""}
       </span>
     ) : null,
   ].filter(Boolean);

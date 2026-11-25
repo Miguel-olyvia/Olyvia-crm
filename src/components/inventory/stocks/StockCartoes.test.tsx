@@ -168,6 +168,18 @@ describe("Existências dentro do novo Inventário", () => {
     expect(resumo).toHaveTextContent("5,25 unidades reservadas para ECs");
   });
 
+  it("com filtro de armazém, o resumo diz «todos os armazéns» e os chips contam as linhas do armazém", async () => {
+    // KPIs de hoje (organização) dizem 1 em stock baixo; no armazém filtrado conta-se nas linhas carregadas.
+    montar(true, "/inventory/novo/existencias?warehouse=w1");
+    await cartao("Cimento Cola");
+    const resumo = screen.getByTestId("existencias-resumo");
+    expect(resumo).toHaveTextContent(/Valor em stock \(todos os armazéns\)\s*48\s?312\s?€/);
+    expect(resumo).toHaveTextContent("5,25 unidades reservadas para ECs (todos os armazéns)");
+    const chips = screen.getByRole("group", { name: "Estado do stock" });
+    expect(within(chips).getByRole("button", { name: "Stock Baixo 1" })).toBeInTheDocument();
+    expect(within(chips).getByRole("button", { name: "Excesso de Stock 0" })).toBeInTheDocument();
+  });
+
   it("Livre e Reservado certos, com decimais; livre negativo a vermelho", async () => {
     montar(true);
     const cc = await cartao("Cimento Cola");

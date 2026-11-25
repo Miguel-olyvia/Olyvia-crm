@@ -1940,11 +1940,19 @@ const Stocks = () => {
   // Contagens dos chips: Stock Baixo / Excesso = os KPIs de hoje (rpc_inventory_today); a do filtro ativo = as linhas
   // carregadas (com filtro de estado carrega-se tudo); "Todos" = as linhas carregadas (+ se ainda há páginas).
   const contagemAtiva = (estado: StockStatusFilter): number | null => (!loading && statusFilter === estado ? stocks.length : null);
+  // Com filtro de armazém, os KPIs de hoje (da organização inteira) não servem para os chips: conta-se nas linhas
+  // carregadas desse armazém (só quando estão todas carregadas; senão fica sem número).
+  const filtroArmazem = warehouseFilter !== "all";
+  const contagemNoArmazem = (estado: "low" | "overstock"): number | null => {
+    if (statusFilter === estado) return contagemAtiva(estado);
+    if (loading || statusFilter !== "all" || hasMore) return null;
+    return stocks.filter((s) => !s.deleted_at && getStockStatusCode(s) === estado).length;
+  };
   const contagensChips = {
     all: loading || statusFilter !== "all" ? null : hasMore ? `${stocks.length}+` : stocks.length,
-    low: stockKpis?.below_reorder_point ?? contagemAtiva("low"),
+    low: filtroArmazem ? contagemNoArmazem("low") : stockKpis?.below_reorder_point ?? contagemAtiva("low"),
     normal: contagemAtiva("normal"),
-    overstock: stockKpis?.overstock ?? contagemAtiva("overstock"),
+    overstock: filtroArmazem ? contagemNoArmazem("overstock") : stockKpis?.overstock ?? contagemAtiva("overstock"),
   };
   // Os mesmos filtros que o indicador do botão "Filtros" conta (StockBarraEmbebida: vista, armazém, categoria, eliminados),
   // para não sobrar um "1" depois de limpar. A pesquisa e o estado também se limpam, como antes.
@@ -1987,6 +1995,7 @@ const Stocks = () => {
               contagens={contagensChips}
               valorEmStock={stockKpis?.value != null ? formatEur(Number(stockKpis.value)) : null}
               unidadesReservadas={stockKpis?.reserved_units != null ? formatQty(Number(stockKpis.reserved_units)) : null}
+              resumoDeTodosArmazens={filtroArmazem}
               modo={modoEmbebido}
               aoMudarModo={setModoEmbebido}
               aoExportar={handleExport}
@@ -2071,7 +2080,7 @@ const Stocks = () => {
               <KpiTile
                 label="Valor em stock"
                 value={formatEur(Number(stockKpis.value))}
-                hint="custo médio ponderado"
+                hint={filtroArmazem ? "todos os armazéns · custo médio ponderado" : "custo médio ponderado"}
               />
             )}
             {stockKpis.below_reorder_point != null && (

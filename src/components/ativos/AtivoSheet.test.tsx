@@ -1,5 +1,6 @@
-// O painel de criar e editar um ativo: o que se pede em cada grupo, as validações no ecrã, os argumentos exatos das RPCs e os erros da base
-// (ATV02 a ATV18) traduzidos junto do campo. As escritas e as opções são simuladas (vi.fn); aqui vê-se o que o ecrã envia e mostra.
+// O painel de registar e editar um ativo (v2): os campos essenciais primeiro (grupo, equipamento do catálogo no serviço, nome, tipo, valor, data,
+// vida), com valores por omissão, e os avançados numa secção recolhida; a regra «serviço precisa de equipamento do catálogo» é um passo
+// guiado com pesquisa; os erros da base (ATV02 a ATV18) saem traduzidos junto do campo. As escritas e as opções são simuladas.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { LanguageProvider } from "@/contexts/LanguageContext";
@@ -24,6 +25,7 @@ const OPCOES: OpcoesAtivo = {
   equipamentos: [
     { id: "c1", nome: "Berbequim", vidaAnos: 5, vidaHoras: null },
     { id: "c2", nome: "Compressor", vidaAnos: null, vidaHoras: 3000 },
+    { id: "c3", nome: "Andaime", vidaAnos: 10, vidaHoras: null },
   ],
   centrosCusto: [{ id: "cc1", nome: "Obras" }],
 };
@@ -53,8 +55,11 @@ function escolher(nome: RegExp, opcao: string) {
   fireEvent.click(screen.getByRole("option", { name: opcao }));
 }
 const guardar = () => fireEvent.click(screen.getByRole("button", { name: /^Guardar/ }));
+const maisDetalhes = () => fireEvent.click(screen.getByRole("button", { name: /Mais detalhes/ }));
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-06-15T12:00:00"));
   window.localStorage.setItem("language", "pt");
   m.criar.mockReset().mockResolvedValue({ ok: true, id: "novo" });
   m.alterar.mockReset().mockResolvedValue({ ok: true, id: "a1" });
@@ -64,74 +69,140 @@ beforeEach(() => {
   aoGuardar.mockReset();
   m.opcoesLigadas.mockReset();
 });
-afterEach(cleanup);
+afterEach(() => { cleanup(); vi.useRealTimers(); });
 
-describe("AtivoSheet: o que se pede em cada grupo", () => {
-  it("Serviço pede o modelo do catálogo (obrigatório); a vida é opcional e diz que usa a do modelo", () => {
-    abrir("servico");
-    expect(screen.getByRole("combobox", { name: /Modelo do catálogo/ })).toHaveAttribute("aria-required", "true");
-    expect(screen.queryByRole("combobox", { name: /^Tipo/ })).not.toBeInTheDocument();
-    expect(campo(/Vida útil/)).not.toBeRequired();
-    expect(screen.getByText(/Vazio: usa a vida do modelo/)).toBeInTheDocument();
-  });
-
-  it("escolher o modelo diz quantos anos tem e preenche o nome vazio", () => {
-    abrir("servico");
-    escolher(/Modelo do catálogo/, "Berbequim");
-    expect(screen.getByText("Vazio: usa a vida do modelo (5 anos).")).toBeInTheDocument();
-    expect(campo(/^Nome/).value).toBe("Berbequim");
-  });
-
-  it("Estrutura não mostra o seletor de modelo e pede o tipo e a vida", () => {
+describe("AtivoSheet: poucos passos, o essencial primeiro", () => {
+  it("o título é «Registar ativo» e o grupo escolhe-se aqui, já com o do separador marcado", () => {
     abrir("estrutura");
-    expect(screen.queryByRole("combobox", { name: /Modelo do catálogo/ })).not.toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: /^Tipo/ })).toBeInTheDocument();
-    expect(campo(/Vida útil/)).toBeRequired();
+    expect(screen.getByRole("heading", { name: "Registar ativo" })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Serviço/ })).not.toBeChecked();
+    expect(screen.getByRole("radio", { name: /Estrutura/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Pessoas/ })).not.toBeChecked();
   });
 
-  it("Pessoas pede o tipo (os seis do RH) e a vida", () => {
+  it("valores por omissão: a data de hoje e a vida habitual do grupo (36 meses em Pessoas, 60 em Estrutura)", () => {
+    abrir("estrutura");
+    expect(campo(/Data de compra/).value).toBe("2026-06-15");
+    expect(campo(/Vida útil/).value).toBe("60");
+    cleanup();
+    abrir("pessoa");
+    expect(campo(/Vida útil/).value).toBe("36");
+  });
+
+  it("os campos avançados ficam recolhidos até se pedir (e cada campo essencial tem uma ajuda curta)", () => {
+    abrir("estrutura");
+    for (const avancado of [/Código/, /Número de série/, /Valor residual/, /Manutenção por ano/, /Localização/, /Notas/]) expect(screen.queryByLabelText(avancado)).not.toBeInTheDocument();
+    expect(screen.queryByRole("combobox", { name: /Centro de custo/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Mais detalhes/ })).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("Quanto custou.")).toBeInTheDocument();
+    maisDetalhes();
+    expect(screen.getByRole("button", { name: /Mais detalhes/ })).toHaveAttribute("aria-expanded", "true");
+    for (const avancado of [/Código/, /Número de série/, /Valor residual/, /Manutenção por ano/, /Localização/, /Notas/]) expect(screen.getByLabelText(avancado)).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: /Centro de custo/ })).toBeInTheDocument();
+  });
+
+  it("mudar de grupo troca os campos: Serviço pede o equipamento, os outros pedem o tipo", () => {
+    abrir("estrutura");
+    expect(screen.getByRole("combobox", { name: /^Tipo/ })).toBeInTheDocument();
+    expect(screen.queryByRole("group", { name: /Equipamento do catálogo/ })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("radio", { name: /Serviço/ }));
+    expect(screen.queryByRole("combobox", { name: /^Tipo/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("group", { name: /Equipamento do catálogo/ })).toBeInTheDocument();
+    expect(campo(/Vida útil/).value).toBe("");
+    fireEvent.click(screen.getByRole("radio", { name: /Pessoas/ }));
+    expect(campo(/Vida útil/).value).toBe("36");
+  });
+
+  it("Pessoas pede o tipo (os seis do RH)", () => {
     abrir("pessoa");
     fireEvent.keyDown(screen.getByRole("combobox", { name: /^Tipo/ }), { key: "Enter" });
-    // A primeira linha é o convite «Escolha o tipo» (o campo mostra-o enquanto nada está escolhido).
     expect(screen.getAllByRole("option").map((o) => o.textContent)).toEqual(["Escolha o tipo", "Telemóvel", "Portátil", "Viatura", "Fardamento", "Ferramentas", "Outro"]);
-    expect(campo(/Vida útil/)).toBeRequired();
   });
 
-  it("os seletores só pedem as opções com o painel aberto", () => {
-    abrir("servico");
-    expect(m.opcoesLigadas).toHaveBeenLastCalledWith(true);
-  });
-
-  it("falha a carregar as opções: avisa (role=alert) e não deixa o painel parecer vazio", () => {
+  it("os seletores só pedem as opções com o painel aberto; falha a carregar: avisa em role=alert", () => {
     m.opcoes = null;
     m.erroOpcoes = "As opções falharam";
     abrir("servico");
+    expect(m.opcoesLigadas).toHaveBeenLastCalledWith(true);
     expect(screen.getByRole("alert")).toHaveTextContent("As opções falharam");
   });
 });
 
-describe("AtivoSheet: validações no ecrã (nada vai à base)", () => {
-  it("Serviço sem modelo fica bloqueado com o texto do desenho", () => {
+describe("AtivoSheet: o passo guiado do equipamento do catálogo (Serviço)", () => {
+  it("diz o que fazer, com pesquisa e uma escolha única", () => {
+    abrir("servico");
+    const grupo = screen.getByRole("group", { name: /Equipamento do catálogo/ });
+    expect(within(grupo).getByText("Escolha o equipamento do catálogo a que esta máquina corresponde.")).toBeInTheDocument();
+    expect(within(grupo).getAllByRole("radio")).toHaveLength(3);
+    expect(within(grupo).getByRole("radio", { name: /Berbequim/ })).toHaveAccessibleName(/5 anos/);
+    expect(campo(/Vida útil/)).not.toBeRequired();
+  });
+
+  it("a pesquisa filtra a lista, anuncia quantos há e diz quando não há nenhum", () => {
+    abrir("servico");
+    escrever(/Procurar equipamento/, "comp");
+    expect(screen.getAllByRole("radio", { name: /Compressor/ })).toHaveLength(1);
+    expect(screen.queryByRole("radio", { name: /Berbequim/ })).not.toBeInTheDocument();
+    expect(screen.getByText("1 equipamento")).toBeInTheDocument();
+    escrever(/Procurar equipamento/, "xyz");
+    expect(screen.getByText("Nenhum equipamento corresponde à pesquisa.")).toBeInTheDocument();
+  });
+
+  it("escolher o equipamento diz quantos anos tem e preenche o nome vazio", () => {
+    abrir("servico");
+    fireEvent.click(screen.getByRole("radio", { name: /Berbequim/ }));
+    expect(screen.getByRole("radio", { name: /Berbequim/ })).toBeChecked();
+    expect(screen.getByText("Vazio: usa a vida do modelo (5 anos).")).toBeInTheDocument();
+    expect(campo(/^Nome/).value).toBe("Berbequim");
+  });
+
+  it("escolher o equipamento não apaga um nome já escrito", () => {
+    abrir("servico");
+    escrever(/^Nome/, "Berbequim nº 2");
+    fireEvent.click(screen.getByRole("radio", { name: /Berbequim/ }));
+    expect(campo(/^Nome/).value).toBe("Berbequim nº 2");
+  });
+
+  it("sem equipamento fica bloqueado, com o texto do desenho, e o foco vai para a pesquisa do passo", () => {
     abrir("servico");
     escrever(/^Nome/, "Berbequim 1");
     escrever(/Valor de compra/, "300");
-    escrever(/Data de compra/, "2026-03-01");
     guardar();
-    expect(screen.getByText("Escolha o modelo do catálogo a que este equipamento pertence.")).toBeInTheDocument();
+    expect(screen.getByText("Escolha o equipamento do catálogo a que esta máquina corresponde, antes de guardar.")).toBeInTheDocument();
     expect(m.criar).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(campo(/Procurar equipamento/));
+  });
+});
+
+describe("AtivoSheet: validações no ecrã (nada vai à base)", () => {
+  function preencher(grupo: "estrutura" | "pessoa" = "estrutura") {
+    escrever(/^Nome/, "Mesa");
+    escolher(/^Tipo/, grupo === "estrutura" ? "Mobiliário" : "Portátil");
+    escrever(/Valor de compra/, "100");
+  }
+
+  it("só faltam o nome, o tipo e o valor: o resto já vem preenchido (registar em poucos passos)", async () => {
+    abrir("estrutura");
+    preencher();
+    guardar();
+    await waitFor(() => expect(m.criar).toHaveBeenCalledTimes(1));
+    expect(m.criar).toHaveBeenCalledWith("estrutura", {
+      p_nome: "Mesa", p_tipo: "mobiliario", p_cat_equipamento_id: null, p_data_compra: "2026-06-15", p_valor_compra: 100, p_valor_residual: 0,
+      p_vida_meses: 60, p_manutencao_ano: 0, p_codigo: null, p_num_serie: null, p_centro_custo_id: null, p_localizacao: null, p_notas: null,
+    });
   });
 
-  it("residual maior do que a compra fica bloqueado", () => {
+  it("residual maior do que a compra fica bloqueado; com a secção recolhida volta a abri-la e leva o foco ao campo", () => {
     abrir("estrutura");
-    escrever(/^Nome/, "Mesa");
-    escolher(/^Tipo/, "Mobiliário");
-    escrever(/Data de compra/, "2026-03-01");
-    escrever(/Valor de compra/, "100");
+    preencher();
+    maisDetalhes();
     escrever(/Valor residual/, "150");
-    escrever(/Vida útil/, "12");
+    maisDetalhes();
+    expect(screen.queryByLabelText(/Valor residual/)).not.toBeInTheDocument();
     guardar();
     expect(screen.getByText("O valor residual não pode ser maior do que o valor de compra.")).toBeInTheDocument();
     expect(campo(/Valor residual/)).toHaveAttribute("aria-invalid", "true");
+    expect(document.activeElement).toBe(campo(/Valor residual/));
     expect(m.criar).not.toHaveBeenCalled();
   });
 
@@ -139,7 +210,6 @@ describe("AtivoSheet: validações no ecrã (nada vai à base)", () => {
     abrir("pessoa");
     escrever(/^Nome/, "Portátil");
     escolher(/^Tipo/, "Portátil");
-    escrever(/Data de compra/, "2026-03-01");
     escrever(/Valor de compra/, "900");
     escrever(/Vida útil/, vida);
     guardar();
@@ -151,10 +221,7 @@ describe("AtivoSheet: validações no ecrã (nada vai à base)", () => {
     for (const vida of ["1", "600"]) {
       m.criar.mockClear();
       const { unmount } = abrir("estrutura");
-      escrever(/^Nome/, "Armazém");
-      escolher(/^Tipo/, "Instalações");
-      escrever(/Data de compra/, "2026-03-01");
-      escrever(/Valor de compra/, "60000");
+      preencher();
       escrever(/Vida útil/, vida);
       guardar();
       await waitFor(() => expect(m.criar).toHaveBeenCalledTimes(1));
@@ -164,10 +231,8 @@ describe("AtivoSheet: validações no ecrã (nada vai à base)", () => {
 
   it("Estrutura e Pessoas pedem a vida: vazia fica bloqueada", () => {
     abrir("estrutura");
-    escrever(/^Nome/, "Mesa");
-    escolher(/^Tipo/, "Mobiliário");
-    escrever(/Data de compra/, "2026-03-01");
-    escrever(/Valor de compra/, "100");
+    preencher();
+    escrever(/Vida útil/, "");
     guardar();
     expect(screen.getByText("Indique a vida útil, de 1 a 600 meses.")).toBeInTheDocument();
   });
@@ -176,22 +241,23 @@ describe("AtivoSheet: validações no ecrã (nada vai à base)", () => {
     abrir("estrutura");
     escrever(/^Nome/, "Mesa");
     escolher(/^Tipo/, "Mobiliário");
-    escrever(/Vida útil/, "12");
+    escrever(/Data de compra/, "");
     escrever(/Valor de compra/, "0");
     guardar();
     expect(screen.getByText("Indique uma data de compra válida.")).toBeInTheDocument();
     expect(screen.getByText("O valor de compra tem de ser maior do que zero.")).toBeInTheDocument();
-    expect(document.activeElement).toBe(campo(/Data de compra/));
+    expect(document.activeElement).toBe(campo(/Valor de compra/));
   });
 });
 
 describe("AtivoSheet: o que se envia à base", () => {
-  it("criar um ativo de serviço: rpc de criar com o grupo e os parâmetros certos", async () => {
+  it("criar um ativo de serviço: grupo e parâmetros certos, com os avançados que se preencheram", async () => {
     abrir("servico");
-    escolher(/Modelo do catálogo/, "Berbequim");
+    fireEvent.click(screen.getByRole("radio", { name: /Berbequim/ }));
     escrever(/^Nome/, "Berbequim nº 2");
     escrever(/Data de compra/, "2026-03-01");
     escrever(/Valor de compra/, "1 234,50");
+    maisDetalhes();
     escrever(/Valor residual/, "100");
     escrever(/Manutenção por ano/, "50");
     escrever(/Código/, " B-02 ");
@@ -207,13 +273,12 @@ describe("AtivoSheet: o que se envia à base", () => {
     expect(aoGuardar).toHaveBeenCalledWith({ nome: "Berbequim nº 2", edicao: false });
   });
 
-  it("criar de pessoa: tipo e vida seguem, sem modelo; residual e manutenção vazios vão a 0", async () => {
+  it("criar de pessoa: tipo e vida seguem, sem equipamento; residual e manutenção vazios vão a 0", async () => {
     abrir("pessoa");
     escrever(/^Nome/, "Portátil 7");
     escolher(/^Tipo/, "Portátil");
     escrever(/Data de compra/, "2026-02-10");
     escrever(/Valor de compra/, "900");
-    escrever(/Vida útil/, "36");
     guardar();
     await waitFor(() => expect(m.criar).toHaveBeenCalledTimes(1));
     expect(m.criar).toHaveBeenCalledWith("pessoa", expect.objectContaining({
@@ -221,20 +286,34 @@ describe("AtivoSheet: o que se envia à base", () => {
     }));
   });
 
-  it("editar: rpc de alterar com o id e sem o grupo; o grupo aparece só para ler", async () => {
+  it("mudar de grupo a meio não leva o equipamento nem o tipo do outro grupo", async () => {
+    abrir("servico");
+    fireEvent.click(screen.getByRole("radio", { name: /Berbequim/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Estrutura/ }));
+    escrever(/^Nome/, "Mesa");
+    escolher(/^Tipo/, "Mobiliário");
+    escrever(/Valor de compra/, "100");
+    guardar();
+    await waitFor(() => expect(m.criar).toHaveBeenCalledTimes(1));
+    expect(m.criar).toHaveBeenCalledWith("estrutura", expect.objectContaining({ p_cat_equipamento_id: null, p_tipo: "mobiliario" }));
+  });
+
+  it("editar: rpc de alterar com o id e sem o grupo; o grupo aparece só para ler e os avançados já preenchidos vêm abertos", async () => {
     abrir("estrutura", EXISTENTE);
     expect(screen.getByRole("heading", { name: "Editar ativo" })).toBeInTheDocument();
     expect(screen.getByText("Estrutura", { selector: "[data-testid='grupo-do-ativo']" })).toBeInTheDocument();
-    expect(screen.queryByRole("combobox", { name: /^Grupo/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
     expect(campo(/^Nome/).value).toBe("Mesa grande");
     expect(campo(/Valor de compra/).value).toBe("1200");
     expect(campo(/Vida útil/).value).toBe("60");
+    expect(campo(/Valor residual/).value).toBe("200");
+    expect(campo(/Data de compra/).value).toBe("2026-01-15");
     escrever(/^Nome/, "Mesa grande nova");
     guardar();
     await waitFor(() => expect(m.alterar).toHaveBeenCalledTimes(1));
     const [id, args] = m.alterar.mock.calls[0];
     expect(id).toBe("a1");
-    expect(args).toMatchObject({ p_nome: "Mesa grande nova", p_tipo: "mobiliario", p_valor_compra: 1200, p_valor_residual: 200, p_vida_meses: 60, p_codigo: "M-01", p_localizacao: "Armazém" });
+    expect(args).toMatchObject({ p_nome: "Mesa grande nova", p_tipo: "mobiliario", p_valor_compra: 1200, p_valor_residual: 200, p_vida_meses: 60, p_codigo: "M-01", p_localizacao: "Armazém", p_data_compra: "2026-01-15" });
     expect(args).not.toHaveProperty("p_grupo");
     expect(m.criar).not.toHaveBeenCalled();
     expect(aoGuardar).toHaveBeenCalledWith({ nome: "Mesa grande nova", edicao: true });
@@ -246,9 +325,7 @@ describe("AtivoSheet: o que se envia à base", () => {
     abrir("estrutura");
     escrever(/^Nome/, "Mesa");
     escolher(/^Tipo/, "Mobiliário");
-    escrever(/Data de compra/, "2026-03-01");
     escrever(/Valor de compra/, "100");
-    escrever(/Vida útil/, "12");
     guardar();
     guardar();
     expect(m.criar).toHaveBeenCalledTimes(1);
@@ -261,27 +338,32 @@ describe("AtivoSheet: os erros da base, traduzidos", () => {
   function preencherEstrutura() {
     escrever(/^Nome/, "Mesa");
     escolher(/^Tipo/, "Mobiliário");
-    escrever(/Data de compra/, "2026-03-01");
     escrever(/Valor de compra/, "100");
-    escrever(/Vida útil/, "12");
   }
 
   it.each([
     ["ATV12", "Já existe um ativo com este código.", /Código/],
     ["ATV09", "O valor residual não pode ser maior do que o valor de compra.", /Valor residual/],
-    ["ATV05", "Escolha o modelo do catálogo a que este equipamento pertence.", /Modelo do catálogo/],
-  ])("%s aparece junto do campo, em português", async (codigo, texto, rotulo) => {
+  ])("%s aparece junto do campo (a secção avançada abre-se), em português", async (codigo, texto, rotulo) => {
     m.criar.mockResolvedValue({ ok: false, codigo, mensagem: texto });
-    abrir(codigo === "ATV05" ? "servico" : "estrutura");
-    if (codigo === "ATV05") {
-      escolher(/Modelo do catálogo/, "Berbequim");
-      escrever(/^Nome/, "B1"); escrever(/Data de compra/, "2026-03-01"); escrever(/Valor de compra/, "100");
-    } else preencherEstrutura();
+    abrir("estrutura");
+    preencherEstrutura();
     guardar();
     await waitFor(() => expect(screen.getAllByText(texto).length).toBeGreaterThan(0));
     expect(aoFechar).not.toHaveBeenCalled();
-    const alvo = rotulo.source.startsWith("Modelo") ? screen.getByRole("combobox", { name: rotulo }) : campo(rotulo);
-    expect(alvo).toHaveAttribute("aria-invalid", "true");
+    expect(campo(rotulo)).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("ATV05 aparece no passo do equipamento (Serviço), traduzido", async () => {
+    const texto = "Escolha o modelo do catálogo a que este equipamento pertence.";
+    m.criar.mockResolvedValue({ ok: false, codigo: "ATV05", mensagem: texto });
+    abrir("servico");
+    fireEvent.click(screen.getByRole("radio", { name: /Berbequim/ }));
+    escrever(/^Nome/, "B1");
+    escrever(/Valor de compra/, "100");
+    guardar();
+    await waitFor(() => expect(screen.getAllByText(texto).length).toBeGreaterThan(0));
+    expect(campo(/Procurar equipamento/)).toHaveAttribute("aria-invalid", "true");
   });
 
   it("um erro sem campo (ATV17, 42501) mostra-se num aviso role=alert e o painel fica aberto", async () => {

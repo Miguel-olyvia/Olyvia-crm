@@ -7,7 +7,7 @@ import type { ComandosVista, RevestimentoVisual } from "./planta3d/Visualizador3
 import { cenaDoProduto, estadoDoModelo, modeloParaPrevia, tipoDaPrevia, type EstadoPrevia, type MedidaCm } from "./planta3d/previaProduto3d";
 import { eixosPorOmissao, notaDaTroca, temCamposParaEixos, textoDasMedidas, trocarEixo, type Eixos } from "./planta3d/eixosMedida";
 import { zonasDoModelo, rotuloDaZona, ZONAS, type ZonaGlb, type ZonasDoProduto } from "./planta3d/zonasGlb";
-import type { LeituraDoProduto } from "./planta3d/acabamentoCor3d";
+import { classeDoNomeDe, type LeituraDoProduto } from "./planta3d/acabamentoCor3d";
 import { InterruptorMedidas, PainelMedidas, PainelZonas } from "./Previa3DPaineis";
 import { Previa3DLigacoes, type Config3dPrevia } from "./Previa3DLigacoes";
 import { PainelEscolherZona } from "./Previa3DEscolherZona";
@@ -99,6 +99,7 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
   const [foco, setFoco] = useState(false), [dentro, setDentro] = useState(false);
   const aoTeclar = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === "Escape" && zonaFixa) { e.preventDefault(); fechar(false); return; } // o foco já está no 3D: fica lá
     if (MAIS.has(e.key)) { e.preventDefault(); comandos.current?.aproximar(); }
     else if (MENOS.has(e.key)) { e.preventDefault(); comandos.current?.afastar(); }
   };
@@ -115,6 +116,18 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
   const [zonaApontada, setZonaApontada] = useState<ZonaGlb | null>(null), [zonaFixa, setZonaFixa] = useState<ZonaGlb | null>(null);
   // 25/11: a zona debaixo do rato no próprio 3D (escolher a zona clicando numa parte da peça); a escolha é a mesma `zonaFixa` do painel «Zonas»
   const [zonaSobRato, setZonaSobRato] = useState<ZonaGlb | null>(null);
+  // de onde veio a zona escolhida (o clique no 3D ou o botão do painel «Zonas»): ao fechar o painel o foco volta para lá; ao abrir por clique, passa ao painel
+  const [origem, setOrigem] = useState<"3d" | "botao">("3d");
+  const raiz = useRef<HTMLDivElement>(null), grupo3d = useRef<HTMLDivElement>(null);
+  const escolherZona3d = (z: ZonaGlb | null) => { setOrigem("3d"); setZonaFixa(z); };
+  const escolherZonaBotao = (z: ZonaGlb | null) => { setOrigem("botao"); setZonaFixa(z); };
+  const fechar = (devolverFoco = true) => {
+    const z = zonaFixa;
+    setZonaFixa(null);
+    if (!devolverFoco) return;
+    const botao = origem === "botao" && z ? raiz.current?.querySelector<HTMLElement>(`[data-zona-botao="${z}"]`) : null;
+    (botao ?? grupo3d.current)?.focus();
+  };
   const modelo = useMemo(() => modeloParaPrevia({ nome, sub: sub ?? undefined, no, arvore, medida, cor, textura, modelo3d, eixos: eixosEscolhidos, zonas }), [nome, sub, no, arvore, medida, cor, textura, modelo3d, eixosEscolhidos, zonas]);
   const eixosEmVigor = eixosEscolhidos ?? eixosPorOmissao(tipo, medida);
   const zonasDoObjecto = useMemo(() => zonasDoModelo(modelo), [modelo]);
@@ -129,6 +142,8 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
     const nome = atributosDoProduto.find((a) => a.id === atributo)?.nome;
     return nome ? ZONAS.filter((z) => zonasEscolheveis.has(z) && zonas?.zonas[z]?.atributo === nome) : [];
   };
+  // os atributos de cor do produto que pintam cada zona SÓ pelo nome («Cor da frente» → frente): a ligação escolhida manda sobre eles (escolherZona.ts)
+  const pelaNome = (z: ZonaGlb) => atributosDoProduto.flatMap((a) => { const c = classeDoNomeDe(a.nome); return c && c.papel === z ? [{ id: a.id, lisa: c.nivel === 3 }] : []; });
   // 24/11: um revestimento (escolhido, ou automático na categoria Revestimentos) mostra-se como superfície: a vista por omissão vem da regra única
   // (revestimentoPrevia.ts, superficieDaPrevia) e o interruptor muda-a só aqui, sem gravar nada; outro produto fica exactamente como antes
   const niveis = useMemo(() => niveisDoNo(arvore, no), [arvore, no]);
@@ -154,9 +169,9 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
     ? `${modelo.nome || "Revestimento sem nome"}: peças de ${nf(plano.pecaRealCm[0])} por ${nf(plano.pecaRealCm[1])} cm, ${superficie === "chao" ? "no chão" : "na parede"}, numa amostra de ${nf(plano.amostraM[0])} por ${nf(plano.amostraM[1])} m.`
     : `${modelo.nome || "Produto sem nome"}: ${nf(d.larguraCm)} por ${nf(d.profundidadeCm)} por ${nf(d.alturaCm)} cm (largura, profundidade e altura).`;
   return (
-    <div className="grid gap-2">
+    <div ref={raiz} className="grid gap-2">
       <div className="relative h-64 overflow-hidden rounded-xl border border-border bg-muted/50 sm:h-80">
-        <div role="group" aria-label="Pré-visualização 3D do produto" aria-describedby={idAjuda} tabIndex={0} onKeyDown={aoTeclar}
+        <div ref={grupo3d} role="group" aria-label="Pré-visualização 3D do produto" aria-describedby={idAjuda} tabIndex={0} onKeyDown={aoTeclar}
           onFocus={() => setFoco(true)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFoco(false); }}
           onPointerEnter={() => setDentro(true)} onPointerLeave={() => setDentro(false)} onPointerDown={(e) => { setDentro(true); e.currentTarget.focus(); }}
           className="h-full outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary/40">
@@ -164,7 +179,7 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
             <Visualizador3D espaco={cena.espaco} modelos={cena.modelos} vista="3d" teto={false} etiquetas={false} descricao={descricao}
               selecionada={null} onSelecionar={SEM_ESCOLHA} camara={cena.camara} rolarPagina zoomRoda={foco && dentro} comandos={comandos} revestimento={revestimento}
               cotas={cotas && !superficie} zonaRealcada={zonaApontada ?? zonaSobRato ?? zonaFixa}
-              aoClicarZona={escolherNo3d && !superficie ? setZonaFixa : undefined} aoPassarZona={escolherNo3d && !superficie ? setZonaSobRato : undefined} zonasEscolheveis={zonasEscolheveis} />
+              aoClicarZona={escolherNo3d && !superficie ? escolherZona3d : undefined} aoPassarZona={escolherNo3d && !superficie ? setZonaSobRato : undefined} zonasEscolheveis={zonasEscolheveis} />
           </Suspense>
         </div>
         {!superficie && <InterruptorMedidas ligado={cotas} aoMudar={setCotas} className="absolute left-2 top-2" />}
@@ -198,7 +213,8 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
           {/* a região viva existe sempre (vazia): o que muda é o texto, e assim a escolha anuncia-se a quem usa leitor de ecrã */}
           <p aria-live="polite" className="sr-only">{zonaFixa ? `Zona ${rotuloDaZona(zonaFixa)} seleccionada` : ""}</p>
           {zonaFixa && (
-            <PainelEscolherZona zona={zonaFixa} pintadaPor={zonas?.zonas[zonaFixa]} atributos={atributosDoProduto.filter((a) => a.daCor)} pintaHoje={pintaHoje} aoFechar={() => setZonaFixa(null)}
+            <PainelEscolherZona key={zonaFixa} zona={zonaFixa} pintadaPor={zonas?.zonas[zonaFixa]} atributos={atributosDoProduto.filter((a) => a.daCor)} pintaHoje={pintaHoje} pelaNome={pelaNome}
+              focarAoAbrir={origem === "3d"} aoFechar={() => fechar()}
               ligacoes={config3d ? { valor: config3d.ligacoes.valor, alterado: config3d.ligacoes.alterado, podeEditar: config3d.podeEditar, aoMudar: config3d.ligacoes.aoMudar, gravar: config3d.ligacoes.gravar } : undefined} />
           )}
         </>
@@ -216,7 +232,7 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
           } : undefined} />
       )}
       {!superficie && zonasDoObjecto.length >= 2 && (
-        <PainelZonas zonas={zonasDoObjecto} pintadaPor={zonas?.zonas} fixa={zonaFixa} aoApontar={setZonaApontada} aoFixar={setZonaFixa} />
+        <PainelZonas zonas={zonasDoObjecto} pintadaPor={zonas?.zonas} fixa={zonaFixa} aoApontar={setZonaApontada} aoFixar={escolherZonaBotao} />
       )}
       {painelMedidas && config3d && !superficie && zonasDoObjecto.length >= 1 && (
         <Previa3DLigacoes {...config3d.ligacoes} zonas={zonasDoObjecto.map((z) => z.zona)} podeEditar={config3d.podeEditar} />

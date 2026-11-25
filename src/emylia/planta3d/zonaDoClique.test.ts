@@ -3,7 +3,7 @@ import * as THREE from "three";
 import { describe, expect, it } from "vitest";
 import { categoriaPorId } from "./categoriasGlb";
 import { montarGenerico } from "./modelosHtml/glb";
-import { LIMITE_ARRASTO_PX, foiClique, zonaDaPrimeiraIntersecao, zonaDoObjeto } from "./zonaDoClique";
+import { INTERVALO_HOVER_MS, LIMITE_ARRASTO_PX, criarPortaDoHover, foiClique, zonaDaPrimeiraIntersecao, zonaDoObjeto } from "./zonaDoClique";
 import { criarMateriaisDeZona } from "./zonasMateriais";
 
 const malha = (zona?: string, visivel = true, pai?: THREE.Object3D): THREE.Mesh => {
@@ -62,5 +62,45 @@ describe("criarMateriaisDeZona marca em cada malha a zona da sua parte (é daí 
     expect(zona("pe_1")).toBe("pes");
     expect(zona("puxador_1")).toBe("puxadores");
     expect(zona("lavatorio")).toBeUndefined();
+  });
+});
+
+describe("M6: os objectos auxiliares (as cotas, o contorno da selecção) não bloqueiam o clique", () => {
+  it("um auxiliar à frente da peça é ignorado: a zona é a da primeira malha com zona atrás dele", () => {
+    const cota = malha(); cota.userData.auxiliar = true;
+    expect(zonaDaPrimeiraIntersecao([{ object: cota }, { object: malha("frente") }])).toBe("frente");
+  });
+  it("também se ignora o filho de um grupo auxiliar (as partes de uma cota)", () => {
+    const grupo = new THREE.Group(); grupo.userData.auxiliar = true;
+    expect(zonaDaPrimeiraIntersecao([{ object: malha(undefined, true, grupo) }, { object: malha("corpo") }])).toBe("corpo");
+  });
+  it("só auxiliares no caminho do raio: não há zona", () => {
+    const cota = malha(); cota.userData.auxiliar = true;
+    expect(zonaDaPrimeiraIntersecao([{ object: cota }])).toBeNull();
+  });
+  it("sem a marca, uma malha sem zona continua a tapar (o chão, o interior): não se atravessa", () => {
+    expect(zonaDaPrimeiraIntersecao([{ object: malha() }, { object: malha("frente") }])).toBeNull();
+  });
+});
+
+describe("M5: o hover só se avalia sem botão premido e no máximo uma vez por intervalo", () => {
+  it("o primeiro movimento avalia; os seguintes dentro do intervalo não; passado o intervalo, sim", () => {
+    const porta = criarPortaDoHover(50);
+    expect(porta(0, 1000)).toBe(true);
+    expect(porta(0, 1010)).toBe(false);
+    expect(porta(0, 1049)).toBe(false);
+    expect(porta(0, 1050)).toBe(true);
+  });
+  it("com um botão premido (a arrastar a câmara) nunca avalia, e não gasta o intervalo", () => {
+    const porta = criarPortaDoHover(50);
+    expect(porta(1, 1000)).toBe(false);
+    expect(porta(0, 1001)).toBe(true);
+  });
+  it("o intervalo por omissão é de 50 ms", () => {
+    expect(INTERVALO_HOVER_MS).toBe(50);
+    const porta = criarPortaDoHover();
+    expect(porta(0, 0)).toBe(true);
+    expect(porta(0, 49)).toBe(false);
+    expect(porta(0, 50)).toBe(true);
   });
 });

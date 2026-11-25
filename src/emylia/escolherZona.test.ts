@@ -7,6 +7,7 @@ vi.mock("@/integrations/supabase/client", () => ({ supabase: { rpc: vi.fn() } })
 
 import { aplicarEscolhaNaZona, escolhaAtualDaZona } from "./escolherZona";
 import { ligacoesDaConfig, type Ligacao } from "./config3dDados";
+import { classeDoNomeDe } from "./planta3d/acabamentoCor3d";
 import { zonasDosAtributos, type ZonaGlb } from "./planta3d/zonasGlb";
 import type { AtributoDef, AtributoProduto } from "./v2/catalogoModelo";
 
@@ -107,4 +108,68 @@ describe("aplicarEscolhaNaZona: «Nenhum» e «Pelo nome»", () => {
     expect(hexPorZona(depois, attrs(COR, FRENTE))).toMatchObject({ frente: "#eeeeee", corpo: "#cc0000" });
   });
   it("«Pelo nome» sem nada ligado não muda nada", () => { expect(aplicarEscolhaNaZona([], "frente", { tipo: "nome" }, ctx())).toEqual([]); });
+});
+
+/* ------------------------------------------------------------------ H1 e M2 (revisão do commit d69e7f539): a ligação explícita manda sobre o atributo que pinta a zona só pelo nome */
+// um atributo por NOME («Cor do corpo», «Cor da frente») que pinta a zona concorre com o escolhido: o resultado não pode depender da ORDEM das definições
+const TODAS: ZonaGlb[] = ["frente", "corpo", "tampo", "pes"];
+const pelaNomeDe = (defs: readonly AtributoDef[]) => (zona: ZonaGlb) => defs.flatMap((d) => { const c = classeDoNomeDe(d.nome); return c && c.papel === zona ? [{ id: d.id, lisa: c.nivel === 3 }] : []; });
+const hexEm = (defs: readonly AtributoDef[], lig: readonly Ligacao[], a: AtributoProduto[]): Record<string, string | null> => {
+  const { ligacoes, excluidos } = ligacoesDaConfig(lig);
+  const z = zonasDosAtributos(a, defs, ligacoes, excluidos);
+  return Object.fromEntries(TODAS.map((k) => [k, z?.zonas[k]?.hex ?? null]));
+};
+const ctxEm = (defs: readonly AtributoDef[], lig: readonly Ligacao[], a: AtributoProduto[]) => ({
+  atributosDaCor: defs.map((d) => d.id),
+  pintaHoje: (id: string): ZonaGlb[] => {
+    const { ligacoes, excluidos } = ligacoesDaConfig(lig);
+    const z = zonasDosAtributos(a, defs, ligacoes, excluidos), nome = defs.find((d) => d.id === id)!.nome;
+    return TODAS.filter((k) => z?.zonas[k]?.atributo === nome);
+  },
+  pelaNome: pelaNomeDe(defs),
+});
+const ORDENS: [string, AtributoDef[]][] = [
+  ["corpo, frente, cor", [DEFS[0], DEFS[1], DEFS[2]]],
+  ["frente, corpo, cor", [DEFS[1], DEFS[0], DEFS[2]]],
+  ["cor, frente, corpo", [DEFS[2], DEFS[1], DEFS[0]]],
+];
+
+describe.each(ORDENS)("a escolha feita no 3D vê-se, com as definições na ordem %s", (_n, defs) => {
+  const a = attrs(CORPO, FRENTE, COR);
+  const escolher = (valor: readonly Ligacao[], zona: ZonaGlb, e: Parameters<typeof aplicarEscolhaNaZona>[2]) => aplicarEscolhaNaZona(valor, zona, e, ctxEm(defs, valor, a));
+  it("«Cor da frente» no corpo: o corpo leva a cor da frente, e a frente continua com ela", () => {
+    const antes = hexEm(defs, [], a);
+    expect(antes).toMatchObject({ frente: "#eeeeee", corpo: "#111111" });
+    const depois = escolher([], "corpo", { tipo: "atributo", id: FRENTE });
+    expect(hexEm(defs, depois, a)).toMatchObject({ frente: "#eeeeee", corpo: "#eeeeee", tampo: antes.tampo, pes: antes.pes });
+  });
+  it("«Cor do corpo» na frente: a frente leva a cor do corpo, e o corpo continua com ela", () => {
+    const antes = hexEm(defs, [], a);
+    const depois = escolher([], "frente", { tipo: "atributo", id: CORPO });
+    expect(hexEm(defs, depois, a)).toMatchObject({ frente: "#111111", corpo: "#111111", tampo: antes.tampo, pes: antes.pes });
+  });
+  it("trocar a escolha na mesma zona: a nova manda (a anterior sai e o nome continua a não concorrer)", () => {
+    const um = escolher([], "corpo", { tipo: "atributo", id: FRENTE });
+    const dois = escolher(um, "corpo", { tipo: "atributo", id: COR });
+    expect(hexEm(defs, dois, a)).toMatchObject({ corpo: "#cc0000", frente: "#eeeeee" });
+    expect(dois.filter((l) => l.zona === "corpo" && l.aplicar).map((l) => l.atributo)).toEqual([COR]);
+  });
+  it("escolher para a zona o atributo que a pinta pelo nome não acrescenta exclusões nem ligações a mais", () => {
+    expect(escolher([], "corpo", { tipo: "atributo", id: CORPO })).toEqual([L(CORPO, "corpo")]);
+  });
+  it("respeita o contrato com a base: sem pares atributo+zona repetidos e no máximo 60", () => {
+    let valor: Ligacao[] = [];
+    for (const [zona, id] of [["corpo", FRENTE], ["frente", CORPO], ["tampo", COR], ["corpo", COR], ["frente", FRENTE]] as const) valor = escolher(valor, zona, { tipo: "atributo", id });
+    expect(new Set(valor.map((l) => `${l.atributo}|${l.zona}`)).size).toBe(valor.length);
+    expect(valor.length).toBeLessThanOrEqual(60);
+  });
+  it("«Pelo nome» REPÕE o nome: a «Cor da frente» ligada só ao corpo volta à frente", () => {
+    const lig = [L(FRENTE, "corpo")];
+    const depois = escolher(lig, "frente", { tipo: "nome" });
+    expect(depois).toEqual(expect.arrayContaining([L(FRENTE, "frente"), L(FRENTE, "corpo")]));
+    expect(hexEm(defs, depois, a).frente).toBe("#eeeeee");
+  });
+  it("«Pelo nome» sem ligações do atributo do nome não acrescenta nada", () => {
+    expect(escolher([L(COR, "tampo")], "frente", { tipo: "nome" })).toEqual([L(COR, "tampo")]);
+  });
 });
