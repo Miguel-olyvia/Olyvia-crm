@@ -6,6 +6,7 @@
 // 28/10 (Fase 3): o Hoje de cada papel (o do técnico é o HojeTecnico) e as Obras (OperacoesSimples: a lista e a página da obra) abrem
 // aqui, com o mesmo Estado: o que se faz na obra grava-se pela obra_guardar_negocio, como o resto. O Inventário ainda não.
 import { VigiaAgentes } from "@/emylia/estudioObra/VigiaAgentes";
+import { NaFrente } from "@/emylia/NaFrente";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { EnderecoAtivo } from "@/lib/paramUrl";
@@ -1139,7 +1140,8 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
             }} />
           </>
         : <NegociosSimples {...ctx} />}
-      <div className="toasts" aria-live="polite">
+      {/* 26/11: os avisos iam dentro da página e ficavam por baixo do Estúdio da obra («Antecipar o resto» parecia não fazer nada) */}
+      <NaFrente z={700}><div className="toasts" aria-live="polite">
         {toasts.slice(-2).map((t) => (
           <div key={t.id} className={"toast " + (t.kind || "")} role="status">
             <i>{t.kind === "ok" ? "✓" : t.kind === "auto" ? "⚡" : t.kind === "bad" ? "!" : "i"}</i>
@@ -1147,7 +1149,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
             {t.act ? <button onClick={() => { t.act!.fn(); setToasts((x) => x.filter((y) => y.id !== t.id)); }}>{t.act.label}</button> : <span />}
           </div>
         ))}
-      </div>
+      </div></NaFrente>
     </div>
     </EnderecoAtivo.Provider>
     </PermPortalNegocios>

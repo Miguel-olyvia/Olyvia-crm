@@ -839,7 +839,7 @@ export function OlyviaComando() {
   // 17/11 (Rúben: «mete o ícone de uma ovelha ao lado do ícone do chat»): um botão redondo do mesmo tamanho do chat, mesmo à esquerda
   // dele (InternalChatWidget: bottom-4 right-4, 48 px; sm: bottom-6 right-6, 56 px). O painel e os avisos abrem por cima.
   return (
-    <div data-olyvia="" className="fixed bottom-4 right-[4.75rem] z-[500] flex flex-col items-end gap-3 print:hidden sm:bottom-6 sm:right-[5.75rem]">
+    <div data-olyvia="" className="fixed bottom-4 right-[4.75rem] z-[605] flex flex-col items-end gap-3 print:hidden sm:bottom-6 sm:right-[5.75rem]">
       {/* 18/11: o que não se desfaz espera por um «sim» (dito ou aqui) */}
       {pendente && (
         <div role="alertdialog" aria-label="Confirmar" className="w-[min(calc(100vw-6rem),20rem)] space-y-2 rounded-2xl border border-primary/40 bg-card p-3 shadow-[var(--shadow-lg,0_10px_30px_rgba(0,0,0,0.18))]">

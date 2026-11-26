@@ -1,7 +1,7 @@
 // 11/11/2026: os alertas dentro do Estúdio da obra, sem React. Cada alerta diz o que se passa numa frase e traz o próximo passo (o Estúdio
 // liga-o à ação): o que está atrasado, o que espera pela validação ou pela decisão do cliente, os técnicos noutra obra, os materiais que
 // ainda não chegaram para a fase que vem, a conversa por ler, o fim que derrapou e a folga para adiantar.
-import { TECS, type Estado, type Negocio, type Plano } from "../motor";
+import { simularBuraco, TECS, type Estado, type Negocio, type Plano } from "../motor";
 import { imprevistosDe, pedidoDeAtraso, textoPedidoAtraso } from "../imprevistos";
 import { motivoOcupado, obraQueOcupa, tecnicosDoOficio } from "../preparacaoObra";
 import { materiaisPorFase } from "../obraOps";
@@ -123,9 +123,15 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
   // 25/11 (revisão): os dias em que a obra fica sem ninguém (uma tarefa que acabou mais cedo deixa um buraco até à seguinte)
   for (const g of diasSemNinguem(p)) {
     const n = g.fim - g.ini + 1, seg = g.seguinte != null ? p.tasks[g.seguinte] : null;
-    L.push({ id: `parada-${g.ini}`, nivel: "oportunidade", t: `A obra fica sem ninguém ${dias(n)}: ${quando(p, g.ini)} a ${quando(p, g.fim)}`,
-      sub: seg ? `A seguir, ${seg.nome} a ${quando(p, seg.dia)}. «Antecipar o resto» puxa as tarefas seguintes o mais que os técnicos deixarem.` : "Pode antecipar uma tarefa para esses dias.",
-      acoes: [{ rot: "Antecipar o resto", a: { k: "fecharBuraco" as const, ini: g.ini, fim: g.fim, ti: g.seguinte } }, ...(seg && g.seguinte != null ? [{ rot: "Ver a tarefa", a: { k: "tarefa" as const, ti: g.seguinte } }] : [])], ...(g.seguinte != null ? { ti: g.seguinte } : {}) });
+    // 26/11 (Rúben: «ao clicar em antecipar o resto, abre o detalhe mas não faz nada»): só se propõe antecipar o que dá; senão diz-se porquê
+    const sim = simularBuraco(S, d, g.ini, g.fim);
+    const ver = seg && g.seguinte != null ? [{ rot: "Ver a tarefa", a: { k: "tarefa" as const, ti: g.seguinte } }] : [];
+    const sub = !sim.s
+      ? `${sim.porque}, por isso não dá para antecipar.${seg ? ` A seguir, ${seg.nome} a ${quando(p, seg.dia)}: pode passá-la a outro técnico.` : ""}`
+      : seg ? `A seguir, ${seg.nome} a ${quando(p, seg.dia)}. «Antecipar ${dias(sim.s)}» puxa as ${sim.alvo.length} tarefas seguintes${sim.s < n ? ` (os ${n} dias não dão: ${sim.porque.charAt(0).toLowerCase() + sim.porque.slice(1)})` : ""}.` : "Pode antecipar uma tarefa para esses dias.";
+    L.push({ id: `parada-${g.ini}`, nivel: "oportunidade", t: `A obra fica sem ninguém ${dias(n)}: ${quando(p, g.ini)} a ${quando(p, g.fim)}`, sub,
+      acoes: sim.s ? [{ rot: `Antecipar ${dias(sim.s)}`, a: { k: "fecharBuraco" as const, ini: g.ini, fim: g.ini + sim.s - 1, ti: g.seguinte } }, ...ver] : ver,
+      ...(g.seguinte != null ? { ti: g.seguinte } : {}) });
   }
   const peso: Record<Nivel, number> = { critico: 0, atencao: 1, oportunidade: 2 };
   return L.sort((a, b) => peso[a.nivel] - peso[b.nivel]);

@@ -72,6 +72,34 @@ describe("antecipar de uma vez o que vem depois de um buraco", () => {
       expect(avisos.at(-1)).toMatch(/^Plano antecipado/);
     } else expect(avisos.at(-1)).toMatch(/^Não dá para antecipar/);
   });
+  it("26/11: o alerta só propõe antecipar o que dá; com o técnico noutra obra, diz porquê e não propõe", async () => {
+    const { simularBuraco, TECS } = await import("../motor");
+    const { obraDeExemplo } = await import("./exemploObra");
+    const { alertasDaObra } = await import("./alertasObra");
+    const { S, d } = obraDeExemplo();
+    const p = d.obra.plano!;
+    const depois = p.tasks.filter((t) => !t.exec && t.dia > p.dia);
+    for (const t of depois) t.dia += 4;
+    const g = diasSemNinguem(p).find((x) => x.seguinte != null)!;
+    const alerta = () => alertasDaObra(d, S, new Map()).find((a) => a.id === `parada-${g.ini}`)!;
+    // livre: a ação diz quantos dias dá e a simulação concorda
+    const sim = simularBuraco(S, d, g.ini, g.fim);
+    if (sim.s) expect(alerta().acoes[0].rot).toBe(`Antecipar ${sim.s} ${sim.s === 1 ? "dia útil" : "dias úteis"}`);
+    // ocupado: outra obra com o mesmo técnico em todos os dias do buraco e da tarefa seguinte
+    const seg = p.tasks[g.seguinte!];
+    const outra = structuredClone(d);
+    outra.id = d.id + 900; outra.nome = "Obra Vizinha";
+    const q = outra.obra.plano!;
+    q.tasks = [{ ...seg, nome: "Ocupado", dia: 0, dur: seg.dia + seg.dur + 10, exec: undefined }];
+    q.dia = 0; q.estado = "em curso";
+    S.deals = [...S.deals, outra];
+    const s2 = simularBuraco(S, d, g.ini, g.fim);
+    expect(s2.s).toBe(0);
+    expect(s2.porque).toMatch(new RegExp(`${TECS.find((x) => x.id === seg.tec)?.n.split(" ")[0] ?? "técnico"}|noutra obra|férias|livres`));
+    const a = alerta();
+    expect(a.acoes.some((x) => x.a.k === "fecharBuraco")).toBe(false);
+    expect(a.sub).toMatch(/não dá para antecipar/);
+  });
 });
 
 describe("o texto do ritmo", () => {

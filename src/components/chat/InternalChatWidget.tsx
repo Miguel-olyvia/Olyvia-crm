@@ -106,7 +106,7 @@ export function InternalChatWidget() {
         <button
           onClick={() => setOpen(true)}
           aria-label="Conversas da equipa"
-          className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-[500] h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-all duration-200 hover:scale-105 flex items-center justify-center"
+          className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-[605] h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-all duration-200 hover:scale-105 flex items-center justify-center"
         >
           <MessageCircle className="h-6 w-6" />
           {totalUnread > 0 && (
@@ -119,7 +119,7 @@ export function InternalChatWidget() {
 
       {/* Chat Panel */}
       {open && (
-        <div className="fixed inset-x-2 bottom-2 top-16 sm:inset-auto sm:bottom-6 sm:right-6 z-[500] sm:w-[360px] sm:h-[500px] rounded-2xl bg-background border border-border shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 fade-in duration-200">
+        <div className="fixed inset-x-2 bottom-2 top-16 sm:inset-auto sm:bottom-6 sm:right-6 z-[605] sm:w-[360px] sm:h-[500px] rounded-2xl bg-background border border-border shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 fade-in duration-200">
           {/* Header */}
           <div className="flex items-center gap-2 p-3 border-b bg-primary text-primary-foreground rounded-t-2xl">
             {view === "conversation" && (
@@ -173,6 +173,20 @@ export function InternalChatWidget() {
               </div>
 
               <ScrollArea className="flex-1">
+                {/* 26/11 (Rúben: «como é que eu abro o chat para falar com a nossa nova AI?»): a Olyvia é a primeira conversa, à vista */}
+                <button
+                  type="button"
+                  onClick={() => setOlyviaOpen(true)}
+                  className="mx-2 mb-1 flex w-[calc(100%-1rem)] items-center gap-3 rounded-xl border border-primary/20 bg-primary/5 px-3 py-2.5 text-left transition-colors hover:bg-primary/10"
+                >
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-primary to-purple-600">
+                    <img src={olyviaIcon} alt="" className="h-6 w-6" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block text-sm font-semibold">Falar com a Olyvia</span>
+                    <span className="block text-xs text-muted-foreground">Assistente IA: negócios, obras, relatórios em PDF e Excel</span>
+                  </span>
+                </button>
                 {/* Existing conversations */}
                 {conversations.length > 0 && (
                   <div>

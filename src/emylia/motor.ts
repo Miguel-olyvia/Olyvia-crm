@@ -1329,6 +1329,29 @@ export function diaDeFerias(tec: Tecnico, p: Plano, dia: number, dur: number): n
   for (let k = dia; k < dia + dur; k++) if (tec.ferias.includes(k) || (rh && ausenteNoRh(tec.id, dataDeDia(k)))) return k;
   return null;
 }
+/** 26/11 («Antecipar o resto» abria a tarefa e não fazia nada): quantos dias úteis dá para puxar as tarefas por fazer depois de um buraco
+ *  (de `n` até 1), sem pôr um técnico em duas obras nem nas férias. `s` 0: não dá, e `porque` diz quem impede. Não muda nada. */
+export function simularBuraco(S: Pick<Estado, "deals">, d: Negocio, ini: number, fim: number): { s: number; alvo: number[]; porque: string } {
+  const p = d.obra?.plano;
+  if (!p) return { s: 0, alvo: [], porque: "A obra não tem plano" };
+  const hoje = p.estado === "em curso" ? p.dia : 0, n = fim - ini + 1;
+  const alvo = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => { const v = estadoVivoTarefa(t, p); return v !== "feita" && v !== "validada" && !t.exec && t.dia > fim; }).map((x) => x.ti);
+  if (!alvo.length || n < 1) return { s: 0, alvo, porque: "Não há tarefas por fazer depois desses dias" };
+  const ferias0 = conflitos(p).length;
+  let porque = "";
+  for (let s = n; s >= 1; s--) {
+    const copia: Plano = { ...p, tasks: p.tasks.map((t) => ({ ...t })) };
+    let mexe = false;
+    for (const ti of alvo) { const nd = Math.max(hoje, copia.tasks[ti].dia - s); if (nd !== copia.tasks[ti].dia) mexe = true; copia.tasks[ti].dia = nd; }
+    if (!mexe) { if (!porque) porque = "As tarefas seguintes já começam o mais cedo possível"; continue; }
+    const fora = conflitosNovos(S, d, copia);
+    if (fora.length) { if (!porque) porque = `${TECS.find((x) => x.id === fora[0].tec)?.n.split(" ")[0] ?? "Um técnico"} está noutra obra (${fora[0].obra.nome}) nesses dias`; continue; }
+    if (conflitos(copia).length > ferias0) { if (!porque) porque = "Um técnico está de férias nesses dias"; continue; }
+    return { s, alvo, porque };
+  }
+  return { s: 0, alvo, porque: porque || "Os técnicos das tarefas seguintes não estão livres" };
+}
+
 export function conflitos(p: Plano) {
   const C: { t: Tarefa; tec: Tecnico; dia: number }[] = [];
   for (const t of p.tasks) {
@@ -4791,28 +4814,20 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     fecharBuraco(id: number, ini: number, fim: number): number {
       if (!exigePerm("obra.planear")) return 0;
       const d = deal(id), p = d.obra.plano;
-      if (!p || (p.estado !== "em curso" && p.estado !== "aprovado")) return 0;
-      const hoje = p.estado === "em curso" ? p.dia : 0;
-      const alvo = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => { const v = estadoVivoTarefa(t, p); return v !== "feita" && v !== "validada" && !t.exec && t.dia > fim; }).map((x) => x.ti);
-      const n = fim - ini + 1;
-      if (!alvo.length || n < 1) return 0;
-      const ferias0 = conflitos(p).length;
-      let porque = "";
-      for (let s = n; s >= 1; s--) {
-        const copia: Plano = { ...p, tasks: p.tasks.map((t) => ({ ...t })) };
-        for (const ti of alvo) copia.tasks[ti].dia = Math.max(hoje, copia.tasks[ti].dia - s);
-        const fora = conflitosNovos(S, d, copia);
-        if (fora.length) { if (!porque) porque = `${TECS.find((x) => x.id === fora[0].tec)?.n.split(" ")[0] ?? "Um técnico"} está noutra obra (${fora[0].obra.nome}) nesses dias`; continue; }
-        if (conflitos(copia).length > ferias0) { if (!porque) porque = "Um técnico está de férias nesses dias"; continue; }
-        guardarBase(p);
-        for (const ti of alvo) { const t = p.tasks[ti]; t.dia = Math.max(hoje, t.dia - s); if (t.dia < inicioMinimo(p, ti)) t.antecipada = true; }
-        const txt = `${alvo.length} ${alvo.length === 1 ? "tarefa começa" : "tarefas começam"} ${s} ${s === 1 ? "dia útil" : "dias úteis"} mais cedo`;
-        log(d, `Plano antecipado para a obra não ficar parada: ${txt}`);
-        avisar({ msg: "Plano antecipado", sub: `${txt}${s < n ? ` (os ${n} dias não deram: ${porque})` : ""}`, kind: "ok" });
-        return s;
+      if (!p || (p.estado !== "em curso" && p.estado !== "aprovado")) { avisar({ msg: "Não dá para antecipar", sub: "O plano não está aprovado nem em curso.", kind: "bad" }); return 0; }
+      const hoje = p.estado === "em curso" ? p.dia : 0, n = fim - ini + 1;
+      // 26/11: a mesma conta que o alerta usa para propor (simularBuraco), para não propor o que não dá
+      const { s, alvo, porque } = simularBuraco(S, d, ini, fim);
+      if (!s) {
+        avisar({ msg: "Não dá para antecipar", sub: `${porque}. Pode passar uma tarefa a outro técnico e antecipar só essa.`, kind: "bad" });
+        return 0;
       }
-      avisar({ msg: "Não dá para antecipar", sub: `${porque || "Os técnicos das tarefas seguintes não estão livres"}. Pode passar uma tarefa a outro técnico e antecipar só essa.`, kind: "bad" });
-      return 0;
+      guardarBase(p);
+      for (const ti of alvo) { const t = p.tasks[ti]; t.dia = Math.max(hoje, t.dia - s); if (t.dia < inicioMinimo(p, ti)) t.antecipada = true; }
+      const txt = `${alvo.length} ${alvo.length === 1 ? "tarefa começa" : "tarefas começam"} ${s} ${s === 1 ? "dia útil" : "dias úteis"} mais cedo`;
+      log(d, `Plano antecipado para a obra não ficar parada: ${txt}`);
+      avisar({ msg: "Plano antecipado", sub: `${txt}${s < n ? ` (os ${n} dias não deram: ${porque})` : ""}`, kind: "ok" });
+      return s;
     },
     adiantarPlano(id: number) {
       if (!exigePerm("obra.planear")) return;
