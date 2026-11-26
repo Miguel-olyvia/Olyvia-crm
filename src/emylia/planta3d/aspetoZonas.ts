@@ -34,6 +34,14 @@ export function ehAtributoDeSuperficie(d: AtributoDef): boolean {
   return d.temAspeto === true && (NOMES_SUPERFICIE.has(sem(d.nome).trim()) || NOMES_SUPERFICIE.has(d.codigo.toLowerCase()));
 }
 
+/**
+ * 26/11: os ids dos atributos de SUPERFÍCIE (e que não dão cor nem foto) das definições, tenha o produto valor neles ou não. Uma regra a um destes atributos é sempre da camada «Superfície»,
+ * mesmo herdada para um produto sem valor em Tonalidade: não decide a cor da zona nem se apaga ao escolher uma cor.
+ */
+export function idsDeSuperficieDasDefs(defs: readonly AtributoDef[] | undefined): string[] {
+  return (defs ?? []).filter((d) => ehAtributoDeSuperficie(d) && d.temHex !== true && d.temFoto !== true).map((d) => d.id);
+}
+
 /** A chave de uma exclusão («este atributo não pinta esta zona»): atributo e zona. */
 export const chaveDeExclusao = (atributo: string, zona: ZonaGlb): string => `${atributo}|${zona}`;
 

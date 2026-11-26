@@ -132,6 +132,31 @@ describe("1. a Tonalidade aparece onde se escolhe (e não em «Cor desta zona»)
   });
 });
 
+// revisão independente (26/11): a regra «Tonalidade → Todas as zonas» herdada da categoria, num produto SEM valor em Tonalidade (o atributo fica `fora`): continua a ser uma regra de superfície
+describe("1b. uma regra de superfície a um atributo que o produto não tem escolhido não mexe na camada Cor", () => {
+  const SEM_TONAL = () => doProduto(A_CORPO, A_FRENTE);
+  it("a Cor desta zona continua «Automático», sem o aviso «já não tem», e o «Pinta-a hoje» continua «por omissão»", async () => {
+    baseCom([{ atributo: A_TONAL, zona: "tudo", aplicar: true }]);
+    await abrir({ attrs: SEM_TONAL() });
+    clicar("corpo");
+    expect(marcado(camada("Cor desta zona"))).toEqual([expect.stringContaining("Automático")]);
+    expect(within(camada("Cor desta zona")).queryByText(/já não tem/)).toBeNull();
+    expect(within(painel()).getByText(/^Pinta-a hoje:/).textContent).toContain("por omissão");
+    expect(within(painel()).getByText(/^Pinta-a hoje:/).textContent).not.toContain("por ligação");
+  });
+  it("escolher uma cor nessa zona não exclui a regra de superfície dela (nem a grava como «não pinta»)", async () => {
+    baseCom([{ atributo: A_TONAL, zona: "tudo", aplicar: true }]);
+    await abrir({ attrs: SEM_TONAL() });
+    clicar("corpo");
+    fireEvent.click(within(camada("Cor desta zona")).getByRole("radio", { name: /Cor da frente/ }));
+    fireEvent.click(guardar());
+    await waitFor(() => expect(chamadasDe("cat_definir_config_3d")).toHaveLength(1));
+    const a = chamadasDe("cat_definir_config_3d")[0].a as { p_ligacoes: Regra[] };
+    expect(a.p_ligacoes).toEqual(expect.arrayContaining([{ atributo: A_TONAL, zona: "tudo", aplicar: true }]));
+    expect(a.p_ligacoes.filter((l) => l.atributo === A_TONAL && l.zona === "corpo")).toEqual([]);
+  });
+});
+
 describe("2. uma regra «Todas as zonas» diz o que faz às outras, e a excepção cria-se ali mesmo", () => {
   it("«Só esta zona é diferente» cria a excepção só nessa zona; as outras continuam a vir da regra «Todas as zonas»", async () => {
     baseCom([{ atributo: A_TONAL, zona: "tudo", aplicar: true }]);

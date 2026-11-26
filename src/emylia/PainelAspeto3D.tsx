@@ -9,6 +9,7 @@ import { ZonaEscolhida } from "./Previa3DEscolherZona";
 import { RegrasDoProduto, type Config3dPrevia } from "./Previa3DLigacoes";
 import type { ContextoEscolha } from "./escolherZona";
 import type { LeituraDoProduto } from "./planta3d/acabamentoCor3d";
+import { idsDeSuperficieDasDefs } from "./planta3d/aspetoZonas";
 import type { ZonaGlb, ZonasDoProduto } from "./planta3d/zonasGlb";
 import { porqueDaZona, zonasSemEfeito } from "./porqueDaZona";
 
@@ -67,6 +68,7 @@ export function PainelAspeto3D({ zonaFixa, zonasDoModelo, pintadaPor, atributos,
   const descreveGuardar = podeGuardar ? undefined : invalida ? idErro : idRazao;
   const leitura = config3d?.leitura;
   const atributosCor = atributos.filter((a) => a.daCor), atributosSuperficie = atributos.filter((a) => a.daSuperficie);
+  const idsSuperficieDasDefs = idsDeSuperficieDasDefs(leitura?.defs);
   const porque = leitura && zonaFixa ? porqueDaZona({ zona: zonaFixa, regras: lig?.valor ?? [], attrs: leitura.attrs, defs: leitura.defs }) : undefined;
   const semEfeito = (regra: Ligacao): ZonaGlb[] => (leitura && lig ? zonasSemEfeito({ regra, regras: lig.valor, attrs: leitura.attrs, defs: leitura.defs, zonas: zonasDoModelo }) : []);
   const n = lig?.guardadas ? alteracoesPorGuardar(lig.valor, lig.guardadas) : null;
@@ -96,6 +98,7 @@ export function PainelAspeto3D({ zonaFixa, zonasDoModelo, pintadaPor, atributos,
 
       {zonaFixa ? (
         <ZonaEscolhida key={zonaFixa} zona={zonaFixa} pintadaPor={pintadaPor?.[zonaFixa]} atributosCor={atributosCor} atributosSuperficie={atributosSuperficie}
+          idsSuperficieDasDefs={idsSuperficieDasDefs}
           ligacoes={lig ? { valor: lig.valor, podeEditar, aoMudar: lig.aoMudar } : undefined} pintaHoje={pintaHoje} {...(pelaNome ? { pelaNome } : {})}
           {...(porque ? { porque } : {})} focarAoAbrir={focarAoAbrir} aoFechar={aoFechar} />
       ) : zonasDoModelo.length >= 2 ? (

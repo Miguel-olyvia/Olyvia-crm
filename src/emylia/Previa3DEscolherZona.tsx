@@ -120,6 +120,8 @@ export interface PropsZonaEscolhida {
   atributosCor: readonly LeituraDoProduto[];
   /** Os atributos do produto que dão a superfície (Tonalidade, Brilho: a camada «Superfície»). Vazia: o bloco não aparece. */
   atributosSuperficie: readonly LeituraDoProduto[];
+  /** Os ids de TODOS os atributos de superfície das definições (o produto ter valor neles ou não): as regras deles são da camada «Superfície» e não decidem a cor. Ausente: só os do produto. */
+  idsSuperficieDasDefs?: readonly string[];
   /** As regras em vigor; ausente quando não há configuração 3D (então só se vê). */
   ligacoes?: LigacoesEditaveis;
   /** As zonas que um atributo pinta hoje: para ligá-lo a outra zona sem tirar o que ele já pinta. */
@@ -135,7 +137,7 @@ export interface PropsZonaEscolhida {
 }
 
 // O estado do painel (anúncio) é DESTA zona: quem o usa leva `key={zona}` para ele não passar à zona seguinte.
-export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperficie, ligacoes, pintaHoje, pelaNome, porque, focarAoAbrir = false, aoFechar }: PropsZonaEscolhida) {
+export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperficie, idsSuperficieDasDefs = [], ligacoes, pintaHoje, pelaNome, porque, focarAoAbrir = false, aoFechar }: PropsZonaEscolhida) {
   const id = useId();
   const movel = useIsMobile();
   const titulo = useRef<HTMLHeadingElement>(null);
@@ -156,7 +158,9 @@ export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperfi
   const rotulo = rotuloDaZona(zona);
   const editavel = !!ligacoes?.podeEditar;
   const valor = ligacoes?.valor ?? [];
-  const atualCor = ligacoes ? escolhaAtualDaZona(valor, zona, idsCor, pintadaPor?.atributo, nomeDeCor, idsSuperficie) : null;
+  // as regras de superfície não são da cor, mesmo as de um atributo que o produto não tem escolhido (herdadas): o conjunto vem das definições e não só dos atributos do produto
+  const idsDeSuperficieDaCamada = [...new Set([...idsSuperficie, ...idsSuperficieDasDefs])];
+  const atualCor = ligacoes ? escolhaAtualDaZona(valor, zona, idsCor, pintadaPor?.atributo, nomeDeCor, idsDeSuperficieDaCamada) : null;
   const atualSuperficie = ligacoes && idsSuperficie.length ? escolhaDeSuperficieDaZona(valor, zona, idsSuperficie, pintadaPor?.acabamento, nomeDeSuperficie) : null;
 
   const mudar = (nova: Ligacao[], depois: string) => {
@@ -165,7 +169,7 @@ export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperfi
     ligacoes.aoMudar(nova);
     setAnuncio(`${rotulo}: ${depois}`);
   };
-  const ctxCor: ContextoEscolha = { atributosDaCor: idsCor, pintaHoje, ...(pelaNome ? { pelaNome } : {}), atributosDeSuperficie: idsSuperficie };
+  const ctxCor: ContextoEscolha = { atributosDaCor: idsCor, pintaHoje, ...(pelaNome ? { pelaNome } : {}), atributosDeSuperficie: idsDeSuperficieDaCamada };
   const escolherCor = (e: EscolhaDaZona, depois: string) => mudar(aplicarEscolhaNaZona(valor, zona, e, ctxCor), depois);
   const escolherSuperficie = (e: EscolhaDaZona, depois: string) => mudar(aplicarSuperficieNaZona(valor, zona, e, { atributosDeSuperficie: idsSuperficie }), depois);
   // «Só esta zona é diferente»: o atributo da regra «Todas as zonas» deixa de pintar só esta zona (a zona explícita vence «Todas as zonas»)

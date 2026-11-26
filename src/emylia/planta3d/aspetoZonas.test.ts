@@ -2,7 +2,7 @@
 // explícita manda sobre o nome e limita-o às zonas a que está ligado), da superfície por omissão da opção que pinta a zona, ou do modelo (null). O metal vem da opção que pinta a zona.
 import { describe, expect, it } from "vitest";
 import type { AtributoDef, AtributoProduto, OpcaoAtributo } from "../v2/catalogoModelo";
-import { ROUGHNESS, ROUGHNESS_METAL, ROUGHNESS_METAL_POR_SUPERFICIE, ehAtributoDeSuperficie, chaveDeExclusao, materialDaSuperficie, superficieDaZona } from "./aspetoZonas";
+import { ROUGHNESS, ROUGHNESS_METAL, ROUGHNESS_METAL_POR_SUPERFICIE, ehAtributoDeSuperficie, idsDeSuperficieDasDefs, chaveDeExclusao, materialDaSuperficie, superficieDaZona } from "./aspetoZonas";
 
 const op = (id: string, extra: Partial<OpcaoAtributo> = {}): OpcaoAtributo => ({ id, valor: id, nome: id, hex: null, ordem: 1, ...extra });
 const def = (id: string, nome: string, opcoes: OpcaoAtributo[], extra: Partial<AtributoDef> = {}): AtributoDef => ({ id, codigo: nome.toLowerCase().replace(/ /g, "_"), nome, tipo: "lista", temHex: false, ordem: 1, opcoes, ...extra });
@@ -48,6 +48,19 @@ describe("ehAtributoDeSuperficie: «Brilho» ou «Tonalidade» (pelo nome ou pel
   it("sem «Tem aspeto» ou com outro nome: não", () => {
     expect(ehAtributoDeSuperficie({ ...BRILHO, temAspeto: false })).toBe(false);
     expect(ehAtributoDeSuperficie(def("x", "Textura", [], { temAspeto: true }))).toBe(false);
+  });
+});
+
+describe("idsDeSuperficieDasDefs: os atributos de superfície das definições que não dão cor nem foto", () => {
+  it("devolve o Brilho e a Tonalidade (pela ordem das definições), sem a Cor e sem os que não têm «Tem aspeto»", () => {
+    const tonal = def("tonal", "Tonalidade", [], { temAspeto: true });
+    expect(idsDeSuperficieDasDefs([COR, BRILHO, tonal, def("x", "Textura", [], { temAspeto: true })])).toEqual(["brilho", "tonal"]);
+  });
+  it("um «Brilho» que também dá cor (hex ou foto) é cor e não fica de fora da escolha da cor", () => {
+    expect(idsDeSuperficieDasDefs([{ ...BRILHO, temHex: true }, def("b2", "Tonalidade", [], { temAspeto: true, temFoto: true })])).toEqual([]);
+  });
+  it("sem definições: lista vazia", () => {
+    expect(idsDeSuperficieDasDefs(undefined)).toEqual([]);
   });
 });
 
