@@ -44,6 +44,8 @@ export const CAMINHO_GESTAO: Record<SeparadorGestao, string> = {
 
 /** O configurador de famílias: não é uma página de gestão (não entra em SeparadorGestao nem em CAMINHO_GESTAO), por isso o caminho vai à parte. */
 export const CAMINHO_FAMILIAS = "/catalogo/produtos/familias";
+/** 26/11: a vista de uma família com 3D (a rota tem mais um segmento que /catalogo/produtos/:id, por isso não colide com a ficha do produto). */
+export const caminhoFamilia = (id: string): string => `${CAMINHO_FAMILIAS}/${encodeURIComponent(id)}`;
 
 /** O id do separador (para o `aria-labelledby` do painel). */
 export const idSeparadorCatalogo = (chave: string): string => `tab-cat-${chave}`;

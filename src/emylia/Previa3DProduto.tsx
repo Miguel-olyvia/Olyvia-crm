@@ -71,7 +71,11 @@ export interface Previa3DProdutoProps {
    * e aparece o painel «Ligações». Sem ela (a função da base ainda não existe, ou o formulário de criar) tudo fica como na fase 1: só para ver.
    */
   config3d?: Config3dPrevia;
+  /** 26/11: a altura da caixa do 3D (classes do Tailwind) quando não há painel «Aspeto 3D»; a omissão é a de sempre (h-64 sm:h-80), a vista da família pede um 3D maior. */
+  alturaClasse?: string;
 }
+
+const ALTURA_OMISSAO = "h-64 sm:h-80";
 
 const ROTULO_SUPERFICIE: Record<SuperficieRev, string> = { chao: "No chão", parede: "Na parede" };
 const BOTOES_SUPERFICIE: ReadonlyArray<readonly [SuperficieRev, string]> = [["chao", "Ver no chão"], ["parede", "Ver na parede"]];
@@ -94,7 +98,7 @@ function textoDeAjuda(foco: boolean, dentro: boolean): string {
 }
 
 /** O 3D: a conta do modelo e da cena, o aviso e o visualizador (lazy). Corre dentro do Falha3D, por isso uma excepção aqui também fica na alternativa. */
-function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRevestimento, aplicacao, zonas, painelMedidas = false, config3d }: Previa3DProdutoProps) {
+function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRevestimento, aplicacao, zonas, painelMedidas = false, config3d, alturaClasse = ALTURA_OMISSAO }: Previa3DProdutoProps) {
   // o zoom: botões (sempre), pinça (toque), e roda do rato e teclas + e − só com o 3D focado (e a roda só com o rato lá dentro), para a página continuar a rolar
   const comandos = useRef<ComandosVista | null>(null), idAjuda = useId();
   const [foco, setFoco] = useState(false), [dentro, setDentro] = useState(false);
@@ -179,7 +183,7 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
       {/* 26/11: o 3D é um filho directo da grelha (e não do contentor das zonas e medidas): por baixo de 1280 px (uma só coluna) fica PRESO no topo do ecrã, com altura limitada, enquanto o painel «Aspeto 3D» rola por baixo (escolhe-se a cor a ver a peça).
           O ecrã que rola é o <main> do Layout (fixed, overflow-auto), por isso `top-0`. Ao lado (≥ 1280 px, xl: com o menu lateral do catálogo aberto a ficha tem ~940 px, e a 1024 px só ~625 px, o 3D ficava com 177 px) volta ao fluxo normal. Sem painel «Aspeto 3D», nada fica preso. */}
       <div className={cn("min-w-0", mostrarAspeto && "sticky top-0 z-10 bg-card pb-2 xl:static xl:z-auto xl:col-start-1 xl:row-start-1 xl:bg-transparent xl:pb-0")}>
-      <div className={cn("relative overflow-hidden rounded-xl border border-border bg-muted/50", mostrarAspeto ? "h-[min(16rem,36vh)] sm:h-[min(18rem,40vh)] xl:h-80" : "h-64 sm:h-80")}>
+      <div className={cn("relative overflow-hidden rounded-xl border border-border bg-muted/50", mostrarAspeto ? "h-[min(16rem,36vh)] sm:h-[min(18rem,40vh)] xl:h-80" : alturaClasse)}>
         <div ref={grupo3d} role="group" aria-label="Pré-visualização 3D do produto" aria-describedby={idAjuda} tabIndex={0} onKeyDown={aoTeclar}
           onFocus={() => setFoco(true)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFoco(false); }}
           onPointerEnter={() => setDentro(true)} onPointerLeave={() => setDentro(false)} onPointerDown={(e) => { setDentro(true); e.currentTarget.focus(); }}
@@ -261,7 +265,7 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
 export function Previa3DProduto(props: Previa3DProdutoProps) {
   const [tentativa, setTentativa] = useState(0);
   const alternativa = (
-    <div className="grid h-64 place-items-center content-center gap-2 rounded-xl border border-border bg-muted/50 p-4 text-center sm:h-80">
+    <div className={cn("grid place-items-center content-center gap-2 rounded-xl border border-border bg-muted/50 p-4 text-center", props.alturaClasse ?? ALTURA_OMISSAO)}>
       <Estado texto={MSG_FALHA} />
       <button type="button" onClick={() => setTentativa((n) => n + 1)}
         className="inline-flex min-h-11 items-center rounded-lg border border-input bg-card px-4 text-[15px] font-medium transition-colors hover:bg-muted focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25">
