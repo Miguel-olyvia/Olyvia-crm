@@ -7,10 +7,12 @@ import { Link } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/hooks/useTranslation";
 import { caminhoFamilia } from "../catalogoRotas";
-import type { OutraMedida } from "./escolhaVariacao";
+import { ESTADO_MUDOU_DE_MEDIDA, type OutraMedida } from "./escolhaVariacao";
+import { SCROLL_FUNDO } from "./SeletoresVariacao";
 
 const LIMITE_PESQUISA = 6;
-const LIGACAO = "inline-flex min-h-11 min-w-11 items-center rounded-lg border border-input bg-card px-3 text-[15px] transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card";
+const LIGACAO = cn("inline-flex min-h-11 min-w-11 items-center rounded-lg border border-foreground/50 bg-card px-3 text-[15px] transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card", SCROLL_FUNDO);
+
 const ATUAL = "border-primary bg-muted font-semibold";
 
 const sem = (s: string) => s.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
@@ -51,7 +53,7 @@ export function OutrasMedidas({ outras, parametros, modelo }: OutrasMedidasProps
   const resto = parametros.toString();
   const ligacao = (o: OutraMedida) => (
     <li key={o.id}>
-      <Link to={`${caminhoFamilia(o.id)}${resto ? `?${resto}` : ""}`} aria-current={o.atual ? "page" : undefined} className={cn(LIGACAO, o.atual && ATUAL)}>
+      <Link to={`${caminhoFamilia(o.id)}${resto ? `?${resto}` : ""}`} state={ESTADO_MUDOU_DE_MEDIDA} aria-current={o.atual ? "page" : undefined} className={cn(LIGACAO, o.atual && ATUAL)}>
         {textoDe(o)}{o.atual ? ` (${t("catFamiliaVer.medida.atual")})` : ""}
       </Link>
     </li>
@@ -64,7 +66,7 @@ export function OutrasMedidas({ outras, parametros, modelo }: OutrasMedidasProps
       {comPesquisa && (
         <>
           <input type="search" value={pergunta} onChange={(e) => setPergunta(e.target.value)} aria-label={t("catFamiliaVer.medida.procurar")} placeholder={t("catFamiliaVer.medida.procurar")}
-            className="min-h-11 rounded-lg border border-input bg-card px-3 text-[15px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary" />
+            className={cn("min-h-11 rounded-lg border border-foreground/50 bg-card px-3 text-[15px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary", SCROLL_FUNDO)} />
           <p role="status" className="text-[15px] text-muted-foreground">{q ? t("catFamiliaVer.medida.contagem", { n: visiveis.length, total: ordenadas.length }) : ""}</p>
         </>
       )}

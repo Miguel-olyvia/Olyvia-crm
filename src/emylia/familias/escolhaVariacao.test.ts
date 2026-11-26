@@ -80,7 +80,7 @@ describe("escolherValor: passa ao produto existente mais próximo e avisa", () =
   it("Sanita: de Branco Brilho escolher Cinza passa a Cinza Mate e avisa «Cinza só existe em Mate»", () => {
     const r = escolherValor(produtos, eixos, { [A_COR]: "Branco", [A_TON]: "Brilho" }, A_COR, "Cinza");
     expect(r.escolha).toEqual({ [A_COR]: "Cinza", [A_TON]: "Mate" });
-    expect(r.aviso).toEqual({ escolhido: "Cinza", mudancas: [{ rotulo: "Tonalidade", para: "Mate" }] });
+    expect(r.aviso).toEqual({ escolhido: "Cinza", soExiste: true, mudancas: [{ rotulo: "Tonalidade", para: "Mate" }] });
     expect(fraseDoAviso(r.aviso!, t)).toBe("Cinza só existe em Mate: mudamos para Mate.");
   });
   it("uma combinação que existe não muda nada nem avisa", () => {
@@ -120,6 +120,16 @@ describe("escolherValor: passa ao produto existente mais próximo e avisa", () =
       expect(r.aviso?.mudancas).toEqual([{ rotulo: "Eixo A", para: "a2" }, { rotulo: "Eixo B", para: "b2" }]);
       expect(fraseDoAviso(r.aviso!, t)).toBe("c2 não existe com a escolha anterior: mudamos Eixo A para a2 e Eixo B para b2.");
     });
+    it("«só existe em» só se diz quando é verdade: se o valor existe também com outro valor do eixo que mudou, a frase não o afirma", () => {
+      // Cor × Textura × Tonalidade: Cinza existe em (X, Mate) e em (Y, Brilho); de Branco X Brilho escolher Cinza passa a X Mate, mas Cinza também existe com Brilho
+      const [Cor, Tex, Ton] = [eixo("K", "cor", "Cor", 0), eixo("T", "textura", "Textura", 1), eixo("N", "tonalidade", "Tonalidade", 2)];
+      const q = (id: string, c: string, x: string, n: string) => produto(id, { K: valor(c, { ordem: c === "Branco" ? 1 : 2 }), T: valor(x, { ordem: x === "X" ? 1 : 2 }), N: valor(n, { ordem: n === "Brilho" ? 1 : 2 }) });
+      const ps = [q("1", "Branco", "X", "Brilho"), q("2", "Cinza", "X", "Mate"), q("3", "Cinza", "Y", "Brilho")];
+      const r = escolherValor(ps, [Cor, Tex, Ton], { K: "Branco", T: "X", N: "Brilho" }, "K", "Cinza");
+      expect(r.escolha).toEqual({ K: "Cinza", T: "X", N: "Mate" });
+      expect(r.aviso?.soExiste).toBe(false);
+      expect(fraseDoAviso(r.aviso!, t)).toBe("Cinza não existe com a escolha anterior: mudamos Tonalidade para Mate.");
+    });
   });
 });
 
@@ -143,12 +153,24 @@ describe("escolhaInicial: o endereço e a mudança de medida (mantém cor e text
     const ps = cach(["1", ANTRACITA, LISO], ["2", ANTRACITA, PIZARRA], ["3", BLANCO, LISO]);
     const r = escolhaInicial(ps, medida, { [A_COR]: "BLANCO", [A_TEX]: "Pizarra" });
     expect(r.escolha).toEqual({ [A_COR]: "BLANCO", [A_TEX]: "Liso" });
-    expect(r.aviso).toEqual({ escolhido: "Blanco", mudancas: [{ rotulo: "Textura", para: "Liso" }] });
+    expect(r.aviso).toEqual({ escolhido: "Blanco", soExiste: true, mudancas: [{ rotulo: "Textura", para: "Liso" }] });
   });
-  it("um valor que não existe na família ignora-se (e não avisa)", () => {
+  it("um valor pedido que esta família não tem (cor ou textura da medida anterior) não se perde em silêncio: passa-se ao mais próximo e avisa", () => {
     const ps = cach(["1", ANTRACITA, LISO], ["3", BLANCO, LISO]);
     const r = escolhaInicial(ps, medida, { [A_COR]: "VERDE", [A_TEX]: "Liso" });
     expect(r.escolha).toEqual({ [A_COR]: "ANTRACITA", [A_TEX]: "Liso" });
+    expect(r.aviso).toEqual({ escolhido: null, soExiste: false, mudancas: [{ rotulo: "Cor", para: "Antracita" }] });
+    expect(fraseDoAviso(r.aviso!, t)).toBe("Esta escolha não existe aqui: mudamos Cor para Antracita.");
+  });
+  it("uma textura que a medida nova não tem avisa também (a cor fica)", () => {
+    const ps = cach(["1", ANTRACITA, LISO], ["3", BLANCO, LISO]);
+    const r = escolhaInicial(ps, medida, { [A_COR]: "BLANCO", [A_TEX]: "Pizarra" });
+    expect(r.escolha).toEqual({ [A_COR]: "BLANCO", [A_TEX]: "Liso" });
+    expect(r.aviso?.mudancas).toEqual([{ rotulo: "Textura", para: "Liso" }]);
+  });
+  it("um parâmetro de um eixo que a família não tem ignora-se (não há o que avisar)", () => {
+    const ps = cach(["1", ANTRACITA, LISO], ["3", BLANCO, LISO]);
+    const r = escolhaInicial(ps, medida, { "at-outro": "x" });
     expect(r.aviso).toBeNull();
   });
 });

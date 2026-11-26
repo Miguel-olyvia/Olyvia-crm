@@ -10,6 +10,10 @@ import { nomeParaMostrar, type OpcaoEixo } from "./escolhaVariacao";
 const NOTA = "text-[15px] text-muted-foreground";
 const ROTULO = "text-[15px] font-semibold text-foreground";
 const FOCO = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card";
+/** No telemóvel o cartão do produto fica preso ao fundo (cerca de 240 px): ao focar um controlo o browser rola com esta margem e o cartão não o tapa (WCAG 2.4.11). */
+export const SCROLL_FUNDO = "max-lg:scroll-mb-64";
+/** Um grupo de rádio tem uma só paragem no Tab: a opção escolhida; sem nenhuma escolhida (o produto não tem valor neste eixo), a primeira. */
+const tabIndexDe = (opcoes: readonly OpcaoEixo[], valor: string, i: number): 0 | -1 => (opcoes.some((o) => o.valor === valor) ? (opcoes[i]!.valor === valor ? 0 : -1) : i === 0 ? 0 : -1);
 
 /** O botão a que as setas levam: o seguinte ou o anterior, com volta ao princípio e ao fim; escolhe-se logo (como um grupo de rádio) e o foco acompanha. */
 function aoTeclar(e: KeyboardEvent<HTMLElement>, opcoes: readonly OpcaoEixo[], valor: string, escolher: (v: string) => void) {
@@ -52,13 +56,13 @@ export function SeletorCor({ rotulo, opcoes, valor, aoEscolher }: SeletorProps) 
     <div role="radiogroup" aria-labelledby={idRotulo} className="grid gap-2">
       <p id={idRotulo} className={ROTULO}>{rotulo}</p>
       <div className="flex flex-wrap gap-1">
-        {opcoes.map((o) => {
+        {opcoes.map((o, i) => {
           const escolhida = o.valor === valor, foto = o.foto ? urlDaFotoOpcao(o.foto) : null;
           return (
-            <button key={o.valor} type="button" role="radio" aria-checked={escolhida} aria-label={nome(o)} tabIndex={escolhida ? 0 : -1}
+            <button key={o.valor} type="button" role="radio" aria-checked={escolhida} aria-label={nome(o)} tabIndex={tabIndexDe(opcoes, valor, i)}
               onClick={() => aoEscolher(o.valor)} onKeyDown={(e) => aoTeclar(e, opcoes, valor, aoEscolher)}
               onMouseEnter={() => setApontada(o.valor)} onMouseLeave={() => setApontada(null)} onFocus={() => setApontada(o.valor)} onBlur={() => setApontada(null)}
-              className={cn("inline-flex min-h-11 min-w-11 items-center justify-center rounded-full", FOCO)}>
+              className={cn("inline-flex min-h-11 min-w-11 items-center justify-center rounded-full", SCROLL_FUNDO, FOCO)}>
               {/* o contorno escuro (3:1 com o cartão, mesmo na cor branca) e o anel de quem está escolhida: não depende só da cor */}
               <span data-amostra aria-hidden="true" style={{ ...fundoDe(o.hex), ...(foto ? { backgroundImage: `url(${foto})`, backgroundSize: "cover" } : {}) }}
                 className={cn("block h-8 w-8 rounded-full border-2 border-foreground/60 transition-transform motion-reduce:transition-none", escolhida && "scale-110 ring-2 ring-primary ring-offset-2 ring-offset-card")} />
@@ -78,12 +82,12 @@ export function SeletorBotoes({ rotulo, opcoes, valor, aoEscolher, nota }: Selet
     <div role="radiogroup" aria-labelledby={idRotulo} className="grid gap-2">
       <p id={idRotulo} className={ROTULO}>{rotulo}</p>
       <div className="flex flex-wrap gap-2">
-        {opcoes.map((o) => {
+        {opcoes.map((o, i) => {
           const escolhida = o.valor === valor;
           return (
-            <button key={o.valor} type="button" role="radio" aria-checked={escolhida} tabIndex={escolhida ? 0 : -1}
+            <button key={o.valor} type="button" role="radio" aria-checked={escolhida} tabIndex={tabIndexDe(opcoes, valor, i)}
               onClick={() => aoEscolher(o.valor)} onKeyDown={(e) => aoTeclar(e, opcoes, valor, aoEscolher)}
-              className={cn("inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-input bg-card px-4 text-[15px] font-medium transition-colors hover:bg-muted",
+              className={cn("inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-foreground/50 bg-card px-4 text-[15px] font-medium transition-colors hover:bg-muted", SCROLL_FUNDO,
                 "aria-checked:border-primary aria-checked:bg-primary aria-checked:text-primary-foreground aria-checked:hover:bg-primary", FOCO)}>
               {nomeParaMostrar(o.nome, false)}
             </button>

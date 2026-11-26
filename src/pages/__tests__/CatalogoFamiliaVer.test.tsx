@@ -2,7 +2,7 @@
 // produto); estados (a ler, erro com «Tentar de novo» e ligação de volta, vazia), a função ainda por aplicar na base dá um erro claro, e o 3D não espera pelas escolhas.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 
 const org = vi.hoisted(() => ({ id: "org-1" as string | null, loading: false }));
 const previa = vi.hoisted(() => ({ props: [] as Record<string, unknown>[] }));
@@ -21,10 +21,10 @@ import CatalogoFamiliaVer from "../CatalogoFamiliaVer";
 const ARVORE = [{ id: "n-s1", n: "Sanitas", pai: null }];
 const K = { arvore: ARVORE, categoriasProduto: [{ id: "n-s1", n: "Sanitas", pai: null, ordem: 1, origem: "s1" }] };
 const COM_SUB = { ...SANITA, produtos: SANITA.produtos.map((p) => ({ ...p, subcategoriaId: "s1", subcategoria: "Sanitas" })) };
-const montar = () => render(
-  <MemoryRouter initialEntries={["/catalogo/produtos/familias/f-sanita"]}>
+const montar = (entrada: string | { pathname: string; state: unknown } = "/catalogo/produtos/familias/f-sanita") => render(
+  <MemoryRouter initialEntries={[entrada]}>
     <Routes>
-      <Route path="/catalogo/produtos/familias/:id" element={<CatalogoFamiliaVer />} />
+      <Route path="/catalogo/produtos/familias/:id" element={<><CatalogoFamiliaVer /><Link to="/catalogo/produtos/familias/f-outra" state={{ focarTitulo: true }}>outra medida</Link></>} />
       <Route path="*" element={<p data-testid="sitio">lista</p>} />
     </Routes>
   </MemoryRouter>,
@@ -86,6 +86,44 @@ describe("CatalogoFamiliaVer", () => {
     expect(dados.lerFamiliaVista).toHaveBeenCalledTimes(2);
   });
 
+  it("mudar de medida (outra família) NÃO volta a ler a árvore de categorias: a leitura é por organização", async () => {
+    montar();
+    await screen.findByTestId("previa3d");
+    expect(leve).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole("link", { name: "outra medida" }));
+    await waitFor(() => expect(dados.lerFamiliaVista).toHaveBeenCalledWith("org-1", "f-outra"));
+    await screen.findByTestId("previa3d");
+    expect(leve).toHaveBeenCalledTimes(1);
+  });
+
+  it("depois de mudar de medida o foco fica no título da família nova (a ligação desapareceu com a página)", async () => {
+    montar();
+    await screen.findByTestId("previa3d");
+    fireEvent.click(screen.getByRole("link", { name: "outra medida" }));
+    const h1 = await screen.findByRole("heading", { level: 1, name: "SANITA GLAMIC BTW" });
+    await waitFor(() => expect(document.activeElement).toBe(h1));
+  });
+
+  it("abrir a família pela lista (sem estado) não rouba o foco", async () => {
+    montar();
+    await screen.findByRole("heading", { level: 1, name: "SANITA GLAMIC BTW" });
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("«Tentar de novo»: o foco não se perde, vai para o título quando a família abre", async () => {
+    dados.lerFamiliaVista.mockResolvedValueOnce({ ok: false, erro: "Sem ligação." });
+    montar();
+    fireEvent.click(await screen.findByRole("button", { name: "Tentar de novo" }));
+    const h1 = await screen.findByRole("heading", { level: 1, name: "SANITA GLAMIC BTW" });
+    await waitFor(() => expect(document.activeElement).toBe(h1));
+  });
+
+  it("«A carregar…» da organização está traduzido (não é texto solto)", async () => {
+    org.loading = true;
+    montar();
+    expect(screen.getByRole("status").textContent).toBe("A abrir a família…");
+  });
+
   it("a função da base ainda por aplicar: um erro claro e não um ecrã partido", async () => {
     dados.lerFamiliaVista.mockResolvedValue({ ok: false, erro: "Ainda não disponível nesta base", codigo: "PGRST202" });
     montar();
@@ -118,7 +156,8 @@ describe("CatalogoFamiliaVer", () => {
   it("enquanto a organização carrega não lê nada", async () => {
     org.loading = true;
     montar();
-    await waitFor(() => expect(screen.getByText("A carregar…")).toBeTruthy());
+    await waitFor(() => expect(screen.getByText("A abrir a família…")).toBeTruthy());
     expect(dados.lerFamiliaVista).not.toHaveBeenCalled();
+    expect(leve).not.toHaveBeenCalled();
   });
 });

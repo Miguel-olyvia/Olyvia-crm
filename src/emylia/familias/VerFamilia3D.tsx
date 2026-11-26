@@ -2,7 +2,9 @@
 // só com valores que existem na família), o produto real que corresponde à escolha, as outras medidas do mesmo modelo de catálogo e a escolha no endereço (?cor=&textura=).
 // Uma combinação que não existe nunca se mostra: ao escolher um valor cuja combinação com o resto não existe, passa-se ao produto existente mais próximo e avisa-se numa linha.
 // Só lê (não escreve nada) e não leva custo nenhum. A textura escolhe o produto mas o 3D ainda não a mostra (o atributo «Textura» não tem aspeto).
-import { useMemo, useState } from "react";
+// Teclado e leitor de ecrã: o cartão do produto vem antes de «Outras medidas» na ordem do DOM (no telemóvel fica preso ao fundo por `order`); o aviso de troca anuncia-se
+// numa região viva que nasce vazia; ao chegar de uma mudança de medida (`focarTitulo`) o foco vai para o título; o separador diz «<família> · Famílias».
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ChevronLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -29,6 +31,15 @@ export interface VerFamilia3DProps {
   arvore: readonly NoCat[] | null;
   /** Os nós de categoria de produto com o id da base (`origem`), para achar o nó do produto. */
   categoriasProduto: readonly { id: string; origem?: string }[];
+  /** Verdade quando se chegou de uma mudança de medida ou de «Tentar de novo»: o botão ou a ligação que tinham o foco desapareceram, por isso o foco vai para o título. */
+  focarTitulo?: boolean;
+}
+
+/** Uma região viva que nasce vazia e só depois recebe o texto: assim o leitor de ecrã anuncia também o aviso que já existe ao abrir (a mesma técnica do Previa3DProduto). */
+function RegiaoViva({ texto, className }: { texto: string; className: string }) {
+  const [lido, setLido] = useState("");
+  useEffect(() => { setLido(texto); }, [texto]);
+  return <p role="status" className={className}>{lido}</p>;
 }
 
 /** A escolha como texto: os nomes dos valores do produto, pela ordem dos eixos, separados por « · » (Antracita · Liso). */
@@ -59,8 +70,8 @@ function Vista({ familia, arvore, categoriasProduto }: VerFamilia3DProps) {
   const parametros = parametrosDaEscolha(estado.escolha, eixos);
   const medida = produto?.medida?.texto ?? null;
   return (
-    <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:grid-rows-[auto_1fr] lg:items-start">
-      <div className="relative min-w-0 lg:col-start-1 lg:row-span-2 lg:row-start-1">
+    <div className="grid gap-5 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)] lg:items-start">
+      <div className="relative min-w-0 lg:col-start-1 lg:row-span-3 lg:row-start-1">
         {arvore === null && (
           <div className={cn("grid place-items-center rounded-xl border border-border bg-muted/50", ALTURA_3D)}>
             <p role="status" className="text-[15px] text-muted-foreground">{t("catFamiliaVer.cena.preparar")}</p>
@@ -88,15 +99,19 @@ function Vista({ familia, arvore, categoriasProduto }: VerFamilia3DProps) {
                 nota={e.code.toLowerCase() === CODIGO_TEXTURA ? t("catFamiliaVer.texturaNota") : undefined} />;
         })}
         {/* regiões vivas: existem sempre (vazias) e só o texto muda, para a mudança se anunciar */}
-        <p role="status" className="text-[15px] font-medium text-foreground">{estado.aviso ? fraseDoAviso(estado.aviso, t) : ""}</p>
+        <RegiaoViva texto={estado.aviso ? fraseDoAviso(estado.aviso, t) : ""} className="text-[15px] font-medium text-foreground" />
         <p role="status" className="sr-only">{anuncio}</p>
         {medida && <p className="text-[15px]">{t("catFamiliaVer.medida.desta", { medida })}</p>}
-        <OutrasMedidas outras={familia.outrasMedidas} parametros={parametros} modelo={produto?.modelo ?? produtos.find((p) => p.modelo)?.modelo ?? null} />
       </div>
 
-      {/* no telemóvel o cartão fica preso ao fundo do ecrã, para estar sempre à vista; ao lado das escolhas segue o fluxo */}
-      <div className="max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:-mx-4 max-lg:border-t max-lg:border-border max-lg:bg-background max-lg:px-4 max-lg:py-3 lg:col-start-2 lg:row-start-2">
-        <CartaoProdutoFamilia produto={produto} />
+      {/* o cartão vem a seguir às escolhas no DOM (teclado e leitor de ecrã chegam ao preço sem passar pelas medidas); no telemóvel `order-last` põe-no ao fim e preso ao fundo
+          do ecrã, para estar sempre à vista (os controlos têm `scroll-mb` para ele não os tapar); ao lado das escolhas segue o fluxo. `key`: o estado «copiada» não passa ao produto seguinte. */}
+      <div className="max-lg:sticky max-lg:bottom-0 max-lg:z-10 max-lg:order-last max-lg:-mx-4 max-lg:border-t max-lg:border-border max-lg:bg-background max-lg:px-4 max-lg:py-3 lg:col-start-2 lg:row-start-2">
+        <CartaoProdutoFamilia key={produto?.id ?? "sem-produto"} produto={produto} />
+      </div>
+
+      <div className="min-w-0 lg:col-start-2 lg:row-start-3">
+        <OutrasMedidas outras={familia.outrasMedidas} parametros={parametros} modelo={produto?.modelo ?? produtos.find((p) => p.modelo)?.modelo ?? null} />
       </div>
     </div>
   );
@@ -104,14 +119,22 @@ function Vista({ familia, arvore, categoriasProduto }: VerFamilia3DProps) {
 
 export function VerFamilia3D(props: VerFamilia3DProps) {
   const { t } = useTranslation();
-  const { familia } = props, n = familia.produtos.length;
+  const { familia, focarTitulo = false } = props, n = familia.produtos.length;
+  const titulo = useRef<HTMLHeadingElement>(null);
+  const rotuloLista = t("catFamiliaVer.voltar");
+  useEffect(() => { if (focarTitulo) titulo.current?.focus(); }, [focarTitulo]);
+  useEffect(() => {
+    const antes = document.title;
+    document.title = `${familia.nome} · ${rotuloLista}`;
+    return () => { document.title = antes; };
+  }, [familia.nome, rotuloLista]);
   return (
     <div className="grid gap-5">
       <header className="grid gap-1">
         <Link to={CAMINHO_FAMILIAS} className="inline-flex min-h-11 items-center gap-1 justify-self-start rounded-lg text-[15px] font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
           <ChevronLeft className="h-4 w-4" aria-hidden="true" />{t("catFamiliaVer.voltar")}
         </Link>
-        <h1 className="break-words text-2xl font-semibold tracking-tight">{familia.nome}</h1>
+        <h1 ref={titulo} tabIndex={-1} className="break-words text-2xl font-semibold tracking-tight">{familia.nome}</h1>
         <p className="text-[15px] text-muted-foreground">{t(n === 1 ? "catFamiliaVer.produtos.one" : "catFamiliaVer.produtos.other", { count: n })}</p>
       </header>
       {n === 0 ? <p role="status" className="text-[15px] text-muted-foreground">{t("catFamiliaVer.vazia")}</p> : <Vista {...props} />}

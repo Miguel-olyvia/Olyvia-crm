@@ -27,8 +27,12 @@ export interface FamiliaVista {
 export type Escolha = Readonly<Record<string, string>>;
 export interface OpcaoEixo { valor: string; nome: string; hex: string | null; foto: string | null; ordem: number | null }
 export interface MudancaAviso { rotulo: string; para: string }
-/** Um valor que não existe com o resto da escolha: o que se tocou (`escolhido`, null quando nada se manteve) e o que o ecrã mudou. Os nomes já vêm para mostrar. */
-export interface AvisoTroca { escolhido: string | null; mudancas: readonly MudancaAviso[] }
+/**
+ * Um valor que não existe com o resto da escolha: o que se tocou (`escolhido`, null quando nada se manteve) e o que o ecrã mudou. Os nomes já vêm para mostrar.
+ * `soExiste`: verdade só quando o valor tocado existe EXCLUSIVAMENTE com o valor para que se mudou (um único eixo mudou e todos os produtos com o valor tocado coincidem nele);
+ * só então se pode dizer «só existe em».
+ */
+export interface AvisoTroca { escolhido: string | null; soExiste: boolean; mudancas: readonly MudancaAviso[] }
 export interface ResultadoEscolha { escolha: Escolha; aviso: AvisoTroca | null }
 export type TipoEixo = "medida" | "cor" | "botoes";
 
@@ -105,14 +109,20 @@ function nomeNoProduto(p: ProdutoVista, e: EixoVista, produtos: readonly Produto
   return nomeParaMostrar(v?.nome || v?.valor || "", tipoDoEixo(e, produtos) === "cor");
 }
 
-/** Os eixos desejados em que o produto escolhido difere, e o aviso. `tocado` (se há) é o eixo que a pessoa acabou de tocar; senão o primeiro eixo desejado que ficou. */
-function avisoDe(produto: ProdutoVista, eixos: readonly EixoVista[], produtos: readonly ProdutoVista[], desejada: Escolha, tocado?: string): AvisoTroca | null {
+/**
+ * Os eixos desejados em que o produto escolhido difere, e o aviso. `tocado` (se há) é o eixo que a pessoa acabou de tocar; senão o primeiro eixo desejado que ficou.
+ * `semNome`: o pedido traz valores que a família não tem (vêm do endereço), por isso não há um valor «tocado» de que falar: a frase é só «esta escolha não existe aqui».
+ */
+function avisoDe(produto: ProdutoVista, eixos: readonly EixoVista[], produtos: readonly ProdutoVista[], desejada: Escolha, tocado?: string, semNome = false): AvisoTroca | null {
   const pedidos = eixos.filter((e) => desejada[e.atributoId] !== undefined);
   const mudados = pedidos.filter((e) => valorDe(produto, e.atributoId) !== desejada[e.atributoId]);
   if (mudados.length === 0) return null;
-  const ficou = tocado !== undefined ? eixos.find((e) => e.atributoId === tocado) : pedidos.find((e) => !mudados.includes(e));
+  const ficou = semNome ? undefined : tocado !== undefined ? eixos.find((e) => e.atributoId === tocado) : pedidos.find((e) => !mudados.includes(e));
+  const unico = mudados.length === 1 ? mudados[0]! : null;
+  const soExiste = !!ficou && !!unico && produtos.filter((p) => valorDe(p, ficou.atributoId) === desejada[ficou.atributoId]).every((p) => valorDe(p, unico.atributoId) === valorDe(produto, unico.atributoId));
   return {
     escolhido: ficou ? nomeNoProduto(produto, ficou, produtos) : null,
+    soExiste,
     mudancas: mudados.map((e) => ({ rotulo: e.rotulo, para: nomeNoProduto(produto, e, produtos) })),
   };
 }
@@ -135,18 +145,21 @@ export function escolherValor(produtos: readonly ProdutoVista[], eixos: readonly
 }
 
 /**
- * A escolha ao abrir a página: o que o endereço pede (valores que existem nesta família; os outros ignoram-se sem aviso) e, onde nada se pede, a omissão. Ao mudar de
- * medida a cor e a textura vêm no endereço: se a combinação não existe na medida nova aplica-se a mesma regra e avisa.
+ * A escolha ao abrir a página: o que o endereço pede e, onde nada se pede, a omissão. Ao mudar de medida a cor e a textura vêm no endereço: se a combinação não existe na
+ * medida nova, ou se um valor pedido nem existe nela, aplica-se a mesma regra (o produto existente mais próximo) e avisa. Só se ignoram, sem aviso, os parâmetros de eixos
+ * que a família não tem.
  */
 export function escolhaInicial(produtos: readonly ProdutoVista[], eixos: readonly EixoVista[], pedido: Escolha): ResultadoEscolha {
-  const validos = Object.fromEntries(eixos.flatMap((e) => {
-    const v = pedido[e.atributoId];
-    return v !== undefined && opcoesDoEixo(produtos, e.atributoId).some((o) => o.valor === v) ? [[e.atributoId, v] as const] : [];
-  }));
-  const p = maisProximo(produtos, eixos, validos);
+  const pedidos = Object.fromEntries(eixos.flatMap((e) => (pedido[e.atributoId] !== undefined ? [[e.atributoId, pedido[e.atributoId]!] as const] : [])));
+  const ausente = eixos.some((e) => pedidos[e.atributoId] !== undefined && !opcoesDoEixo(produtos, e.atributoId).some((o) => o.valor === pedidos[e.atributoId]));
+  const p = maisProximo(produtos, eixos, pedidos);
   if (!p) return { escolha: {}, aviso: null };
-  return { escolha: escolhaDoProduto(p, eixos), aviso: avisoDe(p, eixos, produtos, validos) };
+  return { escolha: escolhaDoProduto(p, eixos), aviso: avisoDe(p, eixos, produtos, pedidos, undefined, ausente) };
 }
+
+/** O estado da navegação das ligações de medida: a página seguinte sabe que veio de uma mudança de medida e põe o foco no título (a ligação desapareceu com a página). */
+export const ESTADO_MUDOU_DE_MEDIDA = { focarTitulo: true } as const;
+export const veioDeMudancaDeMedida = (estado: unknown): boolean => typeof estado === "object" && estado !== null && (estado as { focarTitulo?: unknown }).focarTitulo === true;
 
 /** O nome do parâmetro do endereço de um eixo: o código dele (cor, textura…). */
 const parametroDe = (e: EixoVista): string => e.code.toLowerCase();
@@ -167,8 +180,8 @@ type Traduzir = (chave: string, vars?: Record<string, string | number>) => strin
 
 /** A frase do aviso, nos textos da tradução: «Cinza só existe em Mate: mudamos para Mate.» */
 export function fraseDoAviso(aviso: AvisoTroca, t: Traduzir): string {
-  const { escolhido, mudancas } = aviso;
-  if (escolhido && mudancas.length === 1) return t("catFamiliaVer.aviso.um", { nome: escolhido, novo: mudancas[0]!.para });
+  const { escolhido, soExiste, mudancas } = aviso;
+  if (escolhido && soExiste && mudancas.length === 1) return t("catFamiliaVer.aviso.um", { nome: escolhido, novo: mudancas[0]!.para });
   const partes = mudancas.map((m) => t("catFamiliaVer.aviso.mudanca", { rotulo: m.rotulo, para: m.para }));
   const lista = partes.length > 1 ? `${partes.slice(0, -1).join(", ")}${t("catFamiliaVer.aviso.e")}${partes[partes.length - 1]}` : partes.join("");
   return escolhido ? t("catFamiliaVer.aviso.varios", { nome: escolhido, mudancas: lista }) : t("catFamiliaVer.aviso.semNome", { mudancas: lista });

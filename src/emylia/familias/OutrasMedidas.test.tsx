@@ -2,11 +2,11 @@
 // aria-current="page"; a cor e a textura escolhidas vão no endereço (mantém-se ao mudar de medida); com muitas medidas há pesquisa e grupos.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 
 vi.mock("@/contexts/LanguageContext", () => ({ useLanguage: () => ({ language: "pt", setLanguage: () => undefined }) }));
 
-import type { OutraMedida } from "./escolhaVariacao";
+import { veioDeMudancaDeMedida, type OutraMedida } from "./escolhaVariacao";
 import { OutrasMedidas } from "./OutrasMedidas";
 
 afterEach(cleanup);
@@ -28,6 +28,30 @@ describe("OutrasMedidas", () => {
     const l = screen.getByRole("link", { name: /90×210 cm/ });
     expect(l.getAttribute("href")).toBe("/catalogo/produtos/familias/f6?cor=Antracita&textura=Liso");
     expect(screen.queryAllByRole("button")).toHaveLength(0);
+  });
+
+  it("a ligação diz ao ecrã seguinte que se veio de uma mudança de medida (para ele pôr o foco no título)", () => {
+    const Estado = () => <p data-testid="estado">{String(veioDeMudancaDeMedida(useLocation().state))}</p>;
+    render(
+      <MemoryRouter initialEntries={["/catalogo/produtos/familias/f2"]}>
+        <Routes>
+          <Route path="/catalogo/produtos/familias/f2" element={<OutrasMedidas outras={SEIS} parametros={PARAMS} modelo="CACH" />} />
+          <Route path="/catalogo/produtos/familias/:id" element={<Estado />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("link", { name: /90×210 cm/ }));
+    expect(screen.getByTestId("estado").textContent).toBe("true");
+    expect(veioDeMudancaDeMedida(undefined)).toBe(false);
+    expect(veioDeMudancaDeMedida({ x: 1 })).toBe(false);
+  });
+
+  it("as ligações têm contorno visível (3:1) e margem de rolagem em baixo no telemóvel", () => {
+    montar(SEIS);
+    const l = screen.getByRole("link", { name: /90×210 cm/ });
+    expect(l.className).toContain("border-foreground/50");
+    expect(l.className).not.toContain("border-input");
+    expect(l.className).toContain("max-lg:scroll-mb-64");
   });
 
   it("a medida desta família leva aria-current=page, e só ela", () => {

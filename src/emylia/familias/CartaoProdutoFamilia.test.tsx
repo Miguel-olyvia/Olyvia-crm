@@ -27,8 +27,9 @@ describe("CartaoProdutoFamilia", () => {
 
   it("«Abrir produto» leva à ficha do produto (/catalogo/produtos/:id)", () => {
     montar(P);
-    expect(screen.getByRole("link", { name: "Abrir o produto Base de Duche CACH Antracita 70X100 LISO" }).getAttribute("href")).toBe("/catalogo/produtos/p1");
-    expect(screen.getByRole("link", { name: /Abrir o produto/ }).textContent).toBe("Abrir produto");
+    expect(screen.getByRole("link", { name: "Abrir produto Base de Duche CACH Antracita 70X100 LISO" }).getAttribute("href")).toBe("/catalogo/produtos/p1");
+    // o nome acessível começa pelo texto visível (WCAG 2.5.3: quem diz «clicar Abrir produto» acerta)
+    expect(screen.getByRole("link", { name: /^Abrir produto/ }).textContent).toBe("Abrir produto");
   });
 
   it("copiar a referência escreve-a na área de transferência e diz que copiou", async () => {

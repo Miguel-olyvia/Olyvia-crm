@@ -15,9 +15,9 @@ import { VerFamilia3D } from "./VerFamilia3D";
 
 const ARVORE = [{ id: "n-s1", n: "Sanitas", pai: null }];
 const Local = () => <p data-testid="local">{useLocation().pathname + useLocation().search}</p>;
-const montar = (familia: FamiliaVista, url = "/catalogo/produtos/familias/f-sanita") => render(
+const montar = (familia: FamiliaVista, url = "/catalogo/produtos/familias/f-sanita", focarTitulo = false) => render(
   <MemoryRouter initialEntries={[url]}>
-    <Routes><Route path="/catalogo/produtos/familias/:id" element={<><VerFamilia3D familia={familia} arvore={ARVORE} categoriasProduto={[{ id: "n-s1", origem: "s1" }]} /><Local /></>} /></Routes>
+    <Routes><Route path="/catalogo/produtos/familias/:id" element={<><VerFamilia3D familia={familia} arvore={ARVORE} categoriasProduto={[{ id: "n-s1", origem: "s1" }]} focarTitulo={focarTitulo} /><Local /></>} /></Routes>
   </MemoryRouter>,
 );
 const ultima = () => previa.props[previa.props.length - 1]!;
@@ -113,13 +113,14 @@ describe("VerFamilia3D: escolher", () => {
     expect(screen.getByTestId("local").textContent).toBe("/catalogo/produtos/familias/f-sanita?cor=Cinza&tonalidade=Mate");
   });
 
-  it("abre a escolha que o endereço traz; um valor que não existe na família ignora-se", () => {
+  it("abre a escolha que o endereço traz; um valor que a família não tem passa ao mais próximo e AVISA (não se perde em silêncio)", () => {
     montar(SANITA, "/catalogo/produtos/familias/f-sanita?cor=Cinza&tonalidade=Mate");
     expect(screen.getByText("LS-S-0003-C-M")).toBeTruthy();
     cleanup();
     montar(SANITA, "/catalogo/produtos/familias/f-sanita?cor=Verde&tonalidade=Mate");
     expect(marcado("Tonalidade")).toBe("Mate");
     expect(screen.getByText("LS-S-0003-B-M")).toBeTruthy();
+    expect(screen.getByText("Esta escolha não existe aqui: mudamos Cor para Branco.")).toBeTruthy();
   });
 
   it("um endereço com uma combinação que não existe (cor e textura de outra medida) passa ao mais próximo e avisa ao abrir", () => {
@@ -134,6 +135,59 @@ describe("VerFamilia3D: escolher", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Cinza" }));
     const regioes = screen.getAllByRole("status").map((s) => s.textContent);
     expect(regioes.some((x) => /^Cinza · Mate: LS-S-0003-C-M, 450,00\s€$/.test(x ?? ""))).toBe(true);
+  });
+});
+
+describe("VerFamilia3D: teclado, leitor de ecrã e título", () => {
+  const clip = vi.fn(async () => undefined);
+  beforeEach(() => { clip.mockClear(); Object.defineProperty(navigator, "clipboard", { value: { writeText: clip }, configurable: true }); });
+
+  it("«Referência copiada.» desaparece quando o produto muda (não fica a dizer que se copiou a referência nova)", async () => {
+    montar(SANITA);
+    fireEvent.click(screen.getByRole("button", { name: "Copiar a referência LS-S-0003-B-B" }));
+    expect(await screen.findByText("Referência copiada.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: "Cinza" }));
+    expect(screen.getByText("LS-S-0003-C-M")).toBeTruthy();
+    expect(screen.queryByText("Referência copiada.")).toBeNull();
+  });
+
+  it("o cartão do produto vem ANTES de «Outras medidas» na ordem do DOM (quem usa o teclado não passa por 42 ligações para chegar ao preço)", () => {
+    const med = { atributoId: A_MED, valor: null, unidade: "cm", texto: "70×100 cm" };
+    const outras = [{ id: "f-sanita", nome: "S", atual: true, medida: "70×100 cm", medidaValor: null, unidade: "cm" }, { id: "f-2", nome: "S2", atual: false, medida: "80×120 cm", medidaValor: null, unidade: "cm" }];
+    montar({ ...SANITA, outrasMedidas: outras, produtos: SANITA.produtos.map((p) => ({ ...p, medida: med, modelo: "GLAMIC" })) });
+    const cartao = screen.getByRole("article"), seccao = screen.getByRole("region", { name: /Outras medidas/ });
+    expect(cartao.compareDocumentPosition(seccao) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("com focarTitulo (veio de uma mudança de medida) o foco vai para o título, que se pode focar por programa", () => {
+    montar(SANITA, undefined, true);
+    const h1 = screen.getByRole("heading", { level: 1 });
+    expect(h1.getAttribute("tabindex")).toBe("-1");
+    expect(document.activeElement).toBe(h1);
+  });
+
+  it("sem focarTitulo o foco não se rouba (abrir pela lista não mexe no foco)", () => {
+    montar(SANITA);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("o título do separador diz a família: «<família> · Famílias», e repõe o anterior ao sair", () => {
+    document.title = "Olyvia";
+    const { unmount } = montar(SANITA);
+    expect(document.title).toBe("SANITA GLAMIC BTW · Famílias");
+    unmount();
+    expect(document.title).toBe("Olyvia");
+  });
+
+  it("o aviso de troca anuncia-se numa região viva (a frase aparece depois de a região existir)", async () => {
+    montar(SANITA, "/catalogo/produtos/familias/f-sanita?cor=Cinza&tonalidade=Brilho");
+    const regiao = screen.getAllByRole("status").find((s) => /só existe em/.test(s.textContent ?? ""));
+    expect(regiao?.textContent).toBe("Cinza só existe em Mate: mudamos para Mate.");
+  });
+
+  it("o cartão preso ao fundo no telemóvel não tapa o que tem o foco (os controlos têm margem de rolagem)", () => {
+    montar(SANITA);
+    expect(radios("Cor")[0]!.className).toContain("max-lg:scroll-mb-64");
   });
 });
 
@@ -178,6 +232,6 @@ describe("VerFamilia3D: medidas", () => {
 
   it("«Abrir produto» leva à ficha do produto escolhido", () => {
     montar(SANITA);
-    expect(screen.getByRole("link", { name: /Abrir o produto SANITA GLAMIC BTW BRANCO BRILHO/ }).getAttribute("href")).toBe("/catalogo/produtos/bb");
+    expect(screen.getByRole("link", { name: /Abrir produto SANITA GLAMIC BTW BRANCO BRILHO/ }).getAttribute("href")).toBe("/catalogo/produtos/bb");
   });
 });

@@ -31,7 +31,7 @@ export function CartaoProdutoFamilia({ produto }: { produto: ProdutoVista | null
         <span className="text-muted-foreground">{t("catFamiliaVer.cartao.referencia")}</span>
         <span className="font-mono">{produto.sku}</span>
         <button type="button" aria-label={t("catFamiliaVer.cartao.copiar", { sku: produto.sku })} onClick={copiar}
-          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-input bg-card transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card">
+          className="inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-foreground/50 bg-card transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-card">
           <Copy className="h-4 w-4" aria-hidden="true" />
         </button>
         <span role="status" className="text-muted-foreground">{copia === "ok" ? t("catFamiliaVer.cartao.copiada") : copia === "erro" ? t("catFamiliaVer.cartao.naoCopiou") : ""}</span>

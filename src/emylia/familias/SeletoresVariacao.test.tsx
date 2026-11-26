@@ -18,6 +18,26 @@ const COR: OpcaoEixo[] = [
 ];
 const TEX: OpcaoEixo[] = [{ valor: "Liso", nome: "Liso", hex: null, foto: null, ordem: 1 }, { valor: "Pizarra", nome: "Pizarra", hex: null, foto: null, ordem: 2 }];
 
+describe("um grupo sem nenhuma opção escolhida (o produto não tem valor neste eixo)", () => {
+  const tabs = () => screen.getAllByRole("radio").map((r) => r.getAttribute("tabindex"));
+  it("as bolinhas: a primeira fica no Tab, para o grupo não ficar fora do teclado", () => {
+    render(<SeletorCor rotulo="Cor" opcoes={COR} valor="" aoEscolher={() => undefined} />);
+    expect(tabs()).toEqual(["0", "-1", "-1"]);
+  });
+  it("os botões: a primeira fica no Tab", () => {
+    render(<SeletorBotoes rotulo="Textura" opcoes={TEX} valor="" aoEscolher={() => undefined} />);
+    expect(tabs()).toEqual(["0", "-1"]);
+  });
+  it("com uma opção escolhida só essa fica no Tab", () => {
+    render(<SeletorBotoes rotulo="Textura" opcoes={TEX} valor="Pizarra" aoEscolher={() => undefined} />);
+    expect(tabs()).toEqual(["-1", "0"]);
+  });
+  it("os controlos têm margem de rolagem em baixo no telemóvel (o cartão preso ao fundo não os tapa: WCAG 2.4.11)", () => {
+    render(<SeletorBotoes rotulo="Textura" opcoes={TEX} valor="Liso" aoEscolher={() => undefined} />);
+    expect(screen.getAllByRole("radio")[0]!.className).toContain("max-lg:scroll-mb-64");
+  });
+});
+
 describe("SeletorCor", () => {
   it("um grupo com nome, uma bolinha por opção recebida e o nome da cor escolhida escrito (normalizado)", () => {
     render(<SeletorCor rotulo="Cor" opcoes={COR} valor="NEGRO" aoEscolher={() => undefined} />);
