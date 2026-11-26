@@ -90,10 +90,27 @@ function Pinta({ ligado, aoMudar }: { ligado: boolean; aoMudar: (v: boolean) => 
   );
 }
 
+/**
+ * As regras de UM atributo ditas em português claro (e não «ligado: Todas as zonas sim»): «pinta todas as zonas; não pinta em Frente», «dá a superfície a todas as zonas», «pinta só em Tampo».
+ * `superficie`: o atributo dá a superfície (Brilho, Tonalidade) e não a cor. Uma regra explícita «pinta» ao lado de «Todas as zonas: pinta» é redundante e não se repete.
+ */
+function fraseDasRegras(ls: readonly Ligacao[], superficie: boolean): string {
+  const pinta = superficie ? "dá a superfície" : "pinta", naoPinta = superficie ? "não dá superfície" : "não pinta";
+  const nomes = (zs: readonly Ligacao[]) => zs.map((l) => rotuloDaZonaLigacao(l.zona)).join(", ");
+  const tudo = ls.find((l) => l.zona === "tudo");
+  const sim = ls.filter((l) => l.zona !== "tudo" && l.aplicar), nao = ls.filter((l) => l.zona !== "tudo" && !l.aplicar);
+  const frases: string[] = [];
+  if (tudo?.aplicar) frases.push(superficie ? `${pinta} a todas as zonas` : `${pinta} todas as zonas`);
+  else if (tudo && sim.length === 0) frases.push(`${naoPinta} em nenhuma zona`);
+  if (!tudo?.aplicar && sim.length) frases.push(`${pinta}${tudo ? " só" : ""} em ${nomes(sim)}`);
+  if (nao.length) frases.push(`${naoPinta} em ${nomes(nao)}`);
+  return frases.join("; ");
+}
+
 /** O estado de um atributo no painel: o das regras guardadas ou do rascunho, se as há; senão o que vale por omissão. */
 function estadoDoAtributo(o: LeituraPorOmissao, valor: readonly Ligacao[]): string {
   const ls = valor.filter((l) => l.atributo === o.id);
-  if (ls.length) return `ligado: ${ls.map((l) => `${rotuloDaZonaLigacao(l.zona)} ${l.aplicar ? "sim" : "não"}`).join(", ")}`;
+  if (ls.length) return fraseDasRegras(ls, o.daSuperficie === true);
   return o.aplicado ? `aplicado por omissão (${o.onde})` : "desligado por omissão";
 }
 

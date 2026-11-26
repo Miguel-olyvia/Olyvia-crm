@@ -72,7 +72,8 @@ export function PainelMedidas({ medida, eixos, manual, dimensoes, aoEscolher, ao
           : gravacao.podeEditar ? "Escolha que campo da Medida é a largura, a altura e a profundidade da peça: a peça muda logo. Para a escolha ficar, guarde-a neste produto."
             : "Escolha que campo da Medida é a largura, a altura e a profundidade da peça: a peça muda logo, só para ver. Guardar a escolha precisa da permissão de editar produtos."}
       </p>
-      <div className="grid gap-3 sm:grid-cols-3">
+      {/* as colunas dependem da largura do painel (e não do ecrã): numa coluna estreita as caixas continuam legíveis, uma por linha */}
+      <div className="grid grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] gap-3">
         {EIXOS_PECA.map((eixo) => (
           <div key={eixo} className="grid gap-1">
             <label htmlFor={`${id}-${eixo}`} className="text-[15px] font-medium">{ROTULO_EIXO[eixo]} =</label>
@@ -123,7 +124,7 @@ export function PainelZonas({ zonas, pintadaPor, fixa, aoApontar, aoFixar }: Pro
       <h3 id={`${id}-t`} className="text-[15px] font-semibold">Zonas</h3>
       <p className={NOTA}>Aponte uma zona (rato ou Tab) para a ver realçada no 3D; clique para a manter realçada.</p>
       {/* 26/11: no telemóvel as zonas são uma faixa com scroll horizontal PRÓPRIO (a página não ganha scroll horizontal); a partir de `sm`, a grelha de sempre */}
-      <ul className="flex snap-x gap-2 overflow-x-auto pb-1 sm:grid sm:grid-cols-2 sm:overflow-visible sm:pb-0">
+      <ul className="flex snap-x gap-2 overflow-x-auto pb-1 sm:grid sm:grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] sm:overflow-visible sm:pb-0">
         {zonas.map(({ zona, partes }) => {
           const atributo = pintadaPor?.[zona]?.atributo, acabamento = pintadaPor?.[zona]?.acabamento;
           return (

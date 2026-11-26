@@ -191,6 +191,8 @@ describe("passar o rato por cima de uma parte mostra o nome da zona e o atributo
     const c = await abrir();
     fireEvent.click(screen.getByTestId("passar-corpo"));
     expect(screen.getByTestId("etiqueta-zona").textContent).toBe("Corpo · Cor do corpo");
+    // verificação ao vivo (26/11): a etiqueta ficava por cima dos botões de zoom (Afastar, Aproximar, Repor vista) quando o 3D é estreito: a largura dela deixa sempre o espaço dos três botões
+    expect(screen.getByTestId("etiqueta-zona").className).toContain("max-w-[calc(100%-11rem)]");
     expect(c.getAttribute("data-realce")).toBe("corpo");
     fireEvent.click(screen.getByTestId("passar-nada"));
     expect(screen.queryByTestId("etiqueta-zona")).toBeNull();

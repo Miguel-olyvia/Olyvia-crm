@@ -48,6 +48,24 @@ describe("escolhaAtualDaZona: o que a zona tem escolhido hoje", () => {
     expect(escolhaAtualDaZona(lig, "frente", [COR, FRENTE], "Cor da frente", nomeDe)).toEqual({ tipo: "atributo", id: FRENTE });
     expect(escolhaAtualDaZona(lig, "frente", [COR, FRENTE])).toEqual({ tipo: "atributo", id: COR });
   });
+  // 26/11 (verificação ao vivo): a Tonalidade e o Brilho são regras de SUPERFÍCIE; não são regras de cor e não podem mudar a escolha da camada «Cor»
+  describe("as regras de superfície não afectam a camada «Cor»", () => {
+    const TONAL = "aaaaaaaa-0000-4000-a000-0000000000f1";
+    it("«Tonalidade → Todas as zonas» (e uma regra só da zona): a cor continua em «pelo nome», e não em «regra a um atributo que o produto já não tem»", () => {
+      expect(escolhaAtualDaZona([L(TONAL, "tudo")], "corpo", IDS, undefined, undefined, [TONAL])).toEqual({ tipo: "nome" });
+      expect(escolhaAtualDaZona([L(TONAL, "corpo")], "corpo", IDS, undefined, undefined, [TONAL])).toEqual({ tipo: "nome" });
+    });
+    it("com uma regra de cor ao lado, vale a de cor", () => {
+      expect(escolhaAtualDaZona([L(TONAL, "tudo"), L(CORPO, "corpo")], "corpo", IDS, undefined, undefined, [TONAL])).toEqual({ tipo: "atributo", id: CORPO });
+    });
+    it("uma regra a um atributo que o produto já não tem continua a ver-se (não é de superfície)", () => {
+      const FORA = "aaaaaaaa-0000-4000-a000-0000000000f2";
+      expect(escolhaAtualDaZona([L(FORA, "corpo")], "corpo", IDS, undefined, undefined, [TONAL])).toEqual({ tipo: "atributo", id: FORA });
+    });
+    it("as exclusões de superfície não contam para «nenhum»", () => {
+      expect(escolhaAtualDaZona([L(TONAL, "corpo", false)], "corpo", IDS, undefined, undefined, [TONAL])).toEqual({ tipo: "nome" });
+    });
+  });
 });
 
 describe("aplicarEscolhaNaZona: escolher um atributo", () => {

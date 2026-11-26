@@ -139,7 +139,16 @@ export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperfi
   const id = useId();
   const movel = useIsMobile();
   const titulo = useRef<HTMLHeadingElement>(null);
-  useEffect(() => { if (focarAoAbrir) titulo.current?.focus(); }, [focarAoAbrir]);
+  const seccao = useRef<HTMLElement>(null);
+  // com o painel ao lado do 3D (≥ 1024 px) ele já está à vista; por baixo do 3D (telemóvel, tablet) fica depois de «Zonas» e «Medidas», e escolher a zona leva-o à vista (suave, salvo «reduzir movimento»)
+  const aoLado = () => typeof window.matchMedia === "function" && window.matchMedia("(min-width: 1024px)").matches;
+  // o foco passa ao título (clique no 3D); por baixo do 3D sem o salto brusco do próprio foco, que o salto suave de baixo substitui
+  useEffect(() => { if (focarAoAbrir) titulo.current?.focus({ preventScroll: !aoLado() }); }, [focarAoAbrir]);
+  useEffect(() => {
+    if (aoLado()) return;
+    const reduzir = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    seccao.current?.scrollIntoView?.({ behavior: reduzir ? "auto" : "smooth", block: "start" });
+  }, []);
   const [anuncio, setAnuncio] = useState("");
   const idsCor = atributosCor.map((a) => a.id), idsSuperficie = atributosSuperficie.map((a) => a.id);
   const nomeDeCor = (a: string) => atributosCor.find((x) => x.id === a)?.nome;
@@ -147,7 +156,7 @@ export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperfi
   const rotulo = rotuloDaZona(zona);
   const editavel = !!ligacoes?.podeEditar;
   const valor = ligacoes?.valor ?? [];
-  const atualCor = ligacoes ? escolhaAtualDaZona(valor, zona, idsCor, pintadaPor?.atributo, nomeDeCor) : null;
+  const atualCor = ligacoes ? escolhaAtualDaZona(valor, zona, idsCor, pintadaPor?.atributo, nomeDeCor, idsSuperficie) : null;
   const atualSuperficie = ligacoes && idsSuperficie.length ? escolhaDeSuperficieDaZona(valor, zona, idsSuperficie, pintadaPor?.acabamento, nomeDeSuperficie) : null;
 
   const mudar = (nova: Ligacao[], depois: string) => {
@@ -175,7 +184,7 @@ export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperfi
     </>
   );
   const opcoesCor: OpcaoDeCamada[] = [
-    { chave: "nome", escolha: { tipo: "nome" }, rotulo: <span>Automático (pelo nome do atributo)</span>, texto: "Automático (pelo nome do atributo)", anuncio: "automático" },
+    { chave: "nome", escolha: { tipo: "nome" }, rotulo: <span>Automático (pelo nome do atributo)</span>, texto: "Automático", anuncio: "automático" }, // no seletor do telemóvel cabe só «Automático»: o «Porquê» diz que é pelo nome
     ...(foraDoProduto(atualCor, idsCor) ? [{ chave: `atributo:${(atualCor as { id: string }).id}`, escolha: null, rotulo: <span>Regra a um atributo que o produto já não tem</span>, texto: "Regra a um atributo que o produto já não tem", anuncio: "" }] : []),
     ...atributosCor.map((a) => ({ chave: `atributo:${a.id}`, escolha: { tipo: "atributo", id: a.id } as EscolhaDaZona, rotulo: amostra(a), texto: `${a.nome} · ${a.opcao.nome}`, anuncio: a.nome })),
     { chave: "nenhum", escolha: { tipo: "nenhum" }, rotulo: <span>Sem cor</span>, texto: "Sem cor", anuncio: "sem cor" },
@@ -189,7 +198,7 @@ export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperfi
   ];
 
   return (
-    <section aria-labelledby={`${id}-t`} onKeyDown={aoKeyDown} className="grid gap-3 rounded-xl border border-primary/50 bg-card p-3">
+    <section ref={seccao} aria-labelledby={`${id}-t`} onKeyDown={aoKeyDown} className="grid scroll-mt-20 gap-3 rounded-xl border border-primary/50 bg-card p-3">
       <div className="flex items-start justify-between gap-2">
         <h4 id={`${id}-t`} ref={titulo} tabIndex={-1} className="text-[15px] font-semibold focus:outline-none">Zona: {rotulo}</h4>
         <button type="button" onClick={aoFechar} aria-label={`Deixar de escolher a zona ${rotulo}`} title="Fechar" className={cn(BOTAO, "min-w-11 px-0")}><X className="h-4 w-4" aria-hidden="true" /></button>

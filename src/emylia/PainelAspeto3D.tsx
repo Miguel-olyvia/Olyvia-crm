@@ -107,8 +107,19 @@ export function PainelAspeto3D({ zonaFixa, zonasDoModelo, pintadaPor, atributos,
           orfas={lig.orfas} ignoradas={lig.ignoradas} podeEditar={podeEditar} aoMudar={lig.aoMudar} semEfeito={semEfeito} aoApontar={aoRealcarRegra} idErro={idErro} />
       )}
 
+      {/* «Voltar a herdar» é uma acção rara e apaga as regras guardadas: fica na secção, que rola com a página, e não no rodapé fixo (que assim cabe numa linha, mesmo a 375 px) */}
       {lig && podeEditar && (
-        <div className="sticky bottom-0 z-10 -mx-3 -mb-3 grid gap-2 rounded-b-xl border-t border-border bg-card px-3 py-2">
+        <div className="grid gap-1">
+          {/* apaga as regras guardadas do produto: com um rascunho por guardar perder-se-ia sem aviso, por isso primeiro guarda-se ou descarta-se */}
+          <button type="button" aria-disabled={!lig.proprio || ocupado || alterado} aria-describedby={alterado && lig.proprio ? idHerdar : undefined}
+            onClick={() => { if (lig.proprio && !ocupado && !alterado) void correr(lig.herdar, "As regras voltaram a ser herdadas."); }}
+            className={cn(BOTAO, "justify-self-start", (!lig.proprio || ocupado || alterado) && DESLIGADO)}>Voltar a herdar as regras</button>
+          {alterado && lig.proprio && <p id={idHerdar} className={NOTA}>Guarde ou descarte as alterações antes de voltar a herdar as regras.</p>}
+        </div>
+      )}
+
+      {lig && podeEditar && (
+        <div className="sticky bottom-0 z-10 -mx-3 -mb-3 grid rounded-b-xl border-t border-border bg-card px-3 py-2">
           <div className="flex flex-wrap items-center gap-2">
             {/* aria-disabled (e não disabled): um botão desactivado perde o foco do teclado ao ser carregado; assim o foco fica e o clique é só ignorado */}
             {lig.descartar && (
@@ -118,16 +129,12 @@ export function PainelAspeto3D({ zonaFixa, zonasDoModelo, pintadaPor, atributos,
               className={cn(BOTAO_PRINCIPAL, !podeGuardar && "cursor-not-allowed opacity-50 hover:bg-primary")}>
               {ocupado && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />}Guardar aspeto 3D
             </button>
-            {/* apaga as regras guardadas do produto: com um rascunho por guardar perder-se-ia sem aviso, por isso primeiro guarda-se ou descarta-se */}
-            <button type="button" aria-disabled={!lig.proprio || ocupado || alterado} aria-describedby={alterado && lig.proprio ? idHerdar : undefined}
-              onClick={() => { if (lig.proprio && !ocupado && !alterado) void correr(lig.herdar, "As regras voltaram a ser herdadas."); }}
-              className={cn(BOTAO, (!lig.proprio || ocupado || alterado) && DESLIGADO)}>Voltar a herdar as regras</button>
           </div>
-          {razao && <p id={idRazao} className={NOTA}>{razao}</p>}
-          {alterado && lig.proprio && <p id={idHerdar} className={NOTA}>Guarde ou descarte as alterações antes de voltar a herdar as regras.</p>}
-          {/* região viva: o resultado de guardar ou de voltar a herdar; o erro como alerta */}
-          <p aria-live="polite" className={NOTA}>{msg && !msg.erro ? msg.texto : ""}</p>
-          {msg?.erro && <p role="alert" className="text-[15px] text-red-700 dark:text-red-400">{msg.texto}{msg.texto === FRASE_FALHA ? "" : ` ${FRASE_FALHA}`}</p>}
+          {/* o motivo de o «Guardar» estar desligado é a descrição do botão para o leitor de ecrã; à vista, o estado já está no cabeçalho («Guardado», «Por guardar: N») */}
+          {razao && <p id={idRazao} className="sr-only">{razao}</p>}
+          {/* região viva: o resultado de guardar ou de voltar a herdar; o erro como alerta. Sem texto não ocupa altura. */}
+          <p aria-live="polite" className={cn(NOTA, msg && !msg.erro && "mt-1")}>{msg && !msg.erro ? msg.texto : ""}</p>
+          {msg?.erro && <p role="alert" className="mt-1 text-[15px] text-red-700 dark:text-red-400">{msg.texto}{msg.texto === FRASE_FALHA ? "" : ` ${FRASE_FALHA}`}</p>}
         </div>
       )}
     </section>

@@ -108,6 +108,28 @@ describe("1. a Tonalidade aparece onde se escolhe (e não em «Cor desta zona»)
     expect(within(painel()).queryByRole("group", { name: "Superfície desta zona" })).toBeNull();
     expect(within(painel()).getByRole("group", { name: "Cor desta zona" })).toBeTruthy();
   });
+  // verificação ao vivo (26/11): acrescentar «Tonalidade → Todas as zonas» tirava a «Cor desta zona» de «Automático» e o «Pinta-a hoje» passava de «por omissão» a «por ligação»
+  it("uma regra de superfície («Tonalidade → Todas as zonas») não mexe na camada Cor: continua «Automático», «por omissão» e sem aviso", async () => {
+    await abrir();
+    clicar("corpo");
+    const antesCor = marcado(camada("Cor desta zona"));
+    const antesHoje = within(painel()).getByText(/^Pinta-a hoje:/).textContent;
+    const antesPorque = within(painel()).getByText(/^Porquê: automático: o atributo/).textContent;
+    expect(antesCor).toEqual([expect.stringContaining("Automático")]);
+    expect(antesHoje).toContain("por omissão");
+    // acrescenta a regra pelo próprio painel (a mesma via do dono), escolhendo a Tonalidade
+    fireEvent.click(screen.getByRole("button", { name: "Acrescentar regra" }));
+    const nova = regras()[0];
+    fireEvent.change(within(nova).getByLabelText("Atributo"), { target: { value: A_TONAL } });
+    fireEvent.change(within(nova).getByLabelText(/^Zona/), { target: { value: "tudo" } });
+    expect(marcado(camada("Cor desta zona"))).toEqual(antesCor);
+    expect(within(camada("Cor desta zona")).queryByText(/já não tem/)).toBeNull();
+    expect(within(painel()).getByText(/^Pinta-a hoje:/).textContent).toContain("por omissão");
+    expect(within(painel()).getByText(/^Pinta-a hoje:/).textContent).not.toContain("por ligação");
+    expect(within(painel()).getByText(/^Porquê: automático: o atributo/).textContent).toBe(antesPorque);
+    // a superfície, essa, passou a vir da regra
+    expect(marcado(camada("Superfície desta zona"))).toEqual([expect.stringContaining("Tonalidade")]);
+  });
 });
 
 describe("2. uma regra «Todas as zonas» diz o que faz às outras, e a excepção cria-se ali mesmo", () => {
@@ -419,5 +441,86 @@ describe("10. telemóvel (375 px): as escolhas passam a seletores e os alvos tê
     await abrir();
     clicar("frente");
     for (const r of within(painel()).getAllByRole("radio")) expect(r.closest("label")?.className).toContain("min-h-11");
+  });
+});
+
+// verificação ao vivo (26/11): no telemóvel o painel «Aspeto 3D» fica muito abaixo (depois de Zonas e Medidas): escolher uma zona leva-o à vista
+describe("11. no ecrã estreito, escolher uma zona leva o painel à vista", () => {
+  const original = window.matchMedia, scroll = Element.prototype.scrollIntoView, largura = window.innerWidth;
+  const comEcra = (o: { largo: boolean; reduzir?: boolean }) => {
+    window.matchMedia = ((q: string) => ({
+      matches: q.includes("min-width: 1024px") ? o.largo : q.includes("prefers-reduced-motion") ? !!o.reduzir : false, media: q, onchange: null,
+      addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
+    })) as typeof window.matchMedia;
+  };
+  afterEach(() => { window.matchMedia = original; Element.prototype.scrollIntoView = scroll; Object.defineProperty(window, "innerWidth", { configurable: true, value: largura }); });
+  const botaoDaZona = (z: string) => document.querySelector<HTMLElement>(`[data-zona-botao="${z}"]`)!;
+  it("com o painel por baixo do 3D, tocar numa zona do painel «Zonas» leva o título da zona à vista, com movimento suave", async () => {
+    comEcra({ largo: false });
+    const rolar = vi.fn(); Element.prototype.scrollIntoView = rolar;
+    await abrir();
+    fireEvent.click(botaoDaZona("corpo"));
+    await screen.findByRole("heading", { name: "Zona: Corpo" });
+    expect(rolar).toHaveBeenCalledTimes(1);
+    expect(rolar).toHaveBeenCalledWith({ behavior: "smooth", block: "start" });
+    expect(rolar.mock.instances[0]).toBe(painel());
+  });
+  it("com «reduzir movimento» o salto é imediato", async () => {
+    comEcra({ largo: false, reduzir: true });
+    const rolar = vi.fn(); Element.prototype.scrollIntoView = rolar;
+    await abrir();
+    fireEvent.click(botaoDaZona("corpo"));
+    await screen.findByRole("heading", { name: "Zona: Corpo" });
+    expect(rolar).toHaveBeenCalledWith({ behavior: "auto", block: "start" });
+  });
+  it("com o painel ao lado do 3D (ecrã largo) não há salto nenhum", async () => {
+    comEcra({ largo: true });
+    const rolar = vi.fn(); Element.prototype.scrollIntoView = rolar;
+    await abrir();
+    fireEvent.click(botaoDaZona("corpo"));
+    await screen.findByRole("heading", { name: "Zona: Corpo" });
+    expect(rolar).not.toHaveBeenCalled();
+  });
+  it("clicar no 3D no ecrã estreito: o foco vai ao título e o salto é um só, o suave", async () => {
+    comEcra({ largo: false });
+    const rolar = vi.fn(); Element.prototype.scrollIntoView = rolar;
+    await abrir();
+    clicar("frente");
+    expect(document.activeElement).toBe(within(painel()).getByRole("heading", { name: "Zona: Frente" }));
+    expect(rolar).toHaveBeenCalledTimes(1);
+  });
+  it("sem scrollIntoView (ambiente antigo) não rebenta", async () => {
+    comEcra({ largo: false });
+    Element.prototype.scrollIntoView = undefined as unknown as typeof Element.prototype.scrollIntoView;
+    await abrir();
+    expect(() => clicar("frente")).not.toThrow();
+  });
+  it("no telemóvel a opção automática da cor cabe no seletor: «Automático», sem o texto comprido (o «Porquê» já explica)", async () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 375 });
+    await abrir();
+    clicar("frente");
+    const sel = within(painel()).getByLabelText("Cor desta zona") as HTMLSelectElement;
+    expect(within(sel).getByRole("option", { name: "Automático" })).toBeTruthy();
+    expect(within(sel).queryByRole("option", { name: /pelo nome do atributo/ })).toBeNull();
+  });
+});
+
+describe("12. o rodapé fixo é compacto: uma linha com Descartar e Guardar", () => {
+  it("«Voltar a herdar as regras» (acção rara) sai do rodapé fixo e fica na secção das regras, que rola com a página", async () => {
+    baseCom([{ atributo: A_TONAL, zona: "tudo", aplicar: true }]);
+    await abrir();
+    const rodape = guardar().closest<HTMLElement>(".sticky")!;
+    expect(rodape).toBeTruthy();
+    expect(within(rodape).getByRole("button", { name: "Descartar" })).toBeTruthy();
+    expect(within(rodape).queryByRole("button", { name: "Voltar a herdar as regras" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Voltar a herdar as regras" }).closest(".sticky")).toBeNull();
+    expect(within(rodape).getAllByRole("button")).toHaveLength(2);
+  });
+  it("«Sem alterações para guardar.» já não ocupa uma linha à vista (o cabeçalho diz «Guardado»); continua a ser a descrição do botão para o leitor de ecrã", async () => {
+    await abrir();
+    const razao = screen.getByText("Sem alterações para guardar.");
+    expect(razao.className).toContain("sr-only");
+    expect(razao.id).toBe(guardar().getAttribute("aria-describedby"));
+    expect(screen.getByText("Guardado")).toBeTruthy();
   });
 });

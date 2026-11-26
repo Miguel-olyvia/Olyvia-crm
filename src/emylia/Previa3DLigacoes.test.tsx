@@ -317,8 +317,28 @@ describe("«Atributos que o 3D lê»: todos os atributos com hex, foto ou aspeto
   });
   it("com uma regra, o estado mostra a regra em vez da omissão e já não oferece «Ligar»", () => {
     montar({ omissoes: OMISSOES, valor: [L(A_PUXADOR, "tampo")], atributos: [...ATRIBUTOS, { id: A_PUXADOR, nome: "Puxador" }] });
-    expect(screen.getByText("Puxador", { selector: "strong" }).closest("li")?.textContent).toContain("ligado: Tampo sim");
+    expect(screen.getByText("Puxador", { selector: "strong" }).closest("li")?.textContent).toContain("Puxador: pinta em Tampo");
     expect(screen.queryByRole("button", { name: "Ligar Puxador" })).toBeNull();
+  });
+  // verificação ao vivo (26/11): «Tonalidade: ligado: Todas as zonas sim» não se entendia
+  it("o estado das regras lê-se em português claro: «Tonalidade: dá a superfície a todas as zonas»", () => {
+    const A_TONAL = "aaaaaaaa-0000-4000-a000-0000000000f1";
+    const om = [{ id: A_TONAL, nome: "Tonalidade", aplicado: true, onde: "dá a superfície a todas as zonas", daSuperficie: true }, ...OMISSOES];
+    const atrs = [...ATRIBUTOS, { id: A_PUXADOR, nome: "Puxador" }, { id: A_TONAL, nome: "Tonalidade" }];
+    const estado = (nome: string) => screen.getByText(nome, { selector: "strong" }).closest("li")?.querySelector("span")?.textContent;
+    const { unmount } = montar({ omissoes: om, atributos: atrs, valor: [L(A_TONAL, "tudo")] });
+    expect(estado("Tonalidade")).toBe("Tonalidade: dá a superfície a todas as zonas");
+    unmount();
+    const b = montar({ omissoes: om, atributos: atrs, valor: [L(A_TONAL, "tudo"), L(A_TONAL, "frente", false)] });
+    expect(estado("Tonalidade")).toBe("Tonalidade: dá a superfície a todas as zonas; não dá superfície em Frente");
+    b.unmount();
+    const c = montar({ omissoes: om, atributos: atrs, valor: [L(A_PUXADOR, "tudo", false), L(A_FRENTE, "tudo"), L(A_FRENTE, "tampo", false)] });
+    expect(estado("Cor da frente")).toBe("Cor da frente: pinta todas as zonas; não pinta em Tampo");
+    expect(estado("Puxador")).toBe("Puxador: não pinta em nenhuma zona");
+    c.unmount();
+    montar({ omissoes: om, atributos: atrs, valor: [L(A_PUXADOR, "tudo", false), L(A_PUXADOR, "tampo"), L(A_PUXADOR, "frente")] });
+    expect(estado("Puxador")).toBe("Puxador: pinta só em Tampo, Frente");
+    for (const li of screen.getAllByRole("listitem")) expect(li.textContent).not.toMatch(/ligado:| sim\b/);
   });
   it("só leitura: o estado vê-se, sem botões de ligar nem desligar", () => {
     montar({ omissoes: OMISSOES, podeEditar: false });

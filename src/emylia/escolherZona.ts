@@ -36,9 +36,12 @@ export interface ContextoSuperficie { atributosDeSuperficie: readonly string[] }
  */
 export function escolhaAtualDaZona(
   valor: readonly Ligacao[], zona: ZonaGlb, atributosDaCor: readonly string[], nomeQuePinta?: string, nomeDe?: (id: string) => string | undefined,
+  /** 26/11: os atributos de SUPERFÍCIE (Tonalidade, Brilho) do produto: as regras deles são de outra camada e não decidem a cor da zona. */
+  atributosDeSuperficie: readonly string[] = [],
 ): EscolhaDaZona {
   const { ligacoes, excluidos } = ligacoesDaConfig(valor);
-  const ligados = Object.keys(ligacoes).filter((id) => ligacoes[id].includes(zona));
+  const soSuperficie = new Set(atributosDeSuperficie.filter((id) => !atributosDaCor.includes(id)));
+  const ligados = Object.keys(ligacoes).filter((id) => ligacoes[id].includes(zona) && !soSuperficie.has(id));
   if (ligados.length) {
     const doNome = nomeQuePinta && nomeDe ? ligados.find((id) => nomeDe(id) === nomeQuePinta) : undefined;
     const primeiro = atributosDaCor.find((id) => ligados.includes(id)) ?? ligados[0];

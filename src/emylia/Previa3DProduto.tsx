@@ -194,7 +194,7 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
         {!superficie && <InterruptorMedidas ligado={cotas} aoMudar={setCotas} className="absolute left-2 top-2" />}
         {/* o nome da zona debaixo do rato e o atributo que a pinta (decorativo: o painel «Zonas» e o painel da zona dizem o mesmo em texto) */}
         {escolherNo3d && !superficie && zonaSobRato && (
-          <p data-testid="etiqueta-zona" aria-hidden="true" className="pointer-events-none absolute bottom-2 left-2 max-w-[60%] rounded-md bg-card/95 px-2.5 py-1 text-[15px] font-medium text-foreground shadow-sm">
+          <p data-testid="etiqueta-zona" aria-hidden="true" className="pointer-events-none absolute bottom-2 left-2 max-w-[calc(100%-11rem)] rounded-md bg-card/95 px-2.5 py-1 text-[15px] font-medium text-foreground shadow-sm">
             {rotuloDaZona(zonaSobRato)} · {zonas?.zonas[zonaSobRato]?.atributo || "sem atributo de cor"}
           </p>
         )}

@@ -77,7 +77,7 @@ export function hexDoAcabamentoGeral(attrs: readonly AtributoProduto[] | undefin
 
 /* ------------------------------------------------------------------ o que o 3D lê de cada atributo, por omissão (para o painel «Ligações») */
 /** Um atributo que o 3D pode ler (tem hex, foto ou aspeto) e se, SEM configuração do produto, se aplica por omissão (e onde). */
-export interface LeituraPorOmissao { id: string; nome: string; aplicado: boolean; onde: string }
+export interface LeituraPorOmissao { id: string; nome: string; aplicado: boolean; onde: string; /** 26/11: dá a superfície (Brilho, Tonalidade) e não a cor: o painel di-lo em palavras («dá a superfície a…»). */ daSuperficie?: boolean }
 const ONDE: Readonly<Record<PapelCor, string>> = { corpo: "pinta o corpo", frente: "pinta a frente", geral: "pinta as zonas sem atributo próprio" };
 
 /**
@@ -91,7 +91,7 @@ export function leiturasPorOmissao(defs: readonly AtributoDef[] | undefined): Le
   return lista.map((d) => {
     const c = classes.get(d.id);
     if (c && (d.temHex || d.temFoto)) return { id: d.id, nome: d.nome, aplicado: true, onde: ONDE[c.papel] };
-    if (ehAtributoDeSuperficie(d)) return { id: d.id, nome: d.nome, aplicado: true, onde: "dá a superfície a todas as zonas" };
+    if (ehAtributoDeSuperficie(d)) return { id: d.id, nome: d.nome, aplicado: true, onde: "dá a superfície a todas as zonas", daSuperficie: true };
     if (cores.length === 1 && cores[0].id === d.id) return { id: d.id, nome: d.nome, aplicado: true, onde: "é o único atributo de cor: pinta tudo" };
     return { id: d.id, nome: d.nome, aplicado: false, onde: "" };
   });
