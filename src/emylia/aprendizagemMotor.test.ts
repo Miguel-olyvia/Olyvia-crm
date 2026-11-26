@@ -69,6 +69,11 @@ describe("o que as obras ensinam", () => {
   });
 });
 
+it("os campos a null (um plano lido da base) não escondem as tarefas", () => {
+  const L = [1, 2, 3].map((i) => { const d = obra(i, [feita({ nome: "Pintura", dur: 2, h: 16 }, 4)]); (d.obra.plano!.tasks[0] as { corrige?: unknown }).corrige = null; return d; });
+  expect([...aprender(L).licoes.values()][0]).toMatchObject({ razao: 2, aplica: true });
+});
+
 describe("o plano de uma obra nova nasce com o que se aprendeu", () => {
   it("a tarefa ensinada por 3 obras dura o que costuma durar, as seguintes andam com ela, e as horas e o preço não mudam", () => {
     const S = seed();

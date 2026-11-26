@@ -67,7 +67,7 @@ export function observacoesDaObra(d: Pick<Negocio, "id" | "obra">): { dias: Obse
   const G = gerado ? porNome(gerado) : null;
   const vez = new Map<string, number>();
   for (const t of p.tasks) {
-    if (t.corrige !== undefined || t.nova || t.interna) { vez.set(t.nome, (vez.get(t.nome) ?? 0) + 1); continue; }
+    if (t.corrige != null || t.nova || t.interna) { vez.set(t.nome, (vez.get(t.nome) ?? 0) + 1); continue; }
     const k = vez.get(t.nome) ?? 0; vez.set(t.nome, k + 1);
     const g = G?.get(`${t.nome}#${k}`);
     if (!g) continue;
@@ -84,7 +84,7 @@ export function observacoesDaObra(d: Pick<Negocio, "id" | "obra">): { dias: Obse
     const A = porNome(reg.gerado), B = porNome(reg.final), T = porNome(p.tasks);
     for (const [k, b] of B) {
       const a = A.get(k), t = T.get(k);
-      if (!a || !t || t.nova || t.interna || t.corrige !== undefined) continue;
+      if (!a || !t || t.nova || t.interna || t.corrige != null) continue;
       dias.push({ chave: chaveDaTarefa(t), nome: t.nome, obra: d.id, razao: Math.max(1, b.dur) / diasSemLicao(t, a), peso: 1, fonte: "validacao" });
     }
   }
@@ -108,7 +108,7 @@ export function erroDaObra(d: Pick<Negocio, "id" | "nome" | "obra">): ErroObra |
   for (const t of p.tasks) {
     const k = vez.get(t.nome) ?? 0; vez.set(t.nome, k + 1);
     const g = G.get(`${t.nome}#${k}`);
-    if (!g || !acabada(t) || t.corrige !== undefined) continue;
+    if (!g || !acabada(t) || t.corrige != null) continue;
     const real = diasReais(t);
     if (!real) continue;
     n++; sd += Math.abs(real - Math.max(1, g.dur)); bd += Math.max(1, g.dur);
