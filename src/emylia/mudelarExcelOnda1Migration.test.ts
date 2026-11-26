@@ -222,6 +222,13 @@ describe(`migration ${nome}`, () => {
     }
   });
 
+  it("a Anlorbel vai para o registo principal (18ebe983), nunca para o duplicado 5fdbcc9c", () => {
+    const isupTxt = secao("INSERT INTO _o1_isup", ";");
+    expect(isupTxt).not.toContain("5fdbcc9c-27e8-4635-b84f-2d4e0b21bf65");
+    expect((isupTxt.match(/'18ebe983-523a-4c8e-9721-ba0d0d1a9662'/g) ?? []).length).toBeGreaterThan(0);
+    expect(prod.filter((p) => p.campo === "fornecedor_livre" && /anlorbel - com/i.test(p.para))).toEqual([]);
+  });
+
   it("nenhuma reversão na pasta das migrations e nenhum carimbo repetido", () => {
     expect(readdirSync(pasta).filter((f) => /mudelar_excel|reverter-onda|reverter_onda/.test(f))).toEqual([nome]);
     expect(readdirSync(pasta).filter((f) => f.startsWith("20270129500000_"))).toHaveLength(1);
