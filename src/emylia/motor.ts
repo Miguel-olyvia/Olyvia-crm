@@ -4749,6 +4749,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
           const t = p.tasks[a.ti];
           if (!t) continue;
           t.dia = a.dia; t.tec = a.tec;
+          if (a.dur != null) t.dur = a.dur;
           if (a.antecipada) t.antecipada = true; else delete t.antecipada;
         }
         f.desfeito = agoraIso;
@@ -4757,10 +4758,13 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         return true;
       }
       // aplicar
-      const antes = p.tasks.map((t, ti) => ({ ti, dia: t.dia, tec: t.tec, ...(t.antecipada ? { antecipada: true as const } : {}) }));
+      const antes = p.tasks.map((t, ti) => ({ ti, dia: t.dia, tec: t.tec, dur: t.dur, ...(t.antecipada ? { antecipada: true as const } : {}) }));
       if (op.acao.k === "fecharBuraco") A.fecharBuraco(id, op.acao.ini, op.acao.fim);
+      // 26/11 (etapa 4): pôr em dia ou adiantar, pelo mesmo caminho do gestor (alterações, diário, avisos aos técnicos)
+      else if (op.acao.k === "replanear") A.replanearObra(id, { adiantar: op.acao.adiantar, motivo: `${op.auto ? `Agente ${op.nomeAgente} (sozinho)` : `Agente ${op.nomeAgente}, aceite`}: ${op.texto}`, cliente: false });
       else A.trocarTec(id, op.acao.ti, op.acao.tec);
-      const mudadas = antes.filter((a) => p.tasks[a.ti] && (p.tasks[a.ti].dia !== a.dia || p.tasks[a.ti].tec !== a.tec));
+      const mudadas = antes.filter((a) => p.tasks[a.ti] && (p.tasks[a.ti].dia !== a.dia || p.tasks[a.ti].tec !== a.tec || p.tasks[a.ti].dur !== a.dur))
+        .map(({ dur, ...a }) => (p.tasks[a.ti].dur !== dur ? { ...a, dur } : a));
       if (!mudadas.length) return false;
       const L = (e.feitos ??= []);
       L.unshift({ id: `f${Date.now().toString(36)}${L.length}`, q: agoraIso, agente: op.agente, texto: op.texto, auto: op.auto, quem: op.auto ? "Olyvia" : quem, antes: mudadas });

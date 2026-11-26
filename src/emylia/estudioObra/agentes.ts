@@ -7,7 +7,7 @@
 import type { Estado, Negocio } from "../motor";
 import type { ResumoEcNeg } from "../inventario/ponteNegocios";
 import { alertasDaObra, type AcaoAlerta, type Nivel } from "./alertasObra";
-import { estadoVivo, nomeNoPlano } from "./planoVivo";
+import { estadoVivo, nomeNoPlano, replanear, type Replano } from "./planoVivo";
 import { custoDaHora } from "./quemPaga";
 import { rotuloDia } from "../preparacaoObra";
 import { ROTULO_ALTERACAO } from "../historicoPlano";
@@ -39,7 +39,8 @@ export const DEGRAUS_DE_ORIGEM: Record<AgenteId, Degrau> = { plano: 2, equipa: 2
 export const LIMITE_DIAS_SOZINHO = 2;
 
 /** O que um agente pode aplicar sozinho: só mudanças que não empurram o fim da obra. */
-export type AcaoAuto = { k: "fecharBuraco"; ini: number; fim: number } | { k: "passar"; ti: number; tec: string };
+// 26/11 (etapa 4, ajuste contínuo): «replanear» põe em dia um atraso pequeno ou aproveita a folga, sempre sem empurrar o fim da obra.
+export type AcaoAuto = { k: "fecharBuraco"; ini: number; fim: number } | { k: "passar"; ti: number; tec: string } | { k: "replanear"; adiantar: boolean };
 
 export interface Proposta {
   /** estável entre leituras (é por ele que se guarda quando se viu e se foi recusada) */
@@ -56,7 +57,7 @@ export interface Proposta {
 
 /** O registo do que um agente aplicou (ou do que o gestor aceitou de um agente): com as tarefas como estavam, para desfazer. */
 export interface FeitoAgente { id: string; q: string; agente: AgenteId; texto: string; auto: boolean; quem: string;
-  antes: { ti: number; dia: number; tec: string | null; antecipada?: true }[]; desfeito?: string }
+  antes: { ti: number; dia: number; tec: string | null; antecipada?: true; /** 26/11: a duração, quando um replaneamento a mudou */ dur?: number }[]; desfeito?: string }
 export interface EstadoAgentes {
   degraus?: Partial<Record<AgenteId, Degrau>>;
   /** quando cada proposta foi vista pela primeira vez (ISO): o prazo do degrau 2 conta daqui */
@@ -78,6 +79,13 @@ function agenteDoAlerta(id: string): AgenteId {
 }
 
 const dias = (n: number) => `${n} ${n === 1 ? "dia útil" : "dias úteis"}`;
+
+/** 26/11 (etapa 4): um replaneamento que um agente pode fazer sozinho. Muda alguma coisa, o fim da obra não anda para a frente, e nenhuma
+ *  tarefa muda de dia nem cresce mais do que LIMITE_DIAS_SOZINHO. Os técnicos noutra obra ou de férias já esperam no replanear. */
+export function ajusteSozinho(r: Replano): boolean {
+  return r.mudancas.length > 0 && r.fimDepois <= r.fimAntes
+    && r.mudancas.every((m) => Math.abs(m.para.dia - m.de.dia) <= LIMITE_DIAS_SOZINHO && m.para.dur - m.de.dur <= LIMITE_DIAS_SOZINHO);
+}
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const eur = (n: number) => n.toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -88,7 +96,12 @@ export function propostasDosAgentes(d: Negocio, S: Pick<Estado, "deals"> & Parti
   const out: Proposta[] = [];
   const vivo = p.estado === "em curso";
 
-  // 1) os alertas da obra, cada um com o seu agente; dois deles podem fazer-se sozinhos
+  // 26/11 (etapa 4, ajuste contínuo): pôr em dia e adiantar calculam-se uma vez (numa cópia do plano), só quando há atraso ou folga
+  let emDia: Replano | null = null, comFolga: Replano | null = null;
+  const porEmDia = () => (emDia ??= replanear(p, ocup, { adiantar: false }));
+  const adiantado = () => (comFolga ??= replanear(p, ocup, { adiantar: true }));
+
+  // 1) os alertas da obra, cada um com o seu agente; alguns podem fazer-se sozinhos
   for (const al of alertasDaObra(d, S, ocup, inv)) {
     const ag = agenteDoAlerta(al.id);
     let auto: Proposta["auto"];
@@ -96,7 +109,22 @@ export function propostasDosAgentes(d: Negocio, S: Pick<Estado, "deals"> & Parti
     if (fb && fb.k === "fecharBuraco" && fb.fim - fb.ini + 1 <= LIMITE_DIAS_SOZINHO) auto = { acao: { k: "fecharBuraco", ini: fb.ini, fim: fb.fim }, texto: `Antecipar o que vem depois de ${dias(fb.fim - fb.ini + 1)} sem ninguém` };
     const ps = al.acoes.find((x) => x.a.k === "passar")?.a;
     if (ps && ps.k === "passar" && !p.tasks[ps.ti]?.exec) auto = { acao: { k: "passar", ti: ps.ti, tec: ps.tec }, texto: `Passar ${nomeNoPlano(p, p.tasks[ps.ti])} para ${ps.n.split(" ")[0]}` };
-    out.push({ id: al.id, agente: ag, nivel: al.nivel, titulo: al.t, sub: al.sub, acoes: al.acoes, ...(auto ? { auto } : {}), ...(al.ti != null ? { ti: al.ti } : {}) });
+    let sub = al.sub;
+    // 26/11 (etapa 4): um atraso pequeno absorve-se sozinho, se pôr o plano em dia não mexer no fim da obra. O que empurra o fim pede sempre.
+    if (vivo && /^atraso-/.test(al.id)) {
+      const r = porEmDia();
+      if (ajusteSozinho(r)) auto = { acao: { k: "replanear", adiantar: false }, texto: `Pôr ${al.ti != null ? nomeNoPlano(p, p.tasks[al.ti]).toLowerCase() : "o plano"} em dia, sem mexer no fim da obra` };
+      else if (r.fimDepois > r.fimAntes) sub = `${sub} O fim da obra anda ${dias(r.fimDepois - r.fimAntes)}: isto pede sempre a tua decisão.`;
+    }
+    // 26/11 (etapa 4): a folga aproveita-se sozinha quando cada tarefa só anda até 2 dias úteis
+    if (vivo && al.id === "folga") {
+      const r = adiantado();
+      if (ajusteSozinho(r)) {
+        const ganho = r.fimAntes - r.fimDepois, n = r.mudancas.filter((m) => m.tipo === "adiantada").length;
+        auto = { acao: { k: "replanear", adiantar: true }, texto: `Adiantar ${n} ${n === 1 ? "tarefa" : "tarefas"} com a folga${ganho > 0 ? `: a obra acaba ${dias(ganho)} mais cedo` : ""}` };
+      }
+    }
+    out.push({ id: al.id, agente: ag, nivel: al.nivel, titulo: al.t, sub, acoes: al.acoes, ...(auto ? { auto } : {}), ...(al.ti != null ? { ti: al.ti } : {}) });
   }
 
   // 2) Cliente: a equipa chega no próximo dia útil e o cliente ainda não foi avisado (fica o rascunho, nunca se envia sozinho)

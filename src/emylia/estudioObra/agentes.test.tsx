@@ -6,8 +6,10 @@ import { acoes, type Negocio } from "../motor";
 import type { Ctx } from "../pecas";
 import { EstudioObra } from "./EstudioObra";
 import { obraDeExemplo } from "./exemploObra";
-import { DEGRAUS_DE_ORIGEM, aAplicarAgora, degrauDe, modoDa, prazoDoDegrau2, propostasDosAgentes, type Proposta } from "./agentes";
+import { DEGRAUS_DE_ORIGEM, aAplicarAgora, ajusteSozinho, degrauDe, modoDa, prazoDoDegrau2, propostasDosAgentes, type Proposta } from "./agentes";
+import { replanear, type Replano } from "./planoVivo";
 import { ocupacaoDosTecnicos } from "../preparacaoObra";
+import { estadoVivo as estadoVivoDe } from "./planoVivo";
 
 afterEach(() => { cleanup(); localStorage.clear(); });
 
@@ -85,6 +87,77 @@ describe("o motor dos agentes", () => {
     A.agentesObra(d.id, { k: "vistos", ids: ["b", "c"] });
     expect(Object.keys(d.obra.agentes!.vistos!).sort()).toEqual(["b", "c"]);
     expect(d.obra.agentes!.vistos!.b).toBe(v.b);
+  });
+});
+
+// 26/11 (etapa 4, ajuste contínuo): atrasos pequenos absorvidos sem pedir, folgas aproveitadas sozinhas, o fim protegido
+describe("o ajuste contínuo (etapa 4)", () => {
+  const R = (mud: [number, number, number, number][], fimAntes: number, fimDepois: number) => ({ plano: {} as never, fimAntes, fimDepois,
+    mudancas: mud.map(([d0, u0, d1, u1], ti) => ({ ti, nome: "t", de: { dia: d0, dur: u0 }, para: { dia: d1, dur: u1 }, tipo: "adiada" as const })) }) as Replano;
+  it("sozinho só o que não empurra o fim e não anda mais de 2 dias úteis", () => {
+    expect(ajusteSozinho(R([[5, 2, 6, 2]], 10, 10))).toBe(true);
+    expect(ajusteSozinho(R([[5, 2, 3, 2]], 10, 8))).toBe(true);
+    expect(ajusteSozinho(R([[5, 2, 6, 2]], 10, 11))).toBe(false); // empurra o fim
+    expect(ajusteSozinho(R([[5, 2, 8, 2]], 10, 10))).toBe(false); // 3 dias
+    expect(ajusteSozinho(R([[5, 2, 5, 5]], 10, 10))).toBe(false); // cresce 3 dias
+    expect(ajusteSozinho(R([], 10, 10))).toBe(false); // nada a fazer
+  });
+
+  it("cada atraso traz o ajuste sozinho só quando pôr em dia não mexe no fim", () => {
+    const { S, d } = obraDeExemplo();
+    const p = d.obra.plano!, oc = ocupacaoDosTecnicos(S, d.id);
+    const at = propostasDosAgentes(d, S, oc).filter((x) => x.id.startsWith("atraso-"));
+    expect(at.length).toBeGreaterThan(0);
+    const sozinho = ajusteSozinho(replanear(p, oc, { adiantar: false }));
+    for (const x of at) expect(x.auto?.acao.k === "replanear").toBe(sozinho);
+  });
+
+  it("aplicar o ajuste (a folga) vai pelo replaneamento do gestor; desfazer repõe dias e durações", () => {
+    const { S, d } = obraDeExemplo();
+    const A = acoes(S, () => {}, (fn) => fn());
+    A.role("operacoes");
+    const p = d.obra.plano!;
+    const x = propostasDosAgentes(d, S, ocupacaoDosTecnicos(S, d.id)).find((y) => y.id === "folga")!;
+    expect(x.auto?.acao).toEqual({ k: "replanear", adiantar: true });
+    const antes = p.tasks.map((t) => [t.dia, t.dur]);
+    expect(A.agentesObra(d.id, { k: "aplicar", pid: x.id, agente: "plano", nomeAgente: "Plano", texto: x.auto!.texto, acao: x.auto!.acao, auto: true })).toBe(true);
+    expect(p.tasks.map((t) => [t.dia, t.dur])).not.toEqual(antes);
+    const alt = d.obra.alteracoes![0];
+    expect(alt.motivo).toMatch(/^Agente Plano \(sozinho\): Adiantar/);
+    expect(alt.cliente).toBe(false);
+    const f = d.obra.agentes!.feitos![0];
+    expect(f.antes.some((a) => a.dur != null)).toBe(true); // o revestimento atrasado cresceu um dia
+    A.agentesObra(d.id, { k: "desfazer", fid: f.id });
+    expect(p.tasks.map((t) => [t.dia, t.dur])).toEqual(antes);
+  });
+
+  it("o fim protegido: o atraso que empurra o fim nunca se aplica sozinho e diz porquê", () => {
+    const { S, d } = obraDeExemplo();
+    const p = d.obra.plano!;
+    // sem folga nenhuma: tudo o que ainda não começou fica colado ao revestimento atrasado
+    const rev = p.tasks.findIndex((t) => estadoVivoDe(t, p) === "atrasada");
+    expect(rev).toBeGreaterThanOrEqual(0);
+    let dia = p.tasks[rev].dia + p.tasks[rev].dur;
+    for (const t of p.tasks) if (!t.exec && t.dia > p.tasks[rev].dia) { t.dia = dia; dia += t.dur; }
+    const oc = ocupacaoDosTecnicos(S, d.id);
+    const r = replanear(p, oc, { adiantar: false });
+    expect(r.fimDepois).toBeGreaterThan(r.fimAntes);
+    const x = propostasDosAgentes(d, S, oc).find((y) => y.id === `atraso-${rev}`)!;
+    expect(x.auto).toBeUndefined();
+    expect(x.sub).toMatch(/O fim da obra anda .*pede sempre a tua decisão/);
+    expect(modoDa(x, { degraus: { plano: 3 } })).toBe("pede");
+  });
+
+  it("a folga aproveita-se sozinha quando cada tarefa anda até 2 dias; mais do que isso, pede", () => {
+    const { S, d } = obraDeExemplo();
+    const p = d.obra.plano!, oc = ocupacaoDosTecnicos(S, d.id);
+    expect(propostasDosAgentes(d, S, oc).find((y) => y.id === "folga")?.auto?.texto).toBe("Adiantar 1 tarefa com a folga: a obra acaba 2 dias úteis mais cedo");
+    // a montagem com mais folga ainda: anda mais de 2 dias, já não vai sozinha
+    const mont = p.tasks.findIndex((t) => /Montagem/.test(t.nome));
+    p.tasks[mont].dia += 3;
+    const f = propostasDosAgentes(d, S, oc).find((y) => y.id === "folga");
+    expect(f).toBeTruthy();
+    expect(f!.auto).toBeUndefined();
   });
 });
 
