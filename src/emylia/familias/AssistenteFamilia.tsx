@@ -70,7 +70,9 @@ export function AssistenteFamilia({ org, K, outrosIds, editar, cacheAtributos, o
     const lidos = new Map([...estados].flatMap(([id, e]) => (e.k === "ok" ? [[id, e.attrs] as const] : [])));
     return itensDosEscolhidos(escolhidos, lidos, K.atributos, (no) => categoriaDoNo(K, no));
   }, [noPasso1, estados, escolhidos, K]);
-  const d = useMemo(() => (noPasso1 ? null : derivarFamilia(itens, escolhaEixos, outrosIds)), [noPasso1, itens, escolhaEixos, outrosIds]);
+  // ao editar, o nome é o guardado (o resumo não o deixa mudar); numa família nova deriva-se dos produtos
+  const nomeGuardado = editar?.nome ?? null;
+  const d = useMemo(() => (noPasso1 ? null : derivarFamilia(itens, escolhaEixos, outrosIds, nomeGuardado)), [noPasso1, itens, escolhaEixos, outrosIds, nomeGuardado]);
   const naoLidos = escolhidos.filter((p) => estados.get(p.id)?.k !== "ok");
 
   const erroPasso2 = d ? problemasDoPasso(d.problemas, 2).find((x) => x.gravidade === "erro")?.msg : undefined;

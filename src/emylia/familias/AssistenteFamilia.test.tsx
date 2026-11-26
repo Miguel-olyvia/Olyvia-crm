@@ -279,6 +279,36 @@ describe("AssistenteFamilia: guardar", () => {
     expect(onGuardar.mock.calls[0][0].produtos.map((p: { id: string }) => p.id)).toEqual(["a", "b"]);
   });
 
+  /** a família «Velar» com dois produtos, gravada com um nome que NÃO é o que os produtos sugerem */
+  const guardadaComOutroNome = (nome: string): FamiliaAberta => {
+    const ps = [produto("a", "Lava-loiça Velar 50", { pvp: 150 }), produto("b", "Lava-loiça Velar 60", { pvp: 180 })];
+    const derivada = derivarFamilia(itensDosEscolhidos(ps, new Map<string, AtributoProduto[]>([["a", POR_ID.a], ["b", POR_ID.b]]), DEFS, () => "Louças"), null).familia;
+    return { id: "f1", versao: "v1", nome, produtos: ps, eixos: derivada.eixos };
+  };
+  const guardarEditada = async (editar: FamiliaAberta, outrosIds: string[]) => {
+    const { onGuardar } = montar({ editar, outrosIds });
+    expect(await screen.findByRole("status", { name: "Produtos escolhidos" })).toHaveTextContent("2 escolhidos");
+    seguinte();
+    await esperarAtivo("Seguinte");
+    seguinte();
+    fireEvent.click(botao("Guardar"));
+    return onGuardar;
+  };
+
+  it("editar e guardar sem mexer no nome NÃO muda o nome guardado (não se recalcula a partir dos produtos)", async () => {
+    const onGuardar = await guardarEditada(guardadaComOutroNome("Velar da casa de banho"), []);
+    expect(onGuardar).toHaveBeenCalledTimes(1);
+    expect(onGuardar.mock.calls[0][0].familia).toMatchObject({ nome: "Velar da casa de banho", id: "fam:velar-da-casa-de-banho" });
+  });
+
+  it("editar uma família cujo nome calculado coincide com o de outra NÃO dá erro de nome repetido enquanto o nome guardado não mudar", async () => {
+    // a «Lava-loiça Velar» é de outra família; esta chama-se «Velar branca» e os seus produtos sugeririam «Lava-loiça Velar»
+    const onGuardar = await guardarEditada(guardadaComOutroNome("Velar branca"), ["fam:lava-loica-velar"]);
+    expect(screen.queryByText(/Já existe uma família com o identificador/)).toBeNull();
+    expect(onGuardar).toHaveBeenCalledTimes(1);
+    expect(onGuardar.mock.calls[0][0].familia.nome).toBe("Velar branca");
+  });
+
   it("enquanto grava: aria-busy, um segundo clique não grava; um erro aparece em alerta e o assistente fica no passo 3", async () => {
     let acabar: (e: string | null) => void = () => undefined;
     const fn = montar({ guardar: () => new Promise<string | null>((r) => { acabar = r; }) });

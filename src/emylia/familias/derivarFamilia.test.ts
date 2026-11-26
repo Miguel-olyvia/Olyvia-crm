@@ -76,6 +76,24 @@ describe("derivarFamilia", () => {
     const d = derivarFamilia(itens(), null, ["fam:lava-loica-velar"]);
     expect(d.problemas.some((x) => x.tipo === "id" && x.gravidade === "erro")).toBe(true);
   });
+  it("ao editar, o nome guardado vale: não se recalcula a partir dos produtos e o identificador sai dele", () => {
+    const d = derivarFamilia(itens(), null, [], "Velar da casa de banho");
+    expect(d.familia.nome).toBe("Velar da casa de banho");
+    expect(d.familia.id).toBe("fam:velar-da-casa-de-banho");
+  });
+  it("ao editar, o nome calculado pode coincidir com o de OUTRA família sem erro, enquanto o nome guardado for diferente", () => {
+    const d = derivarFamilia(itens(), null, ["fam:lava-loica-velar"], "Lava-loiça Velar branca");
+    expect(d.problemas.some((x) => x.tipo === "id")).toBe(false);
+    expect(d.familia.nome).toBe("Lava-loiça Velar branca");
+  });
+  it("ao editar, o nome guardado continua a ser conferido: se coincide com o de outra família, é erro", () => {
+    const d = derivarFamilia(itens(), null, ["fam:lava-loica-velar"], "Lava-loiça Velar");
+    expect(d.problemas.some((x) => x.tipo === "id" && x.gravidade === "erro")).toBe(true);
+  });
+  it("sem nome guardado (família nova, ou nome vazio) o nome continua a derivar-se dos produtos", () => {
+    expect(derivarFamilia(itens(), null, [], null).familia.nome).toBe("Lava-loiça Velar");
+    expect(derivarFamilia(itens(), null, [], "   ").familia.nome).toBe("Lava-loiça Velar");
+  });
   it("os eixos escolhidos valem; atributos que já não existem saem; a ordem da escolha mantém-se", () => {
     const d = derivarFamilia(itens(), { cor: "Cor", medida: ["Nº de cubas", "Medida"] });
     expect(d.eixos).toEqual({ cor: "Cor", medida: ["Medida"] });
