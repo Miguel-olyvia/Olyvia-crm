@@ -39,6 +39,7 @@ import { diferencas } from "../ajustesPlano";
 import { MicrotarefasTarefa } from "../estudioObra/MicrotarefasTarefa";
 import { useMicrotarefasAutomaticas } from "../estudioObra/AtualizarMicrotarefas";
 import { AntesDepoisPlano } from "../estudioObra/AntesDepoisPlano";
+import { AprendizagemOlyvia } from "../estudioObra/AprendizagemOlyvia";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { Brilho, Contagem, MOLA, VistoDesenho, useReduzir } from "../movimento";
 
@@ -602,6 +603,8 @@ export function EstudioPlano({ ctx, d, fechar, voltar = "Voltar ao negócio" }: 
                 </AnimatePresence>
               </section>
               {/* 25/11: o que o gestor mudou ao plano gerado (ao vivo) e os registos de cada validação */}
+              {/* 26/11 (etapa 5): o que a Olyvia aprendeu (e o que mudou neste plano por isso) */}
+              <AprendizagemOlyvia S={ctx.S} d={d} />
               <AntesDepoisPlano d={d} />
             </div>
           </main>

@@ -40,6 +40,7 @@ import { ImprevistosNaObra } from "../ImprevistosObra";
 import { AvatarTec, Miniaturas, nomeTec } from "../AcompanhamentoObra";
 import { EstadoFotos, useFotosAJuntar } from "../fotosDaObra";
 import { AntesDepoisPlano } from "./AntesDepoisPlano";
+import { AprendizagemOlyvia } from "./AprendizagemOlyvia";
 import { Contagem, MOLA, useReduzir } from "../movimento";
 import { EstudioPlano, PainelTarefa } from "../estudioPlano/EstudioPlano";
 import { NovaTarefa } from "../PlanoInterativo";
@@ -586,6 +587,8 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
                 </section>
               )}
               {/* 25/11: o plano gerado e o validado (os registos de cada validação, para aprender) */}
+              {/* 26/11 (etapa 5): o que a Olyvia aprendeu com as obras da empresa */}
+              <AprendizagemOlyvia S={ctx.S} d={d} />
               <AntesDepoisPlano d={d} />
                   </>}
                   {aba === "execucao" && <Execucao ctx={ctx} d={d} dias={dias} abrir={(ti) => setPainel({ k: "tarefa", ti })} />}

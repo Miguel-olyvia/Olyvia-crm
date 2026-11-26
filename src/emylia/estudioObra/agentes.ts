@@ -12,6 +12,7 @@ import { custoDaHora } from "./quemPaga";
 import { rotuloDia } from "../preparacaoObra";
 import { ROTULO_ALTERACAO } from "../historicoPlano";
 import { fimDe } from "../ajustesPlano";
+import { aprender, chaveDaTarefa } from "../aprendizagemMotor";
 
 export type AgenteId = "plano" | "equipa" | "materiais" | "cliente" | "margem" | "aprendizagem";
 export type Degrau = 0 | 1 | 2 | 3;
@@ -172,6 +173,19 @@ export function propostasDosAgentes(d: Negocio, S: Pick<Estado, "deals"> & Parti
   if (tipo && n >= 3) out.push({ id: `aprende-${tipo}-${Math.floor(n / 3)}`, agente: "aprendizagem", nivel: "oportunidade",
     titulo: `${ROTULO_ALTERACAO[tipo as keyof typeof ROTULO_ALTERACAO] ?? tipo}: ${n} mudanças nesta obra`,
     sub: "É o que mais se corrige no plano gerado. Fica guardado para o motor aprender.", acoes: [] });
+
+  // 5) 26/11 (etapa 5): o que as outras obras ensinaram e este plano já usa; e as horas que o Catálogo devia ter (mudam o preço: só se mostra)
+  const comLicao = p.tasks.filter((t) => t.aprendido);
+  if (comLicao.length) out.push({ id: `aprende-plano-${comLicao.length}`, agente: "aprendizagem", nivel: "oportunidade",
+    titulo: `Este plano nasceu com ${comLicao.length} ${comLicao.length === 1 ? "lição" : "lições"} de outras obras`,
+    sub: comLicao.slice(0, 3).map((t) => `${nomeNoPlano(p, t)}: ${t.dias ?? t.dur} dias em vez de ${t.aprendido!.base} (${t.aprendido!.obras} obras)`).join(" · ") + (comLicao.length > 3 ? " …" : ""), acoes: [] });
+  try {
+    const A = aprender(S.deals ?? [], d.id), aqui = new Set(p.tasks.map((t) => chaveDaTarefa(t)));
+    for (const c of A.catalogo.filter((x) => aqui.has(x.chave)).slice(0, 2))
+      out.push({ id: `aprende-catalogo-${c.chave}-${c.obras}`, agente: "aprendizagem", nivel: "oportunidade",
+        titulo: `${c.nome}: as obras levam ${c.razao.toLocaleString("pt-PT")}× as horas do orçamento`,
+        sub: `${c.reais} h feitas para ${c.previstas} h previstas, em ${c.obras} obras. Atualizar o tempo no Catálogo muda o preço dos próximos orçamentos: decide quem gere o Catálogo.`, acoes: [] });
+  } catch { /* sem aprendizagem */ }
 
   const rec = d.obra.agentes?.recusadas ?? {};
   const peso: Record<Nivel, number> = { critico: 0, atencao: 1, oportunidade: 2 };

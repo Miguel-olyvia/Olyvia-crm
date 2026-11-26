@@ -7,7 +7,7 @@
 import { fatorReal, linhaCalc, r2, type Estado, type Negocio } from "./motor";
 import { custoObra } from "./custoObra";
 import { FASES_OBRA, fasesPadrao, type FaseObra } from "./fasesObra";
-import { TAREFA_DEMOLICAO, diasPrevistos, tarefasPrevistas, type TarefaPrevista } from "./ganttOrcamento";
+import { TAREFA_DEMOLICAO, diasPrevistos, tarefasPrevistas, type AjustarDias, type TarefaPrevista } from "./ganttOrcamento";
 import { LINHA_DEMOLICAO } from "./entulho";
 
 /** A rampa das fases (um só tom, do claro ao escuro; todos ≥ 3:1 sobre o branco e sobre o fundo). 02/11: mora em fasesObra.ts. */
@@ -120,10 +120,10 @@ export interface Plano {
 export const faseDosMateriais = (descricao: string): FaseObra => fasesPadrao(descricao)[0];
 
 /** `equipa`: pessoas por ofício, para pré-ver o reforço (por omissão, as do orçamento). */
-export function planoObra(d: Negocio, S: Estado, equipa?: number): Plano {
+export function planoObra(d: Negocio, S: Estado, equipa?: number, ajustar?: AjustarDias): Plano {
   const o = d.orc;
   if (!o) return { tarefas: [], fases: [], dias: 0, custo: 0, preco: 0 };
-  const T = tarefasPrevistas(d, S, equipa);
+  const T = tarefasPrevistas(d, S, equipa, ajustar);
   const desc = 1 - (o.desconto || 0) / 100;
   const fases: FasePlano[] = FASES_OBRA.map((f) => ({ n: f.n, nome: f.nome, curto: f.curto, inicio: 0, fim: 0, tarefas: [], custoTarefas: 0, custoMat: 0, custo: 0, preco: 0, margem: 0 }));
   const F = (n: FaseObra) => fases[n - 1];

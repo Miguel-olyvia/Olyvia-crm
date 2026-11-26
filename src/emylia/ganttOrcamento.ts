@@ -61,7 +61,11 @@ export interface TarefaPrevista {
   /** O custo que o orçamento tinha (sem o prazo mudado) e a diferença. */
   custoOrc: number;
   delta: number;
+  /** 26/11 (etapa 5, aprendizagem): os dias vieram de uma lição das obras anteriores; `base` são os das horas. */
+  aprendido?: { base: number; razao: number; obras: number };
 }
+/** 26/11 (etapa 5): os dias de uma tarefa corrigidos pelo que as obras anteriores ensinaram (só no plano da obra; o orçamento não usa). */
+export type AjustarDias = (t: Pick<TarefaPrevista, "chave" | "svc" | "nome" | "perfil" | "perfilId">, dias: number) => { dias: number; razao: number; obras: number } | null;
 
 /** 26/10: as horas de um serviço dos «Modelos de obra» do Catálogo partidas pelos ofícios da receita (pela ordem dos passos), em
  *  proporção das horas de cada um; os outros serviços ficam inteiros ([]). `h` é o total da tarefa (com a quantidade). */
@@ -80,7 +84,7 @@ export function partesPorOficio(S: Estado, sid: string, h: number): { perfilId: 
 }
 
 /** `equipa`: pessoas por ofício (por omissão, as do orçamento, `Orcamento.equipa`, ou 1); serve para pré-ver o reforço. */
-export function tarefasPrevistas(d: Negocio, S: Estado, equipa?: number): TarefaPrevista[] {
+export function tarefasPrevistas(d: Negocio, S: Estado, equipa?: number, ajustar?: AjustarDias): TarefaPrevista[] {
   const o = d.orc;
   if (!o) return [];
   const man = o.prazo ?? {};
@@ -155,7 +159,10 @@ export function tarefasPrevistas(d: Negocio, S: Estado, equipa?: number): Tarefa
     const manual = man[t.chave] != null;
     // o reforço: n pessoas por ofício fazem as mesmas horas em menos dias (a demolição tem a sua equipa própria)
     const n = t.chave === TAREFA_DEMOLICAO ? 1 : pessoas;
-    const dias = manual ? man[t.chave] : diasDeHoras(t.hOrc / n);
+    const dias0 = manual ? man[t.chave] : diasDeHoras(t.hOrc / n);
+    // 26/11 (etapa 5): a duração que as obras anteriores ensinaram (só os dias do calendário; as horas e o custo ficam os do orçamento)
+    const lic = !manual && ajustar ? ajustar(t, dias0) : null;
+    const dias = lic ? lic.dias : dias0;
     const h = manual ? dias * HORAS_DIA * n : t.hOrc;
     const x = extra[t.chave];
     const mo = h * t.custoHora;
@@ -164,6 +171,7 @@ export function tarefasPrevistas(d: Negocio, S: Estado, equipa?: number): Tarefa
       ...t, dias, manual, h, inicio: dia,
       custo: { mo: r2(mo), eq: r2(x.eq), cons: r2(x.cons), outros: r2(x.outros), total: r2(total) },
       custoOrc: r2(x.custoOrc), delta: r2((h - t.hOrc) * t.custoHora),
+      ...(lic ? { aprendido: { base: dias0, razao: lic.razao, obras: lic.obras } } : {}),
     };
     fila[oficio] = dia + dias;
     fimEtapa = Math.max(fimEtapa, dia + dias);

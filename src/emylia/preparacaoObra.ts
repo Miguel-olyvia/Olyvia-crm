@@ -11,7 +11,8 @@ import { resumoErp } from "./erpEticadata";
 import { itemCatalogo, normal } from "./catalogo";
 import { DIAS, LINHAS, PAPEIS, TECS, calcMats, acertoDoValorPendente, conflitos, difDoAcerto, retificacaoPorPagar, diaDeFerias, eur, margemSemAdenda, medidasEPlanoAbertos, mudancasDeValor, nfmt, pct, r2, type Estado, type Negocio, type Papel, type Plano, type Servico, type StockKey, type Tarefa } from "./motor";
 import { custosDe, perfilIdDe, receitaDe } from "./v2/custosModelo";
-import { HORAS_DIA } from "./ganttOrcamento";
+import { HORAS_DIA, TAREFA_DEMOLICAO, type AjustarDias, type TarefaPrevista } from "./ganttOrcamento";
+import { aprender, chaveLicao, diasComLicao, type Aprendizagem } from "./aprendizagemMotor";
 import { PERFIL_DO_SK, tecnicosDoPerfil } from "./equipa/tecnicos";
 import { equipaDe } from "./equipa/equipasObra";
 import { dataCurta, deIso, diasDaObra, iniciosRapidos, isoDia, planoObra, proximoUtil } from "./planoObra";
@@ -214,17 +215,28 @@ export function atribuirPorAtribuir(p: Plano | null | undefined): number {
 /** As tarefas do plano do orçamento (planoObra.ts), em dias úteis, com um técnico do ofício (o que não está de férias).
  *  22/10: o ofício é o perfil do passo da receita (pelo id); sem técnico com esse perfil, a tarefa fica por atribuir (tec null). */
 export function planoDoOrcamento(d: Negocio, S: Estado): Plano {
-  const P = planoObra(d, S);
-  const plano: Plano = { tasks: [], estado: "por aprovar", dia: 0, origem: "orcamento", inicio: d.orc?.inicioObra };
   const C = custosDe(S);
+  // 26/11 (etapa 5): o ofício de cada tarefa, igual para a lição e para a tarefa (a chave da lição tem de ser a mesma nos dois lados)
+  const oficioDe = (t: Pick<TarefaPrevista, "perfilId" | "perfil" | "nome">) => t.perfilId ? { perfilId: t.perfilId, sk: C.perfis.find((x) => x.id === t.perfilId)?.n ?? t.perfil } : oficioDoServico(S, { perfil: t.perfil, n: t.nome });
+  // 26/11 (etapa 5, Rúben: «a plataforma tem de aprender com tudo»): o plano nasce com as durações que as obras anteriores ensinaram
+  let licoes: Aprendizagem["licoes"] | null = null;
+  try { licoes = aprender(S.deals ?? [], d.id).licoes; } catch { licoes = null; }
+  const ajustar: AjustarDias = (t, dias) => {
+    if (!licoes?.size) return null;
+    const of = oficioDe(t), r = diasComLicao(licoes, chaveLicao(t.chave === TAREFA_DEMOLICAO ? undefined : t.svc ?? t.chave, of.perfilId || of.sk, t.nome), dias);
+    return r ? { dias: r.dias, razao: r.licao.razao, obras: r.licao.obras } : null;
+  };
+  const P = planoObra(d, S, undefined, ajustar);
+  const plano: Plano = { tasks: [], estado: "por aprovar", dia: 0, origem: "orcamento", inicio: d.orc?.inicioObra };
   // 26/10: as partes de um «MO Modelo» (uma por ofício) já vêm do plano do orçamento (ganttOrcamento.ts: partesPorOficio), cada uma
   // na sua fase e ao lado dos outros serviços: o plano da obra e o do orçamento têm as mesmas tarefas e os mesmos dias
   for (const t of [...P.tarefas].sort((a, b) => a.inicio - b.inicio)) {
     const dia = Math.floor(t.inicio), dur0 = Math.max(1, Math.ceil(t.inicio + t.dias - 1e-9) - dia);
     const sid = t.svc ?? t.chave;
-    const of = t.perfilId ? { perfilId: t.perfilId, sk: C.perfis.find((x) => x.id === t.perfilId)?.n ?? t.perfil } : oficioDoServico(S, { perfil: t.perfil, n: t.nome });
+    const of = oficioDe(t);
     const tec = tecnicoDoOficio(of, plano, dia, dur0);
-    plano.tasks.push({ nome: t.nome, svcs: t.chave === "demolicao" ? [] : [sid], dia, dur: dur0, sk: of.sk, ...(of.perfilId ? { perfilId: of.perfilId } : {}), h: r2(t.h), tec, fase: t.fase, ini: r2(t.inicio), dias: r2(t.dias) });
+    plano.tasks.push({ nome: t.nome, svcs: t.chave === "demolicao" ? [] : [sid], dia, dur: dur0, sk: of.sk, ...(of.perfilId ? { perfilId: of.perfilId } : {}), h: r2(t.h), tec, fase: t.fase, ini: r2(t.inicio), dias: r2(t.dias),
+      ...(t.aprendido ? { aprendido: t.aprendido } : {}) });
   }
   // 9/11: com o dia de início, os técnicos livres (sem outra obra nesses dias, nem outra tarefa desta)
   if (plano.inicio) escolherTecnicos(plano, ocupacaoDosTecnicos(S, d.id), escolhasDoNegocio(d.f ?? {}));
