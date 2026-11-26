@@ -90,6 +90,7 @@ describe("os relatórios", () => {
     const wb = XLSX.read(xlsx, { type: "array" });
     expect(wb.SheetNames[0]).toBe("Resumo");
     expect(wb.SheetNames).toEqual(expect.arrayContaining(["Serviços", "Totais por taxa de IVA", "Custo e margem (interno)"]));
+    expect(wb.SheetNames.every((n) => n.length <= 31 && !/\([^)]*$/.test(n))).toBe(true); // sem nomes cortados a meio de um parêntese
     const sv = XLSX.utils.sheet_to_json<Record<string, unknown>>(wb.Sheets["Serviços"]);
     expect(typeof sv[0]["Total s/ IVA"]).toBe("number"); // os valores vão em número (para somar no Excel)
   });

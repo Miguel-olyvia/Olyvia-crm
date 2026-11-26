@@ -60,8 +60,10 @@ export async function gerarPdfRelatorio(doc: DocRelatorio, agora = new Date()): 
   escrever(`Dados atualizados ${doc.atualizado ? new Date(doc.atualizado).toLocaleString("pt-PT", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—"}`, M, H - 100, 8, { cor: hex("#d9cffb") });
   y = H - 116 - 26;
 
-  const titulo = (t: string, nota?: string) => {
-    espaco(nota ? 40 : 28);
+  // 26/11: o título nunca fica sozinho no fundo da página: reserva-se também o que vem logo a seguir (`depois`)
+  const titulo = (t: string, nota?: string, depois = 0) => {
+    espaco((nota ? 40 : 28) + depois + 8);
+    y -= 8;
     escrever(t, M, y, 12.5, { bold: true });
     y -= 6;
     page.drawRectangle({ x: M, y, width: 28, height: 2, color: C(COR.marca2) });
@@ -71,7 +73,10 @@ export async function gerarPdfRelatorio(doc: DocRelatorio, agora = new Date()): 
 
   const seccao = (s: Seccao) => {
     if (s.k === "kpis") {
-      const n = s.itens.length, gap = 10, w = (LARG - gap * (n - 1)) / Math.max(1, n), h = 62;
+      const n = s.itens.length, gap = 10, w = (LARG - gap * (n - 1)) / Math.max(1, n);
+      // 26/11: a nota em até duas linhas (antes cortava-se: «… de I...»)
+      const notas = s.itens.map((k) => (k.nota ? partir(k.nota, w - 16, 7.5).slice(0, 2) : []));
+      const h = notas.some((x) => x.length > 1) ? 72 : 62;
       espaco(h + 14);
       s.itens.forEach((k, i) => {
         const x = M + i * (w + gap), cor = k.tom === "bom" ? COR.bom : k.tom === "atencao" ? COR.atencao : COR.marca;
@@ -79,13 +84,13 @@ export async function gerarPdfRelatorio(doc: DocRelatorio, agora = new Date()): 
         page.drawRectangle({ x, y: y - h, width: 3, height: h, color: C(cor) });
         escrever(k.rot.toUpperCase(), x + 10, y - 15, 7.5, { bold: true, cor: COR.suave, max: w - 16 });
         escrever(k.valor, x + 10, y - 34, 14, { bold: true, cor, max: w - 16 });
-        if (k.nota) escrever(k.nota, x + 10, y - 50, 7.5, { cor: COR.suave, max: w - 16 });
+        notas[i].forEach((l, j) => escrever(l, x + 10, y - 50 - j * 10, 7.5, { cor: COR.suave, max: w - 16 }));
       });
       y -= h + 22;
       return;
     }
     if (s.k === "barras") {
-      titulo(s.titulo, s.nota);
+      titulo(s.titulo, s.nota, Math.min(3, s.itens.length) * 17);
       const max = Math.max(1, ...s.itens.map((x) => x.valor)), rotW = 150, valW = 110, barW = LARG - rotW - valW - 16;
       for (const it of s.itens) {
         espaco(18);
@@ -95,17 +100,17 @@ export async function gerarPdfRelatorio(doc: DocRelatorio, agora = new Date()): 
         escrever(it.texto, M + rotW + barW + 8, y - 9, 8.5, { bold: true, max: valW, dir: true });
         y -= 17;
       }
-      y -= 10;
+      y -= 14;
       return;
     }
     if (s.k === "texto") {
-      titulo(s.titulo);
+      titulo(s.titulo, undefined, 26);
       for (const p of s.paragrafos) { for (const l of partir(p, LARG, 9)) { espaco(13); escrever(l, M, y, 9); y -= 12.5; } y -= 6; }
       y -= 6;
       return;
     }
     // tabela
-    titulo(s.titulo, s.nota);
+    titulo(s.titulo, s.nota, 20 + Math.min(3, s.linhas.length) * 16);
     const soma = s.colunas.reduce((a, c) => a + c.w, 0), larg = s.colunas.map((c) => (LARG * c.w) / soma), xs = larg.map((_, i) => M + larg.slice(0, i).reduce((a, b) => a + b, 0));
     const cab = () => {
       page.drawRectangle({ x: M, y: y - 16, width: LARG, height: 18, color: C(COR.clara) });
@@ -162,8 +167,11 @@ export async function gerarExcelRelatorio(doc: DocRelatorio): Promise<Uint8Array
     ws["!cols"] = s.colunas.map((c) => ({ wch: Math.max(8, Math.round(c.w * 1.2)) }));
     s.colunas.forEach((c, ci) => { if (!c.dinheiro) return; for (let r = 1; r < linhas.length; r++) { const cel = ws[XLSX.utils.encode_cell({ r, c: ci })]; if (cel && cel.t === "n") cel.z = "#,##0.00 €"; } });
     if (s.linhas.length) ws["!autofilter"] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: s.linhas.length, c: s.colunas.length - 1 } }) };
-    let nome = s.titulo.replace(/[\\/?*[\]:]/g, " ").slice(0, 31), k = 2;
-    while (usados.has(nome)) nome = `${s.titulo.slice(0, 27)} (${k++})`;
+    // 26/11: o Excel só aceita 31 letras no nome da folha: longo, sai o que vem entre parênteses («(interno)») antes de cortar
+    const limpo = s.titulo.replace(/[\\/?*[\]:]/g, " ");
+    const base = (limpo.length > 31 ? limpo.replace(/\s*\([^)]*\)/g, "").trim() : limpo).slice(0, 31);
+    let nome = base, k = 2;
+    while (usados.has(nome)) nome = `${base.slice(0, 27)} (${k++})`;
     usados.add(nome);
     XLSX.utils.book_append_sheet(wb, ws, nome);
   }
