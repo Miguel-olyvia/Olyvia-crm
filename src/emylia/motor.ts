@@ -4753,6 +4753,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
           if (a.antecipada) t.antecipada = true; else delete t.antecipada;
         }
         f.desfeito = agoraIso;
+        // 26/11 (teste ao vivo): desfazer é recusar; sem isto, o agente voltava a fazê-lo na volta seguinte (o servidor, de 15 em 15 minutos)
+        if (f.pid) (e.recusadas ??= {})[f.pid] = agoraIso;
         log(d, `Agentes: desfeito · ${f.texto}`);
         avisar({ msg: "Desfeito", sub: f.texto, kind: "ok" });
         return true;
@@ -4767,7 +4769,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         .map(({ dur, ...a }) => (p.tasks[a.ti].dur !== dur ? { ...a, dur } : a));
       if (!mudadas.length) return false;
       const L = (e.feitos ??= []);
-      L.unshift({ id: `f${Date.now().toString(36)}${L.length}`, q: agoraIso, agente: op.agente, texto: op.texto, auto: op.auto, quem: op.auto ? "Olyvia" : quem, antes: mudadas });
+      L.unshift({ id: `f${Date.now().toString(36)}${L.length}`, q: agoraIso, agente: op.agente, texto: op.texto, auto: op.auto, quem: op.auto ? "Olyvia" : quem, antes: mudadas, pid: op.pid });
       if (L.length > 200) L.length = 200;
       (e.recusadas ??= {}); delete e.recusadas[op.pid];
       log(d, `${op.auto ? `Agente ${op.nomeAgente} (sozinho)` : `Agente ${op.nomeAgente}, aceite`}: ${op.texto}`);

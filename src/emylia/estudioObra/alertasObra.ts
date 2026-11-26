@@ -112,8 +112,11 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
     const so = replanear(p, ocup, { adiantar: false }), r = replanear(p, ocup, { adiantar: true });
     const adiantadas = r.mudancas.filter((m) => m.para.dia < so.plano.tasks[m.ti].dia);
     if (adiantadas.length) {
-      const ganho = so.fimDepois - r.fimDepois;
-      L.push({ id: "folga", nivel: "oportunidade", t: ganho > 0 ? `Há folga: a obra pode acabar ${dias(ganho)} mais cedo` : `Há folga: ${adiantadas.length} ${adiantadas.length === 1 ? "tarefa pode" : "tarefas podem"} começar mais cedo`,
+      // 26/11 (teste ao vivo: o título dizia 6 dias e a proposta do agente 2): o ganho conta-se face ao plano de agora; o que só evita um
+      // atraso (face a pôr em dia) diz-se assim
+      const ganho = r.fimAntes - r.fimDepois, evita = so.fimDepois - Math.max(r.fimDepois, r.fimAntes);
+      L.push({ id: "folga", nivel: "oportunidade", t: ganho > 0 ? `Há folga: a obra pode acabar ${dias(ganho)} mais cedo` : evita > 0 ? `Há folga: adiantar evita que a obra acabe ${dias(evita)} mais tarde`
+        : `Há folga: ${adiantadas.length} ${adiantadas.length === 1 ? "tarefa pode" : "tarefas podem"} começar mais cedo`,
         sub: `${adiantadas.slice(0, 3).map((m) => `${m.nome} a ${quando(p, m.para.dia)}`).join(", ")}${adiantadas.length > 3 ? "…" : ""}.`, acoes: [{ rot: "Ver e adiantar", a: { k: "adiantar" } }] });
     }
   }

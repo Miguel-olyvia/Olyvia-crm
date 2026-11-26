@@ -129,6 +129,9 @@ describe("o ajuste contínuo (etapa 4)", () => {
     expect(f.antes.some((a) => a.dur != null)).toBe(true); // o revestimento atrasado cresceu um dia
     A.agentesObra(d.id, { k: "desfazer", fid: f.id });
     expect(p.tasks.map((t) => [t.dia, t.dur])).toEqual(antes);
+    // desfeito é recusado: nem no degrau 3 o agente o volta a fazer
+    expect(propostasDosAgentes(d, S, ocupacaoDosTecnicos(S, d.id)).some((y) => y.id === "folga")).toBe(false);
+    expect(aAplicarAgora(propostasDosAgentes(d, S, ocupacaoDosTecnicos(S, d.id)), { ...d.obra.agentes, degraus: { plano: 3 } }).some((y) => y.id === "folga")).toBe(false);
   });
 
   it("o fim protegido: o atraso que empurra o fim nunca se aplica sozinho e diz porquê", () => {
@@ -151,7 +154,9 @@ describe("o ajuste contínuo (etapa 4)", () => {
   it("a folga aproveita-se sozinha quando cada tarefa anda até 2 dias; mais do que isso, pede", () => {
     const { S, d } = obraDeExemplo();
     const p = d.obra.plano!, oc = ocupacaoDosTecnicos(S, d.id);
-    expect(propostasDosAgentes(d, S, oc).find((y) => y.id === "folga")?.auto?.texto).toBe("Adiantar 1 tarefa com a folga: a obra acaba 2 dias úteis mais cedo");
+    const f0 = propostasDosAgentes(d, S, oc).find((y) => y.id === "folga")!;
+    expect(f0.auto?.texto).toBe("Adiantar 1 tarefa com a folga: a obra acaba 2 dias úteis mais cedo");
+    expect(f0.titulo).toBe("Há folga: a obra pode acabar 2 dias úteis mais cedo"); // o mesmo número no título e na proposta
     // a montagem com mais folga ainda: anda mais de 2 dias, já não vai sozinha
     const mont = p.tasks.findIndex((t) => /Montagem/.test(t.nome));
     p.tasks[mont].dia += 3;

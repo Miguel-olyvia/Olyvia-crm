@@ -57,6 +57,7 @@ export interface Proposta {
 
 /** O registo do que um agente aplicou (ou do que o gestor aceitou de um agente): com as tarefas como estavam, para desfazer. */
 export interface FeitoAgente { id: string; q: string; agente: AgenteId; texto: string; auto: boolean; quem: string;
+  /** 26/11: a proposta que o fez (desfazer conta como recusar: o agente não a volta a fazer na volta seguinte) */ pid?: string;
   antes: { ti: number; dia: number; tec: string | null; antecipada?: true; /** 26/11: a duração, quando um replaneamento a mudou */ dur?: number }[]; desfeito?: string }
 export interface EstadoAgentes {
   degraus?: Partial<Record<AgenteId, Degrau>>;
