@@ -1,7 +1,7 @@
 /**
  * @vitest-environment node
  */
-// 25/11: a migration da fase 1 dos ATIVOS (20270126500000) lida como TEXTO. Confere o que se pode conferir sem a correr:
+// 25/11: a migration da fase 1 dos ATIVOS (20270126900000) lida como TEXTO. Confere o que se pode conferir sem a correr:
 // CRLF, cabeçalho (só base de RH, entra junto com o ecrã), uma só transacção com lock_timeout, RLS forçada nas duas
 // tabelas, nenhum direito de tabela para anon/authenticated, nenhuma política de DELETE, as permissões novas ativos.*
 // concedidas só no ARRAY dos papéis globais (nunca assets.*), as RPCs SECURITY DEFINER com search_path vazio, os códigos
@@ -11,7 +11,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const pasta = resolve(process.cwd(), "supabase/migrations");
-const nome = "20270126500000_ativos_registo.sql";
+const nome = "20270126900000_ativos_registo.sql";
 const caminho = resolve(pasta, nome);
 const bytes = existsSync(caminho) ? readFileSync(caminho) : Buffer.alloc(0);
 const bruto = bytes.toString("utf8");
@@ -204,6 +204,6 @@ describe(`migration ${nome}`, () => {
 
   it("nenhuma migration de reversão desta e nenhum carimbo repetido", () => {
     expect(readdirSync(pasta).filter((f) => /ativos?_/.test(f) && /ativo/.test(f))).toEqual([nome]);
-    expect(readdirSync(pasta).filter((f) => f.startsWith("20270126500000_"))).toHaveLength(1);
+    expect(readdirSync(pasta).filter((f) => f.startsWith("20270126900000_"))).toHaveLength(1);
   });
 });
