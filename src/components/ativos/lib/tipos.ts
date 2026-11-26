@@ -47,7 +47,38 @@ export interface AtribuicaoDoAtivo {
   entrega: string | null;
 }
 
-/** Um ativo, como o ecrã o usa (valores já em número, datas AAAA-MM-DD). */
+/** Comprado (valor de compra, amortiza-se) ou alugado (renda mensal e datas do contrato, não se amortiza). */
+export const FORMAS_AQUISICAO = ["comprado", "alugado"] as const;
+export type FormaAquisicao = (typeof FORMAS_AQUISICAO)[number];
+
+/** Como se definiu a vida útil de um comprado: meses de pagamento, a do equipamento do catálogo, ou escrita à mão. */
+export const ORIGENS_VIDA = ["pagamento", "catalogo", "manual"] as const;
+export type OrigemVida = (typeof ORIGENS_VIDA)[number];
+
+/**
+ * Uma vez que o ativo esteve entregue a uma pessoa (uma linha de `pessoas_equipamentos`). `contaDesde` é o que a base calcula: a
+ * entrega, ou o dia seguinte se outra ocupação do mesmo ativo foi devolvida nesse dia. O nome só vem de `rpc_ativo_ler` e só com
+ * `hr.pessoas.retribuicao.view`; a lista traz o `pessoaId` (também só com essa permissão).
+ */
+export interface OcupacaoDoAtivo {
+  pessoaEquipamentoId: string;
+  pessoaId: string | null;
+  pessoaNome: string | null;
+  estado: "atribuido" | "devolvido" | null;
+  entrega: string;
+  devolucao: string | null;
+  contaDesde: string | null;
+}
+
+/** O armazém do Stock a que o ativo está ligado; só vem com `inventory.view`. */
+export interface ArmazemDoAtivo {
+  id: string;
+  nome: string | null;
+  /** O armazém foi apagado no Stock (o ativo fica). */
+  apagado: boolean;
+}
+
+/** Um ativo, como o ecrã o usa (valores já em número, datas AAAA-MM-DD). Um alugado não tem compra, residual nem vida. */
 export interface Ativo {
   id: string;
   grupo: GrupoAtivo;
@@ -56,8 +87,10 @@ export interface Ativo {
   codigo: string | null;
   numSerie: string | null;
   catEquipamentoId: string | null;
-  dataCompra: string;
-  valorCompra: number;
+  /** `null` no alugado. */
+  dataCompra: string | null;
+  /** `null` no alugado. */
+  valorCompra: number | null;
   valorResidual: number;
   vidaMeses: number | null;
   manutencaoAno: number;
@@ -77,17 +110,19 @@ export interface Ativo {
    * que está atribuído. É o que decide «Sem pessoa ligada» e se se pode desativar; `atribuicao` pode ser `null` com `ligado` verdadeiro.
    */
   ligado: boolean;
-}
-
-/** Uma atribuição do RH ainda sem ativo registado (só vem com `hr.pessoas.retribuicao.view`). */
-export interface AtribuicaoSemAtivo {
-  id: string;
-  pessoaNome: string | null;
-  tipo: string | null;
-  descricao: string | null;
-  valor: number | null;
-  entrega: string | null;
-  estado: string | null;
+  forma: FormaAquisicao;
+  /** Só no alugado. */
+  rendaMensal: number | null;
+  inicioAluguer: string | null;
+  /** `null` num alugado = sem fim (um arrendamento que se renova). */
+  fimAluguer: string | null;
+  /** Só no comprado. */
+  vidaOrigem: OrigemVida | null;
+  /** `null` sem `inventory.view` mesmo que o ativo esteja ligado a um armazém (ver `armazemLigado`). */
+  armazem: ArmazemDoAtivo | null;
+  armazemLigado: boolean;
+  /** Todas as vezes que esteve entregue (só no grupo Pessoas). */
+  ocupacoes: OcupacaoDoAtivo[];
 }
 
 export interface OpcaoCentroCusto {
@@ -106,17 +141,27 @@ export interface AtivosLidos {
   servico: Ativo[];
   estrutura: Ativo[];
   pessoa: Ativo[];
-  /** `null` quando o RH está oculto (sem `hr.pessoas.retribuicao.view`). */
-  atribuicoesSemAtivo: AtribuicaoSemAtivo[] | null;
+  /** Sem `hr.pessoas.retribuicao.view` não há nomes de pessoas. */
   rhOculto: boolean;
+  /** Tem `inventory.view`: vê os armazéns e pode ligar um. */
+  podeVerArmazens: boolean;
   centrosCusto: OpcaoCentroCusto[];
   /** A lista foi cortada nos 2000 ativos que a base devolve. */
   truncado: boolean;
 }
 
+export interface OpcaoArmazem {
+  id: string;
+  nome: string;
+  codigo: string | null;
+}
+
 export interface OpcoesAtivo {
   equipamentos: OpcaoEquipamento[];
   centrosCusto: OpcaoCentroCusto[];
+  /** Vazio sem `inventory.view`. */
+  armazens: OpcaoArmazem[];
+  podeVerArmazens: boolean;
 }
 
 type Linha = Record<string, unknown>;
@@ -146,12 +191,40 @@ function atribuicaoDaLinha(v: unknown): AtribuicaoDoAtivo | null {
   return { pessoaEquipamentoId: id, pessoaNome: texto(a.pessoa_nome), entrega: data(a.entrega) };
 }
 
-/** Uma linha de `rpc_ativos_listar` como `Ativo`; `null` se não tiver id, grupo ou data de compra legíveis. */
+function ocupacaoDaLinha(o: Linha): OcupacaoDoAtivo | null {
+  const id = texto(o.pessoa_equipamento_id);
+  const entrega = data(o.entrega);
+  if (!id || !entrega) return null;
+  return {
+    pessoaEquipamentoId: id,
+    pessoaId: texto(o.pessoa_id),
+    pessoaNome: texto(o.pessoa_nome),
+    estado: o.estado === "atribuido" || o.estado === "devolvido" ? o.estado : null,
+    entrega,
+    devolucao: data(o.devolucao),
+    contaDesde: data(o.conta_desde),
+  };
+}
+
+/** As ocupações de um ativo (de `rpc_ativos_listar` ou `rpc_ativo_ler`), por ordem de entrega; uma sem id ou sem entrega fica de fora. */
+export const ocupacoesDaResposta = (v: unknown): OcupacaoDoAtivo[] => lista(v).flatMap((o) => ocupacaoDaLinha(o) ?? []);
+
+function armazemDaLinha(l: Linha): ArmazemDoAtivo | null {
+  const id = texto(l.warehouse_id);
+  return id ? { id, nome: texto(l.warehouse_nome), apagado: l.warehouse_apagado === true } : null;
+}
+
+/** Uma linha de `rpc_ativos_listar` como `Ativo`; `null` se não tiver id, grupo ou os dados da conta (compra ou renda) legíveis. */
 export function ativoDaLinha(l: Linha): Ativo | null {
   const id = texto(l.id);
   const grupo = l.grupo;
+  const forma: FormaAquisicao = l.forma_aquisicao === "alugado" ? "alugado" : "comprado";
   const dataCompra = data(l.data_compra);
-  if (!id || !dataCompra || (grupo !== "servico" && grupo !== "estrutura" && grupo !== "pessoa")) return null;
+  const inicioAluguer = data(l.inicio_aluguer);
+  if (!id || (grupo !== "servico" && grupo !== "estrutura" && grupo !== "pessoa")) return null;
+  // Um comprado sem data de compra, ou um alugado sem início, não tem conta legível.
+  if (forma === "comprado" ? !dataCompra : !inicioAluguer) return null;
+  const origem = l.vida_origem;
   return {
     id,
     grupo,
@@ -161,8 +234,16 @@ export function ativoDaLinha(l: Linha): Ativo | null {
     numSerie: texto(l.num_serie),
     catEquipamentoId: texto(l.cat_equipamento_id),
     dataCompra,
-    valorCompra: numero(l.valor_compra),
+    valorCompra: numeroOuNull(l.valor_compra),
     valorResidual: numero(l.valor_residual),
+    forma,
+    rendaMensal: numeroOuNull(l.renda_mensal),
+    inicioAluguer,
+    fimAluguer: data(l.fim_aluguer),
+    vidaOrigem: origem === "pagamento" || origem === "catalogo" || origem === "manual" ? origem : null,
+    armazem: armazemDaLinha(l),
+    armazemLigado: l.armazem_ligado === true,
+    ocupacoes: ocupacoesDaResposta(l.ocupacoes),
     vidaMeses: numeroOuNull(l.vida_meses),
     manutencaoAno: numero(l.manutencao_ano),
     centroCustoId: texto(l.centro_custo_id),
@@ -190,21 +271,12 @@ const centrosDe = (v: unknown): OpcaoCentroCusto[] =>
 export function ativosLidosDaResposta(dados: unknown): AtivosLidos {
   const raiz = objeto(dados) ?? {};
   const pessoa = objeto(raiz.pessoa) ?? {};
-  const semAtivo = Array.isArray(pessoa.atribuicoes_sem_ativo) ? lista(pessoa.atribuicoes_sem_ativo) : null;
-  const rhOculto = pessoa.rh_oculto === true;
   return {
     servico: ativosDe(raiz.servico),
     estrutura: ativosDe(raiz.estrutura),
     pessoa: ativosDe(pessoa.ativos),
-    atribuicoesSemAtivo: rhOculto || semAtivo === null
-      ? null
-      : semAtivo.flatMap((a) => {
-          const id = texto(a.id);
-          return id
-            ? [{ id, pessoaNome: texto(a.pessoa_nome), tipo: texto(a.tipo), descricao: texto(a.descricao), valor: numeroOuNull(a.valor), entrega: data(a.entrega), estado: texto(a.estado) }]
-            : [];
-        }),
-    rhOculto,
+    rhOculto: pessoa.rh_oculto === true,
+    podeVerArmazens: raiz.pode_ver_armazens === true,
     centrosCusto: centrosDe(raiz.centros_custo),
     truncado: raiz.truncado === true,
   };
@@ -219,5 +291,20 @@ export function opcoesDaResposta(dados: unknown): OpcoesAtivo {
       return id ? [{ id, nome: texto(e.nome) ?? id, vidaAnos: numeroOuNull(e.vida_anos), vidaHoras: numeroOuNull(e.vida_horas) }] : [];
     }),
     centrosCusto: centrosDe(raiz.centros_custo),
+    armazens: lista(raiz.armazens).flatMap((w) => {
+      const id = texto(w.id);
+      return id ? [{ id, nome: texto(w.nome) ?? id, codigo: texto(w.codigo) }] : [];
+    }),
+    podeVerArmazens: raiz.pode_ver_armazens === true,
   };
+}
+
+/** Uma linha de `rpc_ativo_ler`: o ativo (as ocupações já com o nome, quando o RH o deixa ver). */
+export function ativoLidoDaResposta(dados: unknown): Ativo | null {
+  const raiz = objeto(dados);
+  if (!raiz) return null;
+  const base = ativoDaLinha(raiz);
+  if (!base) return null;
+  const atribuicao = atribuicaoDaLinha(raiz.atribuicao);
+  return { ...base, atribuicao: atribuicao ?? base.atribuicao, ligado: raiz.ligado === true, ocupacoes: ocupacoesDaResposta(raiz.ocupacoes) };
 }

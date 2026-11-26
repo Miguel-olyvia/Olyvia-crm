@@ -28,13 +28,15 @@ const OPCOES: OpcoesAtivo = {
     { id: "c3", nome: "Andaime", vidaAnos: 10, vidaHoras: null },
   ],
   centrosCusto: [{ id: "cc1", nome: "Obras" }],
+  armazens: [{ id: "w1", nome: "Armazém Porto", codigo: "ARM1" }, { id: "w2", nome: "Armazém Faro", codigo: null }],
+  podeVerArmazens: true,
 };
 
 const EXISTENTE: Ativo = {
   id: "a1", grupo: "estrutura", tipo: "mobiliario", nome: "Mesa grande", codigo: "M-01", numSerie: null, catEquipamentoId: null,
   dataCompra: "2026-01-15", valorCompra: 1200, valorResidual: 200, vidaMeses: 60, manutencaoAno: 0, centroCustoId: null,
   localizacao: "Armazém", notas: null, estado: "ativo", desativadoEm: null, desativadoMotivo: null, desativadoNota: null,
-  catEquipamento: null, atribuicao: null, ligado: false,
+  catEquipamento: null, atribuicao: null, ligado: false, forma: "comprado", rendaMensal: null, inicioAluguer: null, fimAluguer: null, vidaOrigem: null, armazem: null, armazemLigado: false, ocupacoes: [],
 };
 
 const aoFechar = vi.fn();
@@ -200,6 +202,7 @@ describe("AtivoSheet: validações no ecrã (nada vai à base)", () => {
     expect(m.criar).toHaveBeenCalledWith("estrutura", {
       p_nome: "Mesa", p_tipo: "mobiliario", p_cat_equipamento_id: null, p_data_compra: "2026-06-15", p_valor_compra: 100, p_valor_residual: 0,
       p_vida_meses: 60, p_manutencao_ano: 0, p_codigo: null, p_num_serie: null, p_centro_custo_id: null, p_localizacao: null, p_notas: null,
+      p_vida_origem: "manual", p_warehouse_id: null, p_forma_aquisicao: "comprado", p_renda_mensal: null, p_inicio_aluguer: null, p_fim_aluguer: null,
     });
   });
 
@@ -303,6 +306,7 @@ describe("AtivoSheet: o que se envia à base", () => {
       p_nome: "Berbequim nº 2", p_tipo: null, p_cat_equipamento_id: "c1", p_data_compra: "2026-03-01", p_valor_compra: 1234.5,
       p_valor_residual: 100, p_vida_meses: null, p_manutencao_ano: 50, p_codigo: "B-02", p_num_serie: null, p_centro_custo_id: "cc1",
       p_localizacao: null, p_notas: null,
+      p_vida_origem: null, p_warehouse_id: null, p_forma_aquisicao: "comprado", p_renda_mensal: null, p_inicio_aluguer: null, p_fim_aluguer: null,
     });
     await waitFor(() => expect(aoFechar).toHaveBeenCalled());
     expect(aoGuardar).toHaveBeenCalledWith({ nome: "Berbequim nº 2", edicao: false });
@@ -427,5 +431,367 @@ describe("AtivoSheet: os erros da base, traduzidos", () => {
     const aviso = await screen.findByRole("alert");
     expect(within(aviso).getByText("Não tem permissão para gerir ativos.")).toBeInTheDocument();
     expect(aoFechar).not.toHaveBeenCalled();
+  });
+});
+
+const ALUGADO_EXISTENTE: Ativo = {
+  ...EXISTENTE, id: "r1", grupo: "pessoa", tipo: "viatura", nome: "Carrinha", codigo: "VIA-0001", dataCompra: null, valorCompra: null, valorResidual: 0, vidaMeses: null,
+  forma: "alugado", rendaMensal: 450, inicioAluguer: "2026-01-01", fimAluguer: "2029-12-31", localizacao: null,
+};
+const norm = (s: string | null) => (s ?? "").replace(/\p{Zs}/gu, " ");
+
+describe("AtivoSheet: comprado ou alugado", () => {
+  it("Pessoas e Estrutura perguntam como foi adquirido, com «Comprado» marcado; o Serviço não pergunta (nunca se aluga)", () => {
+    abrir("pessoa");
+    expect(screen.getByRole("radio", { name: /Comprado/ })).toBeChecked();
+    expect(screen.getByRole("radio", { name: /Alugado/ })).not.toBeChecked();
+    cleanup();
+    abrir("estrutura");
+    expect(screen.getByRole("radio", { name: /Alugado/ })).toBeInTheDocument();
+    cleanup();
+    abrir("servico");
+    expect(screen.queryByRole("radio", { name: /Alugado/ })).not.toBeInTheDocument();
+  });
+
+  it("escolher «Alugado» troca os campos: renda, início e fim em vez de valor de compra, data de compra e vida útil", () => {
+    abrir("pessoa");
+    fireEvent.click(screen.getByRole("radio", { name: /Alugado/ }));
+    expect(campo(/Renda mensal/)).toBeInTheDocument();
+    expect(campo(/Início do aluguer/)).toBeInTheDocument();
+    expect(campo(/Fim do aluguer/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Valor de compra/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Data de compra/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/Vida útil/)).not.toBeInTheDocument();
+    maisDetalhes();
+    expect(screen.queryByLabelText(/Valor residual/)).not.toBeInTheDocument();
+  });
+
+  it("voltar a «Comprado» traz os campos da compra de volta, com o que já estava escrito", () => {
+    abrir("pessoa");
+    escrever(/Valor de compra/, "900");
+    fireEvent.click(screen.getByRole("radio", { name: /Alugado/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Comprado/ }));
+    expect(campo(/Valor de compra/).value).toBe("900");
+  });
+
+  it("passar de Pessoas para Serviço tira a pergunta e volta a comprado, mesmo com «Alugado» escolhido", () => {
+    abrir("pessoa");
+    fireEvent.click(screen.getByRole("radio", { name: /Alugado/ }));
+    fireEvent.click(screen.getByRole("radio", { name: /Serviço/ }));
+    expect(screen.queryByRole("radio", { name: /Alugado/ })).not.toBeInTheDocument();
+    expect(campo(/Valor de compra/)).toBeInTheDocument();
+  });
+
+  it("alugado: renda, início e fim são validados junto do campo, e o foco vai para o primeiro com erro", () => {
+    abrir("pessoa");
+    fireEvent.click(screen.getByRole("radio", { name: /Alugado/ }));
+    escrever(/^Nome/, "Carrinha");
+    escolher(/^Tipo/, "Viatura");
+    escrever(/Início do aluguer/, "");
+    guardar();
+    expect(m.criar).not.toHaveBeenCalled();
+    expect(campo(/Renda mensal/)).toHaveAttribute("aria-invalid", "true");
+    expect(campo(/Início do aluguer/)).toHaveAttribute("aria-invalid", "true");
+    expect(document.activeElement).toBe(campo(/Renda mensal/));
+    escrever(/Renda mensal/, "450");
+    escrever(/Início do aluguer/, "2026-01-01");
+    escrever(/Fim do aluguer/, "2025-12-31");
+    guardar();
+    expect(campo(/Fim do aluguer/)).toHaveAttribute("aria-invalid", "true");
+    expect(m.criar).not.toHaveBeenCalled();
+  });
+
+  it("criar um alugado: renda e datas seguem, a compra e a vida vão a null, e o fim vazio é «sem fim»", async () => {
+    abrir("pessoa");
+    fireEvent.click(screen.getByRole("radio", { name: /Alugado/ }));
+    escrever(/^Nome/, "Carrinha");
+    escolher(/^Tipo/, "Viatura");
+    escrever(/Renda mensal/, "450,50");
+    escrever(/Início do aluguer/, "2026-01-01");
+    guardar();
+    await waitFor(() => expect(m.criar).toHaveBeenCalledTimes(1));
+    expect(m.criar).toHaveBeenCalledWith("pessoa", expect.objectContaining({
+      p_nome: "Carrinha", p_tipo: "viatura", p_forma_aquisicao: "alugado", p_renda_mensal: 450.5, p_inicio_aluguer: "2026-01-01", p_fim_aluguer: null,
+      p_data_compra: null, p_valor_compra: null, p_valor_residual: null, p_vida_meses: null, p_vida_origem: null, p_cat_equipamento_id: null,
+    }));
+  });
+
+  it("a viatura alugada avisa que a Frota não está ligada (a renda não fica em dois sítios); um portátil alugado não", () => {
+    abrir("pessoa");
+    fireEvent.click(screen.getByRole("radio", { name: /Alugado/ }));
+    expect(screen.queryByTestId("aviso-frota")).not.toBeInTheDocument();
+    escolher(/^Tipo/, "Portátil");
+    expect(screen.queryByTestId("aviso-frota")).not.toBeInTheDocument();
+    escolher(/^Tipo/, "Viatura");
+    expect(screen.getByTestId("aviso-frota")).toHaveTextContent("a renda fica em dois sítios");
+  });
+
+  it("uma viatura comprada não tem o aviso da Frota", () => {
+    abrir("pessoa");
+    escolher(/^Tipo/, "Viatura");
+    expect(screen.queryByTestId("aviso-frota")).not.toBeInTheDocument();
+  });
+
+  it("a prévia diz quanto custa por mês: comprado (quota e último mês) e alugado (com e sem fim)", () => {
+    abrir("pessoa");
+    escrever(/Valor de compra/, "1200");
+    expect(norm(screen.getByTestId("previa-conta").textContent)).toBe("Perde 33,33 € por mês durante 36 meses, até 05/2029.");
+    fireEvent.click(screen.getByRole("radio", { name: /Alugado/ }));
+    expect(screen.getByTestId("previa-conta")).toHaveTextContent("Preencha os valores");
+    escrever(/Renda mensal/, "450");
+    expect(norm(screen.getByTestId("previa-conta").textContent)).toBe("Custa 450,00 € por mês, desde 15/06/2026, sem data de fim.");
+    escrever(/Fim do aluguer/, "2029-12-31");
+    expect(norm(screen.getByTestId("previa-conta").textContent)).toBe("Custa 450,00 € por mês, de 15/06/2026 a 31/12/2029.");
+  });
+
+  it("em edição a forma só se lê (um ativo não muda de comprado para alugado) e o alugado vem preenchido", () => {
+    abrir("pessoa", ALUGADO_EXISTENTE);
+    expect(screen.queryByRole("radio")).not.toBeInTheDocument();
+    expect(screen.getByTestId("forma-do-ativo")).toHaveTextContent("Alugado");
+    expect(campo(/Renda mensal/).value).toBe("450");
+    expect(campo(/Início do aluguer/).value).toBe("2026-01-01");
+    expect(campo(/Fim do aluguer/).value).toBe("2029-12-31");
+  });
+
+  it("editar um alugado: alterar com a forma, a renda e as datas, e a compra a null", async () => {
+    abrir("pessoa", ALUGADO_EXISTENTE);
+    escrever(/Renda mensal/, "500");
+    escrever(/Fim do aluguer/, "");
+    guardar();
+    await waitFor(() => expect(m.alterar).toHaveBeenCalledTimes(1));
+    const [id, args] = m.alterar.mock.calls[0];
+    expect(id).toBe("r1");
+    expect(args).toMatchObject({
+      p_forma_aquisicao: "alugado", p_renda_mensal: 500, p_inicio_aluguer: "2026-01-01", p_fim_aluguer: null, p_data_compra: null, p_valor_compra: null, p_vida_meses: null,
+    });
+  });
+
+  it("um ativo que já esteve entregue avisa que corrigir muda o custo das pessoas, também no passado", () => {
+    abrir("pessoa", { ...ALUGADO_EXISTENTE, ocupacoes: [{ pessoaEquipamentoId: "o1", pessoaId: null, pessoaNome: null, estado: null, entrega: "2026-02-01", devolucao: null, contaDesde: "2026-02-01" }] });
+    expect(screen.getByTestId("aviso-edicao-passado")).toHaveTextContent("muda o custo");
+    cleanup();
+    abrir("pessoa", ALUGADO_EXISTENTE);
+    expect(screen.queryByTestId("aviso-edicao-passado")).not.toBeInTheDocument();
+  });
+
+  it("os erros da renda (ATV20) e das datas (ATV21) da base aparecem junto do campo certo", async () => {
+    m.criar.mockResolvedValueOnce({ ok: false, codigo: "ATV20", campo: null, mensagem: "A renda mensal tem de ser maior do que zero." });
+    abrir("pessoa");
+    fireEvent.click(screen.getByRole("radio", { name: /Alugado/ }));
+    escrever(/^Nome/, "Carrinha");
+    escolher(/^Tipo/, "Viatura");
+    escrever(/Renda mensal/, "450");
+    guardar();
+    await waitFor(() => expect(campo(/Renda mensal/)).toHaveAttribute("aria-invalid", "true"));
+    m.criar.mockResolvedValueOnce({ ok: false, codigo: "ATV21", campo: null, mensagem: "As datas do aluguer não são válidas." });
+    guardar();
+    await waitFor(() => expect(campo(/Início do aluguer/)).toHaveAttribute("aria-invalid", "true"));
+  });
+});
+
+describe("AtivoSheet: a vida útil (meses de pagamento, do catálogo ou à mão)", () => {
+  const origem = (opcao: string) => escolher(/Como se define a vida útil/, opcao);
+  const opcoesDe = (nome: RegExp) => {
+    fireEvent.keyDown(screen.getByRole("combobox", { name: nome }), { key: "Enter" });
+    return screen.getAllByRole("option").map((o) => o.textContent);
+  };
+
+  it("a vida define-se em Pessoas e Estrutura por uma de três (duas na estrutura, que não tem catálogo); o Serviço mantém o campo de sempre", () => {
+    abrir("pessoa");
+    expect(opcoesDe(/Como se define a vida útil/)).toEqual(["Meses de pagamento", "Do equipamento do catálogo", "Escrever à mão"]);
+    cleanup();
+    abrir("estrutura");
+    expect(opcoesDe(/Como se define a vida útil/)).toEqual(["Meses de pagamento", "Escrever à mão"]);
+    cleanup();
+    abrir("servico");
+    expect(screen.queryByRole("combobox", { name: /Como se define a vida útil/ })).not.toBeInTheDocument();
+  });
+
+  it("meses de pagamento: o campo muda de nome e a origem segue para a base", async () => {
+    abrir("pessoa");
+    origem("Meses de pagamento");
+    escrever(/Meses de pagamento/, "24");
+    escrever(/^Nome/, "Telemóvel");
+    escolher(/^Tipo/, "Telemóvel");
+    escrever(/Valor de compra/, "600");
+    guardar();
+    await waitFor(() => expect(m.criar).toHaveBeenCalledTimes(1));
+    expect(m.criar).toHaveBeenCalledWith("pessoa", expect.objectContaining({ p_vida_meses: 24, p_vida_origem: "pagamento", p_cat_equipamento_id: null }));
+  });
+
+  it("do catálogo: só aparecem os equipamentos com vida em anos, e a vida é a do escolhido (anos x 12)", async () => {
+    abrir("pessoa");
+    origem("Do equipamento do catálogo");
+    expect(screen.queryByLabelText(/Vida útil/)).not.toBeInTheDocument();
+    expect(opcoesDe(/^Equipamento do catálogo/)).toEqual(["Escolha o equipamento", "Berbequim (5 anos)", "Andaime (10 anos)"]);
+    fireEvent.click(screen.getByRole("option", { name: "Berbequim (5 anos)" }));
+    expect(screen.getByText("A vida do equipamento escolhido são 60 meses.")).toBeInTheDocument();
+    escrever(/^Nome/, "Berbequim");
+    escolher(/^Tipo/, "Ferramentas");
+    escrever(/Valor de compra/, "600");
+    guardar();
+    await waitFor(() => expect(m.criar).toHaveBeenCalledTimes(1));
+    expect(m.criar).toHaveBeenCalledWith("pessoa", expect.objectContaining({ p_vida_meses: 60, p_vida_origem: "catalogo", p_cat_equipamento_id: "c1" }));
+  });
+
+  it("do catálogo sem escolher o equipamento fica bloqueado, com o erro junto do seletor", () => {
+    abrir("pessoa");
+    origem("Do equipamento do catálogo");
+    escrever(/^Nome/, "Berbequim");
+    escolher(/^Tipo/, "Ferramentas");
+    escrever(/Valor de compra/, "600");
+    guardar();
+    expect(m.criar).not.toHaveBeenCalled();
+    expect(screen.getByRole("combobox", { name: /^Equipamento do catálogo/ })).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("à mão é o que vem por omissão e leva a vida habitual do grupo", async () => {
+    abrir("pessoa");
+    escrever(/^Nome/, "Portátil");
+    escolher(/^Tipo/, "Portátil");
+    escrever(/Valor de compra/, "900");
+    guardar();
+    await waitFor(() => expect(m.criar).toHaveBeenCalledTimes(1));
+    expect(m.criar).toHaveBeenCalledWith("pessoa", expect.objectContaining({ p_vida_meses: 36, p_vida_origem: "manual" }));
+  });
+
+  it("editar um ativo do catálogo que não mudou de equipamento mantém a vida que ele já tinha (não muda o passado sozinho)", async () => {
+    const doCatalogo: Ativo = {
+      ...EXISTENTE, grupo: "pessoa", tipo: "ferramentas", catEquipamentoId: "c1", vidaMeses: 48, vidaOrigem: "catalogo",
+      catEquipamento: { id: "c1", nome: "Berbequim", vidaAnos: 5, vidaHoras: null, usoAnoHoras: null },
+    };
+    abrir("pessoa", doCatalogo);
+    guardar();
+    await waitFor(() => expect(m.alterar).toHaveBeenCalledTimes(1));
+    expect(m.alterar.mock.calls[0][1]).toMatchObject({ p_vida_meses: 48, p_vida_origem: "catalogo", p_cat_equipamento_id: "c1" });
+  });
+});
+
+describe("AtivoSheet: o armazém do Stock", () => {
+  const instalacoes = () => { escrever(/^Nome/, "Armazém Porto"); escolher(/^Tipo/, "Armazéns e instalações"); };
+
+  it("o tipo chama-se «Armazéns e instalações» e a ligação ao armazém aparece logo por baixo dele, antes da forma e do valor de compra", () => {
+    abrir("estrutura");
+    escolher(/^Tipo/, "Armazéns e instalações");
+    const tipo = screen.getByRole("combobox", { name: /^Tipo/ });
+    const armazem = screen.getByRole("combobox", { name: /Armazém do Stock/ });
+    const antes = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    // Imediatamente a seguir ao Tipo: nenhum outro seletor entre os dois.
+    const seletores = screen.getAllByRole("combobox");
+    expect(seletores.indexOf(armazem)).toBe(seletores.indexOf(tipo) + 1);
+    expect(antes(tipo, armazem)).toBe(true);
+    // E antes da forma (Comprado/Alugado) e do valor de compra.
+    expect(antes(armazem, screen.getByRole("radio", { name: /Comprado/ }))).toBe(true);
+    expect(antes(armazem, campo(/Valor de compra/))).toBe(true);
+  });
+
+  it("com outro tipo não aparece o armazém nem a frase de falta de acesso", () => {
+    abrir("estrutura");
+    escolher(/^Tipo/, "Mobiliário");
+    expect(screen.queryByRole("combobox", { name: /Armazém do Stock/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("armazem-sem-acesso")).not.toBeInTheDocument();
+    cleanup();
+    m.opcoes = { ...OPCOES, armazens: [], podeVerArmazens: false };
+    abrir("estrutura");
+    escolher(/^Tipo/, "Mobiliário");
+    expect(screen.queryByTestId("armazem-sem-acesso")).not.toBeInTheDocument();
+  });
+
+  it("sem acesso ao Stock, o tipo «Armazéns e instalações» diz que é preciso acesso ao Stock para ligar a um armazém, sem o campo", () => {
+    m.opcoes = { ...OPCOES, armazens: [], podeVerArmazens: false };
+    abrir("estrutura");
+    expect(screen.queryByTestId("armazem-sem-acesso")).not.toBeInTheDocument();
+    escolher(/^Tipo/, "Armazéns e instalações");
+    expect(screen.queryByRole("combobox", { name: /Armazém do Stock/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId("armazem-sem-acesso")).toHaveTextContent("Para ligar a um armazém é preciso ter acesso ao Stock.");
+  });
+
+  it("com acesso ao Stock, a frase de falta de acesso não aparece", () => {
+    abrir("estrutura");
+    escolher(/^Tipo/, "Armazéns e instalações");
+    expect(screen.getByRole("combobox", { name: /Armazém do Stock/ })).toBeInTheDocument();
+    expect(screen.queryByTestId("armazem-sem-acesso")).not.toBeInTheDocument();
+  });
+
+  it("enquanto as opções não chegaram, não se diz que falta acesso (ainda não se sabe)", () => {
+    m.opcoes = null;
+    abrir("estrutura");
+    escolher(/^Tipo/, "Armazéns e instalações");
+    expect(screen.queryByTestId("armazem-sem-acesso")).not.toBeInTheDocument();
+  });
+
+  it("só um ativo de estrutura do tipo Armazéns e instalações oferece o armazém, e só a quem vê o Stock", () => {
+    abrir("estrutura");
+    expect(screen.queryByRole("combobox", { name: /Armazém do Stock/ })).not.toBeInTheDocument();
+    escolher(/^Tipo/, "Mobiliário");
+    expect(screen.queryByRole("combobox", { name: /Armazém do Stock/ })).not.toBeInTheDocument();
+    escolher(/^Tipo/, "Armazéns e instalações");
+    expect(screen.getByRole("combobox", { name: /Armazém do Stock/ })).toBeInTheDocument();
+    cleanup();
+    m.opcoes = { ...OPCOES, armazens: [], podeVerArmazens: false };
+    abrir("estrutura");
+    escolher(/^Tipo/, "Armazéns e instalações");
+    expect(screen.queryByRole("combobox", { name: /Armazém do Stock/ })).not.toBeInTheDocument();
+  });
+
+  it("escolher um armazém liga-o: o id segue na criação", async () => {
+    abrir("estrutura");
+    instalacoes();
+    escrever(/Valor de compra/, "5000");
+    escolher(/Armazém do Stock/, "Armazém Porto");
+    guardar();
+    await waitFor(() => expect(m.criar).toHaveBeenCalledTimes(1));
+    expect(m.criar).toHaveBeenCalledWith("estrutura", expect.objectContaining({ p_tipo: "instalacoes", p_warehouse_id: "w1" }));
+  });
+
+  it("mudar o tipo para outro que não Armazéns e instalações larga o armazém escolhido", async () => {
+    abrir("estrutura");
+    instalacoes();
+    escolher(/Armazém do Stock/, "Armazém Porto");
+    escolher(/^Tipo/, "Mobiliário");
+    escrever(/Valor de compra/, "100");
+    guardar();
+    await waitFor(() => expect(m.criar).toHaveBeenCalledTimes(1));
+    expect(m.criar).toHaveBeenCalledWith("estrutura", expect.objectContaining({ p_tipo: "mobiliario", p_warehouse_id: null }));
+  });
+
+  it("um armazém alugado: renda de estrutura ligada ao armazém", async () => {
+    abrir("estrutura");
+    instalacoes();
+    fireEvent.click(screen.getByRole("radio", { name: /Alugado/ }));
+    escrever(/Renda mensal/, "900");
+    escolher(/Armazém do Stock/, "Armazém Faro");
+    guardar();
+    await waitFor(() => expect(m.criar).toHaveBeenCalledTimes(1));
+    expect(m.criar).toHaveBeenCalledWith("estrutura", expect.objectContaining({ p_forma_aquisicao: "alugado", p_renda_mensal: 900, p_warehouse_id: "w2" }));
+  });
+
+  it("sem inventory.view, editar um armazém já ligado manda null (a base mantém a ligação: nunca se desliga sem permissão)", async () => {
+    m.opcoes = { ...OPCOES, armazens: [], podeVerArmazens: false };
+    abrir("estrutura", { ...EXISTENTE, tipo: "instalacoes", nome: "Armazém Porto", armazemLigado: true, armazem: null });
+    expect(screen.queryByRole("combobox", { name: /Armazém do Stock/ })).not.toBeInTheDocument();
+    escrever(/^Nome/, "Armazém do Porto");
+    guardar();
+    await waitFor(() => expect(m.alterar).toHaveBeenCalledTimes(1));
+    expect(m.alterar.mock.calls[0][1]).toMatchObject({ p_warehouse_id: null, p_tipo: "instalacoes" });
+  });
+
+  it("com inventory.view, editar mostra o armazém ligado (mesmo apagado no Stock) e mantém-no", async () => {
+    abrir("estrutura", { ...EXISTENTE, tipo: "instalacoes", nome: "Armazém Velho", armazemLigado: true, armazem: { id: "w9", nome: "Velho", apagado: true } });
+    expect(screen.getByRole("combobox", { name: /Armazém do Stock/ })).toHaveTextContent("Velho");
+    guardar();
+    await waitFor(() => expect(m.alterar).toHaveBeenCalledTimes(1));
+    expect(m.alterar.mock.calls[0][1]).toMatchObject({ p_warehouse_id: "w9" });
+  });
+
+  it("ATV22 (armazém inválido) aparece junto do seletor do armazém", async () => {
+    m.criar.mockResolvedValueOnce({ ok: false, codigo: "ATV22", campo: null, mensagem: "Este armazém já está ligado a outro ativo." });
+    abrir("estrutura");
+    instalacoes();
+    escrever(/Valor de compra/, "5000");
+    escolher(/Armazém do Stock/, "Armazém Porto");
+    guardar();
+    await waitFor(() => expect(screen.getByRole("combobox", { name: /Armazém do Stock/ })).toHaveAttribute("aria-invalid", "true"));
+    expect(screen.getAllByText("Este armazém já está ligado a outro ativo.").length).toBeGreaterThan(0);
   });
 });

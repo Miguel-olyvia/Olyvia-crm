@@ -9,6 +9,15 @@
  * Este ficheiro e puro (nao importa o cliente da base): `recusaPorPermissao` repete a regra de `isPermissionError` de hrDb.
  */
 
+import { codigoAtv, subcodigoAtv } from "@/components/ativos/lib/errosAtivo";
+
+/**
+ * Os codigos ATV que o RH tambem recebe (ao atribuir, devolver e corrigir um equipamento, que e um ativo): ATV05, ATV07 e ATV10 a
+ * ATV33. Os outros (ATV02 a ATV04, ATV06, ATV08, ATV09) nunca chegam ao RH e caem no texto generico. O texto e o dos Ativos
+ * (`ativos.erro.*`), uma so fonte.
+ */
+const ATV_NO_RH: readonly string[] = ["ATV05", "ATV07", ...Array.from({ length: 24 }, (_, i) => `ATV${i + 10}`)];
+
 /** O SQLSTATE (ERRCODE) que a RPC levanta, e o codigo que ele quer dizer. */
 const CODIGO_POR_SQLSTATE: Readonly<Record<string, string>> = {
   HRA10: "pedido_invalido",
@@ -26,6 +35,7 @@ const CODIGO_POR_SQLSTATE: Readonly<Record<string, string>> = {
   HRA72: "estado_devolucao_invalido",
   HRA73: "taxa_invalida",
   HRA74: "valor_unitario_invalido",
+  HRA91: "equipamento_e_ativo",
 };
 
 /** A chave de traducao do texto de cada codigo. */
@@ -46,10 +56,14 @@ const CHAVE_POR_CODIGO: Readonly<Record<string, string>> = {
   estado_devolucao_invalido: "hr.custo.erro.estadoDevolucaoInvalido",
   taxa_invalida: "hr.custo.erro.taxaInvalida",
   valor_unitario_invalido: "hr.custo.erro.valorUnitarioInvalido",
+  equipamento_e_ativo: "hr.custo.erro.equipamentoEAtivo",
 };
 
 /** O texto quando nao ha codigo legivel (rede, timeout, defeito). */
 export const CHAVE_ERRO_GENERICO_CUSTO = "hr.custo.erro.generico";
+
+/** A recusa de «Corrigir equipamento» sem `ativos.edit`: a permissao dos Ativos, nunca a das retribuicoes. */
+export const CHAVE_SEM_PERMISSAO_ATIVOS = "hr.custo.erro.semPermissaoAtivos";
 
 /**
  * Os codigos que o formulario ja sabe mostrar junto do campo, com o nome do erro da validacao local
@@ -83,10 +97,14 @@ export function codigoDeErroCusto(erro: unknown): string | null {
   if (!erro || typeof erro !== "object") return null;
   const { code, message } = erro as { code?: unknown; message?: unknown };
   if (typeof code === "string" && CODIGO_POR_SQLSTATE[code]) return CODIGO_POR_SQLSTATE[code];
-  return typeof message === "string" && CHAVE_POR_CODIGO[message] ? message : null;
+  if (typeof message === "string" && CHAVE_POR_CODIGO[message]) return message;
+  const atv = codigoAtv(erro);
+  // ATV26 tem varias causas (a base di-las no DETAIL): cada uma tem o seu texto, `ATV26.<causa>`.
+  return atv !== null && ATV_NO_RH.includes(atv) ? subcodigoAtv(erro) ?? atv : null;
 }
 
 /** A chave de traducao do texto de um codigo; a generica quando nao ha texto proprio. */
 export function chaveDoErroCusto(codigo: string | null): string {
+  if (codigo && /^ATV\d{2}(\.[A-Za-z]+)?$/.test(codigo) && ATV_NO_RH.includes(codigo.slice(0, 5))) return `ativos.erro.${codigo}`;
   return (codigo && CHAVE_POR_CODIGO[codigo]) || CHAVE_ERRO_GENERICO_CUSTO;
 }

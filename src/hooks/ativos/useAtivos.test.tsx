@@ -31,10 +31,10 @@ const LISTA = {
       { ...ATIVO, id: "p1", grupo: "pessoa", tipo: "portatil", nome: "Portátil 1", ligado: true, atribuicao: { pessoa_equipamento_id: "pe1", pessoa_nome: "Ana Silva", entrega: "2026-02-01" } },
       { ...ATIVO, id: "p2", grupo: "pessoa", tipo: "telemovel", nome: "Telemóvel 1", atribuicao: null },
     ],
-    atribuicoes_sem_ativo: [{ id: "pe9", pessoa_nome: "Rui Costa", tipo: "portatil", descricao: "Portátil velho", valor: 900, entrega: "2025-05-01", estado: "atribuido" }],
     rh_oculto: false,
   },
   centros_custo: [{ id: "cc1", nome: "Obras" }],
+  pode_ver_armazens: true,
   truncado: false,
 };
 
@@ -58,9 +58,51 @@ describe("useAtivos: ler", () => {
     expect(d.pessoa.map((a) => a.nome)).toEqual(["Portátil 1", "Telemóvel 1"]);
     expect(d.pessoa[0].atribuicao).toEqual({ pessoaEquipamentoId: "pe1", pessoaNome: "Ana Silva", entrega: "2026-02-01" });
     expect(d.pessoa[1].atribuicao).toBeNull();
-    expect(d.atribuicoesSemAtivo).toEqual([{ id: "pe9", pessoaNome: "Rui Costa", tipo: "portatil", descricao: "Portátil velho", valor: 900, entrega: "2025-05-01", estado: "atribuido" }]);
     expect(d.rhOculto).toBe(false);
+    expect(d.podeVerArmazens).toBe(true);
     expect(d.centrosCusto).toEqual([{ id: "cc1", nome: "Obras" }]);
+  });
+
+  it("sem as chaves da A1 (forma, renda, ocupações, armazém) um ativo é comprado, sem ocupações e sem armazém", async () => {
+    m.rpc.mockResolvedValue({ data: LISTA, error: null });
+    const { result } = renderHook(() => useAtivos({}), { wrapper: envolver });
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    expect(result.current.dados!.estrutura[0]).toMatchObject({ forma: "comprado", rendaMensal: null, inicioAluguer: null, fimAluguer: null, vidaOrigem: null, armazem: null, armazemLigado: false, ocupacoes: [] });
+  });
+
+  it("lê um alugado (renda e datas, sem compra), as ocupações com conta_desde e o armazém ligado", async () => {
+    const alugado = {
+      ...ATIVO, id: "r1", grupo: "pessoa", tipo: "viatura", nome: "Carrinha", data_compra: null, valor_compra: null, vida_meses: null,
+      forma_aquisicao: "alugado", renda_mensal: "450.00", inicio_aluguer: "2026-01-01", fim_aluguer: null, armazem_ligado: false, ligado: true,
+      ocupacoes: [
+        { pessoa_equipamento_id: "o1", pessoa_id: "p1", entrega: "2026-01-01", devolucao: "2026-08-31", conta_desde: "2026-01-01" },
+        { pessoa_equipamento_id: "o2", pessoa_id: null, entrega: "2026-08-31", devolucao: null, conta_desde: "2026-09-01" },
+        { pessoa_equipamento_id: "", entrega: "2026-08-31" },
+      ],
+    };
+    const armazem = {
+      ...ATIVO, id: "w1", tipo: "instalacoes", nome: "Armazém Porto", forma_aquisicao: "alugado", data_compra: null, valor_compra: null, vida_meses: null,
+      renda_mensal: 900, inicio_aluguer: "2025-01-01", fim_aluguer: "2030-12-31", armazem_ligado: true, warehouse_id: "wh1", warehouse_nome: "Porto", warehouse_apagado: false,
+    };
+    m.rpc.mockResolvedValue({ data: { ...LISTA, estrutura: [armazem], pessoa: { ...LISTA.pessoa, ativos: [alugado] } }, error: null });
+    const { result } = renderHook(() => useAtivos({}), { wrapper: envolver });
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    const d = result.current.dados!;
+    expect(d.pessoa[0]).toMatchObject({ forma: "alugado", dataCompra: null, valorCompra: null, rendaMensal: 450, inicioAluguer: "2026-01-01", fimAluguer: null });
+    expect(d.pessoa[0].ocupacoes).toEqual([
+      { pessoaEquipamentoId: "o1", pessoaId: "p1", pessoaNome: null, estado: null, entrega: "2026-01-01", devolucao: "2026-08-31", contaDesde: "2026-01-01" },
+      { pessoaEquipamentoId: "o2", pessoaId: null, pessoaNome: null, estado: null, entrega: "2026-08-31", devolucao: null, contaDesde: "2026-09-01" },
+    ]);
+    expect(d.estrutura[0]).toMatchObject({ forma: "alugado", rendaMensal: 900, fimAluguer: "2030-12-31", armazemLigado: true, armazem: { id: "wh1", nome: "Porto", apagado: false } });
+  });
+
+  it("um alugado sem início, ou um comprado sem data de compra, não tem conta legível e fica de fora", async () => {
+    const semInicio = { ...ATIVO, id: "x1", forma_aquisicao: "alugado", renda_mensal: 10, data_compra: null, valor_compra: null, inicio_aluguer: null };
+    const semData = { ...ATIVO, id: "x2", data_compra: null };
+    m.rpc.mockResolvedValue({ data: { ...LISTA, estrutura: [semInicio, semData, ATIVO] }, error: null });
+    const { result } = renderHook(() => useAtivos({}), { wrapper: envolver });
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    expect(result.current.dados!.estrutura.map((a) => a.id)).toEqual(["a1"]);
   });
 
   it("a chave inclui o interruptor dos desativados: mudá-lo volta a pedir a lista", async () => {
@@ -108,12 +150,11 @@ describe("useAtivos: ler", () => {
     expect(result.current.dados).not.toBeNull();
   });
 
-  it("rh_oculto: sem atribuições nem nomes (a base manda null) e o ecrã sabe porquê", async () => {
-    m.rpc.mockResolvedValue({ data: { ...LISTA, pessoa: { ativos: [{ ...LISTA.pessoa.ativos[0], atribuicao: null }], atribuicoes_sem_ativo: null, rh_oculto: true } }, error: null });
+  it("rh_oculto: sem nomes (a base manda null) e o ecrã sabe porquê", async () => {
+    m.rpc.mockResolvedValue({ data: { ...LISTA, pessoa: { ativos: [{ ...LISTA.pessoa.ativos[0], atribuicao: null }], rh_oculto: true } }, error: null });
     const { result } = renderHook(() => useAtivos({}), { wrapper: envolver });
     await waitFor(() => expect(result.current.estado).toBe("ok"));
     expect(result.current.dados!.rhOculto).toBe(true);
-    expect(result.current.dados!.atribuicoesSemAtivo).toBeNull();
     expect(result.current.dados!.pessoa[0].atribuicao).toBeNull();
   });
 
@@ -173,31 +214,58 @@ describe("useAtivoMutacoes", () => {
     expect(r).toEqual({ ok: true, id: "novo" });
   });
 
-  it("alterar: rpc_ativo_alterar com id e organização, sem o grupo (é imutável)", async () => {
+  it("alterar: rpc_ativo_alterar com id e organização, sem o grupo (é imutável), e com p_campos_novos para a base escrever a forma, a renda, as datas, a origem da vida e o armazém", async () => {
     m.rpc.mockResolvedValue({ data: { id: "a1" }, error: null });
     const { result } = renderHook(() => useAtivoMutacoes(), { wrapper: envolver });
     await act(async () => { await result.current.alterar("a1", CAMPOS); });
     const [fn, args] = m.rpc.mock.calls[0];
     expect(fn).toBe("rpc_ativo_alterar");
-    expect(args).toEqual({ p_id: "a1", p_organization_id: "org-1", ...CAMPOS });
+    expect(args).toEqual({ p_id: "a1", p_organization_id: "org-1", p_campos_novos: true, ...CAMPOS });
     expect(args).not.toHaveProperty("p_grupo");
   });
 
-  it("desativar, reativar, ligar e desligar chamam as RPCs do desenho com os nomes exatos", async () => {
+  it("desativar e reativar chamam as RPCs do desenho com os nomes exatos", async () => {
     m.rpc.mockResolvedValue({ data: {}, error: null });
     const { result } = renderHook(() => useAtivoMutacoes(), { wrapper: envolver });
     await act(async () => {
       await result.current.desativar("a1", { data: "2026-05-01", motivo: "vendido", nota: null });
       await result.current.reativar("a1");
-      await result.current.ligarPessoa("a1", "pe1");
-      await result.current.desligarPessoa("pe1");
     });
     expect(m.rpc.mock.calls).toEqual([
       ["rpc_ativo_desativar", { p_id: "a1", p_organization_id: "org-1", p_data: "2026-05-01", p_motivo: "vendido", p_nota: null }],
       ["rpc_ativo_reativar", { p_id: "a1", p_organization_id: "org-1" }],
-      ["rpc_ativo_ligar_pessoa", { p_ativo_id: "a1", p_pessoa_equipamento_id: "pe1", p_organization_id: "org-1" }],
-      ["rpc_ativo_desligar_pessoa", { p_pessoa_equipamento_id: "pe1", p_organization_id: "org-1" }],
     ]);
+  });
+
+  it("Ligar e Desligar saíram: a base já só responde ATV25, por isso o hook nem os oferece", () => {
+    const { result } = renderHook(() => useAtivoMutacoes(), { wrapper: envolver });
+    expect(result.current).not.toHaveProperty("ligarPessoa");
+    expect(result.current).not.toHaveProperty("desligarPessoa");
+  });
+
+  it("reativar: o `aviso` da base (a quota ou a renda voltam a contar nos meses passados) passa para o ecrã", async () => {
+    m.rpc.mockResolvedValue({ data: { id: "a1", estado: "ativo", alterado: true, aviso: "Reativar apagou a data de desativação." }, error: null });
+    const { result } = renderHook(() => useAtivoMutacoes(), { wrapper: envolver });
+    let r: unknown;
+    await act(async () => { r = await result.current.reativar("a1"); });
+    expect(r).toEqual({ ok: true, id: "a1", aviso: true });
+  });
+
+  it("reativar um ativo que já estava ativo não traz aviso", async () => {
+    m.rpc.mockResolvedValue({ data: { id: "a1", estado: "ativo", alterado: false }, error: null });
+    const { result } = renderHook(() => useAtivoMutacoes(), { wrapper: envolver });
+    let r: unknown;
+    await act(async () => { r = await result.current.reativar("a1"); });
+    expect(r).toEqual({ ok: true, id: "a1" });
+  });
+
+  it("ATV30 (o armazém já tem outro ativo vivo) volta traduzido e junto do campo do armazém", async () => {
+    m.rpc.mockResolvedValue({ data: null, error: { code: "P0001", message: "ATV30", details: "Este armazém já tem outro ativo ativo." } });
+    const { result } = renderHook(() => useAtivoMutacoes(), { wrapper: envolver });
+    let r: unknown;
+    await act(async () => { r = await result.current.reativar("a1"); });
+    expect(r).toMatchObject({ ok: false, codigo: "ATV30", mensagem: "T:ativos.erro.ATV30" });
+    expect(m.captura).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -216,7 +284,7 @@ describe("useAtivoMutacoes", () => {
     const chamar = async (message: string, details: string) => {
       m.rpc.mockResolvedValue({ data: null, error: { code: "P0001", message, details } });
       let r: unknown;
-      await act(async () => { r = await result.current.ligarPessoa("a1", "pe1"); });
+      await act(async () => { r = await result.current.reativar("a1"); });
       return r;
     };
     expect(await chamar("ATV18", "Esta atribuição já foi devolvida.")).toMatchObject({ codigo: "ATV18", mensagem: "Esta atribuição já foi devolvida." });
@@ -317,7 +385,19 @@ describe("useAtivosOpcoes (os seletores)", () => {
     expect(result.current.opcoes).toEqual({
       equipamentos: [{ id: "c1", nome: "Berbequim", vidaAnos: 5, vidaHoras: null }],
       centrosCusto: [{ id: "cc1", nome: "Obras" }],
+      armazens: [],
+      podeVerArmazens: false,
     });
+  });
+
+  it("os armazéns do Stock só vêm com inventory.view (a base manda a lista e pode_ver_armazens)", async () => {
+    m.rpc.mockResolvedValue({
+      data: { equipamentos: [], centros_custo: [], armazens: [{ id: "w1", codigo: "ARM1", nome: "Armazém Porto" }, { codigo: "sem id" }], pode_ver_armazens: true },
+      error: null,
+    });
+    const { result } = renderHook(() => useAtivosOpcoes(true), { wrapper: envolver });
+    await waitFor(() => expect(result.current.opcoes).not.toBeNull());
+    expect(result.current.opcoes).toMatchObject({ armazens: [{ id: "w1", nome: "Armazém Porto", codigo: "ARM1" }], podeVerArmazens: true });
   });
 
   it("falha: sem opções e com mensagem traduzida", async () => {

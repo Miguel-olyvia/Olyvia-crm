@@ -1,6 +1,6 @@
 /**
  * A etiqueta de estado de relance: cor E texto E ícone (nunca só cor). «Em uso» em verde, «Desativado» em cinza e, quando falta a
- * ligação, «Sem equipamento ligado» ou «Sem pessoa ligada» em âmbar. Cores com contraste suficiente em claro e escuro.
+ * ligação, «Sem equipamento ligado» em âmbar, ou «Livre» (um equipamento de pessoas que ninguém tem) em cinza. Cores com contraste suficiente em claro e escuro.
  */
 import { CircleCheck, CircleSlash, TriangleAlert, type LucideIcon } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";

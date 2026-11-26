@@ -16,41 +16,41 @@ import { hrRpc } from "@/lib/hr/hrDb";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getLocalizedFallback } from "@/utils/friendlyError";
 import {
-  argumentosDaConta, daBaseComTextoDeData, dataDentroDoPermitido, equipamentoDaLinha, erroDeTetoEquipamento, falhaDeEscrita, recusaDeCampo, recusaDeDataFora, SUCESSO_CUSTO, textoDoErro,
-  type LinhaEquipamento, type ResultadoCusto,
+  argumentosDeAtribuir, argumentosDeCorrecao, argumentosDaConta, daBaseComTextoDeData, dataDentroDoPermitido, equipamentoDaLinha, erroDeTetoNovo, falhaDeEscrita, recusaDeCampo, recusaDeDataFora, SUCESSO_CUSTO, textoDoErro,
+  type CorrecaoEquipamento, type LinhaEquipamento, type ResultadoCusto,
 } from "@/lib/hr/custoBase";
-import { normalizarConta, validarConta, contaRepartida, type ContaItem } from "@/components/rh-exemplo/lib/comoConta";
+import { CHAVE_SEM_PERMISSAO_ATIVOS } from "@/lib/hr/errosCusto";
+import { CHAVE_CUSTO_EQUIPAMENTOS, CHAVE_EQUIPAMENTOS_LIVRES, CHAVE_OCUPACOES_ATIVO } from "./chavesEquipamentos";
+import { normalizarConta, validarConta, type ContaItem } from "@/components/rh-exemplo/lib/comoConta";
 import {
-  validarDevolucao, validarEquipamento, type EquipamentoPessoa, type EstadoDevolucao, type TipoEquipamento,
+  validarDevolucao, validarNovoEquipamento, type EquipamentoPessoa, type EstadoDevolucao, type NovoEquipamentoBase,
 } from "@/components/rh-exemplo/lib/equipamentos";
 
-export const CHAVE_CUSTO_EQUIPAMENTOS = "hr-custo-equipamentos";
+export type { NovoEquipamentoBase } from "@/components/rh-exemplo/lib/equipamentos";
+export type { CorrecaoEquipamento } from "@/lib/hr/custoBase";
+
+export { CHAVE_CUSTO_EQUIPAMENTOS };
 const LIMITE_PAGINA = 1000;
 const PAGINAS_MAXIMAS = 20;
-
-export interface NovoEquipamentoBase {
-  pessoaId: string;
-  tipo: TipoEquipamento;
-  descricao: string;
-  valor: number;
-  /** Data de entrega (AAAA-MM-DD). */
-  entrega: string;
-  /** Como conta; sem isto, repartido por 36 meses (o do fluxo 11). */
-  conta?: ContaItem;
-  /** Um uuid gerado UMA vez por submissao do formulario: reenviar o mesmo `idPedido` nao duplica o equipamento. */
-  idPedido?: string;
-}
 
 export interface ResultadoAtribuir extends ResultadoCusto {
   /** O id do equipamento criado; `null` quando falhou. */
   id: string | null;
 }
 
+export interface ResultadoCorrecao extends ResultadoCusto {
+  /** Quantas pessoas tem ocupacoes deste ativo (o custo delas muda em meses passados); `null` se a base nao o disse. */
+  pessoasAfetadas: number | null;
+}
+
 export interface EquipamentosCustoAcoes {
   atribuir: (novo: NovoEquipamentoBase) => Promise<ResultadoAtribuir>;
   /** `equipamento` e o que se devolve (a validacao local compara a data com a entrega). */
   devolver: (equipamento: EquipamentoPessoa, data: string, estado: EstadoDevolucao | string) => Promise<ResultadoCusto>;
+  /** So a farda: numa linha que e um ativo a base recusa (HRA91). */
   alterarConta: (id: string, nova: ContaItem) => Promise<ResultadoCusto>;
+  /** Corrige valor, vida, renda ou datas de um equipamento que e um ativo: pede `ativos.edit`, nunca a permissao das retribuicoes. */
+  corrigir: (ativoId: string, correcao: CorrecaoEquipamento) => Promise<ResultadoCorrecao>;
 }
 
 export interface EquipamentosCustoHook extends EquipamentosCustoAcoes {
@@ -74,32 +74,25 @@ export function useEquipamentosCustoAcoes(): EquipamentosCustoAcoes {
   const organizationId = activeCompany?.id ?? null;
   const queryClient = useQueryClient();
 
-  const refazer = useCallback(
-    () => queryClient.invalidateQueries({ queryKey: [CHAVE_CUSTO_EQUIPAMENTOS, organizationId] }),
-    [organizationId, queryClient],
-  );
+  // O equipamento e um ativo: o que muda no RH muda tambem na lista dos Ativos (ocupacoes, quem o tem), no que esta livre para entregar
+  // e no numero de pessoas que uma correcao afeta (consultas de cache de 5 minutos, que ninguem mais refaz).
+  const refazer = useCallback(async () => {
+    await queryClient.invalidateQueries({ queryKey: [CHAVE_CUSTO_EQUIPAMENTOS, organizationId] });
+    await queryClient.invalidateQueries({ queryKey: [CHAVE_EQUIPAMENTOS_LIVRES, organizationId] });
+    await queryClient.invalidateQueries({ queryKey: [CHAVE_OCUPACOES_ATIVO, organizationId] });
+    await queryClient.invalidateQueries({ queryKey: ["ativos"] });
+  }, [organizationId, queryClient]);
 
   const atribuir = useCallback(
     async (novo: NovoEquipamentoBase): Promise<ResultadoAtribuir> => {
-      const conta = novo.conta ?? contaRepartida();
-      const erro = validarEquipamento({ ...novo, conta });
+      const erro = validarNovoEquipamento(novo);
       if (erro) return { ...recusaDeCampo(erro), id: null };
-      const teto = erroDeTetoEquipamento(novo);
+      const teto = erroDeTetoNovo(novo);
       // A data foi preenchida mas fica fora do intervalo: texto proprio, nao «indica a data de entrega».
       if (teto) return { ...(teto === "semData" ? recusaDeDataFora() : recusaDeCampo(teto)), id: null };
       if (!organizationId) return { ...recusaDeCampo("semPessoa"), id: null };
       try {
-        const { data, error } = await hrRpc("rpc_hr_equipamento_atribuir", {
-          p_pessoa_id: novo.pessoaId,
-          p_organization_id: organizationId,
-          p_tipo: novo.tipo,
-          p_descricao: novo.descricao.trim(),
-          p_valor: novo.valor,
-          p_entrega: novo.entrega,
-          ...argumentosDaConta(conta),
-          // O mesmo id em duplo clique ou reenvio: a base devolve o registo que ja criou em vez de duplicar.
-          p_id: novo.idPedido ?? crypto.randomUUID(),
-        });
+        const { data, error } = await hrRpc("rpc_hr_equipamento_atribuir", argumentosDeAtribuir(novo, organizationId));
         if (error) return { ...daBaseComTextoDeData(falhaDeEscrita(error, "hr-equipamento-atribuir")), id: null };
         await refazer();
         return { ...SUCESSO_CUSTO, id: (data as { id?: string } | null)?.id ?? null };
@@ -157,7 +150,24 @@ export function useEquipamentosCustoAcoes(): EquipamentosCustoAcoes {
     [organizationId, refazer],
   );
 
-  return { atribuir, devolver, alterarConta };
+  const corrigir = useCallback(
+    async (ativoId: string, correcao: CorrecaoEquipamento): Promise<ResultadoCorrecao> => {
+      if (!organizationId || correcao.campos.length === 0) return { ...recusaDeCampo("semData"), pessoasAfetadas: null };
+      try {
+        const { data, error } = await hrRpc("rpc_hr_equipamento_corrigir", argumentosDeCorrecao(organizationId, ativoId, correcao));
+        if (error) return { ...daBaseComTextoDeData(falhaDeEscrita(error, "hr-equipamento-corrigir", CHAVE_SEM_PERMISSAO_ATIVOS)), pessoasAfetadas: null };
+        // O custo de pessoas de meses passados mudou: refaz-se a lista do RH e a dos Ativos.
+        await refazer();
+        const n = (data as { pessoas_afetadas?: unknown } | null)?.pessoas_afetadas;
+        return { ...SUCESSO_CUSTO, pessoasAfetadas: typeof n === "number" ? n : null };
+      } catch (e) {
+        return { ...daBaseComTextoDeData(falhaDeEscrita(e, "hr-equipamento-corrigir", CHAVE_SEM_PERMISSAO_ATIVOS)), pessoasAfetadas: null };
+      }
+    },
+    [organizationId, refazer],
+  );
+
+  return { atribuir, devolver, alterarConta, corrigir };
 }
 
 /** A lista (da organizacao ou de uma pessoa) e as escritas. */
@@ -183,7 +193,7 @@ export function useEquipamentosCusto({ pessoaId = null, enabled = true }: Opcoes
         if (recebidas.length < LIMITE_PAGINA) return linhas.map(equipamentoDaLinha);
       }
       // Todas as paginas vieram cheias: ha mais do que se le. Em vez de mostrar uma lista truncada (e custos errados), falha.
-      captureFlowError(new Error("hr-equipamentos-listar: paginas_maximas"), "hr-equipamentos-listar");
+      captureFlowError(new Error("hr-equipamentos-listar: paginas_maximas"), "ativos-listar");
       throw new Error(getLocalizedFallback("hr.custo.erro.listaDemasiadoLonga"));
     },
   });

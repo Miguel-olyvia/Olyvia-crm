@@ -5,33 +5,67 @@
  */
 import { arredondar, indiceDoMes, mesDaData, type MesIso } from "@/components/rh-exemplo/lib/custo";
 import { somarMesesAoMes } from "@/components/rh-exemplo/lib/comoConta";
+import { contaDoAtivo } from "./amortizacaoAtivo";
+import { rendaDoMes } from "./contaAtivo";
 import type { Ativo } from "./tipos";
 import { depreciacaoMensal, valorAtual, vidaEfetivaMeses } from "./valorAtivo";
 
 export interface TotaisAtivos {
-  /** Os ativos em uso (os desativados ficam de fora). */
+  /** Os ativos em uso, comprados e alugados (os desativados ficam de fora). */
   quantidade: number;
+  /** Quantos dos em uso são comprados: só estes entram na compra, no amortizado e no valor atual. */
+  comprados: number;
   valorCompra: number;
+  /** O que os comprados já amortizaram (compra menos valor atual, dos que têm valor atual). */
+  amortizado: number;
   /** A soma do valor atual dos que depreciam no tempo. */
   valorAtual: number;
   /** Quantos em uso não têm valor atual (só vida em horas, ou modelo sem vida): contam na quantidade e na compra, não aqui. */
   semValorAtual: number;
+  /** Os alugados em uso cujo contrato toca o mês: não entram no valor dos ativos, só na linha das rendas. */
+  alugados: number;
+  /** A soma das rendas mensais desses alugados. */
+  rendaMensal: number;
 }
 
+/**
+ * Os totais de um separador. A compra, o amortizado e o valor atual são só dos COMPRADOS; os alugados (que não têm valor de compra nem
+ * amortização) vão à parte, como rendas por mês, e só os que o contrato toca no mês pedido.
+ */
 export function totaisAtivos(lista: readonly Ativo[], mes: MesIso): TotaisAtivos {
   let valorCompra = 0;
   let atual = 0;
+  let amortizado = 0;
   let semValorAtual = 0;
   let quantidade = 0;
+  let comprados = 0;
+  let alugados = 0;
+  let renda = 0;
   for (const a of lista) {
     if (a.estado !== "ativo") continue;
     quantidade += 1;
-    valorCompra += a.valorCompra;
+    if (a.forma === "alugado") {
+      const conta = contaDoAtivo(a);
+      const doMes = conta?.forma === "alugado" ? rendaDoMes(conta, mes) : 0;
+      if (doMes > 0) {
+        alugados += 1;
+        renda += doMes;
+      }
+      continue;
+    }
+    comprados += 1;
+    valorCompra += a.valorCompra ?? 0;
     const v = valorAtual(a, mes);
     if (v === null) semValorAtual += 1;
-    else atual += v;
+    else {
+      atual += v;
+      amortizado += (a.valorCompra ?? 0) - v;
+    }
   }
-  return { quantidade, valorCompra: arredondar(valorCompra), valorAtual: arredondar(atual), semValorAtual };
+  return {
+    quantidade, comprados, valorCompra: arredondar(valorCompra), amortizado: arredondar(amortizado), valorAtual: arredondar(atual), semValorAtual,
+    alugados, rendaMensal: arredondar(renda),
+  };
 }
 
 export type ChaveEstado = "emUso" | "desativado" | "semEquipamento" | "semPessoa";
@@ -43,14 +77,14 @@ export interface EstadoDoAtivo {
 }
 
 /**
- * A etiqueta de relance: «Em uso», «Desativado» e, quando falta a ligação, «Sem equipamento ligado» (serviço) ou «Sem pessoa ligada»
- * (pessoa). A ligação de uma pessoa lê-se da chave `ligado` da base, que vem mesmo sem permissão do RH (e mesmo que a pessoa já tenha
- * sido apagada): nunca se diz «Sem pessoa ligada» de um ativo que está atribuído.
+ * A etiqueta de relance: «Em uso», «Desativado» e, quando falta a ligação, «Sem equipamento ligado» (serviço) ou «Livre»
+ * (pessoa, sem ninguém que o tenha). A ligação de uma pessoa lê-se da chave `ligado` da base, que vem mesmo sem permissão do RH (e mesmo que a pessoa já tenha
+ * sido apagada): nunca se diz «Livre» de um ativo que está atribuído.
  */
 export function estadoDoAtivo(a: Ativo): EstadoDoAtivo {
   if (a.estado === "desativado") return { chave: "desativado", tom: "neutro" };
   if (a.grupo === "servico" && (!a.catEquipamentoId || !a.catEquipamento)) return { chave: "semEquipamento", tom: "aviso" };
-  if (a.grupo === "pessoa" && !a.ligado) return { chave: "semPessoa", tom: "aviso" };
+  if (a.grupo === "pessoa" && !a.ligado) return { chave: "semPessoa", tom: "neutro" };
   return { chave: "emUso", tom: "bom" };
 }
 
@@ -87,6 +121,7 @@ export function fraseDepreciacao(a: Ativo, mes: MesIso): FraseDepreciacao {
   const atual = valorAtual(a, mes);
   if (vida === null || atual === null) return { chave: motivoSemValor(a) ?? "semVida" };
   if (a.desativadoEm) return { chave: "desativada", fim: mesPt(mesDaData(a.desativadoEm)), valor: atual };
+  if (a.valorCompra === null || a.dataCompra === null) return { chave: "semVida" };
   if (a.valorCompra - a.valorResidual <= 0) return { chave: "semPerda" };
   const inicio = mesDaData(a.dataCompra);
   if (indiceDoMes(mes) < indiceDoMes(inicio)) return { chave: "aindaNaoComeca", inicio: mesPt(inicio) };
@@ -108,7 +143,7 @@ export interface VidaRestante {
 /** A vida que resta e quando acaba de depreciar. `null` quando não há vida em meses ou o ativo está desativado. */
 export function vidaRestante(a: Ativo, mes: MesIso): VidaRestante | null {
   const vida = vidaEfetivaMeses(a);
-  if (vida === null || a.estado === "desativado") return null;
+  if (vida === null || a.estado === "desativado" || a.dataCompra === null) return null;
   const inicio = mesDaData(a.dataCompra);
   const ultimo = somarMesesAoMes(inicio, vida - 1);
   const restantes = indiceDoMes(ultimo) - Math.max(indiceDoMes(mes), indiceDoMes(inicio) - 1);

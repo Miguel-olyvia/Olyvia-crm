@@ -14,6 +14,7 @@ import {
   type FraseConta,
 } from "@/components/rh-exemplo/lib/comoConta";
 import { mesDaData } from "@/components/rh-exemplo/lib/custo";
+import type { AtivoDoEquipamento } from "@/components/rh-exemplo/lib/equipamentos";
 
 export interface EscolhaConta {
   modo: ComoConta;
@@ -35,6 +36,14 @@ export function escolhaDe(modo: ComoConta, conta?: ContaItem): EscolhaConta {
     inicio: conta?.inicio ?? "",
     fim: conta?.fim ?? "",
   };
+}
+
+/**
+ * A escolha com que abre «Alterar como conta» numa linha do RH. Só a farda tem conta própria: numa linha com ativo, `conta_*` ignora-se
+ * (o valor e a conta vêm do ativo) e fica a escolha por omissão.
+ */
+export function escolhaDaLinha(e: { conta: ContaItem; ativo?: AtivoDoEquipamento | null }): EscolhaConta {
+  return e.ativo ? escolhaDe("repartido") : escolhaDe(e.conta.modo, e.conta);
 }
 
 /** Passa a escolha (texto) para a conta; o início em branco segue o mês da data. */
