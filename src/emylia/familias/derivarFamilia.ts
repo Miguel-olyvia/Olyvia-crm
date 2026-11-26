@@ -32,10 +32,12 @@ export function itensDosEscolhidos(
 
 export interface Derivada { nomes: string[]; eixos: EixosCfg; familia: FamiliaCfg; problemas: Problema[] }
 
-/** Tudo o que se mostra, derivado dos itens e da escolha dos eixos (nada se escreve): nomes dos atributos, eixos válidos, família e problemas do núcleo. */
-export function derivarFamilia(itens: readonly ItemEixos[], escolha: EixosCfg | null, outrosIds: readonly string[] = []): Derivada {
+/** Tudo o que se mostra, derivado dos itens e da escolha dos eixos (nada se escreve): nomes dos atributos, eixos válidos, família e problemas do núcleo.
+ * `nomeGuardado`: o nome de uma família que se EDITA. Esse é o nome da família (não se recalcula a partir dos produtos: recalculá-lo mudava-o ao gravar, e podia coincidir com o
+ * de outra família e bloquear o guardar). Numa família nova (ou com o nome vazio) o nome continua a derivar-se dos produtos. */
+export function derivarFamilia(itens: readonly ItemEixos[], escolha: EixosCfg | null, outrosIds: readonly string[] = [], nomeGuardado?: string | null): Derivada {
   const atributos = itens.map((i) => i.atributos), eixos = eixosValidos(escolha, atributos);
-  const refs = itens.map((i) => i.ref), nome = sugerirFamilia(refs).nome.trim() || refs[0]?.n.trim() || "";
+  const refs = itens.map((i) => i.ref), nome = nomeGuardado?.trim() || sugerirFamilia(refs).nome.trim() || refs[0]?.n.trim() || "";
   const { familia } = familiaPorEixos(nome, itens, eixos);
   return { nomes: nomesDosAtributos(atributos), eixos, familia, problemas: problemas(familia, outrosIds) };
 }

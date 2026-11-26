@@ -208,6 +208,23 @@ describe("CatalogoFamilias: editar", () => {
     await waitFor(() => expect(dados.guardarFamilia).toHaveBeenCalledWith("org-1", expect.objectContaining({ id: "f1", versao: F1.versao, produtos: ["a", "b"] })));
   });
 
+  it("grava com o NOME GUARDADO (não o recalcula a partir dos produtos), mesmo que o nome calculado coincida com o de outra família da lista", async () => {
+    // «Velar branca» tem os produtos que sugerem «Lava-loiça Velar», que é o nome de OUTRA família: não pode haver erro de nome repetido nem mudar o nome
+    const OUTRA = { id: "f2", nome: "Lava-loiça Velar", nProdutos: 1, versao: "v" }, PROPRIA = { ...F1, nome: "Velar branca" };
+    dados.lerFamilias.mockResolvedValue({ ok: true, v: [PROPRIA, OUTRA] });
+    dados.lerFamilia.mockResolvedValue({ ok: true, v: { ...LIDA, nome: "Velar branca" } });
+    montar();
+    fireEvent.click(await screen.findByRole("button", { name: "Editar Velar branca" }));
+    expect(await screen.findByRole("status", { name: "Produtos escolhidos" })).toHaveTextContent("2 escolhidos");
+    fireEvent.click(botao("Seguinte"));
+    await waitFor(() => expect(botao("Seguinte")).not.toHaveAttribute("aria-disabled", "true"));
+    fireEvent.click(botao("Seguinte"));
+    expect(screen.queryByText(/Já existe uma família com o identificador/)).toBeNull();
+    expect(botao("Guardar")).not.toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(botao("Guardar"));
+    await waitFor(() => expect(dados.guardarFamilia).toHaveBeenCalledWith("org-1", expect.objectContaining({ id: "f1", nome: "Velar branca", produtos: ["a", "b"] })));
+  });
+
   it("alterada por outra pessoa (CT004): o erro aparece e o assistente fica aberto", async () => {
     dados.lerFamilias.mockResolvedValue({ ok: true, v: [F1] });
     dados.guardarFamilia.mockResolvedValue({ ok: false, erro: "A família foi alterada por outra pessoa: reabra-a.", codigo: "CT004" });
