@@ -4,6 +4,7 @@
 // 20/11 (auditoria 19/11): a página antiga da obra (PaginaObra) saiu. Desde 19/11 as Operações abrem o Estúdio da obra
 // (OperacoesSimples.tsx, estudioObra/); a conversa com o cliente ficou aqui porque o Estúdio a usa.
 import { AtualizarMicrotarefas } from "./estudioObra/AtualizarMicrotarefas";
+import { SinalAoVivo } from "./SinalAoVivo";
 import { useMemo, useState, type ReactNode } from "react";
 import { AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, FileWarning, MapPin, Truck } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -50,7 +51,11 @@ export function ListaObras(ctx: Ctx) {
   ];
   return (
     <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-8 sm:px-8 sm:pt-12">
-      <h1 className="text-3xl font-semibold tracking-tight">Operações</h1>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <h1 className="text-3xl font-semibold tracking-tight">Operações</h1>
+        {/* 26/11 (Rúben: «animações assim, para mostrar mesmo que está live»): os agentes vigiam as obras */}
+        {obras.length > 0 && <p className="flex items-center gap-2 pb-1 text-sm text-muted-foreground"><SinalAoVivo rotulo="Ao vivo: os agentes vigiam as obras" tamanho={16} />Ao vivo · os agentes vigiam as obras</p>}
+      </div>
       {/* 25/11: as microtarefas das obras passam às do Catálogo (só nomes e as novas) */}
       <AtualizarMicrotarefas ctx={ctx} obras={obras} />
       {!obras.length && <p className={cn(NOTA, "mt-8")}>Ainda não há obras. Aparecem quando o cliente assina o contrato.</p>}

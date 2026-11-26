@@ -17,8 +17,13 @@ import { marcaObra } from "../real/sincronizarNegocios";
 import { refNegocio } from "../inventario/ponteNegocios";
 import { carregarEquipasObra } from "../equipa/equipasObra";
 import { voltaDosAgentes } from "./VigiaAgentes";
+import { decisoesAEsperar, horaEmLisboa, propostasDosAgentes } from "./agentes";
+import { ocupacaoDosTecnicos } from "../preparacaoObra";
+import { gravarConhecimento, itensDoConhecimento } from "../conhecimentoOlyvia";
+import { publicarVistas } from "../real/vistaCliente";
 
-export interface ResumoAgentes { org: string; obras: number; aplicadas: number; gravadas: number; adiadas: number; erros: string[] }
+export interface ResumoAgentes { org: string; obras: number; aplicadas: number; gravadas: number; adiadas: number; erros: string[]; /** 26/11: itens gravados na base de conhecimento */ conhecimento?: number;
+  /** 26/11 (recomendação 5): avisos no sino aos gestores */ avisos?: number }
 
 /** Uma volta dos agentes numa organização, com o cliente da base já com a sessão da conta robô. */
 export async function correrAgentesServidor(sb: SupabaseClient, org: string, agora = new Date()): Promise<ResumoAgentes> {
@@ -61,6 +66,7 @@ export async function correrAgentesServidor(sb: SupabaseClient, org: string, ago
   // gravar só as obras que mudaram, e só se a base ainda tem o que se leu
   const mudadas = S.deals.filter((d) => marcaObra(d) !== antes.get(d.id));
   let gravadas = 0, adiadas = 0;
+  const publicar = new Map<number, { id: string }>();
   if (mudadas.length) {
     const naBase = await lerObras(sb, org);
     for (const d of mudadas) {
@@ -68,9 +74,37 @@ export async function correrAgentesServidor(sb: SupabaseClient, org: string, ago
       if (!n || n.docsCrm || n.podeGravar === false) continue;
       const agoraNaBase = naBase?.get(n.id);
       if (naBase && agoraNaBase !== undefined && marcaObra({ obra: obraDaBase(agoraNaBase) } as Negocio) !== daBase.get(n.id)) { adiadas++; continue; }
-      try { await gravarObra(sb, org, n.id, paraObra(d, agora)); gravadas++; }
+      try { await gravarObra(sb, org, n.id, paraObra(d, agora)); gravadas++; publicar.set(d.id, { id: n.id }); }
       catch (e) { erros.push(`Obra ${d.id}: ${(e as Error).message}`); }
     }
   }
-  return { org, obras, aplicadas, gravadas, adiadas, erros };
+  // 26/11 (recomendação 4): o portal do cliente das obras gravadas (um aviso que saiu sozinho chega ao cliente sem ninguém abrir a Olyvia)
+  if (publicar.size) {
+    try { const e = await publicarVistas(sb, org, S, publicar, new Map()); erros.push(...e.map((x) => `Portal ${x}`)); }
+    catch (e) { erros.push(`Portal: ${(e as Error).message}`); }
+  }
+  // 26/11 (recomendação 5): decisões à espera há mais de meio dia avisam no sino quem planeia obras (das 8h às 20h; uma vez por conjunto)
+  let avisos = 0;
+  const h = horaEmLisboa(agora);
+  if (h >= 8 && h < 20) {
+    for (const d of S.deals) {
+      const p = d.obra?.plano;
+      if (!p || d.perdido || (p.estado !== "em curso" && p.estado !== "aprovado")) continue;
+      let L: ReturnType<typeof propostasDosAgentes> = [];
+      try { L = decisoesAEsperar(propostasDosAgentes(d, S, ocupacaoDosTecnicos(S, d.id)), d.obra.agentes, agora); } catch { L = []; }
+      if (!L.length) continue;
+      const chave = `agentes:${d.id}:${L.map((x) => x.id).sort().join(",")}`.slice(0, 300);
+      const titulo = `${d.nome}: ${L.length} ${L.length === 1 ? "decisão à espera" : "decisões à espera"} há mais de meio dia`;
+      const mensagem = `${L.slice(0, 3).map((x) => x.titulo).join(" · ")}${L.length > 3 ? " …" : ""}. Decida no Estúdio da obra, ou diga à Olyvia «o que se passa na obra ${d.id}?».`;
+      try {
+        const { data, error } = await sb.rpc("olyvia_avisar_gestores" as never, { p_org: org, p_numero: d.id, p_chave: chave, p_titulo: titulo, p_mensagem: mensagem } as never);
+        if (error) erros.push(`Aviso ao gestor (${d.id}): ${error.message}`); else avisos += Number(data ?? 0);
+      } catch (e) { erros.push(`Aviso ao gestor (${d.id}): ${(e as Error).message}`); }
+    }
+  }
+  // 26/11: a base de conhecimento da Olyvia (o chat e a voz leem-na de qualquer página), já com o que os agentes fizeram nesta volta
+  let conhecimento = 0;
+  try { conhecimento = await gravarConhecimento(sb, org, itensDoConhecimento(S, agora)); }
+  catch (e) { erros.push(`Base de conhecimento: ${(e as Error).message}`); }
+  return { org, obras, aplicadas, gravadas, adiadas, erros, conhecimento, avisos };
 }

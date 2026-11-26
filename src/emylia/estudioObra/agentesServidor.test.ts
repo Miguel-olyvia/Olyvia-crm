@@ -32,20 +32,23 @@ function preparar() {
 }
 
 beforeEach(() => { estado.obrasNaBase = null; });
+// 26/11: a volta também grava a base de conhecimento (olyvia_conhecimento_gravar)
+const sbFalso = { rpc: async () => ({ data: 1, error: null }) };
 
 describe("os agentes no servidor", () => {
   it("uma volta marca as propostas vistas e grava as obras que mudaram", async () => {
     const { d } = preparar();
-    const r = await correrAgentesServidor({} as never, "org");
+    const r = await correrAgentesServidor(sbFalso as never, "org");
     expect(r.erros).toEqual([]);
     expect(r.obras).toBeGreaterThan(0);
     expect(Object.keys(d.obra.agentes?.vistos ?? {}).length).toBeGreaterThan(0);
     expect(estado.gravadas).toContain(`uuid-${d.id}`);
+    expect(r.conhecimento).toBe(1);
   });
   it("se a obra mudou na base entretanto (o técnico registou), não grava: fica para a volta seguinte", async () => {
     const { d } = preparar();
     estado.obrasNaBase = new Map([[`uuid-${d.id}`, { ...JSON.parse(JSON.stringify(d.obra)), chat: [{ de: "cliente", quem: "x", t: "nova", q: "agora" }] }]]);
-    const r = await correrAgentesServidor({} as never, "org");
+    const r = await correrAgentesServidor(sbFalso as never, "org");
     expect(r.adiadas).toBeGreaterThan(0);
     expect(estado.gravadas).not.toContain(`uuid-${d.id}`);
   });

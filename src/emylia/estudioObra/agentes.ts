@@ -4,7 +4,7 @@
 // o degrau de autonomia escolhido nessa obra, só mostra, sugere, aplica sozinho se ninguém recusar até ao fim do dia útil, ou aplica logo.
 // As decisões são regras (sem IA): só se aplica sozinho o que não mexe no fim da obra, não passa de 2 dias úteis e não põe um técnico em
 // duas obras. O que um agente aplica vai pelas ações do motor (fica no histórico e desfaz-se). Sem SQL: o estado vive em obra.agentes.
-import type { Estado, Negocio } from "../motor";
+import type { Estado, Negocio, Plano } from "../motor";
 import type { ResumoEcNeg } from "../inventario/ponteNegocios";
 import { alertasDaObra, type AcaoAlerta, type Nivel } from "./alertasObra";
 import { estadoVivo, nomeNoPlano, replanear, type Replano } from "./planoVivo";
@@ -41,7 +41,9 @@ export const LIMITE_DIAS_SOZINHO = 2;
 
 /** O que um agente pode aplicar sozinho: só mudanças que não empurram o fim da obra. */
 // 26/11 (etapa 4, ajuste contínuo): «replanear» põe em dia um atraso pequeno ou aproveita a folga, sempre sem empurrar o fim da obra.
-export type AcaoAuto = { k: "fecharBuraco"; ini: number; fim: number } | { k: "passar"; ti: number; tec: string } | { k: "replanear"; adiantar: boolean };
+export type AcaoAuto = { k: "fecharBuraco"; ini: number; fim: number } | { k: "passar"; ti: number; tec: string } | { k: "replanear"; adiantar: boolean }
+  // 26/11 (Rúben aceitou a recomendação 4): só «a equipa vem no próximo dia útil» e «a obra adiantou», com o Cliente no degrau 2 ou 3
+  | { k: "avisarCliente"; texto: string };
 
 export interface Proposta {
   /** estável entre leituras (é por ele que se guarda quando se viu e se foi recusada) */
@@ -70,6 +72,13 @@ export interface EstadoAgentes {
 }
 
 export const degrauDe = (e: EstadoAgentes | undefined, a: AgenteId): Degrau => e?.degraus?.[a] ?? DEGRAUS_DE_ORIGEM[a];
+
+/** 26/11: o dia do plano a que corresponde um rótulo de data («qui, 8 abr»), para saber se o fim andou para trás ou para a frente.
+ *  -1 se não se encontra (então não se diz que adiantou). */
+export function diaDoRotulo(p: Plano, rotulo: string): number {
+  for (let k = 0; k < 800; k++) { try { if (rotuloDia(p, k) === rotulo) return k; } catch { return -1; } }
+  return -1;
+}
 
 /** O agente de cada alerta da obra, pelo prefixo do id. */
 function agenteDoAlerta(id: string): AgenteId {
@@ -129,7 +138,8 @@ export function propostasDosAgentes(d: Negocio, S: Pick<Estado, "deals"> & Parti
     out.push({ id: al.id, agente: ag, nivel: al.nivel, titulo: al.t, sub, acoes: al.acoes, ...(auto ? { auto } : {}), ...(al.ti != null ? { ti: al.ti } : {}) });
   }
 
-  // 2) Cliente: a equipa chega no próximo dia útil e o cliente ainda não foi avisado (fica o rascunho, nunca se envia sozinho)
+  // 2) Cliente: a equipa chega no próximo dia útil e o cliente ainda não foi avisado. 26/11 (recomendação 4, aceite): com o agente do
+  //    Cliente no degrau 2 ou 3 (escolhido pelo gestor depois de testar), este aviso sai sozinho; no degrau 1 (o de origem) é rascunho.
   if (vivo) {
     const amanha = p.dia + 1;
     const chegam = p.tasks.filter((t) => t.dia === amanha && t.tec && estadoVivo(t, p) === "por começar");
@@ -137,7 +147,7 @@ export function propostasDosAgentes(d: Negocio, S: Pick<Estado, "deals"> & Parti
       const texto = `${rotuloDia(p, amanha).replace(/^./, (c) => c.toUpperCase())} a equipa vem para ${chegam.map((t) => nomeNoPlano(p, t).toLowerCase()).join(", ")}.`;
       const jaAvisado = (d.obra.alteracoes ?? []).some((a) => a.avisoCliente === texto);
       if (!jaAvisado) out.push({ id: `cliente-amanha-${amanha}`, agente: "cliente", nivel: "oportunidade", titulo: "Rascunho para o cliente: a equipa vem no próximo dia útil", sub: `«${texto}»`,
-        acoes: [{ rot: "Enviar ao portal", a: { k: "avisarCliente", texto } }] });
+        acoes: [{ rot: "Enviar ao portal", a: { k: "avisarCliente", texto } }], auto: { acao: { k: "avisarCliente", texto }, texto: `Avisar o cliente no portal: «${texto}»` } });
     }
   }
 
@@ -147,9 +157,12 @@ export function propostasDosAgentes(d: Negocio, S: Pick<Estado, "deals"> & Parti
     const avisado = (d.obra.alteracoes ?? []).find((a) => a.cliente)?.fimDepois;
     const sabe = avisado ?? (p.base?.length ? rotuloDia(p, fimDe(p.base) - 1) : null);
     if (sabe && sabe !== fimAgora) {
-      const texto = `A data prevista para acabar a obra passou para ${fimAgora}.`;
-      out.push({ id: `cliente-fim-${fimAgora}`, agente: "cliente", nivel: "atencao", titulo: `O cliente ainda conta com o fim a ${sabe}`,
-        sub: `O plano acaba agora a ${fimAgora}. Rascunho para o portal: «${texto}»`, acoes: [{ rot: "Enviar ao portal", a: { k: "avisarCliente", texto } }] });
+      // 26/11 (recomendação 4): «a obra adiantou» pode sair sozinho (degrau 2 ou 3); o atraso nunca (é sempre o gestor)
+      const adiantou = diaDoRotulo(p, sabe) > fimDe(p.tasks) - 1;
+      const texto = adiantou ? `Boas notícias: a obra adiantou. A data prevista para acabar passou para ${fimAgora}.` : `A data prevista para acabar a obra passou para ${fimAgora}.`;
+      out.push({ id: `cliente-fim-${fimAgora}`, agente: "cliente", nivel: adiantou ? "oportunidade" : "atencao", titulo: `O cliente ainda conta com o fim a ${sabe}`,
+        sub: `O plano acaba agora a ${fimAgora}. Rascunho para o portal: «${texto}»`, acoes: [{ rot: "Enviar ao portal", a: { k: "avisarCliente", texto } }],
+        ...(adiantou ? { auto: { acao: { k: "avisarCliente" as const, texto }, texto: `Avisar o cliente que a obra adiantou: «${texto}»` } } : {}) });
     }
   }
 
@@ -223,6 +236,21 @@ export function modoDa(x: Proposta, e: EstadoAgentes | undefined, agora = new Da
   if (!x.auto || g === 1) return "pede";
   if (pausaDe(e, x.agente, agora)) return "pede";
   return g === 2 ? "prazo" : "ja";
+}
+
+/** 26/11 (recomendação 5, aceite): meio dia. O que pede decisão e foi visto há mais do que isto avisa o gestor no sino. */
+export const MEIO_DIA_MS = 6 * 3600_000;
+/** As propostas que pedem decisão e estão à espera há mais de meio dia (a contar de quando foram vistas). */
+export function decisoesAEsperar(L: Proposta[], e: EstadoAgentes | undefined, agora = new Date(), ms = MEIO_DIA_MS): Proposta[] {
+  return L.filter((x) => {
+    if (modoDa(x, e, agora) !== "pede") return false;
+    const v = e?.vistos?.[x.id];
+    return !!v && agora.getTime() - new Date(v).getTime() >= ms;
+  });
+}
+/** A hora em Portugal (o servidor corre em UTC): os avisos ao gestor só saem das 8h às 20h. */
+export function horaEmLisboa(agora: Date): number {
+  try { return Number(new Intl.DateTimeFormat("pt-PT", { hour: "numeric", hour12: false, timeZone: "Europe/Lisbon" }).format(agora)); } catch { return agora.getHours(); }
 }
 
 /** As propostas a aplicar sozinhas agora: degrau 3, ou degrau 2 com o prazo passado. */

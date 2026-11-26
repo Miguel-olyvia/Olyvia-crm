@@ -42,8 +42,14 @@ async function perguntarIa(corpo: Record<string, unknown>): Promise<RespostaIa |
 }
 import { useGravacao } from "./gravador";
 import { abrirObraPorVoz, decidirPorVoz, obrasParaVoz } from "./estudioObra/agentesPorVoz";
+import { lerEstadoVivo } from "./estadoVivo";
+import { SinalAoVivo } from "./SinalAoVivo";
 /** 26/11 (etapa 6): o que fica em «feito» quando uma decisão por voz não deu. */
 const NAO_DECIDI = "não decidi: ";
+/** 26/11: a organização ativa (a da página dos Negócios, ou a escolhida no seletor de empresa). */
+function orgAtiva(): string | null {
+  try { return lerEstadoVivo()?.org ?? localStorage.getItem("activeCompanyId"); } catch { return null; }
+}
 /** 26/11: quanto tempo fica a resposta no ecrã: 3,2 s nas curtas; nas compridas, o tempo de as ler (até 20 s). */
 export const avisoMs = (msg: string) => Math.min(20_000, Math.max(3200, msg.length * 60));
 
@@ -149,6 +155,7 @@ export function OlyviaComando() {
   const [texto, setTexto] = useState("");
   const [aOuvir, setAOuvir] = useState(false);
   const [aviso, setAviso] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [aPensar, setAPensar] = useState(false);
   const [escutaSempre, setEscutaSempre] = useState<boolean>(() => { try { return localStorage.getItem(CHAVE_ESCUTA) === "1"; } catch { return false; } });
   const [explicarEscuta, setExplicarEscuta] = useState(false);
   /** Ligar ou desligar a escuta; ligar pela 1.ª vez mostra primeiro a explicação. */
@@ -349,6 +356,8 @@ export function OlyviaComando() {
         elementos: ecra.elementos, textoPagina: ecra.texto, conversa: conversaRecente(), feito: feito.slice(-40), hoje: hojeTexto(),
         // 26/11 (etapa 6): o que os agentes veem em todas as obras (só na página dos Negócios, onde os dados estão)
         obras: obrasParaVoz(),
+        // 26/11 (base de conhecimento): a organização ativa, para a função ler a base em qualquer página
+        org: orgAtiva(),
       });
       if (!r) {
         if (ronda === 0) return false;
@@ -410,7 +419,8 @@ export function OlyviaComando() {
     const noNegocio = naPaginaNegocios && !!new URLSearchParams(locRef.current.search).get("negocio");
     const limpa = limparFrase(juntarLetras(normal(frase)).replace(/^(?:ok |o |a )?o ?l[iy]via\s*/, ""));
 
-    const viaIa = (): Promise<boolean> => correrIa(frase, porVoz);
+    // 26/11: enquanto a IA pensa, o painel mostra o sinal «ao vivo» (antes ficava parado, sem dizer nada)
+    const viaIa = async (): Promise<boolean> => { setAPensar(true); try { return await correrIa(frase, porVoz); } finally { setAPensar(false); } };
 
     // 17/11 (Rúben: «no Estúdio falta ele trabalhar também»): no Estúdio, a frase vai primeiro ao projeto (passos, alturas, peças,
     // cores — estudioPorVoz.ts); o que ele não souber fazer segue o caminho de sempre (gravar, navegar, IA)
@@ -859,6 +869,10 @@ export function OlyviaComando() {
               </button>
             )}
           </form>
+          {/* 26/11 (Rúben: «animações assim, para mostrar mesmo que está live»): a ouvir ou a pensar */}
+          {(aPensar || aOuvir) && !pendente && (
+            <p className="flex items-center gap-2 text-sm text-primary"><SinalAoVivo rotulo={aPensar ? "A Olyvia está a pensar" : "A Olyvia está a ouvir"} tamanho={14} intenso />{aPensar ? "A pensar…" : "A ouvir…"}</p>
+          )}
           {pendente ? null : aviso ? (
             <p role="status" className={cn("text-sm", aviso.ok ? "text-primary" : "text-muted-foreground")}>{aviso.msg}</p>
           ) : (

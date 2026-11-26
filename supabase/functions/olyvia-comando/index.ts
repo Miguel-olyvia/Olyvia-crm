@@ -57,6 +57,8 @@ const pedido = z.object({
     })).max(12).default([]),
     feitos: z.array(z.object({ ref: z.string().max(120), texto: z.string().max(200), quem: z.string().max(80), quando: z.string().max(10) })).max(8).default([]),
   })).max(30).default([]),
+  // 26/11 (base de conhecimento): a organização ativa, para ler a base quando a página não tem as obras (qualquer página)
+  org: z.string().uuid().nullable().optional(),
 });
 
 const INSTRUCAO = `És a Olyvia, a assistente por voz de uma aplicação de gestão de obras de remodelação (português de Portugal).
@@ -130,7 +132,12 @@ Regras:
    a ref da proposta de que se fala (pela conversa, pelo nome do técnico, da tarefa ou do agente). "aceitar" só nas propostas com
    «aceitar: sim»; nas outras, diz que essa se decide no cartão e abre a obra. Ambíguo entre duas propostas: pergunta qual. Em 'resposta'
    diz o que vais fazer numa frase («Aceito: passar a Eletricidade para o Luís.»); a app diz se não deu.
-16. Sem «Obras e agentes» e a pessoa pergunta pelas obras ou quer decidir: "navegar" para Operações com "continuar": true.`;
+16. Sem «Obras e agentes» nem «Base de conhecimento» e a pessoa pergunta pelas obras ou quer decidir: "navegar" para Operações com
+   "continuar": true.
+17. «Base de conhecimento» é o que a Olyvia sabe da empresa em qualquer página: o guia de como a plataforma funciona, o resumo do dia
+   das obras, os negócios e as obras (atualizada de minutos a minutos; diz a hora). Responde por ela a perguntas sobre negócios, obras,
+   agentes e como se faz alguma coisa, mesmo que não estejam no ecrã. Para decidir uma proposta fora das Operações, "abrir_obra" com
+   "continuar": true (decides no ecrã seguinte, com as «Obras e agentes»). Nunca inventes o que a base não diz.`;
 
 const ESQUEMA = {
   type: "OBJECT",
@@ -162,7 +169,7 @@ type AcaoIa = { tipo: string; elemento?: number | null; campo?: number | null; o
 type Pedido = z.infer<typeof pedido>;
 
 /** O ecrã escrito para o modelo. */
-export function ecraParaTexto(p: Pedido): string {
+export function ecraParaTexto(p: Pedido, conhecimento: Conhecimento | null = null): string {
   const el = p.elementos.map((e, i) => {
     const extra = [
       e.valor ? `valor: ${e.valor}` : "",
@@ -186,8 +193,38 @@ export function ecraParaTexto(p: Pedido): string {
     p.conversa.length ? `Conversa até aqui:\n${p.conversa.map((c) => `- Pessoa: ${c.eu}\n  Olyvia: ${c.olyvia || "(fez sem dizer nada)"}`).join("\n")}` : "",
     p.feito.length ? `Já fizeste neste pedido:\n${p.feito.map((f) => `- ${f}`).join("\n")}` : "",
     p.obras.length ? `Obras e agentes:\n${p.obras.map(obraParaTexto).join("\n")}` : "",
+    conhecimento ? `Base de conhecimento${conhecimento.hora ? ` (atualizada às ${conhecimento.hora})` : ""}:\n${conhecimento.texto}` : "",
     `Frase: «${p.frase}»`,
   ].filter(Boolean).join("\n\n");
+}
+
+/** 26/11 (base de conhecimento): o que a Olyvia sabe da empresa (tabela olyvia_conhecimento, com a RLS de quem pergunta). */
+export interface Conhecimento { texto: string; hora: string | null; obras: number[] }
+type LinhaConhecimento = { tipo: string; numero: number | null; titulo: string; texto: string; atualizado_em: string };
+/** As palavras da frase que servem para procurar negócios (nomes, números). */
+export function palavrasDaProcura(frase: string): string[] {
+  return [...new Set(frase.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 4 || /^\d{3,}$/.test(w)))].slice(0, 6);
+}
+export function conhecimentoParaTexto(L: LinhaConhecimento[]): Conhecimento | null {
+  if (!L.length) return null;
+  const ordem: Record<string, number> = { resumo: 0, obra: 1, negocio: 2, guia: 3 };
+  const s = [...L].sort((a, b) => (ordem[a.tipo] ?? 9) - (ordem[b.tipo] ?? 9));
+  const recente = s.map((x) => x.atualizado_em).filter((x) => x).sort().pop() ?? null;
+  const hora = recente ? new Date(recente).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" }) : null;
+  return { texto: s.map((x) => `- [${x.tipo}] ${x.titulo}: ${x.texto}`).join("\n").slice(0, 14000), hora, obras: s.filter((x) => x.tipo === "obra" && x.numero != null).map((x) => x.numero!) };
+}
+async function lerConhecimento(sb: ReturnType<typeof createClient>, org: string, frase: string): Promise<Conhecimento | null> {
+  const base = sb.from("olyvia_conhecimento").select("tipo, numero, titulo, texto, atualizado_em").eq("organization_id", org);
+  const { data: fixos } = await base.in("tipo", ["resumo", "obra", "guia"]).limit(60);
+  const palavras = palavrasDaProcura(frase);
+  let negocios: LinhaConhecimento[] = [];
+  if (palavras.length) {
+    const ou = palavras.map((w) => `titulo.ilike.%${w}%`).join(",");
+    const { data } = await sb.from("olyvia_conhecimento").select("tipo, numero, titulo, texto, atualizado_em").eq("organization_id", org).eq("tipo", "negocio").or(ou).limit(12);
+    negocios = (data ?? []) as LinhaConhecimento[];
+  }
+  return conhecimentoParaTexto([...((fixos ?? []) as LinhaConhecimento[]), ...negocios]);
 }
 
 /** 26/11 (etapa 6): uma obra e o que os agentes veem nela, para o modelo. */
@@ -207,7 +244,7 @@ export function esperaBotao(acoes: AcaoIa[], p: Pedido): boolean {
   });
 }
 
-export function acoesValidas(acoes: AcaoIa[], p: Pedido): AcaoIa[] {
+export function acoesValidas(acoes: AcaoIa[], p: Pedido, conhecimento: Conhecimento | null = null): AcaoIa[] {
   const { campos, elementos, destinos } = p;
   return (acoes ?? []).filter((a) => {
     const el = a.elemento != null ? elementos[a.elemento] : undefined;
@@ -224,7 +261,7 @@ export function acoesValidas(acoes: AcaoIa[], p: Pedido): AcaoIa[] {
     // fase vale (a app procura a fase que o tem)
     if (a.tipo === "passo") return (p.passos ?? []).length > 0 && !!a.texto;
     // 26/11 (etapa 6): só obras e propostas que vieram no pedido; aceitar só o que se pode aceitar
-    if (a.tipo === "abrir_obra") return p.obras.some((o) => String(o.id) === String(a.texto ?? "").trim());
+    if (a.tipo === "abrir_obra") return p.obras.some((o) => String(o.id) === String(a.texto ?? "").trim()) || !!conhecimento?.obras.some((n) => String(n) === String(a.texto ?? "").trim());
     if (a.tipo === "decidir") {
       const ref = a.texto ?? "";
       if (a.op === "desfazer") return p.obras.some((o) => o.feitos.some((f) => f.ref === ref));
@@ -261,8 +298,11 @@ serve(async (req) => {
     await recordRateLimitAttempt(supabaseAdmin, RATE_LIMIT.bucket, caller.anewUserId);
 
     try {
-      const r = await gerarJson<{ acoes: AcaoIa[]; resposta: string; continuar?: boolean }>({ modelo: MODELO, partes: [{ text: ecraParaTexto(p) }], esquema: ESQUEMA, instrucaoSistema: INSTRUCAO });
-      const acoes = acoesValidas(r.acoes, p);
+      // 26/11: sem as obras da página (outra página), a base de conhecimento da organização (a RLS de quem pergunta)
+      let conhecimento: Conhecimento | null = null;
+      if (!p.obras.length && p.org) { try { conhecimento = await lerConhecimento(supabase, p.org, p.frase); } catch (e) { console.warn("olyvia-comando: base de conhecimento", e); } }
+      const r = await gerarJson<{ acoes: AcaoIa[]; resposta: string; continuar?: boolean }>({ modelo: MODELO, partes: [{ text: ecraParaTexto(p, conhecimento) }], esquema: ESQUEMA, instrucaoSistema: INSTRUCAO });
+      const acoes = acoesValidas(r.acoes, p, conhecimento);
       // se nada do que a IA quis fazer é possível, não se diz que se fez
       let resposta = (r.acoes ?? []).length > 0 && acoes.length === 0 ? "Isso não consigo fazer a partir deste ecrã." : r.resposta ?? "";
       let continuar = !!r.continuar && acoes.length > 0;

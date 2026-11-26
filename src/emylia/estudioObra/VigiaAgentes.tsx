@@ -11,6 +11,21 @@ import { resumoEcNegocio } from "../inventario/ponteNegocios";
 import { ocupacaoDosTecnicos } from "../preparacaoObra";
 import { aAplicarAgora, agente, propostasDosAgentes } from "./agentes";
 import { registarAgentesVoz } from "./agentesPorVoz";
+import { supabase } from "@/integrations/supabase/client";
+import { lerEstadoVivo } from "../estadoVivo";
+import { gravarConhecimento, itensDoConhecimento } from "../conhecimentoOlyvia";
+
+/** 26/11: de quanto em quanto tempo a página dos Negócios atualiza a base de conhecimento da Olyvia (o servidor faz de 15 em 15 min). */
+export const CONHECIMENTO_MS = 10 * 60_000;
+let ultimoConhecimento = 0;
+/** Grava a base de conhecimento a partir do que a página tem carregado (só quem planeia obras; falhas não incomodam ninguém). */
+export async function atualizarConhecimento(ctx: Pick<Ctx, "S">, agora = Date.now()): Promise<boolean> {
+  const v = lerEstadoVivo();
+  if (!v?.org || !podeNeg(ctx.S.role, "obra.planear") || agora - ultimoConhecimento < CONHECIMENTO_MS) return false;
+  ultimoConhecimento = agora;
+  try { await gravarConhecimento(supabase, v.org, itensDoConhecimento(ctx.S as Parameters<typeof itensDoConhecimento>[0], new Date(agora))); return true; }
+  catch (e) { console.warn("base de conhecimento", e); return false; }
+}
 
 export const VIGIA_INTERVALO_MS = 120000;
 export const VIGIA_PRIMEIRA_MS = 8000;
@@ -48,7 +63,11 @@ export function VigiaAgentes({ ctx }: { ctx: Ctx }) {
   const ativo = podeNeg(ctx.S.role, "obra.planear");
   useEffect(() => {
     if (!ativo) return;
-    const volta = () => { if (typeof document !== "undefined" && document.hidden) return; try { voltaDosAgentes(atual.current); } catch (e) { console.warn("agentes", e); } };
+    const volta = () => {
+      if (typeof document !== "undefined" && document.hidden) return;
+      try { voltaDosAgentes(atual.current); } catch (e) { console.warn("agentes", e); }
+      void atualizarConhecimento(atual.current);
+    };
     const t0 = window.setTimeout(volta, VIGIA_PRIMEIRA_MS);
     const t = window.setInterval(volta, VIGIA_INTERVALO_MS);
     return () => { window.clearTimeout(t0); window.clearInterval(t); };

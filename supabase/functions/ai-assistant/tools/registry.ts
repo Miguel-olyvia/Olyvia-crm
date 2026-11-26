@@ -20,6 +20,7 @@ import * as contracts from "./contracts.ts";
 import * as search from "./search.ts";
 import * as workflowStages from "./workflow_stages.ts";
 import * as stageActions from "./stage_actions.ts";
+import * as conhecimento from "./conhecimento.ts";
 import type { Handler, ToolDef } from "../shared/types.ts";
 
 // Order MUST match the previous TOOLS array exactly:
@@ -232,6 +233,8 @@ export type ToolCategory =
 
 // Always sent, regardless of page: broadly useful on every screen by nature.
 export const CORE_TOOLS: ToolDef[] = [
+  // 26/11: a base de conhecimento da Olyvia responde em qualquer página
+  conhecimento.consultarConhecimentoDef,
   navigation.navigateDef,
   context.getCurrentContextDef,
   search.searchEntitiesDef,
@@ -474,6 +477,7 @@ export function selectToolsForContext(path: unknown): ToolDef[] {
 }
 
 export const HANDLERS: Record<string, Handler> = {
+  ...conhecimento.handlers,
   ...crm.handlers,
   ...deals.handlers,
   ...proposals.handlers,

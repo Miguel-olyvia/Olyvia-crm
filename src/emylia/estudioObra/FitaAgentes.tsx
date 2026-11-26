@@ -2,6 +2,7 @@
 // viu, o que quer fazer e quando; o pulso mostra que está a vigiar; o degrau 2 tem a barra do prazo (aplica-se sozinho ao fim do dia útil
 // se ninguém recusar); o que os agentes fizeram aparece em «Desde a última visita», com desfazer. As regras estão em agentes.ts.
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { SinalAoVivo } from "../SinalAoVivo";
 import { AnimatePresence, motion } from "framer-motion";
 import { Check, ChevronDown, Settings2, Undo2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -103,10 +104,8 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
       <div aria-hidden="true" className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
       {/* o cabeçalho: o pulso, o resumo e a autonomia */}
       <div className="relative flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 sm:px-5">
-        <span className="relative flex h-3 w-3" aria-hidden="true">
-          {!reduzir && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-success opacity-60" />}
-          <span className="relative inline-flex h-3 w-3 rounded-full bg-success" />
-        </span>
+        {/* 26/11 (Rúben: «animações assim, para mostrar mesmo que está live»): o sinal ao vivo dos agentes */}
+        <SinalAoVivo rotulo="Os agentes estão a vigiar a obra" tamanho={18} />
         <div className="min-w-0 flex-1">
           <p className="text-[15px] font-semibold">Os agentes <span className="font-normal text-muted-foreground">· a vigiar a obra</span></p>
           <p className="text-sm text-muted-foreground">

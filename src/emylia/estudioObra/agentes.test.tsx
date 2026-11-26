@@ -6,7 +6,7 @@ import { acoes, type Negocio } from "../motor";
 import type { Ctx } from "../pecas";
 import { EstudioObra } from "./EstudioObra";
 import { obraDeExemplo } from "./exemploObra";
-import { DEGRAUS_DE_ORIGEM, aAplicarAgora, ajusteSozinho, degrauDe, modoDa, pausaDe, prazoDoDegrau2, propostasDosAgentes, type Proposta } from "./agentes";
+import { DEGRAUS_DE_ORIGEM, aAplicarAgora, ajusteSozinho, decisoesAEsperar, degrauDe, horaEmLisboa, modoDa, pausaDe, prazoDoDegrau2, propostasDosAgentes, type Proposta } from "./agentes";
 import { replanear, type Replano } from "./planoVivo";
 import { ocupacaoDosTecnicos } from "../preparacaoObra";
 import { estadoVivo as estadoVivoDe } from "./planoVivo";
@@ -175,6 +175,42 @@ describe("o ajuste contínuo (etapa 4)", () => {
     const f = propostasDosAgentes(d, S, oc).find((y) => y.id === "folga");
     expect(f).toBeTruthy();
     expect(f!.auto).toBeUndefined();
+  });
+});
+
+// 26/11 (Rúben aceitou as recomendações 4 e 5 do plano)
+describe("os avisos sozinhos ao cliente e o aviso ao gestor", () => {
+  it("«a obra adiantou» pode sair sozinho (com o Cliente no degrau 2 ou 3); um atraso nunca", () => {
+    const { S, d } = obraDeExemplo();
+    const p = d.obra.plano!, oc = ocupacaoDosTecnicos(S, d.id);
+    // o cliente conta com um fim 5 dias mais tarde do que o de agora: a obra adiantou
+    p.base = p.tasks.map((t) => ({ dia: t.dia + 5, dur: t.dur, h: t.h, tec: t.tec })) as never;
+    d.obra.alteracoes = []; // sem avisos antes: o cliente conta com o fim do plano aprovado
+    const x = propostasDosAgentes(d, S, oc).find((y) => y.id.startsWith("cliente-fim-"))!;
+    expect(x.sub).toMatch(/Boas notícias: a obra adiantou/);
+    expect(x.auto?.acao.k).toBe("avisarCliente");
+    expect(modoDa(x, undefined)).toBe("pede"); // de origem, o Cliente só sugere (degrau 1)
+    expect(modoDa(x, { degraus: { cliente: 2 } })).toBe("prazo");
+    // aplicar: vai ao portal (fica nas alterações com o aviso), em «feito» sem desfazer, e a proposta sai
+    const A = acoes(S, () => {}, (fn) => fn());
+    A.role("operacoes");
+    expect(A.agentesObra(d.id, { k: "aplicar", pid: x.id, agente: "cliente", nomeAgente: "Cliente", texto: x.auto!.texto, acao: x.auto!.acao, auto: true })).toBe(true);
+    expect(d.obra.alteracoes![0]).toMatchObject({ cliente: true, avisoCliente: expect.stringMatching(/a obra adiantou/) });
+    expect(d.obra.agentes!.feitos![0]).toMatchObject({ agente: "cliente", antes: [] });
+    expect(propostasDosAgentes(d, S, oc).some((y) => y.id === x.id)).toBe(false);
+    // o fim que atrasou: rascunho, nunca sozinho
+    p.base = p.tasks.map((t) => ({ dia: Math.max(0, t.dia - 5), dur: t.dur, h: t.h, tec: t.tec })) as never;
+    d.obra.alteracoes = [];
+    const y = propostasDosAgentes(d, S, oc).find((z) => z.id.startsWith("cliente-fim-"));
+    if (y) expect(y.auto).toBeUndefined();
+  });
+  it("a decisão à espera há mais de meio dia avisa o gestor; antes disso, ou se se aplica sozinha, não", () => {
+    const visto = new Date(2026, 10, 26, 8, 0).toISOString();
+    const L = [P({ id: "a" }), P({ id: "b", auto: { acao: { k: "passar", ti: 0, tec: "x" }, texto: "t" } })];
+    const e = { vistos: { a: visto, b: visto } };
+    expect(decisoesAEsperar(L, e, new Date(2026, 10, 26, 12, 0))).toEqual([]);
+    expect(decisoesAEsperar(L, e, new Date(2026, 10, 26, 14, 30)).map((x) => x.id)).toEqual(["a"]); // a b aplica-se sozinha (degrau 2)
+    expect(horaEmLisboa(new Date(Date.UTC(2026, 10, 26, 9, 0)))).toBe(9);
   });
 });
 

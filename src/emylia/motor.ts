@@ -4761,6 +4761,17 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
         avisar({ msg: "Desfeito", sub: f.texto, kind: "ok" });
         return true;
       }
+      // 26/11 (recomendação 4): o aviso ao cliente no portal. Não se desfaz (já foi): fica em «Desde a última visita» sem desfazer
+      if (op.acao.k === "avisarCliente") {
+        const n0 = d.obra.alteracoes?.length ?? 0;
+        A.avisarClienteObra(id, op.acao.texto);
+        if ((d.obra.alteracoes?.length ?? 0) === n0) return false;
+        const L = (e.feitos ??= []);
+        L.unshift({ id: `f${Date.now().toString(36)}${L.length}`, q: agoraIso, agente: op.agente, texto: op.texto, auto: op.auto, quem: op.auto ? "Olyvia" : quem, antes: [], pid: op.pid });
+        if (L.length > 200) L.length = 200;
+        log(d, `${op.auto ? `Agente ${op.nomeAgente} (sozinho)` : `Agente ${op.nomeAgente}, aceite`}: ${op.texto}`);
+        return true;
+      }
       // aplicar
       const antes = p.tasks.map((t, ti) => ({ ti, dia: t.dia, tec: t.tec, dur: t.dur, ...(t.antecipada ? { antecipada: true as const } : {}) }));
       if (op.acao.k === "fecharBuraco") A.fecharBuraco(id, op.acao.ini, op.acao.fim);
