@@ -32,7 +32,13 @@
 --      «Corrigir equipamento» e «Corrigir datas» só com ativos.edit
 --      (rpc_hr_equipamento_corrigir); aviso fixo da viatura alugada (Frota).
 --    * lib/hr/errosCusto.ts e components/ativos/lib/errosAtivo.ts: traduzir HRA91 e
---      ATV19..ATV33 (o RH também recebe ATV14, ATV15, ATV23, ATV26 e ATV10..ATV21 ao atribuir).
+--      ATV19..ATV33 (o RH também recebe ATV05, ATV07, ATV10..ATV21, ATV23, ATV24, ATV26 e
+--      ATV32 ao atribuir, pela via de ativos_validar e ativos_proximo_codigo).
+--    * MUDANÇAS DE COMPORTAMENTO no RH (o ecrã de hoje aceitava, passa a recusar; dizer ao
+--      dono): (1) entrega daqui a mais de 7 dias em «repartido» ou «uma vez» sem data de
+--      compra: ATV07 (desvio e); (2) «todos os meses» com o fim do contrato num mês já
+--      passado: ATV26 (contrato terminado); (3) «todos os meses» com o mês de início depois
+--      do mês da entrega: ATV26 (entrega antes do início do aluguer, M4).
 --   Ativos (src/components/ativos): comprado/alugado no formulário (p_campos_novos = true),
 --    totais só dos comprados + linha «Rendas», ocupações e parte da estrutura na ficha, sem a
 --    lista «sem ativo» nem Ligar/Desligar (passam a recusar, ATV25), aviso «alugado sem fim,
@@ -46,7 +52,10 @@
 --     `supabase migration list --linked` IMEDIATAMENTE antes: o `db push` aplica TUDO o que
 --     estiver pendente. ATENÇÃO (lido a 26/11): o ramo feature/rh-pessoas tem
 --     20270127000000, 20270128000000 e 20270128100000 que NÃO estão no remoto RH; resolver
---     isso antes (não se empurram por arrasto).
+--     isso antes (não se empurram por arrasto). E o mesmo ramo tem DOIS ficheiros com o
+--     carimbo 20270128200000 (cat_equipamento_armazem, aplicado no remoto, e
+--     olyvia_conhecimento_orcamento_custos): renumerar o segundo no ramo de origem, ou
+--     empurrar a partir de um ramo que só tenha a A1 por cima do que o remoto já tem.
 --  3. Dizer ao dono o impacto na Mudelar DESTA base (3 armazéns): só o índice único novo
 --     warehouses_id_org_key e um trinco de milissegundos em warehouses; nenhum dado dela é
 --     lido nem escrito. Quando chegar à base principal, volta a dizer-se e espera-se.
@@ -505,6 +514,7 @@ DECLARE
   v_residual numeric;
   v_manut    numeric;
   v_renda    numeric;
+  v_wh       uuid;
   v_hoje     date := public.ativos_hoje();
 BEGIN
   IF p_id IS NOT NULL THEN
@@ -646,27 +656,34 @@ BEGIN
   END IF;
   v.centro_custo_id := p_centro_custo_id;
 
-  -- Armazém: só instalações de estrutura; ligar ou mudar exige inventory.view; mesma empresa;
-  -- um só ativo vivo por armazém.
-  IF p_warehouse_id IS NOT NULL THEN
+  -- Armazém: só instalações de estrutura; ligar, mudar OU DESLIGAR exige inventory.view; mesma
+  -- empresa; um só ativo vivo por armazém. Quem não vê o Stock recebe o armazém escondido
+  -- (warehouse_id null em ler/listar) e o ecrã devolve-o null: nesse caso mantém-se a ligação
+  -- de hoje, nunca se apaga sem permissão (revisão de segurança A1, MEDIUM 1).
+  v_wh := p_warehouse_id;
+  IF v_wh IS DISTINCT FROM v_atual.warehouse_id
+     AND NOT coalesce(public.has_anew_permission_in_org(auth.uid(), 'inventory.view', p_org), false) THEN
+    IF v_wh IS NULL THEN
+      v_wh := v_atual.warehouse_id;
+    ELSE
+      RAISE EXCEPTION 'ATV22' USING ERRCODE = 'P0001', DETAIL = 'Para ligar um armazém precisa de ver o Stock.';
+    END IF;
+  END IF;
+  IF v_wh IS NOT NULL THEN
     IF NOT (v.grupo = 'estrutura' AND v.tipo = 'instalacoes') THEN
       RAISE EXCEPTION 'ATV22' USING ERRCODE = 'P0001', DETAIL = 'Só um ativo de estrutura do tipo instalações se liga a um armazém.';
     END IF;
-    IF p_warehouse_id IS DISTINCT FROM v_atual.warehouse_id
-       AND NOT coalesce(public.has_anew_permission_in_org(auth.uid(), 'inventory.view', p_org), false) THEN
-      RAISE EXCEPTION 'ATV22' USING ERRCODE = 'P0001', DETAIL = 'Para ligar um armazém precisa de ver o Stock.';
-    END IF;
     IF NOT EXISTS (SELECT 1 FROM public.warehouses w
-                    WHERE w.id = p_warehouse_id AND w.organization_id = p_org
+                    WHERE w.id = v_wh AND w.organization_id = p_org
                       AND (w.deleted_at IS NULL OR w.id IS NOT DISTINCT FROM v_atual.warehouse_id)) THEN
       RAISE EXCEPTION 'ATV22' USING ERRCODE = 'P0001', DETAIL = 'O armazém não existe nesta organização.';
     END IF;
     IF EXISTS (SELECT 1 FROM public.ativo a
-                WHERE a.warehouse_id = p_warehouse_id AND a.estado = 'ativo' AND a.id IS DISTINCT FROM p_id) THEN
+                WHERE a.warehouse_id = v_wh AND a.estado = 'ativo' AND a.id IS DISTINCT FROM p_id) THEN
       RAISE EXCEPTION 'ATV22' USING ERRCODE = 'P0001', DETAIL = 'Este armazém já está ligado a outro ativo.';
     END IF;
   END IF;
-  v.warehouse_id := p_warehouse_id;
+  v.warehouse_id := v_wh;
 
   RETURN v;
 END;

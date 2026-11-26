@@ -361,4 +361,25 @@ describe(`migration ${nome}`, () => {
     expect(corpo("ativos_validar")).toContain("'inventory.view'");
     expect(corpo("ativos_json")).not.toContain("'warehouse_id'");
   });
+
+  it("armazém: sem inventory.view não se desliga (o null escondido mantém a ligação de hoje)", () => {
+    const c = corpo("ativos_validar");
+    // A permissão confere-se FORA do IF do armazém preenchido: vale também para desligar.
+    const perm = c.indexOf("IF v_wh IS DISTINCT FROM v_atual.warehouse_id AND NOT coalesce(public.has_anew_permission_in_org(auth.uid(), 'inventory.view', p_org), false) THEN");
+    const preenchido = c.indexOf("IF v_wh IS NOT NULL THEN");
+    expect(perm).toBeGreaterThan(-1);
+    expect(preenchido).toBeGreaterThan(perm);
+    expect(c.slice(perm, preenchido)).toContain("IF v_wh IS NULL THEN v_wh := v_atual.warehouse_id; ELSE RAISE EXCEPTION 'ATV22'");
+    expect(c).toContain("v.warehouse_id := v_wh;");
+    expect(c).not.toContain("v.warehouse_id := p_warehouse_id;");
+    expect(c).not.toContain("IF p_warehouse_id IS NOT NULL THEN");
+  });
+
+  it("cabeçalho: códigos que o RH recebe ao atribuir e as recusas novas no RH", () => {
+    for (const cod of ["ATV05", "ATV07", "ATV24", "ATV32"]) {
+      expect(bruto.slice(0, bruto.indexOf("ORDEM DE APLICAÇÃO")), cod).toContain(cod);
+    }
+    expect(bruto).toContain("MUDANÇAS DE COMPORTAMENTO no RH");
+    expect(bruto).toContain("olyvia_conhecimento_orcamento_custos");
+  });
 });
