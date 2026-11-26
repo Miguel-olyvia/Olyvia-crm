@@ -436,3 +436,51 @@ describe("só os atributos do produto, e as regras a atributos que o produto já
     expect(screen.getByText(/Puxador → Tampo.*o produto já não tem este atributo/i)).toBeTruthy();
   });
 });
+
+// 26/11 (palavras do dono: «Pinta é para os que têm hex ou imagem»): o interruptor diz «Aplica / Não aplica» nos atributos de SUPERFÍCIE (aspeto, sem hex nem foto: Tonalidade, Brilho)
+// e «Pinta / Não pinta» nos de cor; um atributo com aspeto E hex (ou foto) conta como de cor.
+describe("o interruptor: «Aplica / Não aplica» na superfície, «Pinta / Não pinta» na cor", () => {
+  const A_TONAL = "aaaaaaaa-0000-4000-a000-0000000000f1";
+  const ATRS = [...ATRIBUTOS, { id: A_TONAL, nome: "Tonalidade" }];
+  it("um atributo de superfície (ids das definições) diz «Aplica» / «Não aplica»; o nome acessível é «Aplica» e o estado vai em aria-checked", () => {
+    const { aoMudar } = montar({ atributos: ATRS, idsSuperficie: [A_BRILHO, A_TONAL], valor: [L(A_BRILHO, "tudo"), L(A_TONAL, "frente", false)] });
+    const um = screen.getByRole("group", { name: "Regra 1" });
+    expect(within(um).getByRole("switch", { name: "Aplica" }).getAttribute("aria-checked")).toBe("true");
+    expect(within(um).getByText("Aplica")).toBeTruthy();
+    const dois = screen.getByRole("group", { name: "Regra 2" });
+    expect(within(dois).getByRole("switch", { name: "Aplica" }).getAttribute("aria-checked")).toBe("false");
+    expect(within(dois).getByText("Não aplica")).toBeTruthy();
+    expect(screen.queryByRole("switch", { name: "Pinta" })).toBeNull();
+    fireEvent.click(within(um).getByRole("switch", { name: "Aplica" }));
+    expect(aoMudar).toHaveBeenLastCalledWith([L(A_BRILHO, "tudo", false), L(A_TONAL, "frente", false)]);
+  });
+  it("os atributos de cor (hex ou foto) ficam com «Pinta» / «Não pinta», na mesma lista", () => {
+    montar({ atributos: ATRS, idsSuperficie: [A_BRILHO, A_TONAL], valor: [L(A_FRENTE, "tudo", false), L(A_BRILHO, "tudo")] });
+    const cor = screen.getByRole("group", { name: "Regra 1" });
+    expect(within(cor).getByRole("switch", { name: "Pinta" }).getAttribute("aria-checked")).toBe("false");
+    expect(within(cor).getByText("Não pinta")).toBeTruthy();
+    expect(within(screen.getByRole("group", { name: "Regra 2" })).getByRole("switch", { name: "Aplica" })).toBeTruthy();
+  });
+  it("um atributo com aspeto E hex ou foto não está nos ids de superfície: conta como de cor e diz «Pinta» (mesmo que a leitura por omissão lhe ponha `daSuperficie`)", () => {
+    const om = [{ id: A_BRILHO, nome: "Brilho", aplicado: true, onde: "dá a superfície a todas as zonas", daSuperficie: true }];
+    montar({ atributos: ATRS, idsSuperficie: [], omissoes: om, valor: [L(A_BRILHO, "tudo"), L(A_BRILHO, "frente", false)] });
+    expect(screen.getAllByRole("switch", { name: "Pinta" })).toHaveLength(2);
+    expect(screen.queryByRole("switch", { name: "Aplica" })).toBeNull();
+    expect(screen.getByText("Brilho", { selector: "strong" }).closest("li")?.querySelector("span")?.textContent).toBe("Brilho: pinta todas as zonas; não pinta em Frente");
+  });
+  it("sem `idsSuperficie` (sem definições) vale o que a leitura por omissão diz: `daSuperficie` dá «Aplica»", () => {
+    const om = [{ id: A_TONAL, nome: "Tonalidade", aplicado: true, onde: "dá a superfície a todas as zonas", daSuperficie: true }];
+    montar({ atributos: ATRS, omissoes: om, valor: [L(A_TONAL, "tudo")] });
+    expect(screen.getByRole("switch", { name: "Aplica" })).toBeTruthy();
+  });
+  it("só leitura: «Brilho → Todas as zonas: não aplica» (superfície) e «Cor da frente → Frente: pinta» (cor)", () => {
+    montar({ atributos: ATRS, idsSuperficie: [A_BRILHO], valor: [L(A_FRENTE, "frente"), L(A_BRILHO, "tudo", false), L(A_BRILHO, "frente")], podeEditar: false, origem: "produto" });
+    expect(screen.getByText(/Cor da frente → Frente: pinta/)).toBeTruthy();
+    expect(screen.getByText(/Brilho → Todas as zonas: não aplica/)).toBeTruthy();
+    expect(screen.getByText(/Brilho → Frente: aplica/)).toBeTruthy();
+  });
+  it("a nota das regras diz que «Não pinta» e «Não aplica» tiram o atributo da zona", () => {
+    montar({ atributos: ATRS, idsSuperficie: [A_BRILHO] });
+    expect(screen.getByText(/«Não pinta» \(«Não aplica», nos atributos de superfície\) tira o atributo dessa zona/)).toBeTruthy();
+  });
+});

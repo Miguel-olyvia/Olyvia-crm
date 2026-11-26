@@ -78,14 +78,18 @@ function zonaProposta(nome: string, ofertadas: readonly ZonaLigacao[]): ZonaLiga
 }
 const plural = (n: number, um: string, varios: string): string => `${n} ${n === 1 ? um : varios}`;
 
-/** Um interruptor «Pinta» / «Não pinta»: o nome acessível é sempre «Pinta» (o estado vai em aria-checked) e o estado também se lê em texto. */
-function Pinta({ ligado, aoMudar }: { ligado: boolean; aoMudar: (v: boolean) => void }) {
+/**
+ * Um interruptor «Pinta» / «Não pinta» (atributos de cor: hex ou foto) ou «Aplica» / «Não aplica» (atributos de superfície: Tonalidade, Brilho): o nome acessível é sempre o do estado ligado
+ * («Pinta» ou «Aplica»; o estado vai em aria-checked) e o estado também se lê em texto.
+ */
+function Pinta({ ligado, aoMudar, superficie = false }: { ligado: boolean; aoMudar: (v: boolean) => void; superficie?: boolean }) {
+  const sim = superficie ? "Aplica" : "Pinta";
   return (
-    <button type="button" role="switch" aria-checked={ligado} aria-label="Pinta" onClick={() => aoMudar(!ligado)} className={cn(BOTAO, "justify-start gap-2 px-3")}>
+    <button type="button" role="switch" aria-checked={ligado} aria-label={sim} onClick={() => aoMudar(!ligado)} className={cn(BOTAO, "justify-start gap-2 px-3")}>
       <span aria-hidden="true" className={cn("relative inline-block h-5 w-9 shrink-0 rounded-full border border-input transition-colors duration-200", ligado ? "bg-primary" : "bg-muted")}>
         <span className={cn("absolute top-0.5 h-3.5 w-3.5 rounded-full bg-background shadow transition-all duration-200", ligado ? "left-[18px]" : "left-0.5")} />
       </span>
-      <span aria-hidden="true">{ligado ? "Pinta" : "Não pinta"}</span>
+      <span aria-hidden="true">{ligado ? sim : `Não ${sim.toLowerCase()}`}</span>
     </button>
   );
 }
@@ -108,9 +112,9 @@ function fraseDasRegras(ls: readonly Ligacao[], superficie: boolean): string {
 }
 
 /** O estado de um atributo no painel: o das regras guardadas ou do rascunho, se as há; senão o que vale por omissão. */
-function estadoDoAtributo(o: LeituraPorOmissao, valor: readonly Ligacao[]): string {
+function estadoDoAtributo(o: LeituraPorOmissao, valor: readonly Ligacao[], superficie: boolean): string {
   const ls = valor.filter((l) => l.atributo === o.id);
-  if (ls.length) return fraseDasRegras(ls, o.daSuperficie === true);
+  if (ls.length) return fraseDasRegras(ls, superficie);
   return o.aplicado ? `aplicado por omissão (${o.onde})` : "desligado por omissão";
 }
 
@@ -127,6 +131,8 @@ export interface PropsRegras {
   origem: OrigemConfig;
   atributos: readonly AtributoLigavel[];
   omissoes?: readonly LeituraPorOmissao[];
+  /** 26/11: os ids dos atributos de SUPERFÍCIE das definições (aspeto, sem hex nem foto: Tonalidade, Brilho; ver idsDeSuperficieDasDefs): o interruptor deles diz «Aplica», o dos outros «Pinta». Ausente: vale `daSuperficie` das `omissoes`. */
+  idsSuperficie?: readonly string[];
   zonas: readonly ZonaGlb[];
   orfas: number; ignoradas: number;
   podeEditar: boolean;
@@ -139,8 +145,10 @@ export interface PropsRegras {
   idErro: string;
 }
 
-export function RegrasDoProduto({ valor, origem, atributos, omissoes, zonas, orfas, ignoradas, podeEditar, aoMudar, semEfeito, aoApontar, idErro }: PropsRegras) {
+export function RegrasDoProduto({ valor, origem, atributos, omissoes, idsSuperficie, zonas, orfas, ignoradas, podeEditar, aoMudar, semEfeito, aoApontar, idErro }: PropsRegras) {
   const id = useId();
+  // de superfície («Aplica»): pelos ids das definições (que já põem de parte quem tem hex ou foto); sem eles, pelo que a leitura por omissão diz
+  const daSuperficie = (a: string): boolean => (idsSuperficie ? idsSuperficie.includes(a) : omissoes?.some((o) => o.id === a && o.daSuperficie === true) === true);
   const [aberto, setAberto] = useState(true);
   // o que «Ligar» e «Desligar» acabaram de fazer, para a região viva o anunciar (o botão não desaparece, mas o leitor de ecrã não vê a lista mudar)
   const [anuncio, setAnuncio] = useState("");
@@ -208,7 +216,7 @@ export function RegrasDoProduto({ valor, origem, atributos, omissoes, zonas, orf
       <div id={`${id}-corpo`} hidden={!aberto} className="grid gap-3">
         <p className={NOTA}>
           {rotuloOrigem ? `Regras ${rotuloOrigem}. ` : "Sem regras guardadas: cada zona é pintada pelo nome do atributo («Cor da frente» pinta a frente, «Cor do corpo» o corpo, «Cor» o resto). "}
-          Uma regra manda sobre o nome; «Não pinta» tira o atributo dessa zona.
+          Uma regra manda sobre o nome; «Não pinta» («Não aplica», nos atributos de superfície) tira o atributo dessa zona.
         </p>
 
         {omissoes && omissoes.length === 0 && <p className={NOTA}>Este produto não tem nenhum atributo que pinte o 3D (cor, foto ou aspeto escolhidos): não há nada para ligar.</p>}
@@ -229,7 +237,7 @@ export function RegrasDoProduto({ valor, origem, atributos, omissoes, zonas, orf
                 };
                 return (
                   <li key={o.id} className="flex flex-wrap items-center gap-2">
-                    <span><strong className="font-medium">{o.nome}</strong>: {estadoDoAtributo(o, valor)}</span>
+                    <span><strong className="font-medium">{o.nome}</strong>: {estadoDoAtributo(o, valor, daSuperficie(o.id))}</span>
                     {/* o MESMO botão muda de rótulo (Ligar ↔ Desligar) em vez de desaparecer: assim o foco do teclado fica nele, e a região viva anuncia o resultado */}
                     {podeEditar && <button type="button" aria-label={`${ativo ? "Desligar" : "Ligar"} ${o.nome}`} onClick={alternar} className={BOTAO}>{ativo ? "Desligar" : "Ligar"}</button>}
                   </li>
@@ -246,7 +254,7 @@ export function RegrasDoProduto({ valor, origem, atributos, omissoes, zonas, orf
           <>
             {valor.length > 0 && (
               <ul className="grid gap-1 text-[15px]">
-                {valor.map((l, i) => <li key={i}>{nomeDe(l.atributo)} → {rotuloDaZonaLigacao(l.zona)}: {l.aplicar ? "pinta" : "não pinta"}{foraDe(l.atributo) ? ` (${SEM_ESTE})` : ""}</li>)}
+                {valor.map((l, i) => <li key={i}>{nomeDe(l.atributo)} → {rotuloDaZonaLigacao(l.zona)}: {daSuperficie(l.atributo) ? (l.aplicar ? "aplica" : "não aplica") : l.aplicar ? "pinta" : "não pinta"}{foraDe(l.atributo) ? ` (${SEM_ESTE})` : ""}</li>)}
               </ul>
             )}
             <p className={NOTA}>Para mudar as regras precisa da permissão de editar produtos.</p>
@@ -285,7 +293,7 @@ export function RegrasDoProduto({ valor, origem, atributos, omissoes, zonas, orf
                         </select>
                       </div>
                       <div className="col-span-2 flex items-center gap-2">
-                        <Pinta ligado={l.aplicar} aoMudar={(v) => mudar(i, { aplicar: v })} />
+                        <Pinta ligado={l.aplicar} superficie={daSuperficie(l.atributo)} aoMudar={(v) => mudar(i, { aplicar: v })} />
                         <button type="button" aria-label={`Remover a regra ${i + 1}`} aria-describedby={idQuem} title="Remover"
                           onClick={() => { setRato(null); setFoco(null); aoMudar(valor.filter((_, j) => j !== i)); botaoAcrescentar.current?.focus(); }} className={cn(BOTAO, "min-w-11 px-0")}>
                           <Trash2 className="h-4 w-4" aria-hidden="true" />

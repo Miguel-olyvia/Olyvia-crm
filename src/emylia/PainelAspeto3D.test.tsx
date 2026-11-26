@@ -68,8 +68,8 @@ const baseCom = (guardadas: Regra[] | null, falhaAoGravar?: string) => {
 beforeEach(() => { base.chamadas = []; baseCom(null); });
 afterEach(cleanup);
 
-const abrir = async (o: { real?: FichaProdutoReal; attrs?: AtributoProduto[] } = {}) => {
-  render(<Modelo3DFicha produto={{ id: PID, n: "Móvel", modelo3d: "movel_lavatorio" }} real={o.real ?? REAL()} anunciar={vi.fn()} nome="Móvel" sub={null} no={null} arvore={[]} attrs={o.attrs ?? COR_E_TONAL} defs={DEFS} />);
+const abrir = async (o: { real?: FichaProdutoReal; attrs?: AtributoProduto[]; defs?: AtributoDef[] } = {}) => {
+  render(<Modelo3DFicha produto={{ id: PID, n: "Móvel", modelo3d: "movel_lavatorio" }} real={o.real ?? REAL()} anunciar={vi.fn()} nome="Móvel" sub={null} no={null} arvore={[]} attrs={o.attrs ?? COR_E_TONAL} defs={o.defs ?? DEFS} />);
   fireEvent.click(screen.getByRole("button", { name: "Ver em 3D" }));
   const c = await screen.findByTestId("canvas3d");
   await waitFor(() => expect(chamadasDe("cat_ler_config_3d")).toHaveLength(1));
@@ -163,11 +163,12 @@ describe("2. uma regra «Todas as zonas» diz o que faz às outras, e a excepç�
     const c = await abrir();
     clicar("frente");
     fireEvent.click(within(painel()).getByRole("button", { name: "Só esta zona é diferente" }));
-    // a excepção está nas regras (Tonalidade · Frente · Não pinta) e a zona di-lo
-    expect(within(painel()).getByText(/Excepção: nesta zona «Tonalidade» não pinta \(a regra «Todas as zonas» manda nas outras\)\./)).toBeTruthy();
+    // a excepção está nas regras (Tonalidade · Frente · Não aplica: é de superfície) e a zona di-lo
+    expect(within(painel()).getByText(/Excepção: nesta zona «Tonalidade» não aplica \(a regra «Todas as zonas» manda nas outras\)\./)).toBeTruthy();
     const excecao = regras().find((g) => (within(g).getByLabelText(/^Zona/) as HTMLSelectElement).value === "frente")!;
     expect((within(excecao).getByLabelText("Atributo") as HTMLSelectElement).value).toBe(A_TONAL);
-    expect(within(excecao).getByRole("switch", { name: "Pinta" }).getAttribute("aria-checked")).toBe("false");
+    expect(within(excecao).getByRole("switch", { name: "Aplica" }).getAttribute("aria-checked")).toBe("false");
+    expect(within(excecao).getByText("Não aplica")).toBeTruthy();
     await waitFor(() => expect(zonasDe(c).frente?.acabamento).toBeUndefined());
     expect(chamadasDe("cat_definir_config_3d")).toHaveLength(0);
     // o corpo continua a vir da regra
@@ -202,7 +203,7 @@ describe("3. escolher a superfície de uma zona", () => {
     expect(chamadasDe("cat_definir_config_3d")).toHaveLength(0);
     const excecao = regras().find((g) => (within(g).getByLabelText("Atributo") as HTMLSelectElement).value === A_TONAL && (within(g).getByLabelText(/^Zona/) as HTMLSelectElement).value === "frente");
     expect(excecao).toBeTruthy();
-    expect(within(excecao!).getByRole("switch", { name: "Pinta" }).getAttribute("aria-checked")).toBe("false");
+    expect(within(excecao!).getByRole("switch", { name: "Aplica" }).getAttribute("aria-checked")).toBe("false");
     expect(screen.getByText("Frente: superfície Brilho")).toBeTruthy();
   });
   it("«Sem cor» não muda a superfície mostrada nem o seu «Porquê»", async () => {
@@ -419,14 +420,41 @@ describe("8. o 3D acompanha a regra apontada", () => {
 });
 
 describe("8b. o realce acompanha a edição da regra apontada", () => {
-  it("desligar «Pinta» na regra focada tira logo o realce (não fica a realçar o que a regra já não pinta)", async () => {
+  it("desligar «Aplica» (a Tonalidade é de superfície) na regra focada tira logo o realce (não fica a realçar o que a regra já não aplica)", async () => {
     baseCom([{ atributo: A_TONAL, zona: "tudo", aplicar: true }]);
     const c = await abrir();
     const regra = regras()[0];
     fireEvent.focus(within(regra).getByLabelText("Atributo"));
     expect(c.getAttribute("data-realce")).not.toBe("");
-    fireEvent.click(within(regra).getByRole("switch", { name: "Pinta" }));
+    fireEvent.click(within(regra).getByRole("switch", { name: "Aplica" }));
     expect(c.getAttribute("data-realce")).toBe("");
+  });
+});
+
+// 26/11 (palavras do dono: «Pinta é para os que têm hex ou imagem»): o interruptor das regras diz «Aplica / Não aplica» nos atributos de SUPERFÍCIE (Tonalidade, Brilho: aspeto, sem hex nem foto)
+// e «Pinta / Não pinta» nos de cor; um atributo com aspeto E hex (ou foto) conta como de cor.
+describe("8c. o interruptor das regras: «Aplica» na superfície, «Pinta» na cor", () => {
+  const regraDe = (atributo: string) => regras().find((g) => (within(g).getByLabelText("Atributo") as HTMLSelectElement).value === atributo)!;
+  it("Tonalidade (superfície) diz «Aplica / Não aplica»; Cor do corpo (hex) diz «Pinta / Não pinta»", async () => {
+    baseCom([{ atributo: A_CORPO, zona: "tudo", aplicar: true }, { atributo: A_TONAL, zona: "tudo", aplicar: true }]);
+    await abrir();
+    expect(within(regraDe(A_CORPO)).getByRole("switch", { name: "Pinta" }).getAttribute("aria-checked")).toBe("true");
+    expect(within(regraDe(A_CORPO)).getByText("Pinta")).toBeTruthy();
+    const tonal = regraDe(A_TONAL);
+    expect(within(tonal).getByRole("switch", { name: "Aplica" }).getAttribute("aria-checked")).toBe("true");
+    expect(within(tonal).getByText("Aplica")).toBeTruthy();
+    expect(within(tonal).queryByRole("switch", { name: "Pinta" })).toBeNull();
+    fireEvent.click(within(tonal).getByRole("switch", { name: "Aplica" }));
+    expect(within(regraDe(A_TONAL)).getByText("Não aplica")).toBeTruthy();
+    expect(within(regraDe(A_CORPO)).getByText("Pinta")).toBeTruthy(); // a cor não mudou
+  });
+  it("um atributo com aspeto E hex (aqui um «Brilho» com cor) conta como de cor: «Pinta»", async () => {
+    const brilhoComCor: AtributoDef = { ...superficie(A_BRILHO, "Brilho", "polida"), temHex: true, opcoes: [{ id: `${A_BRILHO}-1`, valor: "Brilho", nome: "Brilho escolhida", hex: "#abcdef", ordem: 1, superficie: "polida" }] };
+    baseCom([{ atributo: A_TONAL, zona: "tudo", aplicar: true }, { atributo: A_BRILHO, zona: "tudo", aplicar: true }]);
+    await abrir({ attrs: doProduto(A_CORPO, A_TONAL, A_BRILHO), defs: [MEDIDA, DEFS[1], DEFS[2], DEFS[3], brilhoComCor] });
+    expect(within(regraDe(A_BRILHO)).getByRole("switch", { name: "Pinta" })).toBeTruthy();
+    expect(within(regraDe(A_BRILHO)).queryByRole("switch", { name: "Aplica" })).toBeNull();
+    expect(within(regraDe(A_TONAL)).getByRole("switch", { name: "Aplica" })).toBeTruthy();
   });
 });
 
