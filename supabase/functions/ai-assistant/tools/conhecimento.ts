@@ -76,7 +76,7 @@ export const relatorioOlyviaDef: ToolDef = {
   },
 };
 
-const FMT_EUR = new Intl.NumberFormat("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: "always" } as Intl.NumberFormatOptions);
+const FMT_EUR = new Intl.NumberFormat("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: "always" } as unknown as Intl.NumberFormatOptions);
 const eurTxt = (n: number) => `${FMT_EUR.format(n)} €`;
 const FASES_NEG = ["Por contactar", "Contacto", "Visita", "Negócio", "Financeiro", "Obra"];
 // deno-lint-ignore no-explicit-any

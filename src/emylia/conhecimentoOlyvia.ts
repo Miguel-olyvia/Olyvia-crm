@@ -43,7 +43,7 @@ export const GUIA: ItemConhecimento[] = [
 ];
 
 // sempre com o separador dos milhares (o pt-PT só agrupa a partir de 5 algarismos)
-const FMT_EUR = new Intl.NumberFormat("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: "always" } as Intl.NumberFormatOptions);
+const FMT_EUR = new Intl.NumberFormat("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: "always" } as unknown as Intl.NumberFormatOptions);
 const eur = (n: number) => `${FMT_EUR.format(n)} €`;
 const tecNome = (id: string | null | undefined) => TECS.find((x) => x.id === id)?.n ?? "por atribuir";
 

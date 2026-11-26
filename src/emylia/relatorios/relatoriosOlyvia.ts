@@ -17,7 +17,7 @@ export interface DocRelatorio { tipo: TipoRelatorio; titulo: string; subtitulo: 
 
 export const FASES_NEGOCIO = ["Por contactar", "Contacto", "Visita", "Negócio", "Financeiro", "Obra"];
 // sempre com o separador dos milhares (o pt-PT só agrupa a partir de 5 algarismos: «8784,10» ao lado de «10 312,45»)
-const FMT_EUR = new Intl.NumberFormat("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: "always" } as Intl.NumberFormatOptions);
+const FMT_EUR = new Intl.NumberFormat("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2, useGrouping: "always" } as unknown as Intl.NumberFormatOptions);
 export const eur = (n: number | null | undefined) => (n == null || !Number.isFinite(n) ? "—" : `${FMT_EUR.format(n)} €`);
 const pct = (n: number | null | undefined) => (n == null || !Number.isFinite(n) ? "—" : `${(Math.round(n * 1000) / 10).toLocaleString("pt-PT")}%`);
 const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : 0);
