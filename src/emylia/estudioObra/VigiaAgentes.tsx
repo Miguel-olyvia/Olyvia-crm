@@ -10,6 +10,7 @@ import { lerInventario } from "../inventario/loja";
 import { resumoEcNegocio } from "../inventario/ponteNegocios";
 import { ocupacaoDosTecnicos } from "../preparacaoObra";
 import { aAplicarAgora, agente, propostasDosAgentes } from "./agentes";
+import { registarAgentesVoz } from "./agentesPorVoz";
 
 export const VIGIA_INTERVALO_MS = 120000;
 export const VIGIA_PRIMEIRA_MS = 8000;
@@ -42,6 +43,8 @@ export function voltaDosAgentes(ctx: Pick<Ctx, "S" | "A" | "run">, agora = new D
 export function VigiaAgentes({ ctx }: { ctx: Ctx }) {
   const atual = useRef(ctx);
   atual.current = ctx;
+  // 26/11 (etapa 6): a voz (OlyviaComando) pergunta daqui o que os agentes veem e decide por quem fala
+  useEffect(() => registarAgentesVoz(atual), []);
   const ativo = podeNeg(ctx.S.role, "obra.planear");
   useEffect(() => {
     if (!ativo) return;

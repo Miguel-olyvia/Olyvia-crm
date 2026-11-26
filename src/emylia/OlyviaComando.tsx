@@ -30,6 +30,8 @@ function botaoVisivel(rx: RegExp): HTMLButtonElement | null {
 
 type AcaoIa = { tipo: string; elemento?: number | null; campo?: number | null; opcao?: number | null; n?: number | null; texto?: string | null; fase?: string | null };
 interface RespostaIa { acoes: AcaoIa[]; resposta: string; continuar: boolean }
+// 26/11 (etapa 6, falar com a obra): "decidir" leva a referência da proposta em 'texto' e o que fazer em 'op'
+type AcaoIaOp = AcaoIa & { op?: string | null };
 /** 17/11: a frase vai à IA (função olyvia-comando) com o ecrã. 18/11: o ecrã inteiro, a conversa e o que já se fez. Null se não houver resposta. */
 async function perguntarIa(corpo: Record<string, unknown>): Promise<RespostaIa | null> {
   try {
@@ -39,6 +41,9 @@ async function perguntarIa(corpo: Record<string, unknown>): Promise<RespostaIa |
   } catch { return null; }
 }
 import { useGravacao } from "./gravador";
+import { abrirObraPorVoz, decidirPorVoz, obrasParaVoz } from "./estudioObra/agentesPorVoz";
+/** 26/11 (etapa 6): o que fica em «feito» quando uma decisão por voz não deu. */
+const NAO_DECIDI = "não decidi: ";
 
 /** Os passos curtos e sem dúvida: agem logo, sem esperar que se pare de falar. */
 const PASSOS_JA = new Set(["fim", "proximo", "anterior", "inicio"]);
@@ -288,6 +293,17 @@ export function OlyviaComando() {
       else if (a.tipo === "pesquisar") {
         if (!naNeg && escreverNaPesquisa(t)) feito.push(`procurei «${t}»`);
         else { if (!naNeg) navigate("/negocios"); setTimeout(() => avisa(EV_PESQUISA, t), naNeg ? 0 : 80); feito.push(`procurei «${t}» nos negócios`); }
+      } else if (a.tipo === "decidir") {
+        // 26/11 (etapa 6): «aceita a do Luís», «recusa essa», «desfaz o que o agente fez» — pelas ações da fita (desfazem-se)
+        const op = (a as AcaoIaOp).op;
+        if (op === "aceitar" || op === "recusar" || op === "desfazer") {
+          const r = decidirPorVoz(t, op);
+          feito.push(r.ok ? `decidi (${op}): ${r.texto}` : `${NAO_DECIDI}${r.texto}`);
+        }
+      } else if (a.tipo === "abrir_obra") {
+        const id = Number(t);
+        if (id && !abrirObraPorVoz(id)) navigate(`/negocios?vista=operacoes&obra=${id}`);
+        if (id) { feito.push(`abri a obra ${id}`); await esperar(400); }
       } else if (a.tipo === "abrir_negocio") {
         const fase = a.fase ? extrairFase(`fase de ${normal(a.fase)}`).fase : null;
         if (!naNeg) navigate("/negocios");
@@ -329,6 +345,8 @@ export function OlyviaComando() {
         frase: frase.slice(0, 1500), pagina: (loc.pathname + loc.search).slice(0, 300), passos: lista.lista.slice(0, 40), destinos: DESTINOS.map((d) => d.nome),
         campos: campos.map((c) => ({ rotulo: c.rotulo.slice(0, 200), tipo: c.tipo, ...(c.opcoes ? { opcoes: c.opcoes.map((o) => o.texto.slice(0, 120)) } : {}), ...(c.valor ? { valor: c.valor.slice(0, 300) } : {}) })),
         elementos: ecra.elementos, textoPagina: ecra.texto, conversa: conversaRecente(), feito: feito.slice(-40), hoje: hojeTexto(),
+        // 26/11 (etapa 6): o que os agentes veem em todas as obras (só na página dos Negócios, onde os dados estão)
+        obras: obrasParaVoz(),
       });
       if (!r) {
         if (ronda === 0) return false;
@@ -358,6 +376,9 @@ export function OlyviaComando() {
         });
         return true;
       }
+      // 26/11 (etapa 6): uma decisão que não deu (a proposta já mudou, sem permissão): diz-se porquê, nunca «feito»
+      const naoDecidiu = feito.find((x) => x.startsWith(NAO_DECIDI));
+      if (naoDecidiu) { terminar(frase, naoDecidiu.slice(NAO_DECIDI.length), false, porVoz); return true; }
       const falhou = feito.find((x) => x.startsWith(NAO_ENCONTREI));
       if (falhou) { terminar(frase, `Não encontrei esse passo${falhou.slice(NAO_ENCONTREI.length)}.`, false, porVoz); return true; }
       if (!r.continuar) {

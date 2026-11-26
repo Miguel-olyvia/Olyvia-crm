@@ -45,6 +45,18 @@ const pedido = z.object({
   conversa: z.array(z.object({ eu: z.string().max(1500), olyvia: z.string().max(600) })).max(8).default([]),
   feito: z.array(z.string().max(240)).max(40).default([]),
   hoje: z.string().max(60).default(""),
+  // 26/11 (plano «Obra Viva», etapa 6: falar com a obra): o que os agentes veem em cada obra em curso ou aprovada, e o que fizeram hoje
+  obras: z.array(z.object({
+    id: z.number().int(),
+    nome: z.string().max(80),
+    estado: z.string().max(30),
+    fim: z.string().max(60).nullable().optional(),
+    propostas: z.array(z.object({
+      ref: z.string().max(120), agente: z.string().max(30), titulo: z.string().max(200), sub: z.string().max(300),
+      modo: z.enum(["ver", "pede", "prazo", "ja"]), aceitar: z.boolean(),
+    })).max(12).default([]),
+    feitos: z.array(z.object({ ref: z.string().max(120), texto: z.string().max(200), quem: z.string().max(80), quando: z.string().max(10) })).max(8).default([]),
+  })).max(30).default([]),
 });
 
 const INSTRUCAO = `És a Olyvia, a assistente por voz de uma aplicação de gestão de obras de remodelação (português de Portugal).
@@ -75,6 +87,9 @@ Ações, pela ordem em que se fazem:
 - "pesquisar": procurar 'texto' (um nome, um telefone) na pesquisa da página. "limpar": limpar a pesquisa.
 - "scroll": 'texto' = "baixo", "cima", "topo" ou "fundo".
 - "voltar": a página anterior.
+- "abrir_obra": abrir o Estúdio da obra número 'texto' (o número do negócio, das «Obras e agentes»).
+- "decidir": decidir uma proposta dos agentes: 'texto' = a referência exata (ref) e 'op' = "aceitar", "recusar" ou "desfazer"
+  (desfazer leva a ref de uma coisa que os agentes fizeram hoje).
 
 Regras:
 1. Só usas elementos, perguntas, passos e páginas que estão nas listas, pelos números dados. Nunca inventes números nem nomes.
@@ -102,7 +117,19 @@ Regras:
    negócio são páginas diferentes, e os passos (Proposta, Contrato, …) só existem dentro do negócio. "passo" só com passos na lista.
    Em 'resposta' nunca digas que fizeste o que ainda não está feito: num passo intermédio deixa-a vazia.
 12. Os passos da lista são só os da FASE aberta do negócio. Um passo de outra fase (por exemplo, a Proposta é da fase Negócio)
-   pode pedir-se na mesma com "passo" (a app muda de fase sozinha).`;
+   pode pedir-se na mesma com "passo" (a app muda de fase sozinha).
+13. «Obras e agentes» é o que os agentes da Olyvia veem em cada obra (Plano, Equipa, Materiais, Cliente, Margem, Aprendizagem): as
+   propostas (com o modo: «pede» espera decisão, «prazo» aplica-se sozinha ao fim do dia se ninguém recusar, «ja» aplica-se já, «ver» só
+   observa) e o que fizeram hoje. Perguntas sobre uma obra («o que se passa na 1048?», «como vai a obra do Tiago?»): responde com o que
+   pede decisão primeiro e o que os agentes fizeram hoje, e abre a obra ("abrir_obra") se não está aberta. A obra diz-se pelo número
+   ou pelo nome do cliente.
+14. «Resumo do dia», «como estão as obras», «o que há para decidir»: responde com as obras que pedem decisões (quantas e a mais
+   importante de cada), o que os agentes fizeram hoje e as obras sem nada. Aqui a 'resposta' pode ter até quatro frases. Sem ações.
+15. Decisões por voz («aceita a do Luís», «sim, aplica essa», «recusa a da folga», «desfaz o que o agente fez na 1048»): "decidir" com
+   a ref da proposta de que se fala (pela conversa, pelo nome do técnico, da tarefa ou do agente). "aceitar" só nas propostas com
+   «aceitar: sim»; nas outras, diz que essa se decide no cartão e abre a obra. Ambíguo entre duas propostas: pergunta qual. Em 'resposta'
+   diz o que vais fazer numa frase («Aceito: passar a Eletricidade para o Luís.»); a app diz se não deu.
+16. Sem «Obras e agentes» e a pessoa pergunta pelas obras ou quer decidir: "navegar" para Operações com "continuar": true.`;
 
 const ESQUEMA = {
   type: "OBJECT",
@@ -112,13 +139,14 @@ const ESQUEMA = {
       items: {
         type: "OBJECT",
         properties: {
-          tipo: { type: "STRING", enum: ["clicar", "escrever", "escolher", "opcao", "contador", "texto", "navegar", "passo", "scroll", "pesquisar", "limpar", "abrir_negocio", "voltar"] },
+          tipo: { type: "STRING", enum: ["clicar", "escrever", "escolher", "opcao", "contador", "texto", "navegar", "passo", "scroll", "pesquisar", "limpar", "abrir_negocio", "voltar", "abrir_obra", "decidir"] },
           elemento: { type: "INTEGER", nullable: true },
           campo: { type: "INTEGER", nullable: true },
           opcao: { type: "INTEGER", nullable: true },
           n: { type: "NUMBER", nullable: true },
           texto: { type: "STRING", nullable: true },
           fase: { type: "STRING", nullable: true },
+          op: { type: "STRING", nullable: true },
         },
         required: ["tipo"],
       },
@@ -129,7 +157,7 @@ const ESQUEMA = {
   required: ["acoes", "resposta", "continuar"],
 };
 
-type AcaoIa = { tipo: string; elemento?: number | null; campo?: number | null; opcao?: number | null; n?: number | null; texto?: string | null; fase?: string | null };
+type AcaoIa = { tipo: string; elemento?: number | null; campo?: number | null; opcao?: number | null; n?: number | null; texto?: string | null; fase?: string | null; op?: string | null };
 type Pedido = z.infer<typeof pedido>;
 
 /** O ecrã escrito para o modelo. */
@@ -156,8 +184,16 @@ export function ecraParaTexto(p: Pedido): string {
     p.destinos.length ? `Páginas principais: ${p.destinos.join("; ")}` : "",
     p.conversa.length ? `Conversa até aqui:\n${p.conversa.map((c) => `- Pessoa: ${c.eu}\n  Olyvia: ${c.olyvia || "(fez sem dizer nada)"}`).join("\n")}` : "",
     p.feito.length ? `Já fizeste neste pedido:\n${p.feito.map((f) => `- ${f}`).join("\n")}` : "",
+    p.obras.length ? `Obras e agentes:\n${p.obras.map(obraParaTexto).join("\n")}` : "",
     `Frase: «${p.frase}»`,
   ].filter(Boolean).join("\n\n");
+}
+
+/** 26/11 (etapa 6): uma obra e o que os agentes veem nela, para o modelo. */
+export function obraParaTexto(o: Pedido["obras"][number]): string {
+  const P = o.propostas.map((x) => `  - [${x.ref}] ${x.agente}, ${x.modo}${x.aceitar ? ", aceitar: sim" : ""}: ${x.titulo}${x.sub ? `. ${x.sub}` : ""}`);
+  const F = o.feitos.map((x) => `  - feito [${x.ref}] ${x.quando}, ${x.quem}: ${x.texto}`);
+  return [`Obra ${o.id} · ${o.nome} · ${o.estado}${o.fim ? ` · acaba a ${o.fim}` : ""}${P.length || F.length ? "" : " · nada a decidir"}`, ...P, ...F].join("\n");
 }
 
 /** Só passa o que existe no ecrã: um número fora da lista ou uma página inventada não chega ao browser. */
@@ -186,6 +222,14 @@ export function acoesValidas(acoes: AcaoIa[], p: Pedido): AcaoIa[] {
     // os passos só existem com um negócio aberto (18/11: na página da obra pedia «Proposta» e não acontecia nada); um passo de outra
     // fase vale (a app procura a fase que o tem)
     if (a.tipo === "passo") return (p.passos ?? []).length > 0 && !!a.texto;
+    // 26/11 (etapa 6): só obras e propostas que vieram no pedido; aceitar só o que se pode aceitar
+    if (a.tipo === "abrir_obra") return p.obras.some((o) => String(o.id) === String(a.texto ?? "").trim());
+    if (a.tipo === "decidir") {
+      const ref = a.texto ?? "";
+      if (a.op === "desfazer") return p.obras.some((o) => o.feitos.some((f) => f.ref === ref));
+      const x = p.obras.flatMap((o) => o.propostas).find((y) => y.ref === ref);
+      return !!x && (a.op === "recusar" || (a.op === "aceitar" && x.aceitar));
+    }
     return !!a.texto;
   });
 }
