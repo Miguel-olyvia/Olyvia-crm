@@ -83,15 +83,15 @@ describe("a base sem a função, sem permissão ou com erro: o ecrã não rebent
     await abrir();
     await waitFor(() => expect(chamadasDe("cat_ler_config_3d")).toHaveLength(1));
     expect(screen.getByText(/a gravação vem na próxima fase/i)).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Guardar neste produto|Guardar ligações/ })).toBeNull();
-    expect(screen.queryByRole("heading", { name: "Ligações" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Guardar neste produto|Guardar aspeto 3D|Guardar ligações/ })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Regras do produto" })).toBeNull();
     expect(screen.queryByText(/Não foi possível ler a configuração/)).toBeNull();
   });
   it("sem permissão para ler (CT001): fica escondido, sem erro", async () => {
     base.responder = () => ({ data: null, error: { code: "CT001", message: "Sem permissão." } });
     await abrir();
     await waitFor(() => expect(chamadasDe("cat_ler_config_3d")).toHaveLength(1));
-    expect(screen.queryByRole("heading", { name: "Ligações" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Regras do produto" })).toBeNull();
     expect(screen.queryByText(/Não foi possível ler a configuração/)).toBeNull();
   });
   it("outro erro: uma frase em português a dizer que o 3D usa a regra automática (nunca o erro em bruto)", async () => {
@@ -127,7 +127,7 @@ describe("guardar os eixos", () => {
       : f === "cat_definir_config_3d" ? { data: { alvo: "produto", id: PID }, error: null } : { data: null, error: null });
     await abrir();
     await waitFor(() => expect(chamadasDe("cat_ler_config_3d")).toHaveLength(1));
-    await screen.findByRole("heading", { name: "Ligações" });
+    await screen.findByRole("heading", { name: "Regras do produto" });
     fireEvent.change(seletor("Largura"), { target: { value: "comprimento" } });
     fireEvent.click(screen.getByRole("button", { name: "Guardar neste produto" }));
     await waitFor(() => expect(chamadasDe("cat_definir_config_3d")).toHaveLength(1));
@@ -145,7 +145,7 @@ describe("guardar os eixos", () => {
     base.responder = (f) => (f === "cat_ler_config_3d" ? { data: comEixos, error: null } : { data: null, error: null });
     const c = await abrir({ real: REAL({ podeEditar: false }) });
     await waitFor(() => expect(c.getAttribute("data-dim")).toBe("160x40x25"));
-    expect(screen.queryByRole("button", { name: /Guardar neste produto|Voltar a herdar|Guardar ligações/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Guardar neste produto|Voltar a herdar|Guardar aspeto 3D|Guardar ligações/ })).toBeNull();
   });
 });
 
@@ -161,15 +161,15 @@ describe("as ligações atributo → zona", () => {
     await waitFor(() => expect(zonasDe(c).zonas.pes?.atributo).toBe("Cor da frente"));
     expect(zonasDe(c).zonas.corpo?.atributo).toBe("Cor do corpo");
   });
-  it("mudar a ligação no painel muda o 3D logo (sem gravar) e só então «Guardar ligações» grava, uma vez, com os eixos do produto", async () => {
+  it("mudar a ligação no painel muda o 3D logo (sem gravar) e só então «Guardar aspeto 3D» grava, uma vez, com os eixos do produto", async () => {
     base.responder = (f) => (f === "cat_ler_config_3d" ? { data: comLigacoes, error: null } : f === "cat_definir_config_3d" ? { data: { alvo: "produto", id: PID }, error: null } : { data: null, error: null });
     const c = await abrir({ modelo: "mesa", attrs: MESA });
     await waitFor(() => expect(zonasDe(c).zonas.pes?.atributo).toBe("Cor da frente"));
-    const grupo = screen.getByRole("group", { name: "Ligação 1" });
+    const grupo = screen.getByRole("group", { name: "Regra 1" });
     fireEvent.change(within(grupo).getByLabelText("Zona"), { target: { value: "tampo" } });
     await waitFor(() => expect(zonasDe(c).zonas.tampo?.atributo).toBe("Cor da frente"));
     expect(chamadasDe("cat_definir_config_3d")).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "Guardar ligações" }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar aspeto 3D" }));
     await waitFor(() => expect(chamadasDe("cat_definir_config_3d")).toHaveLength(1));
     expect(chamadasDe("cat_definir_config_3d")[0].a).toEqual({ p_org: ORG, p_alvo: "produto", p_id: PID, p_eixos: null, p_ligacoes: [{ atributo: A_FRENTE, zona: "tampo", aplicar: true }] });
   });

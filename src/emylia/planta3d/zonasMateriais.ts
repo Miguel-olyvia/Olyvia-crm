@@ -131,9 +131,13 @@ export function aplicarAparenciaDasZonas(mats: ReadonlyMap<ZonaGlb, THREE.MeshSt
 }
 
 /** Realça uma zona (brilho) e apaga o das outras; mexe só no `emissive`, por isso não obriga o material a recompilar nem toca na cor e na foto. */
-export function aplicarRealceDasZonas(mats: ReadonlyMap<ZonaGlb, THREE.MeshStandardMaterial>, realce: ZonaGlb | null | undefined): void {
+export function aplicarRealceDasZonas(mats: ReadonlyMap<ZonaGlb, THREE.MeshStandardMaterial>, realce: RealceDeZonas | undefined): void {
+  // 26/11: uma zona ou várias (as que uma regra do painel «Aspeto 3D» pinta de facto)
+  const acesa = (zona: ZonaGlb): boolean => (Array.isArray(realce) ? (realce as readonly ZonaGlb[]).includes(zona) : realce === zona);
   for (const [zona, mat] of mats) {
-    mat.emissive.set(realce === zona ? COR_REALCE : SEM_BRILHO);
-    mat.emissiveIntensity = realce === zona ? INTENSIDADE_REALCE : 1;
+    mat.emissive.set(acesa(zona) ? COR_REALCE : SEM_BRILHO);
+    mat.emissiveIntensity = acesa(zona) ? INTENSIDADE_REALCE : 1;
   }
 }
+/** A zona (ou as zonas) a realçar no 3D; null ou uma lista vazia: nenhuma. */
+export type RealceDeZonas = ZonaGlb | readonly ZonaGlb[] | null;

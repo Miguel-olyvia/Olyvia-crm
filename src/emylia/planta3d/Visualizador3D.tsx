@@ -24,7 +24,7 @@ import { corDaJunta, type AmostraNoMundo, type PlanoRevestimento } from "./reves
 import { cotasDaPeca, noEcra } from "./cotasPeca";
 import type { ZonaGlb, ZonasDoProduto } from "./zonasGlb";
 import { criarPortaDoHover, foiClique, zonaDaPrimeiraIntersecao, type ObjetoDoCanvas } from "./zonaDoClique";
-import { aplicarAparenciaDasZonas, aplicarRealceDasZonas, criarMateriaisDeZona } from "./zonasMateriais";
+import { aplicarAparenciaDasZonas, aplicarRealceDasZonas, criarMateriaisDeZona, type RealceDeZonas } from "./zonasMateriais";
 import { useTexturasPorUrl } from "./useTexturasPorUrl";
 import { criarAmbienteMetal, type AmbienteMetal } from "./ambienteMetal";
 
@@ -58,7 +58,7 @@ export interface Visualizador3DProps {
   /** 24/11 (fase 1, a pré-visualização de um produto): as cotas (largura, altura, profundidade) nas arestas da caixa da peça. Sem isto, nada se desenha. */
   cotas?: boolean;
   /** 24/11 (fase 1): a zona do objecto a realçar (brilho), a que o utilizador aponta no painel «Zonas». Sem isto, nada se realça. */
-  zonaRealcada?: ZonaGlb | null;
+  zonaRealcada?: RealceDeZonas;
   /**
    * 25/11 (escolher a zona no 3D, só a pré-visualização do produto): clicar numa parte da peça chama `aoClicarZona` com a zona dela (só conta se o ponteiro quase não se moveu: arrastar roda a câmara),
    * e clicar no fundo chama-o com null; `aoPassarZona` diz a zona debaixo do rato (null ao sair). Só valem as `zonasEscolheveis`. Sem `aoClicarZona` nem `aoPassarZona`, nada muda.
@@ -153,7 +153,7 @@ function useRevestimento(r: Revestimento, w: number, h: number): THREE.MeshLambe
 interface TexturaDaPeca { tex: THREE.Texture; cor: string; lado: number; props: { map: THREE.Texture; onBeforeCompile: THREE.Material["onBeforeCompile"]; customProgramCacheKey: () => string } }
 const TexturaCtx = createContext<TexturaDaPeca | null>(null);
 /** 24/11 (fase 1): a aparência de cada zona da peça e a zona realçada. Passa por contexto DENTRO do canvas (a Peca fornece-o); sem fornecedor, nada de zonas: como sempre. */
-interface ZonasDaPeca { zonas?: ZonasDoProduto; realce?: ZonaGlb | null }
+interface ZonasDaPeca { zonas?: ZonasDoProduto; realce?: RealceDeZonas }
 const ZonasCtx = createContext<ZonasDaPeca>({});
 /** 25/11: pede o mapa de ambiente com contraste dos metais (ambienteMetal.ts); só se constrói na primeira vez que alguma zona de metal o pede (sem metal nunca se cria). Sem fornecedor: nenhum. */
 const AmbienteMetalCtx = createContext<(() => THREE.Texture | null) | null>(null);
@@ -915,7 +915,7 @@ function tornarFantasma(m: THREE.Mesh): void {
   m.userData.fantasma = true;
 }
 
-interface PropsPeca { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; fantasma?: boolean; onSel: (id: string) => void; mover?: Mover3D; arrasto: Arrasto | null; setArrasto: (a: Arrasto | null) => void; alvo: { current: AlvoArrasto }; cotas?: boolean; realce?: ZonaGlb | null; escolha?: EscolhaDeZona }
+interface PropsPeca { p: PecaProduto; m: ProdutoModelo3D; etiquetas: boolean; selecionada: boolean; fantasma?: boolean; onSel: (id: string) => void; mover?: Mover3D; arrasto: Arrasto | null; setArrasto: (a: Arrasto | null) => void; alvo: { current: AlvoArrasto }; cotas?: boolean; realce?: RealceDeZonas; escolha?: EscolhaDeZona }
 function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel, mover, arrasto, setArrasto, alvo, cotas = false, realce = null, escolha }: PropsPeca) {
   const grupoRef = useRef<THREE.Group>(null);
   useEffect(() => {

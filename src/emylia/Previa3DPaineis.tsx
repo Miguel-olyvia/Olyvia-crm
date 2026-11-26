@@ -122,11 +122,12 @@ export function PainelZonas({ zonas, pintadaPor, fixa, aoApontar, aoFixar }: Pro
     <section aria-labelledby={`${id}-t`} className="grid gap-2 rounded-xl border border-border bg-card p-3">
       <h3 id={`${id}-t`} className="text-[15px] font-semibold">Zonas</h3>
       <p className={NOTA}>Aponte uma zona (rato ou Tab) para a ver realçada no 3D; clique para a manter realçada.</p>
-      <ul className="grid gap-2 sm:grid-cols-2">
+      {/* 26/11: no telemóvel as zonas são uma faixa com scroll horizontal PRÓPRIO (a página não ganha scroll horizontal); a partir de `sm`, a grelha de sempre */}
+      <ul className="flex snap-x gap-2 overflow-x-auto pb-1 sm:grid sm:grid-cols-2 sm:overflow-visible sm:pb-0">
         {zonas.map(({ zona, partes }) => {
           const atributo = pintadaPor?.[zona]?.atributo, acabamento = pintadaPor?.[zona]?.acabamento;
           return (
-            <li key={zona}>
+            <li key={zona} className="min-w-[13rem] shrink-0 snap-start sm:min-w-0 sm:shrink">
               <button type="button" data-zona-botao={zona} aria-pressed={fixa === zona} onClick={() => aoFixar(fixa === zona ? null : zona)}
                 onMouseEnter={() => aoApontar(zona)} onMouseLeave={() => aoApontar(null)} onFocus={() => aoApontar(zona)} onBlur={() => aoApontar(null)}
                 className={cn(BOTAO, "w-full flex-col items-start gap-0.5 py-2 text-left aria-pressed:border-primary aria-pressed:bg-muted")}>

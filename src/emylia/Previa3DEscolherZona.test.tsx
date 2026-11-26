@@ -1,5 +1,5 @@
-// 25/11: escolher NO 3D onde vai cada atributo. (1) A lista de atributos do painel «Ligações» e as ligações oferecidas são SÓ os que o produto tem (com valor escolhido), e não todos os do sistema.
-// (2) Clicar numa parte da peça escolhe a zona; o painel «Zona: Frente» diz o que a pinta hoje e deixa escolher «Pintar com: …» (a lista de ligações muda e o 3D acompanha, sem gravar até «Guardar
+// 25/11: escolher NO 3D onde vai cada atributo. (1) A lista de atributos do painel «Regras do produto» e as ligações oferecidas são SÓ os que o produto tem (com valor escolhido), e não todos os do sistema.
+// (2) Clicar numa parte da peça escolhe a zona; o painel «Zona: Frente» diz o que a pinta hoje e deixa escolher a «Cor desta zona» (a lista de ligações muda e o 3D acompanha, sem gravar até «Guardar
 // neste produto»). Os botões do painel «Zonas» escolhem a mesma zona (teclado e leitores de ecrã). O Visualizador3D é simulado (jsdom não tem WebGL): os botões do simulacro fazem o que o clique e o
 // rato fazem no canvas (aoClicarZona e aoPassarZona), e o que o 3D recebe está nos `data-*`.
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
@@ -67,14 +67,14 @@ const abrir = async (o: { real?: FichaProdutoReal; attrs?: AtributoProduto[]; mo
   fireEvent.click(screen.getByRole("button", { name: "Ver em 3D" }));
   const c = await screen.findByTestId("canvas3d");
   await waitFor(() => expect(chamadasDe("cat_ler_config_3d")).toHaveLength(1));
-  await screen.findByRole("heading", { name: "Ligações" });
+  await screen.findByRole("heading", { name: "Regras do produto" });
   return c;
 };
 const zonasDe = (c: HTMLElement) => JSON.parse(c.getAttribute("data-zonas") || "{}") as { zonas: Record<string, { atributo: string }> };
 const painel = () => screen.getByRole("region", { name: /^Zona: / });
 const clicar = (zona: string) => fireEvent.click(screen.getByTestId(`clicar-${zona}`));
 
-describe("(1) o painel «Ligações» lista SÓ os atributos que o produto tem", () => {
+describe("(1) o painel «Regras do produto» lista SÓ os atributos que o produto tem", () => {
   it("o sistema tem seis atributos de cor e um Brilho; o produto tem dois: «Atributos que o 3D lê» mostra esses dois", async () => {
     await abrir();
     const lista = screen.getByRole("heading", { name: "Atributos que o 3D lê" }).parentElement!;
@@ -84,7 +84,7 @@ describe("(1) o painel «Ligações» lista SÓ os atributos que o produto tem",
   });
   it("o seletor de atributo de uma ligação nova só oferece os do produto", async () => {
     await abrir();
-    fireEvent.click(screen.getByRole("button", { name: "Acrescentar ligação" }));
+    fireEvent.click(screen.getByRole("button", { name: "Acrescentar regra" }));
     const opcoes = within(screen.getByLabelText("Atributo")).getAllByRole("option").map((o) => o.textContent);
     expect(opcoes).toEqual(["Cor do corpo", "Cor da frente"]);
   });
@@ -100,11 +100,11 @@ describe("(1) o painel «Ligações» lista SÓ os atributos que o produto tem",
   it("uma ligação gravada a um atributo que o produto já não tem continua lá, marcada, para a poder remover", async () => {
     base.responder = (f) => (f === "cat_ler_config_3d" ? { data: comLigacoes([{ atributo: A_COR, zona: "corpo", aplicar: true }]), error: null } : { data: null, error: null });
     await abrir();
-    const linha = screen.getByRole("group", { name: "Ligação 1" });
-    expect(within(linha).getByText(/o produto já não tem este atributo: remova a ligação/i)).toBeTruthy();
+    const linha = screen.getByRole("group", { name: "Regra 1" });
+    expect(within(linha).getByText(/o produto já não tem este atributo: remova a regra/i)).toBeTruthy();
     expect(within(screen.getByLabelText("Atributo")).getByRole("option", { name: /Cor \(o produto já não tem este atributo\)/ })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Remover a ligação 1" }));
-    expect(screen.queryByRole("group", { name: "Ligação 1" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remover a regra 1" }));
+    expect(screen.queryByRole("group", { name: "Regra 1" })).toBeNull();
   });
   it("REGRESSÃO: sem clicar em nada o 3D recebe as mesmas zonas de sempre (a «Cor da frente» pinta a frente, a «Cor do corpo» o corpo) e não há painel de zona", async () => {
     const c = await abrir();
@@ -129,15 +129,15 @@ describe("(2) clicar numa parte da peça escolhe a zona e abre o painel «Zona»
     expect(within(p).getByText(/Cor da frente \(por omissão\)/)).toBeTruthy();
     expect(screen.getByText("Zona Frente seleccionada").getAttribute("aria-live")).toBe("polite");
   });
-  it("«Pintar com:» oferece «Pelo nome», os atributos do produto (com a opção escolhida) e «Nenhum»; a escolha de hoje vem marcada", async () => {
+  it("«Cor desta zona» oferece «Automático», os atributos do produto (com a opção escolhida) e «Sem cor»; a escolha de hoje vem marcada", async () => {
     await abrir();
     clicar("frente");
     const p = painel();
     const radios = within(p).getAllByRole("radio").map((r) => (r.closest("label")?.textContent ?? "").replace(/\s+/g, " ").trim());
-    expect(radios).toEqual(["Pelo nome (como por omissão)", "Cor do corpo Cor do corpo escolhida", "Cor da frente Cor da frente escolhida", "Nenhum (não pintar esta zona)"]);
-    expect((within(p).getByRole("radio", { name: /Pelo nome/ }) as HTMLInputElement).checked).toBe(true);
+    expect(radios).toEqual(["Automático (pelo nome do atributo)", "Cor do corpo Cor do corpo escolhida", "Cor da frente Cor da frente escolhida", "Sem cor"]);
+    expect((within(p).getByRole("radio", { name: /Automático/ }) as HTMLInputElement).checked).toBe(true);
   });
-  it("escolher outro atributo muda o 3D logo (sem gravar), aparece nas «Ligações» e a zona passa a dizer «por ligação»", async () => {
+  it("escolher outro atributo muda o 3D logo (sem gravar), aparece nas «Regras do produto» e a zona passa a dizer «por ligação»", async () => {
     const c = await abrir();
     clicar("frente");
     fireEvent.click(within(painel()).getByRole("radio", { name: /Cor do corpo/ }));
@@ -146,31 +146,31 @@ describe("(2) clicar numa parte da peça escolhe a zona e abre o painel «Zona»
     expect(chamadasDe("cat_definir_config_3d")).toHaveLength(0);
     expect(within(painel()).getByText(/Cor do corpo \(por ligação\)/)).toBeTruthy();
     expect((within(painel()).getByRole("radio", { name: /Cor do corpo/ }) as HTMLInputElement).checked).toBe(true);
-    expect(screen.getByRole("group", { name: "Ligação 1" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Regra 1" })).toBeTruthy();
   });
   it("«Nenhum» deixa a zona sem cor (as outras ficam); «Pelo nome» volta ao que os nomes davam", async () => {
     const c = await abrir();
     clicar("frente");
-    fireEvent.click(within(painel()).getByRole("radio", { name: /Nenhum/ }));
+    fireEvent.click(within(painel()).getByRole("radio", { name: /Sem cor/ }));
     await waitFor(() => expect(zonasDe(c).zonas.frente).toBeUndefined());
     expect(zonasDe(c).zonas.corpo.atributo).toBe("Cor do corpo");
-    expect(within(painel()).getByText(/nenhum atributo/i)).toBeTruthy();
-    fireEvent.click(within(painel()).getByRole("radio", { name: /Pelo nome/ }));
+    expect(within(painel()).getByText(/Pinta-a hoje: nenhum atributo/)).toBeTruthy();
+    fireEvent.click(within(painel()).getByRole("radio", { name: /Automático/ }));
     await waitFor(() => expect(zonasDe(c).zonas.frente.atributo).toBe("Cor da frente"));
   });
-  it("«Guardar neste produto» grava as ligações (uma vez, com os eixos do produto) e diz-o numa região viva", async () => {
+  it("«Guardar aspeto 3D» grava as regras (uma vez, com os eixos do produto) e diz-o numa região viva", async () => {
     base.responder = (f) => (f === "cat_ler_config_3d" ? { data: SEM, error: null } : f === "cat_definir_config_3d" ? { data: { alvo: "produto", id: PID }, error: null } : { data: null, error: null });
     await abrir();
     clicar("frente");
-    const guardar = within(painel()).getByRole("button", { name: "Guardar neste produto" });
+    const guardar = screen.getByRole("button", { name: "Guardar aspeto 3D" });
     expect(guardar.getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(within(painel()).getByRole("radio", { name: /Cor do corpo/ }));
-    fireEvent.click(within(painel()).getByRole("button", { name: "Guardar neste produto" }));
+    fireEvent.click(screen.getByRole("button", { name: "Guardar aspeto 3D" }));
     await waitFor(() => expect(chamadasDe("cat_definir_config_3d")).toHaveLength(1));
     const a = chamadasDe("cat_definir_config_3d")[0].a as { p_eixos: unknown; p_ligacoes: { atributo: string; zona: string; aplicar: boolean }[] };
     expect(a.p_eixos).toBeNull();
     expect(a.p_ligacoes).toEqual(expect.arrayContaining([{ atributo: A_CORPO, zona: "frente", aplicar: true }]));
-    expect(await within(painel()).findByText("Ligações guardadas neste produto.")).toBeTruthy();
+    expect(await screen.findByText("Regras guardadas.")).toBeTruthy();
   });
   it("clicar fora da peça (o fundo) deixa de escolher a zona e fecha o painel", async () => {
     const c = await abrir();
@@ -226,10 +226,10 @@ describe("a alternativa por teclado e leitores de ecrã: os botões do painel «
     const zonas = screen.getByRole("heading", { name: "Zonas" }).closest("section")!;
     expect(within(zonas).getByRole("button", { name: /^Corpo/ }).getAttribute("aria-pressed")).toBe("true");
   });
-  it("os rádios têm alvos de 44 px (min-h-11) e o painel aponta o campo com a legenda «Pintar com:»", async () => {
+  it("os rádios têm alvos de 44 px (min-h-11) e o painel aponta o campo com a legenda «Cor desta zona»", async () => {
     await abrir();
     clicar("frente");
-    const grupo = within(painel()).getByRole("group", { name: "Pintar com:" });
+    const grupo = within(painel()).getByRole("group", { name: "Cor desta zona" });
     for (const r of within(grupo).getAllByRole("radio")) expect(r.closest("label")?.className).toContain("min-h-11");
   });
 });
@@ -241,7 +241,7 @@ describe("sem permissão de editar, ou sem configuração", () => {
     const p = painel();
     expect(within(p).getByText(/Cor da frente \(por omissão\)/)).toBeTruthy();
     expect(within(p).queryByRole("radio")).toBeNull();
-    expect(within(p).queryByRole("button", { name: "Guardar neste produto" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Guardar aspeto 3D" })).toBeNull();
     expect(within(p).getByText(/permissão de editar produtos/i)).toBeTruthy();
   });
   it("sem a configuração 3D (a função da base ainda não existe), clicar escolhe a zona só para ver, sem rádios", async () => {
@@ -277,7 +277,7 @@ describe("M3: foco e Escape", () => {
   it("Escape dentro do painel fecha-o; a zona foi escolhida por clique no 3D: o foco volta ao grupo do 3D", async () => {
     await abrir();
     clicar("frente");
-    fireEvent.keyDown(within(painel()).getByRole("radio", { name: /Pelo nome/ }), { key: "Escape" });
+    fireEvent.keyDown(within(painel()).getByRole("radio", { name: /Automático/ }), { key: "Escape" });
     expect(screen.queryByRole("region", { name: /^Zona: / })).toBeNull();
     expect(document.activeElement).toBe(grupo3d());
   });
@@ -302,17 +302,17 @@ describe("M3: foco e Escape", () => {
 });
 
 describe("M4: o que se anunciou ou guardou numa zona não fica preso na seguinte", () => {
-  it("a mensagem «Ligações guardadas» e o anúncio da frente não aparecem no painel do corpo", async () => {
+  it("a mensagem «Regras guardadas» e o anúncio da frente não aparecem no painel do corpo", async () => {
     base.responder = (f) => (f === "cat_ler_config_3d" ? { data: SEM, error: null } : f === "cat_definir_config_3d" ? { data: { alvo: "produto", id: PID }, error: null } : { data: null, error: null });
     await abrir();
     clicar("frente");
     fireEvent.click(within(painel()).getByRole("radio", { name: /Cor do corpo/ }));
     expect(within(painel()).getByText("Frente: Cor do corpo")).toBeTruthy();
-    fireEvent.click(within(painel()).getByRole("button", { name: "Guardar neste produto" }));
-    expect(await within(painel()).findByText("Ligações guardadas neste produto.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Guardar aspeto 3D" }));
+    expect(await screen.findByText("Regras guardadas.")).toBeTruthy();
     clicar("corpo");
     expect(within(painel()).getByRole("heading", { name: "Zona: Corpo" })).toBeTruthy();
-    expect(within(painel()).queryByText("Ligações guardadas neste produto.")).toBeNull();
+    expect(within(painel()).queryByText("Regras guardadas.")).toBeNull();
     expect(within(painel()).queryByText(/^Frente: /)).toBeNull();
   });
 });
@@ -321,15 +321,15 @@ describe("L7: não se anuncia o que não mudou", () => {
   it("«Nenhum» num produto sem atributos de cor não muda nada e não anuncia «nenhum»", async () => {
     await abrir({ attrs: [MED] });
     clicar("frente");
-    fireEvent.click(within(painel()).getByRole("radio", { name: /Nenhum/ }));
-    expect(within(painel()).queryByText("Frente: nenhum")).toBeNull();
-    expect(within(painel()).getByText("Sem alterações para guardar.")).toBeTruthy();
+    fireEvent.click(within(painel()).getByRole("radio", { name: /Sem cor/ }));
+    expect(within(painel()).queryByText("Frente: sem cor")).toBeNull();
+    expect(screen.getByText("Sem alterações para guardar.")).toBeTruthy();
   });
   it("uma escolha que muda alguma coisa continua a anunciar-se", async () => {
     await abrir();
     clicar("frente");
-    fireEvent.click(within(painel()).getByRole("radio", { name: /Nenhum/ }));
-    expect(within(painel()).getByText("Frente: nenhum")).toBeTruthy();
+    fireEvent.click(within(painel()).getByRole("radio", { name: /Sem cor/ }));
+    expect(within(painel()).getByText("Frente: sem cor")).toBeTruthy();
   });
 });
 

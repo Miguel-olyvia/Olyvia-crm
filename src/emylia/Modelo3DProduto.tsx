@@ -87,17 +87,21 @@ function Aberto({ nome, sub, no, arvore, attrs, defs, modelo3d, alvoConfig3d }: 
       podeEditar: alvoConfig3d.podeEditar,
       eixos: { guardados: e.eixos, origem: e.eixosOrigem, proprio: !!c.proprio?.eixos, gravar: cfg.gravarEixos },
       atributosDoProduto: omissoes,
+      // 26/11: para o painel «Aspeto 3D» dizer porquê cada zona leva o que leva (as mesmas definições e valores que pintam o 3D)
+      leitura: { attrs: attrsEspera, defs },
       ligacoes: {
-        valor: ligacoesEmVigor, alterado: rascunho !== null && !mesmasLigacoes(rascunho, guardadas ?? SEM_LIGACOES), origem: e.ligacoesOrigem, proprio: c.proprio?.ligacoes != null,
+        valor: ligacoesEmVigor, alterado: rascunho !== null && !mesmasLigacoes(rascunho, guardadas ?? SEM_LIGACOES), guardadas: guardadas ?? SEM_LIGACOES, origem: e.ligacoesOrigem, proprio: c.proprio?.ligacoes != null,
         atributos, omissoes,
         orfas: c.proprio?.orfas ?? 0, ignoradas: c.proprio?.ignoradas ?? 0,
         aoMudar: (l) => setRascunho(l),
+        // 26/11: «Descartar» deixa o rascunho: valem as regras guardadas (ou herdadas) e o 3D volta a elas
+        descartar: () => setRascunho(null),
         // depois de gravar, o rascunho acaba: valem as ligações que a base acabou de guardar (o gancho relê a configuração antes de responder)
         gravar: async () => { const erro = await cfg.gravarLigacoes(ligacoesEmVigor); if (!erro) setRascunho(null); return erro; },
         herdar: async () => { const erro = await cfg.gravarLigacoes(null); if (!erro) setRascunho(null); return erro; },
       },
     };
-  }, [cfg, alvoConfig3d, atributos, omissoes, ligacoesEmVigor, rascunho, guardadas]);
+  }, [cfg, alvoConfig3d, atributos, omissoes, ligacoesEmVigor, rascunho, guardadas, attrsEspera, defs]);
   return (
     <>
       {cfg.erro && <p role="status" className="mb-2 text-[15px] text-muted-foreground">{cfg.erro} O 3D usa a regra automática.</p>}

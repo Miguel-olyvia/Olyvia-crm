@@ -123,18 +123,18 @@ describe("sem permissão e sem configuração", () => {
   it("sem products.edit: os eixos usam-se e vêem-se, mas não há botões de guardar nem de voltar a herdar", async () => {
     const c = await abrir(config({ guardados: GUARDADOS, origem: "produto", proprio: true, podeEditar: false }));
     expect(c.getAttribute("data-dim")).toBe("160x40x25");
-    expect(screen.queryByRole("button", { name: /Guardar neste produto|Voltar a herdar|Guardar ligações/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Guardar neste produto|Voltar a herdar|Guardar aspeto 3D|Guardar ligações/ })).toBeNull();
     expect(screen.getAllByText(/permissão de editar produtos/i).length).toBeGreaterThan(0);
   });
-  it("REGRESSÃO: sem `config3d`, o painel é o de hoje (só para ver, sem botões de gravar, sem painel «Ligações»)", async () => {
+  it("REGRESSÃO: sem `config3d`, o painel é o de hoje (só para ver, sem botões de gravar, sem painel «Regras do produto»)", async () => {
     await abrir(undefined);
     expect(screen.getByText(/a gravação vem na próxima fase/i)).toBeTruthy();
     expect(screen.getByText("Regra: automática por tipo")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /gravar|guardar/i })).toBeNull();
-    expect(screen.queryByRole("heading", { name: "Ligações" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Regras do produto" })).toBeNull();
   });
-  it("com configuração, o painel «Ligações» aparece (só com a Medida ou não: as ligações não dependem dela)", async () => {
+  it("com configuração, o painel «Regras do produto» aparece (só com a Medida ou não: as ligações não dependem dela)", async () => {
     await abrir(config());
-    expect(screen.getByRole("heading", { name: "Ligações" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Regras do produto" })).toBeTruthy();
   });
 });

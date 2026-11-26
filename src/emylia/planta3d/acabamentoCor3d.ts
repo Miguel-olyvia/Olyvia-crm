@@ -100,7 +100,11 @@ export function leiturasPorOmissao(defs: readonly AtributoDef[] | undefined): Le
 /** A opção que o produto escolheu num atributo, para a amostra (foto > cor) e o nome. */
 export interface OpcaoDaLeitura { nome: string; hex: string | null; foto: string | null }
 /** Uma leitura de um atributo QUE O PRODUTO TEM: com a opção escolhida e se o atributo dá cor ou foto (`daCor`; o «Brilho», só com aspeto, lê-se mas não é cor). */
-export interface LeituraDoProduto extends LeituraPorOmissao { opcao: OpcaoDaLeitura; daCor: boolean }
+export interface LeituraDoProduto extends LeituraPorOmissao {
+  opcao: OpcaoDaLeitura; daCor: boolean;
+  /** 26/11: o atributo dá a SUPERFÍCIE das zonas (Brilho ou Tonalidade com «Tem aspeto»): o painel «Aspeto 3D» mostra-o na camada «Superfície», e não na «Cor» (a não ser que também tenha hex ou foto). */
+  daSuperficie: boolean;
+}
 
 /**
  * 25/11: só os atributos que o PRODUTO tem, isto é, com uma opção escolhida (que ainda existe no atributo), e que o 3D lê (hex, foto ou aspeto). O estado por omissão de cada um (`aplicado`)
@@ -114,7 +118,7 @@ export function leiturasDoProduto(defs: readonly AtributoDef[] | undefined, attr
     const d = porId.get(l.id);
     const e = d ? opcaoEscolhida(d, attrs)?.opcao : undefined;
     if (!d || !e) continue;
-    lidos.push({ ...l, opcao: { nome: e.nome, hex: hexValido(e.hex) ? e.hex : null, foto: e.foto || null }, daCor: d.temHex === true || d.temFoto === true });
+    lidos.push({ ...l, opcao: { nome: e.nome, hex: hexValido(e.hex) ? e.hex : null, foto: e.foto || null }, daCor: d.temHex === true || d.temFoto === true, daSuperficie: ehAtributoDeSuperficie(d) });
   }
   return lidos;
 }

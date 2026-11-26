@@ -3,14 +3,15 @@
 // não abre, a própria conta do modelo), fica um texto com «Tentar outra vez» em vez do formulário partido.
 import { Component, Suspense, lazy, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Minus, Plus, RotateCcw } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { ComandosVista, RevestimentoVisual } from "./planta3d/Visualizador3D";
 import { cenaDoProduto, estadoDoModelo, modeloParaPrevia, tipoDaPrevia, type EstadoPrevia, type MedidaCm } from "./planta3d/previaProduto3d";
 import { eixosPorOmissao, notaDaTroca, temCamposParaEixos, textoDasMedidas, trocarEixo, type Eixos } from "./planta3d/eixosMedida";
 import { zonasDoModelo, rotuloDaZona, ZONAS, type ZonaGlb, type ZonasDoProduto } from "./planta3d/zonasGlb";
 import { classeDoNomeDe, type LeituraDoProduto } from "./planta3d/acabamentoCor3d";
 import { InterruptorMedidas, PainelMedidas, PainelZonas } from "./Previa3DPaineis";
-import { Previa3DLigacoes, type Config3dPrevia } from "./Previa3DLigacoes";
-import { PainelEscolherZona } from "./Previa3DEscolherZona";
+import type { Config3dPrevia } from "./Previa3DLigacoes";
+import { PainelAspeto3D } from "./PainelAspeto3D";
 import type { NoCat, ProdutoModelo3D, TipoMockup } from "./planta3d/catalogo3d";
 import type { TexturaModelo } from "./planta3d/texturaProduto";
 import { niveisDoNo } from "./planta3d/modelos3dEscolha";
@@ -118,6 +119,8 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
   const [zonaSobRato, setZonaSobRato] = useState<ZonaGlb | null>(null);
   // de onde veio a zona escolhida (o clique no 3D ou o botão do painel «Zonas»): ao fechar o painel o foco volta para lá; ao abrir por clique, passa ao painel
   const [origem, setOrigem] = useState<"3d" | "botao">("3d");
+  // 26/11: as zonas que a regra apontada (ou focada) no painel «Aspeto 3D» pinta de facto: o 3D realça só essas (uma lista vazia: nenhuma); null: sem regra apontada
+  const [zonasDaRegra, setZonasDaRegra] = useState<readonly ZonaGlb[] | null>(null);
   const raiz = useRef<HTMLDivElement>(null), grupo3d = useRef<HTMLDivElement>(null);
   const escolherZona3d = (z: ZonaGlb | null) => { setOrigem("3d"); setZonaFixa(z); };
   const escolherZonaBotao = (z: ZonaGlb | null) => { setOrigem("botao"); setZonaFixa(z); };
@@ -168,8 +171,12 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
   const descricao = plano
     ? `${modelo.nome || "Revestimento sem nome"}: peças de ${nf(plano.pecaRealCm[0])} por ${nf(plano.pecaRealCm[1])} cm, ${superficie === "chao" ? "no chão" : "na parede"}, numa amostra de ${nf(plano.amostraM[0])} por ${nf(plano.amostraM[1])} m.`
     : `${modelo.nome || "Produto sem nome"}: ${nf(d.larguraCm)} por ${nf(d.profundidadeCm)} por ${nf(d.alturaCm)} cm (largura, profundidade e altura).`;
+  // 26/11: o painel «Aspeto 3D» (zona escolhida + regras do produto + um só «Guardar») fica AO LADO do 3D no ecrã largo e por baixo dele no telemóvel (sem gaveta, que tapava o 3D)
+  const mostrarRegras = painelMedidas && !!config3d && zonasDoObjecto.length >= 1;
+  const mostrarAspeto = !superficie && (mostrarRegras || (escolherNo3d && zonaFixa !== null));
   return (
-    <div ref={raiz} className="grid gap-2">
+    <div ref={raiz} className={cn("grid gap-3", mostrarAspeto && "lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-start")}>
+      <div className="grid gap-2 lg:col-start-1">
       <div className="relative h-64 overflow-hidden rounded-xl border border-border bg-muted/50 sm:h-80">
         <div ref={grupo3d} role="group" aria-label="Pré-visualização 3D do produto" aria-describedby={idAjuda} tabIndex={0} onKeyDown={aoTeclar}
           onFocus={() => setFoco(true)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFoco(false); }}
@@ -178,7 +185,7 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
           <Suspense fallback={<div className="grid h-full place-items-center"><Estado texto="A carregar o 3D…" /></div>}>
             <Visualizador3D espaco={cena.espaco} modelos={cena.modelos} vista="3d" teto={false} etiquetas={false} descricao={descricao}
               selecionada={null} onSelecionar={SEM_ESCOLHA} camara={cena.camara} rolarPagina zoomRoda={foco && dentro} comandos={comandos} revestimento={revestimento}
-              cotas={cotas && !superficie} zonaRealcada={zonaApontada ?? zonaSobRato ?? zonaFixa}
+              cotas={cotas && !superficie} zonaRealcada={zonasDaRegra ?? zonaApontada ?? zonaSobRato ?? zonaFixa}
               aoClicarZona={escolherNo3d && !superficie ? escolherZona3d : undefined} aoPassarZona={escolherNo3d && !superficie ? setZonaSobRato : undefined} zonasEscolheveis={zonasEscolheveis} />
           </Suspense>
         </div>
@@ -212,30 +219,33 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
           <p className={NOTA}>Clique numa parte da peça para escolher a zona e dizer que atributo a pinta; ou use os botões das zonas, mais abaixo.</p>
           {/* a região viva existe sempre (vazia): o que muda é o texto, e assim a escolha anuncia-se a quem usa leitor de ecrã */}
           <p aria-live="polite" className="sr-only">{zonaFixa ? `Zona ${rotuloDaZona(zonaFixa)} seleccionada` : ""}</p>
-          {zonaFixa && (
-            <PainelEscolherZona key={zonaFixa} zona={zonaFixa} pintadaPor={zonas?.zonas[zonaFixa]} atributos={atributosDoProduto.filter((a) => a.daCor)} pintaHoje={pintaHoje} pelaNome={pelaNome}
-              focarAoAbrir={origem === "3d"} aoFechar={() => fechar()}
-              ligacoes={config3d ? { valor: config3d.ligacoes.valor, alterado: config3d.ligacoes.alterado, podeEditar: config3d.podeEditar, aoMudar: config3d.ligacoes.aoMudar, gravar: config3d.ligacoes.gravar } : undefined} />
-          )}
         </>
       )}
       {/* o equivalente em texto das cotas, para leitores de ecrã: a região viva existe sempre (vazia e escondida com as cotas desligadas) para a mudança se anunciar */}
       <p aria-live="polite" className={cotas && !superficie ? NOTA : "sr-only"}>{cotas && !superficie ? textoDasMedidas(d) : ""}</p>
-      {painelMedidas && !superficie && medida && temCamposParaEixos(medida) && (
-        <PainelMedidas medida={medida} eixos={eixosEmVigor} manual={aMao !== null} dimensoes={d} nota={notaTroca}
-          aoEscolher={(eixo, campo) => { const depois = trocarEixo(eixosEmVigor, eixo, campo); setEscolha({ tipo, eixos: depois, nota: notaDaTroca(eixosEmVigor, depois, eixo) }); }} aoRepor={() => setEscolha(null)}
-          gravacao={config3d ? {
-            podeEditar: config3d.podeEditar, origemGuardada: config3d.eixos.guardados ? config3d.eixos.origem : null, proprio: config3d.eixos.proprio,
-            // depois de gravar, a escolha à mão acaba: valem os eixos que a base acabou de guardar (quem grava relê a configuração antes de responder)
-            aoGuardar: async () => { const erro = await config3d.eixos.gravar(eixosEmVigor); if (!erro) setEscolha(null); return erro; },
-            aoHerdar: async () => { const erro = await config3d.eixos.gravar(null); if (!erro) setEscolha(null); return erro; },
-          } : undefined} />
-      )}
+      </div>
       {!superficie && zonasDoObjecto.length >= 2 && (
-        <PainelZonas zonas={zonasDoObjecto} pintadaPor={zonas?.zonas} fixa={zonaFixa} aoApontar={setZonaApontada} aoFixar={escolherZonaBotao} />
+        <div className="min-w-0 lg:col-start-1">
+          <PainelZonas zonas={zonasDoObjecto} pintadaPor={zonas?.zonas} fixa={zonaFixa} aoApontar={setZonaApontada} aoFixar={escolherZonaBotao} />
+        </div>
       )}
-      {painelMedidas && config3d && !superficie && zonasDoObjecto.length >= 1 && (
-        <Previa3DLigacoes {...config3d.ligacoes} zonas={zonasDoObjecto.map((z) => z.zona)} podeEditar={config3d.podeEditar} />
+      {mostrarAspeto && (
+        <div className="min-w-0 lg:col-start-2 lg:row-span-3 lg:row-start-1">
+          <PainelAspeto3D zonaFixa={escolherNo3d ? zonaFixa : null} zonasDoModelo={zonasDoObjecto.map((z) => z.zona)} pintadaPor={zonas?.zonas} atributos={atributosDoProduto}
+            pintaHoje={pintaHoje} pelaNome={pelaNome} focarAoAbrir={origem === "3d"} aoFechar={() => fechar()} config3d={config3d} mostrarRegras={mostrarRegras} aoRealcarRegra={setZonasDaRegra} />
+        </div>
+      )}
+      {painelMedidas && !superficie && medida && temCamposParaEixos(medida) && (
+        <div className="min-w-0 lg:col-start-1">
+          <PainelMedidas medida={medida} eixos={eixosEmVigor} manual={aMao !== null} dimensoes={d} nota={notaTroca}
+            aoEscolher={(eixo, campo) => { const depois = trocarEixo(eixosEmVigor, eixo, campo); setEscolha({ tipo, eixos: depois, nota: notaDaTroca(eixosEmVigor, depois, eixo) }); }} aoRepor={() => setEscolha(null)}
+            gravacao={config3d ? {
+              podeEditar: config3d.podeEditar, origemGuardada: config3d.eixos.guardados ? config3d.eixos.origem : null, proprio: config3d.eixos.proprio,
+              // depois de gravar, a escolha à mão acaba: valem os eixos que a base acabou de guardar (quem grava relê a configuração antes de responder)
+              aoGuardar: async () => { const erro = await config3d.eixos.gravar(eixosEmVigor); if (!erro) setEscolha(null); return erro; },
+              aoHerdar: async () => { const erro = await config3d.eixos.gravar(null); if (!erro) setEscolha(null); return erro; },
+            } : undefined} />
+        </div>
       )}
     </div>
   );

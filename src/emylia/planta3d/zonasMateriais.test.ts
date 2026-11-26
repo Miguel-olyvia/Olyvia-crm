@@ -113,6 +113,16 @@ describe("aplicarAparenciaDasZonas: a cor, a foto e o realce de cada zona", () =
     aplicarRealceDasZonas(zm.porZona, null);
     expect(mat(m.grupo, "frente_cima").emissive.getHexString()).toBe("000000");
   });
+  it("26/11: o realce aceita VÁRIAS zonas (o painel «Aspeto 3D» realça as zonas que uma regra pinta de facto); uma lista vazia apaga-o", () => {
+    const { m, zm } = montar("movel_lavatorio");
+    aplicarRealceDasZonas(zm.porZona, ["frente", "corpo"]);
+    expect(mat(m.grupo, "frente_cima").emissive.getHexString()).toBe(COR_REALCE.slice(1));
+    expect(mat(m.grupo, "caixa").emissive.getHexString()).toBe(COR_REALCE.slice(1));
+    aplicarRealceDasZonas(zm.porZona, ["frente"]);
+    expect(mat(m.grupo, "caixa").emissive.getHexString()).toBe("000000");
+    aplicarRealceDasZonas(zm.porZona, []);
+    expect(mat(m.grupo, "frente_cima").emissive.getHexString()).toBe("000000");
+  });
   it("mudar só o realce mexe só no brilho: não retira nem volta a pôr a foto (o material não se recompila) e a aparência fica como estava", () => {
     const { m, zm } = montar("movel_lavatorio");
     aplicarAparenciaDasZonas(zm.porZona, { corBase: "#cccccc", zonas, texturas: texs });

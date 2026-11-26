@@ -20,7 +20,15 @@ export interface ContextoEscolha {
   pintaHoje: (atributo: string) => readonly ZonaGlb[];
   /** Os atributos que pintam a zona SÓ pelo nome (id, e se é a cor lisa, e não um acabamento: só esta concorre com uma ligação). Ausente: não se conhece nenhum. */
   pelaNome?: (zona: ZonaGlb) => readonly { id: string; lisa: boolean }[];
+  /**
+   * 26/11: os atributos que dão a SUPERFÍCIE (Tonalidade, Brilho). Os que não dão cor ficam fora da escolha da cor: as regras deles nesta zona não se apagam nem se excluem ao escolher uma cor
+   * (a superfície e a cor são duas camadas). Ausente: como era (tudo o que cobre a zona entra na escolha da cor).
+   */
+  atributosDeSuperficie?: readonly string[];
 }
+
+/** O contexto da escolha da superfície: os atributos de superfície do produto, pela ordem das definições. */
+export interface ContextoSuperficie { atributosDeSuperficie: readonly string[] }
 
 /**
  * O que a zona tem escolhido nas ligações em vigor: um atributo ligado a ela (a explícita ou «Tudo»; com vários, o que pinta hoje pelo nome `nomeQuePinta`, senão o primeiro dos `atributosDaCor`),
@@ -42,7 +50,9 @@ export function escolhaAtualDaZona(
 
 /** A lista de ligações depois de escolher `escolha` para a `zona`. Devolve uma lista nova; a recebida não se altera. */
 export function aplicarEscolhaNaZona(valor: readonly Ligacao[], zona: ZonaGlb, escolha: EscolhaDaZona, ctx: ContextoEscolha): Ligacao[] {
-  const resto = valor.filter((l) => l.zona !== zona);
+  // 26/11: as regras de SUPERFÍCIE desta zona (que não são de cor) são de outra camada: ficam como estão
+  const soSuperficie = new Set((ctx.atributosDeSuperficie ?? []).filter((id) => !ctx.atributosDaCor.includes(id)));
+  const resto = valor.filter((l) => l.zona !== zona || soSuperficie.has(l.atributo));
   const antes = ligacoesDaConfig(resto).ligacoes;
   const resultado: Ligacao[] = [...resto];
   const tem = (atributo: string, z: Ligacao["zona"]): boolean => resultado.some((l) => l.atributo === atributo && l.zona === z);
@@ -51,7 +61,7 @@ export function aplicarEscolhaNaZona(valor: readonly Ligacao[], zona: ZonaGlb, e
   const doNome = ctx.pelaNome?.(zona) ?? [];
   // «Pelo nome»: o atributo do nome da zona, mesmo que coberto por «Tudo», continua a pintá-la (é o que o nome diz)
   const ficaPeloNome = (id: string): boolean => escolha.tipo === "nome" && doNome.some((n) => n.id === id);
-  for (const id of Object.keys(antes)) if (antes[id].includes(zona) && id !== escolhido && !ficaPeloNome(id)) resultado.push({ atributo: id, zona, aplicar: false });
+  for (const id of Object.keys(antes)) if (antes[id].includes(zona) && id !== escolhido && !ficaPeloNome(id) && !soSuperficie.has(id)) resultado.push({ atributo: id, zona, aplicar: false });
   if (escolha.tipo === "nome") {
     // repor o nome: o atributo do nome da zona que foi ligado a OUTRAS zonas (um atributo ligado deixa de pintar pelo nome) volta a pintá-la
     const { excluidos } = ligacoesDaConfig(resto);
@@ -67,5 +77,50 @@ export function aplicarEscolhaNaZona(valor: readonly Ligacao[], zona: ZonaGlb, e
   // um atributo sem ligações explícitas pintava pelo nome: ao ligá-lo, ligam-se também as zonas que ele já pintava, para não as perder
   if (!antes[escolha.id]?.length) for (const z of ctx.pintaHoje(escolha.id)) if (z !== zona && !tem(escolha.id, z)) resultado.push({ atributo: escolha.id, zona: z, aplicar: true });
   if (!tem(escolha.id, zona)) resultado.push({ atributo: escolha.id, zona, aplicar: true });
+  return resultado;
+}
+
+/* ------------------------------------------------------------------ 26/11: a camada «Superfície» (Tonalidade, Brilho) */
+/**
+ * O que a superfície da zona tem escolhido nas regras em vigor: um atributo de superfície ligado a ela (a regra explícita ou «Todas as zonas»; com vários, o que decide hoje, `nomeQuePinta`,
+ * senão o primeiro de `ids`), «nenhum» se TODOS os atributos de superfície estão excluídos dela, senão «nome» (automático: os que não têm regras actuam em todas as zonas).
+ */
+export function escolhaDeSuperficieDaZona(
+  valor: readonly Ligacao[], zona: ZonaGlb, ids: readonly string[], nomeQuePinta?: string, nomeDe?: (id: string) => string | undefined,
+): EscolhaDaZona {
+  const { ligacoes, excluidos } = ligacoesDaConfig(valor);
+  const ligados = ids.filter((id) => ligacoes[id]?.includes(zona));
+  if (ligados.length) {
+    const doNome = nomeQuePinta && nomeDe ? ligados.find((id) => nomeDe(id) === nomeQuePinta) : undefined;
+    return { tipo: "atributo", id: doNome ?? ligados[0] };
+  }
+  if (ids.length > 0 && ids.every((id) => excluidos.has(chaveDeExclusao(id, zona)))) return { tipo: "nenhum" };
+  return { tipo: "nome" };
+}
+
+/**
+ * A lista de regras depois de escolher `escolha` para a superfície da `zona`. Devolve uma lista nova; a recebida não se altera. Só mexe nas regras desta zona dos atributos de superfície:
+ *   - um atributo: os outros atributos de superfície que actuariam nesta zona ficam excluídos dela (a zona explícita vence «Todas as zonas»). Se o escolhido não tinha regras (actuava em
+ *     todas as zonas), passa a ter «Todas as zonas»: as outras zonas ficam como estavam. Se estava limitado a outras zonas, ou desligado em tudo, liga-se a esta.
+ *   - «nome» (automático): tira as regras desta zona e exclui dela os que a regra «Todas as zonas» ainda cobria; os que não têm regras continuam a actuar.
+ *   - «nenhum» (sem superfície): todos os atributos de superfície que actuariam nesta zona ficam excluídos dela (a superfície por omissão da opção de cor continua a valer).
+ */
+export function aplicarSuperficieNaZona(valor: readonly Ligacao[], zona: ZonaGlb, escolha: EscolhaDaZona, ctx: ContextoSuperficie): Ligacao[] {
+  const ids = ctx.atributosDeSuperficie, doZona = new Set(ids);
+  const resto = valor.filter((l) => l.zona !== zona || !doZona.has(l.atributo));
+  const { ligacoes: antes, excluidos } = ligacoesDaConfig(resto);
+  const resultado: Ligacao[] = [...resto];
+  const tem = (atributo: string, z: Ligacao["zona"]): boolean => resultado.some((l) => l.atributo === atributo && l.zona === z);
+  // actua nesta zona (depois de tirar as regras dela): sem regras actua em todas; com regras, só onde elas chegam; um «não» nesta zona tira-o
+  const actua = (id: string): boolean => !excluidos.has(chaveDeExclusao(id, zona)) && (antes[id]?.length ? antes[id].includes(zona) : true);
+  const escolhido = escolha.tipo === "atributo" ? escolha.id : null;
+  if (escolha.tipo === "nome") {
+    for (const id of ids) if (antes[id]?.includes(zona)) resultado.push({ atributo: id, zona, aplicar: false });
+    return resultado;
+  }
+  for (const id of ids) if (id !== escolhido && actua(id)) resultado.push({ atributo: id, zona, aplicar: false });
+  if (escolhido === null) return resultado;
+  if (!actua(escolhido)) { if (!tem(escolhido, zona)) resultado.push({ atributo: escolhido, zona, aplicar: true }); return resultado; }
+  if (!antes[escolhido]?.length && !tem(escolhido, "tudo")) resultado.push({ atributo: escolhido, zona: "tudo", aplicar: true });
   return resultado;
 }
