@@ -172,6 +172,8 @@ export const TOOLS: ToolDef[] = [
   stageActions.createStageActionDef,
   stageActions.toggleStageActionDef,
   stageActions.deleteStageActionDef,
+  // 26/11: a base de conhecimento da Olyvia (também nas páginas sem regra de ferramentas, onde vai a lista toda)
+  conhecimento.consultarConhecimentoDef,
 ];
 
 
