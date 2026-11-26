@@ -203,7 +203,8 @@ export interface Conhecimento { texto: string; hora: string | null; obras: numbe
 type LinhaConhecimento = { tipo: string; numero: number | null; titulo: string; texto: string; atualizado_em: string };
 /** As palavras da frase que servem para procurar negócios (nomes, números). */
 export function palavrasDaProcura(frase: string): string[] {
-  return [...new Set(frase.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^a-z0-9]+/)
+  // 26/11 (teste ao vivo): sem tirar os acentos (os nomes na base têm-nos: «goncalves» não encontrava «Gonçalves»)
+  return [...new Set(frase.toLowerCase().split(/[^\p{L}\p{N}]+/u)
     .filter((w) => w.length >= 4 || /^\d{3,}$/.test(w)))].slice(0, 6);
 }
 export function conhecimentoParaTexto(L: LinhaConhecimento[]): Conhecimento | null {
