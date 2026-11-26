@@ -29,6 +29,7 @@ import { formatDistanceToNow } from "date-fns";
 import { pt } from "date-fns/locale";
 import olyviaIcon from "@/assets/olyvia-icon.png";
 import { ToolCallList, type ToolCallView } from "@/components/ai-assistant/ToolCallList";
+import { MarkdownChat } from "@/components/ai/MarkdownChat";
 
 interface PendingConfirmation {
   tool: string;
@@ -773,7 +774,10 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
                                 : "bg-muted rounded-bl-sm"
                             }`}
                           >
-                            <p className="text-sm whitespace-pre-wrap">{renderContent(msg.content)}</p>
+                            {/* 26/11: as respostas da Olyvia vêm em markdown (títulos, negritos, listas); as da pessoa ficam como foram escritas */}
+                            {msg.role === "assistant"
+                              ? <MarkdownChat texto={msg.content} aoLink={handleLinkClick} />
+                              : <p className="text-sm whitespace-pre-wrap">{renderContent(msg.content)}</p>}
                           </div>
                         )}
 
