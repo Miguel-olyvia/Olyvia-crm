@@ -143,7 +143,8 @@ export default function CatalogoProdutos() {
     );
   } else if (id) {
     corpo = (
-      <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
+      // 26/11: é ESTA a página da ficha de produto (rota /catalogo/produtos/:id); a largura de CatalogoV1 (caminho sem rota) não a afecta. Mais larga a partir de lg: o 3D e o painel «Aspeto 3D» lado a lado precisam de espaço
+      <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10 lg:max-w-6xl">
         {separadores}
         {painel(<FichaProdutoLeve id={id} K={K} real={real} min={margens.min} alvo={margens.alvo} voltar={irLista} anunciar={anunciar} nomeServico={nomeServico} servicos={servicos}
           relerReferencias={relerReferencias} onAbrirServico={(sid) => navigate(caminhoServico(sid))} />)}

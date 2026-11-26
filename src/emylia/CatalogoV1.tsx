@@ -636,8 +636,8 @@ export function CatalogoV1({ S, run, real, rota }: Ctx & { real?: FichaProdutoRe
 
   if (produtoAberto) {
     return (
-      // 26/11: a ficha do produto é mais larga (max-w-5xl, a partir de lg): com 768 px o cartão «Modelo 3D» ficava com ~650 px e o 3D e o painel «Aspeto 3D» lado a lado ficavam apertados
-      <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10 lg:max-w-5xl">
+      // 26/11: a ficha do produto é mais larga (max-w-6xl, a partir de lg), como em pages/CatalogoProdutos.tsx (a rota /catalogo/produtos/:id, que é a que se usa de facto): com 768 px o 3D e o painel «Aspeto 3D» lado a lado ficavam apertados
+      <div className="mx-auto w-full max-w-3xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10 lg:max-w-6xl">
         {barraRota}
         {painelFicha(<FichaProdutoAberto id={produtoAberto} K={K} vistas={linhasVistas.current} min={S.cfg.min} alvo={S.cfg.alvo} real={real}
           voltar={() => { voltarProduto.current = produtoAberto; setProdutoAberto(""); }} anunciar={anunciar} nomeServico={nomeServico}

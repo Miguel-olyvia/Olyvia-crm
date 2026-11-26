@@ -121,8 +121,10 @@ export function PainelAspeto3D({ zonaFixa, zonasDoModelo, pintadaPor, atributos,
         </div>
       )}
 
+      {/* 26/11: o rodapé fixo fica ACIMA dos dois botões redondos da app (Olyvia e chat: InternalChatWidget e OlyviaComando, fixed bottom-4 / sm:bottom-6, 48 / 56 px, z-[500]), que se montam em todas as páginas:
+          `bottom` = a sua altura mais uma folga. No fim da secção (posição natural) o desvio não se nota; só conta enquanto o rodapé está preso ao fundo do ecrã. */}
       {lig && podeEditar && (
-        <div className="sticky bottom-0 z-10 -mx-3 -mb-3 grid rounded-b-xl border-t border-border bg-card px-3 py-2">
+        <div className="sticky bottom-[4.75rem] z-10 -mx-3 -mb-3 grid rounded-b-xl border-t border-border bg-card px-3 py-2 sm:bottom-[5.75rem]">
           <div className="flex flex-wrap items-center gap-2">
             {/* aria-disabled (e não disabled): um botão desactivado perde o foco do teclado ao ser carregado; assim o foco fica e o clique é só ignorado */}
             {lig.descartar && (

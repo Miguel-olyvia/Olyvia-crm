@@ -202,7 +202,7 @@ export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperfi
   ];
 
   return (
-    <section ref={seccao} aria-labelledby={`${id}-t`} onKeyDown={aoKeyDown} className="grid scroll-mt-20 gap-3 rounded-xl border border-primary/50 bg-card p-3">
+    <section ref={seccao} aria-labelledby={`${id}-t`} onKeyDown={aoKeyDown} className="grid scroll-mt-[calc(min(18rem,40vh)+1rem)] gap-3 rounded-xl lg:scroll-mt-20 border border-primary/50 bg-card p-3">
       <div className="flex items-start justify-between gap-2">
         <h4 id={`${id}-t`} ref={titulo} tabIndex={-1} className="text-[15px] font-semibold focus:outline-none">Zona: {rotulo}</h4>
         <button type="button" onClick={aoFechar} aria-label={`Deixar de escolher a zona ${rotulo}`} title="Fechar" className={cn(BOTAO, "min-w-11 px-0")}><X className="h-4 w-4" aria-hidden="true" /></button>

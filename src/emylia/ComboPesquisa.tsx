@@ -190,7 +190,7 @@ export function ComboPesquisa({ rotulo, id, itens, atual, onEscolher, onNova, te
         aria-haspopup="listbox" aria-expanded={aberto} aria-controls={aberto && lista.length > 0 ? lid : undefined}
         aria-required={obrigatorio ? true : undefined} aria-disabled={ocupado ? true : undefined} aria-describedby={descr || undefined} disabled={desativado} onClick={() => (aberto ? fechar() : abrir())} onKeyDown={noBotao} onBlur={aberto ? aoPerderFoco : undefined}
         className={cn(CAMPO, "flex min-h-11 items-center justify-between gap-2 text-left disabled:cursor-not-allowed disabled:opacity-60", classeCampo)}>
-        <span id={idValor} className={cn("min-w-0 flex-1 truncate", !valor && "text-muted-foreground")}>{valor || placeholder}</span>
+        <span id={idValor} title={valor || undefined} className={cn("min-w-0 flex-1 truncate", !valor && "text-muted-foreground")}>{valor || placeholder}</span>
         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       </button>
       {/* a região de estado está sempre montada (só muda o texto), para os leitores de ecrã a anunciarem */}

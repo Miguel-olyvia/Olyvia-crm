@@ -124,14 +124,15 @@ export function PainelZonas({ zonas, pintadaPor, fixa, aoApontar, aoFixar }: Pro
       <h3 id={`${id}-t`} className="text-[15px] font-semibold">Zonas</h3>
       <p className={NOTA}>Aponte uma zona (rato ou Tab) para a ver realçada no 3D; clique para a manter realçada.</p>
       {/* 26/11: no telemóvel as zonas são uma faixa com scroll horizontal PRÓPRIO (a página não ganha scroll horizontal); a partir de `sm`, a grelha de sempre */}
-      <ul className="flex snap-x gap-2 overflow-x-auto pb-1 sm:grid sm:grid-cols-[repeat(auto-fill,minmax(14rem,1fr))] sm:overflow-visible sm:pb-0">
+      {/* 26/11: `min(14rem,100%)`: numa caixa mais estreita que 14rem a coluna encolhe em vez de extravasar; no telemóvel cada cartão tem largura própria (85% da faixa, até 16rem), e o texto QUEBRA em vez de se cortar */}
+      <ul className="flex min-w-0 snap-x gap-2 overflow-x-auto pb-1 sm:grid sm:grid-cols-[repeat(auto-fill,minmax(min(14rem,100%),1fr))] sm:overflow-visible sm:pb-0">
         {zonas.map(({ zona, partes }) => {
           const atributo = pintadaPor?.[zona]?.atributo, acabamento = pintadaPor?.[zona]?.acabamento;
           return (
-            <li key={zona} className="min-w-[13rem] shrink-0 snap-start sm:min-w-0 sm:shrink">
+            <li key={zona} className="w-[min(16rem,85%)] min-w-0 shrink-0 snap-start sm:w-auto sm:shrink">
               <button type="button" data-zona-botao={zona} aria-pressed={fixa === zona} onClick={() => aoFixar(fixa === zona ? null : zona)}
                 onMouseEnter={() => aoApontar(zona)} onMouseLeave={() => aoApontar(null)} onFocus={() => aoApontar(zona)} onBlur={() => aoApontar(null)}
-                className={cn(BOTAO, "w-full flex-col items-start gap-0.5 py-2 text-left aria-pressed:border-primary aria-pressed:bg-muted")}>
+                className={cn(BOTAO, "h-full w-full min-w-0 flex-col items-start gap-0.5 break-words py-2 text-left aria-pressed:border-primary aria-pressed:bg-muted")}>
                 <span className="font-semibold">{rotuloDaZona(zona)} — {partes} {partes === 1 ? "parte" : "partes"}</span>{" "}
                 <span className="text-[14px] font-normal text-muted-foreground">{atributo ? `Pintada por: ${atributo}` : "Sem atributo de cor"}{acabamento ? ` · Superfície: ${acabamento}` : ""}</span>
               </button>
