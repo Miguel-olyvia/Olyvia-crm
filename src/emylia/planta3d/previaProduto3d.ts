@@ -102,6 +102,14 @@ export function fotoDosAtributos(attrs: readonly AtributoProduto[] | undefined, 
   return null;
 }
 
+/**
+ * 26/11: o 3D da FICHA de produto usa SÓ os modelos genéricos (decisão do dono): nunca o modelo do HTML (lava-loiça, placa, torneira, tampo Coverlam) nem outro modelo detalhado.
+ * Cada produto fica com o genérico da sua categoria (categoriasGlb.ts) ou, se o tipo não tem genérico, com o desenho aproximado ou a caixa. Uma escolha manual de «Modelo 3D» só
+ * vale se apontar para um genérico (a «caixa» e os revestimentos também). Pôr a `false` repõe os modelos do HTML na ficha. É o ÚNICO sítio que decide isto; só a ficha (e a futura
+ * vista de família, que passa por modeloParaPrevia) o lê: a planta e o Estúdio chamam modeloDoProduto sem esta opção e não mudam.
+ */
+export const PREVIA_SO_GENERICOS = true;
+
 export interface EntradaPrevia {
   nome: string; sub?: string; no: string | null; arvore: readonly NoCat[]; medida?: MedidaCm | null; cor?: string; /** a foto da opção de cor (URL público) */ textura?: TexturaModelo;
   /** O «Modelo 3D» escolhido no próprio produto (o que se está a escolher no formulário ou o gravado); a subcategoria e a categoria vêm da árvore. */
@@ -110,12 +118,14 @@ export interface EntradaPrevia {
   eixos?: Eixos | null;
   /** 24/11: a aparência de cada zona (frente, corpo…), dos atributos «Cor da frente», «Cor do corpo»…; sem ela, a foto ou cor única de hoje. */
   zonas?: ZonasDoProduto;
+  /** 26/11: só genéricos (por omissão `PREVIA_SO_GENERICOS`); `false` repõe os modelos do HTML (os testes fixam os dois lados). */
+  soGenericos?: boolean;
 }
 const ID_PREVIA = "previa-produto";
 
 /** O tipo de mockup que o classificador dá ao produto (antes da medida): o painel «Medidas» precisa dele para a regra de omissão dos eixos. */
-export function tipoDaPrevia({ nome, sub, no, arvore, modelo3d }: Pick<EntradaPrevia, "nome" | "sub" | "no" | "arvore" | "modelo3d">): TipoMockup {
-  return modeloDoProduto({ id: ID_PREVIA, n: nome.trim(), sub: sub?.trim() || undefined, no, ...(modelo3d ? { modelo3d } : {}) }, arvore).tipo;
+export function tipoDaPrevia({ nome, sub, no, arvore, modelo3d, soGenericos = PREVIA_SO_GENERICOS }: Pick<EntradaPrevia, "nome" | "sub" | "no" | "arvore" | "modelo3d" | "soGenericos">): TipoMockup {
+  return modeloDoProduto({ id: ID_PREVIA, n: nome.trim(), sub: sub?.trim() || undefined, no, ...(modelo3d ? { modelo3d } : {}) }, arvore, {}, { soGenericos }).tipo;
 }
 
 /**
@@ -123,13 +133,13 @@ export function tipoDaPrevia({ nome, sub, no, arvore, modelo3d }: Pick<EntradaPr
  * medida dos atributos por cima da do nome (repartida pelo tipo que o classificador deu; o que ela não diz vem do nome ou das omissões do tipo) e a cor do
  * atributo Cor, que o classificador não lê.
  */
-export function modeloParaPrevia({ nome, sub, no, arvore, medida, cor, textura, modelo3d, eixos, zonas }: EntradaPrevia): ProdutoModelo3D {
+export function modeloParaPrevia({ nome, sub, no, arvore, medida, cor, textura, modelo3d, eixos, zonas, soGenericos = PREVIA_SO_GENERICOS }: EntradaPrevia): ProdutoModelo3D {
   const p = { id: ID_PREVIA, n: nome.trim(), sub: sub?.trim() || undefined, no, ...(modelo3d ? { modelo3d } : {}) };
-  let m = modeloDoProduto(p, arvore);
+  let m = modeloDoProduto(p, arvore, {}, { soGenericos });
   const medidas = medida ? dimensoesDaMedida(m.tipo, medida, p.n, eixos) : null;
   if (medidas) {
     const d = m.dimensoes;
-    m = modeloDoProduto({ ...p, dim: [medidas.larguraCm ?? d.larguraCm, medidas.profundidadeCm ?? d.profundidadeCm, medidas.alturaCm ?? d.alturaCm] }, arvore);
+    m = modeloDoProduto({ ...p, dim: [medidas.larguraCm ?? d.larguraCm, medidas.profundidadeCm ?? d.profundidadeCm, medidas.alturaCm ?? d.alturaCm] }, arvore, {}, { soGenericos });
   }
   if (!cor && !textura && !zonas) return m;
   return { ...m, mockup3d: { ...m.mockup3d, ...(cor ? { cor } : {}), ...(textura ? { textura } : {}), ...(zonas ? { zonas } : {}) } };

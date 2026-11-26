@@ -67,11 +67,19 @@ describe("Modelo3DProduto: fechado por omissão, o 3D só arranca ao pedido", ()
     expect(screen.getByText("Sem modelo 3D parecido: aparece uma caixa com as medidas.")).toHaveAttribute("role", "status");
   });
   it("desenho aproximado: o 3D aparece com uma nota própria, e não a da caixa", async () => {
-    render(secao("Lava-loiça 1 cuba inox"));
+    // 26/11: era «Lava-loiça 1 cuba inox», que na ficha passou ao genérico (só genéricos); o quadro não tem genérico
+    render(secao("Quadro 60x40"));
     abrir();
     await screen.findByTestId("canvas3d");
     expect(screen.queryByText(/Sem modelo 3D parecido/)).toBeNull();
     expect(screen.getByText(/desenho aproximado/i)).toHaveAttribute("role", "status");
+  });
+  it("26/11: um modelo do catálogo 3D (HTML) escolhido no produto não se aplica na ficha, e o texto di-lo; um genérico escolhido não leva a nota", () => {
+    const { unmount } = render(secao("Misturadoras Monocomando Extraivel ROUND", { modelo3d: "html_torneira_cozinha" }));
+    expect(screen.getByTestId("modelo3d-origem")).toHaveTextContent(/usa só os modelos genéricos/);
+    unmount();
+    render(secao("Peça X", { modelo3d: "bide" }));
+    expect(screen.getByTestId("modelo3d-origem")).not.toHaveTextContent(/usa só os modelos genéricos/);
   });
   it("as medidas e a cor dos atributos chegam ao visualizador (mm passa a cm)", async () => {
     const attrs: AtributoProduto[] = [...MEDIDA, { atributoId: "a-cor", opcaoId: "o-verde", valor: "Verde" }];
