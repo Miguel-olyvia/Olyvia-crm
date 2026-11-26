@@ -6,11 +6,12 @@ import { cn } from "@/lib/utils";
 
 const ALTURAS = [0.32, 0.4, 0.46, 0.56, 0.68, 0.84, 1];
 
-export function SinalAoVivo({ rotulo = "Ao vivo", tamanho = 16, className, intenso = false }: {
+export function SinalAoVivo({ rotulo = "Ao vivo", tamanho = 16, className, intenso = false, cor = "bg-primary/80" }: {
   /** o que se lê no leitor de ecrã (e na dica) */ rotulo?: string;
   /** a altura em px (a barra mais alta) */ tamanho?: number;
   className?: string;
   /** mais rápido (a Olyvia a ouvir ou a pensar) */ intenso?: boolean;
+  /** a cor das barras (classe), por exemplo branco numa faixa escura */ cor?: string;
 }) {
   const parado = useReducedMotion();
   const largura = Math.max(2, Math.round(tamanho / 8));
@@ -20,7 +21,7 @@ export function SinalAoVivo({ rotulo = "Ao vivo", tamanho = 16, className, inten
         <motion.span
           key={i}
           aria-hidden="true"
-          className="block rounded-full bg-primary/80"
+          className={cn("block rounded-full", cor)}
           style={{ width: largura, height: tamanho * a, originY: 1 }}
           animate={parado ? undefined : { scaleY: [1, 0.45, 1] }}
           transition={parado ? undefined : { duration: intenso ? 0.7 : 1.3, repeat: Infinity, ease: "easeInOut", delay: i * (intenso ? 0.06 : 0.11) }}

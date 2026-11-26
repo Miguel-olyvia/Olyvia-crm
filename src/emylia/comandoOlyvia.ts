@@ -18,6 +18,8 @@ export const DESTINOS: Destino[] = [
   { url: "/equipas-obra", nome: "Equipas de obra", palavras: ["equipas de obra", "equipa de obra", "as equipas", "equipas"] },
   { url: "/catalogo/servicos", nome: "Catálogo e custos", palavras: ["catalogo e custos", "catalogo", "custos", "produtos e servicos", "precos"] },
   { url: "/prototipo/estudio", nome: "Estúdio", palavras: ["estudio", "a planta", "o projeto 3d"] },
+  // 26/11: os relatórios da Olyvia (negócios, obras, orçamento; PDF e Excel)
+  { url: "/relatorios/olyvia", nome: "Relatórios", palavras: ["relatorios", "relatorio", "os relatorios", "relatorio dos negocios"] },
 ];
 
 /** As fases do negócio, pela ordem do motor (motor.ts FASES): 0 Por contactar … 5 Obra. */

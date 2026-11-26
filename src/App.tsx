@@ -73,6 +73,8 @@ const CatalogoFamilias = lazy(() => import("./pages/CatalogoFamilias"));
 const CatalogoProdutos = lazy(() => import("./pages/CatalogoProdutos"));
 const Ativos = lazy(() => import("./pages/ativos/Ativos"));
 const NegociosEmylia = lazy(() => import("./pages/NegociosEmylia"));
+// 26/11: os relatórios da Olyvia (negócios, obras, orçamento; PDF e Excel), a partir da base de conhecimento
+const RelatoriosOlyvia = lazy(() => import("./pages/RelatoriosOlyvia"));
 
 const TeamHub = lazy(() => import("./pages/TeamHub"));
 const TechnicalSettings = lazy(() => import("./pages/TechnicalSettings"));
@@ -312,6 +314,7 @@ const App = () => (
                       <Route path="/pessoas" element={<ProtectedRoute permission="pessoas.view"><PessoasRota><PessoasCrm /></PessoasRota></ProtectedRoute>} />
                       <Route path="/pipeline" element={<ProtectedRoute permission="pessoas.view"><PessoasRota><PessoasPipeline /></PessoasRota></ProtectedRoute>} />
                       <Route path="/negocios" element={<RotaNegocios><NegociosEmylia /></RotaNegocios>} />
+                      <Route path="/relatorios/olyvia" element={<RotaNegocios><RelatoriosOlyvia /></RotaNegocios>} />
                       {/* 12/11: o ecrã de cada técnico, como ele o vê, para o super admin (sem entrar na conta dele); no menu: «Técnicos» */}
                       <Route path="/tecnicos" element={<ProtectedRoute adminOnly><RotaNegocios><NegociosEmylia verTecnicos /></RotaNegocios></ProtectedRoute>} />
                       {/* Utilizadores e Roles num só ecrã: entra quem tem users.view OU roles.view; cada separador pede a sua. */}

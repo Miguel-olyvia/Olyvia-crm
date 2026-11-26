@@ -174,6 +174,8 @@ export const TOOLS: ToolDef[] = [
   stageActions.deleteStageActionDef,
   // 26/11: a base de conhecimento da Olyvia (também nas páginas sem regra de ferramentas, onde vai a lista toda)
   conhecimento.consultarConhecimentoDef,
+  // 26/11: os relatórios da Olyvia (PDF, Excel, no ecrã)
+  conhecimento.relatorioOlyviaDef,
 ];
 
 
@@ -237,6 +239,7 @@ export type ToolCategory =
 export const CORE_TOOLS: ToolDef[] = [
   // 26/11: a base de conhecimento da Olyvia responde em qualquer página
   conhecimento.consultarConhecimentoDef,
+  conhecimento.relatorioOlyviaDef,
   navigation.navigateDef,
   context.getCurrentContextDef,
   search.searchEntitiesDef,

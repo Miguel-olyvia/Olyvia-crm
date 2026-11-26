@@ -209,7 +209,7 @@ export function palavrasDaProcura(frase: string): string[] {
 }
 export function conhecimentoParaTexto(L: LinhaConhecimento[]): Conhecimento | null {
   if (!L.length) return null;
-  const ordem: Record<string, number> = { resumo: 0, obra: 1, negocio: 2, guia: 3 };
+  const ordem: Record<string, number> = { resumo: 0, obra: 1, negocio: 2, orcamento: 3, custos: 4, guia: 5 };
   const s = [...L].sort((a, b) => (ordem[a.tipo] ?? 9) - (ordem[b.tipo] ?? 9));
   const recente = s.map((x) => x.atualizado_em).filter((x) => x).sort().pop() ?? null;
   const hora = recente ? new Date(recente).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit", timeZone: "Europe/Lisbon" }) : null;
@@ -222,7 +222,8 @@ async function lerConhecimento(sb: ReturnType<typeof createClient>, org: string,
   let negocios: LinhaConhecimento[] = [];
   if (palavras.length) {
     const ou = palavras.map((w) => `titulo.ilike.%${w}%`).join(",");
-    const { data } = await sb.from("olyvia_conhecimento").select("tipo, numero, titulo, texto, atualizado_em").eq("organization_id", org).eq("tipo", "negocio").or(ou).limit(12);
+    // 26/11: também o orçamento ao detalhe e os custos do negócio de que se fala (a RLS só dá os custos a quem os vê)
+    const { data } = await sb.from("olyvia_conhecimento").select("tipo, numero, titulo, texto, atualizado_em").eq("organization_id", org).in("tipo", ["negocio", "orcamento", "custos"]).or(ou).limit(18);
     negocios = (data ?? []) as LinhaConhecimento[];
   }
   return conhecimentoParaTexto([...((fixos ?? []) as LinhaConhecimento[]), ...negocios]);
