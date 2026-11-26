@@ -140,12 +140,16 @@ describe(`migration ${nome}`, () => {
   it("só escreve nos campos desta onda: nada de SKU, estado, subcategoria, modelo, atributos, apagar nem gerar SKU", () => {
     const corpo = sql.slice(sql.indexOf("DO $mig$"));
     const updates = [...corpo.matchAll(/UPDATE (\w+) \w+ SET (.*?) (?:FROM|WHERE) /g)].map((m) => ({ t: m[1], set: m[2] }));
-    expect(updates.map((u) => u.t)).toEqual(["products", "products", "products", "products", "item_suppliers", "product_prices"]);
+    expect(updates.map((u) => u.t)).toEqual(["products", "products", "products", "products", "item_suppliers", "item_suppliers",
+      "item_suppliers", "product_prices"]);
     const colunas = updates.flatMap((u) => [...u.set.matchAll(/(?:^|, )(\w+) = /g)].map((m) => `${u.t}.${m[1]}`));
     expect(colunas).toEqual(["products.name", "products.short_description", "products.brand_id", "products.fornecedor_livre",
-      "item_suppliers.supplier_id", "item_suppliers.supplier_sku", "item_suppliers.purchase_price", "product_prices.price", "product_prices.preco_exato"]);
+      "item_suppliers.supplier_sku", "item_suppliers.purchase_price",
+      "item_suppliers.is_preferred",
+      "item_suppliers.supplier_id", "item_suppliers.supplier_sku", "item_suppliers.purchase_price", "item_suppliers.is_preferred",
+      "product_prices.price", "product_prices.preco_exato"]);
     const inserts = [...corpo.matchAll(/INSERT INTO ([\w.]+)/g)].map((m) => m[1]);
-    expect(inserts.filter((t) => !t.startsWith("_mudelar_excel."))).toEqual(["product_prices"]);
+    expect(inserts.filter((t) => !t.startsWith("_mudelar_excel."))).toEqual(["entity_audit_log", "entity_audit_log", "product_prices"]);
     expect(sql).not.toMatch(/\bDELETE FROM\b/i);
     expect(sql).not.toMatch(/cat_gerar_sku_produto|rpc_delete_product|rpc_bulk_delete_product/);
     expect(sql).not.toMatch(/SET [^;]*\b(sku|status|subcategory_id|category_id|model_id|is_deleted|deleted_at|barcode)\s*=/);
@@ -179,13 +183,16 @@ describe(`migration ${nome}`, () => {
     expect(jaAplicada).toBeGreaterThan(semOrg);
     expect(jaAplicada).toBeLessThan(copia);
     for (const g of ["L1: a lista", "G1: a Mudelar tem % produtos vivos", "G1: a Mudelar tem % famílias", "G2: só % de %", "G2: % preços",
-      "mudelar_excel_onda1: estado a meio", "G4: só % de % marcas", "G4: só % de % fornecedores", "G4: um produto", "G5: o utilizador", "G6: %"]) {
+      "mudelar_excel_onda1: estado a meio", "G4: só % de % marcas", "G4: só % de % fornecedores", "G4: um produto",
+      "G4: % produtos têm outra ligação preferencial", "G4: % ligações a trocar", "G4: app.audit_bypass", "G5: o utilizador", "G6: %"]) {
       const i = sql.indexOf(`RAISE EXCEPTION '${g}`);
       expect(i, g).toBeGreaterThan(0);
       expect(i, g).toBeLessThan(copia);
     }
-    for (const w of ["W1", "W2", "W3", "W4", "W5", "W6", "W7"]) expect(sql.indexOf(`RAISE EXCEPTION '${w}: %`), w).toBeGreaterThan(escrita);
-    for (const c of ["C11: só %", "C11: marca_livre", "C11: products.supplier_id", "C1: % produtos tocados", "C1: % preços", "C1: % ligações",
+    for (const w of ["W1", "W2", "W3", "W4", "W5", "W5b", "W5c", "W6", "W7"]) expect(sql.indexOf(`RAISE EXCEPTION '${w}: %`), w).toBeGreaterThan(escrita);
+    for (const c of ["C11: só %", "C11: marca_livre", "C11: products.supplier_id não", "C11: products.supplier_id ficou", "C12: % linhas de auditoria",
+      "C12: só % de % auditorias", "C12: % auditorias de products", "C12: % linhas no histórico de preço das", "C12: % linhas no histórico de preços dos",
+      "C1: % produtos tocados", "C1: % preços", "C1: % ligações",
       "C2: há SKU", "C3: mudaram", "C3: a Mudelar ficou", "C4: mudaram", "C5: mudaram", "C5: a Mudelar ficou", "C6: mudaram", "C7: a Mudelar ficou",
       "C7: as famílias", "C7: % combinações", "C8: mudaram", "C9: %", "C10: o schema", "C10: % ficou"]) {
       expect(sql.indexOf(`RAISE EXCEPTION '${c}`), c).toBeGreaterThan(escrita);
@@ -193,6 +200,39 @@ describe(`migration ${nome}`, () => {
     expect(sql).toContain("PERFORM pg_advisory_xact_lock(hashtextextended('cat_familias:' || c_org::text, 0));");
     expect(sql).toContain("ORDER BY p.id FOR NO KEY UPDATE;");
     expect(sql.indexOf("pg_advisory_xact_lock")).toBeLessThan(copia);
+  });
+
+  it("a troca de fornecedor: desmarca, troca e volta a marcar, com a auditoria dos gatilhos desligada só aí e escrita uma vez à mão", () => {
+    // 26/11: o db push falhou com 23505 — fn_item_suppliers_check_preferred_conflict (BEFORE) conta a própria linha, ainda com o
+    // fornecedor antigo, como «outro preferencial» quando supplier_id muda num só UPDATE de uma ligação preferencial.
+    const corpo = sql.slice(sql.indexOf("DO $mig$"));
+    const on = corpo.indexOf("PERFORM set_config('app.audit_bypass', 'on', true);");
+    const off = corpo.indexOf("PERFORM set_config('app.audit_bypass', 'off', true);");
+    const w5a = corpo.indexOf("UPDATE item_suppliers i SET supplier_sku = ");
+    const desmarca = corpo.indexOf("UPDATE item_suppliers i SET is_preferred = false FROM _o1_isup x WHERE x.m_sup AND");
+    const troca = corpo.indexOf("UPDATE item_suppliers i SET supplier_id = x.sup_para,");
+    const auditoria = corpo.indexOf("INSERT INTO entity_audit_log");
+    const w6 = corpo.indexOf("UPDATE product_prices pp SET price");
+    expect(corpo.match(/set_config\('app\.audit_bypass'/g)).toHaveLength(2);
+    expect(w5a).toBeGreaterThan(0);
+    expect(on).toBeGreaterThan(w5a);
+    expect(desmarca).toBeGreaterThan(on);
+    expect(troca).toBeGreaterThan(desmarca);
+    expect(off).toBeGreaterThan(troca);
+    expect(auditoria).toBeGreaterThan(off);
+    expect(w6).toBeGreaterThan(auditoria);
+    // o W5a não toca no fornecedor e só nas ligações sem troca; a troca volta a marcar e só apanha as que o passo 1 desmarcou
+    expect(corpo.slice(w5a, desmarca)).toContain("WHERE NOT x.m_sup AND i.id = x.id");
+    expect(corpo.slice(w5a, on)).not.toMatch(/supplier_id =/);
+    expect(corpo.slice(troca, off)).toContain("is_preferred = true FROM _o1_isup x WHERE x.m_sup AND");
+    expect(corpo.slice(troca, off)).toContain("i.deleted_at IS NULL AND NOT i.is_preferred AND i.supplier_id = x.sup_de");
+    // só um UPDATE muda supplier_id: o do passo 2, depois de desmarcar
+    expect(corpo.match(/SET supplier_id = /g)).toHaveLength(1);
+    expect(corpo.match(/SET supplier_id = x\.sup_para,/g)).toHaveLength(1);
+    // a auditoria escrita à mão: ligações (sem os ruídos) e products.supplier_id, com o utilizador e a fonte da migration
+    expect(corpo).toContain("WHERE k.key <> ALL (ARRAY['updated_at', 'search_text', 'contact_attempts', 'last_activity_at'])");
+    expect(corpo.match(/NULL, c_criador, c_fonte FROM/g)).toHaveLength(2);
+    expect(corpo).toContain("jsonb_build_object('supplier_id', jsonb_build_object('old', b.linha -> 'supplier_id', 'new', to_jsonb(p.supplier_id)))");
   });
 
   it("as impressões digitais não usam updated_at e comparam-se antes e depois", () => {

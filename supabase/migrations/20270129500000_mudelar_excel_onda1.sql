@@ -18,7 +18,12 @@
 --   descrição .........  2543  (short_description, a que o Catálogo lê e grava; só onde a base está vazia)
 --   marca .............    21  (brand_id de uma marca que JÁ existe; o gatilho acerta marca_livre)
 --   fornecedor ........    76  (a ligação preferencial «Fornecedor Demo» passa ao fornecedor real do Excel, que já
---                              existe; o gatilho de item_suppliers acerta products.supplier_id; fornecedor_livre 76)
+--                              existe; o gatilho de item_suppliers acerta products.supplier_id; fornecedor_livre 76).
+--                              Em DOIS passos (W5b): desmarca is_preferred, troca o fornecedor e volta a marcar, porque o
+--                              gatilho BEFORE fn_item_suppliers_check_preferred_conflict conta a própria linha (ainda com o
+--                              fornecedor antigo) como «outro preferencial» num só UPDATE. A auditoria dos gatilhos fica
+--                              desligada (app.audit_bypass) só nesses dois UPDATE e a linha que um só UPDATE deixaria (uma por
+--                              ligação, uma por produto) escreve-se à mão (W5c); o histórico de preço da ligação sai uma vez.
 --   código fornecedor .   234  (item_suppliers.supplier_sku da ligação ao fornecedor do produto)
 --   custo/PVP .........    84  (a linha ATUAL de product_prices: price e preco_exato, como cat_definir_pvp; a
 --                              história fica em product_price_history pelo gatilho); preço da ligação 41
@@ -37,13 +42,16 @@
 -- GUARDAS (falham a migration inteira; nada fica): G0 a Mudelar existe (senão NOTICE e sai); G1 contagens de partida
 -- (produtos vivos, famílias, membros); G2 cada produto existe, é da Mudelar, está vivo e tem o SKU esperado; G3 cada valor
 -- «de» é o atual (ou todos já são «para»: já aplicada, sai por NOTICE); G4 marcas e fornecedores de destino vivos e da
--- Mudelar; G5 o utilizador da auditoria é membro ativo; G6 os eixos das famílias têm valores distintos.
+-- Mudelar; G4b nenhum produto tem outra ligação preferencial ativa, nenhuma ligação a trocar tem artigo do catálogo do
+-- fornecedor (fn_item_suppliers_catalog_guard apagava-o) e app.audit_bypass está desligado; G5 o utilizador da auditoria é
+-- membro ativo; G6 os eixos das famílias têm valores distintos.
 -- Lock: pg_advisory_xact_lock(hashtextextended('cat_familias:' || org, 0)) e os produtos FOR NO KEY UPDATE por ordem.
 -- CONFERÊNCIAS no fim: C1 contagens exatas; C2 0 SKU alterados na Mudelar; C3 impressão digital dos produtos (sem
 -- updated_at; nos tocados, sem os campos desta onda); C4 preços e C5 ligações a fornecedores que não são desta onda iguais;
 -- C6 atributos iguais; C7 famílias (548 / 14637, impressão digital e eixos distintos); C8 orçamentos, negócios, receitas,
 -- compras e negocio_vista_cliente iguais; C9 nada escrito fora da Mudelar (xmin); C10 a cópia fechada (::text);
--- C11 cada valor «para» ficou gravado.
+-- C11 cada valor «para» ficou gravado e products.supplier_id = o fornecedor da ligação preferencial; C12 uma só linha de
+-- auditoria por ligação (sem is_preferred) e por products.supplier_id, e uma só linha nos históricos de preço por alteração.
 --
 -- CÓPIA E REVERSÃO: o estado antigo de cada linha tocada fica no schema privado _mudelar_excel (onda1_*), só postgres.
 -- REVERSÃO: fora da pasta das migrations (estar aqui é ser aplicada): mudelar-reverter-onda1.sql, guardado com o trabalho.
@@ -6389,6 +6397,17 @@ BEGIN
              WHERE x.m_sup AND i.id <> x.id AND i.supplier_id = x.sup_para) THEN
     RAISE EXCEPTION 'G4: um produto já tem outra ligação ao fornecedor de destino.';
   END IF;
+  -- G4b: a troca de fornecedor (W5b) desmarca e volta a marcar a ligação; só é segura se o produto não tem outra ligação
+  -- preferencial ativa (senão fn_item_suppliers_sync_preferred passava-lhe products.supplier_id) e se a ligação não tem
+  -- artigo do catálogo do fornecedor (fn_item_suppliers_catalog_guard apagava-o ao mudar supplier_id)
+  SELECT count(DISTINCT x.product_id) INTO v_n FROM _o1_isup x JOIN item_suppliers i ON i.product_id = x.product_id
+  WHERE i.id <> x.id AND i.is_preferred AND i.deleted_at IS NULL;
+  IF v_n > 0 THEN RAISE EXCEPTION 'G4: % produtos têm outra ligação preferencial ativa.', v_n; END IF;
+  SELECT count(*) INTO v_n FROM _o1_isup x JOIN item_suppliers i ON i.id = x.id WHERE x.m_sup AND i.catalog_item_id IS NOT NULL;
+  IF v_n > 0 THEN RAISE EXCEPTION 'G4: % ligações a trocar de fornecedor têm artigo do catálogo do fornecedor.', v_n; END IF;
+  IF coalesce(current_setting('app.audit_bypass', true), '') = 'on' THEN
+    RAISE EXCEPTION 'G4: app.audit_bypass já está ligado antes da escrita.';
+  END IF;
   SELECT count(*) INTO v_n_marcas FROM brands b WHERE b.organization_id = c_org;
   SELECT count(*) INTO v_n_forn FROM suppliers s WHERE s.organization_id = c_org;
 
@@ -6476,18 +6495,65 @@ BEGIN
   WHERE x.campo = 'fornecedor_livre' AND p.id = x.id AND p.organization_id = c_org AND p.fornecedor_livre IS NOT DISTINCT FROM x.de;
   GET DIAGNOSTICS v_n = ROW_COUNT;
   IF v_n <> c_n_flivre THEN RAISE EXCEPTION 'W4: % fornecedor_livre escritos, esperados %.', v_n, c_n_flivre; END IF;
-  -- W5: ligações a fornecedores (fornecedor real em vez da Demo, código do fornecedor, preço da ligação = o custo novo);
-  -- o gatilho fn_item_suppliers_sync_preferred passa o fornecedor preferencial para products.supplier_id
+  -- W5: ligações a fornecedores (fornecedor real em vez da Demo, código do fornecedor, preço da ligação = o custo novo).
+  -- O gatilho BEFORE trg_item_suppliers_preferred_guard (fn_item_suppliers_check_preferred_conflict) conta a PRÓPRIA linha,
+  -- ainda com o fornecedor antigo, como «outro preferencial» quando o supplier_id de uma ligação preferencial muda num só
+  -- UPDATE (SQLSTATE 23505; e o índice item_suppliers_one_preferred_per_product só deixa uma preferencial por produto).
+  -- W5a: as ligações em que o fornecedor NÃO muda (só código e/ou preço): um UPDATE, com a auditoria normal dos gatilhos.
   UPDATE item_suppliers i
-     SET supplier_id    = CASE WHEN x.m_sup  THEN x.sup_para  ELSE i.supplier_id END,
-         supplier_sku   = CASE WHEN x.m_ssku THEN x.ssku_para ELSE i.supplier_sku END,
+     SET supplier_sku   = CASE WHEN x.m_ssku THEN x.ssku_para ELSE i.supplier_sku END,
          purchase_price = CASE WHEN x.m_pp   THEN x.pp_para   ELSE i.purchase_price END
     FROM _o1_isup x
-   WHERE i.id = x.id AND i.product_id = x.product_id AND i.organization_id = c_org AND i.deleted_at IS NULL AND i.is_preferred
-     AND (NOT x.m_sup OR i.supplier_id = x.sup_de) AND (NOT x.m_ssku OR i.supplier_sku IS NOT DISTINCT FROM x.ssku_de)
-     AND (NOT x.m_pp OR i.purchase_price = x.pp_de);
+   WHERE NOT x.m_sup AND i.id = x.id AND i.product_id = x.product_id AND i.organization_id = c_org AND i.deleted_at IS NULL AND i.is_preferred
+     AND (NOT x.m_ssku OR i.supplier_sku IS NOT DISTINCT FROM x.ssku_de) AND (NOT x.m_pp OR i.purchase_price = x.pp_de);
   GET DIAGNOSTICS v_n = ROW_COUNT;
-  IF v_n <> c_n_isup THEN RAISE EXCEPTION 'W5: % ligações a fornecedores escritas, esperadas %.', v_n, c_n_isup; END IF;
+  IF v_n <> c_n_isup - c_n_isup_sup THEN RAISE EXCEPTION 'W5: % ligações sem troca de fornecedor escritas, esperadas %.', v_n, c_n_isup - c_n_isup_sup; END IF;
+  -- W5b: as que trocam de fornecedor, em dois passos e com a auditoria dos gatilhos desligada SÓ aqui (app.audit_bypass,
+  -- como as RPC que escrevem uma linha consolidada): (1) desmarca is_preferred (fn_item_suppliers_sync_preferred põe
+  -- products.supplier_id a NULL, G4b garantiu que não há outra preferencial; não apaga a ligação nem lhe muda o
+  -- fornecedor); (2) troca fornecedor, código e preço e volta a marcar (o sync põe products.supplier_id no fornecedor novo;
+  -- o histórico de preço da ligação, que não segue app.audit_bypass, sai uma só vez, aqui). As linhas de auditoria que um
+  -- só UPDATE teria deixado (uma por ligação e uma por produto) escrevem-se à mão em W5c.
+  PERFORM set_config('app.audit_bypass', 'on', true);
+  UPDATE item_suppliers i SET is_preferred = false FROM _o1_isup x
+   WHERE x.m_sup AND i.id = x.id AND i.product_id = x.product_id AND i.organization_id = c_org AND i.deleted_at IS NULL AND i.is_preferred
+     AND i.supplier_id = x.sup_de AND (NOT x.m_ssku OR i.supplier_sku IS NOT DISTINCT FROM x.ssku_de) AND (NOT x.m_pp OR i.purchase_price = x.pp_de);
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  IF v_n <> c_n_isup_sup THEN RAISE EXCEPTION 'W5b: % ligações desmarcadas, esperadas %.', v_n, c_n_isup_sup; END IF;
+  UPDATE item_suppliers i
+     SET supplier_id    = x.sup_para,
+         supplier_sku   = CASE WHEN x.m_ssku THEN x.ssku_para ELSE i.supplier_sku END,
+         purchase_price = CASE WHEN x.m_pp   THEN x.pp_para   ELSE i.purchase_price END,
+         is_preferred   = true
+    FROM _o1_isup x
+   WHERE x.m_sup AND i.id = x.id AND i.product_id = x.product_id AND i.organization_id = c_org AND i.deleted_at IS NULL AND NOT i.is_preferred
+     AND i.supplier_id = x.sup_de AND (NOT x.m_ssku OR i.supplier_sku IS NOT DISTINCT FROM x.ssku_de) AND (NOT x.m_pp OR i.purchase_price = x.pp_de);
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  IF v_n <> c_n_isup_sup THEN RAISE EXCEPTION 'W5b: % ligações trocadas de fornecedor, esperadas %.', v_n, c_n_isup_sup; END IF;
+  PERFORM set_config('app.audit_bypass', 'off', true);
+  IF current_setting('app.audit_bypass', true) <> 'off' THEN RAISE EXCEPTION 'W5b: app.audit_bypass não voltou a off.'; END IF;
+  -- W5c: a auditoria da troca, igual à que fn_generic_entity_audit escreveria num só UPDATE: na ligação, os campos que
+  -- mudaram face à cópia (sem os ruídos updated_at, search_text, contact_attempts, last_activity_at); no produto, supplier_id
+  INSERT INTO entity_audit_log (organization_id, entity_id, record_id, table_name, operation, changed_fields, full_record, changed_by, source)
+  SELECT c_org, i.id, i.id, 'item_suppliers', 'UPDATE',
+         (SELECT jsonb_object_agg(k.key, jsonb_build_object('old', b.linha -> k.key, 'new', k.value))
+            FROM jsonb_each(to_jsonb(i)) k
+           WHERE k.key <> ALL (ARRAY['updated_at', 'search_text', 'contact_attempts', 'last_activity_at'])
+             AND (b.linha ->> k.key) IS DISTINCT FROM (to_jsonb(i) ->> k.key)),
+         NULL, c_criador, c_fonte
+    FROM item_suppliers i JOIN _mudelar_excel.onda1_item_suppliers b ON b.id = i.id
+   WHERE b.m_sup AND i.organization_id = c_org;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  IF v_n <> c_n_isup_sup THEN RAISE EXCEPTION 'W5c: % linhas de auditoria das ligações, esperadas %.', v_n, c_n_isup_sup; END IF;
+  INSERT INTO entity_audit_log (organization_id, entity_id, record_id, table_name, operation, changed_fields, full_record, changed_by, source)
+  SELECT c_org, p.id, p.id, 'products', 'UPDATE',
+         jsonb_build_object('supplier_id', jsonb_build_object('old', b.linha -> 'supplier_id', 'new', to_jsonb(p.supplier_id))),
+         NULL, c_criador, c_fonte
+    FROM products p JOIN _mudelar_excel.onda1_produtos b ON b.id = p.id
+   WHERE p.organization_id = c_org AND p.id IN (SELECT x.product_id FROM _o1_isup x WHERE x.m_sup)
+     AND (b.linha ->> 'supplier_id') IS DISTINCT FROM p.supplier_id::text;
+  GET DIAGNOSTICS v_n = ROW_COUNT;
+  IF v_n <> c_n_isup_sup THEN RAISE EXCEPTION 'W5c: % linhas de auditoria de products.supplier_id, esperadas %.', v_n, c_n_isup_sup; END IF;
   -- W6: custo e PVP na linha ATUAL (como cat_definir_pvp: price a 2 casas e preco_exato a 6); a história fica em
   -- product_price_history pelo gatilho log_product_price_change (changed_by = app.audit_user_id)
   UPDATE product_prices pp SET price = x.para, preco_exato = x.exato FROM _o1_preco x
@@ -6531,6 +6597,42 @@ BEGIN
   WHERE (NOT x.m_sup OR i.supplier_id = x.sup_para) AND (NOT x.m_ssku OR i.supplier_sku IS NOT DISTINCT FROM x.ssku_para)
     AND (NOT x.m_pp OR i.purchase_price = x.pp_para) AND i.deleted_at IS NULL AND i.is_preferred;
   IF v_n <> c_n_isup THEN RAISE EXCEPTION 'C11: só % de % ligações a fornecedores ficaram como no Excel.', v_n, c_n_isup; END IF;
+  SELECT count(*) INTO v_n FROM _o1_isup x JOIN products p ON p.id = x.product_id WHERE p.supplier_id IS DISTINCT FROM
+    (SELECT i.supplier_id FROM item_suppliers i WHERE i.id = x.id);
+  IF v_n > 0 THEN RAISE EXCEPTION 'C11: products.supplier_id ficou diferente da ligação preferencial em % produtos.', v_n; END IF;
+
+  -- C12: auditoria e históricos sem duplicados (now() = o início desta transação, o mesmo em todas as linhas que ela escreve)
+  SELECT count(*), count(DISTINCT l.record_id),
+         count(*) FILTER (WHERE l.changed_fields ? 'is_preferred' OR l.changed_fields IS NULL OR l.changed_fields = '{}'::jsonb)
+    INTO v_n, v_m, v_pend
+  FROM entity_audit_log l
+  WHERE l.table_name = 'item_suppliers' AND l.record_id IN (SELECT x.id FROM _o1_isup x) AND l.created_at = now() AND l.source = c_fonte;
+  IF v_n <> c_n_isup OR v_m <> c_n_isup OR v_pend > 0 THEN
+    RAISE EXCEPTION 'C12: % linhas de auditoria das ligações (% ligações, % com is_preferred ou vazias); esperadas % e %.', v_n, v_m, v_pend, c_n_isup, c_n_isup;
+  END IF;
+  SELECT count(*) INTO v_n FROM entity_audit_log l JOIN _o1_isup x ON x.id = l.record_id
+  WHERE x.m_sup AND l.table_name = 'item_suppliers' AND l.created_at = now() AND l.source = c_fonte
+    AND (l.changed_fields -> 'supplier_id' ->> 'old') IS NOT DISTINCT FROM x.sup_de::text
+    AND (l.changed_fields -> 'supplier_id' ->> 'new') IS NOT DISTINCT FROM x.sup_para::text;
+  IF v_n <> c_n_isup_sup THEN RAISE EXCEPTION 'C12: só % de % auditorias da troca dizem o fornecedor antigo e o novo.', v_n, c_n_isup_sup; END IF;
+  SELECT count(*), count(DISTINCT l.record_id),
+         count(*) FILTER (WHERE (l.changed_fields -> 'supplier_id' ->> 'new') IS DISTINCT FROM x.sup_para::text)
+    INTO v_n, v_m, v_pend
+  FROM entity_audit_log l JOIN _o1_isup x ON x.product_id = l.record_id AND x.m_sup
+  WHERE l.table_name = 'products' AND l.changed_fields ? 'supplier_id' AND l.created_at = now() AND l.source = c_fonte;
+  IF v_n <> c_n_isup_sup OR v_m <> c_n_isup_sup OR v_pend > 0 THEN
+    RAISE EXCEPTION 'C12: % auditorias de products.supplier_id (% produtos, % sem o fornecedor novo); esperadas %.', v_n, v_m, v_pend, c_n_isup_sup;
+  END IF;
+  SELECT count(*), count(DISTINCT h.item_supplier_id),
+         count(*) FILTER (WHERE NOT x.m_pp OR h.old_price IS DISTINCT FROM x.pp_de OR h.new_price IS DISTINCT FROM x.pp_para)
+    INTO v_n, v_m, v_pend
+  FROM item_supplier_price_history h JOIN _o1_isup x ON x.id = h.item_supplier_id WHERE h.changed_at = now();
+  IF v_n <> c_n_isup_pp OR v_m <> c_n_isup_pp OR v_pend > 0 THEN
+    RAISE EXCEPTION 'C12: % linhas no histórico de preço das ligações (% ligações, % erradas); esperadas %.', v_n, v_m, v_pend, c_n_isup_pp;
+  END IF;
+  SELECT count(*) INTO v_n FROM product_price_history h
+  WHERE h.product_id IN (SELECT x.product_id FROM _o1_preco x) AND h.changed_at = now();
+  IF v_n <> c_n_preco THEN RAISE EXCEPTION 'C12: % linhas no histórico de preços dos produtos, esperadas %.', v_n, c_n_preco; END IF;
 
   -- C1: nos produtos tocados só mudaram os campos desta onda (comparado com a cópia, campo a campo)
   SELECT count(*) INTO v_n FROM _mudelar_excel.onda1_produtos b JOIN products p ON p.id = b.id
