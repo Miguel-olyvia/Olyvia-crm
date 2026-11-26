@@ -108,6 +108,9 @@ export function itemCustos(d: Negocio, S: Estado): ItemConhecimento | null {
   if (!d.orc?.linhas?.length) return null;
   let t: ReturnType<typeof tot>;
   try { t = tot(d, S); } catch { return null; }
+  // 26/11: quem não vê custos (o robô do servidor, sem quotes.view_costs) lê as linhas com o custo a 0: não se escreve uma margem de 100%.
+  // A gravação (20270128300000) guarda os custos que já lá estão quando a lista não traz nenhum.
+  if (!(t.custo > 0)) return null;
   let real: ReturnType<typeof realPorFase> = null;
   try { real = d.obra?.plano ? realPorFase(d, S) : null; } catch { real = null; }
   const fases = (real?.fases ?? []).map((f) => ({ nome: f.curto ?? f.nome, prev: r2(f.prev.custo), real: r2(f.real.custo), preco: r2(f.preco), margemPrev: r2(f.margemPrev), margemReal: r2(f.margemReal) }));

@@ -23,7 +23,16 @@ const pct = (n: number | null | undefined) => (n == null || !Number.isFinite(n) 
 const num = (x: unknown) => (typeof x === "number" && Number.isFinite(x) ? x : 0);
 const str = (x: unknown) => (typeof x === "string" ? x : "");
 const dataPt = (iso: string | null | undefined) => (iso ? new Date(iso).toLocaleString("pt-PT", { day: "numeric", month: "long", year: "numeric", hour: "2-digit", minute: "2-digit" }) : null);
-const dia = (iso: unknown) => (typeof iso === "string" && iso ? iso.slice(0, 10).split("-").reverse().join("-") : "—");
+const MESES = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
+/** A data por extenso: ISO («2026-11-24…») ou como a app a guarda («24/11 23:20», «24/11»); outro texto fica como está. */
+export const dia = (v: unknown): string => {
+  if (typeof v !== "string" || !v.trim()) return "—";
+  const iso = v.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${+iso[3]} de ${MESES[+iso[2] - 1]} de ${iso[1]}`;
+  const pt = v.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+  if (pt && +pt[2] >= 1 && +pt[2] <= 12) return `${+pt[1]} de ${MESES[+pt[2] - 1]}${pt[3] ? ` de ${pt[3].length === 2 ? `20${pt[3]}` : pt[3]}` : ""}`;
+  return v.trim();
+};
 const hojeIso = () => new Date().toISOString().slice(0, 10);
 const limpar = (s: string) => s.replace(/[\\/:*?"<>|]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 80);
 const recente = (L: LinhaBase[]) => L.map((x) => x.atualizado_em).filter(Boolean).sort().pop() ?? null;
