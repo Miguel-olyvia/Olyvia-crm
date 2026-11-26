@@ -264,6 +264,33 @@ describe("5. um só «Guardar», «Descartar» e o estado", () => {
     fireEvent.click(guardar());
     expect(chamadasDe("cat_definir_config_3d")).toHaveLength(0);
   });
+  it("«Descartar» anuncia numa região viva que as alterações foram descartadas", async () => {
+    baseCom([{ atributo: A_TONAL, zona: "tudo", aplicar: true }]);
+    await abrir();
+    clicar("frente");
+    fireEvent.click(within(painel()).getByRole("button", { name: "Só esta zona é diferente" }));
+    fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
+    const viva = await screen.findByText("Alterações descartadas.");
+    expect(viva.getAttribute("aria-live")).toBe("polite");
+  });
+  it("com alterações por guardar, «Voltar a herdar as regras» fica desactivado e di-lo (para não apagar o rascunho sem aviso); depois de descartar volta a actuar", async () => {
+    baseCom([{ atributo: A_TONAL, zona: "tudo", aplicar: true }]);
+    await abrir();
+    clicar("frente");
+    fireEvent.click(within(painel()).getByRole("button", { name: "Só esta zona é diferente" }));
+    const herdar = screen.getByRole("button", { name: "Voltar a herdar as regras" });
+    expect(herdar.getAttribute("aria-disabled")).toBe("true");
+    expect(document.getElementById(herdar.getAttribute("aria-describedby")!)?.textContent).toMatch(/guarde ou descarte/i);
+    fireEvent.click(herdar);
+    expect(chamadasDe("cat_definir_config_3d")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Descartar" }));
+    expect(screen.getByRole("button", { name: "Voltar a herdar as regras" }).getAttribute("aria-disabled")).toBe("false");
+  });
+  it("sem zona escolhida o texto manda escolher na lista de zonas (não «em baixo»)", async () => {
+    await abrir();
+    expect(screen.getByText(/escolhe uma zona na lista de zonas/i)).toBeTruthy();
+    expect(screen.queryByText(/em baixo/i)).toBeNull();
+  });
   it("«Voltar a herdar as regras» só actua quando o produto tem regras próprias", async () => {
     baseCom([{ atributo: A_TONAL, zona: "tudo", aplicar: true }]);
     await abrir();
@@ -296,6 +323,26 @@ describe("7. teclado e foco", () => {
       expect(nomes.size).toBe(1);
     }
   });
+  it("o botão «Só esta zona é diferente» desaparece depois de usado e o foco vai para o título da zona (não cai no corpo da página)", async () => {
+    baseCom([{ atributo: A_TONAL, zona: "tudo", aplicar: true }]);
+    await abrir();
+    clicar("frente");
+    const botao = within(painel()).getByRole("button", { name: "Só esta zona é diferente" });
+    botao.focus();
+    fireEvent.click(botao);
+    expect(within(painel()).queryByRole("button", { name: "Só esta zona é diferente" })).toBeNull();
+    expect(document.activeElement).toBe(within(painel()).getByRole("heading", { name: "Zona: Frente" }));
+  });
+  it("«Dar prioridade a …» também leva o foco ao título da zona quando o aviso de conflito desaparece", async () => {
+    baseCom([{ atributo: A_CORPO, zona: "tudo", aplicar: true }, { atributo: A_FRENTE, zona: "frente", aplicar: true }]);
+    await abrir();
+    clicar("frente");
+    const botao = within(painel()).getByRole("button", { name: "Dar prioridade a Cor da frente nesta zona" });
+    botao.focus();
+    fireEvent.click(botao);
+    expect(within(painel()).queryByRole("button", { name: /Dar prioridade/ })).toBeNull();
+    expect(document.activeElement).toBe(within(painel()).getByRole("heading", { name: "Zona: Frente" }));
+  });
   it("Escape devolve o foco ao botão da zona de onde veio", async () => {
     await abrir();
     const botao = within(screen.getByRole("heading", { name: "Zonas" }).closest("section")!).getByRole("button", { name: /^Frente/ });
@@ -312,11 +359,26 @@ describe("8. o 3D acompanha a regra apontada", () => {
     baseCom([{ atributo: A_TONAL, zona: "tudo", aplicar: true }, { atributo: A_TONAL, zona: "frente", aplicar: false }]);
     const c = await abrir();
     const cabeca = regras().find((g) => (within(g).getByLabelText(/^Zona/) as HTMLSelectElement).value === "tudo")!;
-    fireEvent.focus(within(cabeca).getByLabelText("Atributo"));
+    const campo = within(cabeca).getByLabelText("Atributo");
+    fireEvent.focus(campo);
     const zonas = c.getAttribute("data-realce")!.split(",");
     expect(zonas).toContain("corpo");
     expect(zonas).not.toContain("frente");
     fireEvent.mouseLeave(cabeca);
+    expect(c.getAttribute("data-realce")).toContain("corpo"); // o foco ainda está dentro da regra
+    fireEvent.blur(campo);
+    expect(c.getAttribute("data-realce")).toBe("");
+  });
+});
+
+describe("8b. o realce acompanha a edição da regra apontada", () => {
+  it("desligar «Pinta» na regra focada tira logo o realce (não fica a realçar o que a regra já não pinta)", async () => {
+    baseCom([{ atributo: A_TONAL, zona: "tudo", aplicar: true }]);
+    const c = await abrir();
+    const regra = regras()[0];
+    fireEvent.focus(within(regra).getByLabelText("Atributo"));
+    expect(c.getAttribute("data-realce")).not.toBe("");
+    fireEvent.click(within(regra).getByRole("switch", { name: "Pinta" }));
     expect(c.getAttribute("data-realce")).toBe("");
   });
 });

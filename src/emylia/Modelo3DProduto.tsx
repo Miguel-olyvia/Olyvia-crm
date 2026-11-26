@@ -6,7 +6,7 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { cn } from "@/lib/utils";
 import { Previa3DProduto } from "./Previa3DProduto";
 import type { Config3dPrevia } from "./Previa3DLigacoes";
-import { ligacoesDaConfig, type Ligacao } from "./config3dDados";
+import { ligacoesDaConfig, mesmasLigacoes, type Ligacao } from "./config3dDados";
 import { useConfig3d, type AlvoConfig3d } from "./useConfig3d";
 import { urlDaFotoOpcao } from "./fotoOpcaoUrl";
 import { corDosAtributos, fotoDosAtributos, medidaDosAtributos } from "./planta3d/previaProduto3d";
@@ -35,7 +35,6 @@ export interface Modelo3DProdutoProps {
   alvoConfig3d?: AlvoConfig3d;
 }
 
-const mesmasLigacoes = (a: readonly Ligacao[], b: readonly Ligacao[]): boolean => JSON.stringify(a) === JSON.stringify(b);
 const SEM_LIGACOES: readonly Ligacao[] = [];
 
 /** O 3D aberto: nasce com o que há agora e, ao escrever o nome ou as medidas, espera um instante antes de se redesenhar. Só existe enquanto está aberto. */

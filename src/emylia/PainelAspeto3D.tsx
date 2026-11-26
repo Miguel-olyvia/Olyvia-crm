@@ -13,7 +13,7 @@ import type { ZonaGlb, ZonasDoProduto } from "./planta3d/zonasGlb";
 import { porqueDaZona, zonasSemEfeito } from "./porqueDaZona";
 
 const NOTA = "text-[15px] text-muted-foreground";
-const BOTAO = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-input bg-card px-4 text-[15px] font-medium transition-colors duration-200 hover:bg-muted focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25";
+const BOTAO = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-input bg-card px-4 text-[15px] font-medium transition-colors duration-200 hover:bg-muted focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const BOTAO_PRINCIPAL = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-primary bg-primary px-4 text-[15px] font-medium text-primary-foreground transition-colors duration-200 hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2";
 const DESLIGADO = "cursor-not-allowed opacity-50 hover:bg-card";
 const FRASE_FALHA = "Não foi possível guardar. As alterações continuam aqui; tenta outra vez.";
@@ -62,7 +62,7 @@ export function PainelAspeto3D({ zonaFixa, zonasDoModelo, pintadaPor, atributos,
   useEffect(() => { if (alterado) setMsg((m) => (m && !m.erro ? null : m)); }, [alterado]);
   const invalida = lig ? erroDasLigacoes(lig.valor) : null;
   const podeGuardar = !!lig && lig.alterado && !invalida && !ocupado;
-  const idErro = `${id}-erro`, idRazao = `${id}-razao`;
+  const idErro = `${id}-erro`, idRazao = `${id}-razao`, idHerdar = `${id}-herdar`;
   const razao = invalida ? null : ocupado ? "A guardar…" : !alterado ? "Sem alterações para guardar." : null;
   const descreveGuardar = podeGuardar ? undefined : invalida ? idErro : idRazao;
   const leitura = config3d?.leitura;
@@ -99,7 +99,7 @@ export function PainelAspeto3D({ zonaFixa, zonasDoModelo, pintadaPor, atributos,
           ligacoes={lig ? { valor: lig.valor, podeEditar, aoMudar: lig.aoMudar } : undefined} pintaHoje={pintaHoje} {...(pelaNome ? { pelaNome } : {})}
           {...(porque ? { porque } : {})} focarAoAbrir={focarAoAbrir} aoFechar={aoFechar} />
       ) : zonasDoModelo.length >= 2 ? (
-        <p className={NOTA}>Toca numa parte do móvel ou escolhe uma zona em baixo para ver o que a pinta.</p>
+        <p className={NOTA}>Toca numa parte do móvel ou escolhe uma zona na lista de zonas para ver o que a pinta.</p>
       ) : null}
 
       {lig && mostrarRegras && zonasDoModelo.length >= 1 && (
@@ -112,16 +112,19 @@ export function PainelAspeto3D({ zonaFixa, zonasDoModelo, pintadaPor, atributos,
           <div className="flex flex-wrap items-center gap-2">
             {/* aria-disabled (e não disabled): um botão desactivado perde o foco do teclado ao ser carregado; assim o foco fica e o clique é só ignorado */}
             {lig.descartar && (
-              <button type="button" aria-disabled={!alterado || ocupado} onClick={() => { if (alterado && !ocupado) { lig.descartar?.(); setMsg(null); } }} className={cn(BOTAO, (!alterado || ocupado) && DESLIGADO)}>Descartar</button>
+              <button type="button" aria-disabled={!alterado || ocupado} onClick={() => { if (alterado && !ocupado) { lig.descartar?.(); setMsg({ erro: false, texto: "Alterações descartadas." }); } }} className={cn(BOTAO, (!alterado || ocupado) && DESLIGADO)}>Descartar</button>
             )}
             <button type="button" aria-disabled={!podeGuardar} aria-describedby={descreveGuardar} aria-busy={ocupado} onClick={() => { if (podeGuardar) void correr(lig.gravar, "Regras guardadas."); }}
               className={cn(BOTAO_PRINCIPAL, !podeGuardar && "cursor-not-allowed opacity-50 hover:bg-primary")}>
               {ocupado && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" aria-hidden="true" />}Guardar aspeto 3D
             </button>
-            <button type="button" aria-disabled={!lig.proprio || ocupado} onClick={() => { if (lig.proprio && !ocupado) void correr(lig.herdar, "As regras voltaram a ser herdadas."); }}
-              className={cn(BOTAO, (!lig.proprio || ocupado) && DESLIGADO)}>Voltar a herdar as regras</button>
+            {/* apaga as regras guardadas do produto: com um rascunho por guardar perder-se-ia sem aviso, por isso primeiro guarda-se ou descarta-se */}
+            <button type="button" aria-disabled={!lig.proprio || ocupado || alterado} aria-describedby={alterado && lig.proprio ? idHerdar : undefined}
+              onClick={() => { if (lig.proprio && !ocupado && !alterado) void correr(lig.herdar, "As regras voltaram a ser herdadas."); }}
+              className={cn(BOTAO, (!lig.proprio || ocupado || alterado) && DESLIGADO)}>Voltar a herdar as regras</button>
           </div>
           {razao && <p id={idRazao} className={NOTA}>{razao}</p>}
+          {alterado && lig.proprio && <p id={idHerdar} className={NOTA}>Guarde ou descarte as alterações antes de voltar a herdar as regras.</p>}
           {/* região viva: o resultado de guardar ou de voltar a herdar; o erro como alerta */}
           <p aria-live="polite" className={NOTA}>{msg && !msg.erro ? msg.texto : ""}</p>
           {msg?.erro && <p role="alert" className="text-[15px] text-red-700 dark:text-red-400">{msg.texto}{msg.texto === FRASE_FALHA ? "" : ` ${FRASE_FALHA}`}</p>}

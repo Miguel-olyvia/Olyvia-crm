@@ -179,6 +179,90 @@ describe("regra repetida", () => {
     expect(aviso.getAttribute("role")).toBe("alert");
     expect(aviso.id).toBe("erro-regras");
   });
+  it("com as Regras escondidas o aviso continua visível (o «Guardar» desactivado aponta para ele)", () => {
+    montar({ valor: [L(A_FRENTE, "frente"), L(A_FRENTE, "frente", false)] });
+    fireEvent.click(screen.getByRole("button", { name: "Esconder" }));
+    expect(screen.queryByRole("group", { name: "Regra 1" })).toBeNull();
+    const aviso = screen.getByRole("alert");
+    expect(aviso.textContent).toMatch(/repetida/i);
+    expect(aviso.id).toBe("erro-regras");
+  });
+});
+
+describe("mudar o atributo ou a zona de uma regra não faz perder o foco (a linha pode mudar de grupo)", () => {
+  function Guardado({ inicial, aoApontar }: { inicial: Ligacao[]; aoApontar?: (z: readonly string[] | null) => void }) {
+    const [valor, setValor] = useState<Ligacao[]>(inicial);
+    return <RegrasDoProduto valor={valor} origem="automatico" atributos={ATRIBUTOS} zonas={ZONAS} orfas={0} ignoradas={0} podeEditar aoMudar={setValor} idErro="e" aoApontar={aoApontar} />;
+  }
+  it("mudar o «Atributo» para o de outro grupo leva a linha para esse grupo e o foco fica no mesmo campo", () => {
+    render(<Guardado inicial={[L(A_FRENTE, "tudo"), L(A_CORPO, "frente"), L(A_BRILHO, "tudo")]} />);
+    const seletor = screen.getAllByLabelText("Atributo")[1] as HTMLSelectElement; // a regra 2 (Cor do corpo · Frente)
+    seletor.focus();
+    fireEvent.change(seletor, { target: { value: A_FRENTE } });
+    const ativo = document.activeElement as HTMLSelectElement;
+    expect(ativo.tagName).toBe("SELECT");
+    expect(ativo.value).toBe(A_FRENTE);
+    expect(ativo.id.endsWith("-a1")).toBe(true);
+  });
+  it("mudar a «Zona» para «Todas as zonas» (a linha passa à cabeça do grupo) mantém o foco", () => {
+    render(<Guardado inicial={[L(A_FRENTE, "frente"), L(A_FRENTE, "corpo")]} />);
+    const seletor = screen.getAllByLabelText(/^Zona/)[1] as HTMLSelectElement; // a regra 2
+    seletor.focus();
+    fireEvent.change(seletor, { target: { value: "tudo" } });
+    const ativo = document.activeElement as HTMLSelectElement;
+    expect(ativo.value).toBe("tudo");
+    expect(ativo.id.endsWith("-z1")).toBe(true);
+  });
+  it("carregar em «Pinta» numa regra que muda de sítio mantém o foco no interruptor", () => {
+    render(<Guardado inicial={[L(A_FRENTE, "frente"), L(A_FRENTE, "tudo")]} />);
+    const interruptor = screen.getAllByRole("switch", { name: "Pinta" })[1]; // a da «frente», que fica sob «Todas as zonas»
+    interruptor.focus();
+    fireEvent.click(interruptor);
+    expect(document.activeElement?.getAttribute("role")).toBe("switch");
+    expect(document.activeElement?.getAttribute("aria-checked")).toBe("false");
+  });
+  it("o realce no 3D acompanha a regra enquanto se edita (desligar «Pinta» com o rato por cima tira o realce; mudar a zona realça a nova)", () => {
+    const aoApontar = vi.fn();
+    render(<Guardado inicial={[L(A_FRENTE, "tudo")]} aoApontar={aoApontar} />);
+    const linha = screen.getByRole("group", { name: "Regra 1" });
+    fireEvent.mouseEnter(linha);
+    expect(aoApontar).toHaveBeenLastCalledWith(["frente", "corpo", "tampo"]);
+    fireEvent.change(screen.getByLabelText(/^Zona/), { target: { value: "corpo" } });
+    expect(aoApontar).toHaveBeenLastCalledWith(["corpo"]);
+    fireEvent.click(screen.getByRole("switch", { name: "Pinta" }));
+    expect(aoApontar).toHaveBeenLastCalledWith([]);
+  });
+  it("o foco dentro da linha e o rato fora dela mantêm o realce; o realce acaba só quando os dois saem", () => {
+    const aoApontar = vi.fn();
+    render(<Guardado inicial={[L(A_FRENTE, "corpo")]} aoApontar={aoApontar} />);
+    const linha = screen.getByRole("group", { name: "Regra 1" });
+    const campo = within(linha).getByLabelText("Atributo");
+    fireEvent.focus(campo);
+    fireEvent.mouseEnter(linha);
+    fireEvent.mouseLeave(linha);
+    expect(aoApontar).toHaveBeenLastCalledWith(["corpo"]); // o foco continua lá dentro
+    fireEvent.blur(campo);
+    expect(aoApontar).toHaveBeenLastCalledWith(null);
+  });
+  it("remover a regra apontada tira o realce", () => {
+    const aoApontar = vi.fn();
+    render(<Guardado inicial={[L(A_FRENTE, "corpo")]} aoApontar={aoApontar} />);
+    fireEvent.mouseEnter(screen.getByRole("group", { name: "Regra 1" }));
+    expect(aoApontar).toHaveBeenLastCalledWith(["corpo"]);
+    fireEvent.click(screen.getByRole("button", { name: "Remover a regra 1" }));
+    expect(aoApontar).toHaveBeenLastCalledWith(null);
+  });
+});
+
+describe("o nome da regra e do botão de remover dizem de que regra se trata", () => {
+  it("cada linha e cada «Remover» têm uma descrição com o atributo e a zona (o número é só da lista)", () => {
+    montar({ valor: [L(A_FRENTE, "frente"), L(A_CORPO, "tudo", false)] });
+    const um = screen.getByRole("group", { name: "Regra 1" });
+    expect(um.getAttribute("aria-describedby")).toBeTruthy();
+    expect(document.getElementById(um.getAttribute("aria-describedby")!)?.textContent).toBe("Cor da frente, Frente");
+    const remover = screen.getByRole("button", { name: "Remover a regra 2" });
+    expect(document.getElementById(remover.getAttribute("aria-describedby")!)?.textContent).toBe("Cor do corpo, Todas as zonas");
+  });
 });
 
 describe("origem das regras, só leitura e avisos", () => {

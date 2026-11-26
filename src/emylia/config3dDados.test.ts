@@ -10,7 +10,7 @@ vi.mock("@/integrations/supabase/client", () => ({
   supabase: { rpc: vi.fn(async (f: string, a: Record<string, unknown>) => { base.chamadas.push({ f, a }); return base.responder(f, a); }) },
 }));
 
-import { definirConfig3d, lerConfig3d, ligacoesDaConfig, type Ligacao } from "./config3dDados";
+import { definirConfig3d, lerConfig3d, ligacoesDaConfig, mesmasLigacoes, type Ligacao } from "./config3dDados";
 import { chaveDeExclusao } from "./planta3d/aspetoZonas";
 import type { Eixos } from "./planta3d/eixosMedida";
 
@@ -171,5 +171,21 @@ describe("ligacoesDaConfig: de uma lista a «que atributo pinta que zonas» e ao
   });
   it("sem lista (null): nada", () => {
     expect(ligacoesDaConfig(null)).toEqual({ ligacoes: {}, excluidos: new Set() });
+  });
+});
+
+describe("mesmasLigacoes: as mesmas regras noutra ordem não são uma alteração", () => {
+  const X: Ligacao = { atributo: A1, zona: "frente", aplicar: true }, Y: Ligacao = { atributo: A2, zona: "tudo", aplicar: false };
+  it("a ordem não conta", () => {
+    expect(mesmasLigacoes([X, Y], [Y, X])).toBe(true);
+    expect(mesmasLigacoes([], [])).toBe(true);
+  });
+  it("um «aplicar» diferente, uma regra a mais ou uma zona diferente contam", () => {
+    expect(mesmasLigacoes([X], [{ ...X, aplicar: false }])).toBe(false);
+    expect(mesmasLigacoes([X], [X, Y])).toBe(false);
+    expect(mesmasLigacoes([X], [{ ...X, zona: "corpo" }])).toBe(false);
+  });
+  it("uma regra repetida não se confunde com uma só (a lista inválida continua diferente)", () => {
+    expect(mesmasLigacoes([X, X], [X])).toBe(false);
   });
 });

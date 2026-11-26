@@ -14,8 +14,8 @@ import { ZONAS, rotuloDaZona, type ZonaGlb } from "./planta3d/zonasGlb";
 import type { AtributoDef, AtributoProduto } from "./v2/catalogoModelo";
 
 const NOTA = "text-[15px] text-muted-foreground";
-const BOTAO = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-input bg-card px-4 text-[15px] font-medium transition-colors duration-200 hover:bg-muted focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25";
-const SELECT = "min-h-11 w-full rounded-lg border border-input bg-card px-3 text-[15px] text-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25";
+const BOTAO = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-input bg-card px-4 text-[15px] font-medium transition-colors duration-200 hover:bg-muted focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const SELECT = "min-h-11 w-full rounded-lg border border-input bg-card px-3 text-[15px] text-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 const DESLIGADO = "cursor-not-allowed opacity-50 hover:bg-card";
 const DESCONHECIDO = "Atributo desconhecido";
 const SEM_ESTE = "o produto já não tem este atributo";
@@ -144,7 +144,19 @@ export function RegrasDoProduto({ valor, origem, atributos, omissoes, zonas, orf
   };
   const cheio = valor.length >= MAX_LIGACOES;
   const podeAcrescentar = !cheio && !!livre();
-  const mudar = (i: number, parte: Partial<Ligacao>) => aoMudar(valor.map((l, j) => (j === i ? { ...l, ...parte } : l)));
+  // o campo que se acabou de mexer (atributo, zona): mudar o atributo ou a zona leva a linha para outro sítio da lista agrupada, e o navegador larga o foco a um nó que o React move
+  const refocar = useRef<string | null>(null);
+  const mudar = (i: number, parte: Partial<Ligacao>, campo?: "a" | "z") => {
+    if (campo) refocar.current = `${id}-${campo}${i}`;
+    aoMudar(valor.map((l, j) => (j === i ? { ...l, ...parte } : l)));
+  };
+  useEffect(() => {
+    const alvo = refocar.current;
+    if (!alvo) return;
+    refocar.current = null;
+    const el = document.getElementById(alvo);
+    if (el && document.activeElement !== el) el.focus();
+  });
   // ao acrescentar, o foco vai ao campo «Atributo» da regra nova; ao remover, ao botão de acrescentar (que continua lá)
   useEffect(() => {
     if (novaLinha === null) return;
@@ -158,15 +170,21 @@ export function RegrasDoProduto({ valor, origem, atributos, omissoes, zonas, orf
     return base.filter((z) => !semAqui.includes(z));
   };
   const grupos = agrupar(valor);
-  // o realce de uma regra no 3D acaba com ela: acrescentar ou remover (a linha pode desaparecer sem o rato sair) e fechar o painel limpam-no
-  useEffect(() => { aoApontar?.(null); }, [valor.length]); // eslint-disable-line react-hooks/exhaustive-deps -- só quando o número de regras muda
+  // a regra apontada é a que o rato está por cima ou, senão, a que tem o foco (a posição na lista): o realce no 3D calcula-se SEMPRE a partir das regras em vigor, e por isso acompanha
+  // a edição (desligar «Pinta», mudar a zona) e acaba quando a regra desaparece. A chave (as zonas juntas) evita avisar o 3D de cada vez que o painel se redesenha.
+  const [rato, setRato] = useState<number | null>(null);
+  const [foco, setFoco] = useState<number | null>(null);
+  const apontada = rato ?? foco;
+  const regraApontada = apontada === null ? undefined : valor[apontada];
+  const chaveRealce = regraApontada ? zonasQuePinta(regraApontada).join("|") : null;
+  useEffect(() => { aoApontar?.(chaveRealce === null ? null : chaveRealce === "" ? [] : (chaveRealce.split("|") as ZonaGlb[])); }, [chaveRealce]); // eslint-disable-line react-hooks/exhaustive-deps -- só quando muda o que se realça
   useEffect(() => () => aoApontar?.(null), []); // eslint-disable-line react-hooks/exhaustive-deps -- só ao desmontar
 
   return (
     <section aria-labelledby={`${id}-t`} className="grid gap-3 rounded-xl border border-border bg-card p-3">
       <div className="flex items-center justify-between gap-2">
         <h4 id={`${id}-t`} className="text-[15px] font-semibold">Regras do produto</h4>
-        <button type="button" aria-expanded={aberto} aria-controls={`${id}-corpo`} onClick={() => setAberto((v) => !v)} className={cn(BOTAO, "px-3")}>
+        <button type="button" aria-expanded={aberto} aria-controls={`${id}-corpo`} onClick={() => { if (aberto) { setRato(null); setFoco(null); } setAberto((v) => !v); }} className={cn(BOTAO, "px-3")}>
           {aberto ? "Esconder" : `Mostrar (${valor.length})`}
         </button>
       </div>
@@ -219,49 +237,52 @@ export function RegrasDoProduto({ valor, origem, atributos, omissoes, zonas, orf
         ) : (
           <>
             {atributos.length === 0 && !omissoes && <p className={NOTA}>Nenhum atributo deste produto tem cor, foto ou aspeto: não há atributos para ligar ao 3D.</p>}
-            <div className="grid gap-3">
-              {grupos.map((g) => {
+            {/* lista plana (o React mantém a linha e o foco quando ela muda de grupo); a ordem é a dos grupos, com um respiro antes de cada grupo novo */}
+            <div className="grid gap-2">
+              {grupos.flatMap((g, gi) => {
                 const temTudo = g.linhas.some((x) => x.l.zona === "tudo");
-                return (
-                  <div key={g.atributo} className="grid gap-2">
-                    {g.linhas.map(({ l, i }) => {
-                      const conhecido = atributos.some((a) => a.id === l.atributo);
-                      const excecao = temTudo && l.zona !== "tudo";
-                      const semAqui = (semEfeito?.(l) ?? []).filter((z) => l.zona === "tudo" || z === l.zona);
-                      return (
-                        <div key={i} role="group" aria-label={`Regra ${i + 1}`}
-                          onMouseEnter={() => aoApontar?.(zonasQuePinta(l))} onMouseLeave={() => aoApontar?.(null)}
-                          onFocus={() => aoApontar?.(zonasQuePinta(l))} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) aoApontar?.(null); }}
-                          className={cn("grid gap-2 rounded-lg border border-border p-2 transition-colors duration-200 hover:bg-muted/40 sm:grid-cols-[1fr_1fr_auto_auto] sm:items-end", excecao && "ml-4 border-l-4 border-l-primary/40")}>
-                          <div className="grid gap-1">
-                            <label htmlFor={`${id}-a${i}`} className="text-[15px] font-medium">Atributo</label>
-                            <select id={`${id}-a${i}`} value={l.atributo} onChange={(e) => mudar(i, { atributo: e.target.value })} className={SELECT}>
-                              {!conhecido && <option value={l.atributo}>{DESCONHECIDO}</option>}
-                              {atributos.filter((a) => !a.fora || a.id === l.atributo).map((a) => <option key={a.id} value={a.id}>{a.fora ? `${a.nome} (${SEM_ESTE})` : a.nome}</option>)}
-                            </select>
-                            {foraDe(l.atributo) && <p className={NOTA}>O produto já não tem este atributo: remova a regra.</p>}
-                          </div>
-                          <div className="grid gap-1">
-                            <label htmlFor={`${id}-z${i}`} className="text-[15px] font-medium">Zona{excecao ? " (excepção)" : ""}</label>
-                            <select id={`${id}-z${i}`} value={l.zona} onChange={(e) => mudar(i, { zona: e.target.value as ZonaLigacao })} className={SELECT}>
-                              {zonasOfertadas.map((z) => <option key={z} value={z}>{rotuloDaZonaLigacao(z)}</option>)}
-                            </select>
-                          </div>
-                          <Pinta ligado={l.aplicar} aoMudar={(v) => mudar(i, { aplicar: v })} />
-                          <button type="button" aria-label={`Remover a regra ${i + 1}`} title="Remover" onClick={() => { aoMudar(valor.filter((_, j) => j !== i)); botaoAcrescentar.current?.focus(); }} className={cn(BOTAO, "min-w-11 px-0")}>
-                            <Trash2 className="h-4 w-4" aria-hidden="true" />
-                          </button>
-                          {semAqui.length > 0 && (
-                            <p className="flex items-center gap-1.5 text-[15px] text-muted-foreground sm:col-span-4">
-                              <EyeOff className="h-4 w-4 shrink-0" aria-hidden="true" />
-                              <span>sem efeito aqui: {semAqui.map((z) => rotuloDaZona(z)).join(", ")}</span>
-                            </p>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                );
+                return g.linhas.map(({ l, i }, li) => {
+                  const conhecido = atributos.some((a) => a.id === l.atributo);
+                  const excecao = temTudo && l.zona !== "tudo";
+                  const semAqui = (semEfeito?.(l) ?? []).filter((z) => l.zona === "tudo" || z === l.zona);
+                  const idQuem = `${id}-d${i}`;
+                  return (
+                    <div key={i} role="group" aria-label={`Regra ${i + 1}`} aria-describedby={idQuem}
+                      onMouseEnter={() => setRato(i)} onMouseLeave={() => setRato(null)}
+                      onFocus={() => setFoco(i)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFoco(null); }}
+                      className={cn("grid grid-cols-2 gap-2 rounded-lg border border-border p-2 transition-colors duration-200 hover:bg-muted/40", li === 0 && gi > 0 && "mt-1", excecao && "ml-4 border-l-4 border-l-primary/40")}>
+                      {/* o número é o da lista; quem lê com leitor de ecrã ouve também de que regra se trata */}
+                      <span id={idQuem} className="sr-only">{nomeDe(l.atributo)}, {rotuloDaZonaLigacao(l.zona)}</span>
+                      <div className="grid min-w-0 gap-1">
+                        <label htmlFor={`${id}-a${i}`} className="text-[15px] font-medium">Atributo</label>
+                        <select id={`${id}-a${i}`} value={l.atributo} onChange={(e) => mudar(i, { atributo: e.target.value }, "a")} className={SELECT}>
+                          {!conhecido && <option value={l.atributo}>{DESCONHECIDO}</option>}
+                          {atributos.filter((a) => !a.fora || a.id === l.atributo).map((a) => <option key={a.id} value={a.id}>{a.fora ? `${a.nome} (${SEM_ESTE})` : a.nome}</option>)}
+                        </select>
+                        {foraDe(l.atributo) && <p className={NOTA}>O produto já não tem este atributo: remova a regra.</p>}
+                      </div>
+                      <div className="grid min-w-0 gap-1">
+                        <label htmlFor={`${id}-z${i}`} className="text-[15px] font-medium">Zona{excecao ? " (excepção)" : ""}</label>
+                        <select id={`${id}-z${i}`} value={l.zona} onChange={(e) => mudar(i, { zona: e.target.value as ZonaLigacao }, "z")} className={SELECT}>
+                          {zonasOfertadas.map((z) => <option key={z} value={z}>{rotuloDaZonaLigacao(z)}</option>)}
+                        </select>
+                      </div>
+                      <div className="col-span-2 flex items-center gap-2">
+                        <Pinta ligado={l.aplicar} aoMudar={(v) => mudar(i, { aplicar: v })} />
+                        <button type="button" aria-label={`Remover a regra ${i + 1}`} aria-describedby={idQuem} title="Remover"
+                          onClick={() => { setRato(null); setFoco(null); aoMudar(valor.filter((_, j) => j !== i)); botaoAcrescentar.current?.focus(); }} className={cn(BOTAO, "min-w-11 px-0")}>
+                          <Trash2 className="h-4 w-4" aria-hidden="true" />
+                        </button>
+                      </div>
+                      {semAqui.length > 0 && (
+                        <p className="col-span-2 flex items-center gap-1.5 text-[15px] text-muted-foreground">
+                          <EyeOff className="h-4 w-4 shrink-0" aria-hidden="true" />
+                          <span>sem efeito aqui: {semAqui.map((z) => rotuloDaZona(z)).join(", ")}</span>
+                        </p>
+                      )}
+                    </div>
+                  );
+                });
               })}
             </div>
             <div className="flex flex-wrap items-center gap-3">
@@ -272,13 +293,14 @@ export function RegrasDoProduto({ valor, origem, atributos, omissoes, zonas, orf
               )}
               {cheio && <span className={NOTA}>Máximo de {MAX_LIGACOES} regras.</span>}
             </div>
-            {invalida && <p id={idErro} role="alert" className="text-[15px] text-red-700 dark:text-red-400">{invalida}</p>}
           </>
         )}
 
         {orfas > 0 && <p role="status" className={NOTA}>{plural(orfas, "regra a um atributo que já não existe foi ignorada", "regras a atributos que já não existem foram ignoradas")}.</p>}
         {ignoradas > 0 && <p role="status" className={NOTA}>{plural(ignoradas, "regra inválida foi ignorada", "regras inválidas foram ignoradas")}.</p>}
       </div>
+      {/* fora do bloco que se esconde: com as Regras escondidas o «Guardar» continua desactivado e o motivo (o aviso, a que ele aponta) tem de se ver */}
+      {podeEditar && invalida && <p id={idErro} role="alert" className="text-[15px] text-red-700 dark:text-red-400">{invalida}</p>}
     </section>
   );
 }

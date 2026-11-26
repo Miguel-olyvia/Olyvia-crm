@@ -16,9 +16,9 @@ import { rotuloDaZona, type ZonaGlb, type ZonaVisual } from "./planta3d/zonasGlb
 import type { OrigemCamada, Participante, PorqueCamada, PorqueDaZona } from "./porqueDaZona";
 
 const NOTA = "text-[15px] text-muted-foreground";
-const BOTAO = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-input bg-card px-4 text-[15px] font-medium transition-colors duration-200 hover:bg-muted focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25";
-const OPCAO = "flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-input bg-card px-3 py-2 text-[15px] transition-colors duration-200 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-muted has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-primary/25";
-const SELECT = "min-h-11 w-full rounded-lg border border-input bg-card px-3 text-[15px] text-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/25";
+const BOTAO = "inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-input bg-card px-4 text-[15px] font-medium transition-colors duration-200 hover:bg-muted focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
+const OPCAO = "flex min-h-11 cursor-pointer items-center gap-3 rounded-lg border border-input bg-card px-3 py-2 text-[15px] transition-colors duration-200 hover:bg-muted has-[:checked]:border-primary has-[:checked]:bg-muted has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring";
+const SELECT = "min-h-11 w-full rounded-lg border border-input bg-card px-3 text-[15px] text-foreground focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring";
 
 /** Como se diz o que pinta a zona hoje: o atributo e de onde vem («por omissão» pelo nome, «por ligação» escolhida), ou que nenhum a pinta. */
 function textoDoQuePinta(zona: ZonaVisual | undefined, escolha: EscolhaDaZona | null, nomeDoAtributo: (id: string) => string | undefined): string {
@@ -93,7 +93,7 @@ function Porque({ camada, tipo, editavel, aoExcecao, aoPrioridade }: {
   const id = useId();
   const o = camada.origem;
   return (
-    <div className="grid gap-2">
+    <div aria-live="polite" className="grid gap-2">
       {o.tipo === "conflito" ? (
         <div className="grid gap-2 rounded-lg border border-amber-500/50 bg-amber-50 p-2 text-[15px] text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
           <p id={id} className="flex items-start gap-2"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" /><span>Porquê: {frasePorque(o, tipo)}</span></p>
@@ -161,6 +161,8 @@ export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperfi
   const escolherSuperficie = (e: EscolhaDaZona, depois: string) => mudar(aplicarSuperficieNaZona(valor, zona, e, { atributosDeSuperficie: idsSuperficie }), depois);
   // «Só esta zona é diferente»: o atributo da regra «Todas as zonas» deixa de pintar só esta zona (a zona explícita vence «Todas as zonas»)
   const abrirExcecao = (atributoId: string, nome: string) => mudar([...valor.filter((l) => !(l.atributo === atributoId && l.zona === zona)), { atributo: atributoId, zona, aplicar: false }], `${nome} não pinta esta zona`);
+  // o botão que resolveu o caso desaparece: o foco vai ao título da zona em vez de cair no corpo da página
+  const focarTitulo = () => titulo.current?.focus();
   const aoKeyDown = (e: KeyboardEvent<HTMLElement>) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); aoFechar(); } };
 
   const chaveDe = (e: EscolhaDaZona | null): string | null => (!e ? null : e.tipo === "atributo" ? `atributo:${e.id}` : e.tipo);
@@ -202,8 +204,8 @@ export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperfi
 
       {editavel && <EscolhaDeCamada legenda="Cor desta zona" opcoes={opcoesCor} marcada={chaveDe(atualCor)} aoEscolher={escolherCor} movel={movel} />}
       {porque && (
-        <Porque camada={porque.cor} tipo="cor" editavel={editavel} aoExcecao={(a) => abrirExcecao(a, nomeDeCor(a) ?? "O atributo")}
-          aoPrioridade={(p) => escolherCor({ tipo: "atributo", id: p.id }, p.nome)} />
+        <Porque camada={porque.cor} tipo="cor" editavel={editavel} aoExcecao={(a) => { abrirExcecao(a, nomeDeCor(a) ?? "O atributo"); focarTitulo(); }}
+          aoPrioridade={(p) => { escolherCor({ tipo: "atributo", id: p.id }, p.nome); focarTitulo(); }} />
       )}
 
       {atributosSuperficie.length > 0 && (
@@ -213,8 +215,8 @@ export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperfi
               opcoes={opcoesSuperficie} marcada={chaveDe(atualSuperficie)} aoEscolher={escolherSuperficie} movel={movel} />
           )}
           {porque && (
-            <Porque camada={porque.superficie} tipo="superficie" editavel={editavel} aoExcecao={(a) => abrirExcecao(a, nomeDeSuperficie(a) ?? "O atributo")}
-              aoPrioridade={(p) => escolherSuperficie({ tipo: "atributo", id: p.id }, `superfície ${p.nome}`)} />
+            <Porque camada={porque.superficie} tipo="superficie" editavel={editavel} aoExcecao={(a) => { abrirExcecao(a, nomeDeSuperficie(a) ?? "O atributo"); focarTitulo(); }}
+              aoPrioridade={(p) => { escolherSuperficie({ tipo: "atributo", id: p.id }, `superfície ${p.nome}`); focarTitulo(); }} />
           )}
         </>
       )}

@@ -120,6 +120,14 @@ export function erroDasLigacoes(lista: readonly Ligacao[]): string | null {
   return null;
 }
 
+/** Duas listas de regras iguais, sem contar a ordem: uma regra é um par atributo e zona (com o seu «aplicar»); a ordem só muda o desenho da lista e não o que se grava. */
+export function mesmasLigacoes(a: readonly Ligacao[], b: readonly Ligacao[]): boolean {
+  if (a.length !== b.length) return false;
+  const chaves = (l: readonly Ligacao[]): string[] => l.map((x) => `${x.atributo}|${x.zona}|${x.aplicar ? 1 : 0}`).sort();
+  const ca = chaves(a), cb = chaves(b);
+  return ca.every((c, k) => c === cb[k]);
+}
+
 /** Grava a configuração do alvo: os eixos e as ligações (os DOIS como estado final; null herda). null e null apaga a configuração. Valida o formato antes de ir à base. */
 export async function definirConfig3d(org: string, alvo: AlvoConfig3d, id: string, o: { eixos: Eixos | null; ligacoes?: readonly Ligacao[] | null; reenviar?: readonly LigacaoBase[] | null }): Promise<ResConfig<ResultadoConfig3d>> {
   const eixos = o.eixos === null ? null : validarEixos(o.eixos);

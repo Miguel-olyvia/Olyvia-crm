@@ -176,7 +176,9 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
   const mostrarAspeto = !superficie && (mostrarRegras || (escolherNo3d && zonaFixa !== null));
   return (
     <div ref={raiz} className={cn("grid gap-3", mostrarAspeto && "lg:grid-cols-[minmax(0,1fr)_minmax(0,26rem)] lg:items-start")}>
-      <div className="grid gap-2 lg:col-start-1">
+      {/* a coluna da esquerda (3D, zonas, medidas) é UM contentor: assim as Regras compridas da direita não abrem buracos entre os seus blocos, e o Tab segue a ordem visual */}
+      <div className="grid min-w-0 gap-3 lg:col-start-1 lg:row-start-1">
+      <div className="grid gap-2">
       <div className="relative h-64 overflow-hidden rounded-xl border border-border bg-muted/50 sm:h-80">
         <div ref={grupo3d} role="group" aria-label="Pré-visualização 3D do produto" aria-describedby={idAjuda} tabIndex={0} onKeyDown={aoTeclar}
           onFocus={() => setFoco(true)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFoco(false); }}
@@ -225,18 +227,12 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
       <p aria-live="polite" className={cotas && !superficie ? NOTA : "sr-only"}>{cotas && !superficie ? textoDasMedidas(d) : ""}</p>
       </div>
       {!superficie && zonasDoObjecto.length >= 2 && (
-        <div className="min-w-0 lg:col-start-1">
+        <div className="min-w-0">
           <PainelZonas zonas={zonasDoObjecto} pintadaPor={zonas?.zonas} fixa={zonaFixa} aoApontar={setZonaApontada} aoFixar={escolherZonaBotao} />
         </div>
       )}
-      {mostrarAspeto && (
-        <div className="min-w-0 lg:col-start-2 lg:row-span-3 lg:row-start-1">
-          <PainelAspeto3D zonaFixa={escolherNo3d ? zonaFixa : null} zonasDoModelo={zonasDoObjecto.map((z) => z.zona)} pintadaPor={zonas?.zonas} atributos={atributosDoProduto}
-            pintaHoje={pintaHoje} pelaNome={pelaNome} focarAoAbrir={origem === "3d"} aoFechar={() => fechar()} config3d={config3d} mostrarRegras={mostrarRegras} aoRealcarRegra={setZonasDaRegra} />
-        </div>
-      )}
       {painelMedidas && !superficie && medida && temCamposParaEixos(medida) && (
-        <div className="min-w-0 lg:col-start-1">
+        <div className="min-w-0">
           <PainelMedidas medida={medida} eixos={eixosEmVigor} manual={aMao !== null} dimensoes={d} nota={notaTroca}
             aoEscolher={(eixo, campo) => { const depois = trocarEixo(eixosEmVigor, eixo, campo); setEscolha({ tipo, eixos: depois, nota: notaDaTroca(eixosEmVigor, depois, eixo) }); }} aoRepor={() => setEscolha(null)}
             gravacao={config3d ? {
@@ -245,6 +241,13 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
               aoGuardar: async () => { const erro = await config3d.eixos.gravar(eixosEmVigor); if (!erro) setEscolha(null); return erro; },
               aoHerdar: async () => { const erro = await config3d.eixos.gravar(null); if (!erro) setEscolha(null); return erro; },
             } : undefined} />
+        </div>
+      )}
+      </div>
+      {mostrarAspeto && (
+        <div className="min-w-0 lg:col-start-2 lg:row-start-1">
+          <PainelAspeto3D zonaFixa={escolherNo3d ? zonaFixa : null} zonasDoModelo={zonasDoObjecto.map((z) => z.zona)} pintadaPor={zonas?.zonas} atributos={atributosDoProduto}
+            pintaHoje={pintaHoje} pelaNome={pelaNome} focarAoAbrir={origem === "3d"} aoFechar={() => fechar()} config3d={config3d} mostrarRegras={mostrarRegras} aoRealcarRegra={setZonasDaRegra} />
         </div>
       )}
     </div>
