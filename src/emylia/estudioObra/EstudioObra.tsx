@@ -445,7 +445,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
         {modoReal() && <LerQuemAssina />}
         {/* ---------------------------------------------------------------- o cabeçalho */}
         <header className="border-b border-border bg-card/95 backdrop-blur">
-          <div className="mx-auto flex max-w-[2400px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
+          <div className="mx-auto flex max-w-[1900px] flex-wrap items-center justify-between gap-3 px-4 py-3 sm:px-6">
             <div className="flex min-w-0 items-center gap-3">
               <Button type="button" variant="outline" className="min-h-11 shrink-0" onClick={sair} aria-label={voltar}><ArrowLeft className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">{voltar}</span></Button>
               <div className="min-w-0">
@@ -468,7 +468,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
               {principal && <Button type="button" className="hidden min-h-11 sm:inline-flex" disabled={principal.desligado} title={principal.porque || undefined} onClick={principal.fn}><principal.icone className="mr-1.5 h-4 w-4" aria-hidden="true" />{principal.t}</Button>}
             </div>
           </div>
-          {principal?.porque && <p className="mx-auto max-w-[2400px] px-4 pb-2 text-sm text-amber-800 dark:text-amber-300 sm:px-6">{principal.porque}</p>}
+          {principal?.porque && <p className="mx-auto max-w-[1900px] px-4 pb-2 text-sm text-amber-800 dark:text-amber-300 sm:px-6">{principal.porque}</p>}
         </header>
 
         {/* 23/11 (Rúben: «mega next-level», o telemóvel do gestor em obra): as ações ao alcance do polegar, em baixo; no ecrã largo ficam no topo */}
@@ -488,7 +488,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
         )}
         <div className="relative flex min-h-0 flex-1">
           <main className="min-w-0 flex-1 overflow-y-auto pb-24 sm:pb-0">
-            <div className="mx-auto max-w-[2400px] space-y-6 px-4 py-5 sm:px-6">
+            <div className="mx-auto max-w-[1900px] space-y-6 px-4 py-5 sm:px-6">
               {/* ------------------------------------------------------------ 12/11: o pulso (os números, que se tocam) e o comando de hoje */}
               {/* 12/11 (Rúben): as adendas por disparar e o percurso das que andam, em cima, sem sair do Estúdio */}
               {(vivo || acabou) && <AdendasDaObra ctx={ctx} d={d} />}
