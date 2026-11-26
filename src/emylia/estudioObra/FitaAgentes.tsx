@@ -194,13 +194,13 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
                         <span className="font-medium">{x.titulo}</span>
                         <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium",
                           m === "prazo" ? "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200" : m === "ver" ? "bg-muted text-muted-foreground" : m === "ja" ? "bg-success/15 text-success" : "bg-primary/10 text-primary")}>
-                          {m === "prazo" && prazo ? `aplica-se sozinho ${quandoPrazo(prazo, agora)}` : m === "ver" ? "a observar" : m === "ja" ? "a aplicar" : pausa ? `em pausa até ${quandoPrazo(pausa, agora)}: desfez uma mudança` : "pede decisão"}
+                          {m === "prazo" && prazo ? `aplica-se sozinho ${quandoPrazo(prazo, agora)}` : m === "ver" ? (x.info ? "para saberes" : "a observar") : m === "ja" ? "a aplicar" : pausa ? `em pausa até ${quandoPrazo(pausa, agora)}: desfez uma mudança` : "pede decisão"}
                         </span>
                       </p>
                       {x.sub && <p className="text-sm text-muted-foreground">{x.sub}</p>}
                       {x.auto && m !== "ver" && <p className="text-sm"><span className="text-muted-foreground">Proposta:</span> {x.auto.texto}</p>}
                       {falta != null && <div className="h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div className="h-full rounded-full bg-amber-500 transition-[width] duration-1000 ease-linear" style={{ width: `${Math.round(falta * 100)}%` }} /></div>}
-                      {planeia && m !== "ver" && (
+                      {planeia && (m !== "ver" || x.info) && (
                         <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
                           {x.auto ? <Button type="button" size="sm" className="min-h-9 rounded-full" onClick={() => aplicar(x, false)}><Check className="mr-1.5 h-4 w-4" aria-hidden="true" />{m === "prazo" ? "Aplicar já" : "Aplicar"}</Button>
                             : principal && <Button type="button" size="sm" className="min-h-9 rounded-full" onClick={() => agir(principal.a)}>{principal.rot}</Button>}

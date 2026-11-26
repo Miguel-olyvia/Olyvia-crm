@@ -56,6 +56,8 @@ export interface Proposta {
   auto?: { acao: AcaoAuto; texto: string };
   /** só para ver (o Cliente e a Aprendizagem a observar) */
   ti?: number;
+  /** 26/11: só para saber (os botões só levam a um sítio, nada muda o plano): não conta como decisão nem avisa o gestor */
+  info?: boolean;
 }
 
 /** O registo do que um agente aplicou (ou do que o gestor aceitou de um agente): com as tarefas como estavam, para desfazer. */
@@ -135,7 +137,8 @@ export function propostasDosAgentes(d: Negocio, S: Pick<Estado, "deals"> & Parti
         auto = { acao: { k: "replanear", adiantar: true }, texto: `Adiantar ${n} ${n === 1 ? "tarefa" : "tarefas"} com a folga${ganho > 0 ? `: a obra acaba ${dias(ganho)} mais cedo` : ""}` };
       }
     }
-    out.push({ id: al.id, agente: ag, nivel: al.nivel, titulo: al.t, sub, acoes: al.acoes, ...(auto ? { auto } : {}), ...(al.ti != null ? { ti: al.ti } : {}) });
+    const info = !auto && al.acoes.every((x) => x.a.k === "tarefa");
+    out.push({ id: al.id, agente: ag, nivel: al.nivel, titulo: al.t, sub, acoes: al.acoes, ...(auto ? { auto } : {}), ...(al.ti != null ? { ti: al.ti } : {}), ...(info ? { info } : {}) });
   }
 
   // 2) Cliente: a equipa chega no próximo dia útil e o cliente ainda não foi avisado. 26/11 (recomendação 4, aceite): com o agente do
@@ -232,7 +235,7 @@ export function pausaDe(e: EstadoAgentes | undefined, a: AgenteId, agora = new D
  *  um desfazer), «prazo» (2) ou «já» (3). */
 export function modoDa(x: Proposta, e: EstadoAgentes | undefined, agora = new Date()): "ver" | "pede" | "prazo" | "ja" {
   const g = degrauDe(e, x.agente);
-  if (g === 0) return "ver";
+  if (g === 0 || x.info) return "ver";
   if (!x.auto || g === 1) return "pede";
   if (pausaDe(e, x.agente, agora)) return "pede";
   return g === 2 ? "prazo" : "ja";

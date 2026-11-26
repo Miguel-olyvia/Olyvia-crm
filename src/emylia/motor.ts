@@ -1331,25 +1331,26 @@ export function diaDeFerias(tec: Tecnico, p: Plano, dia: number, dur: number): n
 }
 /** 26/11 («Antecipar o resto» abria a tarefa e não fazia nada): quantos dias úteis dá para puxar as tarefas por fazer depois de um buraco
  *  (de `n` até 1), sem pôr um técnico em duas obras nem nas férias. `s` 0: não dá, e `porque` diz quem impede. Não muda nada. */
-export function simularBuraco(S: Pick<Estado, "deals">, d: Negocio, ini: number, fim: number): { s: number; alvo: number[]; porque: string } {
+export function simularBuraco(S: Pick<Estado, "deals">, d: Negocio, ini: number, fim: number): { s: number; alvo: number[]; porque: string; trava: number | null } {
   const p = d.obra?.plano;
-  if (!p) return { s: 0, alvo: [], porque: "A obra não tem plano" };
+  if (!p) return { s: 0, alvo: [], porque: "A obra não tem plano", trava: null };
   const hoje = p.estado === "em curso" ? p.dia : 0, n = fim - ini + 1;
   const alvo = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => { const v = estadoVivoTarefa(t, p); return v !== "feita" && v !== "validada" && !t.exec && t.dia > fim; }).map((x) => x.ti);
-  if (!alvo.length || n < 1) return { s: 0, alvo, porque: "Não há tarefas por fazer depois desses dias" };
+  if (!alvo.length || n < 1) return { s: 0, alvo, porque: "Não há tarefas por fazer depois desses dias", trava: null };
   const ferias0 = conflitos(p).length;
-  let porque = "";
+  // trava: a 1.ª tarefa do técnico que impede (é essa que se pode passar a outro)
+  let porque = "", trava: number | null = null;
   for (let s = n; s >= 1; s--) {
     const copia: Plano = { ...p, tasks: p.tasks.map((t) => ({ ...t })) };
     let mexe = false;
     for (const ti of alvo) { const nd = Math.max(hoje, copia.tasks[ti].dia - s); if (nd !== copia.tasks[ti].dia) mexe = true; copia.tasks[ti].dia = nd; }
     if (!mexe) { if (!porque) porque = "As tarefas seguintes já começam o mais cedo possível"; continue; }
     const fora = conflitosNovos(S, d, copia);
-    if (fora.length) { if (!porque) porque = `${TECS.find((x) => x.id === fora[0].tec)?.n.split(" ")[0] ?? "Um técnico"} está noutra obra (${fora[0].obra.nome}) nesses dias`; continue; }
+    if (fora.length) { if (!porque) { porque = `${TECS.find((x) => x.id === fora[0].tec)?.n.split(" ")[0] ?? "Um técnico"} está noutra obra (${fora[0].obra.nome}) nesses dias`; trava = alvo.find((ti) => p.tasks[ti].tec === fora[0].tec) ?? null; } continue; }
     if (conflitos(copia).length > ferias0) { if (!porque) porque = "Um técnico está de férias nesses dias"; continue; }
-    return { s, alvo, porque };
+    return { s, alvo, porque, trava };
   }
-  return { s: 0, alvo, porque: porque || "Os técnicos das tarefas seguintes não estão livres" };
+  return { s: 0, alvo, porque: porque || "Os técnicos das tarefas seguintes não estão livres", trava };
 }
 
 export function conflitos(p: Plano) {

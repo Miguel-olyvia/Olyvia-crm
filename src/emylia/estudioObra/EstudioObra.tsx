@@ -803,6 +803,31 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   // 23/11: as ligações (setas) e ligar arrastando. As setas saem das posições das linhas (data-linha) e das datas das barras.
   const cont = useRef<HTMLDivElement>(null);
   const rolarRef = useRef<HTMLDivElement>(null);
+  // 26/11 (Rúben: «a parte de cima deve acompanhar o scroll até a tabela caber toda no ecrã, para não termos de fazer scroll para ver
+  // os dias»): o «sticky» não funciona dentro do rolar horizontal (é ele o contentor); a linha dos dias desce com o rolar da página até
+  // ao fim do gráfico (translateY), sem mudar a estrutura (as ligações e os arrastos medem-se como antes)
+  const cabDias = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const caixa = rolarRef.current, cab = cabDias.current;
+    if (!caixa || !cab) return;
+    let pai: HTMLElement | null = caixa.parentElement;
+    while (pai && !/(auto|scroll)/.test(getComputedStyle(pai).overflowY)) pai = pai.parentElement;
+    const alvo: HTMLElement | Window = pai ?? window;
+    let raf = 0;
+    const acertar = () => {
+      raf = 0;
+      const r = caixa.getBoundingClientRect(), topo = pai ? pai.getBoundingClientRect().top : 0;
+      const max = Math.max(0, r.height - cab.offsetHeight - 48); // pára antes da última linha
+      const y = Math.min(max, Math.max(0, topo - r.top));
+      cab.style.transform = y ? `translateY(${y}px)` : "";
+      cab.classList.toggle("shadow-sm", y > 0);
+    };
+    const pedir = () => { if (!raf) raf = requestAnimationFrame(acertar); };
+    acertar();
+    alvo.addEventListener("scroll", pedir, { passive: true });
+    window.addEventListener("resize", pedir);
+    return () => { alvo.removeEventListener("scroll", pedir); window.removeEventListener("resize", pedir); if (raf) cancelAnimationFrame(raf); };
+  }, []);
   const [geo, setGeo] = useState<Record<number, { left: number; top: number }>>({});
   const [hov, setHov] = useState<number | null>(null);
   const [aLigar, setALigarEstado] = useState<{ de: number; x: number; y: number; alvo: number | null } | null>(null);
@@ -1072,7 +1097,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
         <div className="relative min-w-max" ref={cont}>
           {vista === "gantt" && !ord && setas()}
           {/* os dias */}
-          <div className="sticky top-0 z-10 flex border-b border-border bg-card">
+          <div ref={cabDias} className="relative z-30 flex border-b border-border bg-card will-change-transform">
             <div ref={cabCol} className={cn("sticky left-0 z-20 shrink-0 bg-card px-3 py-2 text-xs font-medium text-muted-foreground sm:px-4", rotulo)} style={largura}>
               {nomeCol}
               <div role="separator" aria-orientation="vertical" tabIndex={0} aria-label={`Largura da coluna ${nomeCol}`} aria-valuemin={COLUNA_MIN} aria-valuemax={COLUNA_MAX} aria-valuenow={largCol ?? undefined}

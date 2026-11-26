@@ -99,6 +99,12 @@ describe("antecipar de uma vez o que vem depois de um buraco", () => {
     const a = alerta();
     expect(a.acoes.some((x) => x.a.k === "fecharBuraco")).toBe(false);
     expect(a.sub).toMatch(/não dá para antecipar/);
+    // «Ver a tarefa» leva à tarefa do técnico ocupado (onde se troca o técnico) e o agente não conta isto como decisão
+    if (s2.trava != null) { expect(a.acoes[0].a).toMatchObject({ k: "tarefa", ti: s2.trava }); expect(a.sub).toMatch(/passe «.+» a outro técnico/); }
+    const { propostasDosAgentes, modoDa } = await import("./agentes");
+    const pr = propostasDosAgentes(d, S, new Map()).find((x) => x.id === `parada-${g.ini}`)!;
+    expect(pr.info).toBe(true);
+    expect(modoDa(pr, { degraus: { plano: 1 } } as never)).toBe("ver");
   });
 });
 

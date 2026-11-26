@@ -7,7 +7,7 @@ import { motivoOcupado, obraQueOcupa, tecnicosDoOficio } from "../preparacaoObra
 import { materiaisPorFase } from "../obraOps";
 import type { ResumoEcNeg } from "../inventario/ponteNegocios";
 import { dataCurta } from "../planoObra";
-import { comecada, dataDoDia, derrapagem, diasDeAtraso, diasSemNinguem, estadoVivo, replanear } from "./planoVivo";
+import { comecada, dataDoDia, derrapagem, diasDeAtraso, diasSemNinguem, estadoVivo, nomeNoPlano, replanear } from "./planoVivo";
 
 export type Nivel = "critico" | "atencao" | "oportunidade";
 export type AcaoAlerta =
@@ -125,9 +125,11 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
     const n = g.fim - g.ini + 1, seg = g.seguinte != null ? p.tasks[g.seguinte] : null;
     // 26/11 (Rúben: «ao clicar em antecipar o resto, abre o detalhe mas não faz nada»): só se propõe antecipar o que dá; senão diz-se porquê
     const sim = simularBuraco(S, d, g.ini, g.fim);
-    const ver = seg && g.seguinte != null ? [{ rot: "Ver a tarefa", a: { k: "tarefa" as const, ti: g.seguinte } }] : [];
+    // sem dar: «Ver a tarefa» abre a que trava (a do técnico ocupado), onde se troca o técnico
+    const tiVer = !sim.s && sim.trava != null ? sim.trava : g.seguinte;
+    const ver = tiVer != null ? [{ rot: "Ver a tarefa", a: { k: "tarefa" as const, ti: tiVer } }] : [];
     const sub = !sim.s
-      ? `${sim.porque}, por isso não dá para antecipar.${seg ? ` A seguir, ${seg.nome} a ${quando(p, seg.dia)}: pode passá-la a outro técnico.` : ""}`
+      ? `${sim.porque}, por isso não dá para antecipar.${sim.trava != null ? ` Para antecipar, passe «${nomeNoPlano(p, p.tasks[sim.trava])}» a outro técnico.` : ""}`
       : seg ? `A seguir, ${seg.nome} a ${quando(p, seg.dia)}. «Antecipar ${dias(sim.s)}» puxa as ${sim.alvo.length} tarefas seguintes${sim.s < n ? ` (os ${n} dias não dão: ${sim.porque.charAt(0).toLowerCase() + sim.porque.slice(1)})` : ""}.` : "Pode antecipar uma tarefa para esses dias.";
     L.push({ id: `parada-${g.ini}`, nivel: "oportunidade", t: `A obra fica sem ninguém ${dias(n)}: ${quando(p, g.ini)} a ${quando(p, g.fim)}`, sub,
       acoes: sim.s ? [{ rot: `Antecipar ${dias(sim.s)}`, a: { k: "fecharBuraco" as const, ini: g.ini, fim: g.ini + sim.s - 1, ti: g.seguinte } }, ...ver] : ver,
