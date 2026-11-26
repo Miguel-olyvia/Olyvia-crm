@@ -11,15 +11,26 @@ import { quotaMensal } from "@/components/rh-exemplo/lib/comoConta";
 import { arredondar, indiceDoMes, mesDaData, type MesIso } from "@/components/rh-exemplo/lib/custo";
 import type { Ativo, CatEquipamentoLigado } from "./tipos";
 
-type ParaValor = Pick<Ativo, "valorCompra" | "valorResidual" | "vidaMeses" | "dataCompra" | "desativadoEm"> & {
+/**
+ * O que a conta precisa. Um alugado não tem compra nem data de compra (ambas `null`): não deprecia, e `valorAtual` dá `null`.
+ * Um `Ativo` inteiro serve, tal como o `AtivoCompradoConta` do RH.
+ */
+type ParaValor = Pick<Ativo, "valorResidual" | "vidaMeses" | "desativadoEm"> & {
+  valorCompra: number | null;
+  dataCompra: string | null;
   catEquipamento?: Pick<CatEquipamentoLigado, "vidaAnos"> | null;
 };
+
+/** Os dados de um ativo que deprecia, com compra e data presentes. */
+type ParaDepreciar = Omit<ParaValor, "valorCompra" | "dataCompra"> & { valorCompra: number; dataCompra: string };
+const deprecia = (a: ParaValor): a is ParaDepreciar => a.valorCompra !== null && a.dataCompra !== null;
 
 /**
  * A vida em meses: a do ativo; sem ela (só nos de serviço), a do modelo do catálogo (anos x 12). `null` quando não há vida em
  * tempo (por exemplo o modelo só tem vida em horas): o ativo não deprecia no tempo.
  */
 export function vidaEfetivaMeses(a: ParaValor, catalogo: Pick<CatEquipamentoLigado, "vidaAnos"> | null = a.catEquipamento ?? null): number | null {
+  if (!deprecia(a)) return null;
   if (a.vidaMeses !== null && a.vidaMeses > 0) return a.vidaMeses;
   if (catalogo?.vidaAnos && catalogo.vidaAnos > 0) return Math.max(1, Math.round(catalogo.vidaAnos * 12));
   return null;
@@ -28,11 +39,11 @@ export function vidaEfetivaMeses(a: ParaValor, catalogo: Pick<CatEquipamentoLiga
 /** A quota que deprecia por mês; `null` quando não há vida em tempo. */
 export function depreciacaoMensal(a: ParaValor, catalogo?: Pick<CatEquipamentoLigado, "vidaAnos"> | null): number | null {
   const vida = vidaEfetivaMeses(a, catalogo);
-  return vida === null ? null : quotaMensal(Math.max(0, a.valorCompra - a.valorResidual), vida);
+  return vida === null || !deprecia(a) ? null : quotaMensal(Math.max(0, a.valorCompra - a.valorResidual), vida);
 }
 
 /** O valor depreciado (o que já «contou») até ao mês `mes` («AAAA-MM»), inclusive. */
-function depreciadoAte(a: ParaValor, vida: number, mes: MesIso): number {
+function depreciadoAte(a: ParaDepreciar, vida: number, mes: MesIso): number {
   const inicio = indiceDoMes(mesDaData(a.dataCompra));
   const ultimo = a.desativadoEm ? Math.min(inicio + vida - 1, indiceDoMes(mesDaData(a.desativadoEm))) : inicio + vida - 1;
   const meses = Math.max(0, Math.min(indiceDoMes(mes), ultimo) - inicio + 1);
@@ -48,6 +59,6 @@ function depreciadoAte(a: ParaValor, vida: number, mes: MesIso): number {
  */
 export function valorAtual(a: ParaValor, mes: MesIso, catalogo?: Pick<CatEquipamentoLigado, "vidaAnos"> | null): number | null {
   const vida = vidaEfetivaMeses(a, catalogo);
-  if (vida === null) return null;
+  if (vida === null || !deprecia(a)) return null;
   return arredondar(a.valorCompra - depreciadoAte(a, vida, mes));
 }

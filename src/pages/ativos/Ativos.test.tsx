@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { LanguageProvider } from "@/contexts/LanguageContext";
-import type { Ativo, AtivosLidos } from "@/components/ativos/lib/tipos";
+import type { Ativo, AtivosLidos, OcupacaoDoAtivo } from "@/components/ativos/lib/tipos";
 
 const m = vi.hoisted(() => ({
   permissoes: [] as string[],
@@ -15,16 +15,21 @@ const m = vi.hoisted(() => ({
   mensagem: null as string | null,
   useAtivos: vi.fn(),
   refazer: vi.fn(),
-  mut: { criar: vi.fn(), alterar: vi.fn(), desativar: vi.fn(), reativar: vi.fn(), ligarPessoa: vi.fn(), desligarPessoa: vi.fn() },
+  mut: { criar: vi.fn(), alterar: vi.fn(), desativar: vi.fn(), reativar: vi.fn() },
   semEmpresa: false,
+  /** O ativo lido por `rpc_ativo_ler` (ocupações com o nome da pessoa); `null` = a ficha fica com os dados da lista. */
+  lido: null as unknown,
+  valorStock: { valor: null as number | null, aCarregar: false, falhou: false },
 }));
 vi.mock("@/hooks/useCountries", () => ({ useCountries: () => ({ countries: [], loading: false, error: null }) }));
 vi.mock("@/hooks/ativos/useAtivos", () => ({
   useAtivos: (o: unknown) => { m.useAtivos(o); return { estado: m.estado, dados: m.dados, mensagem: m.mensagem, aAtualizar: false, semOrganizacao: false, refazer: m.refazer }; },
 }));
 vi.mock("@/hooks/ativos/useAtivoMutacoes", () => ({ useAtivoMutacoes: () => m.mut }));
+vi.mock("@/hooks/ativos/useAtivoLido", () => ({ useAtivoLido: () => ({ ativo: m.lido, aCarregar: false }) }));
+vi.mock("@/hooks/ativos/useValorStockArmazem", () => ({ useValorStockArmazem: () => m.valorStock }));
 vi.mock("@/hooks/ativos/useAtivosOpcoes", () => ({
-  useAtivosOpcoes: () => ({ opcoes: { equipamentos: [{ id: "c1", nome: "Berbequim Hilti", vidaAnos: 5, vidaHoras: null }], centrosCusto: [] }, erro: null, aCarregar: false }),
+  useAtivosOpcoes: () => ({ opcoes: { equipamentos: [{ id: "c1", nome: "Berbequim Hilti", vidaAnos: 5, vidaHoras: null }], centrosCusto: [], armazens: [], podeVerArmazens: false }, erro: null, aCarregar: false }),
 }));
 vi.mock("@/hooks/usePermissions", () => ({
   usePermissions: () => ({ hasPermission: (p: string) => m.permissoes.includes(p), hasAnyPermission: (p: string[]) => p.some((x) => m.permissoes.includes(x)), loading: false }),
@@ -37,7 +42,7 @@ const BASE: Ativo = {
   id: "x", grupo: "estrutura", tipo: "mobiliario", nome: "Mesa", codigo: null, numSerie: null, catEquipamentoId: null,
   dataCompra: "2026-01-15", valorCompra: 1200, valorResidual: 0, vidaMeses: 12, manutencaoAno: 0, centroCustoId: null,
   localizacao: "Armazém", notas: null, estado: "ativo", desativadoEm: null, desativadoMotivo: null, desativadoNota: null,
-  catEquipamento: null, atribuicao: null, ligado: false,
+  catEquipamento: null, atribuicao: null, ligado: false, forma: "comprado", rendaMensal: null, inicioAluguer: null, fimAluguer: null, vidaOrigem: null, armazem: null, armazemLigado: false, ocupacoes: [],
 };
 const ativo = (p: Partial<Ativo>): Ativo => ({ ...BASE, ...p });
 
@@ -54,15 +59,14 @@ const DADOS: AtivosLidos = {
     ativo({ id: "p1", grupo: "pessoa", tipo: "portatil", nome: "Portátil 1", ligado: true, atribuicao: { pessoaEquipamentoId: "pe1", pessoaNome: "Ana Silva", entrega: "2026-02-01" } }),
     ativo({ id: "p2", grupo: "pessoa", tipo: "telemovel", nome: "Telemóvel 1" }),
   ],
-  atribuicoesSemAtivo: [{ id: "pe9", pessoaNome: "Rui Costa", tipo: "telemovel", descricao: "Telemóvel velho", valor: 900, entrega: "2025-05-01", estado: "atribuido" }],
   rhOculto: false,
+  podeVerArmazens: true,
   centrosCusto: [{ id: "cc1", nome: "Obras" }],
   truncado: false,
 };
 
 const norm = (s: string | null) => (s ?? "").replace(/\p{Zs}/gu, " ");
 const EDITAR = ["ativos.view", "ativos.edit"];
-const EDITAR_E_LIGAR = [...EDITAR, "hr.pessoas.retribuicao.view", "hr.pessoas.retribuicao.edit"];
 
 function ver() {
   return render(
@@ -90,6 +94,8 @@ beforeEach(() => {
   m.dados = DADOS;
   m.mensagem = null;
   m.semEmpresa = false;
+  m.lido = null;
+  m.valorStock = { valor: null, aCarregar: false, falhou: false };
   m.useAtivos.mockReset();
   m.refazer.mockReset();
   Object.values(m.mut).forEach((f) => f.mockReset().mockResolvedValue({ ok: true, id: "x" }));
@@ -167,12 +173,12 @@ describe("Ativos: a lista (só o que decide)", () => {
     expect(within(item("Cadeira velha")).getByText("Mobiliário")).toBeInTheDocument();
   });
 
-  it("Pessoas: a pessoa que o tem; sem atribuição diz «Sem pessoa ligada»", () => {
+  it("Pessoas: a pessoa que o tem; sem ninguém diz «Livre»", () => {
     ver();
     abrirSeparador(/^Pessoas/);
     expect(within(item("Portátil 1")).getByText("Ana Silva")).toBeInTheDocument();
     expect(within(item("Portátil 1")).getByTestId("estado-etiqueta")).toHaveTextContent("Em uso");
-    expect(within(item("Telemóvel 1")).getByTestId("estado-etiqueta")).toHaveTextContent("Sem pessoa ligada");
+    expect(within(item("Telemóvel 1")).getByTestId("estado-etiqueta")).toHaveTextContent("Livre");
   });
 
   it("Serviço sem equipamento do catálogo ligado: «Sem equipamento ligado»", () => {
@@ -182,24 +188,24 @@ describe("Ativos: a lista (só o que decide)", () => {
   });
 
   it("Pessoas sem permissão para ver o RH: nenhum nome, «Reservado ao RH», aviso e sem a secção do RH", () => {
-    m.dados = { ...DADOS, rhOculto: true, atribuicoesSemAtivo: null };
+    m.dados = { ...DADOS, rhOculto: true };
     ver();
     abrirSeparador(/^Pessoas/);
     expect(screen.queryByText("Ana Silva")).not.toBeInTheDocument();
     expect(within(item("Portátil 1")).getByText("Reservado ao RH")).toBeInTheDocument();
     // A chave `ligado` vem da base mesmo sem permissão do RH: dá para dizer que falta a ligação sem dizer a quem.
-    expect(within(item("Telemóvel 1")).getByTestId("estado-etiqueta")).toHaveTextContent("Sem pessoa ligada");
+    expect(within(item("Telemóvel 1")).getByTestId("estado-etiqueta")).toHaveTextContent("Livre");
     expect(within(item("Portátil 1")).getByTestId("estado-etiqueta")).toHaveTextContent("Em uso");
     expect(screen.getByText("Sem permissão para ver a quem estão atribuídos.")).toBeInTheDocument();
     expect(screen.queryByText("Atribuídos no RH sem ativo registado")).not.toBeInTheDocument();
   });
 
-  it("Pessoas: abaixo da lista, os atribuídos no RH sem ativo, com a ligação «Ver em Custos»", () => {
+  it("Pessoas: a lista «atribuídos no RH sem ativo registado» saiu (o equipamento do RH passa a ser um ativo sozinho)", () => {
     ver();
     abrirSeparador(/^Pessoas/);
-    expect(screen.getByRole("heading", { name: "Atribuídos no RH sem ativo registado" })).toBeInTheDocument();
-    expect(screen.getByText("Rui Costa")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Ver em Custos/ })).toHaveAttribute("href", "/rh-exemplo/custos");
+    expect(screen.queryByText("Atribuídos no RH sem ativo registado")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /Ver em Custos/ })).not.toBeInTheDocument();
+    expect(screen.queryByText("Rui Costa")).not.toBeInTheDocument();
   });
 });
 
@@ -389,7 +395,7 @@ describe("Ativos: o detalhe (o resto da informação, com números exatos)", () 
     const d = within(await abrirDetalhe("Portátil 1"));
     expect(d.getByTestId("detalhe-pessoa")).toHaveTextContent("Ana Silva, desde 01/02/2026");
     cleanup();
-    m.dados = { ...DADOS, rhOculto: true, atribuicoesSemAtivo: null };
+    m.dados = { ...DADOS, rhOculto: true };
     ver();
     abrirSeparador(/^Pessoas/);
     expect(within(await abrirDetalhe("Portátil 1")).getByTestId("detalhe-pessoa")).toHaveTextContent("Reservado ao RH");
@@ -428,7 +434,7 @@ describe("Ativos: o detalhe (o resto da informação, com números exatos)", () 
     expect(await screen.findByText("Ativo «Mesa grande» desativado.")).toBeInTheDocument();
   });
 
-  it("Reativar (só nos desativados) chama a RPC e avisa; um desativado não se edita nem se desativa outra vez", async () => {
+  it("Reativar (só nos desativados) pede confirmação, com o aviso do passado, e só então chama a RPC; um desativado não se edita nem se desativa outra vez", async () => {
     m.permissoes = EDITAR;
     ver();
     abrirSeparador(/^Estrutura/);
@@ -437,8 +443,49 @@ describe("Ativos: o detalhe (o resto da informação, com números exatos)", () 
     expect(d.queryByRole("button", { name: "Editar" })).not.toBeInTheDocument();
     expect(d.queryByRole("button", { name: "Desativar" })).not.toBeInTheDocument();
     fireEvent.click(d.getByRole("button", { name: "Reativar" }));
+    const dialogo = await screen.findByRole("dialog", { name: "Reativar «Cadeira velha»?" });
+    expect(within(dialogo).getByTestId("reativar-aviso")).toHaveTextContent("Reativar apaga a data de desativação");
+    expect(within(dialogo).getByTestId("reativar-aviso")).toHaveTextContent("também nos meses passados");
+    expect(m.mut.reativar).not.toHaveBeenCalled();
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Reativar" }));
     await waitFor(() => expect(m.mut.reativar).toHaveBeenCalledWith("e2"));
     expect(await screen.findByText("Ativo «Cadeira velha» reativado.")).toBeInTheDocument();
+  });
+
+  it("Reativar: «Cancelar» não faz nada", async () => {
+    m.permissoes = EDITAR;
+    ver();
+    abrirSeparador(/^Estrutura/);
+    mostrarTodos();
+    fireEvent.click(within(await abrirDetalhe("Cadeira velha")).getByRole("button", { name: "Reativar" }));
+    const dialogo = await screen.findByRole("dialog", { name: "Reativar «Cadeira velha»?" });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Cancelar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Reativar «Cadeira velha»?" })).not.toBeInTheDocument());
+    expect(m.mut.reativar).not.toHaveBeenCalled();
+  });
+
+  it("Reativar: quando a base avisa que o passado muda, o aviso fica dito na página", async () => {
+    m.permissoes = EDITAR;
+    m.mut.reativar.mockResolvedValue({ ok: true, id: "e2", aviso: true });
+    ver();
+    abrirSeparador(/^Estrutura/);
+    mostrarTodos();
+    fireEvent.click(within(await abrirDetalhe("Cadeira velha")).getByRole("button", { name: "Reativar" }));
+    fireEvent.click(within(await screen.findByRole("dialog", { name: "Reativar «Cadeira velha»?" })).getByRole("button", { name: "Reativar" }));
+    expect(await screen.findByText(/reativado\. A quota ou a renda voltam a contar desde a desativação, também nos meses passados\./)).toBeInTheDocument();
+  });
+
+  it("Reativar: um erro da base (ATV30, o armazém já tem outro ativo) aparece no diálogo e o diálogo fica aberto", async () => {
+    m.permissoes = EDITAR;
+    m.mut.reativar.mockResolvedValue({ ok: false, codigo: "ATV30", mensagem: "Este armazém já tem outro ativo ativo. Desative esse primeiro ou desligue o armazém." });
+    ver();
+    abrirSeparador(/^Estrutura/);
+    mostrarTodos();
+    fireEvent.click(within(await abrirDetalhe("Cadeira velha")).getByRole("button", { name: "Reativar" }));
+    const dialogo = await screen.findByRole("dialog", { name: "Reativar «Cadeira velha»?" });
+    fireEvent.click(within(dialogo).getByRole("button", { name: "Reativar" }));
+    expect(await within(dialogo).findByRole("alert")).toHaveTextContent("Este armazém já tem outro ativo ativo.");
+    expect(screen.getByRole("dialog", { name: "Reativar «Cadeira velha»?" })).toBeInTheDocument();
   });
 
   it("a data de desativação não passa de hoje + 7 dias (como a base: ATV16)", async () => {
@@ -452,7 +499,7 @@ describe("Ativos: o detalhe (o resto da informação, com números exatos)", () 
     fireEvent.click(screen.getByRole("option", { name: "Vendido" }));
     fireEvent.change(within(dialogo).getByLabelText(/Data de desativação/), { target: { value: "2026-06-23" } });
     fireEvent.click(within(dialogo).getByRole("button", { name: "Desativar ativo" }));
-    expect(within(dialogo).getByText("Indique uma data válida, a partir da data de compra.")).toBeInTheDocument();
+    expect(within(dialogo).getByText("Indique uma data válida: a partir da compra ou do início do aluguer e não antes da última devolução.")).toBeInTheDocument();
     expect(m.mut.desativar).not.toHaveBeenCalled();
   });
 
@@ -471,7 +518,7 @@ describe("Ativos: o detalhe (o resto da informação, com números exatos)", () 
   });
 });
 
-describe("Ativos: criar a partir do topo e ligar a pessoas", () => {
+describe("Ativos: criar a partir do topo (e Ligar e Desligar saíram)", () => {
   it("«Registar ativo» no topo abre o formulário já no grupo do separador aberto", async () => {
     m.permissoes = EDITAR;
     ver();
@@ -486,60 +533,16 @@ describe("Ativos: criar a partir do topo e ligar a pessoas", () => {
     expect(screen.queryByRole("button", { name: "Registar ativo" })).not.toBeInTheDocument();
   });
 
-  it("só com ativos.edit E hr.pessoas.retribuicao.edit aparecem Ligar e Desligar", async () => {
-    m.permissoes = [...EDITAR, "hr.pessoas.retribuicao.view"];
+  it("Ligar e Desligar saíram: nem com todas as permissões há botões para ligar a uma pessoa ou desligar (devolve-se no RH)", async () => {
+    m.permissoes = [...EDITAR, "hr.pessoas.retribuicao.view", "hr.pessoas.retribuicao.edit"];
     ver();
     abrirSeparador(/^Pessoas/);
-    expect(within(await abrirDetalhe("Telemóvel 1")).queryByRole("button", { name: /Ligar|Desligar/ })).not.toBeInTheDocument();
-    cleanup();
-    m.permissoes = EDITAR_E_LIGAR;
-    ver();
-    abrirSeparador(/^Pessoas/);
-    expect(within(await abrirDetalhe("Portátil 1")).getByRole("button", { name: "Desligar" })).toBeInTheDocument();
-    expect(within(screen.getByRole("dialog", { name: "Portátil 1" })).queryByRole("button", { name: "Ligar a pessoa" })).not.toBeInTheDocument();
-  });
-
-  it("com o RH oculto não há Ligar (a lista de atribuições não veio)", async () => {
-    m.permissoes = EDITAR_E_LIGAR;
-    m.dados = { ...DADOS, rhOculto: true, atribuicoesSemAtivo: null };
-    ver();
-    abrirSeparador(/^Pessoas/);
-    expect(within(await abrirDetalhe("Telemóvel 1")).queryByRole("button", { name: /Ligar|Desligar/ })).not.toBeInTheDocument();
-  });
-
-  it("Desligar pede confirmação (diz de quem) e só então chama a RPC; «Cancelar» não faz nada", async () => {
-    m.permissoes = EDITAR_E_LIGAR;
-    ver();
-    abrirSeparador(/^Pessoas/);
-    fireEvent.click(within(await abrirDetalhe("Portátil 1")).getByRole("button", { name: "Desligar" }));
-    const confirmar = await screen.findByRole("alertdialog");
-    expect(confirmar).toHaveTextContent("Desligar «Portátil 1» de Ana Silva?");
-    fireEvent.click(within(confirmar).getByRole("button", { name: "Cancelar" }));
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument());
-    expect(m.mut.desligarPessoa).not.toHaveBeenCalled();
-  });
-
-  it("Desligar, confirmado, chama a RPC com a atribuição e avisa", async () => {
-    m.permissoes = EDITAR_E_LIGAR;
-    ver();
-    abrirSeparador(/^Pessoas/);
-    fireEvent.click(within(await abrirDetalhe("Portátil 1")).getByRole("button", { name: "Desligar" }));
-    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Desligar" }));
-    await waitFor(() => expect(m.mut.desligarPessoa).toHaveBeenCalledWith("pe1"));
-    expect(await screen.findByText("Ativo «Portátil 1» desligado da pessoa.")).toBeInTheDocument();
-  });
-
-  it("Ligar abre o diálogo, escolhe a atribuição e chama a RPC", async () => {
-    m.permissoes = EDITAR_E_LIGAR;
-    ver();
-    abrirSeparador(/^Pessoas/);
-    fireEvent.click(within(await abrirDetalhe("Telemóvel 1")).getByRole("button", { name: "Ligar a pessoa" }));
-    const dialogo = await screen.findByRole("dialog", { name: "Ligar a pessoa" });
-    fireEvent.keyDown(within(dialogo).getByRole("combobox", { name: /Atribuição no RH/ }), { key: "Enter" });
-    fireEvent.click(screen.getByRole("option", { name: /Rui Costa/ }));
-    fireEvent.click(within(dialogo).getByRole("button", { name: "Ligar" }));
-    await waitFor(() => expect(m.mut.ligarPessoa).toHaveBeenCalledWith("p2", "pe9"));
-    expect(await screen.findByText("Ativo «Telemóvel 1» ligado a Rui Costa.")).toBeInTheDocument();
+    for (const nome of ["Portátil 1", "Telemóvel 1"]) {
+      const d = within(await abrirDetalhe(nome));
+      expect(d.queryByRole("button", { name: /Ligar|Desligar/ })).not.toBeInTheDocument();
+      fireEvent.keyDown(screen.getByRole("dialog", { name: nome }), { key: "Escape" });
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: nome })).not.toBeInTheDocument());
+    }
   });
 });
 
@@ -547,7 +550,7 @@ describe("Ativos: o que a revisão apanhou", () => {
   const SEM_VIDA = { id: "c3", nome: "Escada", vidaAnos: null, vidaHoras: null, usoAnoHoras: null };
 
   it("um ativo atribuído a uma pessoa não oferece Desativar: explica que se devolve primeiro no RH (chave `ligado`, mesmo sem ver o RH)", async () => {
-    m.permissoes = EDITAR_E_LIGAR;
+    m.permissoes = EDITAR;
     ver();
     abrirSeparador(/^Pessoas/);
     let d = within(await abrirDetalhe("Portátil 1"));
@@ -556,7 +559,7 @@ describe("Ativos: o que a revisão apanhou", () => {
     expect(d.getByRole("button", { name: "Editar" })).toBeInTheDocument();
     cleanup();
     m.permissoes = EDITAR;
-    m.dados = { ...DADOS, rhOculto: true, atribuicoesSemAtivo: null };
+    m.dados = { ...DADOS, rhOculto: true };
     ver();
     abrirSeparador(/^Pessoas/);
     d = within(await abrirDetalhe("Portátil 1"));
@@ -570,7 +573,7 @@ describe("Ativos: o que a revisão apanhou", () => {
   });
 
   it("pessoa já apagada (ligado, sem nome): «Ligado a uma pessoa», sem Ligar, sem Desligar e sem Desativar", async () => {
-    m.permissoes = EDITAR_E_LIGAR;
+    m.permissoes = EDITAR;
     m.dados = { ...DADOS, pessoa: [ativo({ id: "p5", grupo: "pessoa", tipo: "portatil", nome: "Portátil órfão", ligado: true, atribuicao: null })] };
     ver();
     abrirSeparador(/^Pessoas/);
@@ -629,13 +632,14 @@ describe("Ativos: o que a revisão apanhou", () => {
     expect(within(item("Portátil 1")).getByText("Pessoa:")).toBeInTheDocument();
   });
 
-  it("«sem ativo registado» são cartões (sem tabela, sem scroll horizontal)", () => {
+  it("as listas e as fichas são cartões e listas, nunca uma tabela (sem scroll horizontal no telemóvel)", async () => {
     ver();
-    abrirSeparador(/^Pessoas/);
+    for (const g of [/^Serviço/, /^Estrutura/, /^Pessoas/]) {
+      abrirSeparador(g);
+      expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    }
+    await abrirDetalhe("Portátil 1");
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
-    const lista = screen.getByRole("list", { name: "Atribuídos no RH sem ativo registado" });
-    expect(within(lista).getByText("Rui Costa")).toBeInTheDocument();
-    expect(within(lista).getByText("Telemóvel velho")).toBeInTheDocument();
   });
 
   it("ao fechar o detalhe o foco volta ao ativo que o abriu", async () => {
@@ -663,5 +667,382 @@ describe("Ativos: o que a revisão apanhou", () => {
     fireEvent.click(registar);
     fireEvent.keyDown(await screen.findByRole("dialog", { name: "Registar ativo" }), { key: "Escape" });
     await waitFor(() => expect(document.activeElement).toBe(registar));
+  });
+});
+
+// A1: comprado ou alugado. Data fixa (15/06/2026). Um portátil de 1 200 € a 12 meses comprado a 15/01/2026 amortiza 100 € por mês (janeiro a
+// junho = 6 quotas = 600 €); uma viatura alugada a 450 € por mês desde 01/01/2026 já custou 6 rendas = 2 700 €.
+const OC = (parcial: Partial<OcupacaoDoAtivo> & Pick<OcupacaoDoAtivo, "entrega">): OcupacaoDoAtivo => ({
+  pessoaEquipamentoId: "o", pessoaId: null, pessoaNome: null, estado: null, devolucao: null, contaDesde: null, ...parcial,
+});
+const PORTATIL = (parcial: Partial<Ativo> = {}): Ativo => ativo({
+  id: "p1", grupo: "pessoa", tipo: "portatil", nome: "Portátil 1", codigo: "POR-0001", valorCompra: 1200, vidaMeses: 12, vidaOrigem: "pagamento", ...parcial,
+});
+const VIATURA = (parcial: Partial<Ativo> = {}): Ativo => ativo({
+  id: "v1", grupo: "pessoa", tipo: "viatura", nome: "Carrinha", codigo: "VIA-0001", forma: "alugado", dataCompra: null, valorCompra: null, vidaMeses: null,
+  rendaMensal: 450, inicioAluguer: "2026-01-01", fimAluguer: null, ...parcial,
+});
+
+describe("Ativos: totais só dos comprados e as rendas à parte", () => {
+  it("Pessoas: compra, amortizado e valor atual são só dos comprados; o alugado vai na linha «Rendas»", () => {
+    m.dados = { ...DADOS, pessoa: [PORTATIL(), VIATURA()] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    const totais = screen.getByRole("region", { name: "Totais de Pessoas" });
+    expect(within(totais).getByTestId("total-quantidade")).toHaveTextContent("2");
+    expect(norm(within(totais).getByTestId("total-compra").textContent)).toBe("1200,00 €");
+    expect(norm(within(totais).getByTestId("total-amortizado").textContent)).toBe("600,00 €");
+    expect(norm(within(totais).getByTestId("total-atual").textContent)).toBe("600,00 €");
+    expect(norm(within(totais).getByTestId("total-rendas").textContent)).toBe("Rendas: 450,00 € por mês (1 alugado)");
+    expect(totais).toHaveTextContent("só os comprados");
+  });
+
+  it("sem alugados não há linha de rendas nem a nota dos comprados", () => {
+    ver();
+    expect(screen.queryByTestId("total-rendas")).not.toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Totais de Serviço" })).not.toHaveTextContent("só os comprados");
+  });
+
+  it("vários alugados: a soma das rendas e a contagem", () => {
+    m.dados = { ...DADOS, pessoa: [VIATURA(), VIATURA({ id: "v2", nome: "Carrinha 2", rendaMensal: 300 })] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    expect(norm(screen.getByTestId("total-rendas").textContent)).toBe("Rendas: 750,00 € por mês (2 alugados)");
+    expect(norm(screen.getByTestId("total-compra").textContent)).toBe("0,00 €");
+  });
+
+  it("Estrutura: o que os equipamentos de Pessoas sem ninguém custam este mês é custo da estrutura", () => {
+    const devolvido = PORTATIL({ id: "p7", nome: "Portátil devolvido", ocupacoes: [OC({ entrega: "2026-02-01", devolucao: "2026-05-10", contaDesde: "2026-02-01" })] });
+    m.dados = { ...DADOS, pessoa: [devolvido, PORTATIL({ id: "p8", ocupacoes: [OC({ entrega: "2026-02-01", contaDesde: "2026-02-01" })] })] };
+    ver();
+    abrirSeparador(/^Estrutura/);
+    expect(norm(screen.getByTestId("total-parado").textContent)).toBe("Equipamentos parados (sem pessoa): 100,00 € este mês.");
+    abrirSeparador(/^Pessoas/);
+    expect(screen.queryByTestId("total-parado")).not.toBeInTheDocument();
+  });
+
+  it("Estrutura sem equipamentos parados (todos entregues, ou nenhum de Pessoas) não mostra a linha", () => {
+    m.dados = { ...DADOS, pessoa: [] };
+    ver();
+    abrirSeparador(/^Estrutura/);
+    expect(screen.queryByTestId("total-parado")).not.toBeInTheDocument();
+  });
+
+  it("um armazém alugado é uma renda de estrutura: não entra na compra nem no valor atual", () => {
+    const armazem = ativo({
+      id: "w", nome: "Armazém Porto", tipo: "instalacoes", forma: "alugado", dataCompra: null, valorCompra: null, vidaMeses: null,
+      rendaMensal: 900, inicioAluguer: "2025-01-01", fimAluguer: "2030-12-31", armazemLigado: true, armazem: { id: "w1", nome: "Porto", apagado: false },
+    });
+    m.dados = { ...DADOS, estrutura: [armazem] };
+    ver();
+    abrirSeparador(/^Estrutura/);
+    const totais = screen.getByRole("region", { name: "Totais de Estrutura" });
+    expect(norm(within(totais).getByTestId("total-rendas").textContent)).toBe("Rendas: 900,00 € por mês (1 alugado)");
+    expect(norm(within(totais).getByTestId("total-compra").textContent)).toBe("0,00 €");
+    expect(norm(within(totais).getByTestId("total-atual").textContent)).toBe("0,00 €");
+  });
+});
+
+describe("Ativos: a lista mostra a renda do alugado e «Livre»", () => {
+  it("o alugado diz «Alugado» ao lado do código e mostra a renda por mês em vez do valor atual", () => {
+    m.dados = { ...DADOS, pessoa: [PORTATIL(), VIATURA()] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    const l = within(item("Carrinha"));
+    expect(l.getByText("Alugado · VIA-0001")).toBeInTheDocument();
+    expect(norm(l.getByTestId("valor-renda").textContent)).toBe("450,00 € por mês");
+    expect(l.queryByTestId("valor-atual")).not.toBeInTheDocument();
+    expect(within(item("Portátil 1")).getByTestId("valor-atual")).toBeInTheDocument();
+  });
+
+  it("um alugado que ninguém tem está «Livre» (não é um aviso)", () => {
+    m.dados = { ...DADOS, pessoa: [VIATURA()] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    expect(within(item("Carrinha")).getByTestId("estado-etiqueta")).toHaveTextContent("Livre");
+  });
+});
+
+describe("Ativos: a ficha de um comprado mostra a amortização", () => {
+  it("valor atual em grande e, por baixo, quanto já amortizou em euros e em %, os meses, o que falta e o mês em que acaba", async () => {
+    ver();
+    abrirSeparador(/^Estrutura/);
+    const d = within(await abrirDetalhe("Mesa grande"));
+    expect(norm(d.getByTestId("detalhe-valor-atual").textContent)).toBe("600,00 €");
+    expect(norm(d.getByTestId("detalhe-amortizado").textContent)).toBe("600,00 € (50,0 %)");
+    expect(d.getByTestId("detalhe-meses")).toHaveTextContent("6 de 12");
+    expect(norm(d.getByTestId("detalhe-falta").textContent)).toBe("600,00 € em 6 meses");
+    expect(d.getByTestId("detalhe-fim-amortizacao")).toHaveTextContent("12/2026");
+    expect(norm(d.getByTestId("detalhe-valor-compra").textContent)).toBe("1200,00 €");
+  });
+
+  it("a barra de progresso diz a percentagem (aria) e acompanha o amortizado", async () => {
+    ver();
+    abrirSeparador(/^Estrutura/);
+    const barra = within(await abrirDetalhe("Mesa grande")).getByRole("progressbar");
+    expect(barra).toHaveAttribute("aria-valuenow", "50");
+    expect(barra).toHaveAttribute("aria-valuemin", "0");
+    expect(barra).toHaveAttribute("aria-valuemax", "100");
+    expect(barra).toHaveAccessibleName("Amortizado: 50,0 %");
+  });
+
+  it("totalmente amortizado: 100%, sem «falta» e o fim diz «desde»", async () => {
+    m.dados = { ...DADOS, estrutura: [ativo({ id: "e5", nome: "Mesa velha", dataCompra: "2024-01-15", valorCompra: 1200, vidaMeses: 12 })] };
+    ver();
+    abrirSeparador(/^Estrutura/);
+    const d = within(await abrirDetalhe("Mesa velha"));
+    expect(d.getByTestId("detalhe-amortizado")).toHaveTextContent("(100,0 %)");
+    expect(d.queryByTestId("detalhe-falta")).not.toBeInTheDocument();
+    expect(d.getByText("Totalmente amortizado desde")).toBeInTheDocument();
+    expect(d.getByTestId("detalhe-fim-amortizacao")).toHaveTextContent("12/2024");
+  });
+
+  it("desativado: a amortização parou (o fim é o mês da desativação) e não se diz o que falta", async () => {
+    ver();
+    abrirSeparador(/^Estrutura/);
+    mostrarTodos();
+    const d = within(await abrirDetalhe("Cadeira velha"));
+    expect(d.getByText("A amortização parou em")).toBeInTheDocument();
+    expect(d.getByTestId("detalhe-fim-amortizacao")).toHaveTextContent("03/2026");
+    expect(d.queryByTestId("detalhe-falta")).not.toBeInTheDocument();
+  });
+
+  it("o serviço «por uso» (só horas) não tem barra de amortização", async () => {
+    ver();
+    expect(within(await abrirDetalhe("Compressor")).queryByRole("progressbar")).not.toBeInTheDocument();
+  });
+
+  it("a ficha diz como se definiu a vida útil (meses de pagamento, catálogo ou à mão)", async () => {
+    m.dados = { ...DADOS, pessoa: [PORTATIL()] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    expect(within(await abrirDetalhe("Portátil 1")).getByTestId("detalhe-vida-origem")).toHaveTextContent("Meses de pagamento");
+  });
+});
+
+describe("Ativos: a ficha de um alugado", () => {
+  const verViatura = async (parcial: Partial<Ativo> = {}) => {
+    m.dados = { ...DADOS, pessoa: [VIATURA(parcial)] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    return within(await abrirDetalhe("Carrinha"));
+  };
+
+  it("mostra a renda em grande, as datas do contrato e quanto já se pagou, sem valor de compra nem amortização", async () => {
+    const d = await verViatura();
+    expect(norm(d.getByTestId("detalhe-renda").textContent)).toBe("450,00 € por mês");
+    expect(d.getByTestId("detalhe-inicio-aluguer")).toHaveTextContent("01/01/2026");
+    expect(d.getByTestId("detalhe-fim-aluguer")).toHaveTextContent("Sem fim");
+    expect(d.getByTestId("detalhe-aluguer-meses")).toHaveTextContent("6");
+    expect(norm(d.getByTestId("detalhe-aluguer-pago").textContent)).toBe("2700,00 €");
+    expect(d.queryByRole("progressbar")).not.toBeInTheDocument();
+    for (const id of ["detalhe-valor-compra", "detalhe-residual", "detalhe-vida", "detalhe-valor-atual", "detalhe-amortizado", "detalhe-data-compra"]) {
+      expect(d.queryByTestId(id)).not.toBeInTheDocument();
+    }
+  });
+
+  it("com fim: mostra a data de fim", async () => {
+    const d = await verViatura({ fimAluguer: "2029-12-31" });
+    expect(d.getByTestId("detalhe-fim-aluguer")).toHaveTextContent("31/12/2029");
+  });
+
+  it("alugado desativado: a renda pára no mês da desativação", async () => {
+    m.permissoes = EDITAR;
+    m.dados = { ...DADOS, pessoa: [VIATURA({ estado: "desativado", desativadoEm: "2026-03-20", desativadoMotivo: "outro" })] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    mostrarTodos();
+    const d = within(await abrirDetalhe("Carrinha"));
+    expect(d.getByTestId("detalhe-aluguer-meses")).toHaveTextContent("3");
+    expect(norm(d.getByTestId("detalhe-aluguer-pago").textContent)).toBe("1350,00 €");
+  });
+
+  it("aviso: alugado sem fim, já devolvido e nunca desativado (a renda continua a contar como custo de estrutura)", async () => {
+    const d = await verViatura({ ocupacoes: [OC({ entrega: "2026-01-01", devolucao: "2026-03-31", contaDesde: "2026-01-01" })] });
+    expect(d.getByTestId("detalhe-aviso-alugadoSemFimDevolvido")).toHaveTextContent("nunca foi desativado");
+  });
+
+  it("sem esse aviso quando o equipamento ainda está entregue, ou o aluguer tem fim", async () => {
+    let d = await verViatura({ ocupacoes: [OC({ entrega: "2026-01-01", contaDesde: "2026-01-01" })] });
+    expect(d.queryByTestId("detalhe-aviso-alugadoSemFimDevolvido")).not.toBeInTheDocument();
+    cleanup();
+    d = await verViatura({ fimAluguer: "2029-12-31", ocupacoes: [OC({ entrega: "2026-01-01", devolucao: "2026-03-31", contaDesde: "2026-01-01" })] });
+    expect(d.queryByTestId("detalhe-aviso-alugadoSemFimDevolvido")).not.toBeInTheDocument();
+  });
+
+  it("aviso: contrato terminado com o equipamento ainda entregue", async () => {
+    const d = await verViatura({ fimAluguer: "2026-05-31", ocupacoes: [OC({ entrega: "2026-01-01", contaDesde: "2026-01-01" })] });
+    expect(d.getByTestId("detalhe-aviso-aluguerTerminadoEntregue")).toBeInTheDocument();
+  });
+});
+
+describe("Ativos: quem paga cada mês", () => {
+  const ANA = OC({ pessoaEquipamentoId: "o1", entrega: "2026-02-01", devolucao: "2026-03-31", contaDesde: "2026-02-01", pessoaNome: "Ana Silva", estado: "devolvido" });
+  const BRUNO = OC({ pessoaEquipamentoId: "o2", entrega: "2026-05-10", contaDesde: "2026-05-10", pessoaNome: "Bruno Costa", estado: "atribuido" });
+
+  it("lista cada pessoa com o período e o que pagou, e a estrutura nos meses em que ninguém o tinha (soma = amortizado até hoje)", async () => {
+    // Quota de 100 €: janeiro (a 31/01 ainda ninguém) é da estrutura; fevereiro e março são da Ana (devolve a 31/03); abril (a 30/04 ninguém) é da estrutura;
+    // maio e junho são do Bruno.
+    const comNomes = PORTATIL({ ligado: true, ocupacoes: [ANA, BRUNO] });
+    m.dados = { ...DADOS, pessoa: [comNomes] };
+    m.lido = comNomes;
+    ver();
+    abrirSeparador(/^Pessoas/);
+    const d = within(await abrirDetalhe("Portátil 1"));
+    const quem = within(d.getByTestId("detalhe-quem-paga"));
+    expect(quem.getByTestId("quem-pessoa-0")).toHaveTextContent("Ana Silva");
+    expect(quem.getByTestId("quem-pessoa-0")).toHaveTextContent("De 01/02/2026 a 31/03/2026");
+    expect(norm(quem.getByTestId("quem-pessoa-0").textContent)).toContain("200,00 € em 2 meses");
+    expect(quem.getByTestId("quem-pessoa-1")).toHaveTextContent("Bruno Costa");
+    expect(quem.getByTestId("quem-pessoa-1")).toHaveTextContent("Desde 10/05/2026, ainda com a pessoa");
+    expect(norm(quem.getByTestId("quem-pessoa-1").textContent)).toContain("200,00 € em 2 meses");
+    expect(norm(quem.getByTestId("quem-estrutura").textContent)).toContain("200,00 € em 2 meses");
+    expect(norm(quem.getByTestId("quem-total").textContent)).toContain("600,00 € em 6 meses");
+    expect(quem.getByText(/o dia da devolução conta/)).toBeInTheDocument();
+  });
+
+  it("sem a permissão do RH não há nomes («Reservado ao RH»), mas os valores e a estrutura mostram-se na mesma", async () => {
+    m.dados = { ...DADOS, rhOculto: true, pessoa: [PORTATIL({ ligado: true, ocupacoes: [ANA, BRUNO] })] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    const quem = within((within(await abrirDetalhe("Portátil 1"))).getByTestId("detalhe-quem-paga"));
+    expect(quem.queryByText("Ana Silva")).not.toBeInTheDocument();
+    expect(quem.getByTestId("quem-pessoa-0")).toHaveTextContent("Reservado ao RH");
+    expect(quem.getByTestId("quem-estrutura")).toBeInTheDocument();
+  });
+
+  it("sem nome vindo da base (a lista só traz o id da pessoa) a ficha diz «Pessoa», sem inventar um nome", async () => {
+    const semNome = { ...ANA, pessoaNome: null };
+    m.dados = { ...DADOS, pessoa: [PORTATIL({ ligado: true, ocupacoes: [semNome, BRUNO] })] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    const quem = within(within(await abrirDetalhe("Portátil 1")).getByTestId("detalhe-quem-paga"));
+    expect(quem.getByTestId("quem-pessoa-0")).toHaveTextContent("Pessoa");
+    expect(quem.getByTestId("quem-pessoa-0")).not.toHaveTextContent("Ana");
+  });
+
+  it("viatura em renting: o João paga os meses até devolver a 31/03 (março é dele, o dia da devolução conta) e a Ana os seguintes; estrutura 0", async () => {
+    const joao = OC({ pessoaEquipamentoId: "j", entrega: "2026-01-01", devolucao: "2026-03-31", contaDesde: "2026-01-01", pessoaNome: "João" });
+    const ana = OC({ pessoaEquipamentoId: "a", entrega: "2026-04-05", contaDesde: "2026-04-05", pessoaNome: "Ana" });
+    m.dados = { ...DADOS, pessoa: [VIATURA({ ligado: true, ocupacoes: [joao, ana] })] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    const quem = within(within(await abrirDetalhe("Carrinha")).getByTestId("detalhe-quem-paga"));
+    expect(norm(quem.getByTestId("quem-pessoa-0").textContent)).toContain("1350,00 € em 3 meses");
+    expect(norm(quem.getByTestId("quem-pessoa-1").textContent)).toContain("1350,00 € em 3 meses");
+    expect(quem.queryByTestId("quem-estrutura")).not.toBeInTheDocument();
+    expect(norm(quem.getByTestId("quem-total").textContent)).toContain("2700,00 € em 6 meses");
+  });
+
+  it("um ativo de Pessoas que nunca foi entregue: tudo é custo da estrutura, e diz-se", async () => {
+    m.dados = { ...DADOS, pessoa: [PORTATIL()] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    const quem = within(within(await abrirDetalhe("Portátil 1")).getByTestId("detalhe-quem-paga"));
+    expect(quem.getByText("Ainda não foi entregue a ninguém: tudo conta como custo da estrutura.")).toBeInTheDocument();
+    expect(norm(quem.getByTestId("quem-estrutura").textContent)).toContain("600,00 € em 6 meses");
+  });
+
+  it("um comprado de Estrutura (uma mesa) não tem esta secção; um armazém alugado diz que o custo é da estrutura", async () => {
+    ver();
+    abrirSeparador(/^Estrutura/);
+    expect(within(await abrirDetalhe("Mesa grande")).queryByTestId("detalhe-quem-paga")).not.toBeInTheDocument();
+    cleanup();
+    const armazem = ativo({
+      id: "w", nome: "Armazém Porto", tipo: "instalacoes", forma: "alugado", dataCompra: null, valorCompra: null, vidaMeses: null,
+      rendaMensal: 900, inicioAluguer: "2026-01-01", fimAluguer: null,
+    });
+    m.dados = { ...DADOS, estrutura: [armazem] };
+    ver();
+    abrirSeparador(/^Estrutura/);
+    const quem = within(within(await abrirDetalhe("Armazém Porto")).getByTestId("detalhe-quem-paga"));
+    expect(quem.getByText(/o custo é sempre da estrutura/)).toBeInTheDocument();
+    expect(norm(quem.getByTestId("quem-estrutura").textContent)).toContain("5400,00 € em 6 meses");
+    expect(quem.queryByTestId("quem-pessoa-0")).not.toBeInTheDocument();
+  });
+});
+
+describe("Ativos: o armazém do Stock e o valor em produtos", () => {
+  const ARMAZEM = (parcial: Partial<Ativo> = {}): Ativo => ativo({
+    id: "w", nome: "Armazém Porto", tipo: "instalacoes", valorCompra: 60000, vidaMeses: 600, armazemLigado: true,
+    armazem: { id: "w1", nome: "Porto", apagado: false }, ...parcial,
+  });
+  const verArmazem = async (parcial: Partial<Ativo> = {}) => {
+    m.dados = { ...DADOS, estrutura: [ARMAZEM(parcial)] };
+    ver();
+    abrirSeparador(/^Estrutura/);
+    return within(await abrirDetalhe("Armazém Porto"));
+  };
+
+  it("com inventory.view e products.view_cost: o nome do armazém e o valor em produtos, que NÃO entra nos totais", async () => {
+    m.permissoes = ["ativos.view", "inventory.view", "products.view_cost"];
+    m.valorStock = { valor: 12345.6, aCarregar: false, falhou: false };
+    const d = await verArmazem();
+    expect(d.getByTestId("detalhe-armazem-nome")).toHaveTextContent("Porto");
+    expect(norm(d.getByTestId("detalhe-armazem-valor").textContent)).toBe("12 345,60 €");
+    expect(d.getByText(/Não entra nos totais dos ativos/)).toBeInTheDocument();
+    // O total de estrutura só tem a conta do armazém (60 000 € a 600 meses = 100 € por mês, 6 meses): 59 400 €; os 12 345,60 € nunca somam.
+    expect(norm(screen.getByTestId("total-atual").textContent)).toBe("59 400,00 €");
+  });
+
+  it("sem products.view_cost (mesmo com inventory.view) o valor em produtos não aparece, e a ficha não dá erro", async () => {
+    m.permissoes = ["ativos.view", "inventory.view"];
+    const d = await verArmazem();
+    expect(d.getByTestId("detalhe-armazem-nome")).toHaveTextContent("Porto");
+    expect(d.queryByTestId("detalhe-armazem-valor")).not.toBeInTheDocument();
+    expect(d.queryByText(/Não entra nos totais dos ativos/)).not.toBeInTheDocument();
+  });
+
+  it("sem inventory.view a ficha diz que está ligado a um armazém, sem dizer qual", async () => {
+    m.permissoes = ["ativos.view"];
+    const d = await verArmazem({ armazem: null });
+    expect(d.getByTestId("detalhe-armazem-nome")).toHaveTextContent("Ligado a um armazém. Só quem vê o Stock vê qual.");
+    expect(d.queryByTestId("detalhe-armazem-valor")).not.toBeInTheDocument();
+  });
+
+  it("um armazém apagado no Stock: o ativo fica, a ficha diz-o e o valor aparece «—»", async () => {
+    m.permissoes = ["ativos.view", "inventory.view", "products.view_cost"];
+    const d = await verArmazem({ armazem: { id: "w1", nome: "Porto", apagado: true } });
+    expect(d.getByTestId("detalhe-armazem-apagado")).toHaveTextContent("O armazém foi apagado no Stock.");
+    expect(d.getByTestId("detalhe-armazem-valor")).toHaveTextContent("—");
+  });
+
+  it("a leitura do valor falhada (recusa) esconde só essa linha", async () => {
+    m.permissoes = ["ativos.view", "inventory.view", "products.view_cost"];
+    m.valorStock = { valor: null, aCarregar: false, falhou: true };
+    const d = await verArmazem();
+    expect(d.getByTestId("detalhe-armazem-nome")).toHaveTextContent("Porto");
+    expect(d.queryByTestId("detalhe-armazem-valor")).not.toBeInTheDocument();
+  });
+
+  it("um ativo que não está ligado a nenhum armazém não tem a secção", async () => {
+    ver();
+    abrirSeparador(/^Estrutura/);
+    expect(within(await abrirDetalhe("Mesa grande")).queryByTestId("detalhe-armazem")).not.toBeInTheDocument();
+  });
+});
+
+describe("Ativos: as ações da ficha continuam por permissão", () => {
+  it("só com ativos.edit há Editar, Desativar e Reativar; só com ativos.view, nenhuma", async () => {
+    m.dados = { ...DADOS, pessoa: [VIATURA()] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    const d = within(await abrirDetalhe("Carrinha"));
+    for (const nome of ["Editar", "Desativar", "Reativar"]) expect(d.queryByRole("button", { name: nome })).not.toBeInTheDocument();
+  });
+
+  it("um alugado entregue não se desativa (diz que se devolve primeiro no RH); um livre sim, com a data a partir do início do contrato", async () => {
+    m.permissoes = EDITAR;
+    m.dados = { ...DADOS, pessoa: [VIATURA({ ligado: true }), VIATURA({ id: "v2", nome: "Carrinha livre", ocupacoes: [OC({ entrega: "2026-01-01", devolucao: "2026-03-31", contaDesde: "2026-01-01" })] })] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    expect(within(await abrirDetalhe("Carrinha")).getByTestId("detalhe-desativar-bloqueado")).toBeInTheDocument();
+    cleanup();
+    ver();
+    abrirSeparador(/^Pessoas/);
+    fireEvent.click(within(await abrirDetalhe("Carrinha livre")).getByRole("button", { name: "Desativar" }));
+    const dialogo = await screen.findByRole("dialog", { name: "Desativar ativo" });
+    // Não se desativa antes da última devolução (ATV29): o campo diz o mínimo.
+    expect(within(dialogo).getByLabelText(/Data de desativação/)).toHaveAttribute("min", "2026-03-31");
   });
 });

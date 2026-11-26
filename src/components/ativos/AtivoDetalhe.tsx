@@ -1,18 +1,25 @@
 /**
- * O detalhe de um ativo (folha lateral): o valor atual em grande com a regra de depreciação em frase simples, e por baixo tudo o
- * que a lista esconde, com números exatos, unidades e datas claras (valor de compra, residual, vida útil e vida restante, manutenção
- * por ano, data de compra, localização, centro de custo, número de série, notas, equipamento do catálogo ou pessoa). Num ativo
- * desativado o valor é o «à data da desativação». As ações (editar, desativar, reativar, ligar a pessoa, desligar) vivem aqui, e só
- * para quem pode. Um ativo atribuído a uma pessoa não se desativa (a base recusa com ATV17): diz-se porquê em vez de oferecer o botão.
+ * O detalhe de um ativo (folha lateral). Num COMPRADO: o valor atual em grande com a regra de depreciação em frase simples, a
+ * amortização desde a compra (euros e percentagem, barra, meses decorridos e totais, o mês em que acaba), o valor e a vida útil, e
+ * os dados. Num ALUGADO: a renda mensal em grande, as datas do contrato e quanto já se pagou, sem valor de compra nem amortização.
+ * Nos ativos de Pessoas (e no alugado de estrutura) diz também QUEM paga cada mês: cada pessoa que o teve e a parte da estrutura. O
+ * armazém ligado e o valor em produtos aparecem a quem pode. As ações (editar, desativar, reativar) vivem aqui, e só para quem
+ * pode. Ligar e desligar uma pessoa saíram: o equipamento atribuído no RH cria o ativo sozinho e devolve-se no RH. Um ativo
+ * atribuído a uma pessoa não se desativa (a base recusa com ATV17): diz-se porquê em vez de oferecer o botão.
  */
-import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { dataPt, euros } from "@/components/rh-exemplo/custo/formato";
+import { useAtivoLido } from "@/hooks/ativos/useAtivoLido";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
+import { AmortizacaoAtivo } from "./AmortizacaoAtivo";
+import { ArmazemDoAtivoSecao } from "./ArmazemDoAtivoSecao";
+import { Linha, Seccao } from "./DetalheBlocos";
 import { EtiquetaEstado } from "./EtiquetaEstado";
+import { QuemPagaAtivo } from "./QuemPagaAtivo";
+import { avisosDoAtivo, contaDoAtivo, ocupacaoParaConta, repartoDoAtivo, resumoAmortizacao } from "./lib/amortizacaoAtivo";
 import { estadoDoAtivo, fraseDepreciacao, motivoSemValor, vidaRestante, type FraseDepreciacao } from "./lib/resumoAtivo";
 import type { Ativo, OpcaoCentroCusto } from "./lib/tipos";
 import { valorAtual, vidaEfetivaMeses } from "./lib/valorAtivo";
@@ -21,37 +28,19 @@ interface Props {
   ativo: Ativo | null;
   /** O mês em que se calcula o valor atual («AAAA-MM»). */
   mes: string;
+  /** Hoje (AAAA-MM-DD): o dia de referência do mês a decorrer. */
+  hoje: string;
   centrosCusto: readonly OpcaoCentroCusto[];
   rhOculto: boolean;
   podeEditar: boolean;
-  /** `ativos.edit` e `hr.pessoas.retribuicao.edit`. */
-  podeLigar: boolean;
+  /** Tem `inventory.view` e `products.view_cost`: vê o valor em produtos do armazém ligado. */
+  podeVerValorStock: boolean;
   aoFechar: () => void;
   /** Ao fechar a folha, devolve o foco a quem a abriu (a página guarda a origem). */
   aoFecharFoco?: (e: Event) => void;
   aoEditar: (a: Ativo) => void;
   aoDesativar: (a: Ativo) => void;
   aoReativar: (a: Ativo) => void;
-  aoLigar: (a: Ativo) => void;
-  aoDesligar: (a: Ativo) => void;
-}
-
-function Linha({ rotulo, id, children }: { rotulo: string; id: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-col gap-0.5 border-b py-2.5 last:border-b-0 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
-      <dt className="text-sm text-muted-foreground">{rotulo}</dt>
-      <dd data-testid={id} className="min-w-0 break-words text-sm font-medium tabular-nums sm:text-right">{children}</dd>
-    </div>
-  );
-}
-
-function Seccao({ titulo, children }: { titulo: string; children: ReactNode }) {
-  return (
-    <section className="space-y-1">
-      <h3 className="text-sm font-semibold">{titulo}</h3>
-      <dl>{children}</dl>
-    </section>
-  );
 }
 
 function useFrase() {
@@ -72,10 +61,38 @@ function useFrase() {
 
 type PropsDoAtivo = Omit<Props, "ativo" | "aoFechar" | "aoFecharFoco"> & { a: Ativo };
 
-function DetalheDoAtivo({ a, mes, centrosCusto, rhOculto, podeEditar, podeLigar, aoEditar, aoDesativar, aoReativar, aoLigar, aoDesligar }: PropsDoAtivo) {
+/** O topo de um comprado: o valor atual em grande e a regra de depreciação em frase. */
+function TopoComprado({ a, mes }: { a: Ativo; mes: string }) {
   const { t } = useTranslation();
   const frase = useFrase();
+  const desativado = a.estado === "desativado";
   const atual = valorAtual(a, mes);
+  const rotulo = t(desativado ? "ativos.detalhe.valorDesativado" : "ativos.col.valorAtual");
+  return (
+    <section aria-label={rotulo} className="rounded-lg border bg-muted/40 p-4">
+      <p data-testid="detalhe-valor-rotulo" className="text-sm text-muted-foreground">{rotulo}</p>
+      <p data-testid="detalhe-valor-atual" className="text-3xl font-semibold tabular-nums">
+        {atual === null ? t(motivoSemValor(a) === "porUso" ? "ativos.vida.semVida" : "ativos.vida.indefinida") : euros(atual, "—")}
+      </p>
+      <p data-testid="detalhe-frase" className="mt-1 text-sm">{frase(fraseDepreciacao(a, mes))}</p>
+    </section>
+  );
+}
+
+/** O topo de um alugado: a renda mensal em grande (um alugado não tem valor atual). */
+function TopoAlugado({ a }: { a: Ativo }) {
+  const { t } = useTranslation();
+  return (
+    <section aria-label={t("ativos.detalhe.rendaRotulo")} className="rounded-lg border bg-muted/40 p-4">
+      <p className="text-sm text-muted-foreground">{t("ativos.detalhe.rendaRotulo")}</p>
+      <p data-testid="detalhe-renda" className="text-3xl font-semibold tabular-nums">{t("ativos.lista.rendaMes", { valor: euros(a.rendaMensal, "—") })}</p>
+      <p data-testid="detalhe-frase" className="mt-1 text-sm">{t("ativos.detalhe.rendaFrase")}</p>
+    </section>
+  );
+}
+
+function SeccaoValorComprado({ a, mes }: { a: Ativo; mes: string }) {
+  const { t } = useTranslation();
   const vida = vidaEfetivaMeses(a);
   const restante = vidaRestante(a, mes);
   const vidaTexto = vida === null
@@ -90,11 +107,47 @@ function DetalheDoAtivo({ a, mes, centrosCusto, rhOculto, podeEditar, podeLigar,
       : restante.meses === 0
         ? t("ativos.detalhe.vidaRestanteUltimo", { fim: restante.fim })
         : t(restante.meses === 1 ? "ativos.detalhe.vidaRestanteUm" : "ativos.detalhe.vidaRestanteValor", { n: restante.meses, fim: restante.fim });
+  return (
+    <Seccao titulo={t("ativos.detalhe.seccaoValor")}>
+      <Linha rotulo={t("ativos.col.valorCompra")} id="detalhe-valor-compra">{euros(a.valorCompra, "—")}</Linha>
+      <Linha rotulo={t("ativos.campo.valorResidual")} id="detalhe-residual">{euros(a.valorResidual, "—")}</Linha>
+      <Linha rotulo={t("ativos.col.vida")} id="detalhe-vida">{vidaTexto}</Linha>
+      {a.vidaOrigem && <Linha rotulo={t("ativos.detalhe.vidaOrigem")} id="detalhe-vida-origem">{t(`ativos.vida.origem.${a.vidaOrigem}`)}</Linha>}
+      {restanteTexto && <Linha rotulo={t("ativos.detalhe.vidaRestante")} id="detalhe-vida-restante">{restanteTexto}</Linha>}
+      <Linha rotulo={t("ativos.campo.manutencao")} id="detalhe-manutencao">{t("ativos.detalhe.porAno", { valor: euros(a.manutencaoAno, "—") })}</Linha>
+    </Seccao>
+  );
+}
+
+/** As datas do contrato e quanto já se pagou (a renda inteira de cada mês que o contrato tocou, até hoje). */
+function SeccaoAluguer({ a, pago }: { a: Ativo; pago: { valor: number; meses: number } | null }) {
+  const { t } = useTranslation();
+  return (
+    <Seccao titulo={t("ativos.detalhe.seccaoAluguer")}>
+      <Linha rotulo={t("ativos.aluguer.inicio")} id="detalhe-inicio-aluguer">{a.inicioAluguer ? dataPt(a.inicioAluguer) : "—"}</Linha>
+      <Linha rotulo={t("ativos.aluguer.fim")} id="detalhe-fim-aluguer">{a.fimAluguer ? dataPt(a.fimAluguer) : t("ativos.aluguer.semFim")}</Linha>
+      {pago && <Linha rotulo={t("ativos.aluguer.meses")} id="detalhe-aluguer-meses">{pago.meses}</Linha>}
+      {pago && <Linha rotulo={t("ativos.aluguer.pago")} id="detalhe-aluguer-pago">{euros(pago.valor, "—")}</Linha>}
+      <Linha rotulo={t("ativos.campo.manutencao")} id="detalhe-manutencao">{t("ativos.detalhe.porAno", { valor: euros(a.manutencaoAno, "—") })}</Linha>
+    </Seccao>
+  );
+}
+
+function DetalheDoAtivo({ a, mes, hoje, centrosCusto, rhOculto, podeEditar, podeVerValorStock, aoEditar, aoDesativar, aoReativar }: PropsDoAtivo) {
+  const { t } = useTranslation();
+  // A lista só traz o id da pessoa; o nome vem de `rpc_ativo_ler`, que só se pede quando a ficha é de Pessoas e o RH deixa ver nomes.
+  const lido = useAtivoLido(a.id, a.grupo === "pessoa" && !rhOculto);
+  const ocupacoes = lido.ativo?.ocupacoes ?? a.ocupacoes;
+  const conta = contaDoAtivo(a);
+  const alugado = a.forma === "alugado";
+  const resumo = conta?.forma === "comprado" ? resumoAmortizacao(conta, mes) : null;
+  const pago = conta ? repartoDoAtivo(conta, ocupacoes.map(ocupacaoParaConta), mes, hoje).total : null;
+  const mostraQuemPaga = conta !== null && (a.grupo === "pessoa" || (alugado && a.grupo === "estrutura"));
+  const avisos = avisosDoAtivo(a, hoje);
   const centro = a.centroCustoId ? (centrosCusto.find((c) => c.id === a.centroCustoId)?.nome ?? "—") : "—";
   const tipo = a.tipo && a.grupo !== "servico" ? t(`ativos.tipo.${a.grupo}.${a.tipo}`) : null;
   const motivo = a.desativadoMotivo ? t(`ativos.desativar.motivo.${a.desativadoMotivo}`).toLowerCase() : "";
   const desativado = a.estado === "desativado";
-  const ligacao = a.grupo === "pessoa" && podeLigar && !rhOculto && !desativado;
   const BOTAO = cn("min-h-11", FOCO);
   const pessoa = rhOculto
     ? t("ativos.pessoa.rhOculto")
@@ -106,7 +159,7 @@ function DetalheDoAtivo({ a, mes, centrosCusto, rhOculto, podeEditar, podeLigar,
     <>
       <SheetHeader className="space-y-2 text-left">
         <SheetTitle className="break-words pr-6">{a.nome}</SheetTitle>
-        <SheetDescription>{[t(`ativos.grupo.${a.grupo}`), tipo].filter(Boolean).join(" · ")}</SheetDescription>
+        <SheetDescription>{[t(`ativos.grupo.${a.grupo}`), tipo, alugado ? t("ativos.forma.etiqueta.alugado") : null].filter(Boolean).join(" · ")}</SheetDescription>
         <div className="flex flex-wrap items-center gap-2">
           <EtiquetaEstado estado={estadoDoAtivo(a)} />
           {a.codigo && <span className="text-sm text-muted-foreground">{a.codigo}</span>}
@@ -114,13 +167,13 @@ function DetalheDoAtivo({ a, mes, centrosCusto, rhOculto, podeEditar, podeLigar,
       </SheetHeader>
 
       <div className="mt-6 space-y-6">
-        <section aria-label={t(desativado ? "ativos.detalhe.valorDesativado" : "ativos.col.valorAtual")} className="rounded-lg border bg-muted/40 p-4">
-          <p data-testid="detalhe-valor-rotulo" className="text-sm text-muted-foreground">{t(desativado ? "ativos.detalhe.valorDesativado" : "ativos.col.valorAtual")}</p>
-          <p data-testid="detalhe-valor-atual" className="text-3xl font-semibold tabular-nums">
-            {atual === null ? t(motivoSemValor(a) === "porUso" ? "ativos.vida.semVida" : "ativos.vida.indefinida") : euros(atual, "—")}
+        {alugado ? <TopoAlugado a={a} /> : <TopoComprado a={a} mes={mes} />}
+
+        {avisos.map((aviso) => (
+          <p key={aviso} role="note" data-testid={`detalhe-aviso-${aviso}`} className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
+            {t(`ativos.aviso.${aviso}`)}
           </p>
-          <p data-testid="detalhe-frase" className="mt-1 text-sm">{frase(fraseDepreciacao(a, mes))}</p>
-        </section>
+        ))}
 
         {desativado && (
           <p data-testid="detalhe-desativado" className="rounded-md border border-dashed p-3 text-sm">
@@ -129,16 +182,16 @@ function DetalheDoAtivo({ a, mes, centrosCusto, rhOculto, podeEditar, podeLigar,
           </p>
         )}
 
-        <Seccao titulo={t("ativos.detalhe.seccaoValor")}>
-          <Linha rotulo={t("ativos.col.valorCompra")} id="detalhe-valor-compra">{euros(a.valorCompra, "—")}</Linha>
-          <Linha rotulo={t("ativos.campo.valorResidual")} id="detalhe-residual">{euros(a.valorResidual, "—")}</Linha>
-          <Linha rotulo={t("ativos.col.vida")} id="detalhe-vida">{vidaTexto}</Linha>
-          {restanteTexto && <Linha rotulo={t("ativos.detalhe.vidaRestante")} id="detalhe-vida-restante">{restanteTexto}</Linha>}
-          <Linha rotulo={t("ativos.campo.manutencao")} id="detalhe-manutencao">{t("ativos.detalhe.porAno", { valor: euros(a.manutencaoAno, "—") })}</Linha>
-        </Seccao>
+        {resumo && <AmortizacaoAtivo resumo={resumo} desativado={desativado} />}
+
+        {alugado ? <SeccaoAluguer a={a} pago={pago} /> : <SeccaoValorComprado a={a} mes={mes} />}
+
+        {mostraQuemPaga && conta && <QuemPagaAtivo conta={conta} grupo={a.grupo} ocupacoes={ocupacoes} mes={mes} hoje={hoje} rhOculto={rhOculto} />}
+
+        <ArmazemDoAtivoSecao ativo={a} podeVerValor={podeVerValorStock} />
 
         <Seccao titulo={t("ativos.detalhe.seccaoDados")}>
-          <Linha rotulo={t("ativos.col.compra")} id="detalhe-data-compra">{dataPt(a.dataCompra)}</Linha>
+          {!alugado && a.dataCompra && <Linha rotulo={t("ativos.col.compra")} id="detalhe-data-compra">{dataPt(a.dataCompra)}</Linha>}
           {a.grupo === "servico" && <Linha rotulo={t("ativos.col.modelo")} id="detalhe-equipamento">{a.catEquipamento?.nome ?? "—"}</Linha>}
           {a.grupo === "pessoa" && <Linha rotulo={t("ativos.col.pessoa")} id="detalhe-pessoa">{pessoa}</Linha>}
           <Linha rotulo={t("ativos.col.localizacao")} id="detalhe-localizacao">{a.localizacao ?? "—"}</Linha>
@@ -161,8 +214,6 @@ function DetalheDoAtivo({ a, mes, centrosCusto, rhOculto, podeEditar, podeLigar,
           ) : (
             <>
               <Button type="button" onClick={() => aoEditar(a)} className={BOTAO}>{t("ativos.acao.editar")}</Button>
-              {ligacao && a.ligado && a.atribuicao && <Button type="button" variant="outline" onClick={() => aoDesligar(a)} className={BOTAO}>{t("ativos.acao.desligar")}</Button>}
-              {ligacao && !a.ligado && <Button type="button" variant="outline" onClick={() => aoLigar(a)} className={BOTAO}>{t("ativos.acao.ligar")}</Button>}
               {a.ligado
                 ? <p data-testid="detalhe-desativar-bloqueado" className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">{t("ativos.detalhe.desativarBloqueado")}</p>
                 : <Button type="button" variant="outline" onClick={() => aoDesativar(a)} className={BOTAO}>{t("ativos.acao.desativar")}</Button>}

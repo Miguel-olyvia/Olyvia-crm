@@ -9,7 +9,7 @@ const BASE: Ativo = {
   id: "a", grupo: "estrutura", tipo: "mobiliario", nome: "Mesa", codigo: null, numSerie: null, catEquipamentoId: null,
   dataCompra: "2026-01-15", valorCompra: 1200, valorResidual: 0, vidaMeses: 12, manutencaoAno: 0, centroCustoId: null,
   localizacao: null, notas: null, estado: "ativo", desativadoEm: null, desativadoMotivo: null, desativadoNota: null,
-  catEquipamento: null, atribuicao: null, ligado: false,
+  catEquipamento: null, atribuicao: null, ligado: false, forma: "comprado", rendaMensal: null, inicioAluguer: null, fimAluguer: null, vidaOrigem: null, armazem: null, armazemLigado: false, ocupacoes: [],
 };
 const com = (p: Partial<Ativo>): Ativo => ({ ...BASE, ...p });
 const CAT: CatEquipamentoLigado = { id: "c1", nome: "Berbequim", vidaAnos: 5, vidaHoras: null, usoAnoHoras: null };
@@ -42,7 +42,37 @@ describe("totaisAtivos", () => {
   });
 
   it("lista vazia: zeros", () => {
-    expect(totaisAtivos([], "2026-06")).toEqual({ quantidade: 0, valorCompra: 0, valorAtual: 0, semValorAtual: 0 });
+    expect(totaisAtivos([], "2026-06")).toEqual({ quantidade: 0, comprados: 0, valorCompra: 0, amortizado: 0, valorAtual: 0, semValorAtual: 0, alugados: 0, rendaMensal: 0 });
+  });
+
+  it("o amortizado é a compra menos o valor atual de cada comprado (mesa de 1 200 € a 12 meses, 6 quotas = 600 €)", () => {
+    const t = totaisAtivos([com({ id: "1" })], "2026-06");
+    expect(t).toMatchObject({ valorCompra: 1200, amortizado: 600, valorAtual: 600 });
+  });
+
+  it("os alugados não entram na compra, no amortizado nem no valor atual: vão numa linha à parte (rendas por mês)", () => {
+    const alugado = com({
+      id: "r1", grupo: "pessoa", tipo: "viatura", forma: "alugado", dataCompra: null, valorCompra: null, vidaMeses: null,
+      rendaMensal: 450, inicioAluguer: "2026-01-01", fimAluguer: null,
+    });
+    const t = totaisAtivos([com({ id: "1" }), alugado], "2026-06");
+    expect(t).toMatchObject({ quantidade: 2, comprados: 1, valorCompra: 1200, valorAtual: 600, semValorAtual: 0, alugados: 1, rendaMensal: 450 });
+  });
+
+  it("um alugado cujo contrato já acabou ou ainda não começou não conta nas rendas do mês", () => {
+    const acabou = com({ id: "r1", grupo: "pessoa", forma: "alugado", dataCompra: null, valorCompra: null, vidaMeses: null, rendaMensal: 300, inicioAluguer: "2025-01-01", fimAluguer: "2026-03-31" });
+    const futuro = com({ id: "r2", grupo: "pessoa", forma: "alugado", dataCompra: null, valorCompra: null, vidaMeses: null, rendaMensal: 200, inicioAluguer: "2026-09-01", fimAluguer: null });
+    const ativo = com({ id: "r3", grupo: "pessoa", forma: "alugado", dataCompra: null, valorCompra: null, vidaMeses: null, rendaMensal: 100, inicioAluguer: "2026-01-01", fimAluguer: "2026-12-31" });
+    const t = totaisAtivos([acabou, futuro, ativo], "2026-06");
+    expect(t).toMatchObject({ comprados: 0, alugados: 1, rendaMensal: 100, valorCompra: 0 });
+  });
+
+  it("os alugados desativados não contam", () => {
+    const parado = com({
+      id: "r1", grupo: "pessoa", forma: "alugado", dataCompra: null, valorCompra: null, vidaMeses: null, rendaMensal: 300, inicioAluguer: "2026-01-01",
+      estado: "desativado", desativadoEm: "2026-03-01",
+    });
+    expect(totaisAtivos([parado], "2026-06")).toMatchObject({ quantidade: 0, alugados: 0, rendaMensal: 0 });
   });
 
   it("soma em cêntimos exatos (sem 0,1 + 0,2)", () => {
@@ -68,12 +98,12 @@ describe("estadoDoAtivo (etiqueta de relance)", () => {
     expect(estadoDoAtivo(com({ grupo: "servico", catEquipamentoId: null }))).toEqual({ chave: "semEquipamento", tom: "aviso" });
     expect(estadoDoAtivo(SERVICO).chave).toBe("emUso");
   });
-  it("pessoa: a chave `ligado` da base decide (lê-se mesmo sem permissão do RH); sem ela, «Sem pessoa ligada»", () => {
+  it("pessoa: a chave `ligado` da base decide (lê-se mesmo sem permissão do RH); sem ela, «Livre»", () => {
     const pessoa = com({ grupo: "pessoa", tipo: "portatil" });
-    expect(estadoDoAtivo(pessoa)).toEqual({ chave: "semPessoa", tom: "aviso" });
+    expect(estadoDoAtivo(pessoa)).toEqual({ chave: "semPessoa", tom: "neutro" });
     expect(estadoDoAtivo({ ...pessoa, ligado: true }).chave).toBe("emUso");
   });
-  it("uma pessoa já apagada: ligado sem nome (atribuicao null) continua «Em uso», nunca «Sem pessoa ligada»", () => {
+  it("uma pessoa já apagada: ligado sem nome (atribuicao null) continua «Em uso», nunca «Livre»", () => {
     expect(estadoDoAtivo(com({ grupo: "pessoa", tipo: "portatil", ligado: true, atribuicao: null })).chave).toBe("emUso");
   });
   it("estrutura nunca fica «sem ligação»", () => {

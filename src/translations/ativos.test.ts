@@ -47,8 +47,10 @@ describe("traduções de ativos", () => {
     for (const x of ["abatido", "vendido", "perdido", "outro"]) tem(`ativos.desativar.motivo.${x}`);
     for (const x of ["emUso", "desativado", "semEquipamento", "semPessoa"]) tem(`ativos.estado.${x}`);
     for (const x of ["ativos", "desativados", "todos"]) tem(`ativos.filtro.estado.${x}`);
-    for (const x of ["atribuido", "devolvido"]) tem(`ativos.semAtivo.estado.${x}`);
-    for (let n = 2; n <= 18; n += 1) tem(`ativos.erro.ATV${String(n).padStart(2, "0")}`);
+    for (const x of ["comprado", "alugado"]) { tem(`ativos.forma.${x}`); tem(`ativos.forma.${x}.desc`); }
+    for (const x of ["pagamento", "catalogo", "manual"]) { tem(`ativos.vida.origem.${x}`); tem(`ativos.vida.origem.${x}.desc`); }
+    for (const x of ["alugadoSemFimDevolvido", "aluguerTerminadoEntregue"]) tem(`ativos.aviso.${x}`);
+    for (let n = 2; n <= 33; n += 1) tem(`ativos.erro.ATV${String(n).padStart(2, "0")}`);
     for (const x of ["porUso", "semVida", "semPerda", "perdePouco", "perdePorMes", "aindaNaoComeca", "completa", "desativada"]) tem(`ativos.frase.${x}`);
   });
 });

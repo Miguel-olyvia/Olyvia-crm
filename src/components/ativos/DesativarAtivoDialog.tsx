@@ -1,7 +1,8 @@
 /**
  * «Desativar ativo»: a data e o motivo (abatido, vendido, perdido, outro) e uma nota opcional. Um ativo nunca se apaga: fica
- * desativado e deixa de depreciar nessa data. Se estiver atribuído a uma pessoa a base recusa (ATV17: «Devolva-o primeiro no RH»)
- * e o texto aparece aqui, traduzido.
+ * desativado e deixa de depreciar (ou de pagar renda) nessa data, que não pode ser antes da compra ou do início do aluguer nem antes
+ * da última devolução a uma pessoa. Se estiver atribuído a uma pessoa a base recusa (ATV17: «Devolva-o primeiro no RH») e o texto
+ * aparece aqui, traduzido.
  */
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -35,10 +36,14 @@ function Formulario({ ativo, aoFechar, aoDesativar }: { ativo: Ativo; aoFechar: 
   const [aviso, setAviso] = useState<string | null>(null);
   const [aGuardar, setAGuardar] = useState(false);
   const ocupado = useRef(false);
+  // Não se desativa antes da compra (ou do início do aluguer) nem antes da última devolução a uma pessoa (a base recusa com ATV16 e ATV29).
+  const primeira = ativo.dataCompra ?? ativo.inicioAluguer ?? LIMITES_ATIVO.dataMinima;
+  const ultimaDevolucao = ativo.ocupacoes.reduce((mais, o) => (o.devolucao && o.devolucao > mais ? o.devolucao : mais), "");
+  const minimo = ultimaDevolucao > primeira ? ultimaDevolucao : primeira;
 
   const confirmar = async () => {
     if (ocupado.current) return;
-    const dataMa = !dataValida(data) || data < ativo.dataCompra;
+    const dataMa = !dataValida(data) || data < minimo;
     const semMotivo = motivo === "";
     const notaLonga = nota.trim().length > LIMITES_ATIVO.notaDesativacao;
     setErroData(dataMa ? t("ativos.desativar.valData") : null);
@@ -61,7 +66,7 @@ function Formulario({ ativo, aoFechar, aoDesativar }: { ativo: Ativo; aoFechar: 
 
   return (
     <form className="space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); void confirmar(); }}>
-      <CampoTexto id="ativo-des-data" label={t("ativos.desativar.data")} tipo="date" valor={data} onChange={setData} obrigatorio min={ativo.dataCompra} max={dataMaximaAtivo()} erro={erroData} />
+      <CampoTexto id="ativo-des-data" label={t("ativos.desativar.data")} tipo="date" valor={data} onChange={setData} obrigatorio min={minimo} max={dataMaximaAtivo()} erro={erroData} />
       <CampoSelect
         id="ativo-des-motivo" label={t("ativos.desativar.motivo")} valor={motivo} onChange={setMotivo} obrigatorio erro={erroMotivo}
         vazioLabel={t("ativos.desativar.motivoEscolher")} opcoes={MOTIVOS_DESATIVACAO.map((x) => ({ value: x, label: t(`ativos.desativar.motivo.${x}`) }))}

@@ -7,6 +7,11 @@ import { argumentosDoAtivo, dataMaximaAtivo, dataValida, numeroDoCampo, validarA
 const BOM: CamposAtivo = {
   grupo: "estrutura", nome: " Mesa ", tipo: "mobiliario", catEquipamentoId: "", codigo: "", numSerie: "", dataCompra: "2026-03-01",
   valorCompra: "1 234,567", valorResidual: "", vidaMeses: "12", manutencaoAno: "", centroCustoId: "", localizacao: "", notas: "",
+  forma: "comprado", vidaOrigem: "manual", vidaCatalogoMeses: null, rendaMensal: "", inicioAluguer: "", fimAluguer: "", armazemId: "",
+};
+const ALUGADO: CamposAtivo = {
+  ...BOM, grupo: "pessoa", tipo: "viatura", nome: "Carrinha", forma: "alugado", dataCompra: "", valorCompra: "", vidaMeses: "", vidaOrigem: "manual",
+  rendaMensal: "450", inicioAluguer: "2026-01-01", fimAluguer: "",
 };
 
 beforeEach(() => { vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-06-15T12:00:00")); });
@@ -64,6 +69,7 @@ describe("argumentosDoAtivo", () => {
     expect(argumentosDoAtivo(BOM)).toEqual({
       p_nome: "Mesa", p_tipo: "mobiliario", p_cat_equipamento_id: null, p_data_compra: "2026-03-01", p_valor_compra: 1234.57, p_valor_residual: 0,
       p_vida_meses: 12, p_manutencao_ano: 0, p_codigo: null, p_num_serie: null, p_centro_custo_id: null, p_localizacao: null, p_notas: null,
+      p_vida_origem: "manual", p_warehouse_id: null, p_forma_aquisicao: "comprado", p_renda_mensal: null, p_inicio_aluguer: null, p_fim_aluguer: null,
     });
   });
   it("numeroDoCampo aceita «1.234,50», «1234,50», «1 234,50» e «1234.5»; vazio é null; lixo é NaN", () => {
@@ -80,6 +86,110 @@ describe("argumentosDoAtivo", () => {
   });
 });
 
+describe("Alugado: renda e datas do contrato, sem compra nem vida", () => {
+  it("um alugado bom não tem erros, mesmo sem valor de compra, data de compra nem vida", () => {
+    expect(validarAtivo(ALUGADO)).toEqual({});
+    expect(validarAtivo({ ...ALUGADO, fimAluguer: "2029-12-31" })).toEqual({});
+  });
+
+  it("a renda tem de ser maior do que zero e até 9 999 999 999,99", () => {
+    expect(validarAtivo({ ...ALUGADO, rendaMensal: "" }).renda).toBeDefined();
+    expect(validarAtivo({ ...ALUGADO, rendaMensal: "0" }).renda).toBeDefined();
+    expect(validarAtivo({ ...ALUGADO, rendaMensal: "abc" }).renda).toBeDefined();
+    expect(validarAtivo({ ...ALUGADO, rendaMensal: "10000000000" }).renda).toBeDefined();
+    expect(validarAtivo({ ...ALUGADO, rendaMensal: "450,50" }).renda).toBeUndefined();
+  });
+
+  it("o início é obrigatório e vai de 2000-01-01 a hoje + 366 dias (um contrato que ainda vai começar)", () => {
+    expect(validarAtivo({ ...ALUGADO, inicioAluguer: "" }).inicioAluguer).toBeDefined();
+    expect(validarAtivo({ ...ALUGADO, inicioAluguer: "1999-12-31" }).inicioAluguer).toBeDefined();
+    expect(validarAtivo({ ...ALUGADO, inicioAluguer: "2026-02-30" }).inicioAluguer).toBeDefined();
+    expect(validarAtivo({ ...ALUGADO, inicioAluguer: "2027-06-16" }).inicioAluguer).toBeUndefined();
+    expect(validarAtivo({ ...ALUGADO, inicioAluguer: "2027-06-17" }).inicioAluguer).toBeDefined();
+  });
+
+  it("o fim é opcional, não pode ser antes do início e vai até 2100", () => {
+    expect(validarAtivo({ ...ALUGADO, fimAluguer: "2025-12-31" }).fimAluguer).toBeDefined();
+    expect(validarAtivo({ ...ALUGADO, fimAluguer: "2026-01-01" }).fimAluguer).toBeUndefined();
+    expect(validarAtivo({ ...ALUGADO, fimAluguer: "2100-01-02" }).fimAluguer).toBeDefined();
+    expect(validarAtivo({ ...ALUGADO, fimAluguer: "lixo" }).fimAluguer).toBeDefined();
+  });
+
+  it("os argumentos de um alugado: renda e datas, tudo da compra a null, residual e vida a null", () => {
+    expect(argumentosDoAtivo({ ...ALUGADO, fimAluguer: "2029-12-31", rendaMensal: "450,555" })).toEqual({
+      p_nome: "Carrinha", p_tipo: "viatura", p_cat_equipamento_id: null, p_data_compra: null, p_valor_compra: null, p_valor_residual: null,
+      p_vida_meses: null, p_manutencao_ano: 0, p_codigo: null, p_num_serie: null, p_centro_custo_id: null, p_localizacao: null, p_notas: null,
+      p_vida_origem: null, p_warehouse_id: null, p_forma_aquisicao: "alugado", p_renda_mensal: 450.56, p_inicio_aluguer: "2026-01-01", p_fim_aluguer: "2029-12-31",
+    });
+  });
+
+  it("sem fim, o fim vai a null (um arrendamento que se renova)", () => {
+    expect(argumentosDoAtivo(ALUGADO).p_fim_aluguer).toBeNull();
+  });
+
+  it("um comprado nunca leva campos do aluguer, mesmo que tenham ficado escritos no formulário", () => {
+    const a = argumentosDoAtivo({ ...BOM, rendaMensal: "99", inicioAluguer: "2026-01-01", fimAluguer: "2027-01-01" });
+    expect(a).toMatchObject({ p_renda_mensal: null, p_inicio_aluguer: null, p_fim_aluguer: null, p_forma_aquisicao: "comprado" });
+  });
+
+  it("o serviço não se aluga: o formulário trata-o sempre como comprado", () => {
+    const servico = { ...BOM, grupo: "servico" as const, tipo: "", catEquipamentoId: "c1", vidaMeses: "", forma: "alugado" as const };
+    expect(validarAtivo(servico).renda).toBeUndefined();
+    expect(argumentosDoAtivo(servico).p_forma_aquisicao).toBe("comprado");
+  });
+});
+
+describe("A vida útil de um comprado: meses de pagamento, a do catálogo ou à mão", () => {
+  const pessoa = { ...BOM, grupo: "pessoa" as const, tipo: "portatil" };
+
+  it("meses de pagamento: de 1 a 600, e a origem segue para a base", () => {
+    const c = { ...pessoa, vidaOrigem: "pagamento" as const, vidaMeses: "24" };
+    expect(validarAtivo(c)).toEqual({});
+    expect(argumentosDoAtivo(c)).toMatchObject({ p_vida_meses: 24, p_vida_origem: "pagamento" });
+    expect(validarAtivo({ ...c, vidaMeses: "" }).vida).toBeDefined();
+    expect(validarAtivo({ ...c, vidaMeses: "601" }).vida).toBeDefined();
+  });
+
+  it("do catálogo (pessoa): a vida vem do equipamento escolhido (anos x 12) e é obrigatório escolher um com vida em anos", () => {
+    const c = { ...pessoa, vidaOrigem: "catalogo" as const, vidaMeses: "", catEquipamentoId: "c1", vidaCatalogoMeses: 48 };
+    expect(validarAtivo(c)).toEqual({});
+    expect(argumentosDoAtivo(c)).toMatchObject({ p_vida_meses: 48, p_vida_origem: "catalogo", p_cat_equipamento_id: "c1" });
+    expect(validarAtivo({ ...c, catEquipamentoId: "", vidaCatalogoMeses: null }).modelo).toBeDefined();
+    expect(validarAtivo({ ...c, vidaCatalogoMeses: null }).vida).toBeDefined();
+  });
+
+  it("à mão e meses de pagamento não levam o equipamento do catálogo (só o serviço, que o exige)", () => {
+    const c = { ...pessoa, vidaOrigem: "manual" as const, vidaMeses: "36", catEquipamentoId: "c1" };
+    expect(argumentosDoAtivo(c)).toMatchObject({ p_cat_equipamento_id: null, p_vida_origem: "manual" });
+  });
+
+  it("serviço do catálogo: a vida fica a null (usa a do modelo ao vivo) e a origem é «catalogo»", () => {
+    const c = { ...BOM, grupo: "servico" as const, tipo: "", catEquipamentoId: "c1", vidaOrigem: "catalogo" as const, vidaMeses: "" };
+    expect(validarAtivo(c)).toEqual({});
+    expect(argumentosDoAtivo(c)).toMatchObject({ p_vida_meses: null, p_vida_origem: "catalogo", p_cat_equipamento_id: "c1" });
+  });
+
+  it("serviço à mão com vida: origem «manual»; sem vida, fica sem origem (como antes)", () => {
+    const c = { ...BOM, grupo: "servico" as const, tipo: "", catEquipamentoId: "c1", vidaOrigem: "manual" as const };
+    expect(argumentosDoAtivo({ ...c, vidaMeses: "60" })).toMatchObject({ p_vida_meses: 60, p_vida_origem: "manual" });
+    expect(argumentosDoAtivo({ ...c, vidaMeses: "" })).toMatchObject({ p_vida_meses: null, p_vida_origem: null });
+  });
+});
+
+describe("O armazém do Stock", () => {
+  it("só um ativo de estrutura do tipo instalações o leva; os outros mandam null", () => {
+    const instalacoes = { ...BOM, tipo: "instalacoes", armazemId: "w1" };
+    expect(argumentosDoAtivo(instalacoes).p_warehouse_id).toBe("w1");
+    expect(argumentosDoAtivo({ ...instalacoes, tipo: "mobiliario" }).p_warehouse_id).toBeNull();
+    expect(argumentosDoAtivo({ ...instalacoes, grupo: "pessoa", tipo: "portatil" }).p_warehouse_id).toBeNull();
+    expect(argumentosDoAtivo({ ...instalacoes, armazemId: "" }).p_warehouse_id).toBeNull();
+  });
+
+  it("um armazém alugado também o leva (renda de estrutura)", () => {
+    expect(argumentosDoAtivo({ ...ALUGADO, grupo: "estrutura", tipo: "instalacoes", armazemId: "w1" })).toMatchObject({ p_warehouse_id: "w1", p_forma_aquisicao: "alugado" });
+  });
+});
+
 describe("errosAtivo", () => {
   it("lê o código ATVnn da mensagem (P0001) e só aceita os do desenho", () => {
     expect(codigoAtv({ code: "P0001", message: "ATV12", details: "Já existe" })).toBe("ATV12");
@@ -92,6 +202,11 @@ describe("errosAtivo", () => {
     expect(campoDoCodigo("ATV09")).toBe("residual");
     expect(campoDoCodigo("ATV12")).toBe("codigo");
     expect(campoDoCodigo("ATV17")).toBeNull();
+    expect(campoDoCodigo("ATV20")).toBe("renda");
+    expect(campoDoCodigo("ATV21")).toBe("inicioAluguer");
+    expect(campoDoCodigo("ATV22")).toBe("armazem");
+    expect(campoDoCodigo("ATV24")).toBe("vida");
+    expect(campoDoCodigo("ATV28")).toBe("data");
     expect(campoDoCodigo(null)).toBeNull();
   });
   it("ATV03 serve vários campos: o DETAIL da base diz qual (código, série, localização, notas; o resto é o nome)", () => {

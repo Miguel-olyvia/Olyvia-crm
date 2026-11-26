@@ -1,7 +1,7 @@
 /**
- * As escritas do registo de ativos, só pelas RPCs do desenho (`rpc_ativo_criar|alterar|desativar|reativar|ligar_pessoa|desligar_pessoa`):
- * a permissão (`ativos.edit`, e também `hr.pessoas.retribuicao.edit` ao ligar), as regras ATV02 a ATV18 e o limite de organização
- * decidem-se na base. Cada escrita devolve um RESULTADO (nunca lança): `{ok:true}` ou `{ok:false, codigo, mensagem}`, com a mensagem
+ * As escritas do registo de ativos, só pelas RPCs do desenho (`rpc_ativo_criar|alterar|desativar|reativar`): a permissão
+ * (`ativos.edit`), as regras ATV02 a ATV33 e o limite de organização decidem-se na base. Ligar e desligar uma pessoa saíram: o
+ * equipamento atribuído no RH cria o ativo sozinho e devolve-se no RH (a base já só responde ATV25). Cada escrita devolve um RESULTADO (nunca lança): `{ok:true}` ou `{ok:false, codigo, mensagem}`, com a mensagem
  * já traduzida (o código ATV serve para pôr o erro junto do campo). Depois de escrever, a lista refaz-se (invalida «ativos»).
  * Apagar não existe: um ativo só se desativa.
  */
@@ -25,6 +25,8 @@ export interface ResultadoAtivo {
   /** O campo do formulário a que o erro se refere (o ATV03 diz qual pelo DETAIL da base); `null` se não é de um campo. */
   campo?: CampoAtivo | null;
   mensagem?: string;
+  /** A base avisou de algo (só ao reativar: a renda ou a quota voltam a contar nos meses passados). O texto traduz-se no ecrã. */
+  aviso?: boolean;
 }
 
 export interface DesativacaoAtivo {
@@ -40,8 +42,6 @@ export interface AtivoMutacoes {
   alterar: (id: string, campos: Record<string, unknown>) => Promise<ResultadoAtivo>;
   desativar: (id: string, d: DesativacaoAtivo) => Promise<ResultadoAtivo>;
   reativar: (id: string) => Promise<ResultadoAtivo>;
-  ligarPessoa: (ativoId: string, pessoaEquipamentoId: string) => Promise<ResultadoAtivo>;
-  desligarPessoa: (pessoaEquipamentoId: string) => Promise<ResultadoAtivo>;
 }
 
 export function useAtivoMutacoes(): AtivoMutacoes {
@@ -62,8 +62,10 @@ export function useAtivoMutacoes(): AtivoMutacoes {
           return { ok: false, codigo: codigoAtv(error), campo: campoDoErro(error), mensagem: detalheDaBase(error) ?? getLocalizedFallback(chaveDoErro(error)) };
         }
         await queryClient.invalidateQueries({ queryKey: [CHAVE_ATIVOS] });
-        const id = (data as { id?: unknown } | null)?.id;
-        return typeof id === "string" ? { ok: true, id } : { ok: true };
+        const resposta = data as { id?: unknown; aviso?: unknown } | null;
+        const id = resposta?.id;
+        const aviso = typeof resposta?.aviso === "string" && resposta.aviso !== "";
+        return { ok: true, ...(typeof id === "string" ? { id } : {}), ...(aviso ? { aviso: true } : {}) };
       } catch (e) {
         captureFlowError(e, "ativos-escrever");
         return { ok: false, codigo: null, mensagem: getLocalizedFallback("ativos.erro.generico") };
@@ -75,11 +77,10 @@ export function useAtivoMutacoes(): AtivoMutacoes {
   return useMemo<AtivoMutacoes>(
     () => ({
       criar: (grupo, campos) => chamar("rpc_ativo_criar", { p_grupo: grupo, ...campos }),
-      alterar: (id, campos) => chamar("rpc_ativo_alterar", { p_id: id, ...campos }),
+      // `p_campos_novos`: sem ele a base deixa a forma, a renda, as datas do aluguer, a origem da vida e o armazém como estão.
+      alterar: (id, campos) => chamar("rpc_ativo_alterar", { p_id: id, p_campos_novos: true, ...campos }),
       desativar: (id, d) => chamar("rpc_ativo_desativar", { p_id: id, p_data: d.data, p_motivo: d.motivo, p_nota: d.nota }),
       reativar: (id) => chamar("rpc_ativo_reativar", { p_id: id }),
-      ligarPessoa: (ativoId, pessoaEquipamentoId) => chamar("rpc_ativo_ligar_pessoa", { p_ativo_id: ativoId, p_pessoa_equipamento_id: pessoaEquipamentoId }),
-      desligarPessoa: (pessoaEquipamentoId) => chamar("rpc_ativo_desligar_pessoa", { p_pessoa_equipamento_id: pessoaEquipamentoId }),
     }),
     [chamar],
   );

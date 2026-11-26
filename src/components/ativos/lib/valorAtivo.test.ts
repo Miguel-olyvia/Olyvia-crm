@@ -8,7 +8,7 @@ const BASE: Ativo = {
   id: "a1", grupo: "estrutura", tipo: "mobiliario", nome: "Mesa", codigo: null, numSerie: null, catEquipamentoId: null,
   dataCompra: "2026-01-15", valorCompra: 1200, valorResidual: 0, vidaMeses: 12, manutencaoAno: 0, centroCustoId: null,
   localizacao: null, notas: null, estado: "ativo", desativadoEm: null, desativadoMotivo: null, desativadoNota: null,
-  catEquipamento: null, atribuicao: null, ligado: false,
+  catEquipamento: null, atribuicao: null, ligado: false, forma: "comprado", rendaMensal: null, inicioAluguer: null, fimAluguer: null, vidaOrigem: null, armazem: null, armazemLigado: false, ocupacoes: [],
 };
 const com = (p: Partial<Ativo>): Ativo => ({ ...BASE, ...p });
 const CAT = (p: Partial<CatEquipamentoLigado> = {}): CatEquipamentoLigado => ({ id: "c1", nome: "Berbequim", vidaAnos: 5, vidaHoras: null, usoAnoHoras: null, ...p });

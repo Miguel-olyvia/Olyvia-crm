@@ -49,11 +49,13 @@ export function codigoAtv(erro: unknown): CodigoAtv | null {
 /** O campo do formulário a que cada erro se refere (os outros mostram-se no resumo). */
 export type CampoAtivo =
   | "nome" | "tipo" | "modelo" | "data" | "valorCompra" | "residual" | "vida" | "manutencao" | "codigo" | "centroCusto"
-  | "numSerie" | "localizacao" | "notas";
+  | "numSerie" | "localizacao" | "notas" | "renda" | "inicioAluguer" | "fimAluguer" | "armazem";
 
 const CAMPO_DO_CODIGO: Partial<Record<CodigoAtv, CampoAtivo>> = {
   ATV03: "nome", ATV04: "tipo", ATV05: "modelo", ATV06: "modelo", ATV07: "data", ATV08: "valorCompra",
   ATV09: "residual", ATV10: "vida", ATV11: "manutencao", ATV12: "codigo", ATV13: "centroCusto",
+  // A1: ATV21 (datas do aluguer) mostra-se junto do início; ATV28 (compra ou início depois da primeira entrega) junto da data.
+  ATV20: "renda", ATV21: "inicioAluguer", ATV22: "armazem", ATV24: "vida", ATV28: "data",
 };
 
 export const campoDoCodigo = (codigo: string | null): CampoAtivo | null => (codigo ? CAMPO_DO_CODIGO[codigo as CodigoAtv] ?? null : null);

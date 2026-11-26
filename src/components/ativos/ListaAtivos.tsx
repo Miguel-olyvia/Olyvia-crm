@@ -68,12 +68,14 @@ export function ListaAtivos({ grupo, ativos, mes, rhOculto, aoAbrir }: Props) {
       <div aria-hidden="true" className={cn("hidden gap-4 px-4 text-xs font-medium text-muted-foreground md:grid", COLUNAS)}>
         <span>{t("ativos.col.nome")}</span>
         <span>{t("ativos.col.liga")}</span>
-        <span className="text-right">{t("ativos.col.valorAtual")}</span>
+        <span className="text-right">{t(ativos.every((a) => a.forma === "alugado") ? "ativos.col.renda" : ativos.some((a) => a.forma === "alugado") ? "ativos.col.valorOuRenda" : "ativos.col.valorAtual")}</span>
         <span>{t("ativos.col.estado")}</span>
       </div>
       <ul aria-label={t("ativos.lista.legenda", { grupo: t(`ativos.grupo.${grupo}`) })} className="space-y-2">
         {ativos.map((a) => {
-          const atual = valorAtual(a, mes);
+          const alugado = a.forma === "alugado";
+          const atual = alugado ? null : valorAtual(a, mes);
+          const sobreNome = [alugado ? t("ativos.forma.etiqueta.alugado") : null, a.codigo].filter(Boolean).join(" · ");
           return (
             <li
               key={a.id}
@@ -90,14 +92,18 @@ export function ListaAtivos({ grupo, ativos, mes, rhOculto, aoAbrir }: Props) {
                 >
                   <span className="break-words">{a.nome}</span>
                 </button>
-                {a.codigo && <span className="-mt-2 block text-xs text-muted-foreground">{a.codigo}</span>}
+                {sobreNome && <span className="-mt-2 block text-xs text-muted-foreground">{sobreNome}</span>}
               </div>
               <Ligacao a={a} rhOculto={rhOculto} />
               <div className="flex items-baseline justify-between gap-2 md:flex-col md:items-end md:justify-center md:gap-0">
-                <span className="text-xs text-muted-foreground md:sr-only">{t("ativos.col.valorAtual")}</span>
-                <span data-testid="valor-atual" className={cn("font-semibold tabular-nums", atual === null && "text-sm font-medium text-muted-foreground")}>
-                  {atual === null ? t(motivoSemValor(a) === "porUso" ? "ativos.vida.semVida" : "ativos.vida.indefinida") : euros(atual, "—")}
-                </span>
+                <span className="text-xs text-muted-foreground md:sr-only">{t(alugado ? "ativos.col.renda" : "ativos.col.valorAtual")}</span>
+                {alugado ? (
+                  <span data-testid="valor-renda" className="font-semibold tabular-nums">{t("ativos.lista.rendaMes", { valor: euros(a.rendaMensal, "—") })}</span>
+                ) : (
+                  <span data-testid="valor-atual" className={cn("font-semibold tabular-nums", atual === null && "text-sm font-medium text-muted-foreground")}>
+                    {atual === null ? t(motivoSemValor(a) === "porUso" ? "ativos.vida.semVida" : "ativos.vida.indefinida") : euros(atual, "—")}
+                  </span>
+                )}
               </div>
               <div><EtiquetaEstado estado={estadoDoAtivo(a)} /></div>
             </li>
