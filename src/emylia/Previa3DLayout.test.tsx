@@ -1,5 +1,5 @@
 // 26/11: o LAYOUT do 3D do produto com o painel «Aspeto 3D». O jsdom não faz layout: estes testes só provam a ESTRUTURA e as classes de que o layout depende (confirmado ao vivo à parte):
-// o 3D é um filho directo da grelha, preso no topo (só por baixo de lg) e SÓ ele, sem o painel dentro; o painel é irmão e ocupa as duas linhas ao lado; o rodapé fixo fica acima dos botões
+// o 3D é um filho directo da grelha, preso no topo (só por baixo de xl) e SÓ ele, sem o painel dentro; o painel é irmão e ocupa as duas linhas ao lado; o rodapé fixo fica acima dos botões
 // redondos da app; as zonas não extravasam a caixa (coluna com min(14rem,100%), largura própria na faixa do telemóvel).
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -30,13 +30,13 @@ const grupo3d = () => screen.getByRole("group", { name: "Pré-visualização 3D 
 const filhoDaGrelha = (el: HTMLElement) => { let x = el; while (x.parentElement && !x.parentElement.className.includes("grid gap-3")) x = x.parentElement; return x; };
 
 describe("3D e painel «Aspeto 3D»: layout", () => {
-  it("o 3D é um filho directo da grelha, preso no topo só abaixo de lg, e o painel e as zonas NÃO estão dentro dele", async () => {
+  it("o 3D é um filho directo da grelha, preso no topo só abaixo de xl, e o painel e as zonas NÃO estão dentro dele", async () => {
     await abrir(config());
     const preso = filhoDaGrelha(grupo3d());
     const grelha = preso.parentElement!;
     expect(preso.className).toMatch(/\bsticky\b/);
     expect(preso.className).toContain("top-0"); // o ecrã que rola é o <main> do Layout, que começa por baixo do cabeçalho
-    expect(preso.className).toContain("lg:static");
+    expect(preso.className).toContain("xl:static");
     expect(preso.className).toContain("bg-card"); // opaco: o que rola por baixo não se vê através dele
     expect(preso.contains(screen.getByRole("region", { name: "Aspeto 3D" }))).toBe(false);
     expect(preso.contains(screen.getByRole("region", { name: "Zonas" }))).toBe(false);
@@ -48,26 +48,26 @@ describe("3D e painel «Aspeto 3D»: layout", () => {
     expect(Array.from(grelha.children)).toEqual([preso, zonas, painel]);
   });
 
-  it("ao lado (lg): o 3D e o resto na coluna 1 (linhas 1 e 2), o painel na coluna 2 a ocupar as duas linhas, e a linha 2 absorve a altura que sobra", async () => {
+  it("ao lado (xl): o 3D e o resto na coluna 1 (linhas 1 e 2), o painel na coluna 2 a ocupar as duas linhas, e a linha 2 absorve a altura que sobra", async () => {
     await abrir(config());
     const preso = filhoDaGrelha(grupo3d());
     const grelha = preso.parentElement!;
-    expect(grelha.className).toContain("lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]");
-    expect(grelha.className).toContain("lg:grid-rows-[auto_1fr]");
-    expect(grelha.className).toContain("lg:items-start");
-    expect(preso.className).toContain("lg:col-start-1 lg:row-start-1");
-    expect(filhoDaGrelha(screen.getByRole("region", { name: "Zonas" })).className).toContain("lg:col-start-1 lg:row-start-2");
+    expect(grelha.className).toContain("xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]");
+    expect(grelha.className).toContain("xl:grid-rows-[auto_1fr]");
+    expect(grelha.className).toContain("xl:items-start");
+    expect(preso.className).toContain("xl:col-start-1 xl:row-start-1");
+    expect(filhoDaGrelha(screen.getByRole("region", { name: "Zonas" })).className).toContain("xl:col-start-1 xl:row-start-2");
     const painel = filhoDaGrelha(screen.getByRole("region", { name: "Aspeto 3D" }));
-    expect(painel.className).toContain("lg:col-start-2");
-    expect(painel.className).toContain("lg:row-span-2");
+    expect(painel.className).toContain("xl:col-start-2");
+    expect(painel.className).toContain("xl:row-span-2");
   });
 
-  it("a altura do 3D preso é limitada pela do ecrã (vh) abaixo de lg; em lg volta aos 20rem", async () => {
+  it("a altura do 3D preso é limitada pela do ecrã (vh) abaixo de xl; em xl volta aos 20rem", async () => {
     await abrir(config());
     const caixa = grupo3d().parentElement!;
     expect(caixa.className).toContain("h-[min(16rem,36vh)]");
     expect(caixa.className).toContain("sm:h-[min(18rem,40vh)]");
-    expect(caixa.className).toContain("lg:h-80");
+    expect(caixa.className).toContain("xl:h-80");
   });
 
   it("sem o painel «Aspeto 3D» (sem configuração) nada fica preso e a altura é a de sempre", async () => {

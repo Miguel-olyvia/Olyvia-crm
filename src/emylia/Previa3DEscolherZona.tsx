@@ -142,8 +142,8 @@ export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperfi
   const movel = useIsMobile();
   const titulo = useRef<HTMLHeadingElement>(null);
   const seccao = useRef<HTMLElement>(null);
-  // com o painel ao lado do 3D (≥ 1024 px) ele já está à vista; por baixo do 3D (telemóvel, tablet) fica depois de «Zonas» e «Medidas», e escolher a zona leva-o à vista (suave, salvo «reduzir movimento»)
-  const aoLado = () => typeof window.matchMedia === "function" && window.matchMedia("(min-width: 1024px)").matches;
+  // com o painel ao lado do 3D (≥ 1280 px, o `xl:` de Previa3DProduto: o MESMO ponto do sticky) ele já está à vista; por baixo do 3D (telemóvel, tablet) fica depois de «Zonas» e «Medidas», e escolher a zona leva-o à vista (suave, salvo «reduzir movimento»)
+  const aoLado = () => typeof window.matchMedia === "function" && window.matchMedia("(min-width: 1280px)").matches;
   // o foco passa ao título (clique no 3D); por baixo do 3D sem o salto brusco do próprio foco, que o salto suave de baixo substitui
   useEffect(() => { if (focarAoAbrir) titulo.current?.focus({ preventScroll: !aoLado() }); }, [focarAoAbrir]);
   useEffect(() => {
@@ -202,7 +202,7 @@ export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperfi
   ];
 
   return (
-    <section ref={seccao} aria-labelledby={`${id}-t`} onKeyDown={aoKeyDown} className="grid scroll-mt-[calc(min(18rem,40vh)+1rem)] gap-3 rounded-xl lg:scroll-mt-20 border border-primary/50 bg-card p-3">
+    <section ref={seccao} aria-labelledby={`${id}-t`} onKeyDown={aoKeyDown} className="grid scroll-mt-[calc(min(18rem,40vh)+1rem)] gap-3 rounded-xl xl:scroll-mt-20 border border-primary/50 bg-card p-3">
       <div className="flex items-start justify-between gap-2">
         <h4 id={`${id}-t`} ref={titulo} tabIndex={-1} className="text-[15px] font-semibold focus:outline-none">Zona: {rotulo}</h4>
         <button type="button" onClick={aoFechar} aria-label={`Deixar de escolher a zona ${rotulo}`} title="Fechar" className={cn(BOTAO, "min-w-11 px-0")}><X className="h-4 w-4" aria-hidden="true" /></button>

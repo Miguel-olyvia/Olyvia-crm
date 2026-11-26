@@ -474,7 +474,7 @@ describe("11. no ecrã estreito, escolher uma zona leva o painel à vista", () =
   const original = window.matchMedia, scroll = Element.prototype.scrollIntoView, largura = window.innerWidth;
   const comEcra = (o: { largo: boolean; reduzir?: boolean }) => {
     window.matchMedia = ((q: string) => ({
-      matches: q.includes("min-width: 1024px") ? o.largo : q.includes("prefers-reduced-motion") ? !!o.reduzir : false, media: q, onchange: null,
+      matches: q.includes("min-width: 1280px") ? o.largo : q.includes("prefers-reduced-motion") ? !!o.reduzir : false, media: q, onchange: null,
       addListener: () => {}, removeListener: () => {}, addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
     })) as typeof window.matchMedia;
   };

@@ -175,11 +175,11 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
   const mostrarRegras = painelMedidas && !!config3d && zonasDoObjecto.length >= 1;
   const mostrarAspeto = !superficie && (mostrarRegras || (escolherNo3d && zonaFixa !== null));
   return (
-    <div ref={raiz} className={cn("grid gap-3", mostrarAspeto && "lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] lg:grid-rows-[auto_1fr] lg:items-start")}>
-      {/* 26/11: o 3D é um filho directo da grelha (e não do contentor das zonas e medidas): por baixo de 1024 px (uma só coluna) fica PRESO no topo do ecrã, com altura limitada, enquanto o painel «Aspeto 3D» rola por baixo (escolhe-se a cor a ver a peça).
-          O ecrã que rola é o <main> do Layout (fixed, overflow-auto), por isso `top-0`. Ao lado (≥ 1024 px) volta ao fluxo normal. Sem painel «Aspeto 3D», nada fica preso. */}
-      <div className={cn("min-w-0", mostrarAspeto && "sticky top-0 z-10 bg-card pb-2 lg:static lg:z-auto lg:col-start-1 lg:row-start-1 lg:bg-transparent lg:pb-0")}>
-      <div className={cn("relative overflow-hidden rounded-xl border border-border bg-muted/50", mostrarAspeto ? "h-[min(16rem,36vh)] sm:h-[min(18rem,40vh)] lg:h-80" : "h-64 sm:h-80")}>
+    <div ref={raiz} className={cn("grid gap-3", mostrarAspeto && "xl:grid-cols-[minmax(0,1fr)_minmax(0,24rem)] xl:grid-rows-[auto_1fr] xl:items-start")}>
+      {/* 26/11: o 3D é um filho directo da grelha (e não do contentor das zonas e medidas): por baixo de 1280 px (uma só coluna) fica PRESO no topo do ecrã, com altura limitada, enquanto o painel «Aspeto 3D» rola por baixo (escolhe-se a cor a ver a peça).
+          O ecrã que rola é o <main> do Layout (fixed, overflow-auto), por isso `top-0`. Ao lado (≥ 1280 px, xl: com o menu lateral do catálogo aberto a ficha tem ~940 px, e a 1024 px só ~625 px, o 3D ficava com 177 px) volta ao fluxo normal. Sem painel «Aspeto 3D», nada fica preso. */}
+      <div className={cn("min-w-0", mostrarAspeto && "sticky top-0 z-10 bg-card pb-2 xl:static xl:z-auto xl:col-start-1 xl:row-start-1 xl:bg-transparent xl:pb-0")}>
+      <div className={cn("relative overflow-hidden rounded-xl border border-border bg-muted/50", mostrarAspeto ? "h-[min(16rem,36vh)] sm:h-[min(18rem,40vh)] xl:h-80" : "h-64 sm:h-80")}>
         <div ref={grupo3d} role="group" aria-label="Pré-visualização 3D do produto" aria-describedby={idAjuda} tabIndex={0} onKeyDown={aoTeclar}
           onFocus={() => setFoco(true)} onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setFoco(false); }}
           onPointerEnter={() => setDentro(true)} onPointerLeave={() => setDentro(false)} onPointerDown={(e) => { setDentro(true); e.currentTarget.focus(); }}
@@ -216,7 +216,7 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
       </div>
       </div>
       {/* a coluna da esquerda por baixo do 3D (notas, zonas, medidas) é UM contentor: assim as Regras compridas da direita não abrem buracos entre os seus blocos, e o Tab segue a ordem visual */}
-      <div className={cn("grid min-w-0 gap-3", mostrarAspeto && "lg:col-start-1 lg:row-start-2")}>
+      <div className={cn("grid min-w-0 gap-3", mostrarAspeto && "xl:col-start-1 xl:row-start-2")}>
       <div className="grid gap-2">
       <p id={idAjuda} className={NOTA}>{textoDeAjuda(foco, dentro)}</p>
       {aviso && <Estado texto={aviso} />}
@@ -249,7 +249,7 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
       )}
       </div>
       {mostrarAspeto && (
-        <div className="min-w-0 lg:col-start-2 lg:row-span-2 lg:row-start-1 [&_*]:scroll-mb-40 max-lg:[&_*]:scroll-mt-[calc(min(18rem,40vh)+1rem)]">
+        <div className="min-w-0 xl:col-start-2 xl:row-span-2 xl:row-start-1 [&_*]:scroll-mb-40 max-xl:[&_*]:scroll-mt-[calc(min(18rem,40vh)+1rem)]">
           <PainelAspeto3D zonaFixa={escolherNo3d ? zonaFixa : null} zonasDoModelo={zonasDoObjecto.map((z) => z.zona)} pintadaPor={zonas?.zonas} atributos={atributosDoProduto}
             pintaHoje={pintaHoje} pelaNome={pelaNome} focarAoAbrir={origem === "3d"} aoFechar={() => fechar()} config3d={config3d} mostrarRegras={mostrarRegras} aoRealcarRegra={setZonasDaRegra} />
         </div>
