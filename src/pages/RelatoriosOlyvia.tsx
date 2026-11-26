@@ -116,6 +116,8 @@ export default function RelatoriosOlyvia() {
   const [erro, setErro] = useState<string | null>(null);
   const [aGerar, setAGerar] = useState<"pdf" | "excel" | null>(null);
   const [aviso, setAviso] = useState<string | null>(null);
+  // o aviso do ficheiro descarregado é deste relatório: sai quando se muda de separador ou de negócio
+  useEffect(() => setAviso(null), [tipo, numero]);
 
   useEffect(() => {
     if (!org) return;
@@ -146,14 +148,19 @@ export default function RelatoriosOlyvia() {
     finally { setAGerar(null); }
   };
   // ?formato=pdf|excel (a ligação do chat): descarrega uma vez, logo que o relatório está pronto
-  const pedido = useRef(params.get("formato"));
+  // 26/11: lê-se a cada mudança do endereço (com a página já aberta, o botão do chat só muda o endereço), não só ao abrir
+  const formatoPedido = params.get("formato");
+  const tratado = useRef<string | null>(null);
   useEffect(() => {
-    const f = pedido.current;
-    if (!doc || (f !== "pdf" && f !== "excel")) return;
-    pedido.current = null;
+    const f = formatoPedido;
+    if (f !== "pdf" && f !== "excel") { tratado.current = null; return; }
+    if (!doc) return;
+    const chave = `${params.toString()}`;
+    if (tratado.current === chave) return;
+    tratado.current = chave;
     void gerar(f);
     const p = new URLSearchParams(params); p.delete("formato"); setParams(p, { replace: true });
-  }, [doc]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [doc, formatoPedido]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ir = (k: TipoRelatorio, n?: number | null) => { const p = new URLSearchParams({ tipo: k }); if (n) p.set("numero", String(n)); setParams(p); };
 

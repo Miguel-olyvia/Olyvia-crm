@@ -55,13 +55,13 @@ export function docNegocios(L: LinhaBase[], org = ""): DocRelatorio {
     nomeFicheiro: `Relatorio negocios ${hojeIso()}`,
     seccoes: [
       { k: "kpis", itens: [
-        { rot: "Negócios ativos", valor: String(ativos.length), nota: `${perdidos.length} perdidos` },
-        { rot: "Em proposta", valor: eur(soma(propostas)), nota: `${propostas.length} propostas enviadas por aceitar`, tom: "atencao" },
-        { rot: "Ganhos", valor: eur(soma(ganhos)), nota: `${ganhos.length} propostas aceites`, tom: "bom" },
+        { rot: "Negócios ativos", valor: String(ativos.length), nota: perdidos.length === 1 ? "1 perdido" : `${perdidos.length} perdidos` },
+        { rot: "Em proposta", valor: eur(soma(propostas)), nota: propostas.length === 1 ? "1 proposta enviada por aceitar" : `${propostas.length} propostas enviadas por aceitar`, tom: "atencao" },
+        { rot: "Ganhos", valor: eur(soma(ganhos)), nota: ganhos.length === 1 ? "1 proposta aceite" : `${ganhos.length} propostas aceites`, tom: "bom" },
         { rot: "Taxa de aceitação", valor: pct(conv), nota: "das propostas enviadas", tom: "neutro" },
       ] },
       { k: "barras", titulo: "O funil por fase", nota: "Quantos negócios ativos há em cada fase e o valor das propostas (com IVA).",
-        itens: porFase.map((f) => ({ rot: f.rot, valor: f.n, texto: `${f.n} · ${eur(f.valor)}` })) },
+        itens: porFase.map((f) => ({ rot: f.rot, valor: f.n, texto: f.valor > 0 ? `${f.n} · ${eur(f.valor)}` : `${f.n} · sem proposta` })) },
       { k: "tabela", titulo: "Os negócios", colunas: [{ t: "Nº", w: 8, dir: true }, { t: "Cliente", w: 38 }, { t: "Fase", w: 16 }, { t: "Proposta (com IVA)", w: 20, dir: true, dinheiro: true }, { t: "Estado", w: 22 }],
         linhas: N.map((x) => [x.n, x.nome, x.fase || FASES_NEGOCIO[x.faseN] || "—", x.valor ?? "—",
           x.perdido ? "Perdido" : x.obra ? `Obra ${x.obra}` : x.aceite ? `Aceite a ${dia(x.aceite)}` : x.enviada ? `Enviada a ${dia(x.enviada)}` : "Por enviar"]),
