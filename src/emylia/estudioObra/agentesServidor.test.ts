@@ -19,7 +19,7 @@ vi.mock("../real/negocioBase", async (orig) => ({
   gravarObra: vi.fn(async (_sb: unknown, _org: string, id: string) => { estado.gravadas.push(id); return []; }),
 }));
 
-import { correrAgentesServidor } from "./agentesServidor";
+import { correrAgentesServidor, gestoresDaObra } from "./agentesServidor";
 
 /** A obra de exemplo com um buraco de 2 dias, com as propostas vistas há dois dias (o prazo do degrau 2 já passou). */
 function preparar() {
@@ -51,5 +51,13 @@ describe("os agentes no servidor", () => {
     const r = await correrAgentesServidor(sbFalso as never, "org");
     expect(r.adiadas).toBeGreaterThan(0);
     expect(estado.gravadas).not.toContain(`uuid-${d.id}`);
+  });
+});
+
+// 26/11 (teste ao vivo: o aviso ia para as 12 pessoas que planeiam obras): só o gestor desta obra
+describe("quem é avisado das decisões à espera", () => {
+  it("o «Responsável de obra» e quem mede; sem eles, ninguém", () => {
+    expect(gestoresDaObra({ f: { responsavel: " Marco Rodrigues " } } as never)).toEqual(["Marco Rodrigues"]);
+    expect(gestoresDaObra({ f: {} } as never)).toEqual([]);
   });
 });

@@ -85,7 +85,10 @@ GRANT EXECUTE ON FUNCTION public.olyvia_conhecimento_gravar(uuid, jsonb, boolean
 -- «Na app sempre, e email só para o que fica à espera mais de meio dia.» Os agentes no servidor chamam isto quando uma obra tem decisões
 -- à espera há mais de meio dia: um aviso no sino de quem planeia obras nesta organização, uma vez por conjunto de decisões (a chave).
 -- O email fica para quando a organização tiver o envio de emails configurado.
-CREATE OR REPLACE FUNCTION public.olyvia_avisar_gestores(p_org uuid, p_numero integer, p_chave text, p_titulo text, p_mensagem text)
+-- 26/11 (teste ao vivo: a 1.ª versão avisava as 12 pessoas que planeiam obras na Mudelar): só o gestor DESTA obra, pelos nomes que a app
+-- dá (o «Responsável de obra» e quem mede), entre quem planeia obras na organização. Sem nomes, ninguém.
+DROP FUNCTION IF EXISTS public.olyvia_avisar_gestores(uuid, integer, text, text, text);
+CREATE OR REPLACE FUNCTION public.olyvia_avisar_gestores(p_org uuid, p_numero integer, p_chave text, p_titulo text, p_mensagem text, p_nomes text[] DEFAULT NULL)
 RETURNS integer
 LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $$
 DECLARE
@@ -97,7 +100,7 @@ BEGIN
   IF NOT (p_org IN (SELECT o FROM public.get_user_visible_org_ids(auth.uid()) AS o)) THEN
     RAISE EXCEPTION 'Organização fora do âmbito' USING ERRCODE = 'insufficient_privilege';
   END IF;
-  IF coalesce(p_chave, '') = '' OR coalesce(p_titulo, '') = '' THEN RETURN 0; END IF;
+  IF coalesce(p_chave, '') = '' OR coalesce(p_titulo, '') = '' OR coalesce(array_length(p_nomes, 1), 0) = 0 THEN RETURN 0; END IF;
   -- uma vez por chave (o mesmo conjunto de decisões não volta a avisar)
   IF EXISTS (SELECT 1 FROM public.notifications n WHERE n.organization_id = p_org AND n.type = 'agentes_decisoes' AND n.data->>'chave' = p_chave) THEN
     RETURN 0;
@@ -109,10 +112,11 @@ BEGIN
   FROM public.anew_memberships m
   JOIN public.anew_users u ON u.id = m.user_id AND u.auth_user_id IS NOT NULL
   JOIN public.anew_role_permissions rp ON rp.role_id = m.role_id AND rp.permission_code = 'negocios.obra.planear'
-  WHERE m.organization_id = p_org AND m.status = 'active' AND u.auth_user_id <> auth.uid();
+  WHERE m.organization_id = p_org AND m.status = 'active' AND u.auth_user_id <> auth.uid()
+    AND lower(trim(u.name)) IN (SELECT lower(trim(x)) FROM unnest(p_nomes) x WHERE coalesce(trim(x), '') <> '');
   GET DIAGNOSTICS v_n = ROW_COUNT;
   RETURN v_n;
 END $$;
-COMMENT ON FUNCTION public.olyvia_avisar_gestores(uuid, integer, text, text, text) IS 'Obra Viva: avisa no sino quem planeia obras quando há decisões dos agentes à espera há mais de meio dia (uma vez por chave). 20270128000000.';
-REVOKE ALL ON FUNCTION public.olyvia_avisar_gestores(uuid, integer, text, text, text) FROM PUBLIC, anon;
-GRANT EXECUTE ON FUNCTION public.olyvia_avisar_gestores(uuid, integer, text, text, text) TO authenticated;
+COMMENT ON FUNCTION public.olyvia_avisar_gestores(uuid, integer, text, text, text, text[]) IS 'Obra Viva: avisa no sino quem planeia obras quando há decisões dos agentes à espera há mais de meio dia (uma vez por chave). 20270128000000.';
+REVOKE ALL ON FUNCTION public.olyvia_avisar_gestores(uuid, integer, text, text, text, text[]) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.olyvia_avisar_gestores(uuid, integer, text, text, text, text[]) TO authenticated;

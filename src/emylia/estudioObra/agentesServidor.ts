@@ -26,6 +26,16 @@ export interface ResumoAgentes { org: string; obras: number; aplicadas: number; 
   /** 26/11 (recomendação 5): avisos no sino aos gestores */ avisos?: number }
 
 /** Uma volta dos agentes numa organização, com o cliente da base já com a sessão da conta robô. */
+/** 26/11: quem é o gestor desta obra, pelo nome: o «Responsável de obra» (f.responsavel) e quem mede (f.supervisor_medidas, do RH). */
+export function gestoresDaObra(d: Pick<Negocio, "f">): string[] {
+  const out = new Set<string>();
+  const resp = (d.f?.responsavel ?? "").trim();
+  if (resp) out.add(resp);
+  const sup = d.f?.supervisor_medidas ? TECS.find((x) => x.id === d.f.supervisor_medidas)?.n : null;
+  if (sup) out.add(sup.trim());
+  return [...out];
+}
+
 export async function correrAgentesServidor(sb: SupabaseClient, org: string, agora = new Date()): Promise<ResumoAgentes> {
   const erros: string[] = [];
   definirRelogioReal(true);
@@ -93,11 +103,14 @@ export async function correrAgentesServidor(sb: SupabaseClient, org: string, ago
       let L: ReturnType<typeof propostasDosAgentes> = [];
       try { L = decisoesAEsperar(propostasDosAgentes(d, S, ocupacaoDosTecnicos(S, d.id)), d.obra.agentes, agora); } catch { L = []; }
       if (!L.length) continue;
+      // só o gestor desta obra: o «Responsável de obra» e quem mede (pelo nome); sem eles, o aviso fica na fita e nas Operações
+      const nomes = gestoresDaObra(d);
+      if (!nomes.length) continue;
       const chave = `agentes:${d.id}:${L.map((x) => x.id).sort().join(",")}`.slice(0, 300);
       const titulo = `${d.nome}: ${L.length} ${L.length === 1 ? "decisão à espera" : "decisões à espera"} há mais de meio dia`;
       const mensagem = `${L.slice(0, 3).map((x) => x.titulo).join(" · ")}${L.length > 3 ? " …" : ""}. Decida no Estúdio da obra, ou diga à Olyvia «o que se passa na obra ${d.id}?».`;
       try {
-        const { data, error } = await sb.rpc("olyvia_avisar_gestores" as never, { p_org: org, p_numero: d.id, p_chave: chave, p_titulo: titulo, p_mensagem: mensagem } as never);
+        const { data, error } = await sb.rpc("olyvia_avisar_gestores" as never, { p_org: org, p_numero: d.id, p_chave: chave, p_titulo: titulo, p_mensagem: mensagem, p_nomes: nomes } as never);
         if (error) erros.push(`Aviso ao gestor (${d.id}): ${error.message}`); else avisos += Number(data ?? 0);
       } catch (e) { erros.push(`Aviso ao gestor (${d.id}): ${(e as Error).message}`); }
     }
