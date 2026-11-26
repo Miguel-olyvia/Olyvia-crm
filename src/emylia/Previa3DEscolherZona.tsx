@@ -106,7 +106,7 @@ function Porque({ camada, tipo, editavel, aoExcecao, aoPrioridade }: {
         </>
       )}
       {camada.excecoes.map((e) => (
-        <p key={e.id} className={NOTA}>Excepção: nesta zona «{e.nome}» não pinta{e.daRegraTudo ? " (a regra «Todas as zonas» manda nas outras)" : ""}.</p>
+        <p key={e.id} className={NOTA}>Excepção: nesta zona «{e.nome}» {tipo === "superficie" ? "não aplica" : "não pinta"}{e.daRegraTudo ? " (a regra «Todas as zonas» manda nas outras)" : ""}.</p>
       ))}
     </div>
   );
@@ -173,7 +173,7 @@ export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperfi
   const escolherCor = (e: EscolhaDaZona, depois: string) => mudar(aplicarEscolhaNaZona(valor, zona, e, ctxCor), depois);
   const escolherSuperficie = (e: EscolhaDaZona, depois: string) => mudar(aplicarSuperficieNaZona(valor, zona, e, { atributosDeSuperficie: idsSuperficie }), depois);
   // «Só esta zona é diferente»: o atributo da regra «Todas as zonas» deixa de pintar só esta zona (a zona explícita vence «Todas as zonas»)
-  const abrirExcecao = (atributoId: string, nome: string) => mudar([...valor.filter((l) => !(l.atributo === atributoId && l.zona === zona)), { atributo: atributoId, zona, aplicar: false }], `${nome} não pinta esta zona`);
+  const abrirExcecao = (atributoId: string, nome: string, superficie = false) => mudar([...valor.filter((l) => !(l.atributo === atributoId && l.zona === zona)), { atributo: atributoId, zona, aplicar: false }], `${nome} ${superficie ? "não aplica" : "não pinta"} esta zona`);
   // o botão que resolveu o caso desaparece: o foco vai ao título da zona em vez de cair no corpo da página
   const focarTitulo = () => titulo.current?.focus();
   const aoKeyDown = (e: KeyboardEvent<HTMLElement>) => { if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); aoFechar(); } };
@@ -228,7 +228,7 @@ export function ZonaEscolhida({ zona, pintadaPor, atributosCor, atributosSuperfi
               opcoes={opcoesSuperficie} marcada={chaveDe(atualSuperficie)} aoEscolher={escolherSuperficie} movel={movel} />
           )}
           {porque && (
-            <Porque camada={porque.superficie} tipo="superficie" editavel={editavel} aoExcecao={(a) => { abrirExcecao(a, nomeDeSuperficie(a) ?? "O atributo"); focarTitulo(); }}
+            <Porque camada={porque.superficie} tipo="superficie" editavel={editavel} aoExcecao={(a) => { abrirExcecao(a, nomeDeSuperficie(a) ?? "O atributo", true); focarTitulo(); }}
               aoPrioridade={(p) => { escolherSuperficie({ tipo: "atributo", id: p.id }, `superfície ${p.nome}`); focarTitulo(); }} />
           )}
         </>

@@ -106,7 +106,7 @@ export function PainelAspeto3D({ zonaFixa, zonasDoModelo, pintadaPor, atributos,
       ) : null}
 
       {lig && mostrarRegras && zonasDoModelo.length >= 1 && (
-        <RegrasDoProduto valor={lig.valor} origem={lig.origem} atributos={lig.atributos} {...(lig.omissoes ? { omissoes: lig.omissoes } : {})} zonas={zonasDoModelo}
+        <RegrasDoProduto valor={lig.valor} origem={lig.origem} atributos={lig.atributos} {...(lig.omissoes ? { omissoes: lig.omissoes } : {})} {...(leitura?.defs ? { idsSuperficie: idsSuperficieDasDefs } : {})} zonas={zonasDoModelo}
           orfas={lig.orfas} ignoradas={lig.ignoradas} podeEditar={podeEditar} aoMudar={lig.aoMudar} semEfeito={semEfeito} aoApontar={aoRealcarRegra} idErro={idErro} />
       )}
 
