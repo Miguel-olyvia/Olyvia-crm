@@ -151,7 +151,7 @@ vi.mock("@/components/rh-exemplo/ficha/FichaPessoaRh", async () => {
 
 import { lerCusto, reporCusto } from "@/components/rh-exemplo/dados/lojaCusto";
 import { contaRepartida, contaTodosMeses, contaUmaVez, normalizarConta, validarConta } from "@/components/rh-exemplo/lib/comoConta";
-import { validarDevolucao, validarEquipamento, valorDoEquipamentoNoMes } from "@/components/rh-exemplo/lib/equipamentos";
+import { validarDevolucao, validarNovoEquipamento, valorDoEquipamentoNoMes, type AtivoDoEquipamento, type NovoEquipamentoBase } from "@/components/rh-exemplo/lib/equipamentos";
 import { rhExemploCustosTranslations } from "@/translations/rhExemploCustos";
 import { rhExemploProcessamentoRealTranslations } from "@/translations/rhExemploProcessamentoReal";
 import RhCustos from "./RhCustos";
@@ -196,14 +196,28 @@ let contadorEquipamentos = 0;
 function simularAcoes(): void {
   const { atribuir, devolver, alterarConta, definirExcecao } = estado.acoes;
   for (const acao of [atribuir, devolver, alterarConta, definirExcecao]) acao.mockReset();
-  atribuir.mockImplementation(async (novo: { pessoaId: string; tipo: EquipamentoPessoa["tipo"]; descricao: string; valor: number; entrega: string; conta?: ContaItem }) => {
-    const conta = novo.conta ?? contaRepartida();
-    const erro = validarEquipamento({ ...novo, conta });
+  atribuir.mockImplementation(async (novo: NovoEquipamentoBase) => {
+    const erro = validarNovoEquipamento(novo);
     if (erro) return { ok: false, erro, mensagem: null, id: null };
     contadorEquipamentos += 1;
     const id = `eq-novo-${contadorEquipamentos}`;
+    if (novo.forma === "existente") return { ...ok, id };
+    const descricao = novo.descricao.trim();
+    // Como a base: comprado e alugado criam um ativo (a conta vem dele); a farda (sem forma) conta pelo «como conta».
+    if (novo.forma === "comprado" || novo.forma === "alugado") {
+      const identidade = { codigo: null, nome: descricao, tipo: novo.tipo, estado: "ativo" as const, desativadoEm: null };
+      const ativo: AtivoDoEquipamento = novo.forma === "comprado"
+        ? { forma: "comprado", ...identidade, valorCompra: novo.valor, valorResidual: 0, dataCompra: novo.dataCompra ?? novo.entrega, vidaMeses: novo.vidaMeses, vidaOrigem: novo.vidaOrigem }
+        : { forma: "alugado", ...identidade, rendaMensal: novo.rendaMensal, inicioAluguer: novo.inicioAluguer, fimAluguer: novo.fimAluguer };
+      mudarEquipamentos([...estado.equipamentos, equipamento({
+        id, pessoaId: novo.pessoaId, tipo: novo.tipo, descricao, valor: novo.forma === "comprado" ? novo.valor : novo.rendaMensal, entrega: novo.entrega,
+        ativoId: `at-${id}`, ativo, contaDesde: novo.entrega,
+      })]);
+      return { ...ok, id };
+    }
+    const conta = novo.conta ?? contaRepartida();
     mudarEquipamentos([...estado.equipamentos, equipamento({
-      id, pessoaId: novo.pessoaId, tipo: novo.tipo, descricao: novo.descricao.trim(), valor: novo.valor, entrega: novo.entrega, conta: normalizarConta(conta),
+      id, pessoaId: novo.pessoaId, tipo: novo.tipo, descricao, valor: novo.valor, entrega: novo.entrega, conta: normalizarConta(conta),
     })]);
     return { ...ok, id };
   });
@@ -546,12 +560,16 @@ describe("atribuir equipamento (ação da base) e registar valor avulso (lançam
     expect(await within(painel).findByRole("alert")).toHaveTextContent("O valor tem de ser maior que 0.");
     fireEvent.change(within(painel).getByLabelText(/Valor de aquisição/), { target: { value: "720" } });
     fireEvent.change(within(painel).getByLabelText(/Data de entrega/), { target: { value: "2026-09-02" } });
-    expect(within(painel).getByRole("status")).toHaveTextContent(/720,00.* repartidos por 36 meses = 20,00.* por mês, de setembro de 2026 até à devolução/);
+    // O equipamento é um ativo comprado: a vida útil (36 meses de pagamento por omissão) define a quota, e o que se manda leva a forma.
+    expect(within(painel).getByRole("status")).toHaveTextContent(/720,00.* amortizados em 36 meses = 20,00.* por mês, a partir de setembro de 2026/);
     fireEvent.click(within(painel).getByRole("button", { name: "Atribuir" }));
     await waitFor(() => expect(screen.getAllByRole("dialog")).toHaveLength(1));
     expect(await within(screen.getByRole("dialog")).findByText("Tablet de loja")).toBeInTheDocument();
     expect(estado.acoes.atribuir).toHaveBeenLastCalledWith(
-      expect.objectContaining({ pessoaId: "p-tiago", tipo: "portatil", descricao: "Tablet de loja", valor: 720, entrega: "2026-09-02", conta: expect.objectContaining({ modo: "repartido", meses: 36 }) }),
+      expect.objectContaining({
+        pessoaId: "p-tiago", tipo: "portatil", forma: "comprado", descricao: "Tablet de loja", valor: 720, entrega: "2026-09-02",
+        dataCompra: null, vidaMeses: 36, vidaOrigem: "pagamento",
+      }),
     );
     expect(estado.equipamentos.at(-1)).toMatchObject({ pessoaId: "p-tiago", descricao: "Tablet de loja", valor: 720, estado: "atribuido" });
     expect(totalDoCabecalho("equipamentos")).not.toBe(antes);
@@ -662,11 +680,19 @@ describe("atribuir equipamento (ação da base) e registar valor avulso (lançam
 const euroDe = (texto: string): number => Number(texto.replace(/[^\d,-]/g, "").replace(",", "."));
 const irParaMes = (mes: string) => fireEvent.change(screen.getByLabelText("Mês"), { target: { value: mes } });
 
+/** Escolhe o tipo no painel de atribuir (a farda é a única que continua com o «Como conta» de sempre). */
+function escolherTipo(painel: HTMLElement, nome: string): void {
+  fireEvent.keyDown(within(painel).getByRole("combobox", { name: /^Tipo/ }), { key: "Enter" });
+  fireEvent.click(screen.getByRole("option", { name: nome }));
+}
+
+/** Abre o painel no topo e preenche uma FARDA (só ela tem «Como conta»: o comprado e o alugado contam pelo ativo). */
 function atribuirNoTopo(valor: string, entrega: string): HTMLElement {
   fireEvent.click(screen.getByRole("button", { name: "Atribuir equipamento" }));
   const painel = screen.getByRole("dialog");
   fireEvent.keyDown(within(painel).getByRole("combobox", { name: /Pessoa/ }), { key: "Enter" });
   fireEvent.click(screen.getByRole("option", { name: "Hugo Teixeira" }));
+  escolherTipo(painel, "Fardamento");
   fireEvent.change(within(painel).getByLabelText(/Descrição/), { target: { value: "Colete de teste" } });
   fireEvent.change(within(painel).getByLabelText(/Valor de aquisição/), { target: { value: valor } });
   fireEvent.change(within(painel).getByLabelText(/Data de entrega/), { target: { value: entrega } });
@@ -674,10 +700,13 @@ function atribuirNoTopo(valor: string, entrega: string): HTMLElement {
 }
 
 describe("«Como conta» no painel de atribuir e na ficha", () => {
-  it("oferece três opções em linguagem simples, repartido por 36 meses por omissão, e a ajuda abre com texto visível", () => {
+  it("na farda oferece três opções em linguagem simples, repartido por 36 meses por omissão, e a ajuda abre com texto visível", () => {
     noRouter();
     fireEvent.click(screen.getByRole("button", { name: "Atribuir equipamento" }));
     const painel = screen.getByRole("dialog");
+    // Um comprado ou alugado não tem «Como conta»: só a farda.
+    expect(within(painel).queryByRole("radiogroup", { name: "Como conta" })).not.toBeInTheDocument();
+    escolherTipo(painel, "Fardamento");
     const grupo = within(painel).getByRole("radiogroup", { name: "Como conta" });
     const opcoes = within(grupo).getAllByRole("radio");
     expect(opcoes).toHaveLength(3);
@@ -690,7 +719,9 @@ describe("«Como conta» no painel de atribuir e na ficha", () => {
     fireEvent.click(ajuda);
     expect(ajuda).toHaveAttribute("aria-expanded", "true");
     expect(within(painel).getByText(/um portátil de 900 € repartido por 36 meses conta 25 € por mês/)).toBeVisible();
-    expect(document.body.textContent).not.toMatch(/amortiza/i);
+    // O «Como conta» da farda não usa a palavra «amortização» (essa é do equipamento comprado).
+    expect(grupo.textContent).not.toMatch(/amortiza/i);
+    expect(within(painel).getByText(/um portátil de 900 € repartido por 36 meses conta 25 € por mês/).textContent).not.toMatch(/amortiza/i);
   });
 
   it("as setas mudam de opção, e escolher outra troca os campos e a frase de efeito", async () => {

@@ -7,7 +7,7 @@ import type { EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos
 import { itensDoMes } from "@/components/rh-exemplo/lib/custoItens";
 import { useTranslation } from "@/hooks/useTranslation";
 import { euros, nomeDoMes } from "@/components/rh-exemplo/custo/formato";
-import { rotuloDaConta } from "@/components/rh-exemplo/custo/rotuloConta";
+import { rotuloDoEquipamento } from "@/components/rh-exemplo/custo/rotuloConta";
 
 const SEM_EQUIPAMENTOS: readonly EquipamentoPessoa[] = [];
 
@@ -34,7 +34,7 @@ export function ItensDoMes({ pessoaId }: { pessoaId: string }) {
               <span className="min-w-0">
                 <span className="text-xs text-muted-foreground">{t(`rhCustos.itens.${i.tipo}`)}: </span>
                 {i.descricao}
-                <span className="block text-xs text-muted-foreground">{t("rhCustos.conta.titulo")}: {rotuloDaConta(t, i.conta, language)}</span>
+                <span className="block text-xs text-muted-foreground">{t("rhCustos.conta.titulo")}: {rotuloDoEquipamento(t, i, language)}</span>
               </span>
               <span className="tabular-nums font-medium">{euros(i.valorMes, "—")}</span>
             </li>

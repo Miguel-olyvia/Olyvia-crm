@@ -5,7 +5,7 @@
 import { useEquipamentosCusto as useReal, useEquipamentosCustoAcoes as useAcoesReal } from "@/hooks/hr/useEquipamentosCusto";
 
 export type {
-  EquipamentosCustoAcoes, EquipamentosCustoHook, NovoEquipamentoBase, ResultadoAtribuir,
+  CorrecaoEquipamento, EquipamentosCustoAcoes, EquipamentosCustoHook, NovoEquipamentoBase, ResultadoAtribuir, ResultadoCorrecao,
 } from "@/hooks/hr/useEquipamentosCusto";
 export type { ResultadoCusto } from "@/lib/hr/custoBase";
 

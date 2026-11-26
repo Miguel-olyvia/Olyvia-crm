@@ -63,7 +63,7 @@ export function DevolverDialog({ equipamento, aoFechar }: Props) {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>{t("rhCustos.eq.devolverTitulo")}</DialogTitle>
-          <DialogDescription>{equipamento ? `${equipamento.descricao}. ${t("rhCustos.eq.devolverAjuda")}` : ""}</DialogDescription>
+          <DialogDescription>{equipamento ? `${equipamento.descricao}. ${t(equipamento.ativo ? "rhCustos.eq.devolverAjudaAtivo" : "rhCustos.eq.devolverAjuda")}` : ""}</DialogDescription>
         </DialogHeader>
         {equipamento && <Formulario key={equipamento.id} equipamento={equipamento} aoFechar={aoFechar} />}
       </DialogContent>

@@ -14,7 +14,7 @@ import type { EquipamentoPessoa } from "@/components/rh-exemplo/lib/equipamentos
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { ComoContaCampos } from "./ComoContaCampos";
-import { contaDaEscolha, escolhaDe, type EscolhaConta } from "./escolhaConta";
+import { contaDaEscolha, escolhaDaLinha, escolhaDe, type EscolhaConta } from "./escolhaConta";
 
 export type AlvoConta = { tipo: "equipamento"; item: EquipamentoPessoa } | { tipo: "avulso"; item: AvulsoCusto };
 
@@ -27,7 +27,7 @@ const dataDe = (a: AlvoConta): string => (a.tipo === "equipamento" ? a.item.entr
 
 function Formulario({ alvo, aoFechar }: { alvo: AlvoConta; aoFechar: () => void }) {
   const { t } = useTranslation();
-  const [escolha, setEscolha] = useState<EscolhaConta>(() => escolhaDe(alvo.item.conta.modo, alvo.item.conta));
+  const [escolha, setEscolha] = useState<EscolhaConta>(() => (alvo.tipo === "equipamento" ? escolhaDaLinha(alvo.item) : escolhaDe(alvo.item.conta.modo, alvo.item.conta)));
   const [erro, setErro] = useState<ErroConta | null>(null);
   const [mensagem, setMensagem] = useState<string | null>(null);
   const [aGuardar, setAGuardar] = useState(false);
@@ -52,6 +52,17 @@ function Formulario({ alvo, aoFechar }: { alvo: AlvoConta; aoFechar: () => void 
       setAGuardar(false);
     }
   };
+  // Só a farda tem conta própria. Um equipamento que é um ativo não se altera aqui (a base recusa com HRA91): corrige-se.
+  if (alvo.tipo === "equipamento" && alvo.item.ativo) {
+    return (
+      <div className="space-y-4">
+        <p role="status" className="text-sm">{t("hr.custo.erro.equipamentoEAtivo")}</p>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={aoFechar} className={cn("min-h-11", FOCO)}>{t("common.cancel")}</Button>
+        </DialogFooter>
+      </div>
+    );
+  }
   return (
     <form className="space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); void guardar(); }}>
       <ComoContaCampos
