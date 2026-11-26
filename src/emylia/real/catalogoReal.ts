@@ -25,6 +25,8 @@ export interface LinhaPerfil {
 export interface LinhaEquipamento {
   id: string; nome: string; compra: number; vida_anos: number; vida_horas: number | null; residual: number; manutencao_ano: number;
   uso_ano_horas: number; ativo: boolean;
+  /** 26/11: o armazém do equipamento (cat_equipamentos.warehouse_id) e o nome dele; sem as chaves (base antiga), sem armazém. */
+  warehouse_id?: string | null; armazem?: string | null;
 }
 export interface LinhaEstruturaBase { id: string; nome: string; categoria: string; mensal: number; ativo: boolean; ordem: number }
 export interface LinhaServicoBase {
@@ -344,6 +346,7 @@ export function montarCatalogo(L: LinhasCatalogo, base: Catalogo, svcModelo: Rec
     equip: L.equipamentos.filter((e) => e.ativo).map((e) => ({
       id: e.id, n: e.nome, compra: n(e.compra), vida: e.vida_horas != null ? n(e.vida_horas) : n(e.vida_anos) * n(e.uso_ano_horas),
       residual: n(e.residual), manutAno: n(e.manutencao_ano), usoAno: n(e.uso_ano_horas),
+      armazemId: e.warehouse_id ?? null, armazemNome: e.warehouse_id ? e.armazem ?? null : null,
     })),
     estrutura: [...L.estrutura].sort((a, b) => a.ordem - b.ordem)
       .map((e): LinhaEstrutura => ({ id: e.id, n: e.nome, cat: e.categoria as LinhaEstrutura["cat"], mensal: n(e.mensal), ativo: e.ativo })),

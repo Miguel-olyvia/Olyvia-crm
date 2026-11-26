@@ -43,7 +43,8 @@ export interface HoraBd {
   cargos: string[];
 }
 export interface Perfil { id: string; n: string; salario: number | null; horaBd?: HoraBd }
-export interface Equip { id: string; n: string; compra: number; vida: number; residual: number; manutAno: number; usoAno: number }
+/** 26/11: armazemId/armazemNome = o armazém onde o equipamento está (cat_equipamentos.warehouse_id); null = sem armazém. Sem a chave (protótipo): sem armazém. */
+export interface Equip { id: string; n: string; compra: number; vida: number; residual: number; manutAno: number; usoAno: number; armazemId?: string | null; armazemNome?: string | null }
 export type CategoriaEstrutura = "Renda" | "Viaturas" | "Seguros" | "Pessoal não operacional" | "Licenças e software" | "Energia e água" | "Outro";
 export const CATEGORIAS_ESTRUTURA: CategoriaEstrutura[] = ["Renda", "Viaturas", "Seguros", "Pessoal não operacional", "Licenças e software", "Energia e água", "Outro"];
 export interface LinhaEstrutura { id: string; n: string; cat: CategoriaEstrutura; mensal: number; ativo: boolean }

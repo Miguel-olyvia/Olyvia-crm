@@ -23,7 +23,7 @@ import { LigarMicrotarefas } from "./MicrotarefasServico";
 import { lerCustos, mudarCustos, useCustos } from "./v2/custosStore";
 import { caminho, noDoServico, oficios, type Catalogo } from "./v2/catalogoModelo";
 import { useCatalogo } from "./v2/catalogoStore";
-import { ICONE_ALERTA, NumeroCelula, TextoCelula } from "./v2/pecasCustos";
+import { Escolha, ICONE_ALERTA, NumeroCelula, TextoCelula } from "./v2/pecasCustos";
 import { FotoOuIlustracao, IconeServico } from "./ilustracoes";
 import { desempenhoServicos, desempenhoTecnicos } from "./desempenhoCatalogo";
 import { ENTRADA, NavCategorias, NavOficios, ORDENS, PainelDesempenho, PainelProdutos, usePrefsCatalogo, type Ordem } from "./PainelCatalogo";
@@ -54,6 +54,7 @@ import { CAMINHO_SECCAO, caminhoProduto, caminhoServico, grupoDaSeccao, idSepara
 import { SeparadoresCatalogo } from "./SeparadoresCatalogo";
 import { catalogoParcial } from "./real/catalogoLeve";
 import { servidorLigacoes } from "./real/ligacoesServidor";
+import { opcoesArmazemEquip, useArmazensEquipamento, type ArmazemEquip } from "./real/armazensEquipamento";
 
 type Seccao = "servicos" | "produtos" | "equipamentos" | "consumiveis" | "tecnicos" | "ligacoes";
 const SECCOES: [Seccao, string][] = [["servicos", "Serviços"], ["produtos", "Produtos"], ["equipamentos", "Equipamentos"], ["consumiveis", "Consumíveis"], ["tecnicos", "Técnicos"], ["ligacoes", "Ligações"]];
@@ -310,7 +311,14 @@ function Produtos({ K, nomeServico, onAbrir, onAbrirProduto, margem, novo, real,
 }
 
 /* ------------------------------------------------------------------ equipamentos */
-function Equipamentos({ S, C, mudar, novo }: { S: Ctx["S"]; C: Custos; mudar: (fn: (c: Custos) => void, msg: string) => void; novo?: string }) {
+/** 26/11: o nome do armazém num distintivo pequeno (a lista e a ficha do equipamento). */
+const SeloArmazem = ({ nome }: { nome: string }) => (
+  <span className="ml-2 inline-flex max-w-full items-center truncate rounded-full bg-muted px-2 py-0.5 align-middle text-xs font-medium text-muted-foreground" title={`Armazém: ${nome}`}>
+    <span className="sr-only">Armazém: </span>{nome}
+  </span>
+);
+/** `armazens` (26/11): os armazéns da organização para o seletor «Armazém»; undefined = sem base (protótipo) ou ainda a ler, e o seletor não aparece. */
+function Equipamentos({ S, C, mudar, novo, armazens }: { S: Ctx["S"]; C: Custos; mudar: (fn: (c: Custos) => void, msg: string) => void; novo?: string; armazens?: readonly ArmazemEquip[] }) {
   const [aberto, setAberto] = useState<string | null>(null);
   // 03/11: mudar um equipamento grava com cat_guardar_equipamento_horas (services.edit); sem a permissão não há «Editar».
   const pode = usePermissoesCatalogo().servicos;
@@ -324,7 +332,7 @@ function Equipamentos({ S, C, mudar, novo }: { S: Ctx["S"]; C: Custos; mudar: (f
             <li key={e.id} className={cn("py-3", e.id === novo && REALCE)}>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1 sm:flex-nowrap">
                 <span className="min-w-0 flex-1">
-                  <span className="block text-[15px] font-medium">{e.n}{e.id === novo && <Novo />}</span>
+                  <span className="block text-[15px] font-medium">{e.n}{e.id === novo && <Novo />}{e.armazemId && <SeloArmazem nome={e.armazemNome?.trim() || armazens?.find((a) => a.id === e.armazemId)?.nome || "Armazém"} />}</span>
                   <span className={cn(NOTA, "block tabular-nums")}>compra {eur(e.compra)} € · vida útil {nfmt(e.vida)} h{u ? ` · em ${u} ${u === 1 ? "serviço" : "serviços"} em uso` : ""}</span>
                 </span>
                 <span className={VALORES}>
@@ -342,6 +350,15 @@ function Equipamentos({ S, C, mudar, novo }: { S: Ctx["S"]; C: Custos; mudar: (f
                     <label key={k} className="grid gap-1"><span className="text-[15px] font-medium">{t} ({un})</span>
                       <NumeroCelula rotulo={`${t} de ${e.n}`} w="w-full" v={e[k] as number} onSet={(v) => mudar((c) => { (c.equip.find((x) => x.id === e.id)! as unknown as Record<string, number>)[k] = v; }, `${t} de ${e.n}: ${nfmt(v)} ${un}`)} /></label>
                   ))}
+                  {armazens && (
+                    <label className="col-span-2 grid gap-1 sm:col-span-5"><span className="text-[15px] font-medium">Armazém</span>
+                      <Escolha rotulo={`Armazém de ${e.n}`} w="w-full sm:w-80" v={e.armazemId ?? ""} opcoes={opcoesArmazemEquip(armazens, { id: e.armazemId, nome: e.armazemNome })}
+                        onSet={(v) => {
+                          const nome = v ? armazens.find((a) => a.id === v)?.nome ?? e.armazemNome ?? null : null;
+                          mudar((c) => { const x = c.equip.find((y) => y.id === e.id)!; x.armazemId = v || null; x.armazemNome = nome; }, v ? `${e.n}: armazém ${nome ?? ""}`.trim() : `${e.n}: sem armazém`);
+                        }} />
+                    </label>
+                  )}
                   <p className={cn(NOTA, "col-span-2 tabular-nums sm:col-span-5")}>{q.texto}</p>
                 </div>
               )}
@@ -576,6 +593,8 @@ export function CatalogoV1({ S, run, real, rota }: Ctx & { real?: FichaProdutoRe
     setSeccao("ligacoes"); setAberto(null);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const nomeServico = useCallback((sid: SvcId) => nomes.get(sid) ?? sid, [nomes]);
+  // 26/11: os armazéns dos equipamentos lêem-se uma vez, só na página real e só quando o separador Equipamentos ou o Criar equipamento abrem
+  const armazensEquip = useArmazensEquipamento(real?.org, seccao === "equipamentos" || criar === "equipamento");
 
   const regiao = (
     <div aria-live="polite" role="status" aria-label="Avisos" className="pointer-events-none sticky bottom-4 z-10 mt-6 flex justify-center">
@@ -609,7 +628,7 @@ export function CatalogoV1({ S, run, real, rota }: Ctx & { real?: FichaProdutoRe
   if (criar) {
     return (
       <div className="mx-auto w-full max-w-6xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
-        <CriarNoCatalogo S={S} C={C} K={K} run={run} tipo={criar} setTipo={escolherTipoCriar} voltar={() => setCriar("")} onCriado={criado} real={real} />
+        <CriarNoCatalogo S={S} C={C} K={K} run={run} tipo={criar} setTipo={escolherTipoCriar} voltar={() => setCriar("")} onCriado={criado} real={real} armazens={armazensEquip} />
         {regiao}
       </div>
     );
@@ -682,7 +701,7 @@ export function CatalogoV1({ S, run, real, rota }: Ctx & { real?: FichaProdutoRe
       ? <ProdutosPagina K={K} real={real} nomeServico={nomeServico} onAbrir={abrir} onAbrirProduto={(id) => setProdutoAberto(id)} margem={S.cfg.alvo} novo={realce?.t === "produto" ? realce.id : undefined} anunciar={anunciar}
         onLinhas={verLinhas} extra={<MateriaisModelo K={K} real={real} anunciar={anunciar} />} />
       : <Produtos K={K} nomeServico={nomeServico} onAbrir={abrir} onAbrirProduto={(id) => setProdutoAberto(id)} margem={S.cfg.alvo} novo={realce?.t === "produto" ? realce.id : undefined} real={real} anunciar={anunciar} />),
-    equipamentos: () => <Equipamentos S={S} C={C} mudar={mudar} novo={realce?.t === "equipamento" ? realce.id : undefined} />,
+    equipamentos: () => <Equipamentos S={S} C={C} mudar={mudar} novo={realce?.t === "equipamento" ? realce.id : undefined} armazens={armazensEquip} />,
     consumiveis: () => <Consumiveis todos={consumiveis} C={C} nomeServico={nomeServico} novo={realce?.t === "consumivel" ? realce.id : undefined} onAbrirConsumivel={(id) => setConsAberto(id)} real={real} anunciar={anunciar} />,
     tecnicos: () => <Tecnicos S={S} C={C} mudar={mudar} novo={realce?.t === "tecnico" ? realce.id : undefined} />,
     ligacoes: () => <LigacoesCatalogo K={catLig} onAbrirFicha={abrir} S={S} run={run} servidor={servidorLig} />,

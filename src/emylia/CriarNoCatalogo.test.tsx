@@ -2,10 +2,15 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { acoes, seed, type Estado } from "./motor";
 import { CatalogoV1 } from "./CatalogoV1";
-import { ligarCustos, reporCustos } from "./v2/custosStore";
+import { lerCustos, ligarCustos, reporCustos } from "./v2/custosStore";
 import { reporCatalogo } from "./v2/catalogoStore";
+import type { ArmazemEquip } from "./real/armazensEquipamento";
 
-afterEach(() => { cleanup(); reporCustos(); reporCatalogo(); });
+// 26/11: os armazéns dos equipamentos (na página real lêem-se de warehouses); por omissão nenhuns, como no protótipo
+const armazensTeste = vi.hoisted(() => ({ L: undefined as ArmazemEquip[] | undefined }));
+vi.mock("./real/armazensEquipamento", async (orig) => ({ ...(await orig<typeof import("./real/armazensEquipamento")>()), useArmazensEquipamento: () => armazensTeste.L }));
+
+afterEach(() => { cleanup(); reporCustos(); reporCatalogo(); armazensTeste.L = undefined; });
 
 function pagina(S: Estado = seed()) {
   const run = (fn: () => void) => fn();
@@ -81,5 +86,25 @@ describe("Criar no Catálogo", () => {
     const painel = screen.getByRole("tabpanel");
     expect(within(painel).getAllByRole("listitem")[0]).toHaveTextContent(/Lixadora de parede\s*Novo/);
     expect(screen.getByRole("status", { name: "Avisos" })).toHaveTextContent("Equipamento «Lixadora de parede» criado.");
+    // sem armazéns (protótipo) não há o campo, e o equipamento nasce sem armazém
+    expect(screen.queryByLabelText("Armazém")).toBeNull();
+    expect(lerCustos().equip.at(-1)).not.toHaveProperty("armazemId");
+  });
+
+  it("26/11: equipamento com armazém (opcional): o seletor tem «Sem armazém» e os armazéns, e o escolhido vai com o equipamento", () => {
+    armazensTeste.L = [{ id: "w-porto", nome: "Porto", codigo: null }];
+    pagina();
+    fireEvent.click(screen.getByRole("tab", { name: "Equipamentos" }));
+    fireEvent.click(screen.getByRole("button", { name: "Criar" }));
+    const sel = screen.getByLabelText("Armazém") as HTMLSelectElement;
+    expect([...sel.options].map((o) => o.textContent)).toEqual(["Sem armazém", "Porto"]);
+    expect(sel.value).toBe("");
+    escrever("Nome do equipamento", "Aspirador industrial 30 l");
+    escrever("Preço de compra", "800");
+    escrever("Vida útil", "2000");
+    fireEvent.change(sel, { target: { value: "w-porto" } });
+    fireEvent.click(screen.getByRole("button", { name: "Criar o equipamento" }));
+    expect(lerCustos().equip.find((e) => e.n === "Aspirador industrial 30 l")).toMatchObject({ armazemId: "w-porto", armazemNome: "Porto" });
+    expect(within(screen.getByRole("tabpanel")).getAllByRole("listitem")[0]).toHaveTextContent("Armazém: Porto");
   });
 });

@@ -194,7 +194,9 @@ export function criarEquip(C: Custos, o: NovoEquip): ResCriar<{ C: Custos }> {
   const f = faltasEquip(C, o);
   if (f.length) return { ok: false, erro: f[0] };
   const n = o.n.trim(), id = idLivre("e-", n, C.equip.map((e) => e.id));
-  return { ok: true, id, C: { ...C, equip: [...C.equip, { ...o, n, id }] } };
+  // 26/11: o armazém escolhido (opcional) vai com o equipamento e grava-se no mesmo cat_guardar_equipamento_horas (p_warehouse_id)
+  const { armazemId, armazemNome, ...resto } = o;
+  return { ok: true, id, C: { ...C, equip: [...C.equip, { ...resto, n, id, ...(armazemId ? { armazemId, armazemNome: armazemNome ?? null } : {}) }] } };
 }
 
 /* ------------------------------------------------------------------ consumível */

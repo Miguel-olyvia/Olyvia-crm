@@ -2,11 +2,16 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { acoes, seed, type Estado } from "./motor";
 import { CatalogoV1 } from "./CatalogoV1";
-import { reporCustos } from "./v2/custosStore";
+import { lerCustos, reporCustos } from "./v2/custosStore";
 import { mudarCatalogo } from "./v2/catalogoStore";
 import type { Produto } from "./v2/catalogoModelo";
+import type { ArmazemEquip } from "./real/armazensEquipamento";
 
-afterEach(() => { cleanup(); reporCustos(); });
+// 26/11: os armazéns dos equipamentos (na página real lêem-se de warehouses); por omissão nenhuns, como no protótipo
+const armazensTeste = vi.hoisted(() => ({ L: undefined as ArmazemEquip[] | undefined }));
+vi.mock("./real/armazensEquipamento", async (orig) => ({ ...(await orig<typeof import("./real/armazensEquipamento")>()), useArmazensEquipamento: () => armazensTeste.L }));
+
+afterEach(() => { cleanup(); reporCustos(); armazensTeste.L = undefined; });
 
 function pagina(S: Estado = seed()) {
   const run = (fn: () => void) => fn();
@@ -61,6 +66,30 @@ describe("CatalogoV1 · os seis separadores", () => {
     const linha = within(screen.getByRole("tabpanel")).getAllByRole("listitem")[0];
     expect(linha.querySelector("img")).toBeNull();
     expect(linha.querySelector("svg[data-ilustracao]")).not.toBeNull();
+  });
+});
+
+describe("CatalogoV1 · o armazém dos equipamentos (26/11)", () => {
+  it("sem armazéns (protótipo) não há seletor; com eles, «Editar» mostra «Sem armazém» e os armazéns, e escolher grava no equipamento e aparece na linha", () => {
+    pagina();
+    fireEvent.click(screen.getByRole("tab", { name: "Equipamentos" }));
+    const nome = lerCustos().equip[0].n;
+    fireEvent.click(screen.getByRole("button", { name: `Editar ${nome}` }));
+    expect(screen.queryByLabelText(`Armazém de ${nome}`)).toBeNull();
+    cleanup(); reporCustos();
+
+    armazensTeste.L = [{ id: "w-lisboa", nome: "Lisboa", codigo: null }, { id: "w-porto", nome: "Porto", codigo: "POR" }];
+    pagina();
+    fireEvent.click(screen.getByRole("tab", { name: "Equipamentos" }));
+    fireEvent.click(screen.getByRole("button", { name: `Editar ${nome}` }));
+    const sel = screen.getByLabelText(`Armazém de ${nome}`) as HTMLSelectElement;
+    expect([...sel.options].map((o) => o.textContent)).toEqual(["Sem armazém", "Lisboa", "Porto (POR)"]);
+    expect(sel.value).toBe("");
+    fireEvent.change(sel, { target: { value: "w-porto" } });
+    expect(lerCustos().equip[0]).toMatchObject({ armazemId: "w-porto", armazemNome: "Porto" });
+    expect(within(screen.getByRole("tabpanel")).getAllByRole("listitem")[0]).toHaveTextContent("Armazém: Porto");
+    fireEvent.change(screen.getByLabelText(`Armazém de ${nome}`), { target: { value: "" } });
+    expect(lerCustos().equip[0]).toMatchObject({ armazemId: null, armazemNome: null });
   });
 });
 
