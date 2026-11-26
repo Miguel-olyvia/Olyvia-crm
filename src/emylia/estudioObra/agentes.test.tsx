@@ -6,7 +6,7 @@ import { acoes, type Negocio } from "../motor";
 import type { Ctx } from "../pecas";
 import { EstudioObra } from "./EstudioObra";
 import { obraDeExemplo } from "./exemploObra";
-import { DEGRAUS_DE_ORIGEM, aAplicarAgora, ajusteSozinho, degrauDe, modoDa, prazoDoDegrau2, propostasDosAgentes, type Proposta } from "./agentes";
+import { DEGRAUS_DE_ORIGEM, aAplicarAgora, ajusteSozinho, degrauDe, modoDa, pausaDe, prazoDoDegrau2, propostasDosAgentes, type Proposta } from "./agentes";
 import { replanear, type Replano } from "./planoVivo";
 import { ocupacaoDosTecnicos } from "../preparacaoObra";
 import { estadoVivo as estadoVivoDe } from "./planoVivo";
@@ -132,6 +132,18 @@ describe("o ajuste contínuo (etapa 4)", () => {
     // desfeito é recusado: nem no degrau 3 o agente o volta a fazer
     expect(propostasDosAgentes(d, S, ocupacaoDosTecnicos(S, d.id)).some((y) => y.id === "folga")).toBe(false);
     expect(aAplicarAgora(propostasDosAgentes(d, S, ocupacaoDosTecnicos(S, d.id)), { ...d.obra.agentes, degraus: { plano: 3 } }).some((y) => y.id === "folga")).toBe(false);
+  });
+
+  it("depois de desfazer, o agente fica em pausa nesta obra até ao fim do dia útil (não chega ao mesmo por outra proposta)", () => {
+    const desfeito = new Date(2026, 10, 25, 10, 0).toISOString(); // qua de manhã
+    const e = { degraus: { plano: 3 as const }, feitos: [{ id: "f1", q: desfeito, agente: "plano" as const, texto: "t", auto: true, quem: "Olyvia", antes: [], desfeito, pid: "folga" }] };
+    const auto = { acao: { k: "fecharBuraco" as const, ini: 5, fim: 6 }, texto: "Antecipar" };
+    const L = [P({ id: "parada-5", auto })];
+    expect(pausaDe(e, "plano", new Date(2026, 10, 25, 12, 0))?.getHours()).toBe(18);
+    expect(modoDa(L[0], e, new Date(2026, 10, 25, 12, 0))).toBe("pede");
+    expect(aAplicarAgora(L, e, new Date(2026, 10, 25, 12, 0))).toEqual([]);
+    expect(aAplicarAgora(L, e, new Date(2026, 10, 25, 18, 1)).map((x) => x.id)).toEqual(["parada-5"]); // passou a pausa
+    expect(pausaDe(e, "equipa", new Date(2026, 10, 25, 12, 0))).toBeNull(); // só aquele agente
   });
 
   it("o fim protegido: o atraso que empurra o fim nunca se aplica sozinho e diz porquê", () => {

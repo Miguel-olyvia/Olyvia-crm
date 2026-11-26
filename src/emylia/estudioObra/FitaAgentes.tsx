@@ -11,7 +11,7 @@ import type { Ctx } from "../pecas";
 import { useReduzir } from "../movimento";
 import { podeNeg } from "../permissoes";
 import type { AcaoAlerta } from "./alertasObra";
-import { AGENTES, DEGRAUS, aAplicarAgora, agente, degrauDe, modoDa, prazoDoDegrau2, type AgenteId, type Degrau, type FeitoAgente, type Proposta } from "./agentes";
+import { AGENTES, DEGRAUS, aAplicarAgora, agente, degrauDe, modoDa, pausaDe, prazoDoDegrau2, type AgenteId, type Degrau, type FeitoAgente, type Proposta } from "./agentes";
 
 /* ------------------------------------------------------------------ o rasto do antes (o Gantt mostra-o uns segundos) */
 let rasto: { antes: Map<number, number>; ate: number } | null = null;
@@ -94,7 +94,7 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
   const recentes = novos.length ? novos : feitos.slice(0, 3);
   const conta = useMemo(() => {
     const c = { pede: 0, prazo: 0, ver: 0 };
-    for (const x of propostas) { const m = modoDa(x, e); if (m === "prazo") c.prazo++; else if (m === "ver") c.ver++; else c.pede++; }
+    for (const x of propostas) { const m = modoDa(x, e, agora); if (m === "prazo") c.prazo++; else if (m === "ver") c.ver++; else c.pede++; }
     return c;
   }, [propostas, e]);
 
@@ -181,7 +181,7 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
           <ul className="grid gap-2">
             <AnimatePresence initial={false}>
               {mostradas.map((x) => {
-                const m = modoDa(x, e), a = agente(x.agente);
+                const m = modoDa(x, e, agora), a = agente(x.agente), pausa = m === "pede" && x.auto ? pausaDe(e, x.agente, agora) : null;
                 const visto = e?.vistos?.[x.id], prazo = m === "prazo" && visto ? prazoDoDegrau2(visto) : null;
                 const falta = prazo && visto ? Math.max(0, Math.min(1, (prazo.getTime() - agora.getTime()) / Math.max(1, prazo.getTime() - new Date(visto).getTime()))) : null;
                 const principal = x.acoes[0];
@@ -195,7 +195,7 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
                         <span className="font-medium">{x.titulo}</span>
                         <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium",
                           m === "prazo" ? "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200" : m === "ver" ? "bg-muted text-muted-foreground" : m === "ja" ? "bg-success/15 text-success" : "bg-primary/10 text-primary")}>
-                          {m === "prazo" && prazo ? `aplica-se sozinho ${quandoPrazo(prazo, agora)}` : m === "ver" ? "a observar" : m === "ja" ? "a aplicar" : "pede decisão"}
+                          {m === "prazo" && prazo ? `aplica-se sozinho ${quandoPrazo(prazo, agora)}` : m === "ver" ? "a observar" : m === "ja" ? "a aplicar" : pausa ? `em pausa até ${quandoPrazo(pausa, agora)}: desfez uma mudança` : "pede decisão"}
                         </span>
                       </p>
                       {x.sub && <p className="text-sm text-muted-foreground">{x.sub}</p>}

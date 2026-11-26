@@ -188,18 +188,33 @@ export function prazoDoDegrau2(vistoIso: string): Date {
   return fim;
 }
 
-/** O que cada proposta vai fazer agora, pelo degrau do agente: «ver» (0), «pede» (1, ou 2 sem ação automática), «prazo» (2) ou «já» (3). */
-export function modoDa(x: Proposta, e: EstadoAgentes | undefined): "ver" | "pede" | "prazo" | "ja" {
+/** 26/11 (teste ao vivo): depois de o gestor desfazer uma mudança de um agente, esse agente não aplica nada sozinho nesta obra até ao fim do
+ *  dia útil (a mesma regra das 18h do degrau 2). Sem isto, desfazia-se «adiantar com a folga» e o agente chegava ao mesmo por outra
+ *  proposta («antecipar o que vem depois do buraco»). Devolve até quando, ou null. */
+export function pausaDe(e: EstadoAgentes | undefined, a: AgenteId, agora = new Date()): Date | null {
+  let ate: Date | null = null;
+  for (const f of e?.feitos ?? []) {
+    if (f.agente !== a || !f.desfeito) continue;
+    const p = prazoDoDegrau2(f.desfeito);
+    if (p.getTime() > agora.getTime() && (!ate || p > ate)) ate = p;
+  }
+  return ate;
+}
+
+/** O que cada proposta vai fazer agora, pelo degrau do agente: «ver» (0), «pede» (1, 2 sem ação automática, ou o agente em pausa depois de
+ *  um desfazer), «prazo» (2) ou «já» (3). */
+export function modoDa(x: Proposta, e: EstadoAgentes | undefined, agora = new Date()): "ver" | "pede" | "prazo" | "ja" {
   const g = degrauDe(e, x.agente);
   if (g === 0) return "ver";
   if (!x.auto || g === 1) return "pede";
+  if (pausaDe(e, x.agente, agora)) return "pede";
   return g === 2 ? "prazo" : "ja";
 }
 
 /** As propostas a aplicar sozinhas agora: degrau 3, ou degrau 2 com o prazo passado. */
 export function aAplicarAgora(L: Proposta[], e: EstadoAgentes | undefined, agora = new Date()): Proposta[] {
   return L.filter((x) => {
-    const m = modoDa(x, e);
+    const m = modoDa(x, e, agora);
     if (m === "ja") return true;
     if (m !== "prazo") return false;
     const v = e?.vistos?.[x.id];
