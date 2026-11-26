@@ -668,19 +668,69 @@ describe("AtivoSheet: a vida útil (meses de pagamento, do catálogo ou à mão)
 });
 
 describe("AtivoSheet: o armazém do Stock", () => {
-  const instalacoes = () => { escrever(/^Nome/, "Armazém Porto"); escolher(/^Tipo/, "Instalações"); };
+  const instalacoes = () => { escrever(/^Nome/, "Armazém Porto"); escolher(/^Tipo/, "Armazéns e instalações"); };
 
-  it("só um ativo de estrutura do tipo Instalações oferece o armazém, e só a quem vê o Stock", () => {
+  it("o tipo chama-se «Armazéns e instalações» e a ligação ao armazém aparece logo por baixo dele, antes da forma e do valor de compra", () => {
+    abrir("estrutura");
+    escolher(/^Tipo/, "Armazéns e instalações");
+    const tipo = screen.getByRole("combobox", { name: /^Tipo/ });
+    const armazem = screen.getByRole("combobox", { name: /Armazém do Stock/ });
+    const antes = (a: Element, b: Element) => Boolean(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING);
+    // Imediatamente a seguir ao Tipo: nenhum outro seletor entre os dois.
+    const seletores = screen.getAllByRole("combobox");
+    expect(seletores.indexOf(armazem)).toBe(seletores.indexOf(tipo) + 1);
+    expect(antes(tipo, armazem)).toBe(true);
+    // E antes da forma (Comprado/Alugado) e do valor de compra.
+    expect(antes(armazem, screen.getByRole("radio", { name: /Comprado/ }))).toBe(true);
+    expect(antes(armazem, campo(/Valor de compra/))).toBe(true);
+  });
+
+  it("com outro tipo não aparece o armazém nem a frase de falta de acesso", () => {
+    abrir("estrutura");
+    escolher(/^Tipo/, "Mobiliário");
+    expect(screen.queryByRole("combobox", { name: /Armazém do Stock/ })).not.toBeInTheDocument();
+    expect(screen.queryByTestId("armazem-sem-acesso")).not.toBeInTheDocument();
+    cleanup();
+    m.opcoes = { ...OPCOES, armazens: [], podeVerArmazens: false };
+    abrir("estrutura");
+    escolher(/^Tipo/, "Mobiliário");
+    expect(screen.queryByTestId("armazem-sem-acesso")).not.toBeInTheDocument();
+  });
+
+  it("sem acesso ao Stock, o tipo «Armazéns e instalações» diz que é preciso acesso ao Stock para ligar a um armazém, sem o campo", () => {
+    m.opcoes = { ...OPCOES, armazens: [], podeVerArmazens: false };
+    abrir("estrutura");
+    expect(screen.queryByTestId("armazem-sem-acesso")).not.toBeInTheDocument();
+    escolher(/^Tipo/, "Armazéns e instalações");
+    expect(screen.queryByRole("combobox", { name: /Armazém do Stock/ })).not.toBeInTheDocument();
+    expect(screen.getByTestId("armazem-sem-acesso")).toHaveTextContent("Para ligar a um armazém é preciso ter acesso ao Stock.");
+  });
+
+  it("com acesso ao Stock, a frase de falta de acesso não aparece", () => {
+    abrir("estrutura");
+    escolher(/^Tipo/, "Armazéns e instalações");
+    expect(screen.getByRole("combobox", { name: /Armazém do Stock/ })).toBeInTheDocument();
+    expect(screen.queryByTestId("armazem-sem-acesso")).not.toBeInTheDocument();
+  });
+
+  it("enquanto as opções não chegaram, não se diz que falta acesso (ainda não se sabe)", () => {
+    m.opcoes = null;
+    abrir("estrutura");
+    escolher(/^Tipo/, "Armazéns e instalações");
+    expect(screen.queryByTestId("armazem-sem-acesso")).not.toBeInTheDocument();
+  });
+
+  it("só um ativo de estrutura do tipo Armazéns e instalações oferece o armazém, e só a quem vê o Stock", () => {
     abrir("estrutura");
     expect(screen.queryByRole("combobox", { name: /Armazém do Stock/ })).not.toBeInTheDocument();
     escolher(/^Tipo/, "Mobiliário");
     expect(screen.queryByRole("combobox", { name: /Armazém do Stock/ })).not.toBeInTheDocument();
-    escolher(/^Tipo/, "Instalações");
+    escolher(/^Tipo/, "Armazéns e instalações");
     expect(screen.getByRole("combobox", { name: /Armazém do Stock/ })).toBeInTheDocument();
     cleanup();
     m.opcoes = { ...OPCOES, armazens: [], podeVerArmazens: false };
     abrir("estrutura");
-    escolher(/^Tipo/, "Instalações");
+    escolher(/^Tipo/, "Armazéns e instalações");
     expect(screen.queryByRole("combobox", { name: /Armazém do Stock/ })).not.toBeInTheDocument();
   });
 
@@ -694,7 +744,7 @@ describe("AtivoSheet: o armazém do Stock", () => {
     expect(m.criar).toHaveBeenCalledWith("estrutura", expect.objectContaining({ p_tipo: "instalacoes", p_warehouse_id: "w1" }));
   });
 
-  it("mudar o tipo para outro que não Instalações larga o armazém escolhido", async () => {
+  it("mudar o tipo para outro que não Armazéns e instalações larga o armazém escolhido", async () => {
     abrir("estrutura");
     instalacoes();
     escolher(/Armazém do Stock/, "Armazém Porto");

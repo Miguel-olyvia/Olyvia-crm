@@ -152,7 +152,10 @@ function Formulario({ grupo, ativo, opcoes, erroOpcoes, aoFechar, aoGuardar }: F
   }
   const opcoesCentro: OpcaoSelect[] = (opcoes?.centrosCusto ?? []).map((c) => ({ value: c.id, label: c.nome }));
   const armazens = armazensEscolhiveis(opcoes, ativo);
-  const mostraArmazem = g === "estrutura" && campos.tipo === "instalacoes" && opcoes?.podeVerArmazens === true;
+  const eInstalacoes = g === "estrutura" && campos.tipo === "instalacoes";
+  const mostraArmazem = eInstalacoes && opcoes?.podeVerArmazens === true;
+  // Só se diz que falta acesso quando as opções já chegaram e dizem que não (enquanto carregam, ainda não se sabe).
+  const semAcessoAoStock = eInstalacoes && opcoes != null && opcoes.podeVerArmazens === false;
   // A ajuda da vida de um serviço diz o que acontece se ficar vazia, conforme o que o modelo escolhido tem (anos, só horas, nada).
   const modelo = escolhido ?? (ativo?.catEquipamento ? { vidaAnos: ativo.catEquipamento.vidaAnos, vidaHoras: ativo.catEquipamento.vidaHoras } : null);
   const ajudaDaVidaDoModelo = !modelo
@@ -247,18 +250,21 @@ function Formulario({ grupo, ativo, opcoes, erroOpcoes, aoFechar, aoGuardar }: F
             vazioLabel={t("ativos.campo.tipoEscolher")} opcoes={tiposDoGrupo(g).map((x) => ({ value: x, label: t(`ativos.tipo.${g}.${x}`) }))} erro={erro("tipo")}
           />
         )}
-        {g !== "servico" && (edicao ? <FormaFixa forma={campos.forma} /> : <SeletorForma valor={campos.forma} aoMudar={(forma) => mudar({ forma })} />)}
-
-        {alugado
-          ? <CamposAluguer campos={camposFinais} mudar={mudar} erro={erro} />
-          : <CamposComprado campos={camposFinais} mudar={mudar} erro={erro} equipamentos={listaEquipamentos} ajudaVidaServico={ajudaDaVidaDoModelo} aoTocarVida={() => setVidaTocada(true)} />}
-
+        {/* A ligação ao armazém logo por baixo do tipo, para se ver que existe (antes ficava no fim, depois do valor e da vida útil). */}
         {mostraArmazem && (
           <CampoSelect
             id="ativo-armazem" label={t("ativos.campo.armazem")} valor={campos.armazemId} onChange={(v) => mudar({ armazemId: v })}
             vazioLabel={t("ativos.campo.armazemNenhum")} opcoes={armazens.map((w) => ({ value: w.id, label: w.nome }))} ajuda={t("ativos.ajuda.armazem")} erro={erro("armazem")}
           />
         )}
+        {semAcessoAoStock && (
+          <p data-testid="armazem-sem-acesso" className="text-xs leading-5 text-muted-foreground">{t("ativos.ajuda.armazemSemAcesso")}</p>
+        )}
+        {g !== "servico" && (edicao ? <FormaFixa forma={campos.forma} /> : <SeletorForma valor={campos.forma} aoMudar={(forma) => mudar({ forma })} />)}
+
+        {alugado
+          ? <CamposAluguer campos={camposFinais} mudar={mudar} erro={erro} />
+          : <CamposComprado campos={camposFinais} mudar={mudar} erro={erro} equipamentos={listaEquipamentos} ajudaVidaServico={ajudaDaVidaDoModelo} aoTocarVida={() => setVidaTocada(true)} />}
 
         <Collapsible open={avancadoAberto} onOpenChange={setAvancadoAberto} className="rounded-md border">
           <CollapsibleTrigger className={cn("flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm font-medium hover:bg-muted", FOCO)}>
