@@ -78,7 +78,7 @@ describe(`migration ${nome}`, () => {
 
   it("as listas têm os números das constantes, ids e SKU únicos", () => {
     expect(prods).toHaveLength(constante("c_n_produtos"));
-    expect(prods.length).toBe(2341);
+    expect(prods.length).toBe(2317);
     expect(new Set(prods.map((p) => p.id)).size).toBe(prods.length);
     expect(new Set(prods.map((p) => p.sku.toUpperCase())).size).toBe(prods.length);
     expect(prods.filter((p) => p.estado === "active")).toHaveLength(constante("c_n_active"));
@@ -136,7 +136,23 @@ describe(`migration ${nome}`, () => {
     // Torneiras: manda a Rev1 (nenhuma linha só de versão antiga); os ficheiros de onde vêm as linhas
     expect(new Set(prods.map((p) => p.excel.split(":")[0]))).toEqual(new Set(["MOVx", "MOVc", "REVc", "RESx", "ELEc", "LAVc"]));
     expect(prods.filter((p) => p.excel.startsWith("MOV"))).toHaveLength(2263);
-    expect(prods.filter((p) => p.excel.startsWith("REV"))).toHaveLength(65);
+    expect(prods.filter((p) => p.excel.startsWith("REV"))).toHaveLength(41);
+  });
+
+  it("revisão da onda 3: os revestimentos que já existem na base não se criam e nada vai à venda com nome AMBIGUO", () => {
+    const skus = new Set(prods.map((p) => p.sku));
+    // gémeos (mesma subcategoria e medida) e genéricas de família sem medida com os membros já na base
+    for (const s of ["RC0014", "RC0015", "RC0018", "RC0019", "RC0022", "RC0027", "RP0036", "RP0038", "RP0039", "RP0040",
+      "RCL0002", "RCL0003", "RCL0004", "RCL0005", "RCL0006", "RCL0007", "RCL0008",
+      "RP0016", "RP0017", "RP0018", "RP0020", "RP0024", "RP0027", "RP0028"]) {
+      expect(skus.has(s), s).toBe(false);
+    }
+    // CAPRAIA Natural fica: a base só tem CAPRAIA Polido
+    expect(skus.has("RCL0001")).toBe(true);
+    for (const p of prods) if (/\bAMBIGUO\b/i.test(p.nome)) expect(p.estado, p.sku).not.toBe("active");
+    for (const s of ["DBRS0161CR", "DBRS0162CR", "DBRS0163CR", "DBRS0164CR", "DBRS0165CR", "DBRS0166CR"]) {
+      expect(prods.find((p) => p.sku === s)?.estado, s).toBe("draft");
+    }
   });
 
   it("só INSERE (produtos, organização, preços, fornecedores): nada de UPDATE, DELETE, atributos, famílias, gerar SKU nem documentos", () => {

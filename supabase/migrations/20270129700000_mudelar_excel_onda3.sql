@@ -15,16 +15,17 @@
 -- mudelar-audit/onda3/fora.csv. Versão por família: Móveis WC = união de todas as versões (Rev1, xlsx e csv);
 -- Revestimentos = Rev1 mais as linhas só do csv; Torneiras = só a Rev1; Eletrodomésticos = o csv.
 --
--- O QUE FAZ: cria 2341 produtos da Mudelar (lista fechada, embutida abaixo, ids fixos), como o Catálogo os cria
+-- O QUE FAZ: cria 2317 produtos da Mudelar (lista fechada, embutida abaixo, ids fixos), como o Catálogo os cria
 -- (cat_guardar_produto / rpc_create_product): tipo_catalogo 'produto', gere stock, a organização em product_organizations,
--- categoria e subcategoria do Excel, marca por brand_id (2323; as 18 sem marca no Excel ficam sem marca),
+-- categoria e subcategoria do Excel, marca por brand_id (2299; as 18 sem marca no Excel ficam sem marca),
 -- unidade por uom_id (a do Excel; sem ela, a da subcategoria), o SKU DO EXCEL com sku_gerado = false (como os legados),
 -- descrição curta (1969: a Descrição do Excel ou, sem ela, as notas do Atributos, como a carga de 17/11), preços
--- só os > 0 (1748: custo 377, PVP 1367, grossista 2, distribuidor 2; IVA do Excel, vazio = 23) e o fornecedor
--- preferencial em item_suppliers (2327; código do fornecedor 52, custo 363).
+-- só os > 0 (1700: custo 353, PVP 1343, grossista 2, distribuidor 2; IVA do Excel, vazio = 23) e o fornecedor
+-- preferencial em item_suppliers (2303; código do fornecedor 48, custo 339).
 -- ESTADO: o do Excel (Draft = rascunho, Descontinuar = descontinuado e inativo); os «pais» com lista de cores e os que não
--- têm PVP no Excel ficam em RASCUNHO. Ativos 1113, rascunho 1211, descontinuados 17.
--- Por subcategoria: Duche & Banho / Resguardos de Duche 11; Eletrodomésticos / Exaustores 1; Lava-louças & Cubas / Cubas inox 1; Móveis & Arrumação Casa de Banho / Apliques LED 4; Móveis & Arrumação Casa de Banho / Colunas 74; Móveis & Arrumação Casa de Banho / Espelhos 78; Móveis & Arrumação Casa de Banho / Móveis de lavatório 1368; Móveis & Arrumação Casa de Banho / Tampos & Bancadas WC 739; Revestimentos / Cerâmico 22; Revestimentos / Cerâmico Laminado 10; Revestimentos / Microcimento 1; Revestimentos / Painel de Resina 1; Revestimentos / Pedra Natural 1; Revestimentos / Porcelânico 30.
+-- têm PVP no Excel ficam em RASCUNHO, tal como os 6 resguardos com «AMBIGUO» no nome (não vão à venda com esse nome; o dono
+-- decide). Ativos 1083, rascunho 1217, descontinuados 17.
+-- Por subcategoria: Duche & Banho / Resguardos de Duche 11; Eletrodomésticos / Exaustores 1; Lava-louças & Cubas / Cubas inox 1; Móveis & Arrumação Casa de Banho / Apliques LED 4; Móveis & Arrumação Casa de Banho / Colunas 74; Móveis & Arrumação Casa de Banho / Espelhos 78; Móveis & Arrumação Casa de Banho / Móveis de lavatório 1368; Móveis & Arrumação Casa de Banho / Tampos & Bancadas WC 739; Revestimentos / Cerâmico 16; Revestimentos / Cerâmico Laminado 3; Revestimentos / Microcimento 1; Revestimentos / Painel de Resina 1; Revestimentos / Pedra Natural 1; Revestimentos / Porcelânico 19.
 --
 -- O QUE NÃO FAZ: não muda nenhum produto que já existe (C3: impressão digital de todos, sem updated_at), não muda SKU
 -- (nenhuma chamada a cat_gerar_sku_produto; C2: 0 SKU alterados e a numeração interna -NNNN sem SKU novo), não cria
@@ -32,7 +33,7 @@
 -- unidades nem categorias (C5), não arquiva nem apaga nada, não reaponta orçamentos, negócios, compras, receitas nem a
 -- vista do cliente (C8), não dá serviço de instalação (servico_id fica vazio: o Excel não o traz).
 -- EXCEÇÕES à letra do Excel: a cor continua a ser um produto (os 610 «pais» com lista de cores criam-se SEM a lista e
--- em rascunho); fica de fora: 49 renomeacao de um produto existente (tratada na onda 1): nao se cria; 35 torneiras: linha so de versao antiga (manda a Rev1); 29 o codigo do fornecedor ja esta noutro produto da mesma categoria; 16 ambigua: a linha casa com varios produtos que ja existem (nao se cria; resolver a mao); 2 possivel renomeacao recusada na onda 1 (semelhanca 0.75 < 0,8): nao se cria para nao duplicar; resolver a mao; 1 unidade: o Excel nao a traz e a subcategoria nao tem produtos de onde a tirar (nao se inventa). Os consumíveis CONS-… e os CAT/TESTE não são tocados (não estão no Excel de
+-- em rascunho); fica de fora: 49 renomeacao de um produto existente (tratada na onda 1): nao se cria; 35 torneiras: linha so de versao antiga (manda a Rev1); 29 o codigo do fornecedor ja esta noutro produto da mesma categoria; 16 ambigua: a linha casa com varios produtos que ja existem (nao se cria; resolver a mao); 14 generica de familia sem medida: a base ja tem os membros com medida (revisao da onda 3): nao se cria; o dono decide se a quer em rascunho; 10 gemeo: o mesmo produto ja existe na mesma subcategoria e medida (revisao da onda 3): nao se cria; 2 possivel renomeacao recusada na onda 1 (semelhanca 0.75 < 0,8): nao se cria para nao duplicar; resolver a mao; 1 unidade: o Excel nao a traz e a subcategoria nao tem produtos de onde a tirar (nao se inventa). Os consumíveis CONS-… e os CAT/TESTE não são tocados (não estão no Excel de
 -- vendas). Os Atributos do Excel não se copiam nesta onda (lista em mudelar-audit/onda3/atributos_nao_criados.csv).
 --
 -- GUARDAS (falham a migration inteira; nada fica): G0 a Mudelar existe (senão NOTICE e sai); L1 a lista tem os números do
@@ -43,7 +44,7 @@
 -- Lock: pg_advisory_xact_lock(hashtextextended('cat_familias:' || org, 0)).
 -- CONFERÊNCIAS no fim: C1 cada produto, preço, ligação e organização exatamente como na lista; sem atributos, famílias nem
 -- códigos; C12 uma linha de auditoria por linha criada e nenhuma atualização; C2 0 SKU alterados, numeração e modelos
--- intactos; C3 os produtos que já existiam iguais e vivos = 30010 + 2341; C4 preços, ligações e organizações
+-- intactos; C3 os produtos que já existiam iguais e vivos = 30010 + 2317; C4 preços, ligações e organizações
 -- antigos iguais; C5 marcas, fornecedores, unidades, categorias e ramos de serviços sem novos; C6 atributos iguais; C7 famílias
 -- (548 / 14637, impressão digital e eixos distintos); C8 documentos iguais; C9 nada fora da Mudelar (xmin); C10 lista fechada.
 --
@@ -108,12 +109,12 @@ INSERT INTO _o3_ref (tipo, n, id) VALUES
 -- linha do Excel (MOVx/MOVc = Móveis xlsx/csv, REVc, RESx, ELEc, LAVc : linha)
 CREATE TEMP TABLE _o3_prod (id uuid PRIMARY KEY, sku text NOT NULL, nome text NOT NULL, descr text, cat smallint NOT NULL, sub smallint NOT NULL, marca smallint, forn smallint, uom smallint NOT NULL, estado text NOT NULL, vende boolean NOT NULL, compra boolean NOT NULL, iva numeric NOT NULL, pc numeric, pv numeric, pg numeric, pd numeric, ssku text, excel text NOT NULL) ON COMMIT DROP;
 INSERT INTO _o3_prod (id, sku, nome, descr, cat, sub, marca, forn, uom, estado, vende, compra, iva, pc, pv, pg, pd, ssku, excel) VALUES
-  ('fb91825b-29e4-5db0-a7e9-da002dc28ade', 'DBRS0161CR', 'Resguardo Basic Lateral Fijo (tamanho nao rotulado - 5033) AMBIGUO Cromo', 'Lateral fijo BASIC - medida nao rotulada no texto', 1, 1, 1, 1, 1, 'active', true, true, 23, 147, 245, NULL, NULL, '5033+5528', 'RESx:362'),
-  ('a5ed6a91-6196-50b6-9176-00877ab78bc3', 'DBRS0162CR', 'Resguardo Basic Lateral Fijo (tamanho nao rotulado - 5033) AMBIGUO Frost Plus Cromo', 'Lateral fijo BASIC - medida nao rotulada Frost Plus', 1, 1, 1, 1, 1, 'active', true, true, 23, 159, 265, NULL, NULL, '6033+5528', 'RESx:363'),
-  ('8c1a1230-8fdb-507d-9997-a24d95b51781', 'DBRS0163CR', 'Resguardo Basic Lateral Fijo (tamanho nao rotulado - 5034) AMBIGUO Cromo', 'Lateral fijo BASIC - medida nao rotulada no texto', 1, 1, 1, 1, 1, 'active', true, true, 23, 156, 260, NULL, NULL, '5034+5528', 'RESx:364'),
-  ('f1a4a844-a3e1-52e2-b80b-fe58f7c7723f', 'DBRS0164CR', 'Resguardo Basic Lateral Fijo (tamanho nao rotulado - 5034) AMBIGUO Frost Plus Cromo', 'Lateral fijo BASIC - medida nao rotulada Frost Plus', 1, 1, 1, 1, 1, 'active', true, true, 23, 168, 280, NULL, NULL, '6034+5528', 'RESx:365'),
-  ('462a6b62-9d15-5fca-834a-6f3134a79315', 'DBRS0165CR', 'Resguardo Basic Lateral Fijo (tamanho nao rotulado - 5035) AMBIGUO Cromo', 'Lateral fijo BASIC - medida nao rotulada no texto', 1, 1, 1, 1, 1, 'active', true, true, 23, 165, 275, NULL, NULL, '5035+5528', 'RESx:366'),
-  ('f85f86d4-2f60-5417-936d-903046ea63bc', 'DBRS0166CR', 'Resguardo Basic Lateral Fijo (tamanho nao rotulado - 5035) AMBIGUO Frost Plus Cromo', 'Lateral fijo BASIC - medida nao rotulada Frost Plus', 1, 1, 1, 1, 1, 'active', true, true, 23, 177, 295, NULL, NULL, '6035+5528', 'RESx:367'),
+  ('fb91825b-29e4-5db0-a7e9-da002dc28ade', 'DBRS0161CR', 'Resguardo Basic Lateral Fijo (tamanho nao rotulado - 5033) AMBIGUO Cromo', 'Lateral fijo BASIC - medida nao rotulada no texto', 1, 1, 1, 1, 1, 'draft', true, true, 23, 147, 245, NULL, NULL, '5033+5528', 'RESx:362'),
+  ('a5ed6a91-6196-50b6-9176-00877ab78bc3', 'DBRS0162CR', 'Resguardo Basic Lateral Fijo (tamanho nao rotulado - 5033) AMBIGUO Frost Plus Cromo', 'Lateral fijo BASIC - medida nao rotulada Frost Plus', 1, 1, 1, 1, 1, 'draft', true, true, 23, 159, 265, NULL, NULL, '6033+5528', 'RESx:363'),
+  ('8c1a1230-8fdb-507d-9997-a24d95b51781', 'DBRS0163CR', 'Resguardo Basic Lateral Fijo (tamanho nao rotulado - 5034) AMBIGUO Cromo', 'Lateral fijo BASIC - medida nao rotulada no texto', 1, 1, 1, 1, 1, 'draft', true, true, 23, 156, 260, NULL, NULL, '5034+5528', 'RESx:364'),
+  ('f1a4a844-a3e1-52e2-b80b-fe58f7c7723f', 'DBRS0164CR', 'Resguardo Basic Lateral Fijo (tamanho nao rotulado - 5034) AMBIGUO Frost Plus Cromo', 'Lateral fijo BASIC - medida nao rotulada Frost Plus', 1, 1, 1, 1, 1, 'draft', true, true, 23, 168, 280, NULL, NULL, '6034+5528', 'RESx:365'),
+  ('462a6b62-9d15-5fca-834a-6f3134a79315', 'DBRS0165CR', 'Resguardo Basic Lateral Fijo (tamanho nao rotulado - 5035) AMBIGUO Cromo', 'Lateral fijo BASIC - medida nao rotulada no texto', 1, 1, 1, 1, 1, 'draft', true, true, 23, 165, 275, NULL, NULL, '5035+5528', 'RESx:366'),
+  ('f85f86d4-2f60-5417-936d-903046ea63bc', 'DBRS0166CR', 'Resguardo Basic Lateral Fijo (tamanho nao rotulado - 5035) AMBIGUO Frost Plus Cromo', 'Lateral fijo BASIC - medida nao rotulada Frost Plus', 1, 1, 1, 1, 1, 'draft', true, true, 23, 177, 295, NULL, NULL, '6035+5528', 'RESx:367'),
   ('51fa6547-5fe7-5ddb-b810-ce7ead64a4a8', 'DBRS0255XX', 'Resguardo Screen Screen + brazo soporte Nao rotulado (5027) Oro AMBIGUO', '5027+5186,Screen oro - medida nao claramente atribuida', 1, 1, 1, 1, 1, 'draft', true, true, 23, 150.6, 251, NULL, NULL, NULL, 'RESx:498'),
   ('985c09fd-3b70-5452-99bd-03baf223e64f', 'DBRS0255XX-2', 'Resguardo Screen Screen + brazo soporte Nao rotulado (5027) Oro AMBIGUO', '6027+5183,Screen oro Frost Plus - medida nao claramente atribuida (ref suspeita, deveria ser 6027+5186)', 1, 1, 1, 1, 1, 'draft', true, true, 23, 162.6, 271, NULL, NULL, NULL, 'RESx:499'),
   ('42c11317-4593-55e1-b33c-54791ae5368e', 'DBRS0256XX', 'Resguardo Screen Screen + brazo soporte Nao rotulado (5035 cobre extra) Cobre AMBIGUO', '5035+5188,Screen cobre - linha extra nao claramente atribuida (ordem de colunas suspeita de desalinhamento nesta tabela)', 1, 1, 1, 1, 1, 'draft', true, true, 23, NULL, NULL, NULL, NULL, NULL, 'RESx:516'),
@@ -2389,12 +2390,6 @@ INSERT INTO _o3_prod (id, sku, nome, descr, cat, sub, marca, forn, uom, estado, 
   ('97d979da-541f-5537-bc43-e9cd6983d1ab', 'RC0009', 'Revestimento DOMUS GRIS 100', NULL, 5, 9, 10, 7, 2, 'active', true, true, 23, 12.1, 20.17, NULL, NULL, '70D1301', 'REVc:23'),
   ('f0574a4e-44f7-5267-999d-53e8c12f405a', 'RC0011', 'Revestimento DOMUS VIA BLANCO 100', NULL, 5, 9, 10, 7, 2, 'active', true, true, 23, 12.1, 20.17, NULL, NULL, '70D1421', 'REVc:57'),
   ('1770a538-dd68-5b19-96a3-fe886c46f901', 'RC0012', 'Revestimento DOMUS VIA GRIS 100', NULL, 5, 9, 10, 7, 2, 'active', true, true, 23, 12.1, 20.17, NULL, NULL, '70D1321', 'REVc:70'),
-  ('a1afe157-64fc-5dfc-9c96-59c802f0146c', 'RC0014', 'Revestimento SIROS BLANCO', NULL, 5, 9, 9, 7, 2, 'active', true, true, 23, 18.15, 30.25, NULL, NULL, NULL, 'REVc:30'),
-  ('2c5128fe-2fb8-5980-ad9a-99fb08c9abd1', 'RC0015', 'Revestimento SIROS SIENA', NULL, 5, 9, 9, 7, 2, 'active', true, true, 23, 18.15, 30.25, NULL, NULL, NULL, 'REVc:16'),
-  ('fcc1ebc5-8695-5fbb-b416-0aa9de06beab', 'RC0018', 'Revestimento TASOS BLANCO', NULL, 5, 9, 9, 7, 2, 'active', true, true, 23, 18.15, 30.25, NULL, NULL, NULL, 'REVc:99'),
-  ('e4e20879-b18c-53eb-b13e-9abc053c63d6', 'RC0019', 'Revestimento TASOS SIENA', NULL, 5, 9, 9, 7, 2, 'active', true, true, 23, 18.15, 30.25, NULL, NULL, NULL, 'REVc:61'),
-  ('9d4b057b-bd2b-5e63-8689-7dcb960779ef', 'RC0022', 'Revestimento LUCIA BLANCO 7,50x30', NULL, 5, 9, 9, 7, 2, 'active', true, true, 23, 18.5, 30.83, NULL, NULL, NULL, 'REVc:103'),
-  ('a08ad62a-754c-5e2e-8bd4-4fcfa20941a0', 'RC0027', 'Revestimento LUCIA MALVA 7,50x30', NULL, 5, 9, 9, 7, 2, 'active', true, true, 23, 18.5, 30.83, NULL, NULL, NULL, 'REVc:77'),
   ('772b3f0e-0a22-57eb-8d3e-31696a2d31b2', 'RC0034', 'Revestimento LICEO 03 NEGRO NATURAL 20X20', NULL, 5, 9, 9, 7, 2, 'active', true, true, 23, 19.65, 32.75, NULL, NULL, NULL, 'REVc:31'),
   ('96434fb7-7ddd-5c96-bc2c-a0c352b33aa4', 'RC0035', 'Revestimento LICEO 02 NUDE NATURAL 20 x 20', NULL, 5, 9, 9, 7, 2, 'active', true, false, 23, 19.65, 32.75, NULL, NULL, NULL, 'REVc:117'),
   ('3189d947-30f5-5c5b-8929-e07de3e0e22f', 'RC0036', 'Revestimento Majestic Crema Marfil MATE', NULL, 5, 9, NULL, NULL, 2, 'discontinued', true, true, 23, 25.2, 42, NULL, NULL, NULL, 'REVc:97'),
@@ -2408,30 +2403,12 @@ INSERT INTO _o3_prod (id, sku, nome, descr, cat, sub, marca, forn, uom, estado, 
   ('15a2078b-961b-5672-8924-42eda586f831', 'RC0045', 'Revestimento PRIMUS REV TEC BRIL ONDUL BR 20X20X0,55 003.0 1A', NULL, 5, 9, NULL, 1, 2, 'discontinued', true, true, 23, 15.2, 25.33, NULL, NULL, NULL, 'REVc:113'),
   ('92b730e7-5284-5faa-9691-bf5e951cd918', 'RCL0001', 'Revestimento CERÂMICO LAMINADO CAPRAIA Natural', NULL, 5, 10, 11, 7, 2, 'active', true, true, 23, 27.75, 46.25, NULL, NULL, NULL, 'REVc:50'),
   ('02868b0f-e2a7-5deb-b6ce-14b4261570d7', 'RCL00010', 'Revestimento Ceramico Laminado BASIC BLANCO NATURAL 5.6MM', NULL, 5, 10, 9, 7, 2, 'active', true, true, 23, 27.25, 45.41, NULL, NULL, NULL, 'REVc:18'),
-  ('c8a2f4eb-2721-53b1-8a7c-1e1c04b68f7e', 'RCL0002', 'Revestimento CERÂMICO LAMINADO CAMOUFLAGE Natural', NULL, 5, 10, 11, 7, 2, 'active', true, true, 23, 27.75, 46.25, NULL, NULL, NULL, 'REVc:130'),
-  ('ca085670-94be-5b00-8786-50d00d56fd58', 'RCL0003', 'Revestimento CERÂMICO LAMINADO CANELA Natural', NULL, 5, 10, 11, 7, 2, 'active', true, true, 23, 27.75, 46.25, NULL, NULL, NULL, 'REVc:48'),
-  ('28f2bec0-2d38-5325-8489-fd72e0c40d1d', 'RCL0004', 'Revestimento CERÂMICO LAMINADO ANKARA Polido', NULL, 5, 10, 11, 7, 2, 'active', true, true, 23, 42.25, 70.42, NULL, NULL, NULL, 'REVc:28'),
-  ('11da7631-0efc-54cd-9897-08edff13d59e', 'RCL0005', 'Revestimento CERÂMICO LAMINADO ARLES ARENA', NULL, 5, 10, 11, 7, 2, 'active', true, true, 23, 27.75, 46.25, NULL, NULL, NULL, 'REVc:83'),
-  ('ec54c6e8-1710-5983-9732-42647606e872', 'RCL0006', 'Revestimento CERÃMICO LAMINADO ARLES GRIS', NULL, 5, 10, 11, 7, 2, 'active', true, true, 23, 27.75, 46.25, NULL, NULL, NULL, 'REVc:64'),
-  ('bfe38b3a-07fe-5d78-ac44-01d79d4ea780', 'RCL0007', 'Revestimento CERÂMICO LAMINADO BLUE STONE', NULL, 5, 10, 11, 7, 2, 'active', true, true, 23, 27.75, 46.25, NULL, NULL, '80BS94E', 'REVc:15'),
-  ('34c322f6-7958-5307-b983-7025c167197e', 'RCL0008', 'Revestimento CERÂMICO LAMINADO OXIDO', NULL, 5, 10, 11, 7, 2, 'active', true, true, 23, 27.75, 46.25, NULL, NULL, NULL, 'REVc:128'),
   ('63896aa7-7b5d-5de5-a959-eae4b0891281', 'RCL0009', 'Revestimento Ceramico Laminado WHITE BALANCE 5.6MM', NULL, 5, 10, 9, 7, 2, 'active', true, true, 23, 27.25, 46.25, NULL, NULL, '44WB49R', 'REVc:17'),
   ('796562dc-6ffd-52ea-b840-ebf48ac31eb4', 'RMC0001', 'Microcimento Chão / Paredes m2', NULL, 5, 11, 6, NULL, 2, 'discontinued', true, true, 23, 8.73, 34.92, NULL, NULL, NULL, 'REVc:131'),
   ('5e5354cc-6a4b-5c1b-83f7-c3e9997a6993', 'RP0001', 'Revestimento RIBERA MARFIL', NULL, 5, 12, 9, 7, 2, 'active', true, true, 23, 16.75, 27.92, NULL, NULL, '44RI79R', 'REVc:91'),
   ('068e4410-3f3f-568c-baca-f0ab8a719b21', 'RP0002', 'Revestimento RIBERA BLANCO', NULL, 5, 12, 9, 7, 2, 'active', true, true, 23, 16.75, 27.92, NULL, NULL, NULL, 'REVc:90'),
   ('cdc9cf52-a131-5d5b-b8d5-9093f038e191', 'RP0012', 'Revestimento SURFACE SIENA', NULL, 5, 12, 9, 7, 2, 'active', true, true, 23, 16.75, 27.92, NULL, NULL, '44SF29R', 'REVc:13'),
   ('1a568265-c6d0-5a99-a40e-fe7823ca1928', 'RP0015', 'Revestimento SURFACE COBALTO', NULL, 5, 12, 9, 7, 2, 'active', true, true, 23, 16.75, 27.92, NULL, NULL, '44SF59R', 'REVc:62'),
-  ('3d738deb-3684-5b35-b29f-6422ff0ef14e', 'RP0016', 'Revestimento Melbourne BLANCO', NULL, 5, 12, 10, 7, 2, 'active', true, true, 23, 13.45, 22.42, NULL, NULL, NULL, 'REVc:24'),
-  ('79739274-1934-53e2-b466-501d133b7a19', 'RP0017', 'Revestimento Melbourne GRIS', NULL, 5, 12, 10, 7, 2, 'active', true, true, 23, 13.45, 22.42, NULL, NULL, NULL, 'REVc:26'),
-  ('fbb42794-0f9b-5e78-a81f-c063c81b9ade', 'RP0018', 'Revestimento Melbourne MARFIL', NULL, 5, 12, 10, 7, 2, 'active', true, true, 23, 13.45, 22.42, NULL, NULL, NULL, 'REVc:60'),
-  ('7273341d-f7aa-5e7b-bf1a-e564b2f50074', 'RP0020', 'Revestimento Melbourne ANTRACITE', NULL, 5, 12, 10, 7, 2, 'active', true, true, 23, 13.45, 22.42, NULL, NULL, NULL, 'REVc:59'),
-  ('1a078a30-8ada-5c48-8916-0d61d8a243d8', 'RP0024', 'Revestimento VALONIA BLANCO', NULL, 5, 12, 10, 7, 2, 'active', true, true, 23, 13.45, 22.42, NULL, NULL, '43V249R', 'REVc:121'),
-  ('b3901948-566a-50f9-ba18-f4cf21ad535b', 'RP0027', 'Revestimento VALONIA TAUPE', NULL, 5, 12, 10, 7, 2, 'active', true, true, 23, 13.45, 22.42, NULL, NULL, '43V229R', 'REVc:88'),
-  ('3db1babd-7df4-51c7-b45b-4cd833f05d95', 'RP0028', 'Revestimento VALONIA ANTRACITE', NULL, 5, 12, 10, 7, 2, 'active', true, true, 23, 13.45, 22.42, NULL, NULL, '44V269R', 'REVc:29'),
-  ('7623ae94-3b08-5757-9d39-41b3da815fbc', 'RP0036', 'Revestimento BRERA GRIS 60x60', NULL, 5, 12, 10, 7, 2, 'active', true, true, 23, 11.5, 19.17, NULL, NULL, NULL, 'REVc:8'),
-  ('88e79878-632c-534f-a333-ef8d047ef6a4', 'RP0038', 'Revestimento BRERA TAUPE 60x60', NULL, 5, 12, 10, 7, 2, 'active', true, true, 23, 11.5, 19.17, NULL, NULL, NULL, 'REVc:111'),
-  ('fbf777bf-971b-5c9d-8658-41482fe6e8fa', 'RP0039', 'Revestimento BRERA CEMENTO 60x60', NULL, 5, 12, 10, 7, 2, 'active', true, true, 23, 11.5, 19.17, NULL, NULL, NULL, 'REVc:78'),
-  ('01e1fa56-b1ed-58b0-a1d4-6460ee324d60', 'RP0040', 'Revestimento BRERA ANTRACITE 60x60', NULL, 5, 12, 10, 7, 2, 'active', true, true, 23, 11.5, 19.17, NULL, NULL, NULL, 'REVc:126'),
   ('e046c47a-60e8-5e1a-9869-6ebc9f322cb4', 'RP0048', 'Revestimento ABSOLUT BLACK Polido', NULL, 5, 12, 8, 5, 2, 'active', true, true, 23, 16, 26.65, NULL, NULL, NULL, 'REVc:36'),
   ('61cceffb-d821-589f-964d-a243caf9f947', 'RP0049', 'REVESTIMENTO VILLAGE', NULL, 5, 12, 9, 7, 2, 'active', true, true, 23, 16.75, 27.92, NULL, NULL, '82LL45R', 'REVc:65'),
   ('1d26d134-4afd-506d-951c-09ed7d82c2b2', 'RP0050', 'Revestimento INCA GREIGE NATURAL', NULL, 5, 12, 9, 7, 2, 'active', true, true, 23, 20.85, 34.75, NULL, NULL, '44ZA019', 'REVc:84'),
@@ -2459,20 +2436,20 @@ DECLARE
   c_n_mudelar     constant integer := 30010;
   c_n_fam         constant integer := 548;
   c_n_membros     constant integer := 14637;
-  c_n_produtos    constant integer := 2341;
-  c_n_active      constant integer := 1113;
-  c_n_draft       constant integer := 1211;
+  c_n_produtos    constant integer := 2317;
+  c_n_active      constant integer := 1083;
+  c_n_draft       constant integer := 1217;
   c_n_discont     constant integer := 17;
-  c_n_marca       constant integer := 2323;
+  c_n_marca       constant integer := 2299;
   c_n_descr       constant integer := 1969;
-  c_n_preco       constant integer := 1748;
-  c_n_p_purchase  constant integer := 377;
-  c_n_p_retail    constant integer := 1367;
+  c_n_preco       constant integer := 1700;
+  c_n_p_purchase  constant integer := 353;
+  c_n_p_retail    constant integer := 1343;
   c_n_p_wholesale constant integer := 2;
   c_n_p_distrib   constant integer := 2;
-  c_n_isup        constant integer := 2327;
-  c_n_isup_ssku   constant integer := 52;
-  c_n_isup_pp     constant integer := 363;
+  c_n_isup        constant integer := 2303;
+  c_n_isup_ssku   constant integer := 48;
+  c_n_isup_pp     constant integer := 339;
   v_n bigint; v_m bigint; v_k bigint; v_pav_antes bigint; v_gerados_antes bigint;
   v_txt text; v_acl text; v_xid text; v_t text;
   v_h_sku_antes text;   v_h_sku_depois text;
