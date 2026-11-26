@@ -12,7 +12,7 @@ const g = vi.hoisted(() => ({ invoke: null as null | ((nome: string, o: { body: 
 vi.mock("../gravador", () => ({ useGravacao: () => ({ estado: "parado", falas: [] }) }));
 vi.mock("@/integrations/supabase/client", () => ({ supabase: { functions: { invoke: (n: string, o: { body: Corpo }) => (g.invoke ? g.invoke(n, o) : Promise.resolve({ data: null, error: new Error("sem função") })) } } }));
 
-import { OlyviaComando } from "../OlyviaComando";
+import { OlyviaComando, avisoMs } from "../OlyviaComando";
 
 function montar() {
   const { S, d } = obraDeExemplo();
@@ -108,5 +108,13 @@ describe("pela Olyvia (a frase vai à IA com as obras)", () => {
     render(<MemoryRouter initialEntries={["/negocios"]}><OlyviaComando /></MemoryRouter>);
     await pedir("aceita aquela proposta da folga que estava ontem");
     expect(screen.getByRole("status").textContent).toMatch(/já não está na fita/);
+  });
+});
+
+describe("a resposta fica o tempo de se ler", () => {
+  it("as curtas 3,2 s; as compridas mais (o resumo do dia), nunca mais de 20 s", () => {
+    expect(avisoMs("Abri a proposta.")).toBe(3200);
+    expect(avisoMs("x".repeat(300))).toBe(18_000);
+    expect(avisoMs("x".repeat(2000))).toBe(20_000);
   });
 });

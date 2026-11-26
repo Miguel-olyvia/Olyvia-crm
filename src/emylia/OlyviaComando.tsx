@@ -44,6 +44,8 @@ import { useGravacao } from "./gravador";
 import { abrirObraPorVoz, decidirPorVoz, obrasParaVoz } from "./estudioObra/agentesPorVoz";
 /** 26/11 (etapa 6): o que fica em «feito» quando uma decisão por voz não deu. */
 const NAO_DECIDI = "não decidi: ";
+/** 26/11: quanto tempo fica a resposta no ecrã: 3,2 s nas curtas; nas compridas, o tempo de as ler (até 20 s). */
+export const avisoMs = (msg: string) => Math.min(20_000, Math.max(3200, msg.length * 60));
 
 /** Os passos curtos e sem dúvida: agem logo, sem esperar que se pare de falar. */
 const PASSOS_JA = new Set(["fim", "proximo", "anterior", "inicio"]);
@@ -542,7 +544,8 @@ export function OlyviaComando() {
   // o aviso apaga-se sozinho
   useEffect(() => {
     if (!aviso) return;
-    const t = setTimeout(() => setAviso(null), 3200);
+    // 26/11 (teste ao vivo: o resumo do dia, com quatro frases, sumia antes de se ler): fica o tempo de o ler, até 20 s
+    const t = setTimeout(() => setAviso(null), avisoMs(aviso.msg));
     return () => clearTimeout(t);
   }, [aviso]);
 

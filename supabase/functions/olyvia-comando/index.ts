@@ -125,6 +125,7 @@ Regras:
    ou pelo nome do cliente.
 14. «Resumo do dia», «como estão as obras», «o que há para decidir»: responde com as obras que pedem decisões (quantas e a mais
    importante de cada), o que os agentes fizeram hoje e as obras sem nada. Aqui a 'resposta' pode ter até quatro frases. Sem ações.
+   O que os agentes fizeram hoje é só o que vem como «feito»; sem nenhum, diz que hoje ainda não fizeram nada sozinhos. Nunca inventes.
 15. Decisões por voz («aceita a do Luís», «sim, aplica essa», «recusa a da folga», «desfaz o que o agente fez na 1048»): "decidir" com
    a ref da proposta de que se fala (pela conversa, pelo nome do técnico, da tarefa ou do agente). "aceitar" só nas propostas com
    «aceitar: sim»; nas outras, diz que essa se decide no cartão e abre a obra. Ambíguo entre duas propostas: pergunta qual. Em 'resposta'
