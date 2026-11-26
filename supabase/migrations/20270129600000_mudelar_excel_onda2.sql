@@ -15,18 +15,19 @@
 -- estão iguais ao Excel nos campos de negócio (a onda 1 alinhou 86). Plano gerado por script (mudelar-audit/onda2:
 -- o2_plan.py e o2_sql.py), fora da pasta do projeto; o que fica de fora e porquê está em mudelar-audit/onda2/fora.csv.
 --
--- O QUE FAZ, em 52 legados da Mudelar (lista fechada, embutida abaixo; nada se calcula na hora):
+-- O QUE FAZ, em 51 legados da Mudelar (lista fechada, embutida abaixo; nada se calcula na hora):
 --   (a) CAMPOS, em 16 legados das linhas ambíguas do Excel (a mesma linha casa com o legado e com o gémeo; a onda 1
 --       deixou-as de fora): fornecedor 16 (a ligação preferencial «Fornecedor Demo» passa ao fornecedor real, que
 --       já existe; fornecedor_livre 16; em dois passos como na onda 1), código do fornecedor 5, PVP 12, custo
 --       2 (e o preço da ligação 2). Nome, marca, IVA e descrição já estão como no Excel (0 alterações).
---   (b) ATRIBUTOS, em 52 legados: copiam-se TODOS os atributos do gémeo (67 valores), só quando o gémeo cumpre todas
+--   (b) ATRIBUTOS, em 51 legados: copiam-se TODOS os atributos do gémeo (66 valores), só quando o gémeo cumpre todas
 --       as regras: semelhança de nome >= 0,8 (Jaccard dos termos, a mesma da auditoria), a mesma subcategoria, a mesma
 --       medida no nome, sem empate com outro produto novo, nunca um «pai» (o Excel do legado traz uma lista de cores) com
 --       uma cor, nunca um gémeo cujo nome acrescenta uma cor ou acabamento que o legado não diz, e cada valor existe como
 --       opção ativa do grupo do atributo (as medidas, sem grupo, levam o valor em value_json). Legados com e sem campos:
---       só campos 0, só atributos 36, ambos 16.
---   (c) a LIGAÇÃO legado→gémeo dos 52 fica em _mudelar_excel.onda2_gemeos (schema privado, só postgres).
+--       só campos 0, só atributos 35, ambos 16. FORA por revisão: MACBAL0009 (Dentroilmobile), cujo único candidato
+--       MACB-AL-0003-30 é de outra marca (Moovlux): não se afirma que são o mesmo artigo (próximas ondas: exigir a mesma marca).
+--   (c) a LIGAÇÃO legado→gémeo dos 51 fica em _mudelar_excel.onda2_gemeos (schema privado, só postgres).
 --
 -- O QUE NÃO FAZ: não muda SKU (nenhuma chamada a cat_gerar_sku_produto; C2 exige 0 SKU alterados e C13 que os legados
 -- continuam com SKU manual), não dá modelo nem família a nenhum legado (C13), não arquiva nem apaga nada (os 99 legados
@@ -46,7 +47,7 @@
 -- CONFERÊNCIAS no fim: C11 cada valor gravado e cada legado com os atributos do gémeo; C12 auditoria e históricos sem
 -- duplicados (uma linha por atributo novo); C1 nos legados só mudaram os campos desta onda; C2 0 SKU alterados; C13 SKU
 -- manual, sem modelo, sem família; C3 produtos fora da onda iguais (sem updated_at); C4 preços e C5 ligações fora da
--- onda iguais; C6 atributos que já existiam iguais e +67 no total; C7 famílias (548 / 14637, impressão digital e eixos
+-- onda iguais; C6 atributos que já existiam iguais e +66 no total; C7 famílias (548 / 14637, impressão digital e eixos
 -- distintos); C8 orçamentos, negócios, receitas, compras e negocio_vista_cliente iguais; C9 nada escrito fora da
 -- Mudelar (xmin); C10 a cópia fechada.
 --
@@ -101,7 +102,6 @@ INSERT INTO _o2_sku (id, sku) VALUES
   ('c2be5bf6-360b-4fff-86d1-97f7d8fefb81', 'LSS0009'),
   ('c545e43b-95c7-43c6-8650-9a5036d7840e', 'EP0010'),
   ('c70efc94-d8ad-4231-bbff-37c31ab3ead2', 'LLCCI0009'),
-  ('c81d9849-6196-4d0c-9c68-744050fd3e8b', 'MACBAL0009'),
   ('c8df2b88-e927-4ef1-989a-14284b5af2dd', 'MACBE0085'),
   ('cb1769a2-98d6-417d-869d-fa64ebd06732', 'MCCASC0011'),
   ('cb3ac0c4-7eaf-460b-87ee-484013a5735a', 'LSL0008'),
@@ -215,7 +215,6 @@ INSERT INTO _o2_gemeo (legado_id, gemeo_id, gemeo_sku, semelhanca, n_attr) VALUE
   ('c2be5bf6-360b-4fff-86d1-97f7d8fefb81', '88d0899b-bd17-4224-9e53-73f45d4b0a8b', 'LS-S-0003-B-B', 1, 2),
   ('c545e43b-95c7-43c6-8650-9a5036d7840e', 'cbb4953b-9850-41a4-9f9c-c8e3e2688b52', 'EL-PL-0002-P', 1, 1),
   ('c70efc94-d8ad-4231-bbff-37c31ab3ead2', 'e5a25d87-8997-4ee4-99f4-21f5102fa1fd', 'LLC-CI-0008-40', 1, 1),
-  ('c81d9849-6196-4d0c-9c68-744050fd3e8b', 'def1891f-710c-4e87-8d34-b0ee9a60f05b', 'MACB-AL-0003-30', 0.8, 1),
   ('c8df2b88-e927-4ef1-989a-14284b5af2dd', 'e34ef31c-0fb7-4f9f-a3c9-44dd818f3bf4', 'MACB-E-0021-90X80', 0.8, 1),
   ('cb1769a2-98d6-417d-869d-fa64ebd06732', 'fefb1f4e-369b-4ec5-9491-510a41c66cdc', 'MCC-AS-0004-50X90', 1, 1),
   ('cb3ac0c4-7eaf-460b-87ee-484013a5735a', 'a9bc8b9a-7969-47bd-b5d0-95c6becf5d6b', 'LS-L-0008-B-B', 1, 2),
@@ -282,7 +281,6 @@ INSERT INTO _o2_attr (legado_id, attribute_id, gemeo_value_id, value_text, value
   ('c2be5bf6-360b-4fff-86d1-97f7d8fefb81', 'af171aa4-98a6-41b8-804c-470570d8ce0e', 'ca41adc1-70cd-46a8-9a6f-52b9d975d61d', 'BRILHO', NULL, NULL, NULL, NULL, NULL),
   ('c545e43b-95c7-43c6-8650-9a5036d7840e', '98b65c86-5545-43cf-b8b1-e2d2f302ad91', 'e4cd7a75-26d6-4b76-9be3-b0a12c26f170', 'Preto', NULL, NULL, NULL, NULL, NULL),
   ('c70efc94-d8ad-4231-bbff-37c31ab3ead2', '1e938087-56c8-44cb-b3d2-e33072ed2e17', 'e07cd0aa-468f-4553-b656-7d0d00605d2d', '40', NULL, NULL, NULL, NULL, NULL),
-  ('c81d9849-6196-4d0c-9c68-744050fd3e8b', '1e938087-56c8-44cb-b3d2-e33072ed2e17', '5506459c-8be8-4b23-be04-268e435fe7f6', '30', NULL, NULL, NULL, NULL, NULL),
   ('c8df2b88-e927-4ef1-989a-14284b5af2dd', '8c2361bb-146b-4643-8091-f212de868c6f', 'c925c7d2-1d9f-4c1b-9a71-39aa3be78fc4', '90 × 80 cm', NULL, NULL, '{"comprimento": 80, "espessura": null, "largura": 90, "tipo": "2D", "unidade": "cm"}'::jsonb, NULL, 'cm'),
   ('cb1769a2-98d6-417d-869d-fa64ebd06732', '8c2361bb-146b-4643-8091-f212de868c6f', 'd1557c42-6110-4272-80bc-a148d746215b', '50 × 90 cm', NULL, NULL, '{"comprimento": 90, "espessura": null, "largura": 50, "tipo": "2D", "unidade": "cm"}'::jsonb, NULL, 'cm'),
   ('cb3ac0c4-7eaf-460b-87ee-484013a5735a', '98b65c86-5545-43cf-b8b1-e2d2f302ad91', 'a3e494e3-e002-4263-891b-73782f733506', 'Branco', NULL, NULL, NULL, NULL, NULL),
@@ -313,7 +311,7 @@ DECLARE
   c_n_mudelar     constant integer := 30010;
   c_n_fam         constant integer := 548;
   c_n_membros     constant integer := 14637;
-  c_n_produtos    constant integer := 52;
+  c_n_produtos    constant integer := 51;
   c_n_nome        constant integer := 0;
   c_n_descr       constant integer := 0;
   c_n_marca       constant integer := 0;
@@ -323,8 +321,8 @@ DECLARE
   c_n_isup_sup    constant integer := 16;
   c_n_isup_ssku   constant integer := 5;
   c_n_isup_pp     constant integer := 2;
-  c_n_gemeos      constant integer := 52;
-  c_n_attr        constant integer := 67;
+  c_n_gemeos      constant integer := 51;
+  c_n_attr        constant integer := 66;
   v_n bigint; v_m bigint; v_total bigint; v_pend bigint; v_feito bigint; v_pav_antes bigint;
   v_txt text; v_acl text; v_xid text; v_t text;
   v_h_sku_antes text;   v_h_sku_depois text;

@@ -289,6 +289,16 @@ describe(`migration ${nome}`, () => {
     expect(prod.filter((p) => p.campo === "fornecedor_livre" && /anlorbel - com/i.test(p.para))).toEqual([]);
   });
 
+  it("o MACBAL0009 fica de fora: o único candidato a gémeo (MACB-AL-0003-30) é de outra marca", () => {
+    const fora = "c81d9849-6196-4d0c-9c68-744050fd3e8b";
+    expect(skus.map((s) => s.sku)).not.toContain("MACBAL0009");
+    expect(sql).not.toContain(fora);
+    expect(gemeos.map((g) => g.gemeoSku)).not.toContain("MACB-AL-0003-30");
+    expect(constante("c_n_produtos")).toBe(51);
+    expect(constante("c_n_gemeos")).toBe(51);
+    expect(constante("c_n_attr")).toBe(66);
+  });
+
   it("nenhuma reversão na pasta das migrations e nenhum carimbo repetido", () => {
     expect(readdirSync(pasta).filter((f) => /reverter-onda|reverter_onda|mudelar_excel.*reverter/i.test(f))).toEqual([]);
     expect(readdirSync(pasta).filter((f) => /mudelar_excel_onda2/.test(f))).toEqual([nome]);
