@@ -12,6 +12,7 @@ import { Plus, Search, TriangleAlert } from "lucide-react";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { AtivoDetalhe } from "@/components/ativos/AtivoDetalhe";
 import { AtivoSheet, type AvisoGuardado } from "@/components/ativos/AtivoSheet";
+import { AvisoAtivo } from "@/components/ativos/AvisoAtivo";
 import { DesativarAtivoDialog } from "@/components/ativos/DesativarAtivoDialog";
 import { GrupoPessoas } from "@/components/ativos/GrupoPessoas";
 import { ListaAtivos } from "@/components/ativos/ListaAtivos";
@@ -168,9 +169,9 @@ export default function Ativos() {
         {pesquisaAtiva && <Button type="button" variant="outline" onClick={() => setTexto("")} className={cn("min-h-11", FOCO)}>{t("ativos.filtro.limpar")}</Button>}
       </div>
       <p role="status" aria-live="polite" data-testid="ativos-resumo" className="min-h-5 text-sm tabular-nums text-muted-foreground">{aviso ?? resumo(d[g])}</p>
-      {erroAcao && <p role="alert" className="text-sm font-medium text-destructive">{erroAcao}</p>}
+      {erroAcao && <AvisoAtivo tom="erro" role="alert">{erroAcao}</AvisoAtivo>}
       {/* A base devolve no máximo 2000 ativos no total (por ordem de nome): não se sabe de que grupo ficaram de fora, por isso o aviso vale para todos. */}
-      {d.truncado && <p data-testid="aviso-truncado" className="text-sm text-amber-800 dark:text-amber-300">{t("ativos.truncado")}</p>}
+      {d.truncado && <AvisoAtivo tom="aviso" data-testid="aviso-truncado">{t("ativos.truncado")}</AvisoAtivo>}
       {g === "pessoa"
         ? <GrupoPessoas rhOculto={rhOculto}>{lista(g, d[g])}</GrupoPessoas>
         : lista(g, d[g])}

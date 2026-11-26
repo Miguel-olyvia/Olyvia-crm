@@ -11,6 +11,7 @@ import { CampoSelect, CampoTexto, type OpcaoSelect } from "@/components/rh-exemp
 import { dataPt, euros } from "@/components/rh-exemplo/custo/formato";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
+import { AvisoAtivo } from "./AvisoAtivo";
 import { CampoNumero } from "./CampoNumero";
 import { previaDaConta, vidaDoCatalogoEmMeses, type PreviaConta } from "./lib/previaAtivo";
 import { mesPt } from "./lib/resumoAtivo";
@@ -146,9 +147,7 @@ export function CamposAluguer({ campos, mudar, erro }: AluguerProps) {
       </div>
       <Previa previa={previaDaConta(campos)} />
       {campos.grupo === "pessoa" && campos.tipo === "viatura" && (
-        <p role="note" data-testid="aviso-frota" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs leading-5 text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
-          {t("ativos.aviso.frota")}
-        </p>
+        <AvisoAtivo tom="aviso" role="note" data-testid="aviso-frota" className="text-xs leading-5">{t("ativos.aviso.frota")}</AvisoAtivo>
       )}
     </div>
   );

@@ -19,6 +19,7 @@ import { useAtivosOpcoes } from "@/hooks/ativos/useAtivosOpcoes";
 import { useTranslation } from "@/hooks/useTranslation";
 import { hojeLocal } from "@/lib/hr/custoBase";
 import { cn } from "@/lib/utils";
+import { AvisoAtivo } from "./AvisoAtivo";
 import { CampoNumero } from "./CampoNumero";
 import { CamposAluguer, CamposComprado, FormaFixa, SeletorForma } from "./CamposFormaAtivo";
 import { SeletorEquipamento } from "./SeletorEquipamento";
@@ -226,7 +227,7 @@ function Formulario({ grupo, ativo, opcoes, erroOpcoes, aoFechar, aoGuardar }: F
   return (
     <CamposTocadosProvider onTocar={() => {}} rotuloObrigatorio={t("ativos.campo.obrigatorio")}>
       <form ref={formulario} className="mt-6 space-y-5" noValidate onSubmit={(e: FormEvent) => { e.preventDefault(); void guardar(); }}>
-        {erroOpcoes && <p role="alert" className="text-sm font-medium text-destructive">{erroOpcoes}</p>}
+        {erroOpcoes && <AvisoAtivo tom="erro" role="alert">{erroOpcoes}</AvisoAtivo>}
         {edicao ? (
           <p className="text-sm text-muted-foreground">
             {t("ativos.campo.grupo")}: <span data-testid="grupo-do-ativo" className="font-medium text-foreground">{t(`ativos.grupo.${g}`)}</span>
@@ -235,9 +236,7 @@ function Formulario({ grupo, ativo, opcoes, erroOpcoes, aoFechar, aoGuardar }: F
           <SeletorGrupo valor={g} onChange={mudarGrupo} />
         )}
         {ativo !== null && ativo.ocupacoes.length > 0 && (
-          <p role="note" data-testid="aviso-edicao-passado" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs leading-5 text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
-            {t("ativos.aviso.editarMudaPassado")}
-          </p>
+          <AvisoAtivo tom="aviso" role="note" data-testid="aviso-edicao-passado" className="text-xs leading-5">{t("ativos.aviso.editarMudaPassado")}</AvisoAtivo>
         )}
 
         {g === "servico" && <SeletorEquipamento id="ativo-modelo" opcoes={listaEquipamentos} valor={campos.catEquipamentoId} onChange={escolherModelo} erro={erro("modelo")} />}
@@ -280,7 +279,7 @@ function Formulario({ grupo, ativo, opcoes, erroOpcoes, aoFechar, aoGuardar }: F
           </CollapsibleContent>
         </Collapsible>
 
-        {aviso && <p role="alert" className="text-sm font-medium text-destructive">{aviso}</p>}
+        {aviso && <AvisoAtivo tom="erro" role="alert">{aviso}</AvisoAtivo>}
         <SheetFooter className="gap-2 sm:gap-2">
           <Button type="button" variant="outline" onClick={aoFechar} className={cn("min-h-11", FOCO)}>{t("ativos.sheet.cancelar")}</Button>
           <Button type="submit" disabled={aGuardar} className={cn("min-h-11", FOCO)}>{t(edicao ? "ativos.sheet.guardarEditar" : "ativos.sheet.guardar")}</Button>

@@ -35,10 +35,14 @@ export function ArmazemDoAtivoSecao({ ativo, podeVerValor }: Props) {
   return (
     <div className="space-y-1" data-testid="detalhe-armazem">
       <Seccao titulo={t("ativos.detalhe.seccaoArmazem")} id="ativo-armazem">
-        <Linha rotulo={t("ativos.armazem.nome")} id="detalhe-armazem-nome">
-          {armazem ? (armazem.nome ?? "—") : t("ativos.armazem.escondido")}
-        </Linha>
-        {armazem?.apagado && <Linha rotulo={t("ativos.armazem.nome")} id="detalhe-armazem-apagado">{t("ativos.armazem.apagado")}</Linha>}
+        {armazem?.apagado ? (
+          // Uma só linha: o rótulo não se repete com um «—» ao lado do aviso de que foi apagado.
+          <Linha rotulo={t("ativos.armazem.nome")} id="detalhe-armazem-apagado">{t("ativos.armazem.apagado")}</Linha>
+        ) : (
+          <Linha rotulo={t("ativos.armazem.nome")} id="detalhe-armazem-nome">
+            {armazem ? (armazem.nome ?? "—") : t("ativos.armazem.escondido")}
+          </Linha>
+        )}
         {podeVerValor && armazem && !armazem.apagado && <ValorEmProdutos armazemId={armazem.id} />}
         {podeVerValor && armazem?.apagado && <Linha rotulo={t("ativos.armazem.valor")} id="detalhe-armazem-valor">—</Linha>}
       </Seccao>

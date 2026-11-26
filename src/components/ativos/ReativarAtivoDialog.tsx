@@ -10,6 +10,7 @@ import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { useAtivoMutacoes } from "@/hooks/ativos/useAtivoMutacoes";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
+import { AvisoAtivo } from "./AvisoAtivo";
 import type { Ativo } from "./lib/tipos";
 
 interface Props {
@@ -47,10 +48,8 @@ function Conteudo({ ativo, aoFechar, aoReativar }: { ativo: Ativo; aoFechar: () 
 
   return (
     <>
-      <p role="note" data-testid="reativar-aviso" className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
-        {t("ativos.reativar.aviso")}
-      </p>
-      {erro && <p role="alert" className="text-sm font-medium text-destructive">{erro}</p>}
+      <AvisoAtivo tom="aviso" role="note" data-testid="reativar-aviso">{t("ativos.reativar.aviso")}</AvisoAtivo>
+      {erro && <AvisoAtivo tom="erro" role="alert">{erro}</AvisoAtivo>}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={aoFechar} className={cn("min-h-11", FOCO)}>{t("ativos.sheet.cancelar")}</Button>
         <Button type="button" disabled={aGuardar} onClick={() => void confirmar()} className={cn("min-h-11", FOCO)}>{t("ativos.reativar.confirmar")}</Button>

@@ -59,13 +59,15 @@ describe("useAtivoLido", () => {
     await waitFor(() => expect(m.rpc).toHaveBeenCalled());
     await waitFor(() => expect(result.current.aCarregar).toBe(false));
     expect(result.current.ativo).toBeNull();
+    expect(result.current.falhou).toBe(false);
     expect(m.captura).not.toHaveBeenCalled();
   });
 
-  it("um defeito também devolve null, mas vai para o registo de erros", async () => {
+  it("um defeito também devolve null, vai para o registo de erros e marca a leitura como falhada", async () => {
     m.rpc.mockResolvedValue({ data: null, error: { code: "XX000", message: "boom" } });
     const { result } = renderHook(() => useAtivoLido("a1", true), { wrapper: envolver });
     await waitFor(() => expect(m.captura).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(result.current.falhou).toBe(true));
     expect(result.current.ativo).toBeNull();
   });
 });

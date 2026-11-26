@@ -7,6 +7,7 @@
  */
 import { dataPt, euros } from "@/components/rh-exemplo/custo/formato";
 import { useTranslation } from "@/hooks/useTranslation";
+import { AvisoAtivo } from "./AvisoAtivo";
 import { ocupacaoParaConta, repartoDoAtivo, type ParteDoReparto } from "./lib/amortizacaoAtivo";
 import type { AtivoParaConta } from "./lib/contaAtivo";
 import type { GrupoAtivo, OcupacaoDoAtivo } from "./lib/tipos";
@@ -20,6 +21,10 @@ interface Props {
   hoje: string;
   /** Sem `hr.pessoas.retribuicao.view` os nomes não se mostram. */
   rhOculto: boolean;
+  /** Os nomes vêm de `rpc_ativo_ler`: a carregar, ou falhou por um defeito (uma recusa não conta: fica «Pessoa», como na lista). */
+  nomes?: "ok" | "aCarregar" | "falhou";
+  /** Está livre e ativo, e o utilizador vê o RH: a ficha diz onde se entrega a uma pessoa. */
+  podeEntregar?: boolean;
 }
 
 function Cartao({ nome, detalhe, parte, id }: { nome: string; detalhe?: string; parte: ParteDoReparto; id: string }) {
@@ -37,12 +42,16 @@ function Cartao({ nome, detalhe, parte, id }: { nome: string; detalhe?: string; 
   );
 }
 
-export function QuemPagaAtivo({ conta, grupo, ocupacoes, mes, hoje, rhOculto }: Props) {
+export function QuemPagaAtivo({ conta, grupo, ocupacoes, mes, hoje, rhOculto, nomes = "ok", podeEntregar = false }: Props) {
   const { t } = useTranslation();
   const reparto = repartoDoAtivo(conta, ocupacoes.map(ocupacaoParaConta), mes, hoje);
   const soEstrutura = grupo !== "pessoa";
   // Todas as entregas se listam, mesmo uma sem nenhum mês seu (entregue e devolvida entre dois fins de mês): é história, com 0 meses.
-  const nomeDe = (o: OcupacaoDoAtivo): string => (rhOculto ? t("ativos.quem.reservado") : (o.pessoaNome ?? t("ativos.quem.pessoa")));
+  const nomeDe = (o: OcupacaoDoAtivo): string => {
+    if (rhOculto) return t("ativos.quem.reservado");
+    if (o.pessoaNome) return o.pessoaNome;
+    return t(nomes === "aCarregar" ? "ativos.quem.aCarregarNome" : "ativos.quem.pessoa");
+  };
   const periodo = (o: OcupacaoDoAtivo): string =>
     o.devolucao ? t("ativos.quem.periodo", { de: dataPt(o.entrega), ate: dataPt(o.devolucao) }) : t("ativos.quem.periodoAberto", { de: dataPt(o.entrega) });
   const semNada = reparto.total.meses === 0;
@@ -50,6 +59,9 @@ export function QuemPagaAtivo({ conta, grupo, ocupacoes, mes, hoje, rhOculto }: 
     <section aria-labelledby="ativo-quem-paga" className="space-y-2" data-testid="detalhe-quem-paga">
       <h3 id="ativo-quem-paga" className="text-sm font-semibold">{t("ativos.detalhe.seccaoQuemPaga")}</h3>
       <p className="text-xs text-muted-foreground">{t(soEstrutura ? "ativos.quem.regraEstrutura" : "ativos.quem.regra")}</p>
+      {nomes === "falhou" && !rhOculto && ocupacoes.some((o) => !o.pessoaNome) && (
+        <AvisoAtivo tom="aviso" role="status" data-testid="quem-nomes-falhou" className="text-xs leading-5">{t("ativos.quem.nomesFalhou")}</AvisoAtivo>
+      )}
       {semNada ? (
         <p className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">{t("ativos.quem.semCusto")}</p>
       ) : (
@@ -65,6 +77,7 @@ export function QuemPagaAtivo({ conta, grupo, ocupacoes, mes, hoje, rhOculto }: 
         </ul>
       )}
       {!soEstrutura && ocupacoes.length === 0 && <p className="text-sm text-muted-foreground">{t("ativos.quem.semEntregas")}</p>}
+      {podeEntregar && !soEstrutura && <p data-testid="quem-como-entregar" className="text-sm text-muted-foreground">{t("ativos.quem.comoEntregar")}</p>}
     </section>
   );
 }

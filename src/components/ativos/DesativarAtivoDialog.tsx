@@ -13,6 +13,7 @@ import { useAtivoMutacoes } from "@/hooks/ativos/useAtivoMutacoes";
 import { useTranslation } from "@/hooks/useTranslation";
 import { hojeLocal } from "@/lib/hr/custoBase";
 import { cn } from "@/lib/utils";
+import { AvisoAtivo } from "./AvisoAtivo";
 import { LIMITES_ATIVO, MOTIVOS_DESATIVACAO, type Ativo } from "./lib/tipos";
 import { dataMaximaAtivo, dataValida } from "./lib/validarAtivo";
 
@@ -72,7 +73,7 @@ function Formulario({ ativo, aoFechar, aoDesativar }: { ativo: Ativo; aoFechar: 
         vazioLabel={t("ativos.desativar.motivoEscolher")} opcoes={MOTIVOS_DESATIVACAO.map((x) => ({ value: x, label: t(`ativos.desativar.motivo.${x}`) }))}
       />
       <CampoTexto id="ativo-des-nota" label={t("ativos.desativar.nota")} valor={nota} onChange={setNota} />
-      {aviso && <p role="alert" className="text-sm font-medium text-destructive">{aviso}</p>}
+      {aviso && <AvisoAtivo tom="erro" role="alert">{aviso}</AvisoAtivo>}
       <DialogFooter>
         <Button type="button" variant="outline" onClick={aoFechar} className={cn("min-h-11", FOCO)}>{t("ativos.sheet.cancelar")}</Button>
         <Button type="submit" disabled={aGuardar} className={cn("min-h-11", FOCO)}>{t("ativos.desativar.confirmar")}</Button>

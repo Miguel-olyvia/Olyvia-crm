@@ -19,6 +19,8 @@ const m = vi.hoisted(() => ({
   semEmpresa: false,
   /** O ativo lido por `rpc_ativo_ler` (ocupações com o nome da pessoa); `null` = a ficha fica com os dados da lista. */
   lido: null as unknown,
+  /** O estado da leitura dos nomes: a carregar, ou falhou por um defeito (uma recusa não conta). */
+  lidoEstado: { aCarregar: false, falhou: false },
   valorStock: { valor: null as number | null, aCarregar: false, falhou: false },
 }));
 vi.mock("@/hooks/useCountries", () => ({ useCountries: () => ({ countries: [], loading: false, error: null }) }));
@@ -26,7 +28,7 @@ vi.mock("@/hooks/ativos/useAtivos", () => ({
   useAtivos: (o: unknown) => { m.useAtivos(o); return { estado: m.estado, dados: m.dados, mensagem: m.mensagem, aAtualizar: false, semOrganizacao: false, refazer: m.refazer }; },
 }));
 vi.mock("@/hooks/ativos/useAtivoMutacoes", () => ({ useAtivoMutacoes: () => m.mut }));
-vi.mock("@/hooks/ativos/useAtivoLido", () => ({ useAtivoLido: () => ({ ativo: m.lido, aCarregar: false }) }));
+vi.mock("@/hooks/ativos/useAtivoLido", () => ({ useAtivoLido: () => ({ ativo: m.lido, ...m.lidoEstado }) }));
 vi.mock("@/hooks/ativos/useValorStockArmazem", () => ({ useValorStockArmazem: () => m.valorStock }));
 vi.mock("@/hooks/ativos/useAtivosOpcoes", () => ({
   useAtivosOpcoes: () => ({ opcoes: { equipamentos: [{ id: "c1", nome: "Berbequim Hilti", vidaAnos: 5, vidaHoras: null }], centrosCusto: [], armazens: [], podeVerArmazens: false }, erro: null, aCarregar: false }),
@@ -95,6 +97,7 @@ beforeEach(() => {
   m.mensagem = null;
   m.semEmpresa = false;
   m.lido = null;
+  m.lidoEstado = { aCarregar: false, falhou: false };
   m.valorStock = { valor: null, aCarregar: false, falhou: false };
   m.useAtivos.mockReset();
   m.refazer.mockReset();
@@ -873,6 +876,8 @@ describe("Ativos: a ficha de um alugado", () => {
   it("aviso: contrato terminado com o equipamento ainda entregue", async () => {
     const d = await verViatura({ fimAluguer: "2026-05-31", ocupacoes: [OC({ entrega: "2026-01-01", contaDesde: "2026-01-01" })] });
     expect(d.getByTestId("detalhe-aviso-aluguerTerminadoEntregue")).toBeInTheDocument();
+    // Ícone e texto, nunca só cor.
+    expect(d.getByTestId("detalhe-aviso-aluguerTerminadoEntregue").querySelector("svg[aria-hidden='true']")).not.toBeNull();
   });
 });
 
@@ -939,8 +944,39 @@ describe("Ativos: quem paga cada mês", () => {
     ver();
     abrirSeparador(/^Pessoas/);
     const quem = within(within(await abrirDetalhe("Portátil 1")).getByTestId("detalhe-quem-paga"));
-    expect(quem.getByText("Ainda não foi entregue a ninguém: tudo conta como custo da estrutura.")).toBeInTheDocument();
+    expect(quem.getByText(/Ainda não foi entregue a ninguém: tudo conta como custo da estrutura\./)).toBeInTheDocument();
     expect(norm(quem.getByTestId("quem-estrutura").textContent)).toContain("600,00 € em 6 meses");
+  });
+
+  it("um ativo livre diz como se entrega a uma pessoa: pelo RH, em «Atribuir equipamento» (a ponte que faltava depois de Ligar sair)", async () => {
+    m.dados = { ...DADOS, pessoa: [PORTATIL()] };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    const quem = within(within(await abrirDetalhe("Portátil 1")).getByTestId("detalhe-quem-paga"));
+    expect(quem.getByTestId("quem-como-entregar")).toHaveTextContent(/RH.*Atribuir equipamento/);
+  });
+
+  it("enquanto os nomes carregam, o cartão diz «A carregar nomes…» (e não «Pessoa», que depois trocava sozinho)", async () => {
+    const comNomes = PORTATIL({ ligado: true, ocupacoes: [{ ...ANA, pessoaNome: null }, { ...BRUNO, pessoaNome: null }] });
+    m.dados = { ...DADOS, pessoa: [comNomes] };
+    m.lidoEstado = { aCarregar: true, falhou: false };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    const quem = within(within(await abrirDetalhe("Portátil 1")).getByTestId("detalhe-quem-paga"));
+    expect(quem.getByTestId("quem-pessoa-0")).toHaveTextContent("A carregar nome…");
+    expect(quem.getByTestId("quem-pessoa-1")).toHaveTextContent("A carregar nome…");
+    expect(quem.queryByTestId("quem-nomes-falhou")).not.toBeInTheDocument();
+  });
+
+  it("se a leitura dos nomes falha (defeito), fica «Pessoa» e uma frase diz que não se leram os nomes; uma recusa não a mostra", async () => {
+    const semNomes = PORTATIL({ ligado: true, ocupacoes: [{ ...ANA, pessoaNome: null }, { ...BRUNO, pessoaNome: null }] });
+    m.dados = { ...DADOS, pessoa: [semNomes] };
+    m.lidoEstado = { aCarregar: false, falhou: true };
+    ver();
+    abrirSeparador(/^Pessoas/);
+    const quem = within(within(await abrirDetalhe("Portátil 1")).getByTestId("detalhe-quem-paga"));
+    expect(quem.getByTestId("quem-pessoa-0")).toHaveTextContent("Pessoa");
+    expect(quem.getByTestId("quem-nomes-falhou")).toHaveTextContent("Não foi possível ler os nomes");
   });
 
   it("um comprado de Estrutura (uma mesa) não tem esta secção; um armazém alugado diz que o custo é da estrutura", async () => {

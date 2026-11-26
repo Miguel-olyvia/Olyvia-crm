@@ -16,6 +16,8 @@ export interface AtivoLidoHook {
   /** `null` enquanto carrega, ou se a leitura falhou ou foi recusada. */
   ativo: Ativo | null;
   aCarregar: boolean;
+  /** A leitura falhou por um defeito (uma recusa por permissão ou uma RPC por aplicar não contam: aí a ficha fica como a lista). */
+  falhou: boolean;
 }
 
 export function useAtivoLido(id: string | null, ligado: boolean): AtivoLidoHook {
@@ -29,11 +31,13 @@ export function useAtivoLido(id: string | null, ligado: boolean): AtivoLidoHook 
     queryFn: async (): Promise<Ativo | null> => {
       const { data, error } = await hrRpc("rpc_ativo_ler", { p_id: id, p_organization_id: organizationId });
       if (error) {
-        if (!ativosIndisponivel(error) && !ativosRecusado(error)) captureFlowError(error, "ativos-listar");
-        return null;
+        if (ativosIndisponivel(error) || ativosRecusado(error)) return null;
+        captureFlowError(error, "ativos-listar");
+        // Um defeito (e não uma recusa): a consulta falha, para a ficha poder dizer que não leu os nomes.
+        throw new Error("ativos-ler");
       }
       return ativoLidoDaResposta(data);
     },
   });
-  return { ativo: consulta.data ?? null, aCarregar: consulta.isLoading };
+  return { ativo: consulta.data ?? null, aCarregar: consulta.isLoading, falhou: consulta.isError };
 }

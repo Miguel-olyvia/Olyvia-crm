@@ -7,15 +7,16 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { useCompany } from "@/contexts/CompanyContext";
+import { ativosIndisponivel, ativosRecusado } from "@/components/ativos/lib/errosAtivo";
 import { ativoDaLinhaRh, type LinhaAtivoRh } from "@/lib/hr/custoBase";
 import { hrRpc } from "@/lib/hr/hrDb";
+import { CHAVE_EQUIPAMENTOS_LIVRES, CHAVE_OCUPACOES_ATIVO } from "./chavesEquipamentos";
 import { codigoDeErroCusto } from "@/lib/hr/errosCusto";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getLocalizedFallback } from "@/utils/friendlyError";
 import type { AtivoDoEquipamento } from "@/components/rh-exemplo/lib/equipamentos";
 
-export const CHAVE_EQUIPAMENTOS_LIVRES = "hr-equipamentos-livres";
-export const CHAVE_OCUPACOES_ATIVO = "hr-ocupacoes-ativo";
+export { CHAVE_EQUIPAMENTOS_LIVRES, CHAVE_OCUPACOES_ATIVO };
 
 export interface EquipamentoLivre {
   id: string;
@@ -78,8 +79,11 @@ export function useOcupacoesDoAtivo(ativoId: string | null, ligado: boolean): { 
     retry: false,
     queryFn: async (): Promise<number | null> => {
       const { data, error } = await hrRpc("rpc_ativo_ler", { p_id: ativoId, p_organization_id: organizationId });
-      // Sem permissao (ou RPC por aplicar) nao e um defeito: o aviso fica sem numero.
-      if (error) return null;
+      // Sem permissao (ou RPC por aplicar) nao e um defeito: o aviso fica sem numero. Qualquer outro erro vai para o registo.
+      if (error) {
+        if (!ativosIndisponivel(error) && !ativosRecusado(error)) captureFlowError(error, "ativos-listar");
+        return null;
+      }
       const ocupacoes = (data as { ocupacoes?: unknown } | null)?.ocupacoes;
       if (!Array.isArray(ocupacoes)) return null;
       const chaves = ocupacoes.map((o: Linha) => texto(o?.pessoa_id) ?? texto(o?.pessoa_equipamento_id) ?? "");

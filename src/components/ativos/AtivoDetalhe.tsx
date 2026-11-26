@@ -16,6 +16,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { AmortizacaoAtivo } from "./AmortizacaoAtivo";
 import { ArmazemDoAtivoSecao } from "./ArmazemDoAtivoSecao";
+import { AvisoAtivo } from "./AvisoAtivo";
 import { Linha, Seccao } from "./DetalheBlocos";
 import { EtiquetaEstado } from "./EtiquetaEstado";
 import { QuemPagaAtivo } from "./QuemPagaAtivo";
@@ -170,9 +171,7 @@ function DetalheDoAtivo({ a, mes, hoje, centrosCusto, rhOculto, podeEditar, pode
         {alugado ? <TopoAlugado a={a} /> : <TopoComprado a={a} mes={mes} />}
 
         {avisos.map((aviso) => (
-          <p key={aviso} role="note" data-testid={`detalhe-aviso-${aviso}`} className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200">
-            {t(`ativos.aviso.${aviso}`)}
-          </p>
+          <AvisoAtivo key={aviso} tom="aviso" role="note" data-testid={`detalhe-aviso-${aviso}`}>{t(`ativos.aviso.${aviso}`)}</AvisoAtivo>
         ))}
 
         {desativado && (
@@ -186,7 +185,13 @@ function DetalheDoAtivo({ a, mes, hoje, centrosCusto, rhOculto, podeEditar, pode
 
         {alugado ? <SeccaoAluguer a={a} pago={pago} /> : <SeccaoValorComprado a={a} mes={mes} />}
 
-        {mostraQuemPaga && conta && <QuemPagaAtivo conta={conta} grupo={a.grupo} ocupacoes={ocupacoes} mes={mes} hoje={hoje} rhOculto={rhOculto} />}
+        {mostraQuemPaga && conta && (
+          <QuemPagaAtivo
+            conta={conta} grupo={a.grupo} ocupacoes={ocupacoes} mes={mes} hoje={hoje} rhOculto={rhOculto}
+            nomes={lido.aCarregar ? "aCarregar" : lido.falhou ? "falhou" : "ok"}
+            podeEntregar={a.grupo === "pessoa" && !rhOculto && !desativado && !a.ligado && !a.atribuicao}
+          />
+        )}
 
         <ArmazemDoAtivoSecao ativo={a} podeVerValor={podeVerValorStock} />
 

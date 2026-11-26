@@ -20,6 +20,7 @@ import {
   type CorrecaoEquipamento, type LinhaEquipamento, type ResultadoCusto,
 } from "@/lib/hr/custoBase";
 import { CHAVE_SEM_PERMISSAO_ATIVOS } from "@/lib/hr/errosCusto";
+import { CHAVE_CUSTO_EQUIPAMENTOS, CHAVE_EQUIPAMENTOS_LIVRES, CHAVE_OCUPACOES_ATIVO } from "./chavesEquipamentos";
 import { normalizarConta, validarConta, type ContaItem } from "@/components/rh-exemplo/lib/comoConta";
 import {
   validarDevolucao, validarNovoEquipamento, type EquipamentoPessoa, type EstadoDevolucao, type NovoEquipamentoBase,
@@ -28,7 +29,7 @@ import {
 export type { NovoEquipamentoBase } from "@/components/rh-exemplo/lib/equipamentos";
 export type { CorrecaoEquipamento } from "@/lib/hr/custoBase";
 
-export const CHAVE_CUSTO_EQUIPAMENTOS = "hr-custo-equipamentos";
+export { CHAVE_CUSTO_EQUIPAMENTOS };
 const LIMITE_PAGINA = 1000;
 const PAGINAS_MAXIMAS = 20;
 
@@ -73,9 +74,12 @@ export function useEquipamentosCustoAcoes(): EquipamentosCustoAcoes {
   const organizationId = activeCompany?.id ?? null;
   const queryClient = useQueryClient();
 
-  // O equipamento e um ativo: o que muda no RH muda tambem na lista dos Ativos (ocupacoes, quem o tem).
+  // O equipamento e um ativo: o que muda no RH muda tambem na lista dos Ativos (ocupacoes, quem o tem), no que esta livre para entregar
+  // e no numero de pessoas que uma correcao afeta (consultas de cache de 5 minutos, que ninguem mais refaz).
   const refazer = useCallback(async () => {
     await queryClient.invalidateQueries({ queryKey: [CHAVE_CUSTO_EQUIPAMENTOS, organizationId] });
+    await queryClient.invalidateQueries({ queryKey: [CHAVE_EQUIPAMENTOS_LIVRES, organizationId] });
+    await queryClient.invalidateQueries({ queryKey: [CHAVE_OCUPACOES_ATIVO, organizationId] });
     await queryClient.invalidateQueries({ queryKey: ["ativos"] });
   }, [organizationId, queryClient]);
 
@@ -189,7 +193,7 @@ export function useEquipamentosCusto({ pessoaId = null, enabled = true }: Opcoes
         if (recebidas.length < LIMITE_PAGINA) return linhas.map(equipamentoDaLinha);
       }
       // Todas as paginas vieram cheias: ha mais do que se le. Em vez de mostrar uma lista truncada (e custos errados), falha.
-      captureFlowError(new Error("hr-equipamentos-listar: paginas_maximas"), "hr-equipamentos-listar");
+      captureFlowError(new Error("hr-equipamentos-listar: paginas_maximas"), "ativos-listar");
       throw new Error(getLocalizedFallback("hr.custo.erro.listaDemasiadoLonga"));
     },
   });
