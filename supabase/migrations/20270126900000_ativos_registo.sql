@@ -1,5 +1,5 @@
 -- ==============================================================================
--- 20270126500000_ativos_registo.sql
+-- 20270126900000_ativos_registo.sql
 --
 -- ATIVOS, fase 1: o registo de ativos (uma linha por máquina), em três grupos:
 --   pessoa    (o portátil nº X; o custo da pessoa continua a sair de pessoas_equipamentos),
@@ -251,7 +251,7 @@ CREATE TABLE public.ativo (
         AND desativado_em >= data_compra AND desativado_em <= DATE '2100-01-01'))
 );
 COMMENT ON TABLE public.ativo IS
-'Registo de ativos: uma linha por coisa comprada (3 iguais = 3 linhas). grupo pessoa (o custo da pessoa continua em pessoas_equipamentos; ligação por pessoas_equipamentos.ativo_id), servico (liga obrigatoriamente a cat_equipamentos da mesma organização; vida_meses NULL = vida do modelo) ou estrutura (depreciação linear por tempo). O valor actual calcula-se no ecrã. Nunca se apaga: desativa-se com data e motivo. Leitura e escrita só pelas RPCs rpc_ativo*. Desde 20270126500000.';
+'Registo de ativos: uma linha por coisa comprada (3 iguais = 3 linhas). grupo pessoa (o custo da pessoa continua em pessoas_equipamentos; ligação por pessoas_equipamentos.ativo_id), servico (liga obrigatoriamente a cat_equipamentos da mesma organização; vida_meses NULL = vida do modelo) ou estrutura (depreciação linear por tempo). O valor actual calcula-se no ecrã. Nunca se apaga: desativa-se com data e motivo. Leitura e escrita só pelas RPCs rpc_ativo*. Desde 20270126900000.';
 
 CREATE UNIQUE INDEX ativo_org_codigo_key ON public.ativo (organization_id, lower(codigo)) WHERE codigo IS NOT NULL;
 CREATE INDEX idx_ativo_org_grupo_ativos ON public.ativo (organization_id, grupo) WHERE estado = 'ativo';
@@ -288,7 +288,7 @@ CREATE TABLE public.ativo_eventos (
                         'estado', 'desativado_em', 'desativado_motivo', 'desativado_nota']::text[])
 );
 COMMENT ON TABLE public.ativo_eventos IS
-'Auditoria dos ativos, só de acrescentar (UPDATE, DELETE e TRUNCATE recusados por trigger). campos leva só os NOMES das colunas alteradas, nunca valores. actor = anew_users.id, sem FK de propósito (um SET NULL chocaria com a imutabilidade). Desde 20270126500000.';
+'Auditoria dos ativos, só de acrescentar (UPDATE, DELETE e TRUNCATE recusados por trigger). campos leva só os NOMES das colunas alteradas, nunca valores. actor = anew_users.id, sem FK de propósito (um SET NULL chocaria com a imutabilidade). Desde 20270126900000.';
 CREATE INDEX idx_ativo_eventos_ativo ON public.ativo_eventos (ativo_id, em DESC, id DESC);
 CREATE INDEX idx_ativo_eventos_org ON public.ativo_eventos (organization_id, em);
 CREATE INDEX idx_ativo_eventos_pessoa_equipamento ON public.ativo_eventos (pessoa_equipamento_id) WHERE pessoa_equipamento_id IS NOT NULL;
@@ -303,7 +303,7 @@ CREATE UNIQUE INDEX pessoas_equipamentos_ativo_atribuido_key
   ON public.pessoas_equipamentos (ativo_id) WHERE ativo_id IS NOT NULL AND estado = 'atribuido';
 CREATE INDEX idx_pessoas_equipamentos_ativo ON public.pessoas_equipamentos (ativo_id) WHERE ativo_id IS NOT NULL;
 COMMENT ON COLUMN public.pessoas_equipamentos.ativo_id IS
-'Ativo (grupo pessoa) que corresponde a esta atribuição, ou NULL. Escrito só por rpc_ativo_ligar_pessoa / rpc_ativo_desligar_pessoa; não muda o valor nem a conta do RH. Desde 20270126500000.';
+'Ativo (grupo pessoa) que corresponde a esta atribuição, ou NULL. Escrito só por rpc_ativo_ligar_pessoa / rpc_ativo_desligar_pessoa; não muda o valor nem a conta do RH. Desde 20270126900000.';
 
 -- ==============================================================================
 -- 2. Triggers
@@ -1063,9 +1063,9 @@ GRANT EXECUTE ON FUNCTION public.rpc_ativo_desligar_pessoa(uuid, uuid) TO authen
 GRANT EXECUTE ON FUNCTION public.rpc_ativos_opcoes(uuid) TO authenticated;
 
 COMMENT ON FUNCTION public.rpc_ativos_listar(uuid, boolean) IS
-'Ativos por grupo (ativos.view): {servico:[ativo+cat_equipamento], estrutura:[ativo], pessoa:{ativos:[ativo+atribuicao|null], atribuicoes_sem_ativo|null, rh_oculto}, centros_custo, truncado}. Todos levam ligado (boolean). Quem tem o equipamento e as atribuições do RH só com hr.pessoas.retribuicao.view. Limite 2000. O valor actual calcula-se no ecrã. Desde 20270126500000.';
+'Ativos por grupo (ativos.view): {servico:[ativo+cat_equipamento], estrutura:[ativo], pessoa:{ativos:[ativo+atribuicao|null], atribuicoes_sem_ativo|null, rh_oculto}, centros_custo, truncado}. Todos levam ligado (boolean). Quem tem o equipamento e as atribuições do RH só com hr.pessoas.retribuicao.view. Limite 2000. O valor actual calcula-se no ecrã. Desde 20270126900000.';
 COMMENT ON FUNCTION public.rpc_ativo_criar(uuid, text, text, text, uuid, date, numeric, numeric, integer, numeric, text, text, uuid, text, text) IS
-'Cria um ativo (ativos.edit). Erros ATV02..ATV13 (MESSAGE = código, DETAIL em pt-PT). Devolve {id}. Desde 20270126500000.';
+'Cria um ativo (ativos.edit). Erros ATV02..ATV13 (MESSAGE = código, DETAIL em pt-PT). Devolve {id}. Desde 20270126900000.';
 
 -- ==============================================================================
 -- 8. Conferir (falha a migration inteira se algo não bater)
