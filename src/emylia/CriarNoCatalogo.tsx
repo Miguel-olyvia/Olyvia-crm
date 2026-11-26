@@ -33,6 +33,7 @@ import { ramoParaCriar, type RamoEscolhido } from "./ramoProduto";
 import { CAMPO, CHIP, NOTA, Campo, Chips, Num, Retirar } from "./pecasForm";
 import { ESTADOS_PRODUTO, type EstadoProduto, type FichaProdutoReal } from "./fichaProdutoDados";
 import type { AtributoProduto } from "./v2/catalogoModelo";
+import { opcoesArmazemEquip, type ArmazemEquip } from "./real/armazensEquipamento";
 
 const CARTAO = "rounded-2xl border border-border bg-card p-4 shadow-[var(--shadow-sm)] sm:p-5";
 const ICONE_TIPO: Record<TipoCriar, LucideIcon> = { servico: Wrench, produto: Package, equipamento: Drill, consumivel: Droplet, tecnico: HardHat };
@@ -521,9 +522,12 @@ function FormProduto({ S, K, real, onCriado, duplicado, semServico, servicos: se
 }
 
 /* ------------------------------------------------------------------ equipamento */
-function FormEquip({ C, onCriado }: { C: Custos; onCriado: (id: string, nome: string) => void }) {
+/** `armazens` (26/11): só na página real; o armazém é opcional e grava-se com o equipamento. */
+function FormEquip({ C, onCriado, armazens }: { C: Custos; onCriado: (id: string, nome: string) => void; armazens?: readonly ArmazemEquip[] }) {
   const [nome, setNome] = useState(""), [compra, setCompra] = useState(""), [residual, setResidual] = useState("0"), [vida, setVida] = useState("1000"), [manut, setManut] = useState("0"), [uso, setUso] = useState("600");
-  const o = { n: nome, compra: n(compra), residual: n0(residual), vida: n(vida), manutAno: n0(manut), usoAno: n0(uso) };
+  const [armazem, setArmazem] = useState("");
+  const nomeArmazem = armazem ? armazens?.find((a) => a.id === armazem)?.nome ?? null : null;
+  const o = { n: nome, compra: n(compra), residual: n0(residual), vida: n(vida), manutAno: n0(manut), usoAno: n0(uso), ...(armazem ? { armazemId: armazem, armazemNome: nomeArmazem } : {}) };
   const faltas = faltasEquip(C, o);
   const q = quebraEquip({ id: "", ...o, compra: n0(compra), vida: n0(vida) });
   const criar = () => { const r = criarEquip(lerCustos(), o); if (!r.ok) return; mudarCustos(() => r.C); onCriado(r.id, nome.trim()); };
@@ -532,6 +536,13 @@ function FormEquip({ C, onCriado }: { C: Custos; onCriado: (id: string, nome: st
       <div className="grid min-w-0 content-start gap-5">
         <Secao i={1} titulo="O equipamento">
           <Campo rot="Nome do equipamento">{(id) => <input id={id} value={nome} onChange={(e) => setNome(e.target.value)} placeholder="Ex.: Serra de esquadria 254 mm" className={CAMPO} autoFocus />}</Campo>
+          {armazens && (
+            <Campo rot="Armazém" dica="Opcional. Onde o equipamento fica guardado.">{(id) => (
+              <select id={id} value={armazem} onChange={(e) => setArmazem(e.target.value)} className={CAMPO}>
+                {opcoesArmazemEquip(armazens).map((x) => <option key={x.v} value={x.v}>{x.t}</option>)}
+              </select>
+            )}</Campo>
+          )}
         </Secao>
         <Secao i={2} titulo="Compra e uso" texto="O €/h: (compra − valor residual) ÷ vida útil + manutenção do ano ÷ horas de uso do ano.">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -630,7 +641,9 @@ function FormTecnico({ S, C, onCriado }: { S: Estado; C: Custos; onCriado: (id: 
 }
 
 /* ------------------------------------------------------------------ a página */
-export function CriarNoCatalogo({ S, C, K, run, tipo, setTipo, voltar, onCriado, real, produto }: {
+export function CriarNoCatalogo({ S, C, K, run, tipo, setTipo, voltar, onCriado, real, produto, armazens }: {
+  /** 26/11: os armazéns da organização para o equipamento novo (só na página real). */
+  armazens?: readonly ArmazemEquip[];
   /** 17/11: só para «produto» (a página de Produtos, que não tem todos os produtos em memória). */
   produto?: OpcoesCriarProduto;
   S: Estado; C: Custos; K: Catalogo; run: (fn: () => void) => void; tipo: TipoCriar; setTipo: (t: TipoCriar) => void; voltar: () => void;
@@ -675,7 +688,7 @@ export function CriarNoCatalogo({ S, C, K, run, tipo, setTipo, voltar, onCriado,
       {pode && <div key={tipo} className="mt-8 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-300">
         {tipo === "servico" && <FormServico S={S} C={C} K={K} onCriado={feito("servico")} />}
         {tipo === "produto" && <FormProduto S={S} K={K} real={real} onCriado={feito("produto")} {...produto} />}
-        {tipo === "equipamento" && <FormEquip C={C} onCriado={feito("equipamento")} />}
+        {tipo === "equipamento" && <FormEquip C={C} onCriado={feito("equipamento")} armazens={armazens} />}
         {tipo === "consumivel" && <FormConsumivel S={S} C={C} K={K} real={real} onCriado={feito("consumivel")} />}
         {tipo === "tecnico" && <FormTecnico S={S} C={C} onCriado={feito("tecnico")} />}
       </div>}

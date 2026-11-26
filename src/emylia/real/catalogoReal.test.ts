@@ -111,6 +111,50 @@ describe("montarCatalogo: as tabelas nos objetos dos ecrãs da Emylia", () => {
   });
 });
 
+const ARMAZEM = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+describe("26/11: o armazém dos equipamentos (warehouse_id, armazem)", () => {
+  it("lê warehouse_id e armazem; sem as chaves (base antiga) ou null, sem armazém", () => {
+    expect(montar().C.equip[0]).toMatchObject({ armazemId: null, armazemNome: null });
+    const L = linhas();
+    L.equipamentos[0].warehouse_id = ARMAZEM;
+    L.equipamentos[0].armazem = "Porto";
+    expect(montarCatalogo(L, catalogo0(), {}).C.equip[0]).toMatchObject({ armazemId: ARMAZEM, armazemNome: "Porto" });
+    L.equipamentos[0].warehouse_id = null;
+    expect(montarCatalogo(L, catalogo0(), {}).C.equip[0]).toMatchObject({ armazemId: null, armazemNome: null });
+  });
+  it("mudar só o armazém conta como mudança e grava p_warehouse_id; voltar a «Sem armazém» manda null", () => {
+    const M = montar(), antes = foto(M), depois = foto(M);
+    depois.C.equip[0].armazemId = ARMAZEM;
+    depois.C.equip[0].armazemNome = "Porto";
+    const ch = diferencasCatalogo(ORG, antes, depois, { ids: M.ids, produtos: linhas().produtos });
+    expect(ch.map((c) => c.rpc)).toEqual(["cat_guardar_equipamento_horas"]);
+    expect(ch[0].args).toMatchObject({ p_id: ID.equip, p_apagar: false, p_warehouse_id: ARMAZEM });
+    const ch2 = diferencasCatalogo(ORG, depois, foto(M), { ids: M.ids, produtos: linhas().produtos });
+    expect(ch2.map((c) => c.rpc)).toEqual(["cat_guardar_equipamento_horas"]);
+    expect(ch2[0].args).toHaveProperty("p_warehouse_id", null);
+  });
+  it("mudar outro campo manda o armazém atual (não o limpa); retirar também o manda", () => {
+    const L = linhas();
+    L.equipamentos[0].warehouse_id = ARMAZEM;
+    L.equipamentos[0].armazem = "Porto";
+    const M = montarCatalogo(L, catalogo0(), {}), antes = foto(M), depois = foto(M);
+    depois.C.equip[0].compra = 350;
+    expect(diferencasCatalogo(ORG, antes, depois, { ids: M.ids, produtos: L.produtos })[0].args).toMatchObject({ p_compra: 350, p_warehouse_id: ARMAZEM });
+    const semEquip = foto(M);
+    semEquip.C.equip = [];
+    const ret = diferencasCatalogo(ORG, antes, semEquip, { ids: M.ids, produtos: L.produtos }).find((c) => c.rpc === "cat_guardar_equipamento_horas")!;
+    expect(ret.args).toMatchObject({ p_id: ID.equip, p_apagar: true, p_warehouse_id: ARMAZEM });
+  });
+  it("um equipamento novo com armazém cria-se já com ele; sem armazém, com null", () => {
+    const M = montar(), antes = foto(M), depois = foto(M);
+    depois.C.equip.push({ id: "e-martelo", n: "Martelo", compra: 800, vida: 2000, residual: 0, manutAno: 0, usoAno: 600, armazemId: ARMAZEM, armazemNome: "Porto" });
+    depois.C.equip.push({ id: "e-serra", n: "Serra", compra: 100, vida: 1000, residual: 0, manutAno: 0, usoAno: 600 });
+    const ch = diferencasCatalogo(ORG, antes, depois, { ids: M.ids, produtos: linhas().produtos }).filter((c) => c.rpc === "cat_guardar_equipamento_horas");
+    expect(ch[0]).toMatchObject({ guarda: "equip:e-martelo", args: { p_id: null, p_warehouse_id: ARMAZEM } });
+    expect(ch[1].args).toHaveProperty("p_warehouse_id", null);
+  });
+});
+
 describe("diferencasCatalogo: o que mudou, em chamadas às funções cat_*", () => {
   it("sem mudanças, nenhuma chamada", () => {
     const M = montar();

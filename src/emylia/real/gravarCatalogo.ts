@@ -102,18 +102,19 @@ export function diferencasCatalogo(org: string, antes: FotoCatalogo, depois: Fot
     out.push({ rpc: "cat_guardar_perfil", nota: `Perfil: ${p.n}`, guarda: a ? undefined : "perfil:" + p.id, args: { p_org: org, p_id: a ? ids.perfil.get(p.id) ?? null : null, p_nome: p.n, p_salario_referencia: p.salario } });
   }
 
-  // 4. equipamentos
+  // 4. equipamentos. 26/11: o armazém (p_warehouse_id) grava-se SEMPRE (null = sem armazém), também ao retirar; mudar só o armazém
+  // conta como mudança (o igual compara o equipamento inteiro, armazemId incluído).
   const eqA = porId(antes.C.equip);
   const equipRef = (id: string): string | Tmp => (UUID.test(id) && eqA.has(id) ? id : { tmp: "equip:" + id });
   for (const e of depois.C.equip) {
     const a = eqA.get(e.id);
     if (a && igual(a, e)) continue;
     out.push({ rpc: "cat_guardar_equipamento_horas", nota: `Equipamento: ${e.n}`, guarda: a ? undefined : "equip:" + e.id, args: {
-      p_org: org, p_id: a ? e.id : null, p_nome: e.n, p_compra: e.compra, p_vida_horas: e.vida, p_residual: e.residual, p_manutencao_ano: e.manutAno, p_uso_ano_horas: e.usoAno, p_apagar: false } });
+      p_org: org, p_id: a ? e.id : null, p_nome: e.n, p_compra: e.compra, p_vida_horas: e.vida, p_residual: e.residual, p_manutencao_ano: e.manutAno, p_uso_ano_horas: e.usoAno, p_apagar: false, p_warehouse_id: e.armazemId ?? null } });
   }
   for (const a of antes.C.equip) if (!depois.C.equip.some((e) => e.id === a.id) && UUID.test(a.id))
     out.push({ rpc: "cat_guardar_equipamento_horas", nota: `Equipamento retirado: ${a.n}`, args: {
-      p_org: org, p_id: a.id, p_nome: a.n, p_compra: a.compra, p_vida_horas: a.vida, p_residual: a.residual, p_manutencao_ano: a.manutAno, p_uso_ano_horas: a.usoAno, p_apagar: true } });
+      p_org: org, p_id: a.id, p_nome: a.n, p_compra: a.compra, p_vida_horas: a.vida, p_residual: a.residual, p_manutencao_ano: a.manutAno, p_uso_ano_horas: a.usoAno, p_apagar: true, p_warehouse_id: a.armazemId ?? null } });
 
   // 5. árvore (os ofícios antes dos subs). Os ramos só da árvore dos produtos (soProduto) não se gravam aqui: mudam-se nas
   // Categorias de produtos.
