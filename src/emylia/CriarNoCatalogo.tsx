@@ -480,7 +480,7 @@ function FormProduto({ S, K, real, onCriado, duplicado, semServico, servicos: se
           <section aria-labelledby={idModelo3D} className="grid gap-2 border-t border-border pt-4">
             <h3 id={idModelo3D} className="text-[15px] font-semibold">Modelo 3D</h3>
             {real && <CampoModelo3D valor={modelo3d} heranca={resolverDoNo({ arvore: arvoreCria, no: no || null, soHerdado: true })} onChange={setModelo3d} nivel="produto" />}
-            <Modelo3DProduto nome={nome} sub={nomeSub} no={no || null} arvore={arvoreCria} attrs={attrs} defs={K.atributos} modelo3d={real ? modelo3d : null} />
+            <Modelo3DProduto nome={nome} sub={nomeSub} no={no || null} arvore={arvoreCria} attrs={attrs} defs={K.atributos} modelo3d={real ? modelo3d : null} org={real?.org ?? null} modeloId={modelo.id || null} />
           </section>
         </Secao>
         <Secao i={2} titulo="Compra e venda">
