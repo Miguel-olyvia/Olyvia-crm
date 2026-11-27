@@ -120,12 +120,15 @@ export function prestacoesDaProposta(d: Negocio, total: number, S?: Estado): Pre
 export const comDataCurta = (L: PrestacaoDoc[]): { l: string; p: number; v: number; quando?: string }[] =>
   L.map((t) => ({ l: t.l, p: t.p, v: t.v, quando: t.data ? dataCurta(t.data) : undefined }));
 
-/** O fim previsto: `dias` dias úteis (só sem fins de semana) a contar do início, o próprio incluído. Sem um dos dois: null. */
+/** O fim previsto: `dias` dias úteis a contar do início, o próprio incluído. 27/11 (teste do 1029: «fim previsto a 28/12» e a última
+ *  parcela «previsto: ter, 29 dez»): os dias úteis são os do plano da obra (sem fins de semana nem feriados, diasDaObra), os mesmos das
+ *  datas das parcelas. Sem um dos dois: null. */
 export function fimPrevistoData(inicio?: string, dias?: string): Date | null {
   if (!inicio || !dias) return null;
-  const d = new Date(inicio + "T12:00:00"); let n = Number(dias);
-  while (n > 1) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) n--; }
-  return d;
+  const d = new Date(inicio + "T12:00:00"), n = Math.floor(Number(dias));
+  if (Number.isNaN(d.getTime()) || !(n >= 1)) return d;
+  const D = diasDaObra(d, n);
+  return D.length ? D[D.length - 1] : d;
 }
 
 /** Os valores das cláusulas do contrato (o negócio, sem adenda): o objeto, o preço por taxa de IVA, as prestações, o prazo, a garantia

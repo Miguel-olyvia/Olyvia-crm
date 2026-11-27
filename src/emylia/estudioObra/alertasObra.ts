@@ -7,7 +7,7 @@ import { motivoOcupado, obraQueOcupa, tecnicosDoOficio } from "../preparacaoObra
 import { materiaisPorFase } from "../obraOps";
 import type { ResumoEcNeg } from "../inventario/ponteNegocios";
 import { dataCurta } from "../planoObra";
-import { comecada, dataDoDia, derrapagem, diasDeAtraso, diasSemNinguem, estadoVivo, nomeNoPlano, replanear } from "./planoVivo";
+import { antecessoras, comecada, dataDoDia, derrapagem, diasDeAtraso, diasSemNinguem, estadoVivo, nomeNoPlano, replanear } from "./planoVivo";
 
 export type Nivel = "critico" | "atencao" | "oportunidade";
 export type AcaoAlerta =
@@ -22,6 +22,9 @@ export type AcaoAlerta =
   | { k: "fecharBuraco"; ini: number; fim: number; ti: number | null }
   // 27/11 (agentes): passar a tarefa que trava a um colega livre e antecipar o resto, de uma vez
   | { k: "passarEAntecipar"; ti: number; tec: string; n: string; ini: number; fim: number }
+  // 27/11 (Rúben: «devia ser tudo dentro do estúdio»): adiar a tarefa até o técnico estar livre, e puxar uma tarefa para dias vazios
+  | { k: "adiar"; ti: number }
+  | { k: "puxar"; ti: number; dia: number }
   | { k: "avisarCliente"; texto: string }
   | { k: "conversa" }
   | { k: "aceitarFim"; dias: number }
@@ -31,6 +34,20 @@ export interface Alerta { id: string; nivel: Nivel; t: string; sub: string; acoe
 const dias = (n: number) => `${n} ${n === 1 ? "dia útil" : "dias úteis"}`;
 const quem = (id: string | null) => TECS.find((x) => x.id === id)?.n.split(" ")[0] ?? "Sem técnico";
 const quando = (p: Plano, k: number) => { const d = dataDoDia(p, k); return d ? dataCurta(d) : `dia ${k + 1}`; };
+
+/** 27/11 (agentes): a tarefa por fazer, mais à frente, que pode passar para o dia `ini` (um buraco): as que a antecedem já acabaram (ou
+ *  acabam antes de `ini`) e o técnico está livre (sem outra obra, férias nem outra tarefa desta obra nesses dias). A que vinha mais cedo. */
+export function tarefaParaOBuraco(p: Plano, ini: number, ocup: Map<string, Set<string>>): number | null {
+  const T = p.tasks;
+  const feita = (j: number) => { const v = estadoVivo(T[j], p); return v === "feita" || v === "validada"; };
+  const cands = T.map((t, ti) => ({ t, ti }))
+    .filter(({ t, ti }) => t.tec && !t.exec && t.dia > ini && !feita(ti) && estadoVivo(t, p) !== "atrasada")
+    .filter(({ ti }) => antecessoras(T, ti).every((j) => feita(j) || T[j].dia + T[j].dur <= ini))
+    .filter(({ t, ti }) => motivoOcupado(t.tec!, { dia: ini, dur: t.dur, ...(t.h > 0 ? { h: t.h } : {}) }, p, ocup,
+      T.filter((x, k) => k !== ti && x.tec === t.tec && !feita(k)).map((x) => ({ dia: x.dia, dur: x.dur, h: x.h, tec: x.tec }))) == null)
+    .sort((a, b) => a.t.dia - b.t.dia);
+  return cands[0]?.ti ?? null;
+}
 
 export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<string, Set<string>>, inv?: ResumoEcNeg | null): Alerta[] {
   const p = d.obra.plano;
@@ -67,8 +84,17 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
       if (m) {
         const onde = m === "noutra obra" ? obraQueOcupa(S, t.tec, resto, p, d.id) : null;
         const livres = tecnicosDoOficio(t).filter((x) => x.id !== t.tec && motivoOcupado(x.id, resto, p, ocup) == null).slice(0, 2);
-        L.push({ id: `conflito-${ti}`, nivel: "critico", ti, t: `${quem(t.tec)} está ${m === "noutra obra" && onde ? `na obra ${onde.nome}` : m} nos dias de ${t.nome}`, sub: `A partir de ${quando(p, resto.dia)}. Passe a tarefa a quem está livre, ou replaneie.`,
-          acoes: [...livres.map((x) => ({ rot: `Passar para ${x.n.split(" ")[0]}`, a: { k: "passar" as const, ti, tec: x.id, n: x.n } })), ...(onde ? [{ rot: `Abrir ${onde.nome}`, a: { k: "outra" as const, obra: onde } }] : []), { rot: "Replanear", a: { k: "replanear" } }] });
+        // 27/11 (Rúben: «ao clicar aqui ele remete para a outra obra e não devia, devia ser tudo dentro do estúdio»): as ações resolvem
+        // aqui: passar a um colega livre, ou adiar até o técnico estar livre (só a que ainda não começou: diz-se para quando)
+        let livreA: number | null = null;
+        if (!t.exec && t.dia >= p.dia) {
+          for (let nd = t.dia + 1; nd < t.dia + 60; nd++) if (motivoOcupado(t.tec, { dia: nd, dur: t.dur, ...(t.h > 0 ? { h: t.h } : {}) }, p, ocup) == null) { livreA = nd; break; }
+        }
+        const opcoes = [livres.length ? `passe a tarefa a ${livres.map((x) => x.n.split(" ")[0]).join(" ou ")} (livre${livres.length > 1 ? "s" : ""})` : "", livreA != null ? `adie-a para ${quando(p, livreA)}, quando ${quem(t.tec).split(" ")[0]} fica livre` : ""].filter(Boolean);
+        L.push({ id: `conflito-${ti}`, nivel: "critico", ti, t: `${quem(t.tec)} está ${m === "noutra obra" && onde ? `na obra ${onde.nome}` : m} nos dias de ${t.nome}`,
+          sub: `A partir de ${quando(p, resto.dia)}. ${opcoes.length ? `Para resolver: ${opcoes.join(", ou ")}.` : "Não há colega livre do mesmo ofício: replaneie a obra."}`,
+          acoes: [...livres.map((x) => ({ rot: `Passar para ${x.n.split(" ")[0]}`, a: { k: "passar" as const, ti, tec: x.id, n: x.n } })),
+            ...(livreA != null ? [{ rot: `Adiar para ${quando(p, livreA)}`, a: { k: "adiar" as const, ti } }] : []), { rot: "Replanear", a: { k: "replanear" } }] });
       }
     }
     if (!t.tec && v !== "validada") L.push({ id: `sem-${ti}`, nivel: "critico", ti, t: `${t.nome} não tem técnico`, sub: "Escolha quem a faz.", acoes: [{ rot: "Abrir", a: { k: "tarefa", ti } }] });
@@ -129,6 +155,9 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
     const sim = simularBuraco(S, d, g.ini, g.fim);
     // 27/11 (agentes): sem dar, procura-se quem desbloqueia (um colega livre do mesmo ofício para a tarefa que trava)
     const des = !sim.s && sim.trava != null ? desbloquearBuraco(S, d, g.ini, g.fim, sim.trava) : null;
+    // 27/11 (Rúben: «estes agentes não fazem nada, eu clico e ver a tarefa, isso não é útil»): sem antecipar tudo, procura-se uma tarefa
+    // mais à frente que já possa começar nestes dias (as que a antecedem acabaram ou acabam antes) e cujo técnico esteja livre: puxa-se só essa
+    const puxar = !sim.s && !des ? tarefaParaOBuraco(p, g.ini, ocup) : null;
     const ganhoTxt = (x: number) => (x > 0 ? ` A obra acaba ${dias(x)} mais cedo.` : "");
     // sem dar: «Ver a tarefa» abre a que trava (a do técnico ocupado), onde se troca o técnico
     const tiVer = !sim.s && sim.trava != null ? sim.trava : g.seguinte;
@@ -137,10 +166,12 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
     const sub = sim.s
       ? (seg ? `A seguir, ${seg.nome} a ${quando(p, seg.dia)}. «Antecipar ${dias(sim.s)}» puxa as ${sim.alvo.length} tarefas seguintes${sim.s < n ? ` (os ${n} dias não dão: ${sim.porque.charAt(0).toLowerCase() + sim.porque.slice(1)})` : ""}.${ganhoTxt(sim.ganho)}` : "Pode antecipar uma tarefa para esses dias.")
       : des ? `${sim.porque}. Se «${nomeTrava}» passar para ${des.n.split(" ")[0]} (do mesmo ofício e livre), as tarefas seguintes começam ${dias(des.s)} mais cedo.${ganhoTxt(des.ganho)}`
-      : `${sim.porque}, por isso não dá para antecipar.${sim.trava != null ? ` Para antecipar, passe «${nomeTrava}» a outro técnico.` : ""}`;
+      : puxar != null ? `${sim.porque}, por isso não dá para antecipar tudo. Mas «${nomeNoPlano(p, p.tasks[puxar])}» já pode começar a ${quando(p, g.ini)} e ${quem(p.tasks[puxar].tec).split(" ")[0]} está livre: faz-se nestes dias em vez de a ${quando(p, p.tasks[puxar].dia)}.`
+      : `${sim.porque} e nenhum colega do mesmo ofício está livre, por isso a obra fica parada nestes dias. Nada a fazer daqui: só se ${sim.trava != null ? quem(p.tasks[sim.trava].tec) : "o técnico"} ficar livre na outra obra.`;
     const acoes = sim.s ? [{ rot: `Antecipar ${dias(sim.s)}`, a: { k: "fecharBuraco" as const, ini: g.ini, fim: g.ini + sim.s - 1, ti: g.seguinte } }, ...ver]
       : des ? [{ rot: `Passar a ${des.n.split(" ")[0]} e antecipar ${dias(des.s)}`, a: { k: "passarEAntecipar" as const, ti: des.ti, tec: des.tec, n: des.n, ini: g.ini, fim: g.ini + des.s - 1 } }, ...ver]
-      : ver;
+      : puxar != null ? [{ rot: `Fazer «${nomeNoPlano(p, p.tasks[puxar])}» nestes dias`, a: { k: "puxar" as const, ti: puxar, dia: g.ini } }]
+      : [];
     L.push({ id: `parada-${g.ini}`, nivel: "oportunidade", t: `A obra fica sem ninguém ${dias(n)}: ${quando(p, g.ini)} a ${quando(p, g.fim)}`, sub, acoes,
       ...(g.seguinte != null ? { ti: g.seguinte } : {}) });
   }

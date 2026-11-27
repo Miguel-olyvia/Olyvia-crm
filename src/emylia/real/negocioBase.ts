@@ -47,6 +47,12 @@ export function negocioDoLido(n: NegocioLido): Negocio {
     const i = d.hist.findIndex((h) => /Proposta enviada/i.test(h.t));
     d.hist.splice(i < 0 ? 0 : i, 0, { t: "O cliente aceitou a proposta no portal", q: String(d.orc.aceite), k: "a" });
   }
+  // 27/11 (teste do 1029: depois de «Contrato enviado para assinatura no portal» vinha logo a fatura): a assinatura do contrato também
+  // a grava o servidor sem linha no histórico; junta-se a seguir ao envio do contrato (historiaObra.ts já a procura por «assinou o contrato»)
+  if (d.orc?.contrato === "assinado" && !d.hist.some((h) => /assinou o contrato|contrato assinado/i.test(h.t))) {
+    const i = d.hist.findIndex((h) => /Contrato enviado/i.test(h.t));
+    d.hist.splice(i < 0 ? 0 : i, 0, { t: "O cliente assinou o contrato no portal", q: String(d.orc.assinatura?.q ?? (i >= 0 ? d.hist[i].q : "")), k: "a" });
+  }
   return d;
 }
 

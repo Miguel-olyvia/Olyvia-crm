@@ -12,7 +12,7 @@ import { SEM_PERM, podeNeg } from "./permissoes";
 import type { Ctx } from "./pecas";
 import { AbrirEstudioMedidas } from "./estudioPlano/EstudioMedidas";
 import { planoAprovadoDe, podeRetificar, supervisorDasMedidas } from "./preparacaoObra";
-import { rotuloOficios } from "./equipa/tecnicos";
+import { nomeComOficios } from "./equipa/tecnicos";
 import { SUPERVISORES_MEDIDAS } from "./supervisoresMedidas";
 
 export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
@@ -56,11 +56,11 @@ export function RetificacaoMedidas({ ctx, d }: { ctx: Ctx; d: Negocio }) {
                 </optgroup>
                 {tecs.length > 0 && (
                   <optgroup label="Técnicos de obra">
-                    {tecs.map((x) => <option key={x.id} value={x.id}>{x.n} · {rotuloOficios(x)}</option>)}
+                    {tecs.map((x) => <option key={x.id} value={x.id}>{nomeComOficios(x)}</option>)}
                   </optgroup>
                 )}
               </>
-            ) : TECS.map((x) => <option key={x.id} value={x.id}>{x.n} · {rotuloOficios(x)}</option>)}
+            ) : TECS.map((x) => <option key={x.id} value={x.id}>{nomeComOficios(x)}</option>)}
           </select>
           <span className="text-sm font-normal text-muted-foreground">{sup
             ? (supTecnico || !sups.some((s) => s.id === sup.id) ? `${sup.n} tem o passo «Medir no local» no Hoje dele.` : `${sup.n} mede no local e aceita as medidas aqui, no Estúdio das medidas.`)

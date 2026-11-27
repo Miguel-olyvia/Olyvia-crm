@@ -14,6 +14,9 @@
 import { comoSistema } from "./inventario/base";
 import { eliminarEc } from "./inventario/ec";
 import { executar, lerInventario } from "./inventario/loja";
+import { enviarPo, poRem } from "./inventario/po";
+import { receberLinhas } from "./inventario/receber";
+import type { PoLinha } from "./inventario/tipos";
 import { emitirNoInventario, idAjuste, pedidoDoNegocio, refAjuste, resumoEcNegocio } from "./inventario/ponteNegocios";
 import { mudarInicio } from "./ajustesPlano";
 import { deIso, diasDaObra, isoDia } from "./planoObra";
@@ -57,6 +60,29 @@ export function desfazerAjusteReal(d: Negocio, linhas: readonly LinhaAjusteReal[
     const t = d.obra.plano?.tasks.find((x) => x.nome === l.tarefa), e = t?.encomendado?.find((x) => x.n === l.n);
     if (e) e.q = r2(Math.max(0, e.q - l.q));
   }
+}
+
+/**
+ * 27/11 (Rúben: «como estamos em testes podes e deves meter um botão a dizer "recebido"»): recebe no Armazém Central, pelas regras do
+ * Inventário (aprova a encomenda ao fornecedor pendente e recebe as linhas dela que servem esta linha da encomenda de ajuste), um
+ * material de uma tarefa nova. A linha fica reservada para a obra (garantida). Devolve o erro ("" se correu bem; "sem compra" se não há
+ * encomenda ao fornecedor aberta para ela: quem chama marca-o à mão).
+ */
+export function receberDeTeste(d: Negocio, ecN: string, nome: string): string {
+  const base = d.obra.ec;
+  if (!base?.ref) return "sem compra";
+  const li = resumoEcNegocio(lerInventario(), base.ref)?.linhas.find((l) => l.ec === ecN && l.n === nome);
+  if (!li) return "sem compra";
+  let feito = false;
+  const r = executar((db) => comoSistema(() => {
+    const daLinha = (l: PoLinha) => l.ec === ecN && l.ecLine === li.id && poRem(l) > 0;
+    for (const p of db.pos.filter((x) => !x.deleted && x.status !== "cancelled" && x.lines.some(daLinha))) {
+      if (p.status === "pending") enviarPo(db, p);
+      receberLinhas(db, p, p.lines.filter(daLinha).map((l) => ({ lineId: l.id, qty: poRem(l) })), "LIS", null);
+      feito = true;
+    }
+  }));
+  return r.erro || (feito ? "" : "sem compra");
 }
 
 /** 27/11: os materiais novos podem encomendar-se já? A encomenda de cliente está no Inventário (ref) ou, na Olyvia, é a da base (contrato).

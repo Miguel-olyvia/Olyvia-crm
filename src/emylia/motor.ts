@@ -41,7 +41,7 @@ import { avisarTecnico, criarTarefa, criarTarefaInterna, juntarTarefa, materiais
 import { moverNaOrdem } from "./ordemPlano";
 import { registoDoPlano, resumoDiferencas, retratoTarefas, type RegistoPlano, type TarefaRetrato } from "./planoAntesDepois";
 import { ajustePorFazer, horasDaEmpresa, horasDasMicro, listaMicro, microtarefasDe, mudarMicro, nomesFeitos, porFixar, type Micro, type MudancaMicro } from "./microtarefas";
-import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe } from "./encomendasAjuste";
+import { ajusteReal, anularAjustesDaTarefa, ecDaAdenda, encomendarAjustes, porEncomendarDe, receberDeTeste } from "./encomendasAjuste";
 import { anularEcNoInventario, emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio, resumoEcNegocio, textoResumoEc } from "./inventario/ponteNegocios";
 import { CHAVE_CONTACTO_CONCLUIDO, CODIGO_GRAVAR_NEGOCIO, SEM_PERM, comPermissoesReais, contactoConcluido, passoDe, pelaPermissao, podeNeg, soAteAoContacto, temCodigoReal, type PermNeg } from "./permissoes";
 import { lerVersao } from "./versaoPrototipo";
@@ -374,6 +374,7 @@ export interface Tarefa { nome: string; svcs: SvcId[]; dia: number; dur: number;
   /** 25/11 (Rúben: «a empresa absorve»): as horas que a regra das microtarefas juntou acima do orçamento. Não mudam o valor para o cliente
    *  (impactoDoPlano não as conta); o custo fica na margem. */ hNossa?: number;
   /** 21/10: os materiais desta tarefa já encomendados (pelo nome) e as encomendas de ajuste onde foram (encomendasAjuste.ts) */ encomendado?: MatTarefa[]; ecs?: string[];
+  /** 27/11 (teste): os materiais e equipamentos desta tarefa dados como recebidos pelo botão «Recebido» (o nome e a quantidade) */ recebidos?: { n: string; q: number }[];
   /** 21/10: parada por um imprevisto (o id, imprevistos.ts) até o cliente decidir */ bloqueio?: string;
   /** 21/10: tarefa de uma adenda (o número): os materiais dela só se encomendam com o pagamento da adenda validado (encomendasAjuste.ts) */ adenda?: string;
   /** 3/11: resolve um problema que o cliente reportou na conversa (o id, problemasCliente.ts) */ problema?: string;
@@ -1372,6 +1373,28 @@ export function desbloquearBuraco(S: Pick<Estado, "deals">, d: Negocio, ini: num
   return melhor;
 }
 
+/** 27/11 (Rúben: «quando juntar a equipa, distribuir as tarefas todas e propor a distribuição com base no perfil»): para cada tarefa por
+ *  começar, o membro da equipa que a faz. Primeiro quem tem o ofício (o menos carregado); sem ninguém do ofício, o membro menos carregado
+ *  (marcado «sem o ofício», para o gestor ver). A carga conta as horas que a proposta já deu a cada um. Não muda nada. */
+export interface LinhaDistribuicao { ti: number; nome: string; de: string | null; para: string; doOficio: boolean; h: number }
+export function propostaDeEquipa(p: Plano, membros: string[]): LinhaDistribuicao[] {
+  if (!membros.length) return [];
+  const hoje = p.estado === "em curso" ? p.dia : 0;
+  const carga = new Map<string, number>(membros.map((m) => [m, 0]));
+  const menos = (L: string[]) => [...L].sort((a, b) => carga.get(a)! - carga.get(b)!)[0];
+  const out: LinhaDistribuicao[] = [];
+  p.tasks.map((t, ti) => ({ t, ti })).sort((a, b) => a.t.dia - b.t.dia).forEach(({ t, ti }) => {
+    const v = estadoVivoTarefa(t, p);
+    if (t.exec || v === "feita" || v === "validada" || t.dia < hoje) return;
+    const doOficio = tecnicosDoOficio(t).map((x) => x.id).filter((x) => carga.has(x));
+    const para = doOficio.length ? (doOficio.includes(t.tec ?? "") ? t.tec! : menos(doOficio)) : menos(membros);
+    const h = t.h || t.dur * 8;
+    carga.set(para, carga.get(para)! + h);
+    out.push({ ti, nome: t.nome, de: t.tec ?? null, para, doOficio: doOficio.length > 0, h });
+  });
+  return out;
+}
+
 export function conflitos(p: Plano) {
   const C: { t: Tarefa; tec: Tecnico; dia: number }[] = [];
   for (const t of p.tasks) {
@@ -1568,7 +1591,9 @@ export function mudancasDeValor(d: Negocio): string[] {
   }
   const p = d.obra.plano;
   if (p?.base) {
-    const dn = p.tasks.length - p.base.length, h = diferencas(p).horas;
+    // 27/11 (teste do 1029): as horas que a regra das microtarefas junta ao abrir o Estúdio são da empresa (hNossa) e não mudam o valor;
+    // contavam aqui e o plano ficava bloqueado em «O valor mudou» sem ninguém lhe mexer. As mesmas horas que impactoDoPlano.
+    const dn = p.tasks.length - p.base.length, h = horasDoPlanoParaOCliente(p);
     if (dn > 0) R.push(`Plano: ${dn === 1 ? "1 tarefa a mais" : `${dn} tarefas a mais`}`);
     else if (dn < 0) R.push(`Plano: ${-dn === 1 ? "1 tarefa a menos" : `${-dn} tarefas a menos`}`);
     if (dn >= 0 && Math.abs(h) > 0.001) R.push(`Plano: ${h > 0 ? "+" : "−"}${nfmt(Math.abs(h))} h de trabalho`);
@@ -1641,6 +1666,16 @@ export function medidasRetificadas(d: Negocio): Partial<Record<CampoMedida, numb
 export function difDoAcerto(d: Negocio, S: Estado): number {
   const mi = impactoDasMedidas(d, S, medidasRetificadas(d)), pi = impactoDoPlano(d, S);
   return r2((mi?.medidas ?? 0) + (pi.semValor ? 0 : pi.valor));
+}
+/** 27/11: as horas a mais ou a menos do plano face ao orçamento que vão ao cliente: as que a regra das microtarefas juntou (hNossa)
+ *  ficam de fora, tarefa a tarefa (as tarefas a mais contam inteiras). */
+export function horasDoPlanoParaOCliente(p: Plano): number {
+  if (!p.base) return 0;
+  const b = p.base;
+  return r2(p.tasks.reduce((a, t, i) => {
+    const baseH = b[i]?.h ?? 0, nossas = Math.min(t.hNossa ?? 0, Math.max(0, t.h - baseH));
+    return a + (t.h - nossas - baseH);
+  }, 0));
 }
 export function impactoDoPlano(d: Negocio, S: Estado): { horas: number; valor: number; semValor: boolean } {
   const p = d.obra.plano;
@@ -2388,7 +2423,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     const ok = retificacaoAceite(d) && planoAprovado(d) && (d.orc?.contrato === "assinado" || !!d.orc?.vendaDireta) && !retificacaoPorPagar(d) ? emitirEc(d) : false;
     fase(d, 5);
     const F = faltaParaArrancar(d, undefined, S);
-    avisar({ msg: "Recibo " + rc.n + " " + como, sub: "Passou a Obra" + (F.length ? " · falta " + F.join(", ") : " · pronta a arrancar"), kind: "ok" });
+    // 27/11 (teste do 1029: o aviso dizia «RC 2026/301» e o negócio, relido, «RC 2026/14»): numa organização real o número do recibo validado
+    // à mão é o da base (financeiroReal.ts troca-o no histórico); o aviso não mostra o número provisório do ecrã
+    const provisorio = !!real && como === "emitido";
+    avisar({ msg: provisorio ? "Recibo emitido" : "Recibo " + rc.n + " " + como, sub: (provisorio ? "O número do recibo é o da base, ao gravar · " : "") + "Passou a Obra" + (F.length ? " · falta " + F.join(", ") : " · pronta a arrancar"), kind: "ok" });
     // 12/11 (Rúben: as medidas e o plano só depois do Financeiro): é agora que abrem, ao mesmo tempo. 16/11: o contrato já vem assinado
     if (!ok && !real) avisar({ msg: "Segue a Obra", sub: "Ao mesmo tempo, o supervisor confirma as medidas e as Operações aprovam o plano. Se a retificação mudar o valor, volta ao Financeiro; depois, sai a encomenda de cliente", kind: "auto", atraso: 500 });
     else if (real) avisar({ msg: "A encomenda de cliente é emitida ao gravar", sub: "Com o pagamento validado e o plano aprovado, vai para as Encomendas de cliente: stock reservado; o que falta vai numa encomenda a fornecedor", kind: "auto", atraso: 500 });
@@ -2605,7 +2643,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     return true;
   };
   /** 27/11 (Rúben: «ver em destaque o que falta, link para ver o detalhe»): o aviso de uma tarefa juntada ao plano diz logo o que ela
-   *  precisa e o que falta (por encomendar, por aprovar ao fornecedor, à espera da adenda paga) e leva ao separador Materiais do Estúdio
+   *  precisa e o que falta (por encomendar, compra por aprovar, à espera da adenda paga) e leva ao separador Materiais do Estúdio
    *  da obra, onde está em destaque. Sem o Estúdio aberto, leva ao Inventário (a encomenda de ajuste), como antes. */
   const avisoTarefaNova = (d: Negocio, t: Tarefa, base: { msg: string; sub: string }) => {
     const inv = d.obra.ec?.ref ? resumoEcNegocio(lerInventario(), d.obra.ec.ref) : null;
@@ -3908,6 +3946,28 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (A.planoMudou(d)) return;
       avisar({ msg: "Técnico trocado", sub: `${t.nome} · ${novo.n}`, kind: "ok" });
     },
+    /** 27/11 (Rúben: «equipas já pré-customizadas, e não técnicos isolados; associar à obra»): a equipa vem para esta obra. Cada tarefa
+     *  por começar passa para o membro do ofício dela (o menos carregado nesta obra); as do ofício que a equipa não tem ficam como estão.
+     *  Devolve quantas mudaram. Um só «anular». */
+    associarEquipa(id: number, equipa: { nome: string; membros: string[] }, distribuicao?: { ti: number; para: string }[]): number {
+      if (!exigePerm("obra.planear")) return 0;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado === "concluída") return 0;
+      // a distribuição escolhida pelo gestor (a proposta, com as trocas dele); sem ela, a proposta tal como vem
+      const L = (distribuicao ?? propostaDeEquipa(p, equipa.membros).map((x) => ({ ti: x.ti, para: x.para })))
+        .filter((x) => p.tasks[x.ti] && p.tasks[x.ti].tec !== x.para && TECS.some((y) => y.id === x.para));
+      if (!L.length) { avisar({ msg: `A ${equipa.nome} já está nesta obra`, sub: "Nada a mudar.", kind: "" }); return 0; }
+      guardarBase(p);
+      for (const m of L) {
+        const t = p.tasks[m.ti], de = t.tec; t.tec = m.para;
+        avisarTecnico(p, m.ti, `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(p, t.dia)}`, agora());
+        if (de) avisarTecnico(p, m.ti, `${t.nome} passou para a ${equipa.nome}: já não é consigo`, agora(), de);
+      }
+      log(d, `Plano: a ${equipa.nome} vem para a obra (${L.length} ${L.length === 1 ? "tarefa passou" : "tarefas passaram"} para a equipa)`);
+      if (A.planoMudou(d)) return L.length;
+      avisar({ msg: `${equipa.nome} na obra`, sub: `${L.length} ${L.length === 1 ? "tarefa passou" : "tarefas passaram"} para os membros.`, kind: "ok" });
+      return L.length;
+    },
     /* -------------------------------------------- 15/10: as Operações ajustam o plano antes de arrancar (ajustesPlano.ts) */
     /** Um plano aprovado que muda volta a "por aprovar" (diz-o); devolve true se avisou. */
     planoMudou(d: Negocio): boolean {
@@ -4446,19 +4506,20 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /** 12/11 (quem paga): o ajuste é um atraso ou um erro nosso. Entra já no plano; paga a empresa: o custo (as horas a mais ao €/h do técnico,
      *  e os materiais da tarefa nova) fica registado nas mudanças do plano e no diário, e a margem ao vivo mostra-o. Ao cliente, só um aviso
      *  da data, se o gestor quiser. */
-    ajusteNosso(id: number, aj: AjusteObra, m: { horas?: number; nota?: string; cliente?: boolean } = {}): boolean {
+    ajusteNosso(id: number, aj: AjusteObra, m: { horas?: number; nota?: string; cliente?: boolean; soPlano?: boolean } = {}): boolean {
       if (!exigePerm("obra.planear")) return false;
       const d = deal(id), p = d.obra.plano;
       if (!p || p.estado !== "em curso") { avisar({ msg: "Só com a obra em curso", kind: "bad" }); return false; }
       const I = impactoAjuste(S, p, aj, ocupacaoDosTecnicos(S, d.id), aj.k === "atraso" ? m.horas : undefined);
       if (!I) return false;
       const horas = aj.k === "nova" ? I.horas : Math.max(0, r2(m.horas ?? I.horas));
-      const custo = aj.k === "nova" ? I.custo : r2(horas * custoDaHora(S, p.tasks[aj.ti]));
-      const t = fazerAjuste(d, aj, I, { horas, paga: "empresa", custo, nota: m.nota, cliente: m.cliente });
+      // 27/11 (Rúben: «ajustes sem escolher uma das 3»): «Só acertar o plano» entra já, sem adenda e sem custo na margem
+      const custo = m.soPlano ? 0 : aj.k === "nova" ? I.custo : r2(horas * custoDaHora(S, p.tasks[aj.ti]));
+      const t = fazerAjuste(d, aj, I, { horas, paga: "empresa", custo, nota: m.soPlano ? `Acerto do plano${m.nota ? `: ${m.nota}` : ""}` : m.nota, cliente: m.cliente });
       if (!t) return false;
       // a tarefa nova paga por nós: os materiais vão já numa encomenda de ajuste (como as tarefas novas do gestor)
       if (aj.k === "nova") ajustar(d, "tarefa nova " + t.nome, undefined, true);
-      const subAj = `Paga a empresa${custo ? `: ${eur(custo)} € a menos na margem` : ""}${m.cliente ? " · o cliente vê a data nova no portal" : ""}`;
+      const subAj = m.soPlano ? `Acerto do plano: sem adenda nem custo${m.cliente ? " · o cliente vê a data nova no portal" : ""}` : `Paga a empresa${custo ? `: ${eur(custo)} € a menos na margem` : ""}${m.cliente ? " · o cliente vê a data nova no portal" : ""}`;
       if (aj.k === "nova") avisoTarefaNova(d, t, { msg: "Tarefa juntada ao plano", sub: subAj });
       else avisar({ msg: "Plano ajustado", sub: subAj, kind: "ok" });
       return true;
@@ -4664,6 +4725,28 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       // 21/10: numa tarefa do orçamento, o que a receita já contava fica como encomendado; só o que se junta vai à encomenda de ajuste
       if (!t.nova && !t.encomendado) t.encomendado = materiaisDaTarefa(t, S.svc).map((m) => ({ ...m }));
       t.mats = mats.filter((m) => m.q > 0).map((m) => ({ ...m }));
+    },
+    /** 27/11 (Rúben: «como estamos em testes podes e deves meter um botão a dizer "recebido", o que mostra o material como garantido e
+     *  recebido»): um material (ou equipamento) de uma tarefa nova chegou. Com a encomenda de ajuste no Inventário do browser, recebe-o lá
+     *  (aprova e recebe a compra ao fornecedor: fica reservado para a obra). Sem ela (a Olyvia, a obra de exemplo, o que nem foi
+     *  encomendado, um equipamento), fica marcado na tarefa como recebido e deixa de contar como por encomendar. Fica no histórico. */
+    recebidoTeste(id: number, ti: number, nome: string, ecN?: string) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id), t = d.obra.plano?.tasks[ti];
+      if (!t) return;
+      let noInventario = false;
+      if (ecN && !real) {
+        const e = receberDeTeste(d, ecN, nome);
+        if (e && e !== "sem compra") { avisar({ msg: "Não foi possível receber", sub: e, kind: "bad" }); return; }
+        noInventario = !e;
+      }
+      const m = t.mats?.find((x) => x.n === nome), q = m?.q ?? 1;
+      const rec = (t.recebidos ??= []), r0 = rec.find((x) => x.n === nome);
+      if (r0) r0.q = q; else rec.push({ n: nome, q });
+      // o que ainda não tinha sido encomendado deixa de contar como por encomendar (chegou)
+      if (m) { const enc = (t.encomendado ??= []), e = enc.find((x) => x.n === nome); if (e) e.q = Math.max(e.q, m.q); else enc.push({ ...m }); }
+      log(d, `Teste: ${nome} recebido para ${t.nome}${noInventario ? ` (receção no Inventário, ${ecN})` : ""}`);
+      avisar({ msg: "Recebido", sub: `${nome} · ${t.nome}${noInventario ? " · reservado no armazém para a obra" : ""}`, kind: "ok" });
     },
     /** 21/10: encomenda o que os materiais mudados à mão pedem a mais (encomenda de cliente de ajuste, no Inventário). */
     encomendarMateriais(id: number) {

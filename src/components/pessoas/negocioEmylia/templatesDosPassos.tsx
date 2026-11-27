@@ -219,6 +219,9 @@ export function dadosDaMinuta(d: Negocio, c: ContextoDosTemplates, nome: string,
   return { ...base, ...valores } as ContractVariableData;
 }
 
+/** 27/11: quanto tempo depois de se parar de escrever uma resposta da minuta ela se grava. */
+export const PAUSA_ANTES_DE_GRAVAR_MS = 800;
+
 /** As perguntas {{chave}} da minuta. 12/11: o corpo preenchido já não se mostra aqui: vê-se no contrato montado (ContratoNoPasso), mais abaixo. */
 function MinutaDoContrato({ minuta, valores, aoEscrever, aoGuardar, desativado }: {
   minuta: MinutaDeContrato; valores: Record<string, string>; aoEscrever: (k: string, v: string) => void; aoGuardar: () => void; desativado: boolean;
@@ -297,6 +300,17 @@ function MinutaDoNegocio({ c, children, bloqueado, soEscolher = false }: { c: Co
     const ok = await neg.guardar({ minuta_respostas: valores, contrato_corpo_html: corpoPreenchido(minuta, valores) });
     if (!ok) setValores(guardado);
   };
+  // 27/11 (teste do 1029): a resposta só se gravava ao sair do campo; quem escrevia a última e recarregava (ou avançava logo) perdia-a.
+  // Grava-se também quando se pára de escrever (800 ms); sair do campo continua a gravar logo.
+  const guardarAgora = useRef(guardarRespostas);
+  guardarAgora.current = guardarRespostas;
+  useEffect(() => {
+    if (!minuta) return;
+    const guardado = neg.dados.minuta_respostas;
+    if (Object.keys({ ...guardado, ...valores }).every((k) => (guardado[k] ?? "") === (valores[k] ?? ""))) return;
+    const t = window.setTimeout(() => { void guardarAgora.current(); }, PAUSA_ANTES_DE_GRAVAR_MS);
+    return () => window.clearTimeout(t);
+  }, [valores]); // eslint-disable-line react-hooks/exhaustive-deps
   const escolherMinuta = (id: string | null): void => {
     const m = id ? lista.data?.find((x) => x.id === id) ?? null : null;
     void neg.guardar({ minuta_id: id, minuta_respostas: {}, contrato_corpo_html: m ? corpoPreenchido(m, {}) : null });
