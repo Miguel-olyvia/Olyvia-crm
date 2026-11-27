@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompanyOpcional } from "@/contexts/CompanyContext";
 import { SinalAoVivo } from "@/emylia/SinalAoVivo";
-import { FILTROS_NEGOCIOS, docNegocios, docObra, docObras, docOrcamento, docServicos, eur, type Coluna, type DocRelatorio, type FiltroNegocios, type LinhaBase, type Seccao, type TipoRelatorio } from "@/emylia/relatorios/relatoriosOlyvia";
+import { FILTROS_NEGOCIOS, comNotas, docNegocios, docObra, docObras, docOrcamento, docServicos, lerNotas, eur, type Coluna, type DocRelatorio, type FiltroNegocios, type LinhaBase, type Seccao, type TipoRelatorio } from "@/emylia/relatorios/relatoriosOlyvia";
 import { exportarRelatorio } from "@/emylia/relatorios/exportarRelatorio";
 
 const TIPOS: { k: TipoRelatorio; rot: string; Icone: typeof BarChart3 }[] = [
@@ -135,7 +135,9 @@ export default function RelatoriosOlyvia() {
 
   const obrasL = useMemo(() => (linhas ?? []).filter((x) => x.tipo === "obra" && x.numero != null).sort((a, b) => b.numero! - a.numero!), [linhas]);
   const orcamentos = useMemo(() => (linhas ?? []).filter((x) => x.tipo === "orcamento" && x.numero != null).sort((a, b) => b.numero! - a.numero!), [linhas]);
-  const doc = useMemo<DocRelatorio | null>(() => {
+  // 27/11: a análise que o chat escreveu (insights, melhorias) vem na ligação e entra no relatório, no PDF e no Excel
+  const notas = useMemo(() => lerNotas(params.get("notas")), [params]);
+  const docBase = useMemo<DocRelatorio | null>(() => {
     if (!linhas) return null;
     if (tipo === "obras") return docObras(linhas, nomeOrg);
     if (tipo === "servicos") return docServicos(linhas, nomeOrg, params.get("so") === "todos" ? "todos" : "ganhos");
@@ -150,6 +152,7 @@ export default function RelatoriosOlyvia() {
     }
     return docNegocios(linhas, nomeOrg, filtro);
   }, [linhas, tipo, numero, orcamentos, obrasL, nomeOrg, filtro, params]);
+  const doc = useMemo(() => (docBase ? comNotas(docBase, notas) : null), [docBase, notas]);
 
   const gerar = async (formato: "pdf" | "excel") => {
     if (!doc) return;

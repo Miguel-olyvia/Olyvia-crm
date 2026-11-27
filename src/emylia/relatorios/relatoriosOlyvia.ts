@@ -283,3 +283,35 @@ export function enderecoRelatorio(tipo: TipoRelatorio, o: { numero?: number | nu
   if (o.formato) q.set("formato", o.formato);
   return `/relatorios/olyvia?${q.toString()}`;
 }
+
+/* ------------------------------------------------------------------ 27/11: a análise da Olyvia no relatório */
+// Rúben: «eu pedi insights e ele não os fez; a AI tem de ser flexível». O chat escreve a análise (insights, melhorias, áreas novas) a
+// partir dos números e manda-a na ligação (?notas=…, JSON em base64url); o relatório mostra-a logo a seguir aos números e leva-a no PDF e
+// no Excel. Só texto, com limites (12 pontos de 500 letras).
+export interface NotasIA { titulo?: string; pontos: string[] }
+export function lerNotas(param: string | null): NotasIA | null {
+  if (!param) return null;
+  try {
+    const b64 = param.replace(/-/g, "+").replace(/_/g, "/");
+    const bin = atob(b64 + "===".slice((b64.length + 3) % 4));
+    const json = new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
+    const o = JSON.parse(json) as { titulo?: unknown; pontos?: unknown };
+    const pontos = (Array.isArray(o.pontos) ? o.pontos : []).filter((x): x is string => typeof x === "string").map((x) => x.trim().slice(0, 500)).filter(Boolean).slice(0, 12);
+    if (!pontos.length) return null;
+    return { ...(typeof o.titulo === "string" && o.titulo.trim() ? { titulo: o.titulo.trim().slice(0, 80) } : {}), pontos };
+  } catch { return null; }
+}
+export function escreverNotas(n: NotasIA): string {
+  const bytes = new TextEncoder().encode(JSON.stringify(n));
+  let bin = ""; for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+/** O relatório com a análise da Olyvia a seguir aos números (os KPI). */
+export function comNotas(doc: DocRelatorio, n: NotasIA | null): DocRelatorio {
+  if (!n) return doc;
+  const secao: Seccao = { k: "texto", titulo: n.titulo || "A análise da Olyvia", paragrafos: n.pontos.map((p) => `• ${p}`) };
+  const i = doc.seccoes.findIndex((s) => s.k === "kpis");
+  const seccoes = [...doc.seccoes];
+  seccoes.splice(i >= 0 ? i + 1 : 0, 0, secao);
+  return { ...doc, seccoes };
+}

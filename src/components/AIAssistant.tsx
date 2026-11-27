@@ -30,6 +30,8 @@ import { pt } from "date-fns/locale";
 import olyviaIcon from "@/assets/olyvia-icon.png";
 import { ToolCallList, type ToolCallView } from "@/components/ai-assistant/ToolCallList";
 import { MarkdownChat } from "@/components/ai/MarkdownChat";
+import { useDitado } from "@/components/ai/useDitado";
+import { Mic, Square } from "lucide-react";
 
 interface PendingConfirmation {
   tool: string;
@@ -582,6 +584,11 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
     setInput("");
     streamChat(msg);
   };
+  // 27/11 (Rúben: «e também ter botão para usar voz»): ditar a pergunta; o texto aparece na caixa enquanto se fala e vai quando se cala
+  const ditado = useDitado({
+    aoFalar: (t) => setInput(t),
+    aoAcabar: (t) => { if (!t.trim() || isLoading) return; setInput(""); streamChat(t.trim()); },
+  });
 
   const handleRate = async (messageId: string, rating: number) => {
     const { error } = await supabase
@@ -895,14 +902,22 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
                     ref={inputRef}
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
-                    placeholder="Escreve a tua pergunta..."
+                    placeholder={ditado.aOuvir ? "A ouvir… fale à vontade" : "Escreve a tua pergunta..."}
                     disabled={isLoading}
                     className="flex-1"
                   />
+                  {ditado.suportado && (
+                    <Button type="button" size="icon" variant={ditado.aOuvir ? "destructive" : "outline"} disabled={isLoading}
+                      aria-pressed={ditado.aOuvir} aria-label={ditado.aOuvir ? "Parar de ouvir" : "Falar com a Olyvia"} title={ditado.aOuvir ? "A ouvir… carregue para parar" : "Falar (ditar a pergunta)"}
+                      onClick={() => (ditado.aOuvir ? ditado.parar() : ditado.comecar())} className={ditado.aOuvir ? "animate-pulse motion-reduce:animate-none" : ""}>
+                      {ditado.aOuvir ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />}
+                    </Button>
+                  )}
                   <Button type="submit" size="icon" disabled={!input.trim() || isLoading}>
                     <Send className="h-4 w-4" />
                   </Button>
                 </form>
+                {ditado.erro && <p role="alert" className="mt-2 text-xs text-destructive">{ditado.erro}</p>}
               </div>
             </>
           )}

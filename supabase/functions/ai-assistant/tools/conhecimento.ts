@@ -72,6 +72,8 @@ export const relatorioOlyviaDef: ToolDef = {
         numero: { type: "integer", description: "O número do negócio (na obra e no orçamento)." },
         cliente: { type: "string", description: "O nome do cliente, se não se souber o número (na obra e no orçamento)." },
         formato: { type: "string", enum: ["ver", "pdf", "excel"], description: "ver (abrir na app), pdf ou excel. Por omissão: ver." },
+        insights: { type: "array", items: { type: "string" }, description: "A tua análise para ir DENTRO do relatório (PDF/Excel): insights, melhorias, áreas novas, riscos, 3 a 8 pontos curtos, escritos a partir dos números de uma chamada anterior. Usa quando o pedido pede análise, insights, sugestões ou conclusões." },
+        titulo_analise: { type: "string", description: "O título da secção da análise (por omissão «A análise da Olyvia»)." },
       },
       required: ["tipo"],
     },
@@ -94,11 +96,20 @@ const relatorio_olyvia: Handler = async (ctx, args): Promise<ToolResult> => {
   const filtro = typeof args?.filtro === "string" && (FILTROS[args.filtro] || /^fase:[0-5]$/.test(args.filtro)) ? String(args.filtro) : null;
   const formato = args?.formato === "pdf" || args?.formato === "excel" ? String(args.formato) : null;
   const ler = (tipos: string[]) => sb.from("olyvia_conhecimento").select("tipo, numero, titulo, dados, atualizado_em").eq("organization_id", ctx.organizationId).in("tipo", tipos).limit(4000);
+  // 27/11 (Rúben: «pedi insights e ele não os fez; a AI tem de ser flexível»): a análise escrita pelo chat vai na ligação e entra no
+  // relatório (no ecrã, no PDF e no Excel). JSON em base64url, com limites.
+  const pontos = (Array.isArray(args?.insights) ? args.insights : []).filter((x: unknown) => typeof x === "string" && x.trim()).map((x: string) => x.trim().slice(0, 500)).slice(0, 12);
+  const notas = pontos.length ? (() => {
+    const json = JSON.stringify({ ...(typeof args?.titulo_analise === "string" && args.titulo_analise.trim() ? { titulo: args.titulo_analise.trim().slice(0, 80) } : {}), pontos });
+    let bin = ""; for (const b of new TextEncoder().encode(json)) bin += String.fromCharCode(b);
+    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+  })() : null;
   const ligacao = (numero?: number | null) => {
     const q = new URLSearchParams({ tipo });
     if (numero) q.set("numero", String(numero));
     if (filtro && tipo === "negocios") q.set("filtro", filtro);
     if (tipo === "servicos" && so === "todos") q.set("so", "todos");
+    if (notas) q.set("notas", notas);
     if (formato) q.set("formato", formato);
     return `/relatorios/olyvia?${q.toString()}`;
   };

@@ -145,3 +145,18 @@ describe("27/11: os serviços vendidos e as margens", () => {
     expect(JSON.stringify(semCustos)).not.toMatch(/"Margem"|Margem dos serviços/);
   });
 });
+
+describe("27/11: a análise da Olyvia dentro do relatório", () => {
+  it("vai e volta na ligação (acentos incluídos), entra a seguir aos números e no PDF", async () => {
+    const { comNotas, escreverNotas, lerNotas, docServicos } = await import("./relatoriosOlyvia");
+    const n = { titulo: "Insights e áreas novas", pontos: ["Os Modelos de obra são 58% das vendas: criar pacotes com Carpintaria (margem 32%).", "Rever o preço do Projeto e design (margem 18%)."] };
+    const de = lerNotas(escreverNotas(n));
+    expect(de).toEqual(n);
+    expect(lerNotas("lixo!!")).toBeNull();
+    const { L } = base();
+    const doc = comNotas(docServicos(L, "", "todos"), de);
+    expect(doc.seccoes[1]).toMatchObject({ k: "texto", titulo: "Insights e áreas novas" });
+    const pdf = await gerarPdfRelatorio(doc, new Date(2026, 10, 27, 10, 0));
+    expect(new TextDecoder().decode(pdf.slice(0, 5))).toBe("%PDF-");
+  });
+});
