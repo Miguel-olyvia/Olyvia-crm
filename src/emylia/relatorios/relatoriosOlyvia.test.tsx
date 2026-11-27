@@ -57,7 +57,16 @@ describe("os relatórios", () => {
     const doc = docObras(L);
     const t = doc.seccoes.find((s) => s.k === "tabela")!;
     expect(t.k === "tabela" && t.linhas.some((l) => l[0] === id)).toBe(true);
-    expect(doc.seccoes.some((s) => s.k === "texto" && s.titulo === "O dia das obras")).toBe(true);
+    // 27/11: estruturado (números, progresso, tabelas por tema), sem o texto corrido «obra a obra»
+    expect(doc.seccoes.some((s) => s.k === "texto")).toBe(false);
+    expect(doc.seccoes.some((s) => s.k === "barras" && s.titulo === "Progresso por obra")).toBe(true);
+    const kp = doc.seccoes.find((s) => s.k === "kpis")!;
+    expect(kp.k === "kpis" && kp.itens.map((k) => k.rot)).toEqual(["Obras", "Decisões à espera", "Tarefas feitas", "Os agentes fizeram"]);
+    const linhaObra = (t.k === "tabela" ? t.linhas : []).find((l) => l[0] === id)!;
+    expect(String(linhaObra[4])).toMatch(/^\d+ de \d+$/);
+    // as linhas antigas (sem os dados novos) ainda dão o texto
+    const antigo = docObras(L.map((x) => (x.tipo === "obra" ? { ...x, dados: { estado: "em curso", fim: "qui, 8 abr", decisoes: 0 } } : x)));
+    expect(antigo.seccoes.some((s) => s.k === "texto" && s.titulo === "Obra a obra")).toBe(true);
   });
   it("orçamento: sem os custos, não há margem; com eles, há a secção interna", () => {
     const { L, id } = base();
