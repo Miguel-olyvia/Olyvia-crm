@@ -20,6 +20,9 @@ import { BANCADA_OMISSAO, CHAPA_OMISSAO, TOPO_BANCADA_MM, ficheiroDaChapa, mudar
 import { comprimento, normalInterior, trocosDeParede, type Abertura, type Espaco, type OpcoesPeca, type Parede, type PecaProduto } from "./modelo";
 import { repeticoes, revestimentoDaSuperficie, type Revestimento } from "./revestimentos";
 import { aplicarTextura, pedirTextura, retirarTextura, type TexturaModelo } from "./texturaProduto";
+import { ModeloProprio } from "./ModeloProprio";
+import type { MedidasProduto } from "./modelo3dProprio";
+import { registarFalhaGlb } from "./estadoGlbProprio";
 import { corDaJunta, type AmostraNoMundo, type PlanoRevestimento } from "./revestimentoPrevia";
 import { cotasDaPeca, noEcra } from "./cotasPeca";
 import type { ZonaGlb, ZonasDoProduto } from "./zonasGlb";
@@ -746,27 +749,20 @@ function ParametricoAntigo({ tipo, w, d, h, cor, mat, params, recortes, opc }: {
 }
 
 /* ------------------------------------------------------------------ um GLB opcional por produto, com o paramétrico de reserva */
-class Reserva extends Component<{ reserva: ReactNode; children: ReactNode }, { falhou: boolean }> {
+class Reserva extends Component<{ reserva: ReactNode; children: ReactNode; aoFalhar?: (erro: unknown) => void }, { falhou: boolean }> {
   state = { falhou: false };
   static getDerivedStateFromError() { return { falhou: true }; }
+  componentDidCatch(e: unknown) { this.props.aoFalhar?.(e); }
   render() { return this.state.falhou ? this.props.reserva : this.props.children; }
 }
-/** O GLB próprio de um produto (`mockup3d.url`), escalado à caixa da peça: mesma cache e descodificador (meshopt local) que os modelos do HTML. */
-function ModeloGLB({ url, w, d, h }: { url: string; w: number; d: number; h: number }) {
-  useEffect(() => { reterGlb(url); return () => soltarGlb(url); }, [url]);
-  const scene = lerGlb(url);
-  useFonte("produto", "GLB do produto");
-  const copia = useMemo(() => {
-    const c = scene.clone(true);
-    const caixa = new THREE.Box3().setFromObject(c), tam = caixa.getSize(new THREE.Vector3()), centro = caixa.getCenter(new THREE.Vector3());
-    const k = new THREE.Vector3(w / (tam.x || 1), h / (tam.y || 1), d / (tam.z || 1));
-    c.position.set(-centro.x * k.x, -caixa.min.y * k.y, -centro.z * k.z);
-    c.scale.copy(k);
-    const g = new THREE.Group();
-    g.add(c);
-    return g;
-  }, [scene, w, d, h]);
-  return <primitive object={copia} />;
+/**
+ * O GLB de um produto (`mockup3d.url`): o ModeloProprio (ModeloProprio.tsx), com a mesma cache e descodificador (meshopt local) que os modelos do HTML. 27/11: o GLB só dá a forma; a escala
+ * vem das medidas do produto (`medidas`; null: tamanho nativo) e a cor e a textura do produto (`cor`, a textura do contexto) aplicam-se aos materiais que o contrato permite (modelo3dProprio.ts).
+ */
+function ModeloGLB({ url, medidas, cor, proprio }: { url: string; medidas: MedidasProduto | null; cor?: string; proprio: boolean }) {
+  useFonte("produto", proprio ? "GLB próprio" : "GLB do produto");
+  const tx = useContext(TexturaCtx);
+  return <ModeloProprio url={url} medidas={medidas} cor={cor} textura={proprio && tx ? { tex: tx.tex, ladoCm: tx.lado, tingir: tx.tingir } : null} />;
 }
 
 /** O contorno da peça escolhida: uma moldura fina e rasa, 2 cm à volta da pegada, junto à base (não atravessa a peça nem a bancada). */
@@ -990,6 +986,9 @@ function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel,
   }, [arrasto?.id, original.id, controls, setArrasto, invalidate]);
   const { tipo, altura, cor, url } = m.mockup3d;
   const texturaDaPeca = useTexturaDoModelo(m.mockup3d.textura, cor);
+  // 27/11: o GLB (`url`): as medidas do produto escalam-no (sem medidas do produto, só um GLB próprio fica no tamanho nativo); só um GLB próprio é pintado, e só com a cor DO PRODUTO
+  const medidasGlb: MedidasProduto | null = m.mockup3d.proprio && !m.dimensoes.deNome ? null : { larguraM: p.largura, profundidadeM: p.profundidade, alturaM: altura };
+  const corGlb = m.mockup3d.proprio && m.mockup3d.corDoProduto ? cor : undefined;
   const zonasDaPeca = useMemo<ZonasDaPeca>(() => ({ zonas: m.mockup3d.zonas, realce }), [m.mockup3d.zonas, realce]);
   const reserva = <ErroDoModelo nome={m.nome} w={p.largura} d={p.profundidade} h={altura}><Parametrico tipo={tipo} w={p.largura} d={p.profundidade} h={altura} cor={cor} mat={m.mockup3d.material} params={m.mockup3d.params} recortes={p.recortes} opc={p.opc} generico={m.mockup3d.generico} /></ErroDoModelo>;
   const escolhido = modeloEscolhido(m);
@@ -1008,7 +1007,7 @@ function Peca({ p: original, m, etiquetas, selecionada, fantasma = false, onSel,
         <TexturaCtx.Provider value={texturaDaPeca}>
           <ZonasCtx.Provider value={zonasDaPeca}>
             <AvisarFonte.Provider value={avisar}>
-              {url ? <Reserva reserva={reserva}><Suspense fallback={reserva}><ModeloGLB url={url} w={p.largura} d={p.profundidade} h={altura} /></Suspense></Reserva> : reserva}
+              {url ? <Reserva key={url} reserva={reserva} aoFalhar={(e) => registarFalhaGlb(url, e)}><Suspense fallback={reserva}><ModeloGLB url={url} medidas={medidasGlb} cor={corGlb} proprio={!!m.mockup3d.proprio} /></Suspense></Reserva> : reserva}
             </AvisarFonte.Provider>
           </ZonasCtx.Provider>
         </TexturaCtx.Provider>

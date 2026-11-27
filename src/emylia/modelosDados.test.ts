@@ -47,8 +47,8 @@ describe("as chamadas", () => {
     ] }, error: null });
     const r = await lerModelosGestao(ORG);
     expect(r).toEqual({ ok: true, v: [
-      { id: M1, nome: "SORTY", numero: 1, ativo: true, usados: 3, subcategoria: { id: SUB, nome: "Bases de Duche", sigla: "BD", ativo: true }, categoria: { id: "c1", nome: "Casa de banho", sigla: "DB" }, modelo3d: null },
-      { id: "m2", nome: "ZEUS", numero: 7, ativo: false, usados: 0, subcategoria: { id: SUB, nome: "Bases de Duche", sigla: null, ativo: true }, categoria: null, modelo3d: null },
+      { id: M1, nome: "SORTY", numero: 1, ativo: true, usados: 3, subcategoria: { id: SUB, nome: "Bases de Duche", sigla: "BD", ativo: true }, categoria: { id: "c1", nome: "Casa de banho", sigla: "DB" }, modelo3d: null, glbCaminho: null, glbBytes: null },
+      { id: "m2", nome: "ZEUS", numero: 7, ativo: false, usados: 0, subcategoria: { id: SUB, nome: "Bases de Duche", sigla: null, ativo: true }, categoria: null, modelo3d: null, glbCaminho: null, glbBytes: null },
     ] });
   });
   it("lê o modelo 3D de cada modelo (modelo3d); sem a chave (migração por aplicar) ou fora do formato da base, é null", async () => {

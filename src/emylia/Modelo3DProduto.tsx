@@ -15,7 +15,8 @@ import { ZONAS, aparenciaUnicaDasZonas, zonasDosAtributos, zonasVisuais } from "
 import { chaveDeExclusao } from "./planta3d/aspetoZonas";
 import { hexValido, leiturasDoProduto } from "./planta3d/acabamentoCor3d";
 import type { NoCat } from "./planta3d/catalogo3d";
-import { escolhaPorId, resolverDoNo, textoDaOrigem } from "./planta3d/modelos3dEscolha";
+import { escolhaPorId, resolverDoNo, textoDaOrigem, textoDoGlb } from "./planta3d/modelos3dEscolha";
+import { useGlbDoProduto } from "./glbDoProduto";
 import { aplicacaoDosAtributos, medidaDoRevestimento } from "./planta3d/revestimentoPrevia";
 import type { AtributoDef, AtributoProduto } from "./v2/catalogoModelo";
 
@@ -33,12 +34,18 @@ export interface Modelo3DProdutoProps {
    * de criar, o protótipo) a secção é só para ver, como era.
    */
   alvoConfig3d?: AlvoConfig3d;
+  /**
+   * 27/11: a organização e o Modelo do Catálogo a que o produto pertence (products.model_id): com eles o 3D procura o GLB PRÓPRIO do Modelo, da subcategoria ou da categoria (glbDoProduto.ts:
+   * uma leitura por organização). Sem `org` (o protótipo, um formulário sem base) não há GLB próprio e tudo fica como antes.
+   */
+  org?: string | null;
+  modeloId?: string | null;
 }
 
 const SEM_LIGACOES: readonly Ligacao[] = [];
 
 /** O 3D aberto: nasce com o que há agora e, ao escrever o nome ou as medidas, espera um instante antes de se redesenhar. Só existe enquanto está aberto. */
-function Aberto({ nome, sub, no, arvore, attrs, defs, modelo3d, alvoConfig3d }: Modelo3DProdutoProps) {
+function Aberto({ nome, sub, no, arvore, attrs, defs, modelo3d, alvoConfig3d, glbProprio }: Modelo3DProdutoProps & { glbProprio?: string | null }) {
   // 25/11: a configuração 3D lê-se aqui, quando o 3D abre (uma vez), e não antes; o rascunho das ligações vive aqui para o 3D o mostrar logo, sem gravar
   const cfg = useConfig3d(alvoConfig3d);
   const [rascunho, setRascunho] = useState<readonly Ligacao[] | null>(null);
@@ -112,7 +119,7 @@ function Aberto({ nome, sub, no, arvore, attrs, defs, modelo3d, alvoConfig3d }: 
   return (
     <>
       {cfg.erro && <p role="status" className="mb-2 text-[15px] text-muted-foreground">{cfg.erro} O 3D usa a regra automática.</p>}
-      <Previa3DProduto nome={nomeEspera} sub={sub} no={no} arvore={arvore} medida={medida} cor={cor} textura={textura} modelo3d={modelo3d} medidaRevestimento={medidaRevestimento} aplicacao={aplicacao} zonas={zonas} painelMedidas config3d={config3d} />
+      <Previa3DProduto nome={nomeEspera} sub={sub} no={no} arvore={arvore} medida={medida} cor={cor} textura={textura} modelo3d={modelo3d} medidaRevestimento={medidaRevestimento} aplicacao={aplicacao} zonas={zonas} painelMedidas config3d={config3d} glbProprio={glbProprio} />
     </>
   );
 }
@@ -122,14 +129,16 @@ export function Modelo3DProduto(props: Modelo3DProdutoProps) {
   const idPainel = useId();
   // o modelo e de onde vem: do produto, da subcategoria, da categoria ou automático (pelo nome)
   const origem = resolverDoNo({ produto: props.modelo3d, arvore: props.arvore, no: props.no });
+  // 27/11: o GLB próprio do Modelo, da subcategoria ou da categoria (null enquanto lê, se não há ou se o produto tem escolha manual): manda sobre o id do mesmo nível e o 3D mostra-o
+  const glb = useGlbDoProduto({ org: props.org, modeloId: props.modeloId, no: props.no, arvore: props.arvore, modelo3d: props.modelo3d });
   // 26/11: um modelo do catálogo 3D (HTML) escolhido não se aplica na ficha (só genéricos): diz-se, para o texto não prometer o que o 3D não mostra
-  const htmlIgnorado = PREVIA_SO_GENERICOS && escolhaPorId(origem.modelo)?.familia === "html";
+  const htmlIgnorado = !glb && PREVIA_SO_GENERICOS && escolhaPorId(origem.modelo)?.familia === "html";
   return (
     <div className="grid gap-3">
       {props.alvoConfig3d
         ? <p className="text-[15px] text-muted-foreground">O 3D que o catálogo daria a este produto, pelo modelo escolhido, pelo nome, pela subcategoria e pelas medidas. Os eixos da Medida e as ligações dos atributos às zonas podem guardar-se neste produto, abrindo o 3D.</p>
         : <p className="text-[15px] text-muted-foreground">Só para ver: o 3D que o catálogo daria a este produto, pelo modelo escolhido, pelo nome, pela subcategoria e pelas medidas. Não grava nada.</p>}
-      <p data-testid="modelo3d-origem" className="text-[15px]">Modelo: <span className="font-medium">{textoDaOrigem(origem)}</span>{htmlIgnorado && <span className="text-muted-foreground"> — na ficha o 3D usa só os modelos genéricos: este não se aplica aqui.</span>}</p>
+      <p data-testid="modelo3d-origem" className="text-[15px]">Modelo: <span className="font-medium">{glb ? textoDoGlb(glb) : textoDaOrigem(origem)}</span>{htmlIgnorado && <span className="text-muted-foreground"> — na ficha o 3D usa só os modelos genéricos: este não se aplica aqui.</span>}</p>
       {/* o rótulo fica sempre «Ver em 3D» e quem diz se está aberto é o aria-expanded (o fundo também muda): um rótulo que muda E um aria-expanded diziam a mesma coisa duas vezes */}
       <button type="button" aria-expanded={aberto} aria-controls={idPainel} onClick={() => setAberto((v) => !v)}
         className={cn("inline-flex min-h-11 items-center gap-2 justify-self-start rounded-lg border border-input bg-card px-4 text-[15px] font-medium transition-colors hover:bg-muted aria-expanded:border-primary aria-expanded:bg-muted",
@@ -137,7 +146,7 @@ export function Modelo3DProduto(props: Modelo3DProdutoProps) {
         <Box className="h-4 w-4 text-primary" aria-hidden="true" />Ver em 3D
       </button>
       <div id={idPainel}>
-        {aberto && <Aberto {...props} />}
+        {aberto && <Aberto {...props} glbProprio={glb?.url ?? null} />}
       </div>
     </div>
   );

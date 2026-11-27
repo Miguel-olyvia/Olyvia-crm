@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { useTranslation } from "@/hooks/useTranslation";
 import { CAMINHO_FAMILIAS } from "../catalogoRotas";
 import { Previa3DProduto } from "../Previa3DProduto";
+import { useGlbDoProduto } from "../glbDoProduto";
 import type { NoCat } from "../planta3d/catalogo3d";
 import { CartaoProdutoFamilia } from "./CartaoProdutoFamilia";
 import {
@@ -33,7 +34,10 @@ export interface VerFamilia3DProps {
   categoriasProduto: readonly { id: string; origem?: string }[];
   /** Verdade quando se chegou de uma mudança de medida ou de «Tentar de novo»: o botão ou a ligação que tinham o foco desapareceram, por isso o foco vai para o título. */
   focarTitulo?: boolean;
+  /** 27/11: a organização, para o 3D procurar o GLB próprio do Modelo, da subcategoria ou da categoria do produto (glbDoProduto.ts). Sem ela, o 3D é o de sempre. */
+  org?: string | null;
 }
+const SEM_ARVORE: readonly NoCat[] = [];
 
 /** Uma região viva que nasce vazia e só depois recebe o texto: assim o leitor de ecrã anuncia também o aviso que já existe ao abrir (a mesma técnica do Previa3DProduto). */
 function RegiaoViva({ texto, className }: { texto: string; className: string }) {
@@ -47,7 +51,7 @@ function etiquetaDa(p: ProdutoVista, eixos: readonly EixoVista[], produtos: read
   return eixos.map((e) => nomeParaMostrar(p.valores[e.atributoId]?.nome ?? "", tipoDoEixo(e, produtos) === "cor")).filter(Boolean).join(" · ");
 }
 
-function Vista({ familia, arvore, categoriasProduto }: VerFamilia3DProps) {
+function Vista({ familia, arvore, categoriasProduto, org }: VerFamilia3DProps) {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
   const { produtos } = familia;
@@ -56,6 +60,7 @@ function Vista({ familia, arvore, categoriasProduto }: VerFamilia3DProps) {
   const [anuncio, setAnuncio] = useState("");
   const produto = useMemo(() => produtoDaEscolha(produtos, estado.escolha), [produtos, estado.escolha]);
   const previa = useMemo(() => (produto ? previaDoProduto(produto, eixos, produtos) : null), [produto, eixos, produtos]);
+  const glb = useGlbDoProduto({ org, modeloId: produto?.modeloId ?? null, no: produto ? noDoProduto(produto, categoriasProduto) : null, arvore: arvore ?? SEM_ARVORE });
   const opcoes = useMemo(() => new Map(eixos.map((e) => [e.atributoId, opcoesDoEixo(produtos, e.atributoId)] as const)), [eixos, produtos]);
 
   const escolher = (atributoId: string, valor: string) => {
@@ -80,7 +85,7 @@ function Vista({ familia, arvore, categoriasProduto }: VerFamilia3DProps) {
         {arvore !== null && produto && previa && (
           <>
             <Previa3DProduto nome={produto.nome} sub={produto.subcategoria} no={noDoProduto(produto, categoriasProduto)} arvore={arvore} medida={previa.medida} cor={previa.cor}
-              textura={previa.textura} medidaRevestimento={previa.medidaRevestimento} aplicacao={previa.aplicacao} alturaClasse={ALTURA_3D} />
+              textura={previa.textura} medidaRevestimento={previa.medidaRevestimento} aplicacao={previa.aplicacao} alturaClasse={ALTURA_3D} glbProprio={glb?.url ?? null} />
             {/* a escolha atual por cima do 3D, por baixo do interruptor das medidas (decorativa: o leitor de ecrã ouve o anúncio e o cartão) */}
             <p data-testid="etiqueta-escolha" aria-hidden="true" className="pointer-events-none absolute left-2 top-14 max-w-[calc(100%-1rem)] rounded-md bg-card/95 px-2.5 py-1 text-[15px] font-medium text-foreground shadow-sm">
               {etiquetaDa(produto, eixos, produtos)}

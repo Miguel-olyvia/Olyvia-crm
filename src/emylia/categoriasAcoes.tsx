@@ -12,12 +12,14 @@ import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { guardarSigla } from "./skuDados";
 import { FormSigla } from "./siglasGestao";
 import { CampoModelo3D } from "./CampoModelo3D";
+import { BotaoGlbProprio, ChipGlb } from "./GlbProprioLinha";
+import { ModeloGlbDialogo } from "./ModeloGlbDialogo";
 import { definirModelo3d } from "./modelo3dDados";
 import { herdadoDe, rotuloDoModelo3D } from "./planta3d/modelos3dEscolha";
 import { BOTAO_ICONE, BOTAO_TEXTO, ConfirmarMudanca, ENTRA, FormNome, Razao, produtos, protegido, useGestaoLista } from "./gestaoPecas";
 
 export type Item = SubcategoriaGestao;
-export type Aberto = { t: "nova"; pai: string | null } | { t: "renomear"; id: string } | { t: "sigla"; id: string } | { t: "modelo3d"; id: string };
+export type Aberto = { t: "nova"; pai: string | null } | { t: "renomear"; id: string } | { t: "sigla"; id: string } | { t: "modelo3d"; id: string } | { t: "glb"; id: string };
 /** O que espera confirmação: renomear algo que produtos usam (ou de uso desconhecido). */
 export interface Pendente { item: Item; pai: string | null; nome: string }
 type Gestao = ReturnType<typeof useGestaoLista<CategoriaGestao[]>>;
@@ -25,7 +27,7 @@ type Gestao = ReturnType<typeof useGestaoLista<CategoriaGestao[]>>;
 const nomeTipo = (pai: string | null) => (pai ? "subcategoria" : "categoria");
 
 export interface Ctx {
-  podeEditar: boolean; aGravar: boolean; aberto: Aberto | null; pend: Pendente | null; msg: (onde: string) => string | null;
+  org: string; podeEditar: boolean; aGravar: boolean; aberto: Aberto | null; pend: Pendente | null; msg: (onde: string) => string | null;
   abrir: (a: Aberto) => void; fechar: (focar?: string) => void;
   /** `modelo`: o «Modelo 3D» escolhido ao criar (null: herda); define-se logo a seguir a criar, com o id que a base deu. */
   onCriar: (pai: CategoriaGestao | null, nome: string, modelo?: string | null) => void; onRenomear: (item: Item, pai: string | null, nome: string) => void;
@@ -34,6 +36,8 @@ export interface Ctx {
   onSigla: (item: Item, pai: CategoriaGestao | null, sigla: string) => void;
   /** 24/11: muda o «Modelo 3D» da categoria ou subcategoria (null: volta a herdar). */
   onModelo3d: (item: Item, pai: CategoriaGestao | null, modelo: string | null) => void;
+  /** 27/11: o diálogo do GLB próprio acabou (carregou, substituiu ou removeu: `mensagem` anuncia-se; falhou: null, só se relê). A lista relê antes de a promessa acabar. */
+  onGlbTerminar: (item: Item, mensagem: string | null) => Promise<void>;
   onAtivar: (item: Item, pai: CategoriaGestao | null) => void; onMover: (pai: CategoriaGestao | null, irmas: Item[], i: number, d: -1 | 1) => void;
   /** Uma razão para não reordenar (por exemplo, a lista está filtrada); sem ela, a ordem depende só da posição. */
   semOrdem?: string | null;
@@ -96,8 +100,13 @@ export function useAcoesCategorias(real: FichaProdutoReal, g: Gestao, focoCriar:
     const id = irmas[i].id;
     void g.correr(() => reordenarCategorias(org, pai?.id ?? null, ids), `«${irmas[i].nome}» passou para a posição ${i + d + 1} de ${irmas.length}.`, `est:${id}`).then(() => g.setFoco(d === 1 ? `desc-${id}|sub-${id}` : `sub-${id}|desc-${id}`));
   };
+  /** O diálogo do GLB próprio grava por si (carrega, liga, apaga o antigo); aqui só se relê (e o Catálogo), e se gravou, anuncia-se. Releitura também em falha: o ecrã não pode mentir. */
+  const glbTerminar = async (item: Item, mensagem: string | null) => {
+    if (mensagem) await g.correr(async () => ({ ok: true as const, v: null }), mensagem, `glb:${item.id}`);
+    else await g.reler();
+  };
   const ctx: Ctx = {
-    podeEditar, aGravar: g.aGravar, aberto, pend, msg: g.msg, abrir, fechar, onCriar: criar, onRenomear: renomear, onConfirmar: confirmar,
+    org, onGlbTerminar: glbTerminar, podeEditar, aGravar: g.aGravar, aberto, pend, msg: g.msg, abrir, fechar, onCriar: criar, onRenomear: renomear, onConfirmar: confirmar,
     onVoltarConfirmar: voltarConfirmar, onSigla: gravarSigla, onModelo3d: gravarModelo3d, onAtivar: ativar, onMover: mover,
   };
   return { ctx, aberto, abrir, fechar };
@@ -202,6 +211,31 @@ function PainelModelo3D({ item, pai, g }: { item: Item; pai: CategoriaGestao | n
         <Button variant="outline" className="min-h-11 text-[15px] aria-disabled:cursor-not-allowed aria-disabled:opacity-50" {...protegido(g.aGravar ? "A guardar…" : null, `rz-gm-${item.id}`, () => g.fechar(`m3d-${item.id}`))}>Cancelar</Button>
       </div>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ GLB próprio (27/11) */
+const RAZAO_SEM_PERMISSAO_GLB = "Só quem pode editar produtos muda o modelo 3D próprio.";
+
+/** O chip («GLB · 1,2 MB» ou «Sem GLB») e o botão «Modelo 3D próprio…» de uma categoria ou subcategoria. Sempre à vista; bloqueado sem permissão, a gravar ou numa partilhada (a base recusa). */
+export function GlbProprioLinha({ item, pai, g }: { item: Item; pai: CategoriaGestao | null; g: Ctx }) {
+  const tipo = pai ? "subcategoria" : "categoria";
+  const razao = g.aGravar ? "A guardar…" : !g.podeEditar ? RAZAO_SEM_PERMISSAO_GLB : item.global ? `Esta ${tipo} é partilhada por todas as organizações: não pode ter modelo 3D próprio.` : null;
+  const aberto = g.aberto?.t === "glb" && g.aberto.id === item.id;
+  return (
+    <>
+      <ChipGlb caminho={item.glbCaminho} bytes={item.glbBytes} />
+      <BotaoGlbProprio idBotao={`glb-${item.id}`} rotulo={`Modelo 3D próprio da ${tipo} ${item.nome}${pai ? ` em ${pai.nome}` : ""}`} aberto={aberto} razao={razao} aoAbrir={() => g.abrir({ t: "glb", id: item.id })} />
+    </>
+  );
+}
+
+/** O diálogo do GLB próprio, aberto a partir do botão da linha. Ao fechar, o foco volta ao botão. */
+export function EditarGlbProprio({ item, pai, g }: { item: Item; pai: CategoriaGestao | null; g: Ctx }) {
+  if (!g.podeEditar || item.global || g.aberto?.t !== "glb" || g.aberto.id !== item.id) return null;
+  return (
+    <ModeloGlbDialogo org={g.org} nivel={pai ? "subcategoria" : "categoria"} id={item.id} nome={item.nome} atual={{ caminho: item.glbCaminho ?? null, bytes: item.glbBytes ?? null }} usados={item.usados}
+      aoTerminar={(mensagem) => g.onGlbTerminar(item, mensagem)} aoFechar={() => g.fechar(`glb-${item.id}`)} />
   );
 }
 

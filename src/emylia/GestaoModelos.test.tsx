@@ -116,14 +116,14 @@ describe("Modelos: ler, agrupar e filtrar", () => {
 });
 
 describe("Modelos: só leitura sem products.edit", () => {
-  it("mostra a nota e nenhuma ação (a única exceção é o botão do modelo 3D, desativado e com a razão)", async () => {
+  it("mostra a nota e nenhuma ação (as únicas exceções são os botões do modelo 3D e do modelo 3D próprio, desativados e com a razão)", async () => {
     await abrir(REAL({ podeEditar: false }));
     expect(screen.getByRole("note")).toHaveTextContent("Só de leitura");
     expect(screen.queryByRole("button", { name: "Novo modelo" })).toBeNull();
     const botoes = within(linha("0001 · SORTY")).queryAllByRole("button");
-    expect(botoes).toHaveLength(1);
-    expect(botoes[0]).toHaveAttribute("aria-disabled", "true");
-    expect(botoes[0]).toHaveAccessibleName("Mudar o modelo 3D do modelo SORTY");
+    expect(botoes).toHaveLength(2);
+    expect(botoes.every((b) => b.getAttribute("aria-disabled") === "true")).toBe(true);
+    expect(botoes.map((b) => b.getAttribute("aria-label"))).toEqual(["Mudar o modelo 3D do modelo SORTY", "Modelo 3D próprio do modelo SORTY"]);
   });
 });
 

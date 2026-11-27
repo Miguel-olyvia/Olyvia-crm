@@ -15,6 +15,7 @@ import { PainelAspeto3D } from "./PainelAspeto3D";
 import type { NoCat, ProdutoModelo3D, TipoMockup } from "./planta3d/catalogo3d";
 import type { TexturaModelo } from "./planta3d/texturaProduto";
 import { niveisDoNo } from "./planta3d/modelos3dEscolha";
+import { useEstadoGlb } from "./planta3d/estadoGlbProprio";
 import { cenaDoRevestimento, planearRevestimento, superficieDaPrevia, type MedidaRevestimento, type SuperficieRev } from "./planta3d/revestimentoPrevia";
 
 const carregarVisualizador = () => import("./planta3d/Visualizador3D");
@@ -73,6 +74,11 @@ export interface Previa3DProdutoProps {
   config3d?: Config3dPrevia;
   /** 26/11: a altura da caixa do 3D (classes do Tailwind) quando não há painel «Aspeto 3D»; a omissão é a de sempre (h-64 sm:h-80), a vista da família pede um 3D maior. */
   alturaClasse?: string;
+  /**
+   * 27/11: o URL público do GLB PRÓPRIO que vale para este produto (o do Modelo, da subcategoria ou da categoria; glbDoProduto.ts). O 3D mostra a forma do ficheiro, escalada pelas medidas do
+   * produto e com a cor e a textura dele; se o ficheiro falhar, o genérico de sempre e uma nota. Sem ele, tudo como antes.
+   */
+  glbProprio?: string | null;
 }
 
 const ALTURA_OMISSAO = "h-64 sm:h-80";
@@ -98,7 +104,7 @@ function textoDeAjuda(foco: boolean, dentro: boolean): string {
 }
 
 /** O 3D: a conta do modelo e da cena, o aviso e o visualizador (lazy). Corre dentro do Falha3D, por isso uma excepção aqui também fica na alternativa. */
-function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRevestimento, aplicacao, zonas, painelMedidas = false, config3d, alturaClasse = ALTURA_OMISSAO }: Previa3DProdutoProps) {
+function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRevestimento, aplicacao, zonas, painelMedidas = false, config3d, alturaClasse = ALTURA_OMISSAO, glbProprio }: Previa3DProdutoProps) {
   // o zoom: botões (sempre), pinça (toque), e roda do rato e teclas + e − só com o 3D focado (e a roda só com o rato lá dentro), para a página continuar a rolar
   const comandos = useRef<ComandosVista | null>(null), idAjuda = useId();
   const [foco, setFoco] = useState(false), [dentro, setDentro] = useState(false);
@@ -135,7 +141,9 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
     const botao = origem === "botao" && z ? raiz.current?.querySelector<HTMLElement>(`[data-zona-botao="${z}"]`) : null;
     (botao ?? grupo3d.current)?.focus();
   };
-  const modelo = useMemo(() => modeloParaPrevia({ nome, sub: sub ?? undefined, no, arvore, medida, cor, textura, modelo3d, eixos: eixosEscolhidos, zonas }), [nome, sub, no, arvore, medida, cor, textura, modelo3d, eixosEscolhidos, zonas]);
+  const modelo = useMemo(() => modeloParaPrevia({ nome, sub: sub ?? undefined, no, arvore, medida, cor, textura, modelo3d, eixos: eixosEscolhidos, zonas, glbProprio }), [nome, sub, no, arvore, medida, cor, textura, modelo3d, eixosEscolhidos, zonas, glbProprio]);
+  // 27/11: a nota do GLB próprio (não abriu e mostra-se o genérico; tamanho nativo estranho; muitos triângulos): vem do 3D, por baixo, em estadoGlbProprio.ts
+  const estadoGlb = useEstadoGlb(modelo.mockup3d.proprio ? modelo.mockup3d.url : null);
   const eixosEmVigor = eixosEscolhidos ?? eixosPorOmissao(tipo, medida);
   const zonasDoObjecto = useMemo(() => zonasDoModelo(modelo), [modelo]);
   useEffect(() => { if (zonaFixa && !zonasDoObjecto.some((z) => z.zona === zonaFixa)) setZonaFixa(null); }, [zonaFixa, zonasDoObjecto]);
@@ -170,7 +178,7 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
   // a caixa escolhida à mão não leva o aviso de «sem modelo parecido»; um revestimento só avisa quando a medida falta ou a amostra teve de mudar
   const escolhido = modelo.escolha?.modelo;
   const aviso = plano ? [plano.medidaEmFalta ? "Sem medida: aparecem peças de 60 × 60 cm." : null, plano.aviso].filter(Boolean).join(" ") || undefined
-    : escolhido === "caixa" ? undefined : AVISO[estadoDoModelo(modelo)];
+    : escolhido === "caixa" || modelo.mockup3d.proprio ? undefined : AVISO[estadoDoModelo(modelo)];
   const d = modelo.dimensoes;
   const descricao = plano
     ? `${modelo.nome || "Revestimento sem nome"}: peças de ${nf(plano.pecaRealCm[0])} por ${nf(plano.pecaRealCm[1])} cm, ${superficie === "chao" ? "no chão" : "na parede"}, numa amostra de ${nf(plano.amostraM[0])} por ${nf(plano.amostraM[1])} m.`
@@ -224,6 +232,7 @@ function Corpo({ nome, sub, no, arvore, medida, cor, textura, modelo3d, medidaRe
       <div className="grid gap-2">
       <p id={idAjuda} className={NOTA}>{textoDeAjuda(foco, dentro)}</p>
       {aviso && <Estado texto={aviso} />}
+      {estadoGlb && estadoGlb.tipo !== "ok" && <Estado texto={estadoGlb.texto} />}
       {escolherNo3d && !superficie && (
         <>
           <p className={NOTA}>Clique numa parte da peça para escolher a zona e dizer que atributo a pinta; ou use os botões das zonas, mais abaixo.</p>

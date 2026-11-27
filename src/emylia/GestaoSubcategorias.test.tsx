@@ -61,7 +61,10 @@ describe("Subcategorias: ler e filtrar", () => {
     expect(linha("Antiga")).toHaveTextContent("desativada");
     expect(linha("Louças")).not.toHaveTextContent("desativada");
     expect(linha("Manuais")).toHaveTextContent("Partilhada");
-    expect(within(linha("Manuais")).queryAllByRole("button")).toHaveLength(0);
+    // uma partilhada só se lê: a única exceção é o botão do modelo 3D próprio, à vista mas bloqueado (a base recusa um GLB numa partilhada)
+    const botoesManuais = within(linha("Manuais")).queryAllByRole("button");
+    expect(botoesManuais).toHaveLength(1);
+    expect(botoesManuais[0]).toHaveAttribute("aria-disabled", "true");
   });
 
   it("a pesquisa filtra por nome (sem acentos) e anuncia a contagem numa região de estado", async () => {
@@ -221,7 +224,10 @@ describe("Subcategorias: permissões e estados", () => {
   it("sem products.edit é só leitura: nem Nova subcategoria nem ações, e há uma nota", async () => {
     await abrir(REAL({ podeEditar: false }));
     expect(screen.queryByRole("button", { name: "Nova subcategoria" })).toBeNull();
-    expect(within(linha("Louças")).queryAllByRole("button")).toHaveLength(0);
+    // nenhuma ação, só o botão do modelo 3D próprio, à vista mas bloqueado
+    const botoesLoucas = within(linha("Louças")).queryAllByRole("button");
+    expect(botoesLoucas).toHaveLength(1);
+    expect(botoesLoucas[0]).toHaveAttribute("aria-disabled", "true");
     expect(screen.getByRole("note")).toHaveTextContent("Só de leitura");
   });
 

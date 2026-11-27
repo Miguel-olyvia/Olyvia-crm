@@ -12,7 +12,7 @@ import { resolverDoNo, rotuloDoModelo3D } from "./planta3d/modelos3dEscolha";
 const NOTA = "text-[15px] text-muted-foreground";
 
 interface Props extends Omit<Modelo3DProdutoProps, "modelo3d"> {
-  produto: { id: string; n: string; modelo3d?: string | null };
+  produto: { id: string; n: string; modelo3d?: string | null; /** o Modelo do Catálogo do produto (para o GLB próprio do Modelo) */ modeloId?: string | null };
   real?: FichaProdutoReal;
   anunciar: (msg: string) => void;
 }
@@ -47,7 +47,7 @@ export function Modelo3DFicha({ produto, real, anunciar, ...ver }: Props) {
         </div>
       )}
       {/* 25/11: a configuração 3D (eixos e ligações) só existe para um produto da base; lê-se ao abrir o 3D e grava com products.edit (a base decide: aqui só se esconde o que ela não dá) */}
-      <Modelo3DProduto {...ver} modelo3d={valor} alvoConfig3d={podeGravar ? { org: real!.org, produtoId: produto.id, podeEditar: real!.podeEditar } : undefined} />
+      <Modelo3DProduto {...ver} org={real?.org ?? null} modeloId={produto.modeloId ?? null} modelo3d={valor} alvoConfig3d={podeGravar ? { org: real!.org, produtoId: produto.id, podeEditar: real!.podeEditar } : undefined} />
     </div>
   );
 }

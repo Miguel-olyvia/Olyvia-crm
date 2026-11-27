@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { NOTA } from "./pecasForm";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { lerCategoriasGestao, type CategoriaGestao, type SubcategoriaGestao } from "./categoriasMarcasGestao";
-import { Acoes, EditarModelo3D, EditarSigla, FormNovoRamo, Modelo3DTexto, Renomear, useAcoesCategorias, type Ctx } from "./categoriasAcoes";
+import { Acoes, EditarGlbProprio, EditarModelo3D, EditarSigla, FormNovoRamo, GlbProprioLinha, Modelo3DTexto, Renomear, useAcoesCategorias, type Ctx } from "./categoriasAcoes";
 import { SiglaTexto } from "./siglasGestao";
 import { BOTAO_TEXTO, CARTAO, EstadoLeitura, Razao, Selo, produtos, protegido, useGestaoLista } from "./gestaoPecas";
 
@@ -60,6 +60,7 @@ function Categoria({ c, irmas, g }: { c: CategoriaGestao; irmas: Item[]; g: Ctx 
         {!c.ativo && <Selo>desativada</Selo>}
         <SiglaTexto sigla={c.sigla} />
         <Modelo3DTexto modelo={c.modelo3d} />
+        <GlbProprioLinha item={c} pai={null} g={g} />
         {c.usados != null && <span className={NOTA}>{`Usada em ${produtos(c.usados)}`}</span>}
         <Acoes item={c} pai={null} irmas={irmas} g={g} tipo="a categoria" />
       </div>
@@ -67,6 +68,7 @@ function Categoria({ c, irmas, g }: { c: CategoriaGestao; irmas: Item[]; g: Ctx 
       <Renomear item={c} pai={null} g={g} />
       <EditarSigla item={c} pai={null} g={g} />
       <EditarModelo3D item={c} pai={null} g={g} />
+      <EditarGlbProprio item={c} pai={null} g={g} />
       {edita && !c.ativo && c.subcategorias.length > 0 && <p className={cn(NOTA, "mt-2")}>Ao reativar, as subcategorias reativam-se uma a uma.</p>}
 
       {c.subcategorias.length > 0 ? (
@@ -80,6 +82,7 @@ function Categoria({ c, irmas, g }: { c: CategoriaGestao; irmas: Item[]; g: Ctx 
                   {s.global && <Selo>Partilhada</Selo>}
                   <SiglaTexto sigla={s.sigla} />
                   <Modelo3DTexto modelo={s.modelo3d} />
+                  <GlbProprioLinha item={s} pai={c} g={g} />
                   {s.usados != null && <span className="text-sm text-muted-foreground">{produtos(s.usados)}</span>}
                   <Acoes item={s} pai={c} irmas={subsEditaveis} g={g} tipo="a subcategoria" />
                 </div>
@@ -88,6 +91,7 @@ function Categoria({ c, irmas, g }: { c: CategoriaGestao; irmas: Item[]; g: Ctx 
                 <Renomear item={s} pai={c} g={g} />
                 <EditarSigla item={s} pai={c} g={g} />
                 <EditarModelo3D item={s} pai={c} g={g} />
+                <EditarGlbProprio item={s} pai={c} g={g} />
               </li>
             );
           })}

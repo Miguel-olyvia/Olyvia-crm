@@ -5,6 +5,7 @@
 // gravação, também em falha (useGestaoLista.correr). As subcategorias onde se pode criar vêm de cat_ler_categorias_gestao.
 // 27/11: cada modelo tem o seu «Modelo 3D», igual ao das categorias e subcategorias (CampoModelo3D + definirModelo3d com o alvo 'modelo'): o botão da caixa
 // abre o seletor por baixo da linha; sem escolha herda da subcategoria e depois da categoria (as escolhas delas vêm de cat_ler_categorias_gestao, já lida aqui).
+// 27/11: o GLB PRÓPRIO do modelo: o chip «GLB · 1,2 MB» / «Sem GLB» e o botão «Modelo 3D próprio…» ao lado do seletor, que abre o diálogo (ModeloGlbDialogo.tsx); a lista relê depois.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Pencil, Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,8 @@ import { lerCategoriasGestao, type CategoriaGestao } from "./categoriasMarcasGes
 import { estadoModelo, guardarModelo, lerModelosGestao, numeroSku, rotuloModelo, type ModeloGestao } from "./modelosDados";
 import { ComboPesquisa, semAcentos, type ItemCombo } from "./ComboPesquisa";
 import { CampoModelo3D } from "./CampoModelo3D";
+import { BotaoGlbProprio, ChipGlb } from "./GlbProprioLinha";
+import { ModeloGlbDialogo } from "./ModeloGlbDialogo";
 import { Modelo3DTexto } from "./categoriasAcoes";
 import { definirModelo3d } from "./modelo3dDados";
 import { herdadoDe, rotuloDoModelo3D, type ResolvidoNo } from "./planta3d/modelos3dEscolha";
@@ -24,7 +27,8 @@ const ID_TITULO = "tit-modelos";
 const BORDA = "border-foreground/40";
 const RAZAO_SUB_DESATIVADA = "Reative primeiro a subcategoria na aba Subcategorias.";
 const RAZAO_SEM_PERMISSAO_3D = "Só quem pode editar produtos muda o modelo 3D.";
-type Aberto = { t: "nova" } | { t: "renomear"; id: string } | { t: "modelo3d"; id: string };
+const RAZAO_SEM_PERMISSAO_GLB = "Só quem pode editar produtos muda o modelo 3D próprio.";
+type Aberto = { t: "nova" } | { t: "renomear"; id: string } | { t: "modelo3d"; id: string } | { t: "glb"; id: string };
 interface Grupo { chave: string; categoria: string; subcategoria: string; modelos: ModeloGestao[] }
 
 const numeroDe = (t: string): number | null => (/^\d{1,4}$/.test(t.trim()) ? Number(t.trim()) : null);
@@ -115,6 +119,11 @@ export function GestaoModelos({ real, anunciar }: { real: FichaProdutoReal; anun
     g.correr(() => definirModelo3d(org, "modelo", m.id, modelo),
       modelo ? `Modelo 3D de «${m.nome}»: ${rotuloDoModelo3D(modelo)}.` : `Modelo 3D de «${m.nome}»: automático, herda do nível de cima.`, `m3d:${m.id}`)
       .then((ok) => { if (ok) fechar(`m3d-mod-${m.id}`); });
+  /** O diálogo do GLB próprio grava por si; aqui só se relê (e o Catálogo), e se gravou, anuncia-se. Releitura também em falha: o ecrã não pode mentir. */
+  const glbTerminou = async (m: ModeloGestao, mensagem: string | null) => {
+    if (mensagem) await g.correr(async () => ({ ok: true as const, v: null }), mensagem, `glb:${m.id}`);
+    else await g.reler();
+  };
   const ativar = (m: ModeloGestao) => {
     const ativo = !m.ativo;
     void g.correr(() => estadoModelo(org, m.id, ativo), `Modelo «${m.nome}» ${ativo ? "reativado" : "desativado"}.`, `est:${m.id}`).then(() => g.setFoco(`act-mod-${m.id}`));
@@ -166,6 +175,7 @@ export function GestaoModelos({ real, anunciar }: { real: FichaProdutoReal; anun
                         {gr.modelos.map((m) => (
                           <LinhaModelo key={m.id} m={m} podeEditar={podeEditar} g={g} aberto={aberto} pend={pend?.id === m.id ? pend : null} heranca={herancaDe(m)} semHeranca={semHeranca}
                             onAbrir={() => abrir({ t: "renomear", id: m.id })} onFechar={() => fechar(`ren-mod-${m.id}`)} onRenomear={(nome) => renomear(m, nome)}
+                            onAbrirGlb={() => abrir({ t: "glb", id: m.id })}
                             onAbrir3d={() => abrir({ t: "modelo3d", id: m.id })} onFechar3d={() => fechar(`m3d-mod-${m.id}`)} onModelo3d={(modelo) => void gravarModelo3d(m, modelo)}
                             onConfirmar={() => { if (pend) void gravarNome(m, pend.nome); }} onVoltar={() => { g.setFoco(`gn-mod-${m.id}`); setPend(null); }} onAtivar={() => ativar(m)} />
                         ))}
@@ -176,6 +186,13 @@ export function GestaoModelos({ real, anunciar }: { real: FichaProdutoReal; anun
               ) : <p className={cn(NOTA, "mt-3")}>Nenhum modelo encontrado.</p>}
             </section>
           )}
+          {podeEditar && aberto?.t === "glb" && (() => {
+            const m = modelos.find((x) => x.id === aberto.id);
+            return m ? (
+              <ModeloGlbDialogo org={org} nivel="modelo" id={m.id} nome={m.nome} atual={{ caminho: m.glbCaminho ?? null, bytes: m.glbBytes ?? null }} usados={m.usados}
+                aoTerminar={(mensagem) => glbTerminou(m, mensagem)} aoFechar={() => fechar(`glb-mod-${m.id}`)} />
+            ) : null;
+          })()}
         </>
       )}
     </div>
@@ -212,10 +229,10 @@ function NovoModelo({ elegiveis, modelos, g, onCriar, onFechar }: {
 }
 
 /** Um modelo: «0001 · SORTY», estado em texto, produtos e as ações (só quem edita). */
-function LinhaModelo({ m, podeEditar, g, aberto, pend, heranca, semHeranca, onAbrir, onFechar, onAbrir3d, onFechar3d, onModelo3d, onRenomear, onConfirmar, onVoltar, onAtivar }: {
+function LinhaModelo({ m, podeEditar, g, aberto, pend, heranca, semHeranca, onAbrir, onFechar, onAbrirGlb, onAbrir3d, onFechar3d, onModelo3d, onRenomear, onConfirmar, onVoltar, onAtivar }: {
   m: ModeloGestao; podeEditar: boolean; heranca: ResolvidoNo | null; semHeranca: string;
   g: { aGravar: boolean; msg: (onde: string) => string | null }; aberto: Aberto | null; pend: { id: string; nome: string } | null;
-  onAbrir: () => void; onFechar: () => void; onAbrir3d: () => void; onFechar3d: () => void; onModelo3d: (modelo: string | null) => void;
+  onAbrir: () => void; onFechar: () => void; onAbrirGlb: () => void; onAbrir3d: () => void; onFechar3d: () => void; onModelo3d: (modelo: string | null) => void;
   onRenomear: (nome: string) => void; onConfirmar: () => void; onVoltar: () => void; onAtivar: () => void;
 }) {
   const aRenomear = aberto?.t === "renomear" && aberto.id === m.id;
@@ -224,6 +241,7 @@ function LinhaModelo({ m, podeEditar, g, aberto, pend, heranca, semHeranca, onAb
   const bloqueado = !m.ativo && !m.subcategoria.ativo;
   const rAtivar = grav ?? (bloqueado ? RAZAO_SUB_DESATIVADA : null);
   const r3d = podeEditar ? grav : RAZAO_SEM_PERMISSAO_3D; // sem permissão o botão fica à vista, desativado, e a razão é lida com ele
+  const rGlb = podeEditar ? grav : RAZAO_SEM_PERMISSAO_GLB;
   return (
     <li className="rounded-xl bg-muted/50 p-2 pl-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -231,6 +249,7 @@ function LinhaModelo({ m, podeEditar, g, aberto, pend, heranca, semHeranca, onAb
         {!m.ativo && <Selo>desativado</Selo>}
         <span className="text-sm text-muted-foreground">{produtos(m.usados)}</span>
         <Modelo3DTexto modelo={m.modelo3d} />
+        <ChipGlb caminho={m.glbCaminho} bytes={m.glbBytes} />
         <span className="ml-auto flex flex-wrap items-center gap-1">
           {podeEditar && (
             <>
@@ -244,6 +263,7 @@ function LinhaModelo({ m, podeEditar, g, aberto, pend, heranca, semHeranca, onAb
             <Box className="h-4 w-4" aria-hidden="true" />
           </button>
           <Razao id={`rz-m3d-mod-${m.id}`}>{r3d}</Razao>
+          <BotaoGlbProprio idBotao={`glb-mod-${m.id}`} rotulo={`Modelo 3D próprio do modelo ${m.nome}`} aberto={aberto?.t === "glb" && aberto.id === m.id} razao={rGlb} aoAbrir={onAbrirGlb} />
           {podeEditar && (
             <>
               <button id={`act-mod-${m.id}`} type="button" aria-label={`${m.ativo ? "Desativar" : "Reativar"} o modelo ${m.nome}`} className={cn(BOTAO_TEXTO, "border-transparent")} {...protegido(rAtivar, `rz-act-mod-${m.id}`, onAtivar)}>

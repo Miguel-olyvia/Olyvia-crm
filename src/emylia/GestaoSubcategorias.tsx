@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 import { CAMPO, CHIP, NOTA, Campo } from "./pecasForm";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { lerCategoriasGestao, type CategoriaGestao, type SubcategoriaGestao } from "./categoriasMarcasGestao";
-import { Acoes, EditarModelo3D, EditarSigla, FormNovoRamo, Modelo3DTexto, Renomear, useAcoesCategorias, type Ctx } from "./categoriasAcoes";
+import { Acoes, EditarGlbProprio, EditarModelo3D, EditarSigla, FormNovoRamo, GlbProprioLinha, Modelo3DTexto, Renomear, useAcoesCategorias, type Ctx } from "./categoriasAcoes";
 import { SiglaTexto } from "./siglasGestao";
 import { ComboPesquisa, semAcentos, type ItemCombo } from "./ComboPesquisa";
 import { BOTAO_TEXTO, CARTAO, EstadoLeitura, Razao, Selo, produtos, protegido, useGestaoLista } from "./gestaoPecas";
@@ -150,6 +150,7 @@ function LinhaSub({ s, c, g }: { s: SubcategoriaGestao; c: CategoriaGestao; g: C
         {s.global && <Selo>Partilhada</Selo>}
         <SiglaTexto sigla={s.sigla} />
         <Modelo3DTexto modelo={s.modelo3d} />
+        <GlbProprioLinha item={s} pai={c} g={g} />
         <span className="text-sm text-muted-foreground">Categoria: {c.nome}{!c.ativo && " (desativada)"}</span>
         {s.usados != null && <span className="text-sm text-muted-foreground">{produtos(s.usados)}</span>}
         <Acoes item={s} pai={c} irmas={irmas} g={g} tipo="a subcategoria" />
@@ -159,6 +160,7 @@ function LinhaSub({ s, c, g }: { s: SubcategoriaGestao; c: CategoriaGestao; g: C
       <Renomear item={s} pai={c} g={g} />
       <EditarSigla item={s} pai={c} g={g} />
       <EditarModelo3D item={s} pai={c} g={g} />
+      <EditarGlbProprio item={s} pai={c} g={g} />
     </li>
   );
 }
