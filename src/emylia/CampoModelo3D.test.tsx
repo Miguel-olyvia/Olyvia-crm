@@ -35,6 +35,17 @@ describe("CampoModelo3D", () => {
     expect(screen.getByText("Herdado da subcategoria Sanitas: Sanita de chão.")).toBeInTheDocument();
   });
 
+  it("herdado do Modelo (27/11): «Herdado do modelo X: Y», no botão e na frase", () => {
+    render(<CampoModelo3D valor={null} onChange={vi.fn()} heranca={{ modelo: "bide", origem: "modelo", de: "SMOOTH" }} nivel="produto" />);
+    expect(botao()).toHaveTextContent("Automático (herda: Bidé, do modelo SMOOTH)");
+    expect(screen.getByText("Herdado do modelo SMOOTH: Bidé.")).toBeInTheDocument();
+  });
+
+  it("escolhido no próprio Modelo: «Escolhido neste modelo: Y»", () => {
+    render(<CampoModelo3D valor="bide" onChange={vi.fn()} heranca={AUTO} nivel="modelo" />);
+    expect(screen.getByText("Escolhido neste modelo: Bidé.")).toBeInTheDocument();
+  });
+
   it("herdado da categoria", () => {
     render(<CampoModelo3D valor={null} onChange={vi.fn()} heranca={{ modelo: "banheira", origem: "categoria", de: "Casa de banho" }} />);
     expect(screen.getByText("Herdado da categoria Casa de banho: Banheira.")).toBeInTheDocument();

@@ -1,5 +1,6 @@
-// A escolha do «Modelo 3D» de um produto, em TRÊS níveis com herança: o produto, a subcategoria e a categoria. A ordem de decisão é
-//   produto > subcategoria > categoria > automático (o classificador de catalogo3d.ts: pelo nome, pela subcategoria e pelo ramo da árvore).
+// A escolha do «Modelo 3D» de um produto, em QUATRO níveis com herança: o produto, o Modelo do Catálogo (0001 SMOOTH…), a subcategoria e a categoria. A
+// ordem de decisão é produto > MODELO > subcategoria > categoria > automático (o classificador de catalogo3d.ts: pelo nome, pela subcategoria e pelo
+// ramo da árvore). 27/11: o nível do Modelo é novo e opcional: quem não o passa tem exactamente o resultado de antes (retrocompatível).
 // Vazio (null, undefined, '') herda do nível de cima. Funções puras, sem React nem three; a base só guarda o id (texto ^[a-z0-9_]{1,40}$, sem lista fechada):
 // o que cada id quer dizer vive AQUI.
 //
@@ -7,6 +8,9 @@
 // (cat_ler_produtos_pagina + product_categories.modelo_3d). Os lotes cat_ler_produtos_tabelas(_servicos) e cat_ler_catalogo(_servicos) NÃO trazem o modelo por produto,
 // só o das categorias e subcategorias: quem lê um catálogo desses (a planta, o catálogo em memória) só resolve subcategoria > categoria > automático, e o override do
 // produto não entra. Se um dia esses lotes passarem a trazê-lo, basta o campo `modelo3d` nas linhas (real/lerCatalogo.ts já o copia).
+// O `modelo3d` do MODELO (product_models.modelo_3d) vem de cat_ler_modelos_gestao (página de Modelos). A ficha e a planta só o usam quando as leituras do produto
+// (cat_ler_produto, cat_ler_produtos_pagina e os lotes) passarem a trazer o `modelo3d` do Modelo a que o produto pertence (product.model_id): até lá o nível
+// existe só aqui, na regra, e o `resolverDoNo`/`herdadoDe` aceitam-no em `modelo`.
 //
 // Os modelos que se podem escolher:
 //  - genéricos: um por categoria de categoriasGlb.ts (CATEGORIAS_GLB, com os 7 novos de categoriasGlbNovas.ts); o id é o da categoria;
@@ -17,12 +21,12 @@
 //    revestimentoPrevia.ts, onde está também a regra da vista por omissão). Na planta e no classificador continuam a cair na caixa com as medidas.
 import { CATEGORIAS_GLB } from "./categoriasGlb";
 
-export type OrigemModelo3D = "produto" | "subcategoria" | "categoria" | "automatico";
+export type OrigemModelo3D = "produto" | "modelo" | "subcategoria" | "categoria" | "automatico";
 /** `generico`: uma categoria de categoriasGlb.ts; `html`: um modelo exacto do catálogo 3D; `caixa`; `revestimento`: ainda cai na caixa. */
 export type FamiliaModelo = "generico" | "html" | "caixa" | "revestimento";
 export interface ModeloEscolha { id: string; rotulo: string; grupo: string; familia: FamiliaModelo }
 export interface ResolvidoModelo3D { modelo: string | null; origem: OrigemModelo3D }
-/** Como `ResolvidoModelo3D`, mais o nome da subcategoria ou da categoria de onde vem (null: do produto ou automático). */
+/** Como `ResolvidoModelo3D`, mais o nome do modelo, da subcategoria ou da categoria de onde vem (null: do produto ou automático). */
 export interface ResolvidoNo extends ResolvidoModelo3D { de: string | null }
 
 export const ID_CAIXA = "caixa";
@@ -76,10 +80,11 @@ export const rotuloDoModelo3D = (id: string): string => POR_ID.get(id)?.rotulo ?
  */
 const limpo = (v: unknown): string | null => (ehIdDeModelo3D(v) && POR_ID.has(v) ? v : null);
 
-/** Produto > subcategoria > categoria > automático. Vazio herda do nível de cima. */
-export function resolverModelo3D(n: { produto?: string | null; subcategoria?: string | null; categoria?: string | null }): ResolvidoModelo3D {
-  const p = limpo(n.produto), s = limpo(n.subcategoria), c = limpo(n.categoria);
+/** Produto > modelo > subcategoria > categoria > automático. Vazio herda do nível de cima; sem `modelo` dá o mesmo que antes de ele existir. */
+export function resolverModelo3D(n: { produto?: string | null; modelo?: string | null; subcategoria?: string | null; categoria?: string | null }): ResolvidoModelo3D {
+  const p = limpo(n.produto), m = limpo(n.modelo), s = limpo(n.subcategoria), c = limpo(n.categoria);
   if (p) return { modelo: p, origem: "produto" };
+  if (m) return { modelo: m, origem: "modelo" };
   if (s) return { modelo: s, origem: "subcategoria" };
   if (c) return { modelo: c, origem: "categoria" };
   return { modelo: null, origem: "automatico" };
@@ -98,33 +103,36 @@ export function niveisDoNo(arvore: readonly NoComModelo[], no: string | null | u
   return { subcategoria: { nome: n.n, modelo: n.modelo3d }, categoria: { nome: pai.n, modelo: pai.modelo3d } };
 }
 
-/** O modelo resolvido a partir dos níveis de cima (sem o produto), com o nome de onde vem. */
-export function herdadoDe(n: { subcategoria?: NivelModelo | null; categoria?: NivelModelo | null }): ResolvidoNo {
-  const r = resolverModelo3D({ subcategoria: n.subcategoria?.modelo, categoria: n.categoria?.modelo });
-  const de = r.origem === "subcategoria" ? n.subcategoria?.nome : r.origem === "categoria" ? n.categoria?.nome : undefined;
+/** O modelo resolvido a partir dos níveis de cima (sem o produto), com o nome de onde vem. `modelo`: o Modelo do Catálogo a que o produto pertence (nome e escolha). */
+export function herdadoDe(n: { modelo?: NivelModelo | null; subcategoria?: NivelModelo | null; categoria?: NivelModelo | null }): ResolvidoNo {
+  const r = resolverModelo3D({ modelo: n.modelo?.modelo, subcategoria: n.subcategoria?.modelo, categoria: n.categoria?.modelo });
+  const de = r.origem === "modelo" ? n.modelo?.nome : r.origem === "subcategoria" ? n.subcategoria?.nome : r.origem === "categoria" ? n.categoria?.nome : undefined;
   return { ...r, de: de ?? null };
 }
 
 /**
- * O modelo de um produto na árvore: o do próprio produto, senão o da subcategoria, senão o da categoria. `soHerdado`: ignora o produto (o que o produto
- * herdaria se não escolhesse nada: é o que o seletor mostra em «Automático (herda: …)»).
+ * O modelo de um produto na árvore: o do próprio produto, senão o do Modelo (`modelo`, se o chamador o souber), senão o da subcategoria, senão o da categoria.
+ * `soHerdado`: ignora o produto (o que o produto herdaria se não escolhesse nada: é o que o seletor mostra em «Automático (herda: …)»); o Modelo continua a contar.
  */
-export function resolverDoNo(o: { produto?: string | null; arvore: readonly NoComModelo[]; no: string | null | undefined; soHerdado?: boolean }): ResolvidoNo {
-  const herdado = herdadoDe(niveisDoNo(o.arvore, o.no));
+export function resolverDoNo(o: { produto?: string | null; modelo?: NivelModelo | null; arvore: readonly NoComModelo[]; no: string | null | undefined; soHerdado?: boolean }): ResolvidoNo {
+  const herdado = herdadoDe({ ...niveisDoNo(o.arvore, o.no), modelo: o.modelo ?? null });
   const proprio = o.soHerdado ? null : limpo(o.produto);
   return proprio ? { modelo: proprio, origem: "produto", de: null } : herdado;
 }
 
-/** «Sanita de chão (da subcategoria Sanitas)», «Bidé (escolhido neste produto)» ou «automático, pelo nome e pela subcategoria». */
+/** «do modelo», «da subcategoria» ou «da categoria»: de onde vem o que se herda. */
+export const daOrigem = (origem: OrigemModelo3D): string => (origem === "modelo" ? "do modelo" : origem === "subcategoria" ? "da subcategoria" : "da categoria");
+
+/** «Sanita de chão (da subcategoria Sanitas)», «Bidé (do modelo SMOOTH)», «Bidé (escolhido neste produto)» ou «automático, pelo nome e pela subcategoria». */
 export function textoDaOrigem(r: ResolvidoNo): string {
   if (!r.modelo) return "automático, pelo nome e pela subcategoria";
   const nome = rotuloDoModelo3D(r.modelo);
   if (r.origem === "produto") return `${nome} (escolhido neste produto)`;
-  return `${nome} (da ${r.origem === "subcategoria" ? "subcategoria" : "categoria"}${r.de ? ` ${r.de}` : ""})`;
+  return `${nome} (${daOrigem(r.origem)}${r.de ? ` ${r.de}` : ""})`;
 }
 
 /** O rótulo da primeira opção do seletor: «Automático (herda: Sanita de chão, da subcategoria Sanitas)». */
 export function rotuloAutomatico(h: ResolvidoNo): string {
   if (!h.modelo) return "Automático (herda: o classificador, pelo nome e pela subcategoria)";
-  return `Automático (herda: ${rotuloDoModelo3D(h.modelo)}, da ${h.origem === "subcategoria" ? "subcategoria" : "categoria"}${h.de ? ` ${h.de}` : ""})`;
+  return `Automático (herda: ${rotuloDoModelo3D(h.modelo)}, ${daOrigem(h.origem)}${h.de ? ` ${h.de}` : ""})`;
 }

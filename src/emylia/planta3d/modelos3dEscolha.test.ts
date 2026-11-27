@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import { CATEGORIAS_GLB } from "./categoriasGlb";
 import {
-  GRUPOS_MODELO, ID_CAIXA, ID_REVESTIMENTO_CHAO, ID_REVESTIMENTO_PAREDE, MODELOS_ESCOLHA, ehIdDeModelo3D, escolhaPorId, resolverDoNo, resolverModelo3D, rotuloDoModelo3D, textoDaOrigem,
+  GRUPOS_MODELO, ID_CAIXA, ID_REVESTIMENTO_CHAO, ID_REVESTIMENTO_PAREDE, MODELOS_ESCOLHA, ehIdDeModelo3D, escolhaPorId, herdadoDe, resolverDoNo, resolverModelo3D, rotuloAutomatico, rotuloDoModelo3D, textoDaOrigem,
 } from "./modelos3dEscolha";
 
 describe("a lista dos modelos escolháveis", () => {
@@ -140,5 +140,56 @@ describe("textoDaOrigem", () => {
     expect(textoDaOrigem({ modelo: "banheira", origem: "categoria", de: "Casa de banho" })).toBe("Banheira (da categoria Casa de banho)");
     expect(textoDaOrigem({ modelo: "bide", origem: "produto", de: null })).toBe("Bidé (escolhido neste produto)");
     expect(textoDaOrigem({ modelo: null, origem: "automatico", de: null })).toBe("automático, pelo nome e pela subcategoria");
+  });
+});
+
+// 27/11: o nível do MODELO (0001 SMOOTH…) entre o produto e a subcategoria: produto > modelo > subcategoria > categoria > automático.
+describe("com o nível do Modelo: produto > modelo > subcategoria > categoria > automático", () => {
+  it("o produto continua a mandar sobre o modelo", () => {
+    expect(resolverModelo3D({ produto: "sanita", modelo: "bide", subcategoria: "lavatorio", categoria: "banheira" })).toEqual({ modelo: "sanita", origem: "produto" });
+  });
+  it("sem produto, o modelo manda sobre a subcategoria e a categoria", () => {
+    expect(resolverModelo3D({ produto: null, modelo: "bide", subcategoria: "lavatorio", categoria: "banheira" })).toEqual({ modelo: "bide", origem: "modelo" });
+  });
+  it("modelo vazio, só espaços, fora do formato ou desconhecido da lista herda da subcategoria e depois da categoria", () => {
+    for (const m of [null, undefined, "", "  ", "Sem Formato", "modelo_novo"]) {
+      expect(resolverModelo3D({ modelo: m, subcategoria: "lavatorio", categoria: "banheira" })).toEqual({ modelo: "lavatorio", origem: "subcategoria" });
+      expect(resolverModelo3D({ modelo: m, categoria: "banheira" })).toEqual({ modelo: "banheira", origem: "categoria" });
+      expect(resolverModelo3D({ modelo: m })).toEqual({ modelo: null, origem: "automatico" });
+    }
+  });
+  it("retrocompatível: sem o nível do modelo dá exactamente o que dava antes", () => {
+    for (const n of [
+      { produto: "sanita", subcategoria: "bide", categoria: "banheira" }, { produto: null, subcategoria: "bide", categoria: "banheira" },
+      { subcategoria: null, categoria: "banheira" }, {}, { produto: "modelo_novo", subcategoria: "bide" },
+    ]) expect(resolverModelo3D({ ...n, modelo: null })).toEqual(resolverModelo3D(n));
+  });
+
+  const ARV = [
+    { id: "c1", n: "Casa de banho", pai: null, modelo3d: "banheira" },
+    { id: "s1", n: "Sanitas", pai: "c1", modelo3d: "sanita" },
+    { id: "s2", n: "Bidés", pai: "c1" },
+  ];
+  it("resolverDoNo: o modelo do Modelo vem com o nome dele em `de`", () => {
+    expect(resolverDoNo({ arvore: ARV, no: "s1", modelo: { nome: "SMOOTH", modelo: "bide" } })).toEqual({ modelo: "bide", origem: "modelo", de: "SMOOTH" });
+  });
+  it("resolverDoNo: o produto manda sobre o Modelo; soHerdado ignora o produto mas não o Modelo", () => {
+    expect(resolverDoNo({ produto: "mesa", arvore: ARV, no: "s1", modelo: { nome: "SMOOTH", modelo: "bide" } })).toEqual({ modelo: "mesa", origem: "produto", de: null });
+    expect(resolverDoNo({ produto: "mesa", arvore: ARV, no: "s1", modelo: { nome: "SMOOTH", modelo: "bide" }, soHerdado: true })).toEqual({ modelo: "bide", origem: "modelo", de: "SMOOTH" });
+  });
+  it("resolverDoNo: um Modelo sem escolha (ou sem Modelo) herda da árvore como antes", () => {
+    expect(resolverDoNo({ arvore: ARV, no: "s1", modelo: { nome: "SMOOTH", modelo: null } })).toEqual({ modelo: "sanita", origem: "subcategoria", de: "Sanitas" });
+    expect(resolverDoNo({ arvore: ARV, no: "s2", modelo: { nome: "SMOOTH" } })).toEqual({ modelo: "banheira", origem: "categoria", de: "Casa de banho" });
+    expect(resolverDoNo({ arvore: ARV, no: "s2", modelo: null })).toEqual(resolverDoNo({ arvore: ARV, no: "s2" }));
+  });
+  it("herdadoDe: com o Modelo, vem dele; sem ele, como antes", () => {
+    expect(herdadoDe({ modelo: { nome: "SMOOTH", modelo: "bide" }, subcategoria: { nome: "Sanitas", modelo: "sanita" } })).toEqual({ modelo: "bide", origem: "modelo", de: "SMOOTH" });
+    expect(herdadoDe({ subcategoria: { nome: "Sanitas", modelo: "sanita" } })).toEqual({ modelo: "sanita", origem: "subcategoria", de: "Sanitas" });
+  });
+  it("os textos dizem «do modelo» e os de sempre ficam iguais", () => {
+    expect(textoDaOrigem({ modelo: "bide", origem: "modelo", de: "SMOOTH" })).toBe("Bidé (do modelo SMOOTH)");
+    expect(rotuloAutomatico({ modelo: "bide", origem: "modelo", de: "SMOOTH" })).toBe("Automático (herda: Bidé, do modelo SMOOTH)");
+    expect(rotuloAutomatico({ modelo: "sanita", origem: "subcategoria", de: "Sanitas" })).toBe("Automático (herda: Sanita de chão, da subcategoria Sanitas)");
+    expect(rotuloAutomatico({ modelo: "banheira", origem: "categoria", de: "Casa de banho" })).toBe("Automático (herda: Banheira, da categoria Casa de banho)");
   });
 });
