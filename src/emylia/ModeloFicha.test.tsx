@@ -18,6 +18,8 @@ vi.mock("@/integrations/supabase/client", () => {
   return { supabase: { rpc: vi.fn(async (f: string, a: Record<string, unknown>) => { base.chamadas.push({ f, a }); return base.responder(f, a); }), from: vi.fn(() => cadeia()) } };
 });
 
+// 27/11: este teste e do gravar do modelo, nao do 3D: o 3D da ficha le o GLB proprio por outra via (glbCatalogoCache) e juntaria uma leitura de categorias a ordem das chamadas
+vi.mock("./glbCatalogoCache", () => ({ lerGlbsDoCatalogo: async () => null, invalidarGlbsDoCatalogo: () => undefined }));
 import { FichaProduto } from "./FichaProduto";
 import { reporCustos } from "./v2/custosStore";
 import { reporCatalogo } from "./v2/catalogoStore";
