@@ -13,7 +13,8 @@ export type TomDoc = "ok" | "espera" | "mau" | "neutro";
 export interface DocEnviado {
   id: string;
   /** o que se abre (o documento) */
-  k: "proposta" | "contrato" | "fatura" | "faturaTranche" | "propostaAdenda" | "contratoAdenda" | "faturaAdenda" | "auto";
+  k: "proposta" | "contrato" | "fatura" | "faturaTranche" | "propostaAdenda" | "contratoAdenda" | "faturaAdenda" | "auto"
+    /** 27/11: o contrato real (PDF assinado), quando a app não gerou a minuta: só em «Tudo do negócio» */ | "contratoReal";
   titulo: string; numero: string;
   /** quando foi enviado (como o motor o guarda) */
   quando: string;
@@ -74,6 +75,11 @@ export function documentosDoNegocio(d: Negocio, S?: Estado): DocDoNegocio[] {
   for (const x of documentosEnviados(d, S)) {
     const fase = x.k === "proposta" || x.k === "contrato" ? 3 : x.k === "fatura" || x.k === "faturaTranche" ? 4 : 5;
     L.push({ ...x, fase });
+  }
+  // 27/11 (Rúben: «preciso dos contratos reais aqui»): com a proposta aceite e sem minuta gerada pela app, o contrato é o PDF assinado
+  if (o?.aceite && !o.contrato && !o.vendaDireta) {
+    L.push({ id: "contratoReal", k: "contratoReal", titulo: "Contrato de empreitada", numero: numeroDoContratoDoNegocio(d), quando: o.aceite,
+      estado: "O assinado, em PDF", tom: "neutro", reenvio: "contrato", fase: 3 });
   }
   return L;
 }

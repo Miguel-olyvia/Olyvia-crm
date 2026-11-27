@@ -169,7 +169,8 @@ function ListaDocs({ ctx, d, docs, q }: { ctx: Ctx; d: Negocio; docs: DocDoNegoc
             </button>
             <span className="flex gap-1.5">
               <Button type="button" size="sm" variant="outline" className="min-h-9 flex-1 rounded-full" onClick={() => setAberto({ x, pdf: false })}><Eye className="mr-1.5 h-4 w-4" aria-hidden="true" />Ver</Button>
-              <Button type="button" size="sm" variant="outline" className="min-h-9 flex-1 rounded-full" onClick={() => setAberto({ x, pdf: true })} aria-label={`${x.titulo} ${x.numero} em PDF`}><Download className="mr-1.5 h-4 w-4" aria-hidden="true" />PDF</Button>
+              {/* 27/11: o contrato real já é um PDF (descarrega-se na janela) */}
+              {x.k !== "contratoReal" && <Button type="button" size="sm" variant="outline" className="min-h-9 flex-1 rounded-full" onClick={() => setAberto({ x, pdf: true })} aria-label={`${x.titulo} ${x.numero} em PDF`}><Download className="mr-1.5 h-4 w-4" aria-hidden="true" />PDF</Button>}
             </span>
           </li>
         ))}
