@@ -19,3 +19,30 @@ describe("a aceitação da proposta no histórico", () => {
     expect(outra.hist.filter((h) => /aceitou a proposta/.test(h.t))).toHaveLength(1);
   });
 });
+
+// 27/11 (teste do 1029 no testarh): a assinatura do contrato no portal também não aparecia no histórico
+describe("a assinatura do contrato no histórico", () => {
+  it("lida da base com o contrato assinado e sem linha no histórico, junta-a a seguir ao envio do contrato; com ela, não repete", () => {
+    const S = seed();
+    const d = structuredClone(S.deals.find((x) => x.orc?.aceite)!);
+    d.orc!.contrato = "assinado";
+    d.hist = [{ t: "Fatura FT 1 registada", q: "27/11 12:11", k: "a" }, { t: "Contrato enviado para assinatura no portal", q: "27/11 12:10", k: "a" },
+      { t: "O cliente aceitou a proposta no portal", q: "24/11 13:25", k: "a" }];
+    const lido = { id: "x", entityId: "e", estadoCrm: "", fluxoEmylia: true, docsCrm: false, linhas: paraLinhas(d) } as NegocioLido;
+    const r = negocioDoLido(lido);
+    const i = r.hist.findIndex((h) => h.t === "O cliente assinou o contrato no portal");
+    expect(i).toBe(1);
+    expect(r.hist[i + 1].t).toMatch(/Contrato enviado/);
+    expect(r.hist[i].q).toBeTruthy();
+    const outra = negocioDoLido({ ...lido, linhas: paraLinhas(r) });
+    expect(outra.hist.filter((h) => /assinou o contrato/.test(h.t))).toHaveLength(1);
+  });
+  it("com o contrato por assinar, nada se junta", () => {
+    const S = seed();
+    const d = structuredClone(S.deals.find((x) => x.orc?.aceite)!);
+    d.orc!.contrato = "enviado";
+    d.hist = [{ t: "Contrato enviado para assinatura no portal", q: "27/11 12:10", k: "a" }];
+    const r = negocioDoLido({ id: "x", entityId: "e", estadoCrm: "", fluxoEmylia: true, docsCrm: false, linhas: paraLinhas(d) } as NegocioLido);
+    expect(r.hist.some((h) => /assinou o contrato/.test(h.t))).toBe(false);
+  });
+});

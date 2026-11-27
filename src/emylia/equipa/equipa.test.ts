@@ -284,3 +284,13 @@ describe("a ponte com o RH de exemplo", () => {
     expect(ausenciasDosTecnicos(lerRh())).toHaveProperty("ma");
   });
 });
+
+// 27/11 (teste do 1029: «Otaniel Semedo ·» na lista de quem vai medir)
+describe("o nome do técnico com os ofícios (27/11)", () => {
+  it("sem ofícios fica só o nome; com eles, o nome · os ofícios", async () => {
+    const { nomeComOficios } = await import("./tecnicos");
+    expect(nomeComOficios({ n: "Otaniel Semedo", sk: "", oficiosRotulo: "" } as never)).toBe("Otaniel Semedo");
+    expect(nomeComOficios({ n: "Laureano Reis", sk: "Pedreiro" } as never)).toBe("Laureano Reis · Pedreiro");
+    expect(nomeComOficios({ n: "Gustavo Silva", sk: "Pedreiro", oficiosRotulo: "Canalizador · Pedreiro" } as never)).toBe("Gustavo Silva · Canalizador · Pedreiro");
+  });
+});
