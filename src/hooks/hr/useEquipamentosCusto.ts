@@ -20,7 +20,7 @@ import {
   type CorrecaoEquipamento, type LinhaEquipamento, type ResultadoCusto,
 } from "@/lib/hr/custoBase";
 import { CHAVE_SEM_PERMISSAO_ATIVOS } from "@/lib/hr/errosCusto";
-import { CHAVE_CUSTO_EQUIPAMENTOS, CHAVE_EQUIPAMENTOS_LIVRES, CHAVE_OCUPACOES_ATIVO } from "./chavesEquipamentos";
+import { CHAVE_CUSTO_EQUIPAMENTOS, CHAVE_EQUIPAMENTOS_LIVRES, CHAVE_OCUPACOES_ATIVO, CHAVE_POR_DEVOLVER } from "./chavesEquipamentos";
 import { normalizarConta, validarConta, type ContaItem } from "@/components/rh-exemplo/lib/comoConta";
 import {
   validarDevolucao, validarNovoEquipamento, type EquipamentoPessoa, type EstadoDevolucao, type NovoEquipamentoBase,
@@ -80,6 +80,7 @@ export function useEquipamentosCustoAcoes(): EquipamentosCustoAcoes {
     await queryClient.invalidateQueries({ queryKey: [CHAVE_CUSTO_EQUIPAMENTOS, organizationId] });
     await queryClient.invalidateQueries({ queryKey: [CHAVE_EQUIPAMENTOS_LIVRES, organizationId] });
     await queryClient.invalidateQueries({ queryKey: [CHAVE_OCUPACOES_ATIVO, organizationId] });
+    await queryClient.invalidateQueries({ queryKey: [CHAVE_POR_DEVOLVER, organizationId] });
     await queryClient.invalidateQueries({ queryKey: ["ativos"] });
   }, [organizationId, queryClient]);
 

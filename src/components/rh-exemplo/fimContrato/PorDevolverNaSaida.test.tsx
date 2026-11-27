@@ -60,7 +60,7 @@ describe("PorDevolverNaSaida (a organização, em Contratos a terminar)", () => 
     }
     leitura({ estado: "erro", dados: null, mensagem: "x" });
     rerender(<LanguageProvider><MemoryRouter><PorDevolverNaSaida organizationId="org-1" dias={90} /></MemoryRouter></LanguageProvider>);
-    expect(screen.getByText("Não foi possível ler o que falta devolver. A base decide ao terminar.")).toBeTruthy();
+    expect(screen.getByText("Não foi possível ler o que falta devolver. O sistema confirma ao terminar.")).toBeTruthy();
   });
 });
 
@@ -71,15 +71,23 @@ describe("PorDevolverNaSaida (uma pessoa, no diálogo de Terminar)", () => {
   it("pede só essa pessoa e mostra os itens dela antes de confirmar", () => {
     ver(<PorDevolverNaSaida {...props} />);
     expect(m.chamadas).toHaveBeenLastCalledWith(expect.objectContaining({ organizationId: "org-1", pessoaId: "p1", dias: 365 }));
-    expect(screen.getByText("Registe a devolução (ou a perda) de cada item antes de terminar o contrato.")).toBeTruthy();
+    expect(screen.getByText("Se o contrato terminar já, registe a devolução (ou a perda) de cada item antes.")).toBeTruthy();
     expect(screen.getByText("NIKE-IT-LAP-26-0001")).toBeTruthy();
     expect(screen.getByText("12-AB-34")).toBeTruthy();
   });
 
-  it("nada por devolver: diz-o", () => {
+  it("nada por devolver: diz-o sem prometer, porque o sistema confirma ao terminar", () => {
+    m.permissoes = ["hr.pessoas.vinculos.view", "hr.pessoas.retribuicao.view", "fleet.view"];
     leitura({ dados: { ...COMPLETO, totalPessoas: 0, totalItens: 0, pessoas: [] } });
     ver(<PorDevolverNaSaida {...props} />);
-    expect(screen.getByText("Nada por devolver.")).toBeTruthy();
+    expect(screen.getByText("Nada por devolver neste momento. O sistema confirma ao terminar.")).toBeTruthy();
+  });
+
+  it("nada por devolver sem `fleet.view`: avisa que as viaturas da Frota não aparecem, porque o Terminar conta-as à mesma (HRV14)", () => {
+    leitura({ dados: { ...COMPLETO, totalPessoas: 0, totalItens: 0, pessoas: [] } });
+    ver(<PorDevolverNaSaida {...props} />);
+    expect(screen.getByText(/As viaturas da Frota não aparecem sem acesso à Frota/)).toBeTruthy();
+    expect(screen.queryByText("Nada por devolver neste momento. O sistema confirma ao terminar.")).toBeNull();
   });
 
   it("só contagens: diz quantos itens há, sem a lista", () => {

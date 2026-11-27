@@ -6,6 +6,8 @@ import { tabelaFundida } from "@/translations/tabelaFundida";
 const captura = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/observability/captureFlowError", () => ({ captureFlowError: (...a: unknown[]) => captura(...a) }));
 vi.mock("@/components/rh-exemplo/hooks/captureFlowError", () => ({ captureFlowError: (...a: unknown[]) => captura(...a) }));
+// A cadeia de imports chega ao cliente Supabase, que rebenta sem VITE_SUPABASE_URL (um worktree sem .env): este teste não precisa dele.
+vi.mock("@/integrations/supabase/client", () => ({ supabase: {} }));
 
 import * as real from "@/lib/hr/errosFimContrato";
 import * as exemplo from "@/components/rh-exemplo/lib/errosFimContrato";

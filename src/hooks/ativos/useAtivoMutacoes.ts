@@ -12,7 +12,7 @@ import {
   ativosIndisponivel, ativosRecusado, campoDoErro, chaveDoErro, codigoAtv, detalheDaBase, refazListaAposErro, type CampoAtivo,
 } from "@/components/ativos/lib/errosAtivo";
 import type { GrupoAtivo, MotivoDesativacao } from "@/components/ativos/lib/tipos";
-import { CHAVE_CUSTO_EQUIPAMENTOS, CHAVE_EQUIPAMENTOS_LIVRES, CHAVE_OCUPACOES_ATIVO } from "@/hooks/hr/chavesEquipamentos";
+import { CHAVE_CUSTO_EQUIPAMENTOS, CHAVE_EQUIPAMENTOS_LIVRES, CHAVE_OCUPACOES_ATIVO, CHAVE_POR_DEVOLVER } from "@/hooks/hr/chavesEquipamentos";
 import { hrRpc } from "@/lib/hr/hrDb";
 import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { getLocalizedFallback } from "@/utils/friendlyError";
@@ -65,7 +65,7 @@ export function useAtivoMutacoes(): AtivoMutacoes {
         await queryClient.invalidateQueries({ queryKey: [CHAVE_ATIVOS] });
         // Valor, vida, renda, desativar e reativar mudam a quota dos meses passados (o custo da pessoa no RH), e um ativo novo, ou um que
         // deixou de estar ativo, muda o que esta livre para entregar: sem isto o RH mostra o valor de antes ate 5 minutos.
-        await Promise.all([CHAVE_CUSTO_EQUIPAMENTOS, CHAVE_EQUIPAMENTOS_LIVRES, CHAVE_OCUPACOES_ATIVO].map((k) => queryClient.invalidateQueries({ queryKey: [k, organizationId] })));
+        await Promise.all([CHAVE_CUSTO_EQUIPAMENTOS, CHAVE_EQUIPAMENTOS_LIVRES, CHAVE_OCUPACOES_ATIVO, CHAVE_POR_DEVOLVER].map((k) => queryClient.invalidateQueries({ queryKey: [k, organizationId] })));
         const resposta = data as { id?: unknown; aviso?: unknown } | null;
         const id = resposta?.id;
         const aviso = typeof resposta?.aviso === "string" && resposta.aviso !== "";

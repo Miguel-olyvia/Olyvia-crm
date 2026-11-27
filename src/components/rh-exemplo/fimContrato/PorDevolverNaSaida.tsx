@@ -26,6 +26,8 @@ export function PorDevolverNaSaida({ organizationId, pessoaId = null, dias, enab
   // Uma pessoa sem o acesso completo é 42501: nem se pede (a base recusa o «Terminar» à mesma).
   const pedir = enabled && (pessoaId === null || acessoCompleto);
   const { estado, dados } = useAtivosPorDevolver({ organizationId, pessoaId, dias, enabled: pedir });
+  // A lista esconde as viaturas a quem não tem `fleet.view`, mas o Terminar conta-as: sem esse acesso «nada» não é uma certeza.
+  const nada = <p className="text-sm text-muted-foreground">{t(ligacaoFrota ? "ativos.porDevolver.nada" : "ativos.porDevolver.nadaSemFrota")}</p>;
 
   if (!pedir || estado === "recusado" || estado === "indisponivel") return null;
   if (estado === "a_carregar") return <OlyviaLoader size={16} text={t("ativos.saidas.aCarregar")} className="flex-row justify-start" />;
@@ -36,7 +38,7 @@ export function PorDevolverNaSaida({ organizationId, pessoaId = null, dias, enab
   if (pessoaId) {
     const pessoa = dados.pessoas[0];
     if (!dados.detalhe) {
-      if (dados.totalItens <= 0) return <p className="text-sm text-muted-foreground">{t("ativos.porDevolver.nada")}</p>;
+      if (dados.totalItens <= 0) return nada;
       return (
         <p className="flex items-start gap-2 text-sm font-medium">
           <Lock aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
@@ -44,7 +46,7 @@ export function PorDevolverNaSaida({ organizationId, pessoaId = null, dias, enab
         </p>
       );
     }
-    if (!pessoa || pessoa.itens.length === 0) return <p className="text-sm text-muted-foreground">{t("ativos.porDevolver.nada")}</p>;
+    if (!pessoa || pessoa.itens.length === 0) return nada;
     return (
       <div className="space-y-2">
         <p className="text-sm font-semibold">{t("ativos.porDevolver.titulo")}</p>

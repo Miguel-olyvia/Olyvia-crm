@@ -45,7 +45,6 @@ function comONumeroDeItens(texto: string, erro: unknown): string {
   return n ? texto.replace("{n}", n) : texto.replace(" ({n})", "");
 }
 
-
 /** So chaves PROPRIAS (`constructor`, `toString`... do prototipo nao contam como codigo). */
 function temPropria(objecto: object, chave: string): boolean {
   return Object.prototype.hasOwnProperty.call(objecto, chave);

@@ -282,7 +282,11 @@ export default function Ativos() {
         )}
       </div>
 
-      <FaixaPorDevolver organizationId={activeCompany.id} aoVer={() => mudarGrupo(VALOR_SEPARADOR_SAIDAS)} enabled={podeVer && !permissoesACarregar} />
+      {/* «Ver» só quando o separador «Saídas» está no ecrã (a lista de ativos lida): a carregar ou em erro, o clique não levaria a lado nenhum. */}
+      <FaixaPorDevolver
+        organizationId={activeCompany.id} enabled={podeVer && !permissoesACarregar}
+        aoVer={leitura.estado === "ok" && dados && !naoPodeVer ? () => mudarGrupo(VALOR_SEPARADOR_SAIDAS) : undefined}
+      />
 
       {leitura.estado === "a_carregar" && !naoPodeVer && (
         <div className="space-y-5">

@@ -1,7 +1,7 @@
 // A lista «por devolver» (`rpc_ativos_por_devolver`). Cliente tolerante: RPC por aplicar = «indisponivel», sem permissão (42501) = «recusado»
 // (nunca um defeito), um defeito = «erro» (e só esse vai para o registo de erros). Os nomes dos argumentos estão fixados aqui.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook, waitFor } from "@testing-library/react";
+import { act, renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
@@ -77,5 +77,50 @@ describe("useAtivosPorDevolver", () => {
     renderHook(() => useAtivosPorDevolver({ organizationId: null, dias: 30 }), { wrapper: envolver });
     expect(m.rpc).not.toHaveBeenCalled();
     expect(result.current.dados).toBeNull();
+  });
+});
+
+describe("useAtivosPorDevolver: dados frescos", () => {
+  const clienteComCache = () => new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 5 * 60 * 1000 } } });
+
+  it("abrir outra vez (outro ecrã, o diálogo de Terminar) volta a ler, mesmo com a cache de 5 minutos do cliente", async () => {
+    m.rpc.mockResolvedValue({ data: RESPOSTA, error: null });
+    const c = clienteComCache();
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={c}>{children}</QueryClientProvider>;
+    const primeira = renderHook(() => useAtivosPorDevolver({ organizationId: "org-1", pessoaId: "p1", dias: 365 }), { wrapper });
+    await waitFor(() => expect(primeira.result.current.estado).toBe("ok"));
+    primeira.unmount();
+    const segunda = renderHook(() => useAtivosPorDevolver({ organizationId: "org-1", pessoaId: "p1", dias: 365 }), { wrapper });
+    await waitFor(() => expect(m.rpc).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(segunda.result.current.estado).toBe("ok"));
+  });
+
+  it("mudar de pessoa não mostra a lista da anterior enquanto a nova chega", async () => {
+    let solta: (v: unknown) => void = () => undefined;
+    m.rpc.mockResolvedValueOnce({ data: RESPOSTA, error: null });
+    const c = clienteComCache();
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={c}>{children}</QueryClientProvider>;
+    const { result, rerender } = renderHook(({ pessoaId }: { pessoaId: string }) => useAtivosPorDevolver({ organizationId: "org-1", pessoaId, dias: 30 }), { wrapper, initialProps: { pessoaId: "p1" } });
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    m.rpc.mockReturnValueOnce(new Promise((r) => { solta = r; }));
+    rerender({ pessoaId: "p2" });
+    await waitFor(() => expect(m.rpc).toHaveBeenCalledTimes(2));
+    expect(result.current.dados).toBeNull();
+    expect(result.current.estado).toBe("a_carregar");
+    solta({ data: RESPOSTA, error: null });
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+  });
+
+  it("uma releitura que falha com dados na mão mantém a lista e diz que falhou", async () => {
+    m.rpc.mockResolvedValueOnce({ data: RESPOSTA, error: null });
+    const c = clienteComCache();
+    const wrapper = ({ children }: { children: ReactNode }) => <QueryClientProvider client={c}>{children}</QueryClientProvider>;
+    const { result } = renderHook(() => useAtivosPorDevolver({ organizationId: "org-1", dias: 30 }), { wrapper });
+    await waitFor(() => expect(result.current.estado).toBe("ok"));
+    m.rpc.mockResolvedValueOnce({ data: null, error: { code: "XX000", message: "boom" } });
+    await act(async () => { result.current.refazer(); });
+    await waitFor(() => expect(result.current.mensagem).toBe("T:ativos.saidas.erroLer"));
+    expect(result.current.estado).toBe("ok");
+    expect(result.current.dados?.totalPessoas).toBe(1);
   });
 });

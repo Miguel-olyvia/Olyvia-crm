@@ -1129,6 +1129,19 @@ describe("Ativos: separador «Saídas» e faixa «por devolver»", () => {
     expect(separador(/^Saídas/)).toHaveAttribute("aria-selected", "true");
   });
 
+  it("com a lista de ativos a carregar ou em erro, a faixa não oferece «Ver» (o separador «Saídas» ainda não está no ecrã)", () => {
+    comSaidas();
+    for (const estado of ["a_carregar", "erro"]) {
+      m.estado = estado;
+      m.dados = null;
+      cleanup();
+      ver();
+      const faixa = screen.getByTestId("faixa-por-devolver");
+      expect(faixa).toHaveTextContent("1 pessoa sai nos próximos 30 dias");
+      expect(within(faixa).queryByRole("button")).not.toBeInTheDocument();
+    }
+  });
+
   it("sem ninguém a sair (ou sem acesso) não há faixa", () => {
     ver();
     expect(screen.queryByTestId("faixa-por-devolver")).not.toBeInTheDocument();

@@ -5,3 +5,5 @@
 export const CHAVE_CUSTO_EQUIPAMENTOS = "hr-custo-equipamentos";
 export const CHAVE_EQUIPAMENTOS_LIVRES = "hr-equipamentos-livres";
 export const CHAVE_OCUPACOES_ATIVO = "hr-ocupacoes-ativo";
+/** Quem sai com itens por devolver (separador «Saídas», faixas e o aviso do Terminar): muda a cada entrega, devolução ou correção. */
+export const CHAVE_POR_DEVOLVER = "ativos-por-devolver";

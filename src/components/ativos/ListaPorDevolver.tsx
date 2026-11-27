@@ -47,7 +47,7 @@ function LinhaItem({ item, ligacaoFrota }: { item: ItemPorDevolver; ligacaoFrota
       <span className="min-w-0 flex-1 font-medium">{item.nome ?? t("ativos.saidas.item.semNome")}</span>
       {item.desde && <span className="text-xs text-muted-foreground">{t("ativos.saidas.item.desde", { data: dataPt(item.desde) })}</span>}
       {frota && ligacaoFrota && (
-        <Link to={ROTA_FROTA} className={cn("rounded-md px-1 text-xs font-semibold text-primary underline-offset-2 hover:underline", FOCO)}>
+        <Link to={ROTA_FROTA} className={cn("inline-flex min-h-11 items-center rounded-md px-2 text-xs font-semibold text-primary underline-offset-2 hover:underline", FOCO)}>
           {t("ativos.saidas.item.verFrota")}
         </Link>
       )}

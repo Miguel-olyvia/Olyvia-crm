@@ -28,7 +28,8 @@ const EQUIPAMENTO: EquipamentoPessoa = {
 const invalidadas = (espia: ReturnType<typeof vi.spyOn>): string[] =>
   espia.mock.calls.map((c) => String(((c[0] as { queryKey?: unknown[] } | undefined)?.queryKey ?? [])[0]));
 
-const TODAS = ["hr-custo-equipamentos", "hr-equipamentos-livres", "hr-ocupacoes-ativo"];
+// A lista «por devolver» (Saidas, faixas, aviso do Terminar) vive na mesma cache de 5 minutos: devolver ou entregar muda-a.
+const TODAS = ["hr-custo-equipamentos", "hr-equipamentos-livres", "hr-ocupacoes-ativo", "ativos-por-devolver"];
 
 beforeEach(() => {
   vi.restoreAllMocks();
