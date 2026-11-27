@@ -93,9 +93,11 @@ export function useEntityIdentity() {
         // is_primary=true para a mesma entidade (uma substituição cujo DELETE
         // ficou bloqueado por RLS — ver create-client-portal-access), o
         // forEach abaixo (emailMap[e.entity_id] = e.email) fica com o último
-        // elemento processado — com esta ordem, é sempre o mais recente.
-        selectInBatches(uncachedIds, batch => supabase.from('anew_entity_emails').select('entity_id, email, is_primary, created_at').in('entity_id', batch).eq('is_primary', true).order('created_at', { ascending: true })),
-        selectInBatches(uncachedIds, batch => supabase.from('anew_entity_phones').select('entity_id, phone_number, country_code, is_primary, created_at').in('entity_id', batch).eq('is_primary', true).order('created_at', { ascending: true })),
+        // elemento processado — com esta ordem, é sempre o mais recente. O
+        // order("id") desempata duas linhas escritas na mesma hora: ganha a de id
+        // maior, como no portal (sms-otp: created_at desc, id desc).
+        selectInBatches(uncachedIds, batch => supabase.from('anew_entity_emails').select('entity_id, email, is_primary, created_at').in('entity_id', batch).eq('is_primary', true).order('created_at', { ascending: true }).order('id', { ascending: true })),
+        selectInBatches(uncachedIds, batch => supabase.from('anew_entity_phones').select('entity_id, phone_number, country_code, is_primary, created_at').in('entity_id', batch).eq('is_primary', true).order('created_at', { ascending: true }).order('id', { ascending: true })),
         selectInBatches(uncachedIds, batch => (supabase as any).from('anew_entity_fiscal_entities').select('entity_id, fiscal_entity_id, is_primary').in('entity_id', batch).eq('is_primary', true).is('valid_to', null)) as Promise<any[]>,
         selectInBatches(uncachedIds, batch => supabase.from('anew_entity_addresses').select('entity_id, address_id, is_primary').in('entity_id', batch).eq('is_primary', true)) as Promise<any[]>,
       ]);
