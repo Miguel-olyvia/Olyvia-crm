@@ -445,6 +445,9 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
       case "avisarCliente": fazer(() => A.avisarClienteObra(d.id, a.texto)); break;
       case "fecharBuraco": { let r = 0; fazer(() => { r = A.fecharBuraco(d.id, a.ini, a.fim); }); if (!r && a.ti != null) setPainel({ k: "tarefa", ti: a.ti }); break; }
       // 27/11 (agentes): passar a tarefa que travava a um colega livre e antecipar o resto, de uma vez
+      // 27/11 (agentes, tudo dentro do Estúdio): adiar até o técnico estar livre; puxar uma tarefa para dias em que a obra ficava parada
+      case "adiar": mudar(a.ti, () => A.adiar(d.id, a.ti)); break;
+      case "puxar": mudar(a.ti, () => A.ajustarTarefa(d.id, a.ti, { dia: a.dia })); break;
       case "passarEAntecipar": { let r = 0; fazer(() => { r = A.passarEAntecipar(d.id, a.ti, a.tec, a.ini, a.fim); }); if (!r) setPainel({ k: "tarefa", ti: a.ti }); break; }
       case "conversa": setAba("cliente"); break;
       case "aceitarFim": fazer(() => A.aceitarFimObra(d.id, a.dias)); break;
