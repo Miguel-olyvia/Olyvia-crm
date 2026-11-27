@@ -1,3 +1,4 @@
+import { corrigirLigacoes } from "@/components/ai/ligacoesDasFerramentas";
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -449,7 +450,9 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
       }
       setMessages(prev => [...prev, { role: "assistant", content: "" }]);
 
+      let chamadasFeitas: ToolCallView[] = [];
       const applyToolCalls = (toolCalls: ToolCallView[]) => {
+        chamadasFeitas = toolCalls;
         setMessages(prev => {
           const updated = [...prev];
           const lastIdx = updated.length - 1;
@@ -519,7 +522,10 @@ export default function AIAssistant({ open, onOpenChange }: AIAssistantProps) {
       if (textBuffer.trim().length > 0) handleBlock(textBuffer);
 
       // Process final content — preserve toolCalls already attached.
-      const { cleanContent, deepLinks } = extractDeepLinks(assistantContent);
+      const extraido = extractDeepLinks(assistantContent);
+      // 27/11: as ligações exatas das ferramentas (o modelo pode estragá-las ao copiar)
+      const corrigido = corrigirLigacoes(extraido.cleanContent, extraido.deepLinks, chamadasFeitas, "Abrir o relatório");
+      const cleanContent = corrigido.texto, deepLinks = corrigido.ligacoes;
 
       setMessages(prev => {
         const updated = [...prev];

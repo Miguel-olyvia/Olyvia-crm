@@ -230,7 +230,7 @@ async function escreverAnalise(pedido: string, tipo: string, resumo: unknown, id
     const r = await callAiGateway({
       model: MODELO_ANALISE, temperature: 0.4, response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: "És a analista da Olyvia, numa empresa de remodelações (casas de banho, cozinhas, obras). Recebes o pedido do utilizador e os números de um relatório. Escreve 4 a 7 pontos curtos em português de Portugal, que respondam ao pedido. Regras: cada ponto cita pelo menos um valor tirado dos números (euros, margem, número de negócios); só afirmas o que os números mostram; ideias novas (áreas a explorar, serviços a juntar) dizem-se como sugestão e dizem em que número se apoiam; nada de áreas ou margens que não estejam nos dados; sem travessões; uma ideia por ponto, no máximo duas frases. Responde só em JSON: {\"pontos\": [\"...\"]}." },
+        { role: "system", content: "És a analista da Olyvia, numa empresa de remodelações (casas de banho, cozinhas, obras). Recebes o pedido do utilizador e os números de um relatório. Escreve 4 a 7 pontos curtos em português de Portugal, que respondam ao pedido. Regras: cada ponto cita pelo menos um valor tirado dos números (euros, margem, número de negócios), escrito como vem nos dados (ex.: 34,2% ou 9 565,61 €, nunca «porcento» nem «euros»); só afirmas o que os números mostram; ideias novas (áreas a explorar, serviços a juntar) dizem-se como sugestão e dizem em que número se apoiam; nada de áreas ou margens que não estejam nos dados; sem travessões; uma ideia por ponto, no máximo duas frases. Responde só em JSON: {\"pontos\": [\"...\"]}." },
         { role: "user", content: JSON.stringify({ pedido, relatorio: tipo, numeros: resumo, ...(ideias.length ? { pistas_do_chat: ideias } : {}) }) },
       ],
     });
@@ -254,7 +254,7 @@ const relatorio_olyvia: Handler = async (ctx, args): Promise<ToolResult> => {
   const titulo = typeof args?.titulo_analise === "string" && args.titulo_analise.trim() ? args.titulo_analise.trim().slice(0, 80) : undefined;
   return { ...r, link: `${r.link}&notas=${codificarNotas({ ...(titulo ? { titulo } : {}), pontos })}`,
     analise_no_relatorio: pontos,
-    nota_analise: "Estes são os pontos que ficaram DENTRO do relatório (PDF/Excel). Mostra-os ao utilizador tal como estão; não escrevas outros." };
+    nota_analise: "Estes são os pontos que ficaram DENTRO do relatório (PDF/Excel). Mostra-os ao utilizador tal como estão; não escrevas outros. A ligação aparece num botão: basta escrever [rótulo](/relatorios/olyvia)." };
 };
 
 export const handlers: Record<string, Handler> = { consultar_base_conhecimento, relatorio_olyvia };

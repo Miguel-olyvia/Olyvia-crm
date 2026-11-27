@@ -60,6 +60,9 @@ type ToolCallView = {
   status: "done" | "needs_confirmation" | "error";
   errorMessage?: string;
   durationMs?: number;
+  // 27/11: a ligação exata que a ferramenta devolveu (ex.: o relatório com a análise). O modelo, ao copiá-la para o texto, estragava
+  // letras no meio do código da análise; a app troca a ligação escrita por esta.
+  link?: string;
 };
 
 function toolCallView(
@@ -83,6 +86,7 @@ function toolCallView(
     status,
     ...(errorMessage ? { errorMessage } : {}),
     durationMs: Math.round(durationMs),
+    ...(typeof result?.link === "string" && result.link.startsWith("/") && result.link.length < 12000 ? { link: result.link } : {}),
   };
 }
 

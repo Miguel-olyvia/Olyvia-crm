@@ -18,6 +18,8 @@ export interface ToolCallView {
   status: ToolCallStatus;
   errorMessage?: string;
   durationMs?: number;
+  /** 27/11: a ligação exata devolvida pela ferramenta (o texto do modelo pode trazê-la estragada). */
+  link?: string;
 }
 
 const TOOL_LABELS: Record<string, { label: string; icon: LucideIcon }> = {
