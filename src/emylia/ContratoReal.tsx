@@ -138,3 +138,13 @@ export function ContratoRealEMinuta({ numero, cartao, folha }: { numero: number;
     </>
   );
 }
+
+/**
+ * 27/11: «Contrato de empreitada» em «Tudo do negócio» quando a app não gerou a minuta (a proposta aceite é o contrato): só o PDF
+ * assinado, ou o campo para o anexar.
+ */
+export function ContratoRealSo({ numero }: { numero: number }) {
+  const cr = useContratoReal(numero);
+  if (!cr) return <p className="text-[15px] text-muted-foreground">O contrato assinado em PDF só existe numa organização real.</p>;
+  return <ContratoRealBloco numero={numero} cr={cr} />;
+}

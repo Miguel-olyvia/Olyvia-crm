@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import type { Negocio, Plano } from "../motor";
 import type { Ctx } from "../pecas";
 import { NaFrente } from "../NaFrente";
+import { ContratoRealSo } from "../ContratoReal";
 import { rotuloDaTranche } from "../parcelas";
 import { podeNeg } from "../permissoes";
 import { modoReal, emailDaFicha } from "../acessosPortal";
@@ -114,7 +115,7 @@ export function DocAberto({ ctx, d, x, fechar, imprimirLogo = false }: { ctx: Ct
     window.addEventListener("keydown", tecla, true);
     return () => window.removeEventListener("keydown", tecla, true);
   }, [fechar]);
-  const doc = x.k === "proposta" ? <PropostaDoc S={S} d={d} /> : x.k === "contrato" ? <ContratoDoc S={S} d={d} />
+  const doc = x.k === "contratoReal" ? null : x.k === "proposta" ? <PropostaDoc S={S} d={d} /> : x.k === "contrato" ? <ContratoDoc S={S} d={d} />
     : x.k === "fatura" ? <FaturaDoc S={S} d={d} /> : x.k === "faturaTranche" ? <FaturaDoc S={S} d={d} reg={x.reg} regParcela={x.reg ? rotuloDaTranche(S, d, x.reg.tranche) : undefined} />
     : x.k === "propostaAdenda" ? <PropostaDoc S={S} d={d} a={x.a} /> : x.k === "contratoAdenda" ? <ContratoDoc S={S} d={d} a={x.a} />
     : x.k === "faturaAdenda" ? <FaturaDoc S={S} d={d} a={x.a} ft={x.ft} /> : <AutoRececaoDoc d={d} />;
@@ -133,7 +134,8 @@ export function DocAberto({ ctx, d, x, fechar, imprimirLogo = false }: { ctx: Ct
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {/* 27/11: o PDF assinado só no contrato inicial (o de uma adenda é outro documento) */}
-          {tipo ? <Partilhar ctx={ctx} d={d} tipo={tipo} estado={x.estado} semContratoReal={x.k !== "contrato"}>{doc}</Partilhar> : doc}
+          {x.k === "contratoReal" ? <ContratoRealSo numero={d.id} />
+            : tipo ? <Partilhar ctx={ctx} d={d} tipo={tipo} estado={x.estado} semContratoReal={x.k !== "contrato"}>{doc}</Partilhar> : doc}
         </div>
         <div className="flex justify-end border-t border-border p-3">
           <Button type="button" variant="outline" size="lg" onClick={fechar}>Fechar</Button>

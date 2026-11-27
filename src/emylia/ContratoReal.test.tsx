@@ -15,7 +15,7 @@ vi.mock("@/integrations/supabase/client", () => ({
     auth: { getUser: async () => ({ data: { user: null } }) },
   },
 }));
-import { ContratoRealEMinuta } from "./ContratoReal";
+import { ContratoRealEMinuta, ContratoRealSo } from "./ContratoReal";
 import { DOC_CONTRATO_ASSINADO, porqueRecusarPdf, tamanhoLegivel } from "./contratoRealDados";
 import { definirModoReal } from "./acessosPortal";
 
@@ -124,5 +124,27 @@ describe("contratoReal (regras)", () => {
     expect(tamanhoLegivel(3_620_000)).toBe("3,5 MB");
     expect(tamanhoLegivel(820_000)).toBe("801 KB");
     expect(tamanhoLegivel(null)).toBe("");
+  });
+});
+
+describe("ContratoRealSo e o documento em «Tudo do negócio» (sem minuta gerada)", () => {
+  afterEach(() => { cleanup(); definirModoReal(null); sbFrom.mockReset(); download.mockReset(); });
+  it("mostra só o PDF assinado, sem minuta", async () => {
+    base([{ id: "d1", file_name: "Contrato CC-2026-0441 (MD 1610).pdf", file_url: "org-1/proposal/prop-1/y.pdf", file_size: 3_585_329, created_at: "2026-11-27T09:00:00Z" }]);
+    download.mockResolvedValue({ data: new Blob(["%PDF"], { type: "application/pdf" }), error: null });
+    definirModoReal("org-1", "Mudelar");
+    render(<ContratoRealSo numero={1017} />);
+    expect(await screen.findByText("Contrato assinado pelo cliente")).toBeTruthy();
+    expect(screen.queryByText("Minuta gerada pela app")).toBeNull();
+  });
+  it("a lista do negócio tem o contrato real quando a proposta foi aceite e não há minuta; não o repete quando há", async () => {
+    const { documentosDoNegocio } = await import("./estudioObra/enviadosAoCliente");
+    const n = (orc: Record<string, unknown>) => ({ id: 1017, orc, fin: {}, obra: {}, adendas: [], f: {} }) as unknown as Parameters<typeof documentosDoNegocio>[0];
+    const semMinuta = documentosDoNegocio(n({ enviada: "24/11", aceite: "24/11" }));
+    expect(semMinuta.find((x) => x.k === "contratoReal")).toMatchObject({ titulo: "Contrato de empreitada", fase: 3 });
+    const comMinuta = documentosDoNegocio(n({ enviada: "24/11", aceite: "24/11", contrato: "assinado" }));
+    expect(comMinuta.some((x) => x.k === "contratoReal")).toBe(false);
+    expect(comMinuta.some((x) => x.k === "contrato")).toBe(true);
+    expect(documentosDoNegocio(n({ enviada: "24/11" })).some((x) => x.k === "contratoReal")).toBe(false);
   });
 });
