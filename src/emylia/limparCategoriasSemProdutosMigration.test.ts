@@ -1,7 +1,7 @@
 /**
  * @vitest-environment node
  */
-// 27/11: a migration de DADOS que tira as categorias e subcategorias sem produtos (20270130380000, soft delete como o
+// 27/11: a migration de DADOS que tira as categorias e subcategorias sem produtos (20270130410000, soft delete como o
 // ecrã), lida como TEXTO. Confere o que se pode conferir sem a correr: a lista embutida (ids únicos, só a Mudelar da RH;
 // a nike não é tocada, contagens iguais às constantes, nenhuma das categorias que o dono mandou manter), que só faz UPDATE de
 // is_active, deleted_at e deleted_by em product_categories (nada de DELETE, nem escrita noutras tabelas), as guardas
@@ -12,7 +12,7 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const pasta = resolve(process.cwd(), "supabase/migrations");
-const nome = "20270130380000_limpar_categorias_sem_produtos.sql";
+const nome = "20270130410000_limpar_categorias_sem_produtos.sql";
 const bruto = existsSync(resolve(pasta, nome)) ? readFileSync(resolve(pasta, nome), "utf8") : "";
 /** Sem comentários de linha e com os espaços normalizados. */
 const sql = bruto.split(/\r?\n/).map((l) => l.replace(/--.*$/, "")).join("\n").replace(/\s+/g, " ");
