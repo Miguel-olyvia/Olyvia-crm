@@ -10,15 +10,15 @@ import { agente } from "@/emylia/estudioObra/agentes";
 import { nomeDoDegrau, proximaVolta, type ObraCerebro, type ResumoAgente } from "./grafoConhecimento";
 
 const hora = (d: Date | string) => new Date(d).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
-const mmss = (ms: number) => { const s = Math.max(0, Math.round(ms / 1000)); return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`; };
+const falta = (ms: number) => { const s = Math.max(0, Math.round(ms / 1000)), m = Math.floor(s / 60); return m ? `${m} min ${String(s % 60).padStart(2, "0")} s` : `${s} s`; };
 const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
 
 /** O relógio do servidor: um anel que se enche durante os 15 minutos até à próxima volta. */
 export function VoltaDoServidor({ ultima, origem }: { ultima: string | null; origem: "servidor" | "pagina" | null }) {
   const [agora, setAgora] = useState(() => new Date());
   useEffect(() => { const t = window.setInterval(() => setAgora(new Date()), 1000); return () => window.clearInterval(t); }, []);
-  const prox = proximaVolta(agora), falta = prox.getTime() - agora.getTime();
-  const feito = 1 - falta / (15 * 60_000);
+  const prox = proximaVolta(agora), ms = prox.getTime() - agora.getTime();
+  const feito = 1 - ms / (15 * 60_000);
   const R = 17, C = 2 * Math.PI * R;
   return (
     <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.06] p-3 text-white">
@@ -31,7 +31,7 @@ export function VoltaDoServidor({ ultima, origem }: { ultima: string | null; ori
       </div>
       <div className="min-w-0 text-sm leading-snug">
         <p className="font-semibold">Servidor: próxima volta às {hora(prox)}</p>
-        <p className="text-white/70"><span className="tabular-nums">daqui a {mmss(falta)}</span> · corre de 15 em 15 minutos</p>
+        <p className="text-white/70"><span className="tabular-nums">daqui a {falta(ms)}</span> · corre de 15 em 15 minutos</p>
         {ultima && <p className="text-white/60">{origem === "servidor" ? "Última volta do servidor" : origem === "pagina" ? "Base atualizada pela página dos Negócios" : "Base atualizada"} às {hora(ultima)}</p>}
       </div>
     </div>

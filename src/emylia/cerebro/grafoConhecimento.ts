@@ -81,6 +81,7 @@ export const TEMAS: { id: string; titulo: string; re: RegExp }[] = [
   { id: "tema:portal", titulo: "Portal do cliente", re: /portal/i },
 ];
 
+const TEMAS_LIGADOS: [string, string][] = [["tema:portal", "tema:negocios"], ["tema:voz", "tema:agentes"], ["tema:obras", "tema:agentes"], ["tema:negocios", "tema:obras"]];
 const TIPOS_ITEM = new Set<string>(["guia", "resumo", "negocio", "obra", "orcamento", "custos"]);
 const curto = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1).trimEnd()}…` : s);
 /** O nome depois do «·» do título («Negócio 1048 · Tiago Bandarra» → «Tiago Bandarra»). */
@@ -258,6 +259,10 @@ export function montarGrafo(linhas: LinhaConhecimento[], obras: ObraCerebro[] = 
       default: break;
     }
   }
+  // 27/11: os temas ligam-se entre si (o portal recebe as propostas, a voz fala com os agentes, os agentes vigiam as obras): o grafo fica
+  // num só corpo, sem temas a fugir para os cantos
+  const comNotas = new Set([...arestas.values()].flatMap((e) => [e.de, e.para]).filter((x) => x.startsWith("tema:")));
+  for (const [x, y] of TEMAS_LIGADOS) if (comNotas.has(x) && comNotas.has(y)) ligar(x, y, "tema");
   // o resumo do dia fala de cada obra
   const resumo = todos.find((x) => x.tipo === "resumo");
   if (resumo) for (const o of todos.filter((x) => x.tipo === "obra")) ligar(resumo.id, o.id, "resumo");

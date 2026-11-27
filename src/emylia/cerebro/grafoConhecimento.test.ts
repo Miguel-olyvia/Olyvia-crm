@@ -56,6 +56,9 @@ describe("o grafo do Cérebro", () => {
     // os negócios ao tema; o resumo às obras
     expect(ligados("negocio:1050", "tema:negocios")).toBe(true);
     expect(ligados("resumo:dia", "obra:1048")).toBe(true);
+    // os temas ligam-se entre si (nenhum foge para um canto)
+    expect(ligados("tema:portal", "tema:negocios")).toBe(true);
+    expect(ligados("tema:voz", "tema:agentes")).toBe(true);
   });
 
   it("liga o guia aos temas", () => {
