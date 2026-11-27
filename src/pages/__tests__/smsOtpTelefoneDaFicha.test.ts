@@ -52,7 +52,17 @@ describe("sms-otp: o telefone sai da ficha, o principal mais recente", () => {
     );
   });
 
-  it("nao copia o telefone para a proposta: o numero e lido na hora e nao se grava", () => {
-    expect(code).not.toMatch(/\.from\("proposals"\)\s*\.update\([^)]*phone/);
+  it("nao copia o telefone para lado nenhum: a unica tabela em que a funcao escreve e a dos codigos", () => {
+    // Cada escrita (insert/update/upsert/delete) e da ULTIMA tabela aberta antes dela. Se um dia
+    // a funcao passar a gravar o numero na proposta, no contrato ou na ficha, esta lista deixa de
+    // ser so «sms_otp_codes» e o teste avisa.
+    const writtenTables = [...code.matchAll(/\.(insert|update|upsert|delete)\(/g)].map((m) => {
+      const before = code.slice(0, m.index);
+      const open = before.lastIndexOf('.from("');
+      expect(open, "escrita sem .from(...) antes").toBeGreaterThanOrEqual(0);
+      return before.slice(open).match(/^\.from\("([^"]+)"\)/)?.[1];
+    });
+    expect(writtenTables.length).toBeGreaterThan(0);
+    expect([...new Set(writtenTables)]).toEqual(["sms_otp_codes"]);
   });
 });
