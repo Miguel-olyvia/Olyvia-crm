@@ -15,7 +15,7 @@ function base(docs: LinhaEc[][], tabelas: Record<string, unknown[]>) {
     return { data: {}, error: null };
   });
   const consulta = (t: string) => {
-    const q = { select: () => q, eq: () => q, in: () => q, is: () => q, order: () => q, limit: () => q,
+    const q = { select: () => q, eq: () => q, ilike: () => q, in: () => q, is: () => q, order: () => q, limit: () => q,
       insert: (v: Record<string, unknown>) => { inseridos.push({ t, v }); return { select: async () => ({ data: [{ id: "nova" }], error: null }) }; },
       then: (ok: (v: { data: unknown; error: null }) => unknown) => Promise.resolve({ data: tabelas[t] ?? [], error: null }).then(ok) };
     return q;
@@ -43,8 +43,8 @@ describe("dar os materiais como garantidos (teste)", () => {
   it("sem nenhum fornecedor ligado, liga-se ao Fornecedor Demo (não preferido) e dá-se entrada", async () => {
     const falta = [linha({ product_id: "p9", product_sku: "DBR0255", product_name: "Resguardo", qty_missing: 1 })];
     const { sb, rpc, inseridos } = base([falta, falta, []], { purchase_orders: [], item_suppliers: [], suppliers: [{ id: "demo" }] });
-    const r = await garantirMateriaisTeste(sb, "org", "c1");
-    expect(inseridos).toEqual([{ t: "item_suppliers", v: expect.objectContaining({ product_id: "p9", supplier_id: "demo", is_preferred: false }) }]);
+    const r = await garantirMateriaisTeste(sb, "org", "c1", "bu-1");
+    expect(inseridos).toEqual([{ t: "item_suppliers", v: expect.objectContaining({ product_id: "p9", supplier_id: "demo", is_preferred: false, created_by: "bu-1" }) }]);
     expect(rpc).toHaveBeenCalledWith("rpc_register_stock_entry", expect.objectContaining({ p_product_id: "p9", p_item_supplier_id: "nova" }));
     expect(r.deFora).toEqual([]);
   });
