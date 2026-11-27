@@ -6,7 +6,8 @@
 -- !!! SÓ PARA A BASE DE RH (uetjghdkwbywbftedtth). SÓ A MUDELAR (3242e925-da26-459a-8258-be04d904e355): todas as escritas
 -- !!! levam o filtro da organização. Os ids, SKU e opções foram lidos na RH a 27/11/2026 (SELECT como administrador,
 -- !!! sem RLS), depois da onda 4 (20270129800000). Noutra base (a principal) a organização ou os produtos não existem com
--- !!! estes ids e a migration sai por RAISE NOTICE sem escrever nada. Antes do `db push`, confirmar
+-- !!! estes ids, ou não há _mudelar_excel.onda3_produtos (a onda 3 não correu lá), e a migration sai por RAISE NOTICE
+-- !!! sem escrever nada. RP0041 leva acabamento «Mate» (o Excel: «Natural»=Mate), não o «Natural» do nome. Antes do `db push`, confirmar
 -- !!! supabase/.temp/project-ref = uetjghdkwbywbftedtth.
 --
 -- Pedido do dono: «eu só quero que os produtos que estão no modular sejam iguais aos do Excel» e «se são importados, a cor
@@ -7064,7 +7065,7 @@ INSERT INTO _o6_attr (product_id, attribute_id, codigo, opcao, med_tipo, med_l, 
   ('e41d2ac6-f937-5e10-81e0-e4e064207f8c', '1e938087-56c8-44cb-b3d2-e33072ed2e17', 'largura', '220', NULL, NULL, NULL, NULL, NULL),
   ('e43299be-b063-50fc-a490-33025b1a0e98', '8c2361bb-146b-4643-8091-f212de868c6f', 'medida', NULL, '3D', 100, 30, 46, 'cm'),
   ('e44d8453-9aab-5fdc-9467-a9453fec0c40', '8c2361bb-146b-4643-8091-f212de868c6f', 'medida', NULL, '3D', 160, 24, 30, 'cm'),
-  ('e45ffa11-ad1f-4645-9106-ac756a635046', 'd3a0a0e9-53a2-406c-b2d9-6c8be05c2aa1', 'acabamento', 'Natural', NULL, NULL, NULL, NULL, NULL),
+  ('e45ffa11-ad1f-4645-9106-ac756a635046', 'd3a0a0e9-53a2-406c-b2d9-6c8be05c2aa1', 'acabamento', 'Mate', NULL, NULL, NULL, NULL, NULL),
   ('e46b4b92-ce8a-5e57-9430-37572de41cce', '164541f4-21d7-4fc0-883d-056da7618167', 'lado', 'Esquerdo', NULL, NULL, NULL, NULL, NULL),
   ('e46b4b92-ce8a-5e57-9430-37572de41cce', '8c2361bb-146b-4643-8091-f212de868c6f', 'medida', NULL, '3D', 100, 50, 45, 'cm'),
   ('e46b4b92-ce8a-5e57-9430-37572de41cce', 'af171aa4-98a6-41b8-804c-470570d8ce0e', 'tonalidade', 'MATE', NULL, NULL, NULL, NULL, NULL),
@@ -7650,6 +7651,12 @@ BEGIN
   -- G0: só a Mudelar da base de RH
   IF NOT EXISTS (SELECT 1 FROM anew_organizations o WHERE o.id = c_org AND o.name = 'Mudelar' AND o.deleted_at IS NULL) THEN
     RAISE NOTICE 'mudelar_excel_onda6: a organização Mudelar (%) não existe nesta base — nada a fazer.', c_org;
+    RETURN;
+  END IF;
+  -- G1: só onde a onda 3 correu (a cópia _mudelar_excel.onda3_produtos só existe na RH). Numa base clonada da RH com os
+  -- mesmos ids (a principal, quando o ramo chegar ao main) sai aqui por NOTICE em vez de bloquear o db push em G2.
+  IF to_regclass('_mudelar_excel.onda3_produtos') IS NULL THEN
+    RAISE NOTICE 'mudelar_excel_onda6: a onda 3 não correu nesta base (sem _mudelar_excel.onda3_produtos) — nada a fazer.';
     RETURN;
   END IF;
   SELECT count(*) INTO v_n FROM _o6_prod s JOIN products p ON p.id = s.id;
