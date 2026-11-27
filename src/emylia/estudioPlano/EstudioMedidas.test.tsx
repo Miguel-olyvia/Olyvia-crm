@@ -13,7 +13,7 @@ vi.mock("../EditorPlanta", () => ({
 
 import { acoes, seed, type Negocio } from "../motor";
 import type { Ctx } from "../pecas";
-import { EstudioMedidas } from "./EstudioMedidas";
+import { EstudioMedidas, medidasSeguemAPlanta } from "./EstudioMedidas";
 
 afterEach(cleanup);
 Element.prototype.scrollIntoView = function () {};
@@ -36,5 +36,35 @@ describe("Estúdio das medidas: as medidas seguem a planta (11/11)", () => {
     if (outra) expect(outra.value).toBe("7");
     const impacto = screen.getByRole("region", { name: "Impacto no orçamento" });
     expect(within(impacto).queryByText("Sem impacto")).toBeNull();
+  });
+});
+
+// 27/11 (teste do 1029): a planta dava 6,83 m² de chão e a frase dizia «as medidas em baixo seguem a planta», com os 2 m² da visita em baixo
+describe("Estúdio das medidas: a frase da planta diz a verdade (27/11)", () => {
+  const abrir = () => {
+    const S = seed();
+    S.role = "operacoes";
+    const d = S.deals.find((x) => x.orc?.aceite && !x.orc.vendaDireta) as Negocio | undefined ?? (S.deals[0] as Negocio);
+    d.f.planta = gravarPlanta({ o: { x: 0, y: 0 }, paredes: retangulo(297, 230), pecas: [] });
+    d.f.diag_pe_direito_m = "2,5";
+    delete d.f.retif_pav; delete d.f.retif_par;
+    const A = acoes(S, () => {}, (fn) => fn());
+    const ctx = { S, A, run: (fn: () => void) => fn(), go: (fn: () => void) => () => fn(), q: "" } as unknown as Ctx;
+    render(<EstudioMedidas ctx={ctx} d={d} fechar={() => {}} />);
+  };
+  it("com as medidas da visita diferentes da planta, diz que são as da visita e deixa usar as da planta", () => {
+    abrir();
+    expect(screen.queryByText(/seguem a planta/)).toBeNull();
+    expect(screen.getByText(/ainda são as da visita/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Usar as medidas da planta" }));
+    expect((screen.getByRole("textbox", { name: /Pavimento/ }) as HTMLInputElement).value).toBe("6.83");
+    expect(screen.getByText(/seguem a planta/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Usar as medidas da planta" })).toBeNull();
+  });
+  it("medidasSeguemAPlanta compara só o chão e as paredes que o serviço mede", () => {
+    expect(medidasSeguemAPlanta(null, {})).toBe(true);
+    expect(medidasSeguemAPlanta({ pav: 6.831, par: 27.1 }, { pav: "6.83", par: "27.1" })).toBe(true);
+    expect(medidasSeguemAPlanta({ pav: 6.83, par: 27.1 }, { pav: "2", par: "27.1" })).toBe(false);
+    expect(medidasSeguemAPlanta({ pav: 6.83, par: 27.1 }, { pts: "3" })).toBe(true);
   });
 });

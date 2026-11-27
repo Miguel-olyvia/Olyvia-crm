@@ -96,6 +96,11 @@ function completar(t: FichaTecnico): boolean {
 /** O id do perfil do Catálogo de um técnico (o da ficha; nas de antes, pelo ofício); "" sem perfil. */
 /** 09/11: os ofícios do técnico para mostrar (todos, ou o `sk` sem a lista); "" sem nenhum. */
 export const rotuloOficios = (t: Pick<Tecnico, "sk" | "oficiosRotulo">): string => t.oficiosRotulo || t.sk;
+/** 27/11 (teste do 1029: «Otaniel Semedo ·» na lista de quem vai medir): o nome com os ofícios, sem o « ·» quando não há ofícios. */
+export const nomeComOficios = (t: Pick<Tecnico, "n" | "sk" | "oficiosRotulo">): string => {
+  const o = rotuloOficios(t)?.trim();
+  return o ? `${t.n} · ${o}` : t.n;
+};
 export const perfilDoTecnico = (t: Pick<FichaTecnico, "sk"> & { perfilId?: string }): string => t.perfilId ?? PERFIL_DO_SK[t.sk] ?? "";
 /** Os técnicos (do registo vivo, ou de `L`) com o perfil `perfilId` (28/10: um técnico com vários ofícios conta em todos). */
 export const tecnicosDoPerfil = (perfilId: string, L: readonly FichaTecnico[] = TECNICOS): FichaTecnico[] =>

@@ -1567,7 +1567,9 @@ export function mudancasDeValor(d: Negocio): string[] {
   }
   const p = d.obra.plano;
   if (p?.base) {
-    const dn = p.tasks.length - p.base.length, h = diferencas(p).horas;
+    // 27/11 (teste do 1029): as horas que a regra das microtarefas junta ao abrir o Estúdio são da empresa (hNossa) e não mudam o valor;
+    // contavam aqui e o plano ficava bloqueado em «O valor mudou» sem ninguém lhe mexer. As mesmas horas que impactoDoPlano.
+    const dn = p.tasks.length - p.base.length, h = horasDoPlanoParaOCliente(p);
     if (dn > 0) R.push(`Plano: ${dn === 1 ? "1 tarefa a mais" : `${dn} tarefas a mais`}`);
     else if (dn < 0) R.push(`Plano: ${-dn === 1 ? "1 tarefa a menos" : `${-dn} tarefas a menos`}`);
     if (dn >= 0 && Math.abs(h) > 0.001) R.push(`Plano: ${h > 0 ? "+" : "−"}${nfmt(Math.abs(h))} h de trabalho`);
@@ -1640,6 +1642,16 @@ export function medidasRetificadas(d: Negocio): Partial<Record<CampoMedida, numb
 export function difDoAcerto(d: Negocio, S: Estado): number {
   const mi = impactoDasMedidas(d, S, medidasRetificadas(d)), pi = impactoDoPlano(d, S);
   return r2((mi?.medidas ?? 0) + (pi.semValor ? 0 : pi.valor));
+}
+/** 27/11: as horas a mais ou a menos do plano face ao orçamento que vão ao cliente: as que a regra das microtarefas juntou (hNossa)
+ *  ficam de fora, tarefa a tarefa (as tarefas a mais contam inteiras). */
+export function horasDoPlanoParaOCliente(p: Plano): number {
+  if (!p.base) return 0;
+  const b = p.base;
+  return r2(p.tasks.reduce((a, t, i) => {
+    const baseH = b[i]?.h ?? 0, nossas = Math.min(t.hNossa ?? 0, Math.max(0, t.h - baseH));
+    return a + (t.h - nossas - baseH);
+  }, 0));
 }
 export function impactoDoPlano(d: Negocio, S: Estado): { horas: number; valor: number; semValor: boolean } {
   const p = d.obra.plano;
@@ -2387,7 +2399,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     const ok = retificacaoAceite(d) && planoAprovado(d) && (d.orc?.contrato === "assinado" || !!d.orc?.vendaDireta) && !retificacaoPorPagar(d) ? emitirEc(d) : false;
     fase(d, 5);
     const F = faltaParaArrancar(d, undefined, S);
-    avisar({ msg: "Recibo " + rc.n + " " + como, sub: "Passou a Obra" + (F.length ? " · falta " + F.join(", ") : " · pronta a arrancar"), kind: "ok" });
+    // 27/11 (teste do 1029: o aviso dizia «RC 2026/301» e o negócio, relido, «RC 2026/14»): numa organização real o número do recibo validado
+    // à mão é o da base (financeiroReal.ts troca-o no histórico); o aviso não mostra o número provisório do ecrã
+    const provisorio = !!real && como === "emitido";
+    avisar({ msg: provisorio ? "Recibo emitido" : "Recibo " + rc.n + " " + como, sub: (provisorio ? "O número do recibo é o da base, ao gravar · " : "") + "Passou a Obra" + (F.length ? " · falta " + F.join(", ") : " · pronta a arrancar"), kind: "ok" });
     // 12/11 (Rúben: as medidas e o plano só depois do Financeiro): é agora que abrem, ao mesmo tempo. 16/11: o contrato já vem assinado
     if (!ok && !real) avisar({ msg: "Segue a Obra", sub: "Ao mesmo tempo, o supervisor confirma as medidas e as Operações aprovam o plano. Se a retificação mudar o valor, volta ao Financeiro; depois, sai a encomenda de cliente", kind: "auto", atraso: 500 });
     else if (real) avisar({ msg: "A encomenda de cliente é emitida ao gravar", sub: "Com o pagamento validado e o plano aprovado, vai para as Encomendas de cliente: stock reservado; o que falta vai numa encomenda a fornecedor", kind: "auto", atraso: 500 });
