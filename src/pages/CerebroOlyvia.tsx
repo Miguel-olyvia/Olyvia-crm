@@ -83,8 +83,8 @@ function PainelNo({ n, grafo, obras, onFechar, onEscolher }: { n: NoGrafo; grafo
   const principal = lig.obra ? { to: lig.obra, rot: "Abrir o Estúdio da obra", Icone: HardHat } : lig.negocio ? { to: lig.negocio, rot: "Abrir o negócio", Icone: ArrowRight } : null;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-start gap-3 border-b border-border p-4">
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-start gap-3 border-b border-border p-4">
         <span className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ background: n.cor, boxShadow: `0 0 0 4px ${n.cor}33` }} aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{NOMES_TIPO[n.tipo].um}{n.atualizado ? ` · ${new Date(n.atualizado).toLocaleString("pt-PT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}</p>
@@ -94,7 +94,7 @@ function PainelNo({ n, grafo, obras, onFechar, onEscolher }: { n: NoGrafo; grafo
           <X className="h-5 w-5" aria-hidden="true" />
         </button>
       </div>
-      <div className="flex-1 space-y-4 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 pb-28 lg:pb-4">
         {n.decisoes > 0 && (
           <p className="flex items-center gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-800 dark:text-amber-300">
             <span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-60 motion-reduce:animate-none" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" /></span>
@@ -279,7 +279,7 @@ export default function CerebroOlyvia() {
                 <label className="relative block w-full sm:max-w-xs">
                   <span className="sr-only">Procurar na base de conhecimento</span>
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                  <input type="search" value={pesquisa} onChange={(e) => setPesquisa(e.target.value)} placeholder="Procurar uma nota, um cliente, um número…"
+                  <input type="search" value={pesquisa} onChange={(e) => setPesquisa(e.target.value)} placeholder="Procurar cliente, número ou nota…"
                     onKeyDown={(e) => { if (e.key === "Enter" && encontrados[0]) { e.preventDefault(); escolherEFocar(encontrados[0]); } if (e.key === "Escape") setPesquisa(""); }}
                     className="min-h-11 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-sm shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30" />
                 </label>
@@ -315,7 +315,7 @@ export default function CerebroOlyvia() {
                   {no && (
                     <motion.aside key="painel" aria-label={`Nota: ${no.titulo}`}
                       initial={parado ? false : { opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={parado ? undefined : { opacity: 0, y: 24 }} transition={{ duration: 0.22 }}
-                      className="fixed inset-x-0 bottom-0 z-[615] max-h-[72vh] overflow-hidden rounded-t-3xl border border-border bg-background shadow-2xl lg:absolute lg:inset-x-auto lg:bottom-3 lg:right-3 lg:top-3 lg:max-h-none lg:w-[380px] lg:rounded-2xl">
+                      className="fixed inset-x-0 bottom-0 z-[615] flex max-h-[72vh] flex-col overflow-hidden rounded-t-3xl border border-border bg-background shadow-2xl lg:absolute lg:inset-x-auto lg:bottom-3 lg:right-3 lg:top-3 lg:max-h-none lg:w-[380px] lg:rounded-2xl">
                       <PainelNo n={no} grafo={grafo} obras={obras} onFechar={() => escolher(null)} onEscolher={escolherEFocar} />
                     </motion.aside>
                   )}

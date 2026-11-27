@@ -60,7 +60,10 @@ function itemObra(d: Negocio, o: ObraVoz, agora: Date): ItemConhecimento {
     o.feitos.length ? `Hoje os agentes fizeram: ${o.feitos.map((f) => `${f.quando} ${f.texto} (${f.quem})`).join("; ")}.` : "",
   ].filter(Boolean);
   return { chave: `obra:${d.id}`, tipo: "obra", numero: d.id, titulo: `Obra ${d.id} · ${d.nome}`, texto: linhas.join(" "),
-    dados: { estado: p.estado, fim: o.fim, decisoes: o.propostas.filter((x) => x.modo === "pede").length, propostas: o.propostas.map((x) => ({ ref: x.ref, agente: x.agente, modo: x.modo, titulo: x.titulo })),
+    // 27/11 (Rúben: «os relatórios gerados têm de estar muito melhor estruturados»): os dados à parte, para tabelas (não só o texto)
+    dados: { estado: p.estado, fim: o.fim, dia: p.estado === "em curso" ? p.dia + 1 : null, feitas, total: p.tasks.length,
+      decisoes: o.propostas.filter((x) => x.modo === "pede").length, propostas: o.propostas.map((x) => ({ ref: x.ref, agente: x.agente, modo: x.modo, titulo: x.titulo })),
+      proximas: proximas.map((x) => { let q = ""; try { q = rotuloDia(p, x.t.dia); } catch { q = `dia ${x.t.dia + 1}`; } return { nome: nomeNoPlano(p, x.t), estado: x.v, quando: q, tec: tecNome(x.t.tec) }; }),
       // 27/11 (Rúben: «uma nova área no menu para o cérebro, mostrar os agentes a trabalhar»): o Cérebro lê daqui a autonomia de cada agente
       // nesta obra e o que fizeram hoje (com o agente), sem ter de carregar os Negócios
       degraus: Object.fromEntries(AGENTES.map((a) => [a.id, degrauDe(d.obra.agentes, a.id)])),
