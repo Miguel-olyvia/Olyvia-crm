@@ -1103,7 +1103,10 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   // 25/11: a 1.ª coluna alarga-se com o pegador do cabeçalho (fica guardada neste browser, por vista); duplo clique repõe
   const [largCol, setLargCol] = useLarguraColuna(vista);
   const rotulo = largCol == null ? "w-32 sm:w-56" : "";
-  const largura = largCol == null ? undefined : { width: largCol };
+  // 27/11 (revisão a 390 px, na 1048): a largura guardada no computador (548 px) tapava as barras no telemóvel; num ecrã estreito a
+  // coluna fica no máximo a 45% da largura (o valor guardado não muda)
+  const estreito = typeof window !== "undefined" && window.innerWidth < 640;
+  const largura = largCol == null ? undefined : { width: estreito ? Math.min(largCol, Math.max(COLUNA_MIN, Math.round(window.innerWidth * 0.45))) : largCol };
   const cabCol = useRef<HTMLDivElement>(null);
   const puxar = useRef<{ x: number; w: number } | null>(null);
   const [aPuxar, setAPuxar] = useState(false);
