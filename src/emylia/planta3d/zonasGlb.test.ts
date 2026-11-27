@@ -134,6 +134,23 @@ describe("aparenciaDaZona: as omissões POR NOME DO ATRIBUTO", () => {
   });
 });
 
+// 27/11: a Textura (Pizarra, Liso, Piedra) passou a ter hex e foto na base para a foto da opção se poder carregar, mas não é um atributo de cor: nunca pinta uma zona
+// (a foto dela vai ao corpo, tingida, por texturaDosAtributos) e não conta para «o único atributo de cor».
+describe("aparenciaDaZona: a Textura não é um atributo de cor", () => {
+  const TEXTURA = def("d-textura", "Textura", "textura", [op("pizarra", "org/pizarra.webp"), op("liso", null)]);
+  it("com a Textura escolhida, nenhuma zona é pintada por ela", () => {
+    for (const z of ZONAS) expect(aparenciaDaZona(z, [escolha(TEXTURA, "pizarra")], [TEXTURA]), z).toBeNull();
+  });
+  it("não faz da Cor um atributo «que já não é o único»: a Cor continua a pintar todas as zonas", () => {
+    const a = [escolha(COR, "cinza"), escolha(TEXTURA, "pizarra")];
+    for (const z of ZONAS) expect(aparenciaDaZona(z, a, [COR, TEXTURA]), z).toEqual({ atributo: "Cor", foto: null, hex: "#888888" });
+  });
+  it("um atributo qualquer (sem nome conhecido) que é o único de cor continua a pintar com a Textura ao lado", () => {
+    const outro = def("d-x", "Padrão", "padrao", [op("a", null, "#123456")]);
+    for (const z of ZONAS) expect(aparenciaDaZona(z, [escolha(outro, "a"), escolha(TEXTURA, "pizarra")], [outro, TEXTURA]), z).toEqual({ atributo: "Padrão", foto: null, hex: "#123456" });
+  });
+});
+
 describe("zonasDosAtributos: o que cada zona leva, e se as zonas diferem", () => {
   it("sem nenhum atributo de cor (ou sem escolha): undefined, o modelo fica exactamente como hoje", () => {
     expect(zonasDosAtributos(undefined, undefined)).toBeUndefined();
