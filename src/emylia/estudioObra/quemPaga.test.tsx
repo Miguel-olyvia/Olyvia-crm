@@ -223,3 +223,22 @@ describe("o alerta das adendas por disparar, em cima do Estúdio (sem sair dele)
     expect(a.estado).toBe("enviada");
   });
 });
+
+describe("27/11: «Só acertar o plano» (preparar planos reais)", () => {
+  it("é a 4.ª opção e entra no plano sem adenda e sem custo na margem", async () => {
+    const { PORQUE, MOTIVO_QUEM_PAGA } = await import("./quemPaga");
+    expect(PORQUE.map((x) => x.k)).toEqual(["cliente", "imprevisto", "empresa", "plano"]);
+    expect(MOTIVO_QUEM_PAGA.plano).toBe("Acerto do plano");
+  });
+  it("o atraso entra já, sem custo na margem nem adenda", () => {
+    const { S, d, A, p, ix } = obra();
+    const rev = ix("Revestimento de parede"), fim0 = Math.max(...p.tasks.map((t) => t.dia + t.dur));
+    const m0 = margemAoVivo(d, S)!, ad0 = (d.adendas ?? []).length;
+    expect(A.ajusteNosso(d.id, { k: "atraso", ti: rev, dias: 2 }, { soPlano: true })).toBe(true);
+    expect(Math.max(...p.tasks.map((t) => t.dia + t.dur))).toBeGreaterThan(fim0);
+    expect(d.obra.alteracoes![0].custo ?? 0).toBe(0);
+    expect(custoDosNossos(d).custo).toBe(0);
+    expect(margemAoVivo(d, S)!.margemViva).toBe(m0.margemViva);
+    expect((d.adendas ?? []).length).toBe(ad0);
+  });
+});
