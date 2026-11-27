@@ -26,7 +26,7 @@ const lista = bruto.slice(bruto.indexOf("INSERT INTO _lc_cat"), bruto.indexOf("D
 const cats = [...lista.matchAll(new RegExp(`\\('(${UUID})', '(${UUID})', '((?:[^']|'')*)', '([A-Z0-9]{1,6})', (NULL|'${UUID}')\\)`, "g"))]
   .map((m) => ({ id: m[1], org: m[2], nome: m[3].replace(/''/g, "'"), sigla: m[4], pai: m[5] === "NULL" ? null : m[5].slice(1, -1) }));
 
-/** As que o dono manda manter (têm negócios, são pais das que ficam, ou estão no Excel da Mudelar). */
+/** As que o dono manda manter (têm negócios, são pais das que ficam, ou têm linhas no Excel da Mudelar). */
 const FICAM = [
   "1fd72eea-4193-402c-b362-68800dbbc67c", // Materiais
   "4abd6251-f6c0-4862-94c6-edb2e46fe0d6", // laminados
@@ -36,6 +36,7 @@ const FICAM = [
   "dfd635df-e9a1-4bf3-b242-57926137287b", // Bancadas de Cozinha
   "5214c966-2c55-48b2-9b61-10358494d9c8", // Portas
   "e9461498-d8cc-4b64-864b-b5fdd32bf208", // Painéis Acústicos
+  "a99b9a8a-3e47-46e4-bdb7-aedc1fa0ed6d", // Sifões Lavatório (Excel da Mudelar: TMSL0001 e TMSL0002, por carregar)
 ];
 
 describe(`migration ${nome}`, () => {
@@ -72,8 +73,8 @@ describe(`migration ${nome}`, () => {
     expect(cats.every((c) => c.org === MUDELAR)).toBe(true);
     expect(cats.filter((c) => c.pai === null)).toHaveLength(constante("c_n_topo"));
     expect(cats.filter((c) => c.pai !== null)).toHaveLength(constante("c_n_sub"));
-    expect([constante("c_n_cat"), constante("c_n_mudelar"), constante("c_n_nike")]).toEqual([14, 14, 0]);
-    expect([constante("c_n_topo"), constante("c_n_sub")]).toEqual([1, 13]);
+    expect([constante("c_n_cat"), constante("c_n_mudelar"), constante("c_n_nike")]).toEqual([13, 13, 0]);
+    expect([constante("c_n_topo"), constante("c_n_sub")]).toEqual([1, 12]);
     expect(bruto).not.toContain("49b9a13f-1862-4587-871b-897119697c51"); // rafaelcategoria (nike) fica
     expect(constante("c_vivas_mudelar")).toBe(94);
     expect(constante("c_vivas_nike")).toBe(34);
@@ -84,6 +85,7 @@ describe(`migration ${nome}`, () => {
     const ids = new Set(cats.map((c) => c.id));
     expect(cats.some((c) => c.pai !== null && ids.has(c.pai))).toBe(false);
     expect(cats.map((c) => c.nome)).not.toContain("Painéis Acústicos");
+    expect(cats.map((c) => c.nome)).not.toContain("Sifões Lavatório");
   });
 
   it("só escreve por UPDATE de is_active, deleted_at e deleted_by em product_categories (soft delete, como o ecrã)", () => {

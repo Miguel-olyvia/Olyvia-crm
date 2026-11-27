@@ -14,13 +14,13 @@
 -- que nao teem ligacao a nenhum produto ou algo tira, e tira categorias e subcategorias que nao teem produtos». Esta
 -- migration trata SÓ das categorias; os modelos 3D genéricos são código (outro commit).
 --
--- O QUE FAZ: apaga (soft delete) 14 categorias da Mudelar, todas sem nenhum produto (nem vivo nem apagado), sem filhas e
+-- O QUE FAZ: apaga (soft delete) 13 categorias da Mudelar, todas sem nenhum produto (nem vivo nem apagado), sem filhas e
 -- sem nenhuma referência noutra tabela:
---   Mudelar (14): 1 de topo — Mobiliário de Roupeiros (MR); 13 subcategorias — Aros, Guarnições e Acabamentos,
+--   Mudelar (13): 1 de topo — Mobiliário de Roupeiros (MR); 12 subcategorias — Aros, Guarnições e Acabamentos,
 --   Ferragens e Acessórios, Portas de Segurança / Blindadas, Portas de Serviço / Técnicas, Portas Exteriores (de Portas);
 --   Cubas encastrar / pousar / embutir (de Lava-louças & Cubas); Frentes / portas (de Mobiliário & Componentes
 --   Cozinha); Janelas Alumínio (de Janelas); Nichos, Prateleiras (de Acessórios de Casa de Banho); pedra (de Bancadas
---   de Cozinha); Resguardos Banheira (de Duche & Banho); Sifões Lavatório (de Torneiras & Misturadoras).
+--   de Cozinha); Resguardos Banheira (de Duche & Banho).
 --   nike: nenhuma (a rafaelcategoria fica; G1 e C3/C4 confirmam que a nike fica igual).
 -- A escrita é a mesma de rpc_delete_product_category / rpc_delete_product_subcategory (lidas na base a 27/11):
 -- is_active = false, deleted_at = now(), deleted_by = utilizador. A sigla fica livre: o índice único
@@ -29,7 +29,7 @@
 -- O QUE NÃO FAZ: não apaga fisicamente nada; não toca em produtos, modelos, negócios, orçamentos, atributos, preços,
 -- fornecedores nem noutra organização; não apaga as categorias sem produtos que ainda têm uso (ficam, por decisão do
 -- dono): Materiais, laminados, Portas Interiores, Janelas PVC e Janelas (referidas por 55 linhas de negocio_produtos),
--- Bancadas de Cozinha e Portas (pais das que ficam), e Painéis Acústicos (usada no Excel da Mudelar, RPA0001).
+-- Bancadas de Cozinha e Portas (pais das que ficam), e as que têm linhas no Excel da Mudelar, ainda por carregar: Painéis Acústicos (RPA0001) e Sifões Lavatório (TMSL0001 e TMSL0002, estado «Descontinuar»; contam, como as outras, porque o Excel é a fonte do catálogo).
 --
 -- GATILHOS de product_categories (lidos a 27/11): trg_audit_product_categories (AFTER, fn_audit_product_categories_
 -- with_sentinel: escreve a auditoria com app.audit_user_id e app.audit_source, salvo app.audit_bypass = 'on'),
@@ -37,8 +37,8 @@
 -- UPDATE: updated_at). Nenhum calcula caminho, nível ou contagens. Aqui a auditoria fica a cargo do gatilho (uma linha
 -- de UPDATE por categoria, com is_active, deleted_at e deleted_by), e não por fn_manual_audit_log como a RPC.
 --
--- GUARDAS: G0 a base é a RH e as organizações existem (senão NOTICE e sai); L1 a lista tem 14, todas da Mudelar (1 de
--- topo e 13 subcategorias), nenhuma da nike; G1 categorias vivas: Mudelar 94, nike 34, nenhuma noutra organização;
+-- GUARDAS: G0 a base é a RH e as organizações existem (senão NOTICE e sai); L1 a lista tem 13, todas da Mudelar (1 de
+-- topo e 12 subcategorias), nenhuma da nike; G1 categorias vivas: Mudelar 94, nike 34, nenhuma noutra organização;
 -- G2 cada categoria existe na Mudelar, viva, com o nome, a sigla e o pai lidos, sem modelo_3d; G3 nenhum produto (vivo ou
 -- apagado) por category_id, subcategory_id ou catalogo_categoria_id; G4 nenhuma filha viva (parent_id ou
 -- parent_category_id); G5 nenhuma referência em cat_config_3d, category_attribute_palettes, category_attributes,
@@ -46,11 +46,11 @@
 -- product_models, services, supplier_catalog_items, bundles, deal_needs, negocio_produtos, quote_versao_produtos,
 -- ops_ativo, ops_medicao_def nem no texto de negocio_vista_cliente (as 15 chaves estrangeiras para product_categories
 -- estão todas cobertas: estas, products e parent_id/parent_category_id); G6 o utilizador da auditoria é membro ativo da
--- Mudelar e a auditoria está ligada; G7 o índice da sigla é parcial em deleted_at IS NULL. Lock: as 14 linhas FOR
+-- Mudelar e a auditoria está ligada; G7 o índice da sigla é parcial em deleted_at IS NULL. Lock: as 13 linhas FOR
 -- UPDATE (bloqueia produtos novos a apontar para elas até ao fim).
--- CONFERÊNCIAS: C1 as 14 ficam apagadas por esta migration e o resto da linha igual à cópia; C2 uma linha de auditoria
--- por categoria; C3 as outras categorias iguais (a nike incluída); C4 vivas: Mudelar 80, nike 34 (igual); C5 nada
--- escrito fora das 14 (xmin); C6 continua sem produtos nem filhas vivas; C7 a cópia fechada (::text nas ACL e no relkind).
+-- CONFERÊNCIAS: C1 as 13 ficam apagadas por esta migration e o resto da linha igual à cópia; C2 uma linha de auditoria
+-- por categoria; C3 as outras categorias iguais (a nike incluída); C4 vivas: Mudelar 81, nike 34 (igual); C5 nada
+-- escrito fora das 13 (xmin); C6 continua sem produtos nem filhas vivas; C7 a cópia fechada (::text nas ACL e no relkind).
 --
 -- CÓPIA E REVERSÃO: a linha inteira de cada categoria antes de apagar fica em
 -- _limpeza_catalogo.categorias_sem_produtos (só postgres). REVERSÃO fora da pasta das migrations (estar aqui é ser
@@ -82,8 +82,7 @@ INSERT INTO _lc_cat (id, org, nome, sigla, pai) VALUES
   ('77c5a922-e557-4a9e-b8fd-de6cdda31f02', '3242e925-da26-459a-8258-be04d904e355', 'Portas de Serviço / Técnicas', 'PST', '5214c966-2c55-48b2-9b61-10358494d9c8'),
   ('a749455e-abc7-41e3-95d8-fed91dd848bb', '3242e925-da26-459a-8258-be04d904e355', 'Portas Exteriores', 'PE', '5214c966-2c55-48b2-9b61-10358494d9c8'),
   ('c8d587a7-0f47-4dc9-9262-5aa2b242d4d9', '3242e925-da26-459a-8258-be04d904e355', 'Prateleiras', 'PRT', 'd4e8b4bc-85af-4752-be4a-07130b3a7304'),
-  ('b28862b9-c76f-4bd8-bb10-0d01bc23c1eb', '3242e925-da26-459a-8258-be04d904e355', 'Resguardos Banheira', 'RB', 'b808fe48-e4e6-4096-abf0-34fc7a703257'),
-  ('a99b9a8a-3e47-46e4-bdb7-aedc1fa0ed6d', '3242e925-da26-459a-8258-be04d904e355', 'Sifões Lavatório', 'SL', 'b50f7163-b41d-4a49-986d-a43e2be74d5e');
+  ('b28862b9-c76f-4bd8-bb10-0d01bc23c1eb', '3242e925-da26-459a-8258-be04d904e355', 'Resguardos Banheira', 'RB', 'b808fe48-e4e6-4096-abf0-34fc7a703257');
 
 -- ─── 2. Guardas, cópia, escrita e conferências (um só bloco: tudo ou nada) ─────────────────────────
 DO $mig$
@@ -92,11 +91,11 @@ DECLARE
   c_nike            constant uuid    := 'b6ffce4f-f630-4933-833a-008649757a33';
   c_criador         constant uuid    := 'ba0b0ebf-1bdb-43f9-b82b-a2ade29848e2';
   c_fonte           constant text    := 'migration:limpar_categorias_sem_produtos';
-  c_n_cat           constant integer := 14;
-  c_n_mudelar       constant integer := 14;
+  c_n_cat           constant integer := 13;
+  c_n_mudelar       constant integer := 13;
   c_n_nike          constant integer := 0;
   c_n_topo          constant integer := 1;
-  c_n_sub           constant integer := 13;
+  c_n_sub           constant integer := 12;
   c_vivas_mudelar   constant integer := 94;
   c_vivas_nike      constant integer := 34;
   v_n bigint; v_m bigint; v_feito bigint; v_upd bigint;
@@ -136,10 +135,10 @@ BEGIN
 
   PERFORM set_config('app.audit_source', c_fonte, true);
   PERFORM set_config('app.audit_user_id', c_criador::text, true);
-  -- as 14 linhas presas até ao fim, por ordem fixa (um produto novo que aponte para elas espera pelo COMMIT)
+  -- as 13 linhas presas até ao fim, por ordem fixa (um produto novo que aponte para elas espera pelo COMMIT)
   PERFORM 1 FROM product_categories c WHERE c.id IN (SELECT s.id FROM _lc_cat s) ORDER BY c.id FOR UPDATE;
 
-  -- já aplicada? (as 14 apagadas por esta migration e a cópia existe) — sai por NOTICE; estado a meio — pára
+  -- já aplicada? (as 13 apagadas por esta migration e a cópia existe) — sai por NOTICE; estado a meio — pára
   SELECT count(*) INTO v_feito FROM _lc_cat s JOIN product_categories c ON c.id = s.id
   WHERE c.deleted_at IS NOT NULL AND c.deleted_by = c_criador AND c.is_active = false;
   IF v_feito = c_n_cat AND to_regclass('_limpeza_catalogo.categorias_sem_produtos') IS NOT NULL THEN
@@ -246,7 +245,7 @@ BEGIN
   GET DIAGNOSTICS v_upd = ROW_COUNT;
   IF v_upd <> c_n_cat THEN RAISE EXCEPTION 'W1: % categorias apagadas; esperavam-se %.', v_upd, c_n_cat; END IF;
 
-  -- C1: as 14 ficam apagadas por esta migration e o resto da linha igual à cópia
+  -- C1: as 13 ficam apagadas por esta migration e o resto da linha igual à cópia
   SELECT count(*) INTO v_n FROM _limpeza_catalogo.categorias_sem_produtos b JOIN product_categories c ON c.id = b.id
   WHERE c.is_active = false AND c.deleted_at = v_agora AND c.deleted_by = c_criador
     AND to_jsonb(c) - ARRAY['is_active', 'deleted_at', 'deleted_by', 'updated_at'] = b.linha - ARRAY['is_active', 'deleted_at', 'deleted_by', 'updated_at'];
@@ -270,7 +269,7 @@ BEGIN
     RAISE EXCEPTION 'C4: categorias vivas depois: Mudelar %, nike %; esperavam-se % e %.', v_n, v_m, c_vivas_mudelar - c_n_mudelar, c_vivas_nike - c_n_nike;
   END IF;
 
-  -- C5: nada escrito fora das 14 categorias (nenhuma outra linha destas tabelas tem o xmin desta transação)
+  -- C5: nada escrito fora das 13 categorias (nenhuma outra linha destas tabelas tem o xmin desta transação)
   v_xid := (txid_current() % 4294967296)::text;
   SELECT (SELECT count(*) FROM product_categories c WHERE c.xmin::text = v_xid AND c.id NOT IN (SELECT s.id FROM _lc_cat s))
        + (SELECT count(*) FROM products p WHERE p.xmin::text = v_xid)
