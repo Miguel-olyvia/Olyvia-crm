@@ -232,3 +232,12 @@ All colors MUST be HSL.
 [data-sonner-toast] {
   z-index: 999999 !important;
 }
+
+/* 27/11 (Estúdio da obra no telemóvel): com a barra das ações em baixo (o botão principal), a ovelha da Olyvia e o botão do chat
+   sobem para cima dela; antes tapavam metade de «Validar a tarefa feita». */
+@media (max-width: 639px) {
+  html[data-barra-baixo] [data-olyvia],
+  html[data-barra-baixo] [data-chat-equipa] {
+    bottom: calc(4.75rem + env(safe-area-inset-bottom)) !important;
+  }
+}

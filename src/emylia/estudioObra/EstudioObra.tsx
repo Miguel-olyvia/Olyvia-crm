@@ -18,7 +18,7 @@ import { exportarExcelPlano, exportarPdfPlano } from "./exportarPlano";
 import { FitaAgentes, useRastoAgente } from "./FitaAgentes";
 import { degrauDe, modoDa, propostasDosAgentes, type Proposta } from "./agentes";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowLeft, Box, FileDown, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, GripVertical, HardHat, Lightbulb, Link2, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Redo2, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Box, FileDown, FileText, ArrowUpRight, CalendarCheck, CalendarRange, Camera, Check, CheckCircle2, ChevronDown, CircleHelp, ChevronLeft, ChevronRight, Clock, Euro, FastForward, Flag, Gauge, GripVertical, HardHat, Lightbulb, Link2, ListChecks, Lock, MessageSquare, Minus, Package, Pause, Plus, Redo2, ReceiptText, Rocket, Smartphone, RotateCcw, Route, Shuffle, Sparkles, TrendingUp, Users, X, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { comRelogioReal, eur, nfmt, type AvisoTec, type Negocio, type Plano, type Tarefa } from "../motor";
@@ -92,6 +92,7 @@ type Painel = { k: "tarefa"; ti: number } | { k: "imprevisto"; ti?: number; inic
   | { k: "porque"; aj: AjusteObra; volta?: number } | null;
 type AbaObra = "plano" | "execucao" | "diario" | "materiais" | "equipa" | "cliente" | "contrato" | "documentos" | "3d" | "fecho";
 const ABAS_OBRA: readonly AbaObra[] = ["plano", "execucao", "diario", "materiais", "equipa", "cliente", "contrato", "documentos", "3d", "fecho"];
+const ROTULO_ABA: Record<AbaObra, string> = { plano: "Plano", execucao: "Execução", diario: "Diário", materiais: "Materiais", equipa: "Equipa", cliente: "Cliente", contrato: "Contrato", documentos: "Documentos", "3d": "3D", fecho: "Fecho" };
 
 /* 12/11 (o «voltar» do browser): o separador (?aba=equipa) e o painel aberto (?painel=tarefa-3) vivem no endereço. O painel em texto:
    tarefa-<i>, imprevisto[-<i>], nova, porque-<o ajuste em JSON>. O que não cabe (o dia e o técnico da tarefa nova, de onde veio o
@@ -131,6 +132,28 @@ const COR_VIVO: Record<EstadoVivo, string> = {
 function LerQuemAssina() {
   const nome = useNomeParaMarcaDagua();
   useEffect(() => { if (nome) definirQuemAssina(nome); }, [nome]);
+  return null;
+}
+
+/** 27/11: leva `el` ao topo da área que rola do Estúdio (o <main>), sem mexer no resto: o scrollIntoView rolava também a caixa fixa do
+ *  Estúdio (overflow-hidden) quando o fim da página não chegava, e o cabeçalho com os separadores saía do ecrã. */
+function rolarNoEstudio(el: Element | null | undefined, reduzir: boolean) {
+  if (!el) return;
+  const m = el.closest("main");
+  if (!m) { el.scrollIntoView?.({ behavior: reduzir ? "auto" : "smooth", block: "start" }); return; }
+  const top = el.getBoundingClientRect().top - m.getBoundingClientRect().top + m.scrollTop - 16;
+  if (typeof m.scrollTo === "function") m.scrollTo({ top: Math.max(0, top), behavior: reduzir ? "auto" : "smooth" }); else m.scrollTop = Math.max(0, top);
+}
+
+/** 27/11: enquanto a barra das ações do Estúdio está em baixo (no telemóvel), a ovelha e o chat sobem (index.css, data-barra-baixo).
+ *  Conta quantas barras há (o Estúdio de outra obra abre por cima deste). */
+let barrasEmBaixo = 0;
+function MarcarBarraEmBaixo() {
+  useEffect(() => {
+    barrasEmBaixo++;
+    document.documentElement.setAttribute("data-barra-baixo", "");
+    return () => { barrasEmBaixo = Math.max(0, barrasEmBaixo - 1); if (!barrasEmBaixo) document.documentElement.removeAttribute("data-barra-baixo"); };
+  }, []);
   return null;
 }
 
@@ -214,6 +237,8 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
     return () => window.removeEventListener("keydown", tecla);
   });
   const reduzir = useReduzir();
+  const reduzirRef = useRef(reduzir);
+  reduzirRef.current = reduzir;
   const p = d.obra.plano;
   const db = useInventario();
   // 24/11 (microtarefas) e 25/11 (as horas pelas microtarefas): ao abrir e quando o Catálogo chega (AtualizarMicrotarefas.tsx)
@@ -252,7 +277,16 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   const comandoRef = useRef<HTMLElement>(null), previsaoRef = useRef<HTMLElement>(null);
   // 11/11 (Rúben: «gerir tudo por completo»): os separadores, a vista do plano e o «Desfazer» das mudanças ao plano
   const [aba, setAbaUrl] = useParamUrl<AbaObra>("aba", "plano", ABAS_OBRA, noEndereco ? undefined : false);
-  const setAba = (x: AbaObra) => { if (x === aba) return; mexeu.current = true; setAbaUrl(x); };
+  /** Muda o separador sem rolar (quem chama rola para onde quer: a pré-visualização, os imprevistos, o comando). */
+  const setAbaSo = (x: AbaObra) => { if (x === aba) return; mexeu.current = true; setAbaUrl(x); };
+  // 27/11 (Rúben: «melhora a UX de gestão da obra»): os separadores estão no cabeçalho, sempre à vista; mudar de separador (ou tocar no
+  // que já está aberto) leva logo ao conteúdo dele. Antes, «Responder» ao cliente ou «Ver materiais» trocavam o separador lá em baixo,
+  // dois ecrãs abaixo, e o gestor ficava a olhar para o topo sem ver o que mudou.
+  const abaRef = useRef<HTMLDivElement>(null);
+  const setAba = (x: AbaObra) => {
+    setAbaSo(x);
+    window.setTimeout(() => rolarNoEstudio(abaRef.current, reduzirRef.current), 60);
+  };
   // sair do Estúdio: o separador e o painel saem do endereço (não ficam na página do negócio)
   const sair = () => {
     if (noEndereco) {
@@ -263,6 +297,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
     fechar(mexeu.current);
   };
   const [vista, setVista] = useState<"gantt" | "tecnicos">("gantt");
+  const [verAlertas, setVerAlertas] = useState(false);
   const obras = useMemo(() => obrasDosTecnicos(S, d.id), [S, d.id, S.deals, painel, passos.current.pos, passos.current.L.length]); // eslint-disable-line react-hooks/exhaustive-deps
   // Esc fecha o que está por cima: o painel, depois a pré-visualização, depois o Estúdio (com outra obra aberta, é ela que fecha)
   useEffect(() => {
@@ -317,6 +352,9 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   try { propostas = propostasDosAgentes(d, S, ocup, inv); } catch (e) { console.warn("agentes", e); }
   const vivo = p.estado === "em curso", acabou = p.estado === "concluída";
   const planeia = podeNeg(S.role, "obra.planear");
+  // a fita dos agentes aparece com a obra em curso ou aprovada (é ela que mostra os alertas, com o próximo passo); quem só lê (o técnico)
+  // continua a ver a lista aberta
+  const comFita = (vivo || p.estado === "aprovado") && planeia;
   const fim = Math.max(1, fimDe(p.tasks)), der = derrapagem(p);
   const fimR = R ? R.fimDepois : fim;
   const inicio = inicioDoPlano(p) ?? new Date();
@@ -375,7 +413,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   const pedirRestricao = (tec: string, ds: number[] | null) => {
     const nome = (nomeTec(tec) || tec).split(" ")[0];
     setPrevia({ titulo: ds && ds.length ? `${nome} só pode ${diasQuePode(ds)}` : `${nome} volta a poder todos os dias`, k: "restricao", tec, dias: ds && ds.length ? ds : null });
-    window.setTimeout(() => document.querySelector('[aria-label="Antes de aplicar"]')?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+    window.setTimeout(() => rolarNoEstudio(document.querySelector('[aria-label="Antes de aplicar"]'), reduzir), 60);
   };
   const abrirImprevisto = (x: ImprevistoInicial) => { setPrevia(null); setPainel({ k: "imprevisto", ti: x.ti, inicial: x }); };
   const n = {
@@ -387,7 +425,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   };
 
   const verImprevisto = (id: string) => {
-    imprevistosRef.current?.scrollIntoView({ behavior: reduzir ? "auto" : "smooth", block: "start" });
+    rolarNoEstudio(imprevistosRef.current, reduzir);
     window.setTimeout(() => (document.querySelector(`[aria-label="Imprevisto ${id}"]`) as HTMLElement | null)?.focus?.(), 300);
   };
   const agir = (a: AcaoAlerta) => {
@@ -413,19 +451,19 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   };
 
   // 12/11: o que as peças vivas (pulso, comando, previsão, agenda, diário) usam para levar cada coisa ao sítio dela
-  const rolar = (r: React.RefObject<HTMLElement>) => window.setTimeout(() => r.current?.scrollIntoView({ behavior: reduzir ? "auto" : "smooth", block: "start" }), 60);
+  const rolar = (r: React.RefObject<HTMLElement>) => window.setTimeout(() => rolarNoEstudio(r.current, reduzir), 60);
   const ir: Ir = {
     tarefa: (ti) => setPainel({ k: "tarefa", ti }), aba: (x) => setAba(x), outra: setOutra,
-    replanear: () => { if (!planeia) return; setPainel(null); setAba("plano"); setPrevia({ titulo: "Pôr a obra em dia", k: "replanear", adiantar: true }); },
-    imprevisto: (id) => { setAba("plano"); if (id) window.setTimeout(() => verImprevisto(id), 80); else rolar(imprevistosRef); },
-    previsao: () => { setAba("plano"); rolar(previsaoRef); }, comando: () => rolar(comandoRef),
+    replanear: () => { if (!planeia) return; setPainel(null); setAbaSo("plano"); setPrevia({ titulo: "Pôr a obra em dia", k: "replanear", adiantar: true }); },
+    imprevisto: (id) => { setAbaSo("plano"); if (id) window.setTimeout(() => verImprevisto(id), 80); else rolar(imprevistosRef); },
+    previsao: () => { setAbaSo("plano"); rolar(previsaoRef); }, comando: () => rolar(comandoRef),
   };
   const pedidos = precisaDeTi(ctx, d, ir);
   // 25/11 (agentes, etapa 2): o que os agentes pedem entra no «Precisa de ti» numa linha só, que leva à fita
   {
     const pedem = planeia ? propostas.filter((x) => modoDa(x, d.obra.agentes) === "pede") : [];
     if (pedem.length) pedidos.push({ k: "agentes", t: `Os agentes pedem ${pedem.length} ${pedem.length === 1 ? "decisão" : "decisões"}`, sub: pedem.slice(0, 2).map((x) => x.titulo).join(" · "),
-      rot: "Ver", fn: () => document.querySelector('[aria-label="Os agentes da obra"]')?.scrollIntoView({ behavior: reduzir ? "auto" : "smooth", block: "start" }), nivel: pedem.some((x) => x.nivel === "critico") ? "critico" : "atencao" });
+      rot: "Ver", fn: () => rolarNoEstudio(document.querySelector('[aria-label="Os agentes da obra"]'), reduzir), nivel: pedem.some((x) => x.nivel === "critico") ? "critico" : "atencao" });
   }
   // o botão principal: um só, pelo momento da obra
   // 20/11 (Rúben): no 50-25-25, a parcela do arranque está no Financeiro desde o contrato assinado; a obra arranca com ela paga
@@ -469,14 +507,31 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
             </div>
           </div>
           {principal?.porque && <p className="mx-auto max-w-[1900px] px-4 pb-2 text-sm text-amber-800 dark:text-amber-300 sm:px-6">{principal.porque}</p>}
+          {/* ------------------------------------------------------------ 11/11: os separadores (o plano, a execução, os materiais, a equipa, o cliente, o fecho)
+              27/11: no cabeçalho, sempre à vista (antes ficavam por baixo do comando e da fita dos agentes, a dois ecrãs do topo) */}
+          <div role="tablist" aria-label="O que gerir" className="mx-auto flex max-w-[1900px] gap-1 overflow-x-auto px-4 pb-2 [scrollbar-width:none] sm:px-6">
+            <Aba on={aba === "plano"} rot="Plano" n={alertas.length} aviso onClick={() => setAba("plano")} icone={<CalendarRange className="h-4 w-4" />} />
+            <Aba on={aba === "execucao"} rot="Execução" n={n.execucao} aviso onClick={() => setAba("execucao")} icone={<ListChecks className="h-4 w-4" />} />
+            <Aba on={aba === "diario"} rot="Diário" onClick={() => setAba("diario")} icone={<Camera className="h-4 w-4" />} />
+            <Aba on={aba === "materiais"} rot="Materiais" n={n.materiais} aviso onClick={() => setAba("materiais")} icone={<Package className="h-4 w-4" />} />
+            <Aba on={aba === "equipa"} rot="Equipa" n={n.equipa} aviso onClick={() => setAba("equipa")} icone={<Users className="h-4 w-4" />} />
+            <Aba on={aba === "cliente"} rot="Cliente" n={n.cliente} aviso onClick={() => setAba("cliente")} icone={<MessageSquare className="h-4 w-4" />} />
+            {/* 23/11 (Rúben): as linhas do contrato, com o serviço e o produto juntos */}
+            <Aba on={aba === "contrato"} rot="Contrato" onClick={() => setAba("contrato")} icone={<ReceiptText className="h-4 w-4" />} />
+            {/* 12/11 (Rúben): os documentos enviados ao cliente e o projeto em 3D */}
+            <Aba on={aba === "documentos"} rot="Documentos" n={nDocs} onClick={() => setAba("documentos")} icone={<FileText className="h-4 w-4" />} />
+            <Aba on={aba === "3d"} rot="3D" onClick={() => setAba("3d")} icone={<Box className="h-4 w-4" />} />
+            <Aba on={aba === "fecho"} rot="Fecho" n={n.fecho} onClick={() => setAba("fecho")} icone={<Flag className="h-4 w-4" />} />
+          </div>
         </header>
 
         {/* 23/11 (Rúben: «mega next-level», o telemóvel do gestor em obra): as ações ao alcance do polegar, em baixo; no ecrã largo ficam no topo */}
+        {(vivo || p.estado === "aprovado") && <MarcarBarraEmBaixo />}
         {(vivo || p.estado === "aprovado") && (
           <nav aria-label="Ações rápidas" className="fixed inset-x-0 bottom-0 z-40 flex gap-2 border-t border-border bg-card/95 px-3 pt-2 backdrop-blur sm:hidden" style={{ paddingBottom: "max(0.5rem, env(safe-area-inset-bottom))" }}>
             {/* 23/11 (revisão a 390 px: o botão principal saía do ecrã): com o principal, os outros dois ficam só com o ícone (e o número) */}
             <Button type="button" variant="outline" aria-label={`Precisa de ti${pedidos.length ? ` (${pedidos.length})` : ""}`} title="Precisa de ti"
-              className={cn("relative min-h-12 rounded-2xl", principal ? "min-w-12 shrink-0 px-3" : "min-w-0 flex-1")} onClick={() => { setAba("plano"); ir.comando(); }}>
+              className={cn("relative min-h-12 rounded-2xl", principal ? "min-w-12 shrink-0 px-3" : "min-w-0 flex-1")} onClick={() => { setAbaSo("plano"); ir.comando(); }}>
               <Zap className={cn("h-4 w-4 text-amber-600", !principal && "mr-1.5")} aria-hidden="true" />{!principal && "Precisa de ti"}
               {pedidos.length > 0 && <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 text-xs font-semibold text-amber-900">{pedidos.length}</span>}
             </Button>
@@ -508,26 +563,12 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
                   agoraNao={() => { if (d.obra.plano) baseAv.current = marcasDe(d.obra.plano); tocadas.current.clear(); setVerPassos((v) => v + 1); }} />
               )}
 
-              {/* ------------------------------------------------------------ 11/11: os separadores (o plano, a execução, os materiais, a equipa, o cliente, o fecho) */}
-              <div role="tablist" aria-label="O que gerir" className="-mx-4 flex gap-1 overflow-x-auto px-4 pb-1 sm:mx-0 sm:px-0">
-                <Aba on={aba === "plano"} rot="Plano" n={alertas.length} aviso onClick={() => setAba("plano")} icone={<CalendarRange className="h-4 w-4" />} />
-                <Aba on={aba === "execucao"} rot="Execução" n={n.execucao} aviso onClick={() => setAba("execucao")} icone={<ListChecks className="h-4 w-4" />} />
-                <Aba on={aba === "diario"} rot="Diário" onClick={() => setAba("diario")} icone={<Camera className="h-4 w-4" />} />
-                <Aba on={aba === "materiais"} rot="Materiais" n={n.materiais} aviso onClick={() => setAba("materiais")} icone={<Package className="h-4 w-4" />} />
-                <Aba on={aba === "equipa"} rot="Equipa" n={n.equipa} aviso onClick={() => setAba("equipa")} icone={<Users className="h-4 w-4" />} />
-                <Aba on={aba === "cliente"} rot="Cliente" n={n.cliente} aviso onClick={() => setAba("cliente")} icone={<MessageSquare className="h-4 w-4" />} />
-                {/* 23/11 (Rúben): as linhas do contrato, com o serviço e o produto juntos */}
-                <Aba on={aba === "contrato"} rot="Contrato" onClick={() => setAba("contrato")} icone={<ReceiptText className="h-4 w-4" />} />
-                {/* 12/11 (Rúben): os documentos enviados ao cliente e o projeto em 3D */}
-                <Aba on={aba === "documentos"} rot="Documentos" n={nDocs} onClick={() => setAba("documentos")} icone={<FileText className="h-4 w-4" />} />
-                <Aba on={aba === "3d"} rot="3D" onClick={() => setAba("3d")} icone={<Box className="h-4 w-4" />} />
-                <Aba on={aba === "fecho"} rot="Fecho" n={n.fecho} onClick={() => setAba("fecho")} icone={<Flag className="h-4 w-4" />} />
-              </div>
-              {/* troca logo (sem esperar pela saída do anterior), com uma entrada curta */}
-              <motion.div key={aba} role="tabpanel" initial={reduzir ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }} className="space-y-6">
+              {/* troca logo (sem esperar pela saída do anterior), com uma entrada curta; 27/11: os separadores estão no cabeçalho */}
+              <motion.div key={aba} ref={abaRef} role="tabpanel" aria-label={ROTULO_ABA[aba]} initial={reduzir ? false : { opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.15 }} className="scroll-mt-4 space-y-6">
                   {aba === "plano" && <>
-                  {viva.prev && !previa && <PrevisaoViva d={d} S={S} dias={dias} prev={viva.prev} margem={viva.margem} critico={viva.critico} ir={ir} previsaoRef={previsaoRef} />}
-              {/* ------------------------------------------------------------ o plano vivo */}
+              {/* ------------------------------------------------------------ o plano vivo
+                  27/11 (Rúben: «melhora a UX de gestão da obra»): o Gantt vem primeiro no Plano (é onde se gere); a previsão (horas, custo por
+                  fase, caminho crítico) passou para baixo dos imprevistos: é o detalhe do «Fim provável» e da «Margem», que levam lá */}
               <GanttVivo titulo={previa ? "O plano, se aplicar" : R ? "O plano, com o imprevisto" : "O plano vivo"} p={p} R={R} dias={dias} sel={painel?.k === "tarefa" ? painel.ti : null} abrir={(ti) => setPainel({ k: "tarefa", ti })} imprevistos={ims.map((i) => ({ id: i.id, dia: i.dia, texto: i.texto }))} reduzir={reduzir}
                 vista={vista} setVista={setVista} podeMexer={podeMexer} mover={(ti, m) => mudar(ti, () => ctxObra.A.ajustarTarefa(d.id, ti, m))}
                 nova={podeCriar ? (dia, tec) => setPainel({ k: "nova", inicial: { dia, tec } }) : undefined} obras={obras} deFerias={deFerias} abrirOutra={setOutra}
@@ -541,11 +582,21 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
               {planeia && !acabou && !previa && <TemposInfraspeak ctx={ctxObra} d={d} podeMexer={podeMexer} mudar={mudar} />}
 
               <div className="grid gap-6 lg:grid-cols-2">
-                {/* ------------------------------------------------------------ os alertas */}
+                {/* ------------------------------------------------------------ os alertas
+                    27/11: com a fita dos agentes no topo, os mesmos alertas em cartões aqui eram repetidos (9 cartões, ecrã e meio): ficam
+                    recolhidos numa linha, e abrem-se para os ver em lista */}
                 <section aria-label="Alertas" className="space-y-2">
-                  <h2 className="flex items-center gap-2 text-[15px] font-semibold">Alertas {alertas.length > 0 && <span className="rounded-full bg-muted px-2 text-sm font-medium tabular-nums">{alertas.length}</span>}</h2>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <h2 className="flex items-center gap-2 text-[15px] font-semibold">Alertas {alertas.length > 0 && <span className="rounded-full bg-muted px-2 text-sm font-medium tabular-nums">{alertas.length}</span>}</h2>
+                    {comFita && alertas.length > 0 && (
+                      <Button type="button" size="sm" variant="ghost" className="min-h-9 rounded-full" aria-expanded={verAlertas} onClick={() => setVerAlertas((x) => !x)}>
+                        {verAlertas ? "Recolher" : "Ver em lista"}<ChevronDown className={cn("ml-1 h-4 w-4 transition-transform", verAlertas && "rotate-180")} aria-hidden="true" />
+                      </Button>
+                    )}
+                  </div>
+                  {comFita && alertas.length > 0 && !verAlertas && <p className="rounded-xl bg-muted/50 px-4 py-3 text-sm text-muted-foreground">São os mesmos que os agentes mostram no topo, cada um com o próximo passo.</p>}
                   <AnimatePresence initial={false}>
-                    {!alertas.length ? (
+                    {comFita && alertas.length > 0 && !verAlertas ? null : !alertas.length ? (
                       <motion.p key="ok" initial={reduzir ? false : { opacity: 0 }} animate={{ opacity: 1 }} className="flex items-center gap-2 rounded-xl bg-success/10 px-4 py-3 text-[15px] text-success">
                         <Check className="h-5 w-5" aria-hidden="true" />{acabou ? "Obra concluída." : "Tudo em dia: nada atrasado, nada à espera."}
                       </motion.p>
@@ -567,6 +618,8 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
                   )}
                 </section>
               </div>
+
+              {viva.prev && !previa && <PrevisaoViva d={d} S={S} dias={dias} prev={viva.prev} margem={viva.margem} critico={viva.critico} ir={ir} previsaoRef={previsaoRef} />}
 
               {/* ------------------------------------------------------------ a atividade: os ajustes ao plano */}
               {(d.obra.alteracoes ?? []).length > 0 && (
@@ -786,6 +839,8 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
   // 23/11 (Rúben: «não se percebe que serviço é»): na vista por técnico os dias são mais largos e as barras mais altas, com o nome curto
   // 23/11 (revisão: «zoom Dia/Semana»): na vista Gantt, os dias largos (Dia) ou estreitos (Semana, para ver a obra toda)
   const [zoom, setZoom] = useState<"dia" | "semana">("dia");
+  // 27/11 (menos ruído): a legenda e as instruções de arrastar ficam atrás de «Como ler» (no telemóvel, a legenda também)
+  const [ajuda, setAjuda] = useState(false);
   const COL = vista === "tecnicos" ? COL_TEC : zoom === "semana" ? 16 : COL_GANTT, ALTO = vista === "tecnicos" ? 36 : 28, FAIXA = ALTO + 10;
   // os saltos do calendário entre dois dias de trabalho: o fim de semana e os feriados (o plano já os salta)
   const saltos = dias.map((x, k) => {
@@ -1078,8 +1133,12 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
             </div>
           )}
           {exportar && !R && <Exportar exportar={exportar} />}
+          <button type="button" aria-expanded={ajuda} onClick={() => setAjuda((x) => !x)}
+            className={cn("inline-flex min-h-9 items-center gap-1.5 rounded-full px-3 text-sm font-medium transition-colors", ajuda ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground")}>
+            <CircleHelp className="h-4 w-4" aria-hidden="true" />Como ler
+          </button>
         </div>
-        <ul className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground" aria-label="Legenda">
+        <ul className={cn("flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground", ajuda ? "flex" : "hidden lg:flex")} aria-label="Legenda">
           {legenda.map(([t, c]) => <li key={t} className="flex items-center gap-1.5"><span aria-hidden="true" className="h-2.5 w-4 rounded-sm" style={{ background: c }} />{t}</li>)}
           <li className="flex items-center gap-1.5"><Route className="h-3.5 w-3.5 text-primary" aria-hidden="true" />Caminho crítico (sem folga)</li>
           <li className="flex items-center gap-1.5"><span aria-hidden="true" className="h-3 w-0.5 rounded-full bg-primary/70" />Hoje</li>
@@ -1088,7 +1147,7 @@ function GanttVivo({ titulo, p, R, dias, sel, abrir, imprevistos, reduzir, vista
         </ul>
       </div>
       {erroLigar && <p role="alert" className="border-b border-border bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">Não se liga: {erroLigar}</p>}
-      {!R && <p className="border-b border-border px-4 py-2 text-xs text-muted-foreground">{vivo ? "As tarefas que ainda não começaram arrastam-se (o dia) e a ponta muda os dias; as outras abrem-se para gerir a execução." : "Arraste uma barra para mudar o dia; a ponta muda os dias."}{nova && vista === "tecnicos" ? " Num dia vazio, «+» cria uma tarefa." : ""}{passar && vista === "tecnicos" ? " Arraste para a linha de outra pessoa para lhe passar a tarefa." : ""}{ligar && vista === "gantt" ? " Para ligar duas tarefas, arraste o círculo da ponta de uma barra até à tarefa que só começa depois." : ""}{podeOrdenar ? " Para mudar a ordem da lista, arraste o pegador ⋮⋮ à esquerda do nome (ou use as setas do teclado); as datas não mudam." : ""} Para ver os nomes inteiros, arraste a linha à direita de «{nomeCol}».</p>}
+      {!R && ajuda && <p className="border-b border-border bg-muted/30 px-4 py-2 text-sm text-muted-foreground">{vivo ? "As tarefas que ainda não começaram arrastam-se (o dia) e a ponta muda os dias; as outras abrem-se para gerir a execução." : "Arraste uma barra para mudar o dia; a ponta muda os dias."}{nova && vista === "tecnicos" ? " Num dia vazio, «+» cria uma tarefa." : ""}{passar && vista === "tecnicos" ? " Arraste para a linha de outra pessoa para lhe passar a tarefa." : ""}{ligar && vista === "gantt" ? " Para ligar duas tarefas, arraste o círculo da ponta de uma barra até à tarefa que só começa depois." : ""}{podeOrdenar ? " Para mudar a ordem da lista, arraste o pegador ⋮⋮ à esquerda do nome (ou use as setas do teclado); as datas não mudam." : ""} Para ver os nomes inteiros, arraste a linha à direita de «{nomeCol}».</p>}
       <p aria-live="polite" className="sr-only">{anuncio}</p>
       <div ref={rolarRef} className="overflow-x-auto"
         onPointerMove={(e) => { if (premido.current && Math.hypot(e.clientX - premido.current.x, e.clientY - premido.current.y) > 10) largarPremido(); if (ligarRef.current) moverLigar(e); else arrastar(e); }}

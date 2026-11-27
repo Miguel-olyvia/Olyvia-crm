@@ -791,7 +791,7 @@ export function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, ond
   abrirOutra: (o: Negocio) => void; fechar: () => void; ocup: Map<string, Set<string>>;
   mudar: (ti: number, fn: () => void) => void; foraDaObra: (tec: string, k: number) => boolean;
   minDia?: number; notaLivre?: boolean; extra?: ReactNode;
-  /** 23/11: as ligações da tarefa (estudioObra/LigacoesTarefa.tsx), logo a seguir à execução */ ligacoes?: ReactNode;
+  /** 23/11: as ligações da tarefa (estudioObra/LigacoesTarefa.tsx); 27/11: depois de «Quem faz» */ ligacoes?: ReactNode;
 }) {
   const { S, A, run } = ctx;
   const reduzir = useReduzir();
@@ -830,7 +830,6 @@ export function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, ond
         {motivo && <p className="flex items-start gap-2 rounded-xl bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" aria-hidden="true" />
           <span>{nomeTec(t.tec)} {onde ? <>está na obra <LigacaoObra o={onde} abrir={() => abrirOutra(onde)} /> nestes dias.</> : `está ${motivo} nestes dias.`}</span></p>}
         {extra}
-        {ligacoes}
 
         {/* 11/11: quando, à mão (o início e os dias), e a semana em quadrados */}
         <section aria-label="Quando" className="space-y-2">
@@ -881,6 +880,8 @@ export function PainelTarefa({ ctx, d, ti, editavel, podeAgir, dias, motivo, ond
           {/* 11/11 (Rúben: «as dropdowns devem ser muito mais bonitas, com pesquisa e sugestão de disponibilidade; e equipas») */}
           <EscolherQuem t={t} p={p} ocup={ocup} outras={outras} dias={dias} desligado={!podeAgir || acabada} escolher={(tec) => mudar(ti, () => A.trocarTec(d.id, ti, tec))} />
         </div>
+        {/* 27/11 (Rúben: «melhora a UX de gestão da obra»): as ligações vêm depois do quando e do quem (o que se mexe mais vem primeiro) */}
+        {ligacoes}
 
         {editavel && (
           <div className="space-y-1.5">

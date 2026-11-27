@@ -22,6 +22,8 @@ describe("Estúdio da obra (11/11)", () => {
     montar();
     expect(screen.getByRole("region", { name: "O plano vivo" })).toBeTruthy();
     const alertas = screen.getByRole("region", { name: "Alertas" });
+    // 27/11: com a fita dos agentes no topo, os alertas daqui estão recolhidos; abrem-se em lista
+    fireEvent.click(within(alertas).getByRole("button", { name: /Ver em lista/ }));
     expect(within(alertas).getByRole("group", { name: /Revestimento de parede está atrasada/ })).toBeTruthy();
     expect(within(alertas).getByRole("button", { name: "Prolongar até hoje" })).toBeTruthy();
     expect(within(alertas).getByRole("group", { name: /Há folga/ })).toBeTruthy();

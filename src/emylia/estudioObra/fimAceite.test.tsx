@@ -18,7 +18,12 @@ function montar() {
   const r = render(<EstudioObra ctx={ctx} d={d} fechar={() => {}} />);
   return { S, A, d };
 }
-const cartao = () => within(screen.getByRole("region", { name: "Alertas" })).queryByRole("group", { name: /depois do previsto\. Está certo\?$/ });
+// 27/11: os alertas do Plano estão recolhidos (a fita dos agentes mostra-os no topo): abrem-se em lista antes de procurar o cartão
+const cartao = () => {
+  const r = screen.getByRole("region", { name: "Alertas" }), ver = within(r).queryByRole("button", { name: /Ver em lista/ });
+  if (ver) fireEvent.click(ver);
+  return within(screen.getByRole("region", { name: "Alertas" })).queryByRole("group", { name: /depois do previsto\. Está certo\?$/ });
+};
 
 describe("o fim da obra depois do previsto: «Está certo?»", () => {
   it("OK confirma (quem e quando) e o alerta sai; volta só se o atraso crescer", () => {

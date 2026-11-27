@@ -106,6 +106,7 @@ export function InternalChatWidget() {
         <button
           onClick={() => setOpen(true)}
           aria-label="Conversas da equipa"
+          data-chat-equipa=""
           className="fixed bottom-4 right-4 sm:bottom-6 sm:right-6 z-[605] h-12 w-12 sm:h-14 sm:w-14 rounded-full bg-primary text-primary-foreground shadow-lg hover:bg-primary/90 transition-all duration-200 hover:scale-105 flex items-center justify-center"
         >
           <MessageCircle className="h-6 w-6" />

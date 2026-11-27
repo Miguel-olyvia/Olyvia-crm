@@ -89,11 +89,13 @@ export function Pulso({ d, S, dias, prev, margem, precisa, ir }: { d: Negocio; S
   const secundario = "inline-flex min-h-10 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-sm transition-colors hover:border-foreground/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary";
   return (
     <section aria-label="O pulso da obra" className="space-y-3">
-      <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr_1fr]">
+      {/* 27/11 (Rúben: «melhora a UX de gestão da obra»): no telemóvel, o fim e a margem lado a lado (antes eram três cartões em coluna e o
+          «Precisa de ti» ficava fora do primeiro ecrã); cada cartão tem a seta de quem leva ao detalhe */}
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-[1.4fr_1fr_1fr]">
         {/* o número herói: a contagem até ao arranque, ou o dia da obra e o feito */}
         <motion.button type="button" onClick={() => (antes && a ? ir.tarefa(a.ti) : ir.aba("execucao"))} whileTap={reduzir ? undefined : { scale: 0.99 }}
           aria-label={antes ? `Começa daqui a ${dd(faltam)}: abrir a primeira tarefa` : `Feito: ${Math.round(feito * 100)}%, dia ${p.dia + 1} de ${prev.fimPlano}`}
-          className="relative flex items-center gap-4 overflow-hidden rounded-3xl bg-gradient-to-br from-primary to-[#432791] p-5 text-left text-white shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
+          className="relative col-span-2 flex items-center gap-4 overflow-hidden rounded-3xl bg-gradient-to-br from-primary to-[#432791] p-4 text-left sm:p-5 lg:col-span-1 text-white shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2">
           <div aria-hidden="true" className="pointer-events-none absolute -right-10 -top-10 h-40 w-40 rounded-full bg-white/10 blur-2xl" />
           {antes ? (
             <>
@@ -124,27 +126,27 @@ export function Pulso({ d, S, dias, prev, margem, precisa, ir }: { d: Negocio; S
         </motion.button>
         {/* o fim provável contra o do contrato */}
         <button type="button" onClick={ir.previsao} aria-label={`Fim provável: ${quando(prev.fimProvavel - 1)}`}
-          className="rounded-3xl border border-border bg-card p-4 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-          <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><CalendarCheck className="h-4 w-4 text-primary" aria-hidden="true" />Fim provável</span>
-          <span className="mt-1 block text-xl font-semibold tabular-nums">{quando(prev.fimProvavel - 1)}</span>
+          className={cn("group min-w-0 rounded-3xl border border-border bg-card p-3 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:p-4", !verCustos && "col-span-2 lg:col-span-1")}>
+          <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><CalendarCheck className="h-4 w-4 text-primary" aria-hidden="true" />Fim provável<ChevronRight className="ml-auto h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" /></span>
+          <span className="mt-1 block text-lg font-semibold tabular-nums sm:text-xl">{quando(prev.fimProvavel - 1)}</span>
           <span className={cn("mt-0.5 block text-sm", dif > 0 ? "font-medium text-destructive" : dif < 0 ? "font-medium text-success" : "text-muted-foreground")}>
             {dif === 0 ? "No dia do contrato" : dif > 0 ? `${dd(dif)} depois do contrato` : `${dd(-dif)} antes do contrato`}
           </span>
-          <span className="block text-xs text-muted-foreground">Contrato: {quando(fimContrato - 1)} · confiança {prev.confianca}</span>
+          <span className="hidden text-xs text-muted-foreground sm:block">Contrato: {quando(fimContrato - 1)} · confiança {prev.confianca}</span>
         </button>
         {/* a margem com o desvio */}
         {verCustos ? (
           <button type="button" onClick={ir.previsao} aria-label={`Margem ao vivo: ${margem ? pct(margem.margemViva) : "sem orçamento"}`}
-            className="rounded-3xl border border-border bg-card p-4 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-            <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><Euro className="h-4 w-4 text-primary" aria-hidden="true" />Margem ao vivo</span>
-            <span className="mt-1 block text-xl font-semibold tabular-nums">{margem ? pct(margem.margemViva) : "—"}</span>
+            className="group min-w-0 rounded-3xl border border-border bg-card p-3 text-left shadow-sm transition-shadow hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary sm:p-4">
+            <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><Euro className="h-4 w-4 text-primary" aria-hidden="true" />Margem ao vivo<ChevronRight className="ml-auto h-4 w-4 transition-transform group-hover:translate-x-0.5" aria-hidden="true" /></span>
+            <span className="mt-1 block text-lg font-semibold tabular-nums sm:text-xl">{margem ? pct(margem.margemViva) : "—"}</span>
             {margem && <span className={cn("mt-0.5 block text-sm", desvioPp < -0.05 ? "font-medium text-destructive" : desvioPp > 0.05 ? "font-medium text-success" : "text-muted-foreground")}>
               {Math.abs(desvioPp) < 0.05 ? "Igual ao orçamento" : `${desvioPp > 0 ? "+" : "−"}${nfmt(Math.round(Math.abs(desvioPp) * 10) / 10)} pp face ao orçamento`}
             </span>}
-            {margem && <span className="block text-xs text-muted-foreground">Orçamento: {pct(margem.margemOrc)} · {eur(margem.valor - margem.custoVivo)} € de margem</span>}
+            {margem && <span className="hidden text-xs text-muted-foreground sm:block">Orçamento: {pct(margem.margemOrc)} · {eur(margem.valor - margem.custoVivo)} € de margem</span>}
             {/* 23/11 (revisão: «cada coisa num sítio só»): os desvios estão aqui; o Plano já não repete a margem */}
             {margem && ([["Mão de obra até hoje", -margem.desvioMO], ["O resto, a este ritmo", -margem.projecao], ["Materiais a mais", -margem.materiais], ["Atrasos e erros nossos", -(margem.nossos ?? 0)]] as [string, number][]).filter(([, v]) => Math.abs(v) > 0.5).map(([l, v]) => (
-              <span key={l} className="mt-0.5 flex justify-between gap-2 text-xs"><span>{l}</span><span className={cn("tabular-nums", v < 0 ? "text-destructive" : "text-success")}>{v > 0 ? "+" : ""}{eur(v)} €</span></span>
+              <span key={l} className="mt-0.5 hidden justify-between gap-2 text-xs sm:flex"><span>{l}</span><span className={cn("tabular-nums", v < 0 ? "text-destructive" : "text-success")}>{v > 0 ? "+" : ""}{eur(v)} €</span></span>
             ))}
           </button>
         ) : <div className="hidden lg:block" />}
@@ -319,7 +321,8 @@ export function ComandoHoje({ ctx, d, dias, pedidos, ir, comandoRef }: { ctx: Ct
           </>}
         </div>
         {/* precisa de ti */}
-        <div className="relative min-w-0 space-y-2 border-b border-border p-4 lg:border-b-0 lg:border-r">
+        {/* 27/11: no telemóvel, o que precisa do gestor vem primeiro (no ecrã largo fica ao meio, entre quem está e o que vem) */}
+        <div className="relative order-first min-w-0 space-y-2 border-b border-border p-4 lg:order-none lg:border-b-0 lg:border-r">
           <p className="flex items-center gap-2 text-sm font-semibold"><Zap className="h-4 w-4 text-amber-600" aria-hidden="true" />Precisa de ti {visiveis.length > 0 && <span className="rounded-full bg-amber-100 px-2 text-xs text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">{visiveis.length}</span>}</p>
           <AnimatePresence initial={false} mode="popLayout">
             {!visiveis.length ? (

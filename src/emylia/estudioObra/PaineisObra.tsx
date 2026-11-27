@@ -71,6 +71,7 @@ export function ExecucaoTarefa({ ctx, d, ti, simular, simulado, imprevisto }: {
   const F = useFotosAJuntar(d.id), fotos = F.fotos;
   const [atraso, setAtraso] = useState(simulado || 1);
   const [parte, setParte] = useState(Math.max(1, Math.floor(t.dur / 2)));
+  const [todosReg, setTodosReg] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   const horas = t.exec?.horas ?? 0;
   const E = enviosDe(t);
@@ -203,12 +204,16 @@ export function ExecucaoTarefa({ ctx, d, ti, simular, simulado, imprevisto }: {
         </div>
       )}
 
-      {/* os registos do técnico, com as fotografias e as notas */}
+      {/* os registos do técnico, com as fotografias e as notas
+          27/11 (menos ruído no painel): só o último à vista; os outros abrem-se (antes eram até 6 cartões antes do «Quando» e do «Quem faz») */}
       <div className="space-y-2 border-t border-border pt-3">
-        <p className="text-sm font-medium">Registos {E.length > 0 && <span className="text-muted-foreground">· {E.length}</span>}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-sm font-medium">Registos {E.length > 0 && <span className="text-muted-foreground">· {E.length}</span>}</p>
+          {E.length > 1 && <button type="button" aria-expanded={todosReg} onClick={() => setTodosReg((x) => !x)} className="min-h-9 rounded-full px-2 text-sm font-medium text-primary hover:underline">{todosReg ? "Só o último" : `Ver os ${Math.min(E.length, 6)}`}</button>}
+        </div>
         {!E.length ? <p className="text-sm text-muted-foreground">{t.dia > p.dia ? "Ainda não começou." : "Ainda sem registos do técnico."}</p> : (
           <ol className="space-y-2">
-            {[...E].reverse().slice(0, 6).map((e, k) => (
+            {[...E].reverse().slice(0, todosReg ? 6 : 1).map((e, k) => (
               <li key={k} className="rounded-xl bg-card p-2.5 ring-1 ring-border">
                 <p className="text-sm"><span className="font-medium">{e.k === "validada" ? "Validada" : e.k === "correcao" ? "Correção" : e.k === "feita" ? "Dada por feita" : "Registo do dia"}</span> · {primeiro(e.quem)} · {e.q}{e.horas ? ` · ${nfmt(e.horas)} h` : ""}</p>
                 {e.nota && <p className="text-sm text-muted-foreground">{e.nota}</p>}

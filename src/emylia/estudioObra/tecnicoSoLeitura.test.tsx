@@ -52,6 +52,7 @@ describe("Estúdio da obra sem obra.planear (23/11)", () => {
   it("quem planeia (Operações) fica igual", () => {
     montar("operacoes");
     const alertas = screen.getByRole("region", { name: "Alertas" });
+    fireEvent.click(within(alertas).getByRole("button", { name: /Ver em lista/ })); // 27/11: recolhidos por baixo da fita dos agentes
     expect(within(alertas).getByRole("button", { name: "Prolongar até hoje" })).toBeTruthy();
     const topo = screen.getByRole("banner");
     expect(within(topo).getByRole("button", { name: /Validar a tarefa feita/ })).toBeTruthy();
