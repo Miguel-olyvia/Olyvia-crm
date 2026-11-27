@@ -340,18 +340,24 @@ function tipoDaEscolha(e: ModeloEscolha, auto: TipoMockup): TipoMockup {
   return "caixa";
 }
 
+/** `soGenericos`: nunca usa um modelo do catálogo 3D (HTML): só o genérico da categoria. Ausente (a planta, o Estúdio): como sempre. Só a pré-visualização da ficha o liga (previaProduto3d.ts). */
+export interface OpcoesModelo { soGenericos?: boolean }
+
 /**
  * O produto do catálogo mais o seu mockup 3D (paramétrico, com a dimensão real; `urls`: o GLB de cada produto, quando existir).
  * Se o produto, a sua subcategoria ou a sua categoria escolheram um «Modelo 3D» (modelos3dEscolha.ts: produto > subcategoria > categoria), esse manda sobre
  * o classificador: o id escolhido decide o tipo e o genérico; as medidas, a cor e as opções (que vêm do nome) ficam como sempre. Sem escolha, é o de sempre.
  */
-export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], urls: Readonly<Record<string, string>> = {}): ProdutoModelo3D {
+export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], urls: Readonly<Record<string, string>> = {}, opcoes: OpcoesModelo = {}): ProdutoModelo3D {
   const auto = tipoMockupDe(p, arvore);
   const r = resolverDoNo({ produto: p.modelo3d, arvore, no: p.no });
-  const esc = escolhaPorId(r.modelo);
+  // 26/11 (`soGenericos`, a ficha de produto): um modelo do catálogo 3D (família «html») escolhido no produto, na subcategoria ou na categoria não se aplica: decide o classificador
+  const escolhido = escolhaPorId(r.modelo);
+  const esc = opcoes.soGenericos && escolhido?.familia === "html" ? undefined : escolhido;
   const tipo = esc ? tipoDaEscolha(esc, auto) : auto;
   // um genérico, a caixa ou um revestimento escolhidos nunca levam o modelo do HTML do nome; só os exactos do catálogo 3D (ou nenhuma escolha) o procuram
-  const comHtml = !esc || esc.familia === "html";
+  // (com `soGenericos` nunca: lava-loiça, placa, torneira e tampo caem no genérico da categoria, ou no desenho aproximado ou na caixa se o tipo não tem genérico)
+  const comHtml = !opcoes.soGenericos && (!esc || esc.familia === "html");
   let d: Dimensoes = p.dim ? { larguraCm: p.dim[0], profundidadeCm: p.dim[1], alturaCm: alturaDeSanitaDeChao(tipo, p.n, p.dim[2]), deNome: true } : extrairDimensoes(p.n, tipo);
   const e = ESPEC[tipo];
   // o modelo do HTML do produto (pelo nome e pela medida): lava-loiça, placa e torneira com o modelo e as medidas do HTML; tampo com a chapa
