@@ -139,10 +139,56 @@ describe("a tarefa nova e os materiais que faltam", () => {
     const E = screen.getByRole("region", { name: "Equipamentos" });
     expect(within(E).getByText(/Renault Master/)).toBeTruthy();
     expect(within(E).getAllByText("tarefa nova").length).toBeGreaterThan(0);
-    // o aluguer pedido pela tarefa nova fora dos dias do contrato entra no destaque
+    // o equipamento que a tarefa nova pede fora dos dias do contrato entra no destaque, como os materiais: por receber
     const destaque = screen.getByRole("region", { name: "Falta para as tarefas novas" });
-    expect(within(destaque).getByText("Cortadora de azulejo 120 cm")).toBeTruthy();
-    expect(within(destaque).getByText(/equipamento a alugar/)).toBeTruthy();
+    const eq = within(destaque).getByRole("group", { name: "Equipamento das tarefas novas" });
+    expect(within(eq).getByText("Cortadora de azulejo 120 cm")).toBeTruthy();
+    expect(within(destaque).getByText(/equipamentos? por receber/)).toBeTruthy();
+    // 27/11 (Rúben: «um botão a dizer "recebido"»): recebido, fica garantido
+    fireEvent.click(within(eq).getByRole("button", { name: "Recebido: Cortadora de azulejo 120 cm" }));
+    const eq2 = screen.getByRole("group", { name: "Equipamento das tarefas novas" });
+    expect(within(eq2).queryByRole("button", { name: "Recebido: Cortadora de azulejo 120 cm" })).toBeNull();
+    expect(within(within(eq2).getByText("Cortadora de azulejo 120 cm").closest("li")!).getByText("recebido")).toBeTruthy();
+  });
+});
+
+describe("«Recebido» (teste, 27/11)", () => {
+  it("sem o Inventário: o material fica recebido e garantido; sem nada em falta, o destaque passa a «Tudo garantido»", () => {
+    const { S, A, d, redesenhar } = montar(false);
+    const ti = A.novaTarefaPlano(d.id, PINT)!;
+    const t = d.obra.plano!.tasks[ti];
+    redesenhar();
+    abrirMateriais();
+    for (const m of t.mats!) fireEvent.click(within(screen.getByRole("region", { name: /tarefas novas/ })).getAllByRole("button", { name: `Recebido: ${m.n}` })[0]);
+    const L = materiaisDasTarefasNovas(d).filter((x) => x.ti === ti);
+    expect(L.every((x) => x.estado === "garantido" && x.recebido)).toBe(true);
+    // deixou de contar como por encomendar (não volta a ser pedido)
+    expect(porEncomendarDe(d)).toEqual([]);
+    expect(d.hist.some((h) => h.t.startsWith(`Teste: ${t.mats![0].n} recebido para ${S.svc.pint.n}`))).toBe(true);
+    // a tarefa de pintura não pede equipamento novo: nada falta
+    expect(screen.queryByRole("region", { name: "Falta para as tarefas novas" })).toBeNull();
+    const ok = screen.getByRole("region", { name: "Tudo garantido para as tarefas novas" });
+    fireEvent.click(within(ok).getByRole("button", { name: "Ver" }));
+    expect(within(ok).getAllByText("recebido").length).toBe(t.mats!.length);
+    // pedir mais depois de recebido: só o que se pede a mais volta a faltar
+    A.matsTarefa(d.id, ti, t.mats!.map((m, k) => (k ? m : { ...m, q: m.q + 3 })));
+    expect(emFalta(materiaisDasTarefasNovas(d))).toEqual([expect.objectContaining({ n: t.mats![0].n, q: 3, estado: "por encomendar" })]);
+  });
+
+  it("com o Inventário: «Recebido» recebe a compra no armazém (pelas regras do Inventário) e a linha fica garantida em todo o lado", () => {
+    const { A, d, redesenhar } = montar(true);
+    const ti = A.novaTarefaPlano(d.id, PINT)!;
+    const t = d.obra.plano!.tasks[ti], m0 = t.mats![0];
+    expect(materiaisDasTarefasNovas(d, inv(d)).find((x) => x.n === m0.n)!.estado).toBe("por aprovar");
+    redesenhar();
+    abrirMateriais();
+    fireEvent.click(within(screen.getByRole("region", { name: "Falta para as tarefas novas" })).getByRole("button", { name: `Recebido: ${m0.n}` }));
+    // o Inventário recebeu a compra: a linha da encomenda de ajuste está reservada para a obra (garantida também na lista por fase)
+    const li = inv(d)!.linhas.find((l) => l.ec === "EC-1027-A1" && l.n === m0.n)!;
+    expect(["recvpo", "ready"]).toContain(li.st);
+    expect(materiaisPorFase(d, inv(d)).flatMap((g) => g.itens).find((x) => x.n === m0.n && x.ec === "EC-1027-A1")!.estado).toBe("reservado");
+    expect(materiaisDasTarefasNovas(d, inv(d)).find((x) => x.n === m0.n)).toEqual(expect.objectContaining({ estado: "garantido", recebido: true }));
+    expect(d.hist.some((h) => h.t.includes("receção no Inventário, EC-1027-A1"))).toBe(true);
   });
 });
 

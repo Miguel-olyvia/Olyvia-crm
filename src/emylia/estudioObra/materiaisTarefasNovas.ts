@@ -10,7 +10,8 @@
 //  · sem fornecedor: o Inventário não tem fornecedor para ele;
 //  · garantido: reservado no armazém, na carrinha ou na obra.
 // O separador Materiais põe em destaque o que não está garantido; o aviso de quando se junta a tarefa usa o mesmo resumo.
-import type { Negocio, Tarefa } from "../motor";
+import type { Negocio, Plano, Tarefa } from "../motor";
+import { equipamentosDaObra } from "../obraOps";
 import { linhaDoResumo, type LinhaResumoNeg, type ResumoEcNeg } from "../inventario/ponteNegocios";
 import { ajusteDisponivel, contaParaAjuste, ecDaAdenda } from "../encomendasAjuste";
 
@@ -34,6 +35,8 @@ export interface MatDaTarefaNova {
   adenda?: string;
   /** a data prometida pelo fornecedor (aaaa-mm-dd), nas que estão a chegar */
   chega?: string;
+  /** 27/11 (teste): dado como recebido pelo botão «Recebido» (garantido) */
+  recebido?: true;
 }
 
 /** O estado de uma linha da encomenda de ajuste no Inventário (como materiaisPorFase lê as da inicial). */
@@ -63,8 +66,11 @@ export function materiaisDasTarefasNovas(d: Negocio, inv?: ResumoEcNeg | null): 
     const base = { ti, tarefa: t.nome, fase: t.fase ?? 1, dia: t.dia };
     for (const m of t.mats ?? []) {
       if (!(m.q > 0)) continue;
-      const enc = Math.min(m.q, t.encomendado?.find((x) => x.n === m.n)?.q ?? 0), falta = r2(m.q - enc);
       const comum = { ...base, n: m.n, un: m.un, ...(m.produto ? { produto: m.produto } : {}) };
+      // 27/11 (teste): o que se deu como recebido é garantido; o que se pedir depois a mais segue as regras de sempre
+      const rec = Math.min(m.q, t.recebidos?.find((x) => x.n === m.n)?.q ?? 0);
+      if (rec > 0) out.push({ ...comum, q: r2(rec), estado: "garantido", recebido: true });
+      const enc = r2(Math.max(0, Math.min(m.q, t.encomendado?.find((x) => x.n === m.n)?.q ?? 0) - rec)), falta = r2(m.q - rec - enc);
       if (enc > 0) {
         // a encomenda de ajuste desta tarefa que tem o material (a última que o pediu)
         const ec = [...(t.ecs ?? [])].reverse().find((n) => (d.obra.ecsAjuste ?? []).some((a) => a.n === n && !a.anulada && a.linhas.some((l) => l.n === m.n)));
@@ -81,6 +87,29 @@ export function materiaisDasTarefasNovas(d: Negocio, inv?: ResumoEcNeg | null): 
   });
   return out;
 }
+
+/* ------------------------------------------------------------------ os equipamentos das tarefas novas */
+// 27/11 (Rúben: «novo equipamento funciona tal como o step de materiais»): o equipamento que uma tarefa nova pede fora dos dias em que já
+// estava na obra (para as tarefas do contrato) entra no destaque como os materiais: por receber (do armazém ou de aluguer) até alguém o dar
+// como recebido. A carrinha da Frota não conta (vai todos os dias).
+export interface EquipDaTarefaNova { n: string; origem: "Armazém" | "Aluguer"; de?: string; tarefas: number[]; dia: number; fim: number; recebido: boolean }
+export function equipamentosDasTarefasNovas(p: Plano | null | undefined): EquipDaTarefaNova[] {
+  if (!p || p.estado === "concluída") return [];
+  return equipamentosDaObra(p).flatMap((e) => {
+    if (e.origem === "Frota") return [];
+    const ts = p.tasks.map((t, i) => ({ t, i })).filter(({ t }) => e.tarefas.includes(t.nome) && t.exec?.estado !== "validada");
+    const velhas = ts.filter(({ t }) => !t.nova).map(({ t }) => t);
+    const ini = Math.min(...velhas.map((t) => t.dia)), fim = Math.max(...velhas.map((t) => t.dia + t.dur));
+    const fora = ts.filter(({ t }) => t.nova && (!velhas.length || t.dia < ini || t.dia + t.dur > fim));
+    if (!fora.length) return [];
+    return [{ n: e.n, origem: e.origem, ...(e.de ? { de: e.de } : {}), tarefas: fora.map((x) => x.i), dia: Math.min(...fora.map((x) => x.t.dia)), fim: Math.max(...fora.map((x) => x.t.dia + x.t.dur)),
+      recebido: fora.every(({ t }) => !!t.recebidos?.some((r) => r.n === e.n)) }];
+  });
+}
+
+/** 27/11: o botão «Recebido» aparece enquanto estamos em testes (Rúben: «como estamos em testes podes e deves meter um botão»). Para o
+ *  tirar quando as receções reais (armazém, aluguer) estiverem ligadas, basta pôr false. */
+export const RECEBIDO_DE_TESTE = true;
 
 /** O que não está garantido (o destaque «Falta» do separador Materiais). */
 export const emFalta = (L: readonly MatDaTarefaNova[]): MatDaTarefaNova[] => L.filter((x) => x.estado !== "garantido");

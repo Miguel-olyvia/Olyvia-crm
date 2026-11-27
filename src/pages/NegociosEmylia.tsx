@@ -805,7 +805,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
         // 27/11 (Rúben: «um botão para dar "ok" aos materiais de uma obra»): recebe as POs da obra e dá entrada do que falta, sem fornecedores
         garantirMateriais: async (contrato) => {
           try {
-            const r = await garantirMateriaisTeste(supabase, org, contrato);
+            const r = await garantirMateriaisTeste(supabase, org, contrato, await resolveCurrentBusinessUserId());
             await reler();
             avisar(textoGarantir(r));
           } catch (e) {

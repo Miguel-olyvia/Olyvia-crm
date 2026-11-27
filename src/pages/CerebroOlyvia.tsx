@@ -83,9 +83,9 @@ function PainelNo({ n, grafo, obras, onFechar, onEscolher }: { n: NoGrafo; grafo
   const principal = lig.obra ? { to: lig.obra, rot: "Abrir o Estúdio da obra", Icone: HardHat } : lig.negocio ? { to: lig.negocio, rot: "Abrir o negócio", Icone: ArrowRight } : null;
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-start gap-3 border-b border-border p-4">
-        <span className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ background: n.cor, boxShadow: `0 0 0 4px ${n.cor}33` }} aria-hidden="true" />
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 items-start gap-3 border-b border-border p-4">
+        <span className="mt-1 h-3 w-3 shrink-0 rounded-full ring-1 ring-foreground/20" style={{ background: n.cor }} aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{NOMES_TIPO[n.tipo].um}{n.atualizado ? ` · ${new Date(n.atualizado).toLocaleString("pt-PT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}</p>
           <h2 className="text-lg font-semibold leading-snug">{n.titulo}</h2>
@@ -94,7 +94,7 @@ function PainelNo({ n, grafo, obras, onFechar, onEscolher }: { n: NoGrafo; grafo
           <X className="h-5 w-5" aria-hidden="true" />
         </button>
       </div>
-      <div className="flex-1 space-y-4 overflow-y-auto p-4">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 pb-28 lg:pb-4">
         {n.decisoes > 0 && (
           <p className="flex items-center gap-2 rounded-xl bg-amber-500/10 px-3 py-2 text-sm font-medium text-amber-800 dark:text-amber-300">
             <span className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-60 motion-reduce:animate-none" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" /></span>
@@ -158,7 +158,7 @@ function PainelNo({ n, grafo, obras, onFechar, onEscolher }: { n: NoGrafo; grafo
               {viz.slice(0, 40).map((v) => (
                 <li key={v.id}>
                   <button type="button" onClick={() => onEscolher(v.id)} className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-xs font-medium transition hover:border-primary/40 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                    <span className="h-2 w-2 rounded-full" style={{ background: v.cor }} aria-hidden="true" />{v.rotulo}
+                    <span className="h-2 w-2 rounded-full ring-1 ring-foreground/20" style={{ background: v.cor }} aria-hidden="true" />{v.rotulo}
                   </button>
                 </li>
               ))}
@@ -291,7 +291,7 @@ export default function CerebroOlyvia() {
                   return (
                     <button key={t} type="button" aria-pressed={on} onClick={() => alternarTipo(t)}
                       className={cn("inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary", on ? "border-border bg-card shadow-sm" : "border-dashed border-border bg-transparent text-muted-foreground opacity-70")}>
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: on ? corDoTipo(t) : "transparent", boxShadow: `inset 0 0 0 1.5px ${corDoTipo(t)}` }} aria-hidden="true" />
+                      <span className="h-2.5 w-2.5 rounded-full ring-1 ring-foreground/20" style={{ background: on ? corDoTipo(t) : "transparent" }} aria-hidden="true" />
                       {NOMES_TIPO[t].varios}<span className="tabular-nums text-muted-foreground">{contagem.get(t)}</span>
                     </button>
                   );
@@ -315,7 +315,7 @@ export default function CerebroOlyvia() {
                   {no && (
                     <motion.aside key="painel" aria-label={`Nota: ${no.titulo}`}
                       initial={parado ? false : { opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={parado ? undefined : { opacity: 0, y: 24 }} transition={{ duration: 0.22 }}
-                      className="fixed inset-x-0 bottom-0 z-[615] max-h-[72vh] overflow-hidden rounded-t-3xl border border-border bg-background shadow-2xl lg:absolute lg:inset-x-auto lg:bottom-3 lg:right-3 lg:top-3 lg:max-h-none lg:w-[380px] lg:rounded-2xl">
+                      className="fixed inset-x-0 bottom-0 z-[615] flex max-h-[72vh] flex-col overflow-hidden rounded-t-3xl border border-border bg-background shadow-2xl lg:absolute lg:inset-x-auto lg:bottom-3 lg:right-3 lg:top-3 lg:max-h-none lg:w-[380px] lg:rounded-2xl">
                       <PainelNo n={no} grafo={grafo} obras={obras} onFechar={() => escolher(null)} onEscolher={escolherEFocar} />
                     </motion.aside>
                   )}
