@@ -4,7 +4,7 @@
 // RLS de quem abre): cada pessoa só vê o que já vê na app. Um documento só (DocRelatorio) desenha-se no ecrã, em PDF e em Excel, para os
 // três dizerem sempre o mesmo.
 
-export type TipoRelatorio = "negocios" | "obras" | "obra" | "orcamento";
+export type TipoRelatorio = "negocios" | "obras" | "obra" | "orcamento" | "servicos";
 /** 27/11 (Rúben: «preciso de um relatório com todos os negócios com obra por iniciar»): os filtros do relatório dos negócios. */
 export type FiltroNegocios = "obra_por_iniciar" | "obra_em_curso" | "em_proposta" | "ganhos" | "perdidos" | `fase:${number}`;
 export const FILTROS_NEGOCIOS: { k: FiltroNegocios; rot: string }[] = [
@@ -165,6 +165,61 @@ export function docObra(o: LinhaBase, org = ""): DocRelatorio {
         linhas: T.map((t) => [t.fase, t.nome, t.ini, t.fim, t.dias, t.tec, t.estado]) }] : [{ k: "texto" as const, titulo: "O plano", paragrafos: [o.texto] }]),
       ...(props.some((p) => p.modo === "pede") ? [{ k: "tabela" as const, titulo: "O que pede decisão", colunas: [{ t: "Agente", w: 14 }, { t: "Proposta", w: 80 }], linhas: props.filter((p) => p.modo === "pede").map((p) => [p.agente, p.titulo]) }] : []),
       ...(props.some((p) => p.modo !== "pede") ? [{ k: "tabela" as const, titulo: "Os agentes a observar", colunas: [{ t: "Agente", w: 14 }, { t: "Nota", w: 80 }], linhas: props.filter((p) => p.modo !== "pede").map((p) => [p.agente, p.titulo]) }] : []),
+    ],
+  };
+}
+
+/** 27/11 (Rúben: «faz-me um report pdf com o tipo de serviço que mais vendemos e as suas margens de lucro»): os serviços vendidos, somados
+ *  pelos orçamentos dos negócios (por omissão só os ganhos), por serviço e por ofício; com os custos (só quem os vê), a margem de cada um. */
+export function docServicos(L: LinhaBase[], org = "", so: "ganhos" | "todos" = "ganhos"): DocRelatorio {
+  type Linha = { nome: string; tipo: string; oficio?: string; q?: number; total?: number; preco?: number; custo?: number };
+  const neg = new Map(L.filter((x) => x.tipo === "negocio" && x.numero != null).map((x) => [x.numero!, x.dados ?? {}]));
+  const conta = (n: number | null) => { const d = n != null ? neg.get(n) : null; return !!d && !d.perdido && (so === "todos" || !!d.aceite); };
+  const orcs = L.filter((x) => x.tipo === "orcamento" && conta(x.numero));
+  const custos = new Map(L.filter((x) => x.tipo === "custos" && conta(x.numero)).map((x) => [x.numero!, (Array.isArray(x.dados?.linhas) ? x.dados!.linhas : []) as Linha[]]));
+  const temCustos = custos.size > 0;
+  type Acc = { nome: string; oficio: string; negocios: Set<number>; q: number; vendido: number; preco: number; custo: number };
+  const porServ = new Map<string, Acc>();
+  for (const o of orcs) {
+    const LL = (Array.isArray(o.dados?.linhas) ? o.dados!.linhas : []) as Linha[];
+    const CL = custos.get(o.numero!) ?? [];
+    for (const l of LL.filter((x) => x.tipo === "servico")) {
+      const a = porServ.get(l.nome) ?? { nome: l.nome, oficio: l.oficio || "Outros", negocios: new Set<number>(), q: 0, vendido: 0, preco: 0, custo: 0 };
+      a.negocios.add(o.numero!); a.q += num(l.q); a.vendido += num(l.total);
+      const c = CL.find((x) => x.nome === l.nome && x.tipo === "servico");
+      if (c) { a.preco += num(c.preco); a.custo += num(c.custo); }
+      porServ.set(l.nome, a);
+    }
+  }
+  const S = [...porServ.values()].sort((a, b) => b.vendido - a.vendido);
+  const margem = (a: { preco: number; custo: number }) => (a.preco > 0 && a.custo > 0 ? (a.preco - a.custo) / a.preco : null);
+  const porOficio = new Map<string, { oficio: string; vendido: number; preco: number; custo: number; servicos: number }>();
+  for (const a of S) { const o = porOficio.get(a.oficio) ?? { oficio: a.oficio, vendido: 0, preco: 0, custo: 0, servicos: 0 }; o.vendido += a.vendido; o.preco += a.preco; o.custo += a.custo; o.servicos++; porOficio.set(a.oficio, o); }
+  const O = [...porOficio.values()].sort((a, b) => b.vendido - a.vendido);
+  const total = S.reduce((x, a) => x + a.vendido, 0), tp = S.reduce((x, a) => x + a.preco, 0), tc = S.reduce((x, a) => x + a.custo, 0);
+  const mTotal = tp > 0 && tc > 0 ? (tp - tc) / tp : null;
+  const top = S[0];
+  return {
+    tipo: "servicos", titulo: "Os serviços vendidos", subtitulo: `${org ? `${org} · ` : ""}${so === "ganhos" ? `${orcs.length} negócios ganhos` : `${orcs.length} negócios (todos os ativos)`}`,
+    atualizado: recente(L), nomeFicheiro: `Servicos vendidos ${so === "ganhos" ? "ganhos " : ""}${hojeIso()}`,
+    seccoes: [
+      { k: "kpis", itens: [
+        { rot: "Vendido em serviços", valor: eur(total), nota: "sem IVA, com os descontos", tom: "neutro" },
+        { rot: "O mais vendido", valor: top ? top.nome.slice(0, 28) : "—", nota: top ? `${eur(top.vendido)} em ${top.negocios.size} ${top.negocios.size === 1 ? "negócio" : "negócios"}` : "" },
+        { rot: "Serviços diferentes", valor: String(S.length), nota: `${O.length} ${O.length === 1 ? "ofício" : "ofícios"}` },
+        ...(temCustos ? [{ rot: "Margem dos serviços", valor: mTotal != null ? pct(mTotal) : "—", nota: `${eur(tp - tc)} de lucro previsto`, tom: (mTotal != null && mTotal >= 0.28 ? "bom" : "atencao") as "bom" | "atencao" }] : []),
+      ] },
+      ...(O.length ? [{ k: "barras" as const, titulo: "Por tipo de serviço (ofício)", nota: "O valor vendido sem IVA, somado pelos serviços de cada ofício.",
+        itens: O.map((o) => ({ rot: o.oficio, valor: o.vendido, texto: `${eur(o.vendido)}${margem(o) != null ? ` · margem ${pct(margem(o)!)}` : ""}` })) }] : []),
+      ...(S.length ? [{ k: "barras" as const, titulo: "Os 10 serviços mais vendidos", itens: S.slice(0, 10).map((a) => ({ rot: a.nome, valor: a.vendido, texto: `${eur(a.vendido)}${margem(a) != null ? ` · ${pct(margem(a)!)}` : ""}` })) }] : []),
+      ...(S.length ? [{ k: "tabela" as const, titulo: "Por serviço", nota: temCustos ? "A margem é a prevista no orçamento: preço menos custo, sobre o preço." : "Sem acesso aos custos: as margens não aparecem.",
+        colunas: [{ t: "Serviço", w: 38 }, { t: "Ofício", w: 14 }, { t: "Negócios", w: 9, dir: true as const }, { t: "Qtd.", w: 8, dir: true as const }, { t: "Vendido s/ IVA", w: 14, dir: true as const, dinheiro: true as const },
+          ...(temCustos ? [{ t: "Custo", w: 12, dir: true as const, dinheiro: true as const }, { t: "Margem", w: 9, dir: true as const }] : [])],
+        linhas: S.map((a) => [a.nome, a.oficio, a.negocios.size, Math.round(a.q * 100) / 100, Math.round(a.vendido * 100) / 100, ...(temCustos ? [Math.round(a.custo * 100) / 100, margem(a) != null ? pct(margem(a)!) : "—"] : [])]),
+        total: ["Total", "", "", "", Math.round(total * 100) / 100, ...(temCustos ? [Math.round(tc * 100) / 100, mTotal != null ? pct(mTotal) : "—"] : [])] }] : [{ k: "texto" as const, titulo: "Os serviços", paragrafos: ["Ainda não há orçamentos com serviços nestes negócios."] }]),
+      ...(O.length ? [{ k: "tabela" as const, titulo: "Por ofício", colunas: [{ t: "Ofício", w: 24 }, { t: "Serviços", w: 10, dir: true as const }, { t: "Vendido s/ IVA", w: 16, dir: true as const, dinheiro: true as const },
+          ...(temCustos ? [{ t: "Custo", w: 14, dir: true as const, dinheiro: true as const }, { t: "Margem", w: 10, dir: true as const }] : [])],
+        linhas: O.map((o) => [o.oficio, o.servicos, Math.round(o.vendido * 100) / 100, ...(temCustos ? [Math.round(o.custo * 100) / 100, margem(o) != null ? pct(margem(o)!) : "—"] : [])]) }] : []),
     ],
   };
 }

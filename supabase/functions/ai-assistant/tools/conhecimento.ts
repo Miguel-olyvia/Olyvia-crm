@@ -62,11 +62,12 @@ export const relatorioOlyviaDef: ToolDef = {
   function: {
     name: "relatorio_olyvia",
     description:
-      "Relatórios da Olyvia em PDF, Excel ou no ecrã. Escolhe o tipo pelo que se pede: 'negocios' (lista e funil dos negócios; com 'filtro' para só uma parte: obra_por_iniciar, obra_em_curso, em_proposta, ganhos, perdidos ou fase:0 a fase:5), 'obras' (todas as obras: estado, progresso, fim, decisões dos agentes), 'obra' (o PLANO de UMA obra, tarefa a tarefa: fase, datas, técnico, estado; é o que se pede com «o plano», «as tarefas», «exporta este plano») ou 'orcamento' (só quando se pede o ORÇAMENTO, a proposta ou os preços de UM negócio: linhas, IVA, adendas, prestações). Devolve o resumo e uma ligação (link) que abre o relatório e, com formato pdf ou excel, descarrega o ficheiro. Para 'obra' e 'orcamento', dá 'numero' (do negócio) ou 'cliente' (o nome).",
+      "Relatórios da Olyvia em PDF, Excel ou no ecrã. Escolhe o tipo pelo que se pede: 'negocios' (lista e funil dos negócios; com 'filtro' para só uma parte: obra_por_iniciar, obra_em_curso, em_proposta, ganhos, perdidos ou fase:0 a fase:5), 'obras' (todas as obras: estado, progresso, fim, decisões dos agentes), 'obra' (o PLANO de UMA obra, tarefa a tarefa: fase, datas, técnico, estado; é o que se pede com «o plano», «as tarefas», «exporta este plano») ou 'orcamento' (só quando se pede o ORÇAMENTO, a proposta ou os preços de UM negócio: linhas, IVA, adendas, prestações), ou 'servicos' (os SERVIÇOS vendidos somados por todos os negócios: o que mais vendemos, por serviço e por tipo/ofício, com as margens de lucro para quem vê custos; 'so' = ganhos (por omissão) ou todos). Devolve o resumo e uma ligação (link) que abre o relatório e, com formato pdf ou excel, descarrega o ficheiro. Para 'obra' e 'orcamento', dá 'numero' (do negócio) ou 'cliente' (o nome).",
     parameters: {
       type: "object",
       properties: {
-        tipo: { type: "string", enum: ["negocios", "obras", "obra", "orcamento"], description: "O relatório." },
+        tipo: { type: "string", enum: ["negocios", "obras", "obra", "orcamento", "servicos"], description: "O relatório." },
+        so: { type: "string", enum: ["ganhos", "todos"], description: "Só nos serviços: contar só os negócios ganhos (por omissão) ou todos os ativos." },
         filtro: { type: "string", description: "Só nos negócios: obra_por_iniciar, obra_em_curso, em_proposta, ganhos, perdidos, ou fase:N (0 Por contactar, 1 Contacto, 2 Visita, 3 Negócio, 4 Financeiro, 5 Obra)." },
         numero: { type: "integer", description: "O número do negócio (na obra e no orçamento)." },
         cliente: { type: "string", description: "O nome do cliente, se não se souber o número (na obra e no orçamento)." },
@@ -86,7 +87,8 @@ type LinhaK = { tipo: string; numero: number | null; titulo: string; dados: Reco
 const relatorio_olyvia: Handler = async (ctx, args): Promise<ToolResult> => {
   const sb = ctx.userSupabase ?? ctx.supabase;
   if (!ctx.organizationId) return { success: false, message: "Sem organização ativa." };
-  const tipo = ["negocios", "obras", "obra", "orcamento"].includes(args?.tipo) ? String(args.tipo) : "negocios";
+  const tipo = ["negocios", "obras", "obra", "orcamento", "servicos"].includes(args?.tipo) ? String(args.tipo) : "negocios";
+  const so = args?.so === "todos" ? "todos" : "ganhos";
   // 27/11 (Rúben: «pedi relatórios e ele só faz orçamentos»): o filtro dos negócios (o mesmo da página /relatorios/olyvia)
   const FILTROS: Record<string, string> = { obra_por_iniciar: "com obra por iniciar", obra_em_curso: "com obra em curso", em_proposta: "em proposta", ganhos: "ganhos", perdidos: "perdidos" };
   const filtro = typeof args?.filtro === "string" && (FILTROS[args.filtro] || /^fase:[0-5]$/.test(args.filtro)) ? String(args.filtro) : null;
@@ -96,6 +98,7 @@ const relatorio_olyvia: Handler = async (ctx, args): Promise<ToolResult> => {
     const q = new URLSearchParams({ tipo });
     if (numero) q.set("numero", String(numero));
     if (filtro && tipo === "negocios") q.set("filtro", filtro);
+    if (tipo === "servicos" && so === "todos") q.set("so", "todos");
     if (formato) q.set("formato", formato);
     return `/relatorios/olyvia?${q.toString()}`;
   };
@@ -121,6 +124,39 @@ const relatorio_olyvia: Handler = async (ctx, args): Promise<ToolResult> => {
           lista: N.slice(0, 40).map((x) => ({ numero: x.numero, negocio: x.titulo, fase: x.dados?.fase, valor: x.dados?.valor != null ? eurTxt(Number(x.dados.valor)) : null, obra: x.dados?.obra ?? "sem obra" })) } : {}),
         negocios_ativos: ativos.length, perdidos: N.length - ativos.length, em_proposta: eurTxt(soma(propostas)), propostas_por_aceitar: propostas.length, ganhos: eurTxt(soma(ganhos)), aceites: ganhos.length,
         por_fase: FASES_NEG.map((f, i) => { const A = ativos.filter((x) => Number(x.dados?.faseN) === i); return { fase: f, negocios: A.length, valor: eurTxt(soma(A)) }; }) } };
+  }
+  // 27/11 (Rúben: «o tipo de serviço que mais vendemos e as suas margens de lucro»): os serviços somados pelos orçamentos
+  if (tipo === "servicos") {
+    const { data, error } = await ler(["negocio", "orcamento", "custos"]);
+    if (error) return { success: false, message: error.message };
+    const L = (data ?? []) as LinhaK[];
+    const neg = new Map(L.filter((x) => x.tipo === "negocio").map((x) => [x.numero, x.dados ?? {}]));
+    const conta = (n: number | null) => { const d = neg.get(n); return !!d && !d.perdido && (so === "todos" || !!d.aceite); };
+    const custos = new Map(L.filter((x) => x.tipo === "custos" && conta(x.numero)).map((x) => [x.numero, Array.isArray(x.dados?.linhas) ? x.dados!.linhas : []]));
+    // deno-lint-ignore no-explicit-any
+    const acc = new Map<string, { servico: string; oficio: string; negocios: Set<number>; vendido: number; preco: number; custo: number }>();
+    const orcs = L.filter((x) => x.tipo === "orcamento" && conta(x.numero));
+    for (const o of orcs) {
+      // deno-lint-ignore no-explicit-any
+      const CL: any[] = custos.get(o.numero) ?? [];
+      // deno-lint-ignore no-explicit-any
+      for (const l of (Array.isArray(o.dados?.linhas) ? o.dados!.linhas : []).filter((x: any) => x.tipo === "servico")) {
+        const a = acc.get(l.nome) ?? { servico: l.nome, oficio: l.oficio || "Outros", negocios: new Set<number>(), vendido: 0, preco: 0, custo: 0 };
+        a.negocios.add(o.numero as number); a.vendido += Number(l.total) || 0;
+        const cl = CL.find((x) => x.nome === l.nome && x.tipo === "servico");
+        if (cl) { a.preco += Number(cl.preco) || 0; a.custo += Number(cl.custo) || 0; }
+        acc.set(l.nome, a);
+      }
+    }
+    const S = [...acc.values()].sort((a, b) => b.vendido - a.vendido);
+    const m = (a: { preco: number; custo: number }) => (a.preco > 0 && a.custo > 0 ? `${Math.round(((a.preco - a.custo) / a.preco) * 1000) / 10}%` : null);
+    const of = new Map<string, { oficio: string; vendido: number; preco: number; custo: number }>();
+    for (const a of S) { const o = of.get(a.oficio) ?? { oficio: a.oficio, vendido: 0, preco: 0, custo: 0 }; o.vendido += a.vendido; o.preco += a.preco; o.custo += a.custo; of.set(a.oficio, o); }
+    const temCustos = custos.size > 0;
+    return { success: true, link: ligacao(), rotulo_link: rotulo, atualizada_em: L.map((x) => x.atualizado_em).sort().pop(),
+      resumo: { contados: so === "ganhos" ? `${orcs.length} negócios ganhos` : `${orcs.length} negócios ativos`, margens: temCustos ? "com custos" : "sem acesso aos custos: sem margens",
+        por_tipo: [...of.values()].sort((a, b) => b.vendido - a.vendido).map((o) => ({ tipo: o.oficio, vendido: eurTxt(o.vendido), ...(temCustos ? { margem: m(o) } : {}) })),
+        mais_vendidos: S.slice(0, 10).map((a) => ({ servico: a.servico, tipo: a.oficio, negocios: a.negocios.size, vendido: eurTxt(a.vendido), ...(temCustos ? { margem: m(a) } : {}) })) } };
   }
   if (tipo === "obras") {
     const { data, error } = await ler(["obra", "resumo"]);

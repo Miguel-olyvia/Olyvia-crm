@@ -88,9 +88,11 @@ function tarefasDoPlano(d: Negocio, S?: Estado): { fase: string; nome: string; i
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const pct = (n: number) => `${(Math.round(n * 1000) / 10).toLocaleString("pt-PT")}%`;
 type LinhaDoOrc = NonNullable<Negocio["orc"]>["linhas"][number];
-const nomeLinha = (S: Estado, l: LinhaDoOrc): { nome: string; q: number; un: string; tipo: "servico" | "produto" } =>
-  l.t === "svc" ? { nome: S.svc[l.sid]?.n ?? String(l.sid), q: l.q, un: S.svc[l.sid]?.un ?? "un", tipo: "servico" }
-    : { nome: l.d.replace(/^(Produto|Cliente)\s*·\s*/, ""), q: l.prod?.q ?? 1, un: "un", tipo: "produto" };
+// 27/11 (Rúben: «report com o tipo de serviço que mais vendemos e as suas margens de lucro»): o ofício do serviço (o perfil do Catálogo)
+// é o «tipo de serviço»; vai em cada linha, para o relatório dos serviços vendidos
+const nomeLinha = (S: Estado, l: LinhaDoOrc): { nome: string; q: number; un: string; tipo: "servico" | "produto"; oficio: string } =>
+  l.t === "svc" ? { nome: S.svc[l.sid]?.n ?? String(l.sid), q: l.q, un: S.svc[l.sid]?.un ?? "un", tipo: "servico", oficio: S.svc[l.sid]?.perfil || "Outros" }
+    : { nome: l.d.replace(/^(Produto|Cliente)\s*·\s*/, ""), q: l.prod?.q ?? 1, un: "un", tipo: "produto", oficio: "Produtos" };
 
 /** O orçamento ao detalhe (o que o cliente vê: sem custos). Null sem orçamento. */
 export function itemOrcamento(d: Negocio, S: Estado): ItemConhecimento | null {
@@ -145,6 +147,8 @@ export function itemCustos(d: Negocio, S: Estado): ItemConhecimento | null {
   ].filter(Boolean).join(" ");
   return { chave: `custos:${d.id}`, tipo: "custos", numero: d.id, titulo: `Custos e margem ${d.id} · ${d.nome}`, texto,
     dados: { custo: r2(t.custo), venda: r2(t.pf), margem: r2(t.m), lucro: r2(t.pf - t.custo), horas: r2(t.h), horasRegistadas: r2(horasReg),
+      // 27/11: o custo e o preço (com o desconto) de cada linha, para as margens por serviço
+      linhas: (d.orc?.linhas ?? []).map((l) => { const x = linhaCalc(l, S), n = nomeLinha(S, l), kd = 1 - (d.orc!.desconto || 0) / 100; return { nome: n.nome, tipo: n.tipo, oficio: n.oficio, preco: r2(x.preco * kd), custo: r2(x.custo) }; }).filter((l) => l.preco !== 0 || l.custo !== 0),
       custoReal: real ? r2(real.custoReal) : null, custoPrevObra: real ? r2(real.custoPrev) : null, fases } };
 }
 

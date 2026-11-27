@@ -282,7 +282,9 @@ export type MudancaMicro =
   | { k: "juntar"; n: string }
   | { k: "mudar"; id: number; n: string }
   | { k: "mover"; id: number; para: number }
-  | { k: "tirar"; id: number };
+  | { k: "tirar"; id: number }
+  // 27/11 (Rúben: «ao editar as tasks também devemos poder editar os pontos, o tal detalhe por bullets»)
+  | { k: "pontos"; id: number; det: string[] };
 
 const limpo = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 200);
 
@@ -312,6 +314,10 @@ export function mudarMicro(t: Tarefa, m: MudancaMicro, S?: Estado | null, p?: Pl
   } else if (i >= 0 && m.k === "mover") {
     const para = Math.max(0, Math.min(L.length - 1, m.para));
     if (para !== i) { const [x] = L.splice(i, 1); L.splice(para, 0, x); texto = `«${x.n}» mudou de lugar`; }
+  } else if (i >= 0 && m.k === "pontos") {
+    const det = m.det.map((x) => limpo(x)).filter(Boolean).slice(0, 30);
+    const agora = detalheMicro(L[i]).det;
+    if (JSON.stringify(det) !== JSON.stringify(agora)) { L[i] = { ...L[i], det }; texto = `os pontos de «${L[i].n}» mudaram (${det.length})`; }
   } else if (i >= 0 && m.k === "tirar") {
     texto = `tirou «${L[i].n}»`;
     L.splice(i, 1);

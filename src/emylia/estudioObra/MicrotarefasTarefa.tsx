@@ -72,8 +72,10 @@ export function MicrotarefasTarefa({ ctx, d, ti, mexe, cor }: { ctx: Ctx; d: Neg
                 </span>
               )}
             </div>
+            {/* 27/11 (Rúben: «ao editar as tasks também devemos poder editar os pontos»): quem planeia muda, tira e junta pontos */}
+            {mexe && !editar && <PontosEditaveis key={`${m.id}-${D.det.join("|")}`} nome={m.n} det={D.det} quem={D.quem} gravar={(det) => mudar({ k: "pontos", id: m.id, det })} />}
             {/* 25/11: a checklist da tarefa no Infraspeak e quem a faz */}
-            {D.det.length > 0 && !editar && (
+            {!mexe && D.det.length > 0 && !editar && (
               <details className="pb-1 pl-7 text-xs text-muted-foreground">
                 <summary className="cursor-pointer select-none py-0.5">{D.det.length} {D.det.length === 1 ? "ponto" : "pontos"}{D.quem ? ` · ${D.quem}` : ""}</summary>
                 <ul className="mt-1 list-disc space-y-0.5 pl-4">{D.det.map((x, j) => <li key={j}>{x}</li>)}</ul>
@@ -93,5 +95,36 @@ export function MicrotarefasTarefa({ ctx, d, ti, mexe, cor }: { ctx: Ctx; d: Neg
       )}
       <p className="text-xs text-muted-foreground">{ORIGEM[origem]} O técnico marca-as no Hoje dele.</p>
     </section>
+  );
+}
+
+/** 27/11: os pontos (o detalhe por bullets) de uma microtarefa, editáveis: o texto de cada um (grava ao sair do campo ou com Enter),
+ *  tirar um, juntar outro. Fechados por omissão, como antes. */
+function PontosEditaveis({ nome, det, quem, gravar }: { nome: string; det: string[]; quem?: string; gravar: (det: string[]) => void }) {
+  const [L, setL] = useState<string[]>(det);
+  const [novo, setNovo] = useState("");
+  const guardar = (x: string[]) => { setL(x); gravar(x); };
+  return (
+    <details className="pb-1 pl-7 text-xs text-muted-foreground">
+      <summary className="cursor-pointer select-none py-0.5">{L.length ? `${L.length} ${L.length === 1 ? "ponto" : "pontos"}` : "Juntar pontos"}{quem ? ` · ${quem}` : ""}</summary>
+      <ul className="mt-1 space-y-1">
+        {L.map((x, j) => (
+          <li key={j} className="flex items-start gap-1.5">
+            <span aria-hidden="true" className="mt-2.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground/70" />
+            <textarea rows={Math.min(4, Math.max(1, Math.ceil(x.length / 60)))} value={x} aria-label={`Ponto ${j + 1} de «${nome}»`}
+              onChange={(e) => setL((a) => a.map((y, k) => (k === j ? e.target.value : y)))}
+              onBlur={() => guardar(L)} onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); (e.target as HTMLTextAreaElement).blur(); } }}
+              className="min-h-8 min-w-0 flex-1 resize-none rounded-md border border-transparent bg-transparent px-1.5 py-1 text-xs text-foreground hover:border-input focus:border-input focus:bg-background focus:outline-none" />
+            <button type="button" aria-label={`Tirar o ponto ${j + 1}`} onClick={() => guardar(L.filter((_, k) => k !== j))}
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-md hover:bg-muted hover:text-destructive"><X className="h-3.5 w-3.5" /></button>
+          </li>
+        ))}
+      </ul>
+      <form className="mt-1 flex gap-1.5" onSubmit={(e) => { e.preventDefault(); if (!novo.trim()) return; guardar([...L, novo.trim()]); setNovo(""); }}>
+        <input value={novo} onChange={(e) => setNovo(e.target.value)} placeholder="Novo ponto" aria-label={`Novo ponto de «${nome}»`}
+          className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs" />
+        <Button type="submit" size="sm" variant="outline" className="h-8 px-2 text-xs" disabled={!novo.trim()} aria-label={`Acrescentar o ponto a «${nome}»`}><Plus className="mr-1 h-3.5 w-3.5" aria-hidden="true" />Ponto</Button>
+      </form>
+    </details>
   );
 }

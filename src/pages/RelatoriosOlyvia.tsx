@@ -4,18 +4,20 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
-import { BarChart3, Download, FileSpreadsheet, FileText, HardHat, Receipt } from "lucide-react";
+import { BarChart3, Download, FileSpreadsheet, FileText, HardHat, Receipt, Wrench } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompanyOpcional } from "@/contexts/CompanyContext";
 import { SinalAoVivo } from "@/emylia/SinalAoVivo";
-import { FILTROS_NEGOCIOS, docNegocios, docObra, docObras, docOrcamento, eur, type Coluna, type DocRelatorio, type FiltroNegocios, type LinhaBase, type Seccao, type TipoRelatorio } from "@/emylia/relatorios/relatoriosOlyvia";
+import { FILTROS_NEGOCIOS, docNegocios, docObra, docObras, docOrcamento, docServicos, eur, type Coluna, type DocRelatorio, type FiltroNegocios, type LinhaBase, type Seccao, type TipoRelatorio } from "@/emylia/relatorios/relatoriosOlyvia";
 import { exportarRelatorio } from "@/emylia/relatorios/exportarRelatorio";
 
 const TIPOS: { k: TipoRelatorio; rot: string; Icone: typeof BarChart3 }[] = [
   { k: "negocios", rot: "Negócios", Icone: BarChart3 },
   { k: "obras", rot: "Obras", Icone: HardHat },
   { k: "orcamento", rot: "Orçamento", Icone: Receipt },
+  // 27/11: os serviços vendidos e as margens, por serviço e por ofício
+  { k: "servicos", rot: "Serviços", Icone: Wrench },
 ];
 const celula = (c: Coluna, v: string | number | undefined) => (typeof v === "number" ? (c.dinheiro ? eur(v) : v.toLocaleString("pt-PT")) : v ?? "");
 
@@ -136,6 +138,7 @@ export default function RelatoriosOlyvia() {
   const doc = useMemo<DocRelatorio | null>(() => {
     if (!linhas) return null;
     if (tipo === "obras") return docObras(linhas, nomeOrg);
+    if (tipo === "servicos") return docServicos(linhas, nomeOrg, params.get("so") === "todos" ? "todos" : "ganhos");
     if (tipo === "obra") {
       const o = obrasL.find((x) => x.numero === numero) ?? (numero ? null : obrasL[0] ?? null);
       return o ? docObra(o, nomeOrg) : null;
@@ -146,7 +149,7 @@ export default function RelatoriosOlyvia() {
       return docOrcamento(o, linhas.find((x) => x.tipo === "custos" && x.numero === o.numero) ?? null, nomeOrg);
     }
     return docNegocios(linhas, nomeOrg, filtro);
-  }, [linhas, tipo, numero, orcamentos, obrasL, nomeOrg, filtro]);
+  }, [linhas, tipo, numero, orcamentos, obrasL, nomeOrg, filtro, params]);
 
   const gerar = async (formato: "pdf" | "excel") => {
     if (!doc) return;
@@ -199,6 +202,16 @@ export default function RelatoriosOlyvia() {
             <Icone className="h-4 w-4" aria-hidden="true" />{rot}
           </button>
         ))}
+        {tipo === "servicos" && (
+          <label className="ml-auto flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Contar</span>
+            <select value={params.get("so") === "todos" ? "todos" : "ganhos"} onChange={(e) => { const q = new URLSearchParams({ tipo: "servicos" }); if (e.target.value === "todos") q.set("so", "todos"); setParams(q); }}
+              className="min-h-10 max-w-[18rem] rounded-xl border border-border bg-card px-3">
+              <option value="ganhos">Só os negócios ganhos</option>
+              <option value="todos">Todos os negócios ativos</option>
+            </select>
+          </label>
+        )}
         {tipo === "negocios" && (
           <label className="ml-auto flex items-center gap-2 text-sm">
             <span className="text-muted-foreground">Mostrar</span>

@@ -35,9 +35,39 @@ const CHAVE_VISTO = (id: number) => `olyvia.agentes.visto.${id}`;
 const lerVisto = (id: number): string | null => { try { return window.localStorage.getItem(CHAVE_VISTO(id)); } catch { return null; } };
 const guardarVisto = (id: number, iso: string) => { try { window.localStorage.setItem(CHAVE_VISTO(id), iso); } catch { /* sem armazenamento */ } };
 
-function Avatar({ id, tam = "h-9 w-9" }: { id: AgenteId; tam?: string }) {
+function Avatar({ id, tam = "h-9 w-9", vivo = false }: { id: AgenteId; tam?: string; vivo?: boolean }) {
   const a = agente(id);
-  return <span aria-hidden="true" className={cn("grid shrink-0 place-items-center rounded-xl font-mono text-[11px] font-semibold text-white shadow-sm", tam)} style={{ background: a.cor }}>{a.sigla}</span>;
+  // 27/11 (Rúben: «nesta área precisamos de mais animações, como se fosse uma secção viva»): quem pede decisão tem um anel a pulsar
+  return (
+    <span aria-hidden="true" className={cn("relative grid shrink-0 place-items-center rounded-xl font-mono text-[11px] font-semibold text-white shadow-sm", tam)} style={{ background: a.cor }}>
+      {vivo && <span className="absolute -inset-1 animate-ping rounded-2xl opacity-30 [animation-duration:2.4s] motion-reduce:hidden" style={{ background: a.cor }} />}
+      <span className="relative">{a.sigla}</span>
+    </span>
+  );
+}
+
+/** 27/11 (secção viva): o que cada agente está a ver, à vez (um de cada vez, a trocar de 3 em 3 s). Parado para quem pede menos movimento. */
+function AgentesAPensar({ reduzir }: { reduzir: boolean }) {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    if (reduzir) return;
+    const t = window.setInterval(() => setI((x) => (x + 1) % AGENTES.length), 3000);
+    return () => window.clearInterval(t);
+  }, [reduzir]);
+  const a = AGENTES[i];
+  return (
+    <span className="relative inline-flex h-5 min-w-0 items-center overflow-hidden text-xs text-muted-foreground" aria-live="off">
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span key={a.id} className="inline-flex min-w-0 items-center gap-1.5 truncate"
+          initial={reduzir ? false : { y: 10, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={reduzir ? undefined : { y: -10, opacity: 0 }} transition={{ duration: 0.35 }}>
+          <span aria-hidden="true" className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: a.cor }} />
+          <span className="truncate"><b className="font-medium" style={{ color: a.cor }}>{a.nome}</b> a ver {a.vigia}</span>
+          {!reduzir && <span aria-hidden="true" className="inline-flex gap-0.5">{[0, 1, 2].map((k) => <motion.span key={k} className="h-1 w-1 rounded-full bg-muted-foreground/60"
+            animate={{ opacity: [0.2, 1, 0.2] }} transition={{ duration: 1.2, repeat: Infinity, delay: k * 0.2 }} />)}</span>}
+        </motion.span>
+      </AnimatePresence>
+    </span>
+  );
 }
 
 export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio; propostas: Proposta[]; agir: (a: AcaoAlerta) => void }) {
@@ -109,12 +139,20 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
   return (
     <section aria-label="Os agentes da obra" className="relative overflow-hidden rounded-3xl border border-border bg-card shadow-sm">
       <div aria-hidden="true" className="pointer-events-none absolute -right-24 -top-24 h-64 w-64 rounded-full bg-primary/10 blur-3xl" />
+      {/* 27/11 (secção viva): uma luz a percorrer o topo, como um radar */}
+      {!reduzir && (
+        <motion.div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 h-0.5 overflow-hidden">
+          <motion.div className="h-full w-1/3 bg-gradient-to-r from-transparent via-primary/70 to-transparent"
+            animate={{ x: ["-100%", "300%"] }} transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut", repeatDelay: 1.5 }} />
+        </motion.div>
+      )}
       {/* o cabeçalho: o pulso, o resumo e a autonomia */}
       <div className="relative flex flex-wrap items-center gap-3 border-b border-border px-4 py-3 sm:px-5">
         {/* 26/11 (Rúben: «animações assim, para mostrar mesmo que está live»): o sinal ao vivo dos agentes */}
         <SinalAoVivo rotulo="Os agentes estão a vigiar a obra" tamanho={18} />
         <div className="min-w-0 flex-1">
           <p className="text-[15px] font-semibold">Os agentes <span className="font-normal text-muted-foreground">· a vigiar a obra</span></p>
+          <AgentesAPensar reduzir={!!reduzir} />
           <p className="text-sm text-muted-foreground">
             {propostas.length ? [conta.pede && `${conta.pede} ${conta.pede === 1 ? "pede" : "pedem"} decisão`, conta.prazo && `${conta.prazo} ${conta.prazo === 1 ? "aplica-se" : "aplicam-se"} sozinho${conta.prazo === 1 ? "" : "s"} se ninguém recusar`, conta.ver && `${conta.ver} a observar`].filter(Boolean).join(" · ") : "Está tudo em ordem. Nada à espera de ti."}
           </p>
@@ -193,9 +231,9 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
                 const falta = prazo && visto ? Math.max(0, Math.min(1, (prazo.getTime() - agora.getTime()) / Math.max(1, prazo.getTime() - new Date(visto).getTime()))) : null;
                 const principal = x.acoes[0];
                 return (
-                  <motion.li key={x.id} layout={!reduzir} initial={reduzir ? false : { opacity: 0, y: 10, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={reduzir ? undefined : { opacity: 0, x: 40 }}
-                    transition={{ duration: 0.3 }} className={cn("grid grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-2xl border bg-background/60 p-3", x.nivel === "critico" ? "border-destructive/30" : "border-border", m === "ver" && "opacity-80")}>
-                    <Avatar id={x.agente} />
+                  <motion.li key={x.id} layout={!reduzir} initial={reduzir ? false : { opacity: 0, y: 14, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={reduzir ? undefined : { opacity: 0, x: 40 }}
+                    whileHover={reduzir ? undefined : { y: -2 }} transition={{ duration: 0.35, delay: reduzir ? 0 : Math.min(mostradas.indexOf(x), 6) * 0.06 }} className={cn("grid grid-cols-[auto_minmax(0,1fr)] gap-3 rounded-2xl border bg-background/60 p-3", x.nivel === "critico" ? "border-destructive/30" : "border-border", m === "ver" && "opacity-80")}>
+                    <Avatar id={x.agente} vivo={m === "pede" || m === "prazo"} />
                     <div className="min-w-0 space-y-1.5">
                       <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[15px] leading-snug">
                         <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: a.cor }}>{a.nome}</span>

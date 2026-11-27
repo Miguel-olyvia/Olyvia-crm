@@ -131,3 +131,17 @@ describe("os relatórios", () => {
     expect(screen.getAllByRole("table").length).toBe(1);
   });
 });
+
+describe("27/11: os serviços vendidos e as margens", () => {
+  it("soma os serviços dos orçamentos (por serviço e por ofício) e, com os custos, a margem; sem custos, sem margens", async () => {
+    const { docServicos } = await import("./relatoriosOlyvia");
+    const { L } = base();
+    const todos = docServicos(L, "Mudelar", "todos");
+    const t = todos.seccoes.find((s) => s.k === "tabela" && s.titulo === "Por serviço");
+    expect(t && t.k === "tabela" && t.colunas.map((c) => c.t)).toEqual(["Serviço", "Ofício", "Negócios", "Qtd.", "Vendido s/ IVA", "Custo", "Margem"]);
+    expect(t && t.k === "tabela" && t.linhas.length).toBeGreaterThan(0);
+    expect(todos.seccoes.some((s) => s.k === "barras" && s.titulo === "Por tipo de serviço (ofício)")).toBe(true);
+    const semCustos = docServicos(L.filter((x) => x.tipo !== "custos"), "", "todos");
+    expect(JSON.stringify(semCustos)).not.toMatch(/"Margem"|Margem dos serviços/);
+  });
+});
