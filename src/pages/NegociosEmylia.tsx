@@ -21,7 +21,12 @@ import { TECS, acertarDiaDasObras, acoes, definirPerdaReal, definirPessoaLigada,
 import { anularPerdaReal, mensagemDaPerda, perderNegocioReal } from "@/emylia/real/perdaReal";
 import { NegociosSimples } from "@/emylia/NegociosSimples";
 import { NegocioSimples } from "@/emylia/NegocioSimples";
-import { comTemplatesNosPassos } from "@/components/pessoas/negocioEmylia/templatesDosPassos";
+import { comTemplatesNosPassos, dadosDaMinuta, type ContextoDosTemplates } from "@/components/pessoas/negocioEmylia/templatesDosPassos";
+import { levarAoArranque, RESPOSTA_TESTE, type ResultadoArranque } from "@/emylia/real/levarAoArranque";
+import { lerTemplates, lerTemplatesDoNegocio } from "@/hooks/pessoas/useTemplatesDoNegocio";
+import { extractPromptTokens, substituteVariables } from "@/utils/contractVariables";
+import { sanitizeRichHtml } from "@/utils/sanitize";
+import { nomeEmpresa } from "@/emylia/acessosPortal";
 import { PermPortalNegocios } from "@/emylia/PermPortalNegocios";
 import { comVisitasDoCrm } from "@/components/pessoas/negocioEmylia/visitasDosPassos";
 import { passosSoLeitura } from "@/emylia/passosSoLeitura";
@@ -539,6 +544,9 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
   const go = useCallback((fn: () => void) => () => run(fn), [run]);
   // F3: abrir a encomenda de cliente, a Receção e as compras vai às páginas reais, filtradas pela encomenda do negócio
   // 10/11: as ligações ao Inventário real (abrirInv, abrirRececao, abrirInvLista…) também só abrem a página com a permissão da rota
+  // 27/11 (Rúben: «passa todos os negócios que importamos via contrato para o arranque de obra»): as Ferramentas de teste levam negócios
+  // até à obra em curso pelos passos da app (real/levarAoArranque.ts). Num ref: o modo de teste liga-se num efeito, e isto usa o A e o run.
+  const arranqueRef = useRef<(ids: number[], aoPasso: (t: string) => void) => Promise<ResultadoArranque[]>>(async () => []);
   const A = useMemo(() => acoes(S, avisar, run, ligacaoInventario((url) => {
     const perm = permDaPagina(url);
     if (perm && negaRotaRef.current(perm[1])) {
@@ -547,6 +555,58 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
     }
     navigate(url);
   })), [S, avisar, run, navigate]);
+  arranqueRef.current = async (lista, aoPasso) => {
+    if (!org) return [];
+    const esperarGravacao = async () => { await gravar(); while (aGravar.current) await new Promise((r) => setTimeout(r, 300)); };
+    const reler = async () => {
+      await esperarGravacao();
+      const relidos = await lerNegocios(supabase, org, ids.current, S.campos, { semSugestoes: soExecucaoRef.current });
+      aplicarLidos(relidos);
+      await carregarEncomendas(relidos);
+      await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
+      redesenhar();
+    };
+    const refDe = (d: Negocio) => { const r = refs.current.get(d.id); if (!r) throw new Error(`O negócio ${d.id} ainda não está gravado na base.`); return r.id; };
+    const dep = {
+      S, A, run, esperarGravacao, reler, hoje: () => new Date().toISOString().slice(0, 10),
+      prepararMinuta: async (d: Negocio) => {
+        const negId = refDe(d);
+        const lido = await lerTemplatesDoNegocio(negId);
+        const t = lerTemplates(lido.data);
+        if (t.minuta_id && t.contrato_corpo_html) return;
+        const { data, error } = await (supabase as unknown as { from: (x: string) => { select: (c: string) => { eq: (c: string, v: unknown) => { eq: (c: string, v: unknown) => PromiseLike<{ data: { id: string; name: string; body_html: string }[] | null; error: { message?: string } | null }> } } } })
+          .from("client_contract_templates").select("id, name, body_html").eq("organization_id", org).eq("is_active", true);
+        if (error) throw new Error(error.message ?? "Não deu para ler as minutas.");
+        const L = data ?? [];
+        const m = L.find((x) => /\[TESTE\]/i.test(x.name)) ?? L.find((x) => /teste/i.test(x.name)) ?? L[0];
+        if (!m) throw new Error("A organização não tem nenhuma minuta de contrato ativa.");
+        const resp = Object.fromEntries(extractPromptTokens(m.body_html).map((k) => [k, RESPOSTA_TESTE]));
+        const c = { negocioId: negId, ctx: { S, A } as unknown as Ctx, d, podeEditar: true } as ContextoDosTemplates;
+        const corpo = sanitizeRichHtml(substituteVariables(m.body_html, dadosDaMinuta(d, c, nomeEmpresa(), resp)));
+        const r = await (supabase as unknown as { rpc: (f: string, a: unknown) => PromiseLike<{ error: { message?: string } | null }> })
+          .rpc("neg_definir_templates_negocio", { p_negocio_id: negId, p_dados: { minuta_id: m.id, minuta_respostas: resp, contrato_corpo_html: corpo } });
+        if (r.error) throw new Error(r.error.message ?? "Não deu para gravar a minuta.");
+      },
+      assinarContrato: async (d: Negocio) => {
+        const t = lerTemplates((await lerTemplatesDoNegocio(refDe(d))).data);
+        if (!t.contrato_id) throw new Error("O contrato ainda não está na base.");
+        await simularCliente(supabase, "sign_contract", t.contrato_id);
+      },
+      garantirMateriais: async (contrato: string) => {
+        const r = await garantirMateriaisTeste(supabase, org, contrato, await resolveCurrentBusinessUserId());
+        if (r.deFora.length) avisar(textoGarantir(r));
+      },
+    };
+    const out: ResultadoArranque[] = [];
+    for (const id of lista) {
+      aoPasso(`${id}…`);
+      try { out.push(await levarAoArranque(dep, id, (t) => aoPasso(`${id}: ${t}`))); }
+      catch (e) { out.push({ id, nome: S.deals.find((x) => x.id === id)?.nome ?? "?", ok: false, ficou: (e as Error).message, feito: [] }); }
+    }
+    const ok = out.filter((r) => r.ok).length;
+    avisar({ msg: `${ok} de ${out.length} em obra (teste)`, sub: out.filter((r) => !r.ok).map((r) => `${r.id}: ${r.ficou}`).join(" · ") || "Todos arrancaram.", kind: ok === out.length ? "ok" : "bad" });
+    return out;
+  };
   useEffect(() => { definirOrgErp(org); return () => definirOrgErp(null); }, [org]);
   // 4/11: os dados da empresa para o cliente pagar (o passo «Pagamento» e «Ver como o cliente»); sem eles, nada de exemplo
   useEffect(() => {
@@ -802,6 +862,7 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
             avisar({ msg: "O teste não foi feito", sub: (e as Error).message, kind: "bad" });
           } finally { redesenhar(); }
         },
+        levarAoArranque: (lista, aoPasso) => arranqueRef.current(lista, aoPasso),
         // 27/11 (Rúben: «um botão para dar "ok" aos materiais de uma obra»): recebe as POs da obra e dá entrada do que falta, sem fornecedores
         garantirMateriais: async (contrato) => {
           try {

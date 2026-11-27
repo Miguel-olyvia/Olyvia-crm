@@ -6,6 +6,7 @@
 import { useSyncExternalStore } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Negocio } from "../motor";
+import type { ResultadoArranque } from "./levarAoArranque";
 
 export interface AcoesDeTeste {
   /** Aceitar a proposta como o cliente no portal (o mesmo caminho do portal, sem o código por SMS). */
@@ -17,6 +18,8 @@ export interface AcoesDeTeste {
   /** 27/11: dar os materiais da obra como garantidos: recebe as encomendas a fornecedor dela e dá entrada do que falta (real/materiaisTeste.ts).
    *  Nada vai a fornecedores. */
   garantirMateriais?: (contrato: string) => Promise<void>;
+  /** 27/11: levar negócios com a proposta aceite até à obra em curso, pelos passos da app (real/levarAoArranque.ts). */
+  levarAoArranque?: (ids: number[], aoPasso: (t: string) => void) => Promise<ResultadoArranque[]>;
 }
 
 let acoes: AcoesDeTeste | null = null;
