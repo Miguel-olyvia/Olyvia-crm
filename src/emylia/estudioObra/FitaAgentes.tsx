@@ -91,10 +91,15 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
   // 27/11 (agentes): primeiro o que pede decisão, depois o que se aplica sozinho, no fim o que é só para saber (a ordem dos alertas mantém-se dentro)
   const ORDEM_MODO = { pede: 0, prazo: 1, ja: 2, ver: 3 } as const;
   const visiveis = propostas.filter((x) => !filtro || x.agente === filtro).sort((a, b) => ORDEM_MODO[modoDa(a, e, agora)] - ORDEM_MODO[modoDa(b, e, agora)]);
-  const mostradas = todas ? visiveis : visiveis.slice(0, 5);
+  // 27/11 (Rúben: «encurta» a fita, que ocupava ecrã e meio): à vista só as 3 primeiras que pedem ou aplicam (as «para saberes» ficam
+  // recolhidas); o resto, os filtros por agente e o histórico todo abrem com um clique
+  const VISTA_CURTA = 3;
+  const principais = filtro ? visiveis : visiveis.filter((x) => modoDa(x, e, agora) !== "ver");
+  const mostradas = todas ? visiveis : principais.slice(0, VISTA_CURTA);
+  const escondidas = visiveis.length - mostradas.length;
   const feitos = (e?.feitos ?? []).filter((f) => !f.desfeito);
   const novos = feitos.filter((f) => !ultimaVisita || f.q > ultimaVisita);
-  const recentes = novos.length ? novos : feitos.slice(0, 3);
+  const recentes = (novos.length ? novos : feitos).slice(0, todas ? 5 : 2);
   const conta = useMemo(() => {
     const c = { pede: 0, prazo: 0, ver: 0 };
     for (const x of propostas) { const m = modoDa(x, e, agora); if (m === "prazo") c.prazo++; else if (m === "ver") c.ver++; else c.pede++; }
@@ -146,7 +151,7 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
         )}
       </AnimatePresence>
 
-      <div className="relative grid gap-4 p-4 sm:p-5">
+      <div className="relative grid gap-3 p-4 sm:p-5">
         {/* o que os agentes fizeram */}
         {recentes.length > 0 && (
           <div className="rounded-2xl bg-success/[0.06] p-3 ring-1 ring-success/20">
@@ -163,8 +168,8 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
           </div>
         )}
 
-        {/* os agentes: filtrar a fita por um */}
-        <div role="group" aria-label="Ver só um agente" className="flex flex-wrap gap-1.5">
+        {/* os agentes: filtrar a fita por um (27/11: só com a fita aberta, ou com um filtro escolhido) */}
+        {(todas || filtro) && <div role="group" aria-label="Ver só um agente" className="flex flex-wrap gap-1.5">
           {AGENTES.map((a) => {
             const n = propostas.filter((x) => x.agente === a.id).length, on = filtro === a.id;
             return (
@@ -175,9 +180,10 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
               </button>
             );
           })}
-        </div>
+        </div>}
 
         {/* a fita */}
+        {!todas && !mostradas.length && visiveis.length > 0 && <p className="rounded-2xl bg-muted/40 px-4 py-3 text-sm text-muted-foreground">Nada pede decisão agora.</p>}
         {!visiveis.length ? <p className="rounded-2xl bg-muted/40 px-4 py-3 text-sm text-muted-foreground">{filtro ? `O agente ${agente(filtro).nome} não tem nada a dizer agora.` : "Os agentes não encontraram nada para fazer."}</p> : (
           <ul className="grid gap-2">
             <AnimatePresence initial={false}>
@@ -199,7 +205,7 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
                           {m === "prazo" && prazo ? `aplica-se sozinho ${quandoPrazo(prazo, agora)}` : m === "ver" ? (x.info ? "para saberes" : "a observar") : m === "ja" ? "a aplicar" : pausa ? `em pausa até ${quandoPrazo(pausa, agora)}: desfez uma mudança` : "pede decisão"}
                         </span>
                       </p>
-                      {x.sub && <p className="text-sm text-muted-foreground">{x.sub}</p>}
+                      {x.sub && <p className={cn("text-sm text-muted-foreground", !todas && "line-clamp-2")} title={!todas ? x.sub : undefined}>{x.sub}</p>}
                       {x.auto && m !== "ver" && <p className="text-sm"><span className="text-muted-foreground">Proposta:</span> {x.auto.texto}</p>}
                       {falta != null && <div className="h-1 overflow-hidden rounded-full bg-muted" aria-hidden="true"><div className="h-full rounded-full bg-amber-500 transition-[width] duration-1000 ease-linear" style={{ width: `${Math.round(falta * 100)}%` }} /></div>}
                       {planeia && (m !== "ver" || x.info) && (
@@ -219,9 +225,9 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
             </AnimatePresence>
           </ul>
         )}
-        {visiveis.length > 5 && (
+        {(escondidas > 0 || todas) && (
           <button type="button" aria-expanded={todas} onClick={() => setTodas((x) => !x)} className="inline-flex min-h-9 items-center gap-1 justify-self-start rounded-full px-3 text-sm font-medium text-primary hover:bg-primary/10">
-            {todas ? "Mostrar menos" : `Ver todas (${visiveis.length})`}<ChevronDown className={cn("h-4 w-4 transition-transform", todas && "rotate-180")} aria-hidden="true" />
+            {todas ? "Mostrar menos" : `Ver todas (${visiveis.length})${conta.ver && !filtro ? ` · ${conta.ver} para saberes` : ""}`}<ChevronDown className={cn("h-4 w-4 transition-transform", todas && "rotate-180")} aria-hidden="true" />
           </button>
         )}
       </div>

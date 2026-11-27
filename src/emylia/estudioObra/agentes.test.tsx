@@ -230,7 +230,12 @@ describe("a fita dos agentes no Estúdio", () => {
   it("aparece com o pulso, os seis agentes e a autonomia, que muda o degrau", () => {
     const { d } = montar();
     const fita = screen.getByRole("region", { name: "Os agentes da obra" });
-    expect(within(fita).getByRole("group", { name: "Ver só um agente" }).querySelectorAll("button").length).toBe(6);
+    // 27/11 (fita curta): no máximo 3 propostas à vista; os filtros por agente só com a fita aberta
+    expect(within(fita).queryAllByRole("listitem").filter((li) => li.closest("ul")?.className.includes("grid gap-2")).length).toBeLessThanOrEqual(3);
+    expect(within(fita).queryByRole("group", { name: "Ver só um agente" })).toBeNull();
+    const verTodas = within(fita).queryByRole("button", { name: /^Ver todas/ });
+    expect(verTodas).not.toBeNull(); if (verTodas) fireEvent.click(verTodas);
+    if (verTodas) expect(within(fita).getByRole("group", { name: "Ver só um agente" }).querySelectorAll("button").length).toBe(6);
     fireEvent.click(within(fita).getByRole("button", { name: /Autonomia/ }));
     const plano = within(fita).getByRole("group", { name: "Autonomia do agente Plano" });
     fireEvent.click(within(plano).getByRole("button", { name: "Faz sozinho" }));
