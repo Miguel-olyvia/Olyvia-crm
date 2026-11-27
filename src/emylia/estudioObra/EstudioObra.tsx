@@ -52,6 +52,7 @@ import { AgendaEquipa, ComandoHoje, DiarioObra, FechoVivo, PontoDaSemana, Previs
 import { ROTULO_VIVO, fimFeito, comLigacao, comRestricao, naoCabem, conflitosNovos, ligacoesDoPlano, nomeCurtoTarefa, nomeNoPlano, porqueNaoLigar, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
 import { alertasDaObra, type AcaoAlerta, type Alerta } from "./alertasObra";
 import { custoDosNossos, pedePorque, type AjusteObra } from "./quemPaga";
+import { contasDaObra } from "./contasDaObra";
 import { PorqueAjuste, type ImprevistoInicial } from "./PorqueAjuste";
 import { tomarPainelObra } from "./painelPedido";
 import { AdendasDaObra } from "./AdendasObra";
@@ -351,15 +352,17 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   useEffect(() => () => { try { const x = pendentes.current; if (x.L.length) x.enviar(x.L, true); } catch { /* o ecrã já fechou */ } }, []);
   if (!p) return null;
   // as outras obras (para os técnicos noutra obra): lê-se a cada desenho, porque o estado muda no sítio
-  const ocup = ocupacaoDosTecnicos(S, d.id);
+  // 27/11 (Rúben: «sinto o estúdio lento»): a ocupação, os alertas e as propostas dos agentes fazem-se uma vez e guardam-se enquanto a
+  // obra e os dados da página não mudam (contasDaObra.ts); antes refaziam-se a cada clique, painel ou separador
+  const contas = contasDaObra(ctx, d, S, inv);
+  const ocup = contas.ocup;
   const R: Replano | null = previa ? (previa.k === "atraso" ? simularAtraso(p, previa.ti, previa.dias, ocup) : previa.k === "ligar" ? replanear(comLigacao(p, previa.para, previa.de, previa.ligar), ocup, { adiantar: false })
     : previa.k === "restricao" ? replanear(comRestricao(p, previa.tec, previa.dias), ocup, { adiantar: false }) : replanear(p, ocup, { adiantar: previa.adiantar }))
     : fantasma && painel?.k === "imprevisto" ? replanoDe(p, fantasma) : null;
   const fora: ConflitoFora[] = R ? conflitosNovos(S, d, R.plano) : [];
-  const alertas = alertasDaObra(d, S, ocup, inv);
+  const alertas = contas.alertas;
   // 25/11 (plano «Obra Viva», etapa 1): o que os seis agentes veem nesta obra
-  let propostas: Proposta[] = [];
-  try { propostas = propostasDosAgentes(d, S, ocup, inv); } catch (e) { console.warn("agentes", e); }
+  const propostas: Proposta[] = contas.propostas;
   const vivo = p.estado === "em curso", acabou = p.estado === "concluída";
   const planeia = podeNeg(S.role, "obra.planear");
   // a fita dos agentes aparece com a obra em curso ou aprovada (é ela que mostra os alertas, com o próximo passo); quem só lê (o técnico)

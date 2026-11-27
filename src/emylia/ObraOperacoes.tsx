@@ -23,6 +23,7 @@ import { Conversa } from "./ConversaObra";
 import { orgDoModoReal } from "./acessosPortal";
 import { fotoDaEquipa, useConversaReal } from "./real/conversaReal";
 import { AcaoMensagemCliente, ProblemasDoCliente, type ConversaDaObra } from "./ProblemasObra";
+import { contasDaObra } from "./estudioObra/contasDaObra";
 
 const ESTADO_PLANO: Record<string, string> = {
   "por aprovar": "plano por aprovar", aprovado: "pronta a arrancar", "em curso": "em curso", "concluída": "concluída",
@@ -83,7 +84,8 @@ export function ListaObras(ctx: Ctx) {
               // 25/11 (agentes, etapa 2): o que os agentes desta obra pedem, sem abrir o Estúdio
               let pedem = 0, comPrazo = 0;
               try {
-                for (const x of propostasDosAgentes(o, S, ocupacaoDosTecnicos(S, o.id), r)) { const m = modoDa(x, o.obra.agentes); if (m === "pede") pedem++; else if (m === "prazo") comPrazo++; }
+                // 27/11 (desempenho): as contas de cada obra guardam-se enquanto a obra e os dados da página não mudam (contasDaObra.ts)
+                for (const x of contasDaObra(ctx, o, S, r).propostas) { const m = modoDa(x, o.obra.agentes); if (m === "pede") pedem++; else if (m === "prazo") comPrazo++; }
               } catch { /* sem agentes nesta obra */ }
               const alertas: [ReactNode, string][] = [
                 ...(pedem ? [[<span key="ag" aria-hidden="true" className="relative flex h-2.5 w-2.5"><span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-50 motion-reduce:hidden" /><span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-primary" /></span>, `os agentes pedem ${pedem} ${pedem === 1 ? "decisão" : "decisões"}`] as [ReactNode, string]] : []),

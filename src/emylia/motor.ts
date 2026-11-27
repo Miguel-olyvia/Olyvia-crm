@@ -7,7 +7,7 @@ import type { FaturaReg } from "./v2/financeiro";
 import { erroZonasLinha, limparZonas, porZona, type GrupoZona, type ZonaLinha } from "./zonasOrcamento";
 import { anteciparInicio, diferencas, fimDe, guardarBase, inicioMinimo, mudarDuracao, mudarHoras, mudarInicio, reporBase, type BaseTarefa } from "./ajustesPlano";
 import { NOME_SEGURANCA, faltaParaFeita, fotoExemplo, type EntradaDiario, type ExecTarefa } from "./obraOps";
-import { comLigacao, comRestricao, conflitosNovos, estadoVivo as estadoVivoTarefa, nomeCurtoTarefa, porqueNaoLigar, replanear, simularAtraso } from "./estudioObra/planoVivo";
+import { comLigacao, comRestricao, conflitosNovos, ocupacaoDaObra, estadoVivo as estadoVivoTarefa, nomeCurtoTarefa, porqueNaoLigar, replanear, simularAtraso } from "./estudioObra/planoVivo";
 import { porNaTarefa, type RetratoPlano } from "./estudioObra/passosObra";
 import { lerQuemAssina } from "./estudioObra/quemAssina";
 import { fotoPlano, guardarAlteracao, mudancasEntre, type Alteracao as AlteracaoPlano, type FotoPlano } from "./historicoPlano";
@@ -52,6 +52,7 @@ import { CAMPOS_COM_EFEITO, PREFIXO_LEV, efeitosDoLevantamento } from "./efeitos
 import { AREA, CONTACTO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PROPOSTA, RES_INTERESSADO, RES_NUMERO_ERRADO, RES_PERDA, RES_RELIGAR, RESULTADOS_CHAMADA, efetivo, emFalta, grupoVisita, type CfgCampos, type Grupo } from "./campos";
 import { isoDoDia, rotuloVaga, vagaDe, type Vaga } from "./vagaData";
 import { RESPONSAVEIS_OBRA, chaveBase, divisaoPrincipal, divisoesEscolhidas, gruposArea, juntarDivisoes, prefixoDivisao, reorganizarDivisoes } from "./campos";
+import { equipaDe as equipaDeObra } from "./equipa/equipasObra";
 import { quemVaiPorOmissao } from "./equipa/membros";
 import { TECNICOS, ausenteNoRh, custoHoraDe, garantirTecnicos, perfilDoTecnico, temAusenciasRh, tecnicosIniciais, usarTecnicos, type FichaTecnico, type Tecnico } from "./equipa/tecnicos";
 import { supervisorDeMedidas } from "./supervisoresMedidas";
@@ -1342,19 +1343,44 @@ export function simularBuraco(S: Pick<Estado, "deals">, d: Negocio, ini: number,
   const hoje = p.estado === "em curso" ? p.dia : 0, n = fim - ini + 1;
   const alvo = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => { const v = estadoVivoTarefa(t, p); return v !== "feita" && v !== "validada" && !t.exec && t.dia > fim; }).map((x) => x.ti);
   if (!alvo.length || n < 1) return { s: 0, alvo, porque: "Não há tarefas por fazer depois desses dias", trava: null, ganho: 0 };
-  const ferias0 = conflitos(p).length, fim0 = fimDe(p.tasks);
-  // trava: a 1.ª tarefa do técnico que impede (é essa que se pode passar a outro)
+  // 27/11 (Rúben: «sinto o estúdio lento»): antes copiava-se o plano e refazia-se a ocupação e as férias de tudo em cada tentativa
+  // (4 ms por buraco, dezenas por render). Só as tarefas que andam podem dar conflito novo: vê-se cada uma nos dias novos, contra a
+  // ocupação guardada das outras obras (o que esta obra já ocupava não conta, como em conflitosNovos) e contra as férias dela.
+  const tecDe = (ti: number) => (troca && troca.ti === ti ? troca.tec : p.tasks[ti].tec);
+  const fim0 = fimDe(p.tasks);
+  const iso: string[] = p.inicio ? diasDaObra(deIso(p.inicio), Math.max(1, fim0) + 1).map(isoDia) : [];
+  const agora = ocupacaoDaObra(p);
+  const outras = p.inicio ? (S.deals ?? []).filter((o) => o.id !== d.id && !o.perdido && o.obra?.plano && o.obra.plano.estado !== "concluída" && o.obra.plano.inicio)
+    .map((o) => ({ o, occ: ocupacaoDaObra(o.obra!.plano!) })) : [];
+  const membros = (tec: string) => equipaDeObra(tec)?.membros ?? [tec];
+  const feriasEm = (tec: string | null, dia: number, dur: number) => { const x = tec ? TECS.find((y) => y.id === tec) : null; return !!x && diaDeFerias(x, p, dia, dur) != null; };
+  const fer0 = new Map(alvo.map((ti) => [ti, feriasEm(tecDe(ti), p.tasks[ti].dia, p.tasks[ti].dur)]));
+  // a troca também conta: o técnico novo nos dias de agora (se a tarefa não andar) tem de estar livre
   let porque = "", trava: number | null = null;
   for (let s = n; s >= 1; s--) {
-    const copia: Plano = { ...p, tasks: p.tasks.map((t) => ({ ...t })) };
-    if (troca && copia.tasks[troca.ti]) copia.tasks[troca.ti].tec = troca.tec;
-    let mexe = false;
-    for (const ti of alvo) { const nd = Math.max(hoje, copia.tasks[ti].dia - s); if (nd !== copia.tasks[ti].dia) mexe = true; copia.tasks[ti].dia = nd; }
+    let mexe = false, fora: { tec: string; obra: Negocio } | null = null, ferias = false, foraTi: number | null = null;
+    for (const ti of alvo) {
+      const t = p.tasks[ti], nd = Math.max(hoje, t.dia - s), tec = tecDe(ti);
+      if (nd !== t.dia) mexe = true;
+      if (!tec) continue;
+      if (!fora) {
+        for (const m of membros(tec)) {
+          for (let k = nd; k < nd + t.dur && k < iso.length && !fora; k++) {
+            const dia = iso[k];
+            if (tec === t.tec && agora.get(m)?.has(dia)) continue;
+            const o = outras.find((x) => x.occ.get(m)?.has(dia));
+            if (o) { fora = { tec: m, obra: o.o }; foraTi = ti; }
+          }
+          if (fora) break;
+        }
+      }
+      if (!ferias && feriasEm(tec, nd, t.dur) && !fer0.get(ti)) ferias = true;
+    }
     if (!mexe) { if (!porque) porque = "As tarefas seguintes já começam o mais cedo possível"; continue; }
-    const fora = conflitosNovos(S, d, copia);
-    if (fora.length) { if (!porque) { porque = `${TECS.find((x) => x.id === fora[0].tec)?.n.split(" ")[0] ?? "Um técnico"} está noutra obra (${fora[0].obra.nome}) nesses dias`; trava = alvo.find((ti) => copia.tasks[ti].tec === fora[0].tec) ?? null; } continue; }
-    if (conflitos(copia).length > ferias0) { if (!porque) porque = "Um técnico está de férias nesses dias"; continue; }
-    return { s, alvo, porque, trava, ganho: Math.max(0, fim0 - fimDe(copia.tasks)) };
+    if (fora) { if (!porque) { porque = `${TECS.find((x) => x.id === fora!.tec)?.n.split(" ")[0] ?? "Um técnico"} está noutra obra (${fora.obra.nome}) nesses dias`; trava = foraTi; } continue; }
+    if (ferias) { if (!porque) porque = "Um técnico está de férias nesses dias"; continue; }
+    const fimNovo = Math.max(...p.tasks.map((t, ti) => (alvo.includes(ti) ? Math.max(hoje, t.dia - s) : t.dia) + t.dur));
+    return { s, alvo, porque, trava, ganho: Math.max(0, fim0 - fimNovo) };
   }
   return { s: 0, alvo, porque: porque || "Os técnicos das tarefas seguintes não estão livres", trava, ganho: 0 };
 }

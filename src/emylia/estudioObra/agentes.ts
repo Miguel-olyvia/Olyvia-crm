@@ -6,7 +6,7 @@
 // duas obras. O que um agente aplica vai pelas ações do motor (fica no histórico e desfaz-se). Sem SQL: o estado vive em obra.agentes.
 import type { Estado, Negocio, Plano } from "../motor";
 import type { ResumoEcNeg } from "../inventario/ponteNegocios";
-import { alertasDaObra, type AcaoAlerta, type Nivel } from "./alertasObra";
+import { alertasDaObra, type AcaoAlerta, type Alerta, type Nivel } from "./alertasObra";
 import { estadoVivo, nomeNoPlano, replanear, type Replano } from "./planoVivo";
 import { custoDaHora } from "./quemPaga";
 import { rotuloDia } from "../preparacaoObra";
@@ -103,7 +103,7 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 const eur = (n: number) => n.toLocaleString("pt-PT", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 /** O que os seis agentes veem nesta obra agora. As recusadas ficam de fora. */
-export function propostasDosAgentes(d: Negocio, S: Pick<Estado, "deals"> & Partial<Estado>, ocup: Map<string, Set<string>>, inv?: ResumoEcNeg | null): Proposta[] {
+export function propostasDosAgentes(d: Negocio, S: Pick<Estado, "deals"> & Partial<Estado>, ocup: Map<string, Set<string>>, inv?: ResumoEcNeg | null, alertasFeitos?: Alerta[]): Proposta[] {
   const p = d.obra.plano;
   if (!p || p.estado === "concluída" || p.estado === "por aprovar") return [];
   const out: Proposta[] = [];
@@ -115,7 +115,8 @@ export function propostasDosAgentes(d: Negocio, S: Pick<Estado, "deals"> & Parti
   const adiantado = () => (comFolga ??= replanear(p, ocup, { adiantar: true }));
 
   // 1) os alertas da obra, cada um com o seu agente; alguns podem fazer-se sozinhos
-  for (const al of alertasDaObra(d, S, ocup, inv)) {
+  // 27/11 (desempenho): os alertas já feitos por quem chama (o Estúdio) não se refazem
+  for (const al of alertasFeitos ?? alertasDaObra(d, S, ocup, inv)) {
     const ag = agenteDoAlerta(al.id);
     let auto: Proposta["auto"];
     const fb = al.acoes.find((x) => x.a.k === "fecharBuraco")?.a;

@@ -139,7 +139,26 @@ export function replanear(p: Plano, ocup: Map<string, Set<string>>, o: { adianta
 }
 
 /** Os dias (iso) que cada técnico ocupa num plano (as tarefas por validar; uma equipa ocupa todos os membros). */
+// 27/11 (Rúben: «sinto o estúdio lento»): a ocupação de cada obra calculava-se de novo em cada simulação (os agentes simulam dezenas
+// por render, cada uma a percorrer as ~30 obras: 6 ms de cada vez, 120 ms por alerta). Guarda-se por plano e só se refaz quando o que
+// conta muda (o início, os técnicos, os dias, as validadas e as equipas). Quem a usa não a muda (só lê).
+const memoOcupacao = new WeakMap<Plano, { sig: string; occ: Map<string, Set<string>> }>();
+function assinaturaOcupacao(p: Plano): string {
+  let s = `${p.inicio ?? ""}|${p.tasks.length}|`;
+  for (const t of p.tasks) s += `${t.tec ?? ""},${t.dia},${t.dur},${estadoDe(t) === "validada" ? 1 : 0};`;
+  for (const t of p.tasks) if (t.tec) { const e = equipaDe(t.tec); if (e) s += `#${t.tec}=${e.membros.join(",")}`; }
+  return s;
+}
+/** A ocupação de uma obra (técnico → dias ISO), guardada até o plano mudar. Só para ler. */
+export const ocupacaoDaObra = (p: Plano): Map<string, Set<string>> => ocupacaoDe(p);
 function ocupacaoDe(p: Plano): Map<string, Set<string>> {
+  const sig = assinaturaOcupacao(p), m = memoOcupacao.get(p);
+  if (m && m.sig === sig) return m.occ;
+  const occ = ocupacaoDeCalc(p);
+  memoOcupacao.set(p, { sig, occ });
+  return occ;
+}
+function ocupacaoDeCalc(p: Plano): Map<string, Set<string>> {
   const out = new Map<string, Set<string>>();
   if (!p.inicio) return out;
   const ds = diasDaObra(deIso(p.inicio), Math.max(1, fimDe(p.tasks)));
