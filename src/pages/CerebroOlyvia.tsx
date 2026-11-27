@@ -85,7 +85,7 @@ function PainelNo({ n, grafo, obras, onFechar, onEscolher }: { n: NoGrafo; grafo
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-start gap-3 border-b border-border p-4">
-        <span className="mt-1 h-3 w-3 shrink-0 rounded-full" style={{ background: n.cor, boxShadow: `0 0 0 4px ${n.cor}33` }} aria-hidden="true" />
+        <span className="mt-1 h-3 w-3 shrink-0 rounded-full ring-1 ring-foreground/20" style={{ background: n.cor }} aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{NOMES_TIPO[n.tipo].um}{n.atualizado ? ` · ${new Date(n.atualizado).toLocaleString("pt-PT", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}` : ""}</p>
           <h2 className="text-lg font-semibold leading-snug">{n.titulo}</h2>
@@ -158,7 +158,7 @@ function PainelNo({ n, grafo, obras, onFechar, onEscolher }: { n: NoGrafo; grafo
               {viz.slice(0, 40).map((v) => (
                 <li key={v.id}>
                   <button type="button" onClick={() => onEscolher(v.id)} className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-border bg-card px-2.5 text-xs font-medium transition hover:border-primary/40 hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-                    <span className="h-2 w-2 rounded-full" style={{ background: v.cor }} aria-hidden="true" />{v.rotulo}
+                    <span className="h-2 w-2 rounded-full ring-1 ring-foreground/20" style={{ background: v.cor }} aria-hidden="true" />{v.rotulo}
                   </button>
                 </li>
               ))}
@@ -291,7 +291,7 @@ export default function CerebroOlyvia() {
                   return (
                     <button key={t} type="button" aria-pressed={on} onClick={() => alternarTipo(t)}
                       className={cn("inline-flex min-h-9 shrink-0 items-center gap-1.5 rounded-full border px-3 text-[13px] font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary", on ? "border-border bg-card shadow-sm" : "border-dashed border-border bg-transparent text-muted-foreground opacity-70")}>
-                      <span className="h-2.5 w-2.5 rounded-full" style={{ background: on ? corDoTipo(t) : "transparent", boxShadow: `inset 0 0 0 1.5px ${corDoTipo(t)}` }} aria-hidden="true" />
+                      <span className="h-2.5 w-2.5 rounded-full ring-1 ring-foreground/20" style={{ background: on ? corDoTipo(t) : "transparent" }} aria-hidden="true" />
                       {NOMES_TIPO[t].varios}<span className="tabular-nums text-muted-foreground">{contagem.get(t)}</span>
                     </button>
                   );

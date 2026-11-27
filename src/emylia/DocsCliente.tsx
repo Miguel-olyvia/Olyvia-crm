@@ -12,6 +12,7 @@ import { ESTADO_PO_POR_APROVAR, estadoLinhaNegocio, linhaDoResumo, resumoEcNegoc
 import { LINHAS, PAPEIS, eur, linhaCalc, nfmt, tot, type Assinatura, type Estado, type Negocio } from "./motor";
 import { FASES_OBRA, fasesPadrao, type FaseObra } from "./fasesObra";
 import { SeloAssinatura } from "./AssinaturaContrato";
+import { ContratoRealEMinuta } from "./ContratoReal";
 import { modoReal, nifEmpresa, nomeEmpresa, nomeFiscalEmpresa } from "./acessosPortal";
 import { LINHA_DEMOLICAO } from "./entulho";
 import type { Ctx } from "./pecas";
@@ -971,7 +972,8 @@ export function imprimir(el: HTMLElement | null, titulo: string) {
   setTimeout(() => { w.focus(); w.print(); }, 600);
 }
 
-export function Partilhar({ ctx, d, tipo, children, estado }: { ctx: Ctx; d: Negocio; tipo: "proposta" | "contrato" | "fatura" | "encomenda" | "adenda"; children: ReactNode; estado: string }) {
+export function Partilhar({ ctx, d, tipo, children, estado, semContratoReal = false }: { ctx: Ctx; d: Negocio; tipo: "proposta" | "contrato" | "fatura" | "encomenda" | "adenda"; children: ReactNode; estado: string;
+  /** 27/11: o contrato de uma adenda não mostra o PDF assinado do contrato inicial */ semContratoReal?: boolean }) {
   const link = linkPortal(d, tipo, ctx.idNegocioBase?.(d.id));
   const [copiado, setCopiado] = useState(false);
   const [ver, setVer] = useState(false);
@@ -985,8 +987,7 @@ export function Partilhar({ ctx, d, tipo, children, estado }: { ctx: Ctx; d: Neg
     setCopiado(true); setTimeout(() => setCopiado(false), 2000);
   };
   void ctx;
-  return (
-    <section className="space-y-4" aria-label={`Documento: ${nome}`}>
+  const cartao = (
       <div className="rounded-2xl border border-border bg-card p-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-[15px] font-semibold">Partilhar {nome}</p>
@@ -1002,7 +1003,12 @@ export function Partilhar({ ctx, d, tipo, children, estado }: { ctx: Ctx; d: Neg
           <Button variant="ghost" size="sm" onClick={() => imprimir(doc.current?.querySelector(".folha") as HTMLElement, `${EMPRESA.nome} · ${nome}`)}><Printer className="mr-1.5 h-4 w-4" aria-hidden="true" />Imprimir ou PDF</Button>
         </div>
       </div>
-      <div ref={doc} className="rounded-2xl bg-muted/60 p-3 sm:p-6">{children}</div>
+  );
+  const folha = <div ref={doc} className="rounded-2xl bg-muted/60 p-3 sm:p-6">{children}</div>;
+  return (
+    <section className="space-y-4" aria-label={`Documento: ${nome}`}>
+      {/* 27/11: no contrato, o PDF assinado (o real) vem primeiro e a minuta da app fica abaixo, com o nome dela */}
+      {tipo === "contrato" && !semContratoReal ? <ContratoRealEMinuta numero={d.id} cartao={cartao} folha={folha} /> : <>{cartao}{folha}</>}
       {ver && createPortal(
         // o leitor: o documento em ecrã inteiro, como o cliente o abre no portal, com zoom e imprimir (Escape fecha).
         // Vai para o body: dentro do passo (animado, com transform) o "fixed" ficava preso ao passo e não cobria o ecrã.

@@ -14,11 +14,12 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, eur, nfmt, type MatTarefa, type Negocio, type Plano, type Tarefa } from "../motor";
 import type { Ctx } from "../pecas";
+import { EquipasNaObra } from "./EquipasNaObra";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
 import { dataCurta } from "../planoObra";
 import { blocosForaDaObra, motivoOcupado, obrasDosTecnicos, ocupacaoDosTecnicos, tecnicosDoOficio } from "../preparacaoObra";
 import { equipamentosDaObra, materiaisPorFase, seguranca } from "../obraOps";
-import { ROTULO_MAT_NOVO, emFalta, materiaisDasTarefasNovas, resumoFalta, type EstadoMatNovo, type MatDaTarefaNova } from "./materiaisTarefasNovas";
+import { RECEBIDO_DE_TESTE, ROTULO_MAT_NOVO, emFalta, equipamentosDasTarefasNovas, materiaisDasTarefasNovas, resumoFalta, type EstadoMatNovo, type MatDaTarefaNova } from "./materiaisTarefasNovas";
 import { enviosDe, TEMPOS_CORRECAO } from "../trabalhoObra";
 import { pontosEncerrar } from "../encerrarObra";
 import { emCurso } from "../adendas";
@@ -352,19 +353,18 @@ export function MateriaisDaObra({ ctx, d, dias = [], abrir, irAba, realce }: { c
   const p = d.obra.plano!;
   const G = materiaisPorFase(d, inv);
   // 27/11 (Rúben: «adicionar novas tarefas … ver em destaque o que falta, link para ver o detalhe»): os materiais das tarefas novas (e
-  // das de materiais mudados à mão) que ainda não estão garantidos, por tarefa, em cima de tudo, com o passo seguinte de cada um
+  // das de materiais mudados à mão), por tarefa, em cima de tudo, com o passo seguinte de cada um
   const novos = materiaisDasTarefasNovas(d, inv), F = emFalta(novos), RF = resumoFalta(d, novos);
   const garantidosNovos = novos.length - F.length;
-  const porTarefa = [...new Set(F.map((x) => x.ti))].map((i) => ({ ti: i, L: F.filter((x) => x.ti === i) })).sort((a, b) => p.tasks[a.ti].dia - p.tasks[b.ti].dia);
-  // os equipamentos de aluguer que uma tarefa nova pede fora dos dias em que já estavam alugados (para as tarefas do contrato) também
-  // entram no destaque: é mais um aluguer a tratar (não há reserva de aluguer no sistema; fica a pergunta no resumo de 27/11)
+  const porTarefa = [...new Set(novos.map((x) => x.ti))].map((i) => ({ ti: i, L: novos.filter((x) => x.ti === i) })).sort((a, b) => p.tasks[a.ti].dia - p.tasks[b.ti].dia);
+  // 27/11 (Rúben: «novo equipamento funciona tal como o step de materiais»): o equipamento que as tarefas novas pedem fora dos dias em que
+  // já estava na obra, por receber até alguém o dar como recebido
+  const EQ = equipamentosDasTarefasNovas(p), eqFalta = EQ.filter((e) => !e.recebido);
   const E = equipamentosDaObra(p), nomesNovas = new Set(p.tasks.filter((t) => t.nova).map((t) => t.nome));
-  const alugarNovos = E.filter((e) => e.origem === "Aluguer").flatMap((e) => {
-    const ts = p.tasks.filter((t) => e.tarefas.includes(t.nome) && t.exec?.estado !== "validada"), velhas = ts.filter((t) => !t.nova);
-    const ini = Math.min(...velhas.map((t) => t.dia)), fim = Math.max(...velhas.map((t) => t.dia + t.dur));
-    const fora = ts.filter((t) => t.nova && (!velhas.length || t.dia < ini || t.dia + t.dur > fim));
-    return fora.length ? [{ ...e, tarefas: fora.map((t) => t.nome), dia: Math.min(...fora.map((t) => t.dia)), fim: Math.max(...fora.map((t) => t.dia + t.dur)) }] : [];
-  });
+  const temFalta = F.length > 0 || eqFalta.length > 0;
+  const [verGarantidos, setVerGarantidos] = useState(false);
+  // 27/11 (teste): o botão «Recebido» (RECEBIDO_DE_TESTE), para quem planeia
+  const podeReceber = RECEBIDO_DE_TESTE && podeNeg(S.role, "obra.planear");
   const todos = G.flatMap((g) => g.itens), ok = todos.filter((m) => OK_MAT.has(m.estado)).length;
   const planeia = podeNeg(S.role, "obra.planear");
   const [ti, setTi] = useState<number | null>(null);
@@ -411,14 +411,15 @@ export function MateriaisDaObra({ ctx, d, dias = [], abrir, irAba, realce }: { c
   const quandoE = (k: number) => (dias[k] ? dataCurta(dias[k]) : `dia ${k + 1}`);
   return (
     <div className="space-y-6">
-      {(F.length > 0 || alugarNovos.length > 0) && (
-        <section aria-label="Falta para as tarefas novas" className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50/60 p-4 dark:border-amber-800 dark:bg-amber-950/20">
+      {(novos.length > 0 || EQ.length > 0) && (
+        <section aria-label={temFalta ? "Falta para as tarefas novas" : "Tudo garantido para as tarefas novas"}
+          className={cn("space-y-3 rounded-2xl border p-4", temFalta ? "border-amber-300 bg-amber-50/60 dark:border-amber-800 dark:bg-amber-950/20" : "border-success/40 bg-success/[0.06]")}>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex min-w-0 items-start gap-3">
-              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" aria-hidden="true" />
+              {temFalta ? <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" aria-hidden="true" /> : <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-success" aria-hidden="true" />}
               <div className="min-w-0">
-                <p className="text-sm font-semibold">Falta para as tarefas novas</p>
-                <p className="text-sm text-muted-foreground">{[RF.frase, alugarNovos.length ? `${alugarNovos.length} ${alugarNovos.length === 1 ? "equipamento" : "equipamentos"} a alugar` : "", garantidosNovos ? `${garantidosNovos} já ${garantidosNovos === 1 ? "garantido" : "garantidos"}` : ""].filter(Boolean).join(" · ")}</p>
+                <p className="text-sm font-semibold">{temFalta ? "Falta para as tarefas novas" : "Tudo garantido para as tarefas novas"}</p>
+                <p className="text-sm text-muted-foreground">{[RF.frase, eqFalta.length ? `${eqFalta.length} ${eqFalta.length === 1 ? "equipamento" : "equipamentos"} por receber` : "", garantidosNovos + EQ.length - eqFalta.length ? `${garantidosNovos + EQ.length - eqFalta.length} já ${garantidosNovos + EQ.length - eqFalta.length === 1 ? "garantido" : "garantidos"}` : ""].filter(Boolean).join(" · ")}</p>
               </div>
             </div>
             {/* o passo seguinte: encomendar o que ainda não foi a nenhuma encomenda (o caminho de sempre: a encomenda de ajuste) */}
@@ -427,11 +428,12 @@ export function MateriaisDaObra({ ctx, d, dias = [], abrir, irAba, realce }: { c
                 <Package className="mr-1.5 h-4 w-4" aria-hidden="true" />Encomendar {RF.porEncomendar === 1 ? "1 material" : `${RF.porEncomendar} materiais`}
               </Button>
             )}
+            {!temFalta && <Button type="button" variant="ghost" className="min-h-10 rounded-full" aria-expanded={verGarantidos} onClick={() => setVerGarantidos((x) => !x)}>{verGarantidos ? "Esconder" : "Ver"}</Button>}
           </div>
           {RF.porEncomendar > 0 && !RF.podeEncomendar && (
             <p className="text-sm text-muted-foreground">{d.obra.ec ? "A encomenda de cliente desta obra não está no Inventário: estes materiais pedem-se lá, à mão." : "Saem com a encomenda de cliente, quando o pagamento for validado."}</p>
           )}
-          <ul className="space-y-2">
+          {(temFalta || verGarantidos) && <ul className="space-y-2">
             {porTarefa.map(({ ti: i, L }) => {
               const t = p.tasks[i], cor = COR_FASE[t.fase ?? 1], Ic = iconeDaTarefa(t.nome);
               return (
@@ -446,16 +448,20 @@ export function MateriaisDaObra({ ctx, d, dias = [], abrir, irAba, realce }: { c
                   </div>
                   <ul>
                     {L.map((x, k) => {
-                      const l = link(x), tarde = !!(x.chega && dias[t.dia] && x.chega > isoDe(dias[t.dia]));
+                      const l = x.estado === "garantido" ? null : link(x), tarde = !!(x.chega && dias[t.dia] && x.chega > isoDe(dias[t.dia]));
                       return (
                         <li key={k} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2 last:border-b-0">
                           <span className="min-w-0 flex-1 text-sm"><b className="font-medium">{x.n}</b> <span className="text-muted-foreground">· {nfmt(x.q)} {x.un}</span>
                             {tarde && <span className="block text-xs font-medium text-destructive">Chega a {x.chega!.slice(8, 10)}/{x.chega!.slice(5, 7)}, depois de a tarefa começar</span>}
                           </span>
                           <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", tarde ? "bg-destructive/10 text-destructive" : TOM_NOVO[x.estado])}>
-                            {x.estado === "a chegar" && x.chega ? `chega a ${x.chega.slice(8, 10)}/${x.chega.slice(5, 7)}` : x.estado === "espera adenda" && x.adenda ? `à espera da ${x.adenda} paga` : ROTULO_MAT_NOVO[x.estado]}
+                            {x.recebido ? "recebido" : x.estado === "a chegar" && x.chega ? `chega a ${x.chega.slice(8, 10)}/${x.chega.slice(5, 7)}` : x.estado === "espera adenda" && x.adenda ? `à espera da ${x.adenda} paga` : ROTULO_MAT_NOVO[x.estado]}
                           </span>
                           {l && <button type="button" onClick={l.fn} className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-full px-2 text-xs font-medium text-primary hover:bg-primary/[0.08]">{l.rot}<ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button>}
+                          {podeReceber && x.estado !== "garantido" && (
+                            <button type="button" aria-label={`Recebido: ${x.n}`} title="Teste: dá o material como recebido (fica garantido)" onClick={() => run(() => A.recebidoTeste(d.id, i, x.n, x.ec))}
+                              className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-full border border-input bg-card px-3 text-xs font-medium hover:border-success hover:text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Recebido</button>
+                          )}
                         </li>
                       );
                     })}
@@ -463,14 +469,26 @@ export function MateriaisDaObra({ ctx, d, dias = [], abrir, irAba, realce }: { c
                 </li>
               );
             })}
-            {alugarNovos.map((e) => (
-              <li key={e.n} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-card px-3 py-2 text-sm ring-1 ring-border">
-                <Wrench className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                <span className="min-w-0 flex-1"><b className="font-medium">{e.n}</b> <span className="text-muted-foreground">· aluguer{e.de ? ` a ${e.de}` : ""} · {e.tarefas.map(nomeCurtoTarefa).join(", ")}</span></span>
-                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">alugar de {quandoE(e.dia)} a {quandoE(e.fim - 1)}</span>
+            {EQ.length > 0 && (
+              <li role="group" aria-label="Equipamento das tarefas novas" className="overflow-hidden rounded-xl bg-card ring-1 ring-border">
+                <p className="flex items-center gap-2 border-b border-border px-3 py-2 text-sm font-semibold"><Wrench className="h-4 w-4 text-muted-foreground" aria-hidden="true" />Equipamento</p>
+                <ul>
+                  {EQ.map((e) => (
+                    <li key={e.n} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2 text-sm last:border-b-0">
+                      <span className="min-w-0 flex-1"><b className="font-medium">{e.n}</b> <span className="text-muted-foreground">· {e.origem === "Aluguer" ? `aluguer${e.de ? ` a ${e.de}` : ""}` : "do armazém"} · {e.tarefas.map((k) => nomeCurtoTarefa(p.tasks[k].nome)).join(", ")}</span></span>
+                      <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", e.recebido ? TOM_NOVO.garantido : "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200")}>
+                        {e.recebido ? "recebido" : `por receber · ${quandoE(e.dia)}${e.fim - 1 > e.dia ? ` a ${quandoE(e.fim - 1)}` : ""}`}
+                      </span>
+                      {podeReceber && !e.recebido && (
+                        <button type="button" aria-label={`Recebido: ${e.n}`} title="Teste: dá o equipamento como recebido na obra" onClick={() => run(() => e.tarefas.forEach((k) => A.recebidoTeste(d.id, k, e.n)))}
+                          className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-full border border-input bg-card px-3 text-xs font-medium hover:border-success hover:text-success"><Check className="h-3.5 w-3.5" aria-hidden="true" />Recebido</button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               </li>
-            ))}
-          </ul>
+            )}
+          </ul>}
           {RF.porEncomendar > 0 && RF.podeEncomendar && <p className="text-xs text-muted-foreground">Ao encomendar, o que houver no armazém fica reservado; o resto vai ao fornecedor, por aprovar no Inventário. As tarefas esperam pela chegada.</p>}
         </section>
       )}
@@ -545,8 +563,8 @@ export function MateriaisDaObra({ ctx, d, dias = [], abrir, irAba, realce }: { c
                     <span className="block text-sm font-medium">{e.n}{nova && <span className="ml-1.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">tarefa nova</span>}</span>
                     <span className="block text-xs text-muted-foreground">{quandoE(e.dia)}{e.fim - 1 > e.dia ? ` a ${quandoE(e.fim - 1)}` : ""} · {e.tarefas.map(nomeCurtoTarefa).join(", ")}</span>
                   </span>
-                  <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", e.origem === "Aluguer" ? "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200" : "bg-muted text-muted-foreground")}>
-                    {e.origem === "Aluguer" ? `aluguer${e.de ? ` · ${e.de}` : ""}` : e.origem === "Frota" ? "Frota" : "armazém"}
+                  <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", EQ.some((x) => x.n === e.n && x.recebido) ? TOM_NOVO.garantido : e.origem === "Aluguer" ? "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200" : "bg-muted text-muted-foreground")}>
+                    {e.origem === "Aluguer" ? `aluguer${e.de ? ` · ${e.de}` : ""}` : e.origem === "Frota" ? "Frota" : "armazém"}{EQ.some((x) => x.n === e.n && x.recebido) ? " · recebido para a tarefa nova" : ""}
                   </span>
                 </li>
               );
@@ -671,11 +689,20 @@ export function EquipaDaObra({ ctx, d, dias, abrirOutra, novaPara, abrir }: {
   const hoje = p.estado === "em curso" ? p.dia : 0;
   const janela = dias.slice(hoje, hoje + 10);
   const [passar, setPassar] = useState<string | null>(null);
+  const [pedirEquipa, setPedirEquipa] = useState(false);
   return (
     <div className="space-y-3">
+      {/* 27/11 (Rúben: «equipas pré-customizadas, e não técnicos isolados; customizar equipas e associar à obra»): as equipas primeiro */}
+      <EquipasNaObra ctx={ctx} d={d} pedirEquipa={pedirEquipa} fecharPedido={() => setPedirEquipa(false)} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold">Quem está nesta obra e o que tem por fazer</p>
-        {planeia && <Button type="button" variant="outline" className="min-h-10 rounded-full" onClick={() => novaPara(null)}><Plus className="mr-1.5 h-4 w-4" aria-hidden="true" />Juntar uma pessoa</Button>}
+        {planeia && (
+          <div className="flex flex-wrap gap-2">
+            {/* 27/11 (Rúben: «junta uma pessoa, mas falta o botão de juntar uma equipa»): a equipa vem com a distribuição proposta */}
+            <Button type="button" className="min-h-10 rounded-full" onClick={() => setPedirEquipa(true)}><Users className="mr-1.5 h-4 w-4" aria-hidden="true" />Juntar uma equipa</Button>
+            <Button type="button" variant="outline" className="min-h-10 rounded-full" onClick={() => novaPara(null)}><Plus className="mr-1.5 h-4 w-4" aria-hidden="true" />Juntar uma pessoa</Button>
+          </div>
+        )}
       </div>
       {pessoas.map((tec) => {
         const ts = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.tec === tec);
