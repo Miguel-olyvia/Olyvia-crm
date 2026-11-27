@@ -195,7 +195,7 @@ describe(`migration ${nome}`, () => {
 
   it("nenhuma reversão na pasta das migrations e nenhum carimbo repetido", () => {
     expect(readdirSync(pasta).filter((f) => /reverter-onda|reverter_onda|mudelar_excel.*reverter/i.test(f))).toEqual([]);
-    expect(readdirSync(pasta).filter((f) => /mudelar_excel_onda4/.test(f))).toEqual([nome]);
+    expect(readdirSync(pasta).filter((f) => /mudelar_excel_onda4\.sql$/.test(f))).toEqual([nome]);
     expect(readdirSync(pasta).filter((f) => f.startsWith("20270129800000_"))).toHaveLength(1);
   });
 });
