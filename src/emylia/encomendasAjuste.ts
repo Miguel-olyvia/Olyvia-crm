@@ -59,6 +59,10 @@ export function desfazerAjusteReal(d: Negocio, linhas: readonly LinhaAjusteReal[
   }
 }
 
+/** 27/11: os materiais novos podem encomendar-se já? A encomenda de cliente está no Inventário (ref) ou, na Olyvia, é a da base (contrato).
+ *  Sem nenhuma das duas (antes do pagamento, ou a obra de exemplo), saem com a encomenda inicial. Para o botão «Encomendar» do Estúdio. */
+export const ajusteDisponivel = (d: Negocio): boolean => !d.perdido && (!!d.obra.ec?.ref || (!!pedirReal && !!d.obra.ec?.contrato));
+
 /** As tarefas cujos materiais se encomendam à parte: as novas (do validador ou de uma adenda) e as do orçamento com materiais mudados à mão. */
 export const contaParaAjuste = (t: Tarefa): boolean => !!t.mats && (!!t.nova || !!t.encomendado);
 

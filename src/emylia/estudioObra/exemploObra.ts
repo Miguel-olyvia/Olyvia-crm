@@ -8,6 +8,7 @@ import { fotoExemplo } from "../obraOps";
 import { guardarBase } from "../ajustesPlano";
 import { gerarEncCliente } from "../preparacaoObra";
 import { PROJETO_EXEMPLO } from "@/pages/prototipo-estudio/exemploEstudio";
+import { emitirNoInventario, idEcNegocio, pedidoDoNegocio, refNegocio } from "../inventario/ponteNegocios";
 
 export const ID_EXEMPLO_OBRA = 1027;
 export const INICIO_EXEMPLO = "2026-11-04";
@@ -60,4 +61,19 @@ export function obraDeExemplo(): { S: Estado; d: Negocio } {
   if (!d.f.estudio) d.f.estudio = JSON.stringify({ ...PROJETO_EXEMPLO, nome: d.nome, negocio: d.id });
   (d.obra.chat ??= []).push({ de: "cliente", quem: d.nome, t: "Bom dia! Amanhã chegam a que horas? Tenho de sair às 10h.", q: "ter 10/11 08:47" });
   return { S, d };
+}
+
+/** 27/11: a encomenda de cliente da obra de exemplo também no Inventário (só em memória: o Inventário do protótipo não grava no
+ *  localStorage), para as tarefas novas se encomendarem pelo caminho de sempre (a encomenda de ajuste EC-1027-A1: reserva do stock e, do
+ *  que faltar, encomenda ao fornecedor, por aprovar). Os testes e o protótipo com «?inventario» usam-na; sem ela, a obra de exemplo
+ *  fica como estava (os materiais com o estado escrito à mão). Devolve se a encomenda está no Inventário. */
+export function encomendaDeExemploNoInventario(d: Negocio): boolean {
+  const ec = d.obra.ec;
+  if (!ec) return false;
+  if (ec.ref) return true;
+  const n0 = ec.n;
+  ec.ref = refNegocio(d); ec.n = idEcNegocio(d);
+  const r = emitirNoInventario(pedidoDoNegocio(d, ec));
+  if (!r.ok) { delete ec.ref; ec.n = n0; return false; }
+  return true;
 }

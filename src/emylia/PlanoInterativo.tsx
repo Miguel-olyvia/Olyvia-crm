@@ -233,6 +233,8 @@ export function NovaTarefa({ ctx, d, fechar, inicial, porque }: {
             <div>
               <p className="mb-2 text-[15px]">Materiais <span className="text-sm text-muted-foreground">· da receita do serviço</span></p>
               <EditorMateriais mats={mats ?? materiaisDoServico(sid!, q)} mudar={setMats} />
+              {/* 27/11 (Rúben: «novas tarefas podem ter de gerar novas encomendas de fornecedor»): o que acontece aos materiais, antes de juntar */}
+              {(mats ?? materiaisDoServico(sid!, q)).length > 0 && d.obra.ec && <p className="mt-2 text-sm text-muted-foreground">Ao juntar, o que houver no armazém fica reservado e o resto vai ao fornecedor. O que faltar fica em destaque no separador Materiais.</p>}
             </div>
           </>
         )}
