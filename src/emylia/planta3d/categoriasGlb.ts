@@ -8,7 +8,8 @@
 //    editáveis no painel da peça; ficam em `opc.gen` da peça.
 // Sem React nem three: o gerador (Node) e o visualizador usam a mesma tabela.
 // Os 7 genéricos novos (categoriasGlbNovas.ts: tampo de WC, lava-loiça, máquina de roupa, termoacumulador, aplique, garrafeira, acessório) entram
-// no fim da tabela; os GLB deles são gerados por scripts/gerar-modelos-glb-novos.mjs (o gerador dos 28 não está neste ramo).
+// no fim da tabela; os GLB deles são gerados por scripts/gerar-modelos-glb-novos.mjs (o gerador dos que vieram antes não está neste ramo).
+// 27/11: cama, secretária, sofá e mesa saíram (nenhum produto vivo os usava: ver genericosSemSobras.test.ts); o tipo continua e cai no desenho aproximado.
 // Uma parte que o GLB de uma categoria antiga não tem (os pés do móvel de lavatório) constrói-se em tempo de execução (modelosHtml/glb.ts).
 import type { TipoMockup } from "./catalogo3d";
 import { CATEGORIAS_GLB_NOVAS } from "./categoriasGlbNovas";
@@ -240,20 +241,6 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
     ],
   },
   {
-    id: "cama", rotulo: "Cama", tipos: ["cama"], opcoes: [{ id: "cabeceira", rotulo: "Com cabeceira", tipo: "sim", omissao: true }],
-    partes: [
-      caixa("estrado", "corpo", ({ w, d }) => ({ pos: [0, 0.15, 0], esc: [w, 0.3, d] })),
-      { nome: "colchao", forma: "caixaR", mat: "branco", colocar: ({ w, d }) => ({ pos: [0, 0.39, 0.01], esc: [w - 0.04, 0.2, d - 0.04] }) },
-      { nome: "almofada_1", forma: "caixaR", mat: "interior", colocar: ({ w, d }) => ({ pos: [-w / 4, 0.53, -d / 2 + 0.2], esc: [w / 2 - 0.08, 0.1, 0.3] }) },
-      { nome: "almofada_2", forma: "caixaR", mat: "interior", colocar: ({ w, d }) => ({ pos: [w / 4, 0.53, -d / 2 + 0.2], esc: [w / 2 - 0.08, 0.1, 0.3] }) },
-      caixa("cabeceira", "corpo", ({ w, d, h }) => ({ pos: [0, max(0.9, h) / 2, -d / 2 - 0.03], esc: [w + 0.04, max(0.9, h), 0.06] }), (p) => sim(p, "cabeceira")),
-      // o edredão (dois terços da cama, a cair um pouco dos lados) com três pregas simples, e os pés
-      { nome: "edredao", forma: "caixaR", mat: "interior", colocar: ({ w, d }) => ({ pos: [0, 0.46, d * 0.16], esc: [w + 0.02, 0.06, d * 0.68] }) },
-      ...[0, 1, 2].map((i) => caixa(`prega_${i + 1}`, "interior", ({ w, d }) => ({ pos: [0, 0.495, d * (-0.1 + i * 0.18)], esc: [w - 0.06, 0.012, 0.03] }))),
-      ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], i) => caixa(`pe_${i + 1}`, "escuro", ({ w, d }) => ({ pos: [sx * (w / 2 - 0.06), 0.02, sz * (d / 2 - 0.06)], esc: [0.05, 0.04, 0.05] }))),
-    ],
-  },
-  {
     id: "roupeiro", rotulo: "Roupeiro", tipos: ["roupeiro"],
     opcoes: [{ id: "correr", rotulo: "Portas de correr", tipo: "sim", omissao: (_t, n) => /correr/i.test(n) }],
     partes: [
@@ -266,43 +253,6 @@ const CATEGORIAS_COZINHA: CategoriaGlb[] = [
       // rodapé escuro e o friso horizontal das portas (a meio da altura, como os roupeiros com maleiro)
       caixa("rodape", "escuro", ({ w, d }) => ({ pos: [0, 0.01, d / 2 - 0.02], esc: [w - 0.01, 0.02, 0.01] })),
       naFrente("friso", "escuro", ({ w, h }) => [0, h * 0.82, w - 0.01, 0.004], 0.019),
-    ],
-  },
-  {
-    id: "secretaria", rotulo: "Secretária", tipos: ["secretaria"], opcoes: [{ id: "gavetas", rotulo: "Com bloco de gavetas", tipo: "sim", omissao: true }],
-    partes: [
-      caixa("tampo", "corpo", ({ w, d, h }) => ({ pos: [0, h - 0.015, 0], esc: [w, 0.03, d] })),
-      ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], i) => caixa(`perna_${i + 1}`, "metal", ({ w, d, h }) => ({ pos: [sx * (w / 2 - 0.03), (h - 0.03) / 2, sz * (d / 2 - 0.03)], esc: [0.04, h - 0.03, 0.04] }))),
-      caixa("gavetas", "corpo", ({ w, d, h }) => ({ pos: [w / 2 - 0.25, h - 0.03 - 0.3, 0], esc: [0.4, 0.6, d - 0.1] }), (p) => sim(p, "gavetas")),
-      // três frentes de gaveta com puxador, e uma gaveta fina sob o tampo
-      ...[0, 1, 2].map((i) => caixa(`gaveta_${i + 1}`, "corpo", ({ w, d, h }) => ({ pos: [w / 2 - 0.25, h - 0.03 - 0.1 - i * 0.2, (d - 0.1) / 2 + 0.009], esc: [0.39, 0.19, 0.018] }), (p) => sim(p, "gavetas"))),
-      ...[0, 1, 2].map((i) => caixa(`puxador_${i + 1}`, "metal", ({ w, d, h }) => ({ pos: [w / 2 - 0.25, h - 0.03 - 0.06 - i * 0.2, (d - 0.1) / 2 + 0.025], esc: [0.12, 0.012, 0.014] }), (p) => sim(p, "gavetas"))),
-      caixa("gaveta_tampo", "corpo", ({ w, d, h }) => ({ pos: [-0.1, h - 0.06, d / 2 - 0.05], esc: [min(0.5, w * 0.4), 0.05, 0.02] })),
-    ],
-  },
-  {
-    id: "sofa", rotulo: "Sofá", tipos: ["sofa"], opcoes: [{ id: "bracos", rotulo: "Com braços", tipo: "sim", omissao: true }],
-    partes: [
-      { nome: "base", forma: "caixaR", mat: "corpo", colocar: ({ w, d }) => ({ pos: [0, 0.22, 0.05], esc: [w, 0.3, d - 0.1] }) },
-      // o assento e o encosto ficam por baixo das almofadas (caixas simples); as almofadas são as arredondadas
-      caixa("assento", "corpo", ({ w, d }) => ({ pos: [0, 0.4, 0.08], esc: [w - 0.4, 0.06, d - 0.3] })),
-      caixa("encosto", "corpo", ({ w, d, h }) => ({ pos: [0, (0.2 + h) / 2, -d / 2 + 0.08], esc: [w, h - 0.2, 0.16] })),
-      ...[0, 1, 2].map((i): ParteGlb => ({ nome: `almofada_assento_${i + 1}`, forma: "caixaR", mat: "corpo", colocar: ({ w, d }) => { const l = (w - 0.4) / 3; return { pos: [-(w - 0.4) / 2 + l * (i + 0.5), 0.47, 0.06], esc: [l - 0.01, 0.12, d - 0.32] }; } })),
-      ...[0, 1, 2].map((i): ParteGlb => ({ nome: `almofada_costas_${i + 1}`, forma: "caixaR", mat: "corpo", colocar: ({ w, d, h }) => { const l = (w - 0.4) / 3; return { pos: [-(w - 0.4) / 2 + l * (i + 0.5), 0.53 + (h - 0.53) / 2, -d / 2 + 0.22], esc: [l - 0.01, h - 0.55, 0.14], rot: [-0.18, 0, 0] }; } })),
-      ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], i) => caixa(`pe_${i + 1}`, "escuro", ({ w, d }) => ({ pos: [sx * (w / 2 - 0.08), 0.035, sz * (d / 2 - 0.08)], esc: [0.04, 0.07, 0.04] }))),
-      { nome: "braco_esq", forma: "caixaR", mat: "corpo", ver: (p) => sim(p, "bracos"), colocar: ({ w, d }) => ({ pos: [-w / 2 + 0.1, 0.32, 0.03], esc: [0.2, 0.5, d - 0.06] }) },
-      { nome: "braco_dir", forma: "caixaR", mat: "corpo", ver: (p) => sim(p, "bracos"), colocar: ({ w, d }) => ({ pos: [w / 2 - 0.1, 0.32, 0.03], esc: [0.2, 0.5, d - 0.06] }) },
-    ],
-  },
-  {
-    id: "mesa", rotulo: "Mesa", tipos: ["mesa"], opcoes: [{ id: "redonda", rotulo: "Tampo redondo", tipo: "sim", omissao: false }],
-    partes: [
-      caixa("tampo", "corpo", ({ w, d, h }) => ({ pos: [0, h - 0.02, 0], esc: [w, 0.04, d] }), (p) => p.o.redonda !== true),
-      { nome: "tampo_redondo", forma: "cilindro", mat: "corpo", ver: (p) => p.o.redonda === true, colocar: ({ w, d, h }) => ({ pos: [0, h - 0.02, 0], esc: [w, 0.04, d] }) },
-      // o aro (a travessa por baixo do tampo) e o chanfro (uma faixa mais clara na aresta)
-      caixa("aro", "corpo", ({ w, d, h }) => ({ pos: [0, h - 0.07, 0], esc: [w - 0.12, 0.06, d - 0.12] }), (p) => p.o.redonda !== true),
-      caixa("chanfro", "interior", ({ w, d, h }) => ({ pos: [0, h - 0.042, 0], esc: [w - 0.01, 0.004, d - 0.01] }), (p) => p.o.redonda !== true),
-      ...[[-1, -1], [1, -1], [-1, 1], [1, 1]].map(([sx, sz], i) => caixa(`perna_${i + 1}`, "corpo", ({ w, d, h, o }) => { const k = o.redonda === true ? 0.3 : 0.5; return { pos: [sx * (w * k - 0.05), (h - 0.04) / 2, sz * (d * k - 0.05)], esc: [0.05, h - 0.04, 0.05] }; })),
     ],
   },
   {

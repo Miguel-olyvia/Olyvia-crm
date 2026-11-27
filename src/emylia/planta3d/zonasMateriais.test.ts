@@ -2,19 +2,21 @@
 // cena de caixas com os nomes das partes (o que o GLB tem), sem WebGL: o que se vê no ecrã está nas capturas.
 import * as THREE from "three";
 import { describe, expect, it, vi } from "vitest";
-import { categoriaPorId } from "./categoriasGlb";
+import { categoriaPorId, type CategoriaGlb } from "./categoriasGlb";
+import { MESA_TESTE, SOFA_TESTE } from "./__fixtures__/categoriasDeTeste";
 import { montarGenerico } from "./modelosHtml/glb";
 import { COR_REALCE, aplicarAparenciaDasZonas, aplicarRealceDasZonas, criarMateriaisDeZona } from "./zonasMateriais";
 import type { ZonasDoProduto } from "./zonasGlb";
 
 /** Uma cena como a do GLB da categoria: um nó por parte, com o nome e o material (userData.material), todos caixas unitárias. */
-function cenaDe(id: string): THREE.Group {
-  const c = categoriaPorId(id)!, cena = new THREE.Group();
+function cenaDe(c: CategoriaGlb): THREE.Group {
+  const cena = new THREE.Group();
   for (const p of c.partes) { const m = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1)); m.name = p.nome; m.userData.material = p.mat; cena.add(m); }
   return cena;
 }
-const montar = (id: string, o: Record<string, string | boolean> = {}, cor = "#cccccc") => {
-  const c = categoriaPorId(id)!, m = montarGenerico(cenaDe(id), c, { w: 0.8, d: 0.45, h: 0.5, o }, cor);
+/** `id`: um genérico da lista; ou uma receita de teste (a mesa e o sofá, que saíram da lista a 27/11: já nenhum genérico real tem partes `corpo` nas zonas tampo redondo, pés e estofo). */
+const montar = (id: string | CategoriaGlb, o: Record<string, string | boolean> = {}, cor = "#cccccc") => {
+  const c = typeof id === "string" ? categoriaPorId(id)! : id, m = montarGenerico(cenaDe(c), c, { w: 0.8, d: 0.45, h: 0.5, o }, cor);
   return { c, m, zm: criarMateriaisDeZona(m.grupo, c) };
 };
 const noDe = (g: THREE.Object3D, nome: string) => g.getObjectByName(nome) as THREE.Mesh;
@@ -45,14 +47,14 @@ describe("criarMateriaisDeZona: um material por zona", () => {
     expect(mat(m.grupo, "corpo")).toBe(zm.porZona.get("corpo"));
   });
   it("a mesa: corpo (o aro), tampo e pés (as pernas)", () => {
-    const { m, zm } = montar("mesa");
+    const { m, zm } = montar(MESA_TESTE);
     expect([...zm.porZona.keys()].sort()).toEqual(["corpo", "pes", "tampo"]);
     expect(mat(m.grupo, "perna_1")).toBe(zm.porZona.get("pes"));
     expect(mat(m.grupo, "perna_4")).toBe(zm.porZona.get("pes"));
     expect(mat(m.grupo, "tampo")).toBe(zm.porZona.get("tampo"));
   });
   it("o sofá: as almofadas são o estofo; a base, o assento e os braços são o corpo", () => {
-    const { m, zm } = montar("sofa");
+    const { m, zm } = montar(SOFA_TESTE);
     expect(mat(m.grupo, "almofada_assento_1")).toBe(zm.porZona.get("estofo"));
     expect(mat(m.grupo, "almofada_costas_2")).toBe(zm.porZona.get("estofo"));
     expect(mat(m.grupo, "base")).toBe(zm.porZona.get("corpo"));
@@ -83,7 +85,7 @@ describe("aplicarAparenciaDasZonas: a cor, a foto e o realce de cada zona", () =
     expect(frente.color.getHexString()).toBe("ffffff");
   });
   it("uma zona sem aparência (ou com a foto ainda a carregar) fica na cor base; outra zona com hex leva o hex", () => {
-    const { m, zm } = montar("mesa");
+    const { m, zm } = montar(MESA_TESTE);
     aplicarAparenciaDasZonas(zm.porZona, { corBase: "#cccccc", zonas: { porZona: true, zonas: { tampo: { atributo: "Cor do tampo", cor: "#ff0000" }, pes: { atributo: "Cor dos pés", textura: { url: "u:ainda-nao", ladoCm: 40 } } } }, texturas: texs });
     expect(mat(m.grupo, "tampo").color.getHexString()).toBe("ff0000");
     expect(mat(m.grupo, "tampo").map).toBeNull();
@@ -206,7 +208,7 @@ describe("criarMateriaisDeZona: uma parte que o grupo não tem", () => {
     const c = categoriaPorId("movel_lavatorio")!;
     const falta = c.partes.find((p) => p.nome === "frente_baixo")!;
     const montarSem = () => {
-      const m = montarGenerico(cenaDe("movel_lavatorio"), c, { w: 0.8, d: 0.45, h: 0.5, o: {} }, "#cccccc");
+      const m = montarGenerico(cenaDe(c), c, { w: 0.8, d: 0.45, h: 0.5, o: {} }, "#cccccc");
       m.grupo.getObjectByName(falta.nome)?.removeFromParent();
       return { m, zm: criarMateriaisDeZona(m.grupo, c) };
     };

@@ -92,7 +92,7 @@ describe("CampoModelo3D", () => {
     const nomes = screen.getAllByRole("option").map((o) => o.textContent);
     expect(nomes).toContain("Sanita de chão");
     expect(nomes).toContain("Sanita suspensa");
-    expect(nomes).not.toContain("Cama");
+    expect(nomes).not.toContain("Roupeiro");
     expect(Array.from(lista.querySelectorAll('li[role="presentation"]')).map((x) => x.textContent)).toEqual(["Casa de banho"]);
   });
 

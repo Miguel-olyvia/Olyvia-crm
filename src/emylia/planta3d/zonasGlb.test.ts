@@ -44,12 +44,12 @@ describe("zonaDaParte: a zona vem da `zona` explícita ou, senão, do nome está
   });
 });
 
-/** O resumo de TODAS as partes das 35 receitas: «categoria:parte:material». Foi tirado do código ANTES desta fase e prova que nenhum nome de parte nem de material mudou. */
+/** O resumo de TODAS as partes das 31 receitas (35 até 27/11, quando a cama, a secretária, o sofá e a mesa saíram): «categoria:parte:material». Foi tirado do código ANTES desta fase e prova que nenhum nome de parte nem de material mudou. */
 const resumo = CATEGORIAS_GLB.flatMap((c) => c.partes.map((p) => `${c.id}:${p.nome}:${p.mat}`)).join("|");
 const fnv1a = (s: string): string => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; } return h.toString(16); };
 
-describe("as 35 receitas: as zonas cobrem tudo e nada do que existe mudou", () => {
-  it("são 35 categorias", () => { expect(CATEGORIAS_GLB).toHaveLength(35); });
+describe("as 31 receitas: as zonas cobrem tudo e nada do que existe mudou", () => {
+  it("são 31 categorias", () => { expect(CATEGORIAS_GLB).toHaveLength(31); });
   it("nenhuma parte de material `corpo` fica sem zona", () => {
     const sem = CATEGORIAS_GLB.flatMap((c) => c.partes.filter((p) => p.mat === "corpo" && !zonaDaParte(p, c.id)).map((p) => `${c.id}:${p.nome}`));
     expect(sem).toEqual([]);
@@ -70,9 +70,9 @@ describe("as 35 receitas: as zonas cobrem tudo e nada do que existe mudou", () =
     expect(z("corpo")).toBe("corpo"); expect(z("porta_esq")).toBe("frente"); expect(z("gaveta_2")).toBe("frente"); expect(z("puxador_porta")).toBe("puxadores"); expect(z("tampo")).toBe("tampo"); expect(z("rodape")).toBe("pes");
   });
 });
-// preenchido a seguir à primeira corrida, contra o código sem zonas
-const NUMERO_DE_PARTES = 448;
-const HASH_DAS_PARTES = "9ac198b7";
+// preenchido a seguir à primeira corrida, contra o código sem zonas; 27/11: 399 partes (448 menos as 49 dos quatro genéricos tirados)
+const NUMERO_DE_PARTES = 399;
+const HASH_DAS_PARTES = "86db871d"; // 27/11: = o hash das 35 (9ac198b7) sem a cama, a secretária, o sofá e a mesa (provado contra o ficheiro antigo)
 
 /* ------------------------------------------------------------------ os atributos de cor */
 const op = (id: string, foto: string | null, hex: string | null = null) => ({ id, valor: id, nome: id, hex, foto, ordem: 1 });
@@ -211,13 +211,15 @@ describe("zonasDoModelo: as zonas que o modelo tem (só as que se pintam), com o
   });
   it("a ordem é a das zonas (frente, corpo, tampo, puxadores, pés, estofo)", () => {
     expect(ZONAS).toEqual(["frente", "corpo", "tampo", "puxadores", "pes", "estofo"]);
-    const z = zonasDoModelo(modelo("mesa")).map((x) => x.zona);
+    const z = zonasDoModelo(modelo("modulo_base")).map((x) => x.zona);
     expect(z).toEqual(ZONAS.filter((x) => z.includes(x)));
   });
-  it("a mesa tem corpo (o aro), tampo e pés (as pernas)", () => {
-    const z = zonasDoModelo(modelo("mesa", { largura: 120, comprimento: 80, espessura: 75 }));
-    expect(z.map((x) => x.zona)).toEqual(["corpo", "tampo", "pes"]);
-    expect(z.find((x) => x.zona === "pes")?.partes).toBe(4);
+  it("o módulo base de cozinha tem frente (as portas) e corpo; o tampo, o rodapé e os puxadores têm material fixo e não se pintam", () => {
+    const z = zonasDoModelo(modelo("modulo_base", { largura: 60, comprimento: 58, espessura: 80 }));
+    expect(z.map((x) => x.zona)).toEqual(["frente", "corpo"]);
+  });
+  it("a mesa tirada (27/11, sem produtos) já não tem genérico, e um modelo sem genérico não tem zonas", () => {
+    expect(zonasDoModelo(modelo("mesa", { largura: 120, comprimento: 80, espessura: 75 }))).toEqual([]);
   });
   it("um modelo sem genérico (o desenho aproximado) não tem zonas", () => {
     const m = modelo("movel_lavatorio");

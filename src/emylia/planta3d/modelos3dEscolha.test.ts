@@ -14,7 +14,7 @@ describe("a lista dos modelos escolháveis", () => {
   });
 
   it("traz todos os genéricos de CATEGORIAS_GLB, com o rótulo da categoria", () => {
-    expect(CATEGORIAS_GLB.length).toBeGreaterThanOrEqual(35);
+    expect(CATEGORIAS_GLB.length).toBeGreaterThanOrEqual(31);
     for (const c of CATEGORIAS_GLB) {
       const m = MODELOS_ESCOLHA.find((x) => x.id === c.id);
       expect(m, `falta o genérico ${c.id}`).toBeDefined();
@@ -174,8 +174,8 @@ describe("com o nível do Modelo: produto > modelo > subcategoria > categoria > 
     expect(resolverDoNo({ arvore: ARV, no: "s1", modelo: { nome: "SMOOTH", modelo: "bide" } })).toEqual({ modelo: "bide", origem: "modelo", de: "SMOOTH" });
   });
   it("resolverDoNo: o produto manda sobre o Modelo; soHerdado ignora o produto mas não o Modelo", () => {
-    expect(resolverDoNo({ produto: "mesa", arvore: ARV, no: "s1", modelo: { nome: "SMOOTH", modelo: "bide" } })).toEqual({ modelo: "mesa", origem: "produto", de: null });
-    expect(resolverDoNo({ produto: "mesa", arvore: ARV, no: "s1", modelo: { nome: "SMOOTH", modelo: "bide" }, soHerdado: true })).toEqual({ modelo: "bide", origem: "modelo", de: "SMOOTH" });
+    expect(resolverDoNo({ produto: "prateleira", arvore: ARV, no: "s1", modelo: { nome: "SMOOTH", modelo: "bide" } })).toEqual({ modelo: "prateleira", origem: "produto", de: null });
+    expect(resolverDoNo({ produto: "prateleira", arvore: ARV, no: "s1", modelo: { nome: "SMOOTH", modelo: "bide" }, soHerdado: true })).toEqual({ modelo: "bide", origem: "modelo", de: "SMOOTH" });
   });
   it("resolverDoNo: um Modelo sem escolha (ou sem Modelo) herda da árvore como antes", () => {
     expect(resolverDoNo({ arvore: ARV, no: "s1", modelo: { nome: "SMOOTH", modelo: null } })).toEqual({ modelo: "sanita", origem: "subcategoria", de: "Sanitas" });

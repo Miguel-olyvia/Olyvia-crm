@@ -1,7 +1,7 @@
 // Os 7 genéricos NOVOS para os produtos que hoje ficam sem modelo (quadro «subcategoria → modelo genérico 3D», 23/11): tampo de WC, lava-loiça
 // de encastrar, máquina de roupa, termoacumulador/esquentador, aplique LED, garrafeira e acessório pequeno de parede.
 //
-// LIGADOS À APP (aprovados pelo dono, 23/11): CATEGORIAS_GLB (categoriasGlb.ts) junta-os no fim, depois dos 28, para nada do que já casava mudar;
+// LIGADOS À APP (aprovados pelo dono, 23/11): CATEGORIAS_GLB (categoriasGlb.ts) junta-os no fim, depois dos 28 de então (hoje 24: a cama, a secretária, o sofá e a mesa saíram a 27/11), para nada do que já casava mudar;
 // o classificador (catalogo3d.ts) põe as medidas de omissão de cada um (`medidasDeOmissaoNovas`); os GLB estão em
 // public/modelos3d/genericos/<id>.glb, gerados por scripts/gerar-modelos-glb-novos.mjs a partir desta tabela. Todos são `soComProduto`: só os
 // escolhe um produto do catálogo (pelo nome); as peças sem nome (antigas, do Estúdio, das famílias) não mudam. Os tipos usados (`bancada`,

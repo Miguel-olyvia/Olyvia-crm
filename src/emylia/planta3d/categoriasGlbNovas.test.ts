@@ -59,10 +59,10 @@ const parte = (c: CategoriaGlb, nome: string) => {
 const omissoes = (id: string, t: TipoMockup, nome: string) => opcoesComOmissao(cat(id), t, {}, nome);
 
 describe("genéricos novos: estrutura", () => {
-  it("são os 7 pedidos, com ids únicos e sem colidir com os 28 que já existem (ligados no fim da tabela)", () => {
+  it("são os 7 pedidos, com ids únicos e sem colidir com os 24 que já existem (ligados no fim da tabela)", () => {
     expect(CATEGORIAS_GLB_NOVAS.map((c) => c.id)).toEqual(IDS);
     const antigos = new Set(CATEGORIAS_GLB.filter((c) => !CATEGORIAS_GLB_NOVAS.includes(c)).map((c) => c.id));
-    expect(antigos.size).toBe(28);
+    expect(antigos.size).toBe(24);
     for (const id of IDS) expect(antigos.has(id)).toBe(false);
     expect(CATEGORIAS_GLB.slice(-7)).toEqual(CATEGORIAS_GLB_NOVAS);
   });

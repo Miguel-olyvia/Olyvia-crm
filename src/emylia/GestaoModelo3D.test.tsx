@@ -161,11 +161,11 @@ describe("Categorias: Modelo 3D", () => {
     await abrir();
     fireEvent.click(screen.getByRole("button", { name: "Nova categoria" }));
     fireEvent.change(screen.getByLabelText("Nome da categoria"), { target: { value: "Nova" } });
-    escolherModelo("Cama");
+    escolherModelo("Roupeiro");
     fireEvent.click(screen.getByRole("button", { name: "Criar categoria" }));
     await waitFor(() => expect(chamadasDe("cat_definir_modelo_3d")).toHaveLength(1));
     expect(chamadasDe("cat_guardar_categoria_produto")[0].a).toEqual({ p_org: ORG, p_id: null, p_pai: null, p_nome: "Nova" });
-    expect(chamadasDe("cat_definir_modelo_3d")[0].a).toEqual({ p_org: ORG, p_alvo: "categoria", p_id: NOVO, p_modelo: "cama" });
+    expect(chamadasDe("cat_definir_modelo_3d")[0].a).toEqual({ p_org: ORG, p_alvo: "categoria", p_id: NOVO, p_modelo: "roupeiro" });
     // a ordem: primeiro cria, depois define
     const ordem = base.chamadas.map((c) => c.f);
     expect(ordem.indexOf("cat_guardar_categoria_produto")).toBeLessThan(ordem.indexOf("cat_definir_modelo_3d"));
@@ -198,7 +198,7 @@ describe("Categorias: Modelo 3D", () => {
     const anunciar = await abrir();
     fireEvent.click(screen.getByRole("button", { name: "Nova categoria" }));
     fireEvent.change(screen.getByLabelText("Nome da categoria"), { target: { value: "Nova" } });
-    escolherModelo("Cama");
+    escolherModelo("Roupeiro");
     fireEvent.click(screen.getByRole("button", { name: "Criar categoria" }));
     await waitFor(() => expect(anunciar).toHaveBeenCalledWith(expect.stringMatching(/Nova.*criada.*modelo 3D não ficou/s)));
     expect(screen.queryByLabelText("Nome da categoria")).toBeNull();

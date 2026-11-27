@@ -48,7 +48,7 @@ const GRUPO_DO_GENERICO: Readonly<Record<string, string>> = {
   espelho: G_BANHO, armario: G_BANHO, toalheiro: G_BANHO, torneira: G_BANHO, coluna_duche: G_BANHO, acessorio: G_BANHO,
   modulo_canto: G_COZINHA, modulo_base: G_COZINHA, armario_parede: G_COZINHA, coluna_cozinha: G_COZINHA, extrator: G_COZINHA, lava_loica: G_COZINHA, tampo_wc: G_COZINHA,
   frigorifico: G_ELETRO, forno: G_ELETRO, maquina_loica: G_ELETRO, maquina_roupa: G_ELETRO, termoacumulador: G_ELETRO, garrafeira: G_ELETRO, fogao: G_ELETRO,
-  cama: G_QUARTO, roupeiro: G_QUARTO, secretaria: G_QUARTO, sofa: G_QUARTO, mesa: G_QUARTO, prateleira: G_QUARTO, aplique: G_QUARTO,
+  roupeiro: G_QUARTO, prateleira: G_QUARTO, aplique: G_QUARTO,
 };
 
 const GENERICOS: ModeloEscolha[] = CATEGORIAS_GLB.map((c) => ({ id: c.id, rotulo: c.rotulo, grupo: GRUPO_DO_GENERICO[c.id] ?? G_OUTROS, familia: "generico" as const }));

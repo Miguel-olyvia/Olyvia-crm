@@ -152,18 +152,18 @@ describe("guardar os eixos", () => {
 describe("as ligações atributo → zona", () => {
   const ligacoes = [{ atributo: A_FRENTE, zona: "pes", aplicar: true }];
   const comLigacoes = { ...SEM, proprio: { eixos: null, ligacoes, orfas: 0 }, efectiva: { eixos: null, eixos_origem: "automatico", ligacoes, ligacoes_origem: "produto" } };
-  const MESA: AtributoProduto[] = [{ atributoId: A_MED, medida: { tipo: "3D", largura: 120, comprimento: 80, espessura: 75, unidade: "cm" } }, ATTRS[1], ATTRS[2]];
+  const MODULO: AtributoProduto[] = [{ atributoId: A_MED, medida: { tipo: "3D", largura: 120, comprimento: 80, espessura: 75, unidade: "cm" } }, ATTRS[1], ATTRS[2]];
   const zonasDe = (c: HTMLElement) => JSON.parse(c.getAttribute("data-zonas") || "{}") as { zonas: Record<string, { atributo: string }> };
 
   it("a ligação guardada manda sobre o nome: a «Cor da frente» pinta os pés e já não a frente", async () => {
     base.responder = (f) => (f === "cat_ler_config_3d" ? { data: comLigacoes, error: null } : { data: null, error: null });
-    const c = await abrir({ modelo: "mesa", attrs: MESA });
+    const c = await abrir({ modelo: "modulo_base", attrs: MODULO });
     await waitFor(() => expect(zonasDe(c).zonas.pes?.atributo).toBe("Cor da frente"));
     expect(zonasDe(c).zonas.corpo?.atributo).toBe("Cor do corpo");
   });
   it("mudar a ligação no painel muda o 3D logo (sem gravar) e só então «Guardar aspeto 3D» grava, uma vez, com os eixos do produto", async () => {
     base.responder = (f) => (f === "cat_ler_config_3d" ? { data: comLigacoes, error: null } : f === "cat_definir_config_3d" ? { data: { alvo: "produto", id: PID }, error: null } : { data: null, error: null });
-    const c = await abrir({ modelo: "mesa", attrs: MESA });
+    const c = await abrir({ modelo: "maquina_roupa", attrs: MODULO });
     await waitFor(() => expect(zonasDe(c).zonas.pes?.atributo).toBe("Cor da frente"));
     const grupo = screen.getByRole("group", { name: "Regra 1" });
     fireEvent.change(within(grupo).getByLabelText("Zona"), { target: { value: "tampo" } });
