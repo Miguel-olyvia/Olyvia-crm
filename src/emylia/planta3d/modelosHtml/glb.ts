@@ -14,6 +14,7 @@ import { V, nomearMateriais } from "./util";
 import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 import type { CategoriaGlb, FormaGlb, MaterialGlb, ParamsGenerico } from "../categoriasGlb";
 import { noDaParte } from "../noDaParte";
+import { validarGlb } from "../glbValidar";
 
 /** O interruptor único: `false` volta aos construtores procedurais em todo o lado (peças soltas e bancada). */
 export const USAR_GLB = true;
@@ -29,26 +30,44 @@ interface Entrada { promessa: Promise<void>; cena?: THREE.Group; erro?: unknown;
  *  cache para sempre (nenhuma peça chega a reter um GLB que falha, por isso nada a soltava): a peça ficava no modelo de reserva até recarregar. */
 export const TENTAR_GLB_APOS_MS = 5_000;
 const cache = new Map<string, Entrada>();
+/** Os URL dos GLB PRÓPRIOS (os que a empresa carrega): validam-se (validarGlb) antes de o carregador os ler. Os do próprio sítio (genéricos, modelos do HTML) não. */
+const validados = new Set<string>();
 let carregador: GLTFLoader | null = null;
 const obterCarregador = (): GLTFLoader => {
   if (!carregador) { carregador = new GLTFLoader(); carregador.setMeshoptDecoder(MeshoptDecoder); }
   return carregador;
 };
+/**
+ * 27/11: o GLB próprio vem do armazém de ficheiros e qualquer pessoa com `products.edit` pode lá pôr bytes quaisquer pela API (a validação do ecrã só corre no browser de quem carrega).
+ * O GLTFLoader segue os URI que o ficheiro mandar e faria pedidos externos em nome de quem abre a ficha; por isso pedem-se os bytes, corre-se `validarGlb` (autocontido, um bloco JSON e
+ * um binário, sem Draco, até 200 000 triângulos) e só então se lê, com `parse`, sem voltar a pedir nada.
+ */
+async function carregarValidado(url: string) {
+  const r = await fetch(url);
+  if (!r.ok) throw new Error(`GLB ${url}: ${r.status}`);
+  const dados = await r.arrayBuffer();
+  const rel = validarGlb(dados);
+  if (!rel.ok) throw new Error(`O GLB próprio não passou na validação: ${rel.erros.join(" ")}`);
+  return obterCarregador().parseAsync(dados, "");
+}
 function entradaDe(url: string): Entrada {
   const tida = cache.get(url);
   // a falha não fica para sempre: passado um bocado, a próxima peça volta a pedir o ficheiro (não logo: o React volta a desenhar a peça que
   // falhou uma vez antes de pôr a reserva, e um pedido novo a cada desenho seria um ciclo)
   if (tida && !(tida.erro !== undefined && Date.now() - (tida.falhouEm ?? 0) >= TENTAR_GLB_APOS_MS)) return tida;
   const nova: Entrada = { pecas: 0, promessa: Promise.resolve() };
-  nova.promessa = obterCarregador().loadAsync(url).then((g) => { nova.cena = g.scene; }, (e: unknown) => { nova.erro = e ?? new Error(`GLB ${url}`); nova.falhouEm = Date.now(); });
+  const abrir = validados.has(url) ? carregarValidado(url) : obterCarregador().loadAsync(url);
+  nova.promessa = abrir.then((g) => { nova.cena = g.scene; }, (e: unknown) => { nova.erro = e ?? new Error(`GLB ${url}`); nova.falhouEm = Date.now(); });
   cache.set(url, nova);
   return nova;
 }
 /**
  * A cena de um GLB para o Suspense do React: devolve-a (partilhada: montar com `montarModelo`, que clona) ou suspende enquanto carrega.
  * Um GLB que falhe lança o erro, para o ErrorBoundary pôr o construtor procedural no lugar.
+ * `validar`: é um GLB próprio (de fora): valida-se antes de o ler (ver carregarValidado). Fica marcado para o URL, também para `reterGlb`.
  */
-export function lerGlb(url: string): THREE.Group {
+export function lerGlb(url: string, opcoes: { validar?: boolean } = {}): THREE.Group {
+  if (opcoes.validar) validados.add(url);
   const e = entradaDe(url);
   if (e.erro) throw e.erro instanceof Error ? e.erro : new Error(`GLB ${url}: ${String(e.erro)}`);
   if (!e.cena) throw e.promessa;
@@ -67,6 +86,17 @@ export function semearGlb(chave: string, dados: ArrayBuffer): void {
   });
   cache.set(chave, nova);
 }
+/** As texturas (mapas) de um material: qualquer propriedade que seja uma textura (map, normalMap, emissiveMap…). */
+const texturasDe = (m: THREE.Material): THREE.Texture[] => Object.values(m).filter((v): v is THREE.Texture => (v as THREE.Texture | null)?.isTexture === true);
+/** Liberta o que a cena em cache prendeu na GPU: a geometria, os materiais e as texturas embebidas (as instâncias têm materiais clonados à parte e libertam-nos elas). */
+function libertarCena(cena: THREE.Object3D): void {
+  cena.traverse((o) => {
+    const m = o as THREE.Mesh;
+    m.geometry?.dispose();
+    const mats = m.material === undefined ? [] : Array.isArray(m.material) ? m.material : [m.material];
+    for (const mat of mats) { texturasDe(mat).forEach((t) => t.dispose()); mat.dispose(); }
+  });
+}
 /** Uma peça passou a usar o GLB (não o liberta enquanto houver peças). */
 export function reterGlb(url: string): void {
   const e = entradaDe(url);
@@ -81,8 +111,9 @@ export function soltarGlb(url: string, esperaMs = LIBERTAR_APOS_MS): void {
   if (e.pecas > 0) return;
   e.temporizador = setTimeout(() => {
     if (e.pecas > 0 || cache.get(url) !== e) return;
-    e.cena?.traverse((o) => (o as THREE.Mesh).geometry?.dispose());
+    if (e.cena) libertarCena(e.cena);
     cache.delete(url);
+    validados.delete(url);
   }, esperaMs);
 }
 /** Para os testes e as medições: quantos GLB estão em memória. */

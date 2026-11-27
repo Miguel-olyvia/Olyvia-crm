@@ -19,7 +19,7 @@ export interface ModeloProprioProps {
 
 export function useModeloProprio({ url, medidas, cor, textura }: ModeloProprioProps): ModeloProprioMontado {
   useEffect(() => { reterGlb(url); return () => soltarGlb(url); }, [url]);
-  const cena = lerGlb(url);
+  const cena = lerGlb(url, { validar: true });
   const invalidate = useThree((s) => s.invalidate);
   const w = medidas?.larguraM, p = medidas?.profundidadeM, h = medidas?.alturaM;
   const tex = textura?.tex, lado = textura?.ladoCm, tingir = textura?.tingir;

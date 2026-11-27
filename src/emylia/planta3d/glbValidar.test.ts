@@ -120,6 +120,112 @@ describe("validarGlb: autocontido, extensões e malhas", () => {
   });
 });
 
+/** Os blocos de um GLB (tipo e conteúdo), para os testes os reordenarem, duplicarem ou lhes juntarem bytes. */
+function blocosDe(glb: ArrayBuffer): { tipo: number; dados: Uint8Array }[] {
+  const v = new DataView(glb), u = new Uint8Array(glb), fim = v.getUint32(8, true), saida: { tipo: number; dados: Uint8Array }[] = [];
+  for (let p = 12; p + 8 <= fim;) { const n = v.getUint32(p, true); saida.push({ tipo: v.getUint32(p + 4, true), dados: u.slice(p + 8, p + 8 + n) }); p += 8 + n; }
+  return saida;
+}
+function montarGlb(blocos: { tipo: number; dados: Uint8Array }[], soltos = 0): ArrayBuffer {
+  const compr = 12 + blocos.reduce((s, b) => s + 8 + b.dados.length, 0) + soltos, saida = new ArrayBuffer(compr), v = new DataView(saida), u = new Uint8Array(saida);
+  v.setUint32(0, 0x46546c67, true); v.setUint32(4, 2, true); v.setUint32(8, compr, true);
+  let p = 12;
+  for (const b of blocos) { v.setUint32(p, b.dados.length, true); v.setUint32(p + 4, b.tipo, true); u.set(b.dados, p + 8); p += 8 + b.dados.length; }
+  return saida;
+}
+const JSON_T = 0x4e4f534a, BIN_T = 0x004e4942;
+const jsonCom = (glb: ArrayBuffer, mutar: (j: Record<string, unknown>) => void): { tipo: number; dados: Uint8Array } => {
+  const j = JSON.parse(new TextDecoder().decode(blocosDe(glb)[0]!.dados)) as Record<string, unknown>;
+  mutar(j);
+  const t = new TextEncoder().encode(JSON.stringify(j)), d = new Uint8Array((t.length + 3) & ~3).fill(0x20);
+  d.set(t);
+  return { tipo: JSON_T, dados: d };
+};
+
+describe("validarGlb: o carregador lê o ÚLTIMO bloco JSON e o último BIN, por isso só se aceita um de cada", () => {
+  it("recusa um GLB com dois blocos JSON (o segundo, com um URI externo, escaparia à validação do primeiro)", () => {
+    const base = glbDeTeste(), [json, bin] = blocosDe(base) as [{ tipo: number; dados: Uint8Array }, { tipo: number; dados: Uint8Array }];
+    const mau = jsonCom(base, (j) => { (j.buffers as { uri?: string }[])[0]!.uri = "https://exemplo.invalid/x.bin"; });
+    const r = validarGlb(montarGlb([json, bin, mau]));
+    expect(r.ok).toBe(false);
+    expect(r.erros.join(" ")).toMatch(/mais de um bloco JSON/);
+  });
+
+  it("recusa um GLB com dois blocos binários", () => {
+    const [json, bin] = blocosDe(glbDeTeste()) as [{ tipo: number; dados: Uint8Array }, { tipo: number; dados: Uint8Array }];
+    const r = validarGlb(montarGlb([json, bin, bin]));
+    expect(r.ok).toBe(false);
+    expect(r.erros.join(" ")).toMatch(/mais de um bloco binário/);
+  });
+
+  it("recusa o bloco binário antes do JSON (a ordem da especificação é JSON primeiro)", () => {
+    const [json, bin] = blocosDe(glbDeTeste()) as [{ tipo: number; dados: Uint8Array }, { tipo: number; dados: Uint8Array }];
+    const r = validarGlb(montarGlb([bin, json]));
+    expect(r.ok).toBe(false);
+    expect(r.erros.join(" ")).toMatch(/fora de ordem|JSON (tem de vir )?primeiro/);
+  });
+
+  it("recusa bytes soltos no fim do que o cabeçalho declara (o carregador tentaria lê-los como um bloco)", () => {
+    const blocos = blocosDe(glbDeTeste());
+    const r = validarGlb(montarGlb(blocos, 5));
+    expect(r.ok).toBe(false);
+    expect(r.erros.join(" ")).toMatch(/bytes a mais|corrompido|incompleto|truncado/i);
+  });
+
+  it("aceita um bloco de tipo desconhecido depois do binário (o carregador ignora-o), mas só um JSON e um BIN contam", () => {
+    const blocos = [...blocosDe(glbDeTeste()), { tipo: 0x12345678, dados: new Uint8Array(8) }];
+    expect(validarGlb(montarGlb(blocos)).ok).toBe(true);
+  });
+});
+
+describe("validarGlb: os triângulos contam-se como o 3D os desenha (uma vez por nó que usa a malha)", () => {
+  const nosRepetidos = (n: number) => (j: Record<string, unknown>) => {
+    j.nodes = Array.from({ length: n }, () => ({ mesh: 0 }));
+    (j.scenes as { nodes: number[] }[])[0]!.nodes = Array.from({ length: n }, (_, i) => i);
+  };
+
+  it("uma malha usada por 3 nós conta 3 vezes (150 000 x 3 passa os 200 000)", () => {
+    const r = validarGlb(glbDeTeste({ triangulos: 150_000, mutar: nosRepetidos(3) }));
+    expect(r.triangulos).toBe(450_000);
+    expect(r.ok).toBe(false);
+    expect(r.erros.join(" ")).toMatch(/200 000/);
+  });
+
+  it("a mesma malha em 2 nós dentro do limite passa, e o número é o dobro", () => {
+    const r = validarGlb(glbDeTeste({ triangulos: 60_000, mutar: nosRepetidos(2) }));
+    expect(r.triangulos).toBe(120_000);
+    expect(r.ok).toBe(true);
+  });
+
+  it("segue os filhos dos nós (um pai com a malha e dois filhos com a mesma malha)", () => {
+    const r = validarGlb(glbDeTeste({ triangulos: 12, mutar: (j) => {
+      j.nodes = [{ mesh: 0, children: [1, 2] }, { mesh: 0 }, { mesh: 0 }];
+      (j.scenes as { nodes: number[] }[])[0]!.nodes = [0];
+    } }));
+    expect(r.triangulos).toBe(36);
+  });
+
+  it("um ciclo nos nós não prende a validação (o nó que se repete na linha de descendência não volta a contar)", () => {
+    const r = validarGlb(glbDeTeste({ mutar: (j) => {
+      j.nodes = [{ mesh: 0, children: [1] }, { children: [0] }];
+      (j.scenes as { nodes: number[] }[])[0]!.nodes = [0];
+    } }));
+    expect(r.triangulos).toBe(12);
+  });
+
+  it("uma malha que nenhum nó da cena usa não se desenha e não conta (a cena vazia é um erro)", () => {
+    const r = validarGlb(glbDeTeste({ mutar: (j) => { j.nodes = []; (j.scenes as { nodes: number[] }[])[0]!.nodes = []; } }));
+    expect(r.triangulos).toBe(0);
+    expect(r.ok).toBe(false);
+    expect(r.erros.join(" ")).toMatch(/malha/);
+  });
+
+  it("um ficheiro sem cenas conta cada malha uma vez (como antes)", () => {
+    const r = validarGlb(glbDeTeste({ mutar: (j) => { delete j.scenes; delete j.scene; } }));
+    expect(r.triangulos).toBe(12);
+  });
+});
+
 describe("analisarGlb", () => {
   it("abre um GLB bom com o carregador do 3D e devolve o mesmo relatório", async () => {
     const r = await analisarGlb(glbDeTeste());

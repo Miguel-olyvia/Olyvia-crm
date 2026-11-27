@@ -60,6 +60,35 @@ function triangulosDaPrimitiva(p: Json, acessores: unknown[]): number {
   return modo === 4 ? Math.floor(n / 3) : Math.max(0, n - 2);
 }
 
+/** O tecto de visitas ao percorrer os nós (um grafo de nós partilhados pode crescer exponencialmente): acima disto o ficheiro recusa-se. */
+const MAX_VISITAS_NOS = 100_000;
+
+/**
+ * Os triângulos que o 3D desenha: o carregador cria uma malha POR NÓ que usa a malha do ficheiro (a geometria é partilhada, a contagem não), e só da cena por omissão. Percorre
+ * a cena a contar cada malha tantas vezes quantos os nós que a usam, sem seguir um nó que já está na sua própria linha de descendência (ciclo). Sem cenas (ficheiro mínimo) conta
+ * cada malha uma vez. Devolve null se o grafo de nós é grande de mais para se percorrer.
+ */
+function triangulosDaCena(json: Json, porMalha: number[]): number | null {
+  const cenas = lista(json.scenes), nos = lista(json.nodes);
+  const idx = typeof json.scene === "number" ? json.scene : 0;
+  const cena = cenas.length > 0 ? objeto(cenas[idx] ?? cenas[0]) : null;
+  if (!cena) return porMalha.reduce((s, n) => s + n, 0);
+  let total = 0, visitas = 0;
+  const naLinha = new Set<number>();
+  const visitar = (i: unknown): boolean => {
+    if (typeof i !== "number" || !Number.isInteger(i) || i < 0 || i >= nos.length || naLinha.has(i)) return true;
+    if (++visitas > MAX_VISITAS_NOS) return false;
+    const no = objeto(nos[i]);
+    if (typeof no.mesh === "number") total += porMalha[no.mesh] ?? 0;
+    naLinha.add(i);
+    for (const f of lista(no.children)) if (!visitar(f)) return false;
+    naLinha.delete(i);
+    return true;
+  };
+  for (const raiz of lista(cena.nodes)) if (!visitar(raiz)) return null;
+  return total;
+}
+
 /**
  * Valida o contentor e o JSON de um GLB. Nunca lança: tudo o que está mal vem em `erros` (em português); `ok` é «sem erros». Vários erros independentes juntam-se (o ficheiro
  * mostra de uma vez tudo o que tem de mudar), menos os do contentor, que impedem de ler o resto.
@@ -77,15 +106,27 @@ export function validarGlb(entrada: ArrayBuffer | Uint8Array): RelatorioGlb {
   if (declarado > bytes.byteLength) return recusar(r0, "O ficheiro está truncado (incompleto): volte a exportar o GLB.");
   const fim = Math.min(declarado, bytes.byteLength);
 
-  let json: Json | null = null, temBin = false;
-  for (let p = 12; p + 8 <= fim;) {
+  // 27/11: o GLTFLoader fica com o ÚLTIMO bloco JSON e o último BIN que encontra; se aqui se validasse o primeiro, um segundo bloco JSON (com um URI externo, por exemplo) escapava
+  // à validação e o carregador seguia-o. Por isso só se aceita UM bloco JSON (o primeiro, como manda a especificação) e UM binário; blocos de tipo desconhecido o carregador ignora.
+  const blocos: { tipo: number; ini: number; n: number }[] = [];
+  let p = 12;
+  for (; p + 8 <= fim;) {
     const n = v.getUint32(p, true), tipo = v.getUint32(p + 4, true);
     if (p + 8 + n > fim) return recusar(r0, "O ficheiro está truncado (incompleto): volte a exportar o GLB.");
-    if (tipo === BLOCO_JSON && json === null) {
-      try { json = objeto(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(p + 8, p + 8 + n)))); }
-      catch { return recusar(r0, "O JSON do GLB está corrompido: volte a exportar o ficheiro."); }
-    } else if (tipo === BLOCO_BIN) temBin = true;
+    blocos.push({ tipo, ini: p + 8, n });
     p += 8 + n;
+  }
+  // sobram bytes dentro do tamanho declarado, mas menos que um cabeçalho de bloco: o carregador tentaria lê-los como um bloco
+  if (p !== fim) return recusar(r0, "O ficheiro tem bytes a mais depois do último bloco (está corrompido): volte a exportar o GLB.");
+  const jsons = blocos.filter((b) => b.tipo === BLOCO_JSON), bins = blocos.filter((b) => b.tipo === BLOCO_BIN);
+  if (jsons.length > 1) return recusar(r0, "O GLB tem mais de um bloco JSON: volte a exportar o ficheiro.");
+  if (bins.length > 1) return recusar(r0, "O GLB tem mais de um bloco binário: volte a exportar o ficheiro.");
+  if (jsons.length === 1 && blocos[0]?.tipo !== BLOCO_JSON) return recusar(r0, "O GLB tem os blocos fora de ordem (o JSON tem de vir primeiro): volte a exportar o ficheiro.");
+  const temBin = bins.length === 1;
+  let json: Json | null = null;
+  if (jsons[0]) {
+    try { json = objeto(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(jsons[0].ini, jsons[0].ini + jsons[0].n)))); }
+    catch { return recusar(r0, "O JSON do GLB está corrompido: volte a exportar o ficheiro."); }
   }
   if (json === null) return recusar(r0, "O GLB não tem o bloco JSON: volte a exportar o ficheiro.");
   if (!String(objeto(json.asset).version ?? "").startsWith("2")) return recusar(r0, "O GLB não declara a versão 2 do glTF.");
@@ -108,9 +149,11 @@ export function validarGlb(entrada: ArrayBuffer | Uint8Array): RelatorioGlb {
 
   // malhas e triângulos
   const acessores = lista(json.accessors);
-  let triangulos = 0;
-  for (const m of malhas) for (const p of lista(objeto(m).primitives)) triangulos += triangulosDaPrimitiva(objeto(p), acessores);
-  if (malhas.length === 0 || triangulos === 0) erros.push("O GLB não tem nenhuma malha com triângulos para desenhar.");
+  const porMalha = malhas.map((m) => lista(objeto(m).primitives).reduce<number>((s, pr) => s + triangulosDaPrimitiva(objeto(pr), acessores), 0));
+  const daCena = triangulosDaCena(json, porMalha);
+  if (daCena === null) erros.push("O GLB tem uma hierarquia de nós demasiado grande para o 3D: simplifique a cena e volte a exportar.");
+  const triangulos = daCena ?? 0;
+  if (daCena !== null && (malhas.length === 0 || triangulos === 0)) erros.push("O GLB não tem nenhuma malha com triângulos para desenhar.");
   if (triangulos > MAX_TRIANGULOS) erros.push(`O modelo tem ${MIL(triangulos)} triângulos: o limite é ${MIL(MAX_TRIANGULOS)}. Simplifique a malha.`);
   else if (triangulos >= AVISO_TRIANGULOS) avisos.push(`O modelo tem ${MIL(triangulos)} triângulos (a partir de ${MIL(AVISO_TRIANGULOS)} pode ficar pesado no telemóvel).`);
 
