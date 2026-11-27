@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { lerEstadoGlb, limparEstadoGlb, registarEstadoGlb, useEstadoGlb } from "./estadoGlbProprio";
+import { lerEstadoGlb, limparEstadoGlb, registarEstadoGlb, registarFalhaGlb, useEstadoGlb } from "./estadoGlbProprio";
 
 const URL_A = "https://x.invalid/a.glb", URL_B = "https://x.invalid/b.glb";
 
@@ -25,6 +25,14 @@ describe("estadoGlbProprio: a nota do GLB fora do canvas", () => {
     expect(desenhos).toBe(depois);
     act(() => registarEstadoGlb(URL_A, { tipo: "ok" }));
     expect(result.current).toEqual({ tipo: "ok" });
+  });
+
+  it("uma falha do GLB regista a nota em português (rede, Draco, limite) e diz que se mostra o genérico", () => {
+    const { result } = renderHook(() => useEstadoGlb(URL_A));
+    act(() => registarFalhaGlb(URL_A, new TypeError("Failed to fetch")));
+    expect(result.current).toMatchObject({ tipo: "falhou", texto: expect.stringMatching(/carregar.*genérico/) });
+    act(() => registarFalhaGlb(URL_A, new Error("setDRACOLoader() must be called to load Draco compressed meshes")));
+    expect(result.current).toMatchObject({ tipo: "falhou", texto: expect.stringMatching(/Draco/) });
   });
 
   it("ao sair, o leitor limpa o estado: uma falha antiga não aparece da próxima vez", () => {

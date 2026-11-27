@@ -2,6 +2,7 @@
 // aparecer FORA dele (a pré-visualização do produto): um pequeno armazém por URL, lido com useSyncExternalStore. Quem desenha (ModeloProprio, a reserva do Visualizador3D)
 // escreve; quem mostra a nota lê. Sem three.
 import { useEffect, useSyncExternalStore } from "react";
+import { notaDeFalha } from "./modelo3dProprio";
 
 export type EstadoGlb = { tipo: "ok" } | { tipo: "aviso" | "falhou"; texto: string };
 
@@ -15,6 +16,10 @@ export function registarEstadoGlb(url: string, e: EstadoGlb): void {
   if (antes && antes.tipo === e.tipo && (antes.tipo === "ok" || (e.tipo !== "ok" && antes.texto === e.texto))) return;
   estados.set(url, e);
   avisar();
+}
+/** O GLB não abriu (rede, ficheiro, Draco, limite de triângulos): regista a nota em português, que diz também que se mostra o modelo genérico. */
+export function registarFalhaGlb(url: string, erro: unknown): void {
+  registarEstadoGlb(url, { tipo: "falhou", texto: notaDeFalha(erro) });
 }
 export function limparEstadoGlb(url: string): void {
   if (estados.delete(url)) avisar();
