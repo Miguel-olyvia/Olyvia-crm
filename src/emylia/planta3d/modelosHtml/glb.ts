@@ -54,6 +54,19 @@ export function lerGlb(url: string): THREE.Group {
   if (!e.cena) throw e.promessa;
   return e.cena;
 }
+/**
+ * 27/11: põe na cache um GLB que já está em memória (os bytes do ficheiro que a pessoa acabou de escolher), por uma chave que não é um URL de verdade: `lerGlb(chave)` passa a
+ * encontrá-lo sem pedir nada à rede (um `blob:` seria bloqueado pela CSP da aplicação, que não o tem no connect-src). Se a chave já existe, não faz nada; liberta-se como os outros.
+ */
+export function semearGlb(chave: string, dados: ArrayBuffer): void {
+  if (cache.has(chave)) return;
+  const nova: Entrada = { pecas: 0, promessa: Promise.resolve() };
+  nova.promessa = new Promise<void>((resolver) => {
+    const falhar = (e: unknown) => { nova.erro = e instanceof Error ? e : new Error(String((e as { message?: string })?.message ?? e)); nova.falhouEm = Date.now(); resolver(); };
+    try { obterCarregador().parse(dados, "", (g) => { nova.cena = g.scene; resolver(); }, falhar); } catch (e) { falhar(e); }
+  });
+  cache.set(chave, nova);
+}
 /** Uma peça passou a usar o GLB (não o liberta enquanto houver peças). */
 export function reterGlb(url: string): void {
   const e = entradaDe(url);
