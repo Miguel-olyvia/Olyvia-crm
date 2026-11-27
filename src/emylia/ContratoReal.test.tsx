@@ -137,6 +137,14 @@ describe("ContratoRealSo e o documento em «Tudo do negócio» (sem minuta gerad
     expect(await screen.findByText("Contrato assinado pelo cliente")).toBeTruthy();
     expect(screen.queryByText("Minuta gerada pela app")).toBeNull();
   });
+  it("sem PDF e sem minuta, não fala de minuta", async () => {
+    base([]);
+    definirModoReal("org-1", "Mudelar");
+    render(<ContratoRealSo numero={1017} />);
+    expect(await screen.findByText("Ainda não há o contrato assinado em PDF")).toBeTruthy();
+    expect(screen.queryByText(/minuta/i)).toBeNull();
+    expect(screen.getByRole("button", { name: "Anexar o contrato assinado (PDF)" })).toBeTruthy();
+  });
   it("a lista do negócio tem o contrato real quando a proposta foi aceite e não há minuta; não o repete quando há", async () => {
     const { documentosDoNegocio } = await import("./estudioObra/enviadosAoCliente");
     const n = (orc: Record<string, unknown>) => ({ id: 1017, orc, fin: {}, obra: {}, adendas: [], f: {} }) as unknown as Parameters<typeof documentosDoNegocio>[0];

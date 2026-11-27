@@ -25,7 +25,8 @@ export function useContratoReal(numero: number) {
   return org ? { org, estado, setEstado } : null;
 }
 
-export function ContratoRealBloco({ numero, cr }: { numero: number; cr: NonNullable<ReturnType<typeof useContratoReal>> }) {
+export function ContratoRealBloco({ numero, cr, semMinuta = false }: { numero: number; cr: NonNullable<ReturnType<typeof useContratoReal>>;
+  /** 27/11: sem minuta gerada pela app (a janela só tem o PDF) */ semMinuta?: boolean }) {
   const { org, estado, setEstado } = cr;
   const [url, setUrl] = useState<string | null>(null);
   const [erroPdf, setErroPdf] = useState<string | null>(null);
@@ -75,7 +76,7 @@ export function ContratoRealBloco({ numero, cr }: { numero: number; cr: NonNulla
     return (
       <section aria-label="Contrato assinado" className="space-y-2 rounded-2xl border border-dashed border-border bg-card p-4">
         <p className="text-[15px] font-semibold">Ainda não há o contrato assinado em PDF</p>
-        <p className="text-[15px] text-muted-foreground">Abaixo está a minuta que a app gerou. Anexe o contrato que o cliente assinou, para ficar aqui guardado. Só PDF, até 20 MB.</p>
+        <p className="text-[15px] text-muted-foreground">{semMinuta ? "" : "Abaixo está a minuta que a app gerou. "}Anexe o contrato que o cliente assinou, para ficar aqui guardado. Só PDF, até 20 MB.</p>
         {escolher}
         <Button type="button" variant="outline" disabled={aEnviar} onClick={() => ficheiro.current?.click()}>
           {aEnviar ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" aria-hidden="true" /> : <FileUp className="mr-1.5 h-4 w-4" aria-hidden="true" />}
@@ -146,5 +147,5 @@ export function ContratoRealEMinuta({ numero, cartao, folha }: { numero: number;
 export function ContratoRealSo({ numero }: { numero: number }) {
   const cr = useContratoReal(numero);
   if (!cr) return <p className="text-[15px] text-muted-foreground">O contrato assinado em PDF só existe numa organização real.</p>;
-  return <ContratoRealBloco numero={numero} cr={cr} />;
+  return <ContratoRealBloco numero={numero} cr={cr} semMinuta />;
 }
