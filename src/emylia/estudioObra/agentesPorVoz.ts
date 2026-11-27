@@ -26,12 +26,13 @@ const curto = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…
 const mesmoDia = (iso: string, agora: Date) => new Date(iso).toDateString() === agora.toDateString();
 
 /** As obras em curso ou aprovadas, com o que os agentes propõem e o que fizeram hoje. Vazio fora da página dos Negócios. */
-export function obrasParaVoz(agora = new Date(), c: CtxVoz | null = atual?.current ?? null): ObraVoz[] {
+export function obrasParaVoz(agora = new Date(), c: CtxVoz | null = atual?.current ?? null, so?: Set<number>): ObraVoz[] {
   if (!c) return [];
   const out: ObraVoz[] = [];
   for (const d of c.S.deals ?? []) {
     const p = d.obra?.plano;
     if (!p || d.perdido || (p.estado !== "em curso" && p.estado !== "aprovado")) continue;
+    if (so && !so.has(d.id)) continue;
     let L: ReturnType<typeof propostasDosAgentes> = [];
     try { L = propostasDosAgentes(d, c.S, ocupacaoDosTecnicos(c.S, d.id)); } catch { L = []; }
     const e = d.obra.agentes;

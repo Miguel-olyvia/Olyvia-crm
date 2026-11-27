@@ -16,7 +16,8 @@ import { lerEstadoVivo } from "../estadoVivo";
 import { gravarConhecimento, itensDoConhecimento } from "../conhecimentoOlyvia";
 
 /** 26/11: de quanto em quanto tempo a página dos Negócios atualiza a base de conhecimento da Olyvia (o servidor faz de 15 em 15 min). */
-export const CONHECIMENTO_MS = 10 * 60_000;
+// 27/11: de 30 em 30 min (era 10): com 30 obras, a base inteira leva ~2 s; o servidor vai pondo as obras em dia à vez
+export const CONHECIMENTO_MS = 30 * 60_000;
 let ultimoConhecimento = 0;
 /** Grava a base de conhecimento a partir do que a página tem carregado (só quem planeia obras; falhas não incomodam ninguém). */
 export async function atualizarConhecimento(ctx: Pick<Ctx, "S">, agora = Date.now()): Promise<boolean> {
@@ -28,10 +29,20 @@ export async function atualizarConhecimento(ctx: Pick<Ctx, "S">, agora = Date.no
 }
 
 export const VIGIA_INTERVALO_MS = 120000;
+/** 27/11: quantas obras vê cada volta da página, e a vez (roda pelas obras em curso e aprovadas). */
+export const OBRAS_POR_VOLTA_PAGINA = 4;
+let vezPagina = 0;
+export function proximasObras(S: Pick<Ctx["S"], "deals">): Set<number> {
+  const ativas = (S.deals ?? []).filter((d) => d.obra?.plano && !d.perdido && (d.obra.plano.estado === "em curso" || d.obra.plano.estado === "aprovado")).map((d) => d.id).sort((a, b) => a - b);
+  if (ativas.length <= OBRAS_POR_VOLTA_PAGINA) return new Set(ativas);
+  const ini = (vezPagina * OBRAS_POR_VOLTA_PAGINA) % ativas.length;
+  vezPagina++;
+  return new Set([...ativas, ...ativas].slice(ini, ini + OBRAS_POR_VOLTA_PAGINA));
+}
 export const VIGIA_PRIMEIRA_MS = 8000;
 
 /** Uma volta dos agentes por todas as obras em curso ou aprovadas. Devolve quantas propostas se aplicaram. */
-export function voltaDosAgentes(ctx: Pick<Ctx, "S" | "A" | "run">, agora = new Date()): number {
+export function voltaDosAgentes(ctx: Pick<Ctx, "S" | "A" | "run">, agora = new Date(), so?: Set<number>): number {
   const { S, A, run } = ctx;
   if (!podeNeg(S.role, "obra.planear")) return 0;
   let db: ReturnType<typeof lerInventario> | null = null;
@@ -40,6 +51,7 @@ export function voltaDosAgentes(ctx: Pick<Ctx, "S" | "A" | "run">, agora = new D
   for (const d of S.deals ?? []) {
     const p = d.obra?.plano;
     if (!p || d.perdido || (p.estado !== "em curso" && p.estado !== "aprovado")) continue;
+    if (so && !so.has(d.id)) continue;
     let L;
     try { L = propostasDosAgentes(d, S, ocupacaoDosTecnicos(S, d.id), db && d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null); } catch { continue; }
     const v = d.obra.agentes?.vistos ?? {}, ids = L.map((x) => x.id);
@@ -65,7 +77,9 @@ export function VigiaAgentes({ ctx }: { ctx: Ctx }) {
     if (!ativo) return;
     const volta = () => {
       if (typeof document !== "undefined" && document.hidden) return;
-      try { voltaDosAgentes(atual.current); } catch (e) { console.warn("agentes", e); }
+      // 27/11 (Rúben: «sinto o estúdio lento»): com 30 obras, uma volta a todas bloqueava a página ~1 s de 2 em 2 min; agora vê
+      // OBRAS_POR_VOLTA_PAGINA de cada vez, à vez (todas em ~15 min)
+      try { voltaDosAgentes(atual.current, new Date(), proximasObras(atual.current.S)); } catch (e) { console.warn("agentes", e); }
       void atualizarConhecimento(atual.current);
     };
     const t0 = window.setTimeout(volta, VIGIA_PRIMEIRA_MS);

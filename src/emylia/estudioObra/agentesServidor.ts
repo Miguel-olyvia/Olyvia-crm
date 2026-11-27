@@ -36,6 +36,9 @@ export function gestoresDaObra(d: Pick<Negocio, "f">): string[] {
   return [...out];
 }
 
+/** 27/11: quantas obras vê cada volta do servidor (o limite de processamento da função do Supabase). */
+export const OBRAS_POR_VOLTA = 8;
+
 export async function correrAgentesServidor(sb: SupabaseClient, org: string, agora = new Date()): Promise<ResumoAgentes> {
   const erros: string[] = [];
   definirRelogioReal(true);
@@ -70,8 +73,13 @@ export async function correrAgentesServidor(sb: SupabaseClient, org: string, ago
   const porNumero = new Map(lidos.map((n) => [n.linhas.negocio.numero, n]));
   const antes = new Map(S.deals.map((d) => [d.id, marcaObra(d)]));
   const A = acoes(S, () => {}, (fn) => fn());
-  const obras = S.deals.filter((d) => d.obra.plano && (d.obra.plano.estado === "em curso" || d.obra.plano.estado === "aprovado") && !d.perdido).length;
-  const aplicadas = voltaDosAgentes({ S, A, run: (fn) => fn() }, agora);
+  const ativas = S.deals.filter((d) => d.obra.plano && (d.obra.plano.estado === "em curso" || d.obra.plano.estado === "aprovado") && !d.perdido).map((d) => d.id).sort((a, b) => a - b);
+  const obras = ativas.length;
+  // 27/11 (com 30 obras em curso a função passou o limite do Supabase: WORKER_RESOURCE_LIMIT): cada volta trata um grupo de
+  // OBRAS_POR_VOLTA obras, à vez (de 15 em 15 min: cada obra é vista de hora a hora com 30 obras). A página (VigiaAgentes) vê todas.
+  const grupos = Math.max(1, Math.ceil(obras / OBRAS_POR_VOLTA)), vez = Math.floor(agora.getTime() / (15 * 60_000)) % grupos;
+  const so = new Set(ativas.slice(vez * OBRAS_POR_VOLTA, (vez + 1) * OBRAS_POR_VOLTA));
+  const aplicadas = voltaDosAgentes({ S, A, run: (fn) => fn() }, agora, so);
 
   // gravar só as obras que mudaram, e só se a base ainda tem o que se leu
   const mudadas = S.deals.filter((d) => marcaObra(d) !== antes.get(d.id));
@@ -100,6 +108,7 @@ export async function correrAgentesServidor(sb: SupabaseClient, org: string, ago
     for (const d of S.deals) {
       const p = d.obra?.plano;
       if (!p || d.perdido || (p.estado !== "em curso" && p.estado !== "aprovado")) continue;
+      if (!so.has(d.id)) continue;
       let L: ReturnType<typeof propostasDosAgentes> = [];
       try { L = decisoesAEsperar(propostasDosAgentes(d, S, ocupacaoDosTecnicos(S, d.id)), d.obra.agentes, agora); } catch { L = []; }
       if (!L.length) continue;
@@ -117,7 +126,8 @@ export async function correrAgentesServidor(sb: SupabaseClient, org: string, ago
   }
   // 26/11: a base de conhecimento da Olyvia (o chat e a voz leem-na de qualquer página), já com o que os agentes fizeram nesta volta
   let conhecimento = 0;
-  try { conhecimento = await gravarConhecimento(sb, org, itensDoConhecimento(S, agora, "servidor")); }
+  // 27/11: só as obras desta volta, sem apagar as outras (a página grava a base inteira)
+  try { conhecimento = await gravarConhecimento(sb, org, itensDoConhecimento(S, agora, "servidor", so), false); }
   catch (e) { erros.push(`Base de conhecimento: ${(e as Error).message}`); }
   return { org, obras, aplicadas, gravadas, adiadas, erros, conhecimento, avisos };
 }

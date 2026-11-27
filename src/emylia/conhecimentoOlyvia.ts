@@ -159,11 +159,13 @@ function itemNegocio(d: Negocio, S: Estado): ItemConhecimento {
 
 /** Tudo o que a base de conhecimento tem para esta organização, a partir dos negócios carregados.
  *  27/11: `origem` diz quem escreveu (o servidor de 15 em 15 min ou a página dos Negócios): o Cérebro mostra a última volta do servidor. */
-export function itensDoConhecimento(S: Estado, agora = new Date(), origem?: "servidor" | "pagina"): ItemConhecimento[] {
-  const obras = obrasParaVoz(agora, { S, A: null as never, run: (fn: () => void) => fn() });
+/** `so` (27/11, o servidor às voltas): só estes negócios, sem o resumo do dia (é parcial; grava-se sem apagar os outros). */
+export function itensDoConhecimento(S: Estado, agora = new Date(), origem?: "servidor" | "pagina", so?: Set<number>): ItemConhecimento[] {
+  const obras = obrasParaVoz(agora, { S, A: null as never, run: (fn: () => void) => fn() }, so);
   const porId = new Map(obras.map((o) => [o.id, o]));
   const out: ItemConhecimento[] = [...GUIA];
   for (const d of S.deals ?? []) {
+    if (so && !so.has(d.id)) continue;
     try {
       out.push(itemNegocio(d, S));
       const orc = itemOrcamento(d, S);
@@ -174,6 +176,7 @@ export function itensDoConhecimento(S: Estado, agora = new Date(), origem?: "ser
       if (o && d.obra?.plano) out.push(itemObra(d, o, agora, S));
     } catch { /* um negócio estragado não para a base */ }
   }
+  if (so) return out;
   const decisoes = obras.reduce((a, o) => a + o.propostas.filter((x) => x.modo === "pede").length, 0);
   const feitos = obras.reduce((a, o) => a + o.feitos.length, 0);
   const hora = agora.toTimeString().slice(0, 5);
@@ -184,8 +187,8 @@ export function itensDoConhecimento(S: Estado, agora = new Date(), origem?: "ser
 }
 
 /** Grava a base desta organização (o que já não existe sai). Devolve quantos itens ficaram. */
-export async function gravarConhecimento(sb: SupabaseClient, org: string, itens: ItemConhecimento[]): Promise<number> {
-  const { data, error } = await sb.rpc("olyvia_conhecimento_gravar" as never, { p_org: org, p_itens: itens, p_completo: true } as never);
+export async function gravarConhecimento(sb: SupabaseClient, org: string, itens: ItemConhecimento[], completo = true): Promise<number> {
+  const { data, error } = await sb.rpc("olyvia_conhecimento_gravar" as never, { p_org: org, p_itens: itens, p_completo: completo } as never);
   if (error) throw new Error(error.message || "A base de conhecimento não foi gravada.");
   return Number(data ?? 0);
 }
