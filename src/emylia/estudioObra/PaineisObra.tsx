@@ -563,7 +563,7 @@ export function MateriaisDaObra({ ctx, d, dias = [], abrir, irAba, realce }: { c
                     <span className="block text-xs text-muted-foreground">{quandoE(e.dia)}{e.fim - 1 > e.dia ? ` a ${quandoE(e.fim - 1)}` : ""} · {e.tarefas.map(nomeCurtoTarefa).join(", ")}</span>
                   </span>
                   <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", EQ.some((x) => x.n === e.n && x.recebido) ? TOM_NOVO.garantido : e.origem === "Aluguer" ? "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200" : "bg-muted text-muted-foreground")}>
-                    {e.origem === "Aluguer" ? `aluguer${e.de ? ` · ${e.de}` : ""}` : e.origem === "Frota" ? "Frota" : "armazém"}{EQ.some((x) => x.n === e.n && x.recebido) ? " · recebido" : ""}
+                    {e.origem === "Aluguer" ? `aluguer${e.de ? ` · ${e.de}` : ""}` : e.origem === "Frota" ? "Frota" : "armazém"}{EQ.some((x) => x.n === e.n && x.recebido) ? " · recebido para a tarefa nova" : ""}
                   </span>
                 </li>
               );
