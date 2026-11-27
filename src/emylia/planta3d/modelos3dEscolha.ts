@@ -91,17 +91,19 @@ export function resolverModelo3D(n: { produto?: string | null; modelo?: string |
 }
 
 /** O que a árvore do Catálogo (No, NoCat) tem de trazer: o `modelo3d` pode faltar (a migração ainda não está aplicada). */
-export interface NoComModelo { id: string; n: string; pai: string | null; modelo3d?: string | null }
-export interface NivelModelo { nome: string; modelo?: string | null }
+export interface NoComModelo { id: string; n: string; pai: string | null; modelo3d?: string | null; /** 27/11: o GLB próprio do nó (caminho no bucket); vence o `modelo3d` do mesmo nível */ glb?: string | null }
+export interface NivelModelo { nome: string; modelo?: string | null; /** 27/11: o GLB próprio deste nível (caminho no bucket catalogo-modelos3d); vence o `modelo` do mesmo nível */ glb?: string | null }
 
 /** O nível da subcategoria e o da categoria de um nó: um nó com pai é a subcategoria (o pai é a categoria); um nó de topo é a categoria. */
 export function niveisDoNo(arvore: readonly NoComModelo[], no: string | null | undefined): { subcategoria: NivelModelo | null; categoria: NivelModelo | null } {
   const n = no ? arvore.find((x) => x.id === no) : undefined;
   if (!n) return { subcategoria: null, categoria: null };
   const pai = n.pai ? arvore.find((x) => x.id === n.pai) : undefined;
-  if (!pai) return { subcategoria: null, categoria: { nome: n.n, modelo: n.modelo3d } };
-  return { subcategoria: { nome: n.n, modelo: n.modelo3d }, categoria: { nome: pai.n, modelo: pai.modelo3d } };
+  if (!pai) return { subcategoria: null, categoria: { nome: n.n, modelo: n.modelo3d, ...comGlb(n) } };
+  return { subcategoria: { nome: n.n, modelo: n.modelo3d, ...comGlb(n) }, categoria: { nome: pai.n, modelo: pai.modelo3d, ...comGlb(pai) } };
 }
+/** O GLB de um nó, só se o tem (assim, sem GLB, o nível fica exactamente como era). */
+const comGlb = (n: NoComModelo): { glb?: string } => (n.glb ? { glb: n.glb } : {});
 
 /** O modelo resolvido a partir dos níveis de cima (sem o produto), com o nome de onde vem. `modelo`: o Modelo do Catálogo a que o produto pertence (nome e escolha). */
 export function herdadoDe(n: { modelo?: NivelModelo | null; subcategoria?: NivelModelo | null; categoria?: NivelModelo | null }): ResolvidoNo {
@@ -119,6 +121,32 @@ export function resolverDoNo(o: { produto?: string | null; modelo?: NivelModelo 
   const proprio = o.soHerdado ? null : limpo(o.produto);
   return proprio ? { modelo: proprio, origem: "produto", de: null } : herdado;
 }
+
+/** De onde vem o GLB próprio que vale: o Modelo, a subcategoria ou a categoria; `de` é o nome dele. */
+export interface ResolvidoGlb { glb: string; origem: Exclude<OrigemModelo3D, "produto" | "automatico">; de: string | null }
+
+/**
+ * 27/11: o GLB PRÓPRIO que vale para um produto, se algum. A ordem é a do contrato do dono: escolha manual do produto (`produto`) > Modelo (GLB próprio > id escolhido) > subcategoria (GLB próprio >
+ * id) > categoria (GLB próprio > id) > automático. Em cada nível o GLB vence o id do MESMO nível; um id escolhido (e conhecido) num nível de cima vence o GLB de um nível de baixo; um id
+ * desconhecido herda, como em `resolverModelo3D`. Com a escolha manual do produto ou sem nenhum GLB: null, e quem desenha resolve só pelos ids, exactamente como antes.
+ */
+export function resolverGlbProprio(n: { produto?: string | null; modelo?: NivelModelo | null; subcategoria?: NivelModelo | null; categoria?: NivelModelo | null }): ResolvidoGlb | null {
+  if (limpo(n.produto)) return null;
+  for (const [origem, nivel] of [["modelo", n.modelo], ["subcategoria", n.subcategoria], ["categoria", n.categoria]] as const) {
+    if (!nivel) continue;
+    if (nivel.glb) return { glb: nivel.glb, origem, de: nivel.nome || null };
+    if (limpo(nivel.modelo)) return null;
+  }
+  return null;
+}
+
+/** O GLB próprio de um produto na árvore (os nós com `glb`) e, se o chamador o souber, no Modelo a que o produto pertence. */
+export function resolverGlbDoNo(o: { produto?: string | null; modelo?: NivelModelo | null; arvore: readonly NoComModelo[]; no: string | null | undefined }): ResolvidoGlb | null {
+  return resolverGlbProprio({ produto: o.produto, modelo: o.modelo, ...niveisDoNo(o.arvore, o.no) });
+}
+
+/** «Modelo 3D próprio (da subcategoria Bidés)»: o texto de quem manda quando o que se vê é um GLB próprio. */
+export const textoDoGlb = (r: ResolvidoGlb): string => `Modelo 3D próprio (${daOrigem(r.origem)}${r.de ? ` ${r.de}` : ""})`;
 
 /** «do modelo», «da subcategoria» ou «da categoria»: de onde vem o que se herda. */
 export const daOrigem = (origem: OrigemModelo3D): string => (origem === "modelo" ? "do modelo" : origem === "subcategoria" ? "da subcategoria" : "da categoria");

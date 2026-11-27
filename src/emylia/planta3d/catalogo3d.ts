@@ -50,6 +50,10 @@ export type ParamsMockup =
   | { k: "cozinha"; cfg: import("./composicaoCozinha").ComposicaoCozinha };
 export interface Mockup3D {
   tipo: TipoMockup; largura: number; profundidade: number; altura: number; cor: string; url?: string; material?: MaterialMockup; params?: ParamsMockup;
+  /** 27/11: `url` é um GLB PRÓPRIO da empresa (ModeloProprio.tsx): só dá a forma; escala pelas medidas do produto e leva a cor e a textura dele (modelo3dProprio.ts). Sem isto o `url` é o GLB por produto de sempre. */
+  proprio?: true;
+  /** 27/11: `cor` é a cor do produto (do atributo Cor), e não a de omissão do tipo: só então o GLB próprio é pintado com ela. */
+  corDoProduto?: true;
   /** o modelo genérico da categoria (categoriasGlb.ts), escolhido pelo tipo e pelo nome, com as omissões das opções que o nome dá */
   generico?: { id: string; o: Record<string, string | boolean> };
   /** 24/11: a foto da opção de cor (URL público e o lado em cm de cada repetição): o Visualizador3D aplica-a ao corpo da peça. Só a pré-visualização do produto a põe; sem ela, a cor lisa. */
@@ -341,7 +345,11 @@ function tipoDaEscolha(e: ModeloEscolha, auto: TipoMockup): TipoMockup {
 }
 
 /** `soGenericos`: nunca usa um modelo do catálogo 3D (HTML): só o genérico da categoria. Ausente (a planta, o Estúdio): como sempre. Só a pré-visualização da ficha o liga (previaProduto3d.ts). */
-export interface OpcoesModelo { soGenericos?: boolean }
+export interface OpcoesModelo {
+  soGenericos?: boolean;
+  /** 27/11: o URL público do GLB PRÓPRIO que vale para este produto (resolverGlbProprio em modelos3dEscolha.ts: Modelo, subcategoria ou categoria; a escolha manual do produto vence-o). Vale também com `soGenericos`: é uma escolha do dono. */
+  glbProprio?: string | null;
+}
 
 /**
  * O produto do catálogo mais o seu mockup 3D (paramétrico, com a dimensão real; `urls`: o GLB de cada produto, quando existir).
@@ -386,7 +394,7 @@ export function modeloDoProduto(p: ProdutoCat, arvore: readonly NoCat[] = [], ur
   if (cg && o && !p.dim) d = comMedidasDoGenerico(d, cg.id, o, p.n);
   // o resguardo de banheira é mais baixo do que o de duche, quando o nome não diz a altura
   if (tipo === "resguardo" && !d.deNome && /banheira|banera/.test(sem(p.n))) d = { ...d, alturaCm: ALTURA_RESGUARDO_BANHEIRA_CM };
-  const mockup3d: Mockup3D = { tipo, largura: d.larguraCm / 100, profundidade: d.profundidadeCm / 100, altura: d.alturaCm / 100, cor: e.cor, ...(params ? { params } : {}), ...(urls[p.id] ? { url: urls[p.id] } : {}),
+  const mockup3d: Mockup3D = { tipo, largura: d.larguraCm / 100, profundidade: d.profundidadeCm / 100, altura: d.alturaCm / 100, cor: e.cor, ...(params ? { params } : {}), ...(opcoes.glbProprio ? { url: opcoes.glbProprio, proprio: true as const } : urls[p.id] ? { url: urls[p.id] } : {}),
     ...(cg && o ? { generico: { id: cg.id, o } } : {}) };
   // o móvel de lavatório suspenso fica preso à parede, com o tampo a 85 cm do chão
   const suspenso = cg?.id === "movel_lavatorio" && o?.apoio === "suspenso";

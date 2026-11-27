@@ -48,6 +48,8 @@ export function zonaDaParte(parte: Pick<ParteGlb, "nome" | "mat" | "zona">, cate
  */
 export function zonasDoModelo(m: ProdutoModelo3D): { zona: ZonaGlb; partes: number }[] {
   const mk = m.mockup3d;
+  // 27/11: um GLB próprio não tem as zonas do genérico (a cor e a textura do produto aplicam-se-lhe de uma vez, modelo3dProprio.ts)
+  if (mk.proprio) return [];
   if (!USAR_GLB_GENERICOS || temGeometriaPropria(mk.params) || mk.params?.k === "cozinha") return [];
   const c = categoriaPorId(mk.generico?.id) ?? categoriaDoTipo(m.tipo);
   if (!c) return [];

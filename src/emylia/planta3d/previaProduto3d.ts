@@ -133,6 +133,8 @@ export interface EntradaPrevia {
   zonas?: ZonasDoProduto;
   /** 26/11: só genéricos (por omissão `PREVIA_SO_GENERICOS`); `false` repõe os modelos do HTML (os testes fixam os dois lados). */
   soGenericos?: boolean;
+  /** 27/11: o URL público do GLB próprio que vale para o produto (resolverGlbProprio, modelos3dEscolha.ts); vale também com `soGenericos` (é uma escolha do dono). Sem ele, tudo como antes. */
+  glbProprio?: string | null;
 }
 const ID_PREVIA = "previa-produto";
 
@@ -146,16 +148,18 @@ export function tipoDaPrevia({ nome, sub, no, arvore, modelo3d, soGenericos = PR
  * medida dos atributos por cima da do nome (repartida pelo tipo que o classificador deu; o que ela não diz vem do nome ou das omissões do tipo) e a cor do
  * atributo Cor, que o classificador não lê.
  */
-export function modeloParaPrevia({ nome, sub, no, arvore, medida, cor, textura, modelo3d, eixos, zonas, soGenericos = PREVIA_SO_GENERICOS }: EntradaPrevia): ProdutoModelo3D {
+export function modeloParaPrevia({ nome, sub, no, arvore, medida, cor, textura, modelo3d, eixos, zonas, soGenericos = PREVIA_SO_GENERICOS, glbProprio }: EntradaPrevia): ProdutoModelo3D {
   const p = { id: ID_PREVIA, n: nome.trim(), sub: sub?.trim() || undefined, no, ...(modelo3d ? { modelo3d } : {}) };
-  let m = modeloDoProduto(p, arvore, {}, { soGenericos });
+  const opcoes = { soGenericos, ...(glbProprio ? { glbProprio } : {}) };
+  let m = modeloDoProduto(p, arvore, {}, opcoes);
   const medidas = medida ? dimensoesDaMedida(m.tipo, medida, p.n, eixos) : null;
   if (medidas) {
     const d = m.dimensoes;
-    m = modeloDoProduto({ ...p, dim: [medidas.larguraCm ?? d.larguraCm, medidas.profundidadeCm ?? d.profundidadeCm, medidas.alturaCm ?? d.alturaCm] }, arvore, {}, { soGenericos });
+    m = modeloDoProduto({ ...p, dim: [medidas.larguraCm ?? d.larguraCm, medidas.profundidadeCm ?? d.profundidadeCm, medidas.alturaCm ?? d.alturaCm] }, arvore, {}, opcoes);
   }
   if (!cor && !textura && !zonas) return m;
-  return { ...m, mockup3d: { ...m.mockup3d, ...(cor ? { cor } : {}), ...(textura ? { textura } : {}), ...(zonas ? { zonas } : {}) } };
+  // 27/11: com um GLB próprio, a cor do produto vai marcada: só então o GLB é pintado com ela (a de omissão do tipo não conta)
+  return { ...m, mockup3d: { ...m.mockup3d, ...(cor ? { cor, ...(glbProprio ? { corDoProduto: true as const } : {}) } : {}), ...(textura ? { textura } : {}), ...(zonas ? { zonas } : {}) } };
 }
 
 /**
