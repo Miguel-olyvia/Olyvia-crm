@@ -162,6 +162,16 @@ describe("ModeloGlbDialogo: validar o ficheiro logo ao escolher", () => {
     expect(screen.getByText(/largado\.glb/)).toBeInTheDocument();
   });
 
+  it("depois de ler o ficheiro esvazia o campo, para escolher outra vez o MESMO nome (reexportado) voltar a validar", async () => {
+    montar();
+    const c = campo(), limpar = vi.fn();
+    Object.defineProperty(c, "value", { configurable: true, get: () => "", set: limpar });
+    fireEvent.change(c, { target: { files: [ficheiro("armario.glb")] } });
+    await waitFor(() => expect(dados.analisar).toHaveBeenCalled());
+    expect(limpar).toHaveBeenCalledWith("");
+    expect(screen.getByText(/armario\.glb/)).toBeInTheDocument();
+  });
+
   it("escolher um segundo ficheiro vale mais do que a validação lenta do primeiro", async () => {
     const resolvers: ((v: unknown) => void)[] = [];
     dados.analisar.mockImplementation(() => new Promise((r) => { resolvers.push(r); }));

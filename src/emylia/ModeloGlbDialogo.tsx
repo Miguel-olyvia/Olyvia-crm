@@ -134,7 +134,7 @@ export function ModeloGlbDialogo({ org, nivel, id, nome, atual, usados, aoTermin
           className={cn("grid gap-2 rounded-xl border border-dashed p-3 transition-colors", arrastar ? "border-primary bg-primary/5" : "border-foreground/40 bg-card")}>
           <label htmlFor={`${base}-ficheiro`} className="text-[15px] font-medium">Ficheiro GLB</label>
           <input ref={campo} id={`${base}-ficheiro`} type="file" accept=".glb,model/gltf-binary" aria-describedby={descrito} aria-invalid={erros.length > 0 ? true : undefined}
-            onChange={(e) => { void escolher(e.target.files?.[0] ?? null); }}
+            onChange={(e) => { const f = e.target.files?.[0] ?? null; e.target.value = ""; void escolher(f); }}
             className="block w-full rounded-lg text-[15px] outline-none file:mr-3 file:min-h-11 file:cursor-pointer file:rounded-lg file:border file:border-foreground/40 file:bg-card file:px-3.5 file:text-[15px] file:text-foreground hover:file:bg-muted focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background" />
           <p id={ids.ajuda} className={NOTA}>Escolha ou arraste para aqui um ficheiro .glb (autocontido, até 5 MB, sem compressão Draco). Orientação: Y para cima e a frente virada para +Z, a convenção do glTF.</p>
           {ficheiro && <p className={NOTA}>Ficheiro escolhido: <span className="font-medium text-foreground">{ficheiro.name}</span> ({tamanhoGlb(ficheiro.size)})</p>}

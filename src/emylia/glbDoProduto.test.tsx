@@ -88,10 +88,14 @@ describe("lerGlbsDoCatalogo: uma leitura por organização", () => {
     await lerGlbsDoCatalogo(ORG);
     expect(base.chamadas.sort()).toEqual(["cat_ler_categorias_gestao", "cat_ler_modelos_gestao"]);
   });
-  it("uma leitura que falha não fica guardada (tenta-se de novo) e dá null", async () => {
+  it("uma leitura que falha dá null e a falha guarda-se um minuto (as fichas seguintes não repetem as chamadas recusadas); invalidar volta a tentar", async () => {
     base.falhar = true;
     expect(await lerGlbsDoCatalogo(ORG)).toBeNull();
+    const aoFalhar = base.chamadas.length;
     base.falhar = false;
+    expect(await lerGlbsDoCatalogo(ORG)).toBeNull();
+    expect(base.chamadas).toHaveLength(aoFalhar);
+    invalidarGlbsDoCatalogo(ORG);
     expect(await lerGlbsDoCatalogo(ORG)).not.toBeNull();
   });
 });
