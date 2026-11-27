@@ -1,14 +1,16 @@
 /**
- * O detalhe de um ativo (folha lateral). Num COMPRADO: o valor atual em grande com a regra de depreciação em frase simples, a
- * amortização desde a compra (euros e percentagem, barra, meses decorridos e totais, o mês em que acaba), o valor e a vida útil, e
- * os dados. Num ALUGADO: a renda mensal em grande, as datas do contrato e quanto já se pagou, sem valor de compra nem amortização.
- * Nos ativos de Pessoas (e no alugado de estrutura) diz também QUEM paga cada mês: cada pessoa que o teve e a parte da estrutura. O
- * armazém ligado e o valor em produtos aparecem a quem pode. As ações (editar, desativar, reativar) vivem aqui, e só para quem
- * pode. Ligar e desligar uma pessoa saíram: o equipamento atribuído no RH cria o ativo sozinho e devolve-se no RH. Um ativo
- * atribuído a uma pessoa não se desativa (a base recusa com ATV17): diz-se porquê em vez de oferecer o botão.
+ * O detalhe de um ativo (folha lateral larga; no telemóvel ocupa o ecrã inteiro, com os botões fixos em baixo). Num COMPRADO: o valor
+ * atual em grande com a regra de depreciação em frase simples, a linha de vida desenhada (compra, hoje, fim), a amortização desde a
+ * compra (euros e percentagem, barra, meses decorridos e totais, o mês em que acaba), e em duas colunas o valor e a vida útil, e os
+ * dados. Num ALUGADO: a renda mensal em grande, a barra do contrato (início, hoje, fim) e as datas do contrato e quanto já se pagou,
+ * sem valor de compra nem amortização. Nos ativos de Pessoas (e no alugado de estrutura) diz também QUEM paga cada mês: a faixa pela
+ * ordem do tempo e cada pessoa que o teve, mais a parte da estrutura. O armazém ligado e o valor em produtos aparecem a quem pode. As
+ * ações (editar, desativar, reativar) vivem no rodapé, e só para quem pode. Ligar e desligar uma pessoa saíram: o equipamento atribuído
+ * no RH cria o ativo sozinho e devolve-se no RH. Um ativo atribuído a uma pessoa não se desativa (a base recusa com ATV17): diz-se
+ * porquê em vez de oferecer o botão.
  */
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
 import { dataPt, euros } from "@/components/rh-exemplo/custo/formato";
 import { useAtivoLido } from "@/hooks/ativos/useAtivoLido";
@@ -17,10 +19,12 @@ import { cn } from "@/lib/utils";
 import { AmortizacaoAtivo } from "./AmortizacaoAtivo";
 import { ArmazemDoAtivoSecao } from "./ArmazemDoAtivoSecao";
 import { AvisoAtivo } from "./AvisoAtivo";
-import { Linha, Seccao } from "./DetalheBlocos";
+import { Linha, Seccao, TITULO_SECCAO } from "./DetalheBlocos";
 import { EtiquetaEstado } from "./EtiquetaEstado";
+import { LinhaDeVida } from "./LinhaDeVida";
 import { QuemPagaAtivo } from "./QuemPagaAtivo";
 import { avisosDoAtivo, contaDoAtivo, ocupacaoParaConta, repartoDoAtivo, resumoAmortizacao } from "./lib/amortizacaoAtivo";
+import { MARCA_VALOR, TOM_GRUPO, iconeDoAtivo, partirTexto } from "./lib/ativosUi";
 import { estadoDoAtivo, fraseDepreciacao, motivoSemValor, vidaRestante, type FraseDepreciacao } from "./lib/resumoAtivo";
 import type { Ativo, OpcaoCentroCusto } from "./lib/tipos";
 import { valorAtual, vidaEfetivaMeses } from "./lib/valorAtivo";
@@ -62,6 +66,8 @@ function useFrase() {
 
 type PropsDoAtivo = Omit<Props, "ativo" | "aoFechar" | "aoFecharFoco"> & { a: Ativo };
 
+const NUMERO_GRANDE = "text-4xl font-bold leading-none tracking-tight tabular-nums sm:text-[2.75rem]";
+
 /** O topo de um comprado: o valor atual em grande e a regra de depreciação em frase. */
 function TopoComprado({ a, mes }: { a: Ativo; mes: string }) {
   const { t } = useTranslation();
@@ -70,12 +76,14 @@ function TopoComprado({ a, mes }: { a: Ativo; mes: string }) {
   const atual = valorAtual(a, mes);
   const rotulo = t(desativado ? "ativos.detalhe.valorDesativado" : "ativos.col.valorAtual");
   return (
-    <section aria-label={rotulo} className="rounded-lg border bg-muted/40 p-4">
-      <p data-testid="detalhe-valor-rotulo" className="text-sm text-muted-foreground">{rotulo}</p>
-      <p data-testid="detalhe-valor-atual" className="text-3xl font-semibold tabular-nums">
-        {atual === null ? t(motivoSemValor(a) === "porUso" ? "ativos.vida.semVida" : "ativos.vida.indefinida") : euros(atual, "—")}
-      </p>
-      <p data-testid="detalhe-frase" className="mt-1 text-sm">{frase(fraseDepreciacao(a, mes))}</p>
+    <section aria-label={rotulo}>
+      <p data-testid="detalhe-valor-rotulo" className={TITULO_SECCAO}>{rotulo}</p>
+      <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-2">
+        <p data-testid="detalhe-valor-atual" className={cn(NUMERO_GRANDE, atual === null && "text-3xl sm:text-4xl")}>
+          {atual === null ? t(motivoSemValor(a) === "porUso" ? "ativos.vida.semVida" : "ativos.vida.indefinida") : euros(atual, "—")}
+        </p>
+        <p data-testid="detalhe-frase" className="text-sm text-muted-foreground">{frase(fraseDepreciacao(a, mes))}</p>
+      </div>
     </section>
   );
 }
@@ -83,11 +91,16 @@ function TopoComprado({ a, mes }: { a: Ativo; mes: string }) {
 /** O topo de um alugado: a renda mensal em grande (um alugado não tem valor atual). */
 function TopoAlugado({ a }: { a: Ativo }) {
   const { t } = useTranslation();
+  const [antes, depois] = partirTexto(t("ativos.lista.rendaMes", { valor: MARCA_VALOR }), MARCA_VALOR);
   return (
-    <section aria-label={t("ativos.detalhe.rendaRotulo")} className="rounded-lg border bg-muted/40 p-4">
-      <p className="text-sm text-muted-foreground">{t("ativos.detalhe.rendaRotulo")}</p>
-      <p data-testid="detalhe-renda" className="text-3xl font-semibold tabular-nums">{t("ativos.lista.rendaMes", { valor: euros(a.rendaMensal, "—") })}</p>
-      <p data-testid="detalhe-frase" className="mt-1 text-sm">{t("ativos.detalhe.rendaFrase")}</p>
+    <section aria-label={t("ativos.detalhe.rendaRotulo")}>
+      <p className={TITULO_SECCAO}>{t("ativos.detalhe.rendaRotulo")}</p>
+      <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-2">
+        <p data-testid="detalhe-renda" className="tabular-nums">
+          {antes}<span className={NUMERO_GRANDE}>{euros(a.rendaMensal, "—")}</span><span className="text-base font-medium text-muted-foreground">{depois}</span>
+        </p>
+        <p data-testid="detalhe-frase" className="text-sm text-muted-foreground">{t("ativos.detalhe.rendaFrase")}</p>
+      </div>
     </section>
   );
 }
@@ -149,82 +162,99 @@ function DetalheDoAtivo({ a, mes, hoje, centrosCusto, rhOculto, podeEditar, pode
   const tipo = a.tipo && a.grupo !== "servico" ? t(`ativos.tipo.${a.grupo}.${a.tipo}`) : null;
   const motivo = a.desativadoMotivo ? t(`ativos.desativar.motivo.${a.desativadoMotivo}`).toLowerCase() : "";
   const desativado = a.estado === "desativado";
-  const BOTAO = cn("min-h-11", FOCO);
+  const BOTAO = cn("min-h-11 flex-1 rounded-xl px-5 font-semibold sm:flex-none", FOCO);
+  const Icone = iconeDoAtivo(a.grupo, a.tipo);
   const pessoa = rhOculto
     ? t("ativos.pessoa.rhOculto")
     : a.atribuicao
       ? (a.atribuicao.entrega ? t("ativos.pessoa.nomeDesde", { nome: a.atribuicao.pessoaNome ?? "—", data: dataPt(a.atribuicao.entrega) }) : (a.atribuicao.pessoaNome ?? "—"))
       : a.ligado ? t("ativos.pessoa.ligado") : t("ativos.pessoa.semAtribuicao");
+  const temLinhaDeVida = alugado ? a.inicioAluguer !== null : resumo !== null;
 
   return (
     <>
-      <SheetHeader className="space-y-2 text-left">
-        <SheetTitle className="break-words pr-6">{a.nome}</SheetTitle>
-        <SheetDescription>{[t(`ativos.grupo.${a.grupo}`), tipo, alugado ? t("ativos.forma.etiqueta.alugado") : null].filter(Boolean).join(" · ")}</SheetDescription>
-        <div className="flex flex-wrap items-center gap-2">
-          <EtiquetaEstado estado={estadoDoAtivo(a)} />
-          {a.codigo && <span className="text-sm text-muted-foreground">{a.codigo}</span>}
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+        <div className="space-y-5 px-4 pb-8 pt-6 sm:space-y-6 sm:px-8 sm:pt-8">
+          <SheetHeader className="space-y-0 text-left">
+            <div className="flex items-start gap-4 pr-8">
+              <span aria-hidden="true" className={cn("grid h-14 w-14 shrink-0 place-items-center rounded-2xl", TOM_GRUPO[a.grupo], desativado && "grayscale")}>
+                <Icone className="h-7 w-7" />
+              </span>
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  <SheetTitle className="break-words text-2xl font-bold tracking-tight">{a.nome}</SheetTitle>
+                  <EtiquetaEstado estado={estadoDoAtivo(a)} />
+                </div>
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <SheetDescription>{[t(`ativos.grupo.${a.grupo}`), tipo, alugado ? t("ativos.forma.etiqueta.alugado") : null].filter(Boolean).join(" · ")}</SheetDescription>
+                  {a.codigo && <span className="rounded-md bg-primary/10 px-2 py-0.5 font-mono text-xs font-semibold text-primary dark:bg-primary/20 dark:text-violet-300">{a.codigo}</span>}
+                </div>
+              </div>
+            </div>
+          </SheetHeader>
+
+          {avisos.map((aviso) => (
+            <AvisoAtivo key={aviso} tom="aviso" role="note" data-testid={`detalhe-aviso-${aviso}`}>{t(`ativos.aviso.${aviso}`)}</AvisoAtivo>
+          ))}
+
+          {desativado && (
+            <p data-testid="detalhe-desativado" className="rounded-xl border border-dashed bg-muted/30 p-3 text-sm">
+              {a.desativadoEm ? `${t("ativos.detalhe.desativadoEm", { data: dataPt(a.desativadoEm), motivo })} ` : ""}
+              {a.desativadoNota && <span>{a.desativadoNota}</span>}
+            </p>
+          )}
+
+          <div className="space-y-5 rounded-2xl border bg-muted/30 p-4 sm:p-6">
+            {alugado ? <TopoAlugado a={a} /> : <TopoComprado a={a} mes={mes} />}
+            {temLinhaDeVida && <LinhaDeVida a={a} mes={mes} resumo={resumo} pago={pago?.valor ?? null} />}
+            {resumo && <AmortizacaoAtivo resumo={resumo} desativado={desativado} />}
+          </div>
+
+          {mostraQuemPaga && conta && (
+            <QuemPagaAtivo
+              conta={conta} grupo={a.grupo} ocupacoes={ocupacoes} mes={mes} hoje={hoje} rhOculto={rhOculto}
+              nomes={lido.aCarregar ? "aCarregar" : lido.falhou ? "falhou" : "ok"}
+              podeEntregar={a.grupo === "pessoa" && !rhOculto && !desativado && !a.ligado && !a.atribuicao}
+            />
+          )}
+
+          <div className="grid items-start gap-4 md:grid-cols-2">
+            {alugado ? <SeccaoAluguer a={a} pago={pago} /> : <SeccaoValorComprado a={a} mes={mes} />}
+            <div className="space-y-4">
+              <Seccao titulo={t("ativos.detalhe.seccaoDados")}>
+                {!alugado && a.dataCompra && <Linha rotulo={t("ativos.col.compra")} id="detalhe-data-compra">{dataPt(a.dataCompra)}</Linha>}
+                {a.grupo === "servico" && <Linha rotulo={t("ativos.col.modelo")} id="detalhe-equipamento">{a.catEquipamento?.nome ?? "—"}</Linha>}
+                {a.grupo === "pessoa" && <Linha rotulo={t("ativos.col.pessoa")} id="detalhe-pessoa">{pessoa}</Linha>}
+                <Linha rotulo={t("ativos.col.localizacao")} id="detalhe-localizacao">{a.localizacao ?? "—"}</Linha>
+                <Linha rotulo={t("ativos.campo.centroCusto")} id="detalhe-centro">{centro}</Linha>
+                {a.numSerie && <Linha rotulo={t("ativos.campo.numSerie")} id="detalhe-serie">{a.numSerie}</Linha>}
+              </Seccao>
+              <ArmazemDoAtivoSecao ativo={a} podeVerValor={podeVerValorStock} />
+            </div>
+          </div>
+
+          {a.notas && (
+            <section className="rounded-2xl border bg-card p-4 sm:p-5">
+              <h3 className={TITULO_SECCAO}>{t("ativos.campo.notas")}</h3>
+              <p className="mt-2 whitespace-pre-line text-sm">{a.notas}</p>
+            </section>
+          )}
         </div>
-      </SheetHeader>
-
-      <div className="mt-6 space-y-6">
-        {alugado ? <TopoAlugado a={a} /> : <TopoComprado a={a} mes={mes} />}
-
-        {avisos.map((aviso) => (
-          <AvisoAtivo key={aviso} tom="aviso" role="note" data-testid={`detalhe-aviso-${aviso}`}>{t(`ativos.aviso.${aviso}`)}</AvisoAtivo>
-        ))}
-
-        {desativado && (
-          <p data-testid="detalhe-desativado" className="rounded-md border border-dashed p-3 text-sm">
-            {a.desativadoEm ? `${t("ativos.detalhe.desativadoEm", { data: dataPt(a.desativadoEm), motivo })} ` : ""}
-            {a.desativadoNota && <span>{a.desativadoNota}</span>}
-          </p>
-        )}
-
-        {resumo && <AmortizacaoAtivo resumo={resumo} desativado={desativado} />}
-
-        {alugado ? <SeccaoAluguer a={a} pago={pago} /> : <SeccaoValorComprado a={a} mes={mes} />}
-
-        {mostraQuemPaga && conta && (
-          <QuemPagaAtivo
-            conta={conta} grupo={a.grupo} ocupacoes={ocupacoes} mes={mes} hoje={hoje} rhOculto={rhOculto}
-            nomes={lido.aCarregar ? "aCarregar" : lido.falhou ? "falhou" : "ok"}
-            podeEntregar={a.grupo === "pessoa" && !rhOculto && !desativado && !a.ligado && !a.atribuicao}
-          />
-        )}
-
-        <ArmazemDoAtivoSecao ativo={a} podeVerValor={podeVerValorStock} />
-
-        <Seccao titulo={t("ativos.detalhe.seccaoDados")}>
-          {!alugado && a.dataCompra && <Linha rotulo={t("ativos.col.compra")} id="detalhe-data-compra">{dataPt(a.dataCompra)}</Linha>}
-          {a.grupo === "servico" && <Linha rotulo={t("ativos.col.modelo")} id="detalhe-equipamento">{a.catEquipamento?.nome ?? "—"}</Linha>}
-          {a.grupo === "pessoa" && <Linha rotulo={t("ativos.col.pessoa")} id="detalhe-pessoa">{pessoa}</Linha>}
-          <Linha rotulo={t("ativos.col.localizacao")} id="detalhe-localizacao">{a.localizacao ?? "—"}</Linha>
-          <Linha rotulo={t("ativos.campo.centroCusto")} id="detalhe-centro">{centro}</Linha>
-          {a.numSerie && <Linha rotulo={t("ativos.campo.numSerie")} id="detalhe-serie">{a.numSerie}</Linha>}
-        </Seccao>
-
-        {a.notas && (
-          <section className="space-y-1">
-            <h3 className="text-sm font-semibold">{t("ativos.campo.notas")}</h3>
-            <p className="whitespace-pre-line text-sm">{a.notas}</p>
-          </section>
-        )}
       </div>
 
       {podeEditar && (
-        <SheetFooter className="mt-6 flex-col gap-2 sm:flex-col sm:space-x-0">
+        <div className="flex flex-wrap items-center gap-3 border-t bg-background px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 sm:px-8">
           {desativado ? (
-            <Button type="button" onClick={() => aoReativar(a)} className={BOTAO}>{t("ativos.acao.reativar")}</Button>
+            <Button type="button" onClick={() => aoReativar(a)} className={cn(BOTAO, "sm:ml-auto")}>{t("ativos.acao.reativar")}</Button>
           ) : (
             <>
-              <Button type="button" onClick={() => aoEditar(a)} className={BOTAO}>{t("ativos.acao.editar")}</Button>
               {a.ligado
-                ? <p data-testid="detalhe-desativar-bloqueado" className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">{t("ativos.detalhe.desativarBloqueado")}</p>
-                : <Button type="button" variant="outline" onClick={() => aoDesativar(a)} className={BOTAO}>{t("ativos.acao.desativar")}</Button>}
+                ? <p data-testid="detalhe-desativar-bloqueado" className="min-w-0 basis-full text-xs text-muted-foreground sm:flex-1 sm:basis-auto">{t("ativos.detalhe.desativarBloqueado")}</p>
+                : <Button type="button" variant="outline" onClick={() => aoDesativar(a)} className={cn(BOTAO, "sm:ml-auto")}>{t("ativos.acao.desativar")}</Button>}
+              <Button type="button" onClick={() => aoEditar(a)} className={BOTAO}>{t("ativos.acao.editar")}</Button>
             </>
           )}
-        </SheetFooter>
+        </div>
       )}
     </>
   );
@@ -233,7 +263,7 @@ function DetalheDoAtivo({ a, mes, hoje, centrosCusto, rhOculto, podeEditar, pode
 export function AtivoDetalhe({ ativo, aoFechar, aoFecharFoco, ...resto }: Props) {
   return (
     <Sheet open={ativo !== null} onOpenChange={(aberto) => !aberto && aoFechar()}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-md" onCloseAutoFocus={aoFecharFoco}>
+      <SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-[860px]" onCloseAutoFocus={aoFecharFoco}>
         {ativo && <DetalheDoAtivo a={ativo} {...resto} />}
       </SheetContent>
     </Sheet>

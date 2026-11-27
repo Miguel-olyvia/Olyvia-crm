@@ -7,12 +7,13 @@
  * As validações são as da base, junto do campo; um erro da base (ATV02 a ATV33) vem traduzido e, se é de um campo, fica nesse campo
  * (e abre a secção recolhida quando o campo está lá).
  */
-import { useEffect, useRef, useState, type FormEvent } from "react";
-import { ChevronDown } from "lucide-react";
+import { useEffect, useRef, useState, type FocusEvent, type FormEvent } from "react";
+import { Check, ChevronDown, CircleCheck, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { FOCO } from "@/components/ficha-comum/estilosAbas";
+import { euros } from "@/components/rh-exemplo/custo/formato";
 import { CamposTocadosProvider, CampoSelect, CampoTexto, type OpcaoSelect } from "@/components/rh-exemplo/form/Campos";
 import { useAtivoMutacoes } from "@/hooks/ativos/useAtivoMutacoes";
 import { useAtivosOpcoes } from "@/hooks/ativos/useAtivosOpcoes";
@@ -21,12 +22,13 @@ import { hojeLocal } from "@/lib/hr/custoBase";
 import { cn } from "@/lib/utils";
 import { AvisoAtivo } from "./AvisoAtivo";
 import { CampoNumero } from "./CampoNumero";
-import { CamposAluguer, CamposComprado, FormaFixa, SeletorForma } from "./CamposFormaAtivo";
+import { CamposAluguer, CamposComprado, FormaFixa, Previa, SeletorForma } from "./CamposFormaAtivo";
 import { SeletorEquipamento } from "./SeletorEquipamento";
+import { ICONE_GRUPO, TOM_GRUPO, iconeDoAtivo } from "./lib/ativosUi";
 import { campoDoCodigo } from "./lib/errosAtivo";
-import { vidaDoCatalogoEmMeses } from "./lib/previaAtivo";
+import { previaDaConta, vidaDoCatalogoEmMeses } from "./lib/previaAtivo";
 import { GRUPOS_ATIVO, type Ativo, type GrupoAtivo, type OpcaoArmazem, type OpcoesAtivo, type OrigemVida } from "./lib/tipos";
-import { argumentosDoAtivo, eAlugado, numeroTexto, tiposDoGrupo, validarAtivo, type CamposAtivo, type ErrosAtivo } from "./lib/validarAtivo";
+import { argumentosDoAtivo, eAlugado, numeroDoCampo, numeroTexto, tiposDoGrupo, validarAtivo, type CamposAtivo, type ErrosAtivo } from "./lib/validarAtivo";
 
 export interface AvisoGuardado {
   nome: string;
@@ -90,24 +92,31 @@ interface FormularioProps {
 function SeletorGrupo({ valor, onChange }: { valor: GrupoAtivo; onChange: (g: GrupoAtivo) => void }) {
   const { t } = useTranslation();
   return (
-    <fieldset className="space-y-2">
+    <fieldset className="space-y-2.5">
       <legend className="text-sm font-medium leading-none">{t("ativos.campo.grupoPergunta")}</legend>
-      <div className="grid gap-2 sm:grid-cols-3">
-        {GRUPOS_ATIVO.map((g) => (
-          <label
-            key={g}
-            className={cn(
-              "flex min-h-11 cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted motion-reduce:transition-none",
-              "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:checked]:border-primary has-[:checked]:bg-primary/5",
-            )}
-          >
-            <input type="radio" name="ativo-grupo" value={g} checked={valor === g} onChange={() => onChange(g)} className="mt-0.5 h-4 w-4 shrink-0 accent-primary" />
-            <span className="flex flex-col">
-              <span className="font-medium">{t(`ativos.grupo.${g}`)}</span>
-              <span className="text-xs text-muted-foreground">{t(`ativos.grupo.${g}.curto`)}</span>
-            </span>
-          </label>
-        ))}
+      <div className="grid gap-2.5 sm:grid-cols-3">
+        {GRUPOS_ATIVO.map((g) => {
+          const Icone = ICONE_GRUPO[g];
+          return (
+            <label
+              key={g}
+              className={cn(
+                "relative flex min-h-11 cursor-pointer flex-row items-center gap-3 rounded-xl border-[1.5px] bg-card p-3 text-sm transition-[border-color,box-shadow,background-color] hover:bg-muted/50 motion-reduce:transition-none sm:flex-col sm:items-start sm:p-3.5",
+                "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:checked]:border-primary has-[:checked]:shadow-[0_0_0_3px_hsl(var(--primary)/0.12)]",
+              )}
+            >
+              <input type="radio" name="ativo-grupo" value={g} checked={valor === g} onChange={() => onChange(g)} className="peer sr-only" />
+              <span aria-hidden="true" className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", TOM_GRUPO[g])}>
+                <Icone className="h-5 w-5" />
+              </span>
+              <span className="flex min-w-0 flex-col">
+                <span className="font-semibold">{t(`ativos.grupo.${g}`)}</span>
+                <span className="text-xs text-muted-foreground">{t(`ativos.grupo.${g}.curto`)}</span>
+              </span>
+              <CircleCheck aria-hidden="true" className="absolute right-3 top-3 hidden h-4 w-4 text-primary peer-checked:block dark:text-violet-300" />
+            </label>
+          );
+        })}
       </div>
     </fieldset>
   );
@@ -135,6 +144,8 @@ function Formulario({ grupo, ativo, opcoes, erroOpcoes, aoFechar, aoGuardar }: F
   const ocupado = useRef(false);
   const formulario = useRef<HTMLFormElement>(null);
   const [tentativa, setTentativa] = useState(0);
+  // O passo em que se está (o da secção com o foco, ou o último escolhido no indicador): só muda o destaque, nunca esconde campos.
+  const [passoAtual, setPassoAtual] = useState(1);
 
   useEffect(() => {
     if (tentativa > 0) formulario.current?.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus();
@@ -227,68 +238,169 @@ function Formulario({ grupo, ativo, opcoes, erroOpcoes, aoFechar, aoGuardar }: F
     return e ? (e.startsWith("ativos.") ? t(e) : e) : null;
   };
 
+  const valorGrande = alugado ? numeroDoCampo(campos.rendaMensal) : numeroDoCampo(campos.valorCompra);
+  const IconeDoAtivo = iconeDoAtivo(g, campos.tipo || null);
+  const tipoTexto = campos.tipo && g !== "servico" ? t(`ativos.tipo.${g}.${campos.tipo}`) : null;
+
+  /** O indicador de passos é só navegação: leva à secção (todos os campos estão sempre no formulário, pela mesma ordem). */
+  const irPara = (n: number) => {
+    setPassoAtual(n);
+    if (n === 4) setAvancadoAberto(true);
+    const seccao = formulario.current?.querySelector<HTMLElement>(`[data-passo="${n}"]`);
+    if (!seccao) return;
+    const suave = !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    seccao.scrollIntoView?.({ block: "start", behavior: suave ? "smooth" : "auto" });
+    // Depois de a secção recolhida abrir, o foco vai para o primeiro campo dela.
+    requestAnimationFrame(() => seccao.querySelector<HTMLElement>("input:not([type=hidden]):not([disabled]), button:not([disabled]), [role=combobox], textarea")?.focus({ preventScroll: true }));
+  };
+  const aoFocar = (ev: FocusEvent<HTMLDivElement>) => {
+    const n = Number((ev.target as HTMLElement).closest<HTMLElement>("[data-passo]")?.dataset.passo);
+    if (n && n !== passoAtual) setPassoAtual(n);
+  };
+  const PASSOS = [t("ativos.ui.passo.grupo"), t("ativos.ui.passo.identificacao"), t("ativos.ui.passo.aquisicao"), t("ativos.ui.passo.detalhes")];
+  const SECCAO = "scroll-mt-4 space-y-5";
+  const TITULO = "flex items-center gap-2.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground";
+  const NUMERO = "grid h-5 w-5 place-items-center rounded-full bg-muted text-[10px] font-bold text-foreground";
+
   return (
     <CamposTocadosProvider onTocar={() => {}} rotuloObrigatorio={t("ativos.campo.obrigatorio")}>
-      <form ref={formulario} className="mt-6 space-y-5" noValidate onSubmit={(e: FormEvent) => { e.preventDefault(); void guardar(); }}>
-        {erroOpcoes && <AvisoAtivo tom="erro" role="alert">{erroOpcoes}</AvisoAtivo>}
-        {edicao ? (
-          <p className="text-sm text-muted-foreground">
-            {t("ativos.campo.grupo")}: <span data-testid="grupo-do-ativo" className="font-medium text-foreground">{t(`ativos.grupo.${g}`)}</span>
-          </p>
-        ) : (
-          <SeletorGrupo valor={g} onChange={mudarGrupo} />
-        )}
-        {ativo !== null && ativo.ocupacoes.length > 0 && (
-          <AvisoAtivo tom="aviso" role="note" data-testid="aviso-edicao-passado" className="text-xs leading-5">{t("ativos.aviso.editarMudaPassado")}</AvisoAtivo>
-        )}
+      <form ref={formulario} className="flex min-h-0 flex-1 flex-col" noValidate onSubmit={(e: FormEvent) => { e.preventDefault(); void guardar(); }}>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-8 sm:py-6">
+          <div className="grid gap-5 lg:grid-cols-[11rem_minmax(0,1fr)_15rem] lg:gap-7">
+            <nav aria-label={t("ativos.ui.passos")} className="-mx-4 overflow-x-auto px-4 lg:mx-0 lg:overflow-visible lg:px-0">
+              <ol className="flex gap-1.5 lg:sticky lg:top-0 lg:flex-col">
+                {PASSOS.map((nome, i) => {
+                  const n = i + 1;
+                  const atual = passoAtual === n;
+                  const feito = passoAtual > n;
+                  return (
+                    <li key={n} className="shrink-0">
+                      <button
+                        type="button" onClick={() => irPara(n)} aria-current={atual ? "step" : undefined}
+                        className={cn(
+                          "flex min-h-11 w-full items-center gap-2.5 whitespace-nowrap rounded-xl px-2.5 py-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted hover:text-foreground motion-reduce:transition-none",
+                          atual && "bg-primary/10 font-semibold text-primary hover:bg-primary/15 hover:text-primary dark:bg-primary/20 dark:text-violet-300 dark:hover:text-violet-300",
+                          FOCO,
+                        )}
+                      >
+                        <span
+                          aria-hidden="true"
+                          className={cn(
+                            "grid h-7 w-7 shrink-0 place-items-center rounded-full border-2 border-current text-xs font-bold",
+                            feito && "border-primary bg-primary text-primary-foreground",
+                          )}
+                        >
+                          {feito ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : n}
+                        </span>
+                        {nome}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ol>
+            </nav>
 
-        {g === "servico" && <SeletorEquipamento id="ativo-modelo" opcoes={listaEquipamentos} valor={campos.catEquipamentoId} onChange={escolherModelo} erro={erro("modelo")} />}
-        <CampoTexto id="ativo-nome" label={t("ativos.campo.nome")} valor={campos.nome} onChange={(v) => mudar({ nome: v })} obrigatorio ajuda={t("ativos.ajuda.nome")} erro={erro("nome")} />
-        {g !== "servico" && (
-          <CampoSelect
-            id="ativo-tipo" label={t("ativos.campo.tipo")} valor={campos.tipo} onChange={mudarTipo} obrigatorio
-            vazioLabel={t("ativos.campo.tipoEscolher")} opcoes={tiposDoGrupo(g).map((x) => ({ value: x, label: t(`ativos.tipo.${g}.${x}`) }))} erro={erro("tipo")}
-          />
-        )}
-        {/* A ligação ao armazém logo por baixo do tipo, para se ver que existe (antes ficava no fim, depois do valor e da vida útil). */}
-        {mostraArmazem && (
-          <CampoSelect
-            id="ativo-armazem" label={t("ativos.campo.armazem")} valor={campos.armazemId} onChange={(v) => mudar({ armazemId: v })}
-            vazioLabel={t("ativos.campo.armazemNenhum")} opcoes={armazens.map((w) => ({ value: w.id, label: w.nome }))} ajuda={t("ativos.ajuda.armazem")} erro={erro("armazem")}
-          />
-        )}
-        {semAcessoAoStock && (
-          <p data-testid="armazem-sem-acesso" className="text-xs leading-5 text-muted-foreground">{t("ativos.ajuda.armazemSemAcesso")}</p>
-        )}
-        {g !== "servico" && (edicao ? <FormaFixa forma={campos.forma} /> : <SeletorForma valor={campos.forma} aoMudar={(forma) => mudar({ forma })} />)}
+            <div className="min-w-0 space-y-8" onFocus={aoFocar}>
+              {erroOpcoes && <AvisoAtivo tom="erro" role="alert">{erroOpcoes}</AvisoAtivo>}
+              <section data-passo="1" className={SECCAO} aria-labelledby="ativo-passo-1">
+                <h3 id="ativo-passo-1" className={TITULO}><span aria-hidden="true" className={NUMERO}>1</span>{PASSOS[0]}</h3>
+                {edicao ? (
+                  <p className="text-sm text-muted-foreground">
+                    {t("ativos.campo.grupo")}: <span data-testid="grupo-do-ativo" className="font-medium text-foreground">{t(`ativos.grupo.${g}`)}</span>
+                  </p>
+                ) : (
+                  <SeletorGrupo valor={g} onChange={mudarGrupo} />
+                )}
+                {ativo !== null && ativo.ocupacoes.length > 0 && (
+                  <AvisoAtivo tom="aviso" role="note" data-testid="aviso-edicao-passado" className="text-xs leading-5">{t("ativos.aviso.editarMudaPassado")}</AvisoAtivo>
+                )}
+              </section>
 
-        {alugado
-          ? <CamposAluguer campos={camposFinais} mudar={mudar} erro={erro} />
-          : <CamposComprado campos={camposFinais} mudar={mudar} erro={erro} equipamentos={listaEquipamentos} ajudaVidaServico={ajudaDaVidaDoModelo} aoTocarVida={() => setVidaTocada(true)} />}
+              <section data-passo="2" className={SECCAO} aria-labelledby="ativo-passo-2">
+                <h3 id="ativo-passo-2" className={TITULO}><span aria-hidden="true" className={NUMERO}>2</span>{PASSOS[1]}</h3>
+                {g === "servico" && <SeletorEquipamento id="ativo-modelo" opcoes={listaEquipamentos} valor={campos.catEquipamentoId} onChange={escolherModelo} erro={erro("modelo")} />}
+                <CampoTexto id="ativo-nome" label={t("ativos.campo.nome")} valor={campos.nome} onChange={(v) => mudar({ nome: v })} obrigatorio ajuda={t("ativos.ajuda.nome")} erro={erro("nome")} />
+                {g !== "servico" && (
+                  <CampoSelect
+                    id="ativo-tipo" label={t("ativos.campo.tipo")} valor={campos.tipo} onChange={mudarTipo} obrigatorio
+                    vazioLabel={t("ativos.campo.tipoEscolher")} opcoes={tiposDoGrupo(g).map((x) => ({ value: x, label: t(`ativos.tipo.${g}.${x}`) }))} erro={erro("tipo")}
+                  />
+                )}
+                {/* A ligação ao armazém logo por baixo do tipo, para se ver que existe (antes ficava no fim, depois do valor e da vida útil). */}
+                {mostraArmazem && (
+                  <CampoSelect
+                    id="ativo-armazem" label={t("ativos.campo.armazem")} valor={campos.armazemId} onChange={(v) => mudar({ armazemId: v })}
+                    vazioLabel={t("ativos.campo.armazemNenhum")} opcoes={armazens.map((w) => ({ value: w.id, label: w.nome }))} ajuda={t("ativos.ajuda.armazem")} erro={erro("armazem")}
+                  />
+                )}
+                {semAcessoAoStock && (
+                  <p data-testid="armazem-sem-acesso" className="text-xs leading-5 text-muted-foreground">{t("ativos.ajuda.armazemSemAcesso")}</p>
+                )}
+              </section>
 
-        <Collapsible open={avancadoAberto} onOpenChange={setAvancadoAberto} className="rounded-md border">
-          <CollapsibleTrigger className={cn("flex min-h-11 w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-left text-sm font-medium hover:bg-muted", FOCO)}>
-            {t("ativos.maisDetalhes")}
-            <ChevronDown aria-hidden="true" className={cn("h-4 w-4 transition-transform motion-reduce:transition-none", avancadoAberto && "rotate-180")} />
-          </CollapsibleTrigger>
-          <CollapsibleContent className="space-y-4 border-t p-3">
-            <CampoTexto id="ativo-codigo" label={t("ativos.campo.codigo")} valor={campos.codigo} onChange={(v) => mudar({ codigo: v })} ajuda={t("ativos.ajuda.codigo")} erro={erro("codigo")} />
-            <CampoTexto id="ativo-serie" label={t("ativos.campo.numSerie")} valor={campos.numSerie} onChange={(v) => mudar({ numSerie: v })} ajuda={t("ativos.ajuda.numSerie")} erro={erro("numSerie")} />
-            {!alugado && <CampoNumero id="ativo-residual" label={t("ativos.campo.valorResidual")} valor={campos.valorResidual} onChange={(v) => mudar({ valorResidual: v })} ajuda={t("ativos.campo.valorResidualAjuda")} erro={erro("residual")} />}
-            <CampoNumero id="ativo-manutencao" label={t("ativos.campo.manutencao")} valor={campos.manutencaoAno} onChange={(v) => mudar({ manutencaoAno: v })} ajuda={t("ativos.ajuda.manutencao")} erro={erro("manutencao")} />
-            <CampoSelect
-              id="ativo-centro" label={t("ativos.campo.centroCusto")} valor={campos.centroCustoId} onChange={(v) => mudar({ centroCustoId: v })}
-              vazioLabel={t("ativos.campo.centroCustoNenhum")} opcoes={opcoesCentro} ajuda={t("ativos.ajuda.centroCusto")} erro={erro("centroCusto")}
-            />
-            <CampoTexto id="ativo-localizacao" label={t("ativos.campo.localizacao")} valor={campos.localizacao} onChange={(v) => mudar({ localizacao: v })} ajuda={t("ativos.ajuda.localizacao")} erro={erro("localizacao")} />
-            <CampoTexto id="ativo-notas" label={t("ativos.campo.notas")} valor={campos.notas} onChange={(v) => mudar({ notas: v })} ajuda={t("ativos.ajuda.notas")} erro={erro("notas")} />
-          </CollapsibleContent>
-        </Collapsible>
+              <section data-passo="3" className={SECCAO} aria-labelledby="ativo-passo-3">
+                <h3 id="ativo-passo-3" className={TITULO}><span aria-hidden="true" className={NUMERO}>3</span>{PASSOS[2]}</h3>
+                {g !== "servico" && (edicao ? <FormaFixa forma={campos.forma} /> : <SeletorForma valor={campos.forma} aoMudar={(forma) => mudar({ forma })} />)}
+                {alugado
+                  ? <CamposAluguer campos={camposFinais} mudar={mudar} erro={erro} />
+                  : <CamposComprado campos={camposFinais} mudar={mudar} erro={erro} equipamentos={listaEquipamentos} ajudaVidaServico={ajudaDaVidaDoModelo} aoTocarVida={() => setVidaTocada(true)} />}
+              </section>
 
-        {aviso && <AvisoAtivo tom="erro" role="alert">{aviso}</AvisoAtivo>}
-        <SheetFooter className="gap-2 sm:gap-2">
-          <Button type="button" variant="outline" onClick={aoFechar} className={cn("min-h-11", FOCO)}>{t("ativos.sheet.cancelar")}</Button>
-          <Button type="submit" disabled={aGuardar} className={cn("min-h-11", FOCO)}>{t(edicao ? "ativos.sheet.guardarEditar" : "ativos.sheet.guardar")}</Button>
+              <section data-passo="4" className={SECCAO} aria-labelledby="ativo-passo-4">
+                <h3 id="ativo-passo-4" className={TITULO}><span aria-hidden="true" className={NUMERO}>4</span>{PASSOS[3]}</h3>
+                <Collapsible open={avancadoAberto} onOpenChange={setAvancadoAberto} className="rounded-xl border">
+                  <CollapsibleTrigger className={cn("flex min-h-11 w-full items-center justify-between gap-2 rounded-xl px-3.5 py-2 text-left text-sm font-medium hover:bg-muted", FOCO)}>
+                    {t("ativos.maisDetalhes")}
+                    <ChevronDown aria-hidden="true" className={cn("h-4 w-4 transition-transform motion-reduce:transition-none", avancadoAberto && "rotate-180")} />
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-4 border-t p-3.5">
+                    <CampoTexto id="ativo-codigo" label={t("ativos.campo.codigo")} valor={campos.codigo} onChange={(v) => mudar({ codigo: v })} ajuda={t("ativos.ajuda.codigo")} erro={erro("codigo")} />
+                    <CampoTexto id="ativo-serie" label={t("ativos.campo.numSerie")} valor={campos.numSerie} onChange={(v) => mudar({ numSerie: v })} ajuda={t("ativos.ajuda.numSerie")} erro={erro("numSerie")} />
+                    {!alugado && <CampoNumero id="ativo-residual" label={t("ativos.campo.valorResidual")} valor={campos.valorResidual} onChange={(v) => mudar({ valorResidual: v })} ajuda={t("ativos.campo.valorResidualAjuda")} erro={erro("residual")} />}
+                    <CampoNumero id="ativo-manutencao" label={t("ativos.campo.manutencao")} valor={campos.manutencaoAno} onChange={(v) => mudar({ manutencaoAno: v })} ajuda={t("ativos.ajuda.manutencao")} erro={erro("manutencao")} />
+                    <CampoSelect
+                      id="ativo-centro" label={t("ativos.campo.centroCusto")} valor={campos.centroCustoId} onChange={(v) => mudar({ centroCustoId: v })}
+                      vazioLabel={t("ativos.campo.centroCustoNenhum")} opcoes={opcoesCentro} ajuda={t("ativos.ajuda.centroCusto")} erro={erro("centroCusto")}
+                    />
+                    <CampoTexto id="ativo-localizacao" label={t("ativos.campo.localizacao")} valor={campos.localizacao} onChange={(v) => mudar({ localizacao: v })} ajuda={t("ativos.ajuda.localizacao")} erro={erro("localizacao")} />
+                    <CampoTexto id="ativo-notas" label={t("ativos.campo.notas")} valor={campos.notas} onChange={(v) => mudar({ notas: v })} ajuda={t("ativos.ajuda.notas")} erro={erro("notas")} />
+                  </CollapsibleContent>
+                </Collapsible>
+              </section>
+
+              {aviso && <AvisoAtivo tom="erro" role="alert">{aviso}</AvisoAtivo>}
+            </div>
+
+            {/* A pré-visualização: o que está escrito, como vai aparecer, e quanto custa por mês. */}
+            <aside className="lg:sticky lg:top-0 lg:self-start">
+              <div className="flex flex-col gap-3 rounded-2xl border bg-muted/30 p-4 sm:p-5">
+                <div className="flex items-center gap-3">
+                  <span aria-hidden="true" className={cn("grid h-10 w-10 shrink-0 place-items-center rounded-xl", TOM_GRUPO[g])}>
+                    <IconeDoAtivo className="h-5 w-5" />
+                  </span>
+                  <div className="min-w-0">
+                    <p className="break-words text-[15px] font-semibold leading-snug">{campos.nome.trim() || t("ativos.ui.previa.novo")}</p>
+                    <p className="truncate text-xs text-muted-foreground">{[t(`ativos.grupo.${g}`), tipoTexto].filter(Boolean).join(" · ")}</p>
+                  </div>
+                </div>
+                <p className="w-fit max-w-full truncate rounded-md bg-primary/10 px-2 py-0.5 font-mono text-xs font-semibold text-primary dark:bg-primary/20 dark:text-violet-300">
+                  {campos.codigo.trim() || t("ativos.ui.previa.codigoAuto")}
+                </p>
+                <div className="border-t pt-3">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{t(alugado ? "ativos.detalhe.rendaRotulo" : "ativos.col.valorCompra")}</p>
+                  <p className="mt-1 text-2xl font-bold tracking-tight tabular-nums">
+                    {valorGrande !== null && Number.isFinite(valorGrande) && valorGrande > 0 ? euros(valorGrande, "—") : "—"}
+                  </p>
+                </div>
+                {g !== "servico" && <Previa previa={previaDaConta(camposFinais)} className="text-muted-foreground" />}
+              </div>
+            </aside>
+          </div>
+        </div>
+
+        <SheetFooter className="gap-2 border-t bg-background px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 sm:gap-3 sm:space-x-0 sm:px-8">
+          <Button type="button" variant="outline" onClick={aoFechar} className={cn("min-h-11 rounded-xl px-5", FOCO)}>{t("ativos.sheet.cancelar")}</Button>
+          <Button type="submit" disabled={aGuardar} className={cn("min-h-11 rounded-xl px-6 font-semibold", FOCO)}>{t(edicao ? "ativos.sheet.guardarEditar" : "ativos.sheet.guardar")}</Button>
         </SheetFooter>
       </form>
     </CamposTocadosProvider>
@@ -299,12 +411,20 @@ export function AtivoSheet({ aberto, grupo, ativo, aoFechar, aoFecharFoco, aoGua
   const { t } = useTranslation();
   const { opcoes, erro } = useAtivosOpcoes(aberto);
   const grupoReal = ativo?.grupo ?? grupo;
+  const Icone = ICONE_GRUPO[grupoReal];
   return (
     <Sheet open={aberto} onOpenChange={(v) => !v && aoFechar()}>
-      <SheetContent className="w-full overflow-y-auto sm:max-w-lg" onCloseAutoFocus={aoFecharFoco}>
-        <SheetHeader>
-          <SheetTitle>{t(ativo ? "ativos.sheet.tituloEditar" : "ativos.sheet.tituloNovo")}</SheetTitle>
-          <SheetDescription>{t(ativo ? "ativos.sheet.ajudaEditar" : "ativos.sheet.ajudaNovo")}</SheetDescription>
+      <SheetContent className="flex w-full flex-col gap-0 p-0 sm:max-w-[960px]" onCloseAutoFocus={aoFecharFoco}>
+        <SheetHeader className="space-y-0 border-b px-4 py-5 pr-12 text-left sm:px-8">
+          <div className="flex items-start gap-4">
+            <span aria-hidden="true" className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-primary/10 text-primary dark:bg-primary/20 dark:text-violet-300">
+              {ativo ? <Icone className="h-6 w-6" /> : <Plus className="h-6 w-6" />}
+            </span>
+            <div className="min-w-0 space-y-1">
+              <SheetTitle className="text-2xl font-bold tracking-tight">{t(ativo ? "ativos.sheet.tituloEditar" : "ativos.sheet.tituloNovo")}</SheetTitle>
+              <SheetDescription>{t(ativo ? "ativos.sheet.ajudaEditar" : "ativos.sheet.ajudaNovo")}</SheetDescription>
+            </div>
+          </div>
         </SheetHeader>
         {/* Um formulário por ativo (ou por grupo de partida): os campos recomeçam sempre limpos. */}
         <Formulario key={ativo?.id ?? `novo-${grupoReal}`} grupo={grupoReal} ativo={ativo} opcoes={opcoes} erroOpcoes={erro} aoFechar={aoFechar} aoGuardar={aoGuardar} />

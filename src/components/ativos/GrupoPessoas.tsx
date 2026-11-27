@@ -4,6 +4,7 @@
  * Sem `hr.pessoas.retribuicao.view` (`rhOculto`) não há nomes: só o aviso «Sem permissão para ver a quem estão atribuídos».
  */
 import type { ReactNode } from "react";
+import { Lock } from "lucide-react";
 import { useTranslation } from "@/hooks/useTranslation";
 
 interface Props {
@@ -14,8 +15,13 @@ interface Props {
 export function GrupoPessoas({ rhOculto, children }: Props) {
   const { t } = useTranslation();
   return (
-    <div className="space-y-6">
-      {rhOculto && <p className="text-sm text-muted-foreground">{t("ativos.pessoa.rhOcultoAviso")}</p>}
+    <div>
+      {rhOculto && (
+        <p className="flex items-center gap-2 border-b bg-muted/30 px-4 py-3 text-sm text-muted-foreground sm:px-5">
+          <Lock aria-hidden="true" className="h-4 w-4 shrink-0" />
+          {t("ativos.pessoa.rhOcultoAviso")}
+        </p>
+      )}
       {children}
     </div>
   );
