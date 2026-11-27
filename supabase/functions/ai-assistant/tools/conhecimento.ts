@@ -3,6 +3,7 @@
 // ativa: o guia de como a plataforma funciona, o resumo do dia das obras, os negócios e as obras (fase, valor, o que os agentes propõem,
 // as próximas tarefas). Lê com o cliente do utilizador: a RLS só deixa ver os negócios e obras que ele já vê.
 import type { Handler, ToolDef, ToolResult } from "../shared/types.ts";
+import { callAiGateway } from "../../_shared/aiGateway.ts";
 
 export const TIPOS = ["guia", "resumo", "negocio", "obra", "orcamento", "custos"] as const;
 
@@ -72,7 +73,8 @@ export const relatorioOlyviaDef: ToolDef = {
         numero: { type: "integer", description: "O número do negócio (na obra e no orçamento)." },
         cliente: { type: "string", description: "O nome do cliente, se não se souber o número (na obra e no orçamento)." },
         formato: { type: "string", enum: ["ver", "pdf", "excel"], description: "ver (abrir na app), pdf ou excel. Por omissão: ver." },
-        insights: { type: "array", items: { type: "string" }, description: "A tua análise para ir DENTRO do relatório (PDF/Excel): insights, melhorias, áreas novas, riscos, 3 a 8 pontos curtos, escritos a partir dos números de uma chamada anterior. Usa quando o pedido pede análise, insights, sugestões ou conclusões." },
+        analise: { type: "string", description: "Quando o pedido pede também análise, insights, conclusões, melhorias, áreas novas a explorar ou riscos: o que se quer analisar, nas palavras do utilizador (ex.: «insights de melhoria e áreas novas a explorar»). A análise é escrita a partir dos números do relatório e vai DENTRO do PDF/Excel; vem de volta em analise_no_relatorio." },
+        insights: { type: "array", items: { type: "string" }, description: "Opcional: ideias tuas para a análise (só servem de pista; o texto final é escrito a partir dos números)." },
         titulo_analise: { type: "string", description: "O título da secção da análise (por omissão «A análise da Olyvia»)." },
       },
       required: ["tipo"],
@@ -86,7 +88,7 @@ const FASES_NEG = ["Por contactar", "Contacto", "Visita", "Negócio", "Financeir
 // deno-lint-ignore no-explicit-any
 type LinhaK = { tipo: string; numero: number | null; titulo: string; dados: Record<string, any> | null; atualizado_em: string };
 
-const relatorio_olyvia: Handler = async (ctx, args): Promise<ToolResult> => {
+const relatorioBase: Handler = async (ctx, args): Promise<ToolResult> => {
   const sb = ctx.userSupabase ?? ctx.supabase;
   if (!ctx.organizationId) return { success: false, message: "Sem organização ativa." };
   const tipo = ["negocios", "obras", "obra", "orcamento", "servicos"].includes(args?.tipo) ? String(args.tipo) : "negocios";
@@ -96,20 +98,11 @@ const relatorio_olyvia: Handler = async (ctx, args): Promise<ToolResult> => {
   const filtro = typeof args?.filtro === "string" && (FILTROS[args.filtro] || /^fase:[0-5]$/.test(args.filtro)) ? String(args.filtro) : null;
   const formato = args?.formato === "pdf" || args?.formato === "excel" ? String(args.formato) : null;
   const ler = (tipos: string[]) => sb.from("olyvia_conhecimento").select("tipo, numero, titulo, dados, atualizado_em").eq("organization_id", ctx.organizationId).in("tipo", tipos).limit(4000);
-  // 27/11 (Rúben: «pedi insights e ele não os fez; a AI tem de ser flexível»): a análise escrita pelo chat vai na ligação e entra no
-  // relatório (no ecrã, no PDF e no Excel). JSON em base64url, com limites.
-  const pontos = (Array.isArray(args?.insights) ? args.insights : []).filter((x: unknown) => typeof x === "string" && x.trim()).map((x: string) => x.trim().slice(0, 500)).slice(0, 12);
-  const notas = pontos.length ? (() => {
-    const json = JSON.stringify({ ...(typeof args?.titulo_analise === "string" && args.titulo_analise.trim() ? { titulo: args.titulo_analise.trim().slice(0, 80) } : {}), pontos });
-    let bin = ""; for (const b of new TextEncoder().encode(json)) bin += String.fromCharCode(b);
-    return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-  })() : null;
   const ligacao = (numero?: number | null) => {
     const q = new URLSearchParams({ tipo });
     if (numero) q.set("numero", String(numero));
     if (filtro && tipo === "negocios") q.set("filtro", filtro);
     if (tipo === "servicos" && so === "todos") q.set("so", "todos");
-    if (notas) q.set("notas", notas);
     if (formato) q.set("formato", formato);
     return `/relatorios/olyvia?${q.toString()}`;
   };
@@ -167,7 +160,11 @@ const relatorio_olyvia: Handler = async (ctx, args): Promise<ToolResult> => {
     return { success: true, link: ligacao(), rotulo_link: rotulo, atualizada_em: L.map((x) => x.atualizado_em).sort().pop(),
       resumo: { contados: so === "ganhos" ? `${orcs.length} negócios ganhos` : `${orcs.length} negócios ativos`, margens: temCustos ? "com custos" : "sem acesso aos custos: sem margens",
         por_tipo: [...of.values()].sort((a, b) => b.vendido - a.vendido).map((o) => ({ tipo: o.oficio, vendido: eurTxt(o.vendido), ...(temCustos ? { margem: m(o) } : {}) })),
-        mais_vendidos: S.slice(0, 10).map((a) => ({ servico: a.servico, tipo: a.oficio, negocios: a.negocios.size, vendido: eurTxt(a.vendido), ...(temCustos ? { margem: m(a) } : {}) })) } };
+        mais_vendidos: S.slice(0, 10).map((a) => ({ servico: a.servico, tipo: a.oficio, negocios: a.negocios.size, vendido: eurTxt(a.vendido), ...(temCustos ? { margem: m(a) } : {}) })),
+        ...(temCustos ? { margens_mais_baixas: S.filter((a) => a.vendido >= 1000 && a.preco > 0 && a.custo > 0).sort((a, b) => (a.preco - a.custo) / a.preco - (b.preco - b.custo) / b.preco).slice(0, 6)
+          .map((a) => ({ servico: a.servico, tipo: a.oficio, vendido: eurTxt(a.vendido), margem: m(a) })) } : {}),
+        menos_vendidos_por_tipo: [...of.values()].sort((a, b) => a.vendido - b.vendido).slice(0, 6).map((o) => ({ tipo: o.oficio, vendido: eurTxt(o.vendido), ...(temCustos ? { margem: m(o) } : {}) })),
+        total_vendido: eurTxt(S.reduce((t, a) => t + a.vendido, 0)) } };
   }
   if (tipo === "obras") {
     const { data, error } = await ler(["obra", "resumo"]);
@@ -216,6 +213,48 @@ const relatorio_olyvia: Handler = async (ctx, args): Promise<ToolResult> => {
       // deno-lint-ignore no-explicit-any
       maiores_linhas: Array.isArray(d.linhas) ? d.linhas.slice(0, 5).map((l: any) => `${l.nome}: ${eurTxt(Number(l.total) || 0)}`) : [],
       ...(c ? { margem_prevista: `${Math.round((Number(c.dados?.margem) || 0) * 1000) / 10}%`, custo_previsto: eurTxt(Number(c.dados?.custo) || 0) } : {}) } };
+};
+
+// 27/11 (teste ao vivo: o chat pôs «insights» no relatório numa só chamada, antes de ver os números, e saíram genéricos e até
+// inventados, como «domótica com margens superiores»). Agora a análise escreve-se AQUI, depois de ter os números do relatório: o
+// modelo recebe o pedido e o resumo e devolve 3 a 7 pontos, cada um com um valor tirado dos dados. Se falhar, ficam as ideias do chat.
+const MODELO_ANALISE = "gemini-3.5-flash-lite";
+const limparPontos = (x: unknown): string[] => (Array.isArray(x) ? x : []).filter((p): p is string => typeof p === "string" && !!p.trim())
+  .map((p) => p.trim().replace(/^(?:[-•*]\s*|\d+[.)]\s+)/, "").slice(0, 500)).filter(Boolean).slice(0, 8);
+export function codificarNotas(n: { titulo?: string; pontos: string[] }): string {
+  let bin = ""; for (const b of new TextEncoder().encode(JSON.stringify(n))) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+async function escreverAnalise(pedido: string, tipo: string, resumo: unknown, ideias: string[]): Promise<string[] | null> {
+  try {
+    const r = await callAiGateway({
+      model: MODELO_ANALISE, temperature: 0.4, response_format: { type: "json_object" },
+      messages: [
+        { role: "system", content: "És a analista da Olyvia, numa empresa de remodelações (casas de banho, cozinhas, obras). Recebes o pedido do utilizador e os números de um relatório. Escreve 4 a 7 pontos curtos em português de Portugal, que respondam ao pedido. Regras: cada ponto cita pelo menos um valor tirado dos números (euros, margem, número de negócios); só afirmas o que os números mostram; ideias novas (áreas a explorar, serviços a juntar) dizem-se como sugestão e dizem em que número se apoiam; nada de áreas ou margens que não estejam nos dados; sem travessões; uma ideia por ponto, no máximo duas frases. Responde só em JSON: {\"pontos\": [\"...\"]}." },
+        { role: "user", content: JSON.stringify({ pedido, relatorio: tipo, numeros: resumo, ...(ideias.length ? { pistas_do_chat: ideias } : {}) }) },
+      ],
+    });
+    if (!r.ok) return null;
+    // deno-lint-ignore no-explicit-any
+    const j: any = await r.json();
+    const txt = String(j?.choices?.[0]?.message?.content ?? "").replace(/^```(?:json)?|```$/g, "").trim();
+    const pontos = limparPontos(JSON.parse(txt)?.pontos);
+    return pontos.length ? pontos : null;
+  } catch { return null; }
+}
+
+const relatorio_olyvia: Handler = async (ctx, args): Promise<ToolResult> => {
+  const r = await relatorioBase(ctx, args);
+  const pedido = typeof args?.analise === "string" ? args.analise.trim().slice(0, 300) : "";
+  const ideias = limparPontos(args?.insights);
+  if (!r.success || !r.link || (!pedido && !ideias.length)) return r;
+  const tipo = String(args?.tipo ?? "negocios");
+  const pontos = (await escreverAnalise(pedido || "insights e melhorias", tipo, r.resumo, ideias)) ?? ideias;
+  if (!pontos.length) return r;
+  const titulo = typeof args?.titulo_analise === "string" && args.titulo_analise.trim() ? args.titulo_analise.trim().slice(0, 80) : undefined;
+  return { ...r, link: `${r.link}&notas=${codificarNotas({ ...(titulo ? { titulo } : {}), pontos })}`,
+    analise_no_relatorio: pontos,
+    nota_analise: "Estes são os pontos que ficaram DENTRO do relatório (PDF/Excel). Mostra-os ao utilizador tal como estão; não escrevas outros." };
 };
 
 export const handlers: Record<string, Handler> = { consultar_base_conhecimento, relatorio_olyvia };
