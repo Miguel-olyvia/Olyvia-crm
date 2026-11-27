@@ -72,23 +72,48 @@ export function docNegocios(L: LinhaBase[], org = ""): DocRelatorio {
 
 /** As obras: o estado, o fim, o que os agentes pedem e o dia. */
 export function docObras(L: LinhaBase[], org = ""): DocRelatorio {
+  // 27/11 (Rúben: «os relatórios gerados por AI têm de estar muito melhor estruturados»): números, tabelas e listas por tema, em vez
+  // do texto corrido «obra a obra». As linhas antigas da base (sem os dados novos) caem no texto, até a base se reescrever (10 a 15 min).
+  type Prop = { agente: string; modo: string; titulo: string };
+  type Prox = { nome: string; estado: string; quando: string; tec: string };
+  type Feito = { quando: string; texto: string; quem: string };
   const O = L.filter((x) => x.tipo === "obra" && x.numero != null).sort((a, b) => a.numero! - b.numero!);
-  const resumo = L.find((x) => x.tipo === "resumo");
+  const arr = <T,>(v: unknown) => (Array.isArray(v) ? (v as T[]) : []);
   const dec = O.reduce((a, x) => a + num(x.dados?.decisoes), 0);
   const emCurso = O.filter((x) => str(x.dados?.estado) === "em curso").length;
+  const comDados = O.some((x) => x.dados?.total != null);
+  const feitasT = O.reduce((a, x) => a + num(x.dados?.feitas), 0), totalT = O.reduce((a, x) => a + num(x.dados?.total), 0);
+  const nomeObra = (x: LinhaBase) => `${x.numero} · ${nomeDe(x.titulo)}`;
+  const modoTxt = (m: string) => (m === "pede" ? "Pede decisão" : m === "prazo" ? "Aplica-se ao fim do dia" : m === "ja" ? "A aplicar" : "Para saber");
+  const props = O.flatMap((x) => arr<Prop>(x.dados?.propostas).map((p) => ({ obra: nomeObra(x), ...p })));
+  const pedem = props.filter((p) => p.modo === "pede"), outras = props.filter((p) => p.modo !== "pede");
+  const proximas = O.flatMap((x) => arr<Prox>(x.dados?.proximas).map((t) => ({ obra: nomeObra(x), ...t })));
+  const feitos = O.flatMap((x) => arr<Feito>(x.dados?.feitos).map((f) => ({ obra: nomeObra(x), ...f })));
+  const pctObra = (x: LinhaBase) => (num(x.dados?.total) ? Math.round((num(x.dados?.feitas) / num(x.dados?.total)) * 100) : 0);
   return {
     tipo: "obras", titulo: "Relatório das obras", subtitulo: `${org ? `${org} · ` : ""}${O.length} obras em curso ou aprovadas`, atualizado: recente(L),
     nomeFicheiro: `Relatorio obras ${hojeIso()}`,
     seccoes: [
       { k: "kpis", itens: [
         { rot: "Obras", valor: String(O.length), nota: `${emCurso} em curso, ${O.length - emCurso} aprovadas` },
-        { rot: "Decisões à espera", valor: String(dec), nota: "pedidas pelos agentes", tom: dec ? "atencao" : "bom" },
+        { rot: "Decisões à espera", valor: String(dec), nota: dec ? `em ${O.filter((x) => num(x.dados?.decisoes)).length} ${O.filter((x) => num(x.dados?.decisoes)).length === 1 ? "obra" : "obras"}` : "nada à espera", tom: dec ? "atencao" : "bom" },
+        ...(comDados ? [{ rot: "Tarefas feitas", valor: `${feitasT} de ${totalT}`, nota: totalT ? `${Math.round((feitasT / totalT) * 100)}% do total` : "", tom: "neutro" as const }] : []),
+        ...(comDados ? [{ rot: "Os agentes fizeram", valor: String(feitos.length), nota: feitos.length ? "hoje, sozinhos ou aceites" : "nada hoje", tom: (feitos.length ? "bom" : "neutro") as "bom" | "neutro" }] : []),
       ] },
-      { k: "barras", titulo: "Decisões à espera por obra", itens: O.map((x) => ({ rot: `${x.numero} · ${nomeDe(x.titulo)}`, valor: num(x.dados?.decisoes), texto: String(num(x.dados?.decisoes)) })) },
-      { k: "tabela", titulo: "As obras", colunas: [{ t: "Nº", w: 8, dir: true }, { t: "Cliente", w: 36 }, { t: "Estado", w: 14 }, { t: "Acaba a", w: 16 }, { t: "Decisões", w: 10, dir: true }],
-        linhas: O.map((x) => [x.numero!, nomeDe(x.titulo), str(x.dados?.estado) || "—", str(x.dados?.fim) || "—", num(x.dados?.decisoes)]) },
-      ...(resumo ? [{ k: "texto" as const, titulo: "O dia das obras", paragrafos: [resumo.texto] }] : []),
-      { k: "texto", titulo: "Obra a obra", paragrafos: O.map((x) => x.texto) },
+      ...(comDados ? [{ k: "barras" as const, titulo: "Progresso por obra", nota: "Tarefas feitas ou validadas sobre o total do plano.", itens: O.map((x) => ({ rot: nomeObra(x), valor: pctObra(x), texto: `${pctObra(x)}% · ${num(x.dados?.feitas)} de ${num(x.dados?.total)}` })) }] : []),
+      { k: "tabela", titulo: "As obras", colunas: [{ t: "Nº", w: 7, dir: true }, { t: "Cliente", w: 32 }, { t: "Estado", w: 12 }, { t: "Dia", w: 7, dir: true }, { t: "Tarefas", w: 11, dir: true }, { t: "Acaba a", w: 14 }, { t: "Decisões", w: 10, dir: true }],
+        linhas: O.map((x) => [x.numero!, nomeDe(x.titulo), str(x.dados?.estado) || "—", x.dados?.dia != null ? String(num(x.dados?.dia)) : "—",
+          x.dados?.total != null ? `${num(x.dados?.feitas)} de ${num(x.dados?.total)}` : "—", str(x.dados?.fim) || "—", num(x.dados?.decisoes)]) },
+      ...(pedem.length ? [{ k: "tabela" as const, titulo: "O que pede decisão", nota: "As propostas dos agentes à espera do gestor, obra a obra.", colunas: [{ t: "Obra", w: 28 }, { t: "Agente", w: 12 }, { t: "Proposta", w: 60 }],
+        linhas: pedem.map((p) => [p.obra, p.agente, p.titulo]) }] : []),
+      ...(proximas.length ? [{ k: "tabela" as const, titulo: "A seguir em cada obra", colunas: [{ t: "Obra", w: 24 }, { t: "Tarefa", w: 36 }, { t: "Estado", w: 12 }, { t: "Quando", w: 14 }, { t: "Técnico", w: 16 }],
+        linhas: proximas.map((t) => [t.obra, t.nome, t.estado, t.quando, t.tec]) }] : []),
+      ...(feitos.length ? [{ k: "tabela" as const, titulo: "O que os agentes fizeram hoje", colunas: [{ t: "Obra", w: 24 }, { t: "Quando", w: 10 }, { t: "O quê", w: 52 }, { t: "Quem", w: 14 }],
+        linhas: feitos.map((f) => [f.obra, f.quando, f.texto, f.quem]) }] : []),
+      ...(outras.length ? [{ k: "tabela" as const, titulo: "Os agentes a observar", nota: "Não pedem nada: só para saber.", colunas: [{ t: "Obra", w: 28 }, { t: "Agente", w: 12 }, { t: "Estado", w: 16 }, { t: "Nota", w: 48 }],
+        linhas: outras.map((p) => [p.obra, p.agente, modoTxt(p.modo), p.titulo]) }] : []),
+      // as linhas antigas, sem os dados novos: o texto, como antes
+      ...(!comDados ? [{ k: "texto" as const, titulo: "Obra a obra", paragrafos: O.map((x) => x.texto) }] : []),
     ],
   };
 }
