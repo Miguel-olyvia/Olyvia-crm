@@ -2605,7 +2605,7 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     return true;
   };
   /** 27/11 (Rúben: «ver em destaque o que falta, link para ver o detalhe»): o aviso de uma tarefa juntada ao plano diz logo o que ela
-   *  precisa e o que falta (por encomendar, por aprovar ao fornecedor, à espera da adenda paga) e leva ao separador Materiais do Estúdio
+   *  precisa e o que falta (por encomendar, compra por aprovar, à espera da adenda paga) e leva ao separador Materiais do Estúdio
    *  da obra, onde está em destaque. Sem o Estúdio aberto, leva ao Inventário (a encomenda de ajuste), como antes. */
   const avisoTarefaNova = (d: Negocio, t: Tarefa, base: { msg: string; sub: string }) => {
     const inv = d.obra.ec?.ref ? resumoEcNegocio(lerInventario(), d.obra.ec.ref) : null;

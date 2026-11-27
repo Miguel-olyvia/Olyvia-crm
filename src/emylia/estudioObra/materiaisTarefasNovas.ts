@@ -20,7 +20,7 @@ export type EstadoMatNovo = "por encomendar" | "espera adenda" | "espera inicial
 /** O rótulo curto de cada estado (o chip da linha). */
 export const ROTULO_MAT_NOVO: Record<EstadoMatNovo, string> = {
   "por encomendar": "por encomendar", "espera adenda": "à espera da adenda paga", "espera inicial": "sai com a encomenda inicial",
-  "por aprovar": "por aprovar ao fornecedor", encomendado: "encomendado ao fornecedor", "a chegar": "a chegar", "sem fornecedor": "sem fornecedor", garantido: "garantido",
+  "por aprovar": "compra por aprovar", encomendado: "encomendado ao fornecedor", "a chegar": "a chegar", "sem fornecedor": "sem fornecedor", garantido: "garantido",
 };
 
 export interface MatDaTarefaNova {
@@ -90,7 +90,7 @@ export interface ResumoFalta {
   falta: number; porEncomendar: number;
   /** pode encomendar-se daqui (a encomenda de cliente está no Inventário, ou é a da base na Olyvia) */
   podeEncomendar: boolean;
-  /** a frase curta: «2 por encomendar · 1 por aprovar ao fornecedor» */
+  /** a frase curta: «2 por encomendar · 1 compra por aprovar» */
   frase: string;
 }
 const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
