@@ -33,7 +33,7 @@ const rpcDe = (sb: SupabaseClient): Rpc => (fn, args) => (sb as unknown as { rpc
 const erro = (e: { message?: string } | null, o: string): Error => new Error(e?.message || o);
 /** Uma consulta a uma tabela sem os tipos gerados (as colunas lidas estão escritas em cada uso). */
 interface Consulta extends PromiseLike<{ data: unknown; error: { message?: string } | null }> {
-  select(c: string): Consulta; eq(c: string, v: unknown): Consulta; in(c: string, v: unknown[]): Consulta; is(c: string, v: null): Consulta;
+  select(c: string): Consulta; eq(c: string, v: unknown): Consulta; ilike(c: string, v: string): Consulta; in(c: string, v: unknown[]): Consulta; is(c: string, v: null): Consulta;
   order(c: string): Consulta; limit(n: number): Consulta;
 }
 const tabela = (sb: SupabaseClient, t: string): Consulta => (sb as unknown as { from: (t: string) => Consulta }).from(t);
@@ -60,14 +60,18 @@ export function ligacaoPara(produto: string, L: readonly { id: string; product_i
 /** O fornecedor de teste da organização (o da demo da Mudelar, 18/11). */
 export const FORNECEDOR_DE_TESTE = "Fornecedor Demo";
 
-/** Liga o produto ao fornecedor de teste (não preferido: o Catálogo fica como estava para o pedido ao fornecedor). null sem ele. */
-async function ligarAoFornecedorDeTeste(sb: SupabaseClient, org: string, produto: string): Promise<string | null> {
-  const f = await tabela(sb, "suppliers").select("id").eq("organization_id", org).eq("name", FORNECEDOR_DE_TESTE).is("deleted_at", null).limit(1);
+/** Liga o produto ao fornecedor de teste (não preferido: o Catálogo fica como estava para o pedido ao fornecedor). Devolve a ligação,
+ *  ou o motivo por que não deu. 27/11 (no testarh: «sem o Fornecedor Demo»): faltava o created_by (obrigatório) e o erro perdia-se. */
+async function ligarAoFornecedorDeTeste(sb: SupabaseClient, org: string, produto: string, autor: string | null): Promise<{ id: string } | { motivo: string }> {
+  const f = await tabela(sb, "suppliers").select("id").eq("organization_id", org).ilike("name", FORNECEDOR_DE_TESTE).is("deleted_at", null).limit(1);
   const fornecedor = (f.data as { id: string }[] | null)?.[0]?.id;
-  if (f.error || !fornecedor) return null;
+  if (f.error) return { motivo: `não deu para ler o «${FORNECEDOR_DE_TESTE}»: ${f.error.message ?? "erro"}` };
+  if (!fornecedor) return { motivo: `sem nenhum fornecedor ligado no Catálogo e sem o «${FORNECEDOR_DE_TESTE}» na organização` };
+  if (!autor) return { motivo: "não se encontrou o perfil de quem está a usar a app" };
   const ins = await (sb as unknown as { from: (t: string) => { insert: (v: Record<string, unknown>) => { select: (c: string) => PromiseLike<{ data: { id: string }[] | null; error: { message?: string } | null }> } } })
-    .from("item_suppliers").insert({ organization_id: org, item_type: "product", product_id: produto, supplier_id: fornecedor, is_preferred: false, is_active: true }).select("id");
-  return ins.error ? null : ins.data?.[0]?.id ?? null;
+    .from("item_suppliers").insert({ organization_id: org, item_type: "product", product_id: produto, supplier_id: fornecedor, is_preferred: false, is_active: true, created_by: autor }).select("id");
+  if (ins.error || !ins.data?.[0]?.id) return { motivo: `não deu para ligar ao «${FORNECEDOR_DE_TESTE}»: ${ins.error?.message ?? "sem resposta"}` };
+  return { id: ins.data[0].id };
 }
 
 /** O texto do aviso, em palavras. */
@@ -81,7 +85,7 @@ export function textoGarantir(r: ResultadoGarantir): { msg: string; sub: string;
 }
 
 /** Põe os materiais da EC do contrato no armazém (ver o topo do ficheiro). */
-export async function garantirMateriaisTeste(sb: SupabaseClient, org: string, contrato: string): Promise<ResultadoGarantir> {
+export async function garantirMateriaisTeste(sb: SupabaseClient, org: string, contrato: string, autor: string | null = null): Promise<ResultadoGarantir> {
   const rpc = rpcDe(sb);
   const res: ResultadoGarantir = { recebidas: [], entradas: [], deFora: [] };
   const doc = await lerDocumentoEc(sb, contrato);
@@ -115,8 +119,11 @@ export async function garantirMateriaisTeste(sb: SupabaseClient, org: string, co
     for (const l of falta) {
       let ligacao = ligacaoPara(l.product_id!, (lig.data ?? []) as { id: string; product_id: string; is_preferred: boolean | null }[]);
       // sem nenhum fornecedor: liga-se ao fornecedor de teste («Fornecedor Demo»), não preferido, só para a entrada poder acontecer
-      if (!ligacao) ligacao = await ligarAoFornecedorDeTeste(sb, org, l.product_id!);
-      if (!ligacao) { res.deFora.push({ produto: nomeDe(l), motivo: `sem nenhum fornecedor ligado no Catálogo e sem o «${FORNECEDOR_DE_TESTE}» na organização` }); continue; }
+      if (!ligacao) {
+        const r = await ligarAoFornecedorDeTeste(sb, org, l.product_id!, autor);
+        if ("motivo" in r) { res.deFora.push({ produto: nomeDe(l), motivo: r.motivo }); continue; }
+        ligacao = r.id;
+      }
       const { error } = await rpc("rpc_register_stock_entry", {
         p_product_id: l.product_id, p_warehouse_id: armazem, p_qty: Math.ceil(Number(l.qty_missing)), p_item_supplier_id: ligacao,
         p_unit_cost: null, p_counterparty: "Modo de teste", p_notes: "Modo de teste: materiais da obra dados como garantidos (sem fornecedor)",
