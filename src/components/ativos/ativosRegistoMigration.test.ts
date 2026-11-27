@@ -203,8 +203,11 @@ describe(`migration ${nome}`, () => {
   });
 
   it("nenhuma migration de reversão desta e nenhum carimbo repetido", () => {
-    // 26/11: a A1 (20270129100000) é a única migration de ativos que vem depois desta; nenhuma de reversão.
-    expect(readdirSync(pasta).filter((f) => /ativos?_/.test(f) && /ativo/.test(f))).toEqual([nome, "20270129100000_ativos_a1.sql"]);
+    // 26/11: a A1 (20270129100000) vem depois desta; 27/11: e as da fase 1 dos ativos (20270130[1-4]00000, cada
+    // uma com o seu teste de texto). Nenhuma de reversão.
+    const fase1 = /^20270130[1-4]00000_/;
+    expect(readdirSync(pasta).filter((f) => /ativos?_/.test(f) && /ativo/.test(f) && !fase1.test(f))).toEqual([nome, "20270129100000_ativos_a1.sql"]);
+    expect(readdirSync(pasta).filter((f) => /ativo/.test(f) && /(revert|reverter|rollback|desfazer)/i.test(f))).toEqual([]);
     expect(readdirSync(pasta).filter((f) => f.startsWith("20270126900000_"))).toHaveLength(1);
   });
 });

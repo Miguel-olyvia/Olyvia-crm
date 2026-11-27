@@ -84,7 +84,9 @@ describe(`migration ${nome}`, () => {
   });
 
   it("carimbo maior do que tudo o que existe (20270128200000 é o último no remoto) e único", () => {
-    const outras = readdirSync(pasta).filter((f) => /^\d{14}_/.test(f) && f !== nome);
+    // 27/11: as migrations da fase 1 dos ativos (20270130[1-4]00000, a seguir à onda 7) vêm depois desta, de propósito.
+    const fase1 = /^20270130[1-4]00000_/;
+    const outras = readdirSync(pasta).filter((f) => /^\d{14}_/.test(f) && f !== nome && !fase1.test(f));
     for (const f of outras) expect(f.slice(0, 14) < nome.slice(0, 14), f).toBe(true);
     expect(nome.slice(0, 14) > "20270128200000").toBe(true);
     expect(readdirSync(pasta).filter((f) => f.startsWith("20270129100000_"))).toEqual([nome]);
