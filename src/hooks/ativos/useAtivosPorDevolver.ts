@@ -53,7 +53,7 @@ export function useAtivosPorDevolver({ organizationId, pessoaId = null, dias, en
       } catch (e) {
         if (ativosIndisponivel(e)) return "indisponivel";
         if (ativosRecusado(e)) return "recusado";
-        captureFlowError(e, "ativos-por-devolver");
+        captureFlowError(e, "ativos-listar");
         throw e;
       }
     },

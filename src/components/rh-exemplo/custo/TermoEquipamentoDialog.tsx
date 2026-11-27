@@ -44,8 +44,8 @@ function Formulario({ equipamento, pessoaId, aoFechar }: { equipamento: Equipame
     if (aEmitir || modeloId === "") return;
     setMensagem(null);
     const r = await emitir(equipamento.id, momento, modeloId);
-    if (r.ok) setEmitido(r.termo);
-    else setMensagem(r.mensagem);
+    if (r.ok && r.termo) setEmitido(r.termo);
+    else setMensagem(r.mensagem ?? null);
   };
 
   if (emitido) {

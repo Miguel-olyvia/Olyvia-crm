@@ -22,7 +22,12 @@ export interface TermoEmitido {
   estado: string | null;
 }
 
-export type ResultadoTermo = { ok: true; termo: TermoEmitido } | { ok: false; mensagem: string };
+/** `ok` verdadeiro: `termo` é o documento criado. Falso: `mensagem` já traduzida. */
+export interface ResultadoTermo {
+  ok: boolean;
+  termo?: TermoEmitido;
+  mensagem?: string;
+}
 
 export interface TermoAtivoHook {
   /** Emite o termo da linha `pessoaEquipamentoId` (a entrega do ativo a uma pessoa). */

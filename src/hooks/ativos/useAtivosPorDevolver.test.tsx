@@ -69,7 +69,7 @@ describe("useAtivosPorDevolver", () => {
     const { result } = renderHook(() => useAtivosPorDevolver({ organizationId: "org-1", dias: 30 }), { wrapper: envolver });
     await waitFor(() => expect(result.current.estado).toBe("erro"));
     expect(result.current.mensagem).toBe("T:ativos.saidas.erroLer");
-    expect(m.captura).toHaveBeenCalledWith(expect.anything(), "ativos-por-devolver");
+    expect(m.captura).toHaveBeenCalledWith(expect.anything(), "ativos-listar");
   });
 
   it("sem permissão para ver (enabled falso) ou sem organização não pede nada", async () => {
