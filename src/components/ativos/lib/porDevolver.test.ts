@@ -1,7 +1,7 @@
 // A resposta de `rpc_ativos_por_devolver`: o jsonb é lido com tolerância (nada rebenta com uma chave a faltar) e, sem detalhe,
 // fica uma estrutura segura só com contagens (pessoas vazio, nunca nomes nem itens).
 import { describe, expect, it } from "vitest";
-import { chaveDiasRestantes, porDevolverDaResposta, resumoDaFaixa } from "./porDevolver";
+import { chaveDiasRestantes, ordenarPorSaida, porDevolverDaResposta, resumoDaFaixa } from "./porDevolver";
 
 const PESSOA = {
   pessoa_id: "p1", nome: "Ana Silva", saida_prevista: "2026-12-09", origem: "fim_contrato", dias_restantes: 12, vinculo_id: "v1",
@@ -83,5 +83,19 @@ describe("resumoDaFaixa", () => {
     expect(resumoDaFaixa({ totalPessoas: 1, totalItens: 3 })).toBe("ativos.faixa.pessoa.itens");
     expect(resumoDaFaixa({ totalPessoas: 2, totalItens: 1 })).toBe("ativos.faixa.pessoas.item");
     expect(resumoDaFaixa({ totalPessoas: 3, totalItens: 5 })).toBe("ativos.faixa.pessoas.itens");
+  });
+});
+
+describe("ordenarPorSaida", () => {
+  it("a saída mais próxima primeiro («já saiu» no topo), as sem data no fim, sem mexer na lista original", () => {
+    const base = { nome: null, saidaPrevista: null, origem: "fim_contrato" as const, vinculoId: null, nItens: 0, itens: [] };
+    const lista = [
+      { ...base, pessoaId: "a", diasRestantes: 12 },
+      { ...base, pessoaId: "b", diasRestantes: null },
+      { ...base, pessoaId: "c", diasRestantes: -3 },
+      { ...base, pessoaId: "d", diasRestantes: 0 },
+    ];
+    expect(ordenarPorSaida(lista).map((p) => p.pessoaId)).toEqual(["c", "d", "a", "b"]);
+    expect(lista.map((p) => p.pessoaId)).toEqual(["a", "b", "c", "d"]);
   });
 });

@@ -97,6 +97,7 @@ import { ContratoDatasDaPessoa } from "@/components/rh-exemplo/contrato/Contrato
 import { CAMPO_ANTIGUIDADE, ContratoGrupoDatas } from "@/components/rh-exemplo/contrato/ContratoGrupoDatas";
 import { ContratoGrupoTempoTrabalho } from "@/components/rh-exemplo/contrato/ContratoGrupoTempoTrabalho";
 import { ContratosAnterioresCard } from "@/components/rh-exemplo/contrato/ContratosAnterioresCard";
+import { FaixaPorDevolverRh } from "@/components/rh-exemplo/fimContrato/FaixaPorDevolverRh";
 import { FimContratoCard } from "@/components/rh-exemplo/fimContrato/FimContratoCard";
 import { HistoricoAlteracoesCard } from "@/components/rh-exemplo/contrato/HistoricoAlteracoesCard";
 import {
@@ -464,6 +465,8 @@ export function PessoaContratoTab({
         podeAlterar={podeEditar}
         podeCorrigir={podeCorrigirHoras}
       />
+
+      <FaixaPorDevolverRh organizationId={organizationId} pessoaId={pessoaId} enabled={activo !== null} />
 
       <FimContratoCard
         organizationId={organizationId}

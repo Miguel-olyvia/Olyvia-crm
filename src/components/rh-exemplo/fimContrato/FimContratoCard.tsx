@@ -26,12 +26,16 @@ import { AccaoFimContratoDialog } from "@/components/rh-exemplo/fimContrato/Acca
 import { ExcepcaoContratoDialog } from "@/components/rh-exemplo/fimContrato/ExcepcaoContratoDialog";
 import { FimContratoHistorico } from "@/components/rh-exemplo/fimContrato/FimContratoHistorico";
 import { IndicacaoDoResponsavelReal } from "@/components/rh-exemplo/hooks/IndicacaoDoResponsavelReal";
+import { PorDevolverNaSaida } from "@/components/rh-exemplo/fimContrato/PorDevolverNaSaida";
 import { SinoFimContrato } from "@/components/rh-exemplo/fimContrato/SinoFimContrato";
 import { usePessoaContratoFim } from "@/components/rh-exemplo/hooks/usePessoaContratoFim";
 import { useTranslation } from "@/hooks/useTranslation";
 import { duracaoIgualInicial } from "@/components/rh-exemplo/lib/fimContrato";
 import { toast } from "@/lib/toast";
 import type { PessoaVinculo } from "@/components/rh-exemplo/tipos";
+
+/** Os itens por devolver de uma pessoa lem-se ate ao maximo da base (365 dias): terminar agora vale seja qual for a data de fim. */
+const DIAS_POR_DEVOLVER_NA_PESSOA = 365;
 
 interface FimContratoCardProps {
   organizationId: string;
@@ -198,6 +202,9 @@ export function FimContratoCard({ organizationId, vinculo, podeEditar, onMudou }
         titulo={t("hr.fimContrato.terminar.titulo")}
         descricao={t("hr.fimContrato.terminar.descricao")}
         confirmarLabel={t("hr.fimContrato.terminar.confirmar")}
+        antesDoMotivo={
+          <PorDevolverNaSaida organizationId={organizationId} pessoaId={vinculo.pessoa_id} dias={DIAS_POR_DEVOLVER_NA_PESSOA} />
+        }
         saving={fim.saving}
         onConfirmar={async (motivo) => {
           const resultado = await fim.terminar(motivo);

@@ -30,6 +30,9 @@ vi.mock("@/hooks/ativos/useAtivos", () => ({
 vi.mock("@/hooks/ativos/useAtivoMutacoes", () => ({ useAtivoMutacoes: () => m.mut }));
 vi.mock("@/hooks/ativos/useAtivoLido", () => ({ useAtivoLido: () => ({ ativo: m.lido, ...m.lidoEstado }) }));
 vi.mock("@/hooks/ativos/useValorStockArmazem", () => ({ useValorStockArmazem: () => m.valorStock }));
+// «Saídas» e a faixa de aviso (a lista «por devolver» é simulada; por omissão recusada, o que não mostra nada).
+const pd = vi.hoisted(() => ({ leitura: {} as Record<string, unknown>, chamadas: vi.fn() }));
+vi.mock("@/hooks/ativos/useAtivosPorDevolver", () => ({ useAtivosPorDevolver: (o: unknown) => { pd.chamadas(o); return pd.leitura; } }));
 vi.mock("@/hooks/ativos/useAtivosOpcoes", () => ({
   useAtivosOpcoes: () => ({ opcoes: { equipamentos: [{ id: "c1", nome: "Berbequim Hilti", vidaAnos: 5, vidaHoras: null }], centrosCusto: [], armazens: [], podeVerArmazens: false }, erro: null, aCarregar: false }),
 }));
@@ -99,6 +102,8 @@ beforeEach(() => {
   m.lido = null;
   m.lidoEstado = { aCarregar: false, falhou: false };
   m.valorStock = { valor: null, aCarregar: false, falhou: false };
+  pd.leitura = { estado: "recusado", dados: null, mensagem: null, aAtualizar: false, refazer: vi.fn() };
+  pd.chamadas.mockReset();
   m.useAtivos.mockReset();
   m.refazer.mockReset();
   Object.values(m.mut).forEach((f) => f.mockReset().mockResolvedValue({ ok: true, id: "x" }));
@@ -1080,5 +1085,85 @@ describe("Ativos: as ações da ficha continuam por permissão", () => {
     const dialogo = await screen.findByRole("dialog", { name: "Desativar ativo" });
     // Não se desativa antes da última devolução (ATV29): o campo diz o mínimo.
     expect(within(dialogo).getByLabelText(/Data de desativação/)).toHaveAttribute("min", "2026-03-31");
+  });
+});
+
+describe("Ativos: separador «Saídas» e faixa «por devolver»", () => {
+  const SAIDAS = {
+    hoje: "2026-06-15", dias: 90, detalhe: true, totalPessoas: 1, totalItens: 2,
+    pessoas: [{ pessoaId: "p1", nome: "Ana Silva", saidaPrevista: "2026-06-30", origem: "fim_contrato", diasRestantes: 15, vinculoId: "v1", nItens: 2,
+      itens: [{ origem: "ativo", itemId: "i1", refId: "a1", codigo: "NIKE-IT-LAP-26-0001", nome: "Portátil Dell", desde: "2026-02-01" }, { origem: "frota", itemId: "i2", refId: "f1", codigo: "12-AB-34", nome: "Renault Clio", desde: "2026-03-01" }] }],
+  };
+  const comSaidas = (p: Record<string, unknown> = {}) => { pd.leitura = { estado: "ok", dados: SAIDAS, mensagem: null, aAtualizar: false, refazer: vi.fn(), ...p }; };
+
+  it("há um quarto separador «Saídas», que abre a lista e deixa de mostrar os totais de grupo", () => {
+    comSaidas();
+    ver();
+    expect(screen.getAllByRole("tab")).toHaveLength(4);
+    expect(screen.getByRole("region", { name: "Totais de Serviço" })).toBeInTheDocument();
+    abrirSeparador(/^Saídas/);
+    expect(separador(/^Saídas/)).toHaveAttribute("aria-selected", "true");
+    expect(screen.queryByRole("region", { name: /^Totais de/ })).not.toBeInTheDocument();
+    expect(screen.getByRole("heading", { level: 2, name: "Quem sai e o que tem de devolver" })).toBeInTheDocument();
+    expect(screen.getByText("Ana Silva")).toBeInTheDocument();
+    expect(screen.getByText("NIKE-IT-LAP-26-0001")).toBeInTheDocument();
+    // Voltar a um grupo traz os totais de volta.
+    abrirSeparador(/^Estrutura/);
+    expect(screen.getByRole("region", { name: "Totais de Estrutura" })).toBeInTheDocument();
+  });
+
+  it("a lista de Saídas só se pede quando o separador abre (a organização inteira, 90 dias)", () => {
+    ver();
+    expect(pd.chamadas.mock.calls.every(([o]) => (o as { dias: number }).dias === 30)).toBe(true);
+    pd.chamadas.mockClear();
+    abrirSeparador(/^Saídas/);
+    expect(pd.chamadas).toHaveBeenCalledWith(expect.objectContaining({ organizationId: "org-1", dias: 90 }));
+  });
+
+  it("a faixa aparece no topo com X > 0 e o «Ver» muda para Saídas sem navegar", () => {
+    comSaidas();
+    ver();
+    const faixa = screen.getByTestId("faixa-por-devolver");
+    expect(faixa).toHaveTextContent("1 pessoa sai nos próximos 30 dias com 2 itens por devolver");
+    fireEvent.click(within(faixa).getByRole("button", { name: "Ver quem sai e o que falta devolver" }));
+    expect(separador(/^Saídas/)).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("sem ninguém a sair (ou sem acesso) não há faixa", () => {
+    ver();
+    expect(screen.queryByTestId("faixa-por-devolver")).not.toBeInTheDocument();
+    comSaidas({ dados: { ...SAIDAS, totalPessoas: 0, totalItens: 0, pessoas: [] } });
+    cleanup();
+    ver();
+    expect(screen.queryByTestId("faixa-por-devolver")).not.toBeInTheDocument();
+  });
+
+  it("sem `ativos.view` não se pede nada à base", () => {
+    m.permissoes = [];
+    ver();
+    expect(pd.chamadas.mock.calls.every(([o]) => (o as { enabled?: boolean }).enabled === false)).toBe(true);
+  });
+
+  it("a ligação à Frota só aparece com `fleet.view`", () => {
+    comSaidas();
+    ver();
+    abrirSeparador(/^Saídas/);
+    expect(screen.queryByRole("link", { name: "Abrir a Frota" })).not.toBeInTheDocument();
+    cleanup();
+    m.permissoes = ["ativos.view", "fleet.view"];
+    ver();
+    abrirSeparador(/^Saídas/);
+    expect(screen.getByRole("link", { name: "Abrir a Frota" })).toBeInTheDocument();
+  });
+
+  it("`?aba=saidas` (a ligação do RH) abre já no separador Saídas", () => {
+    comSaidas();
+    render(
+      <LanguageProvider>
+        <MemoryRouter initialEntries={["/ativos?aba=saidas"]}><Ativos /></MemoryRouter>
+      </LanguageProvider>,
+    );
+    expect(separador(/^Saídas/)).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByText("Ana Silva")).toBeInTheDocument();
   });
 });

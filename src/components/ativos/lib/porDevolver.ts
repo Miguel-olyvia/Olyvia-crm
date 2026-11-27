@@ -116,3 +116,11 @@ export function resumoDaFaixa(p: Pick<PorDevolver, "totalPessoas" | "totalItens"
   if (p.totalPessoas <= 0) return null;
   return `ativos.faixa.${p.totalPessoas === 1 ? "pessoa" : "pessoas"}.${p.totalItens === 1 ? "item" : "itens"}`;
 }
+
+/** Onde se abre a Frota a partir de uma viatura por devolver (as atribuições, onde se regista a devolução). */
+export const ROTA_FROTA = "/frota/atribuicoes";
+
+/** A saída mais próxima primeiro («já saiu» no topo); as sem data no fim. */
+export function ordenarPorSaida(pessoas: readonly PessoaPorDevolver[]): PessoaPorDevolver[] {
+  return [...pessoas].sort((a, b) => (a.diasRestantes ?? Number.MAX_SAFE_INTEGER) - (b.diasRestantes ?? Number.MAX_SAFE_INTEGER));
+}

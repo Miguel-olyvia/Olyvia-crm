@@ -7,18 +7,23 @@
  * é comprado ou alugado: os totais (compra, amortizado, valor atual) são só dos comprados e os alugados vão nas rendas; a ficha diz quem
  * paga cada mês. O equipamento atribuído no RH passa a ser um ativo sozinho, por isso Ligar e Desligar saíram. Os custos por pessoa
  * continuam no RH e nada daqui entra em preços ou orçamentos. Cliente tolerante: sem o registo na base (migration por aplicar) ou sem
- * acesso, o ecrã diz-o.
+ * acesso, o ecrã diz-o. O quarto separador, «Saídas» (quem sai e o que tem por devolver), e a faixa de aviso por baixo do título são de
+ * `SaidasPorDevolver` e `FaixaPorDevolver`; não são um grupo de ativos, por isso o seu estado fica à parte do grupo.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { CircleCheck, Plus, Search, TriangleAlert, X } from "lucide-react";
 import { NoOrganizationState } from "@/components/NoOrganizationState";
 import { AtivoDetalhe } from "@/components/ativos/AtivoDetalhe";
 import { AtivoSheet, type AvisoGuardado } from "@/components/ativos/AtivoSheet";
 import { AvisoAtivo } from "@/components/ativos/AvisoAtivo";
 import { DesativarAtivoDialog } from "@/components/ativos/DesativarAtivoDialog";
+import { FaixaPorDevolver } from "@/components/ativos/FaixaPorDevolver";
 import { GrupoPessoas } from "@/components/ativos/GrupoPessoas";
 import { ListaAtivos } from "@/components/ativos/ListaAtivos";
 import { ReativarAtivoDialog } from "@/components/ativos/ReativarAtivoDialog";
+import { SaidasPorDevolver } from "@/components/ativos/SaidasPorDevolver";
+import { SeparadorSaidas, VALOR_SEPARADOR_SAIDAS } from "@/components/ativos/SeparadorSaidas";
 import { TotaisGrupo } from "@/components/ativos/TotaisGrupo";
 import { custoParadoDosAtivos } from "@/components/ativos/lib/amortizacaoAtivo";
 import { ICONE_GRUPO, TOM_GRUPO } from "@/components/ativos/lib/ativosUi";
@@ -45,6 +50,8 @@ export const PERMISSAO_EDITAR_ATIVOS = "ativos.edit";
 // O valor em produtos de um armazém ligado: a base exige as duas (inventory.view e products.view_cost).
 const PERMISSAO_VER_STOCK = "inventory.view";
 const PERMISSAO_VER_CUSTO_STOCK = "products.view_cost";
+// A viatura por devolver só leva à Frota a quem a pode ver.
+const PERMISSAO_VER_FROTA = "fleet.view";
 
 const ID_PROCURAR = "ativos-procurar";
 const CARTAO = "rounded-2xl border bg-card shadow-sm";
@@ -105,6 +112,9 @@ export default function Ativos() {
   const podeVerValorStock = hasPermission(PERMISSAO_VER_STOCK) && hasPermission(PERMISSAO_VER_CUSTO_STOCK);
 
   const [grupo, setGrupo] = useState<GrupoAtivo>("servico");
+  // «Saídas» não é um grupo de ativos: abre-se à parte (também por `?aba=saidas`, a ligação que vem do RH).
+  const [params] = useSearchParams();
+  const [emSaidas, setEmSaidas] = useState(() => params.get("aba") === VALOR_SEPARADOR_SAIDAS);
   const [texto, setTexto] = useState("");
   const [estado, setEstado] = useState<FiltroEstado>("ativos");
   const [aviso, setAviso] = useState<string | null>(null);
@@ -134,7 +144,12 @@ export default function Ativos() {
 
   const naoPodeVer = !podeVer || leitura.estado === "recusado";
   const detalhe = detalheId && dados ? procurarEm(dados, detalheId) : null;
-  const mudarGrupo = (g: string) => { setGrupo(g as GrupoAtivo); setAviso(null); setErroAcao(null); };
+  const mudarGrupo = (g: string) => {
+    setEmSaidas(g === VALOR_SEPARADOR_SAIDAS);
+    if (g !== VALOR_SEPARADOR_SAIDAS) setGrupo(g as GrupoAtivo);
+    setAviso(null);
+    setErroAcao(null);
+  };
   const registar = (mensagem: string) => { setAviso(mensagem); setErroAcao(null); };
 
   const aoGuardar = ({ nome, edicao }: AvisoGuardado) => registar(t(edicao ? "ativos.aviso.guardado" : "ativos.aviso.criado", { nome }));
@@ -267,6 +282,8 @@ export default function Ativos() {
         )}
       </div>
 
+      <FaixaPorDevolver organizationId={activeCompany.id} aoVer={() => mudarGrupo(VALOR_SEPARADOR_SAIDAS)} enabled={podeVer && !permissoesACarregar} />
+
       {leitura.estado === "a_carregar" && !naoPodeVer && (
         <div className="space-y-5">
           <OlyviaLoader size={16} text={t("ativos.aCarregar")} className="flex-row justify-start" />
@@ -304,13 +321,15 @@ export default function Ativos() {
 
       {leitura.estado === "ok" && dados && !naoPodeVer && (
         <>
-          <TotaisGrupo
-            grupo={grupo} totais={totaisAtivos(dados[grupo], mes)} parcial={dados.truncado} soEmUso={estado !== "ativos"}
-            parado={grupo === "estrutura" ? custoParadoDosAtivos(dados.pessoa, mes, hoje) : null}
-            livres={grupo === "pessoa" ? livres : null}
-          />
-          <Tabs value={grupo} onValueChange={mudarGrupo} className="space-y-4" aria-busy={leitura.aAtualizar}>
-            <TabsList aria-label={t("ativos.separadores")} className="grid h-auto w-full grid-cols-3 gap-1.5 rounded-2xl border bg-muted/50 p-1.5">
+          {!emSaidas && (
+            <TotaisGrupo
+              grupo={grupo} totais={totaisAtivos(dados[grupo], mes)} parcial={dados.truncado} soEmUso={estado !== "ativos"}
+              parado={grupo === "estrutura" ? custoParadoDosAtivos(dados.pessoa, mes, hoje) : null}
+              livres={grupo === "pessoa" ? livres : null}
+            />
+          )}
+          <Tabs value={emSaidas ? VALOR_SEPARADOR_SAIDAS : grupo} onValueChange={mudarGrupo} className="space-y-4" aria-busy={leitura.aAtualizar}>
+            <TabsList aria-label={t("ativos.separadores")} className="grid h-auto w-full grid-cols-2 gap-1.5 rounded-2xl border bg-muted/50 p-1.5 sm:grid-cols-4">
               {GRUPOS_ATIVO.map((g) => {
                 const Icone = ICONE_GRUPO[g];
                 return (
@@ -343,12 +362,16 @@ export default function Ativos() {
                   </TabsTrigger>
                 );
               })}
+              <SeparadorSaidas />
             </TabsList>
             {GRUPOS_ATIVO.map((g) => (
               <TabsContent key={g} value={g} className="mt-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
                 {painelDoGrupo(g, dados)}
               </TabsContent>
             ))}
+            <TabsContent value={VALOR_SEPARADOR_SAIDAS} className="mt-0 motion-safe:animate-in motion-safe:fade-in-0 motion-safe:duration-200">
+              <SaidasPorDevolver organizationId={activeCompany.id} ligacaoFrota={hasPermission(PERMISSAO_VER_FROTA)} />
+            </TabsContent>
           </Tabs>
         </>
       )}

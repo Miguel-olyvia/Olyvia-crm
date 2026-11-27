@@ -7,8 +7,11 @@
  * `onConfirmar` devolve o texto do erro (ja traduzido) ou `null` se correu
  * bem; com erro a janela fica aberta, com o erro a vista, para se poder
  * corrigir ou cancelar -- nunca se perde a accao em silencio.
+ *
+ * `antesDoMotivo` (opcional) e o que se mostra antes do motivo, por exemplo
+ * a lista do que a pessoa ainda tem por devolver no "Terminar".
  */
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +32,7 @@ interface AccaoFimContratoDialogProps {
   titulo: string;
   descricao: string;
   confirmarLabel: string;
+  antesDoMotivo?: ReactNode;
   saving: boolean;
   onConfirmar: (motivo: string | null) => Promise<string | null>;
 }
@@ -39,6 +43,7 @@ export function AccaoFimContratoDialog({
   titulo,
   descricao,
   confirmarLabel,
+  antesDoMotivo,
   saving,
   onConfirmar,
 }: AccaoFimContratoDialogProps) {
@@ -70,6 +75,7 @@ export function AccaoFimContratoDialog({
           <DialogTitle>{titulo}</DialogTitle>
           <DialogDescription>{descricao}</DialogDescription>
         </DialogHeader>
+        {antesDoMotivo}
         <div className="space-y-1.5">
           <Label htmlFor="hr-fim-contrato-accao-motivo">{t("hr.fimContrato.motivo")}</Label>
           <Textarea

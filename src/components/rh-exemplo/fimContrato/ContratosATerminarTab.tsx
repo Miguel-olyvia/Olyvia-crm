@@ -29,6 +29,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { FaixaPorDevolverRh } from "@/components/rh-exemplo/fimContrato/FaixaPorDevolverRh";
+import { PorDevolverNaSaida } from "@/components/rh-exemplo/fimContrato/PorDevolverNaSaida";
 import { SinoFimContrato } from "@/components/rh-exemplo/fimContrato/SinoFimContrato";
 import { useContratosATerminar } from "@/components/rh-exemplo/hooks/useContratosATerminar";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -37,6 +39,8 @@ import type { OQueAcontece } from "@/components/rh-exemplo/lib/fimContrato";
 /** Os horizontes que o filtro oferece (so um filtro de leitura; nao e regra de negocio). */
 const FILTROS_DIAS = [15, 30, 60, 90, 180] as const;
 const SEM_FILTRO = "__omissao__";
+/** Sem filtro, o bloco "Por devolver" usa o horizonte por omissao da base (90 dias). */
+const DIAS_POR_DEVOLVER_OMISSAO = 90;
 
 function varianteDoQueAcontece(valor: OQueAcontece): "default" | "secondary" | "outline" | "destructive" {
   if (valor === "decisao_rh" || valor === "termina") return "destructive";
@@ -56,6 +60,10 @@ export function ContratosATerminarTab({ organizationId }: ContratosATerminarTabP
   const { contratos, isLoading, error } = useContratosATerminar(organizationId, dias);
 
   return (
+    <>
+    <div className="mb-4 empty:hidden">
+      <FaixaPorDevolverRh organizationId={organizationId} />
+    </div>
     <Card>
       <CardHeader className="flex flex-row flex-wrap items-end justify-between gap-3 pb-3">
         <CardTitle className="text-base">{t("hr.fimContrato.lista.titulo")}</CardTitle>
@@ -155,5 +163,9 @@ export function ContratosATerminarTab({ organizationId }: ContratosATerminarTabP
         )}
       </CardContent>
     </Card>
+    <div className="mt-4 empty:hidden">
+      <PorDevolverNaSaida organizationId={organizationId} dias={dias ?? DIAS_POR_DEVOLVER_OMISSAO} />
+    </div>
+    </>
   );
 }
