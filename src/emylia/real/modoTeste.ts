@@ -14,6 +14,9 @@ export interface AcoesDeTeste {
   assinarContrato: (d: Negocio) => Promise<void>;
   /** Confirmar a encomenda a fornecedor como o fornecedor no portal dele. */
   confirmarFornecedor: (poUuid: string) => Promise<void>;
+  /** 27/11: dar os materiais da obra como garantidos: recebe as encomendas a fornecedor dela e dá entrada do que falta (real/materiaisTeste.ts).
+   *  Nada vai a fornecedores. */
+  garantirMateriais?: (contrato: string) => Promise<void>;
 }
 
 let acoes: AcoesDeTeste | null = null;

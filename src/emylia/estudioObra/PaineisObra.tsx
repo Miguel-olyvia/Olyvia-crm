@@ -401,6 +401,12 @@ export function MateriaisDaObra({ ctx, d, dias = [], abrir, irAba, realce }: { c
     if (x.ec) return { rot: `Ver ${x.ec}`, fn: () => run(() => A.abrirInv(d.id, x.ec)) };
     return null;
   };
+  // 27/11 (visto no testarh): as linhas das encomendas de ajuste usam na lista por fase o mesmo rótulo do destaque (antes, a mesma linha
+  // dizia «por encomendar» em baixo e «por aprovar» em cima)
+  const rotuloNovo = (m: { n: string; ec?: string }): string | null => {
+    const x = m.ec ? novos.find((y) => y.ec === m.ec && y.n === m.n) : undefined;
+    return x && x.estado !== "garantido" ? ROTULO_MAT_NOVO[x.estado] : null;
+  };
   const precisaA = (t: Tarefa) => (dias[t.dia] ? dataCurta(dias[t.dia]) : `dia ${t.dia + 1}`);
   const quandoE = (k: number) => (dias[k] ? dataCurta(dias[k]) : `dia ${k + 1}`);
   return (
@@ -509,7 +515,7 @@ export function MateriaisDaObra({ ctx, d, dias = [], abrir, irAba, realce }: { c
                           {x.tarde && <span className="block text-xs font-medium text-destructive">Chega depois de a tarefa começar</span>}
                         </span>
                         <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", OK_MAT.has(m.estado) ? "bg-success/15 text-success" : x.tarde ? "bg-destructive/10 text-destructive" : "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200")}>
-                          {OK_MAT.has(m.estado) ? ROTULO_MAT[m.estado] ?? m.estado : m.quando ? `chega a ${m.quando}` : m.estado}
+                          {OK_MAT.has(m.estado) ? ROTULO_MAT[m.estado] ?? m.estado : m.quando ? `chega a ${m.quando}` : rotuloNovo(m) ?? m.estado}
                         </span>
                       </li>
                     );

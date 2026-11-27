@@ -20,7 +20,7 @@ export type EstadoMatNovo = "por encomendar" | "espera adenda" | "espera inicial
 /** O rótulo curto de cada estado (o chip da linha). */
 export const ROTULO_MAT_NOVO: Record<EstadoMatNovo, string> = {
   "por encomendar": "por encomendar", "espera adenda": "à espera da adenda paga", "espera inicial": "sai com a encomenda inicial",
-  "por aprovar": "por aprovar ao fornecedor", encomendado: "encomendado ao fornecedor", "a chegar": "a chegar", "sem fornecedor": "sem fornecedor", garantido: "garantido",
+  "por aprovar": "compra por aprovar", encomendado: "encomendado ao fornecedor", "a chegar": "a chegar", "sem fornecedor": "sem fornecedor", garantido: "garantido",
 };
 
 export interface MatDaTarefaNova {
@@ -90,7 +90,7 @@ export interface ResumoFalta {
   falta: number; porEncomendar: number;
   /** pode encomendar-se daqui (a encomenda de cliente está no Inventário, ou é a da base na Olyvia) */
   podeEncomendar: boolean;
-  /** a frase curta: «2 por encomendar · 1 por aprovar ao fornecedor» */
+  /** a frase curta: «2 por encomendar · 1 com a compra por aprovar» */
   frase: string;
 }
 const plural = (n: number, um: string, varios: string) => `${n} ${n === 1 ? um : varios}`;
@@ -100,7 +100,14 @@ export function resumoFalta(d: Negocio, L: readonly MatDaTarefaNova[]): ResumoFa
   const conta = new Map<EstadoMatNovo, number>();
   for (const x of F) conta.set(x.estado, (conta.get(x.estado) ?? 0) + 1);
   const ordem: EstadoMatNovo[] = ["por encomendar", "sem fornecedor", "por aprovar", "encomendado", "a chegar", "espera adenda", "espera inicial"];
-  const frase = ordem.filter((k) => conta.get(k)).map((k) => `${conta.get(k)} ${ROTULO_MAT_NOVO[k]}`).join(" · ");
+  // 27/11 (visto no testarh: «2 compra por aprovar»): a frase com o número concorda com ele
+  const FRASE: Record<EstadoMatNovo, (n: number) => string> = {
+    "por encomendar": (n) => `${n} por encomendar`, "sem fornecedor": (n) => `${n} sem fornecedor`,
+    "por aprovar": (n) => `${n} com a compra por aprovar`, encomendado: (n) => `${n} ${n === 1 ? "encomendado" : "encomendados"} ao fornecedor`,
+    "a chegar": (n) => `${n} a chegar`, "espera adenda": (n) => `${n} à espera da adenda paga`,
+    "espera inicial": (n) => `${n} ${n === 1 ? "sai" : "saem"} com a encomenda inicial`, garantido: (n) => `${n} ${n === 1 ? "garantido" : "garantidos"}`,
+  };
+  const frase = ordem.filter((k) => conta.get(k)).map((k) => FRASE[k](conta.get(k)!)).join(" · ");
   const porEncomendar = conta.get("por encomendar") ?? 0;
   return { falta: F.length, porEncomendar, podeEncomendar: porEncomendar > 0 && ajusteDisponivel(d), frase };
 }
