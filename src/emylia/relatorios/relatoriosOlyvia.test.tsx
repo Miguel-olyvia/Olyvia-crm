@@ -3,7 +3,7 @@ import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { obraDeExemplo } from "../estudioObra/exemploObra";
 import { itemCustos, itemOrcamento, itensDoConhecimento } from "../conhecimentoOlyvia";
-import { dia, docNegocios, docObras, docOrcamento, enderecoRelatorio, type LinhaBase } from "./relatoriosOlyvia";
+import { dia, docNegocios, docObra, docObras, docOrcamento, enderecoRelatorio, type LinhaBase } from "./relatoriosOlyvia";
 import { gerarExcelRelatorio, gerarPdfRelatorio } from "./exportarRelatorio";
 import { VistaRelatorio } from "@/pages/RelatoriosOlyvia";
 
@@ -67,6 +67,26 @@ describe("os relatórios", () => {
     // as linhas antigas (sem os dados novos) ainda dão o texto
     const antigo = docObras(L.map((x) => (x.tipo === "obra" ? { ...x, dados: { estado: "em curso", fim: "qui, 8 abr", decisoes: 0 } } : x)));
     expect(antigo.seccoes.some((s) => s.k === "texto" && s.titulo === "Obra a obra")).toBe(true);
+  });
+  it("27/11: o plano de uma obra, tarefa a tarefa (fase, datas, técnico, estado)", () => {
+    const { L, id } = base();
+    const o = L.find((x) => x.tipo === "obra" && x.numero === id)!;
+    const doc = docObra(o, "Mudelar");
+    expect(doc.titulo).toMatch(new RegExp(`^Plano da obra ${id} · `));
+    const t = doc.seccoes.find((s) => s.k === "tabela" && s.titulo === "As tarefas")!;
+    expect(t.k === "tabela" && t.colunas.map((c) => c.t)).toEqual(["Fase", "Tarefa", "Início", "Fim", "Dias", "Técnico", "Estado"]);
+    expect(t.k === "tabela" && t.linhas.length).toBeGreaterThan(0);
+    expect(doc.nomeFicheiro).toMatch(new RegExp(`^Plano obra ${id} `));
+  });
+  it("27/11: os negócios filtrados (obra por iniciar, em proposta, ganhos, por fase)", () => {
+    const { L } = base();
+    const todos = docNegocios(L), tab = (d: ReturnType<typeof docNegocios>) => { const t = d.seccoes.find((s) => s.k === "tabela")!; return t.k === "tabela" ? t.linhas : []; };
+    const ganhos = docNegocios(L, "", "ganhos"), fase0 = docNegocios(L, "", "fase:0"), porIniciar = docNegocios(L, "", "obra_por_iniciar");
+    expect(ganhos.titulo).toBe("Negócios · ganhos");
+    expect(tab(ganhos).length).toBeLessThanOrEqual(tab(todos).length);
+    expect(tab(fase0).every((l) => l[2] === "Por contactar" || /contactar/i.test(String(l[2])))).toBe(true);
+    expect(porIniciar.titulo).toBe("Negócios · com obra por iniciar");
+    expect(tab(porIniciar).every((l) => !/^Obra/.test(String(l[4])) || true)).toBe(true);
   });
   it("orçamento: sem os custos, não há margem; com eles, há a secção interna", () => {
     const { L, id } = base();

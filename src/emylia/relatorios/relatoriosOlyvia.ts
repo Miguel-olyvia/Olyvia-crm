@@ -4,7 +4,13 @@
 // RLS de quem abre): cada pessoa só vê o que já vê na app. Um documento só (DocRelatorio) desenha-se no ecrã, em PDF e em Excel, para os
 // três dizerem sempre o mesmo.
 
-export type TipoRelatorio = "negocios" | "obras" | "orcamento";
+export type TipoRelatorio = "negocios" | "obras" | "obra" | "orcamento";
+/** 27/11 (Rúben: «preciso de um relatório com todos os negócios com obra por iniciar»): os filtros do relatório dos negócios. */
+export type FiltroNegocios = "obra_por_iniciar" | "obra_em_curso" | "em_proposta" | "ganhos" | "perdidos" | `fase:${number}`;
+export const FILTROS_NEGOCIOS: { k: FiltroNegocios; rot: string }[] = [
+  { k: "obra_por_iniciar", rot: "Com obra por iniciar" }, { k: "obra_em_curso", rot: "Com obra em curso" }, { k: "em_proposta", rot: "Em proposta" },
+  { k: "ganhos", rot: "Ganhos" }, { k: "perdidos", rot: "Perdidos" },
+];
 export interface LinhaBase { tipo: string; numero: number | null; titulo: string; texto: string; dados: Record<string, unknown> | null; atualizado_em: string }
 
 export interface Coluna { t: string; w: number; dir?: true; dinheiro?: true }
@@ -39,20 +45,32 @@ const recente = (L: LinhaBase[]) => L.map((x) => x.atualizado_em).filter(Boolean
 const nomeDe = (titulo: string) => titulo.replace(/^[^·]*·\s*/, "");
 
 /** Os negócios: o funil por fase, os números e a lista. */
-export function docNegocios(L: LinhaBase[], org = ""): DocRelatorio {
-  const N = L.filter((x) => x.tipo === "negocio" && x.numero != null).map((x) => {
+export function docNegocios(L: LinhaBase[], org = "", filtro?: FiltroNegocios | null): DocRelatorio {
+  const todos = L.filter((x) => x.tipo === "negocio" && x.numero != null).map((x) => {
     const d = x.dados ?? {};
     return { n: x.numero!, nome: nomeDe(x.titulo), fase: str(d.fase), faseN: num(d.faseN), perdido: !!d.perdido, valor: typeof d.valor === "number" ? d.valor : null,
       obra: str(d.obra), enviada: str(d.enviada), aceite: str(d.aceite) };
   }).sort((a, b) => a.faseN - b.faseN || b.n - a.n);
+  // o filtro (o mesmo do chat, relatorio_olyvia): obra por iniciar = aceite e a obra ainda sem plano, por aprovar ou aprovada
+  const fFase = filtro?.startsWith("fase:") ? Number(filtro.slice(5)) : null;
+  const passa = (x: (typeof todos)[number]) => !filtro ? true
+    : filtro === "obra_por_iniciar" ? !x.perdido && !!x.aceite && (!x.obra || x.obra === "por aprovar" || x.obra === "aprovado")
+    : filtro === "obra_em_curso" ? x.obra === "em curso"
+    : filtro === "em_proposta" ? !x.perdido && !!x.enviada && !x.aceite
+    : filtro === "ganhos" ? !x.perdido && !!x.aceite
+    : filtro === "perdidos" ? x.perdido
+    : fFase != null ? !x.perdido && x.faseN === fFase : true;
+  const N = todos.filter(passa);
+  const nomeFiltro = filtro ? (FILTROS_NEGOCIOS.find((f) => f.k === filtro)?.rot ?? (fFase != null ? `Na fase ${FASES_NEGOCIO[fFase] ?? fFase}` : "")) : "";
   const ativos = N.filter((x) => !x.perdido), perdidos = N.filter((x) => x.perdido);
   const propostas = ativos.filter((x) => x.enviada && !x.aceite), ganhos = ativos.filter((x) => x.aceite);
   const soma = (A: typeof N) => A.reduce((a, x) => a + (x.valor ?? 0), 0);
   const porFase = FASES_NEGOCIO.map((f, i) => { const A = ativos.filter((x) => x.faseN === i); return { rot: f, n: A.length, valor: soma(A) }; });
   const conv = propostas.length + ganhos.length ? ganhos.length / (propostas.length + ganhos.length) : null;
   return {
-    tipo: "negocios", titulo: "Relatório dos negócios", subtitulo: `${org ? `${org} · ` : ""}${ativos.length} negócios ativos`, atualizado: recente(L),
-    nomeFicheiro: `Relatorio negocios ${hojeIso()}`,
+    tipo: "negocios", titulo: nomeFiltro ? `Negócios · ${nomeFiltro.toLowerCase()}` : "Relatório dos negócios",
+    subtitulo: `${org ? `${org} · ` : ""}${filtro ? `${N.length} ${N.length === 1 ? "negócio" : "negócios"}` : `${ativos.length} negócios ativos`}`, atualizado: recente(L),
+    nomeFicheiro: `Relatorio negocios${nomeFiltro ? ` ${limpar(nomeFiltro.toLowerCase())}` : ""} ${hojeIso()}`,
     seccoes: [
       { k: "kpis", itens: [
         { rot: "Negócios ativos", valor: String(ativos.length), nota: perdidos.length === 1 ? "1 perdido" : `${perdidos.length} perdidos` },
@@ -120,6 +138,37 @@ export function docObras(L: LinhaBase[], org = ""): DocRelatorio {
   };
 }
 
+/** 27/11 (Rúben: «exporta este plano para excel»): o plano de UMA obra, tarefa a tarefa (a fase, as datas, quem e o estado), o que os
+ *  agentes pedem e o que está para saber. */
+export function docObra(o: LinhaBase, org = ""): DocRelatorio {
+  type T = { fase: string; nome: string; ini: string; fim: string; dias: number; tec: string; estado: string };
+  type Prop = { agente: string; modo: string; titulo: string };
+  const d = o.dados ?? {};
+  const T = (Array.isArray(d.tarefas) ? d.tarefas : []) as T[];
+  const props = (Array.isArray(d.propostas) ? d.propostas : []) as Prop[];
+  const feitas = T.filter((t) => t.estado === "feita" || t.estado === "validada").length;
+  const fases = [...new Set(T.map((t) => t.fase))];
+  const semTec = T.filter((t) => t.tec === "—").length;
+  return {
+    tipo: "obra", titulo: `Plano da obra ${o.numero} · ${nomeDe(o.titulo)}`,
+    subtitulo: `${org ? `${org} · ` : ""}${str(d.estado) || "—"}${d.dia != null ? ` · dia ${num(d.dia)}` : ""}${str(d.fim) ? ` · acaba a ${str(d.fim)}` : ""}`,
+    atualizado: o.atualizado_em, nomeFicheiro: `Plano obra ${o.numero} ${limpar(nomeDe(o.titulo))} ${hojeIso()}`,
+    seccoes: [
+      { k: "kpis", itens: [
+        { rot: "Estado", valor: str(d.estado) || "—", nota: d.dia != null ? `dia ${num(d.dia)}` : "" },
+        { rot: "Tarefas feitas", valor: `${feitas} de ${T.length}`, nota: T.length ? `${Math.round((feitas / T.length) * 100)}%` : "", tom: "neutro" },
+        { rot: "Acaba a", valor: str(d.fim) || "—" },
+        { rot: "Sem técnico", valor: String(semTec), nota: semTec ? "por atribuir" : "todas atribuídas", tom: (semTec ? "atencao" : "bom") as "atencao" | "bom" },
+      ] },
+      ...(fases.length ? [{ k: "barras" as const, titulo: "Tarefas por fase", itens: fases.map((f) => { const A = T.filter((t) => t.fase === f); const ok = A.filter((t) => t.estado === "feita" || t.estado === "validada").length; return { rot: f, valor: A.length, texto: `${ok} de ${A.length} feitas` }; }) }] : []),
+      ...(T.length ? [{ k: "tabela" as const, titulo: "As tarefas", colunas: [{ t: "Fase", w: 18 }, { t: "Tarefa", w: 40 }, { t: "Início", w: 13 }, { t: "Fim", w: 13 }, { t: "Dias", w: 6, dir: true as const }, { t: "Técnico", w: 16 }, { t: "Estado", w: 12 }],
+        linhas: T.map((t) => [t.fase, t.nome, t.ini, t.fim, t.dias, t.tec, t.estado]) }] : [{ k: "texto" as const, titulo: "O plano", paragrafos: [o.texto] }]),
+      ...(props.some((p) => p.modo === "pede") ? [{ k: "tabela" as const, titulo: "O que pede decisão", colunas: [{ t: "Agente", w: 14 }, { t: "Proposta", w: 80 }], linhas: props.filter((p) => p.modo === "pede").map((p) => [p.agente, p.titulo]) }] : []),
+      ...(props.some((p) => p.modo !== "pede") ? [{ k: "tabela" as const, titulo: "Os agentes a observar", colunas: [{ t: "Agente", w: 14 }, { t: "Nota", w: 80 }], linhas: props.filter((p) => p.modo !== "pede").map((p) => [p.agente, p.titulo]) }] : []),
+    ],
+  };
+}
+
 /** O orçamento de um negócio ao detalhe (e o custo e a margem, se vierem: só quem vê custos os recebe). */
 export function docOrcamento(orc: LinhaBase, custos: LinhaBase | null, org = ""): DocRelatorio {
   const d = orc.dados ?? {};
@@ -168,6 +217,11 @@ export function docOrcamento(orc: LinhaBase, custos: LinhaBase | null, org = "")
 }
 
 /** O endereço do relatório na app (o chat e a voz dão-no como ligação). */
+export function enderecoRelatorioFiltro(filtro: FiltroNegocios, formato?: "pdf" | "excel"): string {
+  const q = new URLSearchParams({ tipo: "negocios", filtro });
+  if (formato) q.set("formato", formato);
+  return `/relatorios/olyvia?${q.toString()}`;
+}
 export function enderecoRelatorio(tipo: TipoRelatorio, o: { numero?: number | null; formato?: "pdf" | "excel" | null } = {}): string {
   const q = new URLSearchParams({ tipo });
   if (o.numero) q.set("numero", String(o.numero));

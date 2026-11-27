@@ -62,13 +62,14 @@ export const relatorioOlyviaDef: ToolDef = {
   function: {
     name: "relatorio_olyvia",
     description:
-      "Relatórios da Olyvia em PDF, Excel ou no ecrã: 'negocios' (funil por fase, valores em proposta e ganhos, lista dos negócios), 'obras' (estado, fim, decisões dos agentes) ou 'orcamento' (o orçamento de UM negócio ao detalhe: linhas, totais por fase e por IVA, adendas, prestações e, para quem vê custos, custo e margem). Devolve o resumo dos números e uma ligação (link) que abre o relatório na app e, com formato pdf ou excel, descarrega o ficheiro. Para 'orcamento', dá 'numero' (do negócio) ou 'cliente' (o nome).",
+      "Relatórios da Olyvia em PDF, Excel ou no ecrã. Escolhe o tipo pelo que se pede: 'negocios' (lista e funil dos negócios; com 'filtro' para só uma parte: obra_por_iniciar, obra_em_curso, em_proposta, ganhos, perdidos ou fase:0 a fase:5), 'obras' (todas as obras: estado, progresso, fim, decisões dos agentes), 'obra' (o PLANO de UMA obra, tarefa a tarefa: fase, datas, técnico, estado; é o que se pede com «o plano», «as tarefas», «exporta este plano») ou 'orcamento' (só quando se pede o ORÇAMENTO, a proposta ou os preços de UM negócio: linhas, IVA, adendas, prestações). Devolve o resumo e uma ligação (link) que abre o relatório e, com formato pdf ou excel, descarrega o ficheiro. Para 'obra' e 'orcamento', dá 'numero' (do negócio) ou 'cliente' (o nome).",
     parameters: {
       type: "object",
       properties: {
-        tipo: { type: "string", enum: ["negocios", "obras", "orcamento"], description: "O relatório." },
-        numero: { type: "integer", description: "O número do negócio (só no orçamento)." },
-        cliente: { type: "string", description: "O nome do cliente, se não se souber o número (só no orçamento)." },
+        tipo: { type: "string", enum: ["negocios", "obras", "obra", "orcamento"], description: "O relatório." },
+        filtro: { type: "string", description: "Só nos negócios: obra_por_iniciar, obra_em_curso, em_proposta, ganhos, perdidos, ou fase:N (0 Por contactar, 1 Contacto, 2 Visita, 3 Negócio, 4 Financeiro, 5 Obra)." },
+        numero: { type: "integer", description: "O número do negócio (na obra e no orçamento)." },
+        cliente: { type: "string", description: "O nome do cliente, se não se souber o número (na obra e no orçamento)." },
         formato: { type: "string", enum: ["ver", "pdf", "excel"], description: "ver (abrir na app), pdf ou excel. Por omissão: ver." },
       },
       required: ["tipo"],
@@ -85,12 +86,16 @@ type LinhaK = { tipo: string; numero: number | null; titulo: string; dados: Reco
 const relatorio_olyvia: Handler = async (ctx, args): Promise<ToolResult> => {
   const sb = ctx.userSupabase ?? ctx.supabase;
   if (!ctx.organizationId) return { success: false, message: "Sem organização ativa." };
-  const tipo = ["negocios", "obras", "orcamento"].includes(args?.tipo) ? String(args.tipo) : "negocios";
+  const tipo = ["negocios", "obras", "obra", "orcamento"].includes(args?.tipo) ? String(args.tipo) : "negocios";
+  // 27/11 (Rúben: «pedi relatórios e ele só faz orçamentos»): o filtro dos negócios (o mesmo da página /relatorios/olyvia)
+  const FILTROS: Record<string, string> = { obra_por_iniciar: "com obra por iniciar", obra_em_curso: "com obra em curso", em_proposta: "em proposta", ganhos: "ganhos", perdidos: "perdidos" };
+  const filtro = typeof args?.filtro === "string" && (FILTROS[args.filtro] || /^fase:[0-5]$/.test(args.filtro)) ? String(args.filtro) : null;
   const formato = args?.formato === "pdf" || args?.formato === "excel" ? String(args.formato) : null;
   const ler = (tipos: string[]) => sb.from("olyvia_conhecimento").select("tipo, numero, titulo, dados, atualizado_em").eq("organization_id", ctx.organizationId).in("tipo", tipos).limit(4000);
   const ligacao = (numero?: number | null) => {
     const q = new URLSearchParams({ tipo });
     if (numero) q.set("numero", String(numero));
+    if (filtro && tipo === "negocios") q.set("filtro", filtro);
     if (formato) q.set("formato", formato);
     return `/relatorios/olyvia?${q.toString()}`;
   };
@@ -99,11 +104,22 @@ const relatorio_olyvia: Handler = async (ctx, args): Promise<ToolResult> => {
   if (tipo === "negocios") {
     const { data, error } = await ler(["negocio"]);
     if (error) return { success: false, message: error.message };
-    const N = (data ?? []) as LinhaK[];
+    const todos = (data ?? []) as LinhaK[];
+    const ff = filtro?.startsWith("fase:") ? Number(filtro.slice(5)) : null;
+    const passa = (x: LinhaK) => { const d = x.dados ?? {}; return !filtro ? true
+      : filtro === "obra_por_iniciar" ? !d.perdido && !!d.aceite && (!d.obra || d.obra === "por aprovar" || d.obra === "aprovado")
+      : filtro === "obra_em_curso" ? d.obra === "em curso"
+      : filtro === "em_proposta" ? !d.perdido && !!d.enviada && !d.aceite
+      : filtro === "ganhos" ? !d.perdido && !!d.aceite
+      : filtro === "perdidos" ? !!d.perdido
+      : ff != null ? !d.perdido && Number(d.faseN) === ff : true; };
+    const N = todos.filter(passa);
     const ativos = N.filter((x) => !x.dados?.perdido), soma = (A: LinhaK[]) => A.reduce((a, x) => a + (Number(x.dados?.valor) || 0), 0);
     const propostas = ativos.filter((x) => x.dados?.enviada && !x.dados?.aceite), ganhos = ativos.filter((x) => x.dados?.aceite);
     return { success: true, link: ligacao(), rotulo_link: rotulo, atualizada_em: N.map((x) => x.atualizado_em).sort().pop(),
-      resumo: { negocios_ativos: ativos.length, perdidos: N.length - ativos.length, em_proposta: eurTxt(soma(propostas)), propostas_por_aceitar: propostas.length, ganhos: eurTxt(soma(ganhos)), aceites: ganhos.length,
+      resumo: { ...(filtro ? { filtro: FILTROS[filtro] ?? `na fase ${FASES_NEG[ff ?? 0]}`, total: N.length,
+          lista: N.slice(0, 40).map((x) => ({ numero: x.numero, negocio: x.titulo, fase: x.dados?.fase, valor: x.dados?.valor != null ? eurTxt(Number(x.dados.valor)) : null, obra: x.dados?.obra ?? "sem obra" })) } : {}),
+        negocios_ativos: ativos.length, perdidos: N.length - ativos.length, em_proposta: eurTxt(soma(propostas)), propostas_por_aceitar: propostas.length, ganhos: eurTxt(soma(ganhos)), aceites: ganhos.length,
         por_fase: FASES_NEG.map((f, i) => { const A = ativos.filter((x) => Number(x.dados?.faseN) === i); return { fase: f, negocios: A.length, valor: eurTxt(soma(A)) }; }) } };
   }
   if (tipo === "obras") {
@@ -114,19 +130,33 @@ const relatorio_olyvia: Handler = async (ctx, args): Promise<ToolResult> => {
       resumo: { obras: O.length, decisoes_a_espera: O.reduce((a, x) => a + (Number(x.dados?.decisoes) || 0), 0),
         obras_lista: O.map((x) => ({ numero: x.numero, obra: x.titulo, estado: x.dados?.estado, acaba: x.dados?.fim, decisoes: x.dados?.decisoes })) } };
   }
-  // o orçamento de um negócio: pelo número, ou pelo nome do cliente
+  // o orçamento (ou o plano da obra) de um negócio: pelo número, ou pelo nome do cliente
+  const tipoK = tipo === "obra" ? "obra" : "orcamento";
   let numero = Number(args?.numero) || null;
   if (!numero) {
     const P = palavras(String(args?.cliente ?? ""));
     if (!P.length) return { success: false, message: "Diz-me o número do negócio ou o nome do cliente." };
-    const { data, error } = await sb.from("olyvia_conhecimento").select("numero, titulo").eq("organization_id", ctx.organizationId).eq("tipo", "orcamento")
+    const { data, error } = await sb.from("olyvia_conhecimento").select("numero, titulo").eq("organization_id", ctx.organizationId).eq("tipo", tipoK)
       .or(P.map((w) => `titulo.ilike.%${w}%`).join(",")).limit(10);
     if (error) return { success: false, message: error.message };
     const L = (data ?? []) as { numero: number; titulo: string }[];
     const todas = L.filter((x) => P.every((w) => x.titulo.toLowerCase().includes(w)));
     const escolha = todas.length === 1 ? todas : L.length === 1 ? L : [];
-    if (!escolha.length) return { success: false, ambiguo: L.length > 1, candidatos: L.map((x) => x.titulo), message: L.length ? "Há mais do que um orçamento com esse nome: pergunta qual." : "Não encontrei o orçamento desse cliente (ou não o podes ver)." };
+    if (!escolha.length) return { success: false, ambiguo: L.length > 1, candidatos: L.map((x) => x.titulo), message: L.length ? `Há mais do que ${tipoK === "obra" ? "uma obra" : "um orçamento"} com esse nome: pergunta qual.` : `Não encontrei ${tipoK === "obra" ? "a obra" : "o orçamento"} desse cliente (ou não o podes ver).` };
     numero = escolha[0].numero;
+  }
+  if (tipo === "obra") {
+    const { data, error } = await sb.from("olyvia_conhecimento").select("tipo, numero, titulo, dados, atualizado_em").eq("organization_id", ctx.organizationId).eq("numero", numero).eq("tipo", "obra").maybeSingle();
+    if (error) return { success: false, message: error.message };
+    const o = data as LinhaK | null;
+    if (!o) return { success: false, message: `Não encontrei a obra do negócio ${numero} (ou ainda não tem plano, ou não a podes ver).` };
+    const d = o.dados ?? {};
+    // deno-lint-ignore no-explicit-any
+    const T: any[] = Array.isArray(d.tarefas) ? d.tarefas : [];
+    return { success: true, link: ligacao(numero), rotulo_link: rotulo, atualizada_em: o.atualizado_em,
+      resumo: { obra: o.titulo, estado: d.estado, dia: d.dia, acaba: d.fim, tarefas: T.length, feitas: T.filter((t) => t.estado === "feita" || t.estado === "validada").length,
+        sem_tecnico: T.filter((t) => t.tec === "—").length, decisoes_a_espera: d.decisoes,
+        proximas: T.filter((t) => t.estado !== "feita" && t.estado !== "validada").slice(0, 6).map((t) => `${t.nome} (${t.ini} a ${t.fim}, ${t.tec})`) } };
   }
   const { data, error } = await sb.from("olyvia_conhecimento").select("tipo, numero, titulo, dados, atualizado_em").eq("organization_id", ctx.organizationId).eq("numero", numero).in("tipo", ["orcamento", "custos"]);
   if (error) return { success: false, message: error.message };

@@ -8,6 +8,7 @@ import { FASES, TECS, linhaCalc, tot, totaisIva, type Estado, type Negocio } fro
 import { totaisAdenda, valorContrato } from "./adendas";
 import { nomeDaParcela, parcelasDoContrato } from "./parcelas";
 import { planoObra, realPorFase } from "./planoObra";
+import { FASES_OBRA } from "./fasesObra";
 import { rotuloDia } from "./preparacaoObra";
 import { estadoVivo, nomeNoPlano } from "./estudioObra/planoVivo";
 import { obrasParaVoz, type ObraVoz } from "./estudioObra/agentesPorVoz";
@@ -48,7 +49,7 @@ const FMT_EUR = new Intl.NumberFormat("pt-PT", { minimumFractionDigits: 2, maxim
 const eur = (n: number) => `${FMT_EUR.format(n)} €`;
 const tecNome = (id: string | null | undefined) => TECS.find((x) => x.id === id)?.n ?? "por atribuir";
 
-function itemObra(d: Negocio, o: ObraVoz, agora: Date): ItemConhecimento {
+function itemObra(d: Negocio, o: ObraVoz, agora: Date, S?: Estado): ItemConhecimento {
   const p = d.obra.plano!;
   const feitas = p.tasks.filter((t) => { const v = estadoVivo(t, p); return v === "feita" || v === "validada"; }).length;
   const proximas = p.tasks.map((t, i) => ({ t, i, v: estadoVivo(t, p) })).filter((x) => x.v !== "feita" && x.v !== "validada")
@@ -67,10 +68,22 @@ function itemObra(d: Negocio, o: ObraVoz, agora: Date): ItemConhecimento {
       // 27/11 (Rúben: «uma nova área no menu para o cérebro, mostrar os agentes a trabalhar»): o Cérebro lê daqui a autonomia de cada agente
       // nesta obra e o que fizeram hoje (com o agente), sem ter de carregar os Negócios
       degraus: Object.fromEntries(AGENTES.map((a) => [a.id, degrauDe(d.obra.agentes, a.id)])),
+      // 27/11 (Rúben: «pedi relatórios e ele só faz orçamentos»; «exporta este plano para excel»): o plano inteiro, para o relatório da obra
+      tarefas: tarefasDoPlano(d, S),
       feitos: (d.obra.agentes?.feitos ?? []).filter((f) => !f.desfeito && mesmoDia(f.q, agora)).slice(-8)
         .map((f) => ({ agente: f.agente, texto: f.texto.slice(0, 160), quando: f.q, auto: f.auto, quem: f.quem })) } };
 }
 const mesmoDia = (iso: string, agora: Date) => { try { return new Date(iso).toDateString() === agora.toDateString(); } catch { return false; } };
+
+/** As tarefas do plano pela ordem dos dias: a fase, o nome, as datas, os dias, quem e o estado. */
+function tarefasDoPlano(d: Negocio, S?: Estado): { fase: string; nome: string; ini: string; fim: string; dias: number; tec: string; estado: string }[] {
+  const p = d.obra.plano!;
+  void S;
+  const nomesFase = new Map<number, string>(FASES_OBRA.map((f) => [f.n as number, f.curto || f.nome]));
+  const quando = (k: number) => { try { return rotuloDia(p, k); } catch { return `dia ${k + 1}`; } };
+  return p.tasks.map((t) => ({ t, v: estadoVivo(t, p) })).sort((a, b) => a.t.dia - b.t.dia)
+    .map(({ t, v }) => ({ fase: t.fase ? nomesFase.get(t.fase) ?? `Fase ${t.fase}` : "—", nome: nomeNoPlano(p, t), ini: quando(t.dia), fim: quando(t.dia + t.dur - 1), dias: t.dur, tec: t.tec ? tecNome(t.tec) : "—", estado: v }));
+}
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const pct = (n: number) => `${(Math.round(n * 1000) / 10).toLocaleString("pt-PT")}%`;
@@ -158,7 +171,7 @@ export function itensDoConhecimento(S: Estado, agora = new Date(), origem?: "ser
       const cus = itemCustos(d, S);
       if (cus) out.push(cus);
       const o = porId.get(d.id);
-      if (o && d.obra?.plano) out.push(itemObra(d, o, agora));
+      if (o && d.obra?.plano) out.push(itemObra(d, o, agora, S));
     } catch { /* um negócio estragado não para a base */ }
   }
   const decisoes = obras.reduce((a, o) => a + o.propostas.filter((x) => x.modo === "pede").length, 0);

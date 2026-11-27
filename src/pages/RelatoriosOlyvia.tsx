@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompanyOpcional } from "@/contexts/CompanyContext";
 import { SinalAoVivo } from "@/emylia/SinalAoVivo";
-import { docNegocios, docObras, docOrcamento, eur, type Coluna, type DocRelatorio, type LinhaBase, type Seccao, type TipoRelatorio } from "@/emylia/relatorios/relatoriosOlyvia";
+import { FILTROS_NEGOCIOS, docNegocios, docObra, docObras, docOrcamento, eur, type Coluna, type DocRelatorio, type FiltroNegocios, type LinhaBase, type Seccao, type TipoRelatorio } from "@/emylia/relatorios/relatoriosOlyvia";
 import { exportarRelatorio } from "@/emylia/relatorios/exportarRelatorio";
 
 const TIPOS: { k: TipoRelatorio; rot: string; Icone: typeof BarChart3 }[] = [
@@ -110,7 +110,10 @@ export default function RelatoriosOlyvia() {
   const [params, setParams] = useSearchParams();
   const empresa = useCompanyOpcional();
   const org = empresa?.activeCompany?.id ?? null, nomeOrg = empresa?.activeCompany?.name ?? "";
-  const tipo = (TIPOS.some((t) => t.k === params.get("tipo")) ? params.get("tipo") : "negocios") as TipoRelatorio;
+  // 27/11: também «obra» (o plano de uma obra, aberto pelo separador Obras) e o filtro dos negócios (?filtro=obra_por_iniciar…)
+  const tipo = (TIPOS.some((t) => t.k === params.get("tipo")) || params.get("tipo") === "obra" ? params.get("tipo") : "negocios") as TipoRelatorio;
+  const f0 = params.get("filtro");
+  const filtro = (f0 && (FILTROS_NEGOCIOS.some((f) => f.k === f0) || /^fase:\d$/.test(f0)) ? f0 : null) as FiltroNegocios | null;
   const numero = Number(params.get("numero")) || null;
   const [linhas, setLinhas] = useState<LinhaBase[] | null>(null);
   const [erro, setErro] = useState<string | null>(null);
@@ -128,17 +131,22 @@ export default function RelatoriosOlyvia() {
     return () => { vivo = false; };
   }, [org]);
 
+  const obrasL = useMemo(() => (linhas ?? []).filter((x) => x.tipo === "obra" && x.numero != null).sort((a, b) => b.numero! - a.numero!), [linhas]);
   const orcamentos = useMemo(() => (linhas ?? []).filter((x) => x.tipo === "orcamento" && x.numero != null).sort((a, b) => b.numero! - a.numero!), [linhas]);
   const doc = useMemo<DocRelatorio | null>(() => {
     if (!linhas) return null;
     if (tipo === "obras") return docObras(linhas, nomeOrg);
+    if (tipo === "obra") {
+      const o = obrasL.find((x) => x.numero === numero) ?? (numero ? null : obrasL[0] ?? null);
+      return o ? docObra(o, nomeOrg) : null;
+    }
     if (tipo === "orcamento") {
       const o = orcamentos.find((x) => x.numero === numero) ?? (numero ? null : orcamentos[0] ?? null);
       if (!o) return null;
       return docOrcamento(o, linhas.find((x) => x.tipo === "custos" && x.numero === o.numero) ?? null, nomeOrg);
     }
-    return docNegocios(linhas, nomeOrg);
-  }, [linhas, tipo, numero, orcamentos, nomeOrg]);
+    return docNegocios(linhas, nomeOrg, filtro);
+  }, [linhas, tipo, numero, orcamentos, obrasL, nomeOrg, filtro]);
 
   const gerar = async (formato: "pdf" | "excel") => {
     if (!doc) return;
@@ -162,7 +170,7 @@ export default function RelatoriosOlyvia() {
     const p = new URLSearchParams(params); p.delete("formato"); setParams(p, { replace: true });
   }, [doc, formatoPedido]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const ir = (k: TipoRelatorio, n?: number | null) => { const p = new URLSearchParams({ tipo: k }); if (n) p.set("numero", String(n)); setParams(p); };
+  const ir = (k: TipoRelatorio, n?: number | null, fl?: string | null) => { const p = new URLSearchParams({ tipo: k }); if (n) p.set("numero", String(n)); if (fl) p.set("filtro", fl); setParams(p); };
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 pb-24 pt-6 sm:px-8 sm:pt-10">
@@ -186,11 +194,30 @@ export default function RelatoriosOlyvia() {
 
       <nav aria-label="Tipo de relatório" className="mt-5 flex flex-wrap items-center gap-2">
         {TIPOS.map(({ k, rot, Icone }) => (
-          <button key={k} type="button" aria-pressed={tipo === k} onClick={() => ir(k, k === "orcamento" ? numero : null)}
-            className={cn("inline-flex min-h-10 items-center gap-2 rounded-full px-4 text-sm font-medium transition", tipo === k ? "bg-primary text-primary-foreground shadow-sm" : "border border-border bg-card hover:bg-accent")}>
+          <button key={k} type="button" aria-pressed={tipo === k || (k === "obras" && tipo === "obra")} onClick={() => ir(k, k === "orcamento" ? numero : null)}
+            className={cn("inline-flex min-h-10 items-center gap-2 rounded-full px-4 text-sm font-medium transition", tipo === k || (k === "obras" && tipo === "obra") ? "bg-primary text-primary-foreground shadow-sm" : "border border-border bg-card hover:bg-accent")}>
             <Icone className="h-4 w-4" aria-hidden="true" />{rot}
           </button>
         ))}
+        {tipo === "negocios" && (
+          <label className="ml-auto flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Mostrar</span>
+            <select value={filtro ?? ""} onChange={(e) => ir("negocios", null, e.target.value || null)} className="min-h-10 max-w-[18rem] rounded-xl border border-border bg-card px-3">
+              <option value="">Todos os negócios</option>
+              {FILTROS_NEGOCIOS.map((f) => <option key={f.k} value={f.k}>{f.rot}</option>)}
+            </select>
+          </label>
+        )}
+        {(tipo === "obras" || tipo === "obra") && obrasL.length > 0 && (
+          <label className="ml-auto flex items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Obra</span>
+            <select value={tipo === "obra" ? String((obrasL.find((x) => x.numero === numero) ?? obrasL[0]).numero) : ""} onChange={(e) => (e.target.value ? ir("obra", Number(e.target.value)) : ir("obras"))}
+              className="min-h-10 max-w-[18rem] rounded-xl border border-border bg-card px-3">
+              <option value="">Todas as obras</option>
+              {obrasL.map((o) => <option key={o.numero} value={String(o.numero)}>{o.titulo.replace(/^Obra\s*/, "")}</option>)}
+            </select>
+          </label>
+        )}
         {tipo === "orcamento" && orcamentos.length > 0 && (
           <label className="ml-auto flex items-center gap-2 text-sm">
             <span className="text-muted-foreground">Negócio</span>
