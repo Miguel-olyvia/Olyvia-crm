@@ -4461,19 +4461,20 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     /** 12/11 (quem paga): o ajuste é um atraso ou um erro nosso. Entra já no plano; paga a empresa: o custo (as horas a mais ao €/h do técnico,
      *  e os materiais da tarefa nova) fica registado nas mudanças do plano e no diário, e a margem ao vivo mostra-o. Ao cliente, só um aviso
      *  da data, se o gestor quiser. */
-    ajusteNosso(id: number, aj: AjusteObra, m: { horas?: number; nota?: string; cliente?: boolean } = {}): boolean {
+    ajusteNosso(id: number, aj: AjusteObra, m: { horas?: number; nota?: string; cliente?: boolean; soPlano?: boolean } = {}): boolean {
       if (!exigePerm("obra.planear")) return false;
       const d = deal(id), p = d.obra.plano;
       if (!p || p.estado !== "em curso") { avisar({ msg: "Só com a obra em curso", kind: "bad" }); return false; }
       const I = impactoAjuste(S, p, aj, ocupacaoDosTecnicos(S, d.id), aj.k === "atraso" ? m.horas : undefined);
       if (!I) return false;
       const horas = aj.k === "nova" ? I.horas : Math.max(0, r2(m.horas ?? I.horas));
-      const custo = aj.k === "nova" ? I.custo : r2(horas * custoDaHora(S, p.tasks[aj.ti]));
-      const t = fazerAjuste(d, aj, I, { horas, paga: "empresa", custo, nota: m.nota, cliente: m.cliente });
+      // 27/11 (Rúben: «ajustes sem escolher uma das 3»): «Só acertar o plano» entra já, sem adenda e sem custo na margem
+      const custo = m.soPlano ? 0 : aj.k === "nova" ? I.custo : r2(horas * custoDaHora(S, p.tasks[aj.ti]));
+      const t = fazerAjuste(d, aj, I, { horas, paga: "empresa", custo, nota: m.soPlano ? `Acerto do plano${m.nota ? `: ${m.nota}` : ""}` : m.nota, cliente: m.cliente });
       if (!t) return false;
       // a tarefa nova paga por nós: os materiais vão já numa encomenda de ajuste (como as tarefas novas do gestor)
       if (aj.k === "nova") ajustar(d, "tarefa nova " + t.nome, undefined, true);
-      const subAj = `Paga a empresa${custo ? `: ${eur(custo)} € a menos na margem` : ""}${m.cliente ? " · o cliente vê a data nova no portal" : ""}`;
+      const subAj = m.soPlano ? `Acerto do plano: sem adenda nem custo${m.cliente ? " · o cliente vê a data nova no portal" : ""}` : `Paga a empresa${custo ? `: ${eur(custo)} € a menos na margem` : ""}${m.cliente ? " · o cliente vê a data nova no portal" : ""}`;
       if (aj.k === "nova") avisoTarefaNova(d, t, { msg: "Tarefa juntada ao plano", sub: subAj });
       else avisar({ msg: "Plano ajustado", sub: subAj, kind: "ok" });
       return true;

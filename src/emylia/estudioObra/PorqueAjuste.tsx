@@ -2,7 +2,7 @@
 // de cada resposta à vista antes de escolher: + € para o cliente (a adenda), − € de margem (se pagar a empresa) e + dias no fim da obra.
 // As contas estão em quemPaga.ts; as mudanças vão pelo motor (A.ajusteDoCliente, A.ajusteNosso) ou pelo registo do imprevisto.
 import { useMemo, useState } from "react";
-import { AlertTriangle, Building2, Check, Clock, User, X } from "lucide-react";
+import { AlertTriangle, Building2, CalendarCheck, Check, Clock, User, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { eur, nfmt, type Negocio } from "../motor";
@@ -12,7 +12,7 @@ import { ocupacaoDosTecnicos, rotuloDia } from "../preparacaoObra";
 import { custoDaHora, impactoAjuste, PORQUE, type AjusteObra, type QuemPaga } from "./quemPaga";
 
 const ENTRADA = "h-11 w-full rounded-xl border border-input bg-background px-3 text-[15px] tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring";
-const ICONE: Record<QuemPaga, typeof User> = { cliente: User, imprevisto: AlertTriangle, empresa: Building2 };
+const ICONE: Record<QuemPaga, typeof User> = { cliente: User, imprevisto: AlertTriangle, empresa: Building2, plano: CalendarCheck };
 
 /** O que o imprevisto leva já preenchido (a tarefa, os dias e as horas). */
 export interface ImprevistoInicial { ti?: number; dias: number; horas: number; perfil: string }
@@ -53,6 +53,7 @@ export function PorqueAjuste({ ctx, d, aj, fechar, feito, imprevisto, embutido }
     cliente: T ? `+ ${eur(T.total)} € para o cliente` : "Sem custo para o cliente",
     imprevisto: "Custo e dias decidem-se no registo",
     empresa: custo > 0 ? `− ${eur(custo)} € de margem` : "Sem custo",
+    plano: "Sem adenda nem custo",
   };
   const aplicar = () => {
     if (!escolha) return;
@@ -64,12 +65,12 @@ export function PorqueAjuste({ ctx, d, aj, fechar, feito, imprevisto, embutido }
     run(() => {
       ok = escolha === "cliente"
         ? A.ajusteDoCliente(d.id, aj, { horas, ...(preco != null ? { preco } : {}), nota, cliente: avisar }) != null
-        : A.ajusteNosso(d.id, aj, { horas, nota, cliente: avisar });
+        : A.ajusteNosso(d.id, aj, { horas, nota, cliente: avisar, ...(escolha === "plano" ? { soPlano: true } : {}) });
     });
     if (ok) (feito ?? fechar)();
   };
   const botao = escolha === "cliente" ? (linha ? "Preparar a adenda" : "Aplicar a pedido do cliente")
-    : escolha === "empresa" ? "Aplicar: paga a empresa" : escolha === "imprevisto" ? "Registar o imprevisto" : "Escolha porquê";
+    : escolha === "empresa" ? "Aplicar: paga a empresa" : escolha === "plano" ? "Aplicar ao plano" : escolha === "imprevisto" ? "Registar o imprevisto" : "Escolha porquê";
 
   return (
     <section aria-label="Porquê?" className={cn("space-y-4", !embutido && "p-5")}>
