@@ -91,7 +91,7 @@ export async function gerarPdfRelatorio(doc: DocRelatorio, agora = new Date()): 
     }
     if (s.k === "barras") {
       titulo(s.titulo, s.nota, Math.min(3, s.itens.length) * 17);
-      const max = Math.max(1, ...s.itens.map((x) => x.valor)), rotW = 150, valW = 110, barW = LARG - rotW - valW - 16;
+      const max = Math.max(1, ...s.itens.map((x) => x.valor)), rotW = 150, valW = 150, barW = LARG - rotW - valW - 16;
       for (const it of s.itens) {
         espaco(18);
         escrever(it.rot, M, y - 9, 8.5, { max: rotW - 6 });
