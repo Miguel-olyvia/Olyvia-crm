@@ -30,6 +30,12 @@ describe("definirModelo3d", () => {
     await definirModelo3d(ORG, "categoria", ID, "bide");
     expect(base.chamadas[0].a.p_alvo).toBe("categoria");
   });
+  it("o Modelo (0001 SMOOTH…) tem o alvo 'modelo' e o id dele (27/11)", async () => {
+    base.responder = () => ({ data: { alvo: "modelo", id: ID, modelo: "bide", anterior: null }, error: null });
+    const r = await definirModelo3d(ORG, "modelo", ID, "bide");
+    expect(base.chamadas).toEqual([{ f: "cat_definir_modelo_3d", a: { p_org: ORG, p_alvo: "modelo", p_id: ID, p_modelo: "bide" } }]);
+    expect(r).toEqual({ ok: true, v: { alvo: "modelo", id: ID, modelo: "bide", anterior: null } });
+  });
   it("null limpa (herda): vai como null à base", async () => {
     base.responder = () => ({ data: { alvo: "produto", id: ID, modelo: null, anterior: "sanita" }, error: null });
     const r = await definirModelo3d(ORG, "produto", ID, null);

@@ -1,12 +1,12 @@
-// O «Modelo 3D» de um produto, de uma subcategoria ou de uma categoria: gravar com cat_definir_modelo_3d(p_org, p_alvo, p_id, p_modelo) → jsonb
-// {alvo, id, modelo, anterior}. `p_alvo`: 'produto' ou 'categoria' (a subcategoria é uma categoria); '' ou null limpa (herda). A base só guarda o id
+// O «Modelo 3D» de um produto, de um Modelo do Catálogo (0001 SMOOTH…), de uma subcategoria ou de uma categoria: gravar com cat_definir_modelo_3d(p_org,
+// p_alvo, p_id, p_modelo) → jsonb {alvo, id, modelo, anterior}. `p_alvo`: 'produto', 'modelo' ou 'categoria' (a subcategoria é uma categoria); '' ou null limpa (herda). A base só guarda o id
 // (^[a-z0-9_]{1,40}$, sem lista fechada); o que cada id quer dizer vive em planta3d/modelos3dEscolha.ts.
 // Mesmo padrão das outras funções cat_* (fichaProdutoDados: rpcLivre, erroAmigavel): a função ainda não existir na base (PGRST202) é «ainda não
 // disponível»; as recusas CT00x trazem a mensagem em português da base e mostram-se tal e qual; o resto vira uma frase de reserva (nunca inglês em bruto).
 import { AINDA_NAO, erroAmigavel, rpcLivre, type Res } from "./fichaProdutoDados";
 import { ehIdDeModelo3D } from "./planta3d/modelos3dEscolha";
 
-export type AlvoModelo3D = "produto" | "categoria";
+export type AlvoModelo3D = "produto" | "modelo" | "categoria";
 export interface ResultadoModelo3D { alvo: string; id: string; modelo: string | null; anterior: string | null }
 
 const FRASE = "Não foi possível gravar o modelo 3D.";

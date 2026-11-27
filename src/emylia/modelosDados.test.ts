@@ -47,9 +47,20 @@ describe("as chamadas", () => {
     ] }, error: null });
     const r = await lerModelosGestao(ORG);
     expect(r).toEqual({ ok: true, v: [
-      { id: M1, nome: "SORTY", numero: 1, ativo: true, usados: 3, subcategoria: { id: SUB, nome: "Bases de Duche", sigla: "BD", ativo: true }, categoria: { id: "c1", nome: "Casa de banho", sigla: "DB" } },
-      { id: "m2", nome: "ZEUS", numero: 7, ativo: false, usados: 0, subcategoria: { id: SUB, nome: "Bases de Duche", sigla: null, ativo: true }, categoria: null },
+      { id: M1, nome: "SORTY", numero: 1, ativo: true, usados: 3, subcategoria: { id: SUB, nome: "Bases de Duche", sigla: "BD", ativo: true }, categoria: { id: "c1", nome: "Casa de banho", sigla: "DB" }, modelo3d: null },
+      { id: "m2", nome: "ZEUS", numero: 7, ativo: false, usados: 0, subcategoria: { id: SUB, nome: "Bases de Duche", sigla: null, ativo: true }, categoria: null, modelo3d: null },
     ] });
+  });
+  it("lê o modelo 3D de cada modelo (modelo3d); sem a chave (migração por aplicar) ou fora do formato da base, é null", async () => {
+    const sub = { id: SUB, nome: "Bases de Duche", sigla: "BD", ativo: true };
+    base.responder = () => ({ data: { modelos: [
+      { id: M1, nome: "SMOOTH", numero: 1, ativo: true, usados: 0, subcategoria: sub, categoria: null, modelo3d: "base_duche" },
+      { id: "m2", nome: "A", numero: 2, ativo: true, usados: 0, subcategoria: sub, categoria: null },
+      { id: "m3", nome: "B", numero: 3, ativo: true, usados: 0, subcategoria: sub, categoria: null, modelo3d: "Sem Formato" },
+      { id: "m4", nome: "C", numero: 4, ativo: true, usados: 0, subcategoria: sub, categoria: null, modelo3d: "" },
+    ] }, error: null });
+    const r = await lerModelosGestao(ORG);
+    expect(r.ok && r.v.map((m) => m.modelo3d)).toEqual(["base_duche", null, null, null]);
   });
   it("uma resposta sem a lista é um erro, não uma lista vazia", async () => {
     base.responder = () => ({ data: { lixo: 1 }, error: null });
