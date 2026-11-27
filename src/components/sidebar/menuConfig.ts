@@ -1,5 +1,6 @@
 import { LucideIcon } from "lucide-react";
 import {
+  Brain,
   Building,
   Zap,
   LayoutDashboard,
@@ -190,6 +191,15 @@ export const topLevelItems: TopLevelItem[] = [
     // 10/11: as mesmas permissões com que a vista Operações aparece no /negocios (vistaPermitida) e que a rota aceita (RotaNegocios):
     // executar ou planear as obras (qualquer delas). Antes pedia a de operações E pessoas.view, e quem trabalha nas obras não o via.
     permissions: ["negocios.obra.executar", "negocios.obra.planear"],
+  },
+  {
+    // 27/11 (Rúben: «uma nova área no menu para o cérebro, mostrar os agentes a trabalhar, e a base do conhecimento toda, como se fosse
+    // Obsidian»): o Cérebro da Olyvia. As mesmas permissões da rota (quem trabalha nas obras ou vê os negócios); a RLS da base faz o resto.
+    id: "cerebro",
+    to: "/cerebro",
+    icon: Brain,
+    labelKey: "sidebar.cerebro",
+    permissions: ["negocios.obra.planear", "negocios.obra.executar", "pessoas.view"],
   },
   {
     // 12/11 (Rúben: «o super admin precisa de, no menu inicial, conseguir ver a screen de todos os técnicos sem fazer login na conta

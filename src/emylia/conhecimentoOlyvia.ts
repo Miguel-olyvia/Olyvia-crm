@@ -11,6 +11,7 @@ import { planoObra, realPorFase } from "./planoObra";
 import { rotuloDia } from "./preparacaoObra";
 import { estadoVivo, nomeNoPlano } from "./estudioObra/planoVivo";
 import { obrasParaVoz, type ObraVoz } from "./estudioObra/agentesPorVoz";
+import { AGENTES, degrauDe } from "./estudioObra/agentes";
 
 // 26/11 (Rúben: «faz isso ao máximo detalhe, super bonito e detalhado»): mais dois tipos. «orcamento» é o orçamento ao detalhe (as linhas,
 // os totais por fase e por taxa de IVA, as adendas e as prestações), com a mesma visibilidade do negócio; «custos» é o custo e a margem
@@ -47,7 +48,7 @@ const FMT_EUR = new Intl.NumberFormat("pt-PT", { minimumFractionDigits: 2, maxim
 const eur = (n: number) => `${FMT_EUR.format(n)} €`;
 const tecNome = (id: string | null | undefined) => TECS.find((x) => x.id === id)?.n ?? "por atribuir";
 
-function itemObra(d: Negocio, o: ObraVoz): ItemConhecimento {
+function itemObra(d: Negocio, o: ObraVoz, agora: Date): ItemConhecimento {
   const p = d.obra.plano!;
   const feitas = p.tasks.filter((t) => { const v = estadoVivo(t, p); return v === "feita" || v === "validada"; }).length;
   const proximas = p.tasks.map((t, i) => ({ t, i, v: estadoVivo(t, p) })).filter((x) => x.v !== "feita" && x.v !== "validada")
@@ -59,8 +60,14 @@ function itemObra(d: Negocio, o: ObraVoz): ItemConhecimento {
     o.feitos.length ? `Hoje os agentes fizeram: ${o.feitos.map((f) => `${f.quando} ${f.texto} (${f.quem})`).join("; ")}.` : "",
   ].filter(Boolean);
   return { chave: `obra:${d.id}`, tipo: "obra", numero: d.id, titulo: `Obra ${d.id} · ${d.nome}`, texto: linhas.join(" "),
-    dados: { estado: p.estado, fim: o.fim, decisoes: o.propostas.filter((x) => x.modo === "pede").length, propostas: o.propostas.map((x) => ({ ref: x.ref, agente: x.agente, modo: x.modo, titulo: x.titulo })) } };
+    dados: { estado: p.estado, fim: o.fim, decisoes: o.propostas.filter((x) => x.modo === "pede").length, propostas: o.propostas.map((x) => ({ ref: x.ref, agente: x.agente, modo: x.modo, titulo: x.titulo })),
+      // 27/11 (Rúben: «uma nova área no menu para o cérebro, mostrar os agentes a trabalhar»): o Cérebro lê daqui a autonomia de cada agente
+      // nesta obra e o que fizeram hoje (com o agente), sem ter de carregar os Negócios
+      degraus: Object.fromEntries(AGENTES.map((a) => [a.id, degrauDe(d.obra.agentes, a.id)])),
+      feitos: (d.obra.agentes?.feitos ?? []).filter((f) => !f.desfeito && mesmoDia(f.q, agora)).slice(-8)
+        .map((f) => ({ agente: f.agente, texto: f.texto.slice(0, 160), quando: f.q, auto: f.auto, quem: f.quem })) } };
 }
+const mesmoDia = (iso: string, agora: Date) => { try { return new Date(iso).toDateString() === agora.toDateString(); } catch { return false; } };
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const pct = (n: number) => `${(Math.round(n * 1000) / 10).toLocaleString("pt-PT")}%`;
@@ -134,8 +141,9 @@ function itemNegocio(d: Negocio, S: Estado): ItemConhecimento {
     dados: { fase, faseN: d.fase, perdido: !!d.perdido, valor, obra: d.obra?.plano?.estado ?? null, enviada: d.orc?.enviada ?? null, aceite: d.orc?.aceite ?? null } };
 }
 
-/** Tudo o que a base de conhecimento tem para esta organização, a partir dos negócios carregados. */
-export function itensDoConhecimento(S: Estado, agora = new Date()): ItemConhecimento[] {
+/** Tudo o que a base de conhecimento tem para esta organização, a partir dos negócios carregados.
+ *  27/11: `origem` diz quem escreveu (o servidor de 15 em 15 min ou a página dos Negócios): o Cérebro mostra a última volta do servidor. */
+export function itensDoConhecimento(S: Estado, agora = new Date(), origem?: "servidor" | "pagina"): ItemConhecimento[] {
   const obras = obrasParaVoz(agora, { S, A: null as never, run: (fn: () => void) => fn() });
   const porId = new Map(obras.map((o) => [o.id, o]));
   const out: ItemConhecimento[] = [...GUIA];
@@ -147,7 +155,7 @@ export function itensDoConhecimento(S: Estado, agora = new Date()): ItemConhecim
       const cus = itemCustos(d, S);
       if (cus) out.push(cus);
       const o = porId.get(d.id);
-      if (o && d.obra?.plano) out.push(itemObra(d, o));
+      if (o && d.obra?.plano) out.push(itemObra(d, o, agora));
     } catch { /* um negócio estragado não para a base */ }
   }
   const decisoes = obras.reduce((a, o) => a + o.propostas.filter((x) => x.modo === "pede").length, 0);
@@ -155,7 +163,7 @@ export function itensDoConhecimento(S: Estado, agora = new Date()): ItemConhecim
   const hora = agora.toTimeString().slice(0, 5);
   out.push({ chave: "resumo:dia", tipo: "resumo", titulo: "O dia das obras",
     texto: `Às ${hora}: ${obras.length} ${obras.length === 1 ? "obra em curso ou aprovada" : "obras em curso ou aprovadas"}, ${decisoes} ${decisoes === 1 ? "decisão" : "decisões"} à espera do gestor. ${obras.map((o) => `${o.nome} (${o.id}): ${o.propostas.filter((x) => x.modo === "pede").length} a decidir${o.feitos.length ? `, ${o.feitos.length} feitas hoje pelos agentes` : ""}`).join("; ")}. ${feitos ? `Hoje os agentes fizeram ${feitos} ${feitos === 1 ? "mudança" : "mudanças"}.` : "Hoje os agentes ainda não fizeram nada sozinhos."}`,
-    dados: { obras: obras.length, decisoes, feitos } });
+    dados: { obras: obras.length, decisoes, feitos, volta: agora.toISOString(), ...(origem ? { origem } : {}) } });
   return out;
 }
 
