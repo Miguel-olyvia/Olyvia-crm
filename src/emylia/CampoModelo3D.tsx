@@ -16,8 +16,9 @@ const ONDE: Record<NivelModelo3D, string> = { produto: "neste produto", modelo: 
 const ITENS: readonly ItemCombo[] = GRUPOS_MODELO.flatMap((g) => MODELOS_ESCOLHA.filter((m) => m.grupo === g).map((m): ItemCombo => ({ id: m.id, nome: m.rotulo, grupo: g })));
 
 /** A frase por baixo do seletor: o que foi escolhido aqui, o que se herda (e de onde), ou que nada foi escolhido. */
-function fraseDoModelo3D(valor: string | null, heranca: ResolvidoNo, nivel: NivelModelo3D): string {
+function fraseDoModelo3D(valor: string | null, heranca: ResolvidoNo | null, nivel: NivelModelo3D, semHeranca?: string): string {
   if (valor) return `Escolhido ${ONDE[nivel]}: ${rotuloDoModelo3D(valor)}.`;
+  if (!heranca) return semHeranca ?? "Sem escolha: herda do nível de cima.";
   if (heranca.modelo) return `Herdado ${daOrigem(heranca.origem)}${heranca.de ? ` ${heranca.de}` : ""}: ${rotuloDoModelo3D(heranca.modelo)}.`;
   return "Sem escolha: o 3D usa o classificador, pelo nome e pela subcategoria.";
 }
@@ -25,8 +26,10 @@ function fraseDoModelo3D(valor: string | null, heranca: ResolvidoNo, nivel: Nive
 interface Props {
   /** O modelo escolhido neste nível (null: herda). */
   valor: string | null;
-  /** O que este nível herdaria se não escolhesse nada (resolverDoNo com `soHerdado`, ou herdadoDe). */
-  heranca: ResolvidoNo;
+  /** O que este nível herdaria se não escolhesse nada (resolverDoNo com `soHerdado`, ou herdadoDe). `null`: não se sabe (a leitura dos níveis de cima falhou ou ainda decorre): não se afirma o classificador. */
+  heranca: ResolvidoNo | null;
+  /** A frase por baixo do seletor quando `heranca` é null (por omissão «Sem escolha: herda do nível de cima.»). */
+  semHeranca?: string;
   onChange: (valor: string | null) => void;
   nivel?: NivelModelo3D;
   /** Sem permissão: o botão fica desativado. */
@@ -37,9 +40,9 @@ interface Props {
   className?: string;
 }
 
-export function CampoModelo3D({ valor, heranca, onChange, nivel = "produto", desativado, ocupado, erro, className }: Props) {
+export function CampoModelo3D({ valor, heranca, semHeranca, onChange, nivel = "produto", desativado, ocupado, erro, className }: Props) {
   const idFrase = useId(), idErro = useId();
-  const automatico = rotuloAutomatico(heranca);
+  const automatico = heranca ? rotuloAutomatico(heranca) : "Automático (herda do nível de cima)";
   // um id que a base tem e a lista não conhece (a base não tem lista fechada) continua visível e escolhido: nunca se perde em silêncio
   const atual = useMemo<ItemCombo | null>(() => {
     if (!valor) return null;
@@ -53,7 +56,7 @@ export function CampoModelo3D({ valor, heranca, onChange, nivel = "produto", des
           <ComboPesquisa id={id} rotulo="Modelo 3D" itens={ITENS} atual={atual} semValor={automatico} semValorComoValor desativado={desativado} ocupado={ocupado} descr={erro ? `${idFrase} ${idErro}` : idFrase} onEscolher={(i) => onChange(i.id || null)} />
         )}
       </Campo>
-      <p id={idFrase} aria-live="polite" className={NOTA}>{fraseDoModelo3D(valor, heranca, nivel)}</p>
+      <p id={idFrase} aria-live="polite" className={NOTA}>{fraseDoModelo3D(valor, heranca, nivel, semHeranca)}</p>
       {erro && <p id={idErro} role="alert" className="text-[15px] text-red-700 dark:text-red-400">{erro}</p>}
     </div>
   );

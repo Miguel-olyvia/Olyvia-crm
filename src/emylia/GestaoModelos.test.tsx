@@ -308,6 +308,31 @@ describe("Modelos: Modelo 3D", () => {
     await waitFor(() => expect(seletor()).toHaveTextContent("Automático (herda: Banheira, da categoria Casa de banho)"));
   });
 
+  it("se a leitura das categorias falha, a omissão não afirma o classificador: diz que a herança não pôde ser lida (e a gravação continua possível)", async () => {
+    base.responder = (f) => {
+      if (f === "cat_ler_categorias_gestao") return erro("XX000", "boom");
+      if (f === "cat_ler_modelos_gestao") return { data: modelos(), error: null };
+      return { data: { alvo: "modelo", id: M2, modelo: "bide", anterior: null }, error: null };
+    };
+    await abrir();
+    abrirPainel("0002 · STONE PLUS", "STONE PLUS");
+    await waitFor(() => expect(seletor()).toHaveTextContent("Automático (herda do nível de cima)"));
+    expect(screen.getByText(/não foi possível ler a escolha da subcategoria e da categoria/)).toBeInTheDocument();
+    expect(screen.queryByText(/classificador/)).toBeNull();
+    escolherModelo3d("Bidé");
+    fireEvent.click(screen.getByRole("button", { name: "Guardar modelo 3D" }));
+    await waitFor(() => expect(chamadasDe("cat_definir_modelo_3d")).toHaveLength(1));
+  });
+
+  it("enquanto as categorias ainda se leem, a omissão também é neutra (não «classificador»)", async () => {
+    base.responder = (f) => (f === "cat_ler_categorias_gestao" ? new Promise(() => {}) : { data: modelos(), error: null });
+    await abrir();
+    abrirPainel("0002 · STONE PLUS", "STONE PLUS");
+    expect(seletor()).toHaveTextContent("Automático (herda do nível de cima)");
+    expect(screen.getByText(/a ler a escolha da subcategoria e da categoria/)).toBeInTheDocument();
+    expect(screen.queryByText(/classificador/)).toBeNull();
+  });
+
   it("escolher e guardar: grava com o alvo 'modelo' e o id do modelo, anuncia, relê a lista, fecha o painel e devolve o foco ao botão", async () => {
     const anunciar = await abrir();
     abrirPainel("0002 · STONE PLUS", "STONE PLUS");

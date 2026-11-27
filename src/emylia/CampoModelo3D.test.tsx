@@ -29,6 +29,13 @@ describe("CampoModelo3D", () => {
     expect(screen.getByText(/Sem escolha: o 3D usa o classificador/)).toBeInTheDocument();
   });
 
+  it("sem saber o que está acima (heranca null), não afirma o classificador: «Automático (herda do nível de cima)» e a nota recebida", () => {
+    render(<CampoModelo3D valor={null} onChange={vi.fn()} heranca={null} semHeranca="Sem escolha: herda do nível de cima; não foi possível ler a escolha da subcategoria e da categoria." />);
+    expect(botao()).toHaveTextContent("Automático (herda do nível de cima)");
+    expect(screen.getByText(/não foi possível ler a escolha da subcategoria/)).toBeInTheDocument();
+    expect(screen.queryByText(/classificador/)).toBeNull();
+  });
+
   it("herdado da subcategoria: a omissão diz o modelo e de onde vem, e o texto «Herdado da subcategoria X: Y» aparece", () => {
     render(<CampoModelo3D valor={null} onChange={vi.fn()} heranca={{ modelo: "sanita", origem: "subcategoria", de: "Sanitas" }} />);
     expect(botao()).toHaveTextContent("Automático (herda: Sanita de chão, da subcategoria Sanitas)");
