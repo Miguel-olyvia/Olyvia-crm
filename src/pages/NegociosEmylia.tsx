@@ -41,6 +41,7 @@ import { definirCriadorContas, definirModoReal, definirResultadoConta, emailDaFi
 import { marcarContaPortal } from "@/emylia/estadoContaPortal";
 import { documentosDoNegocio, enviarAoPortal } from "@/emylia/real/portalReal";
 import { definirModoTeste, podeModoTeste, simularCliente, simularFornecedor } from "@/emylia/real/modoTeste";
+import { garantirMateriaisTeste, textoGarantir } from "@/emylia/real/materiaisTeste";
 // FERRAMENTAS-TESTE (temporário, remover antes da main)
 import { definirSimularClienteTeste, podeSimularClienteTeste } from "@/emylia/real/modoTeste";
 import { definirGuardarCliente } from "@/emylia/EditarCliente";
@@ -797,6 +798,16 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
             await simularFornecedor(supabase, uuid);
             await reler();
             avisar({ msg: "Encomenda confirmada pelo fornecedor (teste)", sub: "Como no portal do fornecedor.", kind: "ok" });
+          } catch (e) {
+            avisar({ msg: "O teste não foi feito", sub: (e as Error).message, kind: "bad" });
+          } finally { redesenhar(); }
+        },
+        // 27/11 (Rúben: «um botão para dar "ok" aos materiais de uma obra»): recebe as POs da obra e dá entrada do que falta, sem fornecedores
+        garantirMateriais: async (contrato) => {
+          try {
+            const r = await garantirMateriaisTeste(supabase, org, contrato);
+            await reler();
+            avisar(textoGarantir(r));
           } catch (e) {
             avisar({ msg: "O teste não foi feito", sub: (e as Error).message, kind: "bad" });
           } finally { redesenhar(); }
