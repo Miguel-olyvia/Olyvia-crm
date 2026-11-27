@@ -234,7 +234,7 @@ export function montarGrafo(linhas: LinhaConhecimento[], obras: ObraCerebro[] = 
   }
 
   // os temas (só os que ficam com alguma ligação)
-  for (const t of TEMAS) nos.set(t.id, { id: t.id, tipo: "tema", titulo: t.titulo, rotulo: t.titulo, numero: null, texto: "", dados: {}, atualizado: null, grau: 0, decisoes: 0, cor: CORES.tema });
+  for (const t of TEMAS) nos.set(t.id, { id: t.id, tipo: "tema", titulo: t.titulo, rotulo: t.titulo, numero: null, texto: `O tema «${t.titulo}» junta as notas da base que falam dele: carrega numa ligação para a abrir.`, dados: {}, atualizado: null, grau: 0, decisoes: 0, cor: CORES.tema });
   // os seis agentes
   const comAgentes = obras.length > 0 || [...nos.values()].some((n) => n.tipo === "obra" || n.tipo === "resumo");
   if (comAgentes) for (const a of AGENTES) nos.set(`agente:${a.id}`, { id: `agente:${a.id}`, tipo: "agente", titulo: `Agente ${a.nome}`, rotulo: a.nome, numero: null, texto: `Vigia ${a.vigia}.`, dados: {}, atualizado: null, grau: 0, decisoes: 0, cor: a.cor, agente: a.id });

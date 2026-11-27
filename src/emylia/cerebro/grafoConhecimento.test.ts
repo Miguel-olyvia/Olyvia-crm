@@ -7,7 +7,7 @@ import {
   filtrarGrafo, ligacoesDoNo, montarGrafo, obrasDaBase, obrasDoEstado, procurar, proximaVolta, resumoDosAgentes, temasDoGuia, ultimaEscrita, vizinhos,
   type LinhaConhecimento,
 } from "./grafoConhecimento";
-import { Simulacao, enquadrar } from "./forcas";
+import { Simulacao, corpoDoNo, enquadrar } from "./forcas";
 
 const linha = (tipo: string, numero: number | null, titulo: string, dados: Record<string, unknown> = {}, chave?: string): LinhaConhecimento =>
   ({ chave: chave ?? `${tipo}:${numero ?? titulo}`, tipo, numero, titulo, texto: `${titulo}.`, dados, atualizado_em: "2026-11-27T10:00:00Z" });
@@ -196,6 +196,24 @@ describe("as forças", () => {
     const a = sim.corpo("a")!; a.fx = 100; a.fy = -50;
     sim.correr(20);
     expect([a.x, a.y]).toEqual([100, -50]);
+  });
+  it("com o tamanho da Mudelar (50 negócios, 6 obras), os temas, os agentes e as obras não se sobrepõem com o nome", () => {
+    const L: LinhaConhecimento[] = [...BASE.filter((l) => l.tipo === "guia" || l.tipo === "resumo")];
+    const P = ["Plano", "Equipa", "Cliente", "Margem", "Aprendizagem"].map((agente, i) => ({ agente, modo: i % 2 ? "ver" : "pede", titulo: "x" }));
+    for (let i = 1; i <= 50; i++) {
+      L.push(linha("negocio", i, `Negócio ${i} · X`));
+      if (i <= 44) L.push(linha("orcamento", i, `Orçamento ${i} · X`));
+      if (i <= 41) L.push(linha("custos", i, `Custos ${i} · X`));
+      if (i <= 6) L.push(linha("obra", i, `Obra ${i} · X`, { propostas: P }));
+    }
+    const g = montarGrafo(L);
+    const sim = new Simulacao(g.nos.map(corpoDoNo), g.arestas);
+    sim.correr(500);
+    const com = sim.corpos.filter((c) => /^(tema|agente|obra|resumo):/.test(c.id));
+    for (let i = 0; i < com.length; i++) for (let j = i + 1; j < com.length; j++) {
+      const a = com[i], b = com[j];
+      expect(Math.hypot(a.x - b.x, a.y - b.y), `${a.id} e ${b.id}`).toBeGreaterThan(a.c + b.c);
+    }
   });
   it("enquadra o grafo na janela", () => {
     const e = enquadrar({ x0: -100, y0: -50, x1: 100, y1: 50 }, 440, 240, 20);

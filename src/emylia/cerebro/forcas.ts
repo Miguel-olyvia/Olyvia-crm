@@ -6,8 +6,10 @@ export interface Corpo {
   id: string;
   x: number; y: number;
   vx: number; vy: number;
-  /** o raio (as colisões) */
+  /** o raio (o desenho) */
   r: number;
+  /** 27/11: o raio das colisões (o nó e o nome escrito ao lado) e o peso da repulsão (os temas afastam mais) */
+  c: number; w: number;
   /** preso (a ser arrastado) */
   fx?: number | null; fy?: number | null;
 }
@@ -35,16 +37,17 @@ export class Simulacao {
   private readonly decaimento = 1 - Math.pow(0.004, 1 / 300);
   private readonly atrito = 0.55;
 
-  constructor(nos: { id: string; r: number }[], ligacoes: { de: string; para: string }[], op: OpcoesForcas = {}, antes?: Map<string, { x: number; y: number }>) {
+  constructor(nos: { id: string; r: number; folga?: number; peso?: number }[], ligacoes: { de: string; para: string }[], op: OpcoesForcas = {}, antes?: Map<string, { x: number; y: number }>) {
     this.carga = op.carga ?? 38;
     this.gravidade = op.gravidade ?? 0.035;
     const L = op.comprimento ?? 46;
     // posições iniciais em espiral (phyllotaxis, como o d3), ou as de antes quando os dados se atualizam
     this.corpos = nos.map((n, i) => {
       const p = antes?.get(n.id);
-      if (p) return { id: n.id, x: p.x, y: p.y, vx: 0, vy: 0, r: n.r };
+      const c = n.r + (n.folga ?? 0), w = n.peso ?? 1;
+      if (p) return { id: n.id, x: p.x, y: p.y, vx: 0, vy: 0, r: n.r, c, w };
       const raio = 12 * Math.sqrt(0.5 + i), ang = i * ANGULO_DOURADO;
-      return { id: n.id, x: raio * Math.cos(ang), y: raio * Math.sin(ang), vx: 0, vy: 0, r: n.r };
+      return { id: n.id, x: raio * Math.cos(ang), y: raio * Math.sin(ang), vx: 0, vy: 0, r: n.r, c, w };
     });
     const idx = new Map(this.corpos.map((c, i) => [c.id, i]));
     const grau = new Map<number, number>();
@@ -77,9 +80,10 @@ export class Simulacao {
         if (d2 > 640000) continue; // longe demais para contar
         const d = Math.sqrt(d2);
         // como o d3 (forceManyBody): a força cai com a distância (1/d)
-        let f = (this.carga * a) / Math.max(d, 6);
-        const toque = p.r + q.r + 6;
-        if (d < toque) f += ((toque - d) / d) * 0.5;
+        let f = (this.carga * a * Math.sqrt(p.w * q.w)) / Math.max(d, 6);
+        // a colisão (com o nome): empurra o que falta para não se tocarem
+        const toque = p.c + q.c + 4;
+        if (d < toque) f += (toque - d) * 0.3;
         const ux = (dx / d) * f, uy = (dy / d) * f;
         p.vx -= ux; p.vy -= uy; q.vx += ux; q.vy += uy;
       }
@@ -132,4 +136,13 @@ export function enquadrar(l: { x0: number; y0: number; x1: number; y1: number },
   const w = Math.max(1, l.x1 - l.x0), h = Math.max(1, l.y1 - l.y0);
   const k = Math.max(0.2, Math.min(2.2, Math.min((largura - 2 * margem) / w, (altura - 2 * margem) / h)));
   return { k, x: largura / 2 - k * (l.x0 + w / 2), y: altura / 2 - k * (l.y0 + h / 2) };
+}
+
+/** 27/11: o corpo de cada nó do Cérebro. Os nós com o nome sempre escrito (temas, agentes, obras, o resumo) ocupam mais espaço, para os
+ *  nomes não se tocarem; os temas afastam mais (são os centros dos grupos). */
+export function corpoDoNo(n: { id: string; tipo: string; grau: number }): { id: string; r: number; folga: number; peso: number } {
+  if (n.tipo === "tema") return { id: n.id, r: raioDoNo(n.grau, 9), folga: 26, peso: 4 };
+  if (n.tipo === "agente") return { id: n.id, r: 11, folga: 20, peso: 1.6 };
+  if (n.tipo === "obra" || n.tipo === "resumo") return { id: n.id, r: raioDoNo(n.grau), folga: 18, peso: 1.4 };
+  return { id: n.id, r: raioDoNo(n.grau), folga: 2, peso: 1 };
 }
