@@ -144,6 +144,62 @@ describe("aplicarAparenciaDasZonas: a cor, a foto e o realce de cada zona", () =
   });
 });
 
+// 27/11: a Textura da Mudelar (Pizarra…) é uma foto que a COR da opção de Cor tinge (a cor multiplica a foto): `unica.tingir`. Zonas iguais: a cor da zona e a foto por cima; zonas
+// diferentes: a foto tingida vai às zonas sem foto própria, cada uma com a sua cor; a zona com foto própria e as partes fixas (puxadores) não mudam.
+describe("aplicarAparenciaDasZonas com `unica.tingir`: a foto da Textura tingida pela cor", () => {
+  const foto = new THREE.Texture(), propria = new THREE.Texture();
+  const texs = new Map<string, THREE.Texture>([["u:propria", propria]]);
+  const tingida = { tex: foto, lado: 40, tingir: true };
+  it("zonas iguais (ou sem zonas): todas as zonas ficam com a cor base e a foto por cima (a cor NÃO passa a branco)", () => {
+    const { m, zm } = montar("movel_lavatorio", {}, "#645e5e");
+    aplicarAparenciaDasZonas(zm.porZona, { corBase: "#645e5e", texturas: texs, unica: tingida });
+    for (const nome of ["frente_cima", "caixa"]) { expect(mat(m.grupo, nome).map, nome).toBe(foto); expect(mat(m.grupo, nome).color.getHexString(), nome).toBe("645e5e"); }
+  });
+  it("zonas iguais com a cor da zona: a zona fica com a cor da zona e a foto por cima", () => {
+    const { m, zm } = montar("movel_lavatorio");
+    aplicarAparenciaDasZonas(zm.porZona, { corBase: "#cccccc", zonas: { porZona: false, zonas: { corpo: { atributo: "Cor", cor: "#112233" }, frente: { atributo: "Cor", cor: "#112233" } } }, texturas: texs, unica: tingida });
+    expect(mat(m.grupo, "caixa").map).toBe(foto);
+    expect(mat(m.grupo, "caixa").color.getHexString()).toBe("112233");
+    expect(mat(m.grupo, "frente_cima").color.getHexString()).toBe("112233");
+  });
+  it("sem `tingir` (a foto da Cor, como sempre) a cor continua a passar a branco", () => {
+    const { m, zm } = montar("movel_lavatorio");
+    aplicarAparenciaDasZonas(zm.porZona, { corBase: "#645e5e", texturas: texs, unica: { tex: foto, lado: 40 } });
+    expect(mat(m.grupo, "caixa").color.getHexString()).toBe("ffffff");
+  });
+  it("zonas diferentes: a foto tingida vai às zonas sem foto própria, cada uma com a sua cor (a que não tem cor fica com a base)", () => {
+    const { m, zm } = montar("movel_lavatorio");
+    const zonas: ZonasDoProduto = { porZona: true, zonas: { frente: { atributo: "Cor da frente", cor: "#aa0000" } } };
+    aplicarAparenciaDasZonas(zm.porZona, { corBase: "#645e5e", zonas, texturas: texs, unica: tingida });
+    expect(mat(m.grupo, "frente_cima").map).toBe(foto);
+    expect(mat(m.grupo, "frente_cima").color.getHexString()).toBe("aa0000");
+    expect(mat(m.grupo, "caixa").map).toBe(foto);
+    expect(mat(m.grupo, "caixa").color.getHexString()).toBe("645e5e");
+  });
+  it("zonas diferentes: a zona com foto PRÓPRIA fica como está (branca, a sua foto); a Textura não lhe mexe", () => {
+    const { m, zm } = montar("movel_lavatorio");
+    const zonas: ZonasDoProduto = { porZona: true, zonas: { frente: { atributo: "Cor da frente", textura: { url: "u:propria", ladoCm: 40 } } } };
+    aplicarAparenciaDasZonas(zm.porZona, { corBase: "#645e5e", zonas, texturas: texs, unica: tingida });
+    expect(mat(m.grupo, "frente_cima").map).toBe(propria);
+    expect(mat(m.grupo, "frente_cima").color.getHexString()).toBe("ffffff");
+    expect(mat(m.grupo, "caixa").map).toBe(foto);
+  });
+  it("as partes fixas (puxadores de metal) não recebem a Textura", () => {
+    const { m, c } = montar("movel_lavatorio");
+    const comFixas = criarMateriaisDeZona(m.grupo, c, ["puxadores"]);
+    expect(comFixas.fixas.size).toBeGreaterThan(0);
+    aplicarAparenciaDasZonas(comFixas.porZona, { corBase: "#645e5e", texturas: texs, unica: tingida, fixas: comFixas.fixas });
+    for (const f of comFixas.fixas.values()) expect(f.map).toBeNull();
+  });
+  it("tirar a Textura repõe a cor de antes (a cor base) e tira o mapa", () => {
+    const { m, zm } = montar("movel_lavatorio");
+    aplicarAparenciaDasZonas(zm.porZona, { corBase: "#645e5e", texturas: texs, unica: tingida });
+    aplicarAparenciaDasZonas(zm.porZona, { corBase: "#645e5e", texturas: texs });
+    expect(mat(m.grupo, "caixa").map).toBeNull();
+    expect(mat(m.grupo, "caixa").color.getHexString()).toBe("645e5e");
+  });
+});
+
 describe("criarMateriaisDeZona: uma parte que o grupo não tem", () => {
   it("avisa uma vez (console.warn) com o nome da parte, e não volta a avisar na montagem seguinte; as outras zonas continuam a funcionar", () => {
     const aviso = vi.spyOn(console, "warn").mockImplementation(() => {});

@@ -47,6 +47,13 @@ export function classesDosAtributos(defs: readonly AtributoDef[]): Map<string, C
   return m;
 }
 
+/**
+ * 27/11: o atributo «Textura» (Pizarra, Liso, Piedra), pelo código ou pelo nome (sem acentos nem maiúsculas). NÃO é uma classe de cor (não entra em `ClasseCor`, nem nas ordens nem nos papéis):
+ * mesmo com hex e foto na base (para a foto da opção se poder carregar), nunca pinta zonas, nunca conta para «o único atributo de cor» nem dá hex. A sua foto vai pelo caminho próprio
+ * (`texturaDosAtributos`), ao corpo, TINGIDA pela cor da opção de Cor.
+ */
+export const ehAtributoDeTextura = (d: Pick<AtributoDef, "nome" | "codigo">): boolean => d.codigo.trim().toLowerCase() === "textura" || sem(d.nome).trim() === "textura";
+
 /** O atributo é um acabamento (nível 0 a 2): só conta se a opção escolhida der aspeto. */
 export const ehAcabamento = (c: ClasseCor | undefined): boolean => !!c && c.nivel < 3;
 
@@ -79,6 +86,7 @@ export function hexDoAcabamentoGeral(attrs: readonly AtributoProduto[] | undefin
 /** Um atributo que o 3D pode ler (tem hex, foto ou aspeto) e se, SEM configuração do produto, se aplica por omissão (e onde). */
 export interface LeituraPorOmissao { id: string; nome: string; aplicado: boolean; onde: string; /** 26/11: dá a superfície (Brilho, Tonalidade) e não a cor: o painel di-lo em palavras («dá a superfície a…»). */ daSuperficie?: boolean }
 const ONDE: Readonly<Record<PapelCor, string>> = { corpo: "pinta o corpo", frente: "pinta a frente", geral: "pinta as zonas sem atributo próprio" };
+const ONDE_TEXTURA = "dá a textura ao corpo, tingida pela cor";
 
 /**
  * TODOS os atributos de lista com hex, foto ou aspeto, e o estado por omissão de cada um (sem configuração do produto): os nomes conhecidos (Cor, Cor do corpo, Cor da frente, os acabamentos,
@@ -87,8 +95,10 @@ const ONDE: Readonly<Record<PapelCor, string>> = { corpo: "pinta o corpo", frent
 export function leiturasPorOmissao(defs: readonly AtributoDef[] | undefined): LeituraPorOmissao[] {
   const lista = (defs ?? []).filter((d) => d.tipo === "lista" && (d.temHex || d.temFoto || d.temAspeto));
   const classes = classesDosAtributos(lista);
-  const cores = lista.filter((d) => d.temHex || d.temFoto);
+  // 27/11: a Textura (com hex e foto na base) não é um atributo de cor: não conta para «o único atributo de cor»
+  const cores = lista.filter((d) => (d.temHex || d.temFoto) && !ehAtributoDeTextura(d));
   return lista.map((d) => {
+    if ((d.temHex || d.temFoto) && ehAtributoDeTextura(d)) return { id: d.id, nome: d.nome, aplicado: true, onde: ONDE_TEXTURA };
     const c = classes.get(d.id);
     if (c && (d.temHex || d.temFoto)) return { id: d.id, nome: d.nome, aplicado: true, onde: ONDE[c.papel] };
     if (ehAtributoDeSuperficie(d)) return { id: d.id, nome: d.nome, aplicado: true, onde: "dá a superfície a todas as zonas", daSuperficie: true };
@@ -118,7 +128,7 @@ export function leiturasDoProduto(defs: readonly AtributoDef[] | undefined, attr
     const d = porId.get(l.id);
     const e = d ? opcaoEscolhida(d, attrs)?.opcao : undefined;
     if (!d || !e) continue;
-    lidos.push({ ...l, opcao: { nome: e.nome, hex: hexValido(e.hex) ? e.hex : null, foto: e.foto || null }, daCor: d.temHex === true || d.temFoto === true, daSuperficie: ehAtributoDeSuperficie(d) });
+    lidos.push({ ...l, opcao: { nome: e.nome, hex: hexValido(e.hex) ? e.hex : null, foto: e.foto || null }, daCor: (d.temHex === true || d.temFoto === true) && !ehAtributoDeTextura(d), daSuperficie: ehAtributoDeSuperficie(d) });
   }
   return lidos;
 }

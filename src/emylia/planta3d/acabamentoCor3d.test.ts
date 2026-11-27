@@ -9,7 +9,7 @@ import { atributosDeValores, montarCatalogo } from "../real/catalogoReal";
 import { produtoDeLeitura } from "../real/produtosLeves";
 import { sem } from "./catalogo3d";
 import { chaveDeExclusao } from "./aspetoZonas";
-import { leiturasDoProduto, leiturasPorOmissao } from "./acabamentoCor3d";
+import { ehAtributoDeTextura, leiturasDoProduto, leiturasPorOmissao } from "./acabamentoCor3d";
 import { corDosAtributos, fotoDosAtributos } from "./previaProduto3d";
 import { ZONAS, aparenciaDaZona, aparenciaUnicaDasZonas, zonasDosAtributos, zonasVisuais, type ZonaGlb } from "./zonasGlb";
 
@@ -381,5 +381,42 @@ describe("leiturasDoProduto: só os atributos que o PRODUTO tem (com valor escol
     expect(leiturasDoProduto(SEIS, [])).toEqual([]);
     expect(leiturasDoProduto(SEIS, undefined)).toEqual([]);
     expect(leiturasDoProduto(undefined, [escolha(COR, "branco")])).toEqual([]);
+  });
+});
+
+// 27/11: a Textura da Mudelar (Pizarra, Liso, Piedra) passa a ter foto na base (has_hex_color + has_photo), mas não é um atributo de COR: dá a textura ao corpo, tingida pela cor.
+// Não pinta zonas, não conta para «o único atributo de cor» e não aparece como cor no painel «Ligações».
+describe("a Textura: reconhecida à parte, fora de todas as contas da cor", () => {
+  const TEXTURA = def("d-tex", "Textura", "textura", [op("pizarra", "org/pizarra.webp"), op("liso", null)]);
+  const textos = (...ds: AtributoDef[]) => Object.fromEntries(leiturasPorOmissao(ds).map((l) => [l.nome, l]));
+  it("ehAtributoDeTextura: pelo código ou pelo nome, sem acentos nem maiúsculas; nada mais", () => {
+    expect(ehAtributoDeTextura({ codigo: "textura", nome: "x" })).toBe(true);
+    expect(ehAtributoDeTextura({ codigo: "TEXTURA", nome: "x" })).toBe(true);
+    expect(ehAtributoDeTextura({ codigo: "x", nome: "  TEXTURA " })).toBe(true);
+    for (const [c, n] of [["tonalidade", "Tonalidade"], ["cor", "Cor"], ["textura_extra", "Textura extra"]] as const) expect(ehAtributoDeTextura({ codigo: c, nome: n }), n).toBe(false);
+  });
+  it("não pinta nenhuma zona, nem como único atributo de cor, nem escolhida", () => {
+    const a = [escolha(TEXTURA, "pizarra")];
+    expect(zonasDosAtributos(a, [TEXTURA])).toBeUndefined();
+    for (const z of ZONAS) expect(zona(z, a, [TEXTURA]), z).toBeNull();
+    // ligada à mão a todas as zonas, a Textura continua sem pintar cor nem foto (a foto da Textura vai pelo caminho próprio, tingida)
+    expect(zonasDosAtributos(a, [TEXTURA], { [TEXTURA.id]: [...ZONAS] })).toBeUndefined();
+  });
+  it("não impede os outros: com a Cor escolhida, as zonas levam a Cor, não a Textura; e a Textura não faz do Puxador «o único atributo de cor»", () => {
+    const a = [escolha(TEXTURA, "pizarra"), escolha(COR, "branco")];
+    expect(zona("corpo", a, [COR, TEXTURA])?.atributo).toBe("Cor");
+    expect(zona("corpo", [escolha(TEXTURA, "pizarra"), escolha(PUXADOR, "preto-p")], [TEXTURA, PUXADOR])?.atributo).toBe("Puxador"); // único atributo de cor = o Puxador (a Textura não conta)
+    expect(zona("corpo", [escolha(TEXTURA, "pizarra"), escolha(PUXADOR, "preto-p")], [TEXTURA, PUXADOR, COR])).toBeNull(); // com a Cor no sistema, o Puxador volta a só pintar ligado
+  });
+  it("leiturasPorOmissao: a Textura aplica-se por omissão e diz o que faz; não torna nenhum outro «o único atributo de cor»", () => {
+    expect(textos(TEXTURA).Textura).toMatchObject({ aplicado: true, onde: "dá a textura ao corpo, tingida pela cor" });
+    expect(textos(COR, TEXTURA).Textura).toMatchObject({ aplicado: true, onde: "dá a textura ao corpo, tingida pela cor" });
+    expect(textos(PUXADOR, TEXTURA).Puxador).toMatchObject({ aplicado: true, onde: "é o único atributo de cor: pinta tudo" });
+  });
+  it("leiturasDoProduto: a Textura aparece com a opção escolhida, mas não conta como atributo de COR (daCor falso) nem de superfície", () => {
+    const l = leiturasDoProduto([COR, TEXTURA], [escolha(COR, "branco"), escolha(TEXTURA, "pizarra")]);
+    const t = l.find((x) => x.nome === "Textura");
+    expect(t).toMatchObject({ aplicado: true, daCor: false, daSuperficie: false, opcao: { nome: "pizarra", foto: "org/pizarra.webp" } });
+    expect(l.find((x) => x.nome === "Cor")?.daCor).toBe(true);
   });
 });

@@ -12,7 +12,11 @@ import * as THREE from "three";
 /** Quantos centímetros cobre uma repetição da foto, por omissão (constante fácil de afinar). */
 export const LADO_TEXTURA_CM = 40;
 /** A foto de uma opção de cor e o lado, em cm, que uma repetição dela cobre. */
-export interface TexturaModelo { url: string; ladoCm: number }
+export interface TexturaModelo {
+  url: string; ladoCm: number;
+  /** 27/11: a foto da Textura (Pizarra…) é TINGIDA pela cor: a cor do material multiplica a foto em vez de passar a branco. Sem isto (a foto da opção de Cor) a foto substitui a cor, como sempre. */
+  tingir?: boolean;
+}
 
 type V3 = readonly [number, number, number];
 
@@ -29,21 +33,25 @@ export function uvEmMundo(p: V3, n: V3, repeticoes: number, rodar = false): [num
   return rodar ? [v * repeticoes, u * repeticoes] : [u * repeticoes, v * repeticoes];
 }
 /** 24/11: `rodar` troca os eixos da foto (u ↔ v): o veio vertical da foto corre na horizontal. Só os revestimentos com o lado maior na horizontal o pedem. */
-export interface OpcoesTextura { rodar?: boolean }
+export interface OpcoesTextura { rodar?: boolean; /** 27/11: a cor do material multiplica a foto (a cor não passa a branco): a Textura tingida pela cor da opção de Cor */ tingir?: boolean }
 
 /* ------------------------------------------------------------------ o material */
 const CHAVE_PROGRAMA = "textura-no-mundo-v1";
 type Guardado = { cor: THREE.Color; uniform: { value: number } };
 const guardados = new WeakMap<THREE.Material, Guardado>();
 
-/** Põe a foto no material (MeshStandardMaterial) como mapa, mapeada no mundo com `ladoCm` por repetição. A cor passa a branco (e guarda-se a de antes). Idempotente. */
+/**
+ * Põe a foto no material (MeshStandardMaterial) como mapa, mapeada no mundo com `ladoCm` por repetição. A cor passa a branco (e guarda-se a de antes). Idempotente.
+ * 27/11: com `tingir` a cor NÃO passa a branco: a cor que o material já tem multiplica a foto (o shader faz `diffuseColor *= texel`), que é o que a Textura pede (Antracite + Pizarra).
+ * A cor de antes guarda-se na mesma e `retirarTextura` repõe-na; a chave de compilação do shader não muda.
+ */
 export function aplicarTextura(mat: THREE.MeshStandardMaterial, textura: THREE.Texture, ladoCm: number, opcoes: OpcoesTextura = {}): void {
   const rodar = !!opcoes.rodar;
   let g = guardados.get(mat);
   if (!g) { g = { cor: mat.color.clone(), uniform: { value: 0 } }; guardados.set(mat, g); }
   g.uniform.value = repeticoesPorMetro(ladoCm);
   const uniform = g.uniform;
-  mat.color.set(0xffffff);
+  if (!opcoes.tingir) mat.color.set(0xffffff);
   mat.map = textura;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uRepTextura = uniform;

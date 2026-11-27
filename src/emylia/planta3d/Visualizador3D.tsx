@@ -150,7 +150,7 @@ function useRevestimento(r: Revestimento, w: number, h: number): THREE.MeshLambe
  * 24/11: a textura da foto da opção de cor de UMA peça (só a pré-visualização do produto a põe; a planta não): a textura carregada, a cor lisa do corpo (as partes dessa
  * cor levam a foto; as outras, como os puxadores, ficam como são) e as propriedades de material que a aplicam (mapa e shader por posição no mundo). Sem ela, tudo como sempre.
  */
-interface TexturaDaPeca { tex: THREE.Texture; cor: string; lado: number; props: { map: THREE.Texture; onBeforeCompile: THREE.Material["onBeforeCompile"]; customProgramCacheKey: () => string } }
+interface TexturaDaPeca { tex: THREE.Texture; cor: string; lado: number; /** 27/11: a foto da Textura: a cor multiplica-a em vez de passar a branco */ tingir: boolean; props: { map: THREE.Texture; onBeforeCompile: THREE.Material["onBeforeCompile"]; customProgramCacheKey: () => string } }
 const TexturaCtx = createContext<TexturaDaPeca | null>(null);
 /** 24/11 (fase 1): a aparência de cada zona da peça e a zona realçada. Passa por contexto DENTRO do canvas (a Peca fornece-o); sem fornecedor, nada de zonas: como sempre. */
 interface ZonasDaPeca { zonas?: ZonasDoProduto; realce?: RealceDeZonas }
@@ -167,7 +167,7 @@ function AmbienteMetalDosMetais({ children }: { children: ReactNode }) {
 function useTexturaDoModelo(textura: Mockup3D["textura"], cor: string): TexturaDaPeca | null {
   const invalidate = useThree((s) => s.invalidate);
   const [tex, setTex] = useState<THREE.Texture | null>(null);
-  const url = textura?.url, lado = textura?.ladoCm ?? 0;
+  const url = textura?.url, lado = textura?.ladoCm ?? 0, tingir = textura?.tingir === true;
   useEffect(() => {
     if (!url) { setTex(null); return; }
     const largar = pedirTextura(url, (t) => { setTex(t); invalidate(); });
@@ -177,20 +177,20 @@ function useTexturaDoModelo(textura: Mockup3D["textura"], cor: string): TexturaD
     if (!tex) return null;
     // as propriedades saem de um material de molde (nunca desenhado), para haver um só sítio que sabe aplicar a foto
     const molde = new THREE.MeshStandardMaterial();
-    aplicarTextura(molde, tex, lado);
+    aplicarTextura(molde, tex, lado, { tingir });
     const props = { map: tex, onBeforeCompile: molde.onBeforeCompile, customProgramCacheKey: molde.customProgramCacheKey };
     molde.dispose();
-    return { tex, cor, lado, props };
-  }, [tex, cor, lado]);
+    return { tex, cor, lado, tingir, props };
+  }, [tex, cor, lado, tingir]);
 }
 const Caixa = ({ p, s, cor, r = 0.6 }: { p: V3; s: V3; cor: string; r?: number }) => {
   const tx = useContext(TexturaCtx), com = !!tx && tx.cor === cor;
-  return <mesh position={p}><boxGeometry args={s} /><meshStandardMaterial key={com ? "tx" : "liso"} color={com ? "#ffffff" : cor} roughness={r} {...(com && tx ? tx.props : {})} /></mesh>;
+  return <mesh position={p}><boxGeometry args={s} /><meshStandardMaterial key={com ? "tx" : "liso"} color={com && !tx?.tingir ? "#ffffff" : cor} roughness={r} {...(com && tx ? tx.props : {})} /></mesh>;
 };
 /** Um cilindro achatado em elipse: raio 0,5 em x e z, escalado para `ex` × `ez`. */
 const Elipse = ({ p, ex, ez, h, cor, topo = 0.5 }: { p: V3; ex: number; ez: number; h: number; cor: string; topo?: number }) => {
   const tx = useContext(TexturaCtx), com = !!tx && tx.cor === cor;
-  return <mesh position={p} scale={[ex, 1, ez]}><cylinderGeometry args={[topo, 0.5, h, 28]} /><meshStandardMaterial key={com ? "tx" : "liso"} color={com ? "#ffffff" : cor} roughness={0.25} {...(com && tx ? tx.props : {})} /></mesh>;
+  return <mesh position={p} scale={[ex, 1, ez]}><cylinderGeometry args={[topo, 0.5, h, 28]} /><meshStandardMaterial key={com ? "tx" : "liso"} color={com && !tx?.tingir ? "#ffffff" : cor} roughness={0.25} {...(com && tx ? tx.props : {})} /></mesh>;
 };
 /** As frentes (portas) de um móvel, com puxadores, na face de +z. */
 function Frentes({ w, h, d, n, cor, y0 = 0, vertical = false }: { w: number; h: number; d: number; n: number; cor: string; y0?: number; vertical?: boolean }) {
@@ -419,7 +419,7 @@ function GenericoGlb({ c, tipo, w, d, h, cor, mat, opc, generico }: PropsParam &
   const urls = useMemo(() => (zc.zonas?.porZona ? Object.values(zc.zonas.zonas).flatMap((z) => (z?.textura ? [z.textura.url] : [])) : []), [zc.zonas]);
   const texturas = useTexturasPorUrl(urls, invalidate);
   useEffect(() => {
-    aplicarAparenciaDasZonas(zm.porZona, { corBase: corFinal, zonas: zc.zonas, texturas, unica: tx ? { tex: tx.tex, lado: tx.lado } : null, fixas: zm.fixas, ambienteMetal: ambienteMetal ?? undefined });
+    aplicarAparenciaDasZonas(zm.porZona, { corBase: corFinal, zonas: zc.zonas, texturas, unica: tx ? { tex: tx.tex, lado: tx.lado, tingir: tx.tingir } : null, fixas: zm.fixas, ambienteMetal: ambienteMetal ?? undefined });
     invalidate();
   }, [zm, zc.zonas, texturas, tx, corFinal, ambienteMetal, invalidate]);
   // o realce é só brilho: apontar de uma zona a outra não retira nem volta a pôr as fotos (o material não se recompila)
@@ -1137,14 +1137,15 @@ function AmostraRevestimento({ r }: { r: RevestimentoVisual }) {
   const matPecas = useMemo(() => new THREE.MeshStandardMaterial({ color: r.cor, roughness: 0.5, vertexColors: true }), [r.cor]);
   const matJunta = useMemo(() => new THREE.MeshStandardMaterial({ color: corDaJunta(r.cor), roughness: 0.95 }), [r.cor]);
   useEffect(() => () => { matPecas.dispose(); matJunta.dispose(); }, [matPecas, matJunta]);
-  const url = r.textura?.url, lado = r.textura?.ladoCm ?? 0;
+  // 27/11: `tingir` (a foto da Textura): a cor da peça multiplica a foto em vez de a substituir
+  const url = r.textura?.url, lado = r.textura?.ladoCm ?? 0, tingir = r.textura?.tingir === true;
   // o veio da foto (vertical nas fotos das opções de cor) corre ao longo da peça: com o lado maior na horizontal, a foto roda
   const rodar = plano.pecaM[0] > plano.pecaM[1];
   useEffect(() => {
     if (!url) return;
-    const largar = pedirTextura(url, (t) => { if (t) aplicarTextura(matPecas, t, lado, { rodar }); else retirarTextura(matPecas); invalidate(); });
+    const largar = pedirTextura(url, (t) => { if (t) aplicarTextura(matPecas, t, lado, { rodar, tingir }); else retirarTextura(matPecas); invalidate(); });
     return () => { largar(); retirarTextura(matPecas); invalidate(); };
-  }, [url, lado, rodar, matPecas, invalidate]);
+  }, [url, lado, rodar, tingir, matPecas, invalidate]);
   useEffect(() => { invalidate(); }, [geo, invalidate]);
   const base: { p: V3; s: V3 } = chao ? { p: [w / 2, ARGAMASSA_M / 2, h / 2], s: [w, ARGAMASSA_M, h] } : { p: [w / 2, h / 2, ARGAMASSA_M / 2], s: [w, h, ARGAMASSA_M] };
   return (

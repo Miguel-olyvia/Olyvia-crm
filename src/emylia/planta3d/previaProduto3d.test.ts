@@ -3,7 +3,7 @@
 // e a cena mínima (um espaço pequeno com a peça ao centro). Aqui não há mocks: é a lógica real; o desenho em WebGL só se verifica ao vivo.
 import { describe, expect, it } from "vitest";
 import type { AtributoDef, AtributoProduto } from "../v2/catalogoModelo";
-import { cenaDoProduto, corDosAtributos, dimensoesDaMedida, estadoDoModelo, fotoDosAtributos, medidaDosAtributos, modeloParaPrevia, type MedidaCm } from "./previaProduto3d";
+import { cenaDoProduto, corDosAtributos, dimensoesDaMedida, estadoDoModelo, fotoDosAtributos, medidaDosAtributos, modeloParaPrevia, texturaDosAtributos, type MedidaCm } from "./previaProduto3d";
 
 const med = (m: AtributoProduto["medida"]): AtributoProduto[] => [{ atributoId: "a-med", medida: m }];
 
@@ -191,6 +191,47 @@ describe("fotoDosAtributos: o caminho da foto da opção de cor escolhida (corpo
   it("«Cor do corpo» e «Cor da frente» reconhecem-se sem acentos nem maiúsculas", () => {
     const c = cor("a-c", "COR DO CORPO", [{ id: "o-1", foto: ARTISAN }]);
     expect(fotoDosAtributos([escolha("a-c", "o-1")], [c])).toBe(ARTISAN);
+  });
+});
+
+// 27/11: a Textura da Mudelar (Pizarra, Liso, Piedra) dá a FOTO ao corpo, tingida pela cor da opção de Cor; nunca é um atributo de cor (não dá hex nem entra na foto da cor).
+describe("texturaDosAtributos e a Textura fora das contas da cor", () => {
+  const PIZARRA = "org/pizarra.webp";
+  const tex = cor("a-tex", "Textura", [{ id: "o-pizarra", foto: PIZARRA }, { id: "o-liso", foto: null }], { codigo: "textura", temFoto: true });
+  const ant = cor("a-cor", "Cor", [{ id: "o-ant", hex: "#645E5E" }], { codigo: "cor" });
+  const corComFoto = cor("a-cor", "Cor", [{ id: "o-nogal", foto: NOGAL, hex: "#8b5a2b" }], { codigo: "cor", temFoto: true });
+  it("com a opção que tem foto: devolve o caminho dela", () => {
+    expect(texturaDosAtributos([escolha("a-tex", "o-pizarra"), escolha("a-cor", "o-ant")], [ant, tex])).toBe(PIZARRA);
+  });
+  it("reconhece o atributo pelo nome, sem acentos nem maiúsculas, mesmo com outro código", () => {
+    const t2 = cor("a-t2", "TEXTURA", [{ id: "o-1", foto: PIZARRA }], { codigo: "x_y", temFoto: true });
+    expect(texturaDosAtributos([escolha("a-t2", "o-1")], [t2])).toBe(PIZARRA);
+  });
+  it("sem foto na opção, sem escolha, sem atributo, sem definições: null", () => {
+    expect(texturaDosAtributos([escolha("a-tex", "o-liso")], [ant, tex])).toBeNull();
+    expect(texturaDosAtributos([escolha("a-cor", "o-ant")], [ant, tex])).toBeNull();
+    expect(texturaDosAtributos([escolha("a-cor", "o-ant")], [ant])).toBeNull();
+    expect(texturaDosAtributos(undefined, [tex])).toBeNull();
+    expect(texturaDosAtributos([escolha("a-tex", "o-pizarra")], undefined)).toBeNull();
+    expect(texturaDosAtributos([], [tex])).toBeNull();
+  });
+  it("um atributo de Textura sem `temFoto` (a base de hoje) não dá textura, mesmo com a foto na opção", () => {
+    const semFoto = cor("a-tex", "Textura", [{ id: "o-pizarra", foto: PIZARRA }], { codigo: "textura", temHex: false, temFoto: false });
+    expect(texturaDosAtributos([escolha("a-tex", "o-pizarra")], [semFoto])).toBeNull();
+  });
+  it("outro atributo com foto (a Cor) nunca é a textura", () => {
+    expect(texturaDosAtributos([escolha("a-cor", "o-nogal")], [corComFoto, tex])).toBeNull();
+  });
+  it("fotoDosAtributos ignora a Textura, mesmo quando é o único outro atributo com foto (a foto da Cor é a da Cor)", () => {
+    expect(fotoDosAtributos([escolha("a-tex", "o-pizarra")], [tex])).toBeNull();
+    expect(fotoDosAtributos([escolha("a-tex", "o-pizarra"), escolha("a-cor", "o-nogal")], [corComFoto, tex])).toBe(NOGAL);
+    // a Textura não faz da Cor sem foto «o único» nem tapa a Cor: continua sem foto
+    expect(fotoDosAtributos([escolha("a-tex", "o-pizarra"), escolha("a-cor", "o-ant")], [ant, tex])).toBeNull();
+  });
+  it("a Textura sozinha, mesmo com hex nas opções, não dá cor; a cor continua a ser a do código «cor»", () => {
+    const texHex = cor("a-tex", "Textura", [{ id: "o-pizarra", foto: PIZARRA, hex: "#222222" }], { codigo: "textura", temFoto: true });
+    expect(corDosAtributos([escolha("a-tex", "o-pizarra")], [texHex])).toBeUndefined();
+    expect(corDosAtributos([escolha("a-tex", "o-pizarra"), escolha("a-cor", "o-ant")], [ant, texHex])).toBe("#645E5E");
   });
 });
 

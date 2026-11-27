@@ -73,7 +73,7 @@ export interface AparenciaDasZonas {
   /** As fotos já carregadas, por URL. Uma foto que ainda não chegou (ou falhou) deixa a zona na sua cor. */
   texturas: ReadonlyMap<string, THREE.Texture>;
   /** O caminho de hoje: a foto única (corpo > frente > cor) em TODAS as zonas, como ia para o `corpo` inteiro. */
-  unica?: { tex: THREE.Texture; lado: number } | null;
+  unica?: { tex: THREE.Texture; lado: number; /** 27/11: a foto da Textura: tingida pela cor da zona (a cor multiplica a foto) em vez de a substituir */ tingir?: boolean } | null;
   /** 25/11: os materiais fixos das zonas ligadas (`criarMateriaisDeZona().fixas`): só levam o que a zona tem (cor, foto, aspeto); sem nada, ficam como o modelo os fez. */
   fixas?: ReadonlyMap<ZonaGlb, THREE.MeshStandardMaterial>;
   /**
@@ -109,14 +109,20 @@ const corDaZona = (cor: string, material: MaterialZona | undefined, comFoto: boo
 export function aplicarAparenciaDasZonas(mats: ReadonlyMap<ZonaGlb, THREE.MeshStandardMaterial>, o: AparenciaDasZonas): void {
   for (const [zona, mat] of mats) {
     retirarTextura(mat);
-    let cor = o.corBase, tex: THREE.Texture | undefined, lado = 0;
+    let cor = o.corBase, tex: THREE.Texture | undefined, lado = 0, tingir = false;
     const z = o.zonas?.zonas[zona];
     if (o.zonas?.porZona) {
       if (z?.cor) cor = z.cor;
       if (z?.textura) { tex = o.texturas.get(z.textura.url); lado = z.textura.ladoCm; }
-    } else if (o.unica) { tex = o.unica.tex; lado = o.unica.lado; }
+      // 27/11: zonas diferentes e a Textura: a foto tingida vai às zonas SEM foto própria, cada uma com a sua cor; a zona com foto própria fica como está
+      else if (o.unica?.tingir) { tex = o.unica.tex; lado = o.unica.lado; tingir = true; }
+    } else if (o.unica) {
+      tex = o.unica.tex; lado = o.unica.lado; tingir = o.unica.tingir === true;
+      // 27/11: zonas iguais e a Textura: a zona fica com a cor da zona e a foto por cima
+      if (tingir && z?.cor) cor = z.cor;
+    }
     mat.color.set(corDaZona(cor, z?.material, !!tex));
-    if (tex) aplicarTextura(mat, tex, lado);
+    if (tex) aplicarTextura(mat, tex, lado, { tingir });
     aplicarAspeto(mat, z?.material, o.ambienteMetal);
   }
   // as partes fixas (puxadores de metal): só o que a zona leva; sem entrada, voltam à cor e ao metal de origem

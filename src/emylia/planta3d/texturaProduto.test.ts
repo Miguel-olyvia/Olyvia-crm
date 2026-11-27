@@ -100,6 +100,26 @@ describe("aplicarTextura: a foto fica como mapa do material, com a cor branca po
     expect(m.map).toBeNull();
     expect(m.color.getHexString()).toBe("c9b08a");
   });
+  it("27/11 `tingir` (a Textura da Mudelar): a cor do material NÃO passa a branco, multiplica a foto; a chave do programa é a mesma", () => {
+    const m = nova(), b = nova(), t = tex();
+    aplicarTextura(m, t, 40, { tingir: true });
+    aplicarTextura(b, tex(), 40);
+    expect(m.map).toBe(t);
+    expect(m.color.getHexString()).toBe("c9b08a");
+    expect(b.color.getHexString()).toBe("ffffff");
+    expect(m.customProgramCacheKey()).toBe(b.customProgramCacheKey());
+    const s = { vertexShader: "#include <common>\n#include <begin_vertex>", fragmentShader: "#include <common>\n#include <map_fragment>", uniforms: {} as Record<string, { value: unknown }> };
+    m.onBeforeCompile(s as unknown as THREE.WebGLProgramParametersWithUniforms, null as unknown as THREE.WebGLRenderer);
+    expect(s.fragmentShader).toContain("diffuseColor *= texture2D( map,"); // a cor que o material já tem (diffuseColor) multiplica o texel
+  });
+  it("27/11 com `tingir`, retirarTextura repõe a cor de antes e tira o mapa", () => {
+    const m = nova();
+    aplicarTextura(m, tex(), 40, { tingir: true });
+    m.color.set("#112233"); // a cor mudou entretanto: o que se repõe é a de antes de aplicar
+    retirarTextura(m);
+    expect(m.map).toBeNull();
+    expect(m.color.getHexString()).toBe("c9b08a");
+  });
   it("retirar sem nunca ter aplicado não faz nada", () => {
     const m = nova();
     retirarTextura(m);

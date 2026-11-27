@@ -9,11 +9,11 @@ import type { Config3dPrevia } from "./Previa3DLigacoes";
 import { ligacoesDaConfig, mesmasLigacoes, type Ligacao } from "./config3dDados";
 import { useConfig3d, type AlvoConfig3d } from "./useConfig3d";
 import { urlDaFotoOpcao } from "./fotoOpcaoUrl";
-import { PREVIA_SO_GENERICOS, corDosAtributos, fotoDosAtributos, medidaDosAtributos } from "./planta3d/previaProduto3d";
+import { PREVIA_SO_GENERICOS, corDosAtributos, fotoDosAtributos, medidaDosAtributos, texturaDosAtributos } from "./planta3d/previaProduto3d";
 import { LADO_TEXTURA_CM } from "./planta3d/texturaProduto";
 import { ZONAS, aparenciaUnicaDasZonas, zonasDosAtributos, zonasVisuais } from "./planta3d/zonasGlb";
 import { chaveDeExclusao } from "./planta3d/aspetoZonas";
-import { leiturasDoProduto } from "./planta3d/acabamentoCor3d";
+import { hexValido, leiturasDoProduto } from "./planta3d/acabamentoCor3d";
 import type { NoCat } from "./planta3d/catalogo3d";
 import { escolhaPorId, resolverDoNo, textoDaOrigem } from "./planta3d/modelos3dEscolha";
 import { aplicacaoDosAtributos, medidaDoRevestimento } from "./planta3d/revestimentoPrevia";
@@ -58,7 +58,15 @@ function Aberto({ nome, sub, no, arvore, attrs, defs, modelo3d, alvoConfig3d }: 
   const cor = useMemo(() => (unica ? unica.hex ?? undefined : corDosAtributos(attrsDaUnica, defs)), [unica, attrsDaUnica, defs]);
   // a foto da opção de cor escolhida (corpo > frente > cor) passa a textura do 3D; sem foto (ou sem URL do storage), a cor lisa de sempre
   const caminhoFoto = useMemo(() => (unica ? unica.foto ?? null : fotoDosAtributos(attrsDaUnica, defs)), [unica, attrsDaUnica, defs]);
-  const textura = useMemo(() => { const url = caminhoFoto ? urlDaFotoOpcao(caminhoFoto) : null; return url ? { url, ladoCm: LADO_TEXTURA_CM } : undefined; }, [caminhoFoto]);
+  // 27/11: a foto da opção de TEXTURA (Pizarra…), quando a há, manda sobre a da Cor e vai TINGIDA pela cor (a cor continua a ser a da opção de Cor e só a textura muda). Lê-se dos atributos
+  // que contam (`attrsDaUnica`): um «Aplicar: não» à Textura em todas as zonas desliga-a. Sem hex válido a foto aparece pura (nunca cinzento); sem foto na Textura, tudo como antes.
+  const caminhoTextura = useMemo(() => texturaDosAtributos(attrsDaUnica, defs), [attrsDaUnica, defs]);
+  const textura = useMemo(() => {
+    const doTexto = caminhoTextura ? urlDaFotoOpcao(caminhoTextura) : null;
+    if (doTexto) return { url: doTexto, ladoCm: LADO_TEXTURA_CM, ...(hexValido(cor) ? { tingir: true } : {}) };
+    const url = caminhoFoto ? urlDaFotoOpcao(caminhoFoto) : null;
+    return url ? { url, ladoCm: LADO_TEXTURA_CM } : undefined;
+  }, [caminhoTextura, caminhoFoto, cor]);
   // 24/11: um revestimento lê a Medida sem os limites do modelo 3D (a espessura em mm de um laminado) e o atributo «Aplicação» (chão ou parede por omissão)
   const medidaRevestimento = useMemo(() => medidaDoRevestimento(attrsEspera), [attrsEspera]);
   const aplicacao = useMemo(() => aplicacaoDosAtributos(attrsEspera, defs), [attrsEspera, defs]);

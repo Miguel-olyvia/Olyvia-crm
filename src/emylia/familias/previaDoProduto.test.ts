@@ -23,9 +23,32 @@ describe("previaDoProduto", () => {
     expect(r.aplicacao).toBeNull();
   });
 
-  it("o atributo «Textura» escolhe o produto mas não dá cor nem foto (o 3D ainda não a mostra)", () => {
+  it("27/11 o atributo «Textura» sem foto escolhe o produto mas não dá cor nem foto", () => {
     const so = produto("p2", { [A_TEX]: valor("Pizarra", { hex: null }) });
-    expect(previaDoProduto(so, [EIXO_TEX], [so]).cor).toBeUndefined();
+    const r = previaDoProduto(so, [EIXO_TEX], [so]);
+    expect(r.cor).toBeUndefined();
+    expect(r.textura).toBeUndefined();
+  });
+
+  it("27/11 a «Textura» COM foto dá a foto ao 3D, tingida pela cor; a cor continua a vir do eixo de Cor (Antracite), nunca da Textura", () => {
+    const p = produto("p2b", { [A_COR]: ANTRACITA, [A_TEX]: valor("Pizarra", { foto: "org/pizarra.webp", hex: "#222222" }) });
+    const r = previaDoProduto(p, [EIXO_COR, EIXO_TEX], [p]);
+    expect(r.cor).toBe("#645E5E");
+    expect(r.textura).toEqual({ url: "https://cdn.teste/org/pizarra.webp", ladoCm: LADO_TEXTURA_CM, tingir: true });
+  });
+
+  it("27/11 a «Textura» com foto e hex (alguém pôs um hex) nunca é a fonte da cor, mesmo sem eixo de Cor; a foto fica pura (sem cor para tingir)", () => {
+    const p = produto("p2c", { [A_TEX]: valor("Pizarra", { foto: "org/pizarra.webp", hex: "#222222" }) });
+    const r = previaDoProduto(p, [EIXO_TEX], [p]);
+    expect(r.cor).toBeUndefined();
+    expect(r.textura).toEqual({ url: "https://cdn.teste/org/pizarra.webp", ladoCm: LADO_TEXTURA_CM });
+  });
+
+  it("27/11 a foto da Textura ganha à foto da Cor; uma opção de Textura sem foto deixa a foto da Cor como está", () => {
+    const comFoto = produto("p2d", { [A_COR]: valor("NOGAL", { hex: "#8b5a2b", foto: "org/nogal.webp" }), [A_TEX]: valor("Pizarra", { foto: "org/pizarra.webp" }) });
+    expect(previaDoProduto(comFoto, [EIXO_COR, EIXO_TEX], [comFoto]).textura).toEqual({ url: "https://cdn.teste/org/pizarra.webp", ladoCm: LADO_TEXTURA_CM, tingir: true });
+    const liso = produto("p2e", { [A_COR]: valor("NOGAL", { hex: "#8b5a2b", foto: "org/nogal.webp" }), [A_TEX]: valor("Liso") });
+    expect(previaDoProduto(liso, [EIXO_COR, EIXO_TEX], [liso]).textura).toEqual({ url: "https://cdn.teste/org/nogal.webp", ladoCm: LADO_TEXTURA_CM });
   });
 
   it("uma cor dupla (vários hex numa opção) usa a primeira", () => {

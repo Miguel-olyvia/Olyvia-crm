@@ -2,7 +2,7 @@
 // as medidas e a cor que vêm dos atributos do produto, o modelo do catálogo 3D com essas medidas, o estado do modelo (o que se vai ver)
 // e a cena mínima: uma divisão pequena com a peça ao centro e a câmara a apontar-lhe.
 import type { AtributoDef, AtributoProduto, DimensaoMedida } from "../v2/catalogoModelo";
-import { classesDosAtributos, daAspeto, ehAcabamento, hexDoAcabamentoGeral, opcaoEscolhida, ordemUnica } from "./acabamentoCor3d";
+import { classesDosAtributos, daAspeto, ehAcabamento, ehAtributoDeTextura, hexDoAcabamentoGeral, opcaoEscolhida, ordemUnica } from "./acabamentoCor3d";
 import { alturaDeSanitaDeChao, modeloDoProduto, temModeloGenerico, temModeloHtml, type NoCat, type ProdutoModelo3D, type TipoMockup } from "./catalogo3d";
 import { eixosPorOmissao, validarEixos, type Eixos } from "./eixosMedida";
 import { DIRECAO_VISTA } from "./cotasPeca";
@@ -91,7 +91,8 @@ export function corDosAtributos(attrs: readonly AtributoProduto[] | undefined, d
 export function fotoDosAtributos(attrs: readonly AtributoProduto[] | undefined, defs: readonly AtributoDef[] | undefined): string | null {
   if (!attrs?.length || !defs?.length) return null;
   const classes = classesDosAtributos(defs);
-  const cores = defs.filter((d) => d.temHex || d.temFoto);
+  // 27/11: a Textura (com hex e foto na base) não é um atributo de cor: a sua foto vai por texturaDosAtributos
+  const cores = defs.filter((d) => (d.temHex || d.temFoto) && !ehAtributoDeTextura(d));
   const nomeadas = cores.filter((d) => classes.has(d.id)).sort((a, b) => ordemUnica(classes.get(a.id)!) - ordemUnica(classes.get(b.id)!));
   for (const def of nomeadas.length ? nomeadas : cores.length === 1 ? cores : []) {
     const escolhido = opcaoEscolhida(def, attrs);
@@ -103,6 +104,18 @@ export function fotoDosAtributos(attrs: readonly AtributoProduto[] | undefined, 
 }
 
 /**
+ * 27/11: o caminho da foto da opção escolhida no atributo «Textura» (Pizarra, Liso, Piedra), que a base passou a deixar ter foto (`temFoto`): é a foto que o 3D aplica ao corpo TINGIDA pela
+ * cor da opção de Cor (a cor continua a ser a da Cor e só a textura muda). O primeiro atributo de Textura com foto; sem atributo, sem escolha, sem `temFoto` ou sem foto na opção: null.
+ * Não é a foto de um atributo de cor (esta vai por `fotoDosAtributos`, que ignora a Textura).
+ */
+export function texturaDosAtributos(attrs: readonly AtributoProduto[] | undefined, defs: readonly AtributoDef[] | undefined): string | null {
+  if (!attrs?.length || !defs?.length) return null;
+  const def = defs.find((d) => ehAtributoDeTextura(d) && d.temFoto === true);
+  const escolhido = def && opcaoEscolhida(def, attrs);
+  return escolhido?.opcao?.foto || null;
+}
+
+/**
  * 26/11: o 3D da FICHA de produto usa SÓ os modelos genéricos (decisão do dono): nunca o modelo do HTML (lava-loiça, placa, torneira, tampo Coverlam) nem outro modelo detalhado.
  * Cada produto fica com o genérico da sua categoria (categoriasGlb.ts) ou, se o tipo não tem genérico, com o desenho aproximado ou a caixa. Uma escolha manual de «Modelo 3D» só
  * vale se apontar para um genérico (a «caixa» e os revestimentos também). Pôr a `false` repõe os modelos do HTML na ficha. É o ÚNICO sítio que decide isto; só a ficha (e a futura
@@ -111,7 +124,7 @@ export function fotoDosAtributos(attrs: readonly AtributoProduto[] | undefined, 
 export const PREVIA_SO_GENERICOS = true;
 
 export interface EntradaPrevia {
-  nome: string; sub?: string; no: string | null; arvore: readonly NoCat[]; medida?: MedidaCm | null; cor?: string; /** a foto da opção de cor (URL público) */ textura?: TexturaModelo;
+  nome: string; sub?: string; no: string | null; arvore: readonly NoCat[]; medida?: MedidaCm | null; cor?: string; /** a foto da opção de cor (URL público); 27/11: `tingir` quando é a foto da Textura (a cor multiplica-a) */ textura?: TexturaModelo;
   /** O «Modelo 3D» escolhido no próprio produto (o que se está a escolher no formulário ou o gravado); a subcategoria e a categoria vêm da árvore. */
   modelo3d?: string | null;
   /** 24/11: os eixos da Medida escolhidos à mão no painel «Medidas» (só para ver); sem eles, a regra de hoje por tipo. */

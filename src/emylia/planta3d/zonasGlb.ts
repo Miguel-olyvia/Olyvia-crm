@@ -8,7 +8,7 @@
 // Sem React nem three (só a constante do lado da textura).
 import type { AtributoDef, AtributoProduto, Superficie } from "../v2/catalogoModelo";
 import { chaveDeExclusao, materialDaSuperficie, superficieDaZona, type MaterialZona } from "./aspetoZonas";
-import { classesDosAtributos, daAspeto, ehAcabamento, hexValido, opcaoEscolhida } from "./acabamentoCor3d";
+import { classesDosAtributos, daAspeto, ehAcabamento, ehAtributoDeTextura, hexValido, opcaoEscolhida } from "./acabamentoCor3d";
 import { temGeometriaPropria, type ProdutoModelo3D } from "./catalogo3d";
 import { USAR_GLB_GENERICOS, categoriaDoTipo, categoriaPorId, opcoesComOmissao, type ParteGlb, type ZonaGlb } from "./categoriasGlb";
 import { LADO_TEXTURA_CM, type TexturaModelo } from "./texturaProduto";
@@ -84,7 +84,8 @@ export function aparenciaDaZona(
   if (!attrs?.length || !defs?.length) return null;
   // 25/11: um atributo com «aplicar: não» nesta zona (excluidos) deixa de a pintar, mesmo pelo nome
   const classes = classesDosAtributos(defs);
-  const cores = defs.filter((d) => (d.temHex || d.temFoto) && !excluidos?.has(chaveDeExclusao(d.id, zona)));
+  // 27/11: a Textura (com hex e foto na base) não é um atributo de cor: nunca pinta uma zona (a foto dela vai ao corpo, tingida, pelo caminho próprio: texturaDosAtributos)
+  const cores = defs.filter((d) => (d.temHex || d.temFoto) && !ehAtributoDeTextura(d) && !excluidos?.has(chaveDeExclusao(d.id, zona)));
   const ligada = (d: AtributoDef): boolean => !!ligacoes?.[d.id]?.length;
   const papelDe = (d: AtributoDef) => classes.get(d.id)?.papel ?? null;
   const nivelDe = (d: AtributoDef) => classes.get(d.id)?.nivel ?? 3;
@@ -111,7 +112,7 @@ export function aparenciaDaZona(
     ?? primeira(porNivel(livres.filter((d) => papelDe(d) === "geral")))
     ?? primeira(porNivel(livres.filter((d) => papelDe(d) === "corpo")))
     // «o único atributo de cor» conta os atributos de cor do produto ANTES das exclusões: desligar a «Cor» não faz de outro atributo (o Puxador…) o único, que passaria a pintar tudo
-    ?? (defs.filter((d) => d.temHex || d.temFoto).length === 1 ? primeira(livres) : null);
+    ?? (defs.filter((d) => (d.temHex || d.temFoto) && !ehAtributoDeTextura(d)).length === 1 ? primeira(livres) : null);
 }
 
 /** A aparência de cada zona que leva alguma, e se as zonas DIFEREM (`porZona`): com todas iguais o 3D segue o caminho de hoje (a foto ou cor única no material `corpo`). */

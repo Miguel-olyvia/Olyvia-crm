@@ -2,6 +2,7 @@
 // NÃO tem regras próprias: pergunta ao 3D (aparenciaDaZona e superficieDaZona, com as ligações de ligacoesDaConfig) quem vence, e só depois classifica o vencedor pelas regras (explícita,
 // «Todas as zonas», automático) e procura quem perdeu. Assim o painel nunca diz uma coisa e o 3D mostra outra, e se a regra do 3D mudar o painel acompanha-a.
 import { ligacoesDaConfig, type Ligacao } from "./config3dDados";
+import { ehAtributoDeTextura } from "./planta3d/acabamentoCor3d";
 import { chaveDeExclusao, ehAtributoDeSuperficie, superficieDaZona } from "./planta3d/aspetoZonas";
 import { aparenciaDaZona, type ZonaGlb } from "./planta3d/zonasGlb";
 import type { AtributoDef, AtributoProduto } from "./v2/catalogoModelo";
@@ -33,7 +34,8 @@ export interface EntradaPorque {
   defs: readonly AtributoDef[] | undefined;
 }
 
-const daCor = (d: AtributoDef): boolean => d.temHex === true || d.temFoto === true;
+// 27/11: a Textura (com hex e foto na base) não é um atributo de cor: nunca pinta uma zona
+const daCor = (d: AtributoDef): boolean => (d.temHex === true || d.temFoto === true) && !ehAtributoDeTextura(d);
 
 export function porqueDaZona({ zona, regras, attrs, defs }: EntradaPorque): PorqueDaZona {
   const todas = defs ?? [];
