@@ -1,5 +1,5 @@
 // O que é um GLB próprio na base e no storage, sem dependências (usam-no as leituras de gestão, os dados e o 3D): o bucket, o formato do caminho e o tamanho. O contrato é o da
-// migration 20270130390000 (CHECK product_categories_glb_caminho_check / product_models_glb_caminho_check e *_glb_bytes_check).
+// migration 20270130420000 (CHECK product_categories_glb_caminho_check / product_models_glb_caminho_check e *_glb_bytes_check).
 
 /** O bucket público (caminho `{org}/{uuid}.glb`, uuid impossível de adivinhar), 5 MB, só `model/gltf-binary`. */
 export const BUCKET_MODELOS_3D = "catalogo-modelos3d";

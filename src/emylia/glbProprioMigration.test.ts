@@ -1,7 +1,7 @@
 /**
  * @vitest-environment node
  */
-// 27/11: a migration «GLB próprio por categoria, subcategoria e Modelo» (20270130390000) lida como TEXTO. Confere o que se pode conferir sem a
+// 27/11: a migration «GLB próprio por categoria, subcategoria e Modelo» (20270130420000) lida como TEXTO. Confere o que se pode conferir sem a
 // correr: o cabeçalho (só base de RH, o que os ecrãs e o 3D têm de fazer), as colunas e os CHECK nas duas tabelas, o bucket e as três políticas
 // (sem UPDATE), a RPC cat_definir_glb (products.edit, search_path vazio, partilhada e apagado recusados, tamanho lido do armazenamento), as
 // chaves novas nas duas leituras, os privilégios, as guardas por md5 e os RAISE com % passado como argumento. Erros de tipo do SQL só se
@@ -10,7 +10,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const caminho = resolve(process.cwd(), "supabase/migrations/20270130390000_catalogo_glb_proprio.sql");
+const caminho = resolve(process.cwd(), "supabase/migrations/20270130420000_catalogo_glb_proprio.sql");
 const bruto = existsSync(caminho) ? readFileSync(caminho, "utf8") : "";
 /** Sem comentários de linha e com os espaços normalizados. */
 const sql = bruto.split(/\r?\n/).map((l) => l.replace(/--.*$/, "")).join("\n").replace(/\s+/g, " ");
@@ -33,7 +33,7 @@ function politica(nome: string): string {
   return sql.slice(i, sql.indexOf(";", i));
 }
 
-describe("migration 20270130390000_catalogo_glb_proprio.sql", () => {
+describe("migration 20270130420000_catalogo_glb_proprio.sql", () => {
   it("existe e usa CRLF, como os outros ficheiros do projeto", () => {
     expect(bruto.length).toBeGreaterThan(0);
     expect(bruto.includes("\r\n")).toBe(true);

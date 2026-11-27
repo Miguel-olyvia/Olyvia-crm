@@ -81,8 +81,8 @@
 -- REVERSÃO: fora da pasta das migrations, em C:/Users/carva/.claude/jobs/bbc4f3a6/tmp/reverter-glb-proprio.sql
 -- (repõe os dois corpos de partida, larga a função, as políticas, as colunas e o bucket vazio). Não se aplica por omissão.
 --
--- ORDEM: depende só do que já está aplicado na RH (última aplicada lida a 27/11: 20270130370000). `supabase db push`
--- aplica TUDO o que estiver pendente: listar com `supabase migration list --linked` imediatamente antes.
+-- ORDEM: depende só do que já está aplicado na RH (última aplicada lida a 27/11: 20270130410000; o carimbo tem de ficar
+-- ACIMA dela, senão o `db push` recusa-se). `supabase db push` aplica TUDO o que estiver pendente: listar com `supabase migration list --linked` imediatamente antes.
 -- =============================================================================
 
 SET lock_timeout = '5s';
@@ -337,7 +337,7 @@ BEGIN
     uso_cat AS (SELECT x.category_id AS id, count(*)::integer AS n FROM prod x WHERE x.category_id IS NOT NULL GROUP BY x.category_id),
     uso_sub AS (SELECT x.subcategory_id AS id, count(*)::integer AS n FROM prod x WHERE x.subcategory_id IS NOT NULL GROUP BY x.subcategory_id),
     topo AS (
-      -- 20270118000000: "sigla"; 20270126320000: "modelo3d"; 20270130390000: "glb_caminho", "glb_bytes"
+      -- 20270118000000: "sigla"; 20270126320000: "modelo3d"; 20270130420000: "glb_caminho", "glb_bytes"
       SELECT c.id, c.name, coalesce(c.sort_order, 0) AS ordem, coalesce(c.is_active, true) AS ativo, (c.organization_id IS NULL) AS global, c.sigla,
              c.modelo_3d AS modelo3d, c.glb_caminho, c.glb_bytes
       FROM product_categories c
@@ -397,7 +397,7 @@ BEGIN
                'categoria', jsonb_build_object('id', c.id, 'nome', c.name, 'sigla', c.sigla),
                -- 20270130360000: o modelo 3D escolhido no Modelo (NULL = herda)
                'modelo3d', pm.modelo_3d,
-               -- 20270130390000: o GLB próprio do Modelo (NULL = sem GLB)
+               -- 20270130420000: o GLB próprio do Modelo (NULL = sem GLB)
                'glb_caminho', pm.glb_caminho, 'glb_bytes', pm.glb_bytes)
              ORDER BY coalesce(c.sort_order, 0), c.name, coalesce(s.sort_order, 0), s.name, pm.numero, pm.id)
       FROM product_models pm
@@ -411,7 +411,7 @@ END $function$;
 REVOKE ALL ON FUNCTION public.cat_ler_modelos_gestao(uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.cat_ler_modelos_gestao(uuid) TO authenticated, service_role;
 COMMENT ON FUNCTION public.cat_ler_modelos_gestao(uuid) IS
-  'Catálogo (20270118300000; modelo3d em 20270130360000; glb_caminho/glb_bytes em 20270130390000): ecrã de gestão dos modelos. Modelos da organização (não apagados, ativos e desativados) com o número do SKU, a subcategoria e a categoria, quantos produtos vivos os usam, o modelo 3D escolhido (modelo3d, NULL = herda) e o GLB próprio (glb_caminho, glb_bytes). Permissão products.edit ou services.view.';
+  'Catálogo (20270118300000; modelo3d em 20270130360000; glb_caminho/glb_bytes em 20270130420000): ecrã de gestão dos modelos. Modelos da organização (não apagados, ativos e desativados) com o número do SKU, a subcategoria e a categoria, quantos produtos vivos os usam, o modelo 3D escolhido (modelo3d, NULL = herda) e o GLB próprio (glb_caminho, glb_bytes). Permissão products.edit ou services.view.';
 
 -- ---- 6. Conferir: falha a migration se alguma coisa não ficou como descrito -----------------------------------
 DO $conferir$

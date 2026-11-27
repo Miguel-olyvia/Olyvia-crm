@@ -1,4 +1,4 @@
-// 27/11: os dados do GLB PRÓPRIO por categoria, subcategoria e Modelo: o que corre na base e no storage. O contrato é o da migration 20270130390000 (por aplicar enquanto isto se escreve):
+// 27/11: os dados do GLB PRÓPRIO por categoria, subcategoria e Modelo: o que corre na base e no storage. O contrato é o da migration 20270130420000 (por aplicar enquanto isto se escreve):
 //   cat_definir_glb(p_org, p_alvo, p_id, p_caminho) → { alvo, id, caminho, anterior, anterior_orfao }    p_alvo: 'categoria' (categorias e subcategorias) ou 'modelo'; p_caminho null/'' remove
 //   bucket público `catalogo-modelos3d`, caminho `{org}/{uuid}.glb`, upload com contentType model/gltf-binary e upsert false (trocar = ficheiro novo)
 // A sequência é a das fotos de opção (fotoOpcaoDados.ts): validar o ficheiro, carregar o NOVO, ligá-lo (cat_definir_glb) e só então apagar o ANTIGO, e só se a base disser que ficou órfão;

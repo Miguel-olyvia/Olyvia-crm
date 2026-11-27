@@ -1,4 +1,4 @@
-// As leituras de gestão (cat_ler_categorias_gestao e cat_ler_modelos_gestao) passam a trazer glb_caminho e glb_bytes em cada categoria, subcategoria e Modelo (migration 20270130390000).
+// As leituras de gestão (cat_ler_categorias_gestao e cat_ler_modelos_gestao) passam a trazer glb_caminho e glb_bytes em cada categoria, subcategoria e Modelo (migration 20270130420000).
 // Sem as chaves (a migration por aplicar) ou com lixo, os campos são null e o resto da leitura fica como estava.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
