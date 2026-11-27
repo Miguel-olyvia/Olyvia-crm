@@ -82,7 +82,7 @@ import { aoMudarProntidao } from "@/emylia/inventario/prontidaoReal";
 import { definirOrgErp } from "@/emylia/erpEticadata";
 import { usePaginaInteira } from "@/hooks/usePaginaInteira";
 import { aplicarNomesPapeis, aplicarPermissoesReais, definirPapeisEscolhiveis, aplicarGestoresObra, lerGestoresObra, lerMeusPapeis, papeisPermitidos, papelDeAbertura, reporNomesPapeis, VISTAS_NEGOCIO, type MeusPapeis } from "@/emylia/real/papeisReal";
-import { atribuirPorAtribuir } from "@/emylia/preparacaoObra";
+import { atribuirPorAtribuir, tecnicosDepois } from "@/emylia/preparacaoObra";
 import { aprovarPoReal, definirAprovadorPo, definirPedidorFalta, pedirFaltaReal, textoPedido } from "@/emylia/real/encomendaReal";
 import { definirAjusteReal, desfazerAjusteReal } from "@/emylia/encomendasAjuste";
 import { definirMateriaisReais } from "@/emylia/tarefasValidador";
@@ -777,7 +777,8 @@ export default function NegociosEmylia({ vistaInicial: vistaDaRota, enderecoNoUr
       marcarAutor(S.deals, "");
       // 30/10: os planos por aprovar com tarefas por atribuir (o RH não tinha técnicos do ofício quando se geraram) ficam com os técnicos
       // que o RH já tem; grava-se a obra a seguir. Só quem grava a obra (o Gestor de obra; ou quem vê todos) o faz.
-      const atribuidas = mp.todos || mp.papeis.includes("operacoes") ? S.deals.reduce((a, d) => a + atribuirPorAtribuir(d.obra.plano), 0) : 0;
+      // 27/11 (obra Schroeder): com «Técnicos escolhidos depois» o plano por aprovar fica sem técnicos (não se preenchem ao abrir)
+      const atribuidas = mp.todos || mp.papeis.includes("operacoes") ? S.deals.reduce((a, d) => a + (tecnicosDepois(d) ? 0 : atribuirPorAtribuir(d.obra.plano)), 0) : 0;
       // F3: a prontidão das encomendas de cliente emitidas (o passo «À espera dos materiais»); 09/11: não com a leitura reduzida (recusa-a)
       if (!so) await lerProntidoes(supabase, org, contratosDasEcs(S.deals));
       if (!vivo) return;

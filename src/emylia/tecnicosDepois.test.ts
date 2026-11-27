@@ -17,3 +17,11 @@ describe("técnicos depois e arranque com materiais por receber", () => {
     expect(F.some((x) => /materia|encomendar|receber .* unidade/i.test(x))).toBe(false);
   });
 });
+
+describe("ao abrir, os técnicos por atribuir", () => {
+  it("o NegociosEmylia não preenche os planos com «Técnicos escolhidos depois»", async () => {
+    const fs = await import("node:fs");
+    const src = fs.readFileSync("src/pages/NegociosEmylia.tsx", "utf8");
+    expect(src).toMatch(/tecnicosDepois\(d\) \? 0 : atribuirPorAtribuir\(d\.obra\.plano\)/);
+  });
+});
