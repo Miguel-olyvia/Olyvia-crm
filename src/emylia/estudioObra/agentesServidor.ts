@@ -117,7 +117,7 @@ export async function correrAgentesServidor(sb: SupabaseClient, org: string, ago
   }
   // 26/11: a base de conhecimento da Olyvia (o chat e a voz leem-na de qualquer página), já com o que os agentes fizeram nesta volta
   let conhecimento = 0;
-  try { conhecimento = await gravarConhecimento(sb, org, itensDoConhecimento(S, agora)); }
+  try { conhecimento = await gravarConhecimento(sb, org, itensDoConhecimento(S, agora, "servidor")); }
   catch (e) { erros.push(`Base de conhecimento: ${(e as Error).message}`); }
   return { org, obras, aplicadas, gravadas, adiadas, erros, conhecimento, avisos };
 }

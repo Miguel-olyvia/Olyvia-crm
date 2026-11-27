@@ -81,7 +81,9 @@ describe("antecipar de uma vez o que vem depois de um buraco", () => {
     const depois = p.tasks.filter((t) => !t.exec && t.dia > p.dia);
     for (const t of depois) t.dia += 4;
     const g = diasSemNinguem(p).find((x) => x.seguinte != null)!;
-    const alerta = () => alertasDaObra(d, S, new Map()).find((a) => a.id === `parada-${g.ini}`)!;
+    // a ocupação real dos técnicos noutras obras (como a app a passa)
+    const { ocupacaoDosTecnicos } = await import("../preparacaoObra");
+    const alerta = () => alertasDaObra(d, S, ocupacaoDosTecnicos(S, d.id)).find((a) => a.id === `parada-${g.ini}`)!;
     // livre: a ação diz quantos dias dá e a simulação concorda
     const sim = simularBuraco(S, d, g.ini, g.fim);
     if (sim.s) expect(alerta().acoes[0].rot).toBe(`Antecipar ${sim.s} ${sim.s === 1 ? "dia útil" : "dias úteis"}`);
@@ -100,13 +102,15 @@ describe("antecipar de uma vez o que vem depois de um buraco", () => {
     expect(s2.porque).toMatch(new RegExp(`${TECS.find((x) => x.id === seg.tec)?.n.split(" ")[0] ?? "técnico"}|noutra obra|férias|livres`));
     const a = alerta();
     expect(a.acoes.some((x) => x.a.k === "fecharBuraco" || x.a.k === "passarEAntecipar")).toBe(false);
-    expect(a.sub).toMatch(/não dá para antecipar/);
-    // «Ver a tarefa» leva à tarefa do técnico ocupado (onde se troca o técnico) e o agente não conta isto como decisão
-    if (s2.trava != null) { expect(a.acoes[0].a).toMatchObject({ k: "tarefa", ti: s2.trava }); expect(a.sub).toMatch(/passe «.+» a outro técnico/); }
+    expect(a.sub).toMatch(/não dá para antecipar|fica parada/);
+    // 27/11: nunca «Ver a tarefa» (não resolve nada): ou se faz outra tarefa nesses dias (de quem está livre), ou não há ação nenhuma
+    expect(a.acoes.some((x) => x.a.k === "tarefa")).toBe(false);
+    const px = a.acoes.find((x) => x.a.k === "puxar")?.a as { ti: number } | undefined;
+    if (px) expect(doOficio).not.toContain(p.tasks[px.ti].tec);
     const { propostasDosAgentes, modoDa } = await import("./agentes");
-    const pr = propostasDosAgentes(d, S, new Map()).find((x) => x.id === `parada-${g.ini}`)!;
-    expect(pr.info).toBe(true);
-    expect(modoDa(pr, { degraus: { plano: 1 } } as never)).toBe("ver");
+    const pr = propostasDosAgentes(d, S, ocupacaoDosTecnicos(S, d.id)).find((x) => x.id === `parada-${g.ini}`)!;
+    expect(pr.info).toBe(!px);
+    if (!px) expect(modoDa(pr, { degraus: { plano: 1 } } as never)).toBe("ver");
   });
   it("27/11: com um colega do mesmo ofício livre, o agente propõe passar-lhe a tarefa e antecipar, e a ação faz isso de uma vez", async () => {
     const { acoes, desbloquearBuraco, simularBuraco } = await import("../motor");

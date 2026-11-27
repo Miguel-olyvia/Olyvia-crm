@@ -23,7 +23,7 @@ export async function atualizarConhecimento(ctx: Pick<Ctx, "S">, agora = Date.no
   const v = lerEstadoVivo();
   if (!v?.org || !podeNeg(ctx.S.role, "obra.planear") || agora - ultimoConhecimento < CONHECIMENTO_MS) return false;
   ultimoConhecimento = agora;
-  try { await gravarConhecimento(supabase, v.org, itensDoConhecimento(ctx.S as Parameters<typeof itensDoConhecimento>[0], new Date(agora))); return true; }
+  try { await gravarConhecimento(supabase, v.org, itensDoConhecimento(ctx.S as Parameters<typeof itensDoConhecimento>[0], new Date(agora), "pagina")); return true; }
   catch (e) { console.warn("base de conhecimento", e); return false; }
 }
 

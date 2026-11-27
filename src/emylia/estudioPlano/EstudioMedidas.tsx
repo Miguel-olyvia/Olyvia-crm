@@ -23,6 +23,18 @@ import { permEmFaltaDoPasso, podeNeg } from "../permissoes";
 const numero = (s: string) => Number(String(s).replace(",", "."));
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
+/** 27/11: o chão (pav) e as paredes (par) escritos em baixo batem com o que a planta dá (ao centímetro quadrado). As medidas que este
+ *  serviço não tem (sem a chave em `valores`) não contam. */
+export function medidasSeguemAPlanta(daPlanta: { pav: number | null; par: number | null } | null, valores: Record<string, string>): boolean {
+  if (!daPlanta) return true;
+  const bate = (k: "pav" | "par") => {
+    const v = daPlanta[k];
+    if (v == null || !(k in valores)) return true;
+    return Math.abs(numero(valores[k] ?? "0") - r2(v)) < 0.011;
+  };
+  return bate("pav") && bate("par");
+}
+
 export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fechar: () => void }) {
   const reduzir = useReduzir();
   const CM = camposMedida(LINHAS[d.linha]);
@@ -35,6 +47,8 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
   // o que a planta corrigida dá: o chão e as paredes, em m²
   const daPlanta = useMemo(() => (planta ? { pav: areaChaoM2(planta.paredes), par: areaParedesM2(planta, pe) } : null), [planta, pe]);
   const temPlanta = !!planta && planta.paredes.length >= 3;
+  // 27/11: as medidas de chão e paredes são as que a planta dá (só as que este serviço mede)
+  const seguemAPlanta = medidasSeguemAPlanta(daPlanta, valores);
   const mudadas = CM.filter(([k]) => Math.abs(numero(valores[k] ?? "0") - medida(d.visita.med, k)) > 0.001).length;
   // 11/11 (Rúben): o impacto no orçamento ao vivo
   const impacto = useMemo(() => impactoDasMedidas(d, ctx.S, Object.fromEntries(CM.map(([k]) => [k, numero(valores[k] ?? "0")]).filter(([, v]) => Number.isFinite(v as number)))),
@@ -85,7 +99,14 @@ export function EstudioMedidas({ ctx, d, fechar }: { ctx: Ctx; d: Negocio; fecha
                     <p className="text-sm text-muted-foreground">Toque numa parede para corrigir a medida.</p>
                   </div>
                   {daPlanta && (daPlanta.pav != null || daPlanta.par != null) && (
-                    <p className="flex items-center gap-1.5 text-sm text-muted-foreground"><Wand2 className="h-4 w-4 text-primary" aria-hidden="true" />Dá {daPlanta.pav != null ? `${nfmt(daPlanta.pav)} m² de chão` : ""}{daPlanta.pav != null && daPlanta.par != null ? " e " : ""}{daPlanta.par != null ? `${nfmt(daPlanta.par)} m² de paredes` : ""}: as medidas em baixo seguem a planta</p>
+                    // 27/11 (teste do 1029: «Dá 6,83 m² de chão… as medidas em baixo seguem a planta», e em baixo estavam os 2 m² da visita):
+                    // a frase só diz que seguem a planta quando seguem; senão diz que são as da visita e deixa passá-las num toque
+                    <div className="space-y-1">
+                      <p className="flex items-center gap-1.5 text-sm text-muted-foreground"><Wand2 className="h-4 w-4 text-primary" aria-hidden="true" />Dá {daPlanta.pav != null ? `${nfmt(daPlanta.pav)} m² de chão` : ""}{daPlanta.pav != null && daPlanta.par != null ? " e " : ""}{daPlanta.par != null ? `${nfmt(daPlanta.par)} m² de paredes` : ""}{seguemAPlanta ? ": as medidas em baixo seguem a planta" : ". As medidas em baixo ainda são as da visita."}</p>
+                      {!seguemAPlanta && planta && (
+                        <Button type="button" variant="outline" className="min-h-11" onClick={() => mudarPlanta(planta)}>Usar as medidas da planta</Button>
+                      )}
+                    </div>
                   )}
                 </div>
                 <EditorPlanta planta={planta} onMudar={mudarPlanta} divisao={d.f.diag_tipo_area?.split(",")[0]} />
