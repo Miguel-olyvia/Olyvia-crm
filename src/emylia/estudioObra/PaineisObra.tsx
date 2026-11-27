@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, eur, nfmt, type MatTarefa, type Negocio, type Plano, type Tarefa } from "../motor";
 import type { Ctx } from "../pecas";
+import { EquipasNaObra } from "./EquipasNaObra";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
 import { dataCurta } from "../planoObra";
 import { blocosForaDaObra, motivoOcupado, obrasDosTecnicos, ocupacaoDosTecnicos, tecnicosDoOficio } from "../preparacaoObra";
@@ -671,11 +672,20 @@ export function EquipaDaObra({ ctx, d, dias, abrirOutra, novaPara, abrir }: {
   const hoje = p.estado === "em curso" ? p.dia : 0;
   const janela = dias.slice(hoje, hoje + 10);
   const [passar, setPassar] = useState<string | null>(null);
+  const [pedirEquipa, setPedirEquipa] = useState(false);
   return (
     <div className="space-y-3">
+      {/* 27/11 (Rúben: «equipas pré-customizadas, e não técnicos isolados; customizar equipas e associar à obra»): as equipas primeiro */}
+      <EquipasNaObra ctx={ctx} d={d} pedirEquipa={pedirEquipa} fecharPedido={() => setPedirEquipa(false)} />
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm font-semibold">Quem está nesta obra e o que tem por fazer</p>
-        {planeia && <Button type="button" variant="outline" className="min-h-10 rounded-full" onClick={() => novaPara(null)}><Plus className="mr-1.5 h-4 w-4" aria-hidden="true" />Juntar uma pessoa</Button>}
+        {planeia && (
+          <div className="flex flex-wrap gap-2">
+            {/* 27/11 (Rúben: «junta uma pessoa, mas falta o botão de juntar uma equipa»): a equipa vem com a distribuição proposta */}
+            <Button type="button" className="min-h-10 rounded-full" onClick={() => setPedirEquipa(true)}><Users className="mr-1.5 h-4 w-4" aria-hidden="true" />Juntar uma equipa</Button>
+            <Button type="button" variant="outline" className="min-h-10 rounded-full" onClick={() => novaPara(null)}><Plus className="mr-1.5 h-4 w-4" aria-hidden="true" />Juntar uma pessoa</Button>
+          </div>
+        )}
       </div>
       {pessoas.map((tec) => {
         const ts = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => t.tec === tec);

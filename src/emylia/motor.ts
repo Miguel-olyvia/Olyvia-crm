@@ -1372,6 +1372,28 @@ export function desbloquearBuraco(S: Pick<Estado, "deals">, d: Negocio, ini: num
   return melhor;
 }
 
+/** 27/11 (Rúben: «quando juntar a equipa, distribuir as tarefas todas e propor a distribuição com base no perfil»): para cada tarefa por
+ *  começar, o membro da equipa que a faz. Primeiro quem tem o ofício (o menos carregado); sem ninguém do ofício, o membro menos carregado
+ *  (marcado «sem o ofício», para o gestor ver). A carga conta as horas que a proposta já deu a cada um. Não muda nada. */
+export interface LinhaDistribuicao { ti: number; nome: string; de: string | null; para: string; doOficio: boolean; h: number }
+export function propostaDeEquipa(p: Plano, membros: string[]): LinhaDistribuicao[] {
+  if (!membros.length) return [];
+  const hoje = p.estado === "em curso" ? p.dia : 0;
+  const carga = new Map<string, number>(membros.map((m) => [m, 0]));
+  const menos = (L: string[]) => [...L].sort((a, b) => carga.get(a)! - carga.get(b)!)[0];
+  const out: LinhaDistribuicao[] = [];
+  p.tasks.map((t, ti) => ({ t, ti })).sort((a, b) => a.t.dia - b.t.dia).forEach(({ t, ti }) => {
+    const v = estadoVivoTarefa(t, p);
+    if (t.exec || v === "feita" || v === "validada" || t.dia < hoje) return;
+    const doOficio = tecnicosDoOficio(t).map((x) => x.id).filter((x) => carga.has(x));
+    const para = doOficio.length ? (doOficio.includes(t.tec ?? "") ? t.tec! : menos(doOficio)) : menos(membros);
+    const h = t.h || t.dur * 8;
+    carga.set(para, carga.get(para)! + h);
+    out.push({ ti, nome: t.nome, de: t.tec ?? null, para, doOficio: doOficio.length > 0, h });
+  });
+  return out;
+}
+
 export function conflitos(p: Plano) {
   const C: { t: Tarefa; tec: Tecnico; dia: number }[] = [];
   for (const t of p.tasks) {
@@ -3922,6 +3944,28 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       if (velho) avisarTecnico(d.obra.plano!, ti, `${t.nome} passou para ${novo.n.split(" ")[0]}: já não é consigo`, agora(), velho.id);
       if (A.planoMudou(d)) return;
       avisar({ msg: "Técnico trocado", sub: `${t.nome} · ${novo.n}`, kind: "ok" });
+    },
+    /** 27/11 (Rúben: «equipas já pré-customizadas, e não técnicos isolados; associar à obra»): a equipa vem para esta obra. Cada tarefa
+     *  por começar passa para o membro do ofício dela (o menos carregado nesta obra); as do ofício que a equipa não tem ficam como estão.
+     *  Devolve quantas mudaram. Um só «anular». */
+    associarEquipa(id: number, equipa: { nome: string; membros: string[] }, distribuicao?: { ti: number; para: string }[]): number {
+      if (!exigePerm("obra.planear")) return 0;
+      const d = deal(id), p = d.obra.plano;
+      if (!p || p.estado === "concluída") return 0;
+      // a distribuição escolhida pelo gestor (a proposta, com as trocas dele); sem ela, a proposta tal como vem
+      const L = (distribuicao ?? propostaDeEquipa(p, equipa.membros).map((x) => ({ ti: x.ti, para: x.para })))
+        .filter((x) => p.tasks[x.ti] && p.tasks[x.ti].tec !== x.para && TECS.some((y) => y.id === x.para));
+      if (!L.length) { avisar({ msg: `A ${equipa.nome} já está nesta obra`, sub: "Nada a mudar.", kind: "" }); return 0; }
+      guardarBase(p);
+      for (const m of L) {
+        const t = p.tasks[m.ti], de = t.tec; t.tec = m.para;
+        avisarTecnico(p, m.ti, `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(p, t.dia)}`, agora());
+        if (de) avisarTecnico(p, m.ti, `${t.nome} passou para a ${equipa.nome}: já não é consigo`, agora(), de);
+      }
+      log(d, `Plano: a ${equipa.nome} vem para a obra (${L.length} ${L.length === 1 ? "tarefa passou" : "tarefas passaram"} para a equipa)`);
+      if (A.planoMudou(d)) return L.length;
+      avisar({ msg: `${equipa.nome} na obra`, sub: `${L.length} ${L.length === 1 ? "tarefa passou" : "tarefas passaram"} para os membros.`, kind: "ok" });
+      return L.length;
     },
     /* -------------------------------------------- 15/10: as Operações ajustam o plano antes de arrancar (ajustesPlano.ts) */
     /** Um plano aprovado que muda volta a "por aprovar" (diz-o); devolve true se avisou. */
