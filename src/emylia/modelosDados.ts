@@ -5,6 +5,7 @@ import { chamar, type ResG } from "./atributosGestao";
 import { lerCategoriasGestao } from "./categoriasMarcasGestao";
 import { resolverCategoria } from "./skuDados";
 import { modelo3dDeLeitura } from "./modelo3dDados";
+import { bytesDeGlbDeLeitura, glbDeLeitura } from "./glbProprioFormato";
 
 export interface RamoModelo { id: string; nome: string; sigla: string | null }
 /** `usados`: produtos vivos que o usam. `subcategoria.ativo`: um modelo numa subcategoria desativada não se reativa.
@@ -12,6 +13,8 @@ export interface RamoModelo { id: string; nome: string; sigla: string | null }
 export interface ModeloGestao {
   id: string; nome: string; numero: number; ativo: boolean; usados: number;
   subcategoria: RamoModelo & { ativo: boolean }; categoria: RamoModelo | null; modelo3d: string | null;
+  /** 27/11: o GLB próprio deste Modelo (caminho `{org}/{uuid}.glb` no bucket catalogo-modelos3d) e o tamanho em bytes; null = sem GLB (e também sem a chave, migração por aplicar). */
+  glbCaminho?: string | null; glbBytes?: number | null;
 }
 
 type Bruto = Record<string, unknown>;
@@ -32,6 +35,7 @@ function modeloDe(m: Bruto): ModeloGestao {
     subcategoria: { id: texto(s.id), nome: texto(s.nome), sigla: sigla(s.sigla), ativo: s.ativo !== false },
     categoria: c ? { id: texto(c.id), nome: texto(c.nome), sigla: sigla(c.sigla) } : null,
     modelo3d: modelo3dDeLeitura(m.modelo3d),
+    glbCaminho: glbDeLeitura(m.glb_caminho), glbBytes: bytesDeGlbDeLeitura(m.glb_bytes),
   };
 }
 
