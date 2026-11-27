@@ -1,7 +1,7 @@
 // 26/11: a vista da família com 3D (/catalogo/produtos/familias/:id). O 3D grande (Previa3DProduto, o MESMO da ficha, com a altura nova), as escolhas (bolinhas de cor e botões,
 // só com valores que existem na família), o produto real que corresponde à escolha, as outras medidas do mesmo modelo de catálogo e a escolha no endereço (?cor=&textura=).
 // Uma combinação que não existe nunca se mostra: ao escolher um valor cuja combinação com o resto não existe, passa-se ao produto existente mais próximo e avisa-se numa linha.
-// Só lê (não escreve nada) e não leva custo nenhum. A textura escolhe o produto mas o 3D ainda não a mostra (o atributo «Textura» não tem aspeto).
+// Só lê (não escreve nada) e não leva custo nenhum. A textura escolhe o produto; quando a opção tem foto, o 3D aplica-a ao corpo tingida pela cor.
 // Teclado e leitor de ecrã: o cartão do produto vem antes de «Outras medidas» na ordem do DOM (no telemóvel fica preso ao fundo por `order`); o aviso de troca anuncia-se
 // numa região viva que nasce vazia; ao chegar de uma mudança de medida (`focarTitulo`) o foco vai para o título; o separador diz «<família> · Famílias».
 import { useEffect, useMemo, useRef, useState } from "react";

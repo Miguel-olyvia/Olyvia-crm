@@ -57,13 +57,13 @@ describe("VerFamilia3D: o que se mostra", () => {
     expect(screen.getByTestId("etiqueta-escolha").textContent).toBe("Branco · Brilho");
   });
 
-  it("a nota da textura só aparece no eixo «Textura» (a textura escolhe o produto, o 3D ainda não a mostra)", () => {
+  it("a nota da textura só aparece no eixo «Textura» (a textura escolhe o produto)", () => {
     montar(SANITA);
-    expect(screen.queryByText("A textura escolhe o produto; o 3D ainda não a mostra nesta fase.")).toBeNull();
+    expect(screen.queryByText("A textura escolhe o produto.")).toBeNull();
     const tex = [produto("1", { [A_TEX]: valor("Liso", { ordem: 1 }) }), produto("2", { [A_TEX]: valor("Pizarra", { ordem: 2 }) })];
     cleanup();
     montar({ ...SANITA, eixos: [EIXO_TEX], produtos: tex });
-    expect(screen.getByText("A textura escolhe o produto; o 3D ainda não a mostra nesta fase.")).toBeTruthy();
+    expect(screen.getByText("A textura escolhe o produto.")).toBeTruthy();
   });
 
   it("uma família sem eixo de cor não mostra a secção «Cor»; os botões continuam a escolher o produto", () => {
