@@ -243,7 +243,19 @@ export function materiaisPorFase(d: Negocio, inv?: ResumoEcNeg | null, lidas?: r
     const ecAj = x.ec && ajustes.some((a) => a.n === x.ec) ? x.ec : undefined;
     return { n: x.n, q: x.q, un: x.un, estado, quando, forn, ...(chega && estado === "a chegar" ? { chega } : {}), ...(ecAj ? { ec: ecAj } : {}), fase: faseNaObra(F, x) };
   });
-  return [1, 2, 3, 4].map((f) => ({ fase: f, itens: itens.filter((x) => x.fase === f).map(({ fase: _f, ...m }) => m) })).filter((g) => g.itens.length);
+  // 27/11 (Rúben: «ajustar à mão os materiais»): o que o gestor escreveu à mão (a data prevista e o recebido) por cima do Inventário
+  const M = d.obra.matManual ?? {};
+  const comMao = itens.map((x) => aplicarManual(x, M[x.n]));
+  return [1, 2, 3, 4].map((f) => ({ fase: f, itens: comMao.filter((x) => x.fase === f).map(({ fase: _f, ...m }) => m) })).filter((g) => g.itens.length);
+}
+
+const PRONTO_MAT = new Set<EstadoMat>(["na obra", "na carrinha", "reservado", "recebido"]);
+/** 27/11: um material com o que se escreveu à mão: recebido passa a «recebido»; com data prevista e ainda por receber, «a chegar» nessa data. */
+export function aplicarManual<T extends Mat>(x: T, m?: { chega?: string; recebido?: string }): T & { manual?: true } {
+  if (!m) return x;
+  if (m.recebido && !PRONTO_MAT.has(x.estado)) return { ...x, estado: "recebido", quando: undefined, chega: undefined, manual: true };
+  if (m.chega && !PRONTO_MAT.has(x.estado)) return { ...x, estado: "a chegar", quando: `${m.chega.slice(8, 10)}/${m.chega.slice(5, 7)}`, chega: m.chega, manual: true };
+  return x;
 }
 
 /* ------------------------------------------------------------------ segurança e licenças */

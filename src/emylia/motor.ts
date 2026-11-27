@@ -484,6 +484,9 @@ export interface Negocio {
     ec?: EncCliente | null;
     /** 21/10: as encomendas de cliente de ajuste, depois da inicial: materiais novos de tarefas novas, adendas ou mudados à mão (encomendasAjuste.ts) */
     ecsAjuste?: EcAjuste[];
+    /** 27/11 (Rúben: «permitir ajustar à mão os materiais (gerir) no plano da obra, tab materiais»): por material (o nome), a data prevista
+     *  de chegada escrita à mão (ISO; ex.: o prazo que o fornecedor deu à Susana) e quando foi dado como recebido. Por cima do Inventário. */
+    matManual?: Record<string, { chega?: string; recebido?: string; nota?: string }>;
     /** 21/10: os imprevistos a meio da obra (imprevistos.ts): o que se encontrou, a gravidade, as tarefas afetadas e a proposta ao cliente */
     imprevistos?: Imprevisto[];
     /** 25/11: o antes e depois de cada validação do plano (o gerado pelo motor e o aprovado pelo gestor de obra), para aprender (planoAntesDepois.ts) */
@@ -4807,6 +4810,18 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       avisar({ msg: "Plano reposto", sub: "Como veio do orçamento", kind: "ok" });
     },
     /** O início do plano (as Operações confirmam ou mudam a data do orçamento; "aaaa-mm-dd"). */
+    /** 27/11 (Rúben: «ajustar à mão os materiais (gerir)»): a data prevista de chegada de um material (ISO, ou null para tirar), o
+     *  recebido (true: hoje; false: volta a por receber) e uma nota. Fica na obra; o Inventário não muda. */
+    materialManual(id: number, n: string, m: { chega?: string | null; recebido?: boolean; nota?: string | null }) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id), M = (d.obra.matManual ??= {}), x = { ...(M[n] ?? {}) };
+      if (m.chega !== undefined) { if (m.chega && /^\d{4}-\d{2}-\d{2}$/.test(m.chega)) x.chega = m.chega; else delete x.chega; }
+      if (m.recebido !== undefined) { if (m.recebido) x.recebido = isoDia(new Date()); else delete x.recebido; }
+      if (m.nota !== undefined) { if (m.nota?.trim()) x.nota = m.nota.trim().slice(0, 200); else delete x.nota; }
+      if (Object.keys(x).length) M[n] = x; else delete M[n];
+      log(d, m.recebido === true ? `Material recebido (à mão): ${n}` : m.recebido === false ? `Material volta a por receber: ${n}`
+        : m.chega !== undefined ? (x.chega ? `Material ${n}: chega a ${x.chega.slice(8, 10)}/${x.chega.slice(5, 7)} (à mão)` : `Material ${n}: sem data prevista`) : `Material ${n}: nota`);
+    },
     /** 27/11 (Rúben: «a obra sem técnicos, determinam isso depois»): o gestor escolhe os técnicos depois. Ligado, as tarefas do plano por
      *  aprovar ficam sem técnico e não voltam a ser escolhidas sozinhas; desligado, o plano volta a propor os técnicos livres. */
     tecnicosDepois(id: number, on: boolean) {

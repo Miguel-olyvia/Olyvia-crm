@@ -526,15 +526,18 @@ export function MateriaisDaObra({ ctx, d, dias = [], abrir, irAba, realce }: { c
                   {g.itens.map((m, k) => {
                     const x = linhaDe(g.fase, m);
                     return (
-                      <li key={k} className={cn("flex items-center gap-3 border-b border-border px-3 py-2", x.tarde && "bg-destructive/[0.05]")}>
+                      <li key={k} className={cn("flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2", x.tarde && "bg-destructive/[0.05]")}>
                         <span className="min-w-0 flex-1">
                           <span className="block text-sm font-medium">{m.n} <span className="font-normal text-muted-foreground">· {nfmt(m.q)} {m.un}</span>{!x.contrato && <span className="ml-1.5 rounded-full bg-muted px-1.5 py-0.5 text-[11px] font-normal text-muted-foreground">modelo de obra</span>}</span>
                           {x.t && <span className="block text-xs text-muted-foreground">Precisa a {x.precisa} · <button type="button" title={x.t.nome} onClick={() => setTi(x.ti)} className="underline-offset-2 hover:underline">{nomeCurtoTarefa(x.t.nome)}</button></span>}
                           {x.tarde && <span className="block text-xs font-medium text-destructive">Chega depois de a tarefa começar</span>}
                         </span>
                         <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", OK_MAT.has(m.estado) ? "bg-success/15 text-success" : x.tarde ? "bg-destructive/10 text-destructive" : "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200")}>
-                          {OK_MAT.has(m.estado) ? ROTULO_MAT[m.estado] ?? m.estado : m.quando ? `chega a ${m.quando}` : rotuloNovo(m) ?? m.estado}
+                          {OK_MAT.has(m.estado) ? ((m as { manual?: true }).manual ? "recebido" : ROTULO_MAT[m.estado] ?? m.estado) : m.quando ? `chega a ${m.quando}` : rotuloNovo(m) ?? m.estado}
                         </span>
+                        {/* 27/11 (Rúben: «ajustar à mão os materiais (gerir)»): a data prevista e o recebido, à mão */}
+                        {planeia && <GerirMaterial n={m.n} manual={d.obra.matManual?.[m.n]} pronto={OK_MAT.has(m.estado) && !(m as { manual?: true }).manual}
+                          mudar={(x) => run(() => A.materialManual(d.id, m.n, x))} />}
                       </li>
                     );
                   })}
@@ -865,5 +868,27 @@ export function Aba({ on, rot, n, aviso, onClick, icone }: { on: boolean; rot: s
       <span className="relative" aria-hidden="true">{icone}</span><span className="relative">{rot}</span>
       {!!n && <span className={cn("relative rounded-full px-1.5 text-xs tabular-nums", on ? "bg-background/20" : aviso ? "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200" : "bg-muted")}>{n}</span>}
     </button>
+  );
+}
+
+/** 27/11 (Rúben: «permitir ajustar à mão os materiais (gerir)»): num material por receber, a data prevista de chegada e o «Recebido»;
+ *  num recebido à mão, desfazer. Os que o Inventário já dá como no armazém ou na obra não se mexem aqui. */
+function GerirMaterial({ n, manual, pronto, mudar }: { n: string; manual?: { chega?: string; recebido?: string }; pronto: boolean;
+  mudar: (m: { chega?: string | null; recebido?: boolean }) => void }) {
+  if (pronto) return null;
+  if (manual?.recebido) return (
+    <button type="button" onClick={() => mudar({ recebido: false })} aria-label={`Desfazer o recebido de ${n}`}
+      className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-full px-2 text-xs font-medium text-muted-foreground hover:bg-muted">
+      <Undo2 className="h-3.5 w-3.5" aria-hidden="true" />Desfazer</button>
+  );
+  return (
+    <span className="flex shrink-0 items-center gap-1.5">
+      <label className="sr-only" htmlFor={`chega-${n}`}>Chega a (data prevista) de {n}</label>
+      <input id={`chega-${n}`} type="date" value={manual?.chega ?? ""} onChange={(e) => mudar({ chega: e.target.value || null })}
+        title="Data prevista de chegada (à mão)" className="h-9 rounded-lg border border-input bg-background px-2 text-xs" />
+      <button type="button" onClick={() => mudar({ recebido: true })} aria-label={`Recebido: ${n}`} title="Dá o material como recebido (à mão)"
+        className="inline-flex min-h-9 items-center gap-1 rounded-full border border-input bg-card px-3 text-xs font-medium hover:border-success hover:text-success">
+        <Check className="h-3.5 w-3.5" aria-hidden="true" />Recebido</button>
+    </span>
   );
 }
