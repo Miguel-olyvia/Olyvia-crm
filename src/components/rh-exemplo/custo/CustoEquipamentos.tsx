@@ -3,6 +3,7 @@
  * N meses ou todos os meses), o que conta no mês escolhido, o que já contou e o que falta contar. «Atribuir equipamento» abre o
  * painel lateral; «Devolver» pede a data e o estado; «Alterar como conta» muda a forma de contar. Vem da base e escreve na base
  * (só com a permissão de editar retribuições); depois de cada escrita a lista e o custo refazem-se. O devolvido conta até ao mês da devolução, inclusive.
+ * «Termo» (só num ativo, com `hr.pessoas.documentos.emitir`) emite o termo de entrega ou de devolução como documento do RH, sem enviar nada.
  */
 import { useState } from "react";
 import { Plus } from "lucide-react";
@@ -23,6 +24,10 @@ import { EditarContaDialog, type AlvoConta } from "./EditarContaDialog";
 import { EquipamentoSheet, PERMISSAO_EDITAR_ATIVOS } from "./EquipamentoSheet";
 import { dataPt, euros, nomeDoMes } from "./formato";
 import { rotuloDoEquipamento } from "./rotuloConta";
+import { TermoEquipamentoDialog } from "./TermoEquipamentoDialog";
+
+// Quem emite o termo precisa de poder emitir documentos do RH (a base decide; aqui só se esconde o botão).
+const PERMISSAO_EMITIR_DOCUMENTOS = "hr.pessoas.documentos.emitir";
 
 interface Props {
   pessoaId: string;
@@ -40,13 +45,16 @@ interface LinhaProps {
   podeGerir: boolean;
   /** Tem `ativos.edit`: só então se corrigem o valor, a vida, a renda e as datas de um equipamento que é um ativo. */
   podeCorrigir: boolean;
+  /** Tem `hr.pessoas.documentos.emitir`: só então se emite o termo de um equipamento que é um ativo. */
+  podeTermo: boolean;
   aoDevolver: (e: EquipamentoPessoa) => void;
   aoAlterar: (alvo: AlvoConta) => void;
   aoCorrigir: (e: EquipamentoPessoa) => void;
   aoCorrigirDatas: (e: EquipamentoPessoa) => void;
+  aoTermo: (e: EquipamentoPessoa) => void;
 }
 
-function LinhaEquipamento({ e, mes, podeGerir, podeCorrigir, aoDevolver, aoAlterar, aoCorrigir, aoCorrigirDatas }: LinhaProps) {
+function LinhaEquipamento({ e, mes, podeGerir, podeCorrigir, podeTermo, aoDevolver, aoAlterar, aoCorrigir, aoCorrigirDatas, aoTermo }: LinhaProps) {
   const { t, language } = useTranslation();
   const s = situacaoDoEquipamento(e, mes);
   const devolvido = e.estado === "devolvido";
@@ -105,6 +113,11 @@ function LinhaEquipamento({ e, mes, podeGerir, podeCorrigir, aoDevolver, aoAlter
                 {t("rhCustos.eq.devolver")}
               </Button>
             )}
+            {e.ativo && podeTermo && (
+              <Button type="button" size="sm" variant="outline" onClick={() => aoTermo(e)} aria-label={t("ativos.termo.aria", { descricao: e.descricao })} className={cn("min-h-11", FOCO)}>
+                {t("ativos.termo.botao")}
+              </Button>
+            )}
           </div>
         )}
       </TableCell>
@@ -122,8 +135,11 @@ export function CustoEquipamentos({ pessoaId, pessoaNome, mes, autor, equipament
   const [aAlterar, setAAlterar] = useState<AlvoConta | null>(null);
   const [aCorrigir, setACorrigir] = useState<EquipamentoPessoa | null>(null);
   const [aCorrigirDatas, setACorrigirDatas] = useState<EquipamentoPessoa | null>(null);
+  const [aTermo, setATermo] = useState<EquipamentoPessoa | null>(null);
   // A permissão dos Ativos (não a das retribuições do RH); fora do fornecedor de permissões (testes isolados) vale «não».
-  const podeCorrigir = usePermissionsOpcional()?.hasPermission(PERMISSAO_EDITAR_ATIVOS) ?? false;
+  const permissoes = usePermissionsOpcional();
+  const podeCorrigir = permissoes?.hasPermission(PERMISSAO_EDITAR_ATIVOS) ?? false;
+  const podeTermo = permissoes?.hasPermission(PERMISSAO_EMITIR_DOCUMENTOS) ?? false;
   const ordenados = [...equipamentos].sort((a, b) => b.entrega.localeCompare(a.entrega));
 
   return (
@@ -152,7 +168,7 @@ export function CustoEquipamentos({ pessoaId, pessoaNome, mes, autor, equipament
               </TableRow>
             </TableHeader>
             <TableBody>
-              {ordenados.map((e) => <LinhaEquipamento key={e.id} e={e} mes={mes} podeGerir={podeGerir} podeCorrigir={podeCorrigir} aoDevolver={setADevolver} aoAlterar={setAAlterar} aoCorrigir={setACorrigir} aoCorrigirDatas={setACorrigirDatas} />)}
+              {ordenados.map((e) => <LinhaEquipamento key={e.id} e={e} mes={mes} podeGerir={podeGerir} podeCorrigir={podeCorrigir} podeTermo={podeTermo} aoDevolver={setADevolver} aoAlterar={setAAlterar} aoCorrigir={setACorrigir} aoCorrigirDatas={setACorrigirDatas} aoTermo={setATermo} />)}
             </TableBody>
           </Table>
         </div>
@@ -165,6 +181,7 @@ export function CustoEquipamentos({ pessoaId, pessoaNome, mes, autor, equipament
       <EditarContaDialog alvo={aAlterar} aoFechar={() => setAAlterar(null)} />
       <CorrigirEquipamentoDialog equipamento={aCorrigir} aoFechar={() => setACorrigir(null)} />
       <CorrigirDatasDialog equipamento={aCorrigirDatas} aoFechar={() => setACorrigirDatas(null)} />
+      <TermoEquipamentoDialog equipamento={aTermo} pessoaId={pessoaId} aoFechar={() => setATermo(null)} />
     </Seccao>
   );
 }

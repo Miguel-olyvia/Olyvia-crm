@@ -36,6 +36,9 @@ const TOKENS_CATALOGO_SQL = [
   "retribuicao_valor_base", "retribuicao_periodicidade", "retribuicao_moeda",
   "retribuicao_subsidio_alimentacao", "retribuicao_subsidio_alimentacao_modo",
   "empresa_nome", "documento_titulo", "documento_tipo", "documento_data_emissao",
+  // 20270130300000_ativos_termos.sql: o grupo «ativo» do termo de entrega e de devolucao (8 tokens, 45 no total).
+  "ativo_codigo", "ativo_nome", "ativo_tipo", "ativo_num_serie", "ativo_entrega_data", "ativo_devolucao_data",
+  "ativo_devolucao_estado", "termo_momento",
 ].sort();
 
 describe("CATALOGO_VARIAVEIS_RH — paridade com o catalogo SQL", () => {

@@ -12,6 +12,8 @@ export const CODIGOS_ATV = [
   // Fase A1: comprado/alugado, armazém, equipamento do RH como ativo, correção com ativos.edit.
   "ATV19", "ATV20", "ATV21", "ATV22", "ATV23", "ATV24", "ATV25", "ATV26", "ATV27", "ATV28",
   "ATV29", "ATV30", "ATV31", "ATV32", "ATV33",
+  // Fase 1: ATV34 prefixo do código, ATV35 horizonte do «por devolver», ATV36 e ATV37 do termo de entrega ou devolução.
+  "ATV34", "ATV35", "ATV36", "ATV37",
 ] as const;
 export type CodigoAtv = (typeof CODIGOS_ATV)[number];
 

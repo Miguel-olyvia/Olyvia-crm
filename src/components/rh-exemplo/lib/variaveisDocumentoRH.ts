@@ -74,6 +74,15 @@ export const CATALOGO_VARIAVEIS_RH: readonly VariavelDocumentoRH[] = [
   { token: "documento_titulo", rotulo: "Titulo do documento", grupo: "documento" },
   { token: "documento_tipo", rotulo: "Tipo de documento", grupo: "documento" },
   { token: "documento_data_emissao", rotulo: "Data de emissao", grupo: "documento" },
+  // Termo de entrega / devolucao de um ativo (rpc_ativos_termo_emitir): so tem valor nesse termo.
+  { token: "ativo_codigo", rotulo: "Codigo do ativo", grupo: "ativo" },
+  { token: "ativo_nome", rotulo: "Nome do ativo", grupo: "ativo" },
+  { token: "ativo_tipo", rotulo: "Tipo de ativo", grupo: "ativo" },
+  { token: "ativo_num_serie", rotulo: "Numero de serie", grupo: "ativo" },
+  { token: "ativo_entrega_data", rotulo: "Data de entrega", grupo: "ativo" },
+  { token: "ativo_devolucao_data", rotulo: "Data de devolucao", grupo: "ativo" },
+  { token: "ativo_devolucao_estado", rotulo: "Estado na devolucao", grupo: "ativo" },
+  { token: "termo_momento", rotulo: "Momento do termo (entrega ou devolucao)", grupo: "ativo" },
 ];
 
 /** Dados de exemplo para a pre-visualizacao no editor de modelo. Propositadamente
@@ -117,6 +126,13 @@ export const DADOS_EXEMPLO_RH: Readonly<Record<string, string>> = {
   documento_titulo: "Contrato de Trabalho",
   documento_tipo: "contrato",
   documento_data_emissao: "18/09/2026",
+  ativo_codigo: "NIKE-IT-LAP-26-0001",
+  ativo_nome: "Portátil Dell Latitude",
+  ativo_tipo: "Portátil",
+  ativo_num_serie: "SN-4F2A91",
+  ativo_entrega_data: "01/03/2026",
+  // ativo_devolucao_data e ativo_devolucao_estado de proposito AUSENTES: no termo de entrega nao ha devolucao.
+  termo_momento: "Entrega",
 };
 
 const PADRAO_TOKEN = /\{\{\s*([a-z0-9_]+)\s*\}\}/gi;

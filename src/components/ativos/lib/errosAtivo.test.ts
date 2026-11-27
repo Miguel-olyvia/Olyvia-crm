@@ -1,4 +1,5 @@
-// Os erros da base dos Ativos: os códigos novos da fase A1 (ATV19 a ATV33) e as várias causas do ATV26 (entrega recusada).
+// Os erros da base dos Ativos: os códigos novos da fase A1 (ATV19 a ATV33), os da fase 1 (ATV34 prefixo, ATV35 horizonte, ATV36 e ATV37 do
+// termo) e as várias causas do ATV26 (entrega recusada).
 import { describe, expect, it } from "vitest";
 import { chaveDoErro, codigoAtv, CODIGOS_ATV, refazListaAposErro, subcodigoAtv } from "./errosAtivo";
 import { ativosTranslations } from "@/translations/ativos";
@@ -6,8 +7,8 @@ import { ativosTranslations } from "@/translations/ativos";
 const erro = (message: string, details: string | null = null) => ({ code: "P0001", message, details, hint: null });
 
 describe("códigos ATV da A1", () => {
-  it("reconhece ATV19 a ATV33 (e continua a reconhecer os de antes)", () => {
-    for (let n = 19; n <= 33; n += 1) {
+  it("reconhece ATV19 a ATV37 (e continua a reconhecer os de antes)", () => {
+    for (let n = 19; n <= 37; n += 1) {
       const codigo = `ATV${n}`;
       expect(CODIGOS_ATV as readonly string[]).toContain(codigo);
       expect(codigoAtv(erro(codigo))).toBe(codigo);
