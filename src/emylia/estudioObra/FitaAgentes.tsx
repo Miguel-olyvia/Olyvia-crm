@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { SinalAoVivo } from "../SinalAoVivo";
 import { AnimatePresence, motion } from "framer-motion";
-import { Check, ChevronDown, Settings2, Undo2, X } from "lucide-react";
+import { CalendarDays, Check, ChevronDown, Euro, GraduationCap, HardHat, MessageCircle, Package, Settings2, Undo2, X, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Negocio } from "../motor";
@@ -35,13 +35,42 @@ const CHAVE_VISTO = (id: number) => `olyvia.agentes.visto.${id}`;
 const lerVisto = (id: number): string | null => { try { return window.localStorage.getItem(CHAVE_VISTO(id)); } catch { return null; } };
 const guardarVisto = (id: number, iso: string) => { try { window.localStorage.setItem(CHAVE_VISTO(id), iso); } catch { /* sem armazenamento */ } };
 
-function Avatar({ id, tam = "h-9 w-9", vivo = false }: { id: AgenteId; tam?: string; vivo?: boolean }) {
-  const a = agente(id);
-  // 27/11 (Rúben: «nesta área precisamos de mais animações, como se fosse uma secção viva»): quem pede decisão tem um anel a pulsar
+// 27/11 (Rúben: «meter ícones de robôs diferentes para cada tipo, para parecerem mesmo agentes»): cada agente é um robô com o seu
+// acessório (o Plano com o calendário, a Equipa com o capacete, os Materiais com a caixa, o Cliente com o balão, a Margem com o euro e a
+// Aprendizagem com o capelo). Quem pede decisão pulsa só no contorno (o anel grande de antes tapava o cartão).
+const ACESSORIO: Record<AgenteId, LucideIcon> = { plano: CalendarDays, equipa: HardHat, materiais: Package, cliente: MessageCircle, margem: Euro, aprendizagem: GraduationCap };
+
+/** A cara de um robô (antena, cabeça, olhos e boca), em branco, sobre a cor do agente. Os olhos piscam devagar quando está vivo. */
+function CaraRobo({ vivo, reduzir }: { vivo: boolean; reduzir: boolean }) {
   return (
-    <span aria-hidden="true" className={cn("relative grid shrink-0 place-items-center rounded-xl font-mono text-[11px] font-semibold text-white shadow-sm", tam)} style={{ background: a.cor }}>
-      {vivo && <span className="absolute -inset-1 animate-ping rounded-2xl opacity-30 [animation-duration:2.4s] motion-reduce:hidden" style={{ background: a.cor }} />}
-      <span className="relative">{a.sigla}</span>
+    <svg viewBox="0 0 24 24" className="h-[62%] w-[62%]" fill="none" aria-hidden="true">
+      <line x1="12" y1="2.5" x2="12" y2="5.5" stroke="white" strokeWidth="1.6" strokeLinecap="round" />
+      <circle cx="12" cy="2.3" r="1.3" fill="white" />
+      <rect x="4" y="6" width="16" height="13" rx="4" fill="white" fillOpacity="0.95" />
+      <rect x="2" y="10.5" width="2" height="4" rx="1" fill="white" />
+      <rect x="20" y="10.5" width="2" height="4" rx="1" fill="white" />
+      <motion.g style={{ transformOrigin: "12px 11.5px" }} animate={vivo && !reduzir ? { scaleY: [1, 1, 0.1, 1] } : undefined}
+        transition={vivo && !reduzir ? { duration: 3.2, repeat: Infinity, times: [0, 0.9, 0.95, 1] } : undefined}>
+        <circle cx="9" cy="11.5" r="1.6" fill="currentColor" />
+        <circle cx="15" cy="11.5" r="1.6" fill="currentColor" />
+      </motion.g>
+      <rect x="9" y="15" width="6" height="1.6" rx="0.8" fill="currentColor" />
+    </svg>
+  );
+}
+
+export function Avatar({ id, tam = "h-9 w-9", vivo = false }: { id: AgenteId; tam?: string; vivo?: boolean }) {
+  const a = agente(id), reduzir = !!useReduzir(), Ac = ACESSORIO[id];
+  return (
+    <span aria-hidden="true" title={`Agente ${a.nome}`} className={cn("relative grid shrink-0 place-items-center rounded-xl shadow-sm", tam)} style={{ background: a.cor, color: a.cor }}>
+      {vivo && !reduzir && (
+        <motion.span className="pointer-events-none absolute -inset-[3px] rounded-[14px] border-2" style={{ borderColor: a.cor }}
+          animate={{ opacity: [0.7, 0, 0.7], scale: [1, 1.08, 1] }} transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }} />
+      )}
+      <CaraRobo vivo={vivo} reduzir={reduzir} />
+      <span className="absolute -bottom-1 -right-1 grid h-[46%] w-[46%] place-items-center rounded-full bg-card shadow ring-1 ring-border">
+        <Ac className="h-[70%] w-[70%]" style={{ color: a.cor }} />
+      </span>
     </span>
   );
 }

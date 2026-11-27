@@ -6,7 +6,8 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { Server } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SinalAoVivo } from "@/emylia/SinalAoVivo";
-import { agente } from "@/emylia/estudioObra/agentes";
+import { agente, type AgenteId } from "@/emylia/estudioObra/agentes";
+import { Avatar as RoboAgente } from "@/emylia/estudioObra/FitaAgentes";
 import { nomeDoDegrau, proximaVolta, type ObraCerebro, type ResumoAgente } from "./grafoConhecimento";
 
 const hora = (d: Date | string) => new Date(d).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" });
@@ -45,11 +46,8 @@ function CartaoAgente({ a, onEscolher, i }: { a: ResumoAgente; onEscolher(id: st
     <motion.li initial={parado ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}>
       <button type="button" onClick={() => onEscolher(`agente:${a.id}`)}
         className="group relative flex w-full items-start gap-3 overflow-hidden rounded-2xl border border-border bg-card p-3 text-left shadow-sm transition hover:border-primary/40 hover:shadow focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary">
-        <span className="relative mt-0.5 grid h-10 w-10 shrink-0 place-items-center rounded-xl text-xs font-extrabold text-[#0d0a1f]" style={{ background: a.cor }}>
-          {a.sigla}
-          {a.pedem > 0 && !parado && <motion.span aria-hidden="true" className="absolute inset-0 rounded-xl" style={{ boxShadow: `0 0 0 2px ${a.cor}` }}
-            animate={{ scale: [1, 1.35], opacity: [0.8, 0] }} transition={{ duration: 1.6, repeat: Infinity, ease: "easeOut" }} />}
-        </span>
+        {/* 27/11: o mesmo robô de cada agente da fita do Estúdio */}
+        <span className="mt-0.5"><RoboAgente id={a.id as AgenteId} tam="h-10 w-10" vivo={a.pedem > 0} /></span>
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-2">
             <span className="font-semibold">{a.nome}</span>
