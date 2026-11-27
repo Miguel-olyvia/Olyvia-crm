@@ -5,7 +5,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type PointerEvent as EventoPonteiro } from "react";
 import { Maximize2, Minus, Plus } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { Simulacao, enquadrar, raioDoNo } from "./forcas";
+import { Simulacao, corpoDoNo, enquadrar } from "./forcas";
 import { vizinhos, type Grafo, type NoGrafo } from "./grafoConhecimento";
 
 export interface GrafoCerebroRef {
@@ -38,7 +38,8 @@ export const GrafoCerebro = forwardRef<GrafoCerebroRef, Props>(function GrafoCer
   const mexeu = useRef(false); // a pessoa já mexeu na vista: não se volta a enquadrar sozinho
   const [hover, setHover] = useState<string | null>(null);
 
-  const raios = useMemo(() => new Map(grafo.nos.map((n) => [n.id, n.tipo === "tema" ? raioDoNo(n.grau, 9) : n.tipo === "agente" ? 11 : raioDoNo(n.grau)])), [grafo]);
+  const corpos = useMemo(() => grafo.nos.map(corpoDoNo), [grafo]);
+  const raios = useMemo(() => new Map(corpos.map((c) => [c.id, c.r])), [corpos]);
   const porId = useMemo(() => new Map(grafo.nos.map((n) => [n.id, n])), [grafo]);
   const pontas = useMemo(() => grafo.arestas.map((e) => ({ ...e })), [grafo]);
 
@@ -84,14 +85,14 @@ export const GrafoCerebro = forwardRef<GrafoCerebroRef, Props>(function GrafoCer
   // uma simulação nova quando o grafo muda (os nós que já lá estavam ficam onde estavam)
   useEffect(() => {
     const antes = sim.current ? new Map(sim.current.corpos.map((c) => [c.id, { x: c.x, y: c.y }])) : undefined;
-    const nova = new Simulacao(grafo.nos.map((n) => ({ id: n.id, r: raios.get(n.id) ?? 6 })), grafo.arestas, {}, antes);
+    const nova = new Simulacao(corpos, grafo.arestas, {}, antes);
     if (antes) nova.alpha = 0.35; // só se acomoda
     else nova.correr(200); // a primeira disposição já quase assente; o resto vê-se a assentar
     sim.current = nova;
     desenhar();
     if (!mexeu.current) fazerEnquadrar();
     animar();
-  }, [grafo, raios, desenhar, animar, fazerEnquadrar]);
+  }, [grafo, corpos, desenhar, animar, fazerEnquadrar]);
   useEffect(() => () => { if (quadro.current != null) cancelAnimationFrame(quadro.current); sim.current = null; }, []);
 
   // reenquadrar quando a caixa muda de tamanho (rodar o telemóvel), enquanto a pessoa não mexeu

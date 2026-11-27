@@ -58,6 +58,7 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
   const podePedir = !!pedir && podePedirFalta(S.role, !!teste);
   const [aPedir, setAPedir] = useState(false);
   const [aConfirmar, setAConfirmar] = useState<string | null>(null);
+  const [aGarantir, setAGarantir] = useState(false);
   const db = useInventario();
   const ec = d.obra.ec;
   const r = ec?.ref ? resumoEcNegocio(db, ec.ref) : null;
@@ -176,6 +177,13 @@ export function MateriaisObra(ctx: Ctx & { d: Negocio }) {
           {podePedir && pedivel && (
             <Button className="mt-3 min-h-11" disabled={aPedir} onClick={() => { setAPedir(true); void pedir!(ec.contrato!).finally(() => setAPedir(false)); }}>
               {aPedir ? "A pedir…" : "Pedir o que falta ao fornecedor"}
+            </Button>
+          )}
+          {/* 27/11 (Rúben): no modo de teste do super admin, um toque dá os materiais como garantidos (real/materiaisTeste.ts) */}
+          {teste?.garantirMateriais && !!ec.contrato && !pronto && (
+            <Button variant="outline" className="mt-3 min-h-11 gap-2 border-amber-500/60 sm:ml-2" disabled={aGarantir}
+              onClick={() => { setAGarantir(true); void teste.garantirMateriais!(ec.contrato!).finally(() => setAGarantir(false)); }}>
+              <FlaskConical className="h-4 w-4" aria-hidden="true" />{aGarantir ? "A dar entrada…" : "Dar os materiais como garantidos (teste)"}
             </Button>
           )}
           <p className="mt-2 text-sm text-muted-foreground">Faz-se no Inventário: as Compras aprovam as encomendas a fornecedor e o Armazém recebe-as e reserva. Aqui fica o estado.</p>

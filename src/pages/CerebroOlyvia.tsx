@@ -279,7 +279,7 @@ export default function CerebroOlyvia() {
                 <label className="relative block w-full sm:max-w-xs">
                   <span className="sr-only">Procurar na base de conhecimento</span>
                   <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
-                  <input type="search" value={pesquisa} onChange={(e) => setPesquisa(e.target.value)} placeholder="Procurar uma nota, um cliente, um número…"
+                  <input type="search" value={pesquisa} onChange={(e) => setPesquisa(e.target.value)} placeholder="Procurar cliente, número ou nota…"
                     onKeyDown={(e) => { if (e.key === "Enter" && encontrados[0]) { e.preventDefault(); escolherEFocar(encontrados[0]); } if (e.key === "Escape") setPesquisa(""); }}
                     className="min-h-11 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-sm shadow-sm outline-none transition focus:border-primary focus:ring-2 focus:ring-primary/30" />
                 </label>
