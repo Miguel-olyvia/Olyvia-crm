@@ -1,6 +1,6 @@
 // 17/11: o Catálogo passa a ter páginas (menu lateral). O endereço antigo (/catalogo-custos?sec=…&servico=…) traduz-se para as rotas novas.
 import { describe, expect, it } from "vitest";
-import { CAMINHO_GESTAO, CAMINHO_SECCAO, caminhoProduto, caminhoServico, destinoCatalogoAntigo, grupoDaSeccao, separadorDaSeccao } from "./catalogoRotas";
+import { CAMINHO_FAMILIAS, CAMINHO_GESTAO, CAMINHO_SECCAO, caminhoFamilia, caminhoProduto, caminhoServico, destinoCatalogoAntigo, grupoDaSeccao, separadorDaSeccao } from "./catalogoRotas";
 
 describe("destinoCatalogoAntigo: cada parâmetro do endereço antigo vai para a rota certa", () => {
   it("sem parâmetros abre os Serviços (o separador de sempre)", () => {
@@ -67,6 +67,12 @@ describe("os caminhos das rotas", () => {
     expect(CAMINHO_GESTAO.atributos).toBe("/catalogo/produtos/atributos");
     expect(caminhoProduto("a b")).toBe("/catalogo/produtos/a%20b");
     expect(caminhoServico("s1")).toBe("/catalogo/servicos/s1");
+  });
+
+  it("a vista de uma família: /catalogo/produtos/familias/:id (não colide com /catalogo/produtos/:id, que só tem um segmento)", () => {
+    expect(caminhoFamilia("f 1")).toBe("/catalogo/produtos/familias/f%201");
+    expect(caminhoFamilia("f1").startsWith(`${CAMINHO_FAMILIAS}/`)).toBe(true);
+    expect(caminhoFamilia("f1").split("/")).toHaveLength(5);
   });
 });
 

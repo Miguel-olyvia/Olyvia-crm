@@ -9,13 +9,13 @@ import type { Config3dPrevia } from "./Previa3DLigacoes";
 import { ligacoesDaConfig, mesmasLigacoes, type Ligacao } from "./config3dDados";
 import { useConfig3d, type AlvoConfig3d } from "./useConfig3d";
 import { urlDaFotoOpcao } from "./fotoOpcaoUrl";
-import { corDosAtributos, fotoDosAtributos, medidaDosAtributos } from "./planta3d/previaProduto3d";
+import { PREVIA_SO_GENERICOS, corDosAtributos, fotoDosAtributos, medidaDosAtributos } from "./planta3d/previaProduto3d";
 import { LADO_TEXTURA_CM } from "./planta3d/texturaProduto";
 import { ZONAS, aparenciaUnicaDasZonas, zonasDosAtributos, zonasVisuais } from "./planta3d/zonasGlb";
 import { chaveDeExclusao } from "./planta3d/aspetoZonas";
 import { leiturasDoProduto } from "./planta3d/acabamentoCor3d";
 import type { NoCat } from "./planta3d/catalogo3d";
-import { resolverDoNo, textoDaOrigem } from "./planta3d/modelos3dEscolha";
+import { escolhaPorId, resolverDoNo, textoDaOrigem } from "./planta3d/modelos3dEscolha";
 import { aplicacaoDosAtributos, medidaDoRevestimento } from "./planta3d/revestimentoPrevia";
 import type { AtributoDef, AtributoProduto } from "./v2/catalogoModelo";
 
@@ -114,12 +114,14 @@ export function Modelo3DProduto(props: Modelo3DProdutoProps) {
   const idPainel = useId();
   // o modelo e de onde vem: do produto, da subcategoria, da categoria ou automático (pelo nome)
   const origem = resolverDoNo({ produto: props.modelo3d, arvore: props.arvore, no: props.no });
+  // 26/11: um modelo do catálogo 3D (HTML) escolhido não se aplica na ficha (só genéricos): diz-se, para o texto não prometer o que o 3D não mostra
+  const htmlIgnorado = PREVIA_SO_GENERICOS && escolhaPorId(origem.modelo)?.familia === "html";
   return (
     <div className="grid gap-3">
       {props.alvoConfig3d
         ? <p className="text-[15px] text-muted-foreground">O 3D que o catálogo daria a este produto, pelo modelo escolhido, pelo nome, pela subcategoria e pelas medidas. Os eixos da Medida e as ligações dos atributos às zonas podem guardar-se neste produto, abrindo o 3D.</p>
         : <p className="text-[15px] text-muted-foreground">Só para ver: o 3D que o catálogo daria a este produto, pelo modelo escolhido, pelo nome, pela subcategoria e pelas medidas. Não grava nada.</p>}
-      <p data-testid="modelo3d-origem" className="text-[15px]">Modelo: <span className="font-medium">{textoDaOrigem(origem)}</span></p>
+      <p data-testid="modelo3d-origem" className="text-[15px]">Modelo: <span className="font-medium">{textoDaOrigem(origem)}</span>{htmlIgnorado && <span className="text-muted-foreground"> — na ficha o 3D usa só os modelos genéricos: este não se aplica aqui.</span>}</p>
       {/* o rótulo fica sempre «Ver em 3D» e quem diz se está aberto é o aria-expanded (o fundo também muda): um rótulo que muda E um aria-expanded diziam a mesma coisa duas vezes */}
       <button type="button" aria-expanded={aberto} aria-controls={idPainel} onClick={() => setAberto((v) => !v)}
         className={cn("inline-flex min-h-11 items-center gap-2 justify-self-start rounded-lg border border-input bg-card px-4 text-[15px] font-medium transition-colors hover:bg-muted aria-expanded:border-primary aria-expanded:bg-muted",

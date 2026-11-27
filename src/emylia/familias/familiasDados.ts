@@ -6,6 +6,7 @@ import type { AtributoDef } from "../v2/catalogoModelo";
 import { chamar, type ResG } from "../atributosGestao";
 import type { LinhaPaginaProduto } from "../real/produtosPaginados";
 import { nomeDoAtributo } from "./atributosFamilia";
+import type { EixoVista, FamiliaVista, OutraMedida, ProdutoVista, ValorVista } from "./escolhaVariacao";
 import type { EixosCfg } from "./nucleo";
 import { MAX_SELECAO } from "./selecao";
 
@@ -53,6 +54,53 @@ export async function lerFamilia(org: string, id: string): Promise<ResG<FamiliaL
   if (!o || !f || !Array.isArray(o.produtos)) return { ok: false, erro };
   const linhas = (o.produtos as unknown[]).filter((x): x is LinhaPaginaProduto => !!objeto(x) && typeof (x as Bruto).id === "string");
   return { ok: true, v: { id: texto(f.id), nome: texto(f.nome), versao: texto(f.updated_at), veValores: o.ve_valores === true, eixos: eixosDe(f.eixos), linhas } };
+}
+
+const textoOuNull = (x: unknown): string | null => (typeof x === "string" && x ? x : null);
+const numeroOuNull = (x: unknown): number | null => (typeof x === "number" && Number.isFinite(x) ? x : null);
+
+function valoresDe(x: unknown): Record<string, ValorVista> {
+  const o = objeto(x);
+  if (!o) return {};
+  return Object.fromEntries(Object.entries(o).flatMap(([id, v]) => {
+    const b = objeto(v);
+    return b && texto(b.valor) ? [[id, { valor: texto(b.valor), nome: texto(b.nome) || texto(b.valor), hex: textoOuNull(b.hex), foto: textoOuNull(b.foto), sigla: textoOuNull(b.sigla), ordem: numeroOuNull(b.ordem), isMetal: b.is_metal === true }]] : [];
+  }));
+}
+
+function produtoVistaDe(x: unknown): ProdutoVista[] {
+  const o = objeto(x);
+  if (!o || !texto(o.id)) return [];
+  const m = objeto(o.medida), a = objeto(o.aplicacao);
+  return [{
+    id: texto(o.id), nome: texto(o.nome), sku: texto(o.sku), estado: texto(o.estado), pvp: numeroOuNull(o.pvp), stock: numeroOuNull(o.stock),
+    modeloId: textoOuNull(o.modelo_id), modelo: textoOuNull(o.modelo), subcategoriaId: textoOuNull(o.subcategoria_id), subcategoria: textoOuNull(o.subcategoria),
+    categoriaId: textoOuNull(o.categoria_id), categoria: textoOuNull(o.categoria),
+    medida: m && texto(m.attribute_id) ? { atributoId: texto(m.attribute_id), valor: m.valor ?? null, unidade: textoOuNull(m.unidade), texto: textoOuNull(m.texto) } : null,
+    aplicacao: a && texto(a.valor) ? { valor: texto(a.valor), nome: texto(a.nome) || texto(a.valor) } : null,
+    valores: valoresDe(o.valores),
+  }];
+}
+
+/**
+ * 26/11 (20270129300000, cat_ler_familia_vista, POR APLICAR: até lá responde «Ainda não disponível nesta base»): a família para a vista com 3D. Por produto traz o valor de cada
+ * eixo com a cor, a foto e o nome da opção, o PVP (só com services.view) e o stock (só com inventory.view); null sem a permissão. Só lê.
+ */
+export async function lerFamiliaVista(org: string, id: string): Promise<ResG<FamiliaVista>> {
+  const erro = "Não foi possível ler a família.";
+  const r = await chamar("cat_ler_familia_vista", { p_org: org, p_id: id }, erro);
+  if ("erro" in r) return r;
+  const o = objeto(r.v), f = objeto(o?.familia);
+  if (!o || !f || !texto(f.id) || !Array.isArray(o.produtos) || !Array.isArray(o.eixos)) return { ok: false, erro };
+  const eixos: EixoVista[] = o.eixos.flatMap((e): EixoVista[] => {
+    const b = objeto(e);
+    return b && texto(b.attribute_id) ? [{ atributoId: texto(b.attribute_id), code: texto(b.code), rotulo: texto(b.rotulo), papel: texto(b.papel), posicao: inteiro(b.posicao), isMeasurement: b.is_measurement === true }] : [];
+  }).sort((a, b) => a.posicao - b.posicao);
+  const outras: OutraMedida[] = (Array.isArray(o.outras_medidas) ? o.outras_medidas : []).flatMap((e): OutraMedida[] => {
+    const b = objeto(e);
+    return b && texto(b.id) ? [{ id: texto(b.id), nome: texto(b.nome), atual: b.atual === true, medida: textoOuNull(b.medida), medidaValor: b.medida_valor ?? null, unidade: textoOuNull(b.unidade) }] : [];
+  });
+  return { ok: true, v: { id: texto(f.id), nome: texto(f.nome), veValores: o.ve_valores === true, veStock: o.ve_stock === true, eixos, produtos: o.produtos.flatMap(produtoVistaDe), outrasMedidas: outras } };
 }
 
 /** A família de cada produto (para a marca «já está noutra família»). Sem produtos não vai à base; nunca pede mais de MAX_SELECAO. */

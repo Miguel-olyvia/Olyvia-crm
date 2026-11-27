@@ -1,7 +1,7 @@
 // 11/11/2026: os alertas dentro do Estúdio da obra, sem React. Cada alerta diz o que se passa numa frase e traz o próximo passo (o Estúdio
 // liga-o à ação): o que está atrasado, o que espera pela validação ou pela decisão do cliente, os técnicos noutra obra, os materiais que
 // ainda não chegaram para a fase que vem, a conversa por ler, o fim que derrapou e a folga para adiantar.
-import { simularBuraco, TECS, type Estado, type Negocio, type Plano } from "../motor";
+import { desbloquearBuraco, simularBuraco, TECS, type Estado, type Negocio, type Plano } from "../motor";
 import { imprevistosDe, pedidoDeAtraso, textoPedidoAtraso } from "../imprevistos";
 import { motivoOcupado, obraQueOcupa, tecnicosDoOficio } from "../preparacaoObra";
 import { materiaisPorFase } from "../obraOps";
@@ -20,6 +20,8 @@ export type AcaoAlerta =
   | { k: "replanear" }
   | { k: "adiantar" }
   | { k: "fecharBuraco"; ini: number; fim: number; ti: number | null }
+  // 27/11 (agentes): passar a tarefa que trava a um colega livre e antecipar o resto, de uma vez
+  | { k: "passarEAntecipar"; ti: number; tec: string; n: string; ini: number; fim: number }
   | { k: "avisarCliente"; texto: string }
   | { k: "conversa" }
   | { k: "aceitarFim"; dias: number }
@@ -125,14 +127,21 @@ export function alertasDaObra(d: Negocio, S: Pick<Estado, "deals">, ocup: Map<st
     const n = g.fim - g.ini + 1, seg = g.seguinte != null ? p.tasks[g.seguinte] : null;
     // 26/11 (Rúben: «ao clicar em antecipar o resto, abre o detalhe mas não faz nada»): só se propõe antecipar o que dá; senão diz-se porquê
     const sim = simularBuraco(S, d, g.ini, g.fim);
+    // 27/11 (agentes): sem dar, procura-se quem desbloqueia (um colega livre do mesmo ofício para a tarefa que trava)
+    const des = !sim.s && sim.trava != null ? desbloquearBuraco(S, d, g.ini, g.fim, sim.trava) : null;
+    const ganhoTxt = (x: number) => (x > 0 ? ` A obra acaba ${dias(x)} mais cedo.` : "");
     // sem dar: «Ver a tarefa» abre a que trava (a do técnico ocupado), onde se troca o técnico
     const tiVer = !sim.s && sim.trava != null ? sim.trava : g.seguinte;
     const ver = tiVer != null ? [{ rot: "Ver a tarefa", a: { k: "tarefa" as const, ti: tiVer } }] : [];
-    const sub = !sim.s
-      ? `${sim.porque}, por isso não dá para antecipar.${sim.trava != null ? ` Para antecipar, passe «${nomeNoPlano(p, p.tasks[sim.trava])}» a outro técnico.` : ""}`
-      : seg ? `A seguir, ${seg.nome} a ${quando(p, seg.dia)}. «Antecipar ${dias(sim.s)}» puxa as ${sim.alvo.length} tarefas seguintes${sim.s < n ? ` (os ${n} dias não dão: ${sim.porque.charAt(0).toLowerCase() + sim.porque.slice(1)})` : ""}.` : "Pode antecipar uma tarefa para esses dias.";
-    L.push({ id: `parada-${g.ini}`, nivel: "oportunidade", t: `A obra fica sem ninguém ${dias(n)}: ${quando(p, g.ini)} a ${quando(p, g.fim)}`, sub,
-      acoes: sim.s ? [{ rot: `Antecipar ${dias(sim.s)}`, a: { k: "fecharBuraco" as const, ini: g.ini, fim: g.ini + sim.s - 1, ti: g.seguinte } }, ...ver] : ver,
+    const nomeTrava = sim.trava != null ? nomeNoPlano(p, p.tasks[sim.trava]) : "";
+    const sub = sim.s
+      ? (seg ? `A seguir, ${seg.nome} a ${quando(p, seg.dia)}. «Antecipar ${dias(sim.s)}» puxa as ${sim.alvo.length} tarefas seguintes${sim.s < n ? ` (os ${n} dias não dão: ${sim.porque.charAt(0).toLowerCase() + sim.porque.slice(1)})` : ""}.${ganhoTxt(sim.ganho)}` : "Pode antecipar uma tarefa para esses dias.")
+      : des ? `${sim.porque}. Se «${nomeTrava}» passar para ${des.n.split(" ")[0]} (do mesmo ofício e livre), as tarefas seguintes começam ${dias(des.s)} mais cedo.${ganhoTxt(des.ganho)}`
+      : `${sim.porque}, por isso não dá para antecipar.${sim.trava != null ? ` Para antecipar, passe «${nomeTrava}» a outro técnico.` : ""}`;
+    const acoes = sim.s ? [{ rot: `Antecipar ${dias(sim.s)}`, a: { k: "fecharBuraco" as const, ini: g.ini, fim: g.ini + sim.s - 1, ti: g.seguinte } }, ...ver]
+      : des ? [{ rot: `Passar a ${des.n.split(" ")[0]} e antecipar ${dias(des.s)}`, a: { k: "passarEAntecipar" as const, ti: des.ti, tec: des.tec, n: des.n, ini: g.ini, fim: g.ini + des.s - 1 } }, ...ver]
+      : ver;
+    L.push({ id: `parada-${g.ini}`, nivel: "oportunidade", t: `A obra fica sem ninguém ${dias(n)}: ${quando(p, g.ini)} a ${quando(p, g.fim)}`, sub, acoes,
       ...(g.seguinte != null ? { ti: g.seguinte } : {}) });
   }
   const peso: Record<Nivel, number> = { critico: 0, atencao: 1, oportunidade: 2 };

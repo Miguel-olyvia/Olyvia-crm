@@ -70,6 +70,7 @@ const Suppliers = lazy(() => import("./pages/Suppliers"));
 const CatalogoRota = lazy(() => import("./pages/CatalogoRota"));
 const CatalogoGestao = lazy(() => import("./pages/CatalogoGestao"));
 const CatalogoFamilias = lazy(() => import("./pages/CatalogoFamilias"));
+const CatalogoFamiliaVer = lazy(() => import("./pages/CatalogoFamiliaVer"));
 const CatalogoProdutos = lazy(() => import("./pages/CatalogoProdutos"));
 const Ativos = lazy(() => import("./pages/ativos/Ativos"));
 const NegociosEmylia = lazy(() => import("./pages/NegociosEmylia"));
@@ -416,6 +417,7 @@ const App = () => (
                       <Route path="/catalogo/produtos/atributos" element={<ProtectedRoute permission="services.view"><CatalogoGestao separador="atributos" /></ProtectedRoute>} />
                       <Route path="/catalogo/produtos/referencia" element={<ProtectedRoute permission="services.view"><CatalogoGestao separador="sku" /></ProtectedRoute>} />
                       <Route path="/catalogo/produtos/familias" element={<ProtectedRoute permission="services.view"><CatalogoFamilias /></ProtectedRoute>} />
+                      <Route path="/catalogo/produtos/familias/:id" element={<ProtectedRoute permission="services.view"><CatalogoFamiliaVer /></ProtectedRoute>} />
                       <Route path="/catalogo/produtos/:id" element={<ProtectedRoute permission="services.view"><CatalogoProdutos /></ProtectedRoute>} />
                       <Route path="/catalogo/servicos" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="servicos" /></ProtectedRoute>} />
                       <Route path="/catalogo/servicos/equipamentos" element={<ProtectedRoute permission="services.view"><CatalogoRota seccao="equipamentos" /></ProtectedRoute>} />

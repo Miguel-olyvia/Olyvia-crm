@@ -260,7 +260,8 @@ describe("estadoDoModelo: o que a pré-visualização mostra", () => {
     expect(estadoDoModelo(modeloParaPrevia({ nome: "Sanita suspensa Rimless", no: null, arvore: [] }))).toBe("generico");
   });
   it("sem genérico nem modelo do HTML, mas com tipo próprio: «aproximado»", () => {
-    expect(estadoDoModelo(modeloParaPrevia({ nome: "Lava-loiça 1 cuba inox", no: null, arvore: [] }))).toBe("aproximado");
+    // 26/11: era «Lava-loiça 1 cuba inox» (tipo com o modelo do HTML mais parecido); a ficha só usa genéricos, e o lava-loiça tem o seu: passa a «generico» (previaSoGenericos.test.ts). O quadro não tem genérico.
+    expect(estadoDoModelo(modeloParaPrevia({ nome: "Quadro 60x40", no: null, arvore: [] }))).toBe("aproximado");
   });
   it("sem nenhum, a caixa cinzenta: «caixa»", () => {
     expect(estadoDoModelo(modeloParaPrevia({ nome: "Parafuso", no: null, arvore: [] }))).toBe("caixa");
