@@ -190,7 +190,7 @@ export async function runKindStep(
 
 /**
  * A ordem das gravacoes: PRIMEIRO o tipo e o nome (rpc_set_entity_kind), DEPOIS o
- * resto (contactos, NIF, morada...). Assim nunca fica o nome mudado e o tipo nao;
+ * resto (a lead ou o cliente, NIF, morada...). Assim nunca fica o nome mudado e o tipo nao;
  * se o tipo for recusado o resto corre na mesma, sem o nome. Se o resto falhar, o
  * erro sobe, mas o tipo e o nome ja ficaram certos.
  */

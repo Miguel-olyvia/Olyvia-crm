@@ -72,3 +72,15 @@ export const samePhone = (a: string, b: string): boolean => fullDigits(a) === fu
 /** Mesmo email: sem espacos nas pontas e sem diferenca de maiusculas. */
 export const sameEmail = (a: string, b: string): boolean =>
   (a || "").trim().toLowerCase() === (b || "").trim().toLowerCase();
+
+/**
+ * O PostgREST nao encontrou a funcao (a migration que a cria ainda nao esta na base): codigo
+ * PGRST202, ou so a mensagem «Could not find the function public.xxx(...) in the schema cache».
+ * Nao e uma recusa do utilizador, e uma avaria de configuracao: quem chama mostra um texto claro
+ * e regista-a, em vez de mostrar o nome interno da funcao.
+ */
+export const isMissingFunctionError = (error: unknown): boolean => {
+  if (typeof error !== "object" || error === null) return false;
+  const { code, message } = error as { code?: unknown; message?: unknown };
+  return code === "PGRST202" || (typeof message === "string" && /could not find the function/i.test(message));
+};

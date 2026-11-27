@@ -38,6 +38,10 @@ interface PhoneInputProps {
   disabled?: boolean;
   placeholder?: string;
   labels?: PhoneInputLabels;
+  /** Marca o campo do numero como invalido para quem usa leitor de ecra (aria-invalid). */
+  invalid?: boolean;
+  /** Id do elemento que explica o erro do campo do numero (aria-describedby). */
+  describedBy?: string;
 }
 
 export function PhoneInput({
@@ -50,6 +54,8 @@ export function PhoneInput({
   disabled = false,
   placeholder = "912 345 678",
   labels,
+  invalid,
+  describedBy,
 }: PhoneInputProps) {
   const { t } = useTranslation();
   const [searchTerm, setSearchTerm] = useState("");
@@ -118,6 +124,8 @@ export function PhoneInput({
           id={phoneId}
           type="tel"
           aria-label={!label ? labels?.telefone : undefined}
+          aria-invalid={invalid || undefined}
+          aria-describedby={describedBy}
           value={phoneValue}
           onChange={handlePhoneInput}
           placeholder={placeholder}

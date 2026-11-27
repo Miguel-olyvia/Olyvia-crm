@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useId, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { withAuditContext } from "@/utils/auditContext";
 import { useToast } from "@/hooks/use-toast";
@@ -53,10 +53,12 @@ import { linkEntityAddress, linkEntityEmail, linkEntityPhone } from "@/utils/ent
 import {
   getEntityPrimaryEmail,
   getEntityPrimaryPhone,
+  isMissingFunctionError,
   phoneFormValueFromEntity,
   sameEmail,
   samePhone,
 } from "@/utils/entityPrimaryContact";
+import { captureFlowError } from "@/lib/observability/captureFlowError";
 import { checkNifCollisionOnEdit } from "@/lib/duplicateBlockingRule";
 import { useLeadPipelineRules } from "@/hooks/useLeadPipelineRules";
 import {
@@ -199,6 +201,30 @@ interface EntityContacts {
   email?: string | null;
 }
 
+type ContactField = "phone" | "email";
+
+/** Erro da gravacao do telefone ou do email na ficha: qual dos dois falhou e o texto para o alerta. */
+interface ContactError {
+  field: ContactField;
+  message: string;
+}
+
+const CONTACT_FIELD_LABEL: Record<ContactField, string> = { phone: "O telefone", email: "O email" };
+
+// A funcao da ficha nao existe na base (a migration ainda nao foi aplicada): a pessoa nao pode resolver,
+// por isso o texto manda para o suporte em vez de mostrar o nome interno da funcao.
+const CONTACT_FUNCTION_MISSING_MESSAGE =
+  "a gravação de contactos na ficha não está disponível de momento. Contacte o suporte.";
+
+/** O que a ficha ja aceitou antes de uma falha, para quem edita saber que isso nao se perdeu. */
+const contactsSavedNotice = (saved: readonly ContactField[]): string =>
+  saved.length > 1
+    ? "O telefone e o email já ficaram guardados na ficha."
+    : `${CONTACT_FIELD_LABEL[saved[0] ?? "phone"]} já ficou guardado na ficha.`;
+
+/** Junta duas frases sem duplicar o ponto final da primeira. */
+const joinSentences = (first: string, second: string): string => `${first.trim().replace(/[.\s]+$/, "")}. ${second}`;
+
 const fieldDefinitionResolverClient = createSupabaseLeadDialogFieldDefinitionResolverClient(supabase);
 
 export function AnewLeadEditDialog({
@@ -249,8 +275,13 @@ export function AnewLeadEditDialog({
   const [entityContacts, setEntityContacts] = useState<EntityContacts | null>(null);
   const contactSeedPending = useRef(false);
   const contactsRequest = useRef(0);
-  // Erro da gravacao do telefone/email na ficha, mostrado em role="alert" dentro do dialogo.
-  const [contactError, setContactError] = useState<string | null>(null);
+  // Enquanto a ficha se le o Guardar espera: gravar antes de a ler compararia com o retrato da lead e
+  // deixaria passar, sem aviso, o numero que a ficha nao tem (a divergencia que isto veio corrigir).
+  const [contactsLoading, setContactsLoading] = useState(false);
+  // Erro da gravacao do telefone/email na ficha, mostrado em role="alert" dentro do dialogo e ligado
+  // ao campo que falhou (aria-invalid / aria-describedby).
+  const [contactError, setContactError] = useState<ContactError | null>(null);
+  const contactErrorId = useId();
 
   // Load field definitions and populate form when dialog opens
   useEffect(() => {
@@ -307,25 +338,38 @@ export function AnewLeadEditDialog({
     const request = ++contactsRequest.current;
     contactSeedPending.current = false;
     setEntityContacts(null);
-    if (!lead?.entity_id) return;
-    const [phoneRead, emailRead] = await Promise.allSettled([
-      getEntityPrimaryPhone(lead.entity_id),
-      getEntityPrimaryEmail(lead.entity_id),
-    ]);
-    if (request !== contactsRequest.current) return;
-    const contacts: EntityContacts = {};
-    if (phoneRead.status === "fulfilled") {
-      contacts.phone = phoneRead.value ? phoneFormValueFromEntity(phoneRead.value) : null;
-    } else {
-      console.error("Error loading entity primary phone:", phoneRead.reason);
+    if (!lead?.entity_id) {
+      setContactsLoading(false);
+      return;
     }
-    if (emailRead.status === "fulfilled") {
-      contacts.email = emailRead.value;
-    } else {
-      console.error("Error loading entity primary email:", emailRead.reason);
+    setContactsLoading(true);
+    try {
+      const [phoneRead, emailRead] = await Promise.allSettled([
+        getEntityPrimaryPhone(lead.entity_id),
+        getEntityPrimaryEmail(lead.entity_id),
+      ]);
+      if (request !== contactsRequest.current) return;
+      const contacts: EntityContacts = {};
+      if (phoneRead.status === "fulfilled") {
+        contacts.phone = phoneRead.value ? phoneFormValueFromEntity(phoneRead.value) : null;
+      } else {
+        // Ficha por ler: o formulario cai no que a lead tem, sem aviso no ecra. Fica registado, para
+        // se saber quando isto acontece (o Info e o Editar podem mostrar numeros diferentes).
+        console.error("Error loading entity primary phone:", phoneRead.reason);
+        captureFlowError(phoneRead.reason, "lead-contact-update");
+      }
+      if (emailRead.status === "fulfilled") {
+        contacts.email = emailRead.value;
+      } else {
+        console.error("Error loading entity primary email:", emailRead.reason);
+        captureFlowError(emailRead.reason, "lead-contact-update");
+      }
+      contactSeedPending.current = true;
+      setEntityContacts(contacts);
+    } finally {
+      // Uma leitura de uma abertura anterior nao liberta o Guardar da abertura actual.
+      if (request === contactsRequest.current) setContactsLoading(false);
     }
-    contactSeedPending.current = true;
-    setEntityContacts(contacts);
   };
 
   // Tipo da ficha (Pessoa/Empresa) e nome da empresa actual, para pre-seleccionar o
@@ -414,7 +458,10 @@ export function AnewLeadEditDialog({
       aliases.find((alias) => Object.prototype.hasOwnProperty.call(fieldValues, alias)) ||
       aliases[0];
     handleFieldChange(existingAlias, value);
-    if (generalKey === "phone" || generalKey === "email") setContactError(null);
+    // Mexer no campo que a ficha recusou apaga o erro desse campo; o do outro continua (ainda e verdade).
+    if (generalKey === "phone" || generalKey === "email") {
+      setContactError((current) => (current?.field === generalKey ? null : current));
+    }
     if (fieldErrors[generalKey]) {
       setFieldErrors(prev => {
         const next = { ...prev };
@@ -506,13 +553,16 @@ export function AnewLeadEditDialog({
    * mostrava ao abrir (o principal da ficha; sem principal, ou ficha por ler, o que a lead tinha) e
    * NAO com field_values: o que partiu isto foi uma lead com o numero novo ja em field_values e a
    * ficha com o antigo, em que gravar de novo era sempre «sem mudanca». Para no primeiro que a ficha
-   * recusar; devolve qual foi e o erro, ou null se correu tudo.
+   * recusar. Devolve o que a ficha JA aceitou (`saved`) e o que recusou (`failure`, ou null se correu
+   * tudo). O que ficou gravado passa a ser o novo ponto de comparacao: se a lead falhar a seguir e a
+   * pessoa repuser o valor antigo, esse valor volta a ser uma mudanca e escreve-se na ficha.
    */
   const saveEntityContacts = async (
     entityId: string,
     values: Record<string, any>,
-  ): Promise<{ field: "phone" | "email"; error: unknown } | null> => {
+  ): Promise<{ saved: ContactField[]; failure: { field: ContactField; error: unknown } | null }> => {
     const original = lead?.field_values || {};
+    const saved: ContactField[] = [];
 
     const email = readGeneralField("email", values);
     const emailShown = entityContacts?.email ?? readGeneralField("email", original);
@@ -520,8 +570,10 @@ export function AnewLeadEditDialog({
       try {
         await linkEntityEmail(entityId, email, userId);
       } catch (error) {
-        return { field: "email", error };
+        return { saved, failure: { field: "email", error } };
       }
+      saved.push("email");
+      setEntityContacts((current) => ({ ...current, email }));
     }
 
     const phone = readGeneralField("phone", values);
@@ -530,10 +582,12 @@ export function AnewLeadEditDialog({
       try {
         await linkEntityPhone(entityId, phone, userId);
       } catch (error) {
-        return { field: "phone", error };
+        return { saved, failure: { field: "phone", error } };
       }
+      saved.push("phone");
+      setEntityContacts((current) => ({ ...current, phone }));
     }
-    return null;
+    return { saved, failure: null };
   };
 
   const handleSave = async () => {
@@ -553,6 +607,21 @@ export function AnewLeadEditDialog({
 
     setSaving(true);
     setContactError(null);
+    // O que a ficha ja aceitou nesta gravacao. Se algo falhar a seguir, a ficha fica a frente da lead:
+    // diz-se a quem edita e o ecra de listas volta a ler (o Info e a lista mostram a ficha).
+    let contactsSaved: ContactField[] = [];
+    // A lead exactamente como estava: avisa o ecra para voltar a ler SEM dizer que a lead foi gravada.
+    const refreshAfterContactsOnly = () =>
+      onLeadUpdated({
+        leadId: lead.id,
+        entityId: lead.entity_id,
+        status: lead.status,
+        assignedTo: lead.assigned_to,
+        source: lead.source,
+        notes: lead.notes,
+        workflowStageId: lead.workflow_stage_id ?? null,
+        fieldValues: lead.field_values ?? {},
+      });
     try {
       // Preserve _meta if it exists
       const existingMeta = lead.field_values?._meta;
@@ -619,8 +688,9 @@ export function AnewLeadEditDialog({
         }
       }
 
-      // O tipo e o nome da ficha gravam-se PRIMEIRO (rpc_set_entity_kind), antes de rpc_update_lead
-      // e das sincronizacoes (NIF, morada, email, telefone): ver saveKindThenRest.
+      // O tipo e o nome da ficha gravam-se (rpc_set_entity_kind) antes de rpc_update_lead e das
+      // sincronizacoes do NIF e da morada: ver saveKindThenRest. O telefone e o email gravam-se ainda antes,
+      // mais abaixo, porque a recusa deles tem de parar tudo o resto.
       let namePlan: ReturnType<typeof planNameSave> = null;
       if (lead.entity_id) {
         const originalValues = lead.field_values || {};
@@ -686,11 +756,22 @@ export function AnewLeadEditDialog({
       // e do portal, e so se ela aceitar se grava a lead. Se a ficha recusar, nada mais se grava, o
       // erro fica a vista dentro do dialogo e o ecra continua aberto: a lead nunca fica a frente da ficha.
       if (lead.entity_id) {
-        const failedContact = await saveEntityContacts(lead.entity_id, updatedFieldValues);
-        if (failedContact) {
-          console.error(`Error saving entity ${failedContact.field}:`, failedContact.error);
-          const description = await getFriendlyErrorMessage(failedContact.error);
-          setContactError(`${failedContact.field === "phone" ? "O telefone" : "O email"} não foi guardado: ${description}`);
+        const { saved, failure } = await saveEntityContacts(lead.entity_id, updatedFieldValues);
+        contactsSaved = saved;
+        if (failure) {
+          console.error(`Error saving entity ${failure.field}:`, failure.error);
+          const functionMissing = isMissingFunctionError(failure.error);
+          // Uma recusa de permissao e a resposta certa; uma funcao em falta e uma avaria: regista-se.
+          if (functionMissing) captureFlowError(failure.error, "lead-contact-update");
+          const reason = functionMissing
+            ? CONTACT_FUNCTION_MISSING_MESSAGE
+            : await getFriendlyErrorMessage(failure.error);
+          const refused = `${CONTACT_FIELD_LABEL[failure.field]} não foi guardado: ${reason}`;
+          setContactError({
+            field: failure.field,
+            message: saved.length > 0 ? joinSentences(refused, contactsSavedNotice(saved)) : refused,
+          });
+          if (saved.length > 0) refreshAfterContactsOnly();
           return; // o finally envolvente limpa o `saving`
         }
       }
@@ -709,9 +790,10 @@ export function AnewLeadEditDialog({
           const description = await getFriendlyErrorMessage(ownerError);
           toast({
             title: t("leads.toast.assigneeUpdateError"),
-            description,
+            description: contactsSaved.length > 0 ? joinSentences(description, contactsSavedNotice(contactsSaved)) : description,
             variant: "destructive",
           });
+          if (contactsSaved.length > 0) refreshAfterContactsOnly();
           return; // o finally envolvente limpa o `saving`
         }
       }
@@ -878,11 +960,13 @@ export function AnewLeadEditDialog({
       if (kindOutcome.status !== "failed") onOpenChange(false);
     } catch (error) {
       console.error("Error saving lead:", error);
+      const failed = "Não foi possível guardar as alterações.";
       toast({
         title: "Erro",
-        description: "Não foi possível guardar as alterações.",
+        description: contactsSaved.length > 0 ? `${failed} ${contactsSavedNotice(contactsSaved)}` : failed,
         variant: "destructive",
       });
+      if (contactsSaved.length > 0) refreshAfterContactsOnly();
     } finally {
       setSaving(false);
     }
@@ -1033,6 +1117,8 @@ export function AnewLeadEditDialog({
                         label={field.label}
                         value={readGeneralField(field.key)}
                         onChange={(val) => handleGeneralFieldChange(field.key, val)}
+                        invalid={!!fieldErrors[field.key] || contactError?.field === "phone"}
+                        describedBy={contactError?.field === "phone" ? contactErrorId : undefined}
                       />
                     ) : (
                       <>
@@ -1040,7 +1126,8 @@ export function AnewLeadEditDialog({
                         <Input
                           value={readGeneralField(field.key)}
                           onChange={(e) => handleGeneralFieldChange(field.key, e.target.value)}
-                          aria-invalid={!!fieldErrors[field.key]}
+                          aria-invalid={!!fieldErrors[field.key] || (field.key === "email" && contactError?.field === "email")}
+                          aria-describedby={field.key === "email" && contactError?.field === "email" ? contactErrorId : undefined}
                         />
                       </>
                     )}
@@ -1100,8 +1187,8 @@ export function AnewLeadEditDialog({
         )}
 
         {contactError && (
-          <p role="alert" className="text-sm text-destructive">
-            {contactError}
+          <p id={contactErrorId} role="alert" className="text-sm text-destructive">
+            {contactError.message}
           </p>
         )}
 
@@ -1109,7 +1196,7 @@ export function AnewLeadEditDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
             Cancelar
           </Button>
-          <Button onClick={handleSave} disabled={saving || loading}>
+          <Button onClick={handleSave} disabled={saving || loading || contactsLoading}>
             {saving ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />

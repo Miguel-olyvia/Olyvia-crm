@@ -12,9 +12,12 @@ const calls: string[] = [];
 let tables: FakeTables = {};
 let rpcResults: Record<string, { data: unknown; error: unknown }> = {};
 let fichaReadError: { code: string; message: string } | null = null;
+// Quando posto, a leitura do telefone e do email da ficha so responde depois de ele resolver.
+let fichaReadGate: Promise<void> | null = null;
 let fieldDefs: unknown[] = [];
 const rpc = vi.fn();
 const toast = vi.fn();
+const captureFlowError = vi.fn();
 
 vi.mock("@/integrations/supabase/client", () => ({
   supabase: {
@@ -26,7 +29,13 @@ vi.mock("@/integrations/supabase/client", () => ({
         failing.then = (resolve: (v: unknown) => unknown) => resolve({ data: null, error: fichaReadError });
         return failing;
       }
-      return fakeFrom(tables)(table);
+      const chain = fakeFrom(tables)(table) as Record<string, any>;
+      if (fichaReadGate && (table === "anew_entity_phones" || table === "anew_entity_emails")) {
+        const gate = fichaReadGate;
+        const read = chain.maybeSingle;
+        chain.maybeSingle = () => gate.then(() => read());
+      }
+      return chain;
     },
     rpc: (...args: unknown[]) => rpc(...args),
     functions: { invoke: vi.fn().mockResolvedValue({ data: null, error: null }) },
@@ -44,6 +53,9 @@ vi.mock("@/lib/leads/fieldDefinitions", () => ({
 vi.mock("@/lib/leads/entityOwnerSync", () => ({ setEntityOwner: vi.fn(), notifyOwnerChangeVisits: vi.fn() }));
 vi.mock("@/utils/auditContext", () => ({ withAuditContext: (_s: unknown, _u: unknown, fn: () => unknown) => fn() }));
 vi.mock("@/utils/friendlyError", () => ({ getFriendlyErrorMessage: async (e: { message?: string }) => e?.message ?? "erro" }));
+vi.mock("@/lib/observability/captureFlowError", () => ({
+  captureFlowError: (...args: unknown[]) => captureFlowError(...args),
+}));
 vi.mock("@/utils/orgFiscalEntity", () => ({ linkEntityFiscalEntity: vi.fn() }));
 vi.mock("@/lib/duplicateBlockingRule", () => ({ checkNifCollisionOnEdit: async () => ({ collisions: [], error: null }) }));
 vi.mock("@/components/leads/DynamicFormField", () => ({ DynamicFormField: () => null }));
@@ -96,7 +108,7 @@ const emailInput = () =>
   screen.getByText("Email", { selector: "label" }).parentElement!.querySelector("input") as HTMLInputElement;
 const saveButton = () => screen.getByRole("button", { name: /guardar alterações/i });
 
-async function open(field_values: Record<string, unknown>) {
+function renderDialog(field_values: Record<string, unknown>) {
   const onLeadUpdated = vi.fn();
   const onOpenChange = vi.fn();
   render(
@@ -110,6 +122,11 @@ async function open(field_values: Record<string, unknown>) {
       userId="user-1"
     />,
   );
+  return { onLeadUpdated, onOpenChange };
+}
+
+async function open(field_values: Record<string, unknown>) {
+  const { onLeadUpdated, onOpenChange } = renderDialog(field_values);
   await waitFor(() => expect(saveButton()).not.toBeDisabled());
   // a ficha (tipo, nome, telefone, email) le-se a seguir ao formulario
   await waitFor(() => expect(screen.getByRole("radio", { name: /pessoa/i })).toBeChecked());
@@ -133,8 +150,10 @@ beforeEach(() => {
   tables = ficha();
   rpcResults = {};
   fichaReadError = null;
+  fichaReadGate = null;
   fieldDefs = PHONE_DEFS;
   toast.mockReset();
+  captureFlowError.mockReset();
   rpc.mockReset();
   rpc.mockImplementation(async (name: string) => {
     calls.push(name);
@@ -229,7 +248,9 @@ describe("T3 e T4: se a ficha recusa o telefone, a lead nao se grava", () => {
 
     expect(calls).not.toContain("rpc_update_lead");
     const alert = screen.getByRole("alert");
-    expect(alert).toHaveTextContent(/O telefone não foi guardado: .*rpc_set_entity_primary_phone/);
+    // em portugues e sem o nome interno da funcao (o PostgREST diz «Could not find the function ...»)
+    expect(alert).toHaveTextContent(/O telefone não foi guardado: .*não está disponível.*suporte/i);
+    expect(alert).not.toHaveTextContent(/rpc_set_entity_primary_phone|Could not find/i);
     expect(onLeadUpdated).not.toHaveBeenCalled();
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
     // pode tentar de novo
@@ -300,8 +321,198 @@ describe("T5: o mesmo para o email", () => {
     await saveAndSettle(onLeadUpdated);
 
     expect(calls).not.toContain("rpc_update_lead");
-    expect(screen.getByRole("alert")).toHaveTextContent(/O email não foi guardado: /);
+    expect(screen.getByRole("alert")).toHaveTextContent(/O email não foi guardado: .*não está disponível.*suporte/i);
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/rpc_set_entity_primary_email|Could not find/i);
     expect(onLeadUpdated).not.toHaveBeenCalled();
     expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+});
+
+describe("funcao da ficha em falta: reconhece-se pelo codigo ou so pela mensagem, e vai para o Sentry", () => {
+  it("so a mensagem do PostgREST (sem codigo): mesmo texto em portugues e fica registado", async () => {
+    rpcResults.rpc_set_entity_primary_phone = {
+      data: null,
+      error: { message: "Could not find the function public.rpc_set_entity_primary_phone(p_country_code) in the schema cache" },
+    };
+    const { onLeadUpdated } = await open(leadValues());
+    fireEvent.change(phoneInput(), { target: { value: "965818033" } });
+    await saveAndSettle(onLeadUpdated);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(/não está disponível.*suporte/i);
+    expect(screen.getByRole("alert")).not.toHaveTextContent(/rpc_set_entity_primary_phone/);
+    expect(captureFlowError).toHaveBeenCalledTimes(1);
+    expect(captureFlowError).toHaveBeenCalledWith(expect.anything(), "lead-contact-update");
+  });
+
+  it("uma recusa de permissao e a resposta certa: nao vai para o Sentry", async () => {
+    rpcResults.rpc_set_entity_primary_phone = { data: null, error: { code: "42501", message: "recusado" } };
+    const { onLeadUpdated } = await open(leadValues());
+    fireEvent.change(phoneInput(), { target: { value: "965818033" } });
+    await saveAndSettle(onLeadUpdated);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("O telefone não foi guardado: recusado");
+    expect(captureFlowError).not.toHaveBeenCalled();
+  });
+
+  it("ficha que nao se consegue ler: fica registado (o Editar mostra o numero da lead como se fosse o da ficha)", async () => {
+    fichaReadError = { code: "42501", message: "permission denied" };
+    await open(leadValues());
+    expect(captureFlowError).toHaveBeenCalledWith(expect.objectContaining({ code: "42501" }), "lead-contact-update");
+  });
+});
+
+describe("o Guardar espera pela leitura da ficha", () => {
+  it("com a ficha ainda por ler o Guardar fica desativado, e so abre quando ela chega (com o numero dela)", async () => {
+    let release!: () => void;
+    fichaReadGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    renderDialog(leadValues());
+    // o formulario ja carregou (o seletor Pessoa/Empresa so existe depois disso), a ficha nao
+    await waitFor(() => expect(screen.getByRole("radio", { name: /pessoa/i })).toBeChecked());
+    expect(saveButton()).toBeDisabled();
+
+    await act(async () => {
+      release();
+    });
+    await waitFor(() => expect(saveButton()).not.toBeDisabled());
+    await waitFor(() => expect(phoneInput()).toHaveValue("965818833"));
+  });
+});
+
+describe("a ficha aceitou e depois algo falhou: nao se perde de vista", () => {
+  const FICHA_EMAIL_ANTIGO = () =>
+    ficha({
+      anew_entity_emails: [
+        { id: "em-1", entity_id: "ent-1", email: "antigo@sapo.pt", is_primary: true, created_at: OLD },
+      ],
+    });
+  // a lead tem outro email que a ficha: o que se devolve ao ecra de listas tem de ser a lead como estava
+  const leadComoEstava = () => leadValues({ email: "lead@sapo.pt" });
+
+  it("email aceite e telefone recusado: o alerta diz que o email ficou guardado e o ecra volta a ler a ficha", async () => {
+    tables = FICHA_EMAIL_ANTIGO();
+    rpcResults.rpc_set_entity_primary_phone = { data: null, error: { code: "42501", message: "recusado" } };
+    const { onLeadUpdated, onOpenChange } = await open(leadComoEstava());
+    fireEvent.change(emailInput(), { target: { value: "novo@sapo.pt" } });
+    fireEvent.change(phoneInput(), { target: { value: "965818033" } });
+    await saveAndSettle(onLeadUpdated);
+
+    expect(calls).toEqual(["rpc_set_entity_primary_email", "rpc_set_entity_primary_phone"]);
+    expect(screen.getByRole("alert")).toHaveTextContent(/O telefone não foi guardado: recusado/);
+    expect(screen.getByRole("alert")).toHaveTextContent(/O email já ficou guardado na ficha/);
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    // avisa o ecra para ler a ficha de novo, mas com a lead EXACTAMENTE como estava (nao foi gravada)
+    expect(onLeadUpdated).toHaveBeenCalledTimes(1);
+    expect(onLeadUpdated).toHaveBeenCalledWith(
+      expect.objectContaining({ leadId: "lead-1", entityId: "ent-1", fieldValues: leadComoEstava() }),
+    );
+  });
+
+  it("depois disso, gravar de novo nao reenvia o email que a ficha ja tem", async () => {
+    tables = FICHA_EMAIL_ANTIGO();
+    rpcResults.rpc_set_entity_primary_phone = { data: null, error: { code: "42501", message: "recusado" } };
+    const { onLeadUpdated, onOpenChange } = await open(leadComoEstava());
+    fireEvent.change(emailInput(), { target: { value: "novo@sapo.pt" } });
+    fireEvent.change(phoneInput(), { target: { value: "965818033" } });
+    await saveAndSettle(onLeadUpdated);
+    calls.length = 0;
+
+    rpcResults.rpc_set_entity_primary_phone = { data: null, error: null };
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(calls).toEqual(["rpc_set_entity_primary_phone", "rpc_update_lead"]);
+  });
+
+  it("ficha aceite e lead recusada: o aviso diz que o telefone ficou guardado, o ecra volta a ler e fica aberto", async () => {
+    rpcResults.rpc_update_lead = { data: null, error: { code: "XX000", message: "falhou" } };
+    const { onLeadUpdated, onOpenChange } = await open(leadValues());
+    fireEvent.change(phoneInput(), { target: { value: "965818033" } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(toast).toHaveBeenCalled());
+
+    expect(calls).toEqual(["rpc_set_entity_primary_phone", "rpc_update_lead"]);
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: "Erro",
+        description: expect.stringMatching(/O telefone já ficou guardado na ficha/),
+        variant: "destructive",
+      }),
+    );
+    expect(onLeadUpdated).toHaveBeenCalledTimes(1);
+    expect(onLeadUpdated).toHaveBeenCalledWith(
+      expect.objectContaining({ leadId: "lead-1", entityId: "ent-1", fieldValues: leadValues() }),
+    );
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it("lead recusada sem nada gravado na ficha: o aviso nao fala da ficha e o ecra nao e avisado", async () => {
+    rpcResults.rpc_update_lead = { data: null, error: { code: "XX000", message: "falhou" } };
+    const { onLeadUpdated } = await open(leadValues());
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(toast).toHaveBeenCalled());
+
+    expect(calls).toEqual(["rpc_update_lead"]);
+    expect(toast).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Erro", description: "Não foi possível guardar as alterações." }),
+    );
+    expect(onLeadUpdated).not.toHaveBeenCalled();
+  });
+
+  it("depois de a ficha gravar e a lead falhar, repor o numero antigo volta a escrever na ficha", async () => {
+    rpcResults.rpc_update_lead = { data: null, error: { code: "XX000", message: "falhou" } };
+    const { onOpenChange } = await open(leadValues());
+    fireEvent.change(phoneInput(), { target: { value: "965818033" } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(toast).toHaveBeenCalled());
+    // a ficha tem agora 965818033; quem repuser o 965818833 (o que o ecra mostrava ao abrir) tem de o escrever
+    calls.length = 0;
+    rpc.mockClear();
+
+    rpcResults.rpc_update_lead = { data: null, error: null };
+    fireEvent.change(phoneInput(), { target: { value: "965818833" } });
+    fireEvent.click(saveButton());
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(calls).toEqual(["rpc_set_entity_primary_phone", "rpc_update_lead"]);
+    expect(argsOf("rpc_set_entity_primary_phone").p_phone).toBe("965818833");
+  });
+});
+
+describe("acessibilidade: o erro fica ligado ao campo que falhou", () => {
+  it("telefone recusado: o campo fica aria-invalid e aponta para o alerta; o email nao", async () => {
+    rpcResults.rpc_set_entity_primary_phone = { data: null, error: { code: "42501", message: "recusado" } };
+    const { onLeadUpdated } = await open(leadValues());
+    expect(phoneInput()).not.toHaveAttribute("aria-invalid", "true");
+    fireEvent.change(phoneInput(), { target: { value: "965818033" } });
+    await saveAndSettle(onLeadUpdated);
+
+    const alert = screen.getByRole("alert");
+    expect(alert.id).not.toBe("");
+    expect(phoneInput()).toHaveAttribute("aria-invalid", "true");
+    expect(phoneInput()).toHaveAttribute("aria-describedby", alert.id);
+    expect(emailInput()).not.toHaveAttribute("aria-invalid", "true");
+
+    // mexer no campo limpa o erro e a ligacao
+    fireEvent.change(phoneInput(), { target: { value: "965818034" } });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(phoneInput()).not.toHaveAttribute("aria-invalid", "true");
+    expect(phoneInput()).not.toHaveAttribute("aria-describedby");
+  });
+
+  it("email recusado: o campo fica aria-invalid e aponta para o alerta; o telefone nao", async () => {
+    tables = ficha({
+      anew_entity_emails: [
+        { id: "em-1", entity_id: "ent-1", email: "antigo@sapo.pt", is_primary: true, created_at: OLD },
+      ],
+    });
+    rpcResults.rpc_set_entity_primary_email = { data: null, error: { code: "42501", message: "recusado" } };
+    const { onLeadUpdated } = await open(leadValues({ email: "novo@sapo.pt" }));
+    fireEvent.change(emailInput(), { target: { value: "novo@sapo.pt" } });
+    await saveAndSettle(onLeadUpdated);
+
+    const alert = screen.getByRole("alert");
+    expect(emailInput()).toHaveAttribute("aria-invalid", "true");
+    expect(emailInput()).toHaveAttribute("aria-describedby", alert.id);
+    expect(phoneInput()).not.toHaveAttribute("aria-invalid", "true");
   });
 });
