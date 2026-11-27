@@ -33,7 +33,7 @@ export function ArmazemDoAtivoSecao({ ativo, podeVerValor }: Props) {
   if (!ativo.armazemLigado) return null;
   const armazem = ativo.armazem;
   return (
-    <div className="space-y-1" data-testid="detalhe-armazem">
+    <div className="space-y-1.5" data-testid="detalhe-armazem">
       <Seccao titulo={t("ativos.detalhe.seccaoArmazem")} id="ativo-armazem">
         {armazem?.apagado ? (
           // Uma só linha: o rótulo não se repete com um «—» ao lado do aviso de que foi apagado.

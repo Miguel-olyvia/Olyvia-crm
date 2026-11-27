@@ -5,7 +5,7 @@
  *    catálogo, ou escrita à mão), sem tabela de vida por tipo. O serviço mantém o campo de sempre (vazio usa a vida do modelo).
  *  - Alugado: renda mensal, início e fim do contrato (o fim é opcional: um arrendamento pode renovar-se sem fim). Sem valor de compra
  *    nem amortização. A viatura alugada avisa que a Frota não está ligada.
- * Uma frase por baixo diz quanto custa por mês com o que já está escrito.
+ * A frase que diz quanto custa por mês com o que já está escrito (`Previa`) mostra-se no painel ao lado dos campos.
  */
 import { CampoSelect, CampoTexto, type OpcaoSelect } from "@/components/rh-exemplo/form/Campos";
 import { dataPt, euros } from "@/components/rh-exemplo/custo/formato";
@@ -13,7 +13,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
 import { AvisoAtivo } from "./AvisoAtivo";
 import { CampoNumero } from "./CampoNumero";
-import { previaDaConta, vidaDoCatalogoEmMeses, type PreviaConta } from "./lib/previaAtivo";
+import { vidaDoCatalogoEmMeses, type PreviaConta } from "./lib/previaAtivo";
 import { mesPt } from "./lib/resumoAtivo";
 import { FORMAS_AQUISICAO, LIMITES_ATIVO, type FormaAquisicao, type OpcaoEquipamento, type OrigemVida } from "./lib/tipos";
 import { dataMaximaAtivo, fimMaximoAluguer, inicioMaximoAluguer, origensDeVidaDoGrupo, type CamposAtivo, type ErrosAtivo } from "./lib/validarAtivo";
@@ -31,8 +31,8 @@ export function SeletorForma({ valor, aoMudar }: { valor: FormaAquisicao; aoMuda
           <label
             key={f}
             className={cn(
-              "flex min-h-11 cursor-pointer items-start gap-2 rounded-md border px-3 py-2 text-sm transition-colors hover:bg-muted motion-reduce:transition-none",
-              "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:checked]:border-primary has-[:checked]:bg-primary/5",
+              "flex min-h-11 cursor-pointer items-start gap-2.5 rounded-xl border-[1.5px] px-3.5 py-3 text-sm transition-colors hover:bg-muted/60 motion-reduce:transition-none",
+              "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring has-[:checked]:border-primary has-[:checked]:bg-primary/5 has-[:checked]:shadow-[0_0_0_3px_hsl(var(--primary)/0.12)]",
             )}
           >
             <input type="radio" name="ativo-forma" value={f} checked={valor === f} onChange={() => aoMudar(f)} className="mt-0.5 h-4 w-4 shrink-0 accent-primary" />
@@ -60,13 +60,14 @@ export function FormaFixa({ forma }: { forma: FormaAquisicao }) {
   );
 }
 
-function Previa({ previa }: { previa: PreviaConta | null }) {
+/** A frase da conta (quanto custa por mês com o que já está escrito). Vive no painel de pré-visualização ao lado dos campos. */
+export function Previa({ previa, className }: { previa: PreviaConta | null; className?: string }) {
   const { t } = useTranslation();
   let texto = t("ativos.preview.vazio");
   if (previa?.tipo === "comprado") texto = t("ativos.preview.comprado", { quota: euros(previa.quota, "—"), n: previa.meses, fim: mesPt(previa.fim) });
   else if (previa?.tipo === "alugadoFim") texto = t("ativos.preview.alugadoFim", { renda: euros(previa.renda, "—"), inicio: dataPt(previa.inicio), fim: dataPt(previa.fim) });
   else if (previa?.tipo === "alugadoSemFim") texto = t("ativos.preview.alugadoSemFim", { renda: euros(previa.renda, "—"), inicio: dataPt(previa.inicio) });
-  return <p data-testid="previa-conta" className="rounded-md bg-muted/50 p-3 text-sm tabular-nums">{texto}</p>;
+  return <p data-testid="previa-conta" className={cn("text-sm tabular-nums", className)}>{texto}</p>;
 }
 
 interface CompradoProps {
@@ -119,7 +120,6 @@ export function CamposComprado({ campos, mudar, erro, equipamentos, ajudaVidaSer
           )}
         </>
       )}
-      {g !== "servico" && <Previa previa={previaDaConta(campos)} />}
     </div>
   );
 }
@@ -145,7 +145,6 @@ export function CamposAluguer({ campos, mudar, erro }: AluguerProps) {
           min={campos.inicioAluguer || LIMITES_ATIVO.dataMinima} max={fimMaximoAluguer()} ajuda={t("ativos.ajuda.fimAluguer")} erro={erro("fimAluguer")}
         />
       </div>
-      <Previa previa={previaDaConta(campos)} />
       {campos.grupo === "pessoa" && campos.tipo === "viatura" && (
         <AvisoAtivo tom="aviso" role="note" data-testid="aviso-frota" className="text-xs leading-5">{t("ativos.aviso.frota")}</AvisoAtivo>
       )}

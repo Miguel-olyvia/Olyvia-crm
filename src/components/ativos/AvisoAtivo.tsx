@@ -5,14 +5,10 @@
 import type { ReactNode } from "react";
 import { TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-const TOM = {
-  aviso: "rounded-md border border-amber-300 bg-amber-50 p-3 text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200",
-  erro: "font-medium text-destructive",
-} as const;
+import { TOM_AVISO } from "./lib/ativosUi";
 
 interface Props {
-  tom: keyof typeof TOM;
+  tom: keyof typeof TOM_AVISO;
   role?: "note" | "alert" | "status";
   id?: string;
   "data-testid"?: string;
@@ -23,7 +19,7 @@ interface Props {
 
 export function AvisoAtivo({ tom, className, children, ...resto }: Props) {
   return (
-    <p {...resto} className={cn("flex items-start gap-2 text-sm", TOM[tom], className)}>
+    <p {...resto} className={cn("flex items-start gap-2.5 text-sm", TOM_AVISO[tom], className)}>
       <TriangleAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
       <span className="min-w-0 break-words">{children}</span>
     </p>
