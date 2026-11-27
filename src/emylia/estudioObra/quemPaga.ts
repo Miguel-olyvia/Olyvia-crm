@@ -22,14 +22,16 @@ export type AjusteAdenda =
   | { k: "atraso"; tarefa: string; dias: number; horas: number }
   | { k: "nova"; n: NovaTarefa };
 
-export type QuemPaga = "cliente" | "imprevisto" | "empresa";
+export type QuemPaga = "cliente" | "imprevisto" | "empresa" | "plano";
 export const PORQUE = [
   { k: "cliente" as const, t: "O cliente pediu", sub: "Paga o cliente: prepara a adenda, por disparar no alerta em cima. Só entra no plano quando ele a assinar." },
   { k: "imprevisto" as const, t: "Imprevisto em obra", sub: "Abre o registo do imprevisto, com fotos. Se tiver custo, o cliente decide." },
   { k: "empresa" as const, t: "Atraso ou erro nosso", sub: "Paga a empresa: entra já no plano. O custo fica registado e sai da margem." },
+  // 27/11 (Rúben: «permitir fazer ajustes sem ter de selecionar uma destas 3; estamos a fazer testes e queremos já preparar planos reais»)
+  { k: "plano" as const, t: "Sem impacto", sub: "Só acerta o plano: entra já, sem adenda e sem custo na margem. Para testes e para preparar o plano real da obra." },
 ];
 /** O motivo que fica no registo de cada um. */
-export const MOTIVO_QUEM_PAGA: Record<QuemPaga, string> = { cliente: "Pedido do cliente", imprevisto: "Imprevisto na obra", empresa: "Atraso ou erro nosso" };
+export const MOTIVO_QUEM_PAGA: Record<QuemPaga, string> = { cliente: "Pedido do cliente", imprevisto: "Imprevisto na obra", empresa: "Atraso ou erro nosso", plano: "Acerto do plano" };
 
 const meia = (h: number) => Math.round(h * 2) / 2;
 const tarefaPorNome = (p: Plano, nome: string) => p.tasks.findIndex((t) => t.nome === nome && t.exec?.estado !== "validada");
