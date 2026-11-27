@@ -1,6 +1,6 @@
 // 12/11 (Rúben: «falta ver aqui o contrato»): no passo Contrato do Negócio vê-se o contrato montado (dados do cliente e da obra, a minuta
 // preenchida, as cláusulas do negócio) antes de o enviar ao portal; sem minuta, diz-se o que falta, e a minuta por omissão escolhe-se sozinha.
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { acoes, seed, type Negocio } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
@@ -144,5 +144,20 @@ describe("no passo Contrato do Negócio", () => {
   it("sem minutas na organização, diz que é preciso criar uma", async () => {
     await passoContrato();
     expect(screen.getByText("Criar uma minuta de contrato, em «Minutas de contrato».")).toBeTruthy();
+  });
+  // 27/11 (teste do 1029 no testarh): a resposta só se gravava ao sair do campo; escrita a última e recarregada a página, perdia-se
+  it("a resposta a uma pergunta da minuta grava-se quando se pára de escrever, sem sair do campo", async () => {
+    const { PAUSA_ANTES_DE_GRAVAR_MS } = await import("./templatesDosPassos");
+    estadoMinutas.data = [{ ...MINUTA, body_html: "<p>Cartão n.º {{cartao_de_cidadao}}.</p>" }]; escolhido.minuta_id = "m1";
+    vi.useFakeTimers();
+    try {
+      await passoContrato();
+      const campo = screen.getByLabelText("cartao_de_cidadao");
+      fireEvent.change(campo, { target: { value: "TESTE" } });
+      expect(guardar).not.toHaveBeenCalled();
+      await act(async () => { vi.advanceTimersByTime(PAUSA_ANTES_DE_GRAVAR_MS + 50); });
+      expect(guardar).toHaveBeenCalledTimes(1);
+      expect(guardar).toHaveBeenCalledWith(expect.objectContaining({ minuta_respostas: { cartao_de_cidadao: "TESTE" }, contrato_corpo_html: expect.stringContaining("TESTE") }));
+    } finally { vi.useRealTimers(); }
   });
 });

@@ -88,7 +88,9 @@ export function docObras(L: LinhaBase[], org = ""): DocRelatorio {
   const props = O.flatMap((x) => arr<Prop>(x.dados?.propostas).map((p) => ({ obra: nomeObra(x), ...p })));
   const pedem = props.filter((p) => p.modo === "pede"), outras = props.filter((p) => p.modo !== "pede");
   const proximas = O.flatMap((x) => arr<Prox>(x.dados?.proximas).map((t) => ({ obra: nomeObra(x), ...t })));
-  const feitos = O.flatMap((x) => arr<Feito>(x.dados?.feitos).map((f) => ({ obra: nomeObra(x), ...f })));
+  // a hora: o Cérebro guarda a data ISO (27/11); mostra-se só hh:mm
+  const hora = (q: string) => (/^\d{4}-\d{2}-\d{2}T/.test(q) ? new Date(q).toLocaleTimeString("pt-PT", { hour: "2-digit", minute: "2-digit" }) : q);
+  const feitos = O.flatMap((x) => arr<Feito>(x.dados?.feitos).map((f) => ({ obra: nomeObra(x), ...f, quando: hora(str(f.quando)), quem: f.quem || "sozinho" })));
   const pctObra = (x: LinhaBase) => (num(x.dados?.total) ? Math.round((num(x.dados?.feitas) / num(x.dados?.total)) * 100) : 0);
   return {
     tipo: "obras", titulo: "Relatório das obras", subtitulo: `${org ? `${org} · ` : ""}${O.length} obras em curso ou aprovadas`, atualizado: recente(L),
