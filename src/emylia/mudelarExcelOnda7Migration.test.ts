@@ -55,6 +55,9 @@ describe(`migration ${nome}`, () => {
     expect(bruto).toContain("supabase migration list --linked");
     expect(bruto).toContain("REVERSÃO fora da pasta das migrations");
     expect(bruto).toContain("A REVERSÃO DA ONDA 6 (mudelar-reverter-onda6.sql) passa a abortar");
+    // a CHECK de orcamento_linhas.taxa_iva (6, 13 ou 23) fica avisada: o IVA de 24 a 32 % rebenta-a se for copiado
+    expect(bruto).toContain("orcamento_linhas_taxa_iva_check, que só aceita 6, 13 ou 23");
+    expect(bruto).not.toContain("Nenhuma CHECK limita vat_rate");
   });
 
   it("uma só transação: BEGIN, SET LOCAL dos tempos e COMMIT no fim", () => {

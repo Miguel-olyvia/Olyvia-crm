@@ -21,7 +21,13 @@
 --      Escreve-se product_prices.vat_rate nas 24 linhas de preço dos 12 (compra e PVP, como o ecrã de preços do produto,
 --      que grava a taxa em todas as linhas que o produto tem). O preço não muda (o gatilho log_product_price_change só
 --      escreve histórico quando muda o preço: 0 linhas); a auditoria é a do gatilho fn_audit_product_prices (uma por linha).
---      Nenhuma CHECK limita vat_rate (lido: só product_prices_preco_exato_check) e o ecrã aceita de 0 a 100.
+--      Em products, product_prices e item_suppliers nenhuma CHECK limita a taxa (lido: em product_prices só
+--      product_prices_preco_exato_check) e o ecrã aceita de 0 a 100. ATENÇÃO: orcamento_linhas.taxa_iva tem a CHECK
+--      orcamento_linhas_taxa_iva_check, que só aceita 6, 13 ou 23. Hoje não parte nada (nenhuma função da base copia o
+--      vat_rate do produto para taxa_iva; a Emylia descarta 24 a 32 % e só lê o IVA dos serviços; a Mudelar não tem linhas
+--      em orcamento_linhas), mas se algum dia o IVA do produto for copiado para orcamento_linhas estas 12 placas rebentam
+--      essa CHECK. Nota de negócio: 24 a 32 % não são taxas legais em Portugal; é decisão do dono, e como as placas estão
+--      ativas os orçamentos novos do QuoteBuilder passam a cobrar essas taxas.
 --      NÃO entram os outros 422 produtos com IVA no Excel (23 %, sobretudo Resguardos, Móveis e Tampos em rascunho): não
 --      têm NENHUMA linha de preço nem no Excel nem na base, e o IVA só existe na linha de preço (price é NOT NULL). Criar uma
 --      linha a 0 não se faz: o ecrã de preços nunca cria uma linha a 0 («nothing to save»), e no orçamento (AddItemsDialog)
