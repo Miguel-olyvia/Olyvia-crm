@@ -6,7 +6,7 @@
 import { AtualizarMicrotarefas } from "./estudioObra/AtualizarMicrotarefas";
 import { SinalAoVivo } from "./SinalAoVivo";
 import { useMemo, useState, type ReactNode } from "react";
-import { AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, FileWarning, MapPin, Truck } from "lucide-react";
+import { AlertTriangle, ArrowRight, CheckCircle2, ChevronRight, FileWarning, MapPin, Search, Truck, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { TECS, aberto, conflitos, type Negocio } from "./motor";
 import { COR_FASE } from "./planoObra";
@@ -38,13 +38,25 @@ function Avatar({ id, n, tam = "h-8 w-8" }: { id: string | null; n: string; tam?
   return <span className={cn("grid shrink-0 place-items-center rounded-full text-[11px] font-semibold text-white ring-2 ring-card", tam)} style={{ background: corTec(id) }} title={n} aria-hidden="true">{iniciais(n)}</span>;
 }
 
+/** 27/11 (Rúben: «meter barra de pesquisa aqui»): a obra pelo cliente, o serviço, a morada, o n.º do negócio ou o código da obra; sem
+ *  acentos nem maiúsculas, todas as palavras têm de estar. */
+const semAcentos = (s: string) => s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+export function obraBate(o: Negocio, q: string): boolean {
+  const ps = semAcentos(q).split(/\s+/).filter(Boolean);
+  if (!ps.length) return true;
+  const txt = semAcentos([o.nome, o.servico, o.f?.morada, o.local, String(o.id), (o.obra as { codigo?: string }).codigo].filter(Boolean).join(" "));
+  return ps.every((p) => txt.includes(p));
+}
+
 /* ================================================================== a lista de obras */
 export function ListaObras(ctx: Ctx) {
   const { S, A, go } = ctx;
   // os materiais vivem no Inventário: a lista redesenha quando lá muda alguma coisa
   const db = useInventario();
   // 16/10: a obra aparece com o contrato assinado (o plano, por aprovar depois do pagamento)
-  const obras = aberto(S).filter((x) => x.obra.plano && x.fase >= 4);
+  const todas = aberto(S).filter((x) => x.obra.plano && x.fase >= 4);
+  const [q, setQ] = useState("");
+  const obras = q.trim() ? todas.filter((o) => obraBate(o, q)) : todas;
   const grupos: [string, Negocio[]][] = [
     ["Em curso", obras.filter((o) => o.obra.plano!.estado === "em curso")],
     ["Por arrancar", obras.filter((o) => o.obra.plano!.estado === "por aprovar" || o.obra.plano!.estado === "aprovado")],
@@ -55,11 +67,20 @@ export function ListaObras(ctx: Ctx) {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <h1 className="text-3xl font-semibold tracking-tight">Operações</h1>
         {/* 26/11 (Rúben: «animações assim, para mostrar mesmo que está live»): os agentes vigiam as obras */}
-        {obras.length > 0 && <p className="flex items-center gap-2 pb-1 text-sm text-muted-foreground"><SinalAoVivo rotulo="Ao vivo: os agentes vigiam as obras" tamanho={16} />Ao vivo · os agentes vigiam as obras</p>}
+        {todas.length > 0 && <p className="flex items-center gap-2 pb-1 text-sm text-muted-foreground"><SinalAoVivo rotulo="Ao vivo: os agentes vigiam as obras" tamanho={16} />Ao vivo · os agentes vigiam as obras</p>}
       </div>
+      {todas.length > 0 && (
+        <div className="relative mt-5">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Procurar obra: cliente, morada, serviço ou n.º"
+            aria-label="Procurar obra" className="h-11 w-full rounded-xl border border-input bg-card pl-10 pr-10 text-[15px] shadow-[var(--shadow-sm)] outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-search-cancel-button]:hidden" />
+          {q && <button type="button" onClick={() => setQ("")} aria-label="Limpar a pesquisa" className="absolute right-1.5 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-muted-foreground hover:bg-muted"><X className="h-4 w-4" aria-hidden="true" /></button>}
+        </div>
+      )}
+      {q.trim() && <p className={cn(NOTA, "mt-2")} role="status">{obras.length ? `${obras.length} ${obras.length === 1 ? "obra" : "obras"} com «${q.trim()}»` : `Nenhuma obra com «${q.trim()}».`}</p>}
       {/* 25/11: as microtarefas das obras passam às do Catálogo (só nomes e as novas) */}
-      <AtualizarMicrotarefas ctx={ctx} obras={obras} />
-      {!obras.length && <p className={cn(NOTA, "mt-8")}>Ainda não há obras. Aparecem quando o cliente assina o contrato.</p>}
+      <AtualizarMicrotarefas ctx={ctx} obras={todas} />
+      {!todas.length && <p className={cn(NOTA, "mt-8")}>Ainda não há obras. Aparecem quando o cliente assina o contrato.</p>}
       {grupos.filter(([, L]) => L.length).map(([titulo, L]) => {
         // 27/10: as concluídas num grupo fechado, para a lista ficar no que ainda está a andar
         const fechado = titulo === "Concluídas";
