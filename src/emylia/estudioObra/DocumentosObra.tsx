@@ -132,7 +132,8 @@ export function DocAberto({ ctx, d, x, fechar, imprimirLogo = false }: { ctx: Ct
           <Button type="button" variant="ghost" className="min-h-10 shrink-0" aria-label="Fechar" onClick={fechar}><X className="h-4 w-4" /></Button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
-          {tipo ? <Partilhar ctx={ctx} d={d} tipo={tipo} estado={x.estado}>{doc}</Partilhar> : doc}
+          {/* 27/11: o PDF assinado só no contrato inicial (o de uma adenda é outro documento) */}
+          {tipo ? <Partilhar ctx={ctx} d={d} tipo={tipo} estado={x.estado} semContratoReal={x.k !== "contrato"}>{doc}</Partilhar> : doc}
         </div>
         <div className="flex justify-end border-t border-border p-3">
           <Button type="button" variant="outline" size="lg" onClick={fechar}>Fechar</Button>
