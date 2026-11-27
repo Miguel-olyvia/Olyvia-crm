@@ -214,6 +214,13 @@ export function atribuirPorAtribuir(p: Plano | null | undefined): number {
 
 /** As tarefas do plano do orçamento (planoObra.ts), em dias úteis, com um técnico do ofício (o que não está de férias).
  *  22/10: o ofício é o perfil do passo da receita (pelo id); sem técnico com esse perfil, a tarefa fica por atribuir (tec null). */
+/** 27/11 (Rúben, obra Schroeder: «arranja a obra também sem técnicos, determinam isso depois»): o negócio em que o gestor escolhe os
+ *  técnicos depois (f.tecnicos_depois = "Sim"). O plano nasce sem técnicos e a proposta não espera pela agenda deles. */
+export const tecnicosDepois = (d: Pick<Negocio, "f">): boolean => d.f?.tecnicos_depois === "Sim";
+/** 27/11 (Rúben: «tens de desbloquear a obrigatoriedade de materiais antes de arrancar»): a obra arranca com materiais ainda por receber
+ *  (f.arrancar_sem_materiais = "Sim"); os que faltam ficam no plano como «por receber», nas tarefas que os usam. */
+export const arrancarSemMateriais = (d: Pick<Negocio, "f">): boolean => d.f?.arrancar_sem_materiais === "Sim";
+
 export function planoDoOrcamento(d: Negocio, S: Estado): Plano {
   const C = custosDe(S);
   // 26/11 (etapa 5): o ofício de cada tarefa, igual para a lição e para a tarefa (a chave da lição tem de ser a mesma nos dois lados)
@@ -234,12 +241,12 @@ export function planoDoOrcamento(d: Negocio, S: Estado): Plano {
     const dia = Math.floor(t.inicio), dur0 = Math.max(1, Math.ceil(t.inicio + t.dias - 1e-9) - dia);
     const sid = t.svc ?? t.chave;
     const of = oficioDe(t);
-    const tec = tecnicoDoOficio(of, plano, dia, dur0);
+    const tec = tecnicosDepois(d) ? null : tecnicoDoOficio(of, plano, dia, dur0);
     plano.tasks.push({ nome: t.nome, svcs: t.chave === "demolicao" ? [] : [sid], dia, dur: dur0, sk: of.sk, ...(of.perfilId ? { perfilId: of.perfilId } : {}), h: r2(t.h), tec, fase: t.fase, ini: r2(t.inicio), dias: r2(t.dias),
       ...(t.aprendido ? { aprendido: t.aprendido } : {}) });
   }
   // 9/11: com o dia de início, os técnicos livres (sem outra obra nesses dias, nem outra tarefa desta)
-  if (plano.inicio) escolherTecnicos(plano, ocupacaoDosTecnicos(S, d.id), escolhasDoNegocio(d.f ?? {}));
+  if (plano.inicio && !tecnicosDepois(d)) escolherTecnicos(plano, ocupacaoDosTecnicos(S, d.id), escolhasDoNegocio(d.f ?? {}));
   return plano;
 }
 
@@ -549,7 +556,7 @@ export function inicioDaProposta(d: Negocio, hoje = new Date()): { iso: string; 
 
 /** O plano da obra deste orçamento começando em `iso`, com os técnicos escolhidos e porque é que algum não está livre. */
 export function agendaNoInicio(d: Negocio, S: Estado, iso: string, ocup = ocupacaoDosTecnicos(S, d.id)): AgendaProposta | null {
-  if (!d.orc) return null;
+  if (!d.orc || tecnicosDepois(d)) return null;
   const dx = { ...d, orc: { ...d.orc, inicioObra: iso } } as Negocio;
   const plano = planoDoOrcamento(dx, S);
   if (!plano.tasks.length) return null;
@@ -686,6 +693,8 @@ export function faltaParaArrancar(d: Negocio, db?: Inventario | null, S?: Estado
     else if (!acertoDoValorPendente(d) && !retificacaoPorPagar(d)) F.push(ecNoServidor(S) ? FALTA_EC_AUTOMATICA : "emitir a encomenda de cliente");
   }
   // 19/11 (auditoria): sem a permissão das encomendas a prontidão não se lê: diz-se isso (e a quem pedir), não «a ler»
+  // 27/11: com «arrancar sem os materiais todos», os materiais por receber não seguram o arranque (ficam no plano, por receber)
+  else if (arrancarSemMateriais(d)) { /* nada: a encomenda está emitida e o resto chega com a obra a andar */ }
   else if (usarProntidao(d.obra.ec)) { const fx = faltaPorFalha(d.obra.ec.contrato); F.push(...(fx.length ? fx : faltaMateriaisReal(prontidaoDe(d.obra.ec.contrato)))); }
   else if (d.obra.ec.ref) F.push(...faltaMateriais(resumoEcNegocio(db ?? lerInventario(), d.obra.ec.ref)));
   // 12/11: o valor que as medidas ou o plano mudaram acerta-se antes de arrancar (a adenda, ou seguir sem ela)

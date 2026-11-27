@@ -35,7 +35,7 @@ import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema,
   textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, pedidoDeAtraso, textoPedidoAtraso, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
 import { comFaturaDaParcela, faltaParaAuto, nomeDaParcela, parcelaDoArranquePorPagar, parcelasDoContrato } from "./parcelas";
-import { diasQuePode, agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, FALTA_EC_AUTOMATICA, ecNoServidor, marcarEcNoServidor, retificacaoAceite, faltaMedirTexto, medicoesDe, supervisorDasMedidas, motivoOcupado, ocupacaoDosTecnicos, tecnicosDoOficio, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
+import { diasQuePode, agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, FALTA_EC_AUTOMATICA, ecNoServidor, marcarEcNoServidor, retificacaoAceite, faltaMedirTexto, medicoesDe, supervisorDasMedidas, motivoOcupado, ocupacaoDosTecnicos, tecnicosDoOficio, planoNovoDaObra, resolverConflitos, escolherTecnicos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { pedirPainelObra } from "./estudioObra/painelPedido";
 import { avisarTecnico, criarTarefa, criarTarefaInterna, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa, type NovaTarefaInterna } from "./tarefasValidador";
 import { moverNaOrdem } from "./ordemPlano";
@@ -4807,6 +4807,25 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       avisar({ msg: "Plano reposto", sub: "Como veio do orçamento", kind: "ok" });
     },
     /** O início do plano (as Operações confirmam ou mudam a data do orçamento; "aaaa-mm-dd"). */
+    /** 27/11 (Rúben: «a obra sem técnicos, determinam isso depois»): o gestor escolhe os técnicos depois. Ligado, as tarefas do plano por
+     *  aprovar ficam sem técnico e não voltam a ser escolhidas sozinhas; desligado, o plano volta a propor os técnicos livres. */
+    tecnicosDepois(id: number, on: boolean) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id), p = d.obra.plano;
+      if (on) d.f.tecnicos_depois = "Sim"; else delete d.f.tecnicos_depois;
+      if (p && p.estado === "por aprovar") {
+        if (on) { for (const t of p.tasks) if (!t.exec) t.tec = null; }
+        else if (p.inicio) escolherTecnicos(p, ocupacaoDosTecnicos(S, d.id), escolhasDoNegocio(d.f ?? {}));
+      }
+      log(d, on ? "Os técnicos da obra escolhem-se depois (o gestor de obra)" : "O plano volta a propor os técnicos livres");
+    },
+    /** 27/11 (Rúben: «desbloquear a obrigatoriedade de materiais antes de arrancar»): a obra pode arrancar com materiais por receber. */
+    arrancarSemMateriais(id: number, on: boolean) {
+      if (!exigePerm("obra.planear")) return;
+      const d = deal(id);
+      if (on) d.f.arrancar_sem_materiais = "Sim"; else delete d.f.arrancar_sem_materiais;
+      log(d, on ? "A obra pode arrancar com materiais por receber" : "A obra só arranca com os materiais garantidos");
+    },
     inicioPlano(id: number, iso: string) {
       if (!exigePerm("obra.planear")) return;
       const d = deal(id), p = d.obra.plano;

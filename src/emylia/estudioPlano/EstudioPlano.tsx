@@ -28,7 +28,7 @@ import type { Ctx } from "../pecas";
 import { NaFrente } from "../NaFrente";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
 import { dataCurta, diasDaObra, isoDia } from "../planoObra";
-import { blocosForaDaObra, inicioDoPlano, motivoOcupado, obraQueOcupa, obrasDosTecnicos, ocupacaoDosTecnicos, planoComAgendaDeHoje, retificacaoAceite, faltaMedirTexto, tecnicosDoOficio } from "../preparacaoObra";
+import { arrancarSemMateriais, tecnicosDepois, blocosForaDaObra, inicioDoPlano, motivoOcupado, obraQueOcupa, obrasDosTecnicos, ocupacaoDosTecnicos, planoComAgendaDeHoje, retificacaoAceite, faltaMedirTexto, tecnicosDoOficio } from "../preparacaoObra";
 import { NovaTarefa } from "../PlanoInterativo";
 import { pelaPermissao, podeNeg } from "../permissoes";
 import { InfoDoNegocio } from "./InfoDoNegocio";
@@ -308,6 +308,21 @@ export function EstudioPlano({ ctx, d, fechar, voltar = "Voltar ao negócio" }: 
             </div>
           </div>
           {porque && <p className="mx-auto max-w-[1500px] px-4 pb-2 text-sm text-amber-800 dark:text-amber-300 sm:px-6">{porque}</p>}
+          {/* 27/11 (Rúben, obra Schroeder): os técnicos escolhem-se depois, e a obra pode arrancar com materiais por receber */}
+          {planeia && (p.estado === "por aprovar" || p.estado === "aprovado") && (
+            <div className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-2 px-4 pb-3 sm:px-6">
+              <Button type="button" variant={tecnicosDepois(d) ? "default" : "outline"} size="sm" className="min-h-9 rounded-full" aria-pressed={tecnicosDepois(d)}
+                title="Ligado: as tarefas ficam sem técnico até o gestor os escolher; a Olyvia não os propõe sozinha"
+                onClick={() => mudar(-1, () => A.tecnicosDepois(d.id, !tecnicosDepois(d)))}>
+                {tecnicosDepois(d) ? <Check className="mr-1.5 h-4 w-4" aria-hidden="true" /> : null}Técnicos escolhidos depois
+              </Button>
+              <Button type="button" variant={arrancarSemMateriais(d) ? "default" : "outline"} size="sm" className="min-h-9 rounded-full" aria-pressed={arrancarSemMateriais(d)}
+                title="Ligado: a obra arranca com materiais ainda por receber; ficam no plano, nas tarefas que os usam"
+                onClick={() => mudar(-1, () => A.arrancarSemMateriais(d.id, !arrancarSemMateriais(d)))}>
+                {arrancarSemMateriais(d) ? <Check className="mr-1.5 h-4 w-4" aria-hidden="true" /> : null}Arrancar com materiais por receber
+              </Button>
+            </div>
+          )}
           {comAgenda && !dif.mexidas.length && planeia && (
             <div role="status" className="mx-auto flex max-w-[1500px] flex-wrap items-center gap-3 px-4 pb-3 sm:px-6">
               <p className="min-w-0 flex-1 text-[15px]"><Sparkles className="mr-1.5 inline h-4 w-4 text-primary" aria-hidden="true" />
