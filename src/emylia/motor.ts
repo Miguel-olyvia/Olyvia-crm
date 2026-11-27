@@ -12,6 +12,7 @@ import { porNaTarefa, type RetratoPlano } from "./estudioObra/passosObra";
 import { lerQuemAssina } from "./estudioObra/quemAssina";
 import { fotoPlano, guardarAlteracao, mudancasEntre, type Alteracao as AlteracaoPlano, type FotoPlano } from "./historicoPlano";
 import type { AcaoAuto, AgenteId, Degrau, EstadoAgentes } from "./estudioObra/agentes";
+import { fraseDaTarefaNova, irParaMateriais } from "./estudioObra/materiaisTarefasNovas";
 import { MOTIVO_QUEM_PAGA, aplicarNoPlano, custoDaHora, guardarAjuste, impactoAjuste, type AjusteAdenda, type AjusteObra, type ImpactoAjuste } from "./estudioObra/quemPaga";
 import { aplicarAjuste, aplicarCorrecao, instrucoesDe, preverAjuste, textoAvisoCliente, type Alteracao, type AjusteVivo, type Envio } from "./trabalhoObra";
 import { itemCatalogo, normal as normalUn } from "./catalogo";
@@ -2588,7 +2589,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
   };
   const descontoValido = (x?: number) => (x != null && Number.isFinite(x) && x > 0 ? Math.min(100, r2(x)) : 0);
   /** 21/10: a encomenda de ajuste com os materiais novos do plano (encomendasAjuste.ts), o registo e o aviso. Devolve se emitiu. */
-  const ajustar = (d: Negocio, motivo: string, adenda?: string): boolean => {
+  // 27/11: `calado`: a tarefa nova faz um aviso só (a tarefa e o que falta, com «Ver nos Materiais»); os outros ajustes avisam aqui
+  const ajustar = (d: Negocio, motivo: string, adenda?: string, calado = false): boolean => {
     // 30/10: na Olyvia (a encomenda de cliente da base), os materiais novos vão à encomenda a fornecedor da base, pendente para Compras
     const real = ajusteReal(d, motivo, adenda);
     if (real) {
@@ -2612,9 +2614,19 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
     const partes = [r.reservadas ? `${r.reservadas} reservado${r.reservadas === 1 ? "" : "s"} do stock` : "", r.aFornecedor ? `${r.aFornecedor} ao fornecedor${r.chegada ? `, chega a ${r.chegada.slice(8, 10)}/${r.chegada.slice(5, 7)}` : ""}` : ""].filter(Boolean);
     log(d, `Encomenda de ajuste ${r.ec.n} emitida no Inventário (${motivo}): ${r.ec.linhas.map((x) => `${x.n} × ${x.q} ${x.un}`).join(", ")}${partes.length ? " · " + partes.join(" · ") : ""}`);
     for (const t of r.adiadas) log(d, `Plano: ${t.nome} passa para ${rotuloDia(p, t.dia)}, depois de os materiais chegarem`, "w");
+    if (calado) return true;
     avisar({ msg: `Encomenda ${r.ec.n} no Inventário`, sub: `${n} ${n === 1 ? "material novo" : "materiais novos"}${partes.length ? " · " + partes.join(" · ") : ""}${r.adiadas.length ? ` · ${r.adiadas.map((t) => t.nome).join(", ")} passa${r.adiadas.length > 1 ? "m" : ""} para ${rotuloDia(p, r.adiadas[0].dia)}` : ""}`,
       kind: "auto", atraso: 400, act: { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(d.id)) } });
     return true;
+  };
+  /** 27/11 (Rúben: «ver em destaque o que falta, link para ver o detalhe»): o aviso de uma tarefa juntada ao plano diz logo o que ela
+   *  precisa e o que falta (por encomendar, por aprovar ao fornecedor, à espera da adenda paga) e leva ao separador Materiais do Estúdio
+   *  da obra, onde está em destaque. Sem o Estúdio aberto, leva ao Inventário (a encomenda de ajuste), como antes. */
+  const avisoTarefaNova = (d: Negocio, t: Tarefa, base: { msg: string; sub: string }) => {
+    const inv = d.obra.ec?.ref ? resumoEcNegocio(lerInventario(), d.obra.ec.ref) : null;
+    const frase = fraseDaTarefaNova(d, t, inv), ir = irParaMateriais();
+    const act = !frase ? undefined : ir ? { label: "Ver nos Materiais", fn: () => ir(t.nome) } : d.obra.ec?.ref ? { label: "Ver no Inventário", fn: () => run(() => A.abrirInv(d.id)) } : undefined;
+    avisar({ msg: base.msg, sub: frase ? `${base.sub} · ${frase}` : base.sub, kind: "ok", ...(act ? { act } : {}) });
   };
   /** 21/10 (decisão B): as encomendas das adendas com o pagamento validado e materiais por encomendar, uma por adenda, ligadas a ela.
    *  Sem encomenda inicial não faz nada (emitirEc chama-a logo a seguir). Devolve quantas emitiu. */
@@ -3831,12 +3843,14 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       pedirRota({ mod: "inv", aba: "guia", ...o });
       S.view = "inventario"; S.deal = null;
     },
-    abrirInv(id?: number) {
+    /** 27/11: `ecN`: uma encomenda de ajuste do negócio (EC-<id>-A<k>, a de uma tarefa nova) em vez da inicial. */
+    abrirInv(id?: number, ecN?: string) {
       const ec = id != null ? S.deals.find((x) => x.id === id)?.obra.ec : null, o = origemAtual(S);
       // F3: as Encomendas de cliente reais, abertas na deste negócio
       if (real) { real.abrir(ec?.contrato ? "ec" : "inventario", ec?.contrato ?? null); return; }
-      if (ec?.ref) pedirAbrirEcInv(ec.n);
-      pedirRota({ mod: "inv", aba: "ec", q: ec?.ref ? ec.n : "", det: ec?.ref ? "ec:" + ec.n : "", ...o });
+      const n = ec?.ref ? ecN ?? ec.n : "";
+      if (n) pedirAbrirEcInv(n);
+      pedirRota({ mod: "inv", aba: "ec", q: n, det: n ? "ec:" + n : "", ...o });
       S.view = "inventario"; S.deal = null;
     },
     /** 26/10: uma lista do Inventário já filtrada (o "Hoje": "2 encomendas ao fornecedor atrasadas" abre só essas). */
@@ -4458,8 +4472,10 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const t = fazerAjuste(d, aj, I, { horas, paga: "empresa", custo, nota: m.nota, cliente: m.cliente });
       if (!t) return false;
       // a tarefa nova paga por nós: os materiais vão já numa encomenda de ajuste (como as tarefas novas do gestor)
-      if (aj.k === "nova") ajustar(d, "tarefa nova " + t.nome);
-      avisar({ msg: "Plano ajustado", sub: `Paga a empresa${custo ? `: ${eur(custo)} € a menos na margem` : ""}${m.cliente ? " · o cliente vê a data nova no portal" : ""}`, kind: "ok" });
+      if (aj.k === "nova") ajustar(d, "tarefa nova " + t.nome, undefined, true);
+      const subAj = `Paga a empresa${custo ? `: ${eur(custo)} € a menos na margem` : ""}${m.cliente ? " · o cliente vê a data nova no portal" : ""}`;
+      if (aj.k === "nova") avisoTarefaNova(d, t, { msg: "Tarefa juntada ao plano", sub: subAj });
+      else avisar({ msg: "Plano ajustado", sub: subAj, kind: "ok" });
       return true;
     },
     /** 12/11 (Rúben: «isto deve ser só um "está certo?" e ele clica ok ou reagenda»): o gestor confirma o fim da obra como está (`dias` úteis
@@ -4519,8 +4535,8 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       const tec = TECS.find((x) => x.id === t.tec);
       log(d, `Plano: tarefa nova · ${t.nome} (fase ${t.fase ?? "—"}, ${t.dur} ${t.dur === 1 ? "dia" : "dias"}${tec ? ", " + tec.n : ""})`);
       // 21/10: os materiais da tarefa nova vão já numa encomenda de cliente de ajuste (e a tarefa espera por eles)
-      ajustar(d, "tarefa nova " + t.nome);
-      if (!A.planoMudou(d)) avisar({ msg: "Tarefa juntada ao plano", sub: `${t.nome} · ${rotuloDia(p, t.dia)}`, kind: "ok" });
+      ajustar(d, "tarefa nova " + t.nome, undefined, true);
+      if (!A.planoMudou(d)) avisoTarefaNova(d, t, { msg: "Tarefa juntada ao plano", sub: `${t.nome} · ${rotuloDia(p, t.dia)}` });
       return ti;
     },
     moverTarefaPlano(id: number, ti: number, m: { fase?: number; dia?: number }) {

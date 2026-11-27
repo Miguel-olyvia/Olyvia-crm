@@ -178,7 +178,8 @@ export function equipamentosDaObra(p: Plano): Equip[] {
 /* ------------------------------------------------------------------ os materiais, por fase */
 export type EstadoMat = "na obra" | "na carrinha" | "reservado" | "recebido" | "a chegar" | "encomendado" | "por encomendar" | "em falta";
 export interface Mat { n: string; q: number; un: string; estado: EstadoMat; quando?: string; forn?: string;
-  /** 23/11: a data prometida pelo fornecedor (ISO), para comparar com o dia da tarefa que precisa do material */ chega?: string }
+  /** 23/11: a data prometida pelo fornecedor (ISO), para comparar com o dia da tarefa que precisa do material */ chega?: string;
+  /** 27/11: a encomenda de ajuste de onde vem (EC-<id>-A<k>), nas linhas das tarefas novas; sem ela, é da encomenda inicial */ ec?: string }
 /** A fase em que o material entra, só pelo nome. 02/11: mora em fasesObra.ts (a regra única); fica aqui para os imports de sempre. */
 export { faseDoMaterial };
 
@@ -217,7 +218,13 @@ export function materiaisPorFase(d: Negocio, inv?: ResumoEcNeg | null, lidas?: r
   // 09/11: `lidas`: as linhas de obra_materiais_ler (real/materiaisObraReal.ts), para quem não vê as encomendas de cliente; `inv` é o resumo delas
   // 23/11 (Rúben, no 1015: «Sem materiais na encomenda desta obra», com a EC emitida e as compras recebidas): a encomenda emitida no
   // servidor chega à obra sem linhas (d.obra.ec.linhas vazio); as linhas são as da encomenda lida da base (`inv`, encomendaReal.ts)
-  const daObra = d.obra.ec?.linhas.length ? d.obra.ec.linhas.map((x) => ({ id: x.id, n: x.n, q: x.q, un: x.un, falta: x.falta })) : null;
+  // 27/11 (Rúben: «adicionar novas tarefas … atualizar a tab de materiais»): com as linhas das encomendas de ajuste (as tarefas novas, as
+  // adendas, os materiais mudados à mão), cada uma com a sua encomenda (o estado lê-se na linha dela no Inventário). Antes só a inicial.
+  const ajustes = (d.obra.ecsAjuste ?? []).filter((a) => !a.anulada);
+  const daObra = d.obra.ec?.linhas.length ? [
+    ...d.obra.ec.linhas.map((x) => ({ id: x.id, n: x.n, q: x.q, un: x.un, falta: x.falta } as { id?: string | null; n: string; q: number; un: string; falta: number; ec?: string })),
+    ...ajustes.flatMap((a) => a.linhas.map((x) => ({ id: x.id, n: x.n, q: x.q, un: x.un, falta: x.falta, ec: a.n }))),
+  ] : null;
   const daBase = !daObra && inv?.linhas.length ? inv.linhas.map((l) => ({ id: undefined, n: l.n, q: l.q, un: l.un, falta: Math.max(0, l.q - l.pronto - l.saida), ec: l.ec })) : null;
   const linhas: { id?: string | null; n: string; q: number; un: string; falta: number; ec?: string }[] = lidas ? [...lidas]
     : daObra ?? daBase ?? d.obra.mats?.map((x) => ({ id: undefined, n: x.n, q: x.q, un: x.un, falta: x.falta })) ?? [];
@@ -233,7 +240,8 @@ export function materiaisPorFase(d: Negocio, inv?: ResumoEcNeg | null, lidas?: r
       quando = estado === "a chegar" && pr ? `${pr.slice(8, 10)}/${pr.slice(5, 7)}` : undefined;
     } else if (x.falta > 0) estado = d.obra.ec?.ref ? "por encomendar" : "em falta";
     const chega = li?.pos.find((p) => p.prometida)?.prometida ?? undefined;
-    return { n: x.n, q: x.q, un: x.un, estado, quando, forn, ...(chega && estado === "a chegar" ? { chega } : {}), fase: faseNaObra(F, x) };
+    const ecAj = x.ec && ajustes.some((a) => a.n === x.ec) ? x.ec : undefined;
+    return { n: x.n, q: x.q, un: x.un, estado, quando, forn, ...(chega && estado === "a chegar" ? { chega } : {}), ...(ecAj ? { ec: ecAj } : {}), fase: faseNaObra(F, x) };
   });
   return [1, 2, 3, 4].map((f) => ({ fase: f, itens: itens.filter((x) => x.fase === f).map(({ fase: _f, ...m }) => m) })).filter((g) => g.itens.length);
 }

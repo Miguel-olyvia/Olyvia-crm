@@ -9,7 +9,7 @@
 //  · FechoDaObra: o que falta para fechar, a segurança, a vistoria e o auto, e encerrar.
 import { useMemo, useRef, useState, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
-import { AlertTriangle, ArrowUpRight, CalendarClock, Camera, Check, CheckCircle2, ChevronRight, Clock, Minus, Package, Pause, Play, Plus, RotateCcw, Scissors, Send, ShieldCheck, TrendingUp, Undo2, Users, X } from "lucide-react";
+import { AlertTriangle, ArrowUpRight, CalendarClock, Wrench, Camera, Check, CheckCircle2, ChevronRight, Clock, Minus, Package, Pause, Play, Plus, RotateCcw, Scissors, Send, ShieldCheck, TrendingUp, Undo2, Users, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { TECS, eur, nfmt, type MatTarefa, type Negocio, type Plano, type Tarefa } from "../motor";
@@ -17,7 +17,8 @@ import type { Ctx } from "../pecas";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
 import { dataCurta } from "../planoObra";
 import { blocosForaDaObra, motivoOcupado, obrasDosTecnicos, ocupacaoDosTecnicos, tecnicosDoOficio } from "../preparacaoObra";
-import { materiaisPorFase, seguranca } from "../obraOps";
+import { equipamentosDaObra, materiaisPorFase, seguranca } from "../obraOps";
+import { ROTULO_MAT_NOVO, emFalta, materiaisDasTarefasNovas, resumoFalta, type EstadoMatNovo, type MatDaTarefaNova } from "./materiaisTarefasNovas";
 import { enviosDe, TEMPOS_CORRECAO } from "../trabalhoObra";
 import { pontosEncerrar } from "../encerrarObra";
 import { emCurso } from "../adendas";
@@ -336,12 +337,34 @@ export function quemPrecisa(d: Negocio, fase: number, nome: string): { ti: numbe
 const isoDe = (x: Date) => `${x.getFullYear()}-${String(x.getMonth() + 1).padStart(2, "0")}-${String(x.getDate()).padStart(2, "0")}`;
 const ROTULO_MAT: Record<string, string> = { reservado: "no armazém", recebido: "no armazém", "na obra": "na obra", "na carrinha": "na carrinha" };
 
-export function MateriaisDaObra({ ctx, d, dias = [] }: { ctx: Ctx; d: Negocio; dias?: Date[] }) {
+/** 27/11: o chip de cada estado do que falta (âmbar: há um passo a dar; vermelho: está parado; neutro: à espera de outra coisa). */
+const TOM_NOVO: Record<EstadoMatNovo, string> = {
+  "por encomendar": "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200", "sem fornecedor": "bg-destructive/10 text-destructive",
+  "por aprovar": "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200", encomendado: "bg-primary/10 text-primary", "a chegar": "bg-primary/10 text-primary",
+  "espera adenda": "bg-muted text-muted-foreground", "espera inicial": "bg-muted text-muted-foreground", garantido: "bg-success/15 text-success",
+};
+
+/** `abrir`: abre o painel da tarefa; `irAba`: muda de separador (a adenda está no Cliente); `realce`: a tarefa acabada de juntar (27/11). */
+export function MateriaisDaObra({ ctx, d, dias = [], abrir, irAba, realce }: { ctx: Ctx; d: Negocio; dias?: Date[]; abrir?: (ti: number) => void; irAba?: (a: "cliente") => void; realce?: string | null }) {
   const { S, A, run } = ctx;
   const db = useInventario();
   const inv = d.obra.ec?.ref ? resumoEcNegocio(db, d.obra.ec.ref) : null;
   const p = d.obra.plano!;
   const G = materiaisPorFase(d, inv);
+  // 27/11 (Rúben: «adicionar novas tarefas … ver em destaque o que falta, link para ver o detalhe»): os materiais das tarefas novas (e
+  // das de materiais mudados à mão) que ainda não estão garantidos, por tarefa, em cima de tudo, com o passo seguinte de cada um
+  const novos = materiaisDasTarefasNovas(d, inv), F = emFalta(novos), RF = resumoFalta(d, novos);
+  const garantidosNovos = novos.length - F.length;
+  const porTarefa = [...new Set(F.map((x) => x.ti))].map((i) => ({ ti: i, L: F.filter((x) => x.ti === i) })).sort((a, b) => p.tasks[a.ti].dia - p.tasks[b.ti].dia);
+  // os equipamentos de aluguer que uma tarefa nova pede fora dos dias em que já estavam alugados (para as tarefas do contrato) também
+  // entram no destaque: é mais um aluguer a tratar (não há reserva de aluguer no sistema; fica a pergunta no resumo de 27/11)
+  const E = equipamentosDaObra(p), nomesNovas = new Set(p.tasks.filter((t) => t.nova).map((t) => t.nome));
+  const alugarNovos = E.filter((e) => e.origem === "Aluguer").flatMap((e) => {
+    const ts = p.tasks.filter((t) => e.tarefas.includes(t.nome) && t.exec?.estado !== "validada"), velhas = ts.filter((t) => !t.nova);
+    const ini = Math.min(...velhas.map((t) => t.dia)), fim = Math.max(...velhas.map((t) => t.dia + t.dur));
+    const fora = ts.filter((t) => t.nova && (!velhas.length || t.dia < ini || t.dia + t.dur > fim));
+    return fora.length ? [{ ...e, tarefas: fora.map((t) => t.nome), dia: Math.min(...fora.map((t) => t.dia)), fim: Math.max(...fora.map((t) => t.dia + t.dur)) }] : [];
+  });
   const todos = G.flatMap((g) => g.itens), ok = todos.filter((m) => OK_MAT.has(m.estado)).length;
   const planeia = podeNeg(S.role, "obra.planear");
   const [ti, setTi] = useState<number | null>(null);
@@ -352,7 +375,9 @@ export function MateriaisDaObra({ ctx, d, dias = [] }: { ctx: Ctx; d: Negocio; d
   const cPend = custo(pend), cSobra = custo(sobra);
   // a tarefa que precisa de cada material, o dia dela e se o material chega tarde
   const linhaDe = (fase: number, m: (typeof todos)[number]) => {
-    const q = quemPrecisa(d, fase, m.n), tt = q.ti != null ? p.tasks[q.ti] : null, dia = tt ? dias[tt.dia] : undefined;
+    // 27/11: a linha de uma encomenda de ajuste é da tarefa que a pediu (antes, a primeira tarefa da fase)
+    const daEc = m.ec ? p.tasks.findIndex((t) => !!t.ecs?.includes(m.ec!) && (t.mats ?? []).some((x) => x.n === m.n)) : -1;
+    const q = daEc >= 0 ? { ti: daEc, contrato: true } : quemPrecisa(d, fase, m.n), tt = q.ti != null ? p.tasks[q.ti] : null, dia = tt ? dias[tt.dia] : undefined;
     return { ti: q.ti, t: tt, contrato: q.contrato, precisa: dia ? dataCurta(dia) : tt ? `dia ${tt.dia + 1}` : "", tarde: !!(m.chega && dia && m.chega > isoDe(dia)) };
   };
   const tarde = G.flatMap((g) => g.itens.filter((m) => linhaDe(g.fase, m).tarde));
@@ -369,8 +394,81 @@ export function MateriaisDaObra({ ctx, d, dias = [] }: { ctx: Ctx; d: Negocio; d
     }
     return [...M.values()].sort((a, b) => a.dia - b.dia);
   })();
+  // o link de cada linha: a encomenda de ajuste no Inventário, as compras da obra (o que vai ao fornecedor) ou a adenda
+  const link = (x: MatDaTarefaNova): { rot: string; fn: () => void } | null => {
+    if (x.estado === "espera adenda") return irAba ? { rot: "Ver a adenda", fn: () => irAba("cliente") } : null;
+    if (x.estado === "por aprovar" || x.estado === "encomendado" || x.estado === "a chegar" || x.estado === "sem fornecedor") return { rot: "Ver a compra", fn: () => run(() => A.abrirComprasObra(d.id)) };
+    if (x.ec) return { rot: `Ver ${x.ec}`, fn: () => run(() => A.abrirInv(d.id, x.ec)) };
+    return null;
+  };
+  const precisaA = (t: Tarefa) => (dias[t.dia] ? dataCurta(dias[t.dia]) : `dia ${t.dia + 1}`);
+  const quandoE = (k: number) => (dias[k] ? dataCurta(dias[k]) : `dia ${k + 1}`);
   return (
     <div className="space-y-6">
+      {(F.length > 0 || alugarNovos.length > 0) && (
+        <section aria-label="Falta para as tarefas novas" className="space-y-3 rounded-2xl border border-amber-300 bg-amber-50/60 p-4 dark:border-amber-800 dark:bg-amber-950/20">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex min-w-0 items-start gap-3">
+              <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-700" aria-hidden="true" />
+              <div className="min-w-0">
+                <p className="text-sm font-semibold">Falta para as tarefas novas</p>
+                <p className="text-sm text-muted-foreground">{[RF.frase, alugarNovos.length ? `${alugarNovos.length} ${alugarNovos.length === 1 ? "equipamento" : "equipamentos"} a alugar` : "", garantidosNovos ? `${garantidosNovos} já ${garantidosNovos === 1 ? "garantido" : "garantidos"}` : ""].filter(Boolean).join(" · ")}</p>
+              </div>
+            </div>
+            {/* o passo seguinte: encomendar o que ainda não foi a nenhuma encomenda (o caminho de sempre: a encomenda de ajuste) */}
+            {planeia && RF.podeEncomendar && (
+              <Button type="button" className="min-h-10 rounded-full" onClick={() => run(() => A.encomendarMateriais(d.id))}>
+                <Package className="mr-1.5 h-4 w-4" aria-hidden="true" />Encomendar {RF.porEncomendar === 1 ? "1 material" : `${RF.porEncomendar} materiais`}
+              </Button>
+            )}
+          </div>
+          {RF.porEncomendar > 0 && !RF.podeEncomendar && (
+            <p className="text-sm text-muted-foreground">{d.obra.ec ? "A encomenda de cliente desta obra não está no Inventário: estes materiais pedem-se lá, à mão." : "Saem com a encomenda de cliente, quando o pagamento for validado."}</p>
+          )}
+          <ul className="space-y-2">
+            {porTarefa.map(({ ti: i, L }) => {
+              const t = p.tasks[i], cor = COR_FASE[t.fase ?? 1], Ic = iconeDaTarefa(t.nome);
+              return (
+                <li key={i} role="group" aria-label={`Tarefa ${t.nome}`} className={cn("overflow-hidden rounded-xl bg-card ring-1 ring-border", realce === t.nome && "ring-2 ring-primary")}>
+                  <div className="flex flex-wrap items-center gap-2.5 border-b border-border px-3 py-2">
+                    <span aria-hidden="true" className="grid h-7 w-7 shrink-0 place-items-center rounded-full text-white" style={{ background: cor }}><Ic className="h-3.5 w-3.5" /></span>
+                    <span className="min-w-0 flex-1">
+                      {abrir ? <button type="button" title={t.nome} onClick={() => abrir(i)} className="block max-w-full truncate text-left text-sm font-semibold underline-offset-2 hover:underline">{nomeCurtoTarefa(t.nome)}</button>
+                        : <span title={t.nome} className="block truncate text-sm font-semibold">{nomeCurtoTarefa(t.nome)}</span>}
+                      <span className="block text-xs text-muted-foreground">Fase {t.fase ?? 1} · {FASES_OBRA[(t.fase ?? 1) - 1]?.curto} · precisa a {precisaA(t)}{t.nova ? "" : " · materiais mudados"}</span>
+                    </span>
+                  </div>
+                  <ul>
+                    {L.map((x, k) => {
+                      const l = link(x), tarde = !!(x.chega && dias[t.dia] && x.chega > isoDe(dias[t.dia]));
+                      return (
+                        <li key={k} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-border px-3 py-2 last:border-b-0">
+                          <span className="min-w-0 flex-1 text-sm"><b className="font-medium">{x.n}</b> <span className="text-muted-foreground">· {nfmt(x.q)} {x.un}</span>
+                            {tarde && <span className="block text-xs font-medium text-destructive">Chega a {x.chega!.slice(8, 10)}/{x.chega!.slice(5, 7)}, depois de a tarefa começar</span>}
+                          </span>
+                          <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", tarde ? "bg-destructive/10 text-destructive" : TOM_NOVO[x.estado])}>
+                            {x.estado === "a chegar" && x.chega ? `chega a ${x.chega.slice(8, 10)}/${x.chega.slice(5, 7)}` : x.estado === "espera adenda" && x.adenda ? `à espera da ${x.adenda} paga` : ROTULO_MAT_NOVO[x.estado]}
+                          </span>
+                          {l && <button type="button" onClick={l.fn} className="inline-flex min-h-9 shrink-0 items-center gap-1 rounded-full px-2 text-xs font-medium text-primary hover:bg-primary/[0.08]">{l.rot}<ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" /></button>}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </li>
+              );
+            })}
+            {alugarNovos.map((e) => (
+              <li key={e.n} className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded-xl bg-card px-3 py-2 text-sm ring-1 ring-border">
+                <Wrench className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                <span className="min-w-0 flex-1"><b className="font-medium">{e.n}</b> <span className="text-muted-foreground">· aluguer{e.de ? ` a ${e.de}` : ""} · {e.tarefas.map(nomeCurtoTarefa).join(", ")}</span></span>
+                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-900/30 dark:text-amber-200">alugar de {quandoE(e.dia)} a {quandoE(e.fim - 1)}</span>
+              </li>
+            ))}
+          </ul>
+          {RF.porEncomendar > 0 && RF.podeEncomendar && <p className="text-xs text-muted-foreground">Ao encomendar, o que houver no armazém fica reservado; o resto vai ao fornecedor, por aprovar no Inventário. As tarefas esperam pela chegada.</p>}
+        </section>
+      )}
+
       <section aria-label="O que chegou e o que falta" className="space-y-3">
         <div className="flex flex-wrap items-end justify-between gap-2">
           <div>
@@ -423,6 +521,34 @@ export function MateriaisDaObra({ ctx, d, dias = [] }: { ctx: Ctx; d: Negocio; d
         </div>
       </section>
 
+      {/* 27/11 (Rúben: «atualizar a tab de materiais e equipamentos»): os equipamentos só se viam no Hoje do técnico. Aqui, os da obra
+          toda: de onde vêm (armazém, aluguer, Frota), em que dias e para que tarefas; os das tarefas novas marcados */}
+      {E.length > 0 && (
+        <section aria-label="Equipamentos" className="space-y-3">
+          <div>
+            <p className="text-sm font-semibold">Equipamentos</p>
+            <p className="text-sm text-muted-foreground">Do armazém, alugados ou da Frota, nos dias das tarefas que os usam.</p>
+          </div>
+          <ul className="grid gap-2 lg:grid-cols-2">
+            {E.map((e) => {
+              const nova = e.tarefas.some((x) => nomesNovas.has(x));
+              return (
+                <li key={e.n} className={cn("flex items-start gap-3 rounded-2xl border bg-card p-3", nova ? "border-primary/40" : "border-border")}>
+                  <Wrench className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-medium">{e.n}{nova && <span className="ml-1.5 rounded-full bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary">tarefa nova</span>}</span>
+                    <span className="block text-xs text-muted-foreground">{quandoE(e.dia)}{e.fim - 1 > e.dia ? ` a ${quandoE(e.fim - 1)}` : ""} · {e.tarefas.map(nomeCurtoTarefa).join(", ")}</span>
+                  </span>
+                  <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-xs font-medium", e.origem === "Aluguer" ? "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-200" : "bg-muted text-muted-foreground")}>
+                    {e.origem === "Aluguer" ? `aluguer${e.de ? ` · ${e.de}` : ""}` : e.origem === "Frota" ? "Frota" : "armazém"}
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
+
       {/* 23/11 (revisão: «a saída do armazém para a obra»): no dia de cada tarefa, o que sai do armazém e quem o leva */}
       {saidas.length > 0 && (
         <section aria-label="Saídas para a obra" className="space-y-3">
@@ -466,11 +592,12 @@ export function MateriaisDaObra({ ctx, d, dias = [] }: { ctx: Ctx; d: Negocio; d
               <EditorMateriais mats={t.mats ?? materiaisDaTarefa(t, S.svc)} mudar={(m) => run(() => A.matsTarefa(d.id, ti, m))} />
             </div>
           )}
+          {/* 27/11: o que se pede a mais está em destaque em cima («Falta para as tarefas novas»), com o botão de encomendar; aqui fica o
+              custo, para quem está a mudar as quantidades, e o que volta ao armazém */}
           {(pend.length > 0 || sobra.length > 0) && (
             <div className="space-y-2 rounded-xl bg-muted/50 p-3 text-sm">
-              {pend.length > 0 && <p><b className="font-medium">A pedir:</b> {pend.map((x) => `${x.m.n} +${nfmt(x.q)} ${x.m.un}`).join(", ")} <span className="text-muted-foreground">· custo +{eur(cPend)} €</span></p>}
+              {pend.length > 0 && <p><b className="font-medium">A pedir:</b> {pend.map((x) => `${x.m.n} +${nfmt(x.q)} ${x.m.un}`).join(", ")} <span className="text-muted-foreground">· custo +{eur(cPend)} € · em destaque em cima</span></p>}
               {sobra.length > 0 && <p><b className="font-medium">Volta ao armazém:</b> {sobra.map((x) => `${x.m.n} −${nfmt(x.q)} ${x.m.un}`).join(", ")} <span className="text-muted-foreground">· −{eur(cSobra)} €</span></p>}
-              {pend.length > 0 && <Button type="button" variant="outline" className="min-h-10 rounded-full" onClick={() => run(() => A.encomendarMateriais(d.id))}><Package className="mr-1.5 h-4 w-4" aria-hidden="true" />Encomendar o que falta</Button>}
             </div>
           )}
         </section>

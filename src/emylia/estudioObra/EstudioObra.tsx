@@ -46,6 +46,7 @@ import { EstudioPlano, PainelTarefa } from "../estudioPlano/EstudioPlano";
 import { NovaTarefa } from "../PlanoInterativo";
 import { porqueNaoMexe, TECS } from "../motor";
 import { ausenteNoRh } from "../equipa/tecnicos";
+import { definirIrMateriais, materiaisDasTarefasNovas } from "./materiaisTarefasNovas";
 import { DispersaoDaEquipa, Aba, ClienteDaObra, EquipaDaObra, Execucao, ExecucaoTarefa, FechoDaObra, MateriaisDaObra } from "./PaineisObra";
 import { AgendaEquipa, ComandoHoje, DiarioObra, FechoVivo, PontoDaSemana, PrevisaoViva, Pulso, precisaDeTi, obraViva, type Ir } from "./ComandoObra";
 import { ROTULO_VIVO, fimFeito, comLigacao, comRestricao, naoCabem, conflitosNovos, ligacoesDoPlano, nomeCurtoTarefa, nomeNoPlano, porqueNaoLigar, rotuloVivo, dataDoDia, derrapagem, diasDeAtraso, estadoVivo, feitoDe, replanear, replanoDe, simularAtraso, type ConflitoFora, type EstadoVivo, type Replano } from "./planoVivo";
@@ -296,6 +297,15 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
     }
     fechar(mexeu.current);
   };
+  // 27/11 (Rúben: «adicionar novas tarefas … ver em destaque o que falta»): o aviso de uma tarefa juntada («Ver nos Materiais») traz o
+  // gestor ao separador Materiais, ao destaque «Falta para as tarefas novas», com a tarefa realçada. O motor chama-o pelo registo.
+  const [realceMat, setRealceMat] = useState<string | null>(null);
+  const irMateriaisRef = useRef<(tarefa?: string) => void>(() => {});
+  irMateriaisRef.current = (tarefa) => {
+    setPainel(null); setRealceMat(tarefa ?? null); setAbaSo("materiais");
+    window.setTimeout(() => rolarNoEstudio(document.querySelector('[aria-label="Falta para as tarefas novas"]') ?? abaRef.current, reduzirRef.current), 120);
+  };
+  useEffect(() => { definirIrMateriais((x) => irMateriaisRef.current(x)); return () => definirIrMateriais(null); }, []);
   const [vista, setVista] = useState<"gantt" | "tecnicos">("gantt");
   const [verAlertas, setVerAlertas] = useState(false);
   const obras = useMemo(() => obrasDosTecnicos(S, d.id), [S, d.id, S.deals, painel, passos.current.pos, passos.current.L.length]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -418,7 +428,8 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
   const abrirImprevisto = (x: ImprevistoInicial) => { setPrevia(null); setPainel({ k: "imprevisto", ti: x.ti, inicial: x }); };
   const n = {
     execucao: p.tasks.filter((t) => ["feita", "atrasada", "corrigir"].includes(estadoVivo(t, p))).length,
-    materiais: alertas.filter((x) => x.id.startsWith("mat-")).length,
+    // 27/11: e os materiais das tarefas novas por encomendar ou sem fornecedor (o destaque do separador)
+    materiais: alertas.filter((x) => x.id.startsWith("mat-")).length + materiaisDasTarefasNovas(d, inv).filter((x) => x.estado === "por encomendar" || x.estado === "sem fornecedor").length,
     equipa: alertas.filter((x) => x.id.startsWith("conflito-") || x.id.startsWith("sem-")).length,
     cliente: (d.obra.chat ?? []).filter((m) => m.de === "cliente" && !m.lida).length + (d.adendas ?? []).filter((a) => a.estado === "enviada" || a.estado === "recusada").length,
     fecho: vivo ? falta.length : 0,
@@ -445,6 +456,9 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
       case "avisarCliente": fazer(() => A.avisarClienteObra(d.id, a.texto)); break;
       case "fecharBuraco": { let r = 0; fazer(() => { r = A.fecharBuraco(d.id, a.ini, a.fim); }); if (!r && a.ti != null) setPainel({ k: "tarefa", ti: a.ti }); break; }
       // 27/11 (agentes): passar a tarefa que travava a um colega livre e antecipar o resto, de uma vez
+      // 27/11 (agentes, tudo dentro do Estúdio): adiar até o técnico estar livre; puxar uma tarefa para dias em que a obra ficava parada
+      case "adiar": mudar(a.ti, () => A.adiar(d.id, a.ti)); break;
+      case "puxar": mudar(a.ti, () => A.ajustarTarefa(d.id, a.ti, { dia: a.dia })); break;
       case "passarEAntecipar": { let r = 0; fazer(() => { r = A.passarEAntecipar(d.id, a.ti, a.tec, a.ini, a.fim); }); if (!r) setPainel({ k: "tarefa", ti: a.ti }); break; }
       case "conversa": setAba("cliente"); break;
       case "aceitarFim": fazer(() => A.aceitarFimObra(d.id, a.dias)); break;
@@ -648,7 +662,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
                   </>}
                   {aba === "execucao" && <Execucao ctx={ctx} d={d} dias={dias} abrir={(ti) => setPainel({ k: "tarefa", ti })} />}
                   {aba === "diario" && <DiarioObra d={d} ir={ir} dias={dias} />}
-                  {aba === "materiais" && <MateriaisDaObra ctx={ctx} d={d} dias={dias} />}
+                  {aba === "materiais" && <MateriaisDaObra ctx={ctx} d={d} dias={dias} abrir={(ti) => setPainel({ k: "tarefa", ti })} irAba={(x) => setAba(x)} realce={realceMat} />}
                   {aba === "equipa" && <DispersaoDaEquipa ctx={ctx} d={d} />}
                   {aba === "equipa" && <AgendaEquipa ctx={ctx} d={d} dias={dias} ir={ir} />}
                   {aba === "equipa" && <EquipaDaObra ctx={ctx} d={d} dias={dias} abrirOutra={setOutra} abrir={(ti) => setPainel({ k: "tarefa", ti })} novaPara={(tec) => setPainel({ k: "nova", inicial: { tec, dia: vivo ? p.dia : undefined } })} />}

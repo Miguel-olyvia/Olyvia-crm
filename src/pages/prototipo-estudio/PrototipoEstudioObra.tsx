@@ -6,12 +6,18 @@ import { Button } from "@/components/ui/button";
 import { acoes } from "@/emylia/motor";
 import type { Ctx } from "@/emylia/pecas";
 import { EstudioObra } from "@/emylia/estudioObra/EstudioObra";
-import { obraDeExemplo } from "@/emylia/estudioObra/exemploObra";
+import { encomendaDeExemploNoInventario, obraDeExemplo } from "@/emylia/estudioObra/exemploObra";
 import "@/emylia/prototipo.css";
 import { EnderecoAtivo } from "@/emylia/usarParamUrl";
 
 export default function PrototipoEstudioObra() {
-  const { S, d } = useMemo(obraDeExemplo, []);
+  // 27/11: com «?inventario» no endereço, a encomenda da obra vai ao Inventário (em memória), para as tarefas novas se encomendarem
+  // como numa obra a sério (o separador Materiais, «Falta para as tarefas novas»). Sem ele, a obra de exemplo de sempre.
+  const { S, d } = useMemo(() => {
+    const x = obraDeExemplo();
+    if (new URLSearchParams(window.location.search).has("inventario")) encomendaDeExemploNoInventario(x.d);
+    return x;
+  }, []);
   const [, redesenhar] = useReducer((x: number) => x + 1, 0);
   const [aviso, setAviso] = useState("");
   const run = (fn: () => void) => { fn(); redesenhar(); };

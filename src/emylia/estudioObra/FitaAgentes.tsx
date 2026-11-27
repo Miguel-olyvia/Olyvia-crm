@@ -215,7 +215,7 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
                           {x.acoes.filter((b, i) => (x.auto ? b.a.k !== "passar" && b.a.k !== "fecharBuraco" : i > 0)).slice(0, 2).map((b) => (
                             <Button key={b.rot} type="button" size="sm" variant="ghost" className="min-h-9 rounded-full" onClick={() => agir(b.a)}>{b.rot}</Button>
                           ))}
-                          <Button type="button" size="sm" variant="ghost" className="min-h-9 rounded-full text-muted-foreground" onClick={() => recusar(x)} aria-label={`Recusar: ${x.titulo}`}><X className="mr-1 h-4 w-4" aria-hidden="true" />Recusar</Button>
+                          <Button type="button" size="sm" variant="ghost" className="min-h-9 rounded-full text-muted-foreground" onClick={() => recusar(x)} aria-label={`${x.info ? "Dispensar" : "Recusar"}: ${x.titulo}`}><X className="mr-1 h-4 w-4" aria-hidden="true" />{x.info ? "Dispensar" : "Recusar"}</Button>
                         </div>
                       )}
                     </div>
