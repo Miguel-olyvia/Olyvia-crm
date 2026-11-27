@@ -406,6 +406,8 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
       // 25/11 (agentes): o rascunho do Agente do Cliente só sai quando o gestor carrega
       case "avisarCliente": fazer(() => A.avisarClienteObra(d.id, a.texto)); break;
       case "fecharBuraco": { let r = 0; fazer(() => { r = A.fecharBuraco(d.id, a.ini, a.fim); }); if (!r && a.ti != null) setPainel({ k: "tarefa", ti: a.ti }); break; }
+      // 27/11 (agentes): passar a tarefa que travava a um colega livre e antecipar o resto, de uma vez
+      case "passarEAntecipar": { let r = 0; fazer(() => { r = A.passarEAntecipar(d.id, a.ti, a.tec, a.ini, a.fim); }); if (!r) setPainel({ k: "tarefa", ti: a.ti }); break; }
       case "conversa": setAba("cliente"); break;
       case "aceitarFim": fazer(() => A.aceitarFimObra(d.id, a.dias)); break;
       case "materiais": setAba("materiais"); break;

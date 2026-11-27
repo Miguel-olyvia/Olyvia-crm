@@ -88,7 +88,9 @@ export function FitaAgentes({ ctx, d, propostas, agir }: { ctx: Ctx; d: Negocio;
   const desfazer = (f: FeitoAgente) => { run(() => { A.agentesObra(d.id, { k: "desfazer", fid: f.id }); }); deixarRasto({ ...f, antes: f.antes.map((a) => ({ ...a, dia: d.obra.plano?.tasks[a.ti]?.dia ?? a.dia })) }); };
   const mudarDegrau = (id: AgenteId, n: Degrau) => run(() => { A.agentesObra(d.id, { k: "degrau", agente: id, n, texto: `${agente(id).nome} passou a «${DEGRAUS[n].nome}»` }); });
 
-  const visiveis = propostas.filter((x) => !filtro || x.agente === filtro);
+  // 27/11 (agentes): primeiro o que pede decisão, depois o que se aplica sozinho, no fim o que é só para saber (a ordem dos alertas mantém-se dentro)
+  const ORDEM_MODO = { pede: 0, prazo: 1, ja: 2, ver: 3 } as const;
+  const visiveis = propostas.filter((x) => !filtro || x.agente === filtro).sort((a, b) => ORDEM_MODO[modoDa(a, e, agora)] - ORDEM_MODO[modoDa(b, e, agora)]);
   const mostradas = todas ? visiveis : visiveis.slice(0, 5);
   const feitos = (e?.feitos ?? []).filter((f) => !f.desfeito);
   const novos = feitos.filter((f) => !ultimaVisita || f.q > ultimaVisita);

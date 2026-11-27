@@ -85,19 +85,21 @@ describe("antecipar de uma vez o que vem depois de um buraco", () => {
     // livre: a ação diz quantos dias dá e a simulação concorda
     const sim = simularBuraco(S, d, g.ini, g.fim);
     if (sim.s) expect(alerta().acoes[0].rot).toBe(`Antecipar ${sim.s} ${sim.s === 1 ? "dia útil" : "dias úteis"}`);
-    // ocupado: outra obra com o mesmo técnico em todos os dias do buraco e da tarefa seguinte
+    // ocupado: outra obra com o mesmo técnico (e, aqui, todos os do ofício) em todos os dias do buraco e da tarefa seguinte
     const seg = p.tasks[g.seguinte!];
+    const { tecnicosDoOficio } = await import("../preparacaoObra");
+    const doOficio = [seg.tec, ...tecnicosDoOficio(seg).map((x) => x.id).filter((x) => x !== seg.tec)];
     const outra = structuredClone(d);
     outra.id = d.id + 900; outra.nome = "Obra Vizinha";
     const q = outra.obra.plano!;
-    q.tasks = [{ ...seg, nome: "Ocupado", dia: 0, dur: seg.dia + seg.dur + 10, exec: undefined }];
+    q.tasks = doOficio.map((tec) => ({ ...seg, tec, nome: "Ocupado", dia: 0, dur: seg.dia + seg.dur + 10, exec: undefined }));
     q.dia = 0; q.estado = "em curso";
     S.deals = [...S.deals, outra];
     const s2 = simularBuraco(S, d, g.ini, g.fim);
     expect(s2.s).toBe(0);
     expect(s2.porque).toMatch(new RegExp(`${TECS.find((x) => x.id === seg.tec)?.n.split(" ")[0] ?? "técnico"}|noutra obra|férias|livres`));
     const a = alerta();
-    expect(a.acoes.some((x) => x.a.k === "fecharBuraco")).toBe(false);
+    expect(a.acoes.some((x) => x.a.k === "fecharBuraco" || x.a.k === "passarEAntecipar")).toBe(false);
     expect(a.sub).toMatch(/não dá para antecipar/);
     // «Ver a tarefa» leva à tarefa do técnico ocupado (onde se troca o técnico) e o agente não conta isto como decisão
     if (s2.trava != null) { expect(a.acoes[0].a).toMatchObject({ k: "tarefa", ti: s2.trava }); expect(a.sub).toMatch(/passe «.+» a outro técnico/); }
@@ -105,6 +107,49 @@ describe("antecipar de uma vez o que vem depois de um buraco", () => {
     const pr = propostasDosAgentes(d, S, new Map()).find((x) => x.id === `parada-${g.ini}`)!;
     expect(pr.info).toBe(true);
     expect(modoDa(pr, { degraus: { plano: 1 } } as never)).toBe("ver");
+  });
+  it("27/11: com um colega do mesmo ofício livre, o agente propõe passar-lhe a tarefa e antecipar, e a ação faz isso de uma vez", async () => {
+    const { acoes, desbloquearBuraco, simularBuraco } = await import("../motor");
+    const { obraDeExemplo } = await import("./exemploObra");
+    const { alertasDaObra } = await import("./alertasObra");
+    const { tecnicosDoOficio } = await import("../preparacaoObra");
+    const { S, d } = obraDeExemplo();
+    const p = d.obra.plano!;
+    for (const t of p.tasks.filter((t) => !t.exec && t.dia > p.dia)) t.dia += 4;
+    const g = diasSemNinguem(p).find((x) => x.seguinte != null)!;
+    const seg = p.tasks[g.seguinte!];
+    // as ações criam-se antes do colega: acoes() repõe a lista de técnicos a partir do Estado
+    const avisos: string[] = [];
+    const A = acoes(S, (x) => avisos.push(`${x.msg}: ${x.sub ?? ""}`), (fn) => fn());
+    A.role("operacoes");
+    // um colega do mesmo ofício (cópia do técnico da tarefa, sem férias), só para este teste
+    const { TECS } = await import("../motor");
+    const base = TECS.find((x) => x.id === seg.tec)!;
+    TECS.push({ ...base, id: "t-colega-teste", n: "Colega Teste", feriasDatas: [] } as typeof base);
+    try {
+    expect(tecnicosDoOficio(seg).some((x) => x.id === "t-colega-teste")).toBe(true);
+    // só o técnico da tarefa seguinte está ocupado noutra obra
+    const outra = structuredClone(d);
+    outra.id = d.id + 901; outra.nome = "Obra Vizinha";
+    outra.obra.plano!.tasks = [{ ...seg, nome: "Ocupado", dia: 0, dur: seg.dia + seg.dur + 10, exec: undefined }];
+    outra.obra.plano!.dia = 0; outra.obra.plano!.estado = "em curso";
+    S.deals = [...S.deals, outra];
+    const s0 = simularBuraco(S, d, g.ini, g.fim);
+    expect(s0.s).toBe(0); expect(s0.trava).not.toBeNull();
+    const des = desbloquearBuraco(S, d, g.ini, g.fim, s0.trava);
+    expect(des).not.toBeNull();
+    if (!des) return;
+    const al = alertasDaObra(d, S, new Map()).find((x) => x.id === `parada-${g.ini}`)!;
+    expect(al.acoes[0].a).toMatchObject({ k: "passarEAntecipar", ti: des.ti, tec: des.tec });
+    expect(al.acoes[0].rot).toMatch(/^Passar a .+ e antecipar \d+ dias? úte(is|il)$/);
+    const antes = p.tasks.map((t) => t.dia);
+    const a0 = al.acoes[0].a as { ti: number; tec: string; ini: number; fim: number };
+    const r = A.passarEAntecipar(d.id, a0.ti, a0.tec, a0.ini, a0.fim);
+    expect(r).toBe(des.s);
+    expect(p.tasks[des.ti].tec).toBe(des.tec);
+    expect(p.tasks.some((t, k) => t.dia < antes[k])).toBe(true);
+    expect(avisos.at(-1)).toMatch(/^Plano antecipado/);
+    } finally { TECS.splice(TECS.findIndex((x) => x.id === "t-colega-teste"), 1); }
   });
 });
 

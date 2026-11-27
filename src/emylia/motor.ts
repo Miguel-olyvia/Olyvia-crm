@@ -34,7 +34,7 @@ import { MOTIVO_PROBLEMA, diaDeHoje, ehRefProblema, erroTarefas, inicioProblema,
   textoRespostaNaoFazer, textoRespostaSemCusto, type DecisaoProblema, type ProblemaCliente, type TarefaProblema } from "./problemasCliente";
 import { DECISOES, atrasar, avisoClienteImprevisto, bloquear, desbloquear, imprevistosPorTratar, novoIdImprevisto, paradasPor, pedidoDeAtraso, textoPedidoAtraso, type Decisao, type Gravidade, type Imprevisto, type LinhaLivre } from "./imprevistos";
 import { comFaturaDaParcela, faltaParaAuto, nomeDaParcela, parcelaDoArranquePorPagar, parcelasDoContrato } from "./parcelas";
-import { diasQuePode, agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, FALTA_EC_AUTOMATICA, ecNoServidor, marcarEcNoServidor, retificacaoAceite, faltaMedirTexto, medicoesDe, supervisorDasMedidas, motivoOcupado, ocupacaoDosTecnicos, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
+import { diasQuePode, agendaDaProposta, planoComAgendaDeHoje, textoAgenda, faltaParaArrancar, FALTA_EC_AUTOMATICA, ecNoServidor, marcarEcNoServidor, retificacaoAceite, faltaMedirTexto, medicoesDe, supervisorDasMedidas, motivoOcupado, ocupacaoDosTecnicos, tecnicosDoOficio, planoNovoDaObra, resolverConflitos, escolhasDoNegocio, gerarEncCliente, passosAgora, inicioDoPlano, planoDoOrcamento, rotuloDia, type EcAjuste, type EncCliente } from "./preparacaoObra";
 import { pedirPainelObra } from "./estudioObra/painelPedido";
 import { avisarTecnico, criarTarefa, criarTarefaInterna, juntarTarefa, materiaisDaTarefa, materiaisDoServico, moverTarefa, tirarTarefa, type NovaTarefa, type NovaTarefaInterna } from "./tarefasValidador";
 import { moverNaOrdem } from "./ordemPlano";
@@ -1330,27 +1330,45 @@ export function diaDeFerias(tec: Tecnico, p: Plano, dia: number, dur: number): n
   return null;
 }
 /** 26/11 («Antecipar o resto» abria a tarefa e não fazia nada): quantos dias úteis dá para puxar as tarefas por fazer depois de um buraco
- *  (de `n` até 1), sem pôr um técnico em duas obras nem nas férias. `s` 0: não dá, e `porque` diz quem impede. Não muda nada. */
-export function simularBuraco(S: Pick<Estado, "deals">, d: Negocio, ini: number, fim: number): { s: number; alvo: number[]; porque: string; trava: number | null } {
+ *  (de `n` até 1), sem pôr um técnico em duas obras nem nas férias. `s` 0: não dá, e `porque` diz quem impede. Não muda nada.
+ *  27/11 (agentes): `troca` experimenta passar uma tarefa a outro técnico ao mesmo tempo (a comparação é com o plano de agora, por isso
+ *  apanha também o técnico novo ocupado); `ganho` são os dias úteis que o fim da obra anda para trás. */
+export function simularBuraco(S: Pick<Estado, "deals">, d: Negocio, ini: number, fim: number, troca?: { ti: number; tec: string }):
+  { s: number; alvo: number[]; porque: string; trava: number | null; ganho: number } {
   const p = d.obra?.plano;
-  if (!p) return { s: 0, alvo: [], porque: "A obra não tem plano", trava: null };
+  if (!p) return { s: 0, alvo: [], porque: "A obra não tem plano", trava: null, ganho: 0 };
   const hoje = p.estado === "em curso" ? p.dia : 0, n = fim - ini + 1;
   const alvo = p.tasks.map((t, ti) => ({ t, ti })).filter(({ t }) => { const v = estadoVivoTarefa(t, p); return v !== "feita" && v !== "validada" && !t.exec && t.dia > fim; }).map((x) => x.ti);
-  if (!alvo.length || n < 1) return { s: 0, alvo, porque: "Não há tarefas por fazer depois desses dias", trava: null };
-  const ferias0 = conflitos(p).length;
+  if (!alvo.length || n < 1) return { s: 0, alvo, porque: "Não há tarefas por fazer depois desses dias", trava: null, ganho: 0 };
+  const ferias0 = conflitos(p).length, fim0 = fimDe(p.tasks);
   // trava: a 1.ª tarefa do técnico que impede (é essa que se pode passar a outro)
   let porque = "", trava: number | null = null;
   for (let s = n; s >= 1; s--) {
     const copia: Plano = { ...p, tasks: p.tasks.map((t) => ({ ...t })) };
+    if (troca && copia.tasks[troca.ti]) copia.tasks[troca.ti].tec = troca.tec;
     let mexe = false;
     for (const ti of alvo) { const nd = Math.max(hoje, copia.tasks[ti].dia - s); if (nd !== copia.tasks[ti].dia) mexe = true; copia.tasks[ti].dia = nd; }
     if (!mexe) { if (!porque) porque = "As tarefas seguintes já começam o mais cedo possível"; continue; }
     const fora = conflitosNovos(S, d, copia);
-    if (fora.length) { if (!porque) { porque = `${TECS.find((x) => x.id === fora[0].tec)?.n.split(" ")[0] ?? "Um técnico"} está noutra obra (${fora[0].obra.nome}) nesses dias`; trava = alvo.find((ti) => p.tasks[ti].tec === fora[0].tec) ?? null; } continue; }
+    if (fora.length) { if (!porque) { porque = `${TECS.find((x) => x.id === fora[0].tec)?.n.split(" ")[0] ?? "Um técnico"} está noutra obra (${fora[0].obra.nome}) nesses dias`; trava = alvo.find((ti) => copia.tasks[ti].tec === fora[0].tec) ?? null; } continue; }
     if (conflitos(copia).length > ferias0) { if (!porque) porque = "Um técnico está de férias nesses dias"; continue; }
-    return { s, alvo, porque, trava };
+    return { s, alvo, porque, trava, ganho: Math.max(0, fim0 - fimDe(copia.tasks)) };
   }
-  return { s: 0, alvo, porque: porque || "Os técnicos das tarefas seguintes não estão livres", trava };
+  return { s: 0, alvo, porque: porque || "Os técnicos das tarefas seguintes não estão livres", trava, ganho: 0 };
+}
+
+/** 27/11 (Rúben: «melhora ainda mais os agentes»): quando um técnico ocupado noutra obra impede de fechar um buraco, procura no mesmo ofício
+ *  quem está livre e o que se ganha se a tarefa dele passar a esse colega. O melhor (mais dias, depois mais ganho no fim) ou null. */
+export function desbloquearBuraco(S: Pick<Estado, "deals">, d: Negocio, ini: number, fim: number, trava: number):
+  { ti: number; tec: string; n: string; s: number; ganho: number } | null {
+  const p = d.obra?.plano, t = p?.tasks[trava];
+  if (!p || !t) return null;
+  let melhor: { ti: number; tec: string; n: string; s: number; ganho: number } | null = null;
+  for (const x of tecnicosDoOficio(t).filter((y) => y.id !== t.tec).slice(0, 6)) {
+    const r = simularBuraco(S, d, ini, fim, { ti: trava, tec: x.id });
+    if (r.s && (!melhor || r.s > melhor.s || (r.s === melhor.s && r.ganho > melhor.ganho))) melhor = { ti: trava, tec: x.id, n: x.n, s: r.s, ganho: r.ganho };
+  }
+  return melhor;
 }
 
 export function conflitos(p: Plano) {
@@ -4829,6 +4847,25 @@ export function acoes(S: Estado, avisar: Avisar, run: (fn: () => void) => void, 
       log(d, `Plano antecipado para a obra não ficar parada: ${txt}`);
       avisar({ msg: "Plano antecipado", sub: `${txt}${s < n ? ` (os ${n} dias não deram: ${porque})` : ""}`, kind: "ok" });
       return s;
+    },
+    /** 27/11 (agentes): passa a tarefa que travava a um colega livre do mesmo ofício e antecipa o resto, de uma vez (um só «anular»). */
+    passarEAntecipar(id: number, ti: number, tec: string, ini: number, fim: number): number {
+      if (!exigePerm("obra.planear")) return 0;
+      const d = deal(id), p = d.obra.plano, t = p?.tasks[ti], novo = TECS.find((x) => x.id === tec);
+      if (!p || !t || !novo || (p.estado !== "em curso" && p.estado !== "aprovado")) return 0;
+      const sim = simularBuraco(S, d, ini, fim, { ti, tec });
+      if (!sim.s) { avisar({ msg: "Não dá para antecipar", sub: `${sim.porque}. O plano fica igual.`, kind: "bad" }); return 0; }
+      const velho = TECS.find((x) => x.id === t.tec), hoje = p.estado === "em curso" ? p.dia : 0;
+      guardarBase(p);
+      t.tec = tec;
+      for (const k of sim.alvo) { const x = p.tasks[k]; x.dia = Math.max(hoje, x.dia - sim.s); if (x.dia < inicioMinimo(p, k)) x.antecipada = true; }
+      const txt = `${t.nome} passa ${velho ? `de ${velho.n.split(" ")[0]} ` : ""}para ${novo.n.split(" ")[0]} e ${sim.alvo.length} ${sim.alvo.length === 1 ? "tarefa começa" : "tarefas começam"} ${sim.s} ${sim.s === 1 ? "dia útil" : "dias úteis"} mais cedo`;
+      log(d, `Plano antecipado para a obra não ficar parada: ${txt}`);
+      avisarTecnico(p, ti, `Tem uma tarefa nova: ${t.nome}, a partir de ${rotuloDia(p, t.dia)}`, agora());
+      if (velho) avisarTecnico(p, ti, `${t.nome} passou para ${novo.n.split(" ")[0]}: já não é consigo`, agora(), velho.id);
+      if (A.planoMudou(d)) return sim.s;
+      avisar({ msg: "Plano antecipado", sub: `${txt}${sim.ganho ? `; a obra acaba ${sim.ganho} ${sim.ganho === 1 ? "dia útil" : "dias úteis"} mais cedo` : ""}`, kind: "ok" });
+      return sim.s;
     },
     adiantarPlano(id: number) {
       if (!exigePerm("obra.planear")) return;
