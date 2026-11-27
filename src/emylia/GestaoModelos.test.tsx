@@ -12,6 +12,7 @@ vi.mock("@/integrations/supabase/client", () => ({
 }));
 
 import { GestaoModelos } from "./GestaoModelos";
+import { MODELOS_ESCOLHA } from "./planta3d/modelos3dEscolha";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 
 const ORG = "b6ffce4f-f630-4933-833a-008649757a33";
@@ -115,11 +116,14 @@ describe("Modelos: ler, agrupar e filtrar", () => {
 });
 
 describe("Modelos: só leitura sem products.edit", () => {
-  it("mostra a nota e nenhuma ação", async () => {
+  it("mostra a nota e nenhuma ação (a única exceção é o botão do modelo 3D, desativado e com a razão)", async () => {
     await abrir(REAL({ podeEditar: false }));
     expect(screen.getByRole("note")).toHaveTextContent("Só de leitura");
     expect(screen.queryByRole("button", { name: "Novo modelo" })).toBeNull();
-    expect(within(linha("0001 · SORTY")).queryAllByRole("button")).toHaveLength(0);
+    const botoes = within(linha("0001 · SORTY")).queryAllByRole("button");
+    expect(botoes).toHaveLength(1);
+    expect(botoes[0]).toHaveAttribute("aria-disabled", "true");
+    expect(botoes[0]).toHaveAccessibleName("Mudar o modelo 3D do modelo SORTY");
   });
 });
 
@@ -248,5 +252,177 @@ describe("Modelos: renomear e ativar", () => {
     expect(alerta).toHaveTextContent("máximo de modelos ativos");
     expect(alerta.className).toContain("text-red-700");
     expect(chamadasDe("cat_ler_modelos_gestao").length).toBeGreaterThan(antes);
+  });
+});
+
+// 27/11: o seletor de modelo 3D em cada Modelo (0001 SMOOTH…), igual ao das categorias e subcategorias (CampoModelo3D + definirModelo3d, alvo 'modelo').
+describe("Modelos: Modelo 3D", () => {
+  const catsComModelo = () => {
+    const c = categorias();
+    return { categorias: c.categorias.map((x) => ({ ...x, ...(x.id === C1 ? { modelo3d: "banheira" } : {}), subcategorias: x.subcategorias.map((s) => ({ ...s, ...(s.id === S1 ? { modelo3d: "sanita" } : {}) })) })) };
+  };
+  beforeEach(() => {
+    base.responder = (f) => {
+      if (f === "cat_ler_modelos_gestao") return { data: { modelos: modelos().modelos.map((m) => (m.id === M1 ? { ...m, modelo3d: "base_duche" } : m)) }, error: null };
+      if (f === "cat_ler_categorias_gestao") return { data: catsComModelo(), error: null };
+      if (f === "cat_definir_modelo_3d") return { data: { alvo: "modelo", id: M2, modelo: "bide", anterior: null }, error: null };
+      return { data: { ok: true }, error: null };
+    };
+  });
+  const abrirPainel = (linhaTexto: string, modelo: string) => fireEvent.click(within(linha(linhaTexto)).getByRole("button", { name: `Mudar o modelo 3D do modelo ${modelo}` }));
+  const seletor = () => screen.getByRole("combobox", { name: /^Modelo 3D/ });
+  const escolherModelo3d = (nome: string | null) => { fireEvent.click(seletor()); fireEvent.click(nome === null ? screen.getAllByRole("option")[0]! : screen.getByRole("option", { name: nome })); };
+
+  it("cada modelo mostra o seu modelo 3D («Modelo 3D: Base de duche») ou «automático»", async () => {
+    await abrir();
+    expect(within(linha("0001 · SORTY")).getByText("Modelo 3D: Base de duche")).toBeInTheDocument();
+    expect(within(linha("0002 · STONE PLUS")).getByText("Modelo 3D: automático")).toBeInTheDocument();
+  });
+
+  it("sem a chave modelo3d na leitura (migração por aplicar) tudo aparece como «automático», sem erros", async () => {
+    base.responder = (f) => ({ data: f === "cat_ler_modelos_gestao" ? modelos() : categorias(), error: null });
+    await abrir();
+    expect(screen.getAllByText("Modelo 3D: automático")).toHaveLength(4);
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("o seletor abre por baixo da linha, com a omissão «Automático (herda…)» da subcategoria, e a lista é a mesma das categorias", async () => {
+    await abrir();
+    const botaoAbrir = within(linha("0002 · STONE PLUS")).getByRole("button", { name: "Mudar o modelo 3D do modelo STONE PLUS" });
+    expect(botaoAbrir).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(botaoAbrir);
+    expect(botaoAbrir).toHaveAttribute("aria-expanded", "true");
+    await waitFor(() => expect(seletor()).toHaveTextContent("Automático (herda: Sanita de chão, da subcategoria Bases de Duche)"));
+    expect(screen.getByText("Herdado da subcategoria Bases de Duche: Sanita de chão.")).toBeInTheDocument();
+    fireEvent.click(seletor());
+    expect(screen.getAllByRole("option")).toHaveLength(MODELOS_ESCOLHA.length + 1);
+  });
+
+  it("sem escolha na subcategoria, herda da categoria; sem nada, do classificador", async () => {
+    base.responder = (f) => {
+      if (f === "cat_ler_categorias_gestao") { const c = catsComModelo(); return { data: { categorias: c.categorias.map((x) => ({ ...x, subcategorias: x.subcategorias.map((s) => ({ ...s, modelo3d: null })) })) }, error: null }; }
+      return { data: modelos(), error: null };
+    };
+    await abrir();
+    abrirPainel("0002 · STONE PLUS", "STONE PLUS");
+    await waitFor(() => expect(seletor()).toHaveTextContent("Automático (herda: Banheira, da categoria Casa de banho)"));
+  });
+
+  it("escolher e guardar: grava com o alvo 'modelo' e o id do modelo, anuncia, relê a lista, fecha o painel e devolve o foco ao botão", async () => {
+    const anunciar = await abrir();
+    abrirPainel("0002 · STONE PLUS", "STONE PLUS");
+    escolherModelo3d("Bidé");
+    const antes = chamadasDe("cat_ler_modelos_gestao").length;
+    fireEvent.click(screen.getByRole("button", { name: "Guardar modelo 3D" }));
+    await waitFor(() => expect(chamadasDe("cat_definir_modelo_3d")).toHaveLength(1));
+    expect(chamadasDe("cat_definir_modelo_3d")[0]!.a).toEqual({ p_org: ORG, p_alvo: "modelo", p_id: M2, p_modelo: "bide" });
+    await waitFor(() => expect(anunciar).toHaveBeenCalledWith("Modelo 3D de «STONE PLUS»: Bidé."));
+    await waitFor(() => expect(chamadasDe("cat_ler_modelos_gestao").length).toBeGreaterThan(antes));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Guardar modelo 3D" })).toBeNull());
+    await waitFor(() => expect(within(linha("0002 · STONE PLUS")).getByRole("button", { name: "Mudar o modelo 3D do modelo STONE PLUS" })).toHaveFocus());
+  });
+
+  it("voltar a «Automático» limpa: p_modelo null, e o aviso diz que herda", async () => {
+    const anunciar = await abrir();
+    abrirPainel("0001 · SORTY", "SORTY");
+    expect(seletor()).toHaveTextContent("Base de duche");
+    escolherModelo3d(null);
+    fireEvent.click(screen.getByRole("button", { name: "Guardar modelo 3D" }));
+    await waitFor(() => expect(chamadasDe("cat_definir_modelo_3d")).toHaveLength(1));
+    expect(chamadasDe("cat_definir_modelo_3d")[0]!.a).toEqual({ p_org: ORG, p_alvo: "modelo", p_id: M1, p_modelo: null });
+    await waitFor(() => expect(anunciar).toHaveBeenCalledWith("Modelo 3D de «SORTY»: automático, herda do nível de cima."));
+  });
+
+  it("o botão de guardar só vale quando o modelo mudou", async () => {
+    await abrir();
+    abrirPainel("0002 · STONE PLUS", "STONE PLUS");
+    const g = screen.getByRole("button", { name: "Guardar modelo 3D" });
+    expect(g).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(g);
+    expect(chamadasDe("cat_definir_modelo_3d")).toHaveLength(0);
+  });
+
+  it("Cancelar fecha sem gravar e devolve o foco ao botão", async () => {
+    await abrir();
+    abrirPainel("0002 · STONE PLUS", "STONE PLUS");
+    fireEvent.click(screen.getByRole("button", { name: "Cancelar" }));
+    expect(screen.queryByRole("button", { name: "Guardar modelo 3D" })).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Mudar o modelo 3D do modelo STONE PLUS" })).toHaveFocus());
+    expect(chamadasDe("cat_definir_modelo_3d")).toHaveLength(0);
+  });
+
+  it("a recusa da base (CT003) aparece em português junto do seletor; o painel fica aberto e a lista relê-se", async () => {
+    const orig = base.responder;
+    base.responder = (f, a) => (f === "cat_definir_modelo_3d" ? erro("CT003", "Modelo não encontrado.") : orig(f, a));
+    await abrir();
+    abrirPainel("0002 · STONE PLUS", "STONE PLUS");
+    escolherModelo3d("Bidé");
+    const antes = chamadasDe("cat_ler_modelos_gestao").length;
+    fireEvent.click(screen.getByRole("button", { name: "Guardar modelo 3D" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Modelo não encontrado.");
+    expect(screen.getByRole("button", { name: "Guardar modelo 3D" })).toBeInTheDocument();
+    expect(seletor()).toHaveTextContent("Bidé");
+    expect(chamadasDe("cat_ler_modelos_gestao").length).toBeGreaterThan(antes);
+  });
+
+  it("um erro técnico da base nunca aparece em bruto: sai a frase em português", async () => {
+    const orig = base.responder;
+    base.responder = (f, a) => (f === "cat_definir_modelo_3d" ? erro("XX000", "duplicate key value violates unique constraint") : orig(f, a));
+    await abrir();
+    abrirPainel("0002 · STONE PLUS", "STONE PLUS");
+    escolherModelo3d("Bidé");
+    fireEvent.click(screen.getByRole("button", { name: "Guardar modelo 3D" }));
+    const alerta = await screen.findByRole("alert");
+    expect(alerta).toHaveTextContent("Não foi possível gravar o modelo 3D.");
+    expect(alerta.textContent).not.toMatch(/duplicate|violates/);
+  });
+
+  it("função por criar na base: «ainda não está disponível», em português", async () => {
+    const orig = base.responder;
+    base.responder = (f, a) => (f === "cat_definir_modelo_3d" ? erro("PGRST202", "Could not find the function public.cat_definir_modelo_3d") : orig(f, a));
+    await abrir();
+    abrirPainel("0002 · STONE PLUS", "STONE PLUS");
+    escolherModelo3d("Bidé");
+    fireEvent.click(screen.getByRole("button", { name: "Guardar modelo 3D" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(/ainda não está disponível/);
+  });
+
+  it("enquanto grava, o seletor e os botões usam aria-disabled (não disabled) e o Cancelar não fecha", async () => {
+    let largar!: (v: { data: unknown; error: unknown }) => void;
+    const orig = base.responder;
+    base.responder = (f, a) => (f === "cat_definir_modelo_3d" ? new Promise((r) => { largar = r; }) : orig(f, a));
+    await abrir();
+    abrirPainel("0002 · STONE PLUS", "STONE PLUS");
+    escolherModelo3d("Bidé");
+    const guardar = screen.getByRole("button", { name: "Guardar modelo 3D" });
+    guardar.focus();
+    fireEvent.click(guardar);
+    await waitFor(() => expect(chamadasDe("cat_definir_modelo_3d")).toHaveLength(1));
+    const cancelar = screen.getByRole("button", { name: "Cancelar" });
+    for (const el of [seletor(), guardar, cancelar]) { expect(el).toHaveAttribute("aria-disabled", "true"); expect(el).not.toBeDisabled(); }
+    expect(guardar).toHaveFocus();
+    fireEvent.click(cancelar);
+    expect(screen.getByRole("button", { name: "Guardar modelo 3D" })).toBeInTheDocument();
+    largar({ data: { alvo: "modelo", id: M2, modelo: "bide", anterior: null }, error: null });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Guardar modelo 3D" })).toBeNull());
+  });
+
+  it("sem permissão de editar: o botão fica desativado, com a razão ligada, e o clique não abre nada", async () => {
+    await abrir(REAL({ podeEditar: false }));
+    const b = within(linha("0002 · STONE PLUS")).getByRole("button", { name: "Mudar o modelo 3D do modelo STONE PLUS" });
+    expect(b).toHaveAttribute("aria-disabled", "true");
+    expect(razao(b)).toBe("Só quem pode editar produtos muda o modelo 3D.");
+    fireEvent.click(b);
+    expect(screen.queryByRole("combobox", { name: /^Modelo 3D/ })).toBeNull();
+    expect(chamadasDe("cat_definir_modelo_3d")).toHaveLength(0);
+  });
+
+  it("um modelo desativado também aceita modelo 3D; só abre um painel de cada vez (abrir o de renomear fecha o do 3D)", async () => {
+    await abrir();
+    abrirPainel("0007 · ZEUS", "ZEUS");
+    expect(seletor()).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Renomear o modelo STONE PLUS" }));
+    expect(screen.queryByRole("combobox", { name: /^Modelo 3D/ })).toBeNull();
+    expect(screen.getByRole("textbox", { name: "Nome do modelo" })).toBeInTheDocument();
   });
 });

@@ -3,20 +3,28 @@
 // e subcategoria; criar (subcategoria + nome, número automático ou fixado), renomear e ativar/desativar. A subcategoria e o número não mudam depois
 // de criado (a base recusa). Só com products.edit (sem ela, leitura). Lê cat_ler_modelos_gestao e grava por modelosDados.ts: relê-se depois de cada
 // gravação, também em falha (useGestaoLista.correr). As subcategorias onde se pode criar vêm de cat_ler_categorias_gestao.
+// 27/11: cada modelo tem o seu «Modelo 3D», igual ao das categorias e subcategorias (CampoModelo3D + definirModelo3d com o alvo 'modelo'): o botão da caixa
+// abre o seletor por baixo da linha; sem escolha herda da subcategoria e depois da categoria (as escolhas delas vêm de cat_ler_categorias_gestao, já lida aqui).
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Pencil, Plus, Search } from "lucide-react";
+import { Box, Pencil, Plus, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { CAMPO, NOTA, Campo } from "./pecasForm";
 import type { FichaProdutoReal } from "./fichaProdutoDados";
 import { lerCategoriasGestao, type CategoriaGestao } from "./categoriasMarcasGestao";
 import { estadoModelo, guardarModelo, lerModelosGestao, numeroSku, rotuloModelo, type ModeloGestao } from "./modelosDados";
 import { ComboPesquisa, semAcentos, type ItemCombo } from "./ComboPesquisa";
-import { BOTAO_ICONE, BOTAO_TEXTO, CARTAO, ConfirmarMudanca, EstadoLeitura, FormNome, Razao, Selo, produtos, protegido, useGestaoLista } from "./gestaoPecas";
+import { CampoModelo3D } from "./CampoModelo3D";
+import { Modelo3DTexto } from "./categoriasAcoes";
+import { definirModelo3d } from "./modelo3dDados";
+import { herdadoDe, rotuloDoModelo3D, type ResolvidoNo } from "./planta3d/modelos3dEscolha";
+import { BOTAO_ICONE, BOTAO_TEXTO, CARTAO, ENTRA, ConfirmarMudanca, EstadoLeitura, FormNome, Razao, Selo, produtos, protegido, useGestaoLista } from "./gestaoPecas";
 
 const ID_TITULO = "tit-modelos";
 const BORDA = "border-foreground/40";
 const RAZAO_SUB_DESATIVADA = "Reative primeiro a subcategoria na aba Subcategorias.";
-type Aberto = { t: "nova" } | { t: "renomear"; id: string };
+const RAZAO_SEM_PERMISSAO_3D = "Só quem pode editar produtos muda o modelo 3D.";
+type Aberto = { t: "nova" } | { t: "renomear"; id: string } | { t: "modelo3d"; id: string };
 interface Grupo { chave: string; categoria: string; subcategoria: string; modelos: ModeloGestao[] }
 
 const numeroDe = (t: string): number | null => (/^\d{1,4}$/.test(t.trim()) ? Number(t.trim()) : null);
@@ -74,6 +82,20 @@ export function GestaoModelos({ real, anunciar }: { real: FichaProdutoReal; anun
     return acc;
   }, []), [vistos]);
 
+  // o que um modelo herda sem escolha própria: a subcategoria e depois a categoria (as escolhas delas); sem a leitura das categorias fica só o classificador
+  const escolhasDosRamos = useMemo(() => {
+    const m = new Map<string, { sub: { nome: string; modelo3d: string | null } | null; cat: { nome: string; modelo3d: string | null } }>();
+    for (const c of cats ?? []) {
+      const cat = { nome: c.nome, modelo3d: c.modelo3d ?? null };
+      for (const s of c.subcategorias) m.set(s.id, { sub: { nome: s.nome, modelo3d: s.modelo3d ?? null }, cat });
+    }
+    return m;
+  }, [cats]);
+  const herancaDe = (m: ModeloGestao): ResolvidoNo => {
+    const r = escolhasDosRamos.get(m.subcategoria.id);
+    return herdadoDe({ subcategoria: r?.sub ? { nome: r.sub.nome, modelo: r.sub.modelo3d } : null, categoria: r ? { nome: r.cat.nome, modelo: r.cat.modelo3d } : null });
+  };
+
   const elegiveis = useMemo(() => (cats ?? []).filter((c) => !c.global).flatMap((c) => c.subcategorias.filter((s) => s.ativo && !s.global && c.ativo).map((s) => ({ id: s.id, nome: s.nome, cat: c.nome }))), [cats]);
   const aCriar = aberto?.t === "nova";
   const razaoNovo = g.aGravar ? "A guardar…" : !cats ? (erroCats ?? "A ler as subcategorias…") : !elegiveis.length ? "Não há subcategorias ativas: crie ou reative uma subcategoria primeiro." : null;
@@ -86,6 +108,10 @@ export function GestaoModelos({ real, anunciar }: { real: FichaProdutoReal; anun
   const gravarNome = (m: ModeloGestao, nome: string) =>
     g.correr(() => guardarModelo(org, { id: m.id, subcategoria: null, nome, numero: null }), `Modelo «${nome}» guardado.`, `ren:${m.id}`).then((ok) => { if (ok) fechar(`ren-mod-${m.id}`); });
   const renomear = (m: ModeloGestao, nome: string) => { if (m.usados === 0) { void gravarNome(m, nome); return; } g.setErro(null); setPend({ id: m.id, nome }); };
+  const gravarModelo3d = (m: ModeloGestao, modelo: string | null) =>
+    g.correr(() => definirModelo3d(org, "modelo", m.id, modelo),
+      modelo ? `Modelo 3D de «${m.nome}»: ${rotuloDoModelo3D(modelo)}.` : `Modelo 3D de «${m.nome}»: automático, herda do nível de cima.`, `m3d:${m.id}`)
+      .then((ok) => { if (ok) fechar(`m3d-mod-${m.id}`); });
   const ativar = (m: ModeloGestao) => {
     const ativo = !m.ativo;
     void g.correr(() => estadoModelo(org, m.id, ativo), `Modelo «${m.nome}» ${ativo ? "reativado" : "desativado"}.`, `est:${m.id}`).then(() => g.setFoco(`act-mod-${m.id}`));
@@ -135,8 +161,9 @@ export function GestaoModelos({ real, anunciar }: { real: FichaProdutoReal; anun
                       <h3 id={`gm-${gr.chave}`} className="text-[15px] font-semibold">{gr.categoria ? `${gr.categoria} › ${gr.subcategoria}` : gr.subcategoria}</h3>
                       <ul aria-labelledby={`gm-${gr.chave}`} className="mt-2 grid gap-2">
                         {gr.modelos.map((m) => (
-                          <LinhaModelo key={m.id} m={m} podeEditar={podeEditar} g={g} aberto={aberto} pend={pend?.id === m.id ? pend : null}
+                          <LinhaModelo key={m.id} m={m} podeEditar={podeEditar} g={g} aberto={aberto} pend={pend?.id === m.id ? pend : null} heranca={herancaDe(m)}
                             onAbrir={() => abrir({ t: "renomear", id: m.id })} onFechar={() => fechar(`ren-mod-${m.id}`)} onRenomear={(nome) => renomear(m, nome)}
+                            onAbrir3d={() => abrir({ t: "modelo3d", id: m.id })} onFechar3d={() => fechar(`m3d-mod-${m.id}`)} onModelo3d={(modelo) => void gravarModelo3d(m, modelo)}
                             onConfirmar={() => { if (pend) void gravarNome(m, pend.nome); }} onVoltar={() => { g.setFoco(`gn-mod-${m.id}`); setPend(null); }} onAtivar={() => ativar(m)} />
                         ))}
                       </ul>
@@ -182,36 +209,51 @@ function NovoModelo({ elegiveis, modelos, g, onCriar, onFechar }: {
 }
 
 /** Um modelo: «0001 · SORTY», estado em texto, produtos e as ações (só quem edita). */
-function LinhaModelo({ m, podeEditar, g, aberto, pend, onAbrir, onFechar, onRenomear, onConfirmar, onVoltar, onAtivar }: {
-  m: ModeloGestao; podeEditar: boolean;
+function LinhaModelo({ m, podeEditar, g, aberto, pend, heranca, onAbrir, onFechar, onAbrir3d, onFechar3d, onModelo3d, onRenomear, onConfirmar, onVoltar, onAtivar }: {
+  m: ModeloGestao; podeEditar: boolean; heranca: ResolvidoNo;
   g: { aGravar: boolean; msg: (onde: string) => string | null }; aberto: Aberto | null; pend: { id: string; nome: string } | null;
-  onAbrir: () => void; onFechar: () => void; onRenomear: (nome: string) => void; onConfirmar: () => void; onVoltar: () => void; onAtivar: () => void;
+  onAbrir: () => void; onFechar: () => void; onAbrir3d: () => void; onFechar3d: () => void; onModelo3d: (modelo: string | null) => void;
+  onRenomear: (nome: string) => void; onConfirmar: () => void; onVoltar: () => void; onAtivar: () => void;
 }) {
   const aRenomear = aberto?.t === "renomear" && aberto.id === m.id;
+  const aModelo3d = aberto?.t === "modelo3d" && aberto.id === m.id;
   const grav = g.aGravar ? "A guardar…" : null;
   const bloqueado = !m.ativo && !m.subcategoria.ativo;
   const rAtivar = grav ?? (bloqueado ? RAZAO_SUB_DESATIVADA : null);
+  const r3d = podeEditar ? grav : RAZAO_SEM_PERMISSAO_3D; // sem permissão o botão fica à vista, desativado, e a razão é lida com ele
   return (
     <li className="rounded-xl bg-muted/50 p-2 pl-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className={cn("min-w-0 break-words text-[15px] font-medium", !m.ativo && "text-muted-foreground")}>{rotuloModelo(m)}</span>
         {!m.ativo && <Selo>desativado</Selo>}
         <span className="text-sm text-muted-foreground">{produtos(m.usados)}</span>
-        {podeEditar && (
-          <span className="ml-auto flex flex-wrap items-center gap-1">
-            <button id={`ren-mod-${m.id}`} type="button" aria-label={`Renomear o modelo ${m.nome}`} aria-expanded={aRenomear} className={BOTAO_ICONE} {...protegido(grav, `rz-ren-mod-${m.id}`, onAbrir)}>
-              <Pencil className="h-4 w-4" aria-hidden="true" />
-            </button>
-            <Razao id={`rz-ren-mod-${m.id}`}>{grav}</Razao>
-            <button id={`act-mod-${m.id}`} type="button" aria-label={`${m.ativo ? "Desativar" : "Reativar"} o modelo ${m.nome}`} className={cn(BOTAO_TEXTO, "border-transparent")} {...protegido(rAtivar, `rz-act-mod-${m.id}`, onAtivar)}>
-              {m.ativo ? "Desativar" : "Reativar"}
-            </button>
-            <Razao id={`rz-act-mod-${m.id}`}>{rAtivar}</Razao>
-          </span>
-        )}
+        <Modelo3DTexto modelo={m.modelo3d} />
+        <span className="ml-auto flex flex-wrap items-center gap-1">
+          {podeEditar && (
+            <>
+              <button id={`ren-mod-${m.id}`} type="button" aria-label={`Renomear o modelo ${m.nome}`} aria-expanded={aRenomear} className={BOTAO_ICONE} {...protegido(grav, `rz-ren-mod-${m.id}`, onAbrir)}>
+                <Pencil className="h-4 w-4" aria-hidden="true" />
+              </button>
+              <Razao id={`rz-ren-mod-${m.id}`}>{grav}</Razao>
+            </>
+          )}
+          <button id={`m3d-mod-${m.id}`} type="button" aria-label={`Mudar o modelo 3D do modelo ${m.nome}`} aria-expanded={aModelo3d} className={BOTAO_ICONE} {...protegido(r3d, `rz-m3d-mod-${m.id}`, onAbrir3d)}>
+            <Box className="h-4 w-4" aria-hidden="true" />
+          </button>
+          <Razao id={`rz-m3d-mod-${m.id}`}>{r3d}</Razao>
+          {podeEditar && (
+            <>
+              <button id={`act-mod-${m.id}`} type="button" aria-label={`${m.ativo ? "Desativar" : "Reativar"} o modelo ${m.nome}`} className={cn(BOTAO_TEXTO, "border-transparent")} {...protegido(rAtivar, `rz-act-mod-${m.id}`, onAtivar)}>
+                {m.ativo ? "Desativar" : "Reativar"}
+              </button>
+              <Razao id={`rz-act-mod-${m.id}`}>{rAtivar}</Razao>
+            </>
+          )}
+        </span>
       </div>
       {podeEditar && bloqueado && <p className="mt-1 text-sm text-muted-foreground" aria-hidden="true">{RAZAO_SUB_DESATIVADA}</p>}
       {g.msg(`est:${m.id}`) && <p className="mt-2 text-[15px] text-red-700 dark:text-red-400" role="alert">{g.msg(`est:${m.id}`)}</p>}
+      {podeEditar && aModelo3d && <PainelModelo3D m={m} heranca={heranca} aGravar={g.aGravar} erro={g.msg(`m3d:${m.id}`)} onGuardar={onModelo3d} onCancelar={onFechar3d} />}
       {podeEditar && aRenomear && (
         <div className="mt-3 grid gap-3">
           <FormNome rotuloNome="Nome do modelo" inicial={m.nome} botao="Guardar nome" aGravar={g.aGravar} bloqueado={!!pend} erro={pend ? null : g.msg(`ren:${m.id}`)} idGuardar={`gn-mod-${m.id}`}
@@ -223,5 +265,24 @@ function LinhaModelo({ m, podeEditar, g, aberto, pend, onAbrir, onFechar, onReno
         </div>
       )}
     </li>
+  );
+}
+
+/** O seletor do modelo 3D de um modelo, por baixo da linha (o mesmo sítio que o de renomear): escolhe-se e só grava ao carregar em «Guardar modelo 3D». */
+function PainelModelo3D({ m, heranca, aGravar, erro, onGuardar, onCancelar }: {
+  m: ModeloGestao; heranca: ResolvidoNo; aGravar: boolean; erro: string | null; onGuardar: (modelo: string | null) => void; onCancelar: () => void;
+}) {
+  const [modelo, setModelo] = useState<string | null>(m.modelo3d);
+  const porque = aGravar ? "A guardar…" : modelo === m.modelo3d ? "Escolha outro modelo para guardar." : null;
+  const classe = "min-h-11 text-[15px] aria-disabled:cursor-not-allowed aria-disabled:opacity-50";
+  return (
+    <div className={cn("mt-3 grid gap-3 rounded-xl border border-border bg-card p-3", ENTRA)}>
+      <CampoModelo3D valor={modelo} heranca={heranca} onChange={setModelo} nivel="modelo" ocupado={aGravar} erro={erro} />
+      <div className="flex flex-wrap gap-2">
+        <Button id={`gm3d-${m.id}`} className={classe} {...protegido(porque, `rz-gm3d-${m.id}`, () => onGuardar(modelo))}>Guardar modelo 3D</Button>
+        <Razao id={`rz-gm3d-${m.id}`}>{porque}</Razao>
+        <Button variant="outline" className={classe} {...protegido(aGravar ? "A guardar…" : null, `rz-gm3d-${m.id}`, onCancelar)}>Cancelar</Button>
+      </div>
+    </div>
   );
 }
