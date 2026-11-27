@@ -75,7 +75,7 @@ async function limparAnterior(r: ResultadoGlb): Promise<void> {
 }
 
 /** Os bytes de um ficheiro ou Blob (File herda de Blob). `arrayBuffer` falta em ambientes antigos: lê-se com um FileReader. */
-function lerBytes(f: Blob): Promise<ArrayBuffer> {
+export function lerBytes(f: Blob): Promise<ArrayBuffer> {
   if (typeof f.arrayBuffer === "function") return f.arrayBuffer();
   return new Promise((resolver, rejeitar) => {
     const l = new FileReader();
@@ -104,7 +104,7 @@ export async function guardarGlbProprio(org: string, alvo: AlvoGlb, id: string, 
     return { ok: false, erro: mensagemDoStorageGlb((e as Error).message) };
   }
   const r = await definirGlbProprio(org, alvo, id, caminho);
-  if (!r.ok) { await apagarFicheiros([caminho]); return r; }
+  if (r.ok === false) { await apagarFicheiros([caminho]); return r; }
   await limparAnterior(r.v);
   return { ok: true, v: { ...r.v, avisos: a.avisos, bytes: a.bytes, triangulos: a.triangulos } };
 }
