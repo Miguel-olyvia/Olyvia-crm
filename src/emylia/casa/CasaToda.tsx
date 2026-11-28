@@ -77,7 +77,7 @@ export function CasaToda({ ctx, d, abrirArea, soVer: soVerDado = false }: { ctx?
 
   // ------------------------------------------------------------------ arrastar (o SVG em cm; a vista fica fixa enquanto se arrasta)
   const svg = useRef<SVGSVGElement>(null);
-  const inicio = useRef<{ chave: string; px: number; py: number; x: number; y: number; moveu: boolean } | null>(null);
+  const inicio = useRef<{ chave: string; px: number; py: number; x: number; y: number; moveu: boolean; ux?: number; uy?: number } | null>(null);
   const vb0 = limitesCasa(isolar && sel ? [sel] : casa);
   const margem = Math.max(vb0.w, vb0.h) * 0.08 + 40;
   const vbFixo = useRef(vb0);
@@ -101,14 +101,16 @@ export function CasaToda({ ctx, d, abrirArea, soVer: soVerDado = false }: { ctx?
     const q = noSvg(e), dx = q.x - i.px, dy = q.y - i.py;
     if (!i.moveu && Math.hypot(dx, dy) < Math.max(vb.w, vb.h) / 80) return;
     i.moveu = true;
-    setMexer({ chave: i.chave, x: Math.round(i.x + dx), y: Math.round(i.y + dy) });
+    // a última posição também na referência: ao largar depressa, o estado ainda pode não ter chegado
+    i.ux = Math.round(i.x + dx); i.uy = Math.round(i.y + dy);
+    setMexer({ chave: i.chave, x: i.ux, y: i.uy });
   };
   const soltar = () => {
     const i = inicio.current;
     inicio.current = null;
     if (!i) return;
     if (!i.moveu) { setEscolhida((k) => (k === i.chave ? null : i.chave)); return; }
-    if (mexer) largar(mexer.chave, mexer.x, mexer.y);
+    if (i.ux !== undefined && i.uy !== undefined) largar(i.chave, i.ux, i.uy);
     setMexer(null);
     setEscolhida(i.chave);
   };
