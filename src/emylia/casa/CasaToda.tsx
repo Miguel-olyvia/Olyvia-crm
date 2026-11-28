@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils";
 import type { Negocio } from "../motor";
 import type { Ctx } from "../pecas";
 import { PECAS, lerPlanta, type Planta } from "../planta";
-import { divisoesDoNegocio, estudioDaArea, fDaDivisao, type DivisaoNegocio } from "../divisoesNegocio";
+import { divisoesDoNegocio, estudioDaArea, fDaDivisao, tipoDaArea, type DivisaoNegocio } from "../divisoesNegocio";
 import { projetoDaVisita, projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import { produto } from "@/pages/prototipo-estudio/catalogoFake";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
@@ -144,7 +144,10 @@ export function CasaToda({ ctx, d, abrirArea, soVer: soVerDado = false }: { ctx?
       const r = espacoDoEstudio(A.para3d, depois ? "depois" : "antes");
       if (!r.ok) return [];
       const f = formaDaArea(depois ? A.para3d.depois : A.para3d.antes, a.lugar.r ?? 0);
-      return [{ chave: a.chave, nome: a.nome, m2: a.m2, espaco: r.espaco, modelos: r.modelos,
+      // sem pavimento escolhido no Estúdio, o chão pelo tipo da área: soalho nos quartos, na sala e no hall; cerâmico nas casas de banho e na cozinha
+      const comPav = depois && !!A.projeto?.pavimento, molhada = ["casa_banho", "cozinha"].includes(tipoDaArea(a.nome));
+      const espaco = comPav ? r.espaco : { ...r.espaco, revestimentos: { ...r.espaco.revestimentos, pavimento: molhada ? "ceramico_claro" : "madeira_carvalho" } };
+      return [{ chave: a.chave, nome: a.nome, m2: a.m2, espaco, modelos: r.modelos,
         x: (a.lugar.x - f.ox) / 100, z: (a.lugar.y - f.oy) / 100, rot: (-(a.lugar.r ?? 0) * Math.PI) / 180 }];
     });
   }, [modo, casa, areas, qual]);
