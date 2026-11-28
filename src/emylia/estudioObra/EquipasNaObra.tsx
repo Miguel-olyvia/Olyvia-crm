@@ -14,6 +14,7 @@ import { podeNeg } from "../permissoes";
 import { orgDoModoReal } from "../acessosPortal";
 import { ocupacaoDosTecnicos } from "../preparacaoObra";
 import { guardarEquipasObra, lerEquipasObra, useEquipasObra, type EquipaObra } from "../equipa/equipasObra";
+import { usarTecnicos, type FichaTecnico } from "../equipa/tecnicos";
 import { dataDoDia, estadoVivo, nomeNoPlano } from "./planoVivo";
 import { isoDia } from "../planoObra";
 import type { Ctx } from "../pecas";
@@ -32,6 +33,15 @@ export function EquipasNaObra({ ctx, d, pedirEquipa = false, fecharPedido }: { c
   const ativas = equipas.filter((e) => e.ativa && e.membros.length);
   const [editar, setEditar] = useState<EquipaObra | "nova" | null>(null);
   const [novaPessoa, setNovaPessoa] = useState(false);
+  // 28/11: a pessoa da criação rápida entra logo na lista dos técnicos (sem recarregar); a próxima leitura do Catálogo já a traz do RH
+  const [, setNovos] = useState(0);
+  const oficiosDoCatalogo = useMemo(() => (S.custos?.perfis ?? []).map((x) => ({ id: x.id, n: x.n })), [S.custos?.perfis]);
+  const juntarTecnico = (t: FichaTecnico) => {
+    const lista = [...(S.tecnicos ?? (TECS as FichaTecnico[])).filter((x) => x.id !== t.id), t];
+    S.tecnicos = lista;
+    usarTecnicos(lista);
+    setNovos((n) => n + 1);
+  };
   // a equipa escolhida para vir: mostra-se a proposta de distribuição antes de aplicar
   const [distribuir, setDistribuir] = useState<EquipaObra | null>(null);
   // os dias que faltam desta obra (de hoje ao fim), para dizer se a equipa está livre
@@ -54,7 +64,7 @@ export function EquipasNaObra({ ctx, d, pedirEquipa = false, fecharPedido }: { c
         </div>
         {planeia && (
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" className="min-h-10 rounded-full" onClick={() => setNovaPessoa(true)}><UserPlus className="mr-1.5 h-4 w-4" aria-hidden="true" />Nova pessoa (subcontratado)</Button>
+            <Button type="button" variant="outline" className="min-h-10 rounded-full" onClick={() => setNovaPessoa(true)}><UserPlus className="mr-1.5 h-4 w-4" aria-hidden="true" />Subcontratados</Button>
             <Button type="button" className="min-h-10 rounded-full" onClick={() => setEditar("nova")}><Plus className="mr-1.5 h-4 w-4" aria-hidden="true" />Nova equipa</Button>
           </div>
         )}
@@ -115,7 +125,7 @@ export function EquipasNaObra({ ctx, d, pedirEquipa = false, fecharPedido }: { c
       )}
       {novaPessoa && (
         <Suspense fallback={null}>
-          <NovaPessoaRh aberto={novaPessoa} fechar={() => setNovaPessoa(false)} />
+          <NovaPessoaRh aberto={novaPessoa} fechar={() => setNovaPessoa(false)} oficios={oficiosDoCatalogo} aoCriarTecnico={juntarTecnico} />
         </Suspense>
       )}
     </section>
