@@ -368,6 +368,24 @@ Duas abas novas no grupo **Recursos Humanos** (Gestão): **Técnicos** e **Agend
   - **RH › Agenda** mostra-se a quem está a ver: com equipa, "Agenda da equipa" (ele e quem lhe reporta; Operações = Filipe e os técnicos; a Direção vê toda a gente e as visitas de quem não é pessoa do RH); sem equipa, "A minha agenda". `AgendaEquipa` aceita `pessoas`, `comOutros`, `titulo`, `descricao`; o nome abre a ficha de qualquer pessoa.
   - **Hoje:** bloco "A minha agenda" (`equipa/MinhaAgenda.tsx`, carregado à parte) em `Hoje.tsx`, `HojeSimples.tsx`, `v2/HojeV2.tsx` e `HojeTecnico.tsx`: a semana da pessoa, um dia por linha (cabe no telemóvel), semana anterior/seguinte, hoje destacado; a tarefa abre a obra, a visita abre o negócio. Testes: `equipa/agendaPessoas.test.ts` e `equipa/AgendaPapeis.test.tsx`.
 
+
+## Subcontratados no Estúdio da obra (28/11/2026)
+
+No separador **Equipa** do Estúdio da obra, o botão **Subcontratados** (`estudioObra/NovaPessoaNaObra.tsx`) pergunta primeiro como criar:
+
+- **Criação rápida** (o pedido do cliente: «1 empresa subcontratada, 2 técnicos da empresa»):
+  - **Empresa:** uma lista com as equipas de obra que já existem e, no fim, «+ Criar empresa…» (campo com o nome). A empresa é uma equipa de obra (`equipa/equipasObra.ts`, `neg_equipas_guardar`).
+  - **Técnicos da empresa:** o nome e o que faz (os ofícios do Catálogo, `S.custos.perfis`, por toque); «Juntar outro técnico» para vários. Telefone da empresa opcional.
+  - Cada técnico fica no RH só com o núcleo (`criarPessoa` de `usePessoas`): primeiro nome e apelido (só um nome: o apelido é o da empresa, `nomeDoTecnico`), o cargo técnico de obra escolhido por `cargoParaRapida` e os ofícios (`rh_ler_oficios_pessoa` / `rh_guardar_oficios_pessoa`, pelo nome). Sem conta e sem convite.
+  - Entra logo nas equipas da página (`EquipasNaObra.juntarTecnico`: `S.tecnicos` + `usarTecnicos`), sem recarregar; a leitura seguinte do Catálogo já o traz do RH.
+- **Completa:** a ficha toda do RH (`NovaPessoaDialogo`), como antes.
+- Testes: `estudioObra/novaPessoaRapida.test.ts`.
+
+### Por fazer (subcontratados)
+
+- **Cargo «Subempreiteiro» no RH** (Rúben, 28/11: «fazes depois»): criar no RH um cargo marcado como técnico de obra e **sem ofícios**. `cargoParaRapida` escolhe-o sozinho pelo nome (subempreit, subcontrat, extern). Hoje, sem ele, os técnicos da criação rápida ficam com o cargo técnico com menos ofícios herdados (no testarh, «Oficial Principal»).
+- **Portal de fornecedor para a empresa subcontratada** (para depois): a empresa entra no portal, insere a sua equipa, diz os serviços que fornece e associa os técnicos aos serviços.
+- **Acesso das equipas externas ao «Hoje»** (adiado a 28/11): o testarh está atrás da proteção do Vercel. Quando voltar: um 2.º projeto no Vercel com produção = `feature/rh-pessoas`, a base do testarh e um domínio próprio (o domínio também nos redirects do Supabase); antes, confirmar que a conta de um técnico externo só vê o «Hoje».
 ---
 
 ## Como funciona (o essencial)
