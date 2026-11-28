@@ -4,6 +4,21 @@
 // (de 90 em 90°). Fica no negócio (f.casa_layout), pelo nome da área (o prefixo muda quando a principal muda; o nome não).
 // Uma área sem lugar entra à direita das que já o têm. Ao largar, encaixa nas paredes das outras (até 30 cm).
 import { cantos, faltaFechar, areaChaoM2, type PecaPlanta, type Planta, type Ponto } from "../planta";
+import { tipoDaArea } from "../divisoesNegocio";
+
+/** 28/11 (Rúben: «está tudo cinza»): a cor do chão de uma área pelo tipo, sem pavimento escolhido: madeira nos quartos, na sala e no
+ *  hall; pedra clara nas casas de banho e na cozinha. */
+const CHAO: Record<ReturnType<typeof tipoDaArea>, string> = {
+  casa_banho: "#ddd2bd", cozinha: "#e8dfcb", quarto: "#c69a6b", sala: "#c69a6b", outro: "#c9a176",
+};
+export const corDoChao = (nome: string): string => CHAO[tipoDaArea(nome)];
+/** A cor de cada tipo de peça, quando não há produto escolhido (louça branca, bancada, armários, eletrodomésticos). */
+const COR_TIPO: Partial<Record<string, string>> = {
+  sanita: "#f7f7f4", bide: "#f7f7f4", base: "#f4f4f1", banheira: "#f7f7f4", lava: "#f2f2ee", movel: "#ece4d6", coluna: "#ece4d6",
+  espelho: "#cfe4ec", toalheiro: "#f2f2f2", bancada: "#e9dfc8", placa: "#26262a", forno: "#3a3a3f", frigorifico: "#cdd2d6",
+  maquina: "#e6e7e8", exaustor: "#b8bdc2", armario: "#e3d3b6",
+};
+export const corDaPeca = (tipo: string, nome?: string): string => (/roupeiro/i.test(nome ?? "") ? "#d8c09a" : COR_TIPO[tipo] ?? "#d6d0c6");
 
 export type Rotacao = 0 | 90 | 180 | 270;
 export interface LugarArea { x: number; y: number; r?: Rotacao }

@@ -18,7 +18,7 @@ import { espacoDoEstudio } from "@/pages/prototipo-estudio/estudioNo3D";
 import { Visualizador3DSeguro } from "../planta3d/Visualizador3DSeguro";
 import { temWebGL } from "../planta3d/carregarVisualizador3D";
 import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
-import { areaTotal, arrumarCasa, caixaDe, encaixar, gravarLayout, lerLayout, limitesCasa, rodarMais, type AreaNaCasa, type LayoutCasa } from "./casaLayout";
+import { areaTotal, arrumarCasa, corDaPeca, corDoChao, caixaDe, encaixar, gravarLayout, lerLayout, limitesCasa, rodarMais, type AreaNaCasa, type LayoutCasa } from "./casaLayout";
 import type { Area3D } from "./CasaToda3D";
 
 const CasaToda3D = lazy(() => import("./CasaToda3D"));
@@ -127,7 +127,8 @@ export function CasaToda({ ctx, d, abrirArea, soVer: soVerDado = false }: { ctx?
   // ------------------------------------------------------------------ o 3D
   const areas3d: Area3D[] = casa.map((a, i) => {
     const A = areas[i], p = A.projeto;
-    return { ...a, peDireito: A.peDireito, cor: (id) => (qual === "depois" && p ? produto(p.escolhas[id])?.hex : undefined) };
+    return { ...a, peDireito: A.peDireito, cor: (id) => (qual === "depois" && p ? produto(p.escolhas[id])?.hex : undefined),
+      pavimento: qual === "depois" && p?.pavimento ? produto(p.pavimento)?.hex : undefined };
   });
   const isolada3d = modo === "3d" && isolar && selA?.para3d && temWebGL() ? espacoDoEstudio(selA.para3d, qual === "hoje" || !selA.projeto ? "antes" : "depois") : null;
 
@@ -173,13 +174,14 @@ export function CasaToda({ ctx, d, abrirArea, soVer: soVerDado = false }: { ctx?
                 onPointerDown={(e) => pegar(e, a)} onKeyDown={(e) => teclas(e, a)}
                 className={cn("outline-none transition-opacity focus-visible:[&>polygon]:stroke-ring", !soVer && !isolar && "cursor-grab active:cursor-grabbing")} opacity={apagada ? 0.35 : 1}>
                 {a.forma.fecha || semDesenho
-                  ? <polygon points={pts} className={cn(on ? "fill-primary/15 stroke-primary" : "fill-card stroke-foreground", semDesenho && "stroke-dashed")} strokeWidth={on ? letra / 4 : letra / 6} strokeDasharray={semDesenho ? `${letra / 2} ${letra / 3}` : undefined} strokeLinejoin="round" />
+                  ? <polygon points={pts} style={semDesenho ? undefined : { fill: (qual === "depois" && p?.pavimento ? produto(p.pavimento)?.hex : undefined) ?? corDoChao(a.nome), fillOpacity: on ? 0.75 : 0.45 }}
+                      className={cn(on ? "fill-primary/15 stroke-primary" : "fill-card stroke-foreground", semDesenho && "stroke-dashed")} strokeWidth={on ? letra / 4 : letra / 6} strokeDasharray={semDesenho ? `${letra / 2} ${letra / 3}` : undefined} strokeLinejoin="round" />
                   : <polyline points={pts} fill="none" className={on ? "stroke-primary" : "stroke-foreground"} strokeWidth={letra / 5} strokeLinejoin="round" strokeLinecap="round" />}
                 {a.forma.pecas.map((pc) => {
                   const c = cor(pc.id), ang = (pc.rot ?? 0) + (a.lugar.r ?? 0), x = pc.cx + a.lugar.x, y = pc.cy + a.lugar.y;
                   return (
                     <rect key={pc.id} x={x - pc.w / 2} y={y - pc.h / 2} width={pc.w} height={pc.h} rx={Math.min(pc.w, pc.h) / 8} transform={ang ? `rotate(${ang} ${x} ${y})` : undefined}
-                      className={c ? "stroke-foreground/50" : PECAS[pc.tipo]?.abertura ? "fill-amber-200 stroke-amber-700" : "fill-primary/15 stroke-primary/70"} style={c ? { fill: c } : undefined} strokeWidth={letra / 14} />
+                      className={PECAS[pc.tipo]?.abertura && !c ? "fill-amber-200 stroke-amber-700" : "stroke-foreground/50"} style={PECAS[pc.tipo]?.abertura && !c ? undefined : { fill: c ?? corDaPeca(pc.tipo, pc.nome) }} strokeWidth={letra / 14} />
                   );
                 })}
                 <text x={a.lugar.x + a.forma.w / 2} y={a.lugar.y + a.forma.h / 2} textAnchor="middle" fontSize={lt} className="pointer-events-none fill-foreground font-semibold"
