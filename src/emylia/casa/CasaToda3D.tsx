@@ -102,13 +102,14 @@ function Area({ a, destaque, apagada, escolher, maquete }: { a: Area3D; destaque
             </mesh>
           );
         }
-        const h = pc.dh ? pc.dh / 100 : ALTURA[pc.tipo] ?? 0.8;
+        // na maquete nenhuma peça passa das paredes; e fica 1 cm afastada delas (sem se sobrepor à parede)
+        const h0 = pc.dh ? pc.dh / 100 : ALTURA[pc.tipo] ?? 0.8, h = maquete ? Math.min(h0, altura - 0.02) : h0;
         const z0 = pc.alt ? pc.alt / 100 : BASE[pc.tipo] ?? 0;
         const cor = a.cor(pc.id) ?? corDaPeca(pc.tipo, pc.nome);
         const vidro = pc.tipo === "espelho";
         return (
           <mesh key={pc.id} position={[x, Math.min(z0, Math.max(0, altura - h)) + h / 2, z]} rotation={[0, -ang, 0]} castShadow receiveShadow>
-            <boxGeometry args={[Math.max(0.02, pc.w / 100), Math.max(0.02, h), Math.max(0.02, pc.h / 100)]} />
+            <boxGeometry args={[Math.max(0.02, pc.w / 100 - 0.02), Math.max(0.02, h), Math.max(0.02, pc.h / 100 - 0.02)]} />
             <meshStandardMaterial color={cor} roughness={vidro ? 0.05 : 0.55} metalness={vidro ? 0.6 : 0.05} transparent={transp} opacity={op} />
           </mesh>
         );
