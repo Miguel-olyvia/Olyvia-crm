@@ -31,6 +31,9 @@ describe("casa toda: o lugar das áreas (28/11)", () => {
     const sala = { x: 0, y: 0, w: 500, h: 400 };
     expect(encaixar({ x: 517, y: 12, w: 300, h: 250 }, [sala])).toEqual({ x: 500, y: 0 });
     expect(encaixar({ x: 603, y: 102, w: 300, h: 250 }, [sala])).toEqual({ x: 605, y: 100 });
+    // largada por cima da sala: sai pelo lado mais perto, encostada por fora
+    expect(encaixar({ x: 0, y: 300, w: 150, h: 160 }, [sala])).toEqual({ x: 0, y: 400 });
+    expect(encaixar({ x: 420, y: 100, w: 150, h: 160 }, [sala])).toEqual({ x: 500, y: 100 });
   });
   it("lê o layout com cuidado e soma a área", () => {
     expect(lerLayout('{"sala":{"x":10.4,"y":"a"},"coz":{"x":1,"y":2,"r":90},"wc":{"x":1,"y":2,"r":45}}')).toEqual({ coz: { x: 1, y: 2, r: 90 }, wc: { x: 1, y: 2 } });

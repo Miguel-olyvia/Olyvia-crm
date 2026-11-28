@@ -101,8 +101,17 @@ export function encaixar(m: Caixa, outras: readonly Caixa[], tol = 30): { x: num
   // só se encosta a quem está perto no outro eixo (sobrepõe-se, ou quase)
   const pertoY = outras.filter((o) => m.y < o.y + o.h + tol && m.y + m.h > o.y - tol);
   const pertoX = outras.filter((o) => m.x < o.x + o.w + tol && m.x + m.w > o.x - tol);
-  const x = melhor(m.x, pertoY.flatMap((o) => [o.x + o.w, o.x - m.w, o.x, o.x + o.w - m.w]));
-  const y = melhor(m.y, pertoX.flatMap((o) => [o.y + o.h, o.y - m.h, o.y, o.y + o.h - m.h]));
+  let x = melhor(m.x, pertoY.flatMap((o) => [o.x + o.w, o.x - m.w, o.x, o.x + o.w - m.w]));
+  let y = melhor(m.y, pertoX.flatMap((o) => [o.y + o.h, o.y - m.h, o.y, o.y + o.h - m.h]));
+  // uma área nunca fica por cima de outra: sai pelo lado mais perto (encostada à parede dela, por fora)
+  for (let volta = 0; volta < 4; volta++) {
+    const o = outras.find((c) => x < c.x + c.w && x + m.w > c.x && y < c.y + c.h && y + m.h > c.y);
+    if (!o) break;
+    const saidas = [
+      { x: o.x - m.w, y }, { x: o.x + o.w, y }, { x, y: o.y - m.h }, { x, y: o.y + o.h },
+    ].sort((p, q) => Math.hypot(p.x - x, p.y - y) - Math.hypot(q.x - x, q.y - y));
+    ({ x, y } = saidas[0]);
+  }
   return { x, y };
 }
 
