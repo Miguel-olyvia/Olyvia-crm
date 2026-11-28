@@ -25,7 +25,9 @@ function corDoTema(nome: string, omissao: string): string {
   } catch { return omissao; }
 }
 
-function Area({ a, destaque, apagada, escolher }: { a: Area3D; destaque: boolean; apagada: boolean; escolher: (k: string) => void }) {
+function Area({ a, destaque, apagada, escolher, maquete }: { a: Area3D; destaque: boolean; apagada: boolean; escolher: (k: string) => void; maquete: boolean }) {
+  // na casa toda as paredes ficam baixas (como uma maquete), para se ver o que está dentro; isolada, à altura verdadeira
+  const altura = maquete ? Math.min(a.peDireito, 1.1) : a.peDireito;
   const ox = a.lugar.x / 100, oz = a.lugar.y / 100, pts = a.forma.pts.map((q) => ({ x: q.x / 100 + ox, z: q.y / 100 + oz }));
   const chao = useMemo(() => (a.forma.fecha ? new THREE.ShapeGeometry(new THREE.Shape(pts.map((q) => new THREE.Vector2(q.x, -q.z)))) : null), [a.forma, ox, oz]); // eslint-disable-line react-hooks/exhaustive-deps
   const primaria = useMemo(() => corDoTema("--primary", "#2563eb"), []);
@@ -44,8 +46,8 @@ function Area({ a, destaque, apagada, escolher }: { a: Area3D; destaque: boolean
         const L = Math.hypot(q.x - p.x, q.z - p.z);
         if (L < 0.01) return null;
         return (
-          <mesh key={i} position={[(p.x + q.x) / 2, a.peDireito / 2, (p.z + q.z) / 2]} rotation={[0, -Math.atan2(q.z - p.z, q.x - p.x), 0]} castShadow>
-            <boxGeometry args={[L + PAREDE_M, a.peDireito, PAREDE_M]} />
+          <mesh key={i} position={[(p.x + q.x) / 2, altura / 2, (p.z + q.z) / 2]} rotation={[0, -Math.atan2(q.z - p.z, q.x - p.x), 0]} castShadow>
+            <boxGeometry args={[L + PAREDE_M, altura, PAREDE_M]} />
             <meshStandardMaterial color={destaque ? "#f8fafc" : "#d6d3d1"} transparent opacity={0.85 * op} />
           </mesh>
         );
@@ -62,9 +64,9 @@ function Area({ a, destaque, apagada, escolher }: { a: Area3D; destaque: boolean
         );
       })}
       {!apagada && (
-        <Html position={[cx, a.peDireito + 0.25, cz]} center distanceFactor={9} zIndexRange={[10, 0]}>
+        <Html position={[cx, altura + 0.3, cz]} center distanceFactor={14} zIndexRange={[10, 0]}>
           <button type="button" onClick={() => escolher(a.chave)}
-            className={`whitespace-nowrap rounded-full px-2.5 py-1 text-xs font-semibold shadow ${destaque ? "bg-primary text-primary-foreground" : "bg-card text-foreground"}`}>
+            className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold shadow ${destaque ? "bg-primary text-primary-foreground" : "bg-card text-foreground"}`}>
             {a.nome}{a.m2 !== null ? ` · ${a.m2.toLocaleString("pt-PT", { maximumFractionDigits: 1 })} m²` : ""}
           </button>
         </Html>
@@ -80,12 +82,12 @@ export default function CasaToda3D({ areas, escolhida, isolar, escolher, descric
   const b = limitesCasa(vis);
   const cx = (b.x + b.w / 2) / 100, cz = (b.y + b.h / 2) / 100, tam = Math.max(b.w, b.h) / 100;
   return (
-    <Canvas shadows camera={{ position: [cx + tam * 0.35, tam * 1.05 + 2, cz + tam * 0.95 + 1.5], fov: 45 }} aria-label={descricao} role="img"
+    <Canvas shadows camera={{ position: [cx + tam * 0.15, tam * 0.62 + 1.5, cz + tam * 0.58 + 1.2], fov: 45 }} aria-label={descricao} role="img"
       onPointerMissed={() => escolhida && !isolar && escolher("")}>
       <color attach="background" args={["#f5f5f4"]} />
       <hemisphereLight args={["#ffffff", "#d6d3d1", 0.9]} />
       <directionalLight position={[cx + 6, 12, cz + 4]} intensity={1.1} castShadow />
-      {vis.map((a) => <Area key={a.chave} a={a} destaque={a.chave === escolhida} apagada={!!escolhida && !isolar && a.chave !== escolhida} escolher={escolher} />)}
+      {vis.map((a) => <Area key={a.chave} a={a} destaque={a.chave === escolhida} apagada={!!escolhida && !isolar && a.chave !== escolhida} escolher={escolher} maquete={!isolar} />)}
       <OrbitControls target={[cx, 0, cz]} maxPolarAngle={Math.PI / 2.05} makeDefault />
     </Canvas>
   );

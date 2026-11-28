@@ -10,8 +10,8 @@ import { cn } from "@/lib/utils";
 import type { Negocio } from "../motor";
 import type { Ctx } from "../pecas";
 import { PECAS, lerPlanta, type Planta } from "../planta";
-import { divisoesDoNegocio, fDaDivisao, type DivisaoNegocio } from "../divisoesNegocio";
-import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
+import { divisoesDoNegocio, estudioDaArea, fDaDivisao, type DivisaoNegocio } from "../divisoesNegocio";
+import { projetoDaVisita, projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import { produto } from "@/pages/prototipo-estudio/catalogoFake";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
 import { espacoDoEstudio } from "@/pages/prototipo-estudio/estudioNo3D";
@@ -25,7 +25,9 @@ const CasaToda3D = lazy(() => import("./CasaToda3D"));
 const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 1 });
 const peDireitoM = (v: string | undefined) => { const m = (v ?? "").replace(",", ".").match(/(\d+(?:\.\d+)?)/); return m ? Number(m[1]) : 2.5; };
 
-export interface AreaDaCasa { div: DivisaoNegocio; projeto: Projeto | null; hoje: Planta | null; depois: Planta | null; peDireito: number }
+export interface AreaDaCasa { div: DivisaoNegocio; projeto: Projeto | null; hoje: Planta | null; depois: Planta | null; peDireito: number
+  /** Para o 3D com modelos da área isolada: o projeto do Estúdio, ou um feito da planta desenhada (as peças como estão). */
+  para3d: Projeto | null }
 
 /** As áreas do negócio com o que cada uma tem: o projeto do Estúdio, a planta de hoje (a corrigida no local, a da visita ou a do Estúdio)
  *  e a de como vai ficar (a do Estúdio; sem ele, a de hoje). */
@@ -34,7 +36,8 @@ export function areasDaCasa(d: Pick<Negocio, "f" | "linha">): AreaDaCasa[] {
     const fx = fDaDivisao(d.f, div), projeto = projetoDoNegocio(fx);
     const hoje = lerPlanta(fx.retif_planta) ?? lerPlanta(fx.planta) ?? (projeto?.antes.paredes.length ? projeto.antes : null);
     const depois = projeto?.depois.paredes.length ? projeto.depois : hoje;
-    return { div, projeto, hoje, depois, peDireito: projeto ? projeto.alturas.peDireito / 100 : peDireitoM(fx.diag_pe_direito_m) };
+    const para3d = projeto ?? (hoje ? projetoDaVisita(div.nome, { ...fx, planta: JSON.stringify(hoje) }, undefined, undefined, estudioDaArea(div.nome)) : null);
+    return { div, projeto, hoje, depois, para3d, peDireito: projeto ? projeto.alturas.peDireito / 100 : peDireitoM(fx.diag_pe_direito_m) };
   });
 }
 
@@ -124,7 +127,7 @@ export function CasaToda({ ctx, d, abrirArea, soVer: soVerDado = false }: { ctx?
     const A = areas[i], p = A.projeto;
     return { ...a, peDireito: A.peDireito, cor: (id) => (qual === "depois" && p ? produto(p.escolhas[id])?.hex : undefined) };
   });
-  const isolada3d = modo === "3d" && isolar && selA?.projeto && temWebGL() ? espacoDoEstudio(selA.projeto, qual === "hoje" ? "antes" : "depois") : null;
+  const isolada3d = modo === "3d" && isolar && selA?.para3d && temWebGL() ? espacoDoEstudio(selA.para3d, qual === "hoje" || !selA.projeto ? "antes" : "depois") : null;
 
   if (areas.length < 2) return null;
   const semPlanta = areas.filter((a) => !(qual === "hoje" ? a.hoje : a.depois)).map((a) => a.div.nome);
@@ -161,6 +164,8 @@ export function CasaToda({ ctx, d, abrirArea, soVer: soVerDado = false }: { ctx?
             const p = A?.projeto, cor = (id: string) => (qual === "depois" && p ? produto(p.escolhas[id])?.hex : undefined);
             const pts = a.forma.pts.map((q) => `${q.x + a.lugar.x},${q.y + a.lugar.y}`).join(" ");
             const semDesenho = !(qual === "hoje" ? A?.hoje : A?.depois);
+            // o nome cabe na área (uma casa de banho pequena ao lado de uma sala grande)
+            const lt = Math.max(8, Math.min(letra, (a.forma.w * 0.9) / Math.max(4, a.nome.length * 0.56), a.forma.h / 3.2));
             return (
               <g key={a.chave} role="button" tabIndex={0} aria-pressed={on} aria-label={`${a.nome}${a.m2 !== null ? `, ${nf(a.m2)} m²` : ""}${soVer ? "" : ". Setas para mover, R para rodar."}`}
                 onPointerDown={(e) => pegar(e, a)} onKeyDown={(e) => teclas(e, a)}
@@ -175,17 +180,17 @@ export function CasaToda({ ctx, d, abrirArea, soVer: soVerDado = false }: { ctx?
                       className={c ? "stroke-foreground/50" : PECAS[pc.tipo]?.abertura ? "fill-amber-200 stroke-amber-700" : "fill-primary/15 stroke-primary/70"} style={c ? { fill: c } : undefined} strokeWidth={letra / 14} />
                   );
                 })}
-                <text x={a.lugar.x + a.forma.w / 2} y={a.lugar.y + a.forma.h / 2} textAnchor="middle" fontSize={letra} className="pointer-events-none fill-foreground font-semibold"
-                  style={{ paintOrder: "stroke", stroke: "hsl(var(--card))", strokeWidth: letra / 4 }}>{a.nome}</text>
-                <text x={a.lugar.x + a.forma.w / 2} y={a.lugar.y + a.forma.h / 2 + letra * 1.15} textAnchor="middle" fontSize={letra * 0.75} className="pointer-events-none fill-muted-foreground"
-                  style={{ paintOrder: "stroke", stroke: "hsl(var(--card))", strokeWidth: letra / 4 }}>{semDesenho ? "por desenhar" : a.m2 !== null ? `${nf(a.m2)} m²` : "a planta não fecha"}</text>
+                <text x={a.lugar.x + a.forma.w / 2} y={a.lugar.y + a.forma.h / 2} textAnchor="middle" fontSize={lt} className="pointer-events-none fill-foreground font-semibold"
+                  style={{ paintOrder: "stroke", stroke: "hsl(var(--card))", strokeWidth: lt / 4 }}>{a.nome}</text>
+                <text x={a.lugar.x + a.forma.w / 2} y={a.lugar.y + a.forma.h / 2 + lt * 1.15} textAnchor="middle" fontSize={lt * 0.75} className="pointer-events-none fill-muted-foreground"
+                  style={{ paintOrder: "stroke", stroke: "hsl(var(--card))", strokeWidth: lt / 4 }}>{semDesenho ? "por desenhar" : a.m2 !== null ? `${nf(a.m2)} m²` : "a planta não fecha"}</text>
               </g>
             );
           })}
         </svg>
       ) : isolada3d && isolada3d.ok ? (
         <div className="h-[56vh] min-h-[320px] overflow-hidden rounded-xl border border-border">
-          <Visualizador3DSeguro alternativa={<PlantaVista planta={(qual === "hoje" ? selA!.hoje : selA!.depois) ?? selA!.projeto!.depois} titulo={selA!.div.nome} />} refazer={`${escolhida}|${qual}`}
+          <Visualizador3DSeguro alternativa={<PlantaVista planta={(qual === "hoje" ? selA!.hoje : selA!.depois) ?? selA!.para3d!.antes} titulo={selA!.div.nome} />} refazer={`${escolhida}|${qual}`}
             espaco={isolada3d.espaco} modelos={isolada3d.modelos} vista="3d" teto={false} etiquetas={false} descricao={`A ${selA!.div.nome.toLowerCase()} em 3D`} selecionada={null} onSelecionar={() => {}} />
         </div>
       ) : temWebGL() ? (
