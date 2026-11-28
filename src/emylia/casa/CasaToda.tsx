@@ -16,12 +16,16 @@ import { produto } from "@/pages/prototipo-estudio/catalogoFake";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
 import { espacoDoEstudio } from "@/pages/prototipo-estudio/estudioNo3D";
 import { Visualizador3DSeguro } from "../planta3d/Visualizador3DSeguro";
-import { temWebGL } from "../planta3d/carregarVisualizador3D";
+import { carregarVisualizador3D, temWebGL } from "../planta3d/carregarVisualizador3D";
+import { Falha3D } from "../planta3d/Visualizador3DSeguro";
+import type { EspacoNaCasa } from "../planta3d/Visualizador3D";
 import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
-import { areaTotal, arrumarCasa, corDaPeca, corDoChao, caixaDe, encaixar, gravarLayout, lerLayout, limitesCasa, rodarMais, type AreaNaCasa, type LayoutCasa } from "./casaLayout";
+import { areaTotal, arrumarCasa, corDaPeca, corDoChao, formaDaArea, caixaDe, encaixar, gravarLayout, lerLayout, limitesCasa, rodarMais, type AreaNaCasa, type LayoutCasa } from "./casaLayout";
 import type { Area3D } from "./CasaToda3D";
 
 const CasaToda3D = lazy(() => import("./CasaToda3D"));
+// 28/11 (Rúben: «os modelos 3D não carregam»): a casa toda com os modelos verdadeiros (o visualizador, CasaEm3D); se falhar, as caixas
+const novaCasaEm3D = () => lazy(() => carregarVisualizador3D().then((m) => ({ default: m.CasaEm3D })));
 const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 1 });
 const peDireitoM = (v: string | undefined) => { const m = (v ?? "").replace(",", ".").match(/(\d+(?:\.\d+)?)/); return m ? Number(m[1]) : 2.5; };
 
@@ -130,6 +134,22 @@ export function CasaToda({ ctx, d, abrirArea, soVer: soVerDado = false }: { ctx?
     return { ...a, peDireito: A.peDireito, cor: (id) => (qual === "depois" && p ? produto(p.escolhas[id])?.hex : undefined),
       pavimento: qual === "depois" && p?.pavimento ? produto(p.pavimento)?.hex : undefined };
   });
+  // os espaços 3D com modelos de cada área, no lugar dela: um ponto da planta vai para lugar + rodado − (ox, oy)
+  const espacosCasa = useMemo<EspacoNaCasa[]>(() => {
+    if (modo !== "3d" || !temWebGL()) return [];
+    return casa.flatMap((a, i) => {
+      const A = areas[i];
+      if (!A?.para3d) return [];
+      const depois = qual === "depois" && !!A.projeto;
+      const r = espacoDoEstudio(A.para3d, depois ? "depois" : "antes");
+      if (!r.ok) return [];
+      const f = formaDaArea(depois ? A.para3d.depois : A.para3d.antes, a.lugar.r ?? 0);
+      return [{ chave: a.chave, nome: a.nome, m2: a.m2, espaco: r.espaco, modelos: r.modelos,
+        x: (a.lugar.x - f.ox) / 100, z: (a.lugar.y - f.oy) / 100, rot: (-(a.lugar.r ?? 0) * Math.PI) / 180 }];
+    });
+  }, [modo, casa, areas, qual]);
+  const [CasaEm3D, setCasaEm3D] = useState(() => ({ C: novaCasaEm3D(), n: 0 }));
+  const primaria = useMemo(() => { try { const v = getComputedStyle(document.documentElement).getPropertyValue("--primary").trim(); const m = /^([\d.]+)\s+([\d.]+)%\s+([\d.]+)%/.exec(v); return m ? `hsl(${m[1]}, ${m[2]}%, ${m[3]}%)` : "#6d28d9"; } catch { return "#6d28d9"; } }, []);
   const isolada3d = modo === "3d" && isolar && selA?.para3d && temWebGL() ? espacoDoEstudio(selA.para3d, qual === "hoje" || !selA.projeto ? "antes" : "depois") : null;
 
   if (areas.length < 2) return null;
@@ -200,7 +220,15 @@ export function CasaToda({ ctx, d, abrirArea, soVer: soVerDado = false }: { ctx?
       ) : temWebGL() ? (
         <div className="h-[56vh] min-h-[320px] overflow-hidden rounded-xl border border-border">
           <Suspense fallback={<p role="status" className="grid h-full place-items-center text-[15px] text-muted-foreground">A abrir o 3D…</p>}>
-            <CasaToda3D areas={areas3d} escolhida={escolhida} isolar={isolar} escolher={(k) => setEscolhida(k || null)} descricao={`A casa toda em 3D: ${casa.map((a) => a.nome).join(", ")}`} />
+            {espacosCasa.length && !isolar ? (
+              <Falha3D key={CasaEm3D.n} alternativa={<CasaToda3D areas={areas3d} escolhida={escolhida} isolar={isolar} escolher={(k) => setEscolhida(k || null)} descricao={`A casa toda em 3D: ${casa.map((a) => a.nome).join(", ")}`} />}
+                tentarDeNovo={() => setCasaEm3D((x) => ({ C: novaCasaEm3D(), n: x.n + 1 }))}>
+                <CasaEm3D.C espacos={espacosCasa} escolhida={escolhida} escolher={(k) => setEscolhida(k || null)} corDestaque={primaria}
+                  descricao={`A casa toda em 3D: ${casa.map((a) => a.nome).join(", ")}`} />
+              </Falha3D>
+            ) : (
+              <CasaToda3D areas={areas3d} escolhida={escolhida} isolar={isolar} escolher={(k) => setEscolhida(k || null)} descricao={`A casa toda em 3D: ${casa.map((a) => a.nome).join(", ")}`} />
+            )}
           </Suspense>
         </div>
       ) : <p className="rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">Este aparelho não mostra 3D. Use a planta.</p>}

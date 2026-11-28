@@ -1,6 +1,7 @@
 import { describe, expect, it, beforeEach } from "vitest";
 import { arrumarCasa, chaveDaArea, encaixar, formaDaArea, lerLayout, limitesCasa, rodarMais, areaTotal } from "./casaLayout";
-import { areasPorJuntar, comDivisao, divisoesDoNegocio, estudioDaArea, nomeDeArea, tipoDaArea } from "../divisoesNegocio";
+import { areasPorJuntar, comDivisao, divisoesDoNegocio, estudioDaArea, nomeDeArea, semDivisao, tipoDaArea } from "../divisoesNegocio";
+import { reorganizarDivisoes } from "../campos";
 import { areaDoEndereco, chaveDoEstudio, guardarProjetoLocal, lerProjetoLocal, projetoVazio } from "@/pages/prototipo-estudio/projetoGuardado";
 import { lerVolta, devolverAoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import type { Planta } from "../planta";
@@ -59,6 +60,16 @@ describe("casa toda: as áreas do negócio", () => {
     expect(tipoDaArea("Casa de banho suite")).toBe("casa_banho");
     expect(estudioDaArea("Copa")).toBe("Cozinha");
     expect(estudioDaArea("Sala")).toBe("Casa de banho");
+  });
+  it("tira uma divisão; a última não sai; a principal que sai passa a vez à seguinte, sem perder nada", () => {
+    expect(semDivisao({ diag_tipo_area: "Casa de banho, Cozinha, Despensa" }, "despensa")).toBe("Casa de banho, Cozinha");
+    expect(semDivisao({ diag_tipo_area: "Cozinha" }, "Cozinha")).toBeNull();
+    expect(semDivisao({ diag_tipo_area: "Cozinha, Sala" }, "Quarto")).toBeNull();
+    const f: Record<string, string> = { diag_tipo_area: "Casa de banho, Cozinha", diag_div_principal: "Casa de banho", planta: "WC", div_coz_planta: "COZ" };
+    f.diag_tipo_area = semDivisao(f, "Casa de banho")!;
+    reorganizarDivisoes(f);
+    expect(f.planta).toBe("COZ");
+    expect(f.div_wc_planta).toBe("WC");
   });
 });
 

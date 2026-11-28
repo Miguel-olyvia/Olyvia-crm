@@ -1323,3 +1323,80 @@ export default function Visualizador3D({ espaco, modelos, vista, teto, etiquetas
     </div>
   );
 }
+
+/* ------------------------------------------------------------------ 28/11: a casa toda com os modelos */
+// (Rúben, Schroeder: «os modelos 3D não carregam» na casa toda). Várias áreas na mesma cena, cada uma no seu lugar (um grupo com a
+// posição e a rotação da área na casa, casaLayout.ts): o chão com o revestimento e as peças com os modelos verdadeiros, como no
+// visualizador de uma área; as paredes baixas (uma maquete), para se ver o que está dentro. Tocar numa área destaca-a.
+export interface EspacoNaCasa {
+  chave: string; nome: string; m2: number | null; espaco: Espaco; modelos: Record<string, ProdutoModelo3D>;
+  /** O lugar do grupo na casa (m) e a rotação (radianos, em torno do eixo vertical). */
+  x: number; z: number; rot: number;
+}
+const PAREDE_CASA = "#f1ece4";
+function ParedeBaixa({ parede, indice, espaco, h, cor }: { parede: Parede; indice: number; espaco: Espaco; h: number; cor: string }) {
+  const c = comprimento(parede), esp = parede.espessura || 0.1, n = normalInterior(espaco.paredes, indice);
+  const mx = (parede.a.x + parede.b.x) / 2 - (n.x * esp) / 2, mz = (parede.a.y + parede.b.y) / 2 - (n.y * esp) / 2;
+  return (
+    <mesh position={[mx, h / 2, mz]} rotation={[0, -Math.atan2(parede.b.y - parede.a.y, parede.b.x - parede.a.x), 0]} castShadow receiveShadow>
+      <boxGeometry args={[c + esp, h, esp]} />
+      <meshStandardMaterial color={cor} roughness={0.9} />
+    </mesh>
+  );
+}
+function DestaqueChao({ espaco, cor }: { espaco: Espaco; cor: string }) {
+  const geo = useMemo(() => new THREE.ShapeGeometry(new THREE.Shape(espaco.paredes.map((p) => new THREE.Vector2(p.a.x, -p.a.y)))), [espaco.paredes]);
+  useEffect(() => () => geo.dispose(), [geo]);
+  return <mesh geometry={geo} rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.004, 0]}><meshBasicMaterial color={cor} transparent opacity={0.22} depthWrite={false} /></mesh>;
+}
+export function CasaEm3D({ espacos, escolhida, escolher, descricao, altura = 1.1, corDestaque = "#6d28d9" }: {
+  espacos: EspacoNaCasa[]; escolhida: string | null; escolher: (chave: string) => void; descricao: string; altura?: number; corDestaque?: string;
+}) {
+  const alvo = useRef<AlvoArrasto>({ grupo: null, camera: null, controls: null });
+  const nada = useCallback(() => {}, []);
+  // os limites da casa (m), para a luz e a câmara: os cantos de cada área, no lugar dela
+  const lim = useMemo(() => {
+    const pts = espacos.flatMap((e) => e.espaco.paredes.map((p) => {
+      const c = Math.cos(e.rot), s = Math.sin(e.rot);
+      return { x: e.x + p.a.x * c + p.a.y * s, z: e.z - p.a.x * s + p.a.y * c };
+    }));
+    const xs = pts.map((q) => q.x), zs = pts.map((q) => q.z);
+    const x0 = Math.min(...xs), x1 = Math.max(...xs), z0 = Math.min(...zs), z1 = Math.max(...zs);
+    return { cx: (x0 + x1) / 2, cz: (z0 + z1) / 2, tam: Math.max(x1 - x0, z1 - z0, 2), x0, x1, z0, z1 };
+  }, [espacos]);
+  const luz = useMemo(() => ({ paredes: [{ a: { x: lim.x0, y: lim.z0 } }, { a: { x: lim.x1, y: lim.z1 } }] }) as unknown as Espaco, [lim]);
+  return (
+    <div role="img" aria-label={descricao} className="h-full w-full touch-none">
+      <Canvas frameloop="demand" dpr={[1, 1.5]} shadows="soft" gl={{ antialias: true, toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.08, preserveDrawingBuffer: true }}
+        onPointerMissed={() => escolher("")}>
+        <color attach="background" args={["#ecebe7"]} />
+        <EstudioAmbiente />
+        <LuzEstudio espaco={luz} />
+        <PerspectiveCamera makeDefault position={[lim.cx + lim.tam * 0.15, lim.tam * 0.62 + 1.5, lim.cz + lim.tam * 0.58 + 1.2]} fov={45} />
+        <OrbitControls makeDefault target={[lim.cx, 0, lim.cz]} maxPolarAngle={Math.PI / 2.05} />
+        {espacos.map((e) => {
+          const on = e.chave === escolhida;
+          const xs = e.espaco.paredes.map((p) => p.a.x), ys = e.espaco.paredes.map((p) => p.a.y);
+          const cx = (Math.min(...xs) + Math.max(...xs)) / 2, cz = (Math.min(...ys) + Math.max(...ys)) / 2;
+          return (
+            <group key={e.chave} position={[e.x, 0, e.z]} rotation={[0, e.rot, 0]} onClick={(ev) => { ev.stopPropagation(); escolher(e.chave); }}>
+              <Superficies espaco={e.espaco} teto={false} />
+              {on && <DestaqueChao espaco={e.espaco} cor={corDestaque} />}
+              {e.espaco.paredes.map((p, i) => <ParedeBaixa key={p.id} parede={p} indice={i} espaco={e.espaco} h={altura} cor={on ? corDestaque : PAREDE_CASA} />)}
+              <AmbienteMetalDosMetais>
+                {e.espaco.pecas.map((p) => { const m = e.modelos[p.produtoId]; return m ? <Peca key={p.id} p={p} m={m} etiquetas={false} selecionada={false} onSel={() => escolher(e.chave)} arrasto={null} setArrasto={nada} alvo={alvo} /> : null; })}
+              </AmbienteMetalDosMetais>
+              <Html position={[cx, altura + 0.35, cz]} center distanceFactor={14} zIndexRange={[10, 0]}>
+                <button type="button" onClick={() => escolher(e.chave)}
+                  className={`whitespace-nowrap rounded-full px-3 py-1.5 text-sm font-semibold shadow ${on ? "bg-primary text-primary-foreground" : "bg-card text-foreground"}`}>
+                  {e.nome}{e.m2 !== null ? ` · ${e.m2.toLocaleString("pt-PT", { maximumFractionDigits: 1 })} m²` : ""}
+                </button>
+              </Html>
+            </group>
+          );
+        })}
+        <PonteCamara alvo={alvo} />
+      </Canvas>
+    </div>
+  );
+}

@@ -24,8 +24,9 @@ import { Vista3D } from "@/pages/prototipo-estudio/Vista3D";
 import { documentosEnviados, type DocEnviado, type TomDoc } from "./enviadosAoCliente";
 import { antesDoArranque } from "./ComandoObra";
 import { comNomesDoContrato, extrasDoContrato, obraEm3D, obraEm3DComModelos, obraEm3DNoDia, pedidosDosExtras, projetoDaDivisao, tarefaDaPeca } from "./obra3d";
-import { areasPorJuntar, chaveDaDivisao, comDivisao, divisaoPeloNome, divisoesDoNegocio, type DivisaoNegocio } from "../divisoesNegocio";
+import { areasPorJuntar, semDivisao, chaveDaDivisao, comDivisao, divisaoPeloNome, divisoesDoNegocio, type DivisaoNegocio } from "../divisoesNegocio";
 import { CasaToda } from "../casa/CasaToda";
+import { TirarDivisao } from "../casa/TirarDivisao";
 
 /** 28/11: no endereço (?divisao=), a casa toda (as áreas juntas, CasaToda.tsx). */
 const CASA_TODA = "Casa toda";
@@ -207,6 +208,7 @@ export function ProjetoEm3D({ ctx, d, dias = [], abrirTarefa }: { ctx?: Ctx; d: 
   const seletor = (divs.length > 1 || podeJuntar) && (
     <SeletorDivisao divs={divs} atual={div} escolher={escolherDivisao} porJuntar={podeJuntar ? areasPorJuntar(d.f, d.linha) : []}
       casa={divs.length > 1 ? { on: naCasa, abrir: () => { setDvUrl(CASA_TODA); setDiaSel(null); setSel(null); } } : undefined}
+      tirar={podeJuntar && ctx && divs.length > 1 && !naCasa ? () => { const v = semDivisao(d.f, div.nome, d.linha); if (v === null) return; ctx.run(() => ctx.A.campo(d.id, "diag_tipo_area", v)); setDvUrl(""); setDiaSel(null); setSel(null); } : undefined}
       juntar={(nova) => { if (!ctx) return; ctx.run(() => ctx.A.campo(d.id, "diag_tipo_area", comDivisao(d.f, nova, d.linha))); setDvUrl(nova); setDiaSel(null); setSel(null); }} />
   );
   if (naCasa) return <div className="space-y-4">{seletor}<CasaToda ctx={ctx} d={d} soVer={!podeJuntar} abrirArea={escolherDivisao} /></div>;
@@ -313,10 +315,12 @@ export function ProjetoEm3D({ ctx, d, dias = [], abrirTarefa }: { ctx?: Ctx; d: 
 }
 
 /** 25/11: as divisões do negócio (uma por botão, quando há mais do que uma) e «Juntar divisão» (escolhe-se qual, das que faltam). */
-export function SeletorDivisao({ divs, atual, escolher, porJuntar, juntar, casa }: {
+export function SeletorDivisao({ divs, atual, escolher, porJuntar, juntar, casa, tirar }: {
   divs: readonly DivisaoNegocio[]; atual: DivisaoNegocio; escolher: (x: DivisaoNegocio) => void; porJuntar: readonly string[]; juntar: (nova: string) => void;
   /** 28/11: «Casa toda» (as áreas juntas), antes das áreas. */
   casa?: { on: boolean; abrir: () => void };
+  /** 28/11 (Rúben: «permitir apagar divisões»): tirar a divisão escolhida (com confirmação). */
+  tirar?: () => void;
 }) {
   const [aJuntar, setAJuntar] = useState(false);
   const chip = (on: boolean) => cn("min-h-11 rounded-full px-4 text-[15px] font-medium transition-colors", on ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground");
@@ -333,6 +337,7 @@ export function SeletorDivisao({ divs, atual, escolher, porJuntar, juntar, casa 
           <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" />Juntar divisão
         </Button>
       )}
+      {tirar && !aJuntar && <TirarDivisao key={atual.nome} nome={atual.nome} tirar={tirar} />}
       {aJuntar && (
         <div role="group" aria-label="Que divisão juntar" className="flex flex-wrap items-center gap-2 rounded-full border border-dashed border-border py-1 pl-4 pr-1">
           <span className="text-sm text-muted-foreground">Juntar ao negócio:</span>

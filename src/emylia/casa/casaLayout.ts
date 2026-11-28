@@ -45,13 +45,15 @@ export function lerLayout(json: string | undefined): LayoutCasa {
 export const gravarLayout = (l: LayoutCasa): string => JSON.stringify(l);
 
 /** Uma área já rodada e encostada a (0,0): o contorno, as peças (as caixas rodadas) e a largura e a altura (cm). */
-export interface FormaArea { pts: Ponto[]; fecha: boolean; pecas: (PecaPlanta & { cx: number; cy: number; rw: number; rh: number })[]; w: number; h: number }
+export interface FormaArea { pts: Ponto[]; fecha: boolean; pecas: (PecaPlanta & { cx: number; cy: number; rw: number; rh: number })[]; w: number; h: number
+  /** Quanto se deslocou a planta rodada para encostar a (0,0) (cm): um ponto da planta vai para lugar + rodado − (ox, oy). */
+  ox: number; oy: number }
 
 const rodar = (q: Ponto, r: Rotacao): Ponto => (r === 90 ? { x: -q.y, y: q.x } : r === 180 ? { x: -q.x, y: -q.y } : r === 270 ? { x: q.y, y: -q.x } : { x: q.x, y: q.y });
 
 /** A forma da planta de uma área, rodada `r` e encostada a (0,0). Sem paredes, uma caixa de 200 × 200 (a área ainda por desenhar). */
 export function formaDaArea(pl: Planta | null, r: Rotacao = 0): FormaArea {
-  if (!pl || pl.paredes.length < 2) return { pts: [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 200 }, { x: 0, y: 200 }], fecha: false, pecas: [], w: 200, h: 200 };
+  if (!pl || pl.paredes.length < 2) return { pts: [{ x: 0, y: 0 }, { x: 200, y: 0 }, { x: 200, y: 200 }, { x: 0, y: 200 }], fecha: false, pecas: [], w: 200, h: 200, ox: 0, oy: 0 };
   const fecha = faltaFechar(pl.paredes) <= 1;
   const base = cantos(pl.paredes, pl.o);
   const pts0 = (fecha ? base.slice(0, -1) : base).map((q) => rodar(q, r));
@@ -65,7 +67,7 @@ export function formaDaArea(pl: Planta | null, r: Rotacao = 0): FormaArea {
   return {
     pts: pts0.map((q) => ({ x: q.x - x0, y: q.y - y0 })), fecha,
     pecas: pecas0.map((p) => ({ ...p, cx: p.cx - x0, cy: p.cy - y0 })),
-    w: Math.max(1, Math.max(...xs) - x0), h: Math.max(1, Math.max(...ys) - y0),
+    w: Math.max(1, Math.max(...xs) - x0), h: Math.max(1, Math.max(...ys) - y0), ox: x0, oy: y0,
   };
 }
 

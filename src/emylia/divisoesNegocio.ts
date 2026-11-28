@@ -110,6 +110,16 @@ export function comDivisao(f: Record<string, string>, nova: string, linha?: stri
   return (base.some((x) => semAcento(x) === semAcento(n)) ? base : [...base, n]).join(", ");
 }
 
+/** 28/11 (Rúben: «permitir apagar divisões, criei uma sem querer e não consigo apagar»): o novo valor de f.diag_tipo_area sem esta
+ *  divisão. A última não sai (o negócio fica sempre com uma). O que a divisão tinha (a planta, o projeto, as respostas) fica no negócio
+ *  com o prefixo dela e volta se ela voltar a entrar; se sai a principal, reorganizarDivisoes passa a seguinte para as chaves sem prefixo. */
+export function semDivisao(f: Record<string, string>, nome: string, linha?: string): string | null {
+  const ds = divisoesDoNegocio(f, linha).map((x) => x.nome);
+  const n = semAcento(nome), fica = ds.filter((x) => semAcento(x) !== n);
+  if (fica.length === ds.length || !fica.length) return null;
+  return fica.join(", ");
+}
+
 // ------------------------------------------------------------------ as tarefas do plano por divisão
 // As tarefas dos modelos de obra dizem a divisão no nome («MO Modelo Remodelação Completa - Cozinha · eletricidade»; planoVivo.ts).
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();

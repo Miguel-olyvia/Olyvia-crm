@@ -10,7 +10,8 @@ import type { Negocio } from "../motor";
 import type { Ctx } from "../pecas";
 import { useParamUrl } from "../usarParamUrl";
 import { EstudioNaVisita } from "../VisitaEstudio";
-import { areasPorJuntar, comDivisao, divisoesDoNegocio, fDaDivisao, nomeDeArea, type DivisaoNegocio } from "../divisoesNegocio";
+import { areasPorJuntar, comDivisao, divisoesDoNegocio, fDaDivisao, nomeDeArea, semDivisao, type DivisaoNegocio } from "../divisoesNegocio";
+import { TirarDivisao } from "./TirarDivisao";
 import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import { CasaToda } from "./CasaToda";
 
@@ -74,6 +75,9 @@ export function AreasDaCasa({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           </div>
         )}
       </div>
+      {atual && varias && (
+        <TirarDivisao key={atual.nome} nome={atual.nome} tirar={() => { const v = semDivisao(d.f, atual.nome, d.linha); if (v === null) return; ctx.run(() => ctx.A.campo(d.id, "diag_tipo_area", v)); setQual(""); }} />
+      )}
       {atual === null
         ? <CasaToda ctx={ctx} d={d} abrirArea={(x) => setQual(x.prefixo)} />
         : <EstudioNaVisita key={atual.prefixo || "principal"} ctx={ctx} d={d} div={atual} varias={varias} />}
