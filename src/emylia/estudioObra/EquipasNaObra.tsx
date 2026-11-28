@@ -125,7 +125,8 @@ export function EquipasNaObra({ ctx, d, pedirEquipa = false, fecharPedido }: { c
       )}
       {novaPessoa && (
         <Suspense fallback={null}>
-          <NovaPessoaRh aberto={novaPessoa} fechar={() => setNovaPessoa(false)} oficios={oficiosDoCatalogo} aoCriarTecnico={juntarTecnico} />
+          <NovaPessoaRh aberto={novaPessoa} fechar={() => setNovaPessoa(false)} oficios={oficiosDoCatalogo} aoCriarTecnico={juntarTecnico}
+            aoCriarOficio={(o) => { if (S.custos && !S.custos.perfis.some((x) => x.id === o.id)) S.custos.perfis.push({ id: o.id, n: o.n, salario: null }); }} />
         </Suspense>
       )}
     </section>

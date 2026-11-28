@@ -31,3 +31,18 @@ describe("os técnicos da empresa subcontratada", () => {
     expect(nomeDoTecnico("  ", "Gás Lisboa")).toBeNull();
   });
 });
+
+import { funcaoExiste, funcoesQueBatem, nomeDaFuncao } from "./NovaPessoaNaObra";
+describe("as funções do técnico: pesquisar e criar", () => {
+  const L = [{ id: "g", n: "Técnico de gás (ITG)" }, { id: "c", n: "Canalizador" }, { id: "e", n: "tecnico de eletricidade" }];
+  it("pesquisa sem acentos nem maiúsculas; todas as palavras têm de estar", () => {
+    expect(funcoesQueBatem(L, "gas").map((o) => o.id)).toEqual(["g"]);
+    expect(funcoesQueBatem(L, "TECNICO ele").map((o) => o.id)).toEqual(["e"]);
+    expect(funcoesQueBatem(L, "").length).toBe(3);
+  });
+  it("não oferece criar uma função que já existe; mostra com maiúscula", () => {
+    expect(funcaoExiste(L, "canalizador")).toBe(true);
+    expect(funcaoExiste(L, "Serralheiro")).toBe(false);
+    expect(nomeDaFuncao("tecnico de eletricidade")).toBe("Tecnico de eletricidade");
+  });
+});
