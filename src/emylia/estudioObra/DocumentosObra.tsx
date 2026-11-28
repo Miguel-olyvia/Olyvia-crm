@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Visualizador3DSeguro } from "@/emylia/planta3d/Visualizador3DSeguro";
 import { temWebGL } from "@/emylia/planta3d/carregarVisualizador3D";
-import { Box, Check, FileText, Pause, Play, Send, Wrench, X } from "lucide-react";
+import { Box, Check, FileText, Pause, Pencil, Play, Plus, Send, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import type { Negocio, Plano } from "../motor";
@@ -19,11 +19,17 @@ import { modoReal, emailDaFicha } from "../acessosPortal";
 import { usePodeAcessoPortal } from "../AcessoPortalNegocio";
 import { ContratoDoc, FaturaDoc, Partilhar, PropostaDoc, imprimir } from "../DocsCliente";
 import { AutoRececaoDoc } from "../AutoRececao";
-import { usePainelUrl } from "../usarParamUrl";
+import { useParamUrl, usePainelUrl } from "../usarParamUrl";
 import { Vista3D } from "@/pages/prototipo-estudio/Vista3D";
 import { documentosEnviados, type DocEnviado, type TomDoc } from "./enviadosAoCliente";
 import { antesDoArranque } from "./ComandoObra";
-import { comNomesDoContrato, extrasDoContrato, obraEm3D, obraEm3DComModelos, obraEm3DNoDia, pedidosDosExtras, tarefaDaPeca } from "./obra3d";
+import { comNomesDoContrato, extrasDoContrato, obraEm3D, obraEm3DComModelos, obraEm3DNoDia, pedidosDosExtras, projetoDaDivisao, tarefaDaPeca } from "./obra3d";
+import { areasPorJuntar, chaveDaDivisao, comDivisao, divisaoPeloNome, divisoesDoNegocio, type DivisaoNegocio } from "../divisoesNegocio";
+import { CasaToda } from "../casa/CasaToda";
+
+/** 28/11: no endereço (?divisao=), a casa toda (as áreas juntas, CasaToda.tsx). */
+const CASA_TODA = "Casa toda";
+import { PlantaDivisao } from "../PlantaDivisao";
 import { COR_FASE, FASES_OBRA } from "../fasesObra";
 import { dataCurta } from "../planoObra";
 import { materiaisPorFase } from "../obraOps";
@@ -35,7 +41,6 @@ import { ICONE_DA_FASE, iconeDaTarefa } from "./CaminhoCritico";
 import { ROTULO_VIVO, estadoVivo, nomeCurtoTarefa } from "./planoVivo";
 import { cenaDe } from "@/pages/prototipo-estudio/cenaDoProjeto";
 import { PlantaVista } from "@/pages/prototipo-estudio/PlantaVista";
-import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import { sairam } from "@/pages/prototipo-estudio/necessidadesEstudio";
 import { ouvirProdutosReais, produto, versaoProdutosReais } from "@/pages/prototipo-estudio/catalogoFake";
 import { produtosPedidosDoProjeto, useLerProdutos } from "@/pages/prototipo-estudio/produtosDoProjeto";
@@ -157,16 +162,28 @@ export function nomeCurto(nome: string, tipo: string): string {
   return (sem || n).split(/\s+/).slice(0, 3).join(" ");
 }
 
-export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: Date[]; abrirTarefa?: (ti: number) => void }) {
+// 25/11 (Rúben, 1048: «duas plantas com necessidades separadas no mesmo negócio/contrato»; divisoesNegocio.ts): um negócio com várias
+// divisões escolhe a divisão por cima do 3D (?divisao=, o «voltar» volta à anterior). Cada uma tem o seu projeto do Estúdio, ou só a planta
+// (o 3D é então a divisão como está), e conta só as tarefas do plano que são dela. «Juntar divisão» acrescenta outra (a cozinha) ao
+// negócio, como escolhê-la na Divisão da visita, e abre logo a planta dela para desenhar.
+export function ProjetoEm3D({ ctx, d, dias = [], abrirTarefa }: { ctx?: Ctx; d: Negocio; dias?: Date[]; abrirTarefa?: (ti: number) => void }) {
+  const divs = divisoesDoNegocio(d.f, d.linha);
+  const [dvUrl, setDvUrl] = useParamUrl<string>("divisao", "");
+  const div = divisaoPeloNome(divs, dvUrl), dv = div.nome;
+  const chavesDv = [d.f[chaveDaDivisao(div, "estudio")], d.f[chaveDaDivisao(div, "planta")], d.f[chaveDaDivisao(div, "retif_planta")]];
+  const R = useMemo(() => projetoDaDivisao(d, dv), [d, dv, ...chavesDv]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pr = R?.projeto ?? null, soPlanta = !!R?.soPlanta;
   // os produtos do projeto e do contrato, lidos pelo id (o Estúdio da obra não carrega o catálogo); redesenha quando chegam
   // os do contrato entram logo pelo nome (os produtos das Necessidades); a linha do catálogo junta-se quando chega
-  const pr = useMemo(() => projetoDoNegocio(d.f), [d.f.estudio]); // eslint-disable-line react-hooks/exhaustive-deps
   const pedidos = useMemo(() => (pr ? comNomesDoContrato(d, produtosPedidosDoProjeto(pr, pedidosDosExtras(extrasDoContrato(d)))) : []), [pr, d, d.visita.prod]); // eslint-disable-line react-hooks/exhaustive-deps
   useLerProdutos(pedidos);
   const versao = useSyncExternalStore(ouvirProdutosReais, versaoProdutosReais);
-  const O = useMemo(() => obraEm3D(d), [d, d.f.estudio, d.obra.plano, versao]); // eslint-disable-line react-hooks/exhaustive-deps
-  const M = useMemo(() => obraEm3DComModelos(d), [d, d.f.estudio, d.obra.plano, versao]); // eslint-disable-line react-hooks/exhaustive-deps
-  const [qual, setQual] = useState<"obra" | "final" | "antes">("obra");
+  const O = useMemo(() => obraEm3D(d, dv), [d, dv, ...chavesDv, d.obra.plano, versao]); // eslint-disable-line react-hooks/exhaustive-deps
+  const M = useMemo(() => obraEm3DComModelos(d, dv), [d, dv, ...chavesDv, d.obra.plano, versao]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [qualEscolhido, setQual] = useState<"obra" | "final" | "antes">("obra");
+  // só com a planta (sem projeto do Estúdio), o 3D é a divisão como está
+  const qual = soPlanta ? "antes" : qualEscolhido;
+  const [aCorrigir, setACorrigir] = useState(false);
   const [vista, setVista] = useState<"3d" | "cima" | "pessoa">("3d");
   const [sel, setSel] = useState<string | null>(null);
   // 23/11 (Rúben: «mega next-level»): a régua do tempo. null = hoje (o que está mesmo feito); um número = esse dia, pelo plano
@@ -174,22 +191,47 @@ export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: 
   const fimPlano = plano ? Math.max(1, ...plano.tasks.map((t) => t.dia + t.dur)) : 1;
   const hojeK = plano?.estado === "em curso" ? Math.min(plano.dia, fimPlano - 1) : plano?.estado === "concluída" ? fimPlano - 1 : 0;
   const [diaSel, setDiaSel] = useState<number | null>(null);
-  const noDia = useMemo(() => (diaSel == null ? null : obraEm3DNoDia(d, diaSel)), [d, diaSel, versao]); // eslint-disable-line react-hooks/exhaustive-deps
+  const noDia = useMemo(() => (diaSel == null || soPlanta ? null : obraEm3DNoDia(d, diaSel, dv)), [d, diaSel, versao, dv, soPlanta]); // eslint-disable-line react-hooks/exhaustive-deps
   const inv = useInventario();
   // as peças da planta com trabalho no dia escolhido na régua (a tarefa do ofício de cada uma)
   const doDia = useMemo(() => {
     const out = new Set<string>();
     if (diaSel == null || !plano || !pr) return out;
-    for (const pc of pr.depois.pecas) { const ti = tarefaDaPeca(d, pc.id), t = ti != null ? plano.tasks[ti] : null; if (t && t.dia <= diaSel && diaSel < t.dia + t.dur) out.add(pc.id); }
+    for (const pc of pr.depois.pecas) { const ti = tarefaDaPeca(d, pc.id, dv), t = ti != null ? plano.tasks[ti] : null; if (t && t.dia <= diaSel && diaSel < t.dia + t.dur) out.add(pc.id); }
     return out;
-  }, [d, diaSel, plano, pr]);
+  }, [d, diaSel, plano, pr, dv]);
+  const podeJuntar = !!ctx && podeNeg(ctx.S.role, "visita.preencher");
+  const escolherDivisao = (x: DivisaoNegocio) => { setDvUrl(x.principal ? "" : x.nome); setDiaSel(null); setSel(null); setACorrigir(false); };
+  // 28/11 (Rúben, Schroeder: «a casa toda, ou ver em destaque e isolado cada área»): com várias áreas, também a casa toda
+  const naCasa = divs.length > 1 && dvUrl === CASA_TODA;
+  const seletor = (divs.length > 1 || podeJuntar) && (
+    <SeletorDivisao divs={divs} atual={div} escolher={escolherDivisao} porJuntar={podeJuntar ? areasPorJuntar(d.f, d.linha) : []}
+      casa={divs.length > 1 ? { on: naCasa, abrir: () => { setDvUrl(CASA_TODA); setDiaSel(null); setSel(null); } } : undefined}
+      juntar={(nova) => { if (!ctx) return; ctx.run(() => ctx.A.campo(d.id, "diag_tipo_area", comDivisao(d.f, nova, d.linha))); setDvUrl(nova); setDiaSel(null); setSel(null); }} />
+  );
+  if (naCasa) return <div className="space-y-4">{seletor}<CasaToda ctx={ctx} d={d} soVer={!podeJuntar} abrirArea={escolherDivisao} /></div>;
   if (!O || !M) {
-    return <p className="rounded-xl bg-muted/50 px-4 py-3 text-[15px] text-muted-foreground">Este negócio não tem projeto do Estúdio do projeto: o 3D aparece quando a visita é feita no Estúdio.</p>;
+    // sem projeto nem planta: a principal diz como até aqui; outra divisão abre logo a planta para desenhar
+    if (div.principal || !ctx) {
+      return <div className="space-y-4">{seletor}<p className="rounded-xl bg-muted/50 px-4 py-3 text-[15px] text-muted-foreground">{divs.length > 1 ? `A ${dv.toLowerCase()} não tem` : "Este negócio não tem"} projeto do Estúdio do projeto: o 3D aparece quando a visita é feita no Estúdio.</p></div>;
+    }
+    return (
+      <div className="space-y-4">
+        {seletor}
+        <section aria-label={`A planta da ${dv.toLowerCase()}`} className="space-y-3 rounded-2xl border border-border bg-card p-4">
+          <div>
+            <h2 className="text-[15px] font-semibold">Desenhar a planta da {dv.toLowerCase()}</h2>
+            <p className="text-sm text-muted-foreground">Com as paredes fechadas, a {dv.toLowerCase()} aparece em 3D, como está. O projeto do Estúdio desta divisão vem depois.</p>
+          </div>
+          <PlantaDivisao key={div.prefixo} ctx={ctx} d={d} div={div} />
+        </section>
+      </div>
+    );
   }
   const opcao = (on: boolean) => cn("min-h-11 rounded-full px-4 text-[15px] font-medium transition-colors", on ? "bg-background shadow-sm" : "text-muted-foreground");
   // 23/11 (revisão): antes do arranque, «A obra hoje» é a divisão como está (o antes), não o depois transparente
   const aindaNao = !!plano && antesDoArranque(plano) && diaSel == null;
-  const titulo = qual === "obra" && aindaNao ? "A divisão como está, antes da obra" : qual === "obra" ? "A obra em 3D, com o que está feito" : qual === "final" ? "A obra acabada, como vai ficar" : "A divisão antes da obra";
+  const titulo = soPlanta ? `A ${dv.toLowerCase()} como está` : qual === "obra" && aindaNao ? "A divisão como está, antes da obra" : qual === "obra" ? "A obra em 3D, com o que está feito" : qual === "final" ? "A obra acabada, como vai ficar" : "A divisão antes da obra";
   const simples = <Vista3D cena={qual === "obra" ? (aindaNao ? O.antes : O.cena) : qual === "final" ? cenaDe(M.projeto.depois, M.projeto, true) : O.antes} titulo={titulo} />;
   const res = qual === "obra" ? (noDia?.cena ?? (aindaNao ? M.antes : M.hoje)) : qual === "final" ? M.final : M.antes;
   const porFazer = qual === "obra" && !aindaNao ? (noDia ? noDia.porFazer : M.porFazer) : undefined;
@@ -197,22 +239,24 @@ export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: 
   const p = M.projeto;
   return (
     <div className="space-y-8">
+      {seletor}
       <section aria-label="O projeto em 3D" className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="min-w-0">
-            <h2 className="flex items-center gap-2 text-[15px] font-semibold"><Box className="h-4 w-4 text-primary" aria-hidden="true" />Como a obra vai ficar</h2>
+            <h2 className="flex items-center gap-2 text-[15px] font-semibold"><Box className="h-4 w-4 text-primary" aria-hidden="true" />{soPlanta ? titulo : divs.length > 1 ? `Como a ${dv.toLowerCase()} vai ficar` : "Como a obra vai ficar"}</h2>
             <p className="text-sm text-muted-foreground">
-              {qual === "obra" && aindaNao ? <>A obra ainda não começou: <b className="font-medium text-foreground">a divisão como está hoje</b>. Use a régua para a ver a ser feita, dia a dia.</>
+              {soPlanta ? <>Ainda sem projeto no Estúdio: <b className="font-medium text-foreground">o 3D é a planta desenhada</b>, com as peças que lá estão hoje.</>
+                : qual === "obra" && aindaNao ? <>A obra ainda não começou: <b className="font-medium text-foreground">a divisão como está hoje</b>. Use a régua para a ver a ser feita, dia a dia.</>
                 : qual === "obra" ? <>{noDia ? "O plano neste dia." : "O projeto aprovado."} <b className="font-medium text-foreground">A cores, o que {noDia ? "o plano dá por feito" : "já está feito"}</b>; transparente, o que falta{(noDia ?? M).total ? ` (${(noDia ?? M).feitas} de ${(noDia ?? M).total} peças feitas)` : noDia && !noDia.demolida ? " (ainda antes da demolição)" : ""}. Só para ver.</>
                 : qual === "final" ? "O projeto aprovado, com tudo feito: os produtos do contrato, o revestimento e o pavimento." : "A divisão como estava antes da obra."}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <div role="group" aria-label="O que ver" className="inline-flex rounded-full bg-muted p-1">
+            {!soPlanta && <div role="group" aria-label="O que ver" className="inline-flex rounded-full bg-muted p-1">
               <button type="button" aria-pressed={qual === "obra"} onClick={() => setQual("obra")} className={opcao(qual === "obra")}>A obra hoje</button>
               <button type="button" aria-pressed={qual === "final"} onClick={() => setQual("final")} className={opcao(qual === "final")}>Como vai ficar</button>
               <button type="button" aria-pressed={qual === "antes"} onClick={() => setQual("antes")} className={opcao(qual === "antes")}>Antes</button>
-            </div>
+            </div>}
             {comModelos && (
               <div role="group" aria-label="A vista" className="inline-flex rounded-full bg-muted p-1">
                 {([["3d", "3D"], ["cima", "De cima"], ["pessoa", "Pessoa"]] as const).map(([v, n]) => (
@@ -229,16 +273,32 @@ export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: 
               teto={false} etiquetas={false} descricao={titulo} selecionada={sel} onSelecionar={setSel} porFazer={porFazer} />
           </div>
         ) : simples}
-        {comModelos && qual === "obra" && plano && (
+        {comModelos && qual === "obra" && plano && !soPlanta && (
           <ReguaDoTempo plano={plano} dias={dias} fim={fimPlano} hoje={hojeK} dia={diaSel} setDia={(k) => { setDiaSel(k === hojeK ? null : k); setSel(null); }} />
         )}
-        {comModelos && sel && res.ok && <PecaTocada d={d} pecaId={sel} nome={res.modelos[res.espaco.pecas.find((x) => x.id === sel)?.produtoId ?? ""]?.nome} dias={dias} inv={inv} abrir={abrirTarefa} fechar={() => setSel(null)} />}
+        {comModelos && sel && res.ok && <PecaTocada d={d} dv={dv} pecaId={sel} nome={res.modelos[res.espaco.pecas.find((x) => x.id === sel)?.produtoId ?? ""]?.nome} dias={dias} inv={inv} abrir={abrirTarefa} fechar={() => setSel(null)} />}
         {comModelos && !sel && <p className="text-sm text-muted-foreground">Arraste para rodar. Toque numa peça para ver quem a instala, quando e o estado do material.</p>}
       </section>
 
+      {soPlanta ? (
+      <section aria-label="A planta" className="space-y-3">
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="text-[15px] font-semibold">A planta da {dv.toLowerCase()}</h2>
+            <p className="text-sm text-muted-foreground">Como está, com as medidas das paredes.</p>
+          </div>
+          {ctx && !div.principal && (
+            <Button type="button" variant="outline" className="min-h-11" aria-expanded={aCorrigir} onClick={() => setACorrigir((x) => !x)}>
+              <Pencil className="mr-1.5 h-4 w-4" aria-hidden="true" />{aCorrigir ? "Fechar a planta" : "Corrigir a planta"}
+            </Button>
+          )}
+        </div>
+        {ctx && aCorrigir ? <PlantaDivisao key={div.prefixo} ctx={ctx} d={d} div={div} /> : <div className="max-w-xl"><PlantaVista planta={p.antes} titulo="Como está" /></div>}
+      </section>
+      ) : (
       <section aria-label="As plantas antes e depois" className="space-y-3">
         <div>
-          <h2 className="text-[15px] font-semibold">As plantas</h2>
+          <h2 className="text-[15px] font-semibold">{divs.length > 1 ? `As plantas da ${dv.toLowerCase()}` : "As plantas"}</h2>
           <p className="text-sm text-muted-foreground">Como está e como vai ficar, com as medidas das paredes. A tracejado, o que sai.</p>
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
@@ -247,6 +307,39 @@ export function ProjetoEm3D({ d, dias = [], abrirTarefa }: { d: Negocio; dias?: 
             cor={(pc) => (doDia.has(pc.id) ? "#7c5ce0" : produto(p.escolhas[pc.id])?.hex)} rotulo={(pc) => { const x = produto(p.escolhas[pc.id]); return x ? `${PECAS[pc.tipo].n} · ${nomeCurto(x.colecao || x.n, PECAS[pc.tipo].n)}` : undefined; }} />
         </div>
       </section>
+      )}
+    </div>
+  );
+}
+
+/** 25/11: as divisões do negócio (uma por botão, quando há mais do que uma) e «Juntar divisão» (escolhe-se qual, das que faltam). */
+export function SeletorDivisao({ divs, atual, escolher, porJuntar, juntar, casa }: {
+  divs: readonly DivisaoNegocio[]; atual: DivisaoNegocio; escolher: (x: DivisaoNegocio) => void; porJuntar: readonly string[]; juntar: (nova: string) => void;
+  /** 28/11: «Casa toda» (as áreas juntas), antes das áreas. */
+  casa?: { on: boolean; abrir: () => void };
+}) {
+  const [aJuntar, setAJuntar] = useState(false);
+  const chip = (on: boolean) => cn("min-h-11 rounded-full px-4 text-[15px] font-medium transition-colors", on ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground");
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {divs.length > 1 && (
+        <div role="group" aria-label="A divisão" className="flex flex-wrap gap-2">
+          {casa && <button type="button" aria-pressed={casa.on} onClick={casa.abrir} className={chip(casa.on)}>Casa toda</button>}
+          {divs.map((x) => <button key={x.nome} type="button" aria-pressed={!casa?.on && x.nome === atual.nome} onClick={() => escolher(x)} className={chip(!casa?.on && x.nome === atual.nome)}>{x.nome}</button>)}
+        </div>
+      )}
+      {porJuntar.length > 0 && !aJuntar && (
+        <Button type="button" variant="ghost" className="min-h-11 text-muted-foreground" onClick={() => setAJuntar(true)}>
+          <Plus className="mr-1.5 h-4 w-4" aria-hidden="true" />Juntar divisão
+        </Button>
+      )}
+      {aJuntar && (
+        <div role="group" aria-label="Que divisão juntar" className="flex flex-wrap items-center gap-2 rounded-full border border-dashed border-border py-1 pl-4 pr-1">
+          <span className="text-sm text-muted-foreground">Juntar ao negócio:</span>
+          {porJuntar.map((x) => <button key={x} type="button" onClick={() => { setAJuntar(false); juntar(x); }} className={chip(false)}>{x}</button>)}
+          <button type="button" aria-label="Não juntar" onClick={() => setAJuntar(false)} className="flex h-11 w-11 items-center justify-center rounded-full text-muted-foreground hover:text-foreground"><X className="h-4 w-4" aria-hidden="true" /></button>
+        </div>
+      )}
     </div>
   );
 }
@@ -368,8 +461,8 @@ export function ReguaDoTempo({ plano, dias, fim, hoje, dia, setDia }: { plano: P
 }
 
 /** 23/11: a peça tocada no 3D: a tarefa que a instala, quem, quando, o estado, e o material. */
-function PecaTocada({ d, pecaId, nome, dias, inv, abrir, fechar }: { d: Negocio; pecaId: string; nome?: string; dias: Date[]; inv: Inventario; abrir?: (ti: number) => void; fechar: () => void }) {
-  const p = d.obra.plano, ti = tarefaDaPeca(d, pecaId), t = ti != null && p ? p.tasks[ti] : null;
+function PecaTocada({ d, dv, pecaId, nome, dias, inv, abrir, fechar }: { d: Negocio; dv?: string; pecaId: string; nome?: string; dias: Date[]; inv: Inventario; abrir?: (ti: number) => void; fechar: () => void }) {
+  const p = d.obra.plano, ti = tarefaDaPeca(d, pecaId, dv), t = ti != null && p ? p.tasks[ti] : null;
   const quando = (x: number) => (dias[x] ? dataCurta(dias[x]) : `dia ${x + 1}`);
   const resumo = d.obra.ec?.ref ? resumoEcNegocio(inv, d.obra.ec.ref) : null;
   const norm = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();

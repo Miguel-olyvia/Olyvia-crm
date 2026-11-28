@@ -36,7 +36,7 @@ import type { Cena } from "./geometria3d";
 import { totalDaCozinha } from "./cozinha/modelo";
 import { mudarODepois, seguirOAntes } from "./posicoesDepois";
 import { devolverAoNegocio } from "./daVisita";
-import { GRAVAR_NO_NEGOCIO_MS, chaveDoEstudio, gravarNoNegocio, guardarProjetoLocal, lembrarNegocioAberto, negocioDoEndereco, projetoInicial } from "./projetoGuardado";
+import { GRAVAR_NO_NEGOCIO_MS, areaDoEndereco, areaDoProjeto, chaveDoEstudio, gravarNoNegocio, guardarProjetoLocal, lembrarNegocioAberto, negocioDoEndereco, projetoInicial } from "./projetoGuardado";
 import { pedeDesfazer, vozNoEstudio } from "./estudioPorVoz";
 import { useProdutosReaisNoEstudio } from "./catalogoRealDoEstudio";
 import { useProdutosDoProjeto } from "./produtosDoProjeto";
@@ -52,26 +52,28 @@ const semHora = (x: Projeto) => JSON.stringify({ ...x, gravadoEm: undefined });
 
 export default function EstudioProjeto() {
   // 20/11: o negócio vem do endereço (?negocio=) ou do último aberto neste separador; outro negócio é outro Estúdio (key)
+  // 28/11 (casa toda): e a área do negócio (?area=div_coz_; a principal sem nada): cada área é outro Estúdio
   const [negocio, setNegocio] = useState(() => negocioDoEndereco());
+  const [area, setArea] = useState(() => areaDoEndereco());
   useEffect(() => {
-    const h = () => { if (window.location.pathname.startsWith("/prototipo/estudio")) setNegocio(negocioDoEndereco()); };
+    const h = () => { if (window.location.pathname.startsWith("/prototipo/estudio")) { setNegocio(negocioDoEndereco()); setArea(areaDoEndereco()); } };
     window.addEventListener("popstate", h);
     return () => window.removeEventListener("popstate", h);
   }, []);
-  const inicial = useMemo(() => projetoInicial(negocio), [negocio]);
-  useEffect(() => { if (inicial) lembrarNegocioAberto(negocio); }, [inicial, negocio]);
-  if (!inicial) return <SemProjeto negocio={negocio!} />;
-  return <Estudio key={negocio ?? "sem"} inicial={inicial} />;
+  const inicial = useMemo(() => projetoInicial(negocio, area), [negocio, area]);
+  useEffect(() => { if (inicial) lembrarNegocioAberto(negocio, area); }, [inicial, negocio, area]);
+  if (!inicial) return <SemProjeto negocio={negocio!} area={area} />;
+  return <Estudio key={`${negocio ?? "sem"}|${area}`} inicial={inicial} />;
 }
 
 /** 20/11: o Estúdio de um negócio que este browser não tem (outro aparelho, a página recarregada sem nada guardado): abre-se pelo negócio. */
-function SemProjeto({ negocio }: { negocio: number }) {
+function SemProjeto({ negocio, area }: { negocio: number; area: string }) {
   return (
     <main className="grid min-h-screen place-items-center bg-background px-4">
       <div className="max-w-md space-y-4 text-center">
         <h1 className="text-2xl font-semibold tracking-tight">O projeto está no negócio</h1>
         <p className="text-[15px] text-muted-foreground">Este browser não tem o projeto do Estúdio deste negócio. Abra-o a partir da Visita do negócio, para continuar o que lá está gravado.</p>
-        <Button type="button" className="min-h-11" onClick={() => { lembrarNegocioAberto(null); irPara(`${urlDoNegocio(negocio)}&passo=estudio`); }}>
+        <Button type="button" className="min-h-11" onClick={() => { lembrarNegocioAberto(null); irPara(`${urlDoNegocio(negocio)}&passo=estudio${area ? `&area=${area}` : ""}`); }}>
           <ArrowLeft className="mr-2 h-4 w-4" aria-hidden="true" />Abrir o negócio
         </Button>
       </div>
@@ -119,7 +121,7 @@ function Estudio({ inicial }: { inicial: Projeto }) {
   // separador mais antigo gravar por cima (perdia-se o negócio de onde veio e o «Voltar ao negócio»)
   useEffect(() => {
     const aoMudar = (e: StorageEvent) => {
-      if (e.key !== chaveDoEstudio(pRef.current.negocio) || !e.newValue) return;
+      if (e.key !== chaveDoEstudio(pRef.current.negocio, areaDoProjeto(pRef.current)) || !e.newValue) return;
       try {
         const novo = JSON.parse(e.newValue) as Projeto;
         if (!novo?.antes?.paredes || !novo.depois?.paredes) return;
@@ -484,7 +486,7 @@ function CartaoPlaneador({ p }: { p: Projeto }) {
         <p className="font-semibold">Os móveis da cozinha</p>
         <p className="text-muted-foreground">{c ? `${n} ${n === 1 ? "módulo" : "módulos"} planeados · ${t!.comIva.toLocaleString("pt-PT", { maximumFractionDigits: 0 })} € com IVA, já na proposta.` : "Armários baixos, altos e de parede, o tampo e os eletrodomésticos do catálogo, em 3D."}</p>
       </div>
-      <Button type="button" className="min-h-11 shrink-0" onClick={() => { irPara(`/prototipo/cozinha?estudio=1${p.negocio !== undefined ? `&negocio=${p.negocio}` : ""}`); }}>{c ? "Continuar a planear" : "Abrir o planeador"}</Button>
+      <Button type="button" className="min-h-11 shrink-0" onClick={() => { irPara(`/prototipo/cozinha?estudio=1${p.negocio !== undefined ? `&negocio=${p.negocio}` : ""}${p.area?.prefixo ? `&area=${p.area.prefixo}` : ""}`); }}>{c ? "Continuar a planear" : "Abrir o planeador"}</Button>
     </div>
   );
 }

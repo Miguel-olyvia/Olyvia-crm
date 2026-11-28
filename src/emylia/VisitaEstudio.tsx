@@ -38,6 +38,7 @@ import { porMedida, type Negocio } from "./motor";
 import { areaChaoM2, gravarPlanta } from "./planta";
 import type { Ctx } from "./pecas";
 import { usePrincipalDaVisita } from "./principalDaVisita";
+import { chaveDaDivisao, divisoesDoNegocio, estudioDaArea, fDaDivisao, type DivisaoNegocio } from "./divisoesNegocio";
 
 const nf = (n: number) => n.toLocaleString("pt-PT", { maximumFractionDigits: 2 });
 const dataCurta = (d: Date) => d.toLocaleDateString("pt-PT", { weekday: "short", day: "numeric", month: "long" });
@@ -117,11 +118,14 @@ function guardarPlano(ctx: Ctx, d: Negocio, inicio: string): ReturnType<typeof p
   return P;
 }
 
-/** O passo «Estúdio» da Visita: abrir, continuar, e o que voltou (as necessidades para rever). */
-export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
-  const salvo = projetoDoNegocio(d.f);
+/** O passo «Estúdio» da Visita: abrir, continuar, e o que voltou (as necessidades para rever). 28/11 (casa toda): com `div`, o Estúdio
+ *  de uma área do negócio (o projeto dela em f.div_coz_estudio; a principal em f.estudio); sem ela, o da principal. */
+export function EstudioNaVisita({ ctx, d, div: divDada, varias = false }: { ctx: Ctx; d: Negocio; div?: DivisaoNegocio; varias?: boolean }) {
+  const div = divDada ?? divisoesDoNegocio(d.f, d.linha)[0];
+  const area = div.prefixo, chaveCampo = chaveDaDivisao(div, "estudio");
+  const salvo = projetoDoNegocio(fDaDivisao(d.f, div));
   const [feito, setFeito] = useState("");
-  const chavePendentes = `olyvia.estudio.pendentes.${d.id}`;
+  const chavePendentes = `olyvia.estudio.pendentes.${d.id}${area ? `.${area}` : ""}`;
   const [pendentes, setPendentesEstado] = useState<LinhaLevada[]>(() => { try { return JSON.parse(localStorage.getItem(chavePendentes) ?? "[]"); } catch { return []; } });
   const setPendentes = (ls: LinhaLevada[]) => {
     setPendentesEstado(ls);
@@ -164,25 +168,25 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
   useEffect(() => {
     let t: ReturnType<typeof setTimeout> | undefined;
     const gravar = () => {
-      const local = projetoDoEstudioPara(ref.current.d.id);
+      const local = projetoDoEstudioPara(ref.current.d.id, area);
       // 9/11 (o «statement timeout»): só se grava no negócio quando o projeto mudou mesmo (a hora sozinha não conta)
-      const noNegocio = projetoDoNegocio(ref.current.d.f);
+      const noNegocio = projetoDoNegocio(fDaDivisao(ref.current.d.f, div));
       const igual = !!local && !!noNegocio && JSON.stringify({ ...local, gravadoEm: 0 }) === JSON.stringify({ ...noNegocio, gravadoEm: 0 });
       if (local && igual) { ultimo.current = Math.max(ultimo.current, local.gravadoEm ?? 0); return local; }
       if (local && (local.gravadoEm ?? 0) > ultimo.current) {
         ultimo.current = local.gravadoEm ?? Date.now();
         const { ctx: c, d: n } = ref.current;
-        c.run(() => c.A.campo(n.id, "estudio", JSON.stringify(local)));
+        c.run(() => c.A.campo(n.id, chaveCampo, JSON.stringify(local)));
       }
       return local;
     };
     const aoVoltar = () => {
       const local = gravar();
-      const v = lerVolta(ref.current.d.id);
+      const v = lerVolta(ref.current.d.id, area);
       if (!v) return;
-      const p = local ?? projetoDoNegocio(ref.current.d.f);
+      const p = local ?? projetoDoNegocio(fDaDivisao(ref.current.d.f, div));
       if (!p) {
-        if (v.antes.paredes.length) { const { ctx: c, d: n } = ref.current; c.run(() => c.A.campo(n.id, "planta", gravarPlanta(v.antes))); setFeito("A planta ficou no negócio."); }
+        if (v.antes.paredes.length) { const { ctx: c, d: n } = ref.current; c.run(() => c.A.campo(n.id, chaveDaDivisao(div, "planta"), gravarPlanta(v.antes))); setFeito("A planta ficou no negócio."); }
         return;
       }
       // 9/11: «Fechar a visita» no Estúdio: com tudo levado, a visita fecha (o orçamento nasce com o plano e as datas). Se faltar alguma
@@ -198,33 +202,36 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
     aoVoltar();
     const aoMudar = (e: StorageEvent) => {
       if (e.key === CHAVE_VOLTA) aoVoltar();
-      else if (e.key === chaveDoEstudio(ref.current.d.id)) { clearTimeout(t); t = setTimeout(gravar, 800); }
+      else if (e.key === chaveDoEstudio(ref.current.d.id, area)) { clearTimeout(t); t = setTimeout(gravar, 800); }
     };
     window.addEventListener("storage", aoMudar);
     window.addEventListener("focus", aoVoltar);
     return () => { clearTimeout(t); window.removeEventListener("storage", aoMudar); window.removeEventListener("focus", aoVoltar); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- uma vez por negócio (o ctx e o negócio vão por ref)
-  }, [d.id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- uma vez por negócio e área (o ctx e o negócio vão por ref)
+  }, [d.id, area]);
 
   // 9/11 (Rúben: «a transcrição não corre enquanto estamos no Estúdio»): o Estúdio abre no mesmo separador, sem recarregar a app, e a
   // gravação da visita continua (num separador à parte o telemóvel suspendia-a); «Voltar ao negócio» volta a este negócio
   // 20/11: a ligação que deixa o Estúdio gravar no negócio sem esta página aberta (pelo mesmo ctx.run, no negócio desta página)
   function ligarAqui(projeto?: Projeto) {
     ligarEstudioAoNegocio({
-      negocio: ref.current.d.id, projeto,
-      gravar: (json) => { const { ctx: c, d: n } = ref.current; c.run(() => c.A.campo(n.id, "estudio", json)); },
-      noNegocio: () => ref.current.d.f.estudio,
+      negocio: ref.current.d.id, area, projeto,
+      gravar: (json) => { const { ctx: c, d: n } = ref.current; c.run(() => c.A.campo(n.id, chaveCampo, json)); },
+      noNegocio: () => ref.current.d.f[chaveCampo],
     });
   }
   const abrir = () => {
     // 11/11 (Rúben: «depois de terminar o Estúdio da visita, o utilizador deve ser redirecionado para esta screen»): volta ao passo Estúdio
     // 12/11 (Rúben: «o que faltar preencher da visita tem de ser preenchido na última fase do Estúdio»): os campos da empresa
     const campos = gruposParaEstudio({ exterior: efetivo(ctx.S.campos, EXTERIOR), interior: efetivo(ctx.S.campos, INTERIOR), area: efetivo(ctx.S.campos, AREA), escolhas: efetivo(ctx.S.campos, ESCOLHAS) });
-    const p = projetoParaAbrir(d.nome, d.f, d.id, `${urlDoNegocio(d.id)}&passo=estudio`, divisaoDoEstudio(d), campos);
+    // 28/11: com várias áreas, o Estúdio é o da área (o projeto, a planta e as perguntas dela) e volta a ela
+    const comArea = varias ? div : undefined;
+    const sufixo = area ? `&area=${area}` : "";
+    const p = projetoParaAbrir(varias ? `${d.nome} · ${div.nome}` : d.nome, d.f, d.id, `${urlDoNegocio(d.id)}&passo=estudio${sufixo}`, varias ? estudioDaArea(div.nome) : divisaoDoEstudio(d), campos, comArea);
     // 20/11: guardado neste browser (na chave do negócio) e na ligação; mesmo sem armazenamento, o Estúdio abre e grava no negócio
     guardarParaEstudio(p);
     ligarAqui(p);
-    irPara(`/prototipo/estudio?negocio=${d.id}`);
+    irPara(`/prototipo/estudio?negocio=${d.id}${sufixo}`);
   };
   const prods = salvo ? produtosEscolhidos(salvo) : [];
   const chao = salvo ? areaChaoM2(salvo.depois.paredes) : null;
@@ -250,7 +257,7 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           )}
           <div className="flex min-w-0 flex-col gap-4">
             <div>
-              <h3 id={`estudio-${d.id}`} className="text-[17px] font-semibold tracking-tight">O projeto do Estúdio</h3>
+              <h3 id={`estudio-${d.id}`} className="text-[17px] font-semibold tracking-tight">{varias ? `O Estúdio da ${div.nome.toLowerCase()}` : "O projeto do Estúdio"}</h3>
               {guardado && (
                 <p className="mt-0.5 flex items-center gap-1.5 text-sm text-muted-foreground">
                   <Check className="h-4 w-4 text-success" aria-hidden="true" />
@@ -273,7 +280,7 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
             </dl>
             <div className="mt-auto flex flex-wrap gap-2">
               <Button type="button" variant={varianteEstudio} className="min-h-11 flex-1 sm:flex-none" onClick={abrir}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Continuar no Estúdio</Button>
-              <Button type="button" variant="outline" className="min-h-11 flex-1 sm:flex-none" disabled={aLer} onClick={() => { void trazer(projetoDoEstudioPara(d.id) ?? salvo); }}>Trazer do Estúdio</Button>
+              <Button type="button" variant="outline" className="min-h-11 flex-1 sm:flex-none" disabled={aLer} onClick={() => { void trazer(projetoDoEstudioPara(d.id, area) ?? salvo); }}>Trazer do Estúdio</Button>
             </div>
           </div>
         </section>
@@ -282,11 +289,11 @@ export function EstudioNaVisita({ ctx, d }: { ctx: Ctx; d: Negocio }) {
           <div className="flex items-start gap-3">
             <span aria-hidden="true" className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><Sparkles className="h-5 w-5" /></span>
             <div className="min-w-0">
-              <h3 id={`estudio-${d.id}`} className="text-[17px] font-semibold tracking-tight">Desenhar com o cliente</h3>
+              <h3 id={`estudio-${d.id}`} className="text-[17px] font-semibold tracking-tight">{varias ? `Desenhar a ${div.nome.toLowerCase()} com o cliente` : "Desenhar com o cliente"}</h3>
               <p className="text-[15px] text-muted-foreground">A planta de como está e de como vai ficar, as peças do catálogo, os serviços e o 3D.</p>
             </div>
           </div>
-          <p className="text-sm text-muted-foreground">Ao voltar, preenche sozinho as medidas e as necessidades{divisaoDoEstudio(d) === "Casa de banho" ? " e as peças da casa de banho" : ""}.</p>
+          <p className="text-sm text-muted-foreground">Ao voltar, preenche sozinho as medidas e as necessidades{(varias ? estudioDaArea(div.nome) : divisaoDoEstudio(d)) === "Casa de banho" && (!varias || /banho|wc/i.test(div.nome)) ? " e as peças da casa de banho" : ""}.</p>
           <Button type="button" variant={varianteEstudio} className="min-h-11 w-full sm:w-auto" onClick={abrir}><Sparkles className="mr-1.5 h-4 w-4" aria-hidden="true" />Abrir o Estúdio</Button>
         </section>
       )}

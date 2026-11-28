@@ -16,8 +16,10 @@ import { VisitasNoEstudio, temVisitaAtiva } from "./VisitasNoEstudio";
 import { rotuloVaga, type Vaga } from "./vagaData";
 import { AREA, CONTACTO, DECISAO, ESCOLHAS, EXTERIOR, FINANCEIRO, INTERIOR, LEAD, OBRA, PECAS_WC, PROPOSTA, contagem, divisaoPrincipal, divisoesEscolhidas, efetivo, emFalta, grupoVisita, gruposArea, type Def, type Grupo } from "./campos";
 import { PlantaDivisao } from "./PlantaDivisao";
+import { chaveDaDivisao, divisoesDoNegocio } from "./divisoesNegocio";
 import { AgendaDaPropostaCartao } from "./AgendaDaProposta";
-import { EstudioNaVisita, FecharVisita } from "./VisitaEstudio";
+import { FecharVisita } from "./VisitaEstudio";
+import { AreasDaCasa } from "./casa/AreasDaCasa";
 import { projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
 import { VisitasLista } from "./Visitas";
 import { NovaVersao } from "./VoltarAtras";
@@ -424,6 +426,16 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
               <div className="pt-4"><PlantaDivisao ctx={ctx} d={d} divisao={divisaoPrincipal(d.f) ?? undefined} /></div>
             </details>
           )}
+          {/* 25/11 (divisoesNegocio.ts): as outras divisões do negócio, cada uma com a sua planta */}
+          {comPlanta && simples && (CM.some(([k]) => k === "pav") || CM.some(([k]) => k === "par")) && divisoesDoNegocio(d.f, d.linha).filter((x) => !x.principal).map((x) => (
+            <details key={x.nome} className="group mb-6 rounded-2xl border border-border bg-card p-4" open={!!d.f[chaveDaDivisao(x, "planta")] || undefined}>
+              <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 text-[15px] font-semibold">
+                Desenhar a planta da {x.nome.toLowerCase()}
+                <ChevronDown className="h-4 w-4 transition-transform group-open:rotate-180" aria-hidden="true" />
+              </summary>
+              <div className="pt-4"><PlantaDivisao ctx={ctx} d={d} div={x} /></div>
+            </details>
+          ))}
           <p className={simples ? "text-[15px] text-muted-foreground" : "text-xs text-muted-foreground"}>Todas obrigatórias. Água quente pode ser 0.</p>
           <div className={simples ? "grid max-w-xl gap-5 sm:grid-cols-2" : "grid gap-3 sm:grid-cols-5"}>
             {CM.map(([k, l]) => {
@@ -506,7 +518,7 @@ export function passosDaFase(ctx: Ctx, d: Negocio, simples = false, fase = d.fas
           resumo: [pr ? "projeto guardado" : "por abrir", d.f.duracao_obra ? `obra: ${d.f.duracao_obra}` : ""].filter(Boolean),
           // 20/11 (permissões ecrã/servidor): sem negocios.visita.preencher, só o bloco das visitas fica fora do fieldset desativado (a
           // assistente comercial marca, remarca e cancela; o resto do Estúdio fica só de leitura, como o servidor, v_so_agenda)
-          corpo: <div className="space-y-10"><VisitasNoEstudio ctx={ctx} d={d} falta={faltaVisitas} /><SoLeitura ativo={semPreencher}><div className="space-y-10"><EstudioNaVisita ctx={ctx} d={d} /><FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
+          corpo: <div className="space-y-10"><VisitasNoEstudio ctx={ctx} d={d} falta={faltaVisitas} /><SoLeitura ativo={semPreencher}><div className="space-y-10"><AreasDaCasa ctx={ctx} d={d} /><FecharVisita ctx={ctx} d={d} decisao={<Campos grupo={eDecisao} {...fx} />} blocos={[
             ...(passoArea ? [{ id: "area", titulo: passoArea.titulo, resumo: passoArea.resumo.join(" · ") || "por preencher", corpo: passoArea.corpo, falta: faltaArea }] : []),
             ...(nMed === 0 ? [] : [{ id: "medidas", titulo: "Medidas da área", resumo: resumoMedidas.join(" · ") || "por preencher", corpo: corpoMedidas(false), falta: faltaMed }]),
             { id: "nec", titulo: "Necessidades do cliente", resumo: passoNec.resumo.join(" · ") || "por juntar", corpo: passoNec.corpo, falta: faltaNec },

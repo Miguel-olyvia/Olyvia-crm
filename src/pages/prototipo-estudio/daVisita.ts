@@ -14,7 +14,8 @@ import { PECAS } from "@/emylia/planta";
 import { catsDeTexto, corDoTexto, ditosDaConversa, type DitoEstilo } from "./estiloDaConversa";
 import { pedidosDaConversa, servicoDeTexto, tipoPecaDeTexto, type AcaoPeca, type DitoPeca, type DitoServico, type Pedidos } from "./pedidosDaConversa";
 
-import { CHAVE_ESTUDIO, chaveDoEstudio, guardarProjetoLocal, lerProjetoLocal } from "./projetoGuardado";
+import { CHAVE_ESTUDIO, areaDoProjeto, chaveDoEstudio, guardarProjetoLocal, lerProjetoLocal } from "./projetoGuardado";
+import { fDaDivisao, type DivisaoNegocio } from "@/emylia/divisoesNegocio";
 
 // 20/11: o projeto guarda-se numa chave por negócio (projetoGuardado.ts); CHAVE_ESTUDIO é hoje só a do projeto sem negócio
 export { CHAVE_ESTUDIO, chaveDoEstudio };
@@ -22,6 +23,8 @@ export { CHAVE_ESTUDIO, chaveDoEstudio };
 export const CHAVE_VOLTA = "olyvia.estudio.volta";
 export interface Volta {
   negocio: number; antes: Planta; em: number;
+  /** 28/11: a área do projeto (o prefixo; vazio na principal). */
+  area?: string;
   /** As necessidades do Estúdio, para juntar às do negócio. */
   linhas?: LinhaLevada[];
   /** 6/11: as respostas das «Peças da casa de banho» que saem das escolhas do Estúdio (campo → valor). */
@@ -70,16 +73,20 @@ export function guardarParaEstudio(p: Projeto): boolean {
 
 /** O projeto com que o Estúdio de um negócio abre: se o guardado neste browser é deste negócio e mais recente, continua-se (não se perde
  *  o depois); senão o do negócio; sem nenhum, começa um novo pela visita. */
-export function projetoParaAbrir(nome: string, f: Record<string, string>, negocio: number, origem: string, divisao?: Projeto["divisao"], camposVisita?: GrupoVisita[]): Projeto {
+export function projetoParaAbrir(nome: string, f: Record<string, string>, negocio: number, origem: string, divisao?: Projeto["divisao"], camposVisita?: GrupoVisita[], area?: DivisaoNegocio): Projeto {
+  // 28/11 (casa toda): com a área, o projeto, a planta e o pé-direito são os dela (f.div_coz_estudio, …) e as perguntas da área levam
+  // o prefixo dela; sem área, como sempre
+  const fa = area ? fDaDivisao(f, area) : f;
+  const pre = area?.prefixo ?? "";
   // 6/11: o projeto vive no negócio (f.estudio); o deste browser só ganha se for do mesmo negócio e mais recente
-  const doNegocio = projetoDoNegocio(f);
-  const local = lerProjetoLocal(negocio);
+  const doNegocio = projetoDoNegocio(fa);
+  const local = lerProjetoLocal(negocio, pre);
   const melhor = local && (!doNegocio || (local.gravadoEm ?? 0) >= (doNegocio.gravadoEm ?? 0)) ? local : doNegocio;
   // 11/11: as perguntas da visita que o Estúdio faz no passo «Fechar»: com as respostas que o negócio já tem
-  const base = melhor ? { ...melhor, nome, origem, negocio } : projetoDaVisita(nome, f, negocio, origem, divisao);
-  const prefixo = prefixoDoEstudio(f, base.divisao ?? divisao);
+  const base = melhor ? { ...melhor, nome, origem, negocio } : projetoDaVisita(nome, fa, negocio, origem, divisao);
+  const prefixo = area ? pre : prefixoDoEstudio(f, base.divisao ?? divisao);
   const campos = camposVisita?.length ? camposVisita : base.camposVisita;
-  return { ...base, camposVisita: campos, prefixoPerguntas: prefixo, perguntas: { ...(base.perguntas ?? {}), ...respostasDoNegocio(f, prefixo, { camposVisita: campos }) }, ditosAntes: ditosDoNegocio(f), pedidosAntes: pedidosDoNegocio(f) };
+  return { ...base, ...(area ? { area: { nome: area.nome, prefixo: pre } } : {}), camposVisita: campos, prefixoPerguntas: prefixo, perguntas: { ...(base.perguntas ?? {}), ...respostasDoNegocio(f, prefixo, { camposVisita: campos }) }, ditosAntes: ditosDoNegocio(f), pedidosAntes: pedidosDoNegocio(f) };
 }
 
 /** Abrir o Estúdio de um negócio: guarda neste browser o projeto com que abre (projetoParaAbrir). */
@@ -144,8 +151,8 @@ export function projetoDoNegocio(f: Record<string, string | undefined>): Projeto
 }
 
 /** 6/11: o projeto deste negócio que o Estúdio tem neste browser (para a Visita o gravar no negócio), ou null. */
-export function projetoDoEstudioPara(negocio: number): Projeto | null {
-  return lerProjetoLocal(negocio);
+export function projetoDoEstudioPara(negocio: number, area = ""): Projeto | null {
+  return lerProjetoLocal(negocio, area);
 }
 
 /** 6/11: as medidas da área que saem do Estúdio: o chão e as paredes da planta do depois (até ao teto falso), os pontos de água e
@@ -172,16 +179,17 @@ export function medidasDoEstudio(p: Projeto): Partial<Record<"pav" | "par" | "pt
 /** O Estúdio devolve a planta do antes ao negócio de onde veio. */
 export function devolverAoNegocio(p: Projeto, fechar = false): boolean {
   if (p.negocio === undefined) return false;
-  try { localStorage.setItem(CHAVE_VOLTA, JSON.stringify({ negocio: p.negocio, antes: p.antes, em: Date.now(), linhas: linhasParaLevar(p), respostas: respostasDoEstudio(p), ...(fechar ? { fechar } : {}) } satisfies Volta)); return true; } catch { return false; }
+  try { localStorage.setItem(CHAVE_VOLTA, JSON.stringify({ negocio: p.negocio, ...(areaDoProjeto(p) ? { area: areaDoProjeto(p) } : {}), antes: p.antes, em: Date.now(), linhas: linhasParaLevar(p), respostas: respostasDoEstudio(p), ...(fechar ? { fechar } : {}) } satisfies Volta)); return true; } catch { return false; }
 }
 
 /** A volta pendente para este negócio (recente: menos de 30 min), ou null. Ler apaga-a. */
-export function lerVolta(negocio: number): Volta | null {
+export function lerVolta(negocio: number, area = ""): Volta | null {
   try {
     const t = localStorage.getItem(CHAVE_VOLTA);
     if (!t) return null;
     const v = JSON.parse(t) as Volta;
-    if (v.negocio !== negocio || Date.now() - v.em > 30 * 60_000) return null;
+    // 28/11: só a volta da mesma área (cada área da casa tem o seu Estúdio)
+    if (v.negocio !== negocio || (v.area ?? "") !== area || Date.now() - v.em > 30 * 60_000) return null;
     localStorage.removeItem(CHAVE_VOLTA);
     return v;
   } catch { return null; }

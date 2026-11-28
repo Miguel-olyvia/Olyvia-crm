@@ -9,7 +9,8 @@ import { LINHAS, camposMedida, garantirServico, medida, nfmt, porMedida, type Es
 import { fotografia, juntarProduto, mudarQtd, tirarProduto } from "./produtosVisita";
 import type { Produto } from "./v2/catalogoModelo";
 import { gravarPlanta } from "./planta";
-import { medidasDoEstudio } from "@/pages/prototipo-estudio/daVisita";
+import { medidasDoEstudio, projetoDoNegocio } from "@/pages/prototipo-estudio/daVisita";
+import { chaveDaDivisao, divisoesDoNegocio, fDaDivisao, tipoDaArea } from "./divisoesNegocio";
 import { respostasDoEstudio } from "@/pages/prototipo-estudio/respostasDoEstudio";
 import { projetoNoCatalogo, servicosParaPlano } from "@/pages/prototipo-estudio/servicosDoCatalogo";
 import type { Projeto } from "@/pages/prototipo-estudio/necessidadesEstudio";
@@ -43,16 +44,37 @@ const ler = (t: string | undefined): Levados => {
 const NOME_MEDIDA: Record<string, string> = { pav: "pavimento", par: "paredes", ptf: "pontos de água fria", ptq: "pontos de água quente", pcs: "peças" };
 const igual = (a: number, b: number) => Math.abs(a - b) < 0.005;
 
-/** Leva o projeto do Estúdio ao negócio, pelas ações dadas. */
+/**
+ * 28/11 (Rúben, Schroeder: «é a casa toda, tem sala, cozinha, casa de banho»): os projetos de todas as áreas do negócio, com `p` no
+ * lugar da sua (p.area; sem área, a principal). As outras são as gravadas no negócio (f.div_coz_estudio, …). Com uma só área, [p].
+ */
+export function projetosDaCasa(d: Pick<Negocio, "f" | "linha">, p: Projeto): { p: Projeto; nome: string; principal: boolean; prefixo: string }[] {
+  const divs = divisoesDoNegocio(d.f, d.linha);
+  const aqui = p.area?.prefixo ?? "";
+  if (divs.length < 2) return [{ p, nome: divs[0]?.nome ?? p.area?.nome ?? "", principal: true, prefixo: "" }];
+  return divs.flatMap((x) => {
+    const q = x.prefixo === aqui ? p : projetoDoNegocio(fDaDivisao(d.f, x));
+    return q ? [{ p: q, nome: x.nome, principal: x.principal, prefixo: x.prefixo }] : [];
+  });
+}
+
+/** Leva o projeto do Estúdio ao negócio, pelas ações dadas. 28/11: com várias áreas, a planta vai para a da área do projeto e as medidas,
+ *  os serviços e os produtos são a soma de todas as áreas (as outras pelo que têm gravado no negócio). */
 export function levarEstudio(d: Negocio, p: Projeto, S: Estado, produtos: readonly Produto[], A: AcoesEstudio): Levado {
   const avisos: string[] = [];
+  const casa = projetosDaCasa(d, p);
+  const aqui = p.area?.prefixo ?? "";
+  const daqui = casa.find((x) => x.prefixo === aqui) ?? casa[0];
   if (p.antes.paredes.length) {
-    const pl = gravarPlanta(p.antes);
-    if (d.f.planta !== pl) { A.campo("planta", pl); avisos.push("A planta ficou no negócio."); }
+    const pl = gravarPlanta(p.antes), k = chaveDaDivisao({ prefixo: daqui?.prefixo ?? "" }, "planta");
+    if (d.f[k] !== pl) { A.campo(k, pl); avisos.push(casa.length > 1 ? `A planta da ${(daqui?.nome ?? "área").toLowerCase()} ficou no negócio.` : "A planta ficou no negócio."); }
   }
   // as medidas: só as que a linha pede (os «pcs» são os vasos sanitários numa casa de banho, os módulos numa cozinha)
   const pede = camposMedida(LINHAS[d.linha]);
-  const m = medidasDoEstudio(p), rotuloPcs = pede.find(([c]) => c === "pcs")?.[1] ?? "";
+  // 28/11: as medidas da casa são a soma das áreas
+  const m: ReturnType<typeof medidasDoEstudio> = {};
+  for (const x of casa) for (const [k, n] of Object.entries(medidasDoEstudio(x.p)) as [keyof typeof m, number][]) m[k] = Math.round(((m[k] ?? 0) + n) * 100) / 100;
+  const rotuloPcs = pede.find(([c]) => c === "pcs")?.[1] ?? "";
   const pcs = /sanit/i.test(rotuloPcs) ? m.pcs : /m[oó]dulo/i.test(rotuloPcs) ? m.modulos : undefined;
   const med = Object.entries({ pav: m.pav, par: m.par, ptf: m.ptf, ptq: m.ptq, pcs }).filter(([k, n]) => n !== undefined && pede.some(([c]) => c === k)) as [Parameters<typeof porMedida>[1], number][];
   // 23/11 (testarh, negócio 1015: «Trazer do Estúdio» pôs 2,16 e 11,51 m² por cima dos 3 e 15 m² escritos no negócio): a medida da planta só entra
@@ -70,13 +92,23 @@ export function levarEstudio(d: Negocio, p: Projeto, S: Estado, produtos: readon
   }
   if (mudaram) avisos.push("As medidas da área saíram da planta.");
   if (mantidas.length) avisos.push(`As medidas escritas no negócio ficaram: ${mantidas.join(", ")}.`);
-  const novas = Object.entries(respostasDoEstudio(p)).filter(([k, v]) => v && d.f[k] !== v);
+  // 28/11: as respostas das «Peças da casa de banho» (pc_…) são de uma casa de banho só: a primeira da casa; as perguntas da área já
+  // vêm com o prefixo dela
+  const wc = casa.find((x) => tipoDaArea(x.nome) === "casa_banho") ?? casa[0];
+  const dasPecas = !wc || wc.prefixo === aqui;
+  const novas = Object.entries(respostasDoEstudio(p)).filter(([k, v]) => v && d.f[k] !== v && (dasPecas || !k.startsWith("pc_")));
   for (const [k, v] of novas) A.campo(k, v);
   if (novas.length) avisos.push(`As peças ficaram com ${novas.length} ${novas.length === 1 ? "resposta" : "respostas"}.`);
 
   // os serviços e os produtos do Catálogo (o que o Estúdio levou antes e já não leva, sai)
-  const L = projetoNoCatalogo(p, S, produtos);
-  const serv = servicosParaPlano({ ...L, servicos: L.servicos.filter((s) => s.origem !== "produto") });
+  // 28/11: os de todas as áreas, somados (o mesmo serviço em duas áreas soma as quantidades; o mesmo produto também)
+  const porArea = casa.map((x) => projetoNoCatalogo(x.p, S, produtos));
+  const somaServ = new Map<SvcId, number>();
+  for (const L1 of porArea) for (const x of servicosParaPlano({ ...L1, servicos: L1.servicos.filter((s) => s.origem !== "produto") })) somaServ.set(x.sid, Math.round(((somaServ.get(x.sid) ?? 0) + x.q) * 100) / 100);
+  const serv = [...somaServ].map(([sid, q]) => ({ sid, q }));
+  const somaProd = new Map<string, number>();
+  for (const L1 of porArea) for (const x of L1.produtos) somaProd.set(x.id, (somaProd.get(x.id) ?? 0) + x.q);
+  const L = { produtos: [...somaProd].map(([id, q]) => ({ id, q })), semPar: [...new Set(porArea.flatMap((x) => x.semPar))] };
   for (const sid of antes.s) if (!serv.some((x) => x.sid === sid) && d.visita.extra[sid]) A.extra(sid, 0);
   for (const x of serv) if (d.visita.extra[x.sid] !== x.q) A.extra(x.sid, x.q);
   const tem = (pid: string) => (d.visita.prod ?? []).find((x) => x.id === pid);
@@ -95,13 +127,15 @@ export function levarEstudio(d: Negocio, p: Projeto, S: Estado, produtos: readon
   if (serv.length || nProd) avisos.push(`Nas necessidades: ${serv.length} ${serv.length === 1 ? "serviço" : "serviços"} e ${nProd} ${nProd === 1 ? "produto" : "produtos"} do Catálogo.`);
   const inicio = p.catalogo?.inicio;
   if (inicio && d.f.plano_inicio !== inicio) A.campo("plano_inicio", inicio);
-  // 9/11: os técnicos e a equipa escolhidos no plano do Estúdio
+  // 9/11: os técnicos e a equipa escolhidos no plano do Estúdio. 28/11: com várias áreas, o plano é da casa: o de uma área só entra
+  // quando escolheu alguma coisa (o vazio de uma área não apaga o que outra escolheu)
+  const varias = casa.length > 1;
   const tecs = p.catalogo?.tecnicos && Object.keys(p.catalogo.tecnicos).length ? JSON.stringify(p.catalogo.tecnicos) : "";
   const eq = p.catalogo?.equipa?.length ? JSON.stringify(p.catalogo.equipa) : "";
-  if ((d.f.plano_tecnicos ?? "") !== tecs) A.campo("plano_tecnicos", tecs);
-  if ((d.f.plano_equipa ?? "") !== eq) A.campo("plano_equipa", eq);
+  if ((d.f.plano_tecnicos ?? "") !== tecs && (tecs || !varias)) A.campo("plano_tecnicos", tecs);
+  if ((d.f.plano_equipa ?? "") !== eq && (eq || !varias)) A.campo("plano_equipa", eq);
   const eqs = p.catalogo?.equipas?.length ? JSON.stringify(p.catalogo.equipas) : "";
-  if ((d.f.plano_equipas ?? "") !== eqs) A.campo("plano_equipas", eqs);
+  if ((d.f.plano_equipas ?? "") !== eqs && (eqs || !varias)) A.campo("plano_equipas", eqs);
   return { avisos, servicos: serv.length, produtos: nProd, semPar: L.semPar };
 }
 

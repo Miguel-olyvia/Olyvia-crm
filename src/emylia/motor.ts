@@ -2301,7 +2301,8 @@ export function permDoCampo(k: string): PermNeg | null {
   // 11/11: também a marca do contacto concluído (contacto_concluido, 20270113120000); e as medidas retificadas (retif_…) pedem
   // negocios.obra.planear, como o passo (F3, 20270113110000)
   if (k === "resultado" || k === "tentativas" || k === "religar" || k === CHAVE_CONTACTO_CONCLUIDO) return "contacto.registar";
-  if (k.startsWith("retif_")) return "obra.planear";
+  // 25/11 (divisoesNegocio.ts): também a planta corrigida de outra divisão (div_coz_retif_planta)
+  if (k.startsWith("retif_") || /^div_[a-z0-9]+_retif_/.test(k)) return "obra.planear";
   // 11/11 (20270114320000): o combinado e o diagnóstico são preencher a visita; o resto de v<n>_ é a agenda (gerir)
   if (/^(v[0-9]+_combinado$|diag_|div_[a-z0-9]+_diag_)/.test(k)) return "visita.preencher";
   // 23/11 (20270126250000): a marca da visita feita sozinha pelo motor (v<n>_auto, sincronizarVisita) também é preencher a visita; no

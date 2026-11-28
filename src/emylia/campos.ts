@@ -557,6 +557,15 @@ export function reorganizarDivisoes(f: Record<string, string>) {
     if (v) f[c.k] = v; else delete f[c.k];
     delete f[p + c.k];
   }
+  // 25/11 (divisoesNegocio.ts): a planta, a planta corrigida e o projeto do Estúdio também são de cada divisão. Os da principal que saiu
+  // não se perdem: guardam-se com o prefixo dela (voltam se ela voltar a entrar)
+  const pa = prefixoDivisao(antes);
+  for (const k of ["planta", "retif_planta", "estudio"]) {
+    const velho = f[k], novo = f[p + k];
+    if (velho) f[pa + k] = velho;
+    if (novo) f[k] = novo; else delete f[k];
+    delete f[p + k];
+  }
   f[CHAVE_PRINCIPAL] = nova;
 }
 

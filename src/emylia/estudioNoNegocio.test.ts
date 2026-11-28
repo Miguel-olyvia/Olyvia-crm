@@ -61,3 +61,30 @@ describe("as medidas da área ao trazer do Estúdio", () => {
     expect(levado.avisos.join(" ")).toMatch(/pavimento 7/);
   });
 });
+
+describe("28/11: a casa toda (várias áreas, cada uma com o seu Estúdio)", () => {
+  it("as medidas e os produtos somam as áreas; a planta vai para a da área do projeto", () => {
+    const { S, d } = visita();
+    d.visita.med.pav = 0; d.visita.med.par = 0;
+    d.f.diag_tipo_area = "Casa de banho, Casa de banho suite";
+    d.f.diag_div_principal = "Casa de banho";
+    const wc = projeto(200, 250);
+    d.f.estudio = JSON.stringify(wc);
+    const suite = { ...projeto(300, 200), area: { nome: "Casa de banho suite", prefixo: "div_casadebanhosuite_" } };
+    const { d: d1 } = simularNoNegocio(d, suite, S, K());
+    const a = medidasDoEstudio(wc), b = medidasDoEstudio(suite);
+    expect(d1.visita.med.pav).toBeCloseTo((a.pav ?? 0) + (b.pav ?? 0), 2);
+    expect(d1.f.div_casadebanhosuite_planta).toBeTruthy();
+    expect(d1.f.planta).toBe(d.f.planta);
+    // a sanita das duas: 2
+    const san = (d1.visita.prod ?? []).find((x) => x.id === "san-nexo-s");
+    if (san) expect(san.q).toBe(2);
+  });
+
+  it("com uma só área, fica como sempre", () => {
+    const { S, d } = visita();
+    d.visita.med.pav = 0;
+    const { d: d1 } = simularNoNegocio(d, projeto(), S, K());
+    expect(d1.visita.med.pav).toBe(medidasDoEstudio(projeto()).pav);
+  });
+});

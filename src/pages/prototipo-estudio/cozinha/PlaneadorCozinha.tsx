@@ -9,7 +9,7 @@ import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, ChevronLeft, ChevronRight, Copy, List, Redo2, RotateCcw, RotateCw, Ruler, Save, Settings2, Trash2, Undo2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { CATALOGO, produto, type Produto } from "../catalogoFake";
-import { guardarProjetoLocal, lerProjetoLocal, negocioDoEndereco } from "../projetoGuardado";
+import { areaDoEndereco, guardarProjetoLocal, lerProjetoLocal, negocioDoEndereco } from "../projetoGuardado";
 import type { Projeto } from "../necessidadesEstudio";
 import { Ilustracao } from "../Ilustracao";
 import { pct } from "../ivaEstudio";
@@ -33,12 +33,13 @@ const SEPARADORES: { id: Separador; n: string }[] = [
 // ---------------------------------------------------------------- ler e guardar (no browser e, vindo do Estúdio, no projeto)
 // 20/11: o projeto do Estúdio de onde se veio (o do negócio do endereço, ?negocio=, na chave dele)
 function lerProjeto(): Projeto | null {
-  return lerProjetoLocal(negocioDoEndereco());
+  return lerProjetoLocal(negocioDoEndereco(), areaDoEndereco());
 }
 /** O endereço do Estúdio de onde se veio (com o negócio). */
 function voltaAoEstudio(): string {
   const n = negocioDoEndereco();
-  return n != null ? `/prototipo/estudio?negocio=${n}` : "/prototipo/estudio";
+  const a = areaDoEndereco();
+  return n != null ? `/prototipo/estudio?negocio=${n}${a ? `&area=${a}` : ""}` : "/prototipo/estudio";
 }
 function cozinhaInicial(doEstudio: boolean): Cozinha {
   if (doEstudio) {

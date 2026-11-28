@@ -685,7 +685,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
                   )}
                   {aba === "contrato" && <ContratoDaObra ctx={ctx} d={d} />}
                   {aba === "documentos" && <DocumentosDaObra ctx={ctx} d={d} />}
-                  {aba === "3d" && <ProjetoEm3D d={d} dias={dias} abrirTarefa={(ti) => setPainel({ k: "tarefa", ti })} />}
+                  {aba === "3d" && <ProjetoEm3D ctx={ctx} d={d} dias={dias} abrirTarefa={(ti) => setPainel({ k: "tarefa", ti })} />}
                   {aba === "fecho" && <><FechoDaObra ctx={ctx} d={d} irPara={setAba} /><FechoVivo d={d} ir={ir} /></>}
               </motion.div>
             </div>

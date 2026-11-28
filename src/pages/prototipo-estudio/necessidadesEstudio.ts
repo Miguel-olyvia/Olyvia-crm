@@ -41,6 +41,9 @@ export interface Projeto {
   gravadoEm?: number;
   /** 6/11: a divisão do projeto (a cozinha tem as suas peças e o seu catálogo). Sem ela, casa de banho. */
   divisao?: "Casa de banho" | "Cozinha";
+  /** 28/11 (Rúben, Schroeder: «é a casa toda, tem sala, cozinha, casa de banho»): a área do negócio deste projeto, o nome («Sala»,
+   *  «Casa de banho suite») e o prefixo das chaves no negócio (vazio na principal). Cada área tem o seu projeto. */
+  area?: { nome: string; prefixo: string };
   /** 6/11: os móveis e os eletrodomésticos do planeador da cozinha (cozinha/PlaneadorCozinha.tsx). */
   cozinha?: Cozinha;
   /** 6/11: as peças mudadas de sítio no próprio depois (deixam de seguir o antes). Sem o campo: projeto de antes da regra. */

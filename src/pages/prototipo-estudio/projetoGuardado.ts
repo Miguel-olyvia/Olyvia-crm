@@ -12,8 +12,13 @@ import type { Projeto } from "./necessidadesEstudio";
 
 /** A chave de sempre: hoje só a do projeto sem negócio (o protótipo). Um projeto de negócio que ainda lá esteja muda-se para a sua. */
 export const CHAVE_ESTUDIO = "olyvia.estudio.v1";
-/** A chave do projeto de um negócio neste browser. */
-export const chaveDoEstudio = (negocio?: number | null): string => (negocio == null ? CHAVE_ESTUDIO : `${CHAVE_ESTUDIO}.${negocio}`);
+/** A chave do projeto de um negócio neste browser. 28/11: com a área (o prefixo, «div_coz_»), a dessa área; a principal fica na de sempre. */
+export const chaveDoEstudio = (negocio?: number | null, area = ""): string => (negocio == null ? CHAVE_ESTUDIO : `${CHAVE_ESTUDIO}.${negocio}${area ? `.${area}` : ""}`);
+/** 28/11: o prefixo da área de um projeto (vazio na principal e nos de antes). */
+export const areaDoProjeto = (p: Pick<Projeto, "area"> | null | undefined): string => p?.area?.prefixo ?? "";
+/** A área do Estúdio aberto neste separador (sessionStorage), com o negócio. */
+export const CHAVE_AREA_ABERTA = "olyvia.estudio.area";
+const AREA_VALIDA = /^div_[a-z0-9]+_$/;
 /** O negócio do Estúdio aberto neste separador (sessionStorage): a voz e o planeador da cozinha abrem «/prototipo/estudio» sem o dizer. */
 export const CHAVE_ESTUDIO_ABERTO = "olyvia.estudio.aberto";
 
@@ -38,17 +43,17 @@ export function migrarChaveAntiga(): void {
 }
 
 /** O projeto deste negócio (ou o sem negócio) neste browser, ou null. Aproveita a chave antiga se for deste negócio. */
-export function lerProjetoLocal(negocio?: number | null): Projeto | null {
+export function lerProjetoLocal(negocio?: number | null, area = ""): Projeto | null {
   migrarChaveAntiga();
-  const p = ler(chaveDoEstudio(negocio));
+  const p = ler(chaveDoEstudio(negocio, area));
   if (!p) return null;
-  // só vale o projeto do próprio negócio (uma chave de negócio nunca tem outro; a sem negócio pode ter um antigo sem campo)
-  return negocio == null ? (p.negocio == null ? p : null) : (p.negocio === negocio ? p : null);
+  // só vale o projeto do próprio negócio (uma chave de negócio nunca tem outro; a sem negócio pode ter um antigo sem campo) e da área
+  return negocio == null ? (p.negocio == null ? p : null) : (p.negocio === negocio && areaDoProjeto(p) === area ? p : null);
 }
 
 /** Guarda o projeto neste browser, na chave do seu negócio. */
 export function guardarProjetoLocal(p: Projeto): boolean {
-  try { localStorage.setItem(chaveDoEstudio(p.negocio), JSON.stringify(p)); return true; } catch { return false; }
+  try { localStorage.setItem(chaveDoEstudio(p.negocio, areaDoProjeto(p)), JSON.stringify(p)); return true; } catch { return false; }
 }
 
 /** Um projeto vazio (sem paredes nem peças), para quando não há nenhum. */
@@ -65,16 +70,29 @@ export function negocioDoEndereco(search: string = typeof window !== "undefined"
   if (Number.isInteger(n) && n > 0) return n;
   try { const s = Number(sessionStorage.getItem(CHAVE_ESTUDIO_ABERTO)); return Number.isInteger(s) && s > 0 ? s : null; } catch { return null; }
 }
-/** Lembra o negócio do Estúdio aberto neste separador (null esquece). */
-export function lembrarNegocioAberto(negocio: number | null): void {
-  try { if (negocio == null) sessionStorage.removeItem(CHAVE_ESTUDIO_ABERTO); else sessionStorage.setItem(CHAVE_ESTUDIO_ABERTO, String(negocio)); } catch { /* fica pelo endereço */ }
+/** 28/11: a área do Estúdio: a do endereço (?area=div_coz_), senão (sem negócio no endereço) a do último aberto neste separador; a
+ *  principal é "". */
+export function areaDoEndereco(search: string = typeof window !== "undefined" ? window.location.search : ""): string {
+  const q = new URLSearchParams(search);
+  const a = q.get("area") ?? "";
+  if (AREA_VALIDA.test(a)) return a;
+  if (q.get("negocio")) return "";
+  try { const s = sessionStorage.getItem(CHAVE_AREA_ABERTA) ?? ""; return AREA_VALIDA.test(s) ? s : ""; } catch { return ""; }
+}
+/** Lembra o negócio (e a área) do Estúdio aberto neste separador (null esquece). */
+export function lembrarNegocioAberto(negocio: number | null, area = ""): void {
+  try {
+    if (negocio == null) { sessionStorage.removeItem(CHAVE_ESTUDIO_ABERTO); sessionStorage.removeItem(CHAVE_AREA_ABERTA); return; }
+    sessionStorage.setItem(CHAVE_ESTUDIO_ABERTO, String(negocio));
+    if (area) sessionStorage.setItem(CHAVE_AREA_ABERTA, area); else sessionStorage.removeItem(CHAVE_AREA_ABERTA);
+  } catch { /* fica pelo endereço */ }
 }
 
 /** 20/11: o projeto com que o Estúdio abre: o deste browser para o negócio (ou o sem negócio) ou o que a Visita deixou na ligação, o mais
  *  recente. Sem nenhum: sem negócio, um projeto vazio (já não o exemplo); com negócio, null (abre-se a partir do negócio). */
-export function projetoInicial(negocio: number | null): Projeto | null {
-  const local = lerProjetoLocal(negocio);
-  const daVisita = ligacaoDoEstudio(negocio)?.projeto ?? null;
+export function projetoInicial(negocio: number | null, area = ""): Projeto | null {
+  const local = lerProjetoLocal(negocio, area);
+  const daVisita = ligacaoDoEstudio(negocio, area)?.projeto ?? null;
   const melhor = local && (!daVisita || (local.gravadoEm ?? 0) >= (daVisita.gravadoEm ?? 0)) ? local : daVisita;
   if (melhor) return acertarPosicoes(melhor);
   return negocio == null ? projetoVazio() : null;
@@ -84,6 +102,8 @@ export function projetoInicial(negocio: number | null): Projeto | null {
 
 export interface LigacaoEstudio {
   negocio: number;
+  /** 28/11: a área (o prefixo; vazio na principal). */
+  area?: string;
   /** Grava o projeto (JSON) no negócio: na Visita, ctx.run(() => ctx.A.campo(id, "estudio", json)). */
   gravar: (json: string) => void;
   /** O que o negócio tem gravado agora (f.estudio), para não gravar o que já lá está. */
@@ -99,14 +119,14 @@ let enviado = "";
 
 /** A Visita liga o Estúdio ao negócio ao abri-lo (substitui a ligação anterior). */
 export function ligarEstudioAoNegocio(l: LigacaoEstudio): void {
-  if (ligacao?.negocio !== l.negocio) enviado = "";
+  if (ligacao?.negocio !== l.negocio || (ligacao?.area ?? "") !== (l.area ?? "")) enviado = "";
   ligacao = l;
 }
 /** Desliga (a página dos negócios abriu de novo, com outro estado: a ligação antiga já não vale). */
 export function desligarEstudio(): void { ligacao = null; enviado = ""; }
 /** A ligação deste negócio, ou null. */
-export function ligacaoDoEstudio(negocio: number | null | undefined): LigacaoEstudio | null {
-  return negocio != null && ligacao?.negocio === negocio ? ligacao : null;
+export function ligacaoDoEstudio(negocio: number | null | undefined, area = ""): LigacaoEstudio | null {
+  return negocio != null && ligacao?.negocio === negocio && (ligacao.area ?? "") === area ? ligacao : null;
 }
 
 const semHora = (p: Projeto) => JSON.stringify({ ...p, gravadoEm: undefined });
@@ -114,7 +134,7 @@ const semHora = (p: Projeto) => JSON.stringify({ ...p, gravadoEm: undefined });
 /** Grava o projeto no negócio pela ligação, se mudou desde o que o negócio tem. true: gravou; false: não havia o que gravar ou não há
  *  ligação (fica neste browser e a Visita grava-o quando se voltar a ela). */
 export function gravarNoNegocio(p: Projeto): boolean {
-  const l = ligacaoDoEstudio(p.negocio);
+  const l = ligacaoDoEstudio(p.negocio, areaDoProjeto(p));
   if (!l) return false;
   const conteudo = semHora(p);
   if (conteudo === enviado) return false;

@@ -5,6 +5,7 @@
 // contrato, a fatura e o pagamento, o plano e a obra, e o histórico dessa fase. A fase atual vem aberta e marcada; as futuras, esbatidas.
 // Pesquisa no topo (procura em todos os campos e no histórico) e saltos de fase em fase. Só se lê: cada fase tem «Ir a esta fase».
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { divisoesDoNegocio, fDaDivisao } from "./divisoesNegocio";
 import { AnimatePresence, motion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Camera, ChevronDown, Clock, Download, Eye, FileSignature, FileText, Files, Hammer, MessageSquare, Receipt, Ruler, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -84,7 +85,10 @@ function blocosSemDocs(ctx: Ctx, d: Negocio, n: number): Bloco[] {
     case 1: return [...doGrupo(CONTACTO, <FileText className="h-4 w-4" />, "ct"), conversa("insights_chamada", "chamada")].filter((b): b is Bloco => !!b);
     case 2: {
       const nFotos = Object.values(fotosPor(d.visita)).reduce((a, x) => a + x, 0);
-      const planta = lerPlanta(f.retif_planta) ?? lerPlanta(f.planta);
+      // 25/11 (divisoesNegocio.ts): uma planta por divisão (a principal em f.planta; as outras com o prefixo da divisão)
+      const divs = divisoesDoNegocio(f, d.linha);
+      const plantas = divs.map((x) => { const fx = fDaDivisao(f, x); return { x, corrigida: !!fx.retif_planta, planta: lerPlanta(fx.retif_planta) ?? lerPlanta(fx.planta) }; })
+        .filter((y) => !!y.planta && y.planta.paredes.length >= 3);
       const CM = camposMedida(LINHAS[d.linha]);
       const med: Item[] = CM.map(([k, l]) => {
         const v = medida(d.visita.med, k), r = f[`retif_${k}`];
@@ -94,8 +98,9 @@ function blocosSemDocs(ctx: Ctx, d: Negocio, n: number): Bloco[] {
       return [
         ...(nFotos ? [{ id: "fotos", titulo: "Fotografias", icone: <Camera className="h-4 w-4" />, itens: [], resumo: `${nFotos} ${nFotos === 1 ? "fotografia" : "fotografias"}`, largo: true,
           extra: <div className="space-y-3"><FotosEtapa ctx={ctx} d={d} etapa="exterior" soVer simples /><FotosEtapa ctx={ctx} d={d} etapa="interior" soVer simples /><FotosEtapa ctx={ctx} d={d} etapa="area" soVer simples /></div> }] : []),
-        ...(planta && planta.paredes.length >= 3 ? [{ id: "planta", titulo: "A planta", icone: <Ruler className="h-4 w-4" />, itens: [], resumo: f.retif_planta ? "corrigida no local" : "da visita",
-          extra: <PlantaVista planta={planta} titulo={f.retif_planta ? "Corrigida no local" : "Da visita"} /> }] : []),
+        ...plantas.map(({ x, corrigida, planta }) => ({ id: x.principal ? "planta" : `planta-${x.prefixo}`, titulo: divs.length > 1 ? `A planta da ${x.nome.toLowerCase()}` : "A planta",
+          icone: <Ruler className="h-4 w-4" />, itens: [], resumo: corrigida ? "corrigida no local" : "da visita",
+          extra: <PlantaVista planta={planta!} titulo={corrigida ? "Corrigida no local" : "Da visita"} /> })),
         ...(CM.length ? [{ id: "medidas", titulo: "Medidas", icone: <Ruler className="h-4 w-4" />, itens: [...med, ...(f.retif_notas ? [{ l: "Notas do supervisor", v: f.retif_notas }] : [])],
           resumo: f.retif_aceite ? `retificadas e aceites a ${datar(f.retif_aceite)}${f.retif_por ? `, por ${f.retif_por}` : ""}` : "as da visita" }] : []),
         ...[grupo(EXTERIOR, <FileText className="h-4 w-4" />, "ext"), grupo(INTERIOR, <FileText className="h-4 w-4" />, "int")].filter((b): b is Bloco => !!b),
