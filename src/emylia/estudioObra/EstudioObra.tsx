@@ -44,7 +44,8 @@ import { AprendizagemOlyvia } from "./AprendizagemOlyvia";
 import { Contagem, MOLA, useReduzir } from "../movimento";
 import { EstudioPlano, PainelTarefa } from "../estudioPlano/EstudioPlano";
 import { NovaTarefa } from "../PlanoInterativo";
-import { porqueNaoMexe, TECS } from "../motor";
+import { nomeLinha, porqueNaoMexe, TECS } from "../motor";
+import { servicoDaObra } from "../divisoesNegocio";
 import { ausenteNoRh } from "../equipa/tecnicos";
 import { definirIrMateriais, materiaisDasTarefasNovas } from "./materiaisTarefasNovas";
 import { DispersaoDaEquipa, Aba, ClienteDaObra, EquipaDaObra, Execucao, ExecucaoTarefa, FechoDaObra, MateriaisDaObra } from "./PaineisObra";
@@ -507,7 +508,7 @@ export function EstudioObra({ ctx: ctx0, d, fechar, endereco = true, voltar = "V
               <Button type="button" variant="outline" className="min-h-11 shrink-0" onClick={sair} aria-label={voltar}><ArrowLeft className="h-4 w-4 sm:mr-1.5" aria-hidden="true" /><span className="hidden sm:inline">{voltar}</span></Button>
               <div className="min-w-0">
                 <p className="text-xs font-semibold uppercase tracking-[0.16em] text-primary">Estúdio da obra</p>
-                <h1 id="estudio-obra-titulo" className="truncate text-xl font-semibold tracking-tight">{d.nome} · {d.servico || "Obra"}</h1>
+                <h1 id="estudio-obra-titulo" className="truncate text-xl font-semibold tracking-tight">{d.nome} · {servicoDaObra(d, nomeLinha(d))}</h1>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">

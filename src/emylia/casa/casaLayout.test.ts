@@ -91,3 +91,12 @@ describe("casa toda: cada área tem o seu Estúdio neste browser", () => {
     expect(lerVolta(7, "div_coz_")?.area).toBe("div_coz_");
   });
 });
+
+import { servicoDaObra } from "../divisoesNegocio";
+describe("o nome da obra com várias áreas (28/11)", () => {
+  it("com o nome da linha e várias áreas diz a casa; escrito à mão, fica", () => {
+    expect(servicoDaObra({ servico: "Casa de banho", f: { diag_tipo_area: "Casa de banho, Cozinha, Sala" } }, "Casa de banho")).toBe("Remodelação · 3 áreas");
+    expect(servicoDaObra({ servico: "Remodelação de apartamento", f: { diag_tipo_area: "Casa de banho, Cozinha" } }, "Casa de banho")).toBe("Remodelação de apartamento");
+    expect(servicoDaObra({ servico: "Casa de banho", f: { diag_tipo_area: "Casa de banho" } }, "Casa de banho")).toBe("Casa de banho");
+  });
+});

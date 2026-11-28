@@ -120,6 +120,14 @@ export function semDivisao(f: Record<string, string>, nome: string, linha?: stri
   return fica.join(", ");
 }
 
+/** 28/11 (Rúben, Schroeder: «altera agora o nome, já não é só casa de banho»): o serviço que se mostra no título da obra. Com várias
+ *  áreas e o serviço ainda com o nome da linha («Casa de banho»), diz que é a casa: «Remodelação · 7 áreas». Um serviço escrito à mão fica. */
+export function servicoDaObra(d: { servico?: string; f: Record<string, string>; linha?: string }, nomeDaLinha?: string): string {
+  const n = divisoesDoNegocio(d.f, d.linha).length;
+  if (n > 1 && (!d.servico || d.servico === nomeDaLinha)) return `Remodelação · ${n} áreas`;
+  return d.servico || "Obra";
+}
+
 // ------------------------------------------------------------------ as tarefas do plano por divisão
 // As tarefas dos modelos de obra dizem a divisão no nome («MO Modelo Remodelação Completa - Cozinha · eletricidade»; planoVivo.ts).
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
